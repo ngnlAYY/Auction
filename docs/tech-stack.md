@@ -12,9 +12,9 @@
   受支持的 stable `1.98.0`；`1.94.1` 只作为 SQLx 0.9 对应的 workspace MSRV，并由独立
   CI job 校验，不能把 MSRV 当作 LTS。Rust 新 stable 发布后应及时评审升级，安全公告不等
   常规窗口。
-- Axum、Leptos、SQLx、reqwest、redis 等 crate 也没有官方 LTS 通道。项目选择仍受维护的稳定
+- Axum、Dioxus、SQLx、reqwest、redis 等 crate 也没有官方 LTS 通道。项目选择仍受维护的稳定
   版本，由 [`Cargo.lock`](../Cargo.lock) 固定完整解析结果；升级按单个组件执行，并同时检查
-  Rust MSRV、Leptos SSR/WASM 和数据库适配器。
+  Rust MSRV、浏览器端 WASM 构建和数据库适配器。
 - PostgreSQL 不使用 LTS 标签，而是每个 major 官方维护 5 年。完整生产档固定 major 18，
   始终使用该 major 的当前修复版本（截至 2026-08-21 为 18.4），major 升级单独评审。
   SQLite 是长期维护项目；Lite 档使用 SQLx 锁图捆绑的引擎版本，当前为 3.51.3，不依赖
@@ -33,8 +33,8 @@ SQLx 0.9 的 [MSRV 说明](https://docs.rs/crate/sqlx/latest/source/CHANGELOG.md
 
 | 方案 | 特点 | 取舍 |
 | --- | --- | --- |
-| Tokio + Axum | Tower 生态、组合式 middleware、WebSocket/SSE 和 Leptos 官方集成 | 需要自行组织应用层和依赖注入 |
-| Tokio + Actix Web | 性能成熟、功能完整、Leptos 也有官方集成 | 与 Tower 生态分离，组合边界不如 Axum 统一 |
+| Tokio + Axum | Tower 生态、组合式 middleware、WebSocket/SSE 支持 | 需要自行组织应用层和依赖注入 |
+| Tokio + Actix Web | 性能成熟、功能完整 | 与 Tower 生态分离，组合边界不如 Axum 统一 |
 | Poem/Rocket | API 体验直接，适合中小型服务 | 本项目需要的生态和团队经验较少 |
 
 **选择：Tokio + Axum 0.8。** 现有系统有 public/admin 两个 HTTP surface、实时更新和
@@ -45,32 +45,57 @@ SQLx 0.9 的 [MSRV 说明](https://docs.rs/crate/sqlx/latest/source/CHANGELOG.md
 
 | 方案 | 特点 | 适用情况 |
 | --- | --- | --- |
-| Leptos | Rust 组件、细粒度响应式、SSR 与 WASM hydration、Axum 集成 | 本项目要同时覆盖公开端和管理后台 |
-| Dioxus | Rust UI，可扩展桌面/移动端 | 未来要做原生客户端时更有吸引力 |
-| Yew | 成熟的 Rust/WASM SPA | 只需要 CSR，不强调 SSR 时可选 |
-| Askama + HTMX + SSE | 服务端 HTML、无 hydration、无需 Node 构建链 | 公开竞价页和普通 Admin 很合适；复杂客户端状态较弱，且会引入 JavaScript |
+| Dioxus | Rust 组件、RSX、CSR/SSR 可选，可扩展桌面/移动端 | 本项目要同时覆盖公开端和管理后台 |
+| Leptos | Rust 组件、细粒度响应式、SSR 与 WASM hydration | 技术架构本身很契合高频价格表 |
+| Yew | 成熟的 Rust/WASM SPA | 生态配套滞后，`yew-router` 落后核心版本 |
+| Askama + HTMX + SSE | 服务端 HTML、无 hydration、无需 Node 构建链 | 服务端 CRUD 很合适；复杂客户端状态较弱，且会引入 JavaScript |
 
-**选择：Leptos 0.8 + `leptos_axum`。** Public/Admin 使用同一套 Rust UI 基础设施，
-通过 surface 模块隔离路由与权限；首屏采用 SSR，交互通过 hydration，竞价状态通过
-REST 命令和 WebSocket/SSE 更新。项目不引入 React、TypeScript 或 Node 构建链；CSS
-作为静态资源保留，不属于业务运行时。
+**选择：Dioxus 0.7.10 + 纯 CSR SPA。** Public/Admin 使用同一套 Rust UI 基础设施，通过
+独立 crate 隔离组件树与路由树；产物是静态 WASM/JS/HTML，由 `auction-http` 内嵌后提供。
+项目不引入 React、TypeScript 或 Node 运行时；CSS 作为静态资源保留，不属于业务运行时。
 
-这个选择来自“浏览器端也必须使用 Rust”的现有项目契约，不代表 Leptos 是生产复杂度
-最低的方案。若以后放宽“禁止 JavaScript”，本项目优先验证的替代方案是
-**Axum + Askama + HTMX + SSE**：出价仍走显式 REST 命令，SSE 只通知状态变化，浏览器再
-获取权威快照或 HTML fragment。它可以移除 native/WASM 双目标和 hydration mismatch，
-但会改变当前全 Rust 契约，未经用户明确决定不得直接切换。
+不使用 SSR，理由是旧系统本身没有 SSR：`../Auction-BF/apps/web/vite.public.config.ts` 与
+`vite.admin.config.ts` 均无 `ssr`/`prerender` 配置，`manifests/*.routes.json` 是 SPA
+fallback 路由表。引入 SSR 会新增 hydration mismatch 和双目标构建，却不替换任何现有能力。
+同理不启用 `dioxus-fullstack`/`dioxus-server`：后者自带 axum 服务器，会与 `apps/*` 装配根
+和 `auction-http` 的路由所有权冲突。
 
-保留 Leptos 时必须收敛其影响范围：
+从 Leptos 切换到 Dioxus 的直接原因是 Leptos 0.8 线存在未修复的 XSS sink，详见
+「已知未消除风险」。此外 Leptos SSR 为后端贴现了约 175 个依赖包，而当前浏览器端只有
+迁移阶段的静态页面。
 
-- 核心竞价、认证和管理命令保持显式、版本化的 REST/JSON 契约，不依赖 Leptos server
-  functions 的隐式协议。
-- 公开页面默认使用 SSE 接收变化通知，事件带 sequence/version；跳号或重连后重新读取
-  权威快照。只有确实需要双向协议时才启用 WebSocket。
-- 优先评估 Islands 或等价的局部 hydration，只让倒计时、出价和实时面板进入 WASM；
-  静态内容不必整页水合。
-- `auction-web` 只能依赖 contracts/application 表面，不能让 Leptos 类型进入领域、存储
-  或外部 API 契约，确保以后可以替换前端。
+保留以下约束不变：
+
+- 核心竞价、认证和管理命令保持显式、版本化的 REST/JSON 契约。
+- 公开页面实时更新使用 WebSocket，与旧系统 `internal/features/realtime/hub.go` 的既有
+  契约一致；事件带 sequence/version，跳号或重连后重新读取权威快照。
+- 浏览器 crate 只能依赖 contracts 表面，不得让 UI 类型进入领域、存储或外部 API 契约，
+  确保以后可以替换前端。
+- Public 与 Admin 的组件树、路由树和静态产物完全分离，公开端二进制不包含管理端资源。
+
+## 国际化
+
+| 方案 | 特点 | 取舍 |
+| --- | --- | --- |
+| dioxus-i18n + Fluent | 与 Dioxus 信号集成、支持复数与性别等语法、译文编译期内嵌 | 生态较小，`set_language` 在键缺失时 panic |
+| rust-i18n | 下载量高、宏驱动、JSON/YAML 译文 | 与 Dioxus 响应式集成需自行搭建 |
+| 自建 `HashMap` 查表 | 无额外依赖 | 复数、插值、回退链全部要自己实现 |
+
+**选择：`dioxus-i18n` 0.5.1 + `unic-langid` 0.9.6。** 它要求 `dioxus ^0.7`，与当前版本
+匹配，且语言状态本身是 Dioxus 信号，切换语言即触发重渲染，不需要额外的状态桥接。
+
+受支持语言沿用旧系统的 5 种：`en`、`zh-CN`、`zh-TW`、`ja`、`ko`。公开端默认 `en`；管理端
+默认 `zh-CN`，与旧 `manifests/admin.locales.json` 的 `default_locale` 一致。中文按脚本区分
+简繁，两者不互相回退。
+
+工程约定：
+
+- 译文以 `include_str!` 在编译期内嵌，首屏不额外请求语言资源。
+- 两个 surface 的 `i18n/*.ftl` 彼此隔离；共享的只有 `auction-web-shared` 提供的语言集合、
+  `hv.lang` 持久化和 `<html lang>` 同步。存储键与旧系统一致，用户跨系统切换不丢偏好。
+- Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键改为 `nav-home`。
+- `t!` 在键缺失时 panic，因此新增文案必须同步更新全部 5 个 `*.ftl`。可在评审中用键集比对
+  确认一致性；`te!` 返回 `Result`、`tid!` 回退为键名，可用于容错要求更高的位置。
 
 ## 数据库与查询
 
@@ -148,14 +173,15 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
 
 - 全 Rust 只约束本仓库实现及其程序库依赖；PostgreSQL、SQLite、Redis、反向代理等外部
   组件无需由 Rust 实现，避免为语言统一重复建设基础设施。
-- 应用端口使用 Rust 原生 async trait 返回类型，不再直接依赖 `async-trait` 宏；Leptos
-  上游仍会传递引入该宏。HTTP 客户端与 SQLx 统一使用 rustls/ring TLS provider，避免
-  同时链接多个 TLS provider。
-- SQLx 数据库驱动、Redis 和 WASM 调试 panic hook 都由窄 feature 控制。默认构建不携带
-  备用数据库、缓存客户端或仅调试依赖。
+- 应用端口使用 Rust 原生 async trait 返回类型，不再直接依赖 `async-trait` 宏。HTTP 客户端
+  与 SQLx 统一使用 rustls/ring TLS provider，避免同时链接多个 TLS provider。
+- SQLx 数据库驱动和 Redis 都由窄 feature 控制。默认构建不携带备用数据库或缓存客户端。
+  浏览器端 crate 与后端 crate 分离，后端二进制不含 Dioxus、`wasm-bindgen` 或 `web-sys`。
 - 不额外直接依赖框架已经传递提供且项目未使用的 `tower-http`、通用 Redis 连接池、ORM、
   GraphQL、进程内缓存或第二套前端工具链。确有用例后再按 owner 边界引入。
-- 保留 Axum、Leptos、SQLx、reqwest、serde、tracing 等承担明确边界价值的基础库；不为
+- 前端静态产物使用 `rust-embed` 内嵌进二进制，得到单文件制品；`allow_missing` 保证未
+  构建前端时后端仍可编译，运行时以明确的 503 报告而不是 panic。
+- 保留 Axum、Dioxus、SQLx、reqwest、serde、tracing 等承担明确边界价值的基础库；不为
   单纯减少 crate 数量手写 HTTP、TLS、数据库协议、序列化或加密实现。
 
 ## 测试与交付
@@ -165,16 +191,28 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   `cargo clippy -D warnings`。
 - 后续测试恢复后：PostgreSQL 验证完整 repository 契约、行锁、隔离和并发竞价语义；
   SQLite 只验证 Lite 能力契约及文件数据库路径，不要求运行 PostgreSQL 专属用例。
-- 浏览器：Leptos SSR 快照 + Playwright 端到端；生产构建由 `cargo-leptos` 负责。
+- 浏览器：行为验证恢复后再定端到端方案；生产产物由 `dx build --platform web` 生成，并由
+  `auction-http` 内嵌。
 - 发布：通过静态门禁后生成 Public/Admin/Worker/CLI 制品和 migration checksum。
 
 ## 已知未消除风险
 
-- Rust 1.98.0 会为 Leptos 0.8 依赖链中的 `proc-macro-error2 2.0.1` 报告
-  `future-incompatibility`：它当前仍能编译，但某个未来 Rust 版本会把相关重导出变成硬
-  错误（Rust [#127909](https://github.com/rust-lang/rust/issues/127909)）。截至 2026-08-21，
-  crates.io 没有更新版本可直接替换。继续锁定当前版本并跟踪 Leptos/上游修复；在升级到
-  会拒绝该代码的 Rust 前，必须升级依赖或评审最小补丁，不能静默忽略。
+- **Leptos 0.8 的 XSS sink（本项目已通过切换到 Dioxus 规避，记录以备回溯）：**
+  `tachys 0.2.18` 把 `textarea` 的 `ESCAPE_CHILDREN` 设为 `false`，与 `script`/`style`/
+  `noscript` 同类。按 HTML 规范 `<textarea>` 是 escapable raw text，SSR 时流入的不可信
+  字符串会原样输出，`</textarea><script>…</script>` 可突破元素注入活跃标记。上游
+  [PR #4730](https://github.com/leptos-rs/leptos/pull/4730) 已于 2026-05-25 合并，但只进
+  `leptos_0.9` 分支；0.8 线未 backport，0.2.18 已是 0.2.x 最新版，无修复版本可升。
+  **若将来重新评估 Leptos，必须先确认该修复已进入所选版本。**
+- **`dx` CLI 依赖构建期 esbuild：** `dx` 会按需从 npm 注册表下载 esbuild
+  （`packages/cli/src/esbuild.rs`），`verify_web_tooling` 无条件要求它可用；
+  `CliSettings::prefer_no_downloads()` 可改用 PATH 上已有的 esbuild。它是构建期独立
+  二进制，不是运行时依赖、Node 运行时或第二套前端构建链，但确实触及“不引入 Node”的
+  边界，因此在此显式记录。CI 不安装 dx，也不受该下载影响。
+- **`dioxus-web` 0.7.10 漏声明 `web-sys` 的 `Location` feature：** 它在
+  `src/history.rs` 无条件调用 `Window::location()`，却没有在自己的 `web-sys` 依赖中
+  声明该 feature，只能靠依赖图中其他 crate 顺带启用。本仓库在根 `Cargo.toml` 显式启用
+  `web-sys` 的 `Location` 补齐；升级 Dioxus 时应复查上游是否修复，届时可移除该补丁。
 - SQLite Lite 的能力表目前是架构约束，不代表 repository、migration、单 Worker 并发和
   部署防护都已实现。每项功能迁移时仍需显式标注档位并完成对应适配器。
 - PostgreSQL、SQLite 与 Redis feature 目前可以组合编译，方便静态检查，但正式制品仍需

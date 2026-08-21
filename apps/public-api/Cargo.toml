@@ -12,9 +12,6 @@ auction-config.workspace = true
 auction-http.workspace = true
 auction-observability.workspace = true
 axum.workspace = true
-auction-web.workspace = true
-leptos.workspace = true
-leptos_axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 

@@ -1,0 +1,59 @@
+# 管理画面の日本語テキスト。
+
+app-title = Auction 管理画面
+language-label = 言語
+
+nav-label = 管理ナビゲーション
+nav-dashboard = 概要
+nav-auctions = オークション
+nav-users = ユーザー
+nav-mails = メール
+nav-deliveries = 配送
+nav-settlement = 精算
+nav-audit = 監査
+nav-config = 設定
+nav-status = 状態
+
+not-found-title = ページが見つかりません
+not-found-note = リンクが正しいかご確認ください。
+
+page-dashboard-title = 管理概要
+page-dashboard-note = 稼働指標とアラートは、可観測性機能の移行後に接続されます。
+page-login-title = 管理ログイン
+page-login-note = 管理セッションは、セッションローテーション機能の移行後に接続されます。
+page-auctions-title = オークション管理
+page-auctions-note = 開催回と出品の管理は、オークションコマンド契約の凍結後に接続されます。
+page-auction-lots-title = オークション { $auction } の出品
+page-auction-lots-note = 出品の編集は、装備およびポリシー機能の移行後に接続されます。
+page-auction-overview-title = オークション概要
+page-auction-overview-note = オークション状態の集計は、ライフサイクル機能の移行後に接続されます。
+page-mails-title = メール一覧
+page-mails-note = 受信メールはメール機能の移行後に接続されます。
+page-mail-overview-title = メール概要
+page-mail-overview-note = メール処理状況はメール機能の移行後に接続されます。
+page-cookies-title = Cookie 管理
+page-cookies-note = 外部サービスの資格情報はサーバー側でのみ処理し、ブラウザーには表示しません。
+page-credentials-title = 資格情報管理
+page-credentials-note = 資格情報のローテーションは、鍵管理機能の移行後に接続されます。鍵素材はブラウザーに渡しません。
+page-users-title = ユーザー管理
+page-users-note = ユーザーと権限は、ユーザー機能の移行後に接続されます。
+page-renames-title = 改名記録
+page-renames-note = 改名監査は、ユーザー機能の移行後に接続されます。
+page-deliveries-title = 配送管理
+page-deliveries-note = 配送と再試行は、配送機能の移行後に接続されます。
+page-delivery-overview-title = 配送概要
+page-delivery-overview-note = 配送状況の集計は、配送機能の移行後に接続されます。
+page-outbox-title = Outbox
+page-outbox-note = イベント送信記録は、outbox 機能の移行後に接続されます。
+page-settlement-title = 精算管理
+page-settlement-note = 精算と義務は、精算機能の移行後に接続されます。
+page-config-title = 実行設定
+page-config-note = 調整可能なポリシーは、管理設定機能の移行後に接続されます。機密項目はブラウザーで表示も変更もしません。
+page-rules-content-title = 規約コンテンツ
+page-rules-content-note = 規約文書の編集は、規約コンテンツ機能の移行後に接続されます。
+page-rules-title = 規約ポリシー
+page-rules-note = 入札規約は、規約機能の移行後に接続されます。
+page-audit-title = 監査記録
+page-audit-note = 監査証跡は追記のみで、画面から履歴を編集することはできません。
+page-status-title = サービス状況
+page-status-note = サービス状況は管理側ヘルスチェックエンドポイントを参照します。

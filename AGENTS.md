@@ -14,7 +14,8 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   的后台 Worker。
 - Public、Admin、Worker 是可以独立部署的进程边界；`auctionctl` 负责配置、迁移和运维
   命令行操作。
-- 浏览器端同样使用 Rust：Leptos 服务端渲染加 `wasm32-unknown-unknown` 水合。不引入
+- 浏览器端同样使用 Rust：Dioxus 客户端渲染，产物编译为 `wasm32-unknown-unknown` 后由
+  后端内嵌提供。不引入
   React、TypeScript、Node 或第二套前端构建链。
 - “全 Rust”只约束本仓库代码和直接引入的程序库使用 Rust；PostgreSQL、SQLite、Redis、
   反向代理和操作系统服务等外部组件不受实现语言限制。
@@ -45,8 +46,8 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 ├── README.md                     # 项目概览与启动说明
 ├── AGENTS.md                     # 本文件，随源代码版本控制
 ├── apps/                         # 薄的装配根和可部署二进制
-│   ├── public-api/               # 公开 HTTP 表面与公开端 Leptos SSR
-│   ├── admin-api/                # 管理 HTTP 表面与管理端 Leptos SSR
+│   ├── public-api/               # 公开 HTTP 表面与公开端前端产物服务
+│   ├── admin-api/                # 管理 HTTP 表面与管理端前端产物服务
 │   ├── worker/                   # 持久化生命周期/集成 Worker 入口
 │   └── auctionctl/               # 配置、迁移和运维命令行工具
 ├── crates/                       # 按模块所有权拆分的可复用能力
@@ -54,7 +55,9 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 │   ├── auction-application/      # 用例、端口和应用错误
 │   ├── auction-contracts/        # 稳定的 HTTP/流 DTO 与错误契约
 │   ├── auction-http/             # Axum 路由与 HTTP 表面适配器
-│   ├── auction-web/              # Leptos 组件、路由、SSR 和水合
+│   ├── auction-web-shared/       # 浏览器端共享设计变量、基础组件与语言选择
+│   ├── auction-web-public/       # 公开端 Dioxus 组件、路由与 i18n/*.ftl
+│   ├── auction-web-admin/        # 管理端 Dioxus 组件、路由与 i18n/*.ftl
 │   ├── auction-storage/          # PostgreSQL 完整与 SQLite Lite 的 SQLx 适配器边界
 │   ├── auction-cache/            # 可禁用的缓存边界与 Redis 适配器
 │   ├── auction-integrations/     # E-Hentai、MoogleMail 和外部网关
@@ -78,8 +81,12 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - **异步运行时：** Tokio 1.51.x 官方 LTS，当前下限 1.51.4。
 - **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；当前没有为尚未使用的能力直接
   引入 `tower-http`。
-- **浏览器界面：** Leptos 0.8.20、`leptos_axum` 0.8.10；服务端渲染运行在服务端，
-  `wasm32-unknown-unknown` 水合运行在浏览器。
+- **浏览器界面：** Dioxus 0.7.10 纯客户端渲染；产物由 `dx build --platform web` 生成，
+  编译目标为 `wasm32-unknown-unknown`，再由 `auction-http` 用 `rust-embed` 内嵌。
+  不启用 `dioxus-fullstack`/`dioxus-server`，避免第二套 HTTP 服务器与 `auction-http`
+  的路由所有权冲突。
+- **国际化：** `dioxus-i18n` 0.5.1（Project Fluent 后端）与 `unic-langid` 0.9.6；
+  译文以 `include_str!` 在编译期内嵌，首屏不额外请求语言资源。
 - **数据库：** SQLx 0.9；PostgreSQL 与 SQLite 驱动由独立 Cargo feature 选择，发布制品
   只编译实际需要的驱动。PostgreSQL 18.x 提供完整生产能力，跟进 major 18 的当前修复版；
   SQLite 只提供 Lite 能力子集，当前锁图捆绑 SQLite 3.51.3。已支持的关键竞价事务使用
@@ -100,10 +107,10 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   `AUCTION_CONFIG_FILE` 仅用于选择主配置文件。
 
 具体取舍见 [`docs/tech-stack.md`](docs/tech-stack.md)。只有上游正式提供的版本才能称为
-LTS：Tokio 使用官方 LTS；Rust、Axum、Leptos、SQLx 等没有官方 LTS 的组件使用受支持的
+LTS：Tokio 使用官方 LTS；Rust、Axum、Dioxus、SQLx 等没有官方 LTS 的组件使用受支持的
 稳定版本，不得伪称 LTS。Rust 构建工具链跟随当前 stable，独立 CI job 校验 MSRV。依赖
 精确解析版本以 `Cargo.lock` 为准，本地与 CI 的静态检查使用 `--locked`；升级时按组件
-检查 Rust MSRV、Leptos SSR/WASM 兼容性和已实现数据库适配器。
+检查 Rust MSRV、浏览器端 WASM 构建兼容性和已实现数据库适配器。
 
 ## 依赖方向与模块所有权
 
@@ -111,7 +118,7 @@ LTS：Tokio 使用官方 LTS；Rust、Axum、Leptos、SQLx 等没有官方 LTS �
 
 ```text
 apps/*
-  ├── auction-http / auction-web / auction-jobs
+  ├── auction-http / auction-web-* / auction-jobs
   ├── auction-storage / auction-cache / auction-integrations
   ├── auction-config / auction-observability
   └── auction-application
@@ -122,7 +129,7 @@ apps/*
 必须遵守以下边界：
 
 - `auction-domain` 只能使用领域安全的依赖，例如 serde、UUID、时间类型和 `thiserror`。
-  不得导入 Axum、Leptos、SQLx、reqwest、环境变量读取或具体日志初始化。
+  不得导入 Axum、Dioxus、SQLx、reqwest、环境变量读取或具体日志初始化。
 - `auction-application` 只拥有用例、事务编排和窄端口。不得读取进程配置、打开网络监听、
   直接执行 SQL 或直接调用外部服务。
 - `auction-contracts` 只定义稳定的输入输出、流消息和错误契约。不要把数据库记录直接当
@@ -135,8 +142,9 @@ apps/*
   操作，不能直接修改拍卖状态。
 - `auction-http` 负责 HTTP 输入到应用命令、应用输出到稳定契约的映射。处理器不得包含
   竞价、结算或状态机规则。
-- `auction-web` 负责展示、路由、加载和用户交互，不得导入 SQLx、数据库模型、密钥或外
-  部集成客户端。
+- `auction-web-public` 与 `auction-web-admin` 各自负责自己 surface 的展示、路由、加载和
+  用户交互，不得导入 SQLx、数据库模型、密钥或外部集成客户端，也不得互相依赖。
+  `auction-web-shared` 只放真正通用、无业务偏向的基础能力。
 - `auction-jobs` 负责调度、重试、游标和 Worker 编排，不得创建第二套拍卖状态机。
 - `auction-config` 负责 TOML 解析和配置校验；不要在业务模块中散落环境变量读取。
 - `auction-observability` 负责日志、指标、健康检查和关联信息；敏感值不得进入日志。
@@ -194,7 +202,7 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 命名优先表达领域含义，再遵循 Rust 约定。不要为了短而使用无法从上下文确定含义的缩写。
 
 - Rust 模块名、源文件名、函数名、方法名、局部变量名和字段名使用 `snake_case`。
-- `struct`、`enum`、`trait`、类型别名和 Leptos 组件使用 `PascalCase`，例如
+- `struct`、`enum`、`trait`、类型别名和 Dioxus 组件使用 `PascalCase`，例如
   `AuctionId`、`AuctionStatus`、`AuctionRepository`、`PublicAuctionCatalog`。
 - 常量和全局静态值使用 `SCREAMING_SNAKE_CASE`，例如 `MAX_BID_AMOUNT`；普通配置字段不
   使用全大写。
@@ -202,8 +210,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   不要在同一概念上混用 `HTTPClient`、`Httpclient`、`auctionID` 和 `auction_id`。
 - 标识符必须带领域上下文：优先使用 `auction_id`、`lot_id`、`command_id`，不要用含义不
   明确的 `id`、`data`、`item` 代替关键业务字段。
-- Leptos 属性类型使用组件名加 `Props`，例如 `PublicAuctionCatalogProps`；组件事件和
-  状态命名应表达用户动作或状态变化。
+- Dioxus 组件的 props 使用 `#[component]` 函数参数表达；组件事件和状态命名应表达用户
+  动作或状态变化。
 - URL 路径、事件名和 JSON 字段必须先遵守已冻结的旧系统契约；新增契约使用小写和连字符
   的 URL 路径、`snake_case` 的 JSON/TOML/SQL 字段，并通过 serde 映射兼容外部旧命名。
 - SQL 表名、列名、索引名和迁移中的逻辑名称使用 `snake_case`；PostgreSQL 与 SQLite
@@ -244,7 +252,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   才可以让进程失败，并且错误必须包含可行动的原因。
 - 公共 DTO、数据库记录和领域聚合保持不同，即使当前字段看起来相同；转换应在边界完成。
 - 配置键、JSON 字段和 SQL 字段默认使用 `snake_case`；不要把运行时设置散落在环境变量中。
-- CSS 使用两空格缩进、`auction-web/style/main.css` 中的设计变量和 BEM 风格特性类。
+- CSS 使用两空格缩进、`auction-web-shared/style/base.css` 中的设计变量和 BEM 风格特性类；
+  surface 专属规则放在各自 crate 的 `assets/` 下。
 - 只做与当前需求相关的最小修改；不要在迁移一个能力时顺手进行无关重构或改名。
 
 ## 配置规则
@@ -289,20 +298,33 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 
 ## Web 规则
 
-- Public 与 Admin 的组件树和路由树保持分离；只有真正通用且没有业务偏向的基础组件才进
-  入共享模块。
-- 初始文档使用服务端渲染，交互使用水合；不要为了规避服务端边界重新引入 JavaScript
-  单页应用。
-- 核心竞价、认证和管理命令必须保留显式、版本化的 REST/JSON 契约，不得只通过 Leptos
-  server functions 暴露。Public 实时更新默认使用带 sequence/version 的 SSE 通知，跳号
-  或重连后读取权威快照；只有确需双向协议时才使用 WebSocket。
-- 优先评估 Islands 或等价的局部 hydration，只让确需交互的组件进入 WASM。若要切换到
-  Askama + HTMX + SSE，必须先由用户明确放宽“浏览器端全 Rust、禁止 JavaScript”契约，
-  不能把技术原型直接变成架构变更。
+- Public 与 Admin 的组件树、路由树和静态产物保持分离，分别由 `auction-web-public` 与
+  `auction-web-admin` 拥有；只有真正通用且没有业务偏向的基础组件才进入
+  `auction-web-shared`。公开端二进制不得包含管理端资源。
+- 浏览器端是纯客户端渲染的 Dioxus SPA，与旧系统实际能力一致（旧 `vite.*.config.ts` 无
+  `ssr`/`prerender`）。不启用 SSR 或 hydration：它们不替换任何现有能力，只会新增
+  hydration mismatch 和双目标构建。
+- 核心竞价、认证和管理命令必须保留显式、版本化的 REST/JSON 契约。Public 实时更新使用
+  带 sequence/version 的 WebSocket 通知，与旧系统 `internal/features/realtime/hub.go`
+  的既有契约一致；跳号或重连后读取权威快照。无法保持长连接的客户端可退化为 SSE。
+- 若要切换到 Askama + HTMX 一类服务端渲染方案，必须先由用户明确放宽“浏览器端全 Rust、
+  禁止 JavaScript”契约，不能把技术原型直接变成架构变更。
+- 前端静态产物由 `dx build --platform web` 生成，并通过 `rust-embed` 内嵌进后端二进制。
+  内嵌声明必须保留 `allow_missing`：未构建前端时后端仍要能编译，运行时以明确的 503
+  报告，不得 panic。
+- 界面文案一律经由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，**不得在组件里硬编码
+  用户可见字符串**。受支持语言为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`；公开端默认 `en`，
+  管理端默认 `zh-CN`（沿用旧 `manifests/admin.locales.json`）。两个 surface 的译文资源彼此
+  隔离，共享的只有 `auction-web-shared` 提供的语言集合、持久化和 `<html lang>` 同步能力。
+- 语言偏好存储键固定为 `hv.lang`，与旧系统 `src/shared/i18n/createI18n.ts` 一致，不得重命名；
+  存储值必须在受支持集合内，否则回退到该 surface 的默认语言。
+- Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键统一改为 `nav-home`。新增文案时
+  必须同步更新全部 5 个 `*.ftl`——`t!` 在键缺失时 panic，缺一种语言就会让该语言下的页面崩溃。
 - API/流 DTO 放在 `auction-contracts`，浏览器不能直接接收 SQL 行或数据库内部模型。
 - 会改变竞价或管理状态的用户动作必须携带 `command_id`，并显式展示冲突与幂等结果。
 - 拍卖页面的 CSS 和静态资源可以使用旧版 Auction-BF 的结构与视觉契约，但业务逻辑必须
-  留在 Rust；不得引入 React、TypeScript、npm 或第二套前端构建系统。
+  留在 Rust；不得引入 React、TypeScript、npm 包依赖或第二套前端构建系统。dx CLI 会
+  按需下载 esbuild 作为构建期工具，这是唯一允许的例外，且不得成为运行时依赖。
 - 当前页面中的示例竞价行只是迁移阶段的展示数据；接入真实数据前要先完成契约、应用用例
   和持久化边界。
 
@@ -329,9 +351,8 @@ cargo check --locked -p auction-cache --all-targets --no-default-features --feat
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 # 校验 Rust 浏览器目标是否能够编译
-cargo check --locked -p auction-web \
-  --target wasm32-unknown-unknown \
-  --no-default-features --features hydrate
+cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
+cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 ```
 
 `cargo check --locked --workspace --all-targets` 只编译现有目标，不执行测试。除非用户特别
@@ -365,7 +386,8 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
   cargo run -p auctionctl -- check-config public
 ```
 
-完整的开发监听/发布流程需要 `cargo-leptos`；其元数据位于 `auction-web` crate。启动服务、
+前端产物构建需要 dx CLI（`cargo install dioxus-cli --locked`），命令为
+`just web-build`；dx 会按需从 npm 注册表下载 esbuild 作为构建期工具。启动服务、
 访问健康接口或执行功能流程属于行为验证，除非用户明确要求，本规范不要求运行。
 
 ## 变更与 Git 纪律
@@ -393,7 +415,7 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 4. 为用户、规则、交付、实时通信和会话接入应用端口。
 5. 按已冻结契约实现 Public 与 Admin 的 HTTP 表面。
 6. 实现带持久化游标和重试策略的 Worker 任务与外部网关。
-7. 完成 Leptos 公开端/管理端页面，并保持旧版拍卖页面视觉一致性。
+7. 完成 Dioxus 公开端/管理端页面，并保持旧版拍卖页面视觉一致性。
 8. 在用户明确要求行为验证后，再执行对照、双写或切换前验证。
 
 不要因为启动骨架可以编译就宣称功能等价。每个迁移阶段至少要有清晰的模块 owner、外部

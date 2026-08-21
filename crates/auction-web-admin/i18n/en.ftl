@@ -1,0 +1,59 @@
+# Admin English copy.
+
+app-title = Auction Admin
+language-label = Language
+
+nav-label = Admin navigation
+nav-dashboard = Overview
+nav-auctions = Auctions
+nav-users = Users
+nav-mails = Mail
+nav-deliveries = Deliveries
+nav-settlement = Settlement
+nav-audit = Audit
+nav-config = Config
+nav-status = Status
+
+not-found-title = Page not found
+not-found-note = Please check that the link is correct.
+
+page-dashboard-title = Admin overview
+page-dashboard-note = Runtime metrics and alerts will be connected once the observability capability is migrated.
+page-login-title = Admin login
+page-login-note = Admin sessions will be connected once the session rotation capability is migrated.
+page-auctions-title = Auction management
+page-auctions-note = Round and lot management will be connected once the auction command contract is frozen.
+page-auction-lots-title = Lots for auction { $auction }
+page-auction-lots-note = Lot editing will be connected once the equipment and policy capabilities are migrated.
+page-auction-overview-title = Auction overview
+page-auction-overview-note = Auction status summaries will be connected once the lifecycle capability is migrated.
+page-mails-title = Mail list
+page-mails-note = Inbound mail will be connected once the mail capability is migrated.
+page-mail-overview-title = Mail overview
+page-mail-overview-note = Mail processing status will be connected once the mail capability is migrated.
+page-cookies-title = Cookie management
+page-cookies-note = External service credentials are handled server-side only; credential values are never shown in the browser.
+page-credentials-title = Credential management
+page-credentials-note = Credential rotation will be connected once the key management capability is migrated. Key material never reaches the browser.
+page-users-title = User management
+page-users-note = Users and permissions will be connected once the user capability is migrated.
+page-renames-title = Rename records
+page-renames-note = Rename audits will be connected once the user capability is migrated.
+page-deliveries-title = Delivery management
+page-deliveries-note = Delivery and retries will be connected once the delivery capability is migrated.
+page-delivery-overview-title = Delivery overview
+page-delivery-overview-note = Delivery status summaries will be connected once the delivery capability is migrated.
+page-outbox-title = Outbox
+page-outbox-note = Outbound event records will be connected once the outbox capability is migrated.
+page-settlement-title = Settlement management
+page-settlement-note = Settlement and obligations will be connected once the settlement capability is migrated.
+page-config-title = Runtime config
+page-config-note = Tunable policies will be connected once the admin config capability is migrated. Sensitive fields are never shown or edited through the browser.
+page-rules-content-title = Rules content
+page-rules-content-note = Rule document editing will be connected once the rules content capability is migrated.
+page-rules-title = Rule policies
+page-rules-note = Bidding rules will be connected once the rules capability is migrated.
+page-audit-title = Audit records
+page-audit-note = Audit evidence is append-only; the interface offers no history editing.
+page-status-title = Service status
+page-status-note = Service status will read the admin health endpoint.

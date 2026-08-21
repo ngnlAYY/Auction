@@ -1,0 +1,45 @@
+/* 管理端 surface 样式。设计变量由 auction-web-shared 提供。 */
+
+.admin-shell {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-3);
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.admin-nav a {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.admin-nav a:hover,
+.admin-nav a:focus-visible {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  text-decoration: none;
+}
+
+.admin-panel {
+  padding: var(--space-5);
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.admin-panel h1 {
+  color: var(--color-text);
+}
+
+.admin-panel__note {
+  margin: 0;
+  font-size: var(--text-sm);
+}

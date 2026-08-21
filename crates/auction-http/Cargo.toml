@@ -8,3 +8,4 @@ publish.workspace = true
 [dependencies]
 auction-contracts.workspace = true
 axum.workspace = true
+rust-embed.workspace = true

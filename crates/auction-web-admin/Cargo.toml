@@ -1,0 +1,14 @@
+[package]
+name = "auction-web-admin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+auction-web-shared.workspace = true
+dioxus = { workspace = true, features = ["router"] }
+dioxus-i18n.workspace = true
+unic-langid.workspace = true
+# 补齐 dioxus-web 0.7.10 漏声明的 web-sys `Location` feature，详见根 Cargo.toml 说明。
+web-sys.workspace = true

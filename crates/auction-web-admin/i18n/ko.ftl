@@ -1,0 +1,59 @@
+# 관리 화면 한국어 문안.
+
+app-title = Auction 관리
+language-label = 언어
+
+nav-label = 관리 내비게이션
+nav-dashboard = 개요
+nav-auctions = 경매
+nav-users = 사용자
+nav-mails = 메일
+nav-deliveries = 배송
+nav-settlement = 정산
+nav-audit = 감사
+nav-config = 설정
+nav-status = 상태
+
+not-found-title = 페이지를 찾을 수 없습니다
+not-found-note = 링크가 올바른지 확인해 주세요.
+
+page-dashboard-title = 관리 개요
+page-dashboard-note = 운영 지표와 알림은 관측 기능 이전 후 연동됩니다.
+page-login-title = 관리자 로그인
+page-login-note = 관리 세션은 세션 교체 기능 이전 후 연동됩니다.
+page-auctions-title = 경매 관리
+page-auctions-note = 회차 및 품목 관리는 경매 명령 계약 확정 후 연동됩니다.
+page-auction-lots-title = 경매 { $auction } 품목
+page-auction-lots-note = 품목 편집은 장비 및 정책 기능 이전 후 연동됩니다.
+page-auction-overview-title = 경매 개요
+page-auction-overview-note = 경매 상태 요약은 수명 주기 기능 이전 후 연동됩니다.
+page-mails-title = 메일 목록
+page-mails-note = 수신 메일은 메일 기능 이전 후 연동됩니다.
+page-mail-overview-title = 메일 개요
+page-mail-overview-note = 메일 처리 상태는 메일 기능 이전 후 연동됩니다.
+page-cookies-title = 쿠키 관리
+page-cookies-note = 외부 서비스 자격 증명은 서버에서만 처리하며 브라우저에 표시하지 않습니다.
+page-credentials-title = 자격 증명 관리
+page-credentials-note = 자격 증명 교체는 키 관리 기능 이전 후 연동됩니다. 키 자료는 브라우저로 전달되지 않습니다.
+page-users-title = 사용자 관리
+page-users-note = 사용자와 권한은 사용자 기능 이전 후 연동됩니다.
+page-renames-title = 개명 기록
+page-renames-note = 개명 감사는 사용자 기능 이전 후 연동됩니다.
+page-deliveries-title = 배송 관리
+page-deliveries-note = 배송과 재시도는 배송 기능 이전 후 연동됩니다.
+page-delivery-overview-title = 배송 개요
+page-delivery-overview-note = 배송 상태 요약은 배송 기능 이전 후 연동됩니다.
+page-outbox-title = Outbox
+page-outbox-note = 이벤트 발신 기록은 outbox 기능 이전 후 연동됩니다.
+page-settlement-title = 정산 관리
+page-settlement-note = 정산과 의무는 정산 기능 이전 후 연동됩니다.
+page-config-title = 실행 설정
+page-config-note = 조정 가능한 정책은 관리 설정 기능 이전 후 연동됩니다. 민감 항목은 브라우저에서 표시하거나 수정하지 않습니다.
+page-rules-content-title = 규칙 콘텐츠
+page-rules-content-note = 규칙 문서 편집은 규칙 콘텐츠 기능 이전 후 연동됩니다.
+page-rules-title = 규칙 정책
+page-rules-note = 입찰 규칙은 규칙 기능 이전 후 연동됩니다.
+page-audit-title = 감사 기록
+page-audit-note = 감사 증적은 추가만 가능하며 화면에서 이력을 편집할 수 없습니다.
+page-status-title = 서비스 상태
+page-status-note = 서비스 상태는 관리 헬스 체크 엔드포인트를 참조합니다.

@@ -8,7 +8,8 @@ crate 依赖，也不在本仓库的默认修改范围内。
 
 - 保留 Public、Admin、Worker 三个可独立部署的运行边界。
 - 让竞拍规则、状态迁移、幂等和结算不依赖 HTTP、数据库或前端框架。
-- 公开端和管理端的 Web UI 也使用 Rust：Leptos 服务端渲染与 WASM 水合。
+- 公开端和管理端的 Web UI 也使用 Rust：Dioxus 客户端渲染，产物内嵌进后端二进制。
+- 界面原生支持中（简/繁）、英、日、韩五种语言；公开端默认英文，管理端默认简体中文。
 - 将论坛、MoogleMail、数据库、日志和配置视为可替换适配器。
 - Redis 缓存是可选适配器，默认不编译、不启用；关闭或故障时回退到权威数据源。
 - PostgreSQL 提供完整生产能力；SQLite 作为单主机、低并发 Lite 替代品，只实现明确列入
@@ -41,7 +42,9 @@ crates/                       # 可复用能力，按模块所有权拆分
 ├── auction-application/      # 用例、端口和事务边界
 ├── auction-contracts/        # HTTP/WebSocket DTO 与错误契约
 ├── auction-http/             # Axum 路由与 HTTP 表面适配器
-├── auction-web/              # Leptos 公开端/管理端界面
+├── auction-web-shared/       # 浏览器端共享设计变量、基础组件与语言选择
+├── auction-web-public/       # 公开端 Dioxus 界面（14 条路由，默认英文）
+├── auction-web-admin/        # 管理端 Dioxus 界面（21 条路由，默认简体中文）
 ├── auction-storage/          # PostgreSQL 完整适配器与 SQLite Lite 适配器
 ├── auction-cache/            # 默认关闭的缓存边界与可选 Redis 适配器
 ├── auction-integrations/     # E-Hentai、MoogleMail 等外部网关
@@ -58,17 +61,25 @@ ops/                          # 配置样例、部署和恢复文档
 
 ## 本地开发
 
-需要固定的 Rust 1.98.0 当前稳定工具链、`wasm32-unknown-unknown` 编译目标和 Cargo
-Leptos；workspace MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用
-官方 `1.51.x` LTS，其他无 LTS 的 crate 由 `Cargo.lock` 固定并受控升级。运行时配置统一
-使用 TOML；`AUCTION_CONFIG_FILE` 只用于选择主配置文件，不用于覆盖单个配置项。主配置
-通过 `secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名
-密钥只放在该敏感文件中。
+需要固定的 Rust 1.98.0 当前稳定工具链和 `wasm32-unknown-unknown` 编译目标；workspace
+MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用官方 `1.51.x` LTS，
+其他无 LTS 的 crate 由 `Cargo.lock` 固定并受控升级。运行时配置统一使用 TOML；
+`AUCTION_CONFIG_FILE` 只用于选择主配置文件，不用于覆盖单个配置项。主配置通过
+`secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
+只放在该敏感文件中。
+
+构建浏览器端产物还需要 dx CLI（`cargo install dioxus-cli --locked`）。dx 会按需从 npm
+注册表下载 esbuild 作为构建期工具，它不是运行时依赖，也不引入 Node 运行时或第二套前端
+构建链。后端使用 `allow_missing` 内嵌产物，因此未构建前端时后端仍可编译，只是静态资源
+路由返回 503。
 
 ```bash
 # 使用 SQLite Lite 示例配置（本地开发/单节点低并发）
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
   cargo run -p auction-public-api
+
+# 构建两个 surface 的前端产物（需要 dx CLI）
+just web-build
 
 # 完整生产档在不提交的敏感文件中使用 postgres://... 连接串
 just verify

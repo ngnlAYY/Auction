@@ -1,0 +1,59 @@
+# 管理端繁體中文文案。
+
+app-title = Auction 管理端
+language-label = 語言
+
+nav-label = 管理導覽
+nav-dashboard = 總覽
+nav-auctions = 拍賣
+nav-users = 使用者
+nav-mails = 郵件
+nav-deliveries = 投遞
+nav-settlement = 結算
+nav-audit = 稽核
+nav-config = 設定
+nav-status = 狀態
+
+not-found-title = 頁面不存在
+not-found-note = 請檢查連結是否正確。
+
+page-dashboard-title = 管理總覽
+page-dashboard-note = 執行指標與告警將在可觀測性能力遷移後接入。
+page-login-title = 管理登入
+page-login-note = 管理工作階段將在工作階段輪替能力遷移後接入。
+page-auctions-title = 拍賣管理
+page-auctions-note = 輪次與拍品管理將在拍賣命令契約凍結後接入。
+page-auction-lots-title = 拍賣 { $auction } 拍品
+page-auction-lots-note = 拍品編輯將在裝備與策略能力遷移後接入。
+page-auction-overview-title = 拍賣概覽
+page-auction-overview-note = 拍賣狀態匯總將在生命週期能力遷移後接入。
+page-mails-title = 郵件列表
+page-mails-note = 入站郵件將在郵件能力遷移後接入。
+page-mail-overview-title = 郵件概覽
+page-mail-overview-note = 郵件處理狀態將在郵件能力遷移後接入。
+page-cookies-title = Cookie 管理
+page-cookies-note = 外部服務憑證只在伺服器端處理，瀏覽器端不顯示憑證內容。
+page-credentials-title = 憑證管理
+page-credentials-note = 憑證輪替將在金鑰管理能力遷移後接入；金鑰材料不進入瀏覽器。
+page-users-title = 使用者管理
+page-users-note = 使用者與權限將在使用者能力遷移後接入。
+page-renames-title = 改名紀錄
+page-renames-note = 改名稽核將在使用者能力遷移後接入。
+page-deliveries-title = 投遞管理
+page-deliveries-note = 投遞與重試將在投遞能力遷移後接入。
+page-delivery-overview-title = 投遞概覽
+page-delivery-overview-note = 投遞狀態匯總將在投遞能力遷移後接入。
+page-outbox-title = Outbox
+page-outbox-note = 事件外發紀錄將在 outbox 能力遷移後接入。
+page-settlement-title = 結算管理
+page-settlement-note = 結算與義務將在結算能力遷移後接入。
+page-config-title = 執行設定
+page-config-note = 可調策略將在管理設定能力遷移後接入；敏感欄位不透過瀏覽器顯示或修改。
+page-rules-content-title = 規則內容
+page-rules-content-note = 規則文件編輯將在規則內容能力遷移後接入。
+page-rules-title = 規則策略
+page-rules-note = 競價規則將在規則能力遷移後接入。
+page-audit-title = 稽核紀錄
+page-audit-note = 稽核證據只允許追加，介面不提供歷史編輯。
+page-status-title = 服務狀態
+page-status-note = 服務狀態將讀取管理端健康檢查介面。

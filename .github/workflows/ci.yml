@@ -24,10 +24,10 @@ jobs:
       - run: cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite
       - run: cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - run: >-
-          cargo check --locked -p auction-web
-          --target wasm32-unknown-unknown
-          --no-default-features --features hydrate
+      # 浏览器目标只做编译校验。不安装 dx CLI：auction-http 以 allow_missing 内嵌前端
+      # 产物，缺少产物时仍可编译，因此 CI 不需要 npm 下载 esbuild。
+      - run: cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
+      - run: cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
   msrv:
     runs-on: ubuntu-latest

@@ -21,7 +21,8 @@ lint:
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 wasm-check:
-    cargo check --locked -p auction-web --target wasm32-unknown-unknown --no-default-features --features hydrate
+    cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
+    cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
 verify: fmt check feature-check lint wasm-check
 
@@ -40,5 +41,20 @@ check-config role="public":
 db-migrate:
     cargo run -p auctionctl -- migrate
 
-web-watch:
-    cargo leptos watch -p auction-web
+# 前端产物构建需要 dx CLI（cargo install dioxus-cli --locked）。
+# dx 会按需从 npm 注册表下载 esbuild 作为构建期工具；它不是运行时依赖，也不引入
+# Node 运行时或第二套前端构建链。auction-http 使用 allow_missing 内嵌产物，
+# 因此未执行这些命令时后端仍可编译，只是运行时静态资源返回 503。
+web-build: web-build-public web-build-admin
+
+web-build-public:
+    dx build -p auction-web-public --platform web
+
+web-build-admin:
+    dx build -p auction-web-admin --platform web
+
+web-serve-public:
+    dx serve -p auction-web-public --platform web
+
+web-serve-admin:
+    dx serve -p auction-web-admin --platform web

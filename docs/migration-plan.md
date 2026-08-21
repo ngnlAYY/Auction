@@ -18,8 +18,9 @@
    contract tests 防止迁移期间漂移。
 6. **Worker/integrations：** 接入 E-Hentai 发帖/回帖扫描、MoogleMail、通知、重试和
    durable cursor；每个外部写入都要有幂等键和恢复策略。
-7. **Leptos UI：** 先做只读拍卖列表和详情，再接入登录、出价、代理和管理命令；SSR、
-   hydration 和 realtime 通过浏览器测试验证。
+7. **Dioxus UI：** 先做只读拍卖列表和详情，再接入登录、出价、代理和管理命令；Public 与
+   Admin 各自独立的组件树与路由树按旧 `manifests/*.routes.json` 的 URL 契约推进，realtime
+   使用 WebSocket。浏览器行为验证在用户明确要求后才纳入范围。
 8. **切换：** 双跑只读流量，比较事件/余额/竞价结果；确认数据和运维 runbook 后再切写。
 
 在第 1 步完成前，不应把旧数据库表直接当作 Rust domain model；旧 schema 的兼容读取

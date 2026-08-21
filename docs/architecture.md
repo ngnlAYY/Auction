@@ -15,7 +15,7 @@ apps (composition roots)
        domain (invariants, state machines, value objects)
 ```
 
-`auction-domain` 不依赖 Axum、Leptos、SQLx、reqwest 或环境变量。`auction-application`
+`auction-domain` 不依赖 Axum、Dioxus、SQLx、reqwest 或环境变量。`auction-application`
 只声明端口；数据库、论坛、邮件和 HTTP 都在外层实现端口。
 
 “全 Rust”是仓库代码和程序库依赖约束，不是基础设施采购约束。PostgreSQL、SQLite、
@@ -32,10 +32,21 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-cache` | 默认关闭的缓存边界、Redis 连接和带 TTL 的可重建值 | 权威状态、锁、幂等和审计 |
 | `auction-integrations` | E-Hentai、MoogleMail、身份和通知适配器 | 拍卖状态迁移 |
 | `auction-jobs` | due task、论坛扫描、投递重试、生命周期调度 | HTTP handler |
-| `auction-http` | Public/Admin router、认证 middleware、DTO 映射 | 领域决策 |
-| `auction-web` | Leptos SSR/hydrate 组件、surface 路由和交互 | 数据库和 secret |
+| `auction-http` | Public/Admin router、认证 middleware、DTO 映射、前端产物内嵌 | 领域决策 |
+| `auction-web-shared` | 设计变量、基础排版、语言集合与偏好持久化、无业务偏向的展示组件 | 任一 surface 的业务组件与文案 |
+| `auction-web-public` | 公开端 Dioxus 组件、路由、公开端译文 | 数据库、secret、管理端能力 |
+| `auction-web-admin` | 管理端 Dioxus 组件、路由、管理端译文 | 数据库、secret、公开端组件树 |
 | `auction-config` | 配置解析、默认值、校验 | 业务规则 |
 | `auction-observability` | tracing、metrics、health、correlation id | 业务日志内容 |
+
+浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态
+WASM/JS/HTML，`auction-http` 用 `rust-embed` 分别内嵌，产出单文件制品。Public 与 Admin
+的组件树、路由树和静态产物完全隔离：公开端二进制不包含管理端资源。产物缺失时静态路由
+返回 503 并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。
+
+界面文案由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，支持 `en`/`zh-CN`/`zh-TW`/
+`ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
+（受支持集合、`hv.lang` 持久化、`<html lang>` 同步）由 `auction-web-shared` 统一提供。
 
 ## 运行进程
 
