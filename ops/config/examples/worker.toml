@@ -1,0 +1,6 @@
+# Worker configuration.
+
+# PostgreSQL is recommended for multi-process production. SQLite is supported
+# for local development and deliberately single-node deployments.
+database_url = "sqlite://./var/auction.db"
+log_filter = "info,auction=debug"

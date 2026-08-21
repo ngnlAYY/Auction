@@ -1,0 +1,488 @@
+:root {
+  color-scheme: dark;
+  --color-bg: #0e1116;
+  --color-surface: #161b22;
+  --color-surface-raised: #1d242e;
+  --color-border: #2b3442;
+  --color-text: #e6ebf2;
+  --color-text-muted: #93a0b4;
+  --color-accent: #d9a441;
+  --color-accent-contrast: #14100a;
+  --color-live: #3fb96f;
+  --color-warning: #d9a441;
+  --color-danger: #e05555;
+  --color-link: #6ea8fe;
+  --color-overlay: rgb(0 0 0 / 55%);
+  --font-body: Inter, "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-weight-strong: 700;
+  --line-height-body: 1.5;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 999rem;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 45%);
+  --border-width: 1px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --size-target: 2.75rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-block-size: 100%;
+}
+
+body {
+  min-block-size: 100%;
+  margin: 0;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--line-height-body);
+}
+
+a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+a:hover,
+a:focus-visible {
+  text-decoration: underline;
+}
+
+h1,
+h2,
+p {
+  margin-block-start: 0;
+}
+
+h1 {
+  margin-block-end: var(--space-4);
+  font-size: var(--text-xl);
+}
+
+h2 {
+  font-size: var(--text-lg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button:not(:disabled),
+a,
+select {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: var(--border-width) solid var(--color-link);
+  outline-offset: var(--space-1);
+}
+
+.auction-shell {
+  inline-size: min(70%, 72rem);
+  min-block-size: 100vh;
+  margin-inline: auto;
+  color: var(--color-text);
+}
+
+.auction-shell > nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-block-end: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-1);
+}
+
+.auction-shell > nav a:first-child {
+  color: var(--color-accent);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-strong);
+  letter-spacing: 0.02em;
+}
+
+.auction-shell > nav a:not(:first-child) {
+  color: var(--color-text-muted);
+}
+
+.auction-shell > nav a:hover,
+.auction-shell > nav a:focus-visible {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.auction-shell > nav + * {
+  padding-block: var(--space-5);
+}
+
+.public-auction-page {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.public-auction-round {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-block-end: var(--space-5);
+}
+
+.public-auction-round__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.public-auction-round__title h1 {
+  margin: 0;
+}
+
+.public-auction-round__world,
+.public-auction-round__end time,
+.public-auction-summary p,
+.public-auction-page__status {
+  color: var(--color-text-muted);
+}
+
+.public-auction-round__status,
+.public-auction-status {
+  display: inline-block;
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.public-auction-round__status--live,
+.public-auction-status--live {
+  color: var(--color-live);
+  border-color: var(--color-live);
+}
+
+.public-auction-status--sold {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.public-auction-round__end {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.public-auction-round__end time {
+  font-size: var(--text-sm);
+}
+
+.public-auction-countdown,
+.public-auction-catalog__code,
+.public-auction-catalog__amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-auction-summary {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+
+.public-auction-summary h2 {
+  margin-block-end: var(--space-2);
+}
+
+.public-auction-summary p {
+  margin: 0;
+}
+
+.public-auction-summary__eyebrow {
+  margin-block-end: var(--space-2) !important;
+  color: var(--color-accent) !important;
+  font-size: var(--text-sm);
+}
+
+.public-auction-preview-stats {
+  display: grid;
+  gap: var(--space-2);
+  min-inline-size: 9rem;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-auction-preview-stats div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.public-auction-preview-stats dt {
+  color: var(--color-text-muted);
+}
+
+.public-auction-preview-stats dd {
+  margin: 0;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  text-align: end;
+}
+
+.public-auction-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+}
+
+.public-auction-filter__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.public-auction-filter__tab:hover,
+.public-auction-filter__tab:focus-visible {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.public-auction-filter__tab[aria-pressed="true"] {
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.public-auction-filter__count {
+  min-inline-size: 1.5em;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.public-auction-filter__tab[aria-pressed="true"] .public-auction-filter__count {
+  color: var(--color-accent);
+  background: var(--color-accent-contrast);
+}
+
+.public-auction-category {
+  margin-block-end: var(--space-6);
+}
+
+.public-auction-category__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.public-auction-category__code {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.public-auction-catalog {
+  overflow-x: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-auction-catalog table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.public-auction-catalog th,
+.public-auction-catalog td {
+  padding: var(--space-2) var(--space-3);
+  border-block-end: var(--border-width) solid var(--color-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.public-auction-catalog th {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.public-auction-catalog tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+.public-auction-catalog tbody tr:hover {
+  background: var(--color-surface-raised);
+}
+
+.public-auction-catalog tbody .public-auction-catalog__leading {
+  background: rgb(63 185 111 / 8%);
+}
+
+.public-auction-catalog__code {
+  font-weight: 600;
+}
+
+.public-auction-catalog__number {
+  font-variant-numeric: tabular-nums;
+}
+
+.public-auction-catalog__name {
+  min-inline-size: 12em;
+  white-space: normal !important;
+}
+
+.public-auction-catalog__actions {
+  text-align: left;
+}
+
+.public-auction-catalog__actions-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.public-auction-catalog__actions button {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.public-auction-catalog__actions button:not(:disabled):hover,
+.public-auction-catalog__actions button:not(:disabled):focus-visible {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.public-auction-catalog__actions button:disabled {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.public-auction-page__status {
+  padding-block: var(--space-6);
+  text-align: center;
+}
+
+.public-auction-empty {
+  padding: var(--space-6) var(--space-5);
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+@media (max-width: 60rem) {
+  .auction-shell {
+    inline-size: 100%;
+    padding-inline: var(--space-5);
+  }
+}
+
+@media (max-width: 48rem) {
+  .auction-shell {
+    padding-inline: var(--space-3);
+  }
+
+  .public-auction-summary {
+    flex-direction: column;
+  }
+
+  .public-auction-preview-stats {
+    inline-size: 100%;
+  }
+
+  .public-auction-catalog thead {
+    display: none;
+  }
+
+  .public-auction-catalog table,
+  .public-auction-catalog tbody,
+  .public-auction-catalog tr {
+    display: block;
+  }
+
+  .public-auction-catalog tr {
+    padding: var(--space-2) var(--space-3);
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  .public-auction-catalog td {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    border: 0;
+    white-space: normal;
+  }
+
+  .public-auction-catalog td::before {
+    inline-size: 5rem;
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    content: attr(data-label);
+    font-size: var(--text-sm);
+  }
+
+  .public-auction-catalog__name {
+    min-inline-size: 0;
+  }
+
+  .public-auction-catalog__actions {
+    align-items: center;
+  }
+}

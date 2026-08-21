@@ -1,0 +1,6 @@
+# Public API configuration.
+listen_address = "127.0.0.1:8090"
+
+# Supported URL schemes: postgres://, postgresql://, and sqlite:.
+database_url = "sqlite://./var/auction.db"
+log_filter = "info,auction=debug"
