@@ -6,6 +6,7 @@
 .grok/
 .pi/
 
+.keyenv
 .gitignore
 
 /target/

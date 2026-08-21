@@ -80,7 +80,9 @@ redis = { version = "1.6.0", default-features = false }
 
 # 数据与错误
 anyhow = "1.0.104"
-chrono = { version = "0.4.45", default-features = false, features = ["serde", "std"] }
+# `now` 提供 `Utc::now()`，是 auction-application 的 Clock 端口所需。不启用整个 `clock`：
+# 后者会额外引入 winapi 与 iana-time-zone，而本项目只使用 UTC，不做本地时区换算。
+chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.20"
 toml = "1.1.4"

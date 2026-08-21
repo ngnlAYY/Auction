@@ -11,33 +11,36 @@ use axum::{Json, Router, routing::get};
 /// 公开端路由。
 ///
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。
-pub fn public_router<S>() -> Router<S>
+///
+/// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
+/// 自己的版本，而健康检查要报告的是运行进程的版本。
+pub fn public_router<S>(version: &'static str) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    let health = move || health_response("public-api", version);
+
     Router::<S>::new()
-        .route("/health", get(public_health))
-        .route("/api/v1/health", get(public_health))
+        .route("/health", get(health))
+        .route("/api/v1/health", get(health))
         .fallback(web_assets::serve_public_asset)
 }
 
 /// 管理端路由。
 ///
 /// 管理端产物与公开端完全隔离，公开端二进制不包含管理端资源。
-pub fn admin_router<S>() -> Router<S>
+pub fn admin_router<S>(version: &'static str) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
+    let health = move || health_response("admin-api", version);
+
     Router::<S>::new()
-        .route("/health", get(admin_health))
-        .route("/api/v1/health", get(admin_health))
+        .route("/health", get(health))
+        .route("/api/v1/health", get(health))
         .fallback(web_assets::serve_admin_asset)
 }
 
-async fn public_health() -> Json<HealthResponse> {
-    Json(HealthResponse::ok("public-api"))
-}
-
-async fn admin_health() -> Json<HealthResponse> {
-    Json(HealthResponse::ok("admin-api"))
+async fn health_response(service: &'static str, version: &'static str) -> Json<HealthResponse> {
+    Json(HealthResponse::ok(service, version))
 }

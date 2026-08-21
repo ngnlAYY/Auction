@@ -5,7 +5,9 @@
 浏览器和外部客户端只能看到这里的类型。数据库记录和领域聚合都不得直接当作对外 DTO，
 转换在边界完成。
 
-- `HealthResponse`：健康检查响应。
+- `HealthResponse`：健康检查响应。`service` 与 `version` 都由调用方传入——在本 crate 内展开
+  `env!("CARGO_PKG_VERSION")` 只会得到契约 crate 自己的版本，而运维需要的是运行进程的版本。
+  装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
 
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde

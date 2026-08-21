@@ -11,7 +11,8 @@ async fn main() -> anyhow::Result<()> {
     let cache = configure_cache(&config).context("configure admin-api cache")?;
     let address = config.listen_addr.context("admin-api must have a listen address")?;
     let listener = TcpListener::bind(address).await?;
-    let app = auction_http::admin_router::<()>();
+    // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
+    let app = auction_http::admin_router::<()>(env!("CARGO_PKG_VERSION"));
 
     tracing::info!(%address, cache_backend = cache.backend(), "admin api listening");
     axum::serve(listener, app).await?;
