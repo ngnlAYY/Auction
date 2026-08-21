@@ -16,13 +16,16 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   命令行操作。
 - 浏览器端同样使用 Rust：Leptos 服务端渲染加 `wasm32-unknown-unknown` 水合。不引入
   React、TypeScript、Node 或第二套前端构建链。
-- 存储层同时支持 PostgreSQL 和 SQLite。`database_url` 在 TOML 配置中选择后端，不能
-  通过把两个后端隐藏在 `AnyPool` 中来抹平事务、锁和迁移语义的差异。
+- “全 Rust”只约束本仓库代码和直接引入的程序库使用 Rust；PostgreSQL、SQLite、Redis、
+  反向代理和操作系统服务等外部组件不受实现语言限制。
+- PostgreSQL 是完整生产后端；SQLite 是面向本地、演示和单主机低并发部署的 Lite 替代
+  后端。敏感 TOML 中的 `database_url` 选择档位，不能通过 `AnyPool` 抹平事务、锁、迁移
+  和能力差异，也不要求 SQLite 达到 PostgreSQL 的系统能力。
 - 拍卖页面的现有静态结构和 CSS 以旧版 Auction-BF 为视觉参考；页面样式迁移不等于业务
   功能已经完成。
 - 当前状态是**启动骨架**：工作区、进程装配、健康检查、初始领域生命周期、TOML 配置、
-  双数据库适配器边界和页面静态示例已经建立；完整功能等价、数据库结构和外部服务行为
-  仍在迁移中。
+  PostgreSQL 完整/SQLite Lite 适配器边界和页面静态示例已经建立；完整功能等价、数据库
+  结构和外部服务行为仍在迁移中。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
@@ -34,7 +37,7 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 ```text
 .
 ├── Cargo.toml / Cargo.lock       # Rust 工作区与锁定后的依赖图
-├── rust-toolchain.toml           # Rust 1.98、rustfmt、Clippy 和 WASM 目标
+├── rust-toolchain.toml           # Rust 1.98.0 当前 stable、rustfmt、Clippy 和 WASM 目标
 ├── rustfmt.toml                  # Rust 格式化策略
 ├── clippy.toml                   # Clippy 与最低支持 Rust 版本策略
 ├── .editorconfig                 # 多语言编辑器默认设置
@@ -52,12 +55,13 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 │   ├── auction-contracts/        # 稳定的 HTTP/流 DTO 与错误契约
 │   ├── auction-http/             # Axum 路由与 HTTP 表面适配器
 │   ├── auction-web/              # Leptos 组件、路由、SSR 和水合
-│   ├── auction-storage/          # PostgreSQL/SQLite/SQLx 适配器边界
+│   ├── auction-storage/          # PostgreSQL 完整与 SQLite Lite 的 SQLx 适配器边界
+│   ├── auction-cache/            # 可禁用的缓存边界与 Redis 适配器
 │   ├── auction-integrations/     # E-Hentai、MoogleMail 和外部网关
 │   ├── auction-jobs/             # Worker 调度与任务编排
 │   ├── auction-config/           # TOML 解析与进程配置
 │   └── auction-observability/    # tracing、metrics、健康检查和关联 ID
-├── migrations/                   # PostgreSQL/SQLite 追加式迁移
+├── migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集迁移
 ├── docs/                         # 架构、技术选型和迁移记录
 ├── ops/                          # 配置示例与部署资料
 ├── ci/                           # 持续集成约定和后续辅助脚本
@@ -69,25 +73,37 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 
 ## 技术栈
 
-- **语言：** Rust 1.98，edition 2024。
-- **异步运行时：** Tokio 1.53.1。
-- **HTTP 服务：** Axum 0.8.9，配合 Tower/Tower HTTP 0.7 中间件。
+- **语言：** Rust 1.98.0 当前 stable，edition 2024；workspace MSRV 为 1.94.1。Rust 官方
+  没有 LTS，且只支持最新 stable，不能把 MSRV 当作 LTS。
+- **异步运行时：** Tokio 1.51.x 官方 LTS，当前下限 1.51.4。
+- **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；当前没有为尚未使用的能力直接
+  引入 `tower-http`。
 - **浏览器界面：** Leptos 0.8.20、`leptos_axum` 0.8.10；服务端渲染运行在服务端，
   `wasm32-unknown-unknown` 水合运行在浏览器。
-- **数据库：** SQLx 0.9，同时编译 PostgreSQL 和 SQLite 驱动。关键竞价事务使用显式 SQL、
-  事务、后端对应的锁、唯一约束和分方言追加式迁移。
+- **数据库：** SQLx 0.9；PostgreSQL 与 SQLite 驱动由独立 Cargo feature 选择，发布制品
+  只编译实际需要的驱动。PostgreSQL 18.x 提供完整生产能力，跟进 major 18 的当前修复版；
+  SQLite 只提供 Lite 能力子集，当前锁图捆绑 SQLite 3.51.3。已支持的关键竞价事务使用
+  显式 SQL、事务、后端对应的锁、唯一约束和追加式迁移。
+- **缓存：** 默认禁用；启用 `cache-redis` Cargo feature 并在配置中选择 `redis` 后使用
+  `redis` crate 1.6.0 对接 Redis。缓存只保存可重建数据，不能参与竞价正确性、幂等、锁、
+  会话权威状态或审计。
 - **HTTP 客户端：** reqwest 0.13.4，外部服务使用 rustls。
-- **序列化：** serde、serde_json 和明确的契约 DTO。
+- **序列化：** serde 和明确的契约 DTO；当前没有为未使用的手工 JSON 路径直接引入
+  `serde_json`。
 - **错误处理：** 库、领域和应用层使用 `thiserror`；二进制装配根可以使用
   `anyhow::Context`。
 - **可观测性：** tracing、tracing-subscriber、结构化字段和 JSON 输出。
 - **命令行：** clap 4.6.6。
 - **标识与时间：** 使用带类型的 UUID 包装和 UTC 时间戳。
-- **运行配置：** 统一使用 TOML；环境变量 `AUCTION_CONFIG_FILE` 仅用于选择 TOML 文件。
+- **运行配置：** 统一使用 TOML；主配置只保存非敏感设置并引用独立敏感 TOML。数据库连接
+  串、Redis 连接串、Cookie 和会话签名密钥只允许出现在敏感文件中；环境变量
+  `AUCTION_CONFIG_FILE` 仅用于选择主配置文件。
 
-具体取舍见 [`docs/tech-stack.md`](docs/tech-stack.md)。依赖的精确解析版本以
-`Cargo.lock` 为准；升级依赖时同步检查 Rust 工具链、Leptos SSR/WASM 兼容性和 SQLx 两
-个驱动。
+具体取舍见 [`docs/tech-stack.md`](docs/tech-stack.md)。只有上游正式提供的版本才能称为
+LTS：Tokio 使用官方 LTS；Rust、Axum、Leptos、SQLx 等没有官方 LTS 的组件使用受支持的
+稳定版本，不得伪称 LTS。Rust 构建工具链跟随当前 stable，独立 CI job 校验 MSRV。依赖
+精确解析版本以 `Cargo.lock` 为准，本地与 CI 的静态检查使用 `--locked`；升级时按组件
+检查 Rust MSRV、Leptos SSR/WASM 兼容性和已实现数据库适配器。
 
 ## 依赖方向与模块所有权
 
@@ -96,7 +112,7 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 ```text
 apps/*
   ├── auction-http / auction-web / auction-jobs
-  ├── auction-storage / auction-integrations
+  ├── auction-storage / auction-cache / auction-integrations
   ├── auction-config / auction-observability
   └── auction-application
               ↓
@@ -113,6 +129,8 @@ apps/*
   作浏览器 DTO。
 - `auction-storage` 实现应用端口；SQL 模型、查询、连接池、事务和后端锁策略只放在这里，
   业务决定留在领域/应用层。
+- `auction-cache` 只负责可丢弃、可重建数据的缓存适配；默认禁用，Redis 是可选实现。缓存
+  miss、不可用或失效失败必须回退到权威数据源，不得改变命令结果。
 - `auction-integrations` 实现外部传输和认证。外部响应必须经过应用命令或持久化 Worker
   操作，不能直接修改拍卖状态。
 - `auction-http` 负责 HTTP 输入到应用命令、应用输出到稳定契约的映射。处理器不得包含
@@ -150,6 +168,9 @@ apps/*
 [`crates/auction-domain/src/auction.rs`](crates/auction-domain/src/auction.rs)，它只是
 第一片领域切片，不能视为完整竞价行为。
 
+以下不变量适用于 PostgreSQL 的完整能力，也适用于 SQLite Lite 已声明支持的对应能力。
+Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现写入降低正确性要求。
+
 1. 每个可变命令都有稳定的 `command_id`。重复提交相同命令返回原结果；同一 ID 搭配不同
    负载必须报冲突。
 2. 竞价事务使用所选数据库后端的锁模型保护相关拍卖、标的和有效授权，校验资格与状态，
@@ -165,6 +186,8 @@ apps/*
 7. 会话凭据、论坛 Cookie、邮件 Cookie 和其他密钥材料不得出现在日志、DTO、快照或提交的
    配置中。
 8. 审计记录只允许追加；更正应记录为新的事实/事件，不能编辑历史证据。
+9. 缓存不是权威状态。竞价金额、资格、幂等账本、锁、会话真值和审计证据必须由数据库或
+   明确的权威服务决定；禁用或丢失缓存不能破坏正确性。
 
 ## 命名规则
 
@@ -183,8 +206,8 @@ apps/*
   状态命名应表达用户动作或状态变化。
 - URL 路径、事件名和 JSON 字段必须先遵守已冻结的旧系统契约；新增契约使用小写和连字符
   的 URL 路径、`snake_case` 的 JSON/TOML/SQL 字段，并通过 serde 映射兼容外部旧命名。
-- SQL 表名、列名、索引名和迁移中的逻辑名称使用 `snake_case`；PostgreSQL 与 SQLite 的
-  对应对象保持同名和同一逻辑含义。
+- SQL 表名、列名、索引名和迁移中的逻辑名称使用 `snake_case`；PostgreSQL 与 SQLite
+  Lite 中都存在的领域对象保持同名和同一逻辑含义，不要求完整 schema 一一对应。
 - CSS 类使用小写连字符和 BEM 结构，例如 `public-auction-catalog`、
   `public-auction-catalog__name`、`public-auction-catalog--compact`，禁止使用驼峰命名。
 
@@ -229,25 +252,38 @@ apps/*
 - 所有运行时配置文件必须是 TOML，示例位于 `ops/config/examples/`。
 - `AUCTION_CONFIG_FILE` 只能选择配置文件；单个配置项不能通过环境变量覆盖，业务模块也
   不能自行读取环境变量。
-- `database_url` 支持 `postgres://`、`postgresql://` 和 `sqlite:`。PostgreSQL 是多进程
-  生产环境的推荐后端；SQLite 适合本地开发和明确的单节点部署，必须说明单写入者与文件锁
-  假设。
-- 真实密码、令牌、Cookie、私有连接串和本机路径不得提交。需要本地覆盖时使用被忽略的
-  `*.local.toml` 或 `*.secret.toml` 文件。
-- 配置字段变化必须同时更新解析代码、示例、相关 README 和部署说明，并考虑旧配置的兼
-  容性或明确的失败信息。
+- 主配置只允许放监听地址、日志过滤器、缓存非敏感策略等普通设置，并通过必填的
+  `secrets_file` 引用敏感 TOML。相对路径以主配置文件所在目录解析。
+- `database_url`、`redis_url`、论坛/邮件 Cookie 和 `session_signing_key` 只能放在敏感
+  TOML；这些字段不在主配置中提供兼容入口，也不能通过环境变量覆盖。
+- 敏感文件不得提交，部署时应限制为仅运行账号可读。配置错误和日志不得回显连接串、
+  Cookie、密钥或包含这些内容的 TOML 原文。
+- 敏感文件中的 `database_url` 支持 `postgres://`、`postgresql://` 和 `sqlite:`，并直接
+  决定部署档位。
+  PostgreSQL 是完整生产后端；SQLite 是本地、演示和明确单主机低并发部署的 Lite 后端，
+  每个角色至多一个实例、Worker 并发为一，并说明串行写入、锁等待、备份和本地文件系统
+  假设。不得把 SQLite 文件放在网络共享文件系统上作为横向扩展方案。
+- 配置字段变化必须同时更新解析代码、示例、相关 README 和部署说明；当前新配置格式不
+  兼容旧的单文件敏感字段，旧格式必须以明确错误失败。
 
 ## 数据库与迁移
 
-- PostgreSQL 和 SQLite 是正式目标后端。应用端口可以共享，但连接池、SQL、事务、锁和迁
-  移必须在 `auction-storage` 与对应迁移目录中显式表达。
-- 迁移分别放在 `migrations/postgres/` 和 `migrations/sqlite/`，表达同一逻辑结构，同时允
-  许数据库方言差异。迁移只允许追加，已发布文件禁止修改。
+- PostgreSQL 是完整生产目标；SQLite 是非对等 Lite 目标。稳定领域语义可以共享，但
+  SQLite 只实现 Lite 能力需要的应用端口；连接池、SQL、事务、锁、能力缺失和迁移必须在
+  `auction-storage` 与对应文档中显式表达。
+- PostgreSQL 部署固定 major 18 并及时升级 18.x 修复版本；major 升级必须单独评审迁移与
+  回滚。SQLite 引擎版本由 `Cargo.lock` 中的 SQLx/`libsqlite3-sys` 锁定，依赖升级时必须
+  核对实际捆绑版本和编译选项。
+- 新增持久化能力前必须在 [`docs/architecture.md`](docs/architecture.md) 标明它属于
+  “完整档”“Lite 档”或“两者”；只有标为 Lite 或两者的能力才要求 SQLite 实现。
+- `migrations/postgres/` 维护完整生产 schema，`migrations/sqlite/` 维护 Lite 所需子集。
+  两个迁移树不要求文件、序号或数据库对象一一对应；共有对象必须同名同义。迁移只允许
+  追加，已发布文件禁止修改。
 - 新结构必须先对照领域所有权和 Auction-BF 契约评审，不能未经审计复制旧表。需要兼容读
   时使用防腐层或明确的兼容适配器。
 - 每个表、迁移、写入查询、事件和路由只有一个 owner；新增对象时在架构说明中记录职责。
-- SQLx 查询宏需要两个后端都具备可复现的 schema/check 路径。采用离线查询校验后，要同时
-  更新两个迁移树和查询元数据。
+- SQLx 查询宏需要其所属后端具备可复现的 schema/check 路径。采用离线查询校验后，只更新
+  受影响的迁移树和查询元数据；共有查询才要求两个后端都校验。
 - 破坏性数据库操作必须有明确运行手册、精确目标确认和可验证备份；不要在开发脚本中随
   意加入 `DROP DATABASE` 一类命令。
 
@@ -257,6 +293,12 @@ apps/*
   入共享模块。
 - 初始文档使用服务端渲染，交互使用水合；不要为了规避服务端边界重新引入 JavaScript
   单页应用。
+- 核心竞价、认证和管理命令必须保留显式、版本化的 REST/JSON 契约，不得只通过 Leptos
+  server functions 暴露。Public 实时更新默认使用带 sequence/version 的 SSE 通知，跳号
+  或重连后读取权威快照；只有确需双向协议时才使用 WebSocket。
+- 优先评估 Islands 或等价的局部 hydration，只让确需交互的组件进入 WASM。若要切换到
+  Askama + HTMX + SSE，必须先由用户明确放宽“浏览器端全 Rust、禁止 JavaScript”契约，
+  不能把技术原型直接变成架构变更。
 - API/流 DTO 放在 `auction-contracts`，浏览器不能直接接收 SQL 行或数据库内部模型。
 - 会改变竞价或管理状态的用户动作必须携带 `command_id`，并显式展示冲突与幂等结果。
 - 拍卖页面的 CSS 和静态资源可以使用旧版 Auction-BF 的结构与视觉契约，但业务逻辑必须
@@ -280,17 +322,20 @@ just verify
 
 # 等价的直接命令
 cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo check --locked --workspace --all-targets
+cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
+cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite
+cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 # 校验 Rust 浏览器目标是否能够编译
-cargo check -p auction-web \
+cargo check --locked -p auction-web \
   --target wasm32-unknown-unknown \
   --no-default-features --features hydrate
 ```
 
-`cargo check --workspace --all-targets` 只编译现有目标，不执行测试。除非用户特别要求，
-不得编写或运行以下内容：
+`cargo check --locked --workspace --all-targets` 只编译现有目标，不执行测试。除非用户特别
+要求，不得编写或运行以下内容：
 
 - 单元测试；
 - 集成测试；
@@ -298,8 +343,8 @@ cargo check -p auction-web \
 - 端到端测试、浏览器测试和手工功能冒烟流程。
 
 已有测试代码不删除、不扩展、不为了“顺手验证”而执行。若用户明确要求恢复测试，先说
-明测试边界、SQLite/PostgreSQL 的差异和运行成本，再按要求实施；PostgreSQL 测试不能用
-SQLite 替代其隔离和行锁语义。
+明测试边界、SQLite/PostgreSQL 的差异和运行成本，再按要求实施；SQLite 只验证 Lite
+能力契约，不能替代 PostgreSQL 的完整契约、隔离和行锁语义。
 
 ## 运行进程
 
@@ -343,7 +388,8 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 
 1. 盘点并冻结 Auction-BF 的路由、JSON、事件、配置、数据库和部署契约。
 2. 在不依赖 HTTP、数据库和具体外部服务的情况下明确领域规则与状态机。
-3. 分别建立 PostgreSQL/SQLite 结构、仓储、锁、幂等、审计和 outbox 边界。
+3. 先建立 PostgreSQL 完整结构、仓储、锁、幂等、审计和 outbox，再按 Lite 能力清单建立
+   SQLite 子集；不要求迁移树或系统能力对等。
 4. 为用户、规则、交付、实时通信和会话接入应用端口。
 5. 按已冻结契约实现 Public 与 Admin 的 HTTP 表面。
 6. 实现带持久化游标和重试策略的 Worker 任务与外部网关。

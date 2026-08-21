@@ -42,15 +42,15 @@ fn main() -> anyhow::Result<()> {
             let role: Role = role.into();
             let config = AppConfig::load(role).context("load configuration")?;
             let database_backend = config
-                .database_url
-                .as_deref()
+                .database_url()
                 .map(DatabaseBackend::from_url)
                 .transpose()
                 .context("validate database_url")?;
             println!(
-                "role={} listen_addr={:?} database_backend={database_backend:?}",
+                "role={} listen_addr={:?} database_backend={database_backend:?} cache_backend={}",
                 config.role.name(),
                 config.listen_addr,
+                config.cache.backend.name(),
             );
         }
         Command::Migrate => {

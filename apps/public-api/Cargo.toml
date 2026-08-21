@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+auction-cache.workspace = true
 auction-config.workspace = true
 auction-http.workspace = true
 auction-observability.workspace = true
@@ -16,3 +17,7 @@ leptos.workspace = true
 leptos_axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+[features]
+default = []
+cache-redis = ["auction-cache/redis"]

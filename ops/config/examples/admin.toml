@@ -1,7 +1,7 @@
-# Admin API configuration.
+# Admin API 配置。
 listen_address = "127.0.0.1:8091"
-
-# PostgreSQL is recommended for multi-process production. SQLite is supported
-# for local development and deliberately single-node deployments.
-database_url = "sqlite://./var/auction.db"
+secrets_file = "secrets.toml"
 log_filter = "info,auction=debug"
+
+[cache]
+backend = "disabled"

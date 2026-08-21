@@ -10,3 +10,8 @@ anyhow.workspace = true
 auction-config.workspace = true
 auction-storage.workspace = true
 clap.workspace = true
+
+[features]
+default = []
+postgres = ["auction-storage/postgres"]
+sqlite = ["auction-storage/sqlite"]

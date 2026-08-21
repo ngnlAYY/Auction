@@ -1,6 +1,7 @@
-# Public API configuration.
+# Public API 配置。
 listen_address = "127.0.0.1:8090"
-
-# Supported URL schemes: postgres://, postgresql://, and sqlite:.
-database_url = "sqlite://./var/auction.db"
+secrets_file = "secrets.toml"
 log_filter = "info,auction=debug"
+
+[cache]
+backend = "disabled"

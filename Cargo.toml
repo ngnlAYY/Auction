@@ -6,6 +6,7 @@ members = [
     "apps/public-api",
     "apps/worker",
     "crates/auction-application",
+    "crates/auction-cache",
     "crates/auction-config",
     "crates/auction-contracts",
     "crates/auction-domain",
@@ -20,12 +21,13 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.94.1"
 publish = false
 
 [workspace.dependencies]
-# Internal crates
+# 工作区内部 crate
 auction-application = { path = "crates/auction-application" }
+auction-cache = { path = "crates/auction-cache", default-features = false }
 auction-config = { path = "crates/auction-config" }
 auction-contracts = { path = "crates/auction-contracts" }
 auction-domain = { path = "crates/auction-domain" }
@@ -36,49 +38,45 @@ auction-observability = { path = "crates/auction-observability" }
 auction-storage = { path = "crates/auction-storage" }
 auction-web = { path = "crates/auction-web" }
 
-# Async/runtime
-async-trait = "0.1.92"
-tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+# 异步运行时：Tokio 1.51.x 是官方 LTS 分支，只接受该分支内的补丁升级。
+tokio = { version = "~1.51.4", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 
-# HTTP and Web
+# HTTP 与 Web
 axum = { version = "0.8.9", features = ["macros"] }
 leptos = { version = "0.8.20", default-features = false }
 leptos_axum = "0.8.10"
 leptos_meta = { version = "0.8.6", default-features = false }
 leptos_router = { version = "0.8.15", default-features = false }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
-tower-http = { version = "0.7.0", features = ["compression-full", "cors", "trace"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5.8"
 
-# Persistence
-# Both database drivers are compiled into the storage adapter. The configured
-# URL selects the backend at runtime.
+# 持久化基础能力。具体数据库驱动由 auction-storage 的窄发布 feature 引入。
 sqlx = { version = "0.9.0", default-features = false, features = [
     "chrono",
     "json",
     "macros",
     "migrate",
-    "postgres",
     "runtime-tokio",
-    "sqlite",
-    "tls-rustls-ring-webpki",
 ] }
 
-# Data and errors
+# Redis 只由 cache-redis feature 引入；关闭默认 feature，避免附带脚本、流和大数支持。
+redis = { version = "1.6.0", default-features = false }
+
+# 数据与错误
 anyhow = "1.0.104"
-chrono = { version = "0.4.45", features = ["serde", "clock"] }
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "std"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
 thiserror = "2.0.20"
 toml = "1.1.4"
-uuid = { version = "1.24.1", features = ["serde", "v4", "v5"] }
+uuid = { version = "1.24.1", features = ["serde", "v4"] }
 
-# CLI and observability
+# CLI 与可观测性
 clap = { version = "4.6.6", features = ["derive"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
-# Browser-only helpers used by the Leptos hydration build
+# 仅供 Leptos 水合构建使用的浏览器辅助依赖
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.127"
 

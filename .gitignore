@@ -12,10 +12,11 @@
 /.env
 /.env.*
 !/ops/config/examples/
-/ops/config/*.local.toml
-/ops/config/*.secret.toml
+/ops/config/**/*.local.toml
+/ops/config/**/*.secret.toml
 /.tmp/
 /migrations/.sqlx/
 
 AGENTS.md
+CLAUDE.md
 .editorconfig

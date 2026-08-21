@@ -90,13 +90,15 @@ impl Auction {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use std::time::SystemTime;
+
+    use chrono::{DateTime, Utc};
 
     use super::*;
 
     #[test]
     fn draft_follows_the_initial_lifecycle() {
-        let now = Utc::now();
+        let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
         let mut auction = Auction::draft(AuctionId::new(), "Example", now).unwrap();
 
         auction.preview(now).unwrap();
@@ -110,7 +112,7 @@ mod tests {
 
     #[test]
     fn invalid_transitions_are_rejected() {
-        let now = Utc::now();
+        let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
         let mut auction = Auction::draft(AuctionId::new(), "Example", now).unwrap();
 
         let error = auction.settle(now).unwrap_err();

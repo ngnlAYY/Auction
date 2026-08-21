@@ -1,4 +1,5 @@
-use async_trait::async_trait;
+use std::future::Future;
+
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
@@ -10,10 +11,13 @@ pub enum RepositoryError {
     Failed(String),
 }
 
-#[async_trait]
 pub trait AuctionRepository: Send + Sync {
-    async fn insert(&self, auction: Auction) -> Result<(), RepositoryError>;
-    async fn get(&self, id: AuctionId) -> Result<Option<Auction>, RepositoryError>;
+    fn insert(&self, auction: Auction) -> impl Future<Output = Result<(), RepositoryError>> + Send;
+
+    fn get(
+        &self,
+        id: AuctionId,
+    ) -> impl Future<Output = Result<Option<Auction>, RepositoryError>> + Send;
 }
 
 pub trait Clock: Send + Sync {

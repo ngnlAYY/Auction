@@ -18,10 +18,10 @@ wasm-bindgen = { workspace = true, optional = true }
 [features]
 default = ["ssr"]
 hydrate = [
-    "dep:console_error_panic_hook",
     "dep:wasm-bindgen",
     "leptos/hydrate",
 ]
+wasm-debug = ["hydrate", "dep:console_error_panic_hook"]
 ssr = [
     "leptos/ssr",
     "leptos_meta/ssr",

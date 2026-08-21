@@ -10,12 +10,20 @@ fmt-fix:
     cargo fmt --all
 
 check:
-    cargo check --workspace --all-targets
+    cargo check --locked --workspace --all-targets
+
+feature-check:
+    cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
+    cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite
+    cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
 
 lint:
-    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-verify: fmt check lint
+wasm-check:
+    cargo check --locked -p auction-web --target wasm32-unknown-unknown --no-default-features --features hydrate
+
+verify: fmt check feature-check lint wasm-check
 
 run-public:
     cargo run -p auction-public-api

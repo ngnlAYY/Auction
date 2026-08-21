@@ -11,5 +11,10 @@ auction-domain.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 
+[features]
+default = []
+postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
+sqlite = ["sqlx/sqlite"]
+
 [dev-dependencies]
 tokio.workspace = true

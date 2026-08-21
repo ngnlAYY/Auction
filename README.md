@@ -10,16 +10,20 @@ crate 依赖，也不在本仓库的默认修改范围内。
 - 让竞拍规则、状态迁移、幂等和结算不依赖 HTTP、数据库或前端框架。
 - 公开端和管理端的 Web UI 也使用 Rust：Leptos 服务端渲染与 WASM 水合。
 - 将论坛、MoogleMail、数据库、日志和配置视为可替换适配器。
-- 同时支持 PostgreSQL 和 SQLite；通过后端对应的事务、锁、唯一约束和审计事件保证
-  竞价事实的一致性。
+- Redis 缓存是可选适配器，默认不编译、不启用；关闭或故障时回退到权威数据源。
+- PostgreSQL 提供完整生产能力；SQLite 作为单主机、低并发 Lite 替代品，只实现明确列入
+  Lite 范围的功能。两个后端已支持的竞价写入都必须保证事务、幂等和审计一致性。
 - 保留旧版本拍卖页面的视觉语言，并在 Rust Web 层逐步恢复完整交互和业务数据。
 
 ## 当前状态
 
 当前是可编译的启动骨架，已经具备工作区、进程装配、健康检查、初始领域生命周期、
-TOML 配置、SQLite/PostgreSQL 存储边界，以及沿用旧版视觉结构的拍卖页面静态示例。
-Auction-BF 的完整功能、数据表、接口契约和外部服务行为仍在迁移中，不能仅凭编译通过
-宣称功能等价。
+TOML 配置、PostgreSQL 完整/SQLite Lite 存储边界，以及沿用旧版视觉结构的拍卖页面静态
+示例。Auction-BF 的完整功能、数据表、接口契约和外部服务行为仍在迁移中，不能仅凭编译
+通过宣称功能等价。
+
+“全 Rust”只约束本仓库实现及其程序库依赖。PostgreSQL、SQLite、可选 Redis、反向代理
+等外部组件可以使用各自的官方实现，不要求它们由 Rust 编写。
 
 除非用户明确要求，本项目暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试
 和浏览器测试。已有测试文件保留，不因本规则删除。
@@ -38,13 +42,14 @@ crates/                       # 可复用能力，按模块所有权拆分
 ├── auction-contracts/        # HTTP/WebSocket DTO 与错误契约
 ├── auction-http/             # Axum 路由与 HTTP 表面适配器
 ├── auction-web/              # Leptos 公开端/管理端界面
-├── auction-storage/          # PostgreSQL/SQLite/SQLx 适配器
+├── auction-storage/          # PostgreSQL 完整适配器与 SQLite Lite 适配器
+├── auction-cache/            # 默认关闭的缓存边界与可选 Redis 适配器
 ├── auction-integrations/     # E-Hentai、MoogleMail 等外部网关
 ├── auction-jobs/             # Worker 任务编排
 ├── auction-config/           # TOML 解析与运行配置
 └── auction-observability/    # tracing、metrics 和健康检查约定
 docs/                         # 架构、技术选型、兼容性和迁移记录
-migrations/                   # PostgreSQL/SQLite 分数据库方言的追加式迁移
+migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集的追加式迁移
 ops/                          # 配置样例、部署和恢复文档
 ```
 
@@ -53,17 +58,26 @@ ops/                          # 配置样例、部署和恢复文档
 
 ## 本地开发
 
-需要 Rust 1.98、`wasm32-unknown-unknown` 编译目标和 Cargo Leptos。运行时配置统一使用
-TOML；`AUCTION_CONFIG_FILE` 只用于选择配置文件，不用于覆盖单个配置项。
+需要固定的 Rust 1.98.0 当前稳定工具链、`wasm32-unknown-unknown` 编译目标和 Cargo
+Leptos；workspace MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用
+官方 `1.51.x` LTS，其他无 LTS 的 crate 由 `Cargo.lock` 固定并受控升级。运行时配置统一
+使用 TOML；`AUCTION_CONFIG_FILE` 只用于选择主配置文件，不用于覆盖单个配置项。主配置
+通过 `secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名
+密钥只放在该敏感文件中。
 
 ```bash
-# 使用 SQLite 示例配置（本地开发/单节点）
+# 使用 SQLite Lite 示例配置（本地开发/单节点低并发）
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
   cargo run -p auction-public-api
 
-# 使用 PostgreSQL 时，将示例 TOML 中的 database_url 改为 postgres://...
+# 完整生产档在不提交的敏感文件中使用 postgres://... 连接串
 just verify
 ```
 
-`just verify` 默认只执行格式化、编译检查和 Clippy 静态检查，不执行测试。
+受版本控制的 `secrets.toml` 只含安全占位值。实际部署应把它复制为被 Git 忽略的
+`*.secret.toml`，限制文件权限，并让主配置的 `secrets_file` 指向该文件。Redis 还需要以
+`cache-redis` feature 构建对应进程；仅填写 `redis_url` 不会把 Redis 依赖带入默认制品。
+
+`just verify` 默认只执行格式化、锁定依赖的编译检查、Clippy 和 WASM 静态检查，不执行
+测试。
 Auction-BF 的行为迁移顺序记录在 [`docs/migration-plan.md`](docs/migration-plan.md)。

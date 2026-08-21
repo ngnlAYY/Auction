@@ -1,6 +1,6 @@
-# Worker configuration.
-
-# PostgreSQL is recommended for multi-process production. SQLite is supported
-# for local development and deliberately single-node deployments.
-database_url = "sqlite://./var/auction.db"
+# Worker 配置。
+secrets_file = "secrets.toml"
 log_filter = "info,auction=debug"
+
+[cache]
+backend = "disabled"
