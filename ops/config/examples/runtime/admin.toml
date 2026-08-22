@@ -1,0 +1,89 @@
+# Admin runtime 非敏感配置示例。
+#
+# runtime 文件的所有字段都支持省略；省略时使用应用模型的默认值。
+# 本文件不能放 database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥。
+# 生产部署请将文件置于受信任目录并设置为 0640，修改后需要重启 Admin 才会生效。
+
+# 可选：是否允许人工提前开放拍卖；省略时为 false。
+allow_manual_early_open = false
+
+# 可选区块：装备来源和远程读取边界；省略整个区块时使用默认限制。
+[equipment_source]
+# 可选：允许访问的远程主机名；启用 allowlist 时不能为空。
+allowed_hosts = []
+# 可选：允许访问的 URL 路径前缀；启用 allowlist 时不能为空。
+allowed_path_prefixes = []
+# 可选：是否启用主机和路径双重 allowlist；省略时关闭。
+allowlist_enabled = false
+# 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 1 MiB。
+maximum_response_bytes = 1048576
+# 可选：两次请求之间的最小间隔秒数，范围为 1 至 60；默认 1。
+minimum_request_interval_seconds = 1
+# 可选：外部请求超时秒数，范围为 1 至 30；默认 10。
+request_timeout_seconds = 10
+
+# 可选区块：Admin 监听器；省略整个区块时使用 TCP 127.0.0.1:8091。
+[listener]
+# 可选：TCP 监听地址；当前 Rust Admin 只支持 host:port，默认 127.0.0.1:8091。
+address = "127.0.0.1:8091"
+# 可选：Unix socket 用户组；当前 TCP 模式不使用，默认空字符串。
+group = ""
+# 可选：监听模式，当前只能填 tcp；省略时为 tcp。
+mode = "tcp"
+# 可选：Unix socket 运行目录；当前 TCP 模式不使用，默认 /run/hv-auction。
+runtime_directory = "/run/hv-auction"
+# 可选：Unix socket 路径；当前 TCP 模式不使用，默认空字符串。
+socket_path = ""
+
+# 可选区块：metrics 设置；省略整个区块时关闭导出。
+[metrics]
+# 可选：是否启用 metrics 导出；省略时关闭。
+enabled = false
+
+# 可选区块：HTTP 安全策略；省略整个区块时使用默认值。
+[security]
+# 可选：允许的精确 HTTP(S) origin 列表；启用 allowlist 时不能为空。
+allowed_origins = ["http://127.0.0.1:8091"]
+# 可选：是否启用 origin allowlist；省略时关闭。
+allowed_origins_enabled = true
+# 可选：登录请求在限流窗口内的最大次数，默认 10。
+login_rate_limit = 10
+# 可选：状态变更请求在限流窗口内的最大次数，默认 60。
+mutation_rate_limit = 60
+# 可选：限流窗口秒数，默认 60。
+rate_limit_window_seconds = 60
+# 可选：是否给浏览器 Cookie 设置 Secure；生产环境应为 true。
+cookie_secure = false
+
+# 可选区块：Admin 会话策略；省略整个区块时使用默认值。
+[session]
+# 可选：空闲过期秒数，默认 1800。
+idle_ttl_seconds = 1800
+# 可选：绝对过期秒数，默认 604800，不能小于空闲过期时间。
+absolute_ttl_seconds = 604800
+# 可选：单个公开用户允许的最大并发会话数，默认 5。
+max_public_sessions = 5
+
+# 可选区块：tracing 导出参数；省略整个区块时关闭导出。
+[tracing]
+# 可选：导出批次等待秒数，范围为 1 至 30；默认 1。
+batch_timeout_seconds = 1
+# 可选：是否启用 tracing 导出；省略时关闭。
+enabled = false
+# 可选：导出端点；关闭 tracing 时可留空，启用时必须是 HTTP(S) URL。
+endpoint = ""
+# 可选：单次导出超时秒数，范围为 1 至 30；默认 5。
+export_timeout_seconds = 5
+# 可选：单次导出的最大 span 数，范围为 1 至 512；默认 128。
+max_export_batch_size = 128
+# 可选：导出队列容量，范围为 1 至 4096；默认 256。
+queue_capacity = 256
+# 可选：采样比例，单位为百万分率，范围为 0 至 1000000；默认 0。
+sample_ratio_ppm = 0
+# 可选：进程关闭时等待导出完成的最大秒数，范围为 1 至 30；默认 5。
+shutdown_timeout_seconds = 5
+
+# 可选区块：Worker 控制面；省略整个区块时使用默认 socket 路径。
+[worker_control]
+# 可选：Worker 控制面 Unix socket 绝对路径；默认 /run/hv-auction/worker/control.sock。
+socket_path = "/run/hv-auction/worker/control.sock"

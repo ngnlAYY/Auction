@@ -1,6 +1,21 @@
-# Worker 配置。
+# Worker 配置示例。
+#
+# 除 secrets_file 外，以下字段和区块均可省略；省略时使用解析器提供的默认值。
+# SQLite Lite 档会强制 Worker 并发为 1。
+
+# 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
+# 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
+# 可选区块：缓存设置；省略整个区块等同于关闭缓存。
 [cache]
+# 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
+
+# 可选区块：Worker 调度策略；省略整个区块时并发默认为 1、轮询间隔默认为 5 秒。
+[worker]
+# 可选：Worker 并发数；必须大于 0，SQLite Lite 必须为 1。
+concurrency = 1
+# 可选：due 任务轮询间隔秒数；必须大于 0，默认 5。
+poll_interval_seconds = 5

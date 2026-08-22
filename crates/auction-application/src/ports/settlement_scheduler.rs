@@ -1,0 +1,50 @@
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use auction_domain::{AuctionId, CommandId};
+
+use super::ApplicationFuture;
+
+/// Worker 领取的一次持久化结算执行任务。
+///
+/// `settlement_command_id` 按 workflow 稳定派生；Worker 重启或租约过期后必须继续使用同一个
+/// 命令，而不是为同一拍卖创建新的结算事实。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettlementWorkClaim {
+    pub auction_id: AuctionId,
+    pub workflow_id: Uuid,
+    pub settlement_command_id: CommandId,
+    /// 仅补写结算完成 fence，不再次调用结算用例。
+    pub completion_only: bool,
+    pub worker_id: String,
+    pub lease_until: DateTime<Utc>,
+    pub attempt_count: u32,
+}
+
+/// 持久化结算调度端口。
+///
+/// 领取、租约、失败退避和完成标记必须由数据库字段决定。SQLite Lite 没有结算完整档的
+/// workflow 列，适配器应明确返回能力缺失；不能把结算计划改写成内存任务。
+pub trait SettlementWorkStore: Send + Sync {
+    fn claim_due(
+        &self,
+        worker_id: String,
+        now: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<SettlementWorkClaim>>;
+
+    fn complete(
+        &self,
+        claim: SettlementWorkClaim,
+        completed_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
+
+    fn fail(
+        &self,
+        claim: SettlementWorkClaim,
+        retry_at: DateTime<Utc>,
+        failure_code: String,
+        safe_detail: String,
+    ) -> ApplicationFuture<'_, ()>;
+}

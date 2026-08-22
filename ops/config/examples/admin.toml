@@ -1,7 +1,43 @@
-# Admin API 配置。
+# Admin API 配置示例。
+#
+# 除 secrets_file 外，以下字段和区块均可省略；省略时使用解析器或 runtime 文档的默认值。
+# 本文件只保存非敏感设置，真实数据库 URL、Redis URL、Cookie 和密钥必须放在敏感 TOML。
+
+# 可选：Admin HTTP 监听地址；省略时使用 127.0.0.1:8091。若提供 runtime 文件，runtime 的
+# listener.address 会覆盖此值。
 listen_address = "127.0.0.1:8091"
+# 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
+# 可选：Admin 非敏感 runtime TOML 路径；省略时不加载独立 runtime 文档。
+runtime_config_file = "runtime/admin.toml"
+# 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
+# 可选区块：缓存设置；省略整个区块等同于关闭缓存。
 [cache]
+# 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
+
+# 可选区块：HTTP 安全策略；存在 runtime 文件时由 runtime.security 覆盖。
+[http_security]
+# 可选：是否启用 origin allowlist；启用后 allowed_origins 不能为空。
+allowed_origins_enabled = true
+# 可选：允许的精确 HTTP(S) origin 列表，最多 16 项。
+allowed_origins = ["http://127.0.0.1:8091"]
+# 可选：登录请求在限流窗口内的最大次数，默认 10。
+login_rate_limit = 10
+# 可选：状态变更请求在限流窗口内的最大次数，默认 60。
+mutation_rate_limit = 60
+# 可选：限流窗口秒数，默认 60。
+rate_limit_window_seconds = 60
+# 可选：是否给浏览器 Cookie 设置 Secure；生产环境应为 true。
+cookie_secure = false
+
+# 可选区块：会话过期和并发策略；存在 runtime 文件时由 runtime.session 覆盖。
+[session]
+# 可选：空闲过期秒数，默认 1800。
+idle_ttl_seconds = 1800
+# 可选：绝对过期秒数，默认 604800，不能小于空闲过期时间。
+absolute_ttl_seconds = 604800
+# 可选：单个公开用户允许的最大并发会话数，默认 5。
+max_public_sessions = 5

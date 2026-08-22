@@ -1,0 +1,115 @@
+//! Admin 改名历史读取端口。
+//!
+//! 改名记录是追加式身份事实。这里仅暴露安全投影和有界分页，回滚命令另由后续写入切片
+//! 负责，避免把用户状态迁移拆成不完整的半套实现。
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use super::ApplicationFuture;
+
+/// Admin 改名历史允许的最大单页大小。
+pub const MAX_ADMIN_RENAME_PAGE_SIZE: i64 = 200;
+
+/// Admin 改名历史允许的最大偏移。
+pub const MAX_ADMIN_RENAME_OFFSET: i64 = 2_147_483_647;
+
+/// Admin 改名历史查询条件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminRenameListRequest {
+    pub user_id: Option<Uuid>,
+    pub name: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl AdminRenameListRequest {
+    /// 校验用户筛选、名称筛选和有界数字分页。
+    pub fn validate(&self) -> bool {
+        self.user_id.is_none_or(|id| !id.is_nil())
+            && valid_optional_text(self.name.as_deref(), 256)
+            && self.limit > 0
+            && self.limit <= MAX_ADMIN_RENAME_PAGE_SIZE
+            && self.offset >= 0
+            && self.offset <= MAX_ADMIN_RENAME_OFFSET
+    }
+}
+
+/// 改名历史的安全投影，不包含命令摘要或内部数据库字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminRenameRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub previous_username: String,
+    pub next_username: String,
+    pub actor: String,
+    pub created_at: DateTime<Utc>,
+    pub reverted_at: Option<DateTime<Utc>>,
+}
+
+impl AdminRenameRecord {
+    /// 校验追加式改名事实的身份、文本和时间边界。
+    pub fn validate(&self) -> bool {
+        !self.id.is_nil()
+            && !self.user_id.is_nil()
+            && valid_text(&self.previous_username, 256)
+            && valid_text(&self.next_username, 256)
+            && self.previous_username != self.next_username
+            && valid_text(&self.actor, 256)
+            && valid_time(self.created_at)
+            && self.reverted_at.is_none_or(|value| valid_time(value) && value >= self.created_at)
+    }
+}
+
+/// Admin 改名历史分页结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminRenamePage {
+    pub entries: Vec<AdminRenameRecord>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl AdminRenamePage {
+    /// 校验存储 owner 返回的分页形状、筛选命中和稳定排序。
+    pub fn validate(&self, request: &AdminRenameListRequest) -> bool {
+        request.validate()
+            && self.total >= 0
+            && self.limit == request.limit
+            && self.offset == request.offset
+            && self.entries.len() as i64 <= self.limit
+            && self.entries.iter().enumerate().all(|(index, entry)| {
+                entry.validate()
+                    && request.user_id.is_none_or(|user_id| entry.user_id == user_id)
+                    && request.name.as_deref().is_none_or(|name| {
+                        let needle = name.to_lowercase();
+                        entry.previous_username.to_lowercase().contains(&needle)
+                            || entry.next_username.to_lowercase().contains(&needle)
+                    })
+                    && self.entries.get(index + 1).is_none_or(|next| {
+                        entry.created_at > next.created_at
+                            || entry.created_at == next.created_at && entry.id > next.id
+                    })
+            })
+    }
+}
+
+/// Admin 改名历史读取端口。
+pub trait AdminRenameReader: Send + Sync {
+    fn list(&self, request: AdminRenameListRequest) -> ApplicationFuture<'_, AdminRenamePage>;
+}
+
+fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
+    value.is_none_or(|value| value.is_empty() || valid_text(value, maximum))
+}
+
+fn valid_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_time(value: DateTime<Utc>) -> bool {
+    value.timestamp_nanos_opt().is_some()
+}

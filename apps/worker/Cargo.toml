@@ -7,13 +7,19 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+auction-application.workspace = true
 auction-cache.workspace = true
 auction-config.workspace = true
 auction-jobs.workspace = true
 auction-observability.workspace = true
+auction-storage.workspace = true
+chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [features]
 default = []
 cache-redis = ["auction-cache/redis"]
+postgres = ["auction-storage/postgres"]
+sqlite = ["auction-storage/sqlite"]

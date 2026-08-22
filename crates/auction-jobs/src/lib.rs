@@ -1,8 +1,9 @@
-/// Worker lifecycle placeholder. The concrete scheduler will own durable
-/// cursors and retry state instead of relying on in-memory timers.
-pub async fn run_until_shutdown() -> std::io::Result<()> {
-    tracing::info!("auction worker started");
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("auction worker stopping");
-    Ok(())
-}
+//! Worker 任务编排的薄 crate 入口。
+
+mod worker;
+
+pub use worker::{
+    PersistentRealtimeConsumer, PersistentWorker, RealtimeConsumerConfigError,
+    RealtimeConsumerRunner, WorkerError, run_persistent_until_shutdown,
+    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+};

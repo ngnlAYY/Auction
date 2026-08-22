@@ -2,6 +2,8 @@
 
 稳定的对外契约：REST/流 DTO、错误编码、分页和版本约定。
 
+源码布局：`src/lib.rs` 只保留模块声明和公共导出；契约类型集中在 `src/contracts/mod.rs`。
+
 浏览器和外部客户端只能看到这里的类型。数据库记录和领域聚合都不得直接当作对外 DTO，
 转换在边界完成。
 
@@ -9,6 +11,8 @@
   `env!("CARGO_PKG_VERSION")` 只会得到契约 crate 自己的版本，而运维需要的是运行进程的版本。
   装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
+- `AdminForumPreviewRequest` 与 `AdminForumPreviewResponse`：管理端论坛内容预览契约；输入
+  只能选择一个非空的 HTML/文本字段，输出只包含安全的目录、帖子、命令和警告信息。
 
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde
 映射兼容外部旧命名。修改路由、状态码、JSON 字段或事件名时，必须同步更新对应文档。

@@ -74,6 +74,21 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 目录形状参考 `daeuniverse/honk` 的工作区、`crates/*` 拆分和根目录工程约定，但本项目只
 借鉴工程组织方式，不复制 Honk 的代理或 eBPF 业务模块。
 
+### src 子目录规则
+
+所有 apps/*/src 和 crates/*/src 都必须按职责使用清晰的子目录存放实现源码。
+根目录只保留必要的装配入口：二进制保留薄的 main.rs，库保留薄的 lib.rs；
+入口以外的实现文件不得平铺在 src/ 根目录。
+
+- 子目录名称使用领域职责或适配器职责，例如 domain/、ports/、services/、
+  storage/、http/、web/、bootstrap/，禁止使用 misc/、common/ 一类无法表达
+  owner 的兜底目录。
+- 每个职责目录必须有单一 owner；目录边界不能通过大而全的 mod.rs 或共享结构体绕开。
+- 只有一个实现文件的模块也要放进有意义的职责目录；该目录可以使用 mod.rs 作为入口。
+- crate 根的 lib.rs/main.rs 只负责模块声明、公开重导出、参数装配和进程生命周期；
+  领域规则、SQL、HTTP 处理器、Dioxus 组件和外部调用必须放在对应子目录。
+- 新增或移动源码时同步更新该 crate 的 README.md、架构 owner 和相关迁移阶段说明。
+
 ## 技术栈
 
 - **语言：** Rust 1.98.0 当前 stable，edition 2024；workspace MSRV 为 1.94.1。Rust 官方
@@ -173,7 +188,7 @@ apps/*
 
 任何修改拍卖写入、状态迁移、结算或后台任务的变更，都必须在代码或变更说明中写明它保
 护了哪些不变量。初始状态机位于
-[`crates/auction-domain/src/auction.rs`](crates/auction-domain/src/auction.rs)，它只是
+[`crates/auction-domain/src/auction/mod.rs`](crates/auction-domain/src/auction/mod.rs)，它只是
 第一片领域切片，不能视为完整竞价行为。
 
 以下不变量适用于 PostgreSQL 的完整能力，也适用于 SQLite Lite 已声明支持的对应能力。
@@ -182,8 +197,9 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 1. 每个可变命令都有稳定的 `command_id`。重复提交相同命令返回原结果；同一 ID 搭配不同
    负载必须报冲突。
 2. 竞价事务使用所选数据库后端的锁模型保护相关拍卖、标的和有效授权，校验资格与状态，
-   计算结果并原子写入。PostgreSQL 使用行锁；SQLite 使用明确的串行写事务。禁止先读价
-   格、再在另一个事务写入竞价。
+   计算结果并原子写入。PostgreSQL 竞价和关键生命周期写入使用 Serializable、最多 3 次
+   序列化冲突重试并配合明确行锁；队列领取等路径才可使用 Read Committed 加显式锁。
+   SQLite 使用明确的串行写事务。禁止先读价格、再在另一个事务写入竞价。
 3. 成功竞价必须在同一数据库事务中写入竞价事实、状态版本、审计事件和持久化事件/outbox
    记录。
 4. 论坛发帖、邮件、通知和其他外部写入发生在本地事务提交后；外部失败不能抹掉已接受的
@@ -258,13 +274,15 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 
 ## 配置规则
 
-- 所有运行时配置文件必须是 TOML，示例位于 `ops/config/examples/`。
+- 所有运行时配置文件必须是 TOML，主/敏感配置示例位于 `ops/config/examples/`，Admin runtime
+  配置示例集中在 `ops/config/examples/runtime/`。
 - `AUCTION_CONFIG_FILE` 只能选择配置文件；单个配置项不能通过环境变量覆盖，业务模块也
   不能自行读取环境变量。
 - 主配置只允许放监听地址、日志过滤器、缓存非敏感策略等普通设置，并通过必填的
   `secrets_file` 引用敏感 TOML。相对路径以主配置文件所在目录解析。
-- `database_url`、`redis_url`、论坛/邮件 Cookie 和 `session_signing_key` 只能放在敏感
-  TOML；这些字段不在主配置中提供兼容入口，也不能通过环境变量覆盖。
+- `database_url`、`redis_url`、论坛/邮件 Cookie、`session_signing_key`、`admin_actor` 和
+  `admin_secret` 只能放在敏感 TOML；这些字段不在主配置中提供兼容入口，也不能通过环境变量
+  覆盖。Admin 凭据必须成对配置，secret 至少 16 字节。
 - 敏感文件不得提交，部署时应限制为仅运行账号可读。配置错误和日志不得回显连接串、
   Cookie、密钥或包含这些内容的 TOML 原文。
 - 敏感文件中的 `database_url` 支持 `postgres://`、`postgresql://` 和 `sqlite:`，并直接
@@ -338,12 +356,14 @@ just
 
 # 默认静态验证
 just fmt
+just layout-check
 just check
 just lint
 just verify
 
 # 等价的直接命令
 cargo fmt --all -- --check
+just layout-check
 cargo check --locked --workspace --all-targets
 cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
 cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite

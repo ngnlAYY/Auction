@@ -9,6 +9,11 @@ publish.workspace = true
 auction-web-shared.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 dioxus-i18n.workspace = true
+gloo-net.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 unic-langid.workspace = true
 # 补齐 dioxus-web 0.7.10 漏声明的 web-sys `Location` feature，详见根 Cargo.toml 说明。
 web-sys.workspace = true
+uuid.workspace = true
+url.workspace = true

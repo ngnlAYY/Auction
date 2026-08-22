@@ -1,0 +1,281 @@
+//! PostgreSQL Admin 结算报告读取适配器。
+//!
+//! 报告只读取已经提交的拍卖结算事实、lot 结算金额和补偿账本；它不重新计算结算计划，
+//! 也不把 SQLite Lite 的空结果伪装成完整档能力。
+
+use auction_application::{
+    ApplicationError, ApplicationFuture, SettlementReport, SettlementReportReader,
+};
+use auction_domain::AuctionId;
+
+#[cfg(feature = "postgres")]
+use auction_application::{
+    SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementSummary,
+};
+
+use super::DatabaseStore;
+
+impl SettlementReportReader for DatabaseStore {
+    fn settlement_report(
+        &self,
+        auction_id: AuctionId,
+    ) -> ApplicationFuture<'_, Option<SettlementReport>> {
+        Box::pin(async move {
+            if auction_id.is_nil() {
+                return Err(storage_error("结算报告拍卖标识无效"));
+            }
+
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => postgres_report(store, auction_id).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    Err(ApplicationError::CapabilityUnavailable("结算报告仅支持 PostgreSQL 完整档"))
+                }
+            }
+        })
+    }
+}
+
+#[cfg(feature = "postgres")]
+async fn postgres_report(
+    store: &super::PostgresStore,
+    auction_id: AuctionId,
+) -> Result<Option<SettlementReport>, ApplicationError> {
+    use chrono::{DateTime, Utc};
+    use sqlx::Row;
+    use uuid::Uuid;
+
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("打开结算报告快照失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置结算报告快照失败"))?;
+
+    let row = sqlx::query(
+        r#"SELECT
+               a.id AS auction_id,
+               a.world_id,
+               a.sequence,
+               a.status,
+               a.preview_scheduled_at,
+               a.scheduled_open_at,
+               a.preview_opened_at,
+               a.preview_manual_open,
+               a.preview_revision,
+               a.opened_at,
+               a.final_phase_at,
+               a.settled_at,
+               a.cancelled_at,
+               a.cancelled_reason,
+               a.cancelled_by,
+               a.state_version,
+               a.scheduled_end_at,
+               a.effective_end_at,
+               a.created_at,
+               a.updated_at,
+               s.auction_id AS settlement_auction_id,
+               s.opening_pool_balance,
+               s.tax_total,
+               s.discount_demand,
+               s.compensation_total,
+               s.closing_pool_balance,
+               s.settled_at AS settlement_settled_at,
+               (
+                   SELECT COUNT(*)::bigint
+                   FROM public.compensation_ledger AS ledger
+                   WHERE ledger.auction_id = a.id
+               ) AS movement_count
+           FROM public.auctions AS a
+           LEFT JOIN public.auction_settlements AS s ON s.auction_id = a.id
+           WHERE a.id = $1"#,
+    )
+    .bind(auction_id.as_uuid())
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("读取结算报告拍卖失败"))?;
+
+    let Some(row) = row else {
+        transaction.commit().await.map_err(|_| storage_error("提交结算报告快照失败"))?;
+        return Ok(None);
+    };
+
+    let stored_auction_id: Uuid =
+        row.try_get("auction_id").map_err(|_| storage_error("读取结算报告拍卖标识失败"))?;
+    if stored_auction_id != auction_id.as_uuid() {
+        return Err(storage_error("结算报告拍卖标识与请求不一致"));
+    }
+
+    let settlement_id: Option<Uuid> = row
+        .try_get("settlement_auction_id")
+        .map_err(|_| storage_error("读取结算报告结算标识失败"))?;
+    let settlement = match settlement_id {
+        None => None,
+        Some(value) if value == stored_auction_id => {
+            let settled_at: DateTime<Utc> = row
+                .try_get("settlement_settled_at")
+                .map_err(|_| storage_error("读取结算报告完成时间失败"))?;
+            Some(SettlementSummary {
+                opening_balance: row
+                    .try_get("opening_pool_balance")
+                    .map_err(|_| storage_error("读取结算报告期初余额失败"))?,
+                tax_income: row
+                    .try_get("tax_total")
+                    .map_err(|_| storage_error("读取结算报告税收失败"))?,
+                discount_demand: row
+                    .try_get("discount_demand")
+                    .map_err(|_| storage_error("读取结算报告折扣需求失败"))?,
+                compensation_out: row
+                    .try_get("compensation_total")
+                    .map_err(|_| storage_error("读取结算报告补偿支出失败"))?,
+                closing_balance: row
+                    .try_get("closing_pool_balance")
+                    .map_err(|_| storage_error("读取结算报告期末余额失败"))?,
+                movement_count: row
+                    .try_get("movement_count")
+                    .map_err(|_| storage_error("读取结算报告账本笔数失败"))?,
+                settled_at,
+            })
+        }
+        Some(_) => return Err(storage_error("结算报告结算标识与拍卖不一致")),
+    };
+
+    let lots = if settlement.is_some() {
+        let rows = sqlx::query(
+            r#"SELECT
+                   l.id,
+                   l.lot_number,
+                   l.status,
+                   equipment.name AS equipment_name,
+                   submission.seller,
+                   winner.username AS winner,
+                   COALESCE(settlement.end_price, 0) AS final_price,
+                   COALESCE(settlement.buyer_amount, 0) AS buyer_amount,
+                   COALESCE(settlement.seller_amount, 0) AS seller_amount,
+                   COALESCE(settlement.tax_amount, 0) AS tax_amount,
+                   COALESCE(settlement.compensation_amount, 0) AS compensation_amount,
+                   settlement.adjustment_metadata ->> 'policy' AS adjustment_policy
+               FROM public.lots AS l
+               INNER JOIN public.equipment AS equipment ON equipment.id = l.equipment_id
+               LEFT JOIN public.auction_submissions AS submission
+                   ON submission.id = l.submission_id
+               LEFT JOIN public.users AS winner ON winner.id = l.leader_user_id
+               LEFT JOIN public.lot_settlements AS settlement ON settlement.lot_id = l.id
+               WHERE l.auction_id = $1
+               ORDER BY l.lot_number, l.id"#,
+        )
+        .bind(stored_auction_id)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("读取结算报告 lot 失败"))?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(SettlementLotReport {
+                    id: auction_domain::LotId::from_uuid(
+                        row.try_get("id").map_err(|_| storage_error("读取结算 lot 标识失败"))?,
+                    ),
+                    lot_number: row
+                        .try_get("lot_number")
+                        .map_err(|_| storage_error("读取结算 lot 序号失败"))?,
+                    status: row
+                        .try_get("status")
+                        .map_err(|_| storage_error("读取结算 lot 状态失败"))?,
+                    equipment_name: row
+                        .try_get("equipment_name")
+                        .map_err(|_| storage_error("读取结算装备名称失败"))?,
+                    seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
+                    winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
+                    final_price: row
+                        .try_get("final_price")
+                        .map_err(|_| storage_error("读取结算成交金额失败"))?,
+                    buyer_amount: row
+                        .try_get("buyer_amount")
+                        .map_err(|_| storage_error("读取结算买方金额失败"))?,
+                    seller_amount: row
+                        .try_get("seller_amount")
+                        .map_err(|_| storage_error("读取结算卖方金额失败"))?,
+                    tax_amount: row
+                        .try_get("tax_amount")
+                        .map_err(|_| storage_error("读取结算税额失败"))?,
+                    compensation_amount: row
+                        .try_get("compensation_amount")
+                        .map_err(|_| storage_error("读取结算补偿金额失败"))?,
+                    adjustment: SettlementAdjustment {
+                        policy: row
+                            .try_get("adjustment_policy")
+                            .map_err(|_| storage_error("读取结算 adjustment 失败"))?,
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?
+    } else {
+        Vec::new()
+    };
+
+    transaction.commit().await.map_err(|_| storage_error("提交结算报告快照失败"))?;
+
+    Ok(Some(SettlementReport {
+        auction: SettlementAuctionSnapshot {
+            id: auction_id,
+            world_id: row.try_get("world_id").map_err(|_| storage_error("读取结算报告世界失败"))?,
+            sequence: row.try_get("sequence").map_err(|_| storage_error("读取结算报告序号失败"))?,
+            status: row.try_get("status").map_err(|_| storage_error("读取结算报告状态失败"))?,
+            preview_scheduled_at: row
+                .try_get("preview_scheduled_at")
+                .map_err(|_| storage_error("读取结算报告预览时间失败"))?,
+            scheduled_open_at: row
+                .try_get("scheduled_open_at")
+                .map_err(|_| storage_error("读取结算报告开拍时间失败"))?,
+            preview_opened_at: row
+                .try_get("preview_opened_at")
+                .map_err(|_| storage_error("读取结算报告预览开放时间失败"))?,
+            preview_manual_open: row
+                .try_get("preview_manual_open")
+                .map_err(|_| storage_error("读取结算报告预览方式失败"))?,
+            preview_revision: row
+                .try_get("preview_revision")
+                .map_err(|_| storage_error("读取结算报告预览版本失败"))?,
+            opened_at: row
+                .try_get("opened_at")
+                .map_err(|_| storage_error("读取结算报告开放时间失败"))?,
+            final_phase_at: row
+                .try_get("final_phase_at")
+                .map_err(|_| storage_error("读取结算报告终阶段时间失败"))?,
+            settled_at: row
+                .try_get("settled_at")
+                .map_err(|_| storage_error("读取结算报告拍卖结算时间失败"))?,
+            cancelled_at: row
+                .try_get("cancelled_at")
+                .map_err(|_| storage_error("读取结算报告取消时间失败"))?,
+            cancelled_reason: row
+                .try_get("cancelled_reason")
+                .map_err(|_| storage_error("读取结算报告取消原因失败"))?,
+            cancelled_by: row
+                .try_get("cancelled_by")
+                .map_err(|_| storage_error("读取结算报告取消人失败"))?,
+            state_version: row
+                .try_get("state_version")
+                .map_err(|_| storage_error("读取结算报告状态版本失败"))?,
+            scheduled_end_at: row
+                .try_get("scheduled_end_at")
+                .map_err(|_| storage_error("读取结算报告名义结束时间失败"))?,
+            effective_end_at: row
+                .try_get("effective_end_at")
+                .map_err(|_| storage_error("读取结算报告有效结束时间失败"))?,
+            created_at: row
+                .try_get("created_at")
+                .map_err(|_| storage_error("读取结算报告创建时间失败"))?,
+            updated_at: row
+                .try_get("updated_at")
+                .map_err(|_| storage_error("读取结算报告更新时间失败"))?,
+        },
+        settlement,
+        lots,
+    }))
+}
+
+fn storage_error(message: &str) -> ApplicationError {
+    ApplicationError::Repository(auction_application::RepositoryError::Failed(message.to_owned()))
+}

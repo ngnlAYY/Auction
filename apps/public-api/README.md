@@ -2,7 +2,10 @@
 
 公开端进程装配根。
 
-职责仅限于：加载配置、初始化 tracing、装配缓存、绑定监听器、挂载
+源码布局：src/main.rs 只负责 Tokio 入口，src/bootstrap/mod.rs 负责配置、缓存、监听器和
+路由装配。
+
+职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、绑定监听器、挂载
 `auction_http::public_router()`、优雅关闭和退出码。**业务逻辑不属于这里。**
 
 默认监听 `127.0.0.1:8090`。
@@ -26,6 +29,8 @@ just web-build-public
 ## Cargo feature
 
 - `cache-redis`：编译 Redis 缓存客户端。仅在配置里填 `redis_url` 不会引入该依赖。
+- `postgres` / `sqlite`：分别编译对应数据库适配器；数据库 URL 的 scheme 必须与制品 feature
+  一致。未编译数据库 feature 时，含 `database_url` 的配置会在启动装配阶段明确失败。
 
 ## 边界约束
 

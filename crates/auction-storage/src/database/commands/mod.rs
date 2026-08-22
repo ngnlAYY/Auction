@@ -1,0 +1,251 @@
+//! 由数据库后端承载的应用命令组合器。
+//!
+//! 该层只负责把运行时选择的后端接到应用窄端口；竞价规则和事务步骤仍由应用层与各后端
+//! 事务适配器拥有。
+
+use std::sync::Arc;
+
+use auction_application::{
+    AdminAuctionCreatePort, AdminAuctionSummary, AdminCreateAuctionCommand, AdminRulesDocument,
+    AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
+    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
+    AuctionLifecycleResult, AuctionLifecycleService, Clock, CompetitionCommandPort,
+    CompetitionService, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
+};
+#[cfg(feature = "postgres")]
+use auction_application::{AdminAuctionCreateService, AdminRulesService};
+use auction_domain::CompetitionPlan;
+
+use super::DatabaseStore;
+
+mod admin_intake;
+pub use admin_intake::DatabaseAdminIntakeCommands;
+mod admin_mail;
+pub use admin_mail::DatabaseAdminMailCommands;
+mod admin_lot;
+pub use admin_lot::DatabaseAdminLotCommands;
+mod admin_runtime;
+pub use admin_runtime::DatabaseAdminRuntimeCommands;
+
+/// 绑定运行时数据库和时钟的 Public 竞价命令端口。
+pub struct DatabaseCompetitionCommands<C> {
+    store: Arc<DatabaseStore>,
+    clock: Arc<C>,
+}
+
+impl<C> DatabaseCompetitionCommands<C>
+where
+    C: Clock + 'static,
+{
+    /// 建立不向 HTTP 暴露具体数据库类型的命令端口。
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
+        Self { store, clock }
+    }
+}
+
+impl<C> CompetitionCommandPort for DatabaseCompetitionCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn place_bid(&self, command: PlaceBidCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        let _ = (&command, &clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.place_bid(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.place_bid(command).await
+                }
+            }
+        })
+    }
+
+    fn create_proxy(&self, command: CreateProxyCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.create_proxy(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.create_proxy(command).await
+                }
+            }
+        })
+    }
+
+    fn lower_proxy(&self, command: LowerProxyCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.lower_proxy(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.lower_proxy(command).await
+                }
+            }
+        })
+    }
+}
+
+/// 绑定运行时数据库和时钟的 Admin/Worker 生命周期命令端口。
+pub struct DatabaseAuctionLifecycleCommands<C> {
+    store: Arc<DatabaseStore>,
+    clock: Arc<C>,
+}
+
+impl<C> DatabaseAuctionLifecycleCommands<C>
+where
+    C: Clock + 'static,
+{
+    /// 建立不向 HTTP 暴露具体数据库类型的生命周期命令端口。
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
+        Self { store, clock }
+    }
+}
+
+impl<C> AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn execute(
+        &self,
+        command: AuctionLifecycleCommand,
+    ) -> ApplicationFuture<'_, AuctionLifecycleResult> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AuctionLifecycleService::new(Arc::new(store.clone()), clock);
+                    service.execute(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    let service = AuctionLifecycleService::new(Arc::new(store.clone()), clock);
+                    service.execute(command).await
+                }
+            }
+        })
+    }
+}
+
+/// 绑定运行时数据库和时钟的 Admin 创建拍卖命令端口。
+///
+/// 创建拍卖依赖 PostgreSQL 完整档的 intake target、策略快照、审计和 realtime 事务；SQLite
+/// Lite 保持显式能力缺失，不把 draft 写入伪装成完整迁移。
+pub struct DatabaseAdminAuctionCommands<C> {
+    store: Arc<DatabaseStore>,
+    clock: Arc<C>,
+}
+
+/// 绑定运行时数据库和时钟的 Admin 规则读取/发布端口。
+///
+/// 规则读取在 PostgreSQL 与 SQLite Lite 均可用；版本发布依赖 PostgreSQL 完整档的规则命令
+/// 账本、Serializable CAS、审计和重放语义，Lite 明确返回能力缺失。
+pub struct DatabaseAdminRulesCommands<C> {
+    store: Arc<DatabaseStore>,
+    clock: Arc<C>,
+}
+
+impl<C> DatabaseAdminRulesCommands<C>
+where
+    C: Clock + 'static,
+{
+    /// 建立不向 HTTP 暴露具体数据库类型的规则端口。
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
+        Self { store, clock }
+    }
+}
+
+impl<C> AdminRulesPort for DatabaseAdminRulesCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn get(&self, request: AdminRulesRequest) -> ApplicationFuture<'_, Option<AdminRulesDocument>> {
+        let store = Arc::clone(&self.store);
+        Box::pin(async move { AdminRulesReader::get_admin_rules(store.as_ref(), request).await })
+    }
+
+    fn publish(
+        &self,
+        command: AdminRulesPublishCommand,
+    ) -> ApplicationFuture<'_, AdminRulesDocument> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        let _ = (&command, &clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AdminRulesService::new(Arc::new(store.clone()), clock);
+                    service.publish(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    Err(auction_application::ApplicationError::CapabilityUnavailable(
+                        "Admin 规则发布仅支持 PostgreSQL 完整档",
+                    ))
+                }
+            }
+        })
+    }
+}
+
+impl<C> DatabaseAdminAuctionCommands<C>
+where
+    C: Clock + 'static,
+{
+    /// 建立不向 HTTP 暴露具体数据库类型的创建命令端口。
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
+        Self { store, clock }
+    }
+}
+
+impl<C> AdminAuctionCreatePort for DatabaseAdminAuctionCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn create(
+        &self,
+        command: AdminCreateAuctionCommand,
+    ) -> ApplicationFuture<'_, AdminAuctionSummary> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        let _ = (&command, &clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AdminAuctionCreateService::new(Arc::new(store.clone()), clock);
+                    service.create(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    Err(auction_application::ApplicationError::CapabilityUnavailable(
+                        "Admin 创建拍卖仅支持 PostgreSQL 完整档",
+                    ))
+                }
+            }
+        })
+    }
+}

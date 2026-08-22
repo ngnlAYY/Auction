@@ -1,25 +1,12 @@
-use thiserror::Error;
-use tracing_subscriber::EnvFilter;
+//! 可观测性装配的薄 crate 入口。
 
-#[derive(Debug, Error)]
-#[error("failed to initialize tracing subscriber: {message}")]
-pub struct InitError {
-    message: String,
-}
+mod health;
+mod telemetry;
 
-pub fn init(service: &str, configured_filter: Option<&str>) -> Result<(), InitError> {
-    let filter = match configured_filter {
-        Some(value) => {
-            EnvFilter::try_new(value).map_err(|error| InitError { message: error.to_string() })?
-        }
-        None => EnvFilter::new(format!("info,{service}=debug")),
-    };
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .json()
-        .try_init()
-        .map_err(|error| InitError { message: error.to_string() })?;
-
-    Ok(())
-}
+pub use health::{
+    AdminDashboardSnapshot, DashboardSection, DashboardStatus, HealthError, HealthFuture,
+    HealthReader, HealthService, HealthSummary, Heartbeat, HeartbeatCommand, HeartbeatPublisher,
+    HeartbeatStatus, HeartbeatStore, ProcessRole, ProcessSnapshot, ProcessState, ServiceName,
+    TracingHealth, TracingStatus,
+};
+pub use telemetry::{InitError, init};
