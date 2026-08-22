@@ -233,7 +233,10 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             "/api/v1/admin/mail/polling",
             put(admin_mail::set_paused).layer(DefaultBodyLimit::max(4 << 10)),
         )
-        .route("/api/v1/admin/mail/polls:trigger", post(not_migrated))
+        .route(
+            "/api/v1/admin/mail/polls:trigger",
+            post(admin_mail::trigger_poll).layer(DefaultBodyLimit::max(4 << 10)),
+        )
         .route("/api/v1/admin/realtime/lag", get(realtime_admin::list_lag))
         .route("/api/v1/admin/realtime/failures", get(realtime_admin::list_failures))
         .route("/api/v1/admin/realtime/failures/{failure_id}", get(realtime_admin::get_failure))

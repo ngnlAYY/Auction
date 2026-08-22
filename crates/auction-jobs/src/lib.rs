@@ -3,7 +3,9 @@
 mod worker;
 
 pub use worker::{
-    PersistentRealtimeConsumer, PersistentWorker, RealtimeConsumerConfigError,
-    RealtimeConsumerRunner, WorkerError, run_persistent_until_shutdown,
-    run_persistent_with_settlement_until_shutdown, run_until_shutdown,
+    MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
+    MailPollPage, MailPollRuntime, PersistentRealtimeConsumer, PersistentWorker,
+    RealtimeConsumerConfigError, RealtimeConsumerRunner, WorkerError,
+    run_persistent_until_shutdown, run_persistent_with_settlement_until_shutdown,
+    run_until_shutdown,
 };

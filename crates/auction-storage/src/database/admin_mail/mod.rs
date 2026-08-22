@@ -13,10 +13,10 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
-    AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollingCommand,
-    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
-    AdminMailTransactionFailure, AdminMailTransactionRunner, RequestHash, TransactionFuture,
-    TransactionIsolation, TransactionPolicy,
+    AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollTriggerCommand,
+    AdminMailPollingCommand, AdminMailStoredCommand, AdminMailTransaction,
+    AdminMailTransactionError, AdminMailTransactionFailure, AdminMailTransactionRunner,
+    RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
 };
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
@@ -240,6 +240,7 @@ impl AdminMailTransaction for PostgresMailTransaction {
                 "UPDATE public.mail_poll_state
                  SET paused = $1, state_version = state_version + 1, updated_at = $2
                  WHERE mailbox_key = $3 AND state_version = $4
+                       AND (claim_expires_at IS NULL OR claim_expires_at <= $2)
                  RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
                            consecutive_failures, paused, state_version, updated_at",
             )
@@ -250,6 +251,65 @@ impl AdminMailTransaction for PostgresMailTransaction {
             .fetch_optional(&mut **self.transaction_mut()?)
             .await
             .map_err(map_sql_error)?;
+            let Some(row) = row else {
+                let current = sqlx::query_scalar::<_, i64>(
+                    "SELECT state_version FROM public.mail_poll_state WHERE mailbox_key = $1",
+                )
+                .bind(&command.mailbox_key)
+                .fetch_optional(&mut **self.transaction_mut()?)
+                .await
+                .map_err(map_sql_error)?;
+                return match current {
+                    Some(current_state_version) => {
+                        Err(AdminMailTransactionError::StateConflict { current_state_version })
+                    }
+                    None => Err(AdminMailTransactionError::NotFound),
+                };
+            };
+            map_poll_state(row)
+        }
+    }
+
+    fn trigger_poll(
+        &mut self,
+        command: AdminMailPollTriggerCommand,
+        triggered_at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send {
+        async move {
+            let row = if command.expected_state_version == 0 {
+                sqlx::query(
+                    "INSERT INTO public.mail_poll_state
+                        (mailbox_key, cursor_value, last_poll_at, next_poll_at,
+                         consecutive_failures, paused, state_version, updated_at)
+                     SELECT $1, NULL, $2, $2, 0, false, 1, $2
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM public.mail_poll_state WHERE mailbox_key = $1
+                     )
+                     RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
+                               consecutive_failures, paused, state_version, updated_at",
+                )
+                .bind(&command.mailbox_key)
+                .bind(triggered_at)
+                .fetch_optional(&mut **self.transaction_mut()?)
+                .await
+                .map_err(map_sql_error)?
+            } else {
+                sqlx::query(
+                    "UPDATE public.mail_poll_state
+                     SET next_poll_at = GREATEST(last_poll_at, $1),
+                         state_version = state_version + 1, updated_at = $1
+                     WHERE mailbox_key = $2 AND state_version = $3
+                       AND (claim_expires_at IS NULL OR claim_expires_at <= $1)
+                     RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
+                               consecutive_failures, paused, state_version, updated_at",
+                )
+                .bind(triggered_at)
+                .bind(&command.mailbox_key)
+                .bind(command.expected_state_version)
+                .fetch_optional(&mut **self.transaction_mut()?)
+                .await
+                .map_err(map_sql_error)?
+            };
             let Some(row) = row else {
                 let current = sqlx::query_scalar::<_, i64>(
                     "SELECT state_version FROM public.mail_poll_state WHERE mailbox_key = $1",
@@ -286,6 +346,37 @@ impl AdminMailTransaction for PostgresMailTransaction {
                     (id, actor_type, actor_id, action, entity_type, entity_id, result,
                      request_id, source, metadata)
                  VALUES ($1, 'admin', $2, 'mail.set_polling_paused', 'mail_poll_state', $3,
+                         'success', $4, 'admin', $5)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(command.actor_id)
+            .bind(command.mailbox_key)
+            .bind(command.request_id)
+            .bind(Json(metadata))
+            .execute(&mut **self.transaction_mut()?)
+            .await
+            .map_err(map_sql_error)?;
+            Ok(())
+        }
+    }
+
+    fn append_trigger_record(
+        &mut self,
+        command: AdminMailPollTriggerCommand,
+        result: AdminMailPollState,
+    ) -> impl Future<Output = Result<(), AdminMailTransactionError>> + Send {
+        async move {
+            let metadata = serde_json::json!({
+                "command_id": command.command_id.as_uuid(),
+                "mailbox_key": result.mailbox_key,
+                "next_poll_at": result.next_poll_at,
+                "state_version": result.state_version,
+            });
+            sqlx::query(
+                "INSERT INTO public.audit_records
+                    (id, actor_type, actor_id, action, entity_type, entity_id, result,
+                     request_id, source, metadata)
+                 VALUES ($1, 'admin', $2, 'mail.trigger_poll', 'mail_poll_state', $3,
                          'success', $4, 'admin', $5)",
             )
             .bind(Uuid::new_v4())

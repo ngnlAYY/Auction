@@ -138,6 +138,16 @@ pub struct AdminMailPollingRequest {
     pub expected_state_version: i64,
 }
 
+/// Admin 立即触发一次邮箱轮询的请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminMailPollTriggerRequest {
+    pub command_id: Uuid,
+    pub mailbox_key: String,
+    /// 首次触发可使用 0 建立轮询状态；之后必须携带读取到的版本。
+    pub expected_state_version: i64,
+}
+
 /// Admin 邮件轮询状态安全响应；不包含外部 Cookie 或原始游标。
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminMailPollingResponse {

@@ -19,3 +19,22 @@ backend = "disabled"
 concurrency = 1
 # 可选：due 任务轮询间隔秒数；必须大于 0，默认 5。
 poll_interval_seconds = 5
+
+# 可选区块：MoogleMail 入站轮询；默认关闭。启用后只在 PostgreSQL 完整档发送远程 GET。
+[worker.mooglemail]
+# 可选：是否启用 MoogleMail Worker；默认 false，避免配置不完整时触发外部请求。
+enabled = false
+# 可选：持久化邮箱标识；默认 mooglemail:main。
+mailbox_key = "mooglemail:main"
+# 可选：游戏世界，只能是 main 或 isekai；默认 main。
+world_id = "main"
+# 可选：`.keyenv` 路径；相对本文件解析。启用时与敏感 mooglemail_cookie 二选一。
+keyenv_file = "../../../.keyenv"
+# 可选：单次读取上限，范围 1-1000，默认 100。
+batch_size = 100
+# 可选：单次有界读取的最大页数，范围 1-100，默认 20。
+maximum_pages = 20
+# 可选：发件人 allowlist；留空且不关闭 allowlist 时不会读取任何详情。
+sender_allowlist = []
+# 可选：明确设为 true 才读取所有发件人详情；生产环境应保持 false。
+sender_allowlist_disabled = false

@@ -252,18 +252,30 @@ workflow 字段的结算 due claim、稳定结算命令、完成 fence 和指数
 `SettlementCommandPort` 的 Serializable 事务；SQLite Lite 明确不启用该完整档 workflow。
 结算后的履约在 PostgreSQL 已接入持久化 claim/fencing、稳定的 delivery/prepare/activation
 身份，以及 `pending → prepared → enqueued` 的履约状态推进；`deliveries` outbox 也已接入
-持久化领取、发送中 fencing、成功、失败和 `manual_reconcile` 终态边界。外部传输端口已经
-定义，但 Worker 当前尚未装配 MoogleMail 传输实现，因此不会发出外部请求。实时消费的
+持久化领取、发送中 fencing、成功、失败和 `manual_reconcile` 终态边界。MoogleMail 入站
+读取适配器已经完成固定 endpoint、无重定向 GET、响应边界、分页 cursor、allowlist-first
+详情读取和严格 HTML/脚本/附件解析；PostgreSQL `000008_mooglemail_polling` 迁移与
+`MailPollStore` 又接入了 due claim、lease/fencing、连续失败退避，以及
+`inbound_mail`、`mail_commands` 和 cursor 的同事务幂等提交。Worker 通过
+`[worker.mooglemail]` 显式启用后装配该读取适配器，凭据仍来自固定 `.keyenv` 或敏感配置，
+只把安全摘要写入数据库；当前首片的结果状态为 `parsed_pending_processing`，尚未把邮件转换为
+拍卖、交付、注册或重绑等业务写入，也没有接入 DeliveryTransport。MoogleMail 写入协议层已
+补齐 compose/detail typed target、表单闭集、单次 POST、`write_unknown` 不确定性分类以及
+附件/COD/发送成功页证明；`MoogleMailSender` 已把这些步骤编排为高层发送流程，但只接受已
+解析的远端装备 ID。结算 delivery payload 仍缺消息模板、外部装备 ID/key 解析 owner，
+因此不能把协议层完成误报为已经发送；回执对账也尚未实现。实时消费的
 PostgreSQL/SQLite 游标、失败记录、连续序号确认和显式 replay 边界已经接入应用端口、存储
 适配器及现有 Worker 循环；由于外部广播协议尚未冻结，装配根暂不注入 sink，不会伪造远程
-转发成功。论坛回帖游标、邮件轮询游标、远程协议映射、回执/对账与 recovery 履约仍未接入，
-不能把当前 Worker 首片视为完整后台行为。A05 已先落地为纯本地论坛预览解析：HTML/文本输入
+转发成功。论坛回帖游标、邮件业务处理、MoogleMail DeliveryTransport 接入、回执/对账与 recovery 履约仍未
+接入，不能把当前 Worker 首片视为完整后台行为。A05 已先落地为纯本地论坛预览解析：HTML/文本输入
 在 2 MiB 边界内解析为 catalog、posts、warnings，不打开远程发布或数据库写入；论坛回帖、
 同步游标和远程回执仍需后续 Worker/外部协议阶段。
 
-**凭据通道：** 论坛与邮件 Cookie 只能来自 `auction-config` 的
-`ehentai_cookie()` / `mooglemail_cookie()` getter。**不新增任何其他凭据加载路径**
-（包括 `.keyenv` 一类文件）——`SecretString` 的脱敏与校验是唯一入口。
+**凭据通道：** 生产论坛与邮件 Cookie 继续只能来自 `auction-config` 的
+`ehentai_cookie()` / `mooglemail_cookie()` getter。根据本次明确授权，MoogleMail 本地联调
+额外允许 `auction-config::load_mooglemail_keyenv` 读取 `.keyenv` 的两个固定键：
+`hv-ck-key1`（Bot）和 `hv-ck-key2`（测试号）。该入口只允许 owner-only 文件权限和固定键闭集，
+不构成通用环境变量覆盖；值仍由 `SecretString` 脱敏，不能进入日志、DTO、快照或提交内容。
 
 ---
 
@@ -433,9 +445,13 @@ A16-A19 Admin 邮件首片已接入：`GET /api/v1/admin/mail` 返回指定邮�
 邮件页面已接入轮询状态和入站审查表格，五种语言文案均已同步。SQLite Lite 没有该完整邮件
 能力所需的表和外部协议，相关接口明确返回 `501 feature_not_supported`。
 
-A20 `/api/v1/admin/mail/polls:trigger` 仍保持 `feature_not_migrated`：Worker 调度 owner、
-MoogleMail 远程触发协议、幂等回执和失败重试边界尚未冻结，本次没有发送外部请求，也没有把
-本地状态读取误报成远程轮询成功。邮件状态/审查首片因此不等于完整邮件生命周期迁移。
+A20 `/api/v1/admin/mail/polls:trigger` 已接入 Admin session、CSRF、`command_id` 命令账本和
+`expected_state_version` fence；PostgreSQL 中它只负责幂等地推进下一次轮询时间并返回 `202`
+状态，不会把排队动作误报成已完成远程读取。Worker 随后通过持久化 lease、失败次数和退避
+执行实际 MoogleMail GET，外部读取结果再以安全入站事实提交；SQLite Lite 仍明确返回
+`501 feature_not_supported`。A20 以及邮件状态/审查首片仍不等于完整邮件生命周期迁移；业务
+处理、DeliveryTransport 装配、回执对账和 recovery 仍待后续阶段。MoogleMail 协议层虽已具备
+受限写入和结果证明能力，但不拥有业务模板、外部装备密钥解析或 delivery payload 生成职责。
 
 A26/A27 Admin runtime 配置首片已接入：`auction-application` 的严格非敏感文档模型、稳定
 fingerprint、版本化 request hash、pending/applied/unknown 恢复服务和窄端口已落地；

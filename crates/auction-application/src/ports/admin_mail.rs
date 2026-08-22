@@ -238,6 +238,35 @@ impl AdminMailPollingCommand {
     }
 }
 
+/// Admin 立即唤醒一次邮箱轮询的命令。
+#[derive(Debug, Clone)]
+pub struct AdminMailPollTriggerCommand {
+    pub command_id: CommandId,
+    pub mailbox_key: String,
+    /// `0` 只用于首次建立邮箱状态；已有状态必须携带当前版本。
+    pub expected_state_version: i64,
+    pub actor_id: String,
+    pub request_id: Option<String>,
+    pub request_hash: RequestHash,
+}
+
+impl AdminMailPollTriggerCommand {
+    /// 校验不依赖数据库当前状态的触发命令字段。
+    pub fn validate(&self) -> Result<(), AdminMailError> {
+        if self.command_id.is_nil()
+            || self.expected_state_version < 0
+            || self.expected_state_version == i64::MAX
+            || self.request_hash.as_bytes() == [0; 32]
+            || !valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
+            || !valid_text(&self.actor_id, 512)
+            || !valid_optional_text(self.request_id.as_deref(), 512)
+        {
+            return Err(AdminMailError::InvalidCommand);
+        }
+        Ok(())
+    }
+}
+
 /// 邮件 Admin 命令账本中可安全重放的最小记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminMailStoredCommand {
@@ -252,7 +281,7 @@ impl AdminMailStoredCommand {
     /// 校验账本记录，防止把损坏结果交给 HTTP 重放。
     pub fn validate(&self) -> Result<(), AdminMailError> {
         if self.command_id.is_nil()
-            || self.command_kind != "set_polling_paused"
+            || !matches!(self.command_kind.as_str(), "set_polling_paused" | "trigger_poll")
             || !valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
             || self.request_hash.as_bytes() == [0; 32]
             || self.result_payload.is_empty()
@@ -268,6 +297,13 @@ impl AdminMailStoredCommand {
     /// 判断账本记录是否对应同一暂停命令。
     pub fn matches_request(&self, command: &AdminMailPollingCommand) -> bool {
         self.command_kind == "set_polling_paused"
+            && self.mailbox_key == command.mailbox_key
+            && self.request_hash == command.request_hash
+    }
+
+    /// 判断账本记录是否对应同一立即触发命令。
+    pub fn matches_trigger_request(&self, command: &AdminMailPollTriggerCommand) -> bool {
+        self.command_kind == "trigger_poll"
             && self.mailbox_key == command.mailbox_key
             && self.request_hash == command.request_hash
     }
@@ -296,6 +332,12 @@ pub trait AdminMailCommandPort: Send + Sync {
     fn set_polling_paused(
         &self,
         command: AdminMailPollingCommand,
+    ) -> ApplicationFuture<'_, AdminMailPollState>;
+
+    /// 将指定邮箱的 next_poll_at 安全提前到当前时间，并通过命令账本保证幂等。
+    fn trigger_poll(
+        &self,
+        command: AdminMailPollTriggerCommand,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
 }
 
@@ -362,6 +404,18 @@ pub trait AdminMailTransaction: Send {
     fn append_pause_record(
         &mut self,
         command: AdminMailPollingCommand,
+        result: AdminMailPollState,
+    ) -> impl Future<Output = Result<(), AdminMailTransactionError>> + Send;
+
+    fn trigger_poll(
+        &mut self,
+        command: AdminMailPollTriggerCommand,
+        triggered_at: DateTime<Utc>,
+    ) -> impl Future<Output = Result<AdminMailPollState, AdminMailTransactionError>> + Send;
+
+    fn append_trigger_record(
+        &mut self,
+        command: AdminMailPollTriggerCommand,
         result: AdminMailPollState,
     ) -> impl Future<Output = Result<(), AdminMailTransactionError>> + Send;
 }

@@ -24,7 +24,7 @@ pub(crate) use lots::{
 };
 pub(crate) use mail::{
     AdminMailIntake, AdminMailIntakePage, AdminMailPolling, fetch_mail_intakes, fetch_mail_state,
-    set_mail_paused,
+    set_mail_paused, trigger_mail_poll,
 };
 pub(crate) use proxy_events::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 pub(crate) use realtime::{

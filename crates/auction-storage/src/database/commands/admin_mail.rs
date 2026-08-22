@@ -6,8 +6,8 @@ use std::{marker::PhantomData, sync::Arc};
 use auction_application::AdminMailService;
 use auction_application::{
     AdminMailCommandPort, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakePage,
-    AdminMailPollState, AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailReader,
-    ApplicationFuture, Clock,
+    AdminMailPollState, AdminMailPollStateRequest, AdminMailPollTriggerCommand,
+    AdminMailPollingCommand, AdminMailReader, ApplicationFuture, Clock,
 };
 use uuid::Uuid;
 
@@ -90,6 +90,31 @@ where
                     let _ = command;
                     Err(auction_application::ApplicationError::CapabilityUnavailable(
                         "Admin 邮件状态修改仅支持 PostgreSQL 完整档",
+                    ))
+                }
+            }
+        })
+    }
+
+    fn trigger_poll(
+        &self,
+        command: AdminMailPollTriggerCommand,
+    ) -> ApplicationFuture<'_, AdminMailPollState> {
+        let store = Arc::clone(&self.store);
+        #[cfg(feature = "postgres")]
+        let clock = Arc::clone(&self.clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AdminMailService::new(Arc::new(store.clone()), clock);
+                    service.trigger_poll(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    let _ = command;
+                    Err(auction_application::ApplicationError::CapabilityUnavailable(
+                        "Admin 邮件轮询触发仅支持 PostgreSQL 完整档",
                     ))
                 }
             }

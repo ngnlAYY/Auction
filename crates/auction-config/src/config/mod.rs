@@ -10,6 +10,9 @@ use std::{
     str::FromStr,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
@@ -85,18 +88,61 @@ pub struct CacheConfig {
 }
 
 /// Worker 调度并发和数据库 due 轮询间隔。SQLite Lite 档只能使用单实例、单写者 Worker。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkerConfig {
     /// Worker 并发数；省略时为 1。SQLite Lite 必须保持为 1。
     pub concurrency: u16,
     /// due 任务轮询间隔秒数；省略时为 5 秒。
     pub poll_interval_seconds: u64,
+    /// 可选 MoogleMail 轮询配置；省略时关闭远程读取。
+    pub mooglemail: MoogleMailWorkerConfig,
 }
 
 impl Default for WorkerConfig {
     fn default() -> Self {
-        Self { concurrency: 1, poll_interval_seconds: 5 }
+        Self {
+            concurrency: 1,
+            poll_interval_seconds: 5,
+            mooglemail: MoogleMailWorkerConfig::default(),
+        }
+    }
+}
+
+/// Worker 使用的 MoogleMail 入站轮询策略。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MoogleMailWorkerConfig {
+    /// 是否启用远程 MoogleMail 入站读取；默认关闭，避免配置不完整时发出外部请求。
+    pub enabled: bool,
+    /// 持久化邮箱标识；同一邮箱只能由一个有效租约并行处理。
+    pub mailbox_key: String,
+    /// 游戏世界，只允许 `main` 或 `isekai`。
+    pub world_id: String,
+    /// 可选 `.keyenv` 路径；相对路径相对于主 Worker 配置文件解析。
+    pub keyenv_file: Option<PathBuf>,
+    /// 单次从 MoogleMail 读取的最大邮件数。
+    pub batch_size: u16,
+    /// 单次有界分页最多读取的页数。
+    pub maximum_pages: usize,
+    /// 发件人 allowlist；未显式关闭 allowlist 时只读取其中的详情。
+    pub sender_allowlist: Vec<String>,
+    /// 明确关闭发件人 allowlist 后才读取所有发件人详情。
+    pub sender_allowlist_disabled: bool,
+}
+
+impl Default for MoogleMailWorkerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mailbox_key: "mooglemail:main".to_owned(),
+            world_id: "main".to_owned(),
+            keyenv_file: None,
+            batch_size: 100,
+            maximum_pages: 20,
+            sender_allowlist: Vec::new(),
+            sender_allowlist_disabled: false,
+        }
     }
 }
 
@@ -180,6 +226,22 @@ pub enum ConfigError {
     #[error("failed to parse sensitive TOML configuration {path}; secret values are redacted")]
     SecretParse { path: PathBuf },
 
+    #[error("failed to read local MoogleMail key environment {path}: {source}")]
+    MoogleMailKeyEnvRead {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("local MoogleMail key environment {path} must be owner-only readable")]
+    MoogleMailKeyEnvInsecurePermissions { path: PathBuf },
+
+    #[error("failed to parse local MoogleMail key environment {path}; secret values are redacted")]
+    MoogleMailKeyEnvParse { path: PathBuf },
+
+    #[error("local MoogleMail key environment {path} is missing {key}")]
+    MoogleMailKeyEnvMissing { path: PathBuf, key: &'static str },
+
     #[error("invalid {field} value {value:?}: {source}")]
     InvalidAddress { field: &'static str, value: String, source: std::net::AddrParseError },
 
@@ -197,6 +259,12 @@ pub enum ConfigError {
 
     #[error("worker poll interval must be greater than zero")]
     InvalidWorkerPollInterval,
+
+    #[error("enabled MoogleMail Worker requires keyenv_file or sensitive mooglemail_cookie")]
+    MissingMoogleMailCredentials,
+
+    #[error("invalid MoogleMail Worker configuration: {0}")]
+    InvalidMoogleMailConfig(&'static str),
 
     #[error("SQLite Lite requires worker concurrency = 1, got {concurrency}")]
     LiteWorkerConcurrency { concurrency: u16 },
@@ -306,6 +374,34 @@ impl SecretString {
 impl fmt::Debug for SecretString {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
+    }
+}
+
+/// `.keyenv` 中仅允许出现的两个 MoogleMail Cookie 身份。
+///
+/// `hv-ck-key1` 固定解释为 Bot 号，`hv-ck-key2` 固定解释为测试号。该类型不实现序列化，
+/// getter 只应在装配 MoogleMail 适配器时短暂调用。
+#[derive(Clone)]
+pub struct MoogleMailKeyEnv {
+    bot_cookie: SecretString,
+    test_cookie: SecretString,
+}
+
+impl MoogleMailKeyEnv {
+    /// 返回 Bot 号 Cookie；调用方不得记录、持久化或传给浏览器。
+    pub fn bot_cookie(&self) -> &str {
+        self.bot_cookie.expose_secret()
+    }
+
+    /// 返回测试号 Cookie；调用方不得记录、持久化或传给浏览器。
+    pub fn test_cookie(&self) -> &str {
+        self.test_cookie.expose_secret()
+    }
+}
+
+impl fmt::Debug for MoogleMailKeyEnv {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MoogleMailKeyEnv([REDACTED; 2])")
     }
 }
 
@@ -517,6 +613,7 @@ impl AppConfig {
             http_security,
             session,
         } = file;
+        let worker = resolve_worker_paths(config_path.as_deref(), worker);
         let secrets_path = Some(resolve_secrets_path(config_path.as_deref(), secrets_file));
         let runtime_config_path =
             runtime_config_file.map(|path| resolve_config_path(config_path.as_deref(), path));
@@ -571,6 +668,14 @@ impl AppConfig {
         }
         if worker.poll_interval_seconds == 0 {
             return Err(ConfigError::InvalidWorkerPollInterval);
+        }
+        validate_mooglemail_worker(&worker.mooglemail)?;
+        if role == Role::Worker
+            && worker.mooglemail.enabled
+            && worker.mooglemail.keyenv_file.is_none()
+            && secrets.mooglemail_cookie.is_none()
+        {
+            return Err(ConfigError::MissingMoogleMailCredentials);
         }
         validate_http_security(&http_security)?;
         validate_session(&session)?;
@@ -699,11 +804,133 @@ fn resolve_config_path(config_path: Option<&Path>, requested_path: PathBuf) -> P
     config_path.and_then(Path::parent).unwrap_or_else(|| Path::new(".")).join(requested_path)
 }
 
+fn resolve_worker_paths(config_path: Option<&Path>, mut worker: WorkerConfig) -> WorkerConfig {
+    worker.mooglemail.keyenv_file =
+        worker.mooglemail.keyenv_file.map(|path| resolve_config_path(config_path, path));
+    worker
+}
+
+fn validate_mooglemail_worker(config: &MoogleMailWorkerConfig) -> Result<(), ConfigError> {
+    if !valid_config_text(&config.mailbox_key, 256) {
+        return Err(ConfigError::InvalidMoogleMailConfig("mailbox_key 无效"));
+    }
+    if !matches!(config.world_id.as_str(), "main" | "isekai") {
+        return Err(ConfigError::InvalidMoogleMailConfig("world_id 只能是 main 或 isekai"));
+    }
+    if config.batch_size == 0 || config.batch_size > 1000 {
+        return Err(ConfigError::InvalidMoogleMailConfig("batch_size 必须位于 1 至 1000"));
+    }
+    if config.maximum_pages == 0 || config.maximum_pages > 100 {
+        return Err(ConfigError::InvalidMoogleMailConfig("maximum_pages 必须位于 1 至 100"));
+    }
+    for (index, sender) in config.sender_allowlist.iter().enumerate() {
+        if !valid_config_text(sender, 256)
+            || config.sender_allowlist[..index]
+                .iter()
+                .any(|previous| previous.eq_ignore_ascii_case(sender))
+        {
+            return Err(ConfigError::InvalidMoogleMailConfig(
+                "sender_allowlist 含有重复或无效发件人",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_config_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= maximum
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
+}
+
 fn load_secret_file(path: &Path) -> Result<SecretFileConfig, ConfigError> {
     let contents = fs::read_to_string(path)
         .map_err(|source| ConfigError::SecretRead { path: path.to_owned(), source })?;
 
     toml::from_str(&contents).map_err(|_| ConfigError::SecretParse { path: path.to_owned() })
+}
+
+/// 读取本地 `.keyenv` 的两个 MoogleMail Cookie。
+///
+/// 这是用户明确提供的本地开发/联调凭据通道，不是通用环境变量覆盖机制。解析器只接受
+/// `hv-ck-key1` 和 `hv-ck-key2`，拒绝未知键、重复键、空值和不安全文件权限；错误不会回显
+/// 任何值。
+pub fn load_mooglemail_keyenv(path: impl AsRef<Path>) -> Result<MoogleMailKeyEnv, ConfigError> {
+    let path = path.as_ref().to_owned();
+    let metadata = fs::metadata(&path)
+        .map_err(|source| ConfigError::MoogleMailKeyEnvRead { path: path.clone(), source })?;
+    if !metadata.is_file() {
+        return Err(ConfigError::MoogleMailKeyEnvRead {
+            path,
+            source: io::Error::new(io::ErrorKind::InvalidInput, "path is not a regular file"),
+        });
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err(ConfigError::MoogleMailKeyEnvInsecurePermissions { path });
+    }
+
+    let contents = fs::read_to_string(&path)
+        .map_err(|source| ConfigError::MoogleMailKeyEnvRead { path: path.clone(), source })?;
+    let mut bot_cookie = None;
+    let mut test_cookie = None;
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() });
+        };
+        let key = raw_key.trim();
+        let Some(value) = parse_mooglemail_keyenv_value(raw_value) else {
+            return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() });
+        };
+        match key {
+            "hv-ck-key1" if bot_cookie.is_none() => bot_cookie = Some(value),
+            "hv-ck-key2" if test_cookie.is_none() => test_cookie = Some(value),
+            _ => return Err(ConfigError::MoogleMailKeyEnvParse { path: path.clone() }),
+        }
+    }
+    let bot_cookie = bot_cookie.ok_or_else(|| ConfigError::MoogleMailKeyEnvMissing {
+        path: path.clone(),
+        key: "hv-ck-key1",
+    })?;
+    let test_cookie = test_cookie.ok_or_else(|| ConfigError::MoogleMailKeyEnvMissing {
+        path: path.clone(),
+        key: "hv-ck-key2",
+    })?;
+    Ok(MoogleMailKeyEnv {
+        bot_cookie: SecretString::new("hv-ck-key1", bot_cookie)?,
+        test_cookie: SecretString::new("hv-ck-key2", test_cookie)?,
+    })
+}
+
+fn parse_mooglemail_keyenv_value(raw_value: &str) -> Option<String> {
+    let value = if let Some(value) = raw_value.strip_prefix('"') {
+        let value = value.strip_suffix('"')?;
+        if value.contains(['"', '\\']) {
+            return None;
+        }
+        value
+    } else if let Some(value) = raw_value.strip_prefix('\'') {
+        let value = value.strip_suffix('\'')?;
+        if value.contains(['\'', '\\']) {
+            return None;
+        }
+        value
+    } else {
+        if raw_value.contains(['"', '\'']) {
+            return None;
+        }
+        raw_value
+    };
+    (!value.is_empty()
+        && value.len() <= 4096
+        && value == value.trim()
+        && !value.chars().any(char::is_control))
+    .then(|| value.to_owned())
 }
 
 fn load_admin_runtime_file(path: &Path) -> Result<AdminRuntimeDocument, ConfigError> {

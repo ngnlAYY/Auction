@@ -32,6 +32,7 @@ mod delivery_admin;
 mod forum;
 mod fulfillment;
 mod lifecycle;
+mod mail_poll;
 mod queries;
 mod realtime;
 mod realtime_admin;
@@ -78,8 +79,8 @@ pub use admin_lots::{
 pub use admin_mail::{
     AdminMailCommandPort, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
     AdminMailIntakeMetadata, AdminMailIntakePage, AdminMailIntakeSummary, AdminMailPollState,
-    AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailPort, AdminMailReader,
-    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
+    AdminMailPollStateRequest, AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailPort,
+    AdminMailReader, AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
     AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_DECISION_BYTES,
     MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE, MAX_ADMIN_MAILBOX_KEY_BYTES,
     admin_mail_aggregate_id,
@@ -140,6 +141,11 @@ pub use lifecycle::{
     AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
     AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecycleResult,
     AuctionLifecycleTransaction,
+};
+pub use mail_poll::{
+    MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
+    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollIntake,
+    MailPollStore,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,

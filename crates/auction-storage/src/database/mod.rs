@@ -12,6 +12,8 @@ mod admin_intake;
 mod admin_mail;
 #[cfg(feature = "postgres")]
 mod competition;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod mail_poll;
 #[cfg(feature = "postgres")]
 mod settlement;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

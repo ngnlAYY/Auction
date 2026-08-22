@@ -156,8 +156,18 @@ command ledger/竞价事务也已接入配置、应用端口与会话/竞价表�
 Admin A07 结算报告已接入 PostgreSQL 完整档的一致只读快照，SQLite 对该完整档能力明确返回不支持；
 结算后的履约 claim/fencing、`pending → prepared → enqueued` 状态推进和 delivery outbox
 的持久化领取/发送中 fencing 已由 Worker 阶段接入；Admin delivery 列表、release、retry 和
-reconcile 也已接入 PostgreSQL 安全投影、fencing version 与独立命令账本。外部传输端口已定义，
-但具体 MoogleMail 适配器尚未装配。
+reconcile 也已接入 PostgreSQL 安全投影、fencing version 与独立命令账本。具体 MoogleMail
+适配器已在 `auction-integrations/src/clients/mooglemail/` 完成读取首片：它持有固定 URL/响应
+边界、分页 cursor、allowlist-first 详情读取、正文与附件资产严格解析、装备 key 双来源交叉
+校验以及 Bot/测试 Cookie 切换；写入协议层又补齐 compose/detail typed target、表单闭集、
+单次 POST、write_unknown 不确定性分类和发送成功页/附件状态证明；`MoogleMailSender` 负责把
+这些步骤编排成逐步可证明的高层发送流程，但只接受已解析的远端装备 ID。PostgreSQL
+`000008_mooglemail_polling` 与
+`auction-storage/src/database/mail_poll/` 负责持久化状态、lease/fencing、失败退避以及
+`inbound_mail`/`mail_commands`/cursor 的同事务幂等提交；Worker 在 `[worker.mooglemail]` 显式
+启用后装配该读取适配器。当前只持久化 `parsed_pending_processing` 安全入站事实，尚未接入邮件
+驱动的拍卖/交付/注册/重绑业务处理。出站 DeliveryTransport 仍等待消息模板、外部装备 ID/key
+解析 owner 和回执/对账边界，当前不能把协议层完成误报为 delivery 已发送。
 Admin A08 recovery 报告已接入 PostgreSQL 完整档的一致安全投影，SQLite 明确返回不支持；A14 recovery 确认已接入 PostgreSQL 完整档的 Serializable 版本 fence、证据重校验、命令账本、退款激活、guarded relist、审计和预览目录事件，SQLite 明确返回不支持；其余未迁移 handler 也明确返回 501。Worker 已接入 `scheduled_rounds` 的持久化 due claim、
 租约、尝试次数、生命周期 preview/open 调用和指数退避失败记录；PostgreSQL 完整档还接入结算
 workflow 的持久化领取、稳定结算命令、完成 fence 和失败退避，SQLite Lite 明确不启用该
@@ -166,13 +176,13 @@ workflow；结算履约还接入了 delivery/prepare/activation 身份和 outbox
 显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计，
 但外部广播 sink 尚未冻结。公开端首页看板与 lot 详情已经接入同源 Public
 API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，Admin 拍卖列表提供带 CSRF、命令 ID
-和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、论坛镜像、健康和实时 catch-up 页面已消费对应安全 DTO；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 传输、回执对账和其余 Web 数据接入仍在后续阶段，不能宣称
+和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、论坛镜像、健康和实时 catch-up 页面已消费对应安全 DTO；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站轮询已接入 Worker，但业务处理、出站传输、回执对账和其余 Web 数据接入仍在后续阶段，不能宣称
 功能等价。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下返回尚未迁移 owner 的显式 `unknown` section；Public、Admin、Worker
-装配根已发布启动/就绪/周期/停止心跳，Worker control 和 mail/realtime/delivery 等聚合仍未
-装配，不能把该首片视为完整 dashboard 行为。
+装配根已发布启动/就绪/周期/停止心跳，Worker control、外部广播和其余聚合仍未装配，不能把
+该首片视为完整 dashboard 行为。
 
 Admin draft lot 的 `PATCH /api/v1/admin/lots/{lot_id}` 属于 PostgreSQL 完整档能力：
 `auction-application` 持有动作闭集、版本 fence 和命令端口，`auction-storage` 持有
@@ -186,8 +196,10 @@ Admin A16-A19 邮件状态与入站审查同样属于 PostgreSQL 完整档：
 `mail_admin_commands` 的查询和 Serializable 状态变更，`auction-http` 负责 Admin session、
 CSRF、严格筛选和稳定 DTO，`auction-web-admin` 只负责页面交互。响应不包含原始邮件正文、
 Cookie、外部凭据、游标或未审核 metadata；SQLite Lite 没有对应完整表/外部能力，明确返回
-`501 feature_not_supported`。A20 远程轮询触发仍由后续 `auction-jobs`/`auction-integrations`
-阶段负责，协议未冻结前不发出外部请求。
+`501 feature_not_supported`。A20 `POST /api/v1/admin/mail/polls:trigger` 已由
+`auction-application`/`auction-storage` 接入命令账本和状态版本 fence：它只幂等地推进下一次
+轮询时间并返回 `202`，实际远程 GET 仍由 Worker 的持久化 lease、失败退避和入站幂等提交负责，
+不会把排队动作伪装成远程读取成功。
 
 Admin A29 改名历史读取属于“两者”能力：`auction-application` 的 `admin_renames` 端口拥有
 筛选、分页和安全事实校验，`auction-storage/src/database/admin_renames/` 负责 PostgreSQL/

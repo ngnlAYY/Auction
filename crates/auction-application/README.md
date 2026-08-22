@@ -19,7 +19,10 @@
 - `src/ports/admin_audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
   投影端口；只读结果不暴露数据库行。
 - `src/ports/admin_mail.rs` 与 `src/services/admin_mail.rs`：Admin 邮件轮询状态、入站审查
-  安全投影、状态版本 fence、暂停/恢复命令和命令账本端口；不承载 MoogleMail 远程传输。
+  安全投影、状态版本 fence、暂停/恢复/A20 触发命令和命令账本端口；不承载 MoogleMail
+  远程传输。
+- `src/ports/mail_poll.rs`：Worker 的邮箱 claim、lease/fencing、解析后安全入站事实、cursor、
+  失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
 - `src/errors/mod.rs`：应用错误，保留领域错误分类。
 
 Public 规则文档和黑名单只读契约分别位于 `src/ports/rules.rs` 与

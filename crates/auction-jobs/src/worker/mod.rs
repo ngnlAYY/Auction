@@ -13,8 +13,13 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinSet;
 
+mod mail_poll;
 mod realtime_consumer;
 
+pub use mail_poll::{
+    MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
+    MailPollPage, MailPollRuntime,
+};
 pub use realtime_consumer::{
     PersistentRealtimeConsumer, RealtimeConsumerConfigError, RealtimeConsumerRunner,
 };
@@ -28,6 +33,8 @@ pub enum WorkerError {
     InvalidPollInterval,
     #[error("worker identity must not be empty")]
     InvalidWorkerIdentity,
+    #[error("MoogleMail poll configuration is invalid")]
+    InvalidMailPollConfiguration,
     #[error(transparent)]
     Application(#[from] ApplicationError),
     #[error("worker shutdown signal failed")]
@@ -64,6 +71,7 @@ pub struct PersistentWorker<C> {
     pub fulfillment_commands: Option<Arc<dyn SettlementFulfillmentCommandPort>>,
     pub delivery_store: Option<Arc<dyn DeliveryWorkStore>>,
     pub delivery_transport: Option<Arc<dyn DeliveryTransport>>,
+    pub mail_poll: Option<mail_poll::MailPollRuntime>,
     pub realtime_consumer: Option<Arc<dyn RealtimeConsumerRunner>>,
     pub clock: Arc<C>,
     pub worker_id: String,
@@ -95,6 +103,7 @@ where
         fulfillment_commands: None,
         delivery_store: None,
         delivery_transport: None,
+        mail_poll: None,
         realtime_consumer: None,
         clock,
         worker_id,
@@ -219,6 +228,10 @@ where
                 tracing::error!(error = %error, "fulfillment worker task join failed");
             }
         }
+    }
+
+    if let Some(mail_poll) = &worker.mail_poll {
+        mail_poll::run_cycle(worker, mail_poll).await?;
     }
 
     if let Some(realtime_consumer) = &worker.realtime_consumer {

@@ -283,6 +283,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",
+ "tokio",
  "url",
 ]
 
@@ -294,6 +295,7 @@ dependencies = [
  "auction-domain",
  "chrono",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -397,6 +399,7 @@ dependencies = [
  "auction-application",
  "auction-cache",
  "auction-config",
+ "auction-integrations",
  "auction-jobs",
  "auction-observability",
  "auction-storage",

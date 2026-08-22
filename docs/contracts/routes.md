@@ -192,8 +192,10 @@ A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
-A20 远程轮询触发仍返回 `feature_not_migrated`，等待 Worker/MoogleMail 协议冻结，不发送外部
-请求或伪造异步受理结果。
+A20 远程轮询触发已返回 `202`：请求经过 Admin session/CSRF、`command_id` 和
+`expected_state_version` 校验后，PostgreSQL 事务只幂等地提前 `next_poll_at`，由 Worker 后续
+执行实际 MoogleMail GET；该响应表示已排队，不表示外部读取已经完成。SQLite Lite 明确返回
+`501 feature_not_supported`。
 
 A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影
 和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用

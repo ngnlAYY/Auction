@@ -31,6 +31,23 @@ concurrency = 1
 # 可选：due 轮询间隔秒数。
 poll_interval_seconds = 5
 
+# 可选：MoogleMail 入站轮询；默认关闭。
+[worker.mooglemail]
+# 可选：启用后只在 PostgreSQL 完整档执行远程 GET。
+enabled = false
+# 可选：持久化邮箱标识。
+mailbox_key = "mooglemail:main"
+# 可选：游戏世界，只能是 main 或 isekai。
+world_id = "main"
+# 可选：相对主配置解析的 `.keyenv` 路径；或使用敏感 mooglemail_cookie。
+keyenv_file = "../../../.keyenv"
+# 可选：单次读取上限和有界分页上限。
+batch_size = 100
+maximum_pages = 20
+# 可选：allowlist-first 详情读取；生产环境不要关闭 allowlist。
+sender_allowlist = []
+sender_allowlist_disabled = false
+
 # 可选区块：HTTP 安全策略。
 [http_security]
 # 可选：是否启用 origin allowlist。
@@ -69,6 +86,17 @@ max_public_sessions = 5
 相对 `secrets_file` 路径以主配置文件所在目录解析。敏感文件不得提交，部署时应限制为仅运行
 账号可读。
 
+## MoogleMail 本地联调凭据
+
+用户明确提供的本地 `.keyenv` 可作为 MoogleMail 联调的窄凭据通道。`auction-config` 的
+`load_mooglemail_keyenv(path)` 只接受两个键：`hv-ck-key1` 是 Bot 号，`hv-ck-key2` 是测试号；
+未知键、重复键、空值、控制字符和不安全权限都会失败关闭。Unix 文件必须是 owner-only
+（建议 `chmod 600 .keyenv`）；值可使用成对单引号或双引号包裹。文件本身已被 Git 忽略，不能提交。
+
+该文件不是通用环境变量覆盖，也不能承载数据库、Redis、会话或其他业务凭据。读取后只能在
+装配 MoogleMail 适配器时转换为脱敏 Cookie 值对象，禁止写入日志、快照、DTO、数据库或错误
+消息；生产部署仍优先使用敏感 TOML 的显式 `mooglemail_cookie` getter。
+
 Worker 的 concurrency 和 `poll_interval_seconds` 必须为正数；当敏感配置中的 database_url 使用
 sqlite: 时，配置层只允许 concurrency 为 1，以落实 Lite 档的单主机、单写者约束。轮询间隔只
 负责唤醒持久化调度器，不能替代数据库 due/租约状态。
@@ -76,6 +104,13 @@ sqlite: 时，配置层只允许 concurrency 为 1，以落实 Lite 档的单主
 `http_security` 只保存 origin、速率限制和 Cookie 属性等非敏感策略；`session` 保存 Public
 与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、会话 token 和数据库
 连接串不得写入主配置。
+
+启用 `worker.mooglemail` 后，Worker 会先在 `mail_poll_state` 建立或读取持久化状态，再通过
+租约读取 MoogleMail。解析成功的入站安全事实、`mail_commands` 幂等记录和 cursor 在同一
+PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当前 Rust 首片以
+`parsed_pending_processing` 标记“协议解析已完成、业务邮件处理器尚未接入”，不会把该记录
+伪装成拍卖业务已接受。`sender_allowlist_disabled` 必须显式设为 true 才会读取非 allowlist
+发件人的详情。
 
 Admin 主配置的 `runtime_config_file` 指向独立的非敏感 runtime TOML，仓库模板位于
 `ops/config/examples/runtime/admin.toml`。该文档由严格应用模型

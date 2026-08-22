@@ -7,15 +7,15 @@ use dioxus_i18n::t;
 
 use crate::api::{
     AdminMailIntake, AdminMailIntakePage, AdminMailPolling, fetch_mail_intakes, fetch_mail_state,
-    set_mail_paused,
+    set_mail_paused, trigger_mail_poll,
 };
 
 use super::AdminPanel;
 
 /// 加载并展示指定邮箱的轮询状态和入站邮件摘要。
 pub(super) fn page() -> Element {
-    let mut mailbox_key = use_signal(|| "main".to_owned());
-    let mut active_mailbox = use_signal(|| "main".to_owned());
+    let mut mailbox_key = use_signal(|| "mooglemail:main".to_owned());
+    let mut active_mailbox = use_signal(|| "mooglemail:main".to_owned());
     let mut refresh = use_signal(|| 0_u64);
     let polling = use_resource(move || {
         let _ = refresh();
@@ -82,6 +82,12 @@ fn MailPollingCard(
     let label = if polling.paused { t!("admin-mail-resume") } else { t!("admin-mail-pause") };
     let state_label =
         if polling.paused { t!("admin-mail-paused") } else { t!("admin-mail-running") };
+    let pause_polling = polling.clone();
+    let trigger_polling = polling.clone();
+    let pause_notice = notice;
+    let trigger_notice = notice;
+    let pause_refresh = refresh;
+    let trigger_refresh = refresh;
     rsx! {
         section { class: "admin-panel", aria_labelledby: "admin-mail-polling-title",
             h2 { id: "admin-mail-polling-title", {t!("admin-mail-polling-title")} }
@@ -104,9 +110,9 @@ fn MailPollingCard(
             button {
                 r#type: "button",
                 onclick: move |_| {
-                    let polling = polling.clone();
-                    let mut notice = notice;
-                    let mut refresh = refresh;
+                    let polling = pause_polling.clone();
+                    let mut notice = pause_notice;
+                    let mut refresh = pause_refresh;
                     spawn(async move {
                         match set_mail_paused(polling, desired_paused).await {
                             Ok(_) => {
@@ -118,6 +124,24 @@ fn MailPollingCard(
                     });
                 },
                 "{label}"
+            }
+            button {
+                r#type: "button",
+                onclick: move |_| {
+                    let polling = trigger_polling.clone();
+                    let mut notice = trigger_notice;
+                    let mut refresh = trigger_refresh;
+                    spawn(async move {
+                        match trigger_mail_poll(polling).await {
+                            Ok(_) => {
+                                notice.set(Some(true));
+                                refresh.set(refresh().saturating_add(1));
+                            }
+                            Err(_) => notice.set(Some(false)),
+                        }
+                    });
+                },
+                {t!("admin-mail-trigger")}
             }
         }
     }

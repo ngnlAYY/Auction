@@ -102,7 +102,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | --- | --- | --- | --- | --- |
 | inbound_mail | 000001_baseline | auction-storage：mail projection | 完整档 | 入站邮件原始事实索引的安全读取来源 |
 | mail_commands | 000001_baseline | auction-integrations + auction-jobs：mail | 完整档 | 邮件发送 outbox/命令 |
-| mail_poll_state | 000001_baseline | auction-storage：mail state | 完整档 | MoogleMail 轮询游标和状态 |
+| mail_poll_state | 000001_baseline + 000008_mooglemail_polling | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | user_mail_commands | 000002_worker_external_adapters | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | 000026_auction_forum_sync | auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布同步状态 |
@@ -110,9 +110,11 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | auction_forum_reply_cursors | 000028_forum_bidder_identities | auction-jobs：forum | 完整档 | 论坛回帖扫描游标 |
 | auction_forum_bid_commands | 000028_forum_bidder_identities | auction-integrations + auction-jobs：forum | 完整档 | 论坛竞价导入命令 outbox |
 
-A16-A19 只使用 `auction-storage` 的三个邮件表做 PostgreSQL 完整档状态/审查投影；应用层
-定义命令与查询端口，Worker/MoogleMail 的远程轮询触发、发送 outbox 和回执仍分别由
-`auction-jobs`/`auction-integrations` 的后续迁移负责。SQLite Lite 不复制这些完整档表。
+A16-A20 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态/审查与触发投影；
+`000008_mooglemail_polling` 追加 `mail_poll_state` 的 lease/fencing 与失败字段，Worker 在同一
+事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，
+`auction-jobs`/`auction-integrations` 负责远程读取；出站发送和回执仍待后续迁移。SQLite Lite
+不复制这些完整档表。
 
 ## 实时事件与运维告警
 

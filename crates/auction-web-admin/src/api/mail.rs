@@ -1,7 +1,7 @@
 //! Admin 邮件轮询与入站审查 HTTP 客户端。
 //!
-//! 浏览器只读取轮询状态和入站安全摘要；暂停动作携带服务端快照中的 state version，并由
-//! 后端生成新的命令 ID，浏览器不推导邮件处理状态。
+//! 浏览器只读取轮询状态和入站安全摘要；暂停和 A20 触发动作携带服务端快照中的 state version，
+//! 并由后端生成新的命令 ID，浏览器不推导邮件处理状态。
 
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,13 @@ struct AdminMailPollingRequest {
     expected_state_version: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AdminMailPollTriggerRequest {
+    command_id: Uuid,
+    mailbox_key: String,
+    expected_state_version: i64,
+}
+
 pub(crate) async fn fetch_mail_state(mailbox_key: String) -> Result<AdminMailPolling, String> {
     let encoded = encode_query(&mailbox_key);
     let response = Request::get(&format!("/api/v1/admin/mail?mailbox_key={encoded}"))
@@ -141,6 +148,32 @@ pub(crate) async fn set_mail_paused(
         || payload.data.polling.state_version <= polling.state_version
     {
         return Err("mail polling update response does not match command".to_owned());
+    }
+    Ok(payload.data.polling)
+}
+
+pub(crate) async fn trigger_mail_poll(
+    polling: AdminMailPolling,
+) -> Result<AdminMailPolling, String> {
+    let csrf_token = super::fetch_csrf_token().await?;
+    let request = Request::post("/api/v1/admin/mail/polls:trigger")
+        .header("x-csrf-token", &csrf_token)
+        .json(&AdminMailPollTriggerRequest {
+            command_id: Uuid::new_v4(),
+            mailbox_key: polling.mailbox_key.clone(),
+            expected_state_version: polling.state_version,
+        })
+        .map_err(|error| error.to_string())?;
+    let response = request.send().await.map_err(|error| error.to_string())?;
+    if !response.ok() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let payload: ApiResponse<AdminMailStateData> =
+        response.json().await.map_err(|error| error.to_string())?;
+    if payload.data.polling.mailbox_key != polling.mailbox_key
+        || payload.data.polling.state_version <= polling.state_version
+    {
+        return Err("mail polling trigger response does not match command".to_owned());
     }
     Ok(payload.data.polling)
 }

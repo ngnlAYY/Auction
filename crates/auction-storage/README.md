@@ -50,9 +50,11 @@ Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有：两套�
 Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `src/database/commands/admin_mail.rs` 持有：PostgreSQL 读取 `mail_poll_state`、
 `inbound_mail` 的安全投影，并在 Serializable 事务内用 `mail_poll_state` 的版本 fence、
-`mail_admin_commands` 命令账本和追加审计完成暂停/恢复；SQLite Lite 明确返回能力不支持，
-不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程触发和传输仍由后续 Worker/集成
-owner 负责。
+`mail_admin_commands` 命令账本和追加审计完成暂停/恢复/A20 触发；`src/database/mail_poll/`
+又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
+`inbound_mail`、`mail_commands`、cursor 的同事务幂等提交。SQLite Lite 明确返回能力不支持，
+不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
+负责。
 服务心跳由 `src/database/health/mod.rs` 持有：PostgreSQL 使用数据库时钟和
 observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和同一 sequence fence；
 两个后端都只返回 dashboard 所需的安全字段，details 原文不会离开存储边界。

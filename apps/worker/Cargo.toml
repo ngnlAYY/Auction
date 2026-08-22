@@ -10,6 +10,7 @@ anyhow.workspace = true
 auction-application.workspace = true
 auction-cache.workspace = true
 auction-config.workspace = true
+auction-integrations.workspace = true
 auction-jobs.workspace = true
 auction-observability.workspace = true
 auction-storage.workspace = true

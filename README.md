@@ -35,7 +35,8 @@ outbox 持久化边界、Public 持久化实时事件 Catch-up，以及沿用旧
 审计，管理端页面已提供读取和状态操作；SQLite Lite 明确返回能力不支持。
 Worker 的实时消费游标、失败记录、连续
 确认和显式重放边界已经接入，Admin realtime lag/failure/replay 运维面也已接入，但外部广播
-sink 尚未冻结和装配；A20 远程邮件轮询触发、外部 MoogleMail 传输、远程
+sink 尚未冻结和装配；MoogleMail 的远端 HTML 收件解析、PostgreSQL 持久化轮询、Worker 接线
+和 A20 触发命令已经完成。当前入站事实只保存为 `parsed_pending_processing`，业务处理、外部
 回执/对账、论坛远程发布同步和完整功能等价仍未完成。Public `/status` 已在已认证会话下自动订阅只读
 WebSocket；跳号或 refetch 边界会停止并要求重新读取权威快照，其他页面的事件驱动刷新仍未完成。
 Auction-BF 的完整功能、数据表、接口契约和外部服务行为仍在迁移中，不能仅凭编译通过宣称

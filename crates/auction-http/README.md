@@ -59,7 +59,7 @@ Admin A16-A19 邮件路由已接入：轮询状态、入站列表/详情使用�
 安全 DTO，暂停/恢复使用 Admin session、CSRF、`command_id` 与 `expected_state_version`。
 PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lite 明确返回
 `501 feature_not_supported`。HTTP 层不返回原始邮件正文、Cookie、轮询游标或任意 metadata，
-也不调用未冻结的 MoogleMail 远程协议；A20 远程轮询触发仍保持 `feature_not_migrated`。
+A20 只把带版本 fence 的触发命令排入 Worker，返回 `202`，不把排队动作伪装成远程读取成功。
 
 Public 与 Admin 是不同 surface，路由和静态产物分别隔离；公开端二进制不包含管理端资源。
 除已接入的世界、拍卖/lot/竞价日志/价格历史只读目录、Public session、Admin session、普通竞价和代理 mutation 命令外，当前已登记的业务路径在应用用例

@@ -7,13 +7,15 @@ use std::net::SocketAddr;
 
 use auction_application::{
     AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata,
-    AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest, AdminMailPollingCommand,
-    AdminMailTransactionError, ApplicationError, RequestHash, admin_mail_aggregate_id,
+    AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest,
+    AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailTransactionError,
+    ApplicationError, RequestHash, admin_mail_aggregate_id,
 };
 use auction_contracts::{
     AdminMailIntakeDetailResponse, AdminMailIntakeListResponse, AdminMailIntakeMetadataResponse,
-    AdminMailIntakeSummaryResponse, AdminMailPaginationResponse, AdminMailPollingRequest,
-    AdminMailPollingResponse, AdminMailStateResponse, ApiErrorResponseWithData, ApiResponse,
+    AdminMailIntakeSummaryResponse, AdminMailPaginationResponse, AdminMailPollTriggerRequest,
+    AdminMailPollingRequest, AdminMailPollingResponse, AdminMailStateResponse,
+    ApiErrorResponseWithData, ApiResponse,
 };
 use auction_domain::CommandId;
 use axum::{
@@ -306,6 +308,91 @@ pub(crate) async fn set_paused(
         super::no_store_headers(),
         Json(ApiResponse::ok(
             "邮件轮询状态已更新",
+            AdminMailStateResponse { polling: map_poll_state(result) },
+        )),
+    )
+        .into_response()
+}
+
+/// 以版本 fence 和幂等命令立即唤醒指定邮箱的 Worker 轮询。
+pub(crate) async fn trigger_poll(
+    State(state): State<AdminApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
+        return response;
+    }
+    let Some(raw_csrf) = super::read_admin_cookie(&headers, super::ADMIN_CSRF_COOKIE) else {
+        return super::authentication_error();
+    };
+    if !super::valid_admin_csrf_header(&headers, &raw_csrf) {
+        return super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
+            .into_response();
+    }
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return super::api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_query",
+            "邮件轮询触发不接受查询参数",
+        )
+        .into_response();
+    }
+    let (_, identity) = match super::authenticated_admin_session(&state, &headers).await {
+        Ok(result) => result,
+        Err(response) => return *response,
+    };
+    let input: AdminMailPollTriggerRequest = match serde_json::from_slice(&body) {
+        Ok(input) => input,
+        Err(_) => {
+            return super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+                .into_response();
+        }
+    };
+    if input.command_id.is_nil() || input.expected_state_version < 0 {
+        return super::api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_mail_trigger",
+            "邮件轮询触发参数无效",
+        )
+        .into_response();
+    }
+    let aggregate_id = admin_mail_aggregate_id(&input.mailbox_key);
+    let request_hash =
+        match RequestHash::from_request("admin_mail_trigger_poll", aggregate_id, &input) {
+            Ok(hash) => hash,
+            Err(_) => return super::internal_error(),
+        };
+    let Some(port) = state.admin_mail() else {
+        return feature_unavailable();
+    };
+    let result = match port
+        .trigger_poll(AdminMailPollTriggerCommand {
+            command_id: CommandId::from_uuid(input.command_id),
+            mailbox_key: input.mailbox_key.clone(),
+            expected_state_version: input.expected_state_version,
+            actor_id: identity.actor,
+            request_id: None,
+            request_hash,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => return map_error(error),
+    };
+    if !result.validate()
+        || result.mailbox_key != input.mailbox_key
+        || result.state_version != input.expected_state_version.saturating_add(1)
+    {
+        return super::internal_error();
+    }
+    (
+        StatusCode::ACCEPTED,
+        super::no_store_headers(),
+        Json(ApiResponse::ok(
+            "邮件轮询已触发",
             AdminMailStateResponse { polling: map_poll_state(result) },
         )),
     )
