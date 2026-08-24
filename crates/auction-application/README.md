@@ -16,6 +16,8 @@
 - `src/services/auction/competition.rs`：竞价用例，例如 `CompetitionService::place_bid`。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
+- `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
+  错误类型和本地边界校验；`runtime_config.rs` 只负责稳定公共类型出口，不执行文件、数据库或网络操作。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
 - `src/ports/admin/intake.rs` 与 `src/services/admin/intake.rs`：URL/canonical JSON 装备来源、

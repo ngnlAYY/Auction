@@ -653,9 +653,12 @@ Public/Admin HTTP listener。
   storage account/lots/operations/recovery/realtime、competition PostgreSQL/SQLite transaction、recovery
   commands/scheduler、settlement、credentials、fulfillment scheduler、retention inventory、legacy v28、
   delivery scheduler、Worker control transport、equipment source、Admin Dashboard、Admin 拍卖/用户/结算页面、Public 拍卖目录、
-  MoogleMail poller、mail poll state/poll/inbound、delivery Admin reads/commands/mapping、recovery action、PostgreSQL competition Admin、observability telemetry、realtime Admin replay、Public price history、sessions Admin/Public、scheduled-round claim/resolution、settlement workflow claim/resolution、PostgreSQL/SQLite 生命周期事务、Users/Admin PostgreSQL/SQLite、Users Mail 以及 Admin Mail PostgreSQL 适配器的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
+  MoogleMail poller、mail poll state/poll/inbound、delivery Admin reads/commands/mapping、Admin runtime document/command/ports/validation、Worker validation 的 Auction/Delivery/Fulfillment/Recovery/control/MoogleMail/Forum/Operations Alert、recovery action、PostgreSQL competition Admin、observability telemetry、realtime Admin replay、Public price history、sessions Admin/Public、scheduled-round claim/resolution、settlement workflow claim/resolution、PostgreSQL/SQLite 生命周期事务、Users/Admin PostgreSQL/SQLite、Users Mail 以及 Admin Mail PostgreSQL 适配器的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
+- Public HTTP handler 已进一步按 owner 拆入 `routes/public/session.rs`、`account.rs` 和
+  `competition.rs`，`routes/public/mod.rs` 只保留模块装配与稳定导出；路由路径、状态码和 DTO
+  契约未改变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
   owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
   和 Web owner 不再列为未完成项。
@@ -677,6 +680,9 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
 以下是仍需真实环境完成的行为/部署证据，不属于上面的代码数量盘点；测试相关工作继续按用户要求
 暂缓：
 
+- 本轮已用仓库锁定的 `dx` CLI 分别构建 Public/Admin Web 产物，两个 WASM、wasm-bindgen、入口
+  HTML 和 surface/base CSS 均成功生成；这只证明编译和静态资源打包链路，不证明真实浏览器中的
+  字体、换行、焦点顺序、空态或响应式布局，因此浏览器逐页验收仍保留。
 - 使用真实 main/isekai 邮箱与 E-Hentai 论坛核对分页、限流、凭据失效、远端写入不确定结果和回执；
 - 在 canonical PostgreSQL v28 副本上演练 backup、verify、adopt、restore 和 rebuild 安全边界；
 - 在真实 systemd/Caddy 部署中核对启动顺序、readiness、失败回滚、Worker control 和凭据注入；

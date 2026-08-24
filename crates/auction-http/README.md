@@ -3,9 +3,10 @@
 Public 与 Admin 的 HTTP 表面适配器。
 
 - `src/http/routes/mod.rs`：`public_router()` / `admin_router()`、健康检查和冻结契约路径注册；
-  `routes/admin.rs`、`routes/public.rs`、`routes/session.rs`、`routes/reads.rs` 分别持有
-  Admin 命令、Public 命令、会话安全和 Public 只读处理器；`routes/mapping/` 按查询、Public、
-  Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责 surface 导出边界。
+  `routes/admin.rs` 持有 Admin 命令，`routes/public/` 按会话、账户读取和竞价命令拆分 Public
+  handler，`routes/session.rs` 持有共享会话安全逻辑，`routes/reads.rs` 持有 Public 只读处理器；
+  `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
+  surface 导出边界。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
