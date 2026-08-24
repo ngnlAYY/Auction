@@ -2,8 +2,10 @@
 
 公开端进程装配根。
 
-源码布局：src/main.rs 只负责 Tokio 入口，src/bootstrap/mod.rs 负责配置、缓存、监听器和
-路由装配。
+源码布局：`src/main.rs` 只负责 Tokio 入口；`src/bootstrap/mod.rs` 负责模块装配和稳定启动
+入口；`bootstrap/service.rs` 负责 tracing、HTTP 生命周期与退出 drain；`bootstrap/state.rs`
+负责数据库、端口、heartbeat 和 realtime 状态；`bootstrap/config.rs` 负责安全策略与缓存配置；
+`bootstrap/listener.rs` 负责监听器绑定。
 
 职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
 relay/Hub、绑定监听器、挂载 `auction_http::public_router()` 和返回启动错误。Public 的

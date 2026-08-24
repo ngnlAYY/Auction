@@ -4,13 +4,16 @@
 
 源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
 `src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分；其中
+`runtime/postgres/commands/{mod,bootstrap,preflight,backup,delegation}.rs` 分别负责命令装配、
+MoogleMail 凭据引导、只读预检、备份/manifest 和专用 restore/legacy/rebuild owner 桥接；
 `runtime/postgres/artifacts/` 又将外部 PostgreSQL 环境、manifest/hash、文件系统安全、外部进程、
 来源预检和 stdin Cookie 分别放入 `environment.rs`、`manifest.rs`、`filesystem.rs`、`process.rs`、
 `source.rs` 与 `input.rs`，`artifacts.rs` 只保留稳定导出，
 `src/bootstrap/deployment_control/` 按总控装配、Unix 生命周期、systemd 适配、readiness 探针和 receipt
 文件边界拆分，其中 `deployment_control/unix/` 又将生命周期、内部状态模型和路径/unit 校验分别放入
-`lifecycle.rs`、`model.rs` 与 `validation.rs`，`unix/mod.rs` 只承载稳定包装，
-`src/bootstrap/postgres_restore.rs` 独立持有 PostgreSQL 恢复边界，
+`lifecycle.rs`、`controller.rs`、`model.rs` 与 `validation.rs`，`unix/mod.rs` 只承载稳定包装，
+`src/bootstrap/postgres_restore/` 按恢复编排、备份/模式证明、pg_restore 外部进程和不可覆盖 receipt 分别拆入
+`postgres_restore/{mod,verification,process,receipt}.rs`；mod.rs 保留 execute、稳定验证出口和失败关闭顺序，
 `src/bootstrap/postgres_legacy_v28/` 按 `backup.rs`（备份生成）、`verification.rs`（离线 archive/manifest
 校验）、`adoption.rs`（接管编排）、`common.rs`（预检/后置证明）、`model.rs`（证据模型）和
 `receipt.rs`（不可覆盖接管回执）拆分 Auction-BF v28 的专用边界，`mod.rs` 只保留稳定出口，

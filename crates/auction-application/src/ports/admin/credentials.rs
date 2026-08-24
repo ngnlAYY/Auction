@@ -8,7 +8,7 @@
 mod commands;
 #[path = "credentials/ports.rs"]
 mod ports;
-#[path = "credentials/value.rs"]
+#[path = "credentials/value/mod.rs"]
 mod value;
 
 pub use commands::*;

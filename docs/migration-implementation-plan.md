@@ -600,7 +600,7 @@ SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧�
 
 ## 对比旧版的当前复核矩阵
 
-截至 2026-08-24 的静态复核结果如下：旧版业务 HTTP 路径在 Rust 中无缺项，Public/Admin 浏览器
+截至 2026-08-25 的静态复核结果如下：旧版业务 HTTP 路径在 Rust 中无缺项，Public/Admin 浏览器
 路由完整对应，旧版 Worker 循环类别和五类 recovery action 也都有装配。下表把已完成代码、仍需
 外部/浏览器/部署证据的部分和明确不在旧版等价范围内的扩展分开；静态复核不能替代行为验证。
 
@@ -626,7 +626,7 @@ SQLite Lite 的 PostgreSQL 专属 recovery、MoogleMail、论坛完整档、结�
 
 ### 尚未完成的旧版等价收口
 
-截至 2026-08-24，旧版 HTTP 路径、浏览器路由、Worker 类别、recovery action 和运维命令名称没有
+截至 2026-08-25，旧版 HTTP 路径、浏览器路由、Worker 类别、recovery action 和运维命令名称没有
 数量缺项；第二轮从实际消费链、进程边界和项目规范交叉审计后，确认仍有以下**非测试代码任务**。
 三进程 SIGINT/SIGTERM、有界 drain、停止心跳和 tracing flush 已完成。Public/Admin 共用 HTTP
 boundary 也已完成：请求 ID 与命令审计关联、W3C trace context、访问日志、panic recovery、
@@ -657,11 +657,17 @@ Public/Admin HTTP listener。
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
 - Public HTTP handler 已进一步按 owner 拆入 `routes/public/session.rs`、`account.rs` 和
-  `competition.rs`，`routes/public/mod.rs` 只保留模块装配与稳定导出；路由路径、状态码和 DTO
-  契约未改变。
+  `competition/{bid,proxy}.rs`，`routes/public/competition/mod.rs` 与 `routes/public/mod.rs` 只保留
+  模块装配与稳定导出；竞价/代理的认证、request hash、command ID、错误状态码和 DTO 契约未改变。
 - Worker 配置模型已进一步按 Auction、control、Delivery、Fulfillment、Recovery、Forum、
   MoogleMail 和 Operations Alert 拆入 `config/settings/worker/`，`worker/mod.rs` 只负责装配与
   稳定导出；TOML 字段、默认值、校验入口和公共类型路径未改变。
+- Worker Recovery loop owner 已将 cadence/阶段顺序、health、case、return、action、relist/refund
+  resolution 和结果指标分别拆入 `worker/recovery/loop/{mod,health,cases,returns,actions,resolutions,common}.rs`；
+  claim 顺序、每阶段 deadline、并发波次、lease/重试和 WorkerResult 合并语义保持不变。
+- Config 通用设置 owner 已将进程角色、HTTP listener、缓存策略、拍卖经济/结算/恢复策略和
+  Metrics/tracing/realtime 分别拆入 `config/settings/auction/{role,http,cache,policy,observability}.rs`；
+  `auction/mod.rs` 只负责稳定导出，TOML 字段、默认值、`Role::default_listen` 和策略模板转换语义保持不变。
 - Settlement domain 已进一步按 policy、amount、facts、obligations 和 plan 拆入
   `auction-domain/src/settlement/`，`settlement/mod.rs` 只负责稳定导出；策略校验、金额守恒、
   结算曲线与义务闭集规则保持原实现。
@@ -677,12 +683,17 @@ Public/Admin HTTP listener。
   PostgreSQL 连接池和 SQLite 连接池拆入 `backend.rs`、`store.rs`、`pool_metrics.rs`、
   `postgres_store.rs` 与 `sqlite_store.rs`；根文件只保留模块装配、兼容导出和既有根级测试，
   `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径不变。
-- Admin Web surface 已将会话/登录/认证外壳移入 `app/surface/auth.rs`，跨页面状态面板、错误重试和
-  时间格式化移入 `app/surface/shared.rs`；`surface.rs` 只保留路由、资源初始化、页面装配和稳定导出，
-  Admin 路由与组件契约不变。
+- Admin Web surface 已将会话状态编排、站内 return 路径、登录/认证外壳和重试/刷新分别拆入
+  `app/surface/auth/{mod,redirect,session,login,shell}.rs`，跨页面状态面板、错误重试和
+  时间格式化移入 `app/surface/shared.rs`；surface 装配与资源初始化位于 `app/surface/mod.rs`，路由表和
+  页面入口包装器位于 `app/surface/router.rs`，Admin 路由与组件契约不变。
 - Admin API 启动装配已将 tracing/HTTP 生命周期拆入 `apps/admin-api/src/bootstrap/service.rs`，
   数据库、端口和 heartbeat 状态拆入 `state.rs`，缓存、Worker control、安全策略和 dashboard 范围
   投影拆入 `config.rs`；`bootstrap/mod.rs` 只保留模块装配和稳定启动入口，监听器与退出契约不变。
+- Public API 启动装配已将 tracing/HTTP 生命周期拆入 `apps/public-api/src/bootstrap/service.rs`，
+  数据库、端口、heartbeat 和 realtime 状态拆入 `state.rs`，缓存与安全策略拆入 `config.rs`；
+  `bootstrap/mod.rs` 只保留模块装配和稳定启动入口，启动顺序、监听器、优雅退出 drain 与
+  PostgreSQL/SQLite feature fallback 契约不变。
 - `auctionctl` PostgreSQL rebuild 已将授权/参数模型、破坏性执行、确认与 URL 校验、空库/迁移后置证明
   以及不可覆盖回执发布分别拆入 `postgres_rebuild/model.rs`、`execute.rs`、`validation.rs`、
   `postconditions.rs` 和 `receipt.rs`；`mod.rs` 只保留 `Options`、`Mode`、`execute` 的稳定调用路径，
@@ -690,9 +701,13 @@ Public/Admin HTTP listener。
 - `auction-observability/src/health/` 已将安全健康模型与校验、心跳发布/持久化端口、三进程 dashboard
   聚合分别拆入 `model.rs`、`publisher.rs` 和 `dashboard.rs`；`health/mod.rs` 只保留模块装配和稳定导出，
   心跳 sequence、TTL、readiness 与安全投影契约保持不变。
-- Application Admin credentials port 已将安全值对象/密文信封、敏感命令与写入载荷、查询/加密/Worker
-  runtime/dashboard 端口分别拆入 `ports/admin/credentials/{value,commands,ports}.rs`；
+- Application Admin credentials port 已将闭集模型/分页、安全值与密文信封、Worker 运行记录、dashboard 聚合、
+  业务错误、敏感命令与写入载荷、查询/加密/Worker runtime/dashboard 端口分别拆入
+  `ports/admin/credentials/value/{model,secret,runtime,health,error,common}.rs`、`commands.rs` 和 `ports.rs`；
   `credentials.rs` 只保留模块装配和稳定导出，明文清零、密文封装和幂等 request hash 语义保持不变。
+- Application auction lifecycle service 已将服务状态/命令幂等事务编排、状态与 final proxy 计划、后继轮次与
+  稳定 schedule ID 分别拆入 `services/auction/lifecycle/{mod,plan,schedule}.rs`；Serializable 事务、
+  expected state-version fence、命令账本 replay、人工提前开放策略和 final proxy 资格冻结语义保持不变。
 - Application MoogleMail processing port 已将装备过滤、短生命周期邮件 envelope、拍卖入站写入、delivery
   outbox、业务决定和共享安全错误分别拆入 `ports/mail/processing/{filter,message,auction,delivery,decision,common}.rs`；
   `processing.rs` 只保留模块装配和稳定导出，正文/装备 key 清理、密钥封装前置和无密文 delivery 边界保持不变。
@@ -702,15 +717,21 @@ Public/Admin HTTP listener。
 - Admin Web 凭据页面已将页面加载/删除编排、录入与筛选、列表/状态/改名操作、删除确认和标签/幂等辅助分别拆入
   `app/identity/credentials/{page,form,table,dialogs,helpers}.rs`；`credentials.rs` 只负责组件装配和
   `page` 公共出口，secret 短生命周期与五语言文案边界保持不变。
-- Public Web 竞价命令组件已将普通竞价、代理授权和共用金额提示/命令状态/错误映射分别拆入
-  `app/auction/commands/{bid,proxy,common}.rs`；`commands.rs` 只保留稳定的 `BidFormInput`/`ProxyFormInput`
+- Public Web 竞价命令组件已将普通竞价、代理入口/创建表单/降低表单/成功反馈和共用金额提示/命令状态/错误映射分别拆入
+  `app/auction/commands/{bid,proxy/{mod,create,authorization,success},common}.rs`；`commands.rs` 只保留稳定的 `BidFormInput`/`ProxyFormInput`
   出口，command_id、服务端资格与版本 fence、焦点/关闭交互和五语言文案保持不变。
 - Application MoogleMail 处理器已将主题路由/注册换绑、装备读取过滤/拍卖入站和 delivery outbox 编排分别拆入
   `services/mail/processing/processor/{routing,auction,delivery}.rs`；`processor.rs` 只保留处理器配置、共享
   owner 状态和 `MailProcessor` 出口，幂等 request hash、密钥清理、事务 owner 与外部提交后置边界保持不变。
+- Storage MoogleMail 拍卖入站 owner 已将端口适配、装备/拍卖写入和审计/realtime 记录分别拆入
+  `database/mail_intake/{mod,intake,record}.rs`；命令账本、world/auction/玩家锁、密钥信封、pending lot、
+  预览版本和 preview 事件仍由同一个 PostgreSQL 竞价事务原子提交，明文邮件正文与装备 key 边界保持不变。
 - MoogleMail gateway 已将凭据候选池/失效轮换、配置/读取结果模型和 inbox/Sent/Balance 有界读取分别拆入
   `clients/mooglemail/gateway/{credentials,model,reader}.rs`；`gateway.rs` 只保留稳定公共导出与错误辅助，
   Cookie、world scope、allowlist、分页 cursor 和摘要/详情一致性证明边界保持不变。
+- MoogleMail parser reads owner 已将 inbox 分页、Sent 分页、Sent 详情附件/CoD 证明和 Item Shop 余额
+  分别拆入 `clients/mooglemail/parser/reads/{mod,inbox,sent,sent_detail,balance}.rs`；跨页 ID 去重、
+  摘要/详情身份一致性、脚本与可见余额一致性和敏感字段清理语义保持不变。
 - MoogleMail writer 已将 compose 状态模型、共用安全解析辅助、staged compose 证明和最终发送响应分类分别拆入
   `clients/mooglemail/writer/{model,common,compose,response}.rs`；`writer.rs` 只保留稳定公共导出，token
   生命周期、资产/身份 fence、write-unknown 和成功/明确失败证明保持不变。
@@ -723,6 +744,10 @@ Public/Admin HTTP listener。
 - PostgreSQL 生命周期计划已将 preview/open/cancel/final phase 的事务写入分别拆入
   `database/competition/postgres/lifecycle/plan/{preview,open,cancel,final_phase}.rs`；
   `plan.rs` 只保留动作分派，状态版本 fence、锁内物化/lot 转换、取消返还义务和代理子计划写入保持不变。
+- SQLite Lite 生命周期计划也已将 preview/open/cancel/final phase 的 `BEGIN IMMEDIATE` 内写入分别拆入
+  `database/sqlite/competition/transaction/lifecycle/plan/{mod,preview,open,cancel,final_phase}.rs`；
+  `plan/mod.rs` 只保留动作分派和共享状态版本校验，Lite 的串行写入、lot 状态转换、scheduled round fence
+  和 final phase 代理子计划原子性保持不变。
 - Forum 预览解析已将 HTML 抽取、纯文本切分、目录字段、命令/金额语法、内部帖子模型和结果辅助分别拆入
   `src/forum/parser/{html,text,catalog,commands,model,helpers}.rs`；`forum/mod.rs` 只保留适配器
   与稳定出口，A05 的有界输入、warning 排序和“只解析不远程写入”边界保持不变。
@@ -739,8 +764,13 @@ Public/Admin HTTP listener。
   重试释放分别拆入 `worker/runtime/recovery/{dispatch,activation,blacklist,observation,retry}.rs`；
   `runtime/recovery.rs` 只保留稳定出口，`pending → prepared → enqueued`、action fence 与
   `case → return → action → relist → refund` 顺序保持不变。
-- `auctionctl` Unix/systemd deployment control 已将生命周期编排、Controller/部署计划状态模型和路径、配置、unit
-  环境校验分别拆入 `bootstrap/deployment_control/unix/{lifecycle,model,validation}.rs`；
+- Storage recovery delivery action owner 已将 prepared 关联、enqueued 激活和外部结果/证明收口分别拆入
+  `database/recovery_scheduler/scheduler/actions/delivery/{mod,prepare,activation,observation}.rs`；
+  `delivery/mod.rs` 只负责装配，`pending → prepared → enqueued`、claim fencing、proof mismatch/manual reconcile
+  和终态 state-version fence 语义保持不变。
+- `auctionctl` Unix/systemd deployment control 已将跨角色生命周期编排、Controller 锁/预检/readiness/回滚操作、
+  部署计划状态模型和路径、配置、unit 环境校验分别拆入
+  `bootstrap/deployment_control/unix/{lifecycle,controller,model,validation}.rs`；
   `unix/mod.rs` 只保留父控制器包装，Worker → Admin → Public 启动、Public → Admin → Worker 停止、readiness、回滚和
   startup receipt 契约保持不变。
 - Worker 论坛回帖导入已将主题/身份与 lot 映射、竞价命令账本、MoogleMail 通知和完成/错误辅助分别拆入
@@ -754,12 +784,80 @@ Public/Admin HTTP listener。
   进程、来源预检和 stdin Cookie 输入分别拆入
   `runtime/postgres/artifacts/{environment,manifest,filesystem,process,source,input}.rs`；`artifacts.rs`
   只保留原有稳定导出，备份不可覆盖、passfile 清理、SHA-256 证据和外部命令脱敏边界保持不变。
+- `auctionctl` PostgreSQL command owner 已将 MoogleMail 凭据引导、retention/recovery 只读预检、备份/manifest
+  和 restore/legacy-v28/rebuild 专用 owner 桥接分别拆入
+  `runtime/postgres/commands/{mod,bootstrap,preflight,backup,delegation}.rs`；命令名称、PostgreSQL 能力缺失
+  错误、确认门槛、退出码和私有 receipt/证据边界保持不变。
+- `auctionctl` PostgreSQL restore owner 已将恢复编排、备份 pair/空库/恢复后 schema 证明、pg_restore 外部进程和
+  不可覆盖 receipt 分别拆入 `bootstrap/postgres_restore/{mod,verification,process,receipt}.rs`；预检后关闭自身
+  连接、TOCTOU 二次校验、single-transaction 参数和失败后保持角色停止的契约保持不变。
+- Storage PostgreSQL recovery preflight owner 已将预检结果/错误模型与只读事务策略、schema identity/迁移历史
+  查询分别拆入 `database/recovery_preflight/{mod,model,query}.rs`；`mod.rs` 只保留单一
+  REPEATABLE READ/READ ONLY 事务编排，数据库身份校验、空目标判断和恢复前安全边界保持不变。
+- Worker realtime consumer failure owner 已将失败记录与 replay 收口分别拆入
+  `database/realtime_consumer/failure/{mod,record,resolve}.rs`；`failure/mod.rs` 只保留稳定导出，
+  PostgreSQL 行锁、SQLite Lite 串行事务、stream 归属校验、重放序号 fence 和失败状态幂等语义保持不变。
+- Operations alert claim owner 已将新批次领取、过期租约回收和 PostgreSQL 行映射分别拆入
+  `database/operations_alert/claims/{mod,create,reclaim,mapping}.rs`；claim token/fencing、三次重试
+  上限、delivery 准备审计、正文摘要校验和目标 world/recipient 身份 fence 保持不变。
 - `auction-http` 共享会话适配器已将限流/认证守卫、应用错误映射、Cookie/Basic Auth/CSRF、安全响应
   和业务指标分别拆入 `routes/session/{guards,errors,cookies,responses,metrics}.rs`；`session.rs` 只保留
   模块装配与稳定出口，原有 session、CSRF、Cookie 属性、状态码和业务结果分类保持不变。
 - `auction-http` Admin route owner 已将会话、生命周期命令、结算/恢复报告和 recovery 人工确认分别拆入
   `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/admin.rs` 只保留稳定导出，原有
   Basic Auth、CSRF、command ID、版本 fence、状态码和安全投影边界保持不变。
+- `auction-http` routes 根装配已将 Public/Admin 路由表与健康探针分别拆入
+  `routes/surfaces.rs` 和 `routes/health.rs`；`routes/mod.rs` 只保留 HTTP 子模块、共享导入和稳定导出，
+  health/live、health/ready、SPA fallback、缓存层和所有冻结业务路径契约保持不变。
+- Public realtime HTTP owner 已将事件列表读取、WebSocket 连接/补发和事件页校验/DTO 映射分别拆入
+  `http/public/realtime/{mod,list,websocket,mapping}.rs`；`mod.rs` 只保留稳定 handler
+  出口，序号连续性、refetch_required、Public session、连接上限和 `/api/v1/events`/`/api/v1/ws`
+  契约保持不变。
+- Public Web API 根适配器已将服务端时间校准/GET 边界、lot 展示模型和拍卖/lot/竞价日志/价格历史
+  查询分别拆入 `api/{clock,model,queries}.rs`；`api/mod.rs` 只保留模块装配与稳定导出，Date
+  校准、分页参数、公开 DTO 映射和请求路径契约保持不变。
+- Storage service heartbeat 适配器已将 `HeartbeatStore` 分派、PostgreSQL 完整档、SQLite Lite
+  实现和闭集字段/错误映射分别拆入 `database/health/{mod,postgres,sqlite,mapping}.rs`；
+  observation sequence fence、数据库时钟/本地时钟、TTL、readiness 和安全 details 边界保持不变。
+- Worker runtime 根装配已将 `PersistentWorker` 端口/运行参数模型和启动、任务装配、drain/退出循环分别拆入
+  `worker/runtime/{model,runner}.rs`；`runtime/mod.rs` 继续保留跨 owner 的共享 helper 与稳定导出，
+  Worker control 状态、任务启动条件、排空顺序和失败关闭契约保持不变。
+- Worker control server owner 已将 server 生命周期、peer credential 过滤监听和 runtime 目录/实例锁/socket
+  身份安全分别拆入 `control/transport/server/{mod,listener,security}.rs`；Unix socket 单监听器、
+  UID/GID allowlist、inode 清理、group/0660 权限和优雅关闭契约保持不变。
+- Worker MoogleMail poll processing owner 已将 claim/续租/批次提交编排、远程 fetch retry 和单封业务 retry
+  分别拆入 `worker/mail/poll/processing/{mod,fetch,business}.rs`；cursor/lease fencing、失败退避、
+  stable command ID 和批次 commit 顺序保持不变。
+- Worker bootstrap 的 MoogleMail owner 已将凭据恢复、processor/delivery 装配、world poll runtime/gateway
+  和消息 envelope 映射分别拆入 `apps/worker/src/bootstrap/mail/{mod,credentials,processor,runtime,mapping}.rs`；
+  world 配置、凭据轮换、poll cursor/lease、外部错误分类和业务消息字段保持不变。
+- Contracts Public catalog owner 已将拍卖上下文、竞价/价格历史、补偿池、论坛镜像和 lot/装备响应分别拆入
+  `contracts/dto/public/catalog/{mod,auction,history,compensation,forum,lot}.rs`；serde 字段、
+  untagged preview/live 形状和 Public 稳定导出保持不变。
+- Config settings validation owner 已将拍卖策略、HTTP listener、安全/realtime/session、tracing 和路径解析分别拆入
+  `config/settings/validation/{mod,auction,listener,security,tracing,paths}.rs`；错误分类、
+  旧字段兼容解析、Unix 路径约束、OTLP header 禁止项和 SQLite URL 判定保持不变。
+- Storage Public 补偿池 owner 已将后端分派、PostgreSQL 批次/余额查询和单场账本查询分别拆入
+  `database/compensation/{mod,postgres/{mod,rounds,movements}}.rs`；分页 cursor、Serializable
+  快照、公开字段闭集和 SQLite Lite 能力缺失边界保持不变。
+- Storage Admin 装备录入 owner 已将同一 PostgreSQL 竞价事务中的事实写入与审计/realtime 追加分别拆入
+  `database/admin_intake/{mod,write,record}.rs`；命令账本占位、world/auction/player/equipment 锁、
+  pending lot、版本推进和提交原子性保持不变。
+- Domain proxy owner 已将代理快照/枚举、授权状态变更和追加式转换事实校验分别拆入
+  `domain/proxy/{model,authorization,transition}.rs`；`proxy/mod.rs` 只保留稳定导出，
+  Fast/Slow 状态机、版本推进、终态原因闭集和转换事实校验保持不变。
+- Config secrets owner 已将敏感字段/脱敏容器、PostgreSQL 维护密钥读取、MoogleMail `.keyenv`
+  解析和 Admin runtime 文件投影分别拆入 `config/settings/secrets/{model,maintenance,keyenv,runtime}.rs`；
+  未知字段拒绝、owner-only 权限、路径/symlink/hard-link 防护、双 Cookie 身份和所有现有 getter 契约保持不变。
+- Integrations equipment parser 已将来源 URL/allowlist 校验、旧版 HTML 页面、装备身份映射、统计值
+  规范化和共用文本边界分别拆入 `equipment/parser/{url,page,identity,stats,common}.rs`；
+  `parser/mod.rs` 只保留稳定出口，固定 origin/world 路径、闭集类别、可交易条件、字段上限和 InvalidSource 失败关闭边界保持不变。
+- Application Admin Users service 已将用户列表、创建/修改/改名回滚命令、幂等请求摘要和动作字段校验分别拆入
+  `services/admin/users/{query,commands,digest,validation}.rs`；`users/mod.rs` 只保留服务状态、
+  `AdminUserPort` 适配和稳定导出，key 生成/封装、state-version fence、命令 replay 和安全结果校验保持不变。
+- Application Admin Credentials service 已将安全投影查询、导入/改名/启停/删除命令、幂等请求摘要和字段校验分别拆入
+  `services/admin/credentials/{query,commands,digest,validation}.rs`；`credentials/mod.rs` 只保留服务状态、
+  `AdminCredentialPort` 适配和稳定导出，明文 secret 不进入摘要，state-version fence、命令 replay 和安全结果校验保持不变。
 - Storage Admin runtime 命令账本已将跨后端分派、PostgreSQL 只读查询、pending/applied/unknown/reopen
   事务、行映射和错误/SQLite Lite 能力边界分别拆入
   `database/commands/admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；`runtime.rs` 只保留
@@ -776,6 +874,19 @@ Public/Admin HTTP listener。
 - Storage Public 拍卖目录 owner 已将 PostgreSQL 查询、SQLite Lite 查询以及跨后端行映射/列表参数校验
   分别拆入 `database/auctions/{postgres,sqlite,mapping}.rs`；`auctions/mod.rs` 只保留
   `AuctionReader` 端口装配，cursor、总数和 Lite/完整档投影语义保持不变。
+- Storage PostgreSQL Admin Users command owner 已将 recovery 黑名单、用户创建、用户状态/身份变更和改名回滚
+  分别拆入 `database/users/admin/postgres/commands/{mod,blacklist,create,mutation,revert}.rs`；
+  `postgres.rs` 仍只负责 PostgreSQL 子模块装配，Serializable/advisory lock、命令账本、state-version fence、
+  密文信封和追加审计的单事务边界保持不变。
+- Storage SQLite Admin Users command owner 已将用户创建、用户状态/身份变更和改名回滚分别拆入
+  `database/users/admin/sqlite/commands/{mod,create,mutation,revert}.rs`；每个 owner 仍通过
+  `BEGIN IMMEDIATE` 保持命令账本、state-version fence、密文信封、黑名单历史和追加审计的串行写入边界。
+- Storage Admin Audit owner 已将请求校验/后端分派、PostgreSQL 查询、SQLite 查询以及 SQLite 行/时间映射分别拆入
+  `database/admin_audit/{mod,postgres,sqlite,mapping}.rs`；追加式读取、严格筛选、keyset/数字分页、同事务 total
+  和 metadata object 安全投影语义保持不变。
+- Storage Rules owner 已将跨后端 Public/Admin 规则安全快照读取与 SQLite 时间映射、PostgreSQL 规则发布事务
+  分别拆入 `database/rules/{mod,reads,transaction}.rs`；规则 revision CAS、`rules_admin_commands` 幂等账本、
+  Serializable 重试、追加审计和 SQLite Lite 只读/发布不支持边界保持不变。
 - Application Admin Users owner 已将安全用户投影/分页模型、用户与 recovery 命令/写入载荷、
   密钥/Users/recovery 窄端口和共享字段校验分别拆入 `ports/admin/users/{model,commands,ports,common}.rs`；
   `users/mod.rs` 只保留稳定导出，用户命令幂等、密文信封和 recovery 黑名单 proof 语义保持不变。
@@ -802,6 +913,18 @@ Public/Admin HTTP listener。
 - HTTP Admin Auctions owner 已将拍卖列表、创建命令、DTO 映射和共享错误边界分别拆入
   `http/admin/auctions/{list,commands,mapping,common}.rs`；`auctions/mod.rs` 只保留稳定处理器出口，
   旧分页、能力投影、零版本创建 fence、命令幂等和事务错误契约保持不变。
+- HTTP Admin Dashboard section owner 已将邮件、realtime、履约/投递/recovery、凭据、alerting 和安全降级
+  分别拆入 `http/admin/dashboard/sections/{mail,realtime,operations,credentials,alerting,fallback}.rs`；
+  `sections/mod.rs` 只保留聚合映射出口，unknown/source_unavailable、凭据 Worker 重启判断、时间字段和
+  section JSON 语义保持不变。
+- Storage PostgreSQL Admin lot owner 已将事务端口适配、锁内安全读取、lot 状态/起拍价变更、withdrawn-return
+  义务和审计/realtime 事件分别拆入 `database/competition/postgres/admin/lot/{transaction,read,mutation,obligation,events}.rs`；
+  `lot/mod.rs` 只负责装配，world → auction → lot 锁顺序、preview revision、state-version fence、命令账本和
+  同事务事件/履约义务语义保持不变。
+- Storage recovery return owner 已将退回事务编排、严格证据模型、world/obligation/金额校验、action 幂等写入和
+  PostgreSQL 行映射分别拆入 `database/recovery_scheduler/scheduler/returns/{record,model,validation,action,mapping}.rs`；
+  `returns/mod.rs` 只负责装配，Serializable、退回邮件 evidence mismatch 阻断、action ordinal 和 recovery
+ state-version fence 的同一事务边界保持不变。
 - Public HTTP reads owner 已将世界/拍卖目录、竞价与价格历史、lot 列表/详情分别拆入
   `routes/reads/{world,auctions,history,lots}.rs`；`reads/mod.rs` 只保留稳定处理器出口，游标/分页边界、
   公开投影校验和既有 Public URL/JSON 契约保持不变。
@@ -820,6 +943,10 @@ Public/Admin HTTP listener。
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
   `prepared → pending` 激活、审计追加和外部结果后置边界保持不变。
+- MoogleMail DeliveryTransport owner 已将入口 operation dispatch、通知/结算消息发送、凭据轮换和
+  return/take 动作前置身份校验与后置 proof 分别拆入
+  `clients/mooglemail/transport/delivery/{mod,messages,credentials,actions}.rs`；
+  payload 闭集、session 失效后的不确定结果分类、availability gate 和外部重试边界保持不变。
 - Storage Public account mapping owner 已将普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验分别拆入
   `database/account/mapping/{bids,proxy,common}.rs`；`mapping/mod.rs` 只保留稳定导出，公开账户边界、代理
   capability 派生和 PostgreSQL/SQLite 投影校验语义保持不变。
@@ -829,6 +956,9 @@ Public/Admin HTTP listener。
 - MoogleMail client owner 已将 typed target/配置装配、有界 GET/POST 与结果分类、固定 endpoint/响应
   判定/限速/敏感载荷辅助分别拆入 `clients/mooglemail/client/{mod,request,security}.rs`；Cookie、
   write-unknown、重定向/编码拒绝和请求间隔语义保持不变。
+- MoogleMail protocol owner 已将世界/操作/敏感值对象、固定 URL 构造和输入/endpoint 校验分别拆入
+  `clients/mooglemail/protocol/{mod,model,builder,validation}.rs`；Cookie、mmtoken、装备 key 的脱敏
+  生命周期，生产/本地 endpoint allowlist，以及 inbox/Sent/Balance/equipment 路径参数校验保持不变。
 - Config scheduling owner 已将标准 cron 公共模型、五字段范围/名称解析以及 `@every` Go duration
   解析分别拆入 `scheduling/standard_cron/{mod,fields,duration}.rs`；描述符、`TZ=`/`CRON_TZ=`、
   本地/UTC/IANA 时区和整秒触发语义保持不变。
@@ -857,9 +987,21 @@ Public/Admin HTTP listener。
 - Admin Web rules owner 已将页面加载、规则编辑 workspace、Markdown 预览、发布状态模型和字段辅助分别拆入
   `app/content/rules/{mod,page,workspace,preview,model,helpers}.rs`；语言切换、服务端规范化校验、revision
   fence、最近校验草稿限制和发布 command_id 复用语义保持不变。
+- Shared Web Markdown owner 已将共享展示器的模型、块级解析、行内解析和安全 DOM 渲染分别拆入
+  `components/markdown/{mod,model,blocks,inline,render}.rs`；Public 规则正文与 Admin 预览继续共用同一
+  Markdown/GFM 子集，原始 HTML 转义、HTTP(S)/相对路径/mailto 链接白名单和图片懒加载语义保持不变。
+- Public Web board owner 已将看板入口/数据编排、世界选择、实时连接刷新判定和历史导航分别拆入
+  `app/surface/board/{mod,data,world,realtime,navigation}.rs`；当前/历史拍卖读取、lot 快照对齐、
+  倒计时、事件断档回权威快照和 URL 导航语义保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。
+- Admin 拍卖生命周期动作 owner 已将列表行、确认对话框和动作可用性/文案模型分别拆入
+  `app/auction/auctions/actions/{row,dialog,model}.rs`；`actions/mod.rs` 只保留稳定组件出口，
+  capability 过滤、状态版本 fence、CSRF、command ID 重试和成功/失败反馈语义保持不变。
+- Public 价格历史筛选 owner 已将筛选主表单、日期/价格控件、错误模型和输入规范化分别拆入
+  `app/auction/reads/history/filters/{mod,components,model,validation}.rs`；K/M 金额转换、日期闭区间、
+  URL 查询字段和五语言错误文案语义保持不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；本轮明确复核了
   `http/admin/dashboard/sections.rs`（统一 dashboard section 安全投影适配）、`http/admin/lots.rs`
   （单一 lot 列表/详情边界）、`routes/public/competition.rs`（同一 competition command owner）和

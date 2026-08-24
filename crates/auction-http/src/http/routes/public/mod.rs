@@ -8,7 +8,7 @@ use super::*;
 
 #[path = "account.rs"]
 mod account;
-#[path = "competition.rs"]
+#[path = "competition/mod.rs"]
 mod competition;
 #[path = "session.rs"]
 mod session;

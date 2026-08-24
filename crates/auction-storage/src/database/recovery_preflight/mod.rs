@@ -1,65 +1,19 @@
 //! PostgreSQL 恢复前只读预检。
 //!
-//! 该模块迁移旧版 recovery 工具中可以安全自动化的 preflight 部分：确认连接目标、数据库
-//! 是否处于可写主节点、是否仍有其他连接、是否存在用户对象，以及 Auction schema/migration
-//! 身份。它不执行 `pg_restore`、创建或删除数据库，也不改变任何数据。
+//! 本模块只负责同一只读事务中的预检编排；结果模型、错误分类和数据库证据查询分别位于
+//! 子模块，预检不会执行恢复、创建/删除数据库或改变任何数据。
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use sqlx::Row;
-use thiserror::Error;
 
 use super::{PostgresMigrationInventory, PostgresSchemaIdentity, PostgresStore};
 
-/// 恢复前预检证据的机器可读格式标识。
-pub const RECOVERY_PREFLIGHT_FORMAT: &str = "auction-postgres-recovery-preflight.v1";
+mod model;
+mod query;
 
-/// PostgreSQL 恢复前预检结果。
-#[derive(Debug, Serialize)]
-pub struct PostgresRecoveryPreflight {
-    pub format: &'static str,
-    pub collected_at: DateTime<Utc>,
-    pub database_name: String,
-    pub server_version: String,
-    pub in_recovery: bool,
-    pub default_transaction_read_only: bool,
-    pub restore_write_possible: bool,
-    pub active_other_sessions: i64,
-    pub database_size_bytes: i64,
-    pub user_object_count: i64,
-    pub schema_identity_present: bool,
-    pub schema_identity: Option<PostgresSchemaIdentity>,
-    pub migration_history_present: bool,
-    pub migration: Option<PostgresMigrationInventory>,
-    pub restore_preflight_passed: bool,
-    pub notes: Vec<String>,
-}
-
-/// 恢复前预检失败的安全错误分类。
-#[derive(Debug, Error)]
-pub enum RecoveryPreflightError {
-    #[error("confirmed PostgreSQL database name is invalid")]
-    InvalidDatabaseName,
-
-    #[error("confirmed PostgreSQL database does not match the connected database")]
-    DatabaseMismatch { expected: String, actual: String },
-
-    #[error("Auction schema identity is present but invalid")]
-    SchemaIdentityInvalid,
-
-    #[error("failed to query PostgreSQL recovery preflight at {stage}")]
-    Query {
-        stage: &'static str,
-        #[source]
-        source: sqlx::Error,
-    },
-
-    #[error("failed to finish PostgreSQL recovery preflight transaction")]
-    Commit {
-        #[source]
-        source: sqlx::Error,
-    },
-}
+pub use model::{PostgresRecoveryPreflight, RECOVERY_PREFLIGHT_FORMAT, RecoveryPreflightError};
+use query::{query_error, validate_database_name};
+use query::{read_migration_inventory, read_schema_identity, set_read_only_limits};
 
 impl PostgresStore {
     /// 在只读、可重复读事务中收集恢复前预检证据。
@@ -264,103 +218,4 @@ impl PostgresStore {
             notes,
         })
     }
-}
-
-async fn set_read_only_limits(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<(), RecoveryPreflightError> {
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("transaction_policy", source))?;
-    sqlx::query("SET LOCAL statement_timeout = '5s'")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("statement_timeout", source))?;
-    sqlx::query("SET LOCAL lock_timeout = '1s'")
-        .execute(&mut **transaction)
-        .await
-        .map_err(|source| query_error("lock_timeout", source))?;
-    Ok(())
-}
-
-async fn read_schema_identity(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<PostgresSchemaIdentity, RecoveryPreflightError> {
-    let row = sqlx::query(
-        "SELECT application, baseline_version, installed_at
-         FROM public.auction_schema_identity
-         WHERE singleton
-         LIMIT 2",
-    )
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|source| query_error("schema_identity", source))?
-    .ok_or(RecoveryPreflightError::SchemaIdentityInvalid)?;
-    let application: String =
-        row.try_get("application").map_err(|source| query_error("schema_identity", source))?;
-    let baseline_version: i64 =
-        row.try_get("baseline_version").map_err(|source| query_error("schema_identity", source))?;
-    let installed_at: DateTime<Utc> =
-        row.try_get("installed_at").map_err(|source| query_error("schema_identity", source))?;
-    if application != "auction" || baseline_version <= 0 {
-        return Err(RecoveryPreflightError::SchemaIdentityInvalid);
-    }
-    Ok(PostgresSchemaIdentity { application, baseline_version, installed_at })
-}
-
-async fn read_migration_inventory(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<PostgresMigrationInventory, RecoveryPreflightError> {
-    let summary = sqlx::query(
-        "SELECT COUNT(*)::bigint AS migration_count,
-                COALESCE(MAX(version), 0)::bigint AS latest_version,
-                COALESCE(BOOL_AND(success), true) AS all_success
-         FROM public._sqlx_migrations",
-    )
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_summary", source))?;
-    let latest_description = sqlx::query_scalar::<_, String>(
-        "SELECT description
-         FROM public._sqlx_migrations
-         ORDER BY version DESC
-         LIMIT 1",
-    )
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(|source| query_error("migration_description", source))?;
-    let migration_count: i64 = summary
-        .try_get("migration_count")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let latest_version: i64 = summary
-        .try_get("latest_version")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let all_success: bool = summary
-        .try_get("all_success")
-        .map_err(|source| query_error("migration_summary", source))?;
-    let expected_version = super::postgres_expected_migration_version();
-    Ok(PostgresMigrationInventory {
-        migration_count,
-        latest_version,
-        latest_description,
-        all_success,
-        expected_version,
-        current: all_success && latest_version == expected_version,
-    })
-}
-
-fn query_error(stage: &'static str, source: sqlx::Error) -> RecoveryPreflightError {
-    RecoveryPreflightError::Query { stage, source }
-}
-
-fn validate_database_name(value: &str) -> Result<(), RecoveryPreflightError> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > 63
-        || value.chars().any(char::is_control)
-    {
-        return Err(RecoveryPreflightError::InvalidDatabaseName);
-    }
-    Ok(())
 }

@@ -4,9 +4,12 @@ TOML 配置解析与敏感配置加载。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；主/敏感配置解析集中在 `src/config/`，
 其中 `src/config/settings/` 按拍卖策略、Worker/MoogleMail、HTTP 安全、敏感文件、应用
-模型和校验职责拆分，`settings/app/` 再按输入模型、加载、公共 getter 和最终构建拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
-Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，校验再按同一 owner
-放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
+模型和校验职责拆分；通用设置再由 `settings/auction/{role,http,cache,policy,observability}.rs`
+分别持有进程角色、监听、缓存、拍卖策略和可观测性配置；敏感配置继续按 `settings/secrets/{model,maintenance,keyenv,runtime}.rs`
+划分模型、维护库密钥、`.keyenv` 和 Admin runtime owner；`settings/app/` 再按输入模型、加载、公共 getter 和最终构建拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
+Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，普通配置校验再按
+拍卖、listener、安全、tracing 和路径 owner 放入 `settings/validation/{mod,auction,listener,security,tracing,paths}.rs`，
+Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
 `src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML
 文件锁与原子替换集中在 `src/runtime/`。
 

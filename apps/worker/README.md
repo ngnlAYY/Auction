@@ -3,9 +3,10 @@
 持久化生命周期与集成 Worker 进程入口。
 
 源码布局：`src/main.rs` 只负责 Tokio 入口；`src/bootstrap/mod.rs` 负责配置、缓存和运行模式
-选择，`src/bootstrap/persistent.rs` 负责持久化 Worker 装配，`forum.rs`、`mail.rs`、
-`operations_alert.rs`、`fulfillment.rs` 分别负责外部集成与履约端口，`control.rs` 负责本地
-control/heartbeat/task 回收，`skeleton.rs` 负责无数据库启动骨架。
+选择，`src/bootstrap/persistent.rs` 负责持久化 Worker 装配，`forum.rs`、`operations_alert.rs`、
+`fulfillment.rs`、`control.rs` 和 `skeleton.rs` 分别负责各自的集成、履约、本地控制和无数据库启动 owner。
+MoogleMail 装配位于 `src/bootstrap/mail/`：`mod.rs` 只负责组合，`credentials.rs`、`processor.rs`、
+`runtime.rs` 和 `mapping.rs` 分别负责凭据恢复、业务/delivery、world poll runtime 和安全 envelope 映射。
 
 Worker **不监听业务写入 HTTP 表面**，只从配置读取数据库与缓存设置，然后运行
 `auction_jobs::run_persistent_with_settlement_until_shutdown()`；没有数据库时才保留不执行任务的启动骨架。

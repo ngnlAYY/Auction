@@ -9,7 +9,7 @@ use crate::api::fetch_admin_auctions;
 
 use super::AdminPanel;
 
-#[path = "auctions/actions.rs"]
+#[path = "auctions/actions/mod.rs"]
 mod actions;
 #[path = "auctions/create.rs"]
 mod create;

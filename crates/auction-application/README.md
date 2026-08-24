@@ -10,7 +10,9 @@
   拍卖仓储、竞价事务和 UTC 时钟核心端口；`src/ports/mod.rs` 只保留模块装配与稳定公共导出。
   使用 Rust 原生 async trait 返回类型，不依赖 `async-trait` 宏。
 - `src/services/auction/commands.rs`：拍卖创建用例，例如 `AuctionService::create`。
-- `src/services/auction/lifecycle.rs`：Admin/Worker 共享的拍卖状态迁移、命令账本和事务编排；Admin
+- `src/services/auction/lifecycle/`：Admin/Worker 共享的拍卖生命周期用例；`mod.rs` 持有服务状态、
+  命令幂等事务编排和端口实现，`plan.rs` 持有状态迁移与 final proxy 计划，`schedule.rs` 持有后继轮次、
+  安全日期计算和稳定 schedule ID；
   人工提前开放使用启动时冻结的策略，并在事务锁内读取计划开放时间后失败关闭，已到期的计划开放和
   Worker due 命令不受该人工授权开关影响。
 - `src/services/auction/competition.rs`：竞价用例，例如 `CompetitionService::place_bid`。
@@ -21,12 +23,19 @@
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
   错误类型和本地边界校验；`runtime_config.rs` 只负责稳定公共类型出口，不执行文件、数据库或网络操作。
-- `src/ports/admin/credentials/`：凭据安全值对象与密文信封位于 `value.rs`，敏感命令/写入载荷位于
-  `commands.rs`，查询、加密、Worker runtime 和 dashboard 端口位于 `ports.rs`；`credentials.rs`
-  只负责稳定公共类型出口，明文和密文的安全边界保持不变。
+- `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
+  dashboard 端口位于 `ports.rs`；`value/{model,secret,runtime,health,error,common}.rs` 分别负责闭集模型、
+  明文/密文安全值、运行记录、dashboard 聚合、业务错误和共用边界；`credentials.rs` 只负责稳定公共类型出口，
+  明文和密文的安全边界保持不变。
 - `src/ports/admin/users/`：安全用户投影、列表请求和分页位于 `model.rs`，用户/恢复命令、写入
   载荷和安全结果位于 `commands.rs`，密钥、Users 存储和 recovery 黑名单窄端口位于 `ports.rs`，
   共享字段校验位于 `common.rs`；`users/mod.rs` 只负责稳定公共类型出口。
+- `src/services/admin/users/`：`query.rs` 负责有界用户列表，`commands.rs` 负责创建/修改/改名回滚
+  事务编排，`digest.rs` 负责幂等请求摘要，`validation.rs` 负责动作字段校验；`mod.rs` 只保留
+  服务状态、构造函数和 `AdminUserPort` 适配。
+- `src/services/admin/credentials/`：`query.rs` 负责有界凭据安全投影，`commands.rs` 负责导入/改名/启停/删除
+  事务编排与安全结果重放，`digest.rs` 负责不包含明文 secret 的幂等请求摘要，`validation.rs` 负责命令字段校验；
+  `mod.rs` 只保留服务状态、构造函数和 `AdminCredentialPort` 适配。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
 - `src/ports/admin/intake/` 与 `src/services/admin/intake.rs`：`equipment.rs` 负责 URL/canonical JSON

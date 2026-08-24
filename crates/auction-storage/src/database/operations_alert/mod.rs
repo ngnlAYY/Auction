@@ -26,8 +26,6 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 #[cfg(feature = "postgres")]
 use sqlx::Row;
-#[cfg(feature = "postgres")]
-use uuid::Uuid;
 
 use super::DatabaseStore;
 #[cfg(feature = "postgres")]

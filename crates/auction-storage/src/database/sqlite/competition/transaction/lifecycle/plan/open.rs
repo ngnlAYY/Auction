@@ -1,0 +1,112 @@
+//! SQLite open 生命周期动作。
+
+use super::super::super::mapping::*;
+use super::super::super::*;
+
+pub(super) async fn apply_open_plan_sqlite(
+    transaction: &mut SqliteCompetitionTransaction,
+    command: &AuctionLifecycleCommand,
+    auction: &Auction,
+    manual_override: bool,
+) -> Result<(), CompetitionTransactionError> {
+    let scheduled_end_at =
+        auction.scheduled_end_at.ok_or_else(|| invalid_state("Lite 开拍计划缺少名义结束时间"))?;
+    if auction.effective_end_at != Some(scheduled_end_at) {
+        return Err(invalid_state("Lite 开拍计划的名义与有效结束时间不一致"));
+    }
+    let lot_rows = {
+        let connection = transaction.connection_mut()?;
+        sqlx::query(
+            "SELECT status, submission_id FROM lots WHERE auction_id = ? ORDER BY lot_number",
+        )
+        .bind(uuid_blob(auction.id.as_uuid()))
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(map_sql_error)?
+    };
+    if lot_rows.is_empty()
+        || lot_rows.iter().any(|row| {
+            row.try_get::<String, _>("status").ok().as_deref() != Some("pending")
+                || row.try_get::<Option<Vec<u8>>, _>("submission_id").ok().flatten().is_none()
+        })
+    {
+        return Err(CompetitionTransactionError::InvalidState);
+    }
+    let now = sqlite_timestamp(auction.updated_at);
+    let activated = {
+        let connection = transaction.connection_mut()?;
+        sqlx::query(
+            "UPDATE lots
+             SET status = 'live', current_price = start_price, effective_end_at = ?,
+                 slow_due_at = NULL, slow_authorization_id = NULL, slow_generation = 0,
+                 last_proxy_sequence = 0, state_version = state_version + 1, updated_at = ?
+             WHERE auction_id = ? AND status = 'pending'",
+        )
+        .bind(sqlite_timestamp(scheduled_end_at))
+        .bind(&now)
+        .bind(uuid_blob(auction.id.as_uuid()))
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sql_error)?
+        .rows_affected()
+    };
+    if usize::try_from(activated).ok() != Some(lot_rows.len()) {
+        return Err(CompetitionTransactionError::InvalidState);
+    }
+    let updated = {
+        let connection = transaction.connection_mut()?;
+        sqlx::query(
+            "UPDATE auctions
+             SET status = 'live', preview_opened_at = COALESCE(preview_opened_at, ?),
+                 preview_scheduled_at = CASE
+                     WHEN ? AND preview_scheduled_at > ? THEN ? ELSE preview_scheduled_at END,
+                 scheduled_open_at = CASE WHEN ? THEN ? ELSE scheduled_open_at END,
+                 opened_at = ?, scheduled_end_at = ?, effective_end_at = ?,
+                 state_version = ?, updated_at = ?
+             WHERE id = ? AND status = 'preview' AND state_version = ?
+               AND (preview_scheduled_at <= ? OR ?)
+               AND (scheduled_open_at <= ? OR ?)",
+        )
+        .bind(&now)
+        .bind(manual_override)
+        .bind(&now)
+        .bind(&now)
+        .bind(manual_override)
+        .bind(&now)
+        .bind(&now)
+        .bind(sqlite_timestamp(scheduled_end_at))
+        .bind(sqlite_timestamp(scheduled_end_at))
+        .bind(i64_version(auction.state_version, "Lite 开拍状态版本")?)
+        .bind(&now)
+        .bind(uuid_blob(auction.id.as_uuid()))
+        .bind(super::previous_lifecycle_version_sqlite(auction)?)
+        .bind(&now)
+        .bind(manual_override)
+        .bind(&now)
+        .bind(manual_override)
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sql_error)?
+    };
+    if updated.rows_affected() != 1 {
+        return Err(CompetitionTransactionError::InvalidState);
+    }
+    if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
+        let connection = transaction.connection_mut()?;
+        sqlx::query(
+            "UPDATE scheduled_rounds
+             SET open_command_id = ?, open_completed_at = ?,
+                 state_version = state_version + 1, updated_at = ?
+             WHERE auction_id = ? AND status = 'active'
+               AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL",
+        )
+        .bind(uuid_blob(command.command_id.as_uuid()))
+        .bind(&now)
+        .bind(&now)
+        .bind(uuid_blob(auction.id.as_uuid()))
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sql_error)?;
+    }
+    Ok(())
+}

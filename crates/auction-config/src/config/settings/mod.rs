@@ -6,25 +6,17 @@
 use std::{
     collections::BTreeSet,
     env, fmt, fs, io,
-    io::Read,
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use ipnet::IpNet;
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
-use auction_application::{AdminRuntimeDocument, AuctionPolicyTemplate, RecurringSchedule};
-use auction_domain::{
-    AdjustmentAnchor, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
-};
+use auction_application::{AdminRuntimeDocument, RecurringSchedule};
 
 use crate::StandardCronSchedule;
 

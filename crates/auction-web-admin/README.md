@@ -8,14 +8,16 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
 - `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
   安全投影、会话读取和命令请求。
 - `src/app/`：按相同 owner 分组的页面组件；拍卖列表在 `auction/auctions/` 内拆分创建、表格、
-  生命周期动作和共享映射，结算页在 `auction/settlement/` 内拆分拍卖选择、结算报告、recovery 交互和
+  生命周期动作 `actions/{row,dialog,model}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分拍卖选择、结算报告、recovery 交互和
   辅助映射，用户页在 `identity/users/` 内拆分创建/key、筛选表格、用户行和状态对话框，凭据页在
   `identity/credentials/` 内拆分页面编排、录入筛选、凭据表格、确认对话框和安全标签辅助，Dashboard 在
   `operations/dashboard/` 内拆分页面聚合、邮件控制、摘要指标和运行时详情；lot 页在 `auction/lots/` 内拆分
   页面加载、表格编排、单行更新、代理历史和展示辅助；邮件入站页在 `fulfillment/mail/` 内拆分页面筛选、
   轮询动作、入站表格、详情投影和状态标签；`shared/` 只保存本 surface
-  内真正通用的基础组件。`surface.rs` 只保留路由、资源初始化和页面装配，`surface/auth.rs` 持有
-  会话/登录/认证外壳，`surface/shared.rs` 持有跨页面状态面板、错误重试和时间格式化；realtime 页面在
+  内真正通用的基础组件。`surface/mod.rs` 只保留 surface 装配和资源初始化，`surface/router.rs` 持有
+  路由与页面入口包装器，`surface/auth/` 按会话状态编排、return 路径、重试/刷新、登录表单和认证后外壳拆分，
+  分别由 `auth/{mod,redirect,session,login,shell}.rs` 持有，`surface/shared.rs` 持有跨页面状态面板、
+  错误重试和时间格式化；realtime 页面在
   `operations/realtime/` 内拆分页面状态/replay、筛选器、lag 表/分页和 failure 表/分页；delivery outbox
   在 `fulfillment/deliveries/` 内拆分页面编排、状态筛选、列表/分页、动作对话框、共享状态模型和标签辅助；
   规则页面在 `content/rules/` 内拆分页面加载、编辑 workspace、Markdown 预览、发布状态模型和字段辅助。

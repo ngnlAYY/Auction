@@ -5,12 +5,15 @@ Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
 `auction-http/src/assets/routes.rs` 的后端入口清单。
 
 - `src/main.rs`：薄启动入口。
-- `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求，
-  不接触存储模型。
+- `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求；
+  `clock.rs` 负责服务端时间校准和 GET 边界，`model.rs` 负责 lot 展示模型，`queries.rs` 负责
+  拍卖、lot、竞价日志和价格历史查询，`mod.rs` 只保留模块装配与稳定导出，不接触存储模型。
 - `src/app/`：按相同 owner 分组的公开端路由、页面和交互组件；`surface/` 进一步按路由、
-  看板、目录、页面和查询状态拆分跨页面职责；`surface/catalog/` 继续按表格、竞价动作、行组件
-  和展示映射拆分；`surface/pages/` 将历史列表、lot 详情/竞价、通用重试和路由薄包装分开；
-  `auction/commands/` 将普通竞价、代理授权和共用命令状态/错误映射分开；
+  看板、目录、页面和查询状态拆分跨页面职责；`surface/board/` 将看板入口、世界选择、实时刷新、
+  拍卖数据和历史导航分开；`surface/catalog/` 继续按表格、竞价动作、行组件
+  和展示映射拆分；`surface/pages/` 将历史列表、lot 详情/竞价、通用重试和路由薄包装分开；价格历史筛选器在
+  `auction/reads/history/filters/` 内进一步拆分表单控件、错误模型和输入规范化；
+  `auction/commands/` 将普通竞价、代理入口/创建表单/降低表单/成功反馈和共用命令状态/错误映射分开；
   `shared/` 只保存本 surface 内真正通用的基础组件。
 - `assets/public.css`：公开端 surface 样式，沿用旧版公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。

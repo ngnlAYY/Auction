@@ -7,7 +7,7 @@ use super::*;
 
 #[path = "lifecycle/context.rs"]
 mod context;
-#[path = "lifecycle/plan.rs"]
+#[path = "lifecycle/plan/mod.rs"]
 mod plan;
 #[path = "lifecycle/record.rs"]
 mod record;

@@ -3,7 +3,9 @@
 稳定的对外契约：REST/流 DTO、错误编码、分页和版本约定。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；`src/contracts/mod.rs` 负责统一导出，
-`src/contracts/dto/` 再按通用、Public 和 Admin 以及各自业务职责细分 DTO。
+`src/contracts/dto/` 再按通用、Public 和 Admin 以及各自业务职责细分 DTO。Public catalog
+继续由 `dto/public/catalog/{mod,auction,history,compensation,forum,lot}.rs` 分别持有拍卖上下文、
+竞价/价格历史、补偿池、论坛镜像和 lot/装备响应，`catalog/mod.rs` 只保留稳定导出。
 
 浏览器和外部客户端只能看到这里的类型。数据库记录和领域聚合都不得直接当作对外 DTO，
 转换在边界完成。

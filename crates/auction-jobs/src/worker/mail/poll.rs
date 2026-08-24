@@ -10,7 +10,7 @@ pub(super) mod cycle;
 pub(super) mod failure;
 #[path = "../mail/poll/mapping.rs"]
 pub(super) mod mapping;
-#[path = "../mail/poll/processing.rs"]
+#[path = "../mail/poll/processing/mod.rs"]
 pub(super) mod processing;
 #[path = "../mail/poll/types.rs"]
 pub(super) mod types;

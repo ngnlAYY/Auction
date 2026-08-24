@@ -10,7 +10,7 @@ use super::*;
 #[path = "actions/claim.rs"]
 mod claim;
 #[cfg(feature = "postgres")]
-#[path = "actions/delivery.rs"]
+#[path = "actions/delivery/mod.rs"]
 mod delivery;
 #[cfg(feature = "postgres")]
 #[path = "actions/resolution.rs"]

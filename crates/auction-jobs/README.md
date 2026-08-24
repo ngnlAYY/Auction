@@ -5,8 +5,11 @@ Worker 任务编排：调度、重试、游标推进和生命周期任务。
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`，
 并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/` 和 `operations/`
 分组。Worker control 传输层独立归属 `src/control/`，入口只负责装配；协议 DTO、HTTP handler、
-Unix socket server 和 Admin client 分别位于 `src/control/transport/{protocol,handlers,server,client}.rs`，
-由该目录统一拥有 Unix socket 安全与 peer allowlist；调度器只通过 `WorkerControlHandle` 接入状态与唤醒端口。
+Unix socket server 和 Admin client 分别位于 `src/control/transport/{protocol,handlers,server/{mod,listener,security},client}.rs`，
+其中 server 再按生命周期、peer allowlist 和 Unix socket 文件安全划分 owner；调度器只通过
+`WorkerControlHandle` 接入状态与唤醒端口。
+`src/worker/runtime/` 的 `mod.rs` 只保留跨 owner 装配与稳定导出，`model.rs` 管理 Worker 端口/运行参数，
+`runner.rs` 管理启动、任务装配、drain 顺序和任务退出错误；具体业务循环继续由相邻 owner 模块拥有。
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
 指数退避失败记录和由装配根注入的 shutdown future；它通过生命周期应用端口执行 preview/open，
@@ -53,12 +56,14 @@ Operations alert 的 scan、dispatch 和 reconcile 现在按各自一分钟 cade
 reconcile 上限与通知批次上限保持一致。
 Fulfillment 与 Recovery 也已从共享全局 tick 拆为独立循环：两者立即执行首轮，再按一分钟加最多
 五秒抖动调度，使用各自 100 条批次、8 并发、60 秒 lease/持久化重试和 30 秒单项总时限。
-Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Recovery 保持
+Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Recovery 的
+`worker/recovery/loop/{health,cases,returns,actions,resolutions,common}.rs` 保持
 `case → return → action → relist → refund` 顺序，各 phase 失败互不跳过，且不会终止其它 owner。
 MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller，每个 poller 使用独立
 `mailbox_key`、游标、claim/fencing 和固定指标 label；共享凭据池只在 Worker 内复用，不合并
 不同世界的持久化状态。轮询实现位于 `src/worker/mail/poll/`，由 `types.rs`、`cycle.rs`、
-`processing.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、租约处理、事实映射和失败退避。
+`processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
+租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。
 每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
 默认 `* * * * *`，并兼容旧版描述符、`@every`、本地时区和显式 IANA 时区前缀。远程读取与单封业务处理按
 各自次数/超时有界重试，共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；

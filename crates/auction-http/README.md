@@ -2,15 +2,18 @@
 
 Public 与 Admin 的 HTTP 表面适配器。
 
-- `src/http/routes/mod.rs`：`public_router()` / `admin_router()`、健康检查和冻结契约路径注册；
+- `src/http/routes/mod.rs`：HTTP 子模块装配、稳定导出和跨 surface 共享类型；`routes/surfaces.rs`
+  持有 `public_router()` / `admin_router()` 与冻结契约路径注册，`routes/health.rs` 持有健康检查；
   `routes/admin.rs` 只保留稳定出口，Admin 会话、生命周期、结算/恢复报告和恢复确认分别位于
-  `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/public/` 按会话、账户读取和竞价命令拆分 Public
+  `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/public/` 按会话、账户读取和竞价命令拆分 Public，
+  其中竞价与代理命令位于 `routes/public/competition/{bid,proxy}.rs`；
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
   安全逻辑，`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
   lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
   `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
-  surface 导出边界。
+  surface 导出边界。`src/http/public/realtime/` 再按列表读取、WebSocket 生命周期/补发和事件校验/映射
+  拆分为 `{mod,list,websocket,mapping}.rs`，保持 `/api/v1/events` 与 `/api/v1/ws` 契约不变。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
 - `src/http/shared/state/`：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
@@ -19,9 +22,10 @@ Public 与 Admin 的 HTTP 表面适配器。
   访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
   `no-cache`/`no-store` 响应策略。
 - `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
-- `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections.rs` 负责 mail、
-  realtime、credentials、delivery、fulfillment、recovery 和 alerting section 聚合，`mapping.rs`
-  负责 health/process/worker 与稳定 Admin 响应 DTO 映射，不改变 JSON 字段或状态码契约。
+- `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections/{mail,realtime,
+  operations,credentials,alerting,fallback}.rs` 分别负责邮件、realtime、履约/投递/recovery、凭据、
+  alerting 和 unknown 降级 section，`mapping.rs` 负责 health/process/worker 与稳定 Admin 响应 DTO 映射，
+  不改变 JSON 字段或状态码契约。
 - `src/http/admin/users/`：用户列表、创建/属性命令、黑名单与改名状态动作、DTO 映射和共享错误边界
   分别由 `list.rs`、`commands.rs`、`status.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责
   稳定处理器出口；Admin Users 的 session、CSRF、命令 ID 和版本 fence 契约保持不变。

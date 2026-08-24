@@ -8,7 +8,9 @@
 `src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令和共享映射
 分别位于同目录的 `postgres/{lifecycle,admin,mapping}.rs`，竞价 owner 拆入
 `postgres/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`；其中管理事务再按
-拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,lot,mapping}.rs`。SQLite Lite 竞价事务
+拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,mapping}.rs` 与 `postgres/admin/lot/`；
+`lot/` 再按事务适配、锁内读取、状态变更、withdrawn-return 义务和审计/realtime 事件拆到
+`{mod,transaction,read,mutation,obligation,events}.rs`。SQLite Lite 竞价事务
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期和映射仍由
 `transaction/{lifecycle,mapping}.rs` 持有；竞价 owner 进一步拆入
 `transaction/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`，分别负责命令账本、
@@ -46,25 +48,31 @@ SQLite Lite 对确认能力明确返回不支持。
 结算事务在 `src/database/settlement/mod.rs` 装配，由 `transaction.rs`、`facts.rs`、`obligations.rs`
 和 `mapping.rs` 分别负责锁内流程、事实/账本、义务/恢复和映射；它根据冻结的 recovery 策略，为
 每个获胜 lot 与结算义务同事务建立 `settlement_recoveries`。`src/database/recovery_scheduler/scheduler.rs`
-只负责调度分派，due return、推进、action 和映射分别位于同目录的
-`scheduler/{returns,advance,actions,mapping}.rs`；其中 action 再按领取、投递和收口拆到
-`scheduler/actions/{claim,delivery,resolution}.rs`，负责
+只负责调度分派，推进、action 和映射分别位于同目录的
+`scheduler/{advance,actions,mapping}.rs`，退回 owner 位于 `scheduler/returns/`，再按事务编排、
+证据模型、校验、action 幂等写入和行映射拆到 `returns/{mod,record,model,validation,action,mapping}.rs`；
+其中 action 再按领取、投递和收口拆到
+`scheduler/actions/{claim,resolution}.rs` 与
+`scheduler/actions/delivery/{mod,prepare,activation,observation}.rs`，负责
 PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
 owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
 `src/database/users/admin/` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计；
 其中 `mod.rs` 持有跨后端分派与共享校验，PostgreSQL `postgres.rs` 只负责子模块装配，
-`postgres/{commands,reads,mapping}.rs` 分别持有命令写入、查询读取和行/幂等结果映射，
-SQLite `sqlite.rs` 同样只负责子模块装配，`sqlite/{commands,reads,mapping}.rs` 持有对应的
-命令写入、查询读取和行/事务映射，
+`postgres/commands/{mod,blacklist,create,mutation,revert}.rs` 持有按命令职责拆分的写入流程，
+`postgres/reads.rs` 与 `postgres/mapping.rs` 分别持有查询读取和行/幂等结果映射，
+SQLite `sqlite.rs` 同样只负责子模块装配，`sqlite/commands/{mod,create,mutation,revert}.rs` 持有
+按命令职责拆分的串行写入，`sqlite/{reads,mapping}.rs` 持有对应的查询读取和行/事务映射，
 并由 recovery owner 记录完成 proof。`recovery_commands/commands/{confirm,relist}.rs` 同时持有 PostgreSQL 完整档的
 relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
 Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
 满足后再以时间和状态 fence 关闭 recovery；两种推进都追加 worker 审计。SQLite Lite 对 recovery
 完整档明确返回不支持，不能由报告读取适配器临时补写。
-Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs` 与
-`src/database/blacklist/mod.rs` 持有，PostgreSQL 与 SQLite 均只返回公开字段。
+Public 规则文档由 `src/database/rules/` 持有：`mod.rs` 只做模块装配，`reads.rs` 负责
+Public/Admin 的跨后端安全快照读取与 SQLite 时间映射，PostgreSQL 规则发布事务位于
+`transaction.rs`；规则 revision、公开字段校验和 SQLite Lite 只读边界保持显式。黑名单安全
+投影由 `src/database/blacklist/mod.rs` 持有，PostgreSQL 与 SQLite 均只返回公开字段。
 Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，PostgreSQL 与 SQLite
 分别由各自子目录的 `mod.rs`、`list.rs`、`detail.rs` 和 `mapping.rs` 拥有列表、详情与行映射；
 顶层 `mapping.rs` 继续负责跨后端安全投影、装备字段校验和 Lite 时间/UUID 转换。两套后端的
@@ -82,8 +90,9 @@ Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 
 `postgres.rs` 与 `sqlite.rs` 分别负责快照查询；`mapping/` 下的 `bids.rs`、`proxy.rs` 和
 `common.rs` 分别维护普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验，`mapping/mod.rs`
 只负责稳定导出，公开账户边界、代理能力和结果不变量保持不变。
-Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
-同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
+Public 补偿池与单场账本由 `src/database/compensation/` 持有；`mod.rs` 只负责后端分派，
+`postgres/{rounds,movements}.rs` 分别拥有批次/余额和单场账本查询。PostgreSQL 完整档在同一
+Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
 Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
 `sync.rs` 只做主题同步端口装配，领取租约、快照读取、发布/失败状态推进和输入校验分别位于
 `sync/{claims,snapshot,publishing,validation}.rs`；`reply.rs` 只做回帖端口装配，已发布主题与
@@ -101,8 +110,8 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
-`transaction/lifecycle/{context,plan,record}.rs` 分别负责上下文/资格读取、计划写入和审计/realtime
-事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。
+`transaction/lifecycle/{context,plan/{mod,preview,open,cancel,final_phase},record}.rs` 分别负责上下文/资格读取、
+按状态动作的计划写入和审计/realtime 事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin/create.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
@@ -111,24 +120,28 @@ Lite 明确返回能力不支持。策略模板会在同一事务中同时写入
 竞价/生命周期仍读取的 `default_start_price`、软截止、取消截止、slow 间隔列，避免配置与
 遗留规则分叉。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在真正开放前
 保持空值，以兼容旧系统创建行为。
-Admin 规则读取与发布由 `src/database/rules/mod.rs` 和 `src/database/commands/mod.rs` 持有：
+Admin 规则读取与发布由 `src/database/rules/` 和 `src/database/commands/mod.rs` 持有：
+`rules/{mod,reads,transaction}.rs` 分别保留模块装配、跨后端读取和 PostgreSQL 写事务；
 PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin_commands` 幂等账本和
 追加审计；SQLite Lite 读取规则安全快照，但发布明确返回能力不支持。
 Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
-`src/database/admin_intake/mod.rs` 持有：PostgreSQL 在 Serializable 事务中按 world、intake
-target、玩家和外部装备身份加锁，写入装备、`equipment_secrets`、后台投稿、lot、版本、命令
-账本、审计和 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
+`src/database/admin_intake/{mod,write,record}.rs` 持有：PostgreSQL 在 Serializable 事务中按 world、intake
+target、玩家和外部装备身份加锁，`write.rs` 写入装备、`equipment_secrets`、后台投稿、lot、版本和命令
+账本，`record.rs` 追加审计与 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
-`src/database/competition/postgres/admin/lot.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
-版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
-事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
+`src/database/competition/postgres/admin/lot/` 持有：`transaction.rs` 负责事务端口适配，`read.rs`、
+`mutation.rs`、`obligation.rs` 和 `events.rs` 分别负责锁内读取、lot 状态/价格变更、withdrawn-return
+义务及审计/realtime 事件；事务按 world → auction → lot 加锁，完成 lot/auction 版本 fence、预览
+revision 和命令账本。withdrawn 同一事务创建 `withdrawn_return` obligation 与 pending fulfillment，
+SQLite Lite 明确返回不支持。
 Admin runtime 命令账本由 `src/database/commands/admin/runtime.rs` 装配，跨后端分派、PostgreSQL
 只读查询、pending/applied/unknown/reopen 事务、行映射和错误/SQLite Lite 能力边界分别位于
 `admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；命令摘要、状态 fence、审计
 追加和未知结果重放语义保持不变。
-Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
-`audit_records`，支持安全精确筛选、keyset/数字分页和 metadata object 校验；数字页的总数与
-记录在同一读取事务内取得，不返回原始数据库行。
+Admin 审计读取由 `src/database/admin_audit/` 持有：`mod.rs` 只做请求校验与后端分派，
+`postgres.rs`、`sqlite.rs` 和 `mapping.rs` 分别负责两套查询与 SQLite 行/时间转换；两套数据库
+都只读取追加式 `audit_records`，支持安全精确筛选、keyset/数字分页和 metadata object 校验；
+数字页的总数与记录在同一读取事务内取得，不返回原始数据库行。
 Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有；用户管理写入由
 `src/database/users/admin/` 持有。两套数据库都在用户命令事务内完成 state-version fence、
 命令账本、用户投影、密文 key 信封、`user_renames`、`user_blacklist_history` 和追加审计；
@@ -158,9 +171,14 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
 `admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
 轮询与入站查询、行和安全 metadata 映射；父 `mod.rs` 只保留跨后端端口分派。
-服务心跳由 `src/database/health/mod.rs` 持有：PostgreSQL 使用数据库时钟和
-observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和同一 sequence fence；
-两个后端都只返回 dashboard 所需的安全字段，details 原文不会离开存储边界。
+MoogleMail 拍卖入站事务由 `src/database/mail_intake/mod.rs` 装配，`intake.rs` 持有命令账本、world/auction/玩家锁、
+装备与密钥信封、pending lot 和预览版本写入，`record.rs` 持有追加审计与 preview realtime 事件；父模块只保留
+端口适配，所有写入仍在同一个 PostgreSQL 竞价事务中完成，明文邮件正文和装备 key 不进入 storage。
+服务心跳由 `src/database/health/` 持有：`mod.rs` 只负责 `HeartbeatStore` 端口分派，
+`postgres.rs` 与 `sqlite.rs` 分别负责两个后端的条件 upsert/读取，`mapping.rs` 负责闭集
+身份、状态和安全错误映射。PostgreSQL 使用数据库时钟和 observation sequence 条件 upsert，
+SQLite Lite 使用本地数据库时钟和同一 sequence fence；两个后端都只返回 dashboard 所需的安全字段，
+details 原文不会离开存储边界。
 `src/database/audit_health/mod.rs` 对当前所有追加审计 INSERT 的返回错误进行进程内饱和计数，
 不保存 SQL、错误原文或业务数据。`DatabaseStore` 的进程 readiness 每次重新检查数据库和全部
 内嵌 migration，并在该计数非零后失败关闭；同一窄端口同时供 HTTP readiness 与服务心跳使用。
@@ -181,8 +199,8 @@ public 外键依赖及待人工决定项。SQL 使用 5 秒 statement timeout、
 超过安全上限时失败关闭而不静默截断；realtime stream 和外键列表分别带覆盖/截断标记。返回值只
 包含安全统计，固定标记不评估资格且不授予授权；该模块没有归档、删除、恢复或写事务入口。
 
-PostgreSQL 恢复目标的只读预检由 `src/database/recovery_preflight/mod.rs` 持有：在同一
-`REPEATABLE READ READ ONLY` 事务中检查当前数据库身份、主节点/默认只读状态、其他连接、数据库
+PostgreSQL 恢复目标的只读预检由 `src/database/recovery_preflight/{mod,model,query}.rs` 持有：`mod.rs` 只负责
+同一 `REPEATABLE READ READ ONLY` 事务中的编排，检查当前数据库身份、主节点/默认只读状态、其他连接、数据库
 大小、用户 schema、类型、关系、函数、扩展及其他 PostgreSQL 用户对象、schema identity 和迁移
 历史，并固定区分“基础条件通过”和“archive/恢复内容已验证”。它不调用 `pg_restore`，不停止
 外部连接，不创建/删除数据库，也不覆盖已有对象。`PostgresStore::close` 只供运维装配在预检后
@@ -280,10 +298,12 @@ SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
 `replay.rs` 公共结果映射、`replay/postgres.rs` 完整档事务和 `replay/sqlite.rs` Lite 事务
 拆分，`common.rs` 负责共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
 `src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`stream.rs`、`read.rs`、
-`acknowledgement.rs`、`failure.rs` 分别负责 stream 目录、事件读取、连续游标确认和 failure
-生命周期，`common.rs` 负责共享校验与 Lite 串行写事务。
+`acknowledgement.rs`、`failure/` 分别负责 stream 目录、事件读取、连续游标确认和 failure
+生命周期；`failure/mod.rs` 负责稳定导出，`failure/record.rs` 负责失败记录，
+`failure/resolve.rs` 负责 replay 收口，`common.rs` 负责共享校验与 Lite 串行写事务。
 operations alert 由 `src/database/operations_alert/` 分层持有：`mod.rs` 负责 source/store
-端口和后端分派，`snapshot.rs` 负责 signal/fingerprint 与冻结批次快照，`claims.rs` 负责
-批次 lease/fencing，`delivery.rs` 负责三次 Create 尝试、cooldown 与 delivery 终态投影，
+端口和后端分派，`snapshot.rs` 负责 signal/fingerprint 与冻结批次快照，`claims/` 负责
+批次 lease/fencing（`claims/mod.rs` 负责导出，`create.rs` 负责新批次领取，`reclaim.rs` 负责
+过期租约回收，`mapping.rs` 负责 PostgreSQL 行映射），`delivery.rs` 负责三次 Create 尝试、cooldown 与 delivery 终态投影，
 `health.rs` 负责水位健康快照，`common.rs` 负责共享的安全映射；普通失败只释放为无错误码的
 pending，cooldown 只在 delivery 入队确认事务中生效，SQLite Lite 不提供该完整档能力。

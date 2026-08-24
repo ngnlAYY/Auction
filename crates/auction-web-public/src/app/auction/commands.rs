@@ -7,7 +7,7 @@
 mod bid;
 #[path = "commands/common.rs"]
 mod common;
-#[path = "commands/proxy.rs"]
+#[path = "commands/proxy/mod.rs"]
 mod proxy;
 
 pub(super) use bid::{BidFormInput, bid_form};

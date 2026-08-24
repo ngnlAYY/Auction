@@ -11,12 +11,17 @@
   `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
   gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
   inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
-  其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明，
+  其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明；
+  `parser/reads/{mod,inbox,sent,sent_detail,balance}.rs` 进一步隔离 inbox、Sent 摘要、Sent 详情和
+  Item Shop 余额读取，
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
+  其中 `transport/delivery/{mod,messages,credentials,actions}.rs` 分别负责入口分派、通知/结算消息、
+  凭据轮换和 return/take 动作证明；
   `client/mod.rs` 负责 typed target、配置和装配，`client/request.rs` 负责有界 GET/POST 及结果分类，
   `client/security.rs` 负责固定 endpoint、响应类型、session 判定、限速和敏感载荷清零；
-  `protocol.rs`、`forms.rs`、`writer/` 和 `sender.rs` 分别拥有
-  协议值对象、表单、写入状态/compose 证明与发送编排；`writer.rs` 只负责稳定导出，
+  `protocol/`、`forms.rs`、`writer/` 和 `sender.rs` 分别拥有
+  协议值对象、表单、写入状态/compose 证明与发送编排；`protocol/{mod,model,builder,validation}.rs`
+  分别负责协议出口、值对象、安全 URL 构造和输入/endpoint 校验；`writer.rs` 只负责稳定导出，
   `writer/{model,common,compose,response}.rs` 按状态模型、共用安全解析、compose 证明和最终响应分类拆分。
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
   inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
@@ -59,8 +64,9 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
 时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责有界主题正文，回帖命令仍先
 经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。
 - `src/equipment/`：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
-  请求间隔和完整请求超时，`reader.rs` 负责无代理/无重定向读取与应用端口适配，`parser.rs` 只
-  解析旧装备页、URL 和闭集属性，`model.rs` 负责 canonical JSON 事实与稳定指纹。关闭业务
+  请求间隔和完整请求超时，`reader.rs` 负责无代理/无重定向读取与应用端口适配，`parser/` 按
+  `url.rs`、`page.rs`、`identity.rs`、`stats.rs` 和 `common.rs` 分别解析来源 URL、旧装备页、
+  闭集属性、统计值和共用边界，`parser/mod.rs` 只保留稳定出口；`model.rs` 负责 canonical JSON 事实与稳定指纹。关闭业务
   allowlist 也不会放宽固定 origin、精确 world 路径、响应类型、content encoding 和最终响应
   origin 校验。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
   装备 ID 的密文信封，明文 key 不进入应用写端口。

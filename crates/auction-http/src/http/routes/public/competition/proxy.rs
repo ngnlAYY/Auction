@@ -1,0 +1,276 @@
+//! Public 代理创建与降价命令 handler。
+
+use super::super::*;
+
+/// 创建代理授权命令；命令账本和代理快照提交后返回旧契约要求的完整命令投影。
+pub(crate) async fn create_proxy_authorization(
+    State(state): State<PublicApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    Path(lot_id): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = session_guard(&state, &headers, address, true, false) {
+        return response;
+    }
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "代理授权不接受查询参数")
+            .into_response();
+    }
+    let Ok(lot_uuid) = Uuid::parse_str(&lot_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
+            .into_response();
+    };
+    if lot_uuid.is_nil() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
+            .into_response();
+    }
+    let identity = match authenticated_public_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
+    let input: CreateProxyAuthorizationRequest = match serde_json::from_slice(&body) {
+        Ok(input) => input,
+        Err(_) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+                .into_response();
+        }
+    };
+    if input.command_id.is_nil() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+            .into_response();
+    }
+    let mode = match input.mode.as_str() {
+        "" => None,
+        "fast" => Some(ProxyMode::Fast),
+        "slow" => Some(ProxyMode::Slow),
+        _ => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_proxy_mode", "代理模式无效")
+                .into_response();
+        }
+    };
+    let maximum_amount = match BidAmount::new(input.maximum_amount) {
+        Ok(amount) => amount,
+        Err(DomainError::InvalidAmount { .. }) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_maximum_amount", "代理上限无效")
+                .into_response();
+        }
+        Err(_) => return internal_error(),
+    };
+    let request_hash = match RequestHash::from_request("create_proxy", lot_uuid, &input) {
+        Ok(request_hash) => request_hash,
+        Err(_) => return internal_error(),
+    };
+    let Some(commands) = state.commands() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "竞价服务暂不可用",
+        )
+        .into_response();
+    };
+    let command_id = CommandId::from_uuid(input.command_id);
+    let lot_id = LotId::from_uuid(lot_uuid);
+    let bidder_id = UserId::from_uuid(identity.user_id);
+    let command = CreateProxyCommand {
+        command_id,
+        lot_id,
+        bidder_id,
+        maximum_amount,
+        mode,
+        request_hash,
+        request_id: request_id(&headers),
+    };
+    let command_started = Instant::now();
+    let plan = match commands.create_proxy(command).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            observe_public_business(
+                &state,
+                BusinessEvent::Proxy,
+                business_outcome_for_competition_error(&error),
+                command_started,
+            );
+            return map_competition_error(error);
+        }
+    };
+    observe_public_business(
+        &state,
+        BusinessEvent::Proxy,
+        BusinessOutcome::Success,
+        command_started,
+    );
+    let Some(expected_state) = plan.proxy_states.iter().find(|state| {
+        state.lot_id == lot_id
+            && state.user_id == bidder_id
+            && state.creation_command_id == command_id
+    }) else {
+        return internal_error();
+    };
+    let Some(account) = state.account() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "账户代理暂不可用",
+        )
+        .into_response();
+    };
+    let proxy = match account
+        .public_user_proxy_by_id(lot_uuid, expected_state.id.as_uuid(), identity.user_id)
+        .await
+    {
+        Ok(Some(proxy)) if valid_command_proxy_identity(&proxy, expected_state) => proxy,
+        Ok(_) => return internal_error(),
+        Err(_) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "账户代理暂不可用",
+            )
+            .into_response();
+        }
+    };
+    let Some(data) = map_proxy_command_response(proxy, &plan, expected_state, bidder_id) else {
+        return internal_error();
+    };
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("代理授权已创建", data)))
+        .into_response()
+}
+
+/// 降低代理授权上限命令；命令账本保证重试不会重复追加转换事实，并返回完整命令投影。
+pub(crate) async fn lower_proxy_authorization(
+    State(state): State<PublicApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    Path((lot_id, authorization_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = session_guard(&state, &headers, address, true, false) {
+        return response;
+    }
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "代理授权不接受查询参数")
+            .into_response();
+    }
+    let Ok(lot_uuid) = Uuid::parse_str(&lot_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
+            .into_response();
+    };
+    let Ok(authorization_uuid) = Uuid::parse_str(&authorization_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_authorization_id", "代理授权 ID 无效")
+            .into_response();
+    };
+    if lot_uuid.is_nil() || authorization_uuid.is_nil() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
+            .into_response();
+    }
+    let identity = match authenticated_public_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
+    let input: LowerProxyAuthorizationRequest = match serde_json::from_slice(&body) {
+        Ok(input) => input,
+        Err(_) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+                .into_response();
+        }
+    };
+    if input.command_id.is_nil() {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+            .into_response();
+    }
+    let new_maximum = match BidAmount::new(input.maximum_amount) {
+        Ok(amount) => amount,
+        Err(DomainError::InvalidAmount { .. }) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_maximum_amount", "代理上限无效")
+                .into_response();
+        }
+        Err(_) => return internal_error(),
+    };
+    let request_hash = match RequestHash::from_request("lower_proxy", lot_uuid, &input) {
+        Ok(request_hash) => request_hash,
+        Err(_) => return internal_error(),
+    };
+    let Some(commands) = state.commands() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "竞价服务暂不可用",
+        )
+        .into_response();
+    };
+    let command_id = CommandId::from_uuid(input.command_id);
+    let lot_id = LotId::from_uuid(lot_uuid);
+    let bidder_id = UserId::from_uuid(identity.user_id);
+    let authorization_id = ProxyAuthorizationId::from_uuid(authorization_uuid);
+    let command = LowerProxyCommand {
+        command_id,
+        lot_id,
+        bidder_id,
+        authorization_id,
+        new_maximum,
+        request_hash,
+        request_id: request_id(&headers),
+    };
+    let command_started = Instant::now();
+    let plan = match commands.lower_proxy(command).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            observe_public_business(
+                &state,
+                BusinessEvent::Proxy,
+                business_outcome_for_competition_error(&error),
+                command_started,
+            );
+            return map_competition_error(error);
+        }
+    };
+    observe_public_business(
+        &state,
+        BusinessEvent::Proxy,
+        BusinessOutcome::Success,
+        command_started,
+    );
+    let Some(expected_state) = plan.proxy_states.iter().find(|state| {
+        state.id == authorization_id && state.lot_id == lot_id && state.user_id == bidder_id
+    }) else {
+        return internal_error();
+    };
+    if plan.final_lot.lot_id != lot_id
+        || !plan.proxy_transitions.iter().any(|transition| {
+            transition.authorization_id == authorization_id && transition.command_id == command_id
+        })
+    {
+        return internal_error();
+    }
+    let Some(account) = state.account() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "账户代理暂不可用",
+        )
+        .into_response();
+    };
+    let proxy = match account
+        .public_user_proxy_by_id(lot_uuid, expected_state.id.as_uuid(), identity.user_id)
+        .await
+    {
+        Ok(Some(proxy)) if valid_command_proxy_identity(&proxy, expected_state) => proxy,
+        Ok(_) => return internal_error(),
+        Err(_) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "账户代理暂不可用",
+            )
+            .into_response();
+        }
+    };
+    let Some(data) = map_proxy_command_response(proxy, &plan, expected_state, bidder_id) else {
+        return internal_error();
+    };
+    (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("代理授权上限已降低", data)))
+        .into_response()
+}

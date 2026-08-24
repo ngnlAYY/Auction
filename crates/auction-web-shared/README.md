@@ -7,6 +7,9 @@
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
+- `src/components/markdown/{mod,model,blocks,inline,render}.rs`：共享 Markdown/GFM 展示器的
+  模型、块级解析、行内解析和安全 DOM 渲染；原始 HTML 只作为转义文本展示，链接目标经过
+  协议白名单校验。
 - `src/format/mod.rs`：Public/Admin 共用且不参与业务判断的金额展示规则。
 
 ## 语言选择

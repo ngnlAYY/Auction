@@ -1,6 +1,6 @@
 #[path = "admin/auction.rs"]
 mod admin_auction;
-#[path = "admin/credentials.rs"]
+#[path = "admin/credentials/mod.rs"]
 mod admin_credentials;
 #[path = "admin/intake.rs"]
 mod admin_intake;
@@ -12,7 +12,7 @@ mod admin_mail;
 mod admin_rules;
 #[path = "admin/runtime_config.rs"]
 mod admin_runtime_config;
-#[path = "admin/users.rs"]
+#[path = "admin/users/mod.rs"]
 mod admin_users;
 #[path = "auction/commands.rs"]
 mod auction;
@@ -20,7 +20,7 @@ mod auction;
 mod competition;
 #[path = "settlement/fulfillment/mod.rs"]
 mod fulfillment;
-#[path = "auction/lifecycle.rs"]
+#[path = "auction/lifecycle/mod.rs"]
 mod lifecycle;
 #[path = "mail/processing.rs"]
 mod mail_processing;

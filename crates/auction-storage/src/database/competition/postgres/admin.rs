@@ -7,7 +7,7 @@ use super::*;
 
 #[path = "admin/create.rs"]
 mod create;
-#[path = "admin/lot.rs"]
+#[path = "admin/lot/mod.rs"]
 mod lot;
 #[path = "admin/mapping.rs"]
 mod row_mapping;

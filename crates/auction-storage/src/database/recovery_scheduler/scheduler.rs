@@ -38,7 +38,7 @@ mod actions;
 mod advance;
 #[path = "scheduler/mapping.rs"]
 mod mapping;
-#[path = "scheduler/returns.rs"]
+#[path = "scheduler/returns/mod.rs"]
 mod returns;
 
 impl RecoveryWorkStore for DatabaseStore {

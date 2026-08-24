@@ -1,0 +1,17 @@
+//! 进程配置各领域校验器的装配入口。
+
+mod auction;
+mod listener;
+mod paths;
+mod security;
+mod tracing;
+
+pub(super) use auction::validate_auction;
+pub(super) use listener::resolve_http_listener;
+pub(super) use paths::{
+    database_url_is_sqlite, resolve_config_path, resolve_secrets_path, resolve_worker_paths,
+};
+pub(super) use security::{
+    validate_cache, validate_http_security, validate_realtime, validate_session,
+};
+pub(super) use tracing::validate_tracing;

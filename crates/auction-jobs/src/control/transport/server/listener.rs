@@ -1,0 +1,50 @@
+//! Worker control Unix socket 的 peer 凭据过滤监听器。
+
+use super::*;
+
+#[cfg(unix)]
+pub(super) struct PeerCheckedUnixListener {
+    pub(super) listener: tokio::net::UnixListener,
+    pub(super) allowed_peer_uids: HashSet<u32>,
+    pub(super) allowed_peer_gids: HashSet<u32>,
+}
+
+#[cfg(unix)]
+impl axum::serve::Listener for PeerCheckedUnixListener {
+    type Io = tokio::net::UnixStream;
+    type Addr = tokio::net::unix::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            match self.listener.accept().await {
+                Ok((stream, address)) => match stream.peer_cred() {
+                    Ok(credential)
+                        if self.allowed_peer_uids.contains(&credential.uid())
+                            || self.allowed_peer_gids.contains(&credential.gid()) =>
+                    {
+                        return (stream, address);
+                    }
+                    Ok(credential) => {
+                        tracing::warn!(
+                            peer_uid = credential.uid(),
+                            peer_gid = credential.gid(),
+                            peer_pid = ?credential.pid(),
+                            "Worker control 拒绝不在显式 UID/GID allowlist 内的 peer"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "Worker control 无法读取 peer credential");
+                    }
+                },
+                Err(error) => {
+                    tracing::error!(error = %error, "Worker control accept 失败");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}

@@ -10,7 +10,8 @@
 - `src/bidding/competition/`：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan/` 按
   `mod.rs` 规划入口、`validation.rs` 结果/输入校验、`ordinary.rs` 普通竞价、`proxy.rs`
   代理生命周期和 `state.rs` 软截止/状态收口拆分职责，`competition/mod.rs` 只负责稳定导出。
-- `src/proxy/mod.rs`：Fast/Slow 代理授权状态与追加式转换事实。
+- `src/proxy/`：`model.rs` 定义 Fast/Slow 代理授权和转换事实，`authorization.rs` 负责授权
+  创建/状态变更，`transition.rs` 负责追加式转换事实校验；`mod.rs` 只保留稳定导出。
 - `src/identity/mod.rs`：带类型的 UUID 包装，避免不同标识符互相混用。
 - `src/errors/mod.rs`：领域错误分类。
 - `src/settlement/`：结算领域 owner；`policy.rs` 维护策略/恢复参数，`amount.rs` 维护非负金额

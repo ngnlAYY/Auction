@@ -7,6 +7,8 @@ use std::{path::PathBuf, time::Duration};
 
 use super::ControllerOptions;
 
+#[path = "controller.rs"]
+mod controller;
 #[path = "lifecycle.rs"]
 mod lifecycle;
 #[path = "model.rs"]

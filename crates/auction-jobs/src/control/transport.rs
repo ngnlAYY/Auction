@@ -42,7 +42,7 @@ mod client;
 mod handlers;
 #[path = "transport/protocol.rs"]
 mod protocol;
-#[path = "transport/server.rs"]
+#[path = "transport/server/mod.rs"]
 mod server;
 
 use client::*;
