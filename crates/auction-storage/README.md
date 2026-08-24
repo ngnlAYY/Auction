@@ -64,6 +64,9 @@ Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs`
 Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，`postgres.rs` 与
 `sqlite.rs` 分别负责查询，`mapping.rs` 负责跨后端安全投影和字段校验；两套后端的 Lite/完整
 能力差异在各自 SQL 适配器中显式保留。
+Public 拍卖目录读取由 `src/database/auctions/` 持有：`mod.rs` 只做跨后端端口装配，
+`postgres.rs` 与 `sqlite.rs` 分别负责查询，`mapping.rs` 负责行到安全投影的转换和列表参数
+校验；cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。
 Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责查询和后端行映射，`mapping.rs` 负责混合游标、名称筛选、
 统计结果及公共字段校验；SQLite Lite 的成交状态边界仍由其 SQL 明确表达。
@@ -75,7 +78,8 @@ Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
 同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
 Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
-`sync.rs` 持有主题发布 claim/fencing、快照和证明，`reply.rs` 只做回帖端口装配，已发布主题与
+`sync.rs` 只做主题同步端口装配，领取租约、快照读取、发布/失败状态推进和输入校验分别位于
+`sync/{claims,snapshot,publishing,validation}.rs`；`reply.rs` 只做回帖端口装配，已发布主题与
 lot/身份/代理查询、命令账本和扫描游标分别位于 `reply/{queries,commands,cursor,validation}.rs`。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable

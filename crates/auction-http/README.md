@@ -3,7 +3,8 @@
 Public 与 Admin 的 HTTP 表面适配器。
 
 - `src/http/routes/mod.rs`：`public_router()` / `admin_router()`、健康检查和冻结契约路径注册；
-  `routes/admin.rs` 持有 Admin 命令，`routes/public/` 按会话、账户读取和竞价命令拆分 Public
+  `routes/admin.rs` 只保留稳定出口，Admin 会话、生命周期、结算/恢复报告和恢复确认分别位于
+  `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/public/` 按会话、账户读取和竞价命令拆分 Public
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
   安全逻辑，`routes/session.rs` 只负责装配与稳定出口；`routes/reads.rs` 持有 Public 只读处理器；

@@ -750,9 +750,16 @@ Public/Admin HTTP listener。
   预检/迁移后置证明、证据模型和不可覆盖回执分别拆入
   `postgres_legacy_v28/{backup,verification,adoption,common,model,receipt}.rs`；`mod.rs` 只保留稳定出口，
   写库前二次 artifact 校验、逐字确认、失败关闭和 receipt 发布顺序保持不变。
+- `auctionctl` PostgreSQL artifact owner 已将外部命令环境、manifest/hash、文件系统安全、pg_dump/restore
+  进程、来源预检和 stdin Cookie 输入分别拆入
+  `runtime/postgres/artifacts/{environment,manifest,filesystem,process,source,input}.rs`；`artifacts.rs`
+  只保留原有稳定导出，备份不可覆盖、passfile 清理、SHA-256 证据和外部命令脱敏边界保持不变。
 - `auction-http` 共享会话适配器已将限流/认证守卫、应用错误映射、Cookie/Basic Auth/CSRF、安全响应
   和业务指标分别拆入 `routes/session/{guards,errors,cookies,responses,metrics}.rs`；`session.rs` 只保留
   模块装配与稳定出口，原有 session、CSRF、Cookie 属性、状态码和业务结果分类保持不变。
+- `auction-http` Admin route owner 已将会话、生命周期命令、结算/恢复报告和 recovery 人工确认分别拆入
+  `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/admin.rs` 只保留稳定导出，原有
+  Basic Auth、CSRF、command ID、版本 fence、状态码和安全投影边界保持不变。
 - Storage Admin runtime 命令账本已将跨后端分派、PostgreSQL 只读查询、pending/applied/unknown/reopen
   事务、行映射和错误/SQLite Lite 能力边界分别拆入
   `database/commands/admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；`runtime.rs` 只保留
@@ -763,6 +770,12 @@ Public/Admin HTTP listener。
 - Storage 论坛回帖 owner 已将 PostgreSQL 主题、lot/身份/代理查询、命令账本、扫描游标和输入/能力校验
   分别拆入 `database/forum/reply/{queries,commands,cursor,validation}.rs`；`reply.rs` 只保留
   跨后端端口分派，论坛命令幂等、锁内读取、扫描游标递增和 SQLite Lite 能力边界保持不变。
+- Storage 论坛主题同步 owner 已将 PostgreSQL 领取租约、快照一致性读取、发布/失败状态推进和输入/能力校验
+  分别拆入 `database/forum/sync/{claims,snapshot,publishing,validation}.rs`；`sync.rs` 只保留
+  跨后端端口分派，claim token/fencing、REPEATABLE READ 快照和 SQLite Lite 能力边界保持不变。
+- Storage Public 拍卖目录 owner 已将 PostgreSQL 查询、SQLite Lite 查询以及跨后端行映射/列表参数校验
+  分别拆入 `database/auctions/{postgres,sqlite,mapping}.rs`；`auctions/mod.rs` 只保留
+  `AuctionReader` 端口装配，cursor、总数和 Lite/完整档投影语义保持不变。
 - Storage MoogleMail delivery outbox 已将跨后端端口分派、命令闭集校验、普通 outbox 入队、recovery
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
