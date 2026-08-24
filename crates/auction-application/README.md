@@ -27,6 +27,9 @@
   脱敏录入写入计划、key 信封端口、命令摘要和 PostgreSQL 事务编排；明文 key 不进入写端口。
 - `src/ports/auction/policy.rs`：拍卖创建时冻结的经济、结算和恢复策略模板；配置适配器只
   转换为该类型，应用服务和 PostgreSQL 创建事务共享同一份策略来源。
+- `src/ports/auction/queries/`：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
+  成交价格历史分别由 `world.rs`、`auction.rs`、`lot.rs`、`account.rs`、`bid_log.rs` 和
+  `price_history.rs` 持有；`queries.rs` 只负责稳定公共导出，不把数据库记录暴露给表面层。
 - `src/ports/admin/forum.rs`：Admin 论坛 HTML/文本预览的有界输入、catalog/posts/warnings
   安全结果和解析端口；该端口只表达本地预览，不承担远程发布或数据库写入。
 - `src/ports/admin/audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
@@ -40,8 +43,9 @@
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
 - `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
-  `processing/processor.rs`、`processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、
-  业务路由/delivery、命令幂等辅助和起拍价/装备身份解析。
+  `processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、命令幂等辅助和起拍价/装备身份解析；
+  `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
+  delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
   不把告警结果混入拍卖或外部传输事实。

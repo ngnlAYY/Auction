@@ -699,9 +699,42 @@ Public/Admin HTTP listener。
 - Admin dashboard HTTP adapter 已将认证后请求编排、各 owner section 聚合和稳定 response DTO 映射分别拆入
   `http/admin/dashboard/mod.rs`、`sections.rs` 和 `mapping.rs`；路由、状态码、unknown/source_unavailable
   降级语义和 health/process JSON 字段保持不变。
+- Admin Web 凭据页面已将页面加载/删除编排、录入与筛选、列表/状态/改名操作、删除确认和标签/幂等辅助分别拆入
+  `app/identity/credentials/{page,form,table,dialogs,helpers}.rs`；`credentials.rs` 只负责组件装配和
+  `page` 公共出口，secret 短生命周期与五语言文案边界保持不变。
+- Public Web 竞价命令组件已将普通竞价、代理授权和共用金额提示/命令状态/错误映射分别拆入
+  `app/auction/commands/{bid,proxy,common}.rs`；`commands.rs` 只保留稳定的 `BidFormInput`/`ProxyFormInput`
+  出口，command_id、服务端资格与版本 fence、焦点/关闭交互和五语言文案保持不变。
+- Application MoogleMail 处理器已将主题路由/注册换绑、装备读取过滤/拍卖入站和 delivery outbox 编排分别拆入
+  `services/mail/processing/processor/{routing,auction,delivery}.rs`；`processor.rs` 只保留处理器配置、共享
+  owner 状态和 `MailProcessor` 出口，幂等 request hash、密钥清理、事务 owner 与外部提交后置边界保持不变。
+- MoogleMail gateway 已将凭据候选池/失效轮换、配置/读取结果模型和 inbox/Sent/Balance 有界读取分别拆入
+  `clients/mooglemail/gateway/{credentials,model,reader}.rs`；`gateway.rs` 只保留稳定公共导出与错误辅助，
+  Cookie、world scope、allowlist、分页 cursor 和摘要/详情一致性证明边界保持不变。
+- MoogleMail writer 已将 compose 状态模型、共用安全解析辅助、staged compose 证明和最终发送响应分类分别拆入
+  `clients/mooglemail/writer/{model,common,compose,response}.rs`；`writer.rs` 只保留稳定公共导出，token
+  生命周期、资产/身份 fence、write-unknown 和成功/明确失败证明保持不变。
 - Storage PostgreSQL rebuild adapter 已将公开预检/结果/错误模型、catalog 采集与安全预检、advisory-lock
   guard/破坏性执行、动态标识符与 locale SQL quoting 分别拆入 `database/rebuild/{model,catalog,guard,sql}.rs`；
   `rebuild/mod.rs` 只保留稳定导出，删库前保护、mutation 状态和重建后 OID/定义校验保持不变。
+- Application Public query ports 已将世界/拍卖目录、lot/装备投影、账户代理、竞价日志和成交价格历史
+  分别拆入 `ports/auction/queries/{world,auction,lot,account,bid_log,price_history}.rs`；
+  `queries.rs` 只保留稳定公共出口，分页、keyset cursor、公开投影和安全字段边界保持不变。
+- PostgreSQL 生命周期计划已将 preview/open/cancel/final phase 的事务写入分别拆入
+  `database/competition/postgres/lifecycle/plan/{preview,open,cancel,final_phase}.rs`；
+  `plan.rs` 只保留动作分派，状态版本 fence、锁内物化/lot 转换、取消返还义务和代理子计划写入保持不变。
+- Forum 预览解析已将 HTML 抽取、纯文本切分、目录字段、命令/金额语法、内部帖子模型和结果辅助分别拆入
+  `src/forum/parser/{html,text,catalog,commands,model,helpers}.rs`；`forum/mod.rs` 只保留适配器
+  与稳定出口，A05 的有界输入、warning 排序和“只解析不远程写入”边界保持不变。
+- Admin 邮件入站页已将页面筛选/加载、轮询动作、入站表格、详情投影和状态标签分别拆入
+  `app/fulfillment/mail/{page,actions,table,detail,helpers}.rs`；`mail.rs` 只保留页面出口，
+  五语言文案、闭集筛选立即生效、分页、command ID 和安全详情投影保持不变。
+- PostgreSQL recovery command 的范围 owner 已将数据库行模型、命令回放、锁定读取和状态/证据校验分别拆入
+  `database/recovery_commands/commands/scope/{model,replay,locks,validation}.rs`；`scope.rs` 只保留
+  内部稳定出口，Serializable 锁定顺序、命令 replay fence、证据闭集和退款激活语义保持不变。
+- Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
+  `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
+  URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
   owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
   和 Web owner 不再列为未完成项。

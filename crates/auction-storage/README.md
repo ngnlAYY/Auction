@@ -31,6 +31,7 @@ Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
 快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 只做 PostgreSQL 完整档恢复命令分派；
 确认写入、范围快照、guarded relist 和共享映射分别位于 `recovery_commands/commands/{confirm,scope,relist,mapping}.rs`，
+其中 scope 又按数据库行模型、命令回放、锁定读取和状态/证据校验拆入 `scope/{model,replay,locks,validation}.rs`；
 共同完成 Serializable 确认写入、证据重校验、退款激活、命令账本、审计和预览目录事件；
 SQLite Lite 对确认能力明确返回不支持。
 结算事务在 `src/database/settlement/mod.rs` 装配，由 `transaction.rs`、`facts.rs`、`obligations.rs`
@@ -78,7 +79,8 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
 拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配；其 `lifecycle/` 子目录的
-`context.rs`、`plan.rs` 和 `record.rs` 分别负责上下文锁定、计划写入和审计/实时事件记录：管理命令锁定拍卖后校验
+`context.rs`、`plan/` 和 `record.rs` 分别负责上下文锁定、生命周期计划写入和审计/实时事件记录，其中
+`plan/{preview,open,cancel,final_phase}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，

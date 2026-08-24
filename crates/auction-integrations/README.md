@@ -8,10 +8,13 @@
   目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和 Cookie 候选集，
   `client.rs` 持有固定 origin HTTP 协议事务，`gateway.rs` 持有凭据轮换与 Forum 端口，
   `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
+  gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
+  inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
   其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明，
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
-  `protocol.rs`、`forms.rs`、`writer.rs` 和 `sender.rs` 分别拥有
-  协议值对象、表单、写入状态与发送编排。
+  `protocol.rs`、`forms.rs`、`writer/` 和 `sender.rs` 分别拥有
+  协议值对象、表单、写入状态/compose 证明与发送编排；`writer.rs` 只负责稳定导出，
+  `writer/{model,common,compose,response}.rs` 按状态模型、共用安全解析、compose 证明和最终响应分类拆分。
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
   inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
   Bot/测试 Cookie 的有序切换。写入侧已实现 compose/detail typed target、表单闭集、无重定向
@@ -62,8 +65,9 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
   的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入
   与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由
   PostgreSQL 完整档提供，SQLite 不返回伪造的 Lite 能力。
-- `src/forum/mod.rs`：把 HTML 或纯文本论坛内容解析为有界的 catalog、posts、warnings 和命令
-  预览；解析器只在内存中工作。远程主题读写由 `src/clients/ehentai/` 拥有，回帖导入仍由
+- `src/forum/mod.rs`：只负责 ForumPreviewAdapter 和渲染/解析出口；`src/forum/parser/` 按
+  HTML 抽取、纯文本切分、目录、命令/金额、内部模型和结果辅助拆分有界的 catalog、posts、warnings
+  和命令预览。解析器只在内存中工作。远程主题读写由 `src/clients/ehentai/` 拥有，回帖导入仍由
   `auction-jobs` 通过应用端口执行。
 
 ## 边界约束
