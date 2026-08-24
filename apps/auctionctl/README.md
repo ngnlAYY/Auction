@@ -4,7 +4,8 @@
 
 源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
 `src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分，
-`src/bootstrap/deployment_control/` 按总控编排、systemd 适配、readiness 探针和 receipt 文件边界拆分，
+`src/bootstrap/deployment_control/` 按总控装配、Unix 生命周期、systemd 适配、readiness 探针和 receipt
+文件边界拆分，其中 `deployment_control/unix/mod.rs` 只承载 Unix/systemd 生命周期编排，
 `src/bootstrap/postgres_restore.rs` 独立持有 PostgreSQL 恢复边界，
 `src/bootstrap/postgres_legacy_v28/` 持有 Auction-BF v28 的专用备份、离线校验、确认和接管回执，
 `src/bootstrap/postgres_rebuild/` 持有默认只读的破坏性重建编排和不可覆盖 receipt 发布。

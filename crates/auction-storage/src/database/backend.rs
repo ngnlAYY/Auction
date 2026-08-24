@@ -1,0 +1,74 @@
+//! 数据库后端枚举与统一存储错误。
+
+use std::fmt;
+
+use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DatabaseBackend {
+    Postgres,
+    Sqlite,
+}
+
+impl DatabaseBackend {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::Sqlite => "sqlite",
+        }
+    }
+
+    pub fn from_url(database_url: &str) -> Result<Self, StorageError> {
+        let scheme = database_url.split(':').next().unwrap_or_default().to_ascii_lowercase();
+
+        match scheme.as_str() {
+            "postgres" | "postgresql" => Ok(Self::Postgres),
+            "sqlite" => Ok(Self::Sqlite),
+            _ => Err(StorageError::UnsupportedScheme(scheme)),
+        }
+    }
+}
+
+impl fmt::Display for DatabaseBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error(
+        "unsupported database URL scheme {0:?}; expected postgres://, postgresql://, or sqlite:"
+    )]
+    UnsupportedScheme(String),
+
+    #[error("failed to connect to {backend} database")]
+    Connection {
+        backend: DatabaseBackend,
+        #[source]
+        source: sqlx::Error,
+    },
+
+    #[error("{backend} storage support is not compiled; enable its Cargo feature")]
+    BackendNotCompiled { backend: DatabaseBackend },
+
+    #[error("failed to migrate {backend} database")]
+    Migration {
+        backend: DatabaseBackend,
+        #[source]
+        source: sqlx::migrate::MigrateError,
+    },
+
+    #[error("failed to inspect {backend} migration target")]
+    MigrationTarget {
+        backend: DatabaseBackend,
+        #[source]
+        source: sqlx::Error,
+    },
+
+    #[error("refusing to migrate an unknown non-empty {backend} database")]
+    UnknownDatabase { backend: DatabaseBackend },
+
+    #[error("migrations are not available for the {backend} backend yet")]
+    MigrationsUnavailable { backend: DatabaseBackend },
+}

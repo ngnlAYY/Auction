@@ -659,6 +659,21 @@ Public/Admin HTTP listener。
 - Public HTTP handler 已进一步按 owner 拆入 `routes/public/session.rs`、`account.rs` 和
   `competition.rs`，`routes/public/mod.rs` 只保留模块装配与稳定导出；路由路径、状态码和 DTO
   契约未改变。
+- Worker 配置模型已进一步按 Auction、control、Delivery、Fulfillment、Recovery、Forum、
+  MoogleMail 和 Operations Alert 拆入 `config/settings/worker/`，`worker/mod.rs` 只负责装配与
+  稳定导出；TOML 字段、默认值、校验入口和公共类型路径未改变。
+- Settlement domain 已进一步按 policy、amount、facts、obligations 和 plan 拆入
+  `auction-domain/src/settlement/`，`settlement/mod.rs` 只负责稳定导出；策略校验、金额守恒、
+  结算曲线与义务闭集规则保持原实现。
+- Competition domain 已进一步按触发器模型与竞价规划拆入 `auction-domain/src/bidding/competition/`，
+  `competition/mod.rs` 只负责稳定导出；普通竞价、代理、慢速/最终阶段、软截止和版本校验规则保持原实现。
+- `auctionctl` deployment control 已将 Unix/systemd 生命周期实现移入
+  `bootstrap/deployment_control/unix/mod.rs`，根 `mod.rs` 只保留宿主机兼容入口和参数边界；启动顺序、
+  readiness、回滚、状态与回执契约保持不变。
+- `auction-storage/src/database/mod.rs` 已将后端错误与 URL 识别、Store/迁移/readiness、连接池指标、
+  PostgreSQL 连接池和 SQLite 连接池拆入 `backend.rs`、`store.rs`、`pool_metrics.rs`、
+  `postgres_store.rs` 与 `sqlite_store.rs`；根文件只保留模块装配、兼容导出和既有根级测试，
+  `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
   owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
   和 Web owner 不再列为未完成项。

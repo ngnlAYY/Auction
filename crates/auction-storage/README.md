@@ -10,6 +10,11 @@
 拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,lot,mapping}.rs`。SQLite Lite 竞价事务
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
 `transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
+数据库根入口的后端错误与 URL 识别位于 `database/backend.rs`，运行时 Store 选择、迁移目标、
+readiness 和连接池入口位于 `database/store.rs`，连接池指标适配位于 `database/pool_metrics.rs`；
+PostgreSQL/SQLite 的连接池与后端专属边界分别位于 `database/postgres_store.rs` 和
+`database/sqlite_store.rs`。`database/mod.rs` 只负责模块装配、兼容导出和保留的根级领域测试，
+不改变 `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
 和 SQLx 基线接管；`model.rs`、`preflight.rs`、`source_checks.rs`、`adoption.rs` 与 `mapping.rs`
 分别持有安全模型、预检、来源事实检查、接管 bridge 和错误映射；备份、人工确认及不可覆盖回执仍由

@@ -1,0 +1,47 @@
+use serde::Deserialize;
+
+/// Worker 使用的 E-Hentai 论坛主题同步策略。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ForumSyncWorkerConfig {
+    /// 是否启用论坛主题创建/幂等查找；默认关闭，避免配置不完整时触发远程 POST。
+    pub enabled: bool,
+    /// active ForumCookie 凭据所属的 world scope；允许 main、isekai 或 shared。
+    pub credential_world: String,
+    /// 可选固定论坛 endpoint；省略时使用 `https://forums.e-hentai.org`。
+    pub endpoint: Option<String>,
+    /// 可选公开端 origin；配置后论坛主题会附带指向拍卖页面的绝对链接。
+    pub public_base_url: Option<String>,
+    /// 是否把 main/isekai 都映射到旧版测试板块 4；生产环境必须保持 false。
+    pub test_board_mode: bool,
+    /// 单轮最多领取的主题同步任务数，范围 1-100。
+    pub batch_size: u16,
+    /// 单次响应最大字节数，范围 1-8 MiB。
+    pub maximum_response_bytes: usize,
+    /// 连续论坛请求之间的最小间隔毫秒数。
+    pub minimum_request_interval_millis: u64,
+    /// 单次论坛 HTTP 请求超时秒数，范围 1-300。
+    pub request_timeout_seconds: u64,
+    /// 单个论坛同步任务的总处理超时秒数，必须小于 Worker 租约。
+    pub item_timeout_seconds: u64,
+    /// 单个论坛发布 claim 的租约秒数；每个主题在实际领取时单独计算。
+    pub lease_duration_seconds: u64,
+}
+
+impl Default for ForumSyncWorkerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            credential_world: "shared".to_owned(),
+            endpoint: None,
+            public_base_url: None,
+            test_board_mode: false,
+            batch_size: 100,
+            maximum_response_bytes: 2 * 1024 * 1024,
+            minimum_request_interval_millis: 750,
+            request_timeout_seconds: 30,
+            item_timeout_seconds: 93,
+            lease_duration_seconds: 300,
+        }
+    }
+}

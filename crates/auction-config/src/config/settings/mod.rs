@@ -4,7 +4,7 @@
 //! 敏感 TOML。任何凭据都必须通过显式 getter 使用，不能依赖 `Debug` 输出或环境变量覆盖。
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     env, fmt, fs, io,
     io::Read,
     net::{IpAddr, SocketAddr},
@@ -21,10 +21,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
-use auction_application::{
-    AdminRuntimeDocument, AuctionPolicyTemplate, OperationsAlertPolicy, OperationsAlertTarget,
-    RecurringSchedule,
-};
+use auction_application::{AdminRuntimeDocument, AuctionPolicyTemplate, RecurringSchedule};
 use auction_domain::{
     AdjustmentAnchor, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
 };
