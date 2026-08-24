@@ -8,7 +8,7 @@ mod admin_audit;
 mod admin_credentials;
 #[path = "admin/forum.rs"]
 mod admin_forum;
-#[path = "admin/intake.rs"]
+#[path = "admin/intake/mod.rs"]
 mod admin_intake;
 #[path = "admin/lot_commands.rs"]
 mod admin_lot_commands;

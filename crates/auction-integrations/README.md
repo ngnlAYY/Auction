@@ -6,12 +6,15 @@
   外部适配器应复用该客户端，避免每个网关各自维护连接池或选择不同 TLS provider。
 - `src/clients/ehentai/` 与 `src/clients/mooglemail/`：各自的传输与认证边界。E-Hentai
   目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和 Cookie 候选集，
-  `client.rs` 持有固定 origin HTTP 协议事务，`gateway.rs` 持有凭据轮换与 Forum 端口，
+  `client/mod.rs` 负责客户端装配与公共入口，`client/request.rs` 持有固定 origin、限速、
+  响应边界和请求安全校验，`client/topic.rs` 持有主题表单与发布回执解析；`gateway.rs` 持有凭据轮换与 Forum 端口，
   `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
   gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
   inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
   其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明，
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
+  `client/mod.rs` 负责 typed target、配置和装配，`client/request.rs` 负责有界 GET/POST 及结果分类，
+  `client/security.rs` 负责固定 endpoint、响应类型、session 判定、限速和敏感载荷清零；
   `protocol.rs`、`forms.rs`、`writer/` 和 `sender.rs` 分别拥有
   协议值对象、表单、写入状态/compose 证明与发送编排；`writer.rs` 只负责稳定导出，
   `writer/{model,common,compose,response}.rs` 按状态模型、共用安全解析、compose 证明和最终响应分类拆分。

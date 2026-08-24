@@ -26,8 +26,10 @@
   共享字段校验位于 `common.rs`；`users/mod.rs` 只负责稳定公共类型出口。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
-- `src/ports/admin/intake.rs` 与 `src/services/admin/intake.rs`：URL/canonical JSON 装备来源、
-  脱敏录入写入计划、key 信封端口、命令摘要和 PostgreSQL 事务编排；明文 key 不进入写端口。
+- `src/ports/admin/intake/` 与 `src/services/admin/intake.rs`：`equipment.rs` 负责 URL/canonical JSON
+  装备事实和 key 清理，`commands.rs` 负责命令摘要，`source.rs` 负责来源快照，`records.rs` 负责
+  脱敏录入写入计划/结果，`ports.rs` 负责 key 信封与事务端口，`common.rs` 负责错误和字段校验；
+  `mod.rs` 只负责稳定导出，明文 key 不进入写端口。
 - `src/ports/auction/policy.rs`：拍卖创建时冻结的经济、结算和恢复策略模板；配置适配器只
   转换为该类型，应用服务和 PostgreSQL 创建事务共享同一份策略来源。
 - `src/ports/auction/queries/`：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
@@ -74,7 +76,7 @@ Admin 拍卖列表只读契约位于 `src/ports/admin/auctions.rs`，定义 worl
 分页、生命周期安全快照和 lot 数量；SQLite Lite 缺少完整投影时必须显式报告能力不支持。
 Admin 规则文档契约位于 `src/ports/admin/rules.rs`，区分候选校验、读取快照和 PostgreSQL
 完整档发布事务；发布使用 `command_id`、request hash 与 revision fence，SQLite 只保留读取。
-Admin 装备录入契约位于 `src/ports/admin/intake.rs`，区分外部来源读取、key 加密和数据库
+Admin 装备录入契约位于 `src/ports/admin/intake/`，区分外部来源读取、key 加密和数据库
 写入；来源失败不会打开数据库写事务，重复命令只重放已持久化的安全结果。
 
 Admin 拍卖创建会在 PostgreSQL Serializable 事务中把已校验的策略模板同时写入 schema v4

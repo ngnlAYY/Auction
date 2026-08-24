@@ -1,0 +1,197 @@
+//! E-Hentai HTTP 客户端与论坛协议事务。
+//!
+//! 本模块只负责固定 origin、请求限流、响应大小边界、主题创建/读取以及 POST 后的
+//! write-unknown 栅栏；表单字段和响应判定辅助函数集中在 forms.rs。
+
+use super::forms::{
+    TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
+    is_loopback_host, is_session_expired, origin_of, posting_action_matches_board,
+    posting_form_values, same_origin, set_form_value, valid_cookie, valid_rendered_thread,
+    valid_topic_id,
+};
+use super::*;
+
+mod request;
+mod topic;
+
+/// E-Hentai HTTP 客户端配置。
+#[derive(Debug, Clone)]
+pub struct EhentaiClientConfig {
+    /// 固定论坛 origin；生产环境必须使用 HTTPS。
+    pub endpoint: Url,
+    /// 单次响应最大字节数，不能超过 8 MiB。
+    pub maximum_response_bytes: usize,
+    /// 连续请求之间的最小间隔。
+    pub minimum_request_interval: Duration,
+    /// 单次 HTTP 请求超时时间。
+    pub request_timeout: Duration,
+    /// 是否把所有世界映射到旧版测试板块 4。
+    pub test_board_mode: bool,
+}
+
+impl EhentaiClientConfig {
+    /// 返回生产固定 origin 的默认配置。
+    pub fn production() -> Result<Self, EhentaiError> {
+        let endpoint = Url::parse(PRODUCTION_ENDPOINT)
+            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        Ok(Self {
+            endpoint,
+            maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
+            minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            test_board_mode: false,
+        })
+    }
+
+    /// 校验固定 origin、资源上限和时间边界。
+    fn validate(&self, operation: EhentaiOperation) -> Result<(), EhentaiError> {
+        let valid_scheme = self.endpoint.scheme() == "https"
+            || (self.endpoint.scheme() == "http" && is_loopback_host(&self.endpoint));
+        if !valid_scheme
+            || self.endpoint.host_str().is_none()
+            || !self.endpoint.username().is_empty()
+            || self.endpoint.password().is_some()
+            || self.maximum_response_bytes == 0
+            || self.maximum_response_bytes > HARD_MAXIMUM_RESPONSE_BYTES
+            || self.minimum_request_interval.is_zero()
+            || self.request_timeout.is_zero()
+            || self.request_timeout > Duration::from_secs(300)
+        {
+            return Err(EhentaiError::configuration(operation));
+        }
+        Ok(())
+    }
+}
+
+/// 受限的 E-Hentai HTTP 客户端。
+#[derive(Clone)]
+pub struct EhentaiClient {
+    client: Client,
+    base_url: Url,
+    origin: String,
+    gate: Arc<Mutex<Instant>>,
+    maximum_response_bytes: usize,
+    request_timeout: Duration,
+    minimum_request_interval: Duration,
+    test_board_mode: bool,
+}
+
+impl EhentaiClient {
+    /// 使用已有 HTTP client 建立兼容构造器。
+    ///
+    /// 生产装配应使用 [`Self::with_config`]，它会强制关闭自动重定向；该方法保留给已有
+    /// 装配代码和受控本地协议适配器使用。
+    pub fn new(base_url: Url, client: Client) -> Self {
+        let origin = origin_of(&base_url).unwrap_or_default();
+        Self {
+            client,
+            base_url,
+            origin,
+            gate: Arc::new(Mutex::new(Instant::now())),
+            maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
+            test_board_mode: false,
+        }
+    }
+
+    /// 使用安全默认 HTTP client 建立客户端。
+    pub fn with_config(config: EhentaiClientConfig) -> Result<Self, EhentaiError> {
+        config.validate(EhentaiOperation::CreateTopic)?;
+        let client = build_forum_http_client()
+            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        Self::from_config_and_client(config, client)
+    }
+
+    /// 使用调用方提供的 client 建立客户端；调用方必须保证其不跟随重定向。
+    pub fn from_config_and_client(
+        config: EhentaiClientConfig,
+        client: Client,
+    ) -> Result<Self, EhentaiError> {
+        config.validate(EhentaiOperation::CreateTopic)?;
+        let origin = origin_of(&config.endpoint)
+            .ok_or(EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        Ok(Self {
+            client,
+            base_url: config.endpoint,
+            origin,
+            gate: Arc::new(Mutex::new(Instant::now())),
+            maximum_response_bytes: config.maximum_response_bytes,
+            request_timeout: config.request_timeout,
+            minimum_request_interval: config.minimum_request_interval,
+            test_board_mode: config.test_board_mode,
+        })
+    }
+
+    /// 返回底层 HTTP client，供需要共享连接池的装配代码使用。
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
+    /// 返回固定论坛 origin。
+    pub fn base_url(&self) -> &Url {
+        &self.base_url
+    }
+
+    /// 创建或按精确标题查找一个论坛主题。
+    pub async fn create_topic(
+        &self,
+        world: SettlementWorld,
+        cookie: &EhentaiCookie,
+        rendered: ForumRenderedThread,
+    ) -> Result<auction_application::ForumPublishedThread, EhentaiError> {
+        let operation = EhentaiOperation::CreateTopic;
+        if !self.valid_for() || !valid_cookie(cookie) || !valid_rendered_thread(&rendered) {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let board_value = board_id.to_string();
+        let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
+        let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
+        if let Some(published) =
+            self.find_topic(&board_url, board_id, &rendered.title, &body, operation)?
+        {
+            return Ok(published);
+        }
+
+        let form = self.load_topic_form(board_id, &board_url, cookie).await?;
+        self.submit_topic(form, board_id, rendered, cookie).await
+    }
+
+    /// 读取一个已发布主题，并复用论坛预览适配器解析帖子命令。
+    pub async fn fetch_topic(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        cookie: &EhentaiCookie,
+    ) -> Result<AdminForumPreviewResult, EhentaiError> {
+        let operation = EhentaiOperation::FetchTopic;
+        if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_id(thread_id) {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let target = self.index_url(&[("showtopic", thread_id)], operation)?;
+        let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
+        if board_id <= 0 {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let html =
+            std::str::from_utf8(&body).map_err(|_| EhentaiError::protocol(operation, false))?;
+        crate::ForumPreviewAdapter::new()
+            .parse_html_document(html)
+            .map_err(|_| EhentaiError::protocol(operation, false))
+    }
+}
+
+impl fmt::Debug for EhentaiClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EhentaiClient")
+            .field("base_url", &self.base_url)
+            .field("maximum_response_bytes", &self.maximum_response_bytes)
+            .field("request_timeout", &self.request_timeout)
+            .field("minimum_request_interval", &self.minimum_request_interval)
+            .field("test_board_mode", &self.test_board_mode)
+            .finish()
+    }
+}

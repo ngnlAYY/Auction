@@ -6,7 +6,8 @@ TOML 配置解析与敏感配置加载。
 其中 `src/config/settings/` 按拍卖策略、Worker/MoogleMail、HTTP 安全、敏感文件、应用
 模型和校验职责拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
 Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，校验再按同一 owner
-放入 `worker_validation/` 子目录；标准 cron 解析集中在 `src/scheduling/`，Admin runtime TOML
+放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
+`src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML
 文件锁与原子替换集中在 `src/runtime/`。
 
 ## 两层文件结构

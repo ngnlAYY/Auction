@@ -815,6 +815,18 @@ Public/Admin HTTP listener。
 - Storage Public account mapping owner 已将普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验分别拆入
   `database/account/mapping/{bids,proxy,common}.rs`；`mapping/mod.rs` 只保留稳定导出，公开账户边界、代理
   capability 派生和 PostgreSQL/SQLite 投影校验语义保持不变。
+- E-Hentai client owner 已将客户端装配、固定 origin/限速/响应边界和主题表单/发布回执分别拆入
+  `clients/ehentai/client/{mod,request,topic}.rs`；公共客户端构造与 Forum 端口契约、session 失效、
+  write-unknown 和远端主题身份证明语义保持不变。
+- MoogleMail client owner 已将 typed target/配置装配、有界 GET/POST 与结果分类、固定 endpoint/响应
+  判定/限速/敏感载荷辅助分别拆入 `clients/mooglemail/client/{mod,request,security}.rs`；Cookie、
+  write-unknown、重定向/编码拒绝和请求间隔语义保持不变。
+- Config scheduling owner 已将标准 cron 公共模型、五字段范围/名称解析以及 `@every` Go duration
+  解析分别拆入 `scheduling/standard_cron/{mod,fields,duration}.rs`；描述符、`TZ=`/`CRON_TZ=`、
+  本地/UTC/IANA 时区和整秒触发语义保持不变。
+- Application Admin intake owner 已将装备来源类型/规范化事实、命令摘要、来源快照、脱敏事务记录、
+  窄端口和共享字段错误分别拆入 `ports/admin/intake/{equipment,commands,source,records,ports,common}.rs`；
+  `intake/mod.rs` 只负责稳定导出，明文 key 清理、密文信封、幂等摘要和来源先读后写边界保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。
