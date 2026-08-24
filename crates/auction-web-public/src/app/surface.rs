@@ -21,7 +21,7 @@ mod forum;
 mod pagination;
 #[path = "auction/proxy.rs"]
 mod proxy;
-#[path = "auction/reads.rs"]
+#[path = "auction/reads/mod.rs"]
 mod reads;
 #[path = "auction/realtime.rs"]
 mod realtime;

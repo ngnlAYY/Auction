@@ -22,7 +22,8 @@ PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
 owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
-`src/database/users/admin.rs` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计，
+`src/database/users/admin/` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计；
+其中 `mod.rs` 持有跨后端分派与共享校验，`postgres.rs`/`sqlite.rs` 分别持有 SQL 实现，
 并由 recovery owner 记录完成 proof。`recovery_commands/commands.rs` 同时持有 PostgreSQL 完整档的
 relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
 Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
@@ -68,7 +69,7 @@ Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库
 `audit_records`，支持安全精确筛选、keyset/数字分页和 metadata object 校验；数字页的总数与
 记录在同一读取事务内取得，不返回原始数据库行。
 Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有；用户管理写入由
-`src/database/users/admin.rs` 持有。两套数据库都在用户命令事务内完成 state-version fence、
+`src/database/users/admin/` 持有。两套数据库都在用户命令事务内完成 state-version fence、
 命令账本、用户投影、密文 key 信封、`user_renames`、`user_blacklist_history` 和追加审计；
 PostgreSQL 使用 Serializable/advisory lock，SQLite 使用 `BEGIN IMMEDIATE`。MoogleMail 注册/换绑
 仍按其独立能力清单只支持 PostgreSQL，不能把两者混写成完全对等。

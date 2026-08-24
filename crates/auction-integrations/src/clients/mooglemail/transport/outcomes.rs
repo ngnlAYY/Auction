@@ -1,0 +1,247 @@
+use super::*;
+
+pub(crate) fn exact_action_expectation(
+    state: &MoogleMailActionState,
+    expected: &ActionExpectation,
+) -> bool {
+    let expected_count =
+        expected.attachment_ids.len().saturating_add(usize::from(expected.credits > 0));
+    if state.credits() != expected.credits
+        || state.cod() != expected.cod
+        || state.attachment_count() != expected_count
+        || state.equipment_ids().len() != expected.attachment_ids.len()
+    {
+        return false;
+    }
+    let mut observed_ids = state.equipment_ids().to_vec();
+    let mut expected_ids = expected.attachment_ids.clone();
+    observed_ids.sort_unstable();
+    expected_ids.sort_unstable();
+    observed_ids == expected_ids
+}
+
+pub(crate) fn send_receipt(
+    outcome: MoogleMailSendOutcome,
+) -> Result<MoogleMailSendReceipt, DeliveryTransportError> {
+    match outcome {
+        MoogleMailSendOutcome::Sent(receipt) => Ok(receipt),
+        MoogleMailSendOutcome::PreflightUnproven => Err(DeliveryTransportError {
+            failure_code: "preflight_unproven".to_owned(),
+            safe_detail: "MoogleMail compose 初始状态无法证明为干净状态".to_owned(),
+            outcome_unknown: true,
+            external_reference: None,
+            result_metadata: json!({
+                "stage": "preflight",
+                "category": "protocol_drift",
+            }),
+        }),
+        MoogleMailSendOutcome::RecipientNotFound { returned_mail_id } => {
+            let mut result_metadata = json!({
+                "stage": "send",
+                "category": "recipient_not_found",
+                "reason_code": "recipient_not_found",
+                "take_required": true,
+            });
+            if let Some(returned_mail_id) = returned_mail_id.as_ref() {
+                result_metadata["returned_mail_id"] = returned_mail_id.clone().into();
+            }
+            Err(DeliveryTransportError {
+                failure_code: "recipient_not_found".to_owned(),
+                safe_detail: "MoogleMail 收件人不存在，需要核对远端退信".to_owned(),
+                // 收件人不存在本身已有协议证明，但退信中的 Credits/装备尚未取回，
+                // 不能把 delivery 终结为普通 failed。
+                outcome_unknown: true,
+                external_reference: returned_mail_id,
+                result_metadata,
+            })
+        }
+        MoogleMailSendOutcome::Rejected { assets_staged } => Err(DeliveryTransportError {
+            failure_code: if assets_staged { "send_rejected_after_stage" } else { "send_rejected" }
+                .to_owned(),
+            safe_detail: "MoogleMail 远端明确拒绝发送".to_owned(),
+            outcome_unknown: assets_staged,
+            external_reference: None,
+            result_metadata: json!({
+                "stage": "send",
+                "category": "write_rejected",
+            }),
+        }),
+    }
+}
+
+pub(crate) fn preflight_unproven() -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: "preflight_unproven".to_owned(),
+        safe_detail: "MoogleMail 动作前置身份或资产无法证明".to_owned(),
+        outcome_unknown: true,
+        external_reference: None,
+        result_metadata: json!({}),
+    }
+}
+
+pub(crate) fn action_proof_unproven() -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: "write_unknown".to_owned(),
+        safe_detail: "MoogleMail 外部动作结果无法证明".to_owned(),
+        outcome_unknown: true,
+        external_reference: None,
+        result_metadata: json!({}),
+    }
+}
+
+pub(crate) fn action_name(operation: MoogleMailOperation) -> &'static str {
+    match operation {
+        MoogleMailOperation::ReturnMessage => "return",
+        MoogleMailOperation::Take => "take",
+        _ => "action",
+    }
+}
+
+pub(crate) fn render_notification(
+    templates: &MoogleMailNotificationTemplates,
+    template: &str,
+    result_code: &str,
+    login_key: Option<&MailLoginKey>,
+    recipient: &str,
+    reference: &str,
+) -> Option<(String, String)> {
+    match (template, result_code) {
+        ("auction_assets_rejected", "auction_assets_rejected") => Some((
+            "Auction mail rejected".to_owned(),
+            templates.render("auction_assets_rejected", &[])?,
+        )),
+        ("auction_no_attachments", "auction_no_attachments") => Some((
+            "Auction mail rejected".to_owned(),
+            templates.render("auction_no_attachments", &[])?,
+        )),
+        (
+            "auction_equipment_rejected",
+            "auction_equipment_rejected"
+            | "start_price_invalid"
+            | "start_price_missing"
+            | "start_price_duplicate"
+            | "start_price_identity_mismatch"
+            | "start_price_attachment_not_found",
+        ) => Some((
+            "Auction mail rejected".to_owned(),
+            templates.render("auction_equipment_rejected", &[("reason_code", result_code)])?,
+        )),
+        ("user_assets_rejected", "user_assets_rejected") => Some((
+            "Account mail rejected".to_owned(),
+            templates.render("user_assets_rejected", &[])?,
+        )),
+        ("register_key", "registered" | "recovered") => {
+            let key = login_key?;
+            let body = key.with_encoded(|encoded| {
+                templates.render("register_key", &[("login_key", encoded), ("username", recipient)])
+            })?;
+            Some(("Auction login key".to_owned(), body))
+        }
+        ("register_result", "blacklisted" | "identity_conflict") => Some((
+            "Registration result".to_owned(),
+            templates.render(
+                "register_result",
+                &[("result_code", result_code), ("username", recipient)],
+            )?,
+        )),
+        (
+            "rebind_result",
+            "rebound" | "unchanged" | "blacklisted" | "identity_conflict" | "invalid_key"
+            | "missing_key",
+        ) => Some((
+            "Rebind result".to_owned(),
+            templates.render(
+                "rebind_result",
+                &[("result_code", result_code), ("username", recipient)],
+            )?,
+        )),
+        ("forum_auction_notice", "forum_auction_notice") => Some((
+            "Forum auction notification".to_owned(),
+            format!("Forum auction notification for {recipient}"),
+        )),
+        ("recovery_payment_reminder", "payment_overdue") => Some((
+            "Auction payment overdue".to_owned(),
+            templates.render("settlement_payment_reminder", &[("reference", reference)])?,
+        )),
+        _ => None,
+    }
+}
+
+pub(crate) fn invalid_payload() -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: "invalid_payload".to_owned(),
+        safe_detail: "MoogleMail delivery payload 无效".to_owned(),
+        outcome_unknown: false,
+        external_reference: None,
+        result_metadata: json!({}),
+    }
+}
+
+pub(crate) fn login_key_error(error: ApplicationError) -> DeliveryTransportError {
+    match error {
+        ApplicationError::MailProcessing(MailProcessingError::LoginKeyNotFound) => {
+            DeliveryTransportError {
+                failure_code: "secret_not_found".to_owned(),
+                safe_detail: "MoogleMail 注册 key 不存在".to_owned(),
+                outcome_unknown: false,
+                external_reference: None,
+                result_metadata: json!({
+                    "stage": "secret_resolution",
+                    "category": "missing_reference",
+                }),
+            }
+        }
+        ApplicationError::MailProcessing(MailProcessingError::InvalidLoginKey) => {
+            DeliveryTransportError {
+                failure_code: "invalid_secret".to_owned(),
+                safe_detail: "MoogleMail 注册 key 无效".to_owned(),
+                outcome_unknown: false,
+                external_reference: None,
+                result_metadata: json!({
+                    "stage": "secret_resolution",
+                    "category": "invalid_secret",
+                }),
+            }
+        }
+        _ => DeliveryTransportError {
+            failure_code: "login_key_unavailable".to_owned(),
+            safe_detail: "MoogleMail 注册 key 暂时不可用".to_owned(),
+            outcome_unknown: true,
+            external_reference: None,
+            result_metadata: json!({
+                "stage": "secret_resolution",
+                "category": "dependency_unavailable",
+            }),
+        },
+    }
+}
+
+pub(crate) fn valid_notification_body(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        !value.is_empty()
+            && value.len() <= (16 << 10)
+            && value == value.trim()
+            && !value
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    })
+}
+
+pub(crate) fn transport_error(error: MoogleMailError, after_write: bool) -> DeliveryTransportError {
+    let outcome_unknown = after_write
+        || error.write_started()
+        || error.category != MoogleMailErrorCategory::Configuration;
+    DeliveryTransportError {
+        failure_code: error.category.as_str().to_owned(),
+        safe_detail: if after_write {
+            "MoogleMail 外部写入结果未知".to_owned()
+        } else {
+            "MoogleMail 外部请求失败".to_owned()
+        },
+        // Delivery 已经进入 sending；除纯本地配置错误外，依赖/网络/协议错误都不能安全
+        // 收口为普通失败。availability gate 会在此之前释放已知无凭据的 claim。
+        outcome_unknown,
+        external_reference: None,
+        result_metadata: json!({}),
+    }
+}

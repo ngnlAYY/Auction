@@ -1,0 +1,93 @@
+//! audit 相关 DTO。
+
+use super::*;
+
+/// Admin 审计记录安全投影；metadata 必须是安全 JSON 对象。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminAuditRecordResponse {
+    pub id: String,
+    pub occurred_at: String,
+    pub actor_type: String,
+    pub actor_id: String,
+    pub action: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub result: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    pub source: String,
+    pub metadata: Value,
+}
+
+/// Admin 审计 keyset 下一页边界。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminAuditCursorResponse {
+    pub before_time: String,
+    pub before_id: String,
+}
+
+/// Admin 审计查询响应；数字页与 keyset 页保留旧契约的互斥字段形状。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminAuditResponse {
+    pub records: Vec<AdminAuditRecordResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<i64>,
+    pub page_size: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<i64>,
+    pub has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<AdminAuditCursorResponse>,
+    pub next_cursor_token: String,
+}
+
+/// Admin dashboard 的健康聚合。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDashboardHealthResponse {
+    pub status: String,
+    pub readiness: bool,
+    pub audit_failure_count: i64,
+    pub missing_services: Vec<String>,
+}
+
+/// Admin dashboard 的 Worker control 安全投影。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDashboardWorkerResponse {
+    pub condition: String,
+    pub state: String,
+    pub ready: bool,
+    pub version: String,
+    pub mail_pollers: i64,
+}
+
+/// Admin dashboard section 的稳定外壳。
+///
+/// `data` 只允许由 owner 适配器构造安全 JSON；当 owner 尚未迁移或读取失败时只返回
+/// `status` 与有界 `error_code`，不返回数据库行或错误正文。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDashboardSectionResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+/// Admin dashboard 响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDashboardResponse {
+    pub health: AdminDashboardHealthResponse,
+    pub worker: AdminDashboardWorkerResponse,
+    pub process: AdminDashboardSectionResponse,
+    pub mail: AdminDashboardSectionResponse,
+    pub realtime: AdminDashboardSectionResponse,
+    pub credentials: AdminDashboardSectionResponse,
+    pub delivery: AdminDashboardSectionResponse,
+    pub fulfillment: AdminDashboardSectionResponse,
+    pub recovery: AdminDashboardSectionResponse,
+    pub alerting: AdminDashboardSectionResponse,
+}

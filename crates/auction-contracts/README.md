@@ -2,7 +2,8 @@
 
 稳定的对外契约：REST/流 DTO、错误编码、分页和版本约定。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；契约类型集中在 `src/contracts/mod.rs`。
+源码布局：`src/lib.rs` 只保留模块声明和公共导出；`src/contracts/mod.rs` 负责统一导出，
+`src/contracts/dto/` 再按通用、Public 和 Admin 以及各自业务职责细分 DTO。
 
 浏览器和外部客户端只能看到这里的类型。数据库记录和领域聚合都不得直接当作对外 DTO，
 转换在边界完成。

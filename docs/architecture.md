@@ -381,7 +381,8 @@ poller 数量；手动唤醒只让本轮跳过下一次调度时间，实际远�
 
 Admin A28/A30/A31 用户管理属于“两者”能力：`auction-application` 的 `admin_users` 端口拥有
 用户投影、创建/改名/游戏身份修改、key 撤销/重签、黑名单和改名回滚命令；
-`auction-storage/src/database/users/admin.rs` 负责版本 fence、命令账本、密文 key 信封、
+`auction-storage/src/database/users/admin/` 负责版本 fence、命令账本、密文 key 信封；其中
+`mod.rs` 负责跨后端分派与共享校验，`postgres.rs`/`sqlite.rs` 分别拥有对应 SQL 实现。
 改名/黑名单追加历史与审计。PostgreSQL 使用 Serializable + advisory command lock，SQLite
 使用 `BEGIN IMMEDIATE`；两者都不保存 key 明文。`auction-http` 接入 A28/A30/A31 的 session、
 CSRF 和稳定 DTO，`auction-web-admin` 的 `/users` 页面已接入列表、创建、改名、游戏身份修改、

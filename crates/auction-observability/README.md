@@ -2,8 +2,9 @@
 
 tracing 初始化、指标约定、健康检查语义和关联 ID。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；tracing 实现在 `src/telemetry/mod.rs`，
-心跳与 dashboard 安全投影实现在 `src/health/mod.rs`。
+源码布局：`src/lib.rs` 只保留模块声明和公共导出；指标入口 `src/metrics/mod.rs` 只负责
+分组与稳定 re-export，进程、业务、连接池、Worker、tracing collector 分别位于其子文件；
+tracing 实现在 `src/telemetry/mod.rs`，心跳与 dashboard 安全投影实现在 `src/health/mod.rs`。
 
 `init(service, configured_filter)` 安装 JSON 格式的 `tracing-subscriber`。未配置
 `log_filter` 时默认 `info,{service}=debug`。Public、Admin 和 Worker 都可以通过

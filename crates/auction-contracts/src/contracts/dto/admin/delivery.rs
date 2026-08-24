@@ -1,0 +1,61 @@
+//! delivery 相关 DTO。
+
+use super::*;
+
+/// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
+/// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
+/// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDeliveryResponse {
+    pub id: String,
+    pub origin_kind: String,
+    pub origin_id: String,
+    pub recipient: String,
+    pub cod: Option<i64>,
+    pub status: String,
+    pub lease_expires_at: Option<String>,
+    pub fencing_version: i64,
+    pub attempt_count: u32,
+    pub claimed_at: Option<String>,
+    pub sending_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub external_reference: Option<String>,
+    pub failure_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub take_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_mail_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Admin delivery 列表响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDeliveryListResponse {
+    pub deliveries: Vec<AdminDeliveryResponse>,
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+}
+
+/// Admin delivery 状态命令请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminDeliveryCommandRequest {
+    pub command_id: Uuid,
+    pub expected_fencing_version: i64,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub external_reference: Option<String>,
+    #[serde(default)]
+    pub failure_code: Option<String>,
+}
+
+/// Admin delivery 状态命令响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDeliveryCommandResponse {
+    pub delivery: AdminDeliveryResponse,
+}

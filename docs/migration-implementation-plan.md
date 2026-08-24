@@ -647,13 +647,17 @@ Worker control transport 的所有权已从 `src/worker/` 调度目录移至 `au
 统一维护，调度器只保留 `WorkerControlHandle` 状态/唤醒端口；该传输不接受业务写入，也不复用
 Public/Admin HTTP listener。
 
-- 继续按职责细分仍超过约一千行且承担多类职责的 `auction-contracts/contracts/dto.rs`、
-  `auction-storage/users/admin.rs`、Public `auction/reads.rs`、`auctionctl/bootstrap/runtime.rs`、
-  `clients/mooglemail/parser/document.rs`、`clients/mooglemail/transport/http.rs` 和 observability
-  metrics；本轮已完成 HTTP/config/Worker/Web app/
-  auctionctl 入口以及 storage competition/recovery 的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
+- 本轮已完成 HTTP/config/Worker/Web app、HTTP DTO、observability metrics、Users/Admin storage
+  backend、auctionctl runtime 入口、MoogleMail parser/transport、Public auction reads 以及
+  storage competition/recovery 的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
+- 体量复核仍发现第二轮结构任务：`auction-http/src/http/routes.rs`、
+  `auction-config/src/config/settings.rs`、`auction-web-public/src/app/surface.rs`、
+  `auction-jobs/src/worker/runtime.rs`、`auction-storage` 的 competition/recovery/lots/
+  realtime/operations/account 适配器，以及 `apps/worker/src/bootstrap/mod.rs`、
+  `auction-integrations/src/clients/ehentai.rs` 和 `auction-application` 的 mail/operations
+  端口仍超过约一千行或承担多类职责，后续应按 owner 继续细分；本轮不能把它们误记为已完成。
 
 规范门禁此前还存在 CI 漏接：工作流直接执行 Cargo 命令，却没有运行 Justfile 中的目录和配置
 检查。本轮将共同规则收敛到 `ci/check-policy.sh`，本地 Justfile 与 CI 复用同一实现，并补充五种

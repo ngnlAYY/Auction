@@ -2,7 +2,8 @@
 
 配置、迁移和运维命令行工具。
 
-源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/mod.rs` 负责 CLI 解析和命令分派，
+源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
+`src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分，
 `src/bootstrap/deployment_control/` 按总控编排、systemd 适配、readiness 探针和 receipt 文件边界拆分，
 `src/bootstrap/postgres_restore.rs` 独立持有 PostgreSQL 恢复边界，
 `src/bootstrap/postgres_legacy_v28/` 持有 Auction-BF v28 的专用备份、离线校验、确认和接管回执，
