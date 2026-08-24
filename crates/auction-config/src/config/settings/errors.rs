@@ -1,0 +1,162 @@
+//! 配置解析、敏感字段和运行时文档错误。
+
+use super::*;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("unknown process role: {0}")]
+    UnknownRole(String),
+
+    #[error("failed to read TOML configuration {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    // 旧主配置可能仍含连接串或 Cookie，拒绝时也不能让解析器回显原始行。
+    #[error("failed to parse TOML configuration {path}; configuration values are redacted")]
+    Parse { path: PathBuf },
+
+    #[error("failed to read sensitive TOML configuration {path}: {source}")]
+    SecretRead {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    // 敏感 TOML 的解析器错误可能带出原始行，因此这里只报告文件路径。
+    #[error("failed to parse sensitive TOML configuration {path}; secret values are redacted")]
+    SecretParse { path: PathBuf },
+
+    #[error("PostgreSQL maintenance sensitive TOML path is invalid: {path}")]
+    InvalidMaintenanceSecretPath { path: PathBuf },
+
+    #[error("PostgreSQL maintenance sensitive TOML must be a regular non-symlink file: {path}")]
+    InvalidMaintenanceSecretFile { path: PathBuf },
+
+    #[error("PostgreSQL maintenance sensitive TOML must be owner-only readable: {path}")]
+    InsecureMaintenanceSecretPermissions { path: PathBuf },
+
+    #[error(
+        "PostgreSQL maintenance sensitive TOML parent must not allow group/other writes: {path}"
+    )]
+    InsecureMaintenanceSecretParent { path: PathBuf },
+
+    #[error("failed to read local MoogleMail key environment {path}: {source}")]
+    MoogleMailKeyEnvRead {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("local MoogleMail key environment {path} must be owner-only readable")]
+    MoogleMailKeyEnvInsecurePermissions { path: PathBuf },
+
+    #[error("failed to parse local MoogleMail key environment {path}; secret values are redacted")]
+    MoogleMailKeyEnvParse { path: PathBuf },
+
+    #[error("local MoogleMail key environment {path} is missing {key}")]
+    MoogleMailKeyEnvMissing { path: PathBuf, key: &'static str },
+
+    #[error("invalid {field} value {value:?}: {source}")]
+    InvalidAddress { field: &'static str, value: String, source: std::net::AddrParseError },
+
+    #[error("sensitive field {field} must not be empty")]
+    EmptySensitiveField { field: &'static str },
+
+    #[error("cache backend redis requires sensitive field redis_url")]
+    MissingRedisUrl,
+
+    #[error("invalid cache configuration: {0}")]
+    InvalidCacheConfig(&'static str),
+
+    #[error("invalid HTTP listener configuration: {0}")]
+    InvalidListenerConfig(&'static str),
+
+    #[error("equipment data key requires both equipment_data_key_id and equipment_data_key")]
+    InvalidEquipmentDataKeyConfiguration,
+
+    #[error("user login data key requires both user_login_data_key_id and user_login_data_key")]
+    InvalidUserLoginDataKeyConfiguration,
+
+    #[error("credential data key requires both credential_data_key_id and credential_data_key")]
+    InvalidCredentialDataKeyConfiguration,
+
+    #[error("worker concurrency must be greater than zero")]
+    InvalidWorkerConcurrency,
+
+    #[error("worker poll interval must be greater than zero")]
+    InvalidWorkerPollInterval,
+
+    #[error("worker recovery retry delay must be between 1 and 86400 seconds")]
+    InvalidWorkerRecoveryRetryDelay,
+
+    #[error("invalid auction Worker configuration: {0}")]
+    InvalidAuctionWorkerConfig(&'static str),
+
+    #[error("invalid delivery Worker configuration: {0}")]
+    InvalidDeliveryWorkerConfig(&'static str),
+
+    #[error("invalid fulfillment Worker configuration: {0}")]
+    InvalidFulfillmentWorkerConfig(&'static str),
+
+    #[error("invalid recovery Worker configuration: {0}")]
+    InvalidRecoveryWorkerConfig(&'static str),
+
+    #[error("invalid Worker control configuration: {0}")]
+    InvalidWorkerControlConfig(&'static str),
+
+    #[error(
+        "enabled MoogleMail Worker requires keyenv_file, sensitive mooglemail_cookie, or credential data key"
+    )]
+    MissingMoogleMailCredentials,
+
+    #[error("enabled MoogleMail Worker requires user_login_data_key_id and user_login_data_key")]
+    MissingMoogleMailUserLoginDataKey,
+
+    #[error("invalid MoogleMail Worker configuration: {0}")]
+    InvalidMoogleMailConfig(&'static str),
+
+    #[error("invalid auction policy configuration: {0}")]
+    InvalidAuctionConfig(&'static str),
+
+    #[error(
+        "enabled E-Hentai forum Worker requires sensitive ehentai_cookie or credential data key"
+    )]
+    MissingEhentaiCredentials,
+
+    #[error("invalid E-Hentai forum Worker configuration: {0}")]
+    InvalidForumConfig(&'static str),
+
+    #[error("invalid operations alert Worker configuration: {0}")]
+    InvalidOperationsAlertConfig(&'static str),
+
+    #[error("invalid realtime configuration: {0}")]
+    InvalidRealtimeConfig(&'static str),
+
+    #[error("invalid tracing configuration: {0}")]
+    InvalidTracingConfig(&'static str),
+
+    #[error("SQLite Lite requires worker concurrency = 1, got {concurrency}")]
+    LiteWorkerConcurrency { concurrency: u16 },
+
+    #[error("invalid HTTP security configuration: {0}")]
+    InvalidHttpSecurity(&'static str),
+
+    #[error("invalid session configuration: {0}")]
+    InvalidSessionConfig(&'static str),
+
+    #[error("failed to read Admin runtime TOML configuration {path}: {source}")]
+    RuntimeRead {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("failed to parse Admin runtime TOML configuration {path}; values are redacted")]
+    RuntimeParse { path: PathBuf },
+
+    #[error("invalid Admin runtime configuration {path}: {reason}")]
+    InvalidRuntimeConfig { path: PathBuf, reason: String },
+}

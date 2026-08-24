@@ -1,0 +1,66 @@
+//! HTTP 安全和会话配置模型。
+
+use super::*;
+
+/// 浏览器写请求和公开会话使用的非敏感 HTTP 安全策略。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HttpSecurityConfig {
+    /// 允许的精确 HTTP(S) origin；启用 allowlist 时必须填写。
+    pub allowed_origins: Vec<String>,
+    /// 是否启用 origin allowlist；省略时关闭。
+    pub allowed_origins_enabled: bool,
+    /// 登录请求在一个窗口内的最大次数；省略时为 10 次。
+    pub login_rate_limit: u32,
+    /// 状态变更请求在一个窗口内的最大次数；省略时为 60 次。
+    pub mutation_rate_limit: u32,
+    /// 速率限制窗口秒数；省略时为 60 秒。
+    pub rate_limit_window_seconds: u64,
+    /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
+    pub cookie_secure: bool,
+    /// 普通 HTTP 请求的最长处理秒数；省略时为 15 秒，WebSocket 握手路径不受此限制。
+    pub request_timeout_seconds: u64,
+    /// 可以提供 `X-Forwarded-For` 的可信反向代理网段；省略时不信任任何 TCP 代理。
+    pub trusted_proxy_cidrs: Vec<String>,
+    /// 是否信任 Unix socket 上游提供的 `X-Forwarded-For`；省略时关闭，仅允许 Public/Admin
+    /// Unix 监听器启用。
+    pub trusted_unix_proxy: bool,
+}
+
+impl Default for HttpSecurityConfig {
+    fn default() -> Self {
+        Self {
+            allowed_origins: Vec::new(),
+            allowed_origins_enabled: false,
+            login_rate_limit: 10,
+            mutation_rate_limit: 60,
+            rate_limit_window_seconds: 60,
+            cookie_secure: false,
+            request_timeout_seconds: 15,
+            trusted_proxy_cidrs: Vec::new(),
+            trusted_unix_proxy: false,
+        }
+    }
+}
+
+/// Public 会话的滑动过期、绝对过期和并发上限，单位为秒。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionConfig {
+    /// 会话空闲过期秒数；省略时为 1800 秒。
+    pub idle_ttl_seconds: u64,
+    /// 会话绝对过期秒数；省略时为 604800 秒。
+    pub absolute_ttl_seconds: u64,
+    /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
+    pub max_public_sessions: u32,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            idle_ttl_seconds: 30 * 60,
+            absolute_ttl_seconds: 7 * 24 * 60 * 60,
+            max_public_sessions: 5,
+        }
+    }
+}
