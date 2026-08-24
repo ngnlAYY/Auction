@@ -11,14 +11,25 @@ TOML 配置解析与敏感配置加载。
 主配置只放非敏感设置，并通过必填的 `secrets_file` 引用独立敏感 TOML：
 
 ```toml
-# 可选：监听地址；省略时使用角色默认地址。
-listen_address = "127.0.0.1:8090"
 # 必填：敏感 TOML 路径。
 secrets_file = "secrets.toml"
 # 可选：仅 Admin 主配置使用；runtime 示例位于 examples/runtime/admin.toml。
 runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器。
 log_filter = "info,auction=debug"
+
+# 可选区块：Public/Admin HTTP listener；省略时使用各自 loopback TCP 默认值。
+[listener]
+# 可选：TCP host:port；Public 默认 127.0.0.1:8090，Admin 默认 127.0.0.1:8091。
+address = "127.0.0.1:8090"
+# 可选：Unix socket 所属 group；TCP 模式必须为空。
+group = ""
+# 可选：tcp 或 Linux 上的 unix；省略时为 tcp。
+mode = "tcp"
+# 可选：Unix runtime 目录；TCP 模式必须为空。
+runtime_directory = ""
+# 可选：直接位于 runtime 目录下的 Unix socket 路径；TCP 模式必须为空。
+socket_path = ""
 
 # 可选区块：Public/Worker 进程本地 Prometheus 指标；Public 使用 HTTP，Worker 需同时启用 control 才有 UDS `/metrics`。
 [metrics]
@@ -45,6 +56,8 @@ sample_ratio_ppm = 0
 [cache]
 # 可选：disabled 或 redis，默认 disabled。
 backend = "disabled"
+# 可选：Public 规则读模型 TTL 秒数，范围 1-3600，默认 30。
+public_rules_ttl_seconds = 30
 
 # 可选区块：创建拍卖时冻结的策略模板；省略时沿用旧版共享配置默认值。
 [auction.economics]
@@ -282,7 +295,7 @@ cookie_secure = false
 request_timeout_seconds = 15
 # 可选：可信 TCP 代理的规范 CIDR；默认空，最多 64 项。
 trusted_proxy_cidrs = []
-# 可选：信任 Unix socket 上游；只允许 Admin runtime Unix listener 启用。
+# 可选：信任 Unix socket 上游；只允许有效的 Public/Admin Unix listener 启用。
 trusted_unix_proxy = false
 
 # 可选区块：会话策略。
@@ -354,7 +367,7 @@ recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化�
 返回能力缺失。
 
 `http_security` 只保存 origin、速率限制、Cookie 属性、普通请求超时和可信代理 CIDR 等非敏感
-策略；默认不信任任何 `X-Forwarded-For`。`trusted_unix_proxy` 仅允许 Admin runtime Unix
+策略；默认不信任任何 `X-Forwarded-For`。`trusted_unix_proxy` 仅允许有效的 Public/Admin Unix
 listener 启用，TCP listener 必须通过规范且不重复的 `trusted_proxy_cidrs` 明确信任上游。
 `session` 保存 Public 与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、
 会话 token 和数据库连接串不得写入主配置。

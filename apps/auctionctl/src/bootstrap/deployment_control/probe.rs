@@ -1,7 +1,7 @@
 //! 部署启动使用的应用 readiness 探针。
 //!
-//! TCP 只访问 Public/Admin 的本机配置地址；Unix socket 只访问 Worker control。响应正文不参与
-//! 判断，HTTP 200 是应用 owner 对 readiness 的唯一权威信号。
+//! TCP 与 Unix HTTP socket 访问 Public/Admin 的 `/health/ready`；Worker control 使用独立的
+//! `/v1/health/ready`。响应正文不参与判断，HTTP 200 是应用 owner 对 readiness 的唯一权威信号。
 
 use std::{
     fs,
@@ -16,13 +16,15 @@ const PROBE_IO_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(super) enum ReadinessProbe {
     Tcp(SocketAddr),
-    Unix(PathBuf),
+    UnixHttp(PathBuf),
+    UnixControl(PathBuf),
 }
 
 pub(super) fn readiness_probe(probe: &ReadinessProbe) -> bool {
     match probe {
         ReadinessProbe::Tcp(address) => tcp_http_ready(*address),
-        ReadinessProbe::Unix(path) => unix_http_ready(path),
+        ReadinessProbe::UnixHttp(path) => unix_http_ready(path, "/health/ready"),
+        ReadinessProbe::UnixControl(path) => unix_http_ready(path, "/v1/health/ready"),
     }
 }
 
@@ -47,7 +49,7 @@ fn tcp_http_ready(address: SocketAddr) -> bool {
     http_ready(&mut stream, "/health/ready")
 }
 
-fn unix_http_ready(path: &Path) -> bool {
+fn unix_http_ready(path: &Path, readiness_path: &str) -> bool {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return false;
     };
@@ -62,7 +64,7 @@ fn unix_http_ready(path: &Path) -> bool {
     {
         return false;
     }
-    http_ready(&mut stream, "/v1/health/ready")
+    http_ready(&mut stream, readiness_path)
 }
 
 fn http_ready(stream: &mut (impl Read + Write), path: &str) -> bool {

@@ -71,7 +71,7 @@ Public/Admin 已恢复统一 HTTP boundary：只接受 1 至 64 字节的 ASCII 
 Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，但不参与命令请求哈希。边界还
 提取 W3C trace context，记录请求级访问日志，隔离 panic，设置安全响应头，执行默认 15 秒处理
 超时和固定 5 秒 HTTP/1 请求头读取超时。`/api/v1/ws` 不受处理超时限制。客户端地址只在 TCP peer
-命中配置的规范 CIDR，或 Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链
+命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链
 整体丢弃。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 

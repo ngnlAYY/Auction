@@ -94,10 +94,17 @@ Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布�
 限制、final phase 及时间规则。MoogleMail 入站的默认起拍价继承同一 `[auction.economics]`
 模板，只有显式覆盖值才会改变它。
 
-Public/Admin 主配置还可以包含 `[http_security]` 与 `[session]`：前者只保存精确 origin、
+Public/Admin 主配置还可以包含 `[listener]`、`[http_security]` 与 `[session]`。`[listener]` 的
+`mode = "tcp"` 使用 `address`；`mode = "unix"`（仅 Linux）要求规范化的绝对
+`runtime_directory`、直接位于该目录下的 `socket_path` 和 Unix `group`，TCP 模式下后三者必须
+为空。Public 和 Admin 都支持这两种模式；Admin 若加载 runtime 文件，则由 runtime 的 listener
+覆盖主配置 fallback。Unix listener 绑定前会检查目录 owner/group/权限、目录级单实例锁、stale
+socket 身份和 `0660` 权限，Public/Admin 使用不同锁文件名，不能复用 Worker control socket。
+
+`[http_security]` 前者只保存精确 origin、
 速率限制、Cookie `secure`、普通请求处理超时和可信代理网段，后者保存会话时限与公开会话并发
 上限。`trusted_proxy_cidrs` 只接受最多 64 个规范且不重复的 CIDR；默认空集合会忽略所有
-`X-Forwarded-For`。`trusted_unix_proxy` 只允许 Admin runtime 的 Unix listener 启用，不能用它
+`X-Forwarded-For`。`trusted_unix_proxy` 只允许 Public/Admin 的有效 Unix listener 启用，不能用它
 放宽 TCP peer。两者都不是凭据，
 但仍由配置校验限制范围；原始登录 key、会话 token 和数据库 URL 不得出现在主配置。
 

@@ -131,8 +131,14 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --receipt /secure/auction-evidence/rebuild-2026-08-23.json
 ```
 
-`check-config` 接受 `public` / `admin` / `worker`，输出角色、监听地址、数据库后端和缓存后端。
-它只报告后端类型，不打印连接串。
+`check-config` 接受 `public` / `admin` / `worker`，输出 JSON 格式的有效配置安全投影：监听模式与
+非敏感路径、数据库后端类型、缓存 TTL、tracing/metrics 开关、HTTP 安全计数、Worker control
+边界和配置来源状态。它不会输出数据库 URL、Redis URL、Cookie、会话签名密钥、OTLP headers 或
+任何 `.keyenv` 内容。
+
+`auctionctl` 的退出码是稳定的：`0` 表示成功，`2` 表示 CLI 用法或配置错误，`3` 表示数据库/外部
+依赖或前置条件失败，`4` 表示 systemd 部署编排失败，`5` 表示其它运维操作失败。错误正文沿用
+配置解析器的脱敏策略；调用方应依赖退出码判断结果，不要解析错误文本。
 
 `deployment-check` 读取 `public.toml`、`admin.toml` 和 `worker.toml`，检查三者的敏感文件、
 runtime 文件、数据库档位、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
@@ -145,7 +151,7 @@ runtime 目录、group 与显式 UID/GID allowlist 配置。
 自动重启和日志由 systemd 拥有；总控校验 unit 已加载且其 `AUCTION_CONFIG_FILE` 与指定绝对
 `config-dir` 精确一致。`start` 在三个 unit 全部停止时执行严格预检、监听地址占用检查和
 forward-only migration，再按 Worker → Admin → Public 启动并分别读取 Worker Unix control
-`/v1/health/ready`、Public TCP `/health/ready`，以及 Admin runtime 实际选择的 TCP 或 Unix
+`/v1/health/ready`、Public 实际选择的 TCP 或 Unix `/health/ready`，以及 Admin runtime 实际选择的 TCP 或 Unix
 `/health/ready`。任一角色失败时只按反序停止本次启动的 unit，
 不会回退已经提交的 migration。`restart` 会先完成配置/unit 预检，再按 Public → Admin → Worker
 停止并重新执行同一流程；`stop` 的终止等待和最终强制策略由各 unit 的 `TimeoutStopSec` 管理。

@@ -19,7 +19,6 @@ auction-process.workspace = true
 rust-embed.workspace = true
 axum.workspace = true
 chrono.workspace = true
-libc.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

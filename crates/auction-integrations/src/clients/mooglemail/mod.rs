@@ -8,9 +8,11 @@ mod client;
 mod error;
 mod forms;
 mod gateway;
+#[path = "parser/document.rs"]
 mod parser;
 mod protocol;
 mod sender;
+#[path = "transport/http.rs"]
 mod transport;
 mod writer;
 

@@ -34,7 +34,9 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   写入失败计数和各自的 tracing 安全状态；Admin runtime 的人工提前开放与装备来源策略已经进入
   启动时冻结的实际运行 owner。稳定 Web DTO 已统一由 `auction-contracts` 拥有，Public/Admin
   `RustEmbed` 类型也已移入各自装配根并形成制品级隔离；Public 规则读模型已接入可选缓存、有限
-  TTL、权威回源和 Admin 发布后的按语言失效。
+  TTL、权威回源和 Admin 发布后的按语言失效；Public/Admin 已共享 TCP 与 Linux Unix listener
+  的安全绑定，`auctionctl` 已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web
+  surface、auctionctl 和 storage 的大型入口已改为具名实现文件，`mod.rs` 只保留必要的模块边界。
   真实外部服务、部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整功能等价。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
@@ -294,7 +296,7 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   配置示例集中在 `ops/config/examples/runtime/`。
 - `AUCTION_CONFIG_FILE` 只能选择配置文件；单个配置项不能通过环境变量覆盖，业务模块也
   不能自行读取环境变量。
-- 主配置只允许放监听地址、日志过滤器、缓存非敏感策略等普通设置，并通过必填的
+- 主配置只允许放 `[listener]` 监听策略、日志过滤器、缓存非敏感策略等普通设置，并通过必填的
   `secrets_file` 引用敏感 TOML。相对路径以主配置文件所在目录解析。
 - `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
   `admin_secret` 只能放在敏感 TOML；MoogleMail Cookie 生产路径同样使用敏感 TOML，但本地

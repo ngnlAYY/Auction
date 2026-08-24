@@ -5,7 +5,7 @@
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
-`src/database/competition/mod.rs`，后续领域事务继续按同一规则拆分。
+`src/database/competition/postgres.rs`，后续领域事务继续按同一规则拆分。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
 和 SQLx 基线接管；备份、人工确认及不可覆盖回执仍由 `auctionctl` 拥有。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
@@ -13,17 +13,17 @@ Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
 完整档读取同一快照内的结算摘要、补偿账本和 lot 金额；SQLite Lite 明确不支持该能力。
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
-快照内读取 recovery/action 安全投影；`recovery_commands/mod.rs` 持有 PostgreSQL 完整档的
+快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 持有 PostgreSQL 完整档的
 Serializable 确认写入、证据重校验、退款激活、guarded relist、命令账本、审计和预览目录事件；
 SQLite Lite 对确认能力明确返回不支持。
 结算事务在 `src/database/settlement/mod.rs` 中根据冻结的 recovery 策略，为每个获胜 lot 与
-结算义务同事务建立 `settlement_recoveries`；`src/database/recovery_scheduler/mod.rs` 负责
+结算义务同事务建立 `settlement_recoveries`；`src/database/recovery_scheduler/scheduler.rs` 负责
 PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
 owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
 `src/database/users/admin.rs` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计，
-并由 recovery owner 记录完成 proof。`recovery_commands/mod.rs` 同时持有 PostgreSQL 完整档的
+并由 recovery owner 记录完成 proof。`recovery_commands/commands.rs` 同时持有 PostgreSQL 完整档的
 relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
 Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
 满足后再以时间和状态 fence 关闭 recovery；两种推进都追加 worker 审计。SQLite Lite 对 recovery
@@ -41,12 +41,12 @@ Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreS
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
-拍卖生命周期事务由 `src/database/competition/mod.rs` 持有：管理命令锁定拍卖后校验
+拍卖生命周期事务由 `src/database/competition/postgres.rs` 持有：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
-`src/database/competition/mod.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
+`src/database/competition/postgres.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
 事件及公开发现流的持久化派生别名；SQLite
 Lite 明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
@@ -61,7 +61,7 @@ Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 target、玩家和外部装备身份加锁，写入装备、`equipment_secrets`、后台投稿、lot、版本、命令
 账本、审计和 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
-`src/database/competition/mod.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
+`src/database/competition/postgres.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
 版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
 事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
 Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
@@ -181,7 +181,7 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 `src/database/settlement_commands/mod.rs` 持有；SQLite Lite 明确不启用该 workflow，结算履约
 外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。PostgreSQL 完整档的
 `src/database/fulfillment_scheduler/mod.rs` 持有结算履约 claim、fencing、准备/激活状态推进；
-`src/database/recovery_scheduler/mod.rs` 持有 recovery case/action 的 PostgreSQL 完整档 due
+`src/database/recovery_scheduler/scheduler.rs` 持有 recovery case/action 的 PostgreSQL 完整档 due
 推进、提醒 outbox 关联和结果 fence，
 `src/database/delivery_scheduler/mod.rs` 持有 delivery outbox 的领取、发送前安全释放、发送中
 续租/fencing、成功、失败和人工对账终态；目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing

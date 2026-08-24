@@ -3,15 +3,26 @@
 # 除 secrets_file 外，以下字段和区块均可省略；省略时使用解析器或 runtime 文档的默认值。
 # 本文件只保存非敏感设置，真实数据库 URL、Redis URL、Cookie 和密钥必须放在敏感 TOML。
 
-# 若提供 runtime 文件，runtime 的 listener.address 会覆盖此值。
-# 可选：Admin HTTP 监听地址；省略时使用 127.0.0.1:8091。
-listen_address = "127.0.0.1:8091"
 # 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
 # 可选：Admin 非敏感 runtime TOML 路径；省略时不加载独立 runtime 文档。
 runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
+
+# 若提供 runtime 文件，runtime 的 listener 区块会覆盖此 fallback。
+# 可选区块：Admin HTTP 监听器；省略整个区块时使用 TCP 127.0.0.1:8091。
+[listener]
+# 可选：TCP 监听地址；TCP 模式使用 host:port，默认 127.0.0.1:8091。
+address = "127.0.0.1:8091"
+# 可选：Unix socket 所属用户组；TCP 模式必须为空。
+group = ""
+# 可选：监听模式，可填 tcp 或 Linux 上的 unix；省略时为 tcp。
+mode = "tcp"
+# 可选：Unix socket 运行目录；TCP 模式必须为空。
+runtime_directory = ""
+# 可选：直接位于 runtime_directory 下的 Unix socket 路径；TCP 模式必须为空。
+socket_path = ""
 
 # 可选区块：进程本地 Prometheus 指标；省略整个区块等同于关闭 `/metrics`。
 [metrics]
@@ -43,7 +54,7 @@ cookie_secure = false
 request_timeout_seconds = 15
 # 可选：允许提供 X-Forwarded-For 的规范 TCP 代理 CIDR，最多 64 项；默认不信任任何代理。
 trusted_proxy_cidrs = []
-# 可选：只允许 runtime Unix listener 启用；主配置/TCP listener 必须保持 false。
+# 可选：是否信任 Unix socket 上游；仅有效的 Unix listener 可设为 true。
 trusted_unix_proxy = false
 
 # 可选区块：会话过期和并发策略；存在 runtime 文件时由 runtime.session 覆盖。

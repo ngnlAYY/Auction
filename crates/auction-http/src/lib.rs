@@ -8,3 +8,6 @@ pub use http::{
     PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
     admin_router, public_router, serve_http,
 };
+
+#[cfg(target_os = "linux")]
+pub use http::{UnixHttpListener, UnixListenerOptions};

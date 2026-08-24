@@ -1,7 +1,9 @@
 # Auction Rust 的 Public/Admin 反向代理模板。
 #
 # 监听地址默认仍由 Rust 进程配置负责：Public 127.0.0.1:8090，Admin 127.0.0.1:8091。
-# 生产环境应通过环境变量替换站点域名和上游；不要把数据库 URL、Cookie 或其他密钥写在这里。
+# 生产环境应通过环境变量替换站点域名和上游；Public/Admin 也可把上游改为对应 Unix socket，
+# 但必须同步主配置 listener、systemd runtime 目录权限和 socket group；不要把数据库 URL、Cookie
+# 或其他密钥写在这里。
 
 {$AUCTION_CADDY_PUBLIC_SITE:auction.example.com} {
   # Prometheus 指标只允许内网独立抓取，不通过公网站点转发。

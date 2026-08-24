@@ -4,7 +4,7 @@ use auction_application::{
     AdminCredentialImportCommand, AdminCredentialKind, AdminCredentialSecret,
     AdminCredentialService, AdminCredentialWorld,
 };
-use auction_config::{AppConfig, Role};
+use auction_config::{AppConfig, HttpListenMode, Role};
 #[cfg(feature = "postgres")]
 use auction_integrations::{CredentialSealer, DataKey};
 use auction_storage::DatabaseBackend;
@@ -293,23 +293,74 @@ impl From<RoleArg> for Role {
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
-    match Cli::parse().command {
-        Command::CheckConfig { role } => {
-            let role: Role = role.into();
-            let config = AppConfig::load(role).context("load configuration")?;
-            let database_backend = config
-                .database_url()
-                .map(DatabaseBackend::from_url)
-                .transpose()
-                .context("validate database_url")?;
-            println!(
-                "role={} listen_addr={:?} database_backend={database_backend:?} cache_backend={}",
-                config.role.name(),
-                config.listen_addr,
-                config.cache.backend.name(),
-            );
+const EXIT_USAGE_OR_CONFIG: u8 = 2;
+const EXIT_DEPENDENCY: u8 = 3;
+const EXIT_DEPLOYMENT: u8 = 4;
+const EXIT_OPERATION: u8 = 5;
+
+/// auctionctl 对外稳定的失败结果；错误正文沿用已脱敏的业务上下文，退出码由命令类别决定。
+#[derive(Debug)]
+pub struct AuctionCtlError {
+    code: u8,
+    source: anyhow::Error,
+}
+
+impl AuctionCtlError {
+    fn new(code: u8, source: anyhow::Error) -> Self {
+        Self { code, source }
+    }
+
+    /// 返回供 shell/systemd 使用的稳定退出码。
+    pub const fn exit_code(&self) -> u8 {
+        self.code
+    }
+}
+
+impl std::fmt::Display for AuctionCtlError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:#}", self.source)
+    }
+}
+
+impl std::error::Error for AuctionCtlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.source()
+    }
+}
+
+impl Command {
+    fn failure_code(&self) -> u8 {
+        match self {
+            Self::CheckConfig { .. } | Self::DeploymentCheck { .. } => EXIT_USAGE_OR_CONFIG,
+            Self::Deployment { .. } => EXIT_DEPLOYMENT,
+            Self::Migrate
+            | Self::RetentionInventory { .. }
+            | Self::RecoveryPreflight { .. }
+            | Self::PostgresBackup { .. }
+            | Self::PostgresBackupVerify { .. }
+            | Self::PostgresLegacyV28Backup { .. }
+            | Self::PostgresLegacyV28BackupVerify { .. }
+            | Self::PostgresAdoptLegacyV28 { .. }
+            | Self::PostgresRestore { .. }
+            | Self::PostgresRebuild { .. } => EXIT_DEPENDENCY,
+            Self::BootstrapMailCredentials { .. } => EXIT_OPERATION,
         }
+    }
+}
+
+pub async fn run() -> Result<(), AuctionCtlError> {
+    let command = Cli::try_parse()
+        .map_err(|error| {
+            AuctionCtlError::new(EXIT_USAGE_OR_CONFIG, anyhow::anyhow!(error.to_string()))
+        })?
+        .command;
+    let failure_code = command.failure_code();
+    run_command(command).await.map_err(|error| AuctionCtlError::new(failure_code, error))
+}
+
+async fn run_command(command: Command) -> anyhow::Result<()> {
+    match command {
+        Command::CheckConfig { role } => check_config(role.into())?,
         Command::Migrate => {
             migrate().await?;
         }
@@ -415,6 +466,84 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn check_config(role: Role) -> anyhow::Result<()> {
+    let config = AppConfig::load(role).context("load configuration")?;
+    let database_backend = config
+        .database_url()
+        .map(DatabaseBackend::from_url)
+        .transpose()
+        .context("validate database_url")?;
+    let listener = config.listener.as_ref();
+    let listener_mode = listener.map(|listener| listener.mode.name());
+    let listener_socket_path = listener
+        .filter(|listener| listener.mode == HttpListenMode::Unix)
+        .map(|listener| listener.socket_path.as_str());
+    let listener_runtime_directory = listener
+        .filter(|listener| listener.mode == HttpListenMode::Unix)
+        .map(|listener| listener.runtime_directory.as_str());
+    let listener_group = listener
+        .filter(|listener| listener.mode == HttpListenMode::Unix)
+        .map(|listener| listener.group.as_str());
+    let summary = serde_json::json!({
+        "role": config.role.name(),
+        "listener": {
+            "mode": listener_mode,
+            "address": config.listen_addr.map(|address| address.to_string()),
+            "runtime_directory": listener_runtime_directory,
+            "socket_path": listener_socket_path,
+            "group": listener_group,
+        },
+        "database": {
+            "configured": config.database_url().is_some(),
+            "backend": database_backend.map(DatabaseBackend::name),
+        },
+        "cache": {
+            "backend": config.cache.backend.name(),
+            "public_rules_ttl_seconds": config.cache.public_rules_ttl_seconds,
+        },
+        "metrics": {
+            "enabled": config.metrics.enabled,
+        },
+        "tracing": {
+            "enabled": config.tracing.enabled,
+            "endpoint_configured": !config.tracing.endpoint.is_empty(),
+            "headers_configured": config.tracing_headers().is_some(),
+            "queue_capacity": config.tracing.queue_capacity,
+        },
+        "http_security": {
+            "allowed_origin_count": config.http_security.allowed_origins.len(),
+            "trusted_proxy_cidr_count": config.http_security.trusted_proxy_cidrs.len(),
+            "trusted_unix_proxy": config.http_security.trusted_unix_proxy,
+            "cookie_secure": config.http_security.cookie_secure,
+        },
+        "session": {
+            "idle_ttl_seconds": config.session.idle_ttl_seconds,
+            "absolute_ttl_seconds": config.session.absolute_ttl_seconds,
+            "max_public_sessions": config.session.max_public_sessions,
+        },
+        "worker": {
+            "concurrency": config.worker_concurrency(),
+            "poll_interval_seconds": config.worker_poll_interval_seconds(),
+            "control_enabled": config.worker.control.enabled,
+            "control_socket_path": config.worker.control.socket_path,
+            "control_allowed_peer_uid_count": config.worker.control.allowed_peer_uids.len(),
+            "control_allowed_peer_gid_count": config.worker.control.allowed_peer_gids.len(),
+        },
+        "realtime": {
+            "consumer_key": config.realtime.consumer_key,
+            "poll_interval_millis": config.realtime.poll_interval_millis,
+            "client_buffer": config.realtime.client_buffer,
+        },
+        "admin_runtime_configured": config.admin_runtime.is_some(),
+        "admin_credentials_configured": config.admin_credentials_configured(),
+        "config_file": config.config_path.as_ref().map(|path| path.display().to_string()),
+        "secrets_file_configured": config.secrets_path.is_some(),
+        "runtime_config_file": config.runtime_config_path.as_ref().map(|path| path.display().to_string()),
+    });
+    println!("{}", serde_json::to_string_pretty(&summary)?);
+    Ok(())
+}
+
 struct DeploymentConfig {
     role: Role,
     config: AppConfig,
@@ -423,8 +552,19 @@ struct DeploymentConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DeploymentListener {
+    None,
     Tcp(SocketAddr),
     Unix(PathBuf),
+}
+
+impl DeploymentListener {
+    fn description(&self) -> String {
+        match self {
+            Self::None => "none".to_owned(),
+            Self::Tcp(address) => format!("tcp:{address}"),
+            Self::Unix(path) => format!("unix:{}", path.display()),
+        }
+    }
 }
 
 /// 执行不连接数据库、不启动进程的三进程部署预检。
@@ -462,12 +602,17 @@ fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Resu
         if role == Role::Worker && config.worker.control.enabled {
             validate_absolute_path(&config.worker.control.socket_path, "Worker control socket")?;
         }
+        let listener = match role {
+            Role::Public => public_deployment_listener(&config)?,
+            Role::Admin => admin_deployment_listener(&config)?,
+            Role::Worker => DeploymentListener::None,
+        };
         println!(
-            "ok role={} config={} database_backend={} listen_addr={:?}",
+            "ok role={} config={} database_backend={} listener={}",
             role.name(),
             path.display(),
             backend,
-            config.listen_addr,
+            listener.description(),
         );
         configs.push(DeploymentConfig { role, config, backend });
     }
@@ -494,12 +639,7 @@ fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Resu
         .ok_or_else(|| anyhow::anyhow!("worker config was not loaded"))?;
     validate_admin_worker_topology(&admin.config, &worker.config)?;
 
-    let public_listener = DeploymentListener::Tcp(
-        public
-            .config
-            .listen_addr
-            .ok_or_else(|| anyhow::anyhow!("public must expose a listener"))?,
-    );
+    let public_listener = public_deployment_listener(&public.config)?;
     let admin_listener = admin_deployment_listener(&admin.config)?;
     if let DeploymentListener::Tcp(address) = &public_listener
         && address.port() == 0
@@ -522,6 +662,21 @@ fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Resu
     Ok(())
 }
 
+fn public_deployment_listener(config: &AppConfig) -> anyhow::Result<DeploymentListener> {
+    let listener =
+        config.listener.as_ref().ok_or_else(|| anyhow::anyhow!("public must expose a listener"))?;
+    match listener.mode {
+        HttpListenMode::Tcp => config
+            .listen_addr
+            .map(DeploymentListener::Tcp)
+            .ok_or_else(|| anyhow::anyhow!("public TCP listener address is missing")),
+        HttpListenMode::Unix => {
+            validate_absolute_path(&listener.socket_path, "Public Unix listener socket")?;
+            Ok(DeploymentListener::Unix(PathBuf::from(&listener.socket_path)))
+        }
+    }
+}
+
 fn admin_deployment_listener(config: &AppConfig) -> anyhow::Result<DeploymentListener> {
     if let Some(socket_path) = config.admin_unix_listener_socket_path() {
         validate_absolute_path(socket_path, "Admin Unix listener socket")?;
@@ -535,6 +690,7 @@ fn admin_deployment_listener(config: &AppConfig) -> anyhow::Result<DeploymentLis
 
 fn deployment_listeners_conflict(left: &DeploymentListener, right: &DeploymentListener) -> bool {
     match (left, right) {
+        (DeploymentListener::None, _) | (_, DeploymentListener::None) => false,
         (DeploymentListener::Tcp(left), DeploymentListener::Tcp(right)) => {
             left.port() == right.port()
                 && (left.ip() == right.ip()

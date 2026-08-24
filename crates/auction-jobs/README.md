@@ -3,8 +3,9 @@
 Worker 任务编排：调度、重试、游标推进和生命周期任务。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`，
-并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/`、`operations/`
-和 `control/` 分组。
+并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/` 和 `operations/`
+分组。Worker control 传输层独立归属 `src/control/`，由该目录拥有协议 DTO、Unix socket 安全、
+peer allowlist、HTTP handler 和 Admin client；调度器只通过 `WorkerControlHandle` 接入状态与唤醒端口。
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
 指数退避失败记录和由装配根注入的 shutdown future；它通过生命周期应用端口执行 preview/open，
@@ -88,4 +89,5 @@ Worker 游标和命令账本必须持久化：内存定时器或内存游标不�
 Lite 档下 Worker 实例数和并发都必须保持为一，但游标仍然要持久化。
 入口接收配置层已校验的并发数；SQLite Lite 档固定为 1，不能依赖运行时自行降级。
 
-本 crate 不暴露业务写入 HTTP 表面，也不包含 HTTP handler。
+本 crate 不暴露业务写入 HTTP 表面；`src/control/` 的 HTTP 仅是本机 peer-authenticated 运维
+传输，不能承载拍卖或管理业务写入，也不与 Public/Admin 的 `auction-http` 路由混用。

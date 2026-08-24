@@ -24,6 +24,7 @@ mod admin_mail;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod audit_health;
 #[cfg(feature = "postgres")]
+#[path = "competition/postgres.rs"]
 mod competition;
 #[cfg(feature = "postgres")]
 mod legacy_v28;
@@ -124,12 +125,14 @@ mod realtime_admin;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod realtime_consumer;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[path = "recovery_commands/commands.rs"]
 mod recovery_commands;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod recovery_health;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod recovery_report;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[path = "recovery_scheduler/scheduler.rs"]
 mod recovery_scheduler;
 #[cfg(feature = "postgres")]
 mod retention_inventory;

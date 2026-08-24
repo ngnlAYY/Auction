@@ -567,7 +567,8 @@ Admin runtime listener 已接入 TCP 与 Linux Unix socket 启动装配；Unix �
 目录、目录级单实例锁、stale socket 身份、owner/group 和 `0660` 权限检查，Worker control
 socket 路径仍由同一 runtime 文档选择。`auctionctl deployment-check/start/restart` 已恢复跨进程
 拓扑校验：Admin/Worker control socket 与三组数据密钥必须一致，Public/Admin 实际 TCP/Unix
-listener 不能冲突，Admin readiness 跟随 runtime 选择的 listener。其余真实部署与切换行为仍需外部对照。
+listener 不能冲突，Admin readiness 跟随 runtime 选择的 listener；部署探针区分 Public/Admin
+HTTP 的 `/health/ready` 与 Worker control 的 `/v1/health/ready`。其余真实部署与切换行为仍需外部对照。
 systemd Admin 模板也已开放 `/run/hv-auction`，Unix 示例 group 与模板运行组保持一致，避免代码
 支持 Unix 而受保护 unit 无法创建 socket 的装配分叉。
 
@@ -641,11 +642,16 @@ migration readiness、audit failure 和 tracing health；Admin runtime 的人工
 Admin 规则发布成功后执行精确 invalidate；缓存故障、损坏或失效失败始终回源权威规则表，且
 不进入竞价、会话、幂等或审计正确性路径。
 
-- 评审 Public Unix listener 与旧版部署契约、CLI 稳定退出码/脱敏有效配置诊断，以及把 Worker control
-  HTTP transport 从调度 owner 中分离的必要性；这些是次级部署/所有权缺口；
-- 继续拆分超过约一千行且承担多类职责的 `auction-http/http/mod.rs`、`auction-config/config/mod.rs`、
-  storage competition/recovery、Web app、MoogleMail parser/transport 和 Worker 根模块；本轮已完成
-  `admin_*`、`recovery_*`、`realtime_*` 等物理文件分组，并修复此前因错误使用 `$$` 而无法执行的
+Worker control transport 的所有权已从 `src/worker/` 调度目录移至 `auction-jobs/src/control/`：
+协议 DTO、Unix socket 安全、peer allowlist、实例锁、清理和 Admin client 现在由 control 子模块
+统一维护，调度器只保留 `WorkerControlHandle` 状态/唤醒端口；该传输不接受业务写入，也不复用
+Public/Admin HTTP listener。
+
+- 继续按职责细分仍超过约一千行且承担多类职责的 `auction-contracts/contracts/dto.rs`、
+  `auction-storage/users/admin.rs`、Public `auction/reads.rs`、`auctionctl/bootstrap/runtime.rs`、
+  `clients/mooglemail/parser/document.rs`、`clients/mooglemail/transport/http.rs` 和 observability
+  metrics；本轮已完成 HTTP/config/Worker/Web app/
+  auctionctl 入口以及 storage competition/recovery 的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
 

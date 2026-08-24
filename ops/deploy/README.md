@@ -23,7 +23,8 @@
 /etc/auction/runtime/admin.toml
 /var/lib/auction/deployment/       # systemd 总控锁与无敏感信息的启动回执
 /var/lib/auction/                  # SQLite Lite 时还保存本地数据库文件
-/run/hv-auction/worker/            # Worker control socket 等运行时文件
+/run/hv-auction/                  # Public/Admin HTTP Unix socket 与运行时目录
+/run/hv-auction/worker/           # Worker control socket 等运行时文件
 ```
 
 `*.secret.toml` 只能由对应运行账号读取，父目录不得允许 group/world 写入；Admin runtime
@@ -34,7 +35,8 @@
 
 1. 将三个角色的主配置和独立敏感 TOML 放到受信目录；生产 Worker 必须启用
    `[worker.control]`，预建配置中的 runtime 目录与 Unix group，并把实际 Admin/运维 UID 或 GID
-   写入 allowlist，以提供经过内核身份认证的 Unix socket readiness。
+   写入 allowlist，以提供经过内核身份认证的 Unix socket readiness。若 Public/Admin 选择 Unix
+   listener，也必须预建对应 runtime 目录，并让 unit 运行账号属于配置的 socket group。
 2. 安装并审阅三个角色 unit 与 `auction-stack.service`，确保 unit 中的
    `AUCTION_CONFIG_FILE` 分别精确指向 `/etc/auction/public.toml`、`admin.toml` 和
    `worker.toml`。
@@ -42,8 +44,9 @@
    预检、TCP/Unix listener 冲突检查、Admin/Worker control socket 与数据密钥一致性检查和
    forward-only migration，再按 Worker → Admin → Public 顺序逐个等待实际 listener 的
    readiness；失败只回滚本次启动的 unit，migration 不自动回退。
-4. 反向代理只连接 Public/Admin 的监听地址；不要把 `/metrics` 暴露给公网，Caddy 模板
-   已默认返回 `404`。
+4. 反向代理只连接 Public/Admin 的 TCP 地址或 Unix socket；不要把 `/metrics` 暴露给公网，
+   Caddy 模板已默认返回 `404`。切换到 Unix upstream 时要同步修改 Caddy 上游值和 unit 的
+   runtime 目录权限。
 
 示例命令（实际部署应使用已安装的二进制，而不是 `cargo run`）：
 

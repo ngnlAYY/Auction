@@ -29,9 +29,11 @@ use auction_process::{
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::sync::oneshot;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use uuid::Uuid;
+
+mod listener;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 #[derive(Clone, Copy)]
@@ -75,8 +77,8 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
-    let address = config.listen_addr.context("public-api must have a listen address")?;
-    let listener = TcpListener::bind(address).await?;
+    let listener = listener::bind(config).await?;
+    let listener_description = listener.description();
     let (state, heartbeat, realtime_relay) =
         configure_state(config, telemetry.health_reader(), Arc::clone(&metrics), cache.clone())
             .await
@@ -108,10 +110,10 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     )
     .with_state(state);
 
-    tracing::info!(%address, cache_backend = cache.backend(), "public api listening");
+    tracing::info!(listener = %listener_description, cache_backend = cache.backend(), "public api listening");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     let mut server_task = TaskGuard::new(tokio::spawn(async move {
-        auction_http::serve_http(listener, app, async move {
+        listener::serve(listener, app, async move {
             let _ = shutdown_receiver.await;
         })
         .await

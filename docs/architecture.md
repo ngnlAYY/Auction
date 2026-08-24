@@ -31,8 +31,8 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-storage` | PostgreSQL 完整适配器、SQLite Lite 适配器、migration、query、repository | 竞价规则本身 |
 | `auction-cache` | 默认关闭的缓存边界、Redis 连接和带 TTL 的可重建值 | 权威状态、锁、幂等和审计 |
 | `auction-integrations` | E-Hentai、MoogleMail、凭据加密、身份和通知适配器 | 拍卖状态迁移 |
-| `auction-jobs` | due task、论坛扫描、投递重试、生命周期调度 | HTTP handler |
-| `auction-http` | Public/Admin router、认证 middleware、DTO 映射、前端产物内嵌 | 领域决策 |
+| `auction-jobs` | due task、论坛扫描、投递重试、生命周期调度，以及独立的本机 Worker control 传输边界 | Public/Admin 业务 HTTP 与领域决策 |
+| `auction-http` | Public/Admin router、认证 middleware、DTO 映射、前端产物内嵌、共享 TCP/Unix HTTP listener 安全绑定 | 领域决策与进程级监听选择 |
 | `auction-web-shared` | 设计变量、基础排版、语言集合与偏好持久化、无业务偏向的展示组件 | 任一 surface 的业务组件与文案 |
 | `auction-web-public` | 公开端 Dioxus 组件、路由、公开端译文 | 数据库、secret、管理端能力 |
 | `auction-web-admin` | 管理端 Dioxus 组件、路由、管理端译文 | 数据库、secret、公开端组件树 |
@@ -59,11 +59,17 @@ auction-worker      ─┘  ├─ auction-storage ─┬─ PostgreSQL（完整
                        ├─ auction-integrations ─ E-Hentai/MoogleMail
                        ├─ auction-jobs
                        ├─ auction-cache ─ Redis（可选）
-                       └─ auction-process ─ signals/drain/task ownership
+                        └─ auction-process ─ signals/drain/task ownership
 auctionctl ──────────────────────────────── ops/migrations/config
 ```
 
-Public 和 Admin 可以分别绑定端口、Unix socket 或反向代理；Worker 不暴露业务写入
+`auction-jobs/src/control/` 是 Worker control 的独立子模块 owner，不属于 `src/worker/` 调度
+实现：它拥有 UDS-only HTTP/JSON 协议、peer credential allowlist、实例锁、socket 清理和 Admin
+client；`src/worker/` 只依赖状态句柄与唤醒端口。该 control 面不接受业务写入，不能复用 Public/Admin
+HTTP listener 或 socket。
+
+Public 和 Admin 可以分别绑定端口、Unix socket 或反向代理；Public 的 listener 位于主配置，
+Admin 的主配置 listener 是 fallback，存在 runtime 文件时由 runtime listener 覆盖；Worker 不暴露业务写入
 HTTP；所有写入仍必须经过 application owner 的命令端口。这样保留 Auction-BF 的部署
 边界，同时把 apps/*/src/main.rs 与各 crate 的 src/lib.rs 压缩为薄组合根；实际实现按
 职责放入带明确 owner 的 src 子目录，禁止在 src 根目录平铺实现文件。
@@ -160,7 +166,7 @@ Admin 规则发布成功后按语言删除对应 key。读取 miss、快照损�
 
 ## 配置与敏感信息
 
-每个主配置只包含监听地址、日志过滤器、缓存策略和拍卖策略模板等普通字段，并通过 `secrets_file` 引用
+每个主配置只包含 `[listener]` 监听策略、日志过滤器、缓存策略和拍卖策略模板等普通字段，并通过 `secrets_file` 引用
 第二个 TOML。Admin 主配置还可以通过 `runtime_config_file` 引用独立的非敏感 runtime TOML；
 它承载监听、安全策略、会话时限、Worker control 路径和可选 dashboard world/mailbox 投影等可审计运行参数，不承载数据库 URL、
 Redis URL、会话签名密钥、Admin actor/secret 或外部服务 Cookie。敏感值只存在于敏感文件；
@@ -174,7 +180,7 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 和 durable intent，不在当前进程内热改 listener/security/session；成功响应必须带
 `restart_required`。Admin 对外就绪前会执行同一恢复服务；可证明的 pending/applied 状态自动
 收口，`unknown` 或文件冲突会保留人工核对告警，其他恢复错误阻断启动。SQLite Lite 读取
-启动时 runtime 文档但不提供这项完整更新能力，HTTP 返回 `501 feature_not_supported`。Admin
+启动时 runtime 文档但不提供这项完整更新能力，HTTP 返回 `501 feature_not_supported`。Public/Admin
 监听器装配已支持 TCP 与 Linux Unix socket：Unix 模式在绑定前校验受信任 runtime 目录、目录级
 单实例锁、stale socket 身份、owner/group 和 `0660` 权限；当前进程退出时只清理自己创建且身份
 未变化的 socket。

@@ -42,6 +42,12 @@ SQLx 0.9 的 [MSRV 说明](https://docs.rs/crate/sqlx/latest/source/CHANGELOG.md
 不会被框架类型污染。连接装配直接使用 Axum 同版本依赖图中的 Hyper/`hyper-util`：仅用于配置
 5 秒 HTTP/1 请求头读取超时、HTTP/2 WebSocket CONNECT 和连接级优雅排空，不建立第二套路由器。
 
+Public/Admin 的监听配置属于装配根，不进入领域或应用层：主配置的 `[listener]` 支持 TCP 和
+Linux Unix socket，Admin 的 runtime listener 可覆盖主配置 fallback。两种模式都经过
+`auction-http` 的共享绑定器执行目录、单实例锁、stale socket、owner/group 和权限校验；Worker
+control socket 是独立传输面，不能与 HTTP listener 复用。Unix socket 只适用于明确的单主机
+反向代理部署，跨主机或非 Linux 部署使用 TCP。
+
 ## 浏览器端
 
 | 方案 | 特点 | 适用情况 |

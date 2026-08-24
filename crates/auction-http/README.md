@@ -2,7 +2,8 @@
 
 Public 与 Admin 的 HTTP 表面适配器。
 
-- `src/http/mod.rs`：`public_router()` / `admin_router()`，健康检查和冻结契约路径注册。
+- `src/http/routes.rs`：`public_router()` / `admin_router()`，健康检查和冻结契约路径注册；
+  `src/http/mod.rs` 只负责 surface 导出边界。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
@@ -98,7 +99,7 @@ HTTP/1 请求头读取超时。CSP 的脚本来源保持同源，只为 WASM 编
 允许内联是因为两个 Dioxus index 的首屏防闪样式及组件 style 属性属于当前浏览器契约。
 
 `X-Forwarded-For` 默认完全忽略。TCP peer 命中 `trusted_proxy_cidrs` 后才从右向左选择第一个
-非可信地址；任一条目无法解析时丢弃整条链。Admin Unix listener 还必须显式启用
+非可信地址；任一条目无法解析时丢弃整条链。Public/Admin Unix listener 还必须显式启用
 `trusted_unix_proxy`。登录与 mutation 限流使用解析后的地址，固定窗口最多保留 4096 项，容量满时
 按最后访问时间和 IP 稳定淘汰最旧项。
 

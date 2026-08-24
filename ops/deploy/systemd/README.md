@@ -53,8 +53,8 @@ sudo /opt/auction/bin/auctionctl deployment status
 sudo /opt/auction/bin/auctionctl deployment restart --config-dir /etc/auction
 ```
 
-Admin runtime 更新需要写入 `/etc/auction/runtime/`，Unix listener 需要写入 `/run/hv-auction`，
-因此 Admin unit 显式开放这两个目录；其余
+Admin runtime 更新需要写入 `/etc/auction/runtime/`，Public/Admin Unix listener 需要写入
+`/run/hv-auction`，因此对应 unit 必须显式开放这些目录，并保证运行账号属于配置的 socket group；其余
 敏感 TOML 仍保持只读。Worker unit 预建 `/run/hv-auction/worker`，Worker 会校验目录 owner、
 不可被 other 写入及 group-write 一致性，再以实例锁和 inode 身份保护 control socket；unit 只在
 SQLite Lite 部署时开放 `/var/lib/auction` 数据目录。

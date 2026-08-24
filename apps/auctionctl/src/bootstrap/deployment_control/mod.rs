@@ -99,6 +99,7 @@ mod unix {
     use super::systemd::{ManagedRole, START_ORDER, SystemdClient, UnitSnapshot, single_line};
     use crate::bootstrap::{
         DeploymentListener, admin_deployment_listener, deployment_check, migrate_config,
+        public_deployment_listener,
     };
     use anyhow::Context;
     use auction_config::{AppConfig, Role};
@@ -352,15 +353,22 @@ mod unix {
             let worker = AppConfig::load_from_path(Role::Worker, &worker_path)
                 .context("加载 Worker 部署配置失败")?;
 
-            let public_address =
-                public.listen_addr.ok_or_else(|| anyhow::anyhow!("Public 部署配置缺少监听地址"))?;
+            let public_listener = public_deployment_listener(&public)?;
             let admin_probe = match admin_deployment_listener(&admin)? {
                 DeploymentListener::Tcp(address) => ReadinessProbe::Tcp(address),
-                DeploymentListener::Unix(path) => ReadinessProbe::Unix(path),
+                DeploymentListener::Unix(path) => ReadinessProbe::UnixHttp(path),
+                DeploymentListener::None => anyhow::bail!("Admin 部署配置缺少监听器"),
             };
-            if public_address.port() == 0 {
-                anyhow::bail!("部署控制不接受动态端口 0")
-            }
+            let public_probe = match public_listener {
+                DeploymentListener::Tcp(address) => {
+                    if address.port() == 0 {
+                        anyhow::bail!("部署控制不接受动态端口 0")
+                    }
+                    ReadinessProbe::Tcp(address)
+                }
+                DeploymentListener::Unix(path) => ReadinessProbe::UnixHttp(path),
+                DeploymentListener::None => anyhow::bail!("Public 部署配置缺少监听器"),
+            };
             if !worker.worker.control.enabled {
                 anyhow::bail!("deployment start 要求启用 worker.control，以验证 Worker readiness")
             }
@@ -386,13 +394,10 @@ mod unix {
                 plans: vec![
                     RolePlan {
                         role: ManagedRole::Worker,
-                        probe: ReadinessProbe::Unix(worker_socket),
+                        probe: ReadinessProbe::UnixControl(worker_socket),
                     },
                     RolePlan { role: ManagedRole::Admin, probe: admin_probe },
-                    RolePlan {
-                        role: ManagedRole::Public,
-                        probe: ReadinessProbe::Tcp(public_address),
-                    },
+                    RolePlan { role: ManagedRole::Public, probe: public_probe },
                 ],
             })
         }

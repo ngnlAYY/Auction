@@ -5,6 +5,9 @@
 - `src/clients/http.rs`：`build_http_client()` 构建统一使用 rustls/ring 的 `reqwest::Client`。
   外部适配器应复用该客户端，避免每个网关各自维护连接池或选择不同 TLS provider。
 - `src/clients/ehentai.rs` 与 `src/clients/mooglemail/`：各自的传输与认证边界。MoogleMail
+  其中 `parser/document.rs` 专门负责页面事实解析与证明，`transport/http.rs` 专门负责外部
+  HTTP/凭据轮换与请求边界；`protocol.rs`、`forms.rs`、`writer.rs` 和 `sender.rs` 分别拥有
+  协议值对象、表单、写入状态与发送编排。
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
   inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
   Bot/测试 Cookie 的有序切换。写入侧已实现 compose/detail typed target、表单闭集、无重定向

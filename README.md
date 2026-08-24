@@ -34,7 +34,10 @@ SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接�
 tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提前开放和装备来源策略也已冻结到
 启动装配，并分别在锁内生命周期事务和受限流式 HTTP 读取中生效。浏览器 HTTP/stream DTO 已统一
 由 `auction-contracts` 拥有；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，任一部署
-制品都不会引用另一端资源。2026-08-24 的第二轮交叉审计仍保留首批缓存读模型等非测试代码任务。
+制品都不会引用另一端资源。Public/Admin 已支持共享安全 TCP/Linux Unix listener，`auctionctl`
+已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web surface 与 storage 入口也已按
+职责使用具名实现文件。当前剩余主要是少数深层大型业务文件的继续拆分，以及真实外部服务、部署
+切换和浏览器产物对照。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
 Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过

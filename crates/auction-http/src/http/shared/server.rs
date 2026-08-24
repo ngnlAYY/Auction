@@ -19,8 +19,8 @@ const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 运行一个已绑定的 TCP 或 Unix listener，并在停止接收后等待现有 Hyper 连接排空。
 ///
-/// listener 必须把每条连接映射成 `SocketAddr`；Admin Unix listener 使用受保护的 loopback
-/// 占位地址，可信 Unix 代理策略再由 HTTP 边界决定是否接纳 `X-Forwarded-For`。
+/// listener 必须把每条连接映射成 `SocketAddr`；Unix listener 使用受保护的 loopback 占位
+/// 地址，可信 Unix 代理策略再由 HTTP 边界决定是否接纳 `X-Forwarded-For`。
 pub async fn serve_http<L, F>(mut listener: L, app: Router, shutdown: F) -> io::Result<()>
 where
     L: Listener<Addr = SocketAddr>,
