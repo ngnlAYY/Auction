@@ -15,6 +15,7 @@ auction-integrations.workspace = true
 auction-jobs.workspace = true
 auction-storage.workspace = true
 auction-observability.workspace = true
+auction-process.workspace = true
 axum.workspace = true
 chrono.workspace = true
 libc.workspace = true

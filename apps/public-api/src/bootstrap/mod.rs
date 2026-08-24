@@ -17,12 +17,15 @@ use auction_http::{PublicApiState, PublicHttpSecurity};
 use auction_http::{RealtimeHub, RealtimeHubSink};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{HeartbeatPublisher, HeartbeatStore, ProcessRole, ServiceName};
-use auction_observability::{ProcessMetrics, TracingConfig};
+use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
+use auction_process::{
+    DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::oneshot};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use uuid::Uuid;
 
@@ -49,6 +52,14 @@ pub async fn run() -> anyhow::Result<()> {
         config.tracing_headers(),
     )
     .context("initialize tracing")?;
+
+    let result = run_service(&config, &telemetry).await;
+    shutdown_tracing(telemetry).await;
+    result
+}
+
+async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
+    let mut signals = TerminationSignals::subscribe().context("subscribe public-api signals")?;
     let cache = configure_cache(&config).context("configure public-api cache")?;
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
@@ -69,42 +80,135 @@ pub async fn run() -> anyhow::Result<()> {
     let _ = realtime_relay;
     let state = state.with_metrics(metrics);
     #[cfg(any(feature = "postgres", feature = "sqlite"))]
-    let heartbeat_task = heartbeat.as_ref().map(Arc::clone).map(spawn_heartbeat);
+    let mut heartbeat_task =
+        heartbeat.as_ref().map(Arc::clone).map(spawn_heartbeat).map(TaskGuard::new);
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-    let heartbeat_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut heartbeat_task: Option<TaskGuard<()>> = None;
     #[cfg(any(feature = "postgres", feature = "sqlite"))]
-    let realtime_relay_task = realtime_relay.map(|relay| {
-        spawn_realtime_relay(
-            relay,
-            std::time::Duration::from_millis(config.realtime.poll_interval_millis),
-        )
-    });
+    let mut realtime_relay_task = realtime_relay
+        .map(|relay| {
+            spawn_realtime_relay(
+                relay,
+                std::time::Duration::from_millis(config.realtime.poll_interval_millis),
+            )
+        })
+        .map(TaskGuard::new);
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-    let realtime_relay_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut realtime_relay_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let app = auction_http::public_router(env!("CARGO_PKG_VERSION")).with_state(state);
 
     tracing::info!(%address, cache_backend = cache.backend(), "public api listening");
-    let result =
-        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
-    if let Some(publisher) = heartbeat.as_ref()
-        && let Err(error) = publisher.publish_stopping().await
+    let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
+    let mut server_task = TaskGuard::new(tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_receiver.await;
+            })
+            .await
+    }));
+    let mut immediate_server_result = None;
+    let signal = tokio::select! {
+        result = server_task.join() => {
+            immediate_server_result = result;
+            None
+        }
+        signal = signals.recv() => Some(signal.context("receive public-api shutdown signal")?),
+    };
+
+    if let Some(signal) = signal {
+        tracing::info!(signal = %signal, "public api drain started");
+        let _ = shutdown_sender.send(());
+    } else {
+        drop(shutdown_sender);
+    }
+    abort_background_task(&heartbeat_task);
+    abort_background_task(&realtime_relay_task);
+
+    let drain = async {
+        join_background_task(&mut heartbeat_task, "public heartbeat").await;
+        join_background_task(&mut realtime_relay_task, "public realtime relay").await;
+        if let Some(publisher) = heartbeat.as_ref()
+            && let Err(error) = publisher.publish_stopping().await
+        {
+            tracing::warn!(error = %error, "public heartbeat stopping publish failed");
+        }
+        match immediate_server_result.take() {
+            Some(result) => Some(result),
+            None => server_task.join().await,
+        }
+    };
+    let result = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, drain).await {
+        Ok(DrainOutcome::Completed(result)) => public_server_result(result),
+        Ok(DrainOutcome::TimedOut) => {
+            force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
+                .await;
+            Err(anyhow::anyhow!("public-api drain exceeded 10 seconds"))
+        }
+        Ok(DrainOutcome::Interrupted(signal)) => {
+            force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
+                .await;
+            Err(anyhow::anyhow!("public-api drain interrupted by {signal}"))
+        }
+        Err(error) => {
+            force_public_tasks(&mut heartbeat_task, &mut realtime_relay_task, &mut server_task)
+                .await;
+            Err(error).context("wait for public-api drain")
+        }
+    };
+    if result.is_ok() {
+        tracing::info!("public api stopped");
+    }
+    result
+}
+
+fn abort_background_task(task: &Option<TaskGuard<()>>) {
+    if let Some(task) = task {
+        task.abort();
+    }
+}
+
+async fn join_background_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
+    let Some(task) = task else {
+        return;
+    };
+    if let Some(Err(error)) = task.join().await
+        && !error.is_cancelled()
     {
-        tracing::warn!(error = %error, "public heartbeat stopping publish failed");
+        tracing::warn!(task = name, error = %error, "public background task join failed");
     }
-    if let Some(task) = heartbeat_task {
-        task.abort();
+}
+
+async fn force_public_tasks(
+    heartbeat_task: &mut Option<TaskGuard<()>>,
+    realtime_relay_task: &mut Option<TaskGuard<()>>,
+    server_task: &mut TaskGuard<std::io::Result<()>>,
+) {
+    abort_background_task(heartbeat_task);
+    abort_background_task(realtime_relay_task);
+    server_task.abort();
+    join_background_task(heartbeat_task, "public heartbeat").await;
+    join_background_task(realtime_relay_task, "public realtime relay").await;
+    let _ = server_task.join().await;
+}
+
+fn public_server_result(
+    result: Option<Result<std::io::Result<()>, tokio::task::JoinError>>,
+) -> anyhow::Result<()> {
+    match result {
+        Some(Ok(Ok(()))) => Ok(()),
+        Some(Ok(Err(error))) => Err(error).context("serve public-api HTTP"),
+        Some(Err(error)) => Err(error).context("join public-api HTTP server"),
+        None => Err(anyhow::anyhow!("public-api HTTP server result is missing")),
     }
-    if let Some(task) = realtime_relay_task {
-        task.abort();
-    }
+}
+
+async fn shutdown_tracing(telemetry: TracingRuntime) {
     match tokio::task::spawn_blocking(move || telemetry.shutdown()).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "public tracing shutdown failed"),
         Err(error) => tracing::warn!(error = %error, "public tracing shutdown task failed"),
     }
-    result?;
-    Ok(())
 }
 
 fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {

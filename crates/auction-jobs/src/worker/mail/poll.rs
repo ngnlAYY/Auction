@@ -203,11 +203,17 @@ impl MailPollRuntime {
 }
 
 /// 按旧版语义独立运行一个邮箱：等待下一 cron 时刻与 `[0, jitter]` 后轮询，手动触发跳过等待和 due 时间。
-pub(crate) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>, runtime: MailPollRuntime)
-where
+pub(crate) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    runtime: MailPollRuntime,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
+        if *shutdown.borrow() {
+            return;
+        }
         let now = worker.clock.now();
         let Some(next_wake_at) = runtime.schedule.next_after(now) else {
             tracing::error!(
@@ -230,6 +236,13 @@ where
         let scheduled_sleep = tokio::time::sleep_until(scheduled_wake);
         tokio::pin!(scheduled_sleep);
         let force = tokio::select! {
+            biased;
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+                continue;
+            }
             () = &mut scheduled_sleep => {
                 worker.metrics.observe_schedule_delay(
                     runtime.loop_kind(),

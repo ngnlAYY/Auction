@@ -12,8 +12,10 @@ use super::{
 };
 
 /// 立即处理生命周期和结算批次，随后按旧版 polling+jitter cadence 重试。
-pub(super) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
-where
+pub(super) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
@@ -30,7 +32,9 @@ where
 
         let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;
-        tokio::time::sleep_until(scheduled_wake).await;
+        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+            return;
+        }
         worker.metrics.observe_schedule_delay(
             WorkerLoop::Auction,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),

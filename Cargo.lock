@@ -184,6 +184,7 @@ dependencies = [
  "auction-integrations",
  "auction-jobs",
  "auction-observability",
+ "auction-process",
  "auction-storage",
  "axum",
  "chrono",
@@ -336,6 +337,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "auction-process"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "auction-public-api"
 version = "0.1.0"
 dependencies = [
@@ -345,6 +353,7 @@ dependencies = [
  "auction-config",
  "auction-http",
  "auction-observability",
+ "auction-process",
  "auction-storage",
  "axum",
  "chrono",
@@ -440,6 +449,7 @@ dependencies = [
  "auction-integrations",
  "auction-jobs",
  "auction-observability",
+ "auction-process",
  "auction-storage",
  "chrono",
  "tokio",

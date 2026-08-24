@@ -10,8 +10,10 @@ use tokio::task::JoinSet;
 use super::{PersistentWorker, merge_worker_result, poll_delay, process_recovery_action};
 
 /// 立即依次推进 health、case、return、action、relist 与 refund，随后按旧版 cadence 重试。
-pub(super) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
-where
+pub(super) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
@@ -26,7 +28,9 @@ where
 
         let wait = poll_delay(worker.recovery.poll_interval, worker.recovery.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;
-        tokio::time::sleep_until(scheduled_wake).await;
+        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+            return;
+        }
         worker.metrics.observe_schedule_delay(
             WorkerLoop::AuctionRecovery,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),

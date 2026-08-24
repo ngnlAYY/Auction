@@ -13,8 +13,10 @@ use super::{PersistentWorker, merge_worker_result, poll_delay, process_fulfillme
 ///
 /// 批次或单项失败只影响 fulfillment owner；只有循环任务 panic 或意外退出才由装配根
 /// 将整个 Worker 标记为 degraded 并失败关闭。
-pub(super) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
-where
+pub(super) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
@@ -29,7 +31,9 @@ where
 
         let wait = poll_delay(worker.fulfillment.poll_interval, worker.fulfillment.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;
-        tokio::time::sleep_until(scheduled_wake).await;
+        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+            return;
+        }
         worker.metrics.observe_schedule_delay(
             WorkerLoop::AuctionFulfillment,
             tokio::time::Instant::now().saturating_duration_since(scheduled_wake),

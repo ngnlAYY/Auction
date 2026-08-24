@@ -10,8 +10,10 @@ use auction_application::Clock;
 
 use super::{PersistentWorker, poll_delay};
 
-pub(crate) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
-where
+pub(crate) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
@@ -33,6 +35,8 @@ where
 
         let wait = poll_delay(worker.forum.poll_interval, worker.forum.jitter);
         let scheduled_wake = tokio::time::Instant::now() + wait;
-        tokio::time::sleep_until(scheduled_wake).await;
+        if super::wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
+            return;
+        }
     }
 }

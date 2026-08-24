@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 
 #[cfg(feature = "postgres")]
 use std::collections::{HashMap, HashSet};
@@ -57,7 +57,10 @@ use auction_jobs::{MailPollRuntime, RecoveryHealthRuntime};
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{HeartbeatPublisher, HeartbeatStore, ProcessRole, ServiceName};
-use auction_observability::{ProcessMetrics, TracingConfig};
+use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
+use auction_process::{
+    DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_storage::{
     DatabaseAuctionLifecycleCommands, DatabaseBackend, DatabaseCompetitionCommands,
@@ -69,6 +72,8 @@ use chrono::{DateTime, Utc};
 use url::Url;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use uuid::Uuid;
+
+type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 #[derive(Clone, Copy)]
@@ -104,6 +109,14 @@ pub async fn run() -> anyhow::Result<()> {
         config.tracing_headers(),
     )
     .context("initialize tracing")?;
+
+    let result = run_service(&config, &telemetry).await;
+    shutdown_tracing(telemetry).await;
+    result
+}
+
+async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
+    let mut signals = TerminationSignals::subscribe().context("subscribe worker signals")?;
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -122,14 +135,48 @@ pub async fn run() -> anyhow::Result<()> {
         "worker configured"
     );
 
-    let result = run_worker(&config, Arc::clone(&metrics)).await;
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
+    let worker = run_worker(
+        config,
+        Arc::clone(&metrics),
+        Box::pin(async move {
+            let _ = shutdown_receiver.await;
+        }),
+    );
+    tokio::pin!(worker);
+    let result = tokio::select! {
+        result = &mut worker => {
+            drop(shutdown_sender);
+            result
+        }
+        signal = signals.recv() => {
+            let signal = signal.context("receive worker shutdown signal")?;
+            tracing::info!(signal = %signal, "worker drain started");
+            let _ = shutdown_sender.send(());
+            match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, &mut worker).await {
+                Ok(DrainOutcome::Completed(result)) => result,
+                Ok(DrainOutcome::TimedOut) => {
+                    Err(anyhow::anyhow!("worker drain exceeded 10 seconds"))
+                }
+                Ok(DrainOutcome::Interrupted(signal)) => {
+                    Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
+                }
+                Err(error) => Err(error).context("wait for worker drain"),
+            }
+        }
+    };
+    if result.is_ok() {
+        tracing::info!("worker stopped");
+    }
+    result
+}
+
+async fn shutdown_tracing(telemetry: TracingRuntime) {
     match tokio::task::spawn_blocking(move || telemetry.shutdown()).await {
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::warn!(error = %error, "worker tracing shutdown failed"),
         Err(error) => tracing::warn!(error = %error, "worker tracing shutdown task failed"),
     }
-    result?;
-    Ok(())
 }
 
 fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
@@ -146,7 +193,11 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow::Result<()> {
+async fn run_worker(
+    config: &AppConfig,
+    metrics: Arc<ProcessMetrics>,
+    shutdown: ShutdownFuture,
+) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
         if config.worker.mooglemail.enabled
             || config.worker.forum.enabled
@@ -154,7 +205,7 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
         {
             anyhow::bail!("启用外部 Worker 功能时必须配置 PostgreSQL database_url");
         }
-        run_worker_skeleton(config, metrics).await?;
+        run_worker_skeleton(config, metrics, shutdown).await?;
         return Ok(());
     };
     let store =
@@ -221,7 +272,7 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
     };
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len());
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
-    let control_task = if config.worker.control.enabled {
+    let mut control_task = if config.worker.control.enabled {
         let server_config = worker_control_server_config(config)?;
         let server = WorkerControlServer::bind_with_metrics(
             server_config,
@@ -231,9 +282,9 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
         .await
         .context("bind Worker control socket")?;
         let shutdown = Arc::clone(&control_shutdown);
-        Some(tokio::spawn(
-            async move { server.run(async move { shutdown.notified().await }).await },
-        ))
+        Some(TaskGuard::new(tokio::spawn(async move {
+            server.run(async move { shutdown.notified().await }).await
+        })))
     } else {
         None
     };
@@ -302,7 +353,7 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
     if let Err(error) = heartbeat.publish_ready().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
     }
-    let heartbeat_task = spawn_heartbeat(Arc::clone(&heartbeat));
+    let mut heartbeat_task = Some(TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
     let auction_poll_interval =
         std::time::Duration::from_secs(config.worker_poll_interval_seconds());
     let auction_lease_duration = std::time::Duration::from_secs(
@@ -402,25 +453,24 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
             // 外部广播协议尚未冻结；没有具体 sink 时不启动实时消费，避免伪造转发成功。
             realtime_consumer: None,
             metrics: metrics.worker(),
-            control,
+            control: control.clone(),
             clock: Arc::new(SystemClock),
             worker_id,
         },
+        shutdown,
     )
     .await;
+    control.mark_draining();
+    abort_worker_task(&heartbeat_task);
+    join_worker_task(&mut heartbeat_task, "worker heartbeat").await;
     if let Err(error) = heartbeat.publish_stopping().await {
         tracing::warn!(error = %error, "worker heartbeat stopping publish failed");
     }
-    heartbeat_task.abort();
-    control_shutdown.notify_one();
-    if let Some(task) = control_task {
-        match task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(error = %error, "Worker control server stopped with an error")
-            }
-            Err(error) => tracing::warn!(error = %error, "Worker control server task join failed"),
-        }
+    control_shutdown.notify_waiters();
+    if let Err(error) =
+        join_worker_control_task(&mut control_task, "persistent worker control").await
+    {
+        tracing::warn!(error = %error, "Worker control server stopped with an error");
     }
     result.context("run persistent worker")?;
     Ok(())
@@ -1061,11 +1111,15 @@ fn map_mooglemail_message(
 }
 
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
-async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow::Result<()> {
+async fn run_worker(
+    config: &AppConfig,
+    metrics: Arc<ProcessMetrics>,
+    shutdown: ShutdownFuture,
+) -> anyhow::Result<()> {
     if config.database_url().is_some() {
         anyhow::bail!("worker 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
     }
-    run_worker_skeleton(config, metrics).await?;
+    run_worker_skeleton(config, metrics, shutdown).await?;
     Ok(())
 }
 
@@ -1077,9 +1131,10 @@ async fn run_worker(config: &AppConfig, metrics: Arc<ProcessMetrics>) -> anyhow:
 async fn run_worker_skeleton(
     config: &AppConfig,
     metrics: Arc<ProcessMetrics>,
+    shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if !config.worker.control.enabled {
-        auction_jobs::run_until_shutdown(config.worker_concurrency())
+        auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
             .await
             .context("run worker skeleton without database")?;
         return Ok(());
@@ -1088,26 +1143,25 @@ async fn run_worker_skeleton(
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), 0);
     control.mark_serving();
     let server_config = worker_control_server_config(config)?;
-    let server = WorkerControlServer::bind_with_metrics(server_config, control, Some(metrics))
-        .await
-        .context("bind Worker control socket for worker skeleton")?;
+    let server =
+        WorkerControlServer::bind_with_metrics(server_config, control.clone(), Some(metrics))
+            .await
+            .context("bind Worker control socket for worker skeleton")?;
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
-    let shutdown = Arc::clone(&control_shutdown);
-    let control_task =
-        tokio::spawn(async move { server.run(async move { shutdown.notified().await }).await });
+    let control_stop = Arc::clone(&control_shutdown);
+    let mut control_task = Some(TaskGuard::new(tokio::spawn(async move {
+        server.run(async move { control_stop.notified().await }).await
+    })));
 
-    let worker_result = auction_jobs::run_until_shutdown(config.worker_concurrency())
+    let worker_result = auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
         .await
         .context("run worker skeleton without database");
-    control_shutdown.notify_one();
-    let control_result = control_task.await;
+    control.mark_draining();
+    control_shutdown.notify_waiters();
+    let control_result =
+        join_worker_control_task(&mut control_task, "skeleton worker control").await;
     worker_result?;
-    match control_result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => Err(anyhow::Error::msg(error.to_string()))
-            .context("run Worker control server for worker skeleton"),
-        Err(error) => Err(error).context("join Worker control server for worker skeleton"),
-    }
+    control_result
 }
 
 #[cfg(unix)]
@@ -1128,14 +1182,52 @@ fn worker_control_server_config(config: &AppConfig) -> anyhow::Result<WorkerCont
 async fn run_worker_skeleton(
     config: &AppConfig,
     _metrics: Arc<ProcessMetrics>,
+    shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.worker.control.enabled {
         anyhow::bail!("Worker control 需要 Unix socket，当前平台不支持");
     }
-    auction_jobs::run_until_shutdown(config.worker_concurrency())
+    auction_jobs::run_until_shutdown(config.worker_concurrency(), shutdown)
         .await
         .context("run worker skeleton without database")?;
     Ok(())
+}
+
+fn abort_worker_task(task: &Option<TaskGuard<()>>) {
+    if let Some(task) = task {
+        task.abort();
+    }
+}
+
+async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
+    let Some(task) = task else {
+        return;
+    };
+    if let Some(Err(error)) = task.join().await
+        && !error.is_cancelled()
+    {
+        tracing::warn!(task = name, error = %error, "worker background task join failed");
+    }
+}
+
+async fn join_worker_control_task<E>(
+    task: &mut Option<TaskGuard<Result<(), E>>>,
+    name: &'static str,
+) -> anyhow::Result<()>
+where
+    E: std::fmt::Display,
+{
+    let Some(task) = task else {
+        return Ok(());
+    };
+    match task.join().await {
+        Some(Ok(Ok(()))) => Ok(()),
+        Some(Ok(Err(error))) => {
+            Err(anyhow::Error::msg(error.to_string())).with_context(|| format!("run {name}"))
+        }
+        Some(Err(error)) => Err(error).with_context(|| format!("join {name}")),
+        None => Ok(()),
+    }
 }
 
 fn configure_cache(config: &AppConfig) -> anyhow::Result<CacheStore> {

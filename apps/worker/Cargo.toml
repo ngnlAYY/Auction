@@ -14,6 +14,7 @@ auction-domain.workspace = true
 auction-integrations.workspace = true
 auction-jobs.workspace = true
 auction-observability.workspace = true
+auction-process.workspace = true
 auction-storage.workspace = true
 chrono.workspace = true
 tokio.workspace = true

@@ -4,7 +4,7 @@
 //! runtime 目录、单实例锁、socket 身份、owner/group 和权限；这样 stale socket 不会覆盖仍在
 //! 使用中的 Admin 进程，也不会让 runtime 文档中的 Unix 字段停留在“可解析但不生效”。
 
-use std::{io, net::SocketAddr};
+use std::{future::Future, io, net::SocketAddr};
 
 #[cfg(target_os = "linux")]
 use std::{
@@ -74,15 +74,21 @@ pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<AdminListener> {
 ///
 /// Unix 请求没有网络地址，监听器会为其注入 loopback 占位地址；HTTP 安全策略仍由 socket
 /// 文件的 owner/group/权限和上层 origin/CSRF 校验共同保护。
-pub(crate) async fn serve(listener: AdminListener, app: Router) -> io::Result<()> {
+pub(crate) async fn serve(
+    listener: AdminListener,
+    app: Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> io::Result<()> {
     match listener {
         AdminListener::Tcp(listener) => {
-            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
+            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                .with_graceful_shutdown(shutdown)
+                .await
         }
         #[cfg(target_os = "linux")]
         AdminListener::Unix(listener) => {
             let app = app.layer(Extension(ConnectInfo(UNIX_LISTENER_ADDRESS)));
-            axum::serve(listener, app.into_make_service()).await
+            axum::serve(listener, app.into_make_service()).with_graceful_shutdown(shutdown).await
         }
     }
 }

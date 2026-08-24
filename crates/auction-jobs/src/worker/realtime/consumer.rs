@@ -177,8 +177,10 @@ impl RealtimeConsumerRunner for PersistentRealtimeConsumer {
 }
 
 /// 独立运行可选的外部实时 sink；单轮失败只影响该消费游标，不终止其它 Worker owner。
-pub(crate) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
-where
+pub(crate) async fn run_loop<C>(
+    worker: Arc<PersistentWorker<C>>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) where
     C: Clock + 'static,
 {
     loop {
@@ -194,7 +196,11 @@ where
                 }
             }
         }
-        tokio::time::sleep(poll_delay(worker.auction.poll_interval, worker.auction.jitter)).await;
+        let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
+        let deadline = tokio::time::Instant::now() + wait;
+        if super::wait_until_or_shutdown(&mut shutdown, deadline).await {
+            return;
+        }
     }
 }
 
