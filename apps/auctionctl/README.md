@@ -8,7 +8,9 @@
 文件边界拆分，其中 `deployment_control/unix/` 又将生命周期、内部状态模型和路径/unit 校验分别放入
 `lifecycle.rs`、`model.rs` 与 `validation.rs`，`unix/mod.rs` 只承载稳定包装，
 `src/bootstrap/postgres_restore.rs` 独立持有 PostgreSQL 恢复边界，
-`src/bootstrap/postgres_legacy_v28/` 持有 Auction-BF v28 的专用备份、离线校验、确认和接管回执，
+`src/bootstrap/postgres_legacy_v28/` 按 `backup.rs`（备份生成）、`verification.rs`（离线 archive/manifest
+校验）、`adoption.rs`（接管编排）、`common.rs`（预检/后置证明）、`model.rs`（证据模型）和
+`receipt.rs`（不可覆盖接管回执）拆分 Auction-BF v28 的专用边界，`mod.rs` 只保留稳定出口，
 `src/bootstrap/postgres_rebuild/` 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
 `validation.rs`（确认和 URL 安全校验）、`postconditions.rs`（空库/迁移证明）以及
 `receipt.rs`（不可覆盖 receipt 发布）拆分默认只读的破坏性重建边界；`mod.rs` 只保留稳定调用路径。

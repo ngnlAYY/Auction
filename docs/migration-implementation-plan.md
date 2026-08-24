@@ -746,6 +746,27 @@ Public/Admin HTTP listener。
 - Worker 论坛回帖导入已将主题/身份与 lot 映射、竞价命令账本、MoogleMail 通知和完成/错误辅助分别拆入
   `worker/forum/reply/{topic,command,notification,common}.rs`；`reply.rs` 只保留运行时与循环入口，
   world 扫描游标、稳定 command ID、warning-only 通知和外部 POST 结果未知边界保持不变。
+- `auctionctl` canonical PostgreSQL v28 接管已将专用备份生成、离线 archive/manifest 校验、接管编排、
+  预检/迁移后置证明、证据模型和不可覆盖回执分别拆入
+  `postgres_legacy_v28/{backup,verification,adoption,common,model,receipt}.rs`；`mod.rs` 只保留稳定出口，
+  写库前二次 artifact 校验、逐字确认、失败关闭和 receipt 发布顺序保持不变。
+- `auction-http` 共享会话适配器已将限流/认证守卫、应用错误映射、Cookie/Basic Auth/CSRF、安全响应
+  和业务指标分别拆入 `routes/session/{guards,errors,cookies,responses,metrics}.rs`；`session.rs` 只保留
+  模块装配与稳定出口，原有 session、CSRF、Cookie 属性、状态码和业务结果分类保持不变。
+- Storage Admin runtime 命令账本已将跨后端分派、PostgreSQL 只读查询、pending/applied/unknown/reopen
+  事务、行映射和错误/SQLite Lite 能力边界分别拆入
+  `database/commands/admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；`runtime.rs` 只保留
+  稳定公共出口，命令摘要、状态 fence、审计追加和未知结果重放语义保持不变。
+- Storage Public 竞价日志已将公共 cursor/结果校验、PostgreSQL 查询/映射和 SQLite Lite 查询/类型转换
+  分别拆入 `database/bid_log/{common,postgres,sqlite}.rs`；`bid_log/mod.rs` 只保留端口分派，时间、
+  lot、状态版本、事实序号和 bid ID 的 keyset 顺序以及两套后端的非对等 SQL 能力保持不变。
+- Storage 论坛回帖 owner 已将 PostgreSQL 主题、lot/身份/代理查询、命令账本、扫描游标和输入/能力校验
+  分别拆入 `database/forum/reply/{queries,commands,cursor,validation}.rs`；`reply.rs` 只保留
+  跨后端端口分派，论坛命令幂等、锁内读取、扫描游标递增和 SQLite Lite 能力边界保持不变。
+- Storage MoogleMail delivery outbox 已将跨后端端口分派、命令闭集校验、普通 outbox 入队、recovery
+  两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
+  `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
+  `prepared → pending` 激活、审计追加和外部结果后置边界保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。

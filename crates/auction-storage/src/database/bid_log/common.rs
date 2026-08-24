@@ -1,0 +1,62 @@
+//! Public 竞价日志共享的 cursor、结果校验和错误映射。
+
+use auction_application::{
+    ApplicationError, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
+    RepositoryError,
+};
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+pub(super) fn cursor_values(
+    request: &PublicBidLogListRequest,
+) -> (DateTime<Utc>, Uuid, i64, i32, Uuid) {
+    match request.cursor.as_ref() {
+        Some(PublicBidLogCursor::Boundary {
+            created_at,
+            lot_id,
+            accepted_state_version,
+            fact_index,
+            id,
+        }) => (*created_at, *lot_id, *accepted_state_version, *fact_index, *id),
+        Some(PublicBidLogCursor::Start) | None => (Utc::now(), Uuid::nil(), 0, 0, Uuid::nil()),
+    }
+}
+
+pub(super) fn entry_cursor(entry: &PublicBidLogEntry) -> PublicBidLogCursor {
+    PublicBidLogCursor::Boundary {
+        created_at: entry.created_at,
+        lot_id: entry.lot_id,
+        accepted_state_version: entry.accepted_state_version,
+        fact_index: entry.fact_index,
+        id: entry.id,
+    }
+}
+
+pub(super) fn validate_entries(
+    entries: &[PublicBidLogEntry],
+    request: &PublicBidLogListRequest,
+) -> Result<(), ApplicationError> {
+    for entry in entries {
+        if entry.id.is_nil()
+            || entry.auction_id != request.auction_id
+            || entry.lot_id.is_nil()
+            || request.lot_id.is_some_and(|lot_id| entry.lot_id != lot_id)
+            || entry.lot_number <= 0
+            || entry.amount <= 0
+            || entry.accepted_state_version <= 0
+            || entry.fact_index <= 0
+            || entry.equipment_name.is_empty()
+            || entry.equipment_category.is_empty()
+            || entry.bidder_name.is_empty()
+            || entry.mechanism.is_empty()
+            || entry.created_at.timestamp_micros() == 0
+        {
+            return Err(storage_error("公开竞价日志包含无效条目"));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn storage_error(message: &str) -> ApplicationError {
+    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
+}

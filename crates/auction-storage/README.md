@@ -10,6 +10,9 @@
 拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,lot,mapping}.rs`。SQLite Lite 竞价事务
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
 `transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
+Public 竞价日志由 `src/database/bid_log/mod.rs` 装配，公共 cursor/结果校验、PostgreSQL 查询/映射
+和 SQLite Lite 查询/类型转换分别位于 `bid_log/{common,postgres,sqlite}.rs`；两套后端继续共享
+时间、lot、状态版本、事实序号和 bid ID 的 keyset 排序语义，但保留各自 SQL 与能力边界。
 数据库根入口的后端错误与 URL 识别位于 `database/backend.rs`，运行时 Store 选择、迁移目标、
 readiness 和连接池入口位于 `database/store.rs`，连接池指标适配位于 `database/pool_metrics.rs`；
 PostgreSQL/SQLite 的连接池与后端专属边界分别位于 `database/postgres_store.rs` 和
@@ -72,8 +75,9 @@ Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
 同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
 Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
-`sync.rs` 持有主题发布 claim/fencing、快照和证明，`reply.rs` 持有已发布主题、lot/身份映射、
-回帖命令账本和扫描游标。远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
+`sync.rs` 持有主题发布 claim/fencing、快照和证明，`reply.rs` 只做回帖端口装配，已发布主题与
+lot/身份/代理查询、命令账本和扫描游标分别位于 `reply/{queries,commands,cursor,validation}.rs`。
+远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期
 列明确返回能力不支持。
@@ -107,6 +111,10 @@ Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin/lot.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
 版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
 事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
+Admin runtime 命令账本由 `src/database/commands/admin/runtime.rs` 装配，跨后端分派、PostgreSQL
+只读查询、pending/applied/unknown/reopen 事务、行映射和错误/SQLite Lite 能力边界分别位于
+`admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；命令摘要、状态 fence、审计
+追加和未知结果重放语义保持不变。
 Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
 `audit_records`，支持安全精确筛选、keyset/数字分页和 metadata object 校验；数字页的总数与
 记录在同一读取事务内取得，不返回原始数据库行。
@@ -242,6 +250,10 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 推进、提醒 outbox 关联和结果 fence，
 `src/database/delivery_scheduler/mod.rs` 装配 delivery outbox owner；`claims.rs`、`state.rs`、
 `outcome.rs` 和 `mapping.rs` 分别负责领取、发送前安全释放/发送中续租、成功/失败终态和共享映射。
+`src/database/mail_delivery/mod.rs` 只负责 MailDeliveryEnqueuer 的跨后端分派；命令闭集校验、普通
+outbox 入队、recovery 两阶段激活和 PostgreSQL 错误/载荷辅助分别位于
+`mail_delivery/{validation,outbox,activation,common}.rs`，保留命令摘要幂等、`prepared → pending`
+激活和外部结果后置边界。
 目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
 释放回 `pending`。过期 `claimed` 可以安全重领；过期 `sending` 只有在额外 sending grace 到期后
 才批量隔离为 `manual_reconcile`，不能作为 pending 重发。失败写回会保留 transport 已校验的可选外部引用和有界安全
