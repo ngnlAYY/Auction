@@ -9,13 +9,17 @@ fmt:
 fmt-fix:
     cargo fmt --all
 
+repository-policy-check:
+    @bash ci/check-policy.sh repository
+
 layout-check:
-    @if flat=$$(rg --files apps crates | awk -F/ '/\/src\/[^/]+$$/ { name=$$NF; if (name != "lib.rs" && name != "main.rs") print }'); then \
-        if test -n "$$flat"; then \
-            printf '%s\n' "$$flat" >&2; \
-            exit 1; \
-        fi; \
-    fi
+    @bash ci/check-policy.sh layout
+
+config-example-check:
+    @bash ci/check-policy.sh config
+
+i18n-check:
+    @bash ci/check-policy.sh i18n
 
 check:
     cargo check --locked --workspace --all-targets
@@ -32,7 +36,7 @@ wasm-check:
     cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
     cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
-verify: fmt layout-check check feature-check lint wasm-check
+verify: fmt repository-policy-check layout-check config-example-check i18n-check check feature-check lint wasm-check
 
 run-public:
     cargo run -p auction-public-api

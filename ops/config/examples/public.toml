@@ -21,9 +21,11 @@ enabled = false
 enabled = false
 # 可选：collector 地址，例如 https://otel-collector.example.invalid/v1/traces。
 # endpoint = "https://otel-collector.example.invalid/v1/traces"
-# 可选：批次等待、单次导出和关闭等待秒数，范围均为 1-30。
+# 可选：批次等待秒数，范围 1-30，默认 2。
 batch_timeout_seconds = 2
+# 可选：单次导出超时秒数，范围 1-30，默认 5。
 export_timeout_seconds = 5
+# 可选：关闭时等待 exporter 刷新的秒数，范围 1-30，默认 5。
 shutdown_timeout_seconds = 5
 # 可选：单批最大 span 数，不能超过 queue_capacity，范围 1-512。
 max_export_batch_size = 64
@@ -80,14 +82,17 @@ max_public_sessions = 5
 start_price = 1000
 # 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
 bid_increment_ppm = 50000
-# 可选：软截止窗口和延长秒数，默认均为 60。
+# 可选：软截止窗口秒数，默认 60。
 soft_close_window_seconds = 60
+# 可选：命中软截止窗口后的延长秒数，默认 60。
 soft_close_extension_seconds = 60
 # 可选：取消截止窗口秒数，默认 86400。
 cancel_cutoff_seconds = 86400
-# 可选：代理开关、默认模式和 slow 间隔；模式只能为 fast 或 slow。
+# 可选：是否启用代理竞价，默认 true。
 proxy_enabled = true
+# 可选：新代理授权的默认模式，只能为 fast 或 slow，默认 fast。
 proxy_default_mode = "fast"
+# 可选：slow 代理尝试间隔秒数，默认 600。
 proxy_slow_interval_seconds = 600
 # 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
 proxy_max_outbid_uses = 3
@@ -95,13 +100,16 @@ proxy_max_outbid_uses = 3
 final_phase_lead_seconds = 60
 
 [auction.settlement]
-# 可选：结算策略版本和模式；模式只能为 hold_curve_v1 或 legacy_zero_v0。
+# 可选：结算策略版本，当前支持 0 或 1，默认 1。
 version = 1
+# 可选：结算模式，只能为 hold_curve_v1 或 legacy_zero_v0，默认 hold_curve_v1。
 mode = "hold_curve_v1"
-# 可选：补偿池开关和 isekai carrier credit；当前领域策略要求 credit 为 1。
+# 可选：是否启用补偿池，默认 true。
 compensation_pool_enabled = true
+# 可选：isekai carrier credit 数量；当前领域策略要求为 1。
 isekai_carrier_credit = 1
-# 可选：持有比例与调整比例的 PPM 锚点；省略时使用内置曲线。
+# 可选：持有比例与调整比例的 PPM 锚点数组；省略时使用内置曲线。
+# 每个数组元素一旦提供，hold_ppm 与 adjustment_ppm 均为必填字段。
 anchors = [
   { hold_ppm = 0, adjustment_ppm = 80000 },
   { hold_ppm = 50000, adjustment_ppm = 64000 },
@@ -116,8 +124,11 @@ anchors = [
 ]
 
 [auction.settlement.recovery]
-# 可选：当前只支持七天、一次提醒的 remind_v1 策略。
+# 可选：恢复策略版本，当前只支持 1。
 version = 1
+# 可选：恢复模式，当前只支持 remind_v1。
 mode = "remind_v1"
+# 可选：付款超时秒数，默认七天（604800 秒）。
 payment_timeout_seconds = 604800
+# 可选：付款超时提醒次数，当前默认且只支持 1。
 reminder_limit = 1

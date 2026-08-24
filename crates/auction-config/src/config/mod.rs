@@ -1194,7 +1194,7 @@ struct FileConfig {
     /// 可选拍卖策略区块；省略时使用旧版共享配置的默认模板。
     #[serde(default)]
     auction: AuctionConfig,
-    /// 可选 Worker 区块；省略时使用并发 1、轮询 5 秒的默认值。
+    /// 可选 Worker 区块；省略时 PostgreSQL 并发为 8、SQLite 并发为 1，轮询为 60 秒。
     #[serde(default)]
     worker: WorkerConfig,
     /// 可选 HTTP 安全区块；省略时使用内置默认值。

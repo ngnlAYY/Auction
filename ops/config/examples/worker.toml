@@ -19,9 +19,11 @@ enabled = false
 enabled = false
 # 可选：collector 地址，例如 https://otel-collector.example.invalid/v1/traces。
 # endpoint = "https://otel-collector.example.invalid/v1/traces"
-# 可选：批次等待、单次导出和关闭等待秒数，范围均为 1-30。
+# 可选：批次等待秒数，范围 1-30，默认 2。
 batch_timeout_seconds = 2
+# 可选：单次导出超时秒数，范围 1-30，默认 5。
 export_timeout_seconds = 5
+# 可选：关闭时等待 exporter 刷新的秒数，范围 1-30，默认 5。
 shutdown_timeout_seconds = 5
 # 可选：单批最大 span 数，不能超过 queue_capacity，范围 1-512。
 max_export_batch_size = 64
@@ -37,8 +39,9 @@ backend = "disabled"
 
 # 可选区块：Auction 主循环调度策略；省略时 PostgreSQL 并发为 8、SQLite Lite 为 1，其余沿用旧版默认值。
 [worker]
+# 本仓库示例引用 SQLite secrets.toml，因此这里显式使用 1；PostgreSQL 部署可改为 8 或直接省略。
 # 可选：Auction 主循环并发数，范围 1-batch_limit；PostgreSQL 默认 8，SQLite Lite 默认且只允许 1。
-concurrency = 8
+concurrency = 1
 # 可选：Auction 主循环及兼容 owner 的轮询间隔秒数，范围 1-86400，默认 60。
 poll_interval_seconds = 60
 # 可选：生命周期和结算各自的单轮批次上限，范围 1-1000，默认 100。
@@ -115,9 +118,10 @@ evidence_stale_after_seconds = 300
 enabled = false
 # 可选：socket 所属 Unix group 名称；默认 auction-worker-control，启用前必须由部署者建立并授予 Worker 进程成员资格。
 group = "auction-worker-control"
-# 可选：允许访问 control 的内核认证 GID/UID；默认均为空，enabled = true 时至少填写一个实际数字 ID。
 # 不要把示例数字直接用于生产，应以部署主机上的 Admin/运维进程身份为准。
+# 可选：允许访问 control 的内核认证 GID 列表；默认空，启用时与 UID 列表至少填写一项。
 allowed_peer_gids = []
+# 可选：允许访问 control 的内核认证 UID 列表；默认空，启用时与 GID 列表至少填写一项。
 allowed_peer_uids = []
 # 可选：预先建立、归 Worker 运行用户所有且不可被 other 写入的 runtime 目录；默认 /run/hv-auction/worker。
 runtime_directory = "/run/hv-auction/worker"
@@ -252,9 +256,13 @@ operations_alert = "Operations alert: {summary}"
 # 可选：额外启用的世界。每个条目都会建立独立的邮箱游标、claim 和 allowlist；
 # 顶层 world_id 代表第一个世界，不能在这里重复配置同一 world_id 或 mailbox_key。
 # [[worker.mooglemail.additional_worlds]]
+# 可选：额外邮箱的游戏世界，只能是 main 或 isekai。
 # world_id = "isekai"
+# 可选：额外世界的持久化邮箱标识，必须在全部 world 中唯一。
 # mailbox_key = "mooglemail:isekai"
+# 可选：额外世界允许读取详情的发件人列表；空数组表示不允许读取任何详情。
 # sender_allowlist = []
+# 可选：明确设为 true 才允许读取该额外世界的所有发件人详情。
 # sender_allowlist_disabled = false
 
 # 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭，只在 PostgreSQL 完整档运行。
@@ -304,14 +312,17 @@ recipient = ""
 start_price = 1000
 # 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
 bid_increment_ppm = 50000
-# 可选：软截止窗口和延长秒数，默认均为 60。
+# 可选：软截止窗口秒数，默认 60。
 soft_close_window_seconds = 60
+# 可选：命中软截止窗口后的延长秒数，默认 60。
 soft_close_extension_seconds = 60
 # 可选：取消截止窗口秒数，默认 86400。
 cancel_cutoff_seconds = 86400
-# 可选：代理开关、默认模式和 slow 间隔；模式只能为 fast 或 slow。
+# 可选：是否启用代理竞价，默认 true。
 proxy_enabled = true
+# 可选：新代理授权的默认模式，只能为 fast 或 slow，默认 fast。
 proxy_default_mode = "fast"
+# 可选：slow 代理尝试间隔秒数，默认 600。
 proxy_slow_interval_seconds = 600
 # 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
 proxy_max_outbid_uses = 3
@@ -319,13 +330,16 @@ proxy_max_outbid_uses = 3
 final_phase_lead_seconds = 60
 
 [auction.settlement]
-# 可选：结算策略版本和模式；模式只能为 hold_curve_v1 或 legacy_zero_v0。
+# 可选：结算策略版本，当前支持 0 或 1，默认 1。
 version = 1
+# 可选：结算模式，只能为 hold_curve_v1 或 legacy_zero_v0，默认 hold_curve_v1。
 mode = "hold_curve_v1"
-# 可选：补偿池开关和 isekai carrier credit；当前领域策略要求 credit 为 1。
+# 可选：是否启用补偿池，默认 true。
 compensation_pool_enabled = true
+# 可选：isekai carrier credit 数量；当前领域策略要求为 1。
 isekai_carrier_credit = 1
-# 可选：持有比例与调整比例的 PPM 锚点；省略时使用内置曲线。
+# 可选：持有比例与调整比例的 PPM 锚点数组；省略时使用内置曲线。
+# 每个数组元素一旦提供，hold_ppm 与 adjustment_ppm 均为必填字段。
 anchors = [
   { hold_ppm = 0, adjustment_ppm = 80000 },
   { hold_ppm = 50000, adjustment_ppm = 64000 },
@@ -340,8 +354,11 @@ anchors = [
 ]
 
 [auction.settlement.recovery]
-# 可选：当前只支持七天、一次提醒的 remind_v1 策略。
+# 可选：恢复策略版本，当前只支持 1。
 version = 1
+# 可选：恢复模式，当前只支持 remind_v1。
 mode = "remind_v1"
+# 可选：付款超时秒数，默认七天（604800 秒）。
 payment_timeout_seconds = 604800
+# 可选：付款超时提醒次数，当前默认且只支持 1。
 reminder_limit = 1

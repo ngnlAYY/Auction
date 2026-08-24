@@ -1,15 +1,24 @@
 //! Public 浏览器端的同源 HTTP 数据访问。
 //!
-//! 这里仅解码稳定的 HTTP DTO，不引入数据库模型或应用层端口。请求失败会作为页面状态返回，
-//! 组件可以显示可本地化的加载/错误文案，而不是继续渲染迁移阶段的示例数据。
+//! 这里仅解码 HTTP 安全投影，不引入数据库模型或应用层端口。请求失败会作为页面状态返回，
+//! 组件可以显示可本地化的加载/错误文案，而不是继续渲染迁移阶段的示例数据。当前 wire DTO
+//! 仍有一部分在本 crate 重复定义，后续必须收敛到 `auction-contracts`，避免契约漂移。
 
+#[path = "identity/account.rs"]
 mod account;
+#[path = "content/blacklist.rs"]
 mod blacklist;
+#[path = "auction/commands.rs"]
 mod commands;
+#[path = "content/compensation.rs"]
 mod compensation;
+#[path = "content/forum.rs"]
 mod forum;
+#[path = "auction/realtime.rs"]
 mod realtime;
+#[path = "content/rules.rs"]
 mod rules;
+#[path = "identity/session.rs"]
 mod session;
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};

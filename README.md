@@ -1,6 +1,6 @@
 # Auction Rust
 
-这是 Auction-BF 的全 Rust 重构起点。当前目录是从零建立的 Cargo 工作区；相邻的
+这是 Auction-BF 的全 Rust 重构工作区；相邻的
 `Auction-BF` 仓库只作为旧系统的业务、HTTP、部署和数据行为参考，不作为 Rust
 crate 依赖，也不在本仓库的默认修改范围内。
 
@@ -24,6 +24,13 @@ operations alert 等 Worker 任务类别都已有 Rust owner 与装配。Postgre
 竞价、代理、账户、管理命令、审计、实时通信、结算/recovery、凭据、MoogleMail 和论坛链路；
 SQLite Lite 只实现已声明的单主机能力，完整档端点在 Lite 部署中明确报告不支持。
 
+路由和 owner 齐全不等于运行边界已收口。2026-08-24 的第二轮交叉审计确认仍需补齐：Public、
+Admin、Worker 的 SIGTERM/有界优雅停机，Public/Admin 统一 HTTP 边界（请求 ID、trace context、
+安全响应头、超时、可信代理和有界限流器），心跳按真实 readiness/audit/tracing 状态发布，未知
+API/health 路径与 SPA fallback 隔离，以及 Admin runtime 的人工提前开放和装备来源策略真正接入
+运行路径。浏览器端还存在稳定 DTO 在 Web crate 重复定义，以及 Public/Admin 静态资源只做路由
+隔离、尚无 Cargo feature 或独立 crate 提供制品级隔离的问题；这些都属于非测试代码任务。
+
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
 Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
 Users owner 收口。Public 使用持久化 Catch-up、
@@ -35,7 +42,7 @@ MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
 
-尚不能据此宣称行为等价：真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
+尚不能据此宣称行为等价：上述静态代码缺口，以及真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
 浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust `auctionctl` 与 systemd owner
 边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
 不会进入启动路径。旧版 realtime 没有外部广播 sink，
@@ -119,6 +126,6 @@ Admin runtime 模板位于 [`ops/config/examples/runtime/admin.toml`](ops/config
 生产部署应复制到受信目录并设置为 `0640`；其中不得放入凭据或连接串。
 三进程部署目录、启动顺序、权限、Caddy 和 systemd 模板见 [`ops/deploy/README.md`](ops/deploy/README.md)。
 
-`just verify` 默认只执行格式化、锁定依赖的编译检查、Clippy 和 WASM 静态检查，不执行
-测试。
+`just verify` 默认只执行格式化、源码布局/命名、配置示例、五语言 Fluent 键集合门禁、锁定依赖的
+编译检查、Clippy 和 WASM 静态检查，不执行测试。
 Auction-BF 的行为迁移顺序记录在 [`docs/migration-plan.md`](docs/migration-plan.md)。

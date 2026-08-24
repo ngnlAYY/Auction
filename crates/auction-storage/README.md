@@ -55,11 +55,11 @@ Lite 明确返回能力不支持。策略模板会在同一事务中同时写入
 Admin 规则读取与发布由 `src/database/rules/mod.rs` 和 `src/database/commands/mod.rs` 持有：
 PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin_commands` 幂等账本和
 追加审计；SQLite Lite 读取规则安全快照，但发布明确返回能力不支持。
-Admin 装备录入由 `src/database/commands/admin_intake.rs` 与
+Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 `src/database/admin_intake/mod.rs` 持有：PostgreSQL 在 Serializable 事务中按 world、intake
 target、玩家和外部装备身份加锁，写入装备、`equipment_secrets`、后台投稿、lot、版本、命令
 账本、审计和 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
-Admin draft lot 修改由 `src/database/commands/admin_lot.rs` 与 PostgreSQL
+Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
 `src/database/competition/mod.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
 版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
 事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
@@ -79,7 +79,7 @@ Admin A32 凭据管理由 `src/database/credentials/mod.rs` 持有：PostgreSQL 
 `main`/`isekai` 各自的 active/invalid 水位；SQLite Lite 明确返回能力不支持，不把凭据导入、
 解密或外部 Cookie 能力伪装成 Lite 功能。
 Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
-`src/database/commands/admin_mail.rs` 持有：PostgreSQL 读取 `mail_poll_state`、
+`src/database/commands/admin/mail.rs` 持有：PostgreSQL 读取 `mail_poll_state`、
 `inbound_mail` 的安全投影，并在 Serializable 事务内用 `mail_poll_state` 的版本 fence、
 `mail_admin_commands` 命令账本和追加审计完成暂停/恢复及历史兼容命令；`src/database/mail_poll/`
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及

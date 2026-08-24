@@ -4,19 +4,30 @@
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为
 //! 由 `auction-web-shared` 统一提供。
 //!
-//! 本 crate 只允许依赖 `auction-contracts` 的稳定 DTO 与 `auction-web-shared` 的基础能力，
-//! 不得导入存储、配置或凭据访问路径。
+//! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 的目标 owner 是
+//! `auction-contracts`；当前 API 模块仍保留重复 wire struct，已登记为待收敛架构缺口。
 
+#[path = "identity/account.rs"]
 mod account;
+#[path = "content/blacklist.rs"]
 mod blacklist;
+#[path = "auction/commands.rs"]
 mod commands;
+#[path = "content/compensation.rs"]
 mod compensation;
+#[path = "content/forum.rs"]
 mod forum;
+#[path = "shared/pagination.rs"]
 mod pagination;
+#[path = "auction/proxy.rs"]
 mod proxy;
+#[path = "auction/reads.rs"]
 mod reads;
+#[path = "auction/realtime.rs"]
 mod realtime;
+#[path = "content/rules.rs"]
 mod rules;
+#[path = "identity/session.rs"]
 mod session;
 
 use chrono::{DateTime, Utc};
@@ -1757,7 +1768,11 @@ fn countdown_display(ends_at: &str, now: DateTime<Utc>) -> CountdownDisplay {
     let seconds = remaining_seconds % 60;
     let clock = format!("{hours:02}:{minutes:02}:{seconds:02}");
     CountdownDisplay {
-        label: if days > 0 { format!("{days}d {clock}") } else { clock },
+        label: if days > 0 {
+            t!("auction-countdown-days", days: days, clock: clock)
+        } else {
+            clock
+        },
         urgent: remaining_seconds <= 15 * 60,
         expired: false,
         empty: false,

@@ -10,7 +10,8 @@ tracing 初始化、指标约定、健康检查语义和关联 ID。
 `init_with_config` 挂载默认关闭、异步有界队列的 OTLP/HTTP exporter；Public/Worker 的端点、
 批次、采样和关闭等待时间来自主配置 `[tracing]`，Admin 的有效值来自 runtime `[tracing]`。
 每个角色的 OTLP headers 只从敏感 TOML 读取，启动时解析后交给 exporter，既不进入普通配置、
-日志、指标，也不写入 runtime 文件。导出队列有界，进程停止时会在限定时间内刷新并关闭。
+日志、指标，也不写入 runtime 文件。导出队列有界；服务 future 正常返回后会在限定时间内刷新并
+关闭，SIGTERM 下的可靠 drain 取决于装配根尚未补齐的统一关闭信号。
 
 ## 结构化日志约定
 
@@ -34,8 +35,10 @@ process/health 快照。Admin `/api/v1/admin/dashboard` 已接入该安全投影
 OTLP 时，心跳还会携带安全的 exporter 成功/失败计数和闭集错误码。mail、realtime、credential
 aggregation、delivery、fulfillment、recovery 和 operations-alert owner 已分别接入安全汇总；
 缺少对应端口、数据库能力或当前数据源失败时仍返回 `unknown`/`source_unavailable`，不会用示例
-数据掩盖缺失。Public/Admin/Worker 装配根已发布启动/就绪/周期/停止心跳，Worker control 还
-通过 peer-authenticated Unix socket 提供 live/ready/status 和同一指标 registry。
+数据掩盖缺失。Public/Admin/Worker 装配根已有启动、就绪、周期和正常退出后的停止心跳路径；周期
+发布仍固定为 ready/零审计失败，Public/Worker 尚未携带 tracing health，SIGTERM 也不能保证发布
+停止状态。Worker control 还通过 peer-authenticated Unix socket 提供 live/ready/status 和同一
+指标 registry。
 
 ## 指标与待补齐
 

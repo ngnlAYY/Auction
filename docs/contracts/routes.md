@@ -25,7 +25,8 @@ control 未启用或指标关闭时该路径返回 404。
 OTLP/HTTP tracing exporter 不是业务 HTTP 路由，不计入上述统计。Public/Worker 从主配置的
 `[tracing]` 读取，Admin 在配置 `runtime_config_file` 时以 runtime 的 `[tracing]` 为准；角色专属
 OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使用有界异步队列，并在进程停止
-时按限定等待时间刷新和关闭；exporter 不会把 headers 写入日志、指标或 runtime 文件。
+时按限定等待时间刷新和关闭；exporter 不会把 headers 写入日志、指标或 runtime 文件。当前三类
+进程尚未统一接入 SIGTERM 有界优雅停机，因此 systemd 的默认停止信号还不能保证走到该刷新边界。
 
 ## 进程健康探针
 
@@ -46,7 +47,8 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 
 成功响应的业务 code、JSON 字段和错误 code 以旧 handler 为准。下表的错误状态码是该
 handler 当前明确产生的稳定集合；依赖错误中的 504 表示 context deadline，503 表示
-其他依赖不可用。路由器对未注册方法还可能返回 404/405。
+其他依赖不可用。冻结契约要求路由器对未注册路径/方法返回 404/405；当前 SPA fallback 隔离
+缺口见下文。
 
 | 状态码 | 含义 |
 | --- | --- |
@@ -62,6 +64,11 @@ handler 当前明确产生的稳定集合；依赖错误中的 504 表示 contex
 | 429 | 限流或有界连接资源耗尽 |
 | 500 | 服务器内部无法安全完成请求 |
 | 503/504 | 下游依赖不可用或处理超时 |
+
+旧版统一 HTTP boundary 还要求合法或新生成的 `X-Request-ID`、响应回传、trace context、请求级
+访问日志、安全响应头、可信代理客户端地址、处理超时和有界限流状态。当前 Rust 路由只完成了
+origin/CSRF/body limit/按直连地址限流等局部边界，上述统一能力尚未接入；未知 `/api`、`/health`
+和浏览器路径也必须先从 SPA fallback 隔离，再按 JSON 404 或页面 404 返回。
 
 ## Public
 
@@ -102,7 +109,9 @@ next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格�
 ## Admin
 
 除 Admin session 本身外，下表路径都经过 Admin session；mutation 还经过 origin、CSRF、
-限流和 actor/request_id 注入。具有多个 HTTP 方法的路径必须按方法分别保留成功状态。
+限流和 actor 注入。`request_id` 属于冻结契约，但当前 mutation 尚未从 HTTP boundary 注入，审计
+命令仍收到 `None`；补齐前不得宣称请求与审计已经可关联。具有多个 HTTP 方法的路径必须按方法
+分别保留成功状态。
 
 | 编号 | 方法 | 路径 | 成功 | 明确错误状态 | 旧代码来源 |
 | --- | --- | --- | --- | --- | --- |
@@ -226,8 +235,9 @@ A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和
 读取全量轮询器、consumer lag/failure water、delivery pending/failed/manual-reconcile 水位及年龄字段；fulfillment、recovery
 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting
 section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
-`unknown`，不伪造状态。三个进程装配根已接入启动/就绪/周期/停止心跳发布，剩余是实际部署中的
-可用性与外部通知回执对照。外部广播不属于旧版 dashboard 契约。
+`unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，但周期发布当前硬编码
+`ready=true`、`audit_failure_count=0`，Public/Worker 也未注入 tracing health；SIGTERM 还不会可靠
+发布停止心跳。因此 dashboard 心跳真实性仍是待完成代码任务。外部广播不属于旧版 dashboard 契约。
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
@@ -246,7 +256,9 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 `reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
 运行时文件路径由主 TOML 的 `runtime_config_file` 选择，敏感 TOML、Cookie、密钥和数据库
 连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
- `501 feature_not_supported`。
+ `501 feature_not_supported`。当前 `allow_manual_early_open` 和 `[equipment_source]` 虽能通过这组
+接口读取、校验与持久化，但生命周期 capability/命令仍固定允许人工提前开放，装备来源适配器也仍
+使用硬编码策略；这两个字段必须接入实际运行 owner 后才能视为完整生效。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、游戏

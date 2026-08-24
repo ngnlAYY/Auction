@@ -19,16 +19,27 @@ use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinSet;
 
+#[path = "auction/lifecycle.rs"]
 mod auction;
+#[path = "control/mod.rs"]
 mod control;
+#[path = "forum/loop.rs"]
 mod forum;
+#[path = "forum/reply.rs"]
 mod forum_reply;
+#[path = "forum/sync.rs"]
 mod forum_sync;
+#[path = "settlement/fulfillment.rs"]
 mod fulfillment;
+#[path = "mail/poll.rs"]
 mod mail_poll;
+#[path = "operations/alert.rs"]
 mod operations_alert;
+#[path = "realtime/consumer.rs"]
 mod realtime_consumer;
+#[path = "recovery/loop.rs"]
 mod recovery;
+#[path = "recovery/health.rs"]
 mod recovery_health;
 
 pub use control::{

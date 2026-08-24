@@ -9,21 +9,37 @@
 //!
 //! 本 crate 不得导入存储、配置或凭据访问路径。
 
+#[path = "auction/auctions.rs"]
 mod auctions;
+#[path = "operations/audit.rs"]
 mod audit;
+#[path = "operations/config.rs"]
 mod config;
+#[path = "identity/credentials.rs"]
 mod credentials;
+#[path = "operations/dashboard.rs"]
 mod dashboard;
+#[path = "fulfillment/deliveries.rs"]
 mod deliveries;
+#[path = "auction/intake.rs"]
 mod intake;
+#[path = "auction/lots.rs"]
 mod lots;
+#[path = "fulfillment/mail.rs"]
 mod mail;
+#[path = "shared/pagination.rs"]
 mod pagination;
+#[path = "operations/realtime.rs"]
 mod realtime;
+#[path = "identity/renames.rs"]
 mod renames;
+#[path = "content/rules.rs"]
 mod rules;
+#[path = "auction/settlement.rs"]
 mod settlement;
+#[path = "operations/status.rs"]
 mod status;
+#[path = "identity/users.rs"]
 mod users;
 
 use dioxus::prelude::*;

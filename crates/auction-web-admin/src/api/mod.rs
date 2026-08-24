@@ -1,25 +1,44 @@
-//! Admin delivery HTTP 数据访问。
+//! Admin 浏览器端的同源 HTTP 数据访问。
 //!
-//! 浏览器只接收后端的安全 delivery 投影。人工动作携带由页面按输入复用的 `command_id`
-//! 和页面快照中的 `expected_fencing_version`；服务端仍负责最终的状态校验、幂等和审计。
+//! 浏览器只接收后端安全投影。人工动作携带由页面按输入复用的 `command_id` 和对应版本 fence；
+//! 服务端仍负责最终的状态校验、幂等和审计。当前 wire DTO 仍有一部分在本 crate 重复定义，后续
+//! 必须收敛到 `auction-contracts`，避免 HTTP owner 与浏览器解码形状漂移。
 
+#[path = "auction/auctions.rs"]
 mod auctions;
+#[path = "operations/audit.rs"]
 mod audit;
+#[path = "identity/credentials.rs"]
 mod credentials;
+#[path = "operations/dashboard.rs"]
 mod dashboard;
+#[path = "auction/intake.rs"]
 mod intake;
+#[path = "auction/lifecycle.rs"]
 mod lifecycle;
+#[path = "auction/lots.rs"]
 mod lots;
+#[path = "fulfillment/mail.rs"]
 mod mail;
+#[path = "auction/proxy_events.rs"]
 mod proxy_events;
+#[path = "operations/realtime.rs"]
 mod realtime;
+#[path = "auction/recovery.rs"]
 mod recovery;
+#[path = "identity/renames.rs"]
 mod renames;
+#[path = "content/rules.rs"]
 mod rules;
+#[path = "operations/runtime_config.rs"]
 mod runtime_config;
+#[path = "identity/session.rs"]
 mod session;
+#[path = "auction/settlement.rs"]
 mod settlement;
+#[path = "operations/status.rs"]
 mod status;
+#[path = "identity/users.rs"]
 mod users;
 
 pub(crate) use auctions::{

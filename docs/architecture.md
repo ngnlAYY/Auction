@@ -41,8 +41,10 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 
 浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态
 WASM/JS/HTML，`auction-http` 用 `rust-embed` 分别内嵌，产出单文件制品。Public 与 Admin
-的组件树、路由树和静态产物完全隔离：公开端二进制不包含管理端资源。产物缺失时静态路由
-返回 503 并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。
+的组件树和路由树已分离，路由不会跨 surface 提供静态产物；但两种 `RustEmbed` 类型仍编译在
+同一个 `auction-http` crate 中，尚未通过 Cargo feature 或独立 crate 建立制品级资源隔离，
+不能依赖链接器裁剪来保证公开端二进制一定不携带管理端资源。产物缺失时静态路由返回 503
+并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。
 
 界面文案由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，支持 `en`/`zh-CN`/`zh-TW`/
 `ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
@@ -307,12 +309,15 @@ Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版
 owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settlement/recovery 契约，提供已结算拍卖
 选择、lot 金额表、资金池摘要和带版本 fence 的 recovery 确认；Admin outbox 页面复用已冻结的
 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。SQLite 仍明确返回不支持。
-剩余主要是 Admin 真实浏览器产物的视觉/交互核对、真实外部回执和部署切换验证；在完成这些
-证据前仍不能宣称行为等价。
+除真实浏览器、外部回执和部署切换证据外，第二轮静态审计还确认了 SIGTERM 优雅停机、统一
+HTTP boundary/request ID、真实 readiness 心跳、SPA fallback 隔离和部分 Admin runtime 字段生效
+链等代码缺口；在这些边界收口前同样不能宣称行为等价。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下按 owner 返回安全 section；只有 owner 未装配或读取失败时才显式返回
-`unknown`。Public、Admin、Worker 装配根已发布启动/就绪/周期/停止心跳；Worker control 已通过
+`unknown`。Public、Admin、Worker 装配根已有心跳发布路径，但周期心跳仍固定报告 ready/零审计
+失败，Public/Worker 没有纳入 tracing health，SIGTERM 也未可靠进入停止发布；这些状态必须改为
+从实际 readiness/audit/tracing owner 读取。Worker control 已通过
 安全 runtime 目录、实例锁、固定 group/0660、inode 清理和显式 UID/GID peer credential allowlist
 提供 live/ready/status、同 registry 的 `/metrics` 和
 MoogleMail 唤醒，Admin dashboard 只显示安全投影；启用并配置 `dashboard_mailboxes` 时还按 Admin

@@ -10,6 +10,8 @@
 [`examples/secrets/`](examples/secrets/)。主配置必须通过 `secrets_file`
 引用敏感文件；相对路径以主配置所在目录解析。示例主配置引用的 `secrets.toml` 只包含
 安全的本地占位值，不能直接用于生产环境。
+每个示例赋值字段前都必须紧邻中文“可选”或“必填”注释；`just config-example-check` 会阻止
+遗漏字段状态说明的示例进入默认静态验证。
 
 三进程部署目录、启动顺序、健康探针、权限和 Caddy 上游模板见
 [`../deploy/README.md`](../deploy/README.md)。该资料不替代具体主机的服务管理器配置。
@@ -42,17 +44,24 @@ Admin 示例的 `runtime_config_file` 指向 [`examples/runtime/admin.toml`](exa
 启动时读取已存在的文档，HTTP 更新返回 `501 feature_not_supported`。
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
 MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。
+当前 `allow_manual_early_open` 与 `[equipment_source]` 虽可解析、校验和持久化，但尚未接入
+生命周期授权与装备来源 HTTP 适配器；修改这两组字段目前不会改变对应运行行为，必须在该生效链
+完成后才能作为可操作配置交付。
 
 以下字段只能出现在敏感 TOML：
 
 - `database_url`：数据库连接串；
 - `redis_url`：启用 Redis 缓存时的连接串；
 - `session_signing_key`：会话签名密钥；
-- `ehentai_cookie`、`mooglemail_cookie`：外部服务 Cookie。
+- `ehentai_cookie`、`mooglemail_cookie`：外部服务 Cookie；
+- `public_otlp_headers`、`worker_otlp_headers`、`admin_otlp_headers`：角色专属 OTLP 认证或路由头；
+- `admin_actor`、`admin_secret`：Admin 登录交换身份与共享密钥，必须成对配置；
 - `equipment_data_key_id`、`equipment_data_key`：Admin 装备 key 信封的轮换标识与 32 字节
   Base64 数据密钥；两者必须成对配置，且只在 PostgreSQL 完整档启用装备录入时使用。
 - `user_login_data_key_id`、`user_login_data_key`：MoogleMail Users 注册/换绑登录 key 信封的
-  独立轮换标识与 32 字节 Base64 数据密钥；两者必须成对配置，不能与装备 key 混用。
+  独立轮换标识与 32 字节 Base64 数据密钥；两者必须成对配置，不能与装备 key 混用；
+- `credential_data_key_id`、`credential_data_key`：Admin 外部 Cookie 凭据的独立轮换标识与
+  32 字节 Base64 数据密钥，不能与装备或用户登录 key 混用。
 
 旧的单文件格式不兼容；把这些字段放入主配置会因未知字段而启动失败。解析错误和日志不得
 输出敏感 TOML 原文或上述字段值。
@@ -72,6 +81,8 @@ Lite 已实现的写入仍必须满足事务原子性、命令幂等和追加式
 `backend = "redis"` 还要求对应二进制以 `cache-redis` feature 构建，并在敏感文件提供
 `redis_url`。具体缓存写入由调用方显式提供有限 TTL；缓存关闭或不可用不得影响权威业务
 结果。
+当前三个装配根只会按配置建立并检查 cache adapter，尚无权威查询调用 `get`/`set`/`invalidate`；
+因此 Redis 是已装配但尚未产生性能收益的可选能力，不能把“连接成功”描述为业务缓存已接入。
 
 主配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.economics]`、
 `[auction.settlement]` 和 `[auction.settlement.recovery]`。这些字段都是非敏感的可选字段，

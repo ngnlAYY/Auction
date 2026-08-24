@@ -10,11 +10,15 @@ allow_manual_early_open = false
 # 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围；省略时不强制检查范围。
 # 该清单应与 Worker 配置中的 world_id/mailbox_key 一致，只包含非敏感标识。
 [[dashboard_mailboxes]]
+# 可选：需要核对的游戏世界，只能是 main 或 isekai。
 world_id = "main"
+# 可选：Worker 为该世界使用的持久化邮箱标识。
 mailbox_key = "mooglemail:main"
 
 [[dashboard_mailboxes]]
+# 可选：需要核对的游戏世界，只能是 main 或 isekai。
 world_id = "isekai"
+# 可选：Worker 为该世界使用的持久化邮箱标识。
 mailbox_key = "mooglemail:isekai"
 
 # 可选区块：装备来源和远程读取边界；省略整个区块时使用默认限制。
@@ -47,10 +51,15 @@ socket_path = ""
 
 # Linux Unix 模式示例（启用时请替换上面的 listener 区块）：
 # [listener]
+# 可选：Unix 模式不使用 TCP 地址，必须留空。
 # address = ""
+# 可选：Unix socket 所属用户组；部署前必须建立。
 # group = "auction"
+# 可选：将监听模式切换为 unix。
 # mode = "unix"
+# 可选：由运行账号拥有且不可被其他用户写入的 runtime 目录。
 # runtime_directory = "/run/hv-auction"
+# 可选：直接位于 runtime_directory 下的 Unix socket 路径。
 # socket_path = "/run/hv-auction/admin.sock"
 # runtime_directory 必须预先存在，由运行账号拥有，且不能对其他用户开放写权限。
 

@@ -6,9 +6,10 @@
 路由装配。
 
 职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
-relay/Hub、绑定监听器、挂载 `auction_http::public_router()`、优雅关闭和退出码。Public 的
+relay/Hub、绑定监听器、挂载 `auction_http::public_router()` 和返回启动错误。Public 的
 `[tracing]` 使用主配置，OTLP headers 使用敏感 TOML 的 Public 专属字段；exporter 采用有界
-异步队列并在进程停止时限时关闭。**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
+异步队列，当前仅在服务 future 正常返回后执行限时关闭。SIGINT/SIGTERM 共用的有界优雅停机、
+停止心跳和稳定退出码仍待接入。**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
 持久化事件分发，外部广播 sink 仍由独立协议负责。
 
 默认监听 `127.0.0.1:8090`。
@@ -37,4 +38,6 @@ just web-build-public
 
 ## 边界约束
 
-公开端**不得**依赖管理端 UI 模块或管理专属命令。本进程不包含管理端静态资源。
+公开端**不得**依赖管理端 UI 模块或管理专属命令。当前路由只提供 Public 资源，但
+`auction-http` 同时编译两种 `RustEmbed` 类型，尚未用 Cargo feature 或独立 crate 对制品做硬隔离；
+不能仅依赖链接器裁剪来保证本进程不携带管理端静态资源。

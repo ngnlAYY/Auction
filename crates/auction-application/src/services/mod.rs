@@ -1,21 +1,39 @@
+#[path = "admin/auction.rs"]
 mod admin_auction;
+#[path = "admin/credentials.rs"]
 mod admin_credentials;
+#[path = "admin/intake.rs"]
 mod admin_intake;
+#[path = "admin/lot.rs"]
 mod admin_lot;
+#[path = "admin/mail.rs"]
 mod admin_mail;
+#[path = "admin/rules.rs"]
 mod admin_rules;
+#[path = "admin/runtime_config.rs"]
 mod admin_runtime_config;
+#[path = "admin/users.rs"]
 mod admin_users;
+#[path = "auction/commands.rs"]
 mod auction;
+#[path = "auction/competition.rs"]
 mod competition;
+#[path = "settlement/fulfillment.rs"]
 mod fulfillment;
+#[path = "auction/lifecycle.rs"]
 mod lifecycle;
+#[path = "mail/processing.rs"]
 mod mail_processing;
+#[path = "realtime/relay.rs"]
 mod realtime_relay;
+#[path = "recovery/commands.rs"]
 mod recovery;
+#[path = "recovery/health.rs"]
 mod recovery_health;
 mod sessions;
+#[path = "settlement/commands.rs"]
 mod settlement;
+#[path = "mail/user.rs"]
 mod user_mail;
 
 pub use admin_auction::AdminAuctionCreateService;

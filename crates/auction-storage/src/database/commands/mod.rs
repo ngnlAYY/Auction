@@ -19,12 +19,16 @@ use auction_domain::CompetitionPlan;
 
 use super::DatabaseStore;
 
+#[path = "admin/intake.rs"]
 mod admin_intake;
 pub use admin_intake::DatabaseAdminIntakeCommands;
+#[path = "admin/mail.rs"]
 mod admin_mail;
 pub use admin_mail::DatabaseAdminMailCommands;
+#[path = "admin/lot.rs"]
 mod admin_lot;
 pub use admin_lot::DatabaseAdminLotCommands;
+#[path = "admin/runtime.rs"]
 mod admin_runtime;
 pub use admin_runtime::DatabaseAdminRuntimeCommands;
 

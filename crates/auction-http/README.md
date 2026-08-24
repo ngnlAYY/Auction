@@ -3,6 +3,8 @@
 Public 与 Admin 的 HTTP 表面适配器。
 
 - `src/http/mod.rs`：`public_router()` / `admin_router()`，健康检查和冻结契约路径注册。
+- `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
+  realtime Hub 只放在 `src/http/shared/`，安全与指标边界保留独立目录。
 - `src/assets/mod.rs`：前端静态产物内嵌与 SPA fallback。
 
 ## 职责边界
@@ -32,8 +34,8 @@ Catch-up，`/api/v1/ws` 提供带 Public session 和并发上限的只读服务�
 证据重校验、命令账本、退款激活、guarded relist、审计和预览目录 realtime 事件；SQLite 对
 该能力返回 `501 feature_not_supported`。Admin `/api/v1/admin/auction-forum/preview` 已
 接入有界的本地 HTML/文本解析，输入上限为 2 MiB，解析结果只返回 catalog、posts 和 warnings，
-不会抓取远程页面或写数据库。外部论坛发布仍属于后续 Worker/集成阶段；MoogleMail 邮件与结算
-履约 outbox 已由 Worker 接入，Sent/Balance 回执会写入履约 proof。未装配对应 owner 或 SQLite
+不会抓取远程页面或写数据库。外部论坛发布/读取与回帖导入、MoogleMail 邮件及结算
+履约 outbox 已由 Worker/集成 owner 接入，Sent/Balance 回执会写入履约 proof。未装配对应 owner 或 SQLite
 明确不支持的 Admin 能力才返回 501，已登记且已接入的路径不再使用占位响应。
 Admin `/api/v1/admin/audit` 已接入 Admin session、精确筛选、时间范围、opaque keyset cursor 和
 数字分页；响应只包含追加式审计的安全字段与 JSON object metadata，不暴露原始 SQL 行。
@@ -73,10 +75,13 @@ PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lit
 A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 MoogleMail poller，返回带
 `pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 
-Public 与 Admin 是不同 surface，路由和静态产物分别隔离；公开端二进制不包含管理端资源。
+Public 与 Admin 是不同 surface，路由只提供各自静态产物；当前两种 `RustEmbed` 类型仍位于同一个
+`auction-http` crate，尚无 Cargo feature 或独立 crate 提供制品级隔离，不能把链接器裁剪当成
+“公开端二进制不包含管理端资源”的契约保证。
 已登记路径均由对应 owner 负责真实投影或明确的 Lite 能力响应；未装配 owner、数据库档位不支持
-的能力和未登记路径仍分别返回明确的 `feature_not_supported`/`feature_not_migrated`，不伪造旧系统
-成功数据，也不把未登记路径误当成迁移完成。两类 surface 的 HTTP 响应还会提供标准 `Date` 头，
+的能力返回明确的 `feature_not_supported`/`feature_not_migrated`，不伪造旧系统成功数据。未登记
+路径目前仍可能落入宽泛 SPA fallback，需按下文目标顺序修正后才能视为 404 契约完成。两类 surface
+的 HTTP 响应还会提供标准 `Date` 头，
 供 Public 浏览器按旧版契约估算服务端时钟；该头不承载业务状态，也不改变任何服务端时间判断。
 
 ## 静态产物内嵌
@@ -95,7 +100,8 @@ target/dx/build/auction-web-admin/web/public
 
 release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
 
-请求命中顺序：
+目标请求命中顺序如下；当前仍需把 `/api`、`/health` 和任意未知页面从宽泛 SPA fallback 中
+隔离，完成前不能把未知路径的 404 契约视为已收口：
 
 1. 精确匹配静态文件；
 2. 无扩展名路径回退 `index.html`（对应旧 `manifests/*.routes.json` 的浏览器路由）；

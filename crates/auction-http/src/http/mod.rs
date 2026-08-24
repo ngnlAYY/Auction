@@ -3,30 +3,53 @@
 //! 这里只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；竞价、结算和状态机规则
 //! 留在领域与应用层。Public 与 Admin 是不同 surface，各自拥有独立的路由与前端产物。
 
+#[path = "admin/auctions.rs"]
 mod admin_auctions;
+#[path = "admin/audit.rs"]
 mod admin_audit;
+#[path = "admin/credentials.rs"]
 mod admin_credentials;
+#[path = "admin/dashboard/mod.rs"]
 mod admin_dashboard;
+#[path = "admin/forum.rs"]
 mod admin_forum;
+#[path = "admin/intake.rs"]
 mod admin_intake;
+#[path = "admin/lot_update/mod.rs"]
 mod admin_lot_update;
+#[path = "admin/lots.rs"]
 mod admin_lots;
+#[path = "admin/mail/mod.rs"]
 mod admin_mail;
+#[path = "admin/proxy_events.rs"]
 mod admin_proxy_events;
+#[path = "admin/renames.rs"]
 mod admin_renames;
+#[path = "admin/rules.rs"]
 mod admin_rules;
+#[path = "admin/runtime_config.rs"]
 mod admin_runtime_config;
+#[path = "admin/users.rs"]
 mod admin_users;
+#[path = "public/blacklist.rs"]
 mod blacklist;
+#[path = "public/compensation.rs"]
 mod compensation;
+#[path = "admin/delivery.rs"]
 mod delivery_admin;
+#[path = "public/forum.rs"]
 mod forum;
 mod metrics;
+#[path = "public/realtime.rs"]
 mod realtime;
+#[path = "admin/realtime.rs"]
 mod realtime_admin;
+#[path = "shared/realtime_hub/mod.rs"]
 mod realtime_hub;
+#[path = "public/rules.rs"]
 mod rules;
 mod security;
+#[path = "shared/state.rs"]
 mod state;
 
 use std::{collections::BTreeMap, net::SocketAddr, time::Instant};
@@ -125,7 +148,8 @@ pub fn public_router(version: &'static str) -> Router<PublicApiState> {
 
 /// 管理端路由。
 ///
-/// 管理端产物与公开端完全隔离，公开端二进制不包含管理端资源。
+/// 管理端与公开端使用不同资源类型和路由；制品级资源隔离仍需由 Cargo feature 或独立 crate
+/// 明确保证。
 pub fn admin_router(version: &'static str) -> Router<AdminApiState> {
     let health = move || health_response("admin-api", version);
 

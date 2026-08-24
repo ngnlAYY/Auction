@@ -27,8 +27,10 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - 当前状态是**功能迁移后期**：PostgreSQL 完整档的公开竞价、管理命令、Worker 生命周期、
   MoogleMail/论坛、结算/recovery、实时通信和运维证据链，以及 SQLite Lite 的声明子集均已
   建立；canonical Auction-BF PostgreSQL v28 也有独立的严格接管边界。静态盘点未发现旧版
-  业务 HTTP/浏览器路径或 Worker 任务类别缺项；真实外部服务、
-  部署切换和浏览器产物仍未完成行为对照，因此不能宣称完整功能等价。
+  业务 HTTP/浏览器路径或 Worker 任务类别缺项，但仍有已确认的运行边界缺口，包括 SIGTERM
+  优雅停机、统一 HTTP 安全/关联边界、真实状态心跳、SPA fallback 隔离和部分 Admin runtime
+  字段的生效链。真实外部服务、部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整
+  功能等价。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
@@ -86,6 +88,8 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   storage/、http/、web/、bootstrap/，禁止使用 misc/、common/ 一类无法表达
   owner 的兜底目录。
 - 每个职责目录必须有单一 owner；目录边界不能通过大而全的 mod.rs 或共享结构体绕开。
+- 同一目录出现三个或更多同前缀实现文件时，默认视为缺少职责子目录；确有同层必要时必须先
+  调整命名消除伪分组，或在项目规范中记录例外，不能绕过布局检查。
 - 只有一个实现文件的模块也要放进有意义的职责目录；该目录可以使用 mod.rs 作为入口。
 - crate 根的 lib.rs/main.rs 只负责模块声明、公开重导出、参数装配和进程生命周期；
   领域规则、SQL、HTTP 处理器、Dioxus 组件和外部调用必须放在对应子目录。
@@ -297,6 +301,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   假设。不得把 SQLite 文件放在网络共享文件系统上作为横向扩展方案。
 - 配置字段变化必须同时更新解析代码、示例、相关 README 和部署说明；当前新配置格式不
   兼容旧的单文件敏感字段，旧格式必须以明确错误失败。
+- 受版本控制的 TOML 示例中，每个赋值字段前必须紧邻中文注释并明确标为“可选”或“必填”；
+  同一条概括注释不能替代各字段自己的状态、默认值或启用条件说明。
 
 ## 数据库与迁移
 
@@ -348,8 +354,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - 拍卖页面的 CSS 和静态资源可以使用旧版 Auction-BF 的结构与视觉契约，但业务逻辑必须
   留在 Rust；不得引入 React、TypeScript、npm 包依赖或第二套前端构建系统。dx CLI 会
   按需下载 esbuild 作为构建期工具，这是唯一允许的例外，且不得成为运行时依赖。
-- 当前页面中的示例竞价行只是迁移阶段的展示数据；接入真实数据前要先完成契约、应用用例
-  和持久化边界。
+- 当前 Public/Admin 页面已接入版本化 API；不得重新加入会被误认成权威状态的示例竞价行或管理
+  数据。演示空态必须使用明确文案，并与契约、应用用例和持久化边界保持分离。
 
 ## 默认验证与测试范围
 
@@ -361,14 +367,20 @@ just
 
 # 默认静态验证
 just fmt
+just repository-policy-check
 just layout-check
+just config-example-check
+just i18n-check
 just check
 just lint
 just verify
 
 # 等价的直接命令
 cargo fmt --all -- --check
+just repository-policy-check
 just layout-check
+just config-example-check
+just i18n-check
 cargo check --locked --workspace --all-targets
 cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
 cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite
@@ -418,8 +430,8 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 ## 变更与 Git 纪律
 
 - 修改前先查看 `git status --short`，保留用户已有的无关改动。
-- `AGENTS.md`、`.editorconfig` 和所有 README 都应纳入版本控制；`.gitignore` 已通过显式
-  反向规则保证 `AGENTS.md` 和 `.editorconfig` 不被忽略。
+- `AGENTS.md`、`.gitignore`、`.editorconfig` 和所有 README 都应纳入版本控制，不得在仓库
+  `.gitignore` 中忽略这些项目契约文件；`CLAUDE.md` 只作为本地工具文件被忽略，不是项目契约。
 - 应用工作区跟踪 `Cargo.lock`。`target/`、本地环境文件、私有 TOML 和临时发布产物被忽略。
 - 禁止提交凭据、Cookie、含密码的数据库 URL、生成的 `target/` 内容和机器专属绝对路径。
 - 变更必须限制在用户请求范围内。未经明确授权，不得使用 `git reset --hard`、

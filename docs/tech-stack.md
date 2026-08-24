@@ -71,7 +71,9 @@ fallback 路由表。引入 SSR 会新增 hydration mismatch 和双目标构建�
   契约一致；事件带 sequence/version，跳号或重连后重新读取权威快照。
 - 浏览器 crate 只能依赖 contracts 表面，不得让 UI 类型进入领域、存储或外部 API 契约，
   确保以后可以替换前端。
-- Public 与 Admin 的组件树、路由树和静态产物完全分离，公开端二进制不包含管理端资源。
+- Public 与 Admin 的组件树、路由树和静态产物必须完全分离，公开端二进制不得包含管理端资源；
+  当前路由已分离，但共享 `auction-http` 同时编译两种 `RustEmbed` 类型，制品级保证仍待通过
+  Cargo feature 或独立 crate 收口。
 
 ## 国际化
 

@@ -12,51 +12,97 @@ use auction_domain::{
     UserId,
 };
 
+#[path = "admin/auction_create.rs"]
 mod admin_auction_create;
+#[path = "admin/auctions.rs"]
 mod admin_auctions;
+#[path = "admin/audit.rs"]
 mod admin_audit;
+#[path = "admin/credentials.rs"]
 mod admin_credentials;
+#[path = "admin/forum.rs"]
 mod admin_forum;
+#[path = "admin/intake.rs"]
 mod admin_intake;
+#[path = "admin/lot_commands.rs"]
 mod admin_lot_commands;
+#[path = "admin/lots.rs"]
 mod admin_lots;
+#[path = "admin/mail.rs"]
 mod admin_mail;
+#[path = "admin/proxy_events.rs"]
 mod admin_proxy_events;
+#[path = "admin/renames.rs"]
 mod admin_renames;
+#[path = "admin/rules.rs"]
 mod admin_rules;
+#[path = "admin/runtime_config.rs"]
 mod admin_runtime_config;
+#[path = "admin/users.rs"]
 mod admin_users;
+#[path = "auction/policy.rs"]
 mod auction_policy;
+#[path = "public/blacklist.rs"]
 mod blacklist;
+#[path = "auction/commands.rs"]
 mod commands;
+#[path = "public/compensation.rs"]
 mod compensation;
+#[path = "delivery/worker.rs"]
 mod delivery;
+#[path = "delivery/admin.rs"]
 mod delivery_admin;
+#[path = "forum/public.rs"]
 mod forum;
+#[path = "forum/reply.rs"]
 mod forum_reply;
+#[path = "forum/sync.rs"]
 mod forum_sync;
+#[path = "settlement/fulfillment.rs"]
 mod fulfillment;
+#[path = "auction/lifecycle.rs"]
 mod lifecycle;
+#[path = "mail/poll.rs"]
 mod mail_poll;
+#[path = "mail/processing.rs"]
 mod mail_processing;
+#[path = "operations/alert.rs"]
 mod operations_alert;
+#[path = "auction/queries.rs"]
 mod queries;
+#[path = "operations/readiness.rs"]
 mod readiness;
+#[path = "realtime/public.rs"]
 mod realtime;
+#[path = "realtime/admin.rs"]
 mod realtime_admin;
+#[path = "realtime/consumer.rs"]
 mod realtime_consumer;
+#[path = "recovery/commands.rs"]
 mod recovery;
+#[path = "recovery/health.rs"]
 mod recovery_health;
+#[path = "recovery/report.rs"]
 mod recovery_report;
+#[path = "recovery/scheduler.rs"]
 mod recovery_scheduler;
+#[path = "scheduling/recurring.rs"]
 mod recurring_schedule;
+#[path = "public/rules.rs"]
 mod rules;
+#[path = "scheduling/worker.rs"]
 mod scheduler;
+#[path = "public/sessions.rs"]
 mod sessions;
+#[path = "settlement/commands.rs"]
 mod settlement;
+#[path = "settlement/report.rs"]
 mod settlement_report;
+#[path = "settlement/scheduler.rs"]
 mod settlement_scheduler;
+#[path = "mail/user.rs"]
 mod user_mail;
+#[path = "operations/worker_control.rs"]
 mod worker_control;
 
 pub use admin_auction_create::{

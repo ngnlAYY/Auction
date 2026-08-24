@@ -2,10 +2,13 @@
 
 Worker 任务编排：调度、重试、游标推进和生命周期任务。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`。
+源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`，
+并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/`、`operations/`
+和 `control/` 分组。
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
-指数退避失败记录和 Ctrl-C 优雅退出；它通过生命周期应用端口执行 preview/open，不复制状态机。
+指数退避失败记录和 Ctrl-C drain；它通过生命周期应用端口执行 preview/open，不复制状态机。
+进程级 SIGTERM 与三类角色共用的有界优雅停机尚未接入，systemd 停止路径不能据此视为完成。
 `run_persistent_with_settlement_until_shutdown()` 在 PostgreSQL 完整档额外领取结算 workflow，
 通过 `SettlementCommandPort` 执行稳定的 `settle_auction` 命令，并持久化完成 fence 与失败退避；
 Auction 生命周期与结算已使用独立主循环，立即执行首轮，再按一分钟加最多五秒抖动唤醒；两类

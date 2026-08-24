@@ -4,8 +4,9 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
 `manifests/admin.routes.json` 冻结，共 21 条。
 
 - `src/main.rs`：薄启动入口。
-- `src/api/`：管理端会话登录/注销、拍卖、lot、结算/recovery、delivery/realtime/mail 安全投影、CSRF 会话读取和人工状态命令请求。
-- `src/app/`：管理端路由表、外壳、管理总览与按职责拆分的页面组件。
+- `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
+  安全投影、会话读取和命令请求。
+- `src/app/`：按相同 owner 分组的页面组件；`shared/` 只保存本 surface 内真正通用的基础组件。
 - `assets/admin.css`：管理端 surface 样式。设计变量来自 `auction-web-shared`。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认简体中文。
 
@@ -119,3 +120,5 @@ Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话
 所有 `aria-modal` 管理弹窗还由壳层提供 Tab/Shift+Tab 焦点循环、背景滚动锁定和关闭后触发控件
 焦点恢复，避免键盘焦点离开当前弹窗或在关闭后丢失。
 管理命令必须走版本化 REST 契约，不在浏览器端重建状态机；凭据与密钥材料不进入浏览器。
+当前 `src/api/` 仍重复定义了一部分 `auction-contracts` 已拥有的 wire struct，尚未满足 DTO 单一
+owner 规范；后续应直接复用契约类型，只在 Web 层保留展示状态。

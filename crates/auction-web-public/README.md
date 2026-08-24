@@ -4,9 +4,10 @@ Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
 `manifests/public.routes.json` 冻结，共 14 条，修改前必须先确认外部 URL 契约。
 
 - `src/main.rs`：薄启动入口。
-- `src/api/`：按 session、账户、规则、黑名单、只读查询、实时事件和命令职责拆分的同源 Public API DTO 解码与请求，
+- `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求，
   不接触存储模型。
-- `src/app/`：按 session、账户、规则、黑名单、只读页面、实时事件和命令组件拆分的公开端路由表、外壳与页面组件。
+- `src/app/`：按相同 owner 分组的公开端路由、页面和交互组件；`shared/` 只保存本 surface
+  内真正通用的基础组件。
 - `assets/public.css`：公开端 surface 样式，沿用旧版公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。
 
@@ -66,4 +67,5 @@ Fast/Slow 单选模式；最终阶段的 Slow 禁用原因通过对应控件的�
 代理授权成功则继续在弹窗内展示是否领先、当前状态、配额和完整授权变更历史，权威数据刷新不会
 覆盖这份命令结果，用户明确关闭后才恢复触发按钮焦点。
 本 crate 只允许依赖稳定 HTTP DTO 与 `auction-web-shared`，不得导入存储、配置、凭据或管理端
-组件。
+组件。当前 `src/api/` 仍重复定义了一部分 `auction-contracts` 已拥有的 wire struct，尚未满足 DTO
+单一 owner 规范；后续应直接复用契约类型，只在 Web 层保留展示状态。

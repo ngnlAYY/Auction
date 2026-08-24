@@ -1,8 +1,10 @@
 # 持续集成约定
 
-持续集成与本地 `just verify` 使用同一组默认门禁：Rust 格式化、带 `--locked` 的 Cargo
-工作区编译检查、Clippy 静态检查和两个浏览器端 crate 的 `wasm32-unknown-unknown` 目标
-编译检查。Rust 工具链固定为
+持续集成与本地 `just verify` 使用同一组默认门禁：`ci/check-policy.sh` 检查项目契约文件的 Git 规则、每个 src 的职责
+子目录、src 根目录平铺与命名、同前缀文件聚集、配置示例中文可选/必填注释、五语言 Fluent
+文件/键集合/字面量引用/重复与点号规则；随后执行
+Rust 格式化、带 `--locked` 的 Cargo 工作区编译检查、Clippy 静态检查和两个浏览器端 crate 的
+`wasm32-unknown-unknown` 目标编译检查。Rust 工具链固定为
 `1.98.0` 当前 stable，并用独立 job 验证 SQLx 0.9 对应的 workspace MSRV `1.94.1`；
 Tokio 使用官方 `1.51.x` LTS，其他无官方 LTS 的依赖以 `Cargo.lock` 为准。
 

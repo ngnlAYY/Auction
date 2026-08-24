@@ -1,7 +1,8 @@
 //! 前端静态产物内嵌与 SPA fallback。
 //!
-//! Public 与 Admin 各自内嵌自己的 `dx build` 产物，两个 surface 的产物互相隔离：公开端
-//! 二进制里不包含管理端资源。
+//! Public 与 Admin 各自读取自己的 `dx build` 产物，路由不会跨 surface 提供资源。当前两种
+//! `RustEmbed` 类型仍编译在同一个 `auction-http` crate 中，尚未通过 Cargo feature 或独立 crate
+//! 建立制品级隔离，因此不能依赖链接器裁剪来宣称二进制一定不包含另一端资源。
 //!
 //! `allow_missing = true` 是必需的。`rust-embed` 默认在目标目录不存在时**编译期报错**，
 //! 而前端产物由独立的 `dx build` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端

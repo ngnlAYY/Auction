@@ -8,7 +8,8 @@ Worker 生命周期装配。
 Worker **不监听业务写入 HTTP 表面**，只从配置读取数据库与缓存设置，然后运行
 `auction_jobs::run_persistent_with_settlement_until_shutdown()`；没有数据库时才保留不执行任务的启动骨架。
 Worker 的主配置 `[tracing]` 可启用有界 OTLP/HTTP exporter，headers 只从敏感 TOML 的 Worker
-专属字段读取；进程停止时会在限定时间内刷新并关闭 exporter。
+专属字段读取；Worker 主循环退出后会在限定时间内刷新并关闭 exporter。当前关闭信号只监听
+Ctrl-C，SIGTERM、有界 drain 和停止心跳仍待统一接入。
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
@@ -80,7 +81,8 @@ Forum 默认立即执行一轮，再等待一分钟和最多五秒抖动；主�
 损坏或不是合法 UTF-8 时失败关闭；暂时没有 active 凭据时保留 degraded Worker，实际轮询/写入
 再返回 credential unavailable。未配置该独立密钥时继续兼容 `.keyenv` 的
 `hv-ck-key1` Bot 与 `hv-ck-key2` 测试号，以及敏感配置的单 Cookie 入口。
-Worker 在数据库可用时发布持久化启动/就绪/周期/停止心跳；各 owner 的内存定时器只负责唤醒，不能代替
+Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径；周期值目前仍固定
+为 ready/零审计失败，SIGTERM 也不会可靠进入停止发布。各 owner 的内存定时器只负责唤醒，不能代替
 持久化游标。配置 `[worker.control].enabled = true` 后，数据库 Worker 和无数据库启动骨架都会
 提供由安全 runtime 目录、实例锁、固定 group/0660 和显式 UID/GID peer allowlist 保护的本地
 `live`、`ready`、`status` 控制面；后者只报告进程状态和零个 poller，不会伪造数据库或任务就绪。
