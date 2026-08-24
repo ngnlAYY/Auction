@@ -4,7 +4,10 @@
 
 - `src/clients/http.rs`：`build_http_client()` 构建统一使用 rustls/ring 的 `reqwest::Client`。
   外部适配器应复用该客户端，避免每个网关各自维护连接池或选择不同 TLS provider。
-- `src/clients/ehentai.rs` 与 `src/clients/mooglemail/`：各自的传输与认证边界。MoogleMail
+- `src/clients/ehentai/` 与 `src/clients/mooglemail/`：各自的传输与认证边界。E-Hentai
+  目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和 Cookie 候选集，
+  `client.rs` 持有固定 origin HTTP 协议事务，`gateway.rs` 持有凭据轮换与 Forum 端口，
+  `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
   其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明，
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
   `protocol.rs`、`forms.rs`、`writer.rs` 和 `sender.rs` 分别拥有
@@ -59,7 +62,7 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
   与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由
   PostgreSQL 完整档提供，SQLite 不返回伪造的 Lite 能力。
 - `src/forum/mod.rs`：把 HTML 或纯文本论坛内容解析为有界的 catalog、posts、warnings 和命令
-  预览；解析器只在内存中工作。远程主题读写由 `src/clients/ehentai.rs` 拥有，回帖导入仍由
+  预览；解析器只在内存中工作。远程主题读写由 `src/clients/ehentai/` 拥有，回帖导入仍由
   `auction-jobs` 通过应用端口执行。
 
 ## 边界约束

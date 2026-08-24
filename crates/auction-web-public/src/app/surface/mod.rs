@@ -40,7 +40,7 @@ pub(crate) use board::*;
 pub(crate) use catalog::*;
 pub(crate) use pages::*;
 pub(crate) use query::*;
-pub(crate) use router::{App, PublicShell, Route};
+pub(crate) use router::Route;
 pub use router::run;
 
 use chrono::{DateTime, Utc};

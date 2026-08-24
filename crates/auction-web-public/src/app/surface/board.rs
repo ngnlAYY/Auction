@@ -9,6 +9,7 @@ pub(crate) fn AuctionIndex() -> Element {
     }
 }
 
+#[component]
 pub(crate) fn AuctionPage() -> Element {
     redirect_public_alias("/")
 }
@@ -147,6 +148,7 @@ pub(crate) fn should_refresh_auction_board(event: &RealtimeEvent) -> bool {
             | "lot.bid_accepted"
     )
 }
+#[component]
 pub(crate) fn AuctionData(
     auction: CurrentAuction,
     historical: bool,

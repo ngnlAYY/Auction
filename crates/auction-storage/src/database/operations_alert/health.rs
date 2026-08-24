@@ -1,0 +1,78 @@
+//! Operations alert 健康安全投影读取。
+//!
+//! 只返回固定计数、时间和错误码，不暴露 signal 正文或数据库内部字段。
+
+use super::*;
+
+#[cfg(feature = "postgres")]
+pub(super) async fn health_postgres(
+    pool: &super::TrackedPool<sqlx::Postgres>,
+) -> Result<OperationsAlertHealth, ApplicationError> {
+    let signal_row = sqlx::query(
+        "SELECT
+            COUNT(*) FILTER (WHERE active) AS active_signal_count,
+            COUNT(*) FILTER (WHERE active AND next_notify_at <= CURRENT_TIMESTAMP)
+                AS due_signal_count,
+            MAX(last_seen_at) AS last_observed_at
+         FROM public.operations_alert_signals",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| storage_error("读取 operations alert signal 健康失败"))?;
+    let batch_row = sqlx::query(
+        "SELECT
+            COUNT(*) FILTER (WHERE status = 'claimed') AS claimed_batch_count,
+            COUNT(*) FILTER (WHERE status = 'succeeded') AS succeeded_batch_count,
+            COUNT(*) FILTER (WHERE status = 'failed') AS failed_batch_count,
+            COUNT(*) FILTER (WHERE status = 'manual_reconcile') AS manual_reconcile_count,
+            MAX(completed_at) FILTER (WHERE status = 'succeeded') AS last_success_at,
+            MAX(completed_at) FILTER (WHERE status IN ('failed', 'manual_reconcile'))
+                AS last_failure_at
+         FROM public.operations_alert_batches",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| storage_error("读取 operations alert 批次健康失败"))?;
+    let last_error_code: Option<String> = sqlx::query_scalar(
+        "SELECT delivery_error_code
+         FROM public.operations_alert_batches
+         WHERE status IN ('failed', 'manual_reconcile')
+         ORDER BY completed_at DESC, id DESC
+         LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| storage_error("读取 operations alert 最近错误失败"))?;
+    let health = OperationsAlertHealth {
+        enabled: true,
+        active_signal_count: signal_row
+            .try_get("active_signal_count")
+            .map_err(|_| storage_error("读取 operations alert 活跃计数失败"))?,
+        due_signal_count: signal_row
+            .try_get("due_signal_count")
+            .map_err(|_| storage_error("读取 operations alert due 计数失败"))?,
+        claimed_batch_count: batch_row
+            .try_get("claimed_batch_count")
+            .map_err(|_| storage_error("读取 operations alert claim 计数失败"))?,
+        succeeded_batch_count: batch_row
+            .try_get("succeeded_batch_count")
+            .map_err(|_| storage_error("读取 operations alert 成功计数失败"))?,
+        failed_batch_count: batch_row
+            .try_get("failed_batch_count")
+            .map_err(|_| storage_error("读取 operations alert 失败计数失败"))?,
+        manual_reconcile_count: batch_row
+            .try_get("manual_reconcile_count")
+            .map_err(|_| storage_error("读取 operations alert 人工对账计数失败"))?,
+        last_observed_at: signal_row
+            .try_get("last_observed_at")
+            .map_err(|_| storage_error("读取 operations alert 最近观察时间失败"))?,
+        last_success_at: batch_row
+            .try_get("last_success_at")
+            .map_err(|_| storage_error("读取 operations alert 最近成功时间失败"))?,
+        last_failure_at: batch_row
+            .try_get("last_failure_at")
+            .map_err(|_| storage_error("读取 operations alert 最近失败时间失败"))?,
+        last_error_code: last_error_code.unwrap_or_default(),
+    };
+    health.validate().map_err(ApplicationError::from).map(|_| health)
+}

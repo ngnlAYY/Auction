@@ -16,7 +16,7 @@ pub fn run() {
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
 // 路径字面量必须与 auction-http/src/assets/routes.rs 的 Public 清单同步，未知路径不能获得 SPA 入口。
-enum Route {
+pub(crate) enum Route {
     #[layout(PublicShell)]
         #[route("/")]
         AuctionIndex {},
@@ -70,11 +70,11 @@ pub(crate) fn App() -> Element {
     // 语言资源在编译期内嵌，避免首屏额外请求；默认英文，并沿用已保存的语言偏好。
     let i18n = use_init_i18n(|| {
         I18nConfig::new(initial_language(DEFAULT_PUBLIC_LOCALE))
-            .with_locale((langid!("en"), include_str!("../../i18n/en.ftl")))
-            .with_locale((langid!("zh-CN"), include_str!("../../i18n/zh-CN.ftl")))
-            .with_locale((langid!("zh-TW"), include_str!("../../i18n/zh-TW.ftl")))
-            .with_locale((langid!("ja"), include_str!("../../i18n/ja.ftl")))
-            .with_locale((langid!("ko"), include_str!("../../i18n/ko.ftl")))
+            .with_locale((langid!("en"), include_str!("../../../i18n/en.ftl")))
+            .with_locale((langid!("zh-CN"), include_str!("../../../i18n/zh-CN.ftl")))
+            .with_locale((langid!("zh-TW"), include_str!("../../../i18n/zh-TW.ftl")))
+            .with_locale((langid!("ja"), include_str!("../../../i18n/ja.ftl")))
+            .with_locale((langid!("ko"), include_str!("../../../i18n/ko.ftl")))
             .with_fallback(DEFAULT_PUBLIC_LOCALE)
     });
     use_locale_effects(i18n);
@@ -193,5 +193,3 @@ pub(crate) fn PublicShell() -> Element {
         }
     }
 }
-
-#[component]

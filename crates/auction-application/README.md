@@ -31,6 +31,12 @@
   唤醒结果由 Worker control 端口负责，不承载 MoogleMail 远程传输。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
+- `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
+  `processing/processor.rs`、`processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、
+  业务路由/delivery、命令幂等辅助和起拍价/装备身份解析。
+- `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
+  signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
+  不把告警结果混入拍卖或外部传输事实。
 - `src/ports/scheduling/recurring.rs`：Worker 读取下一次 UTC 触发时刻的窄端口；cron、时区和
   固定间隔解析留在配置适配器，不能替代持久化 due、游标或租约。
 - `src/errors/mod.rs`：应用错误，保留领域错误分类。

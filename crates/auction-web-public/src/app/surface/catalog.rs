@@ -101,6 +101,7 @@ pub(crate) fn CatalogTable(
         }
     }
 }
+#[component]
 pub(crate) fn LiveCatalogTable(
     rows: Vec<CatalogRow>,
     now: DateTime<Utc>,
@@ -491,7 +492,11 @@ pub(crate) fn LiveCatalogActions(
 
 /// 公开拍卖参与者标识；长名称保持可读的省略样式，并保留旧版的代理/当前用户标记。
 #[component]
-pub(crate) fn CatalogParticipant(name: String, marker: Option<String>, trailing: Option<String>) -> Element {
+pub(crate) fn CatalogParticipant(
+    name: String,
+    marker: Option<String>,
+    trailing: Option<String>,
+) -> Element {
     rsx! {
         span { class: "public-auction-participant-identity",
             if let Some(marker) = marker {
@@ -559,7 +564,10 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
     }
 }
 
-pub(crate) fn grouped_catalog_rows(rows: &[CatalogRow], active: &str) -> Vec<(&'static str, Vec<CatalogRow>)> {
+pub(crate) fn grouped_catalog_rows(
+    rows: &[CatalogRow],
+    active: &str,
+) -> Vec<(&'static str, Vec<CatalogRow>)> {
     let mut groups: Vec<(&str, Vec<CatalogRow>)> =
         CATALOG_CATEGORIES.iter().map(|(category, _)| (*category, Vec::new())).collect();
     let mut other = Vec::new();
@@ -584,7 +592,11 @@ pub(crate) fn grouped_catalog_rows(rows: &[CatalogRow], active: &str) -> Vec<(&'
     result
 }
 
-pub(crate) fn catalog_count(counts: &BTreeMap<String, i64>, category: &str, rows: &[CatalogRow]) -> i64 {
+pub(crate) fn catalog_count(
+    counts: &BTreeMap<String, i64>,
+    category: &str,
+    rows: &[CatalogRow],
+) -> i64 {
     counts.get(category).copied().unwrap_or_else(|| {
         if category == "all" {
             rows.len() as i64
@@ -762,10 +774,10 @@ pub(crate) fn parse_credit_amount(input: &str) -> Option<i64> {
 }
 
 pub(crate) struct CountdownDisplay {
-    label: String,
-    urgent: bool,
-    expired: bool,
-    empty: bool,
+    pub(crate) label: String,
+    pub(crate) urgent: bool,
+    pub(crate) expired: bool,
+    pub(crate) empty: bool,
 }
 
 pub(crate) fn countdown_display(ends_at: &str, now: DateTime<Utc>) -> CountdownDisplay {

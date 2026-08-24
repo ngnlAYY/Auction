@@ -4,8 +4,9 @@ Worker 任务编排：调度、重试、游标推进和生命周期任务。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`，
 并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/` 和 `operations/`
-分组。Worker control 传输层独立归属 `src/control/`，由该目录拥有协议 DTO、Unix socket 安全、
-peer allowlist、HTTP handler 和 Admin client；调度器只通过 `WorkerControlHandle` 接入状态与唤醒端口。
+分组。Worker control 传输层独立归属 `src/control/`，入口只负责装配；协议 DTO、HTTP handler、
+Unix socket server 和 Admin client 分别位于 `src/control/transport/{protocol,handlers,server,client}.rs`，
+由该目录统一拥有 Unix socket 安全与 peer allowlist；调度器只通过 `WorkerControlHandle` 接入状态与唤醒端口。
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
 指数退避失败记录和由装配根注入的 shutdown future；它通过生命周期应用端口执行 preview/open，

@@ -15,25 +15,26 @@ pub(crate) enum LiveConnectionState {
 /// 公开拍卖看板的 URL 状态；筛选和分页必须能被刷新、分享和返回操作恢复。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicBoardQuery {
-    world: Option<String>,
-    auction_id: Option<String>,
-    category: Option<String>,
-    status: Option<String>,
-    history_name: Option<String>,
-    history_from: Option<String>,
-    history_to: Option<String>,
-    history_min_price: Option<String>,
-    history_max_price: Option<String>,
-    history_buyer: Option<String>,
-    history_seller: Option<String>,
-    bid_log_lot: Option<String>,
-    page: i64,
-    bid_log_page: i64,
-    bid_page: i64,
-    proxy_page: i64,
+    pub(crate) world: Option<String>,
+    pub(crate) auction_id: Option<String>,
+    pub(crate) category: Option<String>,
+    pub(crate) status: Option<String>,
+    pub(crate) history_name: Option<String>,
+    pub(crate) history_from: Option<String>,
+    pub(crate) history_to: Option<String>,
+    pub(crate) history_min_price: Option<String>,
+    pub(crate) history_max_price: Option<String>,
+    pub(crate) history_buyer: Option<String>,
+    pub(crate) history_seller: Option<String>,
+    pub(crate) bid_log_lot: Option<String>,
+    pub(crate) page: i64,
+    pub(crate) bid_log_page: i64,
+    pub(crate) bid_page: i64,
+    pub(crate) proxy_page: i64,
 }
 
-pub(crate) type PreviewHistoryLoad = Result<Option<(Option<CurrentAuction>, Vec<HistoricalAuction>)>, String>;
+pub(crate) type PreviewHistoryLoad =
+    Result<Option<(Option<CurrentAuction>, Vec<HistoricalAuction>)>, String>;
 
 impl Default for PublicBoardQuery {
     fn default() -> Self {

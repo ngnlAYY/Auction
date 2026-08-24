@@ -5,7 +5,10 @@
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
-`src/database/competition/postgres.rs`，后续领域事务继续按同一规则拆分。
+`src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令、竞价写入和
+共享映射分别位于同目录的 `postgres/{lifecycle,admin,bidding,mapping}.rs`。SQLite Lite 竞价事务
+由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
+`transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
 和 SQLx 基线接管；备份、人工确认及不可覆盖回执仍由 `auctionctl` 拥有。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
@@ -13,24 +16,33 @@ Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
 完整档读取同一快照内的结算摘要、补偿账本和 lot 金额；SQLite Lite 明确不支持该能力。
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
-快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 持有 PostgreSQL 完整档的
-Serializable 确认写入、证据重校验、退款激活、guarded relist、命令账本、审计和预览目录事件；
+快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 只做 PostgreSQL 完整档恢复命令分派；
+确认写入、范围快照、guarded relist 和共享映射分别位于 `recovery_commands/commands/{confirm,scope,relist,mapping}.rs`，
+共同完成 Serializable 确认写入、证据重校验、退款激活、命令账本、审计和预览目录事件；
 SQLite Lite 对确认能力明确返回不支持。
-结算事务在 `src/database/settlement/mod.rs` 中根据冻结的 recovery 策略，为每个获胜 lot 与
-结算义务同事务建立 `settlement_recoveries`；`src/database/recovery_scheduler/scheduler.rs` 负责
+结算事务在 `src/database/settlement/mod.rs` 装配，由 `transaction.rs`、`facts.rs`、`obligations.rs`
+和 `mapping.rs` 分别负责锁内流程、事实/账本、义务/恢复和映射；它根据冻结的 recovery 策略，为
+每个获胜 lot 与结算义务同事务建立 `settlement_recoveries`。`src/database/recovery_scheduler/scheduler.rs`
+只负责调度分派，due return、推进、action 和映射分别位于同目录的
+`scheduler/{returns,advance,actions,mapping}.rs`，负责
 PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
 owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
 `src/database/users/admin/` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计；
 其中 `mod.rs` 持有跨后端分派与共享校验，`postgres.rs`/`sqlite.rs` 分别持有 SQL 实现，
-并由 recovery owner 记录完成 proof。`recovery_commands/commands.rs` 同时持有 PostgreSQL 完整档的
+并由 recovery owner 记录完成 proof。`recovery_commands/commands/{confirm,relist}.rs` 同时持有 PostgreSQL 完整档的
 relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
 Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
 满足后再以时间和状态 fence 关闭 recovery；两种推进都追加 worker 审计。SQLite Lite 对 recovery
 完整档明确返回不支持，不能由报告读取适配器临时补写。
 Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs` 与
 `src/database/blacklist/mod.rs` 持有，PostgreSQL 与 SQLite 均只返回公开字段。
+Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，`postgres.rs` 与
+`sqlite.rs` 分别负责查询，`mapping.rs` 负责跨后端安全投影和字段校验；两套后端的 Lite/完整
+能力差异在各自 SQL 适配器中显式保留。
+Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 只做端口分派，
+`postgres.rs` 与 `sqlite.rs` 分别负责快照查询，`mapping.rs` 统一维护代理能力和结果不变量。
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
 同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
 Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
@@ -42,12 +54,12 @@ Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreS
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
-拍卖生命周期事务由 `src/database/competition/postgres.rs` 持有：管理命令锁定拍卖后校验
+拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
-`src/database/competition/postgres.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
+`src/database/competition/postgres/admin.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
 事件及公开发现流的持久化派生别名；SQLite
 Lite 明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
@@ -62,7 +74,7 @@ Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 target、玩家和外部装备身份加锁，写入装备、`equipment_secrets`、后台投稿、lot、版本、命令
 账本、审计和 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
-`src/database/competition/postgres.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
+`src/database/competition/postgres/admin.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
 版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
 事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
 Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
@@ -191,8 +203,15 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 metadata，同时由 storage owner 覆盖 `safe_detail` 和 `outcome_unknown`，不允许原始响应越过该边界。
 delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 sending 隔离和 Admin 人工动作
 都会在同一事务追加安全审计；审计失败会使对应状态变更整体回滚，幂等重放不重复追加记录。
-SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 的
-lag、failure 安全投影和 replay 事务由 `src/database/realtime_admin/mod.rs` 持有。
-operations alert 由 `src/database/operations_alert/mod.rs` 持有 signal、冻结批次、lease/fencing、
-三次 Create 尝试和 delivery 终态投影；普通失败只释放为无错误码的 pending，cooldown 只在
-delivery 入队确认事务中生效，SQLite Lite 不提供该完整档能力。
+SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
+`src/database/realtime_admin/` 分层持有：`mod.rs` 负责端口分派，`snapshot.rs`、`lag.rs`、
+`failures.rs` 与 `replay.rs` 分别负责安全快照、lag、failure 读取和 replay，`common.rs` 负责
+共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
+`src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`stream.rs`、`read.rs`、
+`acknowledgement.rs`、`failure.rs` 分别负责 stream 目录、事件读取、连续游标确认和 failure
+生命周期，`common.rs` 负责共享校验与 Lite 串行写事务。
+operations alert 由 `src/database/operations_alert/` 分层持有：`mod.rs` 负责 source/store
+端口和后端分派，`snapshot.rs` 负责 signal/fingerprint 与冻结批次快照，`claims.rs` 负责
+批次 lease/fencing，`delivery.rs` 负责三次 Create 尝试、cooldown 与 delivery 终态投影，
+`health.rs` 负责水位健康快照，`common.rs` 负责共享的安全映射；普通失败只释放为无错误码的
+pending，cooldown 只在 delivery 入队确认事务中生效，SQLite Lite 不提供该完整档能力。

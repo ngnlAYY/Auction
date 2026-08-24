@@ -47,7 +47,11 @@ pub(crate) fn AuctionList() -> Element {
 
 /// 公开端错误状态；重试只重新触发当前资源读取，不在浏览器端伪造数据。
 #[component]
-pub(crate) fn RetryPlaceholder(title: String, detail: String, mut refresh_generation: Signal<u64>) -> Element {
+pub(crate) fn RetryPlaceholder(
+    title: String,
+    detail: String,
+    mut refresh_generation: Signal<u64>,
+) -> Element {
     rsx! {
         section {
             class: "public-auction-empty",
