@@ -74,7 +74,9 @@ Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只
 `admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`common.rs` 负责
 共享错误和 Lite 时间/UUID 映射；会话真值不进入 Redis。
 Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 只做端口分派，
-`postgres.rs` 与 `sqlite.rs` 分别负责快照查询，`mapping.rs` 统一维护代理能力和结果不变量。
+`postgres.rs` 与 `sqlite.rs` 分别负责快照查询；`mapping/` 下的 `bids.rs`、`proxy.rs` 和
+`common.rs` 分别维护普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验，`mapping/mod.rs`
+只负责稳定导出，公开账户边界、代理能力和结果不变量保持不变。
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
 同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
 Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的

@@ -1,81 +1,7 @@
-//! Public account 的跨后端行映射、代理能力派生和结果校验。
-//!
-//! 数据库行必须转换为安全应用投影；状态闭集、授权历史连续性和当前用户边界不满足时失败关闭。
-
 use super::*;
 
 #[cfg(feature = "postgres")]
-pub(super) fn map_postgres_bid(
-    row: sqlx::postgres::PgRow,
-) -> Result<PublicMyBid, ApplicationError> {
-    let bid = PublicMyBid {
-        id: get_pg(&row, "id", "读取 PostgreSQL 用户竞价标识失败")?,
-        auction_id: get_pg(&row, "auction_id", "读取 PostgreSQL 用户竞价拍卖标识失败")?,
-        lot_id: get_pg(&row, "lot_id", "读取 PostgreSQL 用户竞价 lot 标识失败")?,
-        lot_number: i64::from(get_pg::<i32>(
-            &row,
-            "lot_number",
-            "读取 PostgreSQL 用户竞价序号失败",
-        )?),
-        amount: get_pg(&row, "amount", "读取 PostgreSQL 用户竞价金额失败")?,
-        accepted_state_version: get_pg(
-            &row,
-            "accepted_state_version",
-            "读取 PostgreSQL 用户竞价状态版本失败",
-        )?,
-        fact_index: get_pg(&row, "fact_index", "读取 PostgreSQL 用户竞价事实序号失败")?,
-        mechanism: get_pg(&row, "mechanism", "读取 PostgreSQL 用户竞价机制失败")?,
-        created_at: get_pg(&row, "created_at", "读取 PostgreSQL 用户竞价时间失败")?,
-        equipment_name: get_pg(&row, "equipment_name", "读取 PostgreSQL 用户竞价装备名称失败")?,
-        equipment_category: get_pg(
-            &row,
-            "equipment_category",
-            "读取 PostgreSQL 用户竞价装备分类失败",
-        )?,
-        leading: get_pg(&row, "leading", "读取 PostgreSQL 用户竞价领先状态失败")?,
-    };
-    validate_my_bid(bid)
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn map_sqlite_bid(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<PublicMyBid, ApplicationError> {
-    let bid = PublicMyBid {
-        id: get_sqlite_uuid(&row, "id", "读取 SQLite 用户竞价标识失败")?,
-        auction_id: get_sqlite_uuid(&row, "auction_id", "读取 SQLite 用户竞价拍卖标识失败")?,
-        lot_id: get_sqlite_uuid(&row, "lot_id", "读取 SQLite 用户竞价 lot 标识失败")?,
-        lot_number: get_sqlite(&row, "lot_number", "读取 SQLite 用户竞价序号失败")?,
-        amount: get_sqlite(&row, "amount", "读取 SQLite 用户竞价金额失败")?,
-        accepted_state_version: get_sqlite(
-            &row,
-            "accepted_state_version",
-            "读取 SQLite 用户竞价状态版本失败",
-        )?,
-        fact_index: i32::try_from(get_sqlite::<i64>(
-            &row,
-            "fact_index",
-            "读取 SQLite 用户竞价事实序号失败",
-        )?)
-        .map_err(|_| storage_error("SQLite 用户竞价事实序号超出范围"))?,
-        mechanism: get_sqlite(&row, "mechanism", "读取 SQLite 用户竞价机制失败")?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 用户竞价时间失败")?,
-            "SQLite 用户竞价时间格式无效",
-        )?,
-        equipment_name: get_sqlite(&row, "equipment_name", "读取 SQLite 用户竞价装备名称失败")?,
-        equipment_category: get_sqlite(
-            &row,
-            "equipment_category",
-            "读取 SQLite 用户竞价装备分类失败",
-        )?,
-        leading: get_sqlite::<i64>(&row, "leading", "读取 SQLite 用户竞价领先状态失败")? != 0,
-    };
-    validate_my_bid(bid)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn map_postgres_proxy_base(
+pub(in crate::database::account) fn map_postgres_proxy_base(
     row: sqlx::postgres::PgRow,
 ) -> Result<ProxyBase, ApplicationError> {
     Ok(ProxyBase {
@@ -118,7 +44,7 @@ pub(super) fn map_postgres_proxy_base(
 }
 
 #[cfg(feature = "sqlite")]
-pub(super) fn map_sqlite_proxy_base(
+pub(in crate::database::account) fn map_sqlite_proxy_base(
     row: sqlx::sqlite::SqliteRow,
 ) -> Result<ProxyBase, ApplicationError> {
     Ok(ProxyBase {
@@ -171,7 +97,7 @@ pub(super) fn map_sqlite_proxy_base(
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn map_postgres_transition(
+pub(in crate::database::account) fn map_postgres_transition(
     row: sqlx::postgres::PgRow,
 ) -> Result<PublicProxyTransition, ApplicationError> {
     let transition = PublicProxyTransition {
@@ -195,7 +121,7 @@ pub(super) fn map_postgres_transition(
 }
 
 #[cfg(feature = "sqlite")]
-pub(super) fn map_sqlite_transition(
+pub(in crate::database::account) fn map_sqlite_transition(
     row: sqlx::sqlite::SqliteRow,
 ) -> Result<PublicProxyTransition, ApplicationError> {
     let transition = PublicProxyTransition {
@@ -221,7 +147,7 @@ pub(super) fn map_sqlite_transition(
     normalize_transition(transition)
 }
 
-pub(super) fn normalize_transition(
+pub(in crate::database::account) fn normalize_transition(
     mut transition: PublicProxyTransition,
 ) -> Result<PublicProxyTransition, ApplicationError> {
     if transition.transition_number <= 0
@@ -241,65 +167,7 @@ pub(super) fn normalize_transition(
     Ok(transition)
 }
 
-#[cfg(feature = "postgres")]
-pub(super) fn map_postgres_proxy_bid(
-    row: sqlx::postgres::PgRow,
-) -> Result<PublicProxyBid, ApplicationError> {
-    let bid = PublicProxyBid {
-        id: get_pg(&row, "id", "读取 PostgreSQL 代理竞价标识失败")?,
-        auction_id: get_pg(&row, "auction_id", "读取 PostgreSQL 代理竞价拍卖标识失败")?,
-        lot_id: get_pg(&row, "lot_id", "读取 PostgreSQL 代理竞价 lot 标识失败")?,
-        lot_number: i64::from(get_pg::<i32>(
-            &row,
-            "lot_number",
-            "读取 PostgreSQL 代理竞价序号失败",
-        )?),
-        amount: get_pg(&row, "amount", "读取 PostgreSQL 代理竞价金额失败")?,
-        accepted_state_version: get_pg(
-            &row,
-            "accepted_state_version",
-            "读取 PostgreSQL 代理竞价状态版本失败",
-        )?,
-        fact_index: get_pg(&row, "fact_index", "读取 PostgreSQL 代理竞价事实序号失败")?,
-        mechanism: get_pg(&row, "mechanism", "读取 PostgreSQL 代理竞价机制失败")?,
-        created_at: get_pg(&row, "created_at", "读取 PostgreSQL 代理竞价时间失败")?,
-        leading: get_pg(&row, "leading", "读取 PostgreSQL 代理竞价领先状态失败")?,
-    };
-    validate_proxy_bid(bid)
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn map_sqlite_proxy_bid(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<PublicProxyBid, ApplicationError> {
-    let bid = PublicProxyBid {
-        id: get_sqlite_uuid(&row, "id", "读取 SQLite 代理竞价标识失败")?,
-        auction_id: get_sqlite_uuid(&row, "auction_id", "读取 SQLite 代理竞价拍卖标识失败")?,
-        lot_id: get_sqlite_uuid(&row, "lot_id", "读取 SQLite 代理竞价 lot 标识失败")?,
-        lot_number: get_sqlite(&row, "lot_number", "读取 SQLite 代理竞价序号失败")?,
-        amount: get_sqlite(&row, "amount", "读取 SQLite 代理竞价金额失败")?,
-        accepted_state_version: get_sqlite(
-            &row,
-            "accepted_state_version",
-            "读取 SQLite 代理竞价状态版本失败",
-        )?,
-        fact_index: i32::try_from(get_sqlite::<i64>(
-            &row,
-            "fact_index",
-            "读取 SQLite 代理竞价事实序号失败",
-        )?)
-        .map_err(|_| storage_error("SQLite 代理竞价事实序号超出范围"))?,
-        mechanism: get_sqlite(&row, "mechanism", "读取 SQLite 代理竞价机制失败")?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 代理竞价时间失败")?,
-            "SQLite 代理竞价时间格式无效",
-        )?,
-        leading: get_sqlite::<i64>(&row, "leading", "读取 SQLite 代理竞价领先状态失败")? != 0,
-    };
-    validate_proxy_bid(bid)
-}
-
-pub(super) fn build_proxy(
+pub(in crate::database::account) fn build_proxy(
     base: ProxyBase,
     transitions: Vec<PublicProxyTransition>,
     bid: Option<PublicProxyBid>,
@@ -381,7 +249,7 @@ pub(super) fn build_proxy(
     })
 }
 
-pub(super) fn derive_capabilities(
+pub(in crate::database::account) fn derive_capabilities(
     base: &ProxyBase,
 ) -> Result<PublicProxyCapabilities, ApplicationError> {
     let leading = base.leader_user_id == Some(base.user_id);
@@ -412,7 +280,9 @@ pub(super) fn derive_capabilities(
     })
 }
 
-pub(super) fn public_status(status: &str) -> Result<String, ApplicationError> {
+pub(in crate::database::account) fn public_status(
+    status: &str,
+) -> Result<String, ApplicationError> {
     match status {
         "active" | "final_fast" => Ok("active".to_owned()),
         "exhausted" => Ok("exhausted".to_owned()),
@@ -420,134 +290,4 @@ pub(super) fn public_status(status: &str) -> Result<String, ApplicationError> {
         "closed" => Ok("closed".to_owned()),
         _ => Err(storage_error("账户代理状态未知")),
     }
-}
-
-pub(super) fn validate_page(
-    page: &PublicMyBidsPage,
-    request: PublicMyBidsRequest,
-) -> Result<PublicMyBidsPage, ApplicationError> {
-    if page.bid_total < 0
-        || page.proxy_total < 0
-        || page.bids.len() as i64 > request.bids.limit
-        || page.proxies.len() as i64 > request.proxies.limit
-        || page.bids.len() as i64 > page.bid_total
-        || page.proxies.len() as i64 > page.proxy_total
-        || page.proxies.iter().any(|proxy| proxy.user_id.is_nil())
-    {
-        return Err(storage_error("账户竞价页结果不满足边界约束"));
-    }
-    Ok(page.clone())
-}
-
-pub(super) fn validate_account_request(
-    user_id: Uuid,
-    request: PublicMyBidsRequest,
-) -> Result<(), ApplicationError> {
-    if user_id.is_nil() {
-        return Err(storage_error("公开账户用户标识无效"));
-    }
-    request.validate().map_err(storage_error)
-}
-
-pub(super) fn validate_my_bid(bid: PublicMyBid) -> Result<PublicMyBid, ApplicationError> {
-    if bid.id.is_nil()
-        || bid.auction_id.is_nil()
-        || bid.lot_id.is_nil()
-        || bid.lot_number <= 0
-        || bid.amount <= 0
-        || bid.accepted_state_version <= 0
-        || bid.fact_index <= 0
-        || (bid.mechanism != "ordinary" && bid.mechanism != "proxy")
-        || bid.created_at.timestamp_micros() == 0
-        || bid.equipment_name.trim().is_empty()
-        || bid.equipment_category.trim().is_empty()
-    {
-        return Err(storage_error("账户竞价投影包含无效事实"));
-    }
-    Ok(bid)
-}
-
-pub(super) fn validate_proxy_bid(bid: PublicProxyBid) -> Result<PublicProxyBid, ApplicationError> {
-    if bid.id.is_nil()
-        || bid.auction_id.is_nil()
-        || bid.lot_id.is_nil()
-        || bid.lot_number <= 0
-        || bid.amount <= 0
-        || bid.accepted_state_version <= 0
-        || bid.fact_index <= 0
-        || bid.mechanism != "proxy"
-        || bid.created_at.timestamp_micros() == 0
-    {
-        return Err(storage_error("账户代理竞价投影包含无效事实"));
-    }
-    Ok(bid)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) fn get_pg<T>(
-    row: &sqlx::postgres::PgRow,
-    column: &str,
-    label: &str,
-) -> Result<T, ApplicationError>
-where
-    for<'r> T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
-{
-    row.try_get(column).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn get_sqlite<T>(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<T, ApplicationError>
-where
-    for<'r> T: sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
-{
-    row.try_get(column).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn get_sqlite_uuid(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<Uuid, ApplicationError> {
-    Uuid::from_slice(&get_sqlite::<Vec<u8>>(row, column, label)?).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn get_sqlite_optional_uuid(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<Option<Uuid>, ApplicationError> {
-    get_sqlite::<Option<Vec<u8>>>(row, column, label)?
-        .map(|bytes| Uuid::from_slice(&bytes).map_err(|_| storage_error(label)))
-        .transpose()
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn uuid_blob(id: Uuid) -> Vec<u8> {
-    id.as_bytes().to_vec()
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn parse_timestamp(
-    value: String,
-    label: &str,
-) -> Result<DateTime<Utc>, ApplicationError> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(&value) {
-        return Ok(value.with_timezone(&Utc));
-    }
-    for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
-        if let Ok(value) = NaiveDateTime::parse_from_str(&value, format) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc));
-        }
-    }
-    Err(storage_error(label))
-}
-
-pub(super) fn storage_error(message: &str) -> ApplicationError {
-    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

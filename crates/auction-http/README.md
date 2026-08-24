@@ -7,7 +7,8 @@ Public 与 Admin 的 HTTP 表面适配器。
   `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/public/` 按会话、账户读取和竞价命令拆分 Public
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
-  安全逻辑，`routes/session.rs` 只负责装配与稳定出口；`routes/reads.rs` 持有 Public 只读处理器；
+  安全逻辑，`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
+  lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
   `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
   surface 导出边界。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
@@ -30,6 +31,15 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/admin/realtime/`：lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
   `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；realtime
   分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
+- `src/http/admin/credentials/`：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
+  CSRF/分页/错误边界分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只
+  负责稳定处理器出口；凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
+- `src/http/admin/delivery/`：交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
+  分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；
+  动作闭集、CSRF、fencing、request hash 和外部结果未知对账边界保持不变。
+- `src/http/admin/auctions/`：拍卖列表、创建命令、DTO 映射和共享错误边界分别由 `list.rs`、
+  `commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；旧分页、能力
+  投影、零版本创建 fence、命令幂等和事务错误契约保持不变。
 - `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：14 + 21 条允许获得
   SPA 入口的显式浏览器路由。
 

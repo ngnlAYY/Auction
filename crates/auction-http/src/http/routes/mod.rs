@@ -3,11 +3,11 @@
 //! 这里只做 HTTP 输入到应用命令、应用输出到稳定契约的映射；竞价、结算和状态机规则
 //! 留在领域与应用层。Public 与 Admin 是不同 surface，各自拥有独立的路由与前端产物。
 
-#[path = "../admin/auctions.rs"]
+#[path = "../admin/auctions/mod.rs"]
 mod admin_auctions;
 #[path = "../admin/audit.rs"]
 mod admin_audit;
-#[path = "../admin/credentials.rs"]
+#[path = "../admin/credentials/mod.rs"]
 mod admin_credentials;
 #[path = "../admin/dashboard/mod.rs"]
 mod admin_dashboard;
@@ -37,7 +37,7 @@ mod blacklist;
 mod boundary;
 #[path = "../public/compensation.rs"]
 mod compensation;
-#[path = "../admin/delivery.rs"]
+#[path = "../admin/delivery/mod.rs"]
 mod delivery_admin;
 #[path = "../public/forum.rs"]
 mod forum;

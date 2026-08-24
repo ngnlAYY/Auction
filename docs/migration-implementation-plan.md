@@ -793,6 +793,18 @@ Public/Admin HTTP listener。
 - HTTP Admin Realtime owner 已将 lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别拆入
   `http/admin/realtime/{reads,replay,mapping,common}.rs`；`realtime/mod.rs` 只保留稳定处理器出口，
   分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
+- HTTP Admin Credentials owner 已将凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
+  CSRF/分页/错误边界分别拆入 `http/admin/credentials/{list,commands,mapping,common}.rs`；
+  `credentials/mod.rs` 只保留稳定处理器出口，凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
+- HTTP Admin Delivery owner 已将交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
+  分别拆入 `http/admin/delivery/{list,commands,mapping,common}.rs`；`delivery/mod.rs` 只保留稳定处理器出口，
+  动作闭集、CSRF、fencing、request hash 和外部结果未知对账边界保持不变。
+- HTTP Admin Auctions owner 已将拍卖列表、创建命令、DTO 映射和共享错误边界分别拆入
+  `http/admin/auctions/{list,commands,mapping,common}.rs`；`auctions/mod.rs` 只保留稳定处理器出口，
+  旧分页、能力投影、零版本创建 fence、命令幂等和事务错误契约保持不变。
+- Public HTTP reads owner 已将世界/拍卖目录、竞价与价格历史、lot 列表/详情分别拆入
+  `routes/reads/{world,auctions,history,lots}.rs`；`reads/mod.rs` 只保留稳定处理器出口，游标/分页边界、
+  公开投影校验和既有 Public URL/JSON 契约保持不变。
 - Application 核心端口已将事务策略、命令幂等账本、拍卖仓储、竞价事务和 UTC 时钟分别拆入
   `ports/core/{policy,ledger,repository,competition,clock}.rs`；`ports/mod.rs` 只保留模块装配与稳定
   公共导出，原有事务隔离、命令重放、锁内竞价和时钟端口语义保持不变。
@@ -800,12 +812,17 @@ Public/Admin HTTP listener。
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
   `prepared → pending` 激活、审计追加和外部结果后置边界保持不变。
+- Storage Public account mapping owner 已将普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验分别拆入
+  `database/account/mapping/{bids,proxy,common}.rs`；`mapping/mod.rs` 只保留稳定导出，公开账户边界、代理
+  capability 派生和 PostgreSQL/SQLite 投影校验语义保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。
-- 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
-  owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
-  和 Web owner 不再列为未完成项。
+- 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；本轮明确复核了
+  `http/admin/dashboard/sections.rs`（统一 dashboard section 安全投影适配）、`http/admin/lots.rs`
+  （单一 lot 列表/详情边界）、`routes/public/competition.rs`（同一 competition command owner）和
+  `services/admin/users.rs`（单一 Users 用例、key/事务 owner），它们当前职责边界清晰，不能把“可继续拆分”
+  误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker 和 Web owner 不再列为未完成项。
 
 规范门禁此前还存在 CI 漏接：工作流直接执行 Cargo 命令，却没有运行 Justfile 中的目录和配置
 检查。本轮将共同规则收敛到 `ci/check-policy.sh`，本地 Justfile 与 CI 复用同一实现，并补充五种
