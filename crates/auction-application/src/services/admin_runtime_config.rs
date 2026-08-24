@@ -55,6 +55,14 @@ where
         })
     }
 
+    /// 在 Admin surface 对外就绪前恢复尚未收口的 runtime 命令。
+    ///
+    /// 启动装配层负责决定哪些结果可以带着告警继续运行；服务层只负责执行与更新流程
+    /// 相同的恢复逻辑，避免启动恢复和用户重试各自维护一套状态判断。
+    pub async fn recover(&self) -> Result<(), ApplicationError> {
+        self.recover_unresolved().await
+    }
+
     /// 执行一次带 durable intent 的 runtime 更新。
     pub async fn update(
         &self,

@@ -7,15 +7,15 @@ use std::net::SocketAddr;
 
 use auction_application::{
     AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata,
-    AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest,
-    AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailTransactionError,
-    ApplicationError, RequestHash, admin_mail_aggregate_id,
+    AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest, AdminMailPollingCommand,
+    AdminMailTransactionError, ApplicationError, RequestHash, WorkerControlCondition,
+    WorkerControlTrigger, admin_mail_aggregate_id,
 };
 use auction_contracts::{
     AdminMailIntakeDetailResponse, AdminMailIntakeListResponse, AdminMailIntakeMetadataResponse,
     AdminMailIntakeSummaryResponse, AdminMailPaginationResponse, AdminMailPollTriggerRequest,
-    AdminMailPollingRequest, AdminMailPollingResponse, AdminMailStateResponse,
-    ApiErrorResponseWithData, ApiResponse,
+    AdminMailPollTriggerResponse, AdminMailPollingRequest, AdminMailPollingResponse,
+    AdminMailStateResponse, ApiErrorResponseWithData, ApiResponse,
 };
 use auction_domain::CommandId;
 use axum::{
@@ -314,7 +314,7 @@ pub(crate) async fn set_paused(
         .into_response()
 }
 
-/// 以版本 fence 和幂等命令立即唤醒指定邮箱的 Worker 轮询。
+/// 通过 Worker control 一次唤醒全部已装配邮箱的轮询器。
 pub(crate) async fn trigger_poll(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -340,10 +340,9 @@ pub(crate) async fn trigger_poll(
         )
         .into_response();
     }
-    let (_, identity) = match super::authenticated_admin_session(&state, &headers).await {
-        Ok(result) => result,
-        Err(response) => return *response,
-    };
+    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+        return *response;
+    }
     let input: AdminMailPollTriggerRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
@@ -351,52 +350,58 @@ pub(crate) async fn trigger_poll(
                 .into_response();
         }
     };
-    if input.command_id.is_nil() || input.expected_state_version < 0 {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_mail_trigger",
-            "邮件轮询触发参数无效",
-        )
-        .into_response();
+    if input.command_id.is_nil() {
+        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
+            .into_response();
     }
-    let aggregate_id = admin_mail_aggregate_id(&input.mailbox_key);
-    let request_hash =
-        match RequestHash::from_request("admin_mail_trigger_poll", aggregate_id, &input) {
-            Ok(hash) => hash,
-            Err(_) => return super::internal_error(),
-        };
-    let Some(port) = state.admin_mail() else {
+    if state.admin_mail().is_none() {
         return feature_unavailable();
+    }
+    let Some(worker_control) = state.worker_control() else {
+        return worker_unavailable();
     };
-    let result = match port
-        .trigger_poll(AdminMailPollTriggerCommand {
-            command_id: CommandId::from_uuid(input.command_id),
-            mailbox_key: input.mailbox_key.clone(),
-            expected_state_version: input.expected_state_version,
-            actor_id: identity.actor,
-            request_id: None,
-            request_hash,
-        })
-        .await
-    {
+    let result = match worker_control.trigger_poll(input.command_id).await {
         Ok(result) => result,
-        Err(error) => return map_error(error),
+        Err(_) => return worker_unavailable(),
     };
-    if !result.validate()
-        || result.mailbox_key != input.mailbox_key
-        || result.state_version != input.expected_state_version.saturating_add(1)
+    if result.condition != WorkerControlCondition::Available
+        || !result.accepted
+        || result.pollers <= 0
     {
-        return super::internal_error();
+        return map_worker_trigger(result);
     }
     (
         StatusCode::ACCEPTED,
         super::no_store_headers(),
-        Json(ApiResponse::ok(
+        Json(ApiResponse::accepted(
             "邮件轮询已触发",
-            AdminMailStateResponse { polling: map_poll_state(result) },
+            AdminMailPollTriggerResponse {
+                command_id: input.command_id.to_string(),
+                pollers: result.pollers,
+            },
         )),
     )
         .into_response()
+}
+
+fn worker_unavailable() -> Response {
+    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+        .into_response()
+}
+
+fn map_worker_trigger(result: WorkerControlTrigger) -> Response {
+    match result.condition {
+        WorkerControlCondition::Timeout => {
+            super::api_error(StatusCode::GATEWAY_TIMEOUT, "timeout", "请求处理超时").into_response()
+        }
+        WorkerControlCondition::Rejected => {
+            super::api_error(StatusCode::CONFLICT, "poll_rejected", "Worker 当前无法触发邮件轮询")
+                .into_response()
+        }
+        WorkerControlCondition::Unavailable
+        | WorkerControlCondition::Incompatible
+        | WorkerControlCondition::Available => worker_unavailable(),
+    }
 }
 
 fn parse_time(value: Option<&String>) -> Result<Option<DateTime<Utc>>, ()> {

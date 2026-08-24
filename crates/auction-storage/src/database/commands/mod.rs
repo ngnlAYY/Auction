@@ -9,8 +9,9 @@ use auction_application::{
     AdminAuctionCreatePort, AdminAuctionSummary, AdminCreateAuctionCommand, AdminRulesDocument,
     AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
     ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
-    AuctionLifecycleResult, AuctionLifecycleService, Clock, CompetitionCommandPort,
-    CompetitionService, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand,
+    AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate, Clock,
+    CompetitionCommandPort, CompetitionService, CreateProxyCommand, LowerProxyCommand,
+    PlaceBidCommand,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{AdminAuctionCreateService, AdminRulesService};
@@ -70,6 +71,8 @@ where
     fn create_proxy(&self, command: CreateProxyCommand) -> ApplicationFuture<'_, CompetitionPlan> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
+        #[cfg(not(feature = "postgres"))]
+        let _ = (&command, &clock);
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
@@ -156,6 +159,7 @@ where
 pub struct DatabaseAdminAuctionCommands<C> {
     store: Arc<DatabaseStore>,
     clock: Arc<C>,
+    policy: AuctionPolicyTemplate,
 }
 
 /// 绑定运行时数据库和时钟的 Admin 规则读取/发布端口。
@@ -192,6 +196,7 @@ where
     ) -> ApplicationFuture<'_, AdminRulesDocument> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
+        #[cfg(not(feature = "postgres"))]
         let _ = (&command, &clock);
         Box::pin(async move {
             match store.as_ref() {
@@ -216,8 +221,8 @@ where
     C: Clock + 'static,
 {
     /// 建立不向 HTTP 暴露具体数据库类型的创建命令端口。
-    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
-        Self { store, clock }
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>, policy: AuctionPolicyTemplate) -> Self {
+        Self { store, clock, policy }
     }
 }
 
@@ -231,12 +236,16 @@ where
     ) -> ApplicationFuture<'_, AdminAuctionSummary> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
-        let _ = (&command, &clock);
+        #[cfg(feature = "postgres")]
+        let policy = self.policy.clone();
+        #[cfg(not(feature = "postgres"))]
+        let _ = (&command, &clock, &self.policy);
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = AdminAuctionCreateService::new(Arc::new(store.clone()), clock);
+                    let service =
+                        AdminAuctionCreateService::new(Arc::new(store.clone()), clock, policy);
                     service.create(command).await
                 }
                 #[cfg(feature = "sqlite")]

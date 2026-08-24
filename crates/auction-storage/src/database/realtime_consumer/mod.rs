@@ -6,7 +6,7 @@
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicRealtimeEvent, RealtimeConsumerBatch,
-    RealtimeConsumerRequest, RealtimeConsumerStore, RepositoryError,
+    RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeStreamStore, RepositoryError,
 };
 use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
@@ -19,6 +19,29 @@ use sqlx::{Sqlite, SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
 use uuid::Uuid;
 
 use super::DatabaseStore;
+
+impl RealtimeStreamStore for DatabaseStore {
+    fn list_stream_keys(
+        &self,
+        prefix: String,
+        after: String,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<String>> {
+        Box::pin(async move {
+            validate_stream_directory_query(&prefix, &after, limit)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    list_streams_postgres(store, &prefix, &after, limit).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    list_streams_sqlite(store, &prefix, &after, limit).await
+                }
+            }
+        })
+    }
+}
 
 impl RealtimeConsumerStore for DatabaseStore {
     fn read_batch(
@@ -154,6 +177,69 @@ impl RealtimeConsumerStore for DatabaseStore {
             }
         })
     }
+}
+
+fn validate_stream_directory_query(
+    prefix: &str,
+    after: &str,
+    limit: u16,
+) -> Result<(), ApplicationError> {
+    if prefix != "auction:"
+        || after.len() > 255
+        || after != after.trim()
+        || after.chars().any(char::is_control)
+        || limit == 0
+        || limit > 200
+    {
+        return Err(storage_error("实时 stream 目录查询参数无效"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+async fn list_streams_postgres(
+    store: &super::PostgresStore,
+    prefix: &str,
+    after: &str,
+    limit: u16,
+) -> Result<Vec<String>, ApplicationError> {
+    let pattern = format!("{prefix}%");
+    sqlx::query_scalar(
+        "SELECT stream_key
+         FROM public.realtime_streams
+         WHERE stream_key LIKE $1 AND stream_key > $2
+         ORDER BY stream_key ASC
+         LIMIT $3",
+    )
+    .bind(pattern)
+    .bind(after)
+    .bind(i64::from(limit))
+    .fetch_all(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL 实时 stream 目录失败"))
+}
+
+#[cfg(feature = "sqlite")]
+async fn list_streams_sqlite(
+    store: &super::SqliteStore,
+    prefix: &str,
+    after: &str,
+    limit: u16,
+) -> Result<Vec<String>, ApplicationError> {
+    let pattern = format!("{prefix}%");
+    sqlx::query_scalar(
+        "SELECT stream_key
+         FROM realtime_streams
+         WHERE stream_key LIKE ? AND stream_key > ?
+         ORDER BY stream_key ASC
+         LIMIT ?",
+    )
+    .bind(pattern)
+    .bind(after)
+    .bind(i64::from(limit))
+    .fetch_all(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 Lite 实时 stream 目录失败"))
 }
 
 #[cfg(feature = "postgres")]
@@ -1010,6 +1096,7 @@ fn validate_cursor_keys(consumer_key: &str, stream_key: &str) -> Result<(), Appl
         consumer_key: consumer_key.to_owned(),
         stream_key: stream_key.to_owned(),
         batch_size: 1,
+        allow_discovery_stream: true,
     }
     .validate()
     .map_err(storage_error)

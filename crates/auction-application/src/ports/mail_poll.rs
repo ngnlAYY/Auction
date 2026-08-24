@@ -48,9 +48,9 @@ impl MailPollClaim {
 
 /// 一封已经完成远端协议解析的安全入站事实。
 ///
-/// `decision_metadata` 只能保存不含正文、Cookie、token 和装备 key 的 JSON 对象。当前首个
-/// Worker 接入使用 `parsed_pending_processing` 表示“解析已成功、业务处理尚未接入”，不会把
-/// 该状态误报为拍卖业务已经接受。
+/// `decision_metadata` 只能保存不含正文、Cookie、token 和装备 key 的 JSON 对象。Worker 会在
+/// 业务处理 owner 返回安全决定后再写入该事实；`accepted`、`rejected` 和 `failed` 只表示应用
+/// 决定，不代表后续外部 return/take/send 已经完成。
 #[derive(Debug, Clone, PartialEq)]
 pub struct MailPollIntake {
     pub id: Uuid,
@@ -112,9 +112,9 @@ impl MailPollBatch {
 
 /// MoogleMail 轮询的持久化端口。
 ///
-/// `claim_due`、`commit` 和 `fail` 必须由同一数据库 owner 实现租约 fence。远程 GET 只发生在
-/// `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功后才能
-/// 推进，避免远端成功而本地丢游标或重复执行不受控。
+/// `claim_due`、`renew`、`commit` 和 `fail` 必须由同一数据库 owner 实现租约 fence。远程 GET
+/// 只发生在 `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
+/// 后才能推进，避免远端成功而本地丢游标或重复执行不受控。
 pub trait MailPollStore: Send + Sync {
     /// 确保一个启用的邮箱拥有初始轮询状态；重复调用必须返回现有状态而不递增版本。
     fn ensure_state(
@@ -123,14 +123,24 @@ pub trait MailPollStore: Send + Sync {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
 
-    /// 领取 due 且租约已过期的邮箱，返回值必须来自数据库锁和条件更新。
+    /// 领取指定邮箱中 due 且租约已过期的状态，返回值必须来自数据库锁和条件更新。
     fn claim_due(
         &self,
+        mailbox_key: String,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
+        force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>>;
+
+    /// 在 token、owner、版本和当前租约仍有效时延长处理期限，不改变状态版本。
+    fn renew(
+        &self,
+        claim: MailPollClaim,
+        now: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, MailPollClaim>;
 
     /// 在租约 token 仍有效时原子写入入站事实、命令账本和 cursor。
     fn commit(

@@ -7,6 +7,7 @@
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
+- `src/format/mod.rs`：Public/Admin 共用且不参与业务判断的金额展示规则。
 
 ## 语言选择
 

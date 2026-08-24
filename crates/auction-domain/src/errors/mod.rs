@@ -31,6 +31,9 @@ pub enum DomainError {
     #[error("auction cancellation is inside the cutoff window")]
     CancellationCutoff,
 
+    #[error("invalid auction cancellation metadata")]
+    InvalidCancellationMetadata,
+
     #[error("invalid lot bidding state: {0}")]
     InvalidBidState(&'static str),
 
@@ -39,6 +42,15 @@ pub enum DomainError {
 
     #[error("proxy maximum must be lowered while it is active")]
     InvalidProxyMaximum,
+
+    #[error("proxy bidding is disabled for this auction")]
+    ProxyDisabled,
+
+    #[error("proxy re-entry quota has been exhausted")]
+    ProxyOutbidLimit,
+
+    #[error("slow proxy is not allowed in the final phase")]
+    ProxySlowFinal,
 
     #[error("state version overflowed")]
     StateVersionOverflow,

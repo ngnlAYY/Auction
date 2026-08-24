@@ -6,6 +6,8 @@ use super::{ApplicationFuture, RequestHash};
 
 /// Admin 交付列表允许的最大单页大小。
 pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
+/// Admin 交付投影允许显示的最大 COD 整数；与旧版 JSON 安全整数边界一致。
+pub const MAX_DELIVERY_COD: i64 = 9_007_199_254_740_991;
 
 /// Admin 交付列表查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,14 +50,17 @@ impl DeliveryAdminAction {
 
 /// delivery outbox 的安全 Admin 投影。
 ///
-/// 不包含 payload、命令摘要、lease token 或原始 result metadata；这些字段不能进入管理端
-/// 浏览器响应，避免把外部协议或敏感路由细节扩散到 UI。
+/// 不包含 payload、命令摘要、lease token 或原始 result metadata；仅保留旧版契约允许的
+/// `reason_code`、`take_required` 和 `returned_mail_id` 安全派生字段，避免把外部协议或敏感
+/// 路由细节扩散到 UI。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliveryAdminSnapshot {
     pub id: Uuid,
     pub origin_kind: String,
     pub origin_id: String,
     pub recipient: String,
+    /// 仅从版本化 `send` payload 提取的金额，不跨端口传递 payload 原文。
+    pub cod: Option<i64>,
     pub status: String,
     pub lease_expires_at: Option<DateTime<Utc>>,
     pub fencing_version: i64,
@@ -65,6 +70,9 @@ pub struct DeliveryAdminSnapshot {
     pub completed_at: Option<DateTime<Utc>>,
     pub external_reference: Option<String>,
     pub failure_code: Option<String>,
+    pub reason_code: Option<String>,
+    pub take_required: bool,
+    pub returned_mail_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

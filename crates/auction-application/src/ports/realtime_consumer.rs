@@ -19,6 +19,11 @@ pub struct RealtimeConsumerRequest {
     pub consumer_key: String,
     pub stream_key: String,
     pub batch_size: u16,
+    /// 是否允许消费 Public 进程使用的持久化 discovery 派生流。
+    ///
+    /// 外部广播 consumer 必须保持为 `false`，避免把拍卖创建事件从原始流和派生流重复
+    /// 转发；Public 本地 relay 才能显式打开该开关。
+    pub allow_discovery_stream: bool,
 }
 
 impl RealtimeConsumerRequest {
@@ -36,6 +41,12 @@ impl RealtimeConsumerRequest {
             || self.batch_size > MAX_REALTIME_CONSUMER_BATCH_SIZE
         {
             return Err("实时消费游标参数无效");
+        }
+        // `auction:discovery` 是拍卖专属事件的持久化派生流。外部 sink 必须消费
+        // `auction:<auction_id>` 原始流，否则会把同一创建事件重复转发到广播系统；Public
+        // 本地 relay 则消费已经在创建事务中落库的派生流。
+        if self.stream_key == "auction:discovery" && !self.allow_discovery_stream {
+            return Err("公开发现派生流不能作为外部广播消费源");
         }
         Ok(())
     }
@@ -92,6 +103,17 @@ pub trait RealtimeConsumerStore: Send + Sync {
         replay_event_id: Uuid,
         resolved_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
+}
+
+/// Public relay 用于发现全部拍卖 stream 的持久化目录端口。
+pub trait RealtimeStreamStore: Send + Sync {
+    /// 按稳定 stream key 分页返回指定前缀后的 stream；结果必须按字典序递增。
+    fn list_stream_keys(
+        &self,
+        prefix: String,
+        after: String,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<String>>;
 }
 
 /// 外部广播/转发适配器报告的安全失败分类。

@@ -15,6 +15,31 @@ apps/backend/internal/app/public/features/features.go、apps/backend/internal/ap
 
 迁移实施计划中原来的 Admin 35 条是旧统计低估，不能继续作为验收数字。
 
+进程级可观测性路径不计入上述 feature API 统计：Public 与 Admin 在主配置
+`[metrics].enabled = true` 时提供 `GET/HEAD /metrics` Prometheus text scrape；Admin 若配置
+`runtime_config_file`，以 runtime 文件的 `[metrics].enabled` 为准。指标关闭、
+带 query 或路径变体均返回 404。Worker 不开启 TCP HTTP 监听；启用 Worker control 时，
+同一经过 peer credential 校验的 Unix socket 提供 `GET/HEAD /metrics`，使用同一进程 registry。
+control 未启用或指标关闭时该路径返回 404。
+
+OTLP/HTTP tracing exporter 不是业务 HTTP 路由，不计入上述统计。Public/Worker 从主配置的
+`[tracing]` 读取，Admin 在配置 `runtime_config_file` 时以 runtime 的 `[tracing]` 为准；角色专属
+OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使用有界异步队列，并在进程停止
+时按限定等待时间刷新和关闭；exporter 不会把 headers 写入日志、指标或 runtime 文件。
+
+## 进程健康探针
+
+健康探针不计入 Public/Admin feature API 数量，但属于旧版部署契约，两个 HTTP surface 都提供：
+
+| 方法 | 路径 | 成功 | 未就绪 | 数据 |
+| --- | --- | --- | --- | --- |
+| GET/HEAD | /health/live | 200 | — | `{"live": true}` |
+| GET/HEAD | /health/ready | 200 | 503 | `{"ready": true/false}` |
+
+两条路径均使用统一 `{code,message,data}` 外壳。`/health/live` 不访问下游依赖；`/health/ready`
+通过应用层 readiness 端口只读检查数据库连接和当前二进制的全部 SQLx 迁移。未配置数据库或迁移
+不完整时返回 503，不把启动骨架伪装成可接收业务流量。
+
 旧 HTTP 层使用统一响应外壳：
 
     {"code": "...", "message": "...", "data": ...}
@@ -63,7 +88,10 @@ handler 当前明确产生的稳定集合；依赖错误中的 504 表示 contex
 | P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:111 |
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:118 |
 
-Public 分页必须保留旧的 page/page_size 与 cursor 语义。P10 竞价日志额外保留
+Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot 投影允许读取仍属于公开
+安全边界的 settled 拍卖；响应上下文固定包含 `auction_id`、`world`、`number`、状态、展示模式、
+开标时间、可选有效结束时间和 `preview_revision`，Public 历史页面据此打开指定轮次而不读取数据库行。
+P10 竞价日志额外保留
 `world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
 next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格历史保留 `name`、`world`、
@@ -102,14 +130,14 @@ next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格�
 | A22 | GET | /api/v1/admin/realtime/failures | 200 | 400, 401, 501, 503/504 | features/realtime/adminhttp/adapter.go:73 |
 | A23 | GET | /api/v1/admin/realtime/failures/{failure_id} | 200 | 400, 401, 404, 501, 503/504 | features/realtime/adminhttp/adapter.go:76 |
 | A24 | POST | /api/v1/admin/realtime/failures/{failure_id}/replay | 200 | 400, 401, 403, 404, 409, 413, 415, 500, 501, 503/504 | features/realtime/adminhttp/adapter.go:83 |
-| A25 | GET/POST/PUT | /api/v1/admin/rules | GET/POST/PUT 200；创建时 201 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/rules/adminhttp/adapter.go:91 |
+| A25 | GET/POST/PUT | /api/v1/admin/rules | GET 可带可选 `lang`；GET/POST/PUT 200；创建时 201 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/rules/adminhttp/adapter.go:91 |
 | A26 | GET/PUT | /api/v1/admin/config | GET/PUT 200；Lite 501 | 400, 401, 403, 409, 413/415, 501, 503/504 | features/adminconfig/adminhttp/adapter.go:74 |
 | A27 | POST | /api/v1/admin/config:validate | 200；Lite 501 | 400, 401, 403, 413/415, 501, 503/504 | features/adminconfig/adminhttp/adapter.go:87 |
 | A28 | GET/POST/PATCH | /api/v1/admin/users | GET 200；POST 201；PATCH 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:105 |
 | A29 | GET | /api/v1/admin/renames | 200 | 400, 401, 503/504 | features/users/adminhttp/adapter.go:112 |
 | A30 | POST | /api/v1/admin/renames/{rename_id}/revert | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:117 |
 | A31 | PUT/DELETE | /api/v1/admin/users/{user_id}/blacklist | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:122 |
-| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/keymanagement/adminhttp/adapter.go:95 |
+| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/keymanagement/adminhttp/adapter.go:95 |
 | A33 | GET | /api/v1/admin/audit | 200 | 400, 401, 503/504 | features/audit/adminhttp/adapter.go:62 |
 | A34 | GET | /api/v1/admin/deliveries | 200 | 400, 401, 503/504 | features/delivery/adminhttp/adapter.go:78 |
 | A35 | POST | /api/v1/admin/deliveries/{delivery_id}/release | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:83 |
@@ -138,7 +166,7 @@ Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话
 `/api/v1/admin/auctions` 已接入 Admin 会话保护、`world_id`/`status` 筛选、有限页码和
 PostgreSQL Serializable 生命周期/lot 数量安全投影；创建拍卖 POST 已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件；SQLite Lite 的创建与列表 GET 均明确返回 `501 feature_not_supported`。A06
 `/api/v1/admin/auctions/{auction_id}/lots` 已接入 Admin 会话保护、有限页码、PostgreSQL
-Serializable 同快照的拍卖/lot/装备/投稿安全投影；SQLite Lite 因缺少完整 Admin 生命周期字段
+Serializable 同快照的拍卖/lot/装备/投稿安全投影，并返回 `capabilities.manual_intake` 外部写入能力；SQLite Lite 因缺少完整 Admin 生命周期字段
 明确返回 `501 feature_not_supported`，不填充伪造的默认生命周期数据。A04
 `/api/v1/admin/worlds/{world_id}/auction-intake/items` 已接入 URL/canonical JSON 录入、
 固定 HTTPS 来源边界、key 密文信封和 PostgreSQL 同一 Serializable 写事务；成功响应只返回
@@ -153,14 +181,22 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；SQLite L
 命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、转换历史和
 终止原因从提交后的安全账户快照补齐，并在授权状态版本不一致时失败关闭，不暴露原始账本
 payload。A09-A12 的
-Admin 拍卖生命周期命令已接入应用端口，并在同一数据库事务内追加命令账本、状态版本、审计记录和
-注册表内的 lifecycle realtime 事件。A34-A37 delivery Admin 列表、release、retry 和
-reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；SQLite 明确返回
+Admin 拍卖生命周期命令已接入应用端口；请求携带 `command_id` 和 `expected_state_version`，取消动作
+额外要求非空原因，并在同一数据库事务内追加命令账本、状态版本、取消元数据、审计记录和
+注册表内的 lifecycle realtime 事件。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
+reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；reconcile 的 retry、succeeded、failed
+决策以及对应的外部引用/失败代码由请求体明确表达；列表投影还提供从版本化 send payload
+派生的 COD 数值，以及从结果 metadata 派生的 `reason_code`、`take_required`、`returned_mail_id`，
+但不返回 payload 或 metadata 原文；SQLite 明确返回
 `501 feature_not_supported`。这些动作只推进本地 outbox/履约状态，不会伪造外部 MoogleMail
-回执；外部履约传输与其余 Admin 查询/命令仍待后续阶段接入。
+回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
+证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令
+仍返回明确的能力缺失，不会被空结果伪装成已接入。
 A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、证据重校验、命令账本、退款激活、guarded relist、
-审计和预览目录 realtime 事件；SQLite Lite 明确返回 `501 feature_not_supported`。A14 仍只覆盖已有
-recovery 记录的确认，recovery 生成、Worker 履约和其余路径同样不代表业务能力已经完成。
+审计和预览目录 realtime 事件；结算事务已为获胜 lot 在同一事务中建立 recovery case；SQLite Lite
+明确返回 `501 feature_not_supported`。Recovery Worker 已按旧版 `case → return → action → relist → refund`
+顺序接入持久化调度、回执证明、guarded relist 和买家退款收口；尚缺的是实际 MoogleMail 回执与切换前
+行为对照，不能把静态接入误称为外部流程已经验收。
 A21-A24 realtime 运维面已接入 PostgreSQL/SQLite 的安全 lag/failure 投影和 replay 事务；A24
 使用 `command_id`、CSRF、命令摘要和审计，重试同一命令返回同一 replay 事件。没有数据库端口的
 骨架制品明确返回 `501 feature_not_supported`；这组接口仍只处理本地 realtime 失败边界，外部
@@ -171,7 +207,8 @@ A21-A24 realtime 运维面已接入 PostgreSQL/SQLite 的安全 lag/failure 投�
 A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 边界和 2 MiB
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回
 catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
-输入无效或解析失败返回 400，未声明的远程发布仍属于后续 Worker/外部适配阶段。
+输入无效或解析失败返回 400。远程主题发布/读取、回帖竞价导入和通知由 Worker 的独立论坛 owner
+负责，已经接入持久化游标、命令账本和不确定结果停靠，不属于该预览接口的职责。
 A33 `/api/v1/admin/audit` 已接入 Admin session 和只读安全投影，保留 actor/action/entity/source/result
 等精确筛选、occurred 时间范围、keyset opaque cursor 与 `page` 数字分页；数字页在同一数据库
 读取事务内取得 total 与记录，keyset 页不伪造 total。metadata 仅允许 JSON object，SQLite Lite
@@ -183,19 +220,23 @@ A13 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session、CSRF、空查�
 还会创建 `withdrawn_return` 义务及 pending fulfillment。成功响应为 `200` 的
 `{ lot: ... }` 安全投影，SQLite Lite 明确返回 `501 feature_not_supported`。
 A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和两套数据库的
-`service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control、
-mail aggregation、realtime、credentials、delivery、fulfillment、recovery、alerting section 在对应 owner
-尚未迁移前统一返回 `unknown/source_unavailable`，不伪造可用状态。三个进程装配根已接入
-启动/就绪/周期/停止心跳发布；当前接口仍不代表完整 dashboard 行为已完成。
+`service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control 通过
+配置的 Unix socket 读取 live/ready/status，并将 unavailable/timeout/incompatible/rejected
+映射为有限 condition，不暴露 transport 错误正文。mail、realtime、delivery section 已分别
+读取全量轮询器、consumer lag/failure water、delivery pending/failed/manual-reconcile 水位及年龄字段；fulfillment、recovery
+复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting
+section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
+`unknown`，不伪造状态。三个进程装配根已接入启动/就绪/周期/停止心跳发布，剩余是实际部署中的
+可用性与外部通知回执对照。外部广播不属于旧版 dashboard 契约。
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
-A20 远程轮询触发已返回 `202`：请求经过 Admin session/CSRF、`command_id` 和
-`expected_state_version` 校验后，PostgreSQL 事务只幂等地提前 `next_poll_at`，由 Worker 后续
-执行实际 MoogleMail GET；该响应表示已排队，不表示外部读取已经完成。SQLite Lite 明确返回
-`501 feature_not_supported`。
+A20 远程轮询触发已返回 `202 accepted`：请求经过 Admin session/CSRF 与单个 `command_id`
+校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与 `pollers`；手动唤醒
+只影响当前 Worker 本轮调度，不表示外部读取已经完成。Worker 后续仍以持久化 lease 执行实际
+MoogleMail GET；SQLite Lite 明确返回 `501 feature_not_supported`。
 
 A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影
 和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用
@@ -207,7 +248,18 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
  `501 feature_not_supported`。
 
-A29 `GET /api/v1/admin/renames` 已接入 Admin session、`user_id`/`name` 筛选、有限数字分页和
-PostgreSQL/SQLite 同一读取事务内的追加式改名历史安全投影；响应只包含记录 ID、用户 ID、前后
-用户名、actor 和创建/回滚时间，不返回命令摘要。A30 改名回滚仍保持 `feature_not_migrated`，
-待用户状态版本 fence、命令账本和名称占用冲突规则一并迁移。
+Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
+次数/最近历史/创建时间列表字段、创建、改名、游戏
+身份修改和 key 撤销/重签；A30 `/api/v1/admin/renames/{rename_id}/revert` 已接入改名记录校验、
+state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PUT/DELETE 已接入黑名单当前状态、
+追加历史、版本 fence 和审计。三组命令的 key 明文不会进入命令账本、审计或错误响应。A29
+`GET /api/v1/admin/renames` 继续提供 PostgreSQL/SQLite 的改名历史安全投影，并额外返回当前
+用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、游戏身份修改、key
+撤销/重签、黑名单和改名回滚操作。
+
+A32 `/api/v1/admin/credentials` 已接入 Admin session、origin/CSRF、`command_id` 和
+`expected_state_version`，支持 `mail_cookie`/`forum_cookie` 的安全投影列表、导入、改名、启停
+和删除。secret 只在应用加密边界短暂存在，不进入响应、审计、命令结果或页面；该路由要求
+PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥时返回
+`501 feature_not_supported`。Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作为兼容
+回退入口。

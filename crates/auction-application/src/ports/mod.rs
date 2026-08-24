@@ -15,6 +15,7 @@ use auction_domain::{
 mod admin_auction_create;
 mod admin_auctions;
 mod admin_audit;
+mod admin_credentials;
 mod admin_forum;
 mod admin_intake;
 mod admin_lot_commands;
@@ -24,27 +25,39 @@ mod admin_proxy_events;
 mod admin_renames;
 mod admin_rules;
 mod admin_runtime_config;
+mod admin_users;
+mod auction_policy;
 mod blacklist;
 mod commands;
 mod compensation;
 mod delivery;
 mod delivery_admin;
 mod forum;
+mod forum_reply;
+mod forum_sync;
 mod fulfillment;
 mod lifecycle;
 mod mail_poll;
+mod mail_processing;
+mod operations_alert;
 mod queries;
+mod readiness;
 mod realtime;
 mod realtime_admin;
 mod realtime_consumer;
 mod recovery;
+mod recovery_health;
 mod recovery_report;
+mod recovery_scheduler;
+mod recurring_schedule;
 mod rules;
 mod scheduler;
 mod sessions;
 mod settlement;
 mod settlement_report;
 mod settlement_scheduler;
+mod user_mail;
+mod worker_control;
 
 pub use admin_auction_create::{
     AdminAuctionCreatePort, AdminAuctionCreateTransaction, AdminCreateAuctionCommand,
@@ -56,6 +69,19 @@ pub use admin_auctions::{
 pub use admin_audit::{
     AdminAuditCursor, AdminAuditError, AdminAuditListRequest, AdminAuditPage, AdminAuditPort,
     AdminAuditRecord, MAX_ADMIN_AUDIT_OFFSET, MAX_ADMIN_AUDIT_PAGE_SIZE,
+};
+pub use admin_credentials::{
+    AdminCredential, AdminCredentialCommandKind, AdminCredentialCommandResult,
+    AdminCredentialDeleteCommand, AdminCredentialDeleteResult, AdminCredentialDeleteWrite,
+    AdminCredentialEnvelope, AdminCredentialError, AdminCredentialHealthReader,
+    AdminCredentialHealthScope, AdminCredentialHealthSnapshot, AdminCredentialImportCommand,
+    AdminCredentialImportWrite, AdminCredentialKind, AdminCredentialListRequest,
+    AdminCredentialMutationWrite, AdminCredentialOpener, AdminCredentialPage, AdminCredentialPort,
+    AdminCredentialRenameCommand, AdminCredentialRuntimeReader, AdminCredentialRuntimeRecord,
+    AdminCredentialRuntimeWriter, AdminCredentialSealer, AdminCredentialSecret,
+    AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialStore,
+    AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE,
+    MAX_ADMIN_CREDENTIAL_SECRET_BYTES, credential_scope, credential_secret_hash,
 };
 pub use admin_forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,
@@ -77,13 +103,14 @@ pub use admin_lots::{
     MAX_ADMIN_LOT_PAGE_SIZE,
 };
 pub use admin_mail::{
-    AdminMailCommandPort, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
-    AdminMailIntakeMetadata, AdminMailIntakePage, AdminMailIntakeSummary, AdminMailPollState,
-    AdminMailPollStateRequest, AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailPort,
-    AdminMailReader, AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
+    AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail,
+    AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakePage, AdminMailIntakeSummary,
+    AdminMailPollState, AdminMailPollStateRequest, AdminMailPollTriggerCommand,
+    AdminMailPollerSnapshot, AdminMailPollingCommand, AdminMailPort, AdminMailReader,
+    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
     AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_DECISION_BYTES,
-    MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE, MAX_ADMIN_MAILBOX_KEY_BYTES,
-    admin_mail_aggregate_id,
+    MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE, MAX_ADMIN_MAIL_POLLER_COUNT,
+    MAX_ADMIN_MAILBOX_KEY_BYTES, admin_mail_aggregate_id,
 };
 pub use admin_proxy_events::{
     AdminProxyEvent, AdminProxyEventCursor, AdminProxyEventListRequest, AdminProxyEventPage,
@@ -104,13 +131,26 @@ pub use admin_rules::{
 pub use admin_runtime_config::{
     ADMIN_RUNTIME_DIGEST_VERSION, AdminRuntimeAuditRecord, AdminRuntimeCommandError,
     AdminRuntimeCommandState, AdminRuntimeCommandStore, AdminRuntimeConfigError,
-    AdminRuntimeConfigPort, AdminRuntimeDocument, AdminRuntimeEquipmentSourceConfig,
-    AdminRuntimeFileError, AdminRuntimeFileStore, AdminRuntimeListenMode,
-    AdminRuntimeListenerConfig, AdminRuntimeMetricsConfig, AdminRuntimeReplacement,
-    AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig, AdminRuntimeSnapshot,
-    AdminRuntimeStoredCommand, AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand,
-    AdminRuntimeWorkerControlConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeConfigPort, AdminRuntimeDashboardMailbox, AdminRuntimeDocument,
+    AdminRuntimeEquipmentSourceConfig, AdminRuntimeFileError, AdminRuntimeFileStore,
+    AdminRuntimeListenMode, AdminRuntimeListenerConfig, AdminRuntimeMetricsConfig,
+    AdminRuntimeReplacement, AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig,
+    AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeTracingConfig,
+    AdminRuntimeUpdateCommand, AdminRuntimeWorkerControlConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
+pub use admin_users::{
+    AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminRenameRevertCommand, AdminRenameRevertWrite,
+    AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind, AdminUserCommandResult,
+    AdminUserCreateCommand, AdminUserCreateWrite, AdminUserError, AdminUserKeyIssue,
+    AdminUserKeyMode, AdminUserKeyStatus, AdminUserKeyWrite, AdminUserListItem,
+    AdminUserListRequest, AdminUserMutationAction, AdminUserMutationCommand,
+    AdminUserMutationResult, AdminUserMutationWrite, AdminUserPage, AdminUserPort, AdminUserStatus,
+    AdminUserStore, MAX_ADMIN_USER_OFFSET, MAX_ADMIN_USER_PAGE_SIZE,
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
+};
+pub use auction_policy::{AuctionPolicyTemplate, POLICY_MINIMUM_INCREMENT};
 pub use blacklist::{
     MAX_PUBLIC_BLACKLIST_OFFSET, MAX_PUBLIC_BLACKLIST_PAGE_SIZE, PublicBlacklistEntry,
     PublicBlacklistPage, PublicBlacklistReader, PublicBlacklistRequest,
@@ -130,22 +170,57 @@ pub use delivery::{
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest, DeliveryAdminPage,
     DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot, MAX_DELIVERY_ADMIN_PAGE_SIZE,
+    MAX_DELIVERY_COD,
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
+pub use forum_reply::{
+    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCommandStart,
+    ForumCommandStatus, ForumLotTarget, ForumReplyStore, ForumReplyTopic, ForumTopicReader,
+};
+pub use forum_sync::{
+    ForumAuctionSnapshot, ForumLotSnapshot, ForumPublishedThread, ForumPublisher, ForumRemoteError,
+    ForumRenderError, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
+    forum_world_name,
+};
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
-    SettlementFulfillmentClaim, SettlementFulfillmentCommandPort, SettlementFulfillmentOperation,
-    SettlementFulfillmentResult, SettlementFulfillmentState, SettlementFulfillmentStore,
+    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentOperation, SettlementFulfillmentProof,
+    SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
+    SettlementFulfillmentResult, SettlementFulfillmentSentEvidence, SettlementFulfillmentState,
+    SettlementFulfillmentStore,
 };
 pub use lifecycle::{
-    AuctionLifecycleAction, AuctionLifecycleActor, AuctionLifecycleActorType,
-    AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecycleResult,
-    AuctionLifecycleTransaction,
+    AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActor,
+    AuctionLifecycleActorType, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
+    AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecycleResult,
+    AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
     MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollIntake,
     MailPollStore,
+};
+pub use mail_processing::{
+    MailAuctionIntakeCommand, MailAuctionIntakePort, MailAuctionIntakeRecord,
+    MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItem,
+    MailAuctionItemWrite, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
+    MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment,
+    MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNotificationTemplate,
+    MailProcessingDecision, MailProcessingError, MailProcessor, mail_auction_aggregate_id,
+};
+pub use operations_alert::{
+    MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
+    MAX_OPERATIONS_ALERT_SIGNALS, OperationsAlertBatchClaim, OperationsAlertBatchItem,
+    OperationsAlertClaimRequest, OperationsAlertDeliverySnapshot, OperationsAlertDeliveryStatus,
+    OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch, OperationsAlertError,
+    OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertKind,
+    OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
+    OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
+    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
+    OperationsAlertSourceObservation, OperationsAlertSourceReader, OperationsAlertStore,
+    OperationsAlertTarget, body_digest, canonical_summary, evaluate_snapshot, request_hash,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,
@@ -163,28 +238,38 @@ pub use queries::{
     PublicPriceHistoryReader, PublicPriceHistoryStats, PublicProxyBid, PublicProxyCapabilities,
     PublicProxyTransition, WorldReader, WorldSnapshot,
 };
+pub use readiness::ProcessReadinessPort;
 pub use realtime::{
     MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader,
     PublicRealtimeRequest,
 };
 pub use realtime_admin::{
-    MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError, RealtimeAdminPort,
-    RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
+    MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot,
+    RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot, RealtimeFailureWater,
     RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot, RealtimeReplayCommand,
     RealtimeReplayResult,
 };
 pub use realtime_consumer::{
     MAX_REALTIME_CONSUMER_BATCH_SIZE, RealtimeConsumerBatch, RealtimeConsumerRequest,
-    RealtimeConsumerStore, RealtimeEventSink, RealtimeSinkError,
+    RealtimeConsumerStore, RealtimeEventSink, RealtimeSinkError, RealtimeStreamStore,
 };
 pub use recovery::{
     RecoveryCommandError, RecoveryCommandPort, RecoveryCommandRepository, RecoveryCommandService,
     RecoveryConfirmationAction, RecoveryConfirmationCommand, RecoveryConfirmationResult,
 };
+pub use recovery_health::{
+    RecoveryBalanceStatus, RecoveryEvidenceStatus, RecoveryHealthConfig, RecoveryHealthRefreshPort,
+    RecoveryHealthStore, RecoveryHealthUpdate,
+};
 pub use recovery_report::{
     RecoveryActionReport, RecoveryReport, RecoveryReportEntry, RecoveryReportReader,
     allowed_recovery_commands,
 };
+pub use recovery_scheduler::{
+    RecoveryActionClaim, RecoveryActionOutcome, RecoveryCaseAdvance, RecoveryResolutionAdvance,
+    RecoveryResolutionStore, RecoveryReturnAdvance, RecoveryWorkStore,
+};
+pub use recurring_schedule::RecurringSchedule;
 pub use rules::{
     PUBLIC_RULES_DEFAULT_LOCALE, PUBLIC_RULES_LOCALES, PublicRulesDocument, PublicRulesReader,
     PublicRulesRequest,
@@ -205,6 +290,15 @@ pub use settlement_report::{
     SettlementReportReader, SettlementSummary,
 };
 pub use settlement_scheduler::{SettlementWorkClaim, SettlementWorkStore};
+pub use user_mail::{
+    MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader, MailLoginKeyIssue,
+    MailLoginKeyIssuer, MailLoginKeyReader, MailUserCommandKind, MailUserPort,
+    MailUserRebindCommand, MailUserRegisterCommand, MailUserRegisterWrite, MailUserResult,
+    MailUserResultCode, MailUserStore,
+};
+pub use worker_control::{
+    WorkerControlCondition, WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
+};
 
 /// PostgreSQL 与队列消费路径允许使用的事务隔离级别。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -18,6 +18,11 @@ impl<T> ApiResponse<T> {
     pub fn ok(message: impl Into<String>, data: T) -> Self {
         Self { code: "ok", message: message.into(), data }
     }
+
+    /// 构造表示异步命令已接受的响应；它不表示外部副作用已经完成。
+    pub fn accepted(message: impl Into<String>, data: T) -> Self {
+        Self { code: "accepted", message: message.into(), data }
+    }
 }
 
 /// 健康检查响应。
@@ -37,6 +42,26 @@ impl HealthResponse {
     pub fn ok(service: impl Into<String>, version: &'static str) -> Self {
         Self { service: service.into(), status: "ok", version }
     }
+}
+
+/// 与旧版 `/health/live`、`/health/ready` 保持一致的探针响应外壳。
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthProbeResponse<T> {
+    pub code: &'static str,
+    pub message: &'static str,
+    pub data: T,
+}
+
+/// 进程存活探针数据。
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthLiveData {
+    pub live: bool,
+}
+
+/// 进程就绪探针数据。
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthReadyData {
+    pub ready: bool,
 }
 
 /// Public 持久化实时事件的安全信封。
@@ -115,6 +140,9 @@ pub struct CommandAcknowledgement {
 #[serde(deny_unknown_fields)]
 pub struct AdminAuctionLifecycleRequest {
     pub command_id: Uuid,
+    pub expected_state_version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Admin draft lot 修改请求；动作字段保持旧 HTTP surface 的字符串契约。
@@ -143,9 +171,6 @@ pub struct AdminMailPollingRequest {
 #[serde(deny_unknown_fields)]
 pub struct AdminMailPollTriggerRequest {
     pub command_id: Uuid,
-    pub mailbox_key: String,
-    /// 首次触发可使用 0 建立轮询状态；之后必须携带读取到的版本。
-    pub expected_state_version: i64,
 }
 
 /// Admin 邮件轮询状态安全响应；不包含外部 Cookie 或原始游标。
@@ -164,6 +189,13 @@ pub struct AdminMailPollingResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminMailStateResponse {
     pub polling: AdminMailPollingResponse,
+}
+
+/// Admin 全局邮件轮询唤醒的接受结果。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminMailPollTriggerResponse {
+    pub command_id: String,
+    pub pollers: i64,
 }
 
 /// Admin 入站邮件列表安全摘要。
@@ -412,6 +444,7 @@ pub struct AdminRuntimeConfigUpdateRequest {
 pub struct AdminRenameResponse {
     pub id: String,
     pub user_id: String,
+    pub user_state_version: i64,
     pub previous_username: String,
     pub next_username: String,
     pub actor: String,
@@ -464,12 +497,15 @@ pub struct AdminRecoveryConfirmationResponse {
 }
 
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
+/// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
+/// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminDeliveryResponse {
     pub id: String,
     pub origin_kind: String,
     pub origin_id: String,
     pub recipient: String,
+    pub cod: Option<i64>,
     pub status: String,
     pub lease_expires_at: Option<String>,
     pub fencing_version: i64,
@@ -479,6 +515,12 @@ pub struct AdminDeliveryResponse {
     pub completed_at: Option<String>,
     pub external_reference: Option<String>,
     pub failure_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub take_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returned_mail_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -617,7 +659,8 @@ pub struct AdminSettlementAuctionResponse {
 
 /// Admin 拍卖列表的能力声明。
 ///
-/// 能力只表示对应命令路由已经存在；未声明的 mail intake 等命令仍保持明确的未迁移响应。
+/// 能力只表示对应命令路由已经存在；未声明的扩展命令仍保持明确的未迁移响应，不会由能力
+/// 字段推断出额外的业务 owner。
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminAuctionCapabilitiesResponse {
     pub cancel_auction: bool,
@@ -759,12 +802,19 @@ pub struct AdminLotPaginationResponse {
     pub total: i64,
 }
 
+/// Admin lot 页面可用的外部写入能力；浏览器不得根据数据库档位自行猜测。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminLotCapabilitiesResponse {
+    pub manual_intake: bool,
+}
+
 /// Admin lot 列表响应；拍卖和 lot 来自同一数据库快照。
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminLotListResponse {
     pub auction: AdminSettlementAuctionResponse,
     pub lots: Vec<AdminLotResponse>,
     pub pagination: AdminLotPaginationResponse,
+    pub capabilities: AdminLotCapabilitiesResponse,
 }
 
 /// Admin 代理历史的安全事件投影。
@@ -1458,11 +1508,15 @@ pub enum PublicLotDetailItemResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct PublicLotEnvelopeResponse {
     pub auction_id: String,
+    pub world: String,
+    pub number: i64,
     pub auction_status: String,
     pub projection_kind: String,
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub opens_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_ends_at: Option<String>,
     pub preview_revision: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub final_restriction: Option<PublicFinalRestrictionResponse>,
@@ -1673,4 +1727,207 @@ pub struct AdminDashboardResponse {
     pub fulfillment: AdminDashboardSectionResponse,
     pub recovery: AdminDashboardSectionResponse,
     pub alerting: AdminDashboardSectionResponse,
+}
+
+/// Admin 用户创建请求；`key` 仅在手工 key 模式提供，服务端不会把它写入日志或命令账本。
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUserCreateRequest {
+    pub command_id: Uuid,
+    pub username: String,
+    pub game_player_id: String,
+    pub key_mode: String,
+    pub key: Option<String>,
+}
+
+impl std::fmt::Debug for AdminUserCreateRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminUserCreateRequest")
+            .field("command_id", &self.command_id)
+            .field("username", &self.username)
+            .field("game_player_id", &self.game_player_id)
+            .field("key_mode", &self.key_mode)
+            .field("key", &self.key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+/// Admin 用户属性/key 状态修改请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUserMutationRequest {
+    pub command_id: Uuid,
+    pub user_id: Uuid,
+    pub expected_state_version: i64,
+    pub action: String,
+    pub username: Option<String>,
+    pub game_player_id: Option<String>,
+    pub public_reason: Option<String>,
+}
+
+/// Admin 用户黑名单请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUserBlacklistRequest {
+    pub command_id: Uuid,
+    pub expected_state_version: i64,
+    pub public_reason: String,
+}
+
+/// Admin 用户解封请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUserUnblacklistRequest {
+    pub command_id: Uuid,
+    pub expected_state_version: i64,
+}
+
+/// Admin 改名回滚请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminRenameRevertRequest {
+    pub command_id: Uuid,
+    pub expected_state_version: i64,
+}
+
+/// Admin 用户安全响应。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserResponse {
+    pub id: String,
+    pub username: String,
+    pub game_player_id: Option<String>,
+    pub status: String,
+    pub key_status: String,
+    pub state_version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Admin 用户列表分页。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserPaginationResponse {
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+}
+
+/// Admin 用户列表中的黑名单历史安全投影。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserBlacklistHistoryResponse {
+    pub public_reason: String,
+    pub blacklisted_at: String,
+}
+
+/// Admin 用户列表条目；写命令响应仍只使用 `AdminUserResponse`。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserListItemResponse {
+    #[serde(flatten)]
+    pub user: AdminUserResponse,
+    pub blacklist_count: i64,
+    pub blacklist_history: Vec<AdminUserBlacklistHistoryResponse>,
+}
+
+/// Admin 用户列表响应。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserListResponse {
+    pub users: Vec<AdminUserListItemResponse>,
+    pub pagination: AdminUserPaginationResponse,
+}
+
+/// Admin 用户修改响应；生成 key 只在本次创建/重签响应中出现。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminUserMutationResponse {
+    pub user: AdminUserResponse,
+    pub generated_key: Option<String>,
+}
+
+/// Admin 凭据导入请求；secret 只在请求体和本次加密调用中存在，Debug 实现必须脱敏。
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialCreateRequest {
+    pub command_id: Uuid,
+    pub kind: String,
+    pub world: String,
+    pub label: String,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for AdminCredentialCreateRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminCredentialCreateRequest")
+            .field("command_id", &self.command_id)
+            .field("kind", &self.kind)
+            .field("world", &self.world)
+            .field("label", &self.label)
+            .field("secret", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Admin 凭据改名或状态修改请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialMutationRequest {
+    pub command_id: Uuid,
+    pub credential_id: Uuid,
+    pub expected_state_version: i64,
+    pub action: String,
+    pub label: Option<String>,
+    pub status: Option<String>,
+}
+
+/// Admin 凭据删除请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialDeleteRequest {
+    pub command_id: Uuid,
+    pub credential_id: Uuid,
+    pub expected_state_version: i64,
+}
+
+/// Admin 凭据安全响应，不包含 secret、密文、密钥标识或指纹。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminCredentialResponse {
+    pub id: String,
+    pub kind: String,
+    pub world: String,
+    pub label: String,
+    pub status: String,
+    pub state_version: i64,
+    pub created_at: String,
+    pub rotated_at: Option<String>,
+    pub updated_at: String,
+}
+
+/// Admin 凭据列表分页。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminCredentialPaginationResponse {
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+}
+
+/// Admin 凭据列表响应。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminCredentialListResponse {
+    pub credentials: Vec<AdminCredentialResponse>,
+    pub pagination: AdminCredentialPaginationResponse,
+    pub restart_required: bool,
+}
+
+/// Admin 凭据导入/修改响应。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminCredentialMutationResponse {
+    pub credential: AdminCredentialResponse,
+    pub restart_required: bool,
+}
+
+/// Admin 凭据删除响应。
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminCredentialDeleteResponse {
+    pub credential_id: String,
+    pub state_version: i64,
+    pub restart_required: bool,
 }

@@ -155,6 +155,8 @@ async fn list_postgres_transaction(
                 (l.leader_user_id IS NOT NULL)::boolean AS has_leader,
                 l.leader_proxy_last,
                 l.material,
+                COALESCE((a.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0) AS policy_bid_increment_ppm,
+                COALESCE((a.policy_snapshot ->> 'minimum_increment')::bigint, 30000) AS policy_minimum_increment,
                 leader.username AS leader_name,
                 submission.seller AS seller_name,
                 l.effective_end_at,
@@ -260,6 +262,8 @@ async fn detail_postgres(
                 (l.leader_user_id IS NOT NULL)::boolean AS has_leader,
                 l.leader_proxy_last,
                 l.material,
+                COALESCE((a.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0) AS policy_bid_increment_ppm,
+                COALESCE((a.policy_snapshot ->> 'minimum_increment')::bigint, 30000) AS policy_minimum_increment,
                 leader.username AS leader_name,
                 submission.seller AS seller_name,
                 l.effective_end_at,
@@ -549,6 +553,10 @@ fn map_postgres_live(
             .map_err(|_| storage_error("读取 PostgreSQL 正式代理状态失败"))?,
         row.try_get("material")
             .map_err(|_| storage_error("读取 PostgreSQL 正式装备材质状态失败"))?,
+        row.try_get("policy_bid_increment_ppm")
+            .map_err(|_| storage_error("读取 PostgreSQL 正式竞价增幅失败"))?,
+        row.try_get("policy_minimum_increment")
+            .map_err(|_| storage_error("读取 PostgreSQL 正式最低增量失败"))?,
         row.try_get("leader_name").map_err(|_| storage_error("读取 PostgreSQL 正式领先者失败"))?,
         row.try_get("seller_name").map_err(|_| storage_error("读取 PostgreSQL 正式卖家失败"))?,
         row.try_get("effective_end_at")
@@ -668,6 +676,8 @@ async fn list_sqlite_transaction(
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
                 l.leader_proxy_last,
                 l.material,
+                COALESCE(CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER), 0) AS policy_bid_increment_ppm,
+                COALESCE(CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER), 30000) AS policy_minimum_increment,
                 leader.username AS leader_name,
                 submission.seller AS seller_name,
                 l.effective_end_at,
@@ -752,7 +762,10 @@ async fn detail_sqlite(
             "SELECT
                 l.id, l.auction_id, l.lot_number, l.status, l.start_price, l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
-                l.leader_proxy_last, l.material, leader.username AS leader_name,
+                l.leader_proxy_last, l.material,
+                COALESCE(CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER), 0) AS policy_bid_increment_ppm,
+                COALESCE(CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER), 30000) AS policy_minimum_increment,
+                leader.username AS leader_name,
                 submission.seller AS seller_name, l.effective_end_at, l.state_version,
                 e.external_equipment_id, e.name AS equipment_name,
                 e.category AS equipment_category, e.attributes AS equipment_attributes
@@ -1045,6 +1058,10 @@ fn map_sqlite_live(
         row.try_get::<i64, _>("material")
             .map_err(|_| storage_error("读取 Lite 正式材质状态失败"))?
             != 0,
+        row.try_get("policy_bid_increment_ppm")
+            .map_err(|_| storage_error("读取 Lite 正式竞价增幅失败"))?,
+        row.try_get("policy_minimum_increment")
+            .map_err(|_| storage_error("读取 Lite 正式最低增量失败"))?,
         row.try_get("leader_name").map_err(|_| storage_error("读取 Lite 正式领先者失败"))?,
         row.try_get("seller_name").map_err(|_| storage_error("读取 Lite 正式卖家失败"))?,
         parse_optional_timestamp(
@@ -1140,6 +1157,8 @@ fn map_live_fields(
     has_leader: bool,
     proxy_last: bool,
     material: bool,
+    policy_bid_increment_ppm: i64,
+    policy_minimum_increment: i64,
     leader_name: Option<String>,
     seller_name: Option<String>,
     effective_end_at: Option<DateTime<Utc>>,
@@ -1157,7 +1176,13 @@ fn map_live_fields(
     if current < start {
         return Err(storage_error("公开 lot 当前价低于起始价"));
     }
-    let next_bid = AuctionRules::default()
+    let rules = AuctionRules {
+        bid_increment_ppm: policy_bid_increment_ppm,
+        minimum_increment: policy_minimum_increment,
+        ..AuctionRules::default()
+    };
+    rules.validate().map_err(|_| storage_error("公开 lot 拍卖策略无效"))?;
+    let next_bid = rules
         .next_minimum_bid(Some(start), has_leader.then_some(current), material, proxy_last)
         .value();
     let equipment =

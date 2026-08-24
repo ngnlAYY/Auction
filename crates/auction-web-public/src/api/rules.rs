@@ -1,9 +1,8 @@
 //! Public 规则文档 HTTP DTO 与请求。
 
-use gloo_net::http::Request;
 use serde::Deserialize;
 
-use super::ApiResponse;
+use super::{ApiResponse, send_get};
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub(crate) struct RulesDocument {
@@ -15,7 +14,7 @@ pub(crate) struct RulesDocument {
 }
 
 pub(crate) async fn fetch_rules() -> Result<RulesDocument, String> {
-    let response = Request::get("/api/v1/rules").send().await.map_err(|error| error.to_string())?;
+    let response = send_get("/api/v1/rules").await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

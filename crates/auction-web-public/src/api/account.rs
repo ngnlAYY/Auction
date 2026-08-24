@@ -3,8 +3,9 @@
 //! 这里只解码后端的安全账户 projection；代理上限、历史转换和 capability 仍以服务端返回的
 //! 公开字段为准，浏览器不重建代理状态机。
 
-use gloo_net::http::Request;
 use serde::Deserialize;
+
+use super::send_get;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub(crate) struct OwnedEquipment {
@@ -100,11 +101,9 @@ struct MyProxyData {
     authorization: Option<OwnedProxy>,
 }
 
-pub(crate) async fn fetch_my_bids() -> Result<MyBidsPage, String> {
-    let response = Request::get("/api/v1/me/bids?page=1&page_size=20")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+pub(crate) async fn fetch_my_bids(bid_page: i64, proxy_page: i64) -> Result<MyBidsPage, String> {
+    let url = format!("/api/v1/me/bids?bid_page={bid_page}&proxy_page={proxy_page}&page_size=20");
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -115,7 +114,7 @@ pub(crate) async fn fetch_my_bids() -> Result<MyBidsPage, String> {
 
 pub(crate) async fn fetch_my_proxy(lot_id: String) -> Result<Option<OwnedProxy>, String> {
     let url = format!("/api/v1/lots/{lot_id}/proxy-authorizations/mine");
-    let response = Request::get(&url).send().await.map_err(|error| error.to_string())?;
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

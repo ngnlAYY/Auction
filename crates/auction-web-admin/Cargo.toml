@@ -7,9 +7,13 @@ publish.workspace = true
 
 [dependencies]
 auction-web-shared.workspace = true
+base64.workspace = true
+chrono.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 dioxus-i18n.workspace = true
 gloo-net.workspace = true
+gloo-timers.workspace = true
+js-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 unic-langid.workspace = true
@@ -17,3 +21,4 @@ unic-langid.workspace = true
 web-sys.workspace = true
 uuid.workspace = true
 url.workspace = true
+wasm-bindgen.workspace = true

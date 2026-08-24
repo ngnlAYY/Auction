@@ -23,7 +23,7 @@ use uuid::Uuid;
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Row};
+use sqlx::{Postgres, Row};
 
 impl SettlementWorkStore for DatabaseStore {
     fn claim_due(
@@ -115,6 +115,7 @@ fn bounded_text(value: String, max_chars: usize) -> String {
 #[derive(Debug, Serialize)]
 struct SettlementClaimRequest {
     workflow_id: Uuid,
+    due_at: DateTime<Utc>,
 }
 
 #[cfg(feature = "postgres")]
@@ -138,7 +139,7 @@ fn settlement_command_id(claim_command_id: CommandId) -> CommandId {
 
 #[cfg(feature = "postgres")]
 async fn claim_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
@@ -146,35 +147,51 @@ async fn claim_postgres(
 ) -> Result<Vec<SettlementWorkClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let rows = sqlx::query(
-        r#"SELECT id, status, state_version, effective_end_at,
-                  settlement_workflow_id, settlement_claim_command_id,
-                  settlement_attempt_count, settlement_next_attempt_at
-           FROM public.auctions
+        r#"SELECT a.id, a.status, a.state_version,
+                  COALESCE(a.settlement_due_at, lot_schedule.due_at) AS due_at,
+                  a.settlement_workflow_id, a.settlement_claim_command_id,
+                  a.settlement_attempt_count, a.settlement_next_attempt_at
+           FROM public.auctions AS a
+           LEFT JOIN LATERAL (
+               SELECT
+                   MAX(l.effective_end_at) AS due_at,
+                   COUNT(*)::bigint AS lot_count,
+                   COUNT(*) FILTER (
+                       WHERE l.status = 'live' AND l.effective_end_at IS NOT NULL
+                   )::bigint AS live_lot_count
+               FROM public.lots AS l
+               WHERE l.auction_id = a.id
+           ) AS lot_schedule ON TRUE
            WHERE (
-               status = 'final'
-               AND effective_end_at IS NOT NULL
-               AND effective_end_at <= $1
-               AND settlement_workflow_id IS NULL
+               a.status = 'final'
+               AND lot_schedule.lot_count > 0
+               AND lot_schedule.live_lot_count = lot_schedule.lot_count
+               AND lot_schedule.due_at <= $1
+               AND a.settlement_workflow_id IS NULL
            )
            OR (
-               status = 'settling'
-               AND settlement_workflow_id IS NOT NULL
-               AND settlement_claim_command_id IS NOT NULL
-               AND settlement_complete_command_id IS NULL
-               AND settlement_next_attempt_at IS NOT NULL
-               AND settlement_next_attempt_at <= $1
+               a.status = 'settling'
+               AND a.settlement_workflow_id IS NOT NULL
+               AND a.settlement_claim_command_id IS NOT NULL
+               AND a.settlement_complete_command_id IS NULL
+               AND a.settlement_next_attempt_at IS NOT NULL
+               AND a.settlement_next_attempt_at <= $1
            )
            OR (
-               status = 'settled'
-               AND settlement_workflow_id IS NOT NULL
-               AND settlement_claim_command_id IS NOT NULL
-               AND settlement_complete_command_id IS NULL
-               AND settlement_next_attempt_at IS NOT NULL
-               AND settlement_next_attempt_at <= $1
+               a.status = 'settled'
+               AND a.settlement_workflow_id IS NOT NULL
+               AND a.settlement_claim_command_id IS NOT NULL
+               AND a.settlement_complete_command_id IS NULL
+               AND a.settlement_next_attempt_at IS NOT NULL
+               AND a.settlement_next_attempt_at <= $1
            )
-           ORDER BY COALESCE(effective_end_at, settlement_next_attempt_at), id
+           ORDER BY COALESCE(
+               a.settlement_next_attempt_at,
+               a.settlement_due_at,
+               lot_schedule.due_at
+           ), a.id
            LIMIT $2
-           FOR UPDATE SKIP LOCKED"#,
+           FOR UPDATE OF a SKIP LOCKED"#,
     )
     .bind(now)
     .bind(i64::from(limit))
@@ -186,10 +203,20 @@ async fn claim_postgres(
     for row in rows {
         let auction_uuid: Uuid = row.try_get("id").map_err(map_storage_error)?;
         let status: String = row.try_get("status").map_err(map_storage_error)?;
+        let due_at: DateTime<Utc> = row.try_get("due_at").map_err(map_storage_error)?;
         let previous_state_version: i64 =
             row.try_get("state_version").map_err(map_storage_error)?;
         if previous_state_version <= 0 {
             return Err(repository_error_owned("结算拍卖状态版本无效"));
+        }
+        if status == "final"
+            && lock_initial_lots(&mut transaction, auction_uuid, now, due_at)
+                .await
+                .map_err(map_storage_error)?
+                .is_none()
+        {
+            // 等待 lot 锁期间可能刚好提交了软截止延期；本轮跳过并让下一次扫描读取新世代。
+            continue;
         }
         let (workflow, claim_command, attempt_count, is_initial, completion_only) =
             if status == "final" {
@@ -198,7 +225,7 @@ async fn claim_postgres(
                 let request_hash = RequestHash::from_request(
                     "claim_settlement",
                     auction_uuid,
-                    &SettlementClaimRequest { workflow_id: workflow },
+                    &SettlementClaimRequest { workflow_id: workflow, due_at },
                 )
                 .map_err(|_| repository_error_owned("无法生成结算领取命令摘要"))?;
                 let expected_hash = request_hash.as_bytes().to_vec();
@@ -214,7 +241,11 @@ async fn claim_postgres(
                 .bind(claim_command.as_uuid())
                 .bind(auction_uuid)
                 .bind(&expected_hash)
-                .bind(json!({ "auction_id": auction_uuid, "workflow_id": workflow }))
+                .bind(json!({
+                    "auction_id": auction_uuid,
+                    "workflow_id": workflow,
+                    "due_at": due_at,
+                }))
                 .fetch_one(&mut *transaction)
                 .await
                 .map_err(map_storage_error)?;
@@ -273,15 +304,16 @@ async fn claim_postgres(
                 r#"UPDATE public.auctions
                    SET status = 'settling', settlement_workflow_id = $2,
                        settlement_claim_command_id = $3,
-                       settlement_due_at = COALESCE(settlement_due_at, effective_end_at, $4),
-                       settlement_started_at = $4, settlement_attempt_count = $5,
-                       settlement_next_attempt_at = $6, settlement_last_error_code = NULL,
-                       state_version = state_version + 1, updated_at = $4
-                   WHERE id = $1 AND status = 'final' AND state_version = $7"#,
+                       settlement_due_at = $4,
+                       settlement_started_at = $5, settlement_attempt_count = $6,
+                       settlement_next_attempt_at = $7, settlement_last_error_code = NULL,
+                       state_version = state_version + 1, updated_at = $5
+                   WHERE id = $1 AND status = 'final' AND state_version = $8"#,
             )
             .bind(auction_uuid)
             .bind(workflow)
             .bind(claim_command.as_uuid())
+            .bind(due_at)
             .bind(now)
             .bind(attempt_count_i32)
             .bind(lease_until)
@@ -353,6 +385,7 @@ async fn claim_postgres(
             auction_id: AuctionId::from_uuid(auction_uuid),
             workflow_id: workflow,
             settlement_command_id,
+            due_at,
             completion_only,
             worker_id: worker_id.to_owned(),
             lease_until,
@@ -361,6 +394,45 @@ async fn claim_postgres(
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(claims)
+}
+
+#[cfg(feature = "postgres")]
+async fn lock_initial_lots(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    auction_id: Uuid,
+    now: DateTime<Utc>,
+    expected_due_at: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT status, effective_end_at
+           FROM public.lots
+           WHERE auction_id = $1
+           ORDER BY lot_number, id
+           FOR UPDATE"#,
+    )
+    .bind(auction_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let mut latest_end = None;
+    for row in rows {
+        let status: String = row.try_get("status")?;
+        let effective_end_at: Option<DateTime<Utc>> = row.try_get("effective_end_at")?;
+        let Some(effective_end_at) = effective_end_at else {
+            return Ok(None);
+        };
+        if status != "live" || effective_end_at > now {
+            return Ok(None);
+        }
+        latest_end = Some(
+            latest_end
+                .map_or(effective_end_at, |current: DateTime<Utc>| current.max(effective_end_at)),
+        );
+    }
+    Ok(latest_end.filter(|latest| *latest == expected_due_at))
 }
 
 #[cfg(feature = "postgres")]
@@ -431,7 +503,7 @@ async fn insert_settlement_claim_event(
 
 #[cfg(feature = "postgres")]
 async fn complete_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
@@ -462,7 +534,7 @@ async fn complete_postgres(
 
 #[cfg(feature = "postgres")]
 async fn fail_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &SettlementWorkClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,

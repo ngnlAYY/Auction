@@ -1,7 +1,8 @@
 # 从 Auction-BF 迁移到 Rust
 
-当前仓库是空的 Rust 起点，不会在旧代码上做语言级逐文件翻译。兄弟目录
-`../Auction-BF` 中的旧仓库作为行为基准，迁移顺序如下：
+当前仓库已进入功能迁移后期，不会在旧代码上做语言级逐文件翻译。兄弟目录
+`../Auction-BF` 中的旧仓库继续作为行为基准；阶段 1 至 7 的代码 owner 和主要表面已经落地，
+阶段 8 的真实数据、外部服务、浏览器产物与部署切换证据尚未完成。迁移顺序如下：
 
 1. **契约冻结：** 整理 Public/Admin route、JSON 字段、状态码、WebSocket/SSE 事件、
    TOML 配置字段和 migration 序号。新 Rust 配置明确采用“普通主配置 + 敏感 TOML”，不为
@@ -14,8 +15,8 @@
 4. **Application ports：** 接入 Users、Rules、Delivery、Audit、Realtime 等 owner，
    明确跨模块只允许窄端口。缓存只接入可重建读取投影，默认关闭；Redis 不得成为竞价、
    幂等、会话或审计的权威状态。
-5. **HTTP surface：** 先实现 Public，再实现 Admin；保持旧 route 和错误契约，使用
-   contract tests 防止迁移期间漂移。
+5. **HTTP surface：** 先实现 Public，再实现 Admin；保持旧 route 和错误契约，以稳定 DTO、
+   契约清单和静态复核防止迁移期间漂移；契约测试仅在用户明确要求后恢复。
 6. **Worker/integrations：** 接入 E-Hentai 发帖/回帖扫描、MoogleMail、通知、重试和
    durable cursor；每个外部写入都要有幂等键和恢复策略。
 7. **Dioxus UI：** 先做只读拍卖列表和详情，再接入登录、出价、代理和管理命令；Public 与
@@ -23,5 +24,6 @@
    使用 WebSocket。浏览器行为验证在用户明确要求后才纳入范围。
 8. **切换：** 双跑只读流量，比较事件/余额/竞价结果；确认数据和运维 runbook 后再切写。
 
-在第 1 步完成前，不应把旧数据库表直接当作 Rust domain model；旧 schema 的兼容读取
-与新 schema 的写入需要单独的 anti-corruption adapter。
+旧数据库表不能直接当作 Rust domain model。canonical Auction-BF PostgreSQL v28 由专用
+`auction-storage/database/legacy_v28` anti-corruption bridge 接管：先严格预检和备份，再补齐
+Rust 语义、建立 SQLx 等价基线并继续前向迁移；其他旧版本或非 canonical 数据库继续失败关闭。

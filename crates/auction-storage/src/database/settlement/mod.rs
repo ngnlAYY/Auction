@@ -6,9 +6,10 @@ use auction_application::{
     TransactionIsolation, TransactionPolicy,
 };
 use auction_domain::{
-    AuctionId, CommandId, SettlementAmount, SettlementFact, SettlementMode,
-    SettlementObligationKind, SettlementObligationState, SettlementPlan, SettlementPolicy,
-    SettlementWorld, deterministic_uuid,
+    AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
+    SettlementFact, SettlementMode, SettlementObligation, SettlementObligationKind,
+    SettlementObligationState, SettlementPlan, SettlementPolicy, SettlementWorld,
+    deterministic_uuid,
 };
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -110,8 +111,19 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
         auction_id: AuctionId,
         command_id: CommandId,
         plan: SettlementPlan,
+        proxy_closure_plans: Vec<CompetitionPlan>,
+        recovery_policy: RecoveryPolicy,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send {
-        async move { self.apply_settlement_inner(auction_id, command_id, plan).await }
+        async move {
+            self.apply_settlement_inner(
+                auction_id,
+                command_id,
+                plan,
+                proxy_closure_plans,
+                recovery_policy,
+            )
+            .await
+        }
     }
 }
 
@@ -138,13 +150,10 @@ impl PostgresCompetitionTransaction {
             sqlx::query(
                 r#"SELECT
                        a.world_id,
+                       a.status,
                        a.state_version AS auction_state_version,
                        a.scheduled_open_at,
-                       COALESCE(
-                           a.effective_end_at,
-                           a.scheduled_end_at,
-                           a.scheduled_open_at + interval '24 hours'
-                       ) AS scheduled_end_at,
+                       a.scheduled_end_at,
                        a.policy_snapshot,
                        p.balance AS opening_pool,
                        p.state_version AS opening_pool_version
@@ -162,11 +171,12 @@ impl PostgresCompetitionTransaction {
             return Err(SettlementTransactionError::NotFound);
         };
 
+        let auction_status: String = auction_row.try_get("status").map_err(map_sql_error)?;
         let world =
             settlement_world(auction_row.try_get::<String, _>("world_id").map_err(map_sql_error)?)?;
         let policy_snapshot: Value =
             auction_row.try_get("policy_snapshot").map_err(map_sql_error)?;
-        let policy = parse_settlement_policy(&policy_snapshot)?;
+        let (policy, recovery_policy) = parse_settlement_policy(&policy_snapshot)?;
         let scheduled_open_at: DateTime<Utc> =
             auction_row.try_get("scheduled_open_at").map_err(map_sql_error)?;
         let scheduled_end_at: DateTime<Utc> =
@@ -195,30 +205,32 @@ impl PostgresCompetitionTransaction {
                        l.effective_end_at,
                        l.equipment_id,
                        l.submission_id,
-                       COALESCE(
-                           l.effective_end_at,
-                           a.effective_end_at,
-                           a.scheduled_end_at,
-                           a.scheduled_open_at + interval '24 hours'
-                       ) AS fact_end_at,
+                       l.effective_end_at AS fact_end_at,
                        submission.seller
                    FROM public.lots AS l
                    INNER JOIN public.auctions AS a ON a.id = l.auction_id
                    LEFT JOIN public.auction_submissions AS submission
                        ON submission.id = l.submission_id
                    WHERE l.auction_id = $1
-                     AND l.status IN ('sold', 'unsold', 'withdrawn')
+                     AND (($2 = 'settling' AND l.status = 'live')
+                       OR ($2 = 'settled' AND l.status IN ('sold', 'unsold')))
                    ORDER BY l.lot_number, l.id
                    FOR UPDATE OF l"#,
             )
             .bind(auction_id.as_uuid())
+            .bind(&auction_status)
             .fetch_all(&mut **transaction)
             .await
             .map_err(map_sql_error)?
         };
 
         let mut facts = Vec::with_capacity(rows.len());
+        let mut lot_ids = Vec::with_capacity(rows.len());
         for row in rows {
+            let lot_id = row
+                .try_get::<Uuid, _>("id")
+                .map(auction_domain::LotId::from_uuid)
+                .map_err(map_sql_error)?;
             let leader_id = row
                 .try_get::<Option<Uuid>, _>("leader_user_id")
                 .map_err(map_sql_error)?
@@ -234,10 +246,7 @@ impl PostgresCompetitionTransaction {
                 .ok_or_else(|| invalid("结算 lot 缺少卖方身份"))?;
             let fact_end_at: DateTime<Utc> = row.try_get("fact_end_at").map_err(map_sql_error)?;
             let fact = SettlementFact {
-                lot_id: row
-                    .try_get::<Uuid, _>("id")
-                    .map(auction_domain::LotId::from_uuid)
-                    .map_err(map_sql_error)?,
+                lot_id,
                 world,
                 end_price: leader_id.and(end_price),
                 leader_id,
@@ -253,18 +262,30 @@ impl PostgresCompetitionTransaction {
                     .map_err(map_sql_error)?
                     .map(auction_domain::SubmissionId::from_uuid),
             };
+            lot_ids.push(lot_id);
             facts.push(fact);
+        }
+
+        let mut lot_competitions = Vec::new();
+        if auction_status == "settling" {
+            lot_competitions.reserve(lot_ids.len());
+            for lot_id in lot_ids {
+                lot_competitions
+                    .push(self.load_for_update_inner(lot_id).await.map_err(map_competition_error)?);
+            }
         }
 
         Ok(SettlementSnapshot {
             auction_id,
             auction_state_version,
             policy,
+            recovery_policy,
             scheduled_open_at,
             scheduled_end_at,
             opening_pool,
             opening_pool_version,
             facts,
+            lot_competitions,
         })
     }
 
@@ -273,13 +294,17 @@ impl PostgresCompetitionTransaction {
         auction_id: AuctionId,
         command_id: CommandId,
         plan: SettlementPlan,
+        proxy_closure_plans: Vec<CompetitionPlan>,
+        recovery_policy: RecoveryPolicy,
     ) -> Result<(), SettlementTransactionError> {
+        recovery_policy.validate().map_err(|_| invalid("恢复策略快照校验失败"))?;
         for line in &plan.lines {
             line.validate().map_err(|_| invalid("结算明细校验失败"))?;
         }
         for obligation in &plan.obligations {
             obligation.validate().map_err(|_| invalid("结算义务校验失败"))?;
         }
+        validate_proxy_closure_plans(command_id, &plan, &proxy_closure_plans)?;
 
         let (world_id, auction_state_version) = {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
@@ -322,6 +347,12 @@ impl PostgresCompetitionTransaction {
         };
         let closing_pool_version =
             current_pool_version.checked_add(1).ok_or_else(|| invalid("结算池状态版本溢出"))?;
+
+        // 代理终态、lot 成交/流拍状态与金额事实必须在同一 Serializable 事务内提交。
+        for closure_plan in proxy_closure_plans {
+            self.apply_plan_inner(closure_plan).await.map_err(map_competition_error)?;
+        }
+        close_settlement_lots(self, auction_id, &plan).await?;
 
         {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
@@ -369,6 +400,7 @@ impl PostgresCompetitionTransaction {
         insert_lot_settlements(self, &plan).await?;
         insert_compensation_ledger(self, command_id, &plan).await?;
         insert_obligations(self, &plan).await?;
+        insert_recoveries(self, auction_id, &plan, recovery_policy).await?;
         insert_settlement_audit(self, auction_id, command_id, auction_state_version).await?;
 
         {
@@ -394,6 +426,89 @@ impl PostgresCompetitionTransaction {
 
         insert_settlement_realtime(self, auction_id, command_id, auction_state_version + 1).await
     }
+}
+
+fn validate_proxy_closure_plans(
+    command_id: CommandId,
+    settlement_plan: &SettlementPlan,
+    closure_plans: &[CompetitionPlan],
+) -> Result<(), SettlementTransactionError> {
+    for (index, plan) in closure_plans.iter().enumerate() {
+        plan.validate().map_err(|_| invalid("结算代理关闭计划校验失败"))?;
+        let transition = match (plan.proxy_transitions.as_slice(), plan.proxy_states.as_slice()) {
+            ([transition], [state]) => (transition, state),
+            _ => return Err(invalid("结算代理关闭计划必须只包含一个终态转换")),
+        };
+        if !plan.public_bids.is_empty()
+            || plan.active_proxy_id.is_some()
+            || transition.0.command_id != command_id
+            || transition.0.new_status != ProxyStatus::Closed
+            || transition.1.status != ProxyStatus::Closed
+            || transition.1.lot_id != plan.final_lot.lot_id
+            || !settlement_plan.lines.iter().any(|line| line.lot_id == plan.final_lot.lot_id)
+            || closure_plans[..index]
+                .iter()
+                .any(|previous| previous.final_lot.lot_id == plan.final_lot.lot_id)
+        {
+            return Err(invalid("结算代理关闭计划与结算命令或 lot 不一致"));
+        }
+    }
+    Ok(())
+}
+
+/// 把仍为 live 的 lot 按结算明细关闭；价格、领先者和状态必须与锁内计划保持一致。
+async fn close_settlement_lots(
+    transaction: &mut PostgresCompetitionTransaction,
+    auction_id: AuctionId,
+    plan: &SettlementPlan,
+) -> Result<(), SettlementTransactionError> {
+    for line in &plan.lines {
+        let next_status = if line.end_price.value() == 0 { "unsold" } else { "sold" };
+        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+        let updated = sqlx::query(
+            r#"UPDATE public.lots
+               SET status = $3, slow_authorization_id = NULL, slow_due_at = NULL,
+                   state_version = state_version + 1, updated_at = CURRENT_TIMESTAMP
+               WHERE id = $1 AND auction_id = $2 AND status = 'live'
+                 AND (($3 = 'sold' AND leader_user_id IS NOT NULL AND current_price = $4)
+                   OR ($3 = 'unsold' AND leader_user_id IS NULL))"#,
+        )
+        .bind(line.lot_id.as_uuid())
+        .bind(auction_id.as_uuid())
+        .bind(next_status)
+        .bind(line.end_price.value())
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        if updated.rows_affected() != 1 {
+            return Err(invalid("结算 lot 状态、领先者或价格与领域计划不一致"));
+        }
+    }
+
+    let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+    let counts = sqlx::query(
+        r#"SELECT
+               COUNT(DISTINCT l.id)::bigint AS lot_count,
+               COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'live')::bigint AS live_count,
+               COUNT(DISTINCT p.authorization_id)
+                   FILTER (WHERE p.status IN ('active', 'final_fast'))::bigint AS active_proxy_count
+           FROM public.lots AS l
+           LEFT JOIN public.bid_proxy_authorizations AS p ON p.lot_id = l.id
+           WHERE l.auction_id = $1"#,
+    )
+    .bind(auction_id.as_uuid())
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    let lot_count: i64 = counts.try_get("lot_count").map_err(map_sql_error)?;
+    let live_count: i64 = counts.try_get("live_count").map_err(map_sql_error)?;
+    let active_proxy_count: i64 = counts.try_get("active_proxy_count").map_err(map_sql_error)?;
+    let planned_lot_count =
+        i64::try_from(plan.lines.len()).map_err(|_| invalid("结算 lot 数量超出数据库范围"))?;
+    if lot_count != planned_lot_count || live_count != 0 || active_proxy_count != 0 {
+        return Err(invalid("结算后仍有未关闭 lot 或活动代理授权"));
+    }
+    Ok(())
 }
 
 async fn insert_lot_settlements(
@@ -589,6 +704,99 @@ async fn insert_obligations(
     Ok(())
 }
 
+/// 为每个有获胜者的 lot 建立 recovery case。
+///
+/// recovery 与结算义务必须处于同一个 Serializable 事务；如果只写了 payment obligation
+/// 而没有写 recovery case，付款超时后 Worker 将无法形成可审计的提醒、退回和人工确认链。
+async fn insert_recoveries(
+    transaction: &mut PostgresCompetitionTransaction,
+    auction_id: AuctionId,
+    plan: &SettlementPlan,
+    recovery_policy: RecoveryPolicy,
+) -> Result<(), SettlementTransactionError> {
+    let timeout_seconds = recovery_policy.payment_timeout.num_seconds();
+    let reminder_limit = i32::try_from(recovery_policy.reminder_limit)
+        .map_err(|_| invalid("恢复提醒上限超出数据库范围"))?;
+    let auction_namespace = CommandId::from_uuid(auction_id.as_uuid());
+
+    for payment in plan.obligations.iter().filter(|obligation| {
+        matches!(
+            obligation.kind,
+            SettlementObligationKind::WinnerEquipmentCod
+                | SettlementObligationKind::WinnerPaymentCarrierCod
+        )
+    }) {
+        let winner_user_id =
+            payment.recipient_user_id.ok_or_else(|| invalid("获胜付款义务缺少买方身份"))?;
+        let seller_payout = find_obligation(
+            &plan.obligations,
+            payment.lot_id,
+            SettlementObligationKind::SellerPayout,
+        )
+        .ok_or_else(|| invalid("结算恢复缺少卖方付款义务"))?;
+        let buyer_refund = find_obligation(
+            &plan.obligations,
+            payment.lot_id,
+            SettlementObligationKind::BuyerRefund,
+        )
+        .ok_or_else(|| invalid("结算恢复缺少买方退款义务"))?;
+        let equipment_obligation_id = match payment.world {
+            SettlementWorld::Main => None,
+            SettlementWorld::Isekai => Some(
+                find_obligation(
+                    &plan.obligations,
+                    payment.lot_id,
+                    SettlementObligationKind::WinnerEquipmentHandoff,
+                )
+                .ok_or_else(|| invalid("异世界结算恢复缺少装备交接义务"))?
+                .id,
+            ),
+        };
+        let recovery_id = auction_domain::SettlementId::from_uuid(deterministic_uuid(
+            auction_namespace,
+            &format!("settlement-recovery:{}", payment.lot_id),
+            1,
+        ));
+
+        let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+        sqlx::query(
+            r#"INSERT INTO public.settlement_recoveries
+                   (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
+                    payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
+                    buyer_refund_obligation_id, policy_version, payment_deadline_at,
+                    reminder_limit, stage, state_version, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                       CURRENT_TIMESTAMP + ($12::double precision * interval '1 second'),
+                       $13, 'awaiting_payment', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
+        )
+        .bind(recovery_id.as_uuid())
+        .bind(auction_id.as_uuid())
+        .bind(payment.lot_id.as_uuid())
+        .bind(settlement_world_name(payment.world))
+        .bind(payment.equipment_id.as_uuid())
+        .bind(winner_user_id.as_uuid())
+        .bind(payment.id.as_uuid())
+        .bind(equipment_obligation_id.map(|id| id.as_uuid()))
+        .bind(seller_payout.id.as_uuid())
+        .bind(buyer_refund.id.as_uuid())
+        .bind(i32_version(recovery_policy.version, "恢复策略版本")?)
+        .bind(timeout_seconds)
+        .bind(reminder_limit)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+    }
+    Ok(())
+}
+
+fn find_obligation(
+    obligations: &[SettlementObligation],
+    lot_id: auction_domain::LotId,
+    kind: SettlementObligationKind,
+) -> Option<&SettlementObligation> {
+    obligations.iter().find(|obligation| obligation.lot_id == lot_id && obligation.kind == kind)
+}
+
 async fn insert_settlement_audit(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: AuctionId,
@@ -678,7 +886,7 @@ async fn insert_settlement_realtime(
 
 fn parse_settlement_policy(
     snapshot: &Value,
-) -> Result<SettlementPolicy, SettlementTransactionError> {
+) -> Result<(SettlementPolicy, RecoveryPolicy), SettlementTransactionError> {
     let settlement = snapshot
         .get("settlement")
         .and_then(Value::as_object)
@@ -716,7 +924,26 @@ fn parse_settlement_policy(
         anchors,
     };
     policy.validate().map_err(|_| invalid("结算策略快照校验失败"))?;
-    Ok(policy)
+
+    let recovery = snapshot
+        .get("recovery")
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("拍卖策略快照缺少 recovery"))?;
+    let recovery_policy = RecoveryPolicy {
+        version: json_u32(recovery.get("version"), "恢复策略版本")?,
+        mode: match recovery.get("mode").and_then(Value::as_str) {
+            Some("remind_v1") => auction_domain::RecoveryMode::RemindV1,
+            _ => return Err(invalid("恢复策略模式未知")),
+        },
+        payment_timeout: chrono::Duration::seconds(json_i64(
+            recovery.get("payment_timeout_seconds"),
+            "恢复付款超时",
+        )?),
+        reminder_limit: json_u32(recovery.get("reminder_limit"), "恢复提醒上限")?,
+    };
+    recovery_policy.validate().map_err(|_| invalid("恢复策略快照校验失败"))?;
+
+    Ok((policy, recovery_policy))
 }
 
 fn settlement_world(value: String) -> Result<SettlementWorld, SettlementTransactionError> {

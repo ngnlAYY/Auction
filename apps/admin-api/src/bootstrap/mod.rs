@@ -1,3 +1,5 @@
+mod listener;
+
 use std::time::Duration;
 
 use anyhow::Context;
@@ -5,13 +7,16 @@ use anyhow::Context;
 use auction_application::AdminForumPreviewPort;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{
-    AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminIntakePort, AdminLotReader,
+    AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminCredentialHealthReader,
+    AdminCredentialPort, AdminCredentialService, AdminIntakePort, AdminLotReader,
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
-    AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort,
-    AdminSessionService, AdminSessionStore, AuctionLifecycleCommandPort, DeliveryAdminPort,
-    RealtimeAdminPort, RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader,
-    SettlementReportReader,
+    AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig,
+    AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService,
+    ApplicationError, AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
+    OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort, RecoveryCommandService,
+    RecoveryReportReader, SettlementReportReader,
 };
+use auction_application::{AdminCredentialWorld, WorkerControlPort};
 use auction_cache::CacheStore;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_config::TomlRuntimeFileStore;
@@ -20,12 +25,15 @@ use auction_http::{AdminApiState, AdminHttpSecurity};
 use auction_integrations::ForumPreviewAdapter;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_integrations::{
-    DataKey, EquipmentKeySealer, EquipmentSourceAdapter, build_equipment_http_client,
+    CredentialSealer, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client,
 };
+use auction_jobs::WorkerControlClient;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{HealthReader, HealthService, HeartbeatStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{HeartbeatPublisher, ProcessRole, ServiceName};
+use auction_observability::{ProcessMetrics, TracingConfig};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_storage::{
     DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
@@ -37,7 +45,6 @@ use chrono::Duration as ChronoDuration;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
-use tokio::net::TcpListener;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use uuid::Uuid;
 
@@ -54,12 +61,33 @@ impl auction_application::Clock for SystemClock {
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Admin).context("load admin-api configuration")?;
-    auction_observability::init("auction_admin_api", config.log_filter.as_deref())
-        .context("initialize tracing")?;
+    let tracing_config = tracing_config(&config.tracing);
+    let telemetry = auction_observability::init_with_config(
+        "auction_admin_api",
+        "admin",
+        env!("CARGO_PKG_VERSION"),
+        config.log_filter.as_deref(),
+        Some(&tracing_config),
+        config.tracing_headers(),
+    )
+    .context("initialize tracing")?;
     let cache = configure_cache(&config).context("configure admin-api cache")?;
-    let address = config.listen_addr.context("admin-api must have a listen address")?;
-    let listener = TcpListener::bind(address).await?;
-    let (state, heartbeat) = configure_state(&config).await.context("configure admin-api state")?;
+    let metrics = Arc::new(
+        ProcessMetrics::new_with_tracing_health(
+            config.metrics.enabled,
+            "auction_admin_api",
+            "admin",
+            env!("CARGO_PKG_VERSION"),
+            telemetry.health_reader(),
+        )
+        .context("initialize Prometheus metrics")?,
+    );
+    let bound_listener = listener::bind(&config).await.context("bind admin-api listener")?;
+    let (state, heartbeat) =
+        configure_state(&config, telemetry.health_reader(), Arc::clone(&metrics))
+            .await
+            .context("configure admin-api state")?;
+    let state = state.with_metrics(metrics);
     #[cfg(any(feature = "postgres", feature = "sqlite"))]
     let heartbeat_task = heartbeat.as_ref().map(Arc::clone).map(spawn_heartbeat);
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
@@ -67,10 +95,12 @@ pub async fn run() -> anyhow::Result<()> {
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let app = auction_http::admin_router(env!("CARGO_PKG_VERSION")).with_state(state);
 
-    tracing::info!(%address, cache_backend = cache.backend(), "admin api listening");
-    let result =
-        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-            .await;
+    tracing::info!(
+        listener = %bound_listener.description(),
+        cache_backend = cache.backend(),
+        "admin api listening"
+    );
+    let result = listener::serve(bound_listener, app).await;
     if let Some(publisher) = heartbeat.as_ref()
         && let Err(error) = publisher.publish_stopping().await
     {
@@ -79,15 +109,36 @@ pub async fn run() -> anyhow::Result<()> {
     if let Some(task) = heartbeat_task {
         task.abort();
     }
+    match tokio::task::spawn_blocking(move || telemetry.shutdown()).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!(error = %error, "admin tracing shutdown failed"),
+        Err(error) => tracing::warn!(error = %error, "admin tracing shutdown task failed"),
+    }
     result?;
     Ok(())
+}
+
+fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
+    TracingConfig {
+        enabled: settings.enabled,
+        endpoint: settings.endpoint.clone(),
+        batch_timeout: Duration::from_secs(settings.batch_timeout_seconds),
+        export_timeout: Duration::from_secs(settings.export_timeout_seconds),
+        queue_capacity: settings.queue_capacity as usize,
+        max_export_batch_size: settings.max_export_batch_size as usize,
+        sample_ratio: f64::from(settings.sample_ratio_ppm) / 1_000_000.0,
+        shutdown_timeout: Duration::from_secs(settings.shutdown_timeout_seconds),
+    }
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 async fn configure_state(
     config: &AppConfig,
+    tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
+    metrics: Arc<ProcessMetrics>,
 ) -> anyhow::Result<(AdminApiState, Option<Arc<HeartbeatPublisher>>)> {
     let security = configure_security(config)?;
+    let worker_control = configure_worker_control(config);
     let Some(database_url) = config.database_url() else {
         let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
         return Ok((
@@ -112,13 +163,24 @@ async fn configure_state(
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                worker_control,
                 security,
-            ),
+            )
+            .with_dashboard_worlds(configured_dashboard_worlds(config))
+            .with_dashboard_mailbox_keys(configured_dashboard_mailbox_keys(config)),
             None,
         ));
     };
     let store =
         Arc::new(DatabaseStore::connect(database_url).await.context("connect admin database")?);
+    metrics
+        .register_pool_metrics(store.pool_metrics_source())
+        .context("register admin database pool metrics")?;
     let actor =
         config.admin_actor().context("admin_actor is missing from sensitive configuration")?;
     let secret =
@@ -126,25 +188,38 @@ async fn configure_state(
     let lifecycle_store = Arc::clone(&store);
     let auction_create_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
-    let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> =
-        if store.backend() == DatabaseBackend::Postgres {
-            config
-                .runtime_config_path
-                .clone()
-                .map(|path| {
-                    let files = Arc::new(
-                        TomlRuntimeFileStore::new(path)
-                            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-                    );
-                    let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
-                    Ok::<Arc<dyn AdminRuntimeConfigPort>, anyhow::Error>(Arc::new(
-                        AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)),
-                    ))
-                })
-                .transpose()?
+    let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if store.backend()
+        == DatabaseBackend::Postgres
+    {
+        if let Some(path) = config.runtime_config_path.clone() {
+            let files = Arc::new(
+                TomlRuntimeFileStore::new(path)
+                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+            );
+            let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
+            let service =
+                Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
+            if let Err(error) = service.recover().await {
+                match &error {
+                    ApplicationError::AdminRuntime(
+                        AdminRuntimeConfigError::OutcomeUnknown
+                        | AdminRuntimeConfigError::ReconciliationRequired,
+                    ) => {
+                        tracing::error!(
+                            error = %error,
+                            "admin runtime 配置恢复结果需要人工核对，继续启动"
+                        );
+                    }
+                    _ => return Err(anyhow::Error::msg(error.to_string())),
+                }
+            }
+            Some(service)
         } else {
             None
-        };
+        }
+    } else {
+        None
+    };
     let admin_intake = if store.backend() == DatabaseBackend::Postgres {
         match config.equipment_data_key_id().zip(config.equipment_data_key()) {
             Some((key_id, key_material)) => {
@@ -169,18 +244,50 @@ async fn configure_state(
     let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
     let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
     let admin_renames: Arc<dyn AdminRenameReader> = store.clone();
+    let admin_users: Option<Arc<dyn AdminUserPort>> =
+        match config.user_login_data_key_id().zip(config.user_login_data_key()) {
+            Some((key_id, key_material)) => {
+                let data_key = Arc::new(
+                    DataKey::from_base64(key_id, key_material)
+                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                );
+                let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&data_key)));
+                let opener = Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), data_key));
+                Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
+            }
+            None => None,
+        };
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
+        if store.backend() == DatabaseBackend::Postgres {
+            match config.credential_data_key_id().zip(config.credential_data_key()) {
+                Some((key_id, key_material)) => {
+                    let data_key = Arc::new(
+                        DataKey::from_base64(key_id, key_material)
+                            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                    );
+                    let sealer = Arc::new(CredentialSealer::new(data_key));
+                    Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer)))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
-    let heartbeat = Arc::new(HeartbeatPublisher::new(
-        heartbeat_store,
-        ServiceName::Admin,
-        ProcessRole::Admin,
-        Uuid::new_v4().to_string(),
-        env!("CARGO_PKG_VERSION").to_owned(),
-        Utc::now(),
-        ChronoDuration::seconds(30),
-    ));
+    let heartbeat = Arc::new(
+        HeartbeatPublisher::new(
+            heartbeat_store,
+            ServiceName::Admin,
+            ProcessRole::Admin,
+            Uuid::new_v4().to_string(),
+            env!("CARGO_PKG_VERSION").to_owned(),
+            Utc::now(),
+            ChronoDuration::seconds(30),
+        )
+        .with_tracing_health(tracing_health),
+    );
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "admin heartbeat starting publish failed");
     }
@@ -195,6 +302,9 @@ async fn configure_state(
         Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
     let delivery_admin: Arc<dyn DeliveryAdminPort> = store.clone();
+    let operations_alert: Arc<dyn OperationsAlertStore> = store.clone();
+    let operations_alert_source: Arc<dyn OperationsAlertSourceReader> = store.clone();
+    let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
     let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
     let recovery_command_store = Arc::clone(&store);
     let session_config = AdminSessionConfig {
@@ -210,7 +320,11 @@ async fn configure_state(
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
         Arc::new(DatabaseAuctionLifecycleCommands::new(lifecycle_store, Arc::new(SystemClock)));
     let auction_create: Arc<dyn AdminAuctionCreatePort> =
-        Arc::new(DatabaseAdminAuctionCommands::new(auction_create_store, Arc::new(SystemClock)));
+        Arc::new(DatabaseAdminAuctionCommands::new(
+            auction_create_store,
+            Arc::new(SystemClock),
+            config.auction.policy(),
+        ));
     let admin_rules: Arc<dyn AdminRulesPort> =
         Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));
     let recovery_commands: Arc<dyn RecoveryCommandPort> =
@@ -226,7 +340,9 @@ async fn configure_state(
         Some(admin_mail),
         Some(admin_rules),
         admin_runtime,
+        admin_credentials,
         Some(admin_renames),
+        admin_users,
         Some(recovery_commands),
         Some(settlement_report),
         Some(recovery_report),
@@ -235,9 +351,16 @@ async fn configure_state(
         Some(admin_lot_update),
         Some(admin_proxy_events),
         Some(delivery_admin),
+        Some(operations_alert),
+        Some(operations_alert_source),
+        Some(credential_health),
         Some(realtime_admin),
+        worker_control,
         security,
-    );
+    )
+    .with_dashboard_worlds(configured_dashboard_worlds(config))
+    .with_dashboard_mailbox_keys(configured_dashboard_mailbox_keys(config))
+    .with_readiness(store);
     if let Err(error) = heartbeat.publish_ready().await {
         tracing::warn!(error = %error, "admin heartbeat ready publish failed");
     }
@@ -247,8 +370,11 @@ async fn configure_state(
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
 async fn configure_state(
     config: &AppConfig,
+    _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
+    _metrics: Arc<ProcessMetrics>,
 ) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
     let security = configure_security(config)?;
+    let worker_control = configure_worker_control(config);
     if config.database_url().is_some() {
         anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
     }
@@ -274,10 +400,65 @@ async fn configure_state(
             None,
             None,
             None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            worker_control,
             security,
-        ),
+        )
+        .with_dashboard_worlds(configured_dashboard_worlds(config))
+        .with_dashboard_mailbox_keys(configured_dashboard_mailbox_keys(config)),
         None,
     ))
+}
+
+fn configure_worker_control(config: &AppConfig) -> Option<Arc<dyn WorkerControlPort>> {
+    match WorkerControlClient::new(config.worker_control_socket_path(), Duration::from_secs(5)) {
+        Ok(client) => Some(Arc::new(client)),
+        Err(error) => {
+            tracing::warn!(error = %error, "Worker control client configuration is unavailable");
+            None
+        }
+    }
+}
+
+/// 将 Admin runtime 声明的 Worker world 配置投影到 dashboard；未声明时不强制假设 world。
+fn configured_dashboard_worlds(config: &AppConfig) -> Vec<AdminCredentialWorld> {
+    configured_dashboard_mailboxes(config)
+        .into_iter()
+        .filter_map(|(world_id, _)| AdminCredentialWorld::parse(&world_id))
+        .collect()
+}
+
+/// 将 Admin runtime 声明的邮箱标识投影到 Admin dashboard，保留自定义 mailbox_key 语义。
+fn configured_dashboard_mailbox_keys(config: &AppConfig) -> Vec<String> {
+    configured_dashboard_mailboxes(config).into_iter().map(|(_, mailbox_key)| mailbox_key).collect()
+}
+
+/// 返回 Admin runtime 明确声明的 dashboard 邮箱范围；兼容程序化装配时的 Worker 配置投影。
+fn configured_dashboard_mailboxes(config: &AppConfig) -> Vec<(String, String)> {
+    if let Some(runtime) = config.admin_runtime.as_ref()
+        && !runtime.dashboard_mailboxes.is_empty()
+    {
+        return runtime
+            .dashboard_mailboxes
+            .iter()
+            .map(|mailbox| (mailbox.world_id.clone(), mailbox.mailbox_key.clone()))
+            .collect();
+    }
+    if !config.worker.mooglemail.enabled {
+        return Vec::new();
+    }
+
+    config
+        .worker
+        .mooglemail
+        .configured_worlds()
+        .into_iter()
+        .map(|world| (world.world_id, world.mailbox_key))
+        .collect()
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

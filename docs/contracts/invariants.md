@@ -103,17 +103,21 @@ Admin 论坛预览请求必须在 HTML 与纯文本中恰好选择一个非空�
 边界。具体状态集合和迁移表以领域模块及迁移阶段冻结的旧契约为准，新增状态必须
 同步更新事件、路由、数据库和运维文档。
 
+PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变、前序拍卖序号早于后继，
+以及每个世界的唯一 draft 与 `auction_intake_targets` 恰好指向同一聚合。后两者是跨行不变量，
+使用延迟约束触发器允许生命周期事务先推进状态、再移动或删除 target，但提交时必须一致。
+论坛同步入队不属于这些领域触发器；它由 Worker 从已提交生命周期版本发现并持久化领取。
+
 ### I-07 出价计算必须保留旧业务的离散规则
 
 基线规则包含以下不可被浮点或近似算法替代的语义：
 
 - 金额使用 1000 为信用网格；
-- 默认起始金额为 50,000；
-- 低于 200,000 时的增幅为 30,000；
-- 常规增幅为 50,000；
-- 达到重大金额阈值后使用金额的 3% 规则；
+- 默认起始金额为 1,000；
+- 默认使用 50,000 PPM 的经济增量，按信用网格向上取整且最低增加 1,000；
+- PPM 明确设为 0 时使用冻结的最低增量（默认 30,000）；
 - 代理竞价的反超增量为 1000；
-- 软截止窗口和延长时长均为 15 分钟；
+- 软截止窗口和延长时长均为 1 分钟；
 - 取消截止边界为开始前 24 小时。
 
 实际实现必须继续以 Auction-BF 的领域常量、金额类型和边界条件为基线，所有金额
@@ -133,6 +137,89 @@ Admin 论坛预览请求必须在 HTML 与纯文本中恰好选择一个非空�
 Worker 的命令账本、outbox、消费游标、领取状态、重试次数和失败原因必须能在重启
 后恢复。内存定时器、内存游标或单进程广播不能作为唯一事实。重试必须幂等，超过
 策略上限的任务进入明确的失败/人工处理状态。
+
+### I-09a Operations alert 的通知冷却不能早于入队证明
+
+Operations alert 批次创建时即持有第一次 claim，`claim_fencing` 与 `attempt_count` 从 1 开始；
+lease 过期或 fencing 不匹配的 Worker 不得确认入队或释放 claim。普通 delivery Create 失败只把
+批次释放为错误码为空的 `pending` 并设置持久化退避，identity 不一致立即进入
+`failed/dependency_mismatch`，第三次失败或第三次 lease 过期进入 `failed/retry_exhausted`。
+
+signal 的 `last_notified_at`、`next_notify_at` 和版本只能在批次、delivery 同一事务确认入队后推进；
+领取或 Create 失败不能提前消耗 cooldown。delivery 的外部失败与人工复核只投影为稳定的
+`delivery_failed` / `delivery_manual_reconcile`，不得把任意远端错误原文写入告警健康投影。
+
+scan、dispatch 和 reconcile 必须独立调度并各自受有界 deadline 约束；一个 owner 的读取、领取或
+写回失败不得阻塞另外两类 owner。默认一分钟 cadence、阈值、批次窗口、冷却、重试与正文边界属于
+旧版兼容契约，修改时必须显式评审告警灵敏度和通知频率。
+
+### I-09b MoogleMail 破坏性动作必须有前后双重证明
+
+return/take 只能在已重新读取的详情页上执行，动作前必须证明 sender 与当前
+delivery 收件人一致。take 还必须精确比对装备 ID 集合、Credits、COD、附件条目数和
+claimable 动作；只检查按钮存在不构成资产证明。前置证明失败时不得发起 POST，也不得将
+未知远端状态当作可自动重试的确定失败。
+
+POST 后，return 必须从结构合法的收件箱中证明目标 `mid` 在所有 `href`/`onclick`/
+`action` 引用和结果行中均已消失；take 必须证明 To/From/Subject 不变、资产与 COD 归零、
+claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和
+`Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字或动作按钮消失都不足以
+证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
+
+### I-09c MoogleMail 明确发送失败必须保留资产后果
+
+send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 compose 页开始；无法证明时
+必须进入 `preflight_unproven` 人工对账，不得覆盖或自动清理可能属于上一次结果未知的资产。
+send 失败只能根据远端 body 中的可见协议文字分类，script、style、noscript 和邮件
+textarea 中的同名短语必须排除。明确的收件人不存在已有拒绝证明，但仍必须保留唯一、
+合法的退信 `mid`、`take_required` 和稳定 reason code，并在退信资产取回前进入人工对账，
+不得直接终结为普通失败。
+
+明确的邮资拒绝只在 compose 中从未暂存 Credits、装备或 COD 时可以作为确定失败；任一
+资产暂存已经通过证明后，拒绝结果必须进入 `manual_reconcile`，禁止自动重发。失败
+transport 元数据只能是有界的安全 object；storage owner 必须覆盖而不是信任其
+`safe_detail` / `outcome_unknown`，且不得保存原始响应、Cookie 或请求 payload。
+
+Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据。当前无凭据时
+只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload
+仍必须越过 availability gate 进入确定失败路径，避免永久滞留。进入 `sending` 后发生的凭据竞态、
+网络、响应边界或协议依赖失败不得收口为普通失败。
+
+可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token
+与 fencing version。Worker 只能在有空闲执行槽时领取下一条，不能让批次内排队时间消耗新 claim
+的租约。完整外部调用与终态写回必须分别有界；请求超时属于结果未知。续租失败后不得以 stale
+claimant 保存成功或确定失败；只有原 fence 仍有效时可以写入结果未知。过期 `sending` 必须在额外
+sending grace 后进入 `manual_reconcile`，禁止重新领取并盲目重发。
+
+Delivery 每轮完成后必须使用有界 `poll + [0, jitter]` 再唤醒，避免多实例固定整点抢占。单轮
+claim、持久化或外部处理错误必须由持久化状态保留重试边界并在下一轮继续，不能因此终止整个
+Worker；循环任务异常退出仍必须失败关闭。
+
+### I-09d Delivery 状态事实与审计不能分叉
+
+Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失败、结果未知、过期发送隔离和
+Admin 人工动作必须在同一 PostgreSQL 事务追加安全审计；审计失败时状态变化必须回滚。两阶段
+激活必须同时持久化独立的 activation command ID、请求摘要和激活时间，所有后续状态上的幂等
+重放都必须匹配该身份；幂等重放本身不得重复追加审计。续租不改变业务状态，不逐次生成审计噪声。
+
+### I-09e Fulfillment 与 Recovery 不得共享易失调度边界
+
+PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环、批次、并发、lease、单项总时限、
+重试和 `poll + [0, jitter]` cadence。一个 owner 的领取、依赖或持久化失败只能影响自身下一轮，不能
+阻塞其它 owner 或终止整个 Worker；循环任务 panic 或意外退出仍必须失败关闭。
+
+Fulfillment 只能按并发波次领取，避免尚未开始的工作提前耗尽 lease。Recovery 必须按
+`case → return → action → relist → refund` 依次尝试全部 phase；单个 phase 失败不能跳过后续 phase，
+action 仍由 fencing 和持久化重试保护。旧版默认的 60 秒轮询、5 秒抖动、100 条批次、8 并发、
+60 秒 lease/重试和 30 秒单项时限属于兼容契约。
+
+### I-09f Auction 生命周期与结算必须独立于集成轮询
+
+Auction 生命周期和结算 owner 必须立即执行首轮，再使用自己的 `poll + [0, jitter]` cadence；邮件
+唤醒、论坛、realtime 或其它集成 tick 不得额外触发 Auction，也不得延迟它。生命周期与结算各自
+拥有完整 batch 上限并按共同并发波次领取；一类 claim 或单项失败仍必须尝试另一类，且只影响主循环
+下一轮。默认 60 秒轮询、5 秒抖动、每类 100 条、PostgreSQL 并发 8 和 30 秒单项总时限属于旧版
+兼容契约；SQLite Lite 的有效并发必须固定为 1。
 
 ### I-10 缓存不是权威数据源
 
@@ -183,7 +270,7 @@ PostgreSQL 是完整生产档；SQLite 是本地、演示和明确单主机低�
 
 ## 当前阶段验收边界
 
-启动骨架阶段可以通过格式、编译、静态分析和契约审计证明结构没有明显漂移，但
+功能迁移后期可以通过格式、编译、静态分析和契约审计证明结构没有明显漂移，但
 不能据此宣称行为等价。除非用户明确要求，迁移阶段不新增、不运行单元测试、
 集成测试、功能测试、端到端测试或浏览器测试；行为对照、双写和切换前验证另行
 授权后执行。

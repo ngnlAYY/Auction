@@ -18,29 +18,28 @@ crate 依赖，也不在本仓库的默认修改范围内。
 
 ## 当前状态
 
-当前仍是迁移中的启动骨架，已经具备工作区、进程装配、健康检查、Admin dashboard 的
-service heartbeat health/process 首片（含三个进程的周期发布）、Public/Admin 会话、
-Public 规则、黑名单、补偿池/账本、论坛镜像、健康/实时 catch-up、只读与竞价首片、Admin 会话/拍卖生命周期/结算/recovery 报告与 recovery 确认首片、PostgreSQL 完整/SQLite Lite 存储边界、
-持久化 `scheduled_rounds` Worker 调度首片、PostgreSQL 完整档结算 workflow 与结算履约/delivery
-outbox 持久化边界、Public 持久化实时事件 Catch-up，以及沿用旧版视觉结构的拍卖页面，并已
-让公开端首页看板与 lot 详情读取同源 Public API；Admin A03 拍卖列表 GET/POST、A06 拍卖 lot
-列表、A04 草稿装备录入和 A25 规则 GET/POST/PUT 也已接入 PostgreSQL 一致安全快照、密钥信封
-边界、版本发布边界和管理端页面。A04 的装备数据密钥只从敏感 TOML 读取，SQLite Lite 明确
-返回能力不支持。Admin A05 论坛预览已接入 2 MiB 有界的本地 HTML/文本解析和安全 DTO，
-但不执行远程论坛发布或写数据库；Admin A33 审计只读查询已接入两套数据库的安全投影、
-精确筛选和 keyset/数字分页。Admin A13 draft lot 修改已接入 PostgreSQL 完整档的
-版本 fence、命令账本、审计、预览 realtime 事件和 withdrawn-return 履约义务，管理端页面
-提供改价与撤回入口；SQLite Lite 明确返回能力不支持。Admin A16-A19 邮件轮询状态、入站
-审查列表/详情和暂停/恢复已接入 PostgreSQL 完整档的安全投影、命令账本、版本 fence 与
-审计，管理端页面已提供读取和状态操作；SQLite Lite 明确返回能力不支持。
-Worker 的实时消费游标、失败记录、连续
-确认和显式重放边界已经接入，Admin realtime lag/failure/replay 运维面也已接入，但外部广播
-sink 尚未冻结和装配；MoogleMail 的远端 HTML 收件解析、PostgreSQL 持久化轮询、Worker 接线
-和 A20 触发命令已经完成。当前入站事实只保存为 `parsed_pending_processing`，业务处理、外部
-回执/对账、论坛远程发布同步和完整功能等价仍未完成。Public `/status` 已在已认证会话下自动订阅只读
-WebSocket；跳号或 refetch 边界会停止并要求重新读取权威快照，其他页面的事件驱动刷新仍未完成。
-Auction-BF 的完整功能、数据表、接口契约和外部服务行为仍在迁移中，不能仅凭编译通过宣称
-功能等价。
+当前已进入功能迁移后期，不再只是启动骨架。静态复核确认旧版 Public/Admin 业务 HTTP 路径、
+14 + 21 条浏览器路由，以及生命周期、结算、履约、recovery、邮件、论坛、delivery 和
+operations alert 等 Worker 任务类别都已有 Rust owner 与装配。PostgreSQL 完整档已覆盖公开
+竞价、代理、账户、管理命令、审计、实时通信、结算/recovery、凭据、MoogleMail 和论坛链路；
+SQLite Lite 只实现已声明的单主机能力，完整档端点在 Lite 部署中明确报告不支持。
+
+MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
+Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
+Users owner 收口。Public 使用持久化 Catch-up、
+进程内有界 WebSocket Hub 和权威快照恢复，Admin 页面均已接入真实 API。`auctionctl` 还提供
+配置/迁移检查、systemd 三进程顺序控制、部署预检、retention 只读盘点和 PostgreSQL 备份、
+离线校验、默认只读且需要双重确认的数据库重建、空库恢复及回执。canonical Auction-BF
+PostgreSQL v28 另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测旧库形状。
+MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配置旧版合同；Worker control 使用
+安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
+Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
+
+尚不能据此宣称行为等价：真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
+浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust `auctionctl` 与 systemd owner
+边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
+不会进入启动路径。旧版 realtime 没有外部广播 sink，
+旧版 retention 也只做只读盘点，因此这两项不是漏做的旧版功能。
 
 “全 Rust”只约束本仓库实现及其程序库依赖。PostgreSQL、SQLite、可选 Redis、反向代理
 等外部组件可以使用各自的官方实现，不要求它们由 Rust 编写。
@@ -93,6 +92,8 @@ MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用
 `secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
 只放在该敏感文件中。Admin 主配置还可通过 `runtime_config_file` 引用非敏感运行时 TOML；
 A26/A27 的 PostgreSQL 完整档更新会写入该文件并要求重启 Admin，SQLite Lite 不提供更新命令。
+拍卖策略模板位于主配置的 `[auction]` 区块；Admin 创建拍卖时会把已校验模板冻结到拍卖策略快照，
+具体字段和默认值见 [`ops/config/README.md`](ops/config/README.md)。
 
 构建浏览器端产物还需要 dx CLI（`cargo install dioxus-cli --locked`）。dx 会按需从 npm
 注册表下载 esbuild 作为构建期工具，它不是运行时依赖，也不引入 Node 运行时或第二套前端
@@ -116,6 +117,7 @@ just verify
 `cache-redis` feature 构建对应进程；仅填写 `redis_url` 不会把 Redis 依赖带入默认制品。
 Admin runtime 模板位于 [`ops/config/examples/runtime/admin.toml`](ops/config/examples/runtime/admin.toml)，
 生产部署应复制到受信目录并设置为 `0640`；其中不得放入凭据或连接串。
+三进程部署目录、启动顺序、权限、Caddy 和 systemd 模板见 [`ops/deploy/README.md`](ops/deploy/README.md)。
 
 `just verify` 默认只执行格式化、锁定依赖的编译检查、Clippy 和 WASM 静态检查，不执行
 测试。

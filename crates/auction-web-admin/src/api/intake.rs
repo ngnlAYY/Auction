@@ -41,7 +41,10 @@ struct AdminIntakeRequest {
 }
 
 /// 提交 URL 或 canonical JSON 装备来源，并返回新建 lot 的安全投影。
+///
+/// `command_id` 由表单按同一输入保持不变，网络失败后的重试不会创建第二条 intake。
 pub(crate) async fn add_admin_intake(
+    command_id: Uuid,
     world_id: String,
     source_kind: String,
     equipment_url: String,
@@ -57,7 +60,7 @@ pub(crate) async fn add_admin_intake(
     let request = Request::post(&format!("/api/v1/admin/worlds/{world_id}/auction-intake/items"))
         .header("x-csrf-token", &super::fetch_csrf_token().await?)
         .json(&AdminIntakeRequest {
-            command_id: Uuid::new_v4(),
+            command_id,
             source_kind,
             equipment_url: (equipment_url.is_empty()).then_some(equipment_url),
             equipment,

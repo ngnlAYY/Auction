@@ -442,6 +442,21 @@ fn plan_create_proxy(
     else {
         unreachable!("竞价触发器种类已在外层匹配");
     };
+    if !rules.proxy_enabled {
+        return Err(DomainError::ProxyDisabled);
+    }
+    if rules.proxy_max_outbid_uses > 0 && usage_number > u64::from(rules.proxy_max_outbid_uses) {
+        return Err(DomainError::ProxyOutbidLimit);
+    }
+    if mode == ProxyMode::Slow {
+        let final_phase_start = state
+            .effective_end_at
+            .checked_sub_signed(rules.final_phase_lead)
+            .ok_or(DomainError::InvalidSchedule("最终阶段窗口超出时间范围"))?;
+        if now >= final_phase_start {
+            return Err(DomainError::ProxySlowFinal);
+        }
+    }
     let expected_sequence =
         state.last_proxy_sequence.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
     if actor_id.is_nil()

@@ -9,8 +9,8 @@ use auction_application::{
     AdminLotListRequest, AdminLotPage, AdminLotSummary, ApplicationError, SettlementAuctionSnapshot,
 };
 use auction_contracts::{
-    AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse,
-    AdminSettlementAuctionResponse, ApiResponse,
+    AdminLotCapabilitiesResponse, AdminLotListResponse, AdminLotPaginationResponse,
+    AdminLotResponse, AdminSettlementAuctionResponse, ApiResponse,
 };
 use axum::{
     Json,
@@ -96,6 +96,9 @@ pub(crate) async fn list(
                 auction: map_auction(result.auction),
                 lots: result.entries.into_iter().map(map_lot).collect(),
                 pagination: AdminLotPaginationResponse { page, page_size, total: result.total },
+                capabilities: AdminLotCapabilitiesResponse {
+                    manual_intake: state.admin_intake().is_some(),
+                },
             },
         )),
     )

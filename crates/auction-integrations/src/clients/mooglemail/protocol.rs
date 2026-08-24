@@ -114,6 +114,8 @@ impl MoogleMailCookie {
     pub fn new(value: impl Into<String>) -> Result<Self, MoogleMailError> {
         let value = value.into();
         if !valid_secret(&value, MAX_COOKIE_BYTES) {
+            let mut bytes = value.into_bytes();
+            bytes.fill(0);
             return Err(MoogleMailError::new(
                 MoogleMailOperation::Inbox,
                 MoogleMailWorld::Main,

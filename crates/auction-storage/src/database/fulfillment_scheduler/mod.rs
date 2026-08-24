@@ -6,13 +6,17 @@
 
 use auction_application::{
     ApplicationError, SettlementDeliveryPreparation, SettlementFulfillmentClaim,
-    SettlementFulfillmentResult, SettlementFulfillmentStore,
+    SettlementFulfillmentProof, SettlementFulfillmentReconcileResult, SettlementFulfillmentResult,
+    SettlementFulfillmentStore,
 };
 use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
 #[cfg(feature = "postgres")]
-use auction_application::{SettlementFulfillmentOperation, SettlementFulfillmentState};
+use auction_application::{
+    SettlementFulfillmentOperation, SettlementFulfillmentReconcileStatus,
+    SettlementFulfillmentState,
+};
 #[cfg(feature = "postgres")]
 use auction_domain::{
     AuctionId, EquipmentId, LotId, SettlementId, SettlementObligationKind, SettlementWorld,
@@ -22,9 +26,11 @@ use auction_domain::{
 use uuid::Uuid;
 
 use super::DatabaseStore;
+#[cfg(feature = "postgres")]
+use super::delivery_audit::{ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit};
 
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Postgres, Row, postgres::PgRow};
 
 impl SettlementFulfillmentStore for DatabaseStore {
     fn claim_due(
@@ -112,6 +118,50 @@ impl SettlementFulfillmentStore for DatabaseStore {
         })
     }
 
+    fn satisfy(
+        &self,
+        _claim: SettlementFulfillmentClaim,
+        _proof: SettlementFulfillmentProof,
+    ) -> auction_application::ApplicationFuture<'_, SettlementFulfillmentReconcileResult> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => satisfy_postgres(store.pool(), &_claim, &_proof)
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => {
+                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
+                }
+            }
+        })
+    }
+
+    fn manual_reconcile(
+        &self,
+        _claim: SettlementFulfillmentClaim,
+        failure_code: String,
+    ) -> auction_application::ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            let failure_code = bounded_text(failure_code, 64);
+            if !valid_failure_code(&failure_code) {
+                return Err(repository_error("结算履约人工复核代码无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    manual_reconcile_postgres(store.pool(), &_claim, &failure_code)
+                        .await
+                        .map_err(ApplicationError::from)
+                }
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => {
+                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
+                }
+            }
+        })
+    }
+
     fn fail(
         &self,
         _claim: SettlementFulfillmentClaim,
@@ -143,7 +193,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
 
 #[cfg(feature = "postgres")]
 async fn claim_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
@@ -155,16 +205,31 @@ async fn claim_postgres(
                   f.claim_fencing, f.retry_count, f.dispatch_world,
                   f.delivery_operation,
                   f.delivery_id, f.prepare_command_id, f.prepare_request_digest,
+                  delivery.external_reference AS delivery_external_reference,
+                  delivery.result_metadata ->> 'external_reference_proven'
+                      AS delivery_external_reference_proven,
                   o.auction_id, o.lot_id, o.origin_command_id, o.obligation_kind,
-                  o.recipient_user_id, o.recipient_game_identity, o.amount,
-                  o.carrier_credit, o.equipment_id, o.submission_id,
+                  o.recipient_user_id, recipient_user.game_player_id AS recipient_user_game_identity,
+                  o.recipient_game_identity, o.amount, o.carrier_credit, o.equipment_id,
+                  equipment.external_equipment_id, equipment.name AS equipment_name,
+                  o.submission_id, submission.source_kind AS submission_source_kind,
+                  submission.external_mail_id AS submission_external_mail_id,
                   o.prerequisite_obligation_id
            FROM public.settlement_obligation_fulfillments AS f
            INNER JOIN public.settlement_obligations AS o
                ON o.id = f.obligation_id
+           INNER JOIN public.equipment AS equipment
+               ON equipment.id = o.equipment_id
+           LEFT JOIN public.users AS recipient_user
+               ON recipient_user.id = o.recipient_user_id
+           LEFT JOIN public.auction_submissions AS submission
+               ON submission.id = o.submission_id
            LEFT JOIN public.settlement_obligation_fulfillments AS prerequisite
                ON prerequisite.obligation_id = o.prerequisite_obligation_id
-           WHERE f.execution_state IN ('pending', 'prepared')
+           LEFT JOIN public.deliveries AS delivery
+               ON delivery.id = f.delivery_id
+           WHERE f.execution_state IN ('pending', 'prepared', 'enqueued')
+             AND (f.execution_state <> 'enqueued' OR delivery.status = 'succeeded')
              AND (f.claim_token IS NULL OR f.claim_expires_at <= $1)
              AND (f.next_attempt_at IS NULL OR f.next_attempt_at <= $1)
              AND o.business_state = 'ready'
@@ -217,7 +282,7 @@ async fn claim_postgres(
                    last_error_code = NULL,
                    updated_at = CURRENT_TIMESTAMP
                WHERE obligation_id = $1
-                 AND execution_state IN ('pending', 'prepared')
+                 AND execution_state IN ('pending', 'prepared', 'enqueued')
                  AND (claim_token IS NULL OR claim_expires_at <= $3)"#,
         )
         .bind(obligation_id)
@@ -266,16 +331,35 @@ fn map_claim(
     let kind = obligation_kind(string_column(row, "obligation_kind")?)?;
     let recipient_user_id: Option<Uuid> =
         row.try_get("recipient_user_id").map_err(map_storage_error)?;
+    let recipient_user_game_identity: Option<String> =
+        row.try_get("recipient_user_game_identity").map_err(map_storage_error)?;
     let recipient_game_identity: Option<String> =
         row.try_get("recipient_game_identity").map_err(map_storage_error)?;
-    let recipient = match (recipient_user_id, recipient_game_identity) {
-        (Some(user_id), None) => format!("user:{user_id}"),
-        (None, Some(identity)) if !identity.is_empty() && identity == identity.trim() => identity,
+    let recipient = match (recipient_user_id, recipient_user_game_identity, recipient_game_identity)
+    {
+        (Some(_), Some(identity), None) if !identity.is_empty() && identity == identity.trim() => {
+            identity
+        }
+        (None, None, Some(identity)) if !identity.is_empty() && identity == identity.trim() => {
+            identity
+        }
         _ => return Err(repository_error_owned("结算履约收件人身份不完整")),
     };
     let submission_id: Option<Uuid> = row.try_get("submission_id").map_err(map_storage_error)?;
     let prerequisite_id: Option<Uuid> =
         row.try_get("prerequisite_obligation_id").map_err(map_storage_error)?;
+    let external_reference: Option<String> =
+        row.try_get("delivery_external_reference").map_err(map_storage_error)?;
+    let external_reference_proven = match row
+        .try_get::<Option<String>, _>("delivery_external_reference_proven")
+        .map_err(map_storage_error)?
+        .as_deref()
+    {
+        None => false,
+        Some("true") => true,
+        Some("false") => false,
+        Some(_) => return Err(repository_error_owned("结算履约外部引用证明标记无效")),
+    };
     Ok(SettlementFulfillmentClaim {
         obligation_id: SettlementId::from_uuid(uuid_column(row, "obligation_id")?),
         auction_id: AuctionId::from_uuid(uuid_column(row, "auction_id")?),
@@ -286,6 +370,7 @@ fn map_claim(
         state: match string_column(row, "execution_state")?.as_str() {
             "pending" => SettlementFulfillmentState::Pending,
             "prepared" => SettlementFulfillmentState::Prepared,
+            "enqueued" => SettlementFulfillmentState::Enqueued,
             _ => return Err(repository_error_owned("结算履约阶段无效")),
         },
         operation,
@@ -296,9 +381,17 @@ fn map_claim(
         )
         .map_err(|_| repository_error_owned("结算履约 carrier credit 超出范围"))?,
         equipment_id: EquipmentId::from_uuid(uuid_column(row, "equipment_id")?),
+        external_equipment_id: string_column(row, "external_equipment_id")?,
+        equipment_name: string_column(row, "equipment_name")?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
+        submission_source_kind: row.try_get("submission_source_kind").map_err(map_storage_error)?,
+        submission_external_mail_id: row
+            .try_get("submission_external_mail_id")
+            .map_err(map_storage_error)?,
         prerequisite_id: prerequisite_id.map(SettlementId::from_uuid),
         delivery_id: row.try_get("delivery_id").map_err(map_storage_error)?,
+        external_reference,
+        external_reference_proven,
         prepare_command_id: row
             .try_get::<Option<Uuid>, _>("prepare_command_id")
             .map_err(map_storage_error)?
@@ -318,7 +411,7 @@ fn map_claim(
 
 #[cfg(feature = "postgres")]
 async fn prepare_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     preparation: &SettlementDeliveryPreparation,
     _prepared_at: DateTime<Utc>,
@@ -334,11 +427,11 @@ async fn prepare_postgres(
     }
 
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    sqlx::query(
+    let inserted = sqlx::query(
         r#"INSERT INTO public.deliveries (
                id, command_id, request_digest, origin_kind, origin_id,
-               recipient, payload, status
-           ) VALUES ($1, $2, $3, 'settlement', $4, $5, $6, 'prepared')
+               recipient, payload, status, created_at, updated_at
+           ) VALUES ($1, $2, $3, 'settlement', $4, $5, $6, 'prepared', $7, $7)
            ON CONFLICT (command_id) DO NOTHING"#,
     )
     .bind(preparation.delivery_id)
@@ -347,6 +440,7 @@ async fn prepare_postgres(
     .bind(claim.obligation_id.to_string())
     .bind(&preparation.recipient)
     .bind(&preparation.payload)
+    .bind(_prepared_at)
     .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
@@ -437,6 +531,27 @@ async fn prepare_postgres(
             return Err(repository_error_owned("结算履约 claim 已失效或结果冲突"));
         }
     }
+    if inserted.rows_affected() == 1 {
+        let request_id = preparation.prepare_command_id.to_string();
+        append_delivery_audit(
+            &mut transaction,
+            DeliveryAudit {
+                occurred_at: _prepared_at,
+                actor_type: "system",
+                actor_id: "delivery-service",
+                action: PREPARE,
+                delivery_id: preparation.delivery_id,
+                request_id: Some(&request_id),
+                source: "system",
+                metadata: serde_json::json!({
+                    "origin_kind": "settlement",
+                    "status": "prepared",
+                }),
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
+    }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(SettlementFulfillmentResult {
         obligation_id: claim.obligation_id,
@@ -447,7 +562,7 @@ async fn prepare_postgres(
 
 #[cfg(feature = "postgres")]
 async fn activate_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     activate_command_id: CommandId,
     activate_request_hash: auction_application::RequestHash,
@@ -486,9 +601,12 @@ async fn activate_postgres(
         delivery.try_get("activation_command_id").map_err(map_storage_error)?;
     let existing_digest: Option<Vec<u8>> =
         delivery.try_get("activation_request_digest").map_err(map_storage_error)?;
-    match status.as_str() {
+    let activated = match status.as_str() {
         "prepared" => {
-            sqlx::query(
+            if existing_command.is_some() || existing_digest.is_some() {
+                return Err(repository_error_owned("delivery activation identity 已被占用"));
+            }
+            let updated = sqlx::query(
                 r#"UPDATE public.deliveries
                    SET status = 'pending',
                        activation_command_id = $2,
@@ -504,13 +622,20 @@ async fn activate_postgres(
             .execute(&mut *transaction)
             .await
             .map_err(map_storage_error)?;
+            if updated.rows_affected() != 1 {
+                return Err(repository_error_owned("delivery 激活状态已变化"));
+            }
+            true
         }
-        "pending"
+        "pending" | "claimed" | "sending" | "succeeded" | "failed" | "manual_reconcile"
             if existing_command == Some(activate_command_id.as_uuid())
                 && existing_digest.as_deref()
-                    == Some(activate_request_hash.as_bytes().as_slice()) => {}
+                    == Some(activate_request_hash.as_bytes().as_slice()) =>
+        {
+            false
+        }
         _ => return Err(repository_error_owned("delivery 当前状态不允许激活")),
-    }
+    };
 
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
@@ -572,6 +697,24 @@ async fn activate_postgres(
             return Err(repository_error_owned("结算履约 activation claim 已失效或冲突"));
         }
     }
+    if activated {
+        let request_id = activate_command_id.to_string();
+        append_delivery_audit(
+            &mut transaction,
+            DeliveryAudit {
+                occurred_at: activated_at,
+                actor_type: "system",
+                actor_id: "delivery-service",
+                action: ACTIVATE,
+                delivery_id,
+                request_id: Some(&request_id),
+                source: "system",
+                metadata: serde_json::json!({"status": "pending"}),
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
+    }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(auction_application::SettlementFulfillmentActivationResult {
         obligation_id: claim.obligation_id,
@@ -581,8 +724,109 @@ async fn activate_postgres(
 }
 
 #[cfg(feature = "postgres")]
+async fn satisfy_postgres(
+    pool: &super::TrackedPool<Postgres>,
+    claim: &SettlementFulfillmentClaim,
+    proof: &SettlementFulfillmentProof,
+) -> Result<SettlementFulfillmentReconcileResult, auction_application::RepositoryError> {
+    validate_claim_identity(claim)?;
+    let Some(delivery_id) = claim.delivery_id else {
+        return Err(repository_error_owned("结算履约满足证明缺少 delivery identity"));
+    };
+    if claim.state != SettlementFulfillmentState::Enqueued
+        || proof.kind.is_empty()
+        || proof.kind != proof.kind.trim()
+        || proof.reference.is_empty()
+        || proof.reference != proof.reference.trim()
+        || proof.digest == [0; 32]
+        || proof.observed_at < claim.claimed_at
+        || proof.observed_at > Utc::now()
+        || claim.external_reference.as_deref() != Some(proof.reference.as_str())
+        || !claim.external_reference_proven
+    {
+        return Err(repository_error_owned("结算履约满足证明不满足 fencing 或身份约束"));
+    }
+    let updated = sqlx::query(
+        r#"UPDATE public.settlement_obligation_fulfillments
+           SET execution_state = 'satisfied',
+               proof_kind = $2,
+               proof_reference = $3,
+               proof_digest = $4,
+               proof_observed_at = $5,
+               claim_token = NULL,
+               claimed_at = NULL,
+               claim_expires_at = NULL,
+               completed_at = CURRENT_TIMESTAMP,
+               state_version = state_version + 1,
+               next_attempt_at = NULL,
+               last_error_code = NULL,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE obligation_id = $1
+             AND execution_state = 'enqueued'
+             AND claim_token = $6
+             AND claim_fencing = $7
+             AND delivery_id = $8"#,
+    )
+    .bind(claim.obligation_id.as_uuid())
+    .bind(&proof.kind)
+    .bind(&proof.reference)
+    .bind(proof.digest.to_vec())
+    .bind(proof.observed_at)
+    .bind(claim.claim_token)
+    .bind(claim.claim_fencing)
+    .bind(delivery_id)
+    .execute(pool)
+    .await
+    .map_err(map_storage_error)?;
+    if updated.rows_affected() != 1 {
+        return Err(repository_error_owned("结算履约满足证明的 claim 已失效"));
+    }
+    Ok(SettlementFulfillmentReconcileResult {
+        obligation_id: claim.obligation_id,
+        delivery_id,
+        status: SettlementFulfillmentReconcileStatus::Satisfied,
+    })
+}
+
+#[cfg(feature = "postgres")]
+async fn manual_reconcile_postgres(
+    pool: &super::TrackedPool<Postgres>,
+    claim: &SettlementFulfillmentClaim,
+    failure_code: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    validate_claim_identity(claim)?;
+    let updated = sqlx::query(
+        r#"UPDATE public.settlement_obligation_fulfillments
+           SET execution_state = 'manual_reconcile',
+               claim_token = NULL,
+               claimed_at = NULL,
+               claim_expires_at = NULL,
+               completed_at = CURRENT_TIMESTAMP,
+               state_version = state_version + 1,
+               next_attempt_at = NULL,
+               last_error_code = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE obligation_id = $1
+             AND execution_state IN ('pending', 'prepared', 'enqueued')
+             AND claim_token = $3
+             AND claim_fencing = $4"#,
+    )
+    .bind(claim.obligation_id.as_uuid())
+    .bind(failure_code)
+    .bind(claim.claim_token)
+    .bind(claim.claim_fencing)
+    .execute(pool)
+    .await
+    .map_err(map_storage_error)?;
+    if updated.rows_affected() != 1 {
+        return Err(repository_error_owned("结算履约人工复核的 claim 已失效"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
 async fn fail_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,
@@ -599,7 +843,7 @@ async fn fail_postgres(
                last_error_code = $3,
                updated_at = CURRENT_TIMESTAMP
            WHERE obligation_id = $1
-             AND execution_state IN ('pending', 'prepared')
+             AND execution_state IN ('pending', 'prepared', 'enqueued')
              AND claim_token = $4
              AND claim_fencing = $5"#,
     )

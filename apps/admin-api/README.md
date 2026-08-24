@@ -16,14 +16,22 @@ Admin 论坛预览由本地 `ForumPreviewAdapter` 解析 HTML/文本，限制 2 
 Admin 审计读取由数据库适配器提供两种有界分页形状和安全 metadata 投影；该接口只读，不修改
 审计历史。
 Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
-三个进程装配根负责发布启动/就绪/周期/停止心跳；返回 health/process 安全投影。其他尚未迁移的
-owner section 显式标记为 `unknown`，不伪造 Worker control 或邮件状态。
+三个进程装配根负责发布启动/就绪/周期/停止心跳；返回 health/process 安全投影。Admin 同时
+通过 runtime 文档指定的 Worker control Unix socket 读取 live/ready/status，socket 只允许
+命中 Worker 显式 UID/GID allowlist 的内核认证 peer，失败时显示有限 condition；mail、realtime、credential、delivery、fulfillment、
+recovery 和 alerting section 分别由对应 owner 提供安全摘要，owner 未装配时才显式标记为 `unknown`。
 Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL 完整档装配
 `auction-application` runtime 服务、TOML 原子文件适配器和 durable 命令账本，GET/validate/PUT
-均保留 fingerprint fence 与 `restart_required`。文件更新不会热改当前进程，SQLite Lite 明确
-返回 501。
+均保留 fingerprint fence 与 `restart_required`；Admin 对外就绪前会先恢复未收口的 pending/unknown
+命令，若结果为 `unknown` 或需要人工核对则保留错误级告警并继续启动，其他恢复错误会阻断启动。
+文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
+是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围。
 
-默认监听 `127.0.0.1:8091`，与公开端不同端口。
+默认监听 `127.0.0.1:8091`，与公开端不同端口。Admin runtime 的 `listener.mode` 支持 TCP；
+Linux 部署还支持 Unix socket。Unix 模式要求 `runtime_directory` 预先存在并由运行账号拥有，
+`socket_path` 必须直接位于该目录中，启动时会取得目录级单实例锁，并将 socket 固定为配置的
+group 与 `0660` 权限。检测到仍在使用的 socket、非安全路径或不满足 owner/group 的目录时，
+启动会失败；失效的 stale socket 只会在身份校验通过后清理。
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \

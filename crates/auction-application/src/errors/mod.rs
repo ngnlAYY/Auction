@@ -5,12 +5,13 @@ use thiserror::Error;
 use auction_domain::DomainError;
 
 use crate::{
-    AdminAuditError, AdminForumPreviewError, AdminIntakeError, AdminLotUpdateError, AdminMailError,
-    AdminMailTransactionError, AdminRulesError, AdminRulesTransactionError,
-    AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeFileError, CommandLedgerError,
-    CompetitionTransactionError, RealtimeAdminError, RecoveryCommandError, RepositoryError,
-    SettlementTransactionError, SettlementTransactionFailure, TransactionFailure,
-    TransactionPolicyError,
+    AdminAuditError, AdminCredentialError, AdminForumPreviewError, AdminIntakeError,
+    AdminLotUpdateError, AdminMailError, AdminMailTransactionError, AdminRulesError,
+    AdminRulesTransactionError, AdminRuntimeCommandError, AdminRuntimeConfigError,
+    AdminRuntimeFileError, AdminUserError, CommandLedgerError, CompetitionTransactionError,
+    ForumRemoteError, MailProcessingError, OperationsAlertError, RealtimeAdminError,
+    RecoveryCommandError, RepositoryError, SettlementTransactionError,
+    SettlementTransactionFailure, TransactionFailure, TransactionPolicyError,
 };
 use serde_json::Error as JsonError;
 
@@ -20,6 +21,10 @@ pub use sessions::SessionError;
 pub enum ApplicationError {
     #[error("capability unavailable: {0}")]
     CapabilityUnavailable(&'static str),
+
+    /// 外部回执读取已完成，但在受限观察窗口内没有发现指定远端对象。
+    #[error("履约外部证明尚未观察到")]
+    FulfillmentEvidenceNotObserved,
 
     #[error(transparent)]
     Domain(#[from] DomainError),
@@ -70,7 +75,13 @@ pub enum ApplicationError {
     AdminForumPreview(#[from] AdminForumPreviewError),
 
     #[error(transparent)]
+    ForumRemote(#[from] ForumRemoteError),
+
+    #[error(transparent)]
     AdminAudit(#[from] AdminAuditError),
+
+    #[error(transparent)]
+    AdminCredential(#[from] AdminCredentialError),
 
     #[error(transparent)]
     AdminLotUpdate(#[from] AdminLotUpdateError),
@@ -83,6 +94,15 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     AdminRuntimeCommand(#[from] AdminRuntimeCommandError),
+
+    #[error(transparent)]
+    AdminUser(#[from] AdminUserError),
+
+    #[error(transparent)]
+    MailProcessing(#[from] MailProcessingError),
+
+    #[error(transparent)]
+    OperationsAlert(#[from] OperationsAlertError),
 }
 
 impl TransactionFailure for ApplicationError {

@@ -354,8 +354,14 @@ impl MoogleMailClient {
         if body.len() > self.maximum_response_bytes {
             return Err(self.write_unknown(operation, target.world));
         }
-        if is_session_expired(status, location.as_ref(), &body)
-            || status == StatusCode::TOO_MANY_REQUESTS
+        if is_session_expired(status, location.as_ref(), &body) {
+            return Err(MoogleMailError::after_write(
+                operation,
+                target.world,
+                MoogleMailErrorCategory::SessionExpired,
+            ));
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS
             || status.is_server_error()
             || !status.is_success()
             || !is_html

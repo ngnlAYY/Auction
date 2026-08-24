@@ -3,6 +3,9 @@
 //! 这里只读取 `auction_forum_sync` 的本地投影；论坛发布 Worker 和远程网关仍由独立 owner
 //! 管理，读取路径不会把 pending/publishing 状态伪造成 published。
 
+mod reply;
+mod sync;
+
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicForumReader, PublicForumThread,
 };

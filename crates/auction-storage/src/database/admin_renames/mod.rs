@@ -1,7 +1,8 @@
 //! Admin 改名历史读取适配器。
 //!
 //! 改名事实在 PostgreSQL 与 SQLite Lite 中都由追加式 `user_renames` 表拥有。适配器只返回
-//! 安全投影，并在同一读取事务中取得总数和数字页，避免把数据库行直接越过应用端口。
+//! 安全投影，并在同一读取事务中取得总数、数字页和当前用户版本，避免把数据库行直接越过
+//! 应用端口。
 
 use auction_application::{
     AdminRenameListRequest, AdminRenamePage, AdminRenameReader, AdminRenameRecord,
@@ -57,13 +58,16 @@ async fn list_postgres(
     .map_err(|_| storage_error("统计 Admin 改名历史失败"))?;
 
     let rows = sqlx::query(
-        "SELECT id, user_id, previous_username, next_username, actor, created_at, reverted_at
-         FROM public.user_renames
-         WHERE ($1::uuid IS NULL OR user_id = $1)
+        "SELECT rename.id, rename.user_id, user.state_version AS user_state_version,
+                rename.previous_username, rename.next_username, rename.actor,
+                rename.created_at, rename.reverted_at
+         FROM public.user_renames AS rename
+         JOIN public.users AS user ON user.id = rename.user_id
+         WHERE ($1::uuid IS NULL OR rename.user_id = $1)
            AND ($2::text IS NULL
-                OR strpos(lower(previous_username), lower($2)) > 0
-                OR strpos(lower(next_username), lower($2)) > 0)
-         ORDER BY created_at DESC, id DESC
+                OR strpos(lower(rename.previous_username), lower($2)) > 0
+                OR strpos(lower(rename.next_username), lower($2)) > 0)
+         ORDER BY rename.created_at DESC, rename.id DESC
          LIMIT $3 OFFSET $4",
     )
     .bind(request.user_id)
@@ -82,6 +86,9 @@ async fn list_postgres(
                 user_id: row
                     .try_get("user_id")
                     .map_err(|_| storage_error("读取改名用户标识失败"))?,
+                user_state_version: row
+                    .try_get("user_state_version")
+                    .map_err(|_| storage_error("读取改名用户版本失败"))?,
                 previous_username: row
                     .try_get("previous_username")
                     .map_err(|_| storage_error("读取改名前用户名失败"))?,
@@ -143,13 +150,16 @@ async fn list_sqlite(
     .map_err(|_| storage_error("统计 SQLite Admin 改名历史失败"))?;
 
     let rows = sqlx::query(
-        "SELECT id, user_id, previous_username, next_username, actor, created_at, reverted_at
-         FROM user_renames
-         WHERE (? IS NULL OR user_id = ?)
+        "SELECT rename.id, rename.user_id, user.state_version AS user_state_version,
+                rename.previous_username, rename.next_username, rename.actor,
+                rename.created_at, rename.reverted_at
+         FROM user_renames AS rename
+         JOIN users AS user ON user.id = rename.user_id
+         WHERE (? IS NULL OR rename.user_id = ?)
            AND (? IS NULL
-                OR instr(lower(previous_username), lower(?)) > 0
-                OR instr(lower(next_username), lower(?)) > 0)
-         ORDER BY datetime(created_at) DESC, id DESC
+                OR instr(lower(rename.previous_username), lower(?)) > 0
+                OR instr(lower(rename.next_username), lower(?)) > 0)
+         ORDER BY datetime(rename.created_at) DESC, rename.id DESC
          LIMIT ? OFFSET ?",
     )
     .bind(user_id.as_deref())
@@ -198,6 +208,9 @@ fn map_sqlite_record(row: sqlx::sqlite::SqliteRow) -> Result<AdminRenameRecord, 
     let record = AdminRenameRecord {
         id,
         user_id,
+        user_state_version: row
+            .try_get("user_state_version")
+            .map_err(|_| storage_error("读取 SQLite 改名用户版本失败"))?,
         previous_username: row
             .try_get("previous_username")
             .map_err(|_| storage_error("读取 SQLite 改名前用户名失败"))?,

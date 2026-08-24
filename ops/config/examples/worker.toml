@@ -8,17 +8,146 @@ secrets_file = "secrets.toml"
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
+# 可选区块：进程本地 Prometheus 指标；省略整个区块等同于关闭导出。
+[metrics]
+# 可选：是否启用指标注册表；启用 Worker control 后可通过同一 Unix socket 的 /metrics 抓取，默认关闭。
+enabled = false
+
+# 可选区块：Worker OTLP/HTTP tracing；省略整个区块等同于关闭导出。
+[tracing]
+# 可选：是否启用 OTLP/HTTP span 导出；启用时必须同时提供 endpoint 和非零采样比例。
+enabled = false
+# 可选：collector 地址，例如 https://otel-collector.example.invalid/v1/traces。
+# endpoint = "https://otel-collector.example.invalid/v1/traces"
+# 可选：批次等待、单次导出和关闭等待秒数，范围均为 1-30。
+batch_timeout_seconds = 2
+export_timeout_seconds = 5
+shutdown_timeout_seconds = 5
+# 可选：单批最大 span 数，不能超过 queue_capacity，范围 1-512。
+max_export_batch_size = 64
+# 可选：有界导出队列容量，范围 1-4096。
+queue_capacity = 256
+# 可选：采样比例百万分率；启用时范围 1-1000000，关闭时默认为 0。
+sample_ratio_ppm = 0
+
 # 可选区块：缓存设置；省略整个区块等同于关闭缓存。
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
 
-# 可选区块：Worker 调度策略；省略整个区块时并发默认为 1、轮询间隔默认为 5 秒。
+# 可选区块：Auction 主循环调度策略；省略时 PostgreSQL 并发为 8、SQLite Lite 为 1，其余沿用旧版默认值。
 [worker]
-# 可选：Worker 并发数；必须大于 0，SQLite Lite 必须为 1。
-concurrency = 1
-# 可选：due 任务轮询间隔秒数；必须大于 0，默认 5。
-poll_interval_seconds = 5
+# 可选：Auction 主循环并发数，范围 1-batch_limit；PostgreSQL 默认 8，SQLite Lite 默认且只允许 1。
+concurrency = 8
+# 可选：Auction 主循环及兼容 owner 的轮询间隔秒数，范围 1-86400，默认 60。
+poll_interval_seconds = 60
+# 可选：生命周期和结算各自的单轮批次上限，范围 1-1000，默认 100。
+batch_limit = 100
+# 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
+# 可选：单个生命周期或结算任务的总处理超时秒数，必须小于由轮询间隔派生的 claim lease，默认 30。
+item_timeout_seconds = 30
+# 可选：Recovery 各阶段依赖暂不可用时的持久化重试间隔，范围 1-86400 秒，默认 60。
+recovery_retry_delay_seconds = 60
+
+# 可选区块：Delivery outbox 的独立轮询、并发、lease 和超时边界；省略时沿用旧版默认值。
+[worker.delivery]
+# 可选：单轮最多领取的 delivery 数量，范围 1-1000，默认 100。
+batch_limit = 100
+# 可选：同时执行的 delivery 数量，范围 1-batch_limit，默认 8。
+concurrency = 8
+# 可选：Delivery 独立轮询间隔秒数，范围 1-86400，默认 60。
+poll_interval_seconds = 60
+# 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
+# 可选：每次 claim/renew 的 lease 秒数，范围 1-86400，默认 60。
+lease_duration_seconds = 60
+# 可选：sending 期间的续租间隔秒数，必须小于 lease，默认 10。
+renew_interval_seconds = 10
+# 可选：lease 过期后再等待多久才转人工对账；必须大于请求超时，默认 120。
+sending_grace_seconds = 120
+# 可选：单次完整外部发送调用的总超时秒数，范围 1-86400，默认 30。
+request_timeout_seconds = 30
+# 可选：释放、续租和终态写回的超时秒数，范围 1-300，默认 5。
+finalize_timeout_seconds = 5
+
+# 可选区块：Settlement fulfillment 的独立轮询、并发、lease、超时与重试边界；省略时沿用旧版默认值。
+[worker.fulfillment]
+# 可选：单轮最多处理的 fulfillment 数量，范围 1-1000，默认 100。
+batch_limit = 100
+# 可选：同时处理的 fulfillment 数量，范围 1-batch_limit，默认 8。
+concurrency = 8
+# 可选：独立轮询间隔秒数，范围 1-86400，默认 60。
+poll_interval_seconds = 60
+# 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
+# 可选：claim lease 秒数，范围 1-86400，默认 60。
+lease_duration_seconds = 60
+# 可选：单个 fulfillment 从领取到处理完成的总超时秒数，必须小于 lease，默认 30。
+item_timeout_seconds = 30
+# 可选：依赖暂不可用后的持久化重试间隔秒数，范围 1-86400，默认 60。
+retry_delay_seconds = 60
+
+# 可选区块：Recovery 五阶段的独立调度、批次、lease、超时与 health 刷新边界；省略时沿用旧版默认值。
+[worker.recovery]
+# 可选：每个 recovery phase 单轮最多领取的记录数，范围 1-1000，默认 100。
+batch_limit = 100
+# 可选：recovery action wave 并发数，范围 1-batch_limit，默认 8。
+concurrency = 8
+# 可选：独立轮询间隔秒数，范围 1-86400，默认 60。
+poll_interval_seconds = 60
+# 可选：每轮完成后附加的随机抖动上限秒数，范围 0-86400，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
+# 可选：recovery action claim lease 秒数，范围 1-86400，默认 60。
+lease_duration_seconds = 60
+# 可选：单个 case、return、action、relist 或 refund 的总超时秒数，必须小于 lease，默认 30。
+item_timeout_seconds = 30
+# 可选：MoogleMail Balance 低水位阈值，低于该值标记为 low，默认 100 credits。
+low_balance_threshold = 100
+# 可选：recovery health 远端余额刷新间隔，范围 1-86400 秒，默认 60。
+health_refresh_interval_seconds = 60
+# 可选：余额证据超过该年龄标记为 stale，范围不小于刷新间隔且不超过 86400 秒，默认 300。
+evidence_stale_after_seconds = 300
+
+# 可选区块：Worker control；默认关闭。启用后通过安全 Unix socket 和显式 peer allowlist 提供 live/ready/status、/metrics 和邮件唤醒。
+[worker.control]
+# 可选：是否启用 Worker control；默认 false。
+enabled = false
+# 可选：socket 所属 Unix group 名称；默认 auction-worker-control，启用前必须由部署者建立并授予 Worker 进程成员资格。
+group = "auction-worker-control"
+# 可选：允许访问 control 的内核认证 GID/UID；默认均为空，enabled = true 时至少填写一个实际数字 ID。
+# 不要把示例数字直接用于生产，应以部署主机上的 Admin/运维进程身份为准。
+allowed_peer_gids = []
+allowed_peer_uids = []
+# 可选：预先建立、归 Worker 运行用户所有且不可被 other 写入的 runtime 目录；默认 /run/hv-auction/worker。
+runtime_directory = "/run/hv-auction/worker"
+# 可选：规范化绝对 Unix socket 路径；默认 /run/hv-auction/worker/control.sock。
+socket_path = "/run/hv-auction/worker/control.sock"
+
+# 可选区块：E-Hentai 论坛主题同步；默认关闭。启用后只在 PostgreSQL 完整档进行远程读写。
+[worker.forum]
+# 可选：是否启用主题创建/幂等查找；默认 false。
+enabled = false
+# 可选：active ForumCookie 凭据 scope，可填 main、isekai 或 shared；默认 shared。
+credential_world = "shared"
+# 可选：固定论坛 endpoint；省略时使用生产 endpoint。测试时可使用回环 HTTP。
+# endpoint = "https://forums.e-hentai.org"
+# 可选：公开端 origin；配置后论坛主题会附带拍卖页面绝对链接，例如 https://auction.example.invalid。
+# public_base_url = "https://auction.example.invalid"
+# 可选：是否使用旧版测试板块 4；生产环境必须为 false。
+test_board_mode = false
+# 可选：单轮同步上限，范围 1-100，默认 100。
+batch_size = 100
+# 可选：单次响应上限，范围 1-8388608，默认 2097152。
+maximum_response_bytes = 2097152
+# 可选：连续请求最小间隔毫秒，默认 750。
+minimum_request_interval_millis = 750
+# 可选：单次 HTTP 请求超时秒数，范围 1-300，默认 30。
+request_timeout_seconds = 30
+# 可选：单个论坛主题发布或回帖导入的总超时秒数；默认 93，需覆盖三次请求和请求间隔预算。
+item_timeout_seconds = 93
+# 可选：单个论坛发布 claim 的租约秒数；必须大于 item_timeout_seconds，默认 300。
+lease_duration_seconds = 300
 
 # 可选区块：MoogleMail 入站轮询；默认关闭。启用后只在 PostgreSQL 完整档发送远程 GET。
 [worker.mooglemail]
@@ -28,13 +157,191 @@ enabled = false
 mailbox_key = "mooglemail:main"
 # 可选：游戏世界，只能是 main 或 isekai；默认 main。
 world_id = "main"
+# 可选：拍卖邮件的起拍价覆盖值（Credits）；省略时继承 [auction.economics].start_price。
+# start_price = 1000
 # 可选：`.keyenv` 路径；相对本文件解析。启用时与敏感 mooglemail_cookie 二选一。
 keyenv_file = "../../../.keyenv"
+# 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
+endpoint = "https://hentaiverse.org"
+# 可选：单次响应最大字节数，范围 1-8388608，默认 8388608。
+maximum_response_bytes = 8388608
+# 可选：共享客户端连续请求最小间隔毫秒，范围 1-60000，旧版默认 1000。
+minimum_request_interval_millis = 1000
+# 可选：单次 HTTP 请求及正文读取超时秒数，范围 1-300，旧版默认 15。
+request_timeout_seconds = 15
 # 可选：单次读取上限，范围 1-1000，默认 100。
 batch_size = 100
 # 可选：单次有界读取的最大页数，范围 1-100，默认 20。
 maximum_pages = 20
+# 可选：标准五字段 cron，默认每分钟；也支持 @hourly/@daily/@every 以及 TZ=/CRON_TZ= 时区前缀。
+schedule = "* * * * *"
+# 可选：每个 cron 触发时刻后附加的随机抖动上限秒数，范围 0-86400，默认 5。
+jitter_seconds = 5
+# 可选：邮箱 claim 租约秒数，范围 1-86400，默认 60；处理期间会续租。
+lease_duration_seconds = 60
+# 可选：claim 续租周期秒数，必须小于租约，默认 10。
+renew_interval_seconds = 10
+# 可选：远程读取内联尝试次数，范围 1-10，默认 3。
+fetch_attempts = 3
+# 可选：每次远程读取尝试的总超时秒数，范围 1-300，且须大于 request_timeout_seconds；默认 30。
+fetch_timeout_seconds = 30
+# 可选：单封邮件业务处理内联尝试次数，范围 1-10，默认 3。
+process_attempts = 3
+# 可选：单次邮件业务处理尝试总超时秒数，范围 1-300，且须大于 request_timeout_seconds；默认 30。
+item_timeout_seconds = 30
+# 可选：内联与持久化指数退避基础秒数，默认 1。
+retry_base_seconds = 1
+# 可选：内联与持久化指数退避上限秒数，默认 30。
+retry_maximum_seconds = 30
 # 可选：发件人 allowlist；留空且不关闭 allowlist 时不会读取任何详情。
 sender_allowlist = []
 # 可选：明确设为 true 才读取所有发件人详情；生产环境应保持 false。
 sender_allowlist_disabled = false
+
+# 可选区块：拍卖邮件装备过滤；默认关闭。来源仍必须标记为可交易。
+[worker.mooglemail.equipment_filter]
+# 可选：是否启用品质、前后缀、分类、类型和等级过滤；默认 false。
+enabled = false
+# 可选：允许的品质 token；空数组表示不限制。
+qualities = []
+# 可选：允许的前缀 token；空数组表示不限制。
+prefixes = []
+# 可选：允许的后缀 token；空数组表示不限制。
+suffixes = []
+# 可选：允许的装备分类 token；空数组表示不限制。
+categories = []
+# 可选：允许的装备类型 token；空数组表示不限制。
+equipment_types = []
+# 可选：最低装备等级；0 表示不启用等级下限。
+level_min = 0
+# 可选：最高装备等级；0 表示不启用等级上限，最大 1000。
+level_max = 0
+
+# 可选区块：MoogleMail 业务通知模板；省略字段使用旧版默认英文文本。
+# 模板只能使用各字段注释列出的占位符，Worker 启动时会拒绝未知键或非法正文。
+[worker.mooglemail.mail_templates]
+# 可选：拍卖邮件包含资产时的拒绝正文。
+auction_assets_rejected = "Auction assets rejected"
+# 可选：拍卖邮件没有附件时的拒绝正文。
+auction_no_attachments = "Auction has no attachments"
+# 可选：装备不符合条件时的拒绝正文；支持 {reason_code}。
+auction_equipment_rejected = "Auction equipment rejected: {reason_code}"
+# 可选：用户邮件包含拍卖资产时的拒绝正文。
+user_assets_rejected = "User assets rejected"
+# 可选：注册成功或恢复成功时发送 key；支持 {login_key}、{username}。
+register_key = "Registration key {login_key} for {username}"
+# 可选：注册结果通知；支持 {result_code}、{username}。
+register_result = "Registration result {result_code} {username}"
+# 可选：重绑结果通知；支持 {result_code}、{username}。
+rebind_result = "Rebind result {result_code} {username}"
+# 可选：主世界竞得装备的货到付款通知；支持 {item_name}、{amount}、{reference}。
+settlement_winner_equipment_cod = "Auction item {item_name}; COD {amount}; reference {reference}"
+# 可选：异世界付款载体通知；支持 {amount}、{reference}。
+settlement_payment_carrier = "Auction payment request {amount}; reference {reference}"
+# 可选：结算付款超时提醒；支持 {reference}。
+settlement_payment_reminder = "Auction payment is overdue; reference {reference}"
+# 可选：装备交付或退回通知；支持 {item_name}、{reference}。
+settlement_equipment_handoff = "Auction item {item_name}; reference {reference}"
+# 可选：卖家收款通知；支持 {amount}、{reference}。
+settlement_seller_payout = "Auction seller payout {amount}; reference {reference}"
+# 可选：买家退款通知；支持 {amount}、{reference}。
+settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
+# 可选：运维告警通知；支持 {summary}。
+operations_alert = "Operations alert: {summary}"
+
+# 可选：额外启用的世界。每个条目都会建立独立的邮箱游标、claim 和 allowlist；
+# 顶层 world_id 代表第一个世界，不能在这里重复配置同一 world_id 或 mailbox_key。
+# [[worker.mooglemail.additional_worlds]]
+# world_id = "isekai"
+# mailbox_key = "mooglemail:isekai"
+# sender_allowlist = []
+# sender_allowlist_disabled = false
+
+# 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭，只在 PostgreSQL 完整档运行。
+[worker.operations_alert]
+# 可选：是否启用 operations alert；默认 false。启用时必须配置 recipient。
+enabled = false
+# 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，范围 1-86400，默认 60。
+scan_interval_seconds = 60
+# 可选：读取 process/delivery/fulfillment/recovery 来源的超时秒数，范围 1-30，默认 5。
+source_timeout_seconds = 5
+# 可选：同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600，默认 120。
+batch_window_seconds = 120
+# 可选：同一 signal 的通知冷却秒数，不能小于批次窗口，默认 1800。
+cooldown_seconds = 1800
+# 可选：告警批次 claim 租约秒数，必须覆盖来源超时，默认 120。
+claim_lease_seconds = 120
+# 可选：告警投递失败后的持久化重试间隔秒数，默认 300。
+retry_delay_seconds = 300
+# 可选：单轮最多处理 signal 数量，范围 1-64，默认 64。
+max_signals_per_scan = 64
+# 可选：单个通知批次最多包含 signal 数量，范围 1-64，默认 20。
+max_batch_items = 20
+# 可选：单个通知正文最大字节数，范围 256-16384，默认 4096。
+max_body_bytes = 4096
+# 可选：delivery pending 数量阈值，默认 1。
+delivery_pending_count_threshold = 1
+# 可选：delivery pending 最老记录年龄阈值秒数，默认 900。
+delivery_pending_age_seconds = 900
+# 可选：delivery manual_reconcile 数量阈值，默认 1。
+delivery_manual_reconcile_count_threshold = 1
+# 可选：fulfillment backlog 数量阈值，默认 1。
+fulfillment_backlog_count_threshold = 1
+# 可选：fulfillment backlog 最老记录年龄阈值秒数，默认 900。
+fulfillment_backlog_age_seconds = 900
+# 可选：recovery payment overdue 数量阈值，默认 1。
+recovery_overdue_count_threshold = 1
+# 可选：recovery payment overdue 最老记录年龄阈值秒数，默认 900。
+recovery_overdue_age_seconds = 900
+# 可选：告警通知游戏世界，只能是 main 或 isekai，默认 main。
+world_id = "main"
+# 可选：告警通知收件人；enabled = true 时必须填写。
+recipient = ""
+
+# 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时沿用旧版共享配置默认值。
+[auction.economics]
+# 可选：默认起始价，必须为正且按 1000 信用网格对齐，默认 1000。
+start_price = 1000
+# 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
+bid_increment_ppm = 50000
+# 可选：软截止窗口和延长秒数，默认均为 60。
+soft_close_window_seconds = 60
+soft_close_extension_seconds = 60
+# 可选：取消截止窗口秒数，默认 86400。
+cancel_cutoff_seconds = 86400
+# 可选：代理开关、默认模式和 slow 间隔；模式只能为 fast 或 slow。
+proxy_enabled = true
+proxy_default_mode = "fast"
+proxy_slow_interval_seconds = 600
+# 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
+proxy_max_outbid_uses = 3
+# 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 60。
+final_phase_lead_seconds = 60
+
+[auction.settlement]
+# 可选：结算策略版本和模式；模式只能为 hold_curve_v1 或 legacy_zero_v0。
+version = 1
+mode = "hold_curve_v1"
+# 可选：补偿池开关和 isekai carrier credit；当前领域策略要求 credit 为 1。
+compensation_pool_enabled = true
+isekai_carrier_credit = 1
+# 可选：持有比例与调整比例的 PPM 锚点；省略时使用内置曲线。
+anchors = [
+  { hold_ppm = 0, adjustment_ppm = 80000 },
+  { hold_ppm = 50000, adjustment_ppm = 64000 },
+  { hold_ppm = 100000, adjustment_ppm = 48000 },
+  { hold_ppm = 150000, adjustment_ppm = 32000 },
+  { hold_ppm = 200000, adjustment_ppm = 16000 },
+  { hold_ppm = 250000, adjustment_ppm = 0 },
+  { hold_ppm = 300000, adjustment_ppm = -4000 },
+  { hold_ppm = 400000, adjustment_ppm = -12000 },
+  { hold_ppm = 500000, adjustment_ppm = -20000 },
+  { hold_ppm = 1000000, adjustment_ppm = -20000 },
+]
+
+[auction.settlement.recovery]
+# 可选：当前只支持七天、一次提醒的 remind_v1 策略。
+version = 1
+mode = "remind_v1"
+payment_timeout_seconds = 604800
+reminder_limit = 1

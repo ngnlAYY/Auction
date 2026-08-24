@@ -1,9 +1,8 @@
 //! Public 论坛镜像 HTTP DTO 与请求。
 
-use gloo_net::http::Request;
 use serde::Deserialize;
 
-use super::ApiResponse;
+use super::{ApiResponse, send_get};
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub(crate) struct ForumThread {
@@ -18,7 +17,7 @@ pub(crate) struct ForumThread {
 
 pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread, String> {
     let url = format!("/api/v1/auctions/{auction_id}/forum");
-    let response = Request::get(&url).send().await.map_err(|error| error.to_string())?;
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

@@ -2,9 +2,12 @@
 
 持久化适配器边界：PostgreSQL 完整后端与 SQLite Lite 后端。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；连接池、迁移和后端适配实现集中在
-`src/database/mod.rs`；PostgreSQL 竞价事务按职责放在
+源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
+`src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
+`src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
 `src/database/competition/mod.rs`，后续领域事务继续按同一规则拆分。
+`src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
+和 SQLx 基线接管；备份、人工确认及不可覆盖回执仍由 `auctionctl` 拥有。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 `src/database/scheduler/mod.rs` 持有；它不把调度状态放进内存或 Redis。
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
@@ -13,23 +16,42 @@ Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，�
 快照内读取 recovery/action 安全投影；`recovery_commands/mod.rs` 持有 PostgreSQL 完整档的
 Serializable 确认写入、证据重校验、退款激活、guarded relist、命令账本、审计和预览目录事件；
 SQLite Lite 对确认能力明确返回不支持。
+结算事务在 `src/database/settlement/mod.rs` 中根据冻结的 recovery 策略，为每个获胜 lot 与
+结算义务同事务建立 `settlement_recoveries`；`src/database/recovery_scheduler/mod.rs` 负责
+PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
+evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
+`pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
+owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
+`src/database/users/admin.rs` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计，
+并由 recovery owner 记录完成 proof。`recovery_commands/mod.rs` 同时持有 PostgreSQL 完整档的
+relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
+Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
+满足后再以时间和状态 fence 关闭 recovery；两种推进都追加 worker 审计。SQLite Lite 对 recovery
+完整档明确返回不支持，不能由报告读取适配器临时补写。
 Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs` 与
 `src/database/blacklist/mod.rs` 持有，PostgreSQL 与 SQLite 均只返回公开字段。
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
 同一 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
-Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；远程发布
-仍由后续 Worker/集成 owner 负责，SQLite Lite 不提供该完整档表。
+Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
+`sync.rs` 持有主题发布 claim/fencing、快照和证明，`reply.rs` 持有已发布主题、lot/身份映射、
+回帖命令账本和扫描游标。远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期
 列明确返回能力不支持。
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
+拍卖生命周期事务由 `src/database/competition/mod.rs` 持有：管理命令锁定拍卖后校验
+`expected_state_version`，取消动作同时写入取消时间、原因和操作者；SQLite Lite 通过追加迁移
+提供同名取消元数据列和形状触发器。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
 `src/database/competition/mod.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
-事务锁定 world 和 intake target，写入 draft、策略快照、审计及 `auction.created` 事件；SQLite
-Lite 明确返回能力不支持。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在
-真正开放前保持空值，以兼容旧系统创建行为。
+事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
+事件及公开发现流的持久化派生别名；SQLite
+Lite 明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
+竞价/生命周期仍读取的 `default_start_price`、软截止、取消截止、slow 间隔列，避免配置与
+遗留规则分叉。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在真正开放前
+保持空值，以兼容旧系统创建行为。
 Admin 规则读取与发布由 `src/database/rules/mod.rs` 和 `src/database/commands/mod.rs` 持有：
 PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin_commands` 幂等账本和
 追加审计；SQLite Lite 读取规则安全快照，但发布明确返回能力不支持。
@@ -44,20 +66,57 @@ Admin draft lot 修改由 `src/database/commands/admin_lot.rs` 与 PostgreSQL
 Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
 `audit_records`，支持安全精确筛选、keyset/数字分页和 metadata object 校验；数字页的总数与
 记录在同一读取事务内取得，不返回原始数据库行。
-Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有：两套数据库都在同一读取事务内
-按 `user_id`/用户名筛选并返回 `user_renames` 的安全投影；回滚写命令仍由后续 users owner
-切片负责。
+Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有；用户管理写入由
+`src/database/users/admin.rs` 持有。两套数据库都在用户命令事务内完成 state-version fence、
+命令账本、用户投影、密文 key 信封、`user_renames`、`user_blacklist_history` 和追加审计；
+PostgreSQL 使用 Serializable/advisory lock，SQLite 使用 `BEGIN IMMEDIATE`。MoogleMail 注册/换绑
+仍按其独立能力清单只支持 PostgreSQL，不能把两者混写成完全对等。
+Admin A32 凭据管理由 `src/database/credentials/mod.rs` 持有：PostgreSQL 在 Serializable
+事务中完成 `mail_cookie`/`forum_cookie` 的安全投影、密文信封、命令幂等、版本 fence 和追加审计；
+删除会先保留命令账本与审计，再删除凭据行，外键使用 `ON DELETE SET NULL`。Worker 读取 active
+凭据时也由该模块按 world/shared 返回密文信封；dashboard 聚合同时返回 scope 最近更新时间和
+凭据命令账本最近变更时间，供 HTTP 层结合 Worker 心跳判断重启状态，并按旧版要求检查 MoogleMail
+`main`/`isekai` 各自的 active/invalid 水位；SQLite Lite 明确返回能力不支持，不把凭据导入、
+解密或外部 Cookie 能力伪装成 Lite 功能。
 Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `src/database/commands/admin_mail.rs` 持有：PostgreSQL 读取 `mail_poll_state`、
 `inbound_mail` 的安全投影，并在 Serializable 事务内用 `mail_poll_state` 的版本 fence、
-`mail_admin_commands` 命令账本和追加审计完成暂停/恢复/A20 触发；`src/database/mail_poll/`
+`mail_admin_commands` 命令账本和追加审计完成暂停/恢复及历史兼容命令；`src/database/mail_poll/`
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
 `inbound_mail`、`mail_commands`、cursor 的同事务幂等提交。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
-负责。
+负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
 服务心跳由 `src/database/health/mod.rs` 持有：PostgreSQL 使用数据库时钟和
 observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和同一 sequence fence；
 两个后端都只返回 dashboard 所需的安全字段，details 原文不会离开存储边界。
+
+连接池状态通过 `DatabaseStore::pool_metrics_source` 以窄端口交给
+`auction-observability`：只暴露当前借出、空闲、总数和最大连接数，以及在本 crate 的 SQLx
+池边界真实记录的 acquisition 累计指标；不执行额外 SQL，也不暴露连接串、数据库名或路径。
+普通查询、事务和显式 `acquire()` 都必须经过 `TrackedPool`，避免只统计少数调用点或用快照值
+冒充累计数据。绕过该边界取得的外部原生 SQLx 池不会被这组累计指标覆盖。
+
+PostgreSQL retention 盘点由 `src/database/retention_inventory/mod.rs` 持有，使用编译进制品的
+`ops/deploy/retention-policy.v1.json` 作为版本化保留政策矩阵；单个
+`REPEATABLE READ READ ONLY` 事务读取 `current_database()`、`auction_schema_identity`、SQLx
+迁移历史、public 关系大小/行数估计和政策声明表覆盖，并输出数据族汇总、realtime 诊断水位、
+public 外键依赖及待人工决定项。SQL 使用 5 秒 statement timeout、1 秒 lock timeout，关系数量
+超过安全上限时失败关闭而不静默截断；realtime stream 和外键列表分别带覆盖/截断标记。返回值只
+包含安全统计，固定标记不评估资格且不授予授权；该模块没有归档、删除、恢复或写事务入口。
+
+PostgreSQL 恢复目标的只读预检由 `src/database/recovery_preflight/mod.rs` 持有：在同一
+`REPEATABLE READ READ ONLY` 事务中检查当前数据库身份、主节点/默认只读状态、其他连接、数据库
+大小、用户 schema、类型、关系、函数、扩展及其他 PostgreSQL 用户对象、schema identity 和迁移
+历史，并固定区分“基础条件通过”和“archive/恢复内容已验证”。它不调用 `pg_restore`，不停止
+外部连接，不创建/删除数据库，也不覆盖已有对象。`PostgresStore::close` 只供运维装配在预检后
+显式释放自身连接池，实际外部命令和 receipt 仍由 `auctionctl` 拥有。
+
+PostgreSQL 破坏性重建 SQL 由 `src/database/rebuild/mod.rs` 单独持有，只提供 PostgreSQL 18
+维护库预检、集群 advisory lock 和经过 identifier/literal quoting 审计的
+`DROP DATABASE ... WITH (FORCE)`/`CREATE DATABASE` 边界。它拒绝维护库、未知 locale provider、
+非 UTF8、自定义 database ACL、database/role setting、活动连接、prepared transaction、subscription
+和活动 logical slot；重建时保留 owner、locale provider、tablespace 与连接上限。备份授权、人工确认、
+模式选择、迁移/空库后置证明和 receipt 属于 `auctionctl`，不能由存储适配器自行推断。
 
 `database_url` 的 scheme 决定实际后端，也决定部署档位：
 
@@ -108,15 +167,27 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000007` 已提交核心竞价、结算/履约、生命周期、身份/
-外部命令、恢复/可观测性和论坛同步 schema；`PostgresCompetitionTransaction` 已接入竞价、
+当前 PostgreSQL `000001` 至 `000015` 已提交核心竞价、结算/履约、生命周期、身份/
+外部命令、凭据兼容修正、恢复/可观测性和论坛同步 schema；`PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片。SQLite `000001_lite_core.up.sql`、
+`000002` 至 `000007` 的调度、用户管理、取消/生命周期、Final phase 和领先时间修正，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由
 `src/database/settlement_scheduler/mod.rs` 持有，结算命令装配由
-`src/database/settlement_commands/mod.rs` 持有；SQLite Lite 明确不启用该 workflow，外部投递
-仍未装配外部传输实现。PostgreSQL 完整档的
-`src/database/fulfillment_scheduler/mod.rs` 持有结算履约 claim、fencing、准备/激活状态推进，
-`src/database/delivery_scheduler/mod.rs` 持有 delivery outbox 的领取、发送中 fencing、成功、
-失败和人工对账终态；SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 的
+`src/database/settlement_commands/mod.rs` 持有；SQLite Lite 明确不启用该 workflow，结算履约
+外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。PostgreSQL 完整档的
+`src/database/fulfillment_scheduler/mod.rs` 持有结算履约 claim、fencing、准备/激活状态推进；
+`src/database/recovery_scheduler/mod.rs` 持有 recovery case/action 的 PostgreSQL 完整档 due
+推进、提醒 outbox 关联和结果 fence，
+`src/database/delivery_scheduler/mod.rs` 持有 delivery outbox 的领取、发送前安全释放、发送中
+续租/fencing、成功、失败和人工对账终态；目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
+释放回 `pending`。过期 `claimed` 可以安全重领；过期 `sending` 只有在额外 sending grace 到期后
+才批量隔离为 `manual_reconcile`，不能作为 pending 重发。失败写回会保留 transport 已校验的可选外部引用和有界安全
+metadata，同时由 storage owner 覆盖 `safe_detail` 和 `outcome_unknown`，不允许原始响应越过该边界。
+delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 sending 隔离和 Admin 人工动作
+都会在同一事务追加安全审计；审计失败会使对应状态变更整体回滚，幂等重放不重复追加记录。
+SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 的
 lag、failure 安全投影和 replay 事务由 `src/database/realtime_admin/mod.rs` 持有。
+operations alert 由 `src/database/operations_alert/mod.rs` 持有 signal、冻结批次、lease/fencing、
+三次 Create 尝试和 delivery 终态投影；普通失败只释放为无错误码的 pending，cooldown 只在
+delivery 入队确认事务中生效，SQLite Lite 不提供该完整档能力。

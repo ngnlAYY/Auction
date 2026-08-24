@@ -78,6 +78,20 @@ impl PublicRealtimeEvent {
         {
             return Err("实时事件负载字段不符合注册表");
         }
+        if let Some(stream_auction_id) = stream_auction_id(&self.stream_key) {
+            let Some(payload_auction_id) = object.get("auction_id").and_then(Value::as_str) else {
+                return Err("实时事件负载与拍卖流不匹配");
+            };
+            let Ok(stream_auction_id) = Uuid::parse_str(stream_auction_id) else {
+                return Err("实时事件流名无效");
+            };
+            let Ok(payload_auction_id) = Uuid::parse_str(payload_auction_id) else {
+                return Err("实时事件负载与拍卖流不匹配");
+            };
+            if stream_auction_id != payload_auction_id {
+                return Err("实时事件负载与拍卖流不匹配");
+            }
+        }
         Ok(())
     }
 }
@@ -107,6 +121,10 @@ fn valid_stream_key(stream_key: &str) -> bool {
         .strip_prefix("auction:")
         .and_then(|id| Uuid::parse_str(id).ok())
         .is_some_and(|id| !id.is_nil())
+}
+
+fn stream_auction_id(stream_key: &str) -> Option<&str> {
+    stream_key.strip_prefix("auction:").filter(|id| *id != "discovery")
 }
 
 fn registered_fields(kind: &str, schema_version: i32) -> Option<&'static [&'static str]> {

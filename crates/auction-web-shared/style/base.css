@@ -98,6 +98,20 @@ select {
 
 button:disabled {
   cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.action-feedback {
+  margin-block: var(--space-3) 0;
+  font-size: var(--text-sm);
+}
+
+.action-feedback--success {
+  color: var(--color-live);
+}
+
+.action-feedback--error {
+  color: var(--color-danger);
 }
 
 :focus-visible {
@@ -167,6 +181,113 @@ button:disabled {
 .language-picker__select:hover,
 .language-picker__select:focus-visible {
   border-color: var(--color-accent);
+}
+
+.shared-markdown {
+  line-height: 1.65;
+}
+
+.shared-markdown > :last-child {
+  margin-block-end: 0;
+}
+
+.shared-markdown h1,
+.shared-markdown h2,
+.shared-markdown h3,
+.shared-markdown h4,
+.shared-markdown h5,
+.shared-markdown h6 {
+  margin-block: var(--space-5) var(--space-2);
+}
+
+.shared-markdown p,
+.shared-markdown ul,
+.shared-markdown ol,
+.shared-markdown blockquote,
+.shared-markdown pre,
+.shared-markdown table {
+  margin-block: 0 var(--space-4);
+}
+
+.shared-markdown ul,
+.shared-markdown ol {
+  padding-inline-start: var(--space-6);
+}
+
+.shared-markdown blockquote {
+  padding-inline-start: var(--space-4);
+  border-inline-start: 0.25rem solid var(--color-accent);
+  color: var(--color-text-muted);
+}
+
+.shared-markdown code {
+  padding: 0.08em 0.3em;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.shared-markdown pre {
+  overflow-x: auto;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.shared-markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.shared-markdown__table-wrap {
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+.shared-markdown table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.shared-markdown th,
+.shared-markdown td {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.shared-markdown th {
+  background: var(--color-surface-raised);
+  font-weight: var(--font-weight-strong);
+}
+
+.shared-markdown img {
+  max-inline-size: 100%;
+  block-size: auto;
+}
+
+.shared-truncated-text {
+  display: inline-block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.shared-truncated-text--compact {
+  inline-size: min(100%, 8rem);
+}
+
+.shared-truncated-text--medium {
+  inline-size: min(100%, 14rem);
+}
+
+.shared-truncated-text--wide {
+  inline-size: min(100%, 24rem);
 }
 
 @media (max-width: 60rem) {

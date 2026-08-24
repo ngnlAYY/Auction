@@ -7,11 +7,13 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    ApplicationError, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
+    ApplicationError, Clock, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
 };
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
+
+use super::{PersistentWorker, poll_delay};
 
 /// 实时消费 runner 的配置错误。
 #[derive(Debug, Error)]
@@ -44,7 +46,12 @@ impl PersistentRealtimeConsumer {
         stream_key: String,
         batch_size: u16,
     ) -> Result<Self, RealtimeConsumerConfigError> {
-        let request = RealtimeConsumerRequest { consumer_key, stream_key, batch_size };
+        let request = RealtimeConsumerRequest {
+            consumer_key,
+            stream_key,
+            batch_size,
+            allow_discovery_stream: false,
+        };
         request.validate().map_err(RealtimeConsumerConfigError::Invalid)?;
         Ok(Self { store, sink, request })
     }
@@ -166,6 +173,28 @@ impl RealtimeConsumerRunner for PersistentRealtimeConsumer {
         now: DateTime<Utc>,
     ) -> Pin<Box<dyn Future<Output = Result<usize, ApplicationError>> + Send + '_>> {
         Box::pin(self.run_once_inner(now))
+    }
+}
+
+/// 独立运行可选的外部实时 sink；单轮失败只影响该消费游标，不终止其它 Worker owner。
+pub(crate) async fn run_loop<C>(worker: Arc<PersistentWorker<C>>)
+where
+    C: Clock + 'static,
+{
+    loop {
+        let now = worker.clock.now();
+        if let Some(consumer) = &worker.realtime_consumer {
+            match consumer.run_once(now).await {
+                Ok(processed) if processed > 0 => {
+                    tracing::info!(processed, "realtime consumer advanced persisted cursor");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "realtime consumer cycle failed; retrying");
+                }
+            }
+        }
+        tokio::time::sleep(poll_delay(worker.auction.poll_interval, worker.auction.jitter)).await;
     }
 }
 

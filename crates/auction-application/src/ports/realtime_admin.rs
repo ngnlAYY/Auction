@@ -56,6 +56,7 @@ pub struct RealtimeLagSnapshot {
     pub offset: i64,
     pub latest_sequence: i64,
     pub lag: i64,
+    pub last_advanced_at: Option<DateTime<Utc>>,
 }
 
 /// realtime lag 分页结果。
@@ -65,6 +66,71 @@ pub struct RealtimeLagPage {
     pub total: i64,
     pub limit: i64,
     pub offset: i64,
+}
+
+/// realtime 未解决 failure 的安全水位。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealtimeFailureWater {
+    pub count: i64,
+    pub oldest_at: Option<DateTime<Utc>>,
+    pub latest_code: String,
+}
+
+impl RealtimeFailureWater {
+    /// 校验计数、最早时间和最新错误码之间的一致性。
+    pub fn validate(&self) -> bool {
+        if self.count < 0
+            || self.oldest_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+        {
+            return false;
+        }
+        if self.count == 0 {
+            self.oldest_at.is_none() && self.latest_code.is_empty()
+        } else {
+            self.oldest_at.is_some() && valid_failure_code(Some(&self.latest_code))
+        }
+    }
+}
+
+/// realtime dashboard 的全量安全摘要。
+///
+/// lag 只保留旧版 dashboard 的有界第一页；failure 只保留未解决水位，不包含正文和事件
+/// payload。详细运维列表仍由 realtime Admin 专用端点提供。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealtimeDashboardSnapshot {
+    pub observed_at: DateTime<Utc>,
+    pub lags: Vec<RealtimeLagSnapshot>,
+    pub failure: RealtimeFailureWater,
+}
+
+impl RealtimeDashboardSnapshot {
+    /// 校验观察时间、lag 数值和稳定排序，防止损坏投影进入 dashboard。
+    pub fn validate(&self) -> bool {
+        if self.observed_at.timestamp_nanos_opt().is_none()
+            || self.lags.len() as i64 > MAX_REALTIME_ADMIN_PAGE_SIZE
+            || !self.failure.validate()
+        {
+            return false;
+        }
+        let mut previous: Option<(&str, &str)> = None;
+        for lag in &self.lags {
+            if lag.offset < 0
+                || lag.latest_sequence < lag.offset
+                || lag.lag != lag.latest_sequence - lag.offset
+                || lag.last_advanced_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
+                || !valid_required_text(&lag.stream_key, 256)
+                || !valid_required_text(&lag.consumer_key, 128)
+                || previous.is_some_and(|(consumer, stream)| {
+                    lag.consumer_key.as_str() < consumer
+                        || (lag.consumer_key == consumer && lag.stream_key.as_str() <= stream)
+                })
+            {
+                return false;
+            }
+            previous = Some((&lag.consumer_key, &lag.stream_key));
+        }
+        true
+    }
 }
 
 /// realtime failure 查询条件。
@@ -160,6 +226,9 @@ pub struct RealtimeReplayResult {
 
 /// Admin realtime 查询和 replay 端口。
 pub trait RealtimeAdminPort: Send + Sync {
+    /// 读取旧版 Admin dashboard 所需的 lag/failure 安全摘要。
+    fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot>;
+
     fn list_lag(&self, request: RealtimeLagListRequest) -> ApplicationFuture<'_, RealtimeLagPage>;
 
     fn list_failures(

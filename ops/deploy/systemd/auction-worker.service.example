@@ -1,0 +1,35 @@
+[Unit]
+Description=Auction Rust Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=auction
+Group=auction
+SupplementaryGroups=auction-worker-control
+WorkingDirectory=/opt/auction
+Environment=AUCTION_CONFIG_FILE=/etc/auction/worker.toml
+ExecStart=/opt/auction/bin/auction-worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RuntimeDirectory=hv-auction hv-auction/worker
+RuntimeDirectoryMode=0750
+ReadWritePaths=/run/hv-auction /var/lib/auction
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

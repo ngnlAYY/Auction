@@ -69,10 +69,15 @@ impl DataKey {
         &self.fingerprint
     }
 
-    fn aead_key(&self) -> Result<aead::LessSafeKey, EquipmentKeySealerError> {
+    pub(crate) fn aead_key(&self) -> Result<aead::LessSafeKey, EquipmentKeySealerError> {
         let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, &self.material)
             .map_err(|_| EquipmentKeySealerError::Unconfigured)?;
         Ok(aead::LessSafeKey::new(unbound))
+    }
+
+    /// 在 integrations crate 内部向其他密钥用途适配器提供材料；不暴露到 crate 公共 API。
+    pub(crate) fn material(&self) -> &[u8] {
+        &self.material
     }
 }
 

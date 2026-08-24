@@ -2,8 +2,8 @@ use std::{collections::HashSet, fmt};
 
 use super::{
     MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
-    MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser, MoogleMailWorld,
-    protocol::valid_decimal_id,
+    MoogleMailMessageFields, MoogleMailOperation, MoogleMailParser, MoogleMailSendResponseFailure,
+    MoogleMailWorld, protocol::valid_decimal_id,
 };
 
 const MAX_SEND_ATTACHMENTS: usize = 1000;
@@ -56,6 +56,19 @@ pub struct MoogleMailSendReceipt {
     pub external_mail_id: Option<String>,
 }
 
+/// 最终 send POST 的结构化结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoogleMailSendOutcome {
+    /// 远端成功页已通过证明。
+    Sent(MoogleMailSendReceipt),
+    /// compose 初始页无法证明为干净状态，可能残留上一次结果未知的资产。
+    PreflightUnproven,
+    /// 远端可见文字明确报告收件人不存在。
+    RecipientNotFound { returned_mail_id: Option<String> },
+    /// 远端明确拒绝发送；附件已经分步放入 compose 时不能自动重试。
+    Rejected { assets_staged: bool },
+}
+
 /// 负责把一封 typed message 编排为受证明的多步 compose 写入。
 #[derive(Clone)]
 pub struct MoogleMailSender {
@@ -77,7 +90,7 @@ impl MoogleMailSender {
         &self,
         cookie: &MoogleMailCookie,
         request: MoogleMailSendRequest,
-    ) -> Result<MoogleMailSendReceipt, MoogleMailError> {
+    ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
         if !request.validate() {
             return Err(write_error(
                 request.world,
@@ -87,20 +100,22 @@ impl MoogleMailSender {
         }
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
-        let mut state = self.parser.parse_compose_state(&initial, request.world)?;
-        if !state.is_clean() {
-            return Err(write_error(
-                request.world,
-                MoogleMailOperation::Compose,
-                MoogleMailErrorCategory::ProtocolDrift,
-            ));
-        }
+        let mut state = match self.parser.parse_compose_state(&initial, request.world) {
+            Ok(state) if state.is_clean() => state,
+            Ok(_) | Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven),
+        };
 
         let mut equipment_ids = Vec::with_capacity(request.equipment_ids.len());
         if request.credits > 0 {
             let form =
                 MoogleMailForm::attach_credits(state.token(), &request.message, request.credits)
-                    .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
+                    .map_err(|_| {
+                        write_error(
+                            request.world,
+                            MoogleMailOperation::AttachAdd,
+                            MoogleMailErrorCategory::Configuration,
+                        )
+                    })?;
             let response = self.client.post(&compose, cookie, form).await?;
             state = self
                 .parser
@@ -151,14 +166,39 @@ impl MoogleMailSender {
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
         }
 
-        let form = MoogleMailForm::send(state.token(), &request.message)
-            .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?;
+        let assets_staged =
+            request.credits > 0 || request.cod > 0 || !request.equipment_ids.is_empty();
+        let form = MoogleMailForm::send(state.token(), &request.message).map_err(|_| {
+            if assets_staged {
+                write_unknown(request.world, MoogleMailOperation::Send)
+            } else {
+                write_error(
+                    request.world,
+                    MoogleMailOperation::Send,
+                    MoogleMailErrorCategory::Configuration,
+                )
+            }
+        })?;
         let response = self.client.post(&compose, cookie, form).await?;
+        if let Some(failure) = self
+            .parser
+            .classify_send_response_failure(&response, request.world)
+            .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?
+        {
+            return Ok(match failure {
+                MoogleMailSendResponseFailure::RecipientNotFound { returned_mail_id } => {
+                    MoogleMailSendOutcome::RecipientNotFound { returned_mail_id }
+                }
+                MoogleMailSendResponseFailure::Rejected => {
+                    MoogleMailSendOutcome::Rejected { assets_staged }
+                }
+            });
+        }
         let external_mail_id = self
             .parser
             .prove_send_completed(&response, request.world)
             .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?;
-        Ok(MoogleMailSendReceipt { external_mail_id })
+        Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
     }
 }
 

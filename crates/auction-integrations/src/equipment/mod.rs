@@ -8,7 +8,8 @@ use std::{collections::BTreeMap, fmt};
 
 use auction_application::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, ApplicationError,
-    ApplicationFuture, CanonicalEquipment, EquipmentKeySealerPort,
+    ApplicationFuture, CanonicalEquipment, EquipmentKeySealerPort, MailEquipmentAttachment,
+    MailEquipmentReader,
 };
 use auction_domain::{EquipmentId, EquipmentKey};
 use chrono::Utc;
@@ -154,6 +155,22 @@ impl EquipmentSourceAdapter {
         })
     }
 
+    async fn read_mail_attachment_inner(
+        &self,
+        world_id: String,
+        attachment: MailEquipmentAttachment,
+    ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
+        let key = attachment
+            .key
+            .with_bytes(|bytes| std::str::from_utf8(bytes).map(str::to_owned))
+            .map_err(|_| AdminIntakeError::InvalidSource)?
+            .map_err(|_| AdminIntakeError::InvalidSource)?;
+        let prefix = if world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
+        let mut target = self.endpoint.clone();
+        target.set_path(&format!("{prefix}{}/{key}", attachment.external_equipment_id));
+        self.read_url_inner(world_id, target.to_string()).await
+    }
+
     fn parse_equipment_url(
         &self,
         world_id: &str,
@@ -242,6 +259,20 @@ impl AdminIntakeSourceReader for EquipmentSourceAdapter {
     ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
         Box::pin(async move {
             self.read_json_inner(world_id, equipment).await.map_err(ApplicationError::from)
+        })
+    }
+}
+
+impl MailEquipmentReader for EquipmentSourceAdapter {
+    fn read(
+        &self,
+        world_id: String,
+        attachment: MailEquipmentAttachment,
+    ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot> {
+        Box::pin(async move {
+            self.read_mail_attachment_inner(world_id, attachment)
+                .await
+                .map_err(ApplicationError::from)
         })
     }
 }

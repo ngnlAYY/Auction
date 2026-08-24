@@ -5,9 +5,10 @@ use std::{marker::PhantomData, sync::Arc};
 #[cfg(feature = "postgres")]
 use auction_application::AdminMailService;
 use auction_application::{
-    AdminMailCommandPort, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakePage,
-    AdminMailPollState, AdminMailPollStateRequest, AdminMailPollTriggerCommand,
-    AdminMailPollingCommand, AdminMailReader, ApplicationFuture, Clock,
+    AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailIntakeDetail, AdminMailIntakeFilter,
+    AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest,
+    AdminMailPollTriggerCommand, AdminMailPollingCommand, AdminMailReader, ApplicationFuture,
+    Clock,
 };
 use uuid::Uuid;
 
@@ -42,6 +43,11 @@ impl<C> AdminMailReader for DatabaseAdminMailCommands<C>
 where
     C: Clock + 'static,
 {
+    fn dashboard_snapshot(&self) -> ApplicationFuture<'_, AdminMailDashboardSnapshot> {
+        let store = Arc::clone(&self.store);
+        Box::pin(async move { AdminMailReader::dashboard_snapshot(store.as_ref()).await })
+    }
+
     fn poll_state(
         &self,
         request: AdminMailPollStateRequest,

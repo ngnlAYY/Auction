@@ -4,17 +4,26 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 use crate::api::{RulesDocument, fetch_rules};
+use auction_web_shared::{MarkdownDocument, without_leading_title};
 
-use super::Placeholder;
+use super::{Placeholder, RetryPlaceholder, format_auction_time};
 
 pub(super) fn page() -> Element {
-    let rules = use_resource(fetch_rules);
+    let refresh_generation = use_context::<Signal<u64>>();
+    let rules = use_resource(move || {
+        let _ = refresh_generation();
+        fetch_rules()
+    });
     match &*rules.read_unchecked() {
         None => rsx! {
             Placeholder { title: t!("page-rules-title"), detail: t!("data-loading") }
         },
         Some(Err(_)) => rsx! {
-            Placeholder { title: t!("page-rules-title"), detail: t!("data-error") }
+            RetryPlaceholder {
+                title: t!("page-rules-title"),
+                detail: t!("data-error"),
+                refresh_generation,
+            }
         },
         Some(Ok(document)) => rsx! {
             RulesDocumentView { document: document.clone() }
@@ -31,9 +40,9 @@ fn RulesDocumentView(document: RulesDocument) -> Element {
                 {t!("rules-revision", revision: document.revision, locale: document.locale)}
             }
             p { class: "public-auction-page__status",
-                {t!("rules-published", published_at: document.published_at)}
+                {t!("rules-published", published_at: format_auction_time(&document.published_at))}
             }
-            pre { class: "public-auction-page__document", "{document.markdown}" }
+            MarkdownDocument { markdown: without_leading_title(&document.markdown) }
         }
     }
 }

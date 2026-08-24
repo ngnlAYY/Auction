@@ -14,6 +14,8 @@ pub struct SettlementWorkClaim {
     pub auction_id: AuctionId,
     pub workflow_id: Uuid,
     pub settlement_command_id: CommandId,
+    /// 领取时冻结的最晚 lot 有效结束时间；重试必须保持相同世代。
+    pub due_at: DateTime<Utc>,
     /// 仅补写结算完成 fence，不再次调用结算用例。
     pub completion_only: bool,
     pub worker_id: String,

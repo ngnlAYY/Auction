@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{app_title}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #0e1116;
+      }
+
+      html,
+      body {
+        min-block-size: 100%;
+        margin: 0;
+        background: #0e1116;
+      }
+
+      #main {
+        min-block-size: 100vh;
+      }
+
+      #main[data-dioxus-id] > .app-boot {
+        display: none;
+      }
+
+      .app-boot {
+        display: grid;
+        gap: 1rem;
+        inline-size: min(100%, 90rem);
+        min-block-size: 100vh;
+        margin-inline: auto;
+        align-content: start;
+        padding: 1rem 1.25rem;
+      }
+
+      .app-boot__header,
+      .app-boot__nav,
+      .app-boot__bar,
+      .app-boot__line {
+        border-radius: 0.25rem;
+        background: #1d242e;
+      }
+
+      .app-boot__header {
+        inline-size: min(100%, 18rem);
+        block-size: 1.25rem;
+      }
+
+      .app-boot__nav {
+        inline-size: min(100%, 14rem);
+        block-size: 2rem;
+      }
+
+      .app-boot__bar {
+        inline-size: 100%;
+        block-size: 5rem;
+      }
+
+      .app-boot__line {
+        inline-size: 100%;
+        block-size: 2.5rem;
+      }
+
+      @media (max-width: 48rem) {
+        .app-boot {
+          padding-inline: 0.75rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="main">
+      <div class="app-boot" aria-hidden="true">
+        <div class="app-boot__header"></div>
+        <div class="app-boot__nav"></div>
+        <div class="app-boot__bar"></div>
+        <div class="app-boot__line"></div>
+        <div class="app-boot__line"></div>
+      </div>
+    </div>
+  </body>
+</html>

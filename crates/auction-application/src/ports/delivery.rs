@@ -37,12 +37,24 @@ pub struct DeliverySendResult {
 pub struct DeliveryTransportError {
     pub failure_code: String,
     pub safe_detail: String,
-    /// true 表示远端结果未知，不能自动重发，必须进入人工 reconcile。
+    /// true 表示不能安全自动重发或终结，必须进入人工 reconcile。
+    ///
+    /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景。
     pub outcome_unknown: bool,
+    /// 远端明确失败时仍可能返回的安全引用，例如退信 `mid`。
+    pub external_reference: Option<String>,
+    /// 由 transport 产生的低基数安全元数据；不得包含请求 payload、Cookie 或原始响应。
+    pub result_metadata: Value,
 }
 
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
+    /// 在 delivery 进入 `sending` 前判断目标 world 当前是否有可用凭据。
+    ///
+    /// 无效 payload 必须返回 true，让正式发送路径把它收口为确定失败；false 只表示当前外部
+    /// 能力暂不可用，Worker 应释放 claim 而不是消耗交付。
+    fn available(&self, claim: &DeliveryWorkClaim) -> bool;
+
     fn send(
         &self,
         claim: DeliveryWorkClaim,
@@ -62,6 +74,7 @@ pub trait DeliveryWorkStore: Send + Sync {
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        sending_grace: std::time::Duration,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 
@@ -69,6 +82,21 @@ pub trait DeliveryWorkStore: Send + Sync {
         &self,
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
+
+    /// 在尚未开始外部写入时把有效 claim 释放回 pending。
+    fn release(
+        &self,
+        claim: DeliveryWorkClaim,
+        released_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
+
+    /// 外部发送尚未完成时续租当前 sending claimant。
+    fn renew(
+        &self,
+        claim: DeliveryWorkClaim,
+        renewed_at: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
     fn succeed(

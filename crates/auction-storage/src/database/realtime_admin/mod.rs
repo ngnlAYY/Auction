@@ -4,10 +4,11 @@
 //! audit 追加。原事件永不更新，替代事件必须通过 `replay_of_event_id` 建立明确关系。
 
 use auction_application::{
-    ApplicationError, ApplicationFuture, PublicRealtimeEvent, RealtimeAdminError,
-    RealtimeAdminPort, RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
-    RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot, RealtimeReplayCommand,
-    RealtimeReplayResult, RepositoryError,
+    ApplicationError, ApplicationFuture, MAX_REALTIME_ADMIN_PAGE_SIZE, PublicRealtimeEvent,
+    RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot, RealtimeFailureListRequest,
+    RealtimeFailurePage, RealtimeFailureSnapshot, RealtimeFailureWater, RealtimeLagListRequest,
+    RealtimeLagPage, RealtimeLagSnapshot, RealtimeReplayCommand, RealtimeReplayResult,
+    RepositoryError,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,17 @@ struct ReplayLedgerPayload {
 }
 
 impl RealtimeAdminPort for DatabaseStore {
+    fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => dashboard_snapshot_postgres(store).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => dashboard_snapshot_sqlite(store).await,
+            }
+        })
+    }
+
     fn list_lag(&self, request: RealtimeLagListRequest) -> ApplicationFuture<'_, RealtimeLagPage> {
         Box::pin(async move {
             if !request.validate() {
@@ -103,6 +115,128 @@ impl RealtimeAdminPort for DatabaseStore {
 }
 
 #[cfg(feature = "postgres")]
+async fn dashboard_snapshot_postgres(
+    store: &super::PostgresStore,
+) -> Result<RealtimeDashboardSnapshot, ApplicationError> {
+    let lag_page = list_lag_postgres(
+        store,
+        RealtimeLagListRequest {
+            stream_prefix: None,
+            consumer_key: None,
+            limit: MAX_REALTIME_ADMIN_PAGE_SIZE,
+            offset: 0,
+        },
+    )
+    .await?;
+    let failure = failure_water_postgres(store).await?;
+    let snapshot =
+        RealtimeDashboardSnapshot { observed_at: Utc::now(), lags: lag_page.entries, failure };
+    if snapshot.validate() {
+        Ok(snapshot)
+    } else {
+        Err(storage_error("PostgreSQL realtime dashboard 摘要无效"))
+    }
+}
+
+#[cfg(feature = "sqlite")]
+async fn dashboard_snapshot_sqlite(
+    store: &super::SqliteStore,
+) -> Result<RealtimeDashboardSnapshot, ApplicationError> {
+    let lag_page = list_lag_sqlite(
+        store,
+        RealtimeLagListRequest {
+            stream_prefix: None,
+            consumer_key: None,
+            limit: MAX_REALTIME_ADMIN_PAGE_SIZE,
+            offset: 0,
+        },
+    )
+    .await?;
+    let failure = failure_water_sqlite(store).await?;
+    let snapshot =
+        RealtimeDashboardSnapshot { observed_at: Utc::now(), lags: lag_page.entries, failure };
+    if snapshot.validate() {
+        Ok(snapshot)
+    } else {
+        Err(storage_error("Lite realtime dashboard 摘要无效"))
+    }
+}
+
+#[cfg(feature = "postgres")]
+async fn failure_water_postgres(
+    store: &super::PostgresStore,
+) -> Result<RealtimeFailureWater, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS count,
+                MIN(failed_at) AS oldest_at,
+                COALESCE((
+                    SELECT latest.failure_code
+                    FROM public.realtime_failures AS latest
+                    WHERE latest.resolved_at IS NULL
+                    ORDER BY latest.failed_at DESC, latest.id DESC
+                    LIMIT 1
+                ), '') AS latest_code
+         FROM public.realtime_failures
+         WHERE resolved_at IS NULL",
+    )
+    .fetch_one(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL realtime failure 水位失败"))?;
+    let water = RealtimeFailureWater {
+        count: row.try_get("count").map_err(|_| storage_error("读取 realtime failure 数量失败"))?,
+        oldest_at: row
+            .try_get("oldest_at")
+            .map_err(|_| storage_error("读取 realtime failure 最早时间失败"))?,
+        latest_code: row
+            .try_get("latest_code")
+            .map_err(|_| storage_error("读取 realtime failure 最新代码失败"))?,
+    };
+    if water.validate() {
+        Ok(water)
+    } else {
+        Err(storage_error("PostgreSQL realtime failure 水位投影无效"))
+    }
+}
+
+#[cfg(feature = "sqlite")]
+async fn failure_water_sqlite(
+    store: &super::SqliteStore,
+) -> Result<RealtimeFailureWater, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS count,
+                MIN(failed_at) AS oldest_at,
+                COALESCE((
+                    SELECT latest.failure_code
+                    FROM realtime_failures AS latest
+                    WHERE latest.resolved_at IS NULL
+                    ORDER BY latest.failed_at DESC, latest.id DESC
+                    LIMIT 1
+                ), '') AS latest_code
+         FROM realtime_failures
+         WHERE resolved_at IS NULL",
+    )
+    .fetch_one(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 Lite realtime failure 水位失败"))?;
+    let water = RealtimeFailureWater {
+        count: row.try_get("count").map_err(|_| storage_error("读取 Lite failure 数量失败"))?,
+        oldest_at: row
+            .try_get::<Option<String>, _>("oldest_at")
+            .map_err(|_| storage_error("读取 Lite failure 最早时间失败"))?
+            .map(parse_timestamp)
+            .transpose()?,
+        latest_code: row
+            .try_get("latest_code")
+            .map_err(|_| storage_error("读取 Lite failure 最新代码失败"))?,
+    };
+    if water.validate() {
+        Ok(water)
+    } else {
+        Err(storage_error("Lite realtime failure 水位投影无效"))
+    }
+}
+
+#[cfg(feature = "postgres")]
 async fn list_lag_postgres(
     store: &super::PostgresStore,
     request: RealtimeLagListRequest,
@@ -123,7 +257,8 @@ async fn list_lag_postgres(
     .map_err(|_| storage_error("读取 PostgreSQL realtime lag 总数失败"))?;
     let rows = sqlx::query(
         "SELECT offset_row.consumer_key, offset_row.stream_key,
-                offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence
+                offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence,
+                offset_row.updated_at AS last_advanced_at
          FROM public.realtime_consumer_offsets AS offset_row
          JOIN public.realtime_streams AS stream ON stream.stream_key = offset_row.stream_key
          WHERE offset_row.stream_key LIKE COALESCE($1::text || '%', '%')
@@ -162,7 +297,8 @@ async fn list_lag_sqlite(
     .map_err(|_| storage_error("读取 Lite realtime lag 总数失败"))?;
     let rows = sqlx::query(
         "SELECT offset_row.consumer_key, offset_row.stream_key,
-                offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence
+                offset_row.last_sequence, stream.next_sequence - 1 AS latest_sequence,
+                offset_row.updated_at AS last_advanced_at
          FROM realtime_consumer_offsets AS offset_row
          JOIN realtime_streams AS stream ON stream.stream_key = offset_row.stream_key
          WHERE offset_row.stream_key LIKE COALESCE(? || '%', '%')
@@ -198,7 +334,17 @@ fn lag_from_postgres_row(row: PgRow) -> Result<RealtimeLagSnapshot, ApplicationE
     let lag = latest_sequence
         .checked_sub(offset)
         .ok_or_else(|| storage_error("PostgreSQL realtime lag 水位倒退"))?;
-    Ok(RealtimeLagSnapshot { stream_key, consumer_key, offset, latest_sequence, lag })
+    Ok(RealtimeLagSnapshot {
+        stream_key,
+        consumer_key,
+        offset,
+        latest_sequence,
+        lag,
+        last_advanced_at: Some(
+            row.try_get("last_advanced_at")
+                .map_err(|_| storage_error("读取 PostgreSQL lag 更新时间失败"))?,
+        ),
+    })
 }
 
 #[cfg(feature = "sqlite")]
@@ -214,7 +360,17 @@ fn lag_from_sqlite_row(row: SqliteRow) -> Result<RealtimeLagSnapshot, Applicatio
     let lag = latest_sequence
         .checked_sub(offset)
         .ok_or_else(|| storage_error("Lite realtime lag 水位倒退"))?;
-    Ok(RealtimeLagSnapshot { stream_key, consumer_key, offset, latest_sequence, lag })
+    Ok(RealtimeLagSnapshot {
+        stream_key,
+        consumer_key,
+        offset,
+        latest_sequence,
+        lag,
+        last_advanced_at: Some(parse_timestamp(
+            row.try_get("last_advanced_at")
+                .map_err(|_| storage_error("读取 Lite lag 更新时间失败"))?,
+        )?),
+    })
 }
 
 fn validate_lag_page(

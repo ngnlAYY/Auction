@@ -305,15 +305,14 @@ impl fmt::Debug for AdminIntakeSourceSnapshot {
 }
 
 impl AdminIntakeSourceSnapshot {
-    /// 校验适配器输出且拒绝未来时间和非 object attributes。
-    pub fn validate(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
+    /// 校验适配器输出的结构、时间和属性形状，但保留 `tradeable` 供邮件策略给出稳定拒绝原因。
+    pub fn validate_for_mail(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
         if !valid_text(&self.adapter, 128)
             || self.source_fingerprint == [0; 32]
             || !decimal_identity(&self.external_equipment_id)
             || !valid_text(&self.name, 512)
             || !valid_text(&self.category, 128)
             || self.level.is_some_and(|level| !(0..=100_000).contains(&level))
-            || !self.tradeable
             || self.collected_at.timestamp_micros() == 0
             || self.collected_at > now
             || !self.attributes.is_object()
@@ -321,6 +320,12 @@ impl AdminIntakeSourceSnapshot {
             return Err(AdminIntakeError::InvalidSource);
         }
         Ok(())
+    }
+
+    /// 校验适配器输出且拒绝未来时间、非 object attributes 和不可交易装备。
+    pub fn validate(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
+        self.validate_for_mail(now)?;
+        self.tradeable.then_some(()).ok_or(AdminIntakeError::InvalidSource)
     }
 
     /// 清零短生命周期 key。

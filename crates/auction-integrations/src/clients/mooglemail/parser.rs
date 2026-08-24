@@ -21,6 +21,7 @@ use super::{
 };
 
 const MAX_INBOX_ROWS_PER_PAGE: usize = 1000;
+const MAX_SENT_ROWS_PER_PAGE: usize = MAX_INBOX_ROWS_PER_PAGE;
 const MAX_ATTACHMENT_ENTRIES: usize = 1000;
 const MAX_SUMMARY_SUBJECT_BYTES: usize = 512;
 const MAX_MESSAGE_TEXT_BYTES: usize = 8 * 1024 * 1024;
@@ -101,6 +102,71 @@ pub struct MoogleMailMessage {
     pub returnable: bool,
     /// 详情页是否提供领取附件动作证明。
     pub claimable: bool,
+}
+
+/// 详情页动作编排所需的短生命周期状态。
+///
+/// 该状态为动作前后身份与资产证明保留 token、邮件身份、正文和附件清单，
+/// 但不保存装备 key 或原始 HTML。`Debug` 对身份与正文字段脱敏。
+pub struct MoogleMailActionState {
+    pub(crate) token: MoogleMailToken,
+    recipient: String,
+    sender: String,
+    subject: String,
+    body: String,
+    equipment_ids: Vec<String>,
+    credits: i64,
+    cod: i64,
+    attachment_count: usize,
+    /// 详情页是否声明可以退回整封邮件。
+    pub returnable: bool,
+    /// 详情页是否声明可以领取全部附件。
+    pub claimable: bool,
+}
+
+impl fmt::Debug for MoogleMailActionState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailActionState")
+            .field("token", &"[REDACTED]")
+            .field("recipient", &"[REDACTED]")
+            .field("sender", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("body", &"[REDACTED]")
+            .field("equipment_count", &self.equipment_ids.len())
+            .field("credits", &self.credits)
+            .field("cod", &self.cod)
+            .field("attachment_count", &self.attachment_count)
+            .field("returnable", &self.returnable)
+            .field("claimable", &self.claimable)
+            .finish()
+    }
+}
+
+impl MoogleMailActionState {
+    pub(crate) fn token(&self) -> &MoogleMailToken {
+        &self.token
+    }
+
+    pub(crate) fn sender(&self) -> &str {
+        &self.sender
+    }
+
+    pub(crate) fn equipment_ids(&self) -> &[String] {
+        &self.equipment_ids
+    }
+
+    pub(crate) fn credits(&self) -> i64 {
+        self.credits
+    }
+
+    pub(crate) fn cod(&self) -> i64 {
+        self.cod
+    }
+
+    pub(crate) fn attachment_count(&self) -> usize {
+        self.attachment_count
+    }
 }
 
 impl fmt::Debug for MoogleMailMessage {
@@ -200,6 +266,102 @@ pub struct MoogleMailInboxPage {
     pub has_next_page: bool,
 }
 
+/// 已发送邮件列表中可用于 exact ID 查找的安全摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailSentSummary {
+    /// 远端 `mid`。
+    pub external_mail_id: String,
+    /// 邮件所在世界。
+    pub world: MoogleMailWorld,
+    /// 收件人显示名。
+    pub recipient: String,
+    /// 已发送邮件标题。
+    pub subject: String,
+    /// 远端 HVT-8 时间转换后的 UTC 时间。
+    pub sent_at: DateTime<Utc>,
+}
+
+impl MoogleMailSentSummary {
+    /// 校验摘要可以进入 Sent 详情读取队列。
+    pub fn validate(&self) -> bool {
+        valid_opaque_id(&self.external_mail_id)
+            && valid_line(&self.recipient, 256, false)
+            && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
+            && self.sent_at.timestamp_nanos_opt().is_some()
+    }
+}
+
+/// 单页已发送邮件解析结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailSentPage {
+    /// 按远端 newest-first 顺序排列的摘要。
+    pub summaries: Vec<MoogleMailSentSummary>,
+    /// 是否存在严格验证过的下一页链接。
+    pub has_next_page: bool,
+}
+
+/// 精确 remote ID 的已发送邮件与当前待领取资产快照。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailSentSnapshot {
+    /// 远端邮件 ID。
+    pub external_mail_id: String,
+    /// 邮件所在世界。
+    pub world: MoogleMailWorld,
+    /// 收件人。
+    pub recipient: String,
+    /// 标题。
+    pub subject: String,
+    /// 发送时间。
+    pub sent_at: DateTime<Utc>,
+    /// 当前仍附在邮件中的 Credits。
+    pub remaining_credits: i64,
+    /// 当前仍待支付的 COD。
+    pub cod_pending: i64,
+    /// 当前仍附在邮件中的装备 ID，必须按字典序排列且无重复。
+    pub remaining_equipment_ids: Vec<String>,
+    /// 页面是否明确证明邮件已领取完毕。
+    pub collected: bool,
+    /// 本次读取的观察时间。
+    pub observed_at: DateTime<Utc>,
+}
+
+impl MoogleMailSentSnapshot {
+    /// 校验 Sent snapshot 的身份、时间和 remaining/collected 矩阵。
+    pub fn validate(&self) -> bool {
+        valid_opaque_id(&self.external_mail_id)
+            && valid_line(&self.recipient, 256, false)
+            && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
+            && self.sent_at.timestamp_nanos_opt().is_some()
+            && self.observed_at.timestamp_nanos_opt().is_some()
+            && !self.observed_at.lt(&self.sent_at)
+            && self.remaining_credits >= 0
+            && self.cod_pending >= 0
+            && canonical_equipment_ids(&self.remaining_equipment_ids)
+            && self.collected
+                == (self.remaining_credits == 0
+                    && self.cod_pending == 0
+                    && self.remaining_equipment_ids.is_empty())
+    }
+}
+
+/// 一次同步读取的 world wallet Credits 快照。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoogleMailBalanceSnapshot {
+    /// 余额所属世界。
+    pub world: MoogleMailWorld,
+    /// 页面与脚本均证明的 Credits 余额。
+    pub credits: i64,
+    /// 本次读取的观察时间。
+    pub observed_at: DateTime<Utc>,
+}
+
+impl MoogleMailBalanceSnapshot {
+    /// 校验余额 world、数值和观察时间。
+    pub fn validate(&self) -> bool {
+        self.credits >= 0 && self.observed_at.timestamp_nanos_opt().is_some()
+    }
+}
+
 /// 无状态的 MoogleMail HTML 解析器。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MoogleMailParser;
@@ -261,8 +423,11 @@ impl MoogleMailParser {
             }
             let sender = normalize_text(cells[0].text().collect::<String>());
             let subject = normalize_text(cells[1].text().collect::<String>());
-            let received_at =
-                parse_inbox_time(&normalize_text(cells[2].text().collect::<String>()), world)?;
+            let received_at = parse_page_time(
+                &normalize_text(cells[2].text().collect::<String>()),
+                MoogleMailOperation::Inbox,
+                world,
+            )?;
             if !valid_line(&sender, 256, false)
                 || !valid_line(&subject, MAX_SUMMARY_SUBJECT_BYTES, true)
             {
@@ -279,8 +444,303 @@ impl MoogleMailParser {
         if !empty_row && summaries.is_empty() {
             return Err(protocol(MoogleMailOperation::Inbox, world));
         }
-        let has_next_page = parse_next_page(&document, world, page)?;
+        let has_next_page =
+            parse_next_page(&document, world, page, "inbox", MoogleMailOperation::Inbox)?;
         Ok(MoogleMailInboxPage { summaries, has_next_page })
+    }
+
+    /// 严格解析一页 Sent 列表，并将跨页重复 ID 视为协议漂移。
+    pub fn scan_sent_page(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+        page: usize,
+        seen: &mut HashSet<String>,
+    ) -> Result<MoogleMailSentPage, MoogleMailError> {
+        let source =
+            str::from_utf8(document).map_err(|_| protocol(MoogleMailOperation::Sent, world))?;
+        if source.trim().is_empty() {
+            return Err(protocol(MoogleMailOperation::Sent, world));
+        }
+        let document = Html::parse_document(source);
+        let table_selector = selector("table#mmail_list", MoogleMailOperation::Sent, world)?;
+        let tables = document.select(&table_selector).collect::<Vec<_>>();
+        if tables.len() != 1 {
+            return Err(protocol(MoogleMailOperation::Sent, world));
+        }
+        let row_selector = selector("tr", MoogleMailOperation::Sent, world)?;
+        let rows = tables[0].select(&row_selector).collect::<Vec<_>>();
+        if rows.is_empty() || rows.len().saturating_sub(1) > MAX_SENT_ROWS_PER_PAGE {
+            return Err(protocol(MoogleMailOperation::Sent, world));
+        }
+        if !valid_sent_header(rows[0], world)? {
+            return Err(protocol(MoogleMailOperation::Sent, world));
+        }
+
+        let cell_selector = selector("td", MoogleMailOperation::Sent, world)?;
+        let mut summaries = Vec::with_capacity(rows.len().saturating_sub(1));
+        let mut empty_row = false;
+        for row in rows.iter().skip(1) {
+            let cells = row.select(&cell_selector).collect::<Vec<_>>();
+            let empty_selector = selector("td#mmail_nnm", MoogleMailOperation::Sent, world)?;
+            let is_empty = row.select(&empty_selector).count() == 1;
+            if is_empty {
+                if cells.len() != 1 || empty_row || !summaries.is_empty() {
+                    return Err(protocol(MoogleMailOperation::Sent, world));
+                }
+                empty_row = true;
+                continue;
+            }
+            if empty_row || cells.len() != 4 {
+                return Err(protocol(MoogleMailOperation::Sent, world));
+            }
+            let onclick = row
+                .value()
+                .attr("onclick")
+                .ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
+            let external_mail_id =
+                extract_mid(onclick).ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
+            if !seen.insert(external_mail_id.clone()) {
+                return Err(protocol(MoogleMailOperation::Sent, world));
+            }
+            let recipient = normalize_text(cells[0].text().collect::<String>());
+            let subject = normalize_text(cells[1].text().collect::<String>());
+            let sent_at = parse_page_time(
+                &normalize_text(cells[2].text().collect::<String>()),
+                MoogleMailOperation::Sent,
+                world,
+            )?;
+            let read_state = normalize_text(cells[3].text().collect::<String>());
+            if !valid_line(&recipient, 256, false)
+                || !valid_line(&subject, MAX_SUMMARY_SUBJECT_BYTES, false)
+                || !valid_line(&read_state, 64, true)
+            {
+                return Err(protocol(MoogleMailOperation::Sent, world));
+            }
+            summaries.push(MoogleMailSentSummary {
+                external_mail_id,
+                world,
+                recipient,
+                subject,
+                sent_at,
+            });
+        }
+        if !empty_row && summaries.is_empty() {
+            return Err(protocol(MoogleMailOperation::Sent, world));
+        }
+        let has_next_page =
+            parse_next_page(&document, world, page, "sent", MoogleMailOperation::Sent)?;
+        Ok(MoogleMailSentPage { summaries, has_next_page })
+    }
+
+    /// 严格解析与 Sent 摘要身份一致的详情快照。
+    pub fn parse_sent_detail(
+        &self,
+        document: &[u8],
+        summary: &MoogleMailSentSummary,
+        observed_at: DateTime<Utc>,
+    ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
+        if !summary.validate() || observed_at < summary.sent_at {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::Configuration,
+            ));
+        }
+        let source = str::from_utf8(document).map_err(|_| {
+            detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            )
+        })?;
+        if source.trim().is_empty() {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let document = Html::parse_document(source);
+        parse_token_for_operation(&document, summary.world, MoogleMailOperation::SentDetail)?;
+        let envelope_selector =
+            selector("#mmail_outer", MoogleMailOperation::SentDetail, summary.world)?;
+        let form_selector =
+            selector("form#mailform", MoogleMailOperation::SentDetail, summary.world)?;
+        let panes_selector =
+            selector("#mmail_attachpanes", MoogleMailOperation::SentDetail, summary.world)?;
+        let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
+        let forms = document.select(&form_selector).collect::<Vec<_>>();
+        let panes = document.select(&panes_selector).collect::<Vec<_>>();
+        if envelopes.len() != 1 || forms.len() != 1 || panes.len() != 1 {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        if envelopes[0].select(&form_selector).count() != 1
+            || envelopes[0].select(&panes_selector).count() != 1
+        {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let fields =
+            parse_detail_fields_for(forms[0], summary.world, MoogleMailOperation::SentDetail)?;
+        if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
+            || fields.subject != summary.subject
+        {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::IdentityMismatch,
+            ));
+        }
+
+        let script = script_text(&document, summary.world, MoogleMailOperation::SentDetail)?;
+        let executable = executable_javascript(&script).ok_or_else(|| {
+            detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            )
+        })?;
+        let count = required_script_value(&executable, "attach_count");
+        let cod = required_script_value(&executable, "attach_cod");
+        let state = required_script_value(&executable, "mail_state");
+        if count.is_none()
+            || cod.is_none()
+            || state != Some(1)
+            || count.is_some_and(|value| !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&value))
+            || cod.is_some_and(|value| value < 0)
+        {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let (Some(count), Some(cod)) = (count, cod) else {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        };
+
+        let list_selector =
+            selector("#mmail_attachlist", MoogleMailOperation::SentDetail, summary.world)?;
+        let all_lists = document.select(&list_selector).collect::<Vec<_>>();
+        let nested_lists = panes[0].select(&list_selector).collect::<Vec<_>>();
+        if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let (remaining_equipment_ids, remaining_credits, entries) =
+            if let Some(list) = nested_lists.first() {
+                let (equipment_ids, credits, entries) =
+                    parse_attachment_manifest(*list, summary.world)?;
+                (equipment_ids, credits, entries)
+            } else {
+                (Vec::new(), 0, 0)
+            };
+        if entries as i64 != count
+            || (count == 0 && !nested_lists.is_empty())
+            || (count > 0 && nested_lists.len() != 1)
+            || (cod > 0 && count == 0)
+        {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+
+        let current_cod_selector =
+            selector("#mmail_currentcod", MoogleMailOperation::SentDetail, summary.world)?;
+        let current_cod = document.select(&current_cod_selector).collect::<Vec<_>>();
+        if current_cod.len() > 1
+            || current_cod.first().is_some_and(|element| {
+                parse_current_cod(&normalize_text(element.text().collect::<String>())) != Some(cod)
+            })
+        {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let mut remaining_equipment_ids = remaining_equipment_ids;
+        remaining_equipment_ids.sort_unstable();
+        let snapshot = MoogleMailSentSnapshot {
+            external_mail_id: summary.external_mail_id.clone(),
+            world: summary.world,
+            recipient: summary.recipient.clone(),
+            subject: summary.subject.clone(),
+            sent_at: summary.sent_at,
+            remaining_credits,
+            cod_pending: cod,
+            collected: count == 0 && cod == 0,
+            remaining_equipment_ids,
+            observed_at,
+        };
+        if !snapshot.validate() {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        Ok(snapshot)
+    }
+
+    /// 严格解析 Item Shop 余额，并要求可见余额与脚本余额唯一且一致。
+    pub fn parse_balance(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+        observed_at: DateTime<Utc>,
+    ) -> Result<MoogleMailBalanceSnapshot, MoogleMailError> {
+        if observed_at.timestamp_nanos_opt().is_none() {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        }
+        let source =
+            str::from_utf8(document).map_err(|_| protocol(MoogleMailOperation::Balance, world))?;
+        if source.trim().is_empty() {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        }
+        let document = Html::parse_document(source);
+        let networth_selector = selector("#networth", MoogleMailOperation::Balance, world)?;
+        let networth = document.select(&networth_selector).collect::<Vec<_>>();
+        if networth.len() != 1 {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        }
+        let visible_credits =
+            parse_networth_credits(&normalize_text(networth[0].text().collect::<String>()));
+        let script = script_text(&document, world, MoogleMailOperation::Balance)?;
+        let executable = executable_javascript(&script)
+            .ok_or_else(|| protocol(MoogleMailOperation::Balance, world))?;
+        let script_credits = required_script_value(&executable, "current_credits");
+        if visible_credits.is_none()
+            || script_credits.is_none()
+            || visible_credits != script_credits
+        {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        }
+        let Some(credits) = visible_credits else {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        };
+        let snapshot = MoogleMailBalanceSnapshot { world, credits, observed_at };
+        if !snapshot.validate() {
+            return Err(protocol(MoogleMailOperation::Balance, world));
+        }
+        Ok(snapshot)
     }
 
     /// 严格解析单封详情，并以收件箱摘要校验稳定身份。
@@ -356,9 +816,181 @@ impl MoogleMailParser {
         }
         Ok(message)
     }
+
+    /// 严格解析详情页中可执行的 return/take 动作状态。
+    pub fn parse_action_state(
+        &self,
+        source_bytes: &[u8],
+        world: MoogleMailWorld,
+    ) -> Result<MoogleMailActionState, MoogleMailError> {
+        let source = str::from_utf8(source_bytes)
+            .map_err(|_| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+        if source.trim().is_empty() {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let document = Html::parse_document(source);
+        if has_result_message(&document, world)? {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let token = parse_token(&document, world)?;
+        let envelope_selector = selector("#mmail_outer", MoogleMailOperation::Detail, world)?;
+        let form_selector = selector("form#mailform", MoogleMailOperation::Detail, world)?;
+        let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
+        let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
+        let forms = document.select(&form_selector).collect::<Vec<_>>();
+        let panes = document.select(&panes_selector).collect::<Vec<_>>();
+        if envelopes.len() != 1
+            || forms.len() != 1
+            || panes.len() != 1
+            || envelopes[0].select(&form_selector).count() != 1
+            || envelopes[0].select(&panes_selector).count() != 1
+        {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let fields = parse_detail_fields(forms[0], world)?;
+        let textarea_selector = selector("textarea", MoogleMailOperation::Detail, world)?;
+        let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
+        if textareas.len() != 1 {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let body = textareas[0].text().collect::<String>();
+        if !valid_message_body(&body) {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let assets = parse_detail_asset_manifest(&document, world)?;
+        let (returnable, claimable) = parse_detail_actions(envelopes[0], world)?;
+        let has_assets = !assets.equipment_ids.is_empty() || assets.credits > 0;
+        if claimable != has_assets {
+            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        Ok(MoogleMailActionState {
+            token,
+            recipient: fields.recipient,
+            sender: fields.sender,
+            subject: fields.subject,
+            body,
+            equipment_ids: assets.equipment_ids,
+            credits: assets.credits,
+            cod: assets.cod,
+            attachment_count: assets.entry_count,
+            returnable,
+            claimable,
+        })
+    }
+
+    /// 通过返回后的收件箱结构和目标 `mid` 缺席证明整封退回已完成。
+    pub fn prove_return_completed(
+        &self,
+        source_bytes: &[u8],
+        world: MoogleMailWorld,
+        external_mail_id: &str,
+    ) -> Result<(), MoogleMailError> {
+        let operation = MoogleMailOperation::ReturnMessage;
+        if !valid_opaque_id(external_mail_id) {
+            return Err(action_proof_error(operation, world));
+        }
+        let source =
+            str::from_utf8(source_bytes).map_err(|_| action_proof_error(operation, world))?;
+        if source.trim().is_empty() {
+            return Err(action_proof_error(operation, world));
+        }
+        let document = Html::parse_document(source);
+        if has_result_message(&document, world).map_err(|_| action_proof_error(operation, world))? {
+            return Err(action_proof_error(operation, world));
+        }
+        let form_selector = selector("form#mailform", operation, world)
+            .map_err(|_| action_proof_error(operation, world))?;
+        let table_selector = selector("table#mmail_list", operation, world)
+            .map_err(|_| action_proof_error(operation, world))?;
+        let reference_selector = selector("[href], [onclick], [action]", operation, world)
+            .map_err(|_| action_proof_error(operation, world))?;
+        let tables = document.select(&table_selector).collect::<Vec<_>>();
+        if document.select(&form_selector).next().is_some()
+            || tables.len() != 1
+            || document.select(&reference_selector).any(|element| {
+                ["href", "onclick", "action"].iter().any(|attribute| {
+                    element
+                        .value()
+                        .attr(attribute)
+                        .is_some_and(|value| attribute_references_mail_id(value, external_mail_id))
+                })
+            })
+        {
+            return Err(action_proof_error(operation, world));
+        }
+        let row_selector =
+            selector("tr", operation, world).map_err(|_| action_proof_error(operation, world))?;
+        let cell_selector =
+            selector("td", operation, world).map_err(|_| action_proof_error(operation, world))?;
+        let empty_selector = selector("td#mmail_nnm", operation, world)
+            .map_err(|_| action_proof_error(operation, world))?;
+        let rows = tables[0].select(&row_selector).collect::<Vec<_>>();
+        if rows.len() < 2
+            || !valid_inbox_header(rows[0], world)
+                .map_err(|_| action_proof_error(operation, world))?
+        {
+            return Err(action_proof_error(operation, world));
+        }
+        for row in &rows[1..] {
+            let cells = row.select(&cell_selector).count();
+            if row.select(&empty_selector).count() == 1 && cells == 1 {
+                continue;
+            }
+            let mail_id = row.value().attr("onclick").and_then(extract_mid);
+            if cells != 4 || mail_id.as_deref().is_none_or(|mail_id| mail_id == external_mail_id) {
+                return Err(action_proof_error(operation, world));
+            }
+        }
+        Ok(())
+    }
+
+    /// 通过动作前后的邮件身份、资产归零和正文回执证明附件领取已完成。
+    pub fn prove_take_completed(
+        &self,
+        before: &MoogleMailActionState,
+        source_bytes: &[u8],
+        world: MoogleMailWorld,
+    ) -> Result<(), MoogleMailError> {
+        let operation = MoogleMailOperation::Take;
+        match self.parse_action_state(source_bytes, world) {
+            Ok(after) => {
+                if after.recipient != before.recipient
+                    || after.sender != before.sender
+                    || after.subject != before.subject
+                    || !after.equipment_ids.is_empty()
+                    || after.credits != 0
+                    || after.cod != 0
+                    || after.attachment_count != 0
+                    || after.claimable
+                {
+                    return Err(action_proof_error(operation, world));
+                }
+                prove_take_identity_and_receipts(
+                    before,
+                    &after.recipient,
+                    &after.sender,
+                    &after.subject,
+                    &after.body,
+                    world,
+                )
+            }
+            Err(_) => {
+                let (fields, body) = parse_terminal_empty_detail(source_bytes, world)?;
+                prove_take_identity_and_receipts(
+                    before,
+                    &fields.recipient,
+                    &fields.sender,
+                    &fields.subject,
+                    &body,
+                    world,
+                )
+            }
+        }
+    }
 }
 
 struct DetailFields {
+    recipient: String,
     sender: String,
     subject: String,
 }
@@ -367,6 +999,148 @@ struct DetailAssets {
     attachments: Vec<MoogleMailAttachment>,
     credits: i64,
     cod: i64,
+}
+
+struct DetailAssetManifest {
+    equipment_ids: Vec<String>,
+    credits: i64,
+    cod: i64,
+    entry_count: usize,
+}
+
+fn parse_terminal_empty_detail(
+    source_bytes: &[u8],
+    world: MoogleMailWorld,
+) -> Result<(DetailFields, String), MoogleMailError> {
+    let operation = MoogleMailOperation::Take;
+    let source = str::from_utf8(source_bytes).map_err(|_| action_proof_error(operation, world))?;
+    if source.trim().is_empty() {
+        return Err(action_proof_error(operation, world));
+    }
+    let document = Html::parse_document(source);
+    if has_result_message(&document, world).map_err(|_| action_proof_error(operation, world))? {
+        return Err(action_proof_error(operation, world));
+    }
+    parse_token_for_operation(&document, world, operation)
+        .map_err(|_| action_proof_error(operation, world))?;
+
+    let envelope_selector = selector("#mmail_outer", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let form_selector = selector("form#mailform", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let all_form_selector =
+        selector("form", operation, world).map_err(|_| action_proof_error(operation, world))?;
+    let panes_selector = selector("#mmail_attachpanes", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let buttons_selector = selector("#mmail_showbuttons", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
+    let forms = document.select(&form_selector).collect::<Vec<_>>();
+    let panes = document.select(&panes_selector).collect::<Vec<_>>();
+    let buttons = document.select(&buttons_selector).collect::<Vec<_>>();
+    if envelopes.len() != 1
+        || forms.len() != 1
+        || document.select(&all_form_selector).count() != 1
+        || panes.len() != 1
+        || buttons.len() != 1
+        || envelopes[0].select(&form_selector).count() != 1
+        || envelopes[0].select(&panes_selector).count() != 1
+        || envelopes[0].select(&buttons_selector).count() != 1
+    {
+        return Err(action_proof_error(operation, world));
+    }
+
+    let onclick_selector = selector("[onclick]", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let asset_selector =
+        selector("#mmail_attachlist, #mmail_attachcount, #newcod", operation, world)
+            .map_err(|_| action_proof_error(operation, world))?;
+    let equipment_selector = selector("[onmouseover]", operation, world)
+        .map_err(|_| action_proof_error(operation, world))?;
+    if document.select(&onclick_selector).next().is_some()
+        || document.select(&asset_selector).next().is_some()
+        || document.select(&equipment_selector).next().is_some()
+        || ["attach_count", "attach_cod", "mail_state", "equips.set("]
+            .iter()
+            .any(|marker| source.contains(marker))
+    {
+        return Err(action_proof_error(operation, world));
+    }
+
+    let fields = parse_detail_fields_for(forms[0], world, operation)
+        .map_err(|_| action_proof_error(operation, world))?;
+    let textarea_selector =
+        selector("textarea", operation, world).map_err(|_| action_proof_error(operation, world))?;
+    let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
+    if textareas.len() != 1 {
+        return Err(action_proof_error(operation, world));
+    }
+    let body = textareas[0].text().collect::<String>();
+    if !valid_message_body(&body) {
+        return Err(action_proof_error(operation, world));
+    }
+    Ok((fields, body))
+}
+
+fn prove_take_identity_and_receipts(
+    before: &MoogleMailActionState,
+    recipient: &str,
+    sender: &str,
+    subject: &str,
+    body: &str,
+    world: MoogleMailWorld,
+) -> Result<(), MoogleMailError> {
+    let operation = MoogleMailOperation::Take;
+    if recipient != before.recipient || sender != before.sender || subject != before.subject {
+        return Err(action_proof_error(operation, world));
+    }
+    let base = canonical_mail_body(&before.body);
+    let observed = canonical_mail_body(body);
+    let Some(receipts) = observed.strip_prefix(&base) else {
+        return Err(action_proof_error(operation, world));
+    };
+    if (before.cod > 0 && take_cod_receipt_amount(receipts) != Some(before.cod))
+        || (before.cod == 0 && receipts.contains("CoD Paid:"))
+        || !valid_removed_attachment_receipt(receipts, before.attachment_count > 0)
+    {
+        return Err(action_proof_error(operation, world));
+    }
+    Ok(())
+}
+
+fn canonical_mail_body(body: &str) -> String {
+    body.replace("\r\n", "\n").trim_end_matches([' ', '\t', '\n']).to_owned()
+}
+
+fn take_cod_receipt_amount(value: &str) -> Option<i64> {
+    const MARKER: &str = "CoD Paid: ";
+    let matches = value.match_indices(MARKER).take(2).collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return None;
+    }
+    let remainder = &value[matches[0].0 + MARKER.len()..];
+    let amount_end = remainder
+        .find(|character: char| !character.is_ascii_digit() && character != ',')
+        .unwrap_or(remainder.len());
+    if amount_end == 0 || !remainder[amount_end..].starts_with(" Credits") {
+        return None;
+    }
+    parse_canonical_credits(&remainder[..amount_end])
+}
+
+fn valid_removed_attachment_receipt(value: &str, expected: bool) -> bool {
+    const MARKER: &str = "Removed attachment:";
+    let matches = value.match_indices(MARKER).take(2).collect::<Vec<_>>();
+    if !expected {
+        return matches.is_empty();
+    }
+    if matches.len() != 1 {
+        return false;
+    }
+    let remainder = &value[matches[0].0 + MARKER.len()..];
+    let line =
+        remainder.trim_start_matches([' ', '\t']).split(['\r', '\n']).next().unwrap_or_default();
+    !line.trim().is_empty()
 }
 
 fn valid_inbox_header(
@@ -382,26 +1156,38 @@ fn valid_inbox_header(
         }))
 }
 
+fn valid_sent_header(row: ElementRef<'_>, world: MoogleMailWorld) -> Result<bool, MoogleMailError> {
+    let selector = selector("th", MoogleMailOperation::Sent, world)?;
+    let headers = row.select(&selector).collect::<Vec<_>>();
+    let expected = ["To", "Subject", "Sent", "Read"];
+    Ok(headers.len() == expected.len()
+        && headers.iter().zip(expected).all(|(header, expected)| {
+            normalize_text(header.text().collect::<String>()) == expected
+        }))
+}
+
 fn parse_next_page(
     document: &Html,
     world: MoogleMailWorld,
     current_page: usize,
+    filter: &str,
+    operation: MoogleMailOperation,
 ) -> Result<bool, MoogleMailError> {
-    let pager_selector = selector("#mmail_pager", MoogleMailOperation::Inbox, world)?;
+    let pager_selector = selector("#mmail_pager", operation, world)?;
     let pagers = document.select(&pager_selector).collect::<Vec<_>>();
     if pagers.len() != 1 {
-        return Err(protocol(MoogleMailOperation::Inbox, world));
+        return Err(protocol(operation, world));
     }
     let controls = direct_children(pagers[0], "div");
     if controls.len() != 2 {
-        return Err(protocol(MoogleMailOperation::Inbox, world));
+        return Err(protocol(operation, world));
     }
     let next = controls[1];
     let links = direct_children(next, "a");
     let spans = direct_children(next, "span");
     if links.is_empty() && spans.len() == 1 && direct_element_children(next).len() == 1 {
         if normalize_text(spans[0].text().collect::<String>()) != "Next >" {
-            return Err(protocol(MoogleMailOperation::Inbox, world));
+            return Err(protocol(operation, world));
         }
         return Ok(false);
     }
@@ -410,17 +1196,21 @@ fn parse_next_page(
         || direct_element_children(next).len() != 1
         || normalize_text(links[0].text().collect::<String>()) != "Next >"
     {
-        return Err(protocol(MoogleMailOperation::Inbox, world));
+        return Err(protocol(operation, world));
     }
-    let href =
-        links[0].value().attr("href").ok_or_else(|| protocol(MoogleMailOperation::Inbox, world))?;
-    if !valid_next_page_href(href, world, current_page.saturating_add(1)) {
-        return Err(protocol(MoogleMailOperation::Inbox, world));
+    let href = links[0].value().attr("href").ok_or_else(|| protocol(operation, world))?;
+    if !valid_next_page_href(href, world, current_page.saturating_add(1), filter) {
+        return Err(protocol(operation, world));
     }
     Ok(true)
 }
 
-fn valid_next_page_href(raw: &str, world: MoogleMailWorld, expected_page: usize) -> bool {
+fn valid_next_page_href(
+    raw: &str,
+    world: MoogleMailWorld,
+    expected_page: usize,
+    filter: &str,
+) -> bool {
     if raw.is_empty()
         || raw != raw.trim()
         || raw.chars().any(char::is_control)
@@ -458,7 +1248,7 @@ fn valid_next_page_href(raw: &str, world: MoogleMailWorld, expected_page: usize)
     }
     values.get("s").map(String::as_str) == Some("Bazaar")
         && values.get("ss").map(String::as_str) == Some("mm")
-        && values.get("filter").map(String::as_str) == Some("inbox")
+        && values.get("filter").map(String::as_str) == Some(filter)
         && values.get("page").and_then(|value| value.parse::<usize>().ok()) == Some(expected_page)
 }
 
@@ -466,22 +1256,29 @@ fn parse_token(
     document: &Html,
     world: MoogleMailWorld,
 ) -> Result<MoogleMailToken, MoogleMailError> {
-    let form_selector = selector("form#mailform", MoogleMailOperation::Detail, world)?;
-    let token_selector = selector("input[name='mmtoken']", MoogleMailOperation::Detail, world)?;
+    parse_token_for_operation(document, world, MoogleMailOperation::Detail)
+}
+
+fn parse_token_for_operation(
+    document: &Html,
+    world: MoogleMailWorld,
+    operation: MoogleMailOperation,
+) -> Result<MoogleMailToken, MoogleMailError> {
+    let form_selector = selector("form#mailform", operation, world)?;
+    let token_selector = selector("input[name='mmtoken']", operation, world)?;
     let forms = document.select(&form_selector).collect::<Vec<_>>();
     if forms.len() != 1 {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let inputs = forms[0].select(&token_selector).collect::<Vec<_>>();
     if inputs.len() != 1 {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let value = inputs[0]
-        .value()
-        .attr("value")
-        .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+    let value = inputs[0].value().attr("value").ok_or_else(|| {
+        detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
+    })?;
     MoogleMailToken::new(value)
-        .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))
+        .ok_or_else(|| detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift))
 }
 
 fn has_result_message(document: &Html, world: MoogleMailWorld) -> Result<bool, MoogleMailError> {
@@ -500,13 +1297,21 @@ fn parse_detail_fields(
     form: ElementRef<'_>,
     world: MoogleMailWorld,
 ) -> Result<DetailFields, MoogleMailError> {
-    let left_selector = selector("#mmail_left", MoogleMailOperation::Detail, world)?;
-    let row_selector = selector("tr", MoogleMailOperation::Detail, world)?;
-    let div_selector = selector("div", MoogleMailOperation::Detail, world)?;
-    let input_selector = selector("input", MoogleMailOperation::Detail, world)?;
+    parse_detail_fields_for(form, world, MoogleMailOperation::Detail)
+}
+
+fn parse_detail_fields_for(
+    form: ElementRef<'_>,
+    world: MoogleMailWorld,
+    operation: MoogleMailOperation,
+) -> Result<DetailFields, MoogleMailError> {
+    let left_selector = selector("#mmail_left", operation, world)?;
+    let row_selector = selector("tr", operation, world)?;
+    let div_selector = selector("div", operation, world)?;
+    let input_selector = selector("input", operation, world)?;
     let lefts = form.select(&left_selector).collect::<Vec<_>>();
     if lefts.len() != 1 {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let mut values = HashMap::<String, String>::with_capacity(3);
     for row in lefts[0].select(&row_selector) {
@@ -521,12 +1326,12 @@ fn parse_detail_fields(
             continue;
         }
         let inputs = row.select(&input_selector).collect::<Vec<_>>();
-        let value = inputs
-            .first()
-            .and_then(|input| input.value().attr("value"))
-            .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+        let value =
+            inputs.first().and_then(|input| input.value().attr("value")).ok_or_else(|| {
+                detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift)
+            })?;
         if inputs.len() != 1 || values.insert(label, value.to_owned()).is_some() {
-            return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
         }
     }
     let recipient = values.get("To").map(String::as_str).unwrap_or_default().trim();
@@ -537,9 +1342,13 @@ fn parse_detail_fields(
         || !valid_line(sender, 256, false)
         || !valid_line(subject, MAX_SUMMARY_SUBJECT_BYTES, true)
     {
-        return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        return Err(detail_error_for(operation, world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    Ok(DetailFields { sender: sender.to_owned(), subject: subject.to_owned() })
+    Ok(DetailFields {
+        recipient: recipient.to_owned(),
+        sender: sender.to_owned(),
+        subject: subject.to_owned(),
+    })
 }
 
 fn parse_detail_assets(
@@ -547,13 +1356,35 @@ fn parse_detail_assets(
     body: &str,
     world: MoogleMailWorld,
 ) -> Result<DetailAssets, MoogleMailError> {
+    let manifest = parse_detail_asset_manifest(document, world)?;
+    let wanted = manifest.equipment_ids.iter().cloned().collect::<HashSet<_>>();
+    let keys = equipment_keys(document, body, &wanted, world)?;
+    let attachments = manifest
+        .equipment_ids
+        .into_iter()
+        .map(|equipment_id| {
+            let key = keys
+                .get(&equipment_id)
+                .cloned()
+                .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+            Ok(MoogleMailAttachment { equipment_id, key })
+        })
+        .collect::<Result<Vec<_>, MoogleMailError>>()?;
+    Ok(DetailAssets { attachments, credits: manifest.credits, cod: manifest.cod })
+}
+
+/// 动作前置核对只需附件 ID 与金额，不应为远端写入链路额外保留装备 key。
+fn parse_detail_asset_manifest(
+    document: &Html,
+    world: MoogleMailWorld,
+) -> Result<DetailAssetManifest, MoogleMailError> {
     let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::Detail, world)?;
     let list_selector = selector("#mmail_attachlist", MoogleMailOperation::Detail, world)?;
     let panes = document.select(&panes_selector).collect::<Vec<_>>();
     if panes.len() != 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let script = script_text(document, world)?;
+    let script = script_text(document, world, MoogleMailOperation::Detail)?;
     let executable = executable_javascript(&script)
         .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
     let count = required_script_value(&executable, "attach_count")
@@ -582,19 +1413,7 @@ fn parse_detail_assets(
     {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    let wanted = equipment_ids.iter().cloned().collect::<HashSet<_>>();
-    let keys = equipment_keys(document, body, &wanted, world)?;
-    let attachments = equipment_ids
-        .into_iter()
-        .map(|equipment_id| {
-            let key = keys
-                .get(&equipment_id)
-                .cloned()
-                .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-            Ok(MoogleMailAttachment { equipment_id, key })
-        })
-        .collect::<Result<Vec<_>, MoogleMailError>>()?;
-    Ok(DetailAssets { attachments, credits, cod })
+    Ok(DetailAssetManifest { equipment_ids, credits, cod, entry_count: entries })
 }
 
 fn parse_attachment_manifest(
@@ -653,6 +1472,11 @@ fn parse_attachment_manifest(
 fn parse_credits_text(value: &str) -> Option<i64> {
     let value = value.strip_suffix(" Credits")?;
     let value = value.strip_suffix('x').unwrap_or(value);
+    let amount = parse_canonical_credits(value)?;
+    (amount > 0).then_some(amount)
+}
+
+fn parse_canonical_credits(value: &str) -> Option<i64> {
     if value.is_empty() {
         return None;
     }
@@ -674,8 +1498,24 @@ fn parse_credits_text(value: &str) -> Option<i64> {
         return None;
     }
     let digits = value.replace(',', "");
-    let amount = digits.parse::<i64>().ok()?;
-    (amount > 0).then_some(amount)
+    digits.parse::<i64>().ok()
+}
+
+fn parse_current_cod(value: &str) -> Option<i64> {
+    let value = value.strip_prefix("Current CoD:").or_else(|| value.strip_prefix("CoD:"))?.trim();
+    let value = value.strip_suffix(" Credits").unwrap_or(value).trim();
+    parse_canonical_credits(value)
+}
+
+fn parse_networth_credits(value: &str) -> Option<i64> {
+    let value = value.strip_prefix("Credits")?.trim();
+    parse_canonical_credits(value)
+}
+
+fn canonical_equipment_ids(values: &[String]) -> bool {
+    values.iter().enumerate().all(|(index, value)| {
+        valid_decimal_id(value) && (index == 0 || values[index - 1].as_str() < value.as_str())
+    })
 }
 
 fn required_script_value(source: &str, name: &str) -> Option<i64> {
@@ -716,8 +1556,12 @@ fn required_script_value(source: &str, name: &str) -> Option<i64> {
     (source.as_bytes().get(index) == Some(&b';')).then_some(value)
 }
 
-fn script_text(document: &Html, world: MoogleMailWorld) -> Result<String, MoogleMailError> {
-    let selector = selector("script", MoogleMailOperation::Detail, world)?;
+fn script_text(
+    document: &Html,
+    world: MoogleMailWorld,
+    operation: MoogleMailOperation,
+) -> Result<String, MoogleMailError> {
+    let selector = selector("script", operation, world)?;
     let mut source = String::new();
     for script in document.select(&selector) {
         source.push_str(&script.text().collect::<String>());
@@ -1053,11 +1897,36 @@ fn parse_detail_actions(
     Ok((returns == 1, claims == 1))
 }
 
+fn attribute_references_mail_id(value: &str, external_mail_id: &str) -> bool {
+    let bytes = value.as_bytes();
+    for (index, _) in value.match_indices("mid=") {
+        if index != 0 && !matches!(bytes[index - 1], b'?' | b'&') {
+            continue;
+        }
+        let start = index + 4;
+        let end = value[start..]
+            .find(|character: char| {
+                matches!(character, '&' | '#' | '\'' | '"') || character.is_whitespace()
+            })
+            .map_or(value.len(), |offset| start + offset);
+        if start == end {
+            return true;
+        }
+        let Some(decoded) = decode_form_component(&value[start..end]) else {
+            return true;
+        };
+        if !valid_opaque_id(&decoded) || decoded == external_mail_id {
+            return true;
+        }
+    }
+    false
+}
+
 fn extract_mid(value: &str) -> Option<String> {
     let mut found = None;
     let bytes = value.as_bytes();
     for (index, _) in value.match_indices("mid=") {
-        if index == 0 || !matches!(bytes[index - 1], b'?' | b'&') {
+        if index != 0 && !matches!(bytes[index - 1], b'?' | b'&') {
             continue;
         }
         if found.is_some() {
@@ -1066,7 +1935,7 @@ fn extract_mid(value: &str) -> Option<String> {
         let start = index + 4;
         let end = value[start..]
             .find(|character: char| {
-                matches!(character, '&' | '\'' | '"') || character.is_whitespace()
+                matches!(character, '&' | '#' | '\'' | '"') || character.is_whitespace()
             })
             .map_or(value.len(), |offset| start + offset);
         if start == end {
@@ -1111,16 +1980,19 @@ fn hex_digit(value: u8) -> Option<u8> {
     }
 }
 
-fn parse_inbox_time(value: &str, world: MoogleMailWorld) -> Result<DateTime<Utc>, MoogleMailError> {
+fn parse_page_time(
+    value: &str,
+    operation: MoogleMailOperation,
+    world: MoogleMailWorld,
+) -> Result<DateTime<Utc>, MoogleMailError> {
     let naive = NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT)
-        .map_err(|_| protocol(MoogleMailOperation::Inbox, world))?;
-    let offset = FixedOffset::west_opt(8 * 60 * 60)
-        .ok_or_else(|| protocol(MoogleMailOperation::Inbox, world))?;
+        .map_err(|_| protocol(operation, world))?;
+    let offset = FixedOffset::west_opt(8 * 60 * 60).ok_or_else(|| protocol(operation, world))?;
     offset
         .from_local_datetime(&naive)
         .single()
         .map(|value| value.with_timezone(&Utc))
-        .ok_or_else(|| protocol(MoogleMailOperation::Inbox, world))
+        .ok_or_else(|| protocol(operation, world))
 }
 
 fn valid_message_body(value: &str) -> bool {
@@ -1159,7 +2031,19 @@ fn protocol(operation: MoogleMailOperation, world: MoogleMailWorld) -> MoogleMai
 }
 
 fn detail_error(world: MoogleMailWorld, category: MoogleMailErrorCategory) -> MoogleMailError {
-    MoogleMailError::new(MoogleMailOperation::Detail, world, category, false)
+    detail_error_for(MoogleMailOperation::Detail, world, category)
+}
+
+fn detail_error_for(
+    operation: MoogleMailOperation,
+    world: MoogleMailWorld,
+    category: MoogleMailErrorCategory,
+) -> MoogleMailError {
+    MoogleMailError::new(operation, world, category, false)
+}
+
+fn action_proof_error(operation: MoogleMailOperation, world: MoogleMailWorld) -> MoogleMailError {
+    detail_error_for(operation, world, MoogleMailErrorCategory::WriteUnknown)
 }
 
 fn write_digest_string(digest: &mut Sha256, value: &str) {

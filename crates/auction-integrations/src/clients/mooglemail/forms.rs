@@ -43,6 +43,14 @@ impl fmt::Debug for MoogleMailMessageFields {
     }
 }
 
+impl Drop for MoogleMailMessageFields {
+    fn drop(&mut self) {
+        clear_string(&mut self.recipient);
+        clear_string(&mut self.subject);
+        clear_string(&mut self.body);
+    }
+}
+
 /// 只可由 typed constructor 生成的 MoogleMail 表单。
 ///
 /// token、消息正文和附件参数不会通过 Debug/Display 输出；表单被丢弃时会尽力清除其字符串
@@ -206,6 +214,11 @@ fn form_configuration(operation: MoogleMailOperation) -> MoogleMailError {
         MoogleMailErrorCategory::Configuration,
         false,
     )
+}
+
+fn clear_string(value: &mut String) {
+    let mut bytes = std::mem::take(value).into_bytes();
+    bytes.fill(0);
 }
 
 fn valid_body(value: &str) -> bool {

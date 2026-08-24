@@ -43,7 +43,7 @@ auction-web-public = { path = "crates/auction-web-public" }
 auction-web-shared = { path = "crates/auction-web-shared" }
 
 # 异步运行时：Tokio 1.51.x 是官方 LTS 分支，只接受该分支内的补丁升级。
-tokio = { version = "~1.51.4", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "~1.51.4", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 # HTTP 与 Web
 axum = { version = "0.8.9", features = ["macros", "ws"] }
@@ -58,7 +58,10 @@ dioxus = { version = "0.7.10", default-features = false, features = [
 dioxus-i18n = "0.5.1"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 gloo-net = { version = "0.6.0", default-features = false, features = ["http", "json", "websocket"] }
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+js-sys = "0.3.104"
 futures-util = "0.3.34"
+async-stream = "0.3.6"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
 scraper = "0.24.0"
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
@@ -67,7 +70,8 @@ url = "2.5.8"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
 # 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除本项。
-web-sys = { version = "0.3.104", features = ["Location"] }
+web-sys = { version = "0.3.104", features = ["History", "Location"] }
+wasm-bindgen = "0.2.127"
 
 # 持久化基础能力。具体数据库驱动由 auction-storage 的窄发布 feature 引入。
 sqlx = { version = "0.9.0", default-features = false, features = [
@@ -85,9 +89,11 @@ redis = { version = "1.6.0", default-features = false }
 # 数据与错误
 anyhow = "1.0.104"
 base64 = "0.22.1"
-# `now` 提供 `Utc::now()`，是 auction-application 的 Clock 端口所需。不启用整个 `clock`：
-# 后者会额外引入 winapi 与 iana-time-zone，而本项目只使用 UTC，不做本地时区换算。
-chrono = { version = "0.4.45", default-features = false, features = ["now", "serde", "std"] }
+libc = "0.2.189"
+# `now` 提供 `Utc::now()`；`clock` 还用于恢复旧版标准 cron 的进程本地时区语义。
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "now", "serde", "std"] }
+chrono-tz = "0.10.4"
+croner = { version = "3.0.1", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.10.9"
@@ -99,8 +105,21 @@ uuid = { version = "1.24.1", features = ["js", "serde", "v4", "v5"] }
 
 # CLI 与可观测性
 clap = { version = "4.6.6", features = ["derive"] }
+opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = [
+    "http-proto",
+    "reqwest-client",
+    "trace",
+] }
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = [
+    "experimental_trace_batch_span_processor_with_async_runtime",
+    "rt-tokio",
+    "trace",
+] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.33.0"
+prometheus = { version = "0.14.0", features = ["process"] }
 
 [profile.wasm-release]
 inherits = "release"

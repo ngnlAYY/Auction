@@ -14,6 +14,69 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::{LanguageIdentifier, langid};
 
+/// 按旧版 `formatTime` 约定把 RFC3339 时间显示为当前语言的 Asia/Shanghai 时间。
+///
+/// 浏览器端使用 `Intl.DateTimeFormat`，因此月份、数字和标点会随 `<html lang>` 改变；
+/// 非 WASM 构建只服务于静态检查，使用相同目标时区的稳定兜底格式。
+pub fn format_localized_time(value: &str) -> String {
+    if value.is_empty() {
+        return "—".to_owned();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
+        if date.get_time().is_finite()
+            && let Some(document) = web_sys::window().and_then(|window| window.document())
+            && let Some(root) = document.document_element()
+        {
+            let locale = root.get_attribute("lang").unwrap_or_else(|| "en".to_owned());
+            let locales = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(&locale));
+            let options = js_sys::Object::new();
+            for (name, option) in [
+                ("day", "numeric"),
+                ("hour", "2-digit"),
+                ("minute", "2-digit"),
+                ("month", "short"),
+                ("second", "2-digit"),
+                ("year", "numeric"),
+            ] {
+                let _ = js_sys::Reflect::set(
+                    &options,
+                    &wasm_bindgen::JsValue::from_str(name),
+                    &wasm_bindgen::JsValue::from_str(option),
+                );
+            }
+            let _ = js_sys::Reflect::set(
+                &options,
+                &wasm_bindgen::JsValue::from_str("hour12"),
+                &wasm_bindgen::JsValue::FALSE,
+            );
+            let _ = js_sys::Reflect::set(
+                &options,
+                &wasm_bindgen::JsValue::from_str("timeZone"),
+                &wasm_bindgen::JsValue::from_str("Asia/Shanghai"),
+            );
+            let formatter = js_sys::Intl::DateTimeFormat::new(&locales, &options);
+            if let Ok(formatted) =
+                formatter.format().call1(&wasm_bindgen::JsValue::NULL, date.as_ref())
+                && let Some(formatted) = formatted.as_string()
+            {
+                return formatted;
+            }
+        }
+    }
+
+    value
+        .parse::<chrono::DateTime<chrono::FixedOffset>>()
+        .ok()
+        .and_then(|instant| {
+            chrono::FixedOffset::east_opt(8 * 60 * 60).map(|offset| instant.with_timezone(&offset))
+        })
+        .map(|instant| instant.format("%d %b %Y, %H:%M:%S").to_string())
+        .unwrap_or_else(|| "—".to_owned())
+}
+
 /// 旧系统的语言偏好存储键。跨系统共享该键，不得重命名。
 pub const LANGUAGE_STORAGE_KEY: &str = "hv.lang";
 

@@ -49,6 +49,14 @@ impl EquipmentKey {
         self.bytes.fill(0);
         self.bytes.clear();
     }
+
+    /// 为同一条有界、幂等命令建立一次短生命周期副本。
+    ///
+    /// 该入口只供调用方在明确的进程内重试边界中使用；类型仍不实现 `Clone`，避免装备 key
+    /// 被容器、DTO 或日志辅助结构无意复制。原值和副本销毁时都会独立清零各自缓冲区。
+    pub fn duplicate_for_retry(&self) -> Self {
+        Self { bytes: self.bytes.clone() }
+    }
 }
 
 impl Drop for EquipmentKey {

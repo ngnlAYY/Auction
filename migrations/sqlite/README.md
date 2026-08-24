@@ -9,7 +9,11 @@ SQLite 的串行写入、锁等待、本地文件系统、备份和单节点假�
 追加式审计不变量。已经发布的迁移文件禁止修改；结构修正应通过新的追加迁移完成。
 
 当前 `000001_lite_core.up.sql` 已提交共有身份、拍卖、竞价、代理、审计、realtime、会话和
-调度对象，`000002_worker_scheduler.up.sql` 追加调度租约、尝试次数和失败状态；结算、恢复、
-交付、凭据和外部论坛/邮件对象属于 PostgreSQL 完整档，Lite 不建表。
+调度对象，`000002_worker_scheduler.up.sql` 追加调度租约、尝试次数和失败状态，
+`000003_user_admin.up.sql` 追加用户管理命令账本和可选的登录密钥信封，`000004_auction_cancellation.up.sql`
+追加拍卖取消时间、原因、操作者及形状触发器，`000005_lifecycle_metadata.up.sql` 补齐预览、开放、
+Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化 Final phase 完成 fence，
+`000007_leader_since_backfill.up.sql` 从追加式 bid 事实修正可证明的当前连续领先时间；结算、恢复、交付、
+以及外部论坛/邮件对象仍属于 PostgreSQL 完整档，Lite 不建表。
 SQLite 竞价事务必须使用 `BEGIN IMMEDIATE` 的串行写入口，不能因为 migration 已存在就绕过
 该适配器边界。

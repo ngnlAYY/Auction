@@ -5,8 +5,11 @@
 源码布局：src/main.rs 只负责 Tokio 入口，src/bootstrap/mod.rs 负责配置、缓存、监听器和
 路由装配。
 
-职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、绑定监听器、挂载
-`auction_http::public_router()`、优雅关闭和退出码。**业务逻辑不属于这里。**
+职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
+relay/Hub、绑定监听器、挂载 `auction_http::public_router()`、优雅关闭和退出码。Public 的
+`[tracing]` 使用主配置，OTLP headers 使用敏感 TOML 的 Public 专属字段；exporter 采用有界
+异步队列并在进程停止时限时关闭。**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
+持久化事件分发，外部广播 sink 仍由独立协议负责。
 
 默认监听 `127.0.0.1:8090`。
 

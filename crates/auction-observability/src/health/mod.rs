@@ -221,6 +221,14 @@ impl TracingHealth {
     }
 }
 
+/// 提供当前进程 tracing 安全状态的窄读取端口。
+///
+/// 心跳只读取计数、状态、时间和闭集错误码，不读取 exporter 配置、端点或 span 内容。
+pub trait TracingHealthReader: Send + Sync {
+    /// 返回当前 tracing 的安全快照。
+    fn snapshot(&self) -> TracingHealth;
+}
+
 /// 进程心跳写入命令。
 #[derive(Debug, Clone)]
 pub struct HeartbeatCommand {
@@ -266,6 +274,7 @@ pub struct HeartbeatPublisher {
     version: String,
     started_at: DateTime<Utc>,
     ttl: Duration,
+    tracing_health: Option<Arc<dyn TracingHealthReader>>,
     observation_sequence: AtomicI64,
 }
 
@@ -288,8 +297,15 @@ impl HeartbeatPublisher {
             version,
             started_at,
             ttl,
+            tracing_health: None,
             observation_sequence: AtomicI64::new(0),
         }
+    }
+
+    /// 注入 tracing 安全状态读取器；不改变心跳的存储 owner 或调度生命周期。
+    pub fn with_tracing_health(mut self, reader: Arc<dyn TracingHealthReader>) -> Self {
+        self.tracing_health = Some(reader);
+        self
     }
 
     /// 发布指定状态的安全心跳；存储失败由调用方决定是否降级或继续运行。
@@ -325,17 +341,21 @@ impl HeartbeatPublisher {
 
     /// 发布启动中状态。
     pub async fn publish_starting(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Starting, false, 0, tracing_disabled()).await
+        self.publish(HeartbeatStatus::Starting, false, 0, self.tracing_snapshot()).await
     }
 
     /// 发布已就绪状态。
     pub async fn publish_ready(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Ready, true, 0, tracing_disabled()).await
+        self.publish(HeartbeatStatus::Ready, true, 0, self.tracing_snapshot()).await
     }
 
     /// 发布停止状态；停止状态仍然带有短 TTL，避免残留实例长期显示为活动进程。
     pub async fn publish_stopping(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Stopping, false, 0, tracing_disabled()).await
+        self.publish(HeartbeatStatus::Stopping, false, 0, self.tracing_snapshot()).await
+    }
+
+    fn tracing_snapshot(&self) -> TracingHealth {
+        self.tracing_health.as_ref().map_or_else(tracing_disabled, |reader| reader.snapshot())
     }
 }
 
@@ -445,10 +465,10 @@ pub struct DashboardSection<T> {
     pub data: Option<T>,
 }
 
-/// 当前已迁移的 Admin dashboard 快照。
+/// 可观测性 owner 提供的 Admin dashboard 基础快照。
 ///
-/// 其他 owner 的 mail、realtime、credentials、delivery、fulfillment、recovery 和 alerting
-/// section 仍由后续阶段接入；HTTP 会显式返回 `unknown`，绝不构造示例数据。
+/// HTTP 层会在此基础上组合 mail、realtime、credentials、delivery、fulfillment、recovery
+/// 和 alerting 等其他 owner 的安全投影；本结构只拥有健康与进程 section。
 #[derive(Debug, Clone)]
 pub struct AdminDashboardSnapshot {
     pub health: HealthSummary,

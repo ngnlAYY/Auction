@@ -54,8 +54,11 @@ preview_catalog_changed 的负载字段沿用旧系统的命名，其中 world �
 ## 流和游标
 
 拍卖专属流使用 auction:<auction_id> 形式的 stream_key；发现流使用稳定名称
-auction:discovery。发现流别名只属于进程内订阅组织，不是可持久化的数据库流名，
-不能把它当作第二套事件事实。
+auction:discovery。发现流是 `auction.created` 的持久化派生别名：它有自己的流序号和事件
+ID，但复用同一公开负载、状态版本和来源命令，不构成第二套拍卖事实。创建事务必须同时
+写入两个流，历史数据由追加迁移补齐；发现流丢失或损坏时仍可从拍卖专属事件重建。
+外部广播 sink 若消费拍卖事件，必须以拍卖专属流为来源，不应同时消费并再次转发
+`auction:discovery` 派生流，否则同一个 `auction.created` 会被重复广播。
 
 同一流内的 stream_sequence 必须严格递增且不可复用。事件表和消费游标是追加式
 持久化对象；重放、转发失败和消费恢复不得编辑历史事件或重排已有序号。
@@ -111,7 +114,7 @@ WebSocket 只负责低延迟通知，不替代 Catch-up。重连后客户端必�
 - auction-application 决定哪些已提交的领域事实产生哪些事件。
 - auction-http 只负责 HTTP/WS 输入输出映射和连接生命周期，不实现状态机。
 - auction-jobs 负责可靠转发、失败记录和游标推进，外部失败不能撤销已提交的本地事实。
-- 缓存和进程内发现别名都不是事件权威来源；它们丢失后必须能够从数据库事实恢复。
+- 缓存和发现派生流都不是领域事实的权威来源；它们丢失后必须能够从拍卖专属事件恢复。
 
 ### Worker 消费游标与重放边界
 
@@ -125,15 +128,23 @@ schema 不可识别、序号出现缺口或外部 sink 失败都会写入 `realt
 新序号进入后续消费。这保证重放不会静默重排历史事件。
 
 Rust 已完成 PostgreSQL/SQLite 的游标、失败记录和重放边界适配器，并把可注入的消费 runner
-接入现有 Worker 调度循环。由于旧系统的外部广播协议尚未冻结，当前装配根不注入具体 sink，
-所以不会把本地读取伪装成远程转发成功。
+接入现有 Worker 调度循环。Public 进程另有独立的持久化 relay：按 `auction:` stream 目录追赶
+事件，把 `auction:discovery` 派生流也交给本地有界 Hub；Hub 队列满时淘汰慢连接，relay 只在
+本地 sink 接收后推进对应游标。该链路正是旧版当前 Public 实例的 WebSocket 分发边界；若未来
+增加外部广播 sink，它属于需要另行冻结协议的新能力。
 
 Admin A21-A24 已接入同一持久化边界：lag、failure 列表/详情只返回安全投影；replay 请求
 必须携带稳定 `command_id`、注册表允许的 `schema_version` 和公开 payload。数据库事务会
 锁定原 failure、追加带 `replay_of_event_id` 的新事件、解决 failure、追加 audit，并把结果
 写入 `auction_commands`；同一命令重试返回同一事件投影，负载或 failure 不同则返回冲突。
 
-迁移阶段先冻结上述外部形状，再实现生产注册表和适配器。当前已完成持久化 Catch-up
-读取边界和 `/api/v1/ws` 的只读服务端推送首片：连接使用 Public session、最多 128 个并发
-连接，每 500ms 复用回放端口读取新事件并发送 ping；客户端发送文本/二进制消息会关闭连接。
-它仍不是独立的内存广播事实源，重连和跳号依旧必须走 Catch-up/快照流程。
+当前已完成持久化 Catch-up、生产事件注册表和 `/api/v1/ws` 的只读服务端推送：连接使用
+Public session、最多 128 个并发
+连接，先通过回放端口补齐已确认游标，再接收本地 Hub 的连续事件并发送 ping；客户端发送
+文本/二进制消息会关闭连接，Hub 缓冲区满时对应慢连接会被关闭。
+Public Rust 客户端同时校验事件信封、注册 schema、流名和连续游标；拍卖页面已按旧版补上
+单一 `auction:{auction_id}` 流的实时订阅，竞价、生命周期和断档事件会触发重新读取权威快照。
+存储读取发现序号断档时返回 `refetch_required`，页面清零游标并重新建立订阅。公开发现范围
+现在可以通过持久化 `auction:discovery` 流跨进程 catch-up；Public 本地 relay/Hub 已按旧版
+恢复低延迟分发。未来若连接外部广播系统，必须使用独立 relay/sink 协议，并避免把本地发现流
+误报为远端投递证明。

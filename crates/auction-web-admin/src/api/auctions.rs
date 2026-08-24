@@ -113,16 +113,16 @@ struct AdminAuctionCreateData {
     auction: AdminAuction,
 }
 
-/// 提交 Admin draft 创建命令；datetime-local 输入按 UTC 解释并补齐 RFC3339 秒和时区。
+/// 提交 Admin draft 创建命令；调用组件负责在同一输入重试时复用两个稳定标识。
 pub(crate) async fn create_admin_auction(
+    command_id: Uuid,
+    auction_id: Uuid,
     world_id: String,
     sequence: i64,
     preview_scheduled_at: String,
     scheduled_open_at: String,
     scheduled_end_at: String,
 ) -> Result<AdminAuction, String> {
-    let command_id = Uuid::new_v4();
-    let auction_id = Uuid::new_v4();
     let csrf_token = super::fetch_csrf_token().await?;
     let request = Request::post("/api/v1/admin/auctions")
         .header("x-csrf-token", &csrf_token)
@@ -150,11 +150,5 @@ pub(crate) async fn create_admin_auction(
 }
 
 fn normalize_datetime(value: String) -> String {
-    if value.ends_with('Z') || value.contains('+') {
-        value
-    } else if value.len() == 16 {
-        format!("{value}:00Z")
-    } else {
-        format!("{value}Z")
-    }
+    super::normalize_datetime(&value)
 }

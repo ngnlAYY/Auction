@@ -13,6 +13,11 @@ runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
+# 可选区块：进程本地 Prometheus 指标；省略整个区块等同于关闭 `/metrics`。
+[metrics]
+# 可选：是否启用固定 `/metrics` scrape endpoint；省略时关闭。
+enabled = false
+
 # 可选区块：缓存设置；省略整个区块等同于关闭缓存。
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
@@ -41,3 +46,51 @@ idle_ttl_seconds = 1800
 absolute_ttl_seconds = 604800
 # 可选：单个公开用户允许的最大并发会话数，默认 5。
 max_public_sessions = 5
+
+# 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时沿用旧版共享配置默认值。
+[auction.economics]
+# 可选：默认起始价，必须为正且按 1000 信用网格对齐，默认 1000。
+start_price = 1000
+# 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
+bid_increment_ppm = 50000
+# 可选：软截止窗口和延长秒数，默认均为 60。
+soft_close_window_seconds = 60
+soft_close_extension_seconds = 60
+# 可选：取消截止窗口秒数，默认 86400。
+cancel_cutoff_seconds = 86400
+# 可选：代理开关、默认模式和 slow 间隔；模式只能为 fast 或 slow。
+proxy_enabled = true
+proxy_default_mode = "fast"
+proxy_slow_interval_seconds = 600
+# 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
+proxy_max_outbid_uses = 3
+# 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 60。
+final_phase_lead_seconds = 60
+
+[auction.settlement]
+# 可选：结算策略版本和模式；模式只能为 hold_curve_v1 或 legacy_zero_v0。
+version = 1
+mode = "hold_curve_v1"
+# 可选：补偿池开关和 isekai carrier credit；当前领域策略要求 credit 为 1。
+compensation_pool_enabled = true
+isekai_carrier_credit = 1
+# 可选：持有比例与调整比例的 PPM 锚点；省略时使用内置曲线。
+anchors = [
+  { hold_ppm = 0, adjustment_ppm = 80000 },
+  { hold_ppm = 50000, adjustment_ppm = 64000 },
+  { hold_ppm = 100000, adjustment_ppm = 48000 },
+  { hold_ppm = 150000, adjustment_ppm = 32000 },
+  { hold_ppm = 200000, adjustment_ppm = 16000 },
+  { hold_ppm = 250000, adjustment_ppm = 0 },
+  { hold_ppm = 300000, adjustment_ppm = -4000 },
+  { hold_ppm = 400000, adjustment_ppm = -12000 },
+  { hold_ppm = 500000, adjustment_ppm = -20000 },
+  { hold_ppm = 1000000, adjustment_ppm = -20000 },
+]
+
+[auction.settlement.recovery]
+# 可选：当前只支持七天、一次提醒的 remind_v1 策略。
+version = 1
+mode = "remind_v1"
+payment_timeout_seconds = 604800
+reminder_limit = 1

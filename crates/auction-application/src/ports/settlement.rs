@@ -4,11 +4,13 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use auction_domain::{
-    AuctionId, SettlementAmount, SettlementFact, SettlementPlan, SettlementPolicy,
+    AuctionId, CompetitionPlan, RecoveryPolicy, SettlementAmount, SettlementFact, SettlementPlan,
+    SettlementPolicy,
 };
 
 use super::{
-    CommandLedgerError, StoredCommand, TransactionFuture, TransactionPolicy, TransactionPolicyError,
+    CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture, TransactionPolicy,
+    TransactionPolicyError,
 };
 
 /// 结算事务锁内读取的拍卖事实。
@@ -20,11 +22,15 @@ pub struct SettlementSnapshot {
     pub auction_id: AuctionId,
     pub auction_state_version: u64,
     pub policy: SettlementPolicy,
+    /// 结算时一并冻结的 recovery 策略；后续 Worker 不能读取实时规则替换它。
+    pub recovery_policy: RecoveryPolicy,
     pub scheduled_open_at: DateTime<Utc>,
     pub scheduled_end_at: DateTime<Utc>,
     pub opening_pool: SettlementAmount,
     pub opening_pool_version: u64,
     pub facts: Vec<SettlementFact>,
+    /// 首次结算时用于领域层关闭活动代理的锁内竞价快照；已结算命令重放时为空。
+    pub lot_competitions: Vec<CompetitionSnapshot>,
 }
 
 #[derive(Debug, Error)]
@@ -72,6 +78,8 @@ pub trait SettlementTransaction: Send {
         auction_id: AuctionId,
         command_id: auction_domain::CommandId,
         plan: SettlementPlan,
+        proxy_closure_plans: Vec<CompetitionPlan>,
+        recovery_policy: RecoveryPolicy,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 }
 

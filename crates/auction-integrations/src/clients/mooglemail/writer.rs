@@ -13,6 +13,15 @@ const MAX_RECIPIENT_BYTES: usize = 256;
 const MAX_SUBJECT_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
+/// 最终 send POST 后可从可见页面文字明确证明的失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoogleMailSendResponseFailure {
+    /// 收件人不存在；远端可能同时生成一封需要回收附件的退信。
+    RecipientNotFound { returned_mail_id: Option<String> },
+    /// 远端明确拒绝发送，当前冻结协议只识别邮资不足。
+    Rejected,
+}
+
 /// 经过结构校验的 compose 页面状态。
 ///
 /// token 只通过引用提供给下一步 typed form 构造；正文、收件人和附件 key 不进入 Debug 输出。
@@ -173,6 +182,49 @@ impl MoogleMailParser {
             return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         Ok(response_mail_id(source))
+    }
+
+    /// 只从可见文字识别旧版冻结的明确发送失败。
+    ///
+    /// script/style/noscript/textarea 中的诱饵短语不参与分类；已有 `#mmail_fin` 的页面交给
+    /// 成功证明处理，不会被误分类为失败。
+    pub fn classify_send_response_failure(
+        &self,
+        document: &[u8],
+        world: MoogleMailWorld,
+    ) -> Result<Option<MoogleMailSendResponseFailure>, MoogleMailError> {
+        let source = str::from_utf8(document)
+            .map_err(|_| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
+        if source.trim().is_empty() {
+            return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
+        }
+        let parsed = Html::parse_document(source);
+        let body_selector = selector("body", world)?;
+        let confirmation_selector = selector("#mmail_fin", world)?;
+        let bodies = parsed.select(&body_selector).collect::<Vec<_>>();
+        if bodies.len() != 1 || parsed.select(&confirmation_selector).next().is_some() {
+            return Ok(None);
+        }
+        let visible = visible_body_text(bodies[0]).to_ascii_lowercase();
+        const RECIPIENT_NOT_FOUND_PHRASES: &[&str] = &[
+            "recipient not found",
+            "recipient does not exist",
+            "recipient doesn't exist",
+            "no such recipient",
+            "player not found",
+            "user not found",
+            "no such user",
+            "could not find recipient",
+        ];
+        if RECIPIENT_NOT_FOUND_PHRASES.iter().any(|phrase| visible.contains(phrase)) {
+            return Ok(Some(MoogleMailSendResponseFailure::RecipientNotFound {
+                returned_mail_id: response_mail_id(source),
+            }));
+        }
+        if visible.contains("cannot afford the postage") {
+            return Ok(Some(MoogleMailSendResponseFailure::Rejected));
+        }
+        Ok(None)
     }
 }
 
@@ -447,7 +499,9 @@ fn response_mail_id(source: &str) -> Option<String> {
     while let Some(relative) = source[offset..].find("mid=") {
         let start = offset + relative;
         let previous = start.checked_sub(1).and_then(|index| bytes.get(index).copied());
-        if !matches!(previous, Some(b'?' | b'&' | b';')) {
+        let valid_prefix = matches!(previous, Some(b'?' | b'&'))
+            || previous == Some(b';') && source[..start].ends_with("&amp;");
+        if !valid_prefix {
             offset = start.saturating_add(4);
             continue;
         }
@@ -459,13 +513,38 @@ fn response_mail_id(source: &str) -> Option<String> {
         if value_start == value_end {
             return None;
         }
-        let value = source[value_start..value_end].to_owned();
+        if bytes.get(value_end).is_some_and(|byte| {
+            !matches!(*byte, b'&' | b'#' | b'\'' | b'"') && !byte.is_ascii_whitespace()
+        }) {
+            return None;
+        }
+        let value = &source[value_start..value_end];
+        if !valid_decimal_id(value) {
+            return None;
+        }
         if found.replace(value).is_some() {
             return None;
         }
         offset = value_end;
     }
-    found
+    found.map(str::to_owned)
+}
+
+fn visible_body_text(body: ElementRef<'_>) -> String {
+    let mut visible = String::new();
+    for node in body.descendants() {
+        let Some(text) = node.value().as_text() else {
+            continue;
+        };
+        let hidden = node.ancestors().filter_map(ElementRef::wrap).any(|ancestor| {
+            matches!(ancestor.value().name(), "script" | "style" | "noscript" | "textarea")
+        });
+        if !hidden {
+            visible.push_str(text);
+            visible.push(' ');
+        }
+    }
+    normalize_text(visible)
 }
 
 fn has_visible_result_message(

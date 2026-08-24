@@ -35,11 +35,13 @@ impl AdminRenameListRequest {
     }
 }
 
-/// 改名历史的安全投影，不包含命令摘要或内部数据库字段。
+/// 改名历史的安全投影，不包含命令摘要或内部数据库字段；当前用户版本用于回滚 fence。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminRenameRecord {
     pub id: Uuid,
     pub user_id: Uuid,
+    /// 读取快照时用户当前的版本，用于回滚命令的 state-version fence。
+    pub user_state_version: i64,
     pub previous_username: String,
     pub next_username: String,
     pub actor: String,
@@ -52,6 +54,7 @@ impl AdminRenameRecord {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && !self.user_id.is_nil()
+            && self.user_state_version > 0
             && valid_text(&self.previous_username, 256)
             && valid_text(&self.next_username, 256)
             && self.previous_username != self.next_username

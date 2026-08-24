@@ -1,11 +1,12 @@
 use std::future::Future;
 
-use chrono::{DateTime, Utc};
-use serde_json::Value;
-
 use auction_domain::{AuctionId, CommandId};
+use chrono::{DateTime, Utc};
 
-use super::{AdminAuctionSummary, ApplicationFuture, CompetitionTransactionError, RequestHash};
+use super::{
+    AdminAuctionSummary, ApplicationFuture, AuctionPolicyTemplate, CompetitionTransactionError,
+    RequestHash,
+};
 
 /// Admin 创建 draft 拍卖命令。
 ///
@@ -63,7 +64,7 @@ pub trait AdminAuctionCreateTransaction: Send {
         &mut self,
         command: AdminCreateAuctionCommand,
         title: String,
-        policy_snapshot: Value,
+        policy: AuctionPolicyTemplate,
         created_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<AdminAuctionSummary, CompetitionTransactionError>> + Send;
 

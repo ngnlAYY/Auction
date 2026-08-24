@@ -14,11 +14,11 @@ use uuid::Uuid;
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
-use sqlx::PgPool;
+use sqlx::Postgres;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use sqlx::Row;
 #[cfg(feature = "sqlite")]
-use sqlx::{SqliteConnection, SqlitePool};
+use sqlx::{Sqlite, SqliteConnection};
 
 impl ScheduledRoundStore for DatabaseStore {
     fn claim_due(
@@ -111,22 +111,24 @@ fn command_id(create_command_id: Uuid, phase: ScheduledRoundPhase) -> CommandId 
     let label = match phase {
         ScheduledRoundPhase::Preview => "scheduled-preview",
         ScheduledRoundPhase::Open => "scheduled-open",
+        ScheduledRoundPhase::Final => "scheduled-final",
     };
     CommandId::from_uuid(deterministic_uuid(CommandId::from_uuid(create_command_id), label, 1))
 }
 
-#[cfg(feature = "sqlite")]
-fn phase_from_row(preview_completed_at: Option<&str>) -> ScheduledRoundPhase {
-    if preview_completed_at.is_some() {
+fn phase_from_completion(preview_completed: bool, open_completed: bool) -> ScheduledRoundPhase {
+    if !preview_completed {
+        ScheduledRoundPhase::Preview
+    } else if !open_completed {
         ScheduledRoundPhase::Open
     } else {
-        ScheduledRoundPhase::Preview
+        ScheduledRoundPhase::Final
     }
 }
 
 #[cfg(feature = "postgres")]
 async fn claim_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
@@ -134,18 +136,43 @@ async fn claim_postgres(
 ) -> Result<Vec<ScheduledRoundClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let rows = sqlx::query(
-        "SELECT id, auction_id, create_command_id, preview_completed_at, attempt_count
-         FROM public.scheduled_rounds
-         WHERE status = 'active'
-           AND open_completed_at IS NULL
-           AND (lease_until IS NULL OR lease_until <= $1)
+        "SELECT round.id, round.auction_id, round.create_command_id,
+                round.preview_completed_at, round.open_completed_at, round.attempt_count
+         FROM public.scheduled_rounds AS round
+         INNER JOIN public.auctions AS auction ON auction.id = round.auction_id
+         LEFT JOIN LATERAL (
+             SELECT MIN(lot.effective_end_at) AS earliest_end_at
+             FROM public.lots AS lot
+             WHERE lot.auction_id = round.auction_id AND lot.status = 'live'
+         ) AS deadline ON true
+         WHERE round.status = 'active'
+           AND round.final_completed_at IS NULL
+           AND (round.lease_until IS NULL OR round.lease_until <= $1)
            AND (
-               (preview_completed_at IS NULL AND preview_due_at <= $1)
-               OR (preview_completed_at IS NOT NULL AND open_due_at <= $1)
+               (round.preview_completed_at IS NULL AND round.preview_due_at <= $1)
+               OR (
+                   round.preview_completed_at IS NOT NULL
+                   AND round.open_completed_at IS NULL
+                   AND round.open_due_at <= $1
+               )
+               OR (
+                   round.open_completed_at IS NOT NULL
+                   AND auction.status = 'live'
+                   AND deadline.earliest_end_at IS NOT NULL
+                   AND deadline.earliest_end_at
+                       - ((auction.policy_snapshot ->> 'final_phase_lead_seconds')::double precision
+                          * interval '1 second') <= $1
+               )
            )
-         ORDER BY COALESCE(preview_due_at, open_due_at), id
+         ORDER BY CASE
+             WHEN round.preview_completed_at IS NULL THEN round.preview_due_at
+             WHEN round.open_completed_at IS NULL THEN round.open_due_at
+             ELSE deadline.earliest_end_at
+                 - ((auction.policy_snapshot ->> 'final_phase_lead_seconds')::double precision
+                    * interval '1 second')
+         END, round.id
          LIMIT $2
-         FOR UPDATE SKIP LOCKED",
+         FOR UPDATE OF round SKIP LOCKED",
     )
     .bind(now)
     .bind(i64::from(limit))
@@ -162,11 +189,10 @@ async fn claim_postgres(
             row.try_get("create_command_id").map_err(map_storage_error)?;
         let preview_completed_at: Option<DateTime<Utc>> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
-        let phase = if preview_completed_at.is_some() {
-            ScheduledRoundPhase::Open
-        } else {
-            ScheduledRoundPhase::Preview
-        };
+        let open_completed_at: Option<DateTime<Utc>> =
+            row.try_get("open_completed_at").map_err(map_storage_error)?;
+        let phase =
+            phase_from_completion(preview_completed_at.is_some(), open_completed_at.is_some());
         let old_attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
         let attempt_count = old_attempt_count
             .checked_add(1)
@@ -178,7 +204,7 @@ async fn claim_postgres(
                  state_version = state_version + 1,
                  last_failure_code = NULL, last_failure_detail = NULL,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1",
+             WHERE id = $1 AND status = 'active' AND final_completed_at IS NULL",
         )
         .bind(round_id)
         .bind(worker_id)
@@ -209,7 +235,7 @@ async fn claim_postgres(
 
 #[cfg(feature = "postgres")]
 async fn complete_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
@@ -219,7 +245,8 @@ async fn complete_postgres(
              SET preview_command_id = $3, preview_completed_at = $4,
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND lease_owner = $2 AND preview_completed_at IS NULL",
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
         ScheduledRoundPhase::Open => (
@@ -227,9 +254,20 @@ async fn complete_postgres(
              SET open_command_id = $3, open_completed_at = $4,
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND lease_owner = $2 AND preview_completed_at IS NOT NULL
-                   AND open_completed_at IS NULL",
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
             "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE public.scheduled_rounds
+             SET final_command_id = $3, final_completed_at = $4,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
         ),
     };
     let result = sqlx::query(sql)
@@ -248,7 +286,7 @@ async fn complete_postgres(
 
 #[cfg(feature = "postgres")]
 async fn fail_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &ScheduledRoundClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,
@@ -261,7 +299,8 @@ async fn fail_postgres(
                  SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
                      state_version = state_version + 1,
                      last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $1 AND lease_owner = $2 AND preview_completed_at IS NULL",
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             )
             .bind(claim.round_id)
             .bind(&claim.worker_id)
@@ -277,8 +316,27 @@ async fn fail_postgres(
                  SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
                      state_version = state_version + 1,
                      last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $1 AND lease_owner = $2
-                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL",
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
+            )
+            .bind(claim.round_id)
+            .bind(&claim.worker_id)
+            .bind(retry_at)
+            .bind(failure_code)
+            .bind(safe_detail)
+            .execute(pool)
+            .await
+        }
+        ScheduledRoundPhase::Final => {
+            sqlx::query(
+                "UPDATE public.scheduled_rounds
+                 SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
+                     state_version = state_version + 1,
+                     last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
             )
             .bind(claim.round_id)
             .bind(&claim.worker_id)
@@ -298,7 +356,7 @@ async fn fail_postgres(
 
 #[cfg(feature = "sqlite")]
 async fn claim_sqlite(
-    pool: &SqlitePool,
+    pool: &super::TrackedPool<Sqlite>,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
@@ -330,18 +388,46 @@ async fn claim_sqlite_inner(
     let now_text = sqlite_timestamp(now);
     let lease_text = sqlite_timestamp(lease_until);
     let rows = sqlx::query(
-        "SELECT id, auction_id, create_command_id, preview_completed_at, attempt_count
-         FROM scheduled_rounds
-         WHERE status = 'active'
-           AND open_completed_at IS NULL
-           AND (lease_until IS NULL OR lease_until <= ?)
+        "SELECT round.id, round.auction_id, round.create_command_id,
+                round.preview_completed_at, round.open_completed_at, round.attempt_count
+         FROM scheduled_rounds AS round
+         INNER JOIN auctions AS auction ON auction.id = round.auction_id
+         WHERE round.status = 'active'
+           AND round.final_completed_at IS NULL
+           AND (round.lease_until IS NULL OR round.lease_until <= ?)
            AND (
-               (preview_completed_at IS NULL AND preview_due_at <= ?)
-               OR (preview_completed_at IS NOT NULL AND open_due_at <= ?)
+               (round.preview_completed_at IS NULL AND round.preview_due_at <= ?)
+               OR (
+                   round.preview_completed_at IS NOT NULL
+                   AND round.open_completed_at IS NULL
+                   AND round.open_due_at <= ?
+               )
+               OR (
+                   round.open_completed_at IS NOT NULL
+                   AND auction.status = 'live'
+                   AND (
+                       SELECT MIN(julianday(lot.effective_end_at))
+                       FROM lots AS lot
+                       WHERE lot.auction_id = round.auction_id AND lot.status = 'live'
+                   ) - CAST(json_extract(
+                       auction.policy_snapshot, '$.final_phase_lead_seconds'
+                   ) AS REAL) / 86400.0 <= julianday(?)
+               )
            )
-         ORDER BY COALESCE(preview_due_at, open_due_at), id
+         ORDER BY CASE
+             WHEN round.preview_completed_at IS NULL THEN julianday(round.preview_due_at)
+             WHEN round.open_completed_at IS NULL THEN julianday(round.open_due_at)
+             ELSE (
+                 SELECT MIN(julianday(lot.effective_end_at))
+                 FROM lots AS lot
+                 WHERE lot.auction_id = round.auction_id AND lot.status = 'live'
+             ) - CAST(json_extract(
+                 auction.policy_snapshot, '$.final_phase_lead_seconds'
+             ) AS REAL) / 86400.0
+         END, round.id
          LIMIT ?",
     )
+    .bind(&now_text)
     .bind(&now_text)
     .bind(&now_text)
     .bind(&now_text)
@@ -360,7 +446,10 @@ async fn claim_sqlite_inner(
             uuid_from_blob(row.try_get("create_command_id").map_err(map_storage_error)?)?;
         let preview_completed_at: Option<String> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
-        let phase = phase_from_row(preview_completed_at.as_deref());
+        let open_completed_at: Option<String> =
+            row.try_get("open_completed_at").map_err(map_storage_error)?;
+        let phase =
+            phase_from_completion(preview_completed_at.is_some(), open_completed_at.is_some());
         let old_attempt_count: i64 = row.try_get("attempt_count").map_err(map_storage_error)?;
         let attempt_count = old_attempt_count
             .checked_add(1)
@@ -372,7 +461,7 @@ async fn claim_sqlite_inner(
                  state_version = state_version + 1,
                  last_failure_code = NULL, last_failure_detail = NULL,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?",
+             WHERE id = ? AND status = 'active' AND final_completed_at IS NULL",
         )
         .bind(worker_id)
         .bind(&lease_text)
@@ -399,7 +488,7 @@ async fn claim_sqlite_inner(
 
 #[cfg(feature = "sqlite")]
 async fn complete_sqlite(
-    pool: &SqlitePool,
+    pool: &super::TrackedPool<Sqlite>,
     claim: &ScheduledRoundClaim,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
@@ -409,7 +498,8 @@ async fn complete_sqlite(
              SET preview_command_id = ?, preview_completed_at = ?,
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND lease_owner = ? AND preview_completed_at IS NULL",
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
         ScheduledRoundPhase::Open => (
@@ -417,9 +507,20 @@ async fn complete_sqlite(
              SET open_command_id = ?, open_completed_at = ?,
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND lease_owner = ? AND preview_completed_at IS NOT NULL
-                   AND open_completed_at IS NULL",
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
             "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE scheduled_rounds
+             SET final_command_id = ?, final_completed_at = ?,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
         ),
     };
     let result = sqlx::query(sql)
@@ -438,7 +539,7 @@ async fn complete_sqlite(
 
 #[cfg(feature = "sqlite")]
 async fn fail_sqlite(
-    pool: &SqlitePool,
+    pool: &super::TrackedPool<Sqlite>,
     claim: &ScheduledRoundClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,
@@ -450,7 +551,8 @@ async fn fail_sqlite(
              SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
                  state_version = state_version + 1,
                  last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND lease_owner = ? AND preview_completed_at IS NULL",
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
         ScheduledRoundPhase::Open => (
@@ -458,9 +560,20 @@ async fn fail_sqlite(
              SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
                  state_version = state_version + 1,
                  last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND lease_owner = ? AND preview_completed_at IS NOT NULL
-                   AND open_completed_at IS NULL",
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
             "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE scheduled_rounds
+             SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
+                 state_version = state_version + 1,
+                 last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
         ),
     };
     let result = sqlx::query(sql)

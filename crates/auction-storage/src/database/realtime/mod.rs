@@ -86,6 +86,7 @@ async fn list_postgres(
 
     let mut events = Vec::with_capacity(request.page_size as usize);
     let mut refetch_required = false;
+    let mut expected_sequence = request.after;
     for (index, row) in rows.into_iter().enumerate() {
         if index >= request.page_size as usize {
             break;
@@ -114,10 +115,14 @@ async fn list_postgres(
                 .try_get("created_at")
                 .map_err(|_| storage_error("读取 PostgreSQL 实时事件时间失败"))?,
         };
-        if event.validate().is_err() {
+        // 公开流的 sequence 是每条 stream 的连续游标。发现删除、损坏或跨流读到的
+        // 断档时，不能把不完整的事件页交给浏览器继续推进，必须让它回读权威快照。
+        if event.validate().is_err() || event.stream_sequence != expected_sequence.saturating_add(1)
+        {
             refetch_required = true;
             break;
         }
+        expected_sequence = event.stream_sequence;
         events.push(event);
     }
 
@@ -170,6 +175,7 @@ async fn list_sqlite(
     let has_more = rows_len_is_more(request.page_size, &rows);
     let mut events = Vec::with_capacity(request.page_size as usize);
     let mut refetch_required = false;
+    let mut expected_sequence = request.after;
     for (index, row) in rows.into_iter().enumerate() {
         if index >= request.page_size as usize {
             break;
@@ -199,10 +205,14 @@ async fn list_sqlite(
                     .map_err(|_| storage_error("读取 Lite 实时事件时间失败"))?,
             )?,
         };
-        if event.validate().is_err() {
+        // SQLite Lite 与 PostgreSQL 保持同一条游标安全边界；Lite 不能因为没有行锁
+        // 就放宽事件断档检查，否则重连后的客户端可能跳过无法恢复的竞价事实。
+        if event.validate().is_err() || event.stream_sequence != expected_sequence.saturating_add(1)
+        {
             refetch_required = true;
             break;
         }
+        expected_sequence = event.stream_sequence;
         events.push(event);
     }
 

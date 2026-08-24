@@ -5,6 +5,7 @@
 
 mod admin_auctions;
 mod admin_audit;
+mod admin_credentials;
 mod admin_dashboard;
 mod admin_forum;
 mod admin_intake;
@@ -15,17 +16,20 @@ mod admin_proxy_events;
 mod admin_renames;
 mod admin_rules;
 mod admin_runtime_config;
+mod admin_users;
 mod blacklist;
 mod compensation;
 mod delivery_admin;
 mod forum;
+mod metrics;
 mod realtime;
 mod realtime_admin;
+mod realtime_hub;
 mod rules;
 mod security;
 mod state;
 
-use std::{collections::BTreeMap, net::SocketAddr};
+use std::{collections::BTreeMap, net::SocketAddr, time::Instant};
 
 use crate::assets as web_assets;
 
@@ -56,11 +60,11 @@ use auction_contracts::{
     AdminSettlementLotResponse, AdminSettlementReportResponse, AdminSettlementSummaryResponse,
     ApiErrorResponse, ApiErrorResponseWithData, ApiResponse, AuctionListResponse,
     AuctionSummaryResponse, CreateProxyAuthorizationRequest, CurrentAuctionItemResponse,
-    CurrentAuctionResponse, HealthResponse, LowerProxyAuthorizationRequest, PlaceBidRequest,
-    PlaceBidResponse, PlaceBidResultResponse, PublicAccountBlockedResponse,
-    PublicBidLogEntryResponse, PublicBidLogListResponse, PublicEquipmentResponse,
-    PublicEquipmentStatResponse, PublicFinalRestrictionResponse, PublicLiveLotResponse,
-    PublicLoginRequest, PublicLoginResponse, PublicLotDetailItemResponse,
+    CurrentAuctionResponse, HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse,
+    LowerProxyAuthorizationRequest, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse,
+    PublicAccountBlockedResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
+    PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
+    PublicLiveLotResponse, PublicLoginRequest, PublicLoginResponse, PublicLotDetailItemResponse,
     PublicLotEnvelopeResponse, PublicLotListItemsResponse, PublicMyBidsResponse,
     PublicMyProxyResponse, PublicOwnedBidResponse, PublicOwnedEquipmentResponse,
     PublicOwnedProxyCapabilitiesResponse, PublicOwnedProxyQuotaResponse, PublicOwnedProxyResponse,
@@ -74,11 +78,13 @@ use auction_domain::{
     BidAmount, CommandId, CompetitionPlan, DomainError, LotId, ProxyAuthorization,
     ProxyAuthorizationId, ProxyMode, ProxyStatus, SettlementId, UserId,
 };
+use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
 };
@@ -92,6 +98,7 @@ use subtle::ConstantTimeEq;
 use url::form_urlencoded;
 use uuid::Uuid;
 
+pub use realtime_hub::{RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription};
 pub use security::{AdminHttpSecurity, PublicHttpSecurity};
 pub use state::{AdminApiState, PublicApiState};
 
@@ -107,9 +114,13 @@ pub fn public_router(version: &'static str) -> Router<PublicApiState> {
     public_feature_routes(
         Router::<PublicApiState>::new()
             .route("/health", get(health))
-            .route("/api/v1/health", get(health)),
+            .route("/api/v1/health", get(health))
+            .route("/health/live", get(public_health_live))
+            .route("/health/ready", get(public_health_ready))
+            .route("/metrics", get(metrics::public)),
     )
     .fallback(web_assets::serve_public_asset)
+    .layer(middleware::from_fn(add_server_date))
 }
 
 /// 管理端路由。
@@ -121,19 +132,81 @@ pub fn admin_router(version: &'static str) -> Router<AdminApiState> {
     admin_feature_routes(
         Router::<AdminApiState>::new()
             .route("/health", get(health))
-            .route("/api/v1/health", get(health)),
+            .route("/api/v1/health", get(health))
+            .route("/health/live", get(admin_health_live))
+            .route("/health/ready", get(admin_health_ready))
+            .route("/metrics", get(metrics::admin)),
     )
     .fallback(web_assets::serve_admin_asset)
+    .layer(middleware::from_fn(add_server_date))
+}
+
+/// 为浏览器提供标准 Date 头，使 Public 倒计时可以修正客户端本地时钟偏差。
+async fn add_server_date(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+    if !response.headers().contains_key(header::DATE)
+        && let Ok(value) = HeaderValue::from_str(&date)
+    {
+        response.headers_mut().insert(header::DATE, value);
+    }
+    response
 }
 
 async fn health_response(service: &'static str, version: &'static str) -> Json<HealthResponse> {
     Json(HealthResponse::ok(service, version))
 }
 
-/// 注册已冻结但尚未接入应用端口的 Public 路径。
+/// 返回不访问外部依赖的存活探针；该路径用于进程管理器判断是否需要重启。
+async fn public_health_live() -> Json<HealthProbeResponse<HealthLiveData>> {
+    Json(HealthProbeResponse {
+        code: "live",
+        message: "进程存活",
+        data: HealthLiveData { live: true },
+    })
+}
+
+/// 返回 Public 的依赖 readiness；缺少数据库端口时保持未就绪而不伪造成功。
+async fn public_health_ready(State(state): State<PublicApiState>) -> Response {
+    let ready = match state.readiness() {
+        Some(readiness) => readiness.check().await.is_ok(),
+        None => false,
+    };
+    health_ready_response(ready)
+}
+
+/// 返回不访问外部依赖的 Admin 存活探针。
+async fn admin_health_live() -> Json<HealthProbeResponse<HealthLiveData>> {
+    Json(HealthProbeResponse {
+        code: "live",
+        message: "进程存活",
+        data: HealthLiveData { live: true },
+    })
+}
+
+/// 返回 Admin 的依赖 readiness；数据库连接或迁移不完整时使用 503。
+async fn admin_health_ready(State(state): State<AdminApiState>) -> Response {
+    let ready = match state.readiness() {
+        Some(readiness) => readiness.check().await.is_ok(),
+        None => false,
+    };
+    health_ready_response(ready)
+}
+
+fn health_ready_response(ready: bool) -> Response {
+    let (status, code, message) = if ready {
+        (StatusCode::OK, "ready", "进程已就绪")
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "not_ready", "进程尚未就绪")
+    };
+    (status, Json(HealthProbeResponse { code, message, data: HealthReadyData { ready } }))
+        .into_response()
+}
+
+/// 注册已冻结的 Public 路径。
 ///
-/// 先注册完整路径可以让 404/405 与“功能尚未迁移”明确区分；真正接入用例后只替换对应
-/// handler，不改变路由契约。这里不伪造旧系统的成功 payload。
+/// 路由只负责绑定各自的 HTTP owner；未装配的窄端口仍由 handler 明确返回能力不可用，
+/// 不用伪造的成功 payload 掩盖部署缺口。
 fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiState> {
     router
         .route("/api/v1/worlds", get(list_worlds))
@@ -170,7 +243,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/lots/{lot_id}/bids", post(place_bid).layer(DefaultBodyLimit::max(4 << 10)))
 }
 
-/// 注册已冻结但尚未接入应用端口的 Admin 路径。
+/// 注册已冻结的 Admin 路径。
 fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> {
     router
         .route(
@@ -261,13 +334,31 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             "/api/v1/admin/config:validate",
             post(admin_runtime_config::validate).layer(DefaultBodyLimit::max(4 << 20)),
         )
-        .route("/api/v1/admin/users", get(not_migrated).post(not_migrated).patch(not_migrated))
+        .route(
+            "/api/v1/admin/users",
+            get(admin_users::list)
+                .post(admin_users::create)
+                .patch(admin_users::mutate)
+                .layer(DefaultBodyLimit::max(16 << 10)),
+        )
         .route("/api/v1/admin/renames", get(admin_renames::list))
-        .route("/api/v1/admin/renames/{rename_id}/revert", post(not_migrated))
-        .route("/api/v1/admin/users/{user_id}/blacklist", put(not_migrated).delete(not_migrated))
+        .route(
+            "/api/v1/admin/renames/{rename_id}/revert",
+            post(admin_users::revert_rename).layer(DefaultBodyLimit::max(8 << 10)),
+        )
+        .route(
+            "/api/v1/admin/users/{user_id}/blacklist",
+            put(admin_users::blacklist)
+                .delete(admin_users::unblacklist)
+                .layer(DefaultBodyLimit::max(8 << 10)),
+        )
         .route(
             "/api/v1/admin/credentials",
-            get(not_migrated).post(not_migrated).patch(not_migrated).delete(not_migrated),
+            get(admin_credentials::list)
+                .post(admin_credentials::create)
+                .patch(admin_credentials::mutate)
+                .delete(admin_credentials::delete)
+                .layer(DefaultBodyLimit::max(128 << 10)),
         )
         .route("/api/v1/admin/audit", get(admin_audit::list))
         .route("/api/v1/admin/deliveries", get(delivery_admin::list))
@@ -283,17 +374,6 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             "/api/v1/admin/deliveries/{delivery_id}/reconcile",
             post(delivery_admin::reconcile).layer(DefaultBodyLimit::max(4 << 10)),
         )
-}
-
-async fn not_migrated() -> impl IntoResponse {
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(ApiErrorResponse {
-            code: "feature_not_migrated",
-            message: "该 HTTP 能力尚未接入应用用例".to_owned(),
-            request_id: None,
-        }),
-    )
 }
 
 const ADMIN_SESSION_COOKIE: &str = "auction_admin_session";
@@ -541,6 +621,31 @@ async fn execute_admin_lifecycle(
         return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
+    if input.expected_state_version <= 0 {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_state_version", "拍卖状态版本无效")
+            .into_response();
+    }
+    if action == AuctionLifecycleAction::Cancel {
+        let Some(reason) = input.reason.as_deref() else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_cancel_reason",
+                "取消拍卖必须提供原因",
+            )
+            .into_response();
+        };
+        if reason.trim().is_empty() || reason.len() > 1024 || reason.chars().any(char::is_control) {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_cancel_reason", "取消原因无效")
+                .into_response();
+        }
+    } else if input.reason.is_some() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_lifecycle_reason",
+            "非取消生命周期命令不能携带原因",
+        )
+        .into_response();
+    }
     let request_hash = match RequestHash::from_request(action.command_kind(), auction_uuid, &input)
     {
         Ok(hash) => hash,
@@ -558,6 +663,10 @@ async fn execute_admin_lifecycle(
         command_id: CommandId::from_uuid(input.command_id),
         auction_id: auction_domain::AuctionId::from_uuid(auction_uuid),
         action,
+        expected_state_version: Some(
+            u64::try_from(input.expected_state_version).unwrap_or_default(),
+        ),
+        cancel_reason: input.reason,
         request_hash,
         actor: AuctionLifecycleActor {
             actor_type: AuctionLifecycleActorType::Admin,
@@ -1169,10 +1278,20 @@ async fn place_bid(
         amount,
         request_hash,
     };
+    let command_started = Instant::now();
     let plan = match commands.place_bid(command).await {
         Ok(plan) => plan,
-        Err(error) => return map_competition_error(error),
+        Err(error) => {
+            observe_public_business(
+                &state,
+                BusinessEvent::Bid,
+                business_outcome_for_competition_error(&error),
+                command_started,
+            );
+            return map_competition_error(error);
+        }
     };
+    observe_public_business(&state, BusinessEvent::Bid, BusinessOutcome::Success, command_started);
     let Some(current_price) = plan.final_lot.current_price else {
         return internal_error();
     };
@@ -1239,8 +1358,9 @@ async fn create_proxy_authorization(
             .into_response();
     }
     let mode = match input.mode.as_str() {
-        "fast" => ProxyMode::Fast,
-        "slow" => ProxyMode::Slow,
+        "" => None,
+        "fast" => Some(ProxyMode::Fast),
+        "slow" => Some(ProxyMode::Slow),
         _ => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_proxy_mode", "代理模式无效")
                 .into_response();
@@ -1271,10 +1391,25 @@ async fn create_proxy_authorization(
     let bidder_id = UserId::from_uuid(identity.user_id);
     let command =
         CreateProxyCommand { command_id, lot_id, bidder_id, maximum_amount, mode, request_hash };
+    let command_started = Instant::now();
     let plan = match commands.create_proxy(command).await {
         Ok(plan) => plan,
-        Err(error) => return map_competition_error(error),
+        Err(error) => {
+            observe_public_business(
+                &state,
+                BusinessEvent::Proxy,
+                business_outcome_for_competition_error(&error),
+                command_started,
+            );
+            return map_competition_error(error);
+        }
     };
+    observe_public_business(
+        &state,
+        BusinessEvent::Proxy,
+        BusinessOutcome::Success,
+        command_started,
+    );
     let Some(expected_state) = plan.proxy_states.iter().find(|state| {
         state.lot_id == lot_id
             && state.user_id == bidder_id
@@ -1386,10 +1521,25 @@ async fn lower_proxy_authorization(
         new_maximum,
         request_hash,
     };
+    let command_started = Instant::now();
     let plan = match commands.lower_proxy(command).await {
         Ok(plan) => plan,
-        Err(error) => return map_competition_error(error),
+        Err(error) => {
+            observe_public_business(
+                &state,
+                BusinessEvent::Proxy,
+                business_outcome_for_competition_error(&error),
+                command_started,
+            );
+            return map_competition_error(error);
+        }
     };
+    observe_public_business(
+        &state,
+        BusinessEvent::Proxy,
+        BusinessOutcome::Success,
+        command_started,
+    );
     let Some(expected_state) = plan.proxy_states.iter().find(|state| {
         state.id == command.authorization_id && state.lot_id == lot_id && state.user_id == bidder_id
     }) else {
@@ -1609,6 +1759,14 @@ fn map_admin_lifecycle_error(error: ApplicationError) -> Response {
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
             not_found_error().into_response()
         }
+        ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState) => {
+            api_error(
+                StatusCode::CONFLICT,
+                "state_version_conflict",
+                "拍卖状态已变化，请刷新后重试",
+            )
+            .into_response()
+        }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
         | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
@@ -1658,6 +1816,35 @@ async fn authenticated_public_identity(
     }
 }
 
+fn observe_public_business(
+    state: &PublicApiState,
+    event: BusinessEvent,
+    outcome: BusinessOutcome,
+    started: Instant,
+) {
+    let Some(metrics) = state.metrics() else {
+        return;
+    };
+    let recorder = metrics.business();
+    recorder.observe(event, outcome);
+    recorder.observe_duration(event, started.elapsed());
+}
+
+fn business_outcome_for_competition_error(error: &ApplicationError) -> BusinessOutcome {
+    match error {
+        ApplicationError::Domain(_)
+        | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
+        | ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::NotFound
+            | CompetitionTransactionError::Conflict
+            | CompetitionTransactionError::StaleState
+            | CompetitionTransactionError::InvalidState
+            | CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict),
+        ) => BusinessOutcome::Rejected,
+        _ => BusinessOutcome::Error,
+    }
+}
+
 fn map_competition_error(error: ApplicationError) -> Response {
     match error {
         ApplicationError::AdminLotUpdate(AdminLotUpdateError::InvalidCommand) => {
@@ -1672,6 +1859,18 @@ fn map_competition_error(error: ApplicationError) -> Response {
         }
         ApplicationError::Domain(DomainError::InvalidProxyMaximum) => {
             api_error(StatusCode::CONFLICT, "invalid_proxy_maximum", "代理上限当前不可调整")
+                .into_response()
+        }
+        ApplicationError::Domain(DomainError::ProxyDisabled) => {
+            api_error(StatusCode::CONFLICT, "proxy_disabled", "当前拍卖未启用代理竞价")
+                .into_response()
+        }
+        ApplicationError::Domain(DomainError::ProxyOutbidLimit) => {
+            api_error(StatusCode::CONFLICT, "proxy_outbid_limit", "代理重复进场次数已用尽")
+                .into_response()
+        }
+        ApplicationError::Domain(DomainError::ProxySlowFinal) => {
+            api_error(StatusCode::CONFLICT, "proxy_slow_final", "最终阶段不允许使用慢速代理")
                 .into_response()
         }
         ApplicationError::Domain(DomainError::InvalidProxyTransition { .. }) => {
@@ -1694,6 +1893,7 @@ fn map_competition_error(error: ApplicationError) -> Response {
         }
         ApplicationError::Serialization(_) => internal_error(),
         ApplicationError::CapabilityUnavailable(_)
+        | ApplicationError::FulfillmentEvidenceNotObserved
         | ApplicationError::Domain(_)
         | ApplicationError::Repository(_)
         | ApplicationError::CompetitionTransaction(_)
@@ -1707,12 +1907,17 @@ fn map_competition_error(error: ApplicationError) -> Response {
         | ApplicationError::AdminIntake(_)
         | ApplicationError::AdminForumPreview(_)
         | ApplicationError::AdminAudit(_)
+        | ApplicationError::AdminCredential(_)
         | ApplicationError::AdminMail(_)
         | ApplicationError::AdminMailTransaction(_)
         | ApplicationError::AdminRuntime(_)
         | ApplicationError::AdminRuntimeFile(_)
         | ApplicationError::AdminRuntimeCommand(_)
-        | ApplicationError::Session(_) => {
+        | ApplicationError::AdminUser(_)
+        | ApplicationError::MailProcessing(_)
+        | ApplicationError::ForumRemote(_)
+        | ApplicationError::Session(_)
+        | ApplicationError::OperationsAlert(_) => {
             api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "竞价服务暂不可用")
                 .into_response()
         }
@@ -1754,7 +1959,8 @@ fn map_recovery_command_error(error: ApplicationError) -> Response {
             "恢复确认仅支持 PostgreSQL 完整档",
         )
         .into_response(),
-        ApplicationError::RecoveryCommand(_)
+        ApplicationError::FulfillmentEvidenceNotObserved
+        | ApplicationError::RecoveryCommand(_)
         | ApplicationError::Serialization(_)
         | ApplicationError::Repository(_)
         | ApplicationError::TransactionPolicy(_)
@@ -1768,12 +1974,17 @@ fn map_recovery_command_error(error: ApplicationError) -> Response {
         | ApplicationError::AdminIntake(_)
         | ApplicationError::AdminForumPreview(_)
         | ApplicationError::AdminAudit(_)
+        | ApplicationError::AdminCredential(_)
         | ApplicationError::AdminMail(_)
         | ApplicationError::AdminMailTransaction(_)
         | ApplicationError::AdminRuntime(_)
         | ApplicationError::AdminRuntimeFile(_)
         | ApplicationError::AdminRuntimeCommand(_)
-        | ApplicationError::Session(_) => api_error(
+        | ApplicationError::AdminUser(_)
+        | ApplicationError::MailProcessing(_)
+        | ApplicationError::ForumRemote(_)
+        | ApplicationError::Session(_)
+        | ApplicationError::OperationsAlert(_) => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
             "恢复确认服务暂不可用",
@@ -3100,11 +3311,14 @@ fn map_lot_detail(detail: PublicLotDetail) -> PublicLotEnvelopeResponse {
 fn map_lot_envelope(projection: PublicAuctionProjection) -> PublicLotEnvelopeResponse {
     PublicLotEnvelopeResponse {
         auction_id: projection.auction_id.to_string(),
+        world: projection.world_id,
+        number: projection.sequence,
         auction_status: projection.auction_status,
         projection_kind: projection.projection_kind,
         presentation_mode: projection.presentation_mode,
         bidding_open: projection.bidding_open,
         opens_at: timestamp(projection.opens_at),
+        scheduled_ends_at: projection.scheduled_ends_at.map(timestamp),
         preview_revision: projection.preview_revision,
         final_restriction: projection.final_restriction.map(map_final_restriction),
         lots: None,

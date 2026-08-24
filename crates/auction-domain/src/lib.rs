@@ -11,7 +11,8 @@ mod settlement;
 pub use auction::{Auction, AuctionStatus};
 pub use bidding::{
     AcceptedBid, AuctionRules, BidAmount, BidDecision, BidMechanism, CREDIT_GRID, CompetitionPlan,
-    CompetitionTrigger, CompetitionTriggerKind, DEFAULT_CANCEL_CUTOFF, DEFAULT_PROXY_SLOW_INTERVAL,
+    CompetitionTrigger, CompetitionTriggerKind, DEFAULT_BID_INCREMENT_PPM, DEFAULT_CANCEL_CUTOFF,
+    DEFAULT_FINAL_PHASE_LEAD, DEFAULT_PROXY_MAX_OUTBID_USES, DEFAULT_PROXY_SLOW_INTERVAL,
     DEFAULT_SOFT_CLOSE_EXTENSION, DEFAULT_SOFT_CLOSE_WINDOW, DEFAULT_START_PRICE,
     LARGE_BID_THRESHOLD, LotBidState, PROXY_LAST_INCREMENT, REGULAR_BID_INCREMENT,
     SMALL_BID_INCREMENT, SMALL_BID_THRESHOLD,

@@ -11,6 +11,7 @@ use super::ApplicationFuture;
 pub enum ScheduledRoundPhase {
     Preview,
     Open,
+    Final,
 }
 
 impl ScheduledRoundPhase {
@@ -19,6 +20,7 @@ impl ScheduledRoundPhase {
         match self {
             Self::Preview => super::AuctionLifecycleAction::Preview,
             Self::Open => super::AuctionLifecycleAction::Open,
+            Self::Final => super::AuctionLifecycleAction::FinalPhase,
         }
     }
 }

@@ -16,8 +16,8 @@ cursor。Public session 的登录、当前会话和注销，以及 `/api/v1/me/b
 `/api/v1/lots/{lot_id}/proxy-authorizations/mine` 和 `/api/v1/lots/{lot_id}/bids` 的账户读取/普通竞价
 命令也已接入应用端口；普通竞价使用持久化 `command_id` 幂等账本、稳定请求摘要和数据库
 事务返回结果。账户读取会在 PostgreSQL/SQLite 快照内返回普通竞价、代理 quota、追加转换历史、
-最近代理 bid 和 owner capability；两个代理 mutation 路径仍接入同一事务并返回命令确认，
-其完整旧版命令结果投影尚待后续补齐。Public 启动时未提供数据库状态则返回明确的
+最近代理 bid 和 owner capability；两个代理 mutation 路径接入同一事务，并在提交后重新读取
+安全代理快照，返回旧版命令所需的完整授权、quota、转换历史和最近代理 bid 投影。Public 启动时未提供数据库状态则返回明确的
 `storage_unavailable`。
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
@@ -32,21 +32,32 @@ Catch-up，`/api/v1/ws` 提供带 Public session 和并发上限的只读服务�
 证据重校验、命令账本、退款激活、guarded relist、审计和预览目录 realtime 事件；SQLite 对
 该能力返回 `501 feature_not_supported`。Admin `/api/v1/admin/auction-forum/preview` 已
 接入有界的本地 HTML/文本解析，输入上限为 2 MiB，解析结果只返回 catalog、posts 和 warnings，
-不会抓取远程页面或写数据库。外部论坛发布、邮件和履约 outbox 仍属于后续 Worker/应用阶段，
-其余 Admin 业务路径仍在应用端口接入前返回 501。
+不会抓取远程页面或写数据库。外部论坛发布仍属于后续 Worker/集成阶段；MoogleMail 邮件与结算
+履约 outbox 已由 Worker 接入，Sent/Balance 回执会写入履约 proof。未装配对应 owner 或 SQLite
+明确不支持的 Admin 能力才返回 501，已登记且已接入的路径不再使用占位响应。
 Admin `/api/v1/admin/audit` 已接入 Admin session、精确筛选、时间范围、opaque keyset cursor 和
 数字分页；响应只包含追加式审计的安全字段与 JSON object metadata，不暴露原始 SQL 行。
-Admin `/api/v1/admin/renames` 已接入 Admin session、`user_id`/`name` 筛选、有限数字分页和
-两套数据库的改名历史安全投影；A30 回滚命令仍保持 `feature_not_migrated`，不在 HTTP 层伪造
-用户状态写入。
-Admin `/api/v1/admin/dashboard` 已接入 Admin session 和两套数据库的 service heartbeat
-安全投影，返回 health/process section；尚未迁移的 mail aggregation、realtime、credentials、delivery、
-fulfillment、recovery 和 alerting section 明确返回 `unknown`，不构造占位数据。
+Admin `/api/v1/admin/users`、`/api/v1/admin/renames/{rename_id}/revert` 和
+`/api/v1/admin/users/{user_id}/blacklist` 已接入 Admin session、CSRF、稳定命令 DTO 和用户
+安全投影；创建、改名、游戏身份修改、key 撤销/重签、黑名单/解封和改名回滚由 Users owner
+负责版本 fence、命令账本与审计。`/api/v1/admin/renames` 继续提供 A29 改名历史读取。key
+明文只可能出现在创建/重签的成功响应，不进入日志或错误响应；未配置用户登录数据密钥时，
+该 Users port 明确报告能力不可用。
+Admin A32 `/api/v1/admin/credentials` 已接入 session、origin/CSRF、`command_id`、
+`expected_state_version` 和安全 DTO，支持凭据导入、改名、启停、删除及分页读取。导入请求的
+secret 只在应用/加密适配器边界短暂存在，响应、命令账本、审计和管理端页面均不回显明文；该
+能力要求 PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥时明确返回
+`501 feature_not_supported`。
+Admin `/api/v1/admin/dashboard` 已接入 Admin session、两套数据库的 service heartbeat 安全投影
+和 runtime 指定的 Worker control Unix socket 状态，返回 health/process/worker 安全字段；mail、
+realtime、credential aggregation、delivery、fulfillment、recovery 和 alerting section 由对应
+owner 提供安全汇总，只有 owner 未装配或读取失败时才明确返回 `unknown`，不构造占位数据。Worker
+control 失败只映射为有限 condition。
 
 Admin `/api/v1/admin/auctions` 的 GET 已接入 Admin session、`world_id`/`status` 筛选、旧
 `page`/`page_size` 分页和 PostgreSQL Serializable 生命周期/lot 数量快照；POST 创建已接入
 零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件，响应显式声明已接入的
-生命周期能力，intake 仍保持未迁移。SQLite Lite 对该
+生命周期与 `manual_intake` 能力。SQLite Lite 对该
 列表返回 `501 feature_not_supported`。A06 lot 列表同样只在 PostgreSQL 完整档提供安全快照。
 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session/CSRF 和稳定命令 DTO；HTTP 层只映射
 `withdraw`/`set_start_price` 与版本 fence，事务、审计、预览事件和 withdrawn-return 义务由
@@ -59,12 +70,14 @@ Admin A16-A19 邮件路由已接入：轮询状态、入站列表/详情使用�
 安全 DTO，暂停/恢复使用 Admin session、CSRF、`command_id` 与 `expected_state_version`。
 PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lite 明确返回
 `501 feature_not_supported`。HTTP 层不返回原始邮件正文、Cookie、轮询游标或任意 metadata，
-A20 只把带版本 fence 的触发命令排入 Worker，返回 `202`，不把排队动作伪装成远程读取成功。
+A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 MoogleMail poller，返回带
+`pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 
 Public 与 Admin 是不同 surface，路由和静态产物分别隔离；公开端二进制不包含管理端资源。
-除已接入的世界、拍卖/lot/竞价日志/价格历史只读目录、Public session、Admin session、普通竞价和代理 mutation 命令外，当前已登记的业务路径在应用用例
-接入前返回明确的 501 和 `feature_not_migrated`，不伪造旧系统成功数据，也不把未登记路径
-误当成迁移完成。
+已登记路径均由对应 owner 负责真实投影或明确的 Lite 能力响应；未装配 owner、数据库档位不支持
+的能力和未登记路径仍分别返回明确的 `feature_not_supported`/`feature_not_migrated`，不伪造旧系统
+成功数据，也不把未登记路径误当成迁移完成。两类 surface 的 HTTP 响应还会提供标准 `Date` 头，
+供 Public 浏览器按旧版契约估算服务端时钟；该头不承载业务状态，也不改变任何服务端时间判断。
 
 ## 静态产物内嵌
 

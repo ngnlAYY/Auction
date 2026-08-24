@@ -1,9 +1,8 @@
 //! Public 补偿池 HTTP DTO 与请求。
 
-use gloo_net::http::Request;
 use serde::Deserialize;
 
-use super::ApiResponse;
+use super::{ApiResponse, send_get};
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub(crate) struct CompensationRound {
@@ -54,11 +53,10 @@ pub(crate) struct CompensationMovementPage {
     pub page_size: i64,
 }
 
-pub(crate) async fn fetch_compensation_pool() -> Result<CompensationPoolPage, String> {
-    let response = Request::get("/api/v1/compensation-pool?page=1&page_size=25")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+pub(crate) async fn fetch_compensation_pool(page: i64) -> Result<CompensationPoolPage, String> {
+    let page = page.max(1);
+    let url = format!("/api/v1/compensation-pool?page={page}&page_size=25");
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -69,9 +67,11 @@ pub(crate) async fn fetch_compensation_pool() -> Result<CompensationPoolPage, St
 
 pub(crate) async fn fetch_compensation_movements(
     auction_id: String,
+    page: i64,
 ) -> Result<CompensationMovementPage, String> {
-    let url = format!("/api/v1/compensation-pool/{auction_id}/movements?page=1&page_size=50");
-    let response = Request::get(&url).send().await.map_err(|error| error.to_string())?;
+    let page = page.max(1);
+    let url = format!("/api/v1/compensation-pool/{auction_id}/movements?page={page}&page_size=50");
+    let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

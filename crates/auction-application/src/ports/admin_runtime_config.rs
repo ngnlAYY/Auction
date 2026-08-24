@@ -3,6 +3,8 @@
 //! runtime 文档只承载非敏感字段。文件适配器负责 TOML 编解码和原子替换，数据库适配器负责
 //! durable intent、审计和命令状态；本模块只定义两者之间的窄边界，不读取进程配置或执行 SQL。
 
+use std::path::Path;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -38,7 +40,7 @@ pub struct AdminRuntimeListenerConfig {
     pub address: String,
     /// Unix socket 的用户组；TCP 模式下可省略。
     pub group: String,
-    /// 监听模式；当前 Rust Admin 仅支持 `tcp`，省略时使用 `tcp`。
+    /// 监听模式；支持 `tcp` 与 Linux 上的 `unix`，省略时使用 `tcp`。
     pub mode: AdminRuntimeListenMode,
     /// Unix socket 运行目录；TCP 模式下可省略。
     pub runtime_directory: String,
@@ -197,6 +199,16 @@ impl Default for AdminRuntimeWorkerControlConfig {
     }
 }
 
+/// Admin dashboard 需要核对的 MoogleMail world 与持久化邮箱标识。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AdminRuntimeDashboardMailbox {
+    /// 游戏 world，只允许 `main` 或 `isekai`。
+    pub world_id: String,
+    /// Worker 为该 world 使用的持久化邮箱标识；不包含 Cookie 或其他秘密材料。
+    pub mailbox_key: String,
+}
+
 /// Admin runtime 文件允许承载的非敏感文档。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -207,6 +219,8 @@ pub struct AdminRuntimeDocument {
     pub equipment_source: AdminRuntimeEquipmentSourceConfig,
     /// Admin HTTP 监听配置。
     pub listener: AdminRuntimeListenerConfig,
+    /// Admin dashboard 用于检查 MoogleMail poller/凭据范围的非敏感邮箱清单；省略时不强制范围。
+    pub dashboard_mailboxes: Vec<AdminRuntimeDashboardMailbox>,
     /// metrics 公共开关。
     pub metrics: AdminRuntimeMetricsConfig,
     /// HTTP origin、速率限制和 Cookie 属性。
@@ -223,6 +237,7 @@ impl AdminRuntimeDocument {
     /// 严格校验文档；只检查可由本地文档决定的边界，不执行网络、数据库或 socket 操作。
     pub fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
         validate_listener(&self.listener)?;
+        validate_dashboard_mailboxes(&self.dashboard_mailboxes)?;
         validate_equipment_source(&self.equipment_source)?;
         validate_security(&self.security)?;
         validate_session(&self.session)?;
@@ -256,11 +271,11 @@ impl AdminRuntimeDocument {
         Ok(RequestHash::new(bytes))
     }
 
-    /// 返回用于启动时覆盖 Admin 普通配置的 TCP 地址。
+    /// 返回用于启动时覆盖 Admin 普通配置的 TCP 地址；Unix 模式没有 TCP 地址。
     pub fn tcp_address(&self) -> Result<std::net::SocketAddr, AdminRuntimeConfigError> {
         if self.listener.mode != AdminRuntimeListenMode::Tcp {
             return Err(AdminRuntimeConfigError::InvalidDocument(
-                "当前 Rust Admin 入口只支持 TCP runtime listener".to_owned(),
+                "Unix runtime listener 不提供 TCP 地址".to_owned(),
             ));
         }
         self.listener.address.parse().map_err(|_| {
@@ -548,7 +563,7 @@ pub enum AdminRuntimeCommandError {
 }
 
 fn validate_listener(config: &AdminRuntimeListenerConfig) -> Result<(), AdminRuntimeConfigError> {
-    if !valid_text(&config.address, 256)
+    if (!config.address.is_empty() && !valid_text(&config.address, 256))
         || (!config.group.is_empty() && !valid_text(&config.group, 128))
         || (!config.runtime_directory.is_empty() && !valid_text(&config.runtime_directory, 512))
         || (!config.socket_path.is_empty() && !valid_text(&config.socket_path, 512))
@@ -557,17 +572,57 @@ fn validate_listener(config: &AdminRuntimeListenerConfig) -> Result<(), AdminRun
     }
     match config.mode {
         AdminRuntimeListenMode::Tcp => {
-            if config.address.parse::<std::net::SocketAddr>().is_err() {
+            if !valid_text(&config.address, 256)
+                || !config.group.is_empty()
+                || !config.socket_path.is_empty()
+                || config.address.parse::<std::net::SocketAddr>().is_err()
+            {
                 return Err(AdminRuntimeConfigError::InvalidDocument(
-                    "listener.address 必须是 host:port".to_owned(),
+                    "TCP listener 字段无效".to_owned(),
                 ));
             }
         }
         AdminRuntimeListenMode::Unix => {
+            if !config.address.is_empty()
+                || !valid_group_name(&config.group)
+                || validate_unix_path(&config.runtime_directory, "listener.runtime_directory")
+                    .is_err()
+                || validate_unix_path(&config.socket_path, "listener.socket_path").is_err()
+                || Path::new(&config.socket_path).parent()
+                    != Some(Path::new(&config.runtime_directory))
+            {
+                return Err(AdminRuntimeConfigError::InvalidDocument(
+                    "Unix listener 必须提供规范化的 runtime_directory、socket_path 和 group"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_dashboard_mailboxes(
+    mailboxes: &[AdminRuntimeDashboardMailbox],
+) -> Result<(), AdminRuntimeConfigError> {
+    if mailboxes.len() > 2 {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "dashboard_mailboxes 最多只能配置两个 world".to_owned(),
+        ));
+    }
+    let mut world_ids = Vec::with_capacity(mailboxes.len());
+    let mut mailbox_keys = Vec::with_capacity(mailboxes.len());
+    for mailbox in mailboxes {
+        if !matches!(mailbox.world_id.as_str(), "main" | "isekai")
+            || !valid_text(&mailbox.mailbox_key, 256)
+            || world_ids.iter().any(|world| world == &mailbox.world_id)
+            || mailbox_keys.iter().any(|key| key == &mailbox.mailbox_key)
+        {
             return Err(AdminRuntimeConfigError::InvalidDocument(
-                "当前 Rust Admin 仅支持 TCP listener".to_owned(),
+                "dashboard_mailboxes 的 world_id/mailbox_key 无效或重复".to_owned(),
             ));
         }
+        world_ids.push(mailbox.world_id.clone());
+        mailbox_keys.push(mailbox.mailbox_key.clone());
     }
     Ok(())
 }
@@ -650,6 +705,7 @@ fn validate_unix_path(value: &str, field: &str) -> Result<(), AdminRuntimeConfig
     if value.is_empty()
         || value.len() > 512
         || !value.starts_with('/')
+        || value == "/"
         || value != value.trim()
         || value.chars().any(char::is_control)
         || value.contains("//")
@@ -658,6 +714,17 @@ fn validate_unix_path(value: &str, field: &str) -> Result<(), AdminRuntimeConfig
         return Err(AdminRuntimeConfigError::InvalidDocument(format!("{field} 无效")));
     }
     Ok(())
+}
+
+fn valid_group_name(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    value.len() <= 64
+        && first.is_ascii_alphanumeric()
+        && characters
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
 }
 
 fn valid_text(value: &str, maximum: usize) -> bool {

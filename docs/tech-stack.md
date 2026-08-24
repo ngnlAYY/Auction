@@ -163,11 +163,18 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
 - **配置：** `serde` + TOML。主配置保存普通字段，并用 `secrets_file` 引用敏感 TOML；
   `database_url`、`redis_url`、外部 Cookie 和会话签名密钥只允许出现在敏感文件。旧的
   单文件敏感字段不兼容。`AUCTION_CONFIG_FILE` 只选择主配置，不通过环境变量覆盖单个
-  配置字段，也不在 domain/application 中读取环境变量。
+  配置字段，也不在 domain/application 中读取环境变量。拍卖策略使用普通主配置的
+  `[auction]` 模板；创建时冻结为不可变快照，竞价和生命周期事务从快照恢复经济、代理和
+  final phase 规则，配置更新不会改变已创建拍卖。
 - **错误：** domain/application 使用 `thiserror`；只在 binary composition root 使用
   `anyhow` 汇总启动错误。
-- **日志/指标：** `tracing` + `tracing-subscriber`，指标接口预留 Prometheus；日志中
-  禁止 cookie、密码、论坛 session 和完整邮件正文。
+- **日志/指标：** `tracing` + `tracing-subscriber`，Public/Admin 可选启用进程隔离的
+  Prometheus `/metrics` text scrape，Worker control 可选提供同一 peer-authenticated UDS surface；
+  Public/Worker 主配置和 Admin runtime 均可启用 OTLP/HTTP tracing exporter，使用 Tokio 异步批处理、
+  有界队列、角色专属敏感 headers 和限定关闭等待。Worker loop 指标、tracing health 和进程资源
+  指标已接入；SQLx 存储池边界已补齐旧版 pgx 对应的十项连接池指标，业务事件结果/耗时指标也已
+  覆盖 Public 竞价代理命令和 Worker 业务循环。业务指标只使用固定事件与结果枚举，日志和指标
+  标签中禁止记录密钥、Cookie、密码、完整连接串、高基数业务主键和完整邮件正文。
 - **契约文档：** REST 稳定后用 `utoipa` 生成 OpenAPI；它不反向决定领域模型。
 
 ## 依赖精简原则

@@ -11,24 +11,17 @@ use crate::api::{
     fetch_realtime_events, subscribe_realtime,
 };
 
-use super::Placeholder;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum LiveConnectionState {
-    Checking,
-    Connecting,
-    Connected,
-    Anonymous,
-    Stopped,
-    Error,
-}
+use super::{LiveConnectionState, Placeholder, RetryPlaceholder, format_auction_time};
 
 pub(super) fn page() -> Element {
     let mut cursor = use_signal(|| 0_i64);
     let mut refresh = use_signal(|| 0_u64);
     let mut live_page = use_signal(|| None::<RealtimePage>);
     let live_state = use_signal(|| LiveConnectionState::Checking);
-    let health = use_resource(fetch_health);
+    let health = use_resource(move || {
+        let _ = refresh();
+        fetch_health()
+    });
     let events = use_resource(move || {
         let after = cursor();
         let _ = refresh();
@@ -66,7 +59,11 @@ pub(super) fn page() -> Element {
             Placeholder { title: t!("page-status-title"), detail: t!("realtime-loading") }
         },
         (Some(Err(_)), _) | (_, Some(Err(_))) => rsx! {
-            Placeholder { title: t!("page-status-title"), detail: t!("realtime-error") }
+            RetryPlaceholder {
+                title: t!("page-status-title"),
+                detail: t!("realtime-error"),
+                refresh_generation: refresh,
+            }
         },
         (Some(Ok(health_status)), Some(Ok(event_page))) => {
             let event_page = live_snapshot.unwrap_or_else(|| event_page.clone());
@@ -120,7 +117,7 @@ pub(super) fn page() -> Element {
     }
 }
 
-fn live_connection_message(state: LiveConnectionState) -> String {
+pub(super) fn live_connection_message(state: LiveConnectionState) -> String {
     match state {
         LiveConnectionState::Checking => t!("realtime-connection-checking"),
         LiveConnectionState::Connecting => t!("realtime-connection-connecting"),
@@ -190,7 +187,7 @@ fn RealtimeEventRow(event: RealtimeEvent) -> Element {
             td { class: "public-auction-catalog__number", "{event.schema_version}" }
             td { "{payload}" }
             td {
-                time { datetime: event.created_at.clone(), "{event.created_at}" }
+                time { datetime: event.created_at.clone(), "{format_auction_time(&event.created_at)}" }
             }
         }
     }

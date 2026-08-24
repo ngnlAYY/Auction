@@ -1,0 +1,32 @@
+[Unit]
+Description=Auction Rust Public API
+After=network-online.target auction-worker.service auction-admin-api.service
+Wants=network-online.target
+Requires=auction-worker.service auction-admin-api.service
+
+[Service]
+Type=simple
+User=auction
+Group=auction
+WorkingDirectory=/opt/auction
+Environment=AUCTION_CONFIG_FILE=/etc/auction/public.toml
+ExecStart=/opt/auction/bin/auction-public-api
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -6,27 +6,55 @@
   外部适配器应复用该客户端，避免每个网关各自维护连接池或选择不同 TLS provider。
 - `src/clients/ehentai.rs` 与 `src/clients/mooglemail/`：各自的传输与认证边界。MoogleMail
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
-  inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/操作证明解析，以及
+  inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
   Bot/测试 Cookie 的有序切换。写入侧已实现 compose/detail typed target、表单闭集、无重定向
-  单次 POST、write_unknown 不确定性分类、附件/COD 状态证明和发送成功页证明；解析结果不携带
-  原始 HTML，token 只在短生命周期状态对象中受控引用，Cookie 不进入返回值。`auction-application`
-  已定义窄的 `DeliveryTransport` 端口；读取适配器已经由 Worker 的持久化轮询 owner 装配，但当前
-  只提交 `parsed_pending_processing` 安全入站事实。结算 payload 尚未补齐消息模板、外部装备
- ID/key 的解析 owner，因此 DeliveryTransport 仍未装配，不会凭空发出远程写请求。
+  单次 POST、write_unknown 不确定性分类、发送成功页证明，以及 return/take 的动作前身份/资产
+  fence 和动作后结构化证明；解析结果不携带原始 HTML，token 只在短生命周期状态对象中
+  受控引用，Cookie 不进入返回值。`auction-application`
+  已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，使用
+  严格版本化 payload 执行静态通知、结算 send/return、return 和 take。return 必须在写入前核对
+  sender，写入后证明收件箱中精确 `mid` 消失；take 还必须精确核对装备 ID、Credits、COD 和
+  附件计数，并以资产归零、邮件身份不变与唯一回执证明收口。结算 send 的 compose 成功页不会
+  直接满足履约，还需要 Sent 明细与余额证据；POST 后
+  无法证明的结果进入 `manual_reconcile`，不会自动重发。
+  send 前置要求 compose 页能够证明为无收件人/正文/附件/COD 的干净状态，否则以
+  `preflight_unproven` 进入人工对账，不会覆盖可能属于上一次未知写入的资产。最终 send 响应只从
+  排除 script/style/noscript/textarea 后的可见文字识别旧版闭集失败：
+  “收件人不存在”会保留唯一退信 `mid`、`take_required` 和稳定 reason code；虽然拒绝本身已有
+  协议证明，退信资产在取回前仍进入 `manual_reconcile`；
+  “无法支付邮资”在未暂存资产时是确定失败，暂存过 Credits/装备/COD 时则进入
+  `manual_reconcile`，不会盲目重试并重复处理资产。
+  transport 还会在 delivery 进入 `sending` 前按 payload world 检查 scoped/shared 凭据；无凭据时
+  由 Worker 释放 claim。进入 `sending` 后的凭据、网络或协议依赖失败不会伪装成普通终态失败。
   `MoogleMailSender` 提供了可复用的高层发送编排：GET compose 后要求干净状态，逐步附加
   Credits/装备/CoD，并在每次 POST 后证明状态，最后证明发送结果；它只接受已解析的远端装备
   ID，不负责把内部装备 UUID 或密钥信封转换成远端附件身份。
 
-调用顺序是：用 `MoogleMailClient::production()` 建立受限客户端；用
-`MoogleMailCredentialSet::new(keyenv.bot_cookie(), keyenv.test_cookie())` 建立 Bot 优先、测试号
-后备的凭据集合；再以明确的 sender allowlist 构造 `MoogleMailGateway` 并调用
-`fetch(world, cursor, limit)`。只有摘要扫描、allowlist 筛选、详情读取和全部一致性校验成功后，
-gateway 才返回可提交的新 cursor；应用层仍负责幂等入库和业务分类。
+调用顺序是：用 `MoogleMailClient::production()` 建立受限客户端；Worker 优先从 PostgreSQL
+读取 A32 active 凭据池并用独立数据密钥解密；暂时没有 active 行时保留 degraded 运行态，实际
+操作返回 credential unavailable；未配置该能力时再使用
+`MoogleMailCredentialSet::new(keyenv.bot_cookie(), keyenv.test_cookie())` 或敏感配置 getter
+建立 Bot 优先、测试号后备的凭据集合；数据库凭据保留 `main`/`isekai`/`shared` scope，world
+专属 Cookie 只服务对应 world，shared Cookie 才能跨 world 复用；再以明确的 sender allowlist
+构造 `MoogleMailGateway` 并调用 `fetch(world, cursor, limit)`。只有摘要扫描、allowlist 筛选、详情读取和全部一致性校验成功后，
+gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务分类。当前首条业务链已完成拍卖邮件的
+ Credits/COD 拒绝、无附件通知、装备来源读取、起拍价指令解析、拍卖入站、用户注册/重绑和
+ take/return 编排；用户登录 key 通过独立数据密钥生成密文信封，只有 DeliveryTransport 发送前
+ 短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
+ remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
+实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建和主题读取；创建 POST 无法证明
+时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责有界主题正文，回帖命令仍先
+经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。
 - `src/equipment/mod.rs`：固定 HTTPS origin 的旧装备页解析和 canonical JSON 规范化；关闭环境
   代理与自动重定向，并限制响应类型/大小。`src/cryptobox/mod.rs` 只在适配器边界使用敏感
   数据密钥，以 AES-256-GCM 生成绑定装备 ID 的密文信封，明文 key 不进入应用写端口。
-- `src/forum/mod.rs`：把 Admin 提供的 HTML 或纯文本论坛内容解析为有界的 catalog、posts、
-  warnings 和命令预览；该适配器只在内存中工作，不执行远程抓取、回帖或数据库写入。
+- `src/credentials/mod.rs`：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
+  的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入
+  与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由
+  PostgreSQL 完整档提供，SQLite 不返回伪造的 Lite 能力。
+- `src/forum/mod.rs`：把 HTML 或纯文本论坛内容解析为有界的 catalog、posts、warnings 和命令
+  预览；解析器只在内存中工作。远程主题读写由 `src/clients/ehentai.rs` 拥有，回帖导入仍由
+  `auction-jobs` 通过应用端口执行。
 
 ## 边界约束
 
@@ -38,7 +66,7 @@ Worker 操作。
 
 兼容旧系统时建立防腐层或映射，不把旧 DTO 或旧命名未经审计地传播到新领域。
 
-论坛 Cookie 与生产邮件 Cookie 只能从 `auction-config` 的显式 getter 读取，不得进入日志、DTO
+外部 Cookie 只能从 A32 的密文信封或 `auction-config` 的显式 getter 读取，不得进入日志、DTO
 或快照。用户明确提供的本地 MoogleMail 联调凭据可通过 `load_mooglemail_keyenv` 读取；该
 loader 只接受 `.keyenv` 中的 `hv-ck-key1`（Bot）和 `hv-ck-key2`（测试号），强制 owner-only
 权限，并拒绝未知/重复键。`.keyenv` 仍不得提交或进入普通配置、日志和 DTO。

@@ -17,9 +17,17 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::DatabaseStore;
+#[cfg(feature = "postgres")]
+use super::delivery_audit::{
+    CLAIM, DeliveryAudit, FAIL, OUTCOME_UNKNOWN, RECONCILE_EXPIRED_SENDING, RELEASE, START_SENDING,
+    SUCCEED, append as append_delivery_audit, worker_state_metadata,
+};
 
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Postgres, Row, postgres::PgRow};
+
+#[cfg(feature = "postgres")]
+const EXPIRED_SENDING_RECONCILE_LIMIT: i64 = 100;
 
 impl DeliveryWorkStore for DatabaseStore {
     fn claim_due(
@@ -27,6 +35,7 @@ impl DeliveryWorkStore for DatabaseStore {
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        sending_grace: std::time::Duration,
         limit: u16,
     ) -> auction_application::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
         Box::pin(async move {
@@ -34,13 +43,15 @@ impl DeliveryWorkStore for DatabaseStore {
                 || worker_id != worker_id.trim()
                 || limit == 0
                 || lease_until <= now
+                || sending_grace.is_zero()
+                || sending_grace > std::time::Duration::from_secs(86_400)
             {
                 return Err(repository_error("delivery 领取参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    claim_postgres(store.pool(), &worker_id, now, lease_until, limit)
+                    claim_postgres(store.pool(), &worker_id, now, lease_until, sending_grace, limit)
                         .await
                         .map_err(ApplicationError::from)
                 }
@@ -63,6 +74,50 @@ impl DeliveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => start_sending_postgres(store.pool(), &_claim, _started_at)
                     .await
                     .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "delivery outbox 仅支持 PostgreSQL 完整档",
+                )),
+            }
+        })
+    }
+
+    fn release(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _released_at: DateTime<Utc>,
+    ) -> auction_application::ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => release_postgres(store.pool(), &_claim, _released_at)
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "delivery outbox 仅支持 PostgreSQL 完整档",
+                )),
+            }
+        })
+    }
+
+    fn renew(
+        &self,
+        _claim: DeliveryWorkClaim,
+        _renewed_at: DateTime<Utc>,
+        _lease_until: DateTime<Utc>,
+    ) -> auction_application::ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            if _lease_until <= _renewed_at {
+                return Err(repository_error("delivery 续租时间无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    renew_postgres(store.pool(), &_claim, _renewed_at, _lease_until)
+                        .await
+                        .map_err(ApplicationError::from)
+                }
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
                     "delivery outbox 仅支持 PostgreSQL 完整档",
@@ -108,12 +163,30 @@ impl DeliveryWorkStore for DatabaseStore {
         Box::pin(async move {
             let failure_code = bounded_text(error.failure_code, 64);
             let safe_detail = bounded_text(error.safe_detail, 512);
+            let external_reference = error.external_reference.map(|value| bounded_text(value, 512));
+            let mut result_metadata = error.result_metadata;
             if failure_code.is_empty()
                 || failure_code != failure_code.trim()
                 || safe_detail.is_empty()
                 || safe_detail != safe_detail.trim()
+                || external_reference.as_ref().is_some_and(|value| {
+                    value.is_empty() || value != value.trim() || value.chars().any(char::is_control)
+                })
+                || !result_metadata.is_object()
             {
                 return Err(repository_error("delivery 失败结果无效"));
+            }
+            let Some(metadata) = result_metadata.as_object_mut() else {
+                return Err(repository_error("delivery 失败 metadata 必须是 object"));
+            };
+            metadata.insert("safe_detail".to_owned(), safe_detail.clone().into());
+            metadata.insert("outcome_unknown".to_owned(), error.outcome_unknown.into());
+            if serde_json::to_vec(&result_metadata)
+                .map_err(|_| repository_error("delivery 失败 metadata 无法序列化"))?
+                .len()
+                > 16 * 1024
+            {
+                return Err(repository_error("delivery 失败 metadata 超出边界"));
             }
             match self {
                 #[cfg(feature = "postgres")]
@@ -121,8 +194,9 @@ impl DeliveryWorkStore for DatabaseStore {
                     store.pool(),
                     &_claim,
                     &failure_code,
-                    &safe_detail,
                     error.outcome_unknown,
+                    external_reference.as_deref(),
+                    &result_metadata,
                     _completed_at,
                 )
                 .await
@@ -138,36 +212,103 @@ impl DeliveryWorkStore for DatabaseStore {
 
 #[cfg(feature = "postgres")]
 async fn claim_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
+    sending_grace: std::time::Duration,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
+    let sending_grace_micros = i64::try_from(sending_grace.as_micros())
+        .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    sqlx::query(
-        r#"UPDATE public.deliveries
+    let expired_rows = sqlx::query(
+        r#"WITH expired_sending AS (
+               SELECT id
+               FROM public.deliveries
+               WHERE status = 'sending'
+                 AND lease_expires_at + ($2::bigint * interval '1 microsecond') <= $1
+               ORDER BY lease_expires_at, id
+               LIMIT $3
+               FOR UPDATE SKIP LOCKED
+           )
+           UPDATE public.deliveries AS delivery
            SET status = 'manual_reconcile',
                lease_token = NULL,
                lease_expires_at = NULL,
                completed_at = $1,
                external_reference = NULL,
-               failure_code = 'lease_expired',
-               result_metadata = '{"outcome_unknown":true,"reason":"lease_expired"}'::jsonb,
+               failure_code = 'lease_expired_outcome_unknown',
+               result_metadata = '{"outcome_unknown":true,"reason":"sending_lease_expired"}'::jsonb,
+               fencing_version = delivery.fencing_version + 1,
                updated_at = CURRENT_TIMESTAMP
-           WHERE status = 'sending'
-             AND lease_expires_at <= $1"#,
+           FROM expired_sending
+           WHERE delivery.id = expired_sending.id
+           RETURNING delivery.id, delivery.command_id, delivery.fencing_version,
+                     delivery.attempt_count"#,
     )
     .bind(now)
-    .execute(&mut *transaction)
+    .bind(sending_grace_micros)
+    .bind(EXPIRED_SENDING_RECONCILE_LIMIT)
+    .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
+    for row in expired_rows {
+        let delivery_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
+        let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
+        let fencing_version: i64 = row.try_get("fencing_version").map_err(map_storage_error)?;
+        let attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
+        let request_id = command_id.to_string();
+        append_delivery_audit(
+            &mut transaction,
+            DeliveryAudit {
+                occurred_at: now,
+                actor_type: "worker",
+                actor_id: "delivery-worker",
+                action: RECONCILE_EXPIRED_SENDING,
+                delivery_id,
+                request_id: Some(&request_id),
+                source: "worker",
+                metadata: serde_json::json!({
+                    "status": "manual_reconcile",
+                    "failure_code": "lease_expired_outcome_unknown",
+                    "fencing_version": fencing_version,
+                    "attempt_count": attempt_count,
+                }),
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
+    }
     let rows = sqlx::query(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
                   recipient, payload, fencing_version, attempt_count
-           FROM public.deliveries
-           WHERE status = 'pending'
-              OR (status = 'claimed' AND lease_expires_at <= $1)
+           FROM public.deliveries AS deliveries
+           WHERE (
+                   status = 'pending'
+                   AND (
+                       origin_kind <> 'operations_alert'
+                       OR EXISTS (
+                           SELECT 1
+                           FROM public.operations_alert_batches AS alert_batch
+                           WHERE alert_batch.delivery_id = deliveries.id
+                             AND alert_batch.status = 'enqueued'
+                       )
+                   )
+                 )
+              OR (
+                   status = 'claimed'
+                   AND lease_expires_at <= $1
+                   AND (
+                       origin_kind <> 'operations_alert'
+                       OR EXISTS (
+                           SELECT 1
+                           FROM public.operations_alert_batches AS alert_batch
+                           WHERE alert_batch.delivery_id = deliveries.id
+                             AND alert_batch.status = 'enqueued'
+                       )
+                   )
+                 )
            ORDER BY created_at, id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#,
@@ -194,7 +335,7 @@ async fn claim_postgres(
         let attempt_count_db = i32::try_from(attempt_count)
             .map_err(|_| repository_error_owned("delivery 尝试次数超出数据库范围"))?;
         let updated = sqlx::query(
-            r#"UPDATE public.deliveries
+            r#"UPDATE public.deliveries AS deliveries
                SET status = 'claimed',
                    lease_token = $2,
                    lease_expires_at = $3,
@@ -208,7 +349,33 @@ async fn claim_postgres(
                    result_metadata = '{}'::jsonb,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = $1
-                 AND (status = 'pending' OR (status = 'claimed' AND lease_expires_at <= $6))"#,
+                 AND (
+                       (
+                           status = 'pending'
+                           AND (
+                               origin_kind <> 'operations_alert'
+                               OR EXISTS (
+                                   SELECT 1
+                                   FROM public.operations_alert_batches AS alert_batch
+                                   WHERE alert_batch.delivery_id = deliveries.id
+                                     AND alert_batch.status = 'enqueued'
+                               )
+                           )
+                       )
+                       OR (
+                           status = 'claimed'
+                           AND lease_expires_at <= $6
+                           AND (
+                               origin_kind <> 'operations_alert'
+                               OR EXISTS (
+                                   SELECT 1
+                                   FROM public.operations_alert_batches AS alert_batch
+                                   WHERE alert_batch.delivery_id = deliveries.id
+                                     AND alert_batch.status = 'enqueued'
+                               )
+                           )
+                       )
+                 )"#,
         )
         .bind(delivery_id)
         .bind(lease_token)
@@ -222,6 +389,23 @@ async fn claim_postgres(
         if updated.rows_affected() != 1 {
             return Err(repository_error_owned("delivery 领取时状态已变化"));
         }
+        let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
+        let request_id = command_id.to_string();
+        append_delivery_audit(
+            &mut transaction,
+            DeliveryAudit {
+                occurred_at: now,
+                actor_type: "worker",
+                actor_id: "delivery-worker",
+                action: CLAIM,
+                delivery_id,
+                request_id: Some(&request_id),
+                source: "worker",
+                metadata: worker_state_metadata("claimed", fencing_version, attempt_count, None),
+            },
+        )
+        .await
+        .map_err(map_storage_error)?;
         claims.push(map_claim(
             &row,
             worker_id,
@@ -271,10 +455,11 @@ fn map_claim(
 
 #[cfg(feature = "postgres")]
 async fn start_sending_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let result = sqlx::query(
         r#"UPDATE public.deliveries
            SET status = 'sending', sending_at = $2, updated_at = CURRENT_TIMESTAMP
@@ -288,18 +473,126 @@ async fn start_sending_postgres(
     .bind(started_at)
     .bind(claim.lease_token)
     .bind(claim.fencing_version)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
         return Err(repository_error_owned("delivery 开始发送时 lease 已失效"));
+    }
+    let request_id = claim.command_id.to_string();
+    append_delivery_audit(
+        &mut transaction,
+        DeliveryAudit {
+            occurred_at: started_at,
+            actor_type: "worker",
+            actor_id: "delivery-worker",
+            action: START_SENDING,
+            delivery_id: claim.delivery_id,
+            request_id: Some(&request_id),
+            source: "worker",
+            metadata: worker_state_metadata(
+                "sending",
+                claim.fencing_version,
+                claim.attempt_count,
+                None,
+            ),
+        },
+    )
+    .await
+    .map_err(map_storage_error)?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+async fn release_postgres(
+    pool: &super::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    released_at: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    let result = sqlx::query(
+        r#"UPDATE public.deliveries
+           SET status = 'pending',
+               lease_token = NULL,
+               lease_expires_at = NULL,
+               claimed_at = NULL,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+             AND status = 'claimed'
+             AND lease_token = $3
+             AND fencing_version = $4
+             AND lease_expires_at > $2"#,
+    )
+    .bind(claim.delivery_id)
+    .bind(released_at)
+    .bind(claim.lease_token)
+    .bind(claim.fencing_version)
+    .execute(&mut *transaction)
+    .await
+    .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned("delivery 释放时 lease 已失效"));
+    }
+    let request_id = claim.command_id.to_string();
+    append_delivery_audit(
+        &mut transaction,
+        DeliveryAudit {
+            occurred_at: released_at,
+            actor_type: "worker",
+            actor_id: "delivery-worker",
+            action: RELEASE,
+            delivery_id: claim.delivery_id,
+            request_id: Some(&request_id),
+            source: "worker",
+            metadata: worker_state_metadata(
+                "pending",
+                claim.fencing_version,
+                claim.attempt_count,
+                None,
+            ),
+        },
+    )
+    .await
+    .map_err(map_storage_error)?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+async fn renew_postgres(
+    pool: &super::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    renewed_at: DateTime<Utc>,
+    lease_until: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    let result = sqlx::query(
+        r#"UPDATE public.deliveries
+           SET lease_expires_at = $3,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+             AND status = 'sending'
+             AND lease_token = $4
+             AND fencing_version = $5
+             AND lease_expires_at > $2"#,
+    )
+    .bind(claim.delivery_id)
+    .bind(renewed_at)
+    .bind(lease_until)
+    .bind(claim.lease_token)
+    .bind(claim.fencing_version)
+    .execute(pool)
+    .await
+    .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned("delivery 续租时 lease 已失效"));
     }
     Ok(())
 }
 
 #[cfg(feature = "postgres")]
 async fn succeed_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     result: &DeliverySendResult,
     completed_at: DateTime<Utc>,
@@ -334,59 +627,107 @@ async fn succeed_postgres(
         return Err(repository_error_owned("delivery 成功写回时 lease 已失效"));
     }
     if claim.origin_kind == "settlement" {
-        let proof = DeliveryProof {
-            external_reference: &result.external_reference,
-            result_metadata: &result.result_metadata,
-        };
-        let proof_digest =
-            RequestHash::from_request("settlement_delivery_proof", claim.delivery_id, &proof)
+        let operation = result
+            .result_metadata
+            .get("operation")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| repository_error_owned("结算 delivery 成功结果缺少 operation"))?;
+        match operation {
+            // return 的页面动作已经由 parser.prove_return_completed 证明，
+            // 可以在同一事务中把对应义务收口为 satisfied。
+            "return" => {
+                let proof = DeliveryProof {
+                    external_reference: &result.external_reference,
+                    result_metadata: &result.result_metadata,
+                };
+                let proof_digest = RequestHash::from_request(
+                    "settlement_delivery_proof",
+                    claim.delivery_id,
+                    &proof,
+                )
                 .map_err(|_| repository_error_owned("delivery 成功证明摘要生成失败"))?;
-        let updated_fulfillment = sqlx::query(
-            r#"UPDATE public.settlement_obligation_fulfillments
-               SET execution_state = 'satisfied',
-                   claim_token = NULL,
-                   claimed_at = NULL,
-                   claim_expires_at = NULL,
-                   proof_kind = 'delivery_external_reference',
-                   proof_reference = $2,
-                   proof_digest = $3,
-                   proof_observed_at = $4,
-                   last_error_code = NULL,
-                   completed_at = $4,
-                   state_version = state_version + 1,
-                   updated_at = CURRENT_TIMESTAMP
-               WHERE delivery_id = $1
-                 AND execution_state = 'enqueued'"#,
-        )
-        .bind(claim.delivery_id)
-        .bind(&result.external_reference)
-        .bind(proof_digest.as_bytes().to_vec())
-        .bind(completed_at)
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_storage_error)?;
-        if updated_fulfillment.rows_affected() != 1 {
-            return Err(repository_error_owned("delivery 成功但结算履约未处于 enqueued"));
+                let updated_fulfillment = sqlx::query(
+                    r#"UPDATE public.settlement_obligation_fulfillments
+                       SET execution_state = 'satisfied',
+                           claim_token = NULL,
+                           claimed_at = NULL,
+                           claim_expires_at = NULL,
+                           proof_kind = 'delivery_external_reference',
+                           proof_reference = $2,
+                           proof_digest = $3,
+                           proof_observed_at = $4,
+                           last_error_code = NULL,
+                           completed_at = $4,
+                           state_version = state_version + 1,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE delivery_id = $1
+                         AND execution_state = 'enqueued'"#,
+                )
+                .bind(claim.delivery_id)
+                .bind(&result.external_reference)
+                .bind(proof_digest.as_bytes().to_vec())
+                .bind(completed_at)
+                .execute(&mut *transaction)
+                .await
+                .map_err(map_storage_error)?;
+                if updated_fulfillment.rows_affected() != 1 {
+                    return Err(repository_error_owned("delivery 成功但结算履约未处于 enqueued"));
+                }
+            }
+            // send 的 POST 响应最多只能证明请求已被提交。旧版还会读取 Sent
+            // 明细和余额来核对远端事实；在该证据接入前必须保持 enqueued，
+            // 不能因为 delivery 成功就伪造 satisfied。
+            "send" => {
+                if result
+                    .result_metadata
+                    .get("external_reference_proven")
+                    .and_then(serde_json::Value::as_bool)
+                    .is_none()
+                {
+                    return Err(repository_error_owned(
+                        "结算 send 成功结果缺少 external_reference_proven",
+                    ));
+                }
+            }
+            _ => return Err(repository_error_owned("结算 delivery operation 无效")),
         }
     }
+    let request_id = claim.command_id.to_string();
+    append_delivery_audit(
+        &mut transaction,
+        DeliveryAudit {
+            occurred_at: completed_at,
+            actor_type: "worker",
+            actor_id: "delivery-worker",
+            action: SUCCEED,
+            delivery_id: claim.delivery_id,
+            request_id: Some(&request_id),
+            source: "worker",
+            metadata: worker_state_metadata(
+                "succeeded",
+                claim.fencing_version,
+                claim.attempt_count,
+                None,
+            ),
+        },
+    )
+    .await
+    .map_err(map_storage_error)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())
 }
 
 #[cfg(feature = "postgres")]
 async fn fail_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &DeliveryWorkClaim,
     failure_code: &str,
-    safe_detail: &str,
     outcome_unknown: bool,
+    external_reference: Option<&str>,
+    result_metadata: &serde_json::Value,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
     let status = if outcome_unknown { "manual_reconcile" } else { "failed" };
-    let metadata = serde_json::json!({
-        "safe_detail": safe_detail,
-        "outcome_unknown": outcome_unknown,
-    });
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let updated = sqlx::query(
         r#"UPDATE public.deliveries
@@ -394,21 +735,22 @@ async fn fail_postgres(
                lease_token = NULL,
                lease_expires_at = NULL,
                completed_at = $3,
-               external_reference = NULL,
+               external_reference = $5,
                failure_code = $4,
-               result_metadata = $5,
+               result_metadata = $6,
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $1
              AND status = 'sending'
-             AND lease_token = $6
-             AND fencing_version = $7
+             AND lease_token = $7
+             AND fencing_version = $8
              AND lease_expires_at > $3"#,
     )
     .bind(claim.delivery_id)
     .bind(status)
     .bind(completed_at)
     .bind(failure_code)
-    .bind(metadata)
+    .bind(external_reference)
+    .bind(result_metadata)
     .bind(claim.lease_token)
     .bind(claim.fencing_version)
     .execute(&mut *transaction)
@@ -443,6 +785,27 @@ async fn fail_postgres(
             return Err(repository_error_owned("delivery 失败但结算履约未处于 enqueued"));
         }
     }
+    let request_id = claim.command_id.to_string();
+    append_delivery_audit(
+        &mut transaction,
+        DeliveryAudit {
+            occurred_at: completed_at,
+            actor_type: "worker",
+            actor_id: "delivery-worker",
+            action: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
+            delivery_id: claim.delivery_id,
+            request_id: Some(&request_id),
+            source: "worker",
+            metadata: worker_state_metadata(
+                status,
+                claim.fencing_version,
+                claim.attempt_count,
+                Some(failure_code),
+            ),
+        },
+    )
+    .await
+    .map_err(map_storage_error)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())
 }

@@ -25,6 +25,8 @@ pub const MAX_ADMIN_MAIL_PAGE_SIZE: i64 = 100;
 pub const MAX_ADMIN_MAIL_OFFSET: i64 = 2_147_483_647;
 /// Admin 邮件决定码允许的最大字节数。
 pub const MAX_ADMIN_MAIL_DECISION_BYTES: usize = 256;
+/// Admin 邮件 dashboard 允许展示的最大轮询器数量。
+pub const MAX_ADMIN_MAIL_POLLER_COUNT: usize = 64;
 
 /// 生成邮箱范围内稳定的命令聚合标识。
 pub fn admin_mail_aggregate_id(mailbox_key: &str) -> Uuid {
@@ -55,6 +57,61 @@ impl AdminMailPollState {
             && self.consecutive_failures >= 0
             && self.state_version > 0
             && !self.updated_at.timestamp_nanos_opt().is_none()
+    }
+}
+
+/// Admin 邮件 dashboard 展示的单个轮询器安全摘要。
+///
+/// 这里刻意不包含 cursor_value；游标属于同步实现细节，不能进入浏览器或管理概览响应。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminMailPollerSnapshot {
+    pub mailbox_key: String,
+    pub last_poll_at: DateTime<Utc>,
+    pub next_poll_at: DateTime<Utc>,
+    pub consecutive_failures: i32,
+    pub paused: bool,
+    pub state_version: i64,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl AdminMailPollerSnapshot {
+    /// 校验轮询器摘要的时间、版本和文本边界。
+    pub fn validate(&self) -> bool {
+        valid_text(&self.mailbox_key, MAX_ADMIN_MAILBOX_KEY_BYTES)
+            && !self.last_poll_at.timestamp_nanos_opt().is_none()
+            && !self.next_poll_at.timestamp_nanos_opt().is_none()
+            && self.next_poll_at >= self.last_poll_at
+            && self.consecutive_failures >= 0
+            && self.state_version > 0
+            && !self.updated_at.timestamp_nanos_opt().is_none()
+    }
+}
+
+/// Admin 邮件 dashboard 的全量轮询器安全摘要。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminMailDashboardSnapshot {
+    pub observed_at: DateTime<Utc>,
+    pub pollers: Vec<AdminMailPollerSnapshot>,
+}
+
+impl AdminMailDashboardSnapshot {
+    /// 校验观察时间、数量上限和 mailbox_key 唯一性。
+    pub fn validate(&self) -> bool {
+        if self.observed_at.timestamp_nanos_opt().is_none()
+            || self.pollers.len() > MAX_ADMIN_MAIL_POLLER_COUNT
+        {
+            return false;
+        }
+        for (index, poller) in self.pollers.iter().enumerate() {
+            if !poller.validate()
+                || self.pollers[..index]
+                    .iter()
+                    .any(|previous| previous.mailbox_key == poller.mailbox_key)
+            {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -311,6 +368,9 @@ impl AdminMailStoredCommand {
 
 /// Admin 邮件只读端口。
 pub trait AdminMailReader: Send + Sync {
+    /// 读取所有邮箱轮询器的安全 dashboard 摘要，不返回同步游标。
+    fn dashboard_snapshot(&self) -> ApplicationFuture<'_, AdminMailDashboardSnapshot>;
+
     fn poll_state(
         &self,
         request: AdminMailPollStateRequest,

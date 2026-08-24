@@ -1,6 +1,7 @@
 //! Admin 改名历史 HTTP 适配器。
 //!
-//! 该模块只负责旧契约的查询参数、分页和安全 DTO 映射；改名回滚命令仍由后续迁移切片拥有。
+//! 该模块只负责旧契约的查询参数、分页和安全 DTO 映射；回滚命令由 Users owner 的
+//! `admin_users` handler 持有，列表同时返回当前用户版本供页面建立 state-version fence。
 
 use std::net::SocketAddr;
 
@@ -95,6 +96,7 @@ fn map_record(record: AdminRenameRecord) -> AdminRenameResponse {
     AdminRenameResponse {
         id: record.id.to_string(),
         user_id: record.user_id.to_string(),
+        user_state_version: record.user_state_version,
         previous_username: record.previous_username,
         next_username: record.next_username,
         actor: record.actor,

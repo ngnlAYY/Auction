@@ -6,10 +6,12 @@ SQLite 未实现的完整生产能力必须在 Lite 能力清单或部署说明�
 发布的文件禁止修改。已支持竞价事务的锁、唯一约束、审计事件和 outbox 语义必须与
 [`docs/architecture.md`](../docs/architecture.md) 一起评审。
 
-PostgreSQL `000001` 至 `000008` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
-身份/外部命令、恢复/可观测性、论坛同步和 MoogleMail 轮询对象；其中 `000008` 追加
-MoogleMail Worker 的 lease/fencing、失败退避与 Admin A20 触发所需字段。SQLite `000001_lite_core.up.sql` 已提交
-共有能力子集，`000002_worker_scheduler.up.sql` 追加轮次租约与失败状态。两者仍只表示当前迁移阶段的 schema，不代表旧系统的全部行为或业务表面已经
+PostgreSQL `000001` 至 `000015` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
+身份/外部命令、恢复/可观测性、论坛同步、MoogleMail 轮询、Final phase 调度、领先时间修正和
+生命周期/operations alert 数据库不变量；
+Admin A20 的全局唤醒由 Worker control 处理，不新增数据库触发字段。SQLite `000001` 至
+`000007` 已提交共有 Lite 子集、轮次租约、用户管理、取消/生命周期元数据、Final phase fence
+和领先时间修正。两者仍只表示当前迁移阶段的 schema，不代表旧系统的全部行为或业务表面已经
 等价；旧数据库表也不能未经审计地整体复制到任一后端。
 
 除非用户明确要求，迁移目录不编写或运行功能测试用例；迁移结构变更仍需通过编译检查、

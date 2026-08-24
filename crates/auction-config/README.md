@@ -3,7 +3,8 @@
 TOML 配置解析与敏感配置加载。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；主/敏感配置解析集中在 `src/config/`，
-Admin runtime TOML 文件锁与原子替换集中在 `src/runtime/`。
+标准 cron 解析集中在 `src/scheduling/`，Admin runtime TOML 文件锁与原子替换集中在
+`src/runtime/`。
 
 ## 两层文件结构
 
@@ -19,17 +20,147 @@ runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器。
 log_filter = "info,auction=debug"
 
+# 可选区块：Public/Worker 进程本地 Prometheus 指标；Public 使用 HTTP，Worker 需同时启用 control 才有 UDS `/metrics`。
+[metrics]
+# 可选：是否启用固定 scrape endpoint；省略时关闭。
+enabled = false
+
+# 可选区块：Public/Worker 的 OTLP/HTTP tracing exporter；省略时关闭。
+[tracing]
+# 可选：是否启用异步、有界队列的 exporter；省略时关闭。
+enabled = false
+# 可选：OTLP/HTTP endpoint；启用时必填，必须是 http/https URL。
+endpoint = ""
+# 可选：批处理等待、导出超时和停止刷新等待时间，单位为秒，范围 1-30。
+batch_timeout_seconds = 2
+export_timeout_seconds = 5
+shutdown_timeout_seconds = 5
+# 可选：单批最大 span 数和内存队列容量，范围分别为 1-512、1-4096。
+max_export_batch_size = 64
+queue_capacity = 256
+# 可选：采样比例，百万分比；启用时范围 1-1000000，省略或关闭时可为 0。
+sample_ratio_ppm = 0
+
 # 可选区块：省略时关闭缓存。
 [cache]
 # 可选：disabled 或 redis，默认 disabled。
 backend = "disabled"
 
-# 可选区块：Worker 角色使用；省略时使用并发 1、轮询 5 秒。
+# 可选区块：创建拍卖时冻结的策略模板；省略时沿用旧版共享配置默认值。
+[auction.economics]
+# 可选：默认起始价，必须为正且按 1000 信用网格对齐，默认 1000。
+start_price = 1000
+# 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
+bid_increment_ppm = 50000
+# 可选：软截止窗口/延长秒数，默认均为 60。
+soft_close_window_seconds = 60
+soft_close_extension_seconds = 60
+# 可选：取消截止窗口秒数，默认 86400。
+cancel_cutoff_seconds = 86400
+# 可选：代理开关、默认模式和 slow 间隔。
+proxy_enabled = true
+proxy_default_mode = "fast"
+proxy_slow_interval_seconds = 600
+# 可选：代理 outbid 使用次数上限，默认 3；0 表示不限制。
+proxy_max_outbid_uses = 3
+# 可选：final phase 领先秒数，范围 1-604800，默认 60。
+final_phase_lead_seconds = 60
+
+[auction.settlement]
+# 可选：版本与模式；模式只能是 hold_curve_v1 或 legacy_zero_v0。
+version = 1
+mode = "hold_curve_v1"
+compensation_pool_enabled = true
+isekai_carrier_credit = 1
+# 可选：PPM 锚点数组；省略时使用内置 hold curve。
+anchors = [
+  { hold_ppm = 0, adjustment_ppm = 80000 },
+  { hold_ppm = 50000, adjustment_ppm = 64000 },
+  { hold_ppm = 100000, adjustment_ppm = 48000 },
+  { hold_ppm = 150000, adjustment_ppm = 32000 },
+  { hold_ppm = 200000, adjustment_ppm = 16000 },
+  { hold_ppm = 250000, adjustment_ppm = 0 },
+  { hold_ppm = 300000, adjustment_ppm = -4000 },
+  { hold_ppm = 400000, adjustment_ppm = -12000 },
+  { hold_ppm = 500000, adjustment_ppm = -20000 },
+  { hold_ppm = 1000000, adjustment_ppm = -20000 },
+]
+
+[auction.settlement.recovery]
+# 可选：当前只支持七天、一次提醒的 remind_v1。
+version = 1
+mode = "remind_v1"
+payment_timeout_seconds = 604800
+reminder_limit = 1
+
+# 可选区块：Auction 主循环；省略时 PostgreSQL 并发为 8、SQLite Lite 为 1，其余沿用旧版默认值。
 [worker]
-# 可选：Worker 并发数。
-concurrency = 1
-# 可选：due 轮询间隔秒数。
-poll_interval_seconds = 5
+# 可选：主循环并发数；SQLite Lite 只允许 1。
+concurrency = 8
+# 可选：轮询、批次、随机抖动上限和单项总超时，默认 60/100/5/30。
+poll_interval_seconds = 60
+batch_limit = 100
+jitter_seconds = 5
+item_timeout_seconds = 30
+# 可选：Recovery 各阶段依赖暂不可用时的持久化重试间隔，范围 1-86400 秒。
+recovery_retry_delay_seconds = 60
+
+# 可选区块：Delivery outbox 的独立轮询、并发、lease 和超时边界。
+[worker.delivery]
+# 可选：单轮上限和同时执行数，默认 100/8。
+batch_limit = 100
+concurrency = 8
+# 可选：独立轮询、随机抖动上限、claim lease 和 sending 续租间隔秒数，默认 60/5/60/10。
+poll_interval_seconds = 60
+jitter_seconds = 5
+lease_duration_seconds = 60
+renew_interval_seconds = 10
+# 可选：过期 sending 宽限、完整外部请求和终态写回超时秒数，默认 120/30/5。
+sending_grace_seconds = 120
+request_timeout_seconds = 30
+finalize_timeout_seconds = 5
+
+# 可选区块：Settlement fulfillment 的独立调度边界；默认 100/8/60/5/60/30/60。
+[worker.fulfillment]
+batch_limit = 100
+concurrency = 8
+poll_interval_seconds = 60
+jitter_seconds = 5
+lease_duration_seconds = 60
+item_timeout_seconds = 30
+retry_delay_seconds = 60
+
+# 可选区块：Recovery 五阶段的独立调度、批次与 health 刷新边界；省略时使用默认值。
+[worker.recovery]
+# 可选：每个 recovery phase 单轮最多领取的记录数，范围 1-1000。
+batch_limit = 100
+# 可选：recovery action wave 并发数，范围 1-batch_limit，默认 8。
+concurrency = 8
+# 可选：独立轮询、随机抖动上限、action claim lease 和单项总超时秒数，默认 60/5/60/30。
+poll_interval_seconds = 60
+jitter_seconds = 5
+lease_duration_seconds = 60
+item_timeout_seconds = 30
+# 可选：MoogleMail Balance 低水位阈值，低于该值标记为 low，默认 100 credits。
+low_balance_threshold = 100
+# 可选：recovery health 远端余额刷新间隔，范围 1-86400 秒，默认 60。
+health_refresh_interval_seconds = 60
+# 可选：余额证据超过该年龄标记为 stale，范围不小于刷新间隔且不超过 86400 秒，默认 300。
+evidence_stale_after_seconds = 300
+
+# 可选区块：Worker control；默认关闭。启用后使用安全 Unix socket 和显式 UID/GID peer allowlist，并提供 live/ready/status、`/metrics` 和唤醒。
+[worker.control]
+# 可选：是否启用 Worker control；默认 false。
+enabled = false
+# 可选：socket 所属 Unix group；默认 auction-worker-control。
+group = "auction-worker-control"
+# 可选：内核认证的 peer GID/UID 白名单；启用时至少填写一项实际数字 ID。
+allowed_peer_gids = []
+allowed_peer_uids = []
+# 可选：预先建立的安全 runtime 目录；默认 /run/hv-auction/worker。
+runtime_directory = "/run/hv-auction/worker"
+# 可选：规范化绝对 socket 路径；默认 /run/hv-auction/worker/control.sock。
+socket_path = "/run/hv-auction/worker/control.sock"
 
 # 可选：MoogleMail 入站轮询；默认关闭。
 [worker.mooglemail]
@@ -39,14 +170,99 @@ enabled = false
 mailbox_key = "mooglemail:main"
 # 可选：游戏世界，只能是 main 或 isekai。
 world_id = "main"
+# 可选：拍卖邮件起拍价覆盖值；省略时继承 [auction.economics] 的 start_price。
+# start_price = 1000
 # 可选：相对主配置解析的 `.keyenv` 路径；或使用敏感 mooglemail_cookie。
 keyenv_file = "../../../.keyenv"
+# 可选：固定生产 origin 或回环联调 origin，以及传输响应、限流和请求超时边界。
+endpoint = "https://hentaiverse.org"
+maximum_response_bytes = 8388608
+minimum_request_interval_millis = 1000
+request_timeout_seconds = 15
 # 可选：单次读取上限和有界分页上限。
 batch_size = 100
 maximum_pages = 20
+# 可选：每个 world 共用的标准五字段 cron；默认每分钟，也支持旧版描述符、@every 和时区前缀。
+schedule = "* * * * *"
+# 可选：cron 后随机抖动和可续期 claim 边界。
+jitter_seconds = 5
+lease_duration_seconds = 60
+renew_interval_seconds = 10
+# 可选：远程读取和单封邮件业务处理的内联尝试次数与单次总超时。
+fetch_attempts = 3
+fetch_timeout_seconds = 30
+process_attempts = 3
+item_timeout_seconds = 30
+# 可选：内联与持久化指数退避范围。
+retry_base_seconds = 1
+retry_maximum_seconds = 30
 # 可选：allowlist-first 详情读取；生产环境不要关闭 allowlist。
 sender_allowlist = []
 sender_allowlist_disabled = false
+
+# 可选区块：拍卖装备过滤；默认关闭，但来源仍必须标记为可交易。
+[worker.mooglemail.equipment_filter]
+enabled = false
+qualities = []
+prefixes = []
+suffixes = []
+categories = []
+equipment_types = []
+level_min = 0
+level_max = 0
+
+# 可选区块：MoogleMail 业务通知模板；省略字段使用旧版默认英文文本。
+[worker.mooglemail.mail_templates]
+auction_assets_rejected = "Auction assets rejected"
+auction_no_attachments = "Auction has no attachments"
+auction_equipment_rejected = "Auction equipment rejected: {reason_code}"
+user_assets_rejected = "User assets rejected"
+register_key = "Registration key {login_key} for {username}"
+register_result = "Registration result {result_code} {username}"
+rebind_result = "Rebind result {result_code} {username}"
+settlement_winner_equipment_cod = "Auction item {item_name}; COD {amount}; reference {reference}"
+settlement_payment_carrier = "Auction payment request {amount}; reference {reference}"
+settlement_payment_reminder = "Auction payment is overdue; reference {reference}"
+settlement_equipment_handoff = "Auction item {item_name}; reference {reference}"
+settlement_seller_payout = "Auction seller payout {amount}; reference {reference}"
+settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
+operations_alert = "Operations alert: {summary}"
+
+# 可选：额外启用一个世界；每个条目拥有独立 mailbox_key、cursor 和 allowlist。
+# 顶层 world_id 代表第一个世界，不能重复配置 world_id 或 mailbox_key。
+# [[worker.mooglemail.additional_worlds]]
+# world_id = "isekai"
+# mailbox_key = "mooglemail:isekai"
+# sender_allowlist = []
+# sender_allowlist_disabled = false
+
+# 可选区块：运维告警；默认关闭，只在 PostgreSQL 完整档运行。
+[worker.operations_alert]
+# 可选：启用后必须填写 recipient。
+enabled = false
+# 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，默认 60。
+scan_interval_seconds = 60
+# 可选：来源超时、批次窗口、冷却和 claim 租约秒数。
+source_timeout_seconds = 5
+batch_window_seconds = 120
+cooldown_seconds = 1800
+claim_lease_seconds = 120
+retry_delay_seconds = 300
+# 可选：扫描、批次和正文边界。
+max_signals_per_scan = 64
+max_batch_items = 20
+max_body_bytes = 4096
+# 可选：delivery/fulfillment/recovery 水位阈值。
+delivery_pending_count_threshold = 1
+delivery_pending_age_seconds = 900
+delivery_manual_reconcile_count_threshold = 1
+fulfillment_backlog_count_threshold = 1
+fulfillment_backlog_age_seconds = 900
+recovery_overdue_count_threshold = 1
+recovery_overdue_age_seconds = 900
+# 可选：通知世界和收件人。
+world_id = "main"
+recipient = ""
 
 # 可选区块：HTTP 安全策略。
 [http_security]
@@ -75,7 +291,8 @@ max_public_sessions = 5
 
 敏感文件的稳定字段集合：`database_url`、`redis_url`、`session_signing_key`、
 `ehentai_cookie`、`mooglemail_cookie`、`admin_actor`、`admin_secret`、
-`equipment_data_key_id`、`equipment_data_key`。新增外部凭据必须显式
+`equipment_data_key_id`、`equipment_data_key`、`credential_data_key_id`、
+`credential_data_key`。新增外部凭据必须显式
 扩展该结构，禁止任意键值透传。Admin 凭据只由 Admin 装配根读取，`admin_secret` 至少需要
 16 个字节；Admin 凭据和装备数据密钥的两项字段都必须成对出现，才能建立对应能力。
 
@@ -83,8 +300,23 @@ max_public_sessions = 5
 轮换标识。两者只由 Admin 装配根读取，用于封装装备 key；任何一个字段都不得进入日志、DTO、
 审计 metadata 或浏览器。
 
+`credential_data_key` 是 A32 MoogleMail/E-Hentai 凭据专用的 32 字节标准 Base64 数据密钥，
+必须与 `credential_data_key_id` 成对提供，不能复用装备或用户登录 key。Admin 只有在
+PostgreSQL 完整档且配置这对字段时才启用凭据导入/修改/删除；Worker 配置这对字段时会按
+world 读取 active 凭据池并在内存中解密。没有配置时 Worker 继续使用 `.keyenv` 或
+`mooglemail_cookie` 的兼容入口。
+
 相对 `secrets_file` 路径以主配置文件所在目录解析。敏感文件不得提交，部署时应限制为仅运行
 账号可读。
+
+## PostgreSQL 维护敏感配置
+
+`load_postgres_maintenance_secrets(path)` 只服务于 `auctionctl postgres-rebuild`。它解析一个与
+常驻三进程敏感文件隔离的 TOML，唯一必填字段是指向 `postgres` 维护库的 `database_url`；结构模板
+位于 `ops/config/examples/secrets/postgres-rebuild.toml`。路径必须是规范化绝对路径，目标必须是
+普通非 symlink 文件，父目录不得允许 group/other 写入；Unix 文件必须归当前有效用户所有、只有
+一个 hard link，并去除全部 group/other 权限位。类型的 `Debug` 固定脱敏，解析错误
+只报告路径；调用方只能通过显式 getter 短暂取得 URL，不能写入日志、命令参数、receipt 或 DTO。
 
 ## MoogleMail 本地联调凭据
 
@@ -97,28 +329,56 @@ max_public_sessions = 5
 装配 MoogleMail 适配器时转换为脱敏 Cookie 值对象，禁止写入日志、快照、DTO、数据库或错误
 消息；生产部署仍优先使用敏感 TOML 的显式 `mooglemail_cookie` getter。
 
-Worker 的 concurrency 和 `poll_interval_seconds` 必须为正数；当敏感配置中的 database_url 使用
-sqlite: 时，配置层只允许 concurrency 为 1，以落实 Lite 档的单主机、单写者约束。轮询间隔只
-负责唤醒持久化调度器，不能替代数据库 due/租约状态。
+Worker 的 control socket（若启用）、Auction `concurrency`/`poll_interval_seconds`/`batch_limit`/
+`jitter_seconds`/`item_timeout_seconds`、`recovery_retry_delay_seconds`、
+`[worker.delivery]` 的批次/并发/poll 抖动/lease/续租/宽限/超时、`[worker.fulfillment]` 的
+批次/并发/poll 抖动/lease/单项超时/重试，以及 `[worker.recovery]` 的同类调度边界、低余额阈值和
+health 时间边界必须满足各自的路径/正数边界；Delivery 的续租间隔必须小于 lease，sending 宽限
+必须大于完整请求超时；Fulfillment 和 Recovery 的单项超时必须小于各自 lease；
+其中 recovery 重试间隔不能超过 86400 秒；省略 Auction concurrency 时，配置层按 PostgreSQL=8、
+SQLite Lite=1 计算有效值，显式 SQLite 值也只允许 1，以落实单主机、单写者约束。轮询间隔只负责唤醒持久化调度器，
+不能替代数据库 due/租约状态。MoogleMail 每个 world 使用独立循环和手动唤醒器，读取与单封业务
+处理分别按配置进行有界内联重试；批次执行期间周期续租，续租失败后取消陈旧 future，不能绕过
+token、owner 和版本 fence 提交 cursor。
+
+启用 `[worker.operations_alert]` 后，PostgreSQL Worker 会读取 process、delivery、fulfillment 和
+recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化告警，使用 cooldown/lease/重试
+批次通过 MoogleMail delivery outbox 发送，并在 delivery 终态后完成成功/失败/人工对账。通知正文
+只包含冻结的安全摘要，不包含收件人以外的凭据、原始错误或数据库 payload；SQLite Lite 明确
+返回能力缺失。
 
 `http_security` 只保存 origin、速率限制和 Cookie 属性等非敏感策略；`session` 保存 Public
 与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、会话 token 和数据库
 连接串不得写入主配置。
 
-启用 `worker.mooglemail` 后，Worker 会先在 `mail_poll_state` 建立或读取持久化状态，再通过
-租约读取 MoogleMail。解析成功的入站安全事实、`mail_commands` 幂等记录和 cursor 在同一
-PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当前 Rust 首片以
-`parsed_pending_processing` 标记“协议解析已完成、业务邮件处理器尚未接入”，不会把该记录
-伪装成拍卖业务已接受。`sender_allowlist_disabled` 必须显式设为 true 才会读取非 allowlist
-发件人的详情。
+启用 `worker.mooglemail` 后，Worker 会先为每个已配置 world 在 `mail_poll_state` 建立或读取
+持久化状态，再通过独立租约读取 MoogleMail。解析成功的入站安全事实、`mail_commands` 幂等记录和 cursor 在同一
+PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当前 Rust 首片已接入拍卖入站以及
+用户注册/重绑业务处理；注册 key 由独立的数据密钥加密，数据库和 delivery outbox 不保存明文。
+结算退信以及 Sent/Balance 回执对账已由 PostgreSQL Worker owner 接入。启用 `[worker.forum]`
+后，PostgreSQL Worker 会装配 E-Hentai 主题发布和回帖导入；论坛 Cookie 可从独立凭据池读取，
+或使用敏感配置的兼容 getter。`worker.forum.public_base_url` 可选，填写无路径的公开端
+origin 后会把旧版 `/?auction=...&world=...` 相对链接解析为主题正文中的绝对链接；
+`item_timeout_seconds` 同时控制单个主题发布和回帖导入总时限，必须覆盖三次请求、两次请求间隔
+与收口预算，并小于独立 `lease_duration_seconds`。Forum 使用自己的顺序循环，发布失败不会跳过
+回帖导入，也不会终止其它 Worker owner。论坛完整档不在 SQLite Lite 中伪装提供。
+`sender_allowlist_disabled` 必须显式设为 true 才会读取非 allowlist 发件人的详情。
+`equipment_filter` 启用后按品质、前后缀、分类、类型和等级返回稳定拒绝原因；被拒绝且邮件可退回
+时会安排退回和通知，不能退回时会 fail closed，不会把不符合策略的装备写入拍卖。
 
 Admin 主配置的 `runtime_config_file` 指向独立的非敏感 runtime TOML，仓库模板位于
 `ops/config/examples/runtime/admin.toml`。该文档由严格应用模型
-解析，包含 listener、安全策略、会话时限、metrics/tracing 公共参数和 Worker control socket，
+解析，包含 listener、安全策略、会话时限、metrics/tracing 公共参数、Worker control socket 和可选的
+dashboard MoogleMail world/mailbox 清单，
 不包含 database URL、Cookie、密码、签名密钥或装备数据密钥。PostgreSQL 完整档通过 Admin
 HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启进程，SQLite Lite 不提供该
 完整更新能力。运行中的 runtime 文件必须是受信 regular file，目录不可被 group/world 写入，
 文件权限为 `0640`；仓库示例只用于复制模板。
+
+当 Admin 配置了 `runtime_config_file` 时，runtime 文件中的 `[metrics]` 和 `[tracing]` 公共参数
+覆盖主配置同名字段，确保 runtime 页面修改后重启真正改变 Admin 的 `/metrics` 与 OTLP surface；
+Public/Worker 继续使用主配置中的 `[metrics]`、`[tracing]`。三类进程的 OTLP headers 只能放在
+敏感 TOML 的角色专属字段中，不能写入 runtime 或普通主配置。
 
 ## 环境变量边界
 

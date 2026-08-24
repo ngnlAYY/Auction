@@ -4,7 +4,8 @@
 //! 绕过本回放接口，也不能把浏览器消息当作业务命令。
 
 use auction_application::{
-    MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeRequest,
+    MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader,
+    PublicRealtimeRequest,
 };
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicRealtimeEventResponse, PublicRealtimeResponse,
@@ -22,6 +23,7 @@ use std::net::SocketAddr;
 use tokio::time::{Duration, interval};
 use uuid::Uuid;
 
+use super::realtime_hub::RealtimeSubscription;
 use super::{
     PublicApiState, api_error, not_found_error, parse_positive_i64, parse_query, timestamp,
 };
@@ -171,9 +173,34 @@ pub(crate) async fn websocket(
         )
         .into_response();
     };
+    let Some(hub) = state.realtime_hub() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "realtime_unavailable",
+            "实时连接暂不可用",
+        )
+        .into_response();
+    };
+    let stream_key = request.auction_id.map_or_else(
+        || "auction:discovery".to_owned(),
+        |auction_id| format!("auction:{auction_id}"),
+    );
+    let subscription = match hub.subscribe(stream_key) {
+        Ok(subscription) => subscription,
+        Err(_) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "realtime_unavailable",
+                "实时连接暂不可用",
+            )
+            .into_response();
+        }
+    };
 
     upgrade
-        .on_upgrade(move |socket| stream_events(socket, state, request, connection_permit))
+        .on_upgrade(move |socket| {
+            stream_events(socket, state, request, subscription, connection_permit)
+        })
         .into_response()
 }
 
@@ -181,13 +208,18 @@ async fn stream_events(
     mut socket: WebSocket,
     state: PublicApiState,
     mut request: PublicRealtimeRequest,
+    mut subscription: RealtimeSubscription,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
 ) {
     let Some(reader) = state.realtime() else {
         let _ = socket.send(Message::Close(None)).await;
         return;
     };
-    let mut ticker = interval(Duration::from_millis(500));
+    if !send_catch_up(&mut socket, reader, &mut request).await {
+        return;
+    }
+    let mut ticker = interval(Duration::from_secs(25));
+    ticker.tick().await;
     loop {
         tokio::select! {
             message = socket.recv() => {
@@ -206,26 +238,42 @@ async fn stream_events(
                     Some(Err(_)) => return,
                 }
             }
-            _ = ticker.tick() => {
-                let page = match reader.list_public_events(request.clone()).await {
-                    Ok(Some(page)) => page,
-                    Ok(None) | Err(_) => {
-                        let _ = socket.send(Message::Close(None)).await;
-                        return;
-                    }
+            event = subscription.recv() => {
+                let Some(event) = event else {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
                 };
-                if !valid_page(&page, request.auction_id, request.after) {
+                let expected_stream = request.auction_id.map_or_else(
+                    || "auction:discovery".to_owned(),
+                    |auction_id| format!("auction:{auction_id}"),
+                );
+                if event.validate().is_err() || event.stream_key != expected_stream {
                     let _ = socket.send(Message::Close(None)).await;
                     return;
                 }
-                let refetch_required = page.refetch_required;
-                let next_after = page.next_after;
-                if page.events.is_empty() && !refetch_required {
-                    if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
-                        return;
-                    }
+                if event.stream_sequence <= request.after {
                     continue;
                 }
+                if event.stream_sequence != request.after.saturating_add(1)
+                    && !send_catch_up(&mut socket, reader, &mut request).await
+                {
+                    return;
+                }
+                if event.stream_sequence <= request.after {
+                    continue;
+                }
+                if event.stream_sequence != request.after.saturating_add(1) {
+                    // 当前事件前仍有未送达事件；让客户端通过下一次 reconnect/catch-up 恢复，
+                    // 不在 WebSocket 中伪造连续序号。
+                    continue;
+                }
+                let next_after = event.stream_sequence;
+                let page = PublicRealtimePage {
+                    events: vec![event],
+                    next_after,
+                    has_more: false,
+                    refetch_required: false,
+                };
                 let message = match serde_json::to_string(&map_page(page)) {
                     Ok(message) => message,
                     Err(_) => {
@@ -236,14 +284,49 @@ async fn stream_events(
                 if socket.send(Message::Text(message.into())).await.is_err() {
                     return;
                 }
-                if refetch_required {
-                    let _ = socket.send(Message::Close(None)).await;
+                request.after = next_after;
+            }
+            _ = ticker.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
                     return;
                 }
-                request.after = next_after;
             }
         }
     }
+}
+
+async fn send_catch_up(
+    socket: &mut WebSocket,
+    reader: &dyn PublicRealtimeReader,
+    request: &mut PublicRealtimeRequest,
+) -> bool {
+    let page = match reader.list_public_events(request.clone()).await {
+        Ok(Some(page)) => page,
+        Ok(None) | Err(_) => {
+            let _ = socket.send(Message::Close(None)).await;
+            return false;
+        }
+    };
+    if !valid_page(&page, request.auction_id, request.after) {
+        let _ = socket.send(Message::Close(None)).await;
+        return false;
+    }
+    let refetch_required = page.refetch_required;
+    let next_after = page.next_after;
+    if !page.events.is_empty() || refetch_required {
+        let message = match serde_json::to_string(&map_page(page)) {
+            Ok(message) => message,
+            Err(_) => {
+                let _ = socket.send(Message::Close(None)).await;
+                return false;
+            }
+        };
+        if socket.send(Message::Text(message.into())).await.is_err() {
+            return false;
+        }
+    }
+    request.after = next_after;
+    !refetch_required
 }
 
 fn valid_page(page: &PublicRealtimePage, auction_id: Option<Uuid>, after: i64) -> bool {

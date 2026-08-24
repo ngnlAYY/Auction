@@ -7,6 +7,16 @@
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
 
+# 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围；省略时不强制检查范围。
+# 该清单应与 Worker 配置中的 world_id/mailbox_key 一致，只包含非敏感标识。
+[[dashboard_mailboxes]]
+world_id = "main"
+mailbox_key = "mooglemail:main"
+
+[[dashboard_mailboxes]]
+world_id = "isekai"
+mailbox_key = "mooglemail:isekai"
+
 # 可选区块：装备来源和远程读取边界；省略整个区块时使用默认限制。
 [equipment_source]
 # 可选：允许访问的远程主机名；启用 allowlist 时不能为空。
@@ -24,16 +34,25 @@ request_timeout_seconds = 10
 
 # 可选区块：Admin 监听器；省略整个区块时使用 TCP 127.0.0.1:8091。
 [listener]
-# 可选：TCP 监听地址；当前 Rust Admin 只支持 host:port，默认 127.0.0.1:8091。
+# 可选：TCP 监听地址；TCP 模式使用 host:port，默认 127.0.0.1:8091。
 address = "127.0.0.1:8091"
-# 可选：Unix socket 用户组；当前 TCP 模式不使用，默认空字符串。
+# 可选：Linux Unix socket 用户组；TCP 模式不使用，默认空字符串。
 group = ""
-# 可选：监听模式，当前只能填 tcp；省略时为 tcp。
+# 可选：监听模式，可填 tcp 或 unix（Unix 仅支持 Linux）；省略时为 tcp。
 mode = "tcp"
-# 可选：Unix socket 运行目录；当前 TCP 模式不使用，默认 /run/hv-auction。
+# 可选：Unix socket 运行目录；TCP 模式不使用，默认 /run/hv-auction。
 runtime_directory = "/run/hv-auction"
-# 可选：Unix socket 路径；当前 TCP 模式不使用，默认空字符串。
+# 可选：Unix socket 路径；TCP 模式不使用，默认空字符串。
 socket_path = ""
+
+# Linux Unix 模式示例（启用时请替换上面的 listener 区块）：
+# [listener]
+# address = ""
+# group = "auction"
+# mode = "unix"
+# runtime_directory = "/run/hv-auction"
+# socket_path = "/run/hv-auction/admin.sock"
+# runtime_directory 必须预先存在，由运行账号拥有，且不能对其他用户开放写权限。
 
 # 可选区块：metrics 设置；省略整个区块时关闭导出。
 [metrics]

@@ -2,19 +2,22 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DomainError, ProxyAuthorizationId, UserId,
+    DomainError, ProxyAuthorizationId, ProxyMode, UserId,
     bidding::amount::{BidAmount, CREDIT_GRID},
 };
 
 /// 旧论坛竞价规则中的默认金额和时间边界。
-pub const DEFAULT_START_PRICE: i64 = 50_000;
+pub const DEFAULT_START_PRICE: i64 = 1_000;
+pub const DEFAULT_BID_INCREMENT_PPM: i64 = 50_000;
+pub const DEFAULT_PROXY_MAX_OUTBID_USES: u32 = 3;
+pub const DEFAULT_FINAL_PHASE_LEAD: Duration = Duration::minutes(1);
 pub const SMALL_BID_INCREMENT: i64 = 30_000;
 pub const REGULAR_BID_INCREMENT: i64 = 50_000;
 pub const LARGE_BID_THRESHOLD: i64 = 2_000_000;
 pub const SMALL_BID_THRESHOLD: i64 = 200_000;
 pub const PROXY_LAST_INCREMENT: i64 = 1_000;
-pub const DEFAULT_SOFT_CLOSE_WINDOW: Duration = Duration::minutes(15);
-pub const DEFAULT_SOFT_CLOSE_EXTENSION: Duration = Duration::minutes(15);
+pub const DEFAULT_SOFT_CLOSE_WINDOW: Duration = Duration::minutes(1);
+pub const DEFAULT_SOFT_CLOSE_EXTENSION: Duration = Duration::minutes(1);
 pub const DEFAULT_CANCEL_CUTOFF: Duration = Duration::hours(24);
 pub const DEFAULT_PROXY_SLOW_INTERVAL: Duration = Duration::minutes(10);
 
@@ -22,20 +25,32 @@ pub const DEFAULT_PROXY_SLOW_INTERVAL: Duration = Duration::minutes(10);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuctionRules {
     pub default_start_price: BidAmount,
+    pub bid_increment_ppm: i64,
+    pub minimum_increment: i64,
     pub soft_close_window: Duration,
     pub soft_close_extension: Duration,
     pub cancel_cutoff: Duration,
     pub proxy_slow_interval: Duration,
+    pub proxy_enabled: bool,
+    pub proxy_default_mode: ProxyMode,
+    pub proxy_max_outbid_uses: u32,
+    pub final_phase_lead: Duration,
 }
 
 impl Default for AuctionRules {
     fn default() -> Self {
         Self {
             default_start_price: BidAmount::from_validated(DEFAULT_START_PRICE),
+            bid_increment_ppm: DEFAULT_BID_INCREMENT_PPM,
+            minimum_increment: 0,
             soft_close_window: DEFAULT_SOFT_CLOSE_WINDOW,
             soft_close_extension: DEFAULT_SOFT_CLOSE_EXTENSION,
             cancel_cutoff: DEFAULT_CANCEL_CUTOFF,
             proxy_slow_interval: DEFAULT_PROXY_SLOW_INTERVAL,
+            proxy_enabled: true,
+            proxy_default_mode: ProxyMode::Fast,
+            proxy_max_outbid_uses: DEFAULT_PROXY_MAX_OUTBID_USES,
+            final_phase_lead: DEFAULT_FINAL_PHASE_LEAD,
         }
     }
 }
@@ -44,12 +59,22 @@ impl AuctionRules {
     /// 校验规则快照，防止无效配置进入竞价计算。
     pub fn validate(self) -> Result<(), DomainError> {
         if self.default_start_price.value() <= 0
+            || !(0..=1_000_000).contains(&self.bid_increment_ppm)
+            || self.minimum_increment < 0
+            || (self.bid_increment_ppm == 0 && self.minimum_increment <= 0)
+            || (self.bid_increment_ppm > 0 && self.default_start_price.value() % CREDIT_GRID != 0)
             || self.soft_close_window < Duration::zero()
             || self.soft_close_extension <= Duration::zero()
             || self.cancel_cutoff < Duration::zero()
             || self.proxy_slow_interval <= Duration::zero()
+            || self.proxy_max_outbid_uses > 1_000
+            || self.final_phase_lead <= Duration::zero()
         {
             return Err(DomainError::InvalidRules("金额或时间边界无效"));
+        }
+
+        if !matches!(self.proxy_default_mode, ProxyMode::Fast | ProxyMode::Slow) {
+            return Err(DomainError::InvalidRules("代理默认模式无效"));
         }
 
         Ok(())
@@ -65,7 +90,7 @@ impl AuctionRules {
         self,
         lot_start_price: Option<BidAmount>,
         current_price: Option<BidAmount>,
-        material: bool,
+        _material: bool,
         proxy_last: bool,
     ) -> BidAmount {
         let Some(current_price) = current_price else {
@@ -75,14 +100,10 @@ impl AuctionRules {
         if proxy_last {
             return current_price.saturating_add(PROXY_LAST_INCREMENT);
         }
-        if material || current_price.value() >= LARGE_BID_THRESHOLD {
-            return percentage_minimum(current_price);
+        if self.bid_increment_ppm > 0 {
+            return ppm_minimum(current_price, self.bid_increment_ppm);
         }
-        if current_price.value() < SMALL_BID_THRESHOLD {
-            return current_price.saturating_add(SMALL_BID_INCREMENT);
-        }
-
-        current_price.saturating_add(REGULAR_BID_INCREMENT)
+        current_price.saturating_add(self.minimum_increment)
     }
 
     /// 校验一笔出价并计算软截止后的有效结束时间。
@@ -214,9 +235,14 @@ pub struct BidDecision {
     pub extended: bool,
 }
 
-fn percentage_minimum(current_price: BidAmount) -> BidAmount {
-    let raw = (current_price.value() as i128 * 103 + 99) / 100;
-    let rounded = ((raw + CREDIT_GRID as i128 - 1) / CREDIT_GRID as i128) * CREDIT_GRID as i128;
-    let capped = rounded.min(BidAmount::MAX_ALIGNED as i128);
-    BidAmount::from_validated(capped as i64)
+fn ppm_minimum(current_price: BidAmount, bid_increment_ppm: i64) -> BidAmount {
+    let units = current_price.credit_units();
+    let base = units / 1_000_000;
+    let remainder = units % 1_000_000;
+    let base_increment = base.saturating_mul(bid_increment_ppm);
+    let remainder_increment = (remainder.saturating_mul(bid_increment_ppm) + 999_999) / 1_000_000;
+    let increment_units = base_increment.saturating_add(remainder_increment).max(1);
+    let increment = (increment_units as i128 * CREDIT_GRID as i128)
+        .min(BidAmount::MAX_ALIGNED as i128 - current_price.value() as i128);
+    BidAmount::from_validated((current_price.value() as i128 + increment) as i64)
 }

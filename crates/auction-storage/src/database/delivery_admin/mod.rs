@@ -16,12 +16,19 @@ use chrono::Utc;
 #[cfg(feature = "postgres")]
 use serde::Serialize;
 #[cfg(feature = "postgres")]
+use serde_json::Value;
+#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 use super::DatabaseStore;
+#[cfg(feature = "postgres")]
+use super::delivery_audit::{
+    ADMIN_RECONCILE, ADMIN_RELEASE, ADMIN_RETRY_FAILED, DeliveryAudit,
+    append as append_delivery_audit,
+};
 
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{Postgres, Row, postgres::PgRow};
 
 impl DeliveryAdminPort for DatabaseStore {
     fn list(
@@ -67,7 +74,7 @@ impl DeliveryAdminPort for DatabaseStore {
 
 #[cfg(feature = "postgres")]
 async fn list_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     request: &DeliveryAdminListRequest,
 ) -> Result<DeliveryAdminPage, auction_application::RepositoryError> {
     let status = request.status.as_deref();
@@ -80,7 +87,7 @@ async fn list_postgres(
     .await
     .map_err(map_storage_error)?;
     let rows = sqlx::query(
-        r#"SELECT id, origin_kind, origin_id, recipient, status,
+        r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
                   created_at, updated_at
@@ -101,7 +108,7 @@ async fn list_postgres(
 
 #[cfg(feature = "postgres")]
 async fn execute_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     command: &DeliveryAdminCommand,
 ) -> Result<DeliveryAdminResult, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
@@ -111,7 +118,7 @@ async fn execute_postgres(
     }
 
     let row = sqlx::query(
-        r#"SELECT id, origin_kind, origin_id, recipient, status,
+        r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
                   created_at, updated_at
@@ -162,7 +169,7 @@ async fn execute_postgres(
     }
 
     let updated_row = sqlx::query(
-        r#"SELECT id, origin_kind, origin_id, recipient, status,
+        r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
                   lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
                   created_at, updated_at
@@ -198,6 +205,33 @@ async fn execute_postgres(
     if inserted.rows_affected() != 1 {
         return Err(repository_error_owned("delivery Admin 命令并发冲突"));
     }
+    let (audit_action, admin_action) = match command.action {
+        DeliveryAdminAction::Release => (ADMIN_RELEASE, "release"),
+        DeliveryAdminAction::RetryFailed => (ADMIN_RETRY_FAILED, "retry_failed"),
+        DeliveryAdminAction::ReconcileRetry => (ADMIN_RECONCILE, "reconcile_retry"),
+        DeliveryAdminAction::ReconcileSucceeded => (ADMIN_RECONCILE, "reconcile_succeeded"),
+        DeliveryAdminAction::ReconcileFailed => (ADMIN_RECONCILE, "reconcile_failed"),
+    };
+    append_delivery_audit(
+        &mut transaction,
+        DeliveryAudit {
+            occurred_at: result.snapshot.updated_at,
+            actor_type: "admin",
+            actor_id: &command.actor_id,
+            action: audit_action,
+            delivery_id: command.delivery_id,
+            request_id: command.request_id.as_deref(),
+            source: "admin",
+            metadata: serde_json::json!({
+                "command_id": command.command_id,
+                "admin_action": admin_action,
+                "status": result.snapshot.status,
+                "fencing_version": result.snapshot.fencing_version,
+            }),
+        },
+    )
+    .await
+    .map_err(map_storage_error)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(result)
 }
@@ -409,11 +443,13 @@ fn map_snapshot(
     let attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
     let attempt_count = u32::try_from(attempt_count)
         .map_err(|_| repository_error_owned("delivery 尝试次数无效"))?;
+    let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
     let snapshot = DeliveryAdminSnapshot {
         id: row.try_get("id").map_err(map_storage_error)?,
         origin_kind: row.try_get("origin_kind").map_err(map_storage_error)?,
         origin_id: row.try_get("origin_id").map_err(map_storage_error)?,
         recipient: row.try_get("recipient").map_err(map_storage_error)?,
+        cod: cod_from_payload(&row.try_get::<Value, _>("payload").map_err(map_storage_error)?),
         status: row.try_get("status").map_err(map_storage_error)?,
         lease_expires_at: row.try_get("lease_expires_at").map_err(map_storage_error)?,
         fencing_version: row.try_get("fencing_version").map_err(map_storage_error)?,
@@ -423,6 +459,9 @@ fn map_snapshot(
         completed_at: row.try_get("completed_at").map_err(map_storage_error)?,
         external_reference: row.try_get("external_reference").map_err(map_storage_error)?,
         failure_code: row.try_get("failure_code").map_err(map_storage_error)?,
+        reason_code: reason_code_from_metadata(&result_metadata),
+        take_required: take_required_from_metadata(&result_metadata),
+        returned_mail_id: returned_mail_id_from_metadata(&result_metadata),
         created_at: row.try_get("created_at").map_err(map_storage_error)?,
         updated_at: row.try_get("updated_at").map_err(map_storage_error)?,
     };
@@ -438,6 +477,40 @@ fn map_snapshot(
         return Err(repository_error_owned("delivery Admin 投影不满足不变量"));
     }
     Ok(snapshot)
+}
+
+#[cfg(feature = "postgres")]
+fn cod_from_payload(payload: &Value) -> Option<i64> {
+    if payload.get("schema_version").and_then(Value::as_i64) != Some(1)
+        || payload.get("operation").and_then(Value::as_str) != Some("send")
+    {
+        return None;
+    }
+    let cod = payload.get("cod").and_then(Value::as_i64)?;
+    (0..=auction_application::MAX_DELIVERY_COD).contains(&cod).then_some(cod)
+}
+
+#[cfg(feature = "postgres")]
+fn reason_code_from_metadata(metadata: &Value) -> Option<String> {
+    let value = metadata.get("reason_code").and_then(Value::as_str)?;
+    let trimmed = value.trim();
+    (value == trimmed && !trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+#[cfg(feature = "postgres")]
+fn take_required_from_metadata(metadata: &Value) -> bool {
+    metadata.get("take_required").and_then(Value::as_bool).unwrap_or(false)
+}
+
+#[cfg(feature = "postgres")]
+fn returned_mail_id_from_metadata(metadata: &Value) -> Option<String> {
+    let value = metadata.get("returned_mail_id").and_then(Value::as_str)?;
+    if !(1..=32).contains(&value.len())
+        || !value.bytes().all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn validate_command(command: &DeliveryAdminCommand) -> Result<(), ApplicationError> {

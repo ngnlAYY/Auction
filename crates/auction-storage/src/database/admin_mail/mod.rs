@@ -7,16 +7,17 @@
 use std::future::Future;
 
 use auction_application::{
-    AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakePage,
-    AdminMailPollState, AdminMailPollStateRequest, AdminMailReader, ApplicationError,
-    ApplicationFuture,
+    AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
+    AdminMailIntakePage, AdminMailPollState, AdminMailPollStateRequest, AdminMailReader,
+    ApplicationError, ApplicationFuture,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
     AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollTriggerCommand,
-    AdminMailPollingCommand, AdminMailStoredCommand, AdminMailTransaction,
+    AdminMailPollerSnapshot, AdminMailPollingCommand, AdminMailStoredCommand, AdminMailTransaction,
     AdminMailTransactionError, AdminMailTransactionFailure, AdminMailTransactionRunner,
-    RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
+    MAX_ADMIN_MAIL_POLLER_COUNT, RequestHash, TransactionFuture, TransactionIsolation,
+    TransactionPolicy,
 };
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
@@ -33,6 +34,17 @@ use uuid::Uuid;
 use super::DatabaseStore;
 
 impl AdminMailReader for DatabaseStore {
+    fn dashboard_snapshot(&self) -> ApplicationFuture<'_, AdminMailDashboardSnapshot> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => dashboard_snapshot_postgres(store).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
     fn poll_state(
         &self,
         request: AdminMailPollStateRequest,
@@ -451,6 +463,45 @@ async fn get_poll_state_postgres(
 }
 
 #[cfg(feature = "postgres")]
+async fn dashboard_snapshot_postgres(
+    store: &super::PostgresStore,
+) -> Result<AdminMailDashboardSnapshot, ApplicationError> {
+    // 轮询器数量是部署配置的一小组固定状态；LIMIT + 1 让损坏或异常膨胀的表不会无限进入
+    // Admin 响应，同时仍能明确报告超出安全投影上限的情况。
+    let rows = sqlx::query(
+        "SELECT mailbox_key, last_poll_at, next_poll_at, consecutive_failures,
+                paused, state_version, updated_at
+         FROM public.mail_poll_state
+         ORDER BY mailbox_key ASC
+         LIMIT 65",
+    )
+    .fetch_all(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 PostgreSQL 邮件轮询器 dashboard 摘要失败"))?;
+    if rows.len() > MAX_ADMIN_MAIL_POLLER_COUNT {
+        return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
+    }
+    let mut pollers = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let poller = map_mail_poller(row)?;
+        if !poller.validate()
+            || pollers.iter().any(|previous: &AdminMailPollerSnapshot| {
+                previous.mailbox_key == poller.mailbox_key
+            })
+        {
+            return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
+        }
+        pollers.push(poller);
+    }
+    let snapshot = AdminMailDashboardSnapshot { observed_at: Utc::now(), pollers };
+    if snapshot.validate() {
+        Ok(snapshot)
+    } else {
+        Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection))
+    }
+}
+
+#[cfg(feature = "postgres")]
 async fn list_intakes_postgres(
     store: &super::PostgresStore,
     request: AdminMailIntakeFilter,
@@ -567,6 +618,33 @@ fn map_poll_state(
         paused: row.try_get("paused").map_err(map_sql_error)?,
         state_version: row.try_get("state_version").map_err(map_sql_error)?,
         updated_at: row.try_get("updated_at").map_err(map_sql_error)?,
+    })
+}
+
+#[cfg(feature = "postgres")]
+fn map_mail_poller(
+    row: &sqlx::postgres::PgRow,
+) -> Result<AdminMailPollerSnapshot, ApplicationError> {
+    Ok(AdminMailPollerSnapshot {
+        mailbox_key: row
+            .try_get("mailbox_key")
+            .map_err(|_| storage_error("读取邮件轮询器邮箱标识失败"))?,
+        last_poll_at: row
+            .try_get("last_poll_at")
+            .map_err(|_| storage_error("读取邮件轮询器上次轮询时间失败"))?,
+        next_poll_at: row
+            .try_get("next_poll_at")
+            .map_err(|_| storage_error("读取邮件轮询器下次轮询时间失败"))?,
+        consecutive_failures: row
+            .try_get("consecutive_failures")
+            .map_err(|_| storage_error("读取邮件轮询器失败计数失败"))?,
+        paused: row.try_get("paused").map_err(|_| storage_error("读取邮件轮询器暂停状态失败"))?,
+        state_version: row
+            .try_get("state_version")
+            .map_err(|_| storage_error("读取邮件轮询器状态版本失败"))?,
+        updated_at: row
+            .try_get("updated_at")
+            .map_err(|_| storage_error("读取邮件轮询器更新时间失败"))?,
     })
 }
 

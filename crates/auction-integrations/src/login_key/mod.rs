@@ -1,0 +1,305 @@
+//! MoogleMail 用户登录 key 的签发与 Worker 专用解密。
+//!
+//! Users owner 只接收 SHA-256 摘要和 AES-256-GCM 密文信封；只有 Worker 的 Delivery transport
+//! 在发送注册通知的瞬间读取并解密 key。AAD 绑定用户 UUID，指纹绑定用途，避免密文跨用户或
+//! 跨用途搬移后仍被接受。
+
+use std::{fmt, sync::Arc};
+
+use auction_application::{
+    AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminUserKeyIssue, ApplicationError,
+    ApplicationFuture, MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyEnvelopeReader,
+    MailLoginKeyIssue, MailLoginKeyIssuer, MailLoginKeyReader, MailProcessingError,
+};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use ring::{
+    aead, hmac,
+    rand::{SecureRandom, SystemRandom},
+};
+use subtle::ConstantTimeEq;
+use uuid::Uuid;
+
+use crate::DataKey;
+
+const LOGIN_KEY_ENTROPY_BYTES: usize = 32;
+const LOGIN_KEY_NONCE_BYTES: usize = 12;
+const LOGIN_KEY_FINGERPRINT_DOMAIN: &[u8] = b"user-login-key";
+const SECRET_FINGERPRINT_PREFIX: &[u8] = b"auction/cryptobox/secret/v1/";
+
+/// 登录 key 加解密错误；对外统一映射为不暴露细节的应用错误。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginKeyCryptoError {
+    RandomSource,
+    Encryption,
+    Decryption,
+    InvalidEnvelope,
+    KeyMismatch,
+    FingerprintMismatch,
+    InvalidPlaintext,
+}
+
+impl fmt::Display for LoginKeyCryptoError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MoogleMail 登录 key 加密操作失败")
+    }
+}
+
+impl std::error::Error for LoginKeyCryptoError {}
+
+/// 为 Users owner 签发密文信封的登录 key issuer。
+pub struct MoogleMailLoginKeyIssuer {
+    data_key: Arc<DataKey>,
+    random: SystemRandom,
+}
+
+impl MoogleMailLoginKeyIssuer {
+    /// 使用敏感配置中的独立用户登录 key 数据密钥建立签发器。
+    pub fn new(data_key: Arc<DataKey>) -> Self {
+        Self { data_key, random: SystemRandom::new() }
+    }
+
+    async fn issue_now(&self, user_id: Uuid) -> Result<MailLoginKeyIssue, ApplicationError> {
+        let issue = self.generate_admin_now(user_id)?;
+        let public_key_hash = issue.key.public_key_hash();
+        Ok(MailLoginKeyIssue { public_key_hash, envelope: issue.envelope })
+    }
+
+    fn generate_admin_now(&self, user_id: Uuid) -> Result<AdminUserKeyIssue, ApplicationError> {
+        if user_id.is_nil() {
+            return Err(MailProcessingError::InvalidLoginKey.into());
+        }
+        let mut entropy = [0_u8; LOGIN_KEY_ENTROPY_BYTES];
+        self.random
+            .fill(&mut entropy)
+            .map_err(|_| crypto_error(LoginKeyCryptoError::RandomSource))?;
+        let encoded = URL_SAFE_NO_PAD.encode(entropy);
+        entropy.fill(0);
+        let issue = self.seal_encoded_now(user_id, &encoded)?;
+        let mut encoded_bytes = encoded.into_bytes();
+        encoded_bytes.fill(0);
+        Ok(issue)
+    }
+
+    fn seal_encoded_now(
+        &self,
+        user_id: Uuid,
+        encoded: &str,
+    ) -> Result<AdminUserKeyIssue, ApplicationError> {
+        if user_id.is_nil() {
+            return Err(MailProcessingError::InvalidLoginKey.into());
+        }
+        let key = MailLoginKey::from_encoded(encoded).map_err(ApplicationError::from)?;
+        let mut plaintext = encoded.as_bytes().to_vec();
+        let aad = login_key_aad(user_id);
+        let (ciphertext, nonce) =
+            seal(&self.data_key, &plaintext, aad.as_bytes(), &self.random).map_err(crypto_error)?;
+        let fingerprint = fingerprint(&self.data_key, &plaintext);
+        plaintext.fill(0);
+        let envelope = MailLoginKeyEnvelope::new(
+            ciphertext,
+            nonce,
+            self.data_key.id().to_owned(),
+            fingerprint,
+        )
+        .map_err(ApplicationError::from)?;
+        Ok(AdminUserKeyIssue { key, envelope })
+    }
+}
+
+impl MailLoginKeyIssuer for MoogleMailLoginKeyIssuer {
+    fn issue(&self, user_id: Uuid) -> ApplicationFuture<'_, MailLoginKeyIssue> {
+        Box::pin(async move { self.issue_now(user_id).await })
+    }
+}
+
+impl AdminLoginKeyIssuer for MoogleMailLoginKeyIssuer {
+    fn generate(&self, user_id: Uuid) -> ApplicationFuture<'_, AdminUserKeyIssue> {
+        Box::pin(async move { self.generate_admin_now(user_id) })
+    }
+
+    fn seal(&self, user_id: Uuid, key: MailLoginKey) -> ApplicationFuture<'_, AdminUserKeyIssue> {
+        Box::pin(async move { key.with_encoded(|encoded| self.seal_encoded_now(user_id, encoded)) })
+    }
+}
+
+/// 从 storage 密文信封读取并解密登录 key 的 Worker adapter。
+pub struct MoogleMailLoginKeyReader<S> {
+    source: Arc<S>,
+    data_key: Arc<DataKey>,
+}
+
+impl<S> MoogleMailLoginKeyReader<S>
+where
+    S: MailLoginKeyEnvelopeReader,
+{
+    /// 建立只供 Delivery transport 使用的解密读取器。
+    pub fn new(source: Arc<S>, data_key: Arc<DataKey>) -> Self {
+        Self { source, data_key }
+    }
+
+    async fn read_now(&self, user_id: Uuid) -> Result<MailLoginKey, ApplicationError> {
+        if user_id.is_nil() {
+            return Err(MailProcessingError::InvalidLoginKey.into());
+        }
+        let envelope = self.source.load_login_key_envelope(user_id).await?;
+        self.open_envelope_now(user_id, envelope).await
+    }
+
+    async fn open_envelope_now(
+        &self,
+        user_id: Uuid,
+        envelope: MailLoginKeyEnvelope,
+    ) -> Result<MailLoginKey, ApplicationError> {
+        if user_id.is_nil() {
+            return Err(MailProcessingError::InvalidLoginKey.into());
+        }
+        if envelope.encryption_key_id() != self.data_key.id() {
+            return Err(crypto_error(LoginKeyCryptoError::KeyMismatch));
+        }
+        let aad = login_key_aad(user_id);
+        let mut plaintext = open(
+            &self.data_key,
+            envelope.ciphertext(),
+            envelope.nonce(),
+            envelope.encryption_key_id(),
+            aad.as_bytes(),
+        )
+        .map_err(crypto_error)?;
+        let encoded = match String::from_utf8(std::mem::take(&mut plaintext)) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                let mut bytes = error.into_bytes();
+                bytes.fill(0);
+                return Err(crypto_error(LoginKeyCryptoError::InvalidPlaintext));
+            }
+        };
+        let key = MailLoginKey::from_encoded(&encoded).map_err(ApplicationError::from);
+        let mut encoded_bytes = encoded.into_bytes();
+        encoded_bytes.fill(0);
+        let key = key?;
+        verify_fingerprint(&self.data_key, &key, envelope.fingerprint()).map_err(crypto_error)?;
+        Ok(key)
+    }
+}
+
+impl<S> MailLoginKeyReader for MoogleMailLoginKeyReader<S>
+where
+    S: MailLoginKeyEnvelopeReader + 'static,
+{
+    fn read(&self, user_id: Uuid) -> ApplicationFuture<'_, MailLoginKey> {
+        Box::pin(async move { self.read_now(user_id).await })
+    }
+}
+
+impl<S> AdminLoginKeyOpener for MoogleMailLoginKeyReader<S>
+where
+    S: MailLoginKeyEnvelopeReader + 'static,
+{
+    fn open(
+        &self,
+        user_id: Uuid,
+        envelope: MailLoginKeyEnvelope,
+    ) -> ApplicationFuture<'_, MailLoginKey> {
+        Box::pin(async move { self.open_envelope_now(user_id, envelope).await })
+    }
+}
+
+fn verify_fingerprint(
+    data_key: &DataKey,
+    key: &MailLoginKey,
+    expected: &str,
+) -> Result<(), LoginKeyCryptoError> {
+    let actual = key.with_encoded(|value| fingerprint(data_key, value.as_bytes()));
+    if actual.as_bytes().ct_eq(expected.as_bytes()).into() {
+        Ok(())
+    } else {
+        Err(LoginKeyCryptoError::FingerprintMismatch)
+    }
+}
+
+fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
+    let mut material = Vec::with_capacity(
+        SECRET_FINGERPRINT_PREFIX.len() + LOGIN_KEY_FINGERPRINT_DOMAIN.len() + 1 + plaintext.len(),
+    );
+    material.extend_from_slice(SECRET_FINGERPRINT_PREFIX);
+    material.extend_from_slice(LOGIN_KEY_FINGERPRINT_DOMAIN);
+    material.push(0);
+    material.extend_from_slice(plaintext);
+    hex_encode(
+        hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, data_key.material()), &material).as_ref(),
+    )
+}
+
+fn seal(
+    data_key: &DataKey,
+    plaintext: &[u8],
+    aad: &[u8],
+    random: &SystemRandom,
+) -> Result<(Vec<u8>, Vec<u8>), LoginKeyCryptoError> {
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material())
+        .map_err(|_| LoginKeyCryptoError::Encryption)?;
+    let key = aead::LessSafeKey::new(unbound);
+    let mut nonce = vec![0_u8; LOGIN_KEY_NONCE_BYTES];
+    random.fill(&mut nonce).map_err(|_| LoginKeyCryptoError::RandomSource)?;
+    let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
+        nonce.as_slice().try_into().map_err(|_| LoginKeyCryptoError::Encryption)?;
+    let mut buffer = plaintext.to_vec();
+    key.seal_in_place_append_tag(
+        aead::Nonce::assume_unique_for_key(nonce_array),
+        aead::Aad::from(aad),
+        &mut buffer,
+    )
+    .map_err(|_| LoginKeyCryptoError::Encryption)?;
+    Ok((buffer, nonce))
+}
+
+fn open(
+    data_key: &DataKey,
+    ciphertext: &[u8],
+    nonce: &[u8],
+    key_id: &str,
+    aad: &[u8],
+) -> Result<Vec<u8>, LoginKeyCryptoError> {
+    if key_id != data_key.id() || nonce.len() != LOGIN_KEY_NONCE_BYTES || ciphertext.len() < 16 {
+        return Err(if key_id != data_key.id() {
+            LoginKeyCryptoError::KeyMismatch
+        } else {
+            LoginKeyCryptoError::InvalidEnvelope
+        });
+    }
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, data_key.material())
+        .map_err(|_| LoginKeyCryptoError::Decryption)?;
+    let key = aead::LessSafeKey::new(unbound);
+    let nonce_array: [u8; LOGIN_KEY_NONCE_BYTES] =
+        nonce.try_into().map_err(|_| LoginKeyCryptoError::InvalidEnvelope)?;
+    let mut buffer = ciphertext.to_vec();
+    let plaintext = key
+        .open_in_place(
+            aead::Nonce::assume_unique_for_key(nonce_array),
+            aead::Aad::from(aad),
+            &mut buffer,
+        )
+        .map_err(|_| LoginKeyCryptoError::Decryption)?
+        .to_vec();
+    buffer.fill(0);
+    Ok(plaintext)
+}
+
+fn login_key_aad(user_id: Uuid) -> String {
+    format!("auction/user-login-key/v1/{user_id}/key")
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+fn crypto_error(error: LoginKeyCryptoError) -> ApplicationError {
+    let _ = error;
+    MailProcessingError::InvalidLoginKey.into()
+}

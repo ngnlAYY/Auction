@@ -13,6 +13,9 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
+mod admin;
+mod mail;
+
 impl PublicLoginAuthenticator for DatabaseStore {
     fn authenticate(&self, key: Vec<u8>) -> ApplicationFuture<'_, PublicLoginIdentity> {
         Box::pin(async move {

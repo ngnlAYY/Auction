@@ -17,7 +17,7 @@ use auction_application::MailPollIntake;
 #[cfg(feature = "postgres")]
 use serde_json::Value;
 #[cfg(feature = "postgres")]
-use sqlx::{PgPool, Row, types::Json};
+use sqlx::{Postgres, Row, types::Json};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
@@ -44,13 +44,16 @@ impl MailPollStore for DatabaseStore {
 
     fn claim_due(
         &self,
+        mailbox_key: String,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         limit: u16,
+        _force: bool,
     ) -> ApplicationFuture<'_, Vec<MailPollClaim>> {
         Box::pin(async move {
-            if !valid_text(&worker_id, 256)
+            if !valid_text(&mailbox_key, 256)
+                || !valid_text(&worker_id, 256)
                 || now.timestamp_nanos_opt().is_none()
                 || lease_until <= now
                 || limit == 0
@@ -61,7 +64,16 @@ impl MailPollStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    claim_due_postgres(store.pool(), &worker_id, now, lease_until, limit).await
+                    claim_due_postgres(
+                        store.pool(),
+                        &mailbox_key,
+                        &worker_id,
+                        now,
+                        lease_until,
+                        limit,
+                        _force,
+                    )
+                    .await
                 }
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(capability_error()),
@@ -81,6 +93,31 @@ impl MailPollStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => commit_postgres(store.pool(), &claim, &batch).await,
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn renew(
+        &self,
+        claim: MailPollClaim,
+        now: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, MailPollClaim> {
+        Box::pin(async move {
+            if !claim.validate()
+                || now.timestamp_nanos_opt().is_none()
+                || lease_until <= now
+                || lease_until <= claim.lease_until
+            {
+                return Err(storage_error("MoogleMail 轮询续租参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    renew_postgres(store.pool(), claim, now, lease_until).await
+                }
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(capability_error()),
             }
@@ -115,8 +152,38 @@ impl MailPollStore for DatabaseStore {
 }
 
 #[cfg(feature = "postgres")]
+async fn renew_postgres(
+    pool: &super::TrackedPool<Postgres>,
+    mut claim: MailPollClaim,
+    now: DateTime<Utc>,
+    lease_until: DateTime<Utc>,
+) -> Result<MailPollClaim, ApplicationError> {
+    let updated = sqlx::query(
+        "UPDATE public.mail_poll_state
+         SET claim_expires_at = $4, updated_at = $3
+         WHERE mailbox_key = $1 AND claim_token = $2 AND claim_owner = $5
+               AND state_version = $6 AND paused = false
+               AND claim_expires_at > $3 AND claim_expires_at < $4",
+    )
+    .bind(&claim.mailbox_key)
+    .bind(claim.claim_token)
+    .bind(now)
+    .bind(lease_until)
+    .bind(&claim.worker_id)
+    .bind(claim.state_version)
+    .execute(pool)
+    .await
+    .map_err(|_| storage_error("续租 PostgreSQL MoogleMail 轮询状态失败"))?;
+    if updated.rows_affected() != 1 {
+        return Err(storage_error("MoogleMail 轮询续租 fence 已失效"));
+    }
+    claim.lease_until = lease_until;
+    Ok(claim)
+}
+
+#[cfg(feature = "postgres")]
 async fn ensure_state_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     mailbox_key: &str,
     now: DateTime<Utc>,
 ) -> Result<AdminMailPollState, ApplicationError> {
@@ -146,24 +213,29 @@ async fn ensure_state_postgres(
 
 #[cfg(feature = "postgres")]
 async fn claim_due_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
+    mailbox_key: &str,
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     limit: u16,
+    force: bool,
 ) -> Result<Vec<MailPollClaim>, ApplicationError> {
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 领取事务失败"))?;
     let rows = sqlx::query(
         "SELECT mailbox_key, cursor_value, consecutive_failures, state_version
          FROM public.mail_poll_state
-         WHERE paused = false
-           AND next_poll_at <= $1
-           AND (claim_expires_at IS NULL OR claim_expires_at <= $1)
-         ORDER BY next_poll_at, mailbox_key
-         LIMIT $2
+         WHERE mailbox_key = $1
+           AND paused = false
+           AND ($2 = true OR next_poll_at <= $3)
+           AND (claim_expires_at IS NULL OR claim_expires_at <= $3)
+           ORDER BY next_poll_at, mailbox_key
+         LIMIT $4
          FOR UPDATE SKIP LOCKED",
     )
+    .bind(mailbox_key)
+    .bind(force)
     .bind(now)
     .bind(i64::from(limit))
     .fetch_all(&mut *transaction)
@@ -227,7 +299,7 @@ async fn claim_due_postgres(
 
 #[cfg(feature = "postgres")]
 async fn commit_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &MailPollClaim,
     batch: &MailPollBatch,
 ) -> Result<AdminMailPollState, ApplicationError> {
@@ -263,7 +335,7 @@ async fn commit_postgres(
     if stored_token != Some(claim.claim_token)
         || stored_owner.as_deref() != Some(claim.worker_id.as_str())
         || current_version != claim.state_version
-        || expires_at.is_none_or(|value| value <= batch.polled_at)
+        || expires_at.is_none()
     {
         return rollback_error(transaction, "MoogleMail 提交租约已失效").await;
     }
@@ -284,7 +356,7 @@ async fn commit_postgres(
              last_failure_code = NULL, last_failure_detail = NULL, last_failure_at = NULL,
              state_version = state_version + 1, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $5 AND claim_owner = $6
-               AND state_version = $7 AND claim_expires_at > $3
+               AND state_version = $7 AND claim_expires_at > CURRENT_TIMESTAMP
          RETURNING mailbox_key, cursor_value, last_poll_at, next_poll_at,
                    consecutive_failures, paused, state_version, updated_at",
     )
@@ -308,7 +380,7 @@ async fn commit_postgres(
 
 #[cfg(feature = "postgres")]
 async fn fail_postgres(
-    pool: &PgPool,
+    pool: &super::TrackedPool<Postgres>,
     claim: &MailPollClaim,
     retry_at: DateTime<Utc>,
     failure_code: &str,

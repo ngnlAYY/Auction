@@ -27,7 +27,8 @@ pub struct CreateProxyCommand {
     pub lot_id: LotId,
     pub bidder_id: UserId,
     pub maximum_amount: BidAmount,
-    pub mode: ProxyMode,
+    /// 代理模式；未提供时使用拍卖冻结的默认模式。
+    pub mode: Option<ProxyMode>,
     pub request_hash: RequestHash,
 }
 
@@ -117,7 +118,7 @@ impl CompetitionCommand {
                         1,
                     )),
                     maximum_amount: command.maximum_amount,
-                    mode: command.mode,
+                    mode: command.mode.unwrap_or(snapshot.rules.proxy_default_mode),
                     authorization_sequence,
                     usage_number,
                     bid_ids: vec![BidId::from_uuid(deterministic_uuid(

@@ -27,7 +27,6 @@ impl AuctionStatus {
                 | (Self::Settling, Self::Settled)
                 | (Self::Draft, Self::Cancelled)
                 | (Self::Preview, Self::Cancelled)
-                | (Self::Live, Self::Cancelled)
         )
     }
 }
@@ -42,6 +41,12 @@ pub struct Auction {
     pub updated_at: DateTime<Utc>,
     pub scheduled_end_at: Option<DateTime<Utc>>,
     pub effective_end_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cancelled_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub cancelled_reason: Option<String>,
+    #[serde(default)]
+    pub cancelled_by: Option<String>,
 }
 
 impl Auction {
@@ -64,6 +69,9 @@ impl Auction {
             updated_at: now,
             scheduled_end_at: None,
             effective_end_at: None,
+            cancelled_at: None,
+            cancelled_reason: None,
+            cancelled_by: None,
         })
     }
 
@@ -125,11 +133,64 @@ impl Auction {
         self.cancel(now)
     }
 
+    /// 按规则取消并记录管理端要求的原因与操作者；原因属于审计事实，不能在存储层静默补造。
+    pub fn cancel_with_rules_and_metadata(
+        &mut self,
+        now: DateTime<Utc>,
+        rules: AuctionRules,
+        reason: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> Result<(), DomainError> {
+        let reason = reason.into();
+        let actor = actor.into();
+        if reason.trim().is_empty()
+            || reason.len() > 1024
+            || reason.chars().any(char::is_control)
+            || actor.trim().is_empty()
+            || actor.len() > 128
+            || actor.chars().any(char::is_control)
+        {
+            return Err(DomainError::InvalidCancellationMetadata);
+        }
+        self.cancel_with_rules(now, rules)?;
+        self.cancelled_at = Some(now);
+        self.cancelled_reason = Some(reason);
+        self.cancelled_by = Some(actor);
+        Ok(())
+    }
+
     pub fn preview(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Preview, now)
     }
 
     pub fn go_live(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+        self.transition(AuctionStatus::Live, now)
+    }
+
+    /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
+    ///
+    /// 旧系统把 lot 激活、结束时间冻结和拍卖开拍视为一个事务事实；该方法避免先调用
+    /// `schedule_end` 再迁移状态而产生两个无法对应单条命令的版本。
+    pub fn open(
+        &mut self,
+        scheduled_end_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<(), DomainError> {
+        if self.status != AuctionStatus::Preview {
+            return Err(DomainError::InvalidTransition {
+                from: self.status,
+                to: AuctionStatus::Live,
+            });
+        }
+        if self.scheduled_end_at.is_some() || self.effective_end_at.is_some() {
+            return Err(DomainError::InvalidSchedule("开拍前结束时间必须尚未物化"));
+        }
+        if scheduled_end_at <= now {
+            return Err(DomainError::InvalidSchedule("结束时间必须晚于开拍时间"));
+        }
+
+        self.scheduled_end_at = Some(scheduled_end_at);
+        self.effective_end_at = Some(scheduled_end_at);
         self.transition(AuctionStatus::Live, now)
     }
 
@@ -147,6 +208,41 @@ impl Auction {
 
     pub fn cancel(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Cancelled, now)
+    }
+
+    /// 取消尚未开拍的 draft/preview，并记录不可缺失的管理事实。
+    ///
+    /// 取消发生在结束时间物化之前，因此不能依赖 live 阶段的取消截止窗口；已开拍状态会
+    /// 失败关闭，防止用取消命令绕过竞价收口和结算。
+    pub fn cancel_before_open_with_metadata(
+        &mut self,
+        now: DateTime<Utc>,
+        reason: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> Result<(), DomainError> {
+        let reason = reason.into();
+        let actor = actor.into();
+        if reason.trim().is_empty()
+            || reason.len() > 1024
+            || reason.chars().any(char::is_control)
+            || actor.trim().is_empty()
+            || actor.len() > 128
+            || actor.chars().any(char::is_control)
+        {
+            return Err(DomainError::InvalidCancellationMetadata);
+        }
+        if !matches!(self.status, AuctionStatus::Draft | AuctionStatus::Preview) {
+            return Err(DomainError::InvalidTransition {
+                from: self.status,
+                to: AuctionStatus::Cancelled,
+            });
+        }
+
+        self.cancel(now)?;
+        self.cancelled_at = Some(now);
+        self.cancelled_reason = Some(reason);
+        self.cancelled_by = Some(actor);
+        Ok(())
     }
 
     fn transition(&mut self, next: AuctionStatus, now: DateTime<Utc>) -> Result<(), DomainError> {

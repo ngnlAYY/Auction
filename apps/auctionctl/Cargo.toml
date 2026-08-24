@@ -8,11 +8,24 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 auction-config.workspace = true
+auction-application = { workspace = true, optional = true }
+auction-integrations = { workspace = true, optional = true }
 auction-storage.workspace = true
+chrono.workspace = true
 clap.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
 
 [features]
 default = []
-postgres = ["auction-storage/postgres"]
+postgres = [
+    "auction-storage/postgres",
+    "dep:auction-application",
+    "dep:auction-integrations",
+]
 sqlite = ["auction-storage/sqlite"]
