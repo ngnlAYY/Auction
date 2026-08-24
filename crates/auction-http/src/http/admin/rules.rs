@@ -181,6 +181,7 @@ pub(crate) async fn publish(
     if result.validate().is_err() {
         return super::internal_error();
     }
+    state.invalidate_public_rules_cache(&result.locale).await;
     let status = if input.expected_revision == 0 { StatusCode::CREATED } else { StatusCode::OK };
     let message =
         if status == StatusCode::CREATED { "规则已创建并发布" } else { "规则已发布" };

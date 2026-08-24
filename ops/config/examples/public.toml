@@ -51,6 +51,8 @@ client_buffer = 32
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
+# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30；缓存关闭时仍会校验该字段。
+public_rules_ttl_seconds = 30
 
 # 可选区块：HTTP 安全策略；省略整个区块时使用内置默认值。
 [http_security]

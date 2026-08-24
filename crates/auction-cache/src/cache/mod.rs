@@ -5,6 +5,7 @@
 
 use std::{fmt, time::Duration};
 
+use auction_application::{ReadModelCache, ReadModelCacheError, ReadModelCacheFuture};
 use thiserror::Error;
 
 #[cfg(feature = "redis")]
@@ -88,6 +89,30 @@ impl CacheStore {
             #[cfg(feature = "redis")]
             Self::Redis(cache) => cache.invalidate(key).await,
         }
+    }
+}
+
+impl ReadModelCache for CacheStore {
+    fn get(&self, key: String) -> ReadModelCacheFuture<'_, Option<Vec<u8>>> {
+        Box::pin(async move {
+            CacheStore::get(self, &key).await.map_err(|_| ReadModelCacheError::BackendUnavailable)
+        })
+    }
+
+    fn set(&self, key: String, value: Vec<u8>, ttl: Duration) -> ReadModelCacheFuture<'_, ()> {
+        Box::pin(async move {
+            CacheStore::set(self, &key, &value, ttl)
+                .await
+                .map_err(|_| ReadModelCacheError::BackendUnavailable)
+        })
+    }
+
+    fn invalidate(&self, key: String) -> ReadModelCacheFuture<'_, ()> {
+        Box::pin(async move {
+            CacheStore::invalidate(self, &key)
+                .await
+                .map_err(|_| ReadModelCacheError::BackendUnavailable)
+        })
     }
 }
 

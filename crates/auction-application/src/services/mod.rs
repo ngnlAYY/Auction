@@ -24,6 +24,8 @@ mod fulfillment;
 mod lifecycle;
 #[path = "mail/processing.rs"]
 mod mail_processing;
+#[path = "public/rules_cache.rs"]
+mod public_rules_cache;
 #[path = "realtime/relay.rs"]
 mod realtime_relay;
 #[path = "recovery/commands.rs"]
@@ -49,6 +51,7 @@ pub use competition::{CompetitionService, CreateProxyCommand, LowerProxyCommand,
 pub use fulfillment::SettlementFulfillmentService;
 pub use lifecycle::AuctionLifecycleService;
 pub use mail_processing::{MailAuctionIntakeService, MailProcessorConfig, MailProcessorService};
+pub use public_rules_cache::{CachedPublicRulesReader, public_rules_cache_key};
 pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig};
 pub use recovery::RecoveryCommandService;
 pub use recovery_health::RecoveryHealthService;

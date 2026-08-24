@@ -92,11 +92,19 @@ impl CacheBackend {
 }
 
 /// 非敏感缓存策略。连接 URL 必须放在独立敏感配置文件中。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CacheConfig {
     /// 缓存后端；省略时关闭缓存。Redis 连接串只能放在敏感 TOML。
     pub backend: CacheBackend,
+    /// Public 规则读模型的缓存 TTL 秒数；范围 1-3600，省略时为 30 秒。
+    pub public_rules_ttl_seconds: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self { backend: CacheBackend::Disabled, public_rules_ttl_seconds: 30 }
+    }
 }
 
 /// 拍卖创建时冻结的非敏感策略配置。
@@ -1088,6 +1096,9 @@ pub enum ConfigError {
     #[error("cache backend redis requires sensitive field redis_url")]
     MissingRedisUrl,
 
+    #[error("invalid cache configuration: {0}")]
+    InvalidCacheConfig(&'static str),
+
     #[error("equipment data key requires both equipment_data_key_id and equipment_data_key")]
     InvalidEquipmentDataKeyConfiguration,
 
@@ -1773,6 +1784,7 @@ impl AppConfig {
         if cache.backend == CacheBackend::Redis && secrets.redis_url.is_none() {
             return Err(ConfigError::MissingRedisUrl);
         }
+        validate_cache(&cache)?;
         let database_is_sqlite = secrets
             .database_url
             .as_ref()
@@ -1900,6 +1912,13 @@ fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError> {
         .policy()
         .validate()
         .map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
+}
+
+fn validate_cache(config: &CacheConfig) -> Result<(), ConfigError> {
+    if !(1..=3600).contains(&config.public_rules_ttl_seconds) {
+        return Err(ConfigError::InvalidCacheConfig("public_rules_ttl_seconds 必须位于 1 至 3600"));
+    }
+    Ok(())
 }
 
 fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError> {

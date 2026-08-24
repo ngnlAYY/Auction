@@ -151,10 +151,12 @@ verified backup 或明确的一次性环境豁免；实际 mutation 还要求 `-
 `cache.backend` 设为 `redis`，并仅在敏感 TOML 中提供 `redis_url`。实现直接复用 Redis
 客户端的异步连接管理，不额外引入通用连接池或进程内缓存库。
 
-缓存只能保存可重建的查询结果或派生视图，并必须带有限 TTL。读取 miss、Redis 不可用和
-失效失败都回退到权威数据源；竞价事务、资格判断、命令幂等、锁、会话真值和审计不能依赖
-缓存。由此，未编译 Redis feature、运行时选择 `disabled` 或 Redis 临时故障都不改变业务
-正确性。
+缓存只能保存可重建的查询结果或派生视图，并必须带有限 TTL。当前首个消费者是 Public 规则
+读模型：按语言缓存通过应用校验的 JSON 快照，`cache.public_rules_ttl_seconds` 默认 30 秒；
+Admin 规则发布成功后按语言删除对应 key。读取 miss、快照损坏、Redis 不可用和失效失败都
+回退到 PostgreSQL/SQLite 规则表，失效失败由 TTL 收敛，不能回滚已提交规则事务。竞价事务、
+资格判断、命令幂等、锁、会话真值和审计不能依赖缓存。由此，未编译 Redis feature、运行时
+选择 `disabled` 或 Redis 临时故障都不改变业务正确性。
 
 ## 配置与敏感信息
 

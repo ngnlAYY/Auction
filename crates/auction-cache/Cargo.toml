@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auction-application.workspace = true
 redis = { workspace = true, optional = true, features = ["connection-manager", "tokio-rustls-comp"] }
 rustls = { workspace = true, optional = true }
 thiserror.workspace = true

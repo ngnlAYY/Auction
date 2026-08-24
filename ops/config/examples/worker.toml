@@ -36,6 +36,8 @@ sample_ratio_ppm = 0
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
+# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30；Worker 当前不读取该投影。
+public_rules_ttl_seconds = 30
 
 # 可选区块：Auction 主循环调度策略；省略时 PostgreSQL 并发为 8、SQLite Lite 为 1，其余沿用旧版默认值。
 [worker]

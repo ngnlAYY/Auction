@@ -1,14 +1,15 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
+use auction_application::ReadModelCache;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{
-    AuctionReader, Clock, CompetitionCommandPort, PublicAccountReader, PublicBidLogReader,
-    PublicBlacklistReader, PublicCompensationReader, PublicForumReader, PublicLoginAuthenticator,
-    PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader,
-    PublicSessionConfig, PublicSessionPort, PublicSessionService, PublicSessionStore,
-    RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig,
-    RealtimeStreamStore, WorldReader,
+    AuctionReader, CachedPublicRulesReader, Clock, CompetitionCommandPort, PublicAccountReader,
+    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader, PublicForumReader,
+    PublicLoginAuthenticator, PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader,
+    PublicRulesReader, PublicSessionConfig, PublicSessionPort, PublicSessionService,
+    PublicSessionStore, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
+    RealtimeRelayConfig, RealtimeStreamStore, WorldReader,
 };
 use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend, Role};
@@ -63,7 +64,7 @@ pub async fn run() -> anyhow::Result<()> {
 
 async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("subscribe public-api signals")?;
-    let cache = configure_cache(config).context("configure public-api cache")?;
+    let cache = Arc::new(configure_cache(config).context("configure public-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -77,7 +78,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     let address = config.listen_addr.context("public-api must have a listen address")?;
     let listener = TcpListener::bind(address).await?;
     let (state, heartbeat, realtime_relay) =
-        configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
+        configure_state(config, telemetry.health_reader(), Arc::clone(&metrics), cache.clone())
             .await
             .context("configure public-api state")?;
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
@@ -237,6 +238,7 @@ async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    cache: Arc<dyn ReadModelCache>,
 ) -> anyhow::Result<(PublicApiState, Option<Arc<HeartbeatPublisher>>, Option<Arc<RealtimeRelay>>)> {
     let security = configure_security(config)?;
     let Some(database_url) = config.database_url() else {
@@ -274,7 +276,12 @@ async fn configure_state(
         tracing::warn!(error = %error, "public heartbeat starting publish failed");
     }
     let worlds: Arc<dyn WorldReader> = store.clone();
-    let rules: Arc<dyn PublicRulesReader> = store.clone();
+    let rules_authority: Arc<dyn PublicRulesReader> = store.clone();
+    let rules: Arc<dyn PublicRulesReader> = Arc::new(CachedPublicRulesReader::new(
+        rules_authority,
+        cache,
+        Duration::from_secs(config.cache.public_rules_ttl_seconds),
+    ));
     let blacklist: Arc<dyn PublicBlacklistReader> = store.clone();
     let compensation: Arc<dyn PublicCompensationReader> = store.clone();
     let forum: Arc<dyn PublicForumReader> = store.clone();
@@ -343,6 +350,7 @@ async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
+    _cache: Arc<dyn ReadModelCache>,
 ) -> anyhow::Result<(
     PublicApiState,
     Option<Arc<auction_observability::HeartbeatPublisher>>,

@@ -637,8 +637,10 @@ migration readiness、audit failure 和 tracing health；Admin runtime 的人工
 保留展示状态；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，`auction-http` 只接收
 泛型资源类型，因此制品级隔离不依赖链接器裁剪。以上项目均不再列入未完成项：
 
-- 为已装配的可选 cache adapter 选择首批可重建读模型并接入有限 TTL/get/set/invalidate，或在完成前
-  明确它只是连接边界；缓存不得进入竞价、会话、幂等或审计正确性路径；
+首批可重建缓存读模型也已完成：Public 规则按语言接入有限 TTL/get/set，命中快照经过应用校验，
+Admin 规则发布成功后执行精确 invalidate；缓存故障、损坏或失效失败始终回源权威规则表，且
+不进入竞价、会话、幂等或审计正确性路径。
+
 - 评审 Public Unix listener 与旧版部署契约、CLI 稳定退出码/脱敏有效配置诊断，以及把 Worker control
   HTTP transport 从调度 owner 中分离的必要性；这些是次级部署/所有权缺口；
 - 继续拆分超过约一千行且承担多类职责的 `auction-http/http/mod.rs`、`auction-config/config/mod.rs`、

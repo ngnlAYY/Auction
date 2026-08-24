@@ -215,6 +215,7 @@ dependencies = [
 name = "auction-cache"
 version = "0.1.0"
 dependencies = [
+ "auction-application",
  "redis",
  "rustls",
  "thiserror 2.0.20",

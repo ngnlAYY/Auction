@@ -1,6 +1,7 @@
 //! Public 规则文档读取端口。
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::ApplicationFuture;
 
@@ -32,7 +33,7 @@ impl PublicRulesRequest {
 }
 
 /// 已通过应用边界校验的公开规则文档。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PublicRulesDocument {
     pub locale: String,
     pub title: String,

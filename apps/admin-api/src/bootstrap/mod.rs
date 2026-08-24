@@ -85,7 +85,7 @@ pub async fn run() -> anyhow::Result<()> {
 
 async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("subscribe admin-api signals")?;
-    let cache = configure_cache(config).context("configure admin-api cache")?;
+    let cache = Arc::new(configure_cache(config).context("configure admin-api cache")?);
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -101,7 +101,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
             .await
             .context("configure admin-api state")?;
-    let state = state.with_metrics(metrics);
+    let state = state.with_metrics(metrics).with_public_rules_cache(cache.clone());
     #[cfg(any(feature = "postgres", feature = "sqlite"))]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(spawn_heartbeat).map(TaskGuard::new);

@@ -22,6 +22,8 @@ enabled = false
 [cache]
 # 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
 backend = "disabled"
+# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30；Admin 发布成功后按语言失效。
+public_rules_ttl_seconds = 30
 
 # 可选区块：HTTP 安全策略；存在 runtime 文件时由 runtime.security 覆盖。
 [http_security]

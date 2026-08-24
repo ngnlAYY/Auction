@@ -79,12 +79,13 @@ origin、无重定向、精确 world 路径和流式有界读取。示例默认 
 Lite 已实现的写入仍必须满足事务原子性、命令幂等和追加式审计。不要通过额外环境变量
 伪装或覆盖部署档位。
 
-主配置中的 `[cache]` 只保存 `backend`。`backend = "disabled"` 不需要 Redis；
-`backend = "redis"` 还要求对应二进制以 `cache-redis` feature 构建，并在敏感文件提供
-`redis_url`。具体缓存写入由调用方显式提供有限 TTL；缓存关闭或不可用不得影响权威业务
-结果。
-当前三个装配根只会按配置建立并检查 cache adapter，尚无权威查询调用 `get`/`set`/`invalidate`；
-因此 Redis 是已装配但尚未产生性能收益的可选能力，不能把“连接成功”描述为业务缓存已接入。
+主配置中的 `[cache]` 保存非敏感的 `backend` 和可重建 Public 规则读模型的
+`public_rules_ttl_seconds`。`backend = "disabled"` 不需要 Redis；`backend = "redis"` 还要求
+对应二进制以 `cache-redis` feature 构建，并在敏感文件提供 `redis_url`。TTL 范围为 1-3600 秒，
+默认 30 秒；缓存关闭或不可用不得影响权威业务结果。
+Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布成功后由 Admin 失效同一语言的 key。
+命中内容必须通过完整文档校验；损坏快照会尽力删除并回源数据库。Redis 失效失败只依赖 TTL
+收敛，不会回滚已经提交的规则事务。
 
 主配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.economics]`、
 `[auction.settlement]` 和 `[auction.settlement.recovery]`。这些字段都是非敏感的可选字段，

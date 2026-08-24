@@ -44,6 +44,8 @@ mod admin_users;
 mod auction_policy;
 #[path = "public/blacklist.rs"]
 mod blacklist;
+#[path = "public/cache.rs"]
+mod cache;
 #[path = "auction/commands.rs"]
 mod commands;
 #[path = "public/compensation.rs"]
@@ -201,6 +203,7 @@ pub use blacklist::{
     MAX_PUBLIC_BLACKLIST_OFFSET, MAX_PUBLIC_BLACKLIST_PAGE_SIZE, PublicBlacklistEntry,
     PublicBlacklistPage, PublicBlacklistReader, PublicBlacklistRequest,
 };
+pub use cache::{ReadModelCache, ReadModelCacheError, ReadModelCacheFuture};
 pub use commands::{ApplicationFuture, CompetitionCommandPort};
 pub use compensation::{
     DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,

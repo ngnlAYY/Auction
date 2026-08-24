@@ -11,8 +11,9 @@ use auction_application::{
     OperationsAlertSourceReader, OperationsAlertStore, ProcessReadinessPort, PublicAccountReader,
     PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader, PublicForumReader,
     PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader,
-    PublicSessionPort, RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader,
-    SettlementReportReader, WorkerControlPort, WorldReader,
+    PublicSessionPort, ReadModelCache, RealtimeAdminPort, RecoveryCommandPort,
+    RecoveryReportReader, SettlementReportReader, WorkerControlPort, WorldReader,
+    public_rules_cache_key,
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
@@ -248,6 +249,7 @@ pub struct AdminApiState {
     metrics: Option<Arc<ProcessMetrics>>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
     security: AdminHttpSecurity,
+    public_rules_cache: Option<Arc<dyn ReadModelCache>>,
 }
 
 impl AdminApiState {
@@ -314,6 +316,7 @@ impl AdminApiState {
             metrics: None,
             readiness: None,
             security,
+            public_rules_cache: None,
         }
     }
 
@@ -344,6 +347,12 @@ impl AdminApiState {
     /// 注入 Admin dashboard 需要严格检查的已配置邮箱标识；空集合表示不强制套用 Worker 配置范围。
     pub fn with_dashboard_mailbox_keys(mut self, mailbox_keys: Vec<String>) -> Self {
         self.dashboard_mailbox_keys = mailbox_keys;
+        self
+    }
+
+    /// 注入 Public 规则缓存失效端口；缓存不是 Admin 规则权威，失效失败不能改变发布结果。
+    pub fn with_public_rules_cache(mut self, cache: Arc<dyn ReadModelCache>) -> Self {
+        self.public_rules_cache = Some(cache);
         self
     }
 
@@ -469,5 +478,17 @@ impl AdminApiState {
 
     pub(crate) fn security(&self) -> &AdminHttpSecurity {
         &self.security
+    }
+
+    pub(crate) async fn invalidate_public_rules_cache(&self, locale: &str) {
+        let Some(cache) = self.public_rules_cache.as_deref() else {
+            return;
+        };
+        let Some(key) = public_rules_cache_key(locale) else {
+            return;
+        };
+        if cache.invalidate(key).await.is_err() {
+            tracing::warn!(locale, "public rules cache invalidation failed");
+        }
     }
 }
