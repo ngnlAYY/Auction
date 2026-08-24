@@ -8,7 +8,8 @@ Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
 - `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求，
   不接触存储模型。
 - `src/app/`：按相同 owner 分组的公开端路由、页面和交互组件；`surface/` 进一步按路由、
-  看板、目录、页面和查询状态拆分跨页面职责；`shared/` 只保存本 surface 内真正通用的基础组件。
+  看板、目录、页面和查询状态拆分跨页面职责；`surface/catalog/` 继续按表格、竞价动作、行组件
+  和展示映射拆分；`shared/` 只保存本 surface 内真正通用的基础组件。
 - `assets/public.css`：公开端 surface 样式，沿用旧版公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。
 

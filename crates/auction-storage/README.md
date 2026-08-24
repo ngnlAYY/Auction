@@ -10,7 +10,9 @@
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
 `transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
-和 SQLx 基线接管；备份、人工确认及不可覆盖回执仍由 `auctionctl` 拥有。
+和 SQLx 基线接管；`model.rs`、`preflight.rs`、`source_checks.rs`、`adoption.rs` 与 `mapping.rs`
+分别持有安全模型、预检、来源事实检查、接管 bridge 和错误映射；备份、人工确认及不可覆盖回执仍由
+`auctionctl` 拥有。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 `src/database/scheduler/mod.rs` 持有；它不把调度状态放进内存或 Redis。
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
@@ -54,7 +56,8 @@ Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreS
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
-拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配：管理命令锁定拍卖后校验
+拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配；其 `lifecycle/` 子目录的
+`context.rs`、`plan.rs` 和 `record.rs` 分别负责上下文锁定、计划写入和审计/实时事件记录：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器。
@@ -85,8 +88,10 @@ Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有；用户�
 命令账本、用户投影、密文 key 信封、`user_renames`、`user_blacklist_history` 和追加审计；
 PostgreSQL 使用 Serializable/advisory lock，SQLite 使用 `BEGIN IMMEDIATE`。MoogleMail 注册/换绑
 仍按其独立能力清单只支持 PostgreSQL，不能把两者混写成完全对等。
-Admin A32 凭据管理由 `src/database/credentials/mod.rs` 持有：PostgreSQL 在 Serializable
-事务中完成 `mail_cookie`/`forum_cookie` 的安全投影、密文信封、命令幂等、版本 fence 和追加审计；
+Admin A32 凭据管理由 `src/database/credentials/mod.rs` 装配：`runtime.rs` 负责 active/health
+读取，`read.rs` 负责列表与命令查询，`write.rs` 负责导入/修改/删除事务，`mapping.rs` 与
+`common.rs` 负责安全投影、结果和错误映射。PostgreSQL 在 Serializable 事务中完成
+`mail_cookie`/`forum_cookie` 的安全投影、密文信封、命令幂等、版本 fence 和追加审计；
 删除会先保留命令账本与审计，再删除凭据行，外键使用 `ON DELETE SET NULL`。Worker 读取 active
 凭据时也由该模块按 world/shared 返回密文信封；dashboard 聚合同时返回 scope 最近更新时间和
 凭据命令账本最近变更时间，供 HTTP 层结合 Worker 心跳判断重启状态，并按旧版要求检查 MoogleMail
@@ -113,7 +118,9 @@ observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和�
 普通查询、事务和显式 `acquire()` 都必须经过 `TrackedPool`，避免只统计少数调用点或用快照值
 冒充累计数据。绕过该边界取得的外部原生 SQLx 池不会被这组累计指标覆盖。
 
-PostgreSQL retention 盘点由 `src/database/retention_inventory/mod.rs` 持有，使用编译进制品的
+PostgreSQL retention 盘点由 `src/database/retention_inventory/mod.rs` 装配，`model.rs`、`policy.rs`、
+`realtime.rs`、`catalog.rs` 和 `mapping.rs` 分别负责安全模型/错误、政策聚合、realtime 水位、目录
+查询与共享映射；它使用编译进制品的
 `ops/deploy/retention-policy.v1.json` 作为版本化保留政策矩阵；单个
 `REPEATABLE READ READ ONLY` 事务读取 `current_database()`、`auction_schema_identity`、SQLx
 迁移历史、public 关系大小/行数估计和政策声明表覆盖，并输出数据族汇总、realtime 诊断水位、
@@ -193,11 +200,14 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 `src/database/settlement_scheduler/mod.rs` 持有，结算命令装配由
 `src/database/settlement_commands/mod.rs` 持有；SQLite Lite 明确不启用该 workflow，结算履约
 外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。PostgreSQL 完整档的
-`src/database/fulfillment_scheduler/mod.rs` 持有结算履约 claim、fencing、准备/激活状态推进；
+`src/database/fulfillment_scheduler/mod.rs` 装配结算履约 owner；`claims.rs`、`delivery.rs`、
+`reconcile.rs` 和 `mapping.rs` 分别持有 claim、prepared/activation、证据收口和共享映射；
+该 owner 持有结算履约 claim、fencing、准备/激活状态推进；
 `src/database/recovery_scheduler/scheduler.rs` 持有 recovery case/action 的 PostgreSQL 完整档 due
 推进、提醒 outbox 关联和结果 fence，
-`src/database/delivery_scheduler/mod.rs` 持有 delivery outbox 的领取、发送前安全释放、发送中
-续租/fencing、成功、失败和人工对账终态；目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
+`src/database/delivery_scheduler/mod.rs` 装配 delivery outbox owner；`claims.rs`、`state.rs`、
+`outcome.rs` 和 `mapping.rs` 分别负责领取、发送前安全释放/发送中续租、成功/失败终态和共享映射。
+目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
 释放回 `pending`。过期 `claimed` 可以安全重领；过期 `sending` 只有在额外 sending grace 到期后
 才批量隔离为 `manual_reconcile`，不能作为 pending 重发。失败写回会保留 transport 已校验的可选外部引用和有界安全
 metadata，同时由 storage owner 覆盖 `safe_detail` 和 `outcome_unknown`，不允许原始响应越过该边界。

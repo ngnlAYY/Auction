@@ -1,0 +1,265 @@
+//! Public 拍卖目录筛选、分组表格和分页。
+
+use super::*;
+
+#[component]
+pub(crate) fn CatalogTable(
+    rows: Vec<CatalogRow>,
+    now: DateTime<Utc>,
+    projection_kind: String,
+    category_counts: BTreeMap<String, i64>,
+    mut active_category: Signal<String>,
+    mut page_number: Signal<i64>,
+    page_total: i64,
+    page_size: i64,
+    can_bid: bool,
+    allow_slow: bool,
+    authenticated: bool,
+    viewer_name: Option<String>,
+) -> Element {
+    let active = active_category();
+    let groups = grouped_catalog_rows(&rows, &active);
+    let is_live = projection_kind == "live";
+    let all_count = catalog_count(&category_counts, "all", &rows);
+
+    rsx! {
+        nav { class: "public-auction-filter", aria_label: t!("filter-label"),
+            button {
+                class: "public-auction-filter__tab",
+                r#type: "button",
+                aria_pressed: active == "all",
+                onclick: move |_| {
+                    active_category.set("all".to_owned());
+                    page_number.set(1);
+                    update_public_query(
+                        |query| {
+                            query.category = None;
+                            query.page = 1;
+                        },
+                        false,
+                    );
+                },
+                {t!("filter-all")}
+                span { class: "public-auction-filter__count", "{all_count}" }
+            }
+            for (category, _) in CATALOG_CATEGORIES {
+                button {
+                    class: "public-auction-filter__tab",
+                    r#type: "button",
+                    aria_pressed: active == category,
+                    onclick: move |_| {
+                        active_category.set(category.to_owned());
+                        page_number.set(1);
+                        update_public_query(
+                            |query| {
+                                query.category = Some(category.to_owned());
+                                query.page = 1;
+                            },
+                            false,
+                        );
+                    },
+                    {catalog_category_label(category)}
+                    span { class: "public-auction-filter__count", "{catalog_count(&category_counts, category, &rows)}" }
+                }
+            }
+        }
+        if groups.is_empty() {
+            div { class: "public-auction-empty",
+                h2 { {t!("catalog-empty")} }
+            }
+        }
+        for (category, category_rows) in groups {
+            section { class: "public-auction-category",
+                h2 { class: "public-auction-category__title",
+                    {catalog_category_label(category)}
+                    span { class: "public-auction-category__code", "{catalog_category_code(category)}" }
+                }
+                if is_live {
+                    LiveCatalogTable {
+                        rows: category_rows,
+                        now,
+                        can_bid,
+                        allow_slow,
+                        authenticated,
+                        viewer_name: viewer_name.clone(),
+                    }
+                } else {
+                    PreviewCatalogTable { rows: category_rows }
+                }
+            }
+        }
+        PublicPager {
+            page: page_number(),
+            page_size,
+            total: Some(page_total),
+            has_more: false,
+            label: t!("catalog-pagination"),
+            on_page_change: move |page| {
+                page_number.set(page);
+                update_public_query(|query| query.page = page, false);
+            },
+        }
+    }
+}
+#[component]
+pub(crate) fn LiveCatalogTable(
+    rows: Vec<CatalogRow>,
+    now: DateTime<Utc>,
+    can_bid: bool,
+    allow_slow: bool,
+    authenticated: bool,
+    viewer_name: Option<String>,
+) -> Element {
+    rsx! {
+        div { class: "public-auction-catalog",
+            table {
+                thead {
+                    tr {
+                        th { {t!("catalog-code")} }
+                        th { {t!("catalog-item")} }
+                        th { {t!("catalog-level")} }
+                        th { {t!("catalog-seller")} }
+                        th { class: "public-auction-catalog__number", {t!("catalog-current")} }
+                        th { class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
+                        th { {t!("catalog-leader")} }
+                        th { {t!("catalog-remaining")} }
+                        th { {t!("catalog-status")} }
+                        th { span { class: "public-visually-hidden", {t!("catalog-actions")} } }
+                    }
+                }
+                tbody {
+                    for row in rows {
+                        LiveCatalogRow {
+                            row,
+                            now,
+                            can_bid,
+                            allow_slow,
+                            authenticated,
+                            viewer_name: viewer_name.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
+    rsx! {
+        div { class: "public-auction-catalog",
+            table {
+                thead {
+                    tr {
+                        th { {t!("catalog-code")} }
+                        th { {t!("catalog-item")} }
+                        th { {t!("catalog-level")} }
+                        th { {t!("catalog-seller")} }
+                        th { class: "public-auction-catalog__number", {t!("catalog-start-price")} }
+                        th { {t!("catalog-leader")} }
+                        th { {t!("catalog-remaining")} }
+                        th { {t!("catalog-status")} }
+                        th { span { class: "public-visually-hidden", {t!("catalog-actions")} } }
+                    }
+                }
+                tbody {
+                    for row in rows {
+                        PreviewCatalogRow { row }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn LiveCatalogRow(
+    row: CatalogRow,
+    now: DateTime<Utc>,
+    can_bid: bool,
+    allow_slow: bool,
+    authenticated: bool,
+    viewer_name: Option<String>,
+) -> Element {
+    let status_label = lot_status_label(&row.status);
+    let status_class = lot_status_class(&row.status);
+    let is_leading = viewer_name
+        .as_deref()
+        .zip(row.leader_name.as_deref())
+        .is_some_and(|(viewer, leader)| viewer == leader);
+    let leading = if is_leading { "public-auction-catalog__leading" } else { "" };
+    let countdown = if row.status == "live" {
+        countdown_display(&row.remaining, now)
+    } else {
+        CountdownDisplay { label: t!("value-empty"), urgent: false, expired: false, empty: true }
+    };
+    let countdown_css_class = countdown_class(&countdown);
+    let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
+    let seller = row.seller_name.clone();
+    let current_price = format_amount(row.current_price);
+    let next_bid = format_amount(row.next_bid);
+
+    rsx! {
+        tr { class: "{leading}",
+            td { class: "public-auction-catalog__code", "data-label": t!("catalog-code"),
+                a { href: lot_detail_href(&row.lot_id), "{row.code}" }
+            }
+            td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
+                span { class: "public-auction-catalog__item-name", title: row.name.clone(), "{row.name}" }
+                if let Some(avg_roll) = row.avg_roll {
+                    span { class: "public-auction-catalog__roll", "{avg_roll:.1}%" }
+                }
+            }
+            td { "data-label": t!("catalog-level"), "{level}" }
+            td { "data-label": t!("catalog-seller"),
+                span { class: "public-auction-catalog__seller", title: seller.clone(), "{seller}" }
+            }
+            td {
+                class: "public-auction-catalog__amount public-auction-catalog__number",
+                "data-label": t!("catalog-current"),
+                "{current_price}"
+            }
+            td {
+                class: "public-auction-catalog__amount public-auction-catalog__number",
+                "data-label": t!("catalog-next-bid"),
+                "{next_bid}"
+            }
+            td { class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
+                if row.leader_name.is_some() {
+                    CatalogParticipant {
+                        name: leader,
+                        marker: None,
+                        trailing: is_leading.then(|| t!("catalog-you")),
+                    }
+                } else {
+                    span { class: "public-auction-catalog__none", "{leader}" }
+                }
+            }
+            td {
+                class: "{countdown_css_class}",
+                "data-label": t!("catalog-remaining"),
+                title: if countdown.empty { "".to_owned() } else { row.remaining.clone() },
+                "{countdown.label}"
+            }
+            td { "data-label": t!("catalog-status"),
+                span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
+            }
+            td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                LiveCatalogActions {
+                    lot_id: row.lot_id.clone(),
+                    lot_code: row.code.clone(),
+                    can_bid: can_bid && row.status == "live",
+                    current_price: row.current_price,
+                    next_bid: row.next_bid,
+                    lot_status: row.status.clone(),
+                    allow_slow,
+                    authenticated,
+                    leading: is_leading,
+                    show_view: false,
+                    show_proxy_summary: false,
+                }
+            }
+        }
+    }
+}

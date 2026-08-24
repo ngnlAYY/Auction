@@ -55,7 +55,9 @@ Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Re
 `case → return → action → relist → refund` 顺序，各 phase 失败互不跳过，且不会终止其它 owner。
 MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller，每个 poller 使用独立
 `mailbox_key`、游标、claim/fencing 和固定指标 label；共享凭据池只在 Worker 内复用，不合并
-不同世界的持久化状态。每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
+不同世界的持久化状态。轮询实现位于 `src/worker/mail/poll/`，由 `types.rs`、`cycle.rs`、
+`processing.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、租约处理、事实映射和失败退避。
+每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
 默认 `* * * * *`，并兼容旧版描述符、`@every`、本地时区和显式 IANA 时区前缀。远程读取与单封业务处理按
 各自次数/超时有界重试，共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责

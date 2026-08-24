@@ -651,13 +651,14 @@ Public/Admin HTTP listener。
   storage backend、auctionctl runtime 入口、auction-http routes、MoogleMail parser/transport、
   E-Hentai client、MoogleMail application service、operations alert ports、Public auction reads 以及
   storage account/lots/operations/recovery/realtime、competition PostgreSQL/SQLite transaction、recovery
-  commands/scheduler、settlement 和 Worker control transport 的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
+  commands/scheduler、settlement、credentials、fulfillment scheduler、retention inventory、legacy v28、
+  delivery scheduler、Worker control transport、equipment source、Admin Dashboard、Admin 拍卖/用户页面、Public 拍卖目录、
+  MoogleMail poller 和 PostgreSQL 生命周期事务的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
-- 体量复核仍发现后续结构任务：`auction-storage` 的 `credentials/mod.rs`、
-  `fulfillment_scheduler/mod.rs`、`retention_inventory/mod.rs`、`legacy_v28/mod.rs`，以及少数后台
-  装配和 Web 页面文件仍超过约一千行或承担多类职责，后续应按 owner 继续细分；这些属于结构优化，
-  不应与功能缺口或测试任务混淆。
+- 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
+  owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
+  和 Web owner 不再列为未完成项。
 
 规范门禁此前还存在 CI 漏接：工作流直接执行 Cargo 命令，却没有运行 Justfile 中的目录和配置
 检查。本轮将共同规则收敛到 `ci/check-policy.sh`，本地 Justfile 与 CI 复用同一实现，并补充五种
