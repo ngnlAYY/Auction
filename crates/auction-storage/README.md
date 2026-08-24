@@ -31,7 +31,9 @@ Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
 快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 只做 PostgreSQL 完整档恢复命令分派；
 确认写入、范围快照、guarded relist 和共享映射分别位于 `recovery_commands/commands/{confirm,scope,relist,mapping}.rs`，
-其中 scope 又按数据库行模型、命令回放、锁定读取和状态/证据校验拆入 `scope/{model,replay,locks,validation}.rs`；
+其中 confirm 又按 Admin 确认、Worker relist、buyer refund 和共享 fence/审计辅助拆入
+`confirm/{command,relist,refund,common}.rs`，scope 又按数据库行模型、命令回放、锁定读取和状态/证据校验拆入
+`scope/{model,replay,locks,validation}.rs`；
 共同完成 Serializable 确认写入、证据重校验、退款激活、命令账本、审计和预览目录事件；
 SQLite Lite 对确认能力明确返回不支持。
 结算事务在 `src/database/settlement/mod.rs` 装配，由 `transaction.rs`、`facts.rs`、`obligations.rs`

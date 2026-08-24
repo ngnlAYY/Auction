@@ -44,7 +44,9 @@ Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布�
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
 对应的 MM 通知也会在后续轮次独立重放。主题远端发布成功但本地发布证明写入失败时，Worker
 会持久化人工对账退避，避免租约过期后静默重复发布；单项处理超时也按远端写入结果未知停靠，
-不会自动重试可能已经成功的远端 POST。Forum 使用独立顺序循环，先发布后读取回帖；发布失败
+不会自动重试可能已经成功的远端 POST。回帖导入实现又按主题/映射、竞价命令、MoogleMail
+通知和完成/错误辅助拆入 `worker/forum/reply/{topic,command,notification,common}.rs`，
+`reply.rs` 只保留运行时与循环入口。Forum 使用独立顺序循环，先发布后读取回帖；发布失败
 仍继续回帖导入，主题逐条领取而不提前占用整批租约，循环异常退出才使进程失败关闭。
 Operations alert 的 scan、dispatch 和 reconcile 现在按各自一分钟 cadence 独立运行，分别应用
 有界 deadline、结果/耗时/调度延迟指标和错误重试；任一 owner 的临时失败不会阻塞另外两类任务，
@@ -67,7 +69,9 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 拍卖 owner、幂等账本和远程回执契约。
 recovery action 现在也使用 `pending → prepared → enqueued` 的两阶段本地 delivery 边界，
 prepare/activation identity 可在 Worker 重启后幂等重放，并在 prepare/activation 前复核 Users
-owner 的 active 收件人资格；更广泛的外部回执对照和真实部署验证仍在后续阶段。
+owner 的 active 收件人资格；`worker/runtime/recovery.rs` 又按 dispatch、activation、blacklist、
+observation 和 retry 拆入 `worker/runtime/recovery/`，只保留 runtime 稳定出口；更广泛的外部回执
+对照和真实部署验证仍在后续阶段。
 
 Worker control 已提供 UDS-only 的 `live`、`ready`、`status`、`/metrics` 和 MoogleMail poll 唤醒协议；
 `/metrics` 与 control 共享同一 peer credential 校验的 Unix socket 和 Worker 进程 registry，

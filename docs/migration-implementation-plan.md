@@ -732,6 +732,20 @@ Public/Admin HTTP listener。
 - PostgreSQL recovery command 的范围 owner 已将数据库行模型、命令回放、锁定读取和状态/证据校验分别拆入
   `database/recovery_commands/commands/scope/{model,replay,locks,validation}.rs`；`scope.rs` 只保留
   内部稳定出口，Serializable 锁定顺序、命令 replay fence、证据闭集和退款激活语义保持不变。
+- PostgreSQL recovery command 的写入推进已将 Admin 确认、Worker relist、buyer refund 和共享 fence/审计辅助
+  分别拆入 `database/recovery_commands/commands/confirm/{command,relist,refund,common}.rs`；
+  `confirm.rs` 只保留稳定出口，Serializable 重试、锁定顺序、状态版本和审计语义保持不变。
+- Worker recovery action runtime 已将 action dispatch、prepared delivery 激活、买家黑名单、外部结果观察和持久化
+  重试释放分别拆入 `worker/runtime/recovery/{dispatch,activation,blacklist,observation,retry}.rs`；
+  `runtime/recovery.rs` 只保留稳定出口，`pending → prepared → enqueued`、action fence 与
+  `case → return → action → relist → refund` 顺序保持不变。
+- `auctionctl` Unix/systemd deployment control 已将生命周期编排、Controller/部署计划状态模型和路径、配置、unit
+  环境校验分别拆入 `bootstrap/deployment_control/unix/{lifecycle,model,validation}.rs`；
+  `unix/mod.rs` 只保留父控制器包装，Worker → Admin → Public 启动、Public → Admin → Worker 停止、readiness、回滚和
+  startup receipt 契约保持不变。
+- Worker 论坛回帖导入已将主题/身份与 lot 映射、竞价命令账本、MoogleMail 通知和完成/错误辅助分别拆入
+  `worker/forum/reply/{topic,command,notification,common}.rs`；`reply.rs` 只保留运行时与循环入口，
+  world 扫描游标、稳定 command ID、warning-only 通知和外部 POST 结果未知边界保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。

@@ -1,0 +1,264 @@
+//! Recovery action 的状态分派与 prepared delivery 构造。
+
+use super::*;
+
+pub(in crate::worker::runtime) async fn process_recovery_action<C>(
+    store: Arc<dyn RecoveryWorkStore>,
+    delivery: Option<Arc<dyn MailDeliveryEnqueuer>>,
+    blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>>,
+    clock: Arc<C>,
+    retry_delay: ChronoDuration,
+    claim: auction_application::RecoveryActionClaim,
+) -> WorkerResult
+where
+    C: Clock + 'static,
+{
+    if !matches!(
+        claim.kind.as_str(),
+        "payment_reminder"
+            | "reclaim_equipment_take"
+            | "cancel_carrier_take"
+            | "recover_equipment_take"
+            | "buyer_blacklist"
+    ) {
+        let failure_code = "unsupported_recovery_action";
+        return match store.mark_action_manual_reconcile(claim, failure_code.to_owned()).await {
+            Ok(()) => WorkerResult::Success,
+            Err(error) => {
+                tracing::error!(error = %error, "recovery action unsupported-kind fence failed");
+                WorkerResult::Error
+            }
+        };
+    }
+
+    if claim.kind == "buyer_blacklist" {
+        let Some(blacklister) = blacklister else {
+            return release_recovery_action(
+                store,
+                clock,
+                claim,
+                retry_delay,
+                "recovery_buyer_blacklist_owner_unavailable",
+            )
+            .await;
+        };
+        return process_recovery_buyer_blacklist(store, blacklister, clock, retry_delay, claim)
+            .await;
+    }
+
+    let Some(delivery) = delivery else {
+        return release_recovery_action(
+            store,
+            clock,
+            claim,
+            retry_delay,
+            "recovery_delivery_unavailable",
+        )
+        .await;
+    };
+
+    if claim.execution_state == "pending" {
+        let recipient = match claim.recipient.clone() {
+            Some(recipient) => recipient,
+            None => {
+                return match store
+                    .mark_action_manual_reconcile(claim, "recovery_recipient_missing".to_owned())
+                    .await
+                {
+                    Ok(()) => WorkerResult::Success,
+                    Err(error) => {
+                        tracing::error!(error = %error, "recovery action recipient fence failed");
+                        WorkerResult::Error
+                    }
+                };
+            }
+        };
+        if !claim.recipient_eligible {
+            return release_recovery_action(
+                store,
+                clock,
+                claim,
+                retry_delay,
+                "recovery_recipient_ineligible",
+            )
+            .await;
+        }
+        let action_id = claim.action_id.as_uuid();
+        let is_payment_reminder = claim.kind == "payment_reminder";
+        let external_mail_id = if is_payment_reminder {
+            claim.payment_reference.clone()
+        } else {
+            let Some(source_external_mail_id) = claim.source_external_mail_id.clone() else {
+                return match store
+                    .mark_action_manual_reconcile(claim, "recovery_source_mail_missing".to_owned())
+                    .await
+                {
+                    Ok(()) => WorkerResult::Success,
+                    Err(error) => {
+                        tracing::error!(error = %error, "recovery action source mail fence failed");
+                        WorkerResult::Error
+                    }
+                };
+            };
+            source_external_mail_id
+        };
+        let command_id = CommandId::from_uuid(deterministic_uuid(
+            CommandId::from_uuid(action_id),
+            if is_payment_reminder {
+                "recovery-payment-reminder-prepare"
+            } else {
+                "recovery-take-prepare"
+            },
+            1,
+        ));
+        let request_hash = if is_payment_reminder {
+            let request = RecoveryPaymentReminderRequest {
+                recovery_id: claim.recovery_id.as_uuid(),
+                action_id,
+                recipient: recipient.clone(),
+                payment_reference: claim.payment_reference.clone(),
+            };
+            RequestHash::from_request("recovery_payment_reminder", action_id, &request)
+        } else {
+            let request = RecoveryTakeRequest {
+                recovery_id: claim.recovery_id.as_uuid(),
+                action_id,
+                recipient: recipient.clone(),
+                source_external_mail_id: external_mail_id.clone(),
+                expected_credits: claim.expected_credits,
+                expected_cod: claim.expected_cod,
+                expected_attachment_ids: claim.expected_attachment_ids.clone(),
+            };
+            RequestHash::from_request("recovery_take", action_id, &request)
+        };
+        let request_hash = match request_hash {
+            Ok(hash) => hash,
+            Err(error) => {
+                tracing::error!(error = %error, "recovery payment reminder request hash failed");
+                return release_recovery_action(
+                    store,
+                    clock,
+                    claim,
+                    retry_delay,
+                    "recovery_request_hash_failed",
+                )
+                .await;
+            }
+        };
+        let command = MailDeliveryCommand {
+            command_id,
+            request_hash,
+            origin: MailDeliveryOrigin::SettlementRecoveryAction,
+            origin_id: format!("recovery:{}", claim.recovery_id),
+            operation: if is_payment_reminder {
+                MailDeliveryOperation::Send
+            } else {
+                MailDeliveryOperation::Take
+            },
+            // 付款提醒固定发往 main；退回领取动作使用 recovery action 对应的目标世界。
+            world_id: if is_payment_reminder { "main".to_owned() } else { claim.world_id.clone() },
+            external_mail_id,
+            recipient,
+            template: is_payment_reminder
+                .then_some(MailNotificationTemplate::RecoveryPaymentReminder),
+            result_code: is_payment_reminder.then_some("payment_overdue".to_owned()),
+            user_key_user_id: None,
+            credits: if is_payment_reminder { 0 } else { claim.expected_credits },
+            cod: if is_payment_reminder { 0 } else { claim.expected_cod },
+            attachment_ids: if is_payment_reminder {
+                Vec::new()
+            } else {
+                claim.expected_attachment_ids.clone()
+            },
+            notification_body: None,
+        };
+        let delivery_id = match delivery.prepare_recovery(command).await {
+            Ok(result) if !result.delivery_id.is_nil() => result.delivery_id,
+            Ok(_) => {
+                return release_recovery_action(
+                    store,
+                    clock,
+                    claim,
+                    retry_delay,
+                    "recovery_delivery_result_invalid",
+                )
+                .await;
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "recovery delivery prepare failed");
+                return release_recovery_action(
+                    store,
+                    clock,
+                    claim,
+                    retry_delay,
+                    "recovery_delivery_unavailable",
+                )
+                .await;
+            }
+        };
+        let linked = match store
+            .link_action_preparation(
+                claim.clone(),
+                delivery_id,
+                command_id,
+                request_hash,
+                clock.now(),
+            )
+            .await
+        {
+            Ok(claim) => claim,
+            Err(error) => {
+                tracing::error!(error = %error, "recovery action prepared link failed");
+                return release_recovery_action(
+                    store,
+                    clock,
+                    claim,
+                    retry_delay,
+                    "recovery_delivery_link_failed",
+                )
+                .await;
+            }
+        };
+        return activate_recovery_action(store, delivery, clock, retry_delay, linked).await;
+    }
+
+    if claim.execution_state == "prepared" {
+        if !claim.recipient_eligible {
+            return release_recovery_action(
+                store,
+                clock,
+                claim,
+                retry_delay,
+                "recovery_recipient_ineligible",
+            )
+            .await;
+        }
+        return activate_recovery_action(store, delivery, clock, retry_delay, claim).await;
+    }
+
+    if claim.execution_state == "enqueued" {
+        return observe_recovery_action(store, clock, retry_delay, claim).await;
+    }
+
+    tracing::error!(state = %claim.execution_state, "recovery action state is not executable");
+    WorkerResult::Error
+}
+
+#[derive(Debug, Serialize)]
+struct RecoveryPaymentReminderRequest {
+    recovery_id: uuid::Uuid,
+    action_id: uuid::Uuid,
+    recipient: String,
+    payment_reference: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RecoveryTakeRequest {
+    recovery_id: uuid::Uuid,
+    action_id: uuid::Uuid,
+    recipient: String,
+    source_external_mail_id: String,
+    expected_credits: i64,
+    expected_cod: i64,
+    expected_attachment_ids: Vec<String>,
+}
