@@ -15,6 +15,9 @@ readiness 和连接池入口位于 `database/store.rs`，连接池指标适配�
 PostgreSQL/SQLite 的连接池与后端专属边界分别位于 `database/postgres_store.rs` 和
 `database/sqlite_store.rs`。`database/mod.rs` 只负责模块装配、兼容导出和保留的根级领域测试，
 不改变 `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径。
+PostgreSQL 破坏性重建由 `database/rebuild/` 持有：`model.rs` 定义预检/结果/错误契约，`catalog.rs`
+负责维护库目录采集与安全预检，`guard.rs` 负责 advisory lock、删库/建库和后置身份校验，`sql.rs`
+只负责数据库名、locale/provider、tablespace 和连接上限的 SQL quoting；`rebuild/mod.rs` 只保留稳定导出。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
 和 SQLx 基线接管；`model.rs`、`preflight.rs`、`source_checks.rs`、`adoption.rs` 与 `mapping.rs`
 分别持有安全模型、预检、来源事实检查、接管 bridge 和错误映射；备份、人工确认及不可覆盖回执仍由

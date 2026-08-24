@@ -6,7 +6,7 @@ tracing 初始化、指标约定、健康检查语义和关联 ID。
 分组与稳定 re-export，进程、业务、连接池、Worker、tracing collector 分别位于其子文件；
 tracing 入口 `src/telemetry/mod.rs` 只负责稳定导出，配置、健康状态、批处理器和进程运行时分别
 位于 `src/telemetry/{config,health,processor,runtime}.rs`，心跳与 dashboard 安全投影实现在
-`src/health/mod.rs`。
+`src/health/{model,publisher,dashboard}.rs`，`health/mod.rs` 只负责模块装配和稳定导出。
 
 `init(service, configured_filter)` 安装 JSON 格式的 `tracing-subscriber`。未配置
 `log_filter` 时默认 `info,{service}=debug`。Public、Admin 和 Worker 都可以通过

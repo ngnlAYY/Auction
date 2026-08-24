@@ -687,6 +687,21 @@ Public/Admin HTTP listener。
   以及不可覆盖回执发布分别拆入 `postgres_rebuild/model.rs`、`execute.rs`、`validation.rs`、
   `postconditions.rs` 和 `receipt.rs`；`mod.rs` 只保留 `Options`、`Mode`、`execute` 的稳定调用路径，
   删除前预检、advisory lock、失败回执和迁移后置契约保持不变。
+- `auction-observability/src/health/` 已将安全健康模型与校验、心跳发布/持久化端口、三进程 dashboard
+  聚合分别拆入 `model.rs`、`publisher.rs` 和 `dashboard.rs`；`health/mod.rs` 只保留模块装配和稳定导出，
+  心跳 sequence、TTL、readiness 与安全投影契约保持不变。
+- Application Admin credentials port 已将安全值对象/密文信封、敏感命令与写入载荷、查询/加密/Worker
+  runtime/dashboard 端口分别拆入 `ports/admin/credentials/{value,commands,ports}.rs`；
+  `credentials.rs` 只保留模块装配和稳定导出，明文清零、密文封装和幂等 request hash 语义保持不变。
+- Application MoogleMail processing port 已将装备过滤、短生命周期邮件 envelope、拍卖入站写入、delivery
+  outbox、业务决定和共享安全错误分别拆入 `ports/mail/processing/{filter,message,auction,delivery,decision,common}.rs`；
+  `processing.rs` 只保留模块装配和稳定导出，正文/装备 key 清理、密钥封装前置和无密文 delivery 边界保持不变。
+- Admin dashboard HTTP adapter 已将认证后请求编排、各 owner section 聚合和稳定 response DTO 映射分别拆入
+  `http/admin/dashboard/mod.rs`、`sections.rs` 和 `mapping.rs`；路由、状态码、unknown/source_unavailable
+  降级语义和 health/process JSON 字段保持不变。
+- Storage PostgreSQL rebuild adapter 已将公开预检/结果/错误模型、catalog 采集与安全预检、advisory-lock
+  guard/破坏性执行、动态标识符与 locale SQL quoting 分别拆入 `database/rebuild/{model,catalog,guard,sql}.rs`；
+  `rebuild/mod.rs` 只保留稳定导出，删库前保护、mutation 状态和重建后 OID/定义校验保持不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
   owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
   和 Web owner 不再列为未完成项。

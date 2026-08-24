@@ -18,6 +18,9 @@
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
   错误类型和本地边界校验；`runtime_config.rs` 只负责稳定公共类型出口，不执行文件、数据库或网络操作。
+- `src/ports/admin/credentials/`：凭据安全值对象与密文信封位于 `value.rs`，敏感命令/写入载荷位于
+  `commands.rs`，查询、加密、Worker runtime 和 dashboard 端口位于 `ports.rs`；`credentials.rs`
+  只负责稳定公共类型出口，明文和密文的安全边界保持不变。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
 - `src/ports/admin/intake.rs` 与 `src/services/admin/intake.rs`：URL/canonical JSON 装备来源、
@@ -33,6 +36,9 @@
   唤醒结果由 Worker control 端口负责，不承载 MoogleMail 远程传输。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
+- `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
+  分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
+  只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
 - `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
   `processing/processor.rs`、`processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、
   业务路由/delivery、命令幂等辅助和起拍价/装备身份解析。

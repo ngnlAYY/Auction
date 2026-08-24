@@ -13,6 +13,9 @@ Public 与 Admin 的 HTTP 表面适配器。
   访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
   `no-cache`/`no-store` 响应策略。
 - `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
+- `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections.rs` 负责 mail、
+  realtime、credentials、delivery、fulfillment、recovery 和 alerting section 聚合，`mapping.rs`
+  负责 health/process/worker 与稳定 Admin 响应 DTO 映射，不改变 JSON 字段或状态码契约。
 - `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：14 + 21 条允许获得
   SPA 入口的显式浏览器路由。
 

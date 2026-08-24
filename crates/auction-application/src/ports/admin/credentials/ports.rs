@@ -1,0 +1,127 @@
+use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+use crate::ApplicationError;
+
+use super::super::{ApplicationFuture, RequestHash};
+use super::{
+    commands::{
+        AdminCredentialCommandKind, AdminCredentialCommandResult, AdminCredentialDeleteCommand,
+        AdminCredentialDeleteResult, AdminCredentialDeleteWrite, AdminCredentialImportCommand,
+        AdminCredentialImportWrite, AdminCredentialMutationWrite, AdminCredentialRenameCommand,
+        AdminCredentialStatusCommand,
+    },
+    value::{
+        AdminCredential, AdminCredentialEnvelope, AdminCredentialHealthSnapshot,
+        AdminCredentialKind, AdminCredentialListRequest, AdminCredentialPage,
+        AdminCredentialRuntimeRecord, AdminCredentialWorld,
+    },
+};
+
+/// Admin 凭据密封端口；mail/forum 使用不同的加密用途域。
+pub trait AdminCredentialSealer: Send + Sync {
+    fn seal(
+        &self,
+        kind: AdminCredentialKind,
+        credential_id: Uuid,
+        scope: &str,
+        secret: &[u8],
+    ) -> Result<AdminCredentialEnvelope, ApplicationError>;
+}
+
+/// 凭据查询、幂等和原子写入端口。
+pub trait AdminCredentialStore: Send + Sync {
+    fn list(
+        &self,
+        request: AdminCredentialListRequest,
+    ) -> ApplicationFuture<'_, AdminCredentialPage>;
+    fn find_command(
+        &self,
+        command_id: Uuid,
+        kind: AdminCredentialCommandKind,
+        request_hash: RequestHash,
+    ) -> ApplicationFuture<'_, Option<AdminCredentialCommandResult>>;
+    fn import(
+        &self,
+        write: AdminCredentialImportWrite,
+    ) -> ApplicationFuture<'_, AdminCredentialCommandResult>;
+    fn mutate(
+        &self,
+        write: AdminCredentialMutationWrite,
+    ) -> ApplicationFuture<'_, AdminCredentialCommandResult>;
+    fn delete(
+        &self,
+        write: AdminCredentialDeleteWrite,
+    ) -> ApplicationFuture<'_, AdminCredentialCommandResult>;
+}
+
+/// Worker active 凭据读取端口；查询只允许明确的 kind/world 组合。
+pub trait AdminCredentialRuntimeReader: Send + Sync {
+    fn list_active(
+        &self,
+        kind: AdminCredentialKind,
+        world: AdminCredentialWorld,
+    ) -> ApplicationFuture<'_, Vec<AdminCredentialRuntimeRecord>>;
+}
+
+/// Worker 凭据失效回写端口。
+///
+/// 远端明确返回登录失效时，Worker 只能把当前凭据标记为 invalid；该操作必须是幂等的，
+/// 不能把远端写入结果重试成第二次写入，也不能通过 Admin 命令账本伪造一个用户命令。
+pub trait AdminCredentialRuntimeWriter: Send + Sync {
+    fn mark_invalid(&self, credential_id: Uuid, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+}
+
+/// Admin dashboard 的凭据聚合读取端口。
+pub trait AdminCredentialHealthReader: Send + Sync {
+    fn health(&self) -> ApplicationFuture<'_, AdminCredentialHealthSnapshot>;
+}
+
+/// Worker 凭据解密端口；明文只在 integrations 与远端客户端之间短暂存在。
+pub trait AdminCredentialOpener: Send + Sync {
+    fn open(
+        &self,
+        kind: AdminCredentialKind,
+        credential_id: Uuid,
+        scope: &str,
+        envelope: &AdminCredentialEnvelope,
+    ) -> Result<Vec<u8>, ApplicationError>;
+}
+
+/// Admin 凭据用例端口。
+pub trait AdminCredentialPort: Send + Sync {
+    fn list(
+        &self,
+        request: AdminCredentialListRequest,
+    ) -> ApplicationFuture<'_, AdminCredentialPage>;
+    fn import(
+        &self,
+        command: AdminCredentialImportCommand,
+    ) -> ApplicationFuture<'_, AdminCredential>;
+    fn rename(
+        &self,
+        command: AdminCredentialRenameCommand,
+    ) -> ApplicationFuture<'_, AdminCredential>;
+    fn set_status(
+        &self,
+        command: AdminCredentialStatusCommand,
+    ) -> ApplicationFuture<'_, AdminCredential>;
+    fn delete(
+        &self,
+        command: AdminCredentialDeleteCommand,
+    ) -> ApplicationFuture<'_, AdminCredentialDeleteResult>;
+}
+
+/// 建立凭据导入命令使用的请求摘要；明文只进入 SHA-256，不进入账本。
+pub fn credential_secret_hash(secret: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest(secret);
+    let mut output = [0_u8; 32];
+    output.copy_from_slice(&digest);
+    output
+}
+
+/// 将 kind/world 转换为内部 scope，并拒绝不属于凭据闭集的值。
+pub fn credential_scope(kind: AdminCredentialKind, world: AdminCredentialWorld) -> String {
+    world.scope(kind)
+}
