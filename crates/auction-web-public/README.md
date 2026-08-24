@@ -1,7 +1,8 @@
 # 公开端浏览器界面
 
 Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
-`manifests/public.routes.json` 冻结，共 14 条，修改前必须先确认外部 URL 契约。
+`manifests/public.routes.json` 冻结，共 14 条，修改前必须先确认外部 URL 契约并同步
+`auction-http/src/assets/routes.rs` 的后端入口清单。
 
 - `src/main.rs`：薄启动入口。
 - `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求，
@@ -31,7 +32,8 @@ just web-serve-public   # 本地开发监听
 ```
 
 产物输出到 `target/dx/build/auction-web-public/web/public/`，由 `auction-http` 内嵌进
-公开端二进制。未构建产物时后端仍可编译，静态路由返回 503。
+公开端二进制。未构建产物时后端仍可编译，批准的浏览器路由返回 503；未知路径保持 404，
+不会被宽泛回退为 SPA 入口。
 
 当前首页看板、lot 详情、规则文档、公开黑名单、竞价日志、价格历史、Public session、账户竞价/代理读取、live lot
 普通出价和持久化实时事件游标页已经通过同源 HTTP 读取或提交 Public API；lot 详情现在消费完整装备安全投影，展示
@@ -67,5 +69,5 @@ Fast/Slow 单选模式；最终阶段的 Slow 禁用原因通过对应控件的�
 代理授权成功则继续在弹窗内展示是否领先、当前状态、配额和完整授权变更历史，权威数据刷新不会
 覆盖这份命令结果，用户明确关闭后才恢复触发按钮焦点。
 本 crate 只允许依赖稳定 HTTP DTO 与 `auction-web-shared`，不得导入存储、配置、凭据或管理端
-组件。当前 `src/api/` 仍重复定义了一部分 `auction-contracts` 已拥有的 wire struct，尚未满足 DTO
-单一 owner 规范；后续应直接复用契约类型，只在 Web 层保留展示状态。
+组件。`src/api/` 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`，只保留查询、展示和
+交互状态。

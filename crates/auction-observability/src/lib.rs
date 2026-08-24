@@ -6,9 +6,10 @@ mod telemetry;
 
 pub use health::{
     AdminDashboardSnapshot, DashboardSection, DashboardStatus, HealthError, HealthFuture,
-    HealthReader, HealthService, HealthSummary, Heartbeat, HeartbeatCommand, HeartbeatPublisher,
-    HeartbeatStatus, HeartbeatStore, ProcessRole, ProcessSnapshot, ProcessState, ServiceName,
-    TracingHealth, TracingHealthReader, TracingStatus,
+    HealthReader, HealthService, HealthSummary, Heartbeat, HeartbeatCommand, HeartbeatHealthReader,
+    HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture, HeartbeatStatus,
+    HeartbeatStore, ProcessRole, ProcessSnapshot, ProcessState, ServiceName, TracingHealth,
+    TracingHealthReader, TracingStatus,
 };
 pub use metrics::{
     BusinessEvent, BusinessOutcome, BusinessRecorder, METRICS_ROUTE, MetricsError,

@@ -1,8 +1,8 @@
 //! Public 浏览器端的同源 HTTP 数据访问。
 //!
 //! 这里仅解码 HTTP 安全投影，不引入数据库模型或应用层端口。请求失败会作为页面状态返回，
-//! 组件可以显示可本地化的加载/错误文案，而不是继续渲染迁移阶段的示例数据。当前 wire DTO
-//! 仍有一部分在本 crate 重复定义，后续必须收敛到 `auction-contracts`，避免契约漂移。
+//! 组件可以显示可本地化的加载/错误文案，而不是继续渲染迁移阶段的示例数据。所有 wire DTO
+//! 统一由 `auction-contracts` 拥有，本 crate 只保留浏览器展示与查询状态。
 
 #[path = "identity/account.rs"]
 mod account;
@@ -41,10 +41,21 @@ pub(crate) use session::{
     PublicSession, PublicSessionApiError, fetch_public_session, login_public, logout_public,
 };
 
+use auction_contracts::{ApiResponse, CurrentAuctionResponse};
+pub(crate) use auction_contracts::{
+    AuctionListResponse as AuctionListPage, AuctionSummaryResponse as HistoricalAuction,
+    CurrentAuctionItemResponse as CurrentAuction, PublicBidLogEntryResponse as BidLogEntry,
+    PublicBidLogListResponse as BidLogPage, PublicEquipmentResponse as EquipmentDetail,
+    PublicLiveLotResponse as LiveLot, PublicLotDetailItemResponse as LotDetailItem,
+    PublicLotEnvelopeResponse as LotEnvelope, PublicLotListItemsResponse as LotItems,
+    PublicPreviewLotDetailResponse as PreviewLotDetail,
+    PublicPriceHistoryEntryResponse as PriceHistoryEntry,
+    PublicPriceHistoryListResponse as PriceHistoryPage,
+    PublicPriceHistoryStatsResponse as PriceHistoryStats, WorldStatusResponse as WorldStatus,
+    WorldsResponse as Worlds,
+};
 use chrono::{DateTime, Utc};
 use gloo_net::http::{Request, Response};
-use serde::Deserialize;
-use std::collections::BTreeMap;
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use url::form_urlencoded;
@@ -119,280 +130,6 @@ pub(crate) async fn send_get(url: &str) -> Result<Response, String> {
     Ok(response)
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct ApiResponse<T> {
-    data: T,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct CurrentAuction {
-    pub id: String,
-    pub world: String,
-    pub number: i64,
-    pub status: String,
-    pub opens_at: String,
-    pub scheduled_ends_at: Option<String>,
-    pub presentation_mode: String,
-    #[serde(default)]
-    pub bidding_open: bool,
-    #[serde(default)]
-    pub preview_revision: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct WorldStatus {
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct Worlds {
-    pub worlds: BTreeMap<String, WorldStatus>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CurrentAuctionData {
-    auction: Option<CurrentAuction>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct HistoricalAuction {
-    pub id: String,
-    pub world_id: String,
-    pub sequence: i64,
-    pub status: String,
-    pub scheduled_open_at: String,
-    pub opened_at: Option<String>,
-    pub final_phase_at: Option<String>,
-    pub effective_end_at: Option<String>,
-    pub settled_at: Option<String>,
-    pub lot_count: i64,
-    pub sold_count: i64,
-    pub unsold_count: i64,
-    pub sold_amount: i64,
-    pub state_version: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AuctionListData {
-    auctions: Vec<HistoricalAuction>,
-    #[serde(default)]
-    page: Option<i64>,
-    #[serde(default)]
-    page_size: i64,
-    #[serde(default)]
-    total: Option<i64>,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    next_cursor: Option<String>,
-    #[serde(default)]
-    has_more: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AuctionListPage {
-    pub auctions: Vec<HistoricalAuction>,
-    pub page: Option<i64>,
-    pub page_size: i64,
-    pub total: Option<i64>,
-    pub cursor: Option<String>,
-    pub next_cursor: Option<String>,
-    pub has_more: Option<bool>,
-}
-
-impl From<AuctionListData> for AuctionListPage {
-    fn from(data: AuctionListData) -> Self {
-        Self {
-            auctions: data.auctions,
-            page: data.page,
-            page_size: data.page_size,
-            total: data.total,
-            cursor: data.cursor,
-            next_cursor: data.next_cursor,
-            has_more: data.has_more,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct LotEnvelope {
-    pub auction_id: String,
-    pub world: String,
-    pub number: i64,
-    pub auction_status: String,
-    pub projection_kind: String,
-    pub presentation_mode: String,
-    pub bidding_open: bool,
-    pub opens_at: String,
-    pub scheduled_ends_at: Option<String>,
-    pub preview_revision: i64,
-    pub lots: Option<LotItems>,
-    pub lot: Option<LotDetailItem>,
-    pub total: Option<i64>,
-    #[serde(default)]
-    pub page: Option<i64>,
-    #[serde(default)]
-    pub page_size: i64,
-    pub category_counts: Option<BTreeMap<String, i64>>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub(crate) enum LotItems {
-    Preview(Vec<PreviewLot>),
-    Live(Vec<LiveLot>),
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PreviewLot {
-    pub id: String,
-    pub code: String,
-    pub status: String,
-    pub seller_name: String,
-    pub start_price: i64,
-    pub equipment_name: String,
-    #[serde(default)]
-    pub equipment_category: String,
-    pub equipment_level: Option<i64>,
-    pub avg_roll: Option<f64>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct EquipmentStat {
-    pub value: String,
-    pub base: Option<f64>,
-    pub roll: Option<f64>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct EquipmentDetail {
-    pub name: String,
-    pub category: String,
-    pub level: Option<i64>,
-    #[serde(default)]
-    pub info_summary: String,
-    #[serde(default)]
-    pub stats: BTreeMap<String, EquipmentStat>,
-    pub avg_roll: Option<f64>,
-    pub game_equipment_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct LiveLot {
-    pub id: String,
-    pub lot_number: i64,
-    pub status: String,
-    pub start_price: i64,
-    pub current_price: i64,
-    pub next_bid: i64,
-    pub has_leader: bool,
-    pub leader_name: Option<String>,
-    pub seller_name: String,
-    pub effective_end_at: Option<String>,
-    pub equipment: EquipmentDetail,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PreviewLotDetail {
-    #[serde(flatten)]
-    pub summary: PreviewLot,
-    pub equipment: EquipmentDetail,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub(crate) enum LotDetailItem {
-    Preview(PreviewLotDetail),
-    Live(LiveLot),
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct BidLogEntry {
-    pub id: String,
-    pub lot_id: String,
-    pub lot_number: i64,
-    pub amount: i64,
-    pub equipment_name: String,
-    #[serde(default)]
-    pub equipment_category: String,
-    pub bidder_name: String,
-    pub valid: bool,
-    pub mechanism: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct BidLogData {
-    bids: Vec<BidLogEntry>,
-    page: Option<i64>,
-    page_size: i64,
-    total: Option<i64>,
-    cursor: Option<String>,
-    next_cursor: Option<String>,
-    has_more: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct BidLogPage {
-    pub bids: Vec<BidLogEntry>,
-    pub page: Option<i64>,
-    pub page_size: i64,
-    pub total: Option<i64>,
-    pub cursor: Option<String>,
-    pub next_cursor: Option<String>,
-    pub has_more: Option<bool>,
-}
-
-impl From<BidLogData> for BidLogPage {
-    fn from(data: BidLogData) -> Self {
-        Self {
-            bids: data.bids,
-            page: data.page,
-            page_size: data.page_size,
-            total: data.total,
-            cursor: data.cursor,
-            next_cursor: data.next_cursor,
-            has_more: data.has_more,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PriceHistoryEntry {
-    pub lot_id: String,
-    pub auction_id: String,
-    pub world_id: String,
-    pub auction_sequence: i64,
-    pub lot_number: i64,
-    pub equipment_name: String,
-    pub equipment_category: String,
-    pub equipment_level: Option<i64>,
-    pub buyer_name: String,
-    pub seller_name: String,
-    pub price: i64,
-    pub closed_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PriceHistoryStats {
-    pub count: i64,
-    pub min: i64,
-    pub max: i64,
-    pub median: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PriceHistoryPage {
-    pub rows: Vec<PriceHistoryEntry>,
-    pub stats: Option<PriceHistoryStats>,
-    pub page: Option<i64>,
-    pub page_size: i64,
-    pub total: Option<i64>,
-    pub cursor: Option<String>,
-    pub next_cursor: Option<String>,
-    pub has_more: Option<bool>,
-}
-
 /// 公开价格历史的旧版筛选与分页参数。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PriceHistoryQuery {
@@ -405,33 +142,6 @@ pub(crate) struct PriceHistoryQuery {
     pub buyer: Option<String>,
     pub seller: Option<String>,
     pub page: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct PriceHistoryData {
-    rows: Vec<PriceHistoryEntry>,
-    stats: Option<PriceHistoryStats>,
-    page: Option<i64>,
-    page_size: i64,
-    total: Option<i64>,
-    cursor: Option<String>,
-    next_cursor: Option<String>,
-    has_more: Option<bool>,
-}
-
-impl From<PriceHistoryData> for PriceHistoryPage {
-    fn from(data: PriceHistoryData) -> Self {
-        Self {
-            rows: data.rows,
-            stats: data.stats,
-            page: data.page,
-            page_size: data.page_size,
-            total: data.total,
-            cursor: data.cursor,
-            next_cursor: data.next_cursor,
-            has_more: data.has_more,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -451,8 +161,13 @@ pub(crate) struct CatalogRow {
     pub remaining: String,
 }
 
-impl LotEnvelope {
-    pub(crate) fn rows(&self) -> Vec<CatalogRow> {
+/// 将稳定 lot wire 契约转换为页面表格所需的展示行。
+pub(crate) trait LotEnvelopeRows {
+    fn rows(&self) -> Vec<CatalogRow>;
+}
+
+impl LotEnvelopeRows for LotEnvelope {
+    fn rows(&self) -> Vec<CatalogRow> {
         match self.lots.as_ref() {
             Some(LotItems::Preview(lots)) => lots
                 .iter()
@@ -534,7 +249,7 @@ pub(crate) async fn fetch_current_auction(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<CurrentAuctionData> =
+    let payload: ApiResponse<CurrentAuctionResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.auction)
 }
@@ -574,9 +289,9 @@ pub(crate) async fn fetch_bid_log_page(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<BidLogData> =
+    let payload: ApiResponse<BidLogPage> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 /// 读取可供公开竞价日志选择的拍卖；旧版只展示 live、final 和 settled 拍卖。
@@ -611,9 +326,9 @@ pub(crate) async fn fetch_lot_bid_log(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<BidLogData> =
+    let payload: ApiResponse<BidLogPage> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 pub(crate) async fn fetch_auction_page(
@@ -635,9 +350,9 @@ pub(crate) async fn fetch_auction_page(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AuctionListData> =
+    let payload: ApiResponse<AuctionListPage> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 pub(crate) async fn fetch_auction_list() -> Result<Vec<HistoricalAuction>, String> {
@@ -668,9 +383,9 @@ pub(crate) async fn fetch_price_history(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<PriceHistoryData> =
+    let payload: ApiResponse<PriceHistoryPage> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 pub(crate) async fn fetch_current_lots(

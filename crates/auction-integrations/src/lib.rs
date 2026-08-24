@@ -11,7 +11,8 @@ pub use clients::{build_http_client, ehentai, mooglemail};
 pub use credentials::CredentialSealer;
 pub use cryptobox::{DataKey, EquipmentKeySealer, EquipmentKeySealerError};
 pub use equipment::{
-    EquipmentSourceAdapter, EquipmentSourceConfigurationError, build_equipment_http_client,
+    EquipmentSourceAdapter, EquipmentSourceConfigurationError, EquipmentSourcePolicy,
+    build_equipment_http_client,
 };
 pub use forum::{
     ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer, render_auction_thread,

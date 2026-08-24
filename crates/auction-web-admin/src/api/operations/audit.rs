@@ -3,9 +3,11 @@
 //! 页面只使用后端的安全审计投影；metadata 作为有界 JSON 展示，不在浏览器端推导状态或编辑
 //! 历史事实。数字页语义与旧版保持一致，筛选变化会立即重新加载当前第一页。
 
+use auction_contracts::ApiResponse;
+pub(crate) use auction_contracts::{
+    AdminAuditRecordResponse as AdminAuditRecord, AdminAuditResponse as AdminAuditPage,
+};
 use gloo_net::http::Request;
-use serde::Deserialize;
-use serde_json::Value;
 use url::form_urlencoded;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -19,35 +21,6 @@ pub(crate) struct AdminAuditFilter {
     pub request_id: String,
     pub occurred_from: String,
     pub occurred_to: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminAuditRecord {
-    pub id: String,
-    pub occurred_at: String,
-    pub actor_type: String,
-    pub actor_id: String,
-    pub action: String,
-    pub entity_type: String,
-    pub entity_id: String,
-    pub result: String,
-    pub request_id: Option<String>,
-    pub source: String,
-    pub metadata: Value,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminAuditPage {
-    pub records: Vec<AdminAuditRecord>,
-    pub page: Option<i64>,
-    pub page_size: i64,
-    pub total: Option<i64>,
-    pub has_more: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ApiResponse<T> {
-    data: T,
 }
 
 /// 读取一页 Admin 审计安全投影。

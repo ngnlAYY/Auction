@@ -3,26 +3,23 @@
 //! 浏览器只解码经过服务端事件注册表校验的安全信封；`next_after` 和
 //! `refetch_required` 原样保留，避免在客户端猜测事件序列或自行修复状态。
 
+use auction_contracts::ApiResponse;
+pub(crate) use auction_contracts::{
+    HealthResponse as HealthStatus, PublicRealtimeEventResponse as RealtimeEvent,
+    PublicRealtimeResponse as RealtimePage,
+};
 use chrono::DateTime;
 #[cfg(target_arch = "wasm32")]
 use futures_util::StreamExt;
-use serde::Deserialize;
 use serde_json::Value;
 #[cfg(target_arch = "wasm32")]
 use url::form_urlencoded;
 use uuid::Uuid;
 
-use super::{ApiResponse, send_get};
+use super::send_get;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{Message, futures::WebSocket};
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct HealthStatus {
-    pub service: String,
-    pub status: String,
-    pub version: String,
-}
 
 pub(crate) async fn fetch_health() -> Result<HealthStatus, String> {
     let response = send_get("/api/v1/health").await?;
@@ -32,53 +29,15 @@ pub(crate) async fn fetch_health() -> Result<HealthStatus, String> {
     response.json().await.map_err(|error| error.to_string())
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct RealtimeEvent {
-    pub event_id: String,
-    pub stream_key: String,
-    pub stream_sequence: i64,
-    pub kind: String,
-    pub schema_version: i32,
-    pub payload: Value,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct RealtimeData {
-    events: Vec<RealtimeEvent>,
-    next_after: i64,
-    has_more: bool,
-    refetch_required: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RealtimePage {
-    pub events: Vec<RealtimeEvent>,
-    pub next_after: i64,
-    pub has_more: bool,
-    pub refetch_required: bool,
-}
-
-impl From<RealtimeData> for RealtimePage {
-    fn from(data: RealtimeData) -> Self {
-        Self {
-            events: data.events,
-            next_after: data.next_after,
-            has_more: data.has_more,
-            refetch_required: data.refetch_required,
-        }
-    }
-}
-
 pub(crate) async fn fetch_realtime_events(after: i64) -> Result<RealtimePage, String> {
     let url = format!("/api/v1/events?after={after}&page_size=50");
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<RealtimeData> =
+    let payload: ApiResponse<RealtimePage> =
         response.json().await.map_err(|error| error.to_string())?;
-    let page: RealtimePage = payload.data.into();
+    let page = payload.data;
     validate_realtime_page(&page, after, "auction:discovery")?;
     Ok(page)
 }
@@ -186,9 +145,9 @@ fn websocket_url(after: i64, auction_id: Option<&str>) -> Result<String, String>
 
 #[cfg(target_arch = "wasm32")]
 fn decode_realtime_page(message: &str) -> Result<RealtimePage, String> {
-    let payload: ApiResponse<RealtimeData> =
+    let payload: ApiResponse<RealtimePage> =
         serde_json::from_str(message).map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 fn validate_realtime_page(

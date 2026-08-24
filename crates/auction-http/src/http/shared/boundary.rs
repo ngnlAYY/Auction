@@ -275,8 +275,9 @@ fn error_response(
     (
         status,
         Json(ApiErrorResponse {
-            code,
+            code: code.to_owned(),
             message: message.to_owned(),
+            data: None,
             request_id: Some(request_id.to_owned()),
         }),
     )

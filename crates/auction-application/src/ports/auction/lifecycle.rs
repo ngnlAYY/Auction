@@ -48,6 +48,27 @@ impl AuctionLifecycleActorType {
     }
 }
 
+/// 进程启动时冻结的生命周期授权策略。
+///
+/// Worker 到期开放不依赖该开关；只有 Admin 在 `scheduled_open_at` 之前发起的开放命令需要显式
+/// 授权。策略随 Admin runtime 文件在重启时生效，不能由单次 HTTP 请求覆盖。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuctionLifecyclePolicy {
+    allow_manual_early_open: bool,
+}
+
+impl AuctionLifecyclePolicy {
+    /// 建立不可变的人工提前开放策略。
+    pub const fn new(allow_manual_early_open: bool) -> Self {
+        Self { allow_manual_early_open }
+    }
+
+    /// 返回 Admin capability 使用的安全投影。
+    pub const fn allows_manual_early_open(self) -> bool {
+        self.allow_manual_early_open
+    }
+}
+
 /// 生命周期命令的发起者；actor ID 进入追加式审计记录，不进入公开响应。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuctionLifecycleActor {
@@ -186,6 +207,9 @@ pub trait AuctionLifecycleTransaction: Send {
 
 /// 生命周期应用端口，供 Admin HTTP 和 Worker 共享。
 pub trait AuctionLifecycleCommandPort: Send + Sync {
+    /// 返回与命令执行使用同一启动快照的人工提前开放 capability。
+    fn allows_manual_early_open(&self) -> bool;
+
     fn execute(
         &self,
         command: AuctionLifecycleCommand,

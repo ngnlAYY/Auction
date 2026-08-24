@@ -16,8 +16,11 @@ use auction_http::{HttpSecurityOptions, PublicApiState, PublicHttpSecurity};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_http::{RealtimeHub, RealtimeHubSink};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_observability::{HeartbeatPublisher, HeartbeatStore, ProcessRole, ServiceName};
-use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
+use auction_observability::{
+    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
+    ProcessRole, ServiceName,
+};
+use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
 use auction_process::{
     DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
 };
@@ -73,9 +76,10 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     );
     let address = config.listen_addr.context("public-api must have a listen address")?;
     let listener = TcpListener::bind(address).await?;
-    let (state, heartbeat, realtime_relay) = configure_state(config, Arc::clone(&metrics))
-        .await
-        .context("configure public-api state")?;
+    let (state, heartbeat, realtime_relay) =
+        configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
+            .await
+            .context("configure public-api state")?;
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
     let _ = realtime_relay;
     let state = state.with_metrics(metrics);
@@ -97,7 +101,11 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     let mut realtime_relay_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
-    let app = auction_http::public_router(env!("CARGO_PKG_VERSION"), boundary).with_state(state);
+    let app = auction_http::public_router::<crate::web_assets::PublicWebAssets>(
+        env!("CARGO_PKG_VERSION"),
+        boundary,
+    )
+    .with_state(state);
 
     tracing::info!(%address, cache_backend = cache.backend(), "public api listening");
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -227,6 +235,7 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 async fn configure_state(
     config: &AppConfig,
+    tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
 ) -> anyhow::Result<(PublicApiState, Option<Arc<HeartbeatPublisher>>, Option<Arc<RealtimeRelay>>)> {
     let security = configure_security(config)?;
@@ -247,14 +256,19 @@ async fn configure_state(
         .register_pool_metrics(store.pool_metrics_source())
         .context("register public database pool metrics")?;
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
+    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat = Arc::new(HeartbeatPublisher::new(
         heartbeat_store,
-        ServiceName::Public,
-        ProcessRole::Public,
-        Uuid::new_v4().to_string(),
-        env!("CARGO_PKG_VERSION").to_owned(),
-        Utc::now(),
-        chrono::Duration::seconds(30),
+        HeartbeatPublisherConfig {
+            service_name: ServiceName::Public,
+            process_role: ProcessRole::Public,
+            instance_id: Uuid::new_v4().to_string(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            started_at: Utc::now(),
+            ttl: chrono::Duration::seconds(30),
+        },
+        heartbeat_health,
+        tracing_health,
     ));
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "public heartbeat starting publish failed");
@@ -318,7 +332,7 @@ async fn configure_state(
     )
     .with_realtime_hub(hub)
     .with_readiness(store);
-    if let Err(error) = heartbeat.publish_ready().await {
+    if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "public heartbeat ready publish failed");
     }
     Ok((state, Some(heartbeat), Some(realtime_relay)))
@@ -327,6 +341,7 @@ async fn configure_state(
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
 async fn configure_state(
     config: &AppConfig,
+    _tracing_health: Arc<dyn TracingHealthReader>,
     _metrics: Arc<ProcessMetrics>,
 ) -> anyhow::Result<(
     PublicApiState,
@@ -381,7 +396,7 @@ fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandl
         interval.tick().await;
         loop {
             interval.tick().await;
-            if let Err(error) = publisher.publish_ready().await {
+            if let Err(error) = publisher.publish_current().await {
                 tracing::warn!(error = %error, "public heartbeat publish failed");
             }
         }

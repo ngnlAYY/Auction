@@ -3,20 +3,12 @@
 //! 原始登录 key 只存在于浏览器表单和一次 HTTPS 请求中；成功后由服务端设置 HttpOnly Cookie，
 //! 组件只持有安全身份投影。
 
+pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
+use auction_contracts::{ApiErrorResponse, ApiResponse, PublicLoginRequest, PublicLoginResponse};
 use gloo_net::http::{Request, Response};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{observe_response_date, send_get};
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct PublicSession {
-    pub authenticated: bool,
-    pub user_id: String,
-    pub username: String,
-    pub expires_at: String,
-    pub absolute_expires_at: String,
-}
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,61 +29,14 @@ impl PublicSessionApiError {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct ApiResponse<T> {
-    data: T,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct ApiErrorResponse {
-    #[serde(default)]
-    code: Option<String>,
-    #[serde(default)]
-    data: Option<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CurrentSessionData {
-    authenticated: bool,
-    user_id: String,
-    username: String,
-    expires_at: String,
-    absolute_expires_at: String,
-}
-
-impl From<CurrentSessionData> for PublicSession {
-    fn from(data: CurrentSessionData) -> Self {
-        Self {
-            authenticated: data.authenticated,
-            user_id: data.user_id,
-            username: data.username,
-            expires_at: data.expires_at,
-            absolute_expires_at: data.absolute_expires_at,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct PublicLoginRequest {
-    key: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct PublicLoginData {
-    user_id: String,
-    username: String,
-    expires_at: String,
-    absolute_expires_at: String,
-}
-
 pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, String> {
     let response = send_get("/api/v1/session").await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<Option<CurrentSessionData>> =
+    let payload: ApiResponse<Option<PublicSession>> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.map(Into::into))
+    Ok(payload.data)
 }
 
 pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSessionApiError> {
@@ -103,7 +48,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     if !response.ok() {
         return Err(parse_api_error(response).await);
     }
-    let payload: ApiResponse<PublicLoginData> =
+    let payload: ApiResponse<PublicLoginResponse> =
         response.json().await.map_err(|_| PublicSessionApiError::transport())?;
     Ok(PublicSession {
         authenticated: true,
@@ -120,9 +65,7 @@ async fn parse_api_error(response: Response) -> PublicSessionApiError {
     let Ok(payload) = serde_json::from_str::<ApiErrorResponse>(&body) else {
         return PublicSessionApiError { status, ..PublicSessionApiError::transport() };
     };
-    let public_reason = if status == Some(403)
-        && payload.code.as_deref() == Some("account_blacklisted")
-    {
+    let public_reason = if status == Some(403) && payload.code == "account_blacklisted" {
         payload
             .data
             .as_ref()
@@ -136,7 +79,7 @@ async fn parse_api_error(response: Response) -> PublicSessionApiError {
     } else {
         None
     };
-    PublicSessionApiError { status, code: payload.code, public_reason }
+    PublicSessionApiError { status, code: Some(payload.code), public_reason }
 }
 
 pub(crate) async fn logout_public() -> Result<(), String> {

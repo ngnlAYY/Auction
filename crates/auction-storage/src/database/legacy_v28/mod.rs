@@ -13,6 +13,8 @@ use sqlx::{Connection, PgConnection, Row, migrate::Migrate};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::PostgresStore;
 
 /// Auction-BF 最终发布的 PostgreSQL migration 版本。
@@ -298,6 +300,7 @@ impl PostgresStore {
             }))
             .execute(&mut *transaction)
             .await
+            .record_audit_failure()
             .map_err(|source| PostgresLegacyV28Error::Bridge { source })?;
 
             transaction

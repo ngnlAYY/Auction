@@ -12,9 +12,9 @@ use auction_application::{
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig,
     AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService,
-    ApplicationError, AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
-    OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort, RecoveryCommandService,
-    RecoveryReportReader, SettlementReportReader,
+    ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
+    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
+    RecoveryCommandService, RecoveryReportReader, SettlementReportReader,
 };
 use auction_application::{AdminCredentialWorld, WorkerControlPort};
 use auction_cache::CacheStore;
@@ -25,14 +25,16 @@ use auction_http::{AdminApiState, AdminHttpSecurity, HttpSecurityOptions};
 use auction_integrations::ForumPreviewAdapter;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_integrations::{
-    CredentialSealer, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
+    CredentialSealer, DataKey, EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy,
     MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client,
 };
 use auction_jobs::WorkerControlClient;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{HealthReader, HealthService, HeartbeatStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_observability::{HeartbeatPublisher, ProcessRole, ServiceName};
+use auction_observability::{
+    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, ProcessRole, ServiceName,
+};
 use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
 use auction_process::{
     DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
@@ -107,7 +109,11 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     let mut heartbeat_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();
-    let app = auction_http::admin_router(env!("CARGO_PKG_VERSION"), boundary).with_state(state);
+    let app = auction_http::admin_router::<crate::web_assets::AdminWebAssets>(
+        env!("CARGO_PKG_VERSION"),
+        boundary,
+    )
+    .with_state(state);
 
     tracing::info!(
         listener = %bound_listener.description(),
@@ -321,8 +327,11 @@ async fn configure_state(
             Some((key_id, key_material)) => {
                 let data_key = DataKey::from_base64(key_id, key_material)
                     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-                let source = EquipmentSourceAdapter::production(build_equipment_http_client()?, 0)
-                    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+                let source = EquipmentSourceAdapter::production(
+                    build_equipment_http_client()?,
+                    equipment_source_policy(config)?,
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
                 let sealer = EquipmentKeySealer::new(data_key);
                 let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
                     Arc::clone(&store),
@@ -372,18 +381,20 @@ async fn configure_state(
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
-    let heartbeat = Arc::new(
-        HeartbeatPublisher::new(
-            heartbeat_store,
-            ServiceName::Admin,
-            ProcessRole::Admin,
-            Uuid::new_v4().to_string(),
-            env!("CARGO_PKG_VERSION").to_owned(),
-            Utc::now(),
-            ChronoDuration::seconds(30),
-        )
-        .with_tracing_health(tracing_health),
-    );
+    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
+    let heartbeat = Arc::new(HeartbeatPublisher::new(
+        heartbeat_store,
+        HeartbeatPublisherConfig {
+            service_name: ServiceName::Admin,
+            process_role: ProcessRole::Admin,
+            instance_id: Uuid::new_v4().to_string(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            started_at: Utc::now(),
+            ttl: ChronoDuration::seconds(30),
+        },
+        heartbeat_health,
+        tracing_health,
+    ));
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "admin heartbeat starting publish failed");
     }
@@ -413,8 +424,15 @@ async fn configure_state(
         secret.as_bytes().to_vec(),
         session_config,
     )?);
+    let lifecycle_policy = AuctionLifecyclePolicy::new(
+        config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
+    );
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
-        Arc::new(DatabaseAuctionLifecycleCommands::new(lifecycle_store, Arc::new(SystemClock)));
+        Arc::new(DatabaseAuctionLifecycleCommands::new(
+            lifecycle_store,
+            Arc::new(SystemClock),
+            lifecycle_policy,
+        ));
     let auction_create: Arc<dyn AdminAuctionCreatePort> =
         Arc::new(DatabaseAdminAuctionCommands::new(
             auction_create_store,
@@ -457,10 +475,28 @@ async fn configure_state(
     .with_dashboard_worlds(configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(configured_dashboard_mailbox_keys(config))
     .with_readiness(store);
-    if let Err(error) = heartbeat.publish_ready().await {
+    if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "admin heartbeat ready publish failed");
     }
     Ok((state, Some(heartbeat)))
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<EquipmentSourcePolicy> {
+    let source = config
+        .admin_runtime
+        .as_ref()
+        .map(|runtime| runtime.equipment_source.clone())
+        .unwrap_or_default();
+    Ok(EquipmentSourcePolicy {
+        allowed_hosts: source.allowed_hosts,
+        allowed_path_prefixes: source.allowed_path_prefixes,
+        allowlist_enabled: source.allowlist_enabled,
+        maximum_response_bytes: usize::try_from(source.maximum_response_bytes)
+            .context("admin equipment_source response limit exceeds this platform")?,
+        minimum_request_interval: Duration::from_secs(source.minimum_request_interval_seconds),
+        request_timeout: Duration::from_secs(source.request_timeout_seconds),
+    })
 }
 
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
@@ -564,7 +600,7 @@ fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandl
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            if let Err(error) = publisher.publish_ready().await {
+            if let Err(error) = publisher.publish_current().await {
                 tracing::warn!(error = %error, "admin heartbeat publish failed");
             }
         }

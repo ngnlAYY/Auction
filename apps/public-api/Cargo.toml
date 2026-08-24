@@ -14,6 +14,7 @@ auction-http.workspace = true
 auction-storage.workspace = true
 auction-observability.workspace = true
 auction-process.workspace = true
+rust-embed.workspace = true
 axum.workspace = true
 chrono.workspace = true
 tokio.workspace = true

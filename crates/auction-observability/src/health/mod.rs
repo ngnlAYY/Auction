@@ -26,6 +26,9 @@ pub const MAX_HEARTBEAT_TTL: Duration = Duration::hours(24);
 /// 可观测性端口的异步返回值。
 pub type HealthFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, HealthError>> + Send + 'a>>;
 
+/// 心跳运行状态读取器的异步 readiness 返回值；失败依赖直接投影为 `false`，不泄漏错误细节。
+pub type HeartbeatReadinessFuture<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+
 /// 健康存储或安全投影失败。
 #[derive(Debug, Error)]
 pub enum HealthError {
@@ -229,6 +232,15 @@ pub trait TracingHealthReader: Send + Sync {
     fn snapshot(&self) -> TracingHealth;
 }
 
+/// 提供心跳每轮所需的真实数据库/schema readiness 与进程内审计失败计数。
+pub trait HeartbeatHealthReader: Send + Sync {
+    /// 重新执行一次只读 readiness 检查；不可用或 schema 非 current 时返回 `false`。
+    fn readiness(&self) -> HeartbeatReadinessFuture<'_>;
+
+    /// 返回不包含 SQL、错误原文或业务数据的审计写入失败饱和计数。
+    fn audit_failure_count(&self) -> i64;
+}
+
 /// 进程心跳写入命令。
 #[derive(Debug, Clone)]
 pub struct HeartbeatCommand {
@@ -262,6 +274,17 @@ impl HeartbeatCommand {
     }
 }
 
+/// 心跳发布器的稳定进程身份与租约配置。
+#[derive(Debug, Clone)]
+pub struct HeartbeatPublisherConfig {
+    pub service_name: ServiceName,
+    pub process_role: ProcessRole,
+    pub instance_id: String,
+    pub version: String,
+    pub started_at: DateTime<Utc>,
+    pub ttl: Duration,
+}
+
 /// 进程装配根使用的心跳发布器。
 ///
 /// 发布器只负责生成有界的安全命令并分配本进程内的递增 observation sequence；周期调度、
@@ -274,7 +297,8 @@ pub struct HeartbeatPublisher {
     version: String,
     started_at: DateTime<Utc>,
     ttl: Duration,
-    tracing_health: Option<Arc<dyn TracingHealthReader>>,
+    process_health: Arc<dyn HeartbeatHealthReader>,
+    tracing_health: Arc<dyn TracingHealthReader>,
     observation_sequence: AtomicI64,
 }
 
@@ -282,30 +306,22 @@ impl HeartbeatPublisher {
     /// 建立一个新的进程实例发布器；`instance_id` 必须在进程重启时变化。
     pub fn new(
         store: Arc<dyn HeartbeatStore>,
-        service_name: ServiceName,
-        process_role: ProcessRole,
-        instance_id: String,
-        version: String,
-        started_at: DateTime<Utc>,
-        ttl: Duration,
+        config: HeartbeatPublisherConfig,
+        process_health: Arc<dyn HeartbeatHealthReader>,
+        tracing_health: Arc<dyn TracingHealthReader>,
     ) -> Self {
         Self {
             store,
-            service_name,
-            process_role,
-            instance_id,
-            version,
-            started_at,
-            ttl,
-            tracing_health: None,
+            service_name: config.service_name,
+            process_role: config.process_role,
+            instance_id: config.instance_id,
+            version: config.version,
+            started_at: config.started_at,
+            ttl: config.ttl,
+            process_health,
+            tracing_health,
             observation_sequence: AtomicI64::new(0),
         }
-    }
-
-    /// 注入 tracing 安全状态读取器；不改变心跳的存储 owner 或调度生命周期。
-    pub fn with_tracing_health(mut self, reader: Arc<dyn TracingHealthReader>) -> Self {
-        self.tracing_health = Some(reader);
-        self
     }
 
     /// 发布指定状态的安全心跳；存储失败由调用方决定是否降级或继续运行。
@@ -341,32 +357,42 @@ impl HeartbeatPublisher {
 
     /// 发布启动中状态。
     pub async fn publish_starting(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Starting, false, 0, self.tracing_snapshot()).await
+        self.publish(
+            HeartbeatStatus::Starting,
+            false,
+            self.process_health.audit_failure_count(),
+            self.tracing_snapshot(),
+        )
+        .await
     }
 
-    /// 发布已就绪状态。
-    pub async fn publish_ready(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Ready, true, 0, self.tracing_snapshot()).await
+    /// 重新读取依赖、审计和 tracing 状态并发布当前安全快照。
+    pub async fn publish_current(&self) -> Result<(), HealthError> {
+        let dependency_readiness = self.process_health.readiness().await;
+        let audit_failure_count = self.process_health.audit_failure_count();
+        let readiness = dependency_readiness && audit_failure_count == 0;
+        let tracing = self.tracing_snapshot();
+        let status = if readiness && tracing.status != TracingStatus::Degraded {
+            HeartbeatStatus::Ready
+        } else {
+            HeartbeatStatus::Degraded
+        };
+        self.publish(status, readiness, audit_failure_count, tracing).await
     }
 
     /// 发布停止状态；停止状态仍然带有短 TTL，避免残留实例长期显示为活动进程。
     pub async fn publish_stopping(&self) -> Result<(), HealthError> {
-        self.publish(HeartbeatStatus::Stopping, false, 0, self.tracing_snapshot()).await
+        self.publish(
+            HeartbeatStatus::Stopping,
+            false,
+            self.process_health.audit_failure_count(),
+            self.tracing_snapshot(),
+        )
+        .await
     }
 
     fn tracing_snapshot(&self) -> TracingHealth {
-        self.tracing_health.as_ref().map_or_else(tracing_disabled, |reader| reader.snapshot())
-    }
-}
-
-fn tracing_disabled() -> TracingHealth {
-    TracingHealth {
-        status: TracingStatus::Disabled,
-        dropped_span_count: 0,
-        export_failure_count: 0,
-        last_success_at: None,
-        last_failure_at: None,
-        last_error_code: String::new(),
+        self.tracing_health.snapshot()
     }
 }
 

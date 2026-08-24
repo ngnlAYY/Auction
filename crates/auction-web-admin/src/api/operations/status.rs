@@ -3,8 +3,8 @@
 //! 页面只读取已有的 `/health/live` 与 `/health/ready` 探针，不把业务 dashboard 或 Worker
 //! control 的安全投影混入进程健康判断。`ready` 的 503 是合法的未就绪结果，不能当成网络解析错误。
 
+use auction_contracts::{HealthLiveData, HealthProbeResponse, HealthReadyData};
 use gloo_net::http::Request;
-use serde::Deserialize;
 
 /// 单个健康探针在管理端的有限状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,21 +29,6 @@ pub(crate) struct AdminHealthStatus {
     pub ready: AdminHealthProbeState,
 }
 
-#[derive(Debug, Deserialize)]
-struct HealthEnvelope<T> {
-    data: T,
-}
-
-#[derive(Debug, Deserialize)]
-struct LiveData {
-    live: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReadyData {
-    ready: bool,
-}
-
 /// 读取 Admin 进程的存活与就绪探针。
 pub(crate) async fn fetch_admin_health() -> Result<AdminHealthStatus, String> {
     let live = fetch_live().await?;
@@ -61,7 +46,7 @@ pub(crate) async fn fetch_admin_readiness() -> Result<bool, String> {
 
 async fn fetch_live() -> Result<AdminHealthProbeState, String> {
     let response = Request::get("/health/live").send().await.map_err(|error| error.to_string())?;
-    let payload: HealthEnvelope<LiveData> =
+    let payload: HealthProbeResponse<HealthLiveData> =
         response.json().await.map_err(|error| error.to_string())?;
     if response.ok() && payload.data.live {
         Ok(AdminHealthProbeState::Healthy)
@@ -72,7 +57,7 @@ async fn fetch_live() -> Result<AdminHealthProbeState, String> {
 
 async fn fetch_ready() -> Result<AdminHealthProbeState, String> {
     let response = Request::get("/health/ready").send().await.map_err(|error| error.to_string())?;
-    let payload: HealthEnvelope<ReadyData> =
+    let payload: HealthProbeResponse<HealthReadyData> =
         response.json().await.map_err(|error| error.to_string())?;
     if response.ok() && payload.data.ready {
         Ok(AdminHealthProbeState::Healthy)

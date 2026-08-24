@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::{PostgresCompetitionTransaction, PostgresStore};
 
 /// PostgreSQL 结算事务 runner。结算与竞价都使用 Serializable，但锁集合和落表步骤保持独立。
@@ -815,6 +817,7 @@ async fn insert_settlement_audit(
     .bind(json!({ "state_version": state_version }))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
 }

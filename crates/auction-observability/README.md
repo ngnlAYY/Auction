@@ -37,9 +37,11 @@ OTLP 时，心跳还会携带安全的 exporter 成功/失败计数和闭集错�
 aggregation、delivery、fulfillment、recovery 和 operations-alert owner 已分别接入安全汇总；
 缺少对应端口、数据库能力或当前数据源失败时仍返回 `unknown`/`source_unavailable`，不会用示例
 数据掩盖缺失。Public/Admin/Worker 装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；
-周期发布仍固定为 ready/零审计失败，Public/Worker 尚未携带 tracing health。Worker control 还
-通过 peer-authenticated Unix socket 提供 live/ready/status 和同一
-指标 registry。
+周期发布每轮通过 `HeartbeatHealthReader` 重新读取数据库/schema readiness 和进程内审计写入
+失败饱和计数，并通过各进程自己的 `TracingHealthReader` 携带安全 tracing 投影。依赖或审计异常
+令 readiness 与 status 降级；tracing degraded 令 status 降级但不会单独改变应用 readiness。
+启动和停止状态也携带当时的审计/tracing 投影。Worker control 还通过 peer-authenticated Unix
+socket 提供 live/ready/status 和同一指标 registry。
 
 ## 指标与待补齐
 

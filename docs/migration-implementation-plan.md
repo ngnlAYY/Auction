@@ -498,8 +498,9 @@ A33 Admin 审计查询已接入应用端口、PostgreSQL/SQLite 追加式表读�
 读取事务中取得，metadata 只允许安全 JSON object，不新增任何写入或测试用例。
 A02 Admin dashboard 已接入 `auction-observability` 的心跳安全模型、PostgreSQL/SQLite
 service_heartbeats 适配器、Admin session 保护，以及三个进程装配根的启动/就绪/周期和
-SIGINT/SIGTERM 停止心跳路径，返回数据库中的 health/process 聚合；周期值仍固定为 ready/零审计
-失败。Worker control 通过安全 runtime 目录、实例锁、固定
+SIGINT/SIGTERM 停止心跳路径，返回数据库中的 health/process 聚合；周期值现在每轮读取真实
+数据库/schema readiness、进程内审计写入失败计数和各进程 tracing 安全状态。Worker control
+通过安全 runtime 目录、实例锁、固定
 group/0660、inode 清理和显式 UID/GID peer allowlist 保护的 Unix socket 接入 live/ready/status，
 无数据库启动骨架启用同一 control 时也只报告进程存活和零
 poller，不伪造持久化就绪；Admin 现在消费完整安全 dashboard snapshot，展示 health/process、Worker、
@@ -558,6 +559,10 @@ fingerprint、版本化 request hash、pending/applied/unknown 恢复服务和�
 `501 feature_not_supported`；runtime 更新不热改当前进程，文件写入成功后必须重启 Admin。配置页
 已补齐旧版的 JSON 对象解析提示、服务端候选规范化校验、校验签名门槛、稳定 command ID、
 fingerprint 冲突反馈、重新加载和加载失败重试。
+重启后的运行链也已收口：`allow_manual_early_open` 同时驱动 HTTP capability 和生命周期服务，
+计划时间之前的人工开放在锁内按同一启动快照失败关闭，计划时间已到的开放与 Worker due 命令不受
+影响；`[equipment_source]` 则映射为 host/path allowlist、响应上限、共享请求间隔和全请求超时，
+适配器在固定 HTTPS origin、无重定向和精确 world 路径之上实施流式有界读取。
 Admin runtime listener 已接入 TCP 与 Linux Unix socket 启动装配；Unix 模式会执行 runtime
 目录、目录级单实例锁、stale socket 身份、owner/group 和 `0660` 权限检查，Worker control
 socket 路径仍由同一 runtime 文档选择。`auctionctl deployment-check/start/restart` 已恢复跨进程
@@ -606,10 +611,10 @@ SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧�
 | `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` | MoogleMail main/isekai 独立轮询、读取/处理重试、超时和失败退避 | 每个已配置 world 现在拥有独立调度任务、持久化 cursor、claim 和手动唤醒器，一个邮箱的读取或数据库失败不会阻塞另一个邮箱，也不会终止 Worker。调度契约和默认值已对齐旧版：`schedule` 接受标准五字段 cron、描述符、`@every`、进程本地时区及 `TZ=` / `CRON_TZ=` IANA 时区前缀，默认 `* * * * *`，再附加最多五秒抖动；共享 HTTP transport 恢复一秒最小请求间隔、15 秒请求超时、固定生产/回环安全 endpoint 和 8 MiB 响应上限；批次为 100 封，读取与业务处理各三次、每次 30 秒，使用 `1s → 30s` 指数退避。读取只对暂时错误内联重试，业务错误沿用旧版默认临时分类，成功后按 cron 保存下一次 `next_poll_at`，失败后保存下一 cron 与退避时刻的较大值。长批次处理期间按 10 秒周期续租 60 秒 claim，token/owner/version 或续租 fence 失效后取消陈旧 future；业务重试只通过显式短生命周期副本携带正文和装备 key，所有副本销毁时清零，稳定命令 ID 负责恢复可能已提交的本地步骤。剩余是用真实 main/isekai 邮箱对照分页、限流、Cookie 失效和写入不确定结果。 |
 | `auction-integrations` / `auction-jobs` | 论坛 `start`、`cancel`、PM `notify` 以及对应回执/不确定结果处理 | 经对照 Auction-BF 的 `forumingest`，`start`、`cancel` 和 PM-only `notify` 在旧版本身就是 warning-only，并未连接业务 owner；当前 Rust 保持该边界。MM `notify`、主题发布/读取和回帖竞价导入已接入；Forum 已从全局集成 tick 拆为独立、立即执行的顺序循环，默认一分钟加最多五秒抖动、100 条批次、300 秒逐主题 claim 和 93 秒单主题总时限；发布失败仍继续回帖扫描，任何一阶段失败都不会终止其它 Worker owner。回帖批次按 world 聚合，只有该批所有主题成功且命令账本完成写入后才推进扫描游标，已入账但通知暂未完成的命令会在后续轮次重放通知；主题正文现在可按 `worker.forum.public_base_url` 生成与旧版一致的公开拍卖绝对链接；发布超时按远端写入结果未知停靠，远端发布成功但本地发布证明写入失败时也进入人工对账退避状态，不再静默等待租约过期后重复发布。若要让这些 warning-only 命令真正改变论坛或拍卖状态，属于超出旧版等价范围的新契约，需另行冻结 owner、幂等账本和回执证明。 |
 | `auction-application` / `auction-storage` / `auction-jobs` / `auction-http` / `auction-web-admin` | operations alert 信号、通知批次、Worker control 聚合和完整 dashboard section | 旧版 15 类 signal、阈值 evaluator、fingerprint、观察/恢复、批次 claim lease/fencing、三次 Create 尝试、MoogleMail 通知正文、入队原子 cooldown、稳定失败终态，以及 Admin 的 health/process、Worker、tracing、alerting、全量 mail poller、realtime lag/failure water、delivery、fulfillment、recovery 安全汇总已接入 PostgreSQL 完整档；`000015` 同时修复了普通重试写入会被 CHECK 拒绝、第三次失败误入人工对账和领取时过早消耗 cooldown 的差异。scan、dispatch、reconcile 已恢复为三个独立的一分钟有界循环，错误互不阻塞，阈值、批次窗口、冷却、重试和正文边界默认值与旧版一致。credential scope 聚合和无 active 凭据时的 degraded 启动语义也已接入，SQLite 明确为能力缺失。剩余是通知外部回执、真实部署和切换前验证；外部广播 sink 不属于旧版能力。 |
-| `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter 与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过该边界的外部原生池不纳入累计统计。尚未完成的是心跳按真实 readiness/audit/tracing health 发布。 |
-| `auction-http` / `auction-web-*` | 旧版全部 Public/Admin 页面真实数据和交互 | Public 核心目录、世界切换、当前/历史拍卖、竞价/代理、账户、规则、黑名单、补偿、论坛、实时与价格历史，以及 Admin 登录、拍卖/lot、邮件、用户、凭据、规则、配置、审计、delivery、realtime、settlement/recovery 与 dashboard 页面均已接入真实 API；URL 状态、权威快照恢复、稳定 `command_id` 重试、五语言资源、移动端表格和主要旧版视觉交互已有源码 owner。真实 Dioxus 浏览器产物的字体、换行、焦点与响应式逐页核对仍未完成；SPA fallback 和 Web DTO 单一 owner 是本表下方列出的静态代码缺口。 |
+| `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter、真实状态心跳与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。当前 27 个追加审计 INSERT 均会累加进程内饱和失败计数；三进程周期心跳每轮复用数据库/schema readiness，读取该计数和各自 tracing 安全投影，启动/停止状态也不再使用占位值。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过存储池和审计观测边界的外部原生调用不纳入对应累计统计。剩余是实际部署下的 exporter、心跳 TTL 与故障聚合证据。 |
+| `auction-http` / `auction-web-*` | 旧版全部 Public/Admin 页面真实数据和交互 | Public 核心目录、世界切换、当前/历史拍卖、竞价/代理、账户、规则、黑名单、补偿、论坛、实时与价格历史，以及 Admin 登录、拍卖/lot、邮件、用户、凭据、规则、配置、审计、delivery、realtime、settlement/recovery 与 dashboard 页面均已接入真实 API；URL 状态、权威快照恢复、稳定 `command_id` 重试、五语言资源、移动端表格和主要旧版视觉交互已有源码 owner。SPA 入口现只提供给 14 + 21 条显式浏览器路由，未知 API/health 与页面 404 已隔离；Public/Admin 读响应及静态文件缓存头也按旧版语义和 Dioxus 稳定 WASM 文件名完成收口。HTTP/stream DTO 已统一由 `auction-contracts` 拥有，两个 `RustEmbed` 类型也已移入各自装配根形成制品级隔离。剩余是用真实 Dioxus 浏览器产物逐页核对字体、换行、焦点与响应式布局。 |
 | `auction-integrations` / `auction-storage` | 凭据失效后的自动标记、轮换和 dashboard 聚合 | 读侧 session 失效只轮换未尝试候选，写侧不盲重试但回写 `invalid`；PostgreSQL 幂等状态更新、MoogleMail/E-Hentai 接入和 Admin dashboard 聚合已完成，dashboard 也按旧版检查 MoogleMail `main`/`isekai` availability、scope 更新时间、Worker 重启状态和已配置 `dashboard_mailboxes` 的 poller 完整性。仍需真实外部服务对照和切换前行为验证。 |
-| `auction-storage` / `auctionctl` / `auction-http` | 旧版 `/health/live`、`/health/ready` 探针与 `migrate-only` 对未知数据库的保护 | Public/Admin 两类兼容健康探针已补齐；`ready` 只读检查数据库和全部内嵌迁移，`auctionctl migrate` 在没有 SQLx 迁移标记但检测到用户对象时失败关闭，不会把未知数据库初始化为 Auction 数据库。仍需让持久化 service heartbeat 复用同一真实 readiness 结果，不能继续固定发布 ready。 |
+| `auction-storage` / `auctionctl` / `auction-http` | 旧版 `/health/live`、`/health/ready` 探针与 `migrate-only` 对未知数据库的保护 | Public/Admin 两类兼容健康探针已补齐；`ready` 只读检查数据库、全部内嵌迁移和进程内审计写入完整性，持久化 service heartbeat 复用同一进程 readiness；`auctionctl migrate` 在没有 SQLx 迁移标记但检测到用户对象时失败关闭，不会把未知数据库初始化为 Auction 数据库。剩余是实际 PostgreSQL/SQLite 部署中的探针与编排证据。 |
 | `apps/auctionctl` / `auction-storage` / `auction-integrations` | 旧版 Worker `-bootstrap-mail-credentials`、`-bootstrap-mail-world`、`-bootstrap-mail-label` 一次性登记邮件凭据 | 已补齐 `bootstrap-mail-credentials --world --label`：Cookie 只从标准输入读取，限制为 `main`/`isekai` 且要求 Worker 已启用对应 world，复用凭据数据密钥和 Admin 凭据服务写入 PostgreSQL；命令不回显 Cookie、密文或密钥。仍需在真实部署中按目标 secret 注入方式做一次切换前演练。 |
 | `ops` / `apps/*` | 旧版 `ops/deploy` 的启动脚本、Caddy 反向代理、环境示例、数据库备份/恢复/保留资料 | 已补充当前三进程/TOML/健康探针的部署目录、启动顺序、安全权限、Caddy 反向代理模板、systemd 单角色与总控示例、`auctionctl deployment-check` 只读预检，以及 Rust `auctionctl deployment start/stop/restart/status` 总控：总控验证 unit 与 TOML 绑定，执行严格预检、地址检查和 forward-only migration，按 Worker → Admin → Public 逐角色等待应用 readiness，失败反序回滚本次启动的 unit，并用 flock 与 systemd InvocationID 发布私有启动回执。PostgreSQL retention、recovery preflight、backup/verify、restore/rebuild 和 canonical v28 接管证据链均已有 owner。部署模板继续由 systemd 发送 SIGTERM；Public/Admin 的共享 Hyper 连接服务会停止接收并排空现有连接，Worker 同时响应 SIGINT/SIGTERM，三进程执行 10 秒有界 drain、停止心跳和 tracing flush，单角色 unit 以 45 秒上限覆盖最长 exporter 关闭余量。旧版 retention 本身明确只做 inventory、禁止 mutation，完整 retention mutation 不是旧版漏迁。 |
 | `auction-storage` / `apps/auctionctl` / `ops` | canonical Auction-BF PostgreSQL v28 的现有数据接管 | 专用 v28 backup/verify/adopt 链路已完成：只接受 PostgreSQL 18.x、干净 migration 28、精确 canonical 表集合、零其他 session 和可无损恢复的竞价投影，要求专用恢复点、逐字确认和不可覆盖 receipt，在事务 bridge 中建立 SQLx `1..=5`、`7` 等价基线后继续前向迁移；`000014` 统一生命周期约束并移除旧论坛隐式入队 trigger，`000015` 归一化 operations alert 重试/终态/cooldown，并保留合法的历史终态 delivery 孤儿。普通 `migrate`/`restore` 不会猜测处理。剩余是真实 v28 副本上的接管与恢复演练。 |
@@ -625,19 +630,13 @@ SQLite Lite 的 PostgreSQL 专属 recovery、MoogleMail、论坛完整档、结�
 三进程 SIGINT/SIGTERM、有界 drain、停止心跳和 tracing flush 已完成。Public/Admin 共用 HTTP
 boundary 也已完成：请求 ID 与命令审计关联、W3C trace context、访问日志、panic recovery、
 安全响应头、普通请求/5 秒 read-header timeout、可信代理地址解析，以及 4096 项确定性淘汰限流器
-均已接入，不再列入未完成项：
+均已接入。显式浏览器入口、API/页面 404、GET/HEAD 静态方法边界及
+`no-cache`/`no-store`/`immutable` 缓存矩阵也已恢复。周期心跳同样已改为每轮读取真实数据库/
+migration readiness、audit failure 和 tracing health；Admin runtime 的人工提前开放与装备来源
+策略也已进入实际运行 owner。Web HTTP/stream DTO 已统一收敛到 `auction-contracts`，Web crate 只
+保留展示状态；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，`auction-http` 只接收
+泛型资源类型，因此制品级隔离不依赖链接器裁剪。以上项目均不再列入未完成项：
 
-- 将 `/api`、`/health` 和未知浏览器路径从宽泛 SPA fallback 隔离，恢复 JSON 404/页面 404，并逐项
-  核对旧版读响应缓存头；
-- 周期心跳每轮读取真实数据库/migration readiness、audit failure 和 tracing health；Public、Worker
-  不得继续遗漏 tracing health，也不得固定报告 `ready=true`、`audit_failure_count=0`；
-- 让 Admin runtime 的 `allow_manual_early_open` 真正约束生命周期命令和 capability，让
-  `[equipment_source]` 的 allowlist、响应上限、请求间隔和超时真正配置装备来源适配器；
-- 将 Public/Admin Web 重复定义的 HTTP/stream DTO 收敛到 `auction-contracts`，Web crate 直接依赖稳定
-  契约并只保留展示状态，避免同名字段静默漂移；
-- 将 Public/Admin 的 `RustEmbed` 类型按 Cargo feature 或独立 crate 做制品级隔离；当前路由不会
-  跨 surface 提供资源，但两种类型同时编译在共享 `auction-http` 中，不能依赖链接器裁剪来保证
-  公开端二进制不携带管理端资源；
 - 为已装配的可选 cache adapter 选择首批可重建读模型并接入有限 TTL/get/set/invalidate，或在完成前
   明确它只是连接边界；缓存不得进入竞价、会话、幂等或审计正确性路径；
 - 评审 Public Unix listener 与旧版部署契约、CLI 稳定退出码/脱敏有效配置诊断，以及把 Worker control
@@ -857,8 +856,10 @@ Public 与 Admin 的可见时间统一使用浏览器当前语言的 `Intl.DateT
 
 本轮 Admin 拍卖对照补齐了计划开放就绪判断：拍卖到达 `scheduled_open_at` 后会自动显示开放
 操作；lot 表恢复起拍价字段展示，创建、生命周期、lot 修改和 delivery 操作对话框补齐 Escape
-关闭与首焦点行为。第二轮静态审计确认手动提前开放目前被 HTTP capability 固定开启，尚未服从
-runtime 的 `allow_manual_early_open=false`，因此该能力仍列入上方待完成代码任务。
+关闭与首焦点行为。后续运行链审计又修复了手动提前开放被 HTTP capability 固定开启的问题：
+capability 现在读取启动时冻结的 `allow_manual_early_open`，计划时间之前的人工开放还会在锁内按
+同一策略失败关闭，命令重放仍先返回已提交结果。装备来源适配器也在同一轮接入 runtime 的
+allowlist、响应上限、共享请求间隔和总超时，并改为在流式读取期间实施大小限制。
 
 本轮 Admin 改名历史恢复了旧版的回滚确认对话框，回滚命令仍使用快照中的用户状态版本和稳定
 `command_id`；筛选也允许只填写用户名，不再强制输入用户 ID。

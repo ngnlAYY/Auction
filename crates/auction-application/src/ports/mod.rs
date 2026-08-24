@@ -240,8 +240,8 @@ pub use fulfillment::{
 pub use lifecycle::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActor,
     AuctionLifecycleActorType, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
-    AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecycleResult,
-    AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan,
+    AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecyclePolicy,
+    AuctionLifecycleResult, AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

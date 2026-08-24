@@ -6,9 +6,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 旧系统统一响应外壳的成功形式。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ApiResponse<T> {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
     pub data: T,
 }
@@ -16,12 +16,12 @@ pub struct ApiResponse<T> {
 impl<T> ApiResponse<T> {
     /// 构造稳定的成功响应；业务数据仍由 surface 自己定义。
     pub fn ok(message: impl Into<String>, data: T) -> Self {
-        Self { code: "ok", message: message.into(), data }
+        Self { code: "ok".to_owned(), message: message.into(), data }
     }
 
     /// 构造表示异步命令已接受的响应；它不表示外部副作用已经完成。
     pub fn accepted(message: impl Into<String>, data: T) -> Self {
-        Self { code: "accepted", message: message.into(), data }
+        Self { code: "accepted".to_owned(), message: message.into(), data }
     }
 }
 
@@ -30,36 +30,36 @@ impl<T> ApiResponse<T> {
 /// `service` 与 `version` 都由调用方传入：`env!("CARGO_PKG_VERSION")` 在本 crate 内展开只会
 /// 得到 `auction-contracts` 自己的版本，而运维需要的是运行进程的版本。当前工作区版本统一，
 /// 两者取值恰好相同，但语义不同——独立发布版本后差异就会显现。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HealthResponse {
     pub service: String,
-    pub status: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub version: String,
 }
 
 impl HealthResponse {
     /// 构造健康响应。`version` 应由二进制装配根传入自身的 `CARGO_PKG_VERSION`。
     pub fn ok(service: impl Into<String>, version: &'static str) -> Self {
-        Self { service: service.into(), status: "ok", version }
+        Self { service: service.into(), status: "ok".to_owned(), version: version.to_owned() }
     }
 }
 
 /// 与旧版 `/health/live`、`/health/ready` 保持一致的探针响应外壳。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HealthProbeResponse<T> {
-    pub code: &'static str,
-    pub message: &'static str,
+    pub code: String,
+    pub message: String,
     pub data: T,
 }
 
 /// 进程存活探针数据。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HealthLiveData {
     pub live: bool,
 }
 
 /// 进程就绪探针数据。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HealthReadyData {
     pub ready: bool,
 }
@@ -67,7 +67,7 @@ pub struct HealthReadyData {
 /// Public 持久化实时事件的安全信封。
 ///
 /// 负载已经由应用层事件注册表校验；这里不暴露数据库内部状态版本列或 origin 字段。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeEventResponse {
     pub event_id: String,
     pub stream_key: String,
@@ -79,7 +79,7 @@ pub struct PublicRealtimeEventResponse {
 }
 
 /// Public 事件回放响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeResponse {
     pub events: Vec<PublicRealtimeEventResponse>,
     pub next_after: i64,
@@ -87,17 +87,20 @@ pub struct PublicRealtimeResponse {
     pub refetch_required: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ApiErrorResponse {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
+    /// 可选的安全业务数据；只有明确冻结的错误契约可以填充。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
     pub request_id: Option<String>,
 }
 
 /// 带稳定业务数据的错误响应，用于封禁原因等旧契约投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ApiErrorResponseWithData<T> {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
     pub data: T,
     pub request_id: Option<String>,
@@ -129,10 +132,10 @@ pub struct LowerProxyAuthorizationRequest {
 }
 
 /// 状态命令的最小确认数据，供前端区分接受、重放和冲突。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct CommandAcknowledgement {
     pub command_id: Uuid,
-    pub result_code: &'static str,
+    pub result_code: String,
 }
 
 /// Admin 拍卖生命周期命令请求。
@@ -174,7 +177,7 @@ pub struct AdminMailPollTriggerRequest {
 }
 
 /// Admin 邮件轮询状态安全响应；不包含外部 Cookie 或原始游标。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailPollingResponse {
     pub mailbox_key: String,
     pub last_poll_at: String,
@@ -186,20 +189,20 @@ pub struct AdminMailPollingResponse {
 }
 
 /// Admin 邮箱轮询状态响应 envelope。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailStateResponse {
     pub polling: AdminMailPollingResponse,
 }
 
 /// Admin 全局邮件轮询唤醒的接受结果。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailPollTriggerResponse {
     pub command_id: String,
     pub pollers: i64,
 }
 
 /// Admin 入站邮件列表安全摘要。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeSummaryResponse {
     pub id: String,
     pub mailbox_key: String,
@@ -213,7 +216,7 @@ pub struct AdminMailIntakeSummaryResponse {
 }
 
 /// Admin 入站邮件数字分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -221,14 +224,14 @@ pub struct AdminMailPaginationResponse {
 }
 
 /// Admin 入站邮件列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeListResponse {
     pub intakes: Vec<AdminMailIntakeSummaryResponse>,
     pub pagination: AdminMailPaginationResponse,
 }
 
 /// Admin 入站邮件详情的固定元数据。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeMetadataResponse {
     pub auction_id: String,
     pub submission_id: String,
@@ -244,7 +247,7 @@ pub struct AdminMailIntakeMetadataResponse {
 }
 
 /// Admin 入站邮件详情响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeDetailResponse {
     pub id: String,
     pub mailbox_key: String,
@@ -259,7 +262,7 @@ pub struct AdminMailIntakeDetailResponse {
 }
 
 /// Admin 拍卖生命周期命令的稳定结果投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionLifecycleResponse {
     pub command_id: Uuid,
     pub auction_id: String,
@@ -283,7 +286,7 @@ pub struct AdminCreateAuctionRequest {
 }
 
 /// Admin 创建拍卖成功响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionCreateResponse {
     pub auction: AdminAuctionResponse,
 }
@@ -384,7 +387,7 @@ impl Drop for AdminCanonicalEquipmentRequest {
 }
 
 /// Admin 装备录入成功响应；字段与旧版 `addIntakeItem` 契约保持一致。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminIntakeResponse {
     pub auction_id: Uuid,
     pub auction_sequence: i64,
@@ -440,7 +443,7 @@ pub struct AdminRuntimeConfigUpdateRequest {
 }
 
 /// Admin 改名历史安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRenameResponse {
     pub id: String,
     pub user_id: String,
@@ -453,7 +456,7 @@ pub struct AdminRenameResponse {
 }
 
 /// Admin 改名历史数字分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRenamePaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -461,7 +464,7 @@ pub struct AdminRenamePaginationResponse {
 }
 
 /// Admin 改名历史列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRenameListResponse {
     pub renames: Vec<AdminRenameResponse>,
     pub pagination: AdminRenamePaginationResponse,
@@ -479,7 +482,7 @@ pub struct AdminRecoveryConfirmationRequest {
 }
 
 /// Admin recovery 确认结果的稳定投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRecoveryConfirmationResultResponse {
     pub recovery_id: String,
     pub action: String,
@@ -491,7 +494,7 @@ pub struct AdminRecoveryConfirmationResultResponse {
 }
 
 /// Admin recovery 确认成功响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRecoveryConfirmationResponse {
     pub recovery: AdminRecoveryConfirmationResultResponse,
 }
@@ -499,7 +502,7 @@ pub struct AdminRecoveryConfirmationResponse {
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
 /// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDeliveryResponse {
     pub id: String,
     pub origin_kind: String,
@@ -526,7 +529,7 @@ pub struct AdminDeliveryResponse {
 }
 
 /// Admin delivery 列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDeliveryListResponse {
     pub deliveries: Vec<AdminDeliveryResponse>,
     pub page: i64,
@@ -549,13 +552,13 @@ pub struct AdminDeliveryCommandRequest {
 }
 
 /// Admin delivery 状态命令响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDeliveryCommandResponse {
     pub delivery: AdminDeliveryResponse,
 }
 
 /// Admin realtime lag 的安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeLagResponse {
     pub stream_key: String,
     pub consumer_key: String,
@@ -565,7 +568,7 @@ pub struct AdminRealtimeLagResponse {
 }
 
 /// Admin realtime lag 列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeLagListResponse {
     pub lags: Vec<AdminRealtimeLagResponse>,
     pub page: i64,
@@ -574,7 +577,7 @@ pub struct AdminRealtimeLagListResponse {
 }
 
 /// Admin realtime failure 的安全投影；不包含原始驱动错误或未过滤 payload。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureResponse {
     pub id: String,
     pub event_id: String,
@@ -588,7 +591,7 @@ pub struct AdminRealtimeFailureResponse {
 }
 
 /// Admin realtime failure 列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureListResponse {
     pub failures: Vec<AdminRealtimeFailureResponse>,
     pub page: i64,
@@ -598,7 +601,7 @@ pub struct AdminRealtimeFailureListResponse {
 }
 
 /// Admin realtime failure 详情响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureDetailResponse {
     pub failure: AdminRealtimeFailureResponse,
 }
@@ -615,7 +618,7 @@ pub struct AdminRealtimeReplayRequest {
 }
 
 /// Admin realtime replay 追加事件的安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeReplayEventResponse {
     pub event_id: String,
     pub replay_of_event_id: String,
@@ -627,13 +630,13 @@ pub struct AdminRealtimeReplayEventResponse {
 }
 
 /// Admin realtime replay 响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeReplayResponse {
     pub replay: AdminRealtimeReplayEventResponse,
 }
 
 /// Admin 结算报告中的拍卖生命周期投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAuctionResponse {
     pub id: String,
     pub world_id: String,
@@ -661,7 +664,7 @@ pub struct AdminSettlementAuctionResponse {
 ///
 /// 能力只表示对应命令路由已经存在；未声明的扩展命令仍保持明确的未迁移响应，不会由能力
 /// 字段推断出额外的业务 owner。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionCapabilitiesResponse {
     pub cancel_auction: bool,
     pub manual_early_open: bool,
@@ -670,7 +673,7 @@ pub struct AdminAuctionCapabilitiesResponse {
 }
 
 /// Admin 拍卖列表中的生命周期安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionResponse {
     pub id: String,
     pub world_id: String,
@@ -697,7 +700,7 @@ pub struct AdminAuctionResponse {
 }
 
 /// Admin 拍卖列表分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -705,7 +708,7 @@ pub struct AdminAuctionPaginationResponse {
 }
 
 /// Admin 拍卖列表响应；列表和 lot 数量来自同一 PostgreSQL 快照。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionListResponse {
     pub auctions: Vec<AdminAuctionResponse>,
     pub capabilities: AdminAuctionCapabilitiesResponse,
@@ -713,7 +716,7 @@ pub struct AdminAuctionListResponse {
 }
 
 /// Admin 结算摘要响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementSummaryResponse {
     pub opening_balance: i64,
     pub tax_income: i64,
@@ -725,14 +728,14 @@ pub struct AdminSettlementSummaryResponse {
 }
 
 /// Admin 结算 lot 的 adjustment metadata。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAdjustmentResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<String>,
 }
 
 /// Admin 结算报告中的单个 lot。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementLotResponse {
     pub id: String,
     pub lot_number: i32,
@@ -749,7 +752,7 @@ pub struct AdminSettlementLotResponse {
 }
 
 /// Admin 结算报告响应；未结算拍卖的 `settlement` 为 null，且不伪造 lot 金额。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementReportResponse {
     pub auction: AdminSettlementAuctionResponse,
     pub settlement: Option<AdminSettlementSummaryResponse>,
@@ -757,7 +760,7 @@ pub struct AdminSettlementReportResponse {
 }
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotResponse {
     pub id: String,
     pub auction_id: String,
@@ -789,13 +792,13 @@ pub struct AdminLotResponse {
 }
 
 /// Admin draft lot 修改成功响应；返回同一事务快照中的 lot 安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotUpdateResponse {
     pub lot: AdminLotResponse,
 }
 
 /// Admin lot 列表分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -803,13 +806,13 @@ pub struct AdminLotPaginationResponse {
 }
 
 /// Admin lot 页面可用的外部写入能力；浏览器不得根据数据库档位自行猜测。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotCapabilitiesResponse {
     pub manual_intake: bool,
 }
 
 /// Admin lot 列表响应；拍卖和 lot 来自同一数据库快照。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotListResponse {
     pub auction: AdminSettlementAuctionResponse,
     pub lots: Vec<AdminLotResponse>,
@@ -818,7 +821,7 @@ pub struct AdminLotListResponse {
 }
 
 /// Admin 代理历史的安全事件投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminProxyEventResponse {
     pub authorization_id: String,
     pub authorization_sequence: i64,
@@ -835,7 +838,7 @@ pub struct AdminProxyEventResponse {
 }
 
 /// Admin 代理历史的页码或游标分页信息。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminProxyEventPaginationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<i64>,
@@ -851,14 +854,14 @@ pub struct AdminProxyEventPaginationResponse {
 }
 
 /// Admin 代理历史响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminProxyEventListResponse {
     pub proxy_events: Vec<AdminProxyEventResponse>,
     pub pagination: AdminProxyEventPaginationResponse,
 }
 
 /// Admin recovery action 的安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRecoveryActionResponse {
     pub id: String,
     pub kind: String,
@@ -871,7 +874,7 @@ pub struct AdminRecoveryActionResponse {
 }
 
 /// Admin recovery case 的安全投影，不包含内部 claim/lease 或外部正文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRecoveryResponse {
     pub id: String,
     pub auction_id: String,
@@ -897,7 +900,7 @@ pub struct AdminRecoveryResponse {
 }
 
 /// Admin recovery 报告响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRecoveryReportResponse {
     pub auction_id: String,
     pub recoveries: Vec<AdminRecoveryResponse>,
@@ -907,13 +910,13 @@ pub struct AdminRecoveryReportResponse {
 ///
 /// 结果来自竞价事务提交后的 lot 投影；重放同一 `command_id` 时返回同一份投影，不把数据库
 /// 计划或内部竞价事实直接暴露给浏览器。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PlaceBidResponse {
     pub bid: PlaceBidResultResponse,
 }
 
 /// Public 普通竞价结果中的公开 lot 状态。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PlaceBidResultResponse {
     pub lot_id: String,
     pub current_price: i64,
@@ -923,7 +926,7 @@ pub struct PlaceBidResultResponse {
 }
 
 /// 当前用户竞价事实的账户投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedBidResponse {
     pub id: String,
     pub auction_id: String,
@@ -939,21 +942,21 @@ pub struct PublicOwnedBidResponse {
 }
 
 /// 账户投影中的最小装备信息。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedEquipmentResponse {
     pub name: String,
     pub category: String,
 }
 
 /// 账户代理授权 quota。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedProxyQuotaResponse {
     pub used: i64,
     pub limit: i64,
 }
 
 /// 账户代理授权的历史转换事实。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedProxyTransitionResponse {
     pub transition_number: i64,
     pub kind: String,
@@ -973,7 +976,7 @@ pub struct PublicOwnedProxyTransitionResponse {
 }
 
 /// 账户代理授权当前可执行能力。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedProxyCapabilitiesResponse {
     pub can_lower: bool,
     pub waiting: bool,
@@ -981,7 +984,7 @@ pub struct PublicOwnedProxyCapabilitiesResponse {
 }
 
 /// 当前用户自己的代理授权投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedProxyResponse {
     pub authorization_id: String,
     pub auction_id: String,
@@ -1011,7 +1014,7 @@ pub struct PublicOwnedProxyResponse {
 ///
 /// 该 DTO 对齐旧系统命令响应的最小公开字段；它不携带账户页专属的拍卖、装备、时间和
 /// capability 字段，也不把命令账本的原始结果暴露给浏览器。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicProxyCommandBidResponse {
     pub lot_id: String,
     pub current_price: i64,
@@ -1021,7 +1024,7 @@ pub struct PublicProxyCommandBidResponse {
 }
 
 /// Public 代理命令成功后的授权投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicProxyCommandAuthorizationResponse {
     pub authorization_id: String,
     pub lot_id: String,
@@ -1040,13 +1043,13 @@ pub struct PublicProxyCommandAuthorizationResponse {
 }
 
 /// Public 代理创建/降低命令响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicProxyCommandResponse {
     pub authorization: PublicProxyCommandAuthorizationResponse,
 }
 
 /// 当前用户竞价与代理历史列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicMyBidsResponse {
     pub bids: Vec<PublicOwnedBidResponse>,
     pub proxies: Vec<PublicOwnedProxyResponse>,
@@ -1059,7 +1062,7 @@ pub struct PublicMyBidsResponse {
 }
 
 /// 当前用户在一个 lot 上的代理查询响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicMyProxyResponse {
     pub authorization: Option<PublicOwnedProxyResponse>,
 }
@@ -1072,17 +1075,17 @@ pub struct PublicLoginRequest {
 }
 
 /// Public 登录成功响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLoginResponse {
     pub user_id: String,
     pub username: String,
-    pub status: &'static str,
+    pub status: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
 }
 
 /// Public 当前会话响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicSessionCurrentResponse {
     pub authenticated: bool,
     pub user_id: String,
@@ -1092,7 +1095,7 @@ pub struct PublicSessionCurrentResponse {
 }
 
 /// Admin 登录或当前会话响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSessionResponse {
     pub authenticated: bool,
     pub actor: String,
@@ -1102,25 +1105,25 @@ pub struct AdminSessionResponse {
 }
 
 /// Public 黑名单响应中的可公开原因。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicAccountBlockedResponse {
     pub public_reason: String,
 }
 
 /// Public 世界条目的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct WorldStatusResponse {
     pub enabled: bool,
 }
 
 /// Public 世界目录响应，保持旧系统以世界 ID 为 key 的 JSON 结构。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct WorldsResponse {
     pub worlds: BTreeMap<String, WorldStatusResponse>,
 }
 
 /// Public 规则文档响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRulesResponse {
     pub locale: String,
     pub title: String,
@@ -1130,7 +1133,7 @@ pub struct PublicRulesResponse {
 }
 
 /// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRulesResponse {
     pub locale: String,
     pub title: String,
@@ -1141,7 +1144,7 @@ pub struct AdminRulesResponse {
 }
 
 /// Admin 规则候选校验响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRulesCandidateResponse {
     pub locale: String,
     pub title: String,
@@ -1149,7 +1152,7 @@ pub struct AdminRulesCandidateResponse {
 }
 
 /// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRuntimeConfigResponse {
     pub document: Value,
     pub fingerprint: String,
@@ -1157,7 +1160,7 @@ pub struct AdminRuntimeConfigResponse {
 }
 
 /// Public 黑名单条目的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBlacklistEntryResponse {
     pub game_player_id: String,
     pub reason: String,
@@ -1165,7 +1168,7 @@ pub struct PublicBlacklistEntryResponse {
 }
 
 /// Public 黑名单分页响应，保持旧系统的 `users` 字段命名。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBlacklistResponse {
     pub users: Vec<PublicBlacklistEntryResponse>,
     pub total: i64,
@@ -1174,7 +1177,7 @@ pub struct PublicBlacklistResponse {
 }
 
 /// Public 拍卖历史列表中的稳定摘要。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AuctionSummaryResponse {
     pub id: String,
     pub world_id: String,
@@ -1197,7 +1200,7 @@ pub struct AuctionSummaryResponse {
 }
 
 /// Public 历史拍卖列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AuctionListResponse {
     pub auctions: Vec<AuctionSummaryResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1214,7 +1217,7 @@ pub struct AuctionListResponse {
 }
 
 /// Public 竞价日志条目的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBidLogEntryResponse {
     pub id: String,
     pub auction_id: String,
@@ -1232,7 +1235,7 @@ pub struct PublicBidLogEntryResponse {
 }
 
 /// Public 竞价日志列表响应；编号页与 cursor 页沿用旧系统互斥字段形状。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBidLogListResponse {
     pub bids: Vec<PublicBidLogEntryResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1249,7 +1252,7 @@ pub struct PublicBidLogListResponse {
 }
 
 /// Public 价格历史条目的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPriceHistoryEntryResponse {
     pub lot_id: String,
     pub auction_id: String,
@@ -1267,7 +1270,7 @@ pub struct PublicPriceHistoryEntryResponse {
 }
 
 /// Public 价格历史编号页的完整过滤集统计。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPriceHistoryStatsResponse {
     pub count: i64,
     pub min: i64,
@@ -1276,7 +1279,7 @@ pub struct PublicPriceHistoryStatsResponse {
 }
 
 /// Public 价格历史响应；cursor 页不携带 stats/total。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPriceHistoryListResponse {
     pub rows: Vec<PublicPriceHistoryEntryResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1295,7 +1298,7 @@ pub struct PublicPriceHistoryListResponse {
 }
 
 /// Public 补偿池批次的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationRoundResponse {
     pub auction_id: String,
     pub world_id: String,
@@ -1310,7 +1313,7 @@ pub struct PublicCompensationRoundResponse {
 }
 
 /// Public 补偿池账本 movement 的稳定响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationMovementResponse {
     pub sequence: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1328,7 +1331,7 @@ pub struct PublicCompensationMovementResponse {
 }
 
 /// Public 补偿池批次列表响应；编号页与 cursor 页字段互斥。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationResponse {
     pub balance: i64,
     pub updated_at: Option<String>,
@@ -1347,7 +1350,7 @@ pub struct PublicCompensationResponse {
 }
 
 /// Public 单场补偿账本响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationMovementPageResponse {
     pub round: PublicCompensationRoundResponse,
     pub movements: Vec<PublicCompensationMovementResponse>,
@@ -1357,7 +1360,7 @@ pub struct PublicCompensationMovementPageResponse {
 }
 
 /// Public 论坛镜像同步状态响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicForumResponse {
     pub auction_id: String,
     pub status: String,
@@ -1372,12 +1375,12 @@ pub struct PublicForumResponse {
 }
 
 /// 当前拍卖中的公开上下文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct CurrentAuctionResponse {
     pub auction: Option<CurrentAuctionItemResponse>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct CurrentAuctionItemResponse {
     pub id: String,
     pub world: String,
@@ -1391,7 +1394,7 @@ pub struct CurrentAuctionItemResponse {
 }
 
 /// lot 列表与详情共用的公开拍卖上下文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLotProjectionResponse {
     pub auction_id: String,
     pub auction_status: String,
@@ -1407,14 +1410,14 @@ pub struct PublicLotProjectionResponse {
 }
 
 /// 终阶段代理限制的公开契约。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicFinalRestrictionResponse {
     pub new_slow_proxy_allowed: bool,
     pub existing_slow_proxy_converted: bool,
 }
 
 /// 公开装备 stat 的稳定 JSON 形状。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicEquipmentStatResponse {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1424,7 +1427,7 @@ pub struct PublicEquipmentStatResponse {
 }
 
 /// 公开装备详情；attributes 仅由 lot 详情显式传入。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicEquipmentResponse {
     pub name: String,
     pub category: String,
@@ -1442,7 +1445,7 @@ pub struct PublicEquipmentResponse {
 }
 
 /// 正式竞拍 lot 的公开契约。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLiveLotResponse {
     pub id: String,
     pub auction_id: String,
@@ -1462,7 +1465,7 @@ pub struct PublicLiveLotResponse {
 }
 
 /// 预览 lot 的公开契约。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewLotResponse {
     pub id: String,
     pub auction_id: String,
@@ -1481,7 +1484,7 @@ pub struct PublicPreviewLotResponse {
 }
 
 /// 预览 lot 详情沿用摘要字段，并附加完整公开装备投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewLotDetailResponse {
     #[serde(flatten)]
     pub summary: PublicPreviewLotResponse,
@@ -1489,7 +1492,7 @@ pub struct PublicPreviewLotDetailResponse {
 }
 
 /// lot 列表的无标签数组，保持旧 JSON 契约的 preview/live 形状。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum PublicLotListItemsResponse {
     Preview(Vec<PublicPreviewLotResponse>),
@@ -1497,7 +1500,7 @@ pub enum PublicLotListItemsResponse {
 }
 
 /// lot 详情的无标签对象，保持旧 JSON 契约的 preview/live 形状。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum PublicLotDetailItemResponse {
     Preview(PublicPreviewLotDetailResponse),
@@ -1505,7 +1508,7 @@ pub enum PublicLotDetailItemResponse {
 }
 
 /// Public lot 列表与详情共用的响应外壳。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLotEnvelopeResponse {
     pub auction_id: String,
     pub world: String,
@@ -1553,7 +1556,7 @@ impl std::fmt::Debug for AdminForumPreviewRequest {
 }
 
 /// Admin 论坛预览中的 lot。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumLotResponse {
     pub code: String,
     pub category: String,
@@ -1569,7 +1572,7 @@ pub struct AdminForumLotResponse {
 }
 
 /// Admin 论坛预览目录。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumCatalogResponse {
     pub categories: Vec<String>,
     pub lots: Vec<AdminForumLotResponse>,
@@ -1577,7 +1580,7 @@ pub struct AdminForumCatalogResponse {
 }
 
 /// Admin 论坛预览帖子。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumPostResponse {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1589,7 +1592,7 @@ pub struct AdminForumPostResponse {
 }
 
 /// Admin 论坛预览命令。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumCommandResponse {
     pub line: usize,
     pub text: String,
@@ -1608,7 +1611,7 @@ pub struct AdminForumCommandResponse {
 }
 
 /// Admin 论坛预览帖子命令集合。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumBidPostResponse {
     pub post: AdminForumPostResponse,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -1619,7 +1622,7 @@ pub struct AdminForumBidPostResponse {
 }
 
 /// Admin 论坛预览警告。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumWarningResponse {
     pub line: usize,
     pub code: String,
@@ -1631,7 +1634,7 @@ pub struct AdminForumWarningResponse {
 }
 
 /// Admin 论坛拍卖预览成功响应数据。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumPreviewResponse {
     pub catalog: AdminForumCatalogResponse,
     pub posts: Vec<AdminForumBidPostResponse>,
@@ -1640,7 +1643,7 @@ pub struct AdminForumPreviewResponse {
 }
 
 /// Admin 审计记录安全投影；metadata 必须是安全 JSON 对象。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuditRecordResponse {
     pub id: String,
     pub occurred_at: String,
@@ -1657,14 +1660,14 @@ pub struct AdminAuditRecordResponse {
 }
 
 /// Admin 审计 keyset 下一页边界。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuditCursorResponse {
     pub before_time: String,
     pub before_id: String,
 }
 
 /// Admin 审计查询响应；数字页与 keyset 页保留旧契约的互斥字段形状。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuditResponse {
     pub records: Vec<AdminAuditRecordResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1681,7 +1684,7 @@ pub struct AdminAuditResponse {
 }
 
 /// Admin dashboard 的健康聚合。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDashboardHealthResponse {
     pub status: String,
     pub readiness: bool,
@@ -1690,7 +1693,7 @@ pub struct AdminDashboardHealthResponse {
 }
 
 /// Admin dashboard 的 Worker control 安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDashboardWorkerResponse {
     pub condition: String,
     pub state: String,
@@ -1703,7 +1706,7 @@ pub struct AdminDashboardWorkerResponse {
 ///
 /// `data` 只允许由 owner 适配器构造安全 JSON；当 owner 尚未迁移或读取失败时只返回
 /// `status` 与有界 `error_code`，不返回数据库行或错误正文。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDashboardSectionResponse {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1715,7 +1718,7 @@ pub struct AdminDashboardSectionResponse {
 }
 
 /// Admin dashboard 响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDashboardResponse {
     pub health: AdminDashboardHealthResponse,
     pub worker: AdminDashboardWorkerResponse,
@@ -1792,7 +1795,7 @@ pub struct AdminRenameRevertRequest {
 }
 
 /// Admin 用户安全响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserResponse {
     pub id: String,
     pub username: String,
@@ -1805,7 +1808,7 @@ pub struct AdminUserResponse {
 }
 
 /// Admin 用户列表分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -1813,14 +1816,14 @@ pub struct AdminUserPaginationResponse {
 }
 
 /// Admin 用户列表中的黑名单历史安全投影。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserBlacklistHistoryResponse {
     pub public_reason: String,
     pub blacklisted_at: String,
 }
 
 /// Admin 用户列表条目；写命令响应仍只使用 `AdminUserResponse`。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserListItemResponse {
     #[serde(flatten)]
     pub user: AdminUserResponse,
@@ -1829,14 +1832,14 @@ pub struct AdminUserListItemResponse {
 }
 
 /// Admin 用户列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserListResponse {
     pub users: Vec<AdminUserListItemResponse>,
     pub pagination: AdminUserPaginationResponse,
 }
 
 /// Admin 用户修改响应；生成 key 只在本次创建/重签响应中出现。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserMutationResponse {
     pub user: AdminUserResponse,
     pub generated_key: Option<String>,
@@ -1888,7 +1891,7 @@ pub struct AdminCredentialDeleteRequest {
 }
 
 /// Admin 凭据安全响应，不包含 secret、密文、密钥标识或指纹。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminCredentialResponse {
     pub id: String,
     pub kind: String,
@@ -1902,7 +1905,7 @@ pub struct AdminCredentialResponse {
 }
 
 /// Admin 凭据列表分页。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminCredentialPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -1910,7 +1913,7 @@ pub struct AdminCredentialPaginationResponse {
 }
 
 /// Admin 凭据列表响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminCredentialListResponse {
     pub credentials: Vec<AdminCredentialResponse>,
     pub pagination: AdminCredentialPaginationResponse,
@@ -1918,14 +1921,14 @@ pub struct AdminCredentialListResponse {
 }
 
 /// Admin 凭据导入/修改响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminCredentialMutationResponse {
     pub credential: AdminCredentialResponse,
     pub restart_required: bool,
 }
 
 /// Admin 凭据删除响应。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminCredentialDeleteResponse {
     pub credential_id: String,
     pub state_version: i64,

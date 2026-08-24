@@ -3,45 +3,24 @@
 //! 页面只读取各 owner 提供的安全摘要；数据库行、delivery payload、Cookie 和外部错误正文
 //! 不会进入浏览器。DTO 与后端 dashboard 响应保持字段闭集，便于旧版运维信息逐项迁移。
 
+pub(crate) use auction_contracts::{
+    AdminDashboardHealthResponse as AdminDashboardHealth,
+    AdminDashboardWorkerResponse as AdminDashboardWorker,
+};
+use auction_contracts::{AdminDashboardResponse, AdminDashboardSectionResponse};
 use gloo_net::http::Request;
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
 
 use super::ApiResponse;
 use super::mail::AdminMailPolling;
 
-fn no_data<T>() -> Option<T> {
-    None
-}
-
-/// Admin dashboard 各 owner section 的稳定安全外壳。
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// Dashboard section 的浏览器类型化投影；wire 层仍保留 owner 构造的有界 JSON。
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminDashboardSection<T> {
     pub status: String,
-    #[serde(default)]
     pub observed_at: Option<String>,
-    #[serde(default)]
     pub error_code: Option<String>,
-    #[serde(default = "no_data")]
     pub data: Option<T>,
-}
-
-/// Admin dashboard 顶层健康摘要。
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminDashboardHealth {
-    pub status: String,
-    pub readiness: bool,
-    pub audit_failure_count: i64,
-    pub missing_services: Vec<String>,
-}
-
-/// Admin dashboard 的 Worker control 摘要。
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminDashboardWorker {
-    pub condition: String,
-    pub state: String,
-    pub ready: bool,
-    pub version: String,
-    pub mail_pollers: i64,
 }
 
 /// 进程 tracing 安全摘要。
@@ -215,7 +194,7 @@ pub(crate) struct AdminRecoveryData {
 pub(crate) type AdminRecoverySection = AdminDashboardSection<AdminRecoveryData>;
 
 /// Admin dashboard 全量安全快照；前端只消费这里声明的稳定字段。
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminDashboardSnapshot {
     pub health: AdminDashboardHealth,
     pub worker: AdminDashboardWorker,
@@ -235,9 +214,34 @@ async fn fetch_dashboard_snapshot() -> Result<AdminDashboardSnapshot, String> {
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminDashboardSnapshot> =
+    let payload: ApiResponse<AdminDashboardResponse> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+    let snapshot = payload.data;
+    Ok(AdminDashboardSnapshot {
+        health: snapshot.health,
+        worker: snapshot.worker,
+        process: decode_section(snapshot.process)?,
+        mail: decode_section(snapshot.mail)?,
+        realtime: decode_section(snapshot.realtime)?,
+        credentials: decode_section(snapshot.credentials)?,
+        delivery: decode_section(snapshot.delivery)?,
+        fulfillment: decode_section(snapshot.fulfillment)?,
+        recovery: decode_section(snapshot.recovery)?,
+        alerting: decode_section(snapshot.alerting)?,
+    })
+}
+
+fn decode_section<T: DeserializeOwned>(
+    section: AdminDashboardSectionResponse,
+) -> Result<AdminDashboardSection<T>, String> {
+    let data =
+        section.data.map(serde_json::from_value).transpose().map_err(|error| error.to_string())?;
+    Ok(AdminDashboardSection {
+        status: section.status,
+        observed_at: section.observed_at,
+        error_code: section.error_code,
+        data,
+    })
 }
 
 /// 读取 Admin dashboard 的完整安全快照。

@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 use sqlx::{Row, Sqlite, SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::super::SqliteStore;
 
 /// SQLite 竞价事务持有的唯一连接。
@@ -861,6 +863,7 @@ async fn append_lifecycle_record_inner(
         .bind(metadata)
         .execute(&mut *connection)
         .await
+        .record_audit_failure()
         .map_err(map_sql_error)?;
     }
 
@@ -1399,6 +1402,7 @@ async fn insert_audit_for_bid(
     .bind(serde_json::to_string(&metadata).map_err(|_| invalid_record())?)
     .execute(&mut *connection)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
 }
@@ -1429,6 +1433,7 @@ async fn insert_audit_for_proxy_changes(
         .bind(serde_json::to_string(&metadata).map_err(|_| invalid_record())?)
         .execute(&mut *connection)
         .await
+        .record_audit_failure()
         .map_err(map_sql_error)?;
     }
     Ok(())

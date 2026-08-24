@@ -21,6 +21,9 @@ use sqlx::{Row, postgres::PgRow};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::DatabaseStore;
 
 /// 绑定运行时数据库的 Admin runtime 命令账本端口。
@@ -264,6 +267,7 @@ async fn insert_pending_postgres(
     })))
     .execute(&mut *transaction)
     .await
+    .record_audit_failure()
     .map_err(map_command_sql_error)?;
 
     sqlx::query(
@@ -347,6 +351,7 @@ async fn apply_postgres(
     })))
     .execute(&mut *transaction)
     .await
+    .record_audit_failure()
     .map_err(map_command_sql_error)?;
 
     let row = sqlx::query(UPDATE_APPLY)

@@ -11,15 +11,17 @@ use uuid::Uuid;
 use crate::{
     ApplicationError, ApplicationFuture, AuctionFinalProxyPlan, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort, AuctionLifecycleContext, AuctionLifecycleEffect,
-    AuctionLifecyclePlan, AuctionLifecycleResult, AuctionLifecycleTransaction,
-    AuctionPreviewSuccessorPlan, CommandLedgerError, CompetitionTransaction,
-    CompetitionTransactionError, RequestHash, StoredCommand, TransactionPolicy, TransactionRunner,
+    AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult,
+    AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan, CommandLedgerError,
+    CompetitionTransaction, CompetitionTransactionError, RequestHash, StoredCommand,
+    TransactionPolicy, TransactionRunner,
 };
 
 /// Admin/Worker 共享的拍卖生命周期用例。
 pub struct AuctionLifecycleService<R, C> {
     repository: Arc<R>,
     clock: Arc<C>,
+    policy: AuctionLifecyclePolicy,
 }
 
 impl<R, C> AuctionLifecycleService<R, C>
@@ -28,9 +30,9 @@ where
     R::Transaction: CompetitionTransaction + AuctionLifecycleTransaction,
     C: crate::Clock,
 {
-    /// 建立只依赖事务 runner 和时钟端口的生命周期服务。
-    pub fn new(repository: Arc<R>, clock: Arc<C>) -> Self {
-        Self { repository, clock }
+    /// 建立只依赖事务 runner、时钟端口和启动期冻结策略的生命周期服务。
+    pub fn new(repository: Arc<R>, clock: Arc<C>, policy: AuctionLifecyclePolicy) -> Self {
+        Self { repository, clock, policy }
     }
 
     /// 在 Serializable 事务中查重、锁定聚合、应用领域迁移并追加账本记录。
@@ -47,6 +49,7 @@ where
             );
         }
         let now = self.clock.now();
+        let policy = self.policy;
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
@@ -89,7 +92,7 @@ where
                     {
                         return Err(CompetitionTransactionError::StaleState.into());
                     }
-                    let plan = lifecycle_plan(transaction, &command, context, now).await?;
+                    let plan = lifecycle_plan(transaction, &command, context, now, policy).await?;
                     let auction = &plan.auction;
                     let result = AuctionLifecycleResult {
                         command_id: command.command_id,
@@ -121,6 +124,7 @@ async fn lifecycle_plan<T>(
     command: &AuctionLifecycleCommand,
     context: AuctionLifecycleContext,
     now: chrono::DateTime<chrono::Utc>,
+    policy: AuctionLifecyclePolicy,
 ) -> Result<AuctionLifecyclePlan, ApplicationError>
 where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
@@ -140,6 +144,9 @@ where
         }
         crate::AuctionLifecycleAction::Open => {
             let manual_override = admin_action && now < context.scheduled_open_at;
+            if manual_override && !policy.allows_manual_early_open() {
+                return Err(CompetitionTransactionError::InvalidState.into());
+            }
             if !manual_override
                 && (now < context.preview_scheduled_at || now < context.scheduled_open_at)
             {
@@ -351,6 +358,10 @@ where
     R::Transaction: CompetitionTransaction + AuctionLifecycleTransaction,
     C: crate::Clock,
 {
+    fn allows_manual_early_open(&self) -> bool {
+        self.policy.allows_manual_early_open()
+    }
+
     fn execute(
         &self,
         command: AuctionLifecycleCommand,

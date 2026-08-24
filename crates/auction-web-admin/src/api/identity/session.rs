@@ -3,11 +3,12 @@
 //! 浏览器只持有服务端返回的 actor、CSRF token 和过期时间；Admin secret 只用于一次 Basic
 //! Auth 请求，不进入组件之外的状态，也不写入日志或 DTO。
 
+use auction_contracts::{AdminSessionResponse, ApiResponse};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gloo_net::http::Request;
-use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// 已认证 Admin 会话的浏览器状态；`authenticated = false` 不会构造该类型。
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminSession {
     pub actor: String,
     pub csrf_token: String,
@@ -15,29 +16,13 @@ pub(crate) struct AdminSession {
     pub absolute_expires_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct ApiResponse<T> {
-    data: T,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AdminSessionData {
-    authenticated: bool,
-    actor: String,
-    csrf_token: String,
-    expires_at: String,
-    absolute_expires_at: String,
-}
-
-impl AdminSessionData {
-    fn into_session(self) -> Option<AdminSession> {
-        self.authenticated.then_some(AdminSession {
-            actor: self.actor,
-            csrf_token: self.csrf_token,
-            expires_at: self.expires_at,
-            absolute_expires_at: self.absolute_expires_at,
-        })
-    }
+fn into_session(data: AdminSessionResponse) -> Option<AdminSession> {
+    data.authenticated.then_some(AdminSession {
+        actor: data.actor,
+        csrf_token: data.csrf_token,
+        expires_at: data.expires_at,
+        absolute_expires_at: data.absolute_expires_at,
+    })
 }
 
 /// 读取当前 Admin 会话；401 只表示尚未登录或会话已失效，不视为网络故障。
@@ -50,9 +35,9 @@ pub(crate) async fn fetch_admin_session() -> Result<Option<AdminSession>, String
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminSessionData> =
+    let payload: ApiResponse<AdminSessionResponse> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into_session())
+    Ok(into_session(payload.data))
 }
 
 /// 使用一次 Basic Auth 登录 Admin；服务端负责设置 HttpOnly session Cookie。
@@ -67,9 +52,9 @@ pub(crate) async fn login_admin(actor: String, secret: String) -> Result<AdminSe
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminSessionData> =
+    let payload: ApiResponse<AdminSessionResponse> =
         response.json().await.map_err(|error| error.to_string())?;
-    payload.data.into_session().ok_or_else(|| "Admin 登录响应未包含有效会话".to_owned())
+    into_session(payload.data).ok_or_else(|| "Admin 登录响应未包含有效会话".to_owned())
 }
 
 /// 使用当前 CSRF token 注销 Admin，会话 Cookie 由服务端清除。

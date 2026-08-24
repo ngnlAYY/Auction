@@ -20,6 +20,8 @@ use sqlx::postgres::PgRow;
 use sqlx::{Sqlite, SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::DatabaseStore;
 
 const REPLAY_COMMAND_KIND: &str = "replay_realtime_failure";
@@ -879,6 +881,7 @@ async fn replay_postgres_inner(
     .bind(sqlx::types::Json(metadata))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(|_| storage_error("写入 PostgreSQL realtime replay audit 失败"))?;
 
     let result = RealtimeReplayResult {
@@ -1188,6 +1191,7 @@ async fn replay_sqlite_inner(
     .bind(metadata)
     .execute(&mut *connection)
     .await
+    .record_audit_failure()
     .map_err(|_| storage_error("写入 Lite realtime replay audit 失败"))?;
 
     let result = RealtimeReplayResult {

@@ -7,7 +7,10 @@ use std::time::Duration;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{ApplicationError, ProcessReadinessPort, RepositoryError};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_observability::{PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource};
+use auction_observability::{
+    HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsBackend, PoolMetricsSnapshot,
+    PoolMetricsSource,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use sqlx::Row;
 use thiserror::Error;
@@ -18,6 +21,8 @@ use sqlx::{PgPool, Postgres, postgres::PgPoolOptions};
 mod admin_intake;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod admin_mail;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod audit_health;
 #[cfg(feature = "postgres")]
 mod competition;
 #[cfg(feature = "postgres")]
@@ -401,9 +406,9 @@ async fn ensure_sqlite_migration_target(pool: &SqlitePool) -> Result<(), Storage
 impl ProcessReadinessPort for DatabaseStore {
     fn check(&self) -> auction_application::ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            self.check_readiness().await.map_err(|_| {
+            self.check_process_readiness().await.map_err(|_| {
                 ApplicationError::Repository(RepositoryError::Failed(
-                    "数据库 readiness 检查失败".to_owned(),
+                    "进程 readiness 检查失败".to_owned(),
                 ))
             })
         })
@@ -411,9 +416,29 @@ impl ProcessReadinessPort for DatabaseStore {
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl HeartbeatHealthReader for DatabaseStore {
+    fn readiness(&self) -> HeartbeatReadinessFuture<'_> {
+        Box::pin(async move { self.check_process_readiness().await.is_ok() })
+    }
+
+    fn audit_failure_count(&self) -> i64 {
+        audit_health::failure_count()
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 impl DatabaseStore {
+    /// 复用 HTTP 与 heartbeat 的保守进程 readiness：数据库/schema 正常且没有审计写入失败。
+    async fn check_process_readiness(&self) -> Result<(), ()> {
+        self.check_database_readiness().await?;
+        if audit_health::failure_count() > 0 {
+            return Err(());
+        }
+        Ok(())
+    }
+
     /// 以只读查询确认连接可用且已应用当前二进制的全部迁移。
-    async fn check_readiness(&self) -> Result<(), ()> {
+    async fn check_database_readiness(&self) -> Result<(), ()> {
         match self {
             #[cfg(feature = "postgres")]
             Self::Postgres(store) => check_postgres_readiness(store).await,

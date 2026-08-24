@@ -6,9 +6,11 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
-  访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空。
+  访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
+  `no-cache`/`no-store` 响应策略。
 - `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
-- `src/assets/mod.rs`：前端静态产物内嵌与 SPA fallback。
+- `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：14 + 21 条允许获得
+  SPA 入口的显式浏览器路由。
 
 ## 职责边界
 
@@ -78,13 +80,13 @@ PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lit
 A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 MoogleMail poller，返回带
 `pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 
-Public 与 Admin 是不同 surface，路由只提供各自静态产物；当前两种 `RustEmbed` 类型仍位于同一个
-`auction-http` crate，尚无 Cargo feature 或独立 crate 提供制品级隔离，不能把链接器裁剪当成
-“公开端二进制不包含管理端资源”的契约保证。
+Public 与 Admin 是不同 surface，路由只提供各自静态产物。`RustEmbed` 类型由对应装配根独占，
+本 crate 通过泛型资源类型提供通用分派；任一部署制品都不引用另一端资源，不把链接器裁剪当作
+隔离保证。
 已登记路径均由对应 owner 负责真实投影或明确的 Lite 能力响应；未装配 owner、数据库档位不支持
 的能力返回明确的 `feature_not_supported`/`feature_not_migrated`，不伪造旧系统成功数据。未登记
-路径目前仍可能落入宽泛 SPA fallback，需按下文目标顺序修正后才能视为 404 契约完成。两类 surface
-的 HTTP 响应还会提供标准 `Date` 头，
+的 `/api`、`/health` 路径返回带请求 ID 的 JSON 404；未知浏览器导航按 `Accept` 返回 404 页面，
+不会获得状态为 200 的 SPA 入口。两类 surface 的 HTTP 响应还会提供标准 `Date` 头，
 供 Public 浏览器按旧版契约估算服务端时钟；该头不承载业务状态，也不改变任何服务端时间判断。
 
 两个 surface 共用同一协议边界。缺失的 `X-Request-ID` 会生成 32 位十六进制值，合法入站值只允许
@@ -112,18 +114,21 @@ target/dx/build/auction-web-admin/web/public
 
 `allow_missing = true` 是必需的。`rust-embed` 默认在目标目录不存在时**编译期报错**，而前端
 产物由独立的 `dx build` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端的构建都会
-因为缺少产物而无法编译。缺失产物在运行时以 503 明确报告，不 panic。
+因为缺少产物而无法编译。批准的浏览器路由在产物缺失时以 503 明确报告，不 panic；未知路径仍
+按 404 处理。
 
 release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
 
-目标请求命中顺序如下；当前仍需把 `/api`、`/health` 和任意未知页面从宽泛 SPA fallback 中
-隔离，完成前不能把未知路径的 404 契约视为已收口：
+目标请求按以下顺序封闭分派：
 
-1. 精确匹配静态文件；
-2. 无扩展名路径回退 `index.html`（对应旧 `manifests/*.routes.json` 的浏览器路由）；
-3. 带扩展名但未命中按 404 处理，**不**回退 HTML——否则缺失的 `.wasm`/`.js` 会拿到一份 200
-   的 HTML，浏览器端只会报难以定位的解析错误；
-4. 产物整体缺失返回 503 并说明需要执行的构建命令。
+1. 已注册业务路由由 Axum handler 处理；未注册的 `/api`、`/health` 保留路径直接返回 JSON 404；
+2. 精确静态文件只接受 GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405；
+3. 只有 `assets/routes.rs` 中与 Dioxus `Route` 同步的显式路径才返回 `index.html`，并使用
+   `Cache-Control: no-store`；
+4. 其他路径不回退 SPA：浏览器 HTML 导航返回最小 404 页面，其他请求返回 JSON 404；
+5. 批准的浏览器路由缺少产物时返回 503，并说明需要执行的构建命令。
 
-入口文档使用 `no-cache`：它引用带指纹的 WASM/JS 名称，缓存住会让浏览器加载到已被替换的旧
-产物。指纹化产物本身按 `immutable` 长期缓存。
+缓存策略按旧版语义和 Dioxus 产物形状区分：浏览器路由入口 `no-store`；直接读取 `index.html`、
+顶层 `wasm/*.js`/`*.wasm` 和其他稳定文件名使用 `no-cache` 并提供 `Last-Modified` 条件读取；只有
+`assets/` 下带内容指纹的资源使用一年 `immutable`。Public 非身份化读接口统一 `no-cache`，Public
+会话/身份化/变更接口和全部 Admin 业务接口统一 `no-store`，包括错误响应。

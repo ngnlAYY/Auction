@@ -20,6 +20,8 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::PostgresStore;
 
 type PgTransaction = Transaction<'static, Postgres>;
@@ -1297,6 +1299,7 @@ async fn append_admin_lot_record_inner(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
 
     if !changed {
@@ -1590,6 +1593,7 @@ async fn append_admin_auction_created_record_inner(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
 
     sqlx::query(
@@ -1706,6 +1710,7 @@ async fn append_lifecycle_record_inner(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
 
     let (event_kind, payload) = lifecycle_event_payload(transaction, command, result).await?;
@@ -2230,6 +2235,7 @@ async fn insert_audit_for_bid(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
 }
@@ -2260,6 +2266,7 @@ async fn insert_audit_for_proxy_changes(
         .bind(metadata)
         .execute(&mut **transaction)
         .await
+        .record_audit_failure()
         .map_err(map_sql_error)?;
     }
     Ok(())

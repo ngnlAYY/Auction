@@ -3,10 +3,10 @@
 //! 浏览器只编辑非敏感 JSON 文档，并把服务端返回的 fingerprint 原样作为更新 fence；TOML
 //! 文件、密钥和命令账本永远不进入浏览器。
 
+pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
+use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 use super::ApiResponse;
 
@@ -22,25 +22,6 @@ impl AdminRuntimeConfigApiError {
     pub(crate) const fn is_conflict(&self) -> bool {
         matches!(self.status, Some(409))
     }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminRuntimeConfig {
-    pub document: Value,
-    pub fingerprint: String,
-    pub restart_required: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminRuntimeConfigValidateRequest {
-    document: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminRuntimeConfigUpdateRequest {
-    command_id: Uuid,
-    expected_fingerprint: String,
-    document: Value,
 }
 
 pub(crate) async fn fetch_admin_runtime_config()

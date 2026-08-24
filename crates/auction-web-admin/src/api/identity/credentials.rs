@@ -3,39 +3,20 @@
 //! 浏览器只保存凭据安全投影。导入表单的 secret 仅用于当前请求，成功后清空本地状态，
 //! 列表和命令响应都不包含凭据内容。
 
+use auction_contracts::{
+    AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialListResponse,
+    AdminCredentialMutationRequest, AdminCredentialMutationResponse,
+};
+pub(crate) use auction_contracts::{
+    AdminCredentialDeleteResponse as AdminCredentialDeleteResult,
+    AdminCredentialResponse as AdminCredential,
+};
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ApiResponse, fetch_csrf_token};
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminCredential {
-    pub id: String,
-    pub kind: String,
-    pub world: String,
-    pub label: String,
-    pub status: String,
-    pub state_version: i64,
-    pub created_at: String,
-    pub rotated_at: Option<String>,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminCredentialPagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminCredentialListData {
-    credentials: Vec<AdminCredential>,
-    pagination: AdminCredentialPagination,
-    restart_required: bool,
-}
-
+/// 凭据列表页的浏览器展示投影；分页字段在这里展平，wire 形状仍由 contracts 拥有。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminCredentialPage {
     pub credentials: Vec<AdminCredential>,
@@ -45,47 +26,8 @@ pub(crate) struct AdminCredentialPage {
     pub restart_required: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AdminCredentialCreateRequest {
-    command_id: Uuid,
-    kind: String,
-    world: String,
-    label: String,
-    secret: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminCredentialMutationRequest {
-    command_id: Uuid,
-    credential_id: Uuid,
-    expected_state_version: i64,
-    action: &'static str,
-    label: Option<String>,
-    status: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminCredentialDeleteRequest {
-    command_id: Uuid,
-    credential_id: Uuid,
-    expected_state_version: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminCredentialMutationData {
-    credential: AdminCredential,
-    restart_required: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminCredentialDeleteResult {
-    pub credential_id: String,
-    pub state_version: i64,
-    pub restart_required: bool,
-}
-
-impl From<AdminCredentialListData> for AdminCredentialPage {
-    fn from(data: AdminCredentialListData) -> Self {
+impl From<AdminCredentialListResponse> for AdminCredentialPage {
+    fn from(data: AdminCredentialListResponse) -> Self {
         Self {
             credentials: data.credentials,
             page: data.pagination.page,
@@ -119,7 +61,7 @@ pub(crate) async fn fetch_admin_credentials(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminCredentialListData> =
+    let payload: ApiResponse<AdminCredentialListResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.into())
 }
@@ -141,7 +83,7 @@ pub(crate) async fn create_admin_credential(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminCredentialMutationData> =
+    let payload: ApiResponse<AdminCredentialMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.credential)
 }
@@ -163,7 +105,7 @@ pub(crate) async fn mutate_admin_credential(
             command_id,
             credential_id,
             expected_state_version: credential.state_version,
-            action,
+            action: action.to_owned(),
             label,
             status,
         })
@@ -172,7 +114,7 @@ pub(crate) async fn mutate_admin_credential(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminCredentialMutationData> =
+    let payload: ApiResponse<AdminCredentialMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.credential)
 }

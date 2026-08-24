@@ -42,8 +42,9 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
 拍卖生命周期事务由 `src/database/competition/mod.rs` 持有：管理命令锁定拍卖后校验
-`expected_state_version`，取消动作同时写入取消时间、原因和操作者；SQLite Lite 通过追加迁移
-提供同名取消元数据列和形状触发器。
+`expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
+取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
+触发器。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
 `src/database/competition/mod.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
@@ -89,6 +90,9 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 服务心跳由 `src/database/health/mod.rs` 持有：PostgreSQL 使用数据库时钟和
 observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和同一 sequence fence；
 两个后端都只返回 dashboard 所需的安全字段，details 原文不会离开存储边界。
+`src/database/audit_health/mod.rs` 对当前所有追加审计 INSERT 的返回错误进行进程内饱和计数，
+不保存 SQL、错误原文或业务数据。`DatabaseStore` 的进程 readiness 每次重新检查数据库和全部
+内嵌 migration，并在该计数非零后失败关闭；同一窄端口同时供 HTTP readiness 与服务心跳使用。
 
 连接池状态通过 `DatabaseStore::pool_metrics_source` 以窄端口交给
 `auction-observability`：只暴露当前借出、空闲、总数和最大连接数，以及在本 crate 的 SQLx

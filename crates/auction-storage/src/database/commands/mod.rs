@@ -9,8 +9,8 @@ use auction_application::{
     AdminAuctionCreatePort, AdminAuctionSummary, AdminCreateAuctionCommand, AdminRulesDocument,
     AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
     ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
-    AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate, Clock,
-    CompetitionCommandPort, CompetitionService, CreateProxyCommand, LowerProxyCommand,
+    AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
+    Clock, CompetitionCommandPort, CompetitionService, CreateProxyCommand, LowerProxyCommand,
     PlaceBidCommand,
 };
 #[cfg(feature = "postgres")]
@@ -117,15 +117,16 @@ where
 pub struct DatabaseAuctionLifecycleCommands<C> {
     store: Arc<DatabaseStore>,
     clock: Arc<C>,
+    policy: AuctionLifecyclePolicy,
 }
 
 impl<C> DatabaseAuctionLifecycleCommands<C>
 where
     C: Clock + 'static,
 {
-    /// 建立不向 HTTP 暴露具体数据库类型的生命周期命令端口。
-    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
-        Self { store, clock }
+    /// 建立不向 HTTP 暴露具体数据库类型、并冻结运行期授权策略的生命周期命令端口。
+    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>, policy: AuctionLifecyclePolicy) -> Self {
+        Self { store, clock, policy }
     }
 }
 
@@ -133,22 +134,29 @@ impl<C> AuctionLifecycleCommandPort for DatabaseAuctionLifecycleCommands<C>
 where
     C: Clock + 'static,
 {
+    fn allows_manual_early_open(&self) -> bool {
+        self.policy.allows_manual_early_open()
+    }
+
     fn execute(
         &self,
         command: AuctionLifecycleCommand,
     ) -> ApplicationFuture<'_, AuctionLifecycleResult> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
+        let policy = self.policy;
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = AuctionLifecycleService::new(Arc::new(store.clone()), clock);
+                    let service =
+                        AuctionLifecycleService::new(Arc::new(store.clone()), clock, policy);
                     service.execute(command).await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => {
-                    let service = AuctionLifecycleService::new(Arc::new(store.clone()), clock);
+                    let service =
+                        AuctionLifecycleService::new(Arc::new(store.clone()), clock, policy);
                     service.execute(command).await
                 }
             }

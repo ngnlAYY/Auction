@@ -1,23 +1,10 @@
 //! Public 黑名单 HTTP DTO 与请求。
 
-use serde::Deserialize;
+pub(crate) use auction_contracts::{
+    PublicBlacklistEntryResponse as BlacklistEntry, PublicBlacklistResponse as BlacklistPage,
+};
 
 use super::{ApiResponse, send_get};
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct BlacklistEntry {
-    pub game_player_id: String,
-    pub reason: String,
-    pub blacklisted_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct BlacklistPage {
-    pub users: Vec<BlacklistEntry>,
-    pub total: i64,
-    pub page: i64,
-    pub page_size: i64,
-}
 
 pub(crate) async fn fetch_blacklist(page: i64) -> Result<BlacklistPage, String> {
     let page = page.max(1);

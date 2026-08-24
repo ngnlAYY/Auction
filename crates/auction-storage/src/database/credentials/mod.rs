@@ -29,6 +29,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
+#[cfg(feature = "postgres")]
 use sqlx::{Row, postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
@@ -854,6 +857,7 @@ async fn insert_audit(
     .bind(Json(json!({ "command_id": command_id, "command_kind": kind.as_str() })))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_storage_error)?;
     Ok(())
 }

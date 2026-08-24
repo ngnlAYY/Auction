@@ -29,11 +29,12 @@ SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接�
 停止领取新任务并完成当前有界批次，随后停止心跳并按配置限时刷新 tracing；排空期间第二次信号
 会强制收口。Public/Admin 现已接入统一 HTTP 边界：请求 ID 与命令审计关联、W3C trace context、
 访问日志、panic recovery、安全响应头、处理/请求头超时、可信代理解析和有界限流器均已落地。
-2026-08-24 的第二轮交叉审计仍确认需要补齐：心跳按真实 readiness/audit/tracing 状态发布，
-未知 API/health 路径与 SPA fallback 隔离，以及 Admin runtime
-的人工提前开放和装备来源策略真正接入运行路径。浏览器端还存在稳定 DTO 在 Web crate 重复定义，
-以及 Public/Admin 静态资源只做路由隔离、尚无 Cargo feature 或独立 crate 提供制品级隔离的问题；
-这些都属于非测试代码任务。
+显式 Public/Admin 浏览器路由、未知 API/health 的 JSON 404、未知页面 404 和旧版读响应缓存策略也已
+恢复。三进程心跳现在每轮复用数据库/schema readiness，读取进程内审计写入失败饱和计数和各自的
+tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提前开放和装备来源策略也已冻结到
+启动装配，并分别在锁内生命周期事务和受限流式 HTTP 读取中生效。浏览器 HTTP/stream DTO 已统一
+由 `auction-contracts` 拥有；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，任一部署
+制品都不会引用另一端资源。2026-08-24 的第二轮交叉审计仍保留首批缓存读模型等非测试代码任务。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
 Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
@@ -46,7 +47,7 @@ MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
 
-尚不能据此宣称行为等价：上述静态代码缺口，以及真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
+尚不能据此宣称行为等价：上述剩余静态代码缺口，以及真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
 浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust `auctionctl` 与 systemd owner
 边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
 不会进入启动路径。旧版 realtime 没有外部广播 sink，

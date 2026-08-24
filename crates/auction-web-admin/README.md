@@ -1,7 +1,8 @@
 # 管理端浏览器界面
 
 Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
-`manifests/admin.routes.json` 冻结，共 21 条。
+`manifests/admin.routes.json` 冻结，共 21 条，并与
+`auction-http/src/assets/routes.rs` 的后端入口清单同步维护。
 
 - `src/main.rs`：薄启动入口。
 - `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
@@ -28,8 +29,9 @@ just web-build-admin   # dx build -p auction-web-admin --platform web
 just web-serve-admin   # 本地开发监听
 ```
 
-产物输出到 `target/dx/build/auction-web-admin/web/public/`，由 `auction-http` 内嵌进管理端
-二进制。公开端二进制不包含这些资源。
+产物输出到 `target/dx/build/auction-web-admin/web/public/`，由 Admin 装配根独占的
+`RustEmbed` 类型内嵌，再交给 `auction-http` 提供。依赖图不引用 Public 产物；未知路径保持 404，
+不获得 Admin SPA 入口。
 
 管理端与公开端是不同 surface：本 crate 独立拥有自己的组件树和路由树，不复用公开端组件，
 公开端也不得依赖本 crate。拍卖列表已接入 PostgreSQL 只读安全投影、world/status 筛选、时间线和分页，
@@ -120,5 +122,5 @@ Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话
 所有 `aria-modal` 管理弹窗还由壳层提供 Tab/Shift+Tab 焦点循环、背景滚动锁定和关闭后触发控件
 焦点恢复，避免键盘焦点离开当前弹窗或在关闭后丢失。
 管理命令必须走版本化 REST 契约，不在浏览器端重建状态机；凭据与密钥材料不进入浏览器。
-当前 `src/api/` 仍重复定义了一部分 `auction-contracts` 已拥有的 wire struct，尚未满足 DTO 单一
-owner 规范；后续应直接复用契约类型，只在 Web 层保留展示状态。
+`src/api/` 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`；本 crate 只保留分页展平、
+Dashboard section 解码、表单与交互等浏览器展示状态。

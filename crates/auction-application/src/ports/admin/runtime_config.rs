@@ -65,13 +65,13 @@ impl Default for AdminRuntimeListenerConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeEquipmentSourceConfig {
-    /// 允许访问的远程主机名；未启用 allowlist 时可为空。
+    /// 允许访问的远程主机名；默认只允许 `hentaiverse.org`。
     pub allowed_hosts: Vec<String>,
-    /// 允许访问的 URL 路径前缀；未启用 allowlist 时可为空。
+    /// 允许访问的 URL 路径前缀；默认只允许两个 world 的装备目录。
     pub allowed_path_prefixes: Vec<String>,
-    /// 是否启用主机和路径双重 allowlist；省略时关闭。
+    /// 是否启用主机和路径双重 allowlist；省略时开启。
     pub allowlist_enabled: bool,
-    /// 单次响应最大字节数；省略时为 1 MiB。
+    /// 单次响应最大字节数；省略时为 2 MiB。
     pub maximum_response_bytes: u64,
     /// 两次请求之间的最小间隔秒数；省略时为 1 秒。
     pub minimum_request_interval_seconds: u64,
@@ -82,10 +82,10 @@ pub struct AdminRuntimeEquipmentSourceConfig {
 impl Default for AdminRuntimeEquipmentSourceConfig {
     fn default() -> Self {
         Self {
-            allowed_hosts: Vec::new(),
-            allowed_path_prefixes: Vec::new(),
-            allowlist_enabled: false,
-            maximum_response_bytes: 1 << 20,
+            allowed_hosts: vec!["hentaiverse.org".to_owned()],
+            allowed_path_prefixes: vec!["/equip/".to_owned(), "/isekai/equip/".to_owned()],
+            allowlist_enabled: true,
+            maximum_response_bytes: 2 << 20,
             minimum_request_interval_seconds: 1,
             request_timeout_seconds: 10,
         }
@@ -657,8 +657,14 @@ fn validate_equipment_source(
             "equipment_source 边界无效".to_owned(),
         ));
     }
-    if config.allowed_hosts.iter().any(|host| !valid_dns_name(host))
-        || config.allowed_path_prefixes.iter().any(|prefix| !valid_path_prefix(prefix))
+    if config
+        .allowed_hosts
+        .iter()
+        .enumerate()
+        .any(|(index, host)| !valid_dns_name(host) || config.allowed_hosts[..index].contains(host))
+        || config.allowed_path_prefixes.iter().enumerate().any(|(index, prefix)| {
+            !valid_path_prefix(prefix) || config.allowed_path_prefixes[..index].contains(prefix)
+        })
     {
         return Err(AdminRuntimeConfigError::InvalidDocument(
             "equipment_source allowlist 格式无效".to_owned(),
@@ -787,6 +793,7 @@ fn valid_dns_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 253
         && value == value.to_ascii_lowercase()
+        && value.parse::<std::net::IpAddr>().is_err()
         && value.split('.').all(|label| {
             !label.is_empty()
                 && label.len() <= 63
@@ -804,7 +811,9 @@ fn valid_path_prefix(value: &str) -> bool {
         && value.ends_with('/')
         && value == value.trim()
         && !value.contains("//")
-        && !value.chars().any(|character| matches!(character, '?' | '#' | '%' | '\\'))
+        && !value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '?' | '#' | '%' | '\\'))
         && value.split('/').all(|segment| segment != "." && segment != "..")
 }
 

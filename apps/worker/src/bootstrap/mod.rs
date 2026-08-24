@@ -8,9 +8,9 @@ use anyhow::Context;
 use auction_application::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeReader,
     AdminCredentialRuntimeWriter, AdminCredentialWorld, ApplicationError, ApplicationFuture,
-    AuctionLifecycleCommandPort, Clock, CompetitionCommandPort, DeliveryTransport,
-    DeliveryWorkStore, ForumPublisher, ForumReplyStore, ForumSyncStore, ForumTopicReader,
-    MailDeliveryEnqueuer, OperationsAlertSourceReader, OperationsAlertStore,
+    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, Clock, CompetitionCommandPort,
+    DeliveryTransport, DeliveryWorkStore, ForumPublisher, ForumReplyStore, ForumSyncStore,
+    ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertSourceReader, OperationsAlertStore,
     RecoveryBuyerBlacklister, RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore,
     RecoveryWorkStore, ScheduledRoundStore, SettlementCommandPort,
     SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
@@ -43,8 +43,8 @@ use auction_integrations::mooglemail::{
 use auction_integrations::{CredentialSealer, DataKey, ForumThreadRenderer};
 #[cfg(feature = "postgres")]
 use auction_integrations::{
-    EquipmentKeySealer, EquipmentSourceAdapter, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
-    build_equipment_http_client,
+    EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy, MoogleMailLoginKeyIssuer,
+    MoogleMailLoginKeyReader, build_equipment_http_client,
 };
 #[cfg(feature = "postgres")]
 use auction_jobs::{
@@ -56,8 +56,11 @@ use auction_jobs::{MailPollRuntime, RecoveryHealthRuntime};
 #[cfg(any(feature = "postgres", feature = "sqlite", unix))]
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_observability::{HeartbeatPublisher, HeartbeatStore, ProcessRole, ServiceName};
-use auction_observability::{ProcessMetrics, TracingConfig, TracingRuntime};
+use auction_observability::{
+    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
+    ProcessRole, ServiceName,
+};
+use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, TracingRuntime};
 use auction_process::{
     DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
 };
@@ -138,6 +141,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
     let worker = run_worker(
         config,
+        telemetry.health_reader(),
         Arc::clone(&metrics),
         Box::pin(async move {
             let _ = shutdown_receiver.await;
@@ -195,6 +199,7 @@ fn tracing_config(settings: &auction_config::TracingSettings) -> TracingConfig {
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 async fn run_worker(
     config: &AppConfig,
+    tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
@@ -215,14 +220,19 @@ async fn run_worker(
         .context("register worker database pool metrics")?;
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
+    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
     let heartbeat = Arc::new(HeartbeatPublisher::new(
         heartbeat_store,
-        ServiceName::Worker,
-        ProcessRole::Worker,
-        worker_id.clone(),
-        env!("CARGO_PKG_VERSION").to_owned(),
-        Utc::now(),
-        chrono::Duration::seconds(30),
+        HeartbeatPublisherConfig {
+            service_name: ServiceName::Worker,
+            process_role: ProcessRole::Worker,
+            instance_id: worker_id.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            started_at: Utc::now(),
+            ttl: chrono::Duration::seconds(30),
+        },
+        heartbeat_health,
+        tracing_health,
     ));
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
@@ -230,7 +240,11 @@ async fn run_worker(
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
-        Arc::new(DatabaseAuctionLifecycleCommands::new(lifecycle_store, Arc::new(SystemClock)));
+        Arc::new(DatabaseAuctionLifecycleCommands::new(
+            lifecycle_store,
+            Arc::new(SystemClock),
+            AuctionLifecyclePolicy::default(),
+        ));
     let (mail_polls, mail_delivery_transport, mail_evidence_reader) =
         configure_mail_poll(config, Arc::clone(&store)).await?;
     let operations_alert =
@@ -350,7 +364,7 @@ async fn run_worker(
         (DatabaseBackend::Sqlite, None) => None,
         (DatabaseBackend::Sqlite, Some(_)) => None,
     };
-    if let Err(error) = heartbeat.publish_ready().await {
+    if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
     }
     let mut heartbeat_task = Some(TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
@@ -714,8 +728,11 @@ async fn configure_mail_poll(
                     let equipment_client = build_equipment_http_client()
                         .map_err(|error| anyhow::Error::msg(error.to_string()))?;
                     let equipment = Arc::new(
-                        EquipmentSourceAdapter::production(equipment_client, 0)
-                            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                        EquipmentSourceAdapter::production(
+                            equipment_client,
+                            EquipmentSourcePolicy::default(),
+                        )
+                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
                     );
                     let auctions = Arc::new(MailAuctionIntakeService::new(
                         Arc::new(postgres_store.clone()),
@@ -1113,6 +1130,7 @@ fn map_mooglemail_message(
 #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
 async fn run_worker(
     config: &AppConfig,
+    _tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
@@ -1249,7 +1267,7 @@ fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandl
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            if let Err(error) = publisher.publish_ready().await {
+            if let Err(error) = publisher.publish_current().await {
                 tracing::warn!(error = %error, "worker heartbeat publish failed");
             }
         }

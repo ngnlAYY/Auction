@@ -1,10 +1,11 @@
 //! Admin 装备来源适配器。
 //!
-//! 这里把 canonical JSON 和旧版 Hentaiverse 装备页归一为同一份脱敏快照。URL 读取只允许
-//! 配置 endpoint 的固定 host、无重定向的 HTTPS 请求和 `/equip/{id}/{key}` 形状，解析失败
+//! 这里把 canonical JSON 和旧版 Hentaiverse 装备页归一为同一份脱敏快照。URL 读取先经过
+//! 启动时冻结的 host/path allowlist，再要求固定 endpoint origin、无重定向的 HTTPS 请求和
+//! `/equip/{id}/{key}` 形状；共享适配器同时实施请求间隔、全请求超时和流式响应上限。解析失败
 //! 时不把原始 HTML 交给应用层或数据库层。
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 use auction_application::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, ApplicationError,
@@ -17,36 +18,118 @@ use reqwest::{Client, StatusCode};
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tokio::{
+    sync::Mutex,
+    time::{Instant, sleep_until, timeout},
+};
 use url::Url;
 
 use crate::{EquipmentKeySealer, EquipmentKeySealerError};
 
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MINIMUM_MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const DEFAULT_USER_AGENT: &str = "auction-rust-equipment-source/1";
 
 /// 装备来源适配器初始化错误。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSourceConfigurationError {
     InvalidEndpoint,
+    InvalidAllowlist,
     InvalidResponseLimit,
+    InvalidRequestInterval,
+    InvalidRequestTimeout,
 }
 
 impl fmt::Display for EquipmentSourceConfigurationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::InvalidEndpoint => "装备来源 endpoint 无效",
+            Self::InvalidAllowlist => "装备来源 allowlist 无效",
             Self::InvalidResponseLimit => "装备来源响应大小限制无效",
+            Self::InvalidRequestInterval => "装备来源请求间隔无效",
+            Self::InvalidRequestTimeout => "装备来源请求超时无效",
         })
     }
 }
 
 impl std::error::Error for EquipmentSourceConfigurationError {}
 
+/// 装备来源适配器在进程启动时冻结的非敏感读取策略。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipmentSourcePolicy {
+    /// 允许访问的规范小写 DNS 主机名。
+    pub allowed_hosts: Vec<String>,
+    /// 允许访问的绝对路径前缀。
+    pub allowed_path_prefixes: Vec<String>,
+    /// 是否在固定 endpoint 与装备路径校验之外再启用业务 allowlist。
+    pub allowlist_enabled: bool,
+    /// 单个响应解码前允许读取的最大字节数。
+    pub maximum_response_bytes: usize,
+    /// 同一适配器两次远程请求起点之间的最小间隔。
+    pub minimum_request_interval: Duration,
+    /// 从发送请求到完整流式读取结束的总超时。
+    pub request_timeout: Duration,
+}
+
+impl Default for EquipmentSourcePolicy {
+    fn default() -> Self {
+        Self {
+            allowed_hosts: vec!["hentaiverse.org".to_owned()],
+            allowed_path_prefixes: vec!["/equip/".to_owned(), "/isekai/equip/".to_owned()],
+            allowlist_enabled: true,
+            maximum_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            minimum_request_interval: Duration::from_secs(1),
+            request_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+impl EquipmentSourcePolicy {
+    fn validate(&self) -> Result<(), EquipmentSourceConfigurationError> {
+        if !(MINIMUM_MAX_RESPONSE_BYTES..=DEFAULT_MAX_RESPONSE_BYTES)
+            .contains(&self.maximum_response_bytes)
+        {
+            return Err(EquipmentSourceConfigurationError::InvalidResponseLimit);
+        }
+        if self.minimum_request_interval.is_zero()
+            || self.minimum_request_interval > Duration::from_secs(60)
+        {
+            return Err(EquipmentSourceConfigurationError::InvalidRequestInterval);
+        }
+        if self.request_timeout.is_zero() || self.request_timeout > Duration::from_secs(30) {
+            return Err(EquipmentSourceConfigurationError::InvalidRequestTimeout);
+        }
+        if self.allowed_hosts.len() > 16
+            || self.allowed_path_prefixes.len() > 16
+            || self.allowlist_enabled
+                && (self.allowed_hosts.is_empty() || self.allowed_path_prefixes.is_empty())
+            || self.allowed_hosts.iter().enumerate().any(|(index, host)| {
+                !valid_dns_name(host) || self.allowed_hosts[..index].contains(host)
+            })
+            || self.allowed_path_prefixes.iter().enumerate().any(|(index, prefix)| {
+                !valid_path_prefix(prefix) || self.allowed_path_prefixes[..index].contains(prefix)
+            })
+        {
+            return Err(EquipmentSourceConfigurationError::InvalidAllowlist);
+        }
+        Ok(())
+    }
+
+    fn allows(&self, target: &Url) -> bool {
+        !self.allowlist_enabled
+            || target
+                .host_str()
+                .is_some_and(|host| self.allowed_hosts.iter().any(|item| item == host))
+                && self.allowed_path_prefixes.iter().any(|prefix| target.path().starts_with(prefix))
+    }
+}
+
 /// canonical JSON 与旧装备页共用的来源适配器。
 pub struct EquipmentSourceAdapter {
     client: Client,
     endpoint: Url,
-    max_response_bytes: usize,
+    policy: EquipmentSourcePolicy,
+    next_request_at: Mutex<Instant>,
 }
 
 impl EquipmentSourceAdapter {
@@ -57,34 +140,30 @@ impl EquipmentSourceAdapter {
     pub fn new(
         client: Client,
         endpoint: Url,
-        max_response_bytes: usize,
+        policy: EquipmentSourcePolicy,
     ) -> Result<Self, EquipmentSourceConfigurationError> {
         if endpoint.scheme() != "https"
             || endpoint.host_str().is_none()
             || endpoint.username() != ""
             || endpoint.password().is_some()
-            || endpoint.path() != ""
+            || !matches!(endpoint.path(), "" | "/")
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
         {
             return Err(EquipmentSourceConfigurationError::InvalidEndpoint);
         }
-        let max_response_bytes =
-            if max_response_bytes == 0 { DEFAULT_MAX_RESPONSE_BYTES } else { max_response_bytes };
-        if !(1..=DEFAULT_MAX_RESPONSE_BYTES).contains(&max_response_bytes) {
-            return Err(EquipmentSourceConfigurationError::InvalidResponseLimit);
-        }
-        Ok(Self { client, endpoint, max_response_bytes })
+        policy.validate()?;
+        Ok(Self { client, endpoint, policy, next_request_at: Mutex::new(Instant::now()) })
     }
 
     /// 使用旧版生产 endpoint 创建适配器。
     pub fn production(
         client: Client,
-        max_response_bytes: usize,
+        policy: EquipmentSourcePolicy,
     ) -> Result<Self, EquipmentSourceConfigurationError> {
         let endpoint = Url::parse("https://hentaiverse.org")
             .map_err(|_| EquipmentSourceConfigurationError::InvalidEndpoint)?;
-        Self::new(client, endpoint, max_response_bytes)
+        Self::new(client, endpoint, policy)
     }
 
     async fn read_url_inner(
@@ -93,45 +172,10 @@ impl EquipmentSourceAdapter {
         equipment_url: String,
     ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
         let (target, equipment_id, key) = self.parse_equipment_url(&world_id, &equipment_url)?;
-        let response = self
-            .client
-            .get(target)
-            .header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT)
-            .send()
+        self.await_request_slot().await;
+        let body = timeout(self.policy.request_timeout, self.fetch_document(target))
             .await
-            .map_err(|_| AdminIntakeError::SourceUnavailable)?;
-        if response.url().scheme() != self.endpoint.scheme()
-            || response.url().host_str() != self.endpoint.host_str()
-            || response.url().port_or_known_default() != self.endpoint.port_or_known_default()
-        {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        if response.status() == StatusCode::TOO_MANY_REQUESTS || response.status().is_server_error()
-        {
-            return Err(AdminIntakeError::SourceUnavailable);
-        }
-        if !response.status().is_success() {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        if response.content_length().is_some_and(|length| length > self.max_response_bytes as u64) {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        let content_type = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .split(';')
-            .next()
-            .map(str::trim)
-            .unwrap_or_default();
-        if !matches!(content_type, "text/html" | "application/xhtml+xml") {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        let body = response.bytes().await.map_err(|_| AdminIntakeError::SourceUnavailable)?;
-        if body.len() > self.max_response_bytes {
-            return Err(AdminIntakeError::InvalidSource);
-        }
+            .map_err(|_| AdminIntakeError::SourceUnavailable)??;
         let facts = parse_equipment_page(&body, &equipment_id)?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
         let attributes = facts.attributes()?;
@@ -153,6 +197,83 @@ impl EquipmentSourceAdapter {
             collected_at: Utc::now(),
             key,
         })
+    }
+
+    async fn await_request_slot(&self) {
+        let mut next_request_at = self.next_request_at.lock().await;
+        let now = Instant::now();
+        if *next_request_at > now {
+            sleep_until(*next_request_at).await;
+        }
+        *next_request_at = Instant::now() + self.policy.minimum_request_interval;
+    }
+
+    async fn fetch_document(&self, target: Url) -> Result<Vec<u8>, AdminIntakeError> {
+        let mut response = self
+            .client
+            .get(target)
+            .header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT)
+            .send()
+            .await
+            .map_err(|_| AdminIntakeError::SourceUnavailable)?;
+        if response.url().scheme() != self.endpoint.scheme()
+            || response.url().host_str() != self.endpoint.host_str()
+            || response.url().port_or_known_default() != self.endpoint.port_or_known_default()
+        {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        if response.status() == StatusCode::TOO_MANY_REQUESTS || response.status().is_server_error()
+        {
+            return Err(AdminIntakeError::SourceUnavailable);
+        }
+        if !response.status().is_success() {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > self.policy.maximum_response_bytes as u64)
+        {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        let content_encoding = response
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .trim();
+        if !content_encoding.is_empty() && !content_encoding.eq_ignore_ascii_case("identity") {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .split(';')
+            .next()
+            .map(str::trim)
+            .unwrap_or_default();
+        if !matches!(content_type, "text/html" | "application/xhtml+xml") {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        let mut body = Vec::with_capacity(
+            response
+                .content_length()
+                .and_then(|length| usize::try_from(length).ok())
+                .unwrap_or_default()
+                .min(self.policy.maximum_response_bytes),
+        );
+        while let Some(chunk) =
+            response.chunk().await.map_err(|_| AdminIntakeError::SourceUnavailable)?
+        {
+            let next_length =
+                body.len().checked_add(chunk.len()).ok_or(AdminIntakeError::InvalidSource)?;
+            if next_length > self.policy.maximum_response_bytes {
+                return Err(AdminIntakeError::InvalidSource);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 
     async fn read_mail_attachment_inner(
@@ -195,6 +316,7 @@ impl EquipmentSourceAdapter {
             || parsed.fragment().is_some()
             || parsed.path().contains("..")
             || parsed.as_str() != raw_url
+            || !self.policy.allows(&parsed)
         {
             return Err(AdminIntakeError::InvalidSource);
         }
@@ -703,6 +825,34 @@ fn selector(raw: &str) -> Result<Selector, AdminIntakeError> {
 
 fn normalize_text(value: impl AsRef<str>) -> String {
     value.as_ref().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn valid_dns_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value == value.to_ascii_lowercase()
+        && value.parse::<std::net::IpAddr>().is_err()
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        })
+}
+
+fn valid_path_prefix(value: &str) -> bool {
+    !value.is_empty()
+        && value.starts_with('/')
+        && value.ends_with('/')
+        && value == value.trim()
+        && !value.contains("//")
+        && !value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '?' | '#' | '%' | '\\'))
+        && value.split('/').all(|segment| segment != "." && segment != "..")
 }
 
 fn valid_decimal_id(value: &str) -> bool {

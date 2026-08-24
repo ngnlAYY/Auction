@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+auction-contracts.workspace = true
 auction-web-shared.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 dioxus-i18n.workspace = true

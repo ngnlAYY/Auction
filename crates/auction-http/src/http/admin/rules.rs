@@ -241,7 +241,7 @@ fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminRules(AdminRulesError::RevisionConflict { current_revision }) => (
             StatusCode::CONFLICT,
             axum::Json(ApiErrorResponseWithData {
-                code: "state_conflict",
+                code: "state_conflict".to_owned(),
                 message: "规则版本已变化".to_owned(),
                 data: serde_json::json!({ "current_revision": current_revision }),
                 request_id: None,
@@ -253,7 +253,7 @@ fn map_error(error: ApplicationError) -> Response {
         }) => (
             StatusCode::CONFLICT,
             axum::Json(ApiErrorResponseWithData {
-                code: "state_conflict",
+                code: "state_conflict".to_owned(),
                 message: "规则版本已变化".to_owned(),
                 data: serde_json::json!({ "current_revision": current_revision }),
                 request_id: None,

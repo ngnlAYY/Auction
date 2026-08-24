@@ -48,8 +48,8 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 
 成功响应的业务 code、JSON 字段和错误 code 以旧 handler 为准。下表的错误状态码是该
 handler 当前明确产生的稳定集合；依赖错误中的 504 表示 context deadline，503 表示
-其他依赖不可用。冻结契约要求路由器对未注册路径/方法返回 404/405；当前 SPA fallback 隔离
-缺口见下文。
+其他依赖不可用。冻结契约要求路由器对未注册路径/方法返回 404/405；Rust 路由现已按显式浏览器
+清单封闭 SPA 入口，不再用宽泛 fallback 掩盖未知路径。
 
 | 状态码 | 含义 |
 | --- | --- |
@@ -74,7 +74,18 @@ Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计�
 命中配置的规范 CIDR，或 Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链
 整体丢弃。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
-未知 `/api`、`/health` 和浏览器路径仍必须先从 SPA fallback 隔离，再按 JSON 404 或页面 404 返回。
+
+未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确
+允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受
+GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 14 条、Admin 21 条浏览器路由
+由两个 Dioxus `Route` 枚举与 `auction-http/src/assets/routes.rs` 同步维护，只有这些路径可以读取
+`index.html`；批准路径缺少构建产物时返回 503。
+
+缓存策略沿用旧版安全边界，并适配 Dioxus 稳定 WASM 文件名：Public 非身份化读取为 `no-cache`；
+Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
+浏览器路由入口为 `no-store`，直接静态文件中只有 `assets/` 指纹资源使用一年 `immutable`，
+`index.html`、`wasm/*.js`、`*.wasm` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与
+`If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
 
 ## Public
 
@@ -242,9 +253,11 @@ A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和
 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting
 section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下也会停止周期
-任务并发布停止心跳；但周期发布当前硬编码 `ready=true`、`audit_failure_count=0`，Public/Worker
-也未注入 tracing health。因此 dashboard 心跳真实性仍是待完成代码任务。外部广播不属于旧版
-dashboard 契约。
+任务并发布停止心跳。每轮周期心跳都会重新检查数据库和全部内嵌 migration，读取进程内饱和的
+审计写入失败计数，并由 Public/Admin/Worker 各自的 tracing owner 提供安全状态；数据库、schema
+或审计完整性异常会令 readiness 为 false，tracing degraded 会令 heartbeat status 降级，但不会
+单独改变应用 readiness。启动和停止心跳也携带当时的审计计数与 tracing 安全投影，不再发布
+固定占位值。外部广播不属于旧版 dashboard 契约。
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
@@ -263,9 +276,11 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 `reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
 运行时文件路径由主 TOML 的 `runtime_config_file` 选择，敏感 TOML、Cookie、密钥和数据库
 连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
- `501 feature_not_supported`。当前 `allow_manual_early_open` 和 `[equipment_source]` 虽能通过这组
-接口读取、校验与持久化，但生命周期 capability/命令仍固定允许人工提前开放，装备来源适配器也仍
-使用硬编码策略；这两个字段必须接入实际运行 owner 后才能视为完整生效。
+`501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 会同时决定生命周期
+capability 和锁内人工提前开放校验；计划时间已到的正常开放仍然允许。`[equipment_source]` 会冻结为
+装备来源适配器的 host/path allowlist、响应上限、共享请求间隔和全请求超时；固定 HTTPS origin、
+无重定向、精确 world 路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是
+真实生效边界，不是热加载提示。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、游戏

@@ -1,107 +1,242 @@
-//! 前端静态产物内嵌与 SPA fallback。
+//! 前端静态产物内嵌、显式浏览器路由与 404 分派。
 //!
-//! Public 与 Admin 各自读取自己的 `dx build` 产物，路由不会跨 surface 提供资源。当前两种
-//! `RustEmbed` 类型仍编译在同一个 `auction-http` crate 中，尚未通过 Cargo feature 或独立 crate
-//! 建立制品级隔离，因此不能依赖链接器裁剪来宣称二进制一定不包含另一端资源。
+//! Public 与 Admin 的装配根分别提供自己的 `RustEmbed` 类型；本 crate 只实现通用静态响应和
+//! surface 路由规则，因此任一部署制品都无法从这里引用另一端资源。
 //!
 //! `allow_missing = true` 是必需的。`rust-embed` 默认在目标目录不存在时**编译期报错**，
 //! 而前端产物由独立的 `dx build` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端
-//! 的构建都会因为缺少产物而无法编译。缺失产物在运行时以 503 明确报告，不 panic。
+//! 的构建都会因为缺少产物而无法编译。批准的浏览器路由在缺失产物时以 503 明确报告，不 panic。
 //!
 //! `folder` 的相对路径由 `rust-embed` 按本 crate 的 `CARGO_MANIFEST_DIR` 解析。
 //! release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
 
-use std::borrow::Cow;
+mod routes;
 
+use std::{
+    borrow::Cow,
+    time::{Duration, SystemTime},
+};
+
+use auction_contracts::ApiErrorResponse;
 use axum::{
+    Json,
     body::Body,
-    http::{HeaderValue, StatusCode, Uri, header},
+    extract::Request,
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use rust_embed::{Embed, EmbeddedFile};
+use rust_embed::EmbeddedFile;
 
-/// SPA 入口文档。未命中静态文件的浏览器路由都回退到它。
+use routes::Surface;
+
+/// SPA 入口文档；只有 routes 模块批准的浏览器路径可以回退到它。
 const INDEX_HTML: &str = "index.html";
+const ASSETS_MISSING_BODY: &str = "web assets are not built; run `just web-build`";
+const PUBLIC_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
+const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 
-/// 公开端前端产物。
-#[derive(Embed)]
-#[folder = "../../target/dx/build/auction-web-public/web/public"]
-#[allow_missing = true]
-struct PublicWebAssets;
-
-/// 管理端前端产物。
-#[derive(Embed)]
-#[folder = "../../target/dx/build/auction-web-admin/web/public"]
-#[allow_missing = true]
-struct AdminWebAssets;
-
-/// 处理公开端的静态产物与浏览器路由。
-pub(crate) async fn serve_public_asset(uri: Uri) -> Response {
-    serve::<PublicWebAssets>(uri.path())
+/// 处理公开端的静态产物与显式浏览器路由。
+pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
+    serve::<A>(Surface::Public, request)
 }
 
-/// 处理管理端的静态产物与浏览器路由。
-pub(crate) async fn serve_admin_asset(uri: Uri) -> Response {
-    serve::<AdminWebAssets>(uri.path())
+/// 处理管理端的静态产物与显式浏览器路由。
+pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
+    serve::<A>(Surface::Admin, request)
 }
 
-/// 按请求路径返回内嵌产物。
-///
-/// 命中顺序：精确匹配静态文件 → 无扩展名路径回退 `index.html` → 产物缺失报 503。
-/// 带扩展名且未命中的路径按 404 处理，不回退到 HTML：否则缺失的 `.wasm`/`.js` 会拿到
-/// 一份 200 的 HTML，浏览器端只会报难以定位的解析错误。
-fn serve<A: rust_embed::RustEmbed>(path: &str) -> Response {
+/// 按“保留路径 → 精确静态文件 → 批准浏览器路由 → 404”顺序封闭分派请求。
+fn serve<A: rust_embed::RustEmbed>(surface: Surface, request: Request) -> Response {
+    let method = request.method();
+    let path = request.uri().path();
+    let request_headers = request.headers();
+
+    if reserved_json_path(path) {
+        return json_not_found(request_headers);
+    }
+
     let relative_path = path.trim_start_matches('/');
-
     if let Some(file) = A::get(relative_path) {
-        return asset_response(relative_path, file);
+        if !static_method(method) {
+            return method_not_allowed(request_headers);
+        }
+        return asset_response(file, method, request_headers, exact_asset_cache(relative_path));
     }
 
-    if has_file_extension(relative_path) {
-        return not_found();
+    if routes::browser_route(surface, path) {
+        if !static_method(method) {
+            return method_not_allowed(request_headers);
+        }
+        return match A::get(INDEX_HTML) {
+            Some(index) => asset_response(index, method, request_headers, CachePolicy::NoStore),
+            None => assets_missing(method),
+        };
     }
 
-    match A::get(INDEX_HTML) {
-        Some(index) => asset_response(INDEX_HTML, index),
-        None => assets_missing(),
+    not_found(surface, method, request_headers)
+}
+
+fn static_method(method: &Method) -> bool {
+    matches!(*method, Method::GET | Method::HEAD)
+}
+
+fn reserved_json_path(path: &str) -> bool {
+    path == "/api" || path.starts_with("/api/") || path == "/health" || path.starts_with("/health/")
+}
+
+#[derive(Clone, Copy)]
+enum CachePolicy {
+    NoCache,
+    NoStore,
+    Immutable,
+}
+
+impl CachePolicy {
+    const fn value(self) -> &'static str {
+        match self {
+            Self::NoCache => "no-cache",
+            Self::NoStore => "no-store",
+            Self::Immutable => "public, max-age=31536000, immutable",
+        }
     }
 }
 
-/// 判断路径是否指向具体文件。只看最后一段，避免把 `/lots/one-001` 误判为文件。
-fn has_file_extension(relative_path: &str) -> bool {
-    relative_path.rsplit('/').next().is_some_and(|segment| segment.contains('.'))
+fn exact_asset_cache(relative_path: &str) -> CachePolicy {
+    // Dioxus 只给 assets/ 下的 CSS 等资源加内容指纹；顶层 wasm/*.js 与 *.wasm 文件名稳定，
+    // 必须每次再验证，不能沿用旧实现中“所有非 index 文件 immutable”的过宽策略。
+    if relative_path.starts_with("assets/") { CachePolicy::Immutable } else { CachePolicy::NoCache }
 }
 
-fn asset_response(relative_path: &str, file: EmbeddedFile) -> Response {
-    // release 构建中数据借用自二进制静态段，这里避免多余复制。
-    let body = match file.data {
-        Cow::Borrowed(bytes) => Body::from(bytes),
-        Cow::Owned(bytes) => Body::from(bytes),
-    };
-
+fn asset_response(
+    file: EmbeddedFile,
+    method: &Method,
+    request_headers: &HeaderMap,
+    cache_policy: CachePolicy,
+) -> Response {
+    let content_length = file.data.len();
     let content_type = HeaderValue::from_str(file.metadata.mimetype())
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+    let last_modified = file
+        .metadata
+        .last_modified()
+        .and_then(|seconds| SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(seconds)));
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, content_type);
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache_policy.value()));
+    if let Ok(value) = HeaderValue::from_str(&content_length.to_string()) {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
+    if let Some(last_modified) = last_modified {
+        headers.insert(
+            header::LAST_MODIFIED,
+            HeaderValue::from_str(&httpdate::fmt_http_date(last_modified))
+                .unwrap_or_else(|_| HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT")),
+        );
+        if not_modified(request_headers, last_modified) {
+            headers.remove(header::CONTENT_LENGTH);
+            return (StatusCode::NOT_MODIFIED, headers).into_response();
+        }
+    }
 
-    // 入口文档必须每次校验：它引用带指纹的 WASM/JS 名称，缓存住会让浏览器加载到已被
-    // 替换的旧产物。指纹化产物本身可以长期缓存。
-    let cache_control = if relative_path == INDEX_HTML {
-        HeaderValue::from_static("no-cache")
+    let body = if *method == Method::HEAD {
+        Body::empty()
     } else {
-        HeaderValue::from_static("public, max-age=31536000, immutable")
+        // release 构建中数据借用自二进制静态段，这里避免多余复制。
+        match file.data {
+            Cow::Borrowed(bytes) => Body::from(bytes),
+            Cow::Owned(bytes) => Body::from(bytes),
+        }
     };
-
-    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache_control)], body)
-        .into_response()
+    (StatusCode::OK, headers, body).into_response()
 }
 
-fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, "not found").into_response()
+fn not_modified(headers: &HeaderMap, last_modified: SystemTime) -> bool {
+    headers
+        .get(header::IF_MODIFIED_SINCE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| httpdate::parse_http_date(value).ok())
+        .is_some_and(|requested| last_modified <= requested)
 }
 
-/// 产物缺失时的响应。
-///
-/// 说明可执行的原因而不是 panic：请求路径不得因为构建产物缺失而让进程崩溃。
-fn assets_missing() -> Response {
-    (StatusCode::SERVICE_UNAVAILABLE, "web assets are not built; run `just web-build`")
-        .into_response()
+fn method_not_allowed(request_headers: &HeaderMap) -> Response {
+    let mut response = (
+        StatusCode::METHOD_NOT_ALLOWED,
+        Json(ApiErrorResponse {
+            code: "method_not_allowed".to_owned(),
+            message: "请求方法不受支持".to_owned(),
+            data: None,
+            request_id: crate::http::request_id(request_headers),
+        }),
+    )
+        .into_response();
+    response.headers_mut().insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn json_not_found(request_headers: &HeaderMap) -> Response {
+    let mut response = (
+        StatusCode::NOT_FOUND,
+        Json(ApiErrorResponse {
+            code: "not_found".to_owned(),
+            message: "请求的资源不存在".to_owned(),
+            data: None,
+            request_id: crate::http::request_id(request_headers),
+        }),
+    )
+        .into_response();
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn not_found(surface: Surface, method: &Method, request_headers: &HeaderMap) -> Response {
+    if !accepts_html(request_headers) {
+        return json_not_found(request_headers);
+    }
+    let document = match surface {
+        Surface::Public => PUBLIC_NOT_FOUND_HTML,
+        Surface::Admin => ADMIN_NOT_FOUND_HTML,
+    };
+    let body = if *method == Method::HEAD { Body::empty() } else { Body::from(document) };
+    let mut response = (StatusCode::NOT_FOUND, body).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(value) = HeaderValue::from_str(&document.len().to_string()) {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
+    response
+}
+
+fn accepts_html(headers: &HeaderMap) -> bool {
+    headers.get_all(header::ACCEPT).iter().filter_map(|value| value.to_str().ok()).any(|value| {
+        value.split(',').any(|item| {
+            let mut parts = item.split(';');
+            let media_type = parts.next().map(str::trim).unwrap_or_default();
+            let quality = parts
+                .filter_map(|part| part.trim().split_once('='))
+                .find_map(|(name, value)| {
+                    name.trim().eq_ignore_ascii_case("q").then_some(value.trim())
+                })
+                .and_then(|value| value.parse::<f32>().ok())
+                .unwrap_or(1.0);
+            (media_type.eq_ignore_ascii_case("text/html")
+                || media_type.eq_ignore_ascii_case("application/xhtml+xml"))
+                && quality > 0.0
+        })
+    })
+}
+
+/// 批准的浏览器路由缺少前端产物时说明可执行的恢复动作，而不是 panic。
+fn assets_missing(method: &Method) -> Response {
+    let body =
+        if *method == Method::HEAD { Body::empty() } else { Body::from(ASSETS_MISSING_BODY) };
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, body).into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if let Ok(value) = HeaderValue::from_str(&ASSETS_MISSING_BODY.len().to_string()) {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
+    response
 }

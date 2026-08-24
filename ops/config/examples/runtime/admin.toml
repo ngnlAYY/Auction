@@ -23,14 +23,14 @@ mailbox_key = "mooglemail:isekai"
 
 # 可选区块：装备来源和远程读取边界；省略整个区块时使用默认限制。
 [equipment_source]
-# 可选：允许访问的远程主机名；启用 allowlist 时不能为空。
-allowed_hosts = []
-# 可选：允许访问的 URL 路径前缀；启用 allowlist 时不能为空。
-allowed_path_prefixes = []
-# 可选：是否启用主机和路径双重 allowlist；省略时关闭。
-allowlist_enabled = false
-# 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 1 MiB。
-maximum_response_bytes = 1048576
+# 可选：允许访问的远程主机名；默认只允许 Hentaiverse 生产主机。
+allowed_hosts = ["hentaiverse.org"]
+# 可选：允许访问的 URL 路径前缀；默认只允许两个游戏世界的装备目录。
+allowed_path_prefixes = ["/equip/", "/isekai/equip/"]
+# 可选：是否启用主机和路径双重 allowlist；省略时开启。
+allowlist_enabled = true
+# 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 2 MiB。
+maximum_response_bytes = 2097152
 # 可选：两次请求之间的最小间隔秒数，范围为 1 至 60；默认 1。
 minimum_request_interval_seconds = 1
 # 可选：外部请求超时秒数，范围为 1 至 30；默认 10。

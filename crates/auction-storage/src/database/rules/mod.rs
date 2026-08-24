@@ -24,6 +24,9 @@ use sqlx::{Postgres, Transaction};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
@@ -256,6 +259,7 @@ impl AdminRulesTransaction for PostgresRulesTransaction {
             .bind(metadata)
             .execute(&mut **self.transaction_mut()?)
             .await
+            .record_audit_failure()
             .map_err(map_sql_error)?;
             Ok(())
         }

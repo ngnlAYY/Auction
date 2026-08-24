@@ -1,8 +1,8 @@
 //! Admin 浏览器端的同源 HTTP 数据访问。
 //!
 //! 浏览器只接收后端安全投影。人工动作携带由页面按输入复用的 `command_id` 和对应版本 fence；
-//! 服务端仍负责最终的状态校验、幂等和审计。当前 wire DTO 仍有一部分在本 crate 重复定义，后续
-//! 必须收敛到 `auction-contracts`，避免 HTTP owner 与浏览器解码形状漂移。
+//! 服务端仍负责最终的状态校验、幂等和审计。所有 wire DTO 统一由 `auction-contracts` 拥有，
+//! 本 crate 只保留浏览器表单、筛选和交互状态。
 
 #[path = "auction/auctions.rs"]
 mod auctions;
@@ -92,14 +92,14 @@ pub(crate) use users::{
     fetch_admin_users, mutate_admin_user, unblacklist_admin_user,
 };
 
+use auction_contracts::{
+    AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminSessionResponse, ApiResponse,
+};
+pub(crate) use auction_contracts::{
+    AdminDeliveryListResponse as DeliveryPage, AdminDeliveryResponse as Delivery,
+};
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Debug, Clone, Deserialize)]
-struct ApiResponse<T> {
-    data: T,
-}
 
 /// 将浏览器 `datetime-local` 按本地时区转换为 API 使用的 UTC 文本。
 ///
@@ -123,64 +123,6 @@ pub(crate) fn normalize_datetime(value: &str) -> String {
 
     // 非 WASM 构建只用于静态检查；保留服务端可识别的稳定兜底格式。
     if value.len() == 16 { format!("{value}:00Z") } else { format!("{value}Z") }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AdminSessionData {
-    csrf_token: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct Delivery {
-    pub id: String,
-    pub origin_kind: String,
-    pub origin_id: String,
-    pub recipient: String,
-    pub cod: Option<i64>,
-    pub status: String,
-    pub lease_expires_at: Option<String>,
-    pub fencing_version: i64,
-    pub attempt_count: u32,
-    pub claimed_at: Option<String>,
-    pub sending_at: Option<String>,
-    pub completed_at: Option<String>,
-    pub external_reference: Option<String>,
-    pub failure_code: Option<String>,
-    #[serde(default)]
-    pub reason_code: Option<String>,
-    #[serde(default)]
-    pub take_required: bool,
-    #[serde(default)]
-    pub returned_mail_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct DeliveryListData {
-    deliveries: Vec<Delivery>,
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct DeliveryPage {
-    pub deliveries: Vec<Delivery>,
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
-
-impl From<DeliveryListData> for DeliveryPage {
-    fn from(data: DeliveryListData) -> Self {
-        Self {
-            deliveries: data.deliveries,
-            page: data.page,
-            page_size: data.page_size,
-            total: data.total,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,23 +153,6 @@ impl DeliveryAction {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct DeliveryCommandRequest {
-    command_id: Uuid,
-    expected_fencing_version: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    action: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    external_reference: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure_code: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct DeliveryCommandData {
-    delivery: Delivery,
-}
-
 /// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
 pub(crate) async fn fetch_deliveries(status: String, page: i64) -> Result<DeliveryPage, String> {
     let mut query = url::form_urlencoded::Serializer::new(String::new());
@@ -240,9 +165,9 @@ pub(crate) async fn fetch_deliveries(status: String, page: i64) -> Result<Delive
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<DeliveryListData> =
+    let payload: ApiResponse<DeliveryPage> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.into())
+    Ok(payload.data)
 }
 
 pub(crate) async fn execute_delivery(
@@ -253,10 +178,10 @@ pub(crate) async fn execute_delivery(
     external_reference: Option<String>,
     failure_code: Option<String>,
 ) -> Result<Delivery, String> {
-    let command = DeliveryCommandRequest {
+    let command = AdminDeliveryCommandRequest {
         command_id,
         expected_fencing_version,
-        action: action.request_action(),
+        action: action.request_action().map(str::to_owned),
         external_reference,
         failure_code,
     };
@@ -270,7 +195,7 @@ pub(crate) async fn execute_delivery(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<DeliveryCommandData> =
+    let payload: ApiResponse<AdminDeliveryCommandResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.delivery)
 }
@@ -281,7 +206,7 @@ async fn fetch_csrf_token() -> Result<String, String> {
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminSessionData> =
+    let payload: ApiResponse<AdminSessionResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     if payload.data.csrf_token.is_empty() {
         return Err("CSRF token unavailable".to_owned());

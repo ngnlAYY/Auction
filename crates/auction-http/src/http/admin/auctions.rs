@@ -203,7 +203,9 @@ pub(crate) async fn list(
                 auctions: result.entries.into_iter().map(map_auction).collect(),
                 capabilities: AdminAuctionCapabilitiesResponse {
                     cancel_auction: true,
-                    manual_early_open: true,
+                    manual_early_open: state
+                        .lifecycle()
+                        .is_some_and(|lifecycle| lifecycle.allows_manual_early_open()),
                     manual_intake: state.admin_intake().is_some(),
                     manual_preview_open: true,
                 },

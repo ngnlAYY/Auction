@@ -20,6 +20,9 @@ use serde_json::json;
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
@@ -456,6 +459,7 @@ async fn insert_settlement_claim_audit(
     .bind(json!({ "command_id": command_id, "state_version": state_version }))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map(|_| ())
 }
 

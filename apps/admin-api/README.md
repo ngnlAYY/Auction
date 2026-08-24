@@ -17,7 +17,8 @@ Admin 审计读取由数据库适配器提供两种有界分页形状和安全 m
 审计历史。
 Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
 三个进程装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；返回 health/process 安全
-投影，但周期值仍受下述限制。Admin 同时
+投影，周期值每轮读取真实数据库/schema readiness、进程内审计写入失败计数和对应 tracing 安全
+状态。Admin 同时
 通过 runtime 文档指定的 Worker control Unix socket 读取 live/ready/status，socket 只允许
 命中 Worker 显式 UID/GID allowlist 的内核认证 peer，失败时显示有限 condition；mail、realtime、credential、delivery、fulfillment、
 recovery 和 alerting section 分别由对应 owner 提供安全摘要，owner 未装配时才显式标记为 `unknown`。
@@ -27,12 +28,14 @@ Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL �
 命令，若结果为 `unknown` 或需要人工核对则保留错误级告警并继续启动，其他恢复错误会阻断启动。
 文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
 是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围。
+重启后，`allow_manual_early_open` 会作为不可变策略进入生命周期服务：计划时间已到的开放不受影响，
+人工提前开放则在锁定拍卖并读取 `scheduled_open_at` 后按该策略失败关闭，HTTP capability 使用同一
+策略来源。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔和总超时也会映射到
+装备来源适配器；固定 HTTPS origin、禁用重定向和精确 world 路径校验始终保留。
 
 Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
 shutdown、停止 heartbeat 并发布停止状态，整个 HTTP/后台任务 drain 最多 10 秒，排空期间第二次
-信号会强制收口，最后按配置限时刷新 tracing exporter。稳定退出码仍待统一。runtime 中的
-`allow_manual_early_open` 与
-`[equipment_source]` 已完成解析、校验和持久化，尚未实际约束生命周期命令或装备来源适配器。
+信号会强制收口，最后按配置限时刷新 tracing exporter。稳定退出码仍待统一。
 
 默认监听 `127.0.0.1:8091`，与公开端不同端口。Admin runtime 的 `listener.mode` 支持 TCP；
 Linux 部署还支持 Unix socket。Unix 模式要求 `runtime_directory` 预先存在并由运行账号拥有，
@@ -47,14 +50,14 @@ AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \
 
 ## 前端产物
 
-管理端 SPA 由 `auction-http` 内嵌，构建命令：
+管理端 SPA 由本装配根的 `RustEmbed` 类型内嵌，再交给 `auction-http` 提供，构建命令：
 
 ```bash
 just web-build-admin
 ```
 
-路由只提供管理端产物，不会跨 surface 返回公开端资源。当前两种 `RustEmbed` 类型仍位于同一个
-`auction-http` crate，制品级资源隔离尚待通过 Cargo feature 或独立 crate 明确保证。
+路由只提供管理端产物；本装配根不引用 Public `RustEmbed` 类型，因此制品级资源隔离不依赖
+链接器裁剪。
 
 ## Cargo feature
 

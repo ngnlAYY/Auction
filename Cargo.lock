@@ -189,6 +189,7 @@ dependencies = [
  "axum",
  "chrono",
  "libc",
+ "rust-embed",
  "tokio",
  "tracing",
  "uuid",
@@ -268,6 +269,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures-util",
+ "httpdate",
  "hyper",
  "hyper-util",
  "ipnet",
@@ -365,6 +367,7 @@ dependencies = [
  "auction-storage",
  "axum",
  "chrono",
+ "rust-embed",
  "tokio",
  "tracing",
  "uuid",
@@ -394,6 +397,7 @@ dependencies = [
 name = "auction-web-admin"
 version = "0.1.0"
 dependencies = [
+ "auction-contracts",
  "auction-web-shared",
  "base64",
  "chrono",
@@ -415,6 +419,7 @@ dependencies = [
 name = "auction-web-public"
 version = "0.1.0"
 dependencies = [
+ "auction-contracts",
  "auction-web-shared",
  "chrono",
  "dioxus",

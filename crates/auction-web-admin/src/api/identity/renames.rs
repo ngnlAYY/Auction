@@ -3,42 +3,16 @@
 //! 页面只接收改名事实的安全投影；回滚命令携带列表快照中的用户版本、CSRF 和新命令 ID，
 //! 不在浏览器端推导用户状态；同一条改名事实的重试会复用同一个命令 ID。
 
+pub(crate) use auction_contracts::AdminRenameResponse as AdminRename;
+use auction_contracts::{
+    AdminRenameListResponse, AdminRenameRevertRequest, AdminUserMutationResponse,
+};
 use gloo_net::http::Request;
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{AdminUser, ApiResponse};
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminRename {
-    pub id: String,
-    pub user_id: String,
-    pub user_state_version: i64,
-    pub previous_username: String,
-    pub next_username: String,
-    pub actor: String,
-    pub created_at: String,
-    pub reverted_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminRenameRevertData {
-    user: AdminUser,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminRenamePagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminRenameListData {
-    renames: Vec<AdminRename>,
-    pagination: AdminRenamePagination,
-}
-
+/// 改名历史的浏览器分页投影；wire 中嵌套的 pagination 在这里展平。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminRenamePage {
     pub renames: Vec<AdminRename>,
@@ -47,8 +21,8 @@ pub(crate) struct AdminRenamePage {
     pub total: i64,
 }
 
-impl From<AdminRenameListData> for AdminRenamePage {
-    fn from(data: AdminRenameListData) -> Self {
+impl From<AdminRenameListResponse> for AdminRenamePage {
+    fn from(data: AdminRenameListResponse) -> Self {
         Self {
             renames: data.renames,
             page: data.pagination.page,
@@ -75,7 +49,7 @@ pub(crate) async fn fetch_admin_renames(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminRenameListData> =
+    let payload: ApiResponse<AdminRenameListResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(payload.data.into())
 }
@@ -100,18 +74,12 @@ pub(crate) async fn revert_admin_rename(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminRenameRevertData> =
+    let payload: ApiResponse<AdminUserMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     if payload.data.user.id != user_id.to_string()
         || Some(payload.data.user.state_version) != rename.user_state_version.checked_add(1)
     {
         return Err("rename revert response does not match version fence".to_owned());
     }
-    Ok(payload.data.user)
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-struct AdminRenameRevertRequest {
-    command_id: Uuid,
-    expected_state_version: i64,
+    Ok(payload.data.user.into())
 }

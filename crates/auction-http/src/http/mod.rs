@@ -48,6 +48,8 @@ mod realtime;
 mod realtime_admin;
 #[path = "shared/realtime_hub/mod.rs"]
 mod realtime_hub;
+#[path = "shared/response_cache.rs"]
+mod response_cache;
 #[path = "public/rules.rs"]
 mod rules;
 mod security;
@@ -137,7 +139,10 @@ pub use state::{AdminApiState, PublicApiState};
 ///
 /// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
 /// 自己的版本，而健康检查要报告的是运行进程的版本。
-pub fn public_router(version: &'static str, boundary: HttpBoundary) -> Router<PublicApiState> {
+pub fn public_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<PublicApiState>
+where
+    A: rust_embed::RustEmbed + Send + Sync + 'static,
+{
     let health = move || health_response("public-api", version);
 
     public_feature_routes(
@@ -148,15 +153,17 @@ pub fn public_router(version: &'static str, boundary: HttpBoundary) -> Router<Pu
             .route("/health/ready", get(public_health_ready))
             .route("/metrics", get(metrics::public)),
     )
-    .fallback(web_assets::serve_public_asset)
+    .fallback(web_assets::serve_public_asset::<A>)
     .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
 /// 管理端路由。
 ///
-/// 管理端与公开端使用不同资源类型和路由；制品级资源隔离仍需由 Cargo feature 或独立 crate
-/// 明确保证。
-pub fn admin_router(version: &'static str, boundary: HttpBoundary) -> Router<AdminApiState> {
+/// 管理端与公开端由各自装配根传入不同资源类型，避免任一二进制引用另一端产物。
+pub fn admin_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<AdminApiState>
+where
+    A: rust_embed::RustEmbed + Send + Sync + 'static,
+{
     let health = move || health_response("admin-api", version);
 
     admin_feature_routes(
@@ -167,7 +174,7 @@ pub fn admin_router(version: &'static str, boundary: HttpBoundary) -> Router<Adm
             .route("/health/ready", get(admin_health_ready))
             .route("/metrics", get(metrics::admin)),
     )
-    .fallback(web_assets::serve_admin_asset)
+    .fallback(web_assets::serve_admin_asset::<A>)
     .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
@@ -178,8 +185,8 @@ async fn health_response(service: &'static str, version: &'static str) -> Json<H
 /// 返回不访问外部依赖的存活探针；该路径用于进程管理器判断是否需要重启。
 async fn public_health_live() -> Json<HealthProbeResponse<HealthLiveData>> {
     Json(HealthProbeResponse {
-        code: "live",
-        message: "进程存活",
+        code: "live".to_owned(),
+        message: "进程存活".to_owned(),
         data: HealthLiveData { live: true },
     })
 }
@@ -196,8 +203,8 @@ async fn public_health_ready(State(state): State<PublicApiState>) -> Response {
 /// 返回不访问外部依赖的 Admin 存活探针。
 async fn admin_health_live() -> Json<HealthProbeResponse<HealthLiveData>> {
     Json(HealthProbeResponse {
-        code: "live",
-        message: "进程存活",
+        code: "live".to_owned(),
+        message: "进程存活".to_owned(),
         data: HealthLiveData { live: true },
     })
 }
@@ -217,7 +224,14 @@ fn health_ready_response(ready: bool) -> Response {
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, "not_ready", "进程尚未就绪")
     };
-    (status, Json(HealthProbeResponse { code, message, data: HealthReadyData { ready } }))
+    (
+        status,
+        Json(HealthProbeResponse {
+            code: code.to_owned(),
+            message: message.to_owned(),
+            data: HealthReadyData { ready },
+        }),
+    )
         .into_response()
 }
 
@@ -226,21 +240,12 @@ fn health_ready_response(ready: bool) -> Response {
 /// 路由只负责绑定各自的 HTTP owner；未装配的窄端口仍由 handler 明确返回能力不可用，
 /// 不用伪造的成功 payload 掩盖部署缺口。
 fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiState> {
-    router
+    let no_cache_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
         .route("/api/v1/rules", get(rules::get))
-        .route("/api/v1/events", get(realtime::list))
-        .route("/api/v1/ws", get(realtime::websocket))
         .route("/api/v1/blacklist", get(blacklist::list))
         .route("/api/v1/compensation-pool", get(compensation::pool))
         .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
-        .route(
-            "/api/v1/session",
-            get(current_session)
-                .post(login_session)
-                .delete(logout_session)
-                .layer(DefaultBodyLimit::max(4 << 10)),
-        )
         .route("/api/v1/auctions", get(list_auctions))
         .route("/api/v1/auctions/current", get(current_auction))
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
@@ -248,6 +253,16 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/price-history", get(list_price_history))
         .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
+        .route_layer(middleware::from_fn(response_cache::no_cache));
+    let no_store_routes = Router::<PublicApiState>::new()
+        .route("/api/v1/events", get(realtime::list))
+        .route(
+            "/api/v1/session",
+            get(current_session)
+                .post(login_session)
+                .delete(logout_session)
+                .layer(DefaultBodyLimit::max(4 << 10)),
+        )
         .route("/api/v1/me/bids", get(list_my_bids))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations/mine", get(get_my_proxy_authorization))
         .route(
@@ -259,11 +274,16 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
             post(lower_proxy_authorization).layer(DefaultBodyLimit::max(4 << 10)),
         )
         .route("/api/v1/lots/{lot_id}/bids", post(place_bid).layer(DefaultBodyLimit::max(4 << 10)))
+        .route_layer(middleware::from_fn(response_cache::no_store));
+    router
+        .merge(no_cache_routes)
+        .merge(no_store_routes)
+        .route("/api/v1/ws", get(realtime::websocket))
 }
 
 /// 注册已冻结的 Admin 路径。
 fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> {
-    router
+    let routes = Router::<AdminApiState>::new()
         .route(
             "/api/v1/admin/session",
             get(current_admin_session)
@@ -391,7 +411,8 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
         .route(
             "/api/v1/admin/deliveries/{delivery_id}/reconcile",
             post(delivery_admin::reconcile).layer(DefaultBodyLimit::max(4 << 10)),
-        )
+        );
+    router.merge(routes.route_layer(middleware::from_fn(response_cache::no_store)))
 }
 
 const ADMIN_SESSION_COOKIE: &str = "auction_admin_session";
@@ -969,7 +990,7 @@ async fn login_session(
             let data = PublicLoginResponse {
                 user_id: result.identity.user_id.to_string(),
                 username: result.identity.username,
-                status: "active",
+                status: "active".to_owned(),
                 expires_at: timestamp(result.identity.expires_at),
                 absolute_expires_at: timestamp(result.identity.absolute_expires_at),
             };
@@ -1639,8 +1660,9 @@ fn session_guard(
             StatusCode::TOO_MANY_REQUESTS,
             response_headers,
             Json(ApiErrorResponse {
-                code: "rate_limited",
+                code: "rate_limited".to_owned(),
                 message: "请求过于频繁".to_owned(),
+                data: None,
                 request_id: None,
             }),
         )
@@ -1676,8 +1698,9 @@ fn admin_session_guard(
             StatusCode::TOO_MANY_REQUESTS,
             response_headers,
             Json(ApiErrorResponse {
-                code: "rate_limited",
+                code: "rate_limited".to_owned(),
                 message: "请求过于频繁".to_owned(),
+                data: None,
                 request_id: None,
             }),
         )
@@ -1743,7 +1766,7 @@ fn map_login_error(error: ApplicationError) -> Response {
             (
                 StatusCode::FORBIDDEN,
                 Json(ApiErrorResponseWithData {
-                    code: "account_blacklisted",
+                    code: "account_blacklisted".to_owned(),
                     message: "账号已被封禁".to_owned(),
                     data: PublicAccountBlockedResponse { public_reason },
                     request_id: None,
@@ -2603,10 +2626,18 @@ fn api_error(
     code: &'static str,
     message: &'static str,
 ) -> (StatusCode, Json<ApiErrorResponse>) {
-    (status, Json(ApiErrorResponse { code, message: message.to_owned(), request_id: None }))
+    (
+        status,
+        Json(ApiErrorResponse {
+            code: code.to_owned(),
+            message: message.to_owned(),
+            data: None,
+            request_id: None,
+        }),
+    )
 }
 
-fn request_id(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn request_id(headers: &HeaderMap) -> Option<String> {
     boundary::request_id(headers)
 }
 

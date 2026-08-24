@@ -3,19 +3,19 @@
 //! 浏览器只保存安全用户投影和当前表单内容；登录 key 的生成结果只在创建/重签响应里短暂
 //! 展示，不参与前端状态推导。
 
+use auction_contracts::AdminUserBlacklistHistoryResponse as AdminUserBlacklistHistory;
+use auction_contracts::{
+    AdminUserBlacklistRequest, AdminUserCreateRequest, AdminUserListItemResponse,
+    AdminUserListResponse, AdminUserMutationRequest, AdminUserMutationResponse, AdminUserResponse,
+    AdminUserUnblacklistRequest,
+};
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ApiResponse;
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminUserBlacklistHistory {
-    pub public_reason: String,
-    pub blacklisted_at: String,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// 用户列表行的浏览器投影；它把基础用户响应与列表专属黑名单摘要合并，避免 UI 传播 wire 嵌套。
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminUser {
     pub id: String,
     pub username: String,
@@ -25,34 +25,48 @@ pub(crate) struct AdminUser {
     pub state_version: i64,
     pub created_at: String,
     pub updated_at: String,
-    #[serde(default)]
     pub blacklist_count: i64,
-    #[serde(default)]
     pub blacklist_history: Vec<AdminUserBlacklistHistory>,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminUserPagination {
-    pub page: i64,
-    pub page_size: i64,
-    pub total: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-struct AdminUserListData {
-    users: Vec<AdminUser>,
-    pagination: AdminUserPagination,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminUserPage {
     pub users: Vec<AdminUser>,
-    pub pagination: AdminUserPagination,
+    pub pagination: auction_contracts::AdminUserPaginationResponse,
 }
 
-impl From<AdminUserListData> for AdminUserPage {
-    fn from(data: AdminUserListData) -> Self {
-        Self { users: data.users, pagination: data.pagination }
+impl From<AdminUserResponse> for AdminUser {
+    fn from(user: AdminUserResponse) -> Self {
+        Self {
+            id: user.id,
+            username: user.username,
+            game_player_id: user.game_player_id,
+            status: user.status,
+            key_status: user.key_status,
+            state_version: user.state_version,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+            blacklist_count: 0,
+            blacklist_history: Vec::new(),
+        }
+    }
+}
+
+impl From<AdminUserListItemResponse> for AdminUser {
+    fn from(item: AdminUserListItemResponse) -> Self {
+        let mut user = Self::from(item.user);
+        user.blacklist_count = item.blacklist_count;
+        user.blacklist_history = item.blacklist_history;
+        user
+    }
+}
+
+impl From<AdminUserListResponse> for AdminUserPage {
+    fn from(data: AdminUserListResponse) -> Self {
+        Self {
+            users: data.users.into_iter().map(Into::into).collect(),
+            pagination: data.pagination,
+        }
     }
 }
 
@@ -73,49 +87,11 @@ impl AdminUserStatusFilter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+/// 用户写命令的浏览器结果；基础用户 wire 响应在边界转换为列表行投影。
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AdminUserMutationResult {
     pub user: AdminUser,
     pub generated_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserCreateRequest {
-    command_id: Uuid,
-    username: String,
-    game_player_id: String,
-    key_mode: &'static str,
-    key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserMutationRequest {
-    command_id: Uuid,
-    user_id: Uuid,
-    expected_state_version: i64,
-    action: &'static str,
-    username: Option<String>,
-    game_player_id: Option<String>,
-    public_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserBlacklistRequest {
-    command_id: Uuid,
-    expected_state_version: i64,
-    public_reason: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserUnblacklistRequest {
-    command_id: Uuid,
-    expected_state_version: i64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AdminUserMutationData {
-    user: AdminUser,
-    generated_key: Option<String>,
 }
 
 /// 获取 Admin 用户列表。
@@ -135,7 +111,7 @@ pub(crate) async fn fetch_admin_users(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminUserListData> =
+    let payload: ApiResponse<AdminUserListResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     if payload.data.pagination.page != page {
         return Err("user list response does not match page".to_owned());
@@ -154,16 +130,22 @@ pub(crate) async fn create_admin_user(
     let csrf_token = super::fetch_csrf_token().await?;
     let request = Request::post("/api/v1/admin/users")
         .header("x-csrf-token", &csrf_token)
-        .json(&AdminUserCreateRequest { command_id, username, game_player_id, key_mode, key })
+        .json(&AdminUserCreateRequest {
+            command_id,
+            username,
+            game_player_id,
+            key_mode: key_mode.to_owned(),
+            key,
+        })
         .map_err(|error| error.to_string())?;
     let response = request.send().await.map_err(|error| error.to_string())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminUserMutationData> =
+    let payload: ApiResponse<AdminUserMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(AdminUserMutationResult {
-        user: payload.data.user,
+        user: payload.data.user.into(),
         generated_key: payload.data.generated_key,
     })
 }
@@ -184,7 +166,7 @@ pub(crate) async fn mutate_admin_user(
             command_id,
             user_id,
             expected_state_version: user.state_version,
-            action,
+            action: action.to_owned(),
             username,
             game_player_id,
             public_reason: None,
@@ -194,10 +176,10 @@ pub(crate) async fn mutate_admin_user(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminUserMutationData> =
+    let payload: ApiResponse<AdminUserMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
     Ok(AdminUserMutationResult {
-        user: payload.data.user,
+        user: payload.data.user.into(),
         generated_key: payload.data.generated_key,
     })
 }
@@ -223,9 +205,9 @@ pub(crate) async fn blacklist_admin_user(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminUserMutationData> =
+    let payload: ApiResponse<AdminUserMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.user)
+    Ok(payload.data.user.into())
 }
 
 /// 将用户移出黑名单。
@@ -247,9 +229,9 @@ pub(crate) async fn unblacklist_admin_user(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<AdminUserMutationData> =
+    let payload: ApiResponse<AdminUserMutationResponse> =
         response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.user)
+    Ok(payload.data.user.into())
 }
 
 fn append_query(url: &mut String, name: &str, value: &str) {

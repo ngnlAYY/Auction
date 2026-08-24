@@ -21,6 +21,8 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 #[cfg(feature = "sqlite")]
 use sqlx::{SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
 #[cfg(feature = "postgres")]
@@ -1049,6 +1051,7 @@ async fn insert_audit_postgres(
     .bind(Json(json!({ "command_id": command_id, "command_kind": kind.as_str() })))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_storage_error)?;
     Ok(())
 }
@@ -1761,6 +1764,7 @@ async fn insert_audit_sqlite(
     .bind(metadata)
     .execute(&mut *connection)
     .await
+    .record_audit_failure()
     .map_err(map_sqlite_error)?;
     Ok(())
 }

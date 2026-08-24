@@ -45,9 +45,11 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
 实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建和主题读取；创建 POST 无法证明
 时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责有界主题正文，回帖命令仍先
 经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。
-- `src/equipment/mod.rs`：固定 HTTPS origin 的旧装备页解析和 canonical JSON 规范化；关闭环境
-  代理与自动重定向，并限制响应类型/大小。`src/cryptobox/mod.rs` 只在适配器边界使用敏感
-  数据密钥，以 AES-256-GCM 生成绑定装备 ID 的密文信封，明文 key 不进入应用写端口。
+- `src/equipment/mod.rs`：固定 HTTPS origin 的旧装备页解析和 canonical JSON 规范化；启动时冻结
+  host/path allowlist、响应上限、共享请求间隔和全请求超时，关闭环境代理与自动重定向，并在流式
+  读取过程中实施大小限制。关闭业务 allowlist 也不会放宽固定 origin、精确 world 路径、响应类型、
+  content encoding 和最终响应 origin 校验。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，
+  以 AES-256-GCM 生成绑定装备 ID 的密文信封，明文 key 不进入应用写端口。
 - `src/credentials/mod.rs`：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
   的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入
   与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由

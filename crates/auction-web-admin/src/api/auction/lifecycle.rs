@@ -3,8 +3,9 @@
 //! 浏览器为一次动作输入生成并复用 `command_id`，再提交到版本化 REST 端点；状态迁移、权限、
 //! 幂等和审计仍由服务端应用端口负责。
 
+use auction_contracts::AdminAuctionLifecycleRequest;
+pub(crate) use auction_contracts::AdminAuctionLifecycleResponse as AdminAuctionLifecycleResult;
 use gloo_net::http::Request;
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{ApiResponse, fetch_csrf_token};
@@ -26,23 +27,6 @@ impl AdminAuctionLifecycleAction {
             Self::FinalPhase => "final-phase",
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminAuctionLifecycleResult {
-    pub command_id: Uuid,
-    pub auction_id: String,
-    pub status: String,
-    pub state_version: u64,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-struct AdminAuctionLifecycleRequest {
-    command_id: Uuid,
-    expected_state_version: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
 }
 
 pub(crate) async fn execute_admin_auction_lifecycle(

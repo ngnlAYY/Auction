@@ -82,8 +82,9 @@ Forum 默认立即执行一轮，再等待一分钟和最多五秒抖动；主�
 损坏或不是合法 UTF-8 时失败关闭；暂时没有 active 凭据时保留 degraded Worker，实际轮询/写入
 再返回 credential unavailable。未配置该独立密钥时继续兼容 `.keyenv` 的
 `hv-ck-key1` Bot 与 `hv-ck-key2` 测试号，以及敏感配置的单 Cookie 入口。
-Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径；周期值目前仍固定
-为 ready/零审计失败；SIGINT/SIGTERM 已可靠进入停止发布。各 owner 的内存定时器只负责唤醒，不能代替
-持久化游标。配置 `[worker.control].enabled = true` 后，数据库 Worker 和无数据库启动骨架都会
+Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径；周期值每轮读取
+真实数据库/schema readiness、进程内审计写入失败计数和 Worker tracing 安全状态；SIGINT/SIGTERM
+已可靠进入停止发布。各 owner 的内存定时器只负责唤醒，不能代替持久化游标。配置
+`[worker.control].enabled = true` 后，数据库 Worker 和无数据库启动骨架都会
 提供由安全 runtime 目录、实例锁、固定 group/0660 和显式 UID/GID peer allowlist 保护的本地
 `live`、`ready`、`status` 控制面；后者只报告进程状态和零个 poller，不会伪造数据库或任务就绪。

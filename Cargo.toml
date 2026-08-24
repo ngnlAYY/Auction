@@ -71,6 +71,7 @@ hyper-util = { version = "0.1.20", features = [
     "service",
     "tokio",
 ] }
+httpdate = "1.0.3"
 ipnet = "2.12.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
 scraper = "0.24.0"

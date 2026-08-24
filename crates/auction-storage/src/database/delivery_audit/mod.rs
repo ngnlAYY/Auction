@@ -8,6 +8,8 @@ use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 pub(super) const ACTIVATE: &str = "delivery.activate";
 pub(super) const ADMIN_RECONCILE: &str = "delivery.admin_reconcile";
 pub(super) const ADMIN_RELEASE: &str = "delivery.admin_release";
@@ -54,7 +56,8 @@ pub(super) async fn append(
     .bind(audit.source)
     .bind(audit.metadata)
     .execute(&mut **transaction)
-    .await?;
+    .await
+    .record_audit_failure()?;
     Ok(())
 }
 

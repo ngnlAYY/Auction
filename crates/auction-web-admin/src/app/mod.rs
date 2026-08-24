@@ -83,6 +83,7 @@ pub fn run() {
 /// 不在浏览器端重建状态机。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
+// 路径字面量必须与 auction-http/src/assets/routes.rs 的 Admin 清单同步，未知路径不能获得 SPA 入口。
 enum Route {
     #[layout(AdminShell)]
         #[route("/")]

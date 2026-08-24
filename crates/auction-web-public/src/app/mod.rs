@@ -44,7 +44,7 @@ use wasm_bindgen::JsValue;
 
 use crate::api::{
     AuctionListPage, CatalogRow, CurrentAuction, EquipmentDetail, HistoricalAuction, LotDetailItem,
-    ProxyCommandAuthorization, RealtimeEvent, WorldStatus, Worlds, estimated_now,
+    LotEnvelopeRows, ProxyCommandAuthorization, RealtimeEvent, WorldStatus, Worlds, estimated_now,
     fetch_auction_list, fetch_auction_page, fetch_current_auction, fetch_current_lots,
     fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail, fetch_my_proxy,
     fetch_public_session, fetch_worlds, lot_code_for, subscribe_auction_realtime,
@@ -316,6 +316,7 @@ pub fn run() {
 /// 路径逐条对应旧系统已冻结的公开端 route，新增路由前必须先确认外部契约。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
+// 路径字面量必须与 auction-http/src/assets/routes.rs 的 Public 清单同步，未知路径不能获得 SPA 入口。
 enum Route {
     #[layout(PublicShell)]
         #[route("/")]
@@ -829,7 +830,7 @@ fn AuctionData(
                 active_category,
                 page_number,
                 page_total: page.total.unwrap_or_else(|| page.rows().len() as i64),
-                page_size: if page.page_size > 0 { page.page_size } else { 20 },
+                page_size: page.page_size.filter(|size| *size > 0).unwrap_or(20),
                 can_bid: is_live_presentation && auction.bidding_open,
                 allow_slow: auction.status == "live",
                 authenticated,

@@ -25,6 +25,9 @@ use sqlx::{Postgres, Row, Transaction};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::DatabaseStore;
 
 impl RecoveryResolutionStore for DatabaseStore {
@@ -685,6 +688,7 @@ async fn insert_worker_recovery_audit(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
 }
@@ -1549,6 +1553,7 @@ async fn insert_recovery_audit(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
     Ok(())
 }

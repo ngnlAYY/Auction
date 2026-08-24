@@ -44,9 +44,11 @@ Admin 示例的 `runtime_config_file` 指向 [`examples/runtime/admin.toml`](exa
 启动时读取已存在的文档，HTTP 更新返回 `501 feature_not_supported`。
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
 MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。
-当前 `allow_manual_early_open` 与 `[equipment_source]` 虽可解析、校验和持久化，但尚未接入
-生命周期授权与装备来源 HTTP 适配器；修改这两组字段目前不会改变对应运行行为，必须在该生效链
-完成后才能作为可操作配置交付。
+`allow_manual_early_open` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
+`restart_required` 边界，不会热改当前进程。重启后，前者决定 HTTP capability，并在生命周期事务
+锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。后者配置 host/path allowlist、
+64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔和 1 至 30 秒总超时；适配器始终保留固定 HTTPS
+origin、无重定向、精确 world 路径和流式有界读取。示例默认 2 MiB、1 秒和 10 秒。
 
 以下字段只能出现在敏感 TOML：
 

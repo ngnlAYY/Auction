@@ -29,9 +29,12 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   建立；canonical Auction-BF PostgreSQL v28 也有独立的严格接管边界。静态盘点未发现旧版
   业务 HTTP/浏览器路径或 Worker 任务类别缺项，三进程也已统一接入 SIGINT/SIGTERM、10 秒
   有界 drain、停止心跳和 tracing flush，Public/Admin 共用的请求 ID、trace context、安全头、
-  超时、可信代理和有界限流 HTTP 边界也已建立；仍有已确认的运行边界缺口，包括真实状态心跳、
-  SPA fallback 隔离和部分 Admin runtime 字段的生效链。真实外部服务、
-  部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整功能等价。
+  超时、可信代理和有界限流 HTTP 边界也已建立；静态入口已按显式浏览器路由与 API/页面 404
+  隔离并恢复旧版缓存策略。三进程周期心跳也已接入真实数据库/schema readiness、进程内审计
+  写入失败计数和各自的 tracing 安全状态；Admin runtime 的人工提前开放与装备来源策略已经进入
+  启动时冻结的实际运行 owner。稳定 Web DTO 已统一由 `auction-contracts` 拥有，Public/Admin
+  `RustEmbed` 类型也已移入各自装配根并形成制品级隔离；首批可重建缓存读模型等静态收口仍未完成。
+  真实外部服务、部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整功能等价。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、

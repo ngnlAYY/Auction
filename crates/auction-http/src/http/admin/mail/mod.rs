@@ -504,7 +504,7 @@ fn map_error(error: ApplicationError) -> Response {
         }) => (
             StatusCode::CONFLICT,
             Json(ApiErrorResponseWithData {
-                code: "stale_state_version",
+                code: "stale_state_version".to_owned(),
                 message: "邮件轮询状态版本已变化".to_owned(),
                 data: serde_json::json!({ "current_state_version": current_state_version }),
                 request_id: None,

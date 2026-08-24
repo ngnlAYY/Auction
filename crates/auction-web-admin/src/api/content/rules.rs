@@ -2,9 +2,11 @@
 //!
 //! 浏览器只持有规则安全快照；发布命令的版本 fence 与 command_id 由服务端最终校验。
 
+use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest};
+pub(crate) use auction_contracts::{
+    AdminRulesCandidateResponse as AdminRulesCandidate, AdminRulesResponse as AdminRules,
+};
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use super::{ApiResponse, fetch_csrf_token};
 
@@ -20,40 +22,6 @@ impl AdminRulesApiError {
     pub(crate) const fn is_conflict(&self) -> bool {
         matches!(self.status, Some(409))
     }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct AdminRules {
-    pub locale: String,
-    pub title: String,
-    pub markdown: String,
-    pub published_by: String,
-    pub revision: i64,
-    pub published_at: String,
-}
-
-/// 服务端规范化后的规则候选；发布前必须以它重新计算校验签名。
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub(crate) struct AdminRulesCandidate {
-    pub locale: String,
-    pub title: String,
-    pub markdown: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminRulesCandidateRequest {
-    locale: String,
-    title: String,
-    markdown: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminRulesPublishRequest {
-    command_id: Uuid,
-    expected_revision: i64,
-    locale: String,
-    title: String,
-    markdown: String,
 }
 
 pub(crate) async fn fetch_admin_rules(locale: String) -> Result<AdminRules, AdminRulesApiError> {

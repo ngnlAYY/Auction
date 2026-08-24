@@ -40,12 +40,10 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-observability` | tracing、metrics、health、correlation id、心跳安全投影；Public/Admin 与 Worker control 的可选 `/metrics` scrape、进程资源指标和三类进程的有界 OTLP/HTTP exporter | 业务日志内容 |
 | `auction-process` | SIGINT/SIGTERM 订阅、10 秒默认 drain、二次信号分类和 abort-on-drop Tokio 任务守卫 | 配置、listener、心跳发布和业务停止顺序 |
 
-浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态
-WASM/JS/HTML，`auction-http` 用 `rust-embed` 分别内嵌，产出单文件制品。Public 与 Admin
-的组件树和路由树已分离，路由不会跨 surface 提供静态产物；但两种 `RustEmbed` 类型仍编译在
-同一个 `auction-http` crate 中，尚未通过 Cargo feature 或独立 crate 建立制品级资源隔离，
-不能依赖链接器裁剪来保证公开端二进制一定不携带管理端资源。产物缺失时静态路由返回 503
-并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。
+浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态 WASM/JS/HTML。
+Public/Admin 装配根各自定义唯一的 `RustEmbed` 类型，`auction-http` 只接收泛型资源类型并实现
+通用响应，因此任一部署制品都不会引用另一端资源，也不依赖链接器裁剪保证隔离。产物缺失时
+静态路由返回 503 并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。
 
 界面文案由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，支持 `en`/`zh-CN`/`zh-TW`/
 `ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
@@ -232,6 +230,10 @@ projection，
 形状，竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义，价格历史
 保留旧筛选、成交条目与编号页统计；Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
+Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
+全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
+读取之上，关闭 allowlist 也不会放宽这些 transport 防线。
+
 PostgreSQL 使用结算账本边界，SQLite Lite 使用 settled/sold 公开状态边界。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与草稿 lot 管理页已接入，SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
 登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回旧版
@@ -239,6 +241,11 @@ command ledger/竞价事务也已接入配置、应用端口与会话/竞价表�
 代理重入的 `usage_number` 在 lot 锁内按用户历史最大值递增，避免重入与命令重放混淆，
 不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase 已通过统一应用端口接入，
 命令请求携带 `expected_state_version`，取消动作还必须携带原因；存储事务在锁内校验版本并写入取消时间、原因和操作者，随后与命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件在同一数据库事务内提交；Admin A25 规则 GET/POST/PUT 已接入规则 owner，PostgreSQL 使用独立 Serializable revision CAS、`rules_admin_commands` 幂等账本和追加审计，SQLite 只提供规则读取；A05 论坛预览已接入本地 HTML/文本解析端口与管理端契约，限制单次输入为 2 MiB，并只返回 catalog、posts、warnings 等安全预览数据；它不发起远程论坛请求、不写数据库，也不把本地解析结果误报成远程发布成功。A33 Admin 审计已接入两套数据库的追加式安全只读投影、严格精确筛选、keyset/数字分页和 metadata JSON object 校验；数字页的 total 与记录在同一读取事务内取得，管理端不接触原始 SQL 行。Public
+`allow_manual_early_open` 在 Admin 启动时冻结为应用策略，HTTP capability 使用同一来源；计划时间
+之前的人工开放会在存储事务锁定拍卖并读取 `scheduled_open_at` 后失败关闭，计划时间已到的开放和
+Worker due 命令不受影响。命令账本重放先于当前策略检查，已经提交的结果不会因重启后配置变化而
+失去幂等性。
+
 `/api/v1/events` 已从 PostgreSQL/SQLite 持久化事件表提供带 sequence 游标的 Catch-up，`/api/v1/ws`
 只提供有界的 Public session 服务端推送，恢复仍以 Catch-up/权威快照为准；
 Admin A07 结算报告已接入 PostgreSQL 完整档的一致只读快照，SQLite 对该完整档能力明确返回不支持；
@@ -321,15 +328,19 @@ owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settl
 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。SQLite 仍明确返回不支持。
 Public/Admin 的统一 HTTP boundary 已补齐请求 ID/命令审计关联、W3C trace context、访问日志、
 panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头读取超时、可信代理地址解析和
-4096 项有界限流器。除真实浏览器、外部回执和部署切换证据外，第二轮静态审计仍确认真实
-readiness 心跳、SPA fallback 隔离和部分 Admin runtime 字段生效链等代码缺口；在这些边界收口前
-同样不能宣称行为等价。三进程 SIGINT/SIGTERM 与有界排空也已经完成，不再属于该缺口清单。
+4096 项有界限流器。静态分派也只向 14 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
+返回 JSON 404，未知浏览器导航返回页面 404，并按旧版恢复 Public/Admin/静态资源缓存策略。
+Web DTO 单一 owner 和静态资源制品级隔离已经完成。除真实浏览器、外部回执和部署切换证据外，
+第二轮静态审计仍确认首批缓存读模型和次级部署/所有权等代码缺口；在这些边界收口前同样不能宣称
+行为等价。Admin runtime 的人工提前开放与装备来源策略、三进程 SIGINT/SIGTERM、有界排空和真实
+状态心跳均已经完成，不再属于该缺口清单。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下按 owner 返回安全 section；只有 owner 未装配或读取失败时才显式返回
-`unknown`。Public、Admin、Worker 装配根已有心跳发布路径，SIGINT/SIGTERM 下会停止周期任务并
-发布 `stopping`；但周期心跳仍固定报告 ready/零审计失败，Public/Worker 没有纳入 tracing
-health，这些状态必须改为从实际 readiness/audit/tracing owner 读取。Worker control 已通过
+`unknown`。Public、Admin、Worker 装配根的周期心跳每轮复用数据库/schema readiness，读取当前
+进程的审计写入失败饱和计数，并接入各自 tracing owner 的安全投影；数据库、schema 或审计异常
+会令 readiness 失败，tracing degraded 会令 heartbeat status 降级。SIGINT/SIGTERM 下会停止周期
+任务并发布携带当前审计/tracing 状态的 `stopping`。Worker control 已通过
 安全 runtime 目录、实例锁、固定 group/0660、inode 清理和显式 UID/GID peer credential allowlist
 提供 live/ready/status、同 registry 的 `/metrics` 和
 MoogleMail 唤醒，Admin dashboard 只显示安全投影；启用并配置 `dashboard_mailboxes` 时还按 Admin

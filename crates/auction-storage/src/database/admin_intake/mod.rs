@@ -14,6 +14,8 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::competition::{PostgresCompetitionTransaction, map_sql_error};
 
 #[allow(clippy::manual_async_fn)]
@@ -293,6 +295,7 @@ async fn append_admin_intake_record_inner(
     .bind(metadata)
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_sql_error)?;
 
     let stream_key = format!("auction:{}", record.result.auction_id);

@@ -23,6 +23,9 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
+use crate::database::audit_health::AuditWriteResult as _;
+
+#[cfg(feature = "postgres")]
 use super::super::PostgresStore;
 use super::DatabaseStore;
 
@@ -577,6 +580,7 @@ async fn persist_user_mail_result(
     .bind(json!({ "command_kind": kind.as_str(), "result_code": result_code }))
     .execute(&mut **transaction)
     .await
+    .record_audit_failure()
     .map_err(map_storage_error)?;
     Ok(())
 }
