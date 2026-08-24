@@ -29,7 +29,7 @@ mod admin_renames;
 mod admin_rules;
 #[path = "../admin/runtime_config.rs"]
 mod admin_runtime_config;
-#[path = "../admin/users.rs"]
+#[path = "../admin/users/mod.rs"]
 mod admin_users;
 #[path = "../public/blacklist.rs"]
 mod blacklist;
@@ -45,7 +45,7 @@ mod forum;
 mod metrics;
 #[path = "../public/realtime.rs"]
 mod realtime;
-#[path = "../admin/realtime.rs"]
+#[path = "../admin/realtime/mod.rs"]
 mod realtime_admin;
 #[path = "../shared/realtime_hub/mod.rs"]
 mod realtime_hub;

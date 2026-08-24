@@ -21,6 +21,15 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections.rs` 负责 mail、
   realtime、credentials、delivery、fulfillment、recovery 和 alerting section 聚合，`mapping.rs`
   负责 health/process/worker 与稳定 Admin 响应 DTO 映射，不改变 JSON 字段或状态码契约。
+- `src/http/admin/users/`：用户列表、创建/属性命令、黑名单与改名状态动作、DTO 映射和共享错误边界
+  分别由 `list.rs`、`commands.rs`、`status.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责
+  稳定处理器出口；Admin Users 的 session、CSRF、命令 ID 和版本 fence 契约保持不变。
+- `src/http/admin/mail/`：轮询状态、入站列表/详情、暂停/恢复命令、Worker 唤醒和错误映射分别由
+  `state.rs`、`intake.rs`、`commands.rs`、`trigger.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定
+  处理器出口；邮箱筛选、状态版本、CSRF 和 Worker control 契约保持不变。
+- `src/http/admin/realtime/`：lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
+  `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；realtime
+  分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
 - `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：14 + 21 条允许获得
   SPA 入口的显式浏览器路由。
 

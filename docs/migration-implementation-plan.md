@@ -784,6 +784,15 @@ Public/Admin HTTP listener。
   `mail/mod.rs` 只保留稳定导出，状态版本 fence、命令幂等和安全投影边界保持不变。
 - HTTP shared state 已将 Public 与 Admin 的端口状态容器分别拆入 `http/shared/state/{public,admin}.rs`；
   `state/mod.rs` 只保留兼容导出，两个 surface 的依赖注入、缓存/安全策略和 realtime 连接边界保持不变。
+- HTTP Admin Users owner 已将用户列表、创建/属性命令、黑名单与改名状态动作、DTO 映射和共享错误边界
+  分别拆入 `http/admin/users/{list,commands,status,mapping,common}.rs`；`users/mod.rs` 只保留稳定
+  处理器出口，session、CSRF、command ID、版本 fence 和用户安全投影契约保持不变。
+- HTTP Admin Mail owner 已将轮询状态、入站列表/详情、暂停/恢复命令、Worker 唤醒和错误映射分别拆入
+  `http/admin/mail/{state,intake,commands,trigger,common}.rs`；`mail/mod.rs` 只保留稳定处理器出口，
+  邮箱筛选、状态版本、CSRF、幂等摘要和 Worker control 契约保持不变。
+- HTTP Admin Realtime owner 已将 lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别拆入
+  `http/admin/realtime/{reads,replay,mapping,common}.rs`；`realtime/mod.rs` 只保留稳定处理器出口，
+  分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
 - Application 核心端口已将事务策略、命令幂等账本、拍卖仓储、竞价事务和 UTC 时钟分别拆入
   `ports/core/{policy,ledger,repository,competition,clock}.rs`；`ports/mod.rs` 只保留模块装配与稳定
   公共导出，原有事务隔离、命令重放、锁内竞价和时钟端口语义保持不变。
