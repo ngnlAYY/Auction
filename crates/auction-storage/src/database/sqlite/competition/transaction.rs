@@ -3,7 +3,7 @@
 //! SQLite 没有 `FOR UPDATE`。整个写路径先取得连接并执行 `BEGIN IMMEDIATE`，
 //! 由 SQLite 的单写者锁保护 lot、代理、命令账本和事件写入。
 
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 
 use auction_application::{
     AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::database::audit_health::AuditWriteResult as _;
 
 use super::super::SqliteStore;
-#[path = "transaction/bidding.rs"]
+#[path = "transaction/bidding/mod.rs"]
 mod bidding;
 #[path = "transaction/lifecycle.rs"]
 mod lifecycle;

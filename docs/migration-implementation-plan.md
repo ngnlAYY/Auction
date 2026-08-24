@@ -827,6 +827,22 @@ Public/Admin HTTP listener。
 - Application Admin intake owner 已将装备来源类型/规范化事实、命令摘要、来源快照、脱敏事务记录、
   窄端口和共享字段错误分别拆入 `ports/admin/intake/{equipment,commands,source,records,ports,common}.rs`；
   `intake/mod.rs` 只负责稳定导出，明文 key 清理、密文信封、幂等摘要和来源先读后写边界保持不变。
+- Storage Public lot owner 已将 PostgreSQL/SQLite 的列表查询、详情查询和数据库行映射分别拆入
+  `database/lots/{postgres,sqlite}/{mod,list,detail,mapping}.rs`；顶层 `lots/mapping.rs` 继续拥有
+  跨后端公开投影、装备字段校验和 Lite 时间/UUID 转换，`lots/mod.rs` 只保留端口分派，preview/live
+  互斥投影、分类统计、分页和两种数据库能力边界保持不变。
+- Storage SQLite competition transaction owner 已将命令账本、锁内快照、计划编排、代理/lot 写入、
+  追加审计和 realtime 事件分别拆入
+  `database/sqlite/competition/transaction/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`；
+  `transaction.rs` 仍独占 `BEGIN IMMEDIATE`、提交/回滚和重试边界，竞价计划的幂等、版本 fence、
+  审计与事件原子写入语义保持不变。
+- Storage PostgreSQL competition transaction owner 已按同一职责边界拆入
+  `database/competition/postgres/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`；
+  `competition/postgres.rs` 仍独占 Serializable/行锁事务、提交/重试和端口装配，竞价、代理、
+  审计与 realtime 事件的同事务顺序保持不变，并与 SQLite Lite owner 保持结构对称。
+- Admin Web realtime owner 已将页面状态/replay、筛选器、lag 表/分页和 failure 表/分页分别拆入
+  `app/operations/realtime/{mod,page,filters,lag,failure}.rs`；surface 路由、replay 的
+  `command_id` 派生和安全投影契约保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。

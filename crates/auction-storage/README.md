@@ -5,11 +5,15 @@
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
-`src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令、竞价写入和
-共享映射分别位于同目录的 `postgres/{lifecycle,admin,bidding,mapping}.rs`；其中管理事务再按
+`src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令和共享映射
+分别位于同目录的 `postgres/{lifecycle,admin,mapping}.rs`，竞价 owner 拆入
+`postgres/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`；其中管理事务再按
 拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,lot,mapping}.rs`。SQLite Lite 竞价事务
-由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
-`transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
+由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期和映射仍由
+`transaction/{lifecycle,mapping}.rs` 持有；竞价 owner 进一步拆入
+`transaction/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`，分别负责命令账本、
+锁内快照、计划编排、代理/lot 写入、审计和 realtime 事件，`BEGIN IMMEDIATE` 事务边界仍由父文件
+统一维护；后续领域事务继续按同一规则拆分。
 Public 竞价日志由 `src/database/bid_log/mod.rs` 装配，公共 cursor/结果校验、PostgreSQL 查询/映射
 和 SQLite Lite 查询/类型转换分别位于 `bid_log/{common,postgres,sqlite}.rs`；两套后端继续共享
 时间、lot、状态版本、事实序号和 bid ID 的 keyset 排序语义，但保留各自 SQL 与能力边界。
@@ -61,9 +65,10 @@ Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退
 完整档明确返回不支持，不能由报告读取适配器临时补写。
 Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs` 与
 `src/database/blacklist/mod.rs` 持有，PostgreSQL 与 SQLite 均只返回公开字段。
-Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，`postgres.rs` 与
-`sqlite.rs` 分别负责查询，`mapping.rs` 负责跨后端安全投影和字段校验；两套后端的 Lite/完整
-能力差异在各自 SQL 适配器中显式保留。
+Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，PostgreSQL 与 SQLite
+分别由各自子目录的 `mod.rs`、`list.rs`、`detail.rs` 和 `mapping.rs` 拥有列表、详情与行映射；
+顶层 `mapping.rs` 继续负责跨后端安全投影、装备字段校验和 Lite 时间/UUID 转换。两套后端的
+Lite/完整能力差异在各自 SQL 适配器中显式保留。
 Public 拍卖目录读取由 `src/database/auctions/` 持有：`mod.rs` 只做跨后端端口装配，
 `postgres.rs` 与 `sqlite.rs` 分别负责查询，`mapping.rs` 负责行到安全投影的转换和列表参数
 校验；cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。

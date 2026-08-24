@@ -31,7 +31,7 @@ mod lots;
 mod mail;
 #[path = "shared/pagination.rs"]
 mod pagination;
-#[path = "operations/realtime.rs"]
+#[path = "operations/realtime/mod.rs"]
 mod realtime;
 #[path = "identity/renames.rs"]
 mod renames;

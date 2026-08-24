@@ -1,4 +1,4 @@
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 
 use auction_application::{
     AdminAuctionCreateTransaction, AdminAuctionSummary, AdminCreateAuctionCommand, AdminLotSummary,
@@ -25,7 +25,7 @@ use crate::database::audit_health::AuditWriteResult as _;
 use super::PostgresStore;
 #[path = "postgres/admin.rs"]
 mod admin;
-#[path = "postgres/bidding.rs"]
+#[path = "postgres/bidding/mod.rs"]
 mod bidding;
 #[path = "postgres/lifecycle.rs"]
 mod lifecycle;
