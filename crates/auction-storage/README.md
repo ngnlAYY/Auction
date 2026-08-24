@@ -32,7 +32,10 @@ evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、rec
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
 owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
 `src/database/users/admin/` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计；
-其中 `mod.rs` 持有跨后端分派与共享校验，`postgres.rs`/`sqlite.rs` 分别持有 SQL 实现，
+其中 `mod.rs` 持有跨后端分派与共享校验，PostgreSQL `postgres.rs` 只负责子模块装配，
+`postgres/{commands,reads,mapping}.rs` 分别持有命令写入、查询读取和行/幂等结果映射，
+SQLite `sqlite.rs` 同样只负责子模块装配，`sqlite/{commands,reads,mapping}.rs` 持有对应的
+命令写入、查询读取和行/事务映射，
 并由 recovery owner 记录完成 proof。`recovery_commands/commands/{confirm,relist}.rs` 同时持有 PostgreSQL 完整档的
 relist/refund resolution 调度：重挂目标、原拍卖、原 lot/equipment 和 custody action 在
 Serializable 事务中重新校验，目标暂缺时写入 `next_attempt_at` 退避，buyer refund fulfillment
@@ -60,7 +63,9 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 `context.rs`、`plan.rs` 和 `record.rs` 分别负责上下文锁定、计划写入和审计/实时事件记录：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
-触发器。
+触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
+`transaction/lifecycle/{context,plan,record}.rs` 分别负责上下文/资格读取、计划写入和审计/realtime
+事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
@@ -88,6 +93,10 @@ Admin 改名历史读取由 `src/database/admin_renames/mod.rs` 持有；用户�
 命令账本、用户投影、密文 key 信封、`user_renames`、`user_blacklist_history` 和追加审计；
 PostgreSQL 使用 Serializable/advisory lock，SQLite 使用 `BEGIN IMMEDIATE`。MoogleMail 注册/换绑
 仍按其独立能力清单只支持 PostgreSQL，不能把两者混写成完全对等。
+Users Mail owner 由 `src/database/users/mail.rs` 只做端口分派；`mail/postgres/{commands,reads,mapping}.rs`
+分别负责 MoogleMail 注册/换绑命令、幂等与信封读取、结果/身份/事务映射，`mail/sqlite.rs` 只负责
+Lite 登录 key 信封读取。这样 PostgreSQL 完整档的外部身份命令与 SQLite Lite 的本地信封能力保持
+显式边界，明文 key 仍不进入存储或 HTTP 投影。
 Admin A32 凭据管理由 `src/database/credentials/mod.rs` 装配：`runtime.rs` 负责 active/health
 读取，`read.rs` 负责列表与命令查询，`write.rs` 负责导入/修改/删除事务，`mapping.rs` 与
 `common.rs` 负责安全投影、结果和错误映射。PostgreSQL 在 Serializable 事务中完成
@@ -105,6 +114,8 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `inbound_mail`、`mail_commands`、cursor 的同事务幂等提交。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
 负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
+`admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
+轮询与入站查询、行和安全 metadata 映射；父 `mod.rs` 只保留跨后端端口分派。
 服务心跳由 `src/database/health/mod.rs` 持有：PostgreSQL 使用数据库时钟和
 observation sequence 条件 upsert，SQLite Lite 使用本地数据库时钟和同一 sequence fence；
 两个后端都只返回 dashboard 所需的安全字段，details 原文不会离开存储边界。

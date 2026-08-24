@@ -1,0 +1,181 @@
+//! PostgreSQL Users/Admin 行映射、幂等结果持久化和错误边界。
+
+use super::*;
+
+pub(super) fn map_postgres_user(row: &PgRow) -> Result<AdminUser, ApplicationError> {
+    let status: String = row.try_get("status").map_err(map_storage_error)?;
+    let key_status: String = row.try_get("key_status").map_err(map_storage_error)?;
+    let user = AdminUser {
+        id: row.try_get("id").map_err(map_storage_error)?,
+        username: row.try_get("username").map_err(map_storage_error)?,
+        game_player_id: row.try_get("game_player_id").map_err(map_storage_error)?,
+        status: AdminUserStatus::parse(&status)
+            .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
+        key_status: auction_application::AdminUserKeyStatus::parse(&key_status)
+            .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
+        state_version: row.try_get("state_version").map_err(map_storage_error)?,
+        created_at: row.try_get("created_at").map_err(map_storage_error)?,
+        updated_at: row.try_get("updated_at").map_err(map_storage_error)?,
+    };
+    user.validate().then_some(user).ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))
+}
+
+pub(super) fn parse_postgres_command(
+    row: &PgRow,
+    _command_id: Uuid,
+    kind: AdminUserCommandKind,
+    request_hash: RequestHash,
+) -> Result<AdminUserCommandResult, ApplicationError> {
+    let stored_kind: String = row.try_get("command_kind").map_err(map_storage_error)?;
+    let stored_hash: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;
+    if stored_kind != kind.as_str() || stored_hash.as_slice() != request_hash.as_bytes() {
+        return Err(admin_error(AdminUserError::CommandConflict));
+    }
+    let user_id: Uuid = row.try_get("user_id").map_err(map_storage_error)?;
+    let payload: Json<Value> = row.try_get("result_payload").map_err(map_storage_error)?;
+    let response = load_response_envelope(
+        row.try_get("response_ciphertext").map_err(map_storage_error)?,
+        row.try_get("response_nonce").map_err(map_storage_error)?,
+        row.try_get("response_encryption_key_id").map_err(map_storage_error)?,
+        row.try_get("response_fingerprint").map_err(map_storage_error)?,
+    )?;
+    parse_payload(payload.0, user_id, response)
+}
+
+pub(super) async fn insert_envelope_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    envelope: &MailLoginKeyEnvelope,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
+    sqlx::query(
+        "INSERT INTO public.user_login_key_envelopes
+            (user_id, ciphertext, nonce, encryption_key_id, fingerprint, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $6)
+         ON CONFLICT (user_id) DO UPDATE
+         SET ciphertext = EXCLUDED.ciphertext, nonce = EXCLUDED.nonce,
+             encryption_key_id = EXCLUDED.encryption_key_id,
+             fingerprint = EXCLUDED.fingerprint, updated_at = EXCLUDED.updated_at",
+    )
+    .bind(user_id)
+    .bind(envelope.ciphertext())
+    .bind(envelope.nonce())
+    .bind(envelope.encryption_key_id())
+    .bind(envelope.fingerprint())
+    .bind(now)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    Ok(())
+}
+
+pub(super) async fn insert_command_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command_id: Uuid,
+    kind: AdminUserCommandKind,
+    request_hash: RequestHash,
+    result: &AdminUserCommandResult,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
+    let response = result.response_envelope.as_ref();
+    sqlx::query(
+        "INSERT INTO public.user_admin_commands
+            (command_id, command_kind, request_digest, user_id, result_payload,
+             response_ciphertext, response_nonce, response_encryption_key_id,
+             response_fingerprint, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    )
+    .bind(command_id)
+    .bind(kind.as_str())
+    .bind(request_hash.as_bytes().to_vec())
+    .bind(user_id)
+    .bind(Json(json!({ "user": &result.user })))
+    .bind(response.map(|value| value.ciphertext().to_vec()))
+    .bind(response.map(|value| value.nonce().to_vec()))
+    .bind(response.map(|value| value.encryption_key_id().to_owned()))
+    .bind(response.map(|value| value.fingerprint().to_owned()))
+    .bind(now)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    Ok(())
+}
+
+pub(super) async fn insert_audit_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command_id: Uuid,
+    kind: AdminUserCommandKind,
+    user_id: Uuid,
+    actor_id: &str,
+    request_id: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
+    sqlx::query(
+        "INSERT INTO public.audit_records
+            (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+             result, request_id, source, metadata)
+         VALUES ($1, $2, 'admin', $3, $4, 'user', $5, 'success', $6, 'admin', $7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(now)
+    .bind(actor_id)
+    .bind(format!("user.{}", kind.as_str()))
+    .bind(user_id.to_string())
+    .bind(request_id)
+    .bind(Json(json!({ "command_id": command_id, "command_kind": kind.as_str() })))
+    .execute(&mut **transaction)
+    .await
+    .record_audit_failure()
+    .map_err(map_storage_error)?;
+    Ok(())
+}
+
+pub(super) async fn set_serializable(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), ApplicationError> {
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    Ok(())
+}
+
+pub(super) async fn lock_command(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command_id: Uuid,
+) -> Result<(), ApplicationError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(command_id.to_string())
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    Ok(())
+}
+
+fn map_postgres_error(error: sqlx::Error) -> ApplicationError {
+    match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("23505") =>
+        {
+            admin_error(AdminUserError::Conflict)
+        }
+        _ => map_storage_error(error),
+    }
+}
+
+pub(super) fn map_admin_write_error(error: sqlx::Error) -> ApplicationError {
+    map_postgres_error(error)
+}
+
+pub(super) fn map_storage_error(error: sqlx::Error) -> ApplicationError {
+    let message = match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("40001") =>
+        {
+            "Admin Users 事务发生序列化冲突"
+        }
+        _ => "Admin Users 存储操作失败",
+    };
+    storage_error(message)
+}
