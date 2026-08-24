@@ -18,7 +18,7 @@ mod admin_users;
 mod auction;
 #[path = "auction/competition.rs"]
 mod competition;
-#[path = "settlement/fulfillment.rs"]
+#[path = "settlement/fulfillment/mod.rs"]
 mod fulfillment;
 #[path = "auction/lifecycle.rs"]
 mod lifecycle;

@@ -16,7 +16,9 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
   轮询动作、入站表格、详情投影和状态标签；`shared/` 只保存本 surface
   内真正通用的基础组件。`surface.rs` 只保留路由、资源初始化和页面装配，`surface/auth.rs` 持有
   会话/登录/认证外壳，`surface/shared.rs` 持有跨页面状态面板、错误重试和时间格式化；realtime 页面在
-  `operations/realtime/` 内拆分页面状态/replay、筛选器、lag 表/分页和 failure 表/分页。
+  `operations/realtime/` 内拆分页面状态/replay、筛选器、lag 表/分页和 failure 表/分页；delivery outbox
+  在 `fulfillment/deliveries/` 内拆分页面编排、状态筛选、列表/分页、动作对话框、共享状态模型和标签辅助；
+  规则页面在 `content/rules/` 内拆分页面加载、编辑 workspace、Markdown 预览、发布状态模型和字段辅助。
 - `assets/admin.css`：管理端 surface 样式。设计变量来自 `auction-web-shared`。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认简体中文。
 

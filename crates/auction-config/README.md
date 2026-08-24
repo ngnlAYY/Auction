@@ -4,7 +4,7 @@ TOML 配置解析与敏感配置加载。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；主/敏感配置解析集中在 `src/config/`，
 其中 `src/config/settings/` 按拍卖策略、Worker/MoogleMail、HTTP 安全、敏感文件、应用
-模型和校验职责拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
+模型和校验职责拆分，`settings/app/` 再按输入模型、加载、公共 getter 和最终构建拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
 Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，校验再按同一 owner
 放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
 `src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML

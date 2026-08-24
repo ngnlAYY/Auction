@@ -808,6 +808,14 @@ Public/Admin HTTP listener。
 - Application 核心端口已将事务策略、命令幂等账本、拍卖仓储、竞价事务和 UTC 时钟分别拆入
   `ports/core/{policy,ledger,repository,competition,clock}.rs`；`ports/mod.rs` 只保留模块装配与稳定
   公共导出，原有事务隔离、命令重放、锁内竞价和时钟端口语义保持不变。
+- Application settlement fulfillment owner 已将服务编排、无 secret delivery intent、claim/外部证据校验、
+  proof 摘要和跨 owner 载荷模型分别拆入
+  `services/settlement/fulfillment/{mod,service,intent,validation,evidence,proof,model}.rs`；
+  prepare/activate/reconcile 端口、稳定 command/request hash、Sent/Balance 证明和 manual reconcile
+  边界保持不变。
+- Config AppConfig owner 已将 TOML 输入模型、配置定位/读取、敏感值 getter 和 runtime/Worker/数据库
+  最终校验构建分别拆入 `config/settings/app/{mod,model,load,accessors,build}.rs`；`AppConfig` 公共
+  类型路径、所有配置字段、敏感值最小暴露和 SQLite Lite 并发边界保持不变。
 - Storage MoogleMail delivery outbox 已将跨后端端口分派、命令闭集校验、普通 outbox 入队、recovery
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
@@ -843,6 +851,12 @@ Public/Admin HTTP listener。
 - Admin Web realtime owner 已将页面状态/replay、筛选器、lag 表/分页和 failure 表/分页分别拆入
   `app/operations/realtime/{mod,page,filters,lag,failure}.rs`；surface 路由、replay 的
   `command_id` 派生和安全投影契约保持不变。
+- Admin Web delivery owner 已将页面编排、状态筛选、列表/分页、动作对话框、共享状态模型和标签辅助分别拆入
+  `app/fulfillment/deliveries/{mod,page,filters,table,dialog,model,helpers}.rs`；release/retry/reconcile
+  动作、CSRF、`command_id`、fencing version 和外部结果未知边界保持不变。
+- Admin Web rules owner 已将页面加载、规则编辑 workspace、Markdown 预览、发布状态模型和字段辅助分别拆入
+  `app/content/rules/{mod,page,workspace,preview,model,helpers}.rs`；语言切换、服务端规范化校验、revision
+  fence、最近校验草稿限制和发布 command_id 复用语义保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
   `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。

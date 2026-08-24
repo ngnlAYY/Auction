@@ -21,7 +21,7 @@ mod config;
 mod credentials;
 #[path = "operations/dashboard.rs"]
 mod dashboard;
-#[path = "fulfillment/deliveries.rs"]
+#[path = "fulfillment/deliveries/mod.rs"]
 mod deliveries;
 #[path = "auction/intake.rs"]
 mod intake;
@@ -35,7 +35,7 @@ mod pagination;
 mod realtime;
 #[path = "identity/renames.rs"]
 mod renames;
-#[path = "content/rules.rs"]
+#[path = "content/rules/mod.rs"]
 mod rules;
 #[path = "auction/settlement.rs"]
 mod settlement;

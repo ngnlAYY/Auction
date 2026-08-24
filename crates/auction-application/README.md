@@ -14,6 +14,9 @@
   人工提前开放使用启动时冻结的策略，并在事务锁内读取计划开放时间后失败关闭，已到期的计划开放和
   Worker due 命令不受该人工授权开关影响。
 - `src/services/auction/competition.rs`：竞价用例，例如 `CompetitionService::place_bid`。
+- `src/services/settlement/fulfillment/`：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
+  `intent.rs` 负责无 secret delivery intent，`validation.rs` 与 `evidence.rs` 负责 claim/外部回执
+  校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；`mod.rs` 只负责模块装配和稳定出口。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
