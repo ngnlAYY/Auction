@@ -16,6 +16,7 @@ use auction_application::{
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
+use super::HttpBoundary;
 use super::realtime_hub::RealtimeHub;
 use super::security::{AdminHttpSecurity, PublicHttpSecurity};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -131,6 +132,11 @@ impl PublicApiState {
     pub fn with_realtime_hub(mut self, hub: Arc<RealtimeHub>) -> Self {
         self.realtime_hub = Some(hub);
         self
+    }
+
+    /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
+    pub fn http_boundary(&self) -> HttpBoundary {
+        self.security.boundary()
     }
 
     pub(crate) fn worlds(&self) -> Option<&dyn WorldReader> {
@@ -321,6 +327,11 @@ impl AdminApiState {
     pub fn with_readiness(mut self, readiness: Arc<dyn ProcessReadinessPort>) -> Self {
         self.readiness = Some(readiness);
         self
+    }
+
+    /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
+    pub fn http_boundary(&self) -> HttpBoundary {
+        self.security.boundary()
     }
 
     /// 注入 Admin dashboard 需要严格检查的 Worker world 范围；空集合表示当前进程没有可靠的

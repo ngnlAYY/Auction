@@ -11,6 +11,7 @@ auction-domain.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 croner.workspace = true
+ipnet.workspace = true
 libc.workspace = true
 serde.workspace = true
 thiserror.workspace = true

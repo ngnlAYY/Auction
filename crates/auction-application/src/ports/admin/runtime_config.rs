@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -107,6 +108,12 @@ pub struct AdminRuntimeSecurityConfig {
     pub rate_limit_window_seconds: u64,
     /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
     pub cookie_secure: bool,
+    /// 普通 HTTP 请求的最长处理秒数；省略时为 15 秒，WebSocket 握手路径不受此限制。
+    pub request_timeout_seconds: u64,
+    /// 可以提供 `X-Forwarded-For` 的可信 TCP 反向代理网段；省略时不信任任何 TCP 代理。
+    pub trusted_proxy_cidrs: Vec<String>,
+    /// 是否信任 Unix socket 上游提供的 `X-Forwarded-For`；省略时关闭，且仅 Unix 监听模式可启用。
+    pub trusted_unix_proxy: bool,
 }
 
 impl Default for AdminRuntimeSecurityConfig {
@@ -118,6 +125,9 @@ impl Default for AdminRuntimeSecurityConfig {
             mutation_rate_limit: 60,
             rate_limit_window_seconds: 60,
             cookie_secure: false,
+            request_timeout_seconds: 15,
+            trusted_proxy_cidrs: Vec::new(),
+            trusted_unix_proxy: false,
         }
     }
 }
@@ -240,6 +250,11 @@ impl AdminRuntimeDocument {
         validate_dashboard_mailboxes(&self.dashboard_mailboxes)?;
         validate_equipment_source(&self.equipment_source)?;
         validate_security(&self.security)?;
+        if self.security.trusted_unix_proxy && self.listener.mode != AdminRuntimeListenMode::Unix {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "security.trusted_unix_proxy 只能在 Unix listener 模式启用".to_owned(),
+            ));
+        }
         validate_session(&self.session)?;
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;
@@ -658,7 +673,9 @@ fn validate_security(config: &AdminRuntimeSecurityConfig) -> Result<(), AdminRun
         || config.mutation_rate_limit == 0
         || config.mutation_rate_limit > 10_000
         || !(1..=3600).contains(&config.rate_limit_window_seconds)
+        || !(1..=120).contains(&config.request_timeout_seconds)
         || config.allowed_origins.len() > 16
+        || config.trusted_proxy_cidrs.len() > 64
     {
         return Err(AdminRuntimeConfigError::InvalidDocument("security 边界无效".to_owned()));
     }
@@ -669,6 +686,20 @@ fn validate_security(config: &AdminRuntimeSecurityConfig) -> Result<(), AdminRun
         return Err(AdminRuntimeConfigError::InvalidDocument(
             "security.allowed_origins 无效".to_owned(),
         ));
+    }
+    for (index, value) in config.trusted_proxy_cidrs.iter().enumerate() {
+        let Ok(network) = value.parse::<IpNet>() else {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "security.trusted_proxy_cidrs 无效".to_owned(),
+            ));
+        };
+        if network.trunc().to_string() != *value
+            || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
+        {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "security.trusted_proxy_cidrs 必须规范且不能重复".to_owned(),
+            ));
+        }
     }
     Ok(())
 }

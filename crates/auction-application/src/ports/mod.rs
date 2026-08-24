@@ -588,6 +588,7 @@ pub trait CompetitionTransaction: Send {
     fn apply_plan(
         &mut self,
         plan: CompetitionPlan,
+        request_id: Option<String>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 

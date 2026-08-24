@@ -262,7 +262,7 @@ async fn execute_command(
         external_reference: input.external_reference,
         failure_code: input.failure_code,
         actor_id,
-        request_id: None,
+        request_id: super::request_id(&headers),
         request_hash,
     };
     let result = match port.execute(command).await {

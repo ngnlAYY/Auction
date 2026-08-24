@@ -154,8 +154,9 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
     fn apply_plan(
         &mut self,
         plan: CompetitionPlan,
+        request_id: Option<String>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.apply_plan_inner(plan).await }
+        async move { self.apply_plan_inner(plan, request_id).await }
     }
 }
 
@@ -923,7 +924,7 @@ async fn apply_final_plan_postgres(
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
         transaction.insert_command_inner(proxy_plan.command).await?;
-        transaction.apply_plan_inner(proxy_plan.competition).await?;
+        transaction.apply_plan_inner(proxy_plan.competition, command.request_id.clone()).await?;
     }
     if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
         let transaction = transaction.transaction_mut()?;
@@ -1700,7 +1701,7 @@ async fn append_lifecycle_record_inner(
     .bind(&command.actor.actor_id)
     .bind(command.action.command_kind())
     .bind(result.auction_id.as_uuid().to_string())
-    .bind(command.command_id.as_uuid().to_string())
+    .bind(command.request_id.as_deref())
     .bind(command.actor.actor_type.database_name())
     .bind(metadata)
     .execute(&mut **transaction)
@@ -2017,16 +2018,17 @@ impl PostgresCompetitionTransaction {
     pub(crate) async fn apply_plan_inner(
         &mut self,
         plan: CompetitionPlan,
+        request_id: Option<String>,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(&plan)?;
         apply_proxy_changes(self, &plan).await?;
         for bid in &plan.public_bids {
             insert_bid(self, bid).await?;
-            insert_audit_for_bid(self, bid).await?;
+            insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
             insert_realtime_event(self, bid).await?;
         }
-        insert_audit_for_proxy_changes(self, &plan, command_id).await?;
+        insert_audit_for_proxy_changes(self, &plan, command_id, request_id.as_deref()).await?;
         update_lot(self, &plan).await
     }
 }
@@ -2206,6 +2208,7 @@ async fn update_lot(
 async fn insert_audit_for_bid(
     transaction: &mut PostgresCompetitionTransaction,
     bid: &AcceptedBid,
+    request_id: Option<&str>,
 ) -> Result<(), CompetitionTransactionError> {
     let metadata = json!({
         "bid_id": bid.id.as_uuid(),
@@ -2223,7 +2226,7 @@ async fn insert_audit_for_bid(
     .bind(Uuid::new_v4())
     .bind(bid.bidder_id.as_uuid().to_string())
     .bind(bid.lot_id.as_uuid().to_string())
-    .bind(bid.command_id.as_uuid().to_string())
+    .bind(request_id)
     .bind(metadata)
     .execute(&mut **transaction)
     .await
@@ -2235,9 +2238,11 @@ async fn insert_audit_for_proxy_changes(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,
     command_id: auction_domain::CommandId,
+    request_id: Option<&str>,
 ) -> Result<(), CompetitionTransactionError> {
     for transition in &plan.proxy_transitions {
         let metadata = json!({
+            "command_id": command_id.as_uuid(),
             "authorization_id": transition.authorization_id.as_uuid(),
             "transition_kind": proxy_transition_kind(transition.kind),
             "state_version": transition.state_version,
@@ -2251,7 +2256,7 @@ async fn insert_audit_for_proxy_changes(
         )
         .bind(Uuid::new_v4())
         .bind(transition.authorization_id.as_uuid().to_string())
-        .bind(command_id.as_uuid().to_string())
+        .bind(request_id)
         .bind(metadata)
         .execute(&mut **transaction)
         .await

@@ -8,8 +8,10 @@
 职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
 relay/Hub、绑定监听器、挂载 `auction_http::public_router()` 和返回启动错误。Public 的
 `[tracing]` 使用主配置，OTLP headers 使用敏感 TOML 的 Public 专属字段；exporter 采用有界
-异步队列，当前仅在服务 future 正常返回后执行限时关闭。SIGINT/SIGTERM 共用的有界优雅停机、
-停止心跳和稳定退出码仍待接入。**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
+异步队列。进程通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 Axum graceful
+shutdown，停止 heartbeat/realtime relay 并发布停止心跳，整个 HTTP/后台任务 drain 最多 10 秒，
+排空期间第二次信号会强制收口，最后按配置限时刷新 exporter。稳定退出码仍待统一。
+**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
 持久化事件分发，外部广播 sink 仍由独立协议负责。
 
 默认监听 `127.0.0.1:8090`。

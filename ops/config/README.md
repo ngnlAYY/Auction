@@ -92,7 +92,10 @@ Lite 已实现的写入仍必须满足事务原子性、命令幂等和追加式
 模板，只有显式覆盖值才会改变它。
 
 Public/Admin 主配置还可以包含 `[http_security]` 与 `[session]`：前者只保存精确 origin、
-速率限制和 Cookie `secure` 属性，后者保存会话时限与公开会话并发上限。两者都不是凭据，
+速率限制、Cookie `secure`、普通请求处理超时和可信代理网段，后者保存会话时限与公开会话并发
+上限。`trusted_proxy_cidrs` 只接受最多 64 个规范且不重复的 CIDR；默认空集合会忽略所有
+`X-Forwarded-For`。`trusted_unix_proxy` 只允许 Admin runtime 的 Unix listener 启用，不能用它
+放宽 TCP peer。两者都不是凭据，
 但仍由配置校验限制范围；原始登录 key、会话 token 和数据库 URL 不得出现在主配置。
 
 Public 主配置还可以包含 `[realtime]`：`consumer_key` 是持久化 relay 的稳定非敏感标识，

@@ -39,7 +39,8 @@ SQLx 0.9 的 [MSRV 说明](https://docs.rs/crate/sqlx/latest/source/CHANGELOG.md
 
 **选择：Tokio + Axum 0.8。** 现有系统有 public/admin 两个 HTTP surface、实时更新和
 大量横切 middleware；Axum 的 `Router`/Tower 组合适合把这些能力放在适配器层，领域层
-不会被框架类型污染。
+不会被框架类型污染。连接装配直接使用 Axum 同版本依赖图中的 Hyper/`hyper-util`：仅用于配置
+5 秒 HTTP/1 请求头读取超时、HTTP/2 WebSocket CONNECT 和连接级优雅排空，不建立第二套路由器。
 
 ## 浏览器端
 
@@ -187,7 +188,7 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   与 SQLx 统一使用 rustls/ring TLS provider，避免同时链接多个 TLS provider。
 - SQLx 数据库驱动和 Redis 都由窄 feature 控制。默认构建不携带备用数据库或缓存客户端。
   浏览器端 crate 与后端 crate 分离，后端二进制不含 Dioxus、`wasm-bindgen` 或 `web-sys`。
-- 不额外直接依赖框架已经传递提供且项目未使用的 `tower-http`、通用 Redis 连接池、ORM、
+- 不额外直接依赖项目未使用的 `tower-http`、通用 Redis 连接池、ORM、
   GraphQL、进程内缓存或第二套前端工具链。确有用例后再按 owner 边界引入。
 - 前端静态产物使用 `rust-embed` 内嵌进二进制，得到单文件制品；`allow_missing` 保证未
   构建前端时后端仍可编译，运行时以明确的 503 报告而不是 panic。

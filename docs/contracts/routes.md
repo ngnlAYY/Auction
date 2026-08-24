@@ -25,8 +25,9 @@ control 未启用或指标关闭时该路径返回 404。
 OTLP/HTTP tracing exporter 不是业务 HTTP 路由，不计入上述统计。Public/Worker 从主配置的
 `[tracing]` 读取，Admin 在配置 `runtime_config_file` 时以 runtime 的 `[tracing]` 为准；角色专属
 OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使用有界异步队列，并在进程停止
-时按限定等待时间刷新和关闭；exporter 不会把 headers 写入日志、指标或 runtime 文件。当前三类
-进程尚未统一接入 SIGTERM 有界优雅停机，因此 systemd 的默认停止信号还不能保证走到该刷新边界。
+时按限定等待时间刷新和关闭；exporter 不会把 headers 写入日志、指标或 runtime 文件。三类进程
+已经统一订阅 SIGINT/SIGTERM，先执行 10 秒有界业务/HTTP drain，再进入配置限定的 exporter
+刷新；排空期间第二次信号会强制收口。
 
 ## 进程健康探针
 
@@ -65,10 +66,15 @@ handler 当前明确产生的稳定集合；依赖错误中的 504 表示 contex
 | 500 | 服务器内部无法安全完成请求 |
 | 503/504 | 下游依赖不可用或处理超时 |
 
-旧版统一 HTTP boundary 还要求合法或新生成的 `X-Request-ID`、响应回传、trace context、请求级
-访问日志、安全响应头、可信代理客户端地址、处理超时和有界限流状态。当前 Rust 路由只完成了
-origin/CSRF/body limit/按直连地址限流等局部边界，上述统一能力尚未接入；未知 `/api`、`/health`
-和浏览器路径也必须先从 SPA fallback 隔离，再按 JSON 404 或页面 404 返回。
+Public/Admin 已恢复统一 HTTP boundary：只接受 1 至 64 字节的 ASCII 字母数字/`-_.`
+`X-Request-ID`，缺失时生成并在响应回传，重复或非法值返回 `400 invalid_request_id`；同一值会进入
+Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，但不参与命令请求哈希。边界还
+提取 W3C trace context，记录请求级访问日志，隔离 panic，设置安全响应头，执行默认 15 秒处理
+超时和固定 5 秒 HTTP/1 请求头读取超时。`/api/v1/ws` 不受处理超时限制。客户端地址只在 TCP peer
+命中配置的规范 CIDR，或 Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链
+整体丢弃。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
+属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
+未知 `/api`、`/health` 和浏览器路径仍必须先从 SPA fallback 隔离，再按 JSON 404 或页面 404 返回。
 
 ## Public
 
@@ -109,9 +115,9 @@ next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格�
 ## Admin
 
 除 Admin session 本身外，下表路径都经过 Admin session；mutation 还经过 origin、CSRF、
-限流和 actor 注入。`request_id` 属于冻结契约，但当前 mutation 尚未从 HTTP boundary 注入，审计
-命令仍收到 `None`；补齐前不得宣称请求与审计已经可关联。具有多个 HTTP 方法的路径必须按方法
-分别保留成功状态。
+限流和 actor 注入。HTTP boundary 规范化后的 `request_id` 已注入支持审计的管理命令和生命周期
+命令；Worker 内部命令保持 `None`，避免把 `command_id` 冒充请求关联。具有多个 HTTP 方法的路径
+必须按方法分别保留成功状态。
 
 | 编号 | 方法 | 路径 | 成功 | 明确错误状态 | 旧代码来源 |
 | --- | --- | --- | --- | --- | --- |
@@ -235,9 +241,10 @@ A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和
 读取全量轮询器、consumer lag/failure water、delivery pending/failed/manual-reconcile 水位及年龄字段；fulfillment、recovery
 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting
 section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
-`unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，但周期发布当前硬编码
-`ready=true`、`audit_failure_count=0`，Public/Worker 也未注入 tracing health；SIGTERM 还不会可靠
-发布停止心跳。因此 dashboard 心跳真实性仍是待完成代码任务。外部广播不属于旧版 dashboard 契约。
+`unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下也会停止周期
+任务并发布停止心跳；但周期发布当前硬编码 `ready=true`、`audit_failure_count=0`，Public/Worker
+也未注入 tracing health。因此 dashboard 心跳真实性仍是待完成代码任务。外部广播不属于旧版
+dashboard 契约。
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、

@@ -24,12 +24,16 @@ operations alert 等 Worker 任务类别都已有 Rust owner 与装配。Postgre
 竞价、代理、账户、管理命令、审计、实时通信、结算/recovery、凭据、MoogleMail 和论坛链路；
 SQLite Lite 只实现已声明的单主机能力，完整档端点在 Lite 部署中明确报告不支持。
 
-路由和 owner 齐全不等于运行边界已收口。2026-08-24 的第二轮交叉审计确认仍需补齐：Public、
-Admin、Worker 的 SIGTERM/有界优雅停机，Public/Admin 统一 HTTP 边界（请求 ID、trace context、
-安全响应头、超时、可信代理和有界限流器），心跳按真实 readiness/audit/tracing 状态发布，未知
-API/health 路径与 SPA fallback 隔离，以及 Admin runtime 的人工提前开放和装备来源策略真正接入
-运行路径。浏览器端还存在稳定 DTO 在 Web crate 重复定义，以及 Public/Admin 静态资源只做路由
-隔离、尚无 Cargo feature 或独立 crate 提供制品级隔离的问题；这些都属于非测试代码任务。
+路由和 owner 齐全不等于运行边界已收口。三进程现已通过共用生命周期原语统一处理
+SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接收新 HTTP 连接，Worker
+停止领取新任务并完成当前有界批次，随后停止心跳并按配置限时刷新 tracing；排空期间第二次信号
+会强制收口。Public/Admin 现已接入统一 HTTP 边界：请求 ID 与命令审计关联、W3C trace context、
+访问日志、panic recovery、安全响应头、处理/请求头超时、可信代理解析和有界限流器均已落地。
+2026-08-24 的第二轮交叉审计仍确认需要补齐：心跳按真实 readiness/audit/tracing 状态发布，
+未知 API/health 路径与 SPA fallback 隔离，以及 Admin runtime
+的人工提前开放和装备来源策略真正接入运行路径。浏览器端还存在稳定 DTO 在 Web crate 重复定义，
+以及 Public/Admin 静态资源只做路由隔离、尚无 Cargo feature 或独立 crate 提供制品级隔离的问题；
+这些都属于非测试代码任务。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
 Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
@@ -75,7 +79,8 @@ crates/                       # 可复用能力，按模块所有权拆分
 ├── auction-integrations/     # E-Hentai、MoogleMail 等外部网关
 ├── auction-jobs/             # Worker 任务编排
 ├── auction-config/           # TOML 解析与运行配置
-└── auction-observability/    # tracing、metrics 和健康检查约定
+├── auction-observability/    # tracing、metrics 和健康检查约定
+└── auction-process/          # SIGINT/SIGTERM、有界排空和任务所有权原语
 docs/                         # 架构、技术选型、兼容性和迁移记录
 migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集的追加式迁移
 ops/                          # 配置样例、部署和恢复文档

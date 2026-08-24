@@ -99,7 +99,7 @@ pub(crate) async fn create(
             scheduled_end_at: input.scheduled_end_at,
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             request_hash,
         })
         .await

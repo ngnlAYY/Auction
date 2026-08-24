@@ -21,7 +21,7 @@ use auction_cache::CacheStore;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_config::TomlRuntimeFileStore;
 use auction_config::{AppConfig, CacheBackend, Role};
-use auction_http::{AdminApiState, AdminHttpSecurity};
+use auction_http::{AdminApiState, AdminHttpSecurity, HttpSecurityOptions};
 use auction_integrations::ForumPreviewAdapter;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_integrations::{
@@ -83,7 +83,7 @@ pub async fn run() -> anyhow::Result<()> {
 
 async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::Result<()> {
     let mut signals = TerminationSignals::subscribe().context("subscribe admin-api signals")?;
-    let cache = configure_cache(&config).context("configure admin-api cache")?;
+    let cache = configure_cache(config).context("configure admin-api cache")?;
     let metrics = Arc::new(
         ProcessMetrics::new_with_tracing_health(
             config.metrics.enabled,
@@ -94,9 +94,9 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
-    let bound_listener = listener::bind(&config).await.context("bind admin-api listener")?;
+    let bound_listener = listener::bind(config).await.context("bind admin-api listener")?;
     let (state, heartbeat) =
-        configure_state(&config, telemetry.health_reader(), Arc::clone(&metrics))
+        configure_state(config, telemetry.health_reader(), Arc::clone(&metrics))
             .await
             .context("configure admin-api state")?;
     let state = state.with_metrics(metrics);
@@ -106,7 +106,8 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
     let mut heartbeat_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
-    let app = auction_http::admin_router(env!("CARGO_PKG_VERSION")).with_state(state);
+    let boundary = state.http_boundary();
+    let app = auction_http::admin_router(env!("CARGO_PKG_VERSION"), boundary).with_state(state);
 
     tracing::info!(
         listener = %bound_listener.description(),
@@ -571,14 +572,17 @@ fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandl
 }
 
 fn configure_security(config: &AppConfig) -> anyhow::Result<AdminHttpSecurity> {
-    AdminHttpSecurity::new(
-        config.http_security.cookie_secure,
-        config.http_security.allowed_origins_enabled,
-        &config.http_security.allowed_origins,
-        config.http_security.login_rate_limit,
-        config.http_security.mutation_rate_limit,
-        Duration::from_secs(config.http_security.rate_limit_window_seconds),
-    )
+    AdminHttpSecurity::new(HttpSecurityOptions {
+        cookie_secure: config.http_security.cookie_secure,
+        origins_enabled: config.http_security.allowed_origins_enabled,
+        allowed_origins: &config.http_security.allowed_origins,
+        login_limit: config.http_security.login_rate_limit,
+        mutation_limit: config.http_security.mutation_rate_limit,
+        rate_limit_window: Duration::from_secs(config.http_security.rate_limit_window_seconds),
+        request_timeout: Duration::from_secs(config.http_security.request_timeout_seconds),
+        trusted_proxy_cidrs: &config.http_security.trusted_proxy_cidrs,
+        trusted_unix_proxy: config.http_security.trusted_unix_proxy,
+    })
     .map_err(anyhow::Error::msg)
 }
 

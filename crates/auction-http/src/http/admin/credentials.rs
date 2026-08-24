@@ -153,7 +153,7 @@ pub(crate) async fn create(
             label: input.label,
             secret,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await
@@ -218,7 +218,7 @@ pub(crate) async fn mutate(
                     expected_state_version: input.expected_state_version,
                     label,
                     actor_id: identity.actor,
-                    request_id: None,
+                    request_id: super::request_id(&headers),
                     now: Utc::now(),
                 })
                 .await
@@ -242,7 +242,7 @@ pub(crate) async fn mutate(
                     expected_state_version: input.expected_state_version,
                     status,
                     actor_id: identity.actor,
-                    request_id: None,
+                    request_id: super::request_id(&headers),
                     now: Utc::now(),
                 })
                 .await
@@ -301,7 +301,7 @@ pub(crate) async fn delete(
             credential_id: input.credential_id,
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await

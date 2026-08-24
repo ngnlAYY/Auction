@@ -99,7 +99,7 @@ pub(crate) async fn update(
         action,
         start_price: input.start_price,
         actor_id: identity.actor,
-        request_id: None,
+        request_id: super::request_id(&headers),
         request_hash,
     };
     let result = match port.update(command).await {

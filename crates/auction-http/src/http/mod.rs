@@ -33,6 +33,8 @@ mod admin_runtime_config;
 mod admin_users;
 #[path = "public/blacklist.rs"]
 mod blacklist;
+#[path = "shared/boundary.rs"]
+mod boundary;
 #[path = "public/compensation.rs"]
 mod compensation;
 #[path = "admin/delivery.rs"]
@@ -49,6 +51,8 @@ mod realtime_hub;
 #[path = "public/rules.rs"]
 mod rules;
 mod security;
+#[path = "shared/server.rs"]
+mod server;
 #[path = "shared/state.rs"]
 mod state;
 
@@ -105,9 +109,9 @@ use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
-    middleware::{self, Next},
+    middleware,
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
 };
@@ -121,8 +125,10 @@ use subtle::ConstantTimeEq;
 use url::form_urlencoded;
 use uuid::Uuid;
 
+pub use boundary::HttpBoundary;
 pub use realtime_hub::{RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription};
-pub use security::{AdminHttpSecurity, PublicHttpSecurity};
+pub use security::{AdminHttpSecurity, HttpSecurityOptions, PublicHttpSecurity};
+pub use server::serve_http;
 pub use state::{AdminApiState, PublicApiState};
 
 /// 公开端路由。
@@ -131,7 +137,7 @@ pub use state::{AdminApiState, PublicApiState};
 ///
 /// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
 /// 自己的版本，而健康检查要报告的是运行进程的版本。
-pub fn public_router(version: &'static str) -> Router<PublicApiState> {
+pub fn public_router(version: &'static str, boundary: HttpBoundary) -> Router<PublicApiState> {
     let health = move || health_response("public-api", version);
 
     public_feature_routes(
@@ -143,14 +149,14 @@ pub fn public_router(version: &'static str) -> Router<PublicApiState> {
             .route("/metrics", get(metrics::public)),
     )
     .fallback(web_assets::serve_public_asset)
-    .layer(middleware::from_fn(add_server_date))
+    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
 /// 管理端路由。
 ///
 /// 管理端与公开端使用不同资源类型和路由；制品级资源隔离仍需由 Cargo feature 或独立 crate
 /// 明确保证。
-pub fn admin_router(version: &'static str) -> Router<AdminApiState> {
+pub fn admin_router(version: &'static str, boundary: HttpBoundary) -> Router<AdminApiState> {
     let health = move || health_response("admin-api", version);
 
     admin_feature_routes(
@@ -162,19 +168,7 @@ pub fn admin_router(version: &'static str) -> Router<AdminApiState> {
             .route("/metrics", get(metrics::admin)),
     )
     .fallback(web_assets::serve_admin_asset)
-    .layer(middleware::from_fn(add_server_date))
-}
-
-/// 为浏览器提供标准 Date 头，使 Public 倒计时可以修正客户端本地时钟偏差。
-async fn add_server_date(request: Request, next: Next) -> Response {
-    let mut response = next.run(request).await;
-    let date = Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
-    if !response.headers().contains_key(header::DATE)
-        && let Ok(value) = HeaderValue::from_str(&date)
-    {
-        response.headers_mut().insert(header::DATE, value);
-    }
-    response
+    .layer(middleware::from_fn_with_state(boundary, boundary::enforce))
 }
 
 async fn health_response(service: &'static str, version: &'static str) -> Json<HealthResponse> {
@@ -692,6 +686,7 @@ async fn execute_admin_lifecycle(
         ),
         cancel_reason: input.reason,
         request_hash,
+        request_id: request_id(&headers),
         actor: AuctionLifecycleActor {
             actor_type: AuctionLifecycleActorType::Admin,
             actor_id: identity.actor,
@@ -1301,6 +1296,7 @@ async fn place_bid(
         bidder_id,
         amount,
         request_hash,
+        request_id: request_id(&headers),
     };
     let command_started = Instant::now();
     let plan = match commands.place_bid(command).await {
@@ -1413,8 +1409,15 @@ async fn create_proxy_authorization(
     let command_id = CommandId::from_uuid(input.command_id);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
-    let command =
-        CreateProxyCommand { command_id, lot_id, bidder_id, maximum_amount, mode, request_hash };
+    let command = CreateProxyCommand {
+        command_id,
+        lot_id,
+        bidder_id,
+        maximum_amount,
+        mode,
+        request_hash,
+        request_id: request_id(&headers),
+    };
     let command_started = Instant::now();
     let plan = match commands.create_proxy(command).await {
         Ok(plan) => plan,
@@ -1537,13 +1540,15 @@ async fn lower_proxy_authorization(
     let command_id = CommandId::from_uuid(input.command_id);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
+    let authorization_id = ProxyAuthorizationId::from_uuid(authorization_uuid);
     let command = LowerProxyCommand {
         command_id,
         lot_id,
         bidder_id,
-        authorization_id: ProxyAuthorizationId::from_uuid(authorization_uuid),
+        authorization_id,
         new_maximum,
         request_hash,
+        request_id: request_id(&headers),
     };
     let command_started = Instant::now();
     let plan = match commands.lower_proxy(command).await {
@@ -1565,14 +1570,13 @@ async fn lower_proxy_authorization(
         command_started,
     );
     let Some(expected_state) = plan.proxy_states.iter().find(|state| {
-        state.id == command.authorization_id && state.lot_id == lot_id && state.user_id == bidder_id
+        state.id == authorization_id && state.lot_id == lot_id && state.user_id == bidder_id
     }) else {
         return internal_error();
     };
     if plan.final_lot.lot_id != lot_id
         || !plan.proxy_transitions.iter().any(|transition| {
-            transition.authorization_id == command.authorization_id
-                && transition.command_id == command_id
+            transition.authorization_id == authorization_id && transition.command_id == command_id
         })
     {
         return internal_error();
@@ -1620,16 +1624,14 @@ fn session_guard(
                 .into_response(),
         );
     }
-    let allowed = if login {
+    let retry_after = if login {
         state.security().allow_login(address.ip())
     } else {
         state.security().allow_mutation(address.ip())
     };
-    if allowed {
-        return None;
-    }
+    let retry_after = retry_after?;
     let mut response_headers = HeaderMap::new();
-    if let Ok(value) = HeaderValue::from_str(&state.security().retry_after_seconds().to_string()) {
+    if let Ok(value) = HeaderValue::from_str(&retry_after.max(1).to_string()) {
         response_headers.insert(header::RETRY_AFTER, value);
     }
     Some(
@@ -1659,16 +1661,14 @@ fn admin_session_guard(
                 .into_response(),
         );
     }
-    let allowed = if login {
+    let retry_after = if login {
         state.security().allow_login(address.ip())
     } else {
         state.security().allow_mutation(address.ip())
     };
-    if allowed {
-        return None;
-    }
+    let retry_after = retry_after?;
     let mut response_headers = HeaderMap::new();
-    if let Ok(value) = HeaderValue::from_str(&state.security().retry_after_seconds().to_string()) {
+    if let Ok(value) = HeaderValue::from_str(&retry_after.max(1).to_string()) {
         response_headers.insert(header::RETRY_AFTER, value);
     }
     Some(
@@ -2604,6 +2604,10 @@ fn api_error(
     message: &'static str,
 ) -> (StatusCode, Json<ApiErrorResponse>) {
     (status, Json(ApiErrorResponse { code, message: message.to_owned(), request_id: None }))
+}
+
+fn request_id(headers: &HeaderMap) -> Option<String> {
+    boundary::request_id(headers)
 }
 
 fn parse_query(uri: &Uri, allowed: &[&str]) -> Result<BTreeMap<String, String>, ()> {

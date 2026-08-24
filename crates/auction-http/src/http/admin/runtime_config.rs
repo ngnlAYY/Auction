@@ -157,7 +157,7 @@ pub(crate) async fn update(
             expected_fingerprint: input.expected_fingerprint,
             document,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             request_hash,
         })
         .await

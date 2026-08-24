@@ -38,6 +38,7 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-web-admin` | 管理端 Dioxus 组件、路由、管理端译文 | 数据库、secret、公开端组件树 |
 | `auction-config` | 主/敏感 TOML 解析、默认值、校验、runtime TOML 原子文件适配器 | 业务规则与命令账本 |
 | `auction-observability` | tracing、metrics、health、correlation id、心跳安全投影；Public/Admin 与 Worker control 的可选 `/metrics` scrape、进程资源指标和三类进程的有界 OTLP/HTTP exporter | 业务日志内容 |
+| `auction-process` | SIGINT/SIGTERM 订阅、10 秒默认 drain、二次信号分类和 abort-on-drop Tokio 任务守卫 | 配置、listener、心跳发布和业务停止顺序 |
 
 浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态
 WASM/JS/HTML，`auction-http` 用 `rust-embed` 分别内嵌，产出单文件制品。Public 与 Admin
@@ -59,7 +60,8 @@ auction-worker      ─┘  ├─ auction-storage ─┬─ PostgreSQL（完整
                        │                   └─ SQLite（Lite 档）
                        ├─ auction-integrations ─ E-Hentai/MoogleMail
                        ├─ auction-jobs
-                       └─ auction-cache ─ Redis（可选）
+                       ├─ auction-cache ─ Redis（可选）
+                       └─ auction-process ─ signals/drain/task ownership
 auctionctl ──────────────────────────────── ops/migrations/config
 ```
 
@@ -95,6 +97,14 @@ SQLite 数据库文件只能位于单主机受支持的本地文件系统，不�
 启动后以 systemd `InvocationID`、MainPID 和单调启动时间发布无敏感信息的原子回执。Worker 必须
 启用 Unix control readiness；migration 一旦提交不会因后续角色启动失败而自动 down/restore。
 `auction-stack.service` 可以在开机时进入同一边界，三个角色 unit 不应再被分别 enable。
+
+三进程通过 `auction-process` 共用操作系统生命周期原语，但具体资源顺序仍由各装配根拥有。
+Unix 下显式订阅 SIGINT 与 SIGTERM；首次信号让 Public/Admin 通过共享 Hyper 连接服务停止接收
+新连接，让 Worker control 进入 draining 并通知各循环不再领取新工作。当前 HTTP 请求或 Worker
+有界批次最多排空 10 秒，期间第二次终止信号或超时会触发
+abort-on-drop 强制收口。后台周期心跳先停止，再发布 `stopping`；最后独立按
+`tracing.shutdown_timeout_seconds`（最多 30 秒）刷新 exporter。部署 unit 的停止上限因此至少要覆盖
+10 秒业务排空、最长 30 秒 exporter 刷新和少量进程回收余量，仓库示例固定为 45 秒。
 
 `auctionctl retention-inventory` 属于 PostgreSQL 完整档的只读运维盘点能力，不属于
 SQLite Lite。它把 `ops/deploy/retention-policy.v1.json` 编译进制品作为版本化政策矩阵，在
@@ -309,15 +319,17 @@ Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版
 owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settlement/recovery 契约，提供已结算拍卖
 选择、lot 金额表、资金池摘要和带版本 fence 的 recovery 确认；Admin outbox 页面复用已冻结的
 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。SQLite 仍明确返回不支持。
-除真实浏览器、外部回执和部署切换证据外，第二轮静态审计还确认了 SIGTERM 优雅停机、统一
-HTTP boundary/request ID、真实 readiness 心跳、SPA fallback 隔离和部分 Admin runtime 字段生效
-链等代码缺口；在这些边界收口前同样不能宣称行为等价。
+Public/Admin 的统一 HTTP boundary 已补齐请求 ID/命令审计关联、W3C trace context、访问日志、
+panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头读取超时、可信代理地址解析和
+4096 项有界限流器。除真实浏览器、外部回执和部署切换证据外，第二轮静态审计仍确认真实
+readiness 心跳、SPA fallback 隔离和部分 Admin runtime 字段生效链等代码缺口；在这些边界收口前
+同样不能宣称行为等价。三进程 SIGINT/SIGTERM 与有界排空也已经完成，不再属于该缺口清单。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下按 owner 返回安全 section；只有 owner 未装配或读取失败时才显式返回
-`unknown`。Public、Admin、Worker 装配根已有心跳发布路径，但周期心跳仍固定报告 ready/零审计
-失败，Public/Worker 没有纳入 tracing health，SIGTERM 也未可靠进入停止发布；这些状态必须改为
-从实际 readiness/audit/tracing owner 读取。Worker control 已通过
+`unknown`。Public、Admin、Worker 装配根已有心跳发布路径，SIGINT/SIGTERM 下会停止周期任务并
+发布 `stopping`；但周期心跳仍固定报告 ready/零审计失败，Public/Worker 没有纳入 tracing
+health，这些状态必须改为从实际 readiness/audit/tracing owner 读取。Worker control 已通过
 安全 runtime 目录、实例锁、固定 group/0660、inode 清理和显式 UID/GID peer credential allowlist
 提供 live/ready/status、同 registry 的 `/metrics` 和
 MoogleMail 唤醒，Admin dashboard 只显示安全投影；启用并配置 `dashboard_mailboxes` 时还按 Admin

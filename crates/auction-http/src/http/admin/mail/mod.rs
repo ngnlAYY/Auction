@@ -288,7 +288,7 @@ pub(crate) async fn set_paused(
             paused: input.paused,
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             request_hash,
         })
         .await

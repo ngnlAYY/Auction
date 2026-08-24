@@ -16,6 +16,7 @@ use std::{
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use chrono::{Duration, Utc};
+use ipnet::IpNet;
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
@@ -975,6 +976,12 @@ pub struct HttpSecurityConfig {
     pub rate_limit_window_seconds: u64,
     /// 是否为浏览器 Cookie 设置 Secure；省略时关闭，生产环境应开启。
     pub cookie_secure: bool,
+    /// 普通 HTTP 请求的最长处理秒数；省略时为 15 秒，WebSocket 握手路径不受此限制。
+    pub request_timeout_seconds: u64,
+    /// 可以提供 `X-Forwarded-For` 的可信反向代理网段；省略时不信任任何 TCP 代理。
+    pub trusted_proxy_cidrs: Vec<String>,
+    /// 是否信任 Unix socket 上游提供的 `X-Forwarded-For`；省略时关闭，仅允许 Admin Unix 监听器启用。
+    pub trusted_unix_proxy: bool,
 }
 
 impl Default for HttpSecurityConfig {
@@ -986,6 +993,9 @@ impl Default for HttpSecurityConfig {
             mutation_rate_limit: 60,
             rate_limit_window_seconds: 60,
             cookie_secure: false,
+            request_timeout_seconds: 15,
+            trusted_proxy_cidrs: Vec::new(),
+            trusted_unix_proxy: false,
         }
     }
 }
@@ -1811,12 +1821,17 @@ impl AppConfig {
         {
             return Err(ConfigError::MissingEhentaiCredentials);
         }
+        // 即使 Admin runtime 随后覆盖该区块，也拒绝主配置中无法解析的备用安全策略。
         validate_http_security(&http_security)?;
         validate_session(&session)?;
         if role == Role::Worker && database_is_sqlite && worker_concurrency != 1 {
             return Err(ConfigError::LiteWorkerConcurrency { concurrency: worker_concurrency });
         }
 
+        let admin_uses_unix = role == Role::Admin
+            && admin_runtime.as_ref().is_some_and(|runtime| {
+                runtime.listener.mode == auction_application::AdminRuntimeListenMode::Unix
+            });
         let runtime_listen_address = admin_runtime
             .as_ref()
             .filter(|runtime| {
@@ -1830,14 +1845,16 @@ impl AppConfig {
             })?
             .map(|address| address.to_string());
         let listen_value = runtime_listen_address.or(listen_address).or_else(|| {
-            let admin_uses_unix = role == Role::Admin
-                && admin_runtime.as_ref().is_some_and(|runtime| {
-                    runtime.listener.mode == auction_application::AdminRuntimeListenMode::Unix
-                });
             (!admin_uses_unix).then(|| role.default_listen().map(str::to_owned)).flatten()
         });
         let http_security =
             admin_runtime.as_ref().map(runtime_http_security).unwrap_or(http_security);
+        validate_http_security(&http_security)?;
+        if http_security.trusted_unix_proxy && !admin_uses_unix {
+            return Err(ConfigError::InvalidHttpSecurity(
+                "trusted_unix_proxy 只能由 Admin Unix listener 启用",
+            ));
+        }
         let session = admin_runtime.as_ref().map(runtime_session).unwrap_or(session);
         let listen_addr = listen_value
             .map(|value| {
@@ -1896,6 +1913,22 @@ fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), ConfigError
         return Err(ConfigError::InvalidHttpSecurity(
             "rate_limit_window_seconds 必须位于 1 至 3600",
         ));
+    }
+    if !(1..=120).contains(&config.request_timeout_seconds) {
+        return Err(ConfigError::InvalidHttpSecurity("request_timeout_seconds 必须位于 1 至 120"));
+    }
+    if config.trusted_proxy_cidrs.len() > 64 {
+        return Err(ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 最多包含 64 个网段"));
+    }
+    for (index, value) in config.trusted_proxy_cidrs.iter().enumerate() {
+        let network = value
+            .parse::<IpNet>()
+            .map_err(|_| ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须是规范 CIDR"))?;
+        if network.trunc().to_string() != *value
+            || config.trusted_proxy_cidrs[..index].iter().any(|existing| existing == value)
+        {
+            return Err(ConfigError::InvalidHttpSecurity("trusted_proxy_cidrs 必须规范且不能重复"));
+        }
     }
     if config.allowed_origins_enabled {
         if config.allowed_origins.is_empty() || config.allowed_origins.len() > 16 {
@@ -2956,6 +2989,9 @@ fn runtime_http_security(document: &AdminRuntimeDocument) -> HttpSecurityConfig 
         mutation_rate_limit: document.security.mutation_rate_limit,
         rate_limit_window_seconds: document.security.rate_limit_window_seconds,
         cookie_secure: document.security.cookie_secure,
+        request_timeout_seconds: document.security.request_timeout_seconds,
+        trusted_proxy_cidrs: document.security.trusted_proxy_cidrs.clone(),
+        trusted_unix_proxy: document.security.trusted_unix_proxy,
     }
 }
 

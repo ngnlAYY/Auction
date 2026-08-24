@@ -1517,6 +1517,7 @@ where
         expected_state_version: None,
         cancel_reason: None,
         request_hash,
+        request_id: None,
         actor: AuctionLifecycleActor {
             actor_type: AuctionLifecycleActorType::Worker,
             actor_id: claim.worker_id.clone(),

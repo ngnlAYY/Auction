@@ -445,6 +445,7 @@ async fn execute_command(
                     bidder_id,
                     amount,
                     request_hash,
+                    request_id: None,
                 })
                 .await
                 .map(|_| ())
@@ -468,6 +469,7 @@ async fn execute_command(
                     maximum_amount: amount,
                     mode: Some(mode),
                     request_hash,
+                    request_id: None,
                 })
                 .await
                 .map(|_| ())
@@ -492,6 +494,7 @@ async fn execute_command(
                     authorization_id: proxy.authorization_id,
                     new_maximum: amount,
                     request_hash,
+                    request_id: None,
                 })
                 .await
                 .map(|_| ())

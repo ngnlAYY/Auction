@@ -64,6 +64,8 @@ pub struct AuctionLifecycleCommand {
     pub expected_state_version: Option<u64>,
     pub cancel_reason: Option<String>,
     pub request_hash: super::RequestHash,
+    /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
+    pub request_id: Option<String>,
     pub actor: AuctionLifecycleActor,
 }
 

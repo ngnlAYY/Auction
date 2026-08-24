@@ -154,7 +154,7 @@ pub(crate) async fn create(
             key_mode,
             manual_key,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await
@@ -219,7 +219,7 @@ pub(crate) async fn mutate(
             game_player_id: input.game_player_id,
             public_reason: input.public_reason,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await
@@ -340,7 +340,7 @@ async fn mutate_status(
             game_player_id,
             public_reason,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await
@@ -404,7 +404,7 @@ pub(crate) async fn revert_rename(
             rename_id,
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             now: Utc::now(),
         })
         .await

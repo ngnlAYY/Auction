@@ -11,17 +11,19 @@ use crate::{
 };
 
 /// 普通出价命令。事实 ID 由命令 ID 在应用层稳定派生，调用方不能注入第二个随机 ID。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PlaceBidCommand {
     pub command_id: CommandId,
     pub lot_id: LotId,
     pub bidder_id: UserId,
     pub amount: BidAmount,
     pub request_hash: RequestHash,
+    /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
+    pub request_id: Option<String>,
 }
 
 /// 创建代理授权命令；授权标识由命令 ID 在应用层稳定派生。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CreateProxyCommand {
     pub command_id: CommandId,
     pub lot_id: LotId,
@@ -30,10 +32,12 @@ pub struct CreateProxyCommand {
     /// 代理模式；未提供时使用拍卖冻结的默认模式。
     pub mode: Option<ProxyMode>,
     pub request_hash: RequestHash,
+    /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
+    pub request_id: Option<String>,
 }
 
 /// 降低代理授权上限命令。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct LowerProxyCommand {
     pub command_id: CommandId,
     pub lot_id: LotId,
@@ -41,9 +45,11 @@ pub struct LowerProxyCommand {
     pub authorization_id: ProxyAuthorizationId,
     pub new_maximum: BidAmount,
     pub request_hash: RequestHash,
+    /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
+    pub request_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum CompetitionCommand {
     PlaceBid(PlaceBidCommand),
     CreateProxy(CreateProxyCommand),
@@ -51,7 +57,7 @@ enum CompetitionCommand {
 }
 
 impl CompetitionCommand {
-    fn command_id(self) -> CommandId {
+    fn command_id(&self) -> CommandId {
         match self {
             Self::PlaceBid(command) => command.command_id,
             Self::CreateProxy(command) => command.command_id,
@@ -59,7 +65,7 @@ impl CompetitionCommand {
         }
     }
 
-    fn lot_id(self) -> LotId {
+    fn lot_id(&self) -> LotId {
         match self {
             Self::PlaceBid(command) => command.lot_id,
             Self::CreateProxy(command) => command.lot_id,
@@ -67,7 +73,7 @@ impl CompetitionCommand {
         }
     }
 
-    fn request_hash(self) -> RequestHash {
+    fn request_hash(&self) -> RequestHash {
         match self {
             Self::PlaceBid(command) => command.request_hash,
             Self::CreateProxy(command) => command.request_hash,
@@ -75,11 +81,19 @@ impl CompetitionCommand {
         }
     }
 
-    const fn kind(self) -> &'static str {
+    const fn kind(&self) -> &'static str {
         match self {
             Self::PlaceBid(_) => "place_bid",
             Self::CreateProxy(_) => "create_proxy",
             Self::LowerProxy(_) => "lower_proxy",
+        }
+    }
+
+    fn request_id(&self) -> Option<String> {
+        match self {
+            Self::PlaceBid(command) => command.request_id.clone(),
+            Self::CreateProxy(command) => command.request_id.clone(),
+            Self::LowerProxy(command) => command.request_id.clone(),
         }
     }
 
@@ -190,8 +204,11 @@ where
         let lot_id = command.lot_id();
         let request_hash = command.request_hash();
         let command_kind = command.kind();
+        let request_id = command.request_id();
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
+                let command = command.clone();
+                let request_id = request_id.clone();
                 Box::pin(async move {
                     if let Some(stored) = transaction.find_command(command_id).await? {
                         if !stored.matches_request(command_kind, lot_id.as_uuid(), request_hash) {
@@ -211,7 +228,7 @@ where
 
                     let snapshot = transaction.load_for_update(lot_id).await?;
                     let next_proxy_usage_number = match command {
-                        CompetitionCommand::CreateProxy(command) => Some(
+                        CompetitionCommand::CreateProxy(ref command) => Some(
                             transaction.next_proxy_usage_number(lot_id, command.bidder_id).await?,
                         ),
                         CompetitionCommand::PlaceBid(_) | CompetitionCommand::LowerProxy(_) => None,
@@ -234,7 +251,7 @@ where
                             result_payload: serde_json::to_vec(&plan)?,
                         })
                         .await?;
-                    transaction.apply_plan(plan.clone()).await?;
+                    transaction.apply_plan(plan.clone(), request_id).await?;
                     Ok(plan)
                 })
             })

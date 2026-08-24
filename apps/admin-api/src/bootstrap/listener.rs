@@ -17,7 +17,7 @@ use std::{
 use anyhow::Context;
 use auction_application::AdminRuntimeListenMode;
 use auction_config::AppConfig;
-use axum::{Extension, Router, extract::ConnectInfo};
+use axum::Router;
 use tokio::net::TcpListener;
 
 /// Admin HTTP 的实际监听器；Unix 变体只在 Linux 目标编译。
@@ -80,16 +80,9 @@ pub(crate) async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
     match listener {
-        AdminListener::Tcp(listener) => {
-            axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-                .with_graceful_shutdown(shutdown)
-                .await
-        }
+        AdminListener::Tcp(listener) => auction_http::serve_http(listener, app, shutdown).await,
         #[cfg(target_os = "linux")]
-        AdminListener::Unix(listener) => {
-            let app = app.layer(Extension(ConnectInfo(UNIX_LISTENER_ADDRESS)));
-            axum::serve(listener, app.into_make_service()).with_graceful_shutdown(shutdown).await
-        }
+        AdminListener::Unix(listener) => auction_http::serve_http(listener, app, shutdown).await,
     }
 }
 

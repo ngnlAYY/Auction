@@ -170,7 +170,7 @@ pub(crate) async fn publish(
             title: input.title,
             markdown: input.markdown,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
             request_hash,
         })
         .await

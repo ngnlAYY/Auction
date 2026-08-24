@@ -4,7 +4,10 @@ Public 与 Admin 的 HTTP 表面适配器。
 
 - `src/http/mod.rs`：`public_router()` / `admin_router()`，健康检查和冻结契约路径注册。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
-  realtime Hub 只放在 `src/http/shared/`，安全与指标边界保留独立目录。
+  realtime Hub 只放在 `src/http/shared/`。
+- `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
+  访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空。
+- `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
 - `src/assets/mod.rs`：前端静态产物内嵌与 SPA fallback。
 
 ## 职责边界
@@ -83,6 +86,19 @@ Public 与 Admin 是不同 surface，路由只提供各自静态产物；当前�
 路径目前仍可能落入宽泛 SPA fallback，需按下文目标顺序修正后才能视为 404 契约完成。两类 surface
 的 HTTP 响应还会提供标准 `Date` 头，
 供 Public 浏览器按旧版契约估算服务端时钟；该头不承载业务状态，也不改变任何服务端时间判断。
+
+两个 surface 共用同一协议边界。缺失的 `X-Request-ID` 会生成 32 位十六进制值，合法入站值只允许
+1 至 64 字节 ASCII 字母数字和 `-_.`；重复或非法 header 返回 400。规范化值写回响应，并注入
+Public 竞价/代理、Admin 生命周期及支持审计的管理 mutation；请求 ID 不进入幂等哈希。边界提取
+W3C `traceparent`/`tracestate`、记录 route/status/duration/client address、恢复 panic、设置浏览器
+安全头，并对普通请求应用可配置的默认 15 秒处理超时，WebSocket 路径豁免。连接层另有固定 5 秒
+HTTP/1 请求头读取超时。CSP 的脚本来源保持同源，只为 WASM 编译加入 `wasm-unsafe-eval`；样式侧
+允许内联是因为两个 Dioxus index 的首屏防闪样式及组件 style 属性属于当前浏览器契约。
+
+`X-Forwarded-For` 默认完全忽略。TCP peer 命中 `trusted_proxy_cidrs` 后才从右向左选择第一个
+非可信地址；任一条目无法解析时丢弃整条链。Admin Unix listener 还必须显式启用
+`trusted_unix_proxy`。登录与 mutation 限流使用解析后的地址，固定窗口最多保留 4096 项，容量满时
+按最后访问时间和 IP 稳定淘汰最旧项。
 
 ## 静态产物内嵌
 

@@ -89,7 +89,7 @@ pub(crate) async fn add_item(
             start_price: input.start_price,
             player_id: input.player_id,
             actor_id: identity.actor,
-            request_id: None,
+            request_id: super::request_id(&headers),
         })
         .await
     {

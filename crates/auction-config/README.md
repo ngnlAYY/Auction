@@ -278,6 +278,12 @@ mutation_rate_limit = 60
 rate_limit_window_seconds = 60
 # 可选：Cookie Secure 属性；生产环境应开启。
 cookie_secure = false
+# 可选：普通请求处理超时秒数；默认 15，范围 1-120，WebSocket 路径豁免。
+request_timeout_seconds = 15
+# 可选：可信 TCP 代理的规范 CIDR；默认空，最多 64 项。
+trusted_proxy_cidrs = []
+# 可选：信任 Unix socket 上游；只允许 Admin runtime Unix listener 启用。
+trusted_unix_proxy = false
 
 # 可选区块：会话策略。
 [session]
@@ -347,9 +353,11 @@ recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化�
 只包含冻结的安全摘要，不包含收件人以外的凭据、原始错误或数据库 payload；SQLite Lite 明确
 返回能力缺失。
 
-`http_security` 只保存 origin、速率限制和 Cookie 属性等非敏感策略；`session` 保存 Public
-与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、会话 token 和数据库
-连接串不得写入主配置。
+`http_security` 只保存 origin、速率限制、Cookie 属性、普通请求超时和可信代理 CIDR 等非敏感
+策略；默认不信任任何 `X-Forwarded-For`。`trusted_unix_proxy` 仅允许 Admin runtime Unix
+listener 启用，TCP listener 必须通过规范且不重复的 `trusted_proxy_cidrs` 明确信任上游。
+`session` 保存 Public 与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、
+会话 token 和数据库连接串不得写入主配置。
 
 启用 `worker.mooglemail` 后，Worker 会先为每个已配置 world 在 `mail_poll_state` 建立或读取
 持久化状态，再通过独立租约读取 MoogleMail。解析成功的入站安全事实、`mail_commands` 幂等记录和 cursor 在同一

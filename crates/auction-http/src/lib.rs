@@ -4,6 +4,7 @@ mod assets;
 mod http;
 
 pub use http::{
-    AdminApiState, AdminHttpSecurity, PublicApiState, PublicHttpSecurity, RealtimeHub,
-    RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription, admin_router, public_router,
+    AdminApiState, AdminHttpSecurity, HttpBoundary, HttpSecurityOptions, PublicApiState,
+    PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
+    admin_router, public_router, serve_http,
 };

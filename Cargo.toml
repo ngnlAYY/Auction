@@ -64,6 +64,14 @@ gloo-timers = { version = "0.3.0", features = ["futures"] }
 js-sys = "0.3.104"
 futures-util = "0.3.34"
 async-stream = "0.3.6"
+hyper = { version = "1.11.0", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1.20", features = [
+    "server-auto",
+    "server-graceful",
+    "service",
+    "tokio",
+] }
+ipnet = "2.12.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
 scraper = "0.24.0"
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
@@ -121,6 +129,7 @@ opentelemetry_sdk = { version = "0.32.1", default-features = false, features = [
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.33.0"
+tower = { version = "0.5.3", features = ["util"] }
 prometheus = { version = "0.14.0", features = ["process"] }
 
 [profile.wasm-release]

@@ -62,6 +62,11 @@ PID、信号、`TimeoutStopSec`、退出码、自动重启和 journald；Rust �
 的绝对路径；配置目录和三个主 TOML 不得是符号链接或允许 group/other 写入。完整 unit
 安装方式见 [`systemd/README.md`](systemd/README.md)。
 
+单角色收到 systemd 的 SIGTERM 后先执行最多 10 秒的 HTTP/Worker drain，再按
+`tracing.shutdown_timeout_seconds` 刷新 exporter；该字段允许的最大值为 30 秒。因此示例 unit
+使用 `TimeoutStopSec=45s`，为最长关闭路径保留 5 秒进程回收余量。不要把该值缩短到两段上限之
+和以下；排空期间再次发送 SIGINT/SIGTERM 会立即强制收口，但 exporter 刷新仍由自身超时保护。
+
 ## 数据库恢复与保留
 
 生产 PostgreSQL 的备份、恢复、保留期限和 destructive rebuild 必须由部署方先确定权限、

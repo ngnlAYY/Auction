@@ -10,17 +10,45 @@ use std::{
 
 use crate::health::{TracingHealth, TracingHealthReader, TracingStatus};
 use chrono::{DateTime, Utc};
-use opentelemetry::{Context, KeyValue, trace::TracerProvider as _};
+use opentelemetry::{
+    Context, KeyValue,
+    propagation::TextMapPropagator,
+    trace::{TraceContextExt, TracerProvider as _},
+};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{
     Resource,
     error::{OTelSdkError, OTelSdkResult},
+    propagation::TraceContextPropagator,
     trace::{
         Sampler, SdkTracerProvider, Span, SpanData, SpanExporter as SdkSpanExporter, SpanProcessor,
     },
 };
 use thiserror::Error;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+/// 把经过 HTTP 边界筛选的 W3C trace context 设为当前 server span 的远端父级。
+///
+/// 无效或超长字段会被忽略；函数不记录 header 原文，避免把不受信任的传播数据带入日志。
+pub fn attach_remote_trace_context(
+    span: &tracing::Span,
+    traceparent: Option<&str>,
+    tracestate: Option<&str>,
+) {
+    let Some(traceparent) = traceparent.filter(|value| value.len() <= 512) else {
+        return;
+    };
+    let mut carrier = HashMap::with_capacity(2);
+    carrier.insert("traceparent".to_owned(), traceparent.to_owned());
+    if let Some(tracestate) = tracestate.filter(|value| value.len() <= 1024) {
+        carrier.insert("tracestate".to_owned(), tracestate.to_owned());
+    }
+    let context = TraceContextPropagator::new().extract(&carrier);
+    if context.span().span_context().is_valid() {
+        let _ = span.set_parent(context);
+    }
+}
 
 /// tracing 导出所需的非敏感运行参数。
 ///

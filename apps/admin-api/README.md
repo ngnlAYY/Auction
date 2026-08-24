@@ -16,8 +16,8 @@ Admin 论坛预览由本地 `ForumPreviewAdapter` 解析 HTML/文本，限制 2 
 Admin 审计读取由数据库适配器提供两种有界分页形状和安全 metadata 投影；该接口只读，不修改
 审计历史。
 Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
-三个进程装配根已有启动、就绪、周期和正常返回后的停止心跳路径；返回 health/process 安全投影，
-但周期值和 SIGTERM 边界仍受下述限制。Admin 同时
+三个进程装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；返回 health/process 安全
+投影，但周期值仍受下述限制。Admin 同时
 通过 runtime 文档指定的 Worker control Unix socket 读取 live/ready/status，socket 只允许
 命中 Worker 显式 UID/GID allowlist 的内核认证 peer，失败时显示有限 condition；mail、realtime、credential、delivery、fulfillment、
 recovery 和 alerting section 分别由对应 owner 提供安全摘要，owner 未装配时才显式标记为 `unknown`。
@@ -28,8 +28,10 @@ Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL �
 文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
 是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围。
 
-当前 Admin 服务 future 正常返回后会限时关闭 tracing exporter，但尚未统一监听 SIGINT/SIGTERM，
-也没有接入有界 HTTP drain、停止心跳和稳定退出码。runtime 中的 `allow_manual_early_open` 与
+Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
+shutdown、停止 heartbeat 并发布停止状态，整个 HTTP/后台任务 drain 最多 10 秒，排空期间第二次
+信号会强制收口，最后按配置限时刷新 tracing exporter。稳定退出码仍待统一。runtime 中的
+`allow_manual_early_open` 与
 `[equipment_source]` 已完成解析、校验和持久化，尚未实际约束生命周期命令或装备来源适配器。
 
 默认监听 `127.0.0.1:8091`，与公开端不同端口。Admin runtime 的 `listener.mode` 支持 TCP；

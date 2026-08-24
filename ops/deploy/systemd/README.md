@@ -25,6 +25,11 @@ migration，并按 Worker → Admin → Public 启动。每个角色通过应用
 停止本次启动的 unit，已提交 migration 不会自动 down/restore。停止顺序固定为
 Public → Admin → Worker。
 
+三个角色 unit 都以 SIGTERM 进入同一关闭路径：先进行最多 10 秒的 HTTP/Worker drain，再按配置
+刷新 tracing exporter（最大 30 秒）。示例固定 `TimeoutStopSec=45s`，覆盖两段上限和 5 秒回收
+余量；排空期间第二次 SIGINT/SIGTERM 会强制结束业务 drain。若部署方修改 tracing 上限或进程
+关闭阶段，必须同步重新核算 unit 超时，避免 systemd 在 exporter 有界关闭前发送 SIGKILL。
+
 `auction-stack.service` 通过 `StateDirectory=auction/deployment` 建立私有控制目录，并保存互斥锁与
 `startup-order.v1.json`。回执只包含 unit、systemd `InvocationID`、PID、单调启动时间和观察时间，
 不包含配置正文或凭据。Worker TOML 必须启用 `[worker.control]`，并把实际 Admin/运维 UID 或 GID

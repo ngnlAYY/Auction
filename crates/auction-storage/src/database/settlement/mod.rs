@@ -350,7 +350,7 @@ impl PostgresCompetitionTransaction {
 
         // 代理终态、lot 成交/流拍状态与金额事实必须在同一 Serializable 事务内提交。
         for closure_plan in proxy_closure_plans {
-            self.apply_plan_inner(closure_plan).await.map_err(map_competition_error)?;
+            self.apply_plan_inner(closure_plan, None).await.map_err(map_competition_error)?;
         }
         close_settlement_lots(self, auction_id, &plan).await?;
 

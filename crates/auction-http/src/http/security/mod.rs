@@ -10,8 +10,35 @@ use std::{
 use axum::http::HeaderMap;
 use url::Url;
 
+use super::boundary::HttpBoundary;
+
+const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
+
+/// 装配根传入 HTTP 安全适配器的非敏感参数。
+pub struct HttpSecurityOptions<'a> {
+    /// 是否为浏览器 Cookie 设置 `Secure`。
+    pub cookie_secure: bool,
+    /// 是否启用精确 origin allowlist。
+    pub origins_enabled: bool,
+    /// 允许的精确 HTTP(S) origin。
+    pub allowed_origins: &'a [String],
+    /// 登录请求在固定窗口内的最大次数。
+    pub login_limit: u32,
+    /// 状态变更请求在固定窗口内的最大次数。
+    pub mutation_limit: u32,
+    /// 速率限制固定窗口。
+    pub rate_limit_window: Duration,
+    /// 普通 HTTP 请求的最长处理时间。
+    pub request_timeout: Duration,
+    /// 可以提供 `X-Forwarded-For` 的可信 TCP 代理网段。
+    pub trusted_proxy_cidrs: &'a [String],
+    /// 是否信任 Unix socket 上游提供的 `X-Forwarded-For`。
+    pub trusted_unix_proxy: bool,
+}
+
 #[derive(Clone)]
 pub struct PublicHttpSecurity {
+    boundary: HttpBoundary,
     cookie_secure: bool,
     origins: OriginPolicy,
     login_limiter: RateLimiter,
@@ -21,6 +48,7 @@ pub struct PublicHttpSecurity {
 impl Default for PublicHttpSecurity {
     fn default() -> Self {
         Self {
+            boundary: HttpBoundary::default(),
             cookie_secure: false,
             origins: OriginPolicy::disabled(),
             login_limiter: RateLimiter::new(10, Duration::from_secs(60)),
@@ -31,19 +59,25 @@ impl Default for PublicHttpSecurity {
 
 impl PublicHttpSecurity {
     /// 从配置建立 Public HTTP 安全策略；origin 校验失败时在启动期直接拒绝。
-    pub fn new(
-        cookie_secure: bool,
-        origins_enabled: bool,
-        allowed_origins: &[String],
-        login_limit: u32,
-        mutation_limit: u32,
-        rate_limit_window: Duration,
-    ) -> Result<Self, &'static str> {
+    pub fn new(options: HttpSecurityOptions<'_>) -> Result<Self, &'static str> {
+        let HttpSecurityOptions {
+            cookie_secure,
+            origins_enabled,
+            allowed_origins,
+            login_limit,
+            mutation_limit,
+            rate_limit_window,
+            request_timeout,
+            trusted_proxy_cidrs,
+            trusted_unix_proxy,
+        } = options;
         let origins = OriginPolicy::new(origins_enabled, allowed_origins)?;
+        let boundary = HttpBoundary::new(request_timeout, trusted_proxy_cidrs, trusted_unix_proxy)?;
         if login_limit == 0 || mutation_limit == 0 || rate_limit_window.is_zero() {
             return Err("HTTP 速率限制配置无效");
         }
         Ok(Self {
+            boundary,
             cookie_secure,
             origins,
             login_limiter: RateLimiter::new(login_limit, rate_limit_window),
@@ -59,16 +93,16 @@ impl PublicHttpSecurity {
         self.origins.allows(headers)
     }
 
-    pub(crate) fn allow_login(&self, address: IpAddr) -> bool {
+    pub(crate) fn boundary(&self) -> HttpBoundary {
+        self.boundary.clone()
+    }
+
+    pub(crate) fn allow_login(&self, address: IpAddr) -> Option<u64> {
         self.login_limiter.allow(address)
     }
 
-    pub(crate) fn allow_mutation(&self, address: IpAddr) -> bool {
+    pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.mutation_limiter.allow(address)
-    }
-
-    pub(crate) fn retry_after_seconds(&self) -> u64 {
-        self.login_limiter.window.as_secs().max(1)
     }
 }
 
@@ -83,24 +117,8 @@ pub struct AdminHttpSecurity {
 
 impl AdminHttpSecurity {
     /// 从配置建立 Admin HTTP 安全策略；校验失败时在启动期拒绝。
-    pub fn new(
-        cookie_secure: bool,
-        origins_enabled: bool,
-        allowed_origins: &[String],
-        login_limit: u32,
-        mutation_limit: u32,
-        rate_limit_window: Duration,
-    ) -> Result<Self, &'static str> {
-        Ok(Self {
-            inner: PublicHttpSecurity::new(
-                cookie_secure,
-                origins_enabled,
-                allowed_origins,
-                login_limit,
-                mutation_limit,
-                rate_limit_window,
-            )?,
-        })
+    pub fn new(options: HttpSecurityOptions<'_>) -> Result<Self, &'static str> {
+        Ok(Self { inner: PublicHttpSecurity::new(options)? })
     }
 
     pub(crate) fn cookie_secure(&self) -> bool {
@@ -111,16 +129,16 @@ impl AdminHttpSecurity {
         self.inner.allows_origin(headers)
     }
 
-    pub(crate) fn allow_login(&self, address: IpAddr) -> bool {
+    pub(crate) fn boundary(&self) -> HttpBoundary {
+        self.inner.boundary()
+    }
+
+    pub(crate) fn allow_login(&self, address: IpAddr) -> Option<u64> {
         self.inner.allow_login(address)
     }
 
-    pub(crate) fn allow_mutation(&self, address: IpAddr) -> bool {
+    pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.inner.allow_mutation(address)
-    }
-
-    pub(crate) fn retry_after_seconds(&self) -> u64 {
-        self.inner.retry_after_seconds()
     }
 }
 
@@ -183,33 +201,58 @@ struct RateLimiter {
     limit: u32,
     window: Duration,
     entries: Arc<Mutex<HashMap<IpAddr, RateWindow>>>,
+    max_entries: usize,
 }
 
 #[derive(Clone, Copy)]
 struct RateWindow {
     started: Instant,
+    last_seen: Instant,
     count: u32,
 }
 
 impl RateLimiter {
     fn new(limit: u32, window: Duration) -> Self {
-        Self { limit, window, entries: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            limit,
+            window,
+            entries: Arc::new(Mutex::new(HashMap::new())),
+            max_entries: MAX_RATE_LIMIT_ENTRIES,
+        }
     }
 
-    fn allow(&self, address: IpAddr) -> bool {
+    /// 消耗一个地址的固定窗口额度；`None` 表示允许，`Some` 是拒绝后的最短重试秒数。
+    fn allow(&self, address: IpAddr) -> Option<u64> {
         let now = Instant::now();
         let Ok(mut entries) = self.entries.lock() else {
-            return false;
+            return Some(self.window.as_secs().max(1));
         };
-        entries.retain(|_, value| now.duration_since(value.started) < self.window);
-        let value = entries.entry(address).or_insert(RateWindow { started: now, count: 0 });
-        if now.duration_since(value.started) >= self.window {
-            *value = RateWindow { started: now, count: 0 };
+        if let Some(value) = entries.get_mut(&address) {
+            if now.duration_since(value.started) >= self.window {
+                *value = RateWindow { started: now, last_seen: now, count: 1 };
+                return None;
+            }
+            value.last_seen = now;
+            if value.count >= self.limit {
+                let remaining = self.window.saturating_sub(now.duration_since(value.started));
+                return Some(remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0));
+            }
+            value.count += 1;
+            return None;
         }
-        if value.count >= self.limit {
-            return false;
+        if entries.len() >= self.max_entries
+            && let Some(oldest) = entries
+                .iter()
+                .min_by(|(left_address, left), (right_address, right)| {
+                    left.last_seen
+                        .cmp(&right.last_seen)
+                        .then_with(|| left_address.cmp(right_address))
+                })
+                .map(|(address, _)| *address)
+        {
+            entries.remove(&oldest);
         }
-        value.count += 1;
-        true
+        entries.insert(address, RateWindow { started: now, last_seen: now, count: 1 });
+        None
     }
 }

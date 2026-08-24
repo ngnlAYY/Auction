@@ -266,7 +266,7 @@ pub(crate) async fn replay(
             schema_version: input.schema_version,
             public_payload: input.public_payload,
             actor_id,
-            request_id: None,
+            request_id: super::request_id(&headers),
             request_hash,
             created_at: Utc::now(),
         })

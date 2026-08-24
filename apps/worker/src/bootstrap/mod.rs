@@ -127,7 +127,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
         )
         .context("initialize Prometheus metrics")?,
     );
-    let cache = configure_cache(&config).context("configure worker cache")?;
+    let cache = configure_cache(config).context("configure worker cache")?;
     tracing::info!(
         database_configured = config.database_url().is_some(),
         cache_backend = cache.backend(),
@@ -1193,12 +1193,14 @@ async fn run_worker_skeleton(
     Ok(())
 }
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 fn abort_worker_task(task: &Option<TaskGuard<()>>) {
     if let Some(task) = task {
         task.abort();
     }
 }
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
     let Some(task) = task else {
         return;

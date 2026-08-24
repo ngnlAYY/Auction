@@ -27,10 +27,11 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - 当前状态是**功能迁移后期**：PostgreSQL 完整档的公开竞价、管理命令、Worker 生命周期、
   MoogleMail/论坛、结算/recovery、实时通信和运维证据链，以及 SQLite Lite 的声明子集均已
   建立；canonical Auction-BF PostgreSQL v28 也有独立的严格接管边界。静态盘点未发现旧版
-  业务 HTTP/浏览器路径或 Worker 任务类别缺项，但仍有已确认的运行边界缺口，包括 SIGTERM
-  优雅停机、统一 HTTP 安全/关联边界、真实状态心跳、SPA fallback 隔离和部分 Admin runtime
-  字段的生效链。真实外部服务、部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整
-  功能等价。
+  业务 HTTP/浏览器路径或 Worker 任务类别缺项，三进程也已统一接入 SIGINT/SIGTERM、10 秒
+  有界 drain、停止心跳和 tracing flush，Public/Admin 共用的请求 ID、trace context、安全头、
+  超时、可信代理和有界限流 HTTP 边界也已建立；仍有已确认的运行边界缺口，包括真实状态心跳、
+  SPA fallback 隔离和部分 Admin runtime 字段的生效链。真实外部服务、
+  部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整功能等价。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
@@ -67,7 +68,8 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 │   ├── auction-integrations/     # E-Hentai、MoogleMail 和外部网关
 │   ├── auction-jobs/             # Worker 调度与任务编排
 │   ├── auction-config/           # TOML 解析与进程配置
-│   └── auction-observability/    # tracing、metrics、健康检查和关联 ID
+│   ├── auction-observability/    # tracing、metrics、健康检查和关联 ID
+│   └── auction-process/          # 终止信号、有界 drain 和任务所有权原语
 ├── migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集迁移
 ├── docs/                         # 架构、技术选型和迁移记录
 ├── ops/                          # 配置示例与部署资料
@@ -100,8 +102,9 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - **语言：** Rust 1.98.0 当前 stable，edition 2024；workspace MSRV 为 1.94.1。Rust 官方
   没有 LTS，且只支持最新 stable，不能把 MSRV 当作 LTS。
 - **异步运行时：** Tokio 1.51.x 官方 LTS，当前下限 1.51.4。
-- **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；当前没有为尚未使用的能力直接
-  引入 `tower-http`。
+- **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；连接层直接使用同依赖图的
+  Hyper/`hyper-util` 配置请求头读取超时、HTTP/2 CONNECT 和连接排空。当前没有为尚未使用的
+  能力直接引入 `tower-http`。
 - **浏览器界面：** Dioxus 0.7.10 纯客户端渲染；产物由 `dx build --platform web` 生成，
   编译目标为 `wasm32-unknown-unknown`，再由 `auction-http` 用 `rust-embed` 内嵌。
   不启用 `dioxus-fullstack`/`dioxus-server`，避免第二套 HTTP 服务器与 `auction-http`
@@ -142,7 +145,7 @@ LTS：Tokio 使用官方 LTS；Rust、Axum、Dioxus、SQLx 等没有官方 LTS �
 apps/*
   ├── auction-http / auction-web-* / auction-jobs
   ├── auction-storage / auction-cache / auction-integrations
-  ├── auction-config / auction-observability
+  ├── auction-config / auction-observability / auction-process
   └── auction-application
               ↓
        auction-domain
@@ -170,6 +173,8 @@ apps/*
 - `auction-jobs` 负责调度、重试、游标和 Worker 编排，不得创建第二套拍卖状态机。
 - `auction-config` 负责 TOML 解析和配置校验；不要在业务模块中散落环境变量读取。
 - `auction-observability` 负责日志、指标、健康检查和关联信息；敏感值不得进入日志。
+- `auction-process` 只提供终止信号、有界 drain 和 abort-on-drop 任务守卫；不得读取配置、打开
+  监听器、发布心跳或决定业务任务的停止顺序。
 - `apps/*` 是装配根，只负责参数/配置加载、依赖注入、监听器绑定、优雅关闭和退出码。
 - Public 与 Admin 是不同表面。公开端不得依赖管理端 UI 模块或管理专属命令。
 - 跨模块调用必须通过窄端口或明确契约，禁止访问另一个 crate 的私有持久化模块。
