@@ -1,0 +1,129 @@
+//! Public 价格历史的共享分页、筛选、统计与安全映射。
+
+use auction_application::{
+    ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
+    PublicPriceHistoryListRequest, PublicPriceHistoryStats, RepositoryError,
+};
+#[cfg(feature = "sqlite")]
+use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
+use serde_json::Value;
+use uuid::Uuid;
+
+pub(crate) fn cursor_values(
+    request: &PublicPriceHistoryListRequest,
+) -> (DateTime<Utc>, i64, i64, Uuid) {
+    match request.cursor.as_ref() {
+        Some(PublicPriceHistoryCursor::Boundary {
+            closed_at,
+            auction_sequence,
+            lot_number,
+            lot_id,
+        }) => (*closed_at, *auction_sequence, *lot_number, *lot_id),
+        Some(PublicPriceHistoryCursor::Start) | None => (Utc::now(), 0, 0, Uuid::nil()),
+    }
+}
+
+pub(crate) fn entry_cursor(entry: &PublicPriceHistoryEntry) -> PublicPriceHistoryCursor {
+    PublicPriceHistoryCursor::Boundary {
+        closed_at: entry.closed_at,
+        auction_sequence: entry.auction_sequence,
+        lot_number: entry.lot_number,
+        lot_id: entry.lot_id,
+    }
+}
+
+pub(crate) fn history_name_patterns(
+    request: &PublicPriceHistoryListRequest,
+) -> Option<Vec<String>> {
+    if request.name_terms.is_empty() {
+        return None;
+    }
+    Some(
+        request
+            .name_terms
+            .iter()
+            .map(|term| {
+                format!("%{}%", term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn validate_entries(
+    entries: &[PublicPriceHistoryEntry],
+) -> Result<(), ApplicationError> {
+    if entries.iter().any(|entry| {
+        entry.lot_id.is_nil()
+            || entry.auction_id.is_nil()
+            || entry.world_id.is_empty()
+            || entry.world_id != entry.world_id.trim()
+            || entry.auction_sequence <= 0
+            || entry.lot_number <= 0
+            || entry.equipment_name.is_empty()
+            || entry.equipment_category.is_empty()
+            || entry.equipment_level.is_some_and(|level| level < 0)
+            || entry.buyer_name.is_empty()
+            || entry.seller_name.is_empty()
+            || entry.price <= 0
+            || entry.closed_at.timestamp_micros() == 0
+    }) {
+        return Err(storage_error("公开价格历史包含无效条目"));
+    }
+    Ok(())
+}
+
+pub(crate) fn equipment_level(attributes: Value) -> Option<i64> {
+    attributes.get("level").and_then(Value::as_i64).filter(|level| *level >= 0)
+}
+
+pub(crate) fn validate_stats(
+    stats: PublicPriceHistoryStats,
+) -> Result<PublicPriceHistoryStats, ApplicationError> {
+    if stats.count < 0
+        || stats.count == 0 && (stats.minimum != 0 || stats.maximum != 0 || stats.median != 0)
+        || stats.count > 0
+            && (stats.minimum <= 0
+                || stats.maximum < stats.minimum
+                || stats.median < stats.minimum
+                || stats.median > stats.maximum)
+    {
+        return Err(storage_error("公开价格历史统计无效"));
+    }
+    Ok(stats)
+}
+
+#[cfg(feature = "sqlite")]
+pub(crate) fn uuid_blob(id: Uuid) -> Vec<u8> {
+    id.as_bytes().to_vec()
+}
+
+#[cfg(feature = "sqlite")]
+pub(crate) fn uuid_from_blob(bytes: Vec<u8>, label: &str) -> Result<Uuid, ApplicationError> {
+    Uuid::from_slice(&bytes).map_err(|_| storage_error(label))
+}
+
+#[cfg(feature = "sqlite")]
+pub(crate) fn sqlite_timestamp(value: DateTime<Utc>) -> String {
+    value.to_rfc3339()
+}
+
+#[cfg(feature = "sqlite")]
+pub(crate) fn parse_timestamp(
+    value: String,
+    label: &str,
+) -> Result<DateTime<Utc>, ApplicationError> {
+    if let Ok(value) = DateTime::parse_from_rfc3339(&value) {
+        return Ok(value.with_timezone(&Utc));
+    }
+    for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
+        if let Ok(value) = NaiveDateTime::parse_from_str(&value, format) {
+            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc));
+        }
+    }
+    Err(storage_error(label))
+}
+
+pub(crate) fn storage_error(message: &str) -> ApplicationError {
+    ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
+}

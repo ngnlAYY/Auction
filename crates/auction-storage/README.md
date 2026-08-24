@@ -6,7 +6,8 @@
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
 `src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令、竞价写入和
-共享映射分别位于同目录的 `postgres/{lifecycle,admin,bidding,mapping}.rs`。SQLite Lite 竞价事务
+共享映射分别位于同目录的 `postgres/{lifecycle,admin,bidding,mapping}.rs`；其中管理事务再按
+拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,lot,mapping}.rs`。SQLite Lite 竞价事务
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期、竞价写入和映射分别位于
 `transaction/{lifecycle,bidding,mapping}.rs`；后续领域事务继续按同一规则拆分。
 `src/database/legacy_v28/` 只负责 canonical Auction-BF PostgreSQL v28 的只读预检、事务 bridge
@@ -14,7 +15,9 @@
 分别持有安全模型、预检、来源事实检查、接管 bridge 和错误映射；备份、人工确认及不可覆盖回执仍由
 `auctionctl` 拥有。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
-`src/database/scheduler/mod.rs` 持有；它不把调度状态放进内存或 Redis。
+`src/database/scheduler/` 持有：`mod.rs` 只做端口分派，`claim.rs` 负责 PostgreSQL/SQLite
+领取，`resolution.rs` 负责完成/失败 fence，`mapping.rs` 负责阶段、命令和 Lite 映射；它不把
+调度状态放进内存或 Redis。
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
 完整档读取同一快照内的结算摘要、补偿账本和 lot 金额；SQLite Lite 明确不支持该能力。
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
@@ -26,7 +29,8 @@ SQLite Lite 对确认能力明确返回不支持。
 和 `mapping.rs` 分别负责锁内流程、事实/账本、义务/恢复和映射；它根据冻结的 recovery 策略，为
 每个获胜 lot 与结算义务同事务建立 `settlement_recoveries`。`src/database/recovery_scheduler/scheduler.rs`
 只负责调度分派，due return、推进、action 和映射分别位于同目录的
-`scheduler/{returns,advance,actions,mapping}.rs`，负责
+`scheduler/{returns,advance,actions,mapping}.rs`；其中 action 再按领取、投递和收口拆到
+`scheduler/actions/{claim,delivery,resolution}.rs`，负责
 PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
@@ -46,6 +50,12 @@ Public 规则文档和黑名单安全投影分别由 `src/database/rules/mod.rs`
 Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，`postgres.rs` 与
 `sqlite.rs` 分别负责查询，`mapping.rs` 负责跨后端安全投影和字段校验；两套后端的 Lite/完整
 能力差异在各自 SQL 适配器中显式保留。
+Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只做端口分派，
+`postgres.rs` 与 `sqlite.rs` 分别负责查询和后端行映射，`mapping.rs` 负责混合游标、名称筛选、
+统计结果及公共字段校验；SQLite Lite 的成交状态边界仍由其 SQL 明确表达。
+会话持久化由 `src/database/sessions/` 持有：`mod.rs` 只做 Admin/Public 端口装配，
+`admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`common.rs` 负责
+共享错误和 Lite 时间/UUID 映射；会话真值不进入 Redis。
 Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责快照查询，`mapping.rs` 统一维护代理能力和结果不变量。
 Public 补偿池与单场账本由 `src/database/compensation/mod.rs` 持有；PostgreSQL 完整档在
@@ -67,7 +77,7 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 `transaction/lifecycle/{context,plan,record}.rs` 分别负责上下文/资格读取、计划写入和审计/realtime
 事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
-`src/database/competition/postgres/admin.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
+`src/database/competition/postgres/admin/create.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
 事件及公开发现流的持久化派生别名；SQLite
 Lite 明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
@@ -82,7 +92,7 @@ Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 target、玩家和外部装备身份加锁，写入装备、`equipment_secrets`、后台投稿、lot、版本、命令
 账本、审计和 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
-`src/database/competition/postgres/admin.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
+`src/database/competition/postgres/admin/lot.rs` 持有：事务按 world → auction → lot 加锁，完成 lot/auction
 版本 fence、预览 revision、命令账本、审计和 `auction.preview_updated` 事件；withdrawn 同一
 事务创建 `withdrawn_return` obligation 与 pending fulfillment，SQLite Lite 明确返回不支持。
 Admin 审计读取由 `src/database/admin_audit/mod.rs` 持有：两套数据库都只读取追加式
@@ -111,7 +121,8 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `inbound_mail` 的安全投影，并在 Serializable 事务内用 `mail_poll_state` 的版本 fence、
 `mail_admin_commands` 命令账本和追加审计完成暂停/恢复及历史兼容命令；`src/database/mail_poll/`
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
-`inbound_mail`、`mail_commands`、cursor 的同事务幂等提交。SQLite Lite 明确返回能力不支持，
+`inbound_mail`、`mail_commands`、cursor 的同事务幂等提交；其中 `state.rs` 负责状态/租约，
+`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
 负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
 `admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
@@ -208,7 +219,8 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 `000002` 至 `000007` 的调度、用户管理、取消/生命周期、Final phase 和领先时间修正，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由
-`src/database/settlement_scheduler/mod.rs` 持有，结算命令装配由
+`src/database/settlement_scheduler/mod.rs` 装配，due claim/租约和完成/失败 fence 分别由
+`settlement_scheduler/{claim,resolution}.rs` 持有，结算命令装配由
 `src/database/settlement_commands/mod.rs` 持有；SQLite Lite 明确不启用该 workflow，结算履约
 外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。PostgreSQL 完整档的
 `src/database/fulfillment_scheduler/mod.rs` 装配结算履约 owner；`claims.rs`、`delivery.rs`、
@@ -224,10 +236,14 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 metadata，同时由 storage owner 覆盖 `safe_detail` 和 `outcome_unknown`，不允许原始响应越过该边界。
 delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 sending 隔离和 Admin 人工动作
 都会在同一事务追加安全审计；审计失败会使对应状态变更整体回滚，幂等重放不重复追加记录。
+Admin 交付命令由 `src/database/delivery_admin/` 持有：`mod.rs` 负责端口校验和后端分派，
+`reads.rs` 负责安全列表读取，`commands.rs` 负责幂等人工命令、状态迁移、结算履约联动和追加审计，
+`mapping.rs` 负责安全快照与响应元数据投影；SQLite Lite 明确返回能力不支持。
 SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
 `src/database/realtime_admin/` 分层持有：`mod.rs` 负责端口分派，`snapshot.rs`、`lag.rs`、
-`failures.rs` 与 `replay.rs` 分别负责安全快照、lag、failure 读取和 replay，`common.rs` 负责
-共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
+`failures.rs` 与 `replay/` 分别负责安全快照、lag、failure 读取和 replay；replay 再按
+`replay.rs` 公共结果映射、`replay/postgres.rs` 完整档事务和 `replay/sqlite.rs` Lite 事务
+拆分，`common.rs` 负责共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
 `src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`stream.rs`、`read.rs`、
 `acknowledgement.rs`、`failure.rs` 分别负责 stream 目录、事件读取、连续游标确认和 failure
 生命周期，`common.rs` 负责共享校验与 Lite 串行写事务。

@@ -1,0 +1,238 @@
+//! Worker 调度完成/失败的租约 fence 收口。
+
+use auction_application::{ScheduledRoundClaim, ScheduledRoundPhase};
+use chrono::{DateTime, Utc};
+
+#[cfg(feature = "postgres")]
+use sqlx::Postgres;
+#[cfg(feature = "sqlite")]
+use sqlx::Sqlite;
+
+use super::mapping::{map_storage_error, repository_error_owned};
+use crate::database::TrackedPool;
+
+#[cfg(feature = "postgres")]
+pub(super) async fn complete_postgres(
+    pool: &TrackedPool<Postgres>,
+    claim: &ScheduledRoundClaim,
+    completed_at: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    let (sql, phase) = match claim.phase {
+        ScheduledRoundPhase::Preview => (
+            "UPDATE public.scheduled_rounds
+             SET preview_command_id = $3, preview_completed_at = $4,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
+            "preview",
+        ),
+        ScheduledRoundPhase::Open => (
+            "UPDATE public.scheduled_rounds
+             SET open_command_id = $3, open_completed_at = $4,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
+            "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE public.scheduled_rounds
+             SET final_command_id = $3, final_completed_at = $4,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
+        ),
+    };
+    let result = sqlx::query(sql)
+        .bind(claim.round_id)
+        .bind(&claim.worker_id)
+        .bind(claim.command_id.as_uuid())
+        .bind(completed_at)
+        .execute(pool)
+        .await
+        .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn fail_postgres(
+    pool: &TrackedPool<Postgres>,
+    claim: &ScheduledRoundClaim,
+    retry_at: DateTime<Utc>,
+    failure_code: &str,
+    safe_detail: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    let result = match claim.phase {
+        ScheduledRoundPhase::Preview => {
+            sqlx::query(
+                "UPDATE public.scheduled_rounds
+                 SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
+                     state_version = state_version + 1,
+                     last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NULL AND final_completed_at IS NULL",
+            )
+            .bind(claim.round_id)
+            .bind(&claim.worker_id)
+            .bind(retry_at)
+            .bind(failure_code)
+            .bind(safe_detail)
+            .execute(pool)
+            .await
+        }
+        ScheduledRoundPhase::Open => {
+            sqlx::query(
+                "UPDATE public.scheduled_rounds
+                 SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
+                     state_version = state_version + 1,
+                     last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
+            )
+            .bind(claim.round_id)
+            .bind(&claim.worker_id)
+            .bind(retry_at)
+            .bind(failure_code)
+            .bind(safe_detail)
+            .execute(pool)
+            .await
+        }
+        ScheduledRoundPhase::Final => {
+            sqlx::query(
+                "UPDATE public.scheduled_rounds
+                 SET lease_owner = NULL, lease_until = $3, last_failure_code = $4,
+                     state_version = state_version + 1,
+                     last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            )
+            .bind(claim.round_id)
+            .bind(&claim.worker_id)
+            .bind(retry_at)
+            .bind(failure_code)
+            .bind(safe_detail)
+            .execute(pool)
+            .await
+        }
+    }
+    .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned("Worker 失败记录租约已失效"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "sqlite")]
+pub(super) async fn complete_sqlite(
+    pool: &TrackedPool<Sqlite>,
+    claim: &ScheduledRoundClaim,
+    completed_at: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    let (sql, phase) = match claim.phase {
+        ScheduledRoundPhase::Preview => (
+            "UPDATE scheduled_rounds
+             SET preview_command_id = ?, preview_completed_at = ?,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
+            "preview",
+        ),
+        ScheduledRoundPhase::Open => (
+            "UPDATE scheduled_rounds
+             SET open_command_id = ?, open_completed_at = ?,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
+            "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE scheduled_rounds
+             SET final_command_id = ?, final_completed_at = ?,
+                 state_version = state_version + 1,
+                 lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
+        ),
+    };
+    let result = sqlx::query(sql)
+        .bind(super::mapping::uuid_blob(claim.command_id.as_uuid()))
+        .bind(super::mapping::sqlite_timestamp(completed_at))
+        .bind(super::mapping::uuid_blob(claim.round_id))
+        .bind(&claim.worker_id)
+        .execute(pool)
+        .await
+        .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "sqlite")]
+pub(super) async fn fail_sqlite(
+    pool: &TrackedPool<Sqlite>,
+    claim: &ScheduledRoundClaim,
+    retry_at: DateTime<Utc>,
+    failure_code: &str,
+    safe_detail: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    let (sql, phase) = match claim.phase {
+        ScheduledRoundPhase::Preview => (
+            "UPDATE scheduled_rounds
+             SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
+                 state_version = state_version + 1,
+                 last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND preview_completed_at IS NULL AND final_completed_at IS NULL",
+            "preview",
+        ),
+        ScheduledRoundPhase::Open => (
+            "UPDATE scheduled_rounds
+             SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
+                 state_version = state_version + 1,
+                 last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
+                   AND final_completed_at IS NULL",
+            "open",
+        ),
+        ScheduledRoundPhase::Final => (
+            "UPDATE scheduled_rounds
+             SET lease_owner = NULL, lease_until = ?, last_failure_code = ?,
+                 state_version = state_version + 1,
+                 last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
+                   AND final_completed_at IS NULL",
+            "final",
+        ),
+    };
+    let result = sqlx::query(sql)
+        .bind(super::mapping::sqlite_timestamp(retry_at))
+        .bind(failure_code)
+        .bind(safe_detail)
+        .bind(super::mapping::uuid_blob(claim.round_id))
+        .bind(&claim.worker_id)
+        .execute(pool)
+        .await
+        .map_err(map_storage_error)?;
+    if result.rows_affected() != 1 {
+        return Err(repository_error_owned(&format!("Worker 失败记录 {phase} 租约已失效")));
+    }
+    Ok(())
+}

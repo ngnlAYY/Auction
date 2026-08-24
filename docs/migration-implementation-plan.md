@@ -652,8 +652,8 @@ Public/Admin HTTP listener。
   E-Hentai client、MoogleMail application service、operations alert ports、Public auction reads 以及
   storage account/lots/operations/recovery/realtime、competition PostgreSQL/SQLite transaction、recovery
   commands/scheduler、settlement、credentials、fulfillment scheduler、retention inventory、legacy v28、
-  delivery scheduler、Worker control transport、equipment source、Admin Dashboard、Admin 拍卖/用户页面、Public 拍卖目录、
-  MoogleMail poller、PostgreSQL/SQLite 生命周期事务、Users/Admin PostgreSQL/SQLite、Users Mail 以及 Admin Mail PostgreSQL 适配器的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
+  delivery scheduler、Worker control transport、equipment source、Admin Dashboard、Admin 拍卖/用户/结算页面、Public 拍卖目录、
+  MoogleMail poller、mail poll state/poll/inbound、delivery Admin reads/commands/mapping、recovery action、PostgreSQL competition Admin、observability telemetry、realtime Admin replay、Public price history、sessions Admin/Public、scheduled-round claim/resolution、settlement workflow claim/resolution、PostgreSQL/SQLite 生命周期事务、Users/Admin PostgreSQL/SQLite、Users Mail 以及 Admin Mail PostgreSQL 适配器的具名文件拆分，并修复此前因错误使用 `$$` 而无法执行的
   `layout-check`，新增每个 src 必须存在职责子目录、源码命名、同前缀聚集、配置注释和五语言
   Fluent 键集合门禁；子目录仍不能只成为巨型 `mod.rs` 的外壳。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
