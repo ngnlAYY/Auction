@@ -1,0 +1,369 @@
+//! Admin API 的数据库、端口和 heartbeat 状态装配。
+
+use std::sync::Arc;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use std::time::Duration;
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use anyhow::Context;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_application::{
+    AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminCredentialHealthReader,
+    AdminCredentialPort, AdminCredentialService, AdminForumPreviewPort, AdminIntakePort,
+    AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader,
+    AdminRulesPort, AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService,
+    AdminSessionConfig, AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort,
+    AdminUserService, ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
+    DeliveryAdminPort, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementReportReader,
+};
+use auction_config::AppConfig;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_config::TomlRuntimeFileStore;
+use auction_http::AdminApiState;
+use auction_integrations::ForumPreviewAdapter;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_integrations::{
+    CredentialSealer, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
+    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client,
+};
+use auction_observability::ProcessMetrics;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_observability::{
+    HealthReader, HealthService, HeartbeatHealthReader, HeartbeatPublisher,
+    HeartbeatPublisherConfig, HeartbeatStore, ProcessRole, ServiceName,
+};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_storage::{
+    DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
+    DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
+    DatabaseAuctionLifecycleCommands, DatabaseBackend, DatabaseStore,
+};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use chrono::Duration as ChronoDuration;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use chrono::{DateTime, Utc};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use uuid::Uuid;
+
+use super::config;
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[derive(Clone, Copy)]
+struct SystemClock;
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl auction_application::Clock for SystemClock {
+    fn now(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(super) async fn configure_state(
+    config: &AppConfig,
+    tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
+    metrics: Arc<ProcessMetrics>,
+) -> anyhow::Result<(AdminApiState, Option<Arc<HeartbeatPublisher>>)> {
+    let security = config::configure_security(config)?;
+    let worker_control = config::configure_worker_control(config);
+    let Some(database_url) = config.database_url() else {
+        let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
+        return Ok((
+            AdminApiState::new(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(forum_preview),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                worker_control,
+                security,
+            )
+            .with_dashboard_worlds(config::configured_dashboard_worlds(config))
+            .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config)),
+            None,
+        ));
+    };
+    let store =
+        Arc::new(DatabaseStore::connect(database_url).await.context("connect admin database")?);
+    metrics
+        .register_pool_metrics(store.pool_metrics_source())
+        .context("register admin database pool metrics")?;
+    let actor =
+        config.admin_actor().context("admin_actor is missing from sensitive configuration")?;
+    let secret =
+        config.admin_secret().context("admin_secret is missing from sensitive configuration")?;
+    let lifecycle_store = Arc::clone(&store);
+    let auction_create_store = Arc::clone(&store);
+    let admin_rules_store = Arc::clone(&store);
+    let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if store.backend()
+        == DatabaseBackend::Postgres
+    {
+        if let Some(path) = config.runtime_config_path.clone() {
+            let files = Arc::new(
+                TomlRuntimeFileStore::new(path)
+                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+            );
+            let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
+            let service =
+                Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
+            if let Err(error) = service.recover().await {
+                match &error {
+                    ApplicationError::AdminRuntime(
+                        AdminRuntimeConfigError::OutcomeUnknown
+                        | AdminRuntimeConfigError::ReconciliationRequired,
+                    ) => {
+                        tracing::error!(
+                            error = %error,
+                            "admin runtime 配置恢复结果需要人工核对，继续启动"
+                        );
+                    }
+                    _ => return Err(anyhow::Error::msg(error.to_string())),
+                }
+            }
+            Some(service)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let admin_intake = if store.backend() == DatabaseBackend::Postgres {
+        match config.equipment_data_key_id().zip(config.equipment_data_key()) {
+            Some((key_id, key_material)) => {
+                let data_key = DataKey::from_base64(key_id, key_material)
+                    .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+                let source = EquipmentSourceAdapter::production(
+                    build_equipment_http_client()?,
+                    config::equipment_source_policy(config)?,
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+                let sealer = EquipmentKeySealer::new(data_key);
+                let intake: Arc<dyn AdminIntakePort> = Arc::new(DatabaseAdminIntakeCommands::new(
+                    Arc::clone(&store),
+                    Arc::new(source),
+                    Arc::new(sealer),
+                    Arc::new(SystemClock),
+                ));
+                Some(intake)
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    let forum_preview: Arc<dyn AdminForumPreviewPort> = Arc::new(ForumPreviewAdapter::new());
+    let admin_audit: Arc<dyn AdminAuditPort> = store.clone();
+    let admin_renames: Arc<dyn AdminRenameReader> = store.clone();
+    let admin_users: Option<Arc<dyn AdminUserPort>> =
+        match config.user_login_data_key_id().zip(config.user_login_data_key()) {
+            Some((key_id, key_material)) => {
+                let data_key = Arc::new(
+                    DataKey::from_base64(key_id, key_material)
+                        .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                );
+                let issuer = Arc::new(MoogleMailLoginKeyIssuer::new(Arc::clone(&data_key)));
+                let opener = Arc::new(MoogleMailLoginKeyReader::new(Arc::clone(&store), data_key));
+                Some(Arc::new(AdminUserService::new(Arc::clone(&store), issuer, opener)))
+            }
+            None => None,
+        };
+    let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
+        if store.backend() == DatabaseBackend::Postgres {
+            match config.credential_data_key_id().zip(config.credential_data_key()) {
+                Some((key_id, key_material)) => {
+                    let data_key = Arc::new(
+                        DataKey::from_base64(key_id, key_material)
+                            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                    );
+                    let sealer = Arc::new(CredentialSealer::new(data_key));
+                    Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer)))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+    let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
+    let health: Arc<dyn HealthReader> = Arc::new(HealthService::new(heartbeat_store));
+    let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
+    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
+    let heartbeat = Arc::new(HeartbeatPublisher::new(
+        heartbeat_store,
+        HeartbeatPublisherConfig {
+            service_name: ServiceName::Admin,
+            process_role: ProcessRole::Admin,
+            instance_id: Uuid::new_v4().to_string(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            started_at: Utc::now(),
+            ttl: ChronoDuration::seconds(30),
+        },
+        heartbeat_health,
+        tracing_health,
+    ));
+    if let Err(error) = heartbeat.publish_starting().await {
+        tracing::warn!(error = %error, "admin heartbeat starting publish failed");
+    }
+    let session_store: Arc<dyn AdminSessionStore> = store.clone();
+    let settlement_report: Arc<dyn SettlementReportReader> = store.clone();
+    let recovery_report: Arc<dyn RecoveryReportReader> = store.clone();
+    let admin_auctions: Arc<dyn AdminAuctionReader> = store.clone();
+    let admin_lots: Arc<dyn AdminLotReader> = store.clone();
+    let admin_lot_update: Arc<dyn AdminLotUpdatePort> =
+        Arc::new(DatabaseAdminLotCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+    let admin_mail: Arc<dyn AdminMailPort> =
+        Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+    let admin_proxy_events: Arc<dyn AdminProxyEventReader> = store.clone();
+    let delivery_admin: Arc<dyn DeliveryAdminPort> = store.clone();
+    let operations_alert: Arc<dyn OperationsAlertStore> = store.clone();
+    let operations_alert_source: Arc<dyn OperationsAlertSourceReader> = store.clone();
+    let credential_health: Arc<dyn AdminCredentialHealthReader> = store.clone();
+    let realtime_admin: Arc<dyn RealtimeAdminPort> = store.clone();
+    let recovery_command_store = Arc::clone(&store);
+    let session_config = AdminSessionConfig {
+        idle_ttl: ChronoDuration::seconds(config.session.idle_ttl_seconds as i64),
+        absolute_ttl: ChronoDuration::seconds(config.session.absolute_ttl_seconds as i64),
+    };
+    let session: Arc<dyn AdminSessionPort> = Arc::new(AdminSessionService::new(
+        session_store,
+        actor.to_owned(),
+        secret.as_bytes().to_vec(),
+        session_config,
+    )?);
+    let lifecycle_policy = AuctionLifecyclePolicy::new(
+        config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
+    );
+    let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
+        Arc::new(DatabaseAuctionLifecycleCommands::new(
+            lifecycle_store,
+            Arc::new(SystemClock),
+            lifecycle_policy,
+        ));
+    let auction_create: Arc<dyn AdminAuctionCreatePort> =
+        Arc::new(DatabaseAdminAuctionCommands::new(
+            auction_create_store,
+            Arc::new(SystemClock),
+            config.auction.policy(),
+        ));
+    let admin_rules: Arc<dyn AdminRulesPort> =
+        Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));
+    let recovery_commands: Arc<dyn RecoveryCommandPort> =
+        Arc::new(RecoveryCommandService::new(recovery_command_store));
+    let state = AdminApiState::new(
+        Some(session),
+        Some(lifecycle),
+        Some(auction_create),
+        Some(admin_audit),
+        Some(health),
+        admin_intake,
+        Some(forum_preview),
+        Some(admin_mail),
+        Some(admin_rules),
+        admin_runtime,
+        admin_credentials,
+        Some(admin_renames),
+        admin_users,
+        Some(recovery_commands),
+        Some(settlement_report),
+        Some(recovery_report),
+        Some(admin_auctions),
+        Some(admin_lots),
+        Some(admin_lot_update),
+        Some(admin_proxy_events),
+        Some(delivery_admin),
+        Some(operations_alert),
+        Some(operations_alert_source),
+        Some(credential_health),
+        Some(realtime_admin),
+        worker_control,
+        security,
+    )
+    .with_dashboard_worlds(config::configured_dashboard_worlds(config))
+    .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
+    .with_readiness(store);
+    if let Err(error) = heartbeat.publish_current().await {
+        tracing::warn!(error = %error, "admin heartbeat ready publish failed");
+    }
+    Ok((state, Some(heartbeat)))
+}
+
+#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+pub(super) async fn configure_state(
+    config: &AppConfig,
+    _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
+    _metrics: Arc<ProcessMetrics>,
+) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
+    let security = config::configure_security(config)?;
+    let worker_control = config::configure_worker_control(config);
+    if config.database_url().is_some() {
+        anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
+    }
+    Ok((
+        AdminApiState::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Arc::new(ForumPreviewAdapter::new())),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            worker_control,
+            security,
+        )
+        .with_dashboard_worlds(config::configured_dashboard_worlds(config))
+        .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config)),
+        None,
+    ))
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(10));
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            if let Err(error) = publisher.publish_current().await {
+                tracing::warn!(error = %error, "admin heartbeat publish failed");
+            }
+        }
+    })
+}

@@ -8,7 +8,9 @@
 文件边界拆分，其中 `deployment_control/unix/mod.rs` 只承载 Unix/systemd 生命周期编排，
 `src/bootstrap/postgres_restore.rs` 独立持有 PostgreSQL 恢复边界，
 `src/bootstrap/postgres_legacy_v28/` 持有 Auction-BF v28 的专用备份、离线校验、确认和接管回执，
-`src/bootstrap/postgres_rebuild/` 持有默认只读的破坏性重建编排和不可覆盖 receipt 发布。
+`src/bootstrap/postgres_rebuild/` 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
+`validation.rs`（确认和 URL 安全校验）、`postconditions.rs`（空库/迁移证明）以及
+`receipt.rs`（不可覆盖 receipt 发布）拆分默认只读的破坏性重建边界；`mod.rs` 只保留稳定调用路径。
 
 ```bash
 # 校验配置并显示解析结果（不回显凭据）

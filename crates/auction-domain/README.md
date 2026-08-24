@@ -7,8 +7,9 @@
 - `src/bidding/amount.rs`：带信用网格不变量的竞价金额值对象。
 - `src/bidding/policy.rs`：旧论坛兼容的分段加价、代理反超、软截止和取消截止规则。
 - `src/bidding/bid.rs`：不可变的公开竞价事实和产生机制。
-- `src/bidding/competition/`：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan.rs` 维护
-  公开事实、代理转换、软截止和最终 lot 投影的规划与校验，`mod.rs` 只负责稳定导出。
+- `src/bidding/competition/`：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan/` 按
+  `mod.rs` 规划入口、`validation.rs` 结果/输入校验、`ordinary.rs` 普通竞价、`proxy.rs`
+  代理生命周期和 `state.rs` 软截止/状态收口拆分职责，`competition/mod.rs` 只负责稳定导出。
 - `src/proxy/mod.rs`：Fast/Slow 代理授权状态与追加式转换事实。
 - `src/identity/mod.rs`：带类型的 UUID 包装，避免不同标识符互相混用。
 - `src/errors/mod.rs`：领域错误分类。

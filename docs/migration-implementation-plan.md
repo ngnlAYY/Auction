@@ -667,6 +667,9 @@ Public/Admin HTTP listener。
   结算曲线与义务闭集规则保持原实现。
 - Competition domain 已进一步按触发器模型与竞价规划拆入 `auction-domain/src/bidding/competition/`，
   `competition/mod.rs` 只负责稳定导出；普通竞价、代理、慢速/最终阶段、软截止和版本校验规则保持原实现。
+- Competition domain 的规划器已继续拆入 `competition/plan/`：`mod.rs` 只保留公共结果与规划入口，
+  `validation.rs`、`ordinary.rs`、`proxy.rs` 和 `state.rs` 分别负责输入/结果校验、普通竞价、代理生命周期
+  和状态/软截止收口；`CompetitionPlan` 公共路径与领域规则保持不变。
 - `auctionctl` deployment control 已将 Unix/systemd 生命周期实现移入
   `bootstrap/deployment_control/unix/mod.rs`，根 `mod.rs` 只保留宿主机兼容入口和参数边界；启动顺序、
   readiness、回滚、状态与回执契约保持不变。
@@ -674,6 +677,16 @@ Public/Admin HTTP listener。
   PostgreSQL 连接池和 SQLite 连接池拆入 `backend.rs`、`store.rs`、`pool_metrics.rs`、
   `postgres_store.rs` 与 `sqlite_store.rs`；根文件只保留模块装配、兼容导出和既有根级测试，
   `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径不变。
+- Admin Web surface 已将会话/登录/认证外壳移入 `app/surface/auth.rs`，跨页面状态面板、错误重试和
+  时间格式化移入 `app/surface/shared.rs`；`surface.rs` 只保留路由、资源初始化、页面装配和稳定导出，
+  Admin 路由与组件契约不变。
+- Admin API 启动装配已将 tracing/HTTP 生命周期拆入 `apps/admin-api/src/bootstrap/service.rs`，
+  数据库、端口和 heartbeat 状态拆入 `state.rs`，缓存、Worker control、安全策略和 dashboard 范围
+  投影拆入 `config.rs`；`bootstrap/mod.rs` 只保留模块装配和稳定启动入口，监听器与退出契约不变。
+- `auctionctl` PostgreSQL rebuild 已将授权/参数模型、破坏性执行、确认与 URL 校验、空库/迁移后置证明
+  以及不可覆盖回执发布分别拆入 `postgres_rebuild/model.rs`、`execute.rs`、`validation.rs`、
+  `postconditions.rs` 和 `receipt.rs`；`mod.rs` 只保留 `Options`、`Mode`、`execute` 的稳定调用路径，
+  删除前预检、advisory lock、失败回执和迁移后置契约保持不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；它们当前职责边界已能由
   owner 和端口说明，不能把“可继续拆分”误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker
   和 Web owner 不再列为未完成项。
