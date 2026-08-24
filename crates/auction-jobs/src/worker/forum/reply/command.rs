@@ -71,7 +71,7 @@ pub(super) async fn process_command(
         // 竞价命令已经完成时仍需重放安全的应用命令，以便恢复此前入账但通知失败的场景。
         // 应用端口以同一 command_id 返回既有结果，不会重复写入竞价事实。
         if start.status == ForumCommandStatus::Applied
-            && command.notify.as_deref().is_some_and(|mode| matches!(mode, "mm" | "both"))
+            && command.notify.as_deref().is_some_and(|mode| !mode.is_empty())
         {
             execute_command(
                 runtime,
@@ -104,7 +104,7 @@ pub(super) async fn process_command(
             finish(runtime, command_id, "rejected", "command_rejected", &detail).await?;
         }
     }
-    if succeeded && command.notify.as_deref().is_some_and(|mode| matches!(mode, "mm" | "both")) {
+    if succeeded && command.notify.as_deref().is_some_and(|mode| !mode.is_empty()) {
         process_notification(runtime, topic, bidder, post_id, lot_code, command, lot_id).await?;
     }
     Ok(())

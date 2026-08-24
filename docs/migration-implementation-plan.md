@@ -776,6 +776,17 @@ Public/Admin HTTP listener。
 - Storage Public 拍卖目录 owner 已将 PostgreSQL 查询、SQLite Lite 查询以及跨后端行映射/列表参数校验
   分别拆入 `database/auctions/{postgres,sqlite,mapping}.rs`；`auctions/mod.rs` 只保留
   `AuctionReader` 端口装配，cursor、总数和 Lite/完整档投影语义保持不变。
+- Application Admin Users owner 已将安全用户投影/分页模型、用户与 recovery 命令/写入载荷、
+  密钥/Users/recovery 窄端口和共享字段校验分别拆入 `ports/admin/users/{model,commands,ports,common}.rs`；
+  `users/mod.rs` 只保留稳定导出，用户命令幂等、密文信封和 recovery 黑名单 proof 语义保持不变。
+- Application Admin Mail owner 已将轮询/入站安全投影、暂停/触发命令与账本、应用/事务错误、
+  查询/命令/事务窄端口以及共享字段校验分别拆入 `ports/admin/mail/{model,commands,errors,ports,common}.rs`；
+  `mail/mod.rs` 只保留稳定导出，状态版本 fence、命令幂等和安全投影边界保持不变。
+- HTTP shared state 已将 Public 与 Admin 的端口状态容器分别拆入 `http/shared/state/{public,admin}.rs`；
+  `state/mod.rs` 只保留兼容导出，两个 surface 的依赖注入、缓存/安全策略和 realtime 连接边界保持不变。
+- Application 核心端口已将事务策略、命令幂等账本、拍卖仓储、竞价事务和 UTC 时钟分别拆入
+  `ports/core/{policy,ledger,repository,competition,clock}.rs`；`ports/mod.rs` 只保留模块装配与稳定
+  公共导出，原有事务隔离、命令重放、锁内竞价和时钟端口语义保持不变。
 - Storage MoogleMail delivery outbox 已将跨后端端口分派、命令闭集校验、普通 outbox 入队、recovery
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、

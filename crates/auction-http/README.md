@@ -12,6 +12,8 @@ Public 与 Admin 的 HTTP 表面适配器。
   surface 导出边界。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
+- `src/http/shared/state/`：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
+  `mod.rs` 只保留 `PublicApiState`/`AdminApiState` 稳定导出；状态容器不跨 surface 共用业务端口。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
   访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
   `no-cache`/`no-store` 响应策略。

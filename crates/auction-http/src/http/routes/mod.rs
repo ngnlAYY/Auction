@@ -57,7 +57,7 @@ mod rules;
 mod security;
 #[path = "../shared/server.rs"]
 mod server;
-#[path = "../shared/state.rs"]
+#[path = "../shared/state/mod.rs"]
 mod state;
 #[cfg(target_os = "linux")]
 #[path = "../shared/unix_listener.rs"]

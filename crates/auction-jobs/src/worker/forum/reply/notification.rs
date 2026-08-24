@@ -13,8 +13,11 @@ pub(super) async fn process_notification(
 ) -> Result<(), ApplicationError> {
     let mode = command.notify.as_deref().unwrap_or("both");
     if mode == "pm" {
-        tracing::info!(post_id, "论坛 PM 通知 owner 尚未装配");
+        tracing::warn!(post_id, "论坛 PM 通知 owner 未装配");
         return Ok(());
+    }
+    if mode == "both" {
+        tracing::warn!(post_id, "论坛 PM 通知 owner 未装配，将继续处理 MoogleMail 通知");
     }
     if !matches!(mode, "mm" | "both") {
         tracing::warn!(post_id, "论坛通知模式不在闭集内");

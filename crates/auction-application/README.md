@@ -6,9 +6,9 @@
 `ports/` 与 `services/` 再按 `admin/`、`auction/`、`mail/`、`realtime/`、`recovery/`、
 `settlement/` 等 owner 分组，避免 `admin_*`、`recovery_*` 一类文件在同层堆叠。
 
-- `src/ports/mod.rs`：`AuctionRepository`、`CompetitionTransaction`、`TransactionRunner`、
-  `Clock`、`CommandLedger`、recovery 报告/确认和
-  `TransactionPolicy` 等端口。使用 Rust 原生 async trait 返回类型，不依赖 `async-trait` 宏。
+- `src/ports/core/{policy,ledger,repository,competition,clock}.rs`：事务策略、命令幂等账本、
+  拍卖仓储、竞价事务和 UTC 时钟核心端口；`src/ports/mod.rs` 只保留模块装配与稳定公共导出。
+  使用 Rust 原生 async trait 返回类型，不依赖 `async-trait` 宏。
 - `src/services/auction/commands.rs`：拍卖创建用例，例如 `AuctionService::create`。
 - `src/services/auction/lifecycle.rs`：Admin/Worker 共享的拍卖状态迁移、命令账本和事务编排；Admin
   人工提前开放使用启动时冻结的策略，并在事务锁内读取计划开放时间后失败关闭，已到期的计划开放和
@@ -21,6 +21,9 @@
 - `src/ports/admin/credentials/`：凭据安全值对象与密文信封位于 `value.rs`，敏感命令/写入载荷位于
   `commands.rs`，查询、加密、Worker runtime 和 dashboard 端口位于 `ports.rs`；`credentials.rs`
   只负责稳定公共类型出口，明文和密文的安全边界保持不变。
+- `src/ports/admin/users/`：安全用户投影、列表请求和分页位于 `model.rs`，用户/恢复命令、写入
+  载荷和安全结果位于 `commands.rs`，密钥、Users 存储和 recovery 黑名单窄端口位于 `ports.rs`，
+  共享字段校验位于 `common.rs`；`users/mod.rs` 只负责稳定公共类型出口。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
 - `src/ports/admin/intake.rs` 与 `src/services/admin/intake.rs`：URL/canonical JSON 装备来源、
@@ -34,9 +37,12 @@
   安全结果和解析端口；该端口只表达本地预览，不承担远程发布或数据库写入。
 - `src/ports/admin/audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
   投影端口；只读结果不暴露数据库行。
-- `src/ports/admin/mail.rs` 与 `src/services/admin/mail.rs`：Admin 邮件轮询状态、入站审查
+- `src/ports/admin/mail/` 与 `src/services/admin/mail.rs`：Admin 邮件轮询状态、入站审查
   安全投影、状态版本 fence、暂停/恢复及历史兼容命令端口和命令账本；Admin A20 的全局
   唤醒结果由 Worker control 端口负责，不承载 MoogleMail 远程传输。
+- `src/ports/admin/mail/`：轮询状态和入站安全投影位于 `model.rs`，暂停/触发命令和账本记录位于
+  `commands.rs`，应用/事务错误位于 `errors.rs`，查询、命令和事务窄端口位于 `ports.rs`，
+  常量、聚合标识和字段校验位于 `common.rs`；`mail/mod.rs` 只负责稳定公共导出。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
