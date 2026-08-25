@@ -81,10 +81,13 @@ pub(crate) async fn set_paused(
         Ok(result) => result,
         Err(error) => return map_error(error),
     };
+    let Some(expected_state_version) = input.expected_state_version.checked_add(1) else {
+        return internal_error();
+    };
     if !result.validate()
         || result.mailbox_key != input.mailbox_key
         || result.paused != input.paused
-        || result.state_version != input.expected_state_version.saturating_add(1)
+        || result.state_version != expected_state_version
     {
         return internal_error();
     }

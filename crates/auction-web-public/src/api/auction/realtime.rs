@@ -160,9 +160,10 @@ fn validate_realtime_page(
         if !valid_realtime_event(event) || !event_matches_stream(event, expected_stream) {
             return Err("实时事件负载不符合已冻结契约".to_owned());
         }
-        if event.stream_key != expected_stream
-            || event.stream_sequence != expected_after.saturating_add(1)
-        {
+        let Some(next_sequence) = expected_after.checked_add(1) else {
+            return Err("实时事件序列超过可表示范围".to_owned());
+        };
+        if event.stream_key != expected_stream || event.stream_sequence != next_sequence {
             return Err("实时事件序列出现断档".to_owned());
         }
         expected_after = event.stream_sequence;

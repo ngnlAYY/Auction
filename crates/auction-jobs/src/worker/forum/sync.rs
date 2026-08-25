@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use auction_application::{
     ApplicationError, Clock, ForumPublisher, ForumRenderer, ForumSyncClaim, ForumSyncStore,
+    RepositoryError,
 };
 use chrono::Duration;
 use url::Url;
@@ -206,7 +207,12 @@ where
     } else {
         RETRY_DELAY
     };
-    let retry_at = now.checked_add_signed(delay).unwrap_or(now);
+    let Some(retry_at) = now.checked_add_signed(delay) else {
+        // 不把人工对账或重试时间折回当前时刻，避免未知远端结果被自动再次提交。
+        return Err(ApplicationError::Repository(RepositoryError::Failed(
+            "论坛同步重试时间溢出".to_owned(),
+        )));
+    };
     let safe_detail = bounded_detail(error.to_string());
     store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
 }

@@ -122,7 +122,7 @@ fn batch(
     events: Vec<PublicRealtimeEvent>,
 ) -> RealtimeConsumerBatch {
     let sequence_gap = events.first().is_some_and(|event| {
-        event.stream_sequence > after.saturating_add(1)
+        after.checked_add(1).is_none_or(|next_sequence| event.stream_sequence > next_sequence)
             || event.stream_sequence <= after
             || event.stream_key != request.stream_key
     });

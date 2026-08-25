@@ -72,7 +72,7 @@ impl EhentaiClient {
             .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
             .finish();
 
-        self.wait_rate().await;
+        self.wait_rate(operation).await?;
         let response = self
             .client
             .post(form.action.clone())

@@ -70,10 +70,12 @@ pub(super) async fn record_failure<C>(
 ) where
     C: Clock + 'static,
 {
-    let retry_at = clock
-        .now()
-        .checked_add_signed(retry_delay(claim.attempt_count))
-        .unwrap_or_else(|| clock.now());
+    let now = clock.now();
+    let Some(retry_at) = now.checked_add_signed(retry_delay(claim.attempt_count)) else {
+        // 不把不可表示的退避时间改写为 now；claim 会在原有 fence 到期后重新变为可领取。
+        tracing::error!(failure_code, "lifecycle retry timestamp overflow; claim remains leased");
+        return;
+    };
     if let Err(error) = schedule.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await {
         tracing::error!(error = %error, failure_code, "worker failed to persist retry state");
     }

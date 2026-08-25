@@ -1037,9 +1037,9 @@ Public/Admin HTTP listener。
   `app/auction/reads/history/filters/{mod,components,model,validation}.rs`；K/M 金额转换、日期闭区间、
   URL 查询字段和五语言错误文案语义保持不变。
 - 体量复核仍保留少数后台装配、领域聚合和适配器文件作为后续结构优化候选；本轮明确复核了
-  `http/admin/dashboard/sections.rs`（统一 dashboard section 安全投影适配）、`http/admin/lots.rs`
-  （单一 lot 列表/详情边界）、`routes/public/competition.rs`（同一 competition command owner）和
-  `services/admin/users.rs`（单一 Users 用例、key/事务 owner），它们当前职责边界清晰，不能把“可继续拆分”
+  `http/admin/dashboard/sections/`（统一 dashboard section 安全投影适配）、`http/admin/lots.rs`
+  （单一 lot 列表/详情边界）、`routes/public/competition/`（同一 competition command owner）和
+  `services/admin/users/`（单一 Users 用例、key/事务 owner），它们当前职责边界清晰，不能把“可继续拆分”
   误报成旧版功能缺口或测试任务。当前已完成拆分的 storage、Worker 和 Web owner 不再列为未完成项。
 
 规范门禁此前还存在 CI 漏接：工作流直接执行 Cargo 命令，却没有运行 Justfile 中的目录和配置
@@ -1553,3 +1553,9 @@ sequence，正文分别说明目录冻结、截止时间不变、托管装备退
 恢复“写入审计历史”的提示。弹窗改为原生表单提交，取消原因获得首焦点，其他动作首焦点仍在取消按钮；
 surface 级焦点陷阱负责关闭后恢复触发控件。成功结果改回页面级 `role=status`，并按动作显示五语言文案，
 失败仍留在动作行供重试；表格首列也补回旧版供辅助技术读取的场次隐藏标题。
+
+本轮生产边界审计又收口了时间与版本溢出路径：Admin 邮件状态版本、Worker 的 lifecycle/settlement/
+fulfillment/recovery/forum/MoogleMail 退避、E-Hentai 限速截止时间以及 Public realtime 的连续序号
+现在统一使用 checked 计算；溢出时失败关闭、断开或要求重新获取权威快照，不把异常值折回当前时刻、
+静默提前重试或伪造连续事件。审计同时复核了生产 `unwrap`/`expect`/`panic` 和日志字段，剩余调用仅为
+启动期已校验的内置模板、已由外层闭集保证的不可达分支和既有测试代码；测试编写与运行仍按用户要求暂缓。

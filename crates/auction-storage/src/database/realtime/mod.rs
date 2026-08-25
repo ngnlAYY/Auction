@@ -117,8 +117,11 @@ async fn list_postgres(
         };
         // 公开流的 sequence 是每条 stream 的连续游标。发现删除、损坏或跨流读到的
         // 断档时，不能把不完整的事件页交给浏览器继续推进，必须让它回读权威快照。
-        if event.validate().is_err() || event.stream_sequence != expected_sequence.saturating_add(1)
-        {
+        let Some(next_sequence) = expected_sequence.checked_add(1) else {
+            refetch_required = true;
+            break;
+        };
+        if event.validate().is_err() || event.stream_sequence != next_sequence {
             refetch_required = true;
             break;
         }
@@ -207,8 +210,11 @@ async fn list_sqlite(
         };
         // SQLite Lite 与 PostgreSQL 保持同一条游标安全边界；Lite 不能因为没有行锁
         // 就放宽事件断档检查，否则重连后的客户端可能跳过无法恢复的竞价事实。
-        if event.validate().is_err() || event.stream_sequence != expected_sequence.saturating_add(1)
-        {
+        let Some(next_sequence) = expected_sequence.checked_add(1) else {
+            refetch_required = true;
+            break;
+        };
+        if event.validate().is_err() || event.stream_sequence != next_sequence {
             refetch_required = true;
             break;
         }

@@ -13,7 +13,14 @@ where
     C: Clock + 'static,
 {
     let now = clock.now();
-    let retry_at = now.checked_add_signed(retry_delay).unwrap_or(now);
+    let Some(retry_at) = now.checked_add_signed(retry_delay) else {
+        // 不能把不可表示的重试时间折回 now，否则可能绕过退避并重复执行未知外部结果。
+        tracing::error!(
+            failure_code,
+            "recovery action retry timestamp overflow; claim remains leased"
+        );
+        return WorkerResult::Error;
+    };
     if let Err(error) = store.release_action(claim, retry_at, failure_code.to_owned()).await {
         tracing::error!(error = %error, failure_code, "recovery action retry fence failed");
         return WorkerResult::Error;

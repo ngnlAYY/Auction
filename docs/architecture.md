@@ -283,7 +283,9 @@ Delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 se
 都与状态变化在同一 PostgreSQL 事务中追加审计；两阶段激活会持久化独立 activation command
 及请求摘要，后续幂等重放必须匹配该身份，不能把另一条激活命令误认为成功。
 `000008_mooglemail_polling` 与 `auction-storage/src/database/mail_poll/` 负责持久化状态、
-lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同事务幂等提交。
+lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同事务幂等提交。Worker
+退避时刻、Admin 邮件状态版本和 realtime 连续序号均使用 checked 边界；时间或版本溢出时
+失败关闭并保留 claim/fence，不把异常值折回当前时刻或饱和为可接受的后继状态。
 Worker 在 `[worker.mooglemail]` 显式启用后会按顶层 world 与 `additional_worlds` 为每个已启用世界装配
 独立的持久化邮箱状态、claim、读取 gateway、业务 processor、拍卖入站事务、
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，

@@ -10,7 +10,7 @@ impl EhentaiClient {
         referer: Option<&Url>,
         cookie: &EhentaiCookie,
     ) -> Result<(Vec<u8>, StatusCode), EhentaiError> {
-        self.wait_rate().await;
+        self.wait_rate(operation).await?;
         let mut request = self
             .client
             .get(target)
@@ -141,17 +141,22 @@ impl EhentaiClient {
             && !self.request_timeout.is_zero()
     }
 
-    pub(super) async fn wait_rate(&self) {
+    pub(super) async fn wait_rate(&self, operation: EhentaiOperation) -> Result<(), EhentaiError> {
         let wait = {
             let mut next = self.gate.lock().await;
             let now = Instant::now();
             let start = if *next > now { *next } else { now };
             let wait = if start > now { start - now } else { Duration::ZERO };
-            *next = start.checked_add(self.minimum_request_interval).unwrap_or(start);
+            let Some(next_deadline) = start.checked_add(self.minimum_request_interval) else {
+                // 限速截止时间不可表示时不能继续发起外部请求，交给 Worker 安全退避。
+                return Err(EhentaiError::remote_temporary(operation, false));
+            };
+            *next = next_deadline;
             wait
         };
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
+        Ok(())
     }
 }

@@ -190,7 +190,11 @@ async fn stream_events(
                 if event.stream_sequence <= request.after {
                     continue;
                 }
-                if event.stream_sequence != request.after.saturating_add(1)
+                let Some(expected_sequence) = request.after.checked_add(1) else {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                };
+                if event.stream_sequence != expected_sequence
                     && !send_catch_up(&mut socket, reader, &mut request).await
                 {
                     return;
@@ -198,7 +202,11 @@ async fn stream_events(
                 if event.stream_sequence <= request.after {
                     continue;
                 }
-                if event.stream_sequence != request.after.saturating_add(1) {
+                let Some(expected_sequence) = request.after.checked_add(1) else {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                };
+                if event.stream_sequence != expected_sequence {
                     // 当前事件前仍有未送达事件；让客户端通过下一次 reconnect/catch-up 恢复，
                     // 不在 WebSocket 中伪造连续序号。
                     continue;

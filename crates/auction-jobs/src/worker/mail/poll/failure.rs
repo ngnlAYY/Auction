@@ -22,8 +22,14 @@ pub(super) async fn record_failure<C>(
     metric_context.metrics.observe_retry(metric_context.loop_kind, WorkerRetryKind::Persisted);
     let now = clock.now();
     let delay = retry_delay(config.retry_base, config.retry_maximum, claim.attempt_count);
-    let backoff_at =
-        now.checked_add_signed(ChronoDuration::from_std(delay).unwrap_or_default()).unwrap_or(now);
+    let Ok(delay) = ChronoDuration::from_std(delay) else {
+        tracing::error!("MoogleMail Worker 失败退避时长超出时间表示范围，保留当前 claim");
+        return;
+    };
+    let Some(backoff_at) = now.checked_add_signed(delay) else {
+        tracing::error!("MoogleMail Worker 失败退避时间溢出，保留当前 claim");
+        return;
+    };
     let retry_at =
         schedule.next_after(now).map_or(backoff_at, |scheduled_at| scheduled_at.max(backoff_at));
     if let Err(error) = store.fail(claim, retry_at, failure_code, safe_detail).await {

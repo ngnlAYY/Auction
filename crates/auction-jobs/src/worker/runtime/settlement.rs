@@ -118,7 +118,12 @@ pub(super) async fn record_fulfillment_failure<C>(
 ) where
     C: Clock + 'static,
 {
-    let retry_at = clock.now().checked_add_signed(retry_delay).unwrap_or_else(|| clock.now());
+    let now = clock.now();
+    let Some(retry_at) = now.checked_add_signed(retry_delay) else {
+        // 保留 claim 直到租约 fence 到期，避免用当前时间伪造一个可立即重试的退避点。
+        tracing::error!(failure_code, "fulfillment retry timestamp overflow; claim remains leased");
+        return;
+    };
     if let Err(error) =
         fulfillment_store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
     {
@@ -198,10 +203,12 @@ pub(super) async fn record_settlement_failure<C>(
 ) where
     C: Clock + 'static,
 {
-    let retry_at = clock
-        .now()
-        .checked_add_signed(retry_delay(claim.attempt_count))
-        .unwrap_or_else(|| clock.now());
+    let now = clock.now();
+    let Some(retry_at) = now.checked_add_signed(retry_delay(claim.attempt_count)) else {
+        // 结算失败不能因为时间溢出而回到当前时刻；让 claim 按既有 fence 失效后再恢复。
+        tracing::error!(failure_code, "settlement retry timestamp overflow; claim remains leased");
+        return;
+    };
     if let Err(error) =
         settlement_store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
     {
