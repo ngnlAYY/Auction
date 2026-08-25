@@ -681,7 +681,7 @@ Public/Admin HTTP listener。
   `bootstrap/deployment_control/unix/mod.rs`，根 `mod.rs` 只保留宿主机兼容入口和参数边界；启动顺序、
   readiness、回滚、状态与回执契约保持不变。
 - `auction-storage/src/database/mod.rs` 已将后端错误与 URL 识别、Store/迁移/readiness、连接池指标、
-  PostgreSQL 连接池和 SQLite 连接池拆入 `backend.rs`、`store.rs`、`pool_metrics.rs`、
+  PostgreSQL 连接池和 SQLite 连接池拆入 `backend.rs`、`store.rs`、`pool/{mod,metrics}.rs`、
   `postgres_store.rs` 与 `sqlite_store.rs`；根文件只保留模块装配、兼容导出和既有根级测试，
   `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径不变。
 - Admin Web surface 已将会话状态编排、站内 return 路径、登录/认证外壳和重试/刷新分别拆入
@@ -1569,6 +1569,9 @@ fulfillment/recovery/forum/MoogleMail 退避、E-Hentai 限速截止时间以及
 
 本轮继续收口边界：Auction Worker 的派生 claim lease 与 Public 补偿池/账本页的条目数量、序号和
 页尾计算均改为 checked 转换；异常大小或派生溢出会拒绝配置/公开投影，不会静默饱和或接受未校验索引。
+Application、HTTP 和存储层的 Public/Admin、账户、实时与价格/竞价历史分页投影，以及 retention
+inventory 汇总，现也统一使用 checked 转换和加法；MoogleMail 附件计数、Worker control 计数和
+协议投影超出可表示范围时拒绝处理，不把异常值映射为最大整数。
 
 只读 `auctionctl deployment-check` 复核又发现 URL 解析器会把无路径 origin 表示为根路径 `/`，导致示例
 Public/Admin 配置和论坛 `public_base_url` 被错误拒绝；配置层与 HTTP origin 策略现统一接受空路径/根路径的
@@ -1578,3 +1581,13 @@ Public/Admin 配置和论坛 `public_base_url` 被错误拒绝；配置层与 HT
 配置、runtime 配置和敏感 TOML 均拒绝符号链接；严格模式下主配置/runtime/目录拒绝 group/other 写入，
 敏感文件继续要求无 group/other 权限，非严格模式仅报告权限警告，避免示例目录无法被只读预检加载，同时
 避免只读预检与真正启动使用不同的安全标准。
+
+本轮目录结构复核又收口了剩余的同前缀文件：连接池归并到 `database/pool/{mod,metrics}.rs`，MoogleMail
+详情解析归并到 `parser/detail/{mod,helpers,parse}.rs`，Sent 列表与详情归并到
+`parser/reads/sent/{mod,detail}.rs`；所有 app/crate 的 `src` 根仍只保留薄入口文件，职责和公共模块
+路径不变。这样同一职责目录不再同时堆放 `pool*`、`detail*` 或 `sent*` 文件。
+
+本轮又完成部署模板的离线工具校验：Caddyfile 通过 `caddy validate --adapter caddyfile`；systemd
+示例先映射为合法 `.service` 文件，并在临时 root 中提供占位可执行文件与基础 target 后通过
+`systemd-analyze verify`。这只证明模板语法、依赖和字段形状，不替代真实 unit 安装、systemd 顺序、
+readiness、回滚或凭据注入验收。

@@ -157,7 +157,7 @@ impl AdminLotPage {
             && self.total >= 0
             && self.limit == request.limit
             && self.offset == request.offset
-            && self.entries.len() as i64 <= self.limit
+            && i64::try_from(self.entries.len()).is_ok_and(|entry_count| entry_count <= self.limit)
             && self.entries.iter().all(|entry| {
                 entry.auction_id == request.auction_id.as_uuid().into() && entry.validate()
             })

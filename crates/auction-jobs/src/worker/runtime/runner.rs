@@ -39,8 +39,12 @@ where
     C: Clock + 'static,
     S: std::future::Future<Output = ()>,
 {
-    let auction_lease =
-        std::time::Duration::from_secs(poll_interval.as_secs().saturating_mul(3).max(30));
+    let lease_duration_seconds = poll_interval
+        .as_secs()
+        .checked_mul(3)
+        .ok_or(WorkerError::InvalidAuctionConfiguration)?
+        .max(30);
+    let auction_lease = std::time::Duration::from_secs(lease_duration_seconds);
     let auction_item_timeout = std::time::Duration::from_secs(30)
         .min(auction_lease.saturating_sub(std::time::Duration::from_millis(1)));
     run_persistent_with_settlement_until_shutdown(

@@ -292,6 +292,9 @@ lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同�
 把最高可表示金额当作合法后继出价。
 Worker Auction claim lease 的派生时长和 Public 补偿页的条目序号/页尾也使用 checked 计算；
 配置派生或公开投影超出可表示范围时失败关闭，不把饱和值或未校验的索引当作有效结果。
+Application、HTTP 和存储层的 Public/Admin、账户、实时与价格/竞价历史分页投影，以及 retention
+inventory 汇总，也统一使用 checked 转换和加法；MoogleMail 附件计数与 Worker control 计数超出
+协议或契约可表示范围时拒绝投影，不把异常值映射成最大整数。
 Worker 在 `[worker.mooglemail]` 显式启用后会按顶层 world 与 `additional_worlds` 为每个已启用世界装配
 独立的持久化邮箱状态、claim、读取 gateway、业务 processor、拍卖入站事务、
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，

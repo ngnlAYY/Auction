@@ -130,7 +130,9 @@ pub(super) async fn list_postgres(
 
     let mut entries = rows.into_iter().map(map_postgres_entry).collect::<Result<Vec<_>, _>>()?;
     validate_entries(&entries, &request)?;
-    let has_more = request.cursor.is_some() && entries.len() as i64 > request.limit;
+    let entry_count =
+        i64::try_from(entries.len()).map_err(|_| storage_error("公开竞价日志页大小溢出"))?;
+    let has_more = request.cursor.is_some() && entry_count > request.limit;
     if has_more {
         entries.truncate(request.limit as usize);
     }

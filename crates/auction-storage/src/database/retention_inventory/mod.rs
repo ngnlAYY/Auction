@@ -118,10 +118,13 @@ impl PostgresStore {
         let migration = read_migration_inventory(&mut transaction).await?;
         let relations = read_relations(&mut transaction).await?;
         let policy_tables = build_policy_table_inventory(&policy, &relations);
-        let policy_families = build_policy_family_inventory(&policy, &policy_tables);
+        let policy_families = build_policy_family_inventory(&policy, &policy_tables)?;
         let realtime = read_realtime_inventory(&mut transaction).await?;
         let foreign_keys = read_foreign_key_inventory(&mut transaction).await?;
-        let relation_count = i64::try_from(relations.len()).unwrap_or(MAX_RELATIONS);
+        let relation_count =
+            i64::try_from(relations.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
+        let policy_table_count = i64::try_from(policy_tables.len())
+            .map_err(|_| RetentionInventoryError::CountOverflow)?;
         let mut notes = vec![
             "本盘点只读取 PostgreSQL 系统目录、schema 身份、迁移历史和 pg_stat_user_tables 估计值".to_owned(),
             "policy_tables.relation_present=false 表示政策声明的目标表在当前 schema 中缺失".to_owned(),
@@ -154,7 +157,7 @@ impl PostgresStore {
             migration,
             relation_count,
             relations,
-            policy_table_count: i64::try_from(policy_tables.len()).unwrap_or(i64::MAX),
+            policy_table_count,
             policy_tables,
             policy_families,
             realtime,

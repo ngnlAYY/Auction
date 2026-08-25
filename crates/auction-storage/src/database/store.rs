@@ -102,11 +102,9 @@ impl DatabaseStore {
     pub fn pool_metrics_source(&self) -> Arc<dyn PoolMetricsSource> {
         match self {
             #[cfg(feature = "postgres")]
-            Self::Postgres(store) => {
-                Arc::new(PostgresPoolMetricsSource { pool: store.pool().clone() })
-            }
+            Self::Postgres(store) => Arc::new(PostgresPoolMetricsSource::new(store.pool().clone())),
             #[cfg(feature = "sqlite")]
-            Self::Sqlite(store) => Arc::new(SqlitePoolMetricsSource { pool: store.pool().clone() }),
+            Self::Sqlite(store) => Arc::new(SqlitePoolMetricsSource::new(store.pool().clone())),
         }
     }
 }

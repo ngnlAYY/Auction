@@ -122,7 +122,7 @@ impl AdminProxyEventPage {
             && self.limit == request.limit
             && self.offset == request.offset
             && self.cursor == request.cursor
-            && self.entries.len() as i64 <= self.limit
+            && i64::try_from(self.entries.len()).is_ok_and(|entry_count| entry_count <= self.limit)
             && self.entries.iter().all(|entry| entry.validate(request.lot_id))
             && if cursor_mode {
                 self.total == UNKNOWN_ADMIN_PROXY_EVENT_TOTAL

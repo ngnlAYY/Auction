@@ -1,6 +1,6 @@
 //! MoogleMail Sent 详情及附件/CoD 一致性解析。
 
-use super::super::*;
+use super::super::super::*;
 
 impl MoogleMailParser {
     /// 严格解析与 Sent 摘要身份一致的详情快照。

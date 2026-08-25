@@ -71,10 +71,14 @@ pub(crate) async fn list(
         Ok(result) => result,
         Err(error) => return map_delivery_error(error),
     };
+    let entry_count = match i64::try_from(page_result.entries.len()) {
+        Ok(count) => count,
+        Err(_) => return internal_error(),
+    };
     if page_result.limit != page_size
         || page_result.offset != offset
         || page_result.total < 0
-        || page_result.entries.len() as i64 > page_size
+        || entry_count > page_size
     {
         return internal_error();
     }

@@ -1,4 +1,6 @@
-//! MoogleMail Sent 分页解析。
+//! MoogleMail Sent 分页解析；详情解析位于同目录的 `detail.rs`。
+
+mod detail;
 
 use super::super::*;
 

@@ -142,7 +142,8 @@ impl AdminAuditPage {
         request.validate()
             && self.page == request.page
             && self.page_size == request.page_size
-            && self.entries.len() as i64 <= request.page_size
+            && i64::try_from(self.entries.len())
+                .is_ok_and(|entry_count| entry_count <= request.page_size)
             && self.total.is_none_or(|total| total >= 0)
             && self.next_cursor.is_none_or(AdminAuditCursor::validate)
             && (request.page.is_some() || self.total.is_none())

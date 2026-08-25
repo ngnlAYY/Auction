@@ -107,7 +107,8 @@ impl RealtimeDashboardSnapshot {
     /// 校验观察时间、lag 数值和稳定排序，防止损坏投影进入 dashboard。
     pub fn validate(&self) -> bool {
         if self.observed_at.timestamp_nanos_opt().is_none()
-            || self.lags.len() as i64 > MAX_REALTIME_ADMIN_PAGE_SIZE
+            || !i64::try_from(self.lags.len())
+                .is_ok_and(|lag_count| lag_count <= MAX_REALTIME_ADMIN_PAGE_SIZE)
             || !self.failure.validate()
         {
             return false;

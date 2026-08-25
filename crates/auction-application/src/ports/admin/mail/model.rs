@@ -237,7 +237,8 @@ impl AdminMailIntakePage {
             && self.page == request.page
             && self.page_size == request.page_size
             && self.total >= 0
-            && self.items.len() as i64 <= request.page_size
+            && i64::try_from(self.items.len())
+                .is_ok_and(|item_count| item_count <= request.page_size)
             && (self.items.is_empty() && request.offset() >= self.total
                 || !self.items.is_empty() && request.offset() < self.total)
             && self.items.iter().all(AdminMailIntakeSummary::validate)

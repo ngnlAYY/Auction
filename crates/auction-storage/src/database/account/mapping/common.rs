@@ -4,12 +4,16 @@ pub(in crate::database::account) fn validate_page(
     page: &PublicMyBidsPage,
     request: PublicMyBidsRequest,
 ) -> Result<PublicMyBidsPage, ApplicationError> {
+    let bid_count =
+        i64::try_from(page.bids.len()).map_err(|_| storage_error("账户竞价页大小溢出"))?;
+    let proxy_count =
+        i64::try_from(page.proxies.len()).map_err(|_| storage_error("账户代理页大小溢出"))?;
     if page.bid_total < 0
         || page.proxy_total < 0
-        || page.bids.len() as i64 > request.bids.limit
-        || page.proxies.len() as i64 > request.proxies.limit
-        || page.bids.len() as i64 > page.bid_total
-        || page.proxies.len() as i64 > page.proxy_total
+        || bid_count > request.bids.limit
+        || proxy_count > request.proxies.limit
+        || bid_count > page.bid_total
+        || proxy_count > page.proxy_total
         || page.proxies.iter().any(|proxy| proxy.user_id.is_nil())
     {
         return Err(storage_error("账户竞价页结果不满足边界约束"));

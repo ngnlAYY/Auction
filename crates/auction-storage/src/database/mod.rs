@@ -6,10 +6,7 @@ use std::time::Duration;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{ApplicationError, ProcessReadinessPort, RepositoryError};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_observability::{
-    HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsBackend, PoolMetricsSnapshot,
-    PoolMetricsSource,
-};
+use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use sqlx::Row;
 #[cfg(feature = "postgres")]
@@ -161,8 +158,6 @@ mod pool;
 pub(crate) use pool::TrackedPool;
 
 mod backend;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
-mod pool_metrics;
 #[cfg(feature = "postgres")]
 mod postgres_store;
 #[cfg(feature = "sqlite")]
@@ -172,9 +167,9 @@ mod store;
 
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
-pub(crate) use pool_metrics::PostgresPoolMetricsSource;
+pub(crate) use pool::PostgresPoolMetricsSource;
 #[cfg(feature = "sqlite")]
-pub(crate) use pool_metrics::SqlitePoolMetricsSource;
+pub(crate) use pool::SqlitePoolMetricsSource;
 #[cfg(feature = "postgres")]
 pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
 #[cfg(feature = "sqlite")]

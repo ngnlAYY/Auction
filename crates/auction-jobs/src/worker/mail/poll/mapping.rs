@@ -45,8 +45,9 @@ pub(super) fn valid_page(
                         && business.world_id == message.world_id
                         && business.received_at == message.received_at
                         && business.content_digest == message.content_digest
-                        && business.attachments.len()
-                            == usize::try_from(message.attachment_count).unwrap_or(usize::MAX)
+                        && usize::try_from(message.attachment_count).is_ok_and(|attachment_count| {
+                            business.attachments.len() == attachment_count
+                        })
                         && business.credits == message.credits
                         && business.cod == message.cod
                         && business.returnable == message.returnable

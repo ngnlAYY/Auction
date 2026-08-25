@@ -228,6 +228,9 @@ pub enum RetentionInventoryError {
     #[error("PostgreSQL public relation count exceeds the safe evidence limit of {0}")]
     TooManyRelations(i64),
 
+    #[error("retention inventory count exceeds the representable range")]
+    CountOverflow,
+
     #[error("failed to query PostgreSQL retention inventory at {stage}")]
     Query {
         stage: &'static str,

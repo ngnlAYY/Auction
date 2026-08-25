@@ -4,7 +4,7 @@
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
-`src/database/pool.rs`；PostgreSQL 竞价事务按职责放在
+`src/database/pool/{mod,metrics}.rs`；PostgreSQL 竞价事务按职责放在
 `src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令和共享映射
 分别位于同目录的 `postgres/{lifecycle,admin,mapping}.rs`，竞价 owner 拆入
 `postgres/bidding/{mod,ledger,snapshot,plan,proxy,facts,audit,realtime}.rs`；其中管理事务再按
@@ -20,7 +20,7 @@ Public 竞价日志由 `src/database/bid_log/mod.rs` 装配，公共 cursor/结�
 和 SQLite Lite 查询/类型转换分别位于 `bid_log/{common,postgres,sqlite}.rs`；两套后端继续共享
 时间、lot、状态版本、事实序号和 bid ID 的 keyset 排序语义，但保留各自 SQL 与能力边界。
 数据库根入口的后端错误与 URL 识别位于 `database/backend.rs`，运行时 Store 选择、迁移目标、
-readiness 和连接池入口位于 `database/store.rs`，连接池指标适配位于 `database/pool_metrics.rs`；
+readiness 和连接池入口位于 `database/store.rs`，连接池指标适配位于 `database/pool/metrics.rs`；
 PostgreSQL/SQLite 的连接池与后端专属边界分别位于 `database/postgres_store.rs` 和
 `database/sqlite_store.rs`。`database/mod.rs` 只负责模块装配、兼容导出和保留的根级领域测试，
 不改变 `DatabaseBackend`、`DatabaseStore`、`PostgresStore` 与 `SqliteStore` 的公共路径。

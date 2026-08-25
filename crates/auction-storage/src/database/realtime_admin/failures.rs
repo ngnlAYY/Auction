@@ -178,7 +178,9 @@ fn validate_failure_page(
     total: i64,
     request: &RealtimeFailureListRequest,
 ) -> Result<(), ApplicationError> {
-    if total < 0 || entries.len() as i64 > request.limit {
+    let entry_count =
+        i64::try_from(entries.len()).map_err(|_| storage_error("realtime failure 页大小溢出"))?;
+    if total < 0 || entry_count > request.limit {
         return Err(storage_error("realtime failure 返回页越界"));
     }
     let mut previous: Option<(&DateTime<Utc>, Uuid)> = None;

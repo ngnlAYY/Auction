@@ -51,13 +51,14 @@ pub struct PublicBlacklistPage {
 impl PublicBlacklistPage {
     /// 校验 owner 返回的页边界和公开字段。
     pub fn validate(&self) -> Result<(), &'static str> {
+        let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开黑名单页大小溢出")?;
         if self.total < 0
             || self.limit < 1
             || self.limit > MAX_PUBLIC_BLACKLIST_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_BLACKLIST_OFFSET
-            || self.entries.len() as i64 > self.limit
-            || self.total < self.entries.len() as i64
+            || entry_count > self.limit
+            || self.total < entry_count
             || self.entries.iter().any(|entry| {
                 entry.game_player_id.trim() != entry.game_player_id
                     || entry.game_player_id.is_empty()

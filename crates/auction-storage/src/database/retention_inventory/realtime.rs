@@ -81,8 +81,12 @@ pub(super) async fn read_realtime_inventory(
     let configured_consumer_offset_count: i64 = coverage_row
         .try_get("configured_consumer_offset_count")
         .map_err(|source| query_error("realtime_coverage", source))?;
-    let diagnostic_consumer_offset_count = streams.iter().map(|stream| stream.consumer_count).sum();
-    let reported_stream_count = i64::try_from(streams.len()).unwrap_or(MAX_REALTIME_STREAMS);
+    let diagnostic_consumer_offset_count = streams
+        .iter()
+        .try_fold(0_i64, |total, stream| total.checked_add(stream.consumer_count))
+        .ok_or(RetentionInventoryError::CountOverflow)?;
+    let reported_stream_count =
+        i64::try_from(streams.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
 
     Ok(PostgresRealtimeInventory {
         streams,

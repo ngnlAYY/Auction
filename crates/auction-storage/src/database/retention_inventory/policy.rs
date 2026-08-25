@@ -82,11 +82,11 @@ pub(super) fn build_policy_table_inventory(
 pub(super) fn build_policy_family_inventory(
     policy: &RetentionPolicy,
     tables: &[PostgresRetentionTableInventory],
-) -> Vec<PostgresRetentionFamilyInventory> {
+) -> Result<Vec<PostgresRetentionFamilyInventory>, RetentionInventoryError> {
     policy
         .families
         .iter()
-        .map(|family| {
+        .map(|family| -> Result<PostgresRetentionFamilyInventory, RetentionInventoryError> {
             let family_tables =
                 tables.iter().filter(|table| table.dataset_family == family.dataset_family);
             let mut configured_table_count = 0_i64;
@@ -96,9 +96,13 @@ pub(super) fn build_policy_family_inventory(
             let mut total_bytes = 0_i64;
             let mut statistics_complete = true;
             for table in family_tables {
-                configured_table_count += 1;
+                configured_table_count = configured_table_count
+                    .checked_add(1)
+                    .ok_or(RetentionInventoryError::CountOverflow)?;
                 if table.relation_present {
-                    present_table_count += 1;
+                    present_table_count = present_table_count
+                        .checked_add(1)
+                        .ok_or(RetentionInventoryError::CountOverflow)?;
                 } else {
                     statistics_complete = false;
                 }
@@ -106,19 +110,25 @@ pub(super) fn build_policy_family_inventory(
                     statistics_complete = false;
                     continue;
                 };
-                estimated_rows = estimated_rows.saturating_add(rows.max(0));
+                estimated_rows = estimated_rows
+                    .checked_add(rows.max(0))
+                    .ok_or(RetentionInventoryError::CountOverflow)?;
                 let Some(dead_rows) = table.estimated_dead_rows else {
                     statistics_complete = false;
                     continue;
                 };
-                estimated_dead_rows = estimated_dead_rows.saturating_add(dead_rows.max(0));
+                estimated_dead_rows = estimated_dead_rows
+                    .checked_add(dead_rows.max(0))
+                    .ok_or(RetentionInventoryError::CountOverflow)?;
                 let Some(bytes) = table.total_bytes else {
                     statistics_complete = false;
                     continue;
                 };
-                total_bytes = total_bytes.saturating_add(bytes.max(0));
+                total_bytes = total_bytes
+                    .checked_add(bytes.max(0))
+                    .ok_or(RetentionInventoryError::CountOverflow)?;
             }
-            PostgresRetentionFamilyInventory {
+            Ok(PostgresRetentionFamilyInventory {
                 dataset_family: family.dataset_family.clone(),
                 feature_owner: family.feature_owner.clone(),
                 policy_state: family.policy_state.clone(),
@@ -131,7 +141,7 @@ pub(super) fn build_policy_family_inventory(
                 statistics_complete,
                 eligibility_assessed: false,
                 eligibility_authorized: false,
-            }
+            })
         })
         .collect()
 }

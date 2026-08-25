@@ -3,4 +3,3 @@
 mod balance;
 mod inbox;
 mod sent;
-mod sent_detail;

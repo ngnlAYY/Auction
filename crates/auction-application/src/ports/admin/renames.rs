@@ -80,7 +80,7 @@ impl AdminRenamePage {
             && self.total >= 0
             && self.limit == request.limit
             && self.offset == request.offset
-            && self.entries.len() as i64 <= self.limit
+            && i64::try_from(self.entries.len()).is_ok_and(|entry_count| entry_count <= self.limit)
             && self.entries.iter().enumerate().all(|(index, entry)| {
                 entry.validate()
                     && request.user_id.is_none_or(|user_id| entry.user_id == user_id)

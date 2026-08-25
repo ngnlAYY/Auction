@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 
 pub(crate) struct DetailFields {
     pub(crate) recipient: String,

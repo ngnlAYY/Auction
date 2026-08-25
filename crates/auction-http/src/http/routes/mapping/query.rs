@@ -66,12 +66,18 @@ pub(crate) fn valid_account_page(
     user_id: Uuid,
     request: &PublicMyBidsRequest,
 ) -> bool {
+    let Ok(bid_count) = i64::try_from(page.bids.len()) else {
+        return false;
+    };
+    let Ok(proxy_count) = i64::try_from(page.proxies.len()) else {
+        return false;
+    };
     page.bid_total >= 0
         && page.proxy_total >= 0
-        && page.bids.len() as i64 <= request.bids.limit
-        && page.proxies.len() as i64 <= request.proxies.limit
-        && page.bids.len() as i64 <= page.bid_total
-        && page.proxies.len() as i64 <= page.proxy_total
+        && bid_count <= request.bids.limit
+        && proxy_count <= request.proxies.limit
+        && bid_count <= page.bid_total
+        && proxy_count <= page.proxy_total
         && page.proxies.iter().all(|proxy| proxy.user_id == user_id)
 }
 

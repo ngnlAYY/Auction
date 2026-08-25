@@ -189,11 +189,13 @@ pub(super) async fn run_worker(
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
     }
     let mut heartbeat_task = Some(TaskGuard::new(spawn_heartbeat(Arc::clone(&heartbeat))));
-    let auction_poll_interval =
-        std::time::Duration::from_secs(config.worker_poll_interval_seconds());
-    let auction_lease_duration = std::time::Duration::from_secs(
-        config.worker_poll_interval_seconds().saturating_mul(3).max(30),
-    );
+    let poll_interval_seconds = config.worker_poll_interval_seconds();
+    let lease_duration_seconds = poll_interval_seconds
+        .checked_mul(3)
+        .ok_or_else(|| anyhow::anyhow!("Worker claim lease 派生时长超出可表示范围"))?
+        .max(30);
+    let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
+    let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
     let result = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,

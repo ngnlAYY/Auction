@@ -1,4 +1,4 @@
-//! SQLx 连接池的 acquisition 追踪边界。
+//! SQLx 连接池的 acquisition 追踪边界；Prometheus 后端适配位于同目录的 `metrics.rs`。
 //!
 //! SQLx 的 `Executor for &Pool` 会在查询内部隐式获取连接，单独包裹调用方显式的
 //! `acquire()` 不能覆盖普通查询。这里同时包裹池的 `Executor`、事务和显式获取入口，
@@ -19,6 +19,14 @@ use std::{
 use auction_observability::PoolMetricsSnapshot;
 use futures_util::{TryStreamExt, future::BoxFuture, stream::BoxStream};
 use sqlx::{Database, Either, Execute, Executor, Pool, SqlStr, Transaction, pool::PoolConnection};
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod metrics;
+
+#[cfg(feature = "postgres")]
+pub(crate) use metrics::PostgresPoolMetricsSource;
+#[cfg(feature = "sqlite")]
+pub(crate) use metrics::SqlitePoolMetricsSource;
 
 /// 一个 SQLx 池的真实 acquisition 累计状态。
 #[derive(Debug, Default)]

@@ -122,11 +122,14 @@ pub(crate) fn valid_command_proxy_identity(
     let Ok(expected_state_version) = i64::try_from(expected.state_version) else {
         return false;
     };
+    let Ok(expected_transition_count) = usize::try_from(expected_state_version) else {
+        return false;
+    };
     proxy.authorization_id == expected.id.as_uuid()
         && proxy.lot_id == expected.lot_id.as_uuid()
         && proxy.user_id == expected.user_id.as_uuid()
         && proxy.quota_limit >= 0
-        && proxy.transitions.len() >= usize::try_from(expected_state_version).unwrap_or(usize::MAX)
+        && proxy.transitions.len() >= expected_transition_count
 }
 
 /// 把已提交的代理快照和本次竞价计划组合成旧系统要求的命令响应。

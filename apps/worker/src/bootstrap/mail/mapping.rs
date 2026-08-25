@@ -11,7 +11,12 @@ pub(super) fn map_mooglemail_message(
     let received_at = message.received_at;
     let subject = message.subject.clone();
     let content_digest = message.content_digest();
-    let attachment_count = u32::try_from(message.attachments.len()).unwrap_or(u32::MAX);
+    let attachment_count = u32::try_from(message.attachments.len()).map_err(|_| {
+        auction_integrations::mooglemail::MoogleMailError::protocol_drift(
+            auction_integrations::mooglemail::MoogleMailOperation::Detail,
+            message.world,
+        )
+    })?;
     let credits = message.credits;
     let cod = message.cod;
     let returnable = message.returnable;

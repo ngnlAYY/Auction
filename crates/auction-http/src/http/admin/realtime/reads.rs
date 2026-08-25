@@ -54,10 +54,14 @@ pub(crate) async fn list_lag(
         Ok(result) => result,
         Err(error) => return map_realtime_error(error),
     };
+    let entry_count = match i64::try_from(result.entries.len()) {
+        Ok(count) => count,
+        Err(_) => return internal_error(),
+    };
     if result.limit != page_size
         || result.offset != offset
         || result.total < 0
-        || result.entries.len() as i64 > page_size
+        || entry_count > page_size
     {
         return internal_error();
     }
@@ -122,15 +126,18 @@ pub(crate) async fn list_failures(
         Ok(result) => result,
         Err(error) => return map_realtime_error(error),
     };
+    let entry_count = match i64::try_from(result.entries.len()) {
+        Ok(count) => count,
+        Err(_) => return internal_error(),
+    };
     if result.limit != page_size
         || result.offset != offset
         || result.total < 0
-        || result.entries.len() as i64 > page_size
+        || entry_count > page_size
     {
         return internal_error();
     }
-    let has_more =
-        offset.checked_add(result.entries.len() as i64).is_some_and(|next| next < result.total);
+    let has_more = offset.checked_add(entry_count).is_some_and(|next| next < result.total);
     let failures = result.entries.into_iter().map(map_failure).collect();
     (
         StatusCode::OK,

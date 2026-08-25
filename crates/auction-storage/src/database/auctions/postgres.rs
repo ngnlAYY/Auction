@@ -81,7 +81,9 @@ pub(super) async fn list(
         .map_err(|_| storage_error("读取公开拍卖列表总数失败"))?
         .unwrap_or(0);
     let mut entries = rows.into_iter().map(map_postgres_summary).collect::<Result<Vec<_>, _>>()?;
-    let has_more = use_cursor && entries.len() as i64 > request.limit;
+    let entry_count =
+        i64::try_from(entries.len()).map_err(|_| storage_error("公开拍卖页大小溢出"))?;
+    let has_more = use_cursor && entry_count > request.limit;
     if has_more {
         entries.truncate(request.limit as usize);
     }

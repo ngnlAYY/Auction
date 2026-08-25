@@ -1,6 +1,11 @@
 //! SQLx 连接池指标的后端适配。
 
-use super::*;
+use super::TrackedPool;
+use auction_observability::{PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource};
+#[cfg(feature = "postgres")]
+use sqlx::Postgres;
+#[cfg(feature = "sqlite")]
+use sqlx::Sqlite;
 
 /// 把 SQLx 池公开的连接数转换为 Prometheus scrape 快照。
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -30,6 +35,13 @@ pub struct PostgresPoolMetricsSource {
 }
 
 #[cfg(feature = "postgres")]
+impl PostgresPoolMetricsSource {
+    pub(crate) fn new(pool: TrackedPool<Postgres>) -> Self {
+        Self { pool }
+    }
+}
+
+#[cfg(feature = "postgres")]
 impl PoolMetricsSource for PostgresPoolMetricsSource {
     fn backend(&self) -> PoolMetricsBackend {
         PoolMetricsBackend::Postgres
@@ -44,6 +56,13 @@ impl PoolMetricsSource for PostgresPoolMetricsSource {
 #[derive(Clone)]
 pub struct SqlitePoolMetricsSource {
     pub(super) pool: TrackedPool<Sqlite>,
+}
+
+#[cfg(feature = "sqlite")]
+impl SqlitePoolMetricsSource {
+    pub(crate) fn new(pool: TrackedPool<Sqlite>) -> Self {
+        Self { pool }
+    }
 }
 
 #[cfg(feature = "sqlite")]

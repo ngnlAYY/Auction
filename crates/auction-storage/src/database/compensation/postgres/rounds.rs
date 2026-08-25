@@ -118,7 +118,9 @@ pub(crate) async fn list(
         })
         .collect::<Result<Vec<_>, ApplicationError>>()?;
 
-    let has_more = use_cursor && entries.len() as i64 > request.limit;
+    let entry_count =
+        i64::try_from(entries.len()).map_err(|_| storage_error("补偿池页大小溢出"))?;
+    let has_more = use_cursor && entry_count > request.limit;
     if has_more {
         entries.truncate(request.limit as usize);
     }

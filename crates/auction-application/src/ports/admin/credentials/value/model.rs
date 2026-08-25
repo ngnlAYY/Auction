@@ -177,7 +177,8 @@ impl AdminCredentialPage {
             && self.total >= 0
             && self.limit == request.limit
             && self.offset == request.offset
-            && self.credentials.len() as i64 <= self.limit
+            && i64::try_from(self.credentials.len())
+                .is_ok_and(|credential_count| credential_count <= self.limit)
             && self.credentials.iter().enumerate().all(|(index, credential)| {
                 credential.validate()
                     && request.kind.is_none_or(|kind| credential.kind == kind)

@@ -76,6 +76,11 @@ pub struct MoogleMailError {
 }
 
 impl MoogleMailError {
+    /// 建立协议结构不一致的读侧错误，供 Worker 边界拒绝无法表示的投影值。
+    pub const fn protocol_drift(operation: MoogleMailOperation, world: MoogleMailWorld) -> Self {
+        Self::new(operation, world, MoogleMailErrorCategory::ProtocolDrift, false)
+    }
+
     pub(crate) const fn new(
         operation: MoogleMailOperation,
         world: MoogleMailWorld,

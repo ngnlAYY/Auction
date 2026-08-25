@@ -47,7 +47,8 @@ pub(super) async fn read_foreign_key_inventory(
         .take(MAX_FOREIGN_KEYS as usize)
         .map(map_foreign_key)
         .collect::<Result<Vec<_>, _>>()?;
-    let reported_foreign_key_count = i64::try_from(relations.len()).unwrap_or(MAX_FOREIGN_KEYS);
+    let reported_foreign_key_count =
+        i64::try_from(relations.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
     Ok(PostgresForeignKeyInventoryReport {
         relations,
         coverage: PostgresForeignKeyCoverage {
@@ -195,7 +196,9 @@ pub(super) async fn read_relations(
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| query_error("relation_inventory", source))?;
-    if rows.len() as i64 > MAX_RELATIONS {
+    let relation_count =
+        i64::try_from(rows.len()).map_err(|_| RetentionInventoryError::CountOverflow)?;
+    if relation_count > MAX_RELATIONS {
         return Err(RetentionInventoryError::TooManyRelations(MAX_RELATIONS));
     }
 

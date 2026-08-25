@@ -28,16 +28,14 @@ pub struct MoogleMailParser;
 
 mod actions;
 mod common;
-mod detail_helpers;
-mod detail_parse;
+mod detail;
 mod list_helpers;
 mod reads;
 mod script;
 mod types;
 
 pub(crate) use common::*;
-pub(crate) use detail_helpers::*;
-pub(crate) use detail_parse::*;
+pub(crate) use detail::*;
 pub(crate) use list_helpers::*;
 pub(crate) use script::*;
 pub use types::*;

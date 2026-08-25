@@ -124,8 +124,8 @@ impl AdminUserListItem {
     pub fn validate(&self) -> bool {
         self.user.validate()
             && self.blacklist_count >= 0
-            && self.blacklist_history.len()
-                == self.blacklist_count.min(10).try_into().unwrap_or(usize::MAX)
+            && usize::try_from(self.blacklist_count.min(10))
+                .is_ok_and(|expected_count| self.blacklist_history.len() == expected_count)
             && self.blacklist_history.iter().all(|entry| entry.validate())
             && self
                 .blacklist_history
@@ -170,7 +170,7 @@ impl AdminUserPage {
             && self.total >= 0
             && self.limit == request.limit
             && self.offset == request.offset
-            && self.users.len() as i64 <= self.limit
+            && i64::try_from(self.users.len()).is_ok_and(|user_count| user_count <= self.limit)
             && self.users.iter().enumerate().all(|(index, user)| {
                 user.validate()
                     && request.name.as_deref().is_none_or(|name| {

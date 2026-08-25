@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 
 pub(crate) fn parse_token(
     document: &Html,

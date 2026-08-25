@@ -105,13 +105,20 @@ impl WorkerControlPort for WorkerControlClient {
     fn status(&self) -> ApplicationFuture<'_, WorkerControlStatus> {
         Box::pin(async move {
             match self.fetch_status().await {
-                Ok(status) if valid_status(&status) => Ok(WorkerControlStatus {
-                    condition: WorkerControlCondition::Available,
-                    state: status.state,
-                    ready: status.ready,
-                    version: status.version,
-                    mail_pollers: i64::try_from(status.mail_pollers).unwrap_or(i64::MAX),
-                }),
+                Ok(status) if valid_status(&status) => {
+                    let Ok(mail_pollers) = i64::try_from(status.mail_pollers) else {
+                        return Ok(WorkerControlStatus::unavailable(
+                            WorkerControlCondition::Incompatible,
+                        ));
+                    };
+                    Ok(WorkerControlStatus {
+                        condition: WorkerControlCondition::Available,
+                        state: status.state,
+                        ready: status.ready,
+                        version: status.version,
+                        mail_pollers,
+                    })
+                }
                 Ok(_) => Ok(WorkerControlStatus::unavailable(WorkerControlCondition::Incompatible)),
                 Err(error) => Ok(WorkerControlStatus::unavailable(match error {
                     WorkerControlClientError::Unavailable => WorkerControlCondition::Unavailable,
@@ -131,10 +138,17 @@ impl WorkerControlPort for WorkerControlClient {
                         && result.command_id == command_id.to_string()
                         && result.pollers > 0 =>
                 {
+                    let Ok(pollers) = i64::try_from(result.pollers) else {
+                        return Ok(WorkerControlTrigger {
+                            condition: WorkerControlCondition::Incompatible,
+                            accepted: false,
+                            pollers: 0,
+                        });
+                    };
                     Ok(WorkerControlTrigger {
                         condition: WorkerControlCondition::Available,
                         accepted: true,
-                        pollers: i64::try_from(result.pollers).unwrap_or(i64::MAX),
+                        pollers,
                     })
                 }
                 Ok(_) => Ok(WorkerControlTrigger {
