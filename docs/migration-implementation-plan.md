@@ -703,6 +703,9 @@ Public/Admin HTTP listener。
 - `auction-observability/src/health/` 已将安全健康模型与校验、心跳发布/持久化端口、三进程 dashboard
   聚合分别拆入 `model.rs`、`publisher.rs` 和 `dashboard.rs`；`health/mod.rs` 只保留模块装配和稳定导出，
   心跳 sequence、TTL、readiness 与安全投影契约保持不变。
+- `auction-observability` telemetry processor 已将 exporter 健康包装与有界 span 队列/批处理/关闭控制
+  分别拆入 `telemetry/processor/{mod,exporter,batch}.rs`；OTLP 丢弃计数、flush、shutdown 超时和
+  runtime 的稳定类型路径保持不变。
 - Application Admin credentials port 已将闭集模型/分页、安全值与密文信封、Worker 运行记录、dashboard 聚合、
   业务错误、敏感命令与写入载荷、查询/加密/Worker runtime/dashboard 端口分别拆入
   `ports/admin/credentials/value/{model,secret,runtime,health,error,common}.rs`、`commands.rs` 和 `ports.rs`；
@@ -808,6 +811,9 @@ Public/Admin HTTP listener。
 - Operations alert claim owner 已将新批次领取、过期租约回收和 PostgreSQL 行映射分别拆入
   `database/operations_alert/claims/{mod,create,reclaim,mapping}.rs`；claim token/fencing、三次重试
   上限、delivery 准备审计、正文摘要校验和目标 world/recipient 身份 fence 保持不变。
+- Operations alert snapshot owner 已将 PostgreSQL process/delivery/fulfillment/recovery 水位读取与
+  signal 观察事务分别拆入 `database/operations_alert/snapshot/{mod,reads,observe}.rs`；各 source
+  独立降级、signal fingerprint/state-version fence 和观察事务提交边界保持不变。
 - `auction-http` 共享会话适配器已将限流/认证守卫、应用错误映射、Cookie/Basic Auth/CSRF、安全响应
   和业务指标分别拆入 `routes/session/{guards,errors,cookies,responses,metrics}.rs`；`session.rs` 只保留
   模块装配与稳定出口，原有 session、CSRF、Cookie 属性、状态码和业务结果分类保持不变。
@@ -950,6 +956,9 @@ Public/Admin HTTP listener。
   `services/settlement/fulfillment/{mod,service,intent,validation,evidence,proof,model}.rs`；
   prepare/activate/reconcile 端口、稳定 command/request hash、Sent/Balance 证明和 manual reconcile
   边界保持不变。
+- Application settlement command owner 已将 Serializable 结算事务编排、due 世代与活动代理关闭校验、
+  以及结算义务闭集构造分别拆入 `services/settlement/commands/{mod,validation,obligations}.rs`；
+  稳定结算命令、命令账本 replay、锁内快照、代理终态计划和义务前置依赖语义保持不变。
 - Config AppConfig owner 已将 TOML 输入模型、配置定位/读取、敏感值 getter 和 runtime/Worker/数据库
   最终校验构建分别拆入 `config/settings/app/{mod,model,load,accessors,build}.rs`；`AppConfig` 公共
   类型路径、所有配置字段、敏感值最小暴露和 SQLite Lite 并发边界保持不变。
@@ -1008,8 +1017,10 @@ Public/Admin HTTP listener。
   `app/surface/board/{mod,data,world,realtime,navigation}.rs`；当前/历史拍卖读取、lot 快照对齐、
   倒计时、事件断档回权威快照和 URL 导航语义保持不变。
 - Public 页面 owner 已将历史拍卖列表、lot 详情/竞价、通用重试状态和路由薄包装分别拆入
-  `app/surface/pages/{history,lot,shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
+  `app/surface/pages/{history,lot/{mod,detail,equipment,history},shared,routes}.rs`；`pages.rs` 只保留路由组件稳定出口，
   URL 查询状态、实时刷新、竞价展示和 14 条公开路由保持不变。
+- Public 补偿池页面 owner 已将批次列表/展开交互与流水详情/类型金额展示分别拆入
+  `app/content/compensation/{mod,table,movements}.rs`；分页、URL 状态、公开投影和补偿守恒展示语义保持不变。
 - Admin 拍卖生命周期动作 owner 已将列表行、确认对话框和动作可用性/文案模型分别拆入
   `app/auction/auctions/actions/{row,dialog,model}.rs`；`actions/mod.rs` 只保留稳定组件出口，
   capability 过滤、状态版本 fence、CSRF、command ID 重试和成功/失败反馈语义保持不变。

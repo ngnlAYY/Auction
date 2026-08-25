@@ -2,7 +2,7 @@
 
 #[path = "pages/history.rs"]
 mod history;
-#[path = "pages/lot.rs"]
+#[path = "pages/lot/mod.rs"]
 mod lot;
 #[path = "pages/routes.rs"]
 mod routes;

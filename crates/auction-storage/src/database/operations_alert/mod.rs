@@ -196,6 +196,7 @@ mod delivery;
 #[cfg(feature = "postgres")]
 mod health;
 #[cfg(feature = "postgres")]
+#[path = "snapshot/mod.rs"]
 mod snapshot;
 
 #[cfg(feature = "postgres")]

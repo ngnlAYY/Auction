@@ -33,7 +33,7 @@ mod recovery;
 #[path = "recovery/health.rs"]
 mod recovery_health;
 mod sessions;
-#[path = "settlement/commands.rs"]
+#[path = "settlement/commands/mod.rs"]
 mod settlement;
 #[path = "mail/user.rs"]
 mod user_mail;

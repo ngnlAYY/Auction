@@ -1,12 +1,9 @@
-//! Operations alert 来源快照和 signal 观察写入。
-//!
-//! 各来源独立失败并降级为 unavailable 投影，观察结果在 PostgreSQL 事务中追加或收敛。
+//! Operations alert 各 owner 水位的安全读取。
 
-use super::*;
+use super::super::*;
 
-#[cfg(feature = "postgres")]
-pub(super) async fn snapshot_postgres(
-    store: &super::PostgresStore,
+pub(crate) async fn snapshot_postgres(
+    store: &super::super::PostgresStore,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertSnapshot, ApplicationError> {
     // 四个 source 独立读取；单个 owner 的查询失败只生成该 source 的 unavailable signal，
@@ -19,7 +16,6 @@ pub(super) async fn snapshot_postgres(
     Ok(OperationsAlertSnapshot { process, delivery, fulfillment, recovery })
 }
 
-#[cfg(feature = "postgres")]
 async fn process_snapshot(
     heartbeat_store: &DatabaseStore,
 ) -> Result<OperationsAlertProcessSnapshot, ApplicationError> {
@@ -72,9 +68,8 @@ async fn process_snapshot(
     Ok(OperationsAlertProcessSnapshot { processes, audit_failure_count })
 }
 
-#[cfg(feature = "postgres")]
 async fn delivery_snapshot(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
     let row = sqlx::query(
@@ -121,9 +116,8 @@ async fn delivery_snapshot(
     })
 }
 
-#[cfg(feature = "postgres")]
 async fn fulfillment_snapshot(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertFulfillmentSnapshot, ApplicationError> {
     let row = sqlx::query(
@@ -158,9 +152,8 @@ async fn fulfillment_snapshot(
     })
 }
 
-#[cfg(feature = "postgres")]
 async fn recovery_snapshot(
-    pool: &super::TrackedPool<sqlx::Postgres>,
+    pool: &super::super::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertRecoverySnapshot, ApplicationError> {
     let rows = sqlx::query(
@@ -247,103 +240,6 @@ async fn recovery_snapshot(
     Ok(snapshot)
 }
 
-#[cfg(feature = "postgres")]
 fn age_seconds(now: DateTime<Utc>, observed_at: Option<DateTime<Utc>>) -> i64 {
     observed_at.map(|value| now.signed_duration_since(value).num_seconds().max(0)).unwrap_or(0)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) async fn observe_postgres(
-    pool: &super::TrackedPool<sqlx::Postgres>,
-    command: &OperationsAlertObserveCommand,
-) -> Result<(), ApplicationError> {
-    let batch_window = chrono_duration(command.batch_window)?;
-    let next_notify_at = command
-        .now
-        .checked_add_signed(batch_window)
-        .ok_or_else(|| storage_error("operations alert 首次通知时间溢出"))?;
-    let mut transaction =
-        pool.begin().await.map_err(|_| storage_error("开启 operations alert 观察事务失败"))?;
-
-    for observation in &command.observations {
-        let mut fingerprints = Vec::with_capacity(observation.signals.len());
-        for signal in &observation.signals {
-            signal.validate().map_err(ApplicationError::from)?;
-            if fingerprints.contains(&signal.fingerprint) {
-                return rollback_operations_alert(
-                    transaction,
-                    "operations alert 单轮出现重复 signal",
-                )
-                .await;
-            }
-            fingerprints.push(signal.fingerprint);
-            let state_version: i64 = sqlx::query_scalar(
-                "INSERT INTO public.operations_alert_signals
-                    (fingerprint, kind, scope, source, active, first_seen_at, last_seen_at,
-                     resolved_at, last_notified_at, next_notify_at, count_value, age_seconds,
-                     state_version)
-                 VALUES ($1, $2, $3, $4, true, $5, $5, NULL, NULL, $6, $7, $8, 1)
-                 ON CONFLICT (fingerprint) DO UPDATE SET
-                    active = true,
-                    last_seen_at = EXCLUDED.last_seen_at,
-                    resolved_at = NULL,
-                    next_notify_at = COALESCE(
-                        operations_alert_signals.next_notify_at, EXCLUDED.next_notify_at
-                    ),
-                    count_value = EXCLUDED.count_value,
-                    age_seconds = EXCLUDED.age_seconds,
-                    state_version = operations_alert_signals.state_version + 1
-                 WHERE operations_alert_signals.kind = EXCLUDED.kind
-                   AND operations_alert_signals.scope = EXCLUDED.scope
-                   AND operations_alert_signals.source = EXCLUDED.source
-                 RETURNING state_version",
-            )
-            .bind(signal.fingerprint.to_vec())
-            .bind(signal.kind.as_str())
-            .bind(&signal.scope)
-            .bind(signal.source.as_str())
-            .bind(command.now)
-            .bind(next_notify_at)
-            .bind(signal.count)
-            .bind(signal.age_seconds)
-            .fetch_one(&mut *transaction)
-            .await
-            .map_err(|_| storage_error("写入 operations alert signal 失败"))?;
-            if state_version <= 0 {
-                return rollback_operations_alert(transaction, "operations alert signal 版本无效")
-                    .await;
-            }
-        }
-
-        let active_rows = sqlx::query(
-            "SELECT fingerprint
-             FROM public.operations_alert_signals
-             WHERE source = $1 AND active
-             FOR UPDATE",
-        )
-        .bind(observation.source.as_str())
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("读取 operations alert 当前 signal 失败"))?;
-        for row in active_rows {
-            let fingerprint: Vec<u8> = row
-                .try_get("fingerprint")
-                .map_err(|_| storage_error("读取 operations alert fingerprint 失败"))?;
-            if !fingerprints.iter().any(|value| value.as_slice() == fingerprint.as_slice()) {
-                sqlx::query(
-                    "UPDATE public.operations_alert_signals
-                     SET active = false, resolved_at = $2, next_notify_at = NULL,
-                         state_version = state_version + 1
-                     WHERE fingerprint = $1 AND active",
-                )
-                .bind(fingerprint)
-                .bind(command.now)
-                .execute(&mut *transaction)
-                .await
-                .map_err(|_| storage_error("关闭已恢复 operations alert signal 失败"))?;
-            }
-        }
-    }
-
-    transaction.commit().await.map_err(|_| storage_error("提交 operations alert 观察事务失败"))
 }

@@ -1,0 +1,7 @@
+//! Operations alert 水位读取与 signal 观察写入的模块装配。
+
+mod observe;
+mod reads;
+
+pub(super) use observe::observe_postgres;
+pub(super) use reads::snapshot_postgres;

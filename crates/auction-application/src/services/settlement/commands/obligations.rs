@@ -1,0 +1,160 @@
+//! 结算义务的闭集构造与稳定身份派生。
+
+use auction_domain::{
+    CommandId, SettlementId, SettlementObligation, SettlementObligationKind,
+    SettlementObligationState, SettlementPlan, SettlementWorld, deterministic_uuid,
+};
+
+use crate::SettlementSnapshot;
+
+/// 根据已计算的结算明细构造支付、交接、卖家结算和退款义务。
+pub(super) fn append_obligations(
+    command_id: CommandId,
+    snapshot: &SettlementSnapshot,
+    plan: &mut SettlementPlan,
+) -> Result<(), auction_domain::DomainError> {
+    let mut obligations = Vec::new();
+
+    for fact in &snapshot.facts {
+        let line =
+            plan.lines.iter().find(|line| line.lot_id == fact.lot_id).ok_or(
+                auction_domain::DomainError::InvalidSettlementFacts("结算明细缺少对应 lot"),
+            )?;
+
+        let Some(winner_id) = fact.leader_id else {
+            obligations.push(SettlementObligation {
+                id: obligation_id(command_id, fact.lot_id, "unsold_return"),
+                auction_id: snapshot.auction_id,
+                lot_id: fact.lot_id,
+                origin_command_id: command_id,
+                policy_version: plan.policy_version,
+                world: fact.world,
+                kind: SettlementObligationKind::UnsoldReturn,
+                state: SettlementObligationState::Ready,
+                state_version: 1,
+                recipient_user_id: None,
+                recipient_game_identity: fact.seller_identity.clone(),
+                amount: auction_domain::SettlementAmount::zero(),
+                carrier_credit: 0,
+                equipment_id: fact.equipment_id,
+                submission_id: fact.submission_id,
+                prerequisite_id: None,
+            });
+            continue;
+        };
+
+        let payment_kind = match fact.world {
+            SettlementWorld::Main => SettlementObligationKind::WinnerEquipmentCod,
+            SettlementWorld::Isekai => SettlementObligationKind::WinnerPaymentCarrierCod,
+        };
+        let payment_id = obligation_id(command_id, fact.lot_id, kind_name(payment_kind));
+        obligations.push(SettlementObligation {
+            id: payment_id,
+            auction_id: snapshot.auction_id,
+            lot_id: fact.lot_id,
+            origin_command_id: command_id,
+            policy_version: plan.policy_version,
+            world: fact.world,
+            kind: payment_kind,
+            state: SettlementObligationState::Ready,
+            state_version: 1,
+            recipient_user_id: Some(winner_id),
+            recipient_game_identity: String::new(),
+            amount: line.buyer_amount,
+            carrier_credit: if fact.world == SettlementWorld::Isekai {
+                snapshot.policy.isekai_carrier_credit
+            } else {
+                0
+            },
+            equipment_id: fact.equipment_id,
+            submission_id: fact.submission_id,
+            prerequisite_id: None,
+        });
+
+        let seller_prerequisite = if fact.world == SettlementWorld::Isekai {
+            let handoff_id = obligation_id(command_id, fact.lot_id, "winner_equipment_handoff");
+            obligations.push(SettlementObligation {
+                id: handoff_id,
+                auction_id: snapshot.auction_id,
+                lot_id: fact.lot_id,
+                origin_command_id: command_id,
+                policy_version: plan.policy_version,
+                world: fact.world,
+                kind: SettlementObligationKind::WinnerEquipmentHandoff,
+                state: SettlementObligationState::Blocked,
+                state_version: 1,
+                recipient_user_id: Some(winner_id),
+                recipient_game_identity: String::new(),
+                amount: auction_domain::SettlementAmount::zero(),
+                carrier_credit: 0,
+                equipment_id: fact.equipment_id,
+                submission_id: fact.submission_id,
+                prerequisite_id: Some(payment_id),
+            });
+            handoff_id
+        } else {
+            payment_id
+        };
+
+        obligations.push(SettlementObligation {
+            id: obligation_id(command_id, fact.lot_id, "seller_payout"),
+            auction_id: snapshot.auction_id,
+            lot_id: fact.lot_id,
+            origin_command_id: command_id,
+            policy_version: plan.policy_version,
+            world: fact.world,
+            kind: SettlementObligationKind::SellerPayout,
+            state: SettlementObligationState::Blocked,
+            state_version: 1,
+            recipient_user_id: None,
+            recipient_game_identity: fact.seller_identity.clone(),
+            amount: line.seller_amount,
+            carrier_credit: 0,
+            equipment_id: fact.equipment_id,
+            submission_id: fact.submission_id,
+            prerequisite_id: Some(seller_prerequisite),
+        });
+
+        obligations.push(SettlementObligation {
+            id: obligation_id(command_id, fact.lot_id, "buyer_refund"),
+            auction_id: snapshot.auction_id,
+            lot_id: fact.lot_id,
+            origin_command_id: command_id,
+            policy_version: plan.policy_version,
+            world: fact.world,
+            kind: SettlementObligationKind::BuyerRefund,
+            state: SettlementObligationState::Contingent,
+            state_version: 1,
+            recipient_user_id: Some(winner_id),
+            recipient_game_identity: String::new(),
+            amount: line.buyer_amount,
+            carrier_credit: 0,
+            equipment_id: fact.equipment_id,
+            submission_id: fact.submission_id,
+            prerequisite_id: Some(payment_id),
+        });
+    }
+
+    plan.obligations = obligations;
+    Ok(())
+}
+
+fn obligation_id(command_id: CommandId, lot_id: auction_domain::LotId, kind: &str) -> SettlementId {
+    SettlementId::from_uuid(deterministic_uuid(
+        command_id,
+        &format!("settlement-obligation:{lot_id}:{kind}"),
+        1,
+    ))
+}
+
+fn kind_name(kind: SettlementObligationKind) -> &'static str {
+    match kind {
+        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
+        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
+        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
+        SettlementObligationKind::SellerPayout => "seller_payout",
+        SettlementObligationKind::BuyerRefund => "buyer_refund",
+        SettlementObligationKind::UnsoldReturn => "unsold_return",
+        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
+    }
+}

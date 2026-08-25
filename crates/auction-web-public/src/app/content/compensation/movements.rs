@@ -1,0 +1,129 @@
+//! Public 补偿流水详情及其金额/类型展示。
+
+use super::*;
+
+#[component]
+pub(super) fn CompensationMovementDetails(
+    round: CompensationRound,
+    movements: Option<Result<Option<CompensationMovementPage>, String>>,
+    on_movement_page_change: EventHandler<i64>,
+    on_retry_movements: EventHandler<()>,
+) -> Element {
+    rsx! {
+        section { class: "public-compensation-movements", aria_labelledby: "compensation-movements-title",
+            h2 { id: "compensation-movements-title", class: "public-visually-hidden",
+                {t!("compensation-movements")}
+            }
+            p { class: "public-auction-page__status",
+                {t!(
+                    "compensation-equation",
+                    opening: format_amount(round.opening_balance),
+                    income: format_amount(round.tax_income),
+                    discount: format_amount(round.discount_demand),
+                    outflow: format_amount(round.compensation_out),
+                    closing: format_amount(round.closing_balance)
+                )}
+            }
+            match movements {
+                None => rsx! { p { class: "public-auction-page__status", role: "status", {t!("data-loading")} } },
+                Some(Err(_)) => rsx! {
+                    div { role: "alert",
+                        p { class: "public-auction-page__status", {t!("data-error")} }
+                        button {
+                            r#type: "button",
+                            onclick: move |_| on_retry_movements.call(()),
+                            {t!("data-retry")}
+                        }
+                    }
+                },
+                Some(Ok(None)) => rsx! { p { class: "public-auction-page__status", {t!("data-empty")} } },
+                Some(Ok(Some(page))) => rsx! {
+                    if page.movements.is_empty() {
+                        p { class: "public-auction-page__status", {t!("data-empty")} }
+                    } else {
+                        div { class: "public-auction-catalog",
+                            table {
+                                thead {
+                                    tr {
+                                        th { {t!("compensation-lot")} }
+                                        th { {t!("compensation-equipment")} }
+                                        th { {t!("compensation-world")} }
+                                        th { {t!("compensation-kind")} }
+                                        th { {t!("compensation-amount")} }
+                                    }
+                                }
+                                tbody {
+                                    for movement in page.movements {
+                                        CompensationMovementRow { movement, world_id: round.world_id.clone() }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    PublicPager {
+                        page: page.page,
+                        page_size: page.page_size,
+                        total: Some(page.total),
+                        has_more: false,
+                        label: t!("compensation-movements"),
+                        on_page_change: on_movement_page_change,
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[component]
+fn CompensationMovementRow(
+    movement: crate::api::CompensationMovement,
+    world_id: String,
+) -> Element {
+    let lot =
+        movement.lot_number.zip(movement.equipment_category.clone()).map(|(number, category)| {
+            (lot_code_for(&category, i64::from(number)), movement.lot_id.clone())
+        });
+    let amount = if movement.amount > 0 {
+        format!("+{}", format_amount(movement.amount))
+    } else if movement.amount < 0 {
+        format!("−{}", format_amount(movement.amount.saturating_abs()))
+    } else {
+        format_amount(0)
+    };
+    rsx! {
+        tr {
+            td {
+                if let Some((lot_code, Some(_lot_id))) = lot {
+                    Link { to: Route::LotDetail { lot_code: lot_code.clone() }, "{lot_code}" }
+                } else if let Some((lot_code, None)) = lot {
+                    "{lot_code}"
+                } else {
+                    "—"
+                }
+            }
+            td {
+                if let Some(name) = movement.equipment_name {
+                    "{name}"
+                } else {
+                    "—"
+                }
+                if let Some(category) = movement.equipment_category {
+                    small { "{category}" }
+                }
+            }
+            td { "{world_label(&world_id)}" }
+            td { "{compensation_kind_label(&movement.kind)}" }
+            td { class: "public-auction-catalog__amount", "{amount}" }
+        }
+    }
+}
+
+fn compensation_kind_label(kind: &str) -> String {
+    match kind {
+        "opening" => t!("compensation-kind-opening"),
+        "tax" => t!("compensation-kind-tax"),
+        "compensation" => t!("compensation-kind-compensation"),
+        "closing" => t!("compensation-kind-closing"),
+        _ => kind.to_owned(),
+    }
+}

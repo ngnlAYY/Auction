@@ -13,7 +13,7 @@ mod account;
 mod blacklist;
 #[path = "../auction/commands.rs"]
 mod commands;
-#[path = "../content/compensation.rs"]
+#[path = "../content/compensation/mod.rs"]
 mod compensation;
 #[path = "../content/forum.rs"]
 mod forum;
