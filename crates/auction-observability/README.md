@@ -46,7 +46,7 @@ aggregation、delivery、fulfillment、recovery 和 operations-alert owner 已�
 启动和停止状态也携带当时的审计/tracing 投影。Worker control 还通过 peer-authenticated Unix
 socket 提供 live/ready/status 和同一指标 registry。
 
-## 指标与待补齐
+## 指标与剩余验收证据
 
 Public/Admin 已提供默认关闭的进程本地 Prometheus `/metrics`，暴露旧版同等的进程资源快照
 （CPU、内存、文件描述符、线程数和启动时间）以及进程身份和启用状态。

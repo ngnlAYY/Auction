@@ -20,7 +20,9 @@ use super::{
 
 mod delivery;
 mod outcomes;
+#[path = "payload/mod.rs"]
 mod payload;
+#[path = "types/mod.rs"]
 mod types;
 
 pub(crate) use outcomes::*;

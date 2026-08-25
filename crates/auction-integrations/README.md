@@ -15,6 +15,10 @@
   `parser/reads/{mod,inbox,sent,sent_detail,balance}.rs` 进一步隔离 inbox、Sent 摘要、Sent 详情和
   Item Shop 余额读取，
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
+  其中 `transport/payload/{mod,mail,settlement}.rs` 分别负责 payload 装配、普通邮件 delivery
+  校验以及结算 payload/模板渲染；
+  其中 `transport/types/{mod,delivery,settlement,templates,transport}.rs` 分别负责稳定导出、
+  普通/结算载荷、模板快照和 transport 装配状态；
   其中 `transport/delivery/{mod,messages,credentials,actions}.rs` 分别负责入口分派、通知/结算消息、
   凭据轮换和 return/take 动作证明；
   `client/mod.rs` 负责 typed target、配置和装配，`client/request.rs` 负责有界 GET/POST 及结果分类，

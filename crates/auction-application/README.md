@@ -62,6 +62,9 @@
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
+- `src/ports/mail/user/`：`model.rs` 负责注册/换绑结果闭集，`security.rs` 负责短生命周期登录 key
+  与密文信封，`commands.rs` 负责 Users owner 写入载荷，`ports.rs` 负责存储、签发、读取和用例窄端口；
+  `user/mod.rs` 只负责稳定公共导出。
 - `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
   `processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、命令幂等辅助和起拍价/装备身份解析；
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
@@ -75,8 +78,9 @@
 
 Public 规则文档和黑名单只读契约分别位于 `src/ports/public/rules.rs` 与
 `src/ports/public/blacklist.rs`；它们只定义安全投影、语言/分页边界和 owner 端口，不包含 SQL。
-Public 补偿池与账本只读契约位于 `src/ports/public/compensation.rs`，定义守恒摘要、闭集 movement、
-编号页和 keyset cursor 边界，不依赖 PostgreSQL 或 SQLite 类型。
+Public 补偿池与账本只读契约位于 `src/ports/public/compensation/`，由批次摘要/分页与逐笔
+movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页和 keyset cursor 边界，不依赖
+PostgreSQL 或 SQLite 类型。
 Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态和已发布内容，不承担
 远程论坛传输。
 Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/装备/投稿的安全快照和

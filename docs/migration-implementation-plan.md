@@ -728,6 +728,9 @@ Public/Admin HTTP listener。
 - Application MoogleMail 处理器已将主题路由/注册换绑、装备读取过滤/拍卖入站和 delivery outbox 编排分别拆入
   `services/mail/processing/processor/{routing,auction,delivery}.rs`；`processor.rs` 只保留处理器配置、共享
   owner 状态和 `MailProcessor` 出口，幂等 request hash、密钥清理、事务 owner 与外部提交后置边界保持不变。
+- Application MoogleMail Users port 已将结果闭集、登录 key/密文信封、注册/换绑载荷和存储/签发/读取
+  窄端口分别拆入 `ports/mail/user/{mod,model,security,commands,ports}.rs`；稳定导出、明文清理、
+  密文封装和 Users owner 的幂等边界保持不变。
 - Storage MoogleMail 拍卖入站 owner 已将端口适配、装备/拍卖写入和审计/realtime 记录分别拆入
   `database/mail_intake/{mod,intake,record}.rs`；命令账本、world/auction/玩家锁、密钥信封、pending lot、
   预览版本和 preview 事件仍由同一个 PostgreSQL 竞价事务原子提交，明文邮件正文与装备 key 边界保持不变。
@@ -752,6 +755,9 @@ Public/Admin HTTP listener。
 - Application Public query ports 已将世界/拍卖目录、lot/装备投影、账户代理、竞价日志和成交价格历史
   分别拆入 `ports/auction/queries/{world,auction,lot,account,bid_log,price_history}.rs`；
   `queries.rs` 只保留稳定公共出口，分页、keyset cursor、公开投影和安全字段边界保持不变。
+- Application Public compensation port 已将补偿池批次摘要/分页与逐笔 movement/余额链校验分别拆入
+  `ports/public/compensation/{mod,movement}.rs`；稳定导出、守恒约束、编号页和 keyset cursor
+  边界保持不变。
 - PostgreSQL 生命周期计划已将 preview/open/cancel/final phase 的事务写入分别拆入
   `database/competition/postgres/lifecycle/plan/{preview,open,cancel,final_phase}.rs`；
   `plan.rs` 只保留动作分派，状态版本 fence、锁内物化/lot 转换、取消返还义务和代理子计划写入保持不变。
@@ -968,7 +974,10 @@ Public/Admin HTTP listener。
   `prepared → pending` 激活、审计追加和外部结果后置边界保持不变。
 - MoogleMail DeliveryTransport owner 已将入口 operation dispatch、通知/结算消息发送、凭据轮换和
   return/take 动作前置身份校验与后置 proof 分别拆入
-  `clients/mooglemail/transport/delivery/{mod,messages,credentials,actions}.rs`；
+  `clients/mooglemail/transport/delivery/{mod,messages,credentials,actions}.rs`，并将普通邮件
+  payload 校验与结算 payload/模板渲染拆入 `transport/payload/{mod,mail,settlement}.rs`；
+  transport type owner 又将普通/结算载荷、模板快照和 transport 装配状态拆入
+  `transport/types/{mod,delivery,settlement,templates,transport}.rs`；
   payload 闭集、session 失效后的不确定结果分类、availability gate 和外部重试边界保持不变。
 - Storage Public account mapping owner 已将普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验分别拆入
   `database/account/mapping/{bids,proxy,common}.rs`；`mapping/mod.rs` 只保留稳定导出，公开账户边界、代理

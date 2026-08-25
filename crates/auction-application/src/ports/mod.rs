@@ -34,7 +34,7 @@ mod blacklist;
 mod cache;
 #[path = "auction/commands.rs"]
 mod commands;
-#[path = "public/compensation.rs"]
+#[path = "public/compensation/mod.rs"]
 mod compensation;
 #[path = "core/clock.rs"]
 mod core_clock;
@@ -98,7 +98,7 @@ mod settlement;
 mod settlement_report;
 #[path = "settlement/scheduler.rs"]
 mod settlement_scheduler;
-#[path = "mail/user.rs"]
+#[path = "mail/user/mod.rs"]
 mod user_mail;
 #[path = "operations/worker_control.rs"]
 mod worker_control;

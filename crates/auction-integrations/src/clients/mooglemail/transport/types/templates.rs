@@ -1,61 +1,6 @@
-use super::*;
+//! MoogleMail 通知模板快照及占位符校验。
 
-pub(crate) const SCHEMA_VERSION: u8 = 1;
-pub(crate) const MAX_ATTACHMENT_IDS: usize = 1000;
-
-/// PostgreSQL outbox 中版本化的 MoogleMail payload。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct MailDeliveryPayload {
-    pub(crate) schema_version: u8,
-    pub(crate) operation: String,
-    pub(crate) world: String,
-    pub(crate) external_mail_id: String,
-    pub(crate) template: Option<String>,
-    pub(crate) result_code: Option<String>,
-    pub(crate) body: Option<String>,
-    pub(crate) user_key_user_id: Option<Uuid>,
-    pub(crate) credits: i64,
-    pub(crate) cod: i64,
-    pub(crate) attachment_ids: Vec<String>,
-}
-
-/// take 动作必须在写入前核对的入站资产证据。
-#[derive(Debug)]
-pub(crate) struct ActionExpectation {
-    pub(crate) credits: i64,
-    pub(crate) cod: i64,
-    pub(crate) attachment_ids: Vec<String>,
-}
-
-/// 结算履约 owner 生成的无密文 MoogleMail 意图。
-///
-/// 这里保留业务字段是为了让 transport 在外部写入前重新校验种类矩阵；装备 key 仍只存在
-/// 数据库密文信封中，本次发送只使用同一快照中的远端装备 ID。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SettlementDeliveryPayload {
-    pub(crate) schema_version: u8,
-    pub(crate) operation: String,
-    pub(crate) world: String,
-    pub(crate) obligation_id: Uuid,
-    pub(crate) auction_id: Uuid,
-    pub(crate) lot_id: Uuid,
-    pub(crate) origin_command_id: Uuid,
-    pub(crate) kind: String,
-    pub(crate) recipient: String,
-    pub(crate) template: String,
-    pub(crate) item_name: String,
-    pub(crate) external_equipment_id: String,
-    pub(crate) amount: i64,
-    pub(crate) carrier_credit: u32,
-    pub(crate) credits: i64,
-    pub(crate) cod: i64,
-    pub(crate) equipment_id: Uuid,
-    pub(crate) submission_id: Option<Uuid>,
-    pub(crate) submission_source_kind: Option<String>,
-    pub(crate) source_external_mail_id: Option<String>,
-}
+use super::super::*;
 
 const MOOGLEMAIL_TEMPLATE_KEYS: &[&str] = &[
     "auction_assets_rejected",
@@ -215,14 +160,4 @@ fn validate_template_body(key: &str, value: &str) -> Result<(), String> {
         return Err(format!("MoogleMail mail_templates.{key} 缺少必需占位符"));
     }
     Ok(())
-}
-
-/// MoogleMail delivery 的受控远端 transport。
-pub struct MoogleMailDeliveryTransport {
-    pub(crate) client: MoogleMailClient,
-    pub(crate) credentials: MoogleMailCredentialSet,
-    pub(crate) sender: MoogleMailSender,
-    pub(crate) parser: MoogleMailParser,
-    pub(crate) login_keys: Arc<dyn MailLoginKeyReader>,
-    pub(crate) templates: MoogleMailNotificationTemplates,
 }

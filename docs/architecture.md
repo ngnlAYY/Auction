@@ -338,10 +338,10 @@ Public/Admin 的统一 HTTP boundary 已补齐请求 ID/命令审计关联、W3C
 panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头读取超时、可信代理地址解析和
 4096 项有界限流器。静态分派也只向 14 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
 返回 JSON 404，未知浏览器导航返回页面 404，并按旧版恢复 Public/Admin/静态资源缓存策略。
-Web DTO 单一 owner 和静态资源制品级隔离已经完成。除真实浏览器、外部回执和部署切换证据外，
-第二轮静态审计仍确认首批缓存读模型和次级部署/所有权等代码缺口；在这些边界收口前同样不能宣称
-行为等价。Admin runtime 的人工提前开放与装备来源策略、三进程 SIGINT/SIGTERM、有界排空和真实
-状态心跳均已经完成，不再属于该缺口清单。
+Web DTO 单一 owner、首批缓存读模型和静态资源制品级隔离，以及次级部署/所有权边界均已完成。
+当前除真实浏览器、外部回执和部署切换证据外，不再把这些项目列为代码缺口；在真实行为证据
+完成前仍不能宣称完整等价。Admin runtime 的人工提前开放与装备来源策略、三进程 SIGINT/SIGTERM、
+有界排空和真实状态心跳也已进入实际运行 owner。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下按 owner 返回安全 section；只有 owner 未装配或读取失败时才显式返回
