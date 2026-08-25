@@ -12,8 +12,8 @@
   gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
   inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
   其中 `parser/` 按类型、列表读取、详情动作、脚本/装备和公共 helper 拆分页面事实解析与证明；
-  `parser/reads/{mod,inbox,sent,sent_detail,balance}.rs` 进一步隔离 inbox、Sent 摘要、Sent 详情和
-  Item Shop 余额读取，
+  `parser/reads/{mod,inbox,balance}.rs` 与 `parser/reads/sent/{mod,detail}.rs` 进一步隔离 inbox、
+  Sent 摘要、Sent 详情和 Item Shop 余额读取；
   `transport/` 按 payload、delivery、结果证明和类型快照拆分外部 HTTP/凭据轮换与请求边界；
   其中 `transport/payload/{mod,mail,settlement}.rs` 分别负责 payload 装配、普通邮件 delivery
   校验以及结算 payload/模板渲染；

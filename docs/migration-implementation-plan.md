@@ -345,8 +345,8 @@ sequence/version，跳号或重连后重新读取权威快照，**不在浏览�
 **改状态的动作必须携带 `command_id`**，并显式展示冲突与幂等结果。
 
 **i18n 约束：** 新增文案必须同步更新全部 5 个 `*.ftl`——`t!` 键缺失会 panic。
-Fluent 消息 ID 不含点号（旧 `nav.home` → `nav-home`）。建议在 CI 加键集比对脚本，
-把当前手工校验固化。
+Fluent 消息 ID 不含点号（旧 `nav.home` → `nav-home`）。CI 已通过
+`ci/check-policy.sh i18n` 固化五语言键集、重复 ID、点号 ID 和字面量引用检查。
 
 ---
 
@@ -738,7 +738,8 @@ Public/Admin HTTP listener。
   `clients/mooglemail/gateway/{credentials,model,reader}.rs`；`gateway.rs` 只保留稳定公共导出与错误辅助，
   Cookie、world scope、allowlist、分页 cursor 和摘要/详情一致性证明边界保持不变。
 - MoogleMail parser reads owner 已将 inbox 分页、Sent 分页、Sent 详情附件/CoD 证明和 Item Shop 余额
-  分别拆入 `clients/mooglemail/parser/reads/{mod,inbox,sent,sent_detail,balance}.rs`；跨页 ID 去重、
+  分别拆入 `clients/mooglemail/parser/reads/{mod,inbox,balance}.rs` 与
+  `clients/mooglemail/parser/reads/sent/{mod,detail}.rs`；跨页 ID 去重、
   摘要/详情身份一致性、脚本与可见余额一致性和敏感字段清理语义保持不变。
 - MoogleMail parser script owner 已将 JavaScript 遮罩/脚本值提取与正文/脚本装备 key、严格 JSON 访问分别拆入
   `clients/mooglemail/parser/script/{mod,javascript,equipment}.rs`；重复字段、伪造变量、身份不一致、
@@ -1591,3 +1592,24 @@ Public/Admin 配置和论坛 `public_base_url` 被错误拒绝；配置层与 HT
 示例先映射为合法 `.service` 文件，并在临时 root 中提供占位可执行文件与基础 target 后通过
 `systemd-analyze verify`。这只证明模板语法、依赖和字段形状，不替代真实 unit 安装、systemd 顺序、
 readiness、回滚或凭据注入验收。
+
+本轮重新静态核对旧版与 Rust 浏览器路由：Public 的 14 条、Admin 的 21 条路径分别由 Dioxus
+`Route` 枚举、`auction-http/src/assets/routes.rs` 的精确/参数 allowlist 和旧版别名清单共同覆盖；
+Public 的 `/lots/:lot_code` 与 Admin 的 `/auctions/:auction_id/lots` 参数路由也逐一对应。未匹配
+路由仍只在 Dioxus 内部进入 NotFound，后端不会因此开放未知 SPA 入口；这项证据只证明静态路径
+契约一致，不替代真实浏览器的导航、深链接、焦点和响应式验收。
+
+本轮再次只读盘点本机 PostgreSQL：服务为 18.6，现有 Auction 相关数据库的迁移历史分别属于
+旧版或当前 Rust schema，观测到的最高迁移版本为 1、17、23、25、26、37，schema identity 版本
+为 30、52、55、56，没有唯一且 clean 的 canonical v28 副本。`deployment-check --strict-permissions`
+对示例目录按预期以退出码 2 拒绝 group/other 写入；上述盘点与严格预检均未执行迁移、写入、备份、
+恢复或外部服务调用。canonical v28 的 backup/adoption/restore/rebuild 仍需部署方提供专用副本。
+
+本轮还以 `cargo build --locked --workspace --all-features` 完成实际链接构建，并确认
+`auction-worker`、`auctionctl`、`auction-public-api` 和 `auction-admin-api` 四个 ELF 部署入口均已
+生成；这只证明当前 Linux 工具链的制品链接完整，不替代真实宿主机的 systemd 安装、启动顺序和
+凭据注入验收。
+
+本轮同时以 Rust `1.94.1` MSRV 工具链完成
+`cargo +1.94.1 check --locked --workspace --all-targets --all-features`；MSRV 编译通过，
+未运行测试，该命令只做编译检查。
