@@ -1,16 +1,20 @@
-//! Admin Dashboard 运行时安全详情。
+//! Admin Dashboard 运行时安全详情组件。
 
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
-use crate::api::{AdminCredentialScope, AdminDashboardSnapshot};
+use crate::api::AdminDashboardSnapshot;
 
-use super::super::format_admin_time;
+use super::super::super::format_admin_time;
+use super::{
+    DashboardDetailCard, credential_scope_status, credential_scope_tone, runtime_bool,
+    runtime_status, runtime_tone, section_unavailable,
+};
 
 /// 展示后端已经提供的完整运维安全投影，避免 Dashboard 只显示摘要卡而隐藏旧版可见的健康
 /// 证据。这里不执行额外命令，也不把外部凭据或数据库明细带入浏览器。
 #[component]
-pub(super) fn DashboardRuntimeDetails(snapshot: AdminDashboardSnapshot) -> Element {
+pub(crate) fn DashboardRuntimeDetails(snapshot: AdminDashboardSnapshot) -> Element {
     let health = &snapshot.health;
     let health_missing = if health.missing_services.is_empty() {
         t!("dashboard-runtime-none")
@@ -293,73 +297,5 @@ pub(super) fn DashboardRuntimeDetails(snapshot: AdminDashboardSnapshot) -> Eleme
                 }
             }
         }
-    }
-}
-
-#[component]
-fn DashboardDetailCard(title: String, detail: String, tone: String) -> Element {
-    rsx! {
-        article { class: "admin-dashboard__detail-card admin-dashboard__detail-card--{tone}",
-            h3 { "{title}" }
-            p { "{detail}" }
-        }
-    }
-}
-
-fn runtime_bool(value: bool) -> String {
-    if value { t!("dashboard-runtime-yes") } else { t!("dashboard-runtime-no") }
-}
-
-fn runtime_status(value: &str) -> String {
-    match value {
-        "ok" | "ready" | "available" | "fresh" => t!("dashboard-runtime-status-good"),
-        "degraded" | "low" | "stale" | "starting" => t!("dashboard-runtime-status-warning"),
-        "disabled" => t!("dashboard-runtime-status-disabled"),
-        "unknown" | "unavailable" | "stopping" => t!("dashboard-runtime-status-unavailable"),
-        _ => value.to_owned(),
-    }
-}
-
-fn runtime_tone(value: &str) -> String {
-    match value {
-        "ok" | "ready" | "available" | "fresh" => "positive".to_owned(),
-        "degraded" | "low" | "stale" | "starting" => "warning".to_owned(),
-        "unknown" | "unavailable" | "stopping" => "danger".to_owned(),
-        _ => "neutral".to_owned(),
-    }
-}
-
-fn credential_scope_status(scope: &AdminCredentialScope) -> &'static str {
-    if scope.invalid_count > 0 {
-        "unavailable"
-    } else if scope.active_count > 0 {
-        "ok"
-    } else {
-        "degraded"
-    }
-}
-
-fn credential_scope_tone(scope: &AdminCredentialScope) -> String {
-    match credential_scope_status(scope) {
-        "ok" => "positive".to_owned(),
-        "degraded" => "warning".to_owned(),
-        _ => "danger".to_owned(),
-    }
-}
-
-pub(super) fn section_unavailable(error_code: Option<&str>) -> String {
-    match error_code {
-        Some("no_active_credentials") => t!("dashboard-runtime-no-active-credentials"),
-        Some("invalid_credentials") => t!("dashboard-runtime-invalid-credentials"),
-        Some("credentials_restart_required") => {
-            t!("dashboard-runtime-credentials-restart-required")
-        }
-        Some("credentials_restart_unknown") => t!("dashboard-runtime-credentials-restart-unknown"),
-        Some("unresolved_failure") => t!("dashboard-runtime-unresolved-failure"),
-        Some("consumer_lag") => t!("dashboard-runtime-consumer-lag"),
-        Some("source_unavailable") | Some("no_pollers") | None => {
-            t!("dashboard-runtime-unavailable")
-        }
-        Some(_) => t!("dashboard-runtime-degraded"),
     }
 }

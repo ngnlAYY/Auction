@@ -1,11 +1,6 @@
-use super::*;
+//! 收件箱摘要、详情 envelope 和动作前后状态。
 
-pub(crate) const MAX_INBOX_ROWS_PER_PAGE: usize = 1000;
-pub(crate) const MAX_SENT_ROWS_PER_PAGE: usize = MAX_INBOX_ROWS_PER_PAGE;
-pub(crate) const MAX_ATTACHMENT_ENTRIES: usize = 1000;
-pub(crate) const MAX_SUMMARY_SUBJECT_BYTES: usize = 512;
-pub(crate) const MAX_MESSAGE_TEXT_BYTES: usize = 8 * 1024 * 1024;
-pub(crate) const INBOX_TIME_FORMAT: &str = "%Y-%m-%d %H:%M";
+use super::*;
 
 /// 收件箱列表中不含正文和附件的安全摘要。
 #[derive(Clone, PartialEq, Eq)]
@@ -244,100 +239,4 @@ pub struct MoogleMailInboxPage {
     pub summaries: Vec<MoogleMailSummary>,
     /// 是否存在严格验证过的下一页链接。
     pub has_next_page: bool,
-}
-
-/// 已发送邮件列表中可用于 exact ID 查找的安全摘要。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoogleMailSentSummary {
-    /// 远端 `mid`。
-    pub external_mail_id: String,
-    /// 邮件所在世界。
-    pub world: MoogleMailWorld,
-    /// 收件人显示名。
-    pub recipient: String,
-    /// 已发送邮件标题。
-    pub subject: String,
-    /// 远端 HVT-8 时间转换后的 UTC 时间。
-    pub sent_at: DateTime<Utc>,
-}
-
-impl MoogleMailSentSummary {
-    /// 校验摘要可以进入 Sent 详情读取队列。
-    pub fn validate(&self) -> bool {
-        valid_opaque_id(&self.external_mail_id)
-            && valid_line(&self.recipient, 256, false)
-            && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
-            && self.sent_at.timestamp_nanos_opt().is_some()
-    }
-}
-
-/// 单页已发送邮件解析结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoogleMailSentPage {
-    /// 按远端 newest-first 顺序排列的摘要。
-    pub summaries: Vec<MoogleMailSentSummary>,
-    /// 是否存在严格验证过的下一页链接。
-    pub has_next_page: bool,
-}
-
-/// 精确 remote ID 的已发送邮件与当前待领取资产快照。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoogleMailSentSnapshot {
-    /// 远端邮件 ID。
-    pub external_mail_id: String,
-    /// 邮件所在世界。
-    pub world: MoogleMailWorld,
-    /// 收件人。
-    pub recipient: String,
-    /// 标题。
-    pub subject: String,
-    /// 发送时间。
-    pub sent_at: DateTime<Utc>,
-    /// 当前仍附在邮件中的 Credits。
-    pub remaining_credits: i64,
-    /// 当前仍待支付的 COD。
-    pub cod_pending: i64,
-    /// 当前仍附在邮件中的装备 ID，必须按字典序排列且无重复。
-    pub remaining_equipment_ids: Vec<String>,
-    /// 页面是否明确证明邮件已领取完毕。
-    pub collected: bool,
-    /// 本次读取的观察时间。
-    pub observed_at: DateTime<Utc>,
-}
-
-impl MoogleMailSentSnapshot {
-    /// 校验 Sent snapshot 的身份、时间和 remaining/collected 矩阵。
-    pub fn validate(&self) -> bool {
-        valid_opaque_id(&self.external_mail_id)
-            && valid_line(&self.recipient, 256, false)
-            && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
-            && self.sent_at.timestamp_nanos_opt().is_some()
-            && self.observed_at.timestamp_nanos_opt().is_some()
-            && !self.observed_at.lt(&self.sent_at)
-            && self.remaining_credits >= 0
-            && self.cod_pending >= 0
-            && canonical_equipment_ids(&self.remaining_equipment_ids)
-            && self.collected
-                == (self.remaining_credits == 0
-                    && self.cod_pending == 0
-                    && self.remaining_equipment_ids.is_empty())
-    }
-}
-
-/// 一次同步读取的 world wallet Credits 快照。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoogleMailBalanceSnapshot {
-    /// 余额所属世界。
-    pub world: MoogleMailWorld,
-    /// 页面与脚本均证明的 Credits 余额。
-    pub credits: i64,
-    /// 本次读取的观察时间。
-    pub observed_at: DateTime<Utc>,
-}
-
-impl MoogleMailBalanceSnapshot {
-    /// 校验余额 world、数值和观察时间。
-    pub fn validate(&self) -> bool {
-        self.credits >= 0 && self.observed_at.timestamp_nanos_opt().is_some()
-    }
 }

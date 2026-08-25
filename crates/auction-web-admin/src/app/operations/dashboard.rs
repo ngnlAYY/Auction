@@ -17,7 +17,7 @@ use super::Route;
 mod controls;
 #[path = "dashboard/metrics.rs"]
 mod metrics;
-#[path = "dashboard/runtime.rs"]
+#[path = "dashboard/runtime/mod.rs"]
 mod runtime;
 
 use controls::MailPollerControls;

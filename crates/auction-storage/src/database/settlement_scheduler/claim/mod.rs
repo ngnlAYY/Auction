@@ -1,39 +1,24 @@
 //! PostgreSQL 结算 workflow 的 due claim 与租约写入。
 
-use auction_application::{RequestHash, SettlementWorkClaim};
-use auction_domain::{AuctionId, CommandId, deterministic_uuid};
+use auction_application::SettlementWorkClaim;
+use auction_domain::AuctionId;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use serde_json::json;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use super::{map_storage_error, repository_error_owned};
 use crate::database::TrackedPool;
-use crate::database::audit_health::AuditWriteResult as _;
 
-#[derive(Debug, Serialize)]
-struct SettlementClaimRequest {
-    workflow_id: Uuid,
-    due_at: DateTime<Utc>,
-}
+mod evidence;
+mod ids;
+mod locking;
 
-fn workflow_id(auction_id: Uuid) -> Uuid {
-    deterministic_uuid(CommandId::from_uuid(auction_id), "settlement-workflow", 1)
-}
+use evidence::{insert_settlement_claim_audit, insert_settlement_claim_event};
+use ids::{claim_command_id, request_hash, settlement_command_id, workflow_id};
+use locking::lock_initial_lots;
 
-fn claim_command_id(auction_id: Uuid) -> CommandId {
-    CommandId::from_uuid(deterministic_uuid(
-        CommandId::from_uuid(auction_id),
-        "settlement-claim",
-        1,
-    ))
-}
-
-fn settlement_command_id(claim_command_id: CommandId) -> CommandId {
-    CommandId::from_uuid(deterministic_uuid(claim_command_id, "settlement-execute", 1))
-}
-
+/// 原子领取到的结算工作项只携带稳定 workflow、due 世代和租约，不把 SQL 行泄漏到应用层。
 pub(super) async fn claim_postgres(
     pool: &TrackedPool<Postgres>,
     worker_id: &str,
@@ -118,13 +103,8 @@ pub(super) async fn claim_postgres(
             if status == "final" {
                 let workflow = workflow_id(auction_uuid);
                 let claim_command = claim_command_id(auction_uuid);
-                let request_hash = RequestHash::from_request(
-                    "claim_settlement",
-                    auction_uuid,
-                    &SettlementClaimRequest { workflow_id: workflow, due_at },
-                )
-                .map_err(|_| repository_error_owned("无法生成结算领取命令摘要"))?;
-                let expected_hash = request_hash.as_bytes().to_vec();
+                let expected_hash = request_hash(auction_uuid, workflow, due_at)
+                    .map_err(|_| repository_error_owned("无法生成结算领取命令摘要"))?;
                 let command_row = sqlx::query(
                     r#"INSERT INTO public.auction_commands
                        (command_id, command_kind, aggregate_id, request_hash,
@@ -187,7 +167,7 @@ pub(super) async fn claim_postgres(
                 };
                 (
                     workflow,
-                    CommandId::from_uuid(claim_command_uuid),
+                    auction_domain::CommandId::from_uuid(claim_command_uuid),
                     attempt_count,
                     false,
                     completion_only,
@@ -290,107 +270,4 @@ pub(super) async fn claim_postgres(
     }
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(claims)
-}
-
-async fn lock_initial_lots(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    auction_id: Uuid,
-    now: DateTime<Utc>,
-    expected_due_at: DateTime<Utc>,
-) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
-    let rows = sqlx::query(
-        r#"SELECT status, effective_end_at
-           FROM public.lots
-           WHERE auction_id = $1
-           ORDER BY lot_number, id
-           FOR UPDATE"#,
-    )
-    .bind(auction_id)
-    .fetch_all(&mut **transaction)
-    .await?;
-    if rows.is_empty() {
-        return Ok(None);
-    }
-
-    let mut latest_end = None;
-    for row in rows {
-        let status: String = row.try_get("status")?;
-        let effective_end_at: Option<DateTime<Utc>> = row.try_get("effective_end_at")?;
-        let Some(effective_end_at) = effective_end_at else {
-            return Ok(None);
-        };
-        if status != "live" || effective_end_at > now {
-            return Ok(None);
-        }
-        latest_end = Some(
-            latest_end
-                .map_or(effective_end_at, |current: DateTime<Utc>| current.max(effective_end_at)),
-        );
-    }
-    Ok(latest_end.filter(|latest| *latest == expected_due_at))
-}
-
-async fn insert_settlement_claim_audit(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    auction_id: Uuid,
-    command_id: CommandId,
-    worker_id: &str,
-    state_version: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"INSERT INTO public.audit_records
-               (id, actor_type, actor_id, action, entity_type, entity_id, result,
-                request_id, source, metadata)
-           VALUES ($1, 'worker', $2, 'settlement.claimed', 'auction', $3, 'success', $4, 'worker', $5)"#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(worker_id)
-    .bind(auction_id.to_string())
-    .bind(command_id.to_string())
-    .bind(json!({ "command_id": command_id, "state_version": state_version }))
-    .execute(&mut **transaction)
-    .await
-    .record_audit_failure()
-    .map(|_| ())
-}
-
-async fn insert_settlement_claim_event(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    auction_id: Uuid,
-    command_id: CommandId,
-    state_version: i64,
-) -> Result<(), sqlx::Error> {
-    let stream_key = format!("auction:{auction_id}");
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key) VALUES ($1)
-         ON CONFLICT (stream_key) DO NOTHING",
-    )
-    .bind(&stream_key)
-    .execute(&mut **transaction)
-    .await?;
-    let row = sqlx::query(
-        r#"UPDATE public.realtime_streams
-           SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
-           WHERE stream_key = $1
-           RETURNING next_sequence - 1 AS stream_sequence"#,
-    )
-    .bind(&stream_key)
-    .fetch_one(&mut **transaction)
-    .await?;
-    let sequence: i64 = row.try_get("stream_sequence")?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-               (event_id, stream_key, stream_sequence, kind, schema_version,
-                public_payload, state_version, origin_command_id)
-           VALUES ($1, $2, $3, 'auction.settling', 1, $4, $5, $6)"#,
-    )
-    .bind(deterministic_uuid(command_id, "settlement-claim-realtime-event", 1))
-    .bind(&stream_key)
-    .bind(sequence)
-    .bind(json!({ "auction_id": auction_id, "state_version": state_version }))
-    .bind(state_version)
-    .bind(command_id.as_uuid())
-    .execute(&mut **transaction)
-    .await
-    .map(|_| ())
 }

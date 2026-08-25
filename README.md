@@ -36,8 +36,8 @@ tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提�
 由 `auction-contracts` 拥有；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，任一部署
 制品都不会引用另一端资源。Public/Admin 已支持共享安全 TCP/Linux Unix listener，`auctionctl`
 已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web surface 与 storage 入口也已按
-职责使用具名实现文件。当前剩余主要是少数深层大型业务文件的继续拆分，以及真实外部服务、部署
-切换和浏览器产物对照。
+职责使用具名实现文件。少数深层大型业务文件仍可按 owner 继续做结构优化，但不构成功能缺口；
+当前剩余主要是真实外部服务、部署切换和浏览器产物对照。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
 Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
@@ -50,7 +50,7 @@ MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
 
-尚不能据此宣称行为等价：上述剩余静态代码缺口，以及真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
+尚不能据此宣称行为等价：真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
 浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust `auctionctl` 与 systemd owner
 边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
 不会进入启动路径。旧版 realtime 没有外部广播 sink，

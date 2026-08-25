@@ -64,7 +64,7 @@ pub struct AdminDashboardWorkerResponse {
 
 /// Admin dashboard section 的稳定外壳。
 ///
-/// `data` 只允许由 owner 适配器构造安全 JSON；当 owner 尚未迁移或读取失败时只返回
+/// `data` 只允许由 owner 适配器构造安全 JSON；当 owner 未装配或读取失败时只返回
 /// `status` 与有界 `error_code`，不返回数据库行或错误正文。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDashboardSectionResponse {

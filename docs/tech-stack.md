@@ -68,8 +68,8 @@ fallback 路由表。引入 SSR 会新增 hydration mismatch 和双目标构建�
 和 `auction-http` 的路由所有权冲突。
 
 从 Leptos 切换到 Dioxus 的直接原因是 Leptos 0.8 线存在未修复的 XSS sink，详见
-「已知未消除风险」。此外 Leptos SSR 为后端贴现了约 175 个依赖包，而当前浏览器端只有
-迁移阶段的静态页面。
+「已知未消除风险」。此外 Leptos SSR 为后端贴现了约 175 个依赖包，而当前浏览器端以
+CSR 加载真实 API 投影，不需要 SSR 引入的额外依赖。
 
 保留以下约束不变：
 

@@ -371,7 +371,7 @@ exporter。Public/Worker 从主配置 `[tracing]` 读取，Admin 从 runtime `[t
 headers 只从敏感 TOML 注入；三类 exporter 均使用 Tokio 异步批处理、有界队列、丢弃计数，并在
 服务退出路径显式关闭。三进程已通过 `auction-process` 统一订阅 SIGINT/SIGTERM：首次信号触发
 10 秒有界 HTTP/Worker drain，排空期间第二次信号强制收口，停止心跳后再按配置上限刷新
-exporter。基于真实 readiness/audit/tracing 的周期心跳安全状态仍待收口。`auction-storage` 已在
+ exporter。基于真实 readiness/audit/tracing 的周期心跳安全状态现已收口。`auction-storage` 已在
 SQLx 池的普通查询、事务和显式 acquisition 边界
 接入旧版 pgx 对应的十项连接池指标；固定低基数的竞价、代理和主要 Worker 业务结果/耗时指标
 也已接入。绕过该边界的外部原生池不纳入累计统计。
@@ -624,10 +624,11 @@ SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧�
 SQLite Lite 的 PostgreSQL 专属 recovery、MoogleMail、论坛完整档、结算报告和管理完整写入不属于
 “漏做后补齐”的任务，而是已声明的部署能力边界；不得用空结果或内存状态伪装成已实现。
 
-### 尚未完成的旧版等价收口
+### 旧版等价收口与剩余证据
 
 截至 2026-08-25，旧版 HTTP 路径、浏览器路由、Worker 类别、recovery action 和运维命令名称没有
-数量缺项；第二轮从实际消费链、进程边界和项目规范交叉审计后，确认仍有以下**非测试代码任务**。
+数量缺项；第二轮从实际消费链、进程边界和项目规范交叉审计后，以下内容记录已完成的本地代码收口、
+明确的部署能力边界，以及仍需真实环境证明的等价证据。
 三进程 SIGINT/SIGTERM、有界 drain、停止心跳和 tracing flush 已完成。Public/Admin 共用 HTTP
 boundary 也已完成：请求 ID 与命令审计关联、W3C trace context、访问日志、panic recovery、
 安全响应头、普通请求/5 秒 read-header timeout、可信代理地址解析，以及 4096 项确定性淘汰限流器
@@ -688,8 +689,9 @@ Public/Admin HTTP listener。
   时间格式化移入 `app/surface/shared.rs`；surface 装配与资源初始化位于 `app/surface/mod.rs`，路由表和
   页面入口包装器位于 `app/surface/router.rs`，Admin 路由与组件契约不变。
 - Admin API 启动装配已将 tracing/HTTP 生命周期拆入 `apps/admin-api/src/bootstrap/service.rs`，
-  数据库、端口和 heartbeat 状态拆入 `state.rs`，缓存、Worker control、安全策略和 dashboard 范围
-  投影拆入 `config.rs`；`bootstrap/mod.rs` 只保留模块装配和稳定启动入口，监听器与退出契约不变。
+  状态入口保留在 `state.rs`，数据库完整档、无数据库 feature 的降级装配和 heartbeat 分别拆入
+  `state/{database,fallback,heartbeat}.rs`；缓存、Worker control、安全策略和 dashboard 范围投影
+  拆入 `config.rs`。`bootstrap/mod.rs` 只保留模块装配和稳定启动入口，监听器与退出契约不变。
 - Public API 启动装配已将 tracing/HTTP 生命周期拆入 `apps/public-api/src/bootstrap/service.rs`，
   数据库、端口、heartbeat 和 realtime 状态拆入 `state.rs`，缓存与安全策略拆入 `config.rs`；
   `bootstrap/mod.rs` 只保留模块装配和稳定启动入口，启动顺序、监听器、优雅退出 drain 与
@@ -732,6 +734,12 @@ Public/Admin HTTP listener。
 - MoogleMail parser reads owner 已将 inbox 分页、Sent 分页、Sent 详情附件/CoD 证明和 Item Shop 余额
   分别拆入 `clients/mooglemail/parser/reads/{mod,inbox,sent,sent_detail,balance}.rs`；跨页 ID 去重、
   摘要/详情身份一致性、脚本与可见余额一致性和敏感字段清理语义保持不变。
+- MoogleMail parser script owner 已将 JavaScript 遮罩/脚本值提取与正文/脚本装备 key、严格 JSON 访问分别拆入
+  `clients/mooglemail/parser/script/{mod,javascript,equipment}.rs`；重复字段、伪造变量、身份不一致、
+  key 格式和字段缺失仍按协议漂移或身份不匹配失败关闭。
+- MoogleMail parser type owner 已将收件箱/详情 envelope、Sent 快照和 Item Shop 余额分别拆入
+  `clients/mooglemail/parser/types/{mod,message,sent,balance}.rs`；敏感字段脱敏 Debug、正文/key 清理、
+  content digest、remaining/collected 一致性和各项字段上限保持不变。
 - MoogleMail writer 已将 compose 状态模型、共用安全解析辅助、staged compose 证明和最终发送响应分类分别拆入
   `clients/mooglemail/writer/{model,common,compose,response}.rs`；`writer.rs` 只保留稳定公共导出，token
   生命周期、资产/身份 fence、write-unknown 和成功/明确失败证明保持不变。
@@ -822,6 +830,9 @@ Public/Admin HTTP listener。
 - Worker runtime 根装配已将 `PersistentWorker` 端口/运行参数模型和启动、任务装配、drain/退出循环分别拆入
   `worker/runtime/{model,runner}.rs`；`runtime/mod.rs` 继续保留跨 owner 的共享 helper 与稳定导出，
   Worker control 状态、任务启动条件、排空顺序和失败关闭契约保持不变。
+- Storage PostgreSQL settlement scheduler 的 claim owner 已将稳定 workflow/command identity、lot 锁与 due
+  世代校验、审计与 realtime 证据分别拆入 `database/settlement_scheduler/claim/{mod,ids,locking,evidence}.rs`；
+  `claim/mod.rs` 只保留领取编排，`SKIP LOCKED`、租约 fence、state-version、幂等账本和事务提交边界保持不变。
 - Worker control server owner 已将 server 生命周期、peer credential 过滤监听和 runtime 目录/实例锁/socket
   身份安全分别拆入 `control/transport/server/{mod,listener,security}.rs`；Unix socket 单监听器、
   UID/GID allowlist、inode 清理、group/0660 权限和优雅关闭契约保持不变。
@@ -917,6 +928,9 @@ Public/Admin HTTP listener。
   分别拆入 `http/admin/dashboard/sections/{mail,realtime,operations,credentials,alerting,fallback}.rs`；
   `sections/mod.rs` 只保留聚合映射出口，unknown/source_unavailable、凭据 Worker 重启判断、时间字段和
   section JSON 语义保持不变。
+- Admin Web Dashboard runtime owner 已将运行时详情组件与卡片/状态辅助分别拆入
+  `app/operations/dashboard/runtime/{mod,details,helpers}.rs`；Dashboard 的安全投影、状态本地化、
+  凭据 scope 和 recovery world 展示语义保持不变。
 - Storage PostgreSQL Admin lot owner 已将事务端口适配、锁内安全读取、lot 状态/起拍价变更、withdrawn-return
   义务和审计/realtime 事件分别拆入 `database/competition/postgres/admin/lot/{transaction,read,mutation,obligation,events}.rs`；
   `lot/mod.rs` 只负责装配，world → auction → lot 锁顺序、preview revision、state-version fence、命令账本和
@@ -1491,6 +1505,10 @@ Lot 页标题和返回入口也恢复旧版顺序与五语言文案：标题位�
 展示“拍品 — 第 N 号场次”等格式，加载或失败时显示省略号，不再把内部 auction UUID 当作用户可见
 场次编号；返回链接恢复前置箭头。
 Public 五语言资源中已经没有调用、且仍声称“数据接口接入后替换示例数据”的迁移期死文案同时删除。
+
+本轮静态审计又清理了 Admin/Public 五语言资源中仍把已落地的拍卖生命周期、拍品修改、邮件处理、
+投递、运行配置、规则内容、公开竞价和账户读取描述为“待迁移”的提示；这些文案现在改为说明实际
+的 PostgreSQL 完整档、版本命令和安全投影边界，未把外部回执、浏览器和部署验收误标为完成。
 
 Lot 改价与撤拍交互继续对齐旧版：表头和动作使用旧版短文案，弹窗标题使用 `One01` 等拍品编码而非
 裸序号，撤拍警告明确装备将以 COD 0 寄回卖家且操作不可撤销。改价改为原生表单提交，支持回车与

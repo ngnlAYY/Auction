@@ -4,8 +4,8 @@
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为
 //! 由 `auction-web-shared` 统一提供。
 //!
-//! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 的目标 owner 是
-//! `auction-contracts`；当前 API 模块仍保留重复 wire struct，已登记为待收敛架构缺口。
+//! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 由 `auction-contracts` 拥有，
+//! 本 crate 只保留浏览器展示模型、查询状态和交互编排。
 
 #[path = "../identity/account.rs"]
 mod account;
