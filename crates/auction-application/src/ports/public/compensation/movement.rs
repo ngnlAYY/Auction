@@ -177,7 +177,11 @@ impl PublicCompensationMovementPage {
             }
         }
 
-        if self.offset + self.entries.len() as i64 == self.total && !self.entries.is_empty() {
+        let page_end = self
+            .offset
+            .checked_add(i64::try_from(self.entries.len()).map_err(|_| "公开补偿账本页大小溢出")?)
+            .ok_or("公开补偿账本页偏移溢出")?;
+        if page_end == self.total && !self.entries.is_empty() {
             let last = self.entries.last().ok_or("公开补偿账本末尾缺失")?;
             if last.kind != PublicCompensationMovementKind::Closing
                 || last.balance_after != self.round.closing_balance

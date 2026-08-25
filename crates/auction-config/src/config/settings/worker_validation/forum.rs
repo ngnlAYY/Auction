@@ -21,13 +21,24 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if config.item_timeout_seconds == 0 || config.item_timeout_seconds > 3_600 {
         return Err(ConfigError::InvalidForumConfig("item_timeout_seconds 必须位于 1 至 3600"));
     }
-    let request_budget_millis = config
+    let Some(request_budget_millis) = config
         .request_timeout_seconds
-        .saturating_mul(3)
-        .saturating_mul(1_000)
-        .saturating_add(config.minimum_request_interval_millis.saturating_mul(2))
-        .saturating_add(1_000);
-    if config.item_timeout_seconds.saturating_mul(1_000) < request_budget_millis {
+        .checked_mul(3)
+        .and_then(|value| value.checked_mul(1_000))
+        .and_then(|value| {
+            config
+                .minimum_request_interval_millis
+                .checked_mul(2)
+                .and_then(|interval| value.checked_add(interval))
+        })
+        .and_then(|value| value.checked_add(1_000))
+    else {
+        return Err(ConfigError::InvalidForumConfig("论坛请求预算超出可表示范围"));
+    };
+    let Some(item_budget_millis) = config.item_timeout_seconds.checked_mul(1_000) else {
+        return Err(ConfigError::InvalidForumConfig("论坛任务超时超出可表示范围"));
+    };
+    if item_budget_millis < request_budget_millis {
         return Err(ConfigError::InvalidForumConfig(
             "item_timeout_seconds 必须覆盖三次请求、两次最小请求间隔和一秒收口预算",
         ));

@@ -286,6 +286,8 @@ Delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 se
 lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同事务幂等提交。Worker
 退避时刻、Admin 邮件状态版本和 realtime 连续序号均使用 checked 边界；时间或版本溢出时
 失败关闭并保留 claim/fence，不把异常值折回当前时刻或饱和为可接受的后继状态。
+竞价下一口金额和 PPM 增量也使用 checked 计算；超过信用金额网格时返回领域溢出错误，不能
+把最高可表示金额当作合法后继出价。
 Worker 在 `[worker.mooglemail]` 显式启用后会按顶层 world 与 `additional_worlds` 为每个已启用世界装配
 独立的持久化邮箱状态、claim、读取 gateway、业务 processor、拍卖入站事务、
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，

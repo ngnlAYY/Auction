@@ -19,7 +19,7 @@ pub fn canonical_summary(
     }
     let mut lines = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
-        if item.ordinal != i32::try_from(index + 1).unwrap_or_default()
+        if i32::try_from(index).ok().and_then(|index| index.checked_add(1)) != Some(item.ordinal)
             || item.fingerprint == [0; 32]
             || item.signal_version <= 0
             || item.summary.is_empty()

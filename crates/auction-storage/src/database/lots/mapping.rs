@@ -109,6 +109,7 @@ pub(super) fn map_live_fields(
     rules.validate().map_err(|_| storage_error("公开 lot 拍卖策略无效"))?;
     let next_bid = rules
         .next_minimum_bid(Some(start), has_leader.then_some(current), material, proxy_last)
+        .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
         .value();
     let equipment =
         map_equipment(world_id, &external_id, &equipment_name, &equipment_category, attributes)?;

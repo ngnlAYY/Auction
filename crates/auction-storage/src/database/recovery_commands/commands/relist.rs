@@ -66,14 +66,15 @@ pub(super) async fn relist_recovery(
     .bind(target_id)
     .bind(original_lot.equipment_id)
     .bind(original_lot.submission_id)
-    .bind(max_lot_number + 1)
+    .bind(max_lot_number.checked_add(1).ok_or(RecoveryCommandError::InvalidStoredResult)?)
     .bind(original_lot.start_price)
     .bind(now)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
 
-    let next_revision = preview_revision + 1;
+    let next_revision =
+        preview_revision.checked_add(1).ok_or(RecoveryCommandError::InvalidStoredResult)?;
     let updated = sqlx::query(
         r#"UPDATE public.auctions
            SET preview_revision = $1, state_version = state_version + 1, updated_at = $2

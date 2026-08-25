@@ -30,6 +30,8 @@ where
     ) -> Result<AdminRulesDocument, ApplicationError> {
         let command = command.normalize();
         command.validate().map_err(ApplicationError::from)?;
+        let expected_revision =
+            command.expected_revision.checked_add(1).ok_or(AdminRulesError::InvalidCommand)?;
         let published_at = self.clock.now();
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
@@ -48,7 +50,7 @@ where
                             serde_json::from_slice(&stored.result_payload)?;
                         if result.validate().is_err()
                             || result.locale != command.locale
-                            || result.revision != command.expected_revision + 1
+                            || result.revision != expected_revision
                         {
                             return Err(AdminRulesError::StoredResultCorrupt.into());
                         }
@@ -60,7 +62,7 @@ where
                     if result.validate().is_err()
                         || result.locale != command.locale
                         || result.published_by != command.actor_id
-                        || result.revision != command.expected_revision + 1
+                        || result.revision != expected_revision
                     {
                         return Err(AdminRulesError::StoredResultCorrupt.into());
                     }

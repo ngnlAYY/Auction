@@ -115,7 +115,8 @@ impl OperationsAlertBatchClaim {
         for (index, item) in self.items.iter().enumerate() {
             if item.fingerprint == [0; 32]
                 || item.signal_version <= 0
-                || item.ordinal != i32::try_from(index + 1).unwrap_or_default()
+                || i32::try_from(index).ok().and_then(|index| index.checked_add(1))
+                    != Some(item.ordinal)
                 || item.summary.is_empty()
                 || item.summary.len() > 512
                 || item.summary != item.summary.trim()

@@ -34,19 +34,26 @@ pub(crate) fn observe_response_date(_response: &Response) {
         {
             return;
         }
-        let sample = server_date
+        let Some(sample) = server_date
             .timestamp_millis()
-            .saturating_add(SERVER_DATE_CENTER_MILLIS)
-            .saturating_sub(browser_now as i64);
+            .checked_add(SERVER_DATE_CENTER_MILLIS)
+            .and_then(|value| value.checked_sub(browser_now as i64))
+        else {
+            return;
+        };
         if !SERVER_OFFSET_KNOWN.swap(true, Ordering::AcqRel) {
             SERVER_OFFSET_MILLIS.store(sample, Ordering::Release);
             return;
         }
         let current = SERVER_OFFSET_MILLIS.load(Ordering::Acquire);
-        let adjusted = current.saturating_add(
-            sample.saturating_sub(current).saturating_mul(SERVER_OFFSET_EMA_NUMERATOR)
-                / SERVER_OFFSET_EMA_DENOMINATOR,
-        );
+        let Some(adjusted) = sample
+            .checked_sub(current)
+            .and_then(|delta| delta.checked_mul(SERVER_OFFSET_EMA_NUMERATOR))
+            .and_then(|delta| delta.checked_div(SERVER_OFFSET_EMA_DENOMINATOR))
+            .and_then(|delta| current.checked_add(delta))
+        else {
+            return;
+        };
         SERVER_OFFSET_MILLIS.store(adjusted, Ordering::Release);
     }
 }
@@ -60,9 +67,11 @@ pub(crate) fn estimated_now() -> DateTime<Utc> {
             && browser_now >= i64::MIN as f64
             && browser_now <= i64::MAX as f64
         {
-            let corrected =
-                (browser_now as i64).saturating_add(SERVER_OFFSET_MILLIS.load(Ordering::Acquire));
-            return DateTime::from_timestamp_millis(corrected).unwrap_or_else(Utc::now);
+            if let Some(corrected) =
+                (browser_now as i64).checked_add(SERVER_OFFSET_MILLIS.load(Ordering::Acquire))
+            {
+                return DateTime::from_timestamp_millis(corrected).unwrap_or_else(Utc::now);
+            }
         }
     }
     Utc::now()

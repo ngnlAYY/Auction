@@ -99,8 +99,10 @@ pub(crate) async fn claim_postgres(
             signal_version: row
                 .try_get("state_version")
                 .map_err(|_| storage_error("读取 operations alert signal 版本失败"))?,
-            ordinal: i32::try_from(index + 1)
-                .map_err(|_| storage_error("operations alert 批次序号溢出"))?,
+            ordinal: i32::try_from(index)
+                .ok()
+                .and_then(|index| index.checked_add(1))
+                .ok_or_else(|| storage_error("operations alert 批次序号溢出"))?,
             summary: signal.render_summary().map_err(ApplicationError::from)?,
         });
     }

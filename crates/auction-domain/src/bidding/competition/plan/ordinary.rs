@@ -29,8 +29,12 @@ pub(super) fn plan_ordinary_bid(
         return Err(DomainError::InvalidBidState("活动代理持有者不能提交普通出价"));
     }
 
-    let minimum =
-        rules.next_minimum_bid(Some(state.start_price), state.current_price, state.material, false);
+    let minimum = rules.next_minimum_bid(
+        Some(state.start_price),
+        state.current_price,
+        state.material,
+        false,
+    )?;
     if amount < minimum {
         return Err(DomainError::BidTooLow { minimum });
     }
@@ -71,7 +75,7 @@ pub(super) fn plan_ordinary_bid(
                 Some(amount),
                 final_state.material,
                 false,
-            );
+            )?;
             let response = response.min(active.maximum_amount);
             if response <= amount {
                 return Err(DomainError::InvalidBidState("快速代理无法产生更高出价"));

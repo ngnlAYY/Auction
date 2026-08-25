@@ -132,6 +132,10 @@ pub(crate) async fn execute_admin_lifecycle(
         return api_error(StatusCode::BAD_REQUEST, "invalid_state_version", "拍卖状态版本无效")
             .into_response();
     }
+    let Ok(expected_state_version) = u64::try_from(input.expected_state_version) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_state_version", "拍卖状态版本无效")
+            .into_response();
+    };
     if action == AuctionLifecycleAction::Cancel {
         let Some(reason) = input.reason.as_deref() else {
             return api_error(
@@ -170,9 +174,7 @@ pub(crate) async fn execute_admin_lifecycle(
         command_id: CommandId::from_uuid(input.command_id),
         auction_id: auction_domain::AuctionId::from_uuid(auction_uuid),
         action,
-        expected_state_version: Some(
-            u64::try_from(input.expected_state_version).unwrap_or_default(),
-        ),
+        expected_state_version: Some(expected_state_version),
         cancel_reason: input.reason,
         request_hash,
         request_id: request_id(&headers),

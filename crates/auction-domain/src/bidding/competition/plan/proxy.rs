@@ -55,8 +55,12 @@ pub(super) fn plan_create_proxy(
         return Err(DomainError::InvalidBidState("代理授权输入与 lot 状态不一致"));
     }
 
-    let minimum =
-        rules.next_minimum_bid(Some(state.start_price), state.current_price, state.material, false);
+    let minimum = rules.next_minimum_bid(
+        Some(state.start_price),
+        state.current_price,
+        state.material,
+        false,
+    )?;
     if maximum_amount < minimum {
         return Err(DomainError::BidTooLow { minimum });
     }
@@ -90,7 +94,7 @@ pub(super) fn plan_create_proxy(
                 Some(loser.maximum_amount),
                 final_state.material,
                 false,
-            );
+            )?;
             price = price.min(winner_maximum);
             if let Some(current) = final_state.current_price {
                 price = price.max(current);
@@ -150,7 +154,12 @@ pub(super) fn plan_lower_proxy(
         return Err(DomainError::InvalidProxyMaximum);
     }
     let binding = if state.slow_authorization_id.is_some() {
-        rules.next_minimum_bid(Some(state.start_price), state.current_price, state.material, false)
+        rules.next_minimum_bid(
+            Some(state.start_price),
+            state.current_price,
+            state.material,
+            false,
+        )?
     } else {
         state.current_price.unwrap_or(state.start_price)
     };
@@ -204,7 +213,7 @@ pub(super) fn plan_slow_due(
     }
     let current = state.current_price.ok_or(DomainError::InvalidBidState("慢速代理缺少当前价"))?;
     let amount = rules
-        .next_minimum_bid(Some(state.start_price), Some(current), state.material, false)
+        .next_minimum_bid(Some(state.start_price), Some(current), state.material, false)?
         .min(active.maximum_amount);
     if amount <= current {
         return Err(DomainError::InvalidBidState("慢速代理无法产生更高出价"));
@@ -262,7 +271,7 @@ pub(super) fn plan_final_proxy(
                 Some(current),
                 final_state.material,
                 false,
-            )
+            )?
             .min(active.maximum_amount);
         if amount <= current {
             return Err(DomainError::InvalidBidState("最终阶段代理无法产生更高出价"));

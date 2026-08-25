@@ -266,11 +266,11 @@ impl PostgresCompetitionTransaction {
         insert_obligations(self, &plan).await?;
         insert_recoveries(self, auction_id, &plan, recovery_policy).await?;
         insert_settlement_audit(self, auction_id, command_id, auction_state_version).await?;
+        let next_version =
+            auction_state_version.checked_add(1).ok_or_else(|| invalid("拍卖状态版本溢出"))?;
 
         {
             let transaction = self.transaction_mut().map_err(map_competition_error)?;
-            let next_version =
-                auction_state_version.checked_add(1).ok_or_else(|| invalid("拍卖状态版本溢出"))?;
             let result = sqlx::query(
                 r#"UPDATE public.auctions
                    SET status = 'settled', settled_at = CURRENT_TIMESTAMP,
@@ -288,7 +288,7 @@ impl PostgresCompetitionTransaction {
             }
         }
 
-        insert_settlement_realtime(self, auction_id, command_id, auction_state_version + 1).await
+        insert_settlement_realtime(self, auction_id, command_id, next_version).await
     }
 }
 

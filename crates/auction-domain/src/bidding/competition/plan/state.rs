@@ -55,6 +55,10 @@ pub(super) fn finalize_plan(
 
     let mut public_bids = Vec::with_capacity(drafts.len());
     for (index, draft) in drafts.into_iter().enumerate() {
+        let fact_index = u32::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
         let previous = state.current_price.unwrap_or(state.start_price);
         if draft.amount < previous
             || (draft.amount == previous
@@ -72,7 +76,7 @@ pub(super) fn finalize_plan(
             command_id,
             lot_id: state.lot_id,
             bidder_id: draft.bidder_id,
-            fact_index: index as u32 + 1,
+            fact_index,
             amount: draft.amount,
             effective_end_at: expected_end,
             state_version: state.state_version,

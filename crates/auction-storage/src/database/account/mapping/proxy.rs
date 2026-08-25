@@ -172,6 +172,8 @@ pub(in crate::database::account) fn build_proxy(
     transitions: Vec<PublicProxyTransition>,
     bid: Option<PublicProxyBid>,
 ) -> Result<PublicOwnedProxy, ApplicationError> {
+    let transition_count =
+        i64::try_from(transitions.len()).map_err(|_| storage_error("代理转换数量溢出"))?;
     if base.authorization_id.is_nil()
         || base.auction_id.is_nil()
         || base.lot_id.is_nil()
@@ -189,12 +191,15 @@ pub(in crate::database::account) fn build_proxy(
         || base.updated_at < base.created_at
         || base.equipment_name.trim().is_empty()
         || base.equipment_category.trim().is_empty()
-        || transitions.len() as i64 != base.state_version
+        || transition_count != base.state_version
     {
         return Err(storage_error("账户代理投影包含无效快照"));
     }
     for (index, transition) in transitions.iter().enumerate() {
-        let expected = i64::try_from(index + 1).map_err(|_| storage_error("代理转换序号溢出"))?;
+        let expected = i64::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .ok_or_else(|| storage_error("代理转换序号溢出"))?;
         if transition.transition_number != expected
             || transition.resulting_state_version != expected
         {
@@ -266,7 +271,9 @@ pub(in crate::database::account) fn derive_capabilities(
     let start =
         BidAmount::new(base.start_price).map_err(|_| storage_error("账户代理起始金额无效"))?;
     let binding = if waiting {
-        AuctionRules::default().next_minimum_bid(Some(start), Some(current), base.material, false)
+        AuctionRules::default()
+            .next_minimum_bid(Some(start), Some(current), base.material, false)
+            .map_err(|_| storage_error("账户代理绑定金额超出可表示范围"))?
     } else {
         current
     };

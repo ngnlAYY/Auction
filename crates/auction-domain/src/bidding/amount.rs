@@ -15,7 +15,7 @@ pub const CREDIT_GRID: i64 = 1_000;
 pub struct BidAmount(i64);
 
 impl BidAmount {
-    /// 最大的信用网格对齐金额，用于溢出时的饱和结果。
+    /// 最大的信用网格对齐金额；超过该边界的计算必须失败关闭。
     pub const MAX_ALIGNED: i64 = i64::MAX - i64::MAX % CREDIT_GRID;
 
     /// 从外部输入创建经过不变量校验的金额。
@@ -41,11 +41,17 @@ impl BidAmount {
         self.0 / CREDIT_GRID
     }
 
-    /// 以饱和方式追加一个已经按信用网格对齐的正增量。
-    pub(crate) fn saturating_add(self, increment: i64) -> Self {
+    /// 追加一个正增量；金额超过信用网格边界时返回算术溢出。
+    pub(crate) fn checked_add(self, increment: i64) -> Result<Self, DomainError> {
+        if increment <= 0 {
+            return Err(DomainError::InvalidAmount { value: increment });
+        }
         let candidate = self.0 as i128 + increment as i128;
-        let capped = candidate.min(Self::MAX_ALIGNED as i128);
-        Self::from_validated(capped as i64)
+        if candidate > Self::MAX_ALIGNED as i128 {
+            return Err(DomainError::AmountOverflow);
+        }
+        let value = i64::try_from(candidate).map_err(|_| DomainError::AmountOverflow)?;
+        Self::new(value)
     }
 }
 

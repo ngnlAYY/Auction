@@ -24,9 +24,15 @@ impl CompetitionPlan {
         let mut seen_bid_ids = HashSet::with_capacity(self.public_bids.len());
         for (index, bid) in self.public_bids.iter().enumerate() {
             bid.validate()?;
-            if bid.fact_index != (index as u32 + 1)
+            let expected_fact_index = u32::try_from(index)
+                .ok()
+                .and_then(|index| index.checked_add(1))
+                .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
+            let expected_state_version =
+                previous_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
+            if bid.fact_index != expected_fact_index
                 || bid.lot_id != self.final_lot.lot_id
-                || bid.state_version != previous_version + 1
+                || bid.state_version != expected_state_version
                 || bid.effective_end_at != self.final_lot.effective_end_at
                 || !seen_bid_ids.insert(bid.id)
             {
@@ -64,11 +70,12 @@ impl CompetitionPlan {
             let expected_version = match transition.kind {
                 ProxyTransitionKind::Created => 1,
                 _ => {
-                    transition_versions
+                    let previous_version = transition_versions
                         .get(&transition.authorization_id)
                         .copied()
-                        .unwrap_or(transition.state_version - 1)
-                        + 1
+                        .or_else(|| transition.state_version.checked_sub(1))
+                        .ok_or(DomainError::StateVersionOverflow)?;
+                    previous_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?
                 }
             };
             if transition.state_version != expected_version {

@@ -117,8 +117,16 @@ impl MailAuctionIntakeResult {
             || self.existing_count < 0
             || self.lot_ids.is_empty()
             || self.lot_ids.iter().any(Uuid::is_nil)
-            || i64::from(self.added_count + self.existing_count) != self.lot_ids.len() as i64
         {
+            return Err(MailProcessingError::OwnerResultInvalid);
+        }
+        let total_count = self
+            .added_count
+            .checked_add(self.existing_count)
+            .ok_or(MailProcessingError::OwnerResultInvalid)?;
+        let lot_count = i32::try_from(self.lot_ids.len())
+            .map_err(|_| MailProcessingError::OwnerResultInvalid)?;
+        if total_count != lot_count {
             return Err(MailProcessingError::OwnerResultInvalid);
         }
         Ok(())
