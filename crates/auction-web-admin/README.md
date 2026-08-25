@@ -42,8 +42,9 @@ just web-build-admin   # dx build -p auction-web-admin --platform web
 just web-serve-admin   # 本地开发监听
 ```
 
-产物输出到 `target/dx/build/auction-web-admin/web/public/`，由 Admin 装配根独占的
-`RustEmbed` 类型内嵌，再交给 `auction-http` 提供。依赖图不引用 Public 产物；未知路径保持 404，
+产物输出到 `target/dx/build/auction-web-admin/web/public/`，首屏标题由本 crate 的
+`Dioxus.toml` 固定为 `Auction 管理端`，再由运行时 Fluent 文案按语言切换；产物由 Admin 装配根独占的
+`RustEmbed` 类型内嵌，共享资源还包含旧版一致的品牌 favicon；再交给 `auction-http` 提供。依赖图不引用 Public 产物；未知路径保持 404，
 不获得 Admin SPA 入口。
 
 管理端与公开端是不同 surface：本 crate 独立拥有自己的组件树和路由树，不复用公开端组件，

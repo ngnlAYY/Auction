@@ -37,8 +37,9 @@ just web-build-public   # dx build -p auction-web-public --platform web
 just web-serve-public   # 本地开发监听
 ```
 
-产物输出到 `target/dx/build/auction-web-public/web/public/`，由 `auction-http` 内嵌进
-公开端二进制。未构建产物时后端仍可编译，批准的浏览器路由返回 503；未知路径保持 404，
+产物输出到 `target/dx/build/auction-web-public/web/public/`，首屏标题由本 crate 的
+`Dioxus.toml` 固定为 `Auction`，再由运行时 Fluent 文案按语言切换；产物由 `auction-http` 内嵌进
+公开端二进制，共享资源还包含旧版一致的品牌 favicon。未构建产物时后端仍可编译，批准的浏览器路由返回 503；未知路径保持 404，
 不会被宽泛回退为 SPA 入口。
 
 当前首页看板、lot 详情、规则文档、公开黑名单、竞价日志、价格历史、Public session、账户竞价/代理读取、live lot

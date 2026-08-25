@@ -1524,6 +1524,11 @@ Admin 邮件页恢复旧版的全局立即轮询入口：未加载具体 mailbox
 Lot 页标题和返回入口也恢复旧版顺序与五语言文案：标题位于返回入口之前，已加载时用场次 sequence
 展示“拍品 — 第 N 号场次”等格式，加载或失败时显示省略号，不再把内部 auction UUID 当作用户可见
 场次编号；返回链接恢复前置箭头。
+
+本轮继续收口 Web 首屏产物：Public/Admin 分别增加 crate 级 `Dioxus.toml`，固定 WASM 启动前的
+`Auction` 与 `Auction 管理端` 标题；运行后的 `document::Title` 仍由五语言 Fluent 文案接管，避免
+浏览器标签在客户端启动前显示 Dioxus CLI 默认标题。两个 surface 的 `dx build --platform web` 均已
+成功生成带预加载 CSS 的静态产物；真实浏览器中的字体、换行、焦点和响应式布局仍需保留为后续验收证据。
 Public 五语言资源中已经没有调用、且仍声称“数据接口接入后替换示例数据”的迁移期死文案同时删除。
 
 本轮静态审计又清理了 Admin/Public 五语言资源中仍把已落地的拍卖生命周期、拍品修改、邮件处理、

@@ -14,6 +14,9 @@ pub use truncated_text::TruncatedText;
 pub const BASE_CSS: Asset =
     asset!("/style/base.css", AssetOptions::css().with_preload(true).with_static_head(true));
 
+/// 公开端与管理端共用的品牌图标。
+pub const FAVICON: Asset = asset!("/assets/favicon.svg");
+
 /// 渲染共享的基础样式表。
 ///
 /// 各 surface 的根组件应先渲染该组件，再渲染自己的 surface 样式，保证设计变量在
@@ -22,5 +25,6 @@ pub const BASE_CSS: Asset =
 pub fn BaseStylesheet() -> Element {
     rsx! {
         document::Stylesheet { href: BASE_CSS }
+        document::Link { rel: "icon", href: FAVICON, r#type: "image/svg+xml" }
     }
 }

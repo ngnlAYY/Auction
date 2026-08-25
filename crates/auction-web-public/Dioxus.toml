@@ -1,0 +1,4 @@
+# Public Web 构建配置；运行时语言切换仍由 Dioxus 组件和 Fluent 资源负责。
+[web.app]
+# 首屏 WASM 启动前显示的产品标题。
+title = "Auction"
