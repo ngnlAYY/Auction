@@ -33,11 +33,13 @@ Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键改为
 构建：
 
 ```bash
-just web-build-public   # dx build -p auction-web-public --platform web
+just web-build-public   # 通过 dx bundle 复制到稳定嵌入目录
 just web-serve-public   # 本地开发监听
 ```
 
-产物输出到 `target/dx/build/auction-web-public/web/public/`，首屏标题由本 crate 的
+`just web-build-public` 内部先执行 Web 构建，再将产物复制到
+`target/dx/build/auction-web-public/web/public/`，供 Public 装配根的
+`rust-embed` 使用；首屏标题由本 crate 的
 `Dioxus.toml` 固定为 `Auction`，再由运行时 Fluent 文案按语言切换；产物由 `auction-http` 内嵌进
 公开端二进制，共享资源还包含旧版一致的品牌 favicon。未构建产物时后端仍可编译，批准的浏览器路由返回 503；未知路径保持 404，
 不会被宽泛回退为 SPA 入口。

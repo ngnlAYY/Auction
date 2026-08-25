@@ -26,7 +26,7 @@ pub(super) fn validate_sent_evidence(
         }
     };
     let (remaining_credits, remaining_cod, remaining_equipment) =
-        if evidence.collected { (0, 0, Vec::new()) } else { expected_remaining(claim) };
+        if evidence.collected { (0, 0, Vec::new()) } else { expected_remaining(claim)? };
     if evidence.external_mail_id != external_mail_id
         || evidence.world != claim.world
         || !evidence.recipient.eq_ignore_ascii_case(&claim.recipient)
@@ -41,24 +41,26 @@ pub(super) fn validate_sent_evidence(
     Ok(())
 }
 
-pub(super) fn expected_remaining(claim: &SettlementFulfillmentClaim) -> (i64, i64, Vec<String>) {
+pub(super) fn expected_remaining(
+    claim: &SettlementFulfillmentClaim,
+) -> Result<(i64, i64, Vec<String>), ApplicationError> {
     match claim.kind {
         SettlementObligationKind::WinnerEquipmentCod => {
-            (0, claim.amount, vec![claim.external_equipment_id.clone()])
+            Ok((0, claim.amount, vec![claim.external_equipment_id.clone()]))
         }
-        SettlementObligationKind::WinnerPaymentCarrierCod => (
-            i64::from(claim.carrier_credit),
-            claim.amount.saturating_add(i64::from(claim.carrier_credit)),
-            Vec::new(),
-        ),
+        SettlementObligationKind::WinnerPaymentCarrierCod => claim
+            .amount
+            .checked_add(i64::from(claim.carrier_credit))
+            .map(|remaining_cod| (i64::from(claim.carrier_credit), remaining_cod, Vec::new()))
+            .ok_or_else(|| repository_error("MoogleMail COD 证据期望金额溢出")),
         SettlementObligationKind::WinnerEquipmentHandoff => {
-            (0, 0, vec![claim.external_equipment_id.clone()])
+            Ok((0, 0, vec![claim.external_equipment_id.clone()]))
         }
         SettlementObligationKind::SellerPayout | SettlementObligationKind::BuyerRefund => {
-            (claim.amount, 0, Vec::new())
+            Ok((claim.amount, 0, Vec::new()))
         }
         SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
-            (0, 0, Vec::new())
+            Ok((0, 0, Vec::new()))
         }
     }
 }

@@ -55,15 +55,18 @@ db-migrate:
 
 # 前端产物构建需要 dx CLI（cargo install dioxus-cli --locked）。
 # dx 会按需从 npm 注册表下载 esbuild 作为构建期工具；它不是运行时依赖，也不引入
-# Node 运行时或第二套前端构建链。auction-http 使用 allow_missing 内嵌产物，
+# Node 运行时或第二套前端构建链。这里使用 dx bundle 先构建再复制到稳定的嵌入目录，
+# 使 debug/release 后端都能读取同一份产物。auction-http 使用 allow_missing 内嵌产物，
 # 因此未执行这些命令时后端仍可编译，只是运行时静态资源返回 503。
 web-build: web-build-public web-build-admin
 
 web-build-public:
-    dx build -p auction-web-public --platform web
+    rm -rf target/dx/build/auction-web-public/web
+    dx bundle -p auction-web-public --platform web --out-dir target/dx/build/auction-web-public/web --locked
 
 web-build-admin:
-    dx build -p auction-web-admin --platform web
+    rm -rf target/dx/build/auction-web-admin/web
+    dx bundle -p auction-web-admin --platform web --out-dir target/dx/build/auction-web-admin/web --locked
 
 web-serve-public:
     dx serve -p auction-web-public --platform web

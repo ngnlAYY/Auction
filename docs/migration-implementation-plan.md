@@ -1059,9 +1059,10 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
 以下是仍需真实环境完成的行为/部署证据，不属于上面的代码数量盘点；测试相关工作继续按用户要求
 暂缓：
 
-- 本轮已用仓库锁定的 `dx` CLI 分别构建 Public/Admin Web 产物，两个 WASM、wasm-bindgen、入口
-  HTML 和 surface/base CSS 均成功生成；这只证明编译和静态资源打包链路，不证明真实浏览器中的
-  字体、换行、焦点顺序、空态或响应式布局，因此浏览器逐页验收仍保留。
+- 本轮已用仓库锁定的 `dx` CLI 通过 `just web-build` 分别构建 Public/Admin Web 产物，两个 WASM、
+  wasm-bindgen、入口 HTML 和 surface/base CSS 均成功生成，并复制到后端稳定嵌入目录；这只证明
+  编译和静态资源打包链路，不证明真实浏览器中的字体、换行、焦点顺序、空态或响应式布局，因此
+  浏览器逐页验收仍保留。
 - 使用真实 main/isekai 邮箱与 E-Hentai 论坛核对分页、限流、凭据失效、远端写入不确定结果和回执；
 - 在 canonical PostgreSQL v28 副本上演练 backup、verify、adopt、restore 和 rebuild 安全边界；
 - 在真实 systemd/Caddy 部署中核对启动顺序、readiness、失败回滚、Worker control 和凭据注入；
@@ -1527,8 +1528,10 @@ Lot 页标题和返回入口也恢复旧版顺序与五语言文案：标题位�
 
 本轮继续收口 Web 首屏产物：Public/Admin 分别增加 crate 级 `Dioxus.toml`，固定 WASM 启动前的
 `Auction` 与 `Auction 管理端` 标题；运行后的 `document::Title` 仍由五语言 Fluent 文案接管，避免
-浏览器标签在客户端启动前显示 Dioxus CLI 默认标题。两个 surface 的 `dx build --platform web` 均已
-成功生成带预加载 CSS 的静态产物；真实浏览器中的字体、换行、焦点和响应式布局仍需保留为后续验收证据。
+浏览器标签在客户端启动前显示 Dioxus CLI 默认标题。两个 surface 的 `just web-build`（内部使用
+`dx bundle --platform web`）均已成功生成带预加载 CSS 的静态产物，并复制到
+`target/dx/build/<package>/web/public/`，与后端 `rust-embed` 的 debug/release 嵌入路径一致。
+真实浏览器中的字体、换行、焦点和响应式布局仍需保留为后续验收证据。
 Public 五语言资源中已经没有调用、且仍声称“数据接口接入后替换示例数据”的迁移期死文案同时删除。
 
 本轮静态审计又清理了 Admin/Public 五语言资源中仍把已落地的拍卖生命周期、拍品修改、邮件处理、

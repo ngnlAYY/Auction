@@ -139,8 +139,9 @@ HTTP/1 请求头读取超时。CSP 的脚本来源保持同源，只为 WASM 编
 
 ## 静态产物内嵌
 
-两个 surface 各自内嵌对应的 `dx build` 产物，路径由 `rust-embed` 按本 crate 的
-`CARGO_MANIFEST_DIR` 解析：
+两个 surface 各自内嵌对应的 Web 产物。根目录 `Justfile` 的 `web-build-public` 与
+`web-build-admin` 使用 `dx bundle` 先完成构建，再复制到稳定目录；路径由 `rust-embed` 按本
+crate 的 `CARGO_MANIFEST_DIR` 解析：
 
 ```text
 target/dx/build/auction-web-public/web/public
@@ -152,7 +153,8 @@ target/dx/build/auction-web-admin/web/public
 因为缺少产物而无法编译。批准的浏览器路由在产物缺失时以 503 明确报告，不 panic；未知路径仍
 按 404 处理。
 
-release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
+release 构建把稳定目录中的产物烘进二进制，dev 构建从同一目录读取，因此本地改前端后重新执行
+`just web-build` 即可；不应直接把 `target/dx/<package>/<debug|release>/web/public` 当作嵌入目录。
 
 目标请求按以下顺序封闭分派：
 

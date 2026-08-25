@@ -5,7 +5,7 @@
 
 use rust_embed::Embed;
 
-/// `dx build` 生成的 Admin 浏览器产物。
+/// `dx bundle` 生成并复制到稳定嵌入目录的 Admin 浏览器产物。
 #[derive(Embed)]
 #[folder = "../../target/dx/build/auction-web-admin/web/public"]
 #[allow_missing = true]

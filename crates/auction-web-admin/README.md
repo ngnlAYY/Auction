@@ -38,11 +38,13 @@ Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键改为
 构建：
 
 ```bash
-just web-build-admin   # dx build -p auction-web-admin --platform web
+just web-build-admin   # 通过 dx bundle 复制到稳定嵌入目录
 just web-serve-admin   # 本地开发监听
 ```
 
-产物输出到 `target/dx/build/auction-web-admin/web/public/`，首屏标题由本 crate 的
+`just web-build-admin` 内部先执行 Web 构建，再将产物复制到
+`target/dx/build/auction-web-admin/web/public/`，供 Admin 装配根的
+`rust-embed` 使用；首屏标题由本 crate 的
 `Dioxus.toml` 固定为 `Auction 管理端`，再由运行时 Fluent 文案按语言切换；产物由 Admin 装配根独占的
 `RustEmbed` 类型内嵌，共享资源还包含旧版一致的品牌 favicon；再交给 `auction-http` 提供。依赖图不引用 Public 产物；未知路径保持 404，
 不获得 Admin SPA 入口。

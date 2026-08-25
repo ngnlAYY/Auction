@@ -209,8 +209,8 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   `cargo clippy -D warnings`。
 - 后续测试恢复后：PostgreSQL 验证完整 repository 契约、行锁、隔离和并发竞价语义；
   SQLite 只验证 Lite 能力契约及文件数据库路径，不要求运行 PostgreSQL 专属用例。
-- 浏览器：行为验证恢复后再定端到端方案；生产产物由 `dx build --platform web` 生成，并由
-  `auction-http` 内嵌。
+- 浏览器：行为验证恢复后再定端到端方案；生产产物由 `dx bundle --platform web` 生成并复制到
+  稳定目录，再由 `auction-http` 内嵌。
 - 发布：通过静态门禁后生成 Public/Admin/Worker/CLI 制品和 migration checksum。
 
 ## 已知未消除风险

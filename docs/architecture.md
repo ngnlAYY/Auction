@@ -40,7 +40,8 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-observability` | tracing、metrics、health、correlation id、心跳安全投影；Public/Admin 与 Worker control 的可选 `/metrics` scrape、进程资源指标和三类进程的有界 OTLP/HTTP exporter | 业务日志内容 |
 | `auction-process` | SIGINT/SIGTERM 订阅、10 秒默认 drain、二次信号分类和 abort-on-drop Tokio 任务守卫 | 配置、listener、心跳发布和业务停止顺序 |
 
-浏览器端是纯 CSR SPA。`dx build --platform web` 为每个 surface 生成静态 WASM/JS/HTML。
+浏览器端是纯 CSR SPA。`dx bundle --platform web`（内部先执行 Web build）为每个 surface 生成
+静态 WASM/JS/HTML，并复制到稳定的 `target/dx/build/<package>/web/public/` 目录。
 Public/Admin 装配根各自定义唯一的 `RustEmbed` 类型，`auction-http` 只接收泛型资源类型并实现
 通用响应，因此任一部署制品都不会引用另一端资源，也不依赖链接器裁剪保证隔离。产物缺失时
 静态路由返回 503 并说明需要执行的构建命令，不影响 `/health` 契约，也不让进程崩溃。

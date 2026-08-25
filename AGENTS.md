@@ -111,7 +111,8 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；连接层直接使用同依赖图的
   Hyper/`hyper-util` 配置请求头读取超时、HTTP/2 CONNECT 和连接排空。当前没有为尚未使用的
   能力直接引入 `tower-http`。
-- **浏览器界面：** Dioxus 0.7.10 纯客户端渲染；产物由 `dx build --platform web` 生成，
+- **浏览器界面：** Dioxus 0.7.10 纯客户端渲染；产物由 `just web-build`（内部调用
+  `dx bundle --platform web`）生成，
   编译目标为 `wasm32-unknown-unknown`，再由 `auction-http` 用 `rust-embed` 内嵌。
   不启用 `dioxus-fullstack`/`dioxus-server`，避免第二套 HTTP 服务器与 `auction-http`
   的路由所有权冲突。
@@ -349,7 +350,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   的既有契约一致；跳号或重连后读取权威快照。无法保持长连接的客户端可退化为 SSE。
 - 若要切换到 Askama + HTMX 一类服务端渲染方案，必须先由用户明确放宽“浏览器端全 Rust、
   禁止 JavaScript”契约，不能把技术原型直接变成架构变更。
-- 前端静态产物由 `dx build --platform web` 生成，并通过 `rust-embed` 内嵌进后端二进制。
+- 前端静态产物由 `just web-build`（内部调用 `dx bundle --platform web`）生成并复制到稳定目录，
+  再通过 `rust-embed` 内嵌进后端二进制。
   内嵌声明必须保留 `allow_missing`：未构建前端时后端仍要能编译，运行时以明确的 503
   报告，不得 panic。
 - 界面文案一律经由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，**不得在组件里硬编码
