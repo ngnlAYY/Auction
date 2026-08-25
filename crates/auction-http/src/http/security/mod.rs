@@ -163,19 +163,22 @@ impl OriginPolicy {
         let mut allowed = Vec::with_capacity(values.len());
         for value in values {
             let parsed = Url::parse(value).map_err(|_| "allowed_origins 格式无效")?;
+            let normalized_value = value.strip_suffix('/').unwrap_or(value);
+            let serialized_value = parsed.as_str();
+            let serialized_value = serialized_value.strip_suffix('/').unwrap_or(serialized_value);
             if !matches!(parsed.scheme(), "http" | "https")
                 || parsed.host_str().is_none()
                 || parsed.username() != ""
                 || parsed.password().is_some()
-                || parsed.path() != ""
+                || !(parsed.path().is_empty() || parsed.path() == "/")
                 || parsed.query().is_some()
                 || parsed.fragment().is_some()
-                || parsed.as_str() != value
-                || allowed.iter().any(|item| item == value)
+                || serialized_value != normalized_value
+                || allowed.iter().any(|item| item == normalized_value)
             {
                 return Err("allowed_origins 必须是唯一的精确 scheme+host");
             }
-            allowed.push(value.clone());
+            allowed.push(normalized_value.to_owned());
         }
         Ok(Self { disabled: false, allowed: Arc::new(allowed) })
     }

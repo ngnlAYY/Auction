@@ -43,21 +43,28 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
                 "allowed_origins 启用时必须包含 1 至 16 个 origin",
             ));
         }
-        for origin in &config.allowed_origins {
+        for (index, origin) in config.allowed_origins.iter().enumerate() {
             let parsed = Url::parse(origin).map_err(|_| {
                 ConfigError::InvalidHttpSecurity("allowed_origins 必须是有效的 HTTP(S) origin")
             })?;
+            let normalized_origin = origin.strip_suffix('/').unwrap_or(origin);
+            let serialized_origin = parsed.as_str();
+            let serialized_origin =
+                serialized_origin.strip_suffix('/').unwrap_or(serialized_origin);
             if !matches!(parsed.scheme(), "http" | "https")
                 || parsed.host_str().is_none()
                 || parsed.username() != ""
                 || parsed.password().is_some()
-                || parsed.path() != ""
+                || !(parsed.path().is_empty() || parsed.path() == "/")
                 || parsed.query().is_some()
                 || parsed.fragment().is_some()
-                || parsed.as_str() != origin
+                || serialized_origin != normalized_origin
+                || config.allowed_origins[..index].iter().any(|existing| {
+                    existing.strip_suffix('/').unwrap_or(existing) == normalized_origin
+                })
             {
                 return Err(ConfigError::InvalidHttpSecurity(
-                    "allowed_origins 只能包含精确 scheme+host",
+                    "allowed_origins 只能包含唯一的精确 scheme+host",
                 ));
             }
         }

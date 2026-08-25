@@ -126,13 +126,14 @@ pub struct PublicCompensationPage {
 impl PublicCompensationPage {
     /// 校验存储适配器返回的页结构，但保留编号页/cursor 页的 total 差异。
     pub fn validate(&self) -> Result<(), &'static str> {
+        let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开补偿池页大小溢出")?;
         if self.limit < 1
             || self.limit > MAX_PUBLIC_COMPENSATION_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET
             || self.balance < 0
-            || self.entries.len() as i64 > self.limit
-            || self.total.is_some_and(|total| total < 0 || total < self.entries.len() as i64)
+            || entry_count > self.limit
+            || self.total.is_some_and(|total| total < 0 || total < entry_count)
             || self.next_cursor.is_some() != self.has_more
             || self.updated_at.is_some_and(|value| value.timestamp_micros() == 0)
         {

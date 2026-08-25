@@ -6,20 +6,20 @@
 # 或其他密钥写在这里。
 
 {$AUCTION_CADDY_PUBLIC_SITE:auction.example.com} {
-  # Prometheus 指标只允许内网独立抓取，不通过公网站点转发。
-  @auction_public_metrics path /metrics
-  respond @auction_public_metrics 404
+	# Prometheus 指标只允许内网独立抓取，不通过公网站点转发。
+	@auction_public_metrics path /metrics
+	respond @auction_public_metrics 404
 
-  reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:127.0.0.1:8090} {
-    header_up Host {hostport}
-  }
+	reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:127.0.0.1:8090} {
+		header_up Host {hostport}
+	}
 }
 
 {$AUCTION_CADDY_ADMIN_SITE:admin.auction.example.com} {
-  @auction_admin_metrics path /metrics
-  respond @auction_admin_metrics 404
+	@auction_admin_metrics path /metrics
+	respond @auction_admin_metrics 404
 
-  reverse_proxy {$AUCTION_CADDY_ADMIN_UPSTREAM:127.0.0.1:8091} {
-    header_up Host {hostport}
-  }
+	reverse_proxy {$AUCTION_CADDY_ADMIN_UPSTREAM:127.0.0.1:8091} {
+		header_up Host {hostport}
+	}
 }

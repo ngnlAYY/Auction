@@ -21,7 +21,12 @@ pub(crate) fn validate_auction_worker(
     if config.jitter_seconds > 86_400 {
         return Err(ConfigError::InvalidAuctionWorkerConfig("jitter_seconds 必须位于 0 至 86400"));
     }
-    let lease_duration_seconds = poll_interval_seconds.saturating_mul(3).max(30);
+    let Some(lease_duration_seconds) = poll_interval_seconds.checked_mul(3) else {
+        return Err(ConfigError::InvalidAuctionWorkerConfig(
+            "poll_interval_seconds 派生 claim lease 超出可表示范围",
+        ));
+    };
+    let lease_duration_seconds = lease_duration_seconds.max(30);
     if config.item_timeout_seconds == 0
         || config.item_timeout_seconds >= lease_duration_seconds
         || config.item_timeout_seconds > 86_400

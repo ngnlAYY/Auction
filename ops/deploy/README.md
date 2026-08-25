@@ -48,6 +48,10 @@
    Caddy 模板已默认返回 `404`。切换到 Unix upstream 时要同步修改 Caddy 上游值和 unit 的
    runtime 目录权限。
 
+只读配置预检可单独运行 `auctionctl deployment-check --config-dir /etc/auction`；默认会报告
+目录、主配置、runtime 和敏感文件的权限警告，`--strict-permissions` 会把这些权限边界作为失败
+条件。无论是否严格，配置目录、主配置、runtime 和敏感 TOML 都不能使用符号链接。
+
 示例命令（实际部署应使用已安装的二进制，而不是 `cargo run`）：
 
 ```bash

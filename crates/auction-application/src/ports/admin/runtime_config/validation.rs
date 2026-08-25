@@ -260,20 +260,42 @@ fn valid_path_prefix(value: &str) -> bool {
 }
 
 fn valid_origin(value: &str) -> bool {
-    let Some((scheme, host)) = value.split_once("://") else {
+    let Some((scheme, authority_and_path)) = value.split_once("://") else {
         return false;
     };
-    if !matches!(scheme, "http" | "https")
-        || host.is_empty()
-        || host.contains('/')
-        || host.chars().any(|character| matches!(character, '?' | '#' | '@'))
+    if !matches!(scheme, "http" | "https") || authority_and_path.is_empty() {
+        return false;
+    }
+    let (authority, path) = authority_and_path
+        .split_once('/')
+        .map_or((authority_and_path, None), |(authority, path)| (authority, Some(path)));
+    if authority.is_empty()
+        || authority != authority.trim()
+        || path.is_some_and(|value| !value.is_empty())
+        || authority.chars().any(|character| matches!(character, '?' | '#' | '@'))
     {
         return false;
     }
-    let Some((hostname, port)) = host.rsplit_once(':') else {
-        return valid_dns_name(host);
+    if authority.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let Some((host, suffix)) = bracketed.split_once(']') else {
+            return false;
+        };
+        return host.parse::<std::net::IpAddr>().is_ok()
+            && (suffix.is_empty()
+                || suffix
+                    .strip_prefix(':')
+                    .is_some_and(|port| !port.is_empty() && port.parse::<u16>().is_ok()));
+    }
+    let Some((hostname, port)) = authority.rsplit_once(':') else {
+        return valid_dns_name(authority);
     };
-    valid_dns_name(hostname) && !port.is_empty() && port.parse::<u16>().is_ok()
+    !hostname.contains(':')
+        && (valid_dns_name(hostname) || hostname.parse::<std::net::IpAddr>().is_ok())
+        && !port.is_empty()
+        && port.parse::<u16>().is_ok()
 }
 
 fn valid_http_url(value: &str) -> bool {

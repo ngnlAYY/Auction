@@ -71,13 +71,14 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if let Some(public_base_url) = &config.public_base_url {
         let parsed = Url::parse(public_base_url)
             .map_err(|_| ConfigError::InvalidForumConfig("public_base_url 不是有效 URL"))?;
+        let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
         if !(parsed.scheme() == "https"
             || (parsed.scheme() == "http"
                 && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
             || parsed.host_str().is_none()
             || !parsed.username().is_empty()
             || parsed.password().is_some()
-            || parsed.path() != ""
+            || !path_is_root
             || parsed.query().is_some()
             || parsed.fragment().is_some()
             || public_base_url.trim() != public_base_url

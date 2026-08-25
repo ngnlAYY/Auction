@@ -30,9 +30,13 @@ impl DeploymentListener {
 /// 旧版启动脚本同时承担配置检查、进程装配和数据库操作；该只读命令保持独立，也由
 /// `deployment start/restart` 在任何 unit mutation 前复用，避免预检触发外部 MoogleMail/论坛请求。
 pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Result<()> {
-    if !config_dir.is_dir() {
+    let config_dir_metadata = fs::symlink_metadata(config_dir).with_context(|| {
+        format!("read deployment config directory metadata: {}", config_dir.display())
+    })?;
+    if !config_dir_metadata.is_dir() || config_dir_metadata.file_type().is_symlink() {
         anyhow::bail!("deployment config directory is not a directory: {}", config_dir.display());
     }
+    validate_non_secret_permissions(config_dir, "deployment config directory", strict_permissions)?;
 
     let mut configs = Vec::with_capacity(3);
     for (role, filename) in
@@ -40,6 +44,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
     {
         let path = config_dir.join(filename);
         require_regular_file(&path, "主配置")?;
+        validate_non_secret_permissions(&path, "主配置", strict_permissions)?;
         let config = AppConfig::load_from_path(role, &path)
             .with_context(|| format!("load {} configuration", role.name()))?;
         let backend = config
@@ -56,6 +61,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         }
         if let Some(runtime_path) = config.runtime_config_path.as_deref() {
             require_regular_file(runtime_path, "runtime 配置")?;
+            validate_non_secret_permissions(runtime_path, "runtime 配置", strict_permissions)?;
         }
         if role == Role::Worker && config.worker.control.enabled {
             validate_absolute_path(&config.worker.control.socket_path, "Worker control socket")?;
@@ -202,10 +208,33 @@ fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyh
 }
 
 fn require_regular_file(path: &Path, kind: &str) -> anyhow::Result<()> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("read {kind} metadata: {}", path.display()))?;
-    if !metadata.is_file() {
-        anyhow::bail!("{kind} is not a regular file: {}", path.display());
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("read {kind} metadata: {}", path.display()))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        anyhow::bail!("{kind} is not an ordinary non-symlink file: {}", path.display());
+    }
+    Ok(())
+}
+
+fn validate_non_secret_permissions(path: &Path, kind: &str, strict: bool) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        let mode = fs::symlink_metadata(path)?.permissions().mode();
+        if mode & 0o022 != 0 {
+            if strict {
+                anyhow::bail!("{kind} 不得允许 group/other 写入: {}", path.display());
+            }
+            println!(
+                "warning deployment_file_permissions={} kind={} mode={:o}; use --strict-permissions for deployment gating",
+                path.display(),
+                kind,
+                mode & 0o777,
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, kind, strict);
     }
     Ok(())
 }
@@ -220,7 +249,7 @@ fn validate_absolute_path(value: &str, kind: &str) -> anyhow::Result<()> {
 fn report_secret_permissions(path: &Path, strict: bool) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
-        let mode = fs::metadata(path)?.permissions().mode();
+        let mode = fs::symlink_metadata(path)?.permissions().mode();
         if mode & 0o077 != 0 {
             if strict {
                 anyhow::bail!("敏感配置权限过宽: {} (需要去除 group/other 权限)", path.display());

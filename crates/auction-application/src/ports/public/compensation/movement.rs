@@ -141,17 +141,16 @@ impl PublicCompensationMovementPage {
         self.round.validate()?;
         let request = PublicCompensationMovementRequest { limit: self.limit, offset: self.offset };
         request.validate()?;
-        if self.total != self.round.movement_count
-            || self.total < 2
-            || self.entries.len() as i64 > self.limit
-        {
+        let entry_count =
+            i64::try_from(self.entries.len()).map_err(|_| "公开补偿账本页大小溢出")?;
+        if self.total != self.round.movement_count || self.total < 2 || entry_count > self.limit {
             return Err("公开补偿账本页无效");
         }
 
         for (index, entry) in self.entries.iter().enumerate() {
             let expected_sequence = self
                 .offset
-                .checked_add(index as i64)
+                .checked_add(i64::try_from(index).map_err(|_| "公开补偿账本序号溢出")?)
                 .and_then(|value| value.checked_add(1))
                 .ok_or("公开补偿账本序号溢出")?;
             if entry.validate().is_err()
@@ -177,10 +176,7 @@ impl PublicCompensationMovementPage {
             }
         }
 
-        let page_end = self
-            .offset
-            .checked_add(i64::try_from(self.entries.len()).map_err(|_| "公开补偿账本页大小溢出")?)
-            .ok_or("公开补偿账本页偏移溢出")?;
+        let page_end = self.offset.checked_add(entry_count).ok_or("公开补偿账本页偏移溢出")?;
         if page_end == self.total && !self.entries.is_empty() {
             let last = self.entries.last().ok_or("公开补偿账本末尾缺失")?;
             if last.kind != PublicCompensationMovementKind::Closing

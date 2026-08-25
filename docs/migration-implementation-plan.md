@@ -1064,6 +1064,9 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
   编译和静态资源打包链路，不证明真实浏览器中的字体、换行、焦点顺序、空态或响应式布局，因此
   浏览器逐页验收仍保留。
 - 使用真实 main/isekai 邮箱与 E-Hentai 论坛核对分页、限流、凭据失效、远端写入不确定结果和回执；
+  2026-08-25 的只读 Balance 探针已能到达 `hentaiverse.org`，但 `.keyenv` 的两组候选均收到
+  `e-hentai.org/bounce_login.php` 重定向；按旧版契约应记为 `SessionExpired`，当前没有把它误报为
+  解析成功，也没有执行任何远端写入。需要有效登录会话后才能继续取得正文解析和分页证据；
 - 在 canonical PostgreSQL v28 副本上演练 backup、verify、adopt、restore 和 rebuild 安全边界；
 - 在真实 systemd/Caddy 部署中核对启动顺序、readiness、失败回滚、Worker control 和凭据注入；
 - 用实际 Dioxus 浏览器产物逐页核对字体、换行、焦点顺序、空态和响应式布局；
@@ -1563,3 +1566,15 @@ fulfillment/recovery/forum/MoogleMail 退避、E-Hentai 限速截止时间以及
 竞价边界也已完成同一收口：`BidAmount` 不再把超出信用网格的下一口金额饱和到最大值，固定增量
 与 PPM 增量均以 `AmountOverflow` 失败，并沿普通竞价、代理竞价、慢速代理、Public lot 投影和
 账户代理能力查询链路传播；不合法的非网格 `minimum_increment` 会在规则校验阶段拒绝。
+
+本轮继续收口边界：Auction Worker 的派生 claim lease 与 Public 补偿池/账本页的条目数量、序号和
+页尾计算均改为 checked 转换；异常大小或派生溢出会拒绝配置/公开投影，不会静默饱和或接受未校验索引。
+
+只读 `auctionctl deployment-check` 复核又发现 URL 解析器会把无路径 origin 表示为根路径 `/`，导致示例
+Public/Admin 配置和论坛 `public_base_url` 被错误拒绝；配置层与 HTTP origin 策略现统一接受空路径/根路径的
+等价表示、规范化末尾斜杠并拒绝语义重复项，未放宽凭据、查询、片段或非根路径限制。
+
+同一轮部署安全复核还将 `deployment-check` 的文件边界与实际 `deployment start` 对齐：配置目录、三个主
+配置、runtime 配置和敏感 TOML 均拒绝符号链接；严格模式下主配置/runtime/目录拒绝 group/other 写入，
+敏感文件继续要求无 group/other 权限，非严格模式仅报告权限警告，避免示例目录无法被只读预检加载，同时
+避免只读预检与真正启动使用不同的安全标准。

@@ -242,6 +242,8 @@ projection，
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
 全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
 读取之上，关闭 allowlist 也不会放宽这些 transport 防线。
+Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+host（可带端口），空路径与根路径
+斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 
 PostgreSQL 使用结算账本边界，SQLite Lite 使用 settled/sold 公开状态边界。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与草稿 lot 管理页已接入，SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
@@ -288,6 +290,8 @@ lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同�
 失败关闭并保留 claim/fence，不把异常值折回当前时刻或饱和为可接受的后继状态。
 竞价下一口金额和 PPM 增量也使用 checked 计算；超过信用金额网格时返回领域溢出错误，不能
 把最高可表示金额当作合法后继出价。
+Worker Auction claim lease 的派生时长和 Public 补偿页的条目序号/页尾也使用 checked 计算；
+配置派生或公开投影超出可表示范围时失败关闭，不把饱和值或未校验的索引当作有效结果。
 Worker 在 `[worker.mooglemail]` 显式启用后会按顶层 world 与 `additional_worlds` 为每个已启用世界装配
 独立的持久化邮箱状态、claim、读取 gateway、业务 processor、拍卖入站事务、
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，

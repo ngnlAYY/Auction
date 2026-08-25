@@ -22,7 +22,7 @@ pub(super) enum Command {
         /// 包含 public.toml、admin.toml 和 worker.toml 的部署配置目录。
         #[arg(long, default_value = "ops/config/examples")]
         config_dir: PathBuf,
-        /// 严格要求敏感 TOML 不包含 group/other 权限；默认仅报告警告，便于检查示例目录。
+        /// 严格要求部署目录、主/runtime TOML 和敏感 TOML 的权限边界；默认仅报告警告，便于检查示例目录。
         #[arg(long)]
         strict_permissions: bool,
     },
