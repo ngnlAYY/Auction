@@ -32,6 +32,7 @@ auction-ends-at = 結束於
 auction-opens-at = 開始於
 auction-header-ends-in = 距預定截止
 auction-header-opens-in = 距開拍
+auction-header-opening = 開拍處理中……
 auction-countdown = 倒數
 auction-lots = 拍賣批次
 auction-preview-lots = 拍賣預覽目錄

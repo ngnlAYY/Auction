@@ -78,6 +78,22 @@ pub(super) async fn apply_preview_plan_postgres(
         return Err(CompetitionTransactionError::InvalidState);
     }
 
+    // 预览会转移 intake target；必须在状态写入前拒绝空目录，避免生成永远无法开放的活跃场次。
+    let pending_count: i64 = {
+        let transaction = transaction.transaction_mut()?;
+        sqlx::query_scalar(
+            "SELECT COUNT(*)::bigint FROM public.lots
+             WHERE auction_id = $1 AND status = 'pending'",
+        )
+        .bind(auction.id.as_uuid())
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?
+    };
+    if pending_count <= 0 {
+        return Err(invalid_state("预览至少需要一个 pending lot"));
+    }
+
     let preview_revision = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query_scalar::<_, i64>(
@@ -125,17 +141,6 @@ pub(super) async fn apply_preview_plan_postgres(
         .await
         .map_err(map_sql_error)?
         .rows_affected()
-    };
-    let pending_count: i64 = {
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query_scalar(
-            "SELECT COUNT(*)::bigint FROM public.lots
-             WHERE auction_id = $1 AND status = 'pending'",
-        )
-        .bind(auction.id.as_uuid())
-        .fetch_one(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?
     };
     if i64::try_from(materialized).ok() != Some(pending_count) {
         return Err(invalid_state("预览物化条目数与 pending lot 不一致"));

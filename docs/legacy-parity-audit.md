@@ -351,6 +351,9 @@
 | API-045 | Public 身份化读取认证优先级与 UUID 词法 | P1 | 静态修复，组合输入待 R1 | 旧 `auction/publichttp/account.go` 把 `/me/bids` 与 `/lots/{lot_id}/proxy-authorizations/mine` 只包装在 `Sessions.Require` 下；旧读取边界使用规范小写、带连字符且非零 UUID | 两条身份化读取现先认证且不调用 mutation limiter；mine、forum、bid log 和 compensation movements 的 path/query UUID 统一进入 `parse_public_uuid` | 冻结新版会让只读账户请求消耗写额度，mine 还在认证前暴露 path 分类；若其它读取继续使用宽松 `Uuid::parse_str`，大写/URN/braced 文本可能进入查询 | 身份化 GET 只做 session 认证，不借写限流改变可用性；所有冻结 v1 UUID 文本在 HTTP 防腐层统一失败关闭，领域 ID 不放宽 | auction-http all-targets/all-features 定向静态编译与 rustfmt 已通过；仍需匿名+坏 path/query、认证大写/URN/braced/nil UUID，以及连续 GET 后 mutation quota 不变的 R1 |
 | AUI-096 | Admin 客户端未知路由的认证外壳 | P2 | 静态修复，浏览器待 R1 | 旧 Admin 路由由会话外壳统一拥有，匿名深链接不会先渲染管理内容 | Dioxus `NotFound` 现与 21 条冻结路由同处 `AdminShell` layout；后端未知深链接仍保持 404，不扩大 SPA allowlist | 冻结新版把 catch-all 放在 `#[end_layout]` 之后，客户端导航到未知路径时可绕过 loading/error/login 状态直接显示管理端 404 结构 | 只把客户端 catch-all 收回现有 shell；不新增服务端 SPA 路径、不改变 21 条 manifest 或登录 return 安全边界 | Admin 原生 all-targets/all-features 定向静态编译与 rustfmt 已通过；仍需匿名/loading/error/已认证四态的客户端导航 R1 |
 | OPS-008 | 已发布 PostgreSQL migration 字节、解析与 checksum 双代兼容 | P1 | 静态修复，fresh/两代历史待 R1 | 已发布 migration 必须保持字节与 SQLx checksum 不变；PG18 又会拒绝 `000005`/`000015` 中未加引号的保留字别名 | 两个历史文件已恢复 HEAD 字节；`database/migrations` 只对固定版本、描述、片段和数量生成执行视图。fresh/原始历史使用原 checksum，早期别名修正版只在既有 checksum 精确等于固定替换 SQL 的 SHA-384 时沿用；readiness 和 v28 adoption 复用同一边界 | 直接改历史 SQL 会让原 checksum 库失败；只恢复原 SQL 又会让 fresh PG18 与 v28 前向迁移解析失败；只接受原 checksum 还会阻断已经运行过早期修正版的数据库 | 不修改 `_sqlx_migrations`，不接受任意第三种 checksum；SQLx 对未知历史继续 `VersionMismatch`，执行兼容仅限两个已证明别名 | 两个历史文件对 HEAD 的 diff 为零，Storage all-targets/all-features 静态编译通过；仍需 fresh、原 checksum history、已知修正版 history、未知 checksum 及 v28 adoption 的隔离 R1 |
+| LIF-003 | Preview 非空门禁与不可开放空场次 | P1 | 静态门禁通过；历史空场次已受控取消 | 旧 Preview 会接受零个 pending lot，但 Open 随后拒绝零 lot，能够留下无法自行恢复的 preview 场次 | PostgreSQL 与 SQLite Lite 均在同一生命周期事务内、状态更新和 intake target 转移前要求至少一个 pending lot；历史空场次需要受控取消 | 这是相对旧版的有意不变量强化：拒绝不可达状态早于写入，避免 Worker 对同一 scheduled round 无限重试 | 非空检查复用生命周期已经锁定的 auction/intake scope；不改变有 lot 的 Preview 物化、successor、账本、审计或 realtime 语义 | PostgreSQL/SQLite Storage check、全工作区 check/Clippy、rustfmt 与策略门禁通过；测试库唯一空 preview 通过 Admin 命令从 version 2 取消为 version 3，scheduled round 转为 missed，并追加 `auction.cancel` 成功审计。未把受控修复冒充新门禁的并发 R1 |
+| PUI-029 | Public `opening` 过渡态的倒计时投影 | P1 | 静态修复并部署，真实 opening 画面待 R1 | 计划开放时间到达后，页面不能同时把同一时刻表达为“距开拍”和通用过期“落锤中” | `presentation_mode=opening` 现有独立五语言状态，只显示“开拍处理中”，不渲染过期计划时间；live/lot 的通用过期收尾语义保持不变 | 当前 generic 非 live 分支把合法 opening 投影误当 preview，产生用户报告的矛盾文案和过期时间 | 只在看板页分离 opening；不伪装成 live、不开放竞价、不改变 countdown helper 或权威生命周期状态 | 五份 Public FTL 已同步新键；i18n、Public 原生/WASM、全工作区 check/Clippy、rustfmt 与策略门禁通过。新 Public payload/进程已接管测试环境且 root/live/ready 为 200；空场次已取消，真实 opening 画面仍待下一场非空拍卖的人工 R1 |
+| API-046 | Dashboard MoogleMail `shared` 凭据继承 | P1 | 已实施，shared-only dashboard R1 | Worker 按目标 world 读取专属加 `shared` 凭据池，dashboard 健康投影必须使用同一有效 scope 语义 | 每个 main/isekai availability 现合并专属与 shared 的 active/invalid 计数，更新时间取最新值；只有 shared 时也会生成两个 world 的安全 availability | 冻结实现只精确匹配 world，导致 Worker 实际可用 shared 凭据时 Admin 错报缺失或 degraded | 不改变凭据密文、列表 DTO、重启判断或 Worker 读取；任一有效 scope 有 invalid 仍使该 world 失败关闭 | HTTP all-targets/all-features、全工作区 check/Clippy、rustfmt 与策略门禁通过；测试库只有一条 active `mooglemail:shared`，重启后的 dashboard 对配置的 main 返回 status ok、available 1、invalid 0、restart false，未回显 secret |
 
 2026-08-27 第二轮源码复核确认了 `BID-004` 至 `BID-006`、`SET-001` 和 `SET-002` 五项 P0。
 这些结论不依赖运行态猜测：Final 状态、竞价 SQL 谓词/锁对象、settling 状态与通用快照谓词，以及
@@ -428,7 +431,7 @@ live、ready 均为 200。第三路独立复核随后证明该标注过早：当
   可以承载更多 BCP 47 语言，但不会自动生成翻译，不能把框架能力算作已支持语言。
 - Public 默认 `en`，Admin 默认 `zh-CN`，偏好键均为 `hv.lang`；未知值回退 surface 默认语言。
   共享 picker 已显式同步原生 option 选中态，避免刷新后译文 locale 与下拉显示分离。
-- 新版 Public 每种资源各有 466 个消息 ID，Admin 每种资源各有 933 个消息 ID；同 surface 五个文件
+- 新版 Public 每种资源各有 467 个消息 ID，Admin 每种资源各有 933 个消息 ID；同 surface 五个文件
   数量和键集合一致。语义翻译质量与逐页换行仍属于 EVD-002，不能由键数证明。
 - Fluent 默认会在动态变量外加入 FSI/PDI；旧 i18next 没有该文本变化。两个 surface 现统一通过共享
   `legacy_t!` 兼容边界剥离外层成对隔离符。最终 populated Public 根页和 Admin 登录页均已逐个 locale
@@ -1587,6 +1590,24 @@ fresh/原始历史保留原 checksum，早期别名修正版只在既有值等�
 冻结证据支持改动。本批 rustfmt、repository/layout/config/i18n、全工作区 all-targets、PostgreSQL/SQLite
 Storage、Redis feature、Public/Admin WASM 和全特性 `-D warnings` Clippy 均通过；没有新增或运行任何测试，
 矩阵中的认证组合、混存账本、损坏结算和迁移两代历史仍明确保留 R1。
+
+2026-08-30 按运行环境反例完成 `LIF-003/PUI-029/API-046`。两后端 Preview writer 都在状态写入和
+intake target 转移前检查 pending lot 非空；Public 把 `opening` 从通用非 live 倒计时中分离为五语言
+“开拍处理中”；Admin dashboard 的 MoogleMail availability 与 Worker 一致合并 world 专属和 `shared`
+scope。测试库唯一空 preview 通过既有 Admin 命令从 version 2 取消为 version 3，关联 scheduled round
+转为 missed、auction_id 清空并追加 `auction.cancel` 成功审计；下一周 draft/active round 保持 version 1、
+attempt 0，没有被本次修复改写。
+
+本批通过 rustfmt、repository/layout/config/i18n 策略、workspace/all-targets、PostgreSQL/SQLite Storage、
+Redis feature、Public/Admin WASM 和全 workspace `-D warnings` Clippy，未新增或运行任何测试用例。
+embedded Public/Admin payload SHA-256 分别为
+`35691efa6e7c1407a0b3062dc57e1894142e8c2aad75e600fdadc6eb34603497` 与
+`030aae03309771a0c72c99447e3830156eea2beff7be3cc6bf3a29c8ef1a1a4c`；测试环境三进程已用新制品
+有界重启，运行映像与 artifact 哈希逐项一致，Public/Admin root/live/ready 均为 200。Worker control socket
+为 owner/group `ngnl`、0660，`/v1/health/live`、`/v1/health/ready`、`/v1/status` 均为 200，状态为
+serving/ready 且 `mail_pollers=0`。MoogleMail 继续显式关闭，没有触发真实外部邮件请求；Admin dashboard
+已从 shared-only 数据正确投影 main availability。由于当前没有合法非空 opening 场次，PUI-029 的真实过渡
+画面仍保留人工 R1，不能由制品可访问性外推关闭。
 
 每一批实现前必须从本表引用差异 ID，完成后补充修改路径和静态/运行态证据；不能用一次狭窄的
 编译成功证明整个切面的等价性。

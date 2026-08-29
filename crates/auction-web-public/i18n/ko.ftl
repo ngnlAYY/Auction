@@ -32,6 +32,7 @@ auction-ends-at = 종료 시각
 auction-opens-at = 시작 시각
 auction-header-ends-in = 예정 종료까지
 auction-header-opens-in = 시작까지
+auction-header-opening = 경매 시작 처리 중…
 auction-countdown = 카운트다운
 auction-lots = 경매 품목
 auction-preview-lots = 경매 미리보기 카탈로그

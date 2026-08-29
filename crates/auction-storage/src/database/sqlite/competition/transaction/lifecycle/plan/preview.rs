@@ -49,6 +49,20 @@ pub(super) async fn apply_preview_plan_sqlite(
         row.try_get("world_id").map_err(map_sql_error)?
     };
     let now = sqlite_timestamp(auction.updated_at);
+
+    // SQLite 串行写事务同样要在状态写入前拒绝空目录，不能留下无法开放的 preview 拍卖。
+    let pending_count: i64 = {
+        let connection = transaction.connection_mut()?;
+        sqlx::query_scalar("SELECT COUNT(*) FROM lots WHERE auction_id = ? AND status = 'pending'")
+            .bind(uuid_blob(auction.id.as_uuid()))
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(map_sql_error)?
+    };
+    if pending_count <= 0 {
+        return Err(invalid_state("Lite 预览至少需要一个 pending lot"));
+    }
+
     let preview_revision = {
         let connection = transaction.connection_mut()?;
         sqlx::query_scalar::<_, i64>(
@@ -93,14 +107,6 @@ pub(super) async fn apply_preview_plan_sqlite(
         .await
         .map_err(map_sql_error)?
         .rows_affected()
-    };
-    let pending_count: i64 = {
-        let connection = transaction.connection_mut()?;
-        sqlx::query_scalar("SELECT COUNT(*) FROM lots WHERE auction_id = ? AND status = 'pending'")
-            .bind(uuid_blob(auction.id.as_uuid()))
-            .fetch_one(&mut *connection)
-            .await
-            .map_err(map_sql_error)?
     };
     if i64::try_from(materialized).ok() != Some(pending_count) {
         return Err(invalid_state("Lite 预览物化条目数与 pending lot 不一致"));

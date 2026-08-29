@@ -7,6 +7,7 @@ use auction_contracts::AdminDashboardSectionResponse;
 use auction_observability::{
     DashboardSection, DashboardStatus, ProcessRole, ProcessSnapshot, ServiceName,
 };
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use super::super::super::timestamp;
@@ -21,17 +22,14 @@ pub(crate) fn map_credentials(
     let invalid_count = snapshot.scopes.iter().map(|scope| scope.invalid_count).sum::<i64>();
     let restart_required = credential_restart_required(&snapshot, process);
     let availability_worlds = if dashboard_worlds.is_empty() {
-        snapshot
-            .scopes
-            .iter()
-            .filter(|scope| {
-                scope.kind == AdminCredentialKind::MailCookie
-                    && matches!(
-                        scope.world,
-                        AdminCredentialWorld::Main | AdminCredentialWorld::Isekai
-                    )
+        [AdminCredentialWorld::Main, AdminCredentialWorld::Isekai]
+            .into_iter()
+            .filter(|world| {
+                snapshot.scopes.iter().any(|scope| {
+                    scope.kind == AdminCredentialKind::MailCookie
+                        && (scope.world == *world || scope.world == AdminCredentialWorld::Shared)
+                })
             })
-            .map(|scope| scope.world)
             .collect::<Vec<_>>()
     } else {
         dashboard_worlds.to_vec()
@@ -69,27 +67,49 @@ fn mail_availability(
     world: AdminCredentialWorld,
     restart_required: Option<bool>,
 ) -> serde_json::Value {
-    let scope = snapshot
-        .scopes
-        .iter()
-        .find(|scope| scope.kind == AdminCredentialKind::MailCookie && scope.world == world);
+    let availability = effective_mail_availability(snapshot, world);
     json!({
         "world": world.as_str(),
-        "available": scope.map_or(0, |scope| scope.active_count),
-        "invalid": scope.map_or(0, |scope| scope.invalid_count),
+        "available": availability.active_count,
+        "invalid": availability.invalid_count,
         "restart_required": restart_required,
-        "updated_at": scope.and_then(|scope| scope.updated_at).map(timestamp),
+        "updated_at": availability.updated_at.map(timestamp),
     })
 }
 
 fn mail_world_ready(snapshot: &AdminCredentialHealthSnapshot, world: AdminCredentialWorld) -> bool {
-    snapshot.scopes.iter().any(|scope| {
-        scope.kind == AdminCredentialKind::MailCookie
-            && scope.world == world
-            && scope.active_count > 0
-            && scope.invalid_count == 0
-            && scope.updated_at.is_some()
-    })
+    let availability = effective_mail_availability(snapshot, world);
+    availability.active_count > 0
+        && availability.invalid_count == 0
+        && availability.updated_at.is_some()
+}
+
+#[derive(Default)]
+struct EffectiveMailAvailability {
+    active_count: i64,
+    invalid_count: i64,
+    updated_at: Option<DateTime<Utc>>,
+}
+
+fn effective_mail_availability(
+    snapshot: &AdminCredentialHealthSnapshot,
+    world: AdminCredentialWorld,
+) -> EffectiveMailAvailability {
+    snapshot
+        .scopes
+        .iter()
+        .filter(|scope| {
+            scope.kind == AdminCredentialKind::MailCookie
+                && (scope.world == world || scope.world == AdminCredentialWorld::Shared)
+        })
+        .fold(EffectiveMailAvailability::default(), |mut availability, scope| {
+            availability.active_count =
+                availability.active_count.saturating_add(scope.active_count);
+            availability.invalid_count =
+                availability.invalid_count.saturating_add(scope.invalid_count);
+            availability.updated_at = availability.updated_at.max(scope.updated_at);
+            availability
+        })
 }
 
 fn credential_restart_required(
