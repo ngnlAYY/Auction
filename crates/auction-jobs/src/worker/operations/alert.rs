@@ -19,6 +19,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 #[derive(Debug, Clone, Copy)]
 pub struct OperationsAlertRuntimeConfig {
     pub poll_interval: Duration,
+    pub jitter: Duration,
     pub scan_timeout: Duration,
     pub dispatch_timeout: Duration,
     pub reconcile_timeout: Duration,
@@ -29,6 +30,7 @@ impl OperationsAlertRuntimeConfig {
     fn validate(self) -> bool {
         !self.poll_interval.is_zero()
             && self.poll_interval <= Duration::from_secs(86_400)
+            && self.jitter <= self.poll_interval
             && !self.scan_timeout.is_zero()
             && self.scan_timeout <= Duration::from_secs(86_400)
             && !self.dispatch_timeout.is_zero()

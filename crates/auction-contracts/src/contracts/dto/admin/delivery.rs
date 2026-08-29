@@ -35,6 +35,12 @@ pub struct AdminDeliveryResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminDeliveryListResponse {
     pub deliveries: Vec<AdminDeliveryResponse>,
+    pub pagination: AdminDeliveryPaginationResponse,
+}
+
+/// Admin delivery 的旧版页码信封。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminDeliveryPaginationResponse {
     pub page: i64,
     pub page_size: i64,
     pub total: i64,
@@ -46,11 +52,11 @@ pub struct AdminDeliveryListResponse {
 pub struct AdminDeliveryCommandRequest {
     pub command_id: Uuid,
     pub expected_fencing_version: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_reference: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_code: Option<String>,
 }
 

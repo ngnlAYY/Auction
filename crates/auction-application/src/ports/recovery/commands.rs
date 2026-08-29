@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 use auction_domain::{AuctionId, CommandId, LotId, SettlementId};
 
@@ -47,6 +48,8 @@ pub struct RecoveryConfirmationCommand {
     pub action: RecoveryConfirmationAction,
     pub reason: String,
     pub request_hash: RequestHash,
+    /// 入口请求关联 ID；旧版只把它写入审计 metadata，不占用 audit_records.request_id 列。
+    pub request_id: Option<String>,
     pub actor: AuctionLifecycleActor,
 }
 
@@ -58,20 +61,80 @@ impl RecoveryConfirmationCommand {
             || self.expected_state_version <= 0
             || self.actor.actor_id.trim().is_empty()
             || self.actor.actor_id.chars().count() > 256
+            || self.request_id.as_ref().is_some_and(|request_id| {
+                request_id.is_empty() || request_id != request_id.trim() || request_id.len() > 256
+            })
         {
             return Err(RecoveryCommandError::InvalidCommand);
         }
 
-        let reason = self.reason.trim();
         if self.action == RecoveryConfirmationAction::Reclaimed {
-            if !reason.is_empty() {
+            if !self.reason.trim().is_empty() {
                 return Err(RecoveryCommandError::InvalidCommand);
             }
-        } else if reason.is_empty() || reason.chars().count() > 512 {
+        } else if self.reason.is_empty()
+            || self.reason != self.reason.trim()
+            || self.reason.len() > 512
+        {
             return Err(RecoveryCommandError::InvalidCommand);
         }
         Ok(())
     }
+
+    /// 按旧版 Go recovery ledger 的 canonical `{RecoveryID,Version,Action,Reason}` 计算摘要。
+    /// `command_id` 是账本索引，不属于旧请求摘要；Reason 只在摘要中做 TrimSpace。
+    pub fn legacy_request_hash(
+        recovery_id: Uuid,
+        expected_state_version: i64,
+        action: RecoveryConfirmationAction,
+        reason: &str,
+    ) -> Result<RequestHash, serde_json::Error> {
+        let mut payload = Vec::with_capacity(128);
+        payload.extend_from_slice(b"{\"RecoveryID\":[");
+        for (index, byte) in recovery_id.as_bytes().iter().enumerate() {
+            if index != 0 {
+                payload.push(b',');
+            }
+            payload.extend_from_slice(byte.to_string().as_bytes());
+        }
+        payload.extend_from_slice(b"],\"Version\":");
+        payload.extend_from_slice(expected_state_version.to_string().as_bytes());
+        payload.extend_from_slice(b",\"Action\":");
+        append_go_json_string(&mut payload, action.as_str())?;
+        payload.extend_from_slice(b",\"Reason\":");
+        append_go_json_string(&mut payload, reason.trim())?;
+        payload.push(b'}');
+        Ok(RequestHash::from_canonical_bytes(&payload))
+    }
+}
+
+/// 让摘要字符串遵循 Go `encoding/json` 的 HTML 安全转义细节。
+fn append_go_json_string(payload: &mut Vec<u8>, value: &str) -> Result<(), serde_json::Error> {
+    let encoded = serde_json::to_vec(value)?;
+    let mut index = 0;
+    while index < encoded.len() {
+        let remaining = &encoded[index..];
+        if remaining.starts_with(b"<") {
+            payload.extend_from_slice(br#"\u003c"#);
+            index += 1;
+        } else if remaining.starts_with(b">") {
+            payload.extend_from_slice(br#"\u003e"#);
+            index += 1;
+        } else if remaining.starts_with(b"&") {
+            payload.extend_from_slice(br#"\u0026"#);
+            index += 1;
+        } else if remaining.starts_with(&[0xe2, 0x80, 0xa8]) {
+            payload.extend_from_slice(br#"\u2028"#);
+            index += 3;
+        } else if remaining.starts_with(&[0xe2, 0x80, 0xa9]) {
+            payload.extend_from_slice(br#"\u2029"#);
+            index += 3;
+        } else {
+            payload.push(encoded[index]);
+            index += 1;
+        }
+    }
+    Ok(())
 }
 
 /// recovery 确认成功后持久化并可安全重放的结果。

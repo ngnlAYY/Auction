@@ -49,6 +49,8 @@ tokio = { version = "~1.51.4", features = ["macros", "net", "rt-multi-thread", "
 
 # HTTP 与 Web
 axum = { version = "0.8.9", features = ["macros", "ws"] }
+# 直接识别 Axum WebSocket 的类型化容量错误，才能恢复旧 v1 的 1009 close 契约。
+tungstenite = { version = "0.29.0", default-features = false }
 # 浏览器端使用 Dioxus CSR：产物为静态 WASM/JS/HTML，由 auction-http 内嵌后提供。
 # 不启用 fullstack/server，避免第二套 HTTP 服务器与 auction-http 的路由所有权冲突。
 dioxus = { version = "0.7.10", default-features = false, features = [
@@ -72,7 +74,9 @@ hyper-util = { version = "0.1.20", features = [
     "tokio",
 ] }
 httpdate = "1.0.3"
+http-body-util = "0.1.5"
 ipnet = "2.12.0"
+mime = "0.3.17"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
 scraper = "0.24.0"
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
@@ -80,8 +84,17 @@ rustls = { version = "0.23.43", default-features = false, features = ["ring", "s
 url = "2.5.8"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
-# 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除本项。
-web-sys = { version = "0.3.104", features = ["History", "Location"] }
+# 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除对应项。
+# AbortController/AbortSignal 供 Public 浏览器请求恢复旧版 10 秒取消边界；Request/RequestInit
+# 允许共用 GET 边界绕过 gloo-net 0.6.0 给已有 query 追加空参数的缺陷。
+web-sys = { version = "0.3.104", features = [
+    "AbortController",
+    "AbortSignal",
+    "History",
+    "Location",
+    "Request",
+    "RequestInit",
+] }
 wasm-bindgen = "0.2.127"
 
 # 持久化基础能力。具体数据库驱动由 auction-storage 的窄发布 feature 引入。

@@ -53,34 +53,28 @@ pub(crate) fn map_admin_lifecycle_error(error: ApplicationError) -> Response {
     match error {
         ApplicationError::Domain(DomainError::InvalidTransition { .. })
         | ApplicationError::Domain(DomainError::InvalidSchedule(_))
-        | ApplicationError::Domain(DomainError::CancellationCutoff) => {
-            api_error(StatusCode::CONFLICT, "invalid_lifecycle", "拍卖当前不允许该生命周期操作")
+        | ApplicationError::Domain(DomainError::CancellationCutoff)
+        | ApplicationError::Domain(DomainError::InvalidCancellationMetadata)
+        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
+        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::InvalidState) => {
+            api_error(StatusCode::CONFLICT, "invalid_auction_state", "拍卖状态不允许当前命令")
                 .into_response()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
-            not_found_error().into_response()
+            api_error(StatusCode::NOT_FOUND, "not_found", "拍卖或关联资源不存在").into_response()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState) => {
-            api_error(
-                StatusCode::CONFLICT,
-                "state_version_conflict",
-                "拍卖状态已变化，请刷新后重试",
-            )
-            .into_response()
+            api_error(StatusCode::CONFLICT, "stale_auction_state", "拍卖版本已变化").into_response()
         }
-        ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict)
-        | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
+        ApplicationError::CommandLedger(CommandLedgerError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
             CommandLedgerError::Conflict,
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::Serialization(_) => internal_error(),
-        _ => api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "拍卖生命周期暂不可用",
-        )
-        .into_response(),
+        _ => {
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+                .into_response()
+        }
     }
 }
 
@@ -100,29 +94,62 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         ApplicationError::Domain(DomainError::BidTooLow { .. }) => {
             api_error(StatusCode::CONFLICT, "bid_too_low", "出价未达到当前最低价").into_response()
         }
-        ApplicationError::Domain(DomainError::InvalidProxyMaximum) => {
-            api_error(StatusCode::CONFLICT, "invalid_proxy_maximum", "代理上限当前不可调整")
+        ApplicationError::Domain(DomainError::AlreadyLeading) => {
+            api_error(StatusCode::CONFLICT, "already_leading", "当前账户已经领先").into_response()
+        }
+        ApplicationError::Domain(DomainError::ActiveProxyExists) => {
+            api_error(StatusCode::CONFLICT, "active_proxy_exists", "当前账户已有生效中的代理授权")
                 .into_response()
         }
-        ApplicationError::Domain(DomainError::ProxyDisabled) => {
-            api_error(StatusCode::CONFLICT, "proxy_disabled", "当前拍卖未启用代理竞价")
+        ApplicationError::Domain(DomainError::ProxyAuthorizationNotActive) => api_error(
+            StatusCode::CONFLICT,
+            "proxy_authorization_not_active",
+            "代理授权当前不可降低",
+        )
+        .into_response(),
+        ApplicationError::Domain(DomainError::ProxyMaximumNotLower) => {
+            api_error(StatusCode::CONFLICT, "proxy_maximum_not_lower", "新的代理上限必须严格降低")
                 .into_response()
+        }
+        ApplicationError::Domain(DomainError::ProxyMaximumBelowBinding) => api_error(
+            StatusCode::CONFLICT,
+            "proxy_maximum_below_binding",
+            "新的代理上限低于当前绑定价格",
+        )
+        .into_response(),
+        ApplicationError::Domain(DomainError::ProxyReentryMaximumNotHigher) => api_error(
+            StatusCode::CONFLICT,
+            "proxy_reentry_maximum_not_higher",
+            "重新建立授权时必须提高上一次上限",
+        )
+        .into_response(),
+        ApplicationError::Domain(DomainError::ProxyDisabled) => {
+            api_error(StatusCode::CONFLICT, "proxy_disabled", "代理竞价已禁用").into_response()
         }
         ApplicationError::Domain(DomainError::ProxyOutbidLimit) => {
-            api_error(StatusCode::CONFLICT, "proxy_outbid_limit", "代理重复进场次数已用尽")
+            api_error(StatusCode::CONFLICT, "proxy_outbid_limit", "代理出价次数已达上限")
                 .into_response()
         }
         ApplicationError::Domain(DomainError::ProxySlowFinal) => {
-            api_error(StatusCode::CONFLICT, "proxy_slow_final", "最终阶段不允许使用慢速代理")
+            api_error(StatusCode::CONFLICT, "proxy_slow_final", "最终阶段不允许新建慢速代理")
                 .into_response()
         }
-        ApplicationError::Domain(DomainError::InvalidProxyTransition { .. }) => {
-            api_error(StatusCode::CONFLICT, "invalid_proxy_state", "代理授权当前不可调整")
+        ApplicationError::Domain(DomainError::InvalidRules(_))
+        | ApplicationError::Domain(DomainError::InvalidSchedule(_)) => {
+            api_error(StatusCode::CONFLICT, "invalid_policy", "竞价策略无效").into_response()
+        }
+        ApplicationError::CompetitionTransaction(CompetitionTransactionError::BidderIneligible) => {
+            api_error(StatusCode::FORBIDDEN, "bidder_ineligible", "当前账户没有竞价资格")
                 .into_response()
         }
         ApplicationError::Domain(DomainError::AuctionClosed)
-        | ApplicationError::Domain(DomainError::InvalidBidState(_)) => {
+        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::InvalidState) => {
             api_error(StatusCode::CONFLICT, "auction_not_open", "当前拍卖不接受竞价")
+                .into_response()
+        }
+        ApplicationError::Domain(DomainError::InvalidBidState(_))
+        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Failed(_)) => {
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
                 .into_response()
         }
         ApplicationError::CommandLedger(CommandLedgerError::Conflict)
@@ -134,14 +161,23 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
             not_found_error().into_response()
         }
-        ApplicationError::Serialization(_) => internal_error(),
-        ApplicationError::CapabilityUnavailable(_)
-        | ApplicationError::FulfillmentEvidenceNotObserved
+        ApplicationError::CapabilityUnavailable(_) => api_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "feature_not_supported",
+            "当前部署档位不支持该功能",
+        )
+        .into_response(),
+        ApplicationError::FulfillmentEvidenceNotObserved
+        | ApplicationError::FulfillmentDependencyUnavailable
+        | ApplicationError::FulfillmentDependencyMismatch
+        | ApplicationError::FulfillmentEquipmentSecretNotFound
         | ApplicationError::Domain(_)
         | ApplicationError::Repository(_)
+        | ApplicationError::DeliveryAdmin(_)
         | ApplicationError::CompetitionTransaction(_)
         | ApplicationError::TransactionPolicy(_)
         | ApplicationError::CommandLedger(_)
+        | ApplicationError::Serialization(_)
         | ApplicationError::RecoveryCommand(_)
         | ApplicationError::RealtimeAdmin(_)
         | ApplicationError::SettlementTransaction(_)
@@ -161,7 +197,7 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         | ApplicationError::ForumRemote(_)
         | ApplicationError::Session(_)
         | ApplicationError::OperationsAlert(_) => {
-            api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "竞价服务暂不可用")
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
                 .into_response()
         }
     }
@@ -203,9 +239,13 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
         )
         .into_response(),
         ApplicationError::FulfillmentEvidenceNotObserved
+        | ApplicationError::FulfillmentDependencyUnavailable
+        | ApplicationError::FulfillmentDependencyMismatch
+        | ApplicationError::FulfillmentEquipmentSecretNotFound
         | ApplicationError::RecoveryCommand(_)
         | ApplicationError::Serialization(_)
         | ApplicationError::Repository(_)
+        | ApplicationError::DeliveryAdmin(_)
         | ApplicationError::TransactionPolicy(_)
         | ApplicationError::CompetitionTransaction(_)
         | ApplicationError::SettlementTransaction(_)
@@ -227,12 +267,10 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
         | ApplicationError::MailProcessing(_)
         | ApplicationError::ForumRemote(_)
         | ApplicationError::Session(_)
-        | ApplicationError::OperationsAlert(_) => api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "恢复确认服务暂不可用",
-        )
-        .into_response(),
+        | ApplicationError::OperationsAlert(_) => {
+            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+                .into_response()
+        }
     }
 }
 
@@ -242,6 +280,12 @@ pub(crate) fn authentication_error() -> Response {
 
 pub(crate) fn session_unavailable() -> Response {
     api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "会话服务暂不可用")
+        .into_response()
+}
+
+/// Public 竞价命令依赖失败沿用旧 v1 的统一 503 外壳。
+pub(crate) fn competition_unavailable() -> Response {
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
         .into_response()
 }
 

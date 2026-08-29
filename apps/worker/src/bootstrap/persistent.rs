@@ -7,7 +7,9 @@ use super::control::{join_worker_control_task, worker_control_server_config};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use super::forum::configure_forum;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use super::fulfillment::UnavailableFulfillmentEvidenceReader;
+use super::fulfillment::{
+    UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use super::mail::configure_mail_poll;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -16,6 +18,8 @@ use super::operations_alert::configure_operations_alert;
 use super::skeleton::run_worker_skeleton;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use super::*;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use chrono::Timelike;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(super) async fn run_worker(
@@ -66,8 +70,17 @@ pub(super) async fn run_worker(
             Arc::new(SystemClock),
             AuctionLifecyclePolicy::default(),
         ));
-    let (mail_polls, mail_delivery_transport, mail_evidence_reader) =
+    let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
+    let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
+        Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
+    let (mail_polls, mail_delivery_transport, mail_evidence_reader, mail_custody_reader) =
         configure_mail_poll(config, Arc::clone(&store)).await?;
+    let mail_owner: Option<Arc<dyn AdminMailPort>> = if config.worker.mooglemail.enabled {
+        Some(Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock))))
+    } else {
+        None
+    };
+    let schedule_runtime = configure_schedule_runtime(config, mail_owner)?;
     let operations_alert =
         configure_operations_alert(config, Arc::clone(&store), mail_delivery_transport.is_some())
             .await?;
@@ -88,10 +101,16 @@ pub(super) async fn run_worker(
             let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
                 mail_evidence_reader
                     .unwrap_or_else(|| Arc::new(UnavailableFulfillmentEvidenceReader));
+            let recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader> = store.clone();
+            let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> = mail_custody_reader
+                .unwrap_or_else(|| Arc::new(UnavailableFulfillmentCustodyReader));
             let fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort> =
                 Arc::new(SettlementFulfillmentService::new(
                     Arc::clone(&fulfillment_store),
+                    recipient_reader,
+                    custody_reader,
                     Arc::clone(&evidence_reader),
+                    Arc::new(SystemClock),
                 ));
             (
                 Some(store.clone()),
@@ -200,6 +219,8 @@ pub(super) async fn run_worker(
         auction_jobs::PersistentWorker {
             schedule,
             lifecycle,
+            slow_proxy_due: Some(slow_proxy_due),
+            slow_proxy_commands: Some(slow_proxy_commands),
             auction: auction_jobs::AuctionWorkerRuntimeConfig {
                 batch_limit: config.worker.batch_limit,
                 concurrency: config.worker_concurrency(),
@@ -208,6 +229,7 @@ pub(super) async fn run_worker(
                 lease_duration: auction_lease_duration,
                 item_timeout: std::time::Duration::from_secs(config.worker.item_timeout_seconds),
             },
+            schedule_runtime,
             settlement_store,
             settlement_commands,
             fulfillment_store,
@@ -311,4 +333,48 @@ pub(super) async fn run_worker(
     }
     result.context("run persistent worker")?;
     Ok(())
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+fn configure_schedule_runtime(
+    config: &AppConfig,
+    mail: Option<Arc<dyn AdminMailPort>>,
+) -> anyhow::Result<Option<auction_jobs::AuctionScheduleRuntimeConfig>> {
+    let schedule = &config.auction.schedule;
+    if !schedule.enabled {
+        return Ok(None);
+    }
+    let parse_day = |value: &str| {
+        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            .iter()
+            .position(|day| *day == value)
+            .map(|value| value as u8)
+            .ok_or_else(|| anyhow::anyhow!("auction.schedule 星期配置无效"))
+    };
+    let parse_clock = |value: &str| {
+        chrono::NaiveTime::parse_from_str(value, "%H:%M")
+            .map(|value| value.hour() as u16 * 60 + value.minute() as u16)
+            .map_err(|_| anyhow::anyhow!("auction.schedule 时间配置无效"))
+    };
+    let mailboxes = config
+        .worker
+        .mooglemail
+        .configured_worlds()
+        .into_iter()
+        .map(|world| (world.world_id, world.mailbox_key))
+        .collect();
+    Ok(Some(auction_jobs::AuctionScheduleRuntimeConfig {
+        enabled: true,
+        timezone: schedule.timezone.clone(),
+        preview_weekday: parse_day(&schedule.preview_day)?,
+        preview_minute: parse_clock(&schedule.preview_time)?,
+        open_weekday: parse_day(&schedule.open_day)?,
+        open_minute: parse_clock(&schedule.open_time)?,
+        end_weekday: parse_day(&schedule.nominal_end_day)?,
+        end_minute: parse_clock(&schedule.nominal_end_time)?,
+        worlds: schedule.worlds.clone(),
+        policy: config.auction.policy(),
+        mail,
+        mailboxes,
+    }))
 }

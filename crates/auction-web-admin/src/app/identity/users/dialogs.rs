@@ -1,10 +1,11 @@
 //! Admin 用户状态确认对话框与通用动作辅助。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::AdminUserStatusFilter;
+use crate::app::surface::AdminActionFeedback;
 
 use super::create::AdminUserGeneratedKey;
 
@@ -33,21 +34,22 @@ impl AdminUserDialogKind {
 pub(super) fn AdminUserDialogActions(
     busy: Signal<bool>,
     on_cancel: EventHandler<MouseEvent>,
+    confirm_label: String,
+    confirm_class: String,
 ) -> Element {
     rsx! {
-        div { class: "admin-panel__actions",
+        div { class: "admin-shell__dialog-actions",
             button {
                 r#type: "button",
-                class: "admin-btn-secondary",
                 disabled: busy(),
                 onclick: on_cancel,
                 {t!("admin-users-action-cancel")}
             }
             button {
                 r#type: "submit",
-                class: "admin-btn-primary",
+                class: confirm_class,
                 disabled: busy(),
-                if busy() { {t!("admin-action-working")} } else { {t!("admin-users-action-confirm")} }
+                if busy() { {t!("admin-action-working")} } else { {confirm_label} }
             }
         }
     }
@@ -55,11 +57,10 @@ pub(super) fn AdminUserDialogActions(
 
 pub(super) fn run_user_action<F>(
     mut busy: Signal<bool>,
-    mut feedback: Signal<Option<String>>,
+    mut feedback: Signal<Option<AdminActionFeedback>>,
     mut reload_generation: Signal<u64>,
     mut command_state: Signal<Option<(String, Uuid)>>,
     on_generated_key: EventHandler<AdminUserGeneratedKey>,
-    username: String,
     operation: F,
 ) where
     F: std::future::Future<Output = Result<Option<String>, String>> + 'static,
@@ -70,11 +71,11 @@ pub(super) fn run_user_action<F>(
         let successful = result.is_ok();
         feedback.set(match result {
             Ok(Some(key)) => {
-                on_generated_key.call(AdminUserGeneratedKey { username, key });
-                Some(t!("admin-users-updated"))
+                on_generated_key.call(AdminUserGeneratedKey { key });
+                Some(AdminActionFeedback::Success)
             }
-            Ok(None) => Some(t!("admin-users-updated")),
-            Err(_) => Some(t!("admin-users-action-error")),
+            Ok(None) => Some(AdminActionFeedback::Success),
+            Err(code) => Some(AdminActionFeedback::Error(code)),
         });
         if successful {
             command_state.set(None);
@@ -111,37 +112,5 @@ pub(super) fn parse_status_filter(value: &str) -> AdminUserStatusFilter {
         "active" => AdminUserStatusFilter::Active,
         "blacklisted" => AdminUserStatusFilter::Blacklisted,
         _ => AdminUserStatusFilter::All,
-    }
-}
-
-pub(super) fn user_status_label(value: &str) -> String {
-    match value {
-        "active" => t!("admin-users-status-active"),
-        "blacklisted" => t!("admin-users-status-blacklisted"),
-        _ => value.to_owned(),
-    }
-}
-
-pub(super) fn user_status_class(value: &str) -> &'static str {
-    match value {
-        "active" => "admin-users__status admin-users__status--active",
-        "blacklisted" => "admin-users__status admin-users__status--blacklisted",
-        _ => "admin-users__status",
-    }
-}
-
-pub(super) fn user_key_status_label(value: &str) -> String {
-    match value {
-        "active" => t!("admin-users-key-active"),
-        "revoked" => t!("admin-users-key-revoked"),
-        _ => value.to_owned(),
-    }
-}
-
-pub(super) fn user_key_status_class(value: &str) -> &'static str {
-    match value {
-        "active" => "admin-users__key-status admin-users__key-status--active",
-        "revoked" => "admin-users__key-status admin-users__key-status--revoked",
-        _ => "admin-users__key-status",
     }
 }

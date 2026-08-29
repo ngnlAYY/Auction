@@ -23,6 +23,11 @@ pub(super) async fn process_notification(
         tracing::warn!(post_id, "论坛通知模式不在闭集内");
         return Ok(());
     }
+    let Some(notifier) = runtime.notifier.as_ref() else {
+        // 旧版在 owner 未装配时直接跳过；此处不能先占用稳定 command_id 并留下永久拒绝事实。
+        tracing::warn!(post_id, "论坛 MoogleMail 通知 owner 未装配");
+        return Ok(());
+    };
     let Some(line) = i32::try_from(command.line).ok() else {
         tracing::warn!(post_id, "论坛通知行号超出持久化范围");
         return Ok(());
@@ -51,17 +56,6 @@ pub(super) async fn process_notification(
     if !start.should_run {
         return Ok(());
     }
-    let Some(notifier) = runtime.notifier.as_ref() else {
-        finish(
-            runtime,
-            command_id,
-            "rejected",
-            "notifier_unavailable",
-            "论坛 MoogleMail 通知 owner 未装配",
-        )
-        .await?;
-        return Ok(());
-    };
     let request = ForumNotificationRequest {
         auction_id: topic.auction_id.as_uuid(),
         lot_id: lot_id.as_uuid(),

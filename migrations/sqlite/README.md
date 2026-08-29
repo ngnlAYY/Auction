@@ -13,7 +13,11 @@ SQLite 的串行写入、锁等待、本地文件系统、备份和单节点假�
 `000003_user_admin.up.sql` 追加用户管理命令账本和可选的登录密钥信封，`000004_auction_cancellation.up.sql`
 追加拍卖取消时间、原因、操作者及形状触发器，`000005_lifecycle_metadata.up.sql` 补齐预览、开放、
 Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化 Final phase 完成 fence，
-`000007_leader_since_backfill.up.sql` 从追加式 bid 事实修正可证明的当前连续领先时间；结算、恢复、交付、
+`000007_leader_since_backfill.up.sql` 从追加式 bid 事实修正可证明的当前连续领先时间，
+`000008_lot_effective_end_invariant.up.sql` 以触发器和失败关闭预检恢复 live/sold lot 的有效结束
+时间 shape；结算、恢复、交付、
 以及外部论坛/邮件对象仍属于 PostgreSQL 完整档，Lite 不建表。
+因此 Lite 不声明 Public 成交价格历史能力；`settled`/`sold` 状态列用于共有模型兼容，不构成可供
+历史查询采信的结算事实链，对应 HTTP 路由固定返回 `501 feature_not_supported`。
 SQLite 竞价事务必须使用 `BEGIN IMMEDIATE` 的串行写入口，不能因为 migration 已存在就绕过
 该适配器边界。

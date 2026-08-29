@@ -85,7 +85,6 @@ pub(super) async fn apply_preview_plan_postgres(
              SET status = 'preview',
                  preview_opened_at = COALESCE(preview_opened_at, $1),
                  preview_manual_open = preview_manual_open OR $2,
-                 preview_revision = preview_revision + 1,
                  state_version = $3,
                  updated_at = $1
              WHERE id = $4 AND status = 'draft' AND state_version = $5
@@ -104,7 +103,7 @@ pub(super) async fn apply_preview_plan_postgres(
     let Some(preview_revision) = preview_revision else {
         return Err(CompetitionTransactionError::InvalidState);
     };
-    if preview_revision <= 0 {
+    if preview_revision < 0 {
         return Err(invalid_state("预览修订版本无效"));
     }
 

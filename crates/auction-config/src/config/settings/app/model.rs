@@ -25,7 +25,8 @@ pub(super) struct FileConfig {
     pub(super) realtime: RealtimeConfig,
     /// 必填的敏感 TOML 相对或绝对路径。
     pub(super) secrets_file: PathBuf,
-    /// 可选的 Admin runtime 非敏感 TOML 路径；仅 Admin 会读取。
+    /// 可选的 Admin 管理 runtime 非敏感 TOML 路径；Admin 读取完整文档，Worker 只投影
+    /// MoogleMail world、发件人、装备过滤和通知模板。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
     /// 可选缓存区块；省略时使用关闭缓存的默认值。
@@ -37,12 +38,12 @@ pub(super) struct FileConfig {
     /// 可选 Worker 区块；省略时 PostgreSQL 并发为 8、SQLite 并发为 1，轮询为 60 秒。
     #[serde(default)]
     pub(super) worker: WorkerConfig,
-    /// 可选 HTTP 安全区块；省略时使用内置默认值。
+    /// 可选 HTTP 安全区块；省略时按进程角色使用内置默认值。
     #[serde(default)]
-    pub(super) http_security: HttpSecurityConfig,
-    /// 可选会话区块；省略时使用默认过期和并发限制。
+    pub(super) http_security: Option<HttpSecurityConfig>,
+    /// 可选会话区块；省略时按 Public/Admin 使用各自的旧版默认值。
     #[serde(default)]
-    pub(super) session: SessionConfig,
+    pub(super) session: Option<SessionConfig>,
 }
 
 pub(super) struct BuildInput {
@@ -56,8 +57,8 @@ pub(super) struct BuildInput {
     pub(super) cache: CacheConfig,
     pub(super) auction: AuctionConfig,
     pub(super) worker: WorkerConfig,
-    pub(super) http_security: HttpSecurityConfig,
-    pub(super) session: SessionConfig,
+    pub(super) http_security: Option<HttpSecurityConfig>,
+    pub(super) session: Option<SessionConfig>,
     pub(super) secrets_path: Option<PathBuf>,
     pub(super) runtime_config_path: Option<PathBuf>,
 }
@@ -93,9 +94,9 @@ pub struct AppConfig {
     pub config_path: Option<PathBuf>,
     /// 敏感配置文件路径；主配置加载时由必填 secrets_file 解析得到。
     pub secrets_path: Option<PathBuf>,
-    /// Admin runtime 文件路径；非 Admin 或省略 runtime_config_file 时为 None。
+    /// Admin 管理 runtime 文件路径；Admin/Worker 可配置，Public 或省略时为 None。
     pub runtime_config_path: Option<PathBuf>,
-    /// 已校验的 Admin runtime 非敏感文档；Worker/Public 始终为 None。
+    /// 已校验并应用到 Admin 进程的 runtime 文档；Worker 只保留投影后的启动配置，因此为 None。
     pub admin_runtime: Option<AdminRuntimeDocument>,
     pub(super) secrets: AppSecrets,
 }

@@ -1,11 +1,12 @@
 //! PostgreSQL delivery Admin 适配器装配。
 //!
-//! 列表读取、人工命令事务和安全投影映射分别位于 `reads.rs`、`commands.rs` 和 `mapping.rs`；
-//! 本文件只负责端口校验、后端能力分派和共享错误分类。SQLite Lite 明确不提供该能力。
+//! 列表读取、人工命令编排、安全投影映射和 Serializable 边界分别位于 `reads.rs`、
+//! `commands.rs`、`mapping.rs` 和 `transaction.rs`；本文件只负责端口校验、后端能力分派和
+//! 共享错误分类。SQLite Lite 明确不提供该能力。
 
 use auction_application::{
-    ApplicationError, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest,
-    DeliveryAdminPage, DeliveryAdminPort,
+    ApplicationError, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError,
+    DeliveryAdminListRequest, DeliveryAdminPage, DeliveryAdminPort,
 };
 
 use super::DatabaseStore;
@@ -16,6 +17,8 @@ mod commands;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reads;
+#[cfg(feature = "postgres")]
+mod transaction;
 
 impl DeliveryAdminPort for DatabaseStore {
     fn list(
@@ -24,7 +27,7 @@ impl DeliveryAdminPort for DatabaseStore {
     ) -> auction_application::ApplicationFuture<'_, DeliveryAdminPage> {
         Box::pin(async move {
             if !request.validate() {
-                return Err(repository_error("delivery Admin 列表参数无效"));
+                return Err(DeliveryAdminError::Invalid.into());
             }
             match self {
                 #[cfg(feature = "postgres")]
@@ -59,7 +62,7 @@ impl DeliveryAdminPort for DatabaseStore {
     }
 }
 
-fn validate_command(command: &DeliveryAdminCommand) -> Result<(), ApplicationError> {
+fn validate_command(command: &DeliveryAdminCommand) -> Result<(), DeliveryAdminError> {
     if command.command_id.is_nil()
         || command.delivery_id.is_nil()
         || command.expected_fencing_version <= 0
@@ -71,7 +74,7 @@ fn validate_command(command: &DeliveryAdminCommand) -> Result<(), ApplicationErr
             .is_some_and(|value| value.is_empty() || value != value.trim())
         || command.request_hash.as_bytes() == [0; 32]
     {
-        return Err(repository_error("delivery Admin 命令参数无效"));
+        return Err(DeliveryAdminError::Invalid);
     }
     match command.action {
         DeliveryAdminAction::Release
@@ -90,24 +93,12 @@ fn validate_command(command: &DeliveryAdminCommand) -> Result<(), ApplicationErr
                     .failure_code
                     .as_ref()
                     .is_some_and(|value| !value.is_empty() && value == value.trim()) => {}
-        _ => return Err(repository_error("delivery Admin 命令结果字段不匹配")),
+        _ => return Err(DeliveryAdminError::Invalid),
     }
     Ok(())
 }
 
-fn repository_error(message: &str) -> ApplicationError {
-    auction_application::RepositoryError::Failed(message.to_owned()).into()
-}
-
 #[cfg(feature = "postgres")]
-pub(crate) fn repository_error_owned(message: &str) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(message.to_owned())
-}
-
-#[cfg(feature = "postgres")]
-pub(crate) fn map_storage_error(error: sqlx::Error) -> auction_application::RepositoryError {
-    auction_application::RepositoryError::Failed(match error {
-        sqlx::Error::RowNotFound => "delivery Admin 记录不存在".to_owned(),
-        _ => "delivery Admin 数据库操作失败".to_owned(),
-    })
+pub(crate) fn map_storage_error(_: sqlx::Error) -> DeliveryAdminError {
+    DeliveryAdminError::Unavailable
 }

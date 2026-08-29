@@ -4,6 +4,7 @@ use super::mapping::*;
 use super::reads::{load_command_sqlite, load_user_sqlite};
 use super::*;
 
+mod blacklist;
 mod create;
 mod mutation;
 mod revert;

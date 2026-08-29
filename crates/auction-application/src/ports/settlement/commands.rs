@@ -2,16 +2,80 @@ use std::future::Future;
 
 use chrono::{DateTime, Utc};
 use thiserror::Error;
+use uuid::Uuid;
 
 use auction_domain::{
-    AuctionId, CompetitionPlan, RecoveryPolicy, SettlementAmount, SettlementFact, SettlementPlan,
-    SettlementPolicy,
+    AuctionId, CommandId, CompetitionPlan, RecoveryPolicy, SettlementAmount, SettlementFact,
+    SettlementLine, SettlementMode, SettlementObligationKind, SettlementPlan, SettlementPolicy,
 };
 
 use super::{
-    CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture, TransactionPolicy,
-    TransactionPolicyError,
+    ApplicationFuture, CommandLedgerError, CompetitionSnapshot, StoredCommand, TransactionFuture,
+    TransactionPolicy, TransactionPolicyError,
 };
+
+/// 旧版已完成结算账本与当前权威事实只读核验后的安全摘要。
+///
+/// 该结果不包含用户、装备、义务正文或命令 payload；运维表面只能据此确认旧账本已被严格
+/// 对账，不能把它当作新的结算命令结果再次持久化。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacySettlementVerification {
+    pub auction_id: Uuid,
+    pub workflow_id: Uuid,
+    pub claim_command_id: Uuid,
+    pub complete_command_id: Uuid,
+    pub due_at: DateTime<Utc>,
+    pub state_version: u64,
+    pub sold_count: u64,
+    pub unsold_count: u64,
+    pub obligation_count: u64,
+    pub line_count: u64,
+}
+
+/// 旧版已完成结算账本的只读核验入口。
+///
+/// 实现必须要求已有 `settlement_complete/OK` 账本并在同一只读快照中对账，缺失账本时不得
+/// 退化为通用 `settle`，也不得清空 completion fence 或追加任何事实。
+pub trait LegacySettlementVerificationPort: Send + Sync {
+    fn verify_legacy_settlement(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, LegacySettlementVerification>;
+}
+
+/// 已结算拍卖中按义务种类聚合的权威数量。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedSettlementObligationCount {
+    pub kind: SettlementObligationKind,
+    pub count: u64,
+}
+
+/// 已结算拍卖的权威持久化事实，用于兼容接管旧版命令账本的只读重放。
+///
+/// 该投影只包含结算摘要、不可变 lot 金额和义务种类数量；履约阶段会改变的义务状态不属于
+/// 结算命令原始结果，不能拿当前履约状态覆盖历史重放。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedSettlement {
+    pub command_id: CommandId,
+    /// workflow 完成 fence；旧版在结算事务内写入，新版可能由下一步 completion-only 补写。
+    pub workflow_complete_command_id: Option<CommandId>,
+    pub policy_version: u32,
+    pub policy_mode: SettlementMode,
+    pub pool_enabled: bool,
+    pub opening_pool: SettlementAmount,
+    pub closing_pool: SettlementAmount,
+    pub opening_pool_version: u64,
+    pub closing_pool_version: u64,
+    pub tax_total: SettlementAmount,
+    pub discount_demand: SettlementAmount,
+    pub compensation_total: SettlementAmount,
+    pub sold_count: u64,
+    pub unsold_count: u64,
+    pub obligation_counts: Vec<PersistedSettlementObligationCount>,
+    pub state_version: u64,
+    pub settled_at: DateTime<Utc>,
+    pub lines: Vec<SettlementLine>,
+}
 
 /// 结算事务锁内读取的拍卖事实。
 ///
@@ -31,6 +95,8 @@ pub struct SettlementSnapshot {
     pub facts: Vec<SettlementFact>,
     /// 首次结算时用于领域层关闭活动代理的锁内竞价快照；已结算命令重放时为空。
     pub lot_competitions: Vec<CompetitionSnapshot>,
+    /// 仅在拍卖已经 settled 时存在；用于把旧版摘要账本与当前权威事实逐项对账。
+    pub persisted_settlement: Option<PersistedSettlement>,
 }
 
 #[derive(Debug, Error)]
@@ -71,6 +137,7 @@ pub trait SettlementTransaction: Send {
     fn insert_command(
         &mut self,
         command: StoredCommand,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 
     fn apply_settlement(
@@ -80,6 +147,7 @@ pub trait SettlementTransaction: Send {
         plan: SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send;
 }
 

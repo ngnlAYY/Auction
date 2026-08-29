@@ -9,8 +9,10 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres(
     now: DateTime<Utc>,
     retry_after: ChronoDuration,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
+    // 与旧 Worker 一致，在 Serializable runner 外生成一次事件 ID，并在重试间保持不变。
+    let preview_event_id = Uuid::new_v4();
     for attempt in 0..3_u8 {
-        match advance_relist_postgres_once(pool, now, retry_after).await {
+        match advance_relist_postgres_once(pool, now, retry_after, preview_event_id).await {
             Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
             result => return result,
         }
@@ -23,6 +25,7 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once
     pool: &crate::database::TrackedPool<Postgres>,
     now: DateTime<Utc>,
     retry_after: ChronoDuration,
+    preview_event_id: Uuid,
 ) -> Result<Option<RecoveryResolutionAdvance>, RecoveryCommandError> {
     let mut transaction = pool.begin().await.map_err(map_sql_error)?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
@@ -131,8 +134,16 @@ pub(in crate::database::recovery_commands) async fn advance_relist_postgres_once
     validate_custody_evidence(&recovery, selected_action)?;
 
     let command_id = scheduled_relist_command_id(recovery.id);
-    let relist =
-        relist_recovery(&mut transaction, &recovery, &lot, command_id, action, now).await?;
+    let relist = relist_recovery(
+        &mut transaction,
+        &recovery,
+        &lot,
+        command_id,
+        preview_event_id,
+        action,
+        now,
+    )
+    .await?;
     if relist.auction_id.is_none() && relist.lot_id.is_none() {
         let retry_at = now.checked_add_signed(retry_after).ok_or_else(|| {
             RecoveryCommandError::Failed("recovery relist 重试时间溢出".to_owned())

@@ -1,9 +1,10 @@
 //! Worker 调度共享阶段、命令、UUID、时间与错误映射。
 
 use auction_application::ScheduledRoundPhase;
-use auction_domain::{CommandId, deterministic_uuid};
+use auction_domain::{CommandId, deterministic_uuid, legacy_natural_key_uuid};
 #[cfg(feature = "sqlite")]
 use chrono::DateTime;
+use chrono::NaiveDate;
 #[cfg(feature = "sqlite")]
 use chrono::Utc;
 use uuid::Uuid;
@@ -12,13 +13,31 @@ pub(crate) fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-pub(crate) fn command_id(create_command_id: Uuid, phase: ScheduledRoundPhase) -> CommandId {
-    let label = match phase {
-        ScheduledRoundPhase::Preview => "scheduled-preview",
-        ScheduledRoundPhase::Open => "scheduled-open",
-        ScheduledRoundPhase::Final => "scheduled-final",
+pub(crate) fn command_id(
+    create_command_id: Uuid,
+    world_id: &str,
+    local_week: NaiveDate,
+    phase: ScheduledRoundPhase,
+) -> CommandId {
+    let legacy_kind = match phase {
+        ScheduledRoundPhase::Preview => Some("preview-command"),
+        ScheduledRoundPhase::Open => Some("open-command"),
+        ScheduledRoundPhase::Final => None,
     };
-    CommandId::from_uuid(deterministic_uuid(CommandId::from_uuid(create_command_id), label, 1))
+    if let Some(kind) = legacy_kind {
+        let week = local_week.format("%Y-%m-%d").to_string();
+        return CommandId::from_uuid(legacy_natural_key_uuid(
+            "auction-schedule",
+            &[kind.as_bytes(), world_id.as_bytes(), week.as_bytes()],
+        ));
+    }
+
+    // 旧版周计划只拥有 preview/open 命令；Final 是新版持久化 lifecycle 的内部阶段。
+    CommandId::from_uuid(deterministic_uuid(
+        CommandId::from_uuid(create_command_id),
+        "scheduled-final",
+        1,
+    ))
 }
 
 pub(crate) fn phase_from_completion(

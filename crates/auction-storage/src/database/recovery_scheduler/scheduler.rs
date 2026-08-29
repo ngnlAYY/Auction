@@ -19,8 +19,6 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 use auction_domain::{SettlementId, deterministic_uuid};
 #[cfg(feature = "postgres")]
-use sha2::{Digest, Sha256};
-#[cfg(feature = "postgres")]
 use sqlx::{Postgres, Row};
 
 use super::DatabaseStore;
@@ -198,6 +196,7 @@ impl RecoveryWorkStore for DatabaseStore {
         claim: RecoveryActionClaim,
         proof_kind: String,
         proof_reference: String,
+        proof_digest: [u8; 32],
         observed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -208,10 +207,12 @@ impl RecoveryWorkStore for DatabaseStore {
                 || claim.execution_state != "pending"
                 || claim.delivery_id.is_some()
                 || claim.claim_token.is_nil()
-                || observed_at < claim.created_at
+                || observed_at < claim.claimed_at
+                || observed_at > claim.lease_until
                 || observed_at.timestamp_nanos_opt().is_none()
                 || !valid_failure_code(&proof_kind)
                 || !valid_failure_code(&proof_reference)
+                || proof_digest == [0; 32]
             {
                 return Err(repository_error("recovery action 完成证明参数无效").into());
             }
@@ -222,6 +223,7 @@ impl RecoveryWorkStore for DatabaseStore {
                     &claim,
                     &proof_kind,
                     &proof_reference,
+                    proof_digest,
                     observed_at,
                 )
                 .await
@@ -245,6 +247,7 @@ impl RecoveryWorkStore for DatabaseStore {
                 || claim.execution_state != "enqueued"
                 || claim.claim_token.is_nil()
                 || claim.delivery_id.is_none_or(|value| value.is_nil())
+                || observed_at < claim.claimed_at
                 || observed_at.timestamp_nanos_opt().is_none()
             {
                 return Err(repository_error("recovery action 观察参数无效").into());

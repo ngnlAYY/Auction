@@ -95,8 +95,22 @@ impl SettlementLine {
             {
                 return Err(DomainError::InvalidSettlementFacts("流拍结算明细金额不一致"));
             }
-        } else if self.listed_price.value() == 0 || self.seller_amount != self.listed_price {
-            return Err(DomainError::InvalidSettlementFacts("成交结算明细价格矩阵不一致"));
+        } else {
+            let end_price = self.end_price.value();
+            let seller_amount = self.seller_amount.value();
+            let tax_amount = self.tax_amount.value();
+            let compensation_amount = self.compensation_amount.value();
+            if self.listed_price.value() == 0
+                || self.seller_amount != self.listed_price
+                || tax_amount > 0 && compensation_amount > 0
+                || tax_amount > 0 && seller_amount != end_price
+                || tax_amount == 0 && seller_amount > end_price
+                || compensation_amount > 0 && seller_amount >= end_price
+            {
+                return Err(DomainError::InvalidSettlementFacts(
+                    "成交结算明细价格、税费或补偿矩阵不一致",
+                ));
+            }
         }
         Ok(())
     }

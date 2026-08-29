@@ -1,20 +1,19 @@
 //! Public 成交价格历史只读适配器装配。
 //!
-//! PostgreSQL 与 SQLite Lite 的查询和行映射分别位于后端子模块；共享的游标、筛选、统计
-//! 校验和 UUID/时间转换位于 `mapping.rs`，避免把两套 SQL 与公共分页契约混在一起。
+//! PostgreSQL 完整档从结算事实链读取成交历史；SQLite Lite 没有 settlement owner，因此显式
+//! 报告能力缺失，不能只凭可手工写入的 `settled`/`sold` 状态拼装看似完整的成交记录。
 
 use auction_application::{
-    ApplicationFuture, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
-    PublicPriceHistoryReader,
+    ApplicationError, ApplicationFuture, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
+    PublicPriceHistoryReader, RepositoryError,
 };
 
 use super::DatabaseStore;
 
+#[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 impl PublicPriceHistoryReader for DatabaseStore {
     fn list_public_price_history(
@@ -22,12 +21,18 @@ impl PublicPriceHistoryReader for DatabaseStore {
         request: PublicPriceHistoryListRequest,
     ) -> ApplicationFuture<'_, PublicPriceHistoryPage> {
         Box::pin(async move {
-            request.validate().map_err(mapping::storage_error)?;
+            request.validate().map_err(|_| {
+                ApplicationError::Repository(RepositoryError::Failed(
+                    "公开价格历史查询参数无效".to_owned(),
+                ))
+            })?;
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::list_postgres(store, request).await,
                 #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => sqlite::list_sqlite(store, request).await,
+                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "公开价格历史仅支持 PostgreSQL 完整档",
+                )),
             }
         })
     }

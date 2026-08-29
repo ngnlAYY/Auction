@@ -73,6 +73,8 @@ impl AdminIntakeCommand {
     }
 
     /// 计算不包含明文 key 的稳定请求摘要。
+    ///
+    /// `request_id` 只属于观测与审计；每次 HTTP 重试都会变化，不能参与业务幂等判等。
     pub fn request_hash(&self, aggregate_id: Uuid) -> Result<RequestHash, serde_json::Error> {
         #[derive(Serialize)]
         struct Request<'a> {
@@ -83,7 +85,6 @@ impl AdminIntakeCommand {
             start_price: i64,
             player_id: &'a str,
             actor_id: &'a str,
-            request_id: Option<&'a str>,
         }
 
         let equipment = self.equipment.as_ref().map(CanonicalEquipment::digest_view);
@@ -98,7 +99,6 @@ impl AdminIntakeCommand {
                 start_price: self.start_price,
                 player_id: &self.player_id,
                 actor_id: &self.actor_id,
-                request_id: self.request_id.as_deref(),
             },
         )
     }

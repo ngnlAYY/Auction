@@ -4,6 +4,7 @@ use super::*;
 
 /// Public 论坛镜像同步状态响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicForumResponse {
     pub auction_id: String,
     pub status: String,

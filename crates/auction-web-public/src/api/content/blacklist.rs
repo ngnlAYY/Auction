@@ -4,7 +4,7 @@ pub(crate) use auction_contracts::{
     PublicBlacklistEntryResponse as BlacklistEntry, PublicBlacklistResponse as BlacklistPage,
 };
 
-use super::{ApiResponse, send_get};
+use super::{decoder, send_get};
 
 pub(crate) async fn fetch_blacklist(page: i64) -> Result<BlacklistPage, String> {
     let page = page.max(1);
@@ -12,7 +12,5 @@ pub(crate) async fn fetch_blacklist(page: i64) -> Result<BlacklistPage, String> 
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<BlacklistPage> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+    decoder::decode_blacklist(response).await
 }

@@ -1,13 +1,14 @@
 use std::future::Future;
 
 use auction_application::{
+    CommandLedgerError, PersistedSettlement, PersistedSettlementObligationCount,
     SettlementSnapshot, SettlementTransaction, SettlementTransactionError,
     SettlementTransactionFailure, SettlementTransactionRunner, StoredCommand, TransactionFuture,
     TransactionIsolation, TransactionPolicy,
 };
 use auction_domain::{
     AuctionId, CommandId, CompetitionPlan, ProxyStatus, RecoveryPolicy, SettlementAmount,
-    SettlementFact, SettlementMode, SettlementObligation, SettlementObligationKind,
+    SettlementFact, SettlementLine, SettlementMode, SettlementObligation, SettlementObligationKind,
     SettlementObligationState, SettlementPlan, SettlementPolicy, SettlementWorld,
     deterministic_uuid,
 };
@@ -116,8 +117,9 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
     fn insert_command(
         &mut self,
         command: StoredCommand,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send {
-        async move { self.insert_command_inner(command).await.map_err(map_competition_error) }
+        async move { self.insert_settlement_command(command, occurred_at).await }
     }
 
     fn apply_settlement(
@@ -127,6 +129,7 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
         plan: SettlementPlan,
         proxy_closure_plans: Vec<CompetitionPlan>,
         recovery_policy: RecoveryPolicy,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), SettlementTransactionError>> + Send {
         async move {
             self.apply_settlement_inner(
@@ -135,6 +138,7 @@ impl SettlementTransaction for PostgresCompetitionTransaction {
                 plan,
                 proxy_closure_plans,
                 recovery_policy,
+                occurred_at,
             )
             .await
         }

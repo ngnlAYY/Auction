@@ -13,8 +13,14 @@ where
 {
     match store.observe_action(claim.clone(), clock.now()).await {
         Ok(RecoveryActionOutcome::Retry) => {
-            release_recovery_action(store, clock, claim, retry_delay, "recovery_delivery_pending")
-                .await
+            release_recovery_action(
+                store,
+                clock,
+                claim,
+                retry_delay,
+                "recovery_evidence_not_observed",
+            )
+            .await
         }
         Ok(RecoveryActionOutcome::Satisfied { proof_kind, proof_reference }) => {
             tracing::info!(

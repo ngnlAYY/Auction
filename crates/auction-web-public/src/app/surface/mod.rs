@@ -42,30 +42,42 @@ pub(crate) use pages::*;
 pub(crate) use query::*;
 pub(crate) use router::Route;
 pub use router::run;
+pub(crate) use session::{initial_login_return_location, login_href_for_current_location};
 
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use dioxus_i18n::{prelude::*, t};
+use dioxus_i18n::prelude::*;
 use gloo_timers::future::TimeoutFuture;
-use std::{cell::Cell, collections::BTreeMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeMap,
+    rc::Rc,
+};
 use unic_langid::langid;
 use url::form_urlencoded;
 #[cfg(target_arch = "wasm32")]
 use uuid::Uuid;
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 use crate::api::{
-    AuctionListPage, CatalogRow, CurrentAuction, EquipmentDetail, HistoricalAuction, LotDetailItem,
-    LotEnvelopeRows, ProxyCommandAuthorization, RealtimeEvent, WorldStatus, Worlds, estimated_now,
-    fetch_auction_list, fetch_auction_page, fetch_current_auction, fetch_current_lots,
-    fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail, fetch_my_proxy,
-    fetch_public_session, fetch_worlds, lot_code_for, subscribe_auction_realtime,
-    subscribe_realtime,
+    AuctionListPage, CatalogRow, CurrentAuction, HistoricalAuction, LotDetailFetchError,
+    LotDetailItem, LotEnvelopeRows, ProxyCommandAuthorization, PublicSession, RealtimeCache,
+    RealtimeEvent, WorldStatus, Worlds, estimated_now, fetch_auction_list, fetch_auction_page,
+    fetch_current_auction, fetch_current_lots, fetch_historical_auction, fetch_lot_bid_log,
+    fetch_lot_detail, fetch_my_proxy, fetch_public_readiness, fetch_public_session, fetch_worlds,
+    lot_code_for, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
-    BaseStylesheet, LanguagePicker, format_credit_amount as format_amount, format_localized_time,
+    BaseStylesheet, LanguagePicker, TruncatedText, format_credit_amount as format_amount,
+    format_localized_time,
     i18n::{DEFAULT_PUBLIC_LOCALE, initial_language},
-    use_dialog_focus_trap, use_locale_effects,
+    legacy_t as t, use_dialog_focus_trap, use_locale_effects,
 };
 use pagination::PublicPager;
+
+/// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。
+pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, String>>;
+
+/// Public 外壳按世界读取的当前拍卖快照；结果携带请求世界，切换期间不得消费旧世界缓存。
+pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;

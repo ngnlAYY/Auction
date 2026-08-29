@@ -19,6 +19,48 @@ pub struct AuctionConfig {
     pub economics: AuctionEconomicsConfig,
     /// 结算曲线和恢复策略参数。
     pub settlement: AuctionSettlementConfig,
+    /// 每周轮次生成、preview/open 和 MoogleMail gate 的稳定计划。
+    pub schedule: AuctionScheduleConfig,
+}
+
+/// 按旧版共享配置表达的本地周拍卖时间表。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AuctionScheduleConfig {
+    /// 是否启用 Worker 周计划；省略时关闭，避免开发数据库自动建轮次。
+    pub enabled: bool,
+    /// 计划使用的 IANA 时区。
+    pub timezone: String,
+    /// preview 的星期名称，例如 Friday。
+    pub preview_day: String,
+    /// preview 的本地时间，格式 HH:MM。
+    pub preview_time: String,
+    /// open 的星期名称，例如 Friday。
+    pub open_day: String,
+    /// open 的本地时间，格式 HH:MM。
+    pub open_time: String,
+    /// 名义结束的星期名称，例如 Saturday。
+    pub nominal_end_day: String,
+    /// 名义结束的本地时间，格式 HH:MM。
+    pub nominal_end_time: String,
+    /// 参与周计划的 world；省略时使用 main 和 isekai。
+    pub worlds: Vec<String>,
+}
+
+impl Default for AuctionScheduleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            timezone: "Asia/Shanghai".to_owned(),
+            preview_day: "Friday".to_owned(),
+            preview_time: "10:00".to_owned(),
+            open_day: "Friday".to_owned(),
+            open_time: "12:00".to_owned(),
+            nominal_end_day: "Saturday".to_owned(),
+            nominal_end_time: "22:00".to_owned(),
+            worlds: vec!["main".to_owned(), "isekai".to_owned()],
+        }
+    }
 }
 
 impl AuctionConfig {

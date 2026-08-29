@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::{PublicApiState, api_error, parse_positive_i64, parse_query, timestamp};
+use super::{PublicApiState, api_error, parse_positive_i64, parse_query, public_timestamp};
 
 /// 读取当前公开黑名单，保留旧系统的 `users`、页码和总数形状。
 pub(crate) async fn list(
@@ -77,6 +77,6 @@ fn map_entry(entry: PublicBlacklistEntry) -> PublicBlacklistEntryResponse {
     PublicBlacklistEntryResponse {
         game_player_id: entry.game_player_id,
         reason: entry.public_reason,
-        blacklisted_at: timestamp(entry.blacklisted_at),
+        blacklisted_at: public_timestamp(entry.blacklisted_at),
     }
 }

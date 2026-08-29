@@ -234,12 +234,11 @@ pub(super) fn settlement_return_subject(subject: &str) -> bool {
 pub(super) fn settlement_return_obligation_id(subject: &str) -> Option<Uuid> {
     let (base, encoded) = subject.rsplit_once(" [")?;
     if !subject.ends_with(']')
-        || !(base.eq_ignore_ascii_case("auction equipment delivery")
-            || base.eq_ignore_ascii_case("auction payment request"))
+        || !(base == "auction equipment delivery" || base == "auction payment request")
     {
         return None;
     }
     let encoded = encoded.strip_suffix(']')?;
     let obligation_id = Uuid::parse_str(encoded).ok()?;
-    obligation_id.to_string().eq_ignore_ascii_case(encoded).then_some(obligation_id)
+    (!obligation_id.is_nil() && obligation_id.to_string() == encoded).then_some(obligation_id)
 }

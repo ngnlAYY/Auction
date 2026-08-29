@@ -35,9 +35,11 @@ pub(super) async fn apply_open_plan_sqlite(
     let now = sqlite_timestamp(auction.updated_at);
     let activated = {
         let connection = transaction.connection_mut()?;
+        // Lite 与 PostgreSQL 共用 NULL 无领先者语义；旧版起拍价哨兵只在边界防腐层
+        // 归一化，不能在领域层伪造成已经存在的竞价事实。
         sqlx::query(
             "UPDATE lots
-             SET status = 'live', current_price = start_price, effective_end_at = ?,
+             SET status = 'live', current_price = NULL, effective_end_at = ?,
                  slow_due_at = NULL, slow_authorization_id = NULL, slow_generation = 0,
                  last_proxy_sequence = 0, state_version = state_version + 1, updated_at = ?
              WHERE auction_id = ? AND status = 'pending'",

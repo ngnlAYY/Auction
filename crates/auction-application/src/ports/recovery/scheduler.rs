@@ -152,6 +152,7 @@ pub trait RecoveryWorkStore: Send + Sync {
         claim: RecoveryActionClaim,
         proof_kind: String,
         proof_reference: String,
+        proof_digest: [u8; 32],
         observed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 

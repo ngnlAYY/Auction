@@ -1,7 +1,7 @@
 //! 已有代理授权的降低上限表单及其提交状态。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{CommandError, OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
@@ -99,7 +99,11 @@ pub(super) fn ProxyAuthorizationForm(
                                     saved_authorization.set(Some(Box::new(authorization)));
                                     refresh_generation.set(refresh_generation().saturating_add(1));
                                 }
-                                Err(error) => failure.set(Some(error)),
+                                Err(error) => {
+                                    failure.set(Some(error));
+                                    // 降低失败也要刷新权威 lot/代理状态，但不能清除可重试命令。
+                                    refresh_generation.set(refresh_generation().saturating_add(1));
+                                }
                             }
                         });
                     },

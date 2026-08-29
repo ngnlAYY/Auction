@@ -1,12 +1,13 @@
 //! Admin 拍卖生命周期动作按钮与确认对话框。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{
     AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
 };
+use crate::app::surface::admin_api_error_message;
 
 use super::model::{
     lifecycle_action_button_class, lifecycle_action_confirm_note, lifecycle_action_confirm_title,
@@ -26,7 +27,7 @@ pub(super) fn AdminAuctionActions(
     reload_generation: Signal<u64>,
 ) -> Element {
     let busy = use_signal(|| false);
-    let feedback = use_signal(|| None::<bool>);
+    let feedback = use_signal(|| None::<String>);
     let pending_action = use_signal(|| None::<AdminAuctionLifecycleAction>);
     let cancel_reason = use_signal(String::new);
     let command_state = use_signal(|| None::<(String, Uuid)>);
@@ -64,11 +65,11 @@ pub(super) fn AdminAuctionActions(
                 command_state,
             }
         }
-        if feedback() == Some(false) {
+        if let Some(code) = feedback() {
             span {
                 class: "admin-panel__note action-feedback action-feedback--error",
                 role: "alert",
-                {t!("admin-auctions-action-error")}
+                {admin_api_error_message(&code)}
             }
         }
     }
@@ -105,7 +106,7 @@ fn AdminAuctionActionDialog(
     expected_state_version: i64,
     action: AdminAuctionLifecycleAction,
     busy: Signal<bool>,
-    mut feedback: Signal<Option<bool>>,
+    mut feedback: Signal<Option<String>>,
     mut notice: Signal<Option<AdminAuctionLifecycleAction>>,
     reload_generation: Signal<u64>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
@@ -113,85 +114,100 @@ fn AdminAuctionActionDialog(
     mut command_state: Signal<Option<(String, Uuid)>>,
 ) -> Element {
     let is_cancel = action == AdminAuctionLifecycleAction::Cancel;
+    let is_final = action == AdminAuctionLifecycleAction::FinalPhase;
     let is_destructive = matches!(
         action,
         AdminAuctionLifecycleAction::Cancel | AdminAuctionLifecycleAction::FinalPhase
     );
     let can_submit = !busy() && (!is_cancel || !cancel_reason().trim().is_empty());
+    let title_id = lifecycle_action_title_id(action, &auction_id);
+    let cancel_reason_id = format!("cancel-reason-{auction_id}");
+    let action_signals = LifecycleActionSignals {
+        busy,
+        feedback,
+        notice,
+        reload_generation,
+        pending_action,
+        cancel_reason,
+        command_state,
+    };
     rsx! {
-        div { class: "admin-auctions__dialog-backdrop", role: "presentation",
+        div { class: "admin-shell__dialog-backdrop", role: "presentation",
             section {
-                class: "admin-auctions__dialog",
+                class: "admin-shell__dialog",
                 role: "dialog",
                 aria_modal: "true",
-                aria_labelledby: "admin-auction-action-title",
-                tabindex: "-1",
+                aria_labelledby: title_id.clone(),
                 onkeydown: move |event| {
                     if event.key() == Key::Escape && !busy() {
+                        event.prevent_default();
+                        event.stop_propagation();
                         pending_action.set(None);
                         cancel_reason.set(String::new());
                         feedback.set(None);
                     }
                 },
-                h2 { id: "admin-auction-action-title",
+                h2 { id: title_id,
                     {lifecycle_action_confirm_title(action, auction_sequence)}
                 }
-                form {
-                    class: "admin-auctions__dialog-form",
-                    onsubmit: move |event| {
-                        event.prevent_default();
-                        if !can_submit {
-                            return;
+                if is_final {
+                    p { {lifecycle_action_confirm_note(action)} }
+                    div { class: "admin-shell__dialog-actions",
+                        button {
+                            r#type: "button",
+                            disabled: busy(),
+                            autofocus: true,
+                            onclick: move |_| close_lifecycle_dialog(action_signals),
+                            {t!("admin-auctions-action-close")}
                         }
-                        let reason = is_cancel.then(|| cancel_reason().trim().to_owned());
-                        let auction_id = auction_id.clone();
-                        let signature = format!(
-                            "{action:?}:{expected_state_version}:{}",
-                            reason.as_deref().unwrap_or_default()
-                        );
-                        let command_id = match command_state() {
-                            Some((current, command_id)) if current == signature => command_id,
-                            _ => {
-                                let command_id = Uuid::new_v4();
-                                command_state.set(Some((signature, command_id)));
-                                command_id
-                            }
-                        };
-                        let mut busy = busy;
-                        let mut feedback = feedback;
-                        let mut notice = notice;
-                        let mut pending_action = pending_action;
-                        let mut cancel_reason = cancel_reason;
-                        let mut reload_generation = reload_generation;
-                        busy.set(true);
-                        spawn(async move {
-                            match execute_admin_auction_lifecycle(
-                                command_id,
-                                auction_id,
-                                action,
-                                expected_state_version,
-                                reason,
-                            )
-                            .await
-                            {
-                                Ok(_) => {
-                                    feedback.set(None);
-                                    notice.set(Some(action));
-                                    pending_action.set(None);
-                                    cancel_reason.set(String::new());
-                                    command_state.set(None);
-                                    reload_generation.set(reload_generation().saturating_add(1));
-                                }
-                                Err(_) => feedback.set(Some(false)),
-                            }
-                            busy.set(false);
-                        });
-                    },
-                    p { class: "admin-panel__note", {lifecycle_action_confirm_note(action)} }
+                        button {
+                            class: "admin-btn-danger",
+                            r#type: "button",
+                            disabled: busy(),
+                            onclick: move |_| run_lifecycle_action(
+                                LifecycleActionRequest {
+                                    auction_id: auction_id.clone(),
+                                    expected_state_version,
+                                    action,
+                                    reason: None,
+                                },
+                                action_signals,
+                            ),
+                            if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
+                        }
+                    }
+                } else {
                     if is_cancel {
-                        label {
-                            {t!("admin-auctions-cancel-reason")}
+                        p { {lifecycle_action_confirm_note(action)} }
+                    }
+                    form {
+                        class: "admin-auction-open",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            if !can_submit {
+                                return;
+                            }
+                            run_lifecycle_action(
+                                LifecycleActionRequest {
+                                    auction_id: auction_id.clone(),
+                                    expected_state_version,
+                                    action,
+                                    reason: is_cancel
+                                        .then(|| cancel_reason().trim().to_owned()),
+                                },
+                                action_signals,
+                            );
+                        },
+                        if !is_cancel {
+                            p { {lifecycle_action_confirm_note(action)} }
+                        }
+                        if is_cancel {
+                            label {
+                                r#for: cancel_reason_id.clone(),
+                                {t!("admin-auctions-cancel-reason")}
+                            }
                             textarea {
+                                id: cancel_reason_id,
                                 maxlength: "1024",
                                 required: true,
                                 autofocus: true,
@@ -202,35 +218,100 @@ fn AdminAuctionActionDialog(
                                     feedback.set(None);
                                 },
                             }
+                            p { {t!("admin-auctions-cancel-reason-hint")} }
                         }
-                        p { class: "admin-panel__note", {t!("admin-auctions-cancel-reason-hint")} }
-                    }
-                    if is_cancel && cancel_reason().trim().is_empty() {
-                        p { class: "admin-panel__note action-feedback action-feedback--error", role: "alert",
-                            {t!("admin-auctions-cancel-reason-required")}
-                        }
-                    }
-                    div { class: "admin-auctions__dialog-actions",
-                        button {
-                            r#type: "button",
-                            disabled: busy(),
-                            autofocus: !is_cancel,
-                            onclick: move |_| {
-                                pending_action.set(None);
-                                cancel_reason.set(String::new());
-                                feedback.set(None);
-                            },
-                            {t!("admin-auctions-action-close")}
-                        }
-                        button {
-                            class: if is_destructive { "admin-btn-danger" } else { "admin-btn-primary" },
-                            r#type: "submit",
-                            disabled: !can_submit,
-                            if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
+                        div { class: "admin-shell__dialog-actions",
+                            button {
+                                r#type: "button",
+                                disabled: busy(),
+                                autofocus: !is_cancel,
+                                onclick: move |_| close_lifecycle_dialog(action_signals),
+                                {t!("admin-auctions-action-close")}
+                            }
+                            button {
+                                class: if is_destructive { "admin-btn-danger" } else { "admin-btn-primary" },
+                                r#type: "submit",
+                                disabled: !can_submit,
+                                if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct LifecycleActionSignals {
+    busy: Signal<bool>,
+    feedback: Signal<Option<String>>,
+    notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    reload_generation: Signal<u64>,
+    pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
+    cancel_reason: Signal<String>,
+    command_state: Signal<Option<(String, Uuid)>>,
+}
+
+struct LifecycleActionRequest {
+    auction_id: String,
+    expected_state_version: i64,
+    action: AdminAuctionLifecycleAction,
+    reason: Option<String>,
+}
+
+/// 关闭生命周期对话框并丢弃只属于当前动作的表单状态。
+fn close_lifecycle_dialog(mut signals: LifecycleActionSignals) {
+    signals.pending_action.set(None);
+    signals.cancel_reason.set(String::new());
+    signals.feedback.set(None);
+}
+
+/// 提交已确认的生命周期动作；命令 ID 在同一输入重试期间保持稳定。
+fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleActionSignals) {
+    let LifecycleActionRequest { auction_id, expected_state_version, action, reason } = request;
+    let signature =
+        format!("{action:?}:{expected_state_version}:{}", reason.as_deref().unwrap_or_default());
+    let command_id = match (signals.command_state)() {
+        Some((current, command_id)) if current == signature => command_id,
+        _ => {
+            let command_id = Uuid::new_v4();
+            signals.command_state.set(Some((signature, command_id)));
+            command_id
+        }
+    };
+    signals.busy.set(true);
+    spawn(async move {
+        match execute_admin_auction_lifecycle(
+            command_id,
+            auction_id,
+            action,
+            expected_state_version,
+            reason,
+        )
+        .await
+        {
+            Ok(_) => {
+                signals.feedback.set(None);
+                signals.notice.set(Some(action));
+                signals.pending_action.set(None);
+                signals.cancel_reason.set(String::new());
+                signals.command_state.set(None);
+                signals.reload_generation.set((signals.reload_generation)().saturating_add(1));
+            }
+            Err(code) => signals.feedback.set(Some(code)),
+        }
+        signals.busy.set(false);
+    });
+}
+
+/// 复用旧版的动作标题锚点，保证同一页面上不同拍卖/动作的 dialog ID 不冲突。
+fn lifecycle_action_title_id(action: AdminAuctionLifecycleAction, auction_id: &str) -> String {
+    let action_name = match action {
+        AdminAuctionLifecycleAction::Preview => "preview",
+        AdminAuctionLifecycleAction::Open => "open",
+        AdminAuctionLifecycleAction::Cancel => "cancel",
+        AdminAuctionLifecycleAction::FinalPhase => "final",
+    };
+    format!("{action_name}-title-{auction_id}")
 }

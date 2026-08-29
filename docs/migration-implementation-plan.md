@@ -3,8 +3,9 @@
 ## Context
 
 本仓库当前处于**功能迁移后期**：工作区、四个进程装配、健康检查、TOML 配置、双数据库适配器
-边界、Dioxus 双 surface 与 5 语言已建立；旧版源码能力的静态盘点已收敛，当前工作重点是保持已有
-静态门禁，并完成真实外部服务、浏览器产物和部署切换的行为对照。
+边界、Dioxus 双 surface 与 5 语言已建立；旧版源码能力的静态盘点已收敛，发布制品和同宿主机隔离
+systemd/Caddy 生命周期也已取得 R1。当前工作重点是保持已有静态门禁，并完成真实外部服务、浏览器
+产物和最终生产切换的行为对照。
 
 旧系统 `../Auction-BF` 的实际规模（本次盘点所得，非估算）：
 
@@ -154,12 +155,14 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000015`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000019`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
-可观测性、论坛同步、Final phase 调度、领先时间修正和生命周期/operations alert 数据库不变量。旧名 `bid_proxies` 由只读兼容视图提供，不再维护第二份权威
+可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
+dispatch、生命周期/operations alert/lot 结束时间数据库不变量，以及旧 v28 bid 缺失结束时间的
+严格兼容 trigger。旧名 `bid_proxies` 由只读兼容视图提供，不再维护第二份权威
 状态。`auction-storage` 已接入 PostgreSQL 竞价与结算事务适配器：命令账本重放/冲突、
 权威状态锁、竞价/结算事实、履约初始状态、审计和 realtime 事件在对应事务内提交。
-SQLite `000001` 至 `000007` 及迁移入口已追加，
+SQLite `000001` 至 `000008` 及迁移入口已追加，
 Lite 的 `BEGIN IMMEDIATE` 竞价和 Worker 调度写适配器已接入。
 
 **优先级顺序**（依赖决定，非工作量决定）：
@@ -281,7 +284,8 @@ Sent 分页/exact ID 查找、详情资产矩阵解析、Balance 可见值/脚�
 自动对账，满足时追加 proof kind/reference/digest/observed_at，发送成功页没有 exact remote ID
 时转入 `manual_reconcile`。用户注册 key 只以密文信封落库，delivery outbox 只保存用户 UUID
 引用，发送前才由 Worker 解密。论坛主题同步和回帖导入已经接入 PostgreSQL Worker：主题发布使用
-持久化 claim/fencing 和 `write_unknown` 人工对账；回帖读取先通过登记身份、lot 映射和命令账本，
+持久化 claim/fencing，结果未知时先按精确标题只读对账；未命中必须经 PostgreSQL `000016` 的
+幂等人工授权和追加审计才允许下一次 POST。回帖读取先通过登记身份、lot 映射和命令账本，
 再调用现有竞价端口。MM `notify` 已进入 MoogleMail delivery outbox；结算事务现在会为每个获胜
 lot 同事务建立 `settlement_recoveries`，冻结付款超时和提醒策略。Recovery Worker 的 PostgreSQL
 完整档已接入 due case 推进：付款满足时推进主世界完成或异世界装备交接，付款超时推进
@@ -311,9 +315,9 @@ A05 已先落地为纯本地论坛预览解析：HTML/文本输入
 导入、改名、启停、删除和安全投影读取；Worker 按 world/shared 读取 active 密文池，在内存
 解密后按顺序尝试，密钥不匹配、密文损坏或已有 active 行全部无法解密时失败关闭；暂时没有
 active 行时保留 degraded 运行态，实际操作返回 credential unavailable。该密钥不能复用装备或用户
-登录 key，也不能进入日志、DTO、快照或提交内容。凭据 dashboard 已补齐 scope 最近更新时间、
-最近 Admin 变更时间和 Worker 启动心跳重启判断；Worker 未被可靠观测时保持 unknown，不把未验证
-的凭据加载状态误报为成功。
+登录 key，也不能进入日志、DTO、快照或提交内容。凭据 owner 内部已补齐 scope 最近更新时间、
+最近 Admin 变更时间和 Worker 启动心跳重启判断；旧 v1 dashboard 只投影聚合后的 availability、
+观测时间和最近 Admin 变更时间。Worker 未被可靠观测时保持 unknown，不把未验证状态误报为成功。
 
 兼容回退仍允许 `auction-config` 的 `ehentai_cookie()` / `mooglemail_cookie()` getter，以及
 `auction-config::load_mooglemail_keyenv` 读取 `.keyenv` 的两个固定键：`hv-ck-key1`（Bot）和
@@ -333,11 +337,12 @@ API；通用 panel/placeholder 只用于加载、错误或空结果，不再代�
 **实时更新用 WebSocket**（`/api/v1/ws`），与旧 `realtime/hub.go` 契约一致；事件带
 sequence/version，跳号或重连后重新读取权威快照，**不在浏览器端累积状态**。当前已先把
 `/api/v1/events` 的持久化 Catch-up 已接到 PostgreSQL/SQLite 事件表，支持拍卖流、after 游标、
-有界 page_size 和 `refetch_required`；`/api/v1/ws` 已接入 Public session、只读服务端推送、
-128 个并发连接上限和 ping/pong，并始终以持久化 Catch-up 和权威快照作为恢复依据。
-公开端 `/status` 已接入 `/api/v1/events` 的安全事件信封、sequence 游标、继续读取、刷新和
-`refetch_required` 停止边界；已认证会话还会自动订阅 `/api/v1/ws` 的只读事件页，客户端只替换
-服务端安全快照，跳号或 `refetch_required` 后停止并要求重新读取权威数据。公开端拍卖看板现在
+有界 page_size 和 `refetch_required`；旧版单拍卖读取要求规范 `auction_id`，发现读取使用显式
+`scope=auctions` 扩展。`/api/v1/ws` 已接入 Public session、只读逐事件推送、有界连接和 ping/pong，
+并始终以持久化 Catch-up 和权威快照作为恢复依据。
+公开端 `/status` 按旧版保持静态服务说明，不建立业务请求；持久事件 catch-up 与 WebSocket owner 位于
+公开拍卖看板。已认证会话会先完成 `/api/v1/ws` 握手、再以 HTTP 补齐游标，并消费旧版单事件帧；
+跳号或 `refetch_required` 后停止并要求重新读取权威数据。公开端拍卖看板现在
 会对已注册的拍卖生命周期、目录变化和竞价事件重新读取 `/api/v1/auctions/current` 及其 lot
 快照，不在浏览器端累积事件状态；Admin 拍卖列表也已提供带 CSRF、全新 `command_id` 和成功/失败
 反馈的 preview/open/cancel/final-phase 操作入口。
@@ -354,7 +359,8 @@ Fluent 消息 ID 不含点号（旧 `nav.home` → `nav-home`）。CI 已通过
 
 - 双跑只读流量，比较事件、余额、竞价结果。
 - 确认数据一致性与运维 runbook 后再切写。
-- 行为验证（对照测试、双写、切换前验证）在此阶段才纳入范围，**且需用户明确要求**。
+- 行为验证（人工对照、双写、切换前验证）在此阶段才纳入范围，**且需用户明确要求**；当前授权仅覆盖
+  隔离人工对照，不包含新增/运行测试用例或生产流量切换。
 
 ---
 
@@ -382,7 +388,7 @@ operations alert 已由
 `auction-http`/`auction-web-admin` 已接入 alerting dashboard section。SQLite 明确返回能力缺失。
 Worker control 协议本身已按 UDS/peer credential 边界接入。
 
-**测试边界：** 按 `AGENTS.md`，在用户明确要求前不新增或运行单元测试、功能测试、集成测试、
+**测试边界：** 按 `AGENTS.md` 和本轮用户要求，不新增或运行单元测试、功能测试、集成测试、
 端到端测试或浏览器测试。每阶段的默认验收只有 `just verify`
 （fmt / 源码布局与命名 / 配置注释 / Fluent 键集合 / check --locked / feature-check /
 clippy -D warnings / 两个 wasm 目标）加 MSRV job。
@@ -431,7 +437,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000015` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000016` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -441,7 +447,8 @@ session 与 Admin session 端口、两套启动时状态装配；Admin session �
 `/api/v1/auctions/{auction_id}/bid-log` 与 `/api/v1/lots/{lot_id}` 在配置数据库后返回
 权威数据，拍卖列表保留旧的页码与 keyset cursor 语义，lot 列表保留 preview/live 互斥投影、
 分类统计和旧分页形状，竞价日志保留 world/lot 筛选、编号页与完整 keyset cursor 分页，
-价格历史保留旧筛选、成交条目、编号页 stats 与 cursor 页未知 total 语义；P13/P14 补偿池
+PostgreSQL 完整档的价格历史保留旧筛选、成交条目、编号页 stats 与 cursor 页未知 total 语义，
+SQLite Lite 因没有 settlement 事实链返回 `501 feature_not_supported`；P13/P14 补偿池
 与单场账本已接入 PostgreSQL 完整档的 Serializable 快照、守恒/闭集校验、opaque cursor 和
 旧分页响应，SQLite Lite 明确返回 `501 feature_not_supported`。Public session 已
 使用 HttpOnly 会话 Cookie 与持久化会话表；P20 普通竞价已接入会话身份、稳定
@@ -454,15 +461,18 @@ session 与 Admin session 端口、两套启动时状态装配；Admin session �
 避免重入和命令重放混淆；Admin A06 lot 列表已接入
 PostgreSQL Serializable 同快照的拍卖/lot/装备/投稿投影、Admin 会话保护和管理端表格，SQLite
 Lite 因缺少完整生命周期字段明确返回 `501 feature_not_supported`。Admin 的 settlement-report
-与 recovery-report 已接入 PostgreSQL 完整档一致只读/安全快照，SQLite 明确返回 `501 feature_not_supported`。Admin 的 preview/open/cancel/
+与 recovery-report 已接入 PostgreSQL 完整档一致只读/安全快照；前者保持旧版严格 `auction` 字段闭集，
+并对序列化冲突/死锁最多重试三次，SQLite 明确返回 `501 feature_not_supported`。Admin 的 preview/open/cancel/
 final-phase 已接入统一生命周期端口；preview 建立唯一后继轮次并物化预览，open 校验时间与前序状态，
 cancel 只允许开放前执行，final-phase 在锁内转换可继续的 slow proxy 并冻结失格授权。Admin 请求使用状态版本 fence，取消要求原因，并在同一数据库事务内写入命令账本、状态版本、取消元数据、追加审计和
 注册表内的 lifecycle realtime 事件；A03 GET/POST 拍卖已接入 Admin 会话、旧分页/筛选、PostgreSQL Serializable 生命周期/lot 数量快照、管理端表格和创建表单；其创建命令已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件，主配置 `[auction]` 模板会同时写入 schema v4 快照与遗留规则列；SQLite Lite 创建与列表均返回 `501 feature_not_supported`。Public `/api/v1/events` 已接入 PostgreSQL/SQLite
 持久化事件回放、sequence 游标和 schema 安全边界；Worker 已接入 `scheduled_rounds` 的持久化 due claim、
-租约、尝试次数、preview/open/final 生命周期调用和失败退避，并在 PostgreSQL 完整档接入结算
+租约、尝试次数、preview/open/final 生命周期调用和失败退避；Auction 主循环还接入两后端数据库
+时钟驱动的慢速代理 due 扫描、旧版稳定命令身份、事务内 generation/due/authorization/截止时间/资格
+fence、stale 成功跳过和 `lot.slow_proxy_tick` 审计，并在 PostgreSQL 完整档接入结算
 workflow 的 due claim、稳定 `settle_auction` 命令、精确拍卖/lot/代理锁、代理关闭、sold/unsold
 结果、完成 fence 和失败退避；SQLite Lite 明确
-不启用结算 workflow。公开端首页看板、lot 详情、规则文档、公开黑名单、补偿池/账本、论坛镜像、竞价日志、成交价格历史和 `/status` 持久化实时事件游标页已接入同源 Public API；
+不启用结算 workflow。公开端首页看板、lot 详情、规则文档、公开黑名单、补偿池/账本、论坛镜像、竞价日志和成交价格历史已接入同源 Public API；`/status` 按旧版仅显示静态服务说明。成交价格历史在 SQLite Lite 下显示明确的永久能力缺失状态，不把 501 伪装成可重试存储故障；
 管理端 delivery 页面已接入状态筛选、数字分页、release/retry/reconcile 命令和旧版确认/对账交互，
 操作携带 `command_id`、CSRF 和 fencing version；manual reconcile 的 succeeded/failed 决策分别
 携带外部引用/失败代码。PostgreSQL 完整档还
@@ -470,7 +480,9 @@ workflow 的 due claim、稳定 `settle_auction` 命令、精确拍卖/lot/代�
 已按实时事件重新读取权威快照，管理端拍卖列表已提供带 CSRF、全新 `command_id` 和成功/失败反馈的
 生命周期操作；基础通知与结算 MoogleMail transport、Sent/Balance 远程回执对账、论坛主题同步和
 回帖竞价导入已接入；Public WebSocket 已补齐客户端事件信封/schema/连续游标校验，以及断档后
-`refetch_required` 权威快照恢复；Public 登录错误码/封禁公开原因、页头会话菜单、登录 key 清理、
+`refetch_required` 权威快照恢复；服务端 v1 连接边界已按 RT-002 静态恢复 4 KiB、50/60/5 秒时限、
+稳定 close reason、discovery 专属容量、settled 预检和独立连接尝试限流，真实帧 R1 仍待专用进程补录。
+Public 登录错误码/封禁公开原因、页头会话菜单、登录 key 清理、
 `/me` 竞价账户页映射、匿名登录 CTA、普通竞价/代理独立分页及登录/退出后的会话刷新已按旧版补齐；超出旧版 warning-only 边界的论坛命令扩展不属于等价范围。
 Public 只读历史、黑名单、规则、补偿和论坛镜像页面已补齐请求失败重试入口；Web 剩余项收敛为
 Admin 真实浏览器产物的逐页视觉/交互核对。
@@ -503,11 +515,10 @@ SIGINT/SIGTERM 停止心跳路径，返回数据库中的 health/process 聚合�
 通过安全 runtime 目录、实例锁、固定
 group/0660、inode 清理和显式 UID/GID peer allowlist 保护的 Unix socket 接入 live/ready/status，
 无数据库启动骨架启用同一 control 时也只报告进程存活和零
-poller，不伪造持久化就绪；Admin 现在消费完整安全 dashboard snapshot，展示 health/process、Worker、
-tracing、realtime、credential scope、mail/realtime/delivery 已接入
-轮询/入站、consumer lag/failure 和 delivery outbox 的安全汇总，fulfillment/recovery 复用
-operations-alert source 的履约/恢复水位，credential 按 kind/world 聚合与 alerting section
-也已接入；外部广播仍不属于本地 dashboard 汇总。
+poller，不伪造持久化就绪；Admin 现在只请求一次完整安全 dashboard snapshot，并按旧版顺序展示
+health/process、Worker、tracing、realtime、mail、delivery、fulfillment、recovery、credential availability
+和 alerting。credential scope、重启判断和其它增强诊断仍由内部 owner 计算，但不原地扩张旧 v1 dashboard
+响应；外部广播仍不属于本地 dashboard 汇总。
 Admin 结算页面已接入旧版 `/settlement` 的主要交互：已结算拍卖列表与分页、结算 lot 金额安全投影、
 资金池摘要、recovery 记录和带 state-version fence/CSRF/command ID 的确认对话框。页面仍只消费
 既有 settlement/recovery HTTP 契约，不把浏览器按钮状态当作写入授权；SQLite Lite 继续明确返回
@@ -540,35 +551,43 @@ poller 数量，不会把唤醒动作误报成已完成远程读取。Worker 随
 结构化后置证明：return 证明目标 `mid` 从收件箱完全消失，take 证明身份不变、资产归零与回执
 精确匹配。结算退信、Sent/Balance 回执对账和 recovery 后续 action 已接入
 PostgreSQL Worker；recovery 付款超时提醒由 recovery owner 接管，MoogleMail 协议层不拥有
-recovery 业务 owner。Worker 的 MoogleMail 配置还接入旧版
-`equipment_filter` 的闭集校验、装备属性/交易状态判定和退回原因；旧版 `mail_templates`
-现已迁移为受校验的结构化 TOML 字段，并在 Worker 启动时冻结为模板快照。论坛扩展通知仍
-保留 Rust 固定文案，因为它不属于旧版模板闭集，后续若要配置化需先冻结跨模块契约。
-MoogleMail 调度现已按 world 拆为独立循环，补齐旧版读取/业务处理各三次的超时重试、指数退避、
-周期抖动和全邮箱手动唤醒；Rust 的持久化 claim 在批次执行期间额外续租，失去 fence 后取消陈旧
-处理，不能使用过期 token 推进 cursor。
+recovery 业务 owner。旧版 `worlds`、发件人 allowlist、`equipment_filter` 与 14 个
+`mail_templates` 现由 Admin 管理的共享 runtime TOML 持有，并在 Worker 启动时投影为业务快照。
+Worker 主配置继续拥有 transport endpoint、凭据、调度、mailbox durable identity 和全局
+`enabled`；旧 runtime 缺少三个业务区块时继续使用 Worker 主配置，避免兼容文件被默认值静默改写。
+论坛扩展通知仍保留 Rust 固定文案，因为它不属于旧版模板闭集，后续若要配置化需先冻结跨模块契约。
+MoogleMail 调度现已按 world 拆为独立循环，补齐旧版读取/可重试业务处理各三次的超时重试、指数
+退避、周期抖动和全邮箱手动唤醒；Rust 的持久化 claim 在批次执行期间额外续租，失去 fence 后取消
+陈旧处理，不能使用过期 token 推进 cursor。应用错误已冻结 `Retryable`/`Permanent` 分类：确定性
+业务、输入和配置错误不再 inline retry，超时及可重试依赖错误才进入有界重试。
 
-A26/A27 Admin runtime 配置首片已接入：`auction-application` 的严格非敏感文档模型、稳定
+A26/A27 Admin runtime 配置已接入：`auction-application` 的严格非敏感文档模型、稳定
 fingerprint、版本化 request hash、pending/applied/unknown 恢复服务和窄端口已落地；Admin
 对外就绪前会先执行同一恢复服务，可证明的命令自动收口，`unknown`/文件冲突保留人工核对
 告警，其他恢复错误阻断启动；
 `auction-config/src/runtime/` 负责 regular-file/权限/锁校验以及同目录 fsync + rename 原子
 替换，`auction-storage` PostgreSQL 适配器负责 `runtime_config_admin_commands`、审计外键和
-命令重放。`auction-http` 已接入 GET/validate/PUT，`auction-web-admin` 的 Config 页面已
-使用 JSON 编辑器、候选校验和重启提示，五种语言文案已同步。SQLite Lite 明确返回
-`501 feature_not_supported`；runtime 更新不热改当前进程，文件写入成功后必须重启 Admin。配置页
+命令重放。`auction-http` 已接入 GET/validate/PUT，`auction-web-admin` 的 Config 页面已使用
+JSON 编辑器、候选校验、旧版启用 world/装备过滤事实卡和重启提示，五种语言文案已同步。文档逐字段
+覆盖旧版 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板；三个业务区块使用可选顶层字段
+兼容既有 Rust runtime 与 durable request hash，旧文件在浏览器读取时只物化投影，第一次保存才
+显式写入。SQLite Lite 明确返回 `501 feature_not_supported`；runtime 更新不热改当前进程，文件
+写入成功后必须重启受影响的 Admin 与 Worker。配置页
 已补齐旧版的 JSON 对象解析提示、服务端候选规范化校验、校验签名门槛、稳定 command ID、
 fingerprint 冲突反馈、重新加载和加载失败重试。
 重启后的运行链也已收口：`allow_manual_early_open` 同时驱动 HTTP capability 和生命周期服务，
 计划时间之前的人工开放在锁内按同一启动快照失败关闭，计划时间已到的开放与 Worker due 命令不受
 影响；`[equipment_source]` 则映射为 host/path allowlist、响应上限、共享请求间隔和全请求超时，
-适配器在固定 HTTPS origin、无重定向和精确 world 路径之上实施流式有界读取。
+适配器在固定 HTTPS origin、无重定向和精确 world 路径之上实施流式有界读取。Worker 只消费上述
+业务区块，不把 Admin listener/security/session/metrics/tracing 投影进自身运行边界。
 Admin runtime listener 已接入 TCP 与 Linux Unix socket 启动装配；Unix 模式会执行 runtime
 目录、目录级单实例锁、stale socket 身份、owner/group 和 `0660` 权限检查，Worker control
 socket 路径仍由同一 runtime 文档选择。`auctionctl deployment-check/start/restart` 已恢复跨进程
 拓扑校验：Admin/Worker control socket 与三组数据密钥必须一致，Public/Admin 实际 TCP/Unix
 listener 不能冲突，Admin readiness 跟随 runtime 选择的 listener；部署探针区分 Public/Admin
-HTTP 的 `/health/ready` 与 Worker control 的 `/v1/health/ready`。其余真实部署与切换行为仍需外部对照。
+HTTP 的 `/health/ready` 与 Worker control 的 `/v1/health/ready`。同宿主机隔离 systemd/Caddy R1 已
+证明顺序、探针、restart、drain、回执和失败回滚；真实域名/TLS、专用生产账号、正式 secret 与流量
+切换仍需独立批准。
 systemd Admin 模板也已开放 `/run/hv-auction`，Unix 示例 group 与模板运行组保持一致，避免代码
 支持 Unix 而受保护 unit 无法创建 socket 的装配分叉。
 
@@ -589,10 +608,10 @@ PostgreSQL `000009_credential_admin_compat` 补齐 `forum_cookie` 闭集，并�
 命令账本与审计证据。`auction-storage` 在同一 Serializable 事务内完成导入、改名、启停、
 删除的凭据行、命令账本和追加审计；`auction-http` 与 Admin 页面只接触安全投影，管理页补齐
 kind/world/status 筛选、数字分页、改名对话框和删除确认，导入 secret 不会回显。Worker 配置独立密钥后可按 world/shared 读取 active 凭据池并在内存解密，远端确认
-登录失效时按稳定候选顺序轮换、幂等回写 `invalid` 并从当前进程池移除；Admin dashboard 已接入
-按 kind/world 聚合 active/disabled/invalid 安全计数、scope 更新时间和最近 Admin 变更时间，并结合
-Worker 启动心跳判断凭据是否需要重启；凭据 section 还分别校验 MoogleMail `main`/`isekai` 的
-active、invalid 和更新时间，未配置独立密钥时继续使用 `.keyenv`/敏感
+登录失效时按稳定候选顺序轮换、幂等回写 `invalid` 并从当前进程池移除；凭据 owner 会按 kind/world
+聚合 active/disabled/invalid、scope 更新时间和最近 Admin 变更时间，并结合 Worker 启动心跳判断是否
+需要重启；旧 v1 dashboard 只公开由这些事实计算出的 MoogleMail `main`/`isekai` availability、观测时间
+和最近 Admin 变更时间。未配置独立密钥时继续使用 `.keyenv`/敏感
 配置兼容入口；Admin mail section 在配置 `dashboard_mailboxes` 时还按 Admin runtime 投影核对全量
 mailbox poller；
 SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧版数据上完成切换前
@@ -600,34 +619,39 @@ SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧�
 
 ## 对比旧版的当前复核矩阵
 
-截至 2026-08-25 的静态复核结果如下：旧版业务 HTTP 路径在 Rust 中无缺项，Public/Admin 浏览器
-路由完整对应，旧版 Worker 循环类别和五类 recovery action 也都有装配。下表把已完成代码、仍需
-外部/浏览器/部署证据的部分和明确不在旧版等价范围内的扩展分开；静态复核不能替代行为验证。
+截至 2026-08-26 的重新审计结果如下：旧版业务 HTTP 路径和 Public/Admin 浏览器路由在 Rust 中没有
+数量缺项，但静态注册不能证明行为等价。审计确认的参与资格锁、黑名单副作用和慢速代理 Worker owner
+与实时 wire 已完成静态修复并等待同库/同部署 R1；旧版严格 JSON、业务方法 405、错误 `data: null`、
+Public 规则语言读取和登录来源返回也已完成静态修复，其中 HTTP 边界与登录 CTA 取得局部 R1。论坛
+两阶段恢复、邮件 retryability、Admin 业务 runtime 映射/稳定错误/凭据列和四项配置默认/安全边界也已
+完成静态修复；同宿主机隔离 systemd/Caddy 生命周期也已取得 R1，其余 WebUI、外部服务和真实生产
+切换证据仍按 `legacy-parity-audit.md` 逐项收口。下表把已完成代码、仍需外部/浏览器/生产证据的部分和明确不在旧版
+等价范围内的扩展分开；静态复核不能替代行为验证。
 
 | owner | 旧版能力 | 当前状态与下一步 |
 | --- | --- | --- |
-| `auction-domain` / `auction-application` / `auction-storage` / `auction-jobs` | 预览、开放、Final phase、关闭与结算的完整生命周期 | preview 后继轮次、物化预览、open 时间/前序约束、开放前取消、Final slow proxy 转换/失格冻结、持久化 Final due fence、结算前 due 校验、精确 lot/代理锁、代理关闭、sold/unsold 投影和 `leader_since` 连续领先语义均已落地；PostgreSQL `000012`/`000013` 与 SQLite `000005` 至 `000007` 补齐调度和历史投影，PostgreSQL `000014` 恢复身份不可变、前序顺序和 draft/intake target 的数据库级防线。Auction 生命周期/结算已从集成 tick 拆为独立 `60s + [0,5s]` 主循环，两类各自最多 100 条、PostgreSQL 8 并发波次、30 秒单项总时限，SQLite Lite 有效并发固定为 1；一类错误不再跳过另一类或终止其它 owner。剩余是用真实旧数据对照边界时刻、并发锁等待和切换前运行证据。 |
+| `auction-domain` / `auction-application` / `auction-storage` / `auction-jobs` | 预览、开放、Final phase、慢速代理 due、关闭与结算的完整生命周期 | preview 后继轮次、物化预览、open 时间/前序约束、开放前取消、Final slow proxy 转换/失格冻结、持久化 Final due fence、结算前 due 校验、精确 lot/代理锁、代理关闭、sold/unsold 投影和 `leader_since` 连续领先语义均已落地；慢速代理恢复了数据库时钟扫描、旧版稳定命令 ID/请求摘要、事务内 generation/due/authorization/截止时间/owner 资格 fence、stale 成功跳过和 `lot.slow_proxy_tick` 审计。PostgreSQL `000012`/`000013` 与 SQLite `000005` 至 `000007` 补齐调度和历史投影，PostgreSQL `000014` 恢复身份不可变、前序顺序和 draft/intake target 的数据库级防线。Auction 生命周期、慢速代理与结算共享独立 `60s + [0,5s]` 主循环，三个阶段各自最多 100 条、PostgreSQL 8 并发波次、30 秒单项总时限，SQLite Lite 有效并发固定为 1 且不启用结算；一阶段错误不再跳过后续阶段或终止其它 owner。剩余是用同库旧数据对照边界时刻、并发重复扫描、锁等待和切换前运行证据。 |
 | `auction-domain` / `auction-application` / `auction-storage` | 拍卖经济策略在竞价运行时的完整应用（PPM 增量、代理开关/默认模式/次数上限、final phase、旧版默认值和 intake 起拍价统一） | 已完成主要运行时切片：主配置 `[auction]` 经校验后冻结为 schema v4 `policy_snapshot`；PostgreSQL/SQLite 竞价锁内恢复完整 `AuctionRules`，普通/代理/慢速/最终阶段规划使用旧版 PPM 计算，公开 lot 列表/详情的下一口价也读取同一快照，代理禁用、重复进场次数、默认模式和 final phase 慢速限制已接入，取消也按同一拍卖快照读取截止规则。默认值已对齐旧版共享配置（起拍 1000、PPM 50000、软截止/延长 1 分钟、次数上限 3、final phase 1 分钟）；MoogleMail 起拍价默认继承 `[auction.economics]`，仍允许显式覆盖。剩余是与真实旧数据、外部服务及切换前行为的对照验证。 |
 | `auction-application` / `auction-storage` / `auction-jobs` | recovery 退回后的 relist、refund、resolution 和完整 action 对账 | recovery 退回证据、Take、取消/恢复、COD 买家黑名单、guarded relist、buyer refund fulfillment 收口和状态审计已经接入；Worker 已对齐旧版 `case → return → action → relist → refund` 顺序，recovery action 也已补齐 `pending → prepared → enqueued` 两阶段 delivery identity、action fence 和可重放 activation。Fulfillment/Recovery 已从全局 5 秒 tick 拆为独立 `60s + [0,5s]` 循环，恢复 100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限；Recovery 各 phase 聚合失败但继续尝试后续 owner。prepare/activation 前按 Users owner 的 active 收件人投影复核资格，非 active 收件人持久化退避。旧版 recovery health 刷新也已接入：按 world 读取 Balance，持久化 low/stale/unavailable 状态并同步重算 recovery 计数。仍需更广泛的外部回执对照、真实部署对照和切换前验证。 |
-| `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` | MoogleMail main/isekai 独立轮询、读取/处理重试、超时和失败退避 | 每个已配置 world 现在拥有独立调度任务、持久化 cursor、claim 和手动唤醒器，一个邮箱的读取或数据库失败不会阻塞另一个邮箱，也不会终止 Worker。调度契约和默认值已对齐旧版：`schedule` 接受标准五字段 cron、描述符、`@every`、进程本地时区及 `TZ=` / `CRON_TZ=` IANA 时区前缀，默认 `* * * * *`，再附加最多五秒抖动；共享 HTTP transport 恢复一秒最小请求间隔、15 秒请求超时、固定生产/回环安全 endpoint 和 8 MiB 响应上限；批次为 100 封，读取与业务处理各三次、每次 30 秒，使用 `1s → 30s` 指数退避。读取只对暂时错误内联重试，业务错误沿用旧版默认临时分类，成功后按 cron 保存下一次 `next_poll_at`，失败后保存下一 cron 与退避时刻的较大值。长批次处理期间按 10 秒周期续租 60 秒 claim，token/owner/version 或续租 fence 失效后取消陈旧 future；业务重试只通过显式短生命周期副本携带正文和装备 key，所有副本销毁时清零，稳定命令 ID 负责恢复可能已提交的本地步骤。剩余是用真实 main/isekai 邮箱对照分页、限流、Cookie 失效和写入不确定结果。 |
-| `auction-integrations` / `auction-jobs` | 论坛 `start`、`cancel`、PM `notify` 以及对应回执/不确定结果处理 | 经对照 Auction-BF 的 `forumingest`，`start`、`cancel` 和 PM-only `notify` 在旧版本身就是 warning-only，并未连接业务 owner；当前 Rust 保持该边界。MM `notify`、主题发布/读取和回帖竞价导入已接入；Forum 已从全局集成 tick 拆为独立、立即执行的顺序循环，默认一分钟加最多五秒抖动、100 条批次、300 秒逐主题 claim 和 93 秒单主题总时限；发布失败仍继续回帖扫描，任何一阶段失败都不会终止其它 Worker owner。回帖批次按 world 聚合，只有该批所有主题成功且命令账本完成写入后才推进扫描游标，已入账但通知暂未完成的命令会在后续轮次重放通知；主题正文现在可按 `worker.forum.public_base_url` 生成与旧版一致的公开拍卖绝对链接；发布超时按远端写入结果未知停靠，远端发布成功但本地发布证明写入失败时也进入人工对账退避状态，不再静默等待租约过期后重复发布。若要让这些 warning-only 命令真正改变论坛或拍卖状态，属于超出旧版等价范围的新契约，需另行冻结 owner、幂等账本和回执证明。 |
+| `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` | MoogleMail main/isekai 独立轮询、读取/处理重试、超时和失败退避 | 每个已配置 world 现在拥有独立调度任务、持久化 cursor、claim 和手动唤醒器，一个邮箱的读取或数据库失败不会阻塞另一个邮箱，也不会终止 Worker。调度契约和默认值已对齐旧版：`schedule` 接受标准五字段 cron、描述符、`@every`、进程本地时区及 `TZ=` / `CRON_TZ=` IANA 时区前缀，默认 `* * * * *`，再附加最多五秒抖动；共享 HTTP transport 恢复一秒最小请求间隔、15 秒请求超时、固定生产/回环安全 endpoint 和 8 MiB 响应上限；批次为 100 封，读取与可重试业务处理各三次、每次 30 秒，使用 `1s → 30s` 指数退避。读取只对暂时错误内联重试；业务错误由应用层显式分为 `Retryable`/`Permanent`，确定性输入、配置和业务拒绝立即以永久失败收口，超时与可恢复依赖错误才内联重试，游标和持久化退避不会提前推进。成功后按 cron 保存下一次 `next_poll_at`，失败后保存下一 cron 与退避时刻的较大值。Admin 管理的共享 runtime 覆盖 main/isekai、发件人 allowlist、装备过滤和 14 个模板；Worker 主配置继续拥有 transport、凭据、调度、mailbox identity 和全局启用开关。长批次处理期间按 10 秒周期续租 60 秒 claim，token/owner/version 或续租 fence 失效后取消陈旧 future；业务重试只通过显式短生命周期副本携带正文和装备 key，所有副本销毁时清零，稳定命令 ID 负责恢复可能已提交的本地步骤。剩余是用真实 main/isekai 邮箱对照分页、限流、Cookie 失效和写入不确定结果。 |
+| `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` / `auctionctl` | 论坛 `start`、`cancel`、PM `notify` 以及对应回执/不确定结果处理 | 经对照 Auction-BF 的 `forumingest`，`start`、`cancel` 和 PM-only `notify` 在旧版本身就是 warning-only，并未连接业务 owner；当前 Rust 保持该边界。MM `notify`、主题发布/读取和回帖竞价导入已接入；Forum 已从全局集成 tick 拆为独立、立即执行的顺序循环，默认一分钟加最多五秒抖动、100 条批次、300 秒逐主题 claim 和 93 秒单主题总时限；发布失败仍继续回帖扫描，任何一阶段失败都不会终止其它 Worker owner。回帖批次按 world 聚合，只有该批所有主题成功且命令账本完成写入后才推进扫描游标，已入账但通知暂未完成的命令会在后续轮次重放通知；主题正文现在可按 `worker.forum.public_base_url` 生成与旧版一致的公开拍卖绝对链接；发布超时或本地证明写入失败先进入 reconciliation-only：Worker 按精确标题 GET，命中时只补一份本地 topic 证明，未命中时停在 `write_authorization_required`；只有 `auctionctl authorize-forum-write-retry` 经逐字目标确认写入 PostgreSQL `000016` 幂等授权账本与审计后，下一次领取才可再次 POST，禁止盲重发。剩余是用隔离论坛账号核对同标题命中、未命中无授权和授权后单写的 R1。若要让这些 warning-only 命令真正改变论坛或拍卖状态，属于超出旧版等价范围的新契约，需另行冻结 owner、幂等账本和回执证明。 |
 | `auction-application` / `auction-storage` / `auction-jobs` / `auction-http` / `auction-web-admin` | operations alert 信号、通知批次、Worker control 聚合和完整 dashboard section | 旧版 15 类 signal、阈值 evaluator、fingerprint、观察/恢复、批次 claim lease/fencing、三次 Create 尝试、MoogleMail 通知正文、入队原子 cooldown、稳定失败终态，以及 Admin 的 health/process、Worker、tracing、alerting、全量 mail poller、realtime lag/failure water、delivery、fulfillment、recovery 安全汇总已接入 PostgreSQL 完整档；`000015` 同时修复了普通重试写入会被 CHECK 拒绝、第三次失败误入人工对账和领取时过早消耗 cooldown 的差异。scan、dispatch、reconcile 已恢复为三个独立的一分钟有界循环，错误互不阻塞，阈值、批次窗口、冷却、重试和正文边界默认值与旧版一致。credential scope 聚合和无 active 凭据时的 degraded 启动语义也已接入，SQLite 明确为能力缺失。剩余是通知外部回执、真实部署和切换前验证；外部广播 sink 不属于旧版能力。 |
-| `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter、真实状态心跳与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。当前 27 个追加审计 INSERT 均会累加进程内饱和失败计数；三进程周期心跳每轮复用数据库/schema readiness，读取该计数和各自 tracing 安全投影，启动/停止状态也不再使用占位值。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过存储池和审计观测边界的外部原生调用不纳入对应累计统计。剩余是实际部署下的 exporter、心跳 TTL 与故障聚合证据。 |
-| `auction-http` / `auction-web-*` | 旧版全部 Public/Admin 页面真实数据和交互 | Public 核心目录、世界切换、当前/历史拍卖、竞价/代理、账户、规则、黑名单、补偿、论坛、实时与价格历史，以及 Admin 登录、拍卖/lot、邮件、用户、凭据、规则、配置、审计、delivery、realtime、settlement/recovery 与 dashboard 页面均已接入真实 API；URL 状态、权威快照恢复、稳定 `command_id` 重试、五语言资源、移动端表格和主要旧版视觉交互已有源码 owner。SPA 入口现只提供给 14 + 21 条显式浏览器路由，未知 API/health 与页面 404 已隔离；Public/Admin 读响应及静态文件缓存头也按旧版语义和 Dioxus 稳定 WASM 文件名完成收口。HTTP/stream DTO 已统一由 `auction-contracts` 拥有，两个 `RustEmbed` 类型也已移入各自装配根形成制品级隔离。剩余是用真实 Dioxus 浏览器产物逐页核对字体、换行、焦点与响应式布局。 |
-| `auction-integrations` / `auction-storage` | 凭据失效后的自动标记、轮换和 dashboard 聚合 | 读侧 session 失效只轮换未尝试候选，写侧不盲重试但回写 `invalid`；PostgreSQL 幂等状态更新、MoogleMail/E-Hentai 接入和 Admin dashboard 聚合已完成，dashboard 也按旧版检查 MoogleMail `main`/`isekai` availability、scope 更新时间、Worker 重启状态和已配置 `dashboard_mailboxes` 的 poller 完整性。仍需真实外部服务对照和切换前行为验证。 |
-| `auction-storage` / `auctionctl` / `auction-http` | 旧版 `/health/live`、`/health/ready` 探针与 `migrate-only` 对未知数据库的保护 | Public/Admin 两类兼容健康探针已补齐；`ready` 只读检查数据库、全部内嵌迁移和进程内审计写入完整性，持久化 service heartbeat 复用同一进程 readiness；`auctionctl migrate` 在没有 SQLx 迁移标记但检测到用户对象时失败关闭，不会把未知数据库初始化为 Auction 数据库。剩余是实际 PostgreSQL/SQLite 部署中的探针与编排证据。 |
+| `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter、真实状态心跳与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；配置层已恢复启用 metrics 时有效 listener 必须是 loopback TCP 或 Unix 的旧安全边界，在绑定前拒绝非本地 TCP。Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。当前追加审计 INSERT 均会累加进程内饱和失败计数；三进程周期心跳每轮复用数据库/schema readiness，读取该计数和各自 tracing 安全投影，启动/停止状态也不再使用占位值。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过存储池和审计观测边界的外部原生调用不纳入对应累计统计。剩余是实际部署下的 exporter、心跳 TTL 与故障聚合证据。 |
+| `auction-http` / `auction-web-*` | 旧版全部 Public/Admin 页面真实数据和交互 | Public 核心目录、世界切换、当前/历史拍卖、竞价/代理、账户、规则、黑名单、补偿、论坛、实时与价格历史，以及 Admin 登录、拍卖/lot、邮件、用户、凭据、规则、配置、审计、delivery、realtime、settlement/recovery 与 dashboard 页面均已接入真实 API；URL 状态、权威快照恢复、稳定 `command_id` 重试、五语言资源、移动端表格和主要旧版视觉交互已有源码 owner。Admin API 客户端现统一解析稳定错误 code 并通过五语言 Fluent 映射可操作反馈；配置页恢复旧版启用 world/装备过滤事实卡和业务 runtime JSON；凭据表按旧页面实际语义恢复 last checked/last used/imported by，并保留新版 version。SPA 入口现只提供给 14 + 21 条显式浏览器路由，未知 API/health 与页面 404 已隔离；Public/Admin 读响应及静态文件缓存头也按旧版语义和 Dioxus 稳定 WASM 文件名完成收口。HTTP/stream DTO 已统一由 `auction-contracts` 拥有，两个 `RustEmbed` 类型也已移入各自装配根形成制品级隔离；全部业务路由现恢复旧版严格 JSON、显式方法 405 和错误 `data: null`，Public 规则语言切换与登录来源返回也已有独立 owner。Public 14 条路径已完成 `en` 桌面匿名/空态巡检，规则与补偿池已有五语言浏览器 R1；剩余是补足动态数据行、有效登录与写动作、错误/冲突、移动端逐页状态，以及 Admin 配置保存/重启和其余已认证页面的视觉/交互 R1。 |
+| `auction-integrations` / `auction-storage` | 凭据失效后的自动标记、轮换和 dashboard 聚合 | 读侧 session 失效只轮换未尝试候选，写侧不盲重试但回写 `invalid`；PostgreSQL 幂等状态更新、MoogleMail/E-Hentai 接入和 Admin dashboard 聚合已完成。内部 owner 继续计算 scope 更新时间、Worker 重启状态并核对已配置 `dashboard_mailboxes` 的 poller 完整性；旧 v1 dashboard 只公开由这些事实导出的 MoogleMail `main`/`isekai` availability、观测时间和最近 Admin 变更时间。仍需真实外部服务对照和切换前行为验证。 |
+| `auction-storage` / `auctionctl` / `auction-http` | 旧版 `/health/live`、`/health/ready` 探针与 `migrate-only` 对未知数据库的保护 | Public/Admin 两类兼容健康探针已补齐；`ready` 只读检查数据库、全部内嵌迁移和进程内审计写入完整性，持久化 service heartbeat 复用同一进程 readiness；`auctionctl migrate` 在没有 SQLx 迁移标记但检测到用户对象时失败关闭，不会把未知数据库初始化为 Auction 数据库。同宿主机隔离 PostgreSQL systemd/Caddy 已证明两个 surface 的 live/ready 200、controller 编排和上游停止后的 502；SQLite Lite 与真实生产环境仍需各自的部署证据。 |
 | `apps/auctionctl` / `auction-storage` / `auction-integrations` | 旧版 Worker `-bootstrap-mail-credentials`、`-bootstrap-mail-world`、`-bootstrap-mail-label` 一次性登记邮件凭据 | 已补齐 `bootstrap-mail-credentials --world --label`：Cookie 只从标准输入读取，限制为 `main`/`isekai` 且要求 Worker 已启用对应 world，复用凭据数据密钥和 Admin 凭据服务写入 PostgreSQL；命令不回显 Cookie、密文或密钥。仍需在真实部署中按目标 secret 注入方式做一次切换前演练。 |
 | `ops` / `apps/*` | 旧版 `ops/deploy` 的启动脚本、Caddy 反向代理、环境示例、数据库备份/恢复/保留资料 | 已补充当前三进程/TOML/健康探针的部署目录、启动顺序、安全权限、Caddy 反向代理模板、systemd 单角色与总控示例、`auctionctl deployment-check` 只读预检，以及 Rust `auctionctl deployment start/stop/restart/status` 总控：总控验证 unit 与 TOML 绑定，执行严格预检、地址检查和 forward-only migration，按 Worker → Admin → Public 逐角色等待应用 readiness，失败反序回滚本次启动的 unit，并用 flock 与 systemd InvocationID 发布私有启动回执。PostgreSQL retention、recovery preflight、backup/verify、restore/rebuild 和 canonical v28 接管证据链均已有 owner。部署模板继续由 systemd 发送 SIGTERM；Public/Admin 的共享 Hyper 连接服务会停止接收并排空现有连接，Worker 同时响应 SIGINT/SIGTERM，三进程执行 10 秒有界 drain、停止心跳和 tracing flush，单角色 unit 以 45 秒上限覆盖最长 exporter 关闭余量。旧版 retention 本身明确只做 inventory、禁止 mutation，完整 retention mutation 不是旧版漏迁。 |
-| `auction-storage` / `apps/auctionctl` / `ops` | canonical Auction-BF PostgreSQL v28 的现有数据接管 | 专用 v28 backup/verify/adopt 链路已完成：只接受 PostgreSQL 18.x、干净 migration 28、精确 canonical 表集合、零其他 session 和可无损恢复的竞价投影，要求专用恢复点、逐字确认和不可覆盖 receipt，在事务 bridge 中建立 SQLx `1..=5`、`7` 等价基线后继续前向迁移；`000014` 统一生命周期约束并移除旧论坛隐式入队 trigger，`000015` 归一化 operations alert 重试/终态/cooldown，并保留合法的历史终态 delivery 孤儿。普通 `migrate`/`restore` 不会猜测处理。剩余是真实 v28 副本上的接管与恢复演练。 |
-| 验收与切换 | 双跑、对照、双写、切换前行为验证 | 按项目约束暂不编写或运行测试；只有用户明确要求后，才进入 PostgreSQL 完整契约、SQLite Lite 边界和旧版对照验证。 |
+| `auction-storage` / `apps/auctionctl` / `ops` | canonical Auction-BF PostgreSQL v28 的现有数据接管 | 专用 v28 backup/verify/adopt 链路已完成：只接受 PostgreSQL 18.x、干净 migration 28、精确 canonical 表集合、零其他 session 和可无损恢复的竞价投影，要求专用恢复点、逐字确认和不可覆盖 receipt；执行时在同一持锁物理连接复核完整预检，再在事务 bridge 中建立 SQLx `1..=5`、`7` 等价基线并继续前向迁移。`000014` 统一生命周期约束并移除旧论坛隐式入队 trigger，`000015` 归一化 operations alert 重试/终态/cooldown，并保留合法的历史终态 delivery 孤儿；`000016` 增加论坛未知写入的人工再授权命令账本。普通 `migrate`/`restore` 不会猜测处理。2026-08-26 已在旧对照 PostgreSQL 18.6/canonical v28 的隔离副本上实际完成专用 backup/verify、恢复点复原、adopt 到 SQLx 16、五语言规则导入、当前格式 backup、同名 rebuild、空库证明和单事务 restore；恢复前后规则摘要、审计与迁移计数一致。旧副本没有 auction/lot/bid/user/realtime 业务行，因此仍需非空旧业务数据抽样和真实部署切换。 |
+| 验收与切换 | 双跑、对照、双写、切换前行为验证 | 当前按用户授权继续 PostgreSQL 完整档、SQLite Lite 边界和旧版的隔离人工对照，但不编写或运行测试；真实外部写入、双写和生产流量切换仍需逐项独立批准。 |
 
 SQLite Lite 的 PostgreSQL 专属 recovery、MoogleMail、论坛完整档、结算报告和管理完整写入不属于
 “漏做后补齐”的任务，而是已声明的部署能力边界；不得用空结果或内存状态伪装成已实现。
 
 ### 旧版等价收口与剩余证据
 
-截至 2026-08-25，旧版 HTTP 路径、浏览器路由、Worker 类别、recovery action 和运维命令名称没有
-数量缺项；第二轮从实际消费链、进程边界和项目规范交叉审计后，以下内容记录已完成的本地代码收口、
+截至 2026-08-26，旧版 HTTP 路径和浏览器路由在静态清单上没有数量缺项；重新从实际消费链、
+进程边界和项目规范交叉审计后，以下内容记录已完成的本地代码收口、
 明确的部署能力边界，以及仍需真实环境证明的等价证据。
 三进程 SIGINT/SIGTERM、有界 drain、停止心跳和 tracing flush 已完成。Public/Admin 共用 HTTP
 boundary 也已完成：请求 ID 与命令审计关联、W3C trace context、访问日志、panic recovery、
@@ -716,9 +740,9 @@ Public/Admin HTTP listener。
 - Application MoogleMail processing port 已将装备过滤、短生命周期邮件 envelope、拍卖入站写入、delivery
   outbox、业务决定和共享安全错误分别拆入 `ports/mail/processing/{filter,message,auction,delivery,decision,common}.rs`；
   `processing.rs` 只保留模块装配和稳定导出，正文/装备 key 清理、密钥封装前置和无密文 delivery 边界保持不变。
-- Admin dashboard HTTP adapter 已将认证后请求编排、各 owner section 聚合和稳定 response DTO 映射分别拆入
-  `http/admin/dashboard/mod.rs`、`sections.rs` 和 `mapping.rs`；路由、状态码、unknown/source_unavailable
-  降级语义和 health/process JSON 字段保持不变。
+- Admin dashboard HTTP adapter 已将认证后请求编排、各 owner section 聚合和稳定 response DTO 映射拆入
+  `http/admin/dashboard/`；旧 v1 顶层、section 与 data 键闭集由映射层显式维持，known/degraded 不携带
+  `error_code`，unknown 只携带稳定错误码，内部增强诊断不泄漏到同一路径。
 - Admin Web 凭据页面已将页面加载/删除编排、录入与筛选、列表/状态/改名操作、删除确认和标签/幂等辅助分别拆入
   `app/identity/credentials/{page,form,table,dialogs,helpers}.rs`；`credentials.rs` 只负责组件装配和
   `page` 公共出口，secret 短生命周期与五语言文案边界保持不变。
@@ -830,8 +854,8 @@ Public/Admin HTTP listener。
 - `auction-http` routes 根装配已将 Public/Admin 路由表与健康探针分别拆入
   `routes/surfaces.rs` 和 `routes/health.rs`；`routes/mod.rs` 只保留 HTTP 子模块、共享导入和稳定导出，
   health/live、health/ready、SPA fallback、缓存层和所有冻结业务路径契约保持不变。
-- Public realtime HTTP owner 已将事件列表读取、WebSocket 连接/补发和事件页校验/DTO 映射分别拆入
-  `http/public/realtime/{mod,list,websocket,mapping}.rs`；`mod.rs` 只保留稳定 handler
+- Public realtime HTTP owner 已将事件列表读取、WebSocket 连接、目标解析和事件校验/DTO 映射分别拆入
+  `http/public/realtime/{mod,list,websocket,target,mapping}.rs`；`mod.rs` 只保留稳定 handler
   出口，序号连续性、refetch_required、Public session、连接上限和 `/api/v1/events`/`/api/v1/ws`
   契约保持不变。
 - Public Web API 根适配器已将服务端时间校准/GET 边界、lot 展示模型和拍卖/lot/竞价日志/价格历史
@@ -927,7 +951,8 @@ Public/Admin HTTP listener。
   邮箱筛选、状态版本、CSRF、幂等摘要和 Worker control 契约保持不变。
 - HTTP Admin Realtime owner 已将 lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别拆入
   `http/admin/realtime/{reads,replay,mapping,common}.rs`；`realtime/mod.rs` 只保留稳定处理器出口，
-  分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
+  旧版嵌套分页、CSRF、request hash 和 replay 状态契约保持不变；旧 wire 缺少 `command_id` 时
+  由 HTTP 防腐层稳定派生，新版显式 ID 仍进入同一核心账本。
 - HTTP Admin Credentials owner 已将凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
   CSRF/分页/错误边界分别拆入 `http/admin/credentials/{list,commands,mapping,common}.rs`；
   `credentials/mod.rs` 只保留稳定处理器出口，凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
@@ -939,11 +964,11 @@ Public/Admin HTTP listener。
   旧分页、能力投影、零版本创建 fence、命令幂等和事务错误契约保持不变。
 - HTTP Admin Dashboard section owner 已将邮件、realtime、履约/投递/recovery、凭据、alerting 和安全降级
   分别拆入 `http/admin/dashboard/sections/{mail,realtime,operations,credentials,alerting,fallback}.rs`；
-  `sections/mod.rs` 只保留聚合映射出口，unknown/source_unavailable、凭据 Worker 重启判断、时间字段和
-  section JSON 语义保持不变。
-- Admin Web Dashboard runtime owner 已将运行时详情组件与卡片/状态辅助分别拆入
-  `app/operations/dashboard/runtime/{mod,details,helpers}.rs`；Dashboard 的安全投影、状态本地化、
-  凭据 scope 和 recovery world 展示语义保持不变。
+  `sections/mod.rs` 只保留聚合映射出口，旧 known/unknown/degraded 形状、时间字段和 section JSON 闭集
+  由 HTTP 防腐层统一维护。
+- Admin Web Dashboard 页面由 `app/operations/dashboard.rs` 持有唯一 snapshot resource，
+  `app/operations/dashboard/{content,controls}.rs` 分别负责旧卡片流和操作区；浏览器先逐层校验原始 JSON
+  键集合再反序列化，不再挂载扩展 metrics/runtime/list 请求。
 - Storage PostgreSQL Admin lot owner 已将事务端口适配、锁内安全读取、lot 状态/起拍价变更、withdrawn-return
   义务和审计/realtime 事件分别拆入 `database/competition/postgres/admin/lot/{transaction,read,mutation,obligation,events}.rs`；
   `lot/mod.rs` 只负责装配，world → auction → lot 锁顺序、preview revision、state-version fence、命令账本和
@@ -1060,21 +1085,25 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
 以下是仍需真实环境完成的行为/部署证据，不属于上面的代码数量盘点；测试相关工作继续按用户要求
 暂缓：
 
-- 本轮已用仓库锁定的 `dx` CLI 通过 `just web-build` 分别构建 Public/Admin Web 产物，两个 WASM、
-  wasm-bindgen、入口 HTML 和 surface/base CSS 均成功生成，并复制到后端稳定嵌入目录；这只证明
-  编译和静态资源打包链路，不证明真实浏览器中的字体、换行、焦点顺序、空态或响应式布局，因此
-  浏览器逐页验收仍保留。
+- 本轮已用仓库锁定的 `dx` CLI 分别构建 Public/Admin Web 产物，两个 WASM、wasm-bindgen、入口 HTML
+  和 surface/base CSS 均成功生成并复制到后端稳定嵌入目录；Public 的 14 条路径随后已完成 `en` 桌面
+  匿名/空态浏览器巡检，规则和补偿池另有五语言证据。动态数据行、认证动作、错误/冲突、移动端逐页
+  状态和 Admin 其余页面仍不能由编译或这轮局部 R1 证明。
 - 使用真实 main/isekai 邮箱与 E-Hentai 论坛核对分页、限流、凭据失效、远端写入不确定结果和回执；
   2026-08-25 的只读 Balance 探针已能到达 `hentaiverse.org`，但 `.keyenv` 的两组候选均收到
   `e-hentai.org/bounce_login.php` 重定向；按旧版契约应记为 `SessionExpired`，当前没有把它误报为
   解析成功，也没有执行任何远端写入。需要有效登录会话后才能继续取得正文解析和分页证据；
-- 在 canonical PostgreSQL v28 副本上演练 backup、verify、adopt、restore 和 rebuild 安全边界；
-- 在真实 systemd/Caddy 部署中核对启动顺序、readiness、失败回滚、Worker control 和凭据注入；
-- 用实际 Dioxus 浏览器产物逐页核对字体、换行、焦点顺序、空态和响应式布局；
-- 在用户明确恢复行为验证后，执行 PostgreSQL 完整档、SQLite Lite 边界、旧版双跑/对照和最终切换。
+- canonical PostgreSQL v28 的 backup/verify/adopt/rebuild/restore 安全边界已在隔离旧对照副本完成；
+  仍需具有非空 auction/lot/bid/realtime 事实的数据抽样，以及真实部署切换批准；
+- 同宿主机隔离 systemd/Caddy 已核对启动顺序、readiness、失败回滚、Worker control、严格文件权限和
+  unit 配置绑定；真实域名/TLS、专用生产账号、正式 secret 注入及流量切换仍需独立批准；
+- 继续用实际 Dioxus 浏览器产物核对 Public 动态/认证/错误/移动端状态，以及 Admin 其余页面的字体、
+  换行、焦点顺序、空态和响应式布局；
+- 继续在当前授权的隔离环境核对 PostgreSQL 完整档、SQLite Lite 边界和旧版双跑；双写、真实外部写入与
+  最终生产切换仍需逐项独立批准。
 
-最后一项仍按本仓库约定暂缓；本轮没有新增或运行单元测试、集成测试、功能测试、端到端测试或
-浏览器测试。
+上述隔离人工对照按当前授权继续；测试用例仍按本仓库约定暂缓。本轮没有新增或运行单元测试、
+集成测试、功能测试、端到端测试或浏览器测试。
 
 本轮 Public 价格历史页面已补齐旧版的 world/name/买家/卖家筛选、可折叠高级筛选、月/年日期范围、
 K/M 价格单位、日期与价格范围校验、URL 状态、成交统计、拍品与拍卖链接和分页；历史表格的装备
@@ -1160,7 +1189,8 @@ receipt。`auction-storage` 在 `postgres` 维护库持有集群 advisory lock�
 role setting、prepared transaction、subscription 和活动 logical slot，二次校验 backup 后才执行
 `DROP DATABASE ... WITH (FORCE)`，并保留 owner、UTF8、locale provider、tablespace 和 connection
 limit。`empty-for-restore` 证明零用户对象，`fresh-schema` 运行并证明当前迁移；破坏性步骤后的失败
-回执显式记录数据库是否已删除/重建。外部进程停止、真实部署演练和恢复点保管仍需部署证据。
+回执显式记录数据库是否已删除/重建。OPS-003 已证明隔离进程停止与 systemd/Caddy 演练；正式恢复点
+保管、生产账号和流量切换仍需部署批准。
 
 本轮进一步补齐现有 Auction-BF 数据的显式接管边界：`auction-storage/database/legacy_v28` 在
 只读预检中要求 PostgreSQL 18.x、唯一且 clean 的 migration 28、精确 canonical public 表集合、
@@ -1170,14 +1200,16 @@ limit。`empty-for-restore` 证明零用户对象，`fresh-schema` 运行并证�
 新增专用 v28 custom-format 备份/离线验证与默认只读 adoption；实际执行要求逐字
 `ADOPT LEGACY V28 <数据库名>`、二次 artifact 校验和不可覆盖 receipt，写入 SQLx `1..=5`、`7`
 当前 checksum 基线后只运行剩余迁移。普通 migrate/restore 不接受旧版 manifest；完整手册位于
-`ops/deploy/LEGACY_V28_ADOPTION.md`，真实旧库副本和恢复演练仍属于显式验收。
+`ops/deploy/LEGACY_V28_ADOPTION.md`。OPS-001 已在 canonical v28 隔离副本完成接管与恢复 R1；非空旧业务
+事实抽样和生产切换仍属于显式验收。
 
 本轮继续对照旧版最终 schema，确认 Rust 压缩迁移曾遗漏拍卖身份不可变、前序顺序和
 draft/intake target 一致性触发器，也确认早期 Rust `000003` 遗漏了既有 draft 的 target 回填。
 追加 PostgreSQL `000014_lifecycle_database_invariants` 后，迁移会先锁定并拒绝歧义投影，为可唯一
 映射的 draft 补齐 target，再以当前定义安装三类防线；同一迁移移除旧 v28 的论坛自动入队 trigger，
-避免数据库与 Worker 同时成为论坛任务 owner。`retention-policy.v1.json` 的 schema fence 同步推进到
-`15`，避免只读 retention inventory 因策略仍停在旧版本而无条件失败。SQLite Lite 不复制
+避免数据库与 Worker 同时成为论坛任务 owner。`retention-policy.v1.json` 的 schema fence 当前随
+`000016` 推进到 `16`，并把 `forum_sync_admin_commands` 归入永久保留的拍卖历史族，避免只读
+retention inventory 因策略版本或表覆盖仍停在旧状态而无条件失败。SQLite Lite 不复制
 PostgreSQL 延迟触发器。
 
 同一轮旧版对照还发现 Rust operations alert 的第一次重试会被既有 CHECK 拒绝：代码曾把非空
@@ -1202,10 +1234,12 @@ recovery action wave 的默认并发也从 1 恢复为 8。
 只有循环任务异常退出才使进程失败关闭。SQLite Lite 不装配这两类 PostgreSQL 完整档循环。
 
 Auction 主循环此前也只有全局 1 并发/5 秒 tick：生命周期与结算单轮上限都被并发值截断，没有
-旧版 30 秒单项预算，claim 失败还会让整个 Worker 退出。现在 Auction 已拥有独立立即首轮和
-`60s + [0,5s]` cadence；生命周期与结算各自使用 100 条上限、共同并发波次和单项总时限，一类
-错误仍继续尝试另一类。配置省略并发时按 PostgreSQL=8、SQLite Lite=1 计算有效值；邮件手工唤醒
-不再顺带执行 Auction。
+旧版 30 秒单项预算，claim 失败还会让整个 Worker 退出；重新审计又确认慢速代理只有领域计划而
+没有到期扫描/执行 owner。现在 Auction 已拥有独立立即首轮和 `60s + [0,5s]` cadence；生命周期、
+慢速代理和结算各自使用 100 条上限、共同并发波次和单项总时限，一阶段错误仍继续尝试后续阶段。
+慢速代理使用数据库时钟扫描和事务内 generation/due/authorization/截止时间/owner 资格 fence，
+沿用旧版稳定命令身份、stale 跳过和审计。配置省略并发时按 PostgreSQL=8、SQLite Lite=1 计算
+有效值，Lite 不启用结算；邮件手工唤醒不再顺带执行 Auction。
 
 继续对照旧版 MoogleMail 写入协议后，确认 Rust return/take 曾只核对动作按钮，POST 后也只依赖
 成功文字或按钮消失，无法证明实际处理的是预期邮件和资产。现在动作状态会脱敏保留
@@ -1332,9 +1366,9 @@ Public 未匹配路由也恢复旧版行为：使用同一 `replace` 边界回�
 本轮继续对照 Admin Rules 编辑页：事实栏间距、Markdown 编辑区的 36rem 最小高度、48rem 预览上限和
 窄屏单列布局恢复旧版；语言切换、候选校验、发布门槛和 revision fence 不变。
 
-本轮继续对照 Admin Dashboard 展示层：指标卡与运行时明细恢复旧版扁平卡片、统一边框和连续卡片流，
-不再使用状态色顶边或独立 raised 背景；health、Worker、realtime、delivery、fulfillment、recovery、
-alerting 投影、轮询操作和快捷入口保持不变。
+本轮继续对照 Admin Dashboard 展示层：页面恢复旧版单 snapshot 请求、扁平卡片、统一边框、固定连续顺序
+和操作区，不再挂载分页列表、扩展 metrics/runtime 请求；health、Worker、tracing、realtime、mail、delivery、
+fulfillment、recovery、credential availability 与 alerting 均只消费旧 v1 安全投影。
 
 本轮继续对照 Public 页头连接提示：实时状态徽章恢复旧版圆点、raised 背景和统一边框，并为 checking、
 connecting、connected、error 保留稳定状态色；实时订阅、游标恢复和手动刷新行为不变。
@@ -1414,6 +1448,17 @@ storage owner。
 本轮 Public 黑名单也恢复旧版的 URL 页码分页：请求使用 `page_size=10`，页码写入既有 `page` 查询状态，
 页面继续只展示安全公开投影，不把黑名单原因或玩家标识扩展为新的写入能力。
 
+随后使用旧版 8092 与新版 8090 的实际 embedded 制品完成 Public 14 条路径的 `en`、1440×1000
+匿名/空态巡检。拍卖/竞价/价格历史、账户、黑名单和补偿池的一页 pager、空态间距及登录页几何已恢复；
+补偿池修正了把需要 `$balance` 参数的 Fluent 消息直接用于无参数 `aria-label` 所导致的 WASM
+`unreachable`，成功响应后不再停在 Loading。价格历史 Submit 的尺寸、字重和内边距，以及顶部世界
+下拉的 Isekai/Main 选项顺序与 Main 默认选中状态也已逐项对齐。最终 14 条路径均无浏览器异常，三个
+旧 alias 收敛到 canonical 地址；动态行、有效登录、竞价/代理动作、错误/冲突和移动端仍单独保留。
+
+Public 补偿池又在新旧两端逐项切换 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，十组页面的 `hv.lang`、
+`<html lang>`、picker、标题、0K 余额和空态文案逐项相同且无异常。这是一次性人工运行态证据，未新增
+或运行浏览器/功能测试用例。
+
 本轮 lot 详情装备属性表恢复旧版的每页 10 条分页；分页只作用于展示层，不改变装备属性安全投影、游戏
 链接或竞价历史请求。
 
@@ -1450,7 +1495,9 @@ Admin realtime failure 表也补回旧版可见的 failure/event 标识列；标
 公开原因使用共享安全截断组件；完整值仍保留在原生提示中，不改变公开投影、分页或查询参数。
 
 本轮同时补齐 Public 账户页与旧版的展示契约：恢复账户页和代理授权说明、移动端表格字段标签、领先竞价行
-高亮及状态徽章；竞价、代理授权的现有数据投影、分页和操作语义保持不变。
+高亮及状态徽章；后续精确对照又恢复 `bid_page,page_size,proxy_page` 请求顺序、四列/六列表头、分页在各自
+section 内的 DOM、账户专属 CSS 及五语言旧版词法，并移除认证页新增的说明和总数。竞价、代理授权的安全
+数据投影、独立分页和操作语义保持不变。
 
 本轮还修正 Public `/auctions` 的迁移残留文案：列表已经读取真实拍卖查询投影，页面改为说明世界/状态筛选，
 不再显示“查询用例尚未接入”的过时提示，也不再复用历史价格页说明。
@@ -1459,9 +1506,9 @@ Admin realtime failure 表也补回旧版可见的 failure/event 标识列；标
 的前置校验和 canonical JSON 结构校验，补回必填、自动完成、提示文本与移动端可用的表单语义；成功提示
 同时显示拍卖序号、lot 号和装备名称，输入错误与网络失败分开提示，五种语言资源保持同步。
 
-Admin dashboard 继续恢复旧版运维信息的可见粒度：凭据投影按 world/scope 展示 active、disabled、invalid、
-更新时间和重启要求；alerting 摘要补回 succeeded 计数及最近观察、成功、失败时间。两者仍只使用既有安全
-dashboard DTO，不新增浏览器敏感字段或外部接口。
+Admin dashboard 继续恢复旧版运维信息的可见粒度：凭据卡只展示 MoogleMail `main`/`isekai` availability，
+scope 计数、更新时间和重启要求保留在内部 owner；alerting 卡按旧 snapshot 展示 active/due/claimed/failed/
+manual 与最近观测时间。浏览器严格拒绝同一路径的额外字段，不新增敏感字段或外部接口。
 
 Admin 拍卖总览继续恢复旧版表单语义：创建 draft 使用原生表单提交和必填时间字段，解析错误会归类为
 输入校验失败；列表表头补回 readiness 列，和每行的可开放提示保持对齐。
@@ -1501,9 +1548,9 @@ Admin 邮件页恢复旧版的全局立即轮询入口：未加载具体 mailbox
 后者通过应用层 readiness 端口只读检查数据库连接及当前二进制的全部 SQLx 迁移，缺少数据库或迁移
 未完成时返回 503；探针继续使用旧版 `{code,message,data}` 外壳，不计入 feature API 数量。
 
-本轮补齐 Admin `/status` 页面：不再误复用 realtime 运维页面，而是分别读取 `/health/live` 与
-`/health/ready`，将存活、就绪和暂不可用状态以本地化安全徽章展示；`ready` 的 503 被视为未就绪
-状态，不改变探针 HTTP 契约或业务 dashboard 语义。
+本轮再次按旧版复核 Admin `/status` 页面：页面只保留本地化静态服务说明，不读取 `/health/live` 或
+`/health/ready`。登录与已认证外壳仍独立消费 readiness 作为视觉隐藏的可访问性提示，探针 HTTP 契约和
+业务 dashboard 语义均不改变。
 
 本轮还补齐 `auctionctl migrate` 与旧版 `migrate-only` 的目标保护：执行 SQLx 迁移前只读检查迁移标记，
 空数据库允许初始化，已有 `_sqlx_migrations` 历史交给 SQLx 继续做版本/校验和校验；没有迁移标记但存在
@@ -1535,7 +1582,8 @@ Lot 页标题和返回入口也恢复旧版顺序与五语言文案：标题位�
 浏览器标签在客户端启动前显示 Dioxus CLI 默认标题。两个 surface 的 `just web-build`（内部使用
 `dx bundle --platform web`）均已成功生成带预加载 CSS 的静态产物，并复制到
 `target/dx/build/<package>/web/public/`，与后端 `rust-embed` 的 debug/release 嵌入路径一致。
-真实浏览器中的字体、换行、焦点和响应式布局仍需保留为后续验收证据。
+后续 Public 14 条路径已完成 `en` 桌面匿名/空态浏览器巡检，规则和补偿池也取得五语言证据；
+动态数据行、有效登录与写动作、错误/冲突、移动端逐页状态和 Admin 其余页面仍保留为后续验收范围。
 Public 五语言资源中已经没有调用、且仍声称“数据接口接入后替换示例数据”的迁移期死文案同时删除。
 
 本轮静态审计又清理了 Admin/Public 五语言资源中仍把已落地的拍卖生命周期、拍品修改、邮件处理、
@@ -1590,26 +1638,65 @@ Public/Admin 配置和论坛 `public_base_url` 被错误拒绝；配置层与 HT
 
 本轮又完成部署模板的离线工具校验：Caddyfile 通过 `caddy validate --adapter caddyfile`；systemd
 示例先映射为合法 `.service` 文件，并在临时 root 中提供占位可执行文件与基础 target 后通过
-`systemd-analyze verify`。这只证明模板语法、依赖和字段形状，不替代真实 unit 安装、systemd 顺序、
-readiness、回滚或凭据注入验收。
+`systemd-analyze verify`。该阶段只证明模板语法、依赖和字段形状；后续 OPS-003 已补充真实 unit 安装、
+systemd 顺序、readiness、回滚和隔离凭据文件边界，仍不外推为生产流量切换。
 
 本轮重新静态核对旧版与 Rust 浏览器路由：Public 的 14 条、Admin 的 21 条路径分别由 Dioxus
 `Route` 枚举、`auction-http/src/assets/routes.rs` 的精确/参数 allowlist 和旧版别名清单共同覆盖；
 Public 的 `/lots/:lot_code` 与 Admin 的 `/auctions/:auction_id/lots` 参数路由也逐一对应。未匹配
-路由仍只在 Dioxus 内部进入 NotFound，后端不会因此开放未知 SPA 入口；这项证据只证明静态路径
-契约一致，不替代真实浏览器的导航、深链接、焦点和响应式验收。
+路由仍只在 Dioxus 内部进入 NotFound，后端不会因此开放未知 SPA 入口；这项静态证据随后由 Public
+14 条路径的 `en` 桌面匿名/空态巡检补充了导航、深链接和当前布局 R1，但仍不替代动态数据、认证动作、
+错误/冲突、移动端和 Admin 其余页面的浏览器验收。
 
-本轮再次只读盘点本机 PostgreSQL：服务为 18.6，现有 Auction 相关数据库的迁移历史分别属于
-旧版或当前 Rust schema，观测到的最高迁移版本为 1、17、23、25、26、37，schema identity 版本
-为 30、52、55、56，没有唯一且 clean 的 canonical v28 副本。`deployment-check --strict-permissions`
-对示例目录按预期以退出码 2 拒绝 group/other 写入；上述盘点与严格预检均未执行迁移、写入、备份、
-恢复或外部服务调用。canonical v28 的 backup/adoption/restore/rebuild 仍需部署方提供专用副本。
+后续在旧对照实例定位到唯一且 clean 的 PostgreSQL 18.6/canonical v28 数据库，并按私有临时目录、
+专用角色和同名隔离库边界完成 OPS-001 全链。真实执行同时修复 PG18 关键字别名、连接池自会话、
+普通 owner 读取 `pg_user_mapping` 和显式 `pg_default` 权限四类阻塞；最终接管 receipt、SQLx 16、
+规则五语言、当前备份、rebuild OID 变化、空库 preflight 和 restore receipt 均成立，恢复前后摘要一致。
+该旧副本核心业务表为空，因此证据只关闭 schema/灾备运维链，不替代非空业务历史或生产切换验收。
+`deployment-check --strict-permissions` 对示例目录按预期以退出码 2 拒绝 group/other 写入的结论保持不变。
+
+OPS-002 发布制品链也已按 Auction-BF 的实际 Makefile/release-check 合同收口。Public/Admin 新增显式
+`web-embed` feature，API-only 与 embedded 四个 PostgreSQL ELF 在独立 Cargo target 中生成；无 feature
+时静态 owner 指向确定缺失目录并保留明确 503，不会因为本地已有 Dioxus 文件而偶然嵌入。Web 构建每次
+清理 Dioxus 实际 release 中间目录和稳定目录，使用优化 WASM profile、关闭 debug symbols，并生成
+逐文件哈希与版本化 payload manifest；由此发现并修复了旧指纹 JS/WASM 在中间目录残留的问题，两个
+surface 现在各自只有六个 payload 文件和一组 JS/WASM。制品核验扫描 ELF 中的 payload 摘要和 title，
+证明 Public/Admin 只携带自己的 surface，Worker/auctionctl 与 API-only 不携带 Web payload；隔离
+PostgreSQL 运行探针又证明 API-only 两端根路径为明确 503，embedded 自有资源 200、跨 surface 资源 404。
+确定性 package 使用成员 allowlist、固定 mode/owner/mtime、双次 archive 哈希比较、内部 SHA256SUMS、
+源码指纹和依赖摘要；正式模式拒绝 dirty，显式本地证据包会在名称与 manifest 中记录 dirty 状态。
+发布制品本身不替代部署生命周期证据；后续 OPS-003 已在同宿主机隔离环境消费 embedded 制品并完成该层 R1。
+
+OPS-003 使用 systemd 257、Caddy 2.11.4、四个独立 unit、18590/18591 应用端口、18680/18681 代理端口和
+临时 PostgreSQL 完成受控演练。严格 deployment-check、Caddy/systemd 校验和 SQLx 16/16 前向迁移通过；
+三角色按 Worker → Admin → Public 依次 ready，restart 先按 Public → Admin → Worker 停止再正序启动，
+systemd InvocationID 与 0600 root 回执匹配。直接 metrics 为 200，Caddy `/metrics` 为 404；SIGTERM 日志
+逐角色出现 drain/stopped 且退出码为 0。把隔离 Public unit 临时改为 `/usr/bin/false` 后，控制器以
+`start-failure-v1=public-readiness` 和退出码 4 失败关闭，再按 Public → Admin → Worker 回滚；恢复 unit
+后重新启动/停止成功。三角色 journald 敏感模式扫描为零命中，最终已删除全部临时 unit、目录、端口、
+数据库和角色。该 R1 不包含真实域名/TLS、专用生产账号、正式 secret、外部服务和真实流量，因此不构成
+生产切换批准。
 
 本轮还以 `cargo build --locked --workspace --all-features` 完成实际链接构建，并确认
 `auction-worker`、`auctionctl`、`auction-public-api` 和 `auction-admin-api` 四个 ELF 部署入口均已
-生成；这只证明当前 Linux 工具链的制品链接完整，不替代真实宿主机的 systemd 安装、启动顺序和
-凭据注入验收。
+生成；这只证明当前 Linux 工具链的制品链接完整；隔离 systemd 安装已另行取得 R1，专用生产账号、
+正式凭据注入、域名/TLS 和流量切换仍需真实环境批准。
 
 本轮同时以 Rust `1.94.1` MSRV 工具链完成
 `cargo +1.94.1 check --locked --workspace --all-targets --all-features`；MSRV 编译通过，
 未运行测试，该命令只做编译检查。
+
+本轮 Batch D 又完成论坛同步两阶段恢复与 PostgreSQL `000016` 人工授权账本、MoogleMail
+`Retryable`/`Permanent` 处理分类、旧版 Admin 业务 runtime 到 Worker 启动快照的映射、Admin
+稳定错误反馈和凭据表列，以及 metrics listener、origin 默认、Admin 会话和装备来源节流四项配置
+差异。隔离 SQLite/PostgreSQL 运行态又取得 Admin 配置事实卡、单类稳定错误和凭据列的局部认证浏览器
+R1；共享语言选择器也修复了刷新后原生下拉与 `hv.lang`/`html lang` 分离的问题，并在 Admin 制品逐项
+切换五种语言。真实论坛/邮箱回执、其余认证错误、配置保存和 Admin/Worker 重启仍按
+`legacy-parity-audit.md` 保留 R1，且本轮没有新增或运行任何测试用例。
+
+本轮 EVD-002 又使用旧版 8092 与新版 8090 的 embedded 制品完成 Public 14 条路径的 `en` 桌面
+匿名/空态巡检，并逐页校正共用分页、历史筛选、登录/账户 CTA、黑名单和补偿池布局。首页与登录页的
+新旧截图分别取得相同 SHA-256；`/history` 的世界选项顺序、默认值和 Submit 计算样式逐项一致。
+补偿池修复了缺少 Fluent 参数导致的 WASM trap 后，五种语言的 `hv.lang`、`html lang`、picker、标题、
+余额和空态文案均与旧版一致且无浏览器异常。动态数据行、真实竞价/代理、有效登录、错误/冲突、移动端
+逐页状态和 Admin 其余页面仍未覆盖；该轮是一次性人工对照，没有新增或运行浏览器/功能测试用例。

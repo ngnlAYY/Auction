@@ -24,7 +24,8 @@ pub struct HttpSecurityOptions<'a> {
     pub allowed_origins: &'a [String],
     /// 登录请求在固定窗口内的最大次数。
     pub login_limit: u32,
-    /// 状态变更请求在固定窗口内的最大次数。
+    /// 状态变更请求在固定窗口内的最大次数；Public realtime 连接尝试复用该数值，
+    /// 但使用独立账本，不能消耗 mutation 配额。
     pub mutation_limit: u32,
     /// 速率限制固定窗口。
     pub rate_limit_window: Duration,
@@ -43,6 +44,7 @@ pub struct PublicHttpSecurity {
     origins: OriginPolicy,
     login_limiter: RateLimiter,
     mutation_limiter: RateLimiter,
+    realtime_connection_limiter: RateLimiter,
 }
 
 impl Default for PublicHttpSecurity {
@@ -53,6 +55,7 @@ impl Default for PublicHttpSecurity {
             origins: OriginPolicy::disabled(),
             login_limiter: RateLimiter::new(10, Duration::from_secs(60)),
             mutation_limiter: RateLimiter::new(60, Duration::from_secs(60)),
+            realtime_connection_limiter: RateLimiter::new(60, Duration::from_secs(60)),
         }
     }
 }
@@ -82,6 +85,7 @@ impl PublicHttpSecurity {
             origins,
             login_limiter: RateLimiter::new(login_limit, rate_limit_window),
             mutation_limiter: RateLimiter::new(mutation_limit, rate_limit_window),
+            realtime_connection_limiter: RateLimiter::new(mutation_limit, rate_limit_window),
         })
     }
 
@@ -91,6 +95,10 @@ impl PublicHttpSecurity {
 
     pub(crate) fn allows_origin(&self, headers: &HeaderMap) -> bool {
         self.origins.allows(headers)
+    }
+
+    pub(crate) fn allows_websocket_origin(&self, headers: &HeaderMap) -> bool {
+        self.origins.allows_websocket(headers)
     }
 
     pub(crate) fn boundary(&self) -> HttpBoundary {
@@ -103,6 +111,10 @@ impl PublicHttpSecurity {
 
     pub(crate) fn allow_mutation(&self, address: IpAddr) -> Option<u64> {
         self.mutation_limiter.allow(address)
+    }
+
+    pub(crate) fn allow_realtime_connection(&self, address: IpAddr) -> Option<u64> {
+        self.realtime_connection_limiter.allow(address)
     }
 }
 
@@ -191,6 +203,22 @@ impl OriginPolicy {
         let mut values = origins.iter();
         let Some(origin) = values.next() else {
             return true;
+        };
+        if values.next().is_some() {
+            return false;
+        }
+        origin.to_str().is_ok_and(|value| self.allowed.iter().any(|item| item == value))
+    }
+
+    /// 旧 v1 WebSocket 在启用 allowlist 时要求请求必须且只能携带一个可信 Origin。
+    fn allows_websocket(&self, headers: &HeaderMap) -> bool {
+        if self.disabled {
+            return true;
+        }
+        let origins = headers.get_all("origin");
+        let mut values = origins.iter();
+        let Some(origin) = values.next() else {
+            return false;
         };
         if values.next().is_some() {
             return false;

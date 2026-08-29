@@ -31,6 +31,27 @@
 文件只保存非敏感设置，权限按 `0640` 管理。不要把连接串、Cookie、登录 key 或数据密钥
 写入 unit 文件、命令行参数、Caddyfile 或日志。
 
+## 发布制品
+
+生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制
+某次 `cargo build` 的 `target/release`。发布包只包含四个内嵌发布二进制、配置/敏感配置示例、
+systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 Web payload 清单；不会包含数据库、
+Cookie、`.keyenv`、日志或运行时目录。archive 内 `SHA256SUMS` 绑定全部批准文件，外层
+`target/release-package/SHA256SUMS` 再绑定 archive 与 `DEPENDENCIES.md`。
+
+```bash
+just build-api
+just build-release
+just verify-artifacts
+just package
+```
+
+`build-api` 明确关闭 `web-embed`，即使本机已有前端文件也只生成静态路由 503 的 API-only 二进制；
+`build-release` 只让 Public 嵌入 Public payload、Admin 嵌入 Admin payload，Worker/`auctionctl` 不含
+两端资源。正式 `package` 拒绝脏工作树；`--allow-dirty` 只供迁移期间受控取证，输出名称、依赖摘要和
+源码指纹都会保留 dirty 事实，不得作为正式上线批准。解包后仍需按下文把示例复制到 `/etc/auction`、
+注入真实敏感文件并完成目标主机权限/readiness 演练。
+
 ## 启动顺序
 
 1. 将三个角色的主配置和独立敏感 TOML 放到受信目录；生产 Worker 必须启用
@@ -91,7 +112,8 @@ verified backup 或一次性环境豁免、双重目标确认、零连接、advi
 启动、重启、迁移或任何 unit 隐式执行。
 现有 Auction-BF PostgreSQL v28 使用独立的备份格式、严格表/投影预检和显式接管命令，不能交给
 普通 `migrate` 或当前 Rust backup/restore 猜测处理；完整停机、备份、确认、接管与失败恢复流程见
-[`LEGACY_V28_ADOPTION.md`](LEGACY_V28_ADOPTION.md)。
+[`LEGACY_V28_ADOPTION.md`](LEGACY_V28_ADOPTION.md)。旧版配置目录中的五语言规则不一定存在于 v28
+数据库，必须按同一手册在启动前保存并经 `import-rules-directory` 显式导入。
 旧版 retention 工具本身只允许 inventory 并明确禁止 mutation；当前 Rust 已保持该边界，未来
 完整 retention policy 和 mutation 需要独立设计与授权，不属于旧版功能迁移。
 
@@ -153,5 +175,6 @@ SQLite 只用于本地或单主机 Lite 部署：数据库文件必须位于本�
 
 反向代理示例见 [`caddy/Caddyfile`](caddy/Caddyfile)。
 systemd 服务模板见 [`systemd/README.md`](systemd/README.md)；模板必须先替换运行账号和安装路径。
-三个角色 unit 不自动迁移；只有显式启动总控时执行 forward-only migration，任何 unit 都不会自动
-备份、恢复、DROP/CREATE 数据库或执行 retention 删除。
+三个角色 unit 不自动迁移；只有显式启动总控，或在确认三个角色均已停止后显式调用受保护的
+`auctionctl migrate`，才会执行 forward-only migration。任何 unit 都不会自动备份、恢复、
+DROP/CREATE 数据库或执行 retention 删除。

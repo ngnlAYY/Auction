@@ -16,25 +16,36 @@ pub(super) async fn apply_lifecycle_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     plan: AuctionLifecyclePlan,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<AuctionLifecycleWriteSummary, CompetitionTransactionError> {
     if plan.auction.id != command.auction_id || plan.effect.action() != command.action {
         return Err(invalid_state("生命周期命令与动作计划不一致"));
     }
     let AuctionLifecyclePlan { auction, effect } = plan;
     match effect {
         AuctionLifecycleEffect::Preview { manual, successor } => {
-            preview::apply_preview_plan_postgres(transaction, command, &auction, manual, &successor)
-                .await
+            preview::apply_preview_plan_postgres(
+                transaction,
+                command,
+                &auction,
+                manual,
+                &successor,
+            )
+            .await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
         AuctionLifecycleEffect::Open { manual_override } => {
-            open::apply_open_plan_postgres(transaction, command, &auction, manual_override).await
+            open::apply_open_plan_postgres(transaction, command, &auction, manual_override).await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
         AuctionLifecycleEffect::Cancel => {
-            cancel::apply_cancel_plan_postgres(transaction, command, &auction).await
+            let return_obligation_count =
+                cancel::apply_cancel_plan_postgres(transaction, command, &auction).await?;
+            Ok(AuctionLifecycleWriteSummary { return_obligation_count })
         }
         AuctionLifecycleEffect::FinalPhase { proxy_plans } => {
             final_phase::apply_final_plan_postgres(transaction, command, &auction, proxy_plans)
-                .await
+                .await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
     }
 }

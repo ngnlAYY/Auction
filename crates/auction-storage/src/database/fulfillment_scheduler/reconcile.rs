@@ -5,6 +5,99 @@ use super::mapping::*;
 use super::*;
 
 #[cfg(feature = "postgres")]
+const SERIALIZABLE_RETRY_ATTEMPTS: usize = 3;
+
+#[cfg(feature = "postgres")]
+enum ReconcileTransactionError {
+    Storage(sqlx::Error),
+    Repository(auction_application::RepositoryError),
+}
+
+#[cfg(feature = "postgres")]
+fn is_serialization_conflict(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Database(database)
+            if matches!(database.code().as_deref(), Some("40001" | "40P01"))
+    )
+}
+
+#[cfg(feature = "postgres")]
+macro_rules! run_reconcile_transaction {
+    ($pool:expr, $transaction:ident, $body:block) => {{
+        let mut last_error = None;
+        'retry: {
+            for attempt in 0..SERIALIZABLE_RETRY_ATTEMPTS {
+                let mut $transaction = match $pool.begin().await {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    if is_serialization_conflict(&error)
+                        && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
+                    {
+                        last_error = Some(error);
+                        continue;
+                    }
+                    return Err(map_storage_error(error));
+                }
+                };
+                if let Err(error) = sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    .execute(&mut *$transaction)
+                    .await
+                {
+                    if is_serialization_conflict(&error)
+                        && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
+                    {
+                        last_error = Some(error);
+                        continue;
+                    }
+                    return Err(map_storage_error(error));
+                }
+
+                let operation_result = (async $body).await;
+                match operation_result {
+                    Ok(value) => match $transaction.commit().await {
+                        Ok(()) => break 'retry Ok(value),
+                        Err(error) => {
+                            if is_serialization_conflict(&error)
+                                && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
+                            {
+                                last_error = Some(error);
+                                continue;
+                            }
+                            return Err(map_storage_error(error));
+                        }
+                    }
+                    Err(ReconcileTransactionError::Repository(error)) => return Err(error),
+                    Err(ReconcileTransactionError::Storage(error)) => {
+                        if is_serialization_conflict(&error)
+                            && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS
+                        {
+                            last_error = Some(error);
+                            continue;
+                        }
+                        return Err(map_storage_error(error));
+                    }
+                }
+            }
+
+            match last_error {
+                Some(error) => Err(map_storage_error(error)),
+                None => Err(repository_error_owned("结算履约 Serializable 重试未返回结果")),
+            }
+        }
+    }};
+}
+
+#[cfg(feature = "postgres")]
+fn fulfillment_state_name(state: SettlementFulfillmentState) -> &'static str {
+    match state {
+        SettlementFulfillmentState::Pending => "pending",
+        SettlementFulfillmentState::Prepared => "prepared",
+        SettlementFulfillmentState::Enqueued => "enqueued",
+    }
+}
+
+#[cfg(feature = "postgres")]
 pub(super) async fn satisfy_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
@@ -14,7 +107,13 @@ pub(super) async fn satisfy_postgres(
     let Some(delivery_id) = claim.delivery_id else {
         return Err(repository_error_owned("结算履约满足证明缺少 delivery identity"));
     };
+    let Some(delivery) = claim.delivery_snapshot.as_ref() else {
+        return Err(repository_error_owned("结算履约满足证明缺少 delivery 快照"));
+    };
     if claim.state != SettlementFulfillmentState::Enqueued
+        || delivery.id != delivery_id
+        || delivery.status != auction_application::SettlementFulfillmentDeliveryStatus::Succeeded
+        || !delivery.external_reference_proven
         || proof.kind.is_empty()
         || proof.kind != proof.kind.trim()
         || proof.reference.is_empty()
@@ -22,51 +121,149 @@ pub(super) async fn satisfy_postgres(
         || proof.digest == [0; 32]
         || proof.observed_at < claim.claimed_at
         || proof.observed_at > Utc::now()
-        || claim.external_reference.as_deref() != Some(proof.reference.as_str())
-        || !claim.external_reference_proven
     {
         return Err(repository_error_owned("结算履约满足证明不满足 fencing 或身份约束"));
     }
-    let updated = sqlx::query(
-        r#"UPDATE public.settlement_obligation_fulfillments
-           SET execution_state = 'satisfied',
-               proof_kind = $2,
-               proof_reference = $3,
-               proof_digest = $4,
-               proof_observed_at = $5,
-               claim_token = NULL,
-               claimed_at = NULL,
-               claim_expires_at = NULL,
-               completed_at = CURRENT_TIMESTAMP,
-               state_version = state_version + 1,
-               next_attempt_at = NULL,
-               last_error_code = NULL,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE obligation_id = $1
-             AND execution_state = 'enqueued'
-             AND claim_token = $6
-             AND claim_fencing = $7
-             AND delivery_id = $8"#,
-    )
-    .bind(claim.obligation_id.as_uuid())
-    .bind(&proof.kind)
-    .bind(&proof.reference)
-    .bind(proof.digest.to_vec())
-    .bind(proof.observed_at)
-    .bind(claim.claim_token)
-    .bind(claim.claim_fencing)
-    .bind(delivery_id)
-    .execute(pool)
-    .await
-    .map_err(map_storage_error)?;
-    if updated.rows_affected() != 1 {
-        return Err(repository_error_owned("结算履约满足证明的 claim 已失效"));
-    }
+    let state_version = i64::try_from(claim.state_version)
+        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+    // 审计 ID 在重试轮次外生成，保证一次逻辑提交只对应一个审计身份。
+    let audit_id = Uuid::new_v4();
+    run_reconcile_transaction!(pool, transaction, {
+        let updated = sqlx::query(
+            r#"UPDATE public.settlement_obligation_fulfillments
+                   SET execution_state = 'satisfied',
+                       proof_kind = $1,
+                       proof_reference = $2,
+                       proof_digest = $3,
+                       proof_observed_at = $4,
+                       claim_token = NULL,
+                       claimed_at = NULL,
+                       claim_expires_at = NULL,
+                       completed_at = statement_timestamp(),
+                       state_version = state_version + 1,
+                       next_attempt_at = NULL,
+                       last_error_code = NULL,
+                       updated_at = statement_timestamp()
+                   WHERE obligation_id = $5
+                     AND execution_state = $6
+                     AND state_version = $7
+                     AND claim_token = $8
+                     AND claim_fencing = $9
+                     AND delivery_id = $10
+                     AND claim_expires_at > clock_timestamp()
+                   RETURNING updated_at"#,
+        )
+        .bind(&proof.kind)
+        .bind(&proof.reference)
+        .bind(proof.digest.to_vec())
+        .bind(proof.observed_at)
+        .bind(claim.obligation_id.as_uuid())
+        .bind(fulfillment_state_name(claim.state))
+        .bind(state_version)
+        .bind(claim.claim_token)
+        .bind(claim.claim_fencing)
+        .bind(delivery_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        let updated_at: DateTime<Utc> = updated
+            .ok_or_else(|| {
+                ReconcileTransactionError::Repository(repository_error_owned(
+                    "结算履约满足证明的 claim 已失效",
+                ))
+            })?
+            .try_get("updated_at")
+            .map_err(ReconcileTransactionError::Storage)?;
+        // 满足事实与其直接依赖必须同事务提交，避免依赖在中间态被 Worker 领取或永久阻塞。
+        let activated = sqlx::query(
+            r#"UPDATE public.settlement_obligations
+                   SET business_state = 'ready',
+                       state_version = state_version + 1,
+                       updated_at = clock_timestamp()
+                   WHERE prerequisite_obligation_id = $1
+                     AND business_state = 'blocked'"#,
+        )
+        .bind(claim.obligation_id.as_uuid())
+        .execute(&mut *transaction)
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        append_terminal_audit(
+            &mut transaction,
+            audit_id,
+            claim,
+            "satisfied",
+            "auction.fulfillment.satisfied",
+            None,
+            Some(&proof.kind),
+            activated.rows_affected(),
+            updated_at,
+        )
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        Ok(())
+    })?;
     Ok(SettlementFulfillmentReconcileResult {
         obligation_id: claim.obligation_id,
         delivery_id,
         status: SettlementFulfillmentReconcileStatus::Satisfied,
     })
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn manual_reconcile_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    obligation_id: Uuid,
+    execution_state: &str,
+    state_version: u64,
+    claim_token: Uuid,
+    claim_fencing: i64,
+    failure_code: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    let state_version = i64::try_from(state_version)
+        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+    let audit_id = Uuid::new_v4();
+    let updated = sqlx::query(
+        r#"UPDATE public.settlement_obligation_fulfillments
+               SET execution_state = 'manual_reconcile',
+                   claim_token = NULL,
+                   claimed_at = NULL,
+                   claim_expires_at = NULL,
+                   completed_at = statement_timestamp(),
+                   state_version = state_version + 1,
+                   next_attempt_at = NULL,
+                   last_error_code = $1,
+                   updated_at = statement_timestamp()
+               WHERE obligation_id = $2
+                 AND execution_state = $3
+                 AND state_version = $4
+                 AND claim_token = $5
+                 AND claim_fencing = $6
+                 AND claim_expires_at > clock_timestamp()
+               RETURNING updated_at"#,
+    )
+    .bind(failure_code)
+    .bind(obligation_id)
+    .bind(execution_state)
+    .bind(state_version)
+    .bind(claim_token)
+    .bind(claim_fencing)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
+    let updated_at: DateTime<Utc> = updated
+        .ok_or_else(|| repository_error_owned("结算履约损坏上下文的 claim 已失效"))?
+        .try_get("updated_at")
+        .map_err(map_storage_error)?;
+    append_manual_reconcile_audit(
+        transaction,
+        audit_id,
+        obligation_id,
+        claim_fencing,
+        failure_code,
+        updated_at,
+    )
+    .await
+    .map_err(map_storage_error)
 }
 
 #[cfg(feature = "postgres")]
@@ -76,32 +273,158 @@ pub(super) async fn manual_reconcile_postgres(
     failure_code: &str,
 ) -> Result<(), auction_application::RepositoryError> {
     validate_claim_identity(claim)?;
-    let updated = sqlx::query(
-        r#"UPDATE public.settlement_obligation_fulfillments
-           SET execution_state = 'manual_reconcile',
-               claim_token = NULL,
-               claimed_at = NULL,
-               claim_expires_at = NULL,
-               completed_at = CURRENT_TIMESTAMP,
-               state_version = state_version + 1,
-               next_attempt_at = NULL,
-               last_error_code = $2,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE obligation_id = $1
-             AND execution_state IN ('pending', 'prepared', 'enqueued')
-             AND claim_token = $3
-             AND claim_fencing = $4"#,
+    let state_version = i64::try_from(claim.state_version)
+        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+    let audit_id = Uuid::new_v4();
+    run_reconcile_transaction!(pool, transaction, {
+        let updated = sqlx::query(
+            r#"UPDATE public.settlement_obligation_fulfillments
+                   SET execution_state = 'manual_reconcile',
+                       claim_token = NULL,
+                       claimed_at = NULL,
+                       claim_expires_at = NULL,
+                       completed_at = statement_timestamp(),
+                       state_version = state_version + 1,
+                       next_attempt_at = NULL,
+                       last_error_code = $1,
+                       updated_at = statement_timestamp()
+                   WHERE obligation_id = $2
+                     AND execution_state = $3
+                     AND state_version = $4
+                     AND claim_token = $5
+                     AND claim_fencing = $6
+                     AND claim_expires_at > clock_timestamp()
+                   RETURNING updated_at"#,
+        )
+        .bind(failure_code)
+        .bind(claim.obligation_id.as_uuid())
+        .bind(fulfillment_state_name(claim.state))
+        .bind(state_version)
+        .bind(claim.claim_token)
+        .bind(claim.claim_fencing)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        let updated_at: DateTime<Utc> = updated
+            .ok_or_else(|| {
+                ReconcileTransactionError::Repository(repository_error_owned(
+                    "结算履约人工复核的 claim 已失效",
+                ))
+            })?
+            .try_get("updated_at")
+            .map_err(ReconcileTransactionError::Storage)?;
+        append_terminal_audit(
+            &mut transaction,
+            audit_id,
+            claim,
+            "manual_reconcile",
+            "auction.fulfillment.manual_reconcile",
+            Some(failure_code),
+            None,
+            0,
+            updated_at,
+        )
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+async fn append_manual_reconcile_audit(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    audit_id: Uuid,
+    obligation_id: Uuid,
+    claim_fencing: i64,
+    failure_code: &str,
+    occurred_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let metadata = serde_json::json!({
+        "state": "manual_reconcile",
+        "fencing": claim_fencing,
+        "activated_dependent_count": 0,
+        "error_code": failure_code,
+    });
+    sqlx::query(
+        r#"INSERT INTO public.audit_records
+               (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+                result, source, metadata)
+           VALUES ($1, $2, 'system', 'auction-fulfillment',
+                   'auction.fulfillment.manual_reconcile',
+                   'settlement_obligation', $3, 'success', 'worker', $4)"#,
     )
-    .bind(claim.obligation_id.as_uuid())
-    .bind(failure_code)
-    .bind(claim.claim_token)
-    .bind(claim.claim_fencing)
-    .execute(pool)
+    .bind(audit_id)
+    .bind(occurred_at)
+    .bind(obligation_id.to_string())
+    .bind(metadata)
+    .execute(&mut **transaction)
     .await
-    .map_err(map_storage_error)?;
-    if updated.rows_affected() != 1 {
-        return Err(repository_error_owned("结算履约人工复核的 claim 已失效"));
-    }
+    .map(|_| ())
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn mark_failed_postgres(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &SettlementFulfillmentClaim,
+    failure_code: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    validate_claim_identity(claim)?;
+    let state_version = i64::try_from(claim.state_version)
+        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
+    let audit_id = Uuid::new_v4();
+    run_reconcile_transaction!(pool, transaction, {
+        let updated = sqlx::query(
+            r#"UPDATE public.settlement_obligation_fulfillments
+                   SET execution_state = 'failed',
+                       claim_token = NULL,
+                       claimed_at = NULL,
+                       claim_expires_at = NULL,
+                       completed_at = statement_timestamp(),
+                       state_version = state_version + 1,
+                       next_attempt_at = NULL,
+                       last_error_code = $1,
+                       updated_at = statement_timestamp()
+                   WHERE obligation_id = $2
+                     AND execution_state = $3
+                     AND state_version = $4
+                     AND claim_token = $5
+                     AND claim_fencing = $6
+                     AND claim_expires_at > clock_timestamp()
+                   RETURNING updated_at"#,
+        )
+        .bind(failure_code)
+        .bind(claim.obligation_id.as_uuid())
+        .bind(fulfillment_state_name(claim.state))
+        .bind(state_version)
+        .bind(claim.claim_token)
+        .bind(claim.claim_fencing)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        let updated_at: DateTime<Utc> = updated
+            .ok_or_else(|| {
+                ReconcileTransactionError::Repository(repository_error_owned(
+                    "结算履约确定失败的 claim 已失效",
+                ))
+            })?
+            .try_get("updated_at")
+            .map_err(ReconcileTransactionError::Storage)?;
+        append_terminal_audit(
+            &mut transaction,
+            audit_id,
+            claim,
+            "failed",
+            "auction.fulfillment.failed",
+            Some(failure_code),
+            None,
+            0,
+            updated_at,
+        )
+        .await
+        .map_err(ReconcileTransactionError::Storage)?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -109,28 +432,39 @@ pub(super) async fn manual_reconcile_postgres(
 pub(super) async fn fail_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
-    retry_at: DateTime<Utc>,
+    retry_delay: chrono::Duration,
     failure_code: &str,
     _safe_detail: &str,
 ) -> Result<(), auction_application::RepositoryError> {
     validate_claim_identity(claim)?;
+    let retry_microseconds = retry_delay
+        .num_microseconds()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| repository_error_owned("结算履约重试间隔无效"))?;
+    let state_version = i64::try_from(claim.state_version)
+        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
     let result = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
            SET claim_token = NULL,
                claimed_at = NULL,
                claim_expires_at = NULL,
+               retry_count = retry_count + 1,
                state_version = state_version + 1,
-               next_attempt_at = $2,
+               next_attempt_at = clock_timestamp() + $2::bigint * interval '1 microsecond',
                last_error_code = $3,
-               updated_at = CURRENT_TIMESTAMP
+               updated_at = clock_timestamp()
            WHERE obligation_id = $1
-             AND execution_state IN ('pending', 'prepared', 'enqueued')
-             AND claim_token = $4
-             AND claim_fencing = $5"#,
+             AND execution_state = $4
+             AND state_version = $5
+             AND claim_token = $6
+             AND claim_fencing = $7
+             AND claim_expires_at > clock_timestamp()"#,
     )
     .bind(claim.obligation_id.as_uuid())
-    .bind(retry_at)
+    .bind(retry_microseconds)
     .bind(failure_code)
+    .bind(fulfillment_state_name(claim.state))
+    .bind(state_version)
     .bind(claim.claim_token)
     .bind(claim.claim_fencing)
     .execute(pool)
@@ -139,5 +473,46 @@ pub(super) async fn fail_postgres(
     if result.rows_affected() != 1 {
         return Err(repository_error_owned("结算履约失败记录的 claim 已失效"));
     }
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
+#[allow(clippy::too_many_arguments)]
+async fn append_terminal_audit(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    audit_id: Uuid,
+    claim: &SettlementFulfillmentClaim,
+    state: &str,
+    action: &str,
+    error_code: Option<&str>,
+    proof_kind: Option<&str>,
+    activated_dependent_count: u64,
+    occurred_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let mut object = serde_json::Map::new();
+    object.insert("state".to_owned(), state.into());
+    object.insert("fencing".to_owned(), claim.claim_fencing.into());
+    object.insert("activated_dependent_count".to_owned(), activated_dependent_count.into());
+    if let Some(error_code) = error_code {
+        object.insert("error_code".to_owned(), error_code.into());
+    }
+    if let Some(proof_kind) = proof_kind {
+        object.insert("proof_kind".to_owned(), proof_kind.into());
+    }
+    let metadata = serde_json::Value::Object(object);
+    sqlx::query(
+        r#"INSERT INTO public.audit_records
+               (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+                result, source, metadata)
+           VALUES ($1, $2, 'system', 'auction-fulfillment', $3,
+                   'settlement_obligation', $4, 'success', 'worker', $5)"#,
+    )
+    .bind(audit_id)
+    .bind(occurred_at)
+    .bind(action)
+    .bind(claim.obligation_id.to_string())
+    .bind(metadata)
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
 }

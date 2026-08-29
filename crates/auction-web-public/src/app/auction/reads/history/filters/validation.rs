@@ -2,7 +2,7 @@
 
 use super::super::history_days_in_month;
 use super::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 /// 将页面错误分类转换为对应的本地化日期错误。
 pub(crate) fn history_date_error(error: Option<HistoryFilterError>, from: bool) -> Option<String> {

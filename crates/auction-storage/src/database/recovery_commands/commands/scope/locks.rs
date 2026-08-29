@@ -189,10 +189,14 @@ pub(in crate::database::recovery_commands) async fn lock_obligations(
                 .try_get("recipient_game_identity")
                 .map_err(map_sql_error)?,
         };
+        let world_matches = obligation.world_id == recovery.world_id
+            || (obligation.kind == "winner_payment_carrier_cod"
+                && obligation.world_id == "main"
+                && recovery.world_id == "isekai");
         if obligation.id != id
             || obligation.auction_id != recovery.auction_id
             || obligation.lot_id != recovery.lot_id
-            || obligation.world_id != recovery.world_id
+            || !world_matches
             || obligation.equipment_id != recovery.equipment_id
         {
             return Err(RecoveryCommandError::InvalidStoredResult);

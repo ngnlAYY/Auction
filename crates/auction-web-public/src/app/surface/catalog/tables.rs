@@ -14,6 +14,7 @@ pub(crate) fn CatalogTable(
     page_size: i64,
     can_bid: bool,
     allow_slow: bool,
+    session_ready: bool,
     authenticated: bool,
     viewer_name: Option<String>,
 ) -> Element {
@@ -64,13 +65,19 @@ pub(crate) fn CatalogTable(
             }
         }
         if groups.is_empty() {
-            div { class: "public-auction-empty",
-                h2 { {t!("catalog-empty")} }
+            div { class: "ui-empty-state", role: "status",
+                p { class: "ui-empty-state__title",
+                    if active == "all" {
+                        {t!("catalog-empty-all")}
+                    } else {
+                        {t!("catalog-empty-category")}
+                    }
+                }
             }
         }
         for (category, category_rows) in groups {
             section { class: "public-auction-category",
-                h2 { class: "public-auction-category__title",
+                h3 { class: "public-auction-category__title",
                     {catalog_category_label(category)}
                     span { class: "public-auction-category__code", "{catalog_category_code(category)}" }
                 }
@@ -80,6 +87,7 @@ pub(crate) fn CatalogTable(
                         now,
                         can_bid,
                         allow_slow,
+                        session_ready,
                         authenticated,
                         viewer_name: viewer_name.clone(),
                     }
@@ -93,7 +101,7 @@ pub(crate) fn CatalogTable(
             page_size,
             total: Some(page_total),
             has_more: false,
-            label: t!("catalog-pagination"),
+            label: t!("auction-pager-label"),
             on_page_change: move |page| {
                 page_number.set(page);
                 update_public_query(|query| query.page = page, false);
@@ -107,6 +115,7 @@ pub(crate) fn LiveCatalogTable(
     now: DateTime<Utc>,
     can_bid: bool,
     allow_slow: bool,
+    session_ready: bool,
     authenticated: bool,
     viewer_name: Option<String>,
 ) -> Element {
@@ -134,6 +143,7 @@ pub(crate) fn LiveCatalogTable(
                             now,
                             can_bid,
                             allow_slow,
+                            session_ready,
                             authenticated,
                             viewer_name: viewer_name.clone(),
                         }
@@ -178,6 +188,7 @@ pub(crate) fn LiveCatalogRow(
     now: DateTime<Utc>,
     can_bid: bool,
     allow_slow: bool,
+    session_ready: bool,
     authenticated: bool,
     viewer_name: Option<String>,
 ) -> Element {
@@ -202,18 +213,36 @@ pub(crate) fn LiveCatalogRow(
 
     rsx! {
         tr { class: "{leading}",
-            td { class: "public-auction-catalog__code", "data-label": t!("catalog-code"),
-                a { href: lot_detail_href(&row.lot_id), "{row.code}" }
+            td { "data-label": t!("catalog-code"),
+                Link {
+                    class: "public-auction-catalog__code",
+                    to: lot_detail_href(&row.lot_id),
+                    "{row.code}"
+                }
             }
             td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
-                span { class: "public-auction-catalog__item-name", title: row.name.clone(), "{row.name}" }
+                TruncatedText {
+                    value: row.name.clone(),
+                    class_name: "ui-equipment-name",
+                    portal: true,
+                    legacy_dom: true,
+                }
                 if let Some(avg_roll) = row.avg_roll {
-                    span { class: "public-auction-catalog__roll", "{avg_roll:.1}%" }
+                    span {
+                        class: "public-auction-catalog__roll",
+                        aria_label: t!("equipment-avg-roll"),
+                        title: t!("equipment-avg-roll"),
+                        "{avg_roll:.1}%"
+                    }
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }
             td { "data-label": t!("catalog-seller"),
-                span { class: "public-auction-catalog__seller", title: seller.clone(), "{seller}" }
+                TruncatedText {
+                    value: seller,
+                    portal: true,
+                    legacy_dom: true,
+                }
             }
             td {
                 class: "public-auction-catalog__amount public-auction-catalog__number",
@@ -237,15 +266,13 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td {
-                class: "{countdown_css_class}",
                 "data-label": t!("catalog-remaining"),
-                title: if countdown.empty { "".to_owned() } else { row.remaining.clone() },
-                "{countdown.label}"
+                span { class: "{countdown_css_class}", "{countdown.label}" }
             }
             td { "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
-            td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+            td { class: "public-auction-catalog__actions",
                 LiveCatalogActions {
                     lot_id: row.lot_id.clone(),
                     lot_code: row.code.clone(),
@@ -254,6 +281,8 @@ pub(crate) fn LiveCatalogRow(
                     next_bid: row.next_bid,
                     lot_status: row.status.clone(),
                     allow_slow,
+                    session_ready,
+                    block_ordinary_for_active_proxy: false,
                     authenticated,
                     leading: is_leading,
                     show_view: false,

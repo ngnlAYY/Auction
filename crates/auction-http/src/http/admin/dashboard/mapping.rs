@@ -65,11 +65,12 @@ fn map_health(summary: HealthSummary) -> AdminDashboardHealthResponse {
 fn map_process_section(
     section: DashboardSection<ProcessSnapshot>,
 ) -> AdminDashboardSectionResponse {
+    let has_data = section.data.is_some();
     let data = section.data.map(map_process_data);
     AdminDashboardSectionResponse {
         status: section.status.as_str().to_owned(),
-        observed_at: section.observed_at.map(super::super::timestamp),
-        error_code: section.error_code.map(ToOwned::to_owned),
+        observed_at: if has_data { section.observed_at.map(super::super::timestamp) } else { None },
+        error_code: if has_data { None } else { section.error_code.map(ToOwned::to_owned) },
         data,
     }
 }
@@ -78,10 +79,9 @@ fn map_process_data(snapshot: ProcessSnapshot) -> serde_json::Value {
     json!({
         "processes": snapshot.processes.into_iter().map(map_process).collect::<Vec<_>>(),
         "summary": map_health(snapshot.summary),
-        "missing_services": snapshot.missing_services.into_iter()
-            .map(|service| service_role_name(service).to_owned())
-            .collect::<Vec<_>>(),
-        "observed_at": snapshot.observed_at.map(super::super::timestamp),
+        "observed_at": snapshot.observed_at
+            .map(super::super::timestamp)
+            .unwrap_or_else(|| "0001-01-01T00:00:00Z".to_owned()),
     })
 }
 

@@ -1,12 +1,12 @@
 //! Delivery release/retry/reconcile 确认对话框。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 
 use crate::api::{Delivery, DeliveryAction};
 
-use super::helpers::delivery_status_label;
-use super::model::{DeliveryActionRequest, DeliveryDialogKind};
+use super::helpers::delivery_display_id;
+use super::model::{DeliveryActionRequest, DeliveryDialogKind, DeliveryReconcileDraft};
 
 /// 展示 delivery 动作的确认和人工对账字段。
 #[component]
@@ -14,56 +14,75 @@ pub(super) fn DeliveryDialog(
     delivery: Delivery,
     kind: DeliveryDialogKind,
     busy: bool,
+    draft: DeliveryReconcileDraft,
+    on_draft_change: EventHandler<DeliveryReconcileDraft>,
     on_confirm: EventHandler<DeliveryActionRequest>,
     on_cancel: EventHandler<()>,
 ) -> Element {
-    let mut reconcile_action = use_signal(|| "retry".to_owned());
-    let mut external_reference = use_signal(String::new);
-    let mut failure_code = use_signal(String::new);
-    let title = kind.title();
+    let display_id = delivery_display_id(&delivery);
+    let title = match kind {
+        DeliveryDialogKind::Release => t!("delivery-release"),
+        DeliveryDialogKind::Retry | DeliveryDialogKind::ReconcileRetry => t!("delivery-retry"),
+        DeliveryDialogKind::Reconcile => t!("delivery-reconcile-title", id: display_id),
+    };
     let delivery_id = delivery.id.clone();
+    let reconcile_delivery_id = delivery_id.clone();
     let expected_fencing_version = delivery.fencing_version;
-    let status = delivery_status_label(&delivery.status);
-    let failure = delivery.failure_code.clone().unwrap_or_else(|| t!("value-empty"));
+    let draft_delivery_id = draft.delivery_id.clone();
+    let draft_action = draft.action.clone();
+    let draft_external_reference = draft.external_reference.clone();
+    let draft_failure_code = draft.failure_code.clone();
+    let submit_action = draft_action.clone();
+    let submit_external_reference = draft_external_reference.clone();
+    let submit_failure_code = draft_failure_code.clone();
+    let select_delivery_id = draft_delivery_id.clone();
+    let select_external_reference = draft_external_reference.clone();
+    let select_failure_code = draft_failure_code.clone();
+    let external_delivery_id = draft_delivery_id.clone();
+    let external_action = draft_action.clone();
+    let external_failure_code = draft_failure_code.clone();
+    let failure_delivery_id = draft_delivery_id.clone();
+    let failure_action = draft_action.clone();
+    let failure_external_reference = draft_external_reference.clone();
+    let failure = delivery.failure_code.clone().unwrap_or_else(|| "failed".to_owned());
+    let dialog_identity = match kind {
+        DeliveryDialogKind::Release => "release",
+        DeliveryDialogKind::Retry => "retry",
+        DeliveryDialogKind::Reconcile => "reconcile",
+        DeliveryDialogKind::ReconcileRetry => "reconcile-retry",
+    };
 
     rsx! {
-        div { class: "admin-delivery__dialog-backdrop", role: "presentation",
+        div { class: "admin-shell__dialog-backdrop", role: "presentation", key: "{dialog_identity}",
             section {
-                class: "admin-delivery__dialog",
+                class: "admin-shell__dialog",
                 role: "dialog",
                 aria_modal: "true",
                 aria_labelledby: "delivery-dialog-title",
-                aria_busy: busy.to_string(),
-                tabindex: "-1",
                 onkeydown: move |event| {
                     if event.key() == Key::Escape && !busy {
+                        event.stop_propagation();
                         on_cancel.call(());
                     }
                 },
                 h2 { id: "delivery-dialog-title", {title} }
-                p { class: "admin-panel__note", "{delivery.recipient} · {status} · {failure}" }
                 if kind == DeliveryDialogKind::Reconcile {
                     form {
+                        class: "admin-delivery-reconcile",
                         onsubmit: move |event| {
                             event.prevent_default();
                             if busy {
                                 return;
                             }
-                            let selected_action = reconcile_action();
-                            let external = external_reference().trim().to_owned();
-                            let failure = failure_code().trim().to_owned();
-                            if selected_action == "succeeded" && external.is_empty()
-                                || selected_action == "failed" && failure.is_empty()
-                            {
-                                return;
-                            }
-                            let action = match selected_action.as_str() {
+                            let external = submit_external_reference.trim().to_owned();
+                            let failure = submit_failure_code.trim().to_owned();
+                            let action = match submit_action.as_str() {
                                 "succeeded" => DeliveryAction::ReconcileSucceeded,
                                 "failed" => DeliveryAction::ReconcileFailed,
                                 _ => DeliveryAction::ReconcileRetry,
                             };
                             on_confirm.call(DeliveryActionRequest {
-                                delivery_id: delivery_id.clone(),
+                                delivery_id: reconcile_delivery_id.clone(),
                                 action,
                                 expected_fencing_version,
                                 external_reference: (action == DeliveryAction::ReconcileSucceeded)
@@ -72,41 +91,54 @@ pub(super) fn DeliveryDialog(
                                     .then_some(failure),
                             });
                         },
-                        label {
-                            {t!("delivery-reconcile-action")}
-                            select {
-                                value: reconcile_action(),
-                                disabled: busy,
-                                onchange: move |event| reconcile_action.set(event.value()),
-                                option { value: "retry", {t!("delivery-reconcile-action-retry")} }
-                                option { value: "succeeded", {t!("delivery-reconcile-action-succeeded")} }
-                                option { value: "failed", {t!("delivery-reconcile-action-failed")} }
+                        label { r#for: "delivery-reconcile-action-{delivery_id}", {t!("delivery-reconcile-action")} }
+                        select {
+                            id: "delivery-reconcile-action-{delivery_id}",
+                            value: draft_action.clone(),
+                            onchange: move |event| {
+                                on_draft_change.call(DeliveryReconcileDraft {
+                                    delivery_id: select_delivery_id.clone(),
+                                    action: event.value(),
+                                    external_reference: select_external_reference.clone(),
+                                    failure_code: select_failure_code.clone(),
+                                });
+                            },
+                            option { value: "retry", {t!("delivery-reconcile-action-retry")} }
+                            option { value: "succeeded", {t!("delivery-reconcile-action-succeeded")} }
+                            option { value: "failed", {t!("delivery-reconcile-action-failed")} }
+                        }
+                        if draft_action == "succeeded" {
+                            label { r#for: "delivery-external-reference-{delivery_id}", {t!("delivery-external-reference")} }
+                            input {
+                                id: "delivery-external-reference-{delivery_id}",
+                                r#type: "text",
+                                required: true,
+                                value: draft_external_reference.clone(),
+                                oninput: move |event| {
+                                    on_draft_change.call(DeliveryReconcileDraft {
+                                        delivery_id: external_delivery_id.clone(),
+                                        action: external_action.clone(),
+                                        external_reference: event.value(),
+                                        failure_code: external_failure_code.clone(),
+                                    });
+                                },
                             }
                         }
-                        if reconcile_action() == "succeeded" {
-                            label {
-                                {t!("delivery-external-reference")}
-                                input {
-                                    r#type: "text",
-                                    maxlength: "256",
-                                    required: true,
-                                    disabled: busy,
-                                    value: external_reference(),
-                                    oninput: move |event| external_reference.set(event.value()),
-                                }
-                            }
-                        }
-                        if reconcile_action() == "failed" {
-                            label {
-                                {t!("delivery-failure-code")}
-                                input {
-                                    r#type: "text",
-                                    maxlength: "128",
-                                    required: true,
-                                    disabled: busy,
-                                    value: failure_code(),
-                                    oninput: move |event| failure_code.set(event.value()),
-                                }
+                        if draft_action == "failed" {
+                            label { r#for: "delivery-failure-code-{delivery_id}", {t!("delivery-failure-code")} }
+                            input {
+                                id: "delivery-failure-code-{delivery_id}",
+                                r#type: "text",
+                                required: true,
+                                value: draft_failure_code.clone(),
+                                oninput: move |event| {
+                                    on_draft_change.call(DeliveryReconcileDraft {
+                                        delivery_id: failure_delivery_id.clone(),
+                                        action: failure_action.clone(),
+                                        external_reference: failure_external_reference.clone(),
+                                        failure_code: event.value(),
+                                    });
+                                },
                             }
                         }
                         DeliveryDialogActions {
@@ -116,18 +148,10 @@ pub(super) fn DeliveryDialog(
                         }
                     }
                 } else {
-                    div { class: "admin-delivery__dialog-actions",
+                    p { "{delivery.recipient} · {failure}" }
+                    div { class: "admin-shell__dialog-actions",
                         button {
                             r#type: "button",
-                            class: "admin-btn-secondary",
-                            disabled: busy,
-                            autofocus: true,
-                            onclick: move |_| on_cancel.call(()),
-                            {t!("delivery-cancel")}
-                        }
-                        button {
-                            r#type: "button",
-                            class: "admin-btn-primary",
                             disabled: busy,
                             onclick: move |_| on_confirm.call(DeliveryActionRequest {
                                 delivery_id: delivery_id.clone(),
@@ -136,7 +160,14 @@ pub(super) fn DeliveryDialog(
                                 external_reference: None,
                                 failure_code: None,
                             }),
-                            if busy { {t!("admin-action-working")} } else { {t!("delivery-confirm")} }
+                            {t!("delivery-confirm")}
+                        }
+                        button {
+                            r#type: "button",
+                            disabled: busy,
+                            autofocus: true,
+                            onclick: move |_| on_cancel.call(()),
+                            {t!("delivery-cancel")}
                         }
                     }
                 }
@@ -152,10 +183,9 @@ pub(super) fn DeliveryDialogActions(
     on_cancel: EventHandler<()>,
 ) -> Element {
     rsx! {
-        div { class: "admin-delivery__dialog-actions",
+        div { class: "admin-shell__dialog-actions",
             button {
                 r#type: "button",
-                class: "admin-btn-secondary",
                 disabled: busy,
                 autofocus: true,
                 onclick: move |_| on_cancel.call(()),
@@ -165,7 +195,7 @@ pub(super) fn DeliveryDialogActions(
                 r#type: "submit",
                 class: "admin-btn-primary",
                 disabled: busy,
-                if busy { {t!("admin-action-working")} } else { {confirm_label} }
+                "{confirm_label}"
             }
         }
     }

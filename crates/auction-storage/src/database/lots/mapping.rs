@@ -18,10 +18,7 @@ pub(super) fn map_projection(
     presentation_mode: String,
     bidding_open: bool,
 ) -> Result<PublicAuctionProjection, ApplicationError> {
-    if !matches!(auction_status.as_str(), "preview" | "live" | "final" | "settling" | "settled") {
-        return Err(storage_error("公开 lot 拍卖状态无效"));
-    }
-    Ok(PublicAuctionProjection {
+    let projection = PublicAuctionProjection {
         auction_id,
         world_id,
         sequence,
@@ -36,7 +33,9 @@ pub(super) fn map_projection(
         opens_at,
         scheduled_ends_at,
         preview_revision,
-    })
+    };
+    projection.validate().map_err(storage_error)?;
+    Ok(projection)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -53,21 +52,32 @@ pub(super) fn map_preview_fields(
     equipment_category: String,
     attributes: Value,
 ) -> Result<PublicPreviewLotSummary, ApplicationError> {
-    let equipment =
-        map_equipment(world_id, &external_id, &equipment_name, &equipment_category, attributes)?;
-    Ok(PublicPreviewLotSummary {
+    if lot_number <= 0 {
+        return Err(storage_error("公开预览 lot 序号无效"));
+    }
+    let equipment = map_equipment(
+        world_id,
+        &external_id,
+        &equipment_name,
+        &equipment_category,
+        attributes,
+        false,
+    )?;
+    let summary = PublicPreviewLotSummary {
         id,
         auction_id,
         code: public_forum_lot_code(&equipment_category, lot_number),
         status,
-        seller_name: seller_name.unwrap_or_else(|| "—".to_owned()),
+        seller_name: seller_name.ok_or_else(|| storage_error("公开预览 lot 缺少卖家"))?,
         start_price,
         equipment_name,
         equipment_category,
         equipment_level: equipment.level,
         avg_roll: equipment.avg_roll,
         game_equipment_url: equipment.game_equipment_url,
-    })
+    };
+    summary.validate().map_err(storage_error)?;
+    Ok(summary)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -93,12 +103,19 @@ pub(super) fn map_live_fields(
     equipment_category: String,
     attributes: Value,
 ) -> Result<PublicLiveLotSummary, ApplicationError> {
-    let start =
-        BidAmount::new(start_price).map_err(|_| storage_error("公开 lot 起始价不满足金额网格"))?;
-    let current_value = current_price.unwrap_or(start_price);
-    let current = BidAmount::new(current_value)
-        .map_err(|_| storage_error("公开 lot 当前价不满足金额网格"))?;
-    if current < start {
+    if start_price <= 0 {
+        return Err(storage_error("公开 lot 起始价不是正数"));
+    }
+    // 新存储以 NULL 表示无人领先，Auction-BF v28 则以起拍价作哨兵；两者对外都必须
+    // 投影为旧契约的 current_price=start_price。只兼容这两个可证明等价的形状，避免
+    // 把“有领先者却缺价格”或“无领先者但价格已变化”的损坏事实伪装成正常 lot。
+    let current_value = match (current_price, has_leader) {
+        (None, false) => start_price,
+        (Some(current_price), false) if current_price == start_price => current_price,
+        (Some(current_price), true) => current_price,
+        _ => return Err(storage_error("公开 lot 当前价与领先者不一致")),
+    };
+    if current_value < start_price {
         return Err(storage_error("公开 lot 当前价低于起始价"));
     }
     let rules = AuctionRules {
@@ -107,27 +124,43 @@ pub(super) fn map_live_fields(
         ..AuctionRules::default()
     };
     rules.validate().map_err(|_| storage_error("公开 lot 拍卖策略无效"))?;
-    let next_bid = rules
-        .next_minimum_bid(Some(start), has_leader.then_some(current), material, proxy_last)
-        .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
-        .value();
-    let equipment =
-        map_equipment(world_id, &external_id, &equipment_name, &equipment_category, attributes)?;
-    Ok(PublicLiveLotSummary {
+    // 旧版允许任意正整数作为 lot 起始价；无人领先时展示层必须原样返回该价格，不能把
+    // 真实竞价命令使用的整千网格校验反向施加到既有拍品投影。
+    let next_bid = if has_leader {
+        let current = BidAmount::new(current_value)
+            .map_err(|_| storage_error("公开 lot 领先价不满足金额网格"))?;
+        rules
+            .next_minimum_bid(None, Some(current), material, proxy_last)
+            .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
+            .value()
+    } else {
+        start_price
+    };
+    let equipment = map_equipment(
+        world_id,
+        &external_id,
+        &equipment_name,
+        &equipment_category,
+        attributes,
+        true,
+    )?;
+    let summary = PublicLiveLotSummary {
         id,
         auction_id,
         lot_number,
         status,
-        seller_name: seller_name.unwrap_or_else(|| "—".to_owned()),
+        seller_name: seller_name.ok_or_else(|| storage_error("公开正式 lot 缺少卖家"))?,
         start_price,
-        current_price: current.value(),
+        current_price: current_value,
         next_bid,
         has_leader,
         leader_name,
         effective_end_at,
         state_version,
         equipment,
-    })
+    };
+    summary.validate("live", DateTime::<Utc>::default()).map_err(storage_error)?;
+    Ok(summary)
 }
 
 pub(super) fn map_counts(values: [i64; 8]) -> Result<BTreeMap<String, i64>, ApplicationError> {
@@ -143,27 +176,39 @@ pub(super) fn map_equipment(
     name: &str,
     category: &str,
     attributes: Value,
+    category_required: bool,
 ) -> Result<PublicEquipment, ApplicationError> {
     if !matches!(world_id, "main" | "isekai")
         || external_id.is_empty()
         || external_id.len() > 32
         || !external_id.bytes().all(|byte| byte.is_ascii_digit())
         || !public_text(name, 512)
-        || !public_text(category, 128)
+        || category_required && category.is_empty()
+        || !category.is_empty() && !public_text(category, 128)
         || !attributes.is_object()
     {
         return Err(storage_error("公开装备字段无效"));
     }
     let stored: StoredEquipmentAttributes = serde_json::from_value(attributes.clone())
         .map_err(|_| storage_error("公开装备属性无效"))?;
+    if !public_text(&stored.quality, 128)
+        || (!stored.type_name.is_empty() && !public_text(&stored.type_name, 128))
+        || (!stored.prefix.is_empty() && !public_text(&stored.prefix, 128))
+        || (!stored.suffix.is_empty() && !public_text(&stored.suffix, 128))
+        || stored.level.is_some_and(|level| level < 0)
+    {
+        return Err(storage_error("公开装备属性字段无效"));
+    }
     let info_summary =
-        stored.type_name.filter(|value| !value.is_empty()).unwrap_or_else(|| category.to_owned());
+        if stored.type_name.is_empty() { category.to_owned() } else { stored.type_name.clone() };
     let info_summary =
         stored.level.map_or(info_summary.clone(), |level| format!("{info_summary} Lv{level}"));
-    if !public_text(&info_summary, 512) || stored.level.is_some_and(|level| level < 0) {
+    if !info_summary.is_empty() && !public_text(&info_summary, 512)
+        || stored.level.is_some_and(|level| level < 0)
+    {
         return Err(storage_error("公开装备摘要无效"));
     }
-    let quality = stored.quality.as_deref().and_then(quality_range);
+    let quality = quality_range(&stored.quality);
     let mut stats = BTreeMap::new();
     let mut rolls = Vec::new();
     for (stat_name, stat) in stored.stats {
@@ -189,7 +234,7 @@ pub(super) fn map_equipment(
     } else {
         format!("/equip/{external_id}")
     };
-    Ok(PublicEquipment {
+    let equipment = PublicEquipment {
         name: name.to_owned(),
         category: category.to_owned(),
         level: stored.level,
@@ -198,7 +243,9 @@ pub(super) fn map_equipment(
         avg_roll,
         game_equipment_url: format!("https://hentaiverse.org{path}"),
         attributes,
-    })
+    };
+    equipment.validate(category_required).map_err(storage_error)?;
+    Ok(equipment)
 }
 
 pub(super) fn public_text(value: &str, maximum: usize) -> bool {
@@ -233,16 +280,25 @@ fn quality_range(value: &str) -> Option<EquipmentQualityRange> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoredEquipmentAttributes {
-    #[serde(rename = "type")]
-    type_name: Option<String>,
-    quality: Option<String>,
+    #[serde(rename = "type", default)]
+    type_name: String,
+    quality: String,
+    #[serde(default)]
+    prefix: String,
+    #[serde(default)]
+    suffix: String,
     level: Option<i64>,
+    #[serde(default)]
+    #[serde(rename = "tradeable")]
+    _tradeable: bool,
     #[serde(default)]
     stats: BTreeMap<String, StoredEquipmentStat>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StoredEquipmentStat {
     value: String,
     base: Option<f64>,

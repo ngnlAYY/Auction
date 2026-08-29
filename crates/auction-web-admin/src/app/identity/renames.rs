@@ -1,120 +1,154 @@
 //! Admin 改名历史页面。
 //!
-//! 页面只显示安全历史投影；回滚操作通过后端 Users 命令、当前用户版本和 CSRF 边界完成，
-//! 浏览器不自行推导身份状态迁移。
+//! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
+//! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
+use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 use uuid::Uuid;
-
-use auction_web_shared::TruncatedText;
 
 use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
 
 use super::pagination::AdminPager;
-use super::{AdminLoadError, AdminPanel, format_admin_time};
+use super::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 
 pub(super) fn page() -> Element {
-    let mut user_id = use_signal(|| "all".to_owned());
     let mut name = use_signal(String::new);
-    let mut active_user_id = use_signal(|| "all".to_owned());
-    let mut active_name = use_signal(String::new);
     let mut page_number = use_signal(|| 1_i64);
     let mut refresh = use_signal(|| 0_u64);
     let mut busy_rename = use_signal(|| None::<String>);
-    let mut notice = use_signal(|| None::<bool>);
+    let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let mut selected = use_signal(|| None::<AdminRename>);
     let renames = use_resource(move || {
         let _ = refresh();
-        fetch_admin_renames(active_user_id(), active_name(), page_number())
+        // 旧页面只按名称筛选，输入变化立即成为查询键。
+        fetch_admin_renames("all".to_owned(), name(), page_number())
     });
 
-    let load = move |_| {
-        let next_user_id = match user_id().trim() {
-            "" => "all".to_owned(),
-            value => value.to_owned(),
+    let confirm_revert = move |_| {
+        let Some(rename) = selected() else {
+            return;
         };
-        let next_name = name().trim().to_owned();
-        active_user_id.set(next_user_id);
-        active_name.set(next_name);
-        page_number.set(1);
-        refresh.set(refresh().saturating_add(1));
-    };
-
-    let on_revert = move |rename: AdminRename| {
         if rename.reverted_at.is_some() || busy_rename().is_some() {
             return;
         }
         notice.set(None);
         busy_rename.set(Some(rename.id.clone()));
-        let command_id = stable_command_id(
-            command_state,
-            format!("revert:{}:{}", rename.id, rename.user_state_version),
-        );
+        let command_id = stable_command_id(command_state, format!("revert:{}", rename.id));
         let mut busy_rename = busy_rename;
         spawn(async move {
-            let successful = revert_admin_rename(command_id, &rename).await.is_ok();
-            notice.set(Some(successful));
-            if successful {
-                command_state.set(None);
-                refresh.set(refresh().saturating_add(1));
+            match revert_admin_rename(command_id, &rename).await {
+                Ok(_) => {
+                    notice.set(Some(AdminActionFeedback::Success));
+                    command_state.set(None);
+                    selected.set(None);
+                    refresh.set(refresh().saturating_add(1));
+                }
+                Err(code) => notice.set(Some(AdminActionFeedback::Error(code))),
             }
             busy_rename.set(None);
         });
     };
 
-    match &*renames.read_unchecked() {
+    let state = renames.read_unchecked().clone();
+    let content = match state {
         None => rsx! {
-            AdminPanel { title: t!("page-renames-title"), detail: t!("admin-renames-loading") }
+            p { class: "admin-shell__status", role: "status", {t!("admin-renames-loading")} }
         },
-        Some(Err(_)) => rsx! {
-            AdminLoadError {
-                title: t!("page-renames-title"),
-                detail: t!("admin-renames-error"),
-                refresh,
-            }
+        Some(Err(error)) => rsx! {
+            p { class: "admin-shell__inline-error", role: "alert", {admin_api_error_message(&error)} }
         },
         Some(Ok(page)) => rsx! {
-            section { class: "admin-panel", aria_labelledby: "admin-renames-title",
-                h1 { id: "admin-renames-title", {t!("page-renames-title")} }
-                p { class: "admin-panel__note", {t!("page-renames-note")} }
-                div { class: "admin-panel__actions",
-                    label {
-                        {t!("admin-renames-user-filter")}
-                        input {
-                            maxlength: "64",
-                            value: user_id(),
-                            oninput: move |event| user_id.set(event.value()),
-                        }
-                    }
-                    label {
-                        {t!("admin-renames-name-filter")}
-                        input {
-                            maxlength: "256",
-                            value: name(),
-                            oninput: move |event| name.set(event.value()),
-                        }
-                    }
-                    button { r#type: "button", onclick: load, {t!("admin-renames-load")} }
+            RenameTable {
+                page: page.clone(),
+                on_select: move |rename| selected.set(Some(rename)),
+                busy_rename,
+            }
+            if page.renames.is_empty() {
+                p { class: "admin-shell__status", {t!("admin-renames-empty")} }
+            }
+            if let Some(feedback) = notice() {
+                p {
+                    class: if feedback.is_success() {
+                        "admin-shell__inline-ok"
+                    } else {
+                        "admin-shell__inline-error"
+                    },
+                    role: if feedback.is_success() { "status" } else { "alert" },
+                    {feedback.message(t!("admin-renames-revert-success"))}
                 }
-                if let Some(successful) = notice() {
-                    p {
-                        class: if successful {
-                            "admin-panel__note action-feedback action-feedback--success"
-                        } else {
-                            "admin-panel__note action-feedback action-feedback--error"
-                        },
-                        role: if successful { "status" } else { "alert" },
-                        if successful {
-                            {t!("admin-renames-revert-success")}
-                        } else {
-                            {t!("admin-renames-revert-error")}
-                        }
-                    }
-                }
-                RenameTable { page: page.clone(), page_number, on_revert, busy_rename }
+            }
+            AdminPager {
+                page: page.page,
+                page_size: page.page_size,
+                total: page.total,
+                label: t!("page-renames-title"),
+                on_page_change: move |next_page| page_number.set(next_page),
             }
         },
+    };
+
+    rsx! {
+        section { class: "admin-users-page", aria_labelledby: "admin-renames-title",
+            h1 { id: "admin-renames-title", {t!("page-renames-title")} }
+            div { class: "admin-users-renames-filter",
+                label {
+                    r#for: "rename-name",
+                    {t!("admin-renames-name-filter")}
+                    input {
+                        id: "rename-name",
+                        r#type: "text",
+                        maxlength: "256",
+                        value: name(),
+                        oninput: move |event| {
+                            name.set(event.value());
+                            page_number.set(1);
+                        },
+                    }
+                }
+            }
+            {content}
+            if let Some(rename) = selected() {
+                div { class: "admin-shell__dialog-backdrop", role: "presentation",
+                    section {
+                        class: "admin-shell__dialog",
+                        role: "dialog",
+                        aria_modal: "true",
+                        aria_labelledby: "rename-dialog-title",
+                        onkeydown: move |event| {
+                            if event.key() == Key::Escape && busy_rename().is_none() {
+                                event.stop_propagation();
+                                selected.set(None);
+                            }
+                        },
+                        h2 { id: "rename-dialog-title", {t!("admin-renames-revert-confirm-title")} }
+                        p {
+                            {t!(
+                                "admin-renames-revert-confirm-description",
+                                from: rename.next_username,
+                                to: rename.previous_username
+                            )}
+                        }
+                        div { class: "admin-shell__dialog-actions",
+                            button {
+                                r#type: "button",
+                                disabled: busy_rename().is_some(),
+                                onclick: confirm_revert,
+                                {t!("admin-users-action-confirm")}
+                            }
+                            button {
+                                r#type: "button",
+                                autofocus: true,
+                                disabled: busy_rename().is_some(),
+                                onclick: move |_| selected.set(None),
+                                {t!("admin-renames-cancel")}
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -132,138 +166,63 @@ fn stable_command_id(mut command_state: Signal<Option<(String, Uuid)>>, signatur
 #[component]
 fn RenameTable(
     page: AdminRenamePage,
-    page_number: Signal<i64>,
-    on_revert: EventHandler<AdminRename>,
+    on_select: EventHandler<AdminRename>,
     busy_rename: Signal<Option<String>>,
 ) -> Element {
     rsx! {
-        section {
-            class: "admin-panel",
-            aria_labelledby: "admin-renames-table-title",
-            aria_busy: busy_rename().is_some().to_string(),
-            h2 { id: "admin-renames-table-title", {t!("admin-renames-total", total: page.total)} }
-            if page.renames.is_empty() {
-                p { class: "admin-panel__note", role: "status", {t!("admin-renames-empty")} }
-            } else {
-                div { class: "public-auction-catalog admin-renames__table-wrap",
-                    table {
-                        thead {
-                            tr {
-                                th { {t!("admin-renames-id")} }
-                                th { {t!("admin-renames-user")} }
-                                th { {t!("admin-renames-previous")} }
-                                th { {t!("admin-renames-next")} }
-                                th { {t!("admin-renames-actor")} }
-                                th { {t!("admin-renames-created")} }
-                                th { {t!("admin-renames-reverted")} }
-                                th { {t!("catalog-actions")} }
-                            }
-                        }
-                        tbody {
-                            for rename in page.renames {
-                                RenameRow { rename, on_revert, busy_rename }
-                            }
-                        }
+        div { class: "admin-shell__table-wrap",
+            table { class: "admin-shell__table", aria_busy: busy_rename().is_some().to_string(),
+                thead {
+                    tr {
+                        th { {t!("admin-renames-previous")} }
+                        th { {t!("admin-renames-next")} }
+                        th { {t!("admin-renames-actor")} }
+                        th { {t!("admin-renames-created")} }
+                        th { {t!("admin-renames-reverted")} }
+                        th { {t!("admin-users-actions")} }
                     }
                 }
-            }
-            AdminPager {
-                page: page.page,
-                page_size: page.page_size,
-                total: page.total,
-                label: t!("admin-renames-pagination"),
-                on_page_change: move |next_page| page_number.set(next_page),
+                tbody {
+                    for rename in page.renames {
+                        RenameRow { rename, on_select }
+                    }
+                }
             }
         }
     }
 }
 
 #[component]
-fn RenameRow(
-    rename: AdminRename,
-    on_revert: EventHandler<AdminRename>,
-    busy_rename: Signal<Option<String>>,
-) -> Element {
+fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Element {
     let is_reverted = rename.reverted_at.is_some();
-    let is_busy = busy_rename().as_deref() == Some(rename.id.as_str());
-    let mut confirmation = use_signal(|| false);
     let rename_for_action = rename.clone();
-    let previous_username = rename.previous_username.clone();
-    let next_username = rename.next_username.clone();
     rsx! {
-        tr { class: "admin-renames__row",
-            td { "data-label": t!("admin-renames-id"), TruncatedText { value: rename.id } }
-            td { "data-label": t!("admin-renames-user"), TruncatedText { value: rename.user_id } }
-            td { "data-label": t!("admin-renames-previous"), TruncatedText { value: previous_username.clone() } }
-            td { "data-label": t!("admin-renames-next"), TruncatedText { value: next_username.clone() } }
-            td { "data-label": t!("admin-renames-actor"), TruncatedText { value: rename.actor } }
-            td { "data-label": t!("admin-renames-created"),
+        tr {
+            td {
+                TruncatedText { value: rename.previous_username }
+            }
+            td {
+                TruncatedText { value: rename.next_username }
+            }
+            td {
+                TruncatedText { value: rename.actor }
+            }
+            td {
                 time { datetime: rename.created_at.clone(), "{format_admin_time(&rename.created_at)}" }
             }
-            td { "data-label": t!("admin-renames-reverted"),
-                if let Some(reverted_at) = rename.reverted_at.clone() {
+            td {
+                if let Some(reverted_at) = rename.reverted_at {
                     time { datetime: reverted_at.clone(), "{format_admin_time(&reverted_at)}" }
-                } else {
-                    span { class: "admin-renames__status admin-renames__status--pending", {t!("value-empty")} }
                 }
             }
-            td { "data-label": t!("catalog-actions"), class: "admin-renames__actions",
+            td {
                 if is_reverted {
-                    span { class: "admin-renames__status admin-renames__status--reverted", {t!("admin-renames-no-action")} }
+                    {t!("admin-renames-no-action")}
                 } else {
                     button {
-                        class: "admin-btn-danger",
                         r#type: "button",
-                        disabled: busy_rename().is_some(),
-                        onclick: move |_| confirmation.set(true),
-                        if is_busy { {t!("admin-action-working")} } else { {t!("admin-renames-revert")} }
-                    }
-                }
-            }
-        }
-        if confirmation() {
-            tr { class: "admin-renames__dialog-row",
-                td { colspan: "8",
-                    div { class: "admin-renames__dialog-backdrop", role: "presentation",
-                        section {
-                            class: "admin-renames__dialog",
-                            role: "dialog",
-                            aria_modal: "true",
-                            aria_labelledby: "admin-renames-confirm-title",
-                            tabindex: "-1",
-                            onkeydown: move |event| {
-                                if event.key() == Key::Escape && !busy_rename().is_some() {
-                                    confirmation.set(false);
-                                }
-                            },
-                            h2 { id: "admin-renames-confirm-title", {t!("admin-renames-revert-confirm-title")} }
-                            p {
-                                {t!(
-                                    "admin-renames-revert-confirm-description",
-                                    from: next_username.clone(),
-                                    to: previous_username.clone()
-                                )}
-                            }
-                            div { class: "admin-panel__actions",
-                                button {
-                                    r#type: "button",
-                                    autofocus: true,
-                                    disabled: busy_rename().is_some(),
-                                    onclick: move |_| confirmation.set(false),
-                                    {t!("admin-renames-cancel")}
-                                }
-                                button {
-                                    class: "admin-btn-danger",
-                                    r#type: "button",
-                                    disabled: busy_rename().is_some(),
-                                    onclick: move |_| {
-                                        confirmation.set(false);
-                                        on_revert.call(rename_for_action.clone());
-                                    },
-                                    {t!("admin-renames-revert")}
-                                }
-                            }
-                        }
+                        onclick: move |_| on_select.call(rename_for_action.clone()),
+                        {t!("admin-renames-revert")}
                     }
                 }
             }

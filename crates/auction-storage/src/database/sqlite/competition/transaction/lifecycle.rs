@@ -26,7 +26,8 @@ impl AuctionLifecycleTransaction for SqliteCompetitionTransaction {
         &mut self,
         command: &AuctionLifecycleCommand,
         plan: AuctionLifecyclePlan,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
+    ) -> impl Future<Output = Result<AuctionLifecycleWriteSummary, CompetitionTransactionError>> + Send
+    {
         let command = command.clone();
         async move { plan::apply_lifecycle_plan_sqlite(self, &command, plan).await }
     }
@@ -38,18 +39,24 @@ impl AuctionLifecycleTransaction for SqliteCompetitionTransaction {
         async move { context::list_final_lot_ids_for_update(self, auction_id).await }
     }
 
-    fn proxy_user_is_eligible_for_update(
-        &mut self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
-        async move { context::proxy_user_is_eligible_for_update(self, user_id).await }
-    }
-
     fn append_lifecycle_record(
         &mut self,
         command: &AuctionLifecycleCommand,
+        context: &AuctionLifecycleContext,
+        plan: &AuctionLifecyclePlan,
         result: &AuctionLifecycleResult,
+        write_summary: AuctionLifecycleWriteSummary,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { record::append_lifecycle_record_inner(self, command, result).await }
+        async move {
+            record::append_lifecycle_record_inner(
+                self,
+                command,
+                context,
+                plan,
+                result,
+                write_summary,
+            )
+            .await
+        }
     }
 }

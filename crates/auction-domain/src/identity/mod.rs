@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 macro_rules! typed_id {
@@ -68,6 +69,30 @@ macro_rules! typed_id {
 pub fn deterministic_uuid(command_id: CommandId, label: &str, version: u32) -> Uuid {
     let name = format!("auction:{version}:{command_id}:{label}");
     Uuid::new_v5(&Uuid::NAMESPACE_OID, name.as_bytes())
+}
+
+/// 按 Auction-BF 的长度前缀自然键算法派生稳定 UUID。
+///
+/// 该算法属于旧结算义务和 recovery 主键的持久兼容合同：namespace 与每个二进制部分都先写入
+/// 八字节大端长度，再截取 SHA-256 前 16 字节并设置 UUID v5/variant 位。调用方必须继续使用
+/// 已冻结的 namespace 和自然键顺序，不能改用可重试命令 ID 替代业务事实身份。
+pub fn legacy_natural_key_uuid(namespace: &str, parts: &[&[u8]]) -> Uuid {
+    let mut hash = Sha256::new();
+    write_legacy_stable_part(&mut hash, namespace.as_bytes());
+    for part in parts {
+        write_legacy_stable_part(&mut hash, part);
+    }
+    let digest = hash.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+fn write_legacy_stable_part(hash: &mut Sha256, value: &[u8]) {
+    hash.update(u64::try_from(value.len()).unwrap_or(u64::MAX).to_be_bytes());
+    hash.update(value);
 }
 
 typed_id!(AuctionId);

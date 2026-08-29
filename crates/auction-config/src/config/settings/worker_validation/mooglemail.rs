@@ -212,13 +212,13 @@ pub(crate) fn validate_mooglemail_notification_templates(
         (
             "register_result",
             config.register_result.as_str(),
-            &["result_code", "username"][..],
+            &["result_code"][..],
             &["result_code", "username"][..],
         ),
         (
             "rebind_result",
             config.rebind_result.as_str(),
-            &["result_code", "username"][..],
+            &["result_code"][..],
             &["result_code", "username"][..],
         ),
         (
@@ -313,11 +313,12 @@ pub(crate) fn validate_mooglemail_world(
     if !matches!(world_id, "main" | "isekai") {
         return Err(ConfigError::InvalidMoogleMailConfig("world_id 只能是 main 或 isekai"));
     }
+    if sender_allowlist.len() > 1000 {
+        return Err(ConfigError::InvalidMoogleMailConfig("sender_allowlist 最多 1000 项"));
+    }
     for (index, sender) in sender_allowlist.iter().enumerate() {
-        if !valid_config_text(sender, 256)
-            || sender_allowlist[..index]
-                .iter()
-                .any(|previous| previous.eq_ignore_ascii_case(sender))
+        if !valid_config_text(sender, 128)
+            || sender_allowlist[..index].iter().any(|previous| previous == sender)
         {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "sender_allowlist 含有重复或无效发件人",

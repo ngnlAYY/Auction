@@ -23,7 +23,7 @@ pub use equipment::{
 pub use errors::DomainError;
 pub use identity::{
     AuctionId, BidId, CommandId, EquipmentId, LotId, ProxyAuthorizationId, SettlementId,
-    SubmissionId, UserId, WorldId, deterministic_uuid,
+    SubmissionId, UserId, WorldId, deterministic_uuid, legacy_natural_key_uuid,
 };
 pub use proxy::{
     ProxyAuthorization, ProxyMode, ProxyStatus, ProxyTerminalReason, ProxyTransition,

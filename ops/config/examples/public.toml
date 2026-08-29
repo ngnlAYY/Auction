@@ -73,7 +73,7 @@ allowed_origins_enabled = true
 allowed_origins = ["http://127.0.0.1:8090"]
 # 可选：登录请求在限流窗口内的最大次数，默认 10。
 login_rate_limit = 10
-# 可选：状态变更请求在限流窗口内的最大次数，默认 60。
+# 可选：状态变更请求的最大次数；realtime 连接尝试使用相同上限但独立计数，默认 60。
 mutation_rate_limit = 60
 # 可选：限流窗口秒数，默认 60。
 rate_limit_window_seconds = 60

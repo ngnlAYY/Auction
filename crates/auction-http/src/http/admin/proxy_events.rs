@@ -166,7 +166,8 @@ fn map_event(event: AdminProxyEvent) -> AdminProxyEventResponse {
         maximum_amount: event.maximum_amount,
         mode: event.mode,
         state_version: event.state_version,
-        status: event.status,
+        // `final_fast` 是新版内部状态；旧 v1 Admin wire 只认识 active，不能把内部建模泄漏给旧客户端。
+        status: if event.status == "final_fast" { "active".to_owned() } else { event.status },
         user_id: event.user_id.to_string(),
         usage_number: event.usage_number,
         username: event.username,

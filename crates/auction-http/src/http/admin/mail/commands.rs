@@ -1,9 +1,8 @@
 use std::net::SocketAddr;
 
 use super::{
-    ADMIN_CSRF_COOKIE, AdminApiState, admin_session_guard, authenticated_admin_session,
-    authentication_error, feature_unavailable, internal_error, map_error, no_store_headers,
-    read_admin_cookie, request_id, valid_admin_csrf_header,
+    AdminApiState, authenticated_admin_mutation, feature_unavailable, internal_error, map_error,
+    no_store_headers, request_id,
 };
 use auction_application::{AdminMailPollingCommand, RequestHash, admin_mail_aggregate_id};
 use auction_contracts::{AdminMailPollingRequest, AdminMailStateResponse, ApiResponse};
@@ -24,16 +23,10 @@ pub(crate) async fn set_paused(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let Some(raw_csrf) = read_admin_cookie(&headers, ADMIN_CSRF_COOKIE) else {
-        return authentication_error();
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(result) => result,
+        Err(response) => return *response,
     };
-    if !valid_admin_csrf_header(&headers, &raw_csrf) {
-        return super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-            .into_response();
-    }
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return super::api_error(
             StatusCode::BAD_REQUEST,
@@ -42,10 +35,6 @@ pub(crate) async fn set_paused(
         )
         .into_response();
     }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
-        Ok(result) => result,
-        Err(response) => return *response,
-    };
     let input: AdminMailPollingRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {

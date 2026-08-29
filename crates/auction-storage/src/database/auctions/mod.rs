@@ -6,8 +6,9 @@
 use super::DatabaseStore;
 use auction_application::{
     ApplicationFuture, AuctionReader, CurrentAuctionSnapshot, PublicAuctionListRequest,
-    PublicAuctionPage,
+    PublicAuctionPage, PublicRealtimeAuctionStatus,
 };
+use uuid::Uuid;
 
 mod mapping;
 #[cfg(feature = "postgres")]
@@ -40,6 +41,22 @@ impl AuctionReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => postgres::current(store, &world_id).await,
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => sqlite::current(store, &world_id).await,
+            }
+        })
+    }
+
+    fn public_realtime_auction_status(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<PublicRealtimeAuctionStatus>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    postgres::realtime_status(store, auction_id).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => sqlite::realtime_status(store, auction_id).await,
             }
         })
     }

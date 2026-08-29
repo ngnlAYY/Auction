@@ -9,13 +9,13 @@ use auction_application::{
     AdminLotListRequest, AdminLotPage, AdminLotSummary, ApplicationError, SettlementAuctionSnapshot,
 };
 use auction_contracts::{
-    AdminLotCapabilitiesResponse, AdminLotListResponse, AdminLotPaginationResponse,
-    AdminLotResponse, AdminSettlementAuctionResponse, ApiResponse,
+    AdminAuctionResponse, AdminLotListResponse, AdminLotPaginationResponse, AdminLotResponse,
+    ApiResponse,
 };
 use axum::{
     Json,
     extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, StatusCode, Uri},
+    http::{HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use uuid::Uuid;
@@ -87,18 +87,21 @@ pub(crate) async fn list(
     if !valid_page(&result, request) {
         return super::internal_error();
     }
+    let total = result.total;
+    let mut response_headers = super::no_store_headers();
+    response_headers.insert(
+        "x-auction-capability-manual-intake",
+        HeaderValue::from_static(if state.admin_intake().is_some() { "true" } else { "false" }),
+    );
     (
         StatusCode::OK,
-        super::no_store_headers(),
+        response_headers,
         Json(ApiResponse::ok(
-            "拍品列表已加载",
+            "后台 lot 列表已加载",
             AdminLotListResponse {
-                auction: map_auction(result.auction),
+                auction: map_auction(result.auction, total),
                 lots: result.entries.into_iter().map(map_lot).collect(),
-                pagination: AdminLotPaginationResponse { page, page_size, total: result.total },
-                capabilities: AdminLotCapabilitiesResponse {
-                    manual_intake: state.admin_intake().is_some(),
-                },
+                pagination: AdminLotPaginationResponse { page, page_size, total },
             },
         )),
     )
@@ -120,8 +123,8 @@ fn valid_page(page: &AdminLotPage, request: AdminLotListRequest) -> bool {
                 && page.auction.cancelled_reason.is_none()))
 }
 
-fn map_auction(auction: SettlementAuctionSnapshot) -> AdminSettlementAuctionResponse {
-    AdminSettlementAuctionResponse {
+fn map_auction(auction: SettlementAuctionSnapshot, lot_count: i64) -> AdminAuctionResponse {
+    AdminAuctionResponse {
         id: auction.id.to_string(),
         world_id: auction.world_id,
         sequence: auction.sequence,
@@ -138,8 +141,8 @@ fn map_auction(auction: SettlementAuctionSnapshot) -> AdminSettlementAuctionResp
         cancelled_reason: auction.cancelled_reason,
         cancelled_by: auction.cancelled_by,
         state_version: auction.state_version,
-        scheduled_end_at: auction.scheduled_end_at.map(super::timestamp),
-        effective_end_at: auction.effective_end_at.map(super::timestamp),
+        scheduled_ends_at: None,
+        lot_count: Some(lot_count),
         created_at: super::timestamp(auction.created_at),
         updated_at: super::timestamp(auction.updated_at),
     }

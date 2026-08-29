@@ -7,10 +7,10 @@ use super::*;
 pub(in crate::database::recovery_commands) fn scheduled_relist_command_id(
     recovery_id: Uuid,
 ) -> CommandId {
-    CommandId::from_uuid(deterministic_uuid(
-        CommandId::from_uuid(recovery_id),
-        "recovery-relist-command",
-        1,
+    let nil_uuid = Uuid::nil();
+    CommandId::from_uuid(legacy_natural_key_uuid(
+        "auction.recovery.relist-command.v1",
+        &[recovery_id.as_bytes(), nil_uuid.as_bytes()],
     ))
 }
 

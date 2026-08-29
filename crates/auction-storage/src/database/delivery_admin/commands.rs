@@ -1,8 +1,8 @@
 //! PostgreSQL delivery Admin 人工命令事务与结算履约联动。
 
 use auction_application::{
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminResult, DeliveryAdminSnapshot,
-    RequestHash,
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminResult,
+    DeliveryAdminSnapshot, RequestHash,
 };
 use chrono::Utc;
 use serde::Serialize;
@@ -10,8 +10,12 @@ use serde_json::Value;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use super::mapping::snapshot;
-use super::{map_storage_error, repository_error_owned};
+use super::mapping::{
+    decode_result_payload, legacy_result_payload, stored_snapshot, valid_snapshot,
+};
+use super::transaction::{
+    DeliveryAdminTransactionError, PostgresDeliveryAdminTransaction, wait_before_retry,
+};
 use crate::database::TrackedPool;
 use crate::database::delivery_audit::{
     ADMIN_RECONCILE, ADMIN_RELEASE, ADMIN_RETRY_FAILED, DeliveryAudit,
@@ -21,30 +25,59 @@ use crate::database::delivery_audit::{
 pub(crate) async fn execute(
     pool: &TrackedPool<Postgres>,
     command: &DeliveryAdminCommand,
-) -> Result<DeliveryAdminResult, auction_application::RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+) -> Result<DeliveryAdminResult, DeliveryAdminError> {
+    const MAX_ATTEMPTS: usize = 3;
+
+    for attempt in 0..MAX_ATTEMPTS {
+        match execute_transaction(pool, command).await {
+            Ok(result) => return Ok(result),
+            Err(error) if error.is_retryable() && attempt + 1 < MAX_ATTEMPTS => {
+                // 每次重试都从新的事务开始；已执行的写入不能在同一事务中继续使用。
+                wait_before_retry(attempt).await;
+            }
+            Err(error) => return Err(error.into_delivery_error()),
+        }
+    }
+    unreachable!("Delivery Admin SERIALIZABLE 重试次数已由上界保证");
+}
+
+async fn execute_transaction(
+    pool: &TrackedPool<Postgres>,
+    command: &DeliveryAdminCommand,
+) -> Result<DeliveryAdminResult, DeliveryAdminTransactionError> {
+    let mut transaction = PostgresDeliveryAdminTransaction::begin(pool).await?;
+    lock_command(&mut transaction, command.command_id).await?;
     if let Some(result) = existing_command(&mut transaction, command).await? {
-        transaction.commit().await.map_err(map_storage_error)?;
+        transaction.commit().await?;
         return Ok(result);
     }
 
     let row = sqlx::query(
-        r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
+        r#"SELECT id, command_id, request_digest, activation_command_id,
+                  activation_request_digest, origin_kind, origin_id, recipient, payload,
+                  result_metadata, status,
+                  lease_token,
                   lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
-                  created_at, updated_at
+                  activated_at, created_at, updated_at
            FROM public.deliveries
            WHERE id = $1
            FOR UPDATE"#,
     )
     .bind(command.delivery_id)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?
-    .ok_or_else(|| repository_error_owned("delivery 不存在"))?;
-    let current = snapshot(&row)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?
+    .ok_or(DeliveryAdminError::NotFound)?;
+    let current = stored_snapshot(&row).map_err(DeliveryAdminTransactionError::Business)?;
+    // 兼容滚动升级期间尚未取得 advisory lock 的旧实例：delivery 行锁等待结束后重新读取
+    // 命令账本，必须先识别重放/冲突，再判断已经被前一命令推进的 fencing version。
+    if let Some(result) = existing_command(&mut transaction, command).await? {
+        transaction.commit().await?;
+        return Ok(result);
+    }
     if current.fencing_version != command.expected_fencing_version {
-        return Err(repository_error_owned("delivery 状态或 fencing version 已变化"));
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
 
     let next_status = apply_delivery_action(&mut transaction, command, &current).await?;
@@ -53,10 +86,8 @@ pub(crate) async fn execute(
     {
         reset_settlement_fulfillment(&mut transaction, command.delivery_id).await?;
     } else if command.action == DeliveryAdminAction::ReconcileSucceeded {
-        let external_reference = command
-            .external_reference
-            .as_deref()
-            .ok_or_else(|| repository_error_owned("人工成功确认缺少外部引用"))?;
+        let external_reference =
+            command.external_reference.as_deref().ok_or(DeliveryAdminError::Invalid)?;
         let proof_digest = admin_proof_digest(command.delivery_id, external_reference)?;
         update_settlement_fulfillment(
             &mut transaction,
@@ -80,25 +111,31 @@ pub(crate) async fn execute(
     }
 
     let updated_row = sqlx::query(
-        r#"SELECT id, origin_kind, origin_id, recipient, payload, result_metadata, status,
+        r#"SELECT id, command_id, request_digest, activation_command_id,
+                  activation_request_digest, origin_kind, origin_id, recipient, payload,
+                  result_metadata, status,
+                  lease_token,
                   lease_expires_at, fencing_version, attempt_count, claimed_at,
                   sending_at, completed_at, external_reference, failure_code,
-                  created_at, updated_at
+                  activated_at, created_at, updated_at
            FROM public.deliveries
            WHERE id = $1
            FOR UPDATE"#,
     )
     .bind(command.delivery_id)
-    .fetch_one(&mut *transaction)
+    .fetch_one(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
-    let snapshot = snapshot(&updated_row)?;
-    if snapshot.status != next_status {
-        return Err(repository_error_owned("delivery Admin 动作结果状态不一致"));
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let (payload, snapshot) =
+        legacy_result_payload(&updated_row).map_err(DeliveryAdminTransactionError::Business)?;
+    if snapshot.status != next_status
+        || snapshot.fencing_version <= command.expected_fencing_version
+    {
+        return Err(DeliveryAdminTransactionError::Business(
+            DeliveryAdminError::StoredResultCorrupt,
+        ));
     }
     let result = DeliveryAdminResult { command_id: command.command_id, snapshot };
-    let payload = serde_json::to_value(&result)
-        .map_err(|_| repository_error_owned("delivery Admin 结果编码失败"))?;
     let inserted = sqlx::query(
         r#"INSERT INTO public.delivery_admin_commands
                (command_id, command_kind, request_digest, delivery_id, result_payload)
@@ -110,11 +147,14 @@ pub(crate) async fn execute(
     .bind(command.request_hash.as_bytes().to_vec())
     .bind(command.delivery_id)
     .bind(payload)
-    .execute(&mut *transaction)
+    .execute(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     if inserted.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery Admin 命令并发冲突"));
+        // 另一实例可能未使用同一 advisory lock。先回滚本事务中的 delivery/settlement
+        // 变更，再从已提交账本恢复原结果；不能把相同命令误报为 conflict。
+        transaction.rollback().await?;
+        return committed_command(pool, command).await;
     }
     let (audit_action, admin_action) = match command.action {
         DeliveryAdminAction::Release => (ADMIN_RELEASE, "release"),
@@ -124,7 +164,7 @@ pub(crate) async fn execute(
         DeliveryAdminAction::ReconcileFailed => (ADMIN_RECONCILE, "reconcile_failed"),
     };
     append_delivery_audit(
-        &mut transaction,
+        transaction.transaction_mut()?,
         DeliveryAudit {
             occurred_at: result.snapshot.updated_at,
             actor_type: "admin",
@@ -142,70 +182,101 @@ pub(crate) async fn execute(
         },
     )
     .await
-    .map_err(map_storage_error)?;
-    transaction.commit().await.map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    transaction.commit().await?;
+    Ok(result)
+}
+
+/// 以 command ID 为 PostgreSQL 事务锁键，统一同一幂等身份的并发入口。
+async fn lock_command(
+    transaction: &mut PostgresDeliveryAdminTransaction,
+    command_id: Uuid,
+) -> Result<(), DeliveryAdminTransactionError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(command_id.to_string())
+        .execute(transaction.connection()?)
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    Ok(())
+}
+
+/// 唯一冲突后只从新事务读取已提交账本，避免返回当前已回滚事务中的临时结果。
+async fn committed_command(
+    pool: &TrackedPool<Postgres>,
+    command: &DeliveryAdminCommand,
+) -> Result<DeliveryAdminResult, DeliveryAdminTransactionError> {
+    // 竞态事务已经回滚；账本恢复必须使用另一笔完整 SERIALIZABLE 事务读取已提交结果。
+    let mut transaction = PostgresDeliveryAdminTransaction::begin(pool).await?;
+    let result = existing_command(&mut transaction, command)
+        .await?
+        .ok_or(DeliveryAdminError::Unavailable)?;
+    transaction.commit().await?;
     Ok(result)
 }
 
 async fn existing_command(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut PostgresDeliveryAdminTransaction,
     command: &DeliveryAdminCommand,
-) -> Result<Option<DeliveryAdminResult>, auction_application::RepositoryError> {
+) -> Result<Option<DeliveryAdminResult>, DeliveryAdminTransactionError> {
     let Some(row) = sqlx::query(
         "SELECT command_kind, request_digest, delivery_id, result_payload
          FROM public.delivery_admin_commands WHERE command_id = $1",
     )
     .bind(command.command_id)
-    .fetch_optional(&mut **transaction)
+    .fetch_optional(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?
+    .map_err(DeliveryAdminTransactionError::Sqlx)?
     else {
         return Ok(None);
     };
-    let kind: String = row.try_get("command_kind").map_err(map_storage_error)?;
-    let digest: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;
-    let delivery_id: Uuid = row.try_get("delivery_id").map_err(map_storage_error)?;
+    let kind: String = row.try_get("command_kind").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let digest: Vec<u8> =
+        row.try_get("request_digest").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let delivery_id: Uuid =
+        row.try_get("delivery_id").map_err(DeliveryAdminTransactionError::Sqlx)?;
     if kind != command.action.command_kind()
         || digest != command.request_hash.as_bytes()
         || delivery_id != command.delivery_id
     {
-        return Err(repository_error_owned("delivery Admin 命令摘要冲突"));
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::CommandConflict));
     }
-    let payload: Value = row.try_get("result_payload").map_err(map_storage_error)?;
-    serde_json::from_value(payload)
-        .map(Some)
-        .map_err(|_| repository_error_owned("delivery Admin 命令结果损坏"))
+    let payload: Value =
+        row.try_get("result_payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
+    let result = decode_result_payload(payload, command.command_id)?;
+    if result.command_id != command.command_id
+        || result.snapshot.id != command.delivery_id
+        || !valid_snapshot(&result.snapshot)
+        || result.snapshot.status != delivery_action_transition(command.action).1
+        || result.snapshot.fencing_version <= command.expected_fencing_version
+    {
+        return Err(DeliveryAdminTransactionError::Business(
+            DeliveryAdminError::StoredResultCorrupt,
+        ));
+    }
+    Ok(Some(result))
 }
 
 async fn apply_delivery_action(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut PostgresDeliveryAdminTransaction,
     command: &DeliveryAdminCommand,
     current: &DeliveryAdminSnapshot,
-) -> Result<&'static str, auction_application::RepositoryError> {
-    let (expected_status, next_status) = match command.action {
-        DeliveryAdminAction::Release => ("claimed", "pending"),
-        DeliveryAdminAction::RetryFailed => ("failed", "pending"),
-        DeliveryAdminAction::ReconcileRetry => ("manual_reconcile", "pending"),
-        DeliveryAdminAction::ReconcileSucceeded => ("manual_reconcile", "succeeded"),
-        DeliveryAdminAction::ReconcileFailed => ("manual_reconcile", "failed"),
-    };
+) -> Result<&'static str, DeliveryAdminTransactionError> {
+    let (expected_status, next_status) = delivery_action_transition(command.action);
     if current.status != expected_status {
-        return Err(repository_error_owned("delivery 当前状态不允许该 Admin 动作"));
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
-    let (external_reference, failure_code, metadata, completed_at) = match command.action {
+    let (external_reference, failure_code, metadata) = match command.action {
         DeliveryAdminAction::ReconcileSucceeded => (
             command.external_reference.as_deref(),
             None,
             serde_json::json!({"resolution":"admin_reconciled_succeeded"}),
-            Some(Utc::now()),
         ),
         DeliveryAdminAction::ReconcileFailed => (
             None,
             command.failure_code.as_deref(),
             serde_json::json!({"resolution":"admin_reconciled_failed"}),
-            Some(Utc::now()),
         ),
-        _ => (None, None, serde_json::json!({}), None),
+        _ => (None, None, serde_json::json!({})),
     };
     let result = sqlx::query(
         r#"UPDATE public.deliveries
@@ -214,37 +285,50 @@ async fn apply_delivery_action(
                lease_expires_at = NULL,
                claimed_at = CASE WHEN $2 = 'pending' THEN NULL ELSE claimed_at END,
                sending_at = CASE WHEN $2 = 'pending' THEN NULL ELSE sending_at END,
-               completed_at = $3,
-               external_reference = $4,
-               failure_code = $5,
-               result_metadata = $6,
+               completed_at = CASE
+                   WHEN $2 IN ('succeeded', 'failed') THEN clock_timestamp()
+                   ELSE NULL
+               END,
+               external_reference = $3,
+               failure_code = $4,
+               result_metadata = $5,
                fencing_version = fencing_version + 1,
-               updated_at = CURRENT_TIMESTAMP
+               updated_at = clock_timestamp()
            WHERE id = $1
-             AND status = $7
-             AND fencing_version = $8"#,
+             AND status = $6
+             AND fencing_version = $7"#,
     )
     .bind(command.delivery_id)
     .bind(next_status)
-    .bind(completed_at)
     .bind(external_reference)
     .bind(failure_code)
     .bind(metadata)
     .bind(expected_status)
     .bind(command.expected_fencing_version)
-    .execute(&mut **transaction)
+    .execute(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery Admin 动作的 lease/fence 已变化"));
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
     Ok(next_status)
 }
 
+/// 返回 Admin 动作唯一允许的起止状态；账本回放必须复用同一映射，不能只验证快照形状。
+const fn delivery_action_transition(action: DeliveryAdminAction) -> (&'static str, &'static str) {
+    match action {
+        DeliveryAdminAction::Release => ("claimed", "pending"),
+        DeliveryAdminAction::RetryFailed => ("failed", "pending"),
+        DeliveryAdminAction::ReconcileRetry => ("manual_reconcile", "pending"),
+        DeliveryAdminAction::ReconcileSucceeded => ("manual_reconcile", "succeeded"),
+        DeliveryAdminAction::ReconcileFailed => ("manual_reconcile", "failed"),
+    }
+}
+
 async fn reset_settlement_fulfillment(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut PostgresDeliveryAdminTransaction,
     delivery_id: Uuid,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), DeliveryAdminTransactionError> {
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
            SET execution_state = 'enqueued',
@@ -259,21 +343,21 @@ async fn reset_settlement_fulfillment(
              AND execution_state IN ('failed', 'manual_reconcile')"#,
     )
     .bind(delivery_id)
-    .execute(&mut **transaction)
+    .execute(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     ensure_settlement_update_or_non_settlement(transaction, delivery_id, updated.rows_affected())
         .await
 }
 
 async fn update_settlement_fulfillment(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut PostgresDeliveryAdminTransaction,
     delivery_id: Uuid,
     next_state: &str,
     failure_code: Option<&str>,
     proof_reference: Option<&str>,
     proof_digest: Option<RequestHash>,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), DeliveryAdminTransactionError> {
     let completed_at = Utc::now();
     let updated = sqlx::query(
         r#"UPDATE public.settlement_obligation_fulfillments
@@ -298,27 +382,27 @@ async fn update_settlement_fulfillment(
     .bind(proof_reference)
     .bind(proof_digest.map(|value| value.as_bytes().to_vec()))
     .bind(completed_at)
-    .execute(&mut **transaction)
+    .execute(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     ensure_settlement_update_or_non_settlement(transaction, delivery_id, updated.rows_affected())
         .await
 }
 
 async fn ensure_settlement_update_or_non_settlement(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transaction: &mut PostgresDeliveryAdminTransaction,
     delivery_id: Uuid,
     affected: u64,
-) -> Result<(), auction_application::RepositoryError> {
+) -> Result<(), DeliveryAdminTransactionError> {
     let is_settlement: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments WHERE delivery_id = $1)",
     )
     .bind(delivery_id)
-    .fetch_one(&mut **transaction)
+    .fetch_one(transaction.connection()?)
     .await
-    .map_err(map_storage_error)?;
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     if is_settlement && affected != 1 {
-        return Err(repository_error_owned("结算履约状态不允许该 Admin 动作"));
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
     Ok(())
 }
@@ -331,11 +415,11 @@ struct AdminProof<'a> {
 fn admin_proof_digest(
     delivery_id: Uuid,
     external_reference: &str,
-) -> Result<RequestHash, auction_application::RepositoryError> {
+) -> Result<RequestHash, DeliveryAdminError> {
     RequestHash::from_request(
         "admin_reconcile_delivery_proof",
         delivery_id,
         &AdminProof { external_reference },
     )
-    .map_err(|_| repository_error_owned("人工对账证明摘要生成失败"))
+    .map_err(|_| DeliveryAdminError::Unavailable)
 }

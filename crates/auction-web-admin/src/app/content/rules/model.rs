@@ -12,10 +12,10 @@ pub(super) struct RuleCommand {
     pub(super) signature: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RuleNotice {
     Validated,
     Published,
-    ActionError,
+    ActionError(String),
     Conflict,
 }

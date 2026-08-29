@@ -1,7 +1,10 @@
 //! SQLite final phase 生命周期动作。
 
+use crate::database::lifecycle_audit::final_proxy_audit_record;
+
 use super::super::super::mapping::*;
 use super::super::super::*;
+use super::super::record::insert_lifecycle_audit;
 
 pub(super) async fn apply_final_plan_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
@@ -33,8 +36,10 @@ pub(super) async fn apply_final_plan_sqlite(
         if proxy_plan.command.aggregate_id != proxy_plan.competition.final_lot.lot_id.as_uuid() {
             return Err(invalid_state("Lite 最终阶段代理子命令与 lot 计划不一致"));
         }
+        let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
         transaction.insert_command_inner(proxy_plan.command).await?;
-        transaction.apply_plan_inner(proxy_plan.competition, command.request_id.clone()).await?;
+        transaction.apply_public_command_plan_inner(proxy_plan.competition, None).await?;
+        insert_lifecycle_audit(transaction, audit).await?;
     }
     if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
         let connection = transaction.connection_mut()?;

@@ -23,20 +23,6 @@ pub(crate) fn AdminReturnRedirect() -> Element {
     rsx! {}
 }
 
-pub(crate) fn admin_is_login_path() -> bool {
-    current_admin_path().as_deref() == Some("/login")
-}
-
-#[cfg(target_arch = "wasm32")]
-fn current_admin_path() -> Option<String> {
-    web_sys::window().and_then(|window| window.location().pathname().ok())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn current_admin_path() -> Option<String> {
-    None
-}
-
 #[cfg(target_arch = "wasm32")]
 fn current_admin_location() -> String {
     let Some(window) = web_sys::window() else {

@@ -8,15 +8,16 @@ use std::sync::Arc;
 use crate::WorkerControlHandle;
 use auction_application::{
     ApplicationError, AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
-    AuctionLifecycleCommandPort, Clock, DeliveryTransport, DeliveryTransportError,
-    DeliveryWorkClaim, DeliveryWorkStore, MailDeliveryActivation, MailDeliveryCommand,
-    MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
-    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    AuctionLifecycleCommandPort, Clock, DeliverySendResult, DeliveryTransport,
+    DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore, MailDeliveryActivation,
+    MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin,
+    MailNotificationTemplate, RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
     RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryActionOutcome, RecoveryBuyerBlacklistCommand,
     RecoveryBuyerBlacklister, RecoveryResolutionStore, RecoveryWorkStore, RequestHash,
     ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore, SettleAuctionCommand,
     SettlementCommandPort, SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentStore, SettlementWorkClaim, SettlementWorkStore,
+    SettlementFulfillmentStore, SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort,
+    SlowProxyDueReader,
 };
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};
@@ -47,6 +48,8 @@ mod recovery;
 mod recovery_actions;
 #[path = "../recovery/health.rs"]
 mod recovery_health;
+#[path = "schedule.rs"]
+mod schedule;
 
 pub use forum_reply::ForumReplyRuntime;
 pub use forum_sync::ForumSyncRuntime;
@@ -86,4 +89,4 @@ use delivery::run_delivery_cycle;
 use lifecycle::process_claim;
 use operations::{OperationsAlertLoopAction, run_operations_alert_loop};
 use recovery_actions::process_recovery_action;
-use settlement::{process_fulfillment_claim, process_settlement_claim};
+use settlement::{process_fulfillment_claim, process_settlement_claim, record_settlement_failure};

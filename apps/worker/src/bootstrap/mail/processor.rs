@@ -1,6 +1,13 @@
 //! MoogleMail 入站 processor、装备来源、用户 key 和 delivery transport 装配。
 
+use super::super::fulfillment::EquipmentFulfillmentCustodyReader;
 use super::super::*;
+
+type MailProcessorPorts = (
+    Arc<dyn MailProcessor>,
+    Arc<dyn DeliveryTransport>,
+    Arc<dyn SettlementFulfillmentCustodyReader>,
+);
 
 pub(super) fn build_processor_and_delivery(
     config: &AppConfig,
@@ -9,7 +16,7 @@ pub(super) fn build_processor_and_delivery(
     store: &Arc<DatabaseStore>,
     client: &MoogleMailClient,
     credentials: &MoogleMailCredentialSet,
-) -> anyhow::Result<(Arc<dyn MailProcessor>, Arc<dyn DeliveryTransport>)> {
+) -> anyhow::Result<MailProcessorPorts> {
     match store.as_ref() {
         DatabaseStore::Postgres(postgres_store) => {
             let data_key_id = config
@@ -21,6 +28,13 @@ pub(super) fn build_processor_and_delivery(
             let data_key = DataKey::from_base64(data_key_id, data_key_material)
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let sealer = Arc::new(EquipmentKeySealer::new(data_key));
+            // custody 与 intake 共享同一配置密钥，但分别拥有短生命周期的加密/解密适配器。
+            let custody_data_key = DataKey::from_base64(data_key_id, data_key_material)
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+            let opener = EquipmentKeyOpener::new(custody_data_key);
+            let delivery_data_key = DataKey::from_base64(data_key_id, data_key_material)
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+            let delivery_opener = EquipmentKeyOpener::new(delivery_data_key);
             let equipment_client = build_equipment_http_client()
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
             let equipment = Arc::new(
@@ -30,6 +44,16 @@ pub(super) fn build_processor_and_delivery(
                 )
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
             );
+            let custody_equipment: Arc<dyn MailEquipmentReader> = equipment.clone();
+            let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
+                store.clone();
+            let custody: Arc<dyn SettlementFulfillmentCustodyReader> =
+                Arc::new(EquipmentFulfillmentCustodyReader::new(
+                    Arc::clone(&equipment_secrets),
+                    opener,
+                    custody_equipment,
+                    Arc::new(SystemClock),
+                ));
             let auctions = Arc::new(MailAuctionIntakeService::new(
                 Arc::new(postgres_store.clone()),
                 sealer,
@@ -53,13 +77,15 @@ pub(super) fn build_processor_and_delivery(
             let notification_templates =
                 MoogleMailNotificationTemplates::from_values(mail_config.mail_templates.values())
                     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let delivery_transport: Arc<dyn DeliveryTransport> =
-                Arc::new(MoogleMailDeliveryTransport::with_templates(
+            let delivery_transport: Arc<dyn DeliveryTransport> = Arc::new(
+                MoogleMailDeliveryTransport::with_templates(
                     client.clone(),
                     credentials.clone(),
                     login_keys,
                     notification_templates,
-                ));
+                )
+                .with_settlement_equipment_secrets(equipment_secrets, delivery_opener),
+            );
             let processor: Arc<dyn MailProcessor> = Arc::new(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),
@@ -86,7 +112,7 @@ pub(super) fn build_processor_and_delivery(
                 )
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
             );
-            Ok((processor, delivery_transport))
+            Ok((processor, delivery_transport, custody))
         }
         #[cfg(feature = "sqlite")]
         DatabaseStore::Sqlite(_) => anyhow::bail!("MoogleMail 业务处理仅支持 PostgreSQL 完整档"),

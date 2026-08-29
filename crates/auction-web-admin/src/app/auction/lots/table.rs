@@ -1,7 +1,7 @@
 //! Admin lot 表格和页面级分页编排。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::AdminLotPage;
 
@@ -24,11 +24,11 @@ pub(super) fn AdminLotTable(
     let allow_lot_update = page.auction.status == "draft";
 
     rsx! {
-        section { class: "admin-panel", aria_labelledby: "admin-lots-title",
-            h1 { id: "admin-lots-title",
+        section { class: "admin-auction-page", aria_labelledby: "auction-title",
+            h1 { id: "auction-title",
                 {t!("page-auction-lots-title", auction: page.auction.sequence)}
             }
-            p { class: "admin-lots__back",
+            p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
             if let Some(notice) = notice() {
@@ -36,26 +36,27 @@ pub(super) fn AdminLotTable(
                     {lot_update_notice_label(notice)}
                 }
             }
-            if page.auction.status == "draft" && page.capabilities.manual_intake {
-                AdminIntakeForm {
-                    world_id: page.auction.world_id.clone(),
-                    reload_generation,
+            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
+                h2 { id: "lot-title", class: "admin-visually-hidden",
+                    {t!("page-auction-lots-title", auction: page.auction.sequence)}
                 }
-            }
-            if page.lots.is_empty() {
-                p { class: "admin-panel__note", role: "status", {t!("admin-lots-empty")} }
-            } else {
-                div { class: "public-auction-catalog admin-lots__table-wrap",
-                    table {
+                if page.auction.status == "draft" && page.capabilities.manual_intake {
+                    AdminIntakeForm {
+                        world_id: page.auction.world_id.clone(),
+                        reload_generation,
+                    }
+                }
+                div { class: "admin-auction-table-wrap",
+                    table { class: "admin-auction-table admin-auction-lot-table",
                         thead {
                             tr {
-                                th { class: "admin-lots__col-code", {t!("admin-lots-code")} }
-                                th { class: "admin-lots__col-equipment", {t!("admin-lots-equipment")} }
-                                th { class: "admin-lots__col-seller", {t!("admin-lots-seller")} }
-                                th { class: "admin-lots__col-submission", {t!("admin-lots-submission")} }
-                                th { class: "admin-lots__col-status", {t!("admin-lots-status")} }
-                                th { class: "admin-lots__col-start", {t!("admin-lots-start-price")} }
-                                th { class: "admin-lots__col-current", {t!("admin-lots-price")} }
+                                th { class: "admin-auction-lot-code", {t!("admin-lots-code")} }
+                                th { class: "admin-auction-lot-equipment", {t!("admin-lots-equipment")} }
+                                th { class: "admin-auction-lot-seller", {t!("admin-lots-seller")} }
+                                th { class: "admin-auction-lot-submission", {t!("admin-lots-submission")} }
+                                th { class: "admin-auction-lot-status", {t!("admin-lots-status")} }
+                                th { class: "admin-auction-lot-start", {t!("admin-lots-start-price")} }
+                                th { class: "admin-auction-lot-current", {t!("admin-lots-price")} }
                                 th { {t!("admin-lots-actions")} }
                             }
                         }
@@ -66,13 +67,16 @@ pub(super) fn AdminLotTable(
                         }
                     }
                 }
-            }
-            AdminPager {
-                page: page.pagination.page,
-                page_size: page.pagination.page_size,
-                total: page.pagination.total,
-                label: t!("admin-lots-pagination"),
-                on_page_change: move |next_page| page_number.set(next_page),
+                if page.lots.is_empty() {
+                    p { class: "admin-auction-status", {t!("admin-lots-empty")} }
+                }
+                AdminPager {
+                    page: page.pagination.page,
+                    page_size: page.pagination.page_size,
+                    total: page.pagination.total,
+                    label: t!("admin-lots-pagination"),
+                    on_page_change: move |next_page| page_number.set(next_page),
+                }
             }
             if let Some((lot_id, lot_number)) = selected_lot() {
                 AdminProxyHistory { lot_id, lot_number, selected_lot, reload_generation }

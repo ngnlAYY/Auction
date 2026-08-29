@@ -123,7 +123,10 @@ impl SettlementPlan {
                 if discount.value() == 0 {
                     continue;
                 }
-                let compensation = proportional_floor(available_pool, discount, discount_demand)?;
+                // 旧版按需求比例分配后仍以该 lot 的实际折扣封顶；资金池大于总需求时不能
+                // 让补偿超过折扣，否则买方金额和补偿池都会失去守恒。
+                let compensation =
+                    proportional_floor(available_pool, discount, discount_demand)?.min(discount);
                 line.compensation_amount = compensation;
                 line.buyer_amount = line.buyer_amount.checked_sub(compensation)?;
                 compensation_total = compensation_total.checked_add(compensation)?;
@@ -158,10 +161,17 @@ impl SettlementPlan {
     /// 校验结算计划的策略快照、明细守恒、义务和资金池边界。
     pub fn validate(&self, policy: &SettlementPolicy) -> Result<(), DomainError> {
         policy.validate()?;
+        let expected_closing_pool = if self.compensation_pool_enabled {
+            self.opening_pool.checked_add(self.tax_total)?.checked_sub(self.compensation_total)?
+        } else {
+            self.opening_pool
+        };
         if self.policy_version != policy.version
             || self.policy_mode != policy.mode
             || self.compensation_pool_enabled != policy.compensation_pool_enabled
-            || self.closing_pool > self.opening_pool.checked_add(self.tax_total)?
+            || self.closing_pool != expected_closing_pool
+            || self.compensation_total > self.discount_demand
+            || (!self.compensation_pool_enabled && self.compensation_total.value() != 0)
         {
             return Err(DomainError::InvalidSettlementFacts("结算计划策略或资金池不一致"));
         }

@@ -1,6 +1,8 @@
 //! PostgreSQL 最终阶段计划写入。
 
-use super::super::record::previous_lifecycle_version;
+use crate::database::lifecycle_audit::final_proxy_audit_record;
+
+use super::super::record::{insert_lifecycle_audit, previous_lifecycle_version};
 use super::super::*;
 
 pub(super) async fn apply_final_plan_postgres(
@@ -31,8 +33,10 @@ pub(super) async fn apply_final_plan_postgres(
         if proxy_plan.command.aggregate_id != proxy_plan.competition.final_lot.lot_id.as_uuid() {
             return Err(invalid_state("最终阶段代理子命令与 lot 计划不一致"));
         }
+        let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
         transaction.insert_command_inner(proxy_plan.command).await?;
-        transaction.apply_plan_inner(proxy_plan.competition, command.request_id.clone()).await?;
+        transaction.apply_public_command_plan_inner(proxy_plan.competition, None).await?;
+        insert_lifecycle_audit(transaction, audit).await?;
     }
     if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
         let transaction = transaction.transaction_mut()?;

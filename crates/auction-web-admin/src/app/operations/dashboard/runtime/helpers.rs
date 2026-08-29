@@ -1,7 +1,7 @@
 //! Dashboard runtime 详情卡片与状态映射辅助。
 
 use dioxus::prelude::*;
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use crate::api::AdminCredentialScope;
 

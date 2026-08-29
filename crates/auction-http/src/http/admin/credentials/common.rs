@@ -1,19 +1,10 @@
 use auction_application::{AdminCredentialError, ApplicationError};
 use axum::{
-    http::{HeaderMap, StatusCode, Uri},
+    http::{StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 
-pub(crate) fn mutation_boundary(headers: &HeaderMap, uri: &Uri) -> Option<Response> {
-    let Some(raw_csrf) = super::read_admin_cookie(headers, super::ADMIN_CSRF_COOKIE) else {
-        return Some(super::authentication_error());
-    };
-    if !super::valid_admin_csrf_header(headers, &raw_csrf) {
-        return Some(
-            super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-                .into_response(),
-        );
-    }
+pub(crate) fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
             super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "凭据命令不接受查询参数")

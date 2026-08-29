@@ -129,7 +129,9 @@ pub(super) fn validate_active_authorization(
     active: Option<&ProxyAuthorization>,
 ) -> Result<(), DomainError> {
     let Some(active) = active else {
-        if state.leader_proxy_last || state.slow_authorization_id.is_some() {
+        // `leader_proxy_last` 只记录最后一笔接受事实的机制。代理因失格等原因终止后，
+        // 该历史标记仍应保留；只有尚存慢速调度引用才要求同时存在活动授权。
+        if state.slow_authorization_id.is_some() {
             return Err(DomainError::InvalidBidState("竞价状态引用了不存在的活动代理"));
         }
         return Ok(());

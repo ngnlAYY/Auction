@@ -89,7 +89,8 @@ pub(super) async fn run_operations_alert_loop<C>(
         };
         metrics.observe_iteration(action.loop_kind(), metric_result, started.elapsed());
 
-        let scheduled_wake = tokio::time::Instant::now() + runtime.config.poll_interval;
+        let wait = poll_delay(runtime.config.poll_interval, runtime.config.jitter);
+        let scheduled_wake = tokio::time::Instant::now() + wait;
         if wait_until_or_shutdown(&mut shutdown, scheduled_wake).await {
             return;
         }

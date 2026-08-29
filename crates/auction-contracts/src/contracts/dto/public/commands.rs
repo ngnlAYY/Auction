@@ -6,7 +6,10 @@ use super::*;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlaceBidRequest {
-    pub command_id: Uuid,
+    /// 旧 Go 解码会把缺失或 `null` 字符串保留为零值，再由命令专属校验返回稳定错误。
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub amount: i64,
 }
 
@@ -14,8 +17,12 @@ pub struct PlaceBidRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateProxyAuthorizationRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub maximum_amount: i64,
+    /// 旧 v1 解码会把缺失或 `null` 字段投影为空字符串，再返回 `invalid_proxy_mode`。
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub mode: String,
 }
 
@@ -23,8 +30,19 @@ pub struct CreateProxyAuthorizationRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LowerProxyAuthorizationRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub maximum_amount: i64,
+}
+
+/// 复现 Go `encoding/json` 对非指针 scalar 的 `null`/缺失零值语义；错误类型仍严格拒绝。
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 /// 状态命令的最小确认数据，供前端区分接受、重放和冲突。

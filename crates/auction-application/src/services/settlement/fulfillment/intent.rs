@@ -1,48 +1,89 @@
-//! 结算履约 delivery intent 与稳定命名辅助。
+//! 结算履约 intent、旧版 schema-v1 payload 与稳定身份。
 
-use auction_domain::{CommandId, SettlementObligationKind, SettlementWorld, deterministic_uuid};
+use std::collections::BTreeMap;
+
+use auction_domain::{
+    CommandId, SettlementId, SettlementObligationKind, SettlementWorld, legacy_natural_key_uuid,
+};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{ApplicationError, SettlementFulfillmentClaim};
+use crate::{ApplicationError, RequestHash, SettlementFulfillmentClaim};
 
-use super::model::SettlementDeliveryIntent;
+use super::canonical::to_go_json_bytes;
+use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
 use super::validation::repository_error;
 
-/// 根据数据库 claim 生成无 secret 的 delivery intent。
+const MAXIMUM_PAYLOAD_BYTES: usize = 64 << 10;
+const DELIVERY_NAMESPACE: &str = "auction.fulfillment.delivery.v1";
+const PREPARE_NAMESPACE: &str = "auction.fulfillment.prepare.v1";
+const ACTIVATE_NAMESPACE: &str = "auction.fulfillment.activate.v1";
+
+/// delivery owner 持久化的旧版 canonical payload 与其原始字节摘要。
+pub(super) struct CanonicalSettlementDelivery {
+    pub(super) payload: serde_json::Value,
+    pub(super) request_hash: RequestHash,
+}
+
+#[derive(Serialize)]
+struct EquipmentSecretReference {
+    kind: &'static str,
+    id: String,
+}
+
+/// 字段声明顺序与旧版 BuildPayload 的匿名 send struct 完全一致。
+#[derive(Serialize)]
+struct SettlementSendPayload<'a> {
+    schema_version: u8,
+    operation: &'static str,
+    world: &'a str,
+    template: &'a str,
+    variables: BTreeMap<&'static str, String>,
+    credits: i64,
+    cod: i64,
+    equipment_secret_refs: Vec<EquipmentSecretReference>,
+}
+
+/// 字段声明顺序与旧版 BuildPayload 的匿名 return struct 完全一致。
+#[derive(Serialize)]
+struct SettlementReturnPayload<'a> {
+    schema_version: u8,
+    operation: &'static str,
+    world: &'a str,
+    external_mail_id: &'a str,
+}
+
+/// 根据数据库 claim 生成与旧版相同的无 secret typed intent。
 pub(super) fn build_delivery_intent(
     claim: &SettlementFulfillmentClaim,
 ) -> Result<SettlementDeliveryIntent, ApplicationError> {
     let mut intent = SettlementDeliveryIntent {
-        schema_version: 2,
+        obligation_id: claim.obligation_id.as_uuid(),
+        kind: claim.kind,
         operation: claim.operation.as_str(),
         world: settlement_world_name(claim.world),
-        obligation_id: claim.obligation_id.as_uuid(),
-        auction_id: claim.auction_id.as_uuid(),
-        lot_id: claim.lot_id.as_uuid(),
-        origin_command_id: claim.origin_command_id.as_uuid(),
-        kind: obligation_kind_name(claim.kind),
         recipient: claim.recipient.clone(),
         template: "",
+        reference: String::new(),
         item_name: String::new(),
-        external_equipment_id: claim.external_equipment_id.clone(),
-        amount: claim.amount,
-        carrier_credit: claim.carrier_credit,
         credits: 0,
         cod: 0,
-        equipment_id: claim.equipment_id.as_uuid(),
-        submission_id: claim.submission_id.map(|id| id.as_uuid()),
-        submission_source_kind: claim.submission_source_kind.clone(),
-        source_external_mail_id: claim.submission_external_mail_id.clone(),
+        equipment_id: None,
+        source_external_mail_id: String::new(),
     };
 
     match claim.kind {
         SettlementObligationKind::WinnerEquipmentCod => {
             intent.template = "settlement_winner_equipment_cod";
+            intent.reference = claim.obligation_id.to_string();
             intent.item_name = claim.equipment_name.clone();
             intent.cod = claim.amount;
+            intent.equipment_id = Some(claim.equipment_id.as_uuid());
         }
         SettlementObligationKind::WinnerPaymentCarrierCod => {
             intent.template = "settlement_payment_carrier";
+            intent.reference = claim.obligation_id.to_string();
             intent.credits = i64::from(claim.carrier_credit);
             intent.cod = claim
                 .amount
@@ -51,14 +92,18 @@ pub(super) fn build_delivery_intent(
         }
         SettlementObligationKind::WinnerEquipmentHandoff => {
             intent.template = "settlement_equipment_handoff";
+            intent.reference = claim.obligation_id.to_string();
             intent.item_name = claim.equipment_name.clone();
+            intent.equipment_id = Some(claim.equipment_id.as_uuid());
         }
         SettlementObligationKind::SellerPayout => {
             intent.template = "settlement_seller_payout";
+            intent.reference = claim.obligation_id.to_string();
             intent.credits = claim.amount;
         }
         SettlementObligationKind::BuyerRefund => {
             intent.template = "settlement_buyer_refund";
+            intent.reference = claim.obligation_id.to_string();
             intent.credits = claim.amount;
         }
         SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
@@ -66,49 +111,138 @@ pub(super) fn build_delivery_intent(
                 claim.submission_source_kind.as_deref(),
                 claim.submission_external_mail_id.as_deref(),
             ) {
-                (Some("mail"), Some(external_mail_id))
-                    if !external_mail_id.is_empty()
-                        && external_mail_id == external_mail_id.trim() =>
-                {
-                    intent.operation = "return";
+                (Some("mail"), Some(external_mail_id)) => {
+                    intent.source_external_mail_id = external_mail_id.to_owned();
                 }
                 (Some("admin"), None) => {
-                    intent.operation = "send";
                     intent.template = "settlement_equipment_handoff";
+                    intent.reference = claim.obligation_id.to_string();
                     intent.item_name = claim.equipment_name.clone();
+                    intent.equipment_id = Some(claim.equipment_id.as_uuid());
                 }
                 _ => return Err(repository_error("结算退回来源缺少可执行身份")),
             }
         }
     }
 
+    if !intent.validate() {
+        return Err(repository_error("结算履约 intent 组合无效"));
+    }
     Ok(intent)
 }
 
-/// 从 settlement obligation 生成跨重试稳定的 delivery identity。
-pub(super) fn stable_id(
-    obligation_id: auction_domain::SettlementId,
-    label: &str,
-    version: u32,
-) -> Uuid {
-    deterministic_uuid(CommandId::from_uuid(obligation_id.as_uuid()), label, version)
+/// 把 typed intent 投影为旧版通用 MoogleMail schema-v1 payload，并摘要实际 canonical 字节。
+pub(super) fn build_canonical_delivery(
+    intent: &SettlementDeliveryIntent,
+) -> Result<CanonicalSettlementDelivery, ApplicationError> {
+    if !intent.validate() {
+        return Err(repository_error("结算履约 intent 组合无效"));
+    }
+    let encoded = match intent.operation {
+        "send" => {
+            if !valid_payload_line(&intent.item_name, 512, true) {
+                return Err(repository_error("结算履约 payload 文案无效"));
+            }
+            let mut variables = BTreeMap::from([("reference", intent.reference.clone())]);
+            match intent.template {
+                "settlement_winner_equipment_cod" => {
+                    variables.insert("amount", intent.cod.to_string());
+                    variables.insert("item_name", intent.item_name.clone());
+                }
+                "settlement_payment_carrier" => {
+                    variables.insert("amount", intent.cod.to_string());
+                }
+                "settlement_equipment_handoff" => {
+                    variables.insert("item_name", intent.item_name.clone());
+                }
+                "settlement_seller_payout" | "settlement_buyer_refund" => {
+                    variables.insert("amount", intent.credits.to_string());
+                }
+                _ => return Err(repository_error("结算履约 payload 模板无效")),
+            }
+            let equipment_secret_refs = intent
+                .equipment_id
+                .map(|equipment_id| {
+                    vec![EquipmentSecretReference {
+                        kind: "auction_equipment_key",
+                        id: equipment_id.to_string(),
+                    }]
+                })
+                .unwrap_or_default();
+            to_go_json_bytes(&SettlementSendPayload {
+                schema_version: 1,
+                operation: "send",
+                world: intent.world,
+                template: intent.template,
+                variables,
+                credits: intent.credits,
+                cod: intent.cod,
+                equipment_secret_refs,
+            })?
+        }
+        "return" => to_go_json_bytes(&SettlementReturnPayload {
+            schema_version: 1,
+            operation: "return",
+            world: intent.world,
+            external_mail_id: &intent.source_external_mail_id,
+        })?,
+        _ => return Err(repository_error("结算履约 payload 操作无效")),
+    };
+    if encoded.len() > MAXIMUM_PAYLOAD_BYTES {
+        return Err(repository_error("结算履约 payload 超出大小上限"));
+    }
+    let digest = Sha256::digest(&encoded);
+    let payload = serde_json::from_slice(&encoded)?;
+    Ok(CanonicalSettlementDelivery { payload, request_hash: RequestHash::new(digest.into()) })
+}
+
+/// 从 canonical obligation singleton 派生旧版稳定 delivery ID。
+pub(super) fn stable_delivery_id(obligation_id: SettlementId) -> Uuid {
+    stable_fulfillment_id(DELIVERY_NAMESPACE, obligation_id)
+}
+
+/// 从 canonical obligation singleton 派生旧版稳定 prepare command ID。
+pub(super) fn stable_prepare_command_id(obligation_id: SettlementId) -> CommandId {
+    CommandId::from_uuid(stable_fulfillment_id(PREPARE_NAMESPACE, obligation_id))
+}
+
+/// 从 canonical obligation singleton 派生旧版稳定 activate command ID。
+pub(super) fn stable_activate_command_id(obligation_id: SettlementId) -> CommandId {
+    CommandId::from_uuid(stable_fulfillment_id(ACTIVATE_NAMESPACE, obligation_id))
+}
+
+/// 按旧版 FulfillmentActivationRequestDigest 计算无 envelope 的激活摘要。
+pub(super) fn activation_request_hash(
+    obligation_id: SettlementId,
+    delivery_id: Uuid,
+    prepare_request_hash: RequestHash,
+) -> Result<RequestHash, ApplicationError> {
+    let activation = SettlementDeliveryActivation {
+        schema_version: 1,
+        delivery_id: delivery_id.to_string(),
+        obligation_id: obligation_id.to_string(),
+        prepare_request_digest: prepare_request_hash.as_bytes(),
+        expected_status: "prepared",
+    };
+    let encoded = to_go_json_bytes(&activation)?;
+    Ok(RequestHash::new(Sha256::digest(encoded).into()))
+}
+
+fn stable_fulfillment_id(namespace: &str, obligation_id: SettlementId) -> Uuid {
+    let obligation_uuid = obligation_id.as_uuid();
+    legacy_natural_key_uuid(namespace, &[obligation_uuid.as_bytes()])
+}
+
+fn valid_payload_line(value: &str, maximum: usize, allow_empty: bool) -> bool {
+    (allow_empty || !value.is_empty())
+        && value.len() <= maximum
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
 }
 
 pub(super) fn settlement_world_name(world: SettlementWorld) -> &'static str {
     match world {
         SettlementWorld::Main => "main",
         SettlementWorld::Isekai => "isekai",
-    }
-}
-
-pub(super) fn obligation_kind_name(kind: SettlementObligationKind) -> &'static str {
-    match kind {
-        SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "winner_payment_carrier_cod",
-        SettlementObligationKind::WinnerEquipmentHandoff => "winner_equipment_handoff",
-        SettlementObligationKind::SellerPayout => "seller_payout",
-        SettlementObligationKind::BuyerRefund => "buyer_refund",
-        SettlementObligationKind::UnsoldReturn => "unsold_return",
-        SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
     }
 }

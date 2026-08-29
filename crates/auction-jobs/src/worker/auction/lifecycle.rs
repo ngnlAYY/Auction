@@ -7,9 +7,16 @@ use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::Duration as ChronoDuration;
 use tokio::task::JoinSet;
 
+use super::schedule::run_schedule_bootstrap;
 use super::{
     PersistentWorker, merge_worker_result, poll_delay, process_claim, process_settlement_claim,
+    record_settlement_failure,
 };
+
+#[path = "slow_proxy.rs"]
+mod slow_proxy;
+
+const SETTLEMENT_FAILURE_RECORD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 立即处理生命周期和结算批次，随后按旧版 polling+jitter cadence 重试。
 pub(super) async fn run_loop<C>(
@@ -20,7 +27,13 @@ pub(super) async fn run_loop<C>(
 {
     loop {
         let started = std::time::Instant::now();
-        let mut result = run_lifecycle_phase(worker.as_ref()).await;
+        let mut result = run_schedule_bootstrap(worker.as_ref()).await;
+        let lifecycle_result = run_lifecycle_phase(worker.as_ref()).await;
+        merge_worker_result(&mut result, lifecycle_result);
+        let schedule_result = run_schedule_bootstrap(worker.as_ref()).await;
+        merge_worker_result(&mut result, schedule_result);
+        let slow_proxy_result = slow_proxy::run_phase(worker.as_ref()).await;
+        merge_worker_result(&mut result, slow_proxy_result);
         let settlement_result = run_settlement_phase(worker.as_ref()).await;
         merge_worker_result(&mut result, settlement_result);
         if result != WorkerResult::Success {
@@ -56,7 +69,14 @@ where
     while processed < capacity {
         let wave_limit = usize::from(worker.auction.concurrency).min(capacity - processed);
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.auction.concurrency);
-        let now = worker.clock.now();
+        let now = match worker.schedule.database_now().await {
+            Ok(now) => now,
+            Err(error) => {
+                tracing::warn!(error = %error, "读取拍卖生命周期数据库时间失败");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+        };
         let Some(lease_until) = now.checked_add_signed(lease_duration) else {
             tracing::error!("auction lifecycle lease deadline overflowed");
             phase_result = WorkerResult::Error;
@@ -177,6 +197,9 @@ where
             let clock = Arc::clone(&worker.clock);
             tasks.spawn(async move {
                 let workflow_id = claim.workflow_id;
+                let failure_store = Arc::clone(&store);
+                let failure_clock = Arc::clone(&clock);
+                let failure_claim = claim.clone();
                 match tokio::time::timeout(
                     item_timeout,
                     process_settlement_claim(store, commands, clock, claim),
@@ -186,6 +209,27 @@ where
                     Ok(result) => result,
                     Err(_) => {
                         tracing::warn!(%workflow_id, "auction settlement item timed out");
+                        // 与旧版 `context.WithoutCancel` 的两秒收口一致：业务执行超时后仍要尽力
+                        // 在独立有界窗口内原子推进 attempt、retry 时间和审计；若结算其实已提交，
+                        // settled 状态 fence 会阻止误写失败进度。
+                        if tokio::time::timeout(
+                            SETTLEMENT_FAILURE_RECORD_TIMEOUT,
+                            record_settlement_failure(
+                                failure_store,
+                                failure_clock,
+                                failure_claim,
+                                "timeout",
+                                "结算处理超过单项时间预算".to_owned(),
+                            ),
+                        )
+                        .await
+                        .is_err()
+                        {
+                            tracing::error!(
+                                %workflow_id,
+                                "auction settlement timeout failure record also timed out"
+                            );
+                        }
                         WorkerResult::Error
                     }
                 }

@@ -13,6 +13,7 @@ mod clock;
 mod commands;
 #[path = "content/compensation.rs"]
 mod compensation;
+mod decoder;
 #[path = "content/forum.rs"]
 mod forum;
 mod model;
@@ -23,10 +24,13 @@ mod realtime;
 mod rules;
 #[path = "identity/session.rs"]
 mod session;
+mod status;
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};
-pub(crate) use clock::{estimated_now, observe_response_date, send_get};
+pub(crate) use clock::{
+    estimated_now, observe_response_date, send_get, send_request, transport_error_code,
+};
 pub(crate) use commands::{
     CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
     place_bid,
@@ -38,18 +42,19 @@ pub(crate) use compensation::{
 pub(crate) use forum::{ForumThread, fetch_forum_thread};
 pub(crate) use model::{CatalogRow, LotEnvelopeRows, PriceHistoryQuery, lot_code_for};
 pub(crate) use queries::{
-    fetch_auction_list, fetch_auction_page, fetch_bid_log_auctions, fetch_bid_log_page,
-    fetch_current_auction, fetch_current_lots, fetch_historical_auction, fetch_lot_bid_log,
-    fetch_lot_detail, fetch_price_history, fetch_worlds,
+    LotDetailFetchError, PriceHistoryFetchError, fetch_auction_list, fetch_auction_page,
+    fetch_bid_log_auctions, fetch_bid_log_page, fetch_current_auction, fetch_current_lots,
+    fetch_historical_auction, fetch_lot_bid_log, fetch_lot_detail, fetch_price_history,
+    fetch_worlds,
 };
 pub(crate) use realtime::{
-    HealthStatus, RealtimeEvent, RealtimePage, fetch_health, fetch_realtime_events,
-    subscribe_auction_realtime, subscribe_realtime,
+    RealtimeCache, RealtimeEvent, RealtimePage, subscribe_auction_realtime, subscribe_realtime,
 };
 pub(crate) use rules::{RulesDocument, fetch_rules};
 pub(crate) use session::{
     PublicSession, PublicSessionApiError, fetch_public_session, login_public, logout_public,
 };
+pub(crate) use status::fetch_public_readiness;
 
 use auction_contracts::ApiResponse;
 pub(crate) use auction_contracts::{
@@ -58,6 +63,7 @@ pub(crate) use auction_contracts::{
     PublicBidLogListResponse as BidLogPage, PublicEquipmentResponse as EquipmentDetail,
     PublicLiveLotResponse as LiveLot, PublicLotDetailItemResponse as LotDetailItem,
     PublicLotEnvelopeResponse as LotEnvelope, PublicLotListItemsResponse as LotItems,
+    PublicPreviewEquipmentResponse as PreviewEquipmentDetail,
     PublicPreviewLotDetailResponse as PreviewLotDetail,
     PublicPriceHistoryEntryResponse as PriceHistoryEntry,
     PublicPriceHistoryListResponse as PriceHistoryPage,

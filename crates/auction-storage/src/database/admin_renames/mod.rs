@@ -58,11 +58,11 @@ async fn list_postgres(
     .map_err(|_| storage_error("统计 Admin 改名历史失败"))?;
 
     let rows = sqlx::query(
-        "SELECT rename.id, rename.user_id, user.state_version AS user_state_version,
+        "SELECT rename.id, rename.user_id, usr.state_version AS user_state_version,
                 rename.previous_username, rename.next_username, rename.actor,
                 rename.created_at, rename.reverted_at
          FROM public.user_renames AS rename
-         JOIN public.users AS user ON user.id = rename.user_id
+         JOIN public.users AS usr ON usr.id = rename.user_id
          WHERE ($1::uuid IS NULL OR rename.user_id = $1)
            AND ($2::text IS NULL
                 OR strpos(lower(rename.previous_username), lower($2)) > 0
@@ -150,11 +150,11 @@ async fn list_sqlite(
     .map_err(|_| storage_error("统计 SQLite Admin 改名历史失败"))?;
 
     let rows = sqlx::query(
-        "SELECT rename.id, rename.user_id, user.state_version AS user_state_version,
+        "SELECT rename.id, rename.user_id, usr.state_version AS user_state_version,
                 rename.previous_username, rename.next_username, rename.actor,
                 rename.created_at, rename.reverted_at
          FROM user_renames AS rename
-         JOIN users AS user ON user.id = rename.user_id
+         JOIN users AS usr ON usr.id = rename.user_id
          WHERE (? IS NULL OR rename.user_id = ?)
            AND (? IS NULL
                 OR instr(lower(rename.previous_username), lower(?)) > 0

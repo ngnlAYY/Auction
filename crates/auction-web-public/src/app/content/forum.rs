@@ -1,12 +1,10 @@
 //! Public 拍卖论坛镜像展示。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use gloo_timers::future::TimeoutFuture;
 
 use crate::api::{ForumThread, fetch_forum_thread};
-
-use super::{RetryPlaceholder, format_auction_time};
 
 pub(super) fn panel(auction_id: String) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
@@ -42,14 +40,10 @@ pub(super) fn panel(auction_id: String) -> Element {
     });
     match &*thread.read_unchecked() {
         None => rsx! {
-            p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
+            p { class: "public-page-status", role: "status", {t!("forum-loading")} }
         },
         Some(Err(_)) => rsx! {
-            RetryPlaceholder {
-                title: t!("forum-title"),
-                detail: t!("data-error"),
-                refresh_generation,
-            }
+            p { class: "public-page-status", role: "status", {t!("forum-unavailable")} }
         },
         Some(Ok(thread)) => rsx! {
             ForumThreadPanel { thread: thread.clone() }
@@ -59,27 +53,25 @@ pub(super) fn panel(auction_id: String) -> Element {
 
 #[component]
 fn ForumThreadPanel(thread: ForumThread) -> Element {
+    if thread.status != "published" {
+        let message = match thread.status.as_str() {
+            "pending" => t!("forum-syncing-pending"),
+            "publishing" => t!("forum-syncing-publishing"),
+            "failed" => t!("forum-syncing-failed"),
+            _ => t!("forum-unavailable"),
+        };
+        return rsx! {
+            p { class: "public-page-status", role: "status",
+                "{message}"
+            }
+        };
+    }
     rsx! {
-        section { class: "public-auction-category", aria_labelledby: "forum-title",
-            h2 { id: "forum-title", class: "public-auction-category__title",
-                {t!("forum-title")}
-            }
-            p { class: "public-auction-page__status",
-                {t!("forum-status", status: thread.status, revision: thread.source_revision)}
-            }
-            p { class: "public-auction-page__status",
-                {t!("forum-updated", updated_at: format_auction_time(&thread.updated_at))}
-            }
-            if let Some(title) = thread.title {
-                h3 { "{title}" }
-            }
+        p { class: "public-page-status", role: "status", aria_live: "polite",
+            {t!("forum-published")}
+            " "
             if let Some(url) = thread.thread_url {
-                p {
-                    a { href: url, target: "_blank", rel: "noreferrer", {t!("forum-link")} }
-                }
-            }
-            if let Some(body) = thread.body {
-                pre { class: "public-auction-page__document", "{body}" }
+                a { href: url, target: "_blank", rel: "noreferrer", {t!("forum-link")} }
             }
         }
     }

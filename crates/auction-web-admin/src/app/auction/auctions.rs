@@ -3,11 +3,10 @@
 //! 当前页面展示 PostgreSQL 完整档的生命周期快照，并通过独立的版本化 API 提供写命令入口。
 
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::fetch_admin_auctions;
 
-use super::AdminPanel;
+use super::admin_api_error_message;
 
 #[path = "auctions/actions/mod.rs"]
 mod actions;
@@ -18,38 +17,30 @@ mod helpers;
 #[path = "auctions/table.rs"]
 mod table;
 
-use create::AdminAuctionLoadError;
 use table::AdminAuctionTable;
 
 /// 加载并展示 Admin 拍卖列表。
 pub(super) fn page() -> Element {
-    let world_filter = use_signal(|| "all".to_owned());
-    let status_filter = use_signal(|| "all".to_owned());
+    let world_filter = use_signal(String::new);
     let page_number = use_signal(|| 1_i64);
     let reload_generation = use_signal(|| 0_u64);
     let auctions = use_resource(move || {
         let _ = reload_generation();
-        fetch_admin_auctions(world_filter(), status_filter(), page_number())
+        // 旧 Admin 拍卖页只按 world 筛选；状态不是该页面的请求维度。
+        fetch_admin_auctions(world_filter(), "all".to_owned(), page_number())
     });
 
-    match &*auctions.read_unchecked() {
-        None => rsx! {
-            AdminPanel { title: t!("page-auctions-title"), detail: t!("admin-auctions-loading") }
-        },
-        Some(Err(_)) => rsx! {
-            AdminAuctionLoadError { reload_generation }
-        },
-        Some(Ok(page)) => rsx! {
-            div { class: "admin-auctions",
-                AdminAuctionTable {
-                    page: page.clone(),
-                    capabilities: page.capabilities.clone(),
-                    world_filter,
-                    status_filter,
-                    page_number,
-                    reload_generation,
-                }
-            }
-        },
+    let state = auctions
+        .read_unchecked()
+        .as_ref()
+        .map(|result| result.clone().map_err(|error| admin_api_error_message(&error)));
+
+    rsx! {
+        AdminAuctionTable {
+            state,
+            world_filter,
+            page_number,
+            reload_generation,
+        }
     }
 }

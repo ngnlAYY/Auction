@@ -59,7 +59,7 @@ impl Default for EquipmentSourcePolicy {
             allowed_path_prefixes: vec!["/equip/".to_owned(), "/isekai/equip/".to_owned()],
             allowlist_enabled: true,
             maximum_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
-            minimum_request_interval: Duration::from_secs(1),
+            minimum_request_interval: Duration::from_millis(250),
             request_timeout: Duration::from_secs(10),
         }
     }

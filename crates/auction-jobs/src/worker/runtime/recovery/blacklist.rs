@@ -72,11 +72,37 @@ where
                 && result.buyer_user_id == claim.buyer_user_id
                 && result.occurred_at == claim.created_at =>
         {
+            let proof_digest = match result.legacy_proof_digest() {
+                Ok(proof_digest) => proof_digest,
+                Err(error) => {
+                    tracing::error!(
+                        error = %error,
+                        "recovery buyer blacklist proof digest failed"
+                    );
+                    return match store
+                        .mark_action_manual_reconcile(
+                            claim,
+                            "recovery_buyer_blacklist_result_invalid".to_owned(),
+                        )
+                        .await
+                    {
+                        Ok(()) => WorkerResult::Success,
+                        Err(fence_error) => {
+                            tracing::error!(
+                                error = %fence_error,
+                                "recovery buyer blacklist digest fence failed"
+                            );
+                            WorkerResult::Error
+                        }
+                    };
+                }
+            };
             match store
                 .mark_action_satisfied(
                     claim,
                     RECOVERY_BUYER_BLACKLIST_PROOF_KIND.to_owned(),
                     result.command_id.to_string(),
+                    proof_digest,
                     clock.now(),
                 )
                 .await

@@ -8,11 +8,46 @@ use chrono::{DateTime, Utc};
 
 use super::DatabaseStore;
 
+mod bootstrap;
 mod claim;
 mod mapping;
 mod resolution;
 
 impl ScheduledRoundStore for DatabaseStore {
+    fn database_now(&self) -> auction_application::ApplicationFuture<'_, DateTime<Utc>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => bootstrap::database_now_postgres(store.pool())
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(store) => bootstrap::database_now_sqlite(store.pool())
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
+    fn ensure_current_round(
+        &self,
+        request: auction_application::ScheduledRoundBootstrap,
+    ) -> auction_application::ApplicationFuture<'_, auction_application::ScheduledRoundSnapshot>
+    {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => bootstrap::ensure_postgres(store.pool(), request)
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(store) => bootstrap::ensure_sqlite(store.pool(), request)
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
     fn claim_due(
         &self,
         worker_id: String,

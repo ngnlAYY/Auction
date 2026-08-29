@@ -6,7 +6,7 @@ use super::super::super::*;
 pub(super) async fn apply_cancel_plan_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
     auction: &Auction,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<u64, CompetitionTransactionError> {
     let previous_status: String = {
         let connection = transaction.connection_mut()?;
         sqlx::query_scalar("SELECT status FROM auctions WHERE id = ?")
@@ -21,7 +21,7 @@ pub(super) async fn apply_cancel_plan_sqlite(
     }
     let now = sqlite_timestamp(auction.updated_at);
     let connection = transaction.connection_mut()?;
-    sqlx::query(
+    let withdrawn = sqlx::query(
         "UPDATE lots
          SET status = 'withdrawn', slow_authorization_id = NULL, slow_due_at = NULL,
              state_version = state_version + 1, updated_at = ?
@@ -63,5 +63,5 @@ pub(super) async fn apply_cancel_plan_sqlite(
     if updated.rows_affected() != 1 {
         return Err(CompetitionTransactionError::InvalidState);
     }
-    Ok(())
+    Ok(withdrawn.rows_affected())
 }

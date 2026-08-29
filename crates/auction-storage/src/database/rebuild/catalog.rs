@@ -62,8 +62,10 @@ pub(super) async fn collect_state(
                     SELECT 1 FROM pg_catalog.pg_db_role_setting AS setting
                     WHERE setting.setdatabase = database.oid
                 ) AS has_role_settings,
-                has_tablespace_privilege(current_user, database.dattablespace, 'CREATE')
-                    AS can_create_in_tablespace,
+                (
+                    tablespace.spcname = 'pg_default'
+                    OR has_tablespace_privilege(current_user, database.dattablespace, 'CREATE')
+                ) AS can_create_in_tablespace,
                 (SELECT COUNT(*)::bigint FROM pg_catalog.pg_stat_activity
                  WHERE datname = database.datname) AS active_sessions,
                 (SELECT COUNT(*)::bigint FROM pg_catalog.pg_prepared_xacts AS prepared

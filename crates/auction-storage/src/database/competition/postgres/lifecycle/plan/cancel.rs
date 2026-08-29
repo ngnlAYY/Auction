@@ -7,7 +7,7 @@ pub(super) async fn apply_cancel_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<u64, CompetitionTransactionError> {
     let previous_status: String = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query_scalar("SELECT status FROM public.auctions WHERE id = $1 FOR UPDATE")
@@ -40,6 +40,7 @@ pub(super) async fn apply_cancel_plan_postgres(
         .await
         .map_err(map_sql_error)?
     };
+    let mut return_obligation_count = 0_u64;
     for lot in lot_rows {
         let status: String = lot.try_get("status").map_err(map_sql_error)?;
         if status == "withdrawn" {
@@ -100,6 +101,9 @@ pub(super) async fn apply_cancel_plan_postgres(
             policy_version,
         )
         .await?;
+        return_obligation_count = return_obligation_count
+            .checked_add(1)
+            .ok_or_else(|| invalid_state("取消返还义务数量溢出"))?;
     }
 
     {
@@ -147,7 +151,7 @@ pub(super) async fn apply_cancel_plan_postgres(
             return Err(CompetitionTransactionError::InvalidState);
         }
     }
-    Ok(())
+    Ok(return_obligation_count)
 }
 
 #[allow(clippy::too_many_arguments)]

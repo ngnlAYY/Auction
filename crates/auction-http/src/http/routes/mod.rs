@@ -41,6 +41,8 @@ mod compensation;
 mod delivery_admin;
 #[path = "../public/forum.rs"]
 mod forum;
+#[path = "../shared/method_strict.rs"]
+mod method_strict;
 #[path = "../metrics/mod.rs"]
 mod metrics;
 #[path = "../public/realtime/mod.rs"]
@@ -59,6 +61,8 @@ mod security;
 mod server;
 #[path = "../shared/state/mod.rs"]
 mod state;
+#[path = "../shared/strict_json.rs"]
+mod strict_json;
 #[cfg(target_os = "linux")]
 #[path = "../shared/unix_listener.rs"]
 mod unix_listener;
@@ -84,7 +88,8 @@ use crate::assets as web_assets;
 use auction_application::{
     AdminLotUpdateError, AdminSessionIdentity, ApplicationError, AuctionLifecycleAction,
     AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand, CommandLedgerError,
-    CompetitionTransactionError, CreateProxyCommand, CurrentAuctionSnapshot,
+    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionTransactionError,
+    CompetitionWireTimestamp, CreateProxyCommand, CurrentAuctionSnapshot,
     DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, LowerProxyCommand, MAX_PUBLIC_ACCOUNT_OFFSET,
     MAX_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_BID_LOG_PAGE_SIZE,
     MAX_PUBLIC_HISTORY_NAME_TERMS, MAX_PUBLIC_LOT_OFFSET, MAX_PUBLIC_LOT_PAGE_SIZE,
@@ -99,16 +104,18 @@ use auction_application::{
     PublicSessionIdentity, RecoveryCommandError, RecoveryConfirmationAction,
     RecoveryConfirmationCommand, RecoveryConfirmationResult, RecoveryReport, RequestHash,
     SessionError, SettlementReport, WorldSnapshot, allowed_recovery_commands,
+    format_public_time_wire,
 };
 use auction_contracts::{
-    AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse, AdminRecoveryActionResponse,
-    AdminRecoveryConfirmationRequest, AdminRecoveryConfirmationResponse,
-    AdminRecoveryConfirmationResultResponse, AdminRecoveryReportResponse, AdminRecoveryResponse,
-    AdminSessionResponse, AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse,
-    AdminSettlementLotResponse, AdminSettlementReportResponse, AdminSettlementSummaryResponse,
-    ApiErrorResponse, ApiErrorResponseWithData, ApiResponse, AuctionListResponse,
-    AuctionSummaryResponse, CreateProxyAuthorizationRequest, CurrentAuctionItemResponse,
-    CurrentAuctionResponse, HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse,
+    AdminAuctionCommandResponse, AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse,
+    AdminRecoveryActionResponse, AdminRecoveryConfirmationRequest,
+    AdminRecoveryConfirmationResponse, AdminRecoveryConfirmationResultResponse,
+    AdminRecoveryReportResponse, AdminRecoveryResponse, AdminSessionResponse,
+    AdminSettlementAdjustmentResponse, AdminSettlementAuctionResponse, AdminSettlementLotResponse,
+    AdminSettlementReportResponse, AdminSettlementSummaryResponse, ApiErrorResponse,
+    ApiErrorResponseWithData, ApiResponse, AuctionListResponse, AuctionSummaryResponse,
+    CreateProxyAuthorizationRequest, CurrentAuctionItemResponse, CurrentAuctionResponse,
+    HealthLiveData, HealthProbeResponse, HealthReadyData, HealthResponse,
     LowerProxyAuthorizationRequest, PlaceBidRequest, PlaceBidResponse, PlaceBidResultResponse,
     PublicAccountBlockedResponse, PublicBidLogEntryResponse, PublicBidLogListResponse,
     PublicEquipmentResponse, PublicEquipmentStatResponse, PublicFinalRestrictionResponse,
@@ -116,25 +123,25 @@ use auction_contracts::{
     PublicLotEnvelopeResponse, PublicLotListItemsResponse, PublicMyBidsResponse,
     PublicMyProxyResponse, PublicOwnedBidResponse, PublicOwnedEquipmentResponse,
     PublicOwnedProxyCapabilitiesResponse, PublicOwnedProxyQuotaResponse, PublicOwnedProxyResponse,
-    PublicOwnedProxyTransitionResponse, PublicPreviewLotDetailResponse, PublicPreviewLotResponse,
-    PublicPriceHistoryEntryResponse, PublicPriceHistoryListResponse,
-    PublicPriceHistoryStatsResponse, PublicProxyCommandAuthorizationResponse,
-    PublicProxyCommandBidResponse, PublicProxyCommandResponse, PublicSessionCurrentResponse,
-    WorldStatusResponse, WorldsResponse,
+    PublicOwnedProxyTransitionResponse, PublicPreviewEquipmentResponse,
+    PublicPreviewLotDetailResponse, PublicPreviewLotResponse, PublicPriceHistoryEntryResponse,
+    PublicPriceHistoryListResponse, PublicPriceHistoryStatsResponse,
+    PublicProxyCommandAuthorizationResponse, PublicProxyCommandBidResponse,
+    PublicProxyCommandResponse, PublicSessionCurrentResponse, WorldStatusResponse, WorldsResponse,
 };
 use auction_domain::{
-    BidAmount, CommandId, CompetitionPlan, DomainError, LotId, ProxyAuthorization,
-    ProxyAuthorizationId, ProxyMode, ProxyStatus, SettlementId, UserId,
+    BidAmount, CommandId, CompetitionPlan, DomainError, LotId, ProxyAuthorizationId, ProxyMode,
+    ProxyStatus, ProxyTerminalReason, ProxyTransitionKind, SettlementId, UserId,
 };
 use auction_observability::{BusinessEvent, BusinessOutcome};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{ConnectInfo, DefaultBodyLimit, Path, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Path, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     middleware,
     response::{IntoResponse, Response},
-    routing::{get, patch, post, put},
+    routing::get,
 };
 use base64::{
     Engine,
@@ -145,6 +152,15 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use url::form_urlencoded;
 use uuid::Uuid;
+
+/// 解析旧 Public v1 使用的规范小写、非零 UUID。
+pub(crate) fn parse_public_uuid(value: &str) -> Result<Uuid, ()> {
+    let id = Uuid::parse_str(value).map_err(|_| ())?;
+    if id.is_nil() || id.to_string() != value {
+        return Err(());
+    }
+    Ok(id)
+}
 
 pub use boundary::HttpBoundary;
 pub use realtime_hub::{RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription};

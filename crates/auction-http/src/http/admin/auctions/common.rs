@@ -3,6 +3,18 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use uuid::Uuid;
+
+/// 按旧 v1 拍卖命令闭集解析规范小写、非零 UUID。
+pub(crate) fn parse_canonical_uuid(value: &str) -> Option<Uuid> {
+    let id = Uuid::parse_str(value).ok()?;
+    (!id.is_nil() && id.to_string() == value).then_some(id)
+}
+
+pub(crate) fn invalid_create_command() -> Response {
+    super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍卖创建参数无效")
+        .into_response()
+}
 
 pub(crate) fn feature_unavailable() -> Response {
     super::api_error(
@@ -25,18 +37,22 @@ pub(crate) fn create_feature_unavailable() -> Response {
 pub(crate) fn map_create_error(error: ApplicationError) -> Response {
     match error {
         ApplicationError::Domain(auction_domain::DomainError::InvalidSchedule(_)) => {
-            super::api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_auction_create",
-                "后台拍卖创建参数无效",
-            )
-            .into_response()
+            invalid_create_command()
         }
         ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound) => {
-            super::not_found_error().into_response()
+            super::api_error(StatusCode::NOT_FOUND, "not_found", "拍卖或关联资源不存在")
+                .into_response()
         }
-        ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict) => {
-            super::api_error(StatusCode::CONFLICT, "auction_conflict", "拍卖创建与现有状态冲突")
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::Conflict | CompetitionTransactionError::InvalidState,
+        ) => super::api_error(
+            StatusCode::CONFLICT,
+            "invalid_auction_state",
+            "拍卖状态不允许当前命令",
+        )
+        .into_response(),
+        ApplicationError::CompetitionTransaction(CompetitionTransactionError::StaleState) => {
+            super::api_error(StatusCode::CONFLICT, "stale_auction_state", "拍卖版本已变化")
                 .into_response()
         }
         ApplicationError::CommandLedger(CommandLedgerError::Conflict)
@@ -45,11 +61,10 @@ pub(crate) fn map_create_error(error: ApplicationError) -> Response {
         )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
         ApplicationError::CapabilityUnavailable(_) => create_feature_unavailable(),
-        ApplicationError::Serialization(_) => super::internal_error(),
         _ => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "Admin 创建拍卖暂不可用",
+            "temporarily_unavailable",
+            "服务暂时不可用",
         )
         .into_response(),
     }

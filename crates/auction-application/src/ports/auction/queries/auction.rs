@@ -66,6 +66,70 @@ pub struct CurrentAuctionSnapshot {
     pub preview_revision: i64,
 }
 
+impl CurrentAuctionSnapshot {
+    /// 校验公开快照的基础字段以及状态、展示模式和竞价能力之间的合同。
+    ///
+    /// 该校验只覆盖所有 Public 读取都能表达的核心不变量；终阶段的
+    /// `FinalRestriction` 和 ForumSync 结果不属于当前快照，因此不在这里推断。
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.id.is_nil()
+            || self.world_id.is_empty()
+            || self.world_id.len() > 64
+            || self.world_id != self.world_id.trim()
+            || self.world_id.chars().any(char::is_control)
+            || self.sequence <= 0
+            || is_go_zero_time(self.opens_at)
+            || self.preview_revision < 0
+        {
+            return Err("公开当前拍卖快照无效");
+        }
+
+        match self.status.as_str() {
+            "preview" => {
+                if !matches!(self.presentation_mode.as_str(), "preview" | "opening")
+                    || self.bidding_open
+                    || self.scheduled_ends_at.is_some()
+                {
+                    return Err("公开预览拍卖快照无效");
+                }
+            }
+            "live" | "final" => {
+                if self.presentation_mode != "live" || !self.bidding_open {
+                    return Err("公开竞价拍卖快照无效");
+                }
+            }
+            "settling" | "settled" => {
+                if self.presentation_mode != "live" || self.bidding_open {
+                    return Err("公开收口拍卖快照无效");
+                }
+            }
+            _ => return Err("公开拍卖快照状态无效"),
+        }
+
+        if self.scheduled_ends_at.is_some_and(|value| value < self.opens_at) {
+            return Err("公开拍卖快照时间关系无效");
+        }
+        Ok(())
+    }
+}
+
+/// 单拍卖 Public WebSocket 预检可观察的公开状态闭集。
+///
+/// 存储端只为启用世界中的公开 projection 返回这些状态；HTTP 连接边界据此拒绝新的
+/// `Settled` 连接，但不会据事件历史猜测拍卖是否仍可订阅。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicRealtimeAuctionStatus {
+    Preview,
+    Live,
+    Final,
+    Settling,
+    Settled,
+}
+
+fn is_go_zero_time(value: DateTime<Utc>) -> bool {
+    value.timestamp() == -62_135_596_800 && value.timestamp_subsec_nanos() == 0
+}
+
 /// Public 拍卖只读端口；具体 SQL 和后端时间/UUID 表示由存储适配器负责。
 pub trait AuctionReader: Send + Sync {
     fn list_public_auctions(
@@ -77,4 +141,9 @@ pub trait AuctionReader: Send + Sync {
         &self,
         world_id: String,
     ) -> ApplicationFuture<'_, Option<CurrentAuctionSnapshot>>;
+
+    fn public_realtime_auction_status(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<PublicRealtimeAuctionStatus>>;
 }

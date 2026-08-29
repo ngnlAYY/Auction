@@ -1,7 +1,8 @@
 # TOML 配置
 
-运行时配置统一使用两个必需边界和一个可选 Admin 文件：主配置保存普通设置，敏感配置保存
-凭据，Admin runtime TOML 保存可审计的非敏感运行参数。进程会在
+运行时配置统一使用两个必需边界和一份可选、由 Admin 管理的共享 runtime 文件：主配置保存普通
+设置，敏感配置保存凭据，runtime TOML 保存可审计的非敏感 Admin 参数与旧版 MoogleMail 业务
+策略。Admin 和 Worker 可以指向同一文件，Public 不读取它。进程会在
 `ops/config/{role}.toml` 存在时加载对应主配置；`AUCTION_CONFIG_FILE` 只负责选择另一个
 主配置，单个配置项不会从环境变量读取。
 
@@ -37,18 +38,22 @@ chmod 600 ops/config/auction.secret.toml
 `secrets_file` 引用；未提供时重建命令才会从普通 `database_url` 派生维护连接并要求该应用角色拥有
 对应 owner/`CREATEDB` 权限。
 
-Admin 示例的 `runtime_config_file` 指向 [`examples/runtime/admin.toml`](examples/runtime/admin.toml)。
+Admin 与 Worker 示例的 `runtime_config_file` 都指向
+[`examples/runtime/admin.toml`](examples/runtime/admin.toml)。
 该文件不包含数据库连接串、Cookie、密码或签名密钥；生产部署仍应把模板复制到受信目录，
 确保父目录不可被 group/world 写入，并将 runtime 文件设为 `0640`。A26/A27 只在 PostgreSQL
 完整档提供更新命令、fingerprint fence、durable 命令账本和原子替换；SQLite Lite 只可在
 启动时读取已存在的文档，HTTP 更新返回 `501 feature_not_supported`。
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
-MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。
+MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。旧版可编辑的
+`worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
+Worker 重启时把它们投影为 MoogleMail 业务快照。transport endpoint、凭据来源、调度、mailbox
+标识和全局 `worker.mooglemail.enabled` 仍由 Worker 主配置拥有。
 `allow_manual_early_open` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
-`restart_required` 边界，不会热改当前进程。重启后，前者决定 HTTP capability，并在生命周期事务
+`restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
 锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。后者配置 host/path allowlist、
 64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔和 1 至 30 秒总超时；适配器始终保留固定 HTTPS
-origin、无重定向、精确 world 路径和流式有界读取。示例默认 2 MiB、1 秒和 10 秒。
+origin、无重定向、精确 world 路径和流式有界读取。示例默认 2 MiB、250 ms 和 10 秒。
 
 以下字段只能出现在敏感 TOML：
 
@@ -99,14 +104,18 @@ Public/Admin 主配置还可以包含 `[listener]`、`[http_security]` 与 `[ses
 `runtime_directory`、直接位于该目录下的 `socket_path` 和 Unix `group`，TCP 模式下后三者必须
 为空。Public 和 Admin 都支持这两种模式；Admin 若加载 runtime 文件，则由 runtime 的 listener
 覆盖主配置 fallback。Unix listener 绑定前会检查目录 owner/group/权限、目录级单实例锁、stale
-socket 身份和 `0660` 权限，Public/Admin 使用不同锁文件名，不能复用 Worker control socket。
+socket 身份和 `0660` 权限，Public/Admin 使用不同锁文件名，不能复用 Worker control socket。启用
+metrics 时，有效 listener 必须是 loopback TCP 或 Unix；Admin runtime 覆盖后的有效组合也执行
+同一校验，非本地 TCP 会在绑定前失败关闭。
 
 `[http_security]` 前者只保存精确 origin、
 速率限制、Cookie `secure`、普通请求处理超时和可信代理网段，后者保存会话时限与公开会话并发
 上限。`trusted_proxy_cidrs` 只接受最多 64 个规范且不重复的 CIDR；默认空集合会忽略所有
 `X-Forwarded-For`。`trusted_unix_proxy` 只允许 Public/Admin 的有效 Unix listener 启用，不能用它
 放宽 TCP peer。两者都不是凭据，
-但仍由配置校验限制范围；原始登录 key、会话 token 和数据库 URL 不得出现在主配置。
+但仍由配置校验限制范围；省略 origin 开关时默认启用同源 allowlist。Public 会话默认空闲 30 分钟、
+绝对 7 天，Admin runtime 默认空闲 15 分钟、绝对 8 小时。原始登录 key、会话 token 和数据库 URL
+不得出现在主配置。
 
 Public 主配置还可以包含 `[realtime]`：`consumer_key` 是持久化 relay 的稳定非敏感标识，
 多 Public 实例必须各不相同；其余字段限制 relay 批次、轮询间隔和单连接缓冲。缓冲区满时
@@ -122,11 +131,15 @@ Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手�
 共享客户端使用旧版默认的一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
 `item_timeout_seconds` 必须覆盖该请求预算；读取与单封邮件处理分别配置尝试次数、单次总超时和
 指数退避。批次期间按 `renew_interval_seconds` 延长 claim，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，
-默认值和中文注释见 `examples/worker.toml`。
+默认值和中文注释见 `examples/worker.toml`。若共享 runtime 同时包含完整的 `worlds`、
+`equipment_filter` 和 `mail_templates`，这些业务字段覆盖 Worker 主配置中的对应直接配置；三个区块
+全部缺失时保留直接配置和旧 runtime fingerprint，部分存在则配置失败。确定性业务/输入/配置错误不
+执行 inline retry，只有可重试依赖错误和超时按配置尝试次数重试，失败时 cursor 不提前推进。
 
-Worker 顶层 `[worker]` 控制 Auction 生命周期/结算主循环。省略并发时 PostgreSQL 使用 8、SQLite
-Lite 使用 1；默认轮询 60 秒、抖动上限 5 秒、每类批次 100、单项总时限 30 秒。生命周期与结算
-分别尝试完整批次，一类 claim 失败不会跳过另一类，也不会终止其它 Worker owner。
+Worker 顶层 `[worker]` 控制 Auction 生命周期、慢速代理和结算主循环。省略并发时 PostgreSQL 使用
+8、SQLite Lite 使用 1；默认轮询 60 秒、抖动上限 5 秒、每阶段批次 100、单项总时限 30 秒。
+三个阶段分别尝试完整批次，一阶段读取/命令失败不会跳过后续阶段，也不会终止其它 Worker owner；
+SQLite Lite 不启用结算阶段。
 
 Worker 的 `[worker.delivery]` 独立控制 delivery outbox 的轮询及随机抖动、批次、并发、claim lease、sending
 续租、过期宽限、完整外部请求和终态写回超时。续租间隔必须小于 lease，sending grace 必须大于
@@ -138,5 +151,6 @@ Worker 的 `[worker.fulfillment]` 和 `[worker.recovery]` 只在 PostgreSQL 完�
 30 秒。临时失败保留持久化重试边界并只影响自身下一轮，不能阻塞其它 Worker owner。
 
 Worker 的 `[worker.operations_alert]` 分别调度 scan、dispatch 和 reconcile 三类循环，默认每 60 秒
-运行一次；scan/reconcile 受 claim lease 限时，dispatch 还会为来源读取预留超时。单类循环失败只在
-下一轮重试，不阻塞另外两类 owner。批次窗口、冷却、重试、阈值和正文边界默认值与旧版一致。
+加最多 5 秒随机抖动运行一次；抖动上限不能超过轮询间隔。scan/reconcile 受 claim lease 限时，dispatch
+还会为来源读取预留超时。单类循环失败只在下一轮重试，不阻塞另外两类 owner。批次窗口、冷却、重试、
+阈值和正文边界默认值与旧版一致。

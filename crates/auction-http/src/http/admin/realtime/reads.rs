@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 use auction_application::{RealtimeFailureListRequest, RealtimeLagListRequest};
 use auction_contracts::{
     AdminRealtimeFailureDetailResponse, AdminRealtimeFailureListResponse,
-    AdminRealtimeLagListResponse, ApiResponse,
+    AdminRealtimeFailurePaginationResponse, AdminRealtimeLagListResponse,
+    AdminRealtimePaginationResponse, ApiResponse,
 };
 use axum::{
     Json,
@@ -71,7 +72,14 @@ pub(crate) async fn list_lag(
         no_store_headers(),
         Json(ApiResponse::ok(
             "实时消费延迟已加载",
-            AdminRealtimeLagListResponse { lags, page, page_size, total: result.total },
+            AdminRealtimeLagListResponse {
+                lags,
+                pagination: AdminRealtimePaginationResponse {
+                    page,
+                    page_size,
+                    total: result.total,
+                },
+            },
         )),
     )
         .into_response()
@@ -137,7 +145,8 @@ pub(crate) async fn list_failures(
     {
         return internal_error();
     }
-    let has_more = offset.checked_add(entry_count).is_some_and(|next| next < result.total);
+    // 旧 Admin wire 按完整页边界推导 has_more；不能在短页时改用实际返回条数制造协议漂移。
+    let has_more = page.checked_mul(page_size).is_some_and(|end| end < result.total);
     let failures = result.entries.into_iter().map(map_failure).collect();
     (
         StatusCode::OK,
@@ -146,10 +155,12 @@ pub(crate) async fn list_failures(
             "实时消费失败列表已加载",
             AdminRealtimeFailureListResponse {
                 failures,
-                page,
-                page_size,
-                has_more,
-                total: result.total,
+                pagination: AdminRealtimeFailurePaginationResponse {
+                    page,
+                    page_size,
+                    has_more,
+                    total: result.total,
+                },
             },
         )),
     )

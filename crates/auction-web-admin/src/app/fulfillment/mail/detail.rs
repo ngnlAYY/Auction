@@ -1,9 +1,10 @@
 //! Admin 邮件入站详情安全投影。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::AdminMailIntakeDetail;
+use crate::app::surface::admin_api_error_message;
 
 use super::super::format_admin_time;
 use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
@@ -13,7 +14,7 @@ pub(super) fn MailIntakeDetailPanel(
     visible: bool,
     detail: Option<AdminMailIntakeDetail>,
     loading: bool,
-    error: bool,
+    error: Option<String>,
     mut refresh: Signal<u64>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -30,11 +31,11 @@ pub(super) fn MailIntakeDetailPanel(
         };
     }
 
-    if error {
+    if let Some(code) = error {
         return rsx! {
             section { class: "admin-panel admin-mail-detail", role: "alert",
                 h2 { {t!("admin-mail-detail-title")} }
-                p { class: "admin-panel__note", {t!("admin-mail-detail-error")} }
+                p { class: "admin-panel__note", {admin_api_error_message(&code)} }
                 button {
                     r#type: "button",
                     onclick: move |_| refresh.set(refresh().saturating_add(1)),

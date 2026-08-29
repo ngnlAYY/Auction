@@ -10,5 +10,8 @@ pub struct MoogleMailDeliveryTransport {
     pub(crate) sender: MoogleMailSender,
     pub(crate) parser: MoogleMailParser,
     pub(crate) login_keys: Arc<dyn MailLoginKeyReader>,
+    pub(crate) settlement_equipment_secrets:
+        Option<Arc<dyn SettlementFulfillmentEquipmentSecretReader>>,
+    pub(crate) settlement_equipment_opener: Option<EquipmentKeyOpener>,
     pub(crate) templates: MoogleMailNotificationTemplates,
 }

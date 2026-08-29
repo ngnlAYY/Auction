@@ -87,7 +87,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
                 (authorization_id, transition_number, transition_kind, origin_command_id,
                  old_maximum_amount, new_maximum_amount, old_mode, new_mode, old_status,
                  new_status, reason, resulting_state_version, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP)"#,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)"#,
         )
         .bind(transition.authorization_id.as_uuid())
         .bind(i64_version(transition.state_version, "代理转换序号")?)

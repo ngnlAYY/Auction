@@ -25,6 +25,7 @@ pub(crate) fn business_outcome_for_competition_error(error: &ApplicationError) -
             | CompetitionTransactionError::Conflict
             | CompetitionTransactionError::StaleState
             | CompetitionTransactionError::InvalidState
+            | CompetitionTransactionError::BidderIneligible
             | CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict),
         ) => BusinessOutcome::Rejected,
         _ => BusinessOutcome::Error,

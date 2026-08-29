@@ -1,5 +1,8 @@
 //! Public 论坛镜像 HTTP 适配器。
 
+use super::{
+    PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
+};
 use auction_application::{ApplicationError, PublicForumThread};
 use auction_contracts::{ApiErrorResponse, ApiResponse, PublicForumResponse};
 use axum::{
@@ -7,9 +10,6 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
-use uuid::Uuid;
-
-use super::{PublicApiState, api_error, not_found_error, parse_query, timestamp};
 
 /// 读取单场拍卖的本地论坛镜像状态。
 pub(crate) async fn get(
@@ -18,7 +18,7 @@ pub(crate) async fn get(
     uri: Uri,
 ) -> Result<(HeaderMap, Json<ApiResponse<PublicForumResponse>>), (StatusCode, Json<ApiErrorResponse>)>
 {
-    let auction_id = Uuid::parse_str(&auction_id)
+    let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     parse_query(&uri, &[])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -53,7 +53,7 @@ fn map_thread(thread: PublicForumThread) -> PublicForumResponse {
         thread_url: thread.thread_url,
         title: thread.title,
         body: thread.body,
-        updated_at: timestamp(thread.updated_at),
+        updated_at: public_timestamp(thread.updated_at),
     }
 }
 

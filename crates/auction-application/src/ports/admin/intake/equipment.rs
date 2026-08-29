@@ -94,12 +94,11 @@ impl CanonicalEquipment {
             || !valid_text(&self.name, 512)
             || !valid_text(&self.category, 128)
             || !valid_text(&self.equipment_type, 128)
-            || !valid_optional_text(&self.quality, 128)
+            || !valid_text(&self.quality, 128)
             || !valid_optional_text(&self.prefix, 128)
             || !valid_optional_text(&self.suffix, 128)
             || self.level.is_some_and(|level| !(1..=100_000).contains(&level))
             || !self.tradeable
-            || self.stats.is_empty()
             || self.stats.len() > 256
             || EquipmentKey::new(&self.key).is_err()
         {

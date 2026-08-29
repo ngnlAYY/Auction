@@ -1,18 +1,19 @@
 //! 规则草稿、反馈和 locale 边界辅助。
 
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use crate::api::{AdminRules, AdminRulesCandidate};
+use crate::app::surface::admin_api_error_message;
 
 use super::model::RuleNotice;
 
 pub(super) const DEFAULT_RULES_LOCALE: &str = "en";
 
-pub(super) fn notice_text(notice: RuleNotice) -> String {
+pub(super) fn notice_text(notice: &RuleNotice) -> String {
     match notice {
         RuleNotice::Validated => t!("admin-rules-validated"),
         RuleNotice::Published => t!("admin-rules-success"),
-        RuleNotice::ActionError => t!("admin-rules-action-error"),
+        RuleNotice::ActionError(code) => admin_api_error_message(code),
         RuleNotice::Conflict => t!("admin-rules-conflict"),
     }
 }

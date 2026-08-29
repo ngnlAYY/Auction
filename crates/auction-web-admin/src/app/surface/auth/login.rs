@@ -1,18 +1,5 @@
 use super::*;
 
-/// 会话查询尚未完成或暂时失败时的最小安全页面。
-#[component]
-pub(crate) fn AdminSessionPanel(title: String, detail: String) -> Element {
-    rsx! {
-        main { class: "admin-login-page", aria_busy: "true",
-            section { class: "admin-login-card", aria_labelledby: "admin-session-title",
-                h1 { id: "admin-session-title", "{title}" }
-                p { class: "admin-panel__note", "{detail}" }
-            }
-        }
-    }
-}
-
 /// Admin 登录表单；secret 只在提交时进入一次 Basic Auth 请求。
 #[component]
 pub(crate) fn AdminLogin(
@@ -22,13 +9,12 @@ pub(crate) fn AdminLogin(
     let mut actor = use_signal(String::new);
     let mut secret = use_signal(String::new);
     let mut submitting = use_signal(|| false);
-    let mut failed = use_signal(|| false);
+    let mut error_code = use_signal(|| None::<String>);
 
     rsx! {
         main { class: "admin-login-page", aria_labelledby: "admin-login-title",
             section { class: "admin-login-card", aria_labelledby: "admin-login-title",
                 h1 { id: "admin-login-title", {t!("page-login-title")} }
-                p { class: "admin-panel__note", {t!("page-login-note")} }
                 div { class: "admin-visually-hidden",
                     AdminReadinessStatus { state: readiness }
                 }
@@ -37,21 +23,22 @@ pub(crate) fn AdminLogin(
                     onsubmit: move |event| {
                         event.prevent_default();
                         if submitting() || actor().trim().is_empty() || secret().is_empty() {
-                            failed.set(true);
+                            error_code.set(Some("invalid_request".to_owned()));
                             return;
                         }
                         submitting.set(true);
-                        failed.set(false);
+                        error_code.set(None);
                         let submitted_actor = actor();
                         let submitted_secret = secret();
                         secret.set(String::new());
                         spawn(async move {
-                            let successful = login_admin(submitted_actor, submitted_secret).await.is_ok();
+                            let result = login_admin(submitted_actor, submitted_secret).await;
                             submitting.set(false);
-                            if successful {
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            } else {
-                                failed.set(true);
+                            match result {
+                                Ok(_) => {
+                                    reload_generation.set(reload_generation().saturating_add(1));
+                                }
+                                Err(code) => error_code.set(Some(code)),
                             }
                         });
                     },
@@ -78,13 +65,13 @@ pub(crate) fn AdminLogin(
                     button {
                         class: "admin-btn-primary",
                         r#type: "submit",
-                        disabled: submitting(),
+                        disabled: submitting() || actor().trim().is_empty() || secret().is_empty(),
                         if submitting() { {t!("admin-login-working")} } else { {t!("admin-login-submit")} }
                     }
                 }
-                if failed() {
+                if let Some(code) = error_code() {
                     p { class: "action-feedback action-feedback--error", role: "alert",
-                        {t!("admin-login-error")}
+                        {admin_api_error_message(&code)}
                     }
                 }
             }

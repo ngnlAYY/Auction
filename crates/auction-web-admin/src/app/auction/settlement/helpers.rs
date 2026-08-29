@@ -1,49 +1,25 @@
 //! Admin 结算与 recovery 的标签、金额和分页辅助。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{AdminAuction, AdminRecoveryAction};
 
 pub(super) fn stable_command_id(
-    mut command_state: Signal<Option<(String, Uuid)>>,
+    mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
     signature: String,
 ) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
+    if let Some(command_id) = command_ids.read().get(&signature).copied() {
+        return command_id;
     }
+    let command_id = Uuid::new_v4();
+    command_ids.write().insert(signature, command_id);
+    command_id
 }
 
 pub(super) fn auction_option_label(auction: &AdminAuction) -> String {
-    format!(
-        "{} #{} ({})",
-        auction_world_label(&auction.world_id),
-        auction.sequence,
-        auction_status_label(&auction.status)
-    )
-}
-
-pub(super) fn auction_world_label(world_id: &str) -> String {
-    match world_id {
-        "main" => t!("admin-auctions-world-main"),
-        "isekai" => t!("admin-auctions-world-isekai"),
-        _ => world_id.to_owned(),
-    }
-}
-
-fn auction_status_label(status: &str) -> String {
-    match status {
-        "settled" => t!("admin-auctions-status-settled"),
-        "settling" => t!("admin-auctions-status-settling"),
-        "cancelled" => t!("admin-auctions-status-cancelled"),
-        _ => status.to_owned(),
-    }
+    format!("{} #{} ({})", auction.world_id, auction.sequence, auction.status)
 }
 
 pub(super) fn recovery_stage_label(stage: &str) -> String {
@@ -56,16 +32,6 @@ pub(super) fn recovery_stage_label(stage: &str) -> String {
         "refunding" => t!("admin-recovery-stage-refunding"),
         "completed" => t!("admin-recovery-stage-completed"),
         _ => stage.to_owned(),
-    }
-}
-
-pub(super) fn recovery_stage_class(stage: &str) -> &'static str {
-    match stage {
-        "completed" => "admin-settlement__stage admin-settlement__stage--completed",
-        "payment_overdue" | "reclaiming" | "refunding" => {
-            "admin-settlement__stage admin-settlement__stage--attention"
-        }
-        _ => "admin-settlement__stage admin-settlement__stage--active",
     }
 }
 
@@ -87,11 +53,15 @@ pub(super) fn recovery_action_summary(actions: &[AdminRecoveryAction]) -> String
 }
 
 pub(super) fn hold_share(tax_amount: i64, final_price: i64) -> String {
-    if final_price <= 0 {
+    if tax_amount < 0 || final_price <= 0 {
         return t!("value-empty");
     }
-    let scaled_percent =
-        tax_amount.max(0).saturating_mul(10_000).checked_div(final_price).unwrap_or_default();
+
+    // 旧版用 Math.round((tax * 10000) / finalPrice)；金额事实为非负整数，先提升到
+    // i128 再加半个分母，可在不溢出的前提下恢复正数的四舍五入语义。
+    let numerator = i128::from(tax_amount) * 10_000;
+    let denominator = i128::from(final_price);
+    let scaled_percent = (numerator + denominator / 2) / denominator;
     let whole = scaled_percent / 100;
     let fraction = scaled_percent % 100;
     if fraction == 0 {

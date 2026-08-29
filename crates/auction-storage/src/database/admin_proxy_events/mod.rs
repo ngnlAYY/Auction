@@ -1,9 +1,10 @@
 //! Admin 代理历史读取适配器。
 //!
-//! PostgreSQL 完整档从已提交的命令账本恢复代理计划，再把领域快照映射为安全的 Admin
-//! projection。SQLite Lite 不声明这项完整管理查询能力，因此不会通过猜测字段或拼装空数据
-//! 伪造成功结果。
+//! PostgreSQL 完整档把命令账本与追加式代理转换事实关联，兼容旧短命令名与 Auction-BF
+//! authorization 命令名，同时避免直接暴露两代不同的账本 payload。SQLite Lite 不声明这项
+//! 完整管理查询能力，因此不会通过猜测字段或拼装空数据伪造成功结果。
 
+use super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use auction_application::{
     AdminProxyEvent, AdminProxyEventCursor, UNKNOWN_ADMIN_PROXY_EVENT_TOTAL,
@@ -12,10 +13,6 @@ use auction_application::{
     AdminProxyEventListRequest, AdminProxyEventPage, AdminProxyEventReader, ApplicationError,
     ApplicationFuture,
 };
-#[cfg(feature = "postgres")]
-use auction_domain::{CompetitionPlan, ProxyAuthorization, ProxyMode, ProxyStatus};
-
-use super::DatabaseStore;
 
 impl AdminProxyEventReader for DatabaseStore {
     fn list_admin_proxy_events(
@@ -43,10 +40,7 @@ async fn list_postgres(
     store: &super::PostgresStore,
     request: AdminProxyEventListRequest,
 ) -> Result<Option<AdminProxyEventPage>, ApplicationError> {
-    use std::collections::HashMap;
-
     use chrono::{DateTime, Utc};
-    use serde_json::Value;
     use sqlx::Row;
     use uuid::Uuid;
 
@@ -77,17 +71,46 @@ async fn list_postgres(
     let query_limit =
         request.limit.checked_add(1).ok_or_else(|| storage_error("Admin 代理历史页大小溢出"))?;
     let rows = sqlx::query(
-        "SELECT command_id, command_kind, result_payload, created_at
-         FROM public.auction_commands
-         WHERE aggregate_id = $1
-           AND command_kind IN ('create_proxy', 'lower_proxy')
-           AND result_code = 'accepted'
+        "SELECT
+            command.command_id,
+            proxy_authorization.authorization_id,
+            proxy_authorization.authorization_sequence,
+            proxy_authorization.usage_number,
+            proxy_authorization.lot_id,
+            proxy_authorization.user_id,
+            users.username,
+            transition.new_mode AS mode,
+            transition.new_maximum_amount AS maximum_amount,
+            transition.new_status AS status,
+            transition.resulting_state_version AS state_version,
+            command.created_at
+         FROM public.auction_commands AS command
+         JOIN public.bid_proxy_authorization_transitions AS transition
+           ON transition.origin_command_id = command.command_id
+          AND (
+              (command.command_kind IN ('create_proxy', 'create_proxy_authorization')
+                  AND transition.transition_kind = 'created')
+              OR (command.command_kind IN ('lower_proxy', 'lower_proxy_authorization')
+                  AND transition.transition_kind = 'lowered')
+          )
+         JOIN public.bid_proxy_authorizations AS proxy_authorization
+           ON proxy_authorization.authorization_id = transition.authorization_id
+          AND proxy_authorization.lot_id = command.aggregate_id
+         JOIN public.users AS users ON users.id = proxy_authorization.user_id
+         WHERE command.aggregate_id = $1
+           AND (
+              (command.command_kind IN ('create_proxy', 'lower_proxy')
+                  AND command.result_code = 'accepted')
+              OR (command.command_kind IN (
+                      'create_proxy_authorization', 'lower_proxy_authorization'
+                  ) AND command.result_code = 'OK')
+           )
            AND (
                $4::timestamptz IS NULL
-               OR created_at < $4
-               OR (created_at = $4 AND command_id < $5::uuid)
+               OR command.created_at < $4
+               OR (command.created_at = $4 AND command.command_id < $5::uuid)
            )
-         ORDER BY created_at DESC, command_id DESC
+         ORDER BY command.created_at DESC, command.command_id DESC
          LIMIT $2 OFFSET $3",
     )
     .bind(request.lot_id.as_uuid())
@@ -101,9 +124,6 @@ async fn list_postgres(
 
     let has_more = rows.len() > request.limit as usize;
     let mut entries = Vec::with_capacity(request.limit as usize);
-    let mut user_ids = Vec::with_capacity(rows.len());
-    let mut pending: Vec<(Uuid, ProxyAuthorization, DateTime<Utc>)> =
-        Vec::with_capacity(rows.len());
 
     for (index, row) in rows.into_iter().enumerate() {
         if index >= request.limit as usize {
@@ -113,69 +133,40 @@ async fn list_postgres(
         let command_id: Uuid = row
             .try_get("command_id")
             .map_err(|_| storage_error("读取 Admin 代理历史命令标识失败"))?;
-        let command_kind: String = row
-            .try_get("command_kind")
-            .map_err(|_| storage_error("读取 Admin 代理历史命令类型失败"))?;
-        let payload: Value = row
-            .try_get("result_payload")
-            .map_err(|_| storage_error("读取 Admin 代理历史结果负载失败"))?;
         let created_at: DateTime<Utc> = row
             .try_get("created_at")
             .map_err(|_| storage_error("读取 Admin 代理历史创建时间失败"))?;
-        let plan: CompetitionPlan = serde_json::from_value(payload)
-            .map_err(|_| storage_error("Admin 代理历史结果负载格式无效"))?;
-        plan.validate().map_err(|_| storage_error("Admin 代理历史结果违反领域不变量"))?;
-        if plan.final_lot.lot_id != request.lot_id {
-            return Err(storage_error("Admin 代理历史结果 lot 归属不一致"));
-        }
-
-        let state = *state_for_command(&plan, &command_kind, command_id)
-            .ok_or_else(|| storage_error("Admin 代理历史缺少对应代理快照"))?;
-        let user_id = state.user_id.as_uuid();
-        user_ids.push(user_id);
-        pending.push((command_id, state, created_at));
-    }
-
-    let mut usernames = HashMap::with_capacity(user_ids.len());
-    if !user_ids.is_empty() {
-        let user_rows = sqlx::query(
-            "SELECT id, username
-             FROM public.users
-             WHERE id = ANY($1::uuid[])",
-        )
-        .bind(&user_ids)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("读取 Admin 代理历史用户投影失败"))?;
-        for row in user_rows {
-            let user_id: Uuid =
-                row.try_get("id").map_err(|_| storage_error("读取 Admin 代理历史用户标识失败"))?;
-            let username: String = row
-                .try_get("username")
-                .map_err(|_| storage_error("读取 Admin 代理历史用户名失败"))?;
-            usernames.insert(user_id, username);
-        }
-    }
-
-    for (command_id, state, created_at) in pending {
-        let user_id = state.user_id.as_uuid();
-        let username =
-            usernames.remove(&user_id).ok_or_else(|| storage_error("Admin 代理历史用户不存在"))?;
         let event = AdminProxyEvent {
             command_id,
-            authorization_id: state.id.as_uuid(),
-            authorization_sequence: i64_value(
-                state.authorization_sequence,
-                "Admin 代理历史授权序号溢出",
-            )?,
-            usage_number: i64_value(state.usage_number, "Admin 代理历史使用序号溢出")?,
-            lot_id: state.lot_id,
-            user_id,
-            username,
-            mode: proxy_mode(state.mode).to_owned(),
-            maximum_amount: state.maximum_amount.value(),
-            status: proxy_status(state.status).to_owned(),
-            state_version: i64_value(state.state_version, "Admin 代理历史状态版本溢出")?,
+            authorization_id: row
+                .try_get("authorization_id")
+                .map_err(|_| storage_error("读取 Admin 代理历史授权标识失败"))?,
+            authorization_sequence: row
+                .try_get("authorization_sequence")
+                .map_err(|_| storage_error("读取 Admin 代理历史授权序号失败"))?,
+            usage_number: row
+                .try_get("usage_number")
+                .map_err(|_| storage_error("读取 Admin 代理历史使用序号失败"))?,
+            lot_id: row
+                .try_get::<Uuid, _>("lot_id")
+                .map(auction_domain::LotId::from_uuid)
+                .map_err(|_| storage_error("读取 Admin 代理历史 lot 标识失败"))?,
+            user_id: row
+                .try_get("user_id")
+                .map_err(|_| storage_error("读取 Admin 代理历史用户标识失败"))?,
+            username: row
+                .try_get("username")
+                .map_err(|_| storage_error("读取 Admin 代理历史用户名失败"))?,
+            mode: row.try_get("mode").map_err(|_| storage_error("读取 Admin 代理历史模式失败"))?,
+            maximum_amount: row
+                .try_get("maximum_amount")
+                .map_err(|_| storage_error("读取 Admin 代理历史上限失败"))?,
+            status: row
+                .try_get("status")
+                .map_err(|_| storage_error("读取 Admin 代理历史状态失败"))?,
+            state_version: row
+                .try_get("state_version")
+                .map_err(|_| storage_error("读取 Admin 代理历史状态版本失败"))?,
             created_at,
         };
         if !event.validate(request.lot_id) {
@@ -189,10 +180,26 @@ async fn list_postgres(
     } else {
         sqlx::query_scalar(
             "SELECT count(*)
-             FROM public.auction_commands
-             WHERE aggregate_id = $1
-               AND command_kind IN ('create_proxy', 'lower_proxy')
-               AND result_code = 'accepted'",
+             FROM public.auction_commands AS command
+             JOIN public.bid_proxy_authorization_transitions AS transition
+               ON transition.origin_command_id = command.command_id
+              AND (
+                  (command.command_kind IN ('create_proxy', 'create_proxy_authorization')
+                      AND transition.transition_kind = 'created')
+                  OR (command.command_kind IN ('lower_proxy', 'lower_proxy_authorization')
+                      AND transition.transition_kind = 'lowered')
+              )
+             JOIN public.bid_proxy_authorizations AS proxy_authorization
+               ON proxy_authorization.authorization_id = transition.authorization_id
+              AND proxy_authorization.lot_id = command.aggregate_id
+             WHERE command.aggregate_id = $1
+               AND (
+                  (command.command_kind IN ('create_proxy', 'lower_proxy')
+                      AND command.result_code = 'accepted')
+                  OR (command.command_kind IN (
+                          'create_proxy_authorization', 'lower_proxy_authorization'
+                      ) AND command.result_code = 'OK')
+               )",
         )
         .bind(request.lot_id.as_uuid())
         .fetch_one(&mut *transaction)
@@ -224,52 +231,6 @@ async fn list_postgres(
         return Err(storage_error("Admin 代理历史存储返回不变量失败"));
     }
     Ok(Some(page))
-}
-
-#[cfg(feature = "postgres")]
-fn state_for_command<'a>(
-    plan: &'a CompetitionPlan,
-    command_kind: &str,
-    command_id: uuid::Uuid,
-) -> Option<&'a ProxyAuthorization> {
-    match command_kind {
-        "create_proxy" => {
-            plan.proxy_states.iter().find(|state| state.creation_command_id.as_uuid() == command_id)
-        }
-        "lower_proxy" => {
-            let authorization_id = plan
-                .proxy_transitions
-                .iter()
-                .find(|transition| transition.command_id.as_uuid() == command_id)
-                .map(|transition| transition.authorization_id)?;
-            plan.proxy_states.iter().find(|state| state.id == authorization_id)
-        }
-        _ => None,
-    }
-}
-
-#[cfg(feature = "postgres")]
-fn proxy_mode(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
-}
-
-#[cfg(feature = "postgres")]
-fn proxy_status(status: ProxyStatus) -> &'static str {
-    match status {
-        ProxyStatus::Active => "active",
-        ProxyStatus::FinalFast => "final_fast",
-        ProxyStatus::Exhausted => "exhausted",
-        ProxyStatus::Frozen => "frozen",
-        ProxyStatus::Closed => "closed",
-    }
-}
-
-#[cfg(feature = "postgres")]
-fn i64_value(value: u64, message: &str) -> Result<i64, ApplicationError> {
-    value.try_into().map_err(|_| storage_error(message))
 }
 
 fn storage_error(message: &str) -> ApplicationError {

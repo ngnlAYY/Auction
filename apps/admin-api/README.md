@@ -29,7 +29,9 @@ Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL �
 均保留 fingerprint fence 与 `restart_required`；Admin 对外就绪前会先恢复未收口的 pending/unknown
 命令，若结果为 `unknown` 或需要人工核对则保留错误级告警并继续启动，其他恢复错误会阻断启动。
 文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
-是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围。
+是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围；旧版
+`worlds`、发件人 allowlist、装备过滤和 14 个通知模板也由该文档管理，并在 Worker 重启时投影为
+MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin 与 Worker。
 重启后，`allow_manual_early_open` 会作为不可变策略进入生命周期服务：计划时间已到的开放不受影响，
 人工提前开放则在锁定拍卖并读取 `scheduled_open_at` 后按该策略失败关闭，HTTP capability 使用同一
 策略来源。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔和总超时也会映射到
@@ -56,16 +58,19 @@ AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \
 
 ```bash
 just web-build-admin
+just build-release
 ```
 
 路由只提供管理端产物；本装配根不引用 Public `RustEmbed` 类型，因此制品级资源隔离不依赖
-链接器裁剪。
+链接器裁剪。`web-embed` 默认关闭，API-only 制品使用固定空资源集合并以 503 报告静态资源未包含；
+内嵌发布构建才显式选择 Admin 的优化 payload。
 
 ## Cargo feature
 
 - `cache-redis`：编译 Redis 缓存客户端。
 - `postgres`：编译 PostgreSQL 完整存储适配器。
 - `sqlite`：编译 SQLite Lite 存储适配器。
+- `web-embed`：只嵌入 Admin 的优化 Web payload；默认关闭，API-only 发布不得启用。
 
 ## 边界约束
 

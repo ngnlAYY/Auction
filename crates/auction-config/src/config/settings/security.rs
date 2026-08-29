@@ -8,11 +8,12 @@ use super::*;
 pub struct HttpSecurityConfig {
     /// 允许的精确 HTTP(S) origin；启用 allowlist 时必须填写。
     pub allowed_origins: Vec<String>,
-    /// 是否启用 origin allowlist；省略时关闭。
+    /// 是否启用 origin allowlist；Public/Admin 省略整个区块时开启。
     pub allowed_origins_enabled: bool,
     /// 登录请求在一个窗口内的最大次数；省略时为 10 次。
     pub login_rate_limit: u32,
-    /// 状态变更请求在一个窗口内的最大次数；省略时为 60 次。
+    /// 状态变更请求在一个窗口内的最大次数；Public realtime 连接尝试使用相同数值但独立计数，
+    /// 省略时为 60 次。
     pub mutation_rate_limit: u32,
     /// 速率限制窗口秒数；省略时为 60 秒。
     pub rate_limit_window_seconds: u64,
@@ -31,7 +32,7 @@ impl Default for HttpSecurityConfig {
     fn default() -> Self {
         Self {
             allowed_origins: Vec::new(),
-            allowed_origins_enabled: false,
+            allowed_origins_enabled: true,
             login_rate_limit: 10,
             mutation_rate_limit: 60,
             rate_limit_window_seconds: 60,
@@ -43,7 +44,18 @@ impl Default for HttpSecurityConfig {
     }
 }
 
-/// Public 会话的滑动过期、绝对过期和并发上限，单位为秒。
+impl HttpSecurityConfig {
+    /// 返回角色对应的旧版安全默认值；Worker 没有浏览器 HTTP 表面，因此不启用 origin 校验。
+    pub(crate) fn for_role(role: Role) -> Self {
+        let mut config = Self::default();
+        if role == Role::Worker {
+            config.allowed_origins_enabled = false;
+        }
+        config
+    }
+}
+
+/// 浏览器会话的滑动过期、绝对过期和并发上限，单位为秒。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SessionConfig {
@@ -61,6 +73,20 @@ impl Default for SessionConfig {
             idle_ttl_seconds: 30 * 60,
             absolute_ttl_seconds: 7 * 24 * 60 * 60,
             max_public_sessions: 5,
+        }
+    }
+}
+
+impl SessionConfig {
+    /// 返回角色对应的旧版会话默认值；Admin 使用 15 分钟空闲和 8 小时绝对时限。
+    pub(crate) fn for_role(role: Role) -> Self {
+        match role {
+            Role::Admin => Self {
+                idle_ttl_seconds: 15 * 60,
+                absolute_ttl_seconds: 8 * 60 * 60,
+                max_public_sessions: 5,
+            },
+            Role::Public | Role::Worker => Self::default(),
         }
     }
 }

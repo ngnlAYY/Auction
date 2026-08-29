@@ -184,7 +184,8 @@ pub(crate) async fn fail(
 ) -> Result<AdminMailPollState, ApplicationError> {
     let row = sqlx::query(
         "UPDATE public.mail_poll_state
-         SET next_poll_at = GREATEST(last_poll_at, $3),
+         SET last_poll_at = GREATEST(last_poll_at, CURRENT_TIMESTAMP),
+             next_poll_at = GREATEST(GREATEST(last_poll_at, CURRENT_TIMESTAMP), $3),
              consecutive_failures = consecutive_failures + 1,
              claim_token = NULL, claim_owner = NULL, claim_expires_at = NULL,
              last_failure_code = $4, last_failure_detail = $5, last_failure_at = CURRENT_TIMESTAMP,

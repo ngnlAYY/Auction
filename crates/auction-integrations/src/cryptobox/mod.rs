@@ -11,6 +11,7 @@ use ring::{
     aead, hmac,
     rand::{SecureRandom, SystemRandom},
 };
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 const DATA_KEY_LENGTH: usize = 32;
@@ -34,6 +35,25 @@ pub enum EquipmentKeySealerError {
     RandomSource,
     #[error("装备 key 加密失败")]
     Encryption,
+}
+
+/// 装备 key 解密器错误；错误信息不包含密钥、明文或信封内容。
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum EquipmentKeyOpenerError {
+    #[error("装备 key 解密关联的装备 ID 无效")]
+    InvalidEquipmentId,
+    #[error("装备 key 密文信封结构无效")]
+    InvalidEnvelope,
+    #[error("装备 key 数据密钥标识不匹配")]
+    KeyMismatch,
+    #[error("装备 key 解密认证失败")]
+    Decryption,
+    #[error("装备 key 指纹校验失败")]
+    FingerprintMismatch,
+    #[error("装备 key 明文不是有效的 UTF-8")]
+    InvalidUtf8,
+    #[error("装备 key 明文结构无效")]
+    InvalidPlaintext,
 }
 
 /// 不透明的数据密钥；调试、显示和序列化永远不输出材料。
@@ -178,6 +198,85 @@ impl fmt::Debug for EquipmentKeySealer {
     }
 }
 
+/// 使用数据密钥打开装备 key 信封的解密适配器。
+pub struct EquipmentKeyOpener {
+    data_key: DataKey,
+}
+
+impl EquipmentKeyOpener {
+    /// 建立使用给定数据密钥的装备 key 解密器。
+    pub fn new(data_key: DataKey) -> Self {
+        Self { data_key }
+    }
+
+    /// 校验并解密绑定到指定装备 ID 的信封。
+    ///
+    /// 解密过程同时验证信封结构、数据密钥轮换标识、AES-GCM 认证标签和明文指纹。
+    /// 无论成功或失败，解密缓冲区都会在返回前尽力清零。
+    pub fn open(
+        &self,
+        equipment_id: EquipmentId,
+        envelope: &EquipmentKeyEnvelope,
+    ) -> Result<EquipmentKey, EquipmentKeyOpenerError> {
+        if equipment_id.is_nil() {
+            return Err(EquipmentKeyOpenerError::InvalidEquipmentId);
+        }
+        envelope.validate().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
+        if envelope.encryption_key_id() != self.data_key.id() {
+            return Err(EquipmentKeyOpenerError::KeyMismatch);
+        }
+
+        let aad = format!("{AAD_PREFIX}{}/key", equipment_id.as_uuid());
+        if !valid_associated_data(&aad) {
+            return Err(EquipmentKeyOpenerError::InvalidEnvelope);
+        }
+
+        let mut nonce = envelope.nonce();
+        let nonce_array: [u8; NONCE_LENGTH] =
+            nonce.as_slice().try_into().map_err(|_| EquipmentKeyOpenerError::InvalidEnvelope)?;
+        let mut buffer = envelope.ciphertext();
+        let result = (|| {
+            let aead_key =
+                self.data_key.aead_key().map_err(|_| EquipmentKeyOpenerError::Decryption)?;
+            let plaintext = aead_key
+                .open_in_place(
+                    aead::Nonce::assume_unique_for_key(nonce_array),
+                    aead::Aad::from(aad.as_bytes()),
+                    &mut buffer,
+                )
+                .map_err(|_| EquipmentKeyOpenerError::Decryption)?;
+
+            let actual_fingerprint = fingerprint(&self.data_key, plaintext);
+            if !bool::from(actual_fingerprint.as_bytes().ct_eq(envelope.fingerprint().as_bytes())) {
+                return Err(EquipmentKeyOpenerError::FingerprintMismatch);
+            }
+
+            let plaintext =
+                std::str::from_utf8(plaintext).map_err(|_| EquipmentKeyOpenerError::InvalidUtf8)?;
+            EquipmentKey::new(plaintext).map_err(|_| EquipmentKeyOpenerError::InvalidPlaintext)
+        })();
+        buffer.fill(0);
+        nonce.fill(0);
+        result
+    }
+}
+
+impl fmt::Debug for EquipmentKeyOpener {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EquipmentKeyOpener")
+            .field("key_id", &self.data_key.id)
+            .field("key_fingerprint", &self.data_key.fingerprint)
+            .finish()
+    }
+}
+
+impl fmt::Display for EquipmentKeyOpener {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
 fn valid_key_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -192,6 +291,14 @@ fn valid_associated_data(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'/'))
+}
+
+fn fingerprint(data_key: &DataKey, plaintext: &[u8]) -> String {
+    let hmac_key = hmac::Key::new(hmac::HMAC_SHA256, data_key.material());
+    let mut context = hmac::Context::with_key(&hmac_key);
+    context.update(SECRET_FINGERPRINT_DOMAIN);
+    context.update(plaintext);
+    hex_encode(context.sign().as_ref())
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

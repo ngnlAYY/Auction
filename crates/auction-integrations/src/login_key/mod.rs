@@ -1,8 +1,9 @@
-//! MoogleMail 用户登录 key 的签发与 Worker 专用解密。
+//! 用户登录 key 的签发、Admin 手工封装与 Worker 专用解密。
 //!
 //! Users owner 只接收 SHA-256 摘要和 AES-256-GCM 密文信封；只有 Worker 的 Delivery transport
 //! 在发送注册通知的瞬间读取并解密 key。AAD 绑定用户 UUID，指纹绑定用途，避免密文跨用户或
-//! 跨用途搬移后仍被接受。
+//! 跨用途搬移后仍被接受。Admin 手工 key 保留旧版 32–256 字节闭集；Worker 解密仍只接受系统
+//! 签发的 canonical Base64URL，不把兼容边界扩张到邮件命令。
 
 use std::{fmt, sync::Arc};
 
@@ -74,22 +75,22 @@ impl MoogleMailLoginKeyIssuer {
             .map_err(|_| crypto_error(LoginKeyCryptoError::RandomSource))?;
         let encoded = URL_SAFE_NO_PAD.encode(entropy);
         entropy.fill(0);
-        let issue = self.seal_encoded_now(user_id, &encoded)?;
+        let key = MailLoginKey::from_encoded(&encoded).map_err(ApplicationError::from)?;
+        let issue = self.seal_admin_key_now(user_id, key)?;
         let mut encoded_bytes = encoded.into_bytes();
         encoded_bytes.fill(0);
         Ok(issue)
     }
 
-    fn seal_encoded_now(
+    fn seal_admin_key_now(
         &self,
         user_id: Uuid,
-        encoded: &str,
+        key: MailLoginKey,
     ) -> Result<AdminUserKeyIssue, ApplicationError> {
         if user_id.is_nil() {
             return Err(MailProcessingError::InvalidLoginKey.into());
         }
-        let key = MailLoginKey::from_encoded(encoded).map_err(ApplicationError::from)?;
-        let mut plaintext = encoded.as_bytes().to_vec();
+        let mut plaintext = key.with_encoded(|value| value.as_bytes().to_vec());
         let aad = login_key_aad(user_id);
         let (ciphertext, nonce) =
             seal(&self.data_key, &plaintext, aad.as_bytes(), &self.random).map_err(crypto_error)?;
@@ -118,7 +119,7 @@ impl AdminLoginKeyIssuer for MoogleMailLoginKeyIssuer {
     }
 
     fn seal(&self, user_id: Uuid, key: MailLoginKey) -> ApplicationFuture<'_, AdminUserKeyIssue> {
-        Box::pin(async move { key.with_encoded(|encoded| self.seal_encoded_now(user_id, encoded)) })
+        Box::pin(async move { self.seal_admin_key_now(user_id, key) })
     }
 }
 

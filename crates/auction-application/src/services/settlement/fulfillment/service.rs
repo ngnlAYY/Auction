@@ -2,27 +2,32 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
-use auction_domain::CommandId;
-
 use crate::{
-    ApplicationError, ApplicationFuture, RequestHash, SettlementDeliveryPreparation,
+    ApplicationError, ApplicationFuture, Clock, SettlementDeliveryPreparation,
     SettlementFulfillmentActivationResult, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentProof,
-    SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
-    SettlementFulfillmentResult, SettlementFulfillmentState, SettlementFulfillmentStore,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentReconcileResult,
+    SettlementFulfillmentReconcileStatus, SettlementFulfillmentResult, SettlementFulfillmentState,
+    SettlementFulfillmentStore,
 };
 
-use super::evidence::{validate_balance_evidence, validate_sent_evidence};
-use super::intent::{build_delivery_intent, stable_id};
-use super::model::SettlementDeliveryActivation;
-use super::proof::proof_digest;
-use super::validation::{
-    expected_credit_amount, repository_error, valid_external_mail_id, validate_claim,
+use super::authorization::{
+    AuthorizationResult, authorize_enqueued_recipient, authorize_pending_or_prepared,
 };
+use super::evidence::validate_sent_evidence;
+use super::intent::{
+    activation_request_hash, build_canonical_delivery, build_delivery_intent,
+    settlement_world_name, stable_activate_command_id, stable_delivery_id,
+    stable_prepare_command_id,
+};
+use super::model::SettlementDeliveryIntent;
+use super::proof::{proof_digest, return_proof_digest};
+use super::validation::{repository_error, valid_external_mail_id, validate_claim};
 
 /// 结算履约应用服务。
 ///
@@ -30,147 +35,396 @@ use super::validation::{
 /// 也不把 `prepared` 误报为外部发送成功；delivery Worker 负责后续激活、发送和证据回写。
 pub struct SettlementFulfillmentService {
     store: Arc<dyn SettlementFulfillmentStore>,
+    recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader>,
+    custody_reader: Arc<dyn SettlementFulfillmentCustodyReader>,
     evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
+    clock: Arc<dyn Clock>,
 }
 
 impl SettlementFulfillmentService {
     /// 绑定履约存储端口，保持 Worker 装配根不依赖具体数据库类型。
     pub fn new(
         store: Arc<dyn SettlementFulfillmentStore>,
+        recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader>,
+        custody_reader: Arc<dyn SettlementFulfillmentCustodyReader>,
         evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
+        clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { store, evidence_reader }
+        Self { store, recipient_reader, custody_reader, evidence_reader, clock }
     }
 
     async fn prepare_now(
         &self,
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
-    ) -> Result<SettlementFulfillmentResult, ApplicationError> {
+        retry_delay: Duration,
+    ) -> Result<SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>, ApplicationError>
+    {
         validate_claim(&claim)?;
         if claim.state != SettlementFulfillmentState::Pending {
             return Err(repository_error("当前履约阶段不允许生成 prepared delivery"));
         }
-
-        let intent = build_delivery_intent(&claim)?;
-        if intent.credits > 0 {
-            let balance = self.evidence_reader.read_balance(claim.world).await?;
-            if balance.world != claim.world
-                || balance.credits < intent.credits
-                || balance.observed_at < claim.claimed_at
-                || balance.observed_at > prepared_at
-            {
-                return Err(repository_error("MoogleMail 发送前余额证明不足或已过期"));
+        let (claim, intent) = match authorize_pending_or_prepared(
+            self.store.as_ref(),
+            self.recipient_reader.as_ref(),
+            self.custody_reader.as_ref(),
+            self.evidence_reader.as_ref(),
+            self.clock.as_ref(),
+            claim,
+            retry_delay,
+        )
+        .await?
+        {
+            AuthorizationResult::Authorized(value) => value,
+            AuthorizationResult::Deferred { obligation_id, failure_code } => {
+                return Ok(SettlementFulfillmentPhaseResult::Deferred {
+                    obligation_id,
+                    failure_code,
+                });
             }
-        }
-        let request_hash = RequestHash::from_request(
-            "prepare_settlement_delivery",
-            claim.obligation_id.as_uuid(),
-            &intent,
-        )?;
-        let payload = serde_json::to_value(&intent)?;
-        let preparation = SettlementDeliveryPreparation {
-            delivery_id: stable_id(claim.obligation_id, "settlement-delivery", 1),
-            prepare_command_id: CommandId::from_uuid(stable_id(
-                claim.obligation_id,
-                "settlement-delivery-prepare",
-                1,
-            )),
-            request_hash,
-            recipient: claim.recipient.clone(),
-            payload,
+            AuthorizationResult::ManualReconcile { obligation_id, failure_code } => {
+                return Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
+                    obligation_id,
+                    failure_code,
+                });
+            }
         };
-        self.store.prepare_delivery(claim, preparation, prepared_at).await
+        let canonical = build_canonical_delivery(&intent)?;
+        let preparation = SettlementDeliveryPreparation {
+            delivery_id: stable_delivery_id(claim.obligation_id),
+            prepare_command_id: stable_prepare_command_id(claim.obligation_id),
+            request_hash: canonical.request_hash,
+            recipient: claim.recipient.clone(),
+            payload: canonical.payload,
+        };
+        Ok(SettlementFulfillmentPhaseResult::Advanced(
+            self.store.prepare_delivery(claim, preparation, prepared_at).await?,
+        ))
     }
 
     async fn activate_now(
         &self,
         claim: SettlementFulfillmentClaim,
         activated_at: DateTime<Utc>,
-    ) -> Result<SettlementFulfillmentActivationResult, ApplicationError> {
+        retry_delay: Duration,
+    ) -> Result<
+        SettlementFulfillmentPhaseResult<SettlementFulfillmentActivationResult>,
+        ApplicationError,
+    > {
         validate_claim(&claim)?;
+        if claim.state != SettlementFulfillmentState::Prepared {
+            return Err(repository_error("当前履约阶段不允许激活 delivery"));
+        }
+        let (claim, intent) = match authorize_pending_or_prepared(
+            self.store.as_ref(),
+            self.recipient_reader.as_ref(),
+            self.custody_reader.as_ref(),
+            self.evidence_reader.as_ref(),
+            self.clock.as_ref(),
+            claim,
+            retry_delay,
+        )
+        .await?
+        {
+            AuthorizationResult::Authorized(value) => value,
+            AuthorizationResult::Deferred { obligation_id, failure_code } => {
+                return Ok(SettlementFulfillmentPhaseResult::Deferred {
+                    obligation_id,
+                    failure_code,
+                });
+            }
+            AuthorizationResult::ManualReconcile { obligation_id, failure_code } => {
+                return Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
+                    obligation_id,
+                    failure_code,
+                });
+            }
+        };
         let (Some(delivery_id), Some(_prepare_command_id), Some(prepare_request_hash)) =
             (claim.delivery_id, claim.prepare_command_id, claim.prepare_request_hash)
         else {
             return Err(repository_error("prepared 履约缺少 delivery prepare identity"));
         };
-        if claim.state != SettlementFulfillmentState::Prepared {
-            return Err(repository_error("当前履约阶段不允许激活 delivery"));
+        if !delivery_snapshot_matches(&claim, &intent) {
+            let obligation_id = claim.obligation_id;
+            self.store.manual_reconcile(claim, "delivery_conflict".to_owned()).await?;
+            return Ok(SettlementFulfillmentPhaseResult::ManualReconcile {
+                obligation_id,
+                failure_code: "delivery_conflict",
+            });
         }
-        let activation_command_id =
-            CommandId::from_uuid(stable_id(claim.obligation_id, "settlement-delivery-activate", 1));
-        let activation = SettlementDeliveryActivation {
-            schema_version: 1,
-            delivery_id,
-            obligation_id: claim.obligation_id.as_uuid(),
-            prepare_request_hash: prepare_request_hash.as_bytes(),
-            expected_status: "prepared",
-        };
+        let activation_command_id = stable_activate_command_id(claim.obligation_id);
         let activation_request_hash =
-            RequestHash::from_request("activate_settlement_delivery", delivery_id, &activation)?;
-        self.store
-            .activate_delivery(claim, activation_command_id, activation_request_hash, activated_at)
-            .await
+            activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
+        Ok(SettlementFulfillmentPhaseResult::Advanced(
+            self.store
+                .activate_delivery(
+                    claim,
+                    activation_command_id,
+                    activation_request_hash,
+                    activated_at,
+                )
+                .await?,
+        ))
     }
 
     async fn reconcile_now(
         &self,
         claim: SettlementFulfillmentClaim,
+        observed_at: DateTime<Utc>,
+        retry_at: DateTime<Utc>,
     ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
         validate_claim(&claim)?;
         if claim.state != SettlementFulfillmentState::Enqueued
-            || claim.operation != SettlementFulfillmentOperation::Send
+            || observed_at.timestamp_nanos_opt().is_none()
+            || observed_at < claim.claimed_at
+            || retry_at <= observed_at
         {
             return Err(repository_error("当前履约阶段不允许读取发送回执"));
         }
+        let retry_delay = retry_at - observed_at;
         let Some(delivery_id) = claim.delivery_id else {
             return Err(repository_error("发送回执缺少 delivery identity"));
         };
-        let Some(external_reference) = claim.external_reference.as_deref() else {
+        let claim = match authorize_enqueued_recipient(
+            self.store.as_ref(),
+            self.recipient_reader.as_ref(),
+            claim,
+            retry_delay,
+        )
+        .await?
+        {
+            AuthorizationResult::Authorized(claim) => claim,
+            AuthorizationResult::Deferred { obligation_id, .. } => {
+                return Ok(SettlementFulfillmentReconcileResult {
+                    obligation_id,
+                    delivery_id,
+                    status: SettlementFulfillmentReconcileStatus::Deferred,
+                });
+            }
+            AuthorizationResult::ManualReconcile { obligation_id, .. } => {
+                return Ok(SettlementFulfillmentReconcileResult {
+                    obligation_id,
+                    delivery_id,
+                    status: SettlementFulfillmentReconcileStatus::ManualReconcile,
+                });
+            }
+        };
+        let intent = match build_delivery_intent(&claim) {
+            Ok(intent) => intent,
+            Err(_) => {
+                return self
+                    .manual_reconcile_now(claim, delivery_id, "invalid_fulfillment_fact")
+                    .await;
+            }
+        };
+        if !delivery_snapshot_matches(&claim, &intent) {
+            return self.manual_reconcile_now(claim, delivery_id, "delivery_conflict").await;
+        }
+        let (delivery_status, external_reference, external_reference_proven) = {
+            let snapshot = claim
+                .delivery_snapshot
+                .as_ref()
+                .ok_or_else(|| repository_error("发送回执缺少 delivery 快照"))?;
+            (
+                snapshot.status,
+                snapshot.external_reference.clone(),
+                snapshot.external_reference_proven,
+            )
+        };
+        match delivery_status {
+            SettlementFulfillmentDeliveryStatus::Pending
+            | SettlementFulfillmentDeliveryStatus::Claimed
+            | SettlementFulfillmentDeliveryStatus::Sending => {
+                return self
+                    .defer_now(
+                        claim,
+                        delivery_id,
+                        retry_delay,
+                        "evidence_not_observed",
+                        "delivery 尚未进入可对账终态",
+                    )
+                    .await;
+            }
+            SettlementFulfillmentDeliveryStatus::Failed => {
+                return self.failed_now(claim, delivery_id, "delivery_failed").await;
+            }
+            SettlementFulfillmentDeliveryStatus::ManualReconcile => {
+                return self
+                    .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
+                    .await;
+            }
+            SettlementFulfillmentDeliveryStatus::Succeeded => {}
+            SettlementFulfillmentDeliveryStatus::Prepared => {
+                return self.manual_reconcile_now(claim, delivery_id, "delivery_conflict").await;
+            }
+        }
+        if claim.operation == SettlementFulfillmentOperation::Return {
             return self
-                .manual_reconcile_now(claim, delivery_id, "external_reference_unproven")
+                .reconcile_return_now(
+                    claim,
+                    delivery_id,
+                    external_reference.as_deref(),
+                    external_reference_proven,
+                )
+                .await;
+        }
+        let Some(external_reference) = external_reference.as_deref() else {
+            return self
+                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
                 .await;
         };
-        if !claim.external_reference_proven
-            || !valid_external_mail_id(external_reference)
-            || external_reference.starts_with("delivery:")
+        let Some(remote_id) = fulfillment_reference_suffix(
+            external_reference,
+            claim.world,
+            SettlementFulfillmentOperation::Send,
+        ) else {
+            return self
+                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
+                .await;
+        };
+        if !external_reference_proven
+            || !valid_external_mail_id(remote_id)
+            || remote_id == delivery_id.to_string()
         {
             return self
-                .manual_reconcile_now(claim, delivery_id, "external_reference_unproven")
+                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
                 .await;
         }
 
-        let sent = match self
-            .evidence_reader
-            .read_sent(claim.world, external_reference.to_owned())
-            .await
-        {
+        let sent = match self.evidence_reader.read_sent(claim.world, remote_id.to_owned()).await {
             Ok(sent) => sent,
             Err(ApplicationError::FulfillmentEvidenceNotObserved) => {
-                return self.manual_reconcile_now(claim, delivery_id, "sent_not_observed").await;
+                return self
+                    .defer_now(
+                        claim,
+                        delivery_id,
+                        retry_delay,
+                        "evidence_not_observed",
+                        "MoogleMail Sent 暂未观察到目标邮件",
+                    )
+                    .await;
             }
-            Err(error) => return Err(error),
+            Err(ApplicationError::FulfillmentDependencyMismatch) => {
+                return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
+            }
+            Err(_) => {
+                return self
+                    .defer_now(
+                        claim,
+                        delivery_id,
+                        retry_delay,
+                        "evidence_unavailable",
+                        "MoogleMail Sent 证据读取暂不可用",
+                    )
+                    .await;
+            }
         };
-        validate_sent_evidence(&claim, external_reference, &sent)?;
-        if !sent.collected {
-            return Err(repository_error("MoogleMail Sent 邮件仍有待领取资产"));
+        let checked_at = self.clock.now();
+        if sent.observed_at > checked_at
+            || validate_sent_evidence(&claim, remote_id, &sent).is_err()
+        {
+            return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
         }
-
-        let balance = if expected_credit_amount(&claim) > 0 {
-            Some(self.evidence_reader.read_balance(claim.world).await?)
-        } else {
-            None
-        };
-        if let Some(balance) = balance {
-            validate_balance_evidence(&claim, &balance)?;
+        if !sent.collected {
+            return self
+                .defer_now(
+                    claim,
+                    delivery_id,
+                    retry_delay,
+                    "evidence_not_observed",
+                    "MoogleMail Sent 邮件仍有待领取资产",
+                )
+                .await;
         }
         let proof = SettlementFulfillmentProof {
             kind: "mooglemail_sent_collected".to_owned(),
-            reference: external_reference.to_owned(),
-            digest: proof_digest(&claim, delivery_id, &sent, balance.as_ref())?,
+            reference: remote_id.to_owned(),
+            digest: proof_digest(&claim, delivery_id, &sent, None)?,
             observed_at: sent.observed_at,
         };
         self.store.satisfy(claim, proof).await
+    }
+
+    async fn reconcile_return_now(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        delivery_id: Uuid,
+        external_reference: Option<&str>,
+        external_reference_proven: bool,
+    ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
+        let Some(source_external_mail_id) = claim.submission_external_mail_id.as_deref() else {
+            return self.manual_reconcile_now(claim, delivery_id, "delivery_conflict").await;
+        };
+        let Some(external_reference) = external_reference else {
+            return self
+                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
+                .await;
+        };
+        let reference = fulfillment_reference_suffix(
+            external_reference,
+            claim.world,
+            SettlementFulfillmentOperation::Return,
+        );
+        if claim.submission_source_kind.as_deref() != Some("mail")
+            || !valid_external_mail_id(source_external_mail_id)
+            || !external_reference_proven
+            || reference != Some(source_external_mail_id)
+        {
+            return self
+                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
+                .await;
+        }
+        let checked_at = self.clock.now();
+        if checked_at < claim.claimed_at {
+            return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
+        }
+        let proof = SettlementFulfillmentProof {
+            kind: "delivery_return_succeeded".to_owned(),
+            reference: source_external_mail_id.to_owned(),
+            digest: return_proof_digest(
+                &claim,
+                delivery_id,
+                external_reference,
+                source_external_mail_id,
+            )?,
+            observed_at: checked_at,
+        };
+        self.store.satisfy(claim, proof).await
+    }
+
+    async fn defer_now(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        delivery_id: Uuid,
+        retry_delay: Duration,
+        failure_code: &str,
+        safe_detail: &str,
+    ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
+        let result = SettlementFulfillmentReconcileResult {
+            obligation_id: claim.obligation_id,
+            delivery_id,
+            status: SettlementFulfillmentReconcileStatus::Deferred,
+        };
+        self.store
+            .fail(claim, retry_delay, failure_code.to_owned(), safe_detail.to_owned())
+            .await?;
+        Ok(result)
+    }
+
+    async fn failed_now(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        delivery_id: Uuid,
+        failure_code: &str,
+    ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
+        let result = SettlementFulfillmentReconcileResult {
+            obligation_id: claim.obligation_id,
+            delivery_id,
+            status: SettlementFulfillmentReconcileStatus::Failed,
+        };
+        self.store.mark_failed(claim, failure_code.to_owned()).await?;
+        Ok(result)
     }
 
     async fn manual_reconcile_now(
@@ -194,22 +448,67 @@ impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
         &self,
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentResult> {
-        Box::pin(async move { self.prepare_now(claim, prepared_at).await })
+        retry_delay: Duration,
+    ) -> ApplicationFuture<'_, SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>> {
+        Box::pin(async move { self.prepare_now(claim, prepared_at, retry_delay).await })
     }
 
     fn activate(
         &self,
         claim: SettlementFulfillmentClaim,
         activated_at: DateTime<Utc>,
-    ) -> ApplicationFuture<'_, SettlementFulfillmentActivationResult> {
-        Box::pin(async move { self.activate_now(claim, activated_at).await })
+        retry_delay: Duration,
+    ) -> ApplicationFuture<
+        '_,
+        SettlementFulfillmentPhaseResult<SettlementFulfillmentActivationResult>,
+    > {
+        Box::pin(async move { self.activate_now(claim, activated_at, retry_delay).await })
     }
 
     fn reconcile(
         &self,
         claim: SettlementFulfillmentClaim,
+        observed_at: DateTime<Utc>,
+        retry_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentReconcileResult> {
-        Box::pin(async move { self.reconcile_now(claim).await })
+        Box::pin(async move { self.reconcile_now(claim, observed_at, retry_at).await })
     }
+}
+
+fn delivery_snapshot_matches(
+    claim: &SettlementFulfillmentClaim,
+    intent: &SettlementDeliveryIntent,
+) -> bool {
+    let (Some(delivery_id), Some(prepare_command_id), Some(prepare_request_hash)) =
+        (claim.delivery_id, claim.prepare_command_id, claim.prepare_request_hash)
+    else {
+        return false;
+    };
+    let Some(snapshot) = claim.delivery_snapshot.as_ref() else {
+        return false;
+    };
+    let Ok(expected) = build_canonical_delivery(intent) else {
+        return false;
+    };
+    snapshot.id == delivery_id
+        && delivery_id == stable_delivery_id(claim.obligation_id)
+        && snapshot.prepare_command_id == prepare_command_id
+        && prepare_command_id == stable_prepare_command_id(claim.obligation_id)
+        && snapshot.prepare_request_hash == prepare_request_hash
+        && prepare_request_hash == expected.request_hash
+        && snapshot.activate_command_id == claim.activate_command_id
+        && snapshot.activate_request_hash == claim.activate_request_hash
+        && snapshot.origin_kind == "settlement"
+        && snapshot.origin_id == claim.obligation_id.to_string()
+        && snapshot.recipient == claim.recipient
+        && snapshot.payload == expected.payload
+}
+
+fn fulfillment_reference_suffix(
+    reference: &str,
+    world: auction_domain::SettlementWorld,
+    operation: SettlementFulfillmentOperation,
+) -> Option<&str> {
+    let prefix = format!("mooglemail:{}:{}:", settlement_world_name(world), operation.as_str());
+    reference.strip_prefix(&prefix).filter(|value| !value.is_empty() && *value == value.trim())
 }

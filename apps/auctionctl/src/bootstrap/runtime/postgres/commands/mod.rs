@@ -5,11 +5,19 @@
 
 mod backup;
 mod bootstrap;
+mod database_bootstrap;
 mod delegation;
+mod forum;
 mod preflight;
+mod rules;
+mod settlement;
 
 #[cfg(feature = "postgres")]
 pub(crate) use backup::*;
 pub(crate) use bootstrap::*;
+pub(crate) use database_bootstrap::*;
 pub(crate) use delegation::*;
+pub(crate) use forum::*;
 pub(crate) use preflight::*;
+pub(crate) use rules::*;
+pub(crate) use settlement::*;

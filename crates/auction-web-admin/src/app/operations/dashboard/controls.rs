@@ -1,7 +1,12 @@
 //! Admin Dashboard 邮件轮询控制。
+//!
+//! 控件保持旧版扁平动作区和独立命令 ID owner；暂停冲突会刷新唯一 Dashboard 快照，但不会把
+//! stale 结果伪装成成功。
 
+use std::collections::HashMap;
+
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
@@ -11,118 +16,130 @@ pub(super) fn MailPollerControls(
     pollers: Vec<AdminMailPolling>,
     mut refresh: Signal<u64>,
 ) -> Element {
-    let mut busy = use_signal(|| false);
-    let notice = use_signal(|| None::<bool>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let mut trigger_busy = use_signal(|| false);
+    let mut pause_busy = use_signal(|| false);
+    let mut trigger_command = use_signal(|| None::<Uuid>);
+    let pause_commands = use_signal(HashMap::<String, Uuid>::new);
+    let mut notice = use_signal(|| None::<String>);
+    let mut error_code = use_signal(|| None::<String>);
+
     rsx! {
-        section {
-            class: "admin-panel admin-dashboard__mail-controls",
-            aria_labelledby: "dashboard-mail-pollers-title",
-            h2 { id: "dashboard-mail-pollers-title", {t!("admin-mail-polling-title")} }
-            div { class: "admin-panel__actions",
+        Fragment {
+            div { class: "admin-dashboard-actions",
                 button {
                     class: "admin-btn-primary",
                     r#type: "button",
-                    disabled: busy(),
+                    disabled: trigger_busy(),
                     onclick: move |_| {
-                        if busy() {
+                        if trigger_busy() {
                             return;
                         }
-                        busy.set(true);
-                        let command_id = stable_command_id(command_state, "trigger".to_owned());
+                        trigger_busy.set(true);
+                        notice.set(None);
+                        error_code.set(None);
+                        let command_id = trigger_command().unwrap_or_else(|| {
+                            let command_id = Uuid::new_v4();
+                            trigger_command.set(Some(command_id));
+                            command_id
+                        });
+                        let mut trigger_busy = trigger_busy;
+                        let mut trigger_command = trigger_command;
                         let mut notice = notice;
-                        let mut refresh = refresh;
-                        let mut busy = busy;
+                        let mut error_code = error_code;
                         spawn(async move {
-                            if trigger_mail_poll(command_id).await.is_ok() {
-                                notice.set(Some(true));
-                                command_state.set(None);
-                                refresh.set(refresh().saturating_add(1));
-                            } else {
-                                notice.set(Some(false));
+                            match trigger_mail_poll(command_id).await {
+                                Ok(count) => {
+                                    trigger_command.set(None);
+                                    notice.set(Some(t!(
+                                        "dashboard-legacy-poll-triggered",
+                                        count: count
+                                    )));
+                                }
+                                Err(error) => error_code.set(Some(error.code)),
                             }
-                            busy.set(false);
+                            trigger_busy.set(false);
                         });
                     },
-                    {t!("admin-mail-trigger")}
+                    {t!("dashboard-legacy-trigger-poll")}
                 }
                 for polling in pollers.iter().cloned() {
                     {
                         let desired_paused = !polling.paused;
-                        let label = if polling.paused {
-                            t!("admin-mail-resume")
+                        let action = if polling.paused {
+                            t!("dashboard-legacy-resume-poll")
                         } else {
-                            t!("admin-mail-pause")
+                            t!("dashboard-legacy-pause-poll")
                         };
+                        let label = t!(
+                            "dashboard-legacy-poller-action",
+                            action: action,
+                            mailbox: polling.mailbox_key.clone()
+                        );
                         let mailbox_key = polling.mailbox_key.clone();
                         rsx! {
-                            div { class: "admin-dashboard__mail-poller", key: "{mailbox_key}",
-                                p { class: "admin-panel__note",
-                                    {t!("admin-mail-polling-summary",
-                                        mailbox: mailbox_key.clone(),
-                                        status: if polling.paused {
-                                            t!("admin-mail-paused")
-                                        } else {
-                                            t!("admin-mail-running")
-                                        },
-                                        version: polling.state_version,
-                                        failures: polling.consecutive_failures
-                                    )}
-                                }
-                                button {
-                                    class: "admin-btn-secondary",
-                                    r#type: "button",
-                                    disabled: busy(),
-                                    onclick: move |_| {
-                                        if busy() {
-                                            return;
-                                        }
-                                        busy.set(true);
-                                        let polling = polling.clone();
-                                        let command_id = stable_command_id(
-                                            command_state,
-                                            format!("pause:{}:{}:{}", polling.mailbox_key, polling.state_version, desired_paused),
-                                        );
-                                        let mut notice = notice;
-                                        let mut refresh = refresh;
-                                        let mut busy = busy;
-                                        spawn(async move {
-                                            match set_mail_paused(command_id, polling, desired_paused).await {
-                                                Ok(_) => {
-                                                    notice.set(Some(true));
-                                                    command_state.set(None);
+                            button {
+                                class: "admin-btn-secondary",
+                                key: "{mailbox_key}",
+                                r#type: "button",
+                                disabled: pause_busy(),
+                                onclick: move |_| {
+                                    if pause_busy() {
+                                        return;
+                                    }
+                                    pause_busy.set(true);
+                                    notice.set(None);
+                                    error_code.set(None);
+                                    let polling = polling.clone();
+                                    let signature = format!(
+                                        "{}:{}:{}",
+                                        polling.mailbox_key,
+                                        polling.state_version,
+                                        desired_paused
+                                    );
+                                    let command_id = pause_command_id(pause_commands, &signature);
+                                    let mut pause_busy = pause_busy;
+                                    let mut pause_commands = pause_commands;
+                                    let mut notice = notice;
+                                    let mut error_code = error_code;
+                                    let mut refresh = refresh;
+                                    spawn(async move {
+                                        match set_mail_paused(command_id, polling, desired_paused).await {
+                                            Ok(_) => {
+                                                pause_commands.write().remove(&signature);
+                                                notice.set(Some(t!("dashboard-legacy-poll-updated")));
+                                                refresh.set(refresh().saturating_add(1));
+                                            }
+                                            Err(error) => {
+                                                if error.is_conflict() {
                                                     refresh.set(refresh().saturating_add(1));
                                                 }
-                                                Err(_) => notice.set(Some(false)),
+                                                error_code.set(Some(error.code));
                                             }
-                                            busy.set(false);
-                                        });
-                                    },
-                                    "{label}"
-                                }
+                                        }
+                                        pause_busy.set(false);
+                                    });
+                                },
+                                "{label}"
                             }
                         }
                     }
                 }
             }
-            if let Some(success) = notice() {
-                p {
-                    class: if success { "admin-panel__note" } else { "admin-panel__note admin-panel__note--error" },
-                    role: "status",
-                    {t!(if success { "admin-mail-action-success" } else { "admin-mail-action-error" })}
-                }
+            if let Some(code) = error_code() {
+                p { role: "alert", {super::super::admin_api_error_message(&code)} }
+            }
+            if let Some(message) = notice() {
+                p { class: "admin-shell__inline-ok", role: "status", "{message}" }
             }
         }
     }
 }
 
-fn stable_command_id(mut command_state: Signal<Option<(String, Uuid)>>, signature: String) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
+fn pause_command_id(mut commands: Signal<HashMap<String, Uuid>>, signature: &str) -> Uuid {
+    if let Some(command_id) = commands.read().get(signature).copied() {
+        return command_id;
     }
+    let command_id = Uuid::new_v4();
+    commands.write().insert(signature.to_owned(), command_id);
+    command_id
 }

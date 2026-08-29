@@ -1,12 +1,24 @@
 use super::*;
 
 pub(crate) fn bid_log() -> Element {
-    let selected_world = use_context::<Signal<String>>();
+    let mut selected_world = use_context::<Signal<String>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let query = read_public_query();
     let mut selected_auction_id = use_signal(|| query.auction_id.clone().unwrap_or_default());
-    let mut page_number = use_signal(|| query.bid_log_page);
+    let mut page_number = use_signal(|| query.page);
     let mut lot_filter = use_signal(|| query.bid_log_lot.clone().unwrap_or_default());
+    let canonical_query = query.clone();
+    use_effect(move || {
+        if canonical_query.bid_log_page_alias {
+            // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
+            set_public_query(&canonical_query, true);
+        }
+    });
+    let worlds = use_resource(fetch_worlds);
+    let world_options = match &*worlds.read_unchecked() {
+        Some(Ok(worlds)) => enabled_worlds(worlds),
+        _ => vec![selected_world()],
+    };
     let auctions = use_resource({
         let refresh_generation = refresh_generation;
         move || {
@@ -36,7 +48,7 @@ pub(crate) fn bid_log() -> Element {
                     |query| {
                         query.auction_id =
                             (!next_auction_id.is_empty()).then_some(next_auction_id.clone());
-                        query.bid_log_page = 1;
+                        query.page = 1;
                     },
                     true,
                 );
@@ -74,9 +86,10 @@ pub(crate) fn bid_log() -> Element {
             p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
         },
         Some(Err(_)) => rsx! {
-            div { class: "public-auction-bid-log-empty", role: "alert",
-                p { {t!("data-error")} }
+            div { class: "public-auction-empty", role: "alert",
+                p { class: "public-auction-empty__title", {t!("data-error")} }
                 button {
+                    class: "public-auction-empty__retry",
                     r#type: "button",
                     onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
                     {t!("data-retry")}
@@ -84,10 +97,14 @@ pub(crate) fn bid_log() -> Element {
             }
         },
         Some(Ok(None)) => rsx! {
-            p { class: "public-auction-bid-log-empty", role: "status", {t!("data-empty")} }
+            div { class: "public-auction-empty", role: "status",
+                p { class: "public-auction-empty__title", {t!("bidlog-no-rounds")} }
+            }
         },
         Some(Ok(Some(page))) if page.bids.is_empty() => rsx! {
-            p { class: "public-auction-bid-log-empty", role: "status", {t!("data-empty")} }
+            div { class: "public-auction-empty", role: "status",
+                p { class: "public-auction-empty__title", {t!("bidlog-empty")} }
+            }
         },
         Some(Ok(Some(page))) => rsx! {
             BidLogTable {
@@ -98,13 +115,16 @@ pub(crate) fn bid_log() -> Element {
                     lot_filter.set(value.clone());
                     page_number.set(1);
                     update_public_query(
-                        |query| query.bid_log_lot = (!value.trim().is_empty()).then_some(value),
+                        |query| {
+                            query.bid_log_lot = (!value.trim().is_empty()).then_some(value);
+                            query.page = 1;
+                        },
                         false,
                     );
                 },
                 on_page_change: move |next_page: i64| {
                     page_number.set(next_page);
-                    update_public_query(|query| query.bid_log_page = next_page, false);
+                    update_public_query(|query| query.page = next_page, false);
                 },
             }
         },
@@ -112,10 +132,36 @@ pub(crate) fn bid_log() -> Element {
 
     rsx! {
         section { class: "public-auction-bid-log-page", aria_labelledby: "bid-log-title",
-            h1 { id: "bid-log-title", class: "public-auction-category__title",
-                {t!("page-bidlog-title")}
-            }
+            h1 { id: "bid-log-title", {t!("page-bidlog-title")} }
             div { class: "public-auction-bid-log-controls",
+                label { r#for: "public-auction-bid-log-world",
+                    span { {t!("world-label")} }
+                    select {
+                        id: "public-auction-bid-log-world",
+                        value: selected_world(),
+                        disabled: world_options.is_empty(),
+                        onchange: move |event| {
+                            let world = event.value();
+                            selected_world.set(world.clone());
+                            selected_auction_id.set(String::new());
+                            lot_filter.set(String::new());
+                            page_number.set(1);
+                            update_public_query(
+                                |query| {
+                                    // 旧版 Main 使用缺省 URL，非 Main 世界才写入 `world`。
+                                    query.world = (world != "main").then_some(world.clone());
+                                    query.auction_id = None;
+                                    query.bid_log_lot = None;
+                                    query.page = 1;
+                                },
+                                false,
+                            );
+                        },
+                        for world in world_options.clone() {
+                            option { value: world.clone(), {world_label(&world)} }
+                        }
+                    }
+                }
                 label { r#for: "public-auction-bid-log-round",
                     span { {t!("bidlog-round")} }
                     select {
@@ -125,11 +171,13 @@ pub(crate) fn bid_log() -> Element {
                         onchange: move |event| {
                             let auction_id = event.value();
                             selected_auction_id.set(auction_id.clone());
+                            lot_filter.set(String::new());
                             page_number.set(1);
                             update_public_query(
                                 |query| {
                                     query.auction_id = Some(auction_id.clone());
-                                    query.bid_log_page = 1;
+                                    query.bid_log_lot = None;
+                                    query.page = 1;
                                 },
                                 false,
                             );

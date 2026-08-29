@@ -1,7 +1,7 @@
 //! Admin Dashboard 运行时安全详情组件。
 
 use dioxus::prelude::*;
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use crate::api::AdminDashboardSnapshot;
 

@@ -1,67 +1,11 @@
-//! 凭据页面的筛选和安全录入表单。
+//! 凭据页面的安全录入表单。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::create_admin_credential;
-
-#[component]
-pub fn CredentialFilters(
-    mut kind_filter: Signal<String>,
-    mut world_filter: Signal<String>,
-    mut status_filter: Signal<String>,
-    mut page_number: Signal<i64>,
-) -> Element {
-    rsx! {
-        section { class: "admin-credentials__filters", aria_labelledby: "admin-credentials-filter-title",
-            h2 { id: "admin-credentials-filter-title", {t!("admin-credentials-filter")} }
-            div { class: "admin-panel__actions",
-                label {
-                    {t!("admin-credentials-kind")}
-                    select {
-                        value: kind_filter(),
-                        onchange: move |event| {
-                            kind_filter.set(event.value());
-                            page_number.set(1);
-                        },
-                        option { value: "", {t!("admin-credentials-all")} }
-                        option { value: "mail_cookie", {t!("admin-credentials-kind-mail")} }
-                        option { value: "forum_cookie", {t!("admin-credentials-kind-forum")} }
-                    }
-                }
-                label {
-                    {t!("admin-credentials-world")}
-                    select {
-                        value: world_filter(),
-                        onchange: move |event| {
-                            world_filter.set(event.value());
-                            page_number.set(1);
-                        },
-                        option { value: "", {t!("admin-credentials-all")} }
-                        option { value: "main", {t!("admin-credentials-world-main")} }
-                        option { value: "isekai", {t!("admin-credentials-world-isekai")} }
-                        option { value: "shared", {t!("admin-credentials-world-shared")} }
-                    }
-                }
-                label {
-                    {t!("admin-credentials-status")}
-                    select {
-                        value: status_filter(),
-                        onchange: move |event| {
-                            status_filter.set(event.value());
-                            page_number.set(1);
-                        },
-                        option { value: "", {t!("admin-credentials-all")} }
-                        option { value: "active", {t!("admin-credentials-status-active")} }
-                        option { value: "disabled", {t!("admin-credentials-status-disabled")} }
-                        option { value: "invalid", {t!("admin-credentials-status-invalid")} }
-                    }
-                }
-            }
-        }
-    }
-}
+use crate::app::surface::AdminActionFeedback;
 
 #[component]
 pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
@@ -71,31 +15,28 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
     let mut secret = use_signal(String::new);
     let mut command_id_state = use_signal(|| None::<Uuid>);
     let mut busy = use_signal(|| false);
-    let mut feedback = use_signal(|| None::<bool>);
+    let mut feedback = use_signal(|| None::<AdminActionFeedback>);
 
     rsx! {
-        section {
-            class: "admin-credentials__import",
-            aria_labelledby: "admin-credentials-create-title",
-            aria_busy: busy().to_string(),
-            h2 { id: "admin-credentials-create-title", {t!("admin-credentials-create-title")} }
-            p { class: "admin-panel__note", {t!("admin-credentials-secret-note")} }
-            form {
-                class: "admin-credentials__create-form",
-                onsubmit: move |event| {
+        form {
+            class: "admin-credentials-import",
+            onsubmit: move |event| {
                     event.prevent_default();
                     if busy() {
                         return;
                     }
-                    let kind = kind();
-                    let world = world();
-                    let label = label();
+                    let mut kind_signal = kind;
+                    let mut world_signal = world;
+                    let mut label_signal = label;
+                    let mut secret_signal = secret;
+                    let kind = kind_signal();
+                    let world = world_signal();
+                    let label = label_signal();
                     let raw_secret = secret();
                     if label.trim().is_empty() || raw_secret.is_empty() {
-                        feedback.set(Some(false));
+                        feedback.set(Some(AdminActionFeedback::Error("invalid_request".to_owned())));
                         return;
                     }
-                    let mut secret_signal = secret;
                     let command_id = match command_id_state() {
                         Some(command_id) => command_id,
                         None => {
@@ -114,21 +55,25 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             create_admin_credential(command_id, kind, world, label, raw_secret).await;
                         match result {
                             Ok(_) => {
+                                kind_signal.set("mail_cookie".to_owned());
+                                world_signal.set("main".to_owned());
+                                label_signal.set(String::new());
                                 secret_signal.set(String::new());
                                 command_id_state.set(None);
-                                feedback.set(Some(true));
+                                feedback.set(Some(AdminActionFeedback::Success));
                                 reload_generation.set(reload_generation().saturating_add(1));
                             }
-                            Err(_) => feedback.set(Some(false)),
+                            Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
                         }
                         busy.set(false);
                     });
                 },
-                label {
-                    r#for: "admin-credentials-kind",
+            h2 { {t!("admin-credentials-create-title")} }
+            label {
+                    r#for: "import-kind",
                     {t!("admin-credentials-kind")}
                     select {
-                        id: "admin-credentials-kind",
+                        id: "import-kind",
                         disabled: busy(),
                         value: kind(),
                         onchange: move |event| {
@@ -138,12 +83,27 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                         option { value: "mail_cookie", {t!("admin-credentials-kind-mail")} }
                         option { value: "forum_cookie", {t!("admin-credentials-kind-forum")} }
                     }
-                }
-                label {
-                    r#for: "admin-credentials-world",
+            }
+            label {
+                    r#for: "import-label",
+                    {t!("admin-credentials-label")}
+                    input {
+                        id: "import-label",
+                        r#type: "text",
+                        disabled: busy(),
+                        required: true,
+                        value: label(),
+                        oninput: move |event| {
+                            label.set(event.value());
+                            command_id_state.set(None);
+                        },
+                    }
+            }
+            label {
+                    r#for: "import-world",
                     {t!("admin-credentials-world")}
                     select {
-                        id: "admin-credentials-world",
+                        id: "import-world",
                         disabled: busy(),
                         value: world(),
                         onchange: move |event| {
@@ -154,28 +114,14 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                         option { value: "isekai", {t!("admin-credentials-world-isekai")} }
                         option { value: "shared", {t!("admin-credentials-world-shared")} }
                     }
-                }
-                label {
-                    r#for: "admin-credentials-label",
-                    {t!("admin-credentials-label")}
-                    input {
-                        id: "admin-credentials-label",
-                        disabled: busy(),
-                        required: true,
-                        value: label(),
-                        oninput: move |event| {
-                            label.set(event.value());
-                            command_id_state.set(None);
-                        },
-                    }
-                }
-                label {
-                    r#for: "admin-credentials-secret",
+            }
+            label {
+                    r#for: "import-secret",
                     {t!("admin-credentials-secret")}
                     input {
-                        id: "admin-credentials-secret",
+                        id: "import-secret",
                         r#type: "password",
-                        autocomplete: "new-password",
+                        autocomplete: "off",
                         disabled: busy(),
                         required: true,
                         value: secret(),
@@ -184,23 +130,23 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             command_id_state.set(None);
                         },
                     }
-                }
-                button {
+            }
+            if let Some(feedback) = feedback() {
+                    p {
+                        class: if feedback.is_success() {
+                            "admin-shell__inline-ok"
+                        } else {
+                            "admin-shell__inline-error"
+                        },
+                        role: if feedback.is_success() { "status" } else { "alert" },
+                        {feedback.message(t!("admin-credentials-action-success"))}
+                    }
+            }
+            button {
                     r#type: "submit",
+                    class: "admin-btn-primary",
                     disabled: busy() || label().trim().is_empty() || secret().is_empty(),
                     if busy() { {t!("admin-action-working")} } else { {t!("admin-credentials-create-submit")} }
-                }
-            }
-            if let Some(success) = feedback() {
-                p {
-                    class: if success {
-                        "admin-panel__note action-feedback action-feedback--success"
-                    } else {
-                        "admin-panel__note action-feedback action-feedback--error"
-                    },
-                    role: if success { "status" } else { "alert" },
-                    if success { {t!("admin-credentials-action-success")} } else { {t!("admin-credentials-action-error")} }
-                }
             }
         }
     }

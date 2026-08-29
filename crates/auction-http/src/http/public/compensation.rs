@@ -24,7 +24,8 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use uuid::Uuid;
 
 use super::{
-    PublicApiState, api_error, not_found_error, parse_positive_i64, parse_query, timestamp,
+    PublicApiState, api_error, not_found_error, parse_positive_i64, parse_public_uuid, parse_query,
+    public_timestamp,
 };
 
 /// 读取已结算拍卖的补偿池批次。
@@ -38,19 +39,19 @@ pub(crate) async fn pool(
     let query = parse_query(&uri, &["page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let page_size = parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
         Some(MAX_PUBLIC_COMPENSATION_PAGE_SIZE),
     )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
 
     let raw_cursor = query.get("cursor").cloned();
     if raw_cursor.is_some() && page != 1 {
         return Err(api_error(
             StatusCode::BAD_REQUEST,
-            "invalid_cursor",
+            "invalid_query",
             "游标分页只能从第一页开始",
         ));
     }
@@ -58,16 +59,14 @@ pub(crate) async fn pool(
         .as_deref()
         .map(decode_cursor)
         .transpose()
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_cursor", "分页游标无效"))?;
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页游标无效"))?;
     let offset = if cursor.is_some() {
         0
     } else {
         page.checked_sub(1)
             .and_then(|value| value.checked_mul(page_size))
             .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
-            .ok_or_else(|| {
-                api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效")
-            })?
+            .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?
     };
 
     let Some(reader) = state.compensation() else {
@@ -110,23 +109,23 @@ pub(crate) async fn movements(
     (HeaderMap, Json<ApiResponse<PublicCompensationMovementPageResponse>>),
     (StatusCode, Json<ApiErrorResponse>),
 > {
-    let auction_id = Uuid::parse_str(&auction_id)
+    let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let query = parse_query(&uri, &["page", "page_size"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
-        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let page_size = parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
         Some(MAX_PUBLIC_COMPENSATION_PAGE_SIZE),
     )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let offset = page
         .checked_sub(1)
         .and_then(|value| value.checked_mul(page_size))
         .filter(|value| *value <= MAX_PUBLIC_COMPENSATION_OFFSET)
-        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
 
     let Some(reader) = state.compensation() else {
         return Err(api_error(
@@ -186,7 +185,7 @@ fn map_pool_page(
     let cursor = raw_cursor.is_some();
     PublicCompensationResponse {
         balance: page.balance,
-        updated_at: page.updated_at.map(timestamp),
+        updated_at: page.updated_at.map(public_timestamp),
         rounds: page.entries.into_iter().map(map_round).collect(),
         page: (!cursor).then_some(page_number),
         page_size: page.limit,
@@ -222,7 +221,7 @@ fn map_round(round: PublicCompensationRound) -> PublicCompensationRoundResponse 
         compensation_out: round.compensation_out,
         closing_balance: round.closing_balance,
         movement_count: round.movement_count,
-        settled_at: timestamp(round.settled_at),
+        settled_at: public_timestamp(round.settled_at),
     }
 }
 
@@ -236,7 +235,7 @@ fn map_movement(movement: PublicCompensationMovement) -> PublicCompensationMovem
         kind: movement.kind.as_str().to_owned(),
         amount: movement.amount,
         balance_after: movement.balance_after,
-        created_at: timestamp(movement.created_at),
+        created_at: public_timestamp(movement.created_at),
     }
 }
 

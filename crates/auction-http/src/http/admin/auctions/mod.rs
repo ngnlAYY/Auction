@@ -13,13 +13,14 @@ mod list;
 mod mapping;
 
 pub(super) use super::{
-    ADMIN_CSRF_COOKIE, AdminApiState, admin_session_guard, api_error, authenticated_admin_session,
-    authentication_error, internal_error, no_store_headers, not_found_error, parse_positive_i64,
-    parse_query, read_admin_cookie, request_id, timestamp, valid_admin_csrf_header,
+    AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
+    authenticated_admin_session, internal_error, no_store_headers, parse_positive_i64, parse_query,
+    request_id, timestamp,
 };
 pub(super) use commands::create;
 pub(super) use common::{
-    create_feature_unavailable, feature_unavailable, map_create_error, map_error,
+    create_feature_unavailable, feature_unavailable, invalid_create_command, map_create_error,
+    map_error, parse_canonical_uuid,
 };
 pub(super) use list::list;
-pub(super) use mapping::map_auction;
+pub(super) use mapping::{map_auction, map_auction_command};

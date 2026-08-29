@@ -91,13 +91,12 @@
 }
 
 .public-world-switcher select {
-  min-block-size: var(--size-target);
   padding: var(--space-1) var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
-  font-size: var(--text-sm);
+  font-size: inherit;
 }
 
 .public-world-switcher select:hover,
@@ -107,7 +106,6 @@
 
 .public-connection-badge {
   display: inline-flex;
-  min-block-size: var(--size-target);
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-3);
@@ -127,44 +125,24 @@
   content: "";
 }
 
-.public-connection-badge--checking,
-.public-connection-badge--connecting {
-  color: var(--color-warning);
-}
-
-.public-connection-badge--checking::before,
-.public-connection-badge--connecting::before {
-  background: var(--color-warning);
-}
-
-.public-connection-badge--connected {
-  color: var(--color-live);
-}
-
-.public-connection-badge--connected::before {
+.public-connection-badge--live::before {
   background: var(--color-live);
 }
 
-.public-connection-badge--anonymous,
-.public-connection-badge--stopped {
-  color: var(--color-text-muted);
+.public-connection-badge--degraded::before {
+  background: var(--color-warning);
 }
 
-.public-connection-badge--error {
-  color: var(--color-danger);
-}
-
-.public-connection-badge--error::before {
+.public-connection-badge--unavailable::before {
   background: var(--color-danger);
 }
 
 .public-connection-refresh {
-  min-block-size: var(--size-target);
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  background: transparent;
+  color: var(--color-text);
+  background: var(--color-surface-raised);
   font: inherit;
   font-size: var(--text-sm);
   white-space: nowrap;
@@ -176,54 +154,53 @@
   border-color: var(--color-accent);
 }
 
-.public-shell__utility-link {
+.public-account-session-menu {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.public-account-session-login {
   display: inline-flex;
   align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+}
+
+.public-account-session-login:hover,
+.public-account-session-login:focus-visible {
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  text-decoration: none;
+}
+
+.public-account-session-name {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.public-account-session-logout {
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.public-shell__utility-link:hover,
-.public-shell__utility-link:focus-visible {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-  text-decoration: none;
-}
-
-.public-shell__utility-link--account {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.public-shell__utility-link--account:hover,
-.public-shell__utility-link--account:focus-visible {
-  color: var(--color-accent-contrast);
-  background: var(--color-accent);
-}
-
-.public-session-menu {
-  display: inline-flex;
-  position: relative;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.public-session-menu__logout {
-  appearance: none;
-  cursor: pointer;
-  font: inherit;
   background: transparent;
 }
 
-.public-session-menu__logout:disabled {
-  cursor: wait;
-  opacity: 0.65;
+.public-account-session-logout:hover,
+.public-account-session-logout:focus-visible {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
-.public-session-menu__error {
+.public-account-session-logout:disabled {
+  opacity: 0.6;
+}
+
+.public-account-session-error {
   position: absolute;
   inset-block-start: calc(100% + var(--space-2));
   inset-inline-end: 0;
@@ -246,14 +223,93 @@
 }
 
 .public-page-status {
+  margin-block-start: 1em;
   padding-block: var(--space-6);
   color: var(--color-text-muted);
   text-align: center;
 }
 
+.public-state-retry {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.public-state-retry:focus-visible {
+  position: fixed;
+  inset-block-end: var(--space-2);
+  inset-inline-end: var(--space-2);
+  inline-size: auto;
+  block-size: auto;
+  padding: var(--space-1) var(--space-3);
+  overflow: visible;
+  clip-path: none;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  white-space: normal;
+}
+
+.public-rules-page {
+  max-inline-size: 47.5rem;
+}
+
+.public-rules-page__document {
+  min-inline-size: 0;
+  padding-block-end: var(--space-6);
+}
+
+/* 规则正文沿用 Auction-BF 的浏览器默认 Markdown 排版，只保留横向表格保护。 */
+.public-rules-page__document h2 {
+  margin-block: 0.83em;
+  font-size: 1.5em;
+}
+
+.public-rules-page__document p {
+  margin-block: 1em;
+}
+
+.public-rules-page__document .shared-markdown__table-wrap {
+  display: contents;
+}
+
+.public-rules-page__document table {
+  display: block;
+  max-inline-size: 100%;
+  overflow-x: auto;
+}
+
+.public-rules-page__document th,
+.public-rules-page__document td {
+  text-align: left;
+}
+
+.public-rules-page__document a {
+  color: var(--color-link);
+}
+
+.public-status-page h2 {
+  margin-block: 0.83em;
+  font-size: 1.5em;
+}
+
+.public-status-page p {
+  margin-block: 1em;
+}
+
 .public-auction-page {
   display: grid;
   gap: var(--space-3);
+}
+
+.public-auction-live {
+  min-inline-size: 0;
 }
 
 .public-auction-history-nav {
@@ -325,19 +381,15 @@
 .public-auction-history-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   gap: var(--space-3);
-  margin-block-end: var(--space-5);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  margin-block-end: var(--space-4);
 }
 
 .public-auction-history-controls label {
-  display: grid;
-  gap: var(--space-1);
-  min-inline-size: 11rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
@@ -354,6 +406,36 @@
 .public-auction-history-controls select:hover,
 .public-auction-history-controls select:focus-visible {
   border-color: var(--color-accent);
+}
+
+.public-auction-history-intro {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.public-auction-history-round {
+  font-weight: 600;
+}
+
+.public-auction-history-status {
+  margin-inline-start: var(--space-2);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.public-auction-history-status--live,
+.public-auction-history-status--final {
+  color: var(--color-live);
+}
+
+.public-auction-history-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .public-auction-round {
@@ -535,11 +617,7 @@
 }
 
 .public-history-filters {
-  margin-block-end: var(--space-5);
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  margin-block-end: var(--space-4);
 }
 
 .public-history-filters fieldset {
@@ -557,7 +635,7 @@
 
 .public-history-primary-filters {
   display: grid;
-  grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 2fr) auto;
+  grid-template-columns: minmax(7.5rem, 10rem) minmax(15rem, 1fr) auto;
   align-items: end;
   gap: var(--space-3);
 }
@@ -597,9 +675,9 @@
 }
 
 .public-history-filter-toolbar {
+  align-self: end;
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
   gap: var(--space-2);
 }
 
@@ -623,21 +701,28 @@
 
 .public-history-settings-toggle {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) !important;
+  border-radius: var(--radius-md) !important;
+  white-space: nowrap;
 }
 
 .public-history-active-count {
-  color: var(--color-accent);
-  font-size: var(--text-xs);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-full);
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .public-history-settings-panel {
-  margin-block-start: var(--space-4);
-  padding-block-start: var(--space-4);
-  border-block-start: var(--border-width) solid var(--color-border);
+  padding: var(--space-4);
+  margin-block-start: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 
 .public-history-settings-header {
@@ -649,9 +734,11 @@
 }
 
 .public-history-settings-close {
-  padding-inline: var(--space-2);
+  min-inline-size: var(--size-target);
+  padding: 0;
   color: var(--color-text-muted);
-  font-size: var(--text-sm);
+  background: transparent;
+  font-size: var(--text-lg);
 }
 
 .public-history-settings-grid {
@@ -730,6 +817,7 @@
 .public-history-filter-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-2);
   margin-block-start: var(--space-4);
 }
@@ -752,27 +840,93 @@
   border-color: var(--color-accent);
 }
 
-.public-history-filter-actions__apply {
-  color: var(--color-accent-contrast) !important;
-  border-color: var(--color-accent) !important;
-  background: var(--color-accent) !important;
+.public-history-filter-toolbar .public-history-filter-actions__apply {
+  padding: var(--space-1) var(--space-4);
+  color: var(--color-accent-contrast);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  font-weight: 600;
 }
 
 .public-history-table-wrap {
-  margin-block-end: var(--space-4);
+  overflow-x: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 
 .public-history-table {
-  min-inline-size: 62rem;
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
 }
 
-.public-history-table__item {
-  max-inline-size: 18rem;
-  white-space: normal !important;
+.public-history-table th,
+.public-history-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: nowrap;
 }
 
-.public-history-table__item a {
-  overflow-wrap: anywhere;
+.public-history-table thead th {
+  color: var(--color-text-muted);
+  border-block-end: var(--border-width) solid var(--color-border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.public-history-table tbody tr {
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.public-history-table tbody tr:last-child {
+  border-block-end: 0;
+}
+
+.public-history-table .public-history-number {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-history-equipment a {
+  font-weight: 600;
+}
+
+.public-history-auction a {
+  color: inherit;
+}
+
+.public-history-price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-history-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-history-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.public-history-stat dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-history-stat dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
 }
 
 .public-history-pagination {
@@ -830,78 +984,94 @@
   background: var(--color-accent-contrast);
 }
 
-.public-auction-pages {
+.ui-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-block-start: var(--space-3);
+}
+
+.ui-pager__controls,
+.ui-pager__jump,
+.ui-pager__label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-block: var(--space-4) var(--space-6);
+  gap: var(--space-2);
+}
+
+.ui-pager button,
+.ui-pager__input {
+  min-block-size: var(--size-target);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.ui-pager button {
+  cursor: pointer;
+}
+
+.ui-pager button:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.ui-pager button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ui-pager__status,
+.ui-pager__label {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
 
-.public-auction-pages button {
-  min-block-size: var(--size-target);
-  padding: var(--space-2) var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-}
-
-.public-auction-pages button:not(:disabled):hover,
-.public-auction-pages button:not(:disabled):focus-visible {
-  border-color: var(--color-accent);
-}
-
-.public-auction-pages__controls,
-.public-auction-pages__jump {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.public-auction-pages__jump {
-  margin: 0;
-}
-
-.public-auction-pages__jump label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.public-auction-pages__jump input {
+.ui-pager__input {
   inline-size: 5rem;
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-  font: inherit;
-}
-
-.public-auction-pages__status {
-  min-inline-size: 7rem;
-  text-align: center;
 }
 
 .public-account-section {
-  margin-block-start: var(--space-6);
+  margin-block-end: var(--space-6);
+}
+
+.public-account-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+}
+
+.public-account-hint,
+.public-account-empty {
+  color: var(--color-text-muted);
+}
+
+.public-account-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.public-account-login-prompt {
+  padding: var(--space-6) var(--space-5);
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+.public-account-login-prompt p {
+  margin: 0 0 var(--space-3);
 }
 
 .public-account-login-cta {
-  display: inline-flex;
-  min-block-size: var(--size-target);
-  align-items: center;
-  padding: var(--space-2) var(--space-4);
+  display: inline-block;
+  padding: var(--space-2) var(--space-5);
   border: var(--border-width) solid var(--color-accent);
   border-radius: var(--radius-sm);
-  color: var(--color-accent-contrast);
-  background: var(--color-accent);
-  font-weight: var(--font-weight-strong);
+  color: var(--color-accent);
 }
 
 .public-account-login-cta:hover,
@@ -912,7 +1082,73 @@
 }
 
 .public-account-table-wrap {
-  margin-block-end: var(--space-2);
+  overflow-x: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-account-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
+}
+
+.public-account-table th,
+.public-account-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.public-account-table thead th {
+  color: var(--color-text-muted);
+  border-block-end: var(--border-width) solid var(--color-border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.public-account-table tbody tr {
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.public-account-table tbody tr:last-child {
+  border-block-end: 0;
+}
+
+.public-account-table .public-account-number {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-account-leading {
+  background: color-mix(in srgb, var(--color-live) 8%, transparent);
+}
+
+.public-account-code a,
+.public-account-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-account-code a {
+  font-weight: 600;
+}
+
+.public-account-status {
+  display: inline-block;
+  padding: calc(var(--space-1) / 2) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.public-account-status--live {
+  color: var(--color-live);
+  border-color: var(--color-live);
 }
 
 .public-auction-category {
@@ -1003,17 +1239,14 @@
   white-space: normal !important;
 }
 
-.public-auction-catalog__item-name {
+.ui-truncated-text.ui-equipment-name {
+  display: inline;
+  inline-size: auto;
+  max-inline-size: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
   overflow-wrap: anywhere;
-}
-
-.public-auction-catalog__seller {
-  display: inline-block;
-  max-inline-size: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
-  white-space: nowrap;
 }
 
 .public-auction-catalog__roll {
@@ -1049,9 +1282,6 @@
 .public-auction-participant-identity__name {
   min-inline-size: 0;
   max-inline-size: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .public-auction-participant-identity__marker {
@@ -1380,19 +1610,6 @@
   text-align: center;
 }
 
-.public-auction-page__document {
-  overflow-x: auto;
-  margin: var(--space-4) 0 0;
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface);
-  font: inherit;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
 .public-auction-bid-form {
   display: grid;
   gap: var(--space-3);
@@ -1598,55 +1815,427 @@
   border-color: var(--color-accent);
 }
 
-.public-auction-empty {
+.public-auction-rounds__intro,
+.public-history-intro {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+}
+
+.public-auction-rounds__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.public-auction-rounds__controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-auction-rounds__controls select {
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.public-auction-rounds__table {
+  overflow-x: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-auction-rounds__table table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.public-auction-rounds__table th,
+.public-auction-rounds__table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.public-auction-rounds__table th {
+  color: var(--color-text-muted);
+  border-block-end: var(--border-width) solid var(--color-border);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.public-auction-rounds__table tr {
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.public-auction-rounds__table tbody tr:last-child {
+  border-block-end: 0;
+}
+
+.public-auction-rounds__table .public-auction-rounds__number {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-auction-rounds__round {
+  font-weight: 600;
+}
+
+.public-auction-rounds__table .public-auction-rounds__total {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-auction-rounds__status {
+  margin-inline-start: var(--space-2);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.public-auction-rounds__status--live,
+.public-auction-rounds__status--final {
+  color: var(--color-live);
+}
+
+.public-auction-rounds__links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.public-account-login-page {
+  max-inline-size: 26.25rem;
+}
+
+.public-account-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-account-login-form input {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font-family: var(--font-mono);
+}
+
+.public-account-login-form input[data-masked="true"]::placeholder {
+  color: var(--color-text);
+  opacity: 1;
+}
+
+.public-account-login-form button {
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.public-account-login-form button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.public-account-login-form button[data-error="true"]:disabled {
+  opacity: 1;
+}
+
+.public-account-login-error {
   display: grid;
-  justify-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.public-account-login-ban-reason {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+}
+
+.public-account-login-hint {
+  margin-block: 1em;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-blacklist-page {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.public-blacklist-page h1,
+.public-blacklist-page p {
+  margin: 0;
+}
+
+.public-blacklist-page h1 {
+  font-size: var(--text-xl);
+}
+
+.public-blacklist-page > p,
+.public-blacklist-empty {
+  color: var(--color-text-muted);
+}
+
+.public-blacklist-table-wrap {
+  overflow-x: auto;
+}
+
+.public-blacklist-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+}
+
+.public-blacklist-table th,
+.public-blacklist-table td {
+  padding: var(--space-3);
+  border-block-end: var(--border-width) solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.public-blacklist-table th:first-child,
+.public-blacklist-table td:first-child {
+  inline-size: 8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-blacklist-table th:last-child,
+.public-blacklist-table td:last-child {
+  inline-size: 14rem;
+  white-space: nowrap;
+}
+
+.public-compensation-page {
+  display: grid;
   gap: var(--space-4);
-  min-block-size: 9rem;
-  box-sizing: border-box;
-  align-content: center;
+}
+
+.public-compensation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.public-compensation-heading h1,
+.public-compensation-intro {
+  margin-top: 0;
+}
+
+.public-compensation-empty {
+  margin-block: 1em;
+  color: var(--color-text-muted);
+}
+
+.public-compensation-balance {
+  min-width: 13rem;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+
+.public-compensation-balance strong {
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.public-compensation-balance small {
+  color: var(--color-text-muted);
+}
+
+.public-compensation-table-wrap,
+.public-compensation-movement-wrap {
+  overflow-x: auto;
+}
+
+.public-compensation-table,
+.public-compensation-movement-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.public-compensation-table th,
+.public-compensation-table td,
+.public-compensation-movement-table th,
+.public-compensation-movement-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.public-compensation-table .public-compensation-toggle-cell {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.public-compensation-table .public-compensation-number,
+.public-compensation-movement-table .public-compensation-number {
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-compensation-expand {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: inherit;
+  background: var(--color-surface-raised);
+  cursor: pointer;
+}
+
+.public-compensation-details-row > td {
+  padding: 0;
+  white-space: normal;
+}
+
+.public-compensation-movements {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+}
+
+.public-compensation-equation {
+  margin-top: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.public-compensation-income {
+  color: var(--color-live);
+}
+
+.public-compensation-outflow {
+  color: var(--color-warning);
+}
+
+.public-compensation-lot-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.public-compensation-movement-table small {
+  display: none;
+}
+
+/* 旧 Public 共用 EmptyState：错误详情与重试入口默认只提供给辅助技术和键盘用户。 */
+.ui-empty-state {
+  position: relative;
   padding: var(--space-6) var(--space-5);
   border: var(--border-width) dashed var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
+  border-radius: var(--radius-lg);
   background: var(--color-surface);
   text-align: center;
 }
 
-.public-auction-empty__mark {
-  display: grid;
-  inline-size: 2.5rem;
-  block-size: 2.5rem;
-  place-items: center;
-  border: var(--border-width) solid var(--color-border-strong);
-  border-radius: 50%;
+.ui-empty-state__title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.ui-empty-state__hint {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}
+
+.ui-empty-state__retry {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ui-empty-state__retry:focus-visible {
+  inset-block-end: var(--space-2);
+  inset-inline-end: var(--space-2);
+  inline-size: auto;
+  block-size: auto;
+  padding: var(--space-1) var(--space-3);
+  overflow: visible;
+  clip-path: none;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
   background: var(--color-surface-raised);
+  white-space: normal;
 }
 
-.public-auction-empty__mark::after {
-  inline-size: 0.45rem;
-  block-size: 0.45rem;
-  border-radius: 50%;
-  background: var(--color-accent);
-  content: "";
+.ui-empty-state__detail {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
-.public-auction-empty__copy {
-  display: grid;
-  gap: var(--space-2);
+.public-auction-empty {
+  position: relative;
+  padding: var(--space-6) var(--space-5);
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  text-align: center;
 }
 
 .public-auction-empty h1,
 .public-auction-empty p {
-  margin-block: 0;
+  margin: 0;
+}
+
+.public-auction-empty__title {
+  color: var(--color-text);
+  font-size: var(--text-lg);
+}
+
+.public-auction-empty .public-auction-empty__hint {
+  margin-block-start: var(--space-2);
+  color: var(--color-text-muted);
 }
 
 .public-auction-empty h1 {
+  font-size: var(--text-lg);
   color: var(--color-text);
 }
 
 .public-auction-empty p {
+  margin-block-start: var(--space-2);
   color: var(--color-text-muted);
+}
+
+.public-auction-empty p.public-auction-empty__title {
+  margin-block-start: 0;
+  color: var(--color-text);
 }
 
 .public-auction-empty button {
@@ -1657,6 +2246,29 @@
   color: var(--color-accent-contrast);
   background: var(--color-accent);
   font-weight: var(--font-weight-strong);
+}
+
+.public-auction-empty .public-auction-empty__retry {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.public-auction-empty .public-auction-empty__retry:focus-visible {
+  inset-block-end: var(--space-2);
+  inset-inline-end: var(--space-2);
+  inline-size: auto;
+  block-size: auto;
+  padding: var(--space-1) var(--space-3);
+  overflow: visible;
+  clip-path: none;
+  border: var(--border-width) solid var(--color-border);
+  white-space: normal;
 }
 
 @media (max-width: 60rem) {
@@ -1674,10 +2286,6 @@
     inline-size: 100%;
     flex-wrap: wrap;
     margin-inline-start: 0;
-  }
-
-  .public-shell__controls .language-picker {
-    margin-inline-start: auto;
   }
 
   .public-auction-summary {
@@ -1705,8 +2313,90 @@
     flex: 1 1 auto;
   }
 
+  .public-history-settings-panel {
+    padding: var(--space-3);
+  }
+
   .public-history-table {
     min-inline-size: 0;
+  }
+
+  .public-history-table thead,
+  .public-auction-rounds__table thead {
+    display: none;
+  }
+
+  .public-history-table,
+  .public-history-table tbody,
+  .public-history-table tr,
+  .public-auction-rounds__table table,
+  .public-auction-rounds__table tbody,
+  .public-auction-rounds__table tr {
+    display: block;
+  }
+
+  .public-history-table tbody tr,
+  .public-auction-rounds__table tr {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .public-history-table td,
+  .public-auction-rounds__table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    white-space: normal;
+  }
+
+  .public-history-table td::before,
+  .public-auction-rounds__table td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .public-compensation-heading {
+    display: grid;
+  }
+
+  .public-compensation-balance {
+    min-width: 0;
+  }
+
+  .public-account-table thead {
+    display: none;
+  }
+
+  .public-account-table,
+  .public-account-table tbody,
+  .public-account-table tr {
+    display: block;
+  }
+
+  .public-account-table td {
+    display: flex;
+  }
+
+  .public-account-table tbody tr {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .public-account-table td {
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    white-space: normal;
+  }
+
+  .public-account-table td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
   }
 
   .public-auction-catalog thead {
@@ -1727,6 +2417,7 @@
   .public-auction-catalog td {
     display: flex;
     align-items: baseline;
+    justify-content: flex-start;
     gap: var(--space-3);
     padding: var(--space-1) 0;
     border: 0;
@@ -1767,17 +2458,17 @@
     flex-wrap: wrap;
   }
 
-  .public-auction-pages {
+  .ui-pager,
+  .ui-pager__jump {
     align-items: stretch;
-    flex-wrap: wrap;
   }
 
-  .public-auction-pages__controls,
-  .public-auction-pages__jump {
+  .ui-pager__controls,
+  .ui-pager__jump {
     inline-size: 100%;
   }
 
-  .public-auction-pages__controls {
+  .ui-pager__controls {
     justify-content: space-between;
   }
 }

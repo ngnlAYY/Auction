@@ -4,8 +4,9 @@
 
 源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
 `src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分；其中
-`runtime/postgres/commands/{mod,bootstrap,preflight,backup,delegation}.rs` 分别负责命令装配、
-MoogleMail 凭据引导、只读预检、备份/manifest 和专用 restore/legacy/rebuild owner 桥接；
+`runtime/postgres/commands/{mod,bootstrap,database_bootstrap,forum,rules,settlement,preflight,backup,delegation}.rs` 分别负责命令装配、
+MoogleMail 凭据引导、缺失 PostgreSQL 目标库的非破坏性 bootstrap、论坛未知写入恢复、旧规则目录导入、旧结算账本只读核验、只读预检、备份/manifest 和专用
+restore/legacy/rebuild owner 桥接；
 `runtime/postgres/artifacts/` 又将外部 PostgreSQL 环境、manifest/hash、文件系统安全、外部进程、
 来源预检和 stdin Cookie 分别放入 `environment.rs`、`manifest.rs`、`filesystem.rs`、`process.rs`、
 `source.rs` 与 `input.rs`，`artifacts.rs` 只保留稳定导出，
@@ -26,8 +27,16 @@ MoogleMail 凭据引导、只读预检、备份/manifest 和专用 restore/legac
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
   cargo run -p auctionctl -- check-config public
 
-# 数据库迁移（按 database_url 选择 PostgreSQL 完整迁移或 SQLite Lite 子集）
+# 独立数据库迁移；默认复用 systemd unit owner，并要求 Public/Admin/Worker 全部停止
 cargo run -p auctionctl -- migrate
+
+# PostgreSQL 初始建库；只在目标库缺失时 CREATE DATABASE，不运行迁移，也不修改已有库。
+# 该命令与 migrate 使用相同的 systemd 状态目录锁和三角色停机门禁；执行成功后再显式运行 migrate。
+AUCTION_CONFIG_FILE=/etc/auction/public.toml \
+  cargo run -p auctionctl --features postgres -- \
+    postgres-bootstrap \
+    --confirm-database auction_production \
+    --maintenance-secrets-file /etc/auction/postgres-maintenance.secret.toml
 
 # 只读预检三进程配置；不会连接数据库、迁移 schema 或触发外部请求。
 cargo run -p auctionctl -- deployment-check --config-dir /etc/auction
@@ -47,6 +56,36 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     bootstrap-mail-credentials --world main --label bot-primary \
     < /run/auction/secrets/mooglemail-main.cookie
+
+# 把旧版五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
+AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
+  cargo run -p auctionctl --features postgres -- \
+    import-rules-directory \
+    --directory /secure/auction-migration/rules \
+    --command-id 123e4567-e89b-42d3-a456-426614174000 \
+    --actor legacy-rules-import
+
+# 只读列出论坛写入结果未知、只读对账中或等待人工授权的任务。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    forum-write-recovery-list --limit 100
+
+# 精确标题对账未命中后，显式授权某一拍卖再次尝试创建主题。
+# command-id 必须稳定且非零；confirm-write 必须逐字包含同一 auction UUID。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    authorize-forum-write-retry \
+    --auction-id 00000000-0000-4000-8000-000000000001 \
+    --command-id 00000000-0000-4000-8000-000000000002 \
+    --actor auction-operator \
+    --confirm-write 'AUTHORIZE FORUM WRITE 00000000-0000-4000-8000-000000000001'
+
+# 在同一 Serializable 只读快照中核验已迁移的旧 settlement_complete/OK 账本。
+# 该命令只输出脱敏身份与数量，不补 fence、不重新结算，也不追加任何数据库事实。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    verify-legacy-settlement \
+    --auction-id 00000000-0000-4000-8000-000000000001
 
 # 只读收集 PostgreSQL 保留盘点；目标证据文件不可覆盖，且不会归档或删除数据。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
@@ -146,7 +185,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 `check-config` 接受 `public` / `admin` / `worker`，输出 JSON 格式的有效配置安全投影：监听模式与
 非敏感路径、数据库后端类型、缓存 TTL、tracing/metrics 开关、HTTP 安全计数、Worker control
-边界和配置来源状态。它不会输出数据库 URL、Redis URL、Cookie、会话签名密钥、OTLP headers 或
+边界、Admin 装备来源请求间隔、有效 MoogleMail 启用状态/world、allowlist 总数、装备过滤开关、
+模板数量和配置来源状态。
+它不会输出数据库 URL、Redis URL、Cookie、会话签名密钥、OTLP headers 或
 任何 `.keyenv` 内容。
 
 `auctionctl` 的退出码是稳定的：`0` 表示成功，`2` 表示 CLI 用法或配置错误，`3` 表示数据库/外部
@@ -177,12 +218,35 @@ unit、systemd `InvocationID`、MainPID、单调启动时间和观察时间，�
 推荐通过 [`ops/deploy/systemd/auction-stack.service.example`](../../ops/deploy/systemd/auction-stack.service.example)
 在开机时进入同一控制边界，而不要分别 enable 三个角色 unit。
 
+独立 `migrate` 同样读取 `SystemdControllerArgs` 的默认 unit（`auction-worker.service`、
+`auction-admin-api.service`、`auction-public-api.service`），先持有同一部署控制锁，再读取三个 unit
+状态；任一角色处于运行或状态转换中、unit 状态读取失败或部署锁被占用时都会失败关闭，数据库迁移不会
+开始。需要由总控在受控启动/重启流程中迁移时，仍由 `deployment start/restart` 内部调用
+`migrate_config`，不经过这个独立命令 guard；这保留了旧版启动脚本的受控迁移路径。
+
+`postgres-bootstrap` 是普通迁移之外的显式 PostgreSQL 初始建库命令。它只读取 `Public` 配置的
+`database_url`，要求 `--confirm-database` 与 URL path 完全一致，并可选读取仅运行账号可读的
+maintenance sensitive TOML；未提供时把同一 endpoint/TLS profile 的应用 URL 切换到 `postgres`
+维护库。命令先取得与 `migrate` 相同的部署状态目录锁，再确认 Public/Admin/Worker 均处于明确的
+`inactive`/`failed` 或 `not-found` 收敛状态；锁生命周期覆盖 PostgreSQL catalog 检查、建库和应用
+连接后置验证。PostgreSQL 适配器随后取得与 rebuild 共用的集群级 advisory lock，确认 writable
+primary、维护角色 `CREATEDB`、应用角色存在且可分配 owner，拒绝 `postgres`/`template0`/`template1`
+及不安全数据库名。
+
+目标库缺失时只执行安全 identifier quoting 的 `CREATE DATABASE <target> OWNER <application role>`，
+然后验证 catalog owner 和应用 URL 的 `current_database()`/`current_user`；目标库已存在时绝不
+修改它，只有 owner 一致且应用 URL 可连接才以 `already_exists` 幂等成功。连接异常、权限不足、
+名称非法、目标 owner 不一致或身份后置验证失败均确定失败关闭。该命令绝不运行迁移；标准两步顺序
+是先执行 `postgres-bootstrap`，再在同一停机门禁下显式执行普通 `migrate`。普通 `migrate` 不具备
+`CREATEDB` 或隐式建库权限。
+
 ## Cargo feature
 
 `migrate` 和 `deployment start/restart` 的 migration 阶段需要对应后端的驱动：
 
 - `postgres` → `auction-storage/postgres`
 - `sqlite` → `auction-storage/sqlite`
+- `cache-redis` → `auction-cache/redis`；只在有效 Admin 配置选择 Redis 时供规则导入失效缓存
 
 默认不带驱动，因此默认构建下 `check-config` 只能校验 URL scheme 合法性，`migrate` 和部署启动
 会在启动任何 unit 前明确提示需要启用 `postgres` 或 `sqlite` feature。启用对应 feature 后，工具会按连接串选择并执行
@@ -193,6 +257,30 @@ unit、systemd `InvocationID`、MainPID、单调启动时间和观察时间，�
 `bootstrap-mail-credentials` 只允许 `main` / `isekai`，要求对应 world 已在 Worker 配置中启用，
 并使用敏感 TOML 中的 `credential_data_key` 加密后写入 PostgreSQL。Cookie 通过标准输入读取并在
 导入服务完成后释放；命令不会回显 Cookie、密文或数据密钥。
+
+`import-rules-directory` 只支持 PostgreSQL 完整档，并加载 Admin 主配置以取得数据库和可选缓存边界。
+来源目录必须同时包含普通、非符号链接的 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md` 和 `ko.md`；
+命令逐字保持 Auction-BF 的单个开头 BOM 移除和首个非空行标题规则，并在写入前完成五文件校验及
+五语言数据库预检。数据库已有相同标题和正文时报告 `preserved`，任一语言不同则在首次写入前失败，
+缺失语言才通过既有 Admin 规则 CAS、幂等账本和追加审计发布。各语言命令 UUID 由批次
+`--command-id` 稳定派生；中途依赖失败后应以同一批次 UUID 重试。JSON 结果包含每种语言的动作、
+revision、正文 SHA-256 和实际写入命令 UUID。缓存失效失败不会回滚已提交正文，但会列入
+`cache_invalidation_failures`；配置选择 Redis 时必须同时启用 `postgres,cache-redis`，否则命令失败
+关闭而不会静默禁用缓存。
+
+`forum-write-recovery-list` 只读返回 PostgreSQL 中需要论坛写入对账的安全投影，不发起远端请求或
+修改状态。Worker 会先按精确标题 GET；命中时只补本地发布证明，未命中时停在
+`write_authorization_required`。此后只有 `authorize-forum-write-retry` 可以写入幂等授权命令、
+追加审计并打开下一次 POST；它要求非零 auction/command UUID、规范 actor，以及逐字等于
+`AUTHORIZE FORUM WRITE <auction UUID>` 的二次确认。同一 command ID 搭配不同摘要会失败冲突，
+两条命令均只支持 PostgreSQL 完整档，不能用它们绕过精确标题对账或盲目重复写入。
+
+`verify-legacy-settlement` 只支持 PostgreSQL 完整档，并要求目标已经是带完整 workflow、claim、
+complete 身份和 `settlement_complete/OK` 账本的 settled 拍卖。它在
+`SERIALIZABLE READ ONLY DEFERRABLE` 快照内同时读取命令账本、结算摘要、lot 金额和义务种类数量，
+逐字复现旧 Go complete 请求摘要并复用应用层严格重建校验。缺失账本、新版账本、身份漂移、结果
+损坏或权威事实不一致都会失败关闭；成功 JSON 只包含稳定 UUID、due 时间、状态版本和脱敏计数。
+该入口没有通用 `settle` 回退，不清空 completion fence，也不写命令、审计、实时事件或任何结算事实。
 
 `retention-inventory` 只支持 PostgreSQL 完整档，要求 `--confirm-database` 与连接实际返回的
 `current_database()` 完全一致。命令会把版本化的
@@ -209,7 +297,8 @@ realtime consumer 最小 offset 只作为诊断水位，外键依赖在政策明
 事务中检查主节点可写状态、其他连接、数据库大小、用户对象数量、Auction schema identity 和 SQLx
 迁移历史，并将 `restore_preflight_passed` 写入不可覆盖证据。通过只表示目标满足空库/无其他连接/
 可写主节点的基础条件，不验证 backup archive 或恢复内容，也不会停止连接、执行 `pg_restore` 或
-覆盖现有对象。
+覆盖现有对象。user mapping 只经普通数据库 owner 可读的 `pg_catalog.pg_user_mappings` 安全视图
+计数，不要求为该只读盘点授予 superuser。
 
 `postgres-backup` 只支持 PostgreSQL 完整档，要求源库通过 schema identity、SQLx 迁移完整性和数据库
 身份检查；命令调用外部 `pg_dump --format=custom`，随后用 `pg_restore --list` 校验 archive，并在
@@ -222,15 +311,17 @@ realtime consumer 最小 offset 只作为诊断水位，外键依赖在政策明
 schema identity、零其他 session、尚不存在 SQLx 历史，并证明 policy、lot 领先投影和每条 bid 的
 realtime 截止证据都可无损转换。默认只读；实际执行必须先用
 `postgres-legacy-v28-backup`/`postgres-legacy-v28-backup-verify` 建立专用恢复点，再提供逐字确认和
-新的私有 receipt。bridge 在 Serializable 事务和独占表锁内补齐 Rust v5 兼容结构，将等价覆盖的
+新的私有 receipt。实际执行取得 migration advisory lock 后，会在同一物理连接中重新完成完整只读
+预检，再由 bridge 在 Serializable 事务和独占表锁内补齐 Rust v5 兼容结构，将等价覆盖的
 SQLx `1..=5` 与 `7` 写为带当前 checksum 的基线，再运行其余前向迁移。普通备份/恢复命令故意不
 接受旧版专用 manifest，避免把 golang-migrate v28 误报为当前 Rust schema。完整停机、接管、失败
 恢复和证据保管顺序见
 [`ops/deploy/LEGACY_V28_ADOPTION.md`](../../ops/deploy/LEGACY_V28_ADOPTION.md)。
 
-如果 bridge 已提交而后续 SQLx migration 失败，全部角色必须继续停止，只运行普通
-`auctionctl migrate` 继续前向迁移；此时不得再次运行接管命令。只有 schema identity 和全部内嵌
-迁移都通过后才会发布 `auction-postgres-legacy-v28-adoption.v1` receipt。
+如果 bridge 已提交而后续 SQLx migration 失败，或接管已提交但 postflight/receipt 发布失败，全部
+角色必须继续停止；此时不得再次运行接管命令。先运行普通 `auctionctl migrate` 复核前向迁移，再
+保存 recovery preflight、数据库审计和新的当前 schema 备份作为异常证据。只有正常执行中的 schema
+identity 和全部内嵌迁移都通过后才会发布 `auction-postgres-legacy-v28-adoption.v1` receipt。
 
 `postgres-restore` 复用同一 manifest/哈希校验，并要求 `--confirm-database` 同时匹配 Worker
 连接和 manifest 数据库身份。目标必须是可写主节点、没有其他连接且不存在任何用户 schema、类型、
@@ -260,6 +351,8 @@ receipt。未提供该文件时才从 Worker `database_url` 派生维护连接�
 database ACL 或 database/role setting 时失败关闭。重建以 `template0` 保留原 owner、UTF8 编码、
 locale provider、tablespace 和 connection limit，并在集群 advisory lock 下用
 `DROP DATABASE ... WITH (FORCE)` 捕获预检后的连接竞态。
+自定义 tablespace 仍要求显式 `CREATE` 权限；目标为 `pg_default` 时省略显式 TABLESPACE 子句，
+以符合普通 `CREATEDB` owner 的 PostgreSQL 权限语义。
 
 `--mode empty-for-restore` 只创建并证明空库，且强制要求 backup manifest；随后仍需显式运行
 `postgres-restore`。`--mode fresh-schema` 在空库证明后运行当前内嵌迁移，允许 verified backup 或

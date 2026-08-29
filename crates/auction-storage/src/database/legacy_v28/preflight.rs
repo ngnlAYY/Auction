@@ -20,26 +20,36 @@ impl PostgresStore {
             .begin()
             .await
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
-        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-            .execute(&mut *transaction)
-            .await
-            .map_err(|source| query_error("transaction_policy", source))?;
-        sqlx::query("SET LOCAL statement_timeout = '10s'")
-            .execute(&mut *transaction)
-            .await
-            .map_err(|source| query_error("statement_timeout", source))?;
-        sqlx::query("SET LOCAL lock_timeout = '1s'")
-            .execute(&mut *transaction)
-            .await
-            .map_err(|source| query_error("lock_timeout", source))?;
-
-        let preflight = collect_preflight(&mut transaction, confirmed_database_name).await?;
+        let preflight =
+            collect_configured_preflight(&mut transaction, confirmed_database_name).await?;
         transaction
             .commit()
             .await
             .map_err(|source| query_error("commit_read_only_transaction", source))?;
         Ok(preflight)
     }
+}
+
+/// 在调用方已经拥有的连接事务中执行完整只读预检；接管路径借此避免连接池把自身空闲连接
+/// 误计为外部会话，同时仍在 migration advisory lock 内重新核对全部来源事实。
+pub(super) async fn collect_configured_preflight(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    confirmed_database_name: &str,
+) -> Result<PostgresLegacyV28Preflight, PostgresLegacyV28Error> {
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut **transaction)
+        .await
+        .map_err(|source| query_error("transaction_policy", source))?;
+    sqlx::query("SET LOCAL statement_timeout = '10s'")
+        .execute(&mut **transaction)
+        .await
+        .map_err(|source| query_error("statement_timeout", source))?;
+    sqlx::query("SET LOCAL lock_timeout = '1s'")
+        .execute(&mut **transaction)
+        .await
+        .map_err(|source| query_error("lock_timeout", source))?;
+
+    collect_preflight(transaction, confirmed_database_name).await
 }
 
 pub(super) async fn collect_preflight(

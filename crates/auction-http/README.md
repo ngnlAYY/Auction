@@ -9,18 +9,23 @@ Public 与 Admin 的 HTTP 表面适配器。
   其中竞价与代理命令位于 `routes/public/competition/{bid,proxy}.rs`；
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
-  安全逻辑，`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
+  安全逻辑；Admin 写入统一由守卫保持限流 → Origin → CSRF → session 顺序，Admin 读取不消耗
+  mutation 限流额度。`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
   lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
   `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
-  surface 导出边界。`src/http/public/realtime/` 再按列表读取、WebSocket 生命周期/补发和事件校验/映射
-  拆分为 `{mod,list,websocket,mapping}.rs`，保持 `/api/v1/events` 与 `/api/v1/ws` 契约不变。
+  surface 导出边界。`src/http/public/realtime/` 再按列表读取、WebSocket 生命周期、目标解析和事件校验/映射
+  拆分为 `{mod,list,websocket,target,mapping}.rs`：单拍卖回放保留旧版必填 `auction_id` 和响应信封，
+  发现回放使用显式 `scope=auctions` 扩展，WebSocket 逐帧发送旧版单事件，并拥有 4 KiB 读取、
+  50/60 秒 Ping/Pong、5 秒写入、稳定 close reason、settled 预检和 discovery 专属容量边界。
 - `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
   realtime Hub 只放在 `src/http/shared/`。
 - `src/http/shared/state/`：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
   `mod.rs` 只保留 `PublicApiState`/`AdminApiState` 稳定导出；状态容器不跨 surface 共用业务端口。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
   访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
-  `no-cache`/`no-store` 响应策略。
+  `no-cache`/`no-store` 响应策略；`strict_json.rs`：旧版写路由的媒体类型、body 上限和单 JSON
+  值边界，并允许 Public 竞价命令在限流、Origin 和认证之后延迟解码 body；`method_strict.rs`：业务
+  路由显式 HEAD/405 与 `Allow` 契约。
 - `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
 - `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections/{mail,realtime,
   operations,credentials,alerting,fallback}.rs` 分别负责邮件、realtime、履约/投递/recovery、凭据、
@@ -34,7 +39,8 @@ Public 与 Admin 的 HTTP 表面适配器。
   处理器出口；邮箱筛选、状态版本、CSRF 和 Worker control 契约保持不变。
 - `src/http/admin/realtime/`：lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
   `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；realtime
-  分页、CSRF、`command_id`、request hash 和 replay 状态契约保持不变。
+  旧版嵌套分页、CSRF、request hash 和 replay 状态契约保持不变；旧 replay wire 缺少
+  `command_id` 时稳定派生，新版显式 ID 仍直接进入核心幂等账本。
 - `src/http/admin/credentials/`：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
   CSRF/分页/错误边界分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只
   负责稳定处理器出口；凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
@@ -53,21 +59,26 @@ Public 与 Admin 的 HTTP 表面适配器。
 规则——那些属于领域与应用层。当前 `/api/v1/worlds`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、`/api/v1/auctions/{auction_id}/lots`、
 `/api/v1/auctions/{auction_id}/bid-log` 和 `/api/v1/lots/{lot_id}` 已通过只读应用端口读取
-权威数据库目录/投影；`/api/v1/price-history` 也已接入筛选、成交投影、编号页统计和 keyset
-cursor。Public session 的登录、当前会话和注销，以及 `/api/v1/me/bids`、
+权威数据库目录/投影；PostgreSQL 完整档的 `/api/v1/price-history` 已接入筛选、结算事实成交投影、
+编号页统计和 keyset cursor，SQLite Lite 对同一路由稳定返回 `501 feature_not_supported`。
+Public session 的登录、当前会话和注销，以及 `/api/v1/me/bids`、
 `/api/v1/lots/{lot_id}/proxy-authorizations/mine` 和 `/api/v1/lots/{lot_id}/bids` 的账户读取/普通竞价
 命令也已接入应用端口；普通竞价使用持久化 `command_id` 幂等账本、稳定请求摘要和数据库
-事务返回结果。账户读取会在 PostgreSQL/SQLite 快照内返回普通竞价、代理 quota、追加转换历史、
-最近代理 bid 和 owner capability；两个代理 mutation 路径接入同一事务，并在提交后重新读取
-安全代理快照，返回旧版命令所需的完整授权、quota、转换历史和最近代理 bid 投影。Public 启动时未提供数据库状态则返回明确的
-`storage_unavailable`。
+事务返回结果。两条身份化账户读取先认证、再校验 query/path，且不占用写请求限流额度；公开路径与
+查询中的 UUID 只接受规范小写、带连字符且非零的旧 v1 文本。账户读取会在 PostgreSQL/SQLite 快照内返回普通竞价、代理 quota、追加转换历史、
+最近代理 bid 和 owner capability；两个代理 mutation 路径接入同一事务，并直接消费应用端口在事务内
+冻结的完整授权、quota、转换历史、终态原因和本次代理 bid，不在提交后重新读取账户投影。Public
+competition 的普通依赖失败使用旧版 503 `temporarily_unavailable`，全局请求 deadline 仍由 HTTP 边界
+输出 504 `timeout`；账户只读路径继续保留自己的存储错误分类。
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
 只保存摘要。Admin 的拍卖 `preview`、`open`、`cancel` 和 `final-phase` 命令也已接入
 生命周期应用端口：命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件
 在同一 PostgreSQL/SQLite 事务内提交。Public `/api/v1/events` 已接入两套数据库的持久化
-Catch-up，`/api/v1/ws` 提供带 Public session 和并发上限的只读服务端推送；Public `/status` 页面已在已认证会话下自动订阅该流，收到
+Catch-up，`/api/v1/ws` 提供带 Public session 的只读服务端推送；连接尝试与 mutation 独立限流，
+只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。Public `/status`
+页面已在已认证会话下自动订阅该流，收到
 跳号或 `refetch_required` 后停止并回到权威快照边界。Admin 结算报告已接入 PostgreSQL 完整档的一致只读
 快照；Admin recovery 报告也已接入同一 PostgreSQL 完整档读取边界；SQLite Lite 对这两项能力
 返回 `501 feature_not_supported`。A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、
@@ -129,12 +140,24 @@ Public 与 Admin 是不同 surface，路由只提供各自静态产物。`RustEm
 Public 竞价/代理、Admin 生命周期及支持审计的管理 mutation；请求 ID 不进入幂等哈希。边界提取
 W3C `traceparent`/`tracestate`、记录 route/status/duration/client address、恢复 panic、设置浏览器
 安全头，并对普通请求应用可配置的默认 15 秒处理超时，WebSocket 路径豁免。连接层另有固定 5 秒
-HTTP/1 请求头读取超时。CSP 的脚本来源保持同源，只为 WASM 编译加入 `wasm-unsafe-eval`；样式侧
-允许内联是因为两个 Dioxus index 的首屏防闪样式及组件 style 属性属于当前浏览器契约。
+HTTP/1 请求头读取超时。CSP 的脚本来源保持同源；Dioxus 解释器需要 `unsafe-eval`，WASM 编译
+需要 `wasm-unsafe-eval`。样式侧允许内联是因为两个 Dioxus index 的首屏防闪样式及组件 style
+属性属于当前浏览器契约。
+
+所有 JSON mutation 都保留各路由原有字节上限，并只接受可带合法参数的
+`application/json`。Public 普通竞价、代理创建和降低按旧版先执行 rate limit → Origin → authentication，
+再校验 query、path、媒体类型和 body；Admin mutation 同样统一先执行 rate limit → Origin → CSRF →
+session，再进入 route-specific query/path/body 校验。两种入口都拒绝
+非 JSON、超限、非法或尾随第二个 JSON 值，具体 DTO 再以 `deny_unknown_fields` 拒绝未知字段；稳定映射
+分别是 415 `unsupported_media_type`、413 `body_too_large` 和 400 `invalid_json`。业务 GET 不继承
+Axum 的隐式 HEAD：未显式注册的方法返回
+旧版 JSON 405，`Allow` 只列出该业务路径真实注册的方法。健康、metrics 与静态文件的方法边界独立
+维护。无安全业务数据的错误仍输出 `data: null`，`request_id` 作为非敏感扩展保留。
 
 `X-Forwarded-For` 默认完全忽略。TCP peer 命中 `trusted_proxy_cidrs` 后才从右向左选择第一个
 非可信地址；任一条目无法解析时丢弃整条链。Public/Admin Unix listener 还必须显式启用
-`trusted_unix_proxy`。登录与 mutation 限流使用解析后的地址，固定窗口最多保留 4096 项，容量满时
+`trusted_unix_proxy`。登录、mutation 与 Public realtime 连接尝试限流使用解析后的地址和彼此独立的
+账本，固定窗口最多保留 4096 项，容量满时
 按最后访问时间和 IP 稳定淘汰最旧项。
 
 ## 静态产物内嵌

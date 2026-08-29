@@ -104,8 +104,10 @@ pub(crate) fn auction_status_label(status: &str) -> String {
         "preview" => t!("auction-status-preview"),
         "final" => t!("auction-status-final"),
         "settling" => t!("auction-status-settling"),
+        "settled" => t!("auction-status-settled"),
+        "archived" => t!("auction-status-archived"),
         "cancelled" => t!("auction-status-cancelled"),
-        "sold" | "settled" => t!("status-ended"),
+        "sold" => t!("status-ended"),
         _ => status.to_owned(),
     }
 }
@@ -124,6 +126,15 @@ pub(crate) fn auction_status_class(status: &str) -> &'static str {
     }
 }
 
+pub(crate) fn historical_auction_status_label(status: &str) -> String {
+    match status {
+        "live" => t!("auction-history-status-live"),
+        "final" => t!("auction-history-status-final"),
+        "settled" => t!("auction-history-status-settled"),
+        _ => auction_status_label(status),
+    }
+}
+
 pub(crate) fn auction_world_label(world: &str) -> String {
     match world {
         "main" => t!("auction-world-main"),
@@ -139,14 +150,22 @@ pub(crate) fn historical_auction_href(auction_id: &str, world_id: Option<&str>) 
     public_href("/auction", &query)
 }
 
-pub(crate) fn historical_history_href(auction_id: &str, world_id: &str) -> String {
-    let mut query = read_public_query();
-    query.auction_id = Some(auction_id.to_owned());
-    query.world = normalize_world_query(world_id);
-    query.category = None;
-    query.status = None;
-    query.page = 1;
-    public_href("/auction", &query)
+pub(crate) fn historical_lots_href(auction_id: &str, world_id: &str) -> String {
+    let query = PublicBoardQuery {
+        auction_id: Some(auction_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()),
+        ..PublicBoardQuery::default()
+    };
+    public_href("/", &query)
+}
+
+pub(crate) fn historical_bid_log_href(auction_id: &str, world_id: &str) -> String {
+    let query = PublicBoardQuery {
+        auction_id: Some(auction_id.to_owned()),
+        world: (world_id != "main").then(|| world_id.to_owned()),
+        ..PublicBoardQuery::default()
+    };
+    public_href("/bidlog", &query)
 }
 
 pub(crate) fn lot_detail_href(lot_code: &str) -> String {
@@ -277,11 +296,8 @@ pub(crate) fn Placeholder(title: String, detail: String) -> Element {
             role: "status",
             aria_live: "polite",
             aria_labelledby: "placeholder-title",
-            span { class: "public-auction-empty__mark", aria_hidden: "true" }
-            div { class: "public-auction-empty__copy",
-                h1 { id: "placeholder-title", "{title}" }
-                p { "{detail}" }
-            }
+            h1 { id: "placeholder-title", "{title}" }
+            p { "{detail}" }
         }
     }
 }

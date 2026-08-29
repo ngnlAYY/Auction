@@ -1,6 +1,7 @@
 //! Public lot 的预览/live 详情和标题组件。
 
 use super::*;
+use crate::app::surface::realtime;
 
 #[component]
 pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element {
@@ -14,7 +15,7 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                 status: lot.summary.status.clone(),
             }
             div { class: "public-auction-lot__grid",
-                EquipmentCard { equipment: lot.equipment.clone() }
+                EquipmentCard { equipment: EquipmentCardData::from(lot.equipment.clone()) }
                 div { class: "public-auction-lot__bidding",
                     dl {
                         dt { {t!("catalog-start-price")} }
@@ -35,6 +36,10 @@ pub(crate) fn LiveLotDetailView(
     lot: crate::api::LiveLot,
 ) -> Element {
     let back_href = current_auction_href();
+    let realtime_state = use_context::<Signal<LiveConnectionState>>();
+    let connection_state = realtime_state();
+    let connection_state_name = live_connection_state_name(connection_state);
+    let connection_message = realtime::live_connection_message(connection_state);
     let mut clock = use_signal(estimated_now);
     let _clock_task = use_future(move || async move {
         loop {
@@ -43,12 +48,18 @@ pub(crate) fn LiveLotDetailView(
         }
     });
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let session = use_resource(fetch_public_session);
-    let viewer_name = match &*session.read_unchecked() {
-        Some(Ok(Some(session))) => Some(session.username.clone()),
+    let session = use_context::<PublicSessionResource>();
+    let session_snapshot = session.read().clone();
+    let viewer_name = match session_snapshot.as_ref() {
+        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
         _ => None,
     };
-    let authenticated = matches!(&*session.read_unchecked(), Some(Ok(Some(_))));
+    let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
+    let session_error = matches!(session_snapshot.as_ref(), Some(Err(_)));
+    let authenticated = matches!(
+        session_snapshot.as_ref(),
+        Some(Ok(Some(session))) if session.authenticated
+    );
     let is_leading = viewer_name
         .as_deref()
         .zip(lot.leader_name.as_deref())
@@ -71,7 +82,8 @@ pub(crate) fn LiveLotDetailView(
             p {
                 aria_live: "polite",
                 class: "public-visually-hidden",
-                {t!("auction-realtime-status")}
+                "data-state": connection_state_name,
+                {connection_message}
             }
             LotDetailBack { href: back_href }
             LotDetailHeader {
@@ -80,7 +92,7 @@ pub(crate) fn LiveLotDetailView(
                 status: lot.status.clone(),
             }
             div { class: "public-auction-lot__grid",
-                EquipmentCard { equipment: lot.equipment.clone() }
+                EquipmentCard { equipment: EquipmentCardData::from(lot.equipment.clone()) }
                 div { class: "public-auction-lot__bidding",
                     dl {
                         dt { {t!("lot-current-bid")} }
@@ -110,6 +122,9 @@ pub(crate) fn LiveLotDetailView(
                             }
                         }
                     }
+                    if session_error {
+                        p { role: "alert", {t!("session-error")} }
+                    }
                     LiveCatalogActions {
                         lot_id: lot.id.clone(),
                         lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
@@ -118,6 +133,8 @@ pub(crate) fn LiveLotDetailView(
                         next_bid: lot.next_bid,
                         lot_status: lot.status.clone(),
                         allow_slow: auction_status == "live",
+                        session_ready,
+                        block_ordinary_for_active_proxy: true,
                         authenticated,
                         leading: is_leading,
                         show_view: false,
@@ -166,7 +183,7 @@ pub(crate) fn LiveLotDetailView(
 pub(crate) fn LotDetailBack(href: String) -> Element {
     rsx! {
         p { class: "public-auction-lot__back",
-            a { href, "← ", {t!("lot-back-to-auction")} }
+            Link { to: href, "← ", {t!("lot-back-to-auction")} }
         }
     }
 }

@@ -9,13 +9,13 @@ use auction_application::{
     PublicSessionPort, WorldReader,
 };
 use auction_observability::ProcessMetrics;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use super::super::HttpBoundary;
 use super::super::realtime_hub::RealtimeHub;
 use super::super::security::PublicHttpSecurity;
 
-const MAX_PUBLIC_REALTIME_CONNECTIONS: usize = 128;
+const MAX_PUBLIC_DISCOVERY_CONNECTIONS: usize = 128;
 
 /// Public surface 可使用的应用端口集合。
 ///
@@ -39,8 +39,9 @@ pub struct PublicApiState {
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     metrics: Option<Arc<ProcessMetrics>>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
-    realtime_connections: Arc<Semaphore>,
+    realtime_discovery_connections: Arc<Semaphore>,
     realtime_hub: Option<Arc<RealtimeHub>>,
+    realtime_shutdown: watch::Sender<bool>,
 }
 
 impl Default for PublicApiState {
@@ -62,8 +63,11 @@ impl Default for PublicApiState {
             commands: None,
             metrics: None,
             readiness: None,
-            realtime_connections: Arc::new(Semaphore::new(MAX_PUBLIC_REALTIME_CONNECTIONS)),
+            realtime_discovery_connections: Arc::new(Semaphore::new(
+                MAX_PUBLIC_DISCOVERY_CONNECTIONS,
+            )),
             realtime_hub: None,
+            realtime_shutdown: watch::channel(false).0,
         }
     }
 }
@@ -105,8 +109,11 @@ impl PublicApiState {
             commands,
             metrics: None,
             readiness: None,
-            realtime_connections: Arc::new(Semaphore::new(MAX_PUBLIC_REALTIME_CONNECTIONS)),
+            realtime_discovery_connections: Arc::new(Semaphore::new(
+                MAX_PUBLIC_DISCOVERY_CONNECTIONS,
+            )),
             realtime_hub: None,
+            realtime_shutdown: watch::channel(false).0,
         }
     }
 
@@ -126,6 +133,11 @@ impl PublicApiState {
     pub fn with_realtime_hub(mut self, hub: Arc<RealtimeHub>) -> Self {
         self.realtime_hub = Some(hub);
         self
+    }
+
+    /// 通知已建立的 Public WebSocket 进入旧版 1001 有界关闭流程。
+    pub fn begin_realtime_shutdown(&self) {
+        self.realtime_shutdown.send_replace(true);
     }
 
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
@@ -197,11 +209,15 @@ impl PublicApiState {
         self.readiness.as_deref()
     }
 
-    pub(crate) fn try_acquire_realtime_connection(&self) -> Option<OwnedSemaphorePermit> {
-        self.realtime_connections.clone().try_acquire_owned().ok()
+    pub(crate) fn try_acquire_realtime_discovery(&self) -> Option<OwnedSemaphorePermit> {
+        self.realtime_discovery_connections.clone().try_acquire_owned().ok()
     }
 
     pub(crate) fn realtime_hub(&self) -> Option<Arc<RealtimeHub>> {
         self.realtime_hub.as_ref().map(Arc::clone)
+    }
+
+    pub(crate) fn realtime_shutdown(&self) -> watch::Receiver<bool> {
+        self.realtime_shutdown.subscribe()
     }
 }

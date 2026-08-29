@@ -1,7 +1,7 @@
 //! Admin 拍卖列表行与动作入口。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::{AdminAuction, AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 
@@ -28,7 +28,7 @@ pub(crate) fn AdminAuctionRow(
                 .is_some_and(|scheduled| scheduled <= current_time_millis));
     rsx! {
         tr { class: "admin-auctions__row",
-            td { class: "public-auction-catalog__number", "data-label": t!("admin-auctions-sequence"),
+            td { "data-label": t!("admin-auctions-sequence"),
                 h3 { class: "admin-visually-hidden",
                     {t!("admin-auctions-row-heading", number: auction.sequence, world: auction.world_id.clone())}
                 }
@@ -43,7 +43,7 @@ pub(crate) fn AdminAuctionRow(
             td { "data-label": t!("admin-auctions-open-at"), time { datetime: auction.scheduled_open_at.clone(), "{format_admin_time(&auction.scheduled_open_at)}" } }
             td {
                 "data-label": t!("admin-auctions-end-at"),
-                if let Some(ends_at) = auction.scheduled_ends_at.clone().or(auction.scheduled_end_at.clone()) {
+                if let Some(ends_at) = auction.scheduled_ends_at.clone() {
                     time { datetime: ends_at.clone(), "{format_admin_time(&ends_at)}" }
                 } else {
                     {t!("value-empty")}

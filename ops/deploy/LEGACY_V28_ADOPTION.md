@@ -10,6 +10,8 @@
 - `public.schema_migrations` 必须且只能有 `version=28, dirty=false`；
 - Public、Admin、Worker、旧版服务、后台脚本和人工 SQL 客户端必须全部停止；
 - archive、manifest 和 receipt 的父目录必须预先创建，只允许运行账号访问，目标文件不得存在；
+- 停止旧版前必须从其有效配置确认 `rules_directory`；把五个语言文件逐字复制为私有普通文件并保存
+  SHA-256，不能假设 `rules_documents` 表含有 Public 当前展示的规则；
 - 操作员必须保留旧版 archive/manifest，直到切换和恢复窗口正式结束。
 
 只读预检还会核对 canonical public 表集合、schema identity、旧约束/索引/追加式 bid 触发器，
@@ -79,7 +81,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --receipt /secure/auction-evidence/adopt-v28-2026-08-23.json
 ```
 
-接管在 SQLx migration advisory lock、Serializable 事务和关键表独占锁内完成以下转换：
+接管取得 SQLx migration advisory lock 后，会在同一物理连接的只读事务中重新执行完整预检，避免
+连接池把命令自身的空闲连接误计为外部 session；随后才在 Serializable 事务和关键表独占锁内完成
+以下转换：
 
 - 从冻结 policy 和论坛同步投影补齐 Rust 生命周期读取列；未开放拍卖的结束时间继续为空；
 - 把旧版“无领先者时 `current_price=start_price`”转换为 Rust 的空当前价，并从最后一条 bid 恢复
@@ -100,22 +104,50 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 `auction-postgres-legacy-v28-adoption.v1` receipt。回执包含数据库名摘要、备份/manifest 哈希、
 基线版本、最终 SQLx 版本和数据库审计 ID，不包含连接串、Cookie 或密钥。
 
-## 4. 失败处理
+## 4. 导入数据库之外的旧版规则
+
+Auction-BF Public 在配置 `rules_directory` 后优先读取 `{locale}.md`，即使 canonical v28 数据库中的
+`rules_documents` 完全为空也会正常返回规则。因此 adoption receipt 只证明数据库接管成功，不能
+替代目录规则迁移。保持全部角色停止，使用指向同一已接管数据库的 Admin 配置执行：
+
+```bash
+AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
+  /opt/auction/bin/auctionctl \
+    import-rules-directory \
+    --directory /secure/auction-migration/rules \
+    --command-id 123e4567-e89b-42d3-a456-426614174000 \
+    --actor legacy-rules-import
+```
+
+目录必须包含 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md` 和 `ko.md` 五个 UTF-8 普通文件。命令先
+完整读取五个来源，再读取五种数据库文档；任一现有文档的标题或正文不同都会在首次写入前阻断，
+相同文档报告 `preserved`，只有缺失文档才通过 Admin rules 的 CAS、幂等命令账本和追加审计发布。
+JSON 输出中的正文 SHA-256 必须与停机前保存的五个来源哈希一致。若命令在部分发布后因瞬时依赖
+失败，以同一 `--command-id` 重试；不得生成新正文或直接修改表来绕过冲突。
+
+有效 Admin 配置选择 Redis 时，制品还必须启用 `cache-redis` feature。此时正常启动门槛要求
+`cache_invalidation_failures` 为空；若失效失败，应先按缓存运行手册清除对应
+`auction:read-model:public-rules:v1:<locale>` 可丢弃键，再继续。缓存失败不回滚已经提交的权威规则。
+
+## 5. 失败处理
 
 在 bridge 事务提交前失败时，数据库转换会回滚，receipt 不会发布。保持所有角色停止，保存错误
 输出，修复外部前提后重新执行只读预检；不要修改旧迁移或绕过不匹配计数。
 
 如果错误明确写明“bridge committed, but a later forward migration failed”，旧语义转换和 SQLx
-基线已经提交。此时不得再次运行接管命令，也不得启动任何角色；使用同一二进制和配置继续普通
-前向迁移：
+基线已经提交。若错误写明“adoption committed but postflight/receipt failed”，bridge 和前向迁移也
+已经提交，只是数据库/文件系统之间无法原子发布正常 receipt。两种情况都不得再次运行接管命令，
+也不得启动任何角色；先使用同一二进制和配置继续或复核普通前向迁移：
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   /opt/auction/bin/auctionctl migrate
 ```
 
-迁移成功后保存数据库中的 `schema.legacy_v28_adopted` 审计事实和原失败记录，并立即使用普通
-`postgres-backup` 建立当前 Rust schema 恢复点。该异常路径不会补造一次原接管成功 receipt。
+迁移成功后运行 `recovery-preflight`，保存当前 schema identity、完整 SQLx 历史、数据库中的
+`schema.legacy_v28_adopted` 审计事实和原失败记录，并立即使用普通 `postgres-backup` 建立当前 Rust
+schema 恢复点。该异常路径不会补造一次原接管成功 receipt；若 postflight 本身失败，先修复只读
+盘点条件并重新收集，不得覆盖数据库或把空 receipt 当作成功。
 
 如果决定恢复到旧版 v28，先离线运行 `postgres-legacy-v28-backup-verify`，保持全部角色停止，由
 数据库管理员显式准备同名、空的 PostgreSQL 18 数据库，再以运行角色执行
@@ -123,17 +155,19 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 决策，不由 adoption 或普通 `postgres-restore` 自动执行。恢复后必须重新运行本手册第 1、2 步，
 证明得到的仍是 canonical v28；不得在已部分接管的数据库上覆盖恢复。
 
-## 5. 启动门槛
+## 6. 启动门槛
 
 正常路径只有以下证据同时成立后才能运行部署启动总控：
 
 - adoption 命令正常退出并发布新的不可覆盖 receipt；
 - receipt 的 archive/manifest SHA-256 与保管的恢复点一致；
 - 普通 `auctionctl migrate` 已无待执行迁移；
+- 规则导入报告覆盖五种语言且每项均为 `imported` 或 `preserved`，正文 SHA-256 与旧目录证据一致；
 - Public、Admin、Worker 的目标配置仍指向同一已接管数据库。
 
-若进入“bridge 已提交、后续 migration 失败”的异常路径，则以原 v28 manifest、失败记录、数据库
-中的 `schema.legacy_v28_adopted` 审计 ID、成功完成的普通 migration 证据和新建的当前 Rust
+若进入“bridge 已提交、后续 migration 失败”或“接管已提交、postflight/receipt 失败”的异常路径，
+则以原 v28 manifest、失败记录、recovery preflight、数据库中的
+`schema.legacy_v28_adopted` 审计 ID、成功完成的普通 migration 证据和新建的当前 Rust
 `postgres-backup` manifest 组成替代证据包，并由部署负责人明确批准后再启动；不得伪造正常接管
 receipt。
 

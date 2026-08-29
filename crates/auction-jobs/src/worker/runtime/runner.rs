@@ -51,6 +51,8 @@ where
         PersistentWorker {
             schedule,
             lifecycle,
+            slow_proxy_due: None,
+            slow_proxy_commands: None,
             auction: AuctionWorkerRuntimeConfig {
                 batch_limit: concurrency,
                 concurrency,
@@ -59,6 +61,7 @@ where
                 lease_duration: auction_lease,
                 item_timeout: auction_item_timeout,
             },
+            schedule_runtime: None,
             settlement_store: None,
             settlement_commands: None,
             fulfillment_store: None,
@@ -123,6 +126,9 @@ where
     }
     if worker.fulfillment_store.is_some() != worker.fulfillment_commands.is_some() {
         return Err(WorkerError::InvalidFulfillmentConfiguration);
+    }
+    if worker.slow_proxy_due.is_some() != worker.slow_proxy_commands.is_some() {
+        return Err(WorkerError::InvalidAuctionConfiguration);
     }
     if worker.worker_id.is_empty() || worker.worker_id != worker.worker_id.trim() {
         return Err(WorkerError::InvalidWorkerIdentity);

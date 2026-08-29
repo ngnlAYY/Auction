@@ -246,6 +246,17 @@ Admin 审计读取只能消费追加式 `audit_records` 的安全投影。筛选
 HTTP DTO、事件 payload、快照、错误消息或提交的配置。错误只能返回可操作的
 分类和关联 ID，不能回显敏感 TOML 原文或连接串。
 
+### I-12a Public WebSocket 不能成为无界资源或第二个命令入口
+
+Public WebSocket 只允许服务端推送已提交的公开事件。每条连接必须有 4 KiB frame/message 上限、
+60 秒 Pong 存活期限和 5 秒逐次写入期限；客户端 Text/Binary 必须以稳定 1008 reason 关闭，不能
+被解释为竞价或管理命令。Hub 慢消费者、事件合同错误和进程 drain 分别使用稳定的 1013、1002、
+1001 reason；底层读写或超时失败直接结束，不能伪造业务原因。
+
+discovery 的 128 槽是 Public 进程本地、可丢弃的资源保护，不得限制普通单拍卖连接，也不得进入
+竞价正确性。连接尝试限流必须与 mutation 配额分账；公开状态预检由权威拍卖读取端口决定，不能
+从事件历史猜测。settled 拍卖不接受新连接，但已建立连接可消费其终态事件。
+
 ## 能力档位和模块 owner
 
 PostgreSQL 是完整生产档；SQLite 是本地、演示和明确单主机低并发的 Lite 档。

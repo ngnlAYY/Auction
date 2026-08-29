@@ -1,7 +1,7 @@
 //! 代理命令成功后的安全反馈面板。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::ProxyCommandAuthorization;
 
@@ -9,7 +9,7 @@ use super::super::super::format_amount;
 use super::super::super::proxy::{proxy_status_label, proxy_transition_label};
 
 pub(super) fn proxy_success_panel(
-    authorization: Box<ProxyCommandAuthorization>,
+    authorization: &ProxyCommandAuthorization,
     on_close: EventHandler<()>,
 ) -> Element {
     let success_message = match authorization.bid.as_ref() {

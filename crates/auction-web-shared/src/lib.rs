@@ -18,6 +18,7 @@ pub use i18n::{
 pub use a11y::use_dialog_focus_trap;
 
 pub use components::{
-    BASE_CSS, BaseStylesheet, MarkdownDocument, TruncatedText, without_leading_title,
+    BASE_CSS, BaseStylesheet, MarkdownBlocks, MarkdownDocument, TruncatedText,
+    without_leading_title,
 };
 pub use format::format_credit_amount;

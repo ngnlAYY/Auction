@@ -32,20 +32,17 @@ pub(crate) async fn add_item(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
+    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(result) => result,
+        Err(response) => return *response,
+    };
+    if let Some(response) = mutation_boundary(&uri) {
         return response;
     }
     if !matches!(world_id.as_str(), "main" | "isekai") {
         return super::api_error(StatusCode::BAD_REQUEST, "invalid_world", "拍卖世界无效")
             .into_response();
     }
-    let (_, identity) = match super::authenticated_admin_session(&state, &headers).await {
-        Ok(result) => result,
-        Err(response) => return *response,
-    };
     let mut input: AdminIntakeRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
@@ -53,38 +50,39 @@ pub(crate) async fn add_item(
                 .into_response();
         }
     };
-    if input.command_id.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
-            .into_response();
-    }
-    let source_kind = match input.source_kind.as_deref() {
-        None => None,
-        Some("url") => Some(AdminIntakeSourceKind::Url),
-        Some("json") => Some(AdminIntakeSourceKind::Json),
-        Some(_) => {
-            return super::api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_auction_intake",
-                "后台拍品录入参数无效",
-            )
-            .into_response();
-        }
+    let Some(command_id) = super::admin_auctions::parse_canonical_uuid(&input.command_id) else {
+        return invalid_command();
     };
-    let equipment = match source_kind {
-        Some(AdminIntakeSourceKind::Json) => input.equipment.take().map(into_canonical_equipment),
-        _ => None,
+    let equipment_url = input.equipment_url.take().unwrap_or_default();
+    let (source_kind, equipment, equipment_url) = match input.source_kind.as_deref() {
+        None | Some("url") => {
+            if equipment_url.is_empty() || input.equipment.is_some() {
+                return invalid_command();
+            }
+            (Some(AdminIntakeSourceKind::Url), None, Some(equipment_url))
+        }
+        Some("json") => {
+            if !equipment_url.is_empty() {
+                return invalid_command();
+            }
+            let Some(equipment) = input.equipment.take().and_then(into_canonical_equipment) else {
+                return invalid_command();
+            };
+            (Some(AdminIntakeSourceKind::Json), Some(equipment), None)
+        }
+        Some(_) => return invalid_command(),
     };
     let expected_start_price = input.start_price;
-    let expected_player_id = input.player_id.clone();
+    let expected_player_id = input.player_id.trim().to_owned();
     let Some(port) = state.admin_intake() else {
         return feature_unavailable();
     };
     let result = match port
         .add_item(AdminIntakeCommand {
-            command_id: CommandId::from_uuid(input.command_id),
+            command_id: CommandId::from_uuid(command_id),
             world_id,
             source_kind,
-            equipment_url: input.equipment_url,
+            equipment_url,
             equipment,
             start_price: input.start_price,
             player_id: input.player_id,
@@ -105,29 +103,41 @@ pub(crate) async fn add_item(
     (
         StatusCode::CREATED,
         super::no_store_headers(),
-        Json(ApiResponse::ok("拍品已加入最新一期拍卖", map_result(result))),
+        Json(ApiResponse::created("拍品已加入最新一期拍卖", map_result(result))),
     )
         .into_response()
 }
 
-fn into_canonical_equipment(mut input: AdminCanonicalEquipmentRequest) -> CanonicalEquipment {
-    let stats = std::mem::take(&mut input.stats)
+fn into_canonical_equipment(
+    mut input: AdminCanonicalEquipmentRequest,
+) -> Option<CanonicalEquipment> {
+    let stats = input
+        .stats
+        .take()?
         .into_iter()
-        .map(|(name, stat)| (name, CanonicalEquipmentStat { value: stat.value, base: stat.base }))
-        .collect();
-    CanonicalEquipment {
-        external_equipment_id: std::mem::take(&mut input.external_equipment_id),
-        name: std::mem::take(&mut input.name),
-        category: std::mem::take(&mut input.category),
-        equipment_type: std::mem::take(&mut input.equipment_type),
-        quality: std::mem::take(&mut input.quality),
-        prefix: std::mem::take(&mut input.prefix),
-        suffix: std::mem::take(&mut input.suffix),
+        .map(|(name, stat)| {
+            Some((name, CanonicalEquipmentStat { value: stat.value?, base: stat.base }))
+        })
+        .collect::<Option<_>>()?;
+    let equipment = CanonicalEquipment {
+        external_equipment_id: input.external_equipment_id.take()?,
+        name: input.name.take()?,
+        category: input.category.take()?,
+        equipment_type: input.equipment_type.take()?,
+        quality: input.quality.take()?,
+        prefix: input.prefix.take()?,
+        suffix: input.suffix.take()?,
         level: input.level,
-        tradeable: input.tradeable,
+        tradeable: input.tradeable?,
         stats,
-        key: std::mem::take(&mut input.key),
-    }
+        key: input.key.take()?,
+    };
+    equipment.validate().is_ok().then_some(equipment)
+}
+
+fn invalid_command() -> Response {
+    super::api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", "后台拍品录入参数无效")
+        .into_response()
 }
 
 fn map_result(result: auction_application::AdminIntakeResult) -> AdminIntakeResponse {
@@ -150,16 +160,7 @@ fn map_result(result: auction_application::AdminIntakeResult) -> AdminIntakeResp
     }
 }
 
-fn mutation_boundary(headers: &HeaderMap, uri: &Uri) -> Option<Response> {
-    let Some(raw_csrf) = super::read_admin_cookie(headers, super::ADMIN_CSRF_COOKIE) else {
-        return Some(super::authentication_error());
-    };
-    if !super::valid_admin_csrf_header(headers, &raw_csrf) {
-        return Some(
-            super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-                .into_response(),
-        );
-    }
+fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
             super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "拍品录入不接受查询参数")
@@ -198,31 +199,47 @@ fn map_error(error: ApplicationError) -> Response {
             "装备来源暂时不可读取",
         )
         .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured)
-        | ApplicationError::AdminIntake(AdminIntakeError::KeyUnavailable)
-        | ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
+        ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => super::api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "equipment_source_unavailable",
+            "装备来源暂时不可读取",
+        )
+        .into_response(),
+        ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         ApplicationError::AdminIntake(AdminIntakeError::CommandConflict)
         | ApplicationError::CommandLedger(CommandLedgerError::Conflict)
         | ApplicationError::CompetitionTransaction(CompetitionTransactionError::CommandLedger(
             CommandLedgerError::Conflict,
         )) => super::api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        ApplicationError::AdminIntake(AdminIntakeError::StoredResultCorrupt)
-        | ApplicationError::Serialization(_) => super::internal_error(),
-        ApplicationError::CompetitionTransaction(CompetitionTransactionError::NotFound)
-        | ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict) => {
-            super::api_error(
-                StatusCode::CONFLICT,
-                "auction_intake_unavailable",
-                "当前世界没有可接收拍品的草稿场次，或录入目标与现有状态冲突",
-            )
-            .into_response()
-        }
-        _ => super::api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "后台拍品录入暂不可用",
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::AdminIntakeUnavailable
+            | CompetitionTransactionError::NotFound,
+        ) => super::api_error(
+            StatusCode::CONFLICT,
+            "auction_intake_unavailable",
+            "当前世界没有可接收拍品的草稿场次",
         )
         .into_response(),
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::AdminIntakeSellerBlacklisted,
+        ) => super::api_error(StatusCode::CONFLICT, "seller_blacklisted", "该玩家当前不能提交拍品")
+            .into_response(),
+        ApplicationError::CompetitionTransaction(
+            CompetitionTransactionError::AdminIntakeEquipmentConflict,
+        ) => super::api_error(StatusCode::CONFLICT, "equipment_conflict", "该装备已存在于拍卖系统")
+            .into_response(),
+        ApplicationError::AdminIntake(AdminIntakeError::KeyUnavailable)
+        | ApplicationError::AdminIntake(AdminIntakeError::StoredResultCorrupt)
+        | ApplicationError::Serialization(_) => temporarily_unavailable(),
+        ApplicationError::CompetitionTransaction(CompetitionTransactionError::Conflict) => {
+            temporarily_unavailable()
+        }
+        _ => temporarily_unavailable(),
     }
+}
+
+fn temporarily_unavailable() -> Response {
+    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+        .into_response()
 }

@@ -15,9 +15,9 @@ mod state;
 mod trigger;
 
 pub(super) use super::{
-    ADMIN_CSRF_COOKIE, AdminApiState, admin_session_guard, api_error, authenticated_admin_session,
-    authentication_error, internal_error, no_store_headers, not_found_error, parse_positive_i64,
-    parse_query, read_admin_cookie, request_id, timestamp, valid_admin_csrf_header,
+    AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
+    authenticated_admin_session, internal_error, no_store_headers, not_found_error,
+    parse_positive_i64, parse_query, request_id, timestamp,
 };
 pub(super) use commands::set_paused;
 pub(super) use common::{feature_unavailable, map_error};

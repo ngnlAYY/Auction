@@ -97,7 +97,7 @@ pub(super) async fn list_sqlite(
            AND (? IS NULL OR a.world_id = ?)
            AND (? IS NULL OR l.id = ?)
            AND command.command_kind IN (
-                'place_bid', 'create_proxy_authorization',
+                'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
            )
            AND (
@@ -175,7 +175,7 @@ pub(super) async fn list_sqlite(
                    AND (? IS NULL OR a.world_id = ?)
                    AND (? IS NULL OR l.id = ?)
                    AND command.command_kind IN (
-                        'place_bid', 'create_proxy_authorization',
+                        'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
                    )",
             )

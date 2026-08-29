@@ -6,9 +6,13 @@ use super::*;
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserCreateRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub username: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub game_player_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub key_mode: String,
     pub key: Option<String>,
 }
@@ -30,21 +34,27 @@ impl std::fmt::Debug for AdminUserCreateRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserMutationRequest {
-    pub command_id: Uuid,
-    pub user_id: Uuid,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub user_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub expected_state_version: i64,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub action: String,
     pub username: Option<String>,
     pub game_player_id: Option<String>,
-    pub public_reason: Option<String>,
 }
 
 /// Admin 用户黑名单请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserBlacklistRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub expected_state_version: i64,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub public_reason: String,
 }
 
@@ -52,7 +62,9 @@ pub struct AdminUserBlacklistRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserUnblacklistRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub expected_state_version: i64,
 }
 
@@ -60,8 +72,19 @@ pub struct AdminUserUnblacklistRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRenameRevertRequest {
-    pub command_id: Uuid,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub expected_state_version: i64,
+}
+
+/// Go 旧 wire 把缺失或 `null` 的非指针标量保留为零值，再由业务边界给出稳定错误分类。
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 /// Admin 用户安全响应。
@@ -112,5 +135,6 @@ pub struct AdminUserListResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserMutationResponse {
     pub user: AdminUserResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub generated_key: Option<String>,
 }

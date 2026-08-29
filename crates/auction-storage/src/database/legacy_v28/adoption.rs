@@ -6,6 +6,8 @@ use serde_json::json;
 use sqlx::{Connection, PgConnection, Row, migrate::Migrate};
 use uuid::Uuid;
 
+use super::super::migrations;
+use super::preflight::collect_configured_preflight;
 use super::*;
 
 impl PostgresStore {
@@ -18,11 +20,7 @@ impl PostgresStore {
         &self,
         confirmed_database_name: &str,
     ) -> Result<PostgresLegacyV28Adoption, PostgresLegacyV28Error> {
-        let preflight = self.collect_legacy_v28_preflight(confirmed_database_name).await?;
-        if !preflight.adoption_ready {
-            return Err(PostgresLegacyV28Error::PreflightRejected);
-        }
-
+        validate_database_name(confirmed_database_name)?;
         let mut connection = self
             .raw_pool()
             .acquire()
@@ -33,6 +31,20 @@ impl PostgresStore {
             .map_err(|source| PostgresLegacyV28Error::MigrationLock { source })?;
 
         let result = async {
+            let mut preflight_transaction = connection
+                .begin()
+                .await
+                .map_err(|source| query_error("begin_locked_preflight_transaction", source))?;
+            let preflight =
+                collect_configured_preflight(&mut preflight_transaction, confirmed_database_name)
+                    .await?;
+            preflight_transaction
+                .commit()
+                .await
+                .map_err(|source| query_error("commit_locked_preflight_transaction", source))?;
+            if !preflight.adoption_ready {
+                return Err(PostgresLegacyV28Error::PreflightRejected);
+            }
             require_locked_source(&mut connection, confirmed_database_name).await?;
 
             let mut transaction = connection
@@ -62,7 +74,8 @@ impl PostgresStore {
             .await
             .map_err(|source| PostgresLegacyV28Error::Bridge { source })?;
 
-            let migrator = sqlx::migrate!("../../migrations/postgres");
+            let migrator = migrations::postgres_migrator()
+                .map_err(|_| PostgresLegacyV28Error::EmbeddedBaselineIncomplete)?;
             let mut inserted_baselines = 0_usize;
             for migration in migrator
                 .iter()
@@ -109,7 +122,8 @@ impl PostgresStore {
                 .await
                 .map_err(|source| PostgresLegacyV28Error::Bridge { source })?;
 
-            let mut forward_migrator = sqlx::migrate!("../../migrations/postgres");
+            let mut forward_migrator = migrations::postgres_migrator()
+                .map_err(|_| PostgresLegacyV28Error::EmbeddedBaselineIncomplete)?;
             forward_migrator.set_locking(false);
             forward_migrator
                 .run_direct(None, &mut *connection, false)

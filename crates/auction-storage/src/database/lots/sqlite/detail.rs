@@ -48,8 +48,8 @@ pub(in crate::database::lots) async fn detail_sqlite(
                 l.id, l.auction_id, l.lot_number, l.status, l.start_price, l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
                 l.leader_proxy_last, l.material,
-                COALESCE(CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER), 0) AS policy_bid_increment_ppm,
-                COALESCE(CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER), 30000) AS policy_minimum_increment,
+                CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,
+                CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER) AS policy_minimum_increment,
                 leader.username AS leader_name,
                 submission.seller AS seller_name, l.effective_end_at, l.state_version,
                 e.external_equipment_id, e.name AS equipment_name,
@@ -80,6 +80,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
             live: Some(PublicLiveLotDetail { summary, equipment_attributes: attributes }),
         }
     };
+    detail.validate(lot_id).map_err(storage_error)?;
     transaction.commit().await.map_err(|_| storage_error("提交 Lite lot 详情事务失败"))?;
     Ok(Some(detail))
 }

@@ -18,11 +18,15 @@ crate 依赖，也不在本仓库的默认修改范围内。
 
 ## 当前状态
 
-当前已进入功能迁移后期，不再只是启动骨架。静态复核确认旧版 Public/Admin 业务 HTTP 路径、
-14 + 21 条浏览器路由，以及生命周期、结算、履约、recovery、邮件、论坛、delivery 和
-operations alert 等 Worker 任务类别都已有 Rust owner 与装配。PostgreSQL 完整档已覆盖公开
-竞价、代理、账户、管理命令、审计、实时通信、结算/recovery、凭据、MoogleMail 和论坛链路；
-SQLite Lite 只实现已声明的单主机能力，完整档端点在 Lite 部署中明确报告不支持。
+当前已进入功能迁移后期，不再只是启动骨架。旧版 Public/Admin 的 20 + 37 条业务 HTTP 路径和
+14 + 21 条浏览器路由均有 Rust 注册入口，PostgreSQL 完整档也已建立竞价、代理、账户、管理命令、
+审计、实时、结算/recovery、凭据、MoogleMail 和论坛的主要 owner；SQLite Lite 只实现已声明的
+单主机能力，完整档端点在 Lite 部署中明确报告不支持。路径和模块存在不代表行为等价：
+2026-08-26 至 2026-08-29 的滚动双侧审计已确认并分批修复参与者资格锁、黑名单副作用、慢速代理、
+生命周期锁序、实时 wire、两代竞价账本、Admin mutation 认证顺序、Public 身份化读取、结算重放
+不变量和若干 HTTP/WebUI/配置边界；其中部分 HTTP、竞价、结算、灾备和浏览器路径已有隔离局部 R1，
+其它组合输入、并发、损坏事实和外部服务仍待证，详见
+[`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。
 
 路由和 owner 齐全不等于运行边界已收口。三进程现已通过共用生命周期原语统一处理
 SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接收新 HTTP 连接，Worker
@@ -33,25 +37,32 @@ SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接�
 恢复。三进程心跳现在每轮复用数据库/schema readiness，读取进程内审计写入失败饱和计数和各自的
 tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提前开放和装备来源策略也已冻结到
 启动装配，并分别在锁内生命周期事务和受限流式 HTTP 读取中生效。浏览器 HTTP/stream DTO 已统一
-由 `auction-contracts` 拥有；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，任一部署
-制品都不会引用另一端资源。Public/Admin 已支持共享安全 TCP/Linux Unix listener，`auctionctl`
+由 `auction-contracts` 拥有；Public/Admin 的 `RustEmbed` 类型也已分别移入对应装配根，并由显式
+`web-embed` feature 区分 API-only 与内嵌 Web 制品，任一部署制品都不会引用另一端资源。
+Public/Admin 已支持共享安全 TCP/Linux Unix listener，`auctionctl`
 已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web surface 与 storage 入口也已按
-职责使用具名实现文件。少数深层大型业务文件仍可按 owner 继续做结构优化，但不构成功能缺口；
-当前剩余主要是真实外部服务、部署切换和浏览器产物对照。
+职责使用具名实现文件。canonical v28 的隔离 backup/adopt/rebuild/restore 链已经取得 R1；当前剩余
+工作主要是矩阵中逐项保留的并发/损坏输入、非空生产数据、真实外部服务、部署切换和完整浏览器
+证据，以及后续审计可能发现的新差异，不能据此宣称完整行为等价。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
-Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action，其中买家黑名单通过
-Users owner 收口。Public 使用持久化 Catch-up、
-进程内有界 WebSocket Hub 和权威快照恢复，Admin 页面均已接入真实 API。`auctionctl` 还提供
+Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action。Public 已建立持久化
+Catch-up、进程内有界 WebSocket Hub 和权威快照恢复组件，旧版逐帧单事件 wire、握手后 HTTP 补齐、
+4 KiB/50-60-5 秒连接边界、稳定关闭原因、discovery 专属容量与 settled 新连预检已静态恢复；真实帧
+R1 仍待补录。Admin 页面均已连接实际 API，realtime/delivery 嵌套分页、严格成功 decoder、稳定错误
+反馈和客户端未知路由的认证外壳也已恢复；对应损坏响应与认证组合仍待 R1。`auctionctl` 还提供
 配置/迁移检查、systemd 三进程顺序控制、部署预检、retention 只读盘点和 PostgreSQL 备份、
 离线校验、默认只读且需要双重确认的数据库重建、空库恢复及回执。canonical Auction-BF
-PostgreSQL v28 另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测旧库形状。
+PostgreSQL v28 另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测旧库形状；旧版
+数据库之外的五语言规则目录由显式 `import-rules-directory` 命令导入，不会用硬编码 seed 或覆盖
+不同的 Admin 已发布正文。
 MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配置旧版合同；Worker control 使用
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
 
-尚不能据此宣称行为等价：真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、部署切换和 Admin
-浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust `auctionctl` 与 systemd owner
+尚不能据此宣称行为等价：除已确认的代码差异外，真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、
+部署切换和 Public/Admin 浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust
+`auctionctl` 与 systemd owner
 边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
 不会进入启动路径。旧版 realtime 没有外部广播 sink，
 旧版 retention 也只做只读盘点，因此这两项不是漏做的旧版功能。
@@ -106,15 +117,17 @@ MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用
 其他无 LTS 的 crate 由 `Cargo.lock` 固定并受控升级。运行时配置统一使用 TOML；
 `AUCTION_CONFIG_FILE` 只用于选择主配置文件，不用于覆盖单个配置项。主配置通过
 `secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
-只放在该敏感文件中。Admin 主配置还可通过 `runtime_config_file` 引用非敏感运行时 TOML；
-A26/A27 的 PostgreSQL 完整档更新会写入该文件并要求重启 Admin，SQLite Lite 不提供更新命令。
+只放在该敏感文件中。Admin 与 Worker 主配置还可通过 `runtime_config_file` 指向同一份由 Admin
+管理的非敏感 runtime TOML；A26/A27 的 PostgreSQL 完整档更新会写入该文件，并要求重启受影响的
+Admin/Worker，SQLite Lite 不提供更新命令。Worker 只消费其中的 world、发件人、装备过滤和通知
+模板业务区块，transport、凭据、调度与全局启用开关仍由 Worker 主配置拥有。
 拍卖策略模板位于主配置的 `[auction]` 区块；Admin 创建拍卖时会把已校验模板冻结到拍卖策略快照，
 具体字段和默认值见 [`ops/config/README.md`](ops/config/README.md)。
 
 构建浏览器端产物还需要 dx CLI（`cargo install dioxus-cli --locked`）。dx 会按需从 npm
 注册表下载 esbuild 作为构建期工具，它不是运行时依赖，也不引入 Node 运行时或第二套前端
-构建链。后端使用 `allow_missing` 内嵌产物，因此未构建前端时后端仍可编译，只是静态资源
-路由返回 503。
+构建链。后端使用 `allow_missing` 内嵌产物，因此 API-only 或未构建前端时后端仍可编译，只是
+静态资源路由返回 503；是否嵌入不再取决于构建机上是否恰好残留 `target/dx` 文件。
 
 ```bash
 # 使用 SQLite Lite 示例配置（本地开发/单节点低并发）
@@ -123,6 +136,16 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 
 # 构建两个 surface 的前端产物（需要 dx CLI）
 just web-build
+
+# 构建 API-only 与包含前端资源的 PostgreSQL 完整档制品
+just build-api
+just build-release
+
+# 核对实际二进制中的 surface 隔离和 Web payload 哈希
+just verify-artifacts
+
+# 干净工作树上的完整构建、门禁与确定性发布 archive
+just release-check
 
 # 完整生产档在不提交的敏感文件中使用 postgres://... 连接串
 just verify
@@ -134,7 +157,11 @@ just verify
 Admin runtime 模板位于 [`ops/config/examples/runtime/admin.toml`](ops/config/examples/runtime/admin.toml)，
 生产部署应复制到受信目录并设置为 `0640`；其中不得放入凭据或连接串。
 三进程部署目录、启动顺序、权限、Caddy 和 systemd 模板见 [`ops/deploy/README.md`](ops/deploy/README.md)。
+发布命令只装配 PostgreSQL 完整档的四个二进制、受批准的配置/部署模板、依赖摘要、Web payload
+清单和 SHA-256；正式 package 拒绝脏工作树，本地迁移取证必须显式传入 `--allow-dirty`，并在名称和
+摘要中保留 `dirty` 标记。
 
 `just verify` 默认只执行格式化、源码布局/命名、配置示例、五语言 Fluent 键集合门禁、锁定依赖的
 编译检查、Clippy 和 WASM 静态检查，不执行测试。
-Auction-BF 的行为迁移顺序记录在 [`docs/migration-plan.md`](docs/migration-plan.md)。
+Auction-BF 的迁移阶段记录在 [`docs/migration-plan.md`](docs/migration-plan.md)，当前逐项差异、证据
+等级和实施批次见 [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。

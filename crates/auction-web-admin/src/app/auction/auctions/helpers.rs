@@ -1,6 +1,6 @@
 //! Admin 拍卖页面共享的状态、时间和文案映射。
 
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 pub(super) fn admin_auction_status_label(status: &str) -> String {
     match status {
@@ -18,7 +18,7 @@ pub(super) fn admin_auction_status_label(status: &str) -> String {
 pub(super) fn current_time_millis() -> i64 {
     #[cfg(target_arch = "wasm32")]
     {
-        return js_sys::Date::new_0().get_time() as i64;
+        js_sys::Date::new_0().get_time() as i64
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -32,7 +32,7 @@ pub(super) fn scheduled_time_millis(value: &str) -> Option<i64> {
     {
         let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
         let milliseconds = date.get_time();
-        return milliseconds.is_finite().then_some(milliseconds as i64);
+        milliseconds.is_finite().then_some(milliseconds as i64)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -53,7 +53,7 @@ pub(super) fn valid_auction_schedule(preview: &str, open: &str, end: &str) -> bo
         let Some(end) = local_datetime_millis(end) else {
             return false;
         };
-        return preview >= js_sys::Date::new_0().get_time() && open >= preview && end > open;
+        preview >= js_sys::Date::new_0().get_time() && open >= preview && end > open
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -2,7 +2,10 @@
 
 当前仓库已进入功能迁移后期，不会在旧代码上做语言级逐文件翻译。兄弟目录
 `../Auction-BF` 中的旧仓库继续作为行为基准；阶段 1 至 7 的代码 owner 和主要表面已经落地，
-阶段 8 的真实数据、外部服务、浏览器产物与部署切换证据尚未完成。迁移顺序如下：
+阶段 8 的真实数据、外部服务、浏览器产物与部署切换证据尚未完成。2026-08-26 的重新审计还发现
+若干不能由静态路由覆盖掩盖的代码差异；事务安全、实时 wire 和首批 Public 核心 HTTP/Web 流程已
+完成静态修复，HTTP 边界另有隔离环境局部 R1，其余差异、证据和实施顺序以
+[`legacy-parity-audit.md`](legacy-parity-audit.md) 为准。迁移顺序如下：
 
 1. **契约冻结：** 整理 Public/Admin route、JSON 字段、状态码、WebSocket/SSE 事件、
    TOML 配置字段和 migration 序号。新 Rust 配置明确采用“普通主配置 + 敏感 TOML”，不为
@@ -27,3 +30,6 @@
 旧数据库表不能直接当作 Rust domain model。canonical Auction-BF PostgreSQL v28 由专用
 `auction-storage/database/legacy_v28` anti-corruption bridge 接管：先严格预检和备份，再补齐
 Rust 语义、建立 SQLx 等价基线并继续前向迁移；其他旧版本或非 canonical 数据库继续失败关闭。
+接管后已有 complete fence 的 settled 旧拍卖不会重新进入 Worker 结算候选；运维方应使用专用
+`auctionctl verify-legacy-settlement --auction-id <UUID>`，在一致只读快照中核验旧 complete 账本与
+当前结算、lot 和义务权威事实。该命令没有通用结算回退，也不会清 fence、补写历史或追加审计。

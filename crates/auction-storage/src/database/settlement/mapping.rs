@@ -90,6 +90,16 @@ pub(super) fn settlement_mode(mode: SettlementMode) -> &'static str {
     }
 }
 
+pub(super) fn parse_settlement_mode(
+    value: String,
+) -> Result<SettlementMode, SettlementTransactionError> {
+    match value.as_str() {
+        "legacy_zero_v0" => Ok(SettlementMode::LegacyZeroV0),
+        "hold_curve_v1" => Ok(SettlementMode::HoldCurveV1),
+        _ => Err(invalid("结算摘要策略模式未知")),
+    }
+}
+
 pub(super) fn obligation_kind(kind: SettlementObligationKind) -> &'static str {
     match kind {
         SettlementObligationKind::WinnerEquipmentCod => "winner_equipment_cod",
@@ -99,6 +109,21 @@ pub(super) fn obligation_kind(kind: SettlementObligationKind) -> &'static str {
         SettlementObligationKind::BuyerRefund => "buyer_refund",
         SettlementObligationKind::UnsoldReturn => "unsold_return",
         SettlementObligationKind::WithdrawnReturn => "withdrawn_return",
+    }
+}
+
+pub(super) fn parse_obligation_kind(
+    value: String,
+) -> Result<SettlementObligationKind, SettlementTransactionError> {
+    match value.as_str() {
+        "winner_equipment_cod" => Ok(SettlementObligationKind::WinnerEquipmentCod),
+        "winner_payment_carrier_cod" => Ok(SettlementObligationKind::WinnerPaymentCarrierCod),
+        "winner_equipment_handoff" => Ok(SettlementObligationKind::WinnerEquipmentHandoff),
+        "seller_payout" => Ok(SettlementObligationKind::SellerPayout),
+        "buyer_refund" => Ok(SettlementObligationKind::BuyerRefund),
+        "unsold_return" => Ok(SettlementObligationKind::UnsoldReturn),
+        "withdrawn_return" => Ok(SettlementObligationKind::WithdrawnReturn),
+        _ => Err(invalid("结算义务种类未知")),
     }
 }
 
@@ -132,6 +157,13 @@ pub(super) fn positive_u64(value: i64, label: &str) -> Result<u64, SettlementTra
     u64::try_from(value).map_err(|_| invalid(label))
 }
 
+pub(super) fn settlement_amount(
+    value: i64,
+    label: &str,
+) -> Result<SettlementAmount, SettlementTransactionError> {
+    SettlementAmount::new(value).map_err(|_| invalid(label))
+}
+
 pub(super) fn i64_version(value: u64, label: &str) -> Result<i64, SettlementTransactionError> {
     i64::try_from(value).map_err(|_| invalid(label))
 }
@@ -155,7 +187,12 @@ pub(super) fn map_competition_error(
             SettlementTransactionError::Conflict
         }
         auction_application::CompetitionTransactionError::StaleState
-        | auction_application::CompetitionTransactionError::InvalidState => {
+        | auction_application::CompetitionTransactionError::InvalidState
+        | auction_application::CompetitionTransactionError::BidderIneligible
+        | auction_application::CompetitionTransactionError::StaleSlowProxy
+        | auction_application::CompetitionTransactionError::AdminIntakeUnavailable
+        | auction_application::CompetitionTransactionError::AdminIntakeSellerBlacklisted
+        | auction_application::CompetitionTransactionError::AdminIntakeEquipmentConflict => {
             SettlementTransactionError::Failed("竞价事务中的管理状态不允许当前结算操作".to_owned())
         }
         auction_application::CompetitionTransactionError::Failed(message) => {

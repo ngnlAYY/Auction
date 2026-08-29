@@ -4,6 +4,7 @@ use super::*;
 
 /// Admin 邮件轮询状态安全响应；不包含外部 Cookie 或原始游标。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminMailPollingResponse {
     pub mailbox_key: String,
     pub last_poll_at: String,

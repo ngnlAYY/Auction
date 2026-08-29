@@ -1,7 +1,7 @@
 //! Delivery 状态筛选器组件。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use super::helpers::{DELIVERY_STATUS_VALUES, delivery_status_label};
 
@@ -12,10 +12,11 @@ pub(super) fn DeliveryFilters(
     mut page_number: Signal<i64>,
 ) -> Element {
     rsx! {
-        section { class: "admin-delivery__filters", aria_labelledby: "delivery-filter-label",
-            label { id: "delivery-filter-label",
+        div { class: "admin-delivery-filter",
+            label { r#for: "delivery-status",
                 {t!("delivery-filter")}
                 select {
+                    id: "delivery-status",
                     value: status_filter(),
                     onchange: move |event| {
                         status_filter.set(event.value());

@@ -72,6 +72,46 @@ pub(crate) fn validate_http_security(config: &HttpSecurityConfig) -> Result<(), 
     Ok(())
 }
 
+/// 当启用 origin allowlist 但没有显式列表时，从确定的 TCP listener 推导唯一同源值。
+/// Unix listener 和未指定地址没有可安全推导的浏览器 origin，必须由部署者显式填写。
+pub(crate) fn resolve_http_security_origins(
+    config: &mut HttpSecurityConfig,
+    listen_addr: Option<SocketAddr>,
+) -> Result<(), ConfigError> {
+    if !config.allowed_origins_enabled || !config.allowed_origins.is_empty() {
+        return Ok(());
+    }
+    let address = listen_addr.ok_or(ConfigError::InvalidHttpSecurity(
+        "启用 allowed_origins 时，Unix listener 必须显式配置 allowed_origins",
+    ))?;
+    if address.ip().is_unspecified() {
+        return Err(ConfigError::InvalidHttpSecurity(
+            "未指定 TCP listener 无法推导浏览器 origin，必须显式配置 allowed_origins",
+        ));
+    }
+    let scheme = if config.cookie_secure { "https" } else { "http" };
+    config.allowed_origins.push(format!("{scheme}://{address}"));
+    Ok(())
+}
+
+/// Public/Admin 与旧版保持一致：metrics 只能通过 loopback TCP 或 Unix listener 暴露。
+pub(crate) fn validate_metrics_listener(
+    role: Role,
+    metrics: MetricsConfig,
+    uses_unix_listener: bool,
+    listen_addr: Option<SocketAddr>,
+) -> Result<(), ConfigError> {
+    if !metrics.enabled || role == Role::Worker || uses_unix_listener {
+        return Ok(());
+    }
+    if listen_addr.is_some_and(|address| address.ip().is_loopback()) {
+        return Ok(());
+    }
+    Err(ConfigError::InvalidMetricsConfig(
+        "Public/Admin 启用 metrics 时必须使用 loopback TCP 或 Unix listener",
+    ))
+}
+
 pub(crate) fn validate_realtime(config: &RealtimeConfig) -> Result<(), ConfigError> {
     if config.consumer_key.trim().is_empty()
         || config.consumer_key != config.consumer_key.trim()

@@ -1,7 +1,7 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{
@@ -9,9 +9,9 @@ use crate::api::{
 };
 
 use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
-use super::filters::{RealtimeFailureFilters, RealtimeLagFilters};
+use super::filters::RealtimeFailureFilters;
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
-use crate::app::surface::{AdminLoadError, AdminPanel};
+use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
 /// Outbox 路由复用已冻结的 realtime failure/lag/replay 安全投影；未冻结的外部广播 sink 不在
 /// 页面中虚构状态或成功结果。
@@ -20,18 +20,16 @@ pub(crate) fn outbox_page() -> Element {
 }
 
 fn page_with_copy(page_title: String, page_note: String) -> Element {
-    let mut refresh = use_signal(|| 0_u64);
-    let mut notice = use_signal(|| None::<bool>);
+    let mut failure_refresh = use_signal(|| 0_u64);
+    let mut lag_refresh = use_signal(|| 0_u64);
+    let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut selected_failure = use_signal(|| None::<String>);
     let mut replay_command_id = use_signal(|| None::<(String, Uuid)>);
-    let mut schema_version = use_signal(|| 1_i32);
+    let mut schema_version = use_signal(|| "1".to_owned());
     let mut public_payload = use_signal(|| "{}".to_owned());
+    let mut replay_invalid = use_signal(|| false);
     let mut replay_busy = use_signal(|| false);
-    let mut lag_page_number = use_signal(|| 1_i64);
-    let lag_stream_filter = use_signal(String::new);
-    let lag_consumer_filter = use_signal(String::new);
-    let mut active_lag_stream_filter = use_signal(String::new);
-    let mut active_lag_consumer_filter = use_signal(String::new);
+    let lag_page_number = use_signal(|| 1_i64);
     let mut failure_page_number = use_signal(|| 1_i64);
     let failure_stream_filter = use_signal(String::new);
     let failure_consumer_filter = use_signal(String::new);
@@ -40,219 +38,261 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut active_failure_stream_filter = use_signal(String::new);
     let mut active_failure_consumer_filter = use_signal(String::new);
     let mut active_failure_code_filter = use_signal(String::new);
-    let mut active_failure_resolved_filter = use_signal(|| None);
+    let mut active_failure_state_filter = use_signal(String::new);
     let lag = use_resource(move || {
-        let _ = refresh();
-        fetch_realtime_lag_page(
-            lag_page_number(),
-            active_lag_stream_filter(),
-            active_lag_consumer_filter(),
-        )
+        let _ = lag_refresh();
+        fetch_realtime_lag_page(lag_page_number(), String::new(), String::new())
     });
     let failures = use_resource(move || {
-        let _ = refresh();
+        let _ = failure_refresh();
         fetch_realtime_failure_page(
             failure_page_number(),
             active_failure_stream_filter(),
             active_failure_consumer_filter(),
             active_failure_code_filter(),
-            active_failure_resolved_filter(),
+            active_failure_state_filter(),
         )
     });
 
-    let load_lag = move |_| {
-        active_lag_stream_filter.set(lag_stream_filter());
-        active_lag_consumer_filter.set(lag_consumer_filter());
-        lag_page_number.set(1);
-        refresh.set(refresh().saturating_add(1));
-    };
     let load_failures = move |_| {
         active_failure_stream_filter.set(failure_stream_filter());
         active_failure_consumer_filter.set(failure_consumer_filter());
         active_failure_code_filter.set(failure_code_filter());
-        active_failure_resolved_filter.set(match failure_resolved_filter().as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        });
+        active_failure_state_filter.set(failure_resolved_filter());
         failure_page_number.set(1);
         selected_failure.set(None);
         replay_command_id.set(None);
-        refresh.set(refresh().saturating_add(1));
+        failure_refresh.set(failure_refresh().saturating_add(1));
     };
-    match (&*lag.read_unchecked(), &*failures.read_unchecked()) {
-        (None, _) | (_, None) => rsx! {
-            AdminPanel { title: page_title.clone(), detail: t!("realtime-loading") }
+    let failure_state = failures.read_unchecked().clone();
+    let selected_id = selected_failure();
+    let selected =
+        failure_state.as_ref().and_then(|result| result.as_ref().ok()).and_then(|page| {
+            selected_id
+                .as_ref()
+                .and_then(|id| page.failures.iter().find(|failure| &failure.id == id).cloned())
+        });
+    let failure_content = match &failure_state {
+        None => rsx! {
+            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
         },
-        (Some(Err(_)), _) | (_, Some(Err(_))) => rsx! {
-            AdminLoadError {
-                title: page_title.clone(),
-                detail: t!("realtime-error"),
-                refresh,
+        Some(Err(error)) => rsx! {
+            p {
+                class: "admin-panel__note action-feedback action-feedback--error",
+                role: "alert",
+                {admin_api_error_message(error)}
             }
         },
-        (Some(Ok(lag_page)), Some(Ok(failure_page))) => {
-            let selected_id = selected_failure();
-            let selected = selected_id.as_ref().and_then(|id| {
-                failure_page.failures.iter().find(|failure| &failure.id == id).cloned()
-            });
-            rsx! {
-                div { class: "admin-realtime-page", aria_labelledby: "realtime-page-title",
-                    h1 { id: "realtime-page-title", {page_title} }
-                    p { class: "admin-realtime-intro", {page_note} }
-                    div { class: "admin-realtime-status",
+        Some(Ok(failure_page)) => rsx! {
+            RealtimeFailureTable {
+                page: failure_page.clone(),
+                on_select: move |failure: RealtimeFailure| {
+                    schema_version.set("1".to_owned());
+                    public_payload.set("{}".to_owned());
+                    replay_invalid.set(false);
+                    selected_failure.set(Some(failure.id));
+                    replay_command_id.set(None);
+                    notice.set(None);
+                },
+            }
+        },
+    };
+    let failure_pager = match &failure_state {
+        Some(Ok(failure_page)) => rsx! {
+            RealtimeFailurePager {
+                page: failure_page.clone(),
+                page_number: failure_page_number,
+            }
+        },
+        _ => rsx! {},
+    };
+    let lag_content = match &*lag.read_unchecked() {
+        None => rsx! {
+            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
+        },
+        Some(Err(error)) => rsx! {
+            p {
+                class: "admin-panel__note action-feedback action-feedback--error",
+                role: "alert",
+                {admin_api_error_message(error)}
+            }
+        },
+        Some(Ok(lag_page)) => rsx! {
+            RealtimeLagTable { page: lag_page.clone() }
+            RealtimeLagPager {
+                page: lag_page.clone(),
+                page_number: lag_page_number,
+            }
+        },
+    };
+
+    rsx! {
+        section { class: "admin-realtime-page", aria_labelledby: "outbox-title",
+            h1 { id: "outbox-title", {page_title} }
+            p { class: "admin-realtime-intro", {page_note} }
+            div { class: "admin-realtime-status",
+                label { r#for: "outbox-status",
+                    {t!("realtime-filter-state")}
+                    select {
+                        id: "outbox-status",
+                        value: failure_resolved_filter(),
+                        onchange: move |event| {
+                            let next_state = event.value();
+                            failure_resolved_filter.set(next_state.clone());
+                            active_failure_state_filter.set(next_state);
+                            failure_page_number.set(1);
+                            selected_failure.set(None);
+                            replay_command_id.set(None);
+                            failure_refresh.set(failure_refresh().saturating_add(1));
+                        },
+                        option { value: "", {t!("realtime-filter-all")} }
+                        option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
+                        option { value: "retry", disabled: true, {t!("realtime-state-retry")} }
+                        option { value: "dead_letter", {t!("realtime-state-dead-letter")} }
+                        option { value: "completed", {t!("realtime-state-completed")} }
+                    }
+                }
+            }
+            {failure_content}
+            if let Some(feedback) = notice() {
+                p {
+                    class: if feedback.is_success() {
+                        "admin-panel__note action-feedback action-feedback--success"
+                    } else {
+                        "admin-panel__note action-feedback action-feedback--error"
+                    },
+                    role: if feedback.is_success() { "status" } else { "alert" },
+                    {feedback.message(t!("realtime-replay-success"))}
+                }
+            }
+            {failure_pager}
+            RealtimeFailureFilters {
+                stream_filter: failure_stream_filter,
+                consumer_filter: failure_consumer_filter,
+                code_filter: failure_code_filter,
+                on_load: load_failures,
+            }
+            details { class: "admin-realtime-advanced",
+                summary { {t!("realtime-lag-title")} }
+                {lag_content}
+            }
+            if let Some(failure) = selected {
+                div { class: "admin-shell__dialog-backdrop", role: "presentation",
+                    section {
+                        class: "admin-shell__dialog admin-realtime-dialog",
+                        role: "dialog",
+                        aria_modal: "true",
+                        aria_labelledby: "realtime-replay-title",
+                        onkeydown: move |event| {
+                            if event.key() == Key::Escape && !replay_busy() {
+                                event.stop_propagation();
+                                selected_failure.set(None);
+                                replay_command_id.set(None);
+                            }
+                        },
+                        h2 {
+                            id: "realtime-replay-title",
+                            {t!("realtime-replay-title", id: failure.id.clone())}
+                        }
+                        p {
+                            class: "admin-panel__note",
+                            {t!("realtime-replay-warning", event_id: failure.event_id.clone())}
+                        }
                         label {
-                            {t!("realtime-filter-state")}
-                            select {
-                                value: failure_resolved_filter(),
-                                onchange: move |event| {
-                                    let next_state = event.value();
-                                    failure_resolved_filter.set(next_state.clone());
-                                    active_failure_resolved_filter.set(match next_state.as_str() {
-                                        "true" => Some(true),
-                                        "false" => Some(false),
-                                        _ => None,
+                            {t!("realtime-replay-schema")}
+                            input {
+                                r#type: "number",
+                                min: "1",
+                                step: "1",
+                                value: schema_version(),
+                                oninput: move |event| {
+                                    schema_version.set(event.value());
+                                    replay_invalid.set(false);
+                                    replay_command_id.set(None);
+                                },
+                            }
+                        }
+                        label {
+                            {t!("realtime-replay-payload")}
+                            textarea {
+                                spellcheck: "false",
+                                value: public_payload(),
+                                oninput: move |event| {
+                                    public_payload.set(event.value());
+                                    replay_invalid.set(false);
+                                    replay_command_id.set(None);
+                                },
+                            }
+                        }
+                        if replay_invalid() {
+                            p { role: "alert", {t!("realtime-replay-invalid")} }
+                        }
+                        div { class: "admin-shell__dialog-actions",
+                            button {
+                                r#type: "button",
+                                disabled: replay_busy(),
+                                onclick: move |_| {
+                                    if replay_busy() {
+                                        return;
+                                    }
+                                    let failure_id = failure.id.clone();
+                                    let schema_input = schema_version();
+                                    let payload = public_payload();
+                                    let schema = schema_input.parse::<i32>();
+                                    let valid_payload = serde_json::from_str::<serde_json::Value>(&payload)
+                                        .is_ok_and(|value| value.is_object());
+                                    let Ok(schema) = schema else {
+                                        replay_invalid.set(true);
+                                        return;
+                                    };
+                                    if schema <= 0 || !valid_payload {
+                                        replay_invalid.set(true);
+                                        return;
+                                    }
+                                    replay_invalid.set(false);
+                                    let command_id = stable_command_id(
+                                        replay_command_id,
+                                        format!("{failure_id}:{schema}:{payload}"),
+                                    );
+                                    notice.set(None);
+                                    replay_busy.set(true);
+                                    let mut replay_busy = replay_busy;
+                                    spawn(async move {
+                                        let result = replay_realtime_failure(
+                                            failure_id,
+                                            command_id,
+                                            schema,
+                                            payload,
+                                        )
+                                        .await;
+                                        replay_busy.set(false);
+                                        match result {
+                                            Ok(()) => {
+                                                notice.set(Some(AdminActionFeedback::Success));
+                                                selected_failure.set(None);
+                                                replay_command_id.set(None);
+                                                failure_refresh.set(failure_refresh() + 1);
+                                                lag_refresh.set(lag_refresh() + 1);
+                                            }
+                                            Err(code) => notice.set(Some(
+                                                AdminActionFeedback::Error(code),
+                                            )),
+                                        }
                                     });
-                                    failure_page_number.set(1);
+                                },
+                                {t!("realtime-replay-submit")}
+                            }
+                            button {
+                                r#type: "button",
+                                class: "admin-btn-secondary",
+                                disabled: replay_busy(),
+                                autofocus: true,
+                                onclick: move |_| {
                                     selected_failure.set(None);
                                     replay_command_id.set(None);
-                                    refresh.set(refresh().saturating_add(1));
                                 },
-                                option { value: "", {t!("realtime-filter-all")} }
-                                option { value: "false", {t!("realtime-filter-unresolved")} }
-                                option { value: "true", {t!("realtime-filter-resolved")} }
+                                {t!("realtime-replay-cancel")}
                             }
-                        }
-                    }
-                    RealtimeLagFilters {
-                        stream_filter: lag_stream_filter,
-                        consumer_filter: lag_consumer_filter,
-                        on_load: load_lag,
-                    }
-                    RealtimeLagTable { page: lag_page.clone() }
-                    RealtimeLagPager {
-                        page: lag_page.clone(),
-                        page_number: lag_page_number,
-                    }
-                    RealtimeFailureFilters {
-                        stream_filter: failure_stream_filter,
-                        consumer_filter: failure_consumer_filter,
-                        code_filter: failure_code_filter,
-                        on_load: load_failures,
-                    }
-                    RealtimeFailureTable {
-                        page: failure_page.clone(),
-                        on_select: move |failure: RealtimeFailure| {
-                            schema_version.set(1);
-                            public_payload.set("{}".to_owned());
-                            selected_failure.set(Some(failure.id));
-                            replay_command_id.set(None);
-                            notice.set(None);
-                        },
-                    }
-                    RealtimeFailurePager {
-                        page: failure_page.clone(),
-                        page_number: failure_page_number,
-                    }
-                    if let Some(failure) = selected {
-                        div { class: "admin-settlement__dialog-backdrop", role: "presentation",
-                            section {
-                                class: "admin-settlement__dialog admin-realtime-dialog",
-                                role: "dialog",
-                                aria_modal: "true",
-                                aria_labelledby: "realtime-replay-title",
-                                aria_busy: replay_busy().to_string(),
-                                tabindex: "-1",
-                                onkeydown: move |event| {
-                                    if event.key() == Key::Escape && !replay_busy() {
-                                        selected_failure.set(None);
-                                        replay_command_id.set(None);
-                                    }
-                                },
-                                h2 { id: "realtime-replay-title", {t!("realtime-replay-title")} }
-                                p { class: "admin-panel__note", "{failure.id}" }
-                                label {
-                                    {t!("realtime-replay-schema")}
-                                    input {
-                                        r#type: "number",
-                                        min: "1",
-                                        disabled: replay_busy(),
-                                        value: schema_version().to_string(),
-                                        oninput: move |event| {
-                                            if let Ok(value) = event.value().parse::<i32>() {
-                                                schema_version.set(value);
-                                                replay_command_id.set(None);
-                                            }
-                                        },
-                                    }
-                                }
-                                label {
-                                    {t!("realtime-replay-payload")}
-                                    textarea {
-                                        disabled: replay_busy(),
-                                        value: public_payload(),
-                                        oninput: move |event| {
-                                            public_payload.set(event.value());
-                                            replay_command_id.set(None);
-                                        },
-                                    }
-                                }
-                                div { class: "admin-panel__actions",
-                                    button {
-                                        r#type: "button",
-                                        disabled: replay_busy(),
-                                        onclick: move |_| {
-                                            if replay_busy() {
-                                                return;
-                                            }
-                                            let failure_id = failure.id.clone();
-                                            let schema = schema_version();
-                                            let payload = public_payload();
-                                            let command_id = stable_command_id(
-                                                replay_command_id,
-                                                format!("{failure_id}:{schema}:{payload}"),
-                                            );
-                                            notice.set(None);
-                                            replay_busy.set(true);
-                                            let mut replay_busy = replay_busy;
-                                            spawn(async move {
-                                                let successful = replay_realtime_failure(
-                                                    failure_id,
-                                                    command_id,
-                                                    schema,
-                                                    payload,
-                                                )
-                                                .await
-                                                .is_ok();
-                                                replay_busy.set(false);
-                                                notice.set(Some(successful));
-                                                if successful {
-                                                    selected_failure.set(None);
-                                                    replay_command_id.set(None);
-                                                    refresh.set(refresh() + 1);
-                                                }
-                                            });
-                                        },
-                                        if replay_busy() { {t!("admin-action-working")} } else { {t!("realtime-replay-submit")} }
-                                    }
-                                    button {
-                                        r#type: "button",
-                                        class: "admin-btn-secondary",
-                                        disabled: replay_busy(),
-                                        autofocus: true,
-                                        onclick: move |_| {
-                                            selected_failure.set(None);
-                                            replay_command_id.set(None);
-                                        },
-                                        {t!("realtime-replay-cancel")}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if let Some(successful) = notice() {
-                        p { class: "admin-panel__note action-feedback", role: "status",
-                            if successful { {t!("realtime-replay-success")} } else { {t!("realtime-replay-error")} }
                         }
                     }
                 }

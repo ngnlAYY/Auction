@@ -17,8 +17,8 @@ pub(crate) async fn list_postgres(
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.users
-         WHERE ($1::text IS NULL OR strpos(lower(username), lower($1)) > 0
-                OR strpos(lower(game_player_id), lower($1)) > 0)
+         WHERE ($1::text IS NULL OR strpos(username, $1) > 0
+                OR strpos(game_player_id, $1) > 0)
            AND ($2::text IS NULL OR status = $2)",
     )
     .bind(name)
@@ -30,10 +30,10 @@ pub(crate) async fn list_postgres(
         "SELECT id, username, game_player_id, status, key_status, state_version,
                 created_at, updated_at
          FROM public.users
-         WHERE ($1::text IS NULL OR strpos(lower(username), lower($1)) > 0
-                OR strpos(lower(game_player_id), lower($1)) > 0)
+         WHERE ($1::text IS NULL OR strpos(username, $1) > 0
+                OR strpos(game_player_id, $1) > 0)
            AND ($2::text IS NULL OR status = $2)
-         ORDER BY lower(username), id
+         ORDER BY username COLLATE \"C\", id
          LIMIT $3 OFFSET $4",
     )
     .bind(name)

@@ -62,3 +62,8 @@ SQLite Lite 部署时开放 `/var/lib/auction` 数据目录。
 单个角色 unit 不执行 migration；只有操作员显式调用 `auctionctl deployment start/restart` 或启动
 已审阅的总控 unit 时才会前向迁移。不要把 `DROP DATABASE`、备份恢复或 retention 删除动作放进
 任何 unit。备份、恢复和保留策略仍需独立的人工确认与证据契约。
+
+独立执行 `auctionctl migrate` 时必须使用同一组 `--systemctl`、`--state-dir` 和三角色 unit 参数。
+命令会持有总控锁并检查 Worker、Admin、Public；任一 unit 运行或处于启动/停止转换中，或状态读取
+失败，都会在连接数据库前失败关闭。总控 `deployment start/restart` 的内部迁移不受该独立 guard
+阻断，因为它已经在同一受控锁和配置预检边界内编排迁移。

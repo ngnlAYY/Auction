@@ -213,6 +213,7 @@ where
         }
     };
     let delivery_id = claim.delivery_id;
+    let result = result.and_then(normalize_delivery_send_result);
     match result {
         Ok(result) => {
             match tokio::time::timeout(
@@ -254,6 +255,30 @@ where
             }
         }
     }
+}
+
+fn normalize_delivery_send_result(
+    mut result: DeliverySendResult,
+) -> Result<DeliverySendResult, DeliveryTransportError> {
+    if result.external_reference.is_empty()
+        || result.external_reference != result.external_reference.trim()
+    {
+        return Err(DeliveryTransportError {
+            failure_code: "invalid_gateway_result".to_owned(),
+            safe_detail: "delivery gateway 成功结果无效，远端结果未知".to_owned(),
+            outcome_unknown: true,
+            external_reference: None,
+            result_metadata: serde_json::json!({
+                "category": "invalid_result",
+            }),
+        });
+    }
+    // 旧版会把非对象 metadata 规范化为空对象后再进入成功分支；保持该边界，避免
+    // 传输适配器的无关 metadata 形状改变 delivery 的最终 phase。
+    if !result.result_metadata.is_object() {
+        result.result_metadata = serde_json::json!({});
+    }
+    Ok(result)
 }
 
 fn delivery_gateway_outcome_unknown(

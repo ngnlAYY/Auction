@@ -13,6 +13,8 @@ pub struct OperationsAlertWorkerConfig {
     pub enabled: bool,
     /// scan、dispatch 与 reconcile 各自的轮询间隔秒数；范围 1-86400，省略时为 60 秒。
     pub scan_interval_seconds: u64,
+    /// 每轮完成后附加的随机抖动上限秒数；不能超过轮询间隔，省略时为 5 秒。
+    pub jitter_seconds: u64,
     /// 读取四类健康来源的超时秒数，范围 1-30；省略时为 5 秒。
     pub source_timeout_seconds: u64,
     /// 同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600；省略时为 120 秒。
@@ -54,6 +56,7 @@ impl Default for OperationsAlertWorkerConfig {
         Self {
             enabled: false,
             scan_interval_seconds: 60,
+            jitter_seconds: 5,
             source_timeout_seconds: 5,
             batch_window_seconds: 2 * 60,
             cooldown_seconds: 30 * 60,

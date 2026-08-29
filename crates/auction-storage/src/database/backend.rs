@@ -59,6 +59,9 @@ pub enum StorageError {
         source: sqlx::migrate::MigrateError,
     },
 
+    #[error("{backend} migration source invariant failed: {detail}")]
+    MigrationSourceInvariant { backend: DatabaseBackend, detail: &'static str },
+
     #[error("failed to inspect {backend} migration target")]
     MigrationTarget {
         backend: DatabaseBackend,

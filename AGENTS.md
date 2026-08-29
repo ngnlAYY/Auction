@@ -2,7 +2,7 @@
 
 本文是 Auction Rust 仓库的项目级协作规范，供 AI 编程代理和人类贡献者共同遵守。
 它说明当前目录结构、模块边界、代码风格、配置方式、验证范围和迁移约束。最后一次按
-工作区核对时间为 2026-08-25。
+工作区核对时间为 2026-08-26。
 
 ## 项目概览
 
@@ -24,25 +24,24 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
   和能力差异，也不要求 SQLite 达到 PostgreSQL 的系统能力。
 - 拍卖页面的现有静态结构和 CSS 以旧版 Auction-BF 为视觉参考；页面样式迁移不等于业务
   功能已经完成。
-- 当前状态是**功能迁移后期**：PostgreSQL 完整档的公开竞价、管理命令、Worker 生命周期、
-  MoogleMail/论坛、结算/recovery、实时通信和运维证据链，以及 SQLite Lite 的声明子集均已
-  建立；canonical Auction-BF PostgreSQL v28 也有独立的严格接管边界。静态盘点未发现旧版
-  业务 HTTP/浏览器路径或 Worker 任务类别缺项，三进程也已统一接入 SIGINT/SIGTERM、10 秒
-  有界 drain、停止心跳和 tracing flush，Public/Admin 共用的请求 ID、trace context、安全头、
-  超时、可信代理和有界限流 HTTP 边界也已建立；静态入口已按显式浏览器路由与 API/页面 404
-  隔离并恢复旧版缓存策略。三进程周期心跳也已接入真实数据库/schema readiness、进程内审计
-  写入失败计数和各自的 tracing 安全状态；Admin runtime 的人工提前开放与装备来源策略已经进入
-  启动时冻结的实际运行 owner。稳定 Web DTO 已统一由 `auction-contracts` 拥有，Public/Admin
-  `RustEmbed` 类型也已移入各自装配根并形成制品级隔离；Public 规则读模型已接入可选缓存、有限
-  TTL、权威回源和 Admin 发布后的按语言失效；Public/Admin 已共享 TCP 与 Linux Unix listener
-  的安全绑定，`auctionctl` 已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web
-  surface、auctionctl 和 storage 的大型入口已改为具名实现文件，`mod.rs` 只保留必要的模块边界。
-  真实外部服务、部署切换和浏览器产物同样未完成行为对照，因此不能宣称完整功能等价。
+- 当前状态是**功能迁移后期，但尚未达到旧版行为等价**：主要模块、HTTP/浏览器路径、PostgreSQL
+  完整档、SQLite Lite 声明子集、进程生命周期和运维边界已经建立。2026-08-26 的双仓库审计确认了
+  竞价参与者资格锁、黑名单后的代理冻结/会话撤销、慢速代理 Worker owner、论坛未知结果恢复、
+  Public 实时 client/server wire 与旧 v1 契约，以及部分 Public/Admin WebUI 和配置默认值差异。
+  其中竞价资格、黑名单副作用、慢速代理、Public 实时 wire，以及代理模式、严格 JSON/业务方法、
+  错误外壳、Public 规则 locale 和登录返回已完成静态修复；HTTP 边界已有隔离环境局部 R1，其余
+  确认差异仍需按审计矩阵继续实施。
+  当前运行环境中的新版规则页也返回 503，但在核对两侧数据库前不能把它直接归因为代码缺陷。
+  权威差异矩阵、证据等级和实施顺序见
+  [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。canonical v28 隔离接管及灾备链已取得 R1，
+  API-only/embedded 制品和确定性 archive 已建立显式门禁；真实外部服务、目标主机部署切换和完整
+  浏览器逐页对照仍缺运行态证据，因此不得宣称完整功能等价。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
-  [`docs/tech-stack.md`](docs/tech-stack.md)、[`docs/migration-plan.md`](docs/migration-plan.md)
-  以及各目录的 `README.md` 都属于项目契约。架构、外部行为或目录职责变化时要同步更新。
+  [`docs/tech-stack.md`](docs/tech-stack.md)、[`docs/migration-plan.md`](docs/migration-plan.md)、
+  [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md) 以及各目录的 `README.md` 都属于项目契约。
+  架构、外部行为或目录职责变化时要同步更新。
 
 ## 仓库结构
 
@@ -350,10 +349,13 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   的既有契约一致；跳号或重连后读取权威快照。无法保持长连接的客户端可退化为 SSE。
 - 若要切换到 Askama + HTMX 一类服务端渲染方案，必须先由用户明确放宽“浏览器端全 Rust、
   禁止 JavaScript”契约，不能把技术原型直接变成架构变更。
-- 前端静态产物由 `just web-build`（内部调用 `dx bundle --platform web`）生成并复制到稳定目录，
+- 前端静态产物由 `just web-build`（内部调用
+  `dx bundle --platform web --profile wasm-release`）生成并复制到稳定目录，
   再通过 `rust-embed` 内嵌进后端二进制。
   内嵌声明必须保留 `allow_missing`：未构建前端时后端仍要能编译，运行时以明确的 503
   报告，不得 panic。
+- Public/Admin 只有显式 `web-embed` feature 才能选择各自稳定资源目录；API-only 使用固定空资源
+  集合，不能根据构建机上是否残留 `target/dx` 隐式改变制品。
 - 界面文案一律经由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，**不得在组件里硬编码
   用户可见字符串**。受支持语言为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`；公开端默认 `en`，
   管理端默认 `zh-CN`（沿用旧 `manifests/admin.locales.json`）。两个 surface 的译文资源彼此

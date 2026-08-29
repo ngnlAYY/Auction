@@ -1,7 +1,7 @@
 //! 规则草稿编辑、校验和发布 workspace。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules};
@@ -36,15 +36,9 @@ pub(super) fn AdminRulesWorkspace(
     let can_publish = !busy() && dirty && checked_signature() == signature;
 
     rsx! {
-        section {
-            class: "admin-panel admin-rules",
-            aria_labelledby: "admin-rules-title",
-            aria_busy: busy().to_string(),
-            h1 { id: "admin-rules-title", {t!("page-rules-title")} }
-            p { class: "admin-panel__note admin-rules__intro", {t!("admin-rules-description")} }
-
+        Fragment {
             div {
-                class: "admin-rules__tabs",
+                class: "admin-rules-tabs",
                 role: "tablist",
                 aria_label: t!("admin-rules-languages"),
                 for locale in locales() {
@@ -54,7 +48,6 @@ pub(super) fn AdminRulesWorkspace(
                         role: "tab",
                         aria_selected: (locale == target).to_string(),
                         disabled: busy() && locale == target,
-                        class: if locale == target { "admin-rules__tab admin-rules__tab--active" } else { "admin-rules__tab" },
                         onclick: {
                             let current_target = target.clone();
                             let next_locale = locale.clone();
@@ -74,60 +67,82 @@ pub(super) fn AdminRulesWorkspace(
                 }
             }
 
-            div { class: "admin-rules__add-locale",
+            form {
+                class: "admin-rules-add",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    let next_locale = new_locale().trim().to_owned();
+                    if busy() || !valid_locale(&next_locale) {
+                        return;
+                    }
+                    if !locales().iter().any(|locale| locale == &next_locale) {
+                        let mut next_locales = locales();
+                        next_locales.push(next_locale.clone());
+                        locales.set(next_locales);
+                    }
+                    new_locale.set(String::new());
+                    draft.set(None);
+                    checked_signature.set(String::new());
+                    command.set(None);
+                    notice.set(None);
+                    target_signal.set(next_locale);
+                },
                 label {
-                    for: "admin-rules-new-locale",
+                    r#for: "rules-locale",
                     {t!("admin-rules-add-locale")}
                 }
                 input {
-                    id: "admin-rules-new-locale",
+                    id: "rules-locale",
                     maxlength: "35",
                     placeholder: t!("admin-rules-locale-placeholder"),
+                    required: true,
+                    r#type: "text",
                     value: new_locale(),
                     disabled: busy(),
                     oninput: move |event| new_locale.set(event.value()),
                 }
                 button {
-                    r#type: "button",
+                    r#type: "submit",
                     disabled: busy() || !valid_locale(&new_locale()),
-                    onclick: move |_| {
-                        let next_locale = new_locale().trim().to_owned();
-                        if !valid_locale(&next_locale) {
-                            return;
-                        }
-                        if !locales().iter().any(|locale| locale == &next_locale) {
-                            let mut next_locales = locales();
-                            next_locales.push(next_locale.clone());
-                            locales.set(next_locales);
-                        }
-                        new_locale.set(String::new());
-                        draft.set(None);
-                        checked_signature.set(String::new());
-                        command.set(None);
-                        notice.set(None);
-                        target_signal.set(next_locale);
-                    },
                     {t!("admin-rules-add")}
                 }
             }
 
-            div { class: "admin-rules__default",
-                span { {t!("admin-rules-default-locale")} }
-                code { "{DEFAULT_RULES_LOCALE}" }
+            label {
+                class: "admin-rules-default",
+                r#for: "rules-default-locale",
+                {t!("admin-rules-default-locale")}
+            }
+            " "
+            select {
+                class: "admin-rules-default-locale",
+                disabled: true,
+                id: "rules-default-locale",
+                value: DEFAULT_RULES_LOCALE,
+                for locale in locales() {
+                    option { key: "{locale}", value: "{locale}", "{locale}" }
+                }
             }
 
-            div { class: "admin-rules__facts",
-                span { {t!("admin-rules-revision", revision: document.revision)} }
-                span { {t!("admin-rules-published", actor: document.published_by.clone())} }
+            div { class: "admin-rules-facts",
+                span {
+                    {t!("admin-rules-revision", revision: document.revision)}
+                }
+                span {
+                    {t!("admin-rules-published", actor: document.published_by.clone())}
+                }
                 span {
                     {t!("admin-rules-published-at")}
-                    time { datetime: document.published_at.clone(), "{format_admin_time(&document.published_at)}" }
+                    time {
+                        datetime: document.published_at.clone(),
+                        "{format_admin_time(&document.published_at)}"
+                    }
                 }
             }
 
             if let Some(value) = current_draft {
                 form {
-                    class: "admin-rules__form",
+                    class: "admin-rules-form",
                     onsubmit: {
                         let candidate = value.clone();
                         move |event| {
@@ -157,7 +172,7 @@ pub(super) fn AdminRulesWorkspace(
                                         notice.set(Some(if error.is_conflict() {
                                             RuleNotice::Conflict
                                         } else {
-                                            RuleNotice::ActionError
+                                            RuleNotice::ActionError(error.code)
                                         }));
                                     }
                                 }
@@ -165,15 +180,16 @@ pub(super) fn AdminRulesWorkspace(
                             });
                         }
                     },
-                    div { class: "admin-rules__editor",
-                        div { class: "admin-rules__fields",
+                    div { class: "admin-rules-editor",
+                        div { class: "admin-rules-fields",
                             label {
-                                for: "admin-rules-title-input",
+                                r#for: "rules-title-input",
                                 {t!("admin-rules-title")}
                             }
                             input {
-                                id: "admin-rules-title-input",
+                                id: "rules-title-input",
                                 required: true,
+                                r#type: "text",
                                 value: value.title.clone(),
                                 disabled: busy(),
                                 oninput: {
@@ -189,12 +205,11 @@ pub(super) fn AdminRulesWorkspace(
                                 },
                             }
                             label {
-                                for: "admin-rules-markdown-input",
+                                r#for: "rules-markdown",
                                 {t!("admin-rules-markdown")}
                             }
                             textarea {
-                                id: "admin-rules-markdown-input",
-                                rows: "20",
+                                id: "rules-markdown",
                                 spellcheck: "false",
                                 value: value.markdown.clone(),
                                 disabled: busy(),
@@ -216,19 +231,24 @@ pub(super) fn AdminRulesWorkspace(
 
                     if let Some(current_notice) = notice() {
                         p {
-                            class: if matches!(current_notice, RuleNotice::Validated | RuleNotice::Published) {
-                                "admin-panel__note action-feedback action-feedback--success"
+                            class: if matches!(
+                                &current_notice,
+                                RuleNotice::Validated | RuleNotice::Published
+                            ) {
+                                "admin-rules-ok"
                             } else {
-                                "admin-panel__note action-feedback action-feedback--error"
+                                "admin-rules-error"
                             },
-                            role: if matches!(current_notice, RuleNotice::Validated | RuleNotice::Published) { "status" } else { "alert" },
-                            {notice_text(current_notice)}
+                            role: if matches!(
+                                &current_notice,
+                                RuleNotice::Validated | RuleNotice::Published
+                            ) { "status" } else { "alert" },
+                            {notice_text(&current_notice)}
                         }
                     }
 
-                    div { class: "admin-rules__actions",
+                    div { class: "admin-rules-actions",
                         button {
-                            class: "admin-btn-secondary",
                             r#type: "button",
                             disabled: busy(),
                             onclick: move |_| {
@@ -241,13 +261,11 @@ pub(super) fn AdminRulesWorkspace(
                             {t!("admin-rules-reload")}
                         }
                         button {
-                            class: "admin-btn-secondary",
                             r#type: "submit",
                             disabled: busy() || value.title.trim().is_empty(),
                             if busy() { {t!("admin-action-working")} } else { {t!("admin-rules-validate")} }
                         }
                         button {
-                            class: "admin-btn-primary",
                             r#type: "button",
                             disabled: !can_publish,
                             onclick: {
@@ -288,7 +306,7 @@ pub(super) fn AdminRulesWorkspace(
                                                 notice.set(Some(if error.is_conflict() {
                                                     RuleNotice::Conflict
                                                 } else {
-                                                    RuleNotice::ActionError
+                                                    RuleNotice::ActionError(error.code)
                                                 }));
                                             }
                                         }

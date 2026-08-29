@@ -10,11 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{
-    ADMIN_CSRF_COOKIE, AdminApiState, admin_session_guard, authenticated_admin_session,
-    authentication_error, feature_unavailable, no_store_headers, read_admin_cookie,
-    valid_admin_csrf_header,
-};
+use super::{AdminApiState, authenticated_admin_mutation, feature_unavailable, no_store_headers};
 
 /// 通过 Worker control 一次唤醒全部已装配邮箱的轮询器。
 pub(crate) async fn trigger_poll(
@@ -24,15 +20,8 @@ pub(crate) async fn trigger_poll(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let Some(raw_csrf) = read_admin_cookie(&headers, ADMIN_CSRF_COOKIE) else {
-        return authentication_error();
-    };
-    if !valid_admin_csrf_header(&headers, &raw_csrf) {
-        return super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-            .into_response();
+    if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
+        return *response;
     }
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return super::api_error(
@@ -41,9 +30,6 @@ pub(crate) async fn trigger_poll(
             "邮件轮询触发不接受查询参数",
         )
         .into_response();
-    }
-    if let Err(response) = authenticated_admin_session(&state, &headers).await {
-        return *response;
     }
     let input: AdminMailPollTriggerRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,

@@ -32,6 +32,8 @@ impl PostgresStore {
             .map_err(|source| query_error("begin_read_only_transaction", source))?;
         set_read_only_limits(&mut transaction).await?;
 
+        // `pg_user_mapping` 基表会拒绝普通数据库 owner 读取；公开目录视图保留完整行集合，只隐藏
+        // 敏感 option，因此既能证明映射对象存在，又不要求 recovery 工具取得 superuser 权限。
         let identity = sqlx::query(
             "WITH user_namespaces AS (
                  SELECT oid, nspname
@@ -42,65 +44,93 @@ impl PostgresStore {
              user_objects AS (
                  SELECT oid FROM user_namespaces WHERE nspname <> 'public'
                  UNION ALL
-                 SELECT class.oid
-                 FROM pg_catalog.pg_class AS class
-                 JOIN user_namespaces AS namespace ON namespace.oid = class.relnamespace
+                 SELECT class_record.oid
+                 FROM pg_catalog.pg_class AS class_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = class_record.relnamespace
                  UNION ALL
-                 SELECT type.oid
-                 FROM pg_catalog.pg_type AS type
-                 JOIN user_namespaces AS namespace ON namespace.oid = type.typnamespace
+                 SELECT type_record.oid
+                 FROM pg_catalog.pg_type AS type_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = type_record.typnamespace
                  UNION ALL
-                 SELECT procedure.oid
-                 FROM pg_catalog.pg_proc AS procedure
-                 JOIN user_namespaces AS namespace ON namespace.oid = procedure.pronamespace
+                 SELECT procedure_record.oid
+                 FROM pg_catalog.pg_proc AS procedure_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = procedure_record.pronamespace
                  UNION ALL
-                 SELECT collation.oid
-                 FROM pg_catalog.pg_collation AS collation
-                 JOIN user_namespaces AS namespace ON namespace.oid = collation.collnamespace
+                 SELECT collation_record.oid
+                 FROM pg_catalog.pg_collation AS collation_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = collation_record.collnamespace
                  UNION ALL
-                 SELECT conversion.oid
-                 FROM pg_catalog.pg_conversion AS conversion
-                 JOIN user_namespaces AS namespace ON namespace.oid = conversion.connamespace
+                 SELECT conversion_record.oid
+                 FROM pg_catalog.pg_conversion AS conversion_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = conversion_record.connamespace
                  UNION ALL
-                 SELECT operator.oid
-                 FROM pg_catalog.pg_operator AS operator
-                 JOIN user_namespaces AS namespace ON namespace.oid = operator.oprnamespace
+                 SELECT operator_record.oid
+                 FROM pg_catalog.pg_operator AS operator_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = operator_record.oprnamespace
                  UNION ALL
-                 SELECT operator_class.oid
-                 FROM pg_catalog.pg_opclass AS operator_class
-                 JOIN user_namespaces AS namespace ON namespace.oid = operator_class.opcnamespace
+                 SELECT operator_class_record.oid
+                 FROM pg_catalog.pg_opclass AS operator_class_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = operator_class_record.opcnamespace
                  UNION ALL
-                 SELECT operator_family.oid
-                 FROM pg_catalog.pg_opfamily AS operator_family
-                 JOIN user_namespaces AS namespace ON namespace.oid = operator_family.opfnamespace
+                 SELECT operator_family_record.oid
+                 FROM pg_catalog.pg_opfamily AS operator_family_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = operator_family_record.opfnamespace
                  UNION ALL
-                 SELECT configuration.oid
-                 FROM pg_catalog.pg_ts_config AS configuration
-                 JOIN user_namespaces AS namespace ON namespace.oid = configuration.cfgnamespace
+                 SELECT configuration_record.oid
+                 FROM pg_catalog.pg_ts_config AS configuration_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = configuration_record.cfgnamespace
                  UNION ALL
-                 SELECT dictionary.oid
-                 FROM pg_catalog.pg_ts_dict AS dictionary
-                 JOIN user_namespaces AS namespace ON namespace.oid = dictionary.dictnamespace
+                 SELECT dictionary_record.oid
+                 FROM pg_catalog.pg_ts_dict AS dictionary_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = dictionary_record.dictnamespace
                  UNION ALL
-                 SELECT parser.oid
-                 FROM pg_catalog.pg_ts_parser AS parser
-                 JOIN user_namespaces AS namespace ON namespace.oid = parser.prsnamespace
+                 SELECT parser_record.oid
+                 FROM pg_catalog.pg_ts_parser AS parser_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = parser_record.prsnamespace
                  UNION ALL
-                 SELECT template.oid
-                 FROM pg_catalog.pg_ts_template AS template
-                 JOIN user_namespaces AS namespace ON namespace.oid = template.tmplnamespace
+                 SELECT template_record.oid
+                 FROM pg_catalog.pg_ts_template AS template_record
+                 JOIN user_namespaces AS namespace_record
+                   ON namespace_record.oid = template_record.tmplnamespace
                  UNION ALL
-                 SELECT extension.oid
-                 FROM pg_catalog.pg_extension AS extension
-                 WHERE extension.extname <> 'plpgsql'
-                 UNION ALL SELECT wrapper.oid FROM pg_catalog.pg_foreign_data_wrapper AS wrapper
-                 UNION ALL SELECT server.oid FROM pg_catalog.pg_foreign_server AS server
-                 UNION ALL SELECT mapping.oid FROM pg_catalog.pg_user_mapping AS mapping
-                 UNION ALL SELECT trigger.oid FROM pg_catalog.pg_event_trigger AS trigger
-                 UNION ALL SELECT publication.oid FROM pg_catalog.pg_publication AS publication
-                 UNION ALL SELECT subscription.oid FROM pg_catalog.pg_subscription AS subscription
-                 UNION ALL SELECT object.oid FROM pg_catalog.pg_largeobject_metadata AS object
-                 UNION ALL SELECT acl.oid FROM pg_catalog.pg_default_acl AS acl
+                 SELECT extension_record.oid
+                 FROM pg_catalog.pg_extension AS extension_record
+                 WHERE extension_record.extname <> 'plpgsql'
+                 UNION ALL
+                 SELECT wrapper_record.oid
+                 FROM pg_catalog.pg_foreign_data_wrapper AS wrapper_record
+                 UNION ALL
+                 SELECT server_record.oid
+                 FROM pg_catalog.pg_foreign_server AS server_record
+                 UNION ALL
+                 SELECT mapping_record.umid
+                 FROM pg_catalog.pg_user_mappings AS mapping_record
+                 UNION ALL
+                 SELECT trigger_record.oid
+                 FROM pg_catalog.pg_event_trigger AS trigger_record
+                 UNION ALL
+                 SELECT publication_record.oid
+                 FROM pg_catalog.pg_publication AS publication_record
+                 UNION ALL
+                 SELECT subscription_record.oid
+                 FROM pg_catalog.pg_subscription AS subscription_record
+                 UNION ALL
+                 SELECT object_record.oid
+                 FROM pg_catalog.pg_largeobject_metadata AS object_record
+                 UNION ALL
+                 SELECT acl_record.oid
+                 FROM pg_catalog.pg_default_acl AS acl_record
              )
              SELECT current_database() AS database_name,
                     current_setting('server_version') AS server_version,

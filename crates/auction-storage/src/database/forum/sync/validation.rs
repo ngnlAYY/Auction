@@ -21,6 +21,10 @@ pub(super) fn valid_claim(claim: &ForumSyncClaim) -> bool {
         && valid_text(&claim.worker_id, MAX_WORKER_ID_BYTES)
         && claim.claim_fencing > 0
         && claim.source_revision > 0
+        && claim
+            .previous_failure_code
+            .as_ref()
+            .is_none_or(|code| valid_text(code, MAX_FAILURE_CODE_BYTES))
         && claim.claimed_at.timestamp_nanos_opt().is_some()
         && claim.lease_until > claim.claimed_at
 }

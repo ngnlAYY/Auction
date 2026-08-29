@@ -66,6 +66,16 @@ handler 当前明确产生的稳定集合；依赖错误中的 504 表示 contex
 | 500 | 服务器内部无法安全完成请求 |
 | 503/504 | 下游依赖不可用或处理超时 |
 
+旧版 JSON 写边界同样属于 v1 契约：请求必须使用 `application/json` 媒体类型（允许合法参数），
+body 受每条路由自己的上限约束，解码只接受一个 JSON 值，且请求 DTO 拒绝未知字段。非 JSON、超限、
+语法/未知字段/尾随值分别稳定映射为 415 `unsupported_media_type`、413 `body_too_large` 和
+400 `invalid_json`。所有错误外壳固定包含 `data`；无业务错误数据时序列化为 `null`，Rust 可继续
+附加不含敏感内容的 `request_id`。
+
+Feature API 的方法是严格闭集。GET 路由不会因为 Axum 默认行为额外接受 HEAD；未显式注册的方法
+返回 JSON `405 method_not_allowed`，`Allow` 只列出该路径真实注册的方法并沿用旧版排序。健康探针、
+metrics 和静态文件是否接受 HEAD 由各自契约单独决定，不从业务路由推导。
+
 Public/Admin 已恢复统一 HTTP boundary：只接受 1 至 64 字节的 ASCII 字母数字/`-_.`
 `X-Request-ID`，缺失时生成并在响应回传，重复或非法值返回 `400 invalid_request_id`；同一值会进入
 Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，但不参与命令请求哈希。边界还
@@ -102,7 +112,7 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 | P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:60 |
 | P10 | GET | /api/v1/auctions/{auction_id}/bid-log | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:61 |
 | P11 | GET | /api/v1/lots/{lot_id} | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:62 |
-| P12 | GET | /api/v1/price-history | 公开 | 200 | 400, 503/504 | features/auction/publichttp/adapter.go:63 |
+| P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:63 |
 | P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:64 |
 | P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开 | 200 | 400, 404, 501, 503/504 | features/auction/publichttp/adapter.go:65 |
 | P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开 | 200 | 400, 404, 501, 503/504 | features/auction/publichttp/forum.go:37 |
@@ -118,10 +128,25 @@ Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot �
 P10 竞价日志额外保留
 `world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
-next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格历史保留 `name`、`world`、
-日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计。实时事件的 after 也是
-非负 stream sequence，不得改成时间戳游标。P03 当前接受 `auction_id`、`after`、`page_size`，
-页面大小上限为 200；响应返回 `events`、`next_after`、`has_more` 和 `refetch_required`。
+next_cursor/has_more，不得把未知总数伪装成精确 total。P12 在 PostgreSQL 完整档保留 `name`、`world`、
+日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；SQLite Lite
+因为没有 settlement 事实链固定返回 `501 feature_not_supported`，不能把状态列或空集合当作成交证明。实时事件的 after 也是
+非负 stream sequence，不得改成时间戳游标。P03 的旧版单拍卖读取要求规范 `auction_id`，可带
+`after`、`page_size`，默认页大小 100、上限 200；响应除 `events`、`next_after`、`has_more`、
+`refetch_required` 外必须返回相同 `auction_id`。发现流是显式 `scope=auctions` 扩展，不能靠省略
+`auction_id` 隐式进入。HTTP 外层 envelope 允许非破坏性扩展，但 `data`、事件和 payload 使用精确字段
+闭集；缺口/坏投影会隐藏坏事件、置 refetch 并继续扫描有界原始页，`next_after` 指向原始高水位。
+P04 查询只能含一个 `auction_id` 或 `scope=auctions`，每帧发送一个不含内部 `stream_key` 的旧版事件对象；
+启用 allowlist 时要求恰好一个可信 `Origin`，独立连接尝试限流之后按 origin→query→session 返回错误。
+frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008、1013、1002、1001 及 reason
+分别表示客户端写入、慢消费者、事件合同错误和服务 drain，其余读超限、Pong 超时及底层读写失败直接断开。
+只有 discovery 使用每进程 128 槽和 429 `discovery_busy`；单拍卖新连接拒绝 settled，但既有连接可接收
+`auction.settled`。断线补发只走 P03，refetch 保留恢复游标和现有 socket。
+
+所有 Public JSON 时间沿用旧 Go `time.Time` 的 RFC3339Nano 词法：数据库或新版生成的 UTC
+时间使用 `Z`，小数秒裁掉尾随零，整秒不附加 `.000000`。P18-P20 从旧命令账本重放时还必须
+保留账本字符串原有的 offset 与纳秒精度，同时以解析后的 UTC instant 做一致性校验。该规则不
+改变 PostgreSQL 关系字段的微秒精度，也不改变 Admin 既有的固定六位微秒投影。
 
 ## Admin
 
@@ -174,7 +199,8 @@ next_cursor/has_more，不得把未知总数伪装成精确 total。P12 价格�
 
 1. Rust 路由必须先在本表登记，再实现 handler；迁移期间不得为了方便重命名旧路径。
 2. DTO 必须在 auction-contracts 中重新定义；不得把旧 SQL 行或 Rust storage model 直接暴露给浏览器。
-3. 所有改变状态的请求必须保留 command_id；同一 ID 搭配不同 request hash 必须返回 409。
+3. 所有改变状态的核心命令必须保留 command_id；同一 ID 搭配不同 request hash 必须返回 409。
+   旧版 A24 wire 没有该字段，由 HTTP 防腐层按 failure 与修正负载稳定派生，不得使用随机 ID。
 4. 公开实时更新不以 HTTP 分页替代 WebSocket；无法保持长连接时只允许按 events catch-up
    语义退化为轮询或 SSE。
 5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新 migration plan、契约变更记录和
@@ -192,7 +218,9 @@ Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话
 `/api/v1/admin/auctions` 已接入 Admin 会话保护、`world_id`/`status` 筛选、有限页码和
 PostgreSQL Serializable 生命周期/lot 数量安全投影；创建拍卖 POST 已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件；SQLite Lite 的创建与列表 GET 均明确返回 `501 feature_not_supported`。A06
 `/api/v1/admin/auctions/{auction_id}/lots` 已接入 Admin 会话保护、有限页码、PostgreSQL
-Serializable 同快照的拍卖/lot/装备/投稿安全投影，并返回 `capabilities.manual_intake` 外部写入能力；SQLite Lite 因缺少完整 Admin 生命周期字段
+Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保持旧版
+`auction/lots/pagination` 闭集，内嵌新版 Web 通过非破坏性的
+`X-Auction-Capability-Manual-Intake` 响应头读取外部写入能力。SQLite Lite 因缺少完整 Admin 生命周期字段
 明确返回 `501 feature_not_supported`，不填充伪造的默认生命周期数据。A04
 `/api/v1/admin/worlds/{world_id}/auction-intake/items` 已接入 URL/canonical JSON 录入、
 固定 HTTPS 来源边界、key 密文信封和 PostgreSQL 同一 Serializable 写事务；成功响应只返回
@@ -202,10 +230,12 @@ Serializable 同快照的拍卖/lot/装备/投稿安全投影，并返回 `capab
 PostgreSQL Serializable 命令账本快照和代理安全事件投影；SQLite Lite 明确返回
 `501 feature_not_supported`，管理端 lot 页面已提供历史读取入口。A07
 `/api/v1/admin/auctions/{auction_id}/settlement-report` 已接入 PostgreSQL 完整档的一致
-只读报告；A08 recovery-report 也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
+只读报告；报告中的 `auction` 保持旧版基础字段闭集，不额外发送严格旧 Web 客户端会拒绝的
+`scheduled_end_at`/`effective_end_at`，读取遇到序列化冲突或死锁时最多重试三次。A08 recovery-report
+也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
 能力明确返回 `501 feature_not_supported`，不伪造空报告。P18/P19 已接入同一竞价事务、稳定
-命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、转换历史和
-终止原因从提交后的安全账户快照补齐，并在授权状态版本不一致时失败关闭，不暴露原始账本
+命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
+终止原因随命令结果在同一事务内冻结，HTTP 不再增加提交后账户读取窗口，也不暴露原始账本
 payload。A09-A12 的
 Admin 拍卖生命周期命令已接入应用端口；请求携带 `command_id` 和 `expected_state_version`，取消动作
 额外要求非空原因，并在同一数据库事务内追加命令账本、状态版本、取消元数据、审计记录和
@@ -274,13 +304,15 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 同目录临时文件、权限校验、fsync、rename 和目录同步完成原子替换。文件替换与账本提交
 之间出现不确定结果时会优先恢复旧文件，无法证明恢复成功则锁存 `unknown` 并返回
 `reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
-运行时文件路径由主 TOML 的 `runtime_config_file` 选择，敏感 TOML、Cookie、密钥和数据库
-连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
+运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含旧版
+main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 重启时只把这些业务字段投影为
+MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全局启用开关仍由 Worker 主配置
+拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
 `501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 会同时决定生命周期
 capability 和锁内人工提前开放校验；计划时间已到的正常开放仍然允许。`[equipment_source]` 会冻结为
 装备来源适配器的 host/path allowlist、响应上限、共享请求间隔和全请求超时；固定 HTTPS origin、
 无重定向、精确 world 路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是
-真实生效边界，不是热加载提示。
+真实生效边界，不是热加载提示；业务区块更新要求重启受影响的 Admin 与 Worker。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、游戏

@@ -1,5 +1,6 @@
 //! SQLite Users/Admin 用户属性、密钥与黑名单命令。
 
+use super::blacklist::apply_blacklist_effects_sqlite;
 use super::*;
 
 pub(crate) async fn mutate_sqlite(
@@ -21,6 +22,10 @@ async fn mutate_sqlite_inner(
             .await?
     {
         return Ok(result);
+    }
+    if write.action == AdminUserMutationAction::Blacklist {
+        apply_blacklist_effects_sqlite(connection, write.command_id, write.user_id, write.now)
+            .await?;
     }
     let before = load_user_sqlite(connection, write.user_id).await?;
     if before.state_version != write.expected_state_version {

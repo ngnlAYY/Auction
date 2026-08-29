@@ -3,18 +3,19 @@
 //! 旧版拍卖总览和 lot 草稿页都提供同一份录入能力。表单只负责收集来源与命令参数，
 //! 具体解析、幂等和权限判断仍由既有 Admin API 与应用层负责。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::api::{AdminIntakeResult, add_admin_intake};
+use crate::app::surface::admin_api_error_message;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum IntakeFailure {
     Invalid,
     InvalidJson,
-    Request,
+    Request(String),
 }
 
 /// 展示手工装备录入表单，并在成功后触发所属页面重新加载。
@@ -33,13 +34,13 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
 
     rsx! {
         section {
-            class: "admin-panel admin-intake",
-            aria_labelledby: "admin-intake-title",
+            class: "admin-auction-intake",
+            aria_labelledby: "auction-lot-intake-title",
             aria_busy: busy().to_string(),
-            h2 { id: "admin-intake-title", {t!("admin-intake-title")} }
-            p { class: "admin-panel__note", {t!("admin-intake-description")} }
+            h2 { id: "auction-lot-intake-title", {t!("admin-intake-title", world: world_id.clone())} }
+            p { {t!("admin-intake-description")} }
             form {
-                class: "admin-panel__actions admin-intake__form",
+                class: "admin-auction-intake-form",
                 onsubmit: move |event| {
                     event.prevent_default();
                     if busy() {
@@ -93,21 +94,22 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                             Ok(value) => {
                                 result.set(Some(value));
                                 failure.set(None);
+                                command_id_state.set(None);
                                 reload_generation.set(reload_generation().saturating_add(1));
                             }
-                            Err(_) => {
+                            Err(code) => {
                                 result.set(None);
-                                failure.set(Some(IntakeFailure::Request));
+                                failure.set(Some(IntakeFailure::Request(code)));
                             }
                         }
                         busy.set(false);
                     });
                 },
                 label {
-                    r#for: "admin-intake-source",
+                    r#for: "auction-intake-source",
                     {t!("admin-intake-source")}
                     select {
-                        id: "admin-intake-source",
+                        id: "auction-intake-source",
                         disabled: busy(),
                         value: source_kind(),
                         onchange: move |event| {
@@ -121,10 +123,10 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                 }
                 if source_kind() == "url" {
                     label {
-                        r#for: "admin-intake-equipment-url",
+                        r#for: "auction-intake-url",
                         {t!("admin-intake-equipment-url")}
                         input {
-                            id: "admin-intake-equipment-url",
+                            id: "auction-intake-url",
                             r#type: "url",
                             autocomplete: "off",
                             maxlength: "2048",
@@ -139,12 +141,14 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         }
                     }
                 } else {
-                    label { class: "admin-panel__wide-field admin-intake__json",
-                        r#for: "admin-intake-equipment-json",
-                        {t!("admin-intake-equipment-json")}
+                    div { class: "admin-auction-intake-json",
+                        label {
+                            r#for: "auction-intake-json",
+                            {t!("admin-intake-equipment-json")}
+                        }
                         textarea {
-                            id: "admin-intake-equipment-json",
-                            aria_describedby: "admin-intake-json-hint",
+                            id: "auction-intake-json",
+                            aria_describedby: "auction-intake-json-hint",
                             rows: "8",
                             maxlength: "65536",
                             placeholder: t!("admin-intake-json-hint"),
@@ -157,14 +161,14 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                                 failure.set(None);
                             },
                         }
-                        span { id: "admin-intake-json-hint", class: "admin-panel__note", {t!("admin-intake-json-hint")} }
+                        span { id: "auction-intake-json-hint", {t!("admin-intake-json-hint")} }
                     }
                 }
                 label {
-                    r#for: "admin-intake-start-price",
+                    r#for: "auction-intake-price",
                     {t!("admin-intake-start-price")}
                     input {
-                        id: "admin-intake-start-price",
+                        id: "auction-intake-price",
                         r#type: "number",
                         min: "1",
                         step: "1",
@@ -179,10 +183,10 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                     }
                 }
                 label {
-                    r#for: "admin-intake-player-id",
+                    r#for: "auction-intake-player",
                     {t!("admin-intake-player-id")}
                     input {
-                        id: "admin-intake-player-id",
+                        id: "auction-intake-player",
                         r#type: "text",
                         autocomplete: "off",
                         maxlength: "256",
@@ -210,7 +214,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                 }
             }
             if let Some(value) = result() {
-                p { class: "admin-panel__note action-feedback action-feedback--success", role: "status",
+                p { class: "admin-auction-intake-result action-feedback action-feedback--success", role: "status",
                     {t!(
                         "admin-intake-result",
                         name: value.equipment_name,
@@ -232,7 +236,7 @@ fn intake_failure_message(failure: IntakeFailure) -> String {
     match failure {
         IntakeFailure::Invalid => t!("admin-intake-invalid"),
         IntakeFailure::InvalidJson => t!("admin-intake-invalid-json"),
-        IntakeFailure::Request => t!("admin-intake-error"),
+        IntakeFailure::Request(code) => admin_api_error_message(&code),
     }
 }
 

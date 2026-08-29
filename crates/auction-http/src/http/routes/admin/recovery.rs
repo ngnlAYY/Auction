@@ -1,7 +1,6 @@
 //! Admin recovery case 的人工确认处理器。
 
 use super::super::*;
-use super::ADMIN_CSRF_COOKIE;
 
 /// 以版本 fence 确认一个已解决 custody 证据的 recovery case。
 pub(crate) async fn admin_confirm_recovery(
@@ -12,39 +11,51 @@ pub(crate) async fn admin_confirm_recovery(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let Some(raw_csrf) = read_admin_cookie(&headers, ADMIN_CSRF_COOKIE) else {
-        return authentication_error();
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(result) => result,
+        Err(response) => return *response,
     };
-    if !valid_admin_csrf_header(&headers, &raw_csrf) {
-        return api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败").into_response();
-    }
+
+    let Some(recovery_uuid) = admin_auctions::parse_canonical_uuid(&recovery_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
+            .into_response();
+    };
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "恢复确认不接受查询参数")
             .into_response();
     }
-    let Ok(recovery_uuid) = Uuid::parse_str(&recovery_id) else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_id", "恢复 ID 无效")
-            .into_response();
-    };
-    if recovery_uuid.is_nil() {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_id", "恢复 ID 无效")
-            .into_response();
+    if !application_json(&headers) {
+        return api_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "请求必须使用 JSON",
+        )
+        .into_response();
     }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
-        Ok(result) => result,
-        Err(response) => return *response,
-    };
-    let input: AdminRecoveryConfirmationRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
+    let value: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
         Err(_) => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
                 .into_response();
         }
     };
-    if input.command_id.is_nil() || input.expected_state_version <= 0 {
+    // Go encoding/json 会把整个 struct 请求的 null 解码为零值，再由业务边界返回命令无效。
+    let input: AdminRecoveryConfirmationRequest = if value.is_null() {
+        AdminRecoveryConfirmationRequest::default()
+    } else {
+        match serde_json::from_value(value) {
+            Ok(input) => input,
+            Err(_) => {
+                return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
+                    .into_response();
+            }
+        }
+    };
+    let Some(command_uuid) = admin_auctions::parse_canonical_uuid(&input.command_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
+            .into_response();
+    };
+    if input.expected_state_version <= 0 {
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     }
@@ -52,7 +63,12 @@ pub(crate) async fn admin_confirm_recovery(
         return api_error(StatusCode::BAD_REQUEST, "invalid_recovery_command", "恢复确认参数无效")
             .into_response();
     };
-    let request_hash = match RequestHash::from_request("confirm_recovery", recovery_uuid, &input) {
+    let request_hash = match RecoveryConfirmationCommand::legacy_request_hash(
+        recovery_uuid,
+        input.expected_state_version,
+        action,
+        &input.reason,
+    ) {
         Ok(hash) => hash,
         Err(_) => return internal_error(),
     };
@@ -65,12 +81,13 @@ pub(crate) async fn admin_confirm_recovery(
         .into_response();
     };
     let command = RecoveryConfirmationCommand {
-        command_id: CommandId::from_uuid(input.command_id),
+        command_id: CommandId::from_uuid(command_uuid),
         recovery_id: SettlementId::from_uuid(recovery_uuid),
         expected_state_version: input.expected_state_version,
         action,
         reason: input.reason,
         request_hash,
+        request_id: request_id(&headers),
         actor: AuctionLifecycleActor {
             actor_type: AuctionLifecycleActorType::Admin,
             actor_id: identity.actor,
@@ -88,4 +105,17 @@ pub(crate) async fn admin_confirm_recovery(
     let data = AdminRecoveryConfirmationResponse { recovery: map_recovery_confirmation(result) };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok("恢复确认已提交", data)))
         .into_response()
+}
+
+fn application_json(headers: &HeaderMap) -> bool {
+    let Some(value) = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let Ok(media_type) = value.parse::<mime::Mime>() else {
+        return false;
+    };
+    media_type.type_() == mime::APPLICATION
+        && media_type.subtype() == mime::JSON
+        && media_type.suffix().is_none()
 }

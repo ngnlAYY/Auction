@@ -1,7 +1,7 @@
 //! 普通竞价表单和命令提交。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{CommandError, place_bid};
@@ -83,7 +83,11 @@ pub fn bid_form(input: BidFormInput) -> Element {
                             refresh_generation.set(refresh_generation().saturating_add(1));
                             on_accepted.call(());
                         }
-                        Err(error) => failure.set(Some(error)),
+                        Err(error) => {
+                            failure.set(Some(error));
+                            // 失败后保留输入、command_id 和错误，同时重新读取权威价格与领先者。
+                            refresh_generation.set(refresh_generation().saturating_add(1));
+                        }
                     }
                 });
             },

@@ -21,6 +21,10 @@ AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
 ```
 
 Worker 配置没有 `listen_address`——该角色的默认监听地址为 `None`。
+Worker 可以通过主配置的 `runtime_config_file` 读取 Admin 管理的共享业务文档，但只消费
+main/isekai、发件人 allowlist、装备过滤和 14 个通知模板；Admin listener/security/session/
+metrics/tracing 不会投影到 Worker。transport、凭据、调度、mailbox identity 和全局 MoogleMail
+`enabled` 继续由 Worker 主配置拥有，runtime 更新后必须重启 Worker 才会生效。
 
 ## Cargo feature
 
@@ -30,34 +34,39 @@ Worker 配置没有 `listen_address`——该角色的默认监听地址为 `Non
 
 ## 部署约束
 
-Auction 生命周期/结算使用独立 `60s + [0,5s]` 主循环，默认每类批次 100、PostgreSQL 并发 8、
-单项总时限 30 秒；SQLite Lite 的有效并发固定为 1。Fulfillment 与 Recovery 分别由
+Auction 生命周期、慢速代理和结算使用独立 `60s + [0,5s]` 主循环，默认每阶段批次 100、
+PostgreSQL 并发 8、单项总时限 30 秒；SQLite Lite 的有效并发固定为 1 且不启用结算阶段。
+Fulfillment 与 Recovery 分别由
 `[worker.fulfillment]` / `[worker.recovery]` 的独立 poll、jitter、batch、并发、lease 和单项超时
 控制，Recovery 还维护独立 health 刷新周期，避免任一积压或远端余额读取放大普通拍卖任务。
 MoogleMail 的每个 world 也各自拥有标准五字段 cron（默认 `* * * * *`）加 `[0,5s]` 抖动和
-手动唤醒器；调度兼容旧版描述符、`@every` 与 `TZ=` / `CRON_TZ=` 前缀，读取与业务处理默认各
-三次、每次 30 秒；共享 transport 使用旧版一秒请求间隔与 15 秒请求超时，并在长批次期间续租；
+手动唤醒器；调度兼容旧版描述符、`@every` 与 `TZ=` / `CRON_TZ=` 前缀，读取与可重试业务处理默认各
+三次、每次 30 秒；确定性业务/输入/配置错误按 `Permanent` 立即收口，只有 `Retryable` 和超时进入
+有界重试。共享 transport 使用旧版一秒请求间隔与 15 秒请求超时，并在长批次期间续租；
 Forum 使用独立循环按“主题发布 → 回帖导入”顺序执行，
 任一阶段失败不会跳过另一阶段或终止其它 owner。
 Lite 档（SQLite）不装配这两类完整档循环；其进程实例数和主并发必须为一，因为写入是串行事务，
 运行手册需说明文件锁、锁等待和备份假设。
 
-有数据库时，轮次 due、租约、尝试次数、完成标记和失败原因写入 `scheduled_rounds`；
-PostgreSQL 完整档还把结算 workflow 的领取、稳定命令和完成 fence 写入 `auctions` 与
+有数据库时，轮次 due、租约、尝试次数、完成标记和失败原因写入 `scheduled_rounds`；慢速代理
+阶段直接扫描 `bid_proxy_authorizations.slow_due_at`，随后以旧版稳定身份进入竞价命令账本和事务
+fence，不使用内存游标。PostgreSQL 完整档还把结算 workflow 的领取、稳定命令和完成 fence 写入 `auctions` 与
 `auction_commands`，并把结算履约的 claim/fencing、delivery 准备/激活和 delivery outbox
 终态写入数据库；SQLite Lite 明确不启用结算 workflow 与完整履约。PostgreSQL 完整档且启用
 `[worker.mooglemail]` 时，Worker 还装配 MoogleMail 读取、拍卖及用户注册/重绑业务处理和
 `DeliveryTransport`，执行静态通知、注册 key/结果通知、重绑结果通知以及 return/take；用户
 登录 key 由独立的数据密钥加密保存，outbox 只保存用户 UUID 引用，发送前才在 Worker 内解密。
-`[worker.mooglemail.mail_templates]` 可按旧版 14 个通知键覆盖正文；字段、占位符和控制字符
-会在启动时闭集校验，成功后冻结为本进程模板快照。
+共享 runtime 的 `[mail_templates]` 可按旧版 14 个通知键覆盖正文；字段、占位符和控制字符会在
+启动时闭集校验，成功后冻结为本进程模板快照。旧 runtime 完全缺少业务区块时，才沿用
+`[worker.mooglemail.mail_templates]`、直接 world/sender 和装备过滤兼容配置。
 远端 POST 无法证明时进入人工对账，不自动重发；结算退信以及 Sent/Balance 回执对账已接入。
 每个邮箱的持久化 claim 在批次执行期间按配置续租；token、owner、版本或续租 fence 失效后会
 取消当前陈旧处理，后续只允许从权威 cursor 重放。
 启用 `[worker.operations_alert]` 时，PostgreSQL Worker 会从 process、delivery、fulfillment 和
 recovery owner 读取安全水位，按旧版 15 类 signal、阈值、fingerprint、cooldown 和 claim lease
 生成有界通知批次；通知通过同一 MoogleMail delivery outbox 幂等入队，delivery 终态再回写
-告警成功、失败或人工对账。普通 Create 失败会清空瞬时错误后持久化退避，identity 不一致立即
+告警成功、失败或人工对账。scan、dispatch 和 reconcile 各自立即执行后按 `scan_interval_seconds +
+[0, jitter_seconds]` 等待；取消会跳过等待且不影响 claim/fencing。普通 Create 失败会清空瞬时错误后持久化退避，identity 不一致立即
 失败，第三次失败固定为 `retry_exhausted`；只有入队确认事务会推进 signal cooldown。Recovery
 health 会按 `[worker.recovery]` 的独立周期读取两个 world
 的 Balance，低余额、过期证据和来源不可用都会进入安全投影，读取失败不会覆盖最后成功余额。
@@ -76,7 +85,9 @@ PostgreSQL 完整档启用 `[worker.forum]` 后，Worker 还会装配 E-Hentai �
 回帖导入：身份必须先在 `forum_bidder_identities` 登记，`bid`、`proxy` 和 `proxy lower`
 通过现有竞价命令端口执行；`start`、`cancel` 和 PM-only `notify` 在旧版 `forumingest` 中就是
 warning-only，当前不越过该兼容边界；MM `notify` 进入 MoogleMail delivery outbox。主题发布使用
-持久化 claim/fencing；远端写入不确定时进入人工对账，回帖命令使用持久化账本和稳定命令 ID。
+持久化 claim/fencing；远端写入不确定或本地证明写入失败时先按精确标题只读对账，命中只补本地
+证明，未命中停在等待人工授权。只有 `auctionctl authorize-forum-write-retry` 经逐字目标确认写入
+幂等授权和追加审计后才允许下一次 POST；回帖命令使用持久化账本和稳定命令 ID。
 Forum 默认立即执行一轮，再等待一分钟和最多五秒抖动；主题逐条领取，默认 claim 300 秒，发布
 和回帖单主题总时限 93 秒，发布阶段失败后仍会继续本轮回帖导入。
 论坛完整档不在 SQLite Lite 中伪装提供。

@@ -1,32 +1,47 @@
-//! 结算履约 owner 生成的无密文 MoogleMail 意图。
+//! 旧版通用 MoogleMail schema-v1 结算载荷。
 
 use super::super::*;
 
-/// 结算履约 owner 生成的无密文 MoogleMail 意图。
-///
-/// 这里保留业务字段是为了让 transport 在外部写入前重新校验种类矩阵；装备 key 仍只存在
-/// 数据库密文信封中，本次发送只使用同一快照中的远端装备 ID。
+/// send payload 中只保存 owner UUID 的装备 secret 引用。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct SettlementDeliveryPayload {
+pub(crate) struct SettlementEquipmentSecretReference {
+    pub(crate) kind: String,
+    pub(crate) id: String,
+}
+
+/// 旧版 BuildPayload 生成的 send 线协议。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SettlementSendWirePayload {
     pub(crate) schema_version: u8,
     pub(crate) operation: String,
     pub(crate) world: String,
-    pub(crate) obligation_id: Uuid,
-    pub(crate) auction_id: Uuid,
-    pub(crate) lot_id: Uuid,
-    pub(crate) origin_command_id: Uuid,
-    pub(crate) kind: String,
-    pub(crate) recipient: String,
     pub(crate) template: String,
-    pub(crate) item_name: String,
-    pub(crate) external_equipment_id: String,
-    pub(crate) amount: i64,
-    pub(crate) carrier_credit: u32,
+    pub(crate) variables: BTreeMap<String, String>,
     pub(crate) credits: i64,
     pub(crate) cod: i64,
-    pub(crate) equipment_id: Uuid,
-    pub(crate) submission_id: Option<Uuid>,
-    pub(crate) submission_source_kind: Option<String>,
+    pub(crate) equipment_secret_refs: Vec<SettlementEquipmentSecretReference>,
+}
+
+/// 旧版 BuildPayload 生成的 return 线协议。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SettlementReturnWirePayload {
+    pub(crate) schema_version: u8,
+    pub(crate) operation: String,
+    pub(crate) world: String,
+    pub(crate) external_mail_id: String,
+}
+
+/// 完成严格 wire 校验后供 transport 使用的安全投影。
+#[derive(Debug)]
+pub(crate) struct SettlementDeliveryPayload {
+    pub(crate) operation: String,
+    pub(crate) template: String,
+    pub(crate) variables: BTreeMap<String, String>,
+    pub(crate) credits: i64,
+    pub(crate) cod: i64,
+    pub(crate) equipment_secret_refs: Vec<SettlementEquipmentSecretReference>,
     pub(crate) source_external_mail_id: Option<String>,
 }

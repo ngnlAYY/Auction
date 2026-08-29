@@ -6,6 +6,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EhentaiOperation {
     CreateTopic,
+    ReconcileTopic,
     FetchTopic,
 }
 
@@ -14,6 +15,7 @@ impl EhentaiOperation {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::CreateTopic => "create_topic",
+            Self::ReconcileTopic => "reconcile_topic",
             Self::FetchTopic => "fetch_topic",
         }
     }

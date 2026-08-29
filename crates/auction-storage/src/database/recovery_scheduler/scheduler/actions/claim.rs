@@ -10,7 +10,31 @@ pub(crate) async fn claim_action_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
 ) -> Result<Option<RecoveryActionClaim>, auction_application::RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    let lease_microseconds = (lease_until - now)
+        .num_microseconds()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| repository_error("recovery action 租约时长无效"))?;
+    let claim_token = Uuid::new_v4();
+    let worker_id = worker_id.to_owned();
+    run_serializable_action_transaction(pool, move |transaction| {
+        let worker_id = worker_id.clone();
+        Box::pin(claim_action_in_transaction(
+            transaction,
+            worker_id,
+            lease_microseconds,
+            claim_token,
+        ))
+    })
+    .await
+}
+
+#[cfg(feature = "postgres")]
+async fn claim_action_in_transaction(
+    transaction: &mut sqlx::Transaction<'static, Postgres>,
+    worker_id: String,
+    lease_microseconds: i64,
+    claim_token: Uuid,
+) -> Result<Option<RecoveryActionClaim>, RecoveryActionTransactionError> {
     let Some(row) = sqlx::query(
         r#"SELECT action.id,
                   action.recovery_id,
@@ -64,8 +88,8 @@ pub(crate) async fn claim_action_postgres(
                        AND prerequisite.execution_state = 'satisfied'
                  )
              )
-             AND (action.claim_token IS NULL OR action.claim_expires_at <= $1)
-             AND (action.next_attempt_at IS NULL OR action.next_attempt_at <= $1)
+             AND (action.claim_token IS NULL OR action.claim_expires_at <= clock_timestamp())
+             AND (action.next_attempt_at IS NULL OR action.next_attempt_at <= clock_timestamp())
            ORDER BY COALESCE(action.next_attempt_at, action.created_at),
                     action.recovery_id,
                     action.ordinal,
@@ -73,12 +97,10 @@ pub(crate) async fn claim_action_postgres(
            LIMIT 1
            FOR UPDATE OF action SKIP LOCKED"#,
     )
-    .bind(now)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
-    .map_err(map_storage_error)?
+    .map_err(RecoveryActionTransactionError::from)?
     else {
-        transaction.commit().await.map_err(map_storage_error)?;
         return Ok(None);
     };
 
@@ -120,7 +142,6 @@ pub(crate) async fn claim_action_postgres(
                 | "buyer_blacklist"
         )
         || !matches!(execution_state.as_str(), "pending" | "prepared" | "enqueued")
-        || created_at > now
         || (execution_state == "enqueued" && delivery_id.is_none_or(|value| value.is_nil()))
         || (execution_state == "pending"
             && (delivery_id.is_some()
@@ -165,30 +186,30 @@ pub(crate) async fn claim_action_postgres(
                 || expected_cod != 0
                 || !expected_attachment_ids.is_empty()))
     {
-        return Err(repository_error("recovery action 持久化事实无效"));
+        return Err(repository_error("recovery action 持久化事实无效").into());
     }
     let world_id = match kind.as_str() {
         "payment_reminder" => "main".to_owned(),
         "cancel_carrier_take" => {
             if recovery_world_id != "isekai" {
-                return Err(repository_error("recovery carrier action 世界不匹配"));
+                return Err(repository_error("recovery carrier action 世界不匹配").into());
             }
             "main".to_owned()
         }
         "reclaim_equipment_take" => {
             if recovery_world_id != "main" {
-                return Err(repository_error("recovery reclaim action 世界不匹配"));
+                return Err(repository_error("recovery reclaim action 世界不匹配").into());
             }
             "main".to_owned()
         }
         "recover_equipment_take" => {
             if recovery_world_id != "isekai" {
-                return Err(repository_error("recovery equipment action 世界不匹配"));
+                return Err(repository_error("recovery equipment action 世界不匹配").into());
             }
             "isekai".to_owned()
         }
         "buyer_blacklist" => recovery_world_id.clone(),
-        _ => return Err(repository_error("recovery action 世界无法确定")),
+        _ => return Err(repository_error("recovery action 世界无法确定").into()),
     };
 
     let previous_fencing: i64 = row.try_get("claim_fencing").map_err(map_storage_error)?;
@@ -196,45 +217,56 @@ pub(crate) async fn claim_action_postgres(
         .checked_add(1)
         .ok_or_else(|| repository_error("recovery action fencing 版本溢出"))?;
     if fencing_version <= 0 {
-        return Err(repository_error("recovery action fencing 版本无效"));
+        return Err(repository_error("recovery action fencing 版本无效").into());
     }
     let previous_retry_count: i32 = row.try_get("retry_count").map_err(map_storage_error)?;
-    let retry_count = previous_retry_count
+    let retry_count = u32::try_from(previous_retry_count)
+        .map_err(|_| repository_error("recovery action 重试次数无效"))?;
+    let claimed_state_version = state_version
         .checked_add(1)
-        .and_then(|value| u32::try_from(value).ok())
-        .ok_or_else(|| repository_error("recovery action 重试次数溢出"))?;
-    let retry_count_db = i32::try_from(retry_count)
-        .map_err(|_| repository_error("recovery action 重试次数超出数据库范围"))?;
-    let claim_token = Uuid::new_v4();
+        .ok_or_else(|| repository_error("recovery action 状态版本溢出"))?;
     let updated = sqlx::query(
-        r#"UPDATE public.settlement_recovery_actions
+        r#"WITH claim_clock AS MATERIALIZED (
+               SELECT clock_timestamp() AS claimed_at
+           )
+           UPDATE public.settlement_recovery_actions AS action
            SET claim_token = $1,
-               claimed_at = $2,
-               claim_expires_at = $3,
-               claim_fencing = $4,
-               retry_count = $5,
+               claimed_at = claim_clock.claimed_at,
+               claim_expires_at = claim_clock.claimed_at
+                   + $2::bigint * interval '1 microsecond',
+               claim_fencing = $3,
+               state_version = action.state_version + 1,
                next_attempt_at = NULL,
-               updated_at = $2
-           WHERE id = $6
-             AND execution_state = $7
-             AND state_version > 0
-             AND claim_fencing = $8
-             AND (claim_token IS NULL OR claim_expires_at <= $2)
-             AND (next_attempt_at IS NULL OR next_attempt_at <= $2)"#,
+               updated_at = claim_clock.claimed_at
+           FROM claim_clock
+           WHERE action.id = $4
+             AND action.execution_state = $5
+             AND action.state_version = $6
+             AND action.claim_fencing = $7
+             AND (action.claim_token IS NULL OR action.claim_expires_at <= claim_clock.claimed_at)
+             AND (action.next_attempt_at IS NULL OR action.next_attempt_at <= claim_clock.claimed_at)
+           RETURNING action.state_version, action.claimed_at, action.claim_expires_at"#,
     )
     .bind(claim_token)
-    .bind(now)
-    .bind(lease_until)
+    .bind(lease_microseconds)
     .bind(fencing_version)
-    .bind(retry_count_db)
     .bind(action_id)
     .bind(&execution_state)
+    .bind(state_version)
     .bind(previous_fencing)
-    .execute(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
-    .map_err(map_storage_error)?;
-    if updated.rows_affected() != 1 {
-        return Err(repository_error("recovery action 领取 fence 已失效"));
+    .map_err(RecoveryActionTransactionError::from)?
+    .ok_or_else(|| repository_error("recovery action 领取 fence 已失效"))?;
+    let stored_state_version: i64 = updated.try_get("state_version").map_err(map_storage_error)?;
+    let claimed_at: DateTime<Utc> = updated.try_get("claimed_at").map_err(map_storage_error)?;
+    let stored_lease_until: DateTime<Utc> =
+        updated.try_get("claim_expires_at").map_err(map_storage_error)?;
+    if stored_state_version != claimed_state_version
+        || claimed_at < created_at
+        || stored_lease_until <= claimed_at
+    {
+        return Err(repository_error("recovery action 领取结果无效").into());
     }
     let recipient: Option<String> =
         row.try_get("recipient_game_player_id").map_err(map_storage_error)?;
@@ -242,9 +274,8 @@ pub(crate) async fn claim_action_postgres(
     let recipient_state_version: i64 =
         row.try_get("recipient_state_version").map_err(map_storage_error)?;
     if (recipient.is_some() && recipient_state_version <= 0) || recipient_state_version < 0 {
-        return Err(repository_error("recovery 收件人 Users 状态版本无效"));
+        return Err(repository_error("recovery 收件人 Users 状态版本无效").into());
     }
-    transaction.commit().await.map_err(map_storage_error)?;
     Ok(Some(RecoveryActionClaim {
         action_id: auction_domain::SettlementId::from_uuid(action_id),
         recovery_id: auction_domain::SettlementId::from_uuid(recovery_id),
@@ -266,12 +297,12 @@ pub(crate) async fn claim_action_postgres(
         activate_command_id: activate_command_id.map(CommandId::from_uuid),
         activate_request_hash: request_hash_from_optional(activate_request_digest)?,
         claim_token,
-        state_version,
-        lease_until,
+        state_version: claimed_state_version,
+        lease_until: stored_lease_until,
         fencing_version,
         retry_count,
-        worker_id: worker_id.to_owned(),
-        claimed_at: now,
+        worker_id,
+        claimed_at,
         created_at,
     }))
 }

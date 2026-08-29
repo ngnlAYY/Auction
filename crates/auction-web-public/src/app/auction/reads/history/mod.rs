@@ -79,19 +79,24 @@ pub(crate) fn history() -> Element {
         let _ = refresh_generation();
         fetch_price_history(applied_query())
     });
+    let history_unsupported =
+        matches!(&*history.read_unchecked(), Some(Err(PriceHistoryFetchError::Unsupported)));
     let body = match &*history.read_unchecked() {
         None => rsx! {
             p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
         },
-        Some(Err(_)) => rsx! {
+        Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
+            Placeholder {
+                title: t!("page-history-title"),
+                detail: t!("page-history-unsupported"),
+            }
+        },
+        Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
             RetryPlaceholder {
                 title: t!("page-history-title"),
                 detail: t!("data-error"),
                 refresh_generation,
             }
-        },
-        Some(Ok(page)) if page.rows.is_empty() => rsx! {
-            Placeholder { title: t!("page-history-title"), detail: t!("data-empty") }
         },
         Some(Ok(page)) => rsx! {
             PriceHistoryTable {
@@ -244,30 +249,30 @@ pub(crate) fn history() -> Element {
     let active_filter_count = history_active_filter_count(&applied_query());
 
     rsx! {
-        section { class: "public-auction-page", aria_labelledby: "price-history-title",
-            h1 { id: "price-history-title", class: "public-auction-category__title",
-                {t!("page-history-title")}
-            }
-            p { class: "public-auction-page__status", {t!("page-history-note")} }
-            PriceHistoryFilters {
-                world: world_filter,
-                name: name_filter,
-                from_month: from_month_filter,
-                from_year: from_year_filter,
-                to_month: to_month_filter,
-                to_year: to_year_filter,
-                minimum_price: minimum_price_filter,
-                minimum_price_unit: minimum_price_unit_filter,
-                maximum_price: maximum_price_filter,
-                maximum_price_unit: maximum_price_unit_filter,
-                buyer: buyer_filter,
-                seller: seller_filter,
-                world_options,
-                active_filter_count,
-                settings_open,
-                filter_error,
-                on_apply: apply_filters,
-                on_reset: reset_filters,
+        section { class: "public-history-page", aria_labelledby: "price-history-title",
+            h1 { id: "price-history-title", {t!("page-history-title")} }
+            p { class: "public-history-intro", {t!("page-history-note")} }
+            if !history_unsupported {
+                PriceHistoryFilters {
+                    world: world_filter,
+                    name: name_filter,
+                    from_month: from_month_filter,
+                    from_year: from_year_filter,
+                    to_month: to_month_filter,
+                    to_year: to_year_filter,
+                    minimum_price: minimum_price_filter,
+                    minimum_price_unit: minimum_price_unit_filter,
+                    maximum_price: maximum_price_filter,
+                    maximum_price_unit: maximum_price_unit_filter,
+                    buyer: buyer_filter,
+                    seller: seller_filter,
+                    world_options,
+                    active_filter_count,
+                    settings_open,
+                    filter_error,
+                    on_apply: apply_filters,
+                    on_reset: reset_filters,
+                }
             }
             {body}
         }

@@ -12,11 +12,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
-use uuid::Uuid;
 
-use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, common, map_user, request_id,
-};
+use super::{AdminApiState, authenticated_admin_mutation, common, map_user, request_id};
 
 /// 将用户加入黑名单。
 pub(crate) async fn blacklist(
@@ -27,24 +24,8 @@ pub(crate) async fn blacklist(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let input: AdminUserBlacklistRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => return common::invalid_json(),
-    };
-    mutate_status(
-        state,
-        address,
-        user_id,
-        headers,
-        uri,
-        input.command_id,
-        input.expected_state_version,
-        AdminUserMutationAction::Blacklist,
-        None,
-        None,
-        Some(input.public_reason),
-    )
-    .await
+    mutate_status(state, address, user_id, headers, uri, body, AdminUserMutationAction::Blacklist)
+        .await
 }
 
 /// 将用户移出黑名单。
@@ -56,55 +37,48 @@ pub(crate) async fn unblacklist(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    let input: AdminUserUnblacklistRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => return common::invalid_json(),
-    };
-    mutate_status(
-        state,
-        address,
-        user_id,
-        headers,
-        uri,
-        input.command_id,
-        input.expected_state_version,
-        AdminUserMutationAction::Unblacklist,
-        None,
-        None,
-        None,
-    )
-    .await
+    mutate_status(state, address, user_id, headers, uri, body, AdminUserMutationAction::Unblacklist)
+        .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn mutate_status(
     state: AdminApiState,
     address: SocketAddr,
     user_id: String,
     headers: HeaderMap,
     uri: Uri,
-    command_id: Uuid,
-    expected_state_version: i64,
+    body: Bytes,
     action: AdminUserMutationAction,
-    username: Option<String>,
-    game_player_id: Option<String>,
-    public_reason: Option<String>,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = common::mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    let Ok(user_id) = Uuid::parse_str(&user_id) else {
-        return common::invalid_user_id();
-    };
-    if user_id.is_nil() || command_id.is_nil() {
-        return common::invalid_user_id();
-    }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
+    };
+    if let Some(response) = common::mutation_boundary(&uri) {
+        return response;
+    }
+    let Some(user_id) = common::parse_canonical_uuid(&user_id) else {
+        return common::invalid_user_id();
+    };
+    let (raw_command_id, expected_state_version, public_reason) = match action {
+        AdminUserMutationAction::Blacklist => {
+            let input: AdminUserBlacklistRequest = match serde_json::from_slice(&body) {
+                Ok(input) => input,
+                Err(_) => return common::invalid_json(),
+            };
+            (input.command_id, input.expected_state_version, Some(input.public_reason))
+        }
+        AdminUserMutationAction::Unblacklist => {
+            let input: AdminUserUnblacklistRequest = match serde_json::from_slice(&body) {
+                Ok(input) => input,
+                Err(_) => return common::invalid_json(),
+            };
+            (input.command_id, input.expected_state_version, None)
+        }
+        _ => return common::invalid_user_command(),
+    };
+    let Some(command_id) = common::parse_canonical_uuid(&raw_command_id) else {
+        return common::invalid_command_id();
     };
     let Some(port) = state.admin_users() else {
         return common::feature_unavailable();
@@ -115,8 +89,8 @@ async fn mutate_status(
             user_id,
             expected_state_version,
             action,
-            username,
-            game_player_id,
+            username: None,
+            game_player_id: None,
             public_reason,
             actor_id: identity.actor,
             request_id: request_id(&headers),
@@ -131,11 +105,7 @@ async fn mutate_status(
         StatusCode::OK,
         super::super::no_store_headers(),
         Json(ApiResponse::ok(
-            if action == AdminUserMutationAction::Blacklist {
-                "用户已加入黑名单"
-            } else {
-                "用户已解除黑名单"
-            },
+            "用户黑名单状态已更新",
             AdminUserMutationResponse { user: map_user(result.user), generated_key: None },
         )),
     )

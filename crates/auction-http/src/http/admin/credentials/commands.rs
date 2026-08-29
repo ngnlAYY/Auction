@@ -19,9 +19,8 @@ use axum::{
 use chrono::Utc;
 
 use super::{
-    AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    invalid_json, invalid_request, map_credential, map_error, mutation_boundary, no_store_headers,
-    request_id,
+    AdminApiState, authenticated_admin_mutation, feature_unavailable, invalid_json,
+    invalid_request, map_credential, map_error, mutation_boundary, no_store_headers, request_id,
 };
 
 /// 导入新的 mail_cookie/forum_cookie。
@@ -32,16 +31,13 @@ pub(crate) async fn create(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
+    if let Some(response) = mutation_boundary(&uri) {
+        return response;
+    }
     let input: AdminCredentialCreateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => return invalid_json(),
@@ -106,16 +102,13 @@ pub(crate) async fn mutate(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
+    if let Some(response) = mutation_boundary(&uri) {
+        return response;
+    }
     let input: AdminCredentialMutationRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => return invalid_json(),
@@ -198,16 +191,13 @@ pub(crate) async fn delete(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
+    if let Some(response) = mutation_boundary(&uri) {
+        return response;
+    }
     let input: AdminCredentialDeleteRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => return invalid_json(),

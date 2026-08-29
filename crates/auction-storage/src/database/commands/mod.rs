@@ -10,8 +10,9 @@ use auction_application::{
     AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
     ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
     AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
-    Clock, CompetitionCommandPort, CompetitionService, CreateProxyCommand, LowerProxyCommand,
-    PlaceBidCommand,
+    Clock, CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService,
+    CreateProxyCommand, ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand,
+    SlowProxyCommandPort,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{AdminAuctionCreateService, AdminRulesService};
@@ -52,7 +53,10 @@ impl<C> CompetitionCommandPort for DatabaseCompetitionCommands<C>
 where
     C: Clock + 'static,
 {
-    fn place_bid(&self, command: PlaceBidCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+    fn place_bid(
+        &self,
+        command: PlaceBidCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         let _ = (&command, &clock);
@@ -72,7 +76,10 @@ where
         })
     }
 
-    fn create_proxy(&self, command: CreateProxyCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+    fn create_proxy(
+        &self,
+        command: CreateProxyCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         #[cfg(not(feature = "postgres"))]
@@ -93,7 +100,10 @@ where
         })
     }
 
-    fn lower_proxy(&self, command: LowerProxyCommand) -> ApplicationFuture<'_, CompetitionPlan> {
+    fn lower_proxy(
+        &self,
+        command: LowerProxyCommand,
+    ) -> ApplicationFuture<'_, CompetitionCommandOutcome> {
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         Box::pin(async move {
@@ -107,6 +117,33 @@ where
                 DatabaseStore::Sqlite(store) => {
                     let service = CompetitionService::new(Arc::new(store.clone()), clock);
                     service.lower_proxy(command).await
+                }
+            }
+        })
+    }
+}
+
+impl<C> SlowProxyCommandPort for DatabaseCompetitionCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn execute_slow_proxy(
+        &self,
+        command: ExecuteSlowProxyCommand,
+    ) -> ApplicationFuture<'_, CompetitionPlan> {
+        let store = Arc::clone(&self.store);
+        let clock = Arc::clone(&self.clock);
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.execute_slow_proxy(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
+                    service.execute_slow_proxy(command).await
                 }
             }
         })

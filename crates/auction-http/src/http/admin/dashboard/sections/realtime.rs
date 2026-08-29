@@ -34,7 +34,7 @@ pub(crate) async fn load_realtime_section(
             DashboardStatus::Ok.as_str().to_owned()
         },
         observed_at: Some(timestamp(snapshot.observed_at)),
-        error_code: error_code.map(ToOwned::to_owned),
+        error_code: None,
         data: Some(json!({
             "observed_at": timestamp(snapshot.observed_at),
             "lags": snapshot.lags.into_iter().map(|entry| json!({

@@ -26,10 +26,11 @@ pub(super) async fn configure_mail_poll(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
     Option<Arc<dyn SettlementFulfillmentEvidenceReader>>,
+    Option<Arc<dyn SettlementFulfillmentCustodyReader>>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
-        return Ok((Vec::new(), None, None));
+        return Ok((Vec::new(), None, None, None));
     }
 
     #[cfg(not(feature = "postgres"))]
@@ -65,14 +66,15 @@ pub(super) async fn configure_mail_poll(
             })
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
         );
-        let (processor, delivery_transport) = processor::build_processor_and_delivery(
-            config,
-            mail_config,
-            &world_configs,
-            &store,
-            client.as_ref(),
-            &credentials,
-        )?;
+        let (processor, delivery_transport, custody_reader) =
+            processor::build_processor_and_delivery(
+                config,
+                mail_config,
+                &world_configs,
+                &store,
+                client.as_ref(),
+                &credentials,
+            )?;
         let (runtimes, gateways) = runtime::build_poll_runtimes(
             mail_config,
             world_configs,
@@ -85,6 +87,6 @@ pub(super) async fn configure_mail_poll(
         .await?;
         let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
             Arc::new(MoogleMailFulfillmentEvidenceReader { gateways });
-        Ok((runtimes, Some(delivery_transport), Some(evidence_reader)))
+        Ok((runtimes, Some(delivery_transport), Some(evidence_reader), Some(custody_reader)))
     }
 }

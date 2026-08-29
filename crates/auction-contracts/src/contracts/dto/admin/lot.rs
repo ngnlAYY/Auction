@@ -48,17 +48,10 @@ pub struct AdminLotPaginationResponse {
     pub total: i64,
 }
 
-/// Admin lot 页面可用的外部写入能力；浏览器不得根据数据库档位自行猜测。
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-pub struct AdminLotCapabilitiesResponse {
-    pub manual_intake: bool,
-}
-
 /// Admin lot 列表响应；拍卖和 lot 来自同一数据库快照。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminLotListResponse {
-    pub auction: AdminSettlementAuctionResponse,
+    pub auction: AdminAuctionResponse,
     pub lots: Vec<AdminLotResponse>,
     pub pagination: AdminLotPaginationResponse,
-    pub capabilities: AdminLotCapabilitiesResponse,
 }

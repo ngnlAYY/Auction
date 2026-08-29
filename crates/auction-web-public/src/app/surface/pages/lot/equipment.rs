@@ -1,9 +1,52 @@
 //! Public lot 装备属性和游戏来源展示。
 
 use super::*;
+use crate::api::{EquipmentDetail, PreviewEquipmentDetail};
+use auction_contracts::PublicEquipmentStatResponse;
+use std::collections::BTreeMap;
+
+/// 详情页使用的统一展示模型；preview 与 live 的 wire DTO 在此处保持各自字段约束。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EquipmentCardData {
+    pub(crate) name: String,
+    pub(crate) category: Option<String>,
+    pub(crate) level: Option<i64>,
+    pub(crate) info_summary: String,
+    pub(crate) stats: BTreeMap<String, PublicEquipmentStatResponse>,
+    pub(crate) avg_roll: Option<f64>,
+    pub(crate) game_equipment_url: String,
+}
+
+impl From<EquipmentDetail> for EquipmentCardData {
+    fn from(equipment: EquipmentDetail) -> Self {
+        Self {
+            name: equipment.name,
+            category: Some(equipment.category),
+            level: equipment.level,
+            info_summary: equipment.info_summary,
+            stats: equipment.stats,
+            avg_roll: equipment.avg_roll,
+            game_equipment_url: equipment.game_equipment_url,
+        }
+    }
+}
+
+impl From<PreviewEquipmentDetail> for EquipmentCardData {
+    fn from(equipment: PreviewEquipmentDetail) -> Self {
+        Self {
+            name: equipment.name,
+            category: equipment.category,
+            level: equipment.level,
+            info_summary: equipment.info_summary,
+            stats: equipment.stats,
+            avg_roll: equipment.avg_roll,
+            game_equipment_url: equipment.game_equipment_url,
+        }
+    }
+}
 
 #[component]
-pub(crate) fn EquipmentCard(equipment: EquipmentDetail) -> Element {
+pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
     let mut stats_page = use_signal(|| 1_i64);
     let stats_page_size = 10_i64;
     let current_stats_page = stats_page().max(1);
@@ -15,8 +58,10 @@ pub(crate) fn EquipmentCard(equipment: EquipmentDetail) -> Element {
         div { class: "public-auction-equipment",
             h2 { "{equipment.name}" }
             dl {
-                dt { {t!("equipment-category")} }
-                dd { {catalog_category_label(catalog_category_key(&equipment.category))} }
+                if let Some(category) = equipment.category.as_deref() {
+                    dt { {t!("equipment-category")} }
+                    dd { {catalog_category_label(catalog_category_key(category))} }
+                }
                 if let Some(level) = equipment.level {
                     dt { {t!("equipment-level")} }
                     dd { "{level}" }

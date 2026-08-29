@@ -9,22 +9,41 @@ pub(super) async fn load_lifecycle_context_postgres(
     let row = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
-            r#"SELECT
+            r#"WITH target_auction AS MATERIALIZED (
+                   SELECT auction.id, auction.world_id
+                   FROM public.auctions AS auction
+                   WHERE auction.id = $1
+               ),
+               locked_world AS MATERIALIZED (
+                   SELECT world.id, world.enabled
+                   FROM public.worlds AS world
+                   INNER JOIN target_auction ON target_auction.world_id = world.id
+                   FOR UPDATE OF world
+               ),
+               locked_round AS MATERIALIZED (
+                   SELECT round.local_week
+                   FROM public.scheduled_rounds AS round
+                   INNER JOIN target_auction ON target_auction.id = round.auction_id
+                   INNER JOIN locked_world ON locked_world.id = target_auction.world_id
+                   FOR UPDATE OF round
+               )
+             SELECT
                 a.id, a.title, a.status, a.state_version, a.created_at, a.updated_at,
                 a.scheduled_end_at, a.effective_end_at,
                 a.cancelled_at, a.cancelled_reason, a.cancelled_by,
                 a.world_id, a.sequence, a.preview_scheduled_at, a.scheduled_open_at,
-                a.preview_manual_open,
+                a.preview_opened_at, a.preview_manual_open, a.preview_revision,
+                a.opened_at, a.final_phase_at, a.settled_at,
+                locked_world.enabled AS world_enabled,
                 (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
                     AS policy_scheduled_end_at,
                 (a.policy_snapshot ->> 'final_phase_lead_seconds')::bigint
                     AS policy_final_phase_lead_seconds,
-                (SELECT round.local_week
-                 FROM public.scheduled_rounds AS round
-                 WHERE round.auction_id = a.id
-                 LIMIT 1) AS scheduled_round_local_week
+                locked_round.local_week AS scheduled_round_local_week
              FROM public.auctions AS a
-             WHERE a.id = $1
+             INNER JOIN target_auction ON target_auction.id = a.id
+             INNER JOIN locked_world ON locked_world.id = a.world_id
+             LEFT JOIN locked_round ON TRUE
              FOR UPDATE OF a"#,
         )
         .bind(auction_id.as_uuid())
@@ -58,12 +77,18 @@ pub(super) async fn load_lifecycle_context_postgres(
     Ok(Some(AuctionLifecycleContext {
         auction,
         world_id: row.try_get("world_id").map_err(map_sql_error)?,
+        world_enabled: row.try_get("world_enabled").map_err(map_sql_error)?,
         sequence: row.try_get("sequence").map_err(map_sql_error)?,
         preview_scheduled_at: row.try_get("preview_scheduled_at").map_err(map_sql_error)?,
         scheduled_open_at: row.try_get("scheduled_open_at").map_err(map_sql_error)?,
+        preview_opened_at: row.try_get("preview_opened_at").map_err(map_sql_error)?,
         policy_scheduled_end_at: row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?,
         policy_final_phase_lead: Duration::seconds(final_phase_lead_seconds),
         preview_manual_open: row.try_get("preview_manual_open").map_err(map_sql_error)?,
+        preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,
+        opened_at: row.try_get("opened_at").map_err(map_sql_error)?,
+        final_phase_at: row.try_get("final_phase_at").map_err(map_sql_error)?,
+        settled_at: row.try_get("settled_at").map_err(map_sql_error)?,
         scheduled_round_local_week: row
             .try_get::<Option<NaiveDate>, _>("scheduled_round_local_week")
             .map_err(map_sql_error)?,

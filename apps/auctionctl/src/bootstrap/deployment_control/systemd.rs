@@ -72,6 +72,16 @@ impl UnitSnapshot {
     pub(super) fn stopped(&self) -> bool {
         self.main_pid == 0 && self.active_state != "active" && self.active_state != "activating"
     }
+
+    /// 独立迁移只接受 systemd 明确收敛后的停止状态。
+    ///
+    /// `deactivating`、`maintenance` 和未来新增的未知状态即使暂时没有 MainPID，也不能放行
+    /// schema 变更；否则会在 ExecStopPost 或其他 unit 状态转换尚未结束时绕过部署锁语义。
+    pub(super) fn safely_stopped_for_migration(&self) -> bool {
+        matches!(self.load_state.as_str(), "loaded" | "not-found")
+            && self.main_pid == 0
+            && matches!(self.active_state.as_str(), "inactive" | "failed")
+    }
 }
 
 pub(super) struct SystemdClient {
@@ -142,6 +152,10 @@ impl SystemdClient {
     pub(super) fn stop_unit(&self, role: ManagedRole) -> anyhow::Result<()> {
         let unit = self.unit(role);
         let before = self.snapshot(role)?;
+        if before.load_state == "not-found" {
+            println!("role={} unit={} action=already-stopped", role.name(), unit);
+            return Ok(());
+        }
         if before.load_state != "loaded" {
             anyhow::bail!("{} unit 未装载：{}", role.name(), unit)
         }

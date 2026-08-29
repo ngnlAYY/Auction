@@ -27,36 +27,6 @@ pub(super) async fn list_final_lot_ids_for_update(
         .collect()
 }
 
-pub(super) async fn proxy_user_is_eligible_for_update(
-    transaction: &mut SqliteCompetitionTransaction,
-    user_id: UserId,
-) -> Result<bool, CompetitionTransactionError> {
-    let status = {
-        let connection = transaction.connection_mut()?;
-        sqlx::query_scalar::<_, String>("SELECT status FROM users WHERE id = ?")
-            .bind(uuid_blob(user_id.as_uuid()))
-            .fetch_optional(&mut *connection)
-            .await
-            .map_err(map_sql_error)?
-            .ok_or_else(|| invalid_state("Lite 活动代理用户不存在"))?
-    };
-    let blacklist_active = {
-        let connection = transaction.connection_mut()?;
-        sqlx::query_scalar::<_, i64>(
-            "SELECT CASE WHEN revoked_at IS NULL THEN 1 ELSE 0 END
-             FROM user_blacklist
-             WHERE user_id = ?",
-        )
-        .bind(uuid_blob(user_id.as_uuid()))
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(map_sql_error)?
-        .unwrap_or(0)
-            != 0
-    };
-    Ok(status == "active" && !blacklist_active)
-}
-
 pub(super) async fn load_lifecycle_context_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
     auction_id: AuctionId,
@@ -69,13 +39,16 @@ pub(super) async fn load_lifecycle_context_sqlite(
                 a.scheduled_end_at, a.effective_end_at,
                 a.cancelled_at, a.cancelled_reason, a.cancelled_by,
                 a.world_id, a.sequence, a.preview_scheduled_at, a.scheduled_open_at,
-                a.preview_manual_open,
+                a.preview_opened_at, a.preview_manual_open, a.preview_revision,
+                a.opened_at, a.final_phase_at, a.settled_at,
+                world.enabled AS world_enabled,
                 json_extract(a.policy_snapshot, '$.scheduled_end_at') AS policy_scheduled_end_at,
                 CAST(json_extract(a.policy_snapshot, '$.final_phase_lead_seconds') AS INTEGER)
                     AS policy_final_phase_lead_seconds,
-                (SELECT round.local_week FROM scheduled_rounds AS round
-                 WHERE round.auction_id = a.id LIMIT 1) AS scheduled_round_local_week
+                round.local_week AS scheduled_round_local_week
              FROM auctions AS a
+             INNER JOIN worlds AS world ON world.id = a.world_id
+             LEFT JOIN scheduled_rounds AS round ON round.auction_id = a.id
              WHERE a.id = ?",
         )
         .bind(uuid_blob(auction_id.as_uuid()))
@@ -126,6 +99,22 @@ pub(super) async fn load_lifecycle_context_sqlite(
         row.try_get("scheduled_open_at").map_err(map_sql_error)?,
         "Lite 开拍计划时间格式无效",
     )?;
+    let preview_opened_at = parse_optional_timestamp(
+        row.try_get("preview_opened_at").map_err(map_sql_error)?,
+        "Lite 预览开放时间格式无效",
+    )?;
+    let opened_at = parse_optional_timestamp(
+        row.try_get("opened_at").map_err(map_sql_error)?,
+        "Lite 开拍时间格式无效",
+    )?;
+    let final_phase_at = parse_optional_timestamp(
+        row.try_get("final_phase_at").map_err(map_sql_error)?,
+        "Lite 最终阶段时间格式无效",
+    )?;
+    let settled_at = parse_optional_timestamp(
+        row.try_get("settled_at").map_err(map_sql_error)?,
+        "Lite 结算时间格式无效",
+    )?;
     let policy_scheduled_end_at = parse_timestamp(
         row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?,
         "Lite 策略结束时间格式无效",
@@ -146,13 +135,19 @@ pub(super) async fn load_lifecycle_context_sqlite(
     Ok(Some(AuctionLifecycleContext {
         auction,
         world_id: row.try_get("world_id").map_err(map_sql_error)?,
+        world_enabled: row.try_get::<i64, _>("world_enabled").map_err(map_sql_error)? != 0,
         sequence: row.try_get("sequence").map_err(map_sql_error)?,
         preview_scheduled_at,
         scheduled_open_at,
+        preview_opened_at,
         policy_scheduled_end_at,
         policy_final_phase_lead: Duration::seconds(final_phase_lead_seconds),
         preview_manual_open: row.try_get::<i64, _>("preview_manual_open").map_err(map_sql_error)?
             != 0,
+        preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,
+        opened_at,
+        final_phase_at,
+        settled_at,
         scheduled_round_local_week,
     }))
 }

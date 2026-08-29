@@ -72,14 +72,11 @@ pub(crate) async fn validate(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
+    if let Err(response) = super::authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
+    }
+    if let Some(response) = mutation_boundary(&uri) {
+        return response;
     }
     let input: AdminRuntimeConfigValidateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
@@ -119,16 +116,13 @@ pub(crate) async fn update(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
-        return response;
-    }
-    let (_, identity) = match super::authenticated_admin_session(&state, &headers).await {
+    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
     };
+    if let Some(response) = mutation_boundary(&uri) {
+        return response;
+    }
     let input: AdminRuntimeConfigUpdateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
@@ -194,8 +188,11 @@ fn map_snapshot(
     snapshot: AdminRuntimeSnapshot,
 ) -> Result<AdminRuntimeConfigResponse, Box<Response>> {
     snapshot.validate().map_err(|_| Box::new(super::internal_error()))?;
-    let document =
-        serde_json::to_value(snapshot.document).map_err(|_| Box::new(super::internal_error()))?;
+    let mut document = snapshot.document;
+    // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
+    // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。
+    document.materialize_business_defaults();
+    let document = serde_json::to_value(document).map_err(|_| Box::new(super::internal_error()))?;
     Ok(AdminRuntimeConfigResponse {
         document,
         fingerprint: snapshot.fingerprint,
@@ -203,16 +200,7 @@ fn map_snapshot(
     })
 }
 
-fn mutation_boundary(headers: &HeaderMap, uri: &Uri) -> Option<Response> {
-    let Some(raw_csrf) = super::read_admin_cookie(headers, super::ADMIN_CSRF_COOKIE) else {
-        return Some(super::authentication_error());
-    };
-    if !super::valid_admin_csrf_header(headers, &raw_csrf) {
-        return Some(
-            super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-                .into_response(),
-        );
-    }
+fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
             super::api_error(

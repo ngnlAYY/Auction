@@ -12,6 +12,7 @@ pub(super) use paths::{
     database_url_is_sqlite, resolve_config_path, resolve_secrets_path, resolve_worker_paths,
 };
 pub(super) use security::{
-    validate_cache, validate_http_security, validate_realtime, validate_session,
+    resolve_http_security_origins, validate_cache, validate_http_security,
+    validate_metrics_listener, validate_realtime, validate_session,
 };
 pub(super) use tracing::validate_tracing;

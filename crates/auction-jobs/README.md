@@ -15,12 +15,16 @@ Unix socket server 和 Admin client 分别位于 `src/control/transport/{protoco
 指数退避失败记录和由装配根注入的 shutdown future；它通过生命周期应用端口执行 preview/open，
 不复制状态机。收到 drain 后，各独立循环完成当前有界批次并停止领取新任务；SIGINT/SIGTERM、
 10 秒总上限和二次信号强制收口由 `apps/worker` 与 `auction-process` 拥有。
-`run_persistent_with_settlement_until_shutdown()` 在 PostgreSQL 完整档额外领取结算 workflow，
-通过 `SettlementCommandPort` 执行稳定的 `settle_auction` 命令，并持久化完成 fence 与失败退避；
-Auction 生命周期与结算已使用独立主循环，立即执行首轮，再按一分钟加最多五秒抖动唤醒；两类
-工作各自最多领取 100 条、按 8 并发波次处理，并共享 30 秒单项总预算。一类 claim/处理失败仍会
-继续尝试另一类，且不会终止其它 Worker owner；SQLite Lite 的有效并发由配置层固定为 1。
-SQLite Lite 不启用结算 workflow。PostgreSQL 完整档还提供结算履约的 claim/fencing、
+`run_persistent_with_settlement_until_shutdown()` 在装配根注入 slow due 读取/命令端口，并在
+PostgreSQL 完整档额外领取结算 workflow。Auction 主循环立即执行首轮，再按一分钟加最多五秒
+抖动唤醒，依次运行生命周期、慢速代理和结算三个独立阶段；任一阶段失败仍继续后续阶段，也不会
+终止其它 Worker owner。结算命令的 `now` 使用持久化 claim 的 `due_at`，与旧版 task 时钟语义一致，
+不会因 Worker 实际领取延迟改变结算事实；workflow、claim 和 complete 身份继续绑定同一 due 世代。
+完成阶段失败会映射到旧版安全错误闭集，单项超时后还会在独立两秒窗口内尽力提交 attempt、固定退避和
+retry 审计；若结算其实已经提交，settled fence 会阻止误写失败进度。慢速代理每轮只按数据库时钟扫描一次有界候选，使用旧版稳定命令身份，
+再由竞价事务核对 generation/due/authorization、截止时间和 owner 资格；stale candidate 成功跳过，
+失格 owner 原子冻结。各阶段最多处理 100 条、按 8 并发波次和 30 秒单项预算执行；SQLite Lite
+的有效并发由配置层固定为 1，且不启用结算 workflow。PostgreSQL 完整档还提供结算履约的 claim/fencing、
 `pending → prepared → enqueued` 推进和 delivery outbox 的发送中/成功/失败边界；MoogleMail
 `DeliveryTransport` 已由 Worker 装配，当前执行版本化静态通知、注册/重绑用户通知、return 和
 take payload。动作前会核对 sender 和预期资产；return 以精确 `mid` 从收件箱消失证明结果，
@@ -36,8 +40,10 @@ claim 提前耗尽 lease。进入 `sending` 后按配置周期续租，并用完
 只允许尝试同一 token/fencing 的结果未知写回；若 fence 已失效，则由 lease 加 sending grace
 到期后的防线转入人工对账，禁止重新领取并盲目重发。
 上述 delivery 状态推进均由 PostgreSQL owner 在状态事务内追加审计，Worker 不另建内存审计或
-在事务提交后补写证据。单轮 claim/持久化错误会记录并按下一轮 cadence 重试，不会终止整个
-Worker；只有循环任务异常退出才使进程失败关闭。
+在事务提交后补写证据。履约应用端口已经识别的依赖、证据和外部结果会以旧版对应的
+`error_code` 写入 `pending`、`failed` 或 `manual_reconcile`；尚未完成状态迁移的 claim/持久化
+错误只结束当前项目并保留原 lease/fencing，由下一轮在租约恢复后重试，不由 Worker 猜测新的
+阶段错误码。单轮错误不会终止整个 Worker；只有循环任务异常退出才使进程失败关闭。
 实时消费 runner 已接入
 Worker 循环，并通过 `realtime_consumer_offsets` / `realtime_failures` 提供连续游标、失败停靠
 和显式 replay 边界；旧版只向当前 Public 进程内 Hub 分发，装配根因此不注入不存在的外部 sink，
@@ -45,15 +51,17 @@ Worker 循环，并通过 `realtime_consumer_offsets` / `realtime_failures` 提�
 Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布、主题读取和回帖导入也已接入，
 后者通过 `ForumReplyStore` 的身份/lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
-对应的 MM 通知也会在后续轮次独立重放。主题远端发布成功但本地发布证明写入失败时，Worker
-会持久化人工对账退避，避免租约过期后静默重复发布；单项处理超时也按远端写入结果未知停靠，
-不会自动重试可能已经成功的远端 POST。回帖导入实现又按主题/映射、竞价命令、MoogleMail
+对应的 MM 通知也会在后续轮次独立重放。主题远端写入结果未知或本地发布证明写入失败时，Worker
+进入 reconciliation-only 并按精确标题 GET：命中只补本地 topic 证明，未命中则持久化
+`write_authorization_required`，不会自动重试可能已经成功的远端 POST。只有 `auctionctl` 通过逐字
+auction UUID 确认写入幂等授权账本和追加审计后，Worker 下一次领取才可再次 POST。回帖导入实现又按主题/映射、竞价命令、MoogleMail
 通知和完成/错误辅助拆入 `worker/forum/reply/{topic,command,notification,common}.rs`，
 `reply.rs` 只保留运行时与循环入口。Forum 使用独立顺序循环，先发布后读取回帖；发布失败
 仍继续回帖导入，主题逐条领取而不提前占用整批租约，循环异常退出才使进程失败关闭。
-Operations alert 的 scan、dispatch 和 reconcile 现在按各自一分钟 cadence 独立运行，分别应用
-有界 deadline、结果/耗时/调度延迟指标和错误重试；任一 owner 的临时失败不会阻塞另外两类任务，
-reconcile 上限与通知批次上限保持一致。
+Operations alert 的 scan、dispatch 和 reconcile 现在按各自独立 cadence 运行，默认每 60 秒加最多
+5 秒随机抖动，分别应用有界 deadline、结果/耗时/调度延迟指标和错误重试；任一 owner 的临时失败不会
+阻塞另外两类任务，reconcile 上限与通知批次上限保持一致。收到取消后立即跳过抖动等待，不改变 claim
+或 fencing 语义。
 Fulfillment 与 Recovery 也已从共享全局 tick 拆为独立循环：两者立即执行首轮，再按一分钟加最多
 五秒抖动调度，使用各自 100 条批次、8 并发、60 秒 lease/持久化重试和 30 秒单项总时限。
 Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Recovery 的
@@ -65,8 +73,9 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 `processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
 租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。
 每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
-默认 `* * * * *`，并兼容旧版描述符、`@every`、本地时区和显式 IANA 时区前缀。远程读取与单封业务处理按
-各自次数/超时有界重试，共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；
+默认 `* * * * *`，并兼容旧版描述符、`@every`、本地时区和显式 IANA 时区前缀。远程读取按暂时
+错误有界重试；单封业务错误由应用层冻结为 `Retryable`/`Permanent`，只有前者和超时按配置次数
+重试，确定性输入、配置和业务拒绝立即收口。共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责
 恢复超时前可能已完成的本地步骤。
 论坛 `start/cancel` 和 PM-only 通知在旧版 `forumingest` 中就是 warning-only，当前保持该兼容

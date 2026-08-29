@@ -7,10 +7,12 @@ use std::future::Future;
 
 use auction_application::{
     AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
-    AuctionLifecycleResult, AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan,
-    CommandLedgerError, CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError,
-    RequestHash, StoredCommand, TransactionFailure, TransactionFuture, TransactionIsolation,
-    TransactionPolicy, TransactionRunner,
+    AuctionLifecycleResult, AuctionLifecycleTransaction, AuctionLifecycleWriteSummary,
+    AuctionPreviewSuccessorPlan, CommandLedgerError, CompetitionCommandAuditContext,
+    CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,
+    CompetitionTransactionError, ProxyUsageContext, RequestHash, SlowProxyExecutionContext,
+    StoredCommand, TransactionFailure, TransactionFuture, TransactionIsolation, TransactionPolicy,
+    TransactionRunner,
 };
 use auction_domain::{
     AcceptedBid, Auction, AuctionId, AuctionRules, AuctionStatus, BidAmount, BidMechanism,
@@ -179,26 +181,64 @@ impl CompetitionTransaction for SqliteCompetitionTransaction {
         async move { self.insert_command_inner(command).await }
     }
 
+    fn current_time(
+        &mut self,
+    ) -> impl Future<Output = Result<DateTime<Utc>, CompetitionTransactionError>> + Send {
+        async move { self.current_time_inner().await }
+    }
+
     fn load_for_update(
         &mut self,
         lot_id: LotId,
+        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send {
-        async move { self.load_for_update_inner(lot_id).await }
+        async move { self.load_for_update_inner(lot_id, now).await }
     }
 
-    fn next_proxy_usage_number(
+    fn participant_is_eligible_for_update(
+        &mut self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
+        async move { self.participant_is_eligible_for_update_inner(user_id).await }
+    }
+
+    fn proxy_usage_context(
         &mut self,
         lot_id: LotId,
         user_id: UserId,
-    ) -> impl Future<Output = Result<u64, CompetitionTransactionError>> + Send {
-        async move { self.next_proxy_usage_number_inner(lot_id, user_id).await }
+    ) -> impl Future<Output = Result<ProxyUsageContext, CompetitionTransactionError>> + Send {
+        async move { self.proxy_usage_context_inner(lot_id, user_id).await }
+    }
+
+    fn proxy_transition_history(
+        &mut self,
+        authorization_id: ProxyAuthorizationId,
+    ) -> impl Future<
+        Output = Result<Vec<CompetitionProxyTransitionRecord>, CompetitionTransactionError>,
+    > + Send {
+        async move { self.proxy_transition_history_inner(authorization_id).await }
+    }
+
+    fn proxy_quota_limit(
+        &mut self,
+        lot_id: LotId,
+    ) -> impl Future<Output = Result<u32, CompetitionTransactionError>> + Send {
+        async move { self.proxy_quota_limit_inner(lot_id).await }
     }
 
     fn apply_plan(
         &mut self,
         plan: CompetitionPlan,
-        request_id: Option<String>,
+        audit: Option<CompetitionCommandAuditContext>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.apply_plan_inner(plan, request_id).await }
+        async move { self.apply_public_command_plan_inner(plan, audit).await }
+    }
+
+    fn apply_slow_proxy_plan(
+        &mut self,
+        plan: CompetitionPlan,
+        context: SlowProxyExecutionContext,
+    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
+        async move { self.apply_slow_proxy_plan_inner(plan, context).await }
     }
 }

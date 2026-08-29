@@ -47,7 +47,10 @@ pub use admin_rules::AdminRulesService;
 pub use admin_runtime_config::AdminRuntimeConfigService;
 pub use admin_users::AdminUserService;
 pub use auction::{AuctionService, CreateAuctionCommand};
-pub use competition::{CompetitionService, CreateProxyCommand, LowerProxyCommand, PlaceBidCommand};
+pub use competition::{
+    CREATE_PROXY_COMMAND_KIND, CompetitionService, CreateProxyCommand, LOWER_PROXY_COMMAND_KIND,
+    LowerProxyCommand, PLACE_BID_COMMAND_KIND, PlaceBidCommand,
+};
 pub use fulfillment::SettlementFulfillmentService;
 pub use lifecycle::AuctionLifecycleService;
 pub use mail_processing::{MailAuctionIntakeService, MailProcessorConfig, MailProcessorService};
@@ -56,5 +59,7 @@ pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig}
 pub use recovery::RecoveryCommandService;
 pub use recovery_health::RecoveryHealthService;
 pub use sessions::{AdminSessionService, PublicSessionService};
-pub use settlement::{SettleAuctionCommand, SettlementCommandPort, SettlementService};
+pub use settlement::{
+    SettleAuctionCommand, SettlementCommandPort, SettlementService, verify_legacy_settlement_replay,
+};
 pub use user_mail::MailUserService;

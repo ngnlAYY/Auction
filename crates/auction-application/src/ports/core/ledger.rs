@@ -23,6 +23,49 @@ impl RequestHash {
         self.0
     }
 
+    /// 对已经按具体命令契约冻结的字节序列计算 SHA-256 摘要。
+    ///
+    /// 旧系统已发布的幂等摘要可能不使用通用 envelope；这类兼容编码仍由各命令 owner 构造，
+    /// 但最终摘要统一由该值对象建立，避免散落固定长度复制逻辑。
+    pub fn from_canonical_bytes(payload: &[u8]) -> Self {
+        let digest = Sha256::digest(payload);
+        let mut bytes = [0_u8; 32];
+        bytes.copy_from_slice(&digest);
+        Self::new(bytes)
+    }
+
+    /// 按 Go `encoding/json.Marshal` 的默认 HTML 安全规则编码并计算旧版 SHA-256 摘要。
+    ///
+    /// 旧版命令和证明摘要绑定原始 JSON 字节；serde 默认不会转义 `<`、`>`、`&`、U+2028
+    /// 与 U+2029，因此兼容 owner 必须统一经过此入口。
+    pub fn from_legacy_go_json<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
+        let encoded = serde_json::to_vec(value)?;
+        let mut canonical = Vec::with_capacity(encoded.len());
+        let mut index = 0;
+        while index < encoded.len() {
+            let replacement = match encoded[index] {
+                b'<' => Some((br"\u003c".as_slice(), 1)),
+                b'>' => Some((br"\u003e".as_slice(), 1)),
+                b'&' => Some((br"\u0026".as_slice(), 1)),
+                0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa8].as_slice()) => {
+                    Some((br"\u2028".as_slice(), 3))
+                }
+                0xe2 if encoded.get(index..index + 3) == Some([0xe2, 0x80, 0xa9].as_slice()) => {
+                    Some((br"\u2029".as_slice(), 3))
+                }
+                _ => None,
+            };
+            if let Some((replacement, consumed)) = replacement {
+                canonical.extend_from_slice(replacement);
+                index += consumed;
+            } else {
+                canonical.push(encoded[index]);
+                index += 1;
+            }
+        }
+        Ok(Self::from_canonical_bytes(&canonical))
+    }
+
     /// 按稳定的命令种类、聚合标识和请求 DTO 计算 SHA-256 摘要。
     ///
     /// 摘要算法属于应用幂等边界而不是 HTTP 层；这样重试、队列和其他入口不会各自定义
@@ -40,10 +83,7 @@ impl RequestHash {
         }
 
         let payload = serde_json::to_vec(&Envelope { command_kind, aggregate_id, request })?;
-        let digest = Sha256::digest(payload);
-        let mut bytes = [0_u8; 32];
-        bytes.copy_from_slice(&digest);
-        Ok(Self::new(bytes))
+        Ok(Self::from_canonical_bytes(&payload))
     }
 }
 

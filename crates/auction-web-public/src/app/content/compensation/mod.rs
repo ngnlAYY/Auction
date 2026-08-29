@@ -1,7 +1,7 @@
 //! Public 补偿池页面装配。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::{
     CompensationMovementPage, CompensationPoolPage, CompensationRound,
