@@ -114,11 +114,14 @@ pub(crate) fn AuctionData(
     let status_label = auction_status_label(&auction.status);
     let now = clock();
     let is_live_presentation = auction.presentation_mode == "live";
+    let is_opening_presentation = auction.presentation_mode == "opening";
     let connection_state = realtime_state();
     let connection_state_name = live_connection_state_name(connection_state);
     let connection_message = super::super::realtime::live_connection_message(connection_state);
     let auction_end = if is_live_presentation {
         auction.scheduled_ends_at.clone()
+    } else if is_opening_presentation {
+        None
     } else {
         Some(auction.opens_at.clone())
     };
@@ -186,7 +189,11 @@ pub(crate) fn AuctionData(
                             "{status_label}"
                         }
                     }
-                    if let (Some(scheduled_ends_at), Some(countdown)) =
+                    if is_opening_presentation {
+                        p { class: "public-auction-round__end",
+                            {t!("auction-header-opening")}
+                        }
+                    } else if let (Some(scheduled_ends_at), Some(countdown)) =
                         (auction_end.clone(), auction_countdown)
                     {
                         p { class: "public-auction-round__end",

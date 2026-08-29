@@ -32,6 +32,7 @@ auction-ends-at = 終了時刻
 auction-opens-at = 開始時刻
 auction-header-ends-in = 終了予定まで
 auction-header-opens-in = 開始まで
+auction-header-opening = 開始処理中…
 auction-countdown = カウントダウン
 auction-lots = オークション出品
 auction-preview-lots = オークションプレビューカタログ

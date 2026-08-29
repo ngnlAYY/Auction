@@ -33,6 +33,7 @@ auction-ends-at = Ends at
 auction-opens-at = Opens at
 auction-header-ends-in = Scheduled end in
 auction-header-opens-in = Opens in
+auction-header-opening = Opening…
 auction-countdown = Countdown
 auction-lots = Auction lots
 auction-preview-lots = Auction preview catalogue

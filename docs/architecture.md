@@ -296,7 +296,9 @@ command ledger/竞价事务也已接入配置、应用端口与会话/竞价表�
 本次 bid，HTTP 不在提交后读取账户投影。旧 `OK + ProxyResult` 与历史 `accepted + CompetitionPlan`
 都经同一防腐层严格重放，历史新版结果只在只读事务按授权版本读取转换历史和冻结策略 quota；
 代理重入的 `usage_number` 在 lot 锁内按用户历史最大值递增，避免重入与命令重放混淆，
-不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase 已通过统一应用端口接入，
+不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase 已通过统一应用端口接入；
+Preview 在同一权威事务内、任何状态写入或 intake target 转移前要求至少一个 pending lot，PostgreSQL 与
+SQLite Lite 都拒绝会在 Open 阶段永久失败的空预览场次，
 命令请求携带 `expected_state_version`，取消动作还必须携带原因；存储事务在锁内校验版本并写入取消时间、原因和操作者，随后与命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件在同一数据库事务内提交；Admin A25 规则 GET/POST/PUT 已接入规则 owner，PostgreSQL 使用独立 Serializable revision CAS、`rules_admin_commands` 幂等账本和追加审计，SQLite 只提供规则读取；A05 论坛预览已接入本地 HTML/文本解析端口与管理端契约，限制单次输入为 2 MiB，并只返回 catalog、posts、warnings 等安全预览数据；它不发起远程论坛请求、不写数据库，也不把本地解析结果误报成远程发布成功。A33 Admin 审计已接入两套数据库的追加式安全只读投影、严格精确筛选、keyset/数字分页和 metadata JSON object 校验；数字页的 total 与记录在同一读取事务内取得，管理端不接触原始 SQL 行。Public
 `allow_manual_early_open` 在 Admin 启动时冻结为应用策略，HTTP capability 使用同一来源；计划时间
 之前的人工开放会在存储事务锁定拍卖并读取 `scheduled_open_at` 后失败关闭，计划时间已到的开放和
@@ -411,7 +413,8 @@ delivery/prepare/activation 身份和 outbox 的成功、失败、
 人工对账终态边界；实时消费 runner 已接入 PostgreSQL/SQLite 的持久化游标、失败记录和
 显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计，
 外部广播 sink 属于尚未冻结的新增扩展；Public 本地 relay/Hub 已接入同一持久化事件边界。公开端首页看板与 lot 详情已经接入同源 Public
-API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，Admin 拍卖列表提供带 CSRF、命令 ID
+API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，`opening` 过渡态只展示开拍处理中，
+不把已经过去的计划开放时间渲染为倒计时或落锤状态；Admin 拍卖列表提供带 CSRF、命令 ID
 和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、论坛镜像、健康和实时 catch-up 页面已消费对应安全 DTO；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照
@@ -449,7 +452,8 @@ runtime 中的 world/mailbox 投影校验轮询器数量和邮箱标识，避免
 无数据库启动骨架启用 control 时也只报告进程存活和零个 poller，不伪造持久化就绪；operations
 alert、credential 内部 owner 按 kind/world 聚合 active/disabled/invalid，并计算 scope 更新时间、最近
 Admin 变更时间和 Worker 重启状态；旧 v1 凭据 section 只公开 MoogleMail `main`/`isekai`
-world 的 availability、观测时间和最近 Admin 变更时间，不泄漏内部 scope/restart 诊断。mail、realtime、
+world 的 availability、观测时间和最近 Admin 变更时间，其中每个 world 的有效池由专属 scope 与
+`shared` scope 合并，更新时间取二者最新值；不泄漏内部 scope/restart 诊断。mail、realtime、
 delivery、fulfillment、recovery 的安全汇总也已接入 dashboard，其中 mail 为全量 poller、
 realtime 为 lag/failure water、delivery 为 pending/failed/manual-reconcile 水位及年龄字段；
 外部广播状态不属于旧版 dashboard 契约；未来若新增跨进程 sink，必须用独立 section 表达，
@@ -487,7 +491,8 @@ Admin A32 凭据管理属于 PostgreSQL 完整档：`auction-application` 的
 冲突；`auction-integrations/src/credentials/` 使用独立 `credential_data_key` 生成带类型域的
 AES-256-GCM 信封。`auction-storage/src/database/credentials/` 在同一 Serializable 事务内
 完成安全投影、命令账本、审计以及导入/改名/启停/删除，删除后仍保留命令与审计证据；凭据 dashboard
-同时按 scope 返回更新时间，并以最近 Admin 变更与 Worker 启动心跳判断重启要求；Worker
+同时按 scope 返回更新时间，并以最近 Admin 变更与 Worker 启动心跳判断重启要求；dashboard 的
+world 健康投影与 Worker 一致，把 `shared` 凭据同时继承给 main/isekai，而不是只精确匹配 world；Worker
 通过 active 凭据读取端口按 world 取池并在内存解密；没有 active 行时保留 degraded Worker，
 实际操作返回 credential unavailable；已有 active 行但密钥不匹配或密文损坏时失败关闭。远端
 确认 session 失效时按稳定顺序轮换、幂等回写 `invalid` 并从当前池移除，写入开始后禁止盲重试。Admin/Web 只接触安全投影，secret

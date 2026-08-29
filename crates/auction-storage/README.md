@@ -133,6 +133,7 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 `context.rs`、`plan/` 和 `record.rs` 分别负责上下文锁定、生命周期计划写入和审计/实时事件记录，其中
 `plan/{preview,open,cancel,final_phase}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
+Preview 在修改状态和转移 intake target 前还要求至少一个 pending lot，防止形成永远无法 Open 的空活跃场次；
 取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
 `transaction/lifecycle/{context,plan/{mod,preview,open,cancel,final_phase},record}.rs` 分别负责上下文/资格读取、
@@ -187,7 +188,8 @@ Admin A32 凭据管理由 `src/database/credentials/mod.rs` 装配：`runtime.rs
 删除会先保留命令账本与审计，再删除凭据行，外键使用 `ON DELETE SET NULL`。Worker 读取 active
 凭据时也由该模块按 world/shared 返回密文信封；dashboard 聚合同时返回 scope 最近更新时间和
 凭据命令账本最近变更时间，供 HTTP 层结合 Worker 心跳判断重启状态，并按旧版要求检查 MoogleMail
-`main`/`isekai` 各自的 active/invalid 水位；SQLite Lite 明确返回能力不支持，不把凭据导入、
+`main`/`isekai` 各自的 active/invalid 水位；`shared` 邮件凭据会继承到两个 world，更新时间取有效
+scope 的最新值，任一有效 scope 存在 invalid 行都会使对应 world 降级；SQLite Lite 明确返回能力不支持，不把凭据导入、
 解密或外部 Cookie 能力伪装成 Lite 功能。
 Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `src/database/commands/admin/mail.rs` 持有：PostgreSQL 读取 `mail_poll_state`、

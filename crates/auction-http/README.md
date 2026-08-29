@@ -105,7 +105,8 @@ Admin `/api/v1/admin/dashboard` 已接入 Admin session、两套数据库的 ser
 和 runtime 指定的 Worker control Unix socket 状态，返回 health/process/worker 安全字段；mail、
 realtime、credential aggregation、delivery、fulfillment、recovery 和 alerting section 由对应
 owner 提供安全汇总，只有 owner 未装配或读取失败时才明确返回 `unknown`，不构造占位数据。Worker
-control 失败只映射为有限 condition。
+control 失败只映射为有限 condition。MoogleMail availability 对每个 world 合并其专属 scope 和
+`shared` scope，避免 Worker 实际可用共享凭据时 dashboard 错误显示为缺失。
 
 Admin `/api/v1/admin/auctions` 的 GET 已接入 Admin session、`world_id`/`status` 筛选、旧
 `page`/`page_size` 分页和 PostgreSQL Serializable 生命周期/lot 数量快照；POST 创建已接入
