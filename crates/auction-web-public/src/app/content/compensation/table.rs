@@ -14,36 +14,40 @@ pub(super) fn CompensationPoolTable(
 ) -> Element {
     let page_size = page.page_size.max(1);
     rsx! {
-        section { class: "public-auction-category", aria_labelledby: "compensation-pool-title",
-            header { class: "public-auction-category__header",
+        section { class: "public-compensation-page", aria_labelledby: "compensation-pool-title",
+            header { class: "public-compensation-heading",
                 div {
-                    h1 { id: "compensation-pool-title", class: "public-auction-category__title",
-                        {t!("page-compensation-pool-title")}
-                    }
-                    p { class: "public-auction-page__status", {t!("page-compensation-pool-note")} }
+                    h1 { id: "compensation-pool-title", {t!("page-compensation-pool-title")} }
+                    p { class: "public-compensation-intro", {t!("page-compensation-pool-note")} }
                 }
-                div { class: "public-auction-preview-stats", aria_label: t!("compensation-balance"),
-                    span { {t!("compensation-balance", balance: format_amount(page.balance))} }
+                div { class: "public-compensation-balance", aria_label: t!("compensation-balance"),
+                    span { {t!("compensation-balance")} }
+                    strong { "{format_amount(page.balance)}" }
                     if let Some(updated_at) = page.updated_at.clone() {
-                        time { datetime: updated_at.clone(), "{format_auction_time(&updated_at)}" }
+                        small {
+                            time {
+                                datetime: updated_at.clone(),
+                                {t!("compensation-updated", date: format_auction_time(&updated_at))}
+                            }
+                        }
                     }
                 }
             }
             if page.rounds.is_empty() {
-                p { class: "public-auction-page__status", {t!("data-empty")} }
+                p { class: "public-compensation-empty", {t!("compensation-empty")} }
             } else {
-                div { class: "public-auction-catalog",
-                    table {
+                div { class: "public-compensation-table-wrap",
+                    table { class: "public-compensation-table",
                         thead {
                             tr {
-                                th { aria_label: t!("compensation-details") }
+                                th { class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }
                                 th { {t!("compensation-round-label")} }
                                 th { {t!("compensation-world")} }
-                                th { {t!("compensation-opening")} }
-                                th { {t!("compensation-tax")} }
-                                th { {t!("compensation-discount")} }
-                                th { {t!("compensation-out")} }
-                                th { {t!("compensation-closing")} }
+                                th { class: "public-compensation-number", {t!("compensation-opening")} }
+                                th { class: "public-compensation-number", {t!("compensation-tax")} }
+                                th { class: "public-compensation-number", {t!("compensation-discount")} }
+                                th { class: "public-compensation-number", {t!("compensation-out")} }
+                                th { class: "public-compensation-number", {t!("compensation-closing")} }
                                 th { {t!("compensation-settled")} }
                             }
                         }
@@ -86,9 +90,10 @@ fn CompensationRoundRow(
     let details_id = format!("compensation-details-{}", round.auction_id);
     let auction_id = round.auction_id.clone();
     rsx! {
-        tr {
+        tr { class: "public-compensation-round",
             td { class: "public-compensation-toggle-cell",
                 button {
+                    class: "public-compensation-expand",
                     r#type: "button",
                     aria_controls: details_id.clone(),
                     aria_expanded: open.to_string(),
@@ -103,11 +108,11 @@ fn CompensationRoundRow(
             }
             td { "#{round.auction_sequence}" }
             td { "{world_label(&round.world_id)}" }
-            td { class: "public-auction-catalog__amount", "{format_amount(round.opening_balance)}" }
-            td { class: "public-auction-catalog__amount", "{format_amount(round.tax_income)}" }
-            td { class: "public-auction-catalog__amount", "{format_amount(round.discount_demand)}" }
-            td { class: "public-auction-catalog__amount", "{format_amount(round.compensation_out)}" }
-            td { class: "public-auction-catalog__amount", "{format_amount(round.closing_balance)}" }
+            td { class: "public-compensation-number", "{format_amount(round.opening_balance)}" }
+            td { class: "public-compensation-number", "{format_amount(round.tax_income)}" }
+            td { class: "public-compensation-number", "{format_amount(round.discount_demand)}" }
+            td { class: "public-compensation-number", "{format_amount(round.compensation_out)}" }
+            td { class: "public-compensation-number public-compensation-closing", "{format_amount(round.closing_balance)}" }
             td {
                 time { datetime: round.settled_at.clone(), "{format_auction_time(&round.settled_at)}" }
             }

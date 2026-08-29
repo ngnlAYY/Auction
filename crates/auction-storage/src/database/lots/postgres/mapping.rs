@@ -85,7 +85,7 @@ pub(super) fn map_postgres_preview_detail(
     let category: String = row
         .try_get("equipment_category")
         .map_err(|_| storage_error("读取 PostgreSQL 预览详情装备分类失败"))?;
-    let equipment = map_equipment(world_id, &external_id, &name, &category, attributes.0)?;
+    let equipment = map_equipment(world_id, &external_id, &name, &category, attributes.0, false)?;
     let summary = PublicPreviewLotSummary {
         id,
         auction_id,

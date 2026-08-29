@@ -14,7 +14,7 @@ use auction_application::{
 #[cfg(feature = "postgres")]
 use auction_application::{RecoveryCommandError, RecoveryConfirmationAction};
 #[cfg(feature = "postgres")]
-use auction_domain::{CommandId, deterministic_uuid};
+use auction_domain::{CommandId, legacy_natural_key_uuid};
 use chrono::Duration as ChronoDuration;
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};

@@ -1,6 +1,6 @@
 //! Admin 邮件入站列表的状态和闭集标签映射。
 
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 pub(super) fn mail_status_class(status: &str) -> &'static str {
     match status {
@@ -28,15 +28,5 @@ pub(super) fn mail_status_label(status: &str) -> String {
         "rejected" => t!("admin-mail-status-rejected"),
         "failed" => t!("admin-mail-status-failed"),
         _ => status.to_owned(),
-    }
-}
-
-pub(super) fn mail_decision_class(decision: &str) -> &'static str {
-    if decision.contains("reject") || decision.contains("fail") {
-        "admin-mail__decision admin-mail__decision--rejected"
-    } else if decision.contains("accept") || decision.contains("success") {
-        "admin-mail__decision admin-mail__decision--accepted"
-    } else {
-        "admin-mail__decision admin-mail__decision--pending"
     }
 }

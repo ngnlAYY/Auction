@@ -38,8 +38,8 @@ pub(crate) async fn login_session(
                 user_id: result.identity.user_id.to_string(),
                 username: result.identity.username,
                 status: "active".to_owned(),
-                expires_at: timestamp(result.identity.expires_at),
-                absolute_expires_at: timestamp(result.identity.absolute_expires_at),
+                expires_at: public_timestamp(result.identity.expires_at),
+                absolute_expires_at: public_timestamp(result.identity.absolute_expires_at),
             };
             (StatusCode::OK, response_headers, Json(ApiResponse::ok("登录成功", data)))
                 .into_response()

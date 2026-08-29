@@ -38,9 +38,11 @@ pub(super) async fn apply_open_plan_postgres(
     }
     let activated = {
         let transaction = transaction.transaction_mut()?;
+        // 新存储以 NULL 表示尚无领先者；旧版起拍价哨兵只在竞价与公开读取防腐层归一化，
+        // 避免把持久化占位误当成已经存在的竞价事实。
         sqlx::query(
             "UPDATE public.lots
-             SET status = 'live', current_price = start_price, effective_end_at = $1,
+             SET status = 'live', current_price = NULL, effective_end_at = $1,
                  slow_due_at = NULL, slow_authorization_id = NULL, slow_generation = 0,
                  last_proxy_sequence = 0, state_version = state_version + 1, updated_at = $2
              WHERE auction_id = $3 AND status = 'pending'",

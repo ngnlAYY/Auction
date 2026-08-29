@@ -5,6 +5,7 @@ use super::*;
 mod actions;
 mod credentials;
 mod messages;
+mod settlement_secrets;
 
 impl MoogleMailDeliveryTransport {
     /// 使用已经由配置层校验的 MoogleMail client 和凭据构造 transport。
@@ -29,7 +30,27 @@ impl MoogleMailDeliveryTransport {
         templates: MoogleMailNotificationTemplates,
     ) -> Self {
         let sender = MoogleMailSender::new(client.clone());
-        Self { client, credentials, sender, parser: MoogleMailParser, login_keys, templates }
+        Self {
+            client,
+            credentials,
+            sender,
+            parser: MoogleMailParser,
+            login_keys,
+            settlement_equipment_secrets: None,
+            settlement_equipment_opener: None,
+            templates,
+        }
+    }
+
+    /// 注入结算装备 owner 引用解析器；持久 payload 只保存 UUID，发送前才短暂打开装备 key。
+    pub fn with_settlement_equipment_secrets(
+        mut self,
+        secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader>,
+        opener: EquipmentKeyOpener,
+    ) -> Self {
+        self.settlement_equipment_secrets = Some(secrets);
+        self.settlement_equipment_opener = Some(opener);
+        self
     }
 
     async fn send_claim(

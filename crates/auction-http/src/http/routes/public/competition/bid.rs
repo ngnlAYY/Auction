@@ -7,64 +7,64 @@ pub(crate) async fn place_bid(
     State(state): State<PublicApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(lot_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let headers = parts.headers;
+    let uri = parts.uri;
     if let Some(response) = session_guard(&state, &headers, address, true, false) {
         return response;
     }
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "出价不接受查询参数")
-            .into_response();
-    }
-    let Ok(lot_uuid) = Uuid::parse_str(&lot_id) else {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    };
-    if lot_uuid.is_nil() {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    }
-
-    let identity = match authenticated_public_identity(&state, &headers).await {
+    let identity = match authenticated_public_competition_identity(&state, &headers).await {
         Ok(identity) => identity,
         Err(response) => return *response,
     };
-    let input: PlaceBidRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+    }
+    let Ok(lot_uuid) = parse_public_uuid(&lot_id) else {
+        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
+            .into_response();
     };
-    if input.command_id.is_nil() {
+
+    let input: PlaceBidRequest =
+        match strict_json::decode_after_guard(&headers, body, 4 << 10).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
+    let Ok(command_uuid) = parse_public_uuid(&input.command_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
-    }
+    };
     let amount = match BidAmount::new(input.amount) {
         Ok(amount) => amount,
-        Err(DomainError::InvalidAmount { .. }) => {
+        Err(DomainError::InvalidAmount { .. }) if input.amount <= 0 => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_amount", "出价金额无效")
                 .into_response();
         }
-        Err(_) => return internal_error(),
-    };
-    let request_hash = match RequestHash::from_request("place_bid", lot_uuid, &input) {
-        Ok(request_hash) => request_hash,
+        // 旧 v1 只在 HTTP 层拒绝非正数；正数的网格错误由命令 owner 返回通用依赖外壳。
+        Err(DomainError::InvalidAmount { .. }) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "temporarily_unavailable",
+                "服务暂时不可用",
+            )
+            .into_response();
+        }
         Err(_) => return internal_error(),
     };
     let Some(commands) = state.commands() else {
-        return api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "竞价服务暂不可用",
-        )
-        .into_response();
+        return competition_unavailable();
     };
-    let command_id = CommandId::from_uuid(input.command_id);
+    let command_id = CommandId::from_uuid(command_uuid);
     let lot_id = LotId::from_uuid(lot_uuid);
     let bidder_id = UserId::from_uuid(identity.user_id);
+    let request_hash = match auction_application::PlaceBidCommand::legacy_request_hash(
+        lot_id, bidder_id, amount,
+    ) {
+        Ok(request_hash) => request_hash,
+        Err(_) => return internal_error(),
+    };
     let command = auction_application::PlaceBidCommand {
         command_id,
         lot_id,
@@ -74,8 +74,8 @@ pub(crate) async fn place_bid(
         request_id: request_id(&headers),
     };
     let command_started = Instant::now();
-    let plan = match commands.place_bid(command).await {
-        Ok(plan) => plan,
+    let outcome = match commands.place_bid(command).await {
+        Ok(outcome) => outcome,
         Err(error) => {
             observe_public_business(
                 &state,
@@ -86,6 +86,11 @@ pub(crate) async fn place_bid(
             return map_competition_error(error);
         }
     };
+    if outcome.proxy.is_some() {
+        return internal_error();
+    }
+    let effective_end_at = outcome.effective_end_at;
+    let plan = outcome.plan;
     observe_public_business(&state, BusinessEvent::Bid, BusinessOutcome::Success, command_started);
     let Some(current_price) = plan.final_lot.current_price else {
         return internal_error();
@@ -93,7 +98,8 @@ pub(crate) async fn place_bid(
     let Ok(state_version) = i64::try_from(plan.final_lot.state_version) else {
         return internal_error();
     };
-    if plan.final_lot.lot_id != lot_id
+    if effective_end_at.instant() != plan.final_lot.effective_end_at
+        || plan.final_lot.lot_id != lot_id
         || plan.final_lot.leader_id.is_none()
         || !plan.public_bids.iter().any(|bid| {
             bid.command_id == command_id && bid.lot_id == lot_id && bid.bidder_id == bidder_id
@@ -105,7 +111,7 @@ pub(crate) async fn place_bid(
         bid: PlaceBidResultResponse {
             lot_id: lot_uuid.to_string(),
             current_price: current_price.value(),
-            effective_end_at: timestamp(plan.final_lot.effective_end_at),
+            effective_end_at: effective_end_at.wire().to_owned(),
             state_version,
             leading: plan.final_lot.leader_id == Some(bidder_id),
         },

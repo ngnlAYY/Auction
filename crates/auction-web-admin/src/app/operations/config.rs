@@ -3,8 +3,8 @@
 //! 页面只编辑服务端下发的非敏感 JSON 投影；候选必须先经过服务端规范化校验，更新再以
 //! fingerprint 和可重试的 command ID 作为版本与幂等边界。TOML、密钥和命令账本永远不进入浏览器。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ use crate::api::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 
-use super::AdminPanel;
+use super::admin_api_error_message;
 
 #[derive(Debug, Clone)]
 struct ConfigCommand {
@@ -22,12 +22,12 @@ struct ConfigCommand {
     signature: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ConfigNotice {
     Validated,
     Saved,
     InvalidJson,
-    ActionError,
+    ActionError(String),
     Conflict,
 }
 
@@ -59,12 +59,16 @@ pub(super) fn page() -> Element {
         }
     });
 
-    match &*config.read_unchecked() {
+    let content = match &*config.read_unchecked() {
         None => rsx! {
-            AdminPanel { title: t!("page-config-title"), detail: t!("admin-runtime-loading") }
+            p { class: "admin-config-status", role: "status", {t!("admin-runtime-loading")} }
         },
-        Some(Err(_)) => rsx! {
-            AdminRuntimeConfigLoadError { refresh }
+        Some(Err(error)) => rsx! {
+            p {
+                class: "admin-config-error",
+                role: "alert",
+                {admin_api_error_message(&error.code)}
+            }
         },
         Some(Ok(snapshot)) => {
             let editor_value = editor().unwrap_or_else(|| format_document(&snapshot.document));
@@ -74,16 +78,24 @@ pub(super) fn page() -> Element {
             let validate_text = editor_value.clone();
             let update_text = editor_value.clone();
             let update_fingerprint = current_fingerprint.clone();
+            let (enabled_worlds, equipment_filter_enabled) =
+                runtime_business_facts(&snapshot.document);
 
             rsx! {
-                section {
-                    class: "admin-panel admin-runtime-config admin-config-page",
-                    aria_labelledby: "admin-runtime-title",
+                div {
+                    class: "admin-runtime-config__content",
                     aria_busy: busy().to_string(),
-                    h1 { id: "admin-runtime-title", {t!("page-config-title")} }
-                    p { class: "admin-panel__note admin-config-intro", {t!("admin-runtime-note")} }
-                    p { class: "admin-panel__note admin-config-status",
-                        {t!("admin-runtime-fingerprint", fingerprint: current_fingerprint.clone())}
+                    div { class: "admin-config-facts",
+                        AdminRuntimeConfigFact {
+                            detail: format!("{enabled_worlds}/2"),
+                            enabled: enabled_worlds > 0,
+                            label: t!("admin-runtime-enabled-worlds"),
+                        }
+                        AdminRuntimeConfigFact {
+                            detail: current_fingerprint.clone(),
+                            enabled: equipment_filter_enabled,
+                            label: t!("admin-runtime-equipment-filter"),
+                        }
                     }
                     form {
                         class: "admin-runtime-config__form admin-config-form",
@@ -120,7 +132,7 @@ pub(super) fn page() -> Element {
                                             notice.set(Some(if error.is_conflict() {
                                                 ConfigNotice::Conflict
                                             } else {
-                                                ConfigNotice::ActionError
+                                                ConfigNotice::ActionError(error.code)
                                             }));
                                         }
                                     }
@@ -148,13 +160,19 @@ pub(super) fn page() -> Element {
                         }
                         if let Some(current_notice) = notice() {
                             p {
-                                class: if matches!(current_notice, ConfigNotice::Validated | ConfigNotice::Saved) {
+                                class: if matches!(
+                                    &current_notice,
+                                    ConfigNotice::Validated | ConfigNotice::Saved
+                                ) {
                                     "admin-panel__note action-feedback action-feedback--success"
                                 } else {
                                     "admin-panel__note action-feedback action-feedback--error"
                                 },
-                                role: if matches!(current_notice, ConfigNotice::Validated | ConfigNotice::Saved) { "status" } else { "alert" },
-                                {notice_text(current_notice)}
+                                role: if matches!(
+                                    &current_notice,
+                                    ConfigNotice::Validated | ConfigNotice::Saved
+                                ) { "status" } else { "alert" },
+                                {notice_text(&current_notice)}
                             }
                         }
                         if restart_required() || snapshot.restart_required {
@@ -236,7 +254,7 @@ pub(super) fn page() -> Element {
                                                     notice.set(Some(if error.is_conflict() {
                                                         ConfigNotice::Conflict
                                                     } else {
-                                                        ConfigNotice::ActionError
+                                                        ConfigNotice::ActionError(error.code)
                                                     }));
                                                 }
                                             }
@@ -251,33 +269,45 @@ pub(super) fn page() -> Element {
                 }
             }
         }
-    }
-}
+    };
 
-#[component]
-fn AdminRuntimeConfigLoadError(mut refresh: Signal<u64>) -> Element {
     rsx! {
         section {
-            class: "admin-panel admin-config-page",
-            role: "alert",
-            aria_labelledby: "admin-runtime-error-title",
-            h1 { id: "admin-runtime-error-title", {t!("page-config-title")} }
-            p { class: "admin-panel__note", {t!("admin-runtime-error")} }
-            button {
-                r#type: "button",
-                onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                {t!("admin-runtime-retry")}
-            }
+            class: "admin-config-page",
+            aria_labelledby: "config-title",
+            h1 { id: "config-title", {t!("page-config-title")} }
+            p { class: "admin-config-intro", {t!("admin-runtime-note")} }
+            {content}
         }
     }
 }
 
-fn notice_text(notice: ConfigNotice) -> String {
+#[component]
+fn AdminRuntimeConfigFact(detail: String, enabled: bool, label: String) -> Element {
+    rsx! {
+        article {
+            div { class: "admin-config-fact-heading",
+                strong { "{label}" }
+                span {
+                    class: if enabled {
+                        "admin-config-fact-enabled"
+                    } else {
+                        "admin-config-fact-disabled"
+                    },
+                    if enabled { {t!("admin-runtime-enabled")} } else { {t!("admin-runtime-disabled")} }
+                }
+            }
+            p { "{detail}" }
+        }
+    }
+}
+
+fn notice_text(notice: &ConfigNotice) -> String {
     match notice {
         ConfigNotice::Validated => t!("admin-runtime-validated"),
         ConfigNotice::Saved => t!("admin-runtime-action-success"),
         ConfigNotice::InvalidJson => t!("admin-runtime-invalid-json"),
-        ConfigNotice::ActionError => t!("admin-runtime-action-error"),
+        ConfigNotice::ActionError(code) => admin_api_error_message(code),
         ConfigNotice::Conflict => t!("admin-runtime-conflict"),
     }
 }
@@ -289,4 +319,24 @@ fn parse_document(text: &str) -> Result<Value, ()> {
 
 fn format_document(document: &Value) -> String {
     serde_json::to_string_pretty(document).unwrap_or_else(|_| "{}".to_owned())
+}
+
+fn runtime_business_facts(document: &Value) -> (usize, bool) {
+    let enabled_worlds = ["main", "isekai"]
+        .into_iter()
+        .filter(|world| {
+            document
+                .get("worlds")
+                .and_then(|worlds| worlds.get(*world))
+                .and_then(|config| config.get("enabled"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let equipment_filter_enabled = document
+        .get("equipment_filter")
+        .and_then(|config| config.get("enabled"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    (enabled_worlds, equipment_filter_enabled)
 }

@@ -17,10 +17,12 @@ pub(crate) fn CatalogParticipant(
                     "{marker}"
                 }
             }
-            span {
-                class: "public-auction-participant-identity__name",
-                title: name.clone(),
-                "{name}"
+            TruncatedText {
+                value: name,
+                size: "compact",
+                class_name: "public-auction-participant-identity__name",
+                portal: true,
+                legacy_dom: true,
             }
             if let Some(trailing) = trailing {
                 span {
@@ -42,18 +44,36 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
 
     rsx! {
         tr {
-            td { class: "public-auction-catalog__code", "data-label": t!("catalog-code"),
-                a { href: lot_detail_href(&row.lot_id), "{row.code}" }
+            td { "data-label": t!("catalog-code"),
+                Link {
+                    class: "public-auction-catalog__code",
+                    to: lot_detail_href(&row.lot_id),
+                    "{row.code}"
+                }
             }
-            td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
-                span { class: "public-auction-catalog__item-name", title: row.name.clone(), "{row.name}" }
+            td { "data-label": t!("catalog-item"),
+                TruncatedText {
+                    value: row.name.clone(),
+                    class_name: "ui-equipment-name",
+                    portal: true,
+                    legacy_dom: true,
+                }
                 if let Some(avg_roll) = row.avg_roll {
-                    span { class: "public-auction-catalog__roll", "{avg_roll:.1}%" }
+                    span {
+                        class: "public-auction-catalog__roll",
+                        aria_label: t!("equipment-avg-roll"),
+                        title: t!("equipment-avg-roll"),
+                        "{avg_roll:.1}%"
+                    }
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }
             td { "data-label": t!("catalog-seller"),
-                span { class: "public-auction-catalog__seller", title: seller.clone(), "{seller}" }
+                TruncatedText {
+                    value: seller,
+                    portal: true,
+                    legacy_dom: true,
+                }
             }
             td {
                 class: "public-auction-catalog__amount public-auction-catalog__number",
@@ -63,13 +83,15 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
             td { class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
                 span { class: "public-auction-catalog__none", {t!("value-empty")} }
             }
-            td { class: "public-auction-countdown--none", "data-label": t!("catalog-remaining"), {t!("value-empty")} }
+            td { "data-label": t!("catalog-remaining"),
+                span { class: "public-auction-countdown--none", {t!("value-empty")} }
+            }
             td { "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
-            td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+            td { class: "public-auction-catalog__actions",
                 span { class: "public-auction-catalog__actions-list",
-                    a { href: lot_detail_href(&row.lot_id), {t!("catalog-view")} }
+                    Link { to: lot_detail_href(&row.lot_id), {t!("catalog-view")} }
                 }
             }
         }

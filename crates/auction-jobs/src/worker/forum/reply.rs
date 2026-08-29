@@ -27,9 +27,7 @@ mod notification;
 mod topic;
 
 use command::process_command;
-use common::{
-    bounded_detail, finish, forum_command_id, is_retryable, proxy_mode_name, repository_error,
-};
+use common::{bounded_detail, finish, forum_command_id, is_retryable, repository_error};
 use notification::process_notification;
 use topic::process_topic;
 

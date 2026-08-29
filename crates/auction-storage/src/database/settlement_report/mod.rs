@@ -42,16 +42,70 @@ async fn postgres_report(
     store: &super::PostgresStore,
     auction_id: AuctionId,
 ) -> Result<Option<SettlementReport>, ApplicationError> {
+    for attempt in 0..3_u8 {
+        match postgres_report_once(store, auction_id).await {
+            Err(error) if error.retryable() && attempt < 2 => continue,
+            result => return result.map_err(PostgresReportError::into_application),
+        }
+    }
+    Err(storage_error("结算报告可序列化快照重试次数耗尽"))
+}
+
+#[cfg(feature = "postgres")]
+enum PostgresReportError {
+    Database { source: sqlx::Error, safe_message: &'static str },
+    Application(ApplicationError),
+}
+
+#[cfg(feature = "postgres")]
+impl PostgresReportError {
+    fn database(source: sqlx::Error, safe_message: &'static str) -> Self {
+        Self::Database { source, safe_message }
+    }
+
+    fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Database {
+                source: sqlx::Error::Database(database),
+                ..
+            } if matches!(database.code().as_deref(), Some("40001" | "40P01"))
+        )
+    }
+
+    fn into_application(self) -> ApplicationError {
+        match self {
+            Self::Database { safe_message, .. } => storage_error(safe_message),
+            Self::Application(error) => error,
+        }
+    }
+}
+
+#[cfg(feature = "postgres")]
+impl From<ApplicationError> for PostgresReportError {
+    fn from(error: ApplicationError) -> Self {
+        Self::Application(error)
+    }
+}
+
+#[cfg(feature = "postgres")]
+async fn postgres_report_once(
+    store: &super::PostgresStore,
+    auction_id: AuctionId,
+) -> Result<Option<SettlementReport>, PostgresReportError> {
     use chrono::{DateTime, Utc};
     use sqlx::Row;
     use uuid::Uuid;
 
-    let mut transaction =
-        store.pool().begin().await.map_err(|_| storage_error("打开结算报告快照失败"))?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .map_err(|error| PostgresReportError::database(error, "打开结算报告快照失败"))?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("设置结算报告快照失败"))?;
+        .map_err(|error| PostgresReportError::database(error, "设置结算报告快照失败"))?;
 
     let row = sqlx::query(
         r#"SELECT
@@ -94,17 +148,20 @@ async fn postgres_report(
     .bind(auction_id.as_uuid())
     .fetch_optional(&mut *transaction)
     .await
-    .map_err(|_| storage_error("读取结算报告拍卖失败"))?;
+    .map_err(|error| PostgresReportError::database(error, "读取结算报告拍卖失败"))?;
 
     let Some(row) = row else {
-        transaction.commit().await.map_err(|_| storage_error("提交结算报告快照失败"))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| PostgresReportError::database(error, "提交结算报告快照失败"))?;
         return Ok(None);
     };
 
     let stored_auction_id: Uuid =
         row.try_get("auction_id").map_err(|_| storage_error("读取结算报告拍卖标识失败"))?;
     if stored_auction_id != auction_id.as_uuid() {
-        return Err(storage_error("结算报告拍卖标识与请求不一致"));
+        return Err(storage_error("结算报告拍卖标识与请求不一致").into());
     }
 
     let settlement_id: Option<Uuid> = row
@@ -138,7 +195,7 @@ async fn postgres_report(
                 settled_at,
             })
         }
-        Some(_) => return Err(storage_error("结算报告结算标识与拍卖不一致")),
+        Some(_) => return Err(storage_error("结算报告结算标识与拍卖不一致").into()),
     };
 
     let lots = if settlement.is_some() {
@@ -150,12 +207,13 @@ async fn postgres_report(
                    equipment.name AS equipment_name,
                    submission.seller,
                    winner.username AS winner,
-                   COALESCE(settlement.end_price, 0) AS final_price,
-                   COALESCE(settlement.buyer_amount, 0) AS buyer_amount,
-                   COALESCE(settlement.seller_amount, 0) AS seller_amount,
-                   COALESCE(settlement.tax_amount, 0) AS tax_amount,
-                   COALESCE(settlement.compensation_amount, 0) AS compensation_amount,
-                   settlement.adjustment_metadata ->> 'policy' AS adjustment_policy
+                   settlement.lot_id AS settlement_lot_id,
+                   CASE WHEN l.status = 'sold' THEN l.current_price ELSE 0 END::bigint AS final_price,
+                   settlement.buyer_amount AS buyer_amount,
+                   settlement.seller_amount AS seller_amount,
+                   settlement.tax_amount AS tax_amount,
+                   settlement.compensation_amount AS compensation_amount,
+                   settlement.adjustment_metadata AS adjustment_metadata
                FROM public.lots AS l
                INNER JOIN public.equipment AS equipment ON equipment.id = l.equipment_id
                LEFT JOIN public.auction_submissions AS submission
@@ -168,14 +226,46 @@ async fn postgres_report(
         .bind(stored_auction_id)
         .fetch_all(&mut *transaction)
         .await
-        .map_err(|_| storage_error("读取结算报告 lot 失败"))?;
+        .map_err(|error| PostgresReportError::database(error, "读取结算报告 lot 失败"))?;
 
         rows.into_iter()
             .map(|row| {
+                let lot_id: Uuid =
+                    row.try_get("id").map_err(|_| storage_error("读取结算 lot 标识失败"))?;
+                let settlement_lot_id: Option<Uuid> = row
+                    .try_get("settlement_lot_id")
+                    .map_err(|_| storage_error("读取结算 lot 结算标识失败"))?;
+                if settlement_lot_id != Some(lot_id) {
+                    return Err(storage_error("结算报告缺少 lot 结算事实"));
+                }
+                let buyer_amount: Option<i64> = row
+                    .try_get("buyer_amount")
+                    .map_err(|_| storage_error("读取结算买方金额失败"))?;
+                let seller_amount: Option<i64> = row
+                    .try_get("seller_amount")
+                    .map_err(|_| storage_error("读取结算卖方金额失败"))?;
+                let tax_amount: Option<i64> =
+                    row.try_get("tax_amount").map_err(|_| storage_error("读取结算税额失败"))?;
+                let compensation_amount: Option<i64> = row
+                    .try_get("compensation_amount")
+                    .map_err(|_| storage_error("读取结算补偿金额失败"))?;
+                let (
+                    Some(buyer_amount),
+                    Some(seller_amount),
+                    Some(tax_amount),
+                    Some(compensation_amount),
+                ) = (buyer_amount, seller_amount, tax_amount, compensation_amount)
+                else {
+                    return Err(storage_error("结算报告缺少 lot 金额事实"));
+                };
+                let final_price: i64 = row
+                    .try_get("final_price")
+                    .map_err(|_| storage_error("读取结算成交金额失败"))?;
+                let adjustment_metadata: serde_json::Value = row
+                    .try_get("adjustment_metadata")
+                    .map_err(|_| storage_error("读取结算 adjustment metadata 失败"))?;
                 Ok(SettlementLotReport {
-                    id: auction_domain::LotId::from_uuid(
-                        row.try_get("id").map_err(|_| storage_error("读取结算 lot 标识失败"))?,
-                    ),
+                    id: auction_domain::LotId::from_uuid(lot_id),
                     lot_number: row
                         .try_get("lot_number")
                         .map_err(|_| storage_error("读取结算 lot 序号失败"))?,
@@ -187,26 +277,12 @@ async fn postgres_report(
                         .map_err(|_| storage_error("读取结算装备名称失败"))?,
                     seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
                     winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
-                    final_price: row
-                        .try_get("final_price")
-                        .map_err(|_| storage_error("读取结算成交金额失败"))?,
-                    buyer_amount: row
-                        .try_get("buyer_amount")
-                        .map_err(|_| storage_error("读取结算买方金额失败"))?,
-                    seller_amount: row
-                        .try_get("seller_amount")
-                        .map_err(|_| storage_error("读取结算卖方金额失败"))?,
-                    tax_amount: row
-                        .try_get("tax_amount")
-                        .map_err(|_| storage_error("读取结算税额失败"))?,
-                    compensation_amount: row
-                        .try_get("compensation_amount")
-                        .map_err(|_| storage_error("读取结算补偿金额失败"))?,
-                    adjustment: SettlementAdjustment {
-                        policy: row
-                            .try_get("adjustment_policy")
-                            .map_err(|_| storage_error("读取结算 adjustment 失败"))?,
-                    },
+                    final_price,
+                    buyer_amount,
+                    seller_amount,
+                    tax_amount,
+                    compensation_amount,
+                    adjustment: decode_settlement_adjustment(adjustment_metadata)?,
                 })
             })
             .collect::<Result<Vec<_>, ApplicationError>>()?
@@ -214,7 +290,10 @@ async fn postgres_report(
         Vec::new()
     };
 
-    transaction.commit().await.map_err(|_| storage_error("提交结算报告快照失败"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| PostgresReportError::database(error, "提交结算报告快照失败"))?;
 
     Ok(Some(SettlementReport {
         auction: SettlementAuctionSnapshot {
@@ -274,6 +353,32 @@ async fn postgres_report(
         settlement,
         lots,
     }))
+}
+
+#[cfg(feature = "postgres")]
+fn decode_settlement_adjustment(
+    value: serde_json::Value,
+) -> Result<SettlementAdjustment, ApplicationError> {
+    let serde_json::Value::Object(fields) = value else {
+        return if value.is_null() {
+            Ok(SettlementAdjustment { policy: None })
+        } else {
+            Err(storage_error("结算 adjustment metadata 结构无效"))
+        };
+    };
+    if fields.keys().any(|key| key != "policy") {
+        return Err(storage_error("结算 adjustment metadata 含未知字段"));
+    }
+    let policy = match fields.get("policy") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(policy))
+            if !policy.is_empty() && policy == policy.trim() =>
+        {
+            Some(policy.clone())
+        }
+        Some(_) => return Err(storage_error("结算 adjustment policy 无效")),
+    };
+    Ok(SettlementAdjustment { policy })
 }
 
 fn storage_error(message: &str) -> ApplicationError {

@@ -1,44 +1,32 @@
 //! Public 持久化实时事件列表读取。
 
-use auction_application::{MAX_PUBLIC_EVENT_PAGE_SIZE, PublicRealtimeRequest};
-use auction_contracts::{ApiErrorResponse, ApiResponse, PublicRealtimeResponse};
+use auction_application::PublicRealtimeRequest;
+use auction_contracts::{ApiErrorResponse, ApiResponse};
 use axum::{
     Json,
     extract::State,
     http::{StatusCode, Uri},
+    response::{IntoResponse, Response},
 };
 
-use super::super::{PublicApiState, api_error, not_found_error, parse_positive_i64, parse_query};
-use super::mapping::{map_page, valid_page};
+use super::super::{PublicApiState, api_error, not_found_error, parse_query};
+use super::mapping::{map_auction_page, map_discovery_page, valid_page};
+use super::target::{RealtimeTarget, parse_http_target, parse_nonnegative, parse_page_size};
 
 /// 读取指定拍卖流或公开发现流的持久化事件。
 pub(crate) async fn list(
     State(state): State<PublicApiState>,
     uri: Uri,
-) -> Result<Json<ApiResponse<PublicRealtimeResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let query = parse_query(&uri, &["auction_id", "after", "page_size"])
+) -> Result<Response, (StatusCode, Json<ApiErrorResponse>)> {
+    let query = parse_query(&uri, &["auction_id", "scope", "after", "page_size"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let auction_id = query
-        .get("auction_id")
-        .map(|value| {
-            uuid::Uuid::parse_str(value).map_err(|_| {
-                api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
-            })
-        })
-        .transpose()?;
-    let after =
-        query
-            .get("after")
-            .map(|value| {
-                value.parse::<i64>().ok().filter(|value| *value >= 0).ok_or_else(|| {
-                    api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                })
-            })
-            .transpose()?
-            .unwrap_or(0);
-    let page_size =
-        parse_positive_i64(query.get("page_size"), 50, Some(MAX_PUBLIC_EVENT_PAGE_SIZE))
-            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let target = parse_http_target(&query)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let after = parse_nonnegative(query.get("after"), 0)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let page_size = parse_page_size(query.get("page_size"))
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let auction_id = target.auction_id();
     let request = PublicRealtimeRequest { auction_id, after, page_size };
     request
         .validate()
@@ -57,7 +45,11 @@ pub(crate) async fn list(
     let Some(page) = page else {
         return Err(not_found_error());
     };
-    if !valid_page(&page, auction_id, after) {
+    if !valid_page(&page, auction_id, after)
+        || i64::try_from(page.events.len()).map_or(true, |count| count > page_size)
+        || matches!(target, RealtimeTarget::Discovery)
+            && page.events.iter().any(|event| event.kind != "auction.created")
+    {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "storage_unavailable",
@@ -65,5 +57,13 @@ pub(crate) async fn list(
         ));
     }
 
-    Ok(Json(ApiResponse::ok("实时事件已加载", map_page(page))))
+    Ok(match target {
+        RealtimeTarget::Auction(auction_id) => {
+            Json(ApiResponse::ok("实时事件已加载", map_auction_page(page, auction_id)))
+                .into_response()
+        }
+        RealtimeTarget::Discovery => {
+            Json(ApiResponse::ok("实时事件已加载", map_discovery_page(page))).into_response()
+        }
+    })
 }

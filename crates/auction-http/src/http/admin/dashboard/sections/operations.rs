@@ -13,7 +13,8 @@ use super::super::super::timestamp;
 pub(crate) fn map_fulfillment(
     snapshot: OperationsAlertFulfillmentSnapshot,
 ) -> AdminDashboardSectionResponse {
-    let error_code = if snapshot.manual_reconcile > 0 {
+    let observed_at = timestamp(chrono::Utc::now());
+    let degraded_reason = if snapshot.manual_reconcile > 0 {
         Some("manual_reconcile")
     } else if snapshot.failed > 0 {
         Some("fulfillment_failed")
@@ -25,15 +26,15 @@ pub(crate) fn map_fulfillment(
         None
     };
     AdminDashboardSectionResponse {
-        status: if error_code.is_some() {
+        status: if degraded_reason.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
         } else {
             DashboardStatus::Ok.as_str().to_owned()
         },
-        observed_at: Some(timestamp(chrono::Utc::now())),
-        error_code: error_code.map(ToOwned::to_owned),
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
         data: Some(json!({
-            "observed_at": timestamp(chrono::Utc::now()),
+            "observed_at": observed_at,
             "pending": snapshot.pending,
             "blocked": snapshot.blocked,
             "failed": snapshot.failed,
@@ -46,7 +47,8 @@ pub(crate) fn map_fulfillment(
 pub(crate) fn map_delivery(
     snapshot: OperationsAlertDeliverySnapshot,
 ) -> AdminDashboardSectionResponse {
-    let error_code = if snapshot.manual_reconcile > 0 {
+    let observed_at = timestamp(chrono::Utc::now());
+    let degraded_reason = if snapshot.manual_reconcile > 0 {
         Some("manual_reconcile")
     } else if snapshot.failed > 0 {
         Some("delivery_failed")
@@ -56,15 +58,15 @@ pub(crate) fn map_delivery(
         None
     };
     AdminDashboardSectionResponse {
-        status: if error_code.is_some() {
+        status: if degraded_reason.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
         } else {
             DashboardStatus::Ok.as_str().to_owned()
         },
-        observed_at: Some(timestamp(chrono::Utc::now())),
-        error_code: error_code.map(ToOwned::to_owned),
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
         data: Some(json!({
-            "observed_at": timestamp(chrono::Utc::now()),
+            "observed_at": observed_at,
             "water": {
                 "pending": snapshot.pending,
                 "failed": snapshot.failed,
@@ -80,7 +82,8 @@ pub(crate) fn map_delivery(
 pub(crate) fn map_recovery(
     snapshot: OperationsAlertRecoverySnapshot,
 ) -> AdminDashboardSectionResponse {
-    let error_code = if snapshot.manual_reconcile_count > 0 {
+    let observed_at = timestamp(chrono::Utc::now());
+    let degraded_reason = if snapshot.manual_reconcile_count > 0 {
         Some("manual_reconcile")
     } else if snapshot.failed_action_count > 0 {
         Some("recovery_action_failed")
@@ -91,28 +94,27 @@ pub(crate) fn map_recovery(
     } else if snapshot
         .worlds
         .iter()
-        .any(|world| world.balance_status != "ok" || world.evidence_status != "ok")
+        .any(|world| world.balance_status != "ok" || world.evidence_status != "fresh")
     {
         Some("recovery_source_degraded")
     } else {
         None
     };
     AdminDashboardSectionResponse {
-        status: if error_code.is_some() {
+        status: if degraded_reason.is_some() {
             DashboardStatus::Degraded.as_str().to_owned()
         } else {
             DashboardStatus::Ok.as_str().to_owned()
         },
-        observed_at: Some(timestamp(chrono::Utc::now())),
-        error_code: error_code.map(ToOwned::to_owned),
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
         data: Some(json!({
-            "observed_at": timestamp(chrono::Utc::now()),
+            "observed_at": observed_at,
             "worlds": snapshot.worlds.into_iter().map(|world| json!({
                 "world": world.world,
                 "balance_credits": world.balance_credits,
                 "balance_status": world.balance_status,
                 "evidence_status": world.evidence_status,
-                "evidence_age_seconds": world.evidence_age_seconds,
                 "balance_observed_at": world.balance_observed_at.map(timestamp),
                 "evidence_last_success_at": world.evidence_last_success_at.map(timestamp),
                 "updated_at": timestamp(world.updated_at),

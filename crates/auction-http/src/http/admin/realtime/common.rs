@@ -52,6 +52,41 @@ pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
     }
 }
 
+/// 把内部 typed replay 错误投影回旧 v1 的稳定 HTTP 外壳。
+///
+/// 存储层继续区分 resolved、mismatch、命令冲突和 capability；这里只收窄公开 code/status，
+/// 不回退命令账本、事务 fence 或错误正文隔离。
+pub(crate) fn map_replay_error(error: ApplicationError) -> Response {
+    match error {
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::InvalidCommand) => invalid_replay(),
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::NotFound) => {
+            super::api_error(StatusCode::NOT_FOUND, "not_found", "实时 failure 不存在")
+                .into_response()
+        }
+        ApplicationError::RealtimeAdmin(
+            RealtimeAdminError::AlreadyResolved | RealtimeAdminError::CommandConflict,
+        ) => super::api_error(StatusCode::CONFLICT, "conflict", "实时 failure 已解决")
+            .into_response(),
+        ApplicationError::RealtimeAdmin(RealtimeAdminError::ReplayMismatch) => {
+            super::api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "服务暂时不可用")
+                .into_response()
+        }
+        ApplicationError::CapabilityUnavailable(_) | ApplicationError::Repository(_) => {
+            replay_unavailable()
+        }
+        _ => replay_unavailable(),
+    }
+}
+
+pub(crate) fn invalid_replay() -> Response {
+    super::api_error(StatusCode::BAD_REQUEST, "invalid_replay", "重放参数无效").into_response()
+}
+
+pub(crate) fn replay_unavailable() -> Response {
+    super::api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+        .into_response()
+}
+
 pub(crate) fn feature_unavailable() -> Response {
     super::api_error(
         StatusCode::NOT_IMPLEMENTED,

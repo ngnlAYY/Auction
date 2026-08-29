@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, CommandId};
 
+use crate::AuctionPolicyTemplate;
+
 use super::ApplicationFuture;
 
 /// 持久化拍卖轮次当前需要执行的生命周期阶段。
@@ -37,11 +39,54 @@ pub struct ScheduledRoundClaim {
     pub attempt_count: u32,
 }
 
+/// 当前本地周应存在的持久化轮次及其冻结策略。
+///
+/// `round_id`、`auction_id` 和 `create_command_id` 必须由 world/local_week 的旧版稳定算法
+/// 派生；数据库适配器负责在一个事务内幂等建立拍卖、intake target、命令账本和轮次事实。
+#[derive(Debug, Clone)]
+pub struct ScheduledRoundBootstrap {
+    pub round_id: Uuid,
+    pub auction_id: AuctionId,
+    pub create_command_id: CommandId,
+    pub world_id: String,
+    pub local_week: chrono::NaiveDate,
+    pub preview_due_at: DateTime<Utc>,
+    pub open_due_at: DateTime<Utc>,
+    pub scheduled_end_at: DateTime<Utc>,
+    pub request_hash: super::RequestHash,
+    pub policy: AuctionPolicyTemplate,
+}
+
+/// 周计划 ensure 后返回的安全投影，供调度器决定 Mail owner 的暂停/恢复期望。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledRoundSnapshot {
+    pub round_id: Uuid,
+    pub auction_id: Option<AuctionId>,
+    pub active: bool,
+    pub world_id: String,
+    pub local_week: chrono::NaiveDate,
+    pub preview_due_at: DateTime<Utc>,
+    pub open_due_at: DateTime<Utc>,
+    pub scheduled_end_at: DateTime<Utc>,
+    pub create_command_id: Uuid,
+    pub preview_completed_at: Option<DateTime<Utc>>,
+    pub open_completed_at: Option<DateTime<Utc>>,
+}
+
 /// Worker 调度器使用的窄存储端口。
 ///
 /// `claim_due` 的返回值必须来自数据库条件更新/锁定；内存中的 interval 只能唤醒 Worker，
 /// 不能成为 due、租约、完成或失败状态的权威来源。
 pub trait ScheduledRoundStore: Send + Sync {
+    /// 返回数据库权威当前时间；周身份和 due 判断不得使用进程本地时钟。
+    fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>>;
+
+    /// 幂等确保当前本地周轮次；若窗口已结束则只建立 missed 轮次，不创建过期拍卖。
+    fn ensure_current_round(
+        &self,
+        bootstrap: ScheduledRoundBootstrap,
+    ) -> ApplicationFuture<'_, ScheduledRoundSnapshot>;
+
     fn claim_due(
         &self,
         worker_id: String,

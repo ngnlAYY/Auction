@@ -9,6 +9,8 @@ use super::{
     sql::{create_database_sql, quote_identifier, validate_database_name},
 };
 
+pub(crate) const DATABASE_ADVISORY_LOCK_PREFIX: &str = "auction-postgres-database:";
+
 /// 持有集群级 advisory lock 的破坏性重建会话。
 ///
 /// guard 存活期间，同一数据库的其他 Auction 重建命令不能越过预检；外部数据库管理员仍需遵守
@@ -35,8 +37,9 @@ impl PostgresDatabaseRebuildGuard {
             .map_err(PostgresRebuildError::Connect)?;
         configure_session(&mut connection).await?;
         let advisory_lock_acquired = sqlx::query_scalar::<_, bool>(
-            "SELECT pg_try_advisory_lock(hashtextextended('auction-postgres-rebuild:' || $1, 0))",
+            "SELECT pg_try_advisory_lock(hashtextextended($1 || $2, 0))",
         )
+        .bind(DATABASE_ADVISORY_LOCK_PREFIX)
         .bind(confirmed_database_name)
         .fetch_one(&mut connection)
         .await

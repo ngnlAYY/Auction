@@ -6,7 +6,7 @@ pub(crate) async fn list_lots(
     Path(auction_id): Path<String>,
     uri: Uri,
 ) -> Result<Json<ApiResponse<PublicLotEnvelopeResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let auction_id = Uuid::parse_str(&auction_id)
+    let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let query = parse_query(&uri, &["category", "page", "page_size"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -26,30 +26,20 @@ pub(crate) async fn list_lots(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
 
     let Some(reader) = state.lots() else {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "公开 lot 目录暂不可用",
-        ));
+        return Err(lot_dependency_unavailable());
     };
-    let page_result = reader.list_public_lots(auction_id, request).await.map_err(|_| {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "公开 lot 目录暂不可用")
-    })?;
+    let page_result = reader
+        .list_public_lots(auction_id, request)
+        .await
+        .map_err(|_| lot_dependency_unavailable())?;
     let Some(page_result) = page_result else {
         return Err(not_found_error());
     };
-    if page_result.projection.auction_id != auction_id
+    if page_result.validate(auction_id, query.get("category").map(String::as_str)).is_err()
         || page_result.limit != page_size
         || page_result.offset != offset
-        || page_result.category_counts.len() != 8
-        || page_result.projection.projection_kind == "preview" && !page_result.live.is_empty()
-        || page_result.projection.projection_kind != "preview" && !page_result.preview.is_empty()
     {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "公开 lot 目录暂不可用",
-        ));
+        return Err(lot_dependency_unavailable());
     }
     let response = map_lot_page(page_result, page);
     Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
@@ -64,28 +54,22 @@ pub(crate) async fn lot_detail(
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "lot 详情不接受查询参数"));
     }
-    let lot_id = Uuid::parse_str(&lot_id)
+    let lot_id = parse_public_uuid(&lot_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效"))?;
     let Some(reader) = state.lots() else {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "公开 lot 目录暂不可用",
-        ));
+        return Err(lot_dependency_unavailable());
     };
-    let detail = reader.public_lot(lot_id).await.map_err(|_| {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "公开 lot 目录暂不可用")
-    })?;
+    let detail = reader.public_lot(lot_id).await.map_err(|_| lot_dependency_unavailable())?;
     let Some(detail) = detail else {
         return Err(not_found_error());
     };
     if !valid_lot_detail(&detail, lot_id) {
-        return Err(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "公开 lot 目录暂不可用",
-        ));
+        return Err(lot_dependency_unavailable());
     }
     let response = map_lot_detail(detail);
     Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
+}
+
+fn lot_dependency_unavailable() -> (StatusCode, Json<ApiErrorResponse>) {
+    api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
 }

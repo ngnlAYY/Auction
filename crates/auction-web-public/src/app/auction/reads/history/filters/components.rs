@@ -5,8 +5,8 @@ use super::{
     HistoryFilterError, HistoryPriceUnit, history_date_error, history_month_label,
     history_price_error,
 };
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 /// 渲染价格历史的主筛选表单。
 #[component]
@@ -38,9 +38,7 @@ pub(crate) fn PriceHistoryFilters(
                 event.prevent_default();
                 on_apply.call(());
             },
-            fieldset {
-                legend { {t!("history-filter-title")} }
-                div { class: "public-history-primary-filters",
+            div { class: "public-history-primary-filters",
                     label {
                         span { {t!("history-filter-world")} }
                         select {
@@ -75,6 +73,7 @@ pub(crate) fn PriceHistoryFilters(
                             aria_controls: "public-history-settings",
                             aria_expanded: settings_open().to_string(),
                             onclick: move |_| settings_open.set(!settings_open()),
+                            span { aria_hidden: "true", "⚙" }
                             {t!("history-filter-settings")}
                             if active_filter_count > 0 {
                                 span { class: "public-history-active-count",
@@ -102,7 +101,7 @@ pub(crate) fn PriceHistoryFilters(
                                 class: "public-history-settings-close",
                                 aria_label: t!("history-filter-settings-close"),
                                 onclick: move |_| settings_open.set(false),
-                                {t!("history-filter-settings-close")}
+                                span { aria_hidden: "true", "×" }
                             }
                         }
                         div { class: "public-history-settings-grid",
@@ -126,8 +125,8 @@ pub(crate) fn PriceHistoryFilters(
                             }
                             HistoryPriceFilter {
                                 label: t!("history-filter-min-price"),
-                                value_label: t!("history-filter-price-value"),
-                                unit_label: t!("history-filter-price-unit"),
+                                value_label: t!("history-filter-min-price-value"),
+                                unit_label: t!("history-filter-min-price-unit"),
                                 price_value: minimum_price,
                                 price_unit: minimum_price_unit,
                                 error: history_price_error(current_error, true),
@@ -135,8 +134,8 @@ pub(crate) fn PriceHistoryFilters(
                             }
                             HistoryPriceFilter {
                                 label: t!("history-filter-max-price"),
-                                value_label: t!("history-filter-price-value"),
-                                unit_label: t!("history-filter-price-unit"),
+                                value_label: t!("history-filter-max-price-value"),
+                                unit_label: t!("history-filter-max-price-unit"),
                                 price_value: maximum_price,
                                 price_unit: maximum_price_unit,
                                 error: history_price_error(current_error, false),
@@ -197,7 +196,6 @@ pub(crate) fn PriceHistoryFilters(
                             }
                         }
                     }
-                }
             }
         }
     }

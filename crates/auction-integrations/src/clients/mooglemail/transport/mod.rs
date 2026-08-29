@@ -5,10 +5,14 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 use auction_application::{
     ApplicationError, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
     DeliveryWorkClaim, MailLoginKey, MailLoginKeyReader, MailProcessingError,
+    SettlementFulfillmentEquipmentSecretReader,
 };
+use auction_domain::EquipmentId;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
+
+use crate::EquipmentKeyOpener;
 
 use super::{
     MoogleMailActionState, MoogleMailClient, MoogleMailCredentialSet, MoogleMailError,

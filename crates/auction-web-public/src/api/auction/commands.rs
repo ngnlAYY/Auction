@@ -4,8 +4,8 @@
 //! 服务端应用端口决定。
 
 use auction_contracts::{
-    ApiErrorResponse, ApiResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
-    PlaceBidRequest, PlaceBidResponse, PublicProxyCommandResponse,
+    ApiErrorResponse, CreateProxyAuthorizationRequest, LowerProxyAuthorizationRequest,
+    PlaceBidRequest,
 };
 pub(crate) use auction_contracts::{
     PlaceBidResultResponse as BidResult,
@@ -14,7 +14,7 @@ pub(crate) use auction_contracts::{
 use gloo_net::http::Request;
 use uuid::Uuid;
 
-use super::observe_response_date;
+use super::{decoder, observe_response_date, send_request, transport_error_code};
 
 /// Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +24,8 @@ pub(crate) struct CommandError {
 }
 
 impl CommandError {
-    fn transport() -> Self {
-        Self { code: "network_error".to_owned(), status: 0 }
+    fn transport(error: &str) -> Self {
+        Self { code: transport_error_code(error), status: 0 }
     }
 
     fn invalid_response(status: u16) -> Self {
@@ -39,17 +39,21 @@ pub(crate) async fn place_bid(
     command_id: Uuid,
 ) -> Result<BidResult, CommandError> {
     let url = format!("/api/v1/lots/{lot_id}/bids");
-    let request = Request::post(&url)
-        .json(&PlaceBidRequest { command_id, amount })
-        .map_err(|_| CommandError::transport())?;
-    let response = request.send().await.map_err(|_| CommandError::transport())?;
+    let command = PlaceBidRequest { command_id: command_id.to_string(), amount };
+    let response = send_request(|abort_signal| {
+        Request::post(&url)
+            .abort_signal(abort_signal)
+            .json(&command)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| CommandError::transport(&error))?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }
-    let payload: ApiResponse<PlaceBidResponse> =
-        response.json().await.map_err(|_| CommandError::invalid_response(response.status()))?;
-    Ok(payload.data.bid)
+    let status = response.status();
+    decoder::decode_bid_command(response).await.map_err(|_| CommandError::invalid_response(status))
 }
 
 /// 创建代理授权并解码旧契约要求的完整命令投影。
@@ -60,17 +64,27 @@ pub(crate) async fn create_proxy_authorization(
     command_id: Uuid,
 ) -> Result<ProxyCommandAuthorization, CommandError> {
     let url = format!("/api/v1/lots/{lot_id}/proxy-authorizations");
-    let request = Request::post(&url)
-        .json(&CreateProxyAuthorizationRequest { command_id, maximum_amount, mode })
-        .map_err(|_| CommandError::transport())?;
-    let response = request.send().await.map_err(|_| CommandError::transport())?;
+    let command = CreateProxyAuthorizationRequest {
+        command_id: command_id.to_string(),
+        maximum_amount,
+        mode: mode.clone(),
+    };
+    let response = send_request(|abort_signal| {
+        Request::post(&url)
+            .abort_signal(abort_signal)
+            .json(&command)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| CommandError::transport(&error))?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }
-    let payload: ApiResponse<PublicProxyCommandResponse> =
-        response.json().await.map_err(|_| CommandError::invalid_response(response.status()))?;
-    Ok(payload.data.authorization)
+    let status = response.status();
+    decoder::decode_create_proxy_command(response, &lot_id, maximum_amount, &mode)
+        .await
+        .map_err(|_| CommandError::invalid_response(status))
 }
 
 /// 降低代理授权上限并解码旧契约要求的完整命令投影。
@@ -81,17 +95,24 @@ pub(crate) async fn lower_proxy_authorization(
     command_id: Uuid,
 ) -> Result<ProxyCommandAuthorization, CommandError> {
     let url = format!("/api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower");
-    let request = Request::post(&url)
-        .json(&LowerProxyAuthorizationRequest { command_id, maximum_amount })
-        .map_err(|_| CommandError::transport())?;
-    let response = request.send().await.map_err(|_| CommandError::transport())?;
+    let command =
+        LowerProxyAuthorizationRequest { command_id: command_id.to_string(), maximum_amount };
+    let response = send_request(|abort_signal| {
+        Request::post(&url)
+            .abort_signal(abort_signal)
+            .json(&command)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| CommandError::transport(&error))?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }
-    let payload: ApiResponse<PublicProxyCommandResponse> =
-        response.json().await.map_err(|_| CommandError::invalid_response(response.status()))?;
-    Ok(payload.data.authorization)
+    let status = response.status();
+    decoder::decode_lower_proxy_command(response, &lot_id, &authorization_id, maximum_amount)
+        .await
+        .map_err(|_| CommandError::invalid_response(status))
 }
 
 async fn read_command_error(response: gloo_net::http::Response) -> CommandError {

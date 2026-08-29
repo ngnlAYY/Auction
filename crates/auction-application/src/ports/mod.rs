@@ -28,6 +28,8 @@ mod admin_runtime_config;
 mod admin_users;
 #[path = "auction/policy.rs"]
 mod auction_policy;
+#[path = "auction/slow_proxy.rs"]
+mod auction_slow_proxy;
 #[path = "public/blacklist.rs"]
 mod blacklist;
 #[path = "public/cache.rs"]
@@ -176,11 +178,13 @@ pub use admin_runtime_config::{
     ADMIN_RUNTIME_DIGEST_VERSION, AdminRuntimeAuditRecord, AdminRuntimeCommandError,
     AdminRuntimeCommandState, AdminRuntimeCommandStore, AdminRuntimeConfigError,
     AdminRuntimeConfigPort, AdminRuntimeDashboardMailbox, AdminRuntimeDocument,
+    AdminRuntimeEquipmentFilterConfig, AdminRuntimeEquipmentLevelConfig,
     AdminRuntimeEquipmentSourceConfig, AdminRuntimeFileError, AdminRuntimeFileStore,
-    AdminRuntimeListenMode, AdminRuntimeListenerConfig, AdminRuntimeMetricsConfig,
-    AdminRuntimeReplacement, AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig,
-    AdminRuntimeSnapshot, AdminRuntimeStoredCommand, AdminRuntimeTracingConfig,
-    AdminRuntimeUpdateCommand, AdminRuntimeWorkerControlConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
+    AdminRuntimeListenMode, AdminRuntimeListenerConfig, AdminRuntimeMailTemplatesConfig,
+    AdminRuntimeMetricsConfig, AdminRuntimeReplacement, AdminRuntimeSecurityConfig,
+    AdminRuntimeSessionConfig, AdminRuntimeSnapshot, AdminRuntimeStoredCommand,
+    AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand, AdminRuntimeWorkerControlConfig,
+    AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 pub use admin_users::{
     AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminRenameRevertCommand, AdminRenameRevertWrite,
@@ -195,12 +199,20 @@ pub use admin_users::{
     RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
 };
 pub use auction_policy::{AuctionPolicyTemplate, POLICY_MINIMUM_INCREMENT};
+pub use auction_slow_proxy::{
+    ExecuteSlowProxyCommand, SLOW_PROXY_COMMAND_KIND, SlowProxyCommandPort, SlowProxyDue,
+    SlowProxyDueReader, is_stale_slow_proxy_error,
+};
 pub use blacklist::{
     MAX_PUBLIC_BLACKLIST_OFFSET, MAX_PUBLIC_BLACKLIST_PAGE_SIZE, PublicBlacklistEntry,
     PublicBlacklistPage, PublicBlacklistReader, PublicBlacklistRequest,
 };
 pub use cache::{ReadModelCache, ReadModelCacheError, ReadModelCacheFuture};
-pub use commands::{ApplicationFuture, CompetitionCommandPort};
+pub use commands::{
+    ApplicationFuture, CompetitionCommandOutcome, CompetitionCommandPort,
+    CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionWireTimestamp,
+    format_public_time_wire,
+};
 pub use compensation::{
     DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
     MAX_PUBLIC_COMPENSATION_OFFSET, MAX_PUBLIC_COMPENSATION_PAGE_SIZE, PublicCompensationCursor,
@@ -210,8 +222,9 @@ pub use compensation::{
 };
 pub use core_clock::Clock;
 pub use core_competition::{
-    CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, TransactionFailure,
-    TransactionFuture, TransactionRunner,
+    CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionProxyTransitionRecord,
+    CompetitionSnapshot, CompetitionTransaction, CompetitionTransactionError, ProxyUsageContext,
+    SlowProxyExecutionContext, TransactionFailure, TransactionFuture, TransactionRunner,
 };
 pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredCommand};
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
@@ -221,9 +234,9 @@ pub use delivery::{
     DeliveryWorkStore,
 };
 pub use delivery_admin::{
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminListRequest, DeliveryAdminPage,
-    DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot, MAX_DELIVERY_ADMIN_PAGE_SIZE,
-    MAX_DELIVERY_COD,
+    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
+    DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
+    MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
 pub use forum_reply::{
@@ -232,23 +245,29 @@ pub use forum_reply::{
 };
 pub use forum_sync::{
     ForumAuctionSnapshot, ForumLotSnapshot, ForumPublishedThread, ForumPublisher, ForumRemoteError,
-    ForumRenderError, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
-    forum_world_name,
+    ForumRenderError, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
+    ForumSyncRecoveryPort, ForumSyncStore, ForumWriteRetryAuthorizationCommand,
+    ForumWriteRetryAuthorizationResult, MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
     SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentProof,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentCustodySnapshot, SettlementFulfillmentDeliverySnapshot,
+    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEquipmentSecret,
+    SettlementFulfillmentEquipmentSecretReader, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
     SettlementFulfillmentResult, SettlementFulfillmentSentEvidence, SettlementFulfillmentState,
-    SettlementFulfillmentStore,
+    SettlementFulfillmentStore, canonical_settlement_fulfillment_subject,
 };
 pub use lifecycle::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActor,
     AuctionLifecycleActorType, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
     AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecyclePolicy,
-    AuctionLifecycleResult, AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan,
+    AuctionLifecycleResult, AuctionLifecycleSnapshot, AuctionLifecycleTransaction,
+    AuctionLifecycleWriteSummary, AuctionPreviewSuccessorPlan,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
@@ -289,7 +308,7 @@ pub use queries::{
     PublicOwnedProxy, PublicPreviewLotDetail, PublicPreviewLotSummary, PublicPriceHistoryCursor,
     PublicPriceHistoryEntry, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
     PublicPriceHistoryReader, PublicPriceHistoryStats, PublicProxyBid, PublicProxyCapabilities,
-    PublicProxyTransition, WorldReader, WorldSnapshot,
+    PublicProxyTransition, PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
 };
 pub use readiness::ProcessReadinessPort;
 pub use realtime::{
@@ -327,7 +346,10 @@ pub use rules::{
     PUBLIC_RULES_DEFAULT_LOCALE, PUBLIC_RULES_LOCALES, PublicRulesDocument, PublicRulesReader,
     PublicRulesRequest,
 };
-pub use scheduler::{ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore};
+pub use scheduler::{
+    ScheduledRoundBootstrap, ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundSnapshot,
+    ScheduledRoundStore,
+};
 pub use sessions::{
     AdminLoginResult, AdminSessionConfig, AdminSessionIdentity, AdminSessionPort,
     AdminSessionRecord, AdminSessionStore, PublicLoginAuthenticator, PublicLoginIdentity,
@@ -335,8 +357,9 @@ pub use sessions::{
     PublicSessionRecord, PublicSessionStore,
 };
 pub use settlement::{
-    SettlementSnapshot, SettlementTransaction, SettlementTransactionError,
-    SettlementTransactionFailure, SettlementTransactionRunner,
+    LegacySettlementVerification, LegacySettlementVerificationPort, PersistedSettlement,
+    PersistedSettlementObligationCount, SettlementSnapshot, SettlementTransaction,
+    SettlementTransactionError, SettlementTransactionFailure, SettlementTransactionRunner,
 };
 pub use settlement_report::{
     SettlementAdjustment, SettlementAuctionSnapshot, SettlementLotReport, SettlementReport,

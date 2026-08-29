@@ -16,7 +16,7 @@ pub(crate) use history::{AuctionHistoryPage, AuctionHistoryTable, AuctionList};
 #[allow(unused_imports)]
 pub(crate) use lot::{
     BidHistoryTable, EquipmentCard, LiveLotDetailView, LotDetail, LotDetailBack, LotDetailHeader,
-    PreviewLotDetailView, bid_mechanism_label,
+    PreviewLotDetailView,
 };
 #[allow(unused_imports)]
 pub(crate) use routes::{

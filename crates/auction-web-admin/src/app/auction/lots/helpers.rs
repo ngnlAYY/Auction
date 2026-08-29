@@ -1,6 +1,6 @@
 //! Admin lot 页面状态、编码和安全展示辅助。
 
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use super::state::LotUpdateNotice;
 
@@ -39,17 +39,21 @@ pub(super) fn admin_lot_code_for(category: &str, lot_number: i32) -> String {
 
 /// 将提交编号压缩为旧版列表中的可读后缀，同时保留完整值供悬浮提示查看。
 pub(super) fn submission_id_display(value: &str) -> String {
-    let suffix = value
-        .rsplit_once(|character: char| !character.is_ascii_digit())
-        .map(|(_, digits)| digits)
-        .filter(|digits| !digits.is_empty())
-        .unwrap_or(value)
-        .trim_start_matches('0');
-    let display = if suffix.is_empty() {
-        value.chars().rev().take(8).collect::<String>().chars().rev().collect()
-    } else {
-        suffix.to_owned()
-    };
+    // 旧版正则只在完整值末尾匹配 ASCII 数字；没有匹配时必须回退完整值。
+    let suffix_start = value
+        .char_indices()
+        .rev()
+        .take_while(|&(_, character)| character.is_ascii_digit())
+        .last()
+        .map(|(index, _)| index);
+    let suffix = suffix_start.map(|index| &value[index..]);
+    let fallback =
+        || value.chars().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<String>();
+    let display = suffix
+        .map(|suffix| suffix.trim_start_matches('0'))
+        .filter(|suffix| !suffix.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(fallback);
     format!("#{display}")
 }
 

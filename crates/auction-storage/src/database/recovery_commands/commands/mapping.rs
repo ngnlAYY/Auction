@@ -37,12 +37,16 @@ pub(super) fn action_confirmation(
 
 #[cfg(feature = "postgres")]
 pub(super) fn map_insert_error(error: sqlx::Error) -> RecoveryCommandError {
-    if matches!(&error, sqlx::Error::Database(database) if database.code().as_deref() == Some("23505"))
-    {
-        RecoveryCommandError::CommandConflict
-    } else {
-        map_sql_error(error)
+    if let sqlx::Error::Database(database) = &error {
+        // 只有 command_id 主键冲突表示另一个相同命令已经提交；recovery/action
+        // 等业务唯一约束冲突不能被误判为可重放的命令冲突。
+        if database.code().as_deref() == Some("23505")
+            && database.constraint() == Some("settlement_recovery_commands_pkey")
+        {
+            return RecoveryCommandError::CommandConflict;
+        }
     }
+    map_sql_error(error)
 }
 
 #[cfg(feature = "postgres")]

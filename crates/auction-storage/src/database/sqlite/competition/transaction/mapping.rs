@@ -11,16 +11,6 @@ pub(crate) fn bid_mechanism_name(mechanism: BidMechanism) -> &'static str {
     }
 }
 
-pub(crate) fn plan_command_id(
-    plan: &CompetitionPlan,
-) -> Result<auction_domain::CommandId, CompetitionTransactionError> {
-    plan.public_bids
-        .first()
-        .map(|bid| bid.command_id)
-        .or_else(|| plan.proxy_transitions.first().map(|transition| transition.command_id))
-        .ok_or_else(|| invalid_state("竞价计划没有可审计的命令标识"))
-}
-
 pub(crate) fn terminal_reason(
     plan: &CompetitionPlan,
     authorization_id: ProxyAuthorizationId,
@@ -72,6 +62,15 @@ pub(crate) fn proxy_from_row(
     };
     authorization.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
     Ok(authorization)
+}
+
+pub(crate) fn valid_proxy_terminal_reason(status: ProxyStatus, reason: Option<&str>) -> bool {
+    match status {
+        ProxyStatus::Active | ProxyStatus::FinalFast => reason.is_none(),
+        ProxyStatus::Exhausted => matches!(reason, Some("strictly_defeated" | "ranked_below")),
+        ProxyStatus::Frozen => reason == Some("eligibility_lost"),
+        ProxyStatus::Closed => reason == Some("competition_closed"),
+    }
 }
 
 pub(crate) fn bid_amount(
@@ -242,18 +241,6 @@ pub(crate) fn parse_auction_status(
         "settled" => Ok(AuctionStatus::Settled),
         "cancelled" => Ok(AuctionStatus::Cancelled),
         _ => Err(invalid_state("Lite 拍卖状态不在允许集合内")),
-    }
-}
-
-pub(crate) fn auction_status_name(status: AuctionStatus) -> &'static str {
-    match status {
-        AuctionStatus::Draft => "draft",
-        AuctionStatus::Preview => "preview",
-        AuctionStatus::Live => "live",
-        AuctionStatus::Final => "final",
-        AuctionStatus::Settling => "settling",
-        AuctionStatus::Settled => "settled",
-        AuctionStatus::Cancelled => "cancelled",
     }
 }
 

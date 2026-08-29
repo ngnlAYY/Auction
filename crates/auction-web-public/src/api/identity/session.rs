@@ -4,11 +4,12 @@
 //! 组件只持有安全身份投影。
 
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
-use auction_contracts::{ApiErrorResponse, ApiResponse, PublicLoginRequest, PublicLoginResponse};
+use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
+use uuid::{Uuid, Variant};
 
-use super::{observe_response_date, send_get};
+use super::{decoder, observe_response_date, send_get, send_request, transport_error_code};
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,33 +24,52 @@ impl PublicSessionApiError {
     pub(crate) fn local(code: &'static str) -> Self {
         Self { status: None, code: Some(code.to_owned()), public_reason: None }
     }
-
-    fn transport() -> Self {
-        Self { status: None, code: None, public_reason: None }
-    }
 }
 
 pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, String> {
-    let response = send_get("/api/v1/session").await?;
+    fetch_public_session_once().await
+}
+
+async fn fetch_public_session_once() -> Result<Option<PublicSession>, String> {
+    let response =
+        send_get("/api/v1/session").await.map_err(|error| transport_error_code(&error))?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        let code = decoder::decode_error_code(response).await;
+        return if code == "unauthenticated" { Ok(None) } else { Err(code) };
     }
     let payload: ApiResponse<Option<PublicSession>> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+        response.json().await.map_err(|_| "invalid_response".to_owned())?;
+    match payload.data {
+        None => Ok(None),
+        Some(session) if valid_current_session(&session) => Ok(Some(session)),
+        Some(_) => Err("invalid_response".to_owned()),
+    }
 }
 
 pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSessionApiError> {
-    let request = Request::post("/api/v1/session")
-        .json(&PublicLoginRequest { key })
-        .map_err(|_| PublicSessionApiError::transport())?;
-    let response = request.send().await.map_err(|_| PublicSessionApiError::transport())?;
+    let response = send_request(move |abort_signal| {
+        Request::post("/api/v1/session")
+            .abort_signal(abort_signal)
+            .json(&PublicLoginRequest { key })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| {
+        if error == "请求超时" {
+            PublicSessionApiError::local("request_timeout")
+        } else {
+            PublicSessionApiError::local("network_error")
+        }
+    })?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(parse_api_error(response).await);
     }
     let payload: ApiResponse<PublicLoginResponse> =
-        response.json().await.map_err(|_| PublicSessionApiError::transport())?;
+        response.json().await.map_err(|_| PublicSessionApiError::local("invalid_response"))?;
+    if !valid_login_session(&payload.data) {
+        return Err(PublicSessionApiError::local("invalid_response"));
+    }
     Ok(PublicSession {
         authenticated: true,
         user_id: payload.data.user_id,
@@ -61,33 +81,95 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
 
 async fn parse_api_error(response: Response) -> PublicSessionApiError {
     let status = Some(response.status());
-    let body = response.text().await.unwrap_or_default();
-    let Ok(payload) = serde_json::from_str::<ApiErrorResponse>(&body) else {
-        return PublicSessionApiError { status, ..PublicSessionApiError::transport() };
+    let Ok((code, data)) = decoder::decode_error(response).await else {
+        return PublicSessionApiError {
+            status,
+            ..PublicSessionApiError::local("invalid_response")
+        };
     };
-    let public_reason = if status == Some(403) && payload.code == "account_blacklisted" {
-        payload
-            .data
-            .as_ref()
+    let public_reason = if status == Some(403) && code == "account_blacklisted" {
+        data.as_object()
+            .filter(|data| data.len() == 1)
             .and_then(|data| data.get("public_reason"))
             .and_then(Value::as_str)
-            .map(str::trim)
             .filter(|reason| {
-                !reason.is_empty() && reason.len() <= 1024 && !reason.chars().any(char::is_control)
+                !reason.is_empty()
+                    && *reason == reason.trim()
+                    && reason.len() <= 1024
+                    && !reason.chars().any(char::is_control)
             })
             .map(ToOwned::to_owned)
     } else {
         None
     };
-    PublicSessionApiError { status, code: Some(payload.code), public_reason }
+    PublicSessionApiError { status, code: Some(code), public_reason }
 }
 
 pub(crate) async fn logout_public() -> Result<(), String> {
-    let response =
-        Request::delete("/api/v1/session").send().await.map_err(|error| error.to_string())?;
+    let response = send_request(|abort_signal| {
+        Request::delete("/api/v1/session")
+            .abort_signal(abort_signal)
+            .build()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| transport_error_code(&error))?;
     observe_response_date(&response);
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
-    Ok(())
+    decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())
+}
+
+fn valid_current_session(session: &PublicSession) -> bool {
+    session.authenticated
+        && valid_session_fields(
+            &session.user_id,
+            &session.username,
+            &session.expires_at,
+            &session.absolute_expires_at,
+        )
+}
+
+fn valid_login_session(session: &PublicLoginResponse) -> bool {
+    session.status == "active"
+        && valid_session_fields(
+            &session.user_id,
+            &session.username,
+            &session.expires_at,
+            &session.absolute_expires_at,
+        )
+}
+
+fn valid_session_fields(
+    user_id: &str,
+    username: &str,
+    expires_at: &str,
+    absolute_expires_at: &str,
+) -> bool {
+    valid_legacy_uuid(user_id)
+        && !username.is_empty()
+        && username == username.trim()
+        && username.len() <= 256
+        && !username.chars().any(char::is_control)
+        && valid_legacy_time(expires_at)
+        && valid_legacy_time(absolute_expires_at)
+}
+
+fn valid_legacy_uuid(value: &str) -> bool {
+    Uuid::parse_str(value).is_ok_and(|id| {
+        id.to_string() == value
+            && (1..=5).contains(&id.get_version_num())
+            && id.get_variant() == Variant::RFC4122
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn valid_legacy_time(value: &str) -> bool {
+    !value.is_empty() && !js_sys::Date::parse(value).is_nan()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn valid_legacy_time(value: &str) -> bool {
+    !value.is_empty() && chrono::DateTime::parse_from_rfc3339(value).is_ok()
 }

@@ -1,8 +1,8 @@
 //! 规则 Markdown 预览组件。
 
+use auction_web_shared::legacy_t as t;
 use auction_web_shared::{MarkdownDocument, without_leading_title};
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::AdminRulesCandidate;
 
@@ -12,18 +12,18 @@ pub(super) fn AdminRulesPreview(draft: AdminRulesCandidate) -> Element {
     let markdown = without_leading_title(&draft.markdown);
     rsx! {
         article {
-            class: "admin-rules__preview",
-            aria_labelledby: "admin-rules-preview-title",
-            h2 { id: "admin-rules-preview-title", {t!("admin-rules-preview")} }
+            aria_labelledby: "rules-preview-title",
+            class: "admin-rules-preview",
+            h2 { id: "rules-preview-title", {t!("admin-rules-preview")} }
             h1 {
-                if draft.title.trim().is_empty() {
+                if draft.title.is_empty() {
                     {t!("admin-rules-untitled")}
                 } else {
                     "{draft.title}"
                 }
             }
-            if markdown.trim().is_empty() {
-                p { class: "admin-rules__preview-empty", {t!("admin-rules-empty-preview")} }
+            if markdown.is_empty() {
+                p { {t!("admin-rules-empty-preview")} }
             } else {
                 MarkdownDocument { markdown }
             }

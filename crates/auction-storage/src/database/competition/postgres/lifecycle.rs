@@ -30,7 +30,8 @@ impl AuctionLifecycleTransaction for PostgresCompetitionTransaction {
         &mut self,
         command: &AuctionLifecycleCommand,
         plan: AuctionLifecyclePlan,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
+    ) -> impl Future<Output = Result<AuctionLifecycleWriteSummary, CompetitionTransactionError>> + Send
+    {
         let command = command.clone();
         async move { apply_lifecycle_plan_postgres(self, &command, plan).await }
     }
@@ -59,45 +60,16 @@ impl AuctionLifecycleTransaction for PostgresCompetitionTransaction {
         }
     }
 
-    fn proxy_user_is_eligible_for_update(
-        &mut self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send {
-        async move {
-            let status = {
-                let transaction = self.transaction_mut()?;
-                sqlx::query_scalar::<_, String>(
-                    "SELECT status FROM public.users WHERE id = $1 FOR UPDATE",
-                )
-                .bind(user_id.as_uuid())
-                .fetch_optional(&mut **transaction)
-                .await
-                .map_err(map_sql_error)?
-                .ok_or_else(|| invalid_state("活动代理用户不存在"))?
-            };
-            let blacklist_active = {
-                let transaction = self.transaction_mut()?;
-                sqlx::query_scalar::<_, bool>(
-                    "SELECT revoked_at IS NULL
-                     FROM public.user_blacklist
-                     WHERE user_id = $1
-                     FOR UPDATE",
-                )
-                .bind(user_id.as_uuid())
-                .fetch_optional(&mut **transaction)
-                .await
-                .map_err(map_sql_error)?
-                .unwrap_or(false)
-            };
-            Ok(status == "active" && !blacklist_active)
-        }
-    }
-
     fn append_lifecycle_record(
         &mut self,
         command: &AuctionLifecycleCommand,
+        context: &AuctionLifecycleContext,
+        plan: &AuctionLifecyclePlan,
         result: &AuctionLifecycleResult,
+        write_summary: AuctionLifecycleWriteSummary,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { append_lifecycle_record_inner(self, command, result).await }
+        async move {
+            append_lifecycle_record_inner(self, command, context, plan, result, write_summary).await
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 use auction_application::ScheduledRoundClaim;
 use auction_domain::AuctionId;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
@@ -29,6 +29,7 @@ pub(super) async fn postgres(
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
+                round.world_id, round.local_week,
                 round.preview_completed_at, round.open_completed_at, round.attempt_count
          FROM public.scheduled_rounds AS round
          INNER JOIN public.auctions AS auction ON auction.id = round.auction_id
@@ -79,6 +80,8 @@ pub(super) async fn postgres(
             AuctionId::from_uuid(row.try_get("auction_id").map_err(map_storage_error)?);
         let create_command_id: Uuid =
             row.try_get("create_command_id").map_err(map_storage_error)?;
+        let world_id: String = row.try_get("world_id").map_err(map_storage_error)?;
+        let local_week: NaiveDate = row.try_get("local_week").map_err(map_storage_error)?;
         let preview_completed_at: Option<DateTime<Utc>> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
         let open_completed_at: Option<DateTime<Utc>> =
@@ -115,7 +118,7 @@ pub(super) async fn postgres(
             round_id,
             auction_id,
             phase,
-            command_id: command_id(create_command_id, phase),
+            command_id: command_id(create_command_id, &world_id, local_week, phase),
             worker_id: worker_id.to_owned(),
             lease_until,
             attempt_count,
@@ -160,6 +163,7 @@ async fn sqlite_inner(
     let lease_text = super::mapping::sqlite_timestamp(lease_until);
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
+                round.world_id, round.local_week,
                 round.preview_completed_at, round.open_completed_at, round.attempt_count
          FROM scheduled_rounds AS round
          INNER JOIN auctions AS auction ON auction.id = round.auction_id
@@ -217,6 +221,12 @@ async fn sqlite_inner(
         let create_command_id = super::mapping::uuid_from_blob(
             row.try_get("create_command_id").map_err(map_storage_error)?,
         )?;
+        let world_id: String = row.try_get("world_id").map_err(map_storage_error)?;
+        let local_week = NaiveDate::parse_from_str(
+            &row.try_get::<String, _>("local_week").map_err(map_storage_error)?,
+            "%Y-%m-%d",
+        )
+        .map_err(|_| repository_error_owned("Worker 调度 local_week 格式无效"))?;
         let preview_completed_at: Option<String> =
             row.try_get("preview_completed_at").map_err(map_storage_error)?;
         let open_completed_at: Option<String> =
@@ -250,7 +260,7 @@ async fn sqlite_inner(
             round_id,
             auction_id,
             phase,
-            command_id: command_id(create_command_id, phase),
+            command_id: command_id(create_command_id, &world_id, local_week, phase),
             worker_id: worker_id.to_owned(),
             lease_until,
             attempt_count,

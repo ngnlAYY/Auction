@@ -21,8 +21,6 @@ pub struct AdminSettlementAuctionResponse {
     pub cancelled_reason: Option<String>,
     pub cancelled_by: Option<String>,
     pub state_version: i64,
-    pub scheduled_end_at: Option<String>,
-    pub effective_end_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -58,10 +56,10 @@ pub struct AdminAuctionResponse {
     pub cancelled_reason: Option<String>,
     pub cancelled_by: Option<String>,
     pub state_version: i64,
-    pub scheduled_end_at: Option<String>,
-    pub effective_end_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_ends_at: Option<String>,
-    pub lot_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lot_count: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }

@@ -1,7 +1,7 @@
 //! Public 黑名单页面。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use auction_web_shared::TruncatedText;
 
@@ -39,17 +39,14 @@ pub(super) fn page() -> Element {
 #[component]
 fn BlacklistTable(page: BlacklistPage, mut page_number: Signal<i64>) -> Element {
     rsx! {
-        section { class: "public-auction-category", aria_labelledby: "blacklist-title",
-            h1 { id: "blacklist-title", class: "public-auction-category__title",
-                {t!("page-blacklist-title")}
-            }
-            p { class: "public-auction-page__status", {t!("page-blacklist-note")} }
-            p { class: "public-auction-page__status", {t!("blacklist-total", total: page.total)} }
+        section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
+            h1 { id: "blacklist-title", {t!("page-blacklist-title")} }
+            p { {t!("page-blacklist-note")} }
             if page.users.is_empty() {
-                p { class: "public-auction-page__status", {t!("blacklist-empty")} }
+                p { class: "public-blacklist-empty", {t!("blacklist-empty")} }
             } else {
-                div { class: "public-auction-catalog",
-                    table {
+                div { class: "public-blacklist-table-wrap",
+                    table { class: "public-blacklist-table",
                         thead {
                             tr {
                                 th { {t!("blacklist-player")} }

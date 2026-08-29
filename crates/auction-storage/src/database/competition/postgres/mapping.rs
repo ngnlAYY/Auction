@@ -66,6 +66,15 @@ pub(crate) fn proxy_from_row(
     Ok(authorization)
 }
 
+pub(crate) fn valid_proxy_terminal_reason(status: ProxyStatus, reason: Option<&str>) -> bool {
+    match status {
+        ProxyStatus::Active | ProxyStatus::FinalFast => reason.is_none(),
+        ProxyStatus::Exhausted => matches!(reason, Some("strictly_defeated" | "ranked_below")),
+        ProxyStatus::Frozen => reason == Some("eligibility_lost"),
+        ProxyStatus::Closed => reason == Some("competition_closed"),
+    }
+}
+
 pub(crate) fn bid_amount(
     row: &sqlx::postgres::PgRow,
     column: &str,
@@ -239,7 +248,11 @@ pub(crate) fn map_sql_error(error: sqlx::Error) -> CompetitionTransactionError {
 }
 
 pub(crate) fn is_serialization_error(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(database_error) if database_error.code().as_deref() == Some("40001"))
+    matches!(
+        error,
+        sqlx::Error::Database(database_error)
+            if matches!(database_error.code().as_deref(), Some("40001" | "40P01"))
+    )
 }
 
 pub(crate) fn is_unique_error(error: &sqlx::Error) -> bool {
@@ -266,17 +279,5 @@ pub(crate) fn parse_auction_status(
         "settled" => Ok(AuctionStatus::Settled),
         "cancelled" => Ok(AuctionStatus::Cancelled),
         _ => Err(invalid_state("拍卖状态不在允许集合内")),
-    }
-}
-
-pub(crate) fn auction_status_name(status: AuctionStatus) -> &'static str {
-    match status {
-        AuctionStatus::Draft => "draft",
-        AuctionStatus::Preview => "preview",
-        AuctionStatus::Live => "live",
-        AuctionStatus::Final => "final",
-        AuctionStatus::Settling => "settling",
-        AuctionStatus::Settled => "settled",
-        AuctionStatus::Cancelled => "cancelled",
     }
 }

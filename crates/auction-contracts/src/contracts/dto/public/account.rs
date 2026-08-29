@@ -30,7 +30,7 @@ pub struct PublicOwnedBidResponse {
     pub lot_number: i64,
     pub amount: i64,
     pub accepted_state_version: i64,
-    pub fact_index: i32,
+    pub fact_index: i64,
     pub mechanism: String,
     pub created_at: String,
     pub leading: bool,
@@ -56,16 +56,12 @@ pub struct PublicOwnedProxyQuotaResponse {
 pub struct PublicOwnedProxyTransitionResponse {
     pub transition_number: i64,
     pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub old_maximum_amount: Option<i64>,
     pub new_maximum_amount: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub old_mode: Option<String>,
     pub new_mode: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub old_status: Option<String>,
     pub new_status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub resulting_state_version: i64,
     pub created_at: String,

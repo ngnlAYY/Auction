@@ -1,16 +1,6 @@
 //! delivery 证明、请求摘要和错误映射。
 
-#[cfg(feature = "postgres")]
-use serde::Serialize;
-
 use super::*;
-
-#[cfg(feature = "postgres")]
-#[derive(Serialize)]
-pub(super) struct DeliveryProof<'a> {
-    pub(super) external_reference: &'a str,
-    pub(super) result_metadata: &'a serde_json::Value,
-}
 
 #[cfg(feature = "postgres")]
 pub(super) fn request_hash(

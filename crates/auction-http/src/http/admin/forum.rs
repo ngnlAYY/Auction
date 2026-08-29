@@ -29,10 +29,10 @@ pub(crate) async fn preview(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
-        return response;
+    if let Err(response) = super::authenticated_admin_mutation(&state, &headers, address).await {
+        return *response;
     }
-    if let Some(response) = mutation_boundary(&headers, &uri) {
+    if let Some(response) = mutation_boundary(&uri) {
         return response;
     }
     let request: AdminForumPreviewRequest = match serde_json::from_slice(&body) {
@@ -68,16 +68,7 @@ pub(crate) async fn preview(
         .into_response()
 }
 
-fn mutation_boundary(headers: &HeaderMap, uri: &Uri) -> Option<Response> {
-    let Some(raw_csrf) = super::read_admin_cookie(headers, super::ADMIN_CSRF_COOKIE) else {
-        return Some(super::authentication_error());
-    };
-    if !super::valid_admin_csrf_header(headers, &raw_csrf) {
-        return Some(
-            super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-                .into_response(),
-        );
-    }
+fn mutation_boundary(uri: &Uri) -> Option<Response> {
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return Some(
             super::api_error(StatusCode::BAD_REQUEST, "invalid_query", "论坛预览不接受查询参数")

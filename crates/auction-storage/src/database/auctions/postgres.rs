@@ -2,14 +2,15 @@
 
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest,
-    PublicAuctionPage,
+    PublicAuctionPage, PublicRealtimeAuctionStatus,
 };
 use sqlx::Row;
 use uuid::Uuid;
 
 use super::super::PostgresStore;
 use super::mapping::{
-    map_postgres_current, map_postgres_summary, storage_error, validate_list_request,
+    map_postgres_current, map_postgres_summary, map_realtime_status, storage_error,
+    validate_list_request,
 };
 
 pub(super) async fn list(
@@ -144,4 +145,61 @@ pub(super) async fn current(
     .map_err(|_| storage_error("读取当前公开拍卖失败"))?;
 
     row.map(map_postgres_current).transpose()
+}
+
+pub(super) async fn realtime_status(
+    store: &PostgresStore,
+    auction_id: Uuid,
+) -> Result<Option<PublicRealtimeAuctionStatus>, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT
+             a.id,
+             a.world_id,
+             a.sequence,
+             a.status,
+             a.scheduled_open_at,
+             MAX(l.effective_end_at) FILTER (WHERE l.status IN ('live', 'sold', 'unsold'))
+                 AS scheduled_ends_at,
+             a.preview_revision,
+             CASE
+                 WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
+                 WHEN a.status = 'preview' THEN 'opening'
+                 ELSE 'live'
+             END AS presentation_mode,
+             (a.status IN ('live', 'final')) AS bidding_open
+         FROM public.auctions AS a
+         INNER JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         LEFT JOIN public.lots AS l ON l.auction_id = a.id
+         WHERE a.id = $1
+           AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
+           AND (
+               a.status <> 'preview'
+               OR NOT EXISTS (
+                   SELECT 1
+                   FROM public.auctions AS active
+                   WHERE active.world_id = a.world_id
+                     AND active.status IN ('live', 'final', 'settling')
+               )
+           )
+         GROUP BY a.id",
+    )
+    .bind(auction_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|_| storage_error("读取 Public realtime 拍卖状态失败"))?;
+
+    row.map(|row| {
+        let status: String = row
+            .try_get("status")
+            .map_err(|_| storage_error("读取 Public realtime 拍卖状态失败"))?;
+        if status == "settled" {
+            return map_realtime_status(&status);
+        }
+        let snapshot = map_postgres_current(row)?;
+        if snapshot.id != auction_id {
+            return Err(storage_error("Public realtime 拍卖标识不一致"));
+        }
+        map_realtime_status(&snapshot.status)
+    })
+    .transpose()
 }

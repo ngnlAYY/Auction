@@ -3,7 +3,7 @@ use super::*;
 pub(super) async fn lifecycle_plan<T>(
     transaction: &mut T,
     command: &AuctionLifecycleCommand,
-    context: AuctionLifecycleContext,
+    context: &AuctionLifecycleContext,
     now: chrono::DateTime<chrono::Utc>,
     policy: AuctionLifecyclePolicy,
 ) -> Result<AuctionLifecyclePlan, ApplicationError>
@@ -14,16 +14,22 @@ where
     let admin_action = command.actor.actor_type == crate::AuctionLifecycleActorType::Admin;
     let effect = match command.action {
         crate::AuctionLifecycleAction::Preview => {
+            if !context.world_enabled {
+                return Err(CompetitionTransactionError::InvalidState.into());
+            }
             if !admin_action && now < context.preview_scheduled_at {
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
             auction.preview(now)?;
             AuctionLifecycleEffect::Preview {
                 manual: admin_action,
-                successor: successor_plan(&context)?,
+                successor: successor_plan(context)?,
             }
         }
         crate::AuctionLifecycleAction::Open => {
+            if !context.world_enabled {
+                return Err(CompetitionTransactionError::InvalidState.into());
+            }
             let manual_override = admin_action && now < context.scheduled_open_at;
             if manual_override && !policy.allows_manual_early_open() {
                 return Err(CompetitionTransactionError::InvalidState.into());
@@ -81,7 +87,7 @@ where
     let mut plans = Vec::new();
     let mut earliest_end_at: Option<chrono::DateTime<chrono::Utc>> = None;
     for lot_id in lot_ids {
-        let snapshot = transaction.load_for_update(lot_id).await?;
+        let snapshot = transaction.load_for_update(lot_id, now).await?;
         earliest_end_at =
             Some(earliest_end_at.map_or(snapshot.state.effective_end_at, |current| {
                 current.min(snapshot.state.effective_end_at)
@@ -89,7 +95,7 @@ where
         let Some(active) = snapshot.active_proxy else {
             continue;
         };
-        let eligible = transaction.proxy_user_is_eligible_for_update(active.user_id).await?;
+        let eligible = transaction.participant_is_eligible_for_update(active.user_id).await?;
         if eligible && active.mode == ProxyMode::Fast {
             continue;
         }

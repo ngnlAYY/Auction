@@ -3,56 +3,100 @@
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
 
 use super::pagination::PublicPager;
 use super::proxy::{
-    proxy_capability_label, proxy_mode_label, proxy_quota_label, proxy_status_label,
-    proxy_transition_summary,
+    proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
 use super::{
-    Placeholder, Route, format_amount, format_auction_time, read_public_query, update_public_query,
+    PublicSessionResource, Route, format_amount, format_auction_time,
+    login_href_for_current_location, read_public_query, update_public_query,
 };
 
-const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 20;
+const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
 
 pub(super) fn page() -> Element {
-    let mut refresh_generation = use_context::<Signal<u64>>();
+    let mut session = use_context::<PublicSessionResource>();
+    let session_snapshot = session.read().clone();
+
+    match session_snapshot.as_ref() {
+        None => rsx! {
+            section { class: "public-account-bids-page", aria_labelledby: "account-loading-title",
+                h1 { id: "account-loading-title", {t!("page-account-title")} }
+                p { class: "public-page-status", role: "status", {t!("data-loading")} }
+            }
+        },
+        Some(Err(_)) => rsx! {
+            section { class: "public-account-bids-page", aria_labelledby: "account-error-title",
+                h1 { id: "account-error-title", {t!("page-account-title")} }
+                div { class: "public-auction-empty", role: "alert",
+                    p { class: "public-auction-empty__title", {t!("data-error")} }
+                    button {
+                        class: "public-auction-empty__retry",
+                        r#type: "button",
+                        onclick: move |_| session.restart(),
+                        {t!("data-retry")}
+                    }
+                }
+            }
+        },
+        Some(Ok(None)) | Some(Ok(Some(crate::api::PublicSession { authenticated: false, .. }))) => {
+            rsx! {
+                section { class: "public-account-bids-page", aria_labelledby: "account-login-title",
+                    h1 { id: "account-login-title", {t!("page-account-title")} }
+                    div { class: "public-account-login-prompt", role: "status",
+                        p { {t!("account-login-required")} }
+                        Link {
+                            class: "public-account-login-cta",
+                            to: login_href_for_current_location(),
+                            {t!("account-login-cta")}
+                        }
+                    }
+                }
+            }
+        }
+        Some(Ok(Some(_))) => rsx! { AuthenticatedAccountData {} },
+    }
+}
+
+/// 只有共享 session 已确认认证后才挂载受保护列表资源，对齐旧版请求序列。
+#[component]
+fn AuthenticatedAccountData() -> Element {
+    let refresh_generation = use_context::<Signal<u64>>();
+    let mut account_reload_generation = use_signal(|| 0_u64);
     let mut bid_page = use_signal(|| read_public_query().bid_page);
     let mut proxy_page = use_signal(|| read_public_query().proxy_page);
     let account = use_resource(move || {
         let _ = refresh_generation();
+        let _ = account_reload_generation();
         fetch_my_bids(bid_page(), proxy_page())
     });
 
     match &*account.read_unchecked() {
         None => rsx! {
-            Placeholder { title: t!("page-account-title"), detail: t!("data-loading") }
-        },
-        Some(Err(error)) if error == "HTTP 401" => rsx! {
-            section {
-                class: "public-auction-empty public-account-login-prompt",
-                role: "status",
-                aria_labelledby: "account-login-title",
-                h1 { id: "account-login-title", {t!("page-account-title")} }
-                p { {t!("account-login-required")} }
-                Link { class: "public-account-login-cta", to: Route::Login {}, {t!("account-login-cta")} }
+            section { class: "public-account-bids-page", aria_labelledby: "account-loading-title",
+                h1 { id: "account-loading-title", {t!("page-account-title")} }
+                p { class: "public-page-status", role: "status", {t!("data-loading")} }
             }
         },
         Some(Err(_)) => rsx! {
-            section {
-                class: "public-auction-empty",
-                role: "alert",
-                aria_labelledby: "account-error-title",
+            section { class: "public-account-bids-page", aria_labelledby: "account-error-title",
                 h1 { id: "account-error-title", {t!("page-account-title")} }
-                p { {t!("data-error")} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
-                    {t!("data-retry")}
+                div { class: "public-auction-empty", role: "alert",
+                    p { class: "public-auction-empty__title", {t!("data-error")} }
+                    button {
+                        class: "public-auction-empty__retry",
+                        r#type: "button",
+                        onclick: move |_| {
+                            account_reload_generation
+                                .set(account_reload_generation().saturating_add(1));
+                        },
+                        {t!("data-retry")}
+                    }
                 }
             }
         },
@@ -84,33 +128,17 @@ fn AccountPage(
 ) -> Element {
     let page_size = if page.page_size > 0 { page.page_size } else { DEFAULT_ACCOUNT_PAGE_SIZE };
     rsx! {
-        section { class: "public-auction-category", aria_labelledby: "account-bids-title",
-            h1 { id: "account-bids-title", class: "public-auction-category__title",
-                {t!("page-account-title")}
-            }
-            p { class: "public-auction-page__status", {t!("page-account-note")} }
-            p { class: "public-auction-page__status",
-                {t!("account-total", bids: page.bid_total, proxies: page.proxy_total)}
-            }
-            if page.bids.is_empty() {
-                p { class: "public-auction-page__status", {t!("account-no-bids")} }
-            } else {
-                BidTable { bids: page.bids.clone() }
-            }
-            AccountPager {
-                label: t!("account-bids-title"),
+        section { class: "public-account-bids-page", aria_labelledby: "account-bids-title",
+            h1 { id: "account-bids-title", {t!("page-account-title")} }
+            BidSection {
+                bids: page.bids.clone(),
                 page: bid_page,
                 total: page.bid_total,
                 page_size,
                 on_page_change: on_bid_page_change,
             }
-            if page.proxies.is_empty() {
-                p { class: "public-auction-page__status", {t!("account-no-proxies")} }
-            } else {
-                ProxyTable { proxies: page.proxies.clone() }
-            }
-            AccountPager {
-                label: t!("account-proxies-title"),
+            ProxySection {
+                proxies: page.proxies.clone(),
                 page: proxy_page,
                 total: page.proxy_total,
                 page_size,
@@ -134,28 +162,43 @@ fn AccountPager(
 }
 
 #[component]
-fn BidTable(bids: Vec<OwnedBid>) -> Element {
+fn BidSection(
+    bids: Vec<OwnedBid>,
+    page: i64,
+    total: i64,
+    page_size: i64,
+    on_page_change: EventHandler<i64>,
+) -> Element {
     rsx! {
         section { class: "public-account-section",
-            h2 { class: "public-auction-category__title", {t!("account-bids-title")} }
-            div { class: "public-auction-catalog public-account-table-wrap",
-                table {
-                    thead {
-                        tr {
-                            th { {t!("account-lot")} }
-                            th { {t!("account-item")} }
-                            th { {t!("account-amount")} }
-                            th { {t!("account-mechanism")} }
-                            th { {t!("account-leading")} }
-                            th { {t!("account-time")} }
+            h2 { {t!("account-bids-title")} }
+            if bids.is_empty() {
+                p { class: "public-account-empty", {t!("account-no-bids")} }
+            } else {
+                div { class: "public-account-table-wrap",
+                    table { class: "public-account-table",
+                        thead {
+                            tr {
+                                th { {t!("account-lot")} }
+                                th { class: "numeric-column public-account-number", {t!("account-amount")} }
+                                th { {t!("account-bid-status")} }
+                                th { {t!("account-time")} }
+                            }
                         }
-                    }
-                    tbody {
-                        for bid in bids {
-                            BidRow { bid }
+                        tbody {
+                            for bid in bids {
+                                BidRow { bid }
+                            }
                         }
                     }
                 }
+            }
+            AccountPager {
+                label: t!("account-bids-title"),
+                page,
+                total,
+                page_size,
+                on_page_change,
             }
         }
     }
@@ -164,20 +207,18 @@ fn BidTable(bids: Vec<OwnedBid>) -> Element {
 #[component]
 fn BidRow(bid: OwnedBid) -> Element {
     let leading = if bid.leading { t!("account-bid-leading") } else { t!("account-bid-outbid") };
-    let row_class = if bid.leading { "public-auction-catalog__leading" } else { "" };
+    let row_class = if bid.leading { "public-account-leading" } else { "" };
     rsx! {
         tr { class: row_class,
-            td { class: "public-auction-catalog__code", "data-label": t!("account-lot"),
+            td { class: "public-account-code", "data-label": t!("account-lot"),
                 Link {
                     to: Route::LotDetail { lot_code: bid.lot_id.clone() },
                     {lot_code_for(&bid.equipment.category, bid.lot_number)}
                 }
             }
-            td { "data-label": t!("account-item"), "{bid.equipment.name}" }
-            td { class: "public-auction-catalog__amount public-auction-catalog__number", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
-            td { "data-label": t!("account-mechanism"), {super::bid_mechanism_label(&bid.mechanism)} }
-            td { "data-label": t!("account-leading"),
-                span { class: if bid.leading { "public-auction-status public-auction-status--live" } else { "public-auction-status" }, {leading} }
+            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
+            td { "data-label": t!("account-bid-status"),
+                span { class: if bid.leading { "public-account-status public-account-status--live" } else { "public-account-status" }, {leading} }
             }
             td { "data-label": t!("account-time"), time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" } }
         }
@@ -185,31 +226,46 @@ fn BidRow(bid: OwnedBid) -> Element {
 }
 
 #[component]
-fn ProxyTable(proxies: Vec<OwnedProxy>) -> Element {
+fn ProxySection(
+    proxies: Vec<OwnedProxy>,
+    page: i64,
+    total: i64,
+    page_size: i64,
+    on_page_change: EventHandler<i64>,
+) -> Element {
     rsx! {
         section { class: "public-account-section",
-            h2 { class: "public-auction-category__title", {t!("account-proxies-title")} }
-            p { class: "public-auction-page__status", {t!("account-proxies-note")} }
-            div { class: "public-auction-catalog public-account-table-wrap",
-                table {
-                    thead {
-                        tr {
-                            th { {t!("account-lot")} }
-                            th { {t!("account-item")} }
-                            th { {t!("account-mode")} }
-                            th { {t!("account-maximum")} }
-                            th { {t!("account-transition-history")} }
-                            th { {t!("account-quota")} }
-                            th { {t!("account-status")} }
-                            th { {t!("account-capability")} }
+            h2 { {t!("account-proxies-title")} }
+            p { class: "public-account-hint", {t!("account-proxies-note")} }
+            if proxies.is_empty() {
+                p { class: "public-account-empty", {t!("account-no-proxies")} }
+            } else {
+                div { class: "public-account-table-wrap",
+                    table { class: "public-account-table",
+                        thead {
+                            tr {
+                                th { {t!("account-lot")} }
+                                th { class: "numeric-column public-account-number", {t!("account-secret-maximum")} }
+                                th { {t!("account-transition-history")} }
+                                th { {t!("account-mode")} }
+                                th { {t!("account-proxy-uses")} }
+                                th { {t!("account-status")} }
+                            }
                         }
-                    }
-                    tbody {
-                        for proxy in proxies {
-                            ProxyRow { proxy }
+                        tbody {
+                            for proxy in proxies {
+                                ProxyRow { proxy }
+                            }
                         }
                     }
                 }
+            }
+            AccountPager {
+                label: t!("account-proxies-title"),
+                page,
+                total,
+                page_size,
+                on_page_change,
             }
         }
     }
@@ -219,22 +275,19 @@ fn ProxyTable(proxies: Vec<OwnedProxy>) -> Element {
 fn ProxyRow(proxy: OwnedProxy) -> Element {
     let transitions = proxy_transition_summary(&proxy);
     let quota = proxy_quota_label(&proxy);
-    let capability = proxy_capability_label(&proxy);
     rsx! {
         tr {
-            td { class: "public-auction-catalog__code", "data-label": t!("account-lot"),
+            td { class: "public-account-code", "data-label": t!("account-lot"),
                 Link {
                     to: Route::LotDetail { lot_code: proxy.lot_id.clone() },
                     {lot_code_for(&proxy.equipment.category, proxy.lot_number)}
                 }
             }
-            td { "data-label": t!("account-item"), "{proxy.equipment.name}" }
-            td { "data-label": t!("account-mode"), {proxy_mode_label(&proxy.mode)} }
-            td { class: "public-auction-catalog__amount public-auction-catalog__number", "data-label": t!("account-maximum"), {format_amount(proxy.maximum_amount)} }
+            td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-secret-maximum"), {format_amount(proxy.maximum_amount)} }
             td { "data-label": t!("account-transition-history"), {transitions} }
-            td { "data-label": t!("account-quota"), {quota} }
+            td { "data-label": t!("account-mode"), {proxy_mode_label(&proxy.mode)} }
+            td { "data-label": t!("account-proxy-uses"), {quota} }
             td { "data-label": t!("account-status"), {proxy_status_label(&proxy.status)} }
-            td { "data-label": t!("account-capability"), {capability} }
         }
     }
 }

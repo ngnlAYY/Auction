@@ -9,7 +9,10 @@ mod login_key;
 
 pub use clients::{build_http_client, ehentai, mooglemail};
 pub use credentials::CredentialSealer;
-pub use cryptobox::{DataKey, EquipmentKeySealer, EquipmentKeySealerError};
+pub use cryptobox::{
+    DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
+    EquipmentKeySealerError,
+};
 pub use equipment::{
     EquipmentSourceAdapter, EquipmentSourceConfigurationError, EquipmentSourcePolicy,
     build_equipment_http_client,

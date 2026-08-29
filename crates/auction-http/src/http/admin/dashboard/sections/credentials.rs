@@ -16,6 +16,7 @@ pub(crate) fn map_credentials(
     process: &DashboardSection<ProcessSnapshot>,
     dashboard_worlds: &[AdminCredentialWorld],
 ) -> AdminDashboardSectionResponse {
+    let observed_at = timestamp(snapshot.observed_at);
     let active_count = snapshot.scopes.iter().map(|scope| scope.active_count).sum::<i64>();
     let invalid_count = snapshot.scopes.iter().map(|scope| scope.invalid_count).sum::<i64>();
     let restart_required = credential_restart_required(&snapshot, process);
@@ -51,37 +52,14 @@ pub(crate) fn map_credentials(
         } else {
             DashboardStatus::Ok
         };
-    let error_code = if active_count == 0 || !mail_ready {
-        Some("no_active_credentials".to_owned())
-    } else if invalid_count > 0 {
-        Some("invalid_credentials".to_owned())
-    } else if restart_required == Some(true) {
-        Some("credentials_restart_required".to_owned())
-    } else if restart_required.is_none() {
-        Some("credentials_restart_unknown".to_owned())
-    } else {
-        None
-    };
     AdminDashboardSectionResponse {
         status: status.as_str().to_owned(),
-        observed_at: Some(timestamp(snapshot.observed_at)),
-        error_code,
+        observed_at: Some(observed_at.clone()),
+        error_code: None,
         data: Some(json!({
-            "active_count": active_count,
-            "disabled_count": snapshot.scopes.iter().map(|scope| scope.disabled_count).sum::<i64>(),
-            "invalid_count": invalid_count,
-            "last_admin_change_at": snapshot.last_admin_change_at.map(timestamp),
-            "restart_required": restart_required,
             "availability": mail_availability,
-            "scopes": snapshot.scopes.into_iter().map(|scope| json!({
-                "kind": scope.kind.as_str(),
-                "world": scope.world.as_str(),
-                "active_count": scope.active_count,
-                "disabled_count": scope.disabled_count,
-                "invalid_count": scope.invalid_count,
-                "updated_at": scope.updated_at.map(timestamp),
-                "restart_required": restart_required,
-            })).collect::<Vec<_>>(),
+            "observed_at": observed_at,
+            "last_admin_change_at": snapshot.last_admin_change_at.map(timestamp),
         })),
     }
 }

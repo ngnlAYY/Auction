@@ -6,9 +6,20 @@ use super::super::mapping::*;
 use super::super::*;
 
 impl SqliteCompetitionTransaction {
+    pub(crate) async fn current_time_inner(
+        &mut self,
+    ) -> Result<DateTime<Utc>, CompetitionTransactionError> {
+        let value: String = sqlx::query_scalar("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
+            .fetch_one(&mut *self.connection_mut()?)
+            .await
+            .map_err(map_sql_error)?;
+        parse_timestamp(value, "SQLite 数据库当前时间")
+    }
+
     pub(crate) async fn load_for_update_inner(
         &mut self,
         lot_id: LotId,
+        now: DateTime<Utc>,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
             let connection = self.connection_mut()?;
@@ -17,6 +28,8 @@ impl SqliteCompetitionTransaction {
                     l.start_price, l.current_price, l.leader_user_id, l.leader_proxy_last,
                     l.effective_end_at, l.state_version, l.last_proxy_sequence,
                     l.slow_generation, l.slow_authorization_id, l.slow_due_at, l.material,
+                    l.status AS lot_status, a.status AS auction_status, a.scheduled_open_at,
+                    w.enabled AS world_enabled,
                     a.default_start_price, a.soft_close_window_seconds,
                     a.soft_close_extension_seconds, a.cancel_cutoff_seconds,
                     a.proxy_slow_interval_seconds,
@@ -34,7 +47,8 @@ impl SqliteCompetitionTransaction {
                         AS policy_final_phase_lead_seconds
                  FROM lots AS l
                  INNER JOIN auctions AS a ON a.id = l.auction_id
-                 WHERE l.id = ? AND l.status = 'live'",
+                 INNER JOIN worlds AS w ON w.id = a.world_id
+                 WHERE l.id = ?",
             )
             .bind(uuid_blob(lot_id.as_uuid()))
             .fetch_optional(&mut *connection)
@@ -45,26 +59,57 @@ impl SqliteCompetitionTransaction {
             return Err(CompetitionTransactionError::NotFound);
         };
 
+        let world_enabled = row.try_get::<i64, _>("world_enabled").map_err(map_sql_error)? != 0;
+        let auction_status =
+            parse_auction_status(row.try_get("auction_status").map_err(map_sql_error)?)?;
+        let lot_status: String = row.try_get("lot_status").map_err(map_sql_error)?;
+        let scheduled_open_at = parse_timestamp(
+            row.try_get::<String, _>("scheduled_open_at").map_err(map_sql_error)?,
+            "拍卖计划开放时间",
+        )?;
+        let effective_end_at = row
+            .try_get::<Option<String>, _>("effective_end_at")
+            .map_err(map_sql_error)?
+            .map(|value| parse_timestamp(value, "lot 有效结束时间"))
+            .transpose()?;
+        if !world_enabled
+            || !matches!(auction_status, AuctionStatus::Live | AuctionStatus::Final)
+            || lot_status != "live"
+            || now < scheduled_open_at
+        {
+            return Err(CompetitionTransactionError::InvalidState);
+        }
+        let effective_end_at = effective_end_at.ok_or(CompetitionTransactionError::InvalidState)?;
+        if now >= effective_end_at {
+            return Err(CompetitionTransactionError::InvalidState);
+        }
+
         let rules = auction_rules_from_row(&row)?;
+        let start_price = bid_amount(&row, "start_price", "lot 起始价")?;
+        let stored_current_price = optional_bid_amount(&row, "current_price", "lot 当前价")?;
+        let leader_id = row
+            .try_get::<Option<Vec<u8>>, _>("leader_user_id")
+            .map_err(map_sql_error)?
+            .map(|bytes| uuid_from_blob(bytes, "领先者标识"))
+            .transpose()?
+            .map(auction_domain::UserId::from_uuid);
+        // Lite 同样可能读到旧版或缺陷版本写出的无领先者起始价哨兵；只归一化这一种
+        // 可证明等价的形状，其余金额/领先者矛盾继续失败关闭。
+        let current_price = match (stored_current_price, leader_id.is_some()) {
+            (None, false) => None,
+            (Some(current_price), false) if current_price == start_price => None,
+            (Some(current_price), true) => Some(current_price),
+            _ => return Err(invalid_state("Lite lot 当前价与领先者持久化投影不一致")),
+        };
         let state = LotBidState {
             lot_id,
-            start_price: bid_amount(&row, "start_price", "lot 起始价")?,
-            current_price: optional_bid_amount(&row, "current_price", "lot 当前价")?,
-            leader_id: row
-                .try_get::<Option<Vec<u8>>, _>("leader_user_id")
-                .map_err(map_sql_error)?
-                .map(|bytes| uuid_from_blob(bytes, "领先者标识"))
-                .transpose()?
-                .map(auction_domain::UserId::from_uuid),
+            start_price,
+            current_price,
+            leader_id,
             leader_proxy_last: row.try_get::<i64, _>("leader_proxy_last").map_err(map_sql_error)?
                 != 0,
             material: row.try_get::<i64, _>("material").map_err(map_sql_error)? != 0,
-            effective_end_at: parse_timestamp(
-                row.try_get::<Option<String>, _>("effective_end_at")
-                    .map_err(map_sql_error)?
-                    .ok_or_else(|| invalid_state("lot 缺少有效结束时间"))?,
-                "lot 有效结束时间",
-            )?,
+            effective_end_at,
             state_version: positive_u64(
                 row.try_get("state_version").map_err(map_sql_error)?,
                 "lot 状态版本",
@@ -108,31 +153,106 @@ impl SqliteCompetitionTransaction {
 
         rules.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         state.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
-        Ok(CompetitionSnapshot { rules, state, active_proxy })
+        Ok(CompetitionSnapshot { rules, auction_status, state, active_proxy })
     }
 
-    /// SQLite 事务已经通过 `BEGIN IMMEDIATE` 串行化；在事务内读取历史最大使用次数。
-    pub(crate) async fn next_proxy_usage_number_inner(
+    /// SQLite 事务已由 `BEGIN IMMEDIATE` 串行化；读取上一份授权形成完整重入 fence。
+    pub(crate) async fn proxy_usage_context_inner(
         &mut self,
         lot_id: LotId,
         user_id: UserId,
-    ) -> Result<u64, CompetitionTransactionError> {
-        let next_usage: i64 = {
+    ) -> Result<ProxyUsageContext, CompetitionTransactionError> {
+        let rows = {
             let connection = self.connection_mut()?;
-            sqlx::query_scalar(
-                "SELECT COALESCE(MAX(usage_number), 0) + 1
+            sqlx::query(
+                "SELECT authorization_id, lot_id, user_id, creation_command_id,
+                        authorization_sequence, usage_number, maximum_amount, mode, status,
+                        terminal_reason, state_version
                  FROM bid_proxy_authorizations
-                 WHERE lot_id = ? AND user_id = ?",
+                 WHERE lot_id = ? AND user_id = ?
+                 ORDER BY usage_number, authorization_sequence, authorization_id",
             )
             .bind(uuid_blob(lot_id.as_uuid()))
             .bind(uuid_blob(user_id.as_uuid()))
-            .fetch_one(&mut *connection)
+            .fetch_all(&mut *connection)
             .await
             .map_err(map_sql_error)?
         };
-        if next_usage <= 0 {
-            return Err(invalid_state("代理使用次数超出数据库范围"));
+        let mut history = Vec::with_capacity(rows.len());
+        for row in rows {
+            let terminal_reason =
+                row.try_get::<Option<String>, _>("terminal_reason").map_err(map_sql_error)?;
+            let authorization = proxy_from_row(row)?;
+            if !valid_proxy_terminal_reason(authorization.status, terminal_reason.as_deref()) {
+                return Err(invalid_state("代理授权终态原因无效"));
+            }
+            history.push(authorization);
         }
-        u64::try_from(next_usage).map_err(|_| invalid_state("代理使用次数超出领域范围"))
+        ProxyUsageContext::from_owner_history(lot_id, user_id, &history)
+    }
+
+    /// `BEGIN IMMEDIATE` 已固定写入视图；读取完整历史以生成旧版代理命令结果。
+    pub(crate) async fn proxy_transition_history_inner(
+        &mut self,
+        authorization_id: ProxyAuthorizationId,
+    ) -> Result<Vec<CompetitionProxyTransitionRecord>, CompetitionTransactionError> {
+        if authorization_id.is_nil() {
+            return Err(invalid_state("代理转换历史缺少授权标识"));
+        }
+        let rows = sqlx::query(
+            "SELECT transition_number, transition_kind, old_maximum_amount,
+                    new_maximum_amount, old_mode, new_mode, old_status, new_status,
+                    reason, resulting_state_version, created_at
+             FROM bid_proxy_authorization_transitions
+             WHERE authorization_id = ?
+             ORDER BY transition_number",
+        )
+        .bind(uuid_blob(authorization_id.as_uuid()))
+        .fetch_all(&mut *self.connection_mut()?)
+        .await
+        .map_err(map_sql_error)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let created_at: String = row.try_get("created_at").map_err(map_sql_error)?;
+                Ok(CompetitionProxyTransitionRecord {
+                    transition_number: row.try_get("transition_number").map_err(map_sql_error)?,
+                    kind: row.try_get("transition_kind").map_err(map_sql_error)?,
+                    old_maximum_amount: row.try_get("old_maximum_amount").map_err(map_sql_error)?,
+                    new_maximum_amount: row.try_get("new_maximum_amount").map_err(map_sql_error)?,
+                    old_mode: row.try_get("old_mode").map_err(map_sql_error)?,
+                    new_mode: row.try_get("new_mode").map_err(map_sql_error)?,
+                    old_status: row.try_get("old_status").map_err(map_sql_error)?,
+                    new_status: row.try_get("new_status").map_err(map_sql_error)?,
+                    reason: row.try_get("reason").map_err(map_sql_error)?,
+                    resulting_state_version: row
+                        .try_get("resulting_state_version")
+                        .map_err(map_sql_error)?,
+                    created_at: parse_timestamp(created_at, "SQLite 代理转换时间")?,
+                })
+            })
+            .collect()
+    }
+
+    /// 历史新版账本重放只读取冻结策略，不重新套用当前 lifecycle/时间窗 gate。
+    pub(crate) async fn proxy_quota_limit_inner(
+        &mut self,
+        lot_id: LotId,
+    ) -> Result<u32, CompetitionTransactionError> {
+        let value = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(
+                    CAST(json_extract(a.policy_snapshot, '$.proxy_max_outbid_uses') AS INTEGER),
+                    0
+                )
+             FROM lots AS l
+             INNER JOIN auctions AS a ON a.id = l.auction_id
+             WHERE l.id = ?",
+        )
+        .bind(uuid_blob(lot_id.as_uuid()))
+        .fetch_optional(&mut *self.connection_mut()?)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(CompetitionTransactionError::NotFound)?;
+        u32::try_from(value).map_err(|_| invalid_state("Lite 代理配额超出兼容范围"))
     }
 }

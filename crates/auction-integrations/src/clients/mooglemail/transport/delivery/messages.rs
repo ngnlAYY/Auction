@@ -11,6 +11,8 @@ impl MoogleMailDeliveryTransport {
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let (subject, body) =
             render_settlement(payload, &self.templates).ok_or_else(invalid_payload)?;
+        let equipment_ids =
+            self.resolve_settlement_equipment(&payload.equipment_secret_refs).await?;
         let outcome = self
             .send_with_credentials(MoogleMailSendRequest {
                 world,
@@ -21,26 +23,23 @@ impl MoogleMailDeliveryTransport {
                 },
                 credits: payload.credits,
                 cod: payload.cod,
-                equipment_ids: match payload.template.as_str() {
-                    "settlement_winner_equipment_cod" | "settlement_equipment_handoff" => {
-                        vec![payload.external_equipment_id.clone()]
-                    }
-                    _ => Vec::new(),
-                },
+                equipment_ids,
             })
             .await
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;
         let external_reference_proven = receipt.external_mail_id.is_some();
-        let external_reference =
-            receipt.external_mail_id.unwrap_or_else(|| format!("delivery:{}", claim.delivery_id));
+        let identity = receipt.external_mail_id.unwrap_or_else(|| claim.delivery_id.to_string());
+        // 旧版 fulfillment snapshot 使用 world/operation 前缀区分远端 ID 与本地 fallback；
+        // reconcile 必须先校验此前缀，不能把任意 delivery 引用当作 Sent 邮件 ID。
+        let external_reference = format!("mooglemail:{world}:send:{identity}");
         Ok(DeliverySendResult {
             external_reference,
             result_metadata: json!({
                 "operation": "send",
                 "template": payload.template,
                 "external_reference_proven": external_reference_proven,
-                "settlement_obligation_id": payload.obligation_id,
+                "settlement_obligation_id": payload.variables.get("reference"),
             }),
         })
     }
@@ -93,8 +92,9 @@ impl MoogleMailDeliveryTransport {
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;
         let external_reference_proven = receipt.external_mail_id.is_some();
-        let external_reference =
-            receipt.external_mail_id.unwrap_or_else(|| format!("delivery:{}", claim.delivery_id));
+        let reference_identity =
+            receipt.external_mail_id.unwrap_or_else(|| claim.delivery_id.to_string());
+        let external_reference = format!("mooglemail:{world}:send:{reference_identity}");
         Ok(DeliverySendResult {
             external_reference,
             result_metadata: json!({

@@ -63,7 +63,7 @@ pub(crate) async fn list(
     };
     let result = match port.list(request.clone()).await {
         Ok(result) => result,
-        Err(error) => return common::map_error(error),
+        Err(error) => return common::map_list_error(error),
     };
     if !result.validate(&request) {
         return super::internal_error();

@@ -11,8 +11,6 @@ pub struct PublicLotProjectionResponse {
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub opens_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scheduled_ends_at: Option<String>,
     pub preview_revision: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub final_restriction: Option<PublicFinalRestrictionResponse>,
@@ -42,9 +40,9 @@ pub struct PublicEquipmentResponse {
     pub category: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i64>,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_summary: String,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
@@ -83,8 +81,12 @@ pub struct PublicPreviewLotResponse {
     pub seller_name: String,
     pub start_price: i64,
     pub equipment_name: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub equipment_category: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_nonempty_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub equipment_category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipment_level: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,12 +94,44 @@ pub struct PublicPreviewLotResponse {
     pub game_equipment_url: String,
 }
 
+/// 预览详情装备的公开契约；分类在旧版 wire 中允许缺失。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct PublicPreviewEquipmentResponse {
+    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_nonempty_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<i64>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub info_summary: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_roll: Option<f64>,
+    pub game_equipment_url: String,
+}
+
+fn deserialize_optional_nonempty_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::custom("可选文本字段不能是空字符串"));
+    }
+    Ok(Some(value))
+}
+
 /// 预览 lot 详情沿用摘要字段，并附加完整公开装备投影。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewLotDetailResponse {
     #[serde(flatten)]
     pub summary: PublicPreviewLotResponse,
-    pub equipment: PublicEquipmentResponse,
+    pub equipment: PublicPreviewEquipmentResponse,
 }
 
 /// lot 列表的无标签数组，保持旧 JSON 契约的 preview/live 形状。
@@ -117,18 +151,17 @@ pub enum PublicLotDetailItemResponse {
 }
 
 /// Public lot 列表与详情共用的响应外壳。
+///
+/// 旧 v1 客户端对顶层字段使用严格闭集校验；世界、场次号和计划结束时间只属于
+/// `/api/v1/auctions/current`，不能作为扩展字段混入 lot 响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLotEnvelopeResponse {
     pub auction_id: String,
-    pub world: String,
-    pub number: i64,
     pub auction_status: String,
     pub projection_kind: String,
     pub presentation_mode: String,
     pub bidding_open: bool,
     pub opens_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scheduled_ends_at: Option<String>,
     pub preview_revision: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub final_restriction: Option<PublicFinalRestrictionResponse>,

@@ -29,13 +29,6 @@ pub(super) fn forum_command_id(
     Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes())
 }
 
-pub(super) const fn proxy_mode_name(mode: ProxyMode) -> &'static str {
-    match mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    }
-}
-
 pub(super) fn is_retryable(error: &ApplicationError) -> bool {
     matches!(
         error,

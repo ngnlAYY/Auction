@@ -3,7 +3,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{BidAmount, CommandId, ProxyAuthorizationId, ProxyMode, UserId};
+use crate::{
+    AuctionStatus, BidAmount, CommandId, ProxyAuthorizationId, ProxyMode, ProxyStatus, UserId,
+};
 
 /// 纯竞价规划器接受的命令种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,8 +37,14 @@ pub enum CompetitionTrigger {
         authorization_id: ProxyAuthorizationId,
         maximum_amount: BidAmount,
         mode: ProxyMode,
+        /// 创建命令锁内读取到的 lifecycle 状态；slow 禁止边界由该状态而非时间推导。
+        auction_status: AuctionStatus,
         authorization_sequence: u64,
         usage_number: u64,
+        /// 同一用户上一份终态授权的上限；首次授权为 `None`。
+        previous_maximum: Option<BidAmount>,
+        /// 同一用户上一份授权的状态；与 `previous_maximum` 同时存在或缺失。
+        previous_status: Option<ProxyStatus>,
         bid_ids: Vec<crate::BidId>,
         now: DateTime<Utc>,
     },

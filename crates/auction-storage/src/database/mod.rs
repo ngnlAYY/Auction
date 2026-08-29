@@ -18,16 +18,24 @@ mod admin_mail;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod audit_health;
 #[cfg(feature = "postgres")]
+mod bootstrap;
+#[cfg(feature = "postgres")]
 #[path = "competition/postgres.rs"]
 mod competition;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod competition_audit;
 #[cfg(feature = "postgres")]
 mod legacy_v28;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod lifecycle_audit;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod mail_delivery;
 #[cfg(feature = "postgres")]
 mod mail_intake;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod mail_poll;
+#[cfg(feature = "postgres")]
+mod migrations;
 #[cfg(feature = "postgres")]
 mod rebuild;
 #[cfg(feature = "postgres")]
@@ -36,6 +44,12 @@ mod recovery_preflight;
 mod settlement;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod settlement_report;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod slow_proxy_due;
+#[cfg(feature = "postgres")]
+pub use bootstrap::{
+    PostgresBootstrapResult, PostgresDatabaseBootstrap, PostgresDatabaseBootstrapError,
+};
 #[cfg(feature = "postgres")]
 pub use competition::PostgresCompetitionTransaction;
 #[cfg(feature = "postgres")]

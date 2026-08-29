@@ -7,7 +7,8 @@ use anyhow::Context;
 #[cfg(feature = "postgres")]
 use auction_application::{
     AdminCredentialImportCommand, AdminCredentialKind, AdminCredentialSecret,
-    AdminCredentialService, AdminCredentialWorld,
+    AdminCredentialService, AdminCredentialWorld, ForumSyncRecoveryPort,
+    ForumWriteRetryAuthorizationCommand, RequestHash,
 };
 use auction_config::{AppConfig, HttpListenMode, Role};
 #[cfg(feature = "postgres")]
@@ -41,7 +42,6 @@ use std::{
 };
 #[cfg(feature = "postgres")]
 use url::Url;
-#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 mod deployment_control;
@@ -61,7 +61,7 @@ mod dispatch;
 #[path = "runtime/postgres/mod.rs"]
 mod postgres;
 
-use cli::{Cli, Command, DeploymentAction, PostgresRebuildModeArg};
+use cli::{Cli, Command, DeploymentAction, PostgresRebuildModeArg, SystemdControllerArgs};
 use deployment::{
     DeploymentListener, admin_deployment_listener, deployment_check, public_deployment_listener,
 };

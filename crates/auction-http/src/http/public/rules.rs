@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
 
-use super::{PublicApiState, api_error, parse_query, timestamp};
+use super::{PublicApiState, api_error, parse_query, public_timestamp};
 
 /// 读取指定语言的公开规则；缺失的非默认语言回退到英文。
 pub(crate) async fn get(
@@ -76,6 +76,6 @@ fn map_document(document: PublicRulesDocument) -> PublicRulesResponse {
         title: document.title,
         markdown: document.markdown,
         revision: document.revision,
-        published_at: timestamp(document.published_at),
+        published_at: public_timestamp(document.published_at),
     }
 }

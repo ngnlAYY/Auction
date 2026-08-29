@@ -36,6 +36,7 @@ use self::secrets::{
     load_admin_runtime_file, load_secret_file, runtime_http_security, runtime_session,
 };
 use self::validation::*;
+use self::worker::apply_runtime_document;
 use self::worker_validation::*;
 
 pub use app::*;

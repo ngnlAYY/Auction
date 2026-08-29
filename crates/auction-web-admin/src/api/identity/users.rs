@@ -5,14 +5,81 @@
 
 use auction_contracts::AdminUserBlacklistHistoryResponse as AdminUserBlacklistHistory;
 use auction_contracts::{
-    AdminUserBlacklistRequest, AdminUserCreateRequest, AdminUserListItemResponse,
-    AdminUserListResponse, AdminUserMutationRequest, AdminUserMutationResponse, AdminUserResponse,
-    AdminUserUnblacklistRequest,
+    AdminUserBlacklistRequest, AdminUserCreateRequest, AdminUserMutationRequest,
+    AdminUserPaginationResponse, AdminUserResponse, AdminUserUnblacklistRequest,
 };
 use gloo_net::http::Request;
+use serde::Deserialize;
 use uuid::Uuid;
 
-use super::ApiResponse;
+use super::{
+    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_request_error,
+    invalid_response_error, parse_admin_time, response_error, send_get, send_request,
+    valid_admin_time, valid_safe_text, valid_uuid,
+};
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictUser {
+    id: String,
+    username: String,
+    game_player_id: String,
+    status: String,
+    key_status: String,
+    state_version: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictBlacklistHistory {
+    public_reason: String,
+    blacklisted_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictListedUser {
+    id: String,
+    username: String,
+    game_player_id: String,
+    status: String,
+    key_status: String,
+    state_version: i64,
+    created_at: String,
+    updated_at: String,
+    blacklist_count: i64,
+    blacklist_history: Vec<StrictBlacklistHistory>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictUserPagination {
+    page: i64,
+    page_size: i64,
+    total: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictUserList {
+    users: Vec<StrictListedUser>,
+    pagination: StrictUserPagination,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictUserData {
+    user: StrictUser,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrictUserDataWithKey {
+    user: StrictUser,
+    generated_key: String,
+}
 
 /// 用户列表行的浏览器投影；它把基础用户响应与列表专属黑名单摘要合并，避免 UI 传播 wire 嵌套。
 #[derive(Debug, Clone, PartialEq)]
@@ -52,24 +119,6 @@ impl From<AdminUserResponse> for AdminUser {
     }
 }
 
-impl From<AdminUserListItemResponse> for AdminUser {
-    fn from(item: AdminUserListItemResponse) -> Self {
-        let mut user = Self::from(item.user);
-        user.blacklist_count = item.blacklist_count;
-        user.blacklist_history = item.blacklist_history;
-        user
-    }
-}
-
-impl From<AdminUserListResponse> for AdminUserPage {
-    fn from(data: AdminUserListResponse) -> Self {
-        Self {
-            users: data.users.into_iter().map(Into::into).collect(),
-            pagination: data.pagination,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdminUserStatusFilter {
     All,
@@ -100,23 +149,20 @@ pub(crate) async fn fetch_admin_users(
     status: AdminUserStatusFilter,
     page: i64,
 ) -> Result<AdminUserPage, String> {
-    let mut url = format!("/api/v1/admin/users?page={page}&page_size=50");
+    let mut url = format!("/api/v1/admin/users?page={page}&page_size={TABLE_PAGE_SIZE}");
     if !name.is_empty() {
         append_query(&mut url, "name", &name);
     }
     if let Some(status) = status.as_query() {
         append_query(&mut url, "status", status);
     }
-    let response = Request::get(&url).send().await.map_err(|error| error.to_string())?;
+    let response = send_get(&url).await?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminUserListResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
-    if payload.data.pagination.page != page {
-        return Err("user list response does not match page".to_owned());
-    }
-    Ok(payload.data.into())
+    let payload: ApiResponse<StrictUserList> =
+        response.json().await.map_err(invalid_response_error)?;
+    decode_user_list(payload.data).map_err(invalid_response_error)
 }
 
 /// 创建用户；`key_mode = generated` 时返回一次性 key。
@@ -128,26 +174,25 @@ pub(crate) async fn create_admin_user(
     key: Option<String>,
 ) -> Result<AdminUserMutationResult, String> {
     let csrf_token = super::fetch_csrf_token().await?;
-    let request = Request::post("/api/v1/admin/users")
-        .header("x-csrf-token", &csrf_token)
-        .json(&AdminUserCreateRequest {
-            command_id,
-            username,
-            game_player_id,
-            key_mode: key_mode.to_owned(),
-            key,
-        })
-        .map_err(|error| error.to_string())?;
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
-    }
-    let payload: ApiResponse<AdminUserMutationResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(AdminUserMutationResult {
-        user: payload.data.user.into(),
-        generated_key: payload.data.generated_key,
+    let command = AdminUserCreateRequest {
+        command_id: command_id.to_string(),
+        username,
+        game_player_id,
+        key_mode: key_mode.to_owned(),
+        key,
+    };
+    let response = send_request(|abort_signal| {
+        Request::post("/api/v1/admin/users")
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
     })
+    .await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    decode_user_mutation(response, key_mode == "generated").await
 }
 
 /// 修改用户名、游戏身份或登录 key 状态。
@@ -158,30 +203,28 @@ pub(crate) async fn mutate_admin_user(
     username: Option<String>,
     game_player_id: Option<String>,
 ) -> Result<AdminUserMutationResult, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid user id".to_owned())?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
     let csrf_token = super::fetch_csrf_token().await?;
-    let request = Request::patch("/api/v1/admin/users")
-        .header("x-csrf-token", &csrf_token)
-        .json(&AdminUserMutationRequest {
-            command_id,
-            user_id,
-            expected_state_version: user.state_version,
-            action: action.to_owned(),
-            username,
-            game_player_id,
-            public_reason: None,
-        })
-        .map_err(|error| error.to_string())?;
-    let response = request.send().await.map_err(|error| error.to_string())?;
-    if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
-    }
-    let payload: ApiResponse<AdminUserMutationResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(AdminUserMutationResult {
-        user: payload.data.user.into(),
-        generated_key: payload.data.generated_key,
+    let command = AdminUserMutationRequest {
+        command_id: command_id.to_string(),
+        user_id: user_id.to_string(),
+        expected_state_version: user.state_version,
+        action: action.to_owned(),
+        username,
+        game_player_id,
+    };
+    let response = send_request(|abort_signal| {
+        Request::patch("/api/v1/admin/users")
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
     })
+    .await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    decode_user_mutation(response, action == "reissue_key").await
 }
 
 /// 将用户加入黑名单。
@@ -190,24 +233,26 @@ pub(crate) async fn blacklist_admin_user(
     user: &AdminUser,
     public_reason: String,
 ) -> Result<AdminUser, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid user id".to_owned())?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
     let csrf_token = super::fetch_csrf_token().await?;
     let url = format!("/api/v1/admin/users/{user_id}/blacklist");
-    let request = Request::put(&url)
-        .header("x-csrf-token", &csrf_token)
-        .json(&AdminUserBlacklistRequest {
-            command_id,
-            expected_state_version: user.state_version,
-            public_reason,
-        })
-        .map_err(|error| error.to_string())?;
-    let response = request.send().await.map_err(|error| error.to_string())?;
+    let command = AdminUserBlacklistRequest {
+        command_id: command_id.to_string(),
+        expected_state_version: user.state_version,
+        public_reason,
+    };
+    let response = send_request(|abort_signal| {
+        Request::put(&url)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
+    })
+    .await?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminUserMutationResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.user.into())
+    decode_user_mutation(response, false).await.map(|result| result.user)
 }
 
 /// 将用户移出黑名单。
@@ -215,23 +260,144 @@ pub(crate) async fn unblacklist_admin_user(
     command_id: Uuid,
     user: &AdminUser,
 ) -> Result<AdminUser, String> {
-    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid user id".to_owned())?;
+    let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
     let csrf_token = super::fetch_csrf_token().await?;
     let url = format!("/api/v1/admin/users/{user_id}/blacklist");
-    let request = Request::delete(&url)
-        .header("x-csrf-token", &csrf_token)
-        .json(&AdminUserUnblacklistRequest {
-            command_id,
-            expected_state_version: user.state_version,
-        })
-        .map_err(|error| error.to_string())?;
-    let response = request.send().await.map_err(|error| error.to_string())?;
+    let command = AdminUserUnblacklistRequest {
+        command_id: command_id.to_string(),
+        expected_state_version: user.state_version,
+    };
+    let response = send_request(|abort_signal| {
+        Request::delete(&url)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
+    })
+    .await?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminUserMutationResponse> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data.user.into())
+    decode_user_mutation(response, false).await.map(|result| result.user)
+}
+
+fn decode_user_list(data: StrictUserList) -> Result<AdminUserPage, &'static str> {
+    let users = data.users.into_iter().map(decode_listed_user).collect::<Result<Vec<_>, _>>()?;
+    let pagination = decode_pagination(data.pagination)?;
+    Ok(AdminUserPage { users, pagination })
+}
+
+pub(super) async fn decode_user_mutation(
+    response: gloo_net::http::Response,
+    want_key: bool,
+) -> Result<AdminUserMutationResult, String> {
+    let payload: ApiResponse<serde_json::Value> =
+        response.json().await.map_err(invalid_response_error)?;
+    let (user, generated_key) = if want_key {
+        let data: StrictUserDataWithKey =
+            serde_json::from_value(payload.data).map_err(invalid_response_error)?;
+        if !valid_generated_key(&data.generated_key) {
+            return Err("invalid_response".to_owned());
+        }
+        (data.user, Some(data.generated_key))
+    } else {
+        let data: StrictUserData =
+            serde_json::from_value(payload.data).map_err(invalid_response_error)?;
+        (data.user, None)
+    };
+    Ok(AdminUserMutationResult {
+        user: decode_user(user).map_err(invalid_response_error)?.into(),
+        generated_key,
+    })
+}
+
+fn decode_listed_user(value: StrictListedUser) -> Result<AdminUser, &'static str> {
+    let history_length = usize::try_from(value.blacklist_count.min(10)).map_err(|_| "user")?;
+    if !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.blacklist_count)
+        || value.blacklist_history.len() != history_length
+    {
+        return Err("user");
+    }
+    let history = value
+        .blacklist_history
+        .into_iter()
+        .map(decode_blacklist_history)
+        .collect::<Result<Vec<_>, _>>()?;
+    if history.windows(2).any(|pair| {
+        parse_admin_time(&pair[1].blacklisted_at) > parse_admin_time(&pair[0].blacklisted_at)
+    }) {
+        return Err("user_history_order");
+    }
+    let user = decode_user(StrictUser {
+        id: value.id,
+        username: value.username,
+        game_player_id: value.game_player_id,
+        status: value.status,
+        key_status: value.key_status,
+        state_version: value.state_version,
+        created_at: value.created_at,
+        updated_at: value.updated_at,
+    })?;
+    let mut user: AdminUser = user.into();
+    user.blacklist_count = value.blacklist_count;
+    user.blacklist_history = history;
+    Ok(user)
+}
+
+fn decode_user(value: StrictUser) -> Result<AdminUserResponse, &'static str> {
+    if !valid_uuid(&value.id)
+        || !valid_safe_text(&value.username, 256)
+        || !valid_safe_text(&value.game_player_id, 256)
+        || !matches!(value.status.as_str(), "active" | "blacklisted")
+        || !matches!(value.key_status.as_str(), "active" | "revoked")
+        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
+        || !valid_admin_time(&value.created_at)
+        || !valid_admin_time(&value.updated_at)
+    {
+        return Err("user");
+    }
+    Ok(AdminUserResponse {
+        id: value.id,
+        username: value.username,
+        game_player_id: Some(value.game_player_id),
+        status: value.status,
+        key_status: value.key_status,
+        state_version: value.state_version,
+        created_at: value.created_at,
+        updated_at: value.updated_at,
+    })
+}
+
+fn decode_blacklist_history(
+    value: StrictBlacklistHistory,
+) -> Result<AdminUserBlacklistHistory, &'static str> {
+    if !valid_safe_text(&value.public_reason, 1024) || !valid_admin_time(&value.blacklisted_at) {
+        return Err("blacklist_history");
+    }
+    Ok(AdminUserBlacklistHistory {
+        public_reason: value.public_reason,
+        blacklisted_at: value.blacklisted_at,
+    })
+}
+
+fn decode_pagination(
+    value: StrictUserPagination,
+) -> Result<AdminUserPaginationResponse, &'static str> {
+    if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
+        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
+        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.total)
+    {
+        return Err("pagination");
+    }
+    Ok(AdminUserPaginationResponse {
+        page: value.page,
+        page_size: value.page_size,
+        total: value.total,
+    })
+}
+
+fn valid_generated_key(value: &str) -> bool {
+    (32..=256).contains(&value.len()) && !value.chars().any(char::is_control)
 }
 
 fn append_query(url: &mut String, name: &str, value: &str) {

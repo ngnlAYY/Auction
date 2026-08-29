@@ -1,6 +1,6 @@
 //! Admin 拍卖生命周期动作的闭集模型与文案映射。
 
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 
@@ -64,7 +64,10 @@ pub(super) fn lifecycle_action_button_class(action: AdminAuctionLifecycleAction)
 pub(super) fn lifecycle_action_submit_label(action: AdminAuctionLifecycleAction) -> String {
     match action {
         AdminAuctionLifecycleAction::FinalPhase => t!("admin-auctions-action-confirm"),
-        _ => lifecycle_action_label(action),
+        AdminAuctionLifecycleAction::Cancel => t!("admin-auctions-action-cancel-confirm"),
+        AdminAuctionLifecycleAction::Preview | AdminAuctionLifecycleAction::Open => {
+            lifecycle_action_label(action)
+        }
     }
 }
 

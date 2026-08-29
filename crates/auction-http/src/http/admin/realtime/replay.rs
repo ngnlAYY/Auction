@@ -18,10 +18,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{
-    ADMIN_CSRF_COOKIE, AdminApiState, REPLAY_COMMAND_KIND, admin_session_guard,
-    authenticated_admin_session, authentication_error, feature_unavailable, internal_error,
-    map_realtime_error, no_store_headers, parse_uuid, read_admin_cookie, request_id,
-    valid_admin_csrf_header,
+    AdminApiState, REPLAY_COMMAND_KIND, authenticated_admin_mutation, internal_error,
+    invalid_replay, map_replay_error, no_store_headers, replay_unavailable, request_id,
 };
 
 /// 追加一个 realtime replay 事件并解决原 failure。
@@ -33,9 +31,11 @@ pub(crate) async fn replay(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
+    let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
+    let actor_id = identity.actor;
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return super::api_error(
             StatusCode::BAD_REQUEST,
@@ -44,30 +44,30 @@ pub(crate) async fn replay(
         )
         .into_response();
     }
-    if let Some(response) = validate_csrf(&headers) {
-        return response;
-    }
-    let failure_id = match parse_uuid(&failure_id, "failure_id") {
-        Ok(value) => value,
-        Err(response) => return *response,
+    let failure_id = match Uuid::parse_str(&failure_id) {
+        Ok(value) if !value.is_nil() => value,
+        _ => return invalid_replay(),
     };
     let input = match decode_json::<AdminRealtimeReplayRequest>(&body) {
         Ok(input) => input,
-        Err(response) => return *response,
+        Err(()) => return invalid_replay(),
     };
-    if input.command_id.is_nil() || input.schema_version <= 0 || !input.public_payload.is_object() {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_realtime_command",
-            "replay 命令参数无效",
-        )
-        .into_response();
+    if input.command_id.is_some_and(|command_id| command_id.is_nil())
+        || input.schema_version <= 0
+        || !input.public_payload.is_object()
+    {
+        return invalid_replay();
     }
-    let (_, identity) = match authenticated_admin_session(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
+    let command_id = match input.command_id {
+        Some(command_id) => command_id,
+        None => {
+            match legacy_replay_command_id(failure_id, input.schema_version, &input.public_payload)
+            {
+                Ok(command_id) => command_id,
+                Err(_) => return internal_error(),
+            }
+        }
     };
-    let actor_id = identity.actor;
     let hash_input = ReplayHashInput {
         failure_id,
         schema_version: input.schema_version,
@@ -80,11 +80,11 @@ pub(crate) async fn replay(
         Err(_) => return internal_error(),
     };
     let Some(port) = state.realtime_admin() else {
-        return feature_unavailable();
+        return replay_unavailable();
     };
     let result = match port
         .replay(RealtimeReplayCommand {
-            command_id: input.command_id,
+            command_id,
             failure_id,
             schema_version: input.schema_version,
             public_payload: input.public_payload,
@@ -96,7 +96,7 @@ pub(crate) async fn replay(
         .await
     {
         Ok(result) => result,
-        Err(error) => return map_realtime_error(error),
+        Err(error) => return map_replay_error(error),
     };
     let replay = AdminRealtimeReplayEventResponse {
         event_id: result.event_id.to_string(),
@@ -115,26 +115,8 @@ pub(crate) async fn replay(
         .into_response()
 }
 
-fn decode_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, Box<Response>> {
-    serde_json::from_slice(body).map_err(|_| {
-        Box::new(
-            super::api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response(),
-        )
-    })
-}
-
-fn validate_csrf(headers: &HeaderMap) -> Option<Response> {
-    let Some(raw_csrf) = read_admin_cookie(headers, ADMIN_CSRF_COOKIE) else {
-        return Some(authentication_error());
-    };
-    if !valid_admin_csrf_header(headers, &raw_csrf) {
-        return Some(
-            super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-                .into_response(),
-        );
-    }
-    None
+fn decode_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, ()> {
+    serde_json::from_slice(body).map_err(|_| ())
 }
 
 #[derive(Debug, Serialize)]
@@ -143,4 +125,25 @@ struct ReplayHashInput<'a> {
     schema_version: i32,
     public_payload: &'a Value,
     actor_id: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct LegacyReplayCommandIdInput<'a> {
+    failure_id: Uuid,
+    schema_version: i32,
+    public_payload: &'a Value,
+}
+
+/// 旧版 replay 请求没有 `command_id`。这里按 failure 与修正负载派生稳定 UUID，使同一旧版
+/// 请求的网络重试仍命中命令账本；显式携带 ID 的新版客户端继续拥有自己的幂等键。
+fn legacy_replay_command_id(
+    failure_id: Uuid,
+    schema_version: i32,
+    public_payload: &Value,
+) -> Result<Uuid, serde_json::Error> {
+    let input = LegacyReplayCommandIdInput { failure_id, schema_version, public_payload };
+    let encoded = serde_json::to_vec(&input)?;
+    let mut name = b"auction/http/admin/realtime/replay/v1/".to_vec();
+    name.extend_from_slice(&encoded);
+    Ok(Uuid::new_v5(&Uuid::NAMESPACE_URL, &name))
 }

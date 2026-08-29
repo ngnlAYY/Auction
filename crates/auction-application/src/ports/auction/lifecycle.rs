@@ -1,8 +1,6 @@
 use std::future::Future;
 
-use auction_domain::{
-    Auction, AuctionId, AuctionStatus, CommandId, CompetitionPlan, LotId, UserId,
-};
+use auction_domain::{Auction, AuctionId, AuctionStatus, CommandId, CompetitionPlan, LotId};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -90,7 +88,33 @@ pub struct AuctionLifecycleCommand {
     pub actor: AuctionLifecycleActor,
 }
 
-/// 生命周期命令提交后的最小稳定投影。
+/// 生命周期命令提交时冻结的 Admin 拍卖快照。
+///
+/// 该快照对应旧版生命周期成功响应的 `data.auction`；它必须与命令结果一起持久化，不能在重放时
+/// 另行读取已经继续推进的拍卖投影。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuctionLifecycleSnapshot {
+    pub id: AuctionId,
+    pub world_id: String,
+    pub sequence: i64,
+    pub status: AuctionStatus,
+    pub preview_scheduled_at: DateTime<Utc>,
+    pub scheduled_open_at: DateTime<Utc>,
+    pub preview_opened_at: Option<DateTime<Utc>>,
+    pub preview_manual_open: bool,
+    pub preview_revision: i64,
+    pub opened_at: Option<DateTime<Utc>>,
+    pub final_phase_at: Option<DateTime<Utc>>,
+    pub settled_at: Option<DateTime<Utc>>,
+    pub cancelled_at: Option<DateTime<Utc>>,
+    pub cancelled_reason: Option<String>,
+    pub cancelled_by: Option<String>,
+    pub state_version: u64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 生命周期命令提交后的稳定幂等结果。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuctionLifecycleResult {
     pub command_id: CommandId,
@@ -98,6 +122,9 @@ pub struct AuctionLifecycleResult {
     pub status: AuctionStatus,
     pub state_version: u64,
     pub updated_at: DateTime<Utc>,
+    /// `None` 只用于读取扩展快照前已经写入的旧 Rust 账本结果；新命令必须持久化完整快照。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auction: Option<AuctionLifecycleSnapshot>,
 }
 
 /// 生命周期事务在锁内读取的拍卖、计划时间和冻结策略上下文。
@@ -108,12 +135,19 @@ pub struct AuctionLifecycleResult {
 pub struct AuctionLifecycleContext {
     pub auction: Auction,
     pub world_id: String,
+    /// 与拍卖、可选轮次处于同一锁内快照的世界启用状态。
+    pub world_enabled: bool,
     pub sequence: i64,
     pub preview_scheduled_at: DateTime<Utc>,
     pub scheduled_open_at: DateTime<Utc>,
+    pub preview_opened_at: Option<DateTime<Utc>>,
     pub policy_scheduled_end_at: DateTime<Utc>,
     pub policy_final_phase_lead: chrono::Duration,
     pub preview_manual_open: bool,
+    pub preview_revision: i64,
+    pub opened_at: Option<DateTime<Utc>>,
+    pub final_phase_at: Option<DateTime<Utc>>,
+    pub settled_at: Option<DateTime<Utc>>,
     pub scheduled_round_local_week: Option<NaiveDate>,
 }
 
@@ -171,6 +205,14 @@ pub struct AuctionLifecyclePlan {
     pub effect: AuctionLifecycleEffect,
 }
 
+/// 生命周期适配器在原子写入后返回给审计映射的稳定统计。
+///
+/// 该统计只描述本次计划实际写入的旧版业务事实，不暴露 SQL 行或后端细节。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuctionLifecycleWriteSummary {
+    pub return_obligation_count: u64,
+}
+
 /// 生命周期事务只声明锁内上下文与动作计划所需的窄能力。
 pub trait AuctionLifecycleTransaction: Send {
     fn load_lifecycle_context_for_update(
@@ -183,7 +225,7 @@ pub trait AuctionLifecycleTransaction: Send {
         &mut self,
         command: &AuctionLifecycleCommand,
         plan: AuctionLifecyclePlan,
-    ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
+    ) -> impl Future<Output = Result<AuctionLifecycleWriteSummary, CompetitionTransactionError>> + Send;
 
     /// 按稳定 lot 顺序锁定并返回 final phase 需要检查的竞价单元。
     fn list_final_lot_ids_for_update(
@@ -191,17 +233,14 @@ pub trait AuctionLifecycleTransaction: Send {
         auction_id: AuctionId,
     ) -> impl Future<Output = Result<Vec<LotId>, CompetitionTransactionError>> + Send;
 
-    /// 在同一事务中读取并锁定代理用户资格；失去资格必须冻结，不能静默继续竞价。
-    fn proxy_user_is_eligible_for_update(
-        &mut self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<bool, CompetitionTransactionError>> + Send;
-
     /// 在同一事务内追加管理审计和可重放的生命周期事件。
     fn append_lifecycle_record(
         &mut self,
         command: &AuctionLifecycleCommand,
+        context: &AuctionLifecycleContext,
+        plan: &AuctionLifecyclePlan,
         result: &AuctionLifecycleResult,
+        write_summary: AuctionLifecycleWriteSummary,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 

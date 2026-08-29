@@ -3,13 +3,210 @@ use std::path::Path;
 use ipnet::IpNet;
 
 use super::{
+    business::{
+        AdminRuntimeEquipmentFilterConfig, AdminRuntimeMailTemplatesConfig,
+        AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
+    },
     document::{
-        AdminRuntimeDashboardMailbox, AdminRuntimeEquipmentSourceConfig, AdminRuntimeListenMode,
-        AdminRuntimeListenerConfig, AdminRuntimeSecurityConfig, AdminRuntimeSessionConfig,
-        AdminRuntimeTracingConfig,
+        AdminRuntimeDashboardMailbox, AdminRuntimeDocument, AdminRuntimeEquipmentSourceConfig,
+        AdminRuntimeListenMode, AdminRuntimeListenerConfig, AdminRuntimeSecurityConfig,
+        AdminRuntimeSessionConfig, AdminRuntimeTracingConfig,
     },
     errors::AdminRuntimeConfigError,
 };
+
+pub(super) fn validate_business_config(
+    document: &AdminRuntimeDocument,
+) -> Result<(), AdminRuntimeConfigError> {
+    match (&document.worlds, &document.equipment_filter, &document.mail_templates) {
+        (None, None, None) => Ok(()),
+        (Some(worlds), Some(equipment_filter), Some(mail_templates)) => {
+            validate_worlds(worlds)?;
+            validate_runtime_equipment_filter(equipment_filter)?;
+            validate_runtime_mail_templates(mail_templates)
+        }
+        _ => Err(AdminRuntimeConfigError::InvalidDocument(
+            "worlds、equipment_filter 与 mail_templates 必须同时配置".to_owned(),
+        )),
+    }
+}
+
+fn validate_worlds(config: &AdminRuntimeWorldsConfig) -> Result<(), AdminRuntimeConfigError> {
+    if !config.main.enabled && !config.isekai.enabled {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "worlds 至少必须启用 main 或 isekai".to_owned(),
+        ));
+    }
+    validate_runtime_world("main", &config.main)?;
+    validate_runtime_world("isekai", &config.isekai)
+}
+
+fn validate_runtime_world(
+    name: &str,
+    config: &AdminRuntimeWorldConfig,
+) -> Result<(), AdminRuntimeConfigError> {
+    if config.sender_allowlist.len() > 1000 {
+        return Err(AdminRuntimeConfigError::InvalidDocument(format!(
+            "worlds.{name}.sender_allowlist 最多 1000 项"
+        )));
+    }
+    for (index, sender) in config.sender_allowlist.iter().enumerate() {
+        if !valid_runtime_identity(sender)
+            || config.sender_allowlist[..index].iter().any(|previous| previous == sender)
+        {
+            return Err(AdminRuntimeConfigError::InvalidDocument(format!(
+                "worlds.{name}.sender_allowlist 含有重复或无效身份"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_runtime_equipment_filter(
+    config: &AdminRuntimeEquipmentFilterConfig,
+) -> Result<(), AdminRuntimeConfigError> {
+    if config.level.min < 0 || config.level.max < config.level.min || config.level.max > 1000 {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "equipment_filter.level 必须位于 0 至 1000 且 max 不小于 min".to_owned(),
+        ));
+    }
+    let lists = [
+        &config.qualities,
+        &config.prefixes,
+        &config.suffixes,
+        &config.categories,
+        &config.equipment_types,
+    ];
+    let mut filter_count = 0;
+    for list in lists {
+        if list.len() > 256 {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "equipment_filter 每个 token 列表最多 256 项".to_owned(),
+            ));
+        }
+        filter_count += list.len();
+        for (index, value) in list.iter().enumerate() {
+            if !valid_runtime_token(value) || list[..index].iter().any(|previous| previous == value)
+            {
+                return Err(AdminRuntimeConfigError::InvalidDocument(
+                    "equipment_filter token 必须是唯一的 1 至 128 字节单行文本".to_owned(),
+                ));
+            }
+        }
+    }
+    if config.enabled && filter_count == 0 && config.level.min == 0 && config.level.max == 0 {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "启用 equipment_filter 时至少需要一个过滤条件".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_mail_templates(
+    config: &AdminRuntimeMailTemplatesConfig,
+) -> Result<(), AdminRuntimeConfigError> {
+    let templates = [
+        (config.auction_assets_rejected.as_str(), &[][..], &[][..]),
+        (config.auction_no_attachments.as_str(), &[][..], &[][..]),
+        (config.auction_equipment_rejected.as_str(), &["reason_code"][..], &["reason_code"][..]),
+        (config.user_assets_rejected.as_str(), &[][..], &[][..]),
+        (
+            config.register_key.as_str(),
+            &["login_key", "username"][..],
+            &["login_key", "username"][..],
+        ),
+        (config.register_result.as_str(), &["result_code"][..], &["result_code", "username"][..]),
+        (config.rebind_result.as_str(), &["result_code"][..], &["result_code", "username"][..]),
+        (
+            config.settlement_winner_equipment_cod.as_str(),
+            &["item_name", "amount", "reference"][..],
+            &["item_name", "amount", "reference"][..],
+        ),
+        (
+            config.settlement_payment_carrier.as_str(),
+            &["amount", "reference"][..],
+            &["amount", "reference"][..],
+        ),
+        (config.settlement_payment_reminder.as_str(), &["reference"][..], &["reference"][..]),
+        (
+            config.settlement_equipment_handoff.as_str(),
+            &["item_name", "reference"][..],
+            &["item_name", "reference"][..],
+        ),
+        (
+            config.settlement_seller_payout.as_str(),
+            &["amount", "reference"][..],
+            &["amount", "reference"][..],
+        ),
+        (
+            config.settlement_buyer_refund.as_str(),
+            &["amount", "reference"][..],
+            &["amount", "reference"][..],
+        ),
+        (config.operations_alert.as_str(), &["summary"][..], &["summary"][..]),
+    ];
+    for (value, required, allowed) in templates {
+        validate_runtime_template_body(value, required, allowed)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_template_body(
+    value: &str,
+    required: &[&str],
+    allowed: &[&str],
+) -> Result<(), AdminRuntimeConfigError> {
+    if value.is_empty()
+        || value != value.trim()
+        || value.len() > 64 * 1024
+        || value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "mail_templates 正文格式无效".to_owned(),
+        ));
+    }
+    let mut cursor = 0;
+    let mut seen = Vec::new();
+    while let Some(relative_start) = value[cursor..].find('{') {
+        let start = cursor + relative_start;
+        let relative_end = value[start + 1..].find('}').ok_or_else(|| {
+            AdminRuntimeConfigError::InvalidDocument("mail_templates 占位符未闭合".to_owned())
+        })?;
+        let end = start + 1 + relative_end;
+        let placeholder = &value[start + 1..end];
+        if !allowed.contains(&placeholder) {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "mail_templates 含有未知占位符".to_owned(),
+            ));
+        }
+        if !seen.contains(&placeholder) {
+            seen.push(placeholder);
+        }
+        cursor = end + 1;
+    }
+    if required.iter().any(|placeholder| !seen.contains(placeholder)) {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "mail_templates 缺少必需占位符".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn valid_runtime_identity(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value == value.trim()
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_runtime_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value == value.trim()
+        && !value.chars().any(|character| matches!(character, '\0' | '\r' | '\n'))
+}
 
 pub(super) fn validate_listener(
     config: &AdminRuntimeListenerConfig,
@@ -84,7 +281,7 @@ pub(super) fn validate_equipment_source(
     if config.allowed_hosts.len() > 16
         || config.allowed_path_prefixes.len() > 16
         || !(64 << 10..=8 << 20).contains(&config.maximum_response_bytes)
-        || !(1..=60).contains(&config.minimum_request_interval_seconds)
+        || !(1..=60_000).contains(&config.minimum_request_interval_millis)
         || !(1..=30).contains(&config.request_timeout_seconds)
         || config.allowlist_enabled && config.allowed_hosts.is_empty()
         || config.allowlist_enabled && config.allowed_path_prefixes.is_empty()
@@ -124,8 +321,7 @@ pub(super) fn validate_security(
         return Err(AdminRuntimeConfigError::InvalidDocument("security 边界无效".to_owned()));
     }
     if config.allowed_origins_enabled
-        && (config.allowed_origins.is_empty()
-            || config.allowed_origins.iter().any(|origin| !valid_origin(origin)))
+        && config.allowed_origins.iter().any(|origin| !valid_origin(origin))
     {
         return Err(AdminRuntimeConfigError::InvalidDocument(
             "security.allowed_origins 无效".to_owned(),

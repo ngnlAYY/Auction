@@ -3,6 +3,8 @@
 //! 文档模型、命令账本、适配器端口和本地校验分别由子模块持有；本文件只保留稳定的
 //! 公共类型出口，避免把不同职责重新堆回一个巨型模块。
 
+#[path = "runtime_config/business.rs"]
+mod business;
 #[path = "runtime_config/commands.rs"]
 mod commands;
 #[path = "runtime_config/document.rs"]
@@ -14,6 +16,10 @@ mod ports;
 #[path = "runtime_config/validation.rs"]
 mod validation;
 
+pub use business::{
+    AdminRuntimeEquipmentFilterConfig, AdminRuntimeEquipmentLevelConfig,
+    AdminRuntimeMailTemplatesConfig, AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig,
+};
 pub use commands::{
     AdminRuntimeAuditRecord, AdminRuntimeCommandState, AdminRuntimeReplacement,
     AdminRuntimeStoredCommand, AdminRuntimeUpdateCommand,

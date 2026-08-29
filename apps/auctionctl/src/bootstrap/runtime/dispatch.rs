@@ -42,7 +42,8 @@ impl Command {
         match self {
             Self::CheckConfig { .. } | Self::DeploymentCheck { .. } => EXIT_USAGE_OR_CONFIG,
             Self::Deployment { .. } => EXIT_DEPLOYMENT,
-            Self::Migrate
+            Self::Migrate { .. }
+            | Self::PostgresBootstrap { .. }
             | Self::RetentionInventory { .. }
             | Self::RecoveryPreflight { .. }
             | Self::PostgresBackup { .. }
@@ -52,7 +53,11 @@ impl Command {
             | Self::PostgresAdoptLegacyV28 { .. }
             | Self::PostgresRestore { .. }
             | Self::PostgresRebuild { .. } => EXIT_DEPENDENCY,
-            Self::BootstrapMailCredentials { .. } => EXIT_OPERATION,
+            Self::BootstrapMailCredentials { .. }
+            | Self::ImportRulesDirectory { .. }
+            | Self::ForumWriteRecoveryList { .. }
+            | Self::AuthorizeForumWriteRetry { .. }
+            | Self::VerifyLegacySettlement { .. } => EXIT_OPERATION,
         }
     }
 }
@@ -70,8 +75,12 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
         Command::CheckConfig { role } => check_config(role.into())?,
-        Command::Migrate => {
-            migrate().await?;
+        Command::Migrate { controller } => {
+            migrate(controller).await?;
+        }
+        Command::PostgresBootstrap { controller, confirm_database, maintenance_secrets_file } => {
+            postgres_bootstrap(controller, &confirm_database, maintenance_secrets_file.as_deref())
+                .await?;
         }
         Command::DeploymentCheck { config_dir, strict_permissions } => {
             deployment_check(&config_dir, strict_permissions)?;
@@ -107,6 +116,18 @@ async fn run_command(command: Command) -> anyhow::Result<()> {
         }
         Command::BootstrapMailCredentials { world, label } => {
             bootstrap_mail_credentials(&world, &label).await?;
+        }
+        Command::ImportRulesDirectory { directory, command_id, actor } => {
+            import_rules_directory(&directory, command_id, &actor).await?;
+        }
+        Command::ForumWriteRecoveryList { limit } => {
+            forum_write_recovery_list(limit).await?;
+        }
+        Command::AuthorizeForumWriteRetry { auction_id, command_id, actor, confirm_write } => {
+            authorize_forum_write_retry(auction_id, command_id, &actor, &confirm_write).await?;
+        }
+        Command::VerifyLegacySettlement { auction_id } => {
+            verify_legacy_settlement(auction_id).await?;
         }
         Command::RetentionInventory { output, confirm_database } => {
             retention_inventory(&output, &confirm_database).await?;
@@ -193,6 +214,11 @@ fn check_config(role: Role) -> anyhow::Result<()> {
     let listener_group = listener
         .filter(|listener| listener.mode == HttpListenMode::Unix)
         .map(|listener| listener.group.as_str());
+    let mooglemail_worlds = config.worker.mooglemail.configured_worlds();
+    let mooglemail_world_ids =
+        mooglemail_worlds.iter().map(|world| world.world_id.as_str()).collect::<Vec<_>>();
+    let mooglemail_sender_allowlist_entry_count =
+        mooglemail_worlds.iter().map(|world| world.sender_allowlist.len()).sum::<usize>();
     let summary = serde_json::json!({
         "role": config.role.name(),
         "listener": {
@@ -237,12 +263,21 @@ fn check_config(role: Role) -> anyhow::Result<()> {
             "control_socket_path": config.worker.control.socket_path,
             "control_allowed_peer_uid_count": config.worker.control.allowed_peer_uids.len(),
             "control_allowed_peer_gid_count": config.worker.control.allowed_peer_gids.len(),
+            "mooglemail_enabled": config.worker.mooglemail.enabled,
+            "mooglemail_worlds": mooglemail_world_ids,
+            "mooglemail_sender_allowlist_entry_count": mooglemail_sender_allowlist_entry_count,
+            "mooglemail_equipment_filter_enabled": config.worker.mooglemail.equipment_filter.enabled,
+            "mooglemail_mail_template_count": config.worker.mooglemail.mail_templates.values().len(),
         },
         "realtime": {
             "consumer_key": config.realtime.consumer_key,
             "poll_interval_millis": config.realtime.poll_interval_millis,
             "client_buffer": config.realtime.client_buffer,
         },
+        "admin_runtime": config.admin_runtime.as_ref().map(|runtime| serde_json::json!({
+            "equipment_source_minimum_request_interval_millis":
+                runtime.equipment_source.minimum_request_interval_millis,
+        })),
         "admin_runtime_configured": config.admin_runtime.is_some(),
         "admin_credentials_configured": config.admin_credentials_configured(),
         "config_file": config.config_path.as_ref().map(|path| path.display().to_string()),
@@ -253,8 +288,25 @@ fn check_config(role: Role) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn migrate() -> anyhow::Result<()> {
+async fn migrate(controller: SystemdControllerArgs) -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("load configuration for migration")?;
+
+    #[cfg(unix)]
+    let _migration_guard =
+        deployment_control::acquire_migration_guard(deployment_control::ControllerOptions {
+            systemctl: controller.systemctl,
+            state_dir: controller.state_dir,
+            worker_unit: controller.worker_unit,
+            admin_unit: controller.admin_unit,
+            public_unit: controller.public_unit,
+        })?;
+
+    #[cfg(not(unix))]
+    {
+        let _ = controller;
+        anyhow::bail!("独立 migrate 需要 Unix/systemd 角色运行状态检查")
+    }
+
     migrate_config(&config).await
 }
 

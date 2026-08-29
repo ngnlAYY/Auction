@@ -1,11 +1,11 @@
 //! Admin lot 页面加载和错误状态。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::fetch_admin_lots;
 
-use super::super::{AdminPanel, Route};
+use super::super::{Route, admin_api_error_message};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
 pub fn page(auction_id: String) -> Element {
@@ -21,13 +21,13 @@ pub fn page(auction_id: String) -> Element {
 
     match &*lots.read_unchecked() {
         None => rsx! {
-            AdminPanel {
-                title: t!("page-auction-lots-title", auction: "…"),
-                detail: t!("admin-lots-loading"),
-            }
+            AdminLotLoading {}
         },
-        Some(Err(_)) => rsx! {
-            AdminLotLoadError { reload_generation }
+        Some(Err(error)) => rsx! {
+            AdminLotLoadError {
+                detail: admin_api_error_message(error),
+                reload_generation,
+            }
         },
         Some(Ok(page)) => rsx! {
             super::table::AdminLotTable { page: page.clone(), page_number, reload_generation }
@@ -36,18 +36,41 @@ pub fn page(auction_id: String) -> Element {
 }
 
 #[component]
-fn AdminLotLoadError(mut reload_generation: Signal<u64>) -> Element {
+fn AdminLotLoading() -> Element {
     rsx! {
-        section { class: "admin-panel", role: "alert", aria_labelledby: "admin-lots-error-title",
-            h1 { id: "admin-lots-error-title", {t!("page-auction-lots-title", auction: "…")} }
-            p { class: "admin-lots__back",
+        section { class: "admin-auction-page", aria_labelledby: "auction-title",
+            h1 { id: "auction-title", {t!("page-auction-lots-title", auction: "…")} }
+            p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
-            p { class: "admin-panel__note", {t!("admin-lots-error")} }
-            button {
-                r#type: "button",
-                onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
-                {t!("admin-lots-retry")}
+            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
+                h2 { id: "lot-title", class: "admin-visually-hidden",
+                    {t!("page-auction-lots-title", auction: "…")}
+                }
+                p { class: "admin-auction-status", role: "status", {t!("admin-lots-loading")} }
+            }
+        }
+    }
+}
+
+#[component]
+fn AdminLotLoadError(detail: String, mut reload_generation: Signal<u64>) -> Element {
+    rsx! {
+        section { class: "admin-auction-page", aria_labelledby: "auction-title",
+            h1 { id: "auction-title", {t!("page-auction-lots-title", auction: "…")} }
+            p { class: "admin-auction-intro",
+                Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
+            }
+            section { class: "admin-auction-lot-section", aria_labelledby: "lot-title",
+                h2 { id: "lot-title", class: "admin-visually-hidden",
+                    {t!("page-auction-lots-title", auction: "…")}
+                }
+                p { class: "admin-auction-error", role: "alert", "{detail}" }
+                button {
+                    r#type: "button",
+                    onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
+                    {t!("admin-lots-retry")}
+                }
             }
         }
     }

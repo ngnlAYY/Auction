@@ -152,7 +152,7 @@ pub(crate) async fn enforce(
                 );
                 error_response(
                     StatusCode::GATEWAY_TIMEOUT,
-                    "request_timeout",
+                    "timeout",
                     "请求处理超时",
                     &response_request_id,
                 )
@@ -291,10 +291,10 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
     }
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        // Dioxus 的 WASM 启动需要 `wasm-unsafe-eval`；两端 index 中的首屏防闪样式和组件
-        // style 属性需要 `style-src 'unsafe-inline'`，脚本仍只允许同源外部资源。
+        // Dioxus 的 WASM 启动需要 `wasm-unsafe-eval`，解释器还会使用动态 JavaScript；两端
+        // index 中的首屏防闪样式和组件 style 属性需要 `style-src 'unsafe-inline'`。
         HeaderValue::from_static(
-            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
         ),
     );
     headers.insert(

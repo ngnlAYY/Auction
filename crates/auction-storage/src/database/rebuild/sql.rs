@@ -45,8 +45,12 @@ pub(super) fn create_database_sql(
             }
         }
     }
-    sql.push_str(" TABLESPACE = ");
-    sql.push_str(&quote_identifier(&definition.tablespace));
+    // PostgreSQL 允许 CREATEDB 角色隐式使用 pg_default，却会拒绝该角色在没有显式
+    // tablespace CREATE 权限时写出 TABLESPACE = pg_default；省略该默认项才能保持原语义。
+    if definition.tablespace != "pg_default" {
+        sql.push_str(" TABLESPACE = ");
+        sql.push_str(&quote_identifier(&definition.tablespace));
+    }
     sql.push_str(" CONNECTION LIMIT = ");
     sql.push_str(&definition.connection_limit.to_string());
     Ok(sql)

@@ -51,7 +51,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 预检要求目标仍是当前且 clean 的 Auction schema，并检查 PostgreSQL 18 主节点、零外部 session、
 零 prepared transaction、零 subscription/活动 logical slot、目标 owner/`CREATEDB` 权限、locale、
-tablespace、自定义 database ACL 和 database/role setting。维护连接从 Worker `database_url` 派生到
+tablespace、自定义 database ACL 和 database/role setting。自定义 tablespace 要求维护角色具有显式
+`CREATE` 权限；`pg_default` 使用 PostgreSQL 允许 `CREATEDB` owner 采用的隐式默认路径，不要求为了
+重建而额外授予全局 tablespace 权限。维护连接从 Worker `database_url` 派生到
 同集群 `postgres` 数据库；生产环境推荐改用 owner-only 的独立 `--maintenance-secrets-file`，其
 高权限 URL 必须连接同 endpoint/TLS profile 的 `postgres` 数据库，且不会进入命令行、日志或
 receipt。自定义 ACL/setting 会失败关闭，因为删库后静默丢失这些安全策略比拒绝自动化更危险。
@@ -72,7 +74,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 命令在取得集群 advisory lock 并二次校验 archive/manifest 后执行
 `DROP DATABASE ... WITH (FORCE)`，再以 `template0`、原 owner、UTF8、locale provider、tablespace
-和 connection limit 重建，并重新连接证明目标为空。`empty-for-restore` 强制要求 backup manifest，
+和 connection limit 重建，并重新连接证明目标为空。目标为 `pg_default` 时 DDL 省略显式
+`TABLESPACE` 子句，以符合普通 `CREATEDB` owner 的 PostgreSQL 权限语义；非默认 tablespace 仍逐字
+保留并要求前述权限。`empty-for-restore` 强制要求 backup manifest，
 不能使用 unrecoverable ephemeral 豁免。不要先运行 `auctionctl migrate`：恢复目标必须没有 Auction
 migration 表，也不能存在用户 schema、类型、关系、函数、扩展、publication、subscription、
 large object 或 default ACL。

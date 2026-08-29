@@ -76,7 +76,7 @@ impl SettlementWorkStore for DatabaseStore {
         Box::pin(async move {
             let failure_code = bounded_text(failure_code, 128);
             let safe_detail = bounded_text(safe_detail, 512);
-            if failure_code.is_empty() || safe_detail.is_empty() {
+            if !valid_settlement_failure_code(&failure_code) || safe_detail.is_empty() {
                 return Err(repository_error("结算 Worker 失败记录不能为空"));
             }
             match self {
@@ -101,6 +101,18 @@ fn repository_error(message: &str) -> ApplicationError {
 
 fn bounded_text(value: String, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
+}
+
+fn valid_settlement_failure_code(value: &str) -> bool {
+    matches!(
+        value,
+        "internal"
+            | "persistence"
+            | "timeout"
+            | "canceled"
+            | "invalid_state"
+            | "settlement_mismatch"
+    )
 }
 
 #[cfg(feature = "postgres")]

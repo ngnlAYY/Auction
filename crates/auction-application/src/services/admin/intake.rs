@@ -41,6 +41,8 @@ where
         &self,
         mut command: AdminIntakeCommand,
     ) -> Result<AdminIntakeResult, ApplicationError> {
+        // 旧版在校验和请求摘要之前规范化玩家 ID；重试时首尾空白不能形成另一条幂等命令。
+        command.player_id = command.player_id.trim().to_owned();
         command.validate()?;
         let aggregate_id = admin_intake_aggregate_id(&command.world_id);
         let request_hash = command.request_hash(aggregate_id)?;

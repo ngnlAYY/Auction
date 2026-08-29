@@ -3,6 +3,46 @@
 //! 配置层负责 TOML 字段和跨字段校验，这里的二次校验保护装配根与运行时之间的窄接口，避免
 //! 手动构造无效租约、并发或轮询参数。
 
+use std::sync::Arc;
+
+use auction_application::{AdminMailPort, AuctionPolicyTemplate};
+
+/// 每周拍卖轮次生成所需的已解析配置。
+#[derive(Clone)]
+pub struct AuctionScheduleRuntimeConfig {
+    pub enabled: bool,
+    pub timezone: String,
+    /// 周一至周日编号 0..=6。
+    pub preview_weekday: u8,
+    pub preview_minute: u16,
+    pub open_weekday: u8,
+    pub open_minute: u16,
+    pub end_weekday: u8,
+    pub end_minute: u16,
+    pub worlds: Vec<String>,
+    pub policy: AuctionPolicyTemplate,
+    /// Mail owner 由装配根注入；调度器只通过窄端口改变暂停状态。
+    pub mail: Option<Arc<dyn AdminMailPort>>,
+    pub mailboxes: Vec<(String, String)>,
+}
+
+impl AuctionScheduleRuntimeConfig {
+    pub(super) fn validate(&self) -> bool {
+        self.enabled
+            && !self.timezone.trim().is_empty()
+            && self.preview_weekday <= 6
+            && self.open_weekday <= 6
+            && self.end_weekday <= 6
+            && self.preview_minute < 24 * 60
+            && self.open_minute < 24 * 60
+            && self.end_minute < 24 * 60
+            && self.worlds.len() <= 2
+            && self.worlds.iter().all(|world| matches!(world.as_str(), "main" | "isekai"))
+            && self.worlds.windows(2).all(|pair| pair[0] != pair[1])
+            && self.policy.validate().is_ok()
+    }
+}
+
 /// Delivery loop 已经由配置层校验的独立运行边界。
 #[derive(Debug, Clone, Copy)]
 pub struct DeliveryWorkerRuntimeConfig {

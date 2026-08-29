@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 
 #[cfg(feature = "postgres")]
 use auction_application::{
-    SettlementFulfillmentOperation, SettlementFulfillmentReconcileStatus,
-    SettlementFulfillmentState,
+    SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentOperation,
+    SettlementFulfillmentReconcileStatus, SettlementFulfillmentState,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::{
@@ -31,6 +31,7 @@ use super::DatabaseStore;
 mod claims;
 #[cfg(feature = "postgres")]
 mod delivery;
+mod dependencies;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reconcile;
@@ -178,10 +179,33 @@ impl SettlementFulfillmentStore for DatabaseStore {
         })
     }
 
+    fn mark_failed(
+        &self,
+        _claim: SettlementFulfillmentClaim,
+        failure_code: String,
+    ) -> auction_application::ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            let failure_code = bounded_text(failure_code, 64);
+            if !valid_failure_code(&failure_code) {
+                return Err(repository_error("结算履约确定失败代码无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => mark_failed_postgres(store.pool(), &_claim, &failure_code)
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => {
+                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
+                }
+            }
+        })
+    }
+
     fn fail(
         &self,
         _claim: SettlementFulfillmentClaim,
-        _retry_at: DateTime<Utc>,
+        _retry_delay: chrono::Duration,
         failure_code: String,
         safe_detail: String,
     ) -> auction_application::ApplicationFuture<'_, ()> {
@@ -194,7 +218,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
-                    fail_postgres(store.pool(), &_claim, _retry_at, &failure_code, &safe_detail)
+                    fail_postgres(store.pool(), &_claim, _retry_delay, &failure_code, &safe_detail)
                         .await
                         .map_err(ApplicationError::from)
                 }

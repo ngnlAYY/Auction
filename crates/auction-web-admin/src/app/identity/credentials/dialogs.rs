@@ -1,7 +1,7 @@
 //! 凭据删除确认对话框。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 
 use crate::api::AdminCredential;
 
@@ -12,23 +12,25 @@ pub fn CredentialDeleteDialog(
     on_confirm: EventHandler<AdminCredential>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    // 页面级删除遮罩可能与行内改名对话框同时存在，按动作区分标题 ID 可避免 aria 引用冲突。
+    let title_id = format!("credential-delete-dialog-title-{}", credential.id);
     rsx! {
-        div { class: "admin-credentials__dialog-backdrop", role: "presentation",
+        div { class: "admin-shell__dialog-backdrop", role: "presentation",
             section {
-                class: "admin-credentials__dialog",
+                class: "admin-shell__dialog",
                 role: "dialog",
                 aria_modal: "true",
-                aria_labelledby: "admin-credentials-delete-title",
-                aria_busy: busy.to_string(),
-                tabindex: "-1",
+                aria_labelledby: title_id.clone(),
                 onkeydown: move |event| {
                     if event.key() == Key::Escape && !busy {
+                        event.prevent_default();
+                        event.stop_propagation();
                         on_cancel.call(());
                     }
                 },
-                h2 { id: "admin-credentials-delete-title", {t!("admin-credentials-delete-title")} }
+                h2 { id: title_id, {t!("admin-credentials-delete-title")} }
                 p { {t!("admin-credentials-delete-warning", label: credential.label.clone())} }
-                div { class: "admin-credentials__dialog-actions",
+                div { class: "admin-shell__dialog-actions",
                     button {
                         r#type: "button",
                         class: "admin-btn-secondary",

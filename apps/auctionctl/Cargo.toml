@@ -7,8 +7,10 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+auction-cache = { workspace = true, optional = true }
 auction-config.workspace = true
 auction-application = { workspace = true, optional = true }
+auction-contracts = { workspace = true, optional = true }
 auction-integrations = { workspace = true, optional = true }
 auction-storage.workspace = true
 chrono.workspace = true
@@ -23,9 +25,12 @@ uuid.workspace = true
 
 [features]
 default = []
+cache-redis = ["dep:auction-cache", "auction-cache/redis"]
 postgres = [
+    "dep:auction-cache",
     "auction-storage/postgres",
     "dep:auction-application",
+    "dep:auction-contracts",
     "dep:auction-integrations",
 ]
 sqlite = ["auction-storage/sqlite"]

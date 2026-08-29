@@ -12,7 +12,11 @@ use super::*;
 
 pub(crate) use data::AuctionData;
 pub(crate) use navigation::{HistoricalAuctionNavigation, preview_history_switch};
-pub(crate) use realtime::{live_connection_class, should_refresh_auction_board};
+pub(crate) use realtime::{
+    PublicConnectionState, PublicReadinessState, PublicRealtimeOwner, PublicRealtimeTarget,
+    live_connection_state_name, public_connection_class, public_connection_state,
+    public_connection_state_name,
+};
 pub(crate) use world::{WorldPicker, enabled_worlds, world_label};
 
 #[component]
@@ -32,22 +36,31 @@ pub(crate) fn AuctionPage() -> Element {
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();
     let refresh_generation = use_context::<Signal<u64>>();
+    let current_auction = use_context::<CurrentAuctionResource>();
     let query = read_public_query();
     let requested_auction = query.auction_id.clone();
     let historical = requested_auction.is_some();
-    let current = use_resource(move || {
+    let historical_current = use_resource(move || {
         let _ = refresh_generation();
-        let world = selected_world();
         let requested_auction = requested_auction.clone();
         async move {
             match requested_auction {
                 Some(auction_id) => fetch_historical_auction(auction_id).await.map(Some),
-                None => fetch_current_auction(world).await,
+                None => Ok(None),
             }
         }
     });
+    let current = if historical {
+        historical_current.read().clone()
+    } else {
+        let selected_world = selected_world();
+        match current_auction.read().clone() {
+            Some((loaded_world, result)) if loaded_world == selected_world => Some(result),
+            _ => None,
+        }
+    };
 
-    match &*current.read_unchecked() {
+    match current.as_ref() {
         None => rsx! {
             Placeholder { title: t!("page-auctions-title"), detail: t!("data-loading") }
         },
@@ -59,7 +72,10 @@ pub(crate) fn AuctionBoard() -> Element {
             }
         },
         Some(Ok(None)) => rsx! {
-            Placeholder { title: t!("page-auctions-title"), detail: t!("data-empty") }
+            Placeholder {
+                title: t!("auction-empty-no-auction"),
+                detail: t!("auction-empty-no-auction-hint"),
+            }
         },
         Some(Ok(Some(auction))) => rsx! {
             AuctionData {

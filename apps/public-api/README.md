@@ -30,16 +30,19 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 
 ```bash
 just web-build-public
+just build-release
 ```
 
-未构建产物时进程仍可正常启动，`/health` 与 `/api/v1/health` 照常响应，只有静态资源路由返回
-503。
+`web-embed` 只在内嵌发布构建中显式启用。API-only 制品始终使用固定空资源集合，即使构建机上
+存在旧的 `target/dx` 也不会误嵌入；进程仍可正常启动，`/health` 与 `/api/v1/health` 照常响应，
+只有静态资源路由返回 503。
 
 ## Cargo feature
 
 - `cache-redis`：编译 Redis 缓存客户端。仅在配置里填 `redis_url` 不会引入该依赖。
 - `postgres` / `sqlite`：分别编译对应数据库适配器；数据库 URL 的 scheme 必须与制品 feature
   一致。未编译数据库 feature 时，含 `database_url` 的配置会在启动装配阶段明确失败。
+- `web-embed`：只嵌入 Public 的优化 Web payload；默认关闭，API-only 发布不得启用。
 
 ## 边界约束
 

@@ -13,6 +13,7 @@ use super::ApplicationFuture;
 pub struct SettlementWorkClaim {
     pub auction_id: AuctionId,
     pub workflow_id: Uuid,
+    pub claim_command_id: CommandId,
     pub settlement_command_id: CommandId,
     /// 领取时冻结的最晚 lot 有效结束时间；重试必须保持相同世代。
     pub due_at: DateTime<Utc>,

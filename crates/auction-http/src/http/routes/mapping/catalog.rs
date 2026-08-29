@@ -8,11 +8,11 @@ pub(crate) fn map_auction_summary(summary: PublicAuctionSummary) -> AuctionSumma
         world_id: summary.world_id,
         sequence: summary.sequence,
         status: summary.status,
-        scheduled_open_at: timestamp(summary.scheduled_open_at),
-        opened_at: summary.opened_at.map(timestamp),
-        final_phase_at: summary.final_phase_at.map(timestamp),
-        effective_end_at: summary.effective_end_at.map(timestamp),
-        settled_at: summary.settled_at.map(timestamp),
+        scheduled_open_at: public_timestamp(summary.scheduled_open_at),
+        opened_at: summary.opened_at.map(public_timestamp),
+        final_phase_at: summary.final_phase_at.map(public_timestamp),
+        effective_end_at: summary.effective_end_at.map(public_timestamp),
+        settled_at: summary.settled_at.map(public_timestamp),
         lot_count: summary.lot_count,
         sold_count: summary.sold_count,
         unsold_count: summary.unsold_count,
@@ -27,8 +27,8 @@ pub(crate) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuc
         world: auction.world_id,
         number: auction.sequence,
         status: auction.status,
-        opens_at: timestamp(auction.opens_at),
-        scheduled_ends_at: auction.scheduled_ends_at.map(timestamp),
+        opens_at: public_timestamp(auction.opens_at),
+        scheduled_ends_at: auction.scheduled_ends_at.map(public_timestamp),
         presentation_mode: auction.presentation_mode,
         bidding_open: auction.bidding_open,
         preview_revision: auction.preview_revision,
@@ -74,14 +74,11 @@ pub(crate) fn map_lot_detail(detail: PublicLotDetail) -> PublicLotEnvelopeRespon
 pub(crate) fn map_lot_envelope(projection: PublicAuctionProjection) -> PublicLotEnvelopeResponse {
     PublicLotEnvelopeResponse {
         auction_id: projection.auction_id.to_string(),
-        world: projection.world_id,
-        number: projection.sequence,
         auction_status: projection.auction_status,
         projection_kind: projection.projection_kind,
         presentation_mode: projection.presentation_mode,
         bidding_open: projection.bidding_open,
-        opens_at: timestamp(projection.opens_at),
-        scheduled_ends_at: projection.scheduled_ends_at.map(timestamp),
+        opens_at: public_timestamp(projection.opens_at),
         preview_revision: projection.preview_revision,
         final_restriction: projection.final_restriction.map(map_final_restriction),
         lots: None,
@@ -117,7 +114,7 @@ pub(crate) fn map_live_lot(
         has_leader: lot.has_leader,
         leader_name: lot.leader_name,
         seller_name: lot.seller_name,
-        effective_end_at: lot.effective_end_at.map(timestamp),
+        effective_end_at: lot.effective_end_at.map(public_timestamp),
         state_version: lot.state_version,
         equipment: map_equipment(lot.equipment, attributes),
     }
@@ -132,7 +129,7 @@ pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotR
         seller_name: lot.seller_name,
         start_price: lot.start_price,
         equipment_name: lot.equipment_name,
-        equipment_category: lot.equipment_category,
+        equipment_category: (!lot.equipment_category.is_empty()).then_some(lot.equipment_category),
         equipment_level: lot.equipment_level,
         avg_roll: lot.avg_roll,
         game_equipment_url: lot.game_equipment_url,
@@ -142,7 +139,29 @@ pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotR
 pub(crate) fn map_preview_detail(detail: PublicPreviewLotDetail) -> PublicPreviewLotDetailResponse {
     PublicPreviewLotDetailResponse {
         summary: map_preview_lot(detail.summary),
-        equipment: map_equipment(detail.equipment, None),
+        equipment: map_preview_equipment(detail.equipment),
+    }
+}
+
+fn map_preview_equipment(equipment: PublicEquipment) -> PublicPreviewEquipmentResponse {
+    let stats = equipment
+        .stats
+        .into_iter()
+        .map(|(name, stat)| {
+            (
+                name,
+                PublicEquipmentStatResponse { value: stat.value, base: stat.base, roll: stat.roll },
+            )
+        })
+        .collect();
+    PublicPreviewEquipmentResponse {
+        name: equipment.name,
+        category: (!equipment.category.is_empty()).then_some(equipment.category),
+        level: equipment.level,
+        info_summary: equipment.info_summary,
+        stats,
+        avg_roll: equipment.avg_roll,
+        game_equipment_url: equipment.game_equipment_url,
     }
 }
 
@@ -173,21 +192,16 @@ pub(crate) fn map_equipment(
 }
 
 pub(crate) fn valid_lot_detail(detail: &PublicLotDetail, lot_id: Uuid) -> bool {
-    if detail.projection.auction_id.is_nil()
-        || detail.projection.projection_kind == "preview" && detail.live.is_some()
-        || detail.projection.projection_kind != "preview" && detail.preview.is_some()
-    {
-        return false;
-    }
-    match (&detail.preview, &detail.live) {
-        (Some(preview), None) => preview.summary.id == lot_id,
-        (None, Some(live)) => live.summary.id == lot_id,
-        _ => false,
-    }
+    detail.validate(lot_id).is_ok()
 }
 
 pub(crate) fn timestamp(value: DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::Micros, true)
+}
+
+/// Public 沿用旧 Go `time.Time` 的 `RFC3339Nano` 输出；Admin 继续使用上方既有微秒契约。
+pub(crate) fn public_timestamp(value: DateTime<Utc>) -> String {
+    format_public_time_wire(value)
 }
 
 pub(crate) fn encode_public_cursor(cursor: &PublicAuctionCursor) -> String {

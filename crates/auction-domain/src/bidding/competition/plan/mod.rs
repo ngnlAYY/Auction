@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AcceptedBid, AuctionRules, DomainError, LotBidState, ProxyAuthorization, ProxyAuthorizationId,
-    ProxyStatus, ProxyTransition,
+    AcceptedBid, AuctionRules, AuctionStatus, BidAmount, DomainError, LotBidState,
+    ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTransition, UserId,
 };
 
 use super::trigger::{CompetitionTrigger, CompetitionTriggerKind};
@@ -29,6 +29,41 @@ pub struct CompetitionPlan {
 }
 
 impl CompetitionPlan {
+    /// 按旧 Public v1 的错误优先级，在锁参与者资格前校验代理策略。
+    pub fn validate_proxy_creation_policy(
+        rules: AuctionRules,
+        auction_status: AuctionStatus,
+        mode: ProxyMode,
+    ) -> Result<(), DomainError> {
+        proxy::validate_create_proxy_policy(rules, auction_status, mode)
+    }
+
+    /// 按旧 Public v1 的错误优先级，在锁参与者资格前校验代理重入历史。
+    pub fn validate_proxy_creation_history(
+        rules: AuctionRules,
+        usage_number: u64,
+        previous_maximum: Option<BidAmount>,
+        previous_status: Option<ProxyStatus>,
+        maximum_amount: BidAmount,
+    ) -> Result<(), DomainError> {
+        proxy::validate_create_proxy_history(
+            rules,
+            usage_number,
+            previous_maximum,
+            previous_status,
+            maximum_amount,
+        )
+    }
+
+    /// 在资格读取前确认 lower 命令确实指向调用者当前仍具竞价效力的授权。
+    pub fn validate_lower_proxy_target(
+        active: Option<ProxyAuthorization>,
+        actor_id: UserId,
+        authorization_id: ProxyAuthorizationId,
+    ) -> Result<ProxyAuthorization, DomainError> {
+        proxy::validate_lower_proxy_target(active, actor_id, authorization_id)
+    }
+
     /// 计算一次竞价、代理或代理生命周期命令的原子结果。
     pub fn plan(
         rules: AuctionRules,

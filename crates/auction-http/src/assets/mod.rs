@@ -7,7 +7,7 @@
 //! 而前端产物由独立的 `dx build` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端
 //! 的构建都会因为缺少产物而无法编译。批准的浏览器路由在缺失产物时以 503 明确报告，不 panic。
 //!
-//! `folder` 的相对路径由 `rust-embed` 按本 crate 的 `CARGO_MANIFEST_DIR` 解析。
+//! `folder` 的相对路径由 `rust-embed` 按声明资源类型的装配根 `CARGO_MANIFEST_DIR` 解析。
 //! release 构建把产物烘进二进制，dev 构建从磁盘读取，因此本地改前端不必重编后端。
 
 mod routes;
@@ -31,7 +31,8 @@ use routes::Surface;
 
 /// SPA 入口文档；只有 routes 模块批准的浏览器路径可以回退到它。
 const INDEX_HTML: &str = "index.html";
-const ASSETS_MISSING_BODY: &str = "web assets are not built; run `just web-build`";
+const ASSETS_MISSING_BODY: &str =
+    "web assets are not included in this binary; run `just build-release`";
 const PUBLIC_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>404</title></head><body><main><h1>404</h1></main></body></html>";
 
@@ -50,6 +51,16 @@ fn serve<A: rust_embed::RustEmbed>(surface: Surface, request: Request) -> Respon
     let method = request.method();
     let path = request.uri().path();
     let request_headers = request.headers();
+
+    if path == "/favicon.ico" {
+        if !static_method(method) {
+            return method_not_allowed(request_headers);
+        }
+        return match favicon_file::<A>() {
+            Some(file) => asset_response(file, method, request_headers, CachePolicy::Immutable),
+            None => not_found(surface, method, request_headers),
+        };
+    }
 
     if reserved_json_path(path) {
         return json_not_found(request_headers);
@@ -105,6 +116,14 @@ fn exact_asset_cache(relative_path: &str) -> CachePolicy {
     // Dioxus 只给 assets/ 下的 CSS 等资源加内容指纹；顶层 wasm/*.js 与 *.wasm 文件名稳定，
     // 必须每次再验证，不能沿用旧实现中“所有非 index 文件 immutable”的过宽策略。
     if relative_path.starts_with("assets/") { CachePolicy::Immutable } else { CachePolicy::NoCache }
+}
+
+fn favicon_file<A: rust_embed::RustEmbed>() -> Option<EmbeddedFile> {
+    let path = A::iter().find(|path| {
+        let path = path.as_ref();
+        path.starts_with("assets/favicon-") && path.ends_with(".svg")
+    })?;
+    A::get(path.as_ref())
 }
 
 fn asset_response(

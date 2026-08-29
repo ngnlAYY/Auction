@@ -46,14 +46,6 @@ pub(super) fn valid_recovery_text(value: &str, maximum: usize) -> bool {
 }
 
 #[cfg(feature = "postgres")]
-pub(super) fn recovery_proof_digest(action_id: Uuid, reference: &str) -> [u8; 32] {
-    let digest = Sha256::digest(format!("recovery-action:{action_id}:{reference}").as_bytes());
-    let mut result = [0_u8; 32];
-    result.copy_from_slice(&digest);
-    result
-}
-
-#[cfg(feature = "postgres")]
 pub(super) fn map_due_recovery_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<DueRecoveryRow, auction_application::RepositoryError> {

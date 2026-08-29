@@ -7,7 +7,8 @@ TOML 配置解析与敏感配置加载。
 模型和校验职责拆分；通用设置再由 `settings/auction/{role,http,cache,policy,observability}.rs`
 分别持有进程角色、监听、缓存、拍卖策略和可观测性配置；敏感配置继续按 `settings/secrets/{model,maintenance,keyenv,runtime}.rs`
 划分模型、维护库密钥、`.keyenv` 和 Admin runtime owner；`settings/app/` 再按输入模型、加载、公共 getter 和最终构建拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
-Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，普通配置校验再按
+Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，`settings/worker/runtime.rs`
+只负责把 Admin 管理的旧版业务区块投影为 Worker MoogleMail 启动快照；普通配置校验再按
 拍卖、listener、安全、tracing 和路径 owner 放入 `settings/validation/{mod,auction,listener,security,tracing,paths}.rs`，
 Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
 `src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML
@@ -20,7 +21,7 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 ```toml
 # 必填：敏感 TOML 路径。
 secrets_file = "secrets.toml"
-# 可选：仅 Admin 主配置使用；runtime 示例位于 examples/runtime/admin.toml。
+# 可选：Admin/Worker 可指向同一份 Admin 管理的 runtime；示例位于 examples/runtime/admin.toml。
 runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器。
 log_filter = "info,auction=debug"
@@ -40,7 +41,7 @@ socket_path = ""
 
 # 可选区块：Public/Worker 进程本地 Prometheus 指标；Public 使用 HTTP，Worker 需同时启用 control 才有 UDS `/metrics`。
 [metrics]
-# 可选：是否启用固定 scrape endpoint；省略时关闭。
+# 可选：是否启用固定 scrape endpoint；省略时关闭；启用时 Public/Admin listener 必须为 loopback/Unix。
 enabled = false
 
 # 可选区块：Public/Worker 的 OTLP/HTTP tracing exporter；省略时关闭。
@@ -248,6 +249,10 @@ settlement_seller_payout = "Auction seller payout {amount}; reference {reference
 settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
 operations_alert = "Operations alert: {summary}"
 
+# 上述 world/sender、equipment_filter 与 mail_templates 是 Worker 主配置的兼容回退。
+# Admin 管理的共享 runtime 同时包含三个业务区块时会覆盖它们；全局 enabled、transport、
+# 凭据、调度和 mailbox durable identity 始终由本主配置拥有。
+
 # 可选：额外启用一个世界；每个条目拥有独立 mailbox_key、cursor 和 allowlist。
 # 顶层 world_id 代表第一个世界，不能重复配置 world_id 或 mailbox_key。
 # [[worker.mooglemail.additional_worlds]]
@@ -262,6 +267,8 @@ operations_alert = "Operations alert: {summary}"
 enabled = false
 # 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，默认 60。
 scan_interval_seconds = 60
+# 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
 # 可选：来源超时、批次窗口、冷却和 claim 租约秒数。
 source_timeout_seconds = 5
 batch_window_seconds = 120
@@ -286,13 +293,13 @@ recipient = ""
 
 # 可选区块：HTTP 安全策略。
 [http_security]
-# 可选：是否启用 origin allowlist。
+# 可选：是否启用 origin allowlist；默认 true。
 allowed_origins_enabled = true
 # 可选：允许的精确 HTTP(S) origin。
 allowed_origins = ["http://127.0.0.1:8090"]
 # 可选：登录限流次数。
 login_rate_limit = 10
-# 可选：变更限流次数。
+# 可选：变更限流次数；Public realtime 连接尝试使用相同上限但独立账本。
 mutation_rate_limit = 60
 # 可选：限流窗口秒数。
 rate_limit_window_seconds = 60
@@ -314,6 +321,9 @@ absolute_ttl_seconds = 604800
 # 可选：公开会话并发上限。
 max_public_sessions = 5
 ```
+
+上面的 `[session]` 数值是 Public 主配置默认值；Admin runtime 省略对应字段时使用独立旧版默认：
+`idle_ttl_seconds = 900`、`absolute_ttl_seconds = 28800`。Public 仍保持 1800/604800。
 
 敏感文件的稳定字段集合：`database_url`、`redis_url`、`session_signing_key`、
 `ehentai_cookie`、`mooglemail_cookie`、`admin_actor`、`admin_secret`、
@@ -394,19 +404,23 @@ origin 后会把旧版 `/?auction=...&world=...` 相对链接解析为主题正�
 `equipment_filter` 启用后按品质、前后缀、分类、类型和等级返回稳定拒绝原因；被拒绝且邮件可退回
 时会安排退回和通知，不能退回时会 fail closed，不会把不符合策略的装备写入拍卖。
 
-Admin 主配置的 `runtime_config_file` 指向独立的非敏感 runtime TOML，仓库模板位于
-`ops/config/examples/runtime/admin.toml`。该文档由严格应用模型
-解析，包含 listener、安全策略、会话时限、metrics/tracing 公共参数、Worker control socket 和可选的
-dashboard MoogleMail world/mailbox 清单，
+Admin 与 Worker 主配置的 `runtime_config_file` 可以指向同一份、由 Admin 管理的非敏感 runtime
+TOML，仓库模板位于 `ops/config/examples/runtime/admin.toml`。该文档由严格应用模型解析，包含
+Admin listener、安全策略、会话时限、metrics/tracing 公共参数、Worker control socket、可选的
+dashboard MoogleMail world/mailbox 清单，以及旧版 `worlds`、发件人 allowlist、
+`equipment_filter` 和 14 个 `mail_templates`，
 不包含 database URL、Cookie、密码、签名密钥或装备数据密钥。PostgreSQL 完整档通过 Admin
-HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启进程，SQLite Lite 不提供该
+HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启受影响的 Admin/Worker，SQLite Lite 不提供该
 完整更新能力。运行中的 runtime 文件必须是受信 regular file，目录不可被 group/world 写入，
 文件权限为 `0640`；仓库示例只用于复制模板。
 
 当 Admin 配置了 `runtime_config_file` 时，runtime 文件中的 `[metrics]` 和 `[tracing]` 公共参数
 覆盖主配置同名字段，确保 runtime 页面修改后重启真正改变 Admin 的 `/metrics` 与 OTLP surface；
-Public/Worker 继续使用主配置中的 `[metrics]`、`[tracing]`。三类进程的 OTLP headers 只能放在
-敏感 TOML 的角色专属字段中，不能写入 runtime 或普通主配置。
+Public/Worker 继续使用主配置中的 `[metrics]`、`[tracing]`。Worker 只消费共享 runtime 的
+world/sender/filter/template 业务区块；三个区块完全缺失时保留 Worker 主配置，部分存在时失败关闭。
+完整业务区块存在时，它们覆盖 Worker 直接配置，但不改变 transport、凭据、调度、mailbox identity
+或全局 `enabled`。三类进程的 OTLP headers 只能放在敏感 TOML 的角色专属字段中，不能写入 runtime
+或普通主配置。
 
 ## 环境变量边界
 

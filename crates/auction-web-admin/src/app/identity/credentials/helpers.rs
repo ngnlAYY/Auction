@@ -1,13 +1,15 @@
 //! 凭据页面的幂等命令和安全标签映射辅助。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
+
+use crate::app::surface::AdminActionFeedback;
 
 /// 执行一个管理动作并在成功后触发安全投影刷新。
 pub fn run_action<F>(
     mut busy: Signal<bool>,
-    mut feedback: Signal<Option<bool>>,
+    mut feedback: Signal<Option<AdminActionFeedback>>,
     mut reload_generation: Signal<u64>,
     mut command_state: Signal<Option<(String, Uuid)>>,
     action: F,
@@ -17,11 +19,13 @@ pub fn run_action<F>(
     busy.set(true);
     feedback.set(None);
     spawn(async move {
-        let success = action.await.is_ok();
-        feedback.set(Some(success));
-        if success {
-            command_state.set(None);
-            reload_generation.set(reload_generation().saturating_add(1));
+        match action.await {
+            Ok(()) => {
+                feedback.set(Some(AdminActionFeedback::Success));
+                command_state.set(None);
+                reload_generation.set(reload_generation().saturating_add(1));
+            }
+            Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
         }
         busy.set(false);
     });
@@ -74,13 +78,5 @@ pub fn credential_status_class(status: &str) -> &'static str {
         "disabled" => "admin-credentials__status admin-credentials__status--disabled",
         "invalid" => "admin-credentials__status admin-credentials__status--invalid",
         _ => "admin-credentials__status",
-    }
-}
-
-pub fn credential_status_action_label(status: &str) -> String {
-    match status {
-        "active" => t!("admin-credentials-action-disable"),
-        "disabled" => t!("admin-credentials-action-enable"),
-        _ => t!("admin-credentials-action-status"),
     }
 }

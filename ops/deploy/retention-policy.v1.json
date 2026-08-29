@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 15,
+  "database_schema_version": 19,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -95,6 +95,7 @@
         "auction_preview_items",
         "scheduled_rounds",
         "auction_forum_sync",
+        "forum_sync_admin_commands",
         "auction_forum_bid_commands"
       ]
     },

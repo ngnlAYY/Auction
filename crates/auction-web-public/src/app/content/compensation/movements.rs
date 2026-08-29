@@ -14,12 +14,11 @@ pub(super) fn CompensationMovementDetails(
             h2 { id: "compensation-movements-title", class: "public-visually-hidden",
                 {t!("compensation-movements")}
             }
-            p { class: "public-auction-page__status",
+            p { class: "public-compensation-equation",
                 {t!(
                     "compensation-equation",
                     opening: format_amount(round.opening_balance),
                     income: format_amount(round.tax_income),
-                    discount: format_amount(round.discount_demand),
                     outflow: format_amount(round.compensation_out),
                     closing: format_amount(round.closing_balance)
                 )}
@@ -41,15 +40,15 @@ pub(super) fn CompensationMovementDetails(
                     if page.movements.is_empty() {
                         p { class: "public-auction-page__status", {t!("data-empty")} }
                     } else {
-                        div { class: "public-auction-catalog",
-                            table {
+                        div { class: "public-compensation-movement-wrap",
+                            table { class: "public-compensation-movement-table",
                                 thead {
                                     tr {
                                         th { {t!("compensation-lot")} }
                                         th { {t!("compensation-equipment")} }
                                         th { {t!("compensation-world")} }
                                         th { {t!("compensation-kind")} }
-                                        th { {t!("compensation-amount")} }
+                                        th { class: "public-compensation-number", {t!("compensation-amount")} }
                                     }
                                 }
                                 tbody {
@@ -90,11 +89,22 @@ fn CompensationMovementRow(
     } else {
         format_amount(0)
     };
+    let kind_class = if movement.amount > 0 {
+        "public-compensation-income"
+    } else if movement.amount < 0 {
+        "public-compensation-outflow"
+    } else {
+        ""
+    };
     rsx! {
         tr {
             td {
                 if let Some((lot_code, Some(_lot_id))) = lot {
-                    Link { to: Route::LotDetail { lot_code: lot_code.clone() }, "{lot_code}" }
+                    Link {
+                        class: "public-compensation-lot-link",
+                        to: Route::LotDetail { lot_code: lot_code.clone() },
+                        "{lot_code}"
+                    }
                 } else if let Some((lot_code, None)) = lot {
                     "{lot_code}"
                 } else {
@@ -112,8 +122,8 @@ fn CompensationMovementRow(
                 }
             }
             td { "{world_label(&world_id)}" }
-            td { "{compensation_kind_label(&movement.kind)}" }
-            td { class: "public-auction-catalog__amount", "{amount}" }
+            td { span { class: kind_class, "{compensation_kind_label(&movement.kind)}" } }
+            td { class: "public-compensation-number", "{amount}" }
         }
     }
 }

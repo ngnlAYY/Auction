@@ -15,12 +15,23 @@ use render::MarkdownBlockView;
 /// 自动转义，链接只允许 HTTP(S)、站内相对路径、锚点和 mailto 目标。
 #[component]
 pub fn MarkdownDocument(markdown: String) -> Element {
-    let blocks = blocks::parse_blocks(&markdown);
     rsx! {
         article { class: "shared-markdown",
-            for (index, block) in blocks.into_iter().enumerate() {
-                MarkdownBlockView { key: "{index}", block }
-            }
+            MarkdownBlocks { markdown }
+        }
+    }
+}
+
+/// 只渲染 Markdown 的块级节点，不添加外层容器。
+///
+/// 旧版 Public 规则页由页面自身拥有文档容器；该入口让迁移后的页面保持同一 DOM 层级，
+/// 同时让 Admin 预览继续通过 [`MarkdownDocument`] 使用共享主题容器。
+#[component]
+pub fn MarkdownBlocks(markdown: String) -> Element {
+    let blocks = blocks::parse_blocks(&markdown);
+    rsx! {
+        for (index, block) in blocks.into_iter().enumerate() {
+            MarkdownBlockView { key: "{index}", block }
         }
     }
 }

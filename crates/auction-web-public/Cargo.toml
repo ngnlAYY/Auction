@@ -21,5 +21,5 @@ unic-langid.workspace = true
 url.workspace = true
 wasm-bindgen.workspace = true
 uuid.workspace = true
-# 补齐 dioxus-web 0.7.10 漏声明的 web-sys `Location` feature，详见根 Cargo.toml 说明。
+# 补齐 Dioxus 的 `Location` 及精确 GET 请求所需 web-sys feature，详见根 Cargo.toml 说明。
 web-sys.workspace = true

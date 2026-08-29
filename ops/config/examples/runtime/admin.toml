@@ -2,10 +2,81 @@
 #
 # runtime 文件的所有字段都支持省略；省略时使用应用模型的默认值。
 # 本文件不能放 database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥。
-# 生产部署请将文件置于受信任目录并设置为 0640，修改后需要重启 Admin 才会生效。
+# 生产部署请将文件置于受信任目录并设置为 0640，修改后需要重启受影响的 Admin/Worker 才会生效。
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
+
+# 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter、mail_templates 同时省略时兼容升级前文档。
+[worlds.main]
+# 可选：是否由 Worker 处理主世界；两个 world 至少启用一个，默认 true。
+enabled = true
+# 可选：允许读取详情的发件人身份；空数组且未关闭 allowlist 时不读取任何详情。
+sender_allowlist = []
+# 可选：明确设为 true 才读取任意发件人的详情；默认 false。
+sender_allowlist_disabled = false
+
+# 可选区块：异世界 MoogleMail 入站策略；默认启用并使用独立 durable mailbox。
+[worlds.isekai]
+# 可选：是否由 Worker 处理异世界；两个 world 至少启用一个，默认 true。
+enabled = true
+# 可选：允许读取详情的发件人身份；空数组且未关闭 allowlist 时不读取任何详情。
+sender_allowlist = []
+# 可选：明确设为 true 才读取任意发件人的详情；默认 false。
+sender_allowlist_disabled = false
+
+# 可选区块：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。
+[equipment_filter]
+# 可选：是否启用品质、前后缀、分类、类型和等级过滤；默认 false。
+enabled = false
+# 可选：允许的品质 token；空数组表示不限制。
+qualities = []
+# 可选：允许的前缀 token；空数组表示不限制。
+prefixes = []
+# 可选：允许的后缀 token；空数组表示不限制。
+suffixes = []
+# 可选：允许的装备分类 token；空数组表示不限制。
+categories = []
+# 可选：允许的装备类型 token；空数组表示不限制。
+equipment_types = []
+
+# 可选区块：装备等级范围；0 表示不启用对应边界。
+[equipment_filter.level]
+# 可选：最低装备等级，范围 0-1000，默认 0。
+min = 0
+# 可选：最高装备等级，范围 0-1000 且不小于 min，默认 0。
+max = 0
+
+# 可选区块：MoogleMail 业务通知模板；字段闭集和默认正文与 Auction-BF 一致。
+[mail_templates]
+# 可选：拍卖邮件包含资产时的拒绝正文。
+auction_assets_rejected = "Auction assets rejected"
+# 可选：拍卖邮件没有附件时的拒绝正文。
+auction_no_attachments = "Auction has no attachments"
+# 可选：装备不符合条件时的拒绝正文；支持 {reason_code}。
+auction_equipment_rejected = "Auction equipment rejected: {reason_code}"
+# 可选：用户邮件包含拍卖资产时的拒绝正文。
+user_assets_rejected = "User assets rejected"
+# 可选：注册成功或恢复成功时发送 key；支持且要求 {login_key}、{username}。
+register_key = "Registration key {login_key} for {username}"
+# 可选：注册结果通知；要求 {result_code}，并支持 {username}。
+register_result = "Registration result {result_code} {username}"
+# 可选：重绑结果通知；要求 {result_code}，并支持 {username}。
+rebind_result = "Rebind result {result_code} {username}"
+# 可选：主世界竞得装备的货到付款通知；要求 {item_name}、{amount}、{reference}。
+settlement_winner_equipment_cod = "Auction item {item_name}; COD {amount}; reference {reference}"
+# 可选：异世界付款载体通知；要求 {amount}、{reference}。
+settlement_payment_carrier = "Auction payment request {amount}; reference {reference}"
+# 可选：结算付款超时提醒；要求 {reference}。
+settlement_payment_reminder = "Auction payment is overdue; reference {reference}"
+# 可选：装备交付或退回通知；要求 {item_name}、{reference}。
+settlement_equipment_handoff = "Auction item {item_name}; reference {reference}"
+# 可选：卖家收款通知；要求 {amount}、{reference}。
+settlement_seller_payout = "Auction seller payout {amount}; reference {reference}"
+# 可选：买家退款通知；要求 {amount}、{reference}。
+settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
+# 可选：运维告警通知；要求 {summary}。
+operations_alert = "Operations alert: {summary}"
 
 # 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围；省略时不强制检查范围。
 # 该清单应与 Worker 配置中的 world_id/mailbox_key 一致，只包含非敏感标识。
@@ -31,8 +102,8 @@ allowed_path_prefixes = ["/equip/", "/isekai/equip/"]
 allowlist_enabled = true
 # 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 2 MiB。
 maximum_response_bytes = 2097152
-# 可选：两次请求之间的最小间隔秒数，范围为 1 至 60；默认 1。
-minimum_request_interval_seconds = 1
+# 可选：两次请求之间的最小间隔毫秒数，范围为 1 至 60000；默认沿用旧版的 250。
+minimum_request_interval_millis = 250
 # 可选：外部请求超时秒数，范围为 1 至 30；默认 10。
 request_timeout_seconds = 10
 
@@ -72,7 +143,7 @@ enabled = false
 [security]
 # 可选：允许的精确 HTTP(S) origin 列表；启用 allowlist 时不能为空。
 allowed_origins = ["http://127.0.0.1:8091"]
-# 可选：是否启用 origin allowlist；省略时关闭。
+# 可选：是否启用 origin allowlist；省略时开启，TCP 且列表为空时从 listener 推导。
 allowed_origins_enabled = true
 # 可选：登录请求在限流窗口内的最大次数，默认 10。
 login_rate_limit = 10
@@ -91,10 +162,10 @@ trusted_unix_proxy = false
 
 # 可选区块：Admin 会话策略；省略整个区块时使用默认值。
 [session]
-# 可选：空闲过期秒数，默认 1800。
-idle_ttl_seconds = 1800
-# 可选：绝对过期秒数，默认 604800，不能小于空闲过期时间。
-absolute_ttl_seconds = 604800
+# 可选：空闲过期秒数，默认沿用旧版 Admin 的 900。
+idle_ttl_seconds = 900
+# 可选：绝对过期秒数，默认沿用旧版 Admin 的 28800，不能小于空闲过期时间。
+absolute_ttl_seconds = 28800
 # 可选：单个公开用户允许的最大并发会话数，默认 5。
 max_public_sessions = 5
 

@@ -1,5 +1,7 @@
 //! SQLite 竞价 realtime 事件追加。
 
+use auction_application::format_public_time_wire;
+
 use super::super::mapping::*;
 use super::super::*;
 
@@ -22,7 +24,7 @@ pub(in crate::database::sqlite::competition) async fn insert_realtime_event(
         "lot_id": bid.lot_id.as_uuid(),
         "bid_id": bid.id.as_uuid(),
         "amount": bid.amount.value(),
-        "effective_end": bid.effective_end_at,
+        "effective_end": format_public_time_wire(bid.effective_end_at),
         "state_version": bid.state_version,
         "fact_index": bid.fact_index,
         "mechanism": bid_mechanism_name(bid.mechanism),

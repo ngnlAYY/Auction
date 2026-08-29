@@ -105,8 +105,8 @@ async fn list_postgres_transaction(
                 (l.leader_user_id IS NOT NULL)::boolean AS has_leader,
                 l.leader_proxy_last,
                 l.material,
-                COALESCE((a.policy_snapshot ->> 'bid_increment_ppm')::bigint, 0) AS policy_bid_increment_ppm,
-                COALESCE((a.policy_snapshot ->> 'minimum_increment')::bigint, 30000) AS policy_minimum_increment,
+                (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
+                (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
                 leader.username AS leader_name,
                 submission.seller AS seller_name,
                 l.effective_end_at,
@@ -148,6 +148,7 @@ async fn list_postgres_transaction(
             .map(|row| map_postgres_live(row, &projection.world_id))
             .collect::<Result<_, _>>()?;
     }
+    page.validate(auction_id, request.category.as_deref()).map_err(storage_error)?;
     Ok(Some(page))
 }
 

@@ -15,7 +15,23 @@ pub(super) enum Command {
         #[arg(value_enum, default_value = "public")]
         role: RoleArg,
     },
-    Migrate,
+    /// 在确认 Public/Admin/Worker 均未运行后执行数据库 forward-only 迁移。
+    Migrate {
+        #[command(flatten)]
+        controller: SystemdControllerArgs,
+    },
+    /// 在全部角色明确停止后，安全创建缺失的 PostgreSQL 目标库；不会运行迁移或修改已有库。
+    #[command(name = "postgres-bootstrap")]
+    PostgresBootstrap {
+        #[command(flatten)]
+        controller: SystemdControllerArgs,
+        /// 人工确认的目标数据库名；必须与 Public database_url 的 path 完全一致。
+        #[arg(long)]
+        confirm_database: String,
+        /// 可选的 owner-only maintenance TOML；唯一字段 database_url 必须指向同 endpoint/TLS profile 的 postgres 库。
+        #[arg(long)]
+        maintenance_secrets_file: Option<PathBuf>,
+    },
     /// 只读检查三进程配置、数据库档位、监听地址和文件安全边界。
     #[command(name = "deployment-check")]
     DeploymentCheck {
@@ -41,6 +57,49 @@ pub(super) enum Command {
         /// 凭据在 Admin 和 Worker 中显示的稳定标签。
         #[arg(long)]
         label: String,
+    },
+    /// 将 Auction-BF 规则目录首次导入 PostgreSQL 权威规则表；不会覆盖不同的已发布正文。
+    #[command(name = "import-rules-directory")]
+    ImportRulesDirectory {
+        /// 包含 en、zh-CN、zh-TW、ja、ko 五个 Markdown 文件的目录。
+        #[arg(long)]
+        directory: PathBuf,
+        /// 本次导入批次的非零 UUID；各语言命令 ID 由它稳定派生。
+        #[arg(long)]
+        command_id: Uuid,
+        /// 写入规则发布审计的非空运维操作者标识。
+        #[arg(long)]
+        actor: String,
+    },
+    /// 只读列出远端论坛写入未知、只读对账中和等待人工授权的任务。
+    #[command(name = "forum-write-recovery-list")]
+    ForumWriteRecoveryList {
+        /// 最多返回的恢复项数，范围 1-100。
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u16).range(1..=100))]
+        limit: u16,
+    },
+    /// 在精确标题只读对账未命中后，显式授权 Worker 再次尝试创建论坛主题。
+    #[command(name = "authorize-forum-write-retry")]
+    AuthorizeForumWriteRetry {
+        /// 等待人工授权的拍卖 UUID。
+        #[arg(long)]
+        auction_id: Uuid,
+        /// 本次幂等运维命令 UUID；重复提交只能重放同一请求。
+        #[arg(long)]
+        command_id: Uuid,
+        /// 写入追加式审计记录的非空运维操作者标识。
+        #[arg(long)]
+        actor: String,
+        /// 二次确认，必须逐字等于 `AUTHORIZE FORUM WRITE <auction UUID>`。
+        #[arg(long)]
+        confirm_write: String,
+    },
+    /// 在同一 PostgreSQL Serializable 只读快照中核验旧版已完成结算账本与当前权威事实。
+    #[command(name = "verify-legacy-settlement")]
+    VerifyLegacySettlement {
+        /// 已迁移且状态为 settled 的拍卖 UUID；该命令不会补写或重新执行结算。
+        #[arg(long)]
+        auction_id: Uuid,
     },
     /// 只读收集 PostgreSQL schema、迁移和关系大小/行数估计；不会归档、删除或修改数据库。
     #[command(name = "retention-inventory")]

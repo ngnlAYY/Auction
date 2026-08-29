@@ -16,8 +16,8 @@ pub(crate) fn current_session_response(
         authenticated: true,
         user_id: identity.user_id.to_string(),
         username: identity.username,
-        expires_at: timestamp(identity.expires_at),
-        absolute_expires_at: timestamp(identity.absolute_expires_at),
+        expires_at: public_timestamp(identity.expires_at),
+        absolute_expires_at: public_timestamp(identity.absolute_expires_at),
     });
     let message = if data.is_some() { "会话有效" } else { "当前未登录" };
     (StatusCode::OK, response_headers, Json(ApiResponse::ok(message, data))).into_response()

@@ -15,7 +15,7 @@ pub struct PublicBidLogEntryResponse {
     pub bidder_name: String,
     pub valid: bool,
     pub accepted_state_version: i64,
-    pub fact_index: i32,
+    pub fact_index: i64,
     pub mechanism: String,
     pub created_at: String,
 }

@@ -85,14 +85,8 @@ pub(crate) async fn logout_admin_session(
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if let Some(response) = admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let Some(raw_csrf) = read_admin_cookie(&headers, ADMIN_CSRF_COOKIE) else {
-        return authentication_error();
-    };
-    if !valid_admin_csrf_header(&headers, &raw_csrf) {
-        return api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败").into_response();
+    if let Err(response) = authenticated_admin_mutation(&state, &headers, address).await {
+        return *response;
     }
     let Some(session) = state.session() else {
         return session_unavailable();
@@ -101,12 +95,6 @@ pub(crate) async fn logout_admin_session(
         return authentication_error();
     };
     let now = Utc::now();
-    if let Err(error) = session.current(raw_token.clone(), raw_csrf, now).await {
-        if is_unauthenticated(&error) {
-            return authentication_error();
-        }
-        return session_unavailable();
-    }
     if let Err(error) = session.logout(raw_token, now).await {
         if is_unauthenticated(&error) {
             return authentication_error();

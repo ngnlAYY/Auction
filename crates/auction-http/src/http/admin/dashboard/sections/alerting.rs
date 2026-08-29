@@ -8,30 +8,25 @@ use serde_json::json;
 use super::super::super::timestamp;
 
 pub(crate) fn map_alerting(health: OperationsAlertHealth) -> AdminDashboardSectionResponse {
+    let observed_at = if health.enabled { health.last_observed_at.map(timestamp) } else { None };
     let status = if !health.enabled {
-        DashboardStatus::Unknown
-    } else if health.failed_batch_count > 0
+        DashboardStatus::Ok
+    } else if health.last_observed_at.is_none()
+        || health.active_signal_count > 0
+        || health.failed_batch_count > 0
         || health.manual_reconcile_count > 0
         || health.claimed_batch_count > 0
         || health.due_signal_count > 0
+        || !health.last_error_code.is_empty()
     {
         DashboardStatus::Degraded
     } else {
         DashboardStatus::Ok
     };
-    let error_code = if health.manual_reconcile_count > 0 {
-        Some("manual_reconcile".to_owned())
-    } else if health.failed_batch_count > 0 {
-        Some("delivery_failed".to_owned())
-    } else if !health.last_error_code.is_empty() {
-        Some(health.last_error_code.clone())
-    } else {
-        None
-    };
     AdminDashboardSectionResponse {
         status: status.as_str().to_owned(),
-        observed_at: health.last_observed_at.map(timestamp),
-        error_code,
+        observed_at,
+        error_code: None,
         data: Some(json!({
             "enabled": health.enabled,
             "active_signal_count": health.active_signal_count,

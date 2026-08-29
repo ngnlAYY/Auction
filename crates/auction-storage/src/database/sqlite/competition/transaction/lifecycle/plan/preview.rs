@@ -55,7 +55,7 @@ pub(super) async fn apply_preview_plan_sqlite(
             "UPDATE auctions
              SET status = 'preview', preview_opened_at = COALESCE(preview_opened_at, ?),
                  preview_manual_open = CASE WHEN preview_manual_open = 1 OR ? THEN 1 ELSE 0 END,
-                 preview_revision = preview_revision + 1, state_version = ?, updated_at = ?
+                 state_version = ?, updated_at = ?
              WHERE id = ? AND status = 'draft' AND state_version = ?
                AND (? OR preview_scheduled_at <= ?)
              RETURNING preview_revision",
@@ -72,7 +72,7 @@ pub(super) async fn apply_preview_plan_sqlite(
         .await
         .map_err(map_sql_error)?
     };
-    if preview_revision.is_none_or(|value| value <= 0) {
+    if preview_revision.is_none_or(|value| value < 0) {
         return Err(CompetitionTransactionError::InvalidState);
     }
     let materialized = {

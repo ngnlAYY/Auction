@@ -1,7 +1,7 @@
 //! 代理授权创建表单及其提交状态。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{CommandError, ProxyCommandAuthorization, create_proxy_authorization};
@@ -100,7 +100,11 @@ pub(super) fn ProxyCreateForm(
                                 saved_authorization.set(Some(Box::new(authorization)));
                                 refresh_generation.set(refresh_generation().saturating_add(1));
                             }
-                            Err(error) => failure.set(Some(error)),
+                            Err(error) => {
+                                failure.set(Some(error));
+                                // 失败后保留输入、command_id 和错误，同时重新读取权威价格与代理状态。
+                                refresh_generation.set(refresh_generation().saturating_add(1));
+                            }
                         }
                     });
                 },

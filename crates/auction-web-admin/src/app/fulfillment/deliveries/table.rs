@@ -1,15 +1,18 @@
 //! Delivery 列表、行动作和分页组件。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
 
 use crate::api::{Delivery, DeliveryPage};
 use crate::app::surface::pagination::AdminPager;
 
-use super::helpers::{delivery_origin_label, delivery_status_class, delivery_status_label};
-use super::model::DeliveryDialogKind;
+use super::dialog::DeliveryDialog;
+use super::helpers::{delivery_display_id, delivery_display_type, delivery_status_label};
+use super::model::{
+    DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
+};
 
 /// 展示后端返回的 delivery 安全投影。
 #[component]
@@ -17,39 +20,45 @@ pub(super) fn DeliveryTable(
     page: DeliveryPage,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
     busy_delivery: Signal<Option<String>>,
+    pending_dialog: Option<DeliveryDialogState>,
+    draft: Option<DeliveryReconcileDraft>,
+    on_draft_change: EventHandler<DeliveryReconcileDraft>,
+    on_confirm: EventHandler<DeliveryActionRequest>,
+    on_cancel: EventHandler<()>,
 ) -> Element {
     rsx! {
-        section {
-            class: "admin-panel",
-            aria_labelledby: "delivery-table-title",
-            aria_busy: busy_delivery().is_some().to_string(),
-            h2 { id: "delivery-table-title", {t!("delivery-total", total: page.total)} }
-            if page.deliveries.is_empty() {
-                p { class: "admin-panel__note", {t!("delivery-empty")} }
-            } else {
-                div { class: "public-auction-catalog admin-delivery__table-wrap",
-                    table {
-                        thead {
-                            tr {
-                                th { {t!("delivery-id")} }
-                                th { {t!("delivery-recipient")} }
-                                th { {t!("delivery-cod")} }
-                                th { {t!("delivery-origin")} }
-                                th { {t!("delivery-status")} }
-                                th { {t!("delivery-attempts")} }
-                                th { {t!("delivery-fencing")} }
-                                th { {t!("delivery-failure")} }
-                                th { {t!("catalog-actions")} }
-                            }
-                        }
-                        tbody {
-                            for delivery in page.deliveries {
-                                DeliveryRow { delivery, on_open, busy_delivery }
-                            }
+        div { class: "admin-delivery-table-wrap",
+            table { class: "admin-delivery-table",
+                thead {
+                    tr {
+                        th { class: "admin-delivery-col-id", {t!("delivery-id")} }
+                        th { class: "admin-delivery-col-type", {t!("delivery-type")} }
+                        th { class: "admin-delivery-col-target", {t!("delivery-to")} }
+                        th { class: "admin-delivery-col-cod", {t!("delivery-cod")} }
+                        th { class: "admin-delivery-col-status", {t!("delivery-status")} }
+                        th { class: "admin-delivery-col-attempts", {t!("delivery-attempts")} }
+                        th { class: "admin-delivery-col-error", {t!("delivery-last-error")} }
+                        th { {t!("catalog-actions")} }
+                    }
+                }
+                tbody {
+                    for delivery in page.deliveries.clone() {
+                        DeliveryRow {
+                            delivery,
+                            on_open,
+                            busy_delivery,
+                            pending_dialog: pending_dialog.clone(),
+                            draft: draft.clone(),
+                            on_draft_change,
+                            on_confirm,
+                            on_cancel,
                         }
                     }
                 }
             }
+        }
+        if page.deliveries.is_empty() {
+            p { class: "admin-delivery-status", {t!("delivery-empty")} }
         }
     }
 }
@@ -60,6 +69,11 @@ pub(super) fn DeliveryRow(
     delivery: Delivery,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
     busy_delivery: Signal<Option<String>>,
+    pending_dialog: Option<DeliveryDialogState>,
+    draft: Option<DeliveryReconcileDraft>,
+    on_draft_change: EventHandler<DeliveryReconcileDraft>,
+    on_confirm: EventHandler<DeliveryActionRequest>,
+    on_cancel: EventHandler<()>,
 ) -> Element {
     let kind = match delivery.status.as_str() {
         "claimed" => Some(DeliveryDialogKind::Release),
@@ -68,57 +82,96 @@ pub(super) fn DeliveryRow(
         _ => None,
     };
     let action_label = kind.map(DeliveryDialogKind::action_label);
-    let is_busy = busy_delivery().as_deref() == Some(delivery.id.as_str());
     let status = delivery_status_label(&delivery.status);
     let cod = delivery.cod.map(format_amount).unwrap_or_else(|| t!("value-empty"));
-    let failure = delivery.failure_code.clone().unwrap_or_else(|| t!("value-empty"));
+    let failure = delivery.failure_code.clone().unwrap_or_default();
     let recipient = delivery.recipient.clone();
-    let origin =
-        format!("{}: {}", delivery_origin_label(&delivery.origin_kind), delivery.origin_id);
+    let hidden_recipient = recipient.clone();
+    let full_identifier = if delivery.origin_id.is_empty() {
+        delivery.id.clone()
+    } else {
+        delivery.origin_id.clone()
+    };
+    let display_identifier = delivery_display_id(&delivery);
+    let display_type = delivery_display_type(&delivery.origin_kind);
     let delivery_for_action = delivery.clone();
 
     rsx! {
-        tr { class: "admin-delivery__row",
-            td { "data-label": t!("delivery-id"), TruncatedText { value: delivery.id, size: "wide" } }
-            td { "data-label": t!("delivery-recipient"), TruncatedText { value: recipient } }
+        tr {
             td {
-                "data-label": t!("delivery-cod"),
-                class: "public-auction-catalog__amount public-auction-catalog__number",
-                "{cod}"
-            }
-            td {
-                "data-label": t!("delivery-origin"),
-                TruncatedText { value: origin }
-            }
-            td { "data-label": t!("delivery-status"),
-                span {
-                    class: delivery_status_class(&delivery.status),
-                    {status}
+                TruncatedText {
+                    value: full_identifier,
+                    display: display_identifier,
+                    size: "compact",
+                    portal: true,
+                    legacy_dom: true,
                 }
             }
             td {
-                "data-label": t!("delivery-attempts"),
-                class: "public-auction-catalog__number",
+                TruncatedText {
+                    value: display_type,
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
+            td {
+                h3 { class: "admin-visually-hidden", "{hidden_recipient}" }
+                TruncatedText {
+                    value: recipient,
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
+            td {
+                class: "admin-delivery-num",
+                "{cod}"
+            }
+            td {
+                span { class: "admin-delivery-badge", {status} }
+            }
+            td {
+                class: "admin-delivery-num",
                 "{delivery.attempt_count}"
             }
             td {
-                "data-label": t!("delivery-fencing"),
-                class: "public-auction-catalog__number",
-                "{delivery.fencing_version}"
+                TruncatedText {
+                    value: failure,
+                    portal: true,
+                    legacy_dom: true,
+                }
             }
-            td { "data-label": t!("delivery-failure"), TruncatedText { value: failure } }
-            td { "data-label": t!("catalog-actions"), class: "admin-delivery__actions",
-                if let (Some(kind), Some(label)) = (kind, action_label) {
-                    button {
-                        r#type: "button",
-                        class: "admin-btn-primary",
-                        disabled: busy_delivery().is_some(),
-                        aria_busy: is_busy.to_string(),
-                        onclick: move |_| on_open.call((delivery_for_action.clone(), kind)),
-                        if is_busy { {t!("admin-action-working")} } else { "{label}" }
+            td {
+                div { class: "admin-delivery-actions",
+                    if let (Some(kind), Some(label)) = (kind, action_label) {
+                        button {
+                            r#type: "button",
+                            class: "admin-btn-primary",
+                            disabled: busy_delivery().is_some(),
+                            onclick: move |_| on_open.call((delivery_for_action.clone(), kind)),
+                            "{label}"
+                        }
                     }
-                } else {
-                    span { {t!("delivery-no-action")} }
+                }
+            }
+        }
+        if let Some(dialog) = pending_dialog.filter(|dialog| {
+            dialog.kind == DeliveryDialogKind::Reconcile && dialog.delivery.id == delivery.id
+        }) {
+            tr {
+                class: "admin-delivery-dialog-row",
+                td {
+                    colspan: "8",
+                    DeliveryDialog {
+                        delivery: dialog.delivery,
+                        kind: dialog.kind,
+                        busy: busy_delivery().is_some(),
+                        draft: draft.unwrap_or_else(|| {
+                            DeliveryReconcileDraft::for_delivery(delivery.id.clone())
+                        }),
+                        on_draft_change,
+                        on_confirm,
+                        on_cancel,
+                    }
                 }
             }
         }
@@ -130,9 +183,9 @@ pub(super) fn DeliveryRow(
 pub(super) fn DeliveryPager(page: DeliveryPage, mut page_number: Signal<i64>) -> Element {
     rsx! {
         AdminPager {
-            page: page.page,
-            page_size: page.page_size,
-            total: page.total,
+            page: page.pagination.page,
+            page_size: page.pagination.page_size,
+            total: page.pagination.total,
             label: t!("delivery-pagination"),
             on_page_change: move |next_page| page_number.set(next_page),
         }

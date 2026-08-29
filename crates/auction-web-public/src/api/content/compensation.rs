@@ -7,7 +7,7 @@ pub(crate) use auction_contracts::{
     PublicCompensationRoundResponse as CompensationRound,
 };
 
-use super::{ApiResponse, send_get};
+use super::{decoder, send_get};
 
 pub(crate) async fn fetch_compensation_pool(page: i64) -> Result<CompensationPoolPage, String> {
     let page = page.max(1);
@@ -16,9 +16,7 @@ pub(crate) async fn fetch_compensation_pool(page: i64) -> Result<CompensationPoo
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<CompensationPoolPage> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+    decoder::decode_compensation_pool(response).await
 }
 
 pub(crate) async fn fetch_compensation_movements(
@@ -31,7 +29,5 @@ pub(crate) async fn fetch_compensation_movements(
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<CompensationMovementPage> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+    decoder::decode_compensation_movements(response).await
 }

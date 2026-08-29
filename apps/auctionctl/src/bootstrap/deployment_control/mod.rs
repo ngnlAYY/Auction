@@ -23,6 +23,14 @@ pub(super) struct ControllerOptions {
     pub public_unit: String,
 }
 
+/// 获取独立数据库维护的角色停止证明和部署互斥锁。
+#[cfg(unix)]
+pub(super) fn acquire_migration_guard(
+    options: ControllerOptions,
+) -> anyhow::Result<unix::MigrationGuard> {
+    unix::acquire_migration_guard(options)
+}
+
 #[cfg(unix)]
 pub(super) async fn start(
     options: ControllerOptions,

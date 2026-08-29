@@ -65,10 +65,18 @@ impl DatabaseStore {
         match self {
             #[cfg(feature = "postgres")]
             Self::Postgres(store) => {
-                ensure_postgres_migration_target(store.raw_pool()).await?;
-                sqlx::migrate!("../../migrations/postgres").run(store.raw_pool()).await.map_err(
-                    |source| StorageError::Migration { backend: DatabaseBackend::Postgres, source },
-                )
+                let marker_exists = ensure_postgres_migration_target(store.raw_pool()).await?;
+                let applied_checksums = if marker_exists {
+                    postgres_compatibility_checksums(store.raw_pool()).await?
+                } else {
+                    Vec::new()
+                };
+                let migrator =
+                    migrations::postgres_migrator_with_applied_checksums(&applied_checksums)?;
+                migrator.run(store.raw_pool()).await.map_err(|source| StorageError::Migration {
+                    backend: DatabaseBackend::Postgres,
+                    source,
+                })
             }
             #[cfg(feature = "sqlite")]
             Self::Sqlite(store) => {
@@ -110,7 +118,7 @@ impl DatabaseStore {
 }
 
 #[cfg(feature = "postgres")]
-async fn ensure_postgres_migration_target(pool: &PgPool) -> Result<(), StorageError> {
+async fn ensure_postgres_migration_target(pool: &PgPool) -> Result<bool, StorageError> {
     let marker_exists =
         sqlx::query_scalar::<_, bool>("SELECT to_regclass('_sqlx_migrations') IS NOT NULL")
             .fetch_one(pool)
@@ -120,7 +128,7 @@ async fn ensure_postgres_migration_target(pool: &PgPool) -> Result<(), StorageEr
                 source,
             })?;
     if marker_exists {
-        return Ok(());
+        return Ok(true);
     }
 
     let user_object_count = sqlx::query_scalar::<_, i64>(
@@ -140,7 +148,36 @@ async fn ensure_postgres_migration_target(pool: &PgPool) -> Result<(), StorageEr
     if user_object_count > 0 {
         return Err(StorageError::UnknownDatabase { backend: DatabaseBackend::Postgres });
     }
-    Ok(())
+    Ok(false)
+}
+
+#[cfg(feature = "postgres")]
+async fn postgres_compatibility_checksums(
+    pool: &PgPool,
+) -> Result<Vec<(i64, Vec<u8>)>, StorageError> {
+    let rows = sqlx::query(
+        "SELECT version, checksum
+         FROM _sqlx_migrations
+         WHERE version IN (5, 15)
+         ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StorageError::MigrationTarget {
+        backend: DatabaseBackend::Postgres,
+        source,
+    })?;
+    let mut checksums = Vec::with_capacity(rows.len());
+    for row in rows {
+        let version = row.try_get::<i64, _>("version").map_err(|source| {
+            StorageError::MigrationTarget { backend: DatabaseBackend::Postgres, source }
+        })?;
+        let checksum = row.try_get::<Vec<u8>, _>("checksum").map_err(|source| {
+            StorageError::MigrationTarget { backend: DatabaseBackend::Postgres, source }
+        })?;
+        checksums.push((version, checksum));
+    }
+    Ok(checksums)
 }
 
 #[cfg(feature = "sqlite")]
@@ -222,22 +259,24 @@ impl DatabaseStore {
 #[cfg(feature = "postgres")]
 async fn check_postgres_readiness(store: &PostgresStore) -> Result<(), ()> {
     sqlx::query("SELECT 1").execute(store.raw_pool()).await.map_err(|_| ())?;
-    let rows = sqlx::query("SELECT version, success FROM _sqlx_migrations ORDER BY version ASC")
-        .fetch_all(store.raw_pool())
-        .await
-        .map_err(|_| ())?;
-    let expected = sqlx::migrate!("../../migrations/postgres")
-        .iter()
-        .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))
-        .collect::<Vec<_>>();
+    let rows =
+        sqlx::query("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version ASC")
+            .fetch_all(store.raw_pool())
+            .await
+            .map_err(|_| ())?;
+    let expected =
+        migrations::postgres_migrator().map_err(|_| ())?.iter().cloned().collect::<Vec<_>>();
     if rows.len() != expected.len() {
         return Err(());
     }
-    for (row, (expected_version, expected_checksum)) in rows.iter().zip(expected) {
+    for (row, expected_migration) in rows.iter().zip(expected) {
         let version = row.try_get::<i64, _>("version").map_err(|_| ())?;
         let success = row.try_get::<bool, _>("success").map_err(|_| ())?;
         let checksum = row.try_get::<Vec<u8>, _>("checksum").map_err(|_| ())?;
-        if !success || version != expected_version || checksum != expected_checksum {
+        if !success
+            || version != expected_migration.version
+            || !migrations::postgres_checksum_matches(&expected_migration, &checksum)
+        {
             return Err(());
         }
     }
@@ -247,10 +286,11 @@ async fn check_postgres_readiness(store: &PostgresStore) -> Result<(), ()> {
 #[cfg(feature = "sqlite")]
 async fn check_sqlite_readiness(store: &SqliteStore) -> Result<(), ()> {
     sqlx::query("SELECT 1").execute(store.raw_pool()).await.map_err(|_| ())?;
-    let rows = sqlx::query("SELECT version, success FROM _sqlx_migrations ORDER BY version ASC")
-        .fetch_all(store.raw_pool())
-        .await
-        .map_err(|_| ())?;
+    let rows =
+        sqlx::query("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version ASC")
+            .fetch_all(store.raw_pool())
+            .await
+            .map_err(|_| ())?;
     let expected = sqlx::migrate!("../../migrations/sqlite")
         .iter()
         .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))

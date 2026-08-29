@@ -71,7 +71,7 @@ pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<Equi
         allowlist_enabled: source.allowlist_enabled,
         maximum_response_bytes: usize::try_from(source.maximum_response_bytes)
             .context("admin equipment_source response limit exceeds this platform")?,
-        minimum_request_interval: Duration::from_secs(source.minimum_request_interval_seconds),
+        minimum_request_interval: Duration::from_millis(source.minimum_request_interval_millis),
         request_timeout: Duration::from_secs(source.request_timeout_seconds),
     })
 }

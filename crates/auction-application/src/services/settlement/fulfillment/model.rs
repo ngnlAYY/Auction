@@ -1,59 +1,132 @@
 //! 结算履约跨 owner 传递的无 secret 模型。
 
-use chrono::{DateTime, Utc};
+use auction_domain::SettlementObligationKind;
 use serde::Serialize;
 use uuid::Uuid;
 
-/// 交给 delivery owner 的 canonical intent，不是 MoogleMail 的最终表单 payload。
-#[derive(Debug, Serialize)]
+/// auction owner 在生成通用 MoogleMail schema-v1 payload 前校验的 typed intent。
+///
+/// 字段集合与旧版 `FulfillmentDeliveryIntent` 一致。拍卖、标的、投稿等授权上下文只留在
+/// fulfillment claim，不得混入 delivery owner 的稳定载荷或请求摘要。
+#[derive(Debug)]
 pub(super) struct SettlementDeliveryIntent {
-    pub(super) schema_version: u8,
+    pub(super) obligation_id: Uuid,
+    pub(super) kind: SettlementObligationKind,
     pub(super) operation: &'static str,
     pub(super) world: &'static str,
-    pub(super) obligation_id: Uuid,
-    pub(super) auction_id: Uuid,
-    pub(super) lot_id: Uuid,
-    pub(super) origin_command_id: Uuid,
-    pub(super) kind: &'static str,
     pub(super) recipient: String,
     pub(super) template: &'static str,
+    pub(super) reference: String,
     pub(super) item_name: String,
-    pub(super) external_equipment_id: String,
-    pub(super) amount: i64,
-    pub(super) carrier_credit: u32,
     pub(super) credits: i64,
     pub(super) cod: i64,
-    pub(super) equipment_id: Uuid,
-    pub(super) submission_id: Option<Uuid>,
-    pub(super) submission_source_kind: Option<String>,
-    pub(super) source_external_mail_id: Option<String>,
+    pub(super) equipment_id: Option<Uuid>,
+    pub(super) source_external_mail_id: String,
 }
 
-/// 激活 prepared delivery 时计算的稳定身份和阶段 fence。
+impl SettlementDeliveryIntent {
+    /// 按旧版 `FulfillmentDeliveryIntent.Validate` 校验完整闭集组合。
+    pub(super) fn validate(&self) -> bool {
+        if self.obligation_id.is_nil()
+            || !matches!(self.operation, "send" | "return")
+            || !matches!(self.world, "main" | "isekai")
+            || !trimmed_non_empty(&self.recipient)
+            || self.credits < 0
+            || self.cod < 0
+        {
+            return false;
+        }
+
+        let has_equipment = self.equipment_id.is_some_and(|id| !id.is_nil());
+        match self.kind {
+            SettlementObligationKind::WinnerEquipmentCod => {
+                self.operation == "send"
+                    && self.world == "main"
+                    && self.template == "settlement_winner_equipment_cod"
+                    && self.reference == self.obligation_id.to_string()
+                    && trimmed_non_empty(&self.item_name)
+                    && self.credits == 0
+                    && self.cod > 0
+                    && has_equipment
+                    && self.source_external_mail_id.is_empty()
+            }
+            SettlementObligationKind::WinnerPaymentCarrierCod => {
+                self.operation == "send"
+                    && self.world == "main"
+                    && self.template == "settlement_payment_carrier"
+                    && self.reference == self.obligation_id.to_string()
+                    && self.item_name.is_empty()
+                    && self.credits > 0
+                    && self.cod > self.credits
+                    && self.equipment_id.is_none()
+                    && self.source_external_mail_id.is_empty()
+            }
+            SettlementObligationKind::WinnerEquipmentHandoff => {
+                self.operation == "send"
+                    && self.world == "isekai"
+                    && self.template == "settlement_equipment_handoff"
+                    && self.reference == self.obligation_id.to_string()
+                    && trimmed_non_empty(&self.item_name)
+                    && self.credits == 0
+                    && self.cod == 0
+                    && has_equipment
+                    && self.source_external_mail_id.is_empty()
+            }
+            SettlementObligationKind::SellerPayout => {
+                valid_credit_delivery(self, "settlement_seller_payout")
+            }
+            SettlementObligationKind::BuyerRefund => {
+                valid_credit_delivery(self, "settlement_buyer_refund")
+            }
+            SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
+                match self.operation {
+                    "return" => {
+                        self.template.is_empty()
+                            && self.reference.is_empty()
+                            && self.item_name.is_empty()
+                            && self.credits == 0
+                            && self.cod == 0
+                            && self.equipment_id.is_none()
+                            && trimmed_non_empty(&self.source_external_mail_id)
+                    }
+                    "send" => {
+                        self.template == "settlement_equipment_handoff"
+                            && self.reference == self.obligation_id.to_string()
+                            && trimmed_non_empty(&self.item_name)
+                            && self.credits == 0
+                            && self.cod == 0
+                            && has_equipment
+                            && self.source_external_mail_id.is_empty()
+                    }
+                    _ => false,
+                }
+            }
+        }
+    }
+}
+
+fn valid_credit_delivery(intent: &SettlementDeliveryIntent, template: &str) -> bool {
+    intent.operation == "send"
+        && intent.world == "main"
+        && intent.template == template
+        && intent.reference == intent.obligation_id.to_string()
+        && intent.item_name.is_empty()
+        && intent.credits > 0
+        && intent.cod == 0
+        && intent.equipment_id.is_none()
+        && intent.source_external_mail_id.is_empty()
+}
+
+fn trimmed_non_empty(value: &str) -> bool {
+    !value.is_empty() && value == value.trim()
+}
+
+/// 激活 prepared delivery 时计算的旧版稳定语义载荷。
 #[derive(Debug, Serialize)]
 pub(super) struct SettlementDeliveryActivation {
     pub(super) schema_version: u8,
-    pub(super) delivery_id: Uuid,
-    pub(super) obligation_id: Uuid,
-    pub(super) prepare_request_hash: [u8; 32],
+    pub(super) delivery_id: String,
+    pub(super) obligation_id: String,
+    pub(super) prepare_request_digest: [u8; 32],
     pub(super) expected_status: &'static str,
-}
-
-/// Sent/Balance 证据组成的稳定 proof 摘要载荷。
-#[derive(Debug, Serialize)]
-pub(super) struct SettlementProofDigest<'a> {
-    pub(super) schema_version: u8,
-    pub(super) obligation_id: Uuid,
-    pub(super) delivery_id: Uuid,
-    pub(super) external_mail_id: &'a str,
-    pub(super) world: &'a str,
-    pub(super) recipient: &'a str,
-    pub(super) subject: &'a str,
-    pub(super) remaining_credits: i64,
-    pub(super) cod_pending: i64,
-    pub(super) remaining_equipment_ids: &'a [String],
-    pub(super) collected: bool,
-    pub(super) sent_observed_at: DateTime<Utc>,
-    pub(super) balance_credits: Option<i64>,
-    pub(super) balance_observed_at: Option<DateTime<Utc>>,
 }

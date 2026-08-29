@@ -14,8 +14,8 @@ pub(crate) async fn list_sqlite(
     let status = request.status.map(AdminUserStatus::as_str);
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM users
-         WHERE (? IS NULL OR instr(lower(username), lower(?)) > 0
-                OR instr(lower(game_player_id), lower(?)) > 0)
+         WHERE (? IS NULL OR instr(username, ?) > 0
+                OR instr(game_player_id, ?) > 0)
            AND (? IS NULL OR status = ?)",
     )
     .bind(name)
@@ -30,10 +30,10 @@ pub(crate) async fn list_sqlite(
         "SELECT id, username, game_player_id, status, key_status, state_version,
                 created_at, updated_at
          FROM users
-         WHERE (? IS NULL OR instr(lower(username), lower(?)) > 0
-                OR instr(lower(game_player_id), lower(?)) > 0)
+         WHERE (? IS NULL OR instr(username, ?) > 0
+                OR instr(game_player_id, ?) > 0)
            AND (? IS NULL OR status = ?)
-         ORDER BY lower(username), id
+         ORDER BY username COLLATE BINARY, id
          LIMIT ? OFFSET ?",
     )
     .bind(name)

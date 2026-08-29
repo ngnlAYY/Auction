@@ -4,11 +4,15 @@ use sha2::{Digest, Sha256};
 use crate::ports::RequestHash;
 
 use super::{
+    business::{
+        AdminRuntimeEquipmentFilterConfig, AdminRuntimeMailTemplatesConfig,
+        AdminRuntimeWorldsConfig,
+    },
     errors::AdminRuntimeConfigError,
     validation::{
-        valid_fingerprint, validate_dashboard_mailboxes, validate_equipment_source,
-        validate_listener, validate_security, validate_session, validate_tracing,
-        validate_unix_path,
+        valid_fingerprint, validate_business_config, validate_dashboard_mailboxes,
+        validate_equipment_source, validate_listener, validate_security, validate_session,
+        validate_tracing, validate_unix_path,
     },
 };
 
@@ -67,8 +71,8 @@ pub struct AdminRuntimeEquipmentSourceConfig {
     pub allowlist_enabled: bool,
     /// 单次响应最大字节数；省略时为 2 MiB。
     pub maximum_response_bytes: u64,
-    /// 两次请求之间的最小间隔秒数；省略时为 1 秒。
-    pub minimum_request_interval_seconds: u64,
+    /// 两次请求之间的最小间隔毫秒数；省略时沿用旧版的 250 毫秒。
+    pub minimum_request_interval_millis: u64,
     /// 外部请求超时秒数；省略时为 10 秒。
     pub request_timeout_seconds: u64,
 }
@@ -80,7 +84,7 @@ impl Default for AdminRuntimeEquipmentSourceConfig {
             allowed_path_prefixes: vec!["/equip/".to_owned(), "/isekai/equip/".to_owned()],
             allowlist_enabled: true,
             maximum_response_bytes: 2 << 20,
-            minimum_request_interval_seconds: 1,
+            minimum_request_interval_millis: 250,
             request_timeout_seconds: 10,
         }
     }
@@ -92,7 +96,7 @@ impl Default for AdminRuntimeEquipmentSourceConfig {
 pub struct AdminRuntimeSecurityConfig {
     /// 允许的精确 HTTP(S) origin；启用 allowlist 时不能为空。
     pub allowed_origins: Vec<String>,
-    /// 是否启用 origin allowlist；省略时关闭。
+    /// 是否启用 origin allowlist；省略时开启。
     pub allowed_origins_enabled: bool,
     /// 登录请求在时间窗口内的最大次数；省略时为 10 次。
     pub login_rate_limit: u32,
@@ -114,7 +118,7 @@ impl Default for AdminRuntimeSecurityConfig {
     fn default() -> Self {
         Self {
             allowed_origins: Vec::new(),
-            allowed_origins_enabled: false,
+            allowed_origins_enabled: true,
             login_rate_limit: 10,
             mutation_rate_limit: 60,
             rate_limit_window_seconds: 60,
@@ -130,9 +134,9 @@ impl Default for AdminRuntimeSecurityConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeSessionConfig {
-    /// 会话空闲过期秒数；省略时为 1800 秒。
+    /// 会话空闲过期秒数；省略时沿用旧版 Admin 的 900 秒。
     pub idle_ttl_seconds: u64,
-    /// 会话绝对过期秒数；省略时为 604800 秒。
+    /// 会话绝对过期秒数；省略时沿用旧版 Admin 的 28800 秒。
     pub absolute_ttl_seconds: u64,
     /// 单个公开用户允许的最大并发会话数；省略时为 5 个。
     pub max_public_sessions: u32,
@@ -140,7 +144,7 @@ pub struct AdminRuntimeSessionConfig {
 
 impl Default for AdminRuntimeSessionConfig {
     fn default() -> Self {
-        Self { idle_ttl_seconds: 1800, absolute_ttl_seconds: 604800, max_public_sessions: 5 }
+        Self { idle_ttl_seconds: 900, absolute_ttl_seconds: 28_800, max_public_sessions: 5 }
     }
 }
 
@@ -219,6 +223,18 @@ pub struct AdminRuntimeDashboardMailbox {
 pub struct AdminRuntimeDocument {
     /// 是否允许人工提前开放拍卖；省略时关闭。
     pub allow_manual_early_open: bool,
+    /// Auction-BF 管理端可编辑的 MoogleMail world；三个业务区块必须同时存在或同时省略。
+    ///
+    /// `Option` 只用于保持升级前 runtime 文档和 durable 指纹可重放；Admin HTTP 投影会补齐
+    /// 旧版默认值，新写入的文档始终包含这三个区块。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worlds: Option<AdminRuntimeWorldsConfig>,
+    /// Auction-BF 管理端可编辑的装备过滤策略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipment_filter: Option<AdminRuntimeEquipmentFilterConfig>,
+    /// Auction-BF 管理端可编辑的通知模板。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_templates: Option<AdminRuntimeMailTemplatesConfig>,
     /// 装备来源和远程读取边界。
     pub equipment_source: AdminRuntimeEquipmentSourceConfig,
     /// Admin HTTP 监听配置。
@@ -240,10 +256,33 @@ pub struct AdminRuntimeDocument {
 impl AdminRuntimeDocument {
     /// 严格校验文档；只检查可由本地文档决定的边界，不执行网络、数据库或 socket 操作。
     pub fn validate(&self) -> Result<(), AdminRuntimeConfigError> {
+        validate_business_config(self)?;
         validate_listener(&self.listener)?;
         validate_dashboard_mailboxes(&self.dashboard_mailboxes)?;
         validate_equipment_source(&self.equipment_source)?;
         validate_security(&self.security)?;
+        if self.security.allowed_origins_enabled && self.security.allowed_origins.is_empty() {
+            if self.listener.mode != AdminRuntimeListenMode::Tcp {
+                return Err(AdminRuntimeConfigError::InvalidDocument(
+                    "Unix listener 启用 origin allowlist 时必须显式配置 security.allowed_origins"
+                        .to_owned(),
+                ));
+            }
+            let address = self.tcp_address()?;
+            if address.ip().is_unspecified() {
+                return Err(AdminRuntimeConfigError::InvalidDocument(
+                    "未指定 TCP listener 无法推导浏览器 origin".to_owned(),
+                ));
+            }
+        }
+        if self.metrics.enabled
+            && self.listener.mode == AdminRuntimeListenMode::Tcp
+            && !self.tcp_address()?.ip().is_loopback()
+        {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "启用 metrics 时 Admin listener 必须使用 loopback TCP 或 Unix".to_owned(),
+            ));
+        }
         if self.security.trusted_unix_proxy && self.listener.mode != AdminRuntimeListenMode::Unix {
             return Err(AdminRuntimeConfigError::InvalidDocument(
                 "security.trusted_unix_proxy 只能在 Unix listener 模式启用".to_owned(),
@@ -253,6 +292,19 @@ impl AdminRuntimeDocument {
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;
         Ok(())
+    }
+
+    /// 为浏览器和新 runtime 文件补齐 Auction-BF 的三组业务默认值。
+    ///
+    /// 升级前文件在内存中继续保留 `None`，因此其既有 fingerprint 与 durable command 摘要
+    /// 不会变化；只有 API 投影或用户保存的新候选会显式携带这些字段。
+    pub fn materialize_business_defaults(&mut self) {
+        if self.worlds.is_none() && self.equipment_filter.is_none() && self.mail_templates.is_none()
+        {
+            self.worlds = Some(AdminRuntimeWorldsConfig::default());
+            self.equipment_filter = Some(AdminRuntimeEquipmentFilterConfig::default());
+            self.mail_templates = Some(AdminRuntimeMailTemplatesConfig::default());
+        }
     }
 
     /// 计算不依赖 TOML 排版的稳定文档指纹。

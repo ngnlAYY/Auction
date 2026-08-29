@@ -16,7 +16,9 @@
 - `src/errors/mod.rs`：领域错误分类。
 - `src/settlement/`：结算领域 owner；`policy.rs` 维护策略/恢复参数，`amount.rs` 维护非负金额
   值对象，`facts.rs` 维护 lot 事实与结算明细，`obligations.rs` 维护后续业务义务，`plan.rs`
-  维护结算曲线计算与最终计划；`mod.rs` 只负责稳定导出。
+  维护结算曲线计算与最终计划；其中 `WinnerPaymentCarrierCod` 的义务路由固定为 `main`；
+  `SettlementLine` 在存储/重放边界同时校验金额守恒、税与补偿互斥、税时卖方金额等于成交价，
+  以及补偿时卖方金额严格低于成交价；`mod.rs` 只负责稳定导出。
 
 允许依赖：serde、UUID、时间类型、`thiserror`。
 

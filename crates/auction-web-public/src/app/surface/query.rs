@@ -2,14 +2,98 @@
 
 use super::*;
 
+/// Router 首次挂载前的公开端地址快照，用于恢复未在 `Routable` 中声明的查询参数。
+#[derive(Clone)]
+pub(crate) struct InitialPublicLocation {
+    #[cfg(target_arch = "wasm32")]
+    pathname: String,
+    #[cfg(target_arch = "wasm32")]
+    search: String,
+    #[cfg(target_arch = "wasm32")]
+    had_query_marker: bool,
+    available: Rc<Cell<bool>>,
+}
+
+impl InitialPublicLocation {
+    #[cfg(target_arch = "wasm32")]
+    fn search_for(&self, pathname: &str) -> Option<String> {
+        (self.available.replace(false) && self.pathname == pathname && !self.search.is_empty())
+            .then(|| self.search.clone())
+    }
+
+    pub(crate) fn expire(&self) {
+        #[cfg(target_arch = "wasm32")]
+        self.remove_router_empty_query();
+        self.available.set(false);
+    }
+
+    /// Dioxus 0.7 会把带可选 query 的裸 `/login` 首次规范化成 `/login?`；旧 Router 保持
+    /// 原地址。这里只在原始 URL 没有 `?`、pathname/search 仍未变化时无历史记录地移除空标记。
+    #[cfg(target_arch = "wasm32")]
+    fn remove_router_empty_query(&self) {
+        if !self.search.is_empty() || self.had_query_marker {
+            return;
+        }
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let location = window.location();
+        if location.pathname().ok().as_deref() != Some(self.pathname.as_str())
+            || location.search().is_ok_and(|search| !search.is_empty())
+        {
+            return;
+        }
+        let Ok(href) = location.href() else {
+            return;
+        };
+        if !href.split('#').next().is_some_and(|url| url.ends_with('?')) {
+            return;
+        }
+        let hash = location.hash().unwrap_or_default();
+        let url = format!("{}{hash}", self.pathname);
+        if let Ok(history) = window.history() {
+            let state = history.state().unwrap_or(JsValue::NULL);
+            let _ = history.replace_state_with_url(&state, "", Some(&url));
+        }
+    }
+}
+
+/// 在 Dioxus Router 规范化未声明的 query 前保存首次 pathname 与 search。
+pub(crate) fn initial_public_location() -> InitialPublicLocation {
+    #[cfg(target_arch = "wasm32")]
+    let (pathname, search, had_query_marker) = web_sys::window()
+        .map(|window| {
+            let location = window.location();
+            let had_query_marker = location
+                .href()
+                .ok()
+                .and_then(|href| href.split('#').next().map(str::to_owned))
+                .is_some_and(|url| url.contains('?'));
+            (
+                location.pathname().unwrap_or_else(|_| "/".to_owned()),
+                location.search().unwrap_or_default(),
+                had_query_marker,
+            )
+        })
+        .unwrap_or_else(|| ("/".to_owned(), String::new(), false));
+
+    InitialPublicLocation {
+        #[cfg(target_arch = "wasm32")]
+        pathname,
+        #[cfg(target_arch = "wasm32")]
+        search,
+        #[cfg(target_arch = "wasm32")]
+        had_query_marker,
+        available: Rc::new(Cell::new(true)),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiveConnectionState {
-    Checking,
     Connecting,
-    Connected,
-    Anonymous,
-    Stopped,
-    Error,
+    Degraded,
+    Live,
+    Manual,
 }
 
 /// 公开拍卖看板的 URL 状态；筛选和分页必须能被刷新、分享和返回操作恢复。
@@ -28,9 +112,12 @@ pub(crate) struct PublicBoardQuery {
     pub(crate) history_seller: Option<String>,
     pub(crate) bid_log_lot: Option<String>,
     pub(crate) page: i64,
-    pub(crate) bid_log_page: i64,
+    /// 是否从迁移期间写出的 `bidlog_page` 别名恢复了竞价日志页码。
+    pub(crate) bid_log_page_alias: bool,
     pub(crate) bid_page: i64,
     pub(crate) proxy_page: i64,
+    /// 当前页面不拥有的 query 对必须原样保留，避免筛选或翻页时删除外部入口参数。
+    pub(crate) passthrough: Vec<(String, String)>,
 }
 
 pub(crate) type PreviewHistoryLoad =
@@ -52,9 +139,10 @@ impl Default for PublicBoardQuery {
             history_seller: None,
             bid_log_lot: None,
             page: 1,
-            bid_log_page: 1,
+            bid_log_page_alias: false,
             bid_page: 1,
             proxy_page: 1,
+            passthrough: Vec::new(),
         }
     }
 }
@@ -65,57 +153,23 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
         let Some(window) = web_sys::window() else {
             return PublicBoardQuery::default();
         };
-        let search = window.location().search().unwrap_or_default();
-        let raw = search.strip_prefix('?').unwrap_or_default();
-        let mut query = PublicBoardQuery::default();
-        for (key, value) in form_urlencoded::parse(raw.as_bytes()) {
-            match key.as_ref() {
-                "world" => query.world = normalize_world_query(&value),
-                "auction" => {
-                    query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string())
+        let pathname = window.location().pathname().unwrap_or_default();
+        let mut search = window.location().search().unwrap_or_default();
+        if search.is_empty()
+            && let Some(initial) = try_consume_context::<InitialPublicLocation>()
+            && let Some(initial_search) = initial.search_for(&pathname)
+        {
+            // Router 只拥有 pathname；恢复原 query 时沿用它建立的 history.state，避免破坏
+            // Dioxus 的滚动位置记录，也不额外增加浏览器历史条目。
+            if let Ok(history) = window.history() {
+                let state = history.state().unwrap_or(JsValue::NULL);
+                let url = format!("{pathname}{initial_search}");
+                if history.replace_state_with_url(&state, "", Some(&url)).is_ok() {
+                    search = initial_search;
                 }
-                "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
-                "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
-                "name" => query.history_name = normalize_optional_query(&value, 1024),
-                "from" => query.history_from = normalize_optional_query(&value, 10),
-                "to" => query.history_to = normalize_optional_query(&value, 10),
-                "min_price" => query.history_min_price = normalize_optional_query(&value, 32),
-                "max_price" => query.history_max_price = normalize_optional_query(&value, 32),
-                "buyer" => query.history_buyer = normalize_optional_query(&value, 256),
-                "seller" => query.history_seller = normalize_optional_query(&value, 256),
-                "lot" => query.bid_log_lot = normalize_optional_query(&value, 128),
-                "page" => {
-                    if let Ok(page) = value.parse::<i64>() {
-                        if page > 0 {
-                            query.page = page;
-                        }
-                    }
-                }
-                "bidlog_page" => {
-                    if let Ok(page) = value.parse::<i64>() {
-                        if page > 0 {
-                            query.bid_log_page = page;
-                        }
-                    }
-                }
-                "bid_page" => {
-                    if let Ok(page) = value.parse::<i64>() {
-                        if page > 0 {
-                            query.bid_page = page;
-                        }
-                    }
-                }
-                "proxy_page" => {
-                    if let Ok(page) = value.parse::<i64>() {
-                        if page > 0 {
-                            query.proxy_page = page;
-                        }
-                    }
-                }
-                _ => {}
             }
         }
-        return query;
+        parse_public_query(&pathname, &search)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -124,12 +178,79 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn read_browser_public_query() -> PublicBoardQuery {
+    let Some(window) = web_sys::window() else {
+        return PublicBoardQuery::default();
+    };
+    let pathname = window.location().pathname().unwrap_or_default();
+    let search = window.location().search().unwrap_or_default();
+    parse_public_query(&pathname, &search)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
+    let raw = search.strip_prefix('?').unwrap_or_default();
+    let mut query = PublicBoardQuery::default();
+    let mut canonical_page = None;
+    let mut legacy_bid_log_page = None;
+    for (key, value) in form_urlencoded::parse(raw.as_bytes()) {
+        match key.as_ref() {
+            "world" => query.world = normalize_world_query(&value),
+            "auction" => query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string()),
+            "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
+            "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
+            "name" => query.history_name = normalize_optional_query(&value, 1024),
+            "from" => query.history_from = normalize_optional_query(&value, 10),
+            "to" => query.history_to = normalize_optional_query(&value, 10),
+            "min_price" => query.history_min_price = normalize_optional_query(&value, 32),
+            "max_price" => query.history_max_price = normalize_optional_query(&value, 32),
+            "buyer" => query.history_buyer = normalize_optional_query(&value, 256),
+            "seller" => query.history_seller = normalize_optional_query(&value, 256),
+            "lot" => query.bid_log_lot = normalize_optional_query(&value, 128),
+            "page" => {
+                if let Ok(page) = value.parse::<i64>()
+                    && page > 0
+                {
+                    canonical_page = Some(page);
+                }
+            }
+            "bidlog_page" => {
+                if let Ok(page) = value.parse::<i64>()
+                    && page > 0
+                {
+                    legacy_bid_log_page = Some(page);
+                }
+            }
+            "bid_page" => {
+                if let Ok(page) = value.parse::<i64>()
+                    && page > 0
+                {
+                    query.bid_page = page;
+                }
+            }
+            "proxy_page" => {
+                if let Ok(page) = value.parse::<i64>()
+                    && page > 0
+                {
+                    query.proxy_page = page;
+                }
+            }
+            _ => query.passthrough.push((key.into_owned(), value.into_owned())),
+        }
+    }
+    query.page = canonical_page
+        .or_else(|| (pathname == "/bidlog").then_some(legacy_bid_log_page).flatten())
+        .unwrap_or(1);
+    query.bid_log_page_alias = pathname == "/bidlog" && legacy_bid_log_page.is_some();
+    query
+}
+
 pub(crate) fn normalize_world_query(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() || value.len() > 64 || value.chars().any(char::is_control) {
-        None
-    } else {
-        Some(value.to_owned())
+    match value.trim() {
+        "main" => Some("main".to_owned()),
+        "isekai" => Some("isekai".to_owned()),
+        _ => None,
     }
 }
 
@@ -184,14 +305,14 @@ pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {
     if query.page > 1 {
         serializer.append_pair("page", &query.page.to_string());
     }
-    if query.bid_log_page > 1 {
-        serializer.append_pair("bidlog_page", &query.bid_log_page.to_string());
-    }
     if query.bid_page > 1 {
         serializer.append_pair("bid_page", &query.bid_page.to_string());
     }
     if query.proxy_page > 1 {
         serializer.append_pair("proxy_page", &query.proxy_page.to_string());
+    }
+    for (key, value) in &query.passthrough {
+        serializer.append_pair(key, value);
     }
     let encoded = serializer.finish();
     if encoded.is_empty() { String::new() } else { format!("?{encoded}") }
@@ -207,11 +328,22 @@ pub(crate) fn set_public_query(query: &PublicBoardQuery, replace: bool) {
     };
     let pathname = window.location().pathname().unwrap_or_else(|_| "/".to_owned());
     let url = format!("{pathname}{}", public_query_string(query));
+    let state = browser_scroll_state(&window);
     if replace {
-        let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&url));
+        let _ = history.replace_state_with_url(&state, "", Some(&url));
     } else {
-        let _ = history.push_state_with_url(&JsValue::NULL, "", Some(&url));
+        // 与 Dioxus WebHistory 一致，先把离开的条目更新为当前滚动位置，再建立新条目。
+        let _ = history.replace_state_with_url(&state, "", None);
+        let _ = history.push_state_with_url(&state, "", Some(&url));
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_scroll_state(window: &web_sys::Window) -> js_sys::Array {
+    let state = js_sys::Array::new();
+    state.push(&JsValue::from_f64(window.scroll_x().unwrap_or_default()));
+    state.push(&JsValue::from_f64(window.scroll_y().unwrap_or_default()));
+    state
 }
 
 #[cfg(not(target_arch = "wasm32"))]

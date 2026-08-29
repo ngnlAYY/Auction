@@ -11,6 +11,9 @@ mod fulfillment;
 mod mooglemail;
 mod operations_alert;
 mod recovery;
+mod runtime;
+
+pub(super) use runtime::apply_runtime_document;
 
 pub use auction::WorkerConfig;
 pub use control::WorkerControlConfig;

@@ -33,12 +33,14 @@
   单次 POST、write_unknown 不确定性分类、发送成功页证明，以及 return/take 的动作前身份/资产
   fence 和动作后结构化证明；解析结果不携带原始 HTML，token 只在短生命周期状态对象中
   受控引用，Cookie 不进入返回值。`auction-application`
-  已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，使用
-  严格版本化 payload 执行静态通知、结算 send/return、return 和 take。return 必须在写入前核对
+  已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，严格解码
+  旧版 schema v1 payload 后执行静态通知、结算 send/return、return 和 take；装备 key 只在实际发送前
+  按装备 ID 从密文 owner 读取并解密，不进入 intent、payload、日志或回执。return 必须在写入前核对
   sender，写入后证明收件箱中精确 `mid` 消失；take 还必须精确核对装备 ID、Credits、COD 和
   附件计数，并以资产归零、邮件身份不变与唯一回执证明收口。结算 send 的 compose 成功页不会
   直接满足履约，还需要 Sent 明细与余额证据；POST 后
-  无法证明的结果进入 `manual_reconcile`，不会自动重发。
+  无法证明的结果进入 `manual_reconcile`，不会自动重发。`WinnerPaymentCarrierCod` 的结算
+  payload 按旧版契约固定使用 `main` world。
   send 前置要求 compose 页能够证明为无收件人/正文/附件/COD 的干净状态，否则以
   `preflight_unproven` 进入人工对账，不会覆盖可能属于上一次未知写入的资产。最终 send 响应只从
   排除 script/style/noscript/textarea 后的可见文字识别旧版闭集失败：

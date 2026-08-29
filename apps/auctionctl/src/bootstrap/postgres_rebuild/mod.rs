@@ -11,3 +11,4 @@ mod validation;
 
 pub(super) use execute::execute;
 pub(super) use model::{Mode, Options};
+pub(crate) use validation::{application_database_username, resolve_maintenance_database_url};

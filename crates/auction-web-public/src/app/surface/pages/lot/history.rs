@@ -11,7 +11,6 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                     tr {
                         th { {t!("bidlog-bidder")} }
                         th { class: "public-auction-lot__number", {t!("bidlog-amount")} }
-                        th { {t!("bidlog-mechanism")} }
                         th { {t!("bidlog-time")} }
                     }
                 }
@@ -26,19 +25,11 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                                 }
                             }
                             td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }
-                            td { "data-label": t!("bidlog-mechanism"), "{bid_mechanism_label(&bid.mechanism)}" }
                             td { "data-label": t!("bidlog-time"), time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" } }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-pub(crate) fn bid_mechanism_label(mechanism: &str) -> String {
-    match mechanism {
-        "proxy" => t!("bidlog-mechanism-proxy"),
-        _ => t!("bidlog-mechanism-ordinary"),
     }
 }

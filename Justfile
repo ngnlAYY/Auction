@@ -38,11 +38,34 @@ wasm-check:
 
 verify: fmt repository-policy-check layout-check config-example-check i18n-check check feature-check lint wasm-check
 
+# 构建包含前端资源的 PostgreSQL 完整档可部署制品。
+build: build-release
+
+# 构建不包含浏览器资源的 API-only 制品。
+build-api:
+    @bash ci/release.sh build-api
+
+# 构建只包含各自 surface 浏览器资源的发布制品；脚本会先重建两端优化 payload。
+build-release:
+    @bash ci/release.sh build-embedded
+
+# 核对 API-only、嵌入资源、依赖图和 Public/Admin 制品隔离。
+verify-artifacts:
+    @bash ci/release.sh verify-artifacts
+
+# 只装配并核验已构建的发布制品；正式发布要求干净工作树。
+package *args: verify-artifacts
+    @bash ci/release.sh package {{args}}
+
+# 完整执行两类构建、制品门禁和发布装配；不会运行测试。
+release-check *args: build-api build-release verify-artifacts
+    @bash ci/release.sh package {{args}}
+
 run-public:
-    cargo run -p auction-public-api
+    cargo run -p auction-public-api --features web-embed
 
 run-admin:
-    cargo run -p auction-admin-api
+    cargo run -p auction-admin-api --features web-embed
 
 run-worker:
     cargo run -p auction-worker
@@ -55,18 +78,15 @@ db-migrate:
 
 # 前端产物构建需要 dx CLI（cargo install dioxus-cli --locked）。
 # dx 会按需从 npm 注册表下载 esbuild 作为构建期工具；它不是运行时依赖，也不引入
-# Node 运行时或第二套前端构建链。这里使用 dx bundle 先构建再复制到稳定的嵌入目录，
-# 使 debug/release 后端都能读取同一份产物。auction-http 使用 allow_missing 内嵌产物，
-# 因此未执行这些命令时后端仍可编译，只是运行时静态资源返回 503。
+# Node 运行时或第二套前端构建链。发布构建使用专用 WASM 优化 profile，清理该 surface
+# 的 Dioxus 中间输出后复制到稳定嵌入目录，并生成绑定 payload 的制品标记。
 web-build: web-build-public web-build-admin
 
 web-build-public:
-    rm -rf target/dx/build/auction-web-public/web
-    dx bundle -p auction-web-public --platform web --out-dir target/dx/build/auction-web-public/web --locked
+    @bash ci/web-bundle.sh public
 
 web-build-admin:
-    rm -rf target/dx/build/auction-web-admin/web
-    dx bundle -p auction-web-admin --platform web --out-dir target/dx/build/auction-web-admin/web --locked
+    @bash ci/web-bundle.sh admin
 
 web-serve-public:
     dx serve -p auction-web-public --platform web

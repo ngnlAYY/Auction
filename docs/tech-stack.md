@@ -41,6 +41,8 @@ SQLx 0.9 的 [MSRV 说明](https://docs.rs/crate/sqlx/latest/source/CHANGELOG.md
 大量横切 middleware；Axum 的 `Router`/Tower 组合适合把这些能力放在适配器层，领域层
 不会被框架类型污染。连接装配直接使用 Axum 同版本依赖图中的 Hyper/`hyper-util`：仅用于配置
 5 秒 HTTP/1 请求头读取超时、HTTP/2 WebSocket CONNECT 和连接级优雅排空，不建立第二套路由器。
+`auction-http` 直接锁定 Axum 同依赖图的 Tungstenite 0.29，只用于类型化识别 WebSocket
+`MessageTooLong` 并恢复旧 v1 的 1009 close frame；它不创建第二个 WebSocket server/client owner。
 
 Public/Admin 的监听配置属于装配根，不进入领域或应用层：主配置的 `[listener]` 支持 TCP 和
 Linux Unix socket，Admin 的 runtime listener 可覆盖主配置 fallback。两种模式都经过
@@ -197,8 +199,8 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   浏览器端 crate 与后端 crate 分离，后端二进制不含 Dioxus、`wasm-bindgen` 或 `web-sys`。
 - 不额外直接依赖项目未使用的 `tower-http`、通用 Redis 连接池、ORM、
   GraphQL、进程内缓存或第二套前端工具链。确有用例后再按 owner 边界引入。
-- 前端静态产物使用 `rust-embed` 内嵌进二进制，得到单文件制品；`allow_missing` 保证未
-  构建前端时后端仍可编译，运行时以明确的 503 报告而不是 panic。
+- 前端静态产物使用 `rust-embed` 内嵌进二进制，得到单文件制品；显式 `web-embed` feature
+  区分内嵌与 API-only，`allow_missing` 保证两者都可编译，运行时以明确的 503 报告而不是 panic。
 - 保留 Axum、Dioxus、SQLx、reqwest、serde、tracing 等承担明确边界价值的基础库；不为
   单纯减少 crate 数量手写 HTTP、TLS、数据库协议、序列化或加密实现。
 
@@ -209,9 +211,11 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   `cargo clippy -D warnings`。
 - 后续测试恢复后：PostgreSQL 验证完整 repository 契约、行锁、隔离和并发竞价语义；
   SQLite 只验证 Lite 能力契约及文件数据库路径，不要求运行 PostgreSQL 专属用例。
-- 浏览器：行为验证恢复后再定端到端方案；生产产物由 `dx bundle --platform web` 生成并复制到
-  稳定目录，再由 `auction-http` 内嵌。
-- 发布：通过静态门禁后生成 Public/Admin/Worker/CLI 制品和 migration checksum。
+- 浏览器：行为验证恢复后再定端到端方案；生产产物由
+  `dx bundle --platform web --profile wasm-release` 生成并复制到稳定目录，绑定排序 payload 哈希后
+  再由对应装配根内嵌。
+- 发布：`ci/release.sh` 分开构建 API-only/embedded PostgreSQL 制品，核对实际二进制资源与依赖边界，
+  再生成白名单、mode、依赖摘要、Web 清单、双次确定性 archive 和内外 SHA-256。
 
 ## 已知未消除风险
 

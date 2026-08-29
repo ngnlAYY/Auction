@@ -25,12 +25,33 @@ impl AppConfig {
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
         let secrets = AppSecrets::from_file(secret_file)?;
 
-        let admin_runtime = if role == Role::Admin {
+        let runtime_document = if matches!(role, Role::Admin | Role::Worker) {
             runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?
         } else {
             None
         };
+        let admin_runtime =
+            (role == Role::Admin).then(|| runtime_document.as_ref().cloned()).flatten();
+        let mut worker = worker;
+        if role == Role::Worker
+            && let Some(runtime) = &runtime_document
+        {
+            apply_runtime_document(&mut worker.mooglemail, runtime);
+        }
         let listener = resolve_http_listener(role, listener, listen_address)?;
+        let fallback_listen_addr = listener
+            .as_ref()
+            .filter(|listener| listener.mode == HttpListenMode::Tcp)
+            .map(|listener| {
+                listener.address.parse().map_err(|source| ConfigError::InvalidAddress {
+                    field: "listener.address",
+                    value: listener.address.clone(),
+                    source,
+                })
+            })
+            .transpose()?;
+        let mut http_security = http_security.unwrap_or_else(|| HttpSecurityConfig::for_role(role));
+        let session = session.unwrap_or_else(|| SessionConfig::for_role(role));
 
         // Admin runtime 文件是 Admin 运行时策略的唯一生效源；否则 metrics 区块虽然能被
         // 解析并通过 runtime API 返回，进程装配却仍会读取主配置，形成“可写但不生效”的假配置。
@@ -85,7 +106,7 @@ impl AppConfig {
         validate_worker_control(&worker.control)?;
         validate_mooglemail_worker(&worker.mooglemail)?;
         validate_forum_worker(&worker.forum)?;
-        validate_operations_alert_worker(&worker.operations_alert)?;
+        validate_operations_alert_worker(&worker.operations_alert, &worker.mooglemail)?;
         validate_realtime(&realtime)?;
         let tracing_headers = match role {
             Role::Public => secrets.public_otlp_headers.as_ref(),
@@ -115,6 +136,7 @@ impl AppConfig {
             return Err(ConfigError::MissingEhentaiCredentials);
         }
         // 即使 Admin runtime 随后覆盖该区块，也拒绝主配置中无法解析的备用安全策略。
+        resolve_http_security_origins(&mut http_security, fallback_listen_addr)?;
         validate_http_security(&http_security)?;
         validate_session(&session)?;
         if role == Role::Worker && database_is_sqlite && worker_concurrency != 1 {
@@ -125,7 +147,7 @@ impl AppConfig {
             && admin_runtime.as_ref().is_some_and(|runtime| {
                 runtime.listener.mode == auction_application::AdminRuntimeListenMode::Unix
             });
-        let runtime_listen_address = admin_runtime
+        let runtime_listen_addr = admin_runtime
             .as_ref()
             .filter(|runtime| {
                 runtime.listener.mode == auction_application::AdminRuntimeListenMode::Tcp
@@ -135,20 +157,12 @@ impl AppConfig {
             .map_err(|error| ConfigError::InvalidRuntimeConfig {
                 path: runtime_config_path.clone().unwrap_or_default(),
                 reason: error.to_string(),
-            })?
-            .map(|address| address.to_string());
-        let listen_value = if admin_uses_unix {
-            None
-        } else {
-            runtime_listen_address.or_else(|| {
-                listener
-                    .as_ref()
-                    .filter(|listener| listener.mode == HttpListenMode::Tcp)
-                    .map(|listener| listener.address.clone())
-            })
-        };
-        let http_security =
+            })?;
+        let listen_addr =
+            if admin_uses_unix { None } else { runtime_listen_addr.or(fallback_listen_addr) };
+        let mut http_security =
             admin_runtime.as_ref().map(runtime_http_security).unwrap_or(http_security);
+        resolve_http_security_origins(&mut http_security, listen_addr)?;
         validate_http_security(&http_security)?;
         let public_uses_unix = role == Role::Public
             && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
@@ -157,16 +171,8 @@ impl AppConfig {
                 "trusted_unix_proxy 只能由 Public 或 Admin Unix listener 启用",
             ));
         }
+        validate_metrics_listener(role, metrics, admin_uses_unix || public_uses_unix, listen_addr)?;
         let session = admin_runtime.as_ref().map(runtime_session).unwrap_or(session);
-        let listen_addr = listen_value
-            .map(|value| {
-                value.parse().map_err(|source| ConfigError::InvalidAddress {
-                    field: "listen_address",
-                    value,
-                    source,
-                })
-            })
-            .transpose()?;
 
         Ok(Self {
             role,

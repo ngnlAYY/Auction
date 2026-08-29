@@ -9,7 +9,11 @@ use super::*;
 pub struct PersistentWorker<C> {
     pub schedule: Arc<dyn ScheduledRoundStore>,
     pub lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
+    pub slow_proxy_due: Option<Arc<dyn SlowProxyDueReader>>,
+    pub slow_proxy_commands: Option<Arc<dyn SlowProxyCommandPort>>,
     pub auction: AuctionWorkerRuntimeConfig,
+    /// 当前周 bootstrap 与 Mail 暂停/恢复所需的持久化调度配置。
+    pub schedule_runtime: Option<AuctionScheduleRuntimeConfig>,
     pub settlement_store: Option<Arc<dyn SettlementWorkStore>>,
     pub settlement_commands: Option<Arc<dyn SettlementCommandPort>>,
     pub fulfillment_store: Option<Arc<dyn SettlementFulfillmentStore>>,

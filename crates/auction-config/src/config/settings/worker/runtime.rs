@@ -1,0 +1,80 @@
+use auction_application::AdminRuntimeDocument;
+
+use super::mooglemail::{
+    MoogleMailEquipmentFilterConfig, MoogleMailNotificationTemplatesConfig, MoogleMailWorkerConfig,
+    MoogleMailWorldConfig,
+};
+
+/// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
+///
+/// transport endpoint、凭据来源、调度和全局 `enabled` 仍由 Worker 主配置拥有；共享 runtime
+/// 只决定旧版管理页实际可写的 world、发件人、装备过滤和通知模板。邮箱标识优先沿用主配置
+/// 中同 world 的值，避免一次运营更新意外切换 durable cursor。
+pub(in crate::config::settings) fn apply_runtime_document(
+    config: &mut MoogleMailWorkerConfig,
+    document: &AdminRuntimeDocument,
+) {
+    let (Some(worlds), Some(equipment_filter), Some(mail_templates)) = (
+        document.worlds.as_ref(),
+        document.equipment_filter.as_ref(),
+        document.mail_templates.as_ref(),
+    ) else {
+        return;
+    };
+
+    let existing_worlds = config.configured_worlds();
+    let mut enabled_worlds = Vec::with_capacity(2);
+    for (world_id, runtime) in [("main", &worlds.main), ("isekai", &worlds.isekai)] {
+        if !runtime.enabled {
+            continue;
+        }
+        let mailbox_key = existing_worlds
+            .iter()
+            .find(|world| world.world_id == world_id)
+            .map(|world| world.mailbox_key.clone())
+            .unwrap_or_else(|| format!("mooglemail:{world_id}"));
+        enabled_worlds.push(MoogleMailWorldConfig {
+            world_id: world_id.to_owned(),
+            mailbox_key,
+            sender_allowlist: runtime.sender_allowlist.clone(),
+            sender_allowlist_disabled: runtime.sender_allowlist_disabled,
+        });
+    }
+
+    // AdminRuntimeDocument::validate 已保证至少启用一个 world；这里仍失败关闭，避免未来调用者
+    // 绕过 loader 后把 Worker 留在含义不明的空 world 状态。
+    let Some(primary) = enabled_worlds.first().cloned() else {
+        return;
+    };
+    config.world_id = primary.world_id;
+    config.mailbox_key = primary.mailbox_key;
+    config.sender_allowlist = primary.sender_allowlist;
+    config.sender_allowlist_disabled = primary.sender_allowlist_disabled;
+    config.additional_worlds = enabled_worlds.into_iter().skip(1).collect();
+    config.equipment_filter = MoogleMailEquipmentFilterConfig {
+        enabled: equipment_filter.enabled,
+        qualities: equipment_filter.qualities.clone(),
+        prefixes: equipment_filter.prefixes.clone(),
+        suffixes: equipment_filter.suffixes.clone(),
+        categories: equipment_filter.categories.clone(),
+        equipment_types: equipment_filter.equipment_types.clone(),
+        level_min: equipment_filter.level.min,
+        level_max: equipment_filter.level.max,
+    };
+    config.mail_templates = MoogleMailNotificationTemplatesConfig {
+        auction_assets_rejected: mail_templates.auction_assets_rejected.clone(),
+        auction_no_attachments: mail_templates.auction_no_attachments.clone(),
+        auction_equipment_rejected: mail_templates.auction_equipment_rejected.clone(),
+        user_assets_rejected: mail_templates.user_assets_rejected.clone(),
+        register_key: mail_templates.register_key.clone(),
+        register_result: mail_templates.register_result.clone(),
+        rebind_result: mail_templates.rebind_result.clone(),
+        settlement_winner_equipment_cod: mail_templates.settlement_winner_equipment_cod.clone(),
+        settlement_payment_carrier: mail_templates.settlement_payment_carrier.clone(),
+        settlement_payment_reminder: mail_templates.settlement_payment_reminder.clone(),
+        settlement_equipment_handoff: mail_templates.settlement_equipment_handoff.clone(),
+        settlement_seller_payout: mail_templates.settlement_seller_payout.clone(),
+        settlement_buyer_refund: mail_templates.settlement_buyer_refund.clone(),
+        operations_alert: mail_templates.operations_alert.clone(),
+    };
+}

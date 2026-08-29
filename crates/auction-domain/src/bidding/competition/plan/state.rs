@@ -60,9 +60,12 @@ pub(super) fn finalize_plan(
             .and_then(|index| index.checked_add(1))
             .ok_or(DomainError::InvalidBidState("公开竞价事实序号溢出"))?;
         let previous = state.current_price.unwrap_or(state.start_price);
+        // 没有历史竞价时，起拍价就是允许写入的第一口；已有当前价后，只有代理内部
+        // 竞争产生的同价事实可以维持旧版顺序，普通竞价仍必须严格抬价。
         if draft.amount < previous
             || (draft.amount == previous
-                && !(draft.mechanism == BidMechanism::Proxy && state.current_price.is_some()))
+                && state.current_price.is_some()
+                && draft.mechanism != BidMechanism::Proxy)
         {
             return Err(DomainError::BidTooLow { minimum: previous });
         }

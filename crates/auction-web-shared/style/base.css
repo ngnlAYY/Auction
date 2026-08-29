@@ -165,8 +165,16 @@ button:disabled {
 }
 
 .language-picker__label {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .language-picker__select {
@@ -175,7 +183,7 @@ button:disabled {
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
-  font-size: var(--text-sm);
+  font-size: inherit;
 }
 
 .language-picker__select:hover,
@@ -269,25 +277,65 @@ button:disabled {
   block-size: auto;
 }
 
-.shared-truncated-text {
+.shared-truncated-text,
+.ui-truncated-text {
   display: inline-block;
-  max-inline-size: 100%;
+  inline-size: fit-content;
+  min-inline-size: 0;
+  max-inline-size: var(--truncated-text-max-inline-size);
   overflow: hidden;
   text-overflow: ellipsis;
-  vertical-align: bottom;
   white-space: nowrap;
 }
 
-.shared-truncated-text--compact {
-  inline-size: min(100%, 8rem);
+.shared-truncated-text {
+  vertical-align: bottom;
 }
 
-.shared-truncated-text--medium {
-  inline-size: min(100%, 14rem);
+.shared-truncated-text[data-truncated="true"],
+.ui-truncated-text[data-truncated="true"] {
+  cursor: help;
 }
 
-.shared-truncated-text--wide {
-  inline-size: min(100%, 24rem);
+.shared-truncated-text--compact,
+.ui-truncated-text--compact {
+  --truncated-text-max-inline-size: 10rem;
+}
+
+.shared-truncated-text--medium,
+.ui-truncated-text--medium {
+  --truncated-text-max-inline-size: 16rem;
+}
+
+.shared-truncated-text--wide,
+.ui-truncated-text--wide {
+  --truncated-text-max-inline-size: 24rem;
+}
+
+.shared-truncated-text__tooltip,
+.ui-truncated-text__tooltip {
+  position: fixed;
+  inset-block-start: var(--truncated-text-tooltip-top);
+  inset-inline-start: var(--truncated-text-tooltip-left);
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  inline-size: var(--truncated-text-tooltip-width);
+  max-block-size: min(60vh, 30rem, var(--truncated-text-tooltip-max-height));
+  padding: var(--space-2);
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-surface);
+  overflow-wrap: anywhere;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.shared-truncated-text__tooltip[data-placement="above"],
+.ui-truncated-text__tooltip[data-placement="above"] {
+  transform: translateY(-100%);
 }
 
 @media (max-width: 60rem) {

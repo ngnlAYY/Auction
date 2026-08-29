@@ -31,7 +31,9 @@ pub(super) async fn claim_due_postgres(
     .map_err(|_| storage_error("初始化论坛同步投影失败"))?;
 
     let rows = sqlx::query(
-        "SELECT sync.auction_id, auction.state_version
+        "SELECT sync.auction_id, auction.state_version,
+                CASE WHEN sync.status = 'publishing' THEN 'write_unknown'
+                     ELSE sync.last_error_code END AS previous_failure_code
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE auction.status IN ('preview', 'live', 'final', 'settling', 'settled', 'cancelled')
@@ -39,7 +41,7 @@ pub(super) async fn claim_due_postgres(
                (sync.status IN ('pending', 'failed')
                 AND (sync.last_error_code IS NULL OR sync.last_error_code NOT IN (
                     'invalid_snapshot', 'body_too_large', 'configuration',
-                    'credential_unavailable', 'protocol_drift', 'write_unknown'
+                    'credential_unavailable', 'protocol_drift', 'write_authorization_required'
                 ))
                 AND sync.next_attempt_at <= $1)
                OR (sync.status = 'published' AND sync.source_revision < auction.state_version)
@@ -62,6 +64,9 @@ pub(super) async fn claim_due_postgres(
             row.try_get("auction_id").map_err(|_| storage_error("读取论坛同步拍卖标识失败"))?;
         let source_revision: i64 =
             row.try_get("state_version").map_err(|_| storage_error("读取论坛同步源版本失败"))?;
+        let previous_failure_code: Option<String> = row
+            .try_get("previous_failure_code")
+            .map_err(|_| storage_error("读取论坛同步前序失败码失败"))?;
         if source_revision <= 0 {
             return Err(storage_error("论坛同步源版本无效"));
         }
@@ -108,6 +113,7 @@ pub(super) async fn claim_due_postgres(
             claimed_at: now,
             lease_until,
             source_revision,
+            previous_failure_code,
         });
     }
     transaction.commit().await.map_err(|_| storage_error("提交论坛同步领取事务失败"))?;

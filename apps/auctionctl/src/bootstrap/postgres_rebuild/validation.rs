@@ -81,7 +81,7 @@ pub(super) fn load_authorization<'a>(options: &Options<'a>) -> anyhow::Result<Au
     }
 }
 
-pub(super) fn resolve_maintenance_database_url(
+pub(crate) fn resolve_maintenance_database_url(
     application_database_url: &str,
     configured_maintenance_database_url: Option<&str>,
     confirmed_database_name: &str,
@@ -112,6 +112,20 @@ pub(super) fn resolve_maintenance_database_url(
         }
     };
     Ok(maintenance.into())
+}
+
+pub(crate) fn application_database_username(
+    application_database_url: &str,
+    confirmed_database_name: &str,
+) -> anyhow::Result<String> {
+    let application = parse_secure_postgres_url(
+        application_database_url,
+        confirmed_database_name,
+        "application database_url",
+    )?;
+    let username = decode_uri_component(application.username())?;
+    require_pg_value(&username, "application role", 63)?;
+    Ok(username)
 }
 
 fn parse_secure_postgres_url(

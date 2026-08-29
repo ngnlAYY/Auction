@@ -4,8 +4,6 @@ use auction_application::{
     ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
     PublicPriceHistoryListRequest, PublicPriceHistoryStats, RepositoryError,
 };
-#[cfg(feature = "sqlite")]
-use chrono::NaiveDateTime;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -91,37 +89,6 @@ pub(crate) fn validate_stats(
         return Err(storage_error("公开价格历史统计无效"));
     }
     Ok(stats)
-}
-
-#[cfg(feature = "sqlite")]
-pub(crate) fn uuid_blob(id: Uuid) -> Vec<u8> {
-    id.as_bytes().to_vec()
-}
-
-#[cfg(feature = "sqlite")]
-pub(crate) fn uuid_from_blob(bytes: Vec<u8>, label: &str) -> Result<Uuid, ApplicationError> {
-    Uuid::from_slice(&bytes).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(crate) fn sqlite_timestamp(value: DateTime<Utc>) -> String {
-    value.to_rfc3339()
-}
-
-#[cfg(feature = "sqlite")]
-pub(crate) fn parse_timestamp(
-    value: String,
-    label: &str,
-) -> Result<DateTime<Utc>, ApplicationError> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(&value) {
-        return Ok(value.with_timezone(&Utc));
-    }
-    for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
-        if let Ok(value) = NaiveDateTime::parse_from_str(&value, format) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc));
-        }
-    }
-    Err(storage_error(label))
 }
 
 pub(crate) fn storage_error(message: &str) -> ApplicationError {

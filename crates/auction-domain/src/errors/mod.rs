@@ -37,11 +37,29 @@ pub enum DomainError {
     #[error("invalid lot bidding state: {0}")]
     InvalidBidState(&'static str),
 
+    #[error("bidder is already leading the lot")]
+    AlreadyLeading,
+
+    #[error("bidder already owns the active proxy authorization")]
+    ActiveProxyExists,
+
     #[error("invalid proxy transition from {from:?} to {to:?}")]
     InvalidProxyTransition { from: ProxyStatus, to: ProxyStatus },
 
     #[error("proxy maximum must be lowered while it is active")]
     InvalidProxyMaximum,
+
+    #[error("proxy authorization is not active")]
+    ProxyAuthorizationNotActive,
+
+    #[error("proxy maximum was not strictly lowered")]
+    ProxyMaximumNotLower,
+
+    #[error("proxy maximum is below the binding amount")]
+    ProxyMaximumBelowBinding,
+
+    #[error("proxy re-entry maximum was not raised")]
+    ProxyReentryMaximumNotHigher,
 
     #[error("proxy bidding is disabled for this auction")]
     ProxyDisabled,

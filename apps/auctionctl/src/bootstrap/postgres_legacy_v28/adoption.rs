@@ -128,12 +128,16 @@ pub(in crate::bootstrap) async fn adopt(
         final_sqlx_version: adoption.final_sqlx_version,
         audit_id: adoption.audit_id,
     };
-    let receipt_bytes = serde_json::to_vec_pretty(&receipt_payload)
-        .context("encode legacy v28 adoption receipt")?;
+    let receipt_bytes = serde_json::to_vec_pretty(&receipt_payload).context(
+        "legacy v28 adoption committed but encoding receipt failed; keep all roles stopped",
+    )?;
     receipt
         .take()
         .ok_or_else(|| anyhow::anyhow!("reserved adoption receipt disappeared"))?
-        .publish(&receipt_bytes)?;
+        .publish(&receipt_bytes)
+        .context(
+            "legacy v28 adoption committed but publishing receipt failed; keep all roles stopped",
+        )?;
 
     println!(
         "postgres-adopt-legacy-v28 completed database={} legacy_version={} final_sqlx_version={} audit_id={} receipt={}",

@@ -8,6 +8,7 @@ mod guard;
 mod model;
 mod sql;
 
+pub(crate) use guard::DATABASE_ADVISORY_LOCK_PREFIX;
 pub use guard::PostgresDatabaseRebuildGuard;
 pub use model::{
     POSTGRES_REBUILD_PREFLIGHT_FORMAT, PostgresRebuildError, PostgresRebuildPreflight,

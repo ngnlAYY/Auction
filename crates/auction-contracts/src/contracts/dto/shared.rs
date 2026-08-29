@@ -16,6 +16,11 @@ impl<T> ApiResponse<T> {
         Self { code: "ok".to_owned(), message: message.into(), data }
     }
 
+    /// 构造旧 v1 创建成功响应；HTTP 201 与业务 `code=created` 必须同时保持。
+    pub fn created(message: impl Into<String>, data: T) -> Self {
+        Self { code: "created".to_owned(), message: message.into(), data }
+    }
+
     /// 构造表示异步命令已接受的响应；它不表示外部副作用已经完成。
     pub fn accepted(message: impl Into<String>, data: T) -> Self {
         Self { code: "accepted".to_owned(), message: message.into(), data }
@@ -67,7 +72,6 @@ pub struct HealthReadyData {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeEventResponse {
     pub event_id: String,
-    pub stream_key: String,
     pub stream_sequence: i64,
     pub kind: String,
     pub schema_version: i32,
@@ -78,6 +82,20 @@ pub struct PublicRealtimeEventResponse {
 /// Public 事件回放响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeResponse {
+    pub auction_id: String,
+    pub events: Vec<PublicRealtimeEventResponse>,
+    pub next_after: i64,
+    pub has_more: bool,
+    pub refetch_required: bool,
+}
+
+/// Public 拍卖发现流回放响应。
+///
+/// 旧版每拍卖回放合同只接受 `auction_id`；新版需要的发现读取以显式 `scope=auctions`
+/// 扩展提供，避免把省略 `auction_id` 偷换成另一个 v1 语义。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct PublicRealtimeDiscoveryResponse {
+    pub scope: String,
     pub events: Vec<PublicRealtimeEventResponse>,
     pub next_after: i64,
     pub has_more: bool,
@@ -88,8 +106,8 @@ pub struct PublicRealtimeResponse {
 pub struct ApiErrorResponse {
     pub code: String,
     pub message: String,
-    /// 可选的安全业务数据；只有明确冻结的错误契约可以填充。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// 可选的安全业务数据；`None` 仍固定序列化为旧契约要求的 `data: null`。
+    #[serde(default)]
     pub data: Option<Value>,
     pub request_id: Option<String>,
 }

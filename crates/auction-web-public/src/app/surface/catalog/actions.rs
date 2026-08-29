@@ -11,17 +11,23 @@ pub(crate) fn LiveCatalogActions(
     next_bid: i64,
     lot_status: String,
     allow_slow: bool,
+    session_ready: bool,
+    block_ordinary_for_active_proxy: bool,
     authenticated: bool,
     leading: bool,
     show_view: bool,
     show_proxy_summary: bool,
 ) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
+    let mut action = use_signal(|| None::<String>);
     let requested_lot_id = lot_id.clone();
     let proxy_state = use_resource(move || {
         let _ = refresh_generation();
+        let should_load_proxy = show_proxy_summary || action() == Some("proxy".to_owned());
         let lot_id = requested_lot_id.clone();
-        async move { if authenticated { fetch_my_proxy(lot_id).await } else { Ok(None) } }
+        async move {
+            if authenticated && should_load_proxy { fetch_my_proxy(lot_id).await } else { Ok(None) }
+        }
     });
     let proxy_snapshot = proxy_state.read_unchecked().clone();
     let active_proxy = match proxy_snapshot.as_ref() {
@@ -31,7 +37,8 @@ pub(crate) fn LiveCatalogActions(
     let proxy_leading =
         active_proxy.and_then(|proxy| proxy.bid.as_ref()).is_some_and(|bid| bid.leading);
     let effective_leading = leading || proxy_leading;
-    let ordinary_blocked = effective_leading || active_proxy.is_some();
+    let ordinary_blocked =
+        effective_leading || (block_ordinary_for_active_proxy && active_proxy.is_some());
     let proxy_action_enabled =
         active_proxy.map_or(!effective_leading, |proxy| proxy.capabilities.can_lower);
     let action_reason = if !can_bid {
@@ -46,7 +53,6 @@ pub(crate) fn LiveCatalogActions(
         String::new()
     };
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
-    let mut action = use_signal(|| None::<String>);
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
     let action_name = action();
     let bid_lot_id = lot_id.clone();
@@ -59,7 +65,7 @@ pub(crate) fn LiveCatalogActions(
     rsx! {
         span { class: "public-auction-catalog__actions-list",
             if show_view {
-                a { href: lot_detail_href(&lot_id), {t!("catalog-view")} }
+                Link { to: lot_detail_href(&lot_id), {t!("catalog-view")} }
             }
             if authenticated && (can_bid || show_proxy_summary) {
                 button {
@@ -96,14 +102,14 @@ pub(crate) fn LiveCatalogActions(
                             Some("proxy".to_owned())
                         });
                     },
-                    if active_proxy.is_some() {
+                    if show_proxy_summary && active_proxy.is_some() {
                         {t!("catalog-lower-proxy")}
                     } else {
                         {t!("catalog-proxy")}
                     }
                 }
-            } else if can_bid {
-                Link { to: Route::Login {}, {t!("login-submit")} }
+            } else if can_bid && session_ready {
+                Link { to: login_href_for_current_location(), {t!("catalog-login-to-bid")} }
             } else if show_proxy_summary {
                 button {
                     r#type: "button",

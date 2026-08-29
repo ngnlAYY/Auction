@@ -59,10 +59,10 @@ trusted_unix_proxy = false
 
 # 可选区块：会话过期和并发策略；存在 runtime 文件时由 runtime.session 覆盖。
 [session]
-# 可选：空闲过期秒数，默认 1800。
-idle_ttl_seconds = 1800
-# 可选：绝对过期秒数，默认 604800，不能小于空闲过期时间。
-absolute_ttl_seconds = 604800
+# 可选：空闲过期秒数，默认沿用旧版 Admin 的 900。
+idle_ttl_seconds = 900
+# 可选：绝对过期秒数，默认沿用旧版 Admin 的 28800，不能小于空闲过期时间。
+absolute_ttl_seconds = 28800
 # 可选：单个公开用户允许的最大并发会话数，默认 5。
 max_public_sessions = 5
 

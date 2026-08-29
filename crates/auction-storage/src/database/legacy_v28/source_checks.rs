@@ -52,12 +52,12 @@ pub(super) async fn critical_source_shape_issues(
          ), missing_column AS (
              SELECT expected_column.column_name
              FROM expected_column
-             LEFT JOIN information_schema.columns AS column
-               ON column.table_schema = 'public'
-              AND column.table_name = expected_column.table_name
-              AND column.column_name = expected_column.column_name
-              AND column.udt_name = expected_column.udt_name
-             WHERE column.column_name IS NULL
+             LEFT JOIN information_schema.columns AS actual_column
+               ON actual_column.table_schema = 'public'
+              AND actual_column.table_name = expected_column.table_name
+              AND actual_column.column_name = expected_column.column_name
+              AND actual_column.udt_name = expected_column.udt_name
+             WHERE actual_column.column_name IS NULL
          ), expected_constraint(table_name, constraint_name) AS (
              VALUES ('lots', 'lots_bidding_projection_v25_check')
          ), missing_constraint AS (
@@ -65,14 +65,14 @@ pub(super) async fn critical_source_shape_issues(
              FROM expected_constraint
              WHERE NOT EXISTS (
                  SELECT 1
-                 FROM pg_catalog.pg_constraint AS constraint
-                 JOIN pg_catalog.pg_class AS class
-                   ON class.oid = constraint.conrelid
-                 JOIN pg_catalog.pg_namespace AS namespace
-                   ON namespace.oid = class.relnamespace
-                 WHERE namespace.nspname = 'public'
-                   AND class.relname = expected_constraint.table_name
-                   AND constraint.conname = expected_constraint.constraint_name
+                 FROM pg_catalog.pg_constraint AS actual_constraint
+                 JOIN pg_catalog.pg_class AS actual_class
+                   ON actual_class.oid = actual_constraint.conrelid
+                 JOIN pg_catalog.pg_namespace AS actual_namespace
+                   ON actual_namespace.oid = actual_class.relnamespace
+                 WHERE actual_namespace.nspname = 'public'
+                   AND actual_class.relname = expected_constraint.table_name
+                   AND actual_constraint.conname = expected_constraint.constraint_name
              )
          ), expected_index(index_name) AS (
              VALUES
@@ -92,15 +92,16 @@ pub(super) async fn critical_source_shape_issues(
              FROM expected_trigger
              WHERE NOT EXISTS (
                  SELECT 1
-                 FROM pg_catalog.pg_trigger AS trigger
-                 JOIN pg_catalog.pg_class AS class ON class.oid = trigger.tgrelid
-                 JOIN pg_catalog.pg_namespace AS namespace
-                   ON namespace.oid = class.relnamespace
-                 WHERE namespace.nspname = 'public'
-                   AND class.relname = expected_trigger.table_name
-                   AND trigger.tgname = expected_trigger.trigger_name
-                   AND NOT trigger.tgisinternal
-                   AND trigger.tgenabled = 'O'
+                 FROM pg_catalog.pg_trigger AS actual_trigger
+                 JOIN pg_catalog.pg_class AS actual_class
+                   ON actual_class.oid = actual_trigger.tgrelid
+                 JOIN pg_catalog.pg_namespace AS actual_namespace
+                   ON actual_namespace.oid = actual_class.relnamespace
+                 WHERE actual_namespace.nspname = 'public'
+                   AND actual_class.relname = expected_trigger.table_name
+                   AND actual_trigger.tgname = expected_trigger.trigger_name
+                   AND NOT actual_trigger.tgisinternal
+                   AND actual_trigger.tgenabled = 'O'
              )
          )
          SELECT (

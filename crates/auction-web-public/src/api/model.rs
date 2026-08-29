@@ -47,7 +47,8 @@ impl LotEnvelopeRows for LotEnvelope {
                     lot_id: lot.id.clone(),
                     code: lot.code.clone(),
                     name: lot.equipment_name.clone(),
-                    category: lot.equipment_category.clone(),
+                    // 缺失分类沿用旧版归入 Other，但不把缺失重新编码成 wire 空字符串。
+                    category: lot.equipment_category.clone().unwrap_or_else(|| "other".to_owned()),
                     status: lot.status.clone(),
                     seller_name: lot.seller_name.clone(),
                     level: lot.equipment_level,

@@ -13,8 +13,8 @@ pub(crate) fn History() -> Element {
 }
 
 #[component]
-pub(crate) fn Login() -> Element {
-    session::login()
+pub(crate) fn Login(return_to: Option<String>) -> Element {
+    session::login(return_to)
 }
 
 #[component]

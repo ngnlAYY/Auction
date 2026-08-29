@@ -8,8 +8,10 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     command: RecoveryConfirmationCommand,
 ) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
+    // 旧版在 Serializable runner 外生成事件 ID；同一次请求的三次事务尝试必须复用它。
+    let preview_event_id = Uuid::new_v4();
     for attempt in 0..3_u8 {
-        match confirm_postgres_once(pool, command.clone()).await {
+        match confirm_postgres_once(pool, command.clone(), preview_event_id).await {
             Err(RecoveryCommandError::SerializationConflict) if attempt < 2 => continue,
             result => return result,
         }
@@ -21,6 +23,7 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres(
 pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     pool: &crate::database::TrackedPool<Postgres>,
     command: RecoveryConfirmationCommand,
+    preview_event_id: Uuid,
 ) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
     let mut transaction = pool.begin().await.map_err(map_sql_error)?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
@@ -69,9 +72,16 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
         activate_buyer_refund(&mut transaction, &recovery, now).await?;
     }
 
-    let relist =
-        relist_recovery(&mut transaction, &recovery, &lot, command.command_id, command.action, now)
-            .await?;
+    let relist = relist_recovery(
+        &mut transaction,
+        &recovery,
+        &lot,
+        command.command_id,
+        preview_event_id,
+        command.action,
+        now,
+    )
+    .await?;
 
     let next_state_version = recovery
         .state_version
@@ -94,9 +104,41 @@ pub(in crate::database::recovery_commands) async fn confirm_postgres_once(
     };
     result.validate()?;
 
-    insert_recovery_command(&mut transaction, &command, &result, now).await?;
+    if let Err(error) = insert_recovery_command(&mut transaction, &command, &result, now).await {
+        if matches!(error, RecoveryCommandError::CommandConflict) {
+            // PostgreSQL 在唯一冲突后会将当前事务置为 failed；必须先显式回滚，
+            // 才能用新事务观察竞争者已经提交的命令账本结果。
+            transaction.rollback().await.map_err(map_sql_error)?;
+            return replay_after_command_conflict(pool, &command).await;
+        }
+        return Err(error);
+    }
     insert_recovery_audit(&mut transaction, &command, &recovery, selected_action, &result).await?;
 
     transaction.commit().await.map_err(map_sql_error)?;
     Ok(result)
+}
+
+#[cfg(feature = "postgres")]
+async fn replay_after_command_conflict(
+    pool: &crate::database::TrackedPool<Postgres>,
+    command: &RecoveryConfirmationCommand,
+) -> Result<RecoveryConfirmationResult, RecoveryCommandError> {
+    let mut replay_transaction = pool.begin().await.map_err(map_sql_error)?;
+    let replay = load_replayed_command(&mut replay_transaction, command).await;
+    match replay {
+        Ok(Some(result)) => {
+            replay_transaction.commit().await.map_err(map_sql_error)?;
+            Ok(result)
+        }
+        Ok(None) => {
+            // 主键冲突却找不到已提交 ledger 是持久化事实不完整，失败关闭。
+            replay_transaction.rollback().await.map_err(map_sql_error)?;
+            Err(RecoveryCommandError::InvalidStoredResult)
+        }
+        Err(error) => {
+            replay_transaction.rollback().await.map_err(map_sql_error)?;
+            Err(error)
+        }
+    }
 }

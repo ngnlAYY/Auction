@@ -1,13 +1,71 @@
 //! 代理授权及其慢速、最终阶段生命周期规划。
 
-use crate::{
-    AuctionRules, BidMechanism, DomainError, LotBidState, ProxyAuthorization, ProxyMode,
-    ProxyStatus, ProxyTerminalReason,
-};
-
 use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
 use super::state::{BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan};
+use crate::{
+    AuctionRules, AuctionStatus, BidAmount, BidMechanism, DomainError, LotBidState,
+    ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason, UserId,
+};
+
+pub(super) fn validate_create_proxy_policy(
+    rules: AuctionRules,
+    auction_status: AuctionStatus,
+    mode: ProxyMode,
+) -> Result<(), DomainError> {
+    if !rules.proxy_enabled {
+        return Err(DomainError::ProxyDisabled);
+    }
+    if mode == ProxyMode::Slow && auction_status == AuctionStatus::Final {
+        return Err(DomainError::ProxySlowFinal);
+    }
+    Ok(())
+}
+
+pub(super) fn validate_create_proxy_history(
+    rules: AuctionRules,
+    usage_number: u64,
+    previous_maximum: Option<BidAmount>,
+    previous_status: Option<ProxyStatus>,
+    maximum_amount: BidAmount,
+) -> Result<(), DomainError> {
+    if rules.proxy_max_outbid_uses > 0 && usage_number > u64::from(rules.proxy_max_outbid_uses) {
+        return Err(DomainError::ProxyOutbidLimit);
+    }
+    if usage_number == 1 && (previous_maximum.is_some() || previous_status.is_some())
+        || usage_number > 1 && (previous_maximum.is_none() || previous_status.is_none())
+    {
+        return Err(DomainError::InvalidBidState("代理重入上下文与使用次数不一致"));
+    }
+    match previous_status {
+        Some(ProxyStatus::Active | ProxyStatus::FinalFast) => {
+            return Err(DomainError::ActiveProxyExists);
+        }
+        Some(ProxyStatus::Closed) => return Err(DomainError::AuctionClosed),
+        Some(ProxyStatus::Exhausted | ProxyStatus::Frozen) | None => {}
+    }
+    if previous_maximum.is_some_and(|previous| maximum_amount <= previous) {
+        return Err(DomainError::ProxyReentryMaximumNotHigher);
+    }
+    Ok(())
+}
+
+pub(super) fn validate_lower_proxy_target(
+    active: Option<ProxyAuthorization>,
+    actor_id: UserId,
+    authorization_id: ProxyAuthorizationId,
+) -> Result<ProxyAuthorization, DomainError> {
+    let Some(active) = active else {
+        return Err(DomainError::ProxyAuthorizationNotActive);
+    };
+    if actor_id != active.user_id
+        || authorization_id != active.id
+        || !matches!(active.status, ProxyStatus::Active | ProxyStatus::FinalFast)
+    {
+        return Err(DomainError::ProxyAuthorizationNotActive);
+    }
+    Ok(active)
+}
 
 pub(super) fn plan_create_proxy(
     rules: AuctionRules,
@@ -21,38 +79,36 @@ pub(super) fn plan_create_proxy(
         authorization_id,
         maximum_amount,
         mode,
+        auction_status,
         authorization_sequence,
         usage_number,
+        previous_maximum,
+        previous_status,
         bid_ids,
         now,
     } = trigger
     else {
         unreachable!("竞价触发器种类已在外层匹配");
     };
-    if !rules.proxy_enabled {
-        return Err(DomainError::ProxyDisabled);
-    }
-    if rules.proxy_max_outbid_uses > 0 && usage_number > u64::from(rules.proxy_max_outbid_uses) {
-        return Err(DomainError::ProxyOutbidLimit);
-    }
-    if mode == ProxyMode::Slow {
-        let final_phase_start = state
-            .effective_end_at
-            .checked_sub_signed(rules.final_phase_lead)
-            .ok_or(DomainError::InvalidSchedule("最终阶段窗口超出时间范围"))?;
-        if now >= final_phase_start {
-            return Err(DomainError::ProxySlowFinal);
-        }
-    }
+    validate_create_proxy_policy(rules, auction_status, mode)?;
     let expected_sequence =
         state.last_proxy_sequence.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
-    if actor_id.is_nil()
-        || authorization_id.is_nil()
-        || authorization_sequence != expected_sequence
-        || state.leader_id == Some(actor_id)
-        || active.as_ref().is_some_and(|proxy| proxy.user_id == actor_id)
+    if actor_id.is_nil() || authorization_id.is_nil() || authorization_sequence != expected_sequence
     {
         return Err(DomainError::InvalidBidState("代理授权输入与 lot 状态不一致"));
+    }
+    validate_create_proxy_history(
+        rules,
+        usage_number,
+        previous_maximum,
+        previous_status,
+        maximum_amount,
+    )?;
+    if state.leader_id == Some(actor_id) {
+        return Err(DomainError::AlreadyLeading);
+    }
+    if active.as_ref().is_some_and(|proxy| proxy.user_id == actor_id) {
+        return Err(DomainError::ActiveProxyExists);
     }
 
     let minimum = rules.next_minimum_bid(
@@ -147,11 +203,9 @@ pub(super) fn plan_lower_proxy(
     else {
         unreachable!("竞价触发器种类已在外层匹配");
     };
-    let Some(active) = active else {
-        return Err(DomainError::InvalidProxyMaximum);
-    };
-    if actor_id != active.user_id || authorization_id != active.id {
-        return Err(DomainError::InvalidProxyMaximum);
+    let active = validate_lower_proxy_target(active, actor_id, authorization_id)?;
+    if new_maximum >= active.maximum_amount {
+        return Err(DomainError::ProxyMaximumNotLower);
     }
     let binding = if state.slow_authorization_id.is_some() {
         rules.next_minimum_bid(
@@ -164,7 +218,7 @@ pub(super) fn plan_lower_proxy(
         state.current_price.unwrap_or(state.start_price)
     };
     if new_maximum < binding {
-        return Err(DomainError::InvalidProxyMaximum);
+        return Err(DomainError::ProxyMaximumBelowBinding);
     }
     let mut after = active;
     let transition = after.lower(command_id, new_maximum)?;

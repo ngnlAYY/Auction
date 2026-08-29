@@ -2,21 +2,40 @@
 
 use std::net::SocketAddr;
 
-use auction_application::{PublicRealtimePage, PublicRealtimeReader, PublicRealtimeRequest};
+use auction_application::PublicRealtimeAuctionStatus;
 use axum::{
     extract::{
         ConnectInfo, State, WebSocketUpgrade,
-        ws::{Message, WebSocket},
+        ws::{CloseFrame, Message, WebSocket},
     },
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use tokio::time::{Duration, interval};
-use uuid::Uuid;
+use tokio::{
+    sync::{OwnedSemaphorePermit, watch},
+    time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
+};
 
 use super::super::realtime_hub::RealtimeSubscription;
-use super::super::{PublicApiState, api_error, not_found_error, parse_positive_i64, parse_query};
-use super::mapping::{map_page, valid_page};
+use super::super::{PublicApiState, api_error, not_found_error, parse_query};
+use super::mapping::map_event;
+use super::target::{RealtimeTarget, parse_websocket_target};
+
+const MAX_MESSAGE_BYTES: usize = 4 << 10;
+const WRITE_WAIT: Duration = Duration::from_secs(5);
+const PONG_WAIT: Duration = Duration::from_secs(60);
+const PING_PERIOD: Duration = Duration::from_secs(50);
+
+const CLOSE_GOING_AWAY: u16 = 1001;
+const CLOSE_PROTOCOL_ERROR: u16 = 1002;
+const CLOSE_POLICY_VIOLATION: u16 = 1008;
+const CLOSE_MESSAGE_TOO_BIG: u16 = 1009;
+const CLOSE_TRY_AGAIN_LATER: u16 = 1013;
+
+const REASON_SHUTDOWN: &str = "服务正在关闭";
+const REASON_PROTOCOL_ERROR: &str = "实时事件合同错误";
+const REASON_CLIENT_DATA: &str = "实时连接只允许服务端推送";
+const REASON_SLOW_CONSUMER: &str = "连接消费速度过慢";
 
 /// 建立只读 WebSocket；连接范围必须明确为单一拍卖流或公开发现流。
 pub(crate) async fn websocket(
@@ -26,88 +45,65 @@ pub(crate) async fn websocket(
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if let Some(response) = super::super::session_guard(&state, &headers, address, true, false) {
+    // 连接尝试限流是新版保留的附加安全门禁；通过后恢复旧版 origin→query→session 顺序。
+    if let Some(response) = super::super::realtime_connection_guard(&state, &headers, address) {
         return response;
     }
-    if let Err(response) = super::super::authenticated_public_identity(&state, &headers).await {
-        return *response;
-    }
-    let query = match parse_query(&uri, &["auction_id", "scope", "after", "page_size"]) {
+    let query = match parse_query(&uri, &["auction_id", "scope"]) {
         Ok(query) => query,
         Err(_) => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
                 .into_response();
         }
     };
-    let auction_id = match query.get("auction_id") {
-        Some(value) => match Uuid::parse_str(value) {
-            Ok(value) if !value.is_nil() => Some(value),
-            _ => {
-                return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
-                    .into_response();
-            }
-        },
-        None => None,
-    };
-    let scope = query.get("scope").map(String::as_str);
-    if (auction_id.is_some() && scope.is_some())
-        || (auction_id.is_none() && scope != Some("auctions"))
-    {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_scope", "WebSocket 范围无效")
-            .into_response();
-    }
-    let after = match query.get("after") {
-        Some(value) => match value.parse::<i64>() {
-            Ok(value) if value >= 0 => value,
-            _ => {
-                return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
-                    .into_response();
-            }
-        },
-        None => 0,
-    };
-    let page_size = match parse_positive_i64(
-        query.get("page_size"),
-        50,
-        Some(auction_application::MAX_PUBLIC_EVENT_PAGE_SIZE),
-    ) {
-        Ok(value) => value,
+    let target = match parse_websocket_target(&query) {
+        Ok(target) => target,
         Err(_) => {
             return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")
                 .into_response();
         }
     };
-    let request = PublicRealtimeRequest { auction_id, after, page_size };
-    if request.validate().is_err() {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
+    if let Err(response) = super::super::authenticated_public_identity(&state, &headers).await {
+        return *response;
     }
-    let Some(reader) = state.realtime() else {
-        return api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "storage_unavailable",
-            "实时事件暂不可用",
-        )
-        .into_response();
-    };
-    match reader.list_public_events(request.clone()).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return not_found_error().into_response(),
-        Err(_) => {
+
+    if let RealtimeTarget::Auction(auction_id) = target {
+        let Some(reader) = state.auctions() else {
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "storage_unavailable",
                 "实时事件暂不可用",
             )
             .into_response();
+        };
+        match reader.public_realtime_auction_status(auction_id).await {
+            Ok(Some(PublicRealtimeAuctionStatus::Settled)) | Ok(None) => {
+                return not_found_error().into_response();
+            }
+            Ok(Some(_)) => {}
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "storage_unavailable",
+                    "实时事件暂不可用",
+                )
+                .into_response();
+            }
         }
     }
-    let Some(connection_permit) = state.try_acquire_realtime_connection() else {
-        return api_error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "realtime_capacity_exhausted",
-            "实时连接资源已耗尽",
-        )
-        .into_response();
+
+    let discovery_permit = if matches!(target, RealtimeTarget::Discovery) {
+        let Some(permit) = state.try_acquire_realtime_discovery() else {
+            return api_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "discovery_busy",
+                "拍卖发现连接数已达上限",
+            )
+            .into_response();
+        };
+        Some(permit)
+    } else {
+        None
     };
     let Some(hub) = state.realtime_hub() else {
         return api_error(
@@ -117,11 +113,7 @@ pub(crate) async fn websocket(
         )
         .into_response();
     };
-    let stream_key = request.auction_id.map_or_else(
-        || "auction:discovery".to_owned(),
-        |auction_id| format!("auction:{auction_id}"),
-    );
-    let subscription = match hub.subscribe(stream_key) {
+    let subscription = match hub.subscribe(target.stream_key()) {
         Ok(subscription) => subscription,
         Err(_) => {
             return api_error(
@@ -132,106 +124,105 @@ pub(crate) async fn websocket(
             .into_response();
         }
     };
+    let realtime_shutdown = state.realtime_shutdown();
 
     upgrade
+        .max_message_size(MAX_MESSAGE_BYTES)
+        .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| {
-            stream_events(socket, state, request, subscription, connection_permit)
+            stream_events(socket, target, subscription, discovery_permit, realtime_shutdown)
         })
         .into_response()
 }
 
 async fn stream_events(
     mut socket: WebSocket,
-    state: PublicApiState,
-    mut request: PublicRealtimeRequest,
+    target: RealtimeTarget,
     mut subscription: RealtimeSubscription,
-    _connection_permit: tokio::sync::OwnedSemaphorePermit,
+    _discovery_permit: Option<OwnedSemaphorePermit>,
+    mut realtime_shutdown: watch::Receiver<bool>,
 ) {
-    let Some(reader) = state.realtime() else {
-        let _ = socket.send(Message::Close(None)).await;
-        return;
-    };
-    if !send_catch_up(&mut socket, reader, &mut request).await {
+    let expected_stream = target.stream_key();
+    let mut ticker = interval_at(Instant::now() + PING_PERIOD, PING_PERIOD);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let pong_deadline = sleep(PONG_WAIT);
+    tokio::pin!(pong_deadline);
+
+    if *realtime_shutdown.borrow() {
+        close_connection(&mut socket, CLOSE_GOING_AWAY, REASON_SHUTDOWN).await;
         return;
     }
-    let mut ticker = interval(Duration::from_secs(25));
-    ticker.tick().await;
+
     loop {
         tokio::select! {
+            changed = realtime_shutdown.changed() => {
+                if changed.is_err() || *realtime_shutdown.borrow_and_update() {
+                    close_connection(&mut socket, CLOSE_GOING_AWAY, REASON_SHUTDOWN).await;
+                    return;
+                }
+            }
+            _ = &mut pong_deadline => return,
             message = socket.recv() => {
                 match message {
                     Some(Ok(Message::Close(_))) | None => return,
                     Some(Ok(Message::Ping(payload))) => {
-                        if socket.send(Message::Pong(payload)).await.is_err() {
+                        if !send_message(&mut socket, Message::Pong(payload)).await {
                             return;
                         }
                     }
-                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Pong(_))) => {
+                        pong_deadline.as_mut().reset(Instant::now() + PONG_WAIT);
+                    }
                     Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {
-                        let _ = socket.send(Message::Close(None)).await;
+                        close_connection(
+                            &mut socket,
+                            CLOSE_POLICY_VIOLATION,
+                            REASON_CLIENT_DATA,
+                        )
+                        .await;
                         return;
                     }
-                    Some(Err(_)) => return,
+                    Some(Err(error)) => {
+                        if is_message_too_long(error) {
+                            // Tungstenite 已按 4 KiB 上限拒绝正文；仍发送旧 v1 约定的空原因 1009 close。
+                            close_connection(&mut socket, CLOSE_MESSAGE_TOO_BIG, "").await;
+                        }
+                        return;
+                    }
                 }
             }
             event = subscription.recv() => {
                 let Some(event) = event else {
-                    let _ = socket.send(Message::Close(None)).await;
+                    close_connection(
+                        &mut socket,
+                        CLOSE_TRY_AGAIN_LATER,
+                        REASON_SLOW_CONSUMER,
+                    )
+                    .await;
                     return;
                 };
-                let expected_stream = request.auction_id.map_or_else(
-                    || "auction:discovery".to_owned(),
-                    |auction_id| format!("auction:{auction_id}"),
-                );
-                if event.validate().is_err() || event.stream_key != expected_stream {
-                    let _ = socket.send(Message::Close(None)).await;
-                    return;
-                }
-                if event.stream_sequence <= request.after {
-                    continue;
-                }
-                let Some(expected_sequence) = request.after.checked_add(1) else {
-                    let _ = socket.send(Message::Close(None)).await;
-                    return;
-                };
-                if event.stream_sequence != expected_sequence
-                    && !send_catch_up(&mut socket, reader, &mut request).await
+                if event.validate().is_err()
+                    || event.stream_key != expected_stream
+                    || matches!(target, RealtimeTarget::Discovery) && event.kind != "auction.created"
                 {
+                    close_connection(
+                        &mut socket,
+                        CLOSE_PROTOCOL_ERROR,
+                        REASON_PROTOCOL_ERROR,
+                    )
+                    .await;
                     return;
                 }
-                if event.stream_sequence <= request.after {
-                    continue;
-                }
-                let Some(expected_sequence) = request.after.checked_add(1) else {
-                    let _ = socket.send(Message::Close(None)).await;
-                    return;
-                };
-                if event.stream_sequence != expected_sequence {
-                    // 当前事件前仍有未送达事件；让客户端通过下一次 reconnect/catch-up 恢复，
-                    // 不在 WebSocket 中伪造连续序号。
-                    continue;
-                }
-                let next_after = event.stream_sequence;
-                let page = PublicRealtimePage {
-                    events: vec![event],
-                    next_after,
-                    has_more: false,
-                    refetch_required: false,
-                };
-                let message = match serde_json::to_string(&map_page(page)) {
+                let message = match serde_json::to_string(&map_event(event)) {
                     Ok(message) => message,
-                    Err(_) => {
-                        let _ = socket.send(Message::Close(None)).await;
-                        return;
-                    }
+                    Err(_) => return,
                 };
-                if socket.send(Message::Text(message.into())).await.is_err() {
+                if !send_message(&mut socket, Message::Text(message.into())).await {
                     return;
                 }
-                request.after = next_after;
             }
             _ = ticker.tick() => {
-                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                if !send_message(&mut socket, Message::Ping(Vec::new().into())).await {
                     return;
                 }
             }
@@ -239,36 +230,20 @@ async fn stream_events(
     }
 }
 
-async fn send_catch_up(
-    socket: &mut WebSocket,
-    reader: &dyn PublicRealtimeReader,
-    request: &mut PublicRealtimeRequest,
-) -> bool {
-    let page = match reader.list_public_events(request.clone()).await {
-        Ok(Some(page)) => page,
-        Ok(None) | Err(_) => {
-            let _ = socket.send(Message::Close(None)).await;
-            return false;
-        }
-    };
-    if !valid_page(&page, request.auction_id, request.after) {
-        let _ = socket.send(Message::Close(None)).await;
-        return false;
-    }
-    let refetch_required = page.refetch_required;
-    let next_after = page.next_after;
-    if !page.events.is_empty() || refetch_required {
-        let message = match serde_json::to_string(&map_page(page)) {
-            Ok(message) => message,
-            Err(_) => {
-                let _ = socket.send(Message::Close(None)).await;
-                return false;
-            }
-        };
-        if socket.send(Message::Text(message.into())).await.is_err() {
-            return false;
-        }
-    }
-    request.after = next_after;
-    !refetch_required
+async fn send_message(socket: &mut WebSocket, message: Message) -> bool {
+    matches!(timeout(WRITE_WAIT, socket.send(message)).await, Ok(Ok(())))
+}
+
+fn is_message_too_long(error: axum::Error) -> bool {
+    matches!(
+        error.into_inner().downcast_ref::<tungstenite::Error>(),
+        Some(tungstenite::Error::Capacity(
+            tungstenite::error::CapacityError::MessageTooLong { .. }
+        ))
+    )
+}
+
+async fn close_connection(socket: &mut WebSocket, code: u16, reason: &'static str) {
+    let frame = CloseFrame { code, reason: reason.into() };
+    let _ = send_message(socket, Message::Close(Some(frame))).await;
 }

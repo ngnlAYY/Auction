@@ -35,6 +35,7 @@ pub(super) async fn configure_operations_alert(
         alert_config.target(),
         auction_jobs::OperationsAlertRuntimeConfig {
             poll_interval: std::time::Duration::from_secs(alert_config.scan_interval_seconds),
+            jitter: std::time::Duration::from_secs(alert_config.jitter_seconds),
             scan_timeout: claim_lease,
             dispatch_timeout,
             reconcile_timeout: claim_lease,

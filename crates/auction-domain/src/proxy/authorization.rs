@@ -78,20 +78,24 @@ impl ProxyAuthorization {
         Ok(())
     }
 
-    /// 将活动授权的上限降低，并返回待追加的转换事实。
+    /// 将仍具竞价效力的授权上限降低，并返回待追加的转换事实。
+    ///
+    /// `FinalFast` 是新版用于持久化 Final 转换 owner 的内部状态；旧 v1 在同一时刻仍把授权
+    /// 视为 `active` 且允许降低。因此降低时保留内部状态，再由 Public 防腐层投影为旧状态。
     pub fn lower(
         &mut self,
         command_id: CommandId,
         new_maximum: BidAmount,
     ) -> Result<ProxyTransition, DomainError> {
         if command_id.is_nil()
-            || self.status != ProxyStatus::Active
+            || !matches!(self.status, ProxyStatus::Active | ProxyStatus::FinalFast)
             || new_maximum >= self.maximum_amount
         {
             return Err(DomainError::InvalidProxyMaximum);
         }
 
         let old_maximum = self.maximum_amount;
+        let status = self.status;
         self.maximum_amount = new_maximum;
         let state_version = self.bump_version()?;
         Ok(ProxyTransition {
@@ -102,8 +106,8 @@ impl ProxyAuthorization {
             new_maximum,
             old_mode: Some(self.mode),
             new_mode: self.mode,
-            old_status: Some(ProxyStatus::Active),
-            new_status: ProxyStatus::Active,
+            old_status: Some(status),
+            new_status: status,
             state_version,
             reason: None,
         })

@@ -46,6 +46,27 @@ impl EhentaiGateway {
         Err(EhentaiError::credential(EhentaiOperation::CreateTopic))
     }
 
+    /// 只读按精确标题查找主题；读侧 session 过期时可安全轮换 Cookie。
+    pub async fn find_topic_by_title(
+        &self,
+        world: SettlementWorld,
+        title: &str,
+    ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+        let mut session = self.credentials.begin()?;
+        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
+            match self.client.find_topic_by_title(world, session.cookie(), title).await {
+                Ok(published) => return Ok(published),
+                Err(error) if error.is_session_expired() => {
+                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
+                        return Err(EhentaiError::credential(EhentaiOperation::ReconcileTopic));
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(EhentaiError::credential(EhentaiOperation::ReconcileTopic))
+    }
+
     /// 读取主题；读取失败且确认为 session 过期时才会尝试下一个 Cookie。
     pub async fn fetch_topic(
         &self,
@@ -83,6 +104,18 @@ impl fmt::Debug for EhentaiGateway {
 }
 
 impl ForumPublisher for EhentaiGateway {
+    fn find_topic_by_title(
+        &self,
+        world: SettlementWorld,
+        title: String,
+    ) -> ApplicationFuture<'_, Option<ForumPublishedThread>> {
+        Box::pin(async move {
+            EhentaiGateway::find_topic_by_title(self, world, &title)
+                .await
+                .map_err(EhentaiError::into_application_error)
+        })
+    }
+
     fn create_topic(
         &self,
         world: SettlementWorld,

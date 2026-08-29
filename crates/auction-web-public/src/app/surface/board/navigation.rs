@@ -63,9 +63,9 @@ pub(crate) fn preview_history_switch(
         nav { class: "public-auction-view-switch", aria_label: t!("auction-history-view-label"),
             span { class: "public-auction-view-switch__options",
                 if historical {
-                    a { href: current_href, {t!("auction-history-current")} }
+                    Link { to: current_href, {t!("auction-history-current")} }
                 } else if let Some(previous_href) = previous_href {
-                    a { href: previous_href, {t!("auction-history-previous-view")} }
+                    Link { to: previous_href, {t!("auction-history-previous-view")} }
                 } else {
                     span { {t!("auction-history-no-previous")} }
                 }
@@ -91,10 +91,10 @@ pub(crate) fn HistoricalAuctionNavigation(auction: CurrentAuction) -> Element {
         nav {
             class: "public-auction-history-nav",
             aria_label: t!("auction-history-navigation"),
-            a { href: "/auctions", {t!("auction-history-back")} }
+            Link { to: "/auctions", {t!("auction-history-back")} }
             if let Some(previous) = previous {
-                a {
-                    href: historical_auction_href(&previous.id, Some(&previous.world_id)),
+                Link {
+                    to: historical_auction_href(&previous.id, Some(&previous.world_id)),
                     {t!("auction-history-previous", number: previous.sequence)}
                 }
             }

@@ -57,6 +57,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
     let _ = realtime_relay;
     let state = state.with_metrics(metrics);
+    let realtime_shutdown_state = state.clone();
     #[cfg(any(feature = "postgres", feature = "sqlite"))]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
@@ -100,6 +101,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
 
     if let Some(signal) = signal {
         tracing::info!(signal = %signal, "public api drain started");
+        realtime_shutdown_state.begin_realtime_shutdown();
         let _ = shutdown_sender.send(());
     } else {
         drop(shutdown_sender);

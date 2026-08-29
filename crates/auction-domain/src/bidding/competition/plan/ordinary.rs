@@ -22,11 +22,14 @@ pub(super) fn plan_ordinary_bid(
     else {
         unreachable!("竞价触发器种类已在外层匹配");
     };
-    if actor_id.is_nil() || state.leader_id == Some(actor_id) {
-        return Err(DomainError::InvalidBidState("领先者不能重复提交普通出价"));
+    if actor_id.is_nil() {
+        return Err(DomainError::InvalidBidState("普通出价缺少有效参与者"));
+    }
+    if state.leader_id == Some(actor_id) {
+        return Err(DomainError::AlreadyLeading);
     }
     if active.as_ref().is_some_and(|proxy| proxy.user_id == actor_id) {
-        return Err(DomainError::InvalidBidState("活动代理持有者不能提交普通出价"));
+        return Err(DomainError::ActiveProxyExists);
     }
 
     let minimum = rules.next_minimum_bid(

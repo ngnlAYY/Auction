@@ -48,7 +48,7 @@ mod status;
 mod users;
 
 use dioxus::prelude::*;
-use dioxus_i18n::{prelude::*, t};
+use dioxus_i18n::prelude::*;
 use unic_langid::langid;
 
 use auction_web_shared::{
@@ -58,11 +58,10 @@ use auction_web_shared::{
 };
 
 use router::Route;
-pub(super) use shared::{AdminLoadError, AdminPanel, format_admin_time};
+pub(super) use shared::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 
 /// 管理端 surface 样式。设计变量由 `auction-web-shared` 提供。
-const ADMIN_CSS: Asset =
-    asset!("/assets/admin.css", AssetOptions::css().with_preload(true).with_static_head(true));
+const ADMIN_CSS: Asset = asset!("/assets/admin.css", AssetOptions::css().with_static_head(true));
 
 pub fn run() {
     dioxus::launch(App);
@@ -85,7 +84,6 @@ fn App() -> Element {
     rsx! {
         BaseStylesheet {}
         document::Stylesheet { href: ADMIN_CSS }
-        document::Title { {t!("app-title")} }
         Router::<Route> {}
     }
 }

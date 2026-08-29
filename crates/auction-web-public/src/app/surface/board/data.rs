@@ -35,7 +35,7 @@ pub(crate) fn AuctionData(
                     }
                     if should_refresh_at_open
                         && !opening_refreshed()
-                        && realtime_state() == LiveConnectionState::Connected
+                        && realtime_state() == LiveConnectionState::Live
                         && opening_at.is_some_and(|opens_at| now >= opens_at)
                     {
                         opening_refreshed.set(true);
@@ -46,12 +46,17 @@ pub(crate) fn AuctionData(
         }
     });
     let auction_id = auction.id.clone();
-    let session = use_resource(fetch_public_session);
-    let viewer_name = match &*session.read_unchecked() {
-        Some(Ok(Some(session))) => Some(session.username.clone()),
+    let session = use_context::<PublicSessionResource>();
+    let session_snapshot = session.read().clone();
+    let viewer_name = match session_snapshot.as_ref() {
+        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
         _ => None,
     };
-    let authenticated = matches!(&*session.read_unchecked(), Some(Ok(Some(_))));
+    let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
+    let authenticated = matches!(
+        session_snapshot.as_ref(),
+        Some(Ok(Some(session))) if session.authenticated
+    );
     let history_switch = use_resource({
         let world = auction.world.clone();
         let should_load = historical || auction.presentation_mode != "live";
@@ -64,40 +69,6 @@ pub(crate) fn AuctionData(
                 let current = fetch_current_auction(world).await?;
                 let rounds = fetch_auction_list().await?;
                 Ok(Some((current, rounds)))
-            }
-        }
-    });
-    let _auction_realtime = use_future({
-        let realtime_auction_id = auction_id.clone();
-        move || {
-            let realtime_auction_id = realtime_auction_id.clone();
-            async move {
-                if historical {
-                    return;
-                }
-                let mut after = 0_i64;
-                loop {
-                    let cursor = Rc::new(Cell::new(after));
-                    let callback_cursor = Rc::clone(&cursor);
-                    let mut callback_refresh = refresh_generation;
-                    let result = subscribe_auction_realtime(
-                        after,
-                        realtime_auction_id.clone(),
-                        move |page| {
-                            let refetch_required = page.refetch_required;
-                            callback_cursor.set(if refetch_required { 0 } else { page.next_after });
-                            if refetch_required
-                                || page.events.iter().any(should_refresh_auction_board)
-                            {
-                                callback_refresh.set(callback_refresh().saturating_add(1));
-                            }
-                        },
-                    )
-                    .await;
-                    after = cursor.get();
-                    let _ = result;
-                    TimeoutFuture::new(5_000).await;
-                }
             }
         }
     });
@@ -114,8 +85,6 @@ pub(crate) fn AuctionData(
     let aligned = match &*lots.read_unchecked() {
         Some(Ok(page)) => {
             page.auction_id == auction.id
-                && page.world == auction.world
-                && page.number == auction.number
                 && page.auction_status == auction.status
                 && page.presentation_mode == auction.presentation_mode
                 && page.bidding_open == auction.bidding_open
@@ -145,6 +114,9 @@ pub(crate) fn AuctionData(
     let status_label = auction_status_label(&auction.status);
     let now = clock();
     let is_live_presentation = auction.presentation_mode == "live";
+    let connection_state = realtime_state();
+    let connection_state_name = live_connection_state_name(connection_state);
+    let connection_message = super::super::realtime::live_connection_message(connection_state);
     let auction_end = if is_live_presentation {
         auction.scheduled_ends_at.clone()
     } else {
@@ -153,23 +125,18 @@ pub(crate) fn AuctionData(
     let auction_countdown = auction_end.as_deref().map(|ends_at| countdown_display(ends_at, now));
     let catalog = match &*lots.read_unchecked() {
         None => {
-            rsx! { p { class: "public-auction-page__status", role: "status", {t!("data-loading")} } }
+            rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } }
         }
-        Some(Err(_)) => {
+        Some(Err(error)) => {
             rsx! {
-                RetryPlaceholder {
-                    title: t!("auction-title"),
-                    detail: t!("data-error"),
+                CatalogLoadFailure {
+                    detail: lot_list_error_message(error),
                     refresh_generation: lots_refresh_generation,
                 }
             }
         }
         Some(Ok(_)) if !aligned => rsx! {
-            RetryPlaceholder {
-                title: t!("auction-title"),
-                detail: t!("data-aligning"),
-                refresh_generation: lots_refresh_generation,
-            }
+            p { class: "public-page-status", role: "status", {t!("common-loading")} }
         },
         Some(Ok(page)) => rsx! {
             CatalogTable {
@@ -183,6 +150,7 @@ pub(crate) fn AuctionData(
                 page_size: page.page_size.filter(|size| *size > 0).unwrap_or(20),
                 can_bid: is_live_presentation && auction.bidding_open,
                 allow_slow: auction.status == "live",
+                session_ready,
                 authenticated,
                 viewer_name: viewer_name.clone(),
             }
@@ -194,35 +162,95 @@ pub(crate) fn AuctionData(
             if historical {
                 HistoricalAuctionNavigation { auction: auction.clone() }
             }
-            header { class: "public-auction-round",
-                div { class: "public-auction-round__title",
-                    h1 { id: "auction-title", {t!("auction-title")}, " #{auction.number}" }
-                    span { class: "public-auction-round__world", "{auction_world_label(&auction.world)}" }
-                    span {
-                        class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
-                        "{status_label}"
-                    }
-                }
-                if let (Some(scheduled_ends_at), Some(countdown)) =
-                    (auction_end.clone(), auction_countdown)
-                {
-                    p { class: "public-auction-round__end",
-                        if is_live_presentation { {t!("auction-ends-at")} } else { {t!("auction-opens-at")} }
-                        time { datetime: scheduled_ends_at.clone(), "{format_auction_time(&scheduled_ends_at)}" }
-                        span {
-                            class: countdown_class(&countdown),
-                            aria_label: t!("auction-countdown"),
-                            "{countdown.label}"
-                        }
-                    }
-                }
-                {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
-            }
-
-            {catalog}
             if !historical && is_live_presentation {
                 {forum::panel(auction.id.clone())}
             }
+            div { class: "public-auction-live",
+                if !historical {
+                    p {
+                        aria_live: "polite",
+                        class: "public-visually-hidden",
+                        "data-state": connection_state_name,
+                        {connection_message}
+                    }
+                }
+                header { class: "public-auction-round",
+                    div { class: "public-auction-round__title",
+                        h1 {
+                            id: "auction-title",
+                            {t!("auction-header-title", number: auction.number)}
+                        }
+                        span { class: "public-auction-round__world", "{auction_world_label(&auction.world)}" }
+                        span {
+                            class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
+                            "{status_label}"
+                        }
+                    }
+                    if let (Some(scheduled_ends_at), Some(countdown)) =
+                        (auction_end.clone(), auction_countdown)
+                    {
+                        p { class: "public-auction-round__end",
+                            if is_live_presentation {
+                                {t!("auction-header-ends-in")}
+                            } else {
+                                {t!("auction-header-opens-in")}
+                            }
+                            span {
+                                class: countdown_class(&countdown),
+                                aria_label: t!("auction-countdown"),
+                                "{countdown.label}"
+                            }
+                            time { datetime: scheduled_ends_at.clone(), "{format_auction_time(&scheduled_ends_at)}" }
+                        }
+                    }
+                    {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
+                }
+                if !historical && is_live_presentation {
+                    section { aria_labelledby: "auction-lots",
+                        h2 { id: "auction-lots", class: "public-visually-hidden",
+                            {t!("auction-lots")}
+                        }
+                        {catalog}
+                    }
+                } else if !historical && auction.presentation_mode == "preview" {
+                    section { aria_labelledby: "auction-preview-lots",
+                        h2 { id: "auction-preview-lots", class: "public-visually-hidden",
+                            {t!("auction-preview-lots")}
+                        }
+                        {catalog}
+                    }
+                } else {
+                    {catalog}
+                }
+            }
         }
+    }
+}
+
+#[component]
+fn CatalogLoadFailure(detail: String, mut refresh_generation: Signal<u64>) -> Element {
+    rsx! {
+        div { class: "ui-empty-state", role: "alert",
+            p { class: "ui-empty-state__title", {t!("catalog-empty-all")} }
+            span { class: "ui-empty-state__detail", "{detail}" }
+            button {
+                class: "ui-empty-state__retry",
+                r#type: "button",
+                onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
+                {t!("data-retry")}
+            }
+        }
+    }
+}
+
+fn lot_list_error_message(error: &str) -> String {
+    match error {
+        "invalid_response" => t!("error-invalid-response"),
+        "network_error" => t!("error-network"),
+        "request_timeout" => t!("error-request-timeout"),
+        "request_cancelled" => t!("error-request-cancelled"),
+        "not_found" | "NOT_FOUND" => t!("error-not-found"),
+        "internal" | "INTERNAL" => t!("error-internal"),
+        _ => t!("common-load-error"),
     }
 }

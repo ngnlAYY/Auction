@@ -6,7 +6,12 @@ use super::super::*;
 pub(crate) fn AuctionList() -> Element {
     let query = read_public_query();
     let world_filter = use_signal(|| query.world.clone().unwrap_or_else(|| "all".to_owned()));
-    let status_filter = use_signal(|| query.status.clone().unwrap_or_else(|| "settled".to_owned()));
+    let status_filter = query
+        .status
+        .as_deref()
+        .filter(|status| matches!(*status, "live" | "final" | "settled"))
+        .unwrap_or("settled")
+        .to_owned();
     let page_number = use_signal(|| query.page.max(1));
     let refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
@@ -14,13 +19,16 @@ pub(crate) fn AuctionList() -> Element {
         Some(Ok(worlds)) => enabled_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-    let auctions = use_resource(move || {
-        let _ = refresh_generation();
-        let world = world_filter();
-        let status = status_filter();
-        let page = page_number();
-        let world = (world != "all").then_some(world);
-        fetch_auction_page(world, status, page, 20)
+    let auctions = use_resource({
+        let status_filter = status_filter.clone();
+        move || {
+            let _ = refresh_generation();
+            let world = world_filter();
+            let status = status_filter.clone();
+            let page = page_number();
+            let world = (world != "all").then_some(world);
+            fetch_auction_page(world, status, page, 10)
+        }
     });
     match &*auctions.read_unchecked() {
         None => rsx! {
@@ -37,7 +45,6 @@ pub(crate) fn AuctionList() -> Element {
             AuctionHistoryPage {
                 page: page.clone(),
                 world_filter,
-                status_filter,
                 page_number,
                 world_options,
             }
@@ -49,19 +56,16 @@ pub(crate) fn AuctionList() -> Element {
 pub(crate) fn AuctionHistoryPage(
     page: AuctionListPage,
     mut world_filter: Signal<String>,
-    mut status_filter: Signal<String>,
     mut page_number: Signal<i64>,
     world_options: Vec<String>,
 ) -> Element {
     let total = page.total.unwrap_or(page.auctions.len() as i64);
     let page_size = page.page_size.max(1);
     rsx! {
-        section { class: "public-auction-page", aria_labelledby: "auction-history-title",
-            h1 { id: "auction-history-title", class: "public-auction-category__title",
-                {t!("page-auctions-title")}
-            }
-            p { class: "public-auction-page__status", {t!("page-auctions-note")} }
-            div { class: "public-auction-history-controls",
+        section { class: "public-auction-rounds", aria_labelledby: "auction-history-title",
+            h1 { id: "auction-history-title", {t!("page-auctions-title")} }
+            p { class: "public-auction-history-intro", {t!("page-auctions-note")} }
+            div { class: "public-auction-rounds__controls",
                 label {
                     {t!("auction-history-world")}
                     select {
@@ -73,7 +77,6 @@ pub(crate) fn AuctionHistoryPage(
                             update_public_query(
                                 |query| {
                                     query.world = (world != "all").then_some(world.clone());
-                                    query.status = Some(status_filter());
                                     query.auction_id = None;
                                     query.category = None;
                                     query.page = 1;
@@ -87,32 +90,12 @@ pub(crate) fn AuctionHistoryPage(
                         }
                     }
                 }
-                label {
-                    {t!("auction-history-status")}
-                    select {
-                        value: status_filter(),
-                        onchange: move |event| {
-                            let status = event.value();
-                            status_filter.set(status.clone());
-                            page_number.set(1);
-                            update_public_query(
-                                |query| {
-                                    query.status = Some(status.clone());
-                                    query.auction_id = None;
-                                    query.category = None;
-                                    query.page = 1;
-                                },
-                                false,
-                            );
-                        },
-                        option { value: "settled", {t!("auction-history-status-settled")} }
-                        option { value: "final", {t!("auction-history-status-final")} }
-                        option { value: "live", {t!("auction-history-status-live")} }
-                    }
-                }
             }
             if page.auctions.is_empty() {
-                Placeholder { title: t!("page-auctions-title"), detail: t!("data-empty") }
+                div { class: "public-auction-empty", role: "status",
+                    p { class: "public-auction-empty__title", {t!("auction-history-empty-title")} }
+                    p { class: "public-auction-empty__hint", {t!("auction-history-empty-hint")} }
+                }
             } else {
                 AuctionHistoryTable { rows: page.auctions.clone() }
             }
@@ -121,7 +104,7 @@ pub(crate) fn AuctionHistoryPage(
                 page_size,
                 total: Some(total),
                 has_more: false,
-                label: t!("catalog-pagination"),
+                label: t!("page-auctions-title"),
                 on_page_change: move |page| {
                     page_number.set(page);
                     update_public_query(|query| query.page = page, false);
@@ -134,18 +117,18 @@ pub(crate) fn AuctionHistoryPage(
 #[component]
 pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
     rsx! {
-        div { class: "public-auction-catalog",
+        div { class: "public-auction-rounds__table",
             table {
                 thead {
                     tr {
                         th { {t!("auction-history-number")} }
                         th { {t!("auction-history-world")} }
                         th { {t!("auction-history-ended")} }
-                        th { class: "public-auction-catalog__number", {t!("auction-history-lots")} }
-                        th { class: "public-auction-catalog__number", {t!("auction-history-sold")} }
-                        th { class: "public-auction-catalog__number", {t!("auction-history-unsold")} }
-                        th { class: "public-auction-catalog__number", {t!("auction-history-total")} }
-                        th { {t!("catalog-actions")} }
+                        th { class: "public-auction-rounds__number", {t!("auction-history-lots")} }
+                        th { class: "public-auction-rounds__number", {t!("auction-history-sold")} }
+                        th { class: "public-auction-rounds__number", {t!("auction-history-unsold")} }
+                        th { class: "public-auction-rounds__number", {t!("auction-history-total")} }
+                        th { {t!("auction-history-links")} }
                     }
                 }
                 tbody {
@@ -155,18 +138,30 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
                                 .or_else(|| auction.effective_end_at.clone())
                                 .or_else(|| auction.opened_at.clone())
                                 .unwrap_or_else(|| auction.scheduled_open_at.clone());
-                            let href = historical_history_href(&auction.id, &auction.world_id);
+                            let lots_href = historical_lots_href(&auction.id, &auction.world_id);
+                            let bid_log_href = historical_bid_log_href(&auction.id, &auction.world_id);
+                            let status_class = auction_status_class(&auction.status);
+                            let status_label = historical_auction_status_label(&auction.status);
                             rsx! {
                                 tr {
-                                    td { class: "public-auction-catalog__number", "#{auction.sequence}" }
-                                    td { "{auction_world_label(&auction.world_id)}" }
-                                    td { time { datetime: ended.clone(), "{format_auction_time(&ended)}" } }
-                                    td { class: "public-auction-catalog__number", "{auction.lot_count}" }
-                                    td { class: "public-auction-catalog__number", "{auction.sold_count}" }
-                                    td { class: "public-auction-catalog__number", "{auction.unsold_count}" }
-                                    td { class: "public-auction-catalog__amount public-auction-catalog__number", "{format_amount(auction.sold_amount)}" }
                                     td {
-                                        a { href, {t!("catalog-view")} }
+                                        class: "public-auction-rounds__round",
+                                        "data-label": t!("auction-history-number"),
+                                        "#{auction.sequence}"
+                                        span {
+                                            class: "public-auction-rounds__status public-auction-rounds__status--{status_class}",
+                                            {status_label}
+                                        }
+                                    }
+                                    td { "data-label": t!("auction-history-world"), "{auction_world_label(&auction.world_id)}" }
+                                    td { "data-label": t!("auction-history-ended"), time { datetime: ended.clone(), "{format_auction_time(&ended)}" } }
+                                    td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
+                                    td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
+                                    td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }
+                                    td { class: "public-auction-rounds__total", "data-label": t!("auction-history-total"), "{format_amount(auction.sold_amount)}" }
+                                    td { class: "public-auction-rounds__links", "data-label": t!("auction-history-links"),
+                                        Link { to: lots_href, {t!("auction-history-link-lots")} }
+                                        Link { to: bid_log_href, {t!("auction-history-link-bidlog")} }
                                     }
                                 }
                             }

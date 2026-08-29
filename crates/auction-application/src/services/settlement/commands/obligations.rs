@@ -1,8 +1,8 @@
 //! 结算义务的闭集构造与稳定身份派生。
 
 use auction_domain::{
-    CommandId, SettlementId, SettlementObligation, SettlementObligationKind,
-    SettlementObligationState, SettlementPlan, SettlementWorld, deterministic_uuid,
+    AuctionId, CommandId, SettlementId, SettlementObligation, SettlementObligationKind,
+    SettlementObligationState, SettlementPlan, SettlementWorld, legacy_natural_key_uuid,
 };
 
 use crate::SettlementSnapshot;
@@ -23,7 +23,7 @@ pub(super) fn append_obligations(
 
         let Some(winner_id) = fact.leader_id else {
             obligations.push(SettlementObligation {
-                id: obligation_id(command_id, fact.lot_id, "unsold_return"),
+                id: obligation_id(snapshot.auction_id, fact.lot_id, "unsold_return"),
                 auction_id: snapshot.auction_id,
                 lot_id: fact.lot_id,
                 origin_command_id: command_id,
@@ -47,13 +47,14 @@ pub(super) fn append_obligations(
             SettlementWorld::Main => SettlementObligationKind::WinnerEquipmentCod,
             SettlementWorld::Isekai => SettlementObligationKind::WinnerPaymentCarrierCod,
         };
-        let payment_id = obligation_id(command_id, fact.lot_id, kind_name(payment_kind));
+        let payment_id = obligation_id(snapshot.auction_id, fact.lot_id, kind_name(payment_kind));
         obligations.push(SettlementObligation {
             id: payment_id,
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
             origin_command_id: command_id,
             policy_version: plan.policy_version,
+            // carrier COD 的义务事实仍属于异世界；主世界只在履约投影的 dispatch_world 表达。
             world: fact.world,
             kind: payment_kind,
             state: SettlementObligationState::Ready,
@@ -72,7 +73,8 @@ pub(super) fn append_obligations(
         });
 
         let seller_prerequisite = if fact.world == SettlementWorld::Isekai {
-            let handoff_id = obligation_id(command_id, fact.lot_id, "winner_equipment_handoff");
+            let handoff_id =
+                obligation_id(snapshot.auction_id, fact.lot_id, "winner_equipment_handoff");
             obligations.push(SettlementObligation {
                 id: handoff_id,
                 auction_id: snapshot.auction_id,
@@ -97,7 +99,7 @@ pub(super) fn append_obligations(
         };
 
         obligations.push(SettlementObligation {
-            id: obligation_id(command_id, fact.lot_id, "seller_payout"),
+            id: obligation_id(snapshot.auction_id, fact.lot_id, "seller_payout"),
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
             origin_command_id: command_id,
@@ -116,7 +118,7 @@ pub(super) fn append_obligations(
         });
 
         obligations.push(SettlementObligation {
-            id: obligation_id(command_id, fact.lot_id, "buyer_refund"),
+            id: obligation_id(snapshot.auction_id, fact.lot_id, "buyer_refund"),
             auction_id: snapshot.auction_id,
             lot_id: fact.lot_id,
             origin_command_id: command_id,
@@ -139,11 +141,12 @@ pub(super) fn append_obligations(
     Ok(())
 }
 
-fn obligation_id(command_id: CommandId, lot_id: auction_domain::LotId, kind: &str) -> SettlementId {
-    SettlementId::from_uuid(deterministic_uuid(
-        command_id,
-        &format!("settlement-obligation:{lot_id}:{kind}"),
-        1,
+fn obligation_id(auction_id: AuctionId, lot_id: auction_domain::LotId, kind: &str) -> SettlementId {
+    let auction_uuid = auction_id.as_uuid();
+    let lot_uuid = lot_id.as_uuid();
+    SettlementId::from_uuid(legacy_natural_key_uuid(
+        "auction.settlement-obligation.v1",
+        &[auction_uuid.as_bytes(), lot_uuid.as_bytes(), kind.as_bytes()],
     ))
 }
 

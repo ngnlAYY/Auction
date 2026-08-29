@@ -21,9 +21,9 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000015`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000019`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
-`000001` 至 `000007` 作为共有能力子集及生命周期/领先时间修正。旧系统的 `bid_proxies` 不再作为第二份
+`000001` 至 `000008` 作为共有能力子集及生命周期/领先时间/lot 结束时间修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
 `bid_proxy_authorizations` 及其历史表。完整适配器、Lite 串行写入和其他业务表面仍在迁移中。
 
@@ -38,6 +38,12 @@ draft/target 跨行一致性触发器；这是完整档数据库防线，不要�
 PostgreSQL `000015` 统一 operations alert signal identity、批次 lease/retry/terminal 形状与稳定
 错误码；普通退避保持空错误码，第三次 Create 失败固定为 `failed/retry_exhausted`，signal cooldown
 只在批次和 delivery 原子确认入队后推进。
+PostgreSQL `000016` 为论坛主题写入结果未知后的人工再授权新增
+`forum_sync_admin_commands`：精确标题只读对账未命中时，只有幂等运维命令和追加审计可以打开下一次
+远端 POST；该账本不保存 Cookie、远端响应或任意敏感配置。
+PostgreSQL `000017` 固定 Isekai carrier 的派发 world；`000018` 为 live/sold lot 恢复非空有效结束
+时间约束；`000019` 只为已先更新同一 lot 投影的旧 v28 INSERT 补齐遗漏的 bid 有效结束时间，新版
+显式写入和无法逐字段证明属于同一事实的行都不经过该兼容分支。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -54,14 +60,14 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | user_renames | 000004_identity_external_admin | auction-application：users | 两者 | 用户名变更追加历史 |
 | public_sessions | 000001_baseline | auction-application：sessions | 两者 | Public 会话权威状态 |
 | admin_sessions | 000001_baseline | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态 |
-| rules_documents | 000001_baseline | auction-application：rules | 两者 | 版本化规则文档 |
+| rules_documents | 000001_baseline | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入旧目录 |
 | audit_records | 000001_baseline | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | 000001_baseline | auction-observability | 两者 | 进程/服务心跳与过期判断 |
 | credential_keys | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 加密后的外部凭据索引 |
 | user_login_key_envelopes | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
 | user_mail_commands | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 注册/重绑命令幂等账本与结果 |
 | user_game_identity_history | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 换绑后的游戏身份追加历史 |
-| user_blacklist_history | 000019_user_blacklist_history | auction-application：users | 两者 | 封禁变更追加历史 |
+| user_blacklist_history | PostgreSQL 000004_identity_external_admin / SQLite 000001_lite_core | auction-application：users | 两者 | 封禁变更追加历史 |
 | user_admin_commands | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | Admin 用户命令幂等账本与安全投影重放 |
 | credential_admin_commands | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 凭据管理命令幂等账本 |
 | runtime_config_admin_commands | 000004_identity_external_admin | auction-application：runtime-config | 完整档 | runtime 配置更新、指纹和 pending/applied/unknown 结果 |
@@ -81,7 +87,7 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 | auctions | 000001_baseline + PostgreSQL 000003_lifecycle_proxy_history + 000014_lifecycle_database_invariants / SQLite 000004_auction_cancellation + 000005_lifecycle_metadata | auction-domain + auction-application：auction | 两者 | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份与前序顺序 |
 | equipment | 000001_baseline | auction-domain + auction-application：auction | 两者 | 标的事实与规范化装备属性 |
 | auction_preview_items | 000001_baseline | auction-application：auction | 两者 | 预览阶段的物化展示项 |
-| lots | 000001_baseline | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者和锁定版本 |
+| lots | 000001_baseline + PostgreSQL 000018 / SQLite 000008 | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本及 live/sold 有效结束时间 shape |
 | auction_commands | 000001_baseline | auction-application：command-ledger | 两者 | 所有可变命令的幂等账本 |
 | bids | 000001_baseline | auction-domain + auction-application：auction | 两者 | 追加式竞价事实 |
 | bid_proxies | 000001_baseline | auction-storage：兼容视图 | 两者 | 旧代理字段的只读兼容投影，非权威状态 |
@@ -91,7 +97,7 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 | bid_proxy_attempts | 000024_proxy_bid_attempt_history | auction-domain + auction-application：auction | 两者 | 代理尝试历史与失败分类 |
 | scheduled_rounds | 000013_auction_scheduled_rounds + 000006_worker_scheduler + PostgreSQL 000012_scheduled_final_phase / SQLite 000006_scheduled_final_phase | auction-application + auction-jobs：auction-lifecycle | 两者 | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态 |
 | auction_intake_targets | 000020_auction_lifecycle_hardening + PostgreSQL 000014_lifecycle_database_invariants | auction-application：auction-intake | 完整档 | 世界级拍品录入目标，并与该世界唯一 draft 保持延迟一致性 |
-| auction_submissions | 000002_worker_external_adapters | auction-application：auction-intake | 完整档 | 邮件/后台拍品提交事实 |
+| auction_submissions | 000002_worker_external_adapters | auction-application：auction-intake | 完整档 | `mail/admin` owner 闭集的拍品提交事实；Admin 的 URL/JSON 适配器种类只进入来源引用和命令摘要 |
 | equipment_secrets | 000002_worker_external_adapters | auction-application：keymanagement | 完整档 | 标的敏感来源密文 |
 | auction_schema_identity | 000001_baseline | auction-storage：migration | 两者 | 迁移/schema 身份和兼容检查 |
 
@@ -132,6 +138,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | user_mail_commands | 000002_worker_external_adapters | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing | auction-storage：forum sync；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约和 fencing 证明 |
+| forum_sync_admin_commands | 000016_forum_sync_write_authorization | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
 | forum_bidder_identities | 000005_recovery_observability_forum | auction-storage：forum reply；Admin 凭据/用户 owner 提供登记来源 | 完整档 | 论坛外部身份到用户身份映射 |
 | auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply | 完整档 | 论坛回帖扫描游标 |
 | auction_forum_bid_commands | 000005_recovery_observability_forum | auction-storage：forum reply；auction-jobs：forum reply | 完整档 | 论坛竞价导入命令账本与重试事实 |
@@ -142,7 +149,8 @@ Worker control 唤醒不写入额外触发表；
 事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，
 `auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox
 transport；结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入
-PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。SQLite Lite
+PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛主题写入未知时先按精确标题
+只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。SQLite Lite
 不复制这些完整档表。
 
 ## 实时事件与运维告警

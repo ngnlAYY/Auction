@@ -18,6 +18,8 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_application::{RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

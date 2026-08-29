@@ -106,6 +106,7 @@ where
     let failure_store = Arc::clone(&store);
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
+    let reconciliation_only = requires_reconciliation(&claim);
     match tokio::time::timeout(
         item_timeout,
         process_claim_inner(store, publisher, renderer, clock, public_base_url, claim),
@@ -118,7 +119,7 @@ where
                 failure_store,
                 failure_clock,
                 failure_claim,
-                "write_unknown",
+                scoped_failure_code(reconciliation_only, "write_unknown"),
                 ApplicationError::Repository(auction_application::RepositoryError::Failed(
                     "论坛同步单项处理超时，远端写入结果未知".to_owned(),
                 )),
@@ -140,11 +141,19 @@ async fn process_claim_inner<C>(
 where
     C: Clock + 'static,
 {
+    let reconciliation_only = requires_reconciliation(&claim);
     let retry_claim = claim.clone();
     let snapshot = match store.load_snapshot(claim.clone()).await {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            record_failure(store, clock, retry_claim, "snapshot_failed", error).await?;
+            record_failure(
+                store,
+                clock,
+                retry_claim,
+                scoped_failure_code(reconciliation_only, "snapshot_failed"),
+                error,
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -153,7 +162,14 @@ where
         match resolve_public_url(public_base_url.as_deref(), snapshot.public_url.as_deref()) {
             Ok(public_url) => public_url,
             Err(error) => {
-                record_failure(store, clock, retry_claim, "configuration", error).await?;
+                record_failure(
+                    store,
+                    clock,
+                    retry_claim,
+                    scoped_failure_code(reconciliation_only, "configuration"),
+                    error,
+                )
+                .await?;
                 return Ok(());
             }
         };
@@ -165,10 +181,15 @@ where
                 store,
                 clock,
                 retry_claim,
-                match error {
-                    auction_application::ForumRenderError::InvalidSnapshot => "invalid_snapshot",
-                    auction_application::ForumRenderError::BodyTooLarge => "body_too_large",
-                },
+                scoped_failure_code(
+                    reconciliation_only,
+                    match error {
+                        auction_application::ForumRenderError::InvalidSnapshot => {
+                            "invalid_snapshot"
+                        }
+                        auction_application::ForumRenderError::BodyTooLarge => "body_too_large",
+                    },
+                ),
                 ApplicationError::Repository(auction_application::RepositoryError::Failed(
                     error.to_string(),
                 )),
@@ -177,16 +198,48 @@ where
             return Ok(());
         }
     };
-    let published = match publisher.create_topic(world, rendered.clone()).await {
-        Ok(published) => published,
-        Err(error) => {
-            let failure_code = forum_failure_code(&error);
-            record_failure(store, clock, retry_claim, failure_code, error).await?;
-            return Ok(());
+    let published = if reconciliation_only {
+        match publisher.find_topic_by_title(world, rendered.title.clone()).await {
+            Ok(Some(published)) => published,
+            Ok(None) => {
+                record_failure(
+                    store,
+                    clock,
+                    retry_claim,
+                    "write_authorization_required".to_owned(),
+                    ApplicationError::Repository(RepositoryError::Failed(
+                        "精确标题只读对账未发现主题，必须人工授权后才能重新发帖".to_owned(),
+                    )),
+                )
+                .await?;
+                return Ok(());
+            }
+            Err(error) => {
+                let failure_code = scoped_failure_code(true, forum_failure_code(&error));
+                record_failure(store, clock, retry_claim, failure_code, error).await?;
+                return Ok(());
+            }
+        }
+    } else {
+        match publisher.create_topic(world, rendered.clone()).await {
+            Ok(published) => published,
+            Err(error) => {
+                // 只要远端写入已经开始，后续状态一律先进入精确标题只读对账。
+                let failure_code = if matches!(
+                    &error,
+                    ApplicationError::ForumRemote(remote) if remote.write_started()
+                ) {
+                    "write_unknown"
+                } else {
+                    forum_failure_code(&error)
+                };
+                record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
+                return Ok(());
+            }
         }
     };
     if let Err(error) = store.publish(claim.clone(), rendered, published, clock.now()).await {
-        record_failure(store, clock, claim, "publish_proof_failed", error).await?;
+        record_failure(store, clock, claim, "publish_proof_failed".to_owned(), error).await?;
     }
     Ok(())
 }
@@ -195,14 +248,17 @@ async fn record_failure<C>(
     store: Arc<dyn ForumSyncStore>,
     clock: Arc<C>,
     claim: ForumSyncClaim,
-    failure_code: &str,
+    failure_code: String,
     error: ApplicationError,
 ) -> Result<(), ApplicationError>
 where
     C: Clock + 'static,
 {
     let now = clock.now();
-    let delay = if is_manual_failure(&error, failure_code) {
+    let delay = if matches!(failure_code.as_str(), "write_unknown" | "publish_proof_failed") {
+        // 下一次动作只会执行精确标题 GET，因此可以短退避，不会重复 POST。
+        RETRY_DELAY
+    } else if is_manual_failure(&error, &failure_code) {
         MANUAL_RECONCILIATION_DELAY
     } else {
         RETRY_DELAY
@@ -214,7 +270,7 @@ where
         )));
     };
     let safe_detail = bounded_detail(error.to_string());
-    store.fail(claim, retry_at, failure_code.to_owned(), safe_detail).await
+    store.fail(claim, retry_at, failure_code, safe_detail).await
 }
 
 fn forum_failure_code(error: &ApplicationError) -> &'static str {
@@ -228,17 +284,31 @@ fn forum_failure_code(error: &ApplicationError) -> &'static str {
 fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
     matches!(
         error,
-        ApplicationError::ForumRemote(remote) if remote.write_started()
+        ApplicationError::ForumRemote(remote) if remote.write_started() || !remote.retryable()
     ) || matches!(
-        failure_code,
+        failure_code.strip_prefix("reconcile_").unwrap_or(failure_code),
         "invalid_snapshot"
             | "body_too_large"
             | "configuration"
             | "credential_unavailable"
             | "protocol_drift"
-            | "write_unknown"
-            | "publish_proof_failed"
+            | "write_authorization_required"
+            | "capability_unavailable"
     )
+}
+
+fn requires_reconciliation(claim: &ForumSyncClaim) -> bool {
+    claim.previous_failure_code.as_deref().is_some_and(|code| {
+        matches!(code, "write_unknown" | "publish_proof_failed") || code.starts_with("reconcile_")
+    })
+}
+
+fn scoped_failure_code(reconciliation_only: bool, failure_code: &str) -> String {
+    if reconciliation_only && !failure_code.starts_with("reconcile_") {
+        format!("reconcile_{failure_code}")
+    } else {
+        failure_code.to_owned()
+    }
 }
 
 fn bounded_detail(value: String) -> String {

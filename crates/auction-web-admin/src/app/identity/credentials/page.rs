@@ -1,31 +1,29 @@
 //! 凭据页面的数据加载、删除编排和顶层布局。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 
-use super::super::{AdminLoadError, AdminPanel};
+use super::super::{AdminActionFeedback, admin_api_error_message};
 use super::{
-    CredentialCreateForm, CredentialDeleteDialog, CredentialFilters, CredentialPager,
-    CredentialTable, stable_command_id,
+    CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable,
+    stable_command_id,
 };
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
     let reload_generation = use_signal(|| 0_u64);
-    let kind_filter = use_signal(String::new);
-    let world_filter = use_signal(String::new);
-    let status_filter = use_signal(String::new);
     let page_number = use_signal(|| 1_i64);
     let mut pending_delete = use_signal(|| None::<AdminCredential>);
     let mut delete_busy = use_signal(|| false);
-    let mut delete_feedback = use_signal(|| None::<bool>);
+    let mut delete_feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut delete_command_state = use_signal(|| None::<(String, Uuid)>);
     let credentials = use_resource(move || {
         let _ = reload_generation();
-        fetch_admin_credentials(kind_filter(), world_filter(), status_filter(), page_number())
+        // 旧版凭据页没有列表筛选器，只按固定分页读取完整安全投影。
+        fetch_admin_credentials(String::new(), String::new(), String::new(), page_number())
     });
 
     let open_delete = move |credential: AdminCredential| {
@@ -47,61 +45,69 @@ pub fn page() -> Element {
         let mut pending_delete = pending_delete;
         let mut reload_generation = reload_generation;
         spawn(async move {
-            let successful = delete_admin_credential(command_id, &credential).await.is_ok();
-            delete_feedback.set(Some(successful));
+            let result = delete_admin_credential(command_id, &credential).await;
             delete_busy.set(false);
-            if successful {
-                pending_delete.set(None);
-                delete_command_state.set(None);
-                reload_generation.set(reload_generation().saturating_add(1));
+            match result {
+                Ok(_) => {
+                    delete_feedback.set(Some(AdminActionFeedback::Success));
+                    pending_delete.set(None);
+                    delete_command_state.set(None);
+                    reload_generation.set(reload_generation().saturating_add(1));
+                }
+                Err(code) => {
+                    delete_feedback.set(Some(AdminActionFeedback::Error(code)));
+                }
             }
         });
     };
 
-    match &*credentials.read_unchecked() {
+    let list_content = match &*credentials.read_unchecked() {
         None => rsx! {
-            AdminPanel { title: t!("page-credentials-title"), detail: t!("admin-credentials-loading") }
+            p { class: "admin-shell__status", role: "status", {t!("admin-credentials-loading")} }
         },
-        Some(Err(_)) => rsx! {
-            AdminLoadError {
-                title: t!("page-credentials-title"),
-                detail: t!("admin-credentials-error"),
-                refresh: reload_generation,
+        Some(Err(error)) => rsx! {
+            p {
+                class: "admin-shell__inline-error",
+                role: "alert",
+                {admin_api_error_message(error)}
             }
         },
-        Some(Ok(page)) => {
-            let pending = pending_delete();
-            rsx! {
-                div { class: "admin-credentials",
-                    h1 { id: "admin-credentials-title", {t!("page-credentials-title")} }
-                    CredentialCreateForm { reload_generation }
-                    CredentialFilters { kind_filter, world_filter, status_filter, page_number }
+        Some(Ok(page)) => rsx! {
                     CredentialTable {
                         page: page.clone(),
                         reload_generation,
                         on_delete: open_delete,
                     }
                     CredentialPager { page: page.clone(), page_number }
+        },
+    };
+    let pending = pending_delete();
+
+    rsx! {
+        section {
+            class: "admin-credentials-page",
+            aria_labelledby: "credentials-title",
+            h1 { id: "credentials-title", {t!("page-credentials-title")} }
+            CredentialCreateForm { reload_generation }
+            {list_content}
+            if let Some(feedback) = delete_feedback() {
+                p {
+                    class: if feedback.is_success() {
+                        "admin-panel__note action-feedback action-feedback--success"
+                    } else {
+                        "admin-panel__note action-feedback action-feedback--error"
+                    },
+                    role: if feedback.is_success() { "status" } else { "alert" },
+                    {feedback.message(t!("admin-credentials-action-success"))}
                 }
-                if let Some(credential) = pending {
-                    CredentialDeleteDialog {
-                        credential,
-                        busy: delete_busy(),
-                        on_confirm: confirm_delete,
-                        on_cancel: move |_| pending_delete.set(None),
-                    }
-                }
-                if let Some(successful) = delete_feedback() {
-                    p {
-                        class: if successful {
-                            "admin-panel__note action-feedback action-feedback--success"
-                        } else {
-                            "admin-panel__note action-feedback action-feedback--error"
-                        },
-                        role: if successful { "status" } else { "alert" },
-                        if successful { {t!("admin-credentials-action-success")} } else { {t!("admin-credentials-action-error")} }
-                    }
-                }
+            }
+        }
+        if let Some(credential) = pending {
+            CredentialDeleteDialog {
+                credential,
+                busy: delete_busy(),
+                on_confirm: confirm_delete,
+                on_cancel: move |_| pending_delete.set(None),
             }
         }
     }

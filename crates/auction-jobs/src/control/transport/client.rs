@@ -18,6 +18,8 @@ impl WorkerControlClient {
     ) -> Result<Self, WorkerControlServerError> {
         let socket_path = socket_path.as_ref().to_owned();
         validate_socket_path(&socket_path)?;
+        // Worker control 使用 reqwest，即使通过 Unix socket 连接也需要先安装 Rustls provider。
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .unix_socket(socket_path)
             .timeout(request_timeout)

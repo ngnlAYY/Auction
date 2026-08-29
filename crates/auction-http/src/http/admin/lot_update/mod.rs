@@ -5,6 +5,7 @@
 
 use std::net::SocketAddr;
 
+use super::AdminApiState;
 use auction_application::{
     AdminLotAction, AdminLotUpdateCommand, AdminLotUpdateError, ApplicationError,
     CompetitionTransactionError, RequestHash,
@@ -18,9 +19,6 @@ use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use uuid::Uuid;
-
-use super::AdminApiState;
 
 /// 执行 Admin draft lot 修改。
 pub(crate) async fn update(
@@ -31,16 +29,10 @@ pub(crate) async fn update(
     uri: Uri,
     body: Bytes,
 ) -> Response {
-    if let Some(response) = super::admin_session_guard(&state, &headers, address, true, false) {
-        return response;
-    }
-    let Some(raw_csrf) = super::read_admin_cookie(&headers, super::ADMIN_CSRF_COOKIE) else {
-        return super::authentication_error();
+    let (_, identity) = match super::authenticated_admin_mutation(&state, &headers, address).await {
+        Ok(result) => result,
+        Err(response) => return *response,
     };
-    if !super::valid_admin_csrf_header(&headers, &raw_csrf) {
-        return super::api_error(StatusCode::FORBIDDEN, "csrf_invalid", "CSRF 校验失败")
-            .into_response();
-    }
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return super::api_error(
             StatusCode::BAD_REQUEST,
@@ -49,17 +41,9 @@ pub(crate) async fn update(
         )
         .into_response();
     }
-    let Ok(lot_uuid) = Uuid::parse_str(&lot_id) else {
+    let Some(lot_uuid) = super::admin_auctions::parse_canonical_uuid(&lot_id) else {
         return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍品 ID 无效")
             .into_response();
-    };
-    if lot_uuid.is_nil() {
-        return super::api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍品 ID 无效")
-            .into_response();
-    }
-    let (_, identity) = match super::authenticated_admin_session(&state, &headers).await {
-        Ok(result) => result,
-        Err(response) => return *response,
     };
     let input: AdminLotUpdateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,

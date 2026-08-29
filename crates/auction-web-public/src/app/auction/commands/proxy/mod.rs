@@ -7,8 +7,8 @@ mod authorization;
 mod create;
 mod success;
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 
@@ -48,7 +48,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         on_close,
     } = input;
     if let Some(authorization) = saved_authorization() {
-        return proxy_success_panel(authorization, on_close);
+        return proxy_success_panel(&authorization, on_close);
     }
     match proxy.as_ref() {
         None => rsx! { p { role: "status", {t!("proxy-loading")} } },

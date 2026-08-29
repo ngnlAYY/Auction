@@ -3,13 +3,13 @@ use super::*;
 /// 读取当前用户自己的普通竞价和代理历史，保留旧接口的独立分页字段。
 pub(crate) async fn list_my_bids(
     State(state): State<PublicApiState>,
-    ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = session_guard(&state, &headers, address, false, false) {
-        return response;
-    }
+    let identity = match authenticated_public_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
     let query = match parse_query(&uri, &["page", "page_size", "bid_page", "proxy_page"]) {
         Ok(query) => query,
         Err(_) => {
@@ -65,10 +65,6 @@ pub(crate) async fn list_my_bids(
     if request.validate().is_err() {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效").into_response();
     }
-    let identity = match authenticated_public_identity(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
-    };
     let Some(reader) = state.account() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -113,29 +109,21 @@ pub(crate) async fn list_my_bids(
 /// 读取当前用户在指定公开 lot 上最新的一份代理授权。
 pub(crate) async fn get_my_proxy_authorization(
     State(state): State<PublicApiState>,
-    ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(lot_id): Path<String>,
     headers: HeaderMap,
     uri: Uri,
 ) -> Response {
-    if let Some(response) = session_guard(&state, &headers, address, false, false) {
-        return response;
-    }
+    let identity = match authenticated_public_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
     if uri.query().is_some_and(|query| !query.is_empty()) {
         return api_error(StatusCode::BAD_REQUEST, "invalid_query", "代理授权查询不接受查询参数")
             .into_response();
     }
-    let Ok(lot_uuid) = Uuid::parse_str(&lot_id) else {
+    let Ok(lot_uuid) = parse_public_uuid(&lot_id) else {
         return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
             .into_response();
-    };
-    if lot_uuid.is_nil() {
-        return api_error(StatusCode::BAD_REQUEST, "invalid_lot_id", "拍卖批次 ID 无效")
-            .into_response();
-    }
-    let identity = match authenticated_public_identity(&state, &headers).await {
-        Ok(identity) => identity,
-        Err(response) => return *response,
     };
     let Some(lots) = state.lots() else {
         return api_error(

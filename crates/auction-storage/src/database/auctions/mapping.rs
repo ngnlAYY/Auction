@@ -2,7 +2,7 @@
 
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionListRequest, PublicAuctionSummary,
-    RepositoryError,
+    PublicRealtimeAuctionStatus, RepositoryError,
 };
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -57,7 +57,7 @@ pub(super) fn map_postgres_summary(
 pub(super) fn map_postgres_current(
     row: sqlx::postgres::PgRow,
 ) -> Result<CurrentAuctionSnapshot, ApplicationError> {
-    Ok(CurrentAuctionSnapshot {
+    let snapshot = CurrentAuctionSnapshot {
         id: row.try_get("id").map_err(|_| storage_error("读取当前拍卖标识失败"))?,
         world_id: row.try_get("world_id").map_err(|_| storage_error("读取当前拍卖世界失败"))?,
         sequence: row.try_get("sequence").map_err(|_| storage_error("读取当前拍卖序号失败"))?,
@@ -77,7 +77,9 @@ pub(super) fn map_postgres_current(
         preview_revision: row
             .try_get("preview_revision")
             .map_err(|_| storage_error("读取当前拍卖预览版本失败"))?,
-    })
+    };
+    snapshot.validate().map_err(storage_error)?;
+    Ok(snapshot)
 }
 
 #[cfg(feature = "sqlite")]
@@ -143,7 +145,7 @@ pub(super) fn map_sqlite_summary(
 pub(super) fn map_sqlite_current(
     row: sqlx::sqlite::SqliteRow,
 ) -> Result<CurrentAuctionSnapshot, ApplicationError> {
-    Ok(CurrentAuctionSnapshot {
+    let snapshot = CurrentAuctionSnapshot {
         id: uuid_from_blob(
             row.try_get("id").map_err(|_| storage_error("读取 Lite 当前拍卖标识失败"))?,
             "当前拍卖标识",
@@ -175,7 +177,9 @@ pub(super) fn map_sqlite_current(
         preview_revision: row
             .try_get("preview_revision")
             .map_err(|_| storage_error("读取 Lite 当前拍卖预览版本失败"))?,
-    })
+    };
+    snapshot.validate().map_err(storage_error)?;
+    Ok(snapshot)
 }
 
 #[cfg(feature = "sqlite")]
@@ -227,4 +231,17 @@ pub(super) fn validate_list_request(
         return Err(storage_error("公开拍卖世界参数无效"));
     }
     Ok(())
+}
+
+pub(super) fn map_realtime_status(
+    status: &str,
+) -> Result<PublicRealtimeAuctionStatus, ApplicationError> {
+    match status {
+        "preview" => Ok(PublicRealtimeAuctionStatus::Preview),
+        "live" => Ok(PublicRealtimeAuctionStatus::Live),
+        "final" => Ok(PublicRealtimeAuctionStatus::Final),
+        "settling" => Ok(PublicRealtimeAuctionStatus::Settling),
+        "settled" => Ok(PublicRealtimeAuctionStatus::Settled),
+        _ => Err(storage_error("读取 Public realtime 拍卖状态失败")),
+    }
 }

@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use auction_application::DeliveryAdminListRequest;
-use auction_contracts::{AdminDeliveryListResponse, ApiResponse};
+use auction_contracts::{AdminDeliveryListResponse, AdminDeliveryPaginationResponse, ApiResponse};
 use axum::{
     Json,
     extract::{ConnectInfo, State},
@@ -88,7 +88,14 @@ pub(crate) async fn list(
         no_store_headers(),
         Json(ApiResponse::ok(
             "交付列表已加载",
-            AdminDeliveryListResponse { deliveries, page, page_size, total: page_result.total },
+            AdminDeliveryListResponse {
+                deliveries,
+                pagination: AdminDeliveryPaginationResponse {
+                    page,
+                    page_size,
+                    total: page_result.total,
+                },
+            },
         )),
     )
         .into_response()

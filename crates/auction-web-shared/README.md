@@ -9,7 +9,10 @@
 - `src/components/mod.rs`：无领域语义的共享基础组件。
 - `src/components/markdown/{mod,model,blocks,inline,render}.rs`：共享 Markdown/GFM 展示器的
   模型、块级解析、行内解析和安全 DOM 渲染；原始 HTML 只作为转义文本展示，链接目标经过
-  协议白名单校验。
+  协议白名单校验。`MarkdownDocument` 提供共享主题容器，`MarkdownBlocks` 只输出安全块节点，
+  供必须由 surface 保留旧容器和排版的页面使用。
+- `src/a11y/mod.rs`：共享 `aria-modal` 弹窗的动态初始聚焦、Tab 焦点循环、背景滚动锁和
+  关闭后触发器焦点恢复；不包含 Public/Admin 业务语义。
 - `src/format/mod.rs`：Public/Admin 共用且不参与业务判断的金额展示规则。
 
 ## 语言选择
@@ -22,7 +25,9 @@
 的默认语言；存储不可用（隐私模式、策略禁用）时不让界面崩溃。
 
 `LanguagePicker` 使用原生 `<select>`：它自带键盘操作、屏幕阅读器语义和移动端原生选择面板，
-不需要额外的可访问性实现。其 `label` 由调用方传入已翻译文本，因此本 crate 不含任何文案。
+不需要额外的可访问性实现。组件同时显式同步当前 option 的 `selected` 状态，保证刷新后的原生
+下拉显示与 `hv.lang`、`<html lang>` 一致。其 `label` 由调用方传入已翻译文本，因此本 crate
+不含任何文案。
 
 各 surface 自己拥有译文资源与默认语言常量（`DEFAULT_PUBLIC_LOCALE` / `DEFAULT_ADMIN_LOCALE`
 在本 crate 定义，但译文在各 surface）。

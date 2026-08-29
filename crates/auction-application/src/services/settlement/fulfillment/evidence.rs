@@ -4,7 +4,7 @@ use auction_domain::SettlementObligationKind;
 
 use crate::{
     ApplicationError, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
-    SettlementFulfillmentSentEvidence,
+    SettlementFulfillmentSentEvidence, canonical_settlement_fulfillment_subject,
 };
 
 use super::validation::repository_error;
@@ -16,20 +16,17 @@ pub(super) fn validate_sent_evidence(
     evidence: &SettlementFulfillmentSentEvidence,
 ) -> Result<(), ApplicationError> {
     let expected_subject = match claim.kind {
-        SettlementObligationKind::WinnerEquipmentCod
-        | SettlementObligationKind::WinnerEquipmentHandoff => "Auction equipment delivery",
-        SettlementObligationKind::WinnerPaymentCarrierCod => "Auction payment request",
-        SettlementObligationKind::SellerPayout => "Auction seller payout",
-        SettlementObligationKind::BuyerRefund => "Auction buyer refund",
         SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
             return Err(repository_error("退回义务不应进入发送回执对账"));
         }
+        _ => canonical_settlement_fulfillment_subject(claim.kind, claim.obligation_id)
+            .ok_or_else(|| repository_error("结算履约主题闭集无效"))?,
     };
     let (remaining_credits, remaining_cod, remaining_equipment) =
         if evidence.collected { (0, 0, Vec::new()) } else { expected_remaining(claim)? };
     if evidence.external_mail_id != external_mail_id
         || evidence.world != claim.world
-        || !evidence.recipient.eq_ignore_ascii_case(&claim.recipient)
+        || evidence.recipient != claim.recipient
         || evidence.subject != expected_subject
         || evidence.remaining_credits != remaining_credits
         || evidence.cod_pending != remaining_cod

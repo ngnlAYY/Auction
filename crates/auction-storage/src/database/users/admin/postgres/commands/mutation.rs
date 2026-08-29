@@ -3,6 +3,7 @@
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
 use super::super::*;
+use super::blacklist::apply_blacklist_effects_postgres;
 
 pub(crate) async fn mutate_postgres(
     store: &super::super::super::super::super::PostgresStore,
@@ -24,6 +25,17 @@ pub(crate) async fn mutate_postgres(
         return Ok(result);
     }
 
+    // 竞价事务使用 lot -> proxy -> user 的锁序；拉黑必须先取得相同的 lot/proxy 锁，
+    // 才能在用户资格变更前原子冻结授权，避免与并发出价形成反向锁。
+    if write.action == AdminUserMutationAction::Blacklist {
+        apply_blacklist_effects_postgres(
+            &mut transaction,
+            write.command_id,
+            write.user_id,
+            write.now,
+        )
+        .await?;
+    }
     let before = load_user_postgres_tx(&mut transaction, write.user_id).await?;
     if before.state_version != write.expected_state_version {
         return Err(admin_error(AdminUserError::VersionConflict {

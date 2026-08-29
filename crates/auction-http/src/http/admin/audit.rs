@@ -168,7 +168,6 @@ pub(crate) async fn list(
         page_size: result.page_size,
         total: result.total,
         has_more,
-        cursor: raw_cursor,
         next_cursor: result.next_cursor.map(map_cursor),
         next_cursor_token,
     };

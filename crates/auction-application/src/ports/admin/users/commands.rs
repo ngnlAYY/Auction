@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
+use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -72,6 +73,46 @@ impl RecoveryBuyerBlacklistResult {
             && super::common::valid_time(self.occurred_at)
             && self.user.validate()
     }
+
+    /// 按旧版 recovery buyer blacklist result 的 schema-v1 字段顺序生成证明摘要。
+    ///
+    /// Users owner 返回的完整结果才是证明事实；不能只按 action 与 command reference 生成替代摘要，
+    /// 否则滚动升级接管时同一已完成黑名单会得到不同 proof。
+    pub fn legacy_proof_digest(&self) -> Result<[u8; 32], serde_json::Error> {
+        #[derive(Serialize)]
+        struct LegacyRecoveryBuyerBlacklistProof<'a> {
+            schema_version: u8,
+            command_id: String,
+            recovery_id: String,
+            action_id: String,
+            buyer_user_id: String,
+            public_reason: &'a str,
+            actor_id: &'a str,
+            occurred_at: String,
+        }
+
+        let payload = LegacyRecoveryBuyerBlacklistProof {
+            schema_version: 1,
+            command_id: self.command_id.to_string(),
+            recovery_id: self.recovery_id.as_uuid().to_string(),
+            action_id: self.action_id.as_uuid().to_string(),
+            buyer_user_id: self.buyer_user_id.to_string(),
+            public_reason: &self.public_reason,
+            actor_id: &self.actor_id,
+            occurred_at: legacy_go_time(self.occurred_at),
+        };
+        Ok(RequestHash::from_legacy_go_json(&payload)?.as_bytes())
+    }
+}
+
+/// 复现 Go `time.Time.MarshalJSON` 使用的 RFC3339Nano：纳秒位尾零全部移除。
+fn legacy_go_time(value: DateTime<Utc>) -> String {
+    let encoded = value.to_rfc3339_opts(SecondsFormat::Nanos, true);
+    let Some(without_zone) = encoded.strip_suffix('Z') else {
+        return encoded;
+    };
+    let without_fraction_padding = without_zone.trim_end_matches('0').trim_end_matches('.');
+    format!("{without_fraction_padding}Z")
 }
 
 /// Admin 用户命令闭集，对应旧版 user_admin_commands.command_kind。

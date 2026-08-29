@@ -32,7 +32,7 @@ pub(super) async fn list_published_topics_postgres(
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
            AND sync.thread_id IS NOT NULL
-           AND auction.status IN ('preview', 'live', 'final', 'settling', 'settled')
+           AND auction.status IN ('live', 'final')
          ORDER BY sync.updated_at ASC, sync.auction_id ASC
          LIMIT $1",
     )
@@ -74,6 +74,7 @@ pub(super) async fn lot_targets_postgres(
          FROM public.lots AS lot
          JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
          WHERE lot.auction_id = $1
+           AND lot.status IN ('live', 'sold')
          ORDER BY lot.lot_number ASC, lot.id ASC",
     )
     .bind(auction_id.as_uuid())

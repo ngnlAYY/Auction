@@ -1,11 +1,11 @@
 //! 规则页面加载、语言切换和 workspace 装配。
 
 use auction_web_shared::SUPPORTED_LOCALES;
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use crate::api::fetch_admin_rules;
-use crate::app::surface::AdminPanel;
+use crate::app::surface::admin_api_error_message;
 
 use super::helpers::{DEFAULT_RULES_LOCALE, missing_rules_document, to_draft};
 use super::model::{RuleCommand, RuleNotice};
@@ -41,20 +41,14 @@ pub fn page() -> Element {
         }
     });
 
-    match &*rules.read_unchecked() {
+    let content = match &*rules.read_unchecked() {
         None => rsx! {
-            AdminPanel { title: t!("page-rules-title"), detail: t!("admin-rules-loading") }
+            p { class: "admin-rules-status", role: "status", {t!("admin-rules-loading")} }
         },
         Some(Err(error)) if error.status == Some(404) => {
             let document = missing_rules_document(target());
             rsx! {
-                section {
-                    class: "admin-panel",
-                    role: "status",
-                    aria_labelledby: "admin-rules-missing-title",
-                    h1 { id: "admin-rules-missing-title", {t!("page-rules-title")} }
-                    p { class: "admin-panel__note", {t!("admin-rules-missing")} }
-                }
+                p { class: "admin-rules-status", role: "status", {t!("admin-rules-missing")} }
                 AdminRulesWorkspace {
                     document,
                     target: target(),
@@ -70,8 +64,11 @@ pub fn page() -> Element {
                 }
             }
         }
-        Some(Err(_)) => rsx! {
-            AdminRulesLoadError { reload_generation, missing: false }
+        Some(Err(error)) => rsx! {
+            AdminRulesLoadError {
+                detail: admin_api_error_message(&error.code),
+                reload_generation,
+            }
         },
         Some(Ok(document)) => rsx! {
             AdminRulesWorkspace {
@@ -88,20 +85,26 @@ pub fn page() -> Element {
                 reload_generation,
             }
         },
+    };
+
+    rsx! {
+        section {
+            class: "admin-rules-page",
+            aria_labelledby: "rules-title",
+            h1 { id: "rules-title", {t!("page-rules-title")} }
+            p { class: "admin-rules-intro", {t!("admin-rules-description")} }
+            {content}
+        }
     }
 }
 
 #[component]
-pub(super) fn AdminRulesLoadError(mut reload_generation: Signal<u64>, missing: bool) -> Element {
+pub(super) fn AdminRulesLoadError(detail: String, mut reload_generation: Signal<u64>) -> Element {
     rsx! {
-        section {
-            class: "admin-panel",
+        div {
+            class: "admin-rules-error",
             role: "alert",
-            aria_labelledby: "admin-rules-error-title",
-            h1 { id: "admin-rules-error-title", {t!("page-rules-title")} }
-            p { class: "admin-panel__note", {
-                if missing { t!("admin-rules-missing") } else { t!("admin-rules-error") }
-            }}
+            p { class: "admin-panel__note", "{detail}" }
             button {
                 r#type: "button",
                 onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),

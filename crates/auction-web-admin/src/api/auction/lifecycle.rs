@@ -8,7 +8,8 @@ pub(crate) use auction_contracts::AdminAuctionLifecycleResponse as AdminAuctionL
 use gloo_net::http::Request;
 use uuid::Uuid;
 
-use super::{ApiResponse, fetch_csrf_token};
+use super::auctions::decode_auction_command_response;
+use super::{fetch_csrf_token, invalid_request_error, response_error, send_request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdminAuctionLifecycleAction {
@@ -38,18 +39,25 @@ pub(crate) async fn execute_admin_auction_lifecycle(
 ) -> Result<AdminAuctionLifecycleResult, String> {
     let csrf_token = fetch_csrf_token().await?;
     let url = format!("/api/v1/admin/auctions/{auction_id}/{}", action.path());
-    let request = Request::post(&url)
-        .header("x-csrf-token", &csrf_token)
-        .json(&AdminAuctionLifecycleRequest { command_id, expected_state_version, reason })
-        .map_err(|error| error.to_string())?;
-    let response = request.send().await.map_err(|error| error.to_string())?;
+    let command = AdminAuctionLifecycleRequest {
+        command_id: command_id.to_string(),
+        expected_state_version,
+        reason,
+    };
+    let response = send_request(|abort_signal| {
+        Request::post(&url)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
+    })
+    .await?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(response_error(response).await);
     }
-    let payload: ApiResponse<AdminAuctionLifecycleResult> =
-        response.json().await.map_err(|error| error.to_string())?;
-    if payload.data.command_id != command_id || payload.data.auction_id != auction_id {
-        return Err("lifecycle response does not match command".to_owned());
+    let auction = decode_auction_command_response(response).await?;
+    if auction.id != auction_id {
+        return Err("invalid_response".to_owned());
     }
-    Ok(payload.data)
+    Ok(AdminAuctionLifecycleResult { auction })
 }

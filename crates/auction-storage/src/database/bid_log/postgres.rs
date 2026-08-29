@@ -80,7 +80,7 @@ pub(super) async fn list_postgres(
            AND ($2::text IS NULL OR a.world_id = $2)
            AND ($3::uuid IS NULL OR l.id = $3)
            AND command.command_kind IN (
-                'place_bid', 'create_proxy_authorization',
+                'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
            )
            AND (
@@ -156,7 +156,7 @@ pub(super) async fn list_postgres(
                    AND ($2::text IS NULL OR a.world_id = $2)
                    AND ($3::uuid IS NULL OR l.id = $3)
                    AND command.command_kind IN (
-                        'place_bid', 'create_proxy_authorization',
+                        'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
                    )",
             )

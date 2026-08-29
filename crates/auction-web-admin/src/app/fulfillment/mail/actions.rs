@@ -1,16 +1,16 @@
 //! Admin 邮件轮询触发和暂停/恢复操作。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
 
-use super::super::format_admin_time;
+use super::super::{AdminActionFeedback, format_admin_time};
 
 #[component]
 pub(super) fn MailTriggerButton(
-    mut notice: Signal<Option<bool>>,
+    mut notice: Signal<Option<AdminActionFeedback>>,
     mut refresh: Signal<u64>,
 ) -> Element {
     let mut busy = use_signal(|| false);
@@ -33,11 +33,13 @@ pub(super) fn MailTriggerButton(
                 spawn(async move {
                     match trigger_mail_poll(command_id).await {
                         Ok(_) => {
-                            notice.set(Some(true));
+                            notice.set(Some(AdminActionFeedback::Success));
                             command_state.set(None);
                             refresh.set(refresh().saturating_add(1));
                         }
-                        Err(_) => notice.set(Some(false)),
+                        Err(error) => {
+                            notice.set(Some(AdminActionFeedback::Error(error.code)))
+                        }
                     }
                     busy.set(false);
                 });
@@ -50,7 +52,7 @@ pub(super) fn MailTriggerButton(
 #[component]
 pub(super) fn MailPollingCard(
     polling: AdminMailPolling,
-    mut notice: Signal<Option<bool>>,
+    mut notice: Signal<Option<AdminActionFeedback>>,
     mut refresh: Signal<u64>,
 ) -> Element {
     let desired_paused = !polling.paused;
@@ -63,26 +65,27 @@ pub(super) fn MailPollingCard(
     let pause_notice = notice;
     let pause_refresh = refresh;
     rsx! {
-        section {
-            class: "admin-panel admin-mail-polling-card",
-            aria_labelledby: "admin-mail-polling-title",
+        article {
+            class: "admin-mail-state",
             aria_busy: busy().to_string(),
-            h2 { id: "admin-mail-polling-title", {t!("admin-mail-polling-title")} }
-            p { class: "admin-panel__note",
-                {t!(
-                    "admin-mail-polling-summary",
-                    mailbox: polling.mailbox_key.clone(),
-                    status: state_label,
-                    version: polling.state_version,
-                    failures: polling.consecutive_failures
-                )}
-            }
-            p { class: "admin-panel__note",
-                {t!(
-                    "admin-mail-polling-times",
-                    last: format_admin_time(&polling.last_poll_at),
-                    next: format_admin_time(&polling.next_poll_at)
-                )}
+            h3 { {polling.mailbox_key.clone()} }
+            dl {
+                div {
+                    dt { {t!("admin-mail-polling-state")} }
+                    dd { "{state_label}" }
+                }
+                div {
+                    dt { {t!("admin-mail-polling-failures")} }
+                    dd { "{polling.consecutive_failures}" }
+                }
+                div {
+                    dt { {t!("admin-mail-polling-last")} }
+                    dd { {format_admin_time(&polling.last_poll_at)} }
+                }
+                div {
+                    dt { {t!("admin-mail-polling-next")} }
+                    dd { {format_admin_time(&polling.next_poll_at)} }
+                }
             }
             button {
                 r#type: "button",
@@ -103,11 +106,13 @@ pub(super) fn MailPollingCard(
                     spawn(async move {
                         match set_mail_paused(command_id, polling, desired_paused).await {
                             Ok(_) => {
-                                notice.set(Some(true));
+                                notice.set(Some(AdminActionFeedback::Success));
                                 command_state.set(None);
                                 refresh.set(refresh().saturating_add(1));
                             }
-                            Err(_) => notice.set(Some(false)),
+                            Err(error) => {
+                                notice.set(Some(AdminActionFeedback::Error(error.code)))
+                            }
                         }
                         busy.set(false);
                     });

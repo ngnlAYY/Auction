@@ -2,6 +2,9 @@
 
 use super::super::*;
 use super::*;
+use auction_application::{SettlementAuctionSnapshot, SettlementLotReport};
+use chrono::{DateTime, Utc};
+use std::collections::BTreeSet;
 
 pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlementReportResponse {
     let auction = report.auction;
@@ -23,8 +26,6 @@ pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlement
             cancelled_reason: auction.cancelled_reason,
             cancelled_by: auction.cancelled_by,
             state_version: auction.state_version,
-            scheduled_end_at: auction.scheduled_end_at.map(timestamp),
-            effective_end_at: auction.effective_end_at.map(timestamp),
             created_at: timestamp(auction.created_at),
             updated_at: timestamp(auction.updated_at),
         },
@@ -63,10 +64,23 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
     if auction.id.as_uuid() != auction_id
         || auction.sequence <= 0
         || auction.state_version <= 0
-        || auction.world_id.is_empty()
-        || auction.status.is_empty()
+        || !valid_report_text(&auction.world_id, 64)
+        || !matches!(
+            auction.status.as_str(),
+            "draft" | "preview" | "live" | "final" | "settling" | "settled" | "cancelled"
+        )
+        || !valid_report_time(auction.preview_scheduled_at)
+        || auction.scheduled_open_at < auction.preview_scheduled_at
         || auction.preview_revision < 0
-        || auction.created_at > auction.updated_at
+        || !valid_report_time(auction.created_at)
+        || !valid_report_time(auction.updated_at)
+        || auction.updated_at < auction.created_at
+        || !valid_report_optional_time(auction.preview_opened_at)
+        || !valid_report_optional_time(auction.opened_at)
+        || !valid_report_optional_time(auction.final_phase_at)
+        || !valid_report_optional_time(auction.settled_at)
+        || !valid_report_optional_time(auction.cancelled_at)
+        || !valid_report_auction_lifecycle(auction)
     {
         return false;
     }
@@ -75,6 +89,7 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
         Some(settlement) => {
             if auction.status != "settled"
                 || auction.settled_at != Some(settlement.settled_at)
+                || !valid_report_time(settlement.settled_at)
                 || settlement.opening_balance < 0
                 || settlement.tax_income < 0
                 || settlement.discount_demand < 0
@@ -82,34 +97,292 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
                 || settlement.closing_balance < 0
                 || settlement.movement_count < 2
                 || report.lots.is_empty()
+                || settlement.discount_demand < settlement.compensation_out
             {
                 return false;
             }
-            report.lots.iter().all(|lot| {
-                !lot.id.is_nil()
-                    && lot.lot_number > 0
-                    && matches!(lot.status.as_str(), "sold" | "unsold")
-                    && !lot.equipment_name.is_empty()
-                    && lot.final_price >= 0
-                    && lot.buyer_amount >= 0
-                    && lot.seller_amount >= 0
-                    && lot.tax_amount >= 0
-                    && lot.compensation_amount >= 0
-                    && lot.adjustment.policy.as_ref().is_none_or(|policy| {
-                        !policy.is_empty() && policy.len() <= 64 && policy == policy.trim()
-                    })
-            })
+            let mut lot_ids = BTreeSet::new();
+            let mut lot_numbers = BTreeSet::new();
+            let mut tax_income = 0_i64;
+            let mut compensation_out = 0_i64;
+            let mut movement_count = 2_i64;
+            for lot in &report.lots {
+                if !lot_ids.insert(lot.id) || !lot_numbers.insert(lot.lot_number) {
+                    return false;
+                }
+                if !valid_settlement_lot(lot) {
+                    return false;
+                }
+                tax_income = match tax_income.checked_add(lot.tax_amount) {
+                    Some(value) => value,
+                    None => return false,
+                };
+                compensation_out = match compensation_out.checked_add(lot.compensation_amount) {
+                    Some(value) => value,
+                    None => return false,
+                };
+                if lot.tax_amount > 0 {
+                    movement_count += 1;
+                }
+                if lot.compensation_amount > 0 {
+                    movement_count += 1;
+                }
+            }
+            let Some(closing_balance) = settlement
+                .opening_balance
+                .checked_add(tax_income)
+                .and_then(|value| value.checked_sub(compensation_out))
+            else {
+                return false;
+            };
+            tax_income == settlement.tax_income
+                && compensation_out == settlement.compensation_out
+                && closing_balance == settlement.closing_balance
+                && movement_count == settlement.movement_count
         }
     }
 }
 
-pub(crate) fn map_recovery_report(report: RecoveryReport) -> AdminRecoveryReportResponse {
-    AdminRecoveryReportResponse {
-        auction_id: report.auction_id.to_string(),
-        recoveries: report
-            .recoveries
-            .into_iter()
-            .map(|recovery| AdminRecoveryResponse {
+/// 结算报告必须复用旧版 Admin 快照的时间与生命周期不变量，避免错误状态进入 wire。
+fn valid_report_auction_lifecycle(auction: &SettlementAuctionSnapshot) -> bool {
+    if auction.preview_manual_open && auction.preview_opened_at.is_none()
+        || auction
+            .opened_at
+            .is_some_and(|opened| auction.preview_opened_at.is_none_or(|preview| opened < preview))
+        || auction
+            .final_phase_at
+            .is_some_and(|final_phase| auction.opened_at.is_none_or(|opened| final_phase < opened))
+        || auction
+            .settled_at
+            .is_some_and(|settled| auction.opened_at.is_none_or(|opened| settled < opened))
+    {
+        return false;
+    }
+    let cancelled = auction.status == "cancelled";
+    let has_any_cancel_metadata = auction.cancelled_at.is_some()
+        || auction.cancelled_reason.is_some()
+        || auction.cancelled_by.is_some();
+    let has_cancel_metadata = auction.cancelled_at.is_some()
+        && auction.cancelled_reason.is_some()
+        && auction.cancelled_by.is_some();
+    if cancelled {
+        has_cancel_metadata
+            && auction.cancelled_reason.as_deref().is_some_and(valid_report_cancellation_reason)
+            && auction.cancelled_by.as_deref().is_some_and(|actor| valid_report_text(actor, 256))
+    } else {
+        !has_any_cancel_metadata
+    }
+}
+
+/// 结算 lot 的金额规则与旧版 `SettlementReportLot.Validate` 保持同一闭集。
+fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
+    if lot.id.is_nil()
+        || lot.lot_number <= 0
+        || !valid_report_text(&lot.equipment_name, 512)
+        || !valid_report_optional_text(lot.seller.as_deref(), 512)
+        || !valid_report_optional_text(lot.winner.as_deref(), 512)
+        || lot.final_price < 0
+        || lot.buyer_amount < 0
+        || lot.seller_amount < 0
+        || lot.tax_amount < 0
+        || lot.compensation_amount < 0
+        || !valid_report_optional_text(lot.adjustment.policy.as_deref(), 64)
+    {
+        return false;
+    }
+    match lot.status.as_str() {
+        "sold" => {
+            let Some(winner) = lot.winner.as_deref() else {
+                return false;
+            };
+            if !valid_report_text(winner, 512) || lot.final_price <= 0 {
+                return false;
+            }
+            let Some(buyer_side) = lot.buyer_amount.checked_add(lot.compensation_amount) else {
+                return false;
+            };
+            let Some(seller_side) = lot.seller_amount.checked_add(lot.tax_amount) else {
+                return false;
+            };
+            if buyer_side != seller_side || lot.tax_amount > 0 && lot.compensation_amount > 0 {
+                return false;
+            }
+            if lot.tax_amount > 0 {
+                lot.seller_amount == lot.final_price
+            } else {
+                lot.seller_amount <= lot.final_price
+                    && (lot.compensation_amount == 0 || lot.seller_amount < lot.final_price)
+            }
+        }
+        "unsold" => {
+            lot.winner.is_none()
+                && lot.final_price == 0
+                && lot.buyer_amount == 0
+                && lot.seller_amount == 0
+                && lot.tax_amount == 0
+                && lot.compensation_amount == 0
+        }
+        _ => false,
+    }
+}
+
+fn valid_report_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty() && value == value.trim() && value.len() <= maximum
+}
+
+fn valid_report_optional_text(value: Option<&str>, maximum: usize) -> bool {
+    value.is_none_or(|value| valid_report_text(value, maximum))
+}
+
+fn valid_report_time(value: DateTime<Utc>) -> bool {
+    value.timestamp_nanos_opt().is_some()
+}
+
+fn valid_report_optional_time(value: Option<DateTime<Utc>>) -> bool {
+    value.is_none_or(valid_report_time)
+}
+
+fn valid_report_cancellation_reason(value: &str) -> bool {
+    valid_report_text(value, 1024) && !value.chars().any(char::is_control)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryReportMappingError {
+    UnknownErrorCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublicRecoveryErrorCode {
+    InvalidFact,
+    RecipientUnavailable,
+    DeliveryConflict,
+    DeliveryUnavailable,
+    DeliveryFailed,
+    StaleClaim,
+    EvidenceNotObserved,
+    EvidenceUnavailable,
+    EvidenceMismatch,
+    OutcomeUnknown,
+    RelistUnavailable,
+}
+
+impl PublicRecoveryErrorCode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidFact => "invalid_recovery_fact",
+            Self::RecipientUnavailable => "recovery_recipient_unavailable",
+            Self::DeliveryConflict => "recovery_delivery_conflict",
+            Self::DeliveryUnavailable => "recovery_delivery_unavailable",
+            Self::DeliveryFailed => "recovery_delivery_failed",
+            Self::StaleClaim => "stale_recovery_claim",
+            Self::EvidenceNotObserved => "recovery_evidence_not_observed",
+            Self::EvidenceUnavailable => "recovery_evidence_unavailable",
+            Self::EvidenceMismatch => "recovery_evidence_mismatch",
+            Self::OutcomeUnknown => "recovery_outcome_unknown",
+            Self::RelistUnavailable => "recovery_relist_unavailable",
+        }
+    }
+}
+
+fn map_recovery_error_code(
+    value: &str,
+) -> Result<PublicRecoveryErrorCode, RecoveryReportMappingError> {
+    match value {
+        // 旧 v1 已持久化的公开码必须保持原值，内部实现码只在这个防腐边界归并。
+        "invalid_recovery_fact" => Ok(PublicRecoveryErrorCode::InvalidFact),
+        "recovery_recipient_unavailable" => Ok(PublicRecoveryErrorCode::RecipientUnavailable),
+        "recovery_delivery_conflict" => Ok(PublicRecoveryErrorCode::DeliveryConflict),
+        "recovery_delivery_unavailable" => Ok(PublicRecoveryErrorCode::DeliveryUnavailable),
+        "recovery_delivery_failed" => Ok(PublicRecoveryErrorCode::DeliveryFailed),
+        "stale_recovery_claim" => Ok(PublicRecoveryErrorCode::StaleClaim),
+        "recovery_evidence_not_observed" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "recovery_evidence_unavailable" => Ok(PublicRecoveryErrorCode::EvidenceUnavailable),
+        "recovery_evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        "recovery_outcome_unknown" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "recovery_relist_unavailable" => Ok(PublicRecoveryErrorCode::RelistUnavailable),
+        "evidence_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        // 成功页但远端引用不能证明的旧语义是 outcome_unknown，不能伪装成已观察到的证据缺失。
+        "delivery_reference_mismatch"
+        | "delivery_reference_missing"
+        | "delivery_reference_unproven"
+        | "delivery_outcome_unknown" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "delivery_failed" | "send_rejected" | "invalid_payload" => {
+            Ok(PublicRecoveryErrorCode::DeliveryFailed)
+        }
+        "send_rejected_after_stage"
+        | "write_unknown"
+        | "gateway_outcome_unknown"
+        | "invalid_gateway_result"
+        | "lease_expired_outcome_unknown"
+        | "preflight_unproven" => Ok(PublicRecoveryErrorCode::OutcomeUnknown),
+        "delivery_unavailable"
+        | "recovery_observation_failed"
+        | "recovery_buyer_blacklist_unavailable"
+        | "recovery_buyer_blacklist_owner_unavailable"
+        | "recovery_activation_unavailable"
+        | "recovery_activation_link_failed"
+        | "credential_unavailable"
+        | "secret_not_found"
+        | "invalid_secret"
+        | "login_key_unavailable"
+        | "session_expired"
+        | "rate_limited"
+        | "remote_temporary"
+        | "response_too_large" => Ok(PublicRecoveryErrorCode::DeliveryUnavailable),
+        "recovery_delivery_pending" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "recovery_recipient_missing" | "recovery_recipient_ineligible" | "recipient_not_found" => {
+            Ok(PublicRecoveryErrorCode::RecipientUnavailable)
+        }
+        "recovery_buyer_blacklist_result_invalid"
+        | "recovery_activation_result_invalid"
+        | "recovery_delivery_result_invalid"
+        | "recovery_delivery_link_failed" => Ok(PublicRecoveryErrorCode::DeliveryConflict),
+        "recovery_request_hash_failed"
+        | "recovery_prepare_identity_missing"
+        | "recovery_activation_hash_failed"
+        | "recovery_source_mail_missing"
+        | "unsupported_recovery_action"
+        | "configuration" => Ok(PublicRecoveryErrorCode::InvalidFact),
+        "not_observed" => Ok(PublicRecoveryErrorCode::EvidenceNotObserved),
+        "protocol_drift" | "identity_mismatch" => Ok(PublicRecoveryErrorCode::EvidenceMismatch),
+        _ => Err(RecoveryReportMappingError::UnknownErrorCode),
+    }
+}
+
+fn map_optional_recovery_error_code(
+    value: Option<String>,
+) -> Result<Option<String>, RecoveryReportMappingError> {
+    value
+        .as_deref()
+        .map(map_recovery_error_code)
+        .transpose()
+        .map(|value| value.map(PublicRecoveryErrorCode::as_str).map(ToOwned::to_owned))
+}
+
+pub(crate) fn map_recovery_report(
+    report: RecoveryReport,
+) -> Result<AdminRecoveryReportResponse, RecoveryReportMappingError> {
+    let recoveries = report
+        .recoveries
+        .into_iter()
+        .map(|recovery| -> Result<AdminRecoveryResponse, RecoveryReportMappingError> {
+            let actions = recovery
+                .actions
+                .into_iter()
+                .map(|action| -> Result<AdminRecoveryActionResponse, RecoveryReportMappingError> {
+                    Ok(AdminRecoveryActionResponse {
+                        id: action.id.to_string(),
+                        kind: action.kind,
+                        state: action.state,
+                        delivery_id: action.delivery_id.map(|id| id.to_string()),
+                        failure_code: map_optional_recovery_error_code(action.failure_code)?,
+                        proof_kind: action.proof_kind,
+                        proof_observed_at: action.proof_observed_at.map(timestamp),
+                        updated_at: timestamp(action.updated_at),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(AdminRecoveryResponse {
                 id: recovery.id.to_string(),
                 auction_id: recovery.auction_id.to_string(),
                 lot_id: recovery.lot_id.to_string(),
@@ -124,31 +397,19 @@ pub(crate) fn map_recovery_report(report: RecoveryReport) -> AdminRecoveryReport
                 reminder_limit: recovery.reminder_limit,
                 custody_proof_kind: recovery.custody_proof_kind,
                 custody_proof_observed_at: recovery.custody_proof_observed_at.map(timestamp),
-                blocking_code: recovery.blocking_code,
+                blocking_code: map_optional_recovery_error_code(recovery.blocking_code)?,
                 manual_reconcile_delivery_id: recovery
                     .manual_reconcile_delivery_id
                     .map(|id| id.to_string()),
                 relisted_auction_id: recovery.relisted_auction_id.map(|id| id.to_string()),
                 relisted_lot_id: recovery.relisted_lot_id.map(|id| id.to_string()),
-                actions: recovery
-                    .actions
-                    .into_iter()
-                    .map(|action| AdminRecoveryActionResponse {
-                        id: action.id.to_string(),
-                        kind: action.kind,
-                        state: action.state,
-                        delivery_id: action.delivery_id.map(|id| id.to_string()),
-                        failure_code: action.failure_code,
-                        proof_kind: action.proof_kind,
-                        proof_observed_at: action.proof_observed_at.map(timestamp),
-                        updated_at: timestamp(action.updated_at),
-                    })
-                    .collect(),
+                actions,
                 allowed_commands: recovery.allowed_commands,
                 updated_at: timestamp(recovery.updated_at),
             })
-            .collect(),
-    }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(AdminRecoveryReportResponse { auction_id: report.auction_id.to_string(), recoveries })
 }
 
 pub(crate) fn map_recovery_confirmation(

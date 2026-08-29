@@ -13,5 +13,5 @@ js-sys.workspace = true
 unic-langid.workspace = true
 # 语言偏好持久化与 <html lang> 同步需要 Storage/Element；同时补齐 dioxus-web 0.7.10
 # 漏声明的 Location feature，详见根 Cargo.toml 说明。
-web-sys = { workspace = true, features = ["CssStyleDeclaration", "Document", "Element", "FocusEvent", "HtmlElement", "KeyboardEvent", "MutationObserver", "MutationObserverInit", "NodeList", "Storage"] }
+web-sys = { workspace = true, features = ["CssStyleDeclaration", "Document", "DomRect", "Element", "FocusEvent", "HtmlElement", "KeyboardEvent", "MutationObserver", "MutationObserverInit", "NodeList", "ResizeObserver", "Storage", "Window"] }
 wasm-bindgen.workspace = true

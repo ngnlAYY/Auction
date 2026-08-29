@@ -7,7 +7,7 @@ use super::forms::{
     TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
     is_loopback_host, is_session_expired, origin_of, posting_action_matches_board,
     posting_form_values, same_origin, set_form_value, valid_cookie, valid_rendered_thread,
-    valid_topic_id,
+    valid_topic_id, valid_topic_title,
 };
 use super::*;
 
@@ -144,18 +144,51 @@ impl EhentaiClient {
         if !self.valid_for() || !valid_cookie(cookie) || !valid_rendered_thread(&rendered) {
             return Err(EhentaiError::configuration(operation));
         }
-        let board_id = self.board_for_world(world, operation)?;
-        let board_value = board_id.to_string();
-        let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
-        let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
-        if let Some(published) =
-            self.find_topic(&board_url, board_id, &rendered.title, &body, operation)?
-        {
+        let (board_id, board_url, existing) = self
+            .find_topic_by_title_with_operation(world, cookie, &rendered.title, operation)
+            .await?;
+        if let Some(published) = existing {
             return Ok(published);
         }
 
         let form = self.load_topic_form(board_id, &board_url, cookie).await?;
         self.submit_topic(form, board_id, rendered, cookie).await
+    }
+
+    /// 只读按精确标题查找主题；该入口永远不会加载发帖表单或发送 POST。
+    pub async fn find_topic_by_title(
+        &self,
+        world: SettlementWorld,
+        cookie: &EhentaiCookie,
+        title: &str,
+    ) -> Result<Option<auction_application::ForumPublishedThread>, EhentaiError> {
+        let (_, _, published) = self
+            .find_topic_by_title_with_operation(
+                world,
+                cookie,
+                title,
+                EhentaiOperation::ReconcileTopic,
+            )
+            .await?;
+        Ok(published)
+    }
+
+    async fn find_topic_by_title_with_operation(
+        &self,
+        world: SettlementWorld,
+        cookie: &EhentaiCookie,
+        title: &str,
+        operation: EhentaiOperation,
+    ) -> Result<(i32, Url, Option<auction_application::ForumPublishedThread>), EhentaiError> {
+        if !self.valid_for() || !valid_cookie(cookie) || !valid_topic_title(title) {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let board_value = board_id.to_string();
+        let board_url = self.index_url(&[("showforum", board_value.as_str())], operation)?;
+        let (body, _) = self.get_page(operation, board_url.clone(), None, cookie).await?;
+        let published = self.find_topic(&board_url, board_id, title, &body, operation)?;
+        Ok((board_id, board_url, published))
     }
 
     /// 读取一个已发布主题，并复用论坛预览适配器解析帖子命令。

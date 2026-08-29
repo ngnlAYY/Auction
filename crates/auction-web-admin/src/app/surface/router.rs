@@ -7,8 +7,8 @@ use super::{
     auctions, audit, config, credentials, dashboard, deliveries, lots, mail, realtime, renames,
     rules, settlement, status, users,
 };
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 /// 管理端路由表。
 ///
@@ -81,10 +81,9 @@ pub(super) enum Route {
 
         #[route("/status")]
         Status {},
-    #[end_layout]
 
-    #[route("/:..segments")]
-    NotFound { segments: Vec<String> },
+        #[route("/:..segments")]
+        NotFound { segments: Vec<String> },
 }
 
 #[component]

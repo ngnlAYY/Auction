@@ -1,11 +1,12 @@
 //! Admin lot 的代理竞价历史弹窗与分页。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
-use dioxus_i18n::t;
 
 use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
 
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
+use crate::app::surface::admin_api_error_message;
 
 use super::super::format_admin_time;
 use super::super::pagination::AdminPager;
@@ -29,11 +30,11 @@ pub(super) fn AdminProxyHistory(
 
     let content = match &*events.read_unchecked() {
         None => rsx! {
-            p { class: "admin-panel__note", role: "status", {t!("admin-lots-proxy-loading")} }
+            p { role: "status", {t!("admin-lots-proxy-loading")} }
         },
-        Some(Err(_)) => rsx! {
+        Some(Err(error)) => rsx! {
             div {
-                p { class: "admin-panel__note", role: "alert", {t!("admin-lots-proxy-error")} }
+                p { role: "alert", {admin_api_error_message(error)} }
                 button {
                     r#type: "button",
                     onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
@@ -47,23 +48,22 @@ pub(super) fn AdminProxyHistory(
     };
 
     rsx! {
-        div { class: "admin-lots__dialog-backdrop", role: "presentation",
+        div { class: "admin-shell__dialog-backdrop", role: "presentation",
             section {
-                class: "admin-lots__dialog admin-lots__proxy-dialog",
+                class: "admin-shell__dialog admin-auction-proxy",
                 role: "dialog",
                 aria_modal: "true",
-                aria_labelledby: "admin-proxy-history-title",
-                tabindex: "-1",
+                aria_label: t!("admin-lots-proxy-title", lot: lot_number),
                 onkeydown: move |event| {
                     if event.key() == Key::Escape {
+                        event.prevent_default();
+                        event.stop_propagation();
                         selected_lot.set(None);
                     }
                 },
-                h2 { id: "admin-proxy-history-title",
-                    {t!("admin-lots-proxy-title", lot: lot_number)}
-                }
+                h2 { {t!("admin-lots-proxy-title", lot: lot_number)} }
                 {content}
-                div { class: "admin-lots__dialog-actions",
+                div { class: "admin-shell__dialog-actions",
                     button {
                         r#type: "button",
                         autofocus: true,
@@ -83,27 +83,25 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
     let total = proxy_event_total(&page, current_page);
 
     rsx! {
-        div { class: "admin-lots__proxy-content",
-            if page.proxy_events.is_empty() {
-                p { class: "admin-panel__note", {t!("admin-lots-proxy-empty")} }
-            } else {
-                div { class: "admin-lots__proxy-table-wrap",
-                    table { class: "admin-lots__proxy-table",
-                        tbody {
-                            for event in page.proxy_events.clone() {
-                                AdminProxyHistoryRow { event }
-                            }
+        if page.proxy_events.is_empty() {
+            p { {t!("admin-lots-proxy-empty")} }
+        } else {
+            div { class: "admin-auction-table-wrap",
+                table { class: "admin-auction-table",
+                    tbody {
+                        for event in page.proxy_events.clone() {
+                            AdminProxyHistoryRow { event }
                         }
                     }
                 }
             }
-            AdminPager {
-                page: current_page,
-                page_size,
-                total,
-                label: t!("admin-lots-proxy-pagination"),
-                on_page_change: move |next_page| page_number.set(next_page),
-            }
+        }
+        AdminPager {
+            page: current_page,
+            page_size,
+            total,
+            label: t!("admin-lots-proxy-pagination"),
+            on_page_change: move |next_page| page_number.set(next_page),
         }
     }
 }

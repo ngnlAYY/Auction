@@ -52,9 +52,9 @@ pub(crate) fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryRe
         bidder_name: entry.bidder_name,
         valid: entry.valid,
         accepted_state_version: entry.accepted_state_version,
-        fact_index: entry.fact_index,
+        fact_index: i64::from(entry.fact_index),
         mechanism: entry.mechanism,
-        created_at: timestamp(entry.created_at),
+        created_at: public_timestamp(entry.created_at),
     }
 }
 
@@ -66,9 +66,9 @@ pub(crate) fn map_owned_bid(bid: PublicMyBid) -> PublicOwnedBidResponse {
         lot_number: bid.lot_number,
         amount: bid.amount,
         accepted_state_version: bid.accepted_state_version,
-        fact_index: bid.fact_index,
+        fact_index: i64::from(bid.fact_index),
         mechanism: bid.mechanism,
-        created_at: timestamp(bid.created_at),
+        created_at: public_timestamp(bid.created_at),
         leading: bid.leading,
         equipment: PublicOwnedEquipmentResponse {
             name: bid.equipment_name,
@@ -96,8 +96,8 @@ pub(crate) fn map_owned_proxy(proxy: PublicOwnedProxy) -> PublicOwnedProxyRespon
         status: proxy.status,
         terminal_reason: proxy.terminal_reason,
         state_version: proxy.state_version,
-        created_at: timestamp(proxy.created_at),
-        updated_at: timestamp(proxy.updated_at),
+        created_at: public_timestamp(proxy.created_at),
+        updated_at: public_timestamp(proxy.updated_at),
         equipment,
         bid: proxy
             .bid
@@ -111,37 +111,27 @@ pub(crate) fn map_owned_proxy(proxy: PublicOwnedProxy) -> PublicOwnedProxyRespon
     }
 }
 
-/// 校验命令结果所需的历史账户投影身份和追加式转换链。
-///
-/// 当前授权行可能已经被后续命令推进，但按授权 ID 读取的转换历史仍包含原命令版本；命令
-/// 映射器会根据领域计划截取到原状态版本，避免把后续状态或后续转换混入重放结果。
-pub(crate) fn valid_command_proxy_identity(
-    proxy: &PublicOwnedProxy,
-    expected: &ProxyAuthorization,
-) -> bool {
-    let Ok(expected_state_version) = i64::try_from(expected.state_version) else {
-        return false;
-    };
-    let Ok(expected_transition_count) = usize::try_from(expected_state_version) else {
-        return false;
-    };
-    proxy.authorization_id == expected.id.as_uuid()
-        && proxy.lot_id == expected.lot_id.as_uuid()
-        && proxy.user_id == expected.user_id.as_uuid()
-        && proxy.quota_limit >= 0
-        && proxy.transitions.len() >= expected_transition_count
-}
-
-/// 把已提交的代理快照和本次竞价计划组合成旧系统要求的命令响应。
+/// 把事务内冻结的代理命令结果映射成旧系统要求的成功响应。
 pub(crate) fn map_proxy_command_response(
-    proxy: PublicOwnedProxy,
+    proxy: CompetitionProxyCommandOutcome,
     plan: &CompetitionPlan,
-    expected: &ProxyAuthorization,
     bidder_id: UserId,
+    effective_end_at: CompetitionWireTimestamp,
 ) -> Option<PublicProxyCommandResponse> {
+    let expected = proxy.authorization;
     let expected_state_version = i64::try_from(expected.state_version).ok()?;
-    let transition_count = usize::try_from(expected_state_version).ok()?;
-    if proxy.transitions.len() < transition_count {
+    let transition_count = usize::try_from(expected.state_version).ok()?;
+    if effective_end_at.instant() != plan.final_lot.effective_end_at
+        || expected.lot_id != plan.final_lot.lot_id
+        || proxy.quota_used != expected.usage_number
+        || proxy.quota_limit > 0 && proxy.quota_used > u64::from(proxy.quota_limit)
+        || proxy.transitions.len() != transition_count
+        || proxy.transitions.iter().enumerate().any(|(index, transition)| {
+            let number = u64::try_from(index).ok().and_then(|value| value.checked_add(1));
+            Some(transition.transition_number) != number
+                || transition.resulting_state_version != transition.transition_number
+        })
+    {
         return None;
     }
     let state_version = i64::try_from(plan.final_lot.state_version).ok()?;
@@ -157,7 +147,7 @@ pub(crate) fn map_proxy_command_response(
             Some(PublicProxyCommandBidResponse {
                 lot_id: bid.lot_id.to_string(),
                 current_price: bid.amount.value(),
-                effective_end_at: timestamp(plan.final_lot.effective_end_at),
+                effective_end_at: effective_end_at.wire().to_owned(),
                 state_version,
                 leading: plan.final_lot.leader_id == Some(bidder_id),
             })
@@ -165,26 +155,17 @@ pub(crate) fn map_proxy_command_response(
         _ => return None,
     };
 
-    let status = match expected.status {
-        ProxyStatus::Active | ProxyStatus::FinalFast => "active",
-        ProxyStatus::Exhausted => "exhausted",
-        ProxyStatus::Frozen => "frozen",
-        ProxyStatus::Closed => "closed",
-    };
-    let mode = match expected.mode {
-        ProxyMode::Fast => "fast",
-        ProxyMode::Slow => "slow",
-    };
-    let terminal_reason = if status == "active" {
-        None
-    } else {
-        proxy
-            .transitions
-            .get(transition_count.saturating_sub(1))
-            .and_then(|transition| transition.reason.clone())
-    };
-    let transitions =
-        proxy.transitions.into_iter().take(transition_count).map(map_proxy_transition).collect();
+    let status = proxy_status_wire(expected.status);
+    let mode = proxy_mode_wire(expected.mode);
+    let terminal_reason = proxy.terminal_reason.map(proxy_terminal_reason_wire).map(str::to_owned);
+    if (status == "active") != terminal_reason.is_none() {
+        return None;
+    }
+    let transitions = proxy
+        .transitions
+        .into_iter()
+        .map(map_proxy_command_transition)
+        .collect::<Option<Vec<_>>>()?;
     Some(PublicProxyCommandResponse {
         authorization: PublicProxyCommandAuthorizationResponse {
             authorization_id: expected.id.to_string(),
@@ -194,8 +175,8 @@ pub(crate) fn map_proxy_command_response(
             mode: mode.to_owned(),
             maximum_amount: expected.maximum_amount.value(),
             quota: PublicOwnedProxyQuotaResponse {
-                used: i64::try_from(expected.usage_number).ok()?,
-                limit: proxy.quota_limit,
+                used: i64::try_from(proxy.quota_used).ok()?,
+                limit: i64::from(proxy.quota_limit),
             },
             transitions,
             status: status.to_owned(),
@@ -204,6 +185,60 @@ pub(crate) fn map_proxy_command_response(
             bid,
         },
     })
+}
+
+fn map_proxy_command_transition(
+    transition: CompetitionProxyTransitionOutcome,
+) -> Option<PublicOwnedProxyTransitionResponse> {
+    Some(PublicOwnedProxyTransitionResponse {
+        transition_number: i64::try_from(transition.transition_number).ok()?,
+        kind: proxy_transition_kind_wire(transition.kind).to_owned(),
+        old_maximum_amount: transition.old_maximum_amount.map(BidAmount::value),
+        new_maximum_amount: transition.new_maximum_amount.value(),
+        old_mode: transition.old_mode.map(proxy_mode_wire).map(str::to_owned),
+        new_mode: proxy_mode_wire(transition.new_mode).to_owned(),
+        old_status: transition.old_status.map(proxy_status_wire).map(str::to_owned),
+        new_status: proxy_status_wire(transition.new_status).to_owned(),
+        reason: transition.reason.map(proxy_terminal_reason_wire).map(str::to_owned),
+        resulting_state_version: i64::try_from(transition.resulting_state_version).ok()?,
+        created_at: transition.created_at.wire().to_owned(),
+    })
+}
+
+const fn proxy_mode_wire(mode: ProxyMode) -> &'static str {
+    match mode {
+        ProxyMode::Fast => "fast",
+        ProxyMode::Slow => "slow",
+    }
+}
+
+const fn proxy_status_wire(status: ProxyStatus) -> &'static str {
+    match status {
+        ProxyStatus::Active | ProxyStatus::FinalFast => "active",
+        ProxyStatus::Exhausted => "exhausted",
+        ProxyStatus::Frozen => "frozen",
+        ProxyStatus::Closed => "closed",
+    }
+}
+
+const fn proxy_terminal_reason_wire(reason: ProxyTerminalReason) -> &'static str {
+    match reason {
+        ProxyTerminalReason::StrictlyDefeated => "strictly_defeated",
+        ProxyTerminalReason::RankedBelow => "ranked_below",
+        ProxyTerminalReason::EligibilityLost => "eligibility_lost",
+        ProxyTerminalReason::CompetitionClosed => "competition_closed",
+    }
+}
+
+const fn proxy_transition_kind_wire(kind: ProxyTransitionKind) -> &'static str {
+    match kind {
+        ProxyTransitionKind::Created => "created",
+        ProxyTransitionKind::Lowered => "lowered",
+        ProxyTransitionKind::FinalFast => "final_fast",
+        ProxyTransitionKind::Exhausted => "exhausted",
+        ProxyTransitionKind::Frozen => "frozen",
+        ProxyTransitionKind::Closed => "closed",
+    }
 }
 
 pub(crate) fn map_proxy_bid(
@@ -218,9 +253,9 @@ pub(crate) fn map_proxy_bid(
         lot_number: bid.lot_number,
         amount: bid.amount,
         accepted_state_version: bid.accepted_state_version,
-        fact_index: bid.fact_index,
+        fact_index: i64::from(bid.fact_index),
         mechanism: bid.mechanism,
-        created_at: timestamp(bid.created_at),
+        created_at: public_timestamp(bid.created_at),
         leading: bid.leading,
         equipment: PublicOwnedEquipmentResponse {
             name: equipment_name.to_owned(),
@@ -243,7 +278,7 @@ pub(crate) fn map_proxy_transition(
         new_status: transition.new_status,
         reason: transition.reason,
         resulting_state_version: transition.resulting_state_version,
-        created_at: timestamp(transition.created_at),
+        created_at: public_timestamp(transition.created_at),
     }
 }
 
@@ -281,7 +316,7 @@ pub(crate) fn map_price_history_entry(
         buyer_name: entry.buyer_name,
         seller_name: entry.seller_name,
         price: entry.price,
-        closed_at: timestamp(entry.closed_at),
+        closed_at: public_timestamp(entry.closed_at),
     }
 }
 

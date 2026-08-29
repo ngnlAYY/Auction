@@ -11,6 +11,7 @@ pub(super) async fn relist_recovery(
     recovery: &RecoveryRow,
     original_lot: &OriginalLot,
     command_id: CommandId,
+    preview_event_id: Uuid,
     action: RecoveryConfirmationAction,
     now: DateTime<Utc>,
 ) -> Result<RelistResult, RecoveryCommandError> {
@@ -54,8 +55,11 @@ pub(super) async fn relist_recovery(
         return Err(RecoveryCommandError::NotConfirmable);
     }
 
-    let relisted_lot_id =
-        deterministic_uuid(CommandId::from_uuid(recovery.id), "recovery-relist-lot", 1);
+    let nil_uuid = Uuid::nil();
+    let relisted_lot_id = legacy_natural_key_uuid(
+        "auction.recovery.relist-lot.v1",
+        &[recovery.id.as_bytes(), nil_uuid.as_bytes()],
+    );
     sqlx::query(
         r#"INSERT INTO public.lots
                (id, auction_id, equipment_id, submission_id, lot_number, status,
@@ -99,8 +103,8 @@ pub(super) async fn relist_recovery(
         target_id,
         &recovery.world_id,
         next_revision,
-        target_next_state_version,
         command_id,
+        preview_event_id,
     )
     .await?;
 
@@ -123,8 +127,8 @@ pub(super) async fn insert_preview_event(
     auction_id: Uuid,
     world_id: &str,
     preview_revision: i64,
-    state_version: i64,
     command_id: CommandId,
+    event_id: Uuid,
 ) -> Result<(), RecoveryCommandError> {
     let stream_key = format!("auction:{auction_id}");
     sqlx::query(
@@ -152,7 +156,7 @@ pub(super) async fn insert_preview_event(
                 public_payload, state_version, origin_command_id)
            VALUES ($1, $2, $3, 'preview_catalog_changed', 1, $4, $5, $6)"#,
     )
-    .bind(deterministic_uuid(command_id, "recovery-relist-preview-event", 1))
+    .bind(event_id)
     .bind(&stream_key)
     .bind(sequence)
     .bind(json!({
@@ -160,7 +164,7 @@ pub(super) async fn insert_preview_event(
         "auction_id": auction_id,
         "preview_revision": preview_revision,
     }))
-    .bind(state_version)
+    .bind(preview_revision)
     .bind(command_id.as_uuid())
     .execute(&mut **transaction)
     .await
@@ -210,7 +214,6 @@ pub(super) async fn update_recovery(
 }
 
 #[cfg(feature = "postgres")]
-#[cfg(feature = "postgres")]
 pub(super) async fn insert_recovery_command(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecoveryConfirmationCommand,
@@ -246,11 +249,11 @@ pub(super) async fn insert_recovery_audit(
     action: &ActionRow,
     result: &RecoveryConfirmationResult,
 ) -> Result<(), RecoveryCommandError> {
-    let metadata = json!({
+    let mut metadata = json!({
         "command_id": command.command_id.as_uuid(),
         "recovery_action_id": action.id,
         "delivery_id": action.delivery_id,
-        "previous_stage": "reclaiming",
+        "previous_stage": recovery.stage,
         "next_stage": result.stage,
         "proof_kind": action.proof_kind,
         "relisted_auction_id": result.relisted_auction_id,
@@ -258,19 +261,25 @@ pub(super) async fn insert_recovery_audit(
         "previous_state_version": command.expected_state_version,
         "state_version": result.state_version,
     });
+    if let Some(request_id) = command.request_id.as_ref() {
+        let Some(object) = metadata.as_object_mut() else {
+            return Err(RecoveryCommandError::InvalidStoredResult);
+        };
+        object.insert("request_id".to_owned(), json!(request_id));
+    }
     sqlx::query(
         r#"INSERT INTO public.audit_records
                (id, actor_type, actor_id, action, entity_type, entity_id, result,
                 request_id, source, metadata)
-           VALUES ($1, $2, $3, $4, 'recovery', $5, 'success', $6, $7, $8)"#,
+           VALUES ($1, $2, $3, $4, 'auction', $5, 'success', $6, $7, $8)"#,
     )
     .bind(Uuid::new_v4())
     .bind(command.actor.actor_type.database_name())
     .bind(&command.actor.actor_id)
     .bind(format!("auction.recovery.{}", command.action.as_str()))
     .bind(recovery.id.to_string())
-    .bind(command.command_id.to_string())
-    .bind(command.actor.actor_type.database_name())
+    .bind(None::<String>)
+    .bind("admin")
     .bind(metadata)
     .execute(&mut **transaction)
     .await

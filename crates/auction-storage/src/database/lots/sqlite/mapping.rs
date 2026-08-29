@@ -102,7 +102,7 @@ pub(super) fn map_sqlite_preview_detail(
     let category: String = row
         .try_get("equipment_category")
         .map_err(|_| storage_error("读取 Lite 预览详情装备分类失败"))?;
-    let equipment = map_equipment(world_id, &external_id, &name, &category, attributes)?;
+    let equipment = map_equipment(world_id, &external_id, &name, &category, attributes, false)?;
     let summary = PublicPreviewLotSummary {
         id,
         auction_id,

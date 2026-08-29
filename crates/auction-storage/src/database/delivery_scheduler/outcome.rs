@@ -46,45 +46,16 @@ pub(super) async fn succeed_postgres(
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| repository_error_owned("结算 delivery 成功结果缺少 operation"))?;
         match operation {
-            // return 的页面动作已经由 parser.prove_return_completed 证明，
-            // 可以在同一事务中把对应义务收口为 satisfied。
             "return" => {
-                let proof = DeliveryProof {
-                    external_reference: &result.external_reference,
-                    result_metadata: &result.result_metadata,
-                };
-                let proof_digest = RequestHash::from_request(
-                    "settlement_delivery_proof",
-                    claim.delivery_id,
-                    &proof,
-                )
-                .map_err(|_| repository_error_owned("delivery 成功证明摘要生成失败"))?;
-                let updated_fulfillment = sqlx::query(
-                    r#"UPDATE public.settlement_obligation_fulfillments
-                       SET execution_state = 'satisfied',
-                           claim_token = NULL,
-                           claimed_at = NULL,
-                           claim_expires_at = NULL,
-                           proof_kind = 'delivery_external_reference',
-                           proof_reference = $2,
-                           proof_digest = $3,
-                           proof_observed_at = $4,
-                           last_error_code = NULL,
-                           completed_at = $4,
-                           state_version = state_version + 1,
-                           updated_at = CURRENT_TIMESTAMP
-                       WHERE delivery_id = $1
-                         AND execution_state = 'enqueued'"#,
-                )
-                .bind(claim.delivery_id)
-                .bind(&result.external_reference)
-                .bind(proof_digest.as_bytes().to_vec())
-                .bind(completed_at)
-                .execute(&mut *transaction)
-                .await
-                .map_err(map_storage_error)?;
-                if updated_fulfillment.rows_affected() != 1 {
-                    return Err(repository_error_owned("delivery 成功但结算履约未处于 enqueued"));
+                if result
+                    .result_metadata
+                    .get("external_mail_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none()
+                    || result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
+                        != Some("action_removed_or_success_page")
+                {
+                    return Err(repository_error_owned("结算 return 成功结果缺少动作完成证明"));
                 }
             }
             // send 的 POST 响应最多只能证明请求已被提交。旧版还会读取 Sent
@@ -172,32 +143,8 @@ pub(super) async fn fail_postgres(
     if updated.rows_affected() != 1 {
         return Err(repository_error_owned("delivery 失败写回时 lease 已失效"));
     }
-    if claim.origin_kind == "settlement" {
-        let fulfillment_state = if outcome_unknown { "manual_reconcile" } else { "failed" };
-        let updated_fulfillment = sqlx::query(
-            r#"UPDATE public.settlement_obligation_fulfillments
-               SET execution_state = $2,
-                   claim_token = NULL,
-                   claimed_at = NULL,
-                   claim_expires_at = NULL,
-                   last_error_code = $3,
-                   completed_at = $4,
-                   state_version = state_version + 1,
-                   updated_at = CURRENT_TIMESTAMP
-               WHERE delivery_id = $1
-                 AND execution_state = 'enqueued'"#,
-        )
-        .bind(claim.delivery_id)
-        .bind(fulfillment_state)
-        .bind(failure_code)
-        .bind(completed_at)
-        .execute(&mut *transaction)
-        .await
-        .map_err(map_storage_error)?;
-        if updated_fulfillment.rows_affected() != 1 {
-            return Err(repository_error_owned("delivery 失败但结算履约未处于 enqueued"));
-        }
-    }
+    // delivery 只提交自己的传输终态。fulfillment owner 会在后续领取中读取该状态，
+    // 以自身 claim/fencing 原子写入 failed/manual/satisfied 和唯一 owner audit。
     let request_id = claim.command_id.to_string();
     append_delivery_audit(
         &mut transaction,

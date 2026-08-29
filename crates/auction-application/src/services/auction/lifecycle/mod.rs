@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     ApplicationError, ApplicationFuture, AuctionFinalProxyPlan, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort, AuctionLifecycleContext, AuctionLifecycleEffect,
-    AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult,
+    AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleSnapshot,
     AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan, CommandLedgerError,
     CompetitionTransaction, CompetitionTransactionError, RequestHash, StoredCommand,
     TransactionPolicy, TransactionRunner,
@@ -80,7 +80,7 @@ where
                             )
                             .into());
                         }
-                        let replayed: AuctionLifecycleResult =
+                        let mut replayed: AuctionLifecycleResult =
                             serde_json::from_slice(&stored.result_payload)?;
                         if replayed.command_id != command.command_id
                             || replayed.auction_id != command.auction_id
@@ -89,6 +89,29 @@ where
                                 "生命周期命令账本结果聚合不一致".to_owned(),
                             )
                             .into());
+                        }
+                        if let Some(snapshot) = replayed.auction.as_ref()
+                            && (snapshot.id != replayed.auction_id
+                                || snapshot.status != replayed.status
+                                || snapshot.state_version != replayed.state_version
+                                || snapshot.updated_at != replayed.updated_at)
+                        {
+                            return Err(CompetitionTransactionError::Failed(
+                                "生命周期命令账本完整快照不一致".to_owned(),
+                            )
+                            .into());
+                        }
+                        if replayed.auction.is_none()
+                            && let Some(context) = transaction
+                                .load_lifecycle_context_for_update(command.auction_id)
+                                .await?
+                            && context.auction.status == replayed.status
+                            && context.auction.state_version == replayed.state_version
+                            && context.auction.updated_at == replayed.updated_at
+                        {
+                            // 只在数据库仍停留于旧最小结果对应版本时补出精确快照；状态已继续推进时
+                            // 宁可保留 `None` 让 HTTP 失败关闭，也不把当前状态伪装成历史幂等结果。
+                            replayed.auction = Some(snapshot_from_context(&context));
                         }
                         return Ok(replayed);
                     }
@@ -103,15 +126,8 @@ where
                     {
                         return Err(CompetitionTransactionError::StaleState.into());
                     }
-                    let plan = lifecycle_plan(transaction, &command, context, now, policy).await?;
-                    let auction = &plan.auction;
-                    let result = AuctionLifecycleResult {
-                        command_id: command.command_id,
-                        auction_id: AuctionId::from_uuid(auction.id.as_uuid()),
-                        status: auction.status,
-                        state_version: auction.state_version,
-                        updated_at: auction.updated_at,
-                    };
+                    let plan = lifecycle_plan(transaction, &command, &context, now, policy).await?;
+                    let result = lifecycle_result(&command, &context, &plan)?;
                     let stored = StoredCommand {
                         command_id: command.command_id,
                         command_kind: command.action.command_kind().to_owned(),
@@ -121,12 +137,85 @@ where
                         result_payload: serde_json::to_vec(&result)?,
                     };
                     transaction.insert_command(stored).await?;
-                    transaction.apply_lifecycle_plan(&command, plan).await?;
-                    transaction.append_lifecycle_record(&command, &result).await?;
+                    let write_summary =
+                        transaction.apply_lifecycle_plan(&command, plan.clone()).await?;
+                    transaction
+                        .append_lifecycle_record(&command, &context, &plan, &result, write_summary)
+                        .await?;
                     Ok(result)
                 })
             })
             .await
+    }
+}
+
+fn lifecycle_result(
+    command: &AuctionLifecycleCommand,
+    context: &AuctionLifecycleContext,
+    plan: &AuctionLifecyclePlan,
+) -> Result<AuctionLifecycleResult, ApplicationError> {
+    let auction = &plan.auction;
+    let mut snapshot = snapshot_from_context(context);
+    snapshot.id = AuctionId::from_uuid(auction.id.as_uuid());
+    snapshot.status = auction.status;
+    snapshot.state_version = auction.state_version;
+    snapshot.updated_at = auction.updated_at;
+    snapshot.cancelled_at = auction.cancelled_at;
+    snapshot.cancelled_reason.clone_from(&auction.cancelled_reason);
+    snapshot.cancelled_by.clone_from(&auction.cancelled_by);
+
+    match &plan.effect {
+        AuctionLifecycleEffect::Preview { manual, .. } => {
+            snapshot.preview_opened_at = snapshot.preview_opened_at.or(Some(auction.updated_at));
+            snapshot.preview_manual_open |= *manual;
+            // 预览开放只推进生命周期版本；内容修订号已经由录入、lot 编辑或重列命令推进。
+        }
+        AuctionLifecycleEffect::Open { manual_override } => {
+            snapshot.preview_opened_at = snapshot.preview_opened_at.or(Some(auction.updated_at));
+            if *manual_override {
+                if snapshot.preview_scheduled_at > auction.updated_at {
+                    snapshot.preview_scheduled_at = auction.updated_at;
+                }
+                snapshot.scheduled_open_at = auction.updated_at;
+            }
+            snapshot.opened_at = Some(auction.updated_at);
+        }
+        AuctionLifecycleEffect::Cancel => {}
+        AuctionLifecycleEffect::FinalPhase { .. } => {
+            snapshot.final_phase_at = Some(auction.updated_at);
+        }
+    }
+
+    Ok(AuctionLifecycleResult {
+        command_id: command.command_id,
+        auction_id: AuctionId::from_uuid(auction.id.as_uuid()),
+        status: auction.status,
+        state_version: auction.state_version,
+        updated_at: auction.updated_at,
+        auction: Some(snapshot),
+    })
+}
+
+fn snapshot_from_context(context: &AuctionLifecycleContext) -> AuctionLifecycleSnapshot {
+    AuctionLifecycleSnapshot {
+        id: AuctionId::from_uuid(context.auction.id.as_uuid()),
+        world_id: context.world_id.clone(),
+        sequence: context.sequence,
+        status: context.auction.status,
+        preview_scheduled_at: context.preview_scheduled_at,
+        scheduled_open_at: context.scheduled_open_at,
+        preview_opened_at: context.preview_opened_at,
+        preview_manual_open: context.preview_manual_open,
+        preview_revision: context.preview_revision,
+        opened_at: context.opened_at,
+        final_phase_at: context.final_phase_at,
+        settled_at: context.settled_at,
+        cancelled_at: context.auction.cancelled_at,
+        cancelled_reason: context.auction.cancelled_reason.clone(),
+        cancelled_by: context.auction.cancelled_by.clone(),
+        state_version: context.auction.state_version,
+        created_at: context.auction.created_at,
+        updated_at: context.auction.updated_at,
     }
 }
 

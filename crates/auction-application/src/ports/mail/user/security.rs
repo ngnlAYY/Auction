@@ -1,4 +1,4 @@
-//! Users/MoogleMail 登录 key 的短生命周期安全容器。
+//! Users/Admin/MoogleMail 登录 key 的短生命周期安全容器。
 
 use std::fmt;
 
@@ -9,8 +9,13 @@ use super::super::mail_processing::MailProcessingError;
 
 const LOGIN_KEY_BYTES: usize = 32;
 const LOGIN_KEY_TEXT_LENGTH: usize = 43;
+const ADMIN_MANUAL_LOGIN_KEY_MIN_BYTES: usize = 32;
+const ADMIN_MANUAL_LOGIN_KEY_MAX_BYTES: usize = 256;
 
-/// 仅在 Worker 内存中短暂存在的 Base64URL 登录 key。
+/// 仅在可信边界内短暂存在的用户登录 key。
+///
+/// MoogleMail 签发和换绑只接受 canonical Base64URL；Admin 手工创建还要兼容旧版允许的
+/// 32–256 字节 UTF-8 非控制字符。两个构造器保持各自闭集，避免放宽邮件命令解析。
 pub struct MailLoginKey {
     encoded: Vec<u8>,
 }
@@ -34,10 +39,21 @@ impl MailLoginKey {
         Ok(Self { encoded: encoded.as_bytes().to_vec() })
     }
 
-    /// 在受控回调中读取编码值；回调不得保留或记录明文。
+    /// 解析旧 Admin 契约允许的手工登录 key。
+    pub fn from_admin_manual(value: &str) -> Result<Self, MailProcessingError> {
+        let size = value.len();
+        if !(ADMIN_MANUAL_LOGIN_KEY_MIN_BYTES..=ADMIN_MANUAL_LOGIN_KEY_MAX_BYTES).contains(&size)
+            || value.chars().any(char::is_control)
+        {
+            return Err(MailProcessingError::InvalidLoginKey);
+        }
+        Ok(Self { encoded: value.as_bytes().to_vec() })
+    }
+
+    /// 在受控回调中读取 UTF-8 值；回调不得保留或记录明文。
     pub fn with_encoded<T>(&self, callback: impl FnOnce(&str) -> T) -> T {
-        // `from_encoded` 只接受 ASCII canonical Base64URL，因此这里不会失败；不使用
-        // `unwrap` 是为了避免公共请求路径形成隐含 panic，异常数据由构造器提前拒绝。
+        // 两个构造器都从 `str` 复制 UTF-8，因此这里不会失败；不使用 `unwrap` 是为了避免
+        // 公共请求路径形成隐含 panic，异常数据由构造器提前拒绝。
         let value = std::str::from_utf8(&self.encoded).unwrap_or_default();
         callback(value)
     }

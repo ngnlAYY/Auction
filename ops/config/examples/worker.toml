@@ -5,6 +5,8 @@
 
 # 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
+# 可选：Admin 管理的非敏感 runtime TOML；Worker 重启时只读取 world、发件人、装备过滤和邮件模板。
+runtime_config_file = "runtime/admin.toml"
 # 可选：tracing 过滤器；省略时使用进程默认过滤器。
 log_filter = "info,auction=debug"
 
@@ -273,6 +275,8 @@ operations_alert = "Operations alert: {summary}"
 enabled = false
 # 可选：scan、dispatch 和 reconcile 三类独立循环的间隔秒数，范围 1-86400，默认 60。
 scan_interval_seconds = 60
+# 可选：每轮完成后附加的随机抖动上限秒数，不能超过 scan_interval_seconds，默认 5；0 表示关闭抖动。
+jitter_seconds = 5
 # 可选：读取 process/delivery/fulfillment/recovery 来源的超时秒数，范围 1-30，默认 5。
 source_timeout_seconds = 5
 # 可选：同一轮观察结果合并到通知批次前的窗口秒数，范围 1-3600，默认 120。

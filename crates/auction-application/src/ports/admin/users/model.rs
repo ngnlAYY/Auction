@@ -174,18 +174,17 @@ impl AdminUserPage {
             && self.users.iter().enumerate().all(|(index, user)| {
                 user.validate()
                     && request.name.as_deref().is_none_or(|name| {
-                        let needle = name.to_lowercase();
-                        user.user.username.to_lowercase().contains(&needle)
+                        user.user.username.contains(name)
                             || user
                                 .user
                                 .game_player_id
                                 .as_deref()
-                                .is_some_and(|value| value.to_lowercase().contains(&needle))
+                                .is_some_and(|value| value.contains(name))
                     })
                     && request.status.is_none_or(|status| user.user.status == status)
                     && self.users.get(index + 1).is_none_or(|next| {
-                        user.user.username.to_lowercase() < next.user.username.to_lowercase()
-                            || user.user.username.eq_ignore_ascii_case(&next.user.username)
+                        user.user.username < next.user.username
+                            || user.user.username == next.user.username
                                 && user.user.id < next.user.id
                     })
             })

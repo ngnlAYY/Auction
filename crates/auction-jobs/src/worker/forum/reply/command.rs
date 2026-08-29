@@ -119,16 +119,10 @@ async fn execute_command(
     command_id: Uuid,
     amount: i64,
 ) -> Result<(), ApplicationError> {
-    let request = ForumCommandRequest {
-        command_kind,
-        amount,
-        mode: command.proxy.as_deref(),
-        authorization_id: None,
-    };
     match command_kind {
         "bid" => {
             let amount = BidAmount::new(amount)?;
-            let request_hash = RequestHash::from_request("place_bid", lot_id.as_uuid(), &request)?;
+            let request_hash = PlaceBidCommand::legacy_request_hash(lot_id, bidder_id, amount)?;
             runtime
                 .commands
                 .place_bid(PlaceBidCommand {
@@ -149,9 +143,8 @@ async fn execute_command(
                 Some("slow") => ProxyMode::Slow,
                 Some(_) => return Err(repository_error("论坛代理模式不在闭集内")),
             };
-            let request = ForumCommandRequest { mode: Some(proxy_mode_name(mode)), ..request };
             let request_hash =
-                RequestHash::from_request("create_proxy", lot_id.as_uuid(), &request)?;
+                CreateProxyCommand::legacy_request_hash(lot_id, bidder_id, mode, amount)?;
             runtime
                 .commands
                 .create_proxy(CreateProxyCommand {
@@ -171,12 +164,12 @@ async fn execute_command(
             let Some(proxy) = runtime.store.active_proxy(lot_id, bidder_id).await? else {
                 return Err(repository_error("论坛用户没有可降低的活动代理"));
             };
-            let request = ForumCommandRequest {
-                authorization_id: Some(proxy.authorization_id.as_uuid()),
-                ..request
-            };
-            let request_hash =
-                RequestHash::from_request("lower_proxy", lot_id.as_uuid(), &request)?;
+            let request_hash = LowerProxyCommand::legacy_request_hash(
+                lot_id,
+                bidder_id,
+                proxy.authorization_id,
+                amount,
+            )?;
             runtime
                 .commands
                 .lower_proxy(LowerProxyCommand {
@@ -193,12 +186,4 @@ async fn execute_command(
         }
         _ => Err(repository_error("论坛命令类型不在闭集内")),
     }
-}
-
-#[derive(Debug, Serialize)]
-struct ForumCommandRequest<'a> {
-    command_kind: &'a str,
-    amount: i64,
-    mode: Option<&'a str>,
-    authorization_id: Option<Uuid>,
 }

@@ -6,7 +6,7 @@ pub(crate) async fn list_bid_log(
     Path(auction_id): Path<String>,
     uri: Uri,
 ) -> Result<Json<ApiResponse<PublicBidLogListResponse>>, (StatusCode, Json<ApiErrorResponse>)> {
-    let auction_id = Uuid::parse_str(&auction_id)
+    let auction_id = parse_public_uuid(&auction_id)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效"))?;
     let query = parse_query(&uri, &["world", "lot", "page", "page_size", "cursor"])
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -23,7 +23,7 @@ pub(crate) async fn list_bid_log(
             return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
         }
         Some(lot) => Some(
-            Uuid::parse_str(lot)
+            parse_public_uuid(lot)
                 .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?,
         ),
     };
@@ -177,9 +177,19 @@ pub(crate) async fn list_price_history(
             "公开价格历史暂不可用",
         ));
     };
-    let page_result = reader.list_public_price_history(request).await.map_err(|_| {
-        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "公开价格历史暂不可用")
-    })?;
+    let page_result =
+        reader.list_public_price_history(request).await.map_err(|error| match error {
+            ApplicationError::CapabilityUnavailable(_) => api_error(
+                StatusCode::NOT_IMPLEMENTED,
+                "feature_not_supported",
+                "公开价格历史仅支持 PostgreSQL 完整档",
+            ),
+            _ => api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "storage_unavailable",
+                "公开价格历史暂不可用",
+            ),
+        })?;
     if page_result.limit != page_size
         || page_result.offset != offset
         || cursor_raw.is_some() != page_result.total.is_none()

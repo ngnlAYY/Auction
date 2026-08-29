@@ -16,6 +16,12 @@ pub struct AdminRealtimeLagResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeLagListResponse {
     pub lags: Vec<AdminRealtimeLagResponse>,
+    pub pagination: AdminRealtimePaginationResponse,
+}
+
+/// Admin realtime lag 的旧版页码信封。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRealtimePaginationResponse {
     pub page: i64,
     pub page_size: i64,
     pub total: i64,
@@ -39,6 +45,12 @@ pub struct AdminRealtimeFailureResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureListResponse {
     pub failures: Vec<AdminRealtimeFailureResponse>,
+    pub pagination: AdminRealtimeFailurePaginationResponse,
+}
+
+/// Admin realtime failure 的旧版页码信封。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRealtimeFailurePaginationResponse {
     pub page: i64,
     pub page_size: i64,
     pub has_more: bool,
@@ -53,11 +65,13 @@ pub struct AdminRealtimeFailureDetailResponse {
 
 /// Admin realtime failure replay 请求。
 ///
-/// `command_id` 必须在重试中保持不变；payload 只允许应用事件注册表接受的公开对象。
+/// 新客户端应在重试中复用 `command_id`；旧版请求没有该字段，HTTP 防腐层会按 failure 与
+/// 修正负载稳定派生。payload 只允许应用事件注册表接受的公开对象。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRealtimeReplayRequest {
-    pub command_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_id: Option<Uuid>,
     pub schema_version: i32,
     pub public_payload: Value,
 }

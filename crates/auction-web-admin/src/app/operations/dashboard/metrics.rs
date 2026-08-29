@@ -1,11 +1,12 @@
 //! Admin Dashboard 摘要指标。
 
 use dioxus::prelude::*;
-use dioxus_i18n::t;
+use auction_web_shared::legacy_t as t;
 
 use crate::api::{
     AdminAlertingSection, AdminAuctionPage, AdminCredentialData, AdminCredentialSection,
-    AdminMailData, AdminMailIntakePage, AdminMailSection, AdminRealtimeData, DeliveryPage,
+    AdminDeliverySection, AdminMailData, AdminMailIntakePage, AdminMailSection, AdminRealtimeData,
+    DeliveryPage,
 };
 
 #[derive(Clone, PartialEq)]
@@ -49,43 +50,45 @@ pub(super) fn auction_metric(state: &Option<Result<AdminAuctionPage, String>>) -
         None => loading_metric(),
         Some(Err(_)) => unavailable_metric(),
         Some(Ok(page)) => {
-            let active = page
-                .auctions
-                .iter()
-                .filter(|auction| {
-                    matches!(auction.status.as_str(), "preview" | "live" | "final" | "settling")
-                })
-                .count();
             DashboardMetric {
                 value: page.pagination.total.to_string(),
                 state: t!("dashboard-metric-connected"),
-                detail: t!("dashboard-auctions-detail", active: active, total: page.pagination.total),
-                tone: if active == 0 { "neutral" } else { "positive" },
+                // 旧 dashboard 没有拍卖活跃数 owner；这里只显示列表查询返回的全局 COUNT，
+                // 不能再从任意第一页推导全局活跃场次。
+                detail: t!("dashboard-auctions-detail", total: page.pagination.total),
+                tone: if page.pagination.total == 0 { "neutral" } else { "positive" },
             }
         }
     }
 }
 
-pub(super) fn delivery_metric(state: &Option<Result<DeliveryPage, String>>) -> DashboardMetric {
-    match state {
-        None => loading_metric(),
-        Some(Err(_)) => unavailable_metric(),
-        Some(Ok(page)) => {
-            let attention = page
-                .deliveries
-                .iter()
-                .filter(|delivery| {
-                    matches!(delivery.status.as_str(), "failed" | "manual_reconcile")
-                })
-                .count();
+pub(super) fn delivery_metric(
+    dashboard_state: &Option<Result<AdminDeliverySection, String>>,
+    list_state: &Option<Result<DeliveryPage, String>>,
+) -> DashboardMetric {
+    match (dashboard_state, list_state) {
+        (None, _) | (_, None) => loading_metric(),
+        (Some(Err(_)), _) | (_, Some(Err(_))) => unavailable_metric(),
+        (Some(Ok(section)), Some(Ok(page))) => {
+            let Some(data) = section.data.as_ref() else {
+                return unavailable_metric();
+            };
+            // failed/manual_reconcile 是旧版 dashboard delivery owner 的全局 water-level，
+            // 列表页只提供全局 total，不能从第一页行推导关注数。
+            let attention =
+                data.water.failed.max(0).saturating_add(data.water.manual_reconcile.max(0));
             DashboardMetric {
-                value: page.total.to_string(),
+                value: page.pagination.total.to_string(),
                 state: if attention == 0 {
                     t!("dashboard-metric-connected")
                 } else {
                     t!("dashboard-metric-attention")
                 },
-                detail: t!("dashboard-deliveries-detail", attention: attention, total: page.total),
+                detail: t!(
+                    "dashboard-deliveries-detail",
+                    attention: attention,
+                    total: page.pagination.total
+                ),
                 tone: if attention == 0 { "positive" } else { "warning" },
             }
         }

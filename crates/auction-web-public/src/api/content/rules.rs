@@ -2,14 +2,15 @@
 
 pub(crate) use auction_contracts::PublicRulesResponse as RulesDocument;
 
-use super::{ApiResponse, send_get};
+use super::{decoder, send_get};
+use url::form_urlencoded;
 
-pub(crate) async fn fetch_rules() -> Result<RulesDocument, String> {
-    let response = send_get("/api/v1/rules").await?;
+pub(crate) async fn fetch_rules(locale: &str) -> Result<RulesDocument, String> {
+    let query =
+        form_urlencoded::Serializer::new(String::new()).append_pair("lang", locale).finish();
+    let response = send_get(&format!("/api/v1/rules?{query}")).await?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
-    let payload: ApiResponse<RulesDocument> =
-        response.json().await.map_err(|error| error.to_string())?;
-    Ok(payload.data)
+    decoder::decode_rules(response).await
 }

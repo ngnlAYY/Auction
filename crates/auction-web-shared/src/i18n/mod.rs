@@ -10,9 +10,56 @@
 //! 各 surface 自己拥有译文资源与默认语言：公开端默认英文，管理端默认简体中文。
 //! 本模块只提供与业务无关的语言选择能力，不含任何 surface 文案。
 
+/// 按旧版 i18next 的输出约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外壳。
+///
+/// `dioxus-i18n 0.5.1` 没有公开 `FluentBundle::set_use_isolating` 配置入口；其默认行为会在
+/// 每个动态变量外插入 U+2068/U+2069。旧版浏览器界面直接拼接变量，因此 Public 与 Admin
+/// 都通过这个共享宏移除 Fluent 添加的最外层隔离对。变量自身包含的嵌套隔离对仍会保留。
+#[macro_export]
+macro_rules! legacy_t {
+    ($id:expr, $( $name:ident : $value:expr ),* ) => {{
+        let translated = dioxus_i18n::te!($id, $( $name : $value ),*)
+            .unwrap_or_else(|error| panic!("{}", error.to_string()));
+        $crate::i18n::without_fluent_isolation(translated)
+    }};
+
+    ($id:expr) => {{
+        let translated = dioxus_i18n::te!($id)
+            .unwrap_or_else(|error| panic!("{}", error.to_string()));
+        $crate::i18n::without_fluent_isolation(translated)
+    }};
+}
+
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;
 use unic_langid::{LanguageIdentifier, langid};
+
+/// 移除 Fluent 自动包裹动态变量的最外层 FSI/PDI，同时保留变量内部成对的隔离控制符。
+#[doc(hidden)]
+pub fn without_fluent_isolation(value: String) -> String {
+    if !value.contains(['\u{2068}', '\u{2069}']) {
+        return value;
+    }
+
+    let mut result = String::with_capacity(value.len());
+    let mut isolation_depth = 0_u32;
+    for character in value.chars() {
+        match character {
+            '\u{2068}' if isolation_depth == 0 => isolation_depth = 1,
+            '\u{2068}' => {
+                isolation_depth += 1;
+                result.push(character);
+            }
+            '\u{2069}' if isolation_depth == 1 => isolation_depth = 0,
+            '\u{2069}' if isolation_depth > 1 => {
+                isolation_depth -= 1;
+                result.push(character);
+            }
+            _ => result.push(character),
+        }
+    }
+    result
+}
 
 /// 按旧版 `formatTime` 约定把 RFC3339 时间显示为当前语言的 Asia/Shanghai 时间。
 ///
@@ -127,16 +174,18 @@ pub fn initial_language(default_locale: LanguageIdentifier) -> LanguageIdentifie
 
 /// 切换当前语言，并持久化到 `localStorage`。
 ///
+/// 非法语言码按旧版语义回退并持久化当前 surface 的默认语言。
 /// 写入失败只影响下次启动时的偏好恢复，不影响本次会话内的切换结果，因此忽略错误。
-pub fn set_language(i18n: &mut I18n, code: &str) {
-    let Some(language) = parse_supported(code) else {
+pub fn set_language(i18n: &mut I18n, code: &str, default_locale: &'static str) {
+    let resolved = if parse_supported(code).is_some() { code } else { default_locale };
+    let Some(language) = parse_supported(resolved) else {
         return;
     };
 
     i18n.set_language(language.clone());
 
     if let Some(storage) = local_storage() {
-        let _ = storage.set_item(LANGUAGE_STORAGE_KEY, code);
+        let _ = storage.set_item(LANGUAGE_STORAGE_KEY, resolved);
     }
 }
 
@@ -165,7 +214,7 @@ pub fn use_locale_effects(i18n: I18n) {
 /// 使用原生 `<select>`：它自带键盘操作、屏幕阅读器语义和移动端原生选择面板，
 /// 不需要额外的可访问性实现。
 #[component]
-pub fn LanguagePicker(label: String) -> Element {
+pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
     let mut i18n = i18n();
     let current = i18n.language().to_string();
 
@@ -173,11 +222,21 @@ pub fn LanguagePicker(label: String) -> Element {
         label { class: "language-picker",
             span { class: "language-picker__label", "{label}" }
             select {
+                id: "language",
+                name: "language",
                 class: "language-picker__select",
                 value: "{current}",
-                onchange: move |event| set_language(&mut i18n, &event.value()),
+                onchange: move |event| {
+                    set_language(&mut i18n, &event.value(), default_locale)
+                },
                 for locale in SUPPORTED_LOCALES {
-                    option { value: locale.code, "{locale.label}" }
+                    // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生
+                    // selected 状态；逐项声明可确保刷新后下拉值与 hv.lang、<html lang> 一致。
+                    option {
+                        value: locale.code,
+                        selected: current == locale.code,
+                        "{locale.label}"
+                    }
                 }
             }
         }

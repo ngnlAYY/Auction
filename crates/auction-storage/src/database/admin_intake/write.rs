@@ -1,11 +1,15 @@
 //! Admin 装备录入事实和 pending lot 的原子写入。
 
-use auction_application::{AdminIntakeResult, AdminIntakeWrite, CompetitionTransactionError};
+use auction_application::{
+    AdminIntakeResult, AdminIntakeWrite, CommandLedgerError, CompetitionTransactionError,
+};
 use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::database::competition::{PostgresCompetitionTransaction, map_sql_error};
+use crate::database::competition::{
+    PostgresCompetitionTransaction, is_unique_error, map_sql_error,
+};
 
 use super::failed;
 
@@ -29,7 +33,7 @@ pub(super) async fn add_admin_intake_inner(
     .bind(json!({}))
     .execute(&mut **transaction)
     .await
-    .map_err(map_sql_error)?;
+    .map_err(map_command_insert_error)?;
 
     let world_enabled =
         sqlx::query_scalar::<_, bool>("SELECT enabled FROM public.worlds WHERE id = $1 FOR UPDATE")
@@ -37,9 +41,9 @@ pub(super) async fn add_admin_intake_inner(
             .fetch_optional(&mut **transaction)
             .await
             .map_err(map_sql_error)?
-            .ok_or(CompetitionTransactionError::NotFound)?;
+            .ok_or(CompetitionTransactionError::AdminIntakeUnavailable)?;
     if !world_enabled {
-        return Err(CompetitionTransactionError::Conflict);
+        return Err(CompetitionTransactionError::AdminIntakeUnavailable);
     }
 
     let target = sqlx::query(
@@ -58,7 +62,7 @@ pub(super) async fn add_admin_intake_inner(
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?
-    .ok_or(CompetitionTransactionError::NotFound)?;
+    .ok_or(CompetitionTransactionError::AdminIntakeUnavailable)?;
     let auction_id: Uuid = target.try_get("auction_id").map_err(map_sql_error)?;
     let auction_world_id: String = target.try_get("world_id").map_err(map_sql_error)?;
     let auction_sequence: i64 = target.try_get("sequence").map_err(map_sql_error)?;
@@ -72,7 +76,7 @@ pub(super) async fn add_admin_intake_inner(
         || current_state_version <= 0
         || current_preview_revision < 0
     {
-        return Err(CompetitionTransactionError::Conflict);
+        return Err(CompetitionTransactionError::InvalidState);
     }
 
     let player_status = sqlx::query_scalar::<_, String>(
@@ -83,7 +87,7 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_sql_error)?;
     if player_status.as_deref() == Some("blacklisted") {
-        return Err(CompetitionTransactionError::Conflict);
+        return Err(CompetitionTransactionError::AdminIntakeSellerBlacklisted);
     }
 
     let existing_equipment = sqlx::query_scalar::<_, Uuid>(
@@ -98,7 +102,7 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_sql_error)?;
     if existing_equipment.is_some() {
-        return Err(CompetitionTransactionError::Conflict);
+        return Err(CompetitionTransactionError::AdminIntakeEquipmentConflict);
     }
 
     let maximum_lot_number = sqlx::query_scalar::<_, Option<i32>>(
@@ -135,7 +139,7 @@ pub(super) async fn add_admin_intake_inner(
     .bind(write.collected_at)
     .execute(&mut **transaction)
     .await
-    .map_err(map_sql_error)?;
+    .map_err(map_equipment_insert_error)?;
 
     sqlx::query(
         r#"INSERT INTO public.equipment_secrets
@@ -163,7 +167,8 @@ pub(super) async fn add_admin_intake_inner(
     .bind(auction_id)
     .bind(&write.player_id)
     .bind(write.collected_at)
-    .bind(write.source_kind.as_str())
+    // `source_kind` 属于投稿 owner 闭集；URL/JSON 是 Admin 请求适配器种类，只进入来源引用与摘要。
+    .bind("admin")
     .bind(&write.source_reference)
     .bind(write.source_fingerprint.to_vec())
     .execute(&mut **transaction)
@@ -206,7 +211,7 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_sql_error)?;
     if updated.is_none() {
-        return Err(CompetitionTransactionError::Conflict);
+        return Err(CompetitionTransactionError::InvalidState);
     }
 
     let result = AdminIntakeResult {
@@ -238,4 +243,20 @@ pub(super) async fn add_admin_intake_inner(
     .await
     .map_err(map_sql_error)?;
     Ok(result)
+}
+
+fn map_command_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
+    if is_unique_error(&error) {
+        CompetitionTransactionError::CommandLedger(CommandLedgerError::Conflict)
+    } else {
+        map_sql_error(error)
+    }
+}
+
+fn map_equipment_insert_error(error: sqlx::Error) -> CompetitionTransactionError {
+    if is_unique_error(&error) {
+        CompetitionTransactionError::AdminIntakeEquipmentConflict
+    } else {
+        map_sql_error(error)
+    }
 }

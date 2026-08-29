@@ -14,15 +14,39 @@
   命令幂等事务编排和端口实现，`plan.rs` 持有状态迁移与 final proxy 计划，`schedule.rs` 持有后继轮次、
   安全日期计算和稳定 schedule ID；
   人工提前开放使用启动时冻结的策略，并在事务锁内读取计划开放时间后失败关闭，已到期的计划开放和
-  Worker due 命令不受该人工授权开关影响。
-- `src/services/auction/competition.rs`：竞价用例，例如 `CompetitionService::place_bid`。
+  Worker due 命令不受该人工授权开关影响。生命周期端口会把锁前上下文、动作计划和后端实际写入摘要
+  一并交给同事务审计边界，使 Preview/Open/Cancel/Final 的旧版 action 专属 metadata 可精确恢复，
+  又不把 PostgreSQL/SQLite 行模型泄漏到应用层。
+- `src/ports/auction/slow_proxy.rs`、`src/services/auction/competition.rs` 与
+  `src/services/auction/competition/legacy_ledger.rs`：Public 竞价及 Worker slow due 命令端口和用例；
+  父服务使用数据库时间重读 generation/授权/资格 fence，并复用同一竞价事务，不在 Worker 中复制
+  状态机。旧版稳定命令 ID 与请求摘要由端口值对象统一派生；账本防腐层逐字复现 Auction-BF 的
+  `OK + BidResult/ProxyResult`、确定性事实/授权 ID 和严格重放校验，同时只读兼容已存在的新版
+  `accepted + CompetitionPlan` 记录；无公开事实的旧代理结果按 Go nil slice 接受并输出
+  `facts:null`，但字段缺失、未知字段和非空错误事实仍失败关闭。外部 Public 普通竞价、代理创建和代理降低还通过
+  `CompetitionCommandAuditContext` 把命令级审计身份带到同一事务，前置资格冻结只追加代理转换事实，
+  不重复占用 Admin 审计记录。命令端口返回独立的 typed outcome：领域计划与代理成功响应所需的
+  授权、quota、完整转换历史和终态原因在同一事务内冻结，HTTP 不需要在提交后读取账户投影；历史
+  `accepted` 行只在同一只读事务按授权版本截取转换历史并读取冻结策略 quota，不重新执行命令，也不以
+  当前生命周期或时钟 gate 否定既有成功事实。
+- `src/services/settlement/commands/` 与 `src/ports/settlement/commands.rs`：结算命令在锁定拍卖前先读取
+  命令账本，以保持旧版冲突优先级；当前格式继续按自身合同重放，接管的旧
+  `settlement_complete/OK` 则逐字复现 Go 请求摘要、严格解析完整结果，并与已结算摘要、lot 金额和
+  义务种类数量逐项对账。旧格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
+  `LegacySettlementVerificationPort` 另为 `auctionctl` 提供脱敏只读核验摘要；缺账本时没有写入回退，
+  存储适配器必须在同一一致快照中提供旧命令身份和权威结算事实。
 - `src/services/settlement/fulfillment/`：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
   `intent.rs` 负责无 secret delivery intent，`validation.rs` 与 `evidence.rs` 负责 claim/外部回执
-  校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；`mod.rs` 只负责模块装配和稳定出口。
+  校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；schema v1 intent/payload 使用
+  与旧版 Go 相同的 canonical JSON、稳定 ID 和摘要，装备 secret 不进入持久化 payload。
+  `WinnerPaymentCarrierCod` 的义务/装备来源 world 保持 `isekai`，delivery world 固定为 `main`；
+  `mod.rs` 只负责模块装配和稳定出口。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
-  错误类型和本地边界校验；`runtime_config.rs` 只负责稳定公共类型出口，不执行文件、数据库或网络操作。
+  错误类型和本地边界校验；`business.rs` 冻结旧版 main/isekai、发件人 allowlist、装备过滤和 14 个
+  通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`runtime_config.rs` 只负责稳定公共类型出口，
+  不执行文件、数据库或网络操作。
 - `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
   dashboard 端口位于 `ports.rs`；`value/{model,secret,runtime,health,error,common}.rs` 分别负责闭集模型、
   明文/密文安全值、运行记录、dashboard 聚合、业务错误和共用边界；`credentials.rs` 只负责稳定公共类型出口，
@@ -46,7 +70,8 @@
   转换为该类型，应用服务和 PostgreSQL 创建事务共享同一份策略来源。
 - `src/ports/auction/queries/`：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
   成交价格历史分别由 `world.rs`、`auction.rs`、`lot.rs`、`account.rs`、`bid_log.rs` 和
-  `price_history.rs` 持有；`queries.rs` 只负责稳定公共导出，不把数据库记录暴露给表面层。
+  `price_history.rs` 持有；`auction.rs` 还提供单拍卖 WebSocket 升级前的公开状态闭集，避免 HTTP
+  从事件历史猜测 settled 状态；`queries.rs` 只负责稳定公共导出，不把数据库记录暴露给表面层。
 - `src/ports/admin/forum.rs`：Admin 论坛 HTML/文本预览的有界输入、catalog/posts/warnings
   安全结果和解析端口；该端口只表达本地预览，不承担远程发布或数据库写入。
 - `src/ports/admin/audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
@@ -62,6 +87,8 @@
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
+- `src/errors/mod.rs` 的 `MailProcessingRetryability` 把应用错误冻结为 `Retryable`/`Permanent`；Worker
+  只可对前者和超时执行有界 inline retry，确定性输入、配置和业务拒绝必须立即失败关闭。
 - `src/ports/mail/user/`：`model.rs` 负责注册/换绑结果闭集，`security.rs` 负责短生命周期登录 key
   与密文信封，`commands.rs` 负责 Users owner 写入载荷，`ports.rs` 负责存储、签发、读取和用例窄端口；
   `user/mod.rs` 只负责稳定公共导出。
@@ -83,6 +110,9 @@ movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页�
 PostgreSQL 或 SQLite 类型。
 Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态和已发布内容，不承担
 远程论坛传输。
+论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：`ForumSyncRecoveryPort` 只允许按精确标题读取
+远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段；端口本身不决定 CLI
+确认文字、数据库表或 HTTP 传输实现。
 Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/装备/投稿的安全快照和
 有界分页；它要求完整 Admin 生命周期投影，不把 Lite 缺失字段填成默认成功值。
 Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许版本 fence 保护的

@@ -3,15 +3,15 @@
 //! 审计事实只读且追加式；筛选和分页请求通过 HTTP 安全 DTO 完成，浏览器不修改记录、不接触
 //! 数据库模型，也不把 metadata 当作可执行内容。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 use auction_web_shared::TruncatedText;
 
 use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 
 use super::pagination::AdminPager;
-use super::{AdminPanel, format_admin_time};
+use super::{admin_api_error_message, format_admin_time};
 
 pub(super) fn page() -> Element {
     let filter = use_signal(AdminAuditFilter::default);
@@ -28,45 +28,29 @@ pub(super) fn page() -> Element {
         page_number.set(1);
         refresh.set(refresh().saturating_add(1));
     };
-    match &*audit.read_unchecked() {
+    let content = match &*audit.read_unchecked() {
         None => rsx! {
-            AdminPanel { title: t!("page-audit-title"), detail: t!("admin-audit-loading") }
+            p { class: "admin-shell__status", role: "status", {t!("admin-audit-loading")} }
         },
-        Some(Err(_)) => rsx! {
-            AdminAuditLoadError { refresh }
+        Some(Err(error)) => rsx! {
+            p { class: "admin-shell__inline-error", role: "alert", {admin_api_error_message(error)} }
         },
         Some(Ok(page)) => rsx! {
-            section { class: "admin-panel", aria_labelledby: "admin-audit-title",
-                h1 { id: "admin-audit-title", {t!("page-audit-title")} }
-                p { class: "admin-panel__note", {t!("page-audit-note")} }
-                AuditFilters { filter, on_change: apply_filter }
-                AuditTable { page: page.clone() }
-                AdminPager {
-                    page: page.page.unwrap_or(page_number()).max(1),
-                    page_size: page.page_size,
-                    total: audit_total(page, page_number()),
-                    label: t!("page-audit-title"),
-                    on_page_change: move |next_page| page_number.set(next_page),
-                }
+            AuditTable { page: page.clone() }
+            AdminPager {
+                page: page.page.unwrap_or(page_number()).max(1),
+                page_size: page.page_size,
+                total: audit_total(page, page_number()),
+                label: t!("page-audit-title"),
+                on_page_change: move |next_page| page_number.set(next_page),
             }
         },
-    }
-}
-
-#[component]
-fn AdminAuditLoadError(mut refresh: Signal<u64>) -> Element {
+    };
     rsx! {
-        section {
-            class: "admin-panel",
-            role: "alert",
-            aria_labelledby: "admin-audit-error-title",
-            h1 { id: "admin-audit-error-title", {t!("page-audit-title")} }
-            p { class: "admin-panel__note", {t!("admin-audit-error")} }
-            button {
-                r#type: "button",
-                onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                {t!("admin-audit-retry")}
-            }
+        section { class: "admin-audit-page", aria_labelledby: "admin-audit-title",
+            h1 { id: "admin-audit-title", {t!("page-audit-title")} }
+            AuditFilters { filter, on_change: apply_filter }
+            {content}
         }
     }
 }
@@ -77,7 +61,7 @@ fn AuditFilters(
     on_change: EventHandler<AdminAuditFilter>,
 ) -> Element {
     rsx! {
-        div { class: "admin-panel__actions admin-audit-filters",
+        div { class: "admin-audit-filter",
             label { class: "admin-audit-field-wide",
                 {t!("admin-audit-actor")}
                 input {
@@ -194,34 +178,31 @@ fn AuditFilters(
 
 #[component]
 fn AuditTable(page: AdminAuditPage) -> Element {
+    let empty = page.records.is_empty();
     rsx! {
-        section { aria_labelledby: "admin-audit-table-title",
-            h2 { id: "admin-audit-table-title", {t!("admin-audit-total", total: page.total.unwrap_or(0))} }
-            if page.records.is_empty() {
-                p { class: "admin-panel__note", {t!("admin-audit-empty")} }
-            } else {
-                div { class: "public-auction-catalog admin-audit__table-wrap",
-                    table {
-                        thead {
-                            tr {
-                                th { {t!("admin-audit-at")} }
-                                th { {t!("admin-audit-actor")} }
-                                th { {t!("admin-audit-action")} }
-                                th { {t!("admin-audit-entity")} }
-                                th { {t!("admin-audit-source")} }
-                                th { {t!("admin-audit-result")} }
-                                th { {t!("admin-audit-request-id")} }
-                                th { {t!("admin-audit-metadata")} }
-                            }
-                        }
-                        tbody {
-                            for record in page.records {
-                                AuditRow { record }
-                            }
-                        }
+        div { class: "admin-shell__table-wrap",
+            table { class: "admin-shell__table",
+                thead {
+                    tr {
+                        th { {t!("admin-audit-at")} }
+                        th { {t!("admin-audit-actor")} }
+                        th { {t!("admin-audit-action")} }
+                        th { {t!("admin-audit-entity")} }
+                        th { {t!("admin-audit-source")} }
+                        th { {t!("admin-audit-result")} }
+                        th { {t!("admin-audit-request-id")} }
+                        th { {t!("admin-audit-metadata")} }
+                    }
+                }
+                tbody {
+                    for record in page.records {
+                        AuditRow { record }
                     }
                 }
             }
+        }
+        if empty {
+            p { class: "admin-shell__status", {t!("admin-audit-empty")} }
         }
     }
 }
@@ -232,21 +213,19 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
     let source = audit_source_label(&record.source);
     let result = audit_result_label(&record.result);
     let request_id = record.request_id.unwrap_or_else(|| t!("value-empty"));
-    let actor = format!("{} ({actor_type})", record.actor_id);
-    let entity = format!("{} ({})", record.entity_type, record.entity_id);
+    let actor = format!("{}({actor_type})", record.actor_id);
+    let entity = format!("{}({})", record.entity_type, record.entity_id);
     let metadata = metadata_text(&record.metadata);
     rsx! {
         tr { class: "admin-audit__row",
-            td { "data-label": t!("admin-audit-at"), time { datetime: record.occurred_at.clone(), "{format_admin_time(&record.occurred_at)}" } }
-            td { "data-label": t!("admin-audit-actor"), TruncatedText { value: actor } }
-            td { "data-label": t!("admin-audit-action"), TruncatedText { value: record.action } }
-            td { "data-label": t!("admin-audit-entity"), TruncatedText { value: entity } }
-            td { "data-label": t!("admin-audit-source"), TruncatedText { value: source } }
-            td { "data-label": t!("admin-audit-result"),
-                span { class: audit_result_class(&record.result), "{result}" }
-            }
-            td { "data-label": t!("admin-audit-request-id"), TruncatedText { value: request_id } }
-            td { "data-label": t!("admin-audit-metadata"), class: "admin-audit-metadata", TruncatedText { value: metadata, size: "wide" } }
+            td { time { datetime: record.occurred_at.clone(), "{format_admin_time(&record.occurred_at)}" } }
+            td { TruncatedText { value: actor } }
+            td { TruncatedText { value: record.action } }
+            td { TruncatedText { value: entity } }
+            td { TruncatedText { value: source } }
+            td { TruncatedText { value: result } }
+            td { TruncatedText { value: request_id } }
+            td { class: "admin-audit-metadata", TruncatedText { value: metadata, size: "wide" } }
         }
     }
 }
@@ -262,15 +241,6 @@ fn audit_total(page: &AdminAuditPage, requested_page: i64) -> i64 {
         let loaded = current_page.saturating_mul(page_size);
         if page.has_more { loaded.saturating_add(1) } else { loaded }
     })
-}
-
-fn audit_result_class(result: &str) -> &'static str {
-    match result {
-        "success" => "admin-audit__result admin-audit__result--success",
-        "rejected" => "admin-audit__result admin-audit__result--rejected",
-        "failure" => "admin-audit__result admin-audit__result--failure",
-        _ => "admin-audit__result",
-    }
 }
 
 fn audit_actor_type_label(value: &str) -> String {

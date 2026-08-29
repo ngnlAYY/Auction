@@ -177,6 +177,32 @@ pub(crate) fn invalid_payload() -> DeliveryTransportError {
     }
 }
 
+pub(crate) fn equipment_secret_not_found() -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: "secret_not_found".to_owned(),
+        safe_detail: "MoogleMail 装备 secret 引用不存在".to_owned(),
+        outcome_unknown: false,
+        external_reference: None,
+        result_metadata: json!({
+            "stage": "secret_resolution",
+            "category": "missing_reference",
+        }),
+    }
+}
+
+pub(crate) fn equipment_secret_unavailable() -> DeliveryTransportError {
+    DeliveryTransportError {
+        // 旧版 resolver 返回普通 error 时由 delivery Worker 统一收口为未知结果。
+        failure_code: "gateway_outcome_unknown".to_owned(),
+        safe_detail: "MoogleMail 装备 secret 解析结果未知".to_owned(),
+        outcome_unknown: true,
+        external_reference: None,
+        result_metadata: json!({
+            "category": "gateway_error",
+        }),
+    }
+}
+
 pub(crate) fn login_key_error(error: ApplicationError) -> DeliveryTransportError {
     match error {
         ApplicationError::MailProcessing(MailProcessingError::LoginKeyNotFound) => {

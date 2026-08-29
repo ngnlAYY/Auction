@@ -215,11 +215,11 @@ DECLARE
     constraint_name text;
 BEGIN
     FOR constraint_name IN
-        SELECT constraint.conname
-        FROM pg_catalog.pg_constraint AS constraint
-        WHERE constraint.conrelid = 'public.bid_proxy_authorizations'::regclass
-          AND constraint.contype = 'c'
-          AND pg_get_constraintdef(constraint.oid) ~ '\mstatus\M'
+        SELECT constraint_record.conname
+        FROM pg_catalog.pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid = 'public.bid_proxy_authorizations'::regclass
+          AND constraint_record.contype = 'c'
+          AND pg_get_constraintdef(constraint_record.oid) ~ '\mstatus\M'
     LOOP
         EXECUTE format(
             'ALTER TABLE public.bid_proxy_authorizations DROP CONSTRAINT %I',
@@ -228,11 +228,12 @@ BEGIN
     END LOOP;
 
     FOR constraint_name IN
-        SELECT constraint.conname
-        FROM pg_catalog.pg_constraint AS constraint
-        WHERE constraint.conrelid = 'public.bid_proxy_authorization_transitions'::regclass
-          AND constraint.contype = 'c'
-          AND pg_get_constraintdef(constraint.oid) ~
+        SELECT constraint_record.conname
+        FROM pg_catalog.pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid =
+              'public.bid_proxy_authorization_transitions'::regclass
+          AND constraint_record.contype = 'c'
+          AND pg_get_constraintdef(constraint_record.oid) ~
               '(transition_kind|old_status|new_status)'
     LOOP
         EXECUTE format(
@@ -319,17 +320,17 @@ ALTER TABLE public.bid_proxy_authorization_transitions
         )
     );
 
-UPDATE public.bid_proxy_authorizations AS authorization
+UPDATE public.bid_proxy_authorizations AS proxy_authorization
 SET status = 'final_fast',
-    updated_at = GREATEST(authorization.updated_at, transition.created_at)
+    updated_at = GREATEST(proxy_authorization.updated_at, transition.created_at)
 FROM (
     SELECT history.authorization_id, max(history.created_at) AS created_at
     FROM public.bid_proxy_authorization_transitions AS history
     WHERE history.transition_kind = 'final_fast'
     GROUP BY history.authorization_id
 ) AS transition
-WHERE transition.authorization_id = authorization.authorization_id
-  AND authorization.status = 'active';
+WHERE transition.authorization_id = proxy_authorization.authorization_id
+  AND proxy_authorization.status = 'active';
 
 DROP INDEX public.bid_proxy_authorizations_one_active_lot_idx;
 CREATE UNIQUE INDEX bid_proxy_authorizations_one_active_lot_idx
@@ -366,30 +367,30 @@ CREATE UNIQUE INDEX forum_bidder_identities_casefold_unique
 
 CREATE VIEW public.bid_proxies AS
 SELECT
-    authorization.lot_id,
-    authorization.user_id,
-    CASE authorization.mode WHEN 'fast' THEN 'instant' ELSE 'slow' END AS mode,
-    authorization.maximum_amount,
-    CASE authorization.status
+    proxy_authorization.lot_id,
+    proxy_authorization.user_id,
+    CASE proxy_authorization.mode WHEN 'fast' THEN 'instant' ELSE 'slow' END AS mode,
+    proxy_authorization.maximum_amount,
+    CASE proxy_authorization.status
         WHEN 'active' THEN 'active'
         WHEN 'final_fast' THEN 'active'
         WHEN 'exhausted' THEN 'exhausted'
         WHEN 'frozen' THEN 'frozen'
         ELSE 'cancelled'
     END AS status,
-    authorization.state_version,
-    authorization.created_at,
-    authorization.updated_at,
+    proxy_authorization.state_version,
+    proxy_authorization.created_at,
+    proxy_authorization.updated_at,
     COUNT(outbid_use.use_number)::integer AS outbid_uses
-FROM public.bid_proxy_authorizations AS authorization
+FROM public.bid_proxy_authorizations AS proxy_authorization
 LEFT JOIN public.bid_proxy_outbid_uses AS outbid_use
-    ON outbid_use.authorization_id = authorization.authorization_id
+    ON outbid_use.authorization_id = proxy_authorization.authorization_id
 GROUP BY
-    authorization.lot_id,
-    authorization.user_id,
-    authorization.mode,
-    authorization.maximum_amount,
-    authorization.status,
-    authorization.state_version,
-    authorization.created_at,
-    authorization.updated_at;
+    proxy_authorization.lot_id,
+    proxy_authorization.user_id,
+    proxy_authorization.mode,
+    proxy_authorization.maximum_amount,
+    proxy_authorization.status,
+    proxy_authorization.state_version,
+    proxy_authorization.created_at,
+    proxy_authorization.updated_at;

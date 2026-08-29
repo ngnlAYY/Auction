@@ -3,8 +3,8 @@
 //! 会话状态编排、站内 return 路径、重试/刷新、登录表单和认证后外壳分别归属子模块；
 //! 本文件继续持有认证状态到页面分支的唯一编排入口。
 
+use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use dioxus_i18n::t;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
@@ -16,22 +16,26 @@ use crate::api::{
     logout_admin,
 };
 
-use super::Route;
+use super::{Route, admin_api_error_message};
 
 mod login;
 mod redirect;
 mod session;
 mod shell;
 
-pub(super) use login::{AdminLogin, AdminReadinessStatus, AdminSessionPanel};
-pub(super) use redirect::{AdminLoginRedirect, AdminReturnRedirect, admin_is_login_path};
+pub(super) use login::{AdminLogin, AdminReadinessStatus};
+pub(super) use redirect::{AdminLoginRedirect, AdminReturnRedirect};
 pub(super) use session::{AdminSessionRefresh, AdminSessionRetry};
 pub(super) use shell::AdminAuthenticatedShell;
 
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。
 #[component]
 pub(super) fn AdminShell() -> Element {
-    use_dialog_focus_trap();
+    // 旧 Admin 只限制 dialog 焦点，不锁定 body 滚动；保留滚动条也避免窄屏弹窗宽度跳变。
+    use_dialog_focus_trap(false);
+    // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
+    // 读取一次 `window.location`，否则登录成功后的 replace 会把旧重定向分支永久留在 DOM。
+    let is_login_path = matches!(use_route::<Route>(), Route::Login {});
     let mut reload_generation = use_signal(|| 0_u64);
     let readiness = use_resource(fetch_admin_readiness);
     let session = use_resource(move || {
@@ -46,24 +50,26 @@ pub(super) fn AdminShell() -> Element {
 
     match &*session.read_unchecked() {
         None => rsx! {
-            AdminSessionPanel { title: t!("page-login-title"), detail: t!("admin-session-loading") }
+            div { role: "status", {t!("admin-session-loading")} }
         },
-        Some(Err(_)) => rsx! {
-            section {
-                class: "admin-login-page",
-                role: "alert",
-                aria_labelledby: "admin-session-error-title",
-                h1 { id: "admin-session-error-title", {t!("page-login-title")} }
-                p { class: "admin-panel__note", {t!("admin-session-error")} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
-                    {t!("admin-retry")}
+        Some(Err(error)) => rsx! {
+            main { class: "admin-login-page",
+                section {
+                    class: "admin-login-card",
+                    role: "alert",
+                    aria_labelledby: "admin-session-error-title",
+                    h1 { id: "admin-session-error-title", {t!("page-login-title")} }
+                    p { class: "admin-panel__note", {admin_api_error_message(error)} }
+                    button {
+                        r#type: "button",
+                        onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
+                        {t!("admin-retry")}
+                    }
                 }
             }
             AdminSessionRetry { reload_generation }
         },
-        Some(Ok(None)) if !admin_is_login_path() => rsx! {
+        Some(Ok(None)) if !is_login_path => rsx! {
             AdminLoginRedirect {}
         },
         Some(Ok(None)) => rsx! {
@@ -72,7 +78,7 @@ pub(super) fn AdminShell() -> Element {
                 readiness: readiness_state,
             }
         },
-        Some(Ok(Some(_))) if admin_is_login_path() => rsx! {
+        Some(Ok(Some(_))) if is_login_path => rsx! {
             AdminReturnRedirect {}
         },
         Some(Ok(Some(current))) => rsx! {

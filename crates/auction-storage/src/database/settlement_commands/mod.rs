@@ -11,8 +11,12 @@ use auction_application::ApplicationError;
 use auction_application::SettlementService;
 use auction_application::{ApplicationFuture, SettleAuctionCommand, SettlementCommandPort};
 use auction_domain::SettlementPlan;
+use uuid::Uuid;
 
 use super::DatabaseStore;
+
+#[cfg(feature = "postgres")]
+mod legacy;
 
 /// 绑定运行时数据库的结算命令端口。
 pub struct DatabaseSettlementCommands {
@@ -38,6 +42,24 @@ impl SettlementCommandPort for DatabaseSettlementCommands {
                 DatabaseStore::Sqlite(_) => {
                     Err(ApplicationError::CapabilityUnavailable("结算执行仅支持 PostgreSQL 完整档"))
                 }
+            }
+        })
+    }
+}
+
+impl auction_application::LegacySettlementVerificationPort for DatabaseSettlementCommands {
+    fn verify_legacy_settlement(
+        &self,
+        _auction_id: Uuid,
+    ) -> ApplicationFuture<'_, auction_application::LegacySettlementVerification> {
+        Box::pin(async move {
+            match self.store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => legacy::verify_postgres(store, _auction_id).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "旧版结算账本核验仅支持 PostgreSQL 完整档",
+                )),
             }
         })
     }

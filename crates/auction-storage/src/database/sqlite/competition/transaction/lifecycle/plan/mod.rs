@@ -15,7 +15,7 @@ pub(super) async fn apply_lifecycle_plan_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     plan: AuctionLifecyclePlan,
-) -> Result<(), CompetitionTransactionError> {
+) -> Result<AuctionLifecycleWriteSummary, CompetitionTransactionError> {
     if plan.auction.id != command.auction_id || plan.effect.action() != command.action {
         return Err(invalid_state("Lite 生命周期命令与动作计划不一致"));
     }
@@ -23,16 +23,22 @@ pub(super) async fn apply_lifecycle_plan_sqlite(
     match effect {
         AuctionLifecycleEffect::Preview { manual, successor } => {
             preview::apply_preview_plan_sqlite(transaction, command, &auction, manual, &successor)
-                .await
+                .await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
         AuctionLifecycleEffect::Open { manual_override } => {
-            open::apply_open_plan_sqlite(transaction, command, &auction, manual_override).await
+            open::apply_open_plan_sqlite(transaction, command, &auction, manual_override).await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
         AuctionLifecycleEffect::Cancel => {
-            cancel::apply_cancel_plan_sqlite(transaction, &auction).await
+            let return_obligation_count =
+                cancel::apply_cancel_plan_sqlite(transaction, &auction).await?;
+            Ok(AuctionLifecycleWriteSummary { return_obligation_count })
         }
         AuctionLifecycleEffect::FinalPhase { proxy_plans } => {
-            final_phase::apply_final_plan_sqlite(transaction, command, &auction, proxy_plans).await
+            final_phase::apply_final_plan_sqlite(transaction, command, &auction, proxy_plans)
+                .await?;
+            Ok(AuctionLifecycleWriteSummary::default())
         }
     }
 }
