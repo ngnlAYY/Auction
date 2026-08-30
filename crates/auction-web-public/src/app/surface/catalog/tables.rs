@@ -10,8 +10,9 @@ pub(crate) fn CatalogTable(
     category_counts: BTreeMap<String, i64>,
     mut active_category: Signal<String>,
     mut page_number: Signal<i64>,
-    page_total: i64,
+    page_total: Option<i64>,
     page_size: i64,
+    has_more: bool,
     can_bid: bool,
     allow_slow: bool,
     session_ready: bool,
@@ -99,8 +100,8 @@ pub(crate) fn CatalogTable(
         PublicPager {
             page: page_number(),
             page_size,
-            total: Some(page_total),
-            has_more: false,
+            total: page_total,
+            has_more,
             label: t!("auction-pager-label"),
             on_page_change: move |page| {
                 page_number.set(page);
@@ -122,18 +123,19 @@ pub(crate) fn LiveCatalogTable(
     rsx! {
         div { class: "public-auction-catalog",
             table {
+                caption { class: "public-visually-hidden", {t!("auction-lots")} }
                 thead {
                     tr {
-                        th { {t!("catalog-code")} }
-                        th { {t!("catalog-item")} }
-                        th { {t!("catalog-level")} }
-                        th { {t!("catalog-seller")} }
-                        th { class: "public-auction-catalog__number", {t!("catalog-current")} }
-                        th { class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
-                        th { {t!("catalog-leader")} }
-                        th { {t!("catalog-remaining")} }
-                        th { {t!("catalog-status")} }
-                        th { span { class: "public-visually-hidden", {t!("catalog-actions")} } }
+                        th { scope: "col", {t!("catalog-code")} }
+                        th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", {t!("catalog-level")} }
+                        th { scope: "col", {t!("catalog-seller")} }
+                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-current")} }
+                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
+                        th { scope: "col", {t!("catalog-leader")} }
+                        th { scope: "col", {t!("catalog-remaining")} }
+                        th { scope: "col", {t!("catalog-status")} }
+                        th { scope: "col", span { class: "public-visually-hidden", {t!("catalog-actions")} } }
                     }
                 }
                 tbody {
@@ -159,17 +161,18 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
             table {
+                caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
                 thead {
                     tr {
-                        th { {t!("catalog-code")} }
-                        th { {t!("catalog-item")} }
-                        th { {t!("catalog-level")} }
-                        th { {t!("catalog-seller")} }
-                        th { class: "public-auction-catalog__number", {t!("catalog-start-price")} }
-                        th { {t!("catalog-leader")} }
-                        th { {t!("catalog-remaining")} }
-                        th { {t!("catalog-status")} }
-                        th { span { class: "public-visually-hidden", {t!("catalog-actions")} } }
+                        th { scope: "col", {t!("catalog-code")} }
+                        th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", {t!("catalog-level")} }
+                        th { scope: "col", {t!("catalog-seller")} }
+                        th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-start-price")} }
+                        th { scope: "col", {t!("catalog-leader")} }
+                        th { scope: "col", {t!("catalog-remaining")} }
+                        th { scope: "col", {t!("catalog-status")} }
+                        th { scope: "col", span { class: "public-visually-hidden", {t!("catalog-actions")} } }
                     }
                 }
                 tbody {
@@ -272,7 +275,7 @@ pub(crate) fn LiveCatalogRow(
             td { "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
-            td { class: "public-auction-catalog__actions",
+            td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
                 LiveCatalogActions {
                     lot_id: row.lot_id.clone(),
                     lot_code: row.code.clone(),

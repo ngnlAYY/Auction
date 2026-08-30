@@ -5,6 +5,8 @@ use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;
 
+use super::super::Route;
+
 #[component]
 pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
     let process = snapshot.process.data.as_ref();
@@ -130,6 +132,43 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
 
     rsx! {
         Fragment {
+            section {
+                class: "admin-dashboard-shortcuts",
+                aria_labelledby: "dashboard-shortcuts-title",
+                h2 { id: "dashboard-shortcuts-title", {t!("dashboard-shortcuts-title")} }
+                p { class: "admin-dashboard-status", {t!("dashboard-shortcuts-note")} }
+                nav { class: "admin-quick-links", aria_label: t!("dashboard-shortcuts-title"),
+                    Link { class: "admin-quick-link", to: Route::Auctions {},
+                        span { class: "admin-quick-link__icon" }
+                        span { class: "admin-quick-link__copy",
+                            strong { {t!("dashboard-open-auctions")} }
+                            small { {t!("dashboard-open-auctions-note")} }
+                        }
+                    }
+                    Link { class: "admin-quick-link", to: Route::Mails {},
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--mail" }
+                        span { class: "admin-quick-link__copy",
+                            strong { {t!("dashboard-open-mail")} }
+                            small { {t!("dashboard-open-mail-note")} }
+                        }
+                    }
+                    Link { class: "admin-quick-link", to: Route::Deliveries {},
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--delivery" }
+                        span { class: "admin-quick-link__copy",
+                            strong { {t!("dashboard-open-deliveries")} }
+                            small { {t!("dashboard-open-deliveries-note")} }
+                        }
+                    }
+                    Link { class: "admin-quick-link", to: Route::Outbox {},
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--status" }
+                        span { class: "admin-quick-link__copy",
+                            strong { {t!("dashboard-open-status")} }
+                            small { {t!("dashboard-open-status-note")} }
+                        }
+                    }
+                }
+            }
+
             div { class: "admin-dashboard-cards",
                 {semantic_card(
                     "dashboard-worker-channel",
@@ -237,19 +276,21 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 )}
                 {card(
                     t!("dashboard-legacy-outbox-pending"),
-                    text(if realtime.is_none() || !has_realtime_consumers {
+                    text(if realtime.is_none() {
                         t!("dashboard-legacy-no-data")
+                    } else if !has_realtime_consumers {
+                        t!("dashboard-legacy-outbox-status-no-consumers")
                     } else {
                         pending.to_string()
                     }),
                 )}
                 {card(
                     t!("dashboard-legacy-outbox-retry"),
-                    text(t!("dashboard-legacy-no-data")),
+                    text(t!("dashboard-legacy-metric-not-collected")),
                 )}
                 {card(
                     t!("dashboard-legacy-outbox-dead-letter"),
-                    text(if realtime.is_none() || (!has_realtime_consumers && failures == 0) {
+                    text(if realtime.is_none() {
                         t!("dashboard-legacy-no-data")
                     } else {
                         failures.to_string()
@@ -257,7 +298,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 )}
                 {card(
                     t!("dashboard-legacy-outbox-claimed"),
-                    text(t!("dashboard-legacy-no-data")),
+                    text(t!("dashboard-legacy-metric-not-collected")),
                 )}
             }
             if realtime.is_none() {
@@ -265,7 +306,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                     {t!("dashboard-legacy-outbox-metrics-unavailable")}
                 }
             } else if !has_realtime_consumers {
-                p { class: "admin-dashboard-status", {t!("dashboard-legacy-no-data")} }
+                p { class: "admin-dashboard-status", {t!("dashboard-legacy-outbox-status-no-consumers")} }
             } else if let Some(realtime) = realtime {
                 p { class: "admin-dashboard-status",
                     {t!(
@@ -275,7 +316,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
             h3 { {t!("dashboard-legacy-outbox-attempts")} }
-            p { class: "admin-dashboard-status", {t!("dashboard-legacy-no-data")} }
+            p { class: "admin-dashboard-status", {t!("dashboard-legacy-metric-not-collected")} }
 
             h2 { {t!("dashboard-legacy-cookie-readiness-by-world")} }
             if credentials.is_none_or(|data| data.availability.is_empty()) {

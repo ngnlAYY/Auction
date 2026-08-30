@@ -61,12 +61,30 @@ pub(crate) fn parse_equipment_page(
 
 fn parse_header(value: &str) -> Result<(String, Option<i32>, bool), AdminIntakeError> {
     let mut fields: Vec<&str> = value.split_whitespace().collect();
-    let tradeable = fields.last().is_some_and(|field| *field == "Tradeable");
-    if fields.last().is_some_and(|field| *field == "Tradeable" || *field == "Soulbound") {
+    let status = fields.last().copied().filter(|field| matches!(*field, "Tradeable" | "Soulbound"));
+    let tradeable = status == Some("Tradeable");
+    if status.is_some() {
         fields.pop();
     }
     let mut level = None;
-    if let Some(index) = fields.iter().position(|field| *field == "Level") {
+    if let Some(index) = fields.iter().position(|field| *field == "Tier") {
+        // 旧装备页用 `Tier A/B/C Soulbound` 表示没有普通等级的绑定装备；三个阶段值仍需
+        // 严格落在旧合同的 0..=1000 范围内，不能因为 Admin 放宽交易限制而放宽页面校验。
+        if status != Some("Soulbound") || index + 1 >= fields.len() {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        let tiers = fields[index + 1..].join("");
+        let tiers: Vec<&str> = tiers.split('/').collect();
+        if tiers.len() != 3
+            || tiers.iter().any(|tier| match tier.parse::<i32>() {
+                Ok(tier) => !(0..=1_000).contains(&tier),
+                Err(_) => true,
+            })
+        {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        fields.truncate(index);
+    } else if let Some(index) = fields.iter().position(|field| *field == "Level") {
         let raw = fields.get(index + 1).ok_or(AdminIntakeError::InvalidSource)?;
         let parsed = raw.parse::<i32>().map_err(|_| AdminIntakeError::InvalidSource)?;
         if !(1..=100_000).contains(&parsed) {
@@ -81,7 +99,9 @@ fn parse_header(value: &str) -> Result<(String, Option<i32>, bool), AdminIntakeE
 
 fn parse_stats(panel: ElementRef<'_>) -> Result<BTreeMap<String, EquipmentStat>, AdminIntakeError> {
     let mut stats = BTreeMap::new();
-    let title_selector = selector("[title]")?;
+    // 主属性只允许来自 `.eq` 的直接子项；`.ex`/`.ep` 内的 title 属于分组属性，必须由
+    // 下方行解析器处理，否则会把 `Attack Accuracy +32.16` 误当成值在前的主属性。
+    let title_selector = selector(".eq > div[title]")?;
     for element in panel.select(&title_selector) {
         let Some(title) = element.value().attr("title") else { continue };
         let Some(base) = parse_base(title) else { continue };

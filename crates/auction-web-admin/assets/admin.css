@@ -1,31 +1,39 @@
 /* 管理端样式。壳层、间距、表格和控件沿用旧版 Auction-BF 管理端。 */
 
 :root {
-  --color-text-on-accent: #fff;
+  --color-text-on-accent: var(--color-accent-contrast);
+  --color-text-on-danger: #fff;
   --color-input-border: #747474;
   --color-login-input-border: #858585;
   --color-input-bg: #3b3b3b;
   --color-status-ok: #34d399;
   --color-status-warn: #fbbf24;
   --color-status-error: #f87171;
+  --color-border-subtle: #232b37;
+  --color-bg-muted: #12171e;
+  --color-status-ok-muted: rgb(52 211 153 / 12%);
+  --color-status-error-muted: rgb(248 113 113 / 12%);
   --radius-round: 999rem;
-  --shadow-surface: 0 4px 12px rgb(0 0 0 / 45%);
-  --z-popover: 2;
+  --z-float: 40;
   --z-dialog: 100;
   --admin-text-label: 0.8rem;
   --admin-text-note: 0.85rem;
   --admin-text-table: 0.9rem;
   --admin-text-small: 0.75rem;
+  --admin-text-caption: var(--admin-text-small);
   --admin-text-title: 1.4rem;
   --admin-space-tiny: 0.1rem;
   --admin-space-label: 0.2rem;
   --admin-space-compact: 0.35rem;
+  --admin-space-status: var(--space-1);
   --admin-space-control: 0.4rem;
   --admin-space-table-block: 0.45rem;
   --admin-space-input-inline: 0.55rem;
   --admin-space-table-inline: 0.6rem;
   --admin-space-button-inline: 0.7rem;
   --admin-space-content: 1.25rem;
+  --admin-native-input-block: var(--admin-space-compact);
+  --admin-native-input-inline: var(--admin-space-input-inline);
   --admin-radius-button: 0.35rem;
   --admin-radius-input: 1px;
 }
@@ -78,6 +86,16 @@
   gap: var(--space-3);
 }
 
+.admin-shell__nav-toggle {
+  display: none;
+  min-block-size: var(--size-target);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--admin-radius-button);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
 .admin-shell__banner {
   margin: 0;
   padding: var(--space-2) var(--admin-space-content);
@@ -124,6 +142,7 @@
 }
 
 .admin-login-card button {
+  min-block-size: var(--size-target);
   margin-block-start: var(--space-3);
 }
 
@@ -161,6 +180,12 @@
   text-decoration: none;
 }
 
+.admin-shell__nav a.active {
+  color: var(--color-text-on-accent);
+  background: var(--color-accent);
+  text-decoration: none;
+}
+
 .admin-shell__content {
   min-inline-size: 0;
   flex: 1;
@@ -171,7 +196,7 @@
 .admin-shell__banner {
   margin: 0;
   padding: var(--space-2) var(--space-5);
-  color: var(--color-text-on-accent);
+  color: var(--color-text-on-danger);
   background: var(--color-danger);
 }
 
@@ -876,7 +901,7 @@
 
 .admin-panel button,
 .admin-dashboard button {
-  min-block-size: auto;
+  min-block-size: var(--size-target);
   padding: 0.35rem var(--admin-space-button-inline);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--admin-radius-button);
@@ -912,7 +937,7 @@
   padding: 0.35rem 0.7rem;
   border: 0 !important;
   border-radius: 0.35rem;
-  color: var(--color-text-on-accent) !important;
+  color: var(--color-text-on-danger) !important;
   background: #b91c1c !important;
 }
 
@@ -1195,7 +1220,8 @@
 
 .admin-realtime__error {
   color: var(--color-status-error);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .admin-delivery__actions,
@@ -1318,6 +1344,11 @@
 
 .admin-audit-filter select {
   padding-block: var(--admin-space-compact);
+}
+
+.admin-audit-filter__submit {
+  min-block-size: var(--size-target);
+  align-self: end;
 }
 
 @media (max-width: 60rem) {
@@ -1797,6 +1828,7 @@
 
 .admin-quick-links {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   gap: var(--admin-space-compact);
   margin-block-start: var(--space-4);
 }
@@ -1805,7 +1837,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-block-size: var(--size-target);
   padding: var(--admin-space-control) var(--admin-space-table-inline);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--admin-radius-button);
   color: var(--color-link);
 }
@@ -1838,6 +1872,15 @@
 .admin-quick-link__copy small {
   color: var(--color-text-muted);
   font-size: var(--admin-text-label);
+}
+
+.admin-dashboard-shortcuts {
+  margin-block-end: var(--space-5);
+}
+
+.admin-dashboard-shortcuts h2,
+.admin-dashboard-shortcuts p {
+  margin-block-start: 0;
 }
 
 .admin-dashboard__source-note {
@@ -2573,7 +2616,7 @@
 }
 
 .admin-auction-create-opener {
-  margin-inline-start: var(--space-auto);
+  margin-inline-start: auto;
 }
 
 .admin-auction-filter label {
@@ -3065,9 +3108,45 @@
 }
 
 @media (max-width: 48rem) {
+  .admin-shell__header {
+    flex-wrap: wrap;
+  }
+
+  .admin-shell__nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    margin-inline-start: auto;
+  }
+
+  .admin-shell__controls {
+    inline-size: 100%;
+    justify-content: flex-end;
+  }
+
+  .admin-shell__body {
+    flex-direction: column;
+  }
+
   .admin-shell__nav {
-    inline-size: 12rem;
-    flex-basis: 12rem;
+    display: none;
+    inline-size: 100%;
+    flex: 0 0 auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-inline-end: 0;
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  .admin-shell__nav--open {
+    display: grid;
+  }
+
+  .admin-shell__nav a {
+    min-block-size: var(--size-target);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .admin-shell__content {
+    overflow: visible;
   }
 
   .admin-users__heading {
@@ -3090,6 +3169,38 @@
   .admin-auctions__actions {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .admin-auction-proxy__table thead {
+    display: none;
+  }
+
+  .admin-auction-proxy__table,
+  .admin-auction-proxy__table tbody,
+  .admin-auction-proxy__table tr {
+    display: block;
+  }
+
+  .admin-auction-proxy__table tr {
+    padding-block: var(--space-2);
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  .admin-auction-proxy__table td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 38%) minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--space-2);
+    min-inline-size: 0;
+    padding: var(--space-1) 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-auction-proxy__table td::before {
+    color: var(--color-text-muted);
+    content: attr(data-label);
+    font-size: var(--admin-text-label);
   }
 
   .admin-mail-detail__grid {
@@ -3241,6 +3352,10 @@
   flex-wrap: wrap;
   gap: var(--admin-space-compact);
   margin-block-start: var(--space-5);
+}
+
+.admin-dashboard-actions--refresh {
+  margin-block: 0 var(--space-4);
 }
 
 .admin-dashboard-recovery-world {

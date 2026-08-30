@@ -50,6 +50,7 @@ impl PublicRealtimeTarget {
 pub(crate) fn PublicRealtimeOwner(
     target: PublicRealtimeTarget,
     refresh_generation: Signal<u64>,
+    mut discovery_after: Signal<i64>,
     mut realtime_state: Signal<LiveConnectionState>,
 ) -> Element {
     let _stream = use_resource(use_reactive((&target,), move |(target,)| async move {
@@ -75,13 +76,19 @@ pub(crate) fn PublicRealtimeOwner(
             }
         };
 
-        let mut discovery_after = 0_i64;
         loop {
             realtime_state.set(LiveConnectionState::Connecting);
-            let after = cache.as_ref().map_or(discovery_after, |cache| cache.borrow().after());
+            let after = if let Some(cache) = cache.as_ref() {
+                cache.borrow().after()
+            } else {
+                // 游标只用于建立本轮 catch-up 起点，不是资源依赖；普通读取会让本任务在
+                // 回写游标时取消并重建，重新形成毫秒级连接循环。
+                *discovery_after.peek()
+            };
             let cursor = Rc::new(Cell::new(after));
             let callback_cursor = Rc::clone(&cursor);
             let callback_cache = cache.clone();
+            let mut callback_discovery_after = discovery_after;
             let mut callback_state = realtime_state;
             let mut callback_refresh = refresh_generation;
             let on_page = move |page: crate::api::RealtimePage| {
@@ -105,13 +112,19 @@ pub(crate) fn PublicRealtimeOwner(
                         )
                     };
                 callback_cursor.set(next_after);
+                if callback_cache.is_none() {
+                    // current-auction 刷新会让目标短暂切到 Checking，并按 key 重建 owner；先把
+                    // discovery 游标写回外壳，避免重建后从 0 重放同一事件并形成请求风暴。
+                    callback_discovery_after.set(next_after);
+                }
                 if degraded {
                     callback_state.set(LiveConnectionState::Degraded);
-                } else if callback_state() != LiveConnectionState::Degraded {
+                } else if *callback_state.peek() != LiveConnectionState::Degraded {
                     callback_state.set(LiveConnectionState::Live);
                 }
                 if refresh_required {
-                    callback_refresh.set(callback_refresh().saturating_add(1));
+                    let next_refresh = callback_refresh.peek().saturating_add(1);
+                    callback_refresh.set(next_refresh);
                 }
                 continue_catch_up
             };
@@ -121,7 +134,7 @@ pub(crate) fn PublicRealtimeOwner(
                 subscribe_realtime(after, on_page).await
             };
             if cache.is_none() {
-                discovery_after = cursor.get();
+                discovery_after.set(cursor.get());
             }
             realtime_state.set(LiveConnectionState::Degraded);
             TimeoutFuture::new(3_000).await;
@@ -155,7 +168,7 @@ pub(crate) fn public_connection_state(
         return PublicConnectionState::Idle;
     }
     if !has_current_auction && live_state == LiveConnectionState::Degraded {
-        return PublicConnectionState::Connecting;
+        return PublicConnectionState::Degraded;
     }
     match live_state {
         LiveConnectionState::Connecting => PublicConnectionState::Connecting,

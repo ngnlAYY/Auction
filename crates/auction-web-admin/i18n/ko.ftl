@@ -888,6 +888,7 @@ dashboard-legacy-outbox-metrics-unavailable = Outbox 메트릭을 일시적으�
 dashboard-legacy-outbox-oldest-age = 가장 오래된 활성 이벤트 경과 시간: { $seconds }초
 dashboard-legacy-outbox-attempts = 누적 시도 횟수별 미완료 이벤트
 dashboard-legacy-no-data = 데이터가 없습니다.
+dashboard-legacy-metric-not-collected = 이 대시보드 스냅샷에서 수집되지 않은 지표입니다.
 dashboard-legacy-cookie-readiness-by-world = 월드별 Cookie 준비 상태
 dashboard-legacy-cookie-ready = 준비됨
 dashboard-legacy-cookie-no-active = 활성 Cookie 없음

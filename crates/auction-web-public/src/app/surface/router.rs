@@ -95,9 +95,14 @@ pub(crate) fn App() -> Element {
 #[component]
 pub(crate) fn PublicShell() -> Element {
     use_dialog_focus_trap(true);
+    let current_route = use_route::<Route>();
+    use_route_focus(format!("{current_route:?}"), "public-content");
     let selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
     let location_generation = use_signal(|| 0_u64);
+    let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
+    // 发现流游标属于整个 Public 外壳；current-auction 刷新导致实时 owner 按 key 重建时也不能丢失。
+    let discovery_after = use_signal(|| 0_i64);
     let realtime_state = use_signal(|| LiveConnectionState::Connecting);
     let readiness = use_resource(fetch_public_readiness);
     let session = use_resource(fetch_public_session);
@@ -195,6 +200,7 @@ pub(crate) fn PublicShell() -> Element {
                 key: realtime_key,
                 target: realtime_target,
                 refresh_generation,
+                discovery_after,
                 realtime_state,
             }
             a { class: "public-shell__skip", href: "#public-content", {t!("skip")} }
@@ -202,7 +208,23 @@ pub(crate) fn PublicShell() -> Element {
                 Link { class: "public-shell__logo", to: Route::AuctionIndex {},
                     {t!("app-title")}
                 }
-                nav { class: "public-shell__nav", aria_label: t!("nav-label"),
+                button {
+                    class: "public-shell__nav-toggle",
+                    r#type: "button",
+                    aria_controls: "public-primary-navigation",
+                    aria_expanded: navigation_open().to_string(),
+                    onclick: move |_| navigation_open.set(!navigation_open()),
+                    {t!("nav-label")}
+                }
+                nav {
+                    id: "public-primary-navigation",
+                    class: if navigation_open() {
+                        "public-shell__nav public-shell__nav--open"
+                    } else {
+                        "public-shell__nav"
+                    },
+                    aria_label: t!("nav-label"),
+                    onclick: move |_| navigation_open.set(false),
                     Link { to: Route::AuctionIndex {}, {t!("nav-auctions")} }
                     Link { to: Route::BidLog {}, {t!("page-bidlog-title")} }
                     Link { to: Route::AuctionList {}, {t!("nav-auction-history")} }
@@ -237,7 +259,7 @@ pub(crate) fn PublicShell() -> Element {
                     session::SessionMenu {}
                 }
             }
-            main { id: "public-content", class: "public-shell__content",
+            main { id: "public-content", class: "public-shell__content", tabindex: "-1",
                 Outlet::<Route> { key: location_generation.to_string() }
             }
         }

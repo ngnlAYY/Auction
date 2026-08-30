@@ -9,9 +9,11 @@ pub(crate) fn AdminAuthenticatedShell(
 ) -> Element {
     // 旧凭据表的 importedBy 列由当前登录操作者合成，不扩散到凭据 DTO 或数据库投影。
     use_context_provider(|| session.clone());
+    let mut navigation_open = use_signal(|| false);
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);
     let current_route = use_route::<Route>();
+    use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
         div { class: "admin-shell",
             AdminSessionRefresh {
@@ -22,6 +24,14 @@ pub(crate) fn AdminAuthenticatedShell(
             a { class: "admin-shell__skip", href: "#admin-content", {t!("skip")} }
             header { class: "admin-shell__header",
                 span { class: "admin-shell__logo", {t!("admin-brand")} }
+                button {
+                    class: "admin-shell__nav-toggle",
+                    r#type: "button",
+                    aria_controls: "admin-primary-navigation",
+                    aria_expanded: navigation_open().to_string(),
+                    onclick: move |_| navigation_open.set(!navigation_open()),
+                    {t!("nav-label")}
+                }
                 div { class: "admin-shell__controls",
                     div { class: "admin-shell__health",
                         AdminReadinessStatus { state: readiness }
@@ -60,7 +70,15 @@ pub(crate) fn AdminAuthenticatedShell(
                 p { class: "admin-shell__banner", role: "alert", {admin_api_error_message(&code)} }
             }
             div { class: "admin-shell__body",
-                nav { class: "admin-shell__nav", aria_label: t!("nav-label"),
+                nav {
+                    id: "admin-primary-navigation",
+                    class: if navigation_open() {
+                        "admin-shell__nav admin-shell__nav--open"
+                    } else {
+                        "admin-shell__nav"
+                    },
+                    aria_label: t!("nav-label"),
+                    onclick: move |_| navigation_open.set(false),
                     Link {
                         class: admin_nav_class(matches!(&current_route, Route::Dashboard {})),
                         to: Route::Dashboard {},
@@ -122,7 +140,7 @@ pub(crate) fn AdminAuthenticatedShell(
                         {t!("nav-audit")}
                     }
                 }
-                main { class: "admin-shell__content", id: "admin-content",
+                main { class: "admin-shell__content", id: "admin-content", tabindex: "-1",
                     Outlet::<Route> {}
                 }
             }

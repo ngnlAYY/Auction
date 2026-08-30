@@ -29,16 +29,17 @@ pub(super) fn DeliveryTable(
     rsx! {
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
+                caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
                 thead {
                     tr {
-                        th { class: "admin-delivery-col-id", {t!("delivery-id")} }
-                        th { class: "admin-delivery-col-type", {t!("delivery-type")} }
-                        th { class: "admin-delivery-col-target", {t!("delivery-to")} }
-                        th { class: "admin-delivery-col-cod", {t!("delivery-cod")} }
-                        th { class: "admin-delivery-col-status", {t!("delivery-status")} }
-                        th { class: "admin-delivery-col-attempts", {t!("delivery-attempts")} }
-                        th { class: "admin-delivery-col-error", {t!("delivery-last-error")} }
-                        th { {t!("catalog-actions")} }
+                        th { scope: "col", class: "admin-delivery-col-id", {t!("delivery-id")} }
+                        th { scope: "col", class: "admin-delivery-col-type", {t!("delivery-type")} }
+                        th { scope: "col", class: "admin-delivery-col-target", {t!("delivery-to")} }
+                        th { scope: "col", class: "admin-delivery-col-cod", {t!("delivery-cod")} }
+                        th { scope: "col", class: "admin-delivery-col-status", {t!("delivery-status")} }
+                        th { scope: "col", class: "admin-delivery-col-attempts", {t!("delivery-attempts")} }
+                        th { scope: "col", class: "admin-delivery-col-error", {t!("delivery-last-error")} }
+                        th { scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {

@@ -22,17 +22,18 @@ pub(crate) fn PriceHistoryTable(
                 div { class: "public-history-table-wrap",
                     table {
                         class: "public-history-table",
+                        caption { class: "public-visually-hidden", {t!("page-history-title")} }
                         thead {
                             tr {
-                                th { {t!("history-item")} }
-                                th { {t!("history-category")} }
-                                th { class: "public-history-number", {t!("history-level")} }
-                                th { {t!("history-world")} }
-                                th { {t!("history-round")} }
-                                th { class: "public-history-number", {t!("history-price")} }
-                                th { {t!("history-buyer")} }
-                                th { {t!("history-seller")} }
-                                th { {t!("history-closed")} }
+                                th { scope: "col", {t!("history-item")} }
+                                th { scope: "col", {t!("history-category")} }
+                                th { scope: "col", class: "public-history-number", {t!("history-level")} }
+                                th { scope: "col", {t!("history-world")} }
+                                th { scope: "col", {t!("history-round")} }
+                                th { scope: "col", class: "public-history-number", {t!("history-price")} }
+                                th { scope: "col", {t!("history-buyer")} }
+                                th { scope: "col", {t!("history-seller")} }
+                                th { scope: "col", {t!("history-closed")} }
                             }
                         }
                         tbody {

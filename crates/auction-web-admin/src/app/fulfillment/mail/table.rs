@@ -20,16 +20,17 @@ pub(super) fn MailIntakeTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-mail-table",
+                caption { class: "admin-visually-hidden", {t!("admin-mail-intake-title")} }
                 thead {
                     tr {
-                        th { class: "admin-mail-col-id", {t!("admin-mail-external-id")} }
-                        th { class: "admin-mail-col-world", {t!("admin-mail-intake-world")} }
-                        th { class: "admin-mail-col-from", {t!("admin-mail-intake-from")} }
-                        th { class: "admin-mail-col-subject", {t!("admin-mail-intake-subject")} }
-                        th { class: "admin-mail-col-kind", {t!("admin-mail-intake-kind")} }
-                        th { class: "admin-mail-col-status", {t!("admin-mail-intake-status")} }
-                        th { class: "admin-mail-col-error", {t!("admin-mail-intake-error")} }
-                        th { {t!("admin-mail-intake-received")} }
+                        th { scope: "col", class: "admin-mail-col-id", {t!("admin-mail-external-id")} }
+                        th { scope: "col", class: "admin-mail-col-world", {t!("admin-mail-intake-world")} }
+                        th { scope: "col", class: "admin-mail-col-from", {t!("admin-mail-intake-from")} }
+                        th { scope: "col", class: "admin-mail-col-subject", {t!("admin-mail-intake-subject")} }
+                        th { scope: "col", class: "admin-mail-col-kind", {t!("admin-mail-intake-kind")} }
+                        th { scope: "col", class: "admin-mail-col-status", {t!("admin-mail-intake-status")} }
+                        th { scope: "col", class: "admin-mail-col-error", {t!("admin-mail-intake-error")} }
+                        th { scope: "col", {t!("admin-mail-intake-received")} }
                     }
                 }
                 tbody {

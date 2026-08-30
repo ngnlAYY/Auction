@@ -72,7 +72,7 @@ use auction_web_shared::{
     BaseStylesheet, LanguagePicker, TruncatedText, format_credit_amount as format_amount,
     format_localized_time,
     i18n::{DEFAULT_PUBLIC_LOCALE, initial_language},
-    legacy_t as t, use_dialog_focus_trap, use_locale_effects,
+    legacy_t as t, use_dialog_focus_trap, use_locale_effects, use_route_focus,
 };
 use pagination::PublicPager;
 

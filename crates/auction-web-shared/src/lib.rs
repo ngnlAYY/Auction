@@ -15,7 +15,7 @@ pub use i18n::{
     LanguagePicker, SUPPORTED_LOCALES, SupportedLocale, format_localized_time, use_locale_effects,
 };
 
-pub use a11y::use_dialog_focus_trap;
+pub use a11y::{use_dialog_focus_trap, use_route_focus};
 
 pub use components::{
     BASE_CSS, BaseStylesheet, MarkdownBlocks, MarkdownDocument, TruncatedText,
