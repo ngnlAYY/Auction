@@ -190,19 +190,19 @@ fn map_error(error: ApplicationError) -> Response {
         ApplicationError::AdminIntake(AdminIntakeError::InvalidSource) => super::api_error(
             StatusCode::BAD_REQUEST,
             "unsupported_equipment_source",
-            "装备来源不受支持",
+            "装备 URL 或页面内容未通过安全校验",
         )
         .into_response(),
         ApplicationError::AdminIntake(AdminIntakeError::SourceUnavailable) => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "equipment_source_unavailable",
-            "装备来源暂时不可读取",
+            "装备页面暂时无法读取；请检查对应世界的 MM Cookie 或稍后重试",
         )
         .into_response(),
         ApplicationError::AdminIntake(AdminIntakeError::SourceUnconfigured) => super::api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "equipment_source_unavailable",
-            "装备来源暂时不可读取",
+            "装备来源尚未配置",
         )
         .into_response(),
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
@@ -218,17 +218,25 @@ fn map_error(error: ApplicationError) -> Response {
         ) => super::api_error(
             StatusCode::CONFLICT,
             "auction_intake_unavailable",
-            "当前世界没有可接收拍品的草稿场次",
+            "当前世界没有可接收拍品的草稿场次；请先创建草稿场次",
         )
         .into_response(),
         ApplicationError::CompetitionTransaction(
             CompetitionTransactionError::AdminIntakeSellerBlacklisted,
-        ) => super::api_error(StatusCode::CONFLICT, "seller_blacklisted", "该玩家当前不能提交拍品")
-            .into_response(),
+        ) => super::api_error(
+            StatusCode::CONFLICT,
+            "seller_blacklisted",
+            "该玩家受黑名单限制；请解除限制或更换卖家",
+        )
+        .into_response(),
         ApplicationError::CompetitionTransaction(
             CompetitionTransactionError::AdminIntakeEquipmentConflict,
-        ) => super::api_error(StatusCode::CONFLICT, "equipment_conflict", "该装备已存在于拍卖系统")
-            .into_response(),
+        ) => super::api_error(
+            StatusCode::CONFLICT,
+            "equipment_conflict",
+            "该装备已存在于拍卖系统；请勿重复录入",
+        )
+        .into_response(),
         ApplicationError::AdminIntake(AdminIntakeError::KeyUnavailable)
         | ApplicationError::AdminIntake(AdminIntakeError::StoredResultCorrupt)
         | ApplicationError::Serialization(_) => temporarily_unavailable(),
