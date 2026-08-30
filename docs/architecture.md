@@ -253,7 +253,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000019` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000020` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -261,7 +261,9 @@ PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的
 signal identity、三次 Create 重试、lease/fencing、终态错误码及成功入队后 cooldown 防线；
 `000016` 为论坛远端写入结果未知后的人工再授权增加幂等命令账本和追加审计；`000017` 固定
 carrier dispatch 世界，`000018` 恢复 lot 有效结束时间 shape，`000019` 则在滚动升级窗口只为
-旧 v28 固定 INSERT 遗漏的 `bids.effective_end_at` 从同事务已更新 lot 投影权威值；
+旧 v28 固定 INSERT 遗漏的 `bids.effective_end_at` 从同事务已更新 lot 投影权威值；`000020` 在
+PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，允许退信使用独立 signal，
+不改写既有人工对账 signal 的 fingerprint 或历史事实；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -323,6 +325,9 @@ outbox 预期值精确一致。POST 后 return 只接受结构正确且目标 `m
 `preflight_unproven` 人工核对；远端明确拒绝时，只从排除 script/style/noscript/textarea 后的可见文字
 识别“收件人不存在”和“无法支付邮资”；前者保留可选退信 `mid` 和 `take_required` 证据，
 并在退信资产取回前进入人工对账；后者只在从未暂存资产时归为确定失败，否则进入人工对账。PostgreSQL
+operations alert 只在 delivery 同时满足 `manual_reconcile`、`recipient_not_found` 和布尔型
+`take_required=true` 时追加 `delivery_returned_mail` 提醒；它继续保留总人工对账 signal，并排除
+operations alert 自己的 delivery，避免提醒递归和把其它未知结果误报为退信。
 Delivery Worker 在 `claimed → sending` 前还会按 payload world 查询 scoped/shared 凭据可用性；
 无凭据时以 lease/fencing 释放回 `pending`。进入 `sending` 后的凭据竞态、网络和协议依赖失败必须
 进入人工对账，只有纯本地配置/负载或明确协议拒绝可以成为普通失败。Delivery 使用独立的

@@ -90,10 +90,15 @@ fn evaluate_delivery(
     if snapshot.pending < 0
         || snapshot.failed < 0
         || snapshot.manual_reconcile < 0
+        || snapshot.returned_mail_manual_reconcile < 0
+        || snapshot.returned_mail_manual_reconcile > snapshot.manual_reconcile
         || snapshot.oldest_pending_age_seconds < 0
         || snapshot.oldest_manual_reconcile_age_seconds < 0
+        || snapshot.oldest_returned_mail_age_seconds < 0
         || (snapshot.pending == 0 && snapshot.oldest_pending_age_seconds != 0)
         || (snapshot.manual_reconcile == 0 && snapshot.oldest_manual_reconcile_age_seconds != 0)
+        || (snapshot.returned_mail_manual_reconcile == 0
+            && snapshot.oldest_returned_mail_age_seconds != 0)
         || snapshot.last_update_at.is_some_and(|value| value.timestamp_nanos_opt().is_none())
     {
         return Err(OperationsAlertError::Invalid);
@@ -109,6 +114,16 @@ fn evaluate_delivery(
             OperationsAlertSource::Delivery,
             snapshot.pending,
             snapshot.oldest_pending_age_seconds,
+        )?);
+    }
+    // 退信仍计入总人工对账水位；独立 signal 只补充可执行提醒，不能替代总水位。
+    if snapshot.returned_mail_manual_reconcile >= policy.delivery_manual_reconcile_count_threshold {
+        signals.push(OperationsAlertSignal::new(
+            OperationsAlertKind::DeliveryReturnedMail,
+            "delivery",
+            OperationsAlertSource::Delivery,
+            snapshot.returned_mail_manual_reconcile,
+            snapshot.oldest_returned_mail_age_seconds,
         )?);
     }
     if snapshot.manual_reconcile >= policy.delivery_manual_reconcile_count_threshold {

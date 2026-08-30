@@ -73,18 +73,30 @@ async fn delivery_snapshot(
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
     let row = sqlx::query(
-        "SELECT
+        r#"SELECT
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS pending,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'failed') AS failed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS manual_reconcile,
+            COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
+                AND status = 'manual_reconcile'
+                AND failure_code = 'recipient_not_found'
+                AND result_metadata @>
+                    '{"reason_code":"recipient_not_found","take_required":true}'::jsonb)
+                AS returned_mail_manual_reconcile,
             MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS oldest_pending,
             MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS oldest_manual,
-            MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update",
+            MIN(created_at) FILTER (WHERE origin_kind <> 'operations_alert'
+                AND status = 'manual_reconcile'
+                AND failure_code = 'recipient_not_found'
+                AND result_metadata @>
+                    '{"reason_code":"recipient_not_found","take_required":true}'::jsonb)
+                AS oldest_returned_mail,
+            MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update"#,
     )
     .fetch_one(pool)
     .await
@@ -96,10 +108,14 @@ async fn delivery_snapshot(
     let manual_reconcile: i64 = row
         .try_get("manual_reconcile")
         .map_err(|_| storage_error("读取 delivery 人工对账计数失败"))?;
+    let returned_mail_manual_reconcile: i64 = row
+        .try_get("returned_mail_manual_reconcile")
+        .map_err(|_| storage_error("读取 MoogleMail 退信人工对账计数失败"))?;
     Ok(OperationsAlertDeliverySnapshot {
         pending,
         failed,
         manual_reconcile,
+        returned_mail_manual_reconcile,
         oldest_pending_age_seconds: age_seconds(
             now,
             row.try_get("oldest_pending")
@@ -109,6 +125,11 @@ async fn delivery_snapshot(
             now,
             row.try_get("oldest_manual")
                 .map_err(|_| storage_error("读取 delivery 人工对账时间失败"))?,
+        ),
+        oldest_returned_mail_age_seconds: age_seconds(
+            now,
+            row.try_get("oldest_returned_mail")
+                .map_err(|_| storage_error("读取 MoogleMail 退信人工对账时间失败"))?,
         ),
         last_update_at: row
             .try_get("last_update")

@@ -155,11 +155,12 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000019`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000020`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
-dispatch、生命周期/operations alert/lot 结束时间数据库不变量，以及旧 v28 bid 缺失结束时间的
-严格兼容 trigger。旧名 `bid_proxies` 由只读兼容视图提供，不再维护第二份权威
+dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
+严格兼容 trigger，以及已证明 MoogleMail 退信的独立告警 identity。旧名 `bid_proxies` 由只读兼容
+视图提供，不再维护第二份权威
 状态。`auction-storage` 已接入 PostgreSQL 竞价与结算事务适配器：命令账本重放/冲突、
 权威状态锁、竞价/结算事实、履约初始状态、审计和 realtime 事件在对应事务内提交。
 SQLite `000001` 至 `000008` 及迁移入口已追加，
@@ -438,7 +439,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000016` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000020` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -628,7 +629,9 @@ Public 规则语言读取和登录来源返回也已完成静态修复，其中 
 两阶段恢复、邮件 retryability、Admin 业务 runtime 映射/稳定错误/凭据列和四项配置默认/安全边界也已
 完成静态修复；同宿主机隔离 systemd/Caddy 生命周期也已取得 R1，其余 WebUI、外部服务和真实生产
 切换证据仍按 `legacy-parity-audit.md` 逐项收口。下表把已完成代码、仍需外部/浏览器/生产证据的部分和明确不在旧版
-等价范围内的扩展分开；静态复核不能替代行为验证。
+等价范围内的扩展分开；静态复核不能替代行为验证。新增 `delivery_returned_mail` 只从
+`recipient_not_found + take_required=true` 的人工对账事实派生，在原总量 signal 之外给出取回资产
+提醒；PostgreSQL `000020` 扩展持久化闭集而不改写历史 fingerprint。
 
 | owner | 旧版能力 | 当前状态与下一步 |
 | --- | --- | --- |
@@ -1263,6 +1266,8 @@ script/style/noscript/textarea 后的可见 body 文字；收件人不存在保�
 失败，已暂存 Credits/装备/COD 时则是 `send_rejected_after_stage` 人工对账。delivery 失败端口与
 PostgreSQL 写回同步扩展为可保留有界安全 metadata 和外部引用，storage 仍覆盖权威
 `safe_detail` / `outcome_unknown`，Admin 只接收已有安全投影字段而不接收 metadata 原文。
+Operations alert 现在会对上述严格退信证据追加 `delivery_returned_mail` signal，摘要明确要求核对
+后台交付页和 MM；它沿用人工对账数量阈值、保留总人工对账提醒，并排除自己的通知 delivery。
 
 继续核对旧版 Delivery Worker 后还恢复了发送前 availability gate：Rust 现在会从合法 payload
 解析目标 world，并在 `claimed → sending` 前检查 scoped/shared Cookie；当前无凭据时以完整

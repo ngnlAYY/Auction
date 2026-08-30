@@ -98,7 +98,8 @@
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
-  不把告警结果混入拍卖或外部传输事实。
+  不把告警结果混入拍卖或外部传输事实。`delivery_returned_mail` 是已证明收件人不存在且需要取回
+  资产的人工对账子信号；它保留独立 fingerprint，同时不替代 delivery 人工对账总水位。
 - `src/ports/scheduling/recurring.rs`：Worker 读取下一次 UTC 触发时刻的窄端口；cron、时区和
   固定间隔解析留在配置适配器，不能替代持久化 due、游标或租约。
 - `src/errors/mod.rs`：应用错误，保留领域错误分类。

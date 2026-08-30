@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000019`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000020`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000008` 作为共有能力子集及生命周期/领先时间/lot 结束时间修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
@@ -43,7 +43,8 @@ PostgreSQL `000016` 为论坛主题写入结果未知后的人工再授权新增
 远端 POST；该账本不保存 Cookie、远端响应或任意敏感配置。
 PostgreSQL `000017` 固定 Isekai carrier 的派发 world；`000018` 为 live/sold lot 恢复非空有效结束
 时间约束；`000019` 只为已先更新同一 lot 投影的旧 v28 INSERT 补齐遗漏的 bid 有效结束时间，新版
-显式写入和无法逐字段证明属于同一事实的行都不经过该兼容分支。
+显式写入和无法逐字段证明属于同一事实的行都不经过该兼容分支；`000020` 扩展 operations alert
+kind/identity 闭集，为已证明的 MoogleMail 退信提供独立提醒，同时保留总人工对账 signal。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -161,7 +162,7 @@ PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛�
 | realtime_events | 000001_baseline + 000007_realtime_replay + 000011_realtime_discovery_alias | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 追加式事件、stream sequence、replay 关系和 PostgreSQL `auction.created` 发现别名 |
 | realtime_consumer_offsets | 000001_baseline | auction-application：Public relay；auction-jobs：外部 consumer | 两者 | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key |
 | realtime_failures | 000001_baseline | auction-application：Public relay；auction-jobs + auction-observability：外部 realtime | 两者 | 事件消费隔离、失败事实和显式 replay 边界 |
-| operations_alert_signals | 000005_recovery_observability_forum + 000015_operations_alert_state_invariants | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 完整档 | 告警信号、稳定 identity、版本、通知时间和 cooldown |
+| operations_alert_signals | 000005_recovery_observability_forum + 000015_operations_alert_state_invariants + 000020_operations_alert_returned_mail | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 完整档 | 告警信号、稳定 identity、版本、通知时间、cooldown 与已证明退信的独立提醒 |
 | operations_alert_batches | 000005_recovery_observability_forum + 000015_operations_alert_state_invariants | auction-storage：alert batch；auction-jobs：claim/dispatch | 完整档 | 告警批次、租约/fencing、三次 Create 重试、稳定终态和 delivery 对账 |
 | operations_alert_batch_items | 000005_recovery_observability_forum + 000015_operations_alert_state_invariants | auction-storage：alert batch | 完整档 | 告警批次成员、版本、冻结摘要和 signal 反查索引 |
 

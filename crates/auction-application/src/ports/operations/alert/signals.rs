@@ -38,6 +38,7 @@ pub enum OperationsAlertKind {
     AuditFailure,
     SourceUnavailable,
     DeliveryPending,
+    DeliveryReturnedMail,
     DeliveryManualReconcile,
     FulfillmentBacklog,
     FulfillmentFailed,
@@ -59,6 +60,7 @@ impl OperationsAlertKind {
             Self::AuditFailure => "audit_failure",
             Self::SourceUnavailable => "source_unavailable",
             Self::DeliveryPending => "delivery_pending",
+            Self::DeliveryReturnedMail => "delivery_returned_mail",
             Self::DeliveryManualReconcile => "delivery_manual_reconcile",
             Self::FulfillmentBacklog => "fulfillment_backlog",
             Self::FulfillmentFailed => "fulfillment_failed",
@@ -154,6 +156,10 @@ impl OperationsAlertSignal {
             OperationsAlertKind::DeliveryPending => {
                 format!("交付积压 {}，最长 {} 秒", self.count, self.age_seconds)
             }
+            OperationsAlertKind::DeliveryReturnedMail => format!(
+                "MoogleMail 退信待取回 {}，最长 {} 秒；请核对后台交付页和 MM",
+                self.count, self.age_seconds
+            ),
             OperationsAlertKind::DeliveryManualReconcile => {
                 format!("交付人工对账 {}，最长 {} 秒", self.count, self.age_seconds)
             }

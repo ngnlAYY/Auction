@@ -309,11 +309,12 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000019` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000020` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
-时间 shape，`000019` 为旧 Auction-BF bid 写入补齐同一有效结束时间兼容防线。SQLite
+时间 shape，`000019` 为旧 Auction-BF bid 写入补齐同一有效结束时间兼容防线，`000020` 扩展
+operations alert 的退信 signal 闭集。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000008` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
@@ -365,4 +366,6 @@ operations alert 由 `src/database/operations_alert/` 分层持有：`mod.rs` �
 批次 lease/fencing（`claims/mod.rs` 负责导出，`create.rs` 负责新批次领取，`reclaim.rs` 负责
 过期租约回收，`mapping.rs` 负责 PostgreSQL 行映射），`delivery.rs` 负责三次 Create 尝试、cooldown 与 delivery 终态投影，
 `health.rs` 负责水位健康快照，`common.rs` 负责共享的安全映射；普通失败只释放为无错误码的
-pending，cooldown 只在 delivery 入队确认事务中生效，SQLite Lite 不提供该完整档能力。
+pending，cooldown 只在 delivery 入队确认事务中生效。退信水位只统计同时具有
+`failure_code=recipient_not_found`、同名 reason code 和布尔型 `take_required=true` 的
+`manual_reconcile` delivery，并排除 operations alert 自身 delivery；SQLite Lite 不提供该完整档能力。

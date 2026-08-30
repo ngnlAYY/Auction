@@ -67,13 +67,14 @@ pub(crate) async fn claim_postgres(
          ORDER BY CASE signal.kind
              WHEN 'source_unavailable' THEN 1
              WHEN 'service_missing' THEN 2
-             WHEN 'delivery_manual_reconcile' THEN 3
-             WHEN 'fulfillment_manual_reconcile' THEN 4
-             WHEN 'recovery_manual_reconcile' THEN 5
-             WHEN 'recovery_failed' THEN 6
-             WHEN 'fulfillment_failed' THEN 7
-             WHEN 'audit_failure' THEN 8
-             ELSE 9
+             WHEN 'delivery_returned_mail' THEN 3
+             WHEN 'delivery_manual_reconcile' THEN 4
+             WHEN 'fulfillment_manual_reconcile' THEN 5
+             WHEN 'recovery_manual_reconcile' THEN 6
+             WHEN 'recovery_failed' THEN 7
+             WHEN 'fulfillment_failed' THEN 8
+             WHEN 'audit_failure' THEN 9
+             ELSE 10
          END, signal.kind, signal.scope, signal.fingerprint
          LIMIT $2
          FOR UPDATE OF signal SKIP LOCKED",

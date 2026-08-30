@@ -97,7 +97,9 @@ pub(super) fn valid_signal_identity(
             source == OperationsAlertSource::Process && scope == "audit"
         }
         OperationsAlertKind::SourceUnavailable => scope == source.as_str(),
-        OperationsAlertKind::DeliveryPending | OperationsAlertKind::DeliveryManualReconcile => {
+        OperationsAlertKind::DeliveryPending
+        | OperationsAlertKind::DeliveryReturnedMail
+        | OperationsAlertKind::DeliveryManualReconcile => {
             source == OperationsAlertSource::Delivery && scope == "delivery"
         }
         OperationsAlertKind::FulfillmentBacklog
