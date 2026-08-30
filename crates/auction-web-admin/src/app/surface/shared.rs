@@ -20,15 +20,18 @@ pub fn format_admin_time(value: &str) -> String {
 /// 展示。这样既恢复旧版 `errorKey(error)` 行为，也避免把服务端自然语言当成跨语言契约。
 pub fn admin_api_error_message(code: &str) -> String {
     match code {
-        "invalid_auction_intake" => t!("admin-error-invalid-auction-intake"),
+        "invalid_auction_command" | "invalid_auction_intake" => {
+            t!("admin-error-invalid-auction-intake")
+        }
         "unsupported_equipment_source" => t!("admin-error-unsupported-equipment-source"),
         "equipment_source_unavailable" => t!("admin-error-equipment-source-unavailable"),
         "auction_intake_unavailable" => t!("admin-error-auction-intake-unavailable"),
-        "auction_intake_player_blacklisted" => {
+        "seller_blacklisted" | "auction_intake_player_blacklisted" => {
             t!("admin-error-auction-intake-player-blacklisted")
         }
         "equipment_conflict" => t!("admin-error-equipment-conflict"),
         "network_error" => t!("admin-error-network"),
+        "request_timeout" => t!("admin-error-request-timeout"),
         "invalid_response" => t!("admin-error-invalid-response"),
         "invalid_credentials" => t!("admin-error-invalid-credentials"),
         "unauthenticated" | "http_401" | "csrf_unavailable" => {

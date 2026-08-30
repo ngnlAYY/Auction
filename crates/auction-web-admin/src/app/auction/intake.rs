@@ -207,10 +207,13 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                 }
             }
             if let Some(current_failure) = failure() {
-                p {
+                div {
                     role: "alert",
+                    aria_live: "assertive",
                     class: "admin-panel__note action-feedback action-feedback--error",
-                    {intake_failure_message(current_failure)}
+                    strong { {t!("admin-intake-error")} }
+                    br {}
+                    span { {intake_failure_message(current_failure)} }
                 }
             }
             if let Some(value) = result() {
