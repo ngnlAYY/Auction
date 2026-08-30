@@ -77,8 +77,10 @@ pub struct OperationsAlertDeliverySnapshot {
     pub pending: i64,
     pub failed: i64,
     pub manual_reconcile: i64,
+    pub returned_mail_manual_reconcile: i64,
     pub oldest_pending_age_seconds: i64,
     pub oldest_manual_reconcile_age_seconds: i64,
+    pub oldest_returned_mail_age_seconds: i64,
     pub last_update_at: Option<DateTime<Utc>>,
 }
 

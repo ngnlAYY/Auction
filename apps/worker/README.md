@@ -86,12 +86,15 @@ return 动作同时支持当前只读 `[RTS]` 回执与旧版 Inbox 缺席证明
 每个邮箱的持久化 claim 在批次执行期间按配置续租；token、owner、版本或续租 fence 失效后会
 取消当前陈旧处理，后续只允许从权威 cursor 重放。
 启用 `[worker.operations_alert]` 时，PostgreSQL Worker 会从 process、delivery、fulfillment 和
-recovery owner 读取安全水位，按旧版 15 类 signal、阈值、fingerprint、cooldown 和 claim lease
+recovery owner 读取安全水位，按旧版 15 类 signal、退信子信号、阈值、fingerprint、cooldown 和 claim lease
 生成有界通知批次；通知通过同一 MoogleMail delivery outbox 幂等入队，delivery 终态再回写
 告警成功、失败或人工对账。scan、dispatch 和 reconcile 各自立即执行后按 `scan_interval_seconds +
 [0, jitter_seconds]` 等待；取消会跳过等待且不影响 claim/fencing。普通 Create 失败会清空瞬时错误后持久化退避，identity 不一致立即
-失败，第三次失败固定为 `retry_exhausted`；只有入队确认事务会推进 signal cooldown。Recovery
-health 会按 `[worker.recovery]` 的独立周期读取两个 world
+失败，第三次失败固定为 `retry_exhausted`；只有入队确认事务会推进 signal cooldown。
+其中收件人不存在且明确要求取回资产的 delivery 会在原人工对账总量之外追加
+`delivery_returned_mail` signal，摘要提示管理员核对后台交付页和 MM；该子信号沿用人工对账数量
+阈值，且 operations alert 自身 delivery 不参与统计，避免退信提醒循环。
+Recovery health 会按 `[worker.recovery]` 的独立周期读取两个 world
 的 Balance，低余额、过期证据和来源不可用都会进入安全投影，读取失败不会覆盖最后成功余额。
 告警 delivery 在批次确认 `enqueued` 前不会被普通发送循环领取，
 避免发送竞态；SQLite Lite 明确不提供该能力。

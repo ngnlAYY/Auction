@@ -80,6 +80,7 @@ pub(super) fn parse_kind(value: &str) -> Option<OperationsAlertKind> {
         "audit_failure" => OperationsAlertKind::AuditFailure,
         "source_unavailable" => OperationsAlertKind::SourceUnavailable,
         "delivery_pending" => OperationsAlertKind::DeliveryPending,
+        "delivery_returned_mail" => OperationsAlertKind::DeliveryReturnedMail,
         "delivery_manual_reconcile" => OperationsAlertKind::DeliveryManualReconcile,
         "fulfillment_backlog" => OperationsAlertKind::FulfillmentBacklog,
         "fulfillment_failed" => OperationsAlertKind::FulfillmentFailed,
