@@ -41,7 +41,7 @@ pub(crate) fn parse_equipment_page(
         .ok_or(AdminIntakeError::InvalidSource)?;
     let (category, level, tradeable) = parse_header(&header)?;
     let (quality, prefix, equipment_type, suffix) = parse_identity(&name)?;
-    if category_for_type(&equipment_type).as_deref() != Some(category.as_str()) || !tradeable {
+    if category_for_type(&equipment_type).as_deref() != Some(category.as_str()) {
         return Err(AdminIntakeError::InvalidSource);
     }
     let stats = parse_stats(children[1])?;

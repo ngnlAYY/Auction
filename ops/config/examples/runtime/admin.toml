@@ -100,6 +100,8 @@ allowed_hosts = ["hentaiverse.org"]
 allowed_path_prefixes = ["/equip/", "/isekai/equip/"]
 # 可选：是否启用主机和路径双重 allowlist；省略时开启。
 allowlist_enabled = true
+# 可选：是否只允许可交易装备；省略时关闭，关闭后 Soulbound 装备也可由 Admin 手工录入。
+require_tradeable = false
 # 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 2 MiB。
 maximum_response_bytes = 2097152
 # 可选：两次请求之间的最小间隔毫秒数，范围为 1 至 60000；默认沿用旧版的 250。

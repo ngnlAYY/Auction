@@ -69,6 +69,9 @@ pub struct AdminRuntimeEquipmentSourceConfig {
     pub allowed_path_prefixes: Vec<String>,
     /// 是否启用主机和路径双重 allowlist；省略时开启。
     pub allowlist_enabled: bool,
+    /// 是否只允许可交易装备；省略时关闭。关闭值不参与序列化，以保持升级前文档指纹稳定。
+    #[serde(skip_serializing_if = "is_false")]
+    pub require_tradeable: bool,
     /// 单次响应最大字节数；省略时为 2 MiB。
     pub maximum_response_bytes: u64,
     /// 两次请求之间的最小间隔毫秒数；省略时沿用旧版的 250 毫秒。
@@ -83,11 +86,16 @@ impl Default for AdminRuntimeEquipmentSourceConfig {
             allowed_hosts: vec!["hentaiverse.org".to_owned()],
             allowed_path_prefixes: vec!["/equip/".to_owned(), "/isekai/equip/".to_owned()],
             allowlist_enabled: true,
+            require_tradeable: false,
             maximum_response_bytes: 2 << 20,
             minimum_request_interval_millis: 250,
             request_timeout_seconds: 10,
         }
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Admin runtime HTTP 安全策略；不包含登录凭据、Cookie 或签名密钥。

@@ -264,6 +264,7 @@ fn valid_equipment_source(value: &Value) -> bool {
             "allowlist_enabled",
             "maximum_response_bytes",
             "minimum_request_interval_millis",
+            "require_tradeable",
             "request_timeout_seconds",
         ],
     ) else {
@@ -272,6 +273,9 @@ fn valid_equipment_source(value: &Value) -> bool {
     let Some(enabled) = bool_field(source, "allowlist_enabled") else {
         return false;
     };
+    if bool_field(source, "require_tradeable").is_none() {
+        return false;
+    }
     let hosts_valid = valid_string_list(&source["allowed_hosts"], 16, 253, true);
     let paths_valid = valid_string_list(&source["allowed_path_prefixes"], 16, 512, true);
     let hosts_present = source["allowed_hosts"].as_array().is_some_and(|values| !values.is_empty());

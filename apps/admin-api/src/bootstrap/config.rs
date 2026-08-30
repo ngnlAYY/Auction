@@ -3,6 +3,8 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_application::AdminIntakePolicy;
 use auction_application::{AdminCredentialWorld, WorkerControlPort};
 use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend};
@@ -74,6 +76,15 @@ pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<Equi
         minimum_request_interval: Duration::from_millis(source.minimum_request_interval_millis),
         request_timeout: Duration::from_secs(source.request_timeout_seconds),
     })
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(super) fn admin_intake_policy(config: &AppConfig) -> AdminIntakePolicy {
+    let require_tradeable = config
+        .admin_runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.equipment_source.require_tradeable);
+    AdminIntakePolicy::new(require_tradeable)
 }
 
 pub(super) fn configure_security(config: &AppConfig) -> anyhow::Result<AdminHttpSecurity> {

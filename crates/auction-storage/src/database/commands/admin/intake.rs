@@ -10,8 +10,8 @@ use auction_application::AdminIntakeService;
 #[cfg(feature = "sqlite")]
 use auction_application::ApplicationError;
 use auction_application::{
-    AdminIntakeCommand, AdminIntakePort, AdminIntakeResult, AdminIntakeSourceReader,
-    ApplicationFuture, Clock, EquipmentKeySealerPort,
+    AdminIntakeCommand, AdminIntakePolicy, AdminIntakePort, AdminIntakeResult,
+    AdminIntakeSourceReader, ApplicationFuture, Clock, EquipmentKeySealerPort,
 };
 
 use super::DatabaseStore;
@@ -22,6 +22,7 @@ pub struct DatabaseAdminIntakeCommands<C, S, K> {
     source: Arc<S>,
     sealer: Arc<K>,
     clock: Arc<C>,
+    policy: AdminIntakePolicy,
 }
 
 impl<C, S, K> DatabaseAdminIntakeCommands<C, S, K>
@@ -31,8 +32,14 @@ where
     K: EquipmentKeySealerPort + 'static,
 {
     /// 建立只向应用层暴露窄端口的 Admin 录入装配器。
-    pub fn new(store: Arc<DatabaseStore>, source: Arc<S>, sealer: Arc<K>, clock: Arc<C>) -> Self {
-        Self { store, source, sealer, clock }
+    pub fn new(
+        store: Arc<DatabaseStore>,
+        source: Arc<S>,
+        sealer: Arc<K>,
+        clock: Arc<C>,
+        policy: AdminIntakePolicy,
+    ) -> Self {
+        Self { store, source, sealer, clock, policy }
     }
 }
 
@@ -51,14 +58,21 @@ where
         let sealer = Arc::clone(&self.sealer);
         #[cfg(feature = "postgres")]
         let clock = Arc::clone(&self.clock);
+        #[cfg(feature = "postgres")]
+        let policy = self.policy;
         #[cfg(not(feature = "postgres"))]
-        let _ = (&command, &self.store, &self.source, &self.sealer, &self.clock);
+        let _ = (&command, &self.store, &self.source, &self.sealer, &self.clock, self.policy);
         Box::pin(async move {
             #[cfg(feature = "postgres")]
             match store.as_ref() {
                 DatabaseStore::Postgres(store) => {
-                    let service =
-                        AdminIntakeService::new(Arc::new(store.clone()), source, sealer, clock);
+                    let service = AdminIntakeService::new(
+                        Arc::new(store.clone()),
+                        source,
+                        sealer,
+                        clock,
+                        policy,
+                    );
                     service.add_item(command).await
                 }
                 #[cfg(feature = "sqlite")]

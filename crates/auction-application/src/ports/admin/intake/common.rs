@@ -2,6 +2,24 @@
 
 use super::*;
 
+/// Admin 手工装备录入策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AdminIntakePolicy {
+    require_tradeable: bool,
+}
+
+impl AdminIntakePolicy {
+    /// 建立进程启动时冻结的手工录入策略。
+    pub const fn new(require_tradeable: bool) -> Self {
+        Self { require_tradeable }
+    }
+
+    /// 是否拒绝来源明确标记为不可交易的装备。
+    pub const fn requires_tradeable(self) -> bool {
+        self.require_tradeable
+    }
+}
+
 /// Admin 装备录入应用错误。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum AdminIntakeError {

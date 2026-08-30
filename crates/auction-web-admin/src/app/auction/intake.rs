@@ -290,7 +290,7 @@ fn valid_canonical_equipment_json(value: &str) -> bool {
     let level_valid = equipment.get("level").is_some_and(|level| {
         level.is_null() || level.as_i64().is_some_and(|value| (1..=100_000).contains(&value))
     });
-    if !level_valid || equipment.get("tradeable") != Some(&Value::Bool(true)) {
+    if !level_valid || equipment.get("tradeable").and_then(Value::as_bool).is_none() {
         return false;
     }
     let Some(Value::Object(stats)) = equipment.get("stats") else {
