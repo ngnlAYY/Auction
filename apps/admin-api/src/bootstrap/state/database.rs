@@ -234,6 +234,7 @@ pub(super) async fn configure_state(
                     Arc::new(source),
                     Arc::new(sealer),
                     Arc::new(SystemClock),
+                    config::admin_intake_policy(config),
                 ));
                 Some(intake)
             }

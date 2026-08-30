@@ -223,8 +223,10 @@ Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保�
 `X-Auction-Capability-Manual-Intake` 响应头读取外部写入能力。SQLite Lite 因缺少完整 Admin 生命周期字段
 明确返回 `501 feature_not_supported`，不填充伪造的默认生命周期数据。A04
 `/api/v1/admin/worlds/{world_id}/auction-intake/items` 已接入 URL/canonical JSON 录入、
-固定 HTTPS 来源边界、key 密文信封和 PostgreSQL 同一 Serializable 写事务；成功响应只返回
-拍卖、投稿、lot 与装备的安全事实，不返回原始 URL、canonical 正文或 key，SQLite Lite 明确
+固定 HTTPS 来源边界、可选的可交易装备限制、key 密文信封和 PostgreSQL 同一 Serializable 写事务；
+`equipment_source.require_tradeable` 默认关闭，允许 Admin 手工录入 Soulbound 装备；开启后在事务前
+恢复只接受可交易装备的限制，且不改变 MoogleMail 邮件过滤。成功响应只返回拍卖、投稿、lot 与
+装备的安全事实，不返回原始 URL、canonical 正文或 key，SQLite Lite 明确
 返回 `501 feature_not_supported`。A15
 `/api/v1/admin/lots/{lot_id}/proxy-events` 已接入 Admin 会话保护、页码/opaque cursor 两种分页、
 PostgreSQL Serializable 命令账本快照和代理安全事件投影；SQLite Lite 明确返回
@@ -310,8 +312,9 @@ MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全�
 拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
 `501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 会同时决定生命周期
 capability 和锁内人工提前开放校验；计划时间已到的正常开放仍然允许。`[equipment_source]` 会冻结为
-装备来源适配器的 host/path allowlist、响应上限、共享请求间隔和全请求超时；固定 HTTPS origin、
-无重定向、精确 world 路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是
+装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时，以及 Admin 手工录入的
+可交易装备开关；后者默认关闭且不放宽来源安全或邮件过滤。固定 HTTPS origin、无重定向、精确 world
+路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是
 真实生效边界，不是热加载提示；业务区块更新要求重启受影响的 Admin 与 Worker。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单

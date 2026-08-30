@@ -52,10 +52,17 @@ impl AdminIntakeSourceSnapshot {
         Ok(())
     }
 
-    /// 校验适配器输出且拒绝未来时间、非 object attributes 和不可交易装备。
-    pub fn validate(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
+    /// 按 Admin 手工录入策略校验适配器输出；策略关闭时保留不可交易事实并继续录入。
+    pub fn validate_for_admin(
+        &self,
+        now: DateTime<Utc>,
+        policy: AdminIntakePolicy,
+    ) -> Result<(), AdminIntakeError> {
         self.validate_for_mail(now)?;
-        self.tradeable.then_some(()).ok_or(AdminIntakeError::InvalidSource)
+        if policy.requires_tradeable() && !self.tradeable {
+            return Err(AdminIntakeError::InvalidSource);
+        }
+        Ok(())
     }
 
     /// 清零短生命周期 key。

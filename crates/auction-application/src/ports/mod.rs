@@ -135,8 +135,8 @@ pub use admin_forum::{
     AdminForumPreviewResult, AdminForumWarning, MAX_ADMIN_FORUM_PREVIEW_BYTES,
 };
 pub use admin_intake::{
-    AdminIntakeCommand, AdminIntakeError, AdminIntakePort, AdminIntakeRecord, AdminIntakeResult,
-    AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeSourceSnapshot,
+    AdminIntakeCommand, AdminIntakeError, AdminIntakePolicy, AdminIntakePort, AdminIntakeRecord,
+    AdminIntakeResult, AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeSourceSnapshot,
     AdminIntakeTransaction, AdminIntakeWrite, CanonicalEquipment, CanonicalEquipmentStat,
     EquipmentKeySealerPort, aggregate_id as admin_intake_aggregate_id,
 };

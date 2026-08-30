@@ -192,7 +192,15 @@ fn map_snapshot(
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
     // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。
     document.materialize_business_defaults();
-    let document = serde_json::to_value(document).map_err(|_| Box::new(super::internal_error()))?;
+    let mut document =
+        serde_json::to_value(document).map_err(|_| Box::new(super::internal_error()))?;
+    // `false` 在物理文档中省略以保持旧指纹；浏览器投影显式补齐开关，避免隐藏默认行为。
+    let Some(equipment_source) =
+        document.get_mut("equipment_source").and_then(Value::as_object_mut)
+    else {
+        return Err(Box::new(super::internal_error()));
+    };
+    equipment_source.entry("require_tradeable").or_insert(Value::Bool(false));
     Ok(AdminRuntimeConfigResponse {
         document,
         fingerprint: snapshot.fingerprint,

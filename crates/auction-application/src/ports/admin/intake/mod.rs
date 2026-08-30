@@ -26,7 +26,7 @@ mod records;
 mod source;
 
 pub use commands::AdminIntakeCommand;
-pub use common::{AdminIntakeError, aggregate_id};
+pub use common::{AdminIntakeError, AdminIntakePolicy, aggregate_id};
 pub(super) use common::{decimal_identity, valid_optional_text, valid_text};
 pub(super) use equipment::CanonicalEquipmentDigest;
 pub use equipment::{AdminIntakeSourceKind, CanonicalEquipment, CanonicalEquipmentStat};

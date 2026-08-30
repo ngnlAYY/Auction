@@ -9,10 +9,11 @@ use auction_domain::{CommandId, EquipmentId};
 use uuid::Uuid;
 
 use crate::{
-    AdminIntakeCommand, AdminIntakeError, AdminIntakePort, AdminIntakeRecord, AdminIntakeResult,
-    AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeTransaction, AdminIntakeWrite,
-    ApplicationError, ApplicationFuture, Clock, CompetitionTransaction, EquipmentKeySealerPort,
-    StoredCommand, TransactionPolicy, TransactionRunner, admin_intake_aggregate_id,
+    AdminIntakeCommand, AdminIntakeError, AdminIntakePolicy, AdminIntakePort, AdminIntakeRecord,
+    AdminIntakeResult, AdminIntakeSourceKind, AdminIntakeSourceReader, AdminIntakeTransaction,
+    AdminIntakeWrite, ApplicationError, ApplicationFuture, Clock, CompetitionTransaction,
+    EquipmentKeySealerPort, StoredCommand, TransactionPolicy, TransactionRunner,
+    admin_intake_aggregate_id,
 };
 
 /// Admin 装备录入应用服务。
@@ -21,6 +22,7 @@ pub struct AdminIntakeService<R, S, K, C> {
     source: Arc<S>,
     sealer: Arc<K>,
     clock: Arc<C>,
+    policy: AdminIntakePolicy,
 }
 
 impl<R, S, K, C> AdminIntakeService<R, S, K, C>
@@ -32,8 +34,14 @@ where
     C: Clock,
 {
     /// 建立只依赖端口的装备录入用例。
-    pub fn new(repository: Arc<R>, source: Arc<S>, sealer: Arc<K>, clock: Arc<C>) -> Self {
-        Self { repository, source, sealer, clock }
+    pub fn new(
+        repository: Arc<R>,
+        source: Arc<S>,
+        sealer: Arc<K>,
+        clock: Arc<C>,
+        policy: AdminIntakePolicy,
+    ) -> Self {
+        Self { repository, source, sealer, clock, policy }
     }
 
     /// 执行一次 world-scoped 装备录入。
@@ -74,7 +82,7 @@ where
             }
         };
         snapshot.collected_at = now;
-        snapshot.validate(now)?;
+        snapshot.validate_for_admin(now, self.policy)?;
 
         let equipment_id = EquipmentId::from_uuid(Uuid::new_v4());
         let submission_id = Uuid::new_v4();

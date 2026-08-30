@@ -52,8 +52,10 @@ Worker 重启时把它们投影为 MoogleMail 业务快照。transport endpoint�
 `allow_manual_early_open` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
 `restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
 锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。后者配置 host/path allowlist、
-64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔和 1 至 30 秒总超时；适配器始终保留固定 HTTPS
-origin、无重定向、精确 world 路径和流式有界读取。示例默认 2 MiB、250 ms 和 10 秒。
+64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔、1 至 30 秒总超时，以及仅用于 Admin 手工
+录入的 `require_tradeable` 开关。该开关默认关闭，关闭时允许 Soulbound 装备，开启时只接受可交易
+装备；MoogleMail 邮件装备过滤仍独立拒绝不可交易来源。适配器始终保留固定 HTTPS origin、无重定向、
+精确 world 路径和流式有界读取。示例默认 2 MiB、250 ms、10 秒和关闭可交易限制。
 
 以下字段只能出现在敏感 TOML：
 
