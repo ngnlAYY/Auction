@@ -5,7 +5,8 @@ use std::str;
 use scraper::Html;
 
 use super::common::{
-    compose_error, response_mail_id, selector, visible_body_text, visible_confirmation_text,
+    compose_error, is_css_send_confirmation, response_mail_id, selector, visible_body_text,
+    visible_confirmation_text,
 };
 use super::*;
 
@@ -34,7 +35,9 @@ impl MoogleMailParser {
         }
         if confirmations.len() == 1 && forms == 0 {
             let phrase = visible_confirmation_text(confirmations[0], world)?;
-            if !phrase.to_ascii_lowercase().contains("message has been sent") {
+            if !phrase.to_ascii_lowercase().contains("message has been sent")
+                && !is_css_send_confirmation(confirmations[0])
+            {
                 return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
             }
             return Ok(response_mail_id(source));

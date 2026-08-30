@@ -44,6 +44,47 @@ pub(super) fn parse_attachment_count(value: &str) -> Option<(usize, Option<i64>)
     Some((usize::try_from(count).ok()?, cod))
 }
 
+/// 读取 compose 附件计数；兼容当前页面的固定 CSS 字形结构。
+pub(super) fn attachment_count_text(element: ElementRef<'_>) -> Option<String> {
+    let visible = normalize_text(element.text().collect::<String>());
+    if !visible.is_empty() {
+        return Some(visible);
+    }
+
+    let wrappers = direct_element_children(element);
+    if wrappers.len() != 1
+        || wrappers[0].value().name() != "div"
+        || wrappers[0].value().attr("class") != Some("fc f4b")
+        || !normalize_text(wrappers[0].text().collect::<String>()).is_empty()
+    {
+        return None;
+    }
+    let glyphs = direct_element_children(wrappers[0]);
+    if glyphs.is_empty() {
+        return None;
+    }
+    let mut decoded = String::with_capacity(glyphs.len());
+    for glyph in glyphs {
+        if glyph.value().name() != "div"
+            || !direct_element_children(glyph).is_empty()
+            || !normalize_text(glyph.text().collect::<String>()).is_empty()
+        {
+            return None;
+        }
+        let class_name = glyph.value().attr("class")?;
+        let bytes = class_name.as_bytes();
+        match bytes {
+            [b'c', b'5', b'9'] => decoded.push(' '),
+            [b'c', b'4', b'i'] => decoded.push('/'),
+            [b'c', b'4', digit @ b'0'..=b'9'] => decoded.push(char::from(*digit)),
+            [b'c', b'5', letter @ b'a'..=b'z'] => decoded.push(char::from(*letter)),
+            _ => return None,
+        }
+    }
+    let decoded = normalize_text(decoded);
+    parse_attachment_count(&decoded).is_some().then_some(decoded)
+}
+
 pub(super) fn parse_amount(value: &str) -> Option<i64> {
     if value.is_empty()
         || (value.len() > 1 && value.starts_with('0'))
@@ -105,6 +146,29 @@ pub(super) fn visible_confirmation_text(
         }
     }
     Ok(normalize_text(decoded))
+}
+
+/// 当前 HentaiVerse 也会用单一 CSS sprite 表示“邮件已发送”。
+///
+/// 该证明只在调用方已经确认唯一 `#mmail_fin` 且页面不存在 compose form 后使用；这里再要求
+/// 完整的直接子结构，避免任意 `c5y` class 充当成功证据。
+pub(super) fn is_css_send_confirmation(element: ElementRef<'_>) -> bool {
+    if !normalize_text(element.text().collect::<String>()).is_empty() {
+        return false;
+    }
+    let wrappers = direct_element_children(element);
+    if wrappers.len() != 1
+        || wrappers[0].value().name() != "div"
+        || wrappers[0].value().attr("class") != Some("fc f4b")
+    {
+        return false;
+    }
+    let markers = direct_element_children(wrappers[0]);
+    markers.len() == 1
+        && markers[0].value().name() == "div"
+        && markers[0].value().attr("class") == Some("c5y")
+        && direct_element_children(markers[0]).is_empty()
+        && normalize_text(markers[0].text().collect::<String>()).is_empty()
 }
 
 pub(super) fn response_mail_id(source: &str) -> Option<String> {

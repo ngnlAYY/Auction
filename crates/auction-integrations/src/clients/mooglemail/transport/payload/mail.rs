@@ -33,9 +33,7 @@ pub(crate) fn decode_payload(
         return Err(invalid_payload());
     }
     let world = MoogleMailWorld::parse(&payload.world).ok_or_else(invalid_payload)?;
-    let expected_origin_id =
-        format!("{}:{}:{}", payload.world, payload.external_mail_id, payload.operation);
-    if claim.origin_kind == "mail_intake" && claim.origin_id != expected_origin_id {
+    if claim.origin_kind == "mail_intake" && !valid_mail_intake_origin_id(claim, &payload) {
         return Err(invalid_payload());
     }
     if claim.origin_kind == "operations_alert"
@@ -167,4 +165,20 @@ pub(crate) fn decode_payload(
         _ => return Err(invalid_payload()),
     }
     Ok((payload, world))
+}
+
+fn valid_mail_intake_origin_id(claim: &DeliveryWorkClaim, payload: &MailDeliveryPayload) -> bool {
+    let canonical = format!("{}:{}:{}", payload.world, payload.external_mail_id, payload.operation);
+    if claim.origin_id == canonical {
+        return true;
+    }
+    // 历史 Rust producer 误把命令用途写进 origin_id。兼容仅限同一 world、邮件 ID 和三种
+    // 已知 operation 的逐项别名；稳定命令身份不变，未知后缀继续失败关闭。
+    let legacy_operation = match payload.operation.as_str() {
+        "send" => "delivery-notice",
+        "return" => "delivery-return",
+        "take" => "delivery-take",
+        _ => return false,
+    };
+    claim.origin_id == format!("{}:{}:{legacy_operation}", payload.world, payload.external_mail_id)
 }

@@ -160,11 +160,13 @@ delivery 收件人一致。take 还必须精确比对装备 ID 集合、Credits�
 claimable 动作；只检查按钮存在不构成资产证明。前置证明失败时不得发起 POST，也不得将
 未知远端状态当作可自动重试的确定失败。
 
-POST 后，return 必须从结构合法的收件箱中证明目标 `mid` 在所有 `href`/`onclick`/
-`action` 引用和结果行中均已消失；take 必须证明 To/From/Subject 不变、资产与 COD 归零、
-claimable 消失，且动作前正文是动作后正文的前缀，预期的 `CoD Paid` 和
-`Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字或动作按钮消失都不足以
-证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
+POST 后，return 必须满足两种冻结证明之一：当前协议的唯一只读 `[RTS]` 回执需要与动作前
+To/From/Subject、正文、装备 ID、Credits、COD 和附件数逐项绑定，精确证明收发件人反转、固定
+MoogleMail 发件人、标题前缀、正文退回后缀、资产不变且 return/take 动作都已消失；旧协议则必须
+从结构合法的收件箱中证明目标 `mid` 在所有 `href`/`onclick`/`action` 引用和结果行中均已消失。
+take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消失，且动作前正文是动作后正文
+的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、
+`[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
 
 ### I-09c MoogleMail 明确发送失败必须保留资产后果
 

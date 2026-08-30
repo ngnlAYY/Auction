@@ -136,9 +136,10 @@ impl MoogleMailParser {
         })
     }
 
-    /// 通过返回后的收件箱结构和目标 `mid` 缺席证明整封退回已完成。
+    /// 通过当前只读 `[RTS]` 回执或旧版 Inbox 中目标 `mid` 缺席证明整封退回已完成。
     pub fn prove_return_completed(
         &self,
+        before: &MoogleMailActionState,
         source_bytes: &[u8],
         world: MoogleMailWorld,
         external_mail_id: &str,
@@ -155,6 +156,11 @@ impl MoogleMailParser {
         let document = Html::parse_document(source);
         if has_result_message(&document, world).map_err(|_| action_proof_error(operation, world))? {
             return Err(action_proof_error(operation, world));
+        }
+        if returned_receipt_matches(&document, before, world)
+            .map_err(|_| action_proof_error(operation, world))?
+        {
+            return Ok(());
         }
         let form_selector = selector("form#mailform", operation, world)
             .map_err(|_| action_proof_error(operation, world))?;
@@ -245,4 +251,58 @@ impl MoogleMailParser {
             }
         }
     }
+}
+
+fn returned_receipt_matches(
+    document: &Html,
+    before: &MoogleMailActionState,
+    world: MoogleMailWorld,
+) -> Result<bool, MoogleMailError> {
+    if !before.returnable {
+        return Ok(false);
+    }
+    let envelope_selector = selector("#mmail_outer", MoogleMailOperation::ReturnMessage, world)?;
+    let form_selector = selector("form#mailform", MoogleMailOperation::ReturnMessage, world)?;
+    let panes_selector = selector("#mmail_attachpanes", MoogleMailOperation::ReturnMessage, world)?;
+    let textarea_selector = selector("textarea", MoogleMailOperation::ReturnMessage, world)?;
+    let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
+    let forms = document.select(&form_selector).collect::<Vec<_>>();
+    let panes = document.select(&panes_selector).collect::<Vec<_>>();
+    if envelopes.len() != 1
+        || forms.len() != 1
+        || panes.len() != 1
+        || envelopes[0].select(&form_selector).count() != 1
+        || envelopes[0].select(&panes_selector).count() != 1
+    {
+        return Ok(false);
+    }
+    parse_token(document, world)?;
+    let fields = parse_detail_fields(forms[0], world)?;
+    let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
+    if textareas.len() != 1 {
+        return Ok(false);
+    }
+    let body = textareas[0].text().collect::<String>();
+    if !valid_message_body(&body) {
+        return Ok(false);
+    }
+    let assets = parse_detail_asset_manifest(document, world)?;
+    let (returnable, claimable) = parse_detail_actions(envelopes[0], world)?;
+    let mut actual_equipment_ids = assets.equipment_ids;
+    let mut expected_equipment_ids = before.equipment_ids.clone();
+    actual_equipment_ids.sort_unstable();
+    expected_equipment_ids.sort_unstable();
+    let expected_subject = format!("[RTS] {}", before.subject);
+    let expected_body =
+        format!("{}\n\nThis message was returned from {}, kupo!", before.body, before.recipient);
+    Ok(!returnable
+        && !claimable
+        && fields.recipient.eq_ignore_ascii_case(&before.sender)
+        && fields.sender == "MoogleMail"
+        && fields.subject == expected_subject
+        && body == expected_body
+        && assets.credits == before.credits
+        && assets.cod == before.cod
+        && assets.entry_count == before.attachment_count
+        && actual_equipment_ids == expected_equipment_ids)
 }

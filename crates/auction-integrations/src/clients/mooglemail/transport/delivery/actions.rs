@@ -62,7 +62,7 @@ impl MoogleMailDeliveryTransport {
             };
             match operation {
                 MoogleMailOperation::ReturnMessage => {
-                    self.parser.prove_return_completed(&response, world, external_mail_id)
+                    self.parser.prove_return_completed(&state, &response, world, external_mail_id)
                 }
                 MoogleMailOperation::Take => {
                     self.parser.prove_take_completed(&state, &response, world)

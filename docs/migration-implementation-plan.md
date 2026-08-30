@@ -360,7 +360,8 @@ Fluent 消息 ID 不含点号（旧 `nav.home` → `nav-home`）。CI 已通过
 - 双跑只读流量，比较事件、余额、竞价结果。
 - 确认数据一致性与运维 runbook 后再切写。
 - 行为验证（人工对照、双写、切换前验证）在此阶段才纳入范围，**且需用户明确要求**；当前授权仅覆盖
-  隔离人工对照，不包含新增/运行测试用例或生产流量切换。
+  隔离人工对照和 Auction-Test 中最小化的 MoogleMail main Credits/装备真实写入，不包含新增/运行
+  测试用例、论坛写入、双写或生产流量切换。
 
 ---
 
@@ -548,8 +549,9 @@ poller 数量，不会把唤醒动作误报成已完成远程读取。Worker 随
 入站事实提交；SQLite Lite 仍明确返回 `501 feature_not_supported`。当前 MoogleMail 旧版代码
 边界已覆盖邮件状态/审查、拍卖/用户业务处理、起拍价计划、拍卖入站事务、注册/重绑 Users
 事务、版本化 delivery payload 和 Worker DeliveryTransport，协议层的 return/take/通知写入要求
-结构化后置证明：return 证明目标 `mid` 从收件箱完全消失，take 证明身份不变、资产归零与回执
-精确匹配。结算退信、Sent/Balance 回执对账和 recovery 后续 action 已接入
+结构化后置证明：return 优先把当前只读 `[RTS]` 回执与动作前身份、正文和完整资产逐项绑定，旧协议
+则证明目标 `mid` 从收件箱完全消失；take 证明身份不变、资产归零与回执精确匹配。结算退信、
+Sent/Balance 回执对账和 recovery 后续 action 已接入
 PostgreSQL Worker；recovery 付款超时提醒由 recovery owner 接管，MoogleMail 协议层不拥有
 recovery 业务 owner。旧版 `worlds`、发件人 allowlist、`equipment_filter` 与 14 个
 `mail_templates` 现由 Admin 管理的共享 runtime TOML 持有，并在 Worker 启动时投影为业务快照。
@@ -643,7 +645,7 @@ Public 规则语言读取和登录来源返回也已完成静态修复，其中 
 | `apps/auctionctl` / `auction-storage` / `auction-integrations` | 旧版 Worker `-bootstrap-mail-credentials`、`-bootstrap-mail-world`、`-bootstrap-mail-label` 一次性登记邮件凭据 | 已补齐 `bootstrap-mail-credentials --world --label`：Cookie 只从标准输入读取，限制为 `main`/`isekai` 且要求 Worker 已启用对应 world，复用凭据数据密钥和 Admin 凭据服务写入 PostgreSQL；命令不回显 Cookie、密文或密钥。仍需在真实部署中按目标 secret 注入方式做一次切换前演练。 |
 | `ops` / `apps/*` | 旧版 `ops/deploy` 的启动脚本、Caddy 反向代理、环境示例、数据库备份/恢复/保留资料 | 已补充当前三进程/TOML/健康探针的部署目录、启动顺序、安全权限、Caddy 反向代理模板、systemd 单角色与总控示例、`auctionctl deployment-check` 只读预检，以及 Rust `auctionctl deployment start/stop/restart/status` 总控：总控验证 unit 与 TOML 绑定，执行严格预检、地址检查和 forward-only migration，按 Worker → Admin → Public 逐角色等待应用 readiness，失败反序回滚本次启动的 unit，并用 flock 与 systemd InvocationID 发布私有启动回执。PostgreSQL retention、recovery preflight、backup/verify、restore/rebuild 和 canonical v28 接管证据链均已有 owner。部署模板继续由 systemd 发送 SIGTERM；Public/Admin 的共享 Hyper 连接服务会停止接收并排空现有连接，Worker 同时响应 SIGINT/SIGTERM，三进程执行 10 秒有界 drain、停止心跳和 tracing flush，单角色 unit 以 45 秒上限覆盖最长 exporter 关闭余量。旧版 retention 本身明确只做 inventory、禁止 mutation，完整 retention mutation 不是旧版漏迁。 |
 | `auction-storage` / `apps/auctionctl` / `ops` | canonical Auction-BF PostgreSQL v28 的现有数据接管 | 专用 v28 backup/verify/adopt 链路已完成：只接受 PostgreSQL 18.x、干净 migration 28、精确 canonical 表集合、零其他 session 和可无损恢复的竞价投影，要求专用恢复点、逐字确认和不可覆盖 receipt；执行时在同一持锁物理连接复核完整预检，再在事务 bridge 中建立 SQLx `1..=5`、`7` 等价基线并继续前向迁移。`000014` 统一生命周期约束并移除旧论坛隐式入队 trigger，`000015` 归一化 operations alert 重试/终态/cooldown，并保留合法的历史终态 delivery 孤儿；`000016` 增加论坛未知写入的人工再授权命令账本。普通 `migrate`/`restore` 不会猜测处理。2026-08-26 已在旧对照 PostgreSQL 18.6/canonical v28 的隔离副本上实际完成专用 backup/verify、恢复点复原、adopt 到 SQLx 16、五语言规则导入、当前格式 backup、同名 rebuild、空库证明和单事务 restore；恢复前后规则摘要、审计与迁移计数一致。旧副本没有 auction/lot/bid/user/realtime 业务行，因此仍需非空旧业务数据抽样和真实部署切换。 |
-| 验收与切换 | 双跑、对照、双写、切换前行为验证 | 当前按用户授权继续 PostgreSQL 完整档、SQLite Lite 边界和旧版的隔离人工对照，但不编写或运行测试；真实外部写入、双写和生产流量切换仍需逐项独立批准。 |
+| 验收与切换 | 双跑、对照、双写、切换前行为验证 | 当前按用户授权继续 PostgreSQL 完整档、SQLite Lite 边界和旧版的隔离人工对照，并已完成 Auction-Test 中 MoogleMail main 的最小 Credits/装备真实写入；仍不编写或运行测试，论坛/其它外部写入、双写和生产流量切换需逐项独立批准。 |
 
 SQLite Lite 的 PostgreSQL 专属 recovery、MoogleMail、论坛完整档、结算报告和管理完整写入不属于
 “漏做后补齐”的任务，而是已声明的部署能力边界；不得用空结果或内存状态伪装成已实现。
@@ -1089,18 +1091,20 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
   和 surface/base CSS 均成功生成并复制到后端稳定嵌入目录；Public 的 14 条路径随后已完成 `en` 桌面
   匿名/空态浏览器巡检，规则和补偿池另有五语言证据。动态数据行、认证动作、错误/冲突、移动端逐页
   状态和 Admin 其余页面仍不能由编译或这轮局部 R1 证明。
-- 使用真实 main/isekai 邮箱与 E-Hentai 论坛核对分页、限流、凭据失效、远端写入不确定结果和回执；
-  2026-08-25 的只读 Balance 探针已能到达 `hentaiverse.org`，但 `.keyenv` 的两组候选均收到
-  `e-hentai.org/bounce_login.php` 重定向；按旧版契约应记为 `SessionExpired`，当前没有把它误报为
-  解析成功，也没有执行任何远端写入。需要有效登录会话后才能继续取得正文解析和分页证据；
+- 使用真实 main/isekai 邮箱与 E-Hentai 论坛继续核对分页、限流、凭据失效、远端写入不确定结果和回执；
+  2026-08-30 已在 Auction-Test 使用有效 main 隔离账号完成两组凭据的 Balance/Inbox 读取、手动唤醒与
+  暂停/恢复幂等控制，并用 1 Credit 和 1 件可交易装备逐项证明发送、业务拒绝、通知、`[RTS]` 退回、
+  精确 take 和原装备恢复；最终 mail claim、失败、非终态 delivery 与人工对账均为零。该证据不覆盖
+  isekai、凭据失效轮换、论坛写入、生产账号或生产流量。
 - canonical PostgreSQL v28 的 backup/verify/adopt/rebuild/restore 安全边界已在隔离旧对照副本完成；
   仍需具有非空 auction/lot/bid/realtime 事实的数据抽样，以及真实部署切换批准；
 - 同宿主机隔离 systemd/Caddy 已核对启动顺序、readiness、失败回滚、Worker control、严格文件权限和
   unit 配置绑定；真实域名/TLS、专用生产账号、正式 secret 注入及流量切换仍需独立批准；
 - 继续用实际 Dioxus 浏览器产物核对 Public 动态/认证/错误/移动端状态，以及 Admin 其余页面的字体、
   换行、焦点顺序、空态和响应式布局；
-- 继续在当前授权的隔离环境核对 PostgreSQL 完整档、SQLite Lite 边界和旧版双跑；双写、真实外部写入与
-  最终生产切换仍需逐项独立批准。
+- 继续在当前授权的隔离环境核对 PostgreSQL 完整档、SQLite Lite 边界和旧版双跑；Auction-Test 的
+  MoogleMail main 最小 Credits/装备写入已取得一次性证据，论坛/其它外部写入、双写与最终生产切换
+  仍需逐项独立批准。
 
 上述隔离人工对照按当前授权继续；测试用例仍按本仓库约定暂缓。本轮没有新增或运行单元测试、
 集成测试、功能测试、端到端测试或浏览器测试。
@@ -1245,9 +1249,11 @@ Auction 主循环此前也只有全局 1 并发/5 秒 tick：生命周期与结�
 成功文字或按钮消失，无法证明实际处理的是预期邮件和资产。现在动作状态会脱敏保留
 To/From/Subject、正文、装备 ID、Credits、COD 和附件计数，但不保留装备 key 或原始 HTML。
 transport 在 POST 前校验 sender；take 还与 outbox 的预期资产做集合精确比对。return POST 后
-要求收件箱表头/结果行结构合法且目标 `mid` 不再被任何链接或动作引用；take POST 后
-要求邮件身份不变、资产/COD 归零、claimable 消失，并核对正文追加的唯一 `CoD Paid`/
-`Removed attachment` 回执。前置或后置无法证明都进入人工对账，不会误报成功或盲目重发。
+优先要求当前协议的唯一只读 `[RTS]` 回执与动作前身份、标题、正文、Credits/COD、装备 ID 和附件数
+逐项匹配，并证明 return/take 动作消失；旧协议仍要求收件箱表头/结果行结构合法且目标 `mid` 不再被
+任何链接或动作引用。take POST 后要求邮件身份不变、资产/COD 归零、claimable 消失，并核对正文
+追加的唯一 `CoD Paid`/`Removed attachment` 回执。前置或后置无法证明都进入人工对账，不会误报成功
+或盲目重发。
 
 同一轮还确认 Rust 的最终 send 响应曾把旧版可证明的“收件人不存在”和“无法支付邮资”
 统一收敛为 `write_unknown`，且 transport 失败端口无法保留退信证据；compose 初始页解析失败或残留资产

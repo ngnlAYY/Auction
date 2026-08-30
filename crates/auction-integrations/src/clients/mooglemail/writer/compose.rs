@@ -5,9 +5,9 @@ use std::collections::HashSet;
 use scraper::Html;
 
 use super::common::{
-    canonical_body, compose_error, direct_element_children, extract_equipment_id,
-    has_visible_result_message, input_value, normalize_text, parse_amount, parse_attachment_count,
-    parse_credit_attachment, selector, valid_body,
+    attachment_count_text, canonical_body, compose_error, direct_element_children,
+    extract_equipment_id, has_visible_result_message, input_value, normalize_text, parse_amount,
+    parse_attachment_count, parse_credit_attachment, selector, valid_body,
 };
 use super::model::{MAX_COMPOSE_ATTACHMENTS, MAX_RECIPIENT_BYTES, MAX_SUBJECT_BYTES};
 use super::*;
@@ -199,7 +199,8 @@ fn parse_compose_assets(
 
     let mut cod = None;
     if let Some(count_box) = count_boxes.first() {
-        let text = normalize_text(count_box.text().collect::<String>());
+        let text = attachment_count_text(*count_box)
+            .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
         let (count, count_cod) = parse_attachment_count(&text)
             .ok_or_else(|| compose_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
         if count != entries.len() {

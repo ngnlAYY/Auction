@@ -79,7 +79,7 @@ async fn insert_postgres(
     let stored_status: String = sqlx::Row::try_get(&row, "status").map_err(map_storage_error)?;
     if stored_digest != command.request_hash.as_bytes()
         || stored_origin_kind != command.origin.as_str()
-        || stored_origin_id != command.origin_id
+        || !matching_origin_id(&stored_origin_id, command)
         || stored_recipient != command.recipient
         || stored_payload != payload
         || prepared_status
@@ -127,4 +127,26 @@ fn payload(command: &MailDeliveryCommand) -> Value {
         "attachment_ids": command.attachment_ids,
         "body": command.notification_body,
     })
+}
+
+fn matching_origin_id(stored: &str, command: &MailDeliveryCommand) -> bool {
+    if stored == command.origin_id {
+        return true;
+    }
+    if command.origin.as_str() != "mail_intake" {
+        return false;
+    }
+    let canonical =
+        format!("{}:{}:{}", command.world_id, command.external_mail_id, command.operation.as_str());
+    let legacy_operation = match command.operation.as_str() {
+        "send" => "delivery-notice",
+        "return" => "delivery-return",
+        "take" => "delivery-take",
+        _ => return false,
+    };
+    let legacy = format!("{}:{}:{legacy_operation}", command.world_id, command.external_mail_id);
+    // 请求摘要、收件人和完整 payload 仍由调用处逐项比较；这里只允许同一 mail_intake
+    // command 的已知历史后缀与规范 operation 后缀互认。
+    matches!(stored, value if value == canonical || value == legacy)
+        && matches!(command.origin_id.as_str(), value if value == canonical || value == legacy)
 }

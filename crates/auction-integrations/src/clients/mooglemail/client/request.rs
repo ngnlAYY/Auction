@@ -219,7 +219,7 @@ impl MoogleMailClient {
         operation: MoogleMailOperation,
         world: MoogleMailWorld,
     ) -> MoogleMailError {
-        MoogleMailError::new(operation, world, MoogleMailErrorCategory::WriteUnknown, false)
+        MoogleMailError::after_write(operation, world, MoogleMailErrorCategory::WriteUnknown)
     }
 
     fn protocol(&self, target: &MoogleMailTarget) -> MoogleMailError {

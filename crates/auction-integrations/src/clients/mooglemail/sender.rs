@@ -203,7 +203,7 @@ impl MoogleMailSender {
 }
 
 fn write_unknown(world: MoogleMailWorld, operation: MoogleMailOperation) -> MoogleMailError {
-    write_error(world, operation, MoogleMailErrorCategory::WriteUnknown)
+    MoogleMailError::after_write(operation, world, MoogleMailErrorCategory::WriteUnknown)
 }
 
 fn write_error(

@@ -284,7 +284,8 @@ projection，PostgreSQL 完整档的价格历史从结算事实链返回权威�
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
 全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
-读取之上，关闭 allowlist 也不会放宽这些 transport 防线。
+读取之上，关闭 allowlist 也不会放宽这些 transport 防线。手工输入只在 URL 解析前剥离成对的
+`<URL>` 包裹和明确的中英文句末标点，规范结果仍必须通过相同 origin/path/ID/key 防线。
 Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+host（可带端口），空路径与根路径
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 
@@ -334,6 +335,8 @@ Delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 se
 及请求摘要，后续幂等重放必须匹配该身份，不能把另一条激活命令误认为成功。
 `000008_mooglemail_polling` 与 `auction-storage/src/database/mail_poll/` 负责持久化状态、
 lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同事务幂等提交。Worker
+只用稳定的远端邮件事实和业务决定校验重复入站；`processed_at` 保留首次入站轮询写入的时间值，
+不参与冲突比较且不被重放覆盖，避免数据库时间精度规范化或新一轮轮询时间产生伪冲突。
 退避时刻、Admin 邮件状态版本和 realtime 连续序号均使用 checked 边界；时间或版本溢出时
 失败关闭并保留 claim/fence，不把异常值折回当前时刻或饱和为可接受的后继状态。
 竞价下一口金额和 PPM 增量也使用 checked 计算；超过信用金额网格时返回领域溢出错误，不能
@@ -350,7 +353,9 @@ delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独
 收口，超时和依赖错误按 `Retryable` 重试。批次处理期间周期续租 claim，续租 fence 失效后取消
 陈旧 future，不能推进 cursor。当前首条业务链已覆盖拍卖邮件的 Credits/COD
 拒绝、无附件通知、装备来源校验、起拍价指令解析、拍卖草稿/lot 入站、take/return 动作和静态
-通知发送；通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
+通知发送。起拍价解析兼容空白正文/空行、全附件统一 `start amount`、跨物理行的逐件三元组、
+显式 `#` 注释、规范千分位和可精确换算为整数 Credits 的 `k`/`m` 小数；附件 ID/key 交叉校验、
+逐件唯一覆盖、正数和 checked 溢出边界仍失败关闭。通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
 缺少该区块时由 `[worker.mooglemail]` 直接配置兼容回退；14 个模板在启动时校验占位符并冻结快照；
 用户注册/重绑已经通过 Users owner 的 PostgreSQL Serializable 事务接入，结果通知
 只保存安全结果，注册 key 以独立数据密钥加密，outbox 只保存用户 UUID 引用，发送前才解密。
@@ -418,6 +423,9 @@ API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快�
 和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、论坛镜像、健康和实时 catch-up 页面已消费对应安全 DTO；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照
+`mail_intake` 新 delivery 的 `origin_id` 使用 `world:external_mail_id:send|return|take`；传输与
+幂等复读只为既有 Rust 数据兼容对应的 `delivery-notice|delivery-return|delivery-take` 后缀，
+稳定 command ID、请求摘要、完整 payload 与收件人仍必须逐项一致。
 Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版本身就是 warning-only，
 没有连接业务 owner，当前 Rust 保持该兼容边界；若未来要让它们真正改变状态，需要另行冻结
 owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settlement/recovery 契约，提供已结算拍卖
