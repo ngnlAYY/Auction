@@ -16,7 +16,7 @@ pub(super) fn is_html_content_type(headers: &header::HeaderMap) -> bool {
         .is_some_and(|value| matches!(value.trim(), "text/html" | "application/xhtml+xml"))
 }
 
-pub(super) fn is_session_expired(
+pub(crate) fn is_hentaiverse_login_response(
     status: StatusCode,
     location: Option<&header::HeaderValue>,
     body: &[u8],
@@ -24,7 +24,7 @@ pub(super) fn is_session_expired(
     if status.is_redirection() {
         let location = location.and_then(|value| value.to_str().ok()).unwrap_or_default();
         let location = location.to_ascii_lowercase();
-        if location.contains("bounce_login") || location.contains("e-hentai.org") {
+        if location.contains("bounce_login") {
             return true;
         }
     }
@@ -32,6 +32,21 @@ pub(super) fn is_session_expired(
     body.contains("bounce_login.php")
         || body.contains("you are not logged in")
         || body.contains("this page requires you to log on")
+        || body.contains("you must be logged on to visit the hentaiverse")
+}
+
+pub(super) fn is_session_expired(
+    status: StatusCode,
+    location: Option<&header::HeaderValue>,
+    body: &[u8],
+) -> bool {
+    if is_hentaiverse_login_response(status, location, body) {
+        return true;
+    }
+    status.is_redirection()
+        && location
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.to_ascii_lowercase().contains("e-hentai.org"))
 }
 
 pub(super) fn post_allowed(

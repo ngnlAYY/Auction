@@ -42,7 +42,8 @@ pub(super) fn build_processor_and_delivery(
                     equipment_client,
                     EquipmentSourcePolicy::default(),
                 )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?
+                .with_mooglemail_credentials(credentials.clone()),
             );
             let custody_equipment: Arc<dyn MailEquipmentReader> = equipment.clone();
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
