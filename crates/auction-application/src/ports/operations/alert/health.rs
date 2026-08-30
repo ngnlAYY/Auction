@@ -9,6 +9,25 @@ use super::model::OperationsAlertSnapshot;
 use super::signals::OperationsAlertError;
 use super::*;
 
+/// Worker 向共享存储发布的 operations alert 非敏感运行状态。
+///
+/// 该投影只表达功能是否启用和配置生效时间，不包含收件人、Cookie 或其它私有配置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperationsAlertRuntimeStatus {
+    pub enabled: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl OperationsAlertRuntimeStatus {
+    /// 拒绝超出数据库时间边界的运行状态。
+    pub fn validate(&self) -> Result<(), OperationsAlertError> {
+        if self.updated_at.timestamp_nanos_opt().is_none() {
+            return Err(OperationsAlertError::Invalid);
+        }
+        Ok(())
+    }
+}
+
 /// Dashboard 使用的 operations alert 健康投影。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OperationsAlertHealth {
@@ -94,6 +113,12 @@ pub trait OperationsAlertSourceReader: Send + Sync {
 
 /// 保存 signal、批次、lease 和终态的窄端口。
 pub trait OperationsAlertStore: Send + Sync {
+    /// 发布 Worker 启动时冻结的非敏感启用状态。
+    fn publish_runtime_status(
+        &self,
+        status: OperationsAlertRuntimeStatus,
+    ) -> ApplicationFuture<'_, ()>;
+
     fn observe(&self, command: OperationsAlertObserveCommand) -> ApplicationFuture<'_, ()>;
 
     fn claim_due_batch(

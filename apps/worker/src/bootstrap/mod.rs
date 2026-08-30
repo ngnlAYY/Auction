@@ -10,14 +10,15 @@ use auction_application::{
     AdminCredentialRuntimeWriter, AdminCredentialWorld, AdminMailPort, ApplicationError,
     ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, Clock,
     CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore, ForumPublisher, ForumReplyStore,
-    ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertSourceReader,
-    OperationsAlertStore, RecoveryBuyerBlacklister, RecoveryHealthConfig, RecoveryHealthService,
-    RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore, SettlementCommandPort,
-    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
-    SettlementFulfillmentCustodyReader, SettlementFulfillmentCustodySnapshot,
-    SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentSentEvidence, SettlementFulfillmentService, SettlementFulfillmentStore,
-    SettlementWorkStore, SlowProxyCommandPort, SlowProxyDueReader,
+    ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
+    OperationsAlertSourceReader, OperationsAlertStore, RecoveryBuyerBlacklister,
+    RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
+    ScheduledRoundStore, SettlementCommandPort, SettlementFulfillmentBalanceEvidence,
+    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
+    SettlementFulfillmentCustodySnapshot, SettlementFulfillmentEvidenceReader,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
+    SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
+    SlowProxyCommandPort, SlowProxyDueReader,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{

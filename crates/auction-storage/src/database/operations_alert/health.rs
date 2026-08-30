@@ -5,15 +5,64 @@
 use super::*;
 
 #[cfg(feature = "postgres")]
+pub(super) async fn publish_runtime_status_postgres(
+    pool: &super::TrackedPool<sqlx::Postgres>,
+    status: OperationsAlertRuntimeStatus,
+) -> Result<(), ApplicationError> {
+    let result = sqlx::query(
+        "INSERT INTO public.operations_alert_runtime_state
+            (singleton_id, enabled, last_observed_at, updated_at)
+         VALUES (1, $1, NULL, $2)
+         ON CONFLICT (singleton_id) DO UPDATE SET
+            enabled = EXCLUDED.enabled,
+            last_observed_at = CASE
+                WHEN EXCLUDED.enabled AND operations_alert_runtime_state.enabled
+                    THEN operations_alert_runtime_state.last_observed_at
+                ELSE NULL
+            END,
+            updated_at = EXCLUDED.updated_at
+         WHERE operations_alert_runtime_state.updated_at <= EXCLUDED.updated_at",
+    )
+    .bind(status.enabled)
+    .bind(status.updated_at)
+    .execute(pool)
+    .await
+    .map_err(|_| storage_error("发布 operations alert 运行状态失败"))?;
+    if result.rows_affected() != 1 {
+        return Err(storage_error("operations alert 运行状态发布时间倒退"));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "postgres")]
 pub(super) async fn health_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
 ) -> Result<OperationsAlertHealth, ApplicationError> {
+    let runtime_row = sqlx::query(
+        "SELECT enabled, last_observed_at
+         FROM public.operations_alert_runtime_state
+         WHERE singleton_id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| storage_error("读取 operations alert 运行状态失败"))?;
+    let Some(runtime_row) = runtime_row else {
+        return Ok(OperationsAlertHealth::disabled());
+    };
+    let enabled: bool = runtime_row
+        .try_get("enabled")
+        .map_err(|_| storage_error("读取 operations alert 启用状态失败"))?;
+    if !enabled {
+        return Ok(OperationsAlertHealth::disabled());
+    }
+    let last_observed_at: Option<DateTime<Utc>> = runtime_row
+        .try_get("last_observed_at")
+        .map_err(|_| storage_error("读取 operations alert 扫描水位失败"))?;
     let signal_row = sqlx::query(
         "SELECT
             COUNT(*) FILTER (WHERE active) AS active_signal_count,
             COUNT(*) FILTER (WHERE active AND next_notify_at <= CURRENT_TIMESTAMP)
-                AS due_signal_count,
-            MAX(last_seen_at) AS last_observed_at
+                AS due_signal_count
          FROM public.operations_alert_signals",
     )
     .fetch_one(pool)
@@ -44,7 +93,7 @@ pub(super) async fn health_postgres(
     .await
     .map_err(|_| storage_error("读取 operations alert 最近错误失败"))?;
     let health = OperationsAlertHealth {
-        enabled: true,
+        enabled,
         active_signal_count: signal_row
             .try_get("active_signal_count")
             .map_err(|_| storage_error("读取 operations alert 活跃计数失败"))?,
@@ -63,9 +112,7 @@ pub(super) async fn health_postgres(
         manual_reconcile_count: batch_row
             .try_get("manual_reconcile_count")
             .map_err(|_| storage_error("读取 operations alert 人工对账计数失败"))?,
-        last_observed_at: signal_row
-            .try_get("last_observed_at")
-            .map_err(|_| storage_error("读取 operations alert 最近观察时间失败"))?,
+        last_observed_at,
         last_success_at: batch_row
             .try_get("last_success_at")
             .map_err(|_| storage_error("读取 operations alert 最近成功时间失败"))?,

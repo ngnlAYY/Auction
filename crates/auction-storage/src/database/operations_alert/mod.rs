@@ -10,7 +10,8 @@ use auction_application::{
     ApplicationError, ApplicationFuture, OperationsAlertBatchClaim, OperationsAlertClaimRequest,
     OperationsAlertDeliveryStatus, OperationsAlertDispatchErrorCode, OperationsAlertEnqueuedBatch,
     OperationsAlertError, OperationsAlertHealth, OperationsAlertObserveCommand,
-    OperationsAlertSnapshot, OperationsAlertSourceReader, OperationsAlertStore,
+    OperationsAlertRuntimeStatus, OperationsAlertSnapshot, OperationsAlertSourceReader,
+    OperationsAlertStore,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
@@ -51,6 +52,25 @@ impl OperationsAlertSourceReader for DatabaseStore {
 }
 
 impl OperationsAlertStore for DatabaseStore {
+    fn publish_runtime_status(
+        &self,
+        status: OperationsAlertRuntimeStatus,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            status.validate().map_err(ApplicationError::from)?;
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    publish_runtime_status_postgres(store.pool(), status).await
+                }
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) if !status.enabled => Ok(()),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
     fn observe(&self, command: OperationsAlertObserveCommand) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             command.validate().map_err(ApplicationError::from)?;
@@ -208,6 +228,6 @@ use delivery::{
     mark_terminal_postgres,
 };
 #[cfg(feature = "postgres")]
-use health::health_postgres;
+use health::{health_postgres, publish_runtime_status_postgres};
 #[cfg(feature = "postgres")]
 use snapshot::{observe_postgres, snapshot_postgres};
