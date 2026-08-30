@@ -290,9 +290,10 @@ pub use operations_alert::{
     OperationsAlertFulfillmentSnapshot, OperationsAlertHealth, OperationsAlertKind,
     OperationsAlertObserveCommand, OperationsAlertPolicy, OperationsAlertProcessSnapshot,
     OperationsAlertProcessState, OperationsAlertRecoverySnapshot, OperationsAlertRecoveryWorld,
-    OperationsAlertSignal, OperationsAlertSnapshot, OperationsAlertSource,
-    OperationsAlertSourceObservation, OperationsAlertSourceReader, OperationsAlertStore,
-    OperationsAlertTarget, body_digest, canonical_summary, evaluate_snapshot, request_hash,
+    OperationsAlertRuntimeStatus, OperationsAlertSignal, OperationsAlertSnapshot,
+    OperationsAlertSource, OperationsAlertSourceObservation, OperationsAlertSourceReader,
+    OperationsAlertStore, OperationsAlertTarget, body_digest, canonical_summary, evaluate_snapshot,
+    request_hash,
 };
 pub use queries::{
     AuctionReader, CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,

@@ -155,11 +155,12 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000020`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000022`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
-严格兼容 trigger，以及已证明 MoogleMail 退信的独立告警 identity。旧名 `bid_proxies` 由只读兼容
+严格兼容 trigger、已证明 MoogleMail 退信的独立告警 identity，以及 operations alert 的运行状态、
+扫描水位和独立时钟语义。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
 状态。`auction-storage` 已接入 PostgreSQL 竞价与结算事务适配器：命令账本重放/冲突、
 权威状态锁、竞价/结算事实、履约初始状态、审计和 realtime 事件在对应事务内提交。
@@ -439,7 +440,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000020` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000022` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -1519,7 +1520,9 @@ section 内的 DOM、账户专属 CSS 及五语言旧版词法，并移除认证
 
 Admin dashboard 继续恢复旧版运维信息的可见粒度：凭据卡只展示 MoogleMail `main`/`isekai` availability，
 scope 计数、更新时间和重启要求保留在内部 owner；alerting 卡按旧 snapshot 展示 active/due/claimed/failed/
-manual 与最近观测时间。浏览器严格拒绝同一路径的额外字段，不新增敏感字段或外部接口。
+manual 与最近观测时间。Worker 通过 PostgreSQL 单例投影发布实际启用状态；关闭时返回中性的 disabled
+健康结果，启用后的空扫描仍推进独立水位，配置状态时间倒退则失败关闭。浏览器严格拒绝同一路径的
+额外字段，不新增敏感字段或外部接口。
 
 Admin 拍卖总览继续恢复旧版表单语义：创建 draft 使用原生表单提交和必填时间字段，解析错误会归类为
 输入校验失败；列表表头补回 readiness 列，和每行的可开放提示保持对齐。

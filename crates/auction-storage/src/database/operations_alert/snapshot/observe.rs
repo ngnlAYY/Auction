@@ -94,5 +94,18 @@ pub(crate) async fn observe_postgres(
         }
     }
 
+    let runtime_update = sqlx::query(
+        "UPDATE public.operations_alert_runtime_state
+         SET last_observed_at = GREATEST(COALESCE(last_observed_at, $1), $1)
+         WHERE singleton_id = 1 AND enabled",
+    )
+    .bind(command.now)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("更新 operations alert 扫描水位失败"))?;
+    if runtime_update.rows_affected() != 1 {
+        return rollback_operations_alert(transaction, "operations alert 运行状态未启用").await;
+    }
+
     transaction.commit().await.map_err(|_| storage_error("提交 operations alert 观察事务失败"))
 }

@@ -1,6 +1,6 @@
 # PostgreSQL 迁移
 
-PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000020` 已按 owner 追加核心身份、
+PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000022` 已按 owner 追加核心身份、
 拍卖、竞价、代理、结算/履约、生命周期、身份/外部命令、恢复/可观测性和论坛同步对象；
 它们仍是迁移中的目标 schema，不等于旧系统全部行为已经完成。旧名
 `bid_proxies` 由末尾只读兼容视图提供，权威写入只进入新授权与历史表。
@@ -33,6 +33,10 @@ trigger 只在遗漏 `bids.effective_end_at` 时复制该权威值；新版显�
 `000020` 为已证明的 MoogleMail 收件人不存在退信追加 `delivery_returned_mail` signal kind，
 保留既有 `delivery_manual_reconcile` 总量 identity 和历史 fingerprint；该迁移只扩展 PostgreSQL
 完整档 operations alert 闭集，不为 SQLite Lite 伪造外部邮件能力。
+`000021` 新增 operations alert 单例运行状态：Worker 发布非敏感启用状态，成功 scan 与 signal
+变更在同一事务推进扫描水位；Admin 不再从表是否为空推断配置，也不读取 Worker 私有 TOML。
+`000022` 移除配置状态发布时间与扫描水位之间不存在的先后约束：状态发布继续按自身时间单调
+校验并在倒退时失败关闭，成功 scan 只单调推进 `last_observed_at`，不会阻止之后的启停发布。
 
 `000005` 与 `000015` 的历史文件字节和 SQLx checksum 保持不可变。两者曾使用 PostgreSQL
 保留字作为未加引号的查询别名；`auction-storage` 的迁移执行视图只对这两个固定版本、描述和

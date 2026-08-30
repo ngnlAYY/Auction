@@ -42,7 +42,10 @@ pub use delivery::{
 };
 pub use digest::{body_digest, canonical_summary, request_hash};
 pub use evaluate::evaluate_snapshot;
-pub use health::{OperationsAlertHealth, OperationsAlertSourceReader, OperationsAlertStore};
+pub use health::{
+    OperationsAlertHealth, OperationsAlertRuntimeStatus, OperationsAlertSourceReader,
+    OperationsAlertStore,
+};
 pub use model::{
     OperationsAlertDeliverySnapshot, OperationsAlertFulfillmentSnapshot, OperationsAlertPolicy,
     OperationsAlertProcessSnapshot, OperationsAlertProcessState, OperationsAlertRecoverySnapshot,
