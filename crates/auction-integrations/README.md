@@ -96,6 +96,8 @@ Worker 操作。
 兼容旧系统时建立防腐层或映射，不把旧 DTO 或旧命名未经审计地传播到新领域。
 
 外部 Cookie 只能从 A32 的密文信封或 `auction-config` 的显式 getter 读取，不得进入日志、DTO
-或快照。用户明确提供的本地 MoogleMail 联调凭据可通过 `load_mooglemail_keyenv` 读取；该
+或快照。MoogleMail 与 HentaiVerse 装备来源共用按 world/scoped/shared 选择的候选池；远端明确
+返回登录页时才允许轮换并回写数据库凭据失效，登录页属于凭据不可用而不是 URL/页面协议错误。
+用户明确提供的本地 MoogleMail 联调凭据可通过 `load_mooglemail_keyenv` 读取；该
 loader 只接受 `.keyenv` 中的 `hv-ck-key1`（Bot）和 `hv-ck-key2`（测试号），强制 owner-only
 权限，并拒绝未知/重复键。`.keyenv` 仍不得提交或进入普通配置、日志和 DTO。

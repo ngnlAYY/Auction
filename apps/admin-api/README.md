@@ -35,7 +35,10 @@ MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin
 重启后，`allow_manual_early_open` 会作为不可变策略进入生命周期服务：计划时间已到的开放不受影响，
 人工提前开放则在锁定拍卖并读取 `scheduled_open_at` 后按该策略失败关闭，HTTP capability 使用同一
 策略来源。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔和总超时也会映射到
-装备来源适配器；固定 HTTPS origin、禁用重定向和精确 world 路径校验始终保留。
+装备来源适配器；适配器在启动时读取 A32 中目标 world 或 shared scope 的 active `mail_cookie`，
+并在远端明确返回登录页时轮换候选、回写失效状态。没有数据库候选时才兼容敏感配置的单 Cookie
+入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
+路径校验始终保留。
 
 Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
 shutdown、停止 heartbeat 并发布停止状态，整个 HTTP/后台任务 drain 最多 10 秒，排空期间第二次

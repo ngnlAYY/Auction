@@ -253,7 +253,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000020` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000022` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -263,7 +263,10 @@ signal identity、三次 Create 重试、lease/fencing、终态错误码及成�
 carrier dispatch 世界，`000018` 恢复 lot 有效结束时间 shape，`000019` 则在滚动升级窗口只为
 旧 v28 固定 INSERT 遗漏的 `bids.effective_end_at` 从同事务已更新 lot 投影权威值；`000020` 在
 PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，允许退信使用独立 signal，
-不改写既有人工对账 signal 的 fingerprint 或历史事实；
+不改写既有人工对账 signal 的 fingerprint 或历史事实；`000021` 保存 Worker 发布的非敏感启用
+状态，并让成功 scan 与 signal 观察在同一事务推进扫描水位，Admin 不再把功能关闭或空结果误报为
+告警运行异常，也不读取 Worker 私有 TOML；`000022` 拆开配置状态发布时间与扫描水位的时钟语义，
+避免未来时间的扫描水位静默阻断后续启停发布；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -286,7 +289,9 @@ projection，PostgreSQL 完整档的价格历史从结算事实链返回权威�
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
 全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
-读取之上，关闭 allowlist 也不会放宽这些 transport 防线。手工输入只在 URL 解析前剥离成对的
+读取之上，关闭 allowlist 也不会放宽这些 transport 防线。远端装备页使用 A32 的 active
+`mail_cookie` 候选池，按目标 world 合并专属与 shared scope；明确登录页会轮换并回写凭据失效，
+不会再映射成不受支持的 URL。Worker 的邮件附件装备校验复用同一启动凭据池。手工输入只在 URL 解析前剥离成对的
 `<URL>` 包裹和明确的中英文句末标点，规范结果仍必须通过相同 origin/path/ID/key 防线。
 Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+host（可带端口），空路径与根路径
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
@@ -463,7 +468,10 @@ Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/
 MoogleMail 唤醒，Admin dashboard 只显示安全投影；启用并配置 `dashboard_mailboxes` 时还按 Admin
 runtime 中的 world/mailbox 投影校验轮询器数量和邮箱标识，避免已配置世界缺少 poller 仍显示正常；
 无数据库启动骨架启用 control 时也只报告进程存活和零个 poller，不伪造持久化就绪；operations
-alert、credential 内部 owner 按 kind/world 聚合 active/disabled/invalid，并计算 scope 更新时间、最近
+alert 的启用状态与成功扫描水位由 Worker 写入 PostgreSQL 专属的非敏感单例投影，Admin 只读取该
+投影与 signal/batch 安全汇总；配置状态发布时间与扫描水位彼此独立，状态发布时间倒退会令 Worker
+失败关闭，成功扫描只单调推进扫描水位，不得覆盖配置状态版本；credential 内部 owner 按
+kind/world 聚合 active/disabled/invalid，并计算 scope 更新时间、最近
 Admin 变更时间和 Worker 重启状态；旧 v1 凭据 section 只公开 MoogleMail `main`/`isekai`
 world 的 availability、观测时间和最近 Admin 变更时间，其中每个 world 的有效池由专属 scope 与
 `shared` scope 合并，更新时间取二者最新值；不泄漏内部 scope/restart 诊断。mail、realtime、

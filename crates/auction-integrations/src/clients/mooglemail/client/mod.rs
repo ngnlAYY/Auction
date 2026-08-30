@@ -17,6 +17,7 @@ use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 mod request;
 mod security;
 
+pub(crate) use security::is_hentaiverse_login_response;
 use security::{IntervalGate, build_mooglemail_http_client};
 
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;

@@ -17,7 +17,12 @@ use tokio::{
 };
 use url::Url;
 
-use crate::{EquipmentKeySealer, EquipmentKeySealerError};
+use crate::{
+    EquipmentKeySealer, EquipmentKeySealerError,
+    mooglemail::{
+        MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld, is_hentaiverse_login_response,
+    },
+};
 
 use super::{
     config::{DEFAULT_USER_AGENT, EquipmentSourceConfigurationError, EquipmentSourcePolicy},
@@ -30,7 +35,13 @@ pub struct EquipmentSourceAdapter {
     client: Client,
     endpoint: Url,
     policy: EquipmentSourcePolicy,
+    credentials: Option<MoogleMailCredentialSet>,
     next_request_at: Mutex<Instant>,
+}
+
+enum EquipmentFetchError {
+    Intake(AdminIntakeError),
+    SessionExpired,
 }
 
 impl EquipmentSourceAdapter {
@@ -54,7 +65,13 @@ impl EquipmentSourceAdapter {
             return Err(EquipmentSourceConfigurationError::InvalidEndpoint);
         }
         policy.validate()?;
-        Ok(Self { client, endpoint, policy, next_request_at: Mutex::new(Instant::now()) })
+        Ok(Self {
+            client,
+            endpoint,
+            policy,
+            credentials: None,
+            next_request_at: Mutex::new(Instant::now()),
+        })
     }
 
     /// 使用旧版生产 endpoint 创建适配器。
@@ -67,6 +84,15 @@ impl EquipmentSourceAdapter {
         Self::new(client, endpoint, policy)
     }
 
+    /// 注入与 MoogleMail 共用的 world-aware Cookie 池。
+    ///
+    /// HentaiVerse 装备页要求登录；复用同一凭据池可以在远端明确返回登录页时轮换候选，并
+    /// 通过池内的窄端口把数据库凭据标为失效。Cookie 不进入 URL、错误或日志。
+    pub fn with_mooglemail_credentials(mut self, credentials: MoogleMailCredentialSet) -> Self {
+        self.credentials = Some(credentials);
+        self
+    }
+
     async fn read_url_inner(
         &self,
         world_id: String,
@@ -74,10 +100,8 @@ impl EquipmentSourceAdapter {
     ) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
         let (target, equipment_id, key) =
             parse_equipment_url(&self.endpoint, &self.policy, &world_id, &equipment_url)?;
-        self.await_request_slot().await;
-        let body = timeout(self.policy.request_timeout, self.fetch_document(target))
-            .await
-            .map_err(|_| AdminIntakeError::SourceUnavailable)??;
+        let world = MoogleMailWorld::parse(&world_id).ok_or(AdminIntakeError::InvalidCommand)?;
+        let body = self.fetch_document_for_world(world, target).await?;
         let facts = parse_equipment_page(&body, &equipment_id)?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
         let attributes = facts.attributes()?;
@@ -110,32 +134,76 @@ impl EquipmentSourceAdapter {
         *next_request_at = Instant::now() + self.policy.minimum_request_interval;
     }
 
-    async fn fetch_document(&self, target: Url) -> Result<Vec<u8>, AdminIntakeError> {
-        let mut response = self
-            .client
-            .get(target)
-            .header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT)
+    async fn fetch_document_for_world(
+        &self,
+        world: MoogleMailWorld,
+        target: Url,
+    ) -> Result<Vec<u8>, AdminIntakeError> {
+        let Some(credentials) = self.credentials.as_ref() else {
+            return match self.fetch_document_attempt(target, None).await {
+                Ok(body) => Ok(body),
+                Err(EquipmentFetchError::Intake(error)) => Err(error),
+                Err(EquipmentFetchError::SessionExpired) => {
+                    Err(AdminIntakeError::SourceUnavailable)
+                }
+            };
+        };
+        let mut session =
+            credentials.begin(world).map_err(|_| AdminIntakeError::SourceUnavailable)?;
+        for _ in 0..64 {
+            match self.fetch_document_attempt(target.clone(), Some(session.cookie())).await {
+                Ok(body) => return Ok(body),
+                Err(EquipmentFetchError::Intake(error)) => return Err(error),
+                Err(EquipmentFetchError::SessionExpired) => {
+                    session
+                        .invalidate_current()
+                        .await
+                        .map_err(|_| AdminIntakeError::SourceUnavailable)?;
+                    if session.advance().is_err() {
+                        return Err(AdminIntakeError::SourceUnavailable);
+                    }
+                }
+            }
+        }
+        Err(AdminIntakeError::SourceUnavailable)
+    }
+
+    async fn fetch_document_attempt(
+        &self,
+        target: Url,
+        cookie: Option<&MoogleMailCookie>,
+    ) -> Result<Vec<u8>, EquipmentFetchError> {
+        self.await_request_slot().await;
+        timeout(self.policy.request_timeout, self.fetch_document_once(target, cookie))
+            .await
+            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?
+    }
+
+    async fn fetch_document_once(
+        &self,
+        target: Url,
+        cookie: Option<&MoogleMailCookie>,
+    ) -> Result<Vec<u8>, EquipmentFetchError> {
+        let mut request =
+            self.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
+        if let Some(cookie) = cookie {
+            request = request.header(reqwest::header::COOKIE, cookie.expose());
+        }
+        let mut response = request
             .send()
             .await
-            .map_err(|_| AdminIntakeError::SourceUnavailable)?;
+            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?;
         if response.url().scheme() != self.endpoint.scheme()
             || response.url().host_str() != self.endpoint.host_str()
             || response.url().port_or_known_default() != self.endpoint.port_or_known_default()
         {
-            return Err(AdminIntakeError::InvalidSource);
-        }
-        if response.status() == StatusCode::TOO_MANY_REQUESTS || response.status().is_server_error()
-        {
-            return Err(AdminIntakeError::SourceUnavailable);
-        }
-        if !response.status().is_success() {
-            return Err(AdminIntakeError::InvalidSource);
+            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
         }
         if response
             .content_length()
             .is_some_and(|length| length > self.policy.maximum_response_bytes as u64)
         {
-            return Err(AdminIntakeError::InvalidSource);
+            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
         }
         let content_encoding = response
             .headers()
@@ -144,20 +212,16 @@ impl EquipmentSourceAdapter {
             .unwrap_or_default()
             .trim();
         if !content_encoding.is_empty() && !content_encoding.eq_ignore_ascii_case("identity") {
-            return Err(AdminIntakeError::InvalidSource);
+            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
         }
-        let content_type = response
+        let status = response.status();
+        let location = response.headers().get(reqwest::header::LOCATION).cloned();
+        let is_html = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .split(';')
-            .next()
-            .map(str::trim)
-            .unwrap_or_default();
-        if !matches!(content_type, "text/html" | "application/xhtml+xml") {
-            return Err(AdminIntakeError::InvalidSource);
-        }
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|value| matches!(value.trim(), "text/html" | "application/xhtml+xml"));
         let mut body = Vec::with_capacity(
             response
                 .content_length()
@@ -165,15 +229,28 @@ impl EquipmentSourceAdapter {
                 .unwrap_or_default()
                 .min(self.policy.maximum_response_bytes),
         );
-        while let Some(chunk) =
-            response.chunk().await.map_err(|_| AdminIntakeError::SourceUnavailable)?
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?
         {
-            let next_length =
-                body.len().checked_add(chunk.len()).ok_or(AdminIntakeError::InvalidSource)?;
+            let next_length = body
+                .len()
+                .checked_add(chunk.len())
+                .ok_or(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource))?;
             if next_length > self.policy.maximum_response_bytes {
-                return Err(AdminIntakeError::InvalidSource);
+                return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
             }
             body.extend_from_slice(&chunk);
+        }
+        if is_hentaiverse_login_response(status, location.as_ref(), &body) {
+            return Err(EquipmentFetchError::SessionExpired);
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+            return Err(EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable));
+        }
+        if !status.is_success() || !is_html {
+            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
         }
         Ok(body)
     }

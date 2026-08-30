@@ -16,6 +16,7 @@ mod sender;
 mod transport;
 mod writer;
 
+pub(crate) use client::is_hentaiverse_login_response;
 pub use client::{MoogleMailClient, MoogleMailClientConfig};
 pub use error::{MoogleMailError, MoogleMailErrorCategory};
 pub use forms::{MoogleMailForm, MoogleMailMessageFields};
