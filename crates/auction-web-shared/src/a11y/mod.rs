@@ -5,13 +5,41 @@
 //! 当前焦点范围。
 
 #[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
+
+/// SPA 路由真正变化后把键盘焦点移入主内容；首次挂载与同路由数据刷新不抢占用户焦点。
+pub fn use_route_focus(_route_token: String, _target_id: &'static str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mounted = use_hook(|| Rc::new(Cell::new(false)));
+        let mounted_for_effect = Rc::clone(&mounted);
+        use_effect(use_reactive((&_route_token,), move |(_route_token,)| {
+            // use_effect 首次挂载必定执行；该次保留浏览器自然的文档起始焦点。
+            if !mounted_for_effect.replace(true) {
+                return;
+            }
+            let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+                return;
+            };
+            let Some(target) = document
+                .get_element_by_id(_target_id)
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            else {
+                return;
+            };
+            let _ = target.focus();
+        }));
+    }
+}
 
 /// 管理当前 surface 的模态焦点循环、触发控件恢复和可选的背景滚动锁定。
 pub fn use_dialog_focus_trap(_lock_background_scroll: bool) {

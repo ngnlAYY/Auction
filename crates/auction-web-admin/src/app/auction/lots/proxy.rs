@@ -87,7 +87,18 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
             p { {t!("admin-lots-proxy-empty")} }
         } else {
             div { class: "admin-auction-table-wrap",
-                table { class: "admin-auction-table",
+                table { class: "admin-auction-table admin-auction-proxy__table",
+                    caption { class: "admin-visually-hidden", {t!("admin-lots-proxy-pagination")} }
+                    thead {
+                        tr {
+                            th { scope: "col", {t!("admin-lots-proxy-user")} }
+                            th { scope: "col", {t!("admin-lots-proxy-maximum")} }
+                            th { scope: "col", {t!("admin-lots-proxy-mode")} }
+                            th { scope: "col", {t!("admin-lots-proxy-status")} }
+                            th { scope: "col", {t!("admin-lots-proxy-usage")} }
+                            th { scope: "col", {t!("admin-lots-proxy-created")} }
+                        }
+                    }
                     tbody {
                         for event in page.proxy_events.clone() {
                             AdminProxyHistoryRow { event }
@@ -129,20 +140,20 @@ fn proxy_event_total(page: &AdminProxyEventPage, current_page: i64) -> i64 {
 fn AdminProxyHistoryRow(event: AdminProxyEvent) -> Element {
     rsx! {
         tr {
-            td { strong { TruncatedText { value: event.username.clone() } } }
-            td {
+            td { "data-label": t!("admin-lots-proxy-user"), strong { TruncatedText { value: event.username.clone() } } }
+            td { "data-label": t!("admin-lots-proxy-maximum"),
                 {t!("admin-lots-proxy-amount", amount: format_amount(event.maximum_amount))}
             }
-            td { "{proxy_mode_label(&event.mode)}" }
-            td { "{proxy_status_label(&event.status)}" }
-            td { title: event.authorization_id.clone(),
+            td { "data-label": t!("admin-lots-proxy-mode"), "{proxy_mode_label(&event.mode)}" }
+            td { "data-label": t!("admin-lots-proxy-status"), "{proxy_status_label(&event.status)}" }
+            td { "data-label": t!("admin-lots-proxy-usage"), title: event.authorization_id.clone(),
                 {t!(
                     "admin-lots-proxy-identity",
                     authorization_sequence: event.authorization_sequence,
                     usage_number: event.usage_number
                 )}
             }
-            td { time { datetime: event.created_at.clone(), "{format_admin_time(&event.created_at)}" } }
+            td { "data-label": t!("admin-lots-proxy-created"), time { datetime: event.created_at.clone(), "{format_admin_time(&event.created_at)}" } }
         }
     }
 }

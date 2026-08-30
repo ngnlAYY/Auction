@@ -2,8 +2,9 @@
 
 本 crate 只放 Public 与 Admin 都需要、且没有业务偏向的内容：
 
-- `style/base.css`：设计变量（颜色、字号、间距、圆角）、基础排版、`auction-shell` 外壳
-  布局和语言切换器样式。两个 surface 的样式都建立在这些变量之上。
+- `style/base.css`：primitive/semantic 设计变量（颜色、字号、间距、圆角、层级和表面阴影）、基础排版、
+  `auction-shell` 外壳布局和语言切换器样式。两个 surface 的样式都建立在这些变量之上；窄屏表单
+  控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
@@ -12,7 +13,8 @@
   协议白名单校验。`MarkdownDocument` 提供共享主题容器，`MarkdownBlocks` 只输出安全块节点，
   供必须由 surface 保留旧容器和排版的页面使用。
 - `src/a11y/mod.rs`：共享 `aria-modal` 弹窗的动态初始聚焦、Tab 焦点循环、背景滚动锁和
-  关闭后触发器焦点恢复；不包含 Public/Admin 业务语义。
+  关闭后触发器焦点恢复，以及仅在 SPA 路由真正变化后聚焦主内容的通用 hook；首屏和同路由
+  数据刷新不会抢占焦点，模块不包含 Public/Admin 业务语义。
 - `src/format/mod.rs`：Public/Admin 共用且不参与业务判断的金额展示规则。
 
 ## 语言选择

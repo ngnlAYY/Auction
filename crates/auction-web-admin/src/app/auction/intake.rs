@@ -27,7 +27,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
     let mut start_price = use_signal(String::new);
     let mut player_id = use_signal(String::new);
     let busy = use_signal(|| false);
-    let result = use_signal(|| None::<AdminIntakeResult>);
+    let mut result = use_signal(|| None::<AdminIntakeResult>);
     let mut failure = use_signal(|| None::<IntakeFailure>);
     let mut command_id_state = use_signal(|| None::<Uuid>);
     let empty_value = t!("value-empty");
@@ -115,6 +115,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         onchange: move |event| {
                             source_kind.set(event.value());
                             command_id_state.set(None);
+                            result.set(None);
                             failure.set(None);
                         },
                         option { value: "url", {t!("admin-intake-source-url")} }
@@ -136,6 +137,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                             oninput: move |event| {
                                 equipment_url.set(event.value());
                                 command_id_state.set(None);
+                                result.set(None);
                                 failure.set(None);
                             },
                         }
@@ -158,6 +160,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                             oninput: move |event| {
                                 equipment_json.set(event.value());
                                 command_id_state.set(None);
+                                result.set(None);
                                 failure.set(None);
                             },
                         }
@@ -178,6 +181,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         oninput: move |event| {
                             start_price.set(event.value());
                             command_id_state.set(None);
+                            result.set(None);
                             failure.set(None);
                         },
                     }
@@ -196,6 +200,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         oninput: move |event| {
                             player_id.set(event.value());
                             command_id_state.set(None);
+                            result.set(None);
                             failure.set(None);
                         },
                     }

@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
 
-use auction_web_shared::{LanguagePicker, use_dialog_focus_trap};
+use auction_web_shared::{LanguagePicker, use_dialog_focus_trap, use_route_focus};
 
 use crate::api::{
     AdminReadinessState, AdminSession, fetch_admin_readiness, fetch_admin_session, login_admin,

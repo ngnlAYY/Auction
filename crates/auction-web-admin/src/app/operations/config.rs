@@ -64,10 +64,14 @@ pub(super) fn page() -> Element {
             p { class: "admin-config-status", role: "status", {t!("admin-runtime-loading")} }
         },
         Some(Err(error)) => rsx! {
-            p {
-                class: "admin-config-error",
-                role: "alert",
-                {admin_api_error_message(&error.code)}
+            div { class: "admin-config-error", role: "alert",
+                p { {admin_api_error_message(&error.code)} }
+                button {
+                    class: "admin-btn-secondary",
+                    r#type: "button",
+                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                    {t!("admin-retry")}
+                }
             }
         },
         Some(Ok(snapshot)) => {

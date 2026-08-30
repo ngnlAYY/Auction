@@ -82,19 +82,19 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
                         caption { {t!("equipment-stats")} }
                         thead {
                             tr {
-                                th { {t!("equipment-stat-name")} }
-                                th { {t!("equipment-stat-value")} }
-                                th { {t!("equipment-stat-base")} }
-                                th { {t!("equipment-stat-roll")} }
+                                th { scope: "col", {t!("equipment-stat-name")} }
+                                th { scope: "col", {t!("equipment-stat-value")} }
+                                th { scope: "col", {t!("equipment-stat-base")} }
+                                th { scope: "col", {t!("equipment-stat-roll")} }
                             }
                         }
                         tbody {
                             for (name, stat) in equipment.stats.iter().skip(stats_start).take(stats_page_size as usize) {
                                 tr {
-                                    th { scope: "row", "{name}" }
-                                    td { "{stat.value}" }
-                                    td { {stat.base.map(|value| format!("{value:.2}")).unwrap_or_else(|| t!("value-empty"))} }
-                                    td { {stat.roll.map(|value| format!("{value:.1}%")).unwrap_or_else(|| t!("value-empty"))} }
+                                    th { scope: "row", "data-label": t!("equipment-stat-name"), "{name}" }
+                                    td { "data-label": t!("equipment-stat-value"), "{stat.value}" }
+                                    td { "data-label": t!("equipment-stat-base"), {stat.base.map(|value| format!("{value:.2}")).unwrap_or_else(|| t!("value-empty"))} }
+                                    td { "data-label": t!("equipment-stat-roll"), {stat.roll.map(|value| format!("{value:.1}%")).unwrap_or_else(|| t!("value-empty"))} }
                                 }
                             }
                         }

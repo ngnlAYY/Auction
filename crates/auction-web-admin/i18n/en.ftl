@@ -888,6 +888,7 @@ dashboard-legacy-outbox-metrics-unavailable = Outbox metrics are temporarily una
 dashboard-legacy-outbox-oldest-age = Oldest active event age: { $seconds } seconds
 dashboard-legacy-outbox-attempts = Non-completed events by cumulative attempts
 dashboard-legacy-no-data = No data available.
+dashboard-legacy-metric-not-collected = Not collected by this dashboard snapshot.
 dashboard-legacy-cookie-readiness-by-world = Cookie readiness by world
 dashboard-legacy-cookie-ready = Ready
 dashboard-legacy-cookie-no-active = No active cookie

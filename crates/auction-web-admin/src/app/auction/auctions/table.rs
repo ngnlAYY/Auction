@@ -53,15 +53,16 @@ pub(super) fn AdminAuctionTable(
                 }
                 div { class: "admin-auction-table-wrap",
                     table { class: "admin-auction-table",
+                        caption { class: "admin-visually-hidden", {t!("page-auctions-title")} }
                         thead {
                             tr {
-                                th { class: "admin-auction-col-number", {t!("admin-auctions-sequence")} }
-                                th { class: "admin-auction-col-world", {t!("admin-auctions-world")} }
-                                th { class: "admin-auction-col-status", {t!("admin-auctions-status")} }
-                                th { class: "admin-auction-col-opens", {t!("admin-auctions-open-at")} }
-                                th { class: "admin-auction-col-ends", {t!("admin-auctions-end-at")} }
-                                th { class: "admin-auction-col-ready", {t!("admin-auctions-readiness")} }
-                                th { {t!("admin-auctions-actions")} }
+                                th { scope: "col", class: "admin-auction-col-number", {t!("admin-auctions-sequence")} }
+                                th { scope: "col", class: "admin-auction-col-world", {t!("admin-auctions-world")} }
+                                th { scope: "col", class: "admin-auction-col-status", {t!("admin-auctions-status")} }
+                                th { scope: "col", class: "admin-auction-col-opens", {t!("admin-auctions-open-at")} }
+                                th { scope: "col", class: "admin-auction-col-ends", {t!("admin-auctions-end-at")} }
+                                th { scope: "col", class: "admin-auction-col-ready", {t!("admin-auctions-readiness")} }
+                                th { scope: "col", {t!("admin-auctions-actions")} }
                             }
                         }
                         tbody {

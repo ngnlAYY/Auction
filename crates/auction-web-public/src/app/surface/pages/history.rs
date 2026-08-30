@@ -59,7 +59,6 @@ pub(crate) fn AuctionHistoryPage(
     mut page_number: Signal<i64>,
     world_options: Vec<String>,
 ) -> Element {
-    let total = page.total.unwrap_or(page.auctions.len() as i64);
     let page_size = page.page_size.max(1);
     rsx! {
         section { class: "public-auction-rounds", aria_labelledby: "auction-history-title",
@@ -102,8 +101,8 @@ pub(crate) fn AuctionHistoryPage(
             PublicPager {
                 page: page_number(),
                 page_size,
-                total: Some(total),
-                has_more: false,
+                total: page.total,
+                has_more: page.has_more.unwrap_or(false),
                 label: t!("page-auctions-title"),
                 on_page_change: move |page| {
                     page_number.set(page);
@@ -119,16 +118,17 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
     rsx! {
         div { class: "public-auction-rounds__table",
             table {
+                caption { class: "public-visually-hidden", {t!("page-auctions-title")} }
                 thead {
                     tr {
-                        th { {t!("auction-history-number")} }
-                        th { {t!("auction-history-world")} }
-                        th { {t!("auction-history-ended")} }
-                        th { class: "public-auction-rounds__number", {t!("auction-history-lots")} }
-                        th { class: "public-auction-rounds__number", {t!("auction-history-sold")} }
-                        th { class: "public-auction-rounds__number", {t!("auction-history-unsold")} }
-                        th { class: "public-auction-rounds__number", {t!("auction-history-total")} }
-                        th { {t!("auction-history-links")} }
+                        th { scope: "col", {t!("auction-history-number")} }
+                        th { scope: "col", {t!("auction-history-world")} }
+                        th { scope: "col", {t!("auction-history-ended")} }
+                        th { scope: "col", class: "public-auction-rounds__number", {t!("auction-history-lots")} }
+                        th { scope: "col", class: "public-auction-rounds__number", {t!("auction-history-sold")} }
+                        th { scope: "col", class: "public-auction-rounds__number", {t!("auction-history-unsold")} }
+                        th { scope: "col", class: "public-auction-rounds__number", {t!("auction-history-total")} }
+                        th { scope: "col", {t!("auction-history-links")} }
                     }
                 }
                 tbody {

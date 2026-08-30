@@ -177,12 +177,13 @@ fn BidSection(
             } else {
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
+                        caption { class: "public-visually-hidden", {t!("account-bids-title")} }
                         thead {
                             tr {
-                                th { {t!("account-lot")} }
-                                th { class: "numeric-column public-account-number", {t!("account-amount")} }
-                                th { {t!("account-bid-status")} }
-                                th { {t!("account-time")} }
+                                th { scope: "col", {t!("account-lot")} }
+                                th { scope: "col", class: "numeric-column public-account-number", {t!("account-amount")} }
+                                th { scope: "col", {t!("account-bid-status")} }
+                                th { scope: "col", {t!("account-time")} }
                             }
                         }
                         tbody {
@@ -242,14 +243,15 @@ fn ProxySection(
             } else {
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table",
+                        caption { class: "public-visually-hidden", {t!("account-proxies-title")} }
                         thead {
                             tr {
-                                th { {t!("account-lot")} }
-                                th { class: "numeric-column public-account-number", {t!("account-secret-maximum")} }
-                                th { {t!("account-transition-history")} }
-                                th { {t!("account-mode")} }
-                                th { {t!("account-proxy-uses")} }
-                                th { {t!("account-status")} }
+                                th { scope: "col", {t!("account-lot")} }
+                                th { scope: "col", class: "numeric-column public-account-number", {t!("account-secret-maximum")} }
+                                th { scope: "col", {t!("account-transition-history")} }
+                                th { scope: "col", {t!("account-mode")} }
+                                th { scope: "col", {t!("account-proxy-uses")} }
+                                th { scope: "col", {t!("account-status")} }
                             }
                         }
                         tbody {

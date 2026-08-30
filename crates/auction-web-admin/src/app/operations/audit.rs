@@ -33,7 +33,14 @@ pub(super) fn page() -> Element {
             p { class: "admin-shell__status", role: "status", {t!("admin-audit-loading")} }
         },
         Some(Err(error)) => rsx! {
-            p { class: "admin-shell__inline-error", role: "alert", {admin_api_error_message(error)} }
+            div { class: "admin-shell__inline-error", role: "alert",
+                p { {admin_api_error_message(error)} }
+                button {
+                    r#type: "button",
+                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                    {t!("admin-audit-retry")}
+                }
+            }
         },
         Some(Ok(page)) => rsx! {
             AuditTable { page: page.clone() }
@@ -49,7 +56,7 @@ pub(super) fn page() -> Element {
     rsx! {
         section { class: "admin-audit-page", aria_labelledby: "admin-audit-title",
             h1 { id: "admin-audit-title", {t!("page-audit-title")} }
-            AuditFilters { filter, on_change: apply_filter }
+            AuditFilters { filter, on_submit: apply_filter }
             {content}
         }
     }
@@ -58,10 +65,15 @@ pub(super) fn page() -> Element {
 #[component]
 fn AuditFilters(
     mut filter: Signal<AdminAuditFilter>,
-    on_change: EventHandler<AdminAuditFilter>,
+    on_submit: EventHandler<AdminAuditFilter>,
 ) -> Element {
     rsx! {
-        div { class: "admin-audit-filter",
+        form {
+            class: "admin-audit-filter",
+            onsubmit: move |event| {
+                event.prevent_default();
+                on_submit.call(filter());
+            },
             label { class: "admin-audit-field-wide",
                 {t!("admin-audit-actor")}
                 input {
@@ -69,7 +81,6 @@ fn AuditFilters(
                     value: filter().actor,
                     oninput: move |event| {
                         filter.write().actor = event.value();
-                        on_change.call(filter());
                     },
                 }
             }
@@ -79,7 +90,6 @@ fn AuditFilters(
                     value: filter().actor_type,
                     onchange: move |event| {
                         filter.write().actor_type = event.value();
-                        on_change.call(filter());
                     },
                     option { value: "", {t!("admin-audit-all")} }
                     option { value: "public_user", {audit_actor_type_label("public_user")} }
@@ -95,7 +105,6 @@ fn AuditFilters(
                     value: filter().action,
                     oninput: move |event| {
                         filter.write().action = event.value();
-                        on_change.call(filter());
                     },
                 }
             }
@@ -106,7 +115,6 @@ fn AuditFilters(
                     value: filter().entity,
                     oninput: move |event| {
                         filter.write().entity = event.value();
-                        on_change.call(filter());
                     },
                 }
             }
@@ -116,7 +124,6 @@ fn AuditFilters(
                     value: filter().source,
                     onchange: move |event| {
                         filter.write().source = event.value();
-                        on_change.call(filter());
                     },
                     option { value: "", {t!("admin-audit-all")} }
                     option { value: "public", {audit_source_label("public")} }
@@ -131,7 +138,6 @@ fn AuditFilters(
                     value: filter().result,
                     onchange: move |event| {
                         filter.write().result = event.value();
-                        on_change.call(filter());
                     },
                     option { value: "", {t!("admin-audit-all")} }
                     option { value: "success", {audit_result_label("success")} }
@@ -146,7 +152,6 @@ fn AuditFilters(
                     value: filter().request_id,
                     oninput: move |event| {
                         filter.write().request_id = event.value();
-                        on_change.call(filter());
                     },
                 }
             }
@@ -157,7 +162,6 @@ fn AuditFilters(
                     value: filter().occurred_from,
                     oninput: move |event| {
                         filter.write().occurred_from = event.value();
-                        on_change.call(filter());
                     },
                 }
             }
@@ -168,9 +172,13 @@ fn AuditFilters(
                     value: filter().occurred_to,
                     oninput: move |event| {
                         filter.write().occurred_to = event.value();
-                        on_change.call(filter());
                     },
                 }
+            }
+            button {
+                class: "admin-btn-primary admin-audit-filter__submit",
+                r#type: "submit",
+                {t!("admin-audit-load")}
             }
         }
     }

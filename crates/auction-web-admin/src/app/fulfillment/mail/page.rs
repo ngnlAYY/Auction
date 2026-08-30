@@ -19,7 +19,7 @@ pub fn page() -> Element {
     // 旧版邮件页首次打开显示所有邮箱的入站记录；轮询状态只有输入具体邮箱后才读取。
     let active_query = use_signal(AdminMailIntakeQuery::default);
     let page_number = use_signal(|| 1_i64);
-    let refresh = use_signal(|| 0_u64);
+    let mut refresh = use_signal(|| 0_u64);
     let mut polling_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut selected_intake = use_signal(|| None::<String>);
@@ -62,10 +62,15 @@ pub fn page() -> Element {
             p { class: "admin-shell__status", role: "status", {t!("admin-mail-loading")} }
         },
         Some(Err(error)) => rsx! {
-            p {
+            div {
                 class: "admin-shell__inline-error",
                 role: "alert",
-                {admin_api_error_message(error)}
+                p { {admin_api_error_message(error)} }
+                button {
+                    r#type: "button",
+                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                    {t!("admin-retry")}
+                }
             }
         },
         Some(Ok(intakes)) => rsx! {
@@ -91,10 +96,17 @@ pub fn page() -> Element {
                 p { class: "admin-panel__note", role: "status", {t!("admin-mail-loading")} }
             },
             Some(Err(error)) => rsx! {
-                p {
+                div {
                     class: "admin-panel__note admin-panel__note--error",
                     role: "alert",
-                    {admin_api_error_message(error)}
+                    p { {admin_api_error_message(error)} }
+                    button {
+                        r#type: "button",
+                        onclick: move |_| {
+                            polling_refresh.set(polling_refresh().saturating_add(1));
+                        },
+                        {t!("admin-retry")}
+                    }
                 }
             },
             Some(Ok(Some(polling))) => rsx! {

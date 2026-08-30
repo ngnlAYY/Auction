@@ -889,6 +889,7 @@ dashboard-legacy-outbox-metrics-unavailable = 发件箱指标暂时不可用。
 dashboard-legacy-outbox-oldest-age = 最早活跃事件已等待 { $seconds } 秒
 dashboard-legacy-outbox-attempts = 按累计尝试次数统计未完成事件
 dashboard-legacy-no-data = 暂无数据。
+dashboard-legacy-metric-not-collected = 此总览快照未采集该指标。
 dashboard-legacy-cookie-readiness-by-world = 各世界 Cookie 就绪状态
 dashboard-legacy-cookie-ready = 就绪
 dashboard-legacy-cookie-no-active = 无活跃 Cookie

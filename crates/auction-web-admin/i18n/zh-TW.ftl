@@ -888,6 +888,7 @@ dashboard-legacy-outbox-metrics-unavailable = 寄件匣指標暫時無法使用�
 dashboard-legacy-outbox-oldest-age = 最早的活躍事件已等待 { $seconds } 秒
 dashboard-legacy-outbox-attempts = 依累計嘗試次數統計未完成事件
 dashboard-legacy-no-data = 目前沒有資料。
+dashboard-legacy-metric-not-collected = 此總覽快照未採集該指標。
 dashboard-legacy-cookie-readiness-by-world = 各世界 Cookie 就緒狀態
 dashboard-legacy-cookie-ready = 就緒
 dashboard-legacy-cookie-no-active = 無活躍 Cookie

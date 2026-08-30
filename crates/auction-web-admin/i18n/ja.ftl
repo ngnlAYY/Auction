@@ -888,6 +888,7 @@ dashboard-legacy-outbox-metrics-unavailable = Outbox メトリクスは一時的
 dashboard-legacy-outbox-oldest-age = 最古のアクティブイベント経過時間：{ $seconds } 秒
 dashboard-legacy-outbox-attempts = 累計試行回数別の未完了イベント
 dashboard-legacy-no-data = データがありません。
+dashboard-legacy-metric-not-collected = このダッシュボードスナップショットでは未収集です。
 dashboard-legacy-cookie-readiness-by-world = ワールド別 Cookie 準備状態
 dashboard-legacy-cookie-ready = 準備完了
 dashboard-legacy-cookie-no-active = 有効な Cookie なし

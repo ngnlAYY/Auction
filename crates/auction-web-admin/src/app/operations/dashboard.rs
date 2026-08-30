@@ -50,6 +50,14 @@ pub(super) fn page() -> Element {
                 }
             }
             if let Some(Ok(snapshot)) = state.as_ref() {
+                div { class: "admin-dashboard-actions admin-dashboard-actions--refresh",
+                    button {
+                        class: "admin-btn-secondary",
+                        r#type: "button",
+                        onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                        {t!("dashboard-refresh")}
+                    }
+                }
                 DashboardContent { snapshot: snapshot.clone() }
                 MailPollerControls {
                     pollers: snapshot

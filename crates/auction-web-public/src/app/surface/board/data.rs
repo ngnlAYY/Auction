@@ -115,9 +115,6 @@ pub(crate) fn AuctionData(
     let now = clock();
     let is_live_presentation = auction.presentation_mode == "live";
     let is_opening_presentation = auction.presentation_mode == "opening";
-    let connection_state = realtime_state();
-    let connection_state_name = live_connection_state_name(connection_state);
-    let connection_message = super::super::realtime::live_connection_message(connection_state);
     let auction_end = if is_live_presentation {
         auction.scheduled_ends_at.clone()
     } else if is_opening_presentation {
@@ -141,23 +138,32 @@ pub(crate) fn AuctionData(
         Some(Ok(_)) if !aligned => rsx! {
             p { class: "public-page-status", role: "status", {t!("common-loading")} }
         },
-        Some(Ok(page)) => rsx! {
-            CatalogTable {
-                rows: page.rows(),
-                now,
-                projection_kind: page.projection_kind.clone(),
-                category_counts: page.category_counts.clone().unwrap_or_default(),
-                active_category,
-                page_number,
-                page_total: page.total.unwrap_or_else(|| page.rows().len() as i64),
-                page_size: page.page_size.filter(|size| *size > 0).unwrap_or(20),
-                can_bid: is_live_presentation && auction.bidding_open,
-                allow_slow: auction.status == "live",
-                session_ready,
-                authenticated,
-                viewer_name: viewer_name.clone(),
+        Some(Ok(page)) => {
+            let rows = page.rows();
+            let page_size = page.page_size.filter(|size| *size > 0).unwrap_or(20);
+            // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
+            // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
+            let has_more = page.total.is_none()
+                && i64::try_from(rows.len()).is_ok_and(|row_count| row_count >= page_size);
+            rsx! {
+                CatalogTable {
+                    rows,
+                    now,
+                    projection_kind: page.projection_kind.clone(),
+                    category_counts: page.category_counts.clone().unwrap_or_default(),
+                    active_category,
+                    page_number,
+                    page_total: page.total,
+                    page_size,
+                    has_more,
+                    can_bid: is_live_presentation && auction.bidding_open,
+                    allow_slow: auction.status == "live",
+                    session_ready,
+                    authenticated,
+                    viewer_name: viewer_name.clone(),
+                }
             }
-        },
+        }
     };
 
     rsx! {
@@ -169,14 +175,6 @@ pub(crate) fn AuctionData(
                 {forum::panel(auction.id.clone())}
             }
             div { class: "public-auction-live",
-                if !historical {
-                    p {
-                        aria_live: "polite",
-                        class: "public-visually-hidden",
-                        "data-state": connection_state_name,
-                        {connection_message}
-                    }
-                }
                 header { class: "public-auction-round",
                     div { class: "public-auction-round__title",
                         h1 {
@@ -238,7 +236,7 @@ pub(crate) fn AuctionData(
 fn CatalogLoadFailure(detail: String, mut refresh_generation: Signal<u64>) -> Element {
     rsx! {
         div { class: "ui-empty-state", role: "alert",
-            p { class: "ui-empty-state__title", {t!("catalog-empty-all")} }
+            p { class: "ui-empty-state__title", {t!("data-error")} }
             span { class: "ui-empty-state__detail", "{detail}" }
             button {
                 class: "ui-empty-state__retry",

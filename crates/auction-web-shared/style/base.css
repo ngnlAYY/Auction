@@ -4,6 +4,7 @@
   --color-surface: #161b22;
   --color-surface-raised: #1d242e;
   --color-border: #2b3442;
+  --color-border-strong: #46546a;
   --color-text: #e6ebf2;
   --color-text-muted: #93a0b4;
   --color-accent: #d9a441;
@@ -12,11 +13,13 @@
   --color-warning: #d9a441;
   --color-danger: #e05555;
   --color-link: #6ea8fe;
+  --color-action-primary: var(--color-link);
   --color-overlay: rgb(0 0 0 / 55%);
   --font-body: Inter, "Segoe UI", system-ui, -apple-system, "Noto Sans", sans-serif;
   --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --font-weight-strong: 700;
   --line-height-body: 1.5;
+  --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
   --text-lg: 1.125rem;
@@ -27,6 +30,8 @@
   --radius-full: 999rem;
   --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
   --shadow-2: 0 4px 12px rgb(0 0 0 / 45%);
+  --shadow-surface: var(--shadow-2);
+  --z-popover: 20;
   --border-width: 1px;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -346,7 +351,25 @@ button:disabled {
 }
 
 @media (max-width: 48rem) {
+  body,
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+
   .auction-shell {
     padding-inline: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
