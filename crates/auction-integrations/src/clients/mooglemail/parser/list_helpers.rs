@@ -4,26 +4,45 @@ pub(crate) fn valid_inbox_header(
     row: ElementRef<'_>,
     world: MoogleMailWorld,
 ) -> Result<bool, MoogleMailError> {
-    let selector = selector("th", MoogleMailOperation::Inbox, world)?;
-    let headers = row.select(&selector).collect::<Vec<_>>();
-    let expected = ["From", "Subject", "Sent", "Read"];
-    Ok(headers.len() == expected.len()
-        && headers.iter().zip(expected).all(|(header, expected)| {
-            normalize_text(header.text().collect::<String>()) == expected
-        }))
+    valid_list_header(row, world, MoogleMailOperation::Inbox, ["From", "Subject", "Sent", "Read"])
 }
 
 pub(crate) fn valid_sent_header(
     row: ElementRef<'_>,
     world: MoogleMailWorld,
 ) -> Result<bool, MoogleMailError> {
-    let selector = selector("th", MoogleMailOperation::Sent, world)?;
-    let headers = row.select(&selector).collect::<Vec<_>>();
-    let expected = ["To", "Subject", "Sent", "Read"];
+    valid_list_header(row, world, MoogleMailOperation::Sent, ["To", "Subject", "Sent", "Read"])
+}
+
+fn valid_list_header(
+    row: ElementRef<'_>,
+    _world: MoogleMailWorld,
+    _operation: MoogleMailOperation,
+    expected: [&str; 4],
+) -> Result<bool, MoogleMailError> {
+    // 只接收表头行的直接 th，避免嵌套 table 提供一组伪造列名。
+    let headers = direct_children(row, "th");
     Ok(headers.len() == expected.len()
-        && headers.iter().zip(expected).all(|(header, expected)| {
-            normalize_text(header.text().collect::<String>()) == expected
-        }))
+        && headers
+            .iter()
+            .zip(expected)
+            .all(|(header, expected)| header_label(*header).as_deref() == Some(expected)))
+}
+
+fn header_label(header: ElementRef<'_>) -> Option<String> {
+    let visible = normalize_text(header.text().collect::<String>());
+    if !visible.is_empty() {
+        return Some(visible);
+    }
+
+    // 部分账号把固定英文表头渲染成 CSS 字形。兼容路径只接受真实页面已观察到的
+    // `div.fl.f2b > div.c3x` 直接子结构，并在调用方继续逐字核对固定列名。
+    let wrapper_children = direct_element_children(header);
+    if wrapper_children.len() != 1 {
+        return None;
+    }
+    let wrapper = wrapper_children[0];
+    decode_css_glyph_label(wrapper, "fl f2b", false)
 }
 
 pub(crate) fn parse_next_page(
@@ -71,25 +90,36 @@ pub(crate) fn valid_next_page_href(
     expected_page: usize,
     filter: &str,
 ) -> bool {
-    if raw.is_empty()
-        || raw != raw.trim()
-        || raw.chars().any(char::is_control)
-        || !raw.starts_with('/')
-    {
-        return false;
-    }
-    if raw.starts_with("//") {
+    if raw.is_empty() || raw != raw.trim() || raw.chars().any(char::is_control) {
         return false;
     }
     let base = match Url::parse("https://hentaiverse.org/") {
         Ok(base) => base,
         Err(_) => return false,
     };
-    let parsed = match base.join(raw) {
-        Ok(parsed) => parsed,
-        Err(_) => return false,
+    let parsed = if raw.starts_with('/') {
+        if raw.starts_with("//") {
+            return false;
+        }
+        match base.join(raw) {
+            Ok(parsed) => parsed,
+            Err(_) => return false,
+        }
+    } else {
+        // 当前 MoogleMail 会输出规范同源绝对分页 URL；只兼容精确 HTTPS origin，
+        // 不接受协议相对、用户信息、显式端口或其它 host。
+        if !raw.starts_with("https://hentaiverse.org/") {
+            return false;
+        }
+        match Url::parse(raw) {
+            Ok(parsed) => parsed,
+            Err(_) => return false,
+        }
     };
-    if parsed.username() != ""
+    if parsed.scheme() != "https"
+        || parsed.host_str() != Some("hentaiverse.org")
+        || parsed.port().is_some()
+        || parsed.username() != ""
         || parsed.password().is_some()
         || parsed.fragment().is_some()
         || parsed.path() != world.path()

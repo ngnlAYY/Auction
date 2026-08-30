@@ -67,12 +67,7 @@ pub(crate) fn parse_detail_fields_for(
     let mut values = HashMap::<String, String>::with_capacity(3);
     for row in lefts[0].select(&row_selector) {
         let divs = row.select(&div_selector).collect::<Vec<_>>();
-        let label = divs
-            .first()
-            .map(|div| {
-                normalize_text(div.text().collect::<String>()).trim_end_matches(':').to_owned()
-            })
-            .unwrap_or_default();
+        let label = divs.first().map(|div| detail_field_label(*div)).unwrap_or_default();
         if !matches!(label.as_str(), "To" | "From" | "Subject") {
             continue;
         }
@@ -100,6 +95,14 @@ pub(crate) fn parse_detail_fields_for(
         sender: sender.to_owned(),
         subject: subject.to_owned(),
     })
+}
+
+fn detail_field_label(label: ElementRef<'_>) -> String {
+    let visible = normalize_text(label.text().collect::<String>());
+    if !visible.is_empty() {
+        return visible.trim_end_matches(':').to_owned();
+    }
+    decode_css_glyph_label(label, "fr f2b", true).unwrap_or_default()
 }
 
 pub(crate) fn parse_detail_assets(
@@ -144,7 +147,10 @@ pub(crate) fn parse_detail_asset_manifest(
         .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
     let state = required_script_value(&executable, "mail_state")
         .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
-    if !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&count) || cod < 0 || state != 1 {
+    // 当前 Inbox 在详情被打开后会把空附件邮件标记为已读（mail_state=2）；
+    // 含资产邮件仍必须处于可领取态（mail_state=1），避免把不可领取资产误交给业务层。
+    let valid_state = if count == 0 && cod == 0 { matches!(state, 1 | 2) } else { state == 1 };
+    if !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&count) || cod < 0 || !valid_state {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
     let all_lists = document.select(&list_selector).collect::<Vec<_>>();
@@ -259,7 +265,9 @@ pub(crate) fn parse_current_cod(value: &str) -> Option<i64> {
 }
 
 pub(crate) fn parse_networth_credits(value: &str) -> Option<i64> {
-    let value = value.strip_prefix("Credits")?.trim();
+    // HentaiVerse 当前页面在标签后使用冒号，旧页面使用空格；只兼容这两个完整分隔符，
+    // 避免把 `Credits123` 或其他相似前缀误认成余额证明。
+    let value = value.strip_prefix("Credits: ").or_else(|| value.strip_prefix("Credits "))?;
     parse_canonical_credits(value)
 }
 

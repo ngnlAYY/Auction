@@ -37,7 +37,7 @@ pub(crate) async fn insert_or_verify_intake(
 
     let row = sqlx::query(
         "SELECT id, world_id, mail_kind, content_digest, received_at, status,
-                decision_code, decision_metadata, processed_at
+                decision_code, decision_metadata
          FROM public.inbound_mail
          WHERE mailbox_key = $1 AND external_mail_id = $2
          FOR UPDATE",
@@ -65,9 +65,8 @@ pub(crate) async fn insert_or_verify_intake(
     let stored_metadata: Json<Value> = row
         .try_get("decision_metadata")
         .map_err(|_| storage_error("读取 MoogleMail 入站 metadata 失败"))?;
-    let stored_processed: DateTime<Utc> = row
-        .try_get("processed_at")
-        .map_err(|_| storage_error("读取 MoogleMail 入站处理时间失败"))?;
+    // `processed_at` 保留首次入站轮询写入的时间值，并非远端邮件事实。PostgreSQL 会把 Rust
+    // 纳秒时间规范到微秒，后续重放也会产生新的本轮时间，因此既不能参与冲突比较，也不能覆盖原值。
     if stored_id != item.id
         || stored_world != item.world_id
         || stored_kind != item.mail_kind
@@ -76,7 +75,6 @@ pub(crate) async fn insert_or_verify_intake(
         || stored_status != item.status
         || stored_code != item.decision_code
         || stored_metadata.0 != item.decision_metadata
-        || stored_processed != item.processed_at
     {
         return Err(storage_error("MoogleMail 外部邮件 ID 对应内容发生冲突"));
     }

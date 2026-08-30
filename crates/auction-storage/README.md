@@ -197,7 +197,9 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `mail_admin_commands` 命令账本和追加审计完成暂停/恢复及历史兼容命令；`src/database/mail_poll/`
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
 `inbound_mail`、`mail_commands`、cursor 的同事务幂等提交；其中 `state.rs` 负责状态/租约，
-`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。SQLite Lite 明确返回能力不支持，
+`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。入站重放会严格比较
+远端身份、内容摘要和业务决定，但保留首次入站轮询写入的 `processed_at`，不把后续本轮时间或
+PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
 负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
 `admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
@@ -337,7 +339,8 @@ claim 以 obligation owner 顺序锁定并支持旧版缺失 execution 行的惰
 `src/database/mail_delivery/mod.rs` 只负责 MailDeliveryEnqueuer 的跨后端分派；命令闭集校验、普通
 outbox 入队、recovery 两阶段激活和 PostgreSQL 错误/载荷辅助分别位于
 `mail_delivery/{validation,outbox,activation,common}.rs`，保留命令摘要幂等、`prepared → pending`
-激活和外部结果后置边界。
+激活和外部结果后置边界。`mail_intake` 新记录使用 operation 后缀的规范 `origin_id`；幂等复读
+只在请求摘要、收件人和完整 payload 仍相同时兼容既有 `delivery-*` 后缀，不接受通用 origin 改写。
 目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
 释放回 `pending`。过期 `claimed` 可以安全重领；过期 `sending` 只有在额外 sending grace 到期后
 才批量隔离为 `manual_reconcile`，不能作为 pending 重发。失败写回会保留 transport 已校验的可选外部引用和有界安全

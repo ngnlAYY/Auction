@@ -95,14 +95,14 @@ where
         user_key_user_id: Option<Uuid>,
         attachment_ids: Vec<String>,
     ) -> Result<Uuid, ApplicationError> {
-        let operation_name = match operation {
+        let command_operation = match operation {
             MailDeliveryOperation::Return => DELIVERY_RETURN_OPERATION,
             MailDeliveryOperation::Take => DELIVERY_TAKE_OPERATION,
             MailDeliveryOperation::Send => DELIVERY_NOTICE_OPERATION,
         };
         let suffix = template.map_or_else(
-            || operation_name.to_owned(),
-            |value| format!("{operation_name}:{}", value.as_str()),
+            || command_operation.to_owned(),
+            |value| format!("{command_operation}:{}", value.as_str()),
         );
         let command_id = stable_command_id(message, &suffix);
         let request_hash = delivery_request_hash(
@@ -122,7 +122,9 @@ where
                 origin: MailDeliveryOrigin::MailIntake,
                 origin_id: format!(
                     "{}:{}:{}",
-                    message.world_id, message.external_mail_id, operation_name
+                    message.world_id,
+                    message.external_mail_id,
+                    operation.as_str()
                 ),
                 operation,
                 world_id: message.world_id.clone(),

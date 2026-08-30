@@ -21,7 +21,8 @@ pub(crate) fn parse_equipment_url(
     {
         return Err(AdminIntakeError::InvalidCommand);
     }
-    let parsed = Url::parse(raw_url).map_err(|_| AdminIntakeError::InvalidSource)?;
+    let normalized_url = normalize_equipment_url(raw_url).ok_or(AdminIntakeError::InvalidSource)?;
+    let parsed = Url::parse(normalized_url).map_err(|_| AdminIntakeError::InvalidSource)?;
     if parsed.scheme() != endpoint.scheme()
         || parsed.host_str() != endpoint.host_str()
         || parsed.port_or_known_default() != endpoint.port_or_known_default()
@@ -30,7 +31,7 @@ pub(crate) fn parse_equipment_url(
         || parsed.query().is_some()
         || parsed.fragment().is_some()
         || parsed.path().contains("..")
-        || parsed.as_str() != raw_url
+        || parsed.as_str() != normalized_url
         || !policy.allows(&parsed)
     {
         return Err(AdminIntakeError::InvalidSource);
@@ -47,6 +48,21 @@ pub(crate) fn parse_equipment_url(
         return Err(AdminIntakeError::InvalidSource);
     }
     Ok((parsed, parts[0].clone(), parts[1].to_ascii_lowercase()))
+}
+
+/// 兼容从自然语言复制的 URL 包裹和句末标点；规范化后仍执行完整 origin、路径和 key 校验。
+fn normalize_equipment_url(value: &str) -> Option<&str> {
+    let value = value.trim_end_matches(equipment_url_sentence_punctuation);
+    let value = if value.starts_with('<') || value.ends_with('>') {
+        value.strip_prefix('<')?.strip_suffix('>')?
+    } else {
+        value
+    };
+    (!value.is_empty()).then_some(value)
+}
+
+fn equipment_url_sentence_punctuation(character: char) -> bool {
+    matches!(character, '.' | ',' | ';' | '!' | '?' | '。' | '，' | '；' | '！' | '？')
 }
 
 pub(crate) fn valid_dns_name(value: &str) -> bool {

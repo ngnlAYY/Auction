@@ -83,7 +83,8 @@ impl MoogleMailParser {
         let state = required_script_value(&executable, "mail_state");
         if count.is_none()
             || cod.is_none()
-            || state != Some(1)
+            // 当前 Sent 详情使用 mail_state=2；Inbox 独立区分含资产可领取态与空附件已读态。
+            || state != Some(2)
             || count.is_some_and(|value| !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&value))
             || cod.is_some_and(|value| value < 0)
         {

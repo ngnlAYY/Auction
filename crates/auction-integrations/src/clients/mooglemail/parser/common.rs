@@ -152,6 +152,59 @@ pub(crate) fn direct_element_children(element: ElementRef<'_>) -> Vec<ElementRef
     element.children().filter_map(ElementRef::wrap).collect()
 }
 
+/// 解码 HentaiVerse 固定标签使用的受限 CSS 字形结构。
+///
+/// 字形只允许作为指定 wrapper 的直接空 `div` 子元素出现；`c3x` 表示单个小写字母，
+/// 详情标签额外要求一个结尾 `c2m` 冒号。调用方仍须把结果与自己的固定闭集逐字核对。
+pub(crate) fn decode_css_glyph_label(
+    wrapper: ElementRef<'_>,
+    expected_wrapper_class: &str,
+    trailing_colon: bool,
+) -> Option<String> {
+    if wrapper.value().name() != "div"
+        || wrapper.value().attr("class") != Some(expected_wrapper_class)
+        || !normalize_text(wrapper.text().collect::<String>()).is_empty()
+    {
+        return None;
+    }
+    let mut glyphs = direct_element_children(wrapper);
+    if trailing_colon {
+        let colon = glyphs.pop()?;
+        if colon.value().name() != "div"
+            || colon.value().attr("class") != Some("c2m")
+            || !direct_element_children(colon).is_empty()
+            || !normalize_text(colon.text().collect::<String>()).is_empty()
+        {
+            return None;
+        }
+    }
+    if glyphs.is_empty()
+        || glyphs.iter().any(|glyph| {
+            glyph.value().name() != "div"
+                || !direct_element_children(*glyph).is_empty()
+                || !normalize_text(glyph.text().collect::<String>()).is_empty()
+        })
+    {
+        return None;
+    }
+    let mut decoded = String::with_capacity(glyphs.len());
+    for glyph in glyphs {
+        let class = glyph.value().attr("class")?;
+        if class.split_ascii_whitespace().count() != 1 {
+            return None;
+        }
+        let suffix = class.strip_prefix("c3")?;
+        if suffix.len() != 1 || !suffix.as_bytes()[0].is_ascii_lowercase() {
+            return None;
+        }
+        decoded.push(char::from(suffix.as_bytes()[0]));
+    }
+    // 远端 glyph class 只编码字母，不编码固定标签的首字母大小写。
+    let mut bytes = decoded.into_bytes();
+    bytes[0] = bytes[0].to_ascii_uppercase();
+    String::from_utf8(bytes).ok()
+}
+
 pub(crate) fn selector(
     value: &str,
     operation: MoogleMailOperation,

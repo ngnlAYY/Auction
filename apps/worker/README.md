@@ -26,6 +26,18 @@ main/isekai、发件人 allowlist、装备过滤和 14 个通知模板；Admin l
 metrics/tracing 不会投影到 Worker。transport、凭据、调度、mailbox identity 和全局 MoogleMail
 `enabled` 继续由 Worker 主配置拥有，runtime 更新后必须重启 Worker 才会生效。
 
+## 拍卖邮件起拍价
+
+拍卖邮件正文为空或只包含空白、空行和 `#` 注释时，所有装备使用配置默认起拍价。单条
+`start amount` 对邮件中的全部装备生效；逐件定价使用重复的
+`<equipment-url> start amount` 三元组，三元组可以换行或放在同一行。普通空行、尾换行、
+CRLF/CR、`<URL>` 包裹、URL 后的中英文句末标点和空白后开始的 `#` 注释都会被兼容处理。
+
+金额接受正整数、规范千分位以及能精确换算为整数 Credits 的 `k`/`m` 小数，例如
+`1000`、`10,000`、`1.5k` 和 `0.5m`。零、负数、非整数换算和溢出继续失败关闭。逐件定价仍
+必须恰好覆盖每个真实附件一次；未知装备 ID、ID/key 不匹配、重复或缺失指令不会被兼容逻辑
+猜测或默认补齐。
+
 ## Cargo feature
 
 - `cache-redis`：编译 Redis 缓存客户端。
@@ -56,10 +68,21 @@ fence，不使用内存游标。PostgreSQL 完整档还把结算 workflow 的领
 `[worker.mooglemail]` 时，Worker 还装配 MoogleMail 读取、拍卖及用户注册/重绑业务处理和
 `DeliveryTransport`，执行静态通知、注册 key/结果通知、重绑结果通知以及 return/take；用户
 登录 key 由独立的数据密钥加密保存，outbox 只保存用户 UUID 引用，发送前才在 Worker 内解密。
+远端读取兼容当前 Item Shop 的 `Credits: amount` 与旧版 `Credits amount` 余额标签，以及
+MoogleMail Inbox/Sent 固定英文表头、详情字段和发送完成标记的文本或受限 CSS 字形表示；两种
+路径仍要求唯一结构、固定列序和逐字列名，余额也必须与脚本中的 `current_credits` 精确一致。
+compose 的固定附件计数器同样兼容当前受限 CSS 字形，但仍需解码为规范的
+`count / maximum items attached` 并与附件清单数量一致。
+分页只兼容规范相对 URL 或 `https://hentaiverse.org/` 的同源绝对 URL，协议、host、端口、路径和
+查询闭集仍逐项校验。
+Sent 详情要求当前 `mail_state=2`；Inbox 含资产邮件要求可领取态 `1`，空附件邮件兼容打开详情前后
+的 `1`/`2`，但不会放宽含资产邮件的领取状态。
 共享 runtime 的 `[mail_templates]` 可按旧版 14 个通知键覆盖正文；字段、占位符和控制字符会在
 启动时闭集校验，成功后冻结为本进程模板快照。旧 runtime 完全缺少业务区块时，才沿用
 `[worker.mooglemail.mail_templates]`、直接 world/sender 和装备过滤兼容配置。
 远端 POST 无法证明时进入人工对账，不自动重发；结算退信以及 Sent/Balance 回执对账已接入。
+return 动作同时支持当前只读 `[RTS]` 回执与旧版 Inbox 缺席证明；当前回执必须把前后身份、固定
+正文后缀、Credits/CoD/装备清单和动作消失逐项绑定，不能只凭标题前缀判定成功。
 每个邮箱的持久化 claim 在批次执行期间按配置续租；token、owner、版本或续租 fence 失效后会
 取消当前陈旧处理，后续只允许从权威 cursor 重放。
 启用 `[worker.operations_alert]` 时，PostgreSQL Worker 会从 process、delivery、fulfillment 和
