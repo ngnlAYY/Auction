@@ -49,7 +49,7 @@ pub(super) fn AdminLotRow(
     let expected_state_version = lot.state_version;
     rsx! {
         tr { class: "admin-lots__row",
-            td { "data-label": t!("admin-lots-code"),
+            td { class: "admin-lots__code-cell", "data-label": t!("admin-lots-code"),
                 h4 { class: "admin-visually-hidden",
                     {t!(
                         "admin-lots-row-heading",
@@ -57,27 +57,33 @@ pub(super) fn AdminLotRow(
                         name: lot.equipment_name.clone()
                     )}
                 }
-                "{lot_code}"
+                span { class: "admin-lots__code", "{lot_code}" }
             }
-            td { "data-label": t!("admin-lots-equipment"),
+            td { class: "admin-lots__equipment", "data-label": t!("admin-lots-equipment"),
                 TruncatedText {
                     value: equipment_details(&lot.equipment_name, &lot.equipment_attributes),
                     display: lot.equipment_name.clone(),
+                    class_name: "admin-lots__equipment-name".to_owned(),
                 }
             }
-            td { "data-label": t!("admin-lots-seller"),
-                TruncatedText { value: lot.seller.clone().unwrap_or_default() }
+            td { class: "admin-lots__seller", "data-label": t!("admin-lots-seller"),
+                TruncatedText {
+                    value: lot.seller.clone().unwrap_or_else(|| t!("value-empty")),
+                    class_name: "admin-lots__seller-name".to_owned(),
+                }
             }
-            td { "data-label": t!("admin-lots-submission"),
+            td { class: "admin-lots__submission", "data-label": t!("admin-lots-submission"),
                 if let Some(submission_id) = lot.submission_id.clone() {
                     TruncatedText {
                         value: submission_id.clone(),
                         display: super::helpers::submission_id_display(&submission_id),
                         size: "compact",
                     }
+                } else {
+                    span { class: "admin-lots__empty-value", {t!("value-empty")} }
                 }
             }
-            td { "data-label": t!("admin-lots-status"),
+            td { class: "admin-lots__status-cell", "data-label": t!("admin-lots-status"),
                 span { class: "admin-auction-badge admin-lots__status--{lot.status}",
                     {lot_status_label(&lot.status)}
                 }
@@ -88,9 +94,13 @@ pub(super) fn AdminLotRow(
                     }
                 }
             }
-            td { class: "admin-auction-num", "data-label": t!("admin-lots-start-price"), "{format_amount(lot.start_price)}" }
-            td { class: "admin-auction-num", "data-label": t!("admin-lots-price"), "{format_amount(lot.current_price)}" }
-            td { "data-label": t!("admin-lots-actions"),
+            td { class: "admin-auction-num admin-lots__start-price", "data-label": t!("admin-lots-start-price"),
+                span { class: "admin-lots__price-value", "{format_amount(lot.start_price)}" }
+            }
+            td { class: "admin-auction-num admin-lots__current-price", "data-label": t!("admin-lots-price"),
+                strong { class: "admin-lots__price-value", "{format_amount(lot.current_price)}" }
+            }
+            td { class: "admin-lots__actions-cell", "data-label": t!("admin-lots-actions"),
                 div { class: "admin-auction-actions",
                     if can_update {
                         button {
@@ -127,6 +137,7 @@ pub(super) fn AdminLotRow(
                         }
                     }
                     button {
+                        class: "admin-btn-secondary",
                         r#type: "button",
                         disabled: busy(),
                         onclick: move |_| {
