@@ -59,11 +59,11 @@ impl AuctionRules {
     /// 校验规则快照，防止无效配置进入竞价计算。
     pub fn validate(self) -> Result<(), DomainError> {
         if self.default_start_price.value() <= 0
+            || !self.default_start_price.is_credit_grid_aligned()
             || !(0..=1_000_000).contains(&self.bid_increment_ppm)
             || self.minimum_increment < 0
             || self.minimum_increment % CREDIT_GRID != 0
             || (self.bid_increment_ppm == 0 && self.minimum_increment <= 0)
-            || (self.bid_increment_ppm > 0 && self.default_start_price.value() % CREDIT_GRID != 0)
             || self.soft_close_window < Duration::zero()
             || self.soft_close_extension <= Duration::zero()
             || self.cancel_cutoff < Duration::zero()
@@ -86,7 +86,7 @@ impl AuctionRules {
         lot_start_price.unwrap_or(self.default_start_price)
     }
 
-    /// 计算下一次允许的最低出价，所有结果都保持信用网格对齐；不可表示时失败关闭。
+    /// 计算下一次允许的最低出价；固定增量和 PPM 网格增量都保留旧价格余数。
     pub fn next_minimum_bid(
         self,
         lot_start_price: Option<BidAmount>,
@@ -176,7 +176,12 @@ impl AuctionRules {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LotBidState {
     pub lot_id: crate::LotId,
+    #[serde(deserialize_with = "crate::bidding::amount::deserialize_persisted_positive")]
     pub start_price: BidAmount,
+    #[serde(
+        default,
+        deserialize_with = "crate::bidding::amount::deserialize_optional_persisted_positive"
+    )]
     pub current_price: Option<BidAmount>,
     pub leader_id: Option<UserId>,
     pub leader_proxy_last: bool,
@@ -238,15 +243,15 @@ pub struct BidDecision {
 }
 
 fn ppm_minimum(current_price: BidAmount, bid_increment_ppm: i64) -> Result<BidAmount, DomainError> {
-    let units = i128::from(current_price.credit_units());
+    let current = i128::from(current_price.value());
     let ppm = i128::from(bid_increment_ppm);
-    let base = units / 1_000_000;
-    let remainder = units % 1_000_000;
-    let base_increment = base * ppm;
-    let remainder_increment = (remainder * ppm + 999_999) / 1_000_000;
-    let increment_units = (base_increment + remainder_increment).max(1);
-    let candidate = i128::from(current_price.value()) + increment_units * i128::from(CREDIT_GRID);
-    if candidate > i128::from(BidAmount::MAX_ALIGNED) {
+    let grid = i128::from(CREDIT_GRID);
+    // Auction-BF 的事务策略先把当前价向上折算为信用网格单位，再对增量单位执行 PPM
+    // 向上取整，最后把整千增量加回原始 current；因此 1111 的 5% 下一口是 2111。
+    let current_units = (current + grid - 1) / grid;
+    let increment_units = ((current_units * ppm + 999_999) / 1_000_000).max(1);
+    let candidate = current + increment_units * grid;
+    if candidate <= current || candidate > i128::from(i64::MAX) {
         return Err(DomainError::AmountOverflow);
     }
     let value = i64::try_from(candidate).map_err(|_| DomainError::AmountOverflow)?;

@@ -281,7 +281,8 @@ impl LegacyAcceptedBidTransition {
             lot_id: LotId::from_uuid(Uuid::from_bytes(self.lot_id)),
             bidder_id: UserId::from_uuid(Uuid::from_bytes(self.leader_id)),
             fact_index: u32::try_from(self.fact_index).map_err(|_| legacy_payload_error())?,
-            amount: BidAmount::new(self.amount).map_err(|_| legacy_payload_error())?,
+            amount: BidAmount::from_persisted_positive(self.amount)
+                .map_err(|_| legacy_payload_error())?,
             effective_end_at: self.effective_end.instant(),
             state_version: u64::try_from(self.accepted_state_version)
                 .map_err(|_| legacy_payload_error())?,
@@ -364,7 +365,14 @@ impl LegacyBidResult {
     }
 
     fn into_plan(self, last_proxy_sequence: u64) -> Result<CompetitionPlan, ApplicationError> {
-        let amount = BidAmount::new(self.amount).map_err(|_| legacy_payload_error())?;
+        // 旧 BidResult 不携带 lot 原始起拍价；无副作用重放使用首条已接受事实作为安全下界，
+        // 不能把可能更高的最终价反向冒充起拍价。
+        let replay_start =
+            self.facts.first().map(|fact| fact.amount).ok_or_else(legacy_payload_error)?;
+        let start_price =
+            BidAmount::from_persisted_positive(replay_start).map_err(|_| legacy_payload_error())?;
+        let amount =
+            BidAmount::from_persisted_positive(self.amount).map_err(|_| legacy_payload_error())?;
         let leader_id = UserId::from_uuid(Uuid::from_bytes(self.leader_id));
         let leader_proxy_last =
             self.facts.last().is_some_and(|fact| fact.mechanism == LegacyBidMechanism::Proxy);
@@ -380,7 +388,7 @@ impl LegacyBidResult {
             active_proxy_id: None,
             final_lot: LotBidState {
                 lot_id: LotId::from_uuid(Uuid::from_bytes(self.lot_id)),
-                start_price: amount,
+                start_price,
                 current_price: Some(amount),
                 leader_id: Some(leader_id),
                 leader_proxy_last,

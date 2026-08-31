@@ -9,6 +9,11 @@ impl ProxyTransition {
         if self.authorization_id.is_nil() || self.command_id.is_nil() || self.state_version == 0 {
             return Err(DomainError::InvalidBidState("代理转换缺少有效身份或版本"));
         }
+        if !self.new_maximum.is_credit_grid_aligned()
+            || self.old_maximum.is_some_and(|amount| !amount.is_credit_grid_aligned())
+        {
+            return Err(DomainError::InvalidProxyMaximum);
+        }
 
         match self.kind {
             ProxyTransitionKind::Created => {

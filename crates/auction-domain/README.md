@@ -4,7 +4,8 @@
 
 - `src/auction/mod.rs`：`Auction` 聚合与 `AuctionStatus` 生命周期状态机，包含状态版本、结束时间
   和取消/软截止边界。
-- `src/bidding/amount.rs`：带信用网格不变量的竞价金额值对象。
+- `src/bidding/amount.rs`：正竞价金额值对象；外部命令构造保持信用网格，持久化防腐入口保留
+  旧版任意正起拍价、当前价和自动代理事实。
 - `src/bidding/policy.rs`：旧论坛兼容的分段加价、代理反超、软截止和取消截止规则。
 - `src/bidding/bid.rs`：不可变的公开竞价事实和产生机制。
 - `src/bidding/competition/`：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan/` 按

@@ -85,8 +85,11 @@ impl SqliteCompetitionTransaction {
         }
 
         let rules = auction_rules_from_row(&row)?;
-        let start_price = bid_amount(&row, "start_price", "lot 起始价")?;
-        let stored_current_price = optional_bid_amount(&row, "current_price", "lot 当前价")?;
+        let stored_start_price: i64 = row.try_get("start_price").map_err(map_sql_error)?;
+        let start_price = BidAmount::from_persisted_positive(stored_start_price)
+            .map_err(|_| invalid_state("Lite lot 起始价不是正数"))?;
+        let stored_current_price: Option<i64> =
+            row.try_get("current_price").map_err(map_sql_error)?;
         let leader_id = row
             .try_get::<Option<Vec<u8>>, _>("leader_user_id")
             .map_err(map_sql_error)?
@@ -97,8 +100,11 @@ impl SqliteCompetitionTransaction {
         // 可证明等价的形状，其余金额/领先者矛盾继续失败关闭。
         let current_price = match (stored_current_price, leader_id.is_some()) {
             (None, false) => None,
-            (Some(current_price), false) if current_price == start_price => None,
-            (Some(current_price), true) => Some(current_price),
+            (Some(current_price), false) if current_price == stored_start_price => None,
+            (Some(current_price), true) => Some(
+                BidAmount::from_persisted_positive(current_price)
+                    .map_err(|_| invalid_state("Lite lot 当前价不是正数"))?,
+            ),
             _ => return Err(invalid_state("Lite lot 当前价与领先者持久化投影不一致")),
         };
         let state = LotBidState {
