@@ -92,6 +92,8 @@ async fn list_postgres(
                   AND transition.transition_kind = 'created')
               OR (command.command_kind IN ('lower_proxy', 'lower_proxy_authorization')
                   AND transition.transition_kind = 'lowered')
+              OR (command.command_kind = 'freeze_proxy_authorization'
+                  AND transition.transition_kind = 'frozen')
           )
          JOIN public.bid_proxy_authorizations AS proxy_authorization
            ON proxy_authorization.authorization_id = transition.authorization_id
@@ -100,6 +102,8 @@ async fn list_postgres(
          WHERE command.aggregate_id = $1
            AND (
               (command.command_kind IN ('create_proxy', 'lower_proxy')
+                  AND command.result_code = 'accepted')
+              OR (command.command_kind = 'freeze_proxy_authorization'
                   AND command.result_code = 'accepted')
               OR (command.command_kind IN (
                       'create_proxy_authorization', 'lower_proxy_authorization'
@@ -188,6 +192,8 @@ async fn list_postgres(
                       AND transition.transition_kind = 'created')
                   OR (command.command_kind IN ('lower_proxy', 'lower_proxy_authorization')
                       AND transition.transition_kind = 'lowered')
+                  OR (command.command_kind = 'freeze_proxy_authorization'
+                      AND transition.transition_kind = 'frozen')
               )
              JOIN public.bid_proxy_authorizations AS proxy_authorization
                ON proxy_authorization.authorization_id = transition.authorization_id
@@ -195,6 +201,8 @@ async fn list_postgres(
              WHERE command.aggregate_id = $1
                AND (
                   (command.command_kind IN ('create_proxy', 'lower_proxy')
+                      AND command.result_code = 'accepted')
+                  OR (command.command_kind = 'freeze_proxy_authorization'
                       AND command.result_code = 'accepted')
                   OR (command.command_kind IN (
                           'create_proxy_authorization', 'lower_proxy_authorization'

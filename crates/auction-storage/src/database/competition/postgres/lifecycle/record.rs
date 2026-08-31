@@ -81,6 +81,66 @@ pub(super) async fn append_lifecycle_record_inner(
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
+    if matches!(plan.effect, AuctionLifecycleEffect::Preview { .. }) {
+        append_preview_discovery_event(transaction, command, context, result).await?;
+    }
+    Ok(())
+}
+
+/// 只有进入公开预览后，发现流才通知客户端重新读取当前拍卖。
+async fn append_preview_discovery_event(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command: &AuctionLifecycleCommand,
+    context: &AuctionLifecycleContext,
+    result: &AuctionLifecycleResult,
+) -> Result<(), CompetitionTransactionError> {
+    let stream_key = "auction:discovery";
+    let state_version = i64_version(result.state_version, "发现事件状态版本")?;
+    let payload = json!({
+        "auction_id": result.auction_id.as_uuid(),
+        "world_id": &context.world_id,
+        "sequence": context.sequence,
+        "state_version": result.state_version,
+    });
+    sqlx::query(
+        "INSERT INTO public.realtime_streams (stream_key)
+         VALUES ($1) ON CONFLICT (stream_key) DO NOTHING",
+    )
+    .bind(stream_key)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    let sequence: i64 = sqlx::query_scalar(
+        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
+    )
+    .bind(stream_key)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    sqlx::query(
+        "UPDATE public.realtime_streams
+         SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
+         WHERE stream_key = $1",
+    )
+    .bind(stream_key)
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    sqlx::query(
+        r#"INSERT INTO public.realtime_events
+            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
+             state_version, origin_command_id)
+         VALUES ($1, $2, $3, 'auction.created', 1, $4, $5, $6)"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(stream_key)
+    .bind(sequence)
+    .bind(payload)
+    .bind(state_version)
+    .bind(command.command_id.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
     Ok(())
 }
 

@@ -9,6 +9,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use auction_application::{
     ApplicationError, Clock, RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeEventSink,
 };
+use auction_observability::{WorkerLoop, WorkerResult};
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
@@ -184,23 +185,33 @@ pub(crate) async fn run_loop<C>(
     C: Clock + 'static,
 {
     loop {
+        let started = std::time::Instant::now();
         let now = worker.clock.now();
-        if let Some(consumer) = &worker.realtime_consumer {
+        let result = if let Some(consumer) = &worker.realtime_consumer {
             match consumer.run_once(now).await {
                 Ok(processed) if processed > 0 => {
                     tracing::info!(processed, "realtime consumer advanced persisted cursor");
+                    WorkerResult::Success
                 }
-                Ok(_) => {}
+                Ok(_) => WorkerResult::Success,
                 Err(error) => {
                     tracing::warn!(error = %error, "realtime consumer cycle failed; retrying");
+                    WorkerResult::Error
                 }
             }
-        }
+        } else {
+            WorkerResult::Success
+        };
+        worker.metrics.observe_iteration(WorkerLoop::Realtime, result, started.elapsed());
         let wait = poll_delay(worker.auction.poll_interval, worker.auction.jitter);
         let deadline = tokio::time::Instant::now() + wait;
         if super::wait_until_or_shutdown(&mut shutdown, deadline).await {
             return;
         }
+        worker.metrics.observe_schedule_delay(
+            WorkerLoop::Realtime,
+            tokio::time::Instant::now().saturating_duration_since(deadline),
+        );
     }
 }
 

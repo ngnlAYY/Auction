@@ -120,23 +120,30 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
             async move { fetch_forum_thread(auction_id).await }
         }
     });
-    // 页面可见且帖子尚未发布时沿用旧版两秒轮询；离开独立页面后组件卸载并停止任务。
+    // 页面可见且帖子仍在处理中时沿用旧版两秒轮询；发布完成、明确失败或请求错误后暂停
+    // 自动轮询。failed 仍可能由 Worker 恢复，因此页面保留显式状态刷新入口。
     let _poll = use_future({
         let mut poll_generation = poll_generation;
-        move || async move {
-            loop {
-                TimeoutFuture::new(2_000).await;
-                let published = {
-                    let current = thread.read_unchecked();
-                    current
-                        .as_ref()
-                        .and_then(|result| result.as_ref().ok())
-                        .is_some_and(|thread| thread.status == "published")
-                };
-                if published {
-                    break;
+        move || {
+            let _ = retry_generation();
+            async move {
+                loop {
+                    TimeoutFuture::new(2_000).await;
+                    let automatic_poll_paused = {
+                        let current = thread.read_unchecked();
+                        match current.as_ref() {
+                            Some(Ok(thread)) => {
+                                matches!(thread.status.as_str(), "published" | "failed")
+                            }
+                            Some(Err(_)) => true,
+                            None => false,
+                        }
+                    };
+                    if automatic_poll_paused {
+                        break;
+                    }
+                    poll_generation.set(poll_generation().saturating_add(1));
                 }
-                poll_generation.set(poll_generation().saturating_add(1));
             }
         }
     });
@@ -160,7 +167,7 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
                 }),
             )
         }
-        Some(Ok(thread)) => forum_thread_details(thread),
+        Some(Ok(thread)) => forum_thread_details(thread, retry_generation),
     };
 
     rsx! {
@@ -171,12 +178,24 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
     }
 }
 
-fn forum_thread_details(thread: ForumThread) -> Element {
+fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) -> Element {
     let status_label = forum_status_label(&thread.status);
     let status_message = forum_status_message(&thread.status);
     let status_class = forum_status_class(&thread.status);
     let updated_at = format_auction_time(&thread.updated_at);
     let status_accessible_label = format!("{}: {status_label}", t!("forum-status"));
+    let retry_action = (thread.status == "failed").then(|| {
+        rsx! {
+            button {
+                class: "public-state-retry",
+                r#type: "button",
+                onclick: move |_| {
+                    retry_generation.set(retry_generation().saturating_add(1));
+                },
+                {t!("forum-retry")}
+            }
+        }
+    });
     let published_content = match (
         thread.thread_url.clone(),
         thread.title.clone(),
@@ -212,6 +231,7 @@ fn forum_thread_details(thread: ForumThread) -> Element {
                     "{status_label}"
                 }
                 p { role: "status", aria_live: "polite", "{status_message}" }
+                {retry_action}
             }
             dl { class: "public-forum-metadata",
                 div {

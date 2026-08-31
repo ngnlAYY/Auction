@@ -110,10 +110,13 @@ pub struct AdminSettlementLotResponse {
     pub seller: Option<String>,
     pub winner: Option<String>,
     pub final_price: i64,
+    pub listed_price: i64,
     pub buyer_amount: i64,
     pub seller_amount: i64,
     pub tax_amount: i64,
     pub compensation_amount: i64,
+    pub hold_ppm: i32,
+    pub adjustment_ppm: i32,
     pub adjustment: AdminSettlementAdjustmentResponse,
 }
 

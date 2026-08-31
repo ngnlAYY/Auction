@@ -208,11 +208,14 @@ async fn postgres_report_once(
                    submission.seller,
                    winner.username AS winner,
                    settlement.lot_id AS settlement_lot_id,
-                   CASE WHEN l.status = 'sold' THEN l.current_price ELSE 0 END::bigint AS final_price,
+                   COALESCE(l.current_price, 0)::bigint AS final_price,
+                   settlement.listed_price AS listed_price,
                    settlement.buyer_amount AS buyer_amount,
                    settlement.seller_amount AS seller_amount,
                    settlement.tax_amount AS tax_amount,
                    settlement.compensation_amount AS compensation_amount,
+                   settlement.hold_ppm AS hold_ppm,
+                   settlement.adjustment_ppm AS adjustment_ppm,
                    settlement.adjustment_metadata AS adjustment_metadata
                FROM public.lots AS l
                INNER JOIN public.equipment AS equipment ON equipment.id = l.equipment_id
@@ -241,6 +244,9 @@ async fn postgres_report_once(
                 let buyer_amount: Option<i64> = row
                     .try_get("buyer_amount")
                     .map_err(|_| storage_error("读取结算买方金额失败"))?;
+                let listed_price: Option<i64> = row
+                    .try_get("listed_price")
+                    .map_err(|_| storage_error("读取结算挂牌金额失败"))?;
                 let seller_amount: Option<i64> = row
                     .try_get("seller_amount")
                     .map_err(|_| storage_error("读取结算卖方金额失败"))?;
@@ -249,15 +255,35 @@ async fn postgres_report_once(
                 let compensation_amount: Option<i64> = row
                     .try_get("compensation_amount")
                     .map_err(|_| storage_error("读取结算补偿金额失败"))?;
+                let hold_ppm: Option<i64> =
+                    row.try_get("hold_ppm").map_err(|_| storage_error("读取结算持有比例失败"))?;
+                let adjustment_ppm: Option<i64> = row
+                    .try_get("adjustment_ppm")
+                    .map_err(|_| storage_error("读取结算调整比例失败"))?;
                 let (
+                    Some(listed_price),
                     Some(buyer_amount),
                     Some(seller_amount),
                     Some(tax_amount),
                     Some(compensation_amount),
-                ) = (buyer_amount, seller_amount, tax_amount, compensation_amount)
+                    Some(hold_ppm),
+                    Some(adjustment_ppm),
+                ) = (
+                    listed_price,
+                    buyer_amount,
+                    seller_amount,
+                    tax_amount,
+                    compensation_amount,
+                    hold_ppm,
+                    adjustment_ppm,
+                )
                 else {
-                    return Err(storage_error("结算报告缺少 lot 金额事实"));
+                    return Err(storage_error("结算报告缺少 lot 金额或调整事实"));
                 };
+                let hold_ppm = i32::try_from(hold_ppm)
+                    .map_err(|_| storage_error("结算报告持有比例超出支持范围"))?;
+                let adjustment_ppm = i32::try_from(adjustment_ppm)
+                    .map_err(|_| storage_error("结算报告调整比例超出支持范围"))?;
                 let final_price: i64 = row
                     .try_get("final_price")
                     .map_err(|_| storage_error("读取结算成交金额失败"))?;
@@ -278,10 +304,13 @@ async fn postgres_report_once(
                     seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
                     winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
                     final_price,
+                    listed_price,
                     buyer_amount,
                     seller_amount,
                     tax_amount,
                     compensation_amount,
+                    hold_ppm,
+                    adjustment_ppm,
                     adjustment: decode_settlement_adjustment(adjustment_metadata)?,
                 })
             })

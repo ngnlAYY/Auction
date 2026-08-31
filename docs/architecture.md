@@ -436,7 +436,9 @@ delivery/prepare/activation 身份和 outbox 的成功、失败、
 显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计，
 外部广播 sink 属于尚未冻结的新增扩展；Public 本地 relay/Hub 已接入同一持久化事件边界。公开端首页看板与 lot 详情已经接入同源 Public
 API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，`opening` 过渡态只展示开拍处理中，
-不把已经过去的计划开放时间渲染为倒计时或落锤状态；Admin 拍卖列表提供带 CSRF、命令 ID
+`settling`/`settled` 只展示终态状态，不把已经过去的计划开放/截止时间渲染为倒计时或落锤状态；
+Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调整 PPM，以正值惩罚/税费、负值折扣的
+闭集语义展示，不在浏览器重算结算事实；Admin 拍卖列表提供带 CSRF、命令 ID
 和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照

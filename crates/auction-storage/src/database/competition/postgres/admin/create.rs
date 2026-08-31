@@ -245,49 +245,5 @@ async fn append_admin_auction_created_record_inner(
     .await
     .map_err(map_sql_error)?;
 
-    // 旧版 relay 会把创建事件同时投递到公开发现范围。这里在同一事务内追加一个持久化
-    // 派生事件，使跨进程重启、HTTP catch-up 和 WebSocket 初始读取都能从权威数据库恢复。
-    // 派生事件使用独立流序号和事件 ID，但保留同一命令、状态版本和公开负载；它不是第二份
-    // 拍卖事实，也不能被当作拍卖专属流中的额外生命周期事件。
-    let discovery_stream_key = "auction:discovery";
-    sqlx::query(
-        "INSERT INTO public.realtime_streams (stream_key)
-         VALUES ($1) ON CONFLICT (stream_key) DO NOTHING",
-    )
-    .bind(discovery_stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    let discovery_sequence: i64 = sqlx::query_scalar(
-        "SELECT next_sequence FROM public.realtime_streams WHERE stream_key = $1 FOR UPDATE",
-    )
-    .bind(discovery_stream_key)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        "UPDATE public.realtime_streams
-         SET next_sequence = next_sequence + 1, updated_at = CURRENT_TIMESTAMP
-         WHERE stream_key = $1",
-    )
-    .bind(discovery_stream_key)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
-    sqlx::query(
-        r#"INSERT INTO public.realtime_events
-            (event_id, stream_key, stream_sequence, kind, schema_version, public_payload,
-             state_version, origin_command_id)
-         VALUES ($1, $2, $3, 'auction.created', 1, $4, $5, $6)"#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(discovery_stream_key)
-    .bind(discovery_sequence)
-    .bind(&payload)
-    .bind(result.auction.state_version)
-    .bind(command.command_id.as_uuid())
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_sql_error)?;
     Ok(())
 }

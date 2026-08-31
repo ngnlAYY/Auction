@@ -43,6 +43,9 @@ struct StrictSettlementLot {
     compensation_amount: i64,
     equipment_name: String,
     final_price: i64,
+    listed_price: i64,
+    hold_ppm: i32,
+    adjustment_ppm: i32,
     id: String,
     lot_number: i32,
     seller: RequiredOption<String>,
@@ -113,10 +116,13 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         || !valid_optional_text(lot.seller.0.as_deref())
         || !valid_optional_text(lot.winner.0.as_deref())
         || !valid_count(lot.final_price)
+        || !valid_count(lot.listed_price)
         || !valid_count(lot.buyer_amount)
         || !valid_count(lot.seller_amount)
         || !valid_count(lot.tax_amount)
         || !valid_count(lot.compensation_amount)
+        || !(0..=1_000_000).contains(&lot.hold_ppm)
+        || !(-1_000_000..=1_000_000).contains(&lot.adjustment_ppm)
         || !valid_optional_text(lot.adjustment.policy.0.as_deref())
     {
         return Err("settlement_lot");
@@ -129,10 +135,13 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         seller: lot.seller.0,
         winner: lot.winner.0,
         final_price: lot.final_price,
+        listed_price: lot.listed_price,
         buyer_amount: lot.buyer_amount,
         seller_amount: lot.seller_amount,
         tax_amount: lot.tax_amount,
         compensation_amount: lot.compensation_amount,
+        hold_ppm: lot.hold_ppm,
+        adjustment_ppm: lot.adjustment_ppm,
         adjustment: AdminSettlementAdjustmentResponse { policy: lot.adjustment.policy.0 },
     })
 }

@@ -66,9 +66,11 @@ preview_catalog_changed 的负载字段沿用旧系统的命名，其中 world �
 ## 流和游标
 
 拍卖专属流使用 auction:<auction_id> 形式的 stream_key；发现流使用稳定名称
-auction:discovery。发现流是 `auction.created` 的持久化派生别名：它有自己的流序号和事件
-ID，但复用同一公开负载、状态版本和来源命令，不构成第二套拍卖事实。创建事务必须同时
-写入两个流，历史数据由追加迁移补齐；发现流丢失或损坏时仍可从拍卖专属事件重建。
+auction:discovery。拍卖在 draft 创建时只向专属流写入 `auction.created`；当同一拍卖进入公开
+preview 后，生命周期事务向发现流追加同 kind 的持久化派生别名。该别名有自己的流序号和
+事件 ID，并复用 preview 后的状态版本与来源命令，不构成第二套拍卖事实。这样尚不可公开读取的
+draft 不会提前触发发现，而 draft→preview 必定唤醒当前拍卖的权威快照读取。发现流丢失或损坏时
+仍可从拍卖专属事件和拍卖状态重建。
 外部广播 sink 若消费拍卖事件，必须以拍卖专属流为来源，不应同时消费并再次转发
 `auction:discovery` 派生流，否则同一个 `auction.created` 会被重复广播。
 

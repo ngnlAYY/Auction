@@ -74,6 +74,7 @@ pub(super) fn AdminUserTable(
                 tbody {
                     for user in page.users.iter().cloned() {
                         AdminUserRow {
+                            key: "{user.id}",
                             user,
                             reload_generation,
                             busy: action_busy,

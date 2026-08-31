@@ -49,10 +49,13 @@ pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlement
                 seller: lot.seller,
                 winner: lot.winner,
                 final_price: lot.final_price,
+                listed_price: lot.listed_price,
                 buyer_amount: lot.buyer_amount,
                 seller_amount: lot.seller_amount,
                 tax_amount: lot.tax_amount,
                 compensation_amount: lot.compensation_amount,
+                hold_ppm: lot.hold_ppm,
+                adjustment_ppm: lot.adjustment_ppm,
                 adjustment: AdminSettlementAdjustmentResponse { policy: lot.adjustment.policy },
             })
             .collect(),
@@ -182,10 +185,13 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
         || !valid_report_optional_text(lot.seller.as_deref(), 512)
         || !valid_report_optional_text(lot.winner.as_deref(), 512)
         || lot.final_price < 0
+        || lot.listed_price < 0
         || lot.buyer_amount < 0
         || lot.seller_amount < 0
         || lot.tax_amount < 0
         || lot.compensation_amount < 0
+        || !(0..=1_000_000).contains(&lot.hold_ppm)
+        || !(-1_000_000..=1_000_000).contains(&lot.adjustment_ppm)
         || !valid_report_optional_text(lot.adjustment.policy.as_deref(), 64)
     {
         return false;
@@ -195,7 +201,7 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
             let Some(winner) = lot.winner.as_deref() else {
                 return false;
             };
-            if !valid_report_text(winner, 512) || lot.final_price <= 0 {
+            if !valid_report_text(winner, 512) || lot.final_price <= 0 || lot.listed_price <= 0 {
                 return false;
             }
             let Some(buyer_side) = lot.buyer_amount.checked_add(lot.compensation_amount) else {
@@ -207,20 +213,38 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
             if buyer_side != seller_side || lot.tax_amount > 0 && lot.compensation_amount > 0 {
                 return false;
             }
-            if lot.tax_amount > 0 {
-                lot.seller_amount == lot.final_price
-            } else {
-                lot.seller_amount <= lot.final_price
-                    && (lot.compensation_amount == 0 || lot.seller_amount < lot.final_price)
+            match lot.adjustment_ppm.cmp(&0) {
+                std::cmp::Ordering::Greater => {
+                    lot.listed_price == lot.final_price
+                        && lot.seller_amount == lot.final_price
+                        && lot.compensation_amount == 0
+                }
+                std::cmp::Ordering::Less => {
+                    // 折扣按整数金额向下取整，极小成交额可能保留负比例但折扣金额为零。
+                    lot.tax_amount == 0
+                        && lot.listed_price <= lot.final_price
+                        && lot.seller_amount == lot.listed_price
+                        && lot.compensation_amount <= lot.final_price - lot.listed_price
+                }
+                std::cmp::Ordering::Equal => {
+                    lot.listed_price == lot.final_price
+                        && lot.buyer_amount == lot.final_price
+                        && lot.seller_amount == lot.final_price
+                        && lot.tax_amount == 0
+                        && lot.compensation_amount == 0
+                }
             }
         }
         "unsold" => {
             lot.winner.is_none()
                 && lot.final_price == 0
+                && lot.listed_price == 0
                 && lot.buyer_amount == 0
                 && lot.seller_amount == 0
                 && lot.tax_amount == 0
                 && lot.compensation_amount == 0
+                && lot.hold_ppm == 0
+                && lot.adjustment_ppm == 0
         }
         _ => false,
     }

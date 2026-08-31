@@ -200,6 +200,10 @@ pub enum WorkerLoop {
     AuctionFulfillment,
     /// recovery 退回、重列和退款动作。
     AuctionRecovery,
+    /// 论坛主题发布与回帖导入。
+    Forum,
+    /// 外部实时事件消费。
+    Realtime,
     /// operations alert 观察扫描。
     OperationsAlertScan,
     /// operations alert 通知批次分发。
@@ -217,6 +221,8 @@ impl WorkerLoop {
             Self::Auction => "auction",
             Self::AuctionFulfillment => "auction-fulfillment",
             Self::AuctionRecovery => "auction-recovery",
+            Self::Forum => "forum",
+            Self::Realtime => "realtime",
             Self::OperationsAlertScan => "operations-alert-scan",
             Self::OperationsAlertDispatch => "operations-alert-dispatch",
             Self::OperationsAlertReconcile => "operations-alert-reconcile",

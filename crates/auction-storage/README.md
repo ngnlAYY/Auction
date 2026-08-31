@@ -49,7 +49,7 @@ generation；`src/database/slow_proxy_due.rs` 按数据库时钟无锁有界扫�
 重新锁定 lot/活动代理/用户、核对截止时间并原子写入命令账本、计划、事件和
 `lot.slow_proxy_tick` 审计。它沿用旧版确定性身份，不另建租约表或内存游标。
 Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只在 PostgreSQL
-完整档读取同一 Serializable 快照内的结算摘要、补偿账本和 lot 金额，对序列化冲突/死锁最多
+完整档读取同一 Serializable 快照内的结算摘要、补偿账本、lot 金额、挂牌价、持有比例和调整比例，对序列化冲突/死锁最多
 重试三次；已存在的结算摘要不会因补偿账本损坏而被静默隐藏，后续闭集校验会失败关闭。SQLite Lite
 明确不支持该能力。
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable

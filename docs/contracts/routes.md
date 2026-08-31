@@ -231,11 +231,14 @@ Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保�
 装备的安全事实，不返回原始 URL、canonical 正文或 key，SQLite Lite 明确
 返回 `501 feature_not_supported`。A15
 `/api/v1/admin/lots/{lot_id}/proxy-events` 已接入 Admin 会话保护、页码/opaque cursor 两种分页、
-PostgreSQL Serializable 命令账本快照和代理安全事件投影；SQLite Lite 明确返回
+PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影包含创建、降低上限，以及用户被
+列入黑名单时由子命令产生的 `frozen` 转换，不把冻结伪装成竞价事实。SQLite Lite 明确返回
 `501 feature_not_supported`，管理端 lot 页面已提供历史读取入口。A07
 `/api/v1/admin/auctions/{auction_id}/settlement-report` 已接入 PostgreSQL 完整档的一致
 只读报告；报告中的 `auction` 保持旧版基础字段闭集，不额外发送严格旧 Web 客户端会拒绝的
-`scheduled_end_at`/`effective_end_at`，读取遇到序列化冲突或死锁时最多重试三次。A08 recovery-report
+`scheduled_end_at`/`effective_end_at`；lot 明细新增权威 `listed_price`、`hold_ppm` 与带符号
+`adjustment_ppm`，正值表示惩罚/税费、负值表示折扣，界面不从税额反推持有比例。读取遇到
+序列化冲突或死锁时最多重试三次。A08 recovery-report
 也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
 能力明确返回 `501 feature_not_supported`，不伪造空报告。P18/P19 已接入同一竞价事务、稳定
 命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
@@ -302,10 +305,12 @@ A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
-A20 远程轮询触发已返回 `202 accepted`：请求经过 Admin session/CSRF 与单个 `command_id`
-校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与 `pollers`；手动唤醒
-只影响当前 Worker 本轮调度，不表示外部读取已经完成。Worker 后续仍以持久化 lease 执行实际
-MoogleMail GET；SQLite Lite 明确返回 `501 feature_not_supported`。
+A20 远程轮询触发在至少一个邮箱未暂停时返回 `202 accepted`：请求经过 Admin session/CSRF
+与单个 `command_id` 校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与
+`pollers`。空快照或全部邮箱暂停时返回 `409 poll_rejected`；混合状态只唤醒未暂停邮箱，不会隐式
+恢复暂停状态。该响应只表示当前 Worker 接受了本轮调度唤醒，不表示外部读取已经完成；Worker
+后续仍以持久化 lease 执行实际 MoogleMail GET。SQLite Lite 明确返回
+`501 feature_not_supported`。
 
 A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影
 和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用

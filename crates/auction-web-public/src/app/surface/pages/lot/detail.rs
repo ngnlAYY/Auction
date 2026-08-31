@@ -74,8 +74,12 @@ pub(crate) fn LiveLotDetailView(
             fetch_lot_bid_log(auction_id.clone(), lot_id.clone(), page)
         }
     });
-    let countdown =
-        lot.effective_end_at.as_deref().map(|ends_at| countdown_display(ends_at, clock()));
+    let show_countdown =
+        lot.status == "live" && matches!(auction_status.as_str(), "live" | "final");
+    let countdown = show_countdown
+        .then_some(lot.effective_end_at.as_deref())
+        .flatten()
+        .map(|ends_at| countdown_display(ends_at, clock()));
 
     rsx! {
         section { class: "public-auction-lot", aria_labelledby: "lot-detail-title",
@@ -111,14 +115,16 @@ pub(crate) fn LiveLotDetailView(
                                 span { class: "public-auction-lot__none", {t!("value-empty")} }
                             }
                         }
-                        dt { {t!("lot-ends-in")} }
-                        dd {
-                            if let (Some(ends_at), Some(countdown)) =
-                                (lot.effective_end_at.clone(), countdown)
-                            {
-                                time { datetime: ends_at, class: countdown_class(&countdown), "{countdown.label}" }
-                            } else {
-                                span { class: "public-auction-lot__none", {t!("value-empty")} }
+                        if show_countdown {
+                            dt { {t!("lot-ends-in")} }
+                            dd {
+                                if let (Some(ends_at), Some(countdown)) =
+                                    (lot.effective_end_at.clone(), countdown)
+                                {
+                                    time { datetime: ends_at, class: countdown_class(&countdown), "{countdown.label}" }
+                                } else {
+                                    span { class: "public-auction-lot__none", {t!("value-empty")} }
+                                }
                             }
                         }
                     }
