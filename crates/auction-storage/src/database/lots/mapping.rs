@@ -90,7 +90,6 @@ pub(super) fn map_live_fields(
     start_price: i64,
     current_price: Option<i64>,
     has_leader: bool,
-    proxy_last: bool,
     material: bool,
     policy_bid_increment_ppm: i64,
     policy_minimum_increment: i64,
@@ -129,8 +128,10 @@ pub(super) fn map_live_fields(
     let next_bid = if has_leader {
         let current = BidAmount::from_persisted_positive(current_value)
             .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;
+        // Public 的普通出价入口必须与竞价事务使用同一完整加价阶梯。`proxy_last + 1K`
+        // 只属于旧论坛帖投影，不能把它暴露成浏览器可提交的下一口最低价。
         rules
-            .next_minimum_bid(None, Some(current), material, proxy_last)
+            .next_minimum_bid(None, Some(current), material, false)
             .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
             .value()
     } else {

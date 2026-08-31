@@ -90,7 +90,6 @@ async fn list_sqlite_transaction(
                 l.start_price,
                 l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
-                l.leader_proxy_last,
                 l.material,
                 CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,
                 CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER) AS policy_minimum_increment,
