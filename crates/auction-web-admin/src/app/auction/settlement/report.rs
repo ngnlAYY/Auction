@@ -12,7 +12,7 @@ use crate::app::surface::AdminActionFeedback;
 
 use super::super::{format_admin_time, pagination::AdminPager};
 use super::RecoveryConfirmationDraft;
-use super::helpers::{hold_share, page_count, page_slice};
+use super::helpers::{format_ppm, page_count, page_slice, price_adjustment_label};
 use super::recovery::AdminRecoveryTable;
 
 #[component]
@@ -39,17 +39,18 @@ pub(super) fn AdminSettlementReportView(
                     caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
                     thead {
                         tr {
-                            th { scope: "col", {t!("admin-settlement-lot-id")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-lot-id")} }
                             th { scope: "col", {t!("admin-settlement-equipment")} }
                             th { scope: "col", {t!("admin-settlement-seller")} }
                             th { scope: "col", {t!("admin-settlement-winner")} }
-                            th { scope: "col", {t!("admin-settlement-final-price")} }
-                            th { scope: "col", {t!("admin-settlement-hold")} }
-                            th { scope: "col", {t!("admin-settlement-adjustment")} }
-                            th { scope: "col", {t!("admin-settlement-listed-price")} }
-                            th { scope: "col", {t!("admin-settlement-compensation")} }
-                            th { scope: "col", {t!("admin-settlement-buyer")} }
-                            th { scope: "col", {t!("admin-settlement-seller-amount")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-final-price")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-hold")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-adjustment")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-discount-penalty")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-listed-price")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-compensation")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-buyer")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-seller-amount")} }
                         }
                     }
                     tbody {
@@ -84,22 +85,23 @@ pub(super) fn AdminSettlementReportView(
 
 #[component]
 fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
+    let hold_share = format_ppm(lot.hold_ppm, false);
+    let adjustment_rate = format_ppm(lot.adjustment_ppm, true);
+    let price_adjustment = price_adjustment_label(&lot);
     let equipment_name = lot.equipment_name.clone();
     let seller = lot.seller.unwrap_or_else(|| t!("value-empty"));
     let winner = lot.winner.unwrap_or_else(|| t!("value-empty"));
-    let adjustment = lot.adjustment.policy.unwrap_or_else(|| t!("value-empty"));
-    // 税额仍参与旧版“扣留比例”计算；这里只移除独立税额列，不改变后端报告事实。
-    let hold_share = hold_share(lot.tax_amount, lot.final_price);
     rsx! {
         tr {
-            td { "{lot.lot_number}" }
+            td { class: "admin-auction-num", "{lot.lot_number}" }
             td { TruncatedText { value: equipment_name } }
             td { TruncatedText { value: seller } }
             td { TruncatedText { value: winner } }
             td { class: "admin-auction-num", {format_amount(lot.final_price)} }
             td { class: "admin-auction-num", "{hold_share}" }
-            td { TruncatedText { value: adjustment } }
-            td { class: "admin-auction-num", {t!("value-empty")} }
+            td { class: "admin-auction-num", "{adjustment_rate}" }
+            td { class: "admin-auction-num", "{price_adjustment}" }
+            td { class: "admin-auction-num", {format_amount(lot.listed_price)} }
             td { class: "admin-auction-num", {format_amount(lot.compensation_amount)} }
             td { class: "admin-auction-num", {format_amount(lot.buyer_amount)} }
             td { class: "admin-auction-num", {format_amount(lot.seller_amount)} }

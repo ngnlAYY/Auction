@@ -2703,7 +2703,8 @@
 }
 
 .admin-auction-table .admin-auction-num {
-  text-align: left;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .admin-auction-cards {

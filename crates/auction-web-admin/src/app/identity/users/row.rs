@@ -86,7 +86,11 @@ pub(super) fn AdminUserRow(
                     button {
                         r#type: "button",
                         disabled: busy(),
-                        onclick: move |_| dialog.set(Some(AdminUserDialogKind::GamePlayerId)),
+                        onclick: move |_| {
+                            game_player_id_value
+                                .set(user.game_player_id.clone().unwrap_or_default());
+                            dialog.set(Some(AdminUserDialogKind::GamePlayerId));
+                        },
                         {t!("admin-users-action-set-game-player-id")}
                     }
                     button {

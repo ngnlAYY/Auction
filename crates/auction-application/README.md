@@ -36,7 +36,8 @@
   `settlement_complete/OK` 则逐字复现 Go 请求摘要、严格解析完整结果，并与已结算摘要、lot 金额和
   义务种类数量逐项对账。旧格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
   `LegacySettlementVerificationPort` 另为 `auctionctl` 提供脱敏只读核验摘要；缺账本时没有写入回退，
-  存储适配器必须在同一一致快照中提供旧命令身份和权威结算事实。
+  存储适配器必须在同一一致快照中提供旧命令身份和权威结算事实。`src/ports/settlement/report.rs`
+  的 Admin lot 投影还显式携带挂牌价、持有比例和带符号调整比例，表面层不得从税额反推这些权威事实。
 - `src/services/settlement/fulfillment/`：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
   `intent.rs` 负责无 secret delivery intent，`validation.rs` 与 `evidence.rs` 负责 claim/外部回执
   校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；schema v1 intent/payload 使用

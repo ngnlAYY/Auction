@@ -3,7 +3,13 @@
 //! 主题处理、竞价命令、MoogleMail 通知和共享幂等辅助分别由子模块负责；本文件保留
 //! runtime 配置与 `run_cycle` 入口，不改变游标推进和 warning-only 边界。
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use auction_application::{
     ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
@@ -11,7 +17,7 @@ use auction_application::{
     LowerProxyCommand, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
     MailDeliveryOrigin, MailNotificationTemplate, PlaceBidCommand, RequestHash, forum_world_name,
 };
-use auction_domain::{BidAmount, CommandId, ProxyMode};
+use auction_domain::{BidAmount, CommandId, ProxyMode, SettlementWorld};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -41,6 +47,7 @@ pub struct ForumReplyRuntime {
     pub(crate) notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
+    next_world_index: AtomicUsize,
 }
 
 impl ForumReplyRuntime {
@@ -56,7 +63,15 @@ impl ForumReplyRuntime {
         if batch_size == 0 || batch_size > MAX_BATCH_SIZE || item_timeout.is_zero() {
             return Err(WorkerError::InvalidForumReplyConfiguration);
         }
-        Ok(Self { store, reader, commands, notifier, batch_size, item_timeout })
+        Ok(Self {
+            store,
+            reader,
+            commands,
+            notifier,
+            batch_size,
+            item_timeout,
+            next_world_index: AtomicUsize::new(0),
+        })
     }
 }
 
@@ -67,7 +82,20 @@ pub(crate) async fn run_cycle<C>(
 where
     C: auction_application::Clock + 'static,
 {
-    let topics = runtime.store.list_published_topics(runtime.batch_size).await?;
+    // 世界闭集只有 main/isekai，且数据库保证每个世界至多一个 live/final 拍卖。额度为 1 时
+    // 多读一个候选并轮换选择，但实际处理量仍严格受 batch_size 限制。
+    let candidate_limit = runtime.batch_size.max(2);
+    let mut topics = runtime.store.list_published_topics(candidate_limit).await?;
+    if runtime.batch_size == 1 && topics.len() > 1 {
+        let preferred_world =
+            if runtime.next_world_index.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
+                SettlementWorld::Main
+            } else {
+                SettlementWorld::Isekai
+            };
+        topics.sort_by_key(|topic| topic.world != preferred_world);
+    }
+    topics.truncate(usize::from(runtime.batch_size));
     let mut worlds = Vec::new();
     let mut failed_worlds = Vec::new();
     for topic in topics {

@@ -4,7 +4,9 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::api::{AdminAuction, AdminRecoveryAction};
+use auction_web_shared::format_credit_amount as format_amount;
+
+use crate::api::{AdminAuction, AdminRecoveryAction, AdminSettlementLot};
 
 pub(super) fn stable_command_id(
     mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
@@ -52,24 +54,39 @@ pub(super) fn recovery_action_summary(actions: &[AdminRecoveryAction]) -> String
         .join(" · ")
 }
 
-pub(super) fn hold_share(tax_amount: i64, final_price: i64) -> String {
-    if tax_amount < 0 || final_price <= 0 {
-        return t!("value-empty");
-    }
-
-    // 旧版用 Math.round((tax * 10000) / finalPrice)；金额事实为非负整数，先提升到
-    // i128 再加半个分母，可在不溢出的前提下恢复正数的四舍五入语义。
-    let numerator = i128::from(tax_amount) * 10_000;
-    let denominator = i128::from(final_price);
-    let scaled_percent = (numerator + denominator / 2) / denominator;
-    let whole = scaled_percent / 100;
-    let fraction = scaled_percent % 100;
-    if fraction == 0 {
-        format!("{whole}%")
-    } else if fraction % 10 == 0 {
-        format!("{whole}.{}%", fraction / 10)
+pub(super) fn format_ppm(value: i32, show_positive_sign: bool) -> String {
+    let absolute = i64::from(value).abs();
+    let whole = absolute / 10_000;
+    let fraction = absolute % 10_000;
+    let number = if fraction == 0 {
+        whole.to_string()
     } else {
-        format!("{whole}.{fraction:02}%")
+        let fraction = format!("{fraction:04}").trim_end_matches('0').to_owned();
+        format!("{whole}.{fraction}")
+    };
+    let sign = if value < 0 {
+        "−"
+    } else if value > 0 && show_positive_sign {
+        "+"
+    } else {
+        ""
+    };
+    format!("{sign}{number}%")
+}
+
+pub(super) fn price_adjustment_label(lot: &AdminSettlementLot) -> String {
+    match lot.adjustment_ppm.cmp(&0) {
+        std::cmp::Ordering::Greater => t!(
+            "admin-settlement-penalty-value",
+            amount: format_amount(lot.tax_amount)
+        ),
+        std::cmp::Ordering::Less => {
+            let Some(discount) = lot.final_price.checked_sub(lot.listed_price) else {
+                return t!("value-empty");
+            };
+            t!("admin-settlement-discount-value", amount: format_amount(discount))
+        }
+        std::cmp::Ordering::Equal => t!("value-empty"),
     }
 }
 

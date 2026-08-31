@@ -90,6 +90,8 @@ struct ProxyBase {
     usage_number: i64,
     quota_used: i64,
     quota_limit: i64,
+    policy_bid_increment_ppm: i64,
+    policy_minimum_increment: i64,
     mode: String,
     maximum_amount: i64,
     status: String,

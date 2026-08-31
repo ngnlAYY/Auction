@@ -119,12 +119,17 @@ pub(crate) fn AuctionData(
     let now = clock();
     let is_live_presentation = auction.presentation_mode == "live";
     let is_opening_presentation = auction.presentation_mode == "opening";
-    let auction_end = if is_live_presentation {
+    let show_live_countdown =
+        is_live_presentation && matches!(auction.status.as_str(), "live" | "final");
+    let auction_end = if show_live_countdown {
         auction.scheduled_ends_at.clone()
     } else if is_opening_presentation {
         None
-    } else {
+    } else if !is_live_presentation {
         Some(auction.opens_at.clone())
+    } else {
+        // settling/settled 已进入终态收口，不再把过去的计划截止时间渲染为“落锤中…”。
+        None
     };
     let auction_countdown = auction_end.as_deref().map(|ends_at| countdown_display(ends_at, now));
     let catalog = match &*lots.read_unchecked() {

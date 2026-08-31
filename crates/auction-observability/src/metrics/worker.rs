@@ -186,6 +186,8 @@ fn business_event_for_worker(loop_kind: WorkerLoop) -> Option<BusinessEvent> {
         WorkerLoop::Auction => Some(BusinessEvent::AuctionLifecycle),
         WorkerLoop::AuctionFulfillment => Some(BusinessEvent::Fulfillment),
         WorkerLoop::AuctionRecovery => Some(BusinessEvent::Recovery),
+        WorkerLoop::Forum => Some(BusinessEvent::ForumSync),
+        WorkerLoop::Realtime => Some(BusinessEvent::Realtime),
         WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile => Some(BusinessEvent::OperationsAlert),
@@ -199,6 +201,8 @@ fn valid_retry_mode(loop_kind: WorkerLoop, retry_kind: WorkerRetryKind) -> bool 
             matches!(retry_kind, WorkerRetryKind::Persisted)
         }
         WorkerLoop::Auction
+        | WorkerLoop::Forum
+        | WorkerLoop::Realtime
         | WorkerLoop::OperationsAlertScan
         | WorkerLoop::OperationsAlertDispatch
         | WorkerLoop::OperationsAlertReconcile => false,

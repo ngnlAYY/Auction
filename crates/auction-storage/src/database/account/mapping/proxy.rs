@@ -22,6 +22,16 @@ pub(in crate::database::account) fn map_postgres_proxy_base(
         usage_number: get_pg(&row, "usage_number", "读取 PostgreSQL 代理使用序号失败")?,
         quota_used: get_pg(&row, "quota_used", "读取 PostgreSQL 代理 quota 使用量失败")?,
         quota_limit: get_pg(&row, "quota_limit", "读取 PostgreSQL 代理 quota 上限失败")?,
+        policy_bid_increment_ppm: get_pg(
+            &row,
+            "policy_bid_increment_ppm",
+            "读取 PostgreSQL 代理竞价增量比例失败",
+        )?,
+        policy_minimum_increment: get_pg(
+            &row,
+            "policy_minimum_increment",
+            "读取 PostgreSQL 代理最低增量失败",
+        )?,
         mode: get_pg(&row, "mode", "读取 PostgreSQL 代理模式失败")?,
         maximum_amount: get_pg(&row, "maximum_amount", "读取 PostgreSQL 代理金额失败")?,
         status: get_pg(&row, "proxy_status", "读取 PostgreSQL 代理状态失败")?,
@@ -65,6 +75,16 @@ pub(in crate::database::account) fn map_sqlite_proxy_base(
         usage_number: get_sqlite(&row, "usage_number", "读取 SQLite 代理使用序号失败")?,
         quota_used: get_sqlite(&row, "quota_used", "读取 SQLite 代理 quota 使用量失败")?,
         quota_limit: get_sqlite(&row, "quota_limit", "读取 SQLite 代理 quota 上限失败")?,
+        policy_bid_increment_ppm: get_sqlite(
+            &row,
+            "policy_bid_increment_ppm",
+            "读取 SQLite 代理竞价增量比例失败",
+        )?,
+        policy_minimum_increment: get_sqlite(
+            &row,
+            "policy_minimum_increment",
+            "读取 SQLite 代理最低增量失败",
+        )?,
         mode: get_sqlite(&row, "mode", "读取 SQLite 代理模式失败")?,
         maximum_amount: get_sqlite(&row, "maximum_amount", "读取 SQLite 代理金额失败")?,
         status: get_sqlite(&row, "proxy_status", "读取 SQLite 代理状态失败")?,
@@ -272,7 +292,13 @@ pub(in crate::database::account) fn derive_capabilities(
     let start = BidAmount::from_persisted_positive(base.start_price)
         .map_err(|_| storage_error("账户代理起始金额不是正数"))?;
     let binding = if waiting {
-        AuctionRules::default()
+        let rules = AuctionRules {
+            bid_increment_ppm: base.policy_bid_increment_ppm,
+            minimum_increment: base.policy_minimum_increment,
+            ..AuctionRules::default()
+        };
+        rules.validate().map_err(|_| storage_error("账户代理冻结规则快照无效"))?;
+        rules
             .next_minimum_bid(Some(start), Some(current), base.material, false)
             .map_err(|_| storage_error("账户代理绑定金额超出可表示范围"))?
     } else {

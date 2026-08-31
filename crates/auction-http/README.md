@@ -82,7 +82,7 @@ Catch-up，`/api/v1/ws` 提供带 Public session 的只读服务端推送；连�
 只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。Public `/status`
 页面已在已认证会话下自动订阅该流，收到
 跳号或 `refetch_required` 后停止并回到权威快照边界。Admin 结算报告已接入 PostgreSQL 完整档的一致只读
-快照；Admin recovery 报告也已接入同一 PostgreSQL 完整档读取边界；SQLite Lite 对这两项能力
+快照，并把 lot 挂牌价、持有 PPM 与带符号调整 PPM 映射为稳定安全字段；Admin recovery 报告也已接入同一 PostgreSQL 完整档读取边界；SQLite Lite 对这两项能力
 返回 `501 feature_not_supported`。A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、
 证据重校验、命令账本、退款激活、guarded relist、审计和预览目录 realtime 事件；SQLite 对
 该能力返回 `501 feature_not_supported`。Admin `/api/v1/admin/auction-forum/preview` 已

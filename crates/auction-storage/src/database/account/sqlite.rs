@@ -75,6 +75,8 @@ pub(super) async fn list_sqlite(
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             ) AS quota_used,
             COALESCE(CAST(json_extract(a.policy_snapshot, '$.proxy_max_outbid_uses') AS INTEGER), 0) AS quota_limit,
+            json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS policy_bid_increment_ppm,
+            json_extract(a.policy_snapshot, '$.minimum_increment') AS policy_minimum_increment,
             p.mode,
             p.maximum_amount,
             p.status AS proxy_status,
@@ -163,6 +165,8 @@ pub(super) async fn proxy_sqlite(
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             ) AS quota_used,
             COALESCE(CAST(json_extract(a.policy_snapshot, '$.proxy_max_outbid_uses') AS INTEGER), 0) AS quota_limit,
+            json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS policy_bid_increment_ppm,
+            json_extract(a.policy_snapshot, '$.minimum_increment') AS policy_minimum_increment,
             p.mode,
             p.maximum_amount,
             p.status AS proxy_status,
@@ -201,6 +205,8 @@ pub(super) async fn proxy_sqlite(
                 WHERE quota.lot_id = p.lot_id AND quota.user_id = p.user_id
             ) AS quota_used,
             COALESCE(CAST(json_extract(a.policy_snapshot, '$.proxy_max_outbid_uses') AS INTEGER), 0) AS quota_limit,
+            json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS policy_bid_increment_ppm,
+            json_extract(a.policy_snapshot, '$.minimum_increment') AS policy_minimum_increment,
             p.mode,
             p.maximum_amount,
             p.status AS proxy_status,

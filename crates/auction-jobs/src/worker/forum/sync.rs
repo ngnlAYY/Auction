@@ -142,6 +142,7 @@ where
     C: Clock + 'static,
 {
     let reconciliation_only = requires_reconciliation(&claim);
+    let retry_authorized = claim.previous_failure_code.as_deref() == Some("write_retry_authorized");
     let retry_claim = claim.clone();
     let snapshot = match store.load_snapshot(claim.clone()).await {
         Ok(snapshot) => snapshot,
@@ -201,6 +202,26 @@ where
     let published = if reconciliation_only {
         match publisher.find_topic_by_title(world, rendered.title.clone()).await {
             Ok(Some(published)) => published,
+            Ok(None) if retry_authorized => {
+                match publisher.create_topic(world, rendered.clone()).await {
+                    Ok(published) => published,
+                    Err(error) => {
+                        // 已授权重试也只能在远端尚未开始写入时自动再次提交；一旦结果未知，
+                        // 下一轮必须重新回到精确标题只读对账。
+                        let failure_code = if matches!(
+                            &error,
+                            ApplicationError::ForumRemote(remote) if remote.write_started()
+                        ) {
+                            "write_unknown"
+                        } else {
+                            forum_failure_code(&error)
+                        };
+                        record_failure(store, clock, retry_claim, failure_code.to_owned(), error)
+                            .await?;
+                        return Ok(());
+                    }
+                }
+            }
             Ok(None) => {
                 record_failure(
                     store,
@@ -299,7 +320,8 @@ fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
 
 fn requires_reconciliation(claim: &ForumSyncClaim) -> bool {
     claim.previous_failure_code.as_deref().is_some_and(|code| {
-        matches!(code, "write_unknown" | "publish_proof_failed") || code.starts_with("reconcile_")
+        matches!(code, "write_unknown" | "publish_proof_failed" | "write_retry_authorized")
+            || code.starts_with("reconcile_")
     })
 }
 
@@ -326,7 +348,7 @@ fn valid_public_base_url(value: &str) -> bool {
         && parsed.host_str().is_some()
         && parsed.username().is_empty()
         && parsed.password().is_none()
-        && parsed.path().is_empty()
+        && (parsed.path().is_empty() || parsed.path() == "/")
         && parsed.query().is_none()
         && parsed.fragment().is_none()
         && value.trim() == value

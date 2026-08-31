@@ -42,8 +42,18 @@ pub(crate) async fn trigger_poll(
         return super::api_error(StatusCode::BAD_REQUEST, "invalid_command_id", "命令 ID 无效")
             .into_response();
     }
-    if state.admin_mail().is_none() {
-        return feature_unavailable();
+    let Some(admin_mail) = state.admin_mail() else { return feature_unavailable() };
+    let snapshot = match admin_mail.dashboard_snapshot().await {
+        Ok(snapshot) => snapshot,
+        Err(_) => return worker_unavailable(),
+    };
+    if snapshot.pollers.is_empty() || snapshot.pollers.iter().all(|poller| poller.paused) {
+        return super::api_error(
+            StatusCode::CONFLICT,
+            "poll_rejected",
+            "所有邮箱轮询均已暂停；请先恢复至少一个邮箱",
+        )
+        .into_response();
     }
     let Some(worker_control) = state.worker_control() else {
         return worker_unavailable();
