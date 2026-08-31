@@ -1,5 +1,7 @@
 use super::*;
 
+use std::collections::BTreeMap;
+
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -106,6 +108,27 @@ pub(super) async fn add_mail_auction_intake_inner(
     .await
     .map_err(map_sql_error)?
     .unwrap_or(0);
+    let category_rows = sqlx::query(
+        "SELECT category_key, MAX(category_number)::integer AS maximum_category_number
+         FROM public.lots
+         WHERE auction_id = $1
+         GROUP BY category_key",
+    )
+    .bind(auction_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    let mut category_numbers = BTreeMap::<String, i32>::new();
+    for row in category_rows {
+        let category: String = row.try_get("category_key").map_err(map_sql_error)?;
+        let maximum: i32 = row.try_get("maximum_category_number").map_err(map_sql_error)?;
+        if category.is_empty()
+            || maximum <= 0
+            || category_numbers.insert(category, maximum).is_some()
+        {
+            return Err(failed("MoogleMail 分类编号快照无效"));
+        }
+    }
     let next_state_version = current_state_version
         .checked_add(1)
         .ok_or_else(|| failed("MoogleMail 拍卖状态版本溢出"))?;
@@ -131,11 +154,18 @@ pub(super) async fn add_mail_auction_intake_inner(
     .map_err(map_sql_error)?;
 
     for (index, item) in write.items.iter().enumerate() {
+        // 全局 lot 顺序继续供锁序、游标和历史事实使用；分类编号只负责对外编码。
         let lot_number = maximum_lot_number
             .checked_add(i32::try_from(index).map_err(|_| failed("MoogleMail lot 序号溢出"))?)
             .and_then(|value| value.checked_add(1))
             .ok_or_else(|| failed("MoogleMail lot 序号溢出"))?;
+        let category_number = {
+            let current = category_numbers.entry(item.category.clone()).or_insert(0);
+            *current = current.checked_add(1).ok_or_else(|| failed("MoogleMail 分类编号溢出"))?;
+            *current
+        };
         if lot_number <= 0
+            || category_number <= 0
             || item.equipment_id.is_nil()
             || item.lot_id.is_nil()
             || item.equipment_id.as_uuid() == item.lot_id
@@ -192,14 +222,16 @@ pub(super) async fn add_mail_auction_intake_inner(
 
         sqlx::query(
             r#"INSERT INTO public.lots
-                (id, auction_id, equipment_id, lot_number, status, start_price,
-                 submission_id, state_version, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, 'pending', $5, $6, 1, $7, $7)"#,
+                (id, auction_id, equipment_id, lot_number, category_key, category_number,
+                 status, start_price, submission_id, state_version, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, 1, $9, $9)"#,
         )
         .bind(item.lot_id)
         .bind(auction_id)
         .bind(item.equipment_id.as_uuid())
         .bind(lot_number)
+        .bind(&item.category)
+        .bind(category_number)
         .bind(item.start_price)
         .bind(write.submission_id)
         .bind(item.collected_at)

@@ -13,4 +13,5 @@ mod state;
 #[path = "lots/table.rs"]
 mod table;
 
+pub(super) use helpers::admin_lot_code_for;
 pub(super) use page::page;

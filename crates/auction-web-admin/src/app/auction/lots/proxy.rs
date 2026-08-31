@@ -15,8 +15,8 @@ use super::helpers::{proxy_mode_label, proxy_status_label};
 #[component]
 pub(super) fn AdminProxyHistory(
     lot_id: String,
-    lot_number: i32,
-    mut selected_lot: Signal<Option<(String, i32)>>,
+    lot_code: String,
+    mut selected_lot: Signal<Option<(String, String)>>,
     mut reload_generation: Signal<u64>,
 ) -> Element {
     let page_number = use_signal(|| 1_i64);
@@ -53,7 +53,7 @@ pub(super) fn AdminProxyHistory(
                 class: "admin-shell__dialog admin-auction-proxy",
                 role: "dialog",
                 aria_modal: "true",
-                aria_label: t!("admin-lots-proxy-title", lot: lot_number),
+                aria_label: t!("admin-lots-proxy-title", lot: lot_code.clone()),
                 onkeydown: move |event| {
                     if event.key() == Key::Escape {
                         event.prevent_default();
@@ -61,7 +61,7 @@ pub(super) fn AdminProxyHistory(
                         selected_lot.set(None);
                     }
                 },
-                h2 { {t!("admin-lots-proxy-title", lot: lot_number)} }
+                h2 { {t!("admin-lots-proxy-title", lot: lot_code.clone())} }
                 {content}
                 div { class: "admin-shell__dialog-actions",
                     button {

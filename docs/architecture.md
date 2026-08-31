@@ -253,7 +253,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000023` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000024` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -268,6 +268,9 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 告警运行异常，也不读取 Worker 私有 TOML；`000022` 拆开配置状态发布时间与扫描水位的时钟语义，
 避免未来时间的扫描水位静默阻断后续启停发布；`000023` 为 HV 战斗页导致的 Item Shop 暂不可读
 增加独立 `busy` 余额状态，保留有效 Cookie 和最后成功余额，不把该可恢复状态误报为协议漂移；
+`000024` 保留 `lots.lot_number` 的场次内全局顺序，并以不可变
+`category_key/category_number` 为七类装备分别分配从 1 开始的用户可见编号；既有已开始发布的
+论坛主题继续使用冻结的旧编号方案，新主题使用分类编号，避免历史帖子命令被迁移重解释；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -277,14 +280,16 @@ PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、1
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
 Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 cadence、100 条分阶段批次、PostgreSQL
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
-SQLite `000001` 至 `000008`、迁移入口和
+SQLite `000001` 至 `000009`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
 Public 20 条与 Admin 37 条契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、Public lot 列表/详情、竞价日志和普通竞价命令返回权威目录或当前公开
 projection，PostgreSQL 完整档的价格历史从结算事实链返回权威成交投影，SQLite Lite 对同一路由返回
 `501 feature_not_supported`，
-拍卖列表保留页码与 keyset cursor 语义，lot 列表保留 preview/live 互斥投影、分类统计和旧分页；已结算拍卖仍可在公开安全投影内读取 lot，供历史轮次页面使用，
+拍卖列表保留页码与 keyset cursor 语义，lot 列表保留 preview/live 互斥投影、分类统计和旧分页；
+所有 Public/Admin `lot_number` 展示投影使用分类内编号，竞价身份仍是 `lot_id` UUID，价格历史
+opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.lot_number`；已结算拍卖仍可在公开安全投影内读取 lot，供历史轮次页面使用，
 竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义，价格历史
 在完整档保留旧筛选、成交条目与编号页统计；Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。

@@ -126,6 +126,9 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot 投影允许读取仍属于公开
 安全边界的 settled 拍卖；响应上下文固定包含 `auction_id`、`world`、`number`、状态、展示模式、
 开标时间、可选有效结束时间和 `preview_revision`，Public 历史页面据此打开指定轮次而不读取数据库行。
+所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与
+`equipment.category` 组合解释为 `One01`、`Two01` 等编码；它不是全局身份。详情和写命令继续只以
+`lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。
 P10 竞价日志额外保留
 `world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
@@ -228,7 +231,7 @@ Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保�
 固定 HTTPS 来源边界、可选的可交易装备限制、key 密文信封和 PostgreSQL 同一 Serializable 写事务；
 `equipment_source.require_tradeable` 默认关闭，允许 Admin 手工录入 Soulbound 装备；开启后在事务前
 恢复只接受可交易装备的限制，且不改变 MoogleMail 邮件过滤。成功响应只返回拍卖、投稿、lot 与
-装备的安全事实，不返回原始 URL、canonical 正文或 key，SQLite Lite 明确
+装备的安全事实，其中 `lot_number` 是对应 `equipment_category` 内独立递增的编号；不返回原始 URL、canonical 正文或 key，SQLite Lite 明确
 返回 `501 feature_not_supported`。A15
 `/api/v1/admin/lots/{lot_id}/proxy-events` 已接入 Admin 会话保护、页码/opaque cursor 两种分页、
 PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影包含创建、降低上限，以及用户被
@@ -238,7 +241,8 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影�
 只读报告；报告中的 `auction` 保持旧版基础字段闭集，不额外发送严格旧 Web 客户端会拒绝的
 `scheduled_end_at`/`effective_end_at`；lot 明细新增权威 `listed_price`、`hold_ppm` 与带符号
 `adjustment_ppm`，正值表示惩罚/税费、负值表示折扣，界面不从税额反推持有比例。读取遇到
-序列化冲突或死锁时最多重试三次。A08 recovery-report
+序列化冲突或死锁时最多重试三次。A07/A08 的 lot 明细同时返回 `equipment_category`，管理端据此
+显示分类编码并允许不同分类各自存在编号 1。A08 recovery-report
 也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
 能力明确返回 `501 feature_not_supported`，不伪造空报告。P18/P19 已接入同一竞价事务、稳定
 命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和

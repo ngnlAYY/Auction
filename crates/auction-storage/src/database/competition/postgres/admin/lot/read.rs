@@ -56,7 +56,8 @@ pub(super) async fn load_admin_lot_update_inner(
                 a.preview_revision,
                 COALESCE((a.policy_snapshot->'settlement'->>'version')::integer, 0)
                     AS policy_version,
-                l.id, l.auction_id, l.equipment_id, l.submission_id, l.lot_number, l.status,
+                l.id, l.auction_id, l.equipment_id, l.submission_id,
+                l.category_number AS lot_number, l.status,
                 l.start_price, COALESCE(l.current_price, l.start_price) AS current_price,
                 l.leader_user_id, l.effective_end_at, l.slow_due_at, l.slow_generation,
                 l.slow_authorization_id, l.state_version, l.created_at, l.updated_at,

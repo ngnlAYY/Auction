@@ -41,7 +41,8 @@ pub(super) async fn list_postgres(
             a.id AS auction_id,
             a.world_id,
             a.sequence AS auction_sequence,
-            l.lot_number,
+            l.lot_number AS ordering_lot_number,
+            l.category_number AS lot_number,
             e.name AS equipment_name,
             e.category AS equipment_category,
             e.attributes AS equipment_attributes,
@@ -190,6 +191,10 @@ fn map_postgres_entry(
         auction_sequence: row
             .try_get("auction_sequence")
             .map_err(|_| storage_error("读取 PostgreSQL 历史拍卖序号失败"))?,
+        ordering_lot_number: i64::from(
+            row.try_get::<i32, _>("ordering_lot_number")
+                .map_err(|_| storage_error("读取 PostgreSQL 历史内部顺序失败"))?,
+        ),
         lot_number: i64::from(
             row.try_get::<i32, _>("lot_number")
                 .map_err(|_| storage_error("读取 PostgreSQL 历史 lot 序号失败"))?,

@@ -23,7 +23,7 @@ pub(super) fn lot_update_notice_label(notice: LotUpdateNotice) -> String {
 }
 
 /// 按旧版拍卖页面的约定生成稳定的拍品编码。
-pub(super) fn admin_lot_code_for(category: &str, lot_number: i32) -> String {
+pub(in crate::app::surface) fn admin_lot_code_for(category: &str, lot_number: i32) -> String {
     let prefix = match category {
         "One-Handed" => "One",
         "Two-Handed" => "Two",

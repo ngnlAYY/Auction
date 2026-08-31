@@ -81,8 +81,9 @@ async fn postgres_report(
                recovery.relisted_auction_id,
                recovery.relisted_lot_id,
                recovery.updated_at,
-               lot.lot_number,
-               equipment.name AS equipment_name
+               lot.category_number AS lot_number,
+               equipment.name AS equipment_name,
+               equipment.category AS equipment_category
            FROM public.settlement_recoveries AS recovery
            INNER JOIN public.lots AS lot
                ON lot.id = recovery.lot_id AND lot.auction_id = recovery.auction_id
@@ -174,6 +175,9 @@ async fn postgres_report(
             equipment_name: row
                 .try_get("equipment_name")
                 .map_err(|_| storage_error("读取 recovery 装备名称失败"))?,
+            equipment_category: row
+                .try_get("equipment_category")
+                .map_err(|_| storage_error("读取 recovery 装备分类失败"))?,
             stage: row.try_get("stage").map_err(|_| storage_error("读取 recovery 阶段失败"))?,
             resolution: row
                 .try_get("resolution")

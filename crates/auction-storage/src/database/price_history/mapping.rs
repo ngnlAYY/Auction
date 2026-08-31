@@ -26,7 +26,7 @@ pub(crate) fn entry_cursor(entry: &PublicPriceHistoryEntry) -> PublicPriceHistor
     PublicPriceHistoryCursor::Boundary {
         closed_at: entry.closed_at,
         auction_sequence: entry.auction_sequence,
-        lot_number: entry.lot_number,
+        lot_number: entry.ordering_lot_number,
         lot_id: entry.lot_id,
     }
 }
@@ -57,6 +57,7 @@ pub(crate) fn validate_entries(
             || entry.world_id.is_empty()
             || entry.world_id != entry.world_id.trim()
             || entry.auction_sequence <= 0
+            || entry.ordering_lot_number <= 0
             || entry.lot_number <= 0
             || entry.equipment_name.is_empty()
             || entry.equipment_category.is_empty()

@@ -58,7 +58,7 @@ pub(super) async fn list_postgres(
             b.id,
             l.auction_id,
             b.lot_id,
-            l.lot_number,
+            l.category_number AS lot_number,
             e.name AS equipment_name,
             e.category AS equipment_category,
             users.username AS bidder_name,

@@ -54,6 +54,23 @@ pub(super) async fn relist_recovery(
     if max_lot_number >= i64::from(i32::MAX) {
         return Err(RecoveryCommandError::NotConfirmable);
     }
+    let max_category_number: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(category_number), 0)::bigint
+         FROM public.lots
+         WHERE auction_id = $1 AND category_key = $2",
+    )
+    .bind(target_id)
+    .bind(&original_lot.equipment_category)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
+    if max_category_number >= i64::from(i32::MAX) {
+        return Err(RecoveryCommandError::NotConfirmable);
+    }
+    let next_lot_number =
+        max_lot_number.checked_add(1).ok_or(RecoveryCommandError::InvalidStoredResult)?;
+    let next_category_number =
+        max_category_number.checked_add(1).ok_or(RecoveryCommandError::InvalidStoredResult)?;
 
     let nil_uuid = Uuid::nil();
     let relisted_lot_id = legacy_natural_key_uuid(
@@ -62,15 +79,18 @@ pub(super) async fn relist_recovery(
     );
     sqlx::query(
         r#"INSERT INTO public.lots
-               (id, auction_id, equipment_id, submission_id, lot_number, status,
-                start_price, current_price, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6, $7, $7)"#,
+               (id, auction_id, equipment_id, submission_id, lot_number,
+                category_key, category_number, status, start_price, current_price,
+                created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $8, $9, $9)"#,
     )
     .bind(relisted_lot_id)
     .bind(target_id)
     .bind(original_lot.equipment_id)
     .bind(original_lot.submission_id)
-    .bind(max_lot_number.checked_add(1).ok_or(RecoveryCommandError::InvalidStoredResult)?)
+    .bind(next_lot_number)
+    .bind(&original_lot.equipment_category)
+    .bind(next_category_number)
     .bind(original_lot.start_price)
     .bind(now)
     .execute(&mut **transaction)

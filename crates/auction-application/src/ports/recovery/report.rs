@@ -29,6 +29,7 @@ pub struct RecoveryReportEntry {
     pub lot_number: i32,
     pub world_id: String,
     pub equipment_name: String,
+    pub equipment_category: String,
     pub stage: String,
     pub resolution: Option<String>,
     pub state_version: i64,

@@ -163,7 +163,8 @@ PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin
 Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 `src/database/admin_intake/{mod,write,record}.rs` 持有：PostgreSQL 在 Serializable 事务中按 world、intake
 target、玩家和外部装备身份加锁，`write.rs` 写入装备、`equipment_secrets`、后台投稿、lot、版本和命令
-账本，`record.rs` 追加审计与 realtime 事件；SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
+账本，`record.rs` 追加审计与 realtime 事件；内部 `lot_number` 保持场次内全局顺序，
+`category_number` 在装备分类内从 1 独立递增并作为安全展示编号。SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin/lot/` 持有：`transaction.rs` 负责事务端口适配，`read.rs`、
 `mutation.rs`、`obligation.rs` 和 `events.rs` 分别负责锁内读取、lot 状态/价格变更、withdrawn-return
@@ -212,7 +213,8 @@ PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能
 轮询与入站查询、行和安全 metadata 映射；父 `mod.rs` 只保留跨后端端口分派。
 MoogleMail 拍卖入站事务由 `src/database/mail_intake/mod.rs` 装配，`intake.rs` 持有命令账本、world/auction/玩家锁、
 装备与密钥信封、pending lot 和预览版本写入，`record.rs` 持有追加审计与 preview realtime 事件；父模块只保留
-端口适配，所有写入仍在同一个 PostgreSQL 竞价事务中完成，明文邮件正文和装备 key 不进入 storage。
+端口适配；同批不同分类使用独立分类计数器，撤回条目也保留已占用编号。所有写入仍在同一个
+PostgreSQL 竞价事务中完成，明文邮件正文和装备 key 不进入 storage。
 服务心跳由 `src/database/health/` 持有：`mod.rs` 只负责 `HeartbeatStore` 端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责两个后端的条件 upsert/读取，`mapping.rs` 负责闭集
 身份、状态和安全错误映射。PostgreSQL 使用数据库时钟和 observation sequence 条件 upsert，
@@ -315,15 +317,16 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000023` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000024` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
 时间 shape，`000019` 为旧 Auction-BF bid 写入补齐同一有效结束时间兼容防线，`000020` 扩展
 operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态与成功扫描水位，`000022`
 将配置状态发布时间和扫描水位拆为两条独立单调时钟，避免扫描时间阻断后续启停发布，`000023`
-则为 HV 战斗页导致的余额暂不可读增加 `busy` 状态，并继续保留最后成功余额。SQLite
-`000001_lite_core.up.sql`、`000002` 至 `000008` 的调度、用户管理、取消/
+则为 HV 战斗页导致的余额暂不可读增加 `busy` 状态，并继续保留最后成功余额；`000024` 为 lot
+增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案。SQLite
+`000001_lite_core.up.sql`、`000002` 至 `000009` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由

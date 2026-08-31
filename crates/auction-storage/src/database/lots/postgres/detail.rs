@@ -23,7 +23,7 @@ pub(in crate::database::lots) async fn detail_postgres(
             "SELECT
                 l.id,
                 l.auction_id,
-                l.lot_number,
+                l.category_number AS lot_number,
                 l.status,
                 l.start_price,
                 submission.seller AS seller_name,
@@ -57,7 +57,7 @@ pub(in crate::database::lots) async fn detail_postgres(
             "SELECT
                 l.id,
                 l.auction_id,
-                l.lot_number,
+                l.category_number AS lot_number,
                 l.status,
                 l.start_price,
                 l.current_price,

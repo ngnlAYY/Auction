@@ -46,6 +46,7 @@ pub(in crate::database::recovery_commands) struct OriginalLot {
     pub(in crate::database::recovery_commands) status: String,
     pub(in crate::database::recovery_commands) start_price: i64,
     pub(in crate::database::recovery_commands) equipment_world_id: String,
+    pub(in crate::database::recovery_commands) equipment_category: String,
 }
 
 #[cfg(feature = "postgres")]

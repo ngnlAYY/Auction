@@ -21,9 +21,9 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000023`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000024`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
-`000001` 至 `000008` 作为共有能力子集及生命周期/领先时间/lot 结束时间修正。旧系统的 `bid_proxies` 不再作为第二份
+`000001` 至 `000009` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
 `bid_proxy_authorizations` 及其历史表。完整适配器、Lite 串行写入和其他业务表面仍在迁移中。
 
@@ -48,7 +48,10 @@ kind/identity 闭集，为已证明的 MoogleMail 退信提供独立提醒，同
 `000021` 保存 Worker 发布的非敏感启用状态和成功扫描水位，Admin 不从 signal 是否为空推断配置；
 `000022` 解除配置状态发布时间与扫描水位之间不存在的先后约束，状态发布仍按自身时间单调校验，
 成功扫描只推进自己的水位；`000023` 扩展 recovery 余额状态闭集，以 `busy` 表达 HV 账号仍有效
-但因处于战斗页而暂时无法读取 Item Shop 的可恢复状态。
+但因处于战斗页而暂时无法读取 Item Shop 的可恢复状态；PostgreSQL `000024` 与 SQLite `000009`
+为 `lots` 增加不可变 `category_key/category_number`：`lot_number` 继续作为场次内全局顺序，
+用户可见编号则在 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy 各分类内从 1
+独立递增。PostgreSQL 还为已开始发布的论坛主题冻结旧全局编号方案，避免迁移后改变既有帖子命令。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -92,7 +95,7 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 | auctions | 000001_baseline + PostgreSQL 000003_lifecycle_proxy_history + 000014_lifecycle_database_invariants / SQLite 000004_auction_cancellation + 000005_lifecycle_metadata | auction-domain + auction-application：auction | 两者 | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份与前序顺序 |
 | equipment | 000001_baseline | auction-domain + auction-application：auction | 两者 | 标的事实与规范化装备属性 |
 | auction_preview_items | 000001_baseline | auction-application：auction | 两者 | 预览阶段的物化展示项 |
-| lots | 000001_baseline + PostgreSQL 000018 / SQLite 000008 | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本及 live/sold 有效结束时间 shape |
+| lots | 000001_baseline + PostgreSQL 000018、000024 / SQLite 000008、000009 | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
 | auction_commands | 000001_baseline | auction-application：command-ledger | 两者 | 所有可变命令的幂等账本 |
 | bids | 000001_baseline | auction-domain + auction-application：auction | 两者 | 追加式竞价事实 |
 | bid_proxies | 000001_baseline | auction-storage：兼容视图 | 两者 | 旧代理字段的只读兼容投影，非权威状态 |
@@ -147,7 +150,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | mail_poll_state | 000001_baseline + 000008_mooglemail_polling | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | user_mail_commands | 000002_worker_external_adapters | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
-| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing | auction-storage：forum sync；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约和 fencing 证明 |
+| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering | auction-storage：forum sync；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing 证明及冻结的 lot 编号方案 |
 | forum_sync_admin_commands | 000016_forum_sync_write_authorization | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
 | forum_bidder_identities | 000005_recovery_observability_forum | auction-storage：forum reply；Admin 凭据/用户 owner 提供登记来源 | 完整档 | 论坛外部身份到用户身份映射 |
 | auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply | 完整档 | 论坛回帖扫描游标 |
@@ -189,5 +192,8 @@ PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛�
    PostgreSQL 的 origin bid fact 唯一性只约束原始事件，不能阻止同一事实的运维 replay。
 5. 任何标记为两者的对象都必须同时满足 PostgreSQL 并发语义和 SQLite Lite 的串行写事务、
    WAL/本地文件系统、锁等待及单 Worker 实例约束。
-6. 迁移提交前必须为每张表补充 Rust 查询 owner、共有查询的 SQLx 离线元数据策略，以及
+6. `lots.lot_number` 是正数、场次内唯一且不可变的内部顺序；`category_key/category_number`
+   是正数、场次与分类内唯一且不可变的对外编号。分类键必须与对应 equipment category 一致，
+   撤回或重挂不会复用已经分配的编号。
+7. 迁移提交前必须为每张表补充 Rust 查询 owner、共有查询的 SQLx 离线元数据策略，以及
    PostgreSQL/SQLite 是否真的需要该对象的证据。
