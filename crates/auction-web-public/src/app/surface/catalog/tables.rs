@@ -128,6 +128,7 @@ pub(crate) fn LiveCatalogTable(
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
                         th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
                         th { scope: "col", {t!("catalog-seller")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-current")} }
@@ -166,6 +167,7 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
                         th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
                         th { scope: "col", {t!("catalog-seller")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-start-price")} }
@@ -209,6 +211,7 @@ pub(crate) fn LiveCatalogRow(
     };
     let countdown_css_class = countdown_class(&countdown);
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
     let seller = row.seller_name.clone();
     let current_price = format_amount(row.current_price);
@@ -230,13 +233,14 @@ pub(crate) fn LiveCatalogRow(
                     portal: true,
                     legacy_dom: true,
                 }
-                if let Some(avg_roll) = row.avg_roll {
-                    span {
-                        class: "public-auction-catalog__roll",
-                        aria_label: t!("equipment-avg-roll"),
-                        title: t!("equipment-avg-roll"),
-                        "{avg_roll:.1}%"
-                    }
+            }
+            td {
+                class: "public-auction-catalog__avg-roll public-auction-catalog__number",
+                "data-label": t!("equipment-avg-roll"),
+                if let Some(avg_roll) = avg_roll {
+                    "{avg_roll}"
+                } else {
+                    span { class: "public-auction-catalog__none", {t!("value-empty")} }
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }

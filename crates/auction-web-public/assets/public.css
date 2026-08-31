@@ -1442,14 +1442,10 @@
   overflow-wrap: anywhere;
 }
 
-.public-auction-catalog__roll {
-  display: inline-block;
-  margin-inline-start: var(--space-2);
-  padding-inline: var(--space-1);
-  border-radius: var(--radius-sm);
+.public-auction-catalog__avg-roll {
+  min-inline-size: 6.5rem;
   color: var(--color-accent);
-  background: var(--color-surface-raised);
-  font-size: var(--text-sm);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1465,6 +1461,7 @@
 
 .public-auction-participant-identity {
   display: inline-flex;
+  inline-size: 100%;
   max-inline-size: 100%;
   min-inline-size: 0;
   align-items: center;
@@ -1473,6 +1470,8 @@
 }
 
 .public-auction-participant-identity__name {
+  flex: 1 1 auto;
+  inline-size: auto;
   min-inline-size: 0;
   max-inline-size: 16rem;
 }
@@ -2639,6 +2638,17 @@
     overflow-wrap: anywhere;
   }
 
+  .public-auction-catalog .public-auction-catalog__participant-cell {
+    inline-size: 100%;
+    max-inline-size: none;
+    align-items: center;
+  }
+
+  .public-auction-participant-identity__name {
+    inline-size: 0;
+    max-inline-size: 100%;
+  }
+
   .public-auction-catalog__name {
     min-inline-size: 0;
     text-align: left;
@@ -2890,6 +2900,11 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-1) 0;
+  }
+
+  .public-auction-lot__table .public-auction-lot__participant-cell {
+    inline-size: 100%;
+    max-inline-size: none;
   }
 
   .public-auction-lot__table td::before {

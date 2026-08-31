@@ -39,6 +39,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
     let seller = row.seller_name.clone();
     let start_price = format_amount(row.start_price);
 
@@ -58,13 +59,14 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                     portal: true,
                     legacy_dom: true,
                 }
-                if let Some(avg_roll) = row.avg_roll {
-                    span {
-                        class: "public-auction-catalog__roll",
-                        aria_label: t!("equipment-avg-roll"),
-                        title: t!("equipment-avg-roll"),
-                        "{avg_roll:.1}%"
-                    }
+            }
+            td {
+                class: "public-auction-catalog__avg-roll public-auction-catalog__number",
+                "data-label": t!("equipment-avg-roll"),
+                if let Some(avg_roll) = avg_roll {
+                    "{avg_roll}"
+                } else {
+                    span { class: "public-auction-catalog__none", {t!("value-empty")} }
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }

@@ -1867,6 +1867,7 @@
 
 .admin-quick-link__icon--mail,
 .admin-quick-link__icon--delivery,
+.admin-quick-link__icon--settlement,
 .admin-quick-link__icon--status {
   border-radius: 2px;
 }
@@ -3292,23 +3293,62 @@
 }
 
 /* 旧版 Dashboard 的卡片、状态徽章和动作区视觉契约。 */
+.admin-dashboard-page {
+  display: grid;
+  min-inline-size: 0;
+}
+
 .admin-dashboard-page > h1 {
   margin: 0 0 var(--space-4);
   font-size: var(--admin-text-title);
 }
 
+.admin-dashboard-page > h2 {
+  margin: var(--space-5) 0 var(--space-3);
+  padding-block-start: var(--space-5);
+  border-block-start: var(--border-width) solid var(--color-border);
+  font-size: var(--text-lg);
+}
+
+.admin-dashboard-page > h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+}
+
 .admin-dashboard-cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin-block-end: var(--space-5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.admin-dashboard-cards--summary {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
 }
 
 .admin-dashboard-card {
-  min-inline-size: 8rem;
+  min-inline-size: 0;
   padding: var(--space-3) var(--space-4);
   border: var(--border-width) solid var(--color-border);
+  border-inline-start-width: 3px;
   border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+  box-shadow: var(--shadow-1);
+}
+
+.admin-dashboard-card[data-state="available"],
+.admin-dashboard-card[data-state="ready"],
+.admin-dashboard-card[data-state="ok"] {
+  border-inline-start-color: var(--color-status-ok);
+  background: var(--color-status-ok-muted);
+}
+
+.admin-dashboard-card[data-state="unavailable"],
+.admin-dashboard-card[data-state="not-ready"],
+.admin-dashboard-card[data-state="error"] {
+  border-inline-start-color: var(--color-status-error);
+  background: var(--color-status-error-muted);
 }
 
 .admin-dashboard-value {
@@ -3339,16 +3379,19 @@
 .admin-dashboard-badge--ok {
   color: var(--color-status-ok);
   border-color: var(--color-status-ok);
+  background: var(--color-status-ok-muted);
 }
 
 .admin-dashboard-badge--warn {
   color: var(--color-status-warn);
   border-color: var(--color-status-warn);
+  background: var(--color-status-warn-muted);
 }
 
 .admin-dashboard-badge--error {
   color: var(--color-status-error);
   border-color: var(--color-status-error);
+  background: var(--color-status-error-muted);
 }
 
 .admin-dashboard-badge--neutral {
@@ -3363,7 +3406,53 @@
 }
 
 .admin-dashboard-actions--refresh {
+  justify-content: flex-end;
   margin-block: 0 var(--space-4);
+}
+
+.admin-dashboard-attention {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block: 0 var(--space-5);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-status-error);
+  border-inline-start-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-status-error-muted);
+}
+
+.admin-dashboard-attention h3,
+.admin-dashboard-attention p {
+  margin: 0;
+}
+
+.admin-dashboard-attention p {
+  margin-block-start: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.admin-dashboard-attention__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-dashboard-attention__actions a {
+  min-block-size: var(--size-target);
+  padding: var(--admin-space-control) var(--admin-space-table-inline);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--admin-radius-button);
+  color: var(--color-link);
+  background: var(--color-surface);
+}
+
+.admin-dashboard-attention__actions a:hover,
+.admin-dashboard-attention__actions a:focus-visible {
+  border-color: var(--color-accent);
+  text-decoration: none;
 }
 
 .admin-dashboard-recovery-world {
@@ -3378,6 +3467,22 @@
   gap: var(--admin-space-tiny);
   justify-items: start;
   font-size: var(--text-base);
+}
+
+@media (max-width: 48rem) {
+  .admin-dashboard-attention {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-dashboard-attention__actions a {
+    flex: 1 1 10rem;
+    text-align: center;
+  }
+
+  .admin-dashboard-actions--refresh button {
+    inline-size: 100%;
+  }
 }
 
 /* 管理拍品列表使用独立的高密度数据表层级；其它 Admin 表格暂不受影响。 */

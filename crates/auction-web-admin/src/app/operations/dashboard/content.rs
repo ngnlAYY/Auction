@@ -159,6 +159,13 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                             small { {t!("dashboard-open-deliveries-note")} }
                         }
                     }
+                    Link { class: "admin-quick-link", to: Route::Settlement {},
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--settlement" }
+                        span { class: "admin-quick-link__copy",
+                            strong { {t!("nav-settlement")} }
+                            small { {t!("dashboard-open-settlement-note")} }
+                        }
+                    }
                     Link { class: "admin-quick-link", to: Route::Outbox {},
                         span { class: "admin-quick-link__icon admin-quick-link__icon--status" }
                         span { class: "admin-quick-link__copy",
@@ -169,7 +176,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            div { class: "admin-dashboard-cards",
+            div { class: "admin-dashboard-cards admin-dashboard-cards--summary",
                 {semantic_card(
                     "dashboard-worker-channel",
                     t!("dashboard-legacy-worker-channel"),
@@ -406,25 +413,39 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
             h2 { {t!("dashboard-legacy-fulfillment-health")} }
             if let Some(fulfillment) = fulfillment {
                 div { class: "admin-dashboard-cards",
-                    {card(
+                    {semantic_card(
+                        "dashboard-fulfillment-state",
                         t!("dashboard-legacy-fulfillment-health"),
+                        fulfillment_state.to_owned(),
                         badge(fulfillment_state, fulfillment_status(fulfillment_state)),
                     )}
                     {card(
                         t!("dashboard-legacy-fulfillment-pending"),
-                        text(fulfillment.pending.to_string()),
+                        badge(
+                            if fulfillment.pending > 0 { "warn" } else { "ok" },
+                            fulfillment.pending.to_string(),
+                        ),
                     )}
                     {card(
                         t!("dashboard-legacy-fulfillment-blocked"),
-                        text(fulfillment.blocked.to_string()),
+                        badge(
+                            if fulfillment.blocked > 0 { "error" } else { "ok" },
+                            fulfillment.blocked.to_string(),
+                        ),
                     )}
                     {card(
                         t!("dashboard-legacy-fulfillment-failed"),
-                        text(fulfillment.failed.to_string()),
+                        badge(
+                            if fulfillment.failed > 0 { "error" } else { "ok" },
+                            fulfillment.failed.to_string(),
+                        ),
                     )}
                     {card(
                         t!("dashboard-legacy-fulfillment-manual-reconcile"),
-                        text(fulfillment.manual_reconcile.to_string()),
+                        badge(
+                            if fulfillment.manual_reconcile > 0 { "error" } else { "ok" },
+                            fulfillment.manual_reconcile.to_string(),
+                        ),
                     )}
                     {card(
                         t!("dashboard-legacy-fulfillment-oldest-backlog"),
@@ -433,6 +454,29 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                             seconds: fulfillment.oldest_backlog_age_seconds
                         )),
                     )}
+                }
+                if fulfillment_backlog {
+                    aside {
+                        class: "admin-dashboard-attention",
+                        aria_labelledby: "dashboard-fulfillment-attention-title",
+                        "data-state": "error",
+                        div {
+                            class: "admin-dashboard-attention__copy",
+                            role: "status",
+                            aria_atomic: "true",
+                            h3 {
+                                id: "dashboard-fulfillment-attention-title",
+                                {t!("dashboard-fulfillment-attention-title")}
+                            }
+                            p { {t!("dashboard-fulfillment-attention-note")} }
+                        }
+                        nav {
+                            class: "admin-dashboard-attention__actions",
+                            aria_label: t!("dashboard-fulfillment-attention-title"),
+                            Link { to: Route::Deliveries {}, {t!("dashboard-open-deliveries")} }
+                            Link { to: Route::Settlement {}, {t!("nav-settlement")} }
+                        }
+                    }
                 }
             } else {
                 p { class: "admin-dashboard-status",
