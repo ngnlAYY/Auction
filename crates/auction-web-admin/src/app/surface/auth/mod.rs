@@ -9,14 +9,16 @@ use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
 
-use auction_web_shared::{LanguagePicker, use_dialog_focus_trap, use_route_focus};
+use auction_web_shared::{
+    LanguagePicker, use_app_boot_ready, use_dialog_focus_trap, use_route_focus,
+};
 
 use crate::api::{
     AdminReadinessState, AdminSession, fetch_admin_readiness, fetch_admin_session, login_admin,
     logout_admin,
 };
 
-use super::{Route, admin_api_error_message};
+use super::{AdminReadinessResource, Route, admin_api_error_message};
 
 mod login;
 mod redirect;
@@ -35,20 +37,34 @@ pub(super) fn AdminShell() -> Element {
     use_dialog_focus_trap(false);
     // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
     // 读取一次 `window.location`，否则登录成功后的 replace 会把旧重定向分支永久留在 DOM。
-    let is_login_path = matches!(use_route::<Route>(), Route::Login {});
+    let current_route = use_route::<Route>();
+    let is_login_path = matches!(&current_route, Route::Login {});
+    let is_dashboard_path = matches!(&current_route, Route::Dashboard {});
     let mut reload_generation = use_signal(|| 0_u64);
     let readiness = use_resource(fetch_admin_readiness);
     let session = use_resource(move || {
         let _ = reload_generation();
         fetch_admin_session()
     });
+    let readiness_context: AdminReadinessResource = readiness;
+    use_context_provider(move || readiness_context);
+    let session_snapshot = session.read().clone();
+    let shell_boot_ready = readiness.read().is_some()
+        && match session_snapshot.as_ref() {
+            Some(Err(_)) => true,
+            Some(Ok(None)) => is_login_path,
+            Some(Ok(Some(_))) => !is_login_path && !is_dashboard_path,
+            None => false,
+        };
+    // 已认证 Dashboard 由页面快照解除门禁；重定向路径保持骨架，避免中间页面短暂露出。
+    use_app_boot_ready(shell_boot_ready);
     let readiness_state = match &*readiness.read_unchecked() {
         None => AdminReadinessState::Checking,
         Some(Ok(true)) => AdminReadinessState::Ready,
         Some(Ok(false) | Err(_)) => AdminReadinessState::Degraded,
     };
 
-    match &*session.read_unchecked() {
+    match session_snapshot.as_ref() {
         None => rsx! {
             div { role: "status", {t!("admin-session-loading")} }
         },

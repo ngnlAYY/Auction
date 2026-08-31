@@ -12,6 +12,7 @@ const PUBLIC_EXACT_ROUTES: &[&str] = &[
     "/blacklist",
     "/compensation",
     "/compensation-pool",
+    "/forum",
     "/history",
     "/login",
     "/me",

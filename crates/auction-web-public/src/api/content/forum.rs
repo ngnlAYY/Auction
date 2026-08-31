@@ -1,6 +1,7 @@
 //! Public 论坛镜像 HTTP DTO 与请求。
 
 use chrono::DateTime;
+use url::Url;
 use uuid::{Uuid, Variant};
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
@@ -29,9 +30,20 @@ fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
         && DateTime::parse_from_rfc3339(&thread.updated_at).is_ok()
         && matches!(thread.status.as_str(), "failed" | "pending" | "published" | "publishing")
         && (thread.status != "published"
-            || [&thread.thread_url, &thread.title, &thread.body]
-                .into_iter()
-                .all(|value| value.as_ref().is_some_and(|value| !value.is_empty())))
+            || (thread.thread_url.as_deref().is_some_and(valid_forum_url)
+                && [&thread.title, &thread.body]
+                    .into_iter()
+                    .all(|value| value.as_ref().is_some_and(|value| !value.is_empty()))))
+}
+
+/// 外部链接只接受无用户信息的 HTTPS URL，避免损坏投影把危险 scheme 注入浏览器。
+fn valid_forum_url(value: &str) -> bool {
+    Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
 }
 
 /// 旧 Web 只接受小写 canonical、RFC 4122 variant 且版本为 1 至 5 的 UUID。

@@ -8,6 +8,7 @@ pub(crate) fn AuctionData(
     historical: bool,
     initial_category: String,
     initial_page: i64,
+    boot_prerequisites_ready: bool,
 ) -> Element {
     let mut clock = use_signal(estimated_now);
     let active_category = use_signal(|| initial_category.clone());
@@ -92,6 +93,8 @@ pub(crate) fn AuctionData(
         }
         _ => true,
     };
+    // 首次揭示要等主要目录已有成功或失败结果；辅助历史导航继续局部异步，避免拖慢整页。
+    use_app_boot_ready(boot_prerequisites_ready && lots.read().is_some());
     let alignment_key = format!(
         "{}:{}:{}:{}:{}",
         auction.id,
@@ -170,9 +173,6 @@ pub(crate) fn AuctionData(
         section { class: "public-auction-page", aria_labelledby: "auction-title",
             if historical {
                 HistoricalAuctionNavigation { auction: auction.clone() }
-            }
-            if !historical && is_live_presentation {
-                {forum::panel(auction.id.clone())}
             }
             div { class: "public-auction-live",
                 header { class: "public-auction-round",

@@ -1,6 +1,7 @@
 //! 公开端浏览器界面（Dioxus CSR）。
 //!
-//! 路由集合按旧版 Auction-BF 的 `manifests/public.routes.json` 冻结，保持 URL 契约不变。
+//! 路由集合保留旧版 Auction-BF 的 `manifests/public.routes.json` 路径，并显式登记经评审的 Public
+//! 扩展页面，保持 URL 契约可审计。
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为
 //! 由 `auction-web-shared` 统一提供。
 //!
@@ -72,12 +73,15 @@ use auction_web_shared::{
     BaseStylesheet, LanguagePicker, TruncatedText, format_credit_amount as format_amount,
     format_localized_time,
     i18n::{DEFAULT_PUBLIC_LOCALE, initial_language},
-    legacy_t as t, use_dialog_focus_trap, use_locale_effects, use_route_focus,
+    legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_route_focus,
 };
 use pagination::PublicPager;
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。
 pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, String>>;
+
+/// Public 外壳唯一拥有的 readiness 快照；默认首页用它协调主内容与首屏门禁。
+pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 
 /// Public 外壳按世界读取的当前拍卖快照；结果携带请求世界，切换期间不得消费旧世界缓存。
 pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;

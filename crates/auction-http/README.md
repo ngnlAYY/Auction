@@ -50,7 +50,7 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/admin/auctions/`：拍卖列表、创建命令、DTO 映射和共享错误边界分别由 `list.rs`、
   `commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；旧分页、能力
   投影、零版本创建 fence、命令幂等和事务错误契约保持不变。
-- `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：14 + 21 条允许获得
+- `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：15 + 21 条允许获得
   SPA 入口的显式浏览器路由。
 
 ## 职责边界

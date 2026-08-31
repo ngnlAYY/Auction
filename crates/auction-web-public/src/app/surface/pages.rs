@@ -20,8 +20,8 @@ pub(crate) use lot::{
 };
 #[allow(unused_imports)]
 pub(crate) use routes::{
-    Account, BidLog, Blacklist, Compensation, CompensationPool, History, Login, Me, NotFound,
-    Rules, Status,
+    Account, BidLog, Blacklist, Compensation, CompensationPool, Forum, History, Login, Me,
+    NotFound, Rules, Status,
 };
 #[allow(unused_imports)]
 pub(crate) use shared::RetryPlaceholder;

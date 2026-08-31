@@ -430,7 +430,7 @@ delivery/prepare/activation 身份和 outbox 的成功、失败、
 外部广播 sink 属于尚未冻结的新增扩展；Public 本地 relay/Hub 已接入同一持久化事件边界。公开端首页看板与 lot 详情已经接入同源 Public
 API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，`opening` 过渡态只展示开拍处理中，
 不把已经过去的计划开放时间渲染为倒计时或落锤状态；Admin 拍卖列表提供带 CSRF、命令 ID
-和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、论坛镜像、健康和实时 catch-up 页面已消费对应安全 DTO；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
+和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照
 `mail_intake` 新 delivery 的 `origin_id` 使用 `world:external_mail_id:send|return|take`；传输与
@@ -447,7 +447,7 @@ panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头�
 上限、单 JSON 值和稳定 400/413/415；三条 Public competition mutation 延迟到 rate limit、Origin、
 authentication、query 和 path 之后读取 body，其余路由继续在 route 边界预解析。业务 MethodRouter 显式拒绝 Axum 隐式 HEAD，并用旧版
 JSON 405/`Allow` 响应。错误 DTO 在无业务数据时仍固定输出 `data: null`。静态分派也只向
-14 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
+15 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
 返回 JSON 404，未知浏览器导航返回页面 404，并按旧版恢复 Public/Admin/静态资源缓存策略。
 Web DTO 单一 owner、首批缓存读模型和静态资源制品级隔离，以及次级部署/所有权边界均已完成；
 Public/Admin 的 Dioxus 构建配置还分别固定了 WASM 启动前的产品标题，避免首屏短暂显示 CLI 默认标题。

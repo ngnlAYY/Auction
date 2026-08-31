@@ -1,8 +1,8 @@
 # 公开端浏览器界面
 
-Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
-`manifests/public.routes.json` 冻结，共 14 条，修改前必须先确认外部 URL 契约并同步
-`auction-http/src/assets/routes.rs` 的后端入口清单。
+Dioxus 客户端渲染的公开端 SPA。路由集合包含旧版 Auction-BF
+`manifests/public.routes.json` 冻结的 14 条路径，以及独立论坛同步页 `/forum`，共 15 条；修改前
+必须先确认外部 URL 契约并同步 `auction-http/src/assets/routes.rs` 的后端入口清单。
 
 - `src/main.rs`：薄启动入口。
 - `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求；
@@ -15,6 +15,8 @@ Dioxus 客户端渲染的公开端 SPA。路由集合按旧版 Auction-BF 的
   `auction/reads/history/filters/` 内进一步拆分表单控件、错误模型和输入规范化；
   `auction/commands/` 将普通竞价、代理入口/创建表单/降低表单/成功反馈和共用命令状态/错误映射分开；
   `shared/` 只保存本 surface 内真正通用的基础组件。
+- `src/app/content/forum.rs`：独立 `/forum` 页面，按所选世界读取当前拍卖的 P15 论坛镜像；仅在
+  该页且帖子尚未发布时轮询，首页不再读取论坛同步状态。
 - `assets/public.css`：公开端 surface 样式，沿用旧版公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。
 
@@ -46,7 +48,7 @@ just web-serve-public   # 本地开发监听
 `auction-http` 内嵌进公开端二进制。未构建产物时后端仍可编译，批准的浏览器路由返回 503；未知路径保持 404，
 不会被宽泛回退为 SPA 入口。
 
-当前首页看板、lot 详情、规则文档、公开黑名单、竞价日志、价格历史、Public session、账户竞价/代理读取、live lot
+当前首页看板、lot 详情、规则文档、公开黑名单、论坛同步、竞价日志、价格历史、Public session、账户竞价/代理读取、live lot
 普通出价和持久化实时事件游标页已经通过同源 HTTP 读取或提交 Public API；lot 详情现在消费完整装备安全投影，展示
 分类、等级、属性、平均 roll、游戏链接和按 lot 分页的竞价历史；公开端已补齐独立品牌导航、拍卖摘要、
 状态徽章、拍卖与 lot 倒计时、竞价表单和数据/空状态视觉层；规则正文单独保持旧版页面排版。首屏使用内联启动骨架，CSS 由静态 head 预加载，

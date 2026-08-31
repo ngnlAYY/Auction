@@ -19,7 +19,8 @@ crate 依赖，也不在本仓库的默认修改范围内。
 ## 当前状态
 
 当前已进入功能迁移后期，不再只是启动骨架。旧版 Public/Admin 的 20 + 37 条业务 HTTP 路径和
-14 + 21 条浏览器路由均有 Rust 注册入口，PostgreSQL 完整档也已建立竞价、代理、账户、管理命令、
+14 + 21 条浏览器路由均有 Rust 注册入口；Public 另有独立论坛同步页，当前浏览器入口总数为 15 + 21。
+PostgreSQL 完整档也已建立竞价、代理、账户、管理命令、
 审计、实时、结算/recovery、凭据、MoogleMail 和论坛的主要 owner；SQLite Lite 只实现已声明的
 单主机能力，完整档端点在 Lite 部署中明确报告不支持。路径和模块存在不代表行为等价：
 2026-08-26 至 2026-08-29 的滚动双侧审计已确认并分批修复参与者资格锁、黑名单副作用、慢速代理、
@@ -87,7 +88,7 @@ crates/                       # 可复用能力，按模块所有权拆分
 ├── auction-contracts/        # HTTP/WebSocket DTO 与错误契约
 ├── auction-http/             # Axum 路由与 HTTP 表面适配器
 ├── auction-web-shared/       # 浏览器端共享设计变量、基础组件与语言选择
-├── auction-web-public/       # 公开端 Dioxus 界面（14 条路由，默认英文）
+├── auction-web-public/       # 公开端 Dioxus 界面（15 条路由，默认英文）
 ├── auction-web-admin/        # 管理端 Dioxus 界面（21 条路由，默认简体中文）
 ├── auction-storage/          # PostgreSQL 完整适配器与 SQLite Lite 适配器
 ├── auction-cache/            # 默认关闭的缓存边界与可选 Redis 适配器

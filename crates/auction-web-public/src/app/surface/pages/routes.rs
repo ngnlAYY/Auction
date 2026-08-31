@@ -48,6 +48,11 @@ pub(crate) fn Compensation() -> Element {
 }
 
 #[component]
+pub(crate) fn Forum() -> Element {
+    forum::page()
+}
+
+#[component]
 pub(crate) fn Status() -> Element {
     realtime::page()
 }

@@ -15,6 +15,9 @@
 - `src/a11y/mod.rs`：共享 `aria-modal` 弹窗的动态初始聚焦、Tab 焦点循环、背景滚动锁和
   关闭后触发器焦点恢复，以及仅在 SPA 路由真正变化后聚焦主内容的通用 hook；首屏和同路由
   数据刷新不会抢占焦点，模块不包含 Public/Admin 业务语义。
+- `src/bootstrap/mod.rs`：Public/Admin 共用的首屏启动门禁。静态骨架会持续覆盖尚未就绪的
+  Dioxus 树，必要请求完成（包括进入错误结果）后只触发一次交叉淡出；后续刷新和认证状态变化
+  不会重新遮住界面。
 - `src/format/mod.rs`：Public/Admin 共用且不参与业务判断的金额展示规则。
 
 ## 语言选择
