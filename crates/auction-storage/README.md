@@ -100,7 +100,8 @@ Public/Admin 的跨后端安全快照读取与 SQLite 时间映射，PostgreSQL 
 Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派，PostgreSQL 与 SQLite
 分别由各自子目录的 `mod.rs`、`list.rs`、`detail.rs` 和 `mapping.rs` 拥有列表、详情与行映射；
 顶层 `mapping.rs` 继续负责跨后端安全投影、装备字段校验和 Lite 时间/UUID 转换。两套后端的
-Lite/完整能力差异在各自 SQL 适配器中显式保留。
+Lite/完整能力差异在各自 SQL 适配器中显式保留。Public 的 `next_bid` 与普通竞价事务统一使用
+完整加价阶梯；论坛帖专属的代理末口 `+1K` 投影不得进入浏览器竞价契约。
 Public 拍卖目录读取由 `src/database/auctions/` 持有：`mod.rs` 只做跨后端端口装配，
 `postgres.rs` 与 `sqlite.rs` 分别负责查询，`mapping.rs` 负责行到安全投影的转换和列表参数
 校验；两后端还按启用世界和公开状态闭集提供 WebSocket 预检，不读取事件历史，也不把 draft/cancelled

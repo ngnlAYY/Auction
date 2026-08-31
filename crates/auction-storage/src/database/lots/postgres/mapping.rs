@@ -123,8 +123,6 @@ pub(super) fn map_postgres_live(
         row.try_get("current_price")
             .map_err(|_| storage_error("读取 PostgreSQL 正式当前价失败"))?,
         row.try_get("has_leader").map_err(|_| storage_error("读取 PostgreSQL 正式领先状态失败"))?,
-        row.try_get("leader_proxy_last")
-            .map_err(|_| storage_error("读取 PostgreSQL 正式代理状态失败"))?,
         row.try_get("material")
             .map_err(|_| storage_error("读取 PostgreSQL 正式装备材质状态失败"))?,
         row.try_get("policy_bid_increment_ppm")

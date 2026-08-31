@@ -47,7 +47,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
             "SELECT
                 l.id, l.auction_id, l.lot_number, l.status, l.start_price, l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
-                l.leader_proxy_last, l.material,
+                l.material,
                 CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,
                 CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER) AS policy_minimum_increment,
                 leader.username AS leader_name,

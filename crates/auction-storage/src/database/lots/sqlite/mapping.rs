@@ -145,9 +145,6 @@ pub(super) fn map_sqlite_live(
         row.try_get::<i64, _>("has_leader")
             .map_err(|_| storage_error("读取 Lite 正式领先状态失败"))?
             != 0,
-        row.try_get::<i64, _>("leader_proxy_last")
-            .map_err(|_| storage_error("读取 Lite 正式代理状态失败"))?
-            != 0,
         row.try_get::<i64, _>("material")
             .map_err(|_| storage_error("读取 Lite 正式材质状态失败"))?
             != 0,

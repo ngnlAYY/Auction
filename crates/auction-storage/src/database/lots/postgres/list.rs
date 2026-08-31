@@ -103,7 +103,6 @@ async fn list_postgres_transaction(
                 l.start_price,
                 l.current_price,
                 (l.leader_user_id IS NOT NULL)::boolean AS has_leader,
-                l.leader_proxy_last,
                 l.material,
                 (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
                 (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
