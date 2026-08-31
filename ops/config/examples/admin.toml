@@ -86,8 +86,8 @@ proxy_default_mode = "fast"
 proxy_slow_interval_seconds = 600
 # 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
 proxy_max_outbid_uses = 3
-# 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 60。
-final_phase_lead_seconds = 60
+# 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 900（15 分钟）。
+final_phase_lead_seconds = 900
 
 [auction.settlement]
 # 可选：结算策略版本，当前支持 0 或 1，默认 1。

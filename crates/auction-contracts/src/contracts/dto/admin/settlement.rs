@@ -33,6 +33,7 @@ pub struct AdminSettlementAuctionResponse {
 pub struct AdminAuctionCapabilitiesResponse {
     pub cancel_auction: bool,
     pub manual_early_open: bool,
+    pub manual_early_settlement: bool,
     pub manual_intake: bool,
     pub manual_preview_open: bool,
 }

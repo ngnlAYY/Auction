@@ -29,7 +29,7 @@ pub(super) fn AdminAuctionActions(
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<String>);
     let pending_action = use_signal(|| None::<AdminAuctionLifecycleAction>);
-    let cancel_reason = use_signal(String::new);
+    let action_reason = use_signal(String::new);
     let command_state = use_signal(|| None::<(String, Uuid)>);
     let actions =
         lifecycle_actions(&status, &capabilities, &scheduled_open_at, current_time_millis);
@@ -61,7 +61,7 @@ pub(super) fn AdminAuctionActions(
                 notice,
                 reload_generation,
                 pending_action,
-                cancel_reason,
+                action_reason,
                 command_state,
             }
         }
@@ -110,25 +110,29 @@ fn AdminAuctionActionDialog(
     mut notice: Signal<Option<AdminAuctionLifecycleAction>>,
     reload_generation: Signal<u64>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
-    mut cancel_reason: Signal<String>,
+    mut action_reason: Signal<String>,
     mut command_state: Signal<Option<(String, Uuid)>>,
 ) -> Element {
     let is_cancel = action == AdminAuctionLifecycleAction::Cancel;
     let is_final = action == AdminAuctionLifecycleAction::FinalPhase;
+    let is_early_settlement = action == AdminAuctionLifecycleAction::EarlySettlement;
+    let requires_reason = is_cancel || is_early_settlement;
     let is_destructive = matches!(
         action,
-        AdminAuctionLifecycleAction::Cancel | AdminAuctionLifecycleAction::FinalPhase
+        AdminAuctionLifecycleAction::Cancel
+            | AdminAuctionLifecycleAction::FinalPhase
+            | AdminAuctionLifecycleAction::EarlySettlement
     );
-    let can_submit = !busy() && (!is_cancel || !cancel_reason().trim().is_empty());
+    let can_submit = !busy() && (!requires_reason || !action_reason().trim().is_empty());
     let title_id = lifecycle_action_title_id(action, &auction_id);
-    let cancel_reason_id = format!("cancel-reason-{auction_id}");
+    let action_reason_id = format!("action-reason-{auction_id}");
     let action_signals = LifecycleActionSignals {
         busy,
         feedback,
         notice,
         reload_generation,
         pending_action,
-        cancel_reason,
+        action_reason,
         command_state,
     };
     rsx! {
@@ -143,8 +147,9 @@ fn AdminAuctionActionDialog(
                         event.prevent_default();
                         event.stop_propagation();
                         pending_action.set(None);
-                        cancel_reason.set(String::new());
+                        action_reason.set(String::new());
                         feedback.set(None);
+                        command_state.set(None);
                     }
                 },
                 h2 { id: title_id,
@@ -177,9 +182,6 @@ fn AdminAuctionActionDialog(
                         }
                     }
                 } else {
-                    if is_cancel {
-                        p { {lifecycle_action_confirm_note(action)} }
-                    }
                     form {
                         class: "admin-auction-open",
                         onsubmit: move |event| {
@@ -192,39 +194,47 @@ fn AdminAuctionActionDialog(
                                     auction_id: auction_id.clone(),
                                     expected_state_version,
                                     action,
-                                    reason: is_cancel
-                                        .then(|| cancel_reason().trim().to_owned()),
+                                    reason: requires_reason
+                                        .then(|| action_reason().trim().to_owned()),
                                 },
                                 action_signals,
                             );
                         },
-                        if !is_cancel {
-                            p { {lifecycle_action_confirm_note(action)} }
-                        }
-                        if is_cancel {
+                        p { {lifecycle_action_confirm_note(action)} }
+                        if requires_reason {
                             label {
-                                r#for: cancel_reason_id.clone(),
-                                {t!("admin-auctions-cancel-reason")}
+                                r#for: action_reason_id.clone(),
+                                if is_cancel {
+                                    {t!("admin-auctions-cancel-reason")}
+                                } else {
+                                    {t!("admin-auctions-early-settlement-reason")}
+                                }
                             }
                             textarea {
-                                id: cancel_reason_id,
+                                id: action_reason_id,
                                 maxlength: "1024",
                                 required: true,
                                 autofocus: true,
                                 disabled: busy(),
-                                value: cancel_reason(),
+                                value: action_reason(),
                                 oninput: move |event| {
-                                    cancel_reason.set(event.value());
+                                    action_reason.set(event.value());
                                     feedback.set(None);
                                 },
                             }
-                            p { {t!("admin-auctions-cancel-reason-hint")} }
+                            p {
+                                if is_cancel {
+                                    {t!("admin-auctions-cancel-reason-hint")}
+                                } else {
+                                    {t!("admin-auctions-early-settlement-reason-hint")}
+                                }
+                            }
                         }
                         div { class: "admin-shell__dialog-actions",
                             button {
                                 r#type: "button",
                                 disabled: busy(),
-                                autofocus: !is_cancel,
+                                autofocus: !requires_reason,
                                 onclick: move |_| close_lifecycle_dialog(action_signals),
                                 {t!("admin-auctions-action-close")}
                             }
@@ -249,7 +259,7 @@ struct LifecycleActionSignals {
     notice: Signal<Option<AdminAuctionLifecycleAction>>,
     reload_generation: Signal<u64>,
     pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
-    cancel_reason: Signal<String>,
+    action_reason: Signal<String>,
     command_state: Signal<Option<(String, Uuid)>>,
 }
 
@@ -263,8 +273,9 @@ struct LifecycleActionRequest {
 /// 关闭生命周期对话框并丢弃只属于当前动作的表单状态。
 fn close_lifecycle_dialog(mut signals: LifecycleActionSignals) {
     signals.pending_action.set(None);
-    signals.cancel_reason.set(String::new());
+    signals.action_reason.set(String::new());
     signals.feedback.set(None);
+    signals.command_state.set(None);
 }
 
 /// 提交已确认的生命周期动作；命令 ID 在同一输入重试期间保持稳定。
@@ -295,7 +306,7 @@ fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleA
                 signals.feedback.set(None);
                 signals.notice.set(Some(action));
                 signals.pending_action.set(None);
-                signals.cancel_reason.set(String::new());
+                signals.action_reason.set(String::new());
                 signals.command_state.set(None);
                 signals.reload_generation.set((signals.reload_generation)().saturating_add(1));
             }
@@ -312,6 +323,7 @@ fn lifecycle_action_title_id(action: AdminAuctionLifecycleAction, auction_id: &s
         AdminAuctionLifecycleAction::Open => "open",
         AdminAuctionLifecycleAction::Cancel => "cancel",
         AdminAuctionLifecycleAction::FinalPhase => "final",
+        AdminAuctionLifecycleAction::EarlySettlement => "early-settlement",
     };
     format!("{action_name}-title-{auction_id}")
 }

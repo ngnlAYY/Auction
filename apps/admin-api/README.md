@@ -32,9 +32,11 @@ Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL �
 是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围；旧版
 `worlds`、发件人 allowlist、装备过滤和 14 个通知模板也由该文档管理，并在 Worker 重启时投影为
 MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin 与 Worker。
-重启后，`allow_manual_early_open` 会作为不可变策略进入生命周期服务：计划时间已到的开放不受影响，
-人工提前开放则在锁定拍卖并读取 `scheduled_open_at` 后按该策略失败关闭，HTTP capability 使用同一
-策略来源。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔、总超时和
+重启后，`allow_manual_early_open` 与 `allow_manual_early_settlement` 会作为不可变策略进入生命周期
+服务，且默认均关闭：计划时间已到的开放不受影响，人工提前开放与提前结算则在锁内按同一策略失败
+关闭，HTTP capability 使用同一来源。人工进入 Final 会把较晚的 live lot 截止时间收紧到冻结的最终
+窗口（默认 15 分钟），保留竞价与软截止延期；提前结算则要求理由并仅在 PostgreSQL 完整档把截止时间
+收紧到当前事务时间，实际结算仍由 Worker 领取。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔、总超时和
 `require_tradeable` 也会映射到装备来源适配器及手工录入策略；该开关默认关闭，关闭时允许 Admin
 录入明确标记为 Soulbound 的装备，开启时恢复只接受可交易装备的旧限制。MoogleMail 邮件装备仍由
 独立过滤策略拒绝不可交易来源，不受该 Admin 开关影响。适配器在启动时读取 A32 中目标 world 或 shared scope 的 active `mail_cookie`，

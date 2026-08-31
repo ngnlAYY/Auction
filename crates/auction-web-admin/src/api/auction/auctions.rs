@@ -52,6 +52,7 @@ pub(super) struct StrictAuction {
 struct StrictAuctionCapabilities {
     cancel_auction: bool,
     manual_early_open: bool,
+    manual_early_settlement: bool,
     manual_intake: bool,
     manual_preview_open: bool,
 }
@@ -166,6 +167,7 @@ fn decode_auction_list(data: StrictAuctionList) -> Result<AdminAuctionPage, &'st
         capabilities: AdminAuctionCapabilities {
             cancel_auction: data.capabilities.cancel_auction,
             manual_early_open: data.capabilities.manual_early_open,
+            manual_early_settlement: data.capabilities.manual_early_settlement,
             manual_intake: data.capabilities.manual_intake,
             manual_preview_open: data.capabilities.manual_preview_open,
         },

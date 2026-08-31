@@ -49,8 +49,27 @@ pub(crate) fn map_admin_session_error(error: ApplicationError) -> Response {
     }
 }
 
-pub(crate) fn map_admin_lifecycle_error(error: ApplicationError) -> Response {
+pub(crate) fn map_admin_lifecycle_error(
+    action: AuctionLifecycleAction,
+    error: ApplicationError,
+) -> Response {
     match error {
+        ApplicationError::CapabilityUnavailable(_)
+            if action == AuctionLifecycleAction::EarlySettlement =>
+        {
+            api_error(
+                StatusCode::FORBIDDEN,
+                "manual_early_settlement_disabled",
+                "人工提前结算功能未启用",
+            )
+            .into_response()
+        }
+        ApplicationError::CapabilityUnavailable(_) => api_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "feature_not_supported",
+            "当前部署档位不支持该生命周期命令",
+        )
+        .into_response(),
         ApplicationError::Domain(DomainError::InvalidTransition { .. })
         | ApplicationError::Domain(DomainError::InvalidSchedule(_))
         | ApplicationError::Domain(DomainError::CancellationCutoff)
@@ -169,6 +188,7 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
         .into_response(),
         ApplicationError::FulfillmentEvidenceNotObserved
         | ApplicationError::FulfillmentDependencyUnavailable
+        | ApplicationError::FulfillmentAccountBusy
         | ApplicationError::FulfillmentDependencyMismatch
         | ApplicationError::FulfillmentEquipmentSecretNotFound
         | ApplicationError::Domain(_)
@@ -240,6 +260,7 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
         .into_response(),
         ApplicationError::FulfillmentEvidenceNotObserved
         | ApplicationError::FulfillmentDependencyUnavailable
+        | ApplicationError::FulfillmentAccountBusy
         | ApplicationError::FulfillmentDependencyMismatch
         | ApplicationError::FulfillmentEquipmentSecretNotFound
         | ApplicationError::RecoveryCommand(_)

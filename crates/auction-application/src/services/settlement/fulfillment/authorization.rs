@@ -109,7 +109,8 @@ pub(super) async fn authorize_pending_or_prepared(
     }
 
     if intent.credits > 0 {
-        let balance = match evidence.read_balance(claim.world).await {
+        let observed_at = clock.now();
+        let balance = match evidence.read_balance(claim.world, observed_at).await {
             Ok(balance) => balance,
             Err(_) => {
                 return defer(

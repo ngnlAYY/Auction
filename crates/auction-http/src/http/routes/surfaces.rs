@@ -140,29 +140,13 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             get(admin_settlement_report),
         )
         .route("/api/v1/admin/auctions/{auction_id}/recovery-report", get(admin_recovery_report))
+        .route("/api/v1/admin/auctions/{auction_id}/preview", post(admin_preview_auction))
+        .route("/api/v1/admin/auctions/{auction_id}/open", post(admin_open_auction))
+        .route("/api/v1/admin/auctions/{auction_id}/cancel", post(admin_cancel_auction))
+        .route("/api/v1/admin/auctions/{auction_id}/final-phase", post(admin_final_phase_auction))
         .route(
-            "/api/v1/admin/auctions/{auction_id}/preview",
-            post(admin_preview_auction).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
-            ),
-        )
-        .route(
-            "/api/v1/admin/auctions/{auction_id}/open",
-            post(admin_open_auction).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
-            ),
-        )
-        .route(
-            "/api/v1/admin/auctions/{auction_id}/cancel",
-            post(admin_cancel_auction).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
-            ),
-        )
-        .route(
-            "/api/v1/admin/auctions/{auction_id}/final-phase",
-            post(admin_final_phase_auction).layer(DefaultBodyLimit::max(4 << 10)).layer(
-                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
-            ),
+            "/api/v1/admin/auctions/{auction_id}/early-settlement",
+            post(admin_early_settlement_auction),
         )
         .route(
             "/api/v1/admin/lots/{lot_id}",

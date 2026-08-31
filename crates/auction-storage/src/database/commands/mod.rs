@@ -175,6 +175,10 @@ where
         self.policy.allows_manual_early_open()
     }
 
+    fn allows_manual_early_settlement(&self) -> bool {
+        self.policy.allows_manual_early_settlement()
+    }
+
     fn execute(
         &self,
         command: AuctionLifecycleCommand,

@@ -16,7 +16,7 @@ pub struct RecoveryHealthService {
 }
 
 impl RecoveryHealthService {
-    /// 建立 health 刷新服务；外部读取失败会落为 unavailable 投影。
+    /// 建立 health 刷新服务；外部读取失败通常落为 unavailable，账号战斗中则落为 busy。
     pub fn new(
         config: RecoveryHealthConfig,
         store: Arc<dyn RecoveryHealthStore>,
@@ -47,33 +47,39 @@ impl RecoveryHealthRefreshPort for RecoveryHealthService {
                     updated_at: now,
                 };
 
-                if let Ok(snapshot) = self.balances.read_balance(world).await {
-                    let valid_snapshot = snapshot.world == world
-                        && snapshot.credits >= 0
-                        && snapshot.observed_at.timestamp_nanos_opt().is_some()
-                        && snapshot.observed_at <= now;
-                    if valid_snapshot {
-                        let observed_at = snapshot.observed_at;
-                        update.balance_credits = Some(snapshot.credits);
-                        update.balance_observed_at = Some(observed_at);
-                        update.evidence_last_success_at = Some(observed_at);
-                        if now
-                            .signed_duration_since(observed_at)
-                            .to_std()
-                            .is_ok_and(|age| age > self.config.evidence_stale_after)
-                        {
-                            update.balance_status = RecoveryBalanceStatus::Stale;
-                            update.evidence_status = RecoveryEvidenceStatus::Stale;
-                        } else {
-                            update.balance_status =
-                                if snapshot.credits < self.config.low_balance_threshold {
-                                    RecoveryBalanceStatus::Low
-                                } else {
-                                    RecoveryBalanceStatus::Ok
-                                };
-                            update.evidence_status = RecoveryEvidenceStatus::Fresh;
+                match self.balances.read_balance(world, now).await {
+                    Ok(snapshot) => {
+                        let valid_snapshot = snapshot.world == world
+                            && snapshot.credits >= 0
+                            && snapshot.observed_at.timestamp_nanos_opt().is_some()
+                            && snapshot.observed_at <= now;
+                        if valid_snapshot {
+                            let observed_at = snapshot.observed_at;
+                            update.balance_credits = Some(snapshot.credits);
+                            update.balance_observed_at = Some(observed_at);
+                            update.evidence_last_success_at = Some(observed_at);
+                            if now
+                                .signed_duration_since(observed_at)
+                                .to_std()
+                                .is_ok_and(|age| age > self.config.evidence_stale_after)
+                            {
+                                update.balance_status = RecoveryBalanceStatus::Stale;
+                                update.evidence_status = RecoveryEvidenceStatus::Stale;
+                            } else {
+                                update.balance_status =
+                                    if snapshot.credits < self.config.low_balance_threshold {
+                                        RecoveryBalanceStatus::Low
+                                    } else {
+                                        RecoveryBalanceStatus::Ok
+                                    };
+                                update.evidence_status = RecoveryEvidenceStatus::Fresh;
+                            }
                         }
                     }
+                    Err(ApplicationError::FulfillmentAccountBusy) => {
+                        update.balance_status = RecoveryBalanceStatus::Busy;
+                    }
+                    Err(_) => {}
                 }
 
                 update.validate().map_err(|message| {

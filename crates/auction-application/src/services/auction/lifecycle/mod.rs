@@ -184,6 +184,9 @@ fn lifecycle_result(
         AuctionLifecycleEffect::FinalPhase { .. } => {
             snapshot.final_phase_at = Some(auction.updated_at);
         }
+        AuctionLifecycleEffect::EarlySettlement { .. } => {
+            snapshot.final_phase_at = snapshot.final_phase_at.or(Some(auction.updated_at));
+        }
     }
 
     Ok(AuctionLifecycleResult {
@@ -231,6 +234,10 @@ where
 {
     fn allows_manual_early_open(&self) -> bool {
         self.policy.allows_manual_early_open()
+    }
+
+    fn allows_manual_early_settlement(&self) -> bool {
+        self.policy.allows_manual_early_settlement()
     }
 
     fn execute(

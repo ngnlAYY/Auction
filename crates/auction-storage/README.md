@@ -136,10 +136,11 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 用空列表或默认能力掩盖完整档缺失。
 拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配；其 `lifecycle/` 子目录的
 `context.rs`、`plan/` 和 `record.rs` 分别负责上下文锁定、生命周期计划写入和审计/实时事件记录，其中
-`plan/{preview,open,cancel,final_phase}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
+`plan/{preview,open,cancel,final_phase,early_settlement}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 Preview 在修改状态和转移 intake target 前还要求至少一个 pending lot，防止形成永远无法 Open 的空活跃场次；
-取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
+人工 Final 只收紧较晚的 live lot 截止时间并保留软截止竞价；提前结算只在 PostgreSQL 完整档把截止
+时间收紧到事务时间，使既有 settlement scheduler 可领取，结算事实仍由 Worker 事务写入。取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
 `transaction/lifecycle/{context,plan/{mod,preview,open,cancel,final_phase},record}.rs` 分别负责上下文/资格读取、
 按状态动作的计划写入和审计/realtime 事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。两后端通过
@@ -314,13 +315,14 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000022` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000023` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
 时间 shape，`000019` 为旧 Auction-BF bid 写入补齐同一有效结束时间兼容防线，`000020` 扩展
 operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态与成功扫描水位，`000022`
-将配置状态发布时间和扫描水位拆为两条独立单调时钟，避免扫描时间阻断后续启停发布。SQLite
+将配置状态发布时间和扫描水位拆为两条独立单调时钟，避免扫描时间阻断后续启停发布，`000023`
+则为 HV 战斗页导致的余额暂不可读增加 `busy` 状态，并继续保留最后成功余额。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000008` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite

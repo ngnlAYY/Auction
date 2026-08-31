@@ -272,7 +272,7 @@ fn evaluate_recovery(
                 world.balance_credits,
                 0,
             )?),
-            "unknown" | "stale" | "unavailable" => {
+            "unknown" | "stale" | "busy" | "unavailable" => {
                 return OperationsAlertSourceObservation::unavailable(
                     OperationsAlertSource::Recovery,
                 );

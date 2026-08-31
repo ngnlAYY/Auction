@@ -219,6 +219,7 @@ pub(crate) fn should_refresh_auction_board(event: &RealtimeEvent) -> bool {
             | "preview_catalog_changed"
             | "auction.opened"
             | "auction.final_phase_entered"
+            | "auction.early_settlement_requested"
             | "auction.cancelled"
             | "auction.settling"
             | "auction.settled"

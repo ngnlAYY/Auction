@@ -216,6 +216,7 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
     fn read_balance(
         &self,
         world: SettlementWorld,
+        observed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence> {
         let (world, gateway) = match fulfillment_gateway(
             &self.gateways,
@@ -226,8 +227,10 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
             Err(error) => return Box::pin(async move { Err(error) }),
         };
         Box::pin(async move {
-            let snapshot =
-                gateway.read_balance(world, Utc::now()).await.map_err(mooglemail_evidence_error)?;
+            let snapshot = gateway
+                .read_balance(world, observed_at)
+                .await
+                .map_err(mooglemail_evidence_error)?;
             Ok(SettlementFulfillmentBalanceEvidence {
                 world: settlement_world(snapshot.world),
                 credits: snapshot.credits,
@@ -272,6 +275,7 @@ impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReade
     fn read_balance(
         &self,
         _world: SettlementWorld,
+        _observed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence> {
         Box::pin(async {
             Err(ApplicationError::CapabilityUnavailable(
@@ -299,8 +303,14 @@ fn settlement_world(world: MoogleMailWorld) -> SettlementWorld {
 
 #[cfg(feature = "postgres")]
 fn mooglemail_evidence_error(error: MoogleMailError) -> ApplicationError {
-    if error.category == MoogleMailErrorCategory::NotObserved {
-        return ApplicationError::FulfillmentEvidenceNotObserved;
+    match error.category {
+        MoogleMailErrorCategory::NotObserved => {
+            return ApplicationError::FulfillmentEvidenceNotObserved;
+        }
+        MoogleMailErrorCategory::AccountBusy => {
+            return ApplicationError::FulfillmentAccountBusy;
+        }
+        _ => {}
     }
     auction_application::RepositoryError::Failed(format!(
         "MoogleMail {} 证据读取失败",

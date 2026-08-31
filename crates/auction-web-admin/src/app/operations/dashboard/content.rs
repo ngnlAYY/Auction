@@ -97,7 +97,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
     });
     let recovery_evidence_warning = recovery.is_some_and(|data| {
         data.worlds.iter().any(|world| {
-            matches!(world.balance_status.as_str(), "low" | "stale")
+            matches!(world.balance_status.as_str(), "low" | "stale" | "busy")
                 || world.evidence_status == "stale"
         })
     });
@@ -479,7 +479,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                                 && !matches!(world.balance_status.as_str(), "unknown" | "unavailable");
                             let balance_tone = match world.balance_status.as_str() {
                                 "ok" => "ok",
-                                "low" | "stale" => "warn",
+                                "low" | "stale" | "busy" => "warn",
                                 _ => "neutral",
                             };
                             let evidence_tone = match world.evidence_status.as_str() {
@@ -513,6 +513,11 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                                                     evidence_tone,
                                                     recovery_evidence_status(&world.evidence_status),
                                                 )}
+                                            }
+                                            if world.balance_status == "busy" {
+                                                span { class: "admin-dashboard-label",
+                                                    {t!("dashboard-legacy-recovery-balance-busy-hint")}
+                                                }
                                             }
                                         }
                                     }
@@ -668,6 +673,7 @@ fn recovery_balance_status(status: &str) -> String {
         "ok" => t!("dashboard-legacy-recovery-balance-ok"),
         "low" => t!("dashboard-legacy-recovery-balance-low"),
         "stale" => t!("dashboard-legacy-recovery-balance-stale"),
+        "busy" => t!("dashboard-legacy-recovery-balance-busy"),
         "unavailable" => t!("dashboard-legacy-recovery-balance-unavailable"),
         _ => t!("dashboard-legacy-recovery-balance-unknown"),
     }
