@@ -66,6 +66,8 @@ SQLite Lite 对确认能力明确返回不支持。
 `aggregate_id` 关联拍卖；命令账本、lot/池/账本、义务、恢复、
 审计、实时事件及终态统一使用 workflow 冻结的 `due_at` 作为业务事实时间；已 settled 的旧版命令
 重放只读取结算摘要、lot 明细和义务聚合并失败关闭，不会重写历史或再次插入结算事实。
+PostgreSQL 结算提交只对映射为序列化冲突或死锁的错误执行有界重试；连接、约束和其他提交错误
+立即按原分类返回，不能把未知提交结果当作可安全重放的事务。
 `src/database/settlement_commands/legacy.rs` 为 `auctionctl` 在
 `SERIALIZABLE READ ONLY DEFERRABLE` 事务中装配专用核验入口；账本读取与 settled 快照均不请求
 `FOR UPDATE`，缺失旧 complete 账本或任何身份/事实不一致都失败关闭。SQLite Lite 明确不提供该能力。
@@ -122,6 +124,8 @@ Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地�
 `sync/{claims,snapshot,publishing,validation}.rs`，`sync/authorization.rs` 单独拥有未知写入清单、
 幂等人工再授权、命令重放和追加审计事务；`reply.rs` 只做回帖端口装配，已发布主题与
 lot/身份/代理查询、命令账本和扫描游标分别位于 `reply/{queries,commands,cursor,validation}.rs`。
+回帖账本接管会同时核对命令 ID 与冻结自然键；自然键和完整业务负载一致时复用既有旧版命令 ID，
+两种身份命中不同记录或任一负载字段漂移时失败关闭。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期

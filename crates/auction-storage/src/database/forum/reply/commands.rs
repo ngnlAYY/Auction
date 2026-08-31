@@ -28,7 +28,7 @@ pub(super) async fn begin_command_postgres(
             (command_id, auction_id, world_id, thread_id, post_id, line_number, lot_code,
              actor, command_kind, amount, status, attempt_count)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 1)
-         ON CONFLICT (command_id) DO NOTHING",
+         ON CONFLICT DO NOTHING",
     )
     .bind(record.command_id)
     .bind(record.auction_id.as_uuid())
@@ -45,23 +45,43 @@ pub(super) async fn begin_command_postgres(
     .map_err(|_| storage_error("写入论坛命令账本失败"))?;
     if inserted.rows_affected() == 1 {
         transaction.commit().await.map_err(|_| storage_error("提交论坛命令账本事务失败"))?;
-        return Ok(ForumCommandStart { status: ForumCommandStatus::Pending, should_run: true });
+        return Ok(ForumCommandStart {
+            command_id: record.command_id,
+            status: ForumCommandStatus::Pending,
+            should_run: true,
+        });
     }
 
-    let row = sqlx::query(
-        "SELECT auction_id, world_id, thread_id, post_id, line_number, lot_code,
+    // canonical v28 旧账本使用另一套稳定 ID；自然键相同且负载逐项一致时必须复用旧 ID，
+    // 否则历史回复会在每轮全主题扫描中持续触发唯一约束并阻断后续新命令。
+    let rows = sqlx::query(
+        "SELECT command_id, auction_id, world_id, thread_id, post_id, line_number, lot_code,
                 actor, command_kind, amount, status
          FROM public.auction_forum_bid_commands
          WHERE command_id = $1
+            OR (auction_id = $2
+                AND thread_id = $3
+                AND post_id = $4
+                AND line_number = $5
+                AND lot_code = $6
+                AND command_kind = $7)
          FOR UPDATE",
     )
     .bind(record.command_id)
-    .fetch_optional(&mut *transaction)
+    .bind(record.auction_id.as_uuid())
+    .bind(&record.thread_id)
+    .bind(&record.post_id)
+    .bind(record.line_number)
+    .bind(&record.lot_code)
+    .bind(&record.command_kind)
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取既有论坛命令账本失败"))?;
-    let Some(row) = row else {
-        return Err(storage_error("论坛命令账本冲突记录不存在"));
+    let [row] = rows.as_slice() else {
+        return Err(storage_error("论坛命令账本冲突记录不存在或不唯一"));
     };
+    let existing_command_id: Uuid =
+        row.try_get("command_id").map_err(|_| storage_error("读取论坛命令标识失败"))?;
     let existing_auction_id: Uuid =
         row.try_get("auction_id").map_err(|_| storage_error("读取论坛命令拍卖标识失败"))?;
     let existing_world: String =
@@ -101,7 +121,7 @@ pub(super) async fn begin_command_postgres(
                  SET attempt_count = attempt_count + 1, updated_at = CURRENT_TIMESTAMP
                  WHERE command_id = $1",
             )
-            .bind(record.command_id)
+            .bind(existing_command_id)
             .execute(&mut *transaction)
             .await
             .map_err(|_| storage_error("更新论坛命令重试次数失败"))?;
@@ -112,7 +132,7 @@ pub(super) async fn begin_command_postgres(
         _ => return Err(storage_error("论坛命令账本状态不在闭集内")),
     };
     transaction.commit().await.map_err(|_| storage_error("提交既有论坛命令账本事务失败"))?;
-    Ok(ForumCommandStart { status, should_run })
+    Ok(ForumCommandStart { command_id: existing_command_id, status, should_run })
 }
 
 #[cfg(feature = "postgres")]

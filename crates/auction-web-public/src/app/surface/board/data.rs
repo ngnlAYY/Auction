@@ -47,13 +47,14 @@ pub(crate) fn AuctionData(
         }
     });
     let auction_id = auction.id.clone();
-    let session = use_context::<PublicSessionResource>();
+    let mut session = use_context::<PublicSessionResource>();
     let session_snapshot = session.read().clone();
     let viewer_name = match session_snapshot.as_ref() {
         Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
         _ => None,
     };
     let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
+    let session_error = matches!(session_snapshot.as_ref(), Some(Err(_)));
     let authenticated = matches!(
         session_snapshot.as_ref(),
         Some(Ok(Some(session))) if session.authenticated
@@ -209,6 +210,17 @@ pub(crate) fn AuctionData(
                         }
                     }
                     {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
+                }
+                if !historical && is_live_presentation && auction.bidding_open && session_error {
+                    div { class: "ui-empty-state", role: "alert",
+                        p { class: "ui-empty-state__title", {t!("session-error")} }
+                        button {
+                            class: "ui-empty-state__retry",
+                            r#type: "button",
+                            onclick: move |_| session.restart(),
+                            {t!("data-retry")}
+                        }
+                    }
                 }
                 if !historical && is_live_presentation {
                     section { aria_labelledby: "auction-lots",

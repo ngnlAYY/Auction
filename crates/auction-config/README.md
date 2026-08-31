@@ -91,6 +91,7 @@ final_phase_lead_seconds = 60
 # 可选：版本与模式；模式只能是 hold_curve_v1 或 legacy_zero_v0。
 version = 1
 mode = "hold_curve_v1"
+# 可选：hold_curve_v1 必须启用，legacy_zero_v0 必须关闭；默认启用。
 compensation_pool_enabled = true
 isekai_carrier_credit = 1
 # 可选：PPM 锚点数组；省略时使用内置 hold curve。

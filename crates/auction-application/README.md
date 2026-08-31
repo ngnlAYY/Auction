@@ -30,7 +30,8 @@
   `accepted` 行只在同一只读事务按授权版本截取转换历史并读取冻结策略 quota，不重新执行命令，也不以
   当前生命周期或时钟 gate 否定既有成功事实。
 - `src/services/settlement/commands/` 与 `src/ports/settlement/commands.rs`：结算命令在锁定拍卖前先读取
-  命令账本，以保持旧版冲突优先级；当前格式继续按自身合同重放，接管的旧
+  命令账本，以保持旧版冲突优先级；当前格式重放时还会从冻结策略、首次结算资金池和锁内 lot
+  事实重算完整计划及义务，只有持久化摘要与 payload 全量一致才返回。接管的旧
   `settlement_complete/OK` 则逐字复现 Go 请求摘要、严格解析完整结果，并与已结算摘要、lot 金额和
   义务种类数量逐项对账。旧格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
   `LegacySettlementVerificationPort` 另为 `auctionctl` 提供脱敏只读核验摘要；缺账本时没有写入回退，

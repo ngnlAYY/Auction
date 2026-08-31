@@ -94,7 +94,7 @@ final_phase_lead_seconds = 60
 version = 1
 # 可选：结算模式，只能为 hold_curve_v1 或 legacy_zero_v0，默认 hold_curve_v1。
 mode = "hold_curve_v1"
-# 可选：是否启用补偿池，默认 true。
+# 可选：补偿池开关；hold_curve_v1 必须为 true，legacy_zero_v0 必须为 false，默认 true。
 compensation_pool_enabled = true
 # 可选：isekai carrier credit 数量；当前领域策略要求为 1。
 isekai_carrier_credit = 1

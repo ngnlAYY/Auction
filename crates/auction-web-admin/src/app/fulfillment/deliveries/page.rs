@@ -147,7 +147,11 @@ pub fn page() -> Element {
                     draft: draft.clone(),
                     on_draft_change: update_reconcile_draft,
                     on_confirm: confirm_action,
-                    on_cancel: move |_| pending_dialog.set(None),
+                    on_cancel: move |_| {
+                        pending_dialog.set(None);
+                        reconcile_draft.set(None);
+                        command_state.set(None);
+                    },
                 }
             } else if let Some(error) = load_error {
                 p { class: "admin-delivery-error", role: "alert", {error} }
@@ -178,7 +182,11 @@ pub fn page() -> Element {
                     }),
                     on_draft_change: move |_| {},
                     on_confirm: confirm_action,
-                    on_cancel: move |_| pending_dialog.set(None),
+                    on_cancel: move |_| {
+                        pending_dialog.set(None);
+                        reconcile_draft.set(None);
+                        command_state.set(None);
+                    },
                 }
             }
         }
