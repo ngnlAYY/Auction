@@ -8,7 +8,8 @@ use auction_contracts::{
     AuctionListResponse, CurrentAuctionResponse, PlaceBidResponse,
     PlaceBidResultResponse as BidResult, PublicBidLogListResponse, PublicBlacklistResponse,
     PublicCompensationMovementPageResponse, PublicCompensationResponse, PublicMyBidsResponse,
-    PublicMyProxyResponse, PublicPriceHistoryListResponse, PublicRulesResponse, WorldsResponse,
+    PublicMyProxyResponse, PublicPriceHistoryListResponse, PublicProxyCommandResponse,
+    PublicRulesResponse, WorldsResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use auction_contracts::{
@@ -209,10 +210,11 @@ pub(crate) async fn decode_create_proxy_command(
     maximum_amount: i64,
     mode: &str,
 ) -> Result<ProxyCommandAuthorization, String> {
-    decode_success(response, |value| {
+    decode_success::<PublicProxyCommandResponse, _>(response, |value| {
         valid_proxy_command(value, lot_id, Some(maximum_amount), Some(mode), false)
     })
     .await
+    .map(|response| response.authorization)
 }
 
 pub(crate) async fn decode_lower_proxy_command(
@@ -221,7 +223,7 @@ pub(crate) async fn decode_lower_proxy_command(
     authorization_id: &str,
     maximum_amount: i64,
 ) -> Result<ProxyCommandAuthorization, String> {
-    decode_success(response, |value| {
+    decode_success::<PublicProxyCommandResponse, _>(response, |value| {
         valid_proxy_command(value, lot_id, Some(maximum_amount), None, true)
             && object(value)
                 .and_then(|value| value.get("authorization"))
@@ -230,6 +232,7 @@ pub(crate) async fn decode_lower_proxy_command(
                 == Some(authorization_id)
     })
     .await
+    .map(|response| response.authorization)
 }
 
 #[cfg(target_arch = "wasm32")]
