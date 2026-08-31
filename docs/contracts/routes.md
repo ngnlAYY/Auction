@@ -195,6 +195,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A35 | POST | /api/v1/admin/deliveries/{delivery_id}/release | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:83 |
 | A36 | POST | /api/v1/admin/deliveries/{delivery_id}/retry | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:89 |
 | A37 | POST | /api/v1/admin/deliveries/{delivery_id}/reconcile | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:95 |
+| A38 | POST | /api/v1/admin/auctions/{auction_id}/early-settlement | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | 新增能力，旧代码无对应路径 |
 
 ## 迁移冻结规则
 
@@ -239,10 +240,15 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；SQLite L
 能力明确返回 `501 feature_not_supported`，不伪造空报告。P18/P19 已接入同一竞价事务、稳定
 命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
 终止原因随命令结果在同一事务内冻结，HTTP 不再增加提交后账户读取窗口，也不暴露原始账本
-payload。A09-A12 的
+payload。A09-A12 与 A38 的
 Admin 拍卖生命周期命令已接入应用端口；请求携带 `command_id` 和 `expected_state_version`，取消动作
-额外要求非空原因，并在同一数据库事务内追加命令账本、状态版本、取消元数据、审计记录和
-注册表内的 lifecycle realtime 事件。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
+与提前结算额外要求非空原因，并在同一数据库事务内追加命令账本、状态版本、动作元数据、审计记录和
+注册表内的 lifecycle realtime 事件。Admin 人工进入 Final 会把尚晚于当前时间加冻结
+`final_phase_lead_seconds` 的 live lot 有效截止时间原子收紧到该窗口；默认配置为 900 秒，已经更早结束的
+lot 不会被反向延长，之后的竞价仍可按冻结软截止策略延期。A38 只在 PostgreSQL 完整档且
+`allow_manual_early_settlement = true` 时声明 capability；开关默认关闭。命令接受 `live`/`final`，把所有
+尚未到期的 live lot 有效截止时间收紧到事务时间并交给既有 settlement scheduler/Worker，HTTP 事务不
+直接写成交、义务或履约事实。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
 reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；reconcile 的 retry、succeeded、failed
 决策以及对应的外部引用/失败代码由请求体明确表达；列表投影还提供从版本化 send payload
 派生的 COD 数值，以及从结果 metadata 派生的 `reason_code`、`take_required`、`returned_mail_id`，
@@ -311,8 +317,10 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 重启时只把这些业务字段投影为
 MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全局启用开关仍由 Worker 主配置
 拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
-`501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 会同时决定生命周期
-capability 和锁内人工提前开放校验；计划时间已到的正常开放仍然允许。`[equipment_source]` 会冻结为
+`501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 与
+`allow_manual_early_settlement` 会分别决定人工提前开放、人工提前结算 capability 和对应的锁内校验；
+两个开关都默认关闭，计划时间已到的正常开放仍然允许，SQLite Lite 不声明人工提前结算 capability。
+`[equipment_source]` 会冻结为
 装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时，以及 Admin 手工录入的
 可交易装备开关；后者默认关闭且不放宽来源安全或邮件过滤。固定 HTTPS origin、无重定向、精确 world
 路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是

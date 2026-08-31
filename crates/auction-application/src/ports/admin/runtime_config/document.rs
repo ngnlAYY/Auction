@@ -231,6 +231,8 @@ pub struct AdminRuntimeDashboardMailbox {
 pub struct AdminRuntimeDocument {
     /// 是否允许人工提前开放拍卖；省略时关闭。
     pub allow_manual_early_open: bool,
+    /// 是否允许 Admin 提前结束竞价并把拍卖交给既有结算 Worker；省略时关闭。
+    pub allow_manual_early_settlement: bool,
     /// Auction-BF 管理端可编辑的 MoogleMail world；三个业务区块必须同时存在或同时省略。
     ///
     /// `Option` 只用于保持升级前 runtime 文档和 durable 指纹可重放；Admin HTTP 投影会补齐

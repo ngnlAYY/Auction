@@ -13,6 +13,7 @@ pub enum AuctionLifecycleAction {
     Open,
     Cancel,
     FinalPhase,
+    EarlySettlement,
 }
 
 impl AuctionLifecycleAction {
@@ -23,6 +24,7 @@ impl AuctionLifecycleAction {
             Self::Open => "auction_open",
             Self::Cancel => "auction_cancel",
             Self::FinalPhase => "auction_final_phase",
+            Self::EarlySettlement => "auction_early_settlement",
         }
     }
 }
@@ -48,22 +50,28 @@ impl AuctionLifecycleActorType {
 
 /// 进程启动时冻结的生命周期授权策略。
 ///
-/// Worker 到期开放不依赖该开关；只有 Admin 在 `scheduled_open_at` 之前发起的开放命令需要显式
-/// 授权。策略随 Admin runtime 文件在重启时生效，不能由单次 HTTP 请求覆盖。
+/// Worker 到期开放不依赖该开关；只有 Admin 提前开拍或提前结算需要显式授权。策略随 Admin
+/// runtime 文件在重启时生效，不能由单次 HTTP 请求覆盖。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuctionLifecyclePolicy {
     allow_manual_early_open: bool,
+    allow_manual_early_settlement: bool,
 }
 
 impl AuctionLifecyclePolicy {
-    /// 建立不可变的人工提前开放策略。
-    pub const fn new(allow_manual_early_open: bool) -> Self {
-        Self { allow_manual_early_open }
+    /// 建立不可变的人工生命周期授权策略。
+    pub const fn new(allow_manual_early_open: bool, allow_manual_early_settlement: bool) -> Self {
+        Self { allow_manual_early_open, allow_manual_early_settlement }
     }
 
     /// 返回 Admin capability 使用的安全投影。
     pub const fn allows_manual_early_open(self) -> bool {
         self.allow_manual_early_open
+    }
+
+    /// 返回人工提前结算 capability 使用的安全投影。
+    pub const fn allows_manual_early_settlement(self) -> bool {
+        self.allow_manual_early_settlement
     }
 }
 
@@ -81,7 +89,8 @@ pub struct AuctionLifecycleCommand {
     pub auction_id: AuctionId,
     pub action: AuctionLifecycleAction,
     pub expected_state_version: Option<u64>,
-    pub cancel_reason: Option<String>,
+    /// Cancel 与 EarlySettlement 要求持久化的管理原因；其它动作必须为 `None`。
+    pub reason: Option<String>,
     pub request_hash: super::RequestHash,
     /// HTTP 发起时使用请求边界生成/校验的关联 ID；Worker 内部命令为 `None`。
     pub request_id: Option<String>,
@@ -182,8 +191,14 @@ pub enum AuctionLifecycleEffect {
     Open { manual_override: bool },
     /// 取消尚未开拍的拍卖，并撤回其 pending lot。
     Cancel,
-    /// 进入最终阶段，并原子提交应用层为每个活动代理计算出的转换计划。
-    FinalPhase { proxy_plans: Vec<AuctionFinalProxyPlan> },
+    /// 进入最终阶段，并原子提交代理转换；人工动作还会把有效截止时间收紧到最终窗口。
+    FinalPhase { proxy_plans: Vec<AuctionFinalProxyPlan>, effective_end_at: Option<DateTime<Utc>> },
+    /// 立即结束竞价并把拍卖交给既有 settlement Worker；结算事实仍由 Worker 独占写入。
+    EarlySettlement {
+        proxy_plans: Vec<AuctionFinalProxyPlan>,
+        effective_end_at: DateTime<Utc>,
+        reason: String,
+    },
 }
 
 impl AuctionLifecycleEffect {
@@ -194,6 +209,7 @@ impl AuctionLifecycleEffect {
             Self::Open { .. } => AuctionLifecycleAction::Open,
             Self::Cancel => AuctionLifecycleAction::Cancel,
             Self::FinalPhase { .. } => AuctionLifecycleAction::FinalPhase,
+            Self::EarlySettlement { .. } => AuctionLifecycleAction::EarlySettlement,
         }
     }
 }
@@ -233,6 +249,14 @@ pub trait AuctionLifecycleTransaction: Send {
         auction_id: AuctionId,
     ) -> impl Future<Output = Result<Vec<LotId>, CompetitionTransactionError>> + Send;
 
+    /// 读取 Final 转换使用的锁内 lot 快照；允许截止时间已经到达，但仍要求 world、拍卖和 lot
+    /// 处于可收口的 live/final 形状。调用方不得把该入口用于公开竞价。
+    fn load_final_lot_for_update(
+        &mut self,
+        lot_id: LotId,
+        now: DateTime<Utc>,
+    ) -> impl Future<Output = Result<super::CompetitionSnapshot, CompetitionTransactionError>> + Send;
+
     /// 在同一事务内追加管理审计和可重放的生命周期事件。
     fn append_lifecycle_record(
         &mut self,
@@ -248,6 +272,9 @@ pub trait AuctionLifecycleTransaction: Send {
 pub trait AuctionLifecycleCommandPort: Send + Sync {
     /// 返回与命令执行使用同一启动快照的人工提前开放 capability。
     fn allows_manual_early_open(&self) -> bool;
+
+    /// 返回与命令执行使用同一启动快照的人工提前结算 capability。
+    fn allows_manual_early_settlement(&self) -> bool;
 
     fn execute(
         &self,

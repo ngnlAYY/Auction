@@ -198,6 +198,23 @@ impl Auction {
         self.transition(AuctionStatus::Final, now)
     }
 
+    /// 记录人工提前结算请求；Live 会先进入 Final，Final 则只推进同一聚合版本。
+    ///
+    /// 该方法只关闭新的竞价入口，不直接伪造 Settling/Settled；权威结算仍由持久化 Worker
+    /// claim 推进。
+    pub fn request_early_settlement(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
+        match self.status {
+            AuctionStatus::Live => self.transition(AuctionStatus::Final, now),
+            AuctionStatus::Final => {
+                self.updated_at = now;
+                self.bump_version()
+            }
+            status => {
+                Err(DomainError::InvalidTransition { from: status, to: AuctionStatus::Final })
+            }
+        }
+    }
+
     pub fn begin_settlement(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
         self.transition(AuctionStatus::Settling, now)
     }

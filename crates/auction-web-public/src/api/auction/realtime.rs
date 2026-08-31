@@ -224,6 +224,7 @@ fn event_version(event: &RealtimeEvent) -> Option<(String, i64)> {
             Some((format!("opened:{auction_id}"), payload.get("preview_revision")?.as_i64()?))
         }
         "auction.final_phase_entered"
+        | "auction.early_settlement_requested"
         | "auction.cancelled"
         | "auction.settling"
         | "auction.settled" => {

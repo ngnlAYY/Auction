@@ -1,6 +1,8 @@
 //! MoogleMail typed GET/POST 请求与远端结果分类。
 
-use super::security::{is_html_content_type, is_session_expired, post_allowed};
+use super::security::{
+    is_hentaiverse_battle_response, is_html_content_type, is_session_expired, post_allowed,
+};
 use super::*;
 
 impl MoogleMailClient {
@@ -90,6 +92,14 @@ impl MoogleMailClient {
                 target.world,
                 MoogleMailErrorCategory::SessionExpired,
                 false,
+            ));
+        }
+        if is_hentaiverse_battle_response(&body) {
+            return Err(MoogleMailError::new(
+                target.operation,
+                target.world,
+                MoogleMailErrorCategory::AccountBusy,
+                true,
             ));
         }
         if status == StatusCode::TOO_MANY_REQUESTS {

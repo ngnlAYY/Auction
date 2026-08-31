@@ -40,6 +40,10 @@ pub enum ApplicationError {
     #[error("履约依赖暂时不可用")]
     FulfillmentDependencyUnavailable,
 
+    /// MoogleMail 账号正在战斗，Item Shop 暂不可读；调用方应保留凭据并稍后重试。
+    #[error("履约账号正在战斗，外部余额暂不可读")]
+    FulfillmentAccountBusy,
+
     /// 履约依赖返回了与冻结 owner 身份冲突的事实；调用方必须停止自动推进。
     #[error("履约依赖身份或事实不匹配")]
     FulfillmentDependencyMismatch,

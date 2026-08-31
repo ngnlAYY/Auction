@@ -46,6 +46,7 @@ Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2b
 | preview_catalog_changed | 1 | world, auction_id, preview_revision | 拍卖预览目录变化 |
 | auction.opened | 1 | auction_id, world_id, state_version, preview_revision | 拍卖流 |
 | auction.final_phase_entered | 1 | auction_id, state_version | 拍卖流 |
+| auction.early_settlement_requested | 1 | auction_id, state_version | 拍卖流；Admin 已立即关闭竞价并交给结算 Worker |
 | auction.cancelled | 1 | auction_id, state_version | 拍卖流 |
 | auction.settling | 1 | auction_id, state_version | 拍卖流 |
 | auction.settled | 1 | auction_id, sold_count, unsold_count, state_version | 拍卖流；另有版本 2 |

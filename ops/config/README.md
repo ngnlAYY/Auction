@@ -49,9 +49,11 @@ MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保�
 `worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
 Worker 重启时把它们投影为 MoogleMail 业务快照。transport endpoint、凭据来源、调度、mailbox
 标识和全局 `worker.mooglemail.enabled` 仍由 Worker 主配置拥有。
-`allow_manual_early_open` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
+`allow_manual_early_open`、`allow_manual_early_settlement` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
 `restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
-锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。后者配置 host/path allowlist、
+锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。人工提前结算开关默认关闭，并且只在
+PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live lot 截止时间收紧到事务时间，再由
+既有 settlement Worker 写入结算与履约事实。`[equipment_source]` 配置 host/path allowlist、
 64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔、1 至 30 秒总超时，以及仅用于 Admin 手工
 录入的 `require_tradeable` 开关。该开关默认关闭，关闭时允许 Soulbound 装备，开启时只接受可交易
 装备；MoogleMail 邮件装备过滤仍独立拒绝不可交易来源。适配器始终保留固定 HTTPS origin、无重定向、

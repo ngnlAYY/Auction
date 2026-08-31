@@ -100,6 +100,9 @@ pub(crate) async fn list(
                     manual_early_open: state
                         .lifecycle()
                         .is_some_and(|lifecycle| lifecycle.allows_manual_early_open()),
+                    manual_early_settlement: state
+                        .lifecycle()
+                        .is_some_and(|lifecycle| lifecycle.allows_manual_early_settlement()),
                     manual_intake: state.admin_intake().is_some(),
                     manual_preview_open: true,
                 },

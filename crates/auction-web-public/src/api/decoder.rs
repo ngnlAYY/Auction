@@ -322,7 +322,12 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
                 && positive(payload.get("preview_revision"))
         }
         (
-            Some("auction.final_phase_entered" | "auction.cancelled" | "auction.settling"),
+            Some(
+                "auction.final_phase_entered"
+                | "auction.early_settlement_requested"
+                | "auction.cancelled"
+                | "auction.settling",
+            ),
             Some(1),
         ) => {
             only(payload, &["auction_id", "state_version"], &[])

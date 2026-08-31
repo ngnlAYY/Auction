@@ -197,7 +197,11 @@ pub(crate) fn AuctionData(
                     {
                         p { class: "public-auction-round__end",
                             if is_live_presentation {
-                                {t!("auction-header-ends-in")}
+                                if auction.status == "final" {
+                                    {t!("auction-header-final-ends-in")}
+                                } else {
+                                    {t!("auction-header-ends-in")}
+                                }
                             } else {
                                 {t!("auction-header-opens-in")}
                             }

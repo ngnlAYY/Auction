@@ -20,6 +20,25 @@ impl PostgresCompetitionTransaction {
         lot_id: LotId,
         now: DateTime<Utc>,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
+        self.load_for_update_with_deadline_gate(lot_id, now, true).await
+    }
+
+    /// 生命周期 Final 转换复用竞价快照形状，但允许读取已经到期的 live lot；公开竞价仍必须
+    /// 走带截止门禁的 `load_for_update_inner`。
+    pub(crate) async fn load_for_final_transition_inner(
+        &mut self,
+        lot_id: LotId,
+        now: DateTime<Utc>,
+    ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
+        self.load_for_update_with_deadline_gate(lot_id, now, false).await
+    }
+
+    async fn load_for_update_with_deadline_gate(
+        &mut self,
+        lot_id: LotId,
+        now: DateTime<Utc>,
+        require_unexpired: bool,
+    ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
             let transaction = self.transaction_mut()?;
             sqlx::query(
@@ -69,7 +88,7 @@ impl PostgresCompetitionTransaction {
                         AS policy_proxy_default_mode,
                     COALESCE((locked_auction.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0)
                         AS policy_proxy_max_outbid_uses,
-                    COALESCE((locked_auction.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 60)
+                    COALESCE((locked_auction.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 900)
                         AS policy_final_phase_lead_seconds
                  FROM public.lots AS l
                  INNER JOIN locked_auction ON locked_auction.id = l.auction_id
@@ -102,7 +121,7 @@ impl PostgresCompetitionTransaction {
             return Err(CompetitionTransactionError::InvalidState);
         }
         let effective_end_at = effective_end_at.ok_or(CompetitionTransactionError::InvalidState)?;
-        if now >= effective_end_at {
+        if require_unexpired && now >= effective_end_at {
             return Err(CompetitionTransactionError::InvalidState);
         }
 
@@ -138,7 +157,7 @@ impl PostgresCompetitionTransaction {
                         AS policy_proxy_default_mode,
                     COALESCE((a.policy_snapshot ->> 'proxy_max_outbid_uses')::bigint, 0)
                         AS policy_proxy_max_outbid_uses,
-                    COALESCE((a.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 60)
+                    COALESCE((a.policy_snapshot ->> 'final_phase_lead_seconds')::bigint, 900)
                         AS policy_final_phase_lead_seconds
                  FROM public.lots AS l
                  INNER JOIN public.auctions AS a ON a.id = l.auction_id

@@ -17,6 +17,7 @@ pub(crate) enum AdminAuctionLifecycleAction {
     Open,
     Cancel,
     FinalPhase,
+    EarlySettlement,
 }
 
 impl AdminAuctionLifecycleAction {
@@ -26,6 +27,7 @@ impl AdminAuctionLifecycleAction {
             Self::Open => "open",
             Self::Cancel => "cancel",
             Self::FinalPhase => "final-phase",
+            Self::EarlySettlement => "early-settlement",
         }
     }
 }

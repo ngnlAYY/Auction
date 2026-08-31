@@ -112,6 +112,7 @@ fn valid_runtime_document(value: &Value) -> bool {
         value,
         &[
             "allow_manual_early_open",
+            "allow_manual_early_settlement",
             "dashboard_mailboxes",
             "equipment_filter",
             "equipment_source",
@@ -128,6 +129,7 @@ fn valid_runtime_document(value: &Value) -> bool {
         return false;
     };
     bool_field(document, "allow_manual_early_open").is_some()
+        && bool_field(document, "allow_manual_early_settlement").is_some()
         && valid_worlds(&document["worlds"])
         && valid_equipment_filter(&document["equipment_filter"])
         && valid_mail_templates(&document["mail_templates"])

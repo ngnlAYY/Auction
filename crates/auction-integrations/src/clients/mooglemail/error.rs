@@ -13,6 +13,8 @@ pub enum MoogleMailErrorCategory {
     CredentialUnavailable,
     /// 远端返回登录页或登录跳转，当前 Cookie 已失效。
     SessionExpired,
+    /// 当前账号处于战斗页，Item Shop 暂时无法读取；Cookie 仍然有效。
+    AccountBusy,
     /// 远端明确要求降低请求频率。
     RateLimited,
     /// 网络、超时或远端 5xx 等可重试失败。
@@ -36,6 +38,7 @@ impl MoogleMailErrorCategory {
             Self::Configuration => "configuration",
             Self::CredentialUnavailable => "credential_unavailable",
             Self::SessionExpired => "session_expired",
+            Self::AccountBusy => "account_busy",
             Self::RateLimited => "rate_limited",
             Self::RemoteTemporary => "remote_temporary",
             Self::ResponseTooLarge => "response_too_large",

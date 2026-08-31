@@ -167,6 +167,13 @@ fn lifecycle_event_payload(
                 "state_version": result.state_version,
             }),
         )),
+        AuctionLifecycleEffect::EarlySettlement { .. } => Some((
+            "auction.early_settlement_requested",
+            json!({
+                "auction_id": result.auction_id.as_uuid(),
+                "state_version": result.state_version,
+            }),
+        )),
     };
     if plan.effect.action() != command.action {
         return Err(invalid_state("Lite 生命周期实时事件与命令动作不一致"));

@@ -6,78 +6,53 @@ pub(crate) async fn admin_preview_auction(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(auction_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
 ) -> Response {
-    execute_admin_lifecycle(
-        state,
-        address,
-        auction_id,
-        headers,
-        uri,
-        body,
-        AuctionLifecycleAction::Preview,
-    )
-    .await
+    execute_admin_lifecycle(state, address, auction_id, request, AuctionLifecycleAction::Preview)
+        .await
 }
 
 pub(crate) async fn admin_open_auction(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(auction_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
 ) -> Response {
-    execute_admin_lifecycle(
-        state,
-        address,
-        auction_id,
-        headers,
-        uri,
-        body,
-        AuctionLifecycleAction::Open,
-    )
-    .await
+    execute_admin_lifecycle(state, address, auction_id, request, AuctionLifecycleAction::Open).await
 }
 
 pub(crate) async fn admin_cancel_auction(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(auction_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
 ) -> Response {
-    execute_admin_lifecycle(
-        state,
-        address,
-        auction_id,
-        headers,
-        uri,
-        body,
-        AuctionLifecycleAction::Cancel,
-    )
-    .await
+    execute_admin_lifecycle(state, address, auction_id, request, AuctionLifecycleAction::Cancel)
+        .await
 }
 
 pub(crate) async fn admin_final_phase_auction(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     Path(auction_id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
+) -> Response {
+    execute_admin_lifecycle(state, address, auction_id, request, AuctionLifecycleAction::FinalPhase)
+        .await
+}
+
+pub(crate) async fn admin_early_settlement_auction(
+    State(state): State<AdminApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    Path(auction_id): Path<String>,
+    request: Request,
 ) -> Response {
     execute_admin_lifecycle(
         state,
         address,
         auction_id,
-        headers,
-        uri,
-        body,
-        AuctionLifecycleAction::FinalPhase,
+        request,
+        AuctionLifecycleAction::EarlySettlement,
     )
     .await
 }
@@ -86,11 +61,12 @@ pub(crate) async fn execute_admin_lifecycle(
     state: AdminApiState,
     address: SocketAddr,
     auction_id: String,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
+    request: Request,
     action: AuctionLifecycleAction,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let headers = parts.headers;
+    let uri = parts.uri;
     let (_, identity) = match authenticated_admin_mutation(&state, &headers, address).await {
         Ok(result) => result,
         Err(response) => return *response,
@@ -103,13 +79,11 @@ pub(crate) async fn execute_admin_lifecycle(
         return api_error(StatusCode::BAD_REQUEST, "invalid_auction_id", "拍卖 ID 无效")
             .into_response();
     };
-    let input: AdminAuctionLifecycleRequest = match serde_json::from_slice(&body) {
-        Ok(input) => input,
-        Err(_) => {
-            return api_error(StatusCode::BAD_REQUEST, "invalid_json", "请求 JSON 无效")
-                .into_response();
-        }
-    };
+    let input: AdminAuctionLifecycleRequest =
+        match strict_json::decode_after_guard(&headers, body, 4 << 10).await {
+            Ok(input) => input,
+            Err(response) => return *response,
+        };
     let Some(command_uuid) = parse_canonical_uuid(&input.command_id) else {
         return invalid_lifecycle_command(action);
     };
@@ -119,7 +93,7 @@ pub(crate) async fn execute_admin_lifecycle(
     let Ok(expected_state_version) = u64::try_from(input.expected_state_version) else {
         return invalid_lifecycle_command(action);
     };
-    if action == AuctionLifecycleAction::Cancel {
+    if matches!(action, AuctionLifecycleAction::Cancel | AuctionLifecycleAction::EarlySettlement) {
         let Some(reason) = input.reason.as_deref() else {
             return invalid_lifecycle_command(action);
         };
@@ -148,7 +122,7 @@ pub(crate) async fn execute_admin_lifecycle(
         auction_id: auction_domain::AuctionId::from_uuid(auction_uuid),
         action,
         expected_state_version: Some(expected_state_version),
-        cancel_reason: input.reason,
+        reason: input.reason,
         request_hash,
         request_id: request_id(&headers),
         actor: AuctionLifecycleActor {
@@ -158,7 +132,7 @@ pub(crate) async fn execute_admin_lifecycle(
     };
     let result = match lifecycle.execute(command).await {
         Ok(result) => result,
-        Err(error) => return map_admin_lifecycle_error(error),
+        Err(error) => return map_admin_lifecycle_error(action, error),
     };
     let Some(auction) = result.auction.as_ref() else {
         return internal_error();
@@ -203,6 +177,7 @@ pub(crate) async fn execute_admin_lifecycle(
         AuctionLifecycleAction::Open => "后台拍卖已开拍",
         AuctionLifecycleAction::Cancel => "后台拍卖已取消",
         AuctionLifecycleAction::FinalPhase => "后台拍卖已进入最终阶段",
+        AuctionLifecycleAction::EarlySettlement => "后台拍卖已提前进入结算队列",
     };
     (StatusCode::OK, no_store_headers(), Json(ApiResponse::ok(message, data))).into_response()
 }
@@ -218,6 +193,7 @@ fn invalid_lifecycle_command(action: AuctionLifecycleAction) -> Response {
         AuctionLifecycleAction::Open => "后台拍卖开拍参数无效",
         AuctionLifecycleAction::Cancel => "后台拍卖取消参数无效",
         AuctionLifecycleAction::FinalPhase => "后台拍卖最终阶段参数无效",
+        AuctionLifecycleAction::EarlySettlement => "后台拍卖提前结算参数无效",
     };
     api_error(StatusCode::BAD_REQUEST, "invalid_auction_command", message).into_response()
 }

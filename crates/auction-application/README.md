@@ -13,9 +13,10 @@
 - `src/services/auction/lifecycle/`：Admin/Worker 共享的拍卖生命周期用例；`mod.rs` 持有服务状态、
   命令幂等事务编排和端口实现，`plan.rs` 持有状态迁移与 final proxy 计划，`schedule.rs` 持有后继轮次、
   安全日期计算和稳定 schedule ID；
-  人工提前开放使用启动时冻结的策略，并在事务锁内读取计划开放时间后失败关闭，已到期的计划开放和
-  Worker due 命令不受该人工授权开关影响。生命周期端口会把锁前上下文、动作计划和后端实际写入摘要
-  一并交给同事务审计边界，使 Preview/Open/Cancel/Final 的旧版 action 专属 metadata 可精确恢复，
+  人工提前开放与提前结算使用启动时冻结且默认关闭的策略，并在事务锁内失败关闭；已到期的计划开放和
+  Worker due 命令不受人工提前开放开关影响。人工 Final 把较晚截止时间收紧到冻结的最终窗口并保留
+  软截止竞价；提前结算只把截止时间收紧到当前事务时间，让既有 Worker 继续拥有结算事实。生命周期端口会把锁前上下文、动作计划和后端实际写入摘要
+  一并交给同事务审计边界，使 Preview/Open/Cancel/Final 与新增 EarlySettlement 的 action metadata 可精确恢复，
   又不把 PostgreSQL/SQLite 行模型泄漏到应用层。
 - `src/ports/auction/slow_proxy.rs`、`src/services/auction/competition.rs` 与
   `src/services/auction/competition/legacy_ledger.rs`：Public 竞价及 Worker slow due 命令端口和用例；

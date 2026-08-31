@@ -35,10 +35,20 @@ pub(super) async fn apply_lifecycle_plan_sqlite(
                 cancel::apply_cancel_plan_sqlite(transaction, &auction).await?;
             Ok(AuctionLifecycleWriteSummary { return_obligation_count })
         }
-        AuctionLifecycleEffect::FinalPhase { proxy_plans } => {
-            final_phase::apply_final_plan_sqlite(transaction, command, &auction, proxy_plans)
-                .await?;
+        AuctionLifecycleEffect::FinalPhase { proxy_plans, effective_end_at } => {
+            final_phase::apply_final_plan_sqlite(
+                transaction,
+                command,
+                &auction,
+                proxy_plans,
+                effective_end_at,
+            )
+            .await?;
             Ok(AuctionLifecycleWriteSummary::default())
+        }
+        // SQLite Lite 没有 settlement Worker；不能只停止竞价却留下永远无法结算的拍卖。
+        AuctionLifecycleEffect::EarlySettlement { .. } => {
+            Err(CompetitionTransactionError::InvalidState)
         }
     }
 }

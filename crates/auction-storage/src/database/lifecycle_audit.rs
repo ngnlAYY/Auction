@@ -106,7 +106,7 @@ pub(crate) fn lifecycle_parent_audit_record(
                 }),
             )
         }
-        AuctionLifecycleEffect::FinalPhase { .. } => {
+        AuctionLifecycleEffect::FinalPhase { effective_end_at, .. } => {
             if context.auction.status != AuctionStatus::Live
                 || plan.auction.status != AuctionStatus::Final
                 || preview_item_count.is_some()
@@ -119,6 +119,27 @@ pub(crate) fn lifecycle_parent_audit_record(
                 json!({
                     "auction_id": command.auction_id.as_uuid().to_string(),
                     "state_version": result.state_version,
+                    "effective_end_at": effective_end_at,
+                }),
+            )
+        }
+        AuctionLifecycleEffect::EarlySettlement { effective_end_at, reason, .. } => {
+            if !matches!(context.auction.status, AuctionStatus::Live | AuctionStatus::Final)
+                || plan.auction.status != AuctionStatus::Final
+                || preview_item_count.is_some()
+                || write_summary != AuctionLifecycleWriteSummary::default()
+                || reason.trim().is_empty()
+            {
+                return Err(invalid_audit("提前结算生命周期审计状态不一致"));
+            }
+            (
+                "auction.early_settlement",
+                json!({
+                    "auction_id": command.auction_id.as_uuid().to_string(),
+                    "previous_status": auction_status_name(context.auction.status),
+                    "state_version": result.state_version,
+                    "effective_end_at": effective_end_at,
+                    "reason": reason,
                 }),
             )
         }
@@ -145,8 +166,10 @@ pub(crate) fn final_proxy_audit_record(
 ) -> Result<LifecycleAuditRecord, CompetitionTransactionError> {
     let plan = &proxy_plan.competition;
     plan.validate().map_err(|_| invalid_audit("最终阶段代理审计计划无效"))?;
-    if parent.action != AuctionLifecycleAction::FinalPhase
-        || parent.command_id.is_nil()
+    if !matches!(
+        parent.action,
+        AuctionLifecycleAction::FinalPhase | AuctionLifecycleAction::EarlySettlement
+    ) || parent.command_id.is_nil()
         || proxy_plan.command.command_id.is_nil()
         || proxy_plan.command.command_kind != "final_proxy_transition"
         || proxy_plan.command.result_code != "accepted"

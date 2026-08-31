@@ -73,9 +73,11 @@ competition 的普通依赖失败使用旧版 503 `temporarily_unavailable`，�
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
-只保存摘要。Admin 的拍卖 `preview`、`open`、`cancel` 和 `final-phase` 命令也已接入
+只保存摘要。Admin 的拍卖 `preview`、`open`、`cancel`、`final-phase` 和 `early-settlement` 命令也已接入
 生命周期应用端口：命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件
-在同一 PostgreSQL/SQLite 事务内提交。Public `/api/v1/events` 已接入两套数据库的持久化
+在同一事务内提交。人工 Final 收紧较晚的 live lot 截止时间但保留竞价和软截止；提前结算受默认关闭的
+runtime capability 保护，只在 PostgreSQL 完整档要求理由并把到期事实交给既有 Worker，HTTP 不直接
+写结算结果。Public `/api/v1/events` 已接入两套数据库的持久化
 Catch-up，`/api/v1/ws` 提供带 Public session 的只读服务端推送；连接尝试与 mutation 独立限流，
 只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。Public `/status`
 页面已在已认证会话下自动订阅该流，收到

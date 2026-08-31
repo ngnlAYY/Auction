@@ -253,7 +253,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000022` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000023` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -266,7 +266,8 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 不改写既有人工对账 signal 的 fingerprint 或历史事实；`000021` 保存 Worker 发布的非敏感启用
 状态，并让成功 scan 与 signal 观察在同一事务推进扫描水位，Admin 不再把功能关闭或空结果误报为
 告警运行异常，也不读取 Worker 私有 TOML；`000022` 拆开配置状态发布时间与扫描水位的时钟语义，
-避免未来时间的扫描水位静默阻断后续启停发布；
+避免未来时间的扫描水位静默阻断后续启停发布；`000023` 为 HV 战斗页导致的 Item Shop 暂不可读
+增加独立 `busy` 余额状态，保留有效 Cookie 和最后成功余额，不把该可恢复状态误报为协议漂移；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -304,14 +305,20 @@ command ledger/竞价事务也已接入配置、应用端口与会话/竞价表�
 本次 bid，HTTP 不在提交后读取账户投影。旧 `OK + ProxyResult` 与历史 `accepted + CompetitionPlan`
 都经同一防腐层严格重放，历史新版结果只在只读事务按授权版本读取转换历史和冻结策略 quota；
 代理重入的 `usage_number` 在 lot 锁内按用户历史最大值递增，避免重入与命令重放混淆，
-不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase 已通过统一应用端口接入；
+不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase/early-settlement 已通过统一应用端口接入；
 Preview 在同一权威事务内、任何状态写入或 intake target 转移前要求至少一个 pending lot，PostgreSQL 与
 SQLite Lite 都拒绝会在 Open 阶段永久失败的空预览场次，
 命令请求携带 `expected_state_version`，取消动作还必须携带原因；存储事务在锁内校验版本并写入取消时间、原因和操作者，随后与命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件在同一数据库事务内提交；Admin A25 规则 GET/POST/PUT 已接入规则 owner，PostgreSQL 使用独立 Serializable revision CAS、`rules_admin_commands` 幂等账本和追加审计，SQLite 只提供规则读取；A05 论坛预览已接入本地 HTML/文本解析端口与管理端契约，限制单次输入为 2 MiB，并只返回 catalog、posts、warnings 等安全预览数据；它不发起远程论坛请求、不写数据库，也不把本地解析结果误报成远程发布成功。A33 Admin 审计已接入两套数据库的追加式安全只读投影、严格精确筛选、keyset/数字分页和 metadata JSON object 校验；数字页的 total 与记录在同一读取事务内取得，管理端不接触原始 SQL 行。Public
 `allow_manual_early_open` 在 Admin 启动时冻结为应用策略，HTTP capability 使用同一来源；计划时间
 之前的人工开放会在存储事务锁定拍卖并读取 `scheduled_open_at` 后失败关闭，计划时间已到的开放和
 Worker due 命令不受影响。命令账本重放先于当前策略检查，已经提交的结果不会因重启后配置变化而
-失去幂等性。
+失去幂等性。人工进入 Final 会把 live lot 中较晚的有效截止时间收紧到事务时间加冻结的
+`final_phase_lead_seconds`，默认即最后 15 分钟；已经更早结束的 lot 不会被延长，后续有效竞价继续
+使用冻结的软截止策略。`allow_manual_early_settlement` 也在 Admin 启动时冻结且默认关闭；仅 PostgreSQL
+完整档会声明 capability。启用后，Admin 可从 Live 或 Final 把所有尚未到期的 live lot 截止时间收紧到
+同一事务时间并写入理由、审计和 realtime 事件；命令只使既有 settlement scheduler 立即可领取，实际
+成交、补偿、义务、recovery 与履约事实仍由 Worker 独占的结算事务写入。SQLite Lite 没有 settlement
+owner，因此始终不提供该能力。
 
 `/api/v1/events` 已从 PostgreSQL/SQLite 持久化事件表提供带 sequence 游标的 Catch-up，`/api/v1/ws`
 只提供有界的 Public session 服务端推送，恢复仍以 Catch-up/权威快照为准；

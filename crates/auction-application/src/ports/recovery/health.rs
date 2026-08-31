@@ -13,6 +13,7 @@ pub enum RecoveryBalanceStatus {
     Ok,
     Low,
     Stale,
+    Busy,
     Unavailable,
 }
 
@@ -24,6 +25,7 @@ impl RecoveryBalanceStatus {
             Self::Ok => "ok",
             Self::Low => "low",
             Self::Stale => "stale",
+            Self::Busy => "busy",
             Self::Unavailable => "unavailable",
         }
     }
@@ -92,7 +94,11 @@ impl RecoveryHealthUpdate {
             {
                 return Err("recovery health 余额状态缺少观测值");
             }
-            RecoveryBalanceStatus::Unknown | RecoveryBalanceStatus::Unavailable if has_balance => {
+            RecoveryBalanceStatus::Unknown
+            | RecoveryBalanceStatus::Busy
+            | RecoveryBalanceStatus::Unavailable
+                if has_balance =>
+            {
                 return Err("recovery health 不可用余额状态不应携带观测值");
             }
             _ => {}

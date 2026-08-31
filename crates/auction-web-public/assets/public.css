@@ -1688,22 +1688,24 @@
 }
 
 .public-auction-catalog__actions {
+  min-inline-size: 22rem;
   text-align: left;
 }
 
 .public-auction-catalog__actions-list {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
 }
 
 .public-auction-catalog__leading-reason {
-  flex-basis: 100%;
+  flex: 0 0 auto;
+  min-inline-size: 0;
   max-inline-size: 18rem;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .public-auction-catalog__inline-form {
@@ -2647,6 +2649,11 @@
     flex-wrap: wrap;
     inline-size: 100%;
     justify-content: flex-start;
+  }
+
+  .public-auction-catalog__leading-reason {
+    flex: 0 1 auto;
+    white-space: normal;
   }
 
   .public-auction-catalog__actions-list > a,

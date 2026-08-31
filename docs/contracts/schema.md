@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000022`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000023`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000008` 作为共有能力子集及生命周期/领先时间/lot 结束时间修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
@@ -47,7 +47,8 @@ PostgreSQL `000017` 固定 Isekai carrier 的派发 world；`000018` 为 live/so
 kind/identity 闭集，为已证明的 MoogleMail 退信提供独立提醒，同时保留总人工对账 signal；
 `000021` 保存 Worker 发布的非敏感启用状态和成功扫描水位，Admin 不从 signal 是否为空推断配置；
 `000022` 解除配置状态发布时间与扫描水位之间不存在的先后约束，状态发布仍按自身时间单调校验，
-成功扫描只推进自己的水位。
+成功扫描只推进自己的水位；`000023` 扩展 recovery 余额状态闭集，以 `busy` 表达 HV 账号仍有效
+但因处于战斗页而暂时无法读取 Item Shop 的可恢复状态。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -110,6 +111,11 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 取消截止和 slow 间隔等遗留规则列在同一创建事务中写入；配置更新不会回溯改变已创建拍卖。
 竞价和取消事务在锁内读取该快照，恢复 PPM、代理开关/默认模式/次数上限和 final phase 参数。
 
+A38 不新增表或修改结算事实 schema：`auction_early_settlement` 继续写入通用
+`auction_commands`，理由与动作上下文进入追加式 `audit_records`，截止时间只更新 `auctions`/`lots`
+现有字段，并追加已登记的 realtime 事件。事务提交后仍由 PostgreSQL settlement scheduler 建立
+workflow 并写入下方结算、义务与恢复表；SQLite Lite 没有该 owner，因此不声明 capability。
+
 A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 复用 `auctions`、`lots`、
 `auction_commands`、`audit_records`、`realtime_streams`/`realtime_events`，撤回时再写入下方
 已有的 `settlement_obligations` 与 `settlement_obligation_fulfillments`。应用层仍只通过窄端口
@@ -128,7 +134,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | settlement_recoveries | 000005_recovery_observability_forum | auction-application：settlement-recovery | 完整档 | 付款/交付异常恢复聚合 |
 | settlement_recovery_actions | 000005_recovery_observability_forum | auction-application：settlement-recovery | 完整档 | 恢复动作及 durable claim |
 | settlement_recovery_commands | 000005_recovery_observability_forum | auction-application：settlement-recovery | 完整档 | 恢复确认命令幂等账本 |
-| settlement_recovery_health | 000005_recovery_observability_forum | auction-application + auction-storage + auction-jobs | 完整档 | 恢复阻塞和健康投影；Worker 刷新，Admin 只读 |
+| settlement_recovery_health | 000005_recovery_observability_forum + 000023_recovery_balance_busy | auction-application + auction-storage + auction-jobs | 完整档 | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用以 `busy` 投影并保留最后成功余额 |
 | deliveries | 000001_baseline | auction-application + auction-jobs：delivery | 完整档 | 外部投递 outbox、claim 和重试 |
 | delivery_admin_commands | 000005_delivery_admin_commands | auction-application：delivery | 完整档 | Admin 交付命令幂等账本 |
 

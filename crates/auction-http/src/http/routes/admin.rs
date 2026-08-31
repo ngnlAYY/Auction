@@ -17,7 +17,8 @@ pub(crate) const ADMIN_CSRF_COOKIE: &str = "auction_admin_csrf";
 pub(crate) const ADMIN_CSRF_HEADER: &str = "x-csrf-token";
 
 pub(crate) use lifecycle::{
-    admin_cancel_auction, admin_final_phase_auction, admin_open_auction, admin_preview_auction,
+    admin_cancel_auction, admin_early_settlement_auction, admin_final_phase_auction,
+    admin_open_auction, admin_preview_auction,
 };
 pub(crate) use recovery::admin_confirm_recovery;
 pub(crate) use reports::{admin_recovery_report, admin_settlement_report};

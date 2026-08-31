@@ -23,6 +23,7 @@ pub(crate) fn runtime_status(value: &str) -> String {
     match value {
         "ok" | "ready" | "available" | "fresh" => t!("dashboard-runtime-status-good"),
         "degraded" | "low" | "stale" | "starting" => t!("dashboard-runtime-status-warning"),
+        "busy" => t!("dashboard-legacy-recovery-balance-busy"),
         "disabled" => t!("dashboard-runtime-status-disabled"),
         "unknown" | "unavailable" | "stopping" => t!("dashboard-runtime-status-unavailable"),
         _ => value.to_owned(),
@@ -32,7 +33,7 @@ pub(crate) fn runtime_status(value: &str) -> String {
 pub(crate) fn runtime_tone(value: &str) -> String {
     match value {
         "ok" | "ready" | "available" | "fresh" => "positive".to_owned(),
-        "degraded" | "low" | "stale" | "starting" => "warning".to_owned(),
+        "degraded" | "low" | "stale" | "starting" | "busy" => "warning".to_owned(),
         "unknown" | "unavailable" | "stopping" => "danger".to_owned(),
         _ => "neutral".to_owned(),
     }

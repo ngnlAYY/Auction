@@ -323,6 +323,11 @@ pub(super) async fn configure_state(
     )?);
     let lifecycle_policy = AuctionLifecyclePolicy::new(
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
+        store.backend() == DatabaseBackend::Postgres
+            && config
+                .admin_runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.allow_manual_early_settlement),
     );
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
         Arc::new(DatabaseAuctionLifecycleCommands::new(

@@ -21,6 +21,24 @@ impl SqliteCompetitionTransaction {
         lot_id: LotId,
         now: DateTime<Utc>,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
+        self.load_for_update_with_deadline_gate(lot_id, now, true).await
+    }
+
+    /// Lite 生命周期 Final 转换允许读取已到期 lot，但不放宽公开竞价的截止时间门禁。
+    pub(crate) async fn load_for_final_transition_inner(
+        &mut self,
+        lot_id: LotId,
+        now: DateTime<Utc>,
+    ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
+        self.load_for_update_with_deadline_gate(lot_id, now, false).await
+    }
+
+    async fn load_for_update_with_deadline_gate(
+        &mut self,
+        lot_id: LotId,
+        now: DateTime<Utc>,
+        require_unexpired: bool,
+    ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
             let connection = self.connection_mut()?;
             sqlx::query(
@@ -43,7 +61,7 @@ impl SqliteCompetitionTransaction {
                         AS policy_proxy_default_mode,
                     COALESCE(CAST(json_extract(a.policy_snapshot, '$.proxy_max_outbid_uses') AS INTEGER), 0)
                         AS policy_proxy_max_outbid_uses,
-                    COALESCE(CAST(json_extract(a.policy_snapshot, '$.final_phase_lead_seconds') AS INTEGER), 60)
+                    COALESCE(CAST(json_extract(a.policy_snapshot, '$.final_phase_lead_seconds') AS INTEGER), 900)
                         AS policy_final_phase_lead_seconds
                  FROM lots AS l
                  INNER JOIN auctions AS a ON a.id = l.auction_id
@@ -80,7 +98,7 @@ impl SqliteCompetitionTransaction {
             return Err(CompetitionTransactionError::InvalidState);
         }
         let effective_end_at = effective_end_at.ok_or(CompetitionTransactionError::InvalidState)?;
-        if now >= effective_end_at {
+        if require_unexpired && now >= effective_end_at {
             return Err(CompetitionTransactionError::InvalidState);
         }
 

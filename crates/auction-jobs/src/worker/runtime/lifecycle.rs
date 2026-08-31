@@ -38,7 +38,7 @@ where
         auction_id: claim.auction_id,
         action,
         expected_state_version: None,
-        cancel_reason: None,
+        reason: None,
         request_hash,
         request_id: None,
         actor: AuctionLifecycleActor {

@@ -35,6 +35,12 @@ pub(super) fn lifecycle_actions(
         }
         "live" => {
             actions.push(AdminAuctionLifecycleAction::FinalPhase);
+            if capabilities.manual_early_settlement {
+                actions.push(AdminAuctionLifecycleAction::EarlySettlement);
+            }
+        }
+        "final" if capabilities.manual_early_settlement => {
+            actions.push(AdminAuctionLifecycleAction::EarlySettlement);
         }
         _ => {}
     }
@@ -47,6 +53,9 @@ pub(super) fn lifecycle_action_label(action: AdminAuctionLifecycleAction) -> Str
         AdminAuctionLifecycleAction::Open => t!("admin-auctions-action-open"),
         AdminAuctionLifecycleAction::Cancel => t!("admin-auctions-action-cancel"),
         AdminAuctionLifecycleAction::FinalPhase => t!("admin-auctions-action-final"),
+        AdminAuctionLifecycleAction::EarlySettlement => {
+            t!("admin-auctions-action-early-settlement")
+        }
     }
 }
 
@@ -55,9 +64,9 @@ pub(super) fn lifecycle_action_button_class(action: AdminAuctionLifecycleAction)
         AdminAuctionLifecycleAction::Preview | AdminAuctionLifecycleAction::Open => {
             "admin-btn-primary"
         }
-        AdminAuctionLifecycleAction::Cancel | AdminAuctionLifecycleAction::FinalPhase => {
-            "admin-btn-danger"
-        }
+        AdminAuctionLifecycleAction::Cancel
+        | AdminAuctionLifecycleAction::FinalPhase
+        | AdminAuctionLifecycleAction::EarlySettlement => "admin-btn-danger",
     }
 }
 
@@ -65,6 +74,9 @@ pub(super) fn lifecycle_action_submit_label(action: AdminAuctionLifecycleAction)
     match action {
         AdminAuctionLifecycleAction::FinalPhase => t!("admin-auctions-action-confirm"),
         AdminAuctionLifecycleAction::Cancel => t!("admin-auctions-action-cancel-confirm"),
+        AdminAuctionLifecycleAction::EarlySettlement => {
+            t!("admin-auctions-action-early-settlement-confirm")
+        }
         AdminAuctionLifecycleAction::Preview | AdminAuctionLifecycleAction::Open => {
             lifecycle_action_label(action)
         }
@@ -88,6 +100,9 @@ pub(super) fn lifecycle_action_confirm_title(
         AdminAuctionLifecycleAction::FinalPhase => {
             t!("admin-auctions-confirm-final", number: auction_sequence)
         }
+        AdminAuctionLifecycleAction::EarlySettlement => {
+            t!("admin-auctions-confirm-early-settlement", number: auction_sequence)
+        }
     }
 }
 
@@ -97,6 +112,9 @@ pub(super) fn lifecycle_action_confirm_note(action: AdminAuctionLifecycleAction)
         AdminAuctionLifecycleAction::Open => t!("admin-auctions-confirm-open-note"),
         AdminAuctionLifecycleAction::Cancel => t!("admin-auctions-confirm-cancel-note"),
         AdminAuctionLifecycleAction::FinalPhase => t!("admin-auctions-confirm-final-note"),
+        AdminAuctionLifecycleAction::EarlySettlement => {
+            t!("admin-auctions-confirm-early-settlement-note")
+        }
     }
 }
 
@@ -106,5 +124,8 @@ pub(crate) fn lifecycle_action_success_label(action: AdminAuctionLifecycleAction
         AdminAuctionLifecycleAction::Open => t!("admin-auctions-action-open-success"),
         AdminAuctionLifecycleAction::Cancel => t!("admin-auctions-action-cancel-success"),
         AdminAuctionLifecycleAction::FinalPhase => t!("admin-auctions-action-final-success"),
+        AdminAuctionLifecycleAction::EarlySettlement => {
+            t!("admin-auctions-action-early-settlement-success")
+        }
     }
 }

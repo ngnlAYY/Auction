@@ -134,7 +134,7 @@ pub struct AuctionEconomicsConfig {
     pub proxy_slow_interval_seconds: i64,
     /// 单个代理授权允许的 outbid 使用次数，省略时为 3；0 表示不限制。
     pub proxy_max_outbid_uses: u32,
-    /// final phase 领先秒数，范围 1-604800；省略时为 60 秒。
+    /// final phase 领先秒数，范围 1-604800；省略时为 900 秒。
     pub final_phase_lead_seconds: i64,
 }
 
@@ -150,7 +150,7 @@ impl Default for AuctionEconomicsConfig {
             proxy_default_mode: "fast".to_owned(),
             proxy_slow_interval_seconds: 600,
             proxy_max_outbid_uses: 3,
-            final_phase_lead_seconds: 60,
+            final_phase_lead_seconds: 900,
         }
     }
 }

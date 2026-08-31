@@ -6,6 +6,8 @@
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
+# 可选：是否允许 Admin 提前结束竞价并进入结算队列；默认 false，修改后需重启。
+allow_manual_early_settlement = false
 
 # 可选区块：主世界 MoogleMail 入站策略；与 isekai、equipment_filter、mail_templates 同时省略时兼容升级前文档。
 [worlds.main]

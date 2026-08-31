@@ -84,8 +84,8 @@ proxy_default_mode = "fast"
 proxy_slow_interval_seconds = 600
 # 可选：代理 outbid 使用次数上限，默认 3；0 表示不限制。
 proxy_max_outbid_uses = 3
-# 可选：final phase 领先秒数，范围 1-604800，默认 60。
-final_phase_lead_seconds = 60
+# 可选：final phase 领先秒数，范围 1-604800，默认 900（15 分钟）。
+final_phase_lead_seconds = 900
 
 [auction.settlement]
 # 可选：版本与模式；模式只能是 hold_curve_v1 或 legacy_zero_v0。

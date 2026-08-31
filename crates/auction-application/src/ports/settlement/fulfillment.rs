@@ -225,9 +225,11 @@ pub trait SettlementFulfillmentEvidenceReader: Send + Sync {
         external_mail_id: String,
     ) -> ApplicationFuture<'_, SettlementFulfillmentSentEvidence>;
 
+    /// 使用应用层冻结的观测时间读取余额，避免外部适配器把未来时间写入健康投影。
     fn read_balance(
         &self,
         world: SettlementWorld,
+        observed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentBalanceEvidence>;
 }
 
