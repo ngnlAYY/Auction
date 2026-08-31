@@ -12,7 +12,9 @@
   --color-border-subtle: #232b37;
   --color-bg-muted: #12171e;
   --color-status-ok-muted: rgb(52 211 153 / 12%);
+  --color-status-warn-muted: rgb(251 191 36 / 12%);
   --color-status-error-muted: rgb(248 113 113 / 12%);
+  --color-accent-muted: rgb(217 164 65 / 12%);
   --radius-round: 999rem;
   --z-float: 40;
   --z-dialog: 100;
@@ -948,7 +950,7 @@
   opacity: 0.6;
 }
 
-/* 拍卖与 lot 表保留旧版的原生表格、状态徽章和动作组。 */
+/* 拍卖表保留旧版基线；lot 列表在同一变量体系内强化信息层级和响应式阅读。 */
 .admin-auctions__filters {
   align-items: flex-end;
   gap: var(--space-2);
@@ -980,35 +982,40 @@
 }
 
 .admin-auction-lot-table {
+  min-inline-size: 64rem;
   table-layout: fixed;
 }
 
 .admin-auction-lot-code {
-  inline-size: 6.333%;
+  inline-size: 5.5rem;
 }
 
 .admin-auction-lot-equipment {
-  inline-size: 14.583%;
+  inline-size: 14rem;
 }
 
 .admin-auction-lot-seller {
-  inline-size: 6.333%;
+  inline-size: 7rem;
 }
 
 .admin-auction-lot-submission {
-  inline-size: 6.417%;
+  inline-size: 6rem;
 }
 
 .admin-auction-lot-status {
-  inline-size: 8.833%;
+  inline-size: 7rem;
 }
 
 .admin-auction-lot-start {
-  inline-size: 9.833%;
+  inline-size: 6.5rem;
 }
 
 .admin-auction-lot-current {
-  inline-size: 12%;
+  inline-size: 6.5rem;
+}
+
+.admin-auction-lot-actions {
+  inline-size: 11.5rem;
 }
 
 .admin-auctions__row:hover,
@@ -3371,4 +3378,217 @@
   gap: var(--admin-space-tiny);
   justify-items: start;
   font-size: var(--text-base);
+}
+
+/* 管理拍品列表使用独立的高密度数据表层级；其它 Admin 表格暂不受影响。 */
+.admin-auction-lot-table-wrap {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+  box-shadow: var(--shadow-1);
+}
+
+.admin-auction-lot-table th,
+.admin-auction-lot-table td {
+  padding: var(--space-3);
+  vertical-align: middle;
+}
+
+.admin-auction-lot-table th {
+  border-block-end-color: var(--color-border-strong);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  font-size: var(--admin-text-label);
+  letter-spacing: 0.02em;
+}
+
+.admin-auction-lot-table tbody {
+  background: var(--color-bg-muted);
+}
+
+.admin-auction-lot-table tbody tr:last-child > td {
+  border-block-end: 0;
+}
+
+.admin-lots__row:hover,
+.admin-lots__row:focus-within {
+  background: var(--color-surface);
+}
+
+.admin-auction-lot-start,
+.admin-auction-lot-current,
+.admin-auction-lot-actions {
+  text-align: right !important;
+}
+
+.admin-lots__code {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 1.75rem;
+  padding-inline: var(--space-2);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-full);
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+  font-family: var(--font-mono);
+  font-size: var(--admin-text-label);
+  font-weight: var(--font-weight-strong);
+  white-space: nowrap;
+}
+
+.admin-lots__equipment-name,
+.admin-lots__seller-name {
+  max-inline-size: 100%;
+  vertical-align: middle;
+}
+
+.admin-lots__equipment-name {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.admin-lots__seller-name,
+.admin-lots__empty-value,
+.admin-lots__start-price {
+  color: var(--color-text-muted);
+}
+
+.admin-lots__price-value {
+  white-space: nowrap;
+}
+
+.admin-lots__current-price {
+  color: var(--color-text);
+}
+
+.admin-lots__status-cell .admin-auction-badge {
+  white-space: nowrap;
+}
+
+.admin-lots__status--pending {
+  border-color: var(--color-status-warn);
+  color: var(--color-status-warn);
+  background: var(--color-status-warn-muted);
+}
+
+.admin-lots__status--live,
+.admin-lots__status--sold {
+  border-color: var(--color-status-ok);
+  color: var(--color-status-ok);
+  background: var(--color-status-ok-muted);
+}
+
+.admin-lots__status--unsold,
+.admin-lots__status--withdrawn {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.admin-lots__slow-schedule {
+  margin-block-start: var(--space-1);
+  line-height: 1.35;
+}
+
+.admin-lots__actions-cell .admin-auction-actions {
+  justify-content: flex-end;
+}
+
+.admin-lots__actions-cell button {
+  white-space: nowrap;
+}
+
+.admin-lots__actions-cell .action-feedback {
+  flex-basis: 100%;
+  text-align: start;
+}
+
+@media (max-width: 75rem) {
+  .admin-auction-lot-table-wrap {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .admin-auction-lot-table {
+    display: block;
+    min-inline-size: 0;
+    table-layout: auto;
+  }
+
+  .admin-auction-lot-table thead {
+    display: none;
+  }
+
+  .admin-auction-lot-table tbody {
+    display: grid;
+    gap: var(--space-3);
+    background: transparent;
+  }
+
+  .admin-auction-lot-table .admin-lots__row {
+    display: block;
+    padding: var(--space-3) var(--space-4);
+    border: var(--border-width) solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-muted);
+    box-shadow: var(--shadow-1);
+  }
+
+  .admin-auction-lot-table .admin-lots__row > td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 30%) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2);
+    min-inline-size: 0;
+    padding: var(--space-2) 0;
+    border: 0;
+    text-align: start !important;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-auction-lot-table .admin-lots__row > td::before {
+    color: var(--color-text-muted);
+    content: attr(data-label);
+    font-size: var(--admin-text-label);
+    font-weight: 600;
+  }
+
+  .admin-auction-lot-table .admin-lots__row > .admin-auction-num > * {
+    justify-self: start;
+  }
+
+  .admin-auction-lot-table .admin-lots__slow-schedule {
+    grid-column: 2;
+  }
+
+  .admin-auction-lot-table .admin-auction-actions {
+    align-items: center;
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .admin-auction-lot-table .admin-auction-dialog-row,
+  .admin-auction-lot-table .admin-auction-dialog-row > td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+}
+
+@media (max-width: 38rem) {
+  .admin-auction-lot-table .admin-lots__row {
+    padding-inline: var(--space-3);
+  }
+
+  .admin-auction-lot-table .admin-lots__row > td {
+    grid-template-columns: minmax(6.5rem, 36%) minmax(0, 1fr);
+  }
+
+  .admin-auction-lot-table .admin-lots__actions-cell .admin-auction-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }

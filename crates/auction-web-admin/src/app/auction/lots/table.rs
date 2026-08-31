@@ -49,18 +49,21 @@ pub(super) fn AdminLotTable(
                         reload_generation,
                     }
                 }
-                div { class: "admin-auction-table-wrap",
+                div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
                     table { class: "admin-auction-table admin-auction-lot-table",
+                        caption { class: "admin-visually-hidden",
+                            {t!("page-auction-lots-title", auction: page.auction.sequence)}
+                        }
                         thead {
                             tr {
-                                th { class: "admin-auction-lot-code", {t!("admin-lots-code")} }
-                                th { class: "admin-auction-lot-equipment", {t!("admin-lots-equipment")} }
-                                th { class: "admin-auction-lot-seller", {t!("admin-lots-seller")} }
-                                th { class: "admin-auction-lot-submission", {t!("admin-lots-submission")} }
-                                th { class: "admin-auction-lot-status", {t!("admin-lots-status")} }
-                                th { class: "admin-auction-lot-start", {t!("admin-lots-start-price")} }
-                                th { class: "admin-auction-lot-current", {t!("admin-lots-price")} }
-                                th { {t!("admin-lots-actions")} }
+                                th { scope: "col", class: "admin-auction-lot-code", {t!("admin-lots-code")} }
+                                th { scope: "col", class: "admin-auction-lot-equipment", {t!("admin-lots-equipment")} }
+                                th { scope: "col", class: "admin-auction-lot-seller", {t!("admin-lots-seller")} }
+                                th { scope: "col", class: "admin-auction-lot-submission", {t!("admin-lots-submission")} }
+                                th { scope: "col", class: "admin-auction-lot-status", {t!("admin-lots-status")} }
+                                th { scope: "col", class: "admin-auction-lot-start", {t!("admin-lots-start-price")} }
+                                th { scope: "col", class: "admin-auction-lot-current", {t!("admin-lots-price")} }
+                                th { scope: "col", class: "admin-auction-lot-actions", {t!("admin-lots-actions")} }
                             }
                         }
                         tbody {
