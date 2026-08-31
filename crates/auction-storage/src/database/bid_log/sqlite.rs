@@ -59,6 +59,7 @@ pub(super) async fn list_sqlite(
     }
 
     let lot_id_blob = request.lot_id.map(uuid_blob);
+    // Lite 与完整档复用同一公开可见性规则，不能让部署档位改变竞价历史语义。
     let rows = sqlx::query(
         "WITH boundary AS (
             SELECT
@@ -99,6 +100,21 @@ pub(super) async fn list_sqlite(
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
+           )
+           AND NOT (
+                command.command_kind = 'place_bid'
+                AND b.mechanism = 'ordinary'
+                AND EXISTS (
+                    SELECT 1
+                    FROM bids AS proxy_response
+                    WHERE proxy_response.command_id = b.command_id
+                      AND proxy_response.lot_id = b.lot_id
+                      AND proxy_response.fact_index = b.fact_index + 1
+                      AND proxy_response.accepted_state_version = b.accepted_state_version + 1
+                      AND proxy_response.bidder_user_id <> b.bidder_user_id
+                      AND proxy_response.amount >= b.amount
+                      AND proxy_response.mechanism = 'proxy'
+                )
            )
            AND (
                 boundary.use_boundary = 0
@@ -159,6 +175,7 @@ pub(super) async fn list_sqlite(
     let total = if request.cursor.is_some() {
         None
     } else {
+        // total 必须复用明细的可见性规则，避免页数和游标投影错位。
         Some(
             sqlx::query_scalar::<_, i64>(
                 "SELECT count(*)
@@ -177,6 +194,21 @@ pub(super) async fn list_sqlite(
                    AND command.command_kind IN (
                         'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
+                   )
+                   AND NOT (
+                        command.command_kind = 'place_bid'
+                        AND b.mechanism = 'ordinary'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM bids AS proxy_response
+                            WHERE proxy_response.command_id = b.command_id
+                              AND proxy_response.lot_id = b.lot_id
+                              AND proxy_response.fact_index = b.fact_index + 1
+                              AND proxy_response.accepted_state_version = b.accepted_state_version + 1
+                              AND proxy_response.bidder_user_id <> b.bidder_user_id
+                              AND proxy_response.amount >= b.amount
+                              AND proxy_response.mechanism = 'proxy'
+                        )
                    )",
             )
             .bind(uuid_blob(request.auction_id))

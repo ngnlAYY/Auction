@@ -56,6 +56,7 @@ pub(crate) fn LiveCatalogActions(
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
     let action_name = action();
     let bid_lot_id = lot_id.clone();
+    let bid_lot_code = lot_code.clone();
     let proxy_lot_id = lot_id.clone();
     let bid_lot_status = lot_status.clone();
     let proxy_lot_status = lot_status.clone();
@@ -167,6 +168,7 @@ pub(crate) fn LiveCatalogActions(
                     }
                     {commands::bid_form(commands::BidFormInput {
                         lot_id: bid_lot_id,
+                        lot_code: bid_lot_code,
                         current_price,
                         next_bid,
                         lot_status: bid_lot_status,

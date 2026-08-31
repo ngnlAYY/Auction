@@ -5,10 +5,10 @@
 //! DTO，避免 `serde` 的默认宽松行为把缺字段、未知字段或自相矛盾的投影送进组件。
 
 use auction_contracts::{
-    AuctionListResponse, CurrentAuctionResponse, PlaceBidResultResponse as BidResult,
-    PublicBidLogListResponse, PublicBlacklistResponse, PublicCompensationMovementPageResponse,
-    PublicCompensationResponse, PublicMyBidsResponse, PublicMyProxyResponse,
-    PublicPriceHistoryListResponse, PublicRulesResponse, WorldsResponse,
+    AuctionListResponse, CurrentAuctionResponse, PlaceBidResponse,
+    PlaceBidResultResponse as BidResult, PublicBidLogListResponse, PublicBlacklistResponse,
+    PublicCompensationMovementPageResponse, PublicCompensationResponse, PublicMyBidsResponse,
+    PublicMyProxyResponse, PublicPriceHistoryListResponse, PublicRulesResponse, WorldsResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use auction_contracts::{
@@ -198,7 +198,9 @@ pub(crate) async fn decode_my_proxy(
 }
 
 pub(crate) async fn decode_bid_command(response: Response) -> Result<BidResult, String> {
-    decode_success(response, valid_bid_command).await
+    decode_success::<PlaceBidResponse, _>(response, valid_bid_command)
+        .await
+        .map(|response| response.bid)
 }
 
 pub(crate) async fn decode_create_proxy_command(

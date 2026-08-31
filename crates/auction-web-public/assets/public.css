@@ -1878,6 +1878,12 @@
   color: var(--color-danger);
 }
 
+.public-auction-bid-form p.public-auction-bid-form__confirmation {
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
 .public-auction-bid-form__history {
   line-height: 1.6;
   overflow-wrap: anywhere;
