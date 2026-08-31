@@ -26,6 +26,9 @@ impl ProxyAuthorization {
         if authorization_sequence == 0 || usage_number == 0 {
             return Err(DomainError::InvalidBidState("代理授权序号和使用次数必须为正数"));
         }
+        if !maximum_amount.is_credit_grid_aligned() {
+            return Err(DomainError::InvalidProxyMaximum);
+        }
 
         Ok(Self {
             id,
@@ -69,6 +72,7 @@ impl ProxyAuthorization {
             || self.authorization_sequence == 0
             || self.usage_number == 0
             || self.state_version == 0
+            || !self.maximum_amount.is_credit_grid_aligned()
         {
             return Err(DomainError::InvalidBidState("代理授权快照缺少有效身份或版本"));
         }
@@ -89,6 +93,7 @@ impl ProxyAuthorization {
     ) -> Result<ProxyTransition, DomainError> {
         if command_id.is_nil()
             || !matches!(self.status, ProxyStatus::Active | ProxyStatus::FinalFast)
+            || !new_maximum.is_credit_grid_aligned()
             || new_maximum >= self.maximum_amount
         {
             return Err(DomainError::InvalidProxyMaximum);

@@ -82,15 +82,6 @@ pub(crate) fn bid_amount(
     BidAmount::new(value).map_err(|_| invalid_state(label))
 }
 
-pub(crate) fn optional_bid_amount(
-    row: &SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<Option<BidAmount>, CompetitionTransactionError> {
-    let value: Option<i64> = row.try_get(column).map_err(map_sql_error)?;
-    value.map(|value| BidAmount::new(value).map_err(|_| invalid_state(label))).transpose()
-}
-
 pub(crate) fn auction_rules_from_row(
     row: &SqliteRow,
 ) -> Result<AuctionRules, CompetitionTransactionError> {

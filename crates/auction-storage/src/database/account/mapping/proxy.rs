@@ -151,7 +151,8 @@ pub(in crate::database::account) fn normalize_transition(
     mut transition: PublicProxyTransition,
 ) -> Result<PublicProxyTransition, ApplicationError> {
     if transition.transition_number <= 0
-        || transition.new_maximum_amount <= 0
+        || BidAmount::new(transition.new_maximum_amount).is_err()
+        || transition.old_maximum_amount.is_some_and(|amount| BidAmount::new(amount).is_err())
         || transition.resulting_state_version <= 0
         || transition.kind.trim().is_empty()
         || transition.new_mode.trim().is_empty()
@@ -185,7 +186,7 @@ pub(in crate::database::account) fn build_proxy(
         || base.quota_limit < 0
         || base.quota_used < base.usage_number
         || base.quota_limit > 0 && base.quota_used > base.quota_limit
-        || base.maximum_amount <= 0
+        || BidAmount::new(base.maximum_amount).is_err()
         || base.start_price <= 0
         || base.state_version <= 0
         || base.updated_at < base.created_at
@@ -266,10 +267,10 @@ pub(in crate::database::account) fn derive_capabilities(
         return Err(storage_error("账户代理领先/等待状态不一致"));
     }
     let current_price = base.current_price.unwrap_or(base.start_price);
-    let current =
-        BidAmount::new(current_price).map_err(|_| storage_error("账户代理当前金额无效"))?;
-    let start =
-        BidAmount::new(base.start_price).map_err(|_| storage_error("账户代理起始金额无效"))?;
+    let current = BidAmount::from_persisted_positive(current_price)
+        .map_err(|_| storage_error("账户代理当前金额不是正数"))?;
+    let start = BidAmount::from_persisted_positive(base.start_price)
+        .map_err(|_| storage_error("账户代理起始金额不是正数"))?;
     let binding = if waiting {
         AuctionRules::default()
             .next_minimum_bid(Some(start), Some(current), base.material, false)

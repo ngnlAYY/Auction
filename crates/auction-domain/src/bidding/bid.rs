@@ -18,6 +18,7 @@ pub struct AcceptedBid {
     pub lot_id: LotId,
     pub bidder_id: UserId,
     pub fact_index: u32,
+    #[serde(deserialize_with = "crate::bidding::amount::deserialize_persisted_positive")]
     pub amount: BidAmount,
     pub effective_end_at: DateTime<Utc>,
     pub state_version: u64,

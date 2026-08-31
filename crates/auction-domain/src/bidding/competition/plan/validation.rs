@@ -91,6 +91,10 @@ impl CompetitionPlan {
                 return Err(DomainError::InvalidBidState("代理快照与转换链版本不一致"));
             }
         }
+        if transition_versions.keys().any(|authorization_id| !states.contains_key(authorization_id))
+        {
+            return Err(DomainError::InvalidBidState("代理转换缺少对应的最终快照"));
+        }
 
         if let Some(active_id) = self.active_proxy_id
             && states.get(&active_id).is_some_and(|state| !is_active_proxy_status(state.status))
@@ -120,6 +124,23 @@ pub(super) fn validate_trigger_basics(trigger: &CompetitionTrigger) -> Result<()
         if bid_id.is_nil() || !seen.insert(*bid_id) {
             return Err(DomainError::InvalidBidState("公开竞价事实标识重复或无效"));
         }
+    }
+    match trigger {
+        CompetitionTrigger::OrdinaryBid { amount, .. } if !amount.is_credit_grid_aligned() => {
+            return Err(DomainError::InvalidAmount { value: amount.value() });
+        }
+        CompetitionTrigger::CreateProxy { maximum_amount, previous_maximum, .. }
+            if !maximum_amount.is_credit_grid_aligned()
+                || previous_maximum.is_some_and(|amount| !amount.is_credit_grid_aligned()) =>
+        {
+            return Err(DomainError::InvalidProxyMaximum);
+        }
+        CompetitionTrigger::LowerProxy { new_maximum, .. }
+            if !new_maximum.is_credit_grid_aligned() =>
+        {
+            return Err(DomainError::InvalidProxyMaximum);
+        }
+        _ => {}
     }
     Ok(())
 }

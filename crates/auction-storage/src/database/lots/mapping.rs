@@ -127,8 +127,8 @@ pub(super) fn map_live_fields(
     // 旧版允许任意正整数作为 lot 起始价；无人领先时展示层必须原样返回该价格，不能把
     // 真实竞价命令使用的整千网格校验反向施加到既有拍品投影。
     let next_bid = if has_leader {
-        let current = BidAmount::new(current_value)
-            .map_err(|_| storage_error("公开 lot 领先价不满足金额网格"))?;
+        let current = BidAmount::from_persisted_positive(current_value)
+            .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;
         rules
             .next_minimum_bid(None, Some(current), material, proxy_last)
             .map_err(|_| storage_error("公开 lot 下一口金额超出可表示范围"))?
