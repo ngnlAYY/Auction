@@ -73,7 +73,8 @@ delivery、凭据、Users、改名、realtime、邮件入站、审计和结算/R
 表格时不会再撑开空白行，窄屏审计筛选会自动收缩为两列或单列。
 delivery 页面已接入 PostgreSQL 安全投影、状态筛选、数字分页，以及 release/retry/人工对账动作；
 release/retry 使用确认对话框，manual_reconcile 支持 retry、succeeded（外部引用）和 failed（失败代码）
-三种决策。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
+三种决策。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
+命令 ID 供重试。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
 投递状态筛选恢复旧版的轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
 Realtime 运维页面已接入 lag/failure 安全投影、stream/consumer/code/resolved 筛选、分页、
 空结果状态和旧版风格的可展开高级筛选区；已解决 failure 不允许再次发起 replay。replay 使用

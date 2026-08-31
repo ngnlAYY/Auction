@@ -18,7 +18,10 @@ mod validation;
 
 use legacy::{StoredSettlementReplay, classify_stored_settlement, replay_legacy_settlement};
 use obligations::append_obligations;
-use validation::{plan_proxy_closures, validate_settlement_due, validate_settlement_plan};
+use validation::{
+    plan_proxy_closures, validate_replayed_settlement_plan, validate_settlement_due,
+    validate_settlement_plan,
+};
 
 /// 在已经取得一致只读快照后，严格核验旧版 complete 账本并返回脱敏摘要。
 ///
@@ -122,7 +125,11 @@ where
                             StoredSettlementReplay::Current => {
                                 let replayed: SettlementPlan =
                                     serde_json::from_slice(&stored.result_payload)?;
-                                validate_settlement_plan(command.command_id, &snapshot, &replayed)?;
+                                validate_replayed_settlement_plan(
+                                    command.command_id,
+                                    &snapshot,
+                                    &replayed,
+                                )?;
                                 Ok(replayed)
                             }
                             StoredSettlementReplay::Legacy(result) => {

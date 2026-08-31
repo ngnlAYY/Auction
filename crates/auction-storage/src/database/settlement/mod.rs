@@ -76,11 +76,14 @@ impl SettlementTransactionRunner for PostgresStore {
                 match operation(&mut transaction).await {
                     Ok(value) => match transaction.commit().await {
                         Ok(()) => return Ok(value),
-                        Err(_) if attempt + 1 < policy.max_attempts => continue,
-                        Err(_) => {
-                            return Err(E::from(SettlementTransactionError::Failed(
-                                "PostgreSQL 结算事务提交失败".to_owned(),
-                            )));
+                        Err(error) => {
+                            let error = map_sql_error(error);
+                            if matches!(error, SettlementTransactionError::SerializationConflict)
+                                && attempt + 1 < policy.max_attempts
+                            {
+                                continue;
+                            }
+                            return Err(E::from(error));
                         }
                     },
                     Err(error) => {

@@ -11,6 +11,46 @@ use crate::SettlementSnapshot;
 use super::SettleAuctionCommand;
 use super::obligations::append_obligations;
 
+/// 从锁内 lot、冻结策略和首次结算资金池重建当前命令结果，拒绝只满足内部守恒但不符合
+/// 当前版本算法的账本 payload。结算后 `snapshot.opening_pool` 已是最新池余额，不能拿它代替
+/// 摘要中冻结的首次 opening pool。
+pub(super) fn validate_replayed_settlement_plan(
+    command_id: CommandId,
+    snapshot: &SettlementSnapshot,
+    replayed: &SettlementPlan,
+) -> Result<(), auction_domain::DomainError> {
+    validate_settlement_plan(command_id, snapshot, replayed)?;
+    let persisted = snapshot.persisted_settlement.as_ref().ok_or(
+        auction_domain::DomainError::InvalidSettlementFacts("结算命令重放缺少权威结算事实"),
+    )?;
+    let mut expected = SettlementPlan::calculate(
+        &snapshot.policy,
+        snapshot.scheduled_open_at,
+        snapshot.scheduled_end_at,
+        persisted.opening_pool,
+        &snapshot.facts,
+    )?;
+    append_obligations(command_id, snapshot, &mut expected)?;
+    validate_settlement_plan(command_id, snapshot, &expected)?;
+    if persisted.command_id != command_id
+        || persisted.policy_version != expected.policy_version
+        || persisted.policy_mode != expected.policy_mode
+        || persisted.pool_enabled != expected.compensation_pool_enabled
+        || persisted.opening_pool != expected.opening_pool
+        || persisted.closing_pool != expected.closing_pool
+        || persisted.tax_total != expected.tax_total
+        || persisted.discount_demand != expected.discount_demand
+        || persisted.compensation_total != expected.compensation_total
+        || persisted.lines != expected.lines
+        || expected != *replayed
+    {
+        return Err(auction_domain::DomainError::InvalidSettlementFacts(
+            "结算命令结果或持久化摘要无法从权威 lot 与策略重建",
+        ));
+    }
+    Ok(())
+}
+
 /// 校验新计划和命令账本重放的完整 lot、金额与义务矩阵。
 ///
 /// 只校验每个元素本身不足以防止重复 lot、缺失义务或被篡改的统计总额；这里使用锁内事实

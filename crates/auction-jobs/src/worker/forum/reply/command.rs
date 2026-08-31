@@ -36,7 +36,7 @@ pub(super) async fn process_command(
         tracing::warn!(post_id, "论坛命令行号超出持久化范围");
         return Ok(());
     };
-    let command_id = forum_command_id(
+    let proposed_command_id = forum_command_id(
         topic.auction_id,
         &topic.thread_id,
         post_id,
@@ -45,7 +45,7 @@ pub(super) async fn process_command(
         command_kind,
     );
     let record = ForumBidCommandRecord {
-        command_id,
+        command_id: proposed_command_id,
         auction_id: topic.auction_id,
         world: topic.world,
         thread_id: topic.thread_id.clone(),
@@ -60,13 +60,14 @@ pub(super) async fn process_command(
         Ok(start) => start,
         Err(error) => {
             tracing::error!(
-                command_id = %command_id,
+                command_id = %proposed_command_id,
                 error = %error,
                 "论坛命令账本开始失败"
             );
             return Err(error);
         }
     };
+    let command_id = start.command_id;
     if !start.should_run {
         // 竞价命令已经完成时仍需重放安全的应用命令，以便恢复此前入账但通知失败的场景。
         // 应用端口以同一 command_id 返回既有结果，不会重复写入竞价事实。

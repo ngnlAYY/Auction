@@ -65,9 +65,12 @@ pub enum ForumCommandStatus {
 /// 论坛命令账本开始结果。
 ///
 /// Worker 需要区分“已完成的原命令”和“本次可以继续执行的 pending 命令”，否则竞价已成功
-/// 但通知入队失败时，下一轮只看到 `should_run = false`，会永久跳过通知重试。
+/// 但通知入队失败时，下一轮只看到 `should_run = false`，会永久跳过通知重试。旧版账本使用
+/// 不同的稳定 ID 算法，因此还必须返回实际命中的命令 ID，让后续竞价、通知和完成写入继续
+/// 使用同一个幂等身份。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForumCommandStart {
+    pub command_id: Uuid,
     pub status: ForumCommandStatus,
     pub should_run: bool,
 }

@@ -32,10 +32,10 @@ pub(super) async fn process_notification(
         tracing::warn!(post_id, "论坛通知行号超出持久化范围");
         return Ok(());
     };
-    let command_id =
+    let proposed_command_id =
         forum_command_id(topic.auction_id, &topic.thread_id, post_id, line, lot_code, "notify");
     let record = ForumBidCommandRecord {
-        command_id,
+        command_id: proposed_command_id,
         auction_id: topic.auction_id,
         world: topic.world,
         thread_id: topic.thread_id.clone(),
@@ -49,10 +49,11 @@ pub(super) async fn process_notification(
     let start = match runtime.store.begin_command(record).await {
         Ok(value) => value,
         Err(error) => {
-            tracing::error!(command_id = %command_id, error = %error, "论坛通知账本开始失败");
+            tracing::error!(command_id = %proposed_command_id, error = %error, "论坛通知账本开始失败");
             return Err(error);
         }
     };
+    let command_id = start.command_id;
     if !start.should_run {
         return Ok(());
     }

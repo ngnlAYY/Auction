@@ -115,6 +115,7 @@ impl SettlementPolicy {
             }
             SettlementMode::HoldCurveV1 => {
                 if self.version != 1
+                    || !self.compensation_pool_enabled
                     || self.isekai_carrier_credit != 1
                     || self.anchors.len() < 2
                     || self.anchors.first().is_none_or(|anchor| anchor.hold_ppm != 0)
