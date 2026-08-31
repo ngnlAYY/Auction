@@ -41,6 +41,7 @@ struct StrictSettlementLot {
     adjustment: StrictSettlementAdjustment,
     buyer_amount: i64,
     compensation_amount: i64,
+    equipment_category: String,
     equipment_name: String,
     final_price: i64,
     listed_price: i64,
@@ -113,6 +114,7 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         || lot.lot_number <= 0
         || !valid_trimmed_text(&lot.status)
         || !valid_trimmed_text(&lot.equipment_name)
+        || !valid_trimmed_text(&lot.equipment_category)
         || !valid_optional_text(lot.seller.0.as_deref())
         || !valid_optional_text(lot.winner.0.as_deref())
         || !valid_count(lot.final_price)
@@ -132,6 +134,7 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         lot_number: lot.lot_number,
         status: lot.status,
         equipment_name: lot.equipment_name,
+        equipment_category: lot.equipment_category,
         seller: lot.seller.0,
         winner: lot.winner.0,
         final_price: lot.final_price,

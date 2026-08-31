@@ -202,9 +202,10 @@ async fn postgres_report_once(
         let rows = sqlx::query(
             r#"SELECT
                    l.id,
-                   l.lot_number,
+                   l.category_number AS lot_number,
                    l.status,
                    equipment.name AS equipment_name,
+                   equipment.category AS equipment_category,
                    submission.seller,
                    winner.username AS winner,
                    settlement.lot_id AS settlement_lot_id,
@@ -301,6 +302,9 @@ async fn postgres_report_once(
                     equipment_name: row
                         .try_get("equipment_name")
                         .map_err(|_| storage_error("读取结算装备名称失败"))?,
+                    equipment_category: row
+                        .try_get("equipment_category")
+                        .map_err(|_| storage_error("读取结算装备分类失败"))?,
                     seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
                     winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
                     final_price,

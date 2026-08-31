@@ -27,7 +27,7 @@ struct LotUpdateSignals {
 #[component]
 pub(super) fn AdminLotRow(
     lot: AdminLot,
-    selected_lot: Signal<Option<(String, i32)>>,
+    selected_lot: Signal<Option<(String, String)>>,
     mut notice: Signal<Option<LotUpdateNotice>>,
     reload_generation: Signal<u64>,
     allow_lot_update: bool,
@@ -45,6 +45,7 @@ pub(super) fn AdminLotRow(
     let lot_id_for_price = lot.id.clone();
     let lot_id_for_withdraw = lot.id.clone();
     let lot_code = admin_lot_code_for(&lot.equipment_category, lot.lot_number);
+    let lot_code_for_proxy = lot_code.clone();
     let expected_state_version = lot.state_version;
     rsx! {
         tr { class: "admin-lots__row",
@@ -52,7 +53,7 @@ pub(super) fn AdminLotRow(
                 h4 { class: "admin-visually-hidden",
                     {t!(
                         "admin-lots-row-heading",
-                        number: lot.lot_number,
+                        number: lot_code.clone(),
                         name: lot.equipment_name.clone()
                     )}
                 }
@@ -128,7 +129,9 @@ pub(super) fn AdminLotRow(
                     button {
                         r#type: "button",
                         disabled: busy(),
-                        onclick: move |_| selected_lot.set(Some((lot_id.clone(), lot.lot_number))),
+                        onclick: move |_| {
+                            selected_lot.set(Some((lot_id.clone(), lot_code_for_proxy.clone())));
+                        },
                         {t!("admin-lots-proxy-open")}
                     }
                 }

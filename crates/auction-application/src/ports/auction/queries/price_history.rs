@@ -98,6 +98,8 @@ pub struct PublicPriceHistoryEntry {
     pub auction_id: Uuid,
     pub world_id: String,
     pub auction_sequence: i64,
+    /// 内部场次全局顺序，只用于稳定 keyset；对外编码使用 `lot_number` 分类编号。
+    pub ordering_lot_number: i64,
     pub lot_number: i64,
     pub equipment_name: String,
     pub equipment_category: String,

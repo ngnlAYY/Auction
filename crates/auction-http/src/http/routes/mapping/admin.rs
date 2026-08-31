@@ -46,6 +46,7 @@ pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlement
                 lot_number: lot.lot_number,
                 status: lot.status,
                 equipment_name: lot.equipment_name,
+                equipment_category: lot.equipment_category,
                 seller: lot.seller,
                 winner: lot.winner,
                 final_price: lot.final_price,
@@ -105,12 +106,14 @@ pub(crate) fn valid_settlement_report(report: &SettlementReport, auction_id: Uui
                 return false;
             }
             let mut lot_ids = BTreeSet::new();
-            let mut lot_numbers = BTreeSet::new();
+            let mut lot_codes = BTreeSet::new();
             let mut tax_income = 0_i64;
             let mut compensation_out = 0_i64;
             let mut movement_count = 2_i64;
             for lot in &report.lots {
-                if !lot_ids.insert(lot.id) || !lot_numbers.insert(lot.lot_number) {
+                if !lot_ids.insert(lot.id)
+                    || !lot_codes.insert((lot.equipment_category.clone(), lot.lot_number))
+                {
                     return false;
                 }
                 if !valid_settlement_lot(lot) {
@@ -182,6 +185,7 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
     if lot.id.is_nil()
         || lot.lot_number <= 0
         || !valid_report_text(&lot.equipment_name, 512)
+        || !valid_report_text(&lot.equipment_category, 128)
         || !valid_report_optional_text(lot.seller.as_deref(), 512)
         || !valid_report_optional_text(lot.winner.as_deref(), 512)
         || lot.final_price < 0
@@ -413,6 +417,7 @@ pub(crate) fn map_recovery_report(
                 lot_number: recovery.lot_number,
                 world_id: recovery.world_id,
                 equipment_name: recovery.equipment_name,
+                equipment_category: recovery.equipment_category,
                 stage: recovery.stage,
                 resolution: recovery.resolution,
                 state_version: recovery.state_version,
@@ -463,6 +468,7 @@ pub(crate) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
             || recovery.lot_number <= 0
             || !matches!(recovery.world_id.as_str(), "main" | "isekai")
             || recovery.equipment_name.is_empty()
+            || recovery.equipment_category.is_empty()
             || !matches!(
                 recovery.stage.as_str(),
                 "awaiting_payment"

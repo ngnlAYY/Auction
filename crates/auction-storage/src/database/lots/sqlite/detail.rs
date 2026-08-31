@@ -17,7 +17,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
     let detail = if projection.projection_kind == "preview" {
         let row = sqlx::query(
             "SELECT
-                l.id, l.auction_id, l.lot_number, l.status, l.start_price,
+                l.id, l.auction_id, l.category_number AS lot_number, l.status, l.start_price,
                 submission.seller AS seller_name,
                 e.external_equipment_id, e.name AS equipment_name,
                 e.category AS equipment_category, e.attributes AS equipment_attributes
@@ -45,7 +45,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
     } else {
         let row = sqlx::query(
             "SELECT
-                l.id, l.auction_id, l.lot_number, l.status, l.start_price, l.current_price,
+                l.id, l.auction_id, l.category_number AS lot_number, l.status, l.start_price, l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
                 l.material,
                 CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,

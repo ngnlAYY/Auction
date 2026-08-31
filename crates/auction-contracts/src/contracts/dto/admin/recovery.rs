@@ -68,6 +68,7 @@ pub struct AdminRecoveryResponse {
     pub lot_number: i32,
     pub world_id: String,
     pub equipment_name: String,
+    pub equipment_category: String,
     pub stage: String,
     #[serde(deserialize_with = "deserialize_required_option")]
     pub resolution: Option<String>,

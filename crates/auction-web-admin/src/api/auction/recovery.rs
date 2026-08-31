@@ -112,6 +112,7 @@ fn validate_recovery(recovery: &AdminRecovery) -> bool {
         && recovery.lot_number > 0
         && matches!(recovery.world_id.as_str(), "main" | "isekai")
         && valid_trimmed(&recovery.equipment_name)
+        && valid_trimmed(&recovery.equipment_category)
         && valid_recovery_stage(&recovery.stage)
         && recovery.state_version > 0
         && valid_time(&recovery.payment_deadline_at)

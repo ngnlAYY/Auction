@@ -70,8 +70,15 @@ pub(super) async fn lot_targets_postgres(
     use sqlx::Row;
 
     let rows = sqlx::query(
-        "SELECT lot.id, lot.lot_number, equipment.category
+        "SELECT lot.id,
+                CASE sync.numbering_scheme
+                    WHEN 'legacy_global' THEN lot.lot_number
+                    WHEN 'category_v1' THEN lot.category_number
+                END AS lot_number,
+                equipment.category
          FROM public.lots AS lot
+         JOIN public.auction_forum_sync AS sync
+           ON sync.auction_id = lot.auction_id AND sync.status = 'published'
          JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
          WHERE lot.auction_id = $1
            AND lot.status IN ('live', 'sold')

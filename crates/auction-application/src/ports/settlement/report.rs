@@ -58,6 +58,7 @@ pub struct SettlementLotReport {
     pub lot_number: i32,
     pub status: String,
     pub equipment_name: String,
+    pub equipment_category: String,
     pub seller: Option<String>,
     pub winner: Option<String>,
     pub final_price: i64,

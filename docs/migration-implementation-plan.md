@@ -155,16 +155,18 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000023`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000024`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
 严格兼容 trigger、已证明 MoogleMail 退信的独立告警 identity，以及 operations alert 的运行状态、
-扫描水位和独立时钟语义，以及 HV 战斗页占用时的 recovery `busy` 余额状态。旧名 `bid_proxies` 由只读兼容
+扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态，以及 lot 的分类内展示编号。
+`lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
+不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
 状态。`auction-storage` 已接入 PostgreSQL 竞价与结算事务适配器：命令账本重放/冲突、
 权威状态锁、竞价/结算事实、履约初始状态、审计和 realtime 事件在对应事务内提交。
-SQLite `000001` 至 `000008` 及迁移入口已追加，
+SQLite `000001` 至 `000009` 及迁移入口已追加，
 Lite 的 `BEGIN IMMEDIATE` 竞价和 Worker 调度写适配器已接入。
 
 **优先级顺序**（依赖决定，非工作量决定）：
@@ -440,7 +442,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000023` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000024` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -1501,7 +1503,9 @@ Admin realtime failure 表也补回旧版可见的 failure/event 标识列；标
 
 本轮继续恢复 Admin 拍品列表与旧版的关键可见语义：列表首列使用按装备分类生成的稳定拍品编码，补回
 提交编号的紧凑展示并保留完整值悬浮查看；软截止信息继续通过安全 DTO 中的授权编号提供旧版提示。
-这只改变浏览器安全投影的展示，不新增接口字段、不把装备密钥或邮件凭据暴露给前端。
+随后按产品要求把分类编号从纯展示提升为持久化不变量：每个拍卖的每个装备分类都从 1 独立递增，公开与
+管理投影返回分类内编号；命令仍以 `lot_id` 标识拍品，价格历史 cursor、生命周期和结算顺序仍使用内部全局
+`lots.lot_number`。已经发布的论坛主题保留旧全局编号方案，新主题使用分类内编号，且不暴露装备密钥或邮件凭据。
 
 本轮还修正 Admin runtime 配置页的版本 fence 语义：候选校验返回的 fingerprint 只属于规范化候选，
 不会覆盖当前 TOML 文件 fingerprint；保存时继续携带当前文件版本，避免校验修改后的有效配置被页面

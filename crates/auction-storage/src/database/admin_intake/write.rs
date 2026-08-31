@@ -118,6 +118,23 @@ pub(super) async fn add_admin_intake_inner(
     if lot_number <= 0 {
         return Err(failed("Admin 装备录入 lot 序号无效"));
     }
+    // `lot_number` 保留场次内不可变全局顺序；用户可见编码在分类内独立递增。
+    let maximum_category_number = sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT MAX(category_number) FROM public.lots
+         WHERE auction_id = $1 AND category_key = $2",
+    )
+    .bind(auction_id)
+    .bind(&write.equipment_category)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?
+    .unwrap_or(0);
+    let category_number = maximum_category_number
+        .checked_add(1)
+        .ok_or_else(|| failed("Admin 装备录入分类编号溢出"))?;
+    if category_number <= 0 {
+        return Err(failed("Admin 装备录入分类编号无效"));
+    }
     let next_state_version = current_state_version
         .checked_add(1)
         .ok_or_else(|| failed("Admin 装备录入拍卖状态版本溢出"))?;
@@ -177,14 +194,16 @@ pub(super) async fn add_admin_intake_inner(
 
     sqlx::query(
         r#"INSERT INTO public.lots
-            (id, auction_id, equipment_id, lot_number, status, start_price,
-             submission_id, state_version, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, 'pending', $5, $6, 1, $7, $7)"#,
+            (id, auction_id, equipment_id, lot_number, category_key, category_number,
+             status, start_price, submission_id, state_version, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, 1, $9, $9)"#,
     )
     .bind(write.candidate_lot_id)
     .bind(auction_id)
     .bind(write.candidate_equipment_id.as_uuid())
     .bind(lot_number)
+    .bind(&write.equipment_category)
+    .bind(category_number)
     .bind(write.start_price)
     .bind(write.candidate_submission_id)
     .bind(write.collected_at)
@@ -221,7 +240,7 @@ pub(super) async fn add_admin_intake_inner(
         preview_revision: next_preview_revision,
         submission_id: write.candidate_submission_id,
         lot_id: write.candidate_lot_id,
-        lot_number,
+        lot_number: category_number,
         lot_state_version: 1,
         equipment_id: write.candidate_equipment_id.as_uuid(),
         external_equipment_id: write.external_equipment_id,

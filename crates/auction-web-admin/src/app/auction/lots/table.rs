@@ -19,7 +19,7 @@ pub(super) fn AdminLotTable(
     mut page_number: Signal<i64>,
     reload_generation: Signal<u64>,
 ) -> Element {
-    let selected_lot = use_signal(|| None::<(String, i32)>);
+    let selected_lot = use_signal(|| None::<(String, String)>);
     let notice = use_signal(|| None::<LotUpdateNotice>);
     let allow_lot_update = page.auction.status == "draft";
 
@@ -81,8 +81,8 @@ pub(super) fn AdminLotTable(
                     on_page_change: move |next_page| page_number.set(next_page),
                 }
             }
-            if let Some((lot_id, lot_number)) = selected_lot() {
-                AdminProxyHistory { lot_id, lot_number, selected_lot, reload_generation }
+            if let Some((lot_id, lot_code)) = selected_lot() {
+                AdminProxyHistory { lot_id, lot_code, selected_lot, reload_generation }
             }
         }
     }

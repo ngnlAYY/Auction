@@ -34,7 +34,7 @@ struct RecoveryConfirmationDraft {
     state_version: i64,
     action: String,
     equipment_name: String,
-    lot_number: i32,
+    lot_code: String,
 }
 
 /// 加载并展示旧版结算页面对应的完整 Rust 页面。

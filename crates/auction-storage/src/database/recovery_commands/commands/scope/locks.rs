@@ -124,7 +124,8 @@ pub(in crate::database::recovery_commands) async fn lock_original_lot(
 ) -> Result<OriginalLot, RecoveryCommandError> {
     let row = sqlx::query(
         r#"SELECT lot.equipment_id, lot.submission_id, lot.status, lot.start_price,
-                  equipment.world_id AS equipment_world_id
+                  equipment.world_id AS equipment_world_id,
+                  equipment.category AS equipment_category
            FROM public.lots AS lot
            INNER JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
            WHERE lot.id = $1 AND lot.auction_id = $2 AND lot.equipment_id = $3
@@ -143,6 +144,7 @@ pub(in crate::database::recovery_commands) async fn lock_original_lot(
         status: row.try_get("status").map_err(map_sql_error)?,
         start_price: row.try_get("start_price").map_err(map_sql_error)?,
         equipment_world_id: row.try_get("equipment_world_id").map_err(map_sql_error)?,
+        equipment_category: row.try_get("equipment_category").map_err(map_sql_error)?,
     })
 }
 

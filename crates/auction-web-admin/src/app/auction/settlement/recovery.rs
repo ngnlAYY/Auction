@@ -88,6 +88,8 @@ fn AdminRecoveryRow(
     let display_equipment_name = recovery.equipment_name.clone();
     let deadline_attribute = recovery.payment_deadline_at.clone();
     let deadline_text = super::super::format_admin_time(&recovery.payment_deadline_at);
+    let lot_code =
+        super::super::lots::admin_lot_code_for(&recovery.equipment_category, recovery.lot_number);
     let evidence = recovery
         .blocking_code
         .clone()
@@ -96,7 +98,7 @@ fn AdminRecoveryRow(
     let actions = recovery_action_summary(&recovery.actions);
     rsx! {
         tr {
-            td { "{recovery.lot_number}" }
+            td { "{lot_code}" }
             td {
                 TruncatedText { value: display_equipment_name }
                 br {}
@@ -117,7 +119,7 @@ fn AdminRecoveryRow(
                                 state_version: recovery.state_version,
                                 action: action.clone(),
                                 equipment_name: recovery.equipment_name.clone(),
-                                lot_number: recovery.lot_number,
+                                lot_code: lot_code.clone(),
                             };
                             rsx! {
                                 button {
@@ -175,7 +177,7 @@ pub(super) fn AdminRecoveryDialog(
                 h2 { id: "settlement-recovery-confirm-title", {recovery_command_label(&draft.action)} }
                 p {
                     id: "settlement-recovery-confirm-description",
-                    {t!("admin-recovery-confirm-description", lot: draft.lot_number, equipment: draft.equipment_name.clone())}
+                    {t!("admin-recovery-confirm-description", lot: draft.lot_code.clone(), equipment: draft.equipment_name.clone())}
                 }
                 form {
                     class: "admin-auction-recovery-confirm",

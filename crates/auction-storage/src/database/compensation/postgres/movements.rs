@@ -107,7 +107,7 @@ pub(crate) async fn movements(
             ledger.amount,
             ledger.balance_after,
             ledger.created_at,
-            lot.lot_number,
+            lot.category_number AS lot_number,
             equipment.name AS equipment_name,
             equipment.category AS equipment_category
          FROM public.compensation_ledger AS ledger

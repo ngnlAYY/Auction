@@ -89,11 +89,12 @@ fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
     let adjustment_rate = format_ppm(lot.adjustment_ppm, true);
     let price_adjustment = price_adjustment_label(&lot);
     let equipment_name = lot.equipment_name.clone();
+    let lot_code = super::super::lots::admin_lot_code_for(&lot.equipment_category, lot.lot_number);
     let seller = lot.seller.unwrap_or_else(|| t!("value-empty"));
     let winner = lot.winner.unwrap_or_else(|| t!("value-empty"));
     rsx! {
         tr {
-            td { class: "admin-auction-num", "{lot.lot_number}" }
+            td { class: "admin-auction-num", "{lot_code}" }
             td { TruncatedText { value: equipment_name } }
             td { TruncatedText { value: seller } }
             td { TruncatedText { value: winner } }
