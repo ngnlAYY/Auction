@@ -36,6 +36,8 @@ pub(crate) fn AuctionPage() -> Element {
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();
     let refresh_generation = use_context::<Signal<u64>>();
+    let readiness = use_context::<PublicReadinessResource>();
+    let session = use_context::<PublicSessionResource>();
     let current_auction = use_context::<CurrentAuctionResource>();
     let query = read_public_query();
     let requested_auction = query.auction_id.clone();
@@ -59,6 +61,11 @@ pub(crate) fn AuctionBoard() -> Element {
             _ => None,
         }
     };
+    let boot_prerequisites_ready =
+        readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
+    let terminal_without_auction = matches!(current.as_ref(), Some(Err(_)) | Some(Ok(None)));
+    // 错误与空拍卖本身就是可操作的最终首屏；有拍卖时由 AuctionData 等待主要 lots。
+    use_app_boot_ready(boot_prerequisites_ready && terminal_without_auction);
 
     match current.as_ref() {
         None => rsx! {
@@ -83,6 +90,7 @@ pub(crate) fn AuctionBoard() -> Element {
                 historical,
                 initial_category: query.category.clone().unwrap_or_else(|| "all".to_owned()),
                 initial_page: query.page,
+                boot_prerequisites_ready,
             }
         },
     }

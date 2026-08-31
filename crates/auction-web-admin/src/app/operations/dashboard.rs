@@ -3,12 +3,12 @@
 //! 旧版 Dashboard 只读取一次聚合快照；各项指标、邮件控制和局部降级都从该快照派生，不能再
 //! 额外请求列表接口拼装第二套页面状态。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{legacy_t as t, use_app_boot_ready};
 use dioxus::prelude::*;
 
 use crate::api::fetch_dashboard;
 
-use super::admin_api_error_message;
+use super::{AdminReadinessResource, admin_api_error_message};
 
 #[path = "dashboard/content.rs"]
 mod content;
@@ -25,6 +25,9 @@ pub(super) fn page() -> Element {
         let _ = refresh();
         fetch_dashboard()
     });
+    let readiness = use_context::<AdminReadinessResource>();
+    // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。
+    use_app_boot_ready(readiness.read().is_some() && dashboard.read().is_some());
     let state = dashboard.read_unchecked();
 
     rsx! {

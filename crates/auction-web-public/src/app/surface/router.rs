@@ -11,7 +11,7 @@ pub fn run() {
 
 /// 公开端路由表。
 ///
-/// 路径逐条对应旧系统已冻结的公开端 route，新增路由前必须先确认外部契约。
+/// 路径逐条登记旧系统已冻结的公开端 route 与经评审的 Public 扩展，新增前必须确认外部契约。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]
 // 路径字面量必须与 auction-http/src/assets/routes.rs 的 Public 清单同步，未知路径不能获得 SPA 入口。
@@ -56,6 +56,9 @@ pub(crate) enum Route {
         #[route("/compensation")]
         Compensation {},
 
+        #[route("/forum")]
+        Forum {},
+
         #[route("/status")]
         Status {},
     #[end_layout]
@@ -87,7 +90,9 @@ pub(crate) fn App() -> Element {
     rsx! {
         BaseStylesheet {}
         document::Stylesheet { href: PUBLIC_CSS }
-        Router::<Route> {}
+        div { class: "app-root",
+            Router::<Route> {}
+        }
     }
 }
 
@@ -96,6 +101,8 @@ pub(crate) fn App() -> Element {
 pub(crate) fn PublicShell() -> Element {
     use_dialog_focus_trap(true);
     let current_route = use_route::<Route>();
+    let auction_page_owns_initial_boot =
+        matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
     use_route_focus(format!("{current_route:?}"), "public-content");
     let selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
     let location_generation = use_signal(|| 0_u64);
@@ -114,11 +121,17 @@ pub(crate) fn PublicShell() -> Element {
             (world, result)
         }
     });
+    let boot_prerequisites_ready =
+        readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
+    // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
+    use_app_boot_ready(boot_prerequisites_ready && !auction_page_owns_initial_boot);
     use_context_provider(|| selected_world);
     use_context_provider(|| refresh_generation);
     use_context_provider(|| realtime_state);
     let session_context = session;
     use_context_provider(move || session_context);
+    let readiness_context = readiness;
+    use_context_provider(move || readiness_context);
     let current_auction_context = current_auction;
     use_context_provider(move || current_auction_context);
 
@@ -232,6 +245,7 @@ pub(crate) fn PublicShell() -> Element {
                     Link { to: Route::Rules {}, {t!("page-rules-title")} }
                     Link { to: Route::Blacklist {}, {t!("nav-blacklist")} }
                     Link { to: Route::CompensationPool {}, {t!("page-compensation-pool-title")} }
+                    Link { to: Route::Forum {}, {t!("nav-forum")} }
                 }
                 div { class: "public-shell__controls",
                     WorldPicker { selected_world }

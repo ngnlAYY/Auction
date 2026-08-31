@@ -60,6 +60,9 @@ use auction_web_shared::{
 use router::Route;
 pub(super) use shared::{AdminActionFeedback, admin_api_error_message, format_admin_time};
 
+/// Admin 登录外壳唯一拥有的 readiness 快照；默认 Dashboard 用它协调首屏门禁。
+pub(crate) type AdminReadinessResource = Resource<Result<bool, String>>;
+
 /// 管理端 surface 样式。设计变量由 `auction-web-shared` 提供。
 const ADMIN_CSS: Asset = asset!("/assets/admin.css", AssetOptions::css().with_static_head(true));
 
@@ -84,6 +87,8 @@ fn App() -> Element {
     rsx! {
         BaseStylesheet {}
         document::Stylesheet { href: ADMIN_CSS }
-        Router::<Route> {}
+        div { class: "app-root",
+            Router::<Route> {}
+        }
     }
 }

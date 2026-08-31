@@ -7,6 +7,7 @@
 //! 本 crate 不得依赖 `auction-storage`、`auction-config` 或任何凭据访问路径。
 
 mod a11y;
+mod bootstrap;
 mod components;
 mod format;
 pub mod i18n;
@@ -16,6 +17,7 @@ pub use i18n::{
 };
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
+pub use bootstrap::use_app_boot_ready;
 
 pub use components::{
     BASE_CSS, BaseStylesheet, MarkdownBlocks, MarkdownDocument, TruncatedText,

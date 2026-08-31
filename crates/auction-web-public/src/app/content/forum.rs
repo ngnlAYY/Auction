@@ -1,24 +1,126 @@
-//! Public 拍卖论坛镜像展示。
+//! Public 论坛同步独立页面。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 
-use crate::api::{ForumThread, fetch_forum_thread};
+use crate::api::{CurrentAuction, ForumThread, fetch_forum_thread};
 
-pub(super) fn panel(auction_id: String) -> Element {
+use super::{CurrentAuctionResource, auction_world_label, format_auction_time};
+
+/// 展示所选世界当前拍卖的论坛同步投影；首页不再承担该数据源的轮询。
+pub(super) fn page() -> Element {
+    let selected_world = use_context::<Signal<String>>();
+    let mut refresh_generation = use_context::<Signal<u64>>();
+    let current_auction = use_context::<CurrentAuctionResource>();
+    let selected_world_value = selected_world();
+    let current = match current_auction.read().clone() {
+        Some((loaded_world, result)) if loaded_world == selected_world_value => Some(result),
+        _ => None,
+    };
+
+    let content = match current {
+        None => forum_page_state(t!("forum-loading"), false, None),
+        Some(Err(_)) => forum_page_state(
+            t!("forum-unavailable-note"),
+            true,
+            Some(rsx! {
+                button {
+                    class: "public-state-retry",
+                    r#type: "button",
+                    onclick: move |_| {
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                    },
+                    {t!("forum-retry")}
+                }
+            }),
+        ),
+        Some(Ok(None)) => rsx! {
+            section {
+                class: "public-forum-state",
+                role: "status",
+                aria_live: "polite",
+                h2 { {t!("forum-no-auction")} }
+                p { {t!("forum-no-auction-note")} }
+            }
+        },
+        Some(Ok(Some(auction))) if auction.presentation_mode != "live" => rsx! {
+            article { class: "public-forum-card",
+                ForumAuctionHeading { auction: auction.clone() }
+                section {
+                    class: "public-forum-state",
+                    role: "status",
+                    aria_live: "polite",
+                    h3 { {t!("forum-not-open")} }
+                    p { {t!("forum-not-open-note")} }
+                }
+            }
+        },
+        Some(Ok(Some(auction))) => {
+            let forum_key = format!("{}:{}", auction.world, auction.id);
+            // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍可能产生误报。
+            let _ = forum_key.as_str();
+            rsx! {
+                ForumAuctionPanel { key: "{forum_key}", auction }
+            }
+        }
+    };
+
+    rsx! {
+        section { class: "public-forum-page", aria_labelledby: "public-forum-title",
+            header { class: "public-forum-page__intro",
+                h1 { id: "public-forum-title", {t!("page-forum-title")} }
+                p { {t!("page-forum-note")} }
+            }
+            {content}
+        }
+    }
+}
+
+fn forum_page_state(message: String, alert: bool, action: Option<Element>) -> Element {
+    rsx! {
+        section {
+            class: "public-forum-state",
+            role: if alert { "alert" } else { "status" },
+            aria_live: "polite",
+            p { "{message}" }
+            {action}
+        }
+    }
+}
+
+#[component]
+fn ForumAuctionHeading(auction: CurrentAuction) -> Element {
+    rsx! {
+        header { class: "public-forum-card__header",
+            div {
+                h2 { {t!("forum-current-auction", number: auction.number)} }
+                p { class: "public-forum-card__world",
+                    {t!("forum-world")}
+                    ": "
+                    "{auction_world_label(&auction.world)}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
+    let retry_generation = use_signal(|| 0_u64);
     let poll_generation = use_signal(|| 0_u64);
     let thread = use_resource({
-        let auction_id = auction_id.clone();
+        let auction_id = auction.id.clone();
         move || {
             let _ = refresh_generation();
+            let _ = retry_generation();
             let _ = poll_generation();
             let auction_id = auction_id.clone();
             async move { fetch_forum_thread(auction_id).await }
         }
     });
-    // 旧版在论坛主题尚未发布时每两秒重读一次；发布成功后停止，避免无意义请求。
+    // 页面可见且帖子尚未发布时沿用旧版两秒轮询；离开独立页面后组件卸载并停止任务。
     let _poll = use_future({
         let mut poll_generation = poll_generation;
         move || async move {
@@ -38,41 +140,121 @@ pub(super) fn panel(auction_id: String) -> Element {
             }
         }
     });
-    match &*thread.read_unchecked() {
-        None => rsx! {
-            p { class: "public-page-status", role: "status", {t!("forum-loading")} }
-        },
-        Some(Err(_)) => rsx! {
-            p { class: "public-page-status", role: "status", {t!("forum-unavailable")} }
-        },
-        Some(Ok(thread)) => rsx! {
-            ForumThreadPanel { thread: thread.clone() }
-        },
+    let thread_state = thread.read().clone();
+    let content = match thread_state {
+        None => forum_page_state(t!("forum-loading"), false, None),
+        Some(Err(_)) => {
+            let mut retry_generation = retry_generation;
+            forum_page_state(
+                t!("forum-unavailable-note"),
+                true,
+                Some(rsx! {
+                    button {
+                        class: "public-state-retry",
+                        r#type: "button",
+                        onclick: move |_| {
+                            retry_generation.set(retry_generation().saturating_add(1));
+                        },
+                        {t!("forum-retry")}
+                    }
+                }),
+            )
+        }
+        Some(Ok(thread)) => forum_thread_details(thread),
+    };
+
+    rsx! {
+        article { class: "public-forum-card",
+            ForumAuctionHeading { auction }
+            {content}
+        }
     }
 }
 
-#[component]
-fn ForumThreadPanel(thread: ForumThread) -> Element {
-    if thread.status != "published" {
-        let message = match thread.status.as_str() {
-            "pending" => t!("forum-syncing-pending"),
-            "publishing" => t!("forum-syncing-publishing"),
-            "failed" => t!("forum-syncing-failed"),
-            _ => t!("forum-unavailable"),
-        };
-        return rsx! {
-            p { class: "public-page-status", role: "status",
-                "{message}"
+fn forum_thread_details(thread: ForumThread) -> Element {
+    let status_label = forum_status_label(&thread.status);
+    let status_message = forum_status_message(&thread.status);
+    let status_class = forum_status_class(&thread.status);
+    let updated_at = format_auction_time(&thread.updated_at);
+    let status_accessible_label = format!("{}: {status_label}", t!("forum-status"));
+    let published_content = match (
+        thread.thread_url.clone(),
+        thread.title.clone(),
+        thread.body.clone(),
+    ) {
+        (Some(thread_url), Some(title), Some(body)) if thread.status == "published" => rsx! {
+            section { class: "public-forum-thread", aria_labelledby: "public-forum-thread-title",
+                div { class: "public-forum-thread__heading",
+                    h3 { id: "public-forum-thread-title", "{title}" }
+                    a {
+                        class: "public-forum-thread__link",
+                        href: thread_url,
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        {t!("forum-link")}
+                    }
+                }
+                details { class: "public-forum-thread__body",
+                    summary { {t!("forum-thread-body-summary")} }
+                    pre { "{body}" }
+                }
             }
-        };
-    }
+        },
+        _ => rsx! {},
+    };
+
     rsx! {
-        p { class: "public-page-status", role: "status", aria_live: "polite",
-            {t!("forum-published")}
-            " "
-            if let Some(url) = thread.thread_url {
-                a { href: url, target: "_blank", rel: "noreferrer", {t!("forum-link")} }
+        div { class: "public-forum-card__content",
+            div { class: "public-forum-card__status-line",
+                span {
+                    class: "public-forum-status public-forum-status--{status_class}",
+                    aria_label: status_accessible_label,
+                    "{status_label}"
+                }
+                p { role: "status", aria_live: "polite", "{status_message}" }
             }
+            dl { class: "public-forum-metadata",
+                div {
+                    dt { {t!("forum-source-revision")} }
+                    dd { "{thread.source_revision}" }
+                }
+                div {
+                    dt { {t!("forum-updated-at")} }
+                    dd {
+                        time { datetime: thread.updated_at.clone(), "{updated_at}" }
+                    }
+                }
+            }
+            {published_content}
         }
+    }
+}
+
+fn forum_status_label(status: &str) -> String {
+    match status {
+        "pending" => t!("forum-state-pending"),
+        "publishing" => t!("forum-state-publishing"),
+        "failed" => t!("forum-state-failed"),
+        "published" => t!("forum-state-published"),
+        _ => t!("forum-unavailable"),
+    }
+}
+
+fn forum_status_message(status: &str) -> String {
+    match status {
+        "pending" => t!("forum-syncing-pending"),
+        "publishing" => t!("forum-syncing-publishing"),
+        "failed" => t!("forum-syncing-failed"),
+        "published" => t!("forum-published"),
+        _ => t!("forum-unavailable"),
+    }
+}
+
+fn forum_status_class(status: &str) -> &'static str {
+    match status {
+        "published" => "published",
+        "failed" => "failed",
+        "publishing" => "publishing",
+        _ => "pending",
     }
 }
