@@ -52,6 +52,7 @@ pub(super) async fn list_postgres(
         return Ok(None);
     }
 
+    // Public 只压缩同一普通命令内被代理立即反击的展示行；内部竞价事实与账户记录保持完整。
     let rows = sqlx::query(
         "SELECT
             b.id,
@@ -82,6 +83,21 @@ pub(super) async fn list_postgres(
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
+           )
+           AND NOT (
+                command.command_kind = 'place_bid'
+                AND b.mechanism = 'ordinary'
+                AND EXISTS (
+                    SELECT 1
+                    FROM public.bids AS proxy_response
+                    WHERE proxy_response.command_id = b.command_id
+                      AND proxy_response.lot_id = b.lot_id
+                      AND proxy_response.fact_index = b.fact_index + 1
+                      AND proxy_response.accepted_state_version = b.accepted_state_version + 1
+                      AND proxy_response.bidder_user_id <> b.bidder_user_id
+                      AND proxy_response.amount >= b.amount
+                      AND proxy_response.mechanism = 'proxy'
+                )
            )
            AND (
                 NOT $4::boolean
@@ -140,6 +156,7 @@ pub(super) async fn list_postgres(
     let total = if request.cursor.is_some() {
         None
     } else {
+        // total 必须复用明细的可见性规则，避免页数和游标投影错位。
         Some(
             sqlx::query_scalar::<_, i64>(
                 "SELECT count(*)
@@ -158,6 +175,21 @@ pub(super) async fn list_postgres(
                    AND command.command_kind IN (
                         'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
+                   )
+                   AND NOT (
+                        command.command_kind = 'place_bid'
+                        AND b.mechanism = 'ordinary'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM public.bids AS proxy_response
+                            WHERE proxy_response.command_id = b.command_id
+                              AND proxy_response.lot_id = b.lot_id
+                              AND proxy_response.fact_index = b.fact_index + 1
+                              AND proxy_response.accepted_state_version = b.accepted_state_version + 1
+                              AND proxy_response.bidder_user_id <> b.bidder_user_id
+                              AND proxy_response.amount >= b.amount
+                              AND proxy_response.mechanism = 'proxy'
+                        )
                    )",
             )
             .bind(request.auction_id)
