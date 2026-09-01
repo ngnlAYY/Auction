@@ -52,8 +52,8 @@ pub(crate) fn LiveLotDetailView(
     let mut refresh_generation = use_context::<Signal<u64>>();
     let session = use_context::<PublicSessionResource>();
     let session_snapshot = session.read().clone();
-    let viewer_name = match session_snapshot.as_ref() {
-        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
+    let viewer_player_id = match session_snapshot.as_ref() {
+        Some(Ok(Some(session))) if session.authenticated => session.game_player_id.clone(),
         _ => None,
     };
     let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
@@ -62,7 +62,7 @@ pub(crate) fn LiveLotDetailView(
         session_snapshot.as_ref(),
         Some(Ok(Some(session))) if session.authenticated
     );
-    let is_leading = viewer_name
+    let is_leading = viewer_player_id
         .as_deref()
         .zip(lot.leader_name.as_deref())
         .is_some_and(|(viewer, leader)| viewer == leader);

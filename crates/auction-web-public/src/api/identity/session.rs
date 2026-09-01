@@ -74,6 +74,7 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
         authenticated: true,
         user_id: payload.data.user_id,
         username: payload.data.username,
+        game_player_id: payload.data.game_player_id,
         expires_at: payload.data.expires_at,
         absolute_expires_at: payload.data.absolute_expires_at,
     })
@@ -126,6 +127,7 @@ fn valid_current_session(session: &PublicSession) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
+            session.game_player_id.as_deref(),
             &session.expires_at,
             &session.absolute_expires_at,
         )
@@ -136,6 +138,7 @@ fn valid_login_session(session: &PublicLoginResponse) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
+            session.game_player_id.as_deref(),
             &session.expires_at,
             &session.absolute_expires_at,
         )
@@ -144,6 +147,7 @@ fn valid_login_session(session: &PublicLoginResponse) -> bool {
 fn valid_session_fields(
     user_id: &str,
     username: &str,
+    game_player_id: Option<&str>,
     expires_at: &str,
     absolute_expires_at: &str,
 ) -> bool {
@@ -152,6 +156,12 @@ fn valid_session_fields(
         && username == username.trim()
         && username.len() <= 256
         && !username.chars().any(char::is_control)
+        && game_player_id.is_none_or(|value| {
+            !value.is_empty()
+                && value == value.trim()
+                && value.len() <= 256
+                && !value.chars().any(char::is_control)
+        })
         && valid_legacy_time(expires_at)
         && valid_legacy_time(absolute_expires_at)
 }

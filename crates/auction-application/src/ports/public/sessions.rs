@@ -47,6 +47,7 @@ impl AdminSessionConfig {
 pub struct PublicLoginIdentity {
     pub user_id: Uuid,
     pub username: String,
+    pub game_player_id: Option<String>,
     pub active: bool,
     pub public_reason: Option<String>,
 }
@@ -56,6 +57,7 @@ pub struct PublicLoginIdentity {
 pub struct PublicSessionIdentity {
     pub user_id: Uuid,
     pub username: String,
+    pub game_player_id: Option<String>,
     pub expires_at: DateTime<Utc>,
     pub absolute_expires_at: DateTime<Utc>,
 }

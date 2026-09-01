@@ -1,7 +1,5 @@
 //! 论坛/MM 共用玩家 ID 的 Users-owner 解析与 forum-only 主体建立。
 
-use std::fmt::Write as _;
-
 use auction_application::{ApplicationError, ForumBidderIdentity, forum_world_name};
 use auction_domain::{SettlementWorld, UserId};
 use sha2::{Digest, Sha256};
@@ -13,7 +11,7 @@ use super::validation::{
     MAX_DISPLAY_NAME_BYTES, MAX_FORUM_PLAYER_ID_BYTES, storage_error, valid_decimal_id, valid_text,
 };
 
-/// 按论坛/MM 共用的 `game_player_id` 解析用户；首次论坛竞价可建立 revoked-key 临时主体。
+/// 按论坛/MM 共用的 `game_player_id` 解析用户；首次论坛竞价可建立 revoked-key forum-only 主体。
 pub(super) async fn resolve_bidder_postgres(
     store: &PostgresStore,
     world: SettlementWorld,
@@ -145,7 +143,8 @@ pub(super) async fn resolve_bidder_postgres(
         (user_id, canonical_account_id, registration_state)
     } else {
         let user_id = Uuid::new_v4();
-        let (username, shadow_hash) = shadow_identity(world_id, external_account_id)?;
+        let placeholder_hash = revoked_key_placeholder_hash(world_id, external_account_id);
+        // 用户名若已被其它主体占用，唯一约束会让事务失败关闭；不能仅凭同名数字自动接管账号。
         sqlx::query(
             "INSERT INTO public.users
                 (id, username, status, public_key_hash, game_player_id,
@@ -154,12 +153,12 @@ pub(super) async fn resolve_bidder_postgres(
                      transaction_timestamp(), transaction_timestamp())",
         )
         .bind(user_id)
-        .bind(username)
-        .bind(shadow_hash)
+        .bind(external_account_id)
+        .bind(placeholder_hash)
         .bind(external_account_id)
         .execute(&mut *transaction)
         .await
-        .map_err(|_| storage_error("创建论坛临时用户失败"))?;
+        .map_err(|_| storage_error("创建论坛 forum-only 用户失败"))?;
         (user_id, external_account_id.to_owned(), "forum_only")
     };
 
@@ -187,19 +186,11 @@ pub(super) async fn resolve_bidder_postgres(
     })
 }
 
-fn shadow_identity(
-    world_id: &str,
-    external_account_id: &str,
-) -> Result<(String, Vec<u8>), ApplicationError> {
+fn revoked_key_placeholder_hash(world_id: &str, external_account_id: &str) -> Vec<u8> {
     let mut hasher = Sha256::new();
-    hasher.update(b"auction/forum-shadow/v1\0");
+    hasher.update(b"auction/forum-revoked-key-placeholder/v1\0");
     hasher.update(world_id.as_bytes());
     hasher.update(b"\0");
     hasher.update(external_account_id.as_bytes());
-    let digest = hasher.finalize();
-    let mut username = String::from("forum-");
-    for byte in &digest[..10] {
-        write!(&mut username, "{byte:02x}").map_err(|_| storage_error("生成论坛临时用户名失败"))?;
-    }
-    Ok((username, digest.to_vec()))
+    hasher.finalize().to_vec()
 }

@@ -420,9 +420,9 @@ HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计�
 从完成时刻推进到下一次配置周期。既有 #2 不是同拍卖系统
 标记时失败关闭，不覆盖用户帖子。论坛
 作者链接的 `showuser` 数字 ID 与 MM 的 `users.game_player_id` 是同一身份，论坛昵称不参与身份
-兜底；Users owner 会在 Serializable 事务内复用已有用户，或为尚未注册 MM 的作者建立 revoked-key
-`forum_only` 临时主体及 world 映射，后续 MM 注册按
-同一玩家 ID 恢复该用户。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
+兜底；Users owner 会在 Serializable 事务内复用已有用户，或为尚未注册 MM 的作者建立用户名直接等于
+玩家 ID 的 revoked-key `forum_only` 主体及 world 映射，不生成 `forum-*` 影子用户名；后续 MM 注册按
+同一玩家 ID 恢复该用户。论坛首帖、公开拍卖目录和竞价历史也统一展示该玩家 ID。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
 现有竞价端口。Forum 在独立顺序循环中先发布后读取回帖，两阶段错误分别记录，发布失败不会跳过
 回帖扫描，也不会终止其它 Worker owner；该循环默认每 300 秒加最多 5 秒抖动，独立于 Auction 的
 60 秒生命周期循环。主题读取先从第一页发现同 origin、同 thread 的规范 `st` 分页水位，再用每个已读页面复核该水位没有扩张；默认最多 10 页且硬上限
