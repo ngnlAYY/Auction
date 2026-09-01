@@ -29,7 +29,10 @@ use commands::{begin_command_postgres, finish_command_postgres};
 #[cfg(feature = "postgres")]
 use cursor::mark_scanned_postgres;
 #[cfg(feature = "postgres")]
-use fixed_posts::{finish_topic_scan_postgres, record_fixed_posts_update_postgres};
+use fixed_posts::{
+    finish_topic_scan_postgres, record_fixed_posts_progress_postgres,
+    record_fixed_posts_update_postgres,
+};
 #[cfg(feature = "postgres")]
 use identity::resolve_bidder_postgres;
 #[cfg(feature = "postgres")]
@@ -223,6 +226,51 @@ impl ForumReplyStore for DatabaseStore {
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
         updated_at: DateTime<Utc>,
+        next_scan_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            if topic.auction_id.is_nil()
+                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
+                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
+                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
+                || topic.catalog_post_id == topic.system_log_post_id
+                || topic.content_revision <= 0
+                || topic.content_claim_token.is_nil()
+                || !valid_text(&topic.content_claim_owner, 256)
+                || topic.content_claim_fencing <= 0
+                || topic.content_lease_until <= updated_at
+                || !super::sync::valid_fixed_post_update(&catalog, &system_log)
+                || updated_at.timestamp_nanos_opt().is_none()
+                || next_scan_at.timestamp_nanos_opt().is_none()
+                || next_scan_at <= updated_at
+            {
+                return Err(storage_error("论坛固定楼层更新参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    record_fixed_posts_update_postgres(
+                        store,
+                        &topic,
+                        &catalog,
+                        &system_log,
+                        updated_at,
+                        next_scan_at,
+                    )
+                    .await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn record_fixed_posts_progress(
+        &self,
+        topic: ForumReplyTopic,
+        catalog: ForumRenderedThread,
+        system_log: ForumRenderedPost,
+        updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if topic.auction_id.is_nil()
@@ -238,12 +286,12 @@ impl ForumReplyStore for DatabaseStore {
                 || !super::sync::valid_fixed_post_update(&catalog, &system_log)
                 || updated_at.timestamp_nanos_opt().is_none()
             {
-                return Err(storage_error("论坛固定楼层更新参数无效"));
+                return Err(storage_error("论坛固定楼层进度参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    record_fixed_posts_update_postgres(
+                    record_fixed_posts_progress_postgres(
                         store,
                         &topic,
                         &catalog,
@@ -262,6 +310,7 @@ impl ForumReplyStore for DatabaseStore {
         &self,
         topic: ForumReplyTopic,
         scanned_at: DateTime<Utc>,
+        next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if topic.auction_id.is_nil()
@@ -274,6 +323,8 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
                 || scanned_at.timestamp_nanos_opt().is_none()
+                || next_scan_at.timestamp_nanos_opt().is_none()
+                || next_scan_at <= scanned_at
                 || topic.content_lease_until <= scanned_at
             {
                 return Err(storage_error("论坛固定楼层扫描完成参数无效"));
@@ -281,7 +332,7 @@ impl ForumReplyStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    finish_topic_scan_postgres(store, &topic, scanned_at).await
+                    finish_topic_scan_postgres(store, &topic, scanned_at, next_scan_at).await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

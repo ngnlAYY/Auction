@@ -9,8 +9,17 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if config.batch_size == 0 || config.batch_size > 100 {
         return Err(ConfigError::InvalidForumConfig("batch_size 必须位于 1 至 100"));
     }
+    if config.poll_interval_seconds == 0 || config.poll_interval_seconds > 86_400 {
+        return Err(ConfigError::InvalidForumConfig("poll_interval_seconds 必须位于 1 至 86400"));
+    }
+    if config.jitter_seconds > 86_400 {
+        return Err(ConfigError::InvalidForumConfig("jitter_seconds 必须位于 0 至 86400"));
+    }
     if config.maximum_response_bytes == 0 || config.maximum_response_bytes > 8 * 1024 * 1024 {
         return Err(ConfigError::InvalidForumConfig("maximum_response_bytes 必须位于 1 至 8 MiB"));
+    }
+    if !(1..=20).contains(&config.maximum_topic_pages) {
+        return Err(ConfigError::InvalidForumConfig("maximum_topic_pages 必须位于 1 至 20"));
     }
     if config.minimum_request_interval_millis == 0 {
         return Err(ConfigError::InvalidForumConfig("minimum_request_interval_millis 必须大于零"));
@@ -21,14 +30,25 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if config.item_timeout_seconds == 0 || config.item_timeout_seconds > 3_600 {
         return Err(ConfigError::InvalidForumConfig("item_timeout_seconds 必须位于 1 至 3600"));
     }
+    // 集成适配器最多四路并发读取主题；固定 #1/#2 各自最多再执行一次 GET + POST。
+    let topic_pages = u64::from(config.maximum_topic_pages);
+    let Some(topic_read_waves) = topic_pages.checked_add(3).map(|value| value / 4) else {
+        return Err(ConfigError::InvalidForumConfig("论坛分页波次数超出可表示范围"));
+    };
+    let Some(request_timeout_waves) = topic_read_waves.checked_add(4) else {
+        return Err(ConfigError::InvalidForumConfig("论坛请求超时波次数超出可表示范围"));
+    };
+    let Some(request_starts) = topic_pages.checked_add(4) else {
+        return Err(ConfigError::InvalidForumConfig("论坛请求起始次数超出可表示范围"));
+    };
     let Some(request_budget_millis) = config
         .request_timeout_seconds
-        .checked_mul(3)
+        .checked_mul(request_timeout_waves)
         .and_then(|value| value.checked_mul(1_000))
         .and_then(|value| {
             config
                 .minimum_request_interval_millis
-                .checked_mul(2)
+                .checked_mul(request_starts)
                 .and_then(|interval| value.checked_add(interval))
         })
         .and_then(|value| value.checked_add(1_000))
@@ -40,7 +60,7 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     };
     if item_budget_millis < request_budget_millis {
         return Err(ConfigError::InvalidForumConfig(
-            "item_timeout_seconds 必须覆盖三次请求、两次最小请求间隔和一秒收口预算",
+            "item_timeout_seconds 必须覆盖分页读取、固定楼层写入、最小请求间隔和一秒收口预算",
         ));
     }
     if config.lease_duration_seconds == 0 || config.lease_duration_seconds > 86_400 {
@@ -54,12 +74,14 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if let Some(endpoint) = &config.endpoint {
         let parsed = Url::parse(endpoint)
             .map_err(|_| ConfigError::InvalidForumConfig("endpoint 不是有效 URL"))?;
+        let path_is_root = parsed.path().is_empty() || parsed.path() == "/";
         let loopback_http = parsed.scheme() == "http"
             && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
         if !(parsed.scheme() == "https" || loopback_http)
             || parsed.host_str().is_none()
             || !parsed.username().is_empty()
             || parsed.password().is_some()
+            || !path_is_root
             || parsed.query().is_some()
             || parsed.fragment().is_some()
         {

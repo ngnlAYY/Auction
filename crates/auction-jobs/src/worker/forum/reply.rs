@@ -108,12 +108,15 @@ pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &ForumReplyRuntime,
     lease_duration: std::time::Duration,
+    poll_interval: std::time::Duration,
 ) -> Result<(), WorkerError>
 where
     C: auction_application::Clock + 'static,
 {
     let lease_duration =
         Duration::from_std(lease_duration).map_err(|_| WorkerError::InvalidForumConfiguration)?;
+    let poll_interval =
+        Duration::from_std(poll_interval).map_err(|_| WorkerError::InvalidForumConfiguration)?;
     let mut worlds = Vec::new();
     let mut failed_worlds = Vec::new();
     let mut seen_auctions = HashSet::new();
@@ -132,7 +135,11 @@ where
         };
         if !seen_auctions.insert(topic.auction_id) {
             // 同一轮不重复读取远端主题；释放刚领取的重复 claim 后等待下一次 poll。
-            runtime.store.finish_topic_scan(topic, worker.clock.now()).await?;
+            let scanned_at = worker.clock.now();
+            let next_scan_at = scanned_at
+                .checked_add_signed(poll_interval)
+                .ok_or(WorkerError::InvalidForumConfiguration)?;
+            runtime.store.finish_topic_scan(topic, scanned_at, next_scan_at).await?;
             break;
         }
         processed += 1;
@@ -141,7 +148,7 @@ where
         }
         match tokio::time::timeout(
             runtime.item_timeout,
-            process_topic(runtime, topic.clone(), worker.clock.now()),
+            process_topic(runtime, topic.clone(), worker.clock.as_ref(), poll_interval),
         )
         .await
         {

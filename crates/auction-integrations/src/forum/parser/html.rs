@@ -6,16 +6,19 @@ use url::Url;
 use super::model::ParsedPost;
 
 pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
+    super::parse_thread(extract_html_posts(input)?)
+}
+
+pub(super) fn extract_html_posts(input: &str) -> Result<Vec<ParsedPost>, ()> {
     let document = Html::parse_document(input);
     let selector = Selector::parse("div.postcolor").map_err(|_| ())?;
     let mut posts = Vec::new();
     for element in document.select(&selector) {
-        let Some(raw_id) = element.attr("id") else {
-            continue;
-        };
-        let Some(id) = raw_id.strip_prefix("post-").filter(|value| !value.is_empty()) else {
-            continue;
-        };
+        let id = element
+            .attr("id")
+            .and_then(|value| value.strip_prefix("post-"))
+            .filter(|value| canonical_post_id(value))
+            .ok_or(())?;
         let text = render_post_text(element);
         let (author_id, author) = extract_author(element);
         posts.push(ParsedPost {
@@ -26,7 +29,15 @@ pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
             text,
         });
     }
-    super::parse_thread(posts)
+    (!posts.is_empty()).then_some(posts).ok_or(())
+}
+
+pub(super) fn canonical_post_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value.as_bytes()[0].is_ascii_digit()
+        && value.as_bytes()[0] != b'0'
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn post_was_edited(element: ElementRef<'_>) -> bool {

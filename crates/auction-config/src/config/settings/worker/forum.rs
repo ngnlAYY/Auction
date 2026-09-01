@@ -16,8 +16,14 @@ pub struct ForumSyncWorkerConfig {
     pub test_board_mode: bool,
     /// 单轮最多领取的主题同步任务数，范围 1-100。
     pub batch_size: u16,
+    /// 论坛发布与回帖导入轮询间隔秒数；默认五分钟，独立于拍卖生命周期轮询。
+    pub poll_interval_seconds: u64,
+    /// 论坛轮询抖动秒数，用于错开多个 Worker 的领取时刻。
+    pub jitter_seconds: u64,
     /// 单次响应最大字节数，范围 1-8 MiB。
     pub maximum_response_bytes: usize,
+    /// 单次主题扫描允许读取的最大页数，范围 1-20。
+    pub maximum_topic_pages: u16,
     /// 连续论坛请求之间的最小间隔毫秒数。
     pub minimum_request_interval_millis: u64,
     /// 单次论坛 HTTP 请求超时秒数，范围 1-300。
@@ -37,10 +43,13 @@ impl Default for ForumSyncWorkerConfig {
             public_base_url: None,
             test_board_mode: false,
             batch_size: 100,
+            poll_interval_seconds: 300,
+            jitter_seconds: 5,
             maximum_response_bytes: 2 * 1024 * 1024,
+            maximum_topic_pages: 10,
             minimum_request_interval_millis: 750,
             request_timeout_seconds: 30,
-            item_timeout_seconds: 93,
+            item_timeout_seconds: 240,
             lease_duration_seconds: 300,
         }
     }

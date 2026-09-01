@@ -1,5 +1,7 @@
 //! 论坛预览的语法分层与结果编排。
 
+use std::collections::HashSet;
+
 use auction_application::{AdminForumCatalog, AdminForumPreviewResult};
 
 #[path = "catalog.rs"]
@@ -24,7 +26,35 @@ pub(super) const CREDIT_GRID: i64 = 1_000;
 pub(super) const CATALOG_CATEGORIES: [&str; 7] =
     ["One-Handed", "Two-Handed", "Staff", "Shield", "Cloth", "Light", "Heavy"];
 
-fn parse_thread(posts: Vec<ParsedPost>) -> Result<AdminForumPreviewResult, ()> {
+pub(super) fn parse_html_documents(inputs: &[&str]) -> Result<AdminForumPreviewResult, ()> {
+    if inputs.is_empty() {
+        return Err(());
+    }
+    let mut seen_post_ids = HashSet::new();
+    let mut posts = Vec::new();
+    let mut previous_post_id = None;
+    for input in inputs {
+        for post in html::extract_html_posts(input)? {
+            if !html::canonical_post_id(&post.id)
+                || previous_post_id
+                    .as_deref()
+                    .is_some_and(|previous| !decimal_id_precedes(previous, &post.id))
+                || !seen_post_ids.insert(post.id.clone())
+            {
+                return Err(());
+            }
+            previous_post_id = Some(post.id.clone());
+            posts.push(post);
+        }
+    }
+    parse_thread(posts)
+}
+
+fn decimal_id_precedes(left: &str, right: &str) -> bool {
+    left.len() < right.len() || left.len() == right.len() && left < right
+}
+
+pub(super) fn parse_thread(posts: Vec<ParsedPost>) -> Result<AdminForumPreviewResult, ()> {
     let Some(catalog_post) = posts.first() else {
         return Err(());
     };

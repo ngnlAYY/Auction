@@ -68,6 +68,7 @@ pub(super) async fn configure_forum(
         EhentaiClient::with_config(EhentaiClientConfig {
             endpoint,
             maximum_response_bytes: forum_config.maximum_response_bytes,
+            maximum_topic_pages: usize::from(forum_config.maximum_topic_pages),
             minimum_request_interval: std::time::Duration::from_millis(
                 forum_config.minimum_request_interval_millis,
             ),

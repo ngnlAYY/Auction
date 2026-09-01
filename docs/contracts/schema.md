@@ -172,7 +172,8 @@ transport；结算 send 的 Sent/Balance 严格解析、exact remote ID 查找�
 PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛主题写入未知时先按精确标题
 只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。固定 #1/#2 的
 post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以旧内容版本 CAS 收口，每个主题另以
-独立 lease/fencing 串行刷新；SQLite Lite 不复制这些完整档表。
+独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
+SQLite Lite 不复制这些完整档表。
 
 ## 实时事件与运维告警
 
