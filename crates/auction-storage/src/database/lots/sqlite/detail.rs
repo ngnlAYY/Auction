@@ -55,7 +55,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
                 l.material,
                 CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,
                 CAST(json_extract(a.policy_snapshot, '$.minimum_increment') AS INTEGER) AS policy_minimum_increment,
-                leader.username AS leader_name,
+                leader.game_player_id AS leader_name,
                 submission.seller AS seller_name, l.effective_end_at, l.state_version,
                 e.external_equipment_id, e.name AS equipment_name,
                 e.category AS equipment_category, e.attributes AS equipment_attributes

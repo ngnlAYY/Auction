@@ -57,8 +57,8 @@ PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 pos
 主题对账，不以 thread ID 或楼层位置伪造 post proof。
 论坛作者 ID 与 MoogleMail 使用同一个 `users.game_player_id`；`forum_bidder_identities` 只保存
 world/provider 参与映射、显示名及 `forum_only/mm_bound` 生命周期，不是第二份玩家身份权威源。
-首次论坛竞价可以在 Users-owner Serializable 事务内建立 revoked-key 的 `forum_only` 临时用户，
-后续 MM 注册按同一玩家 ID 恢复该主体。
+首次论坛竞价可以在 Users-owner Serializable 事务内建立用户名直接等于玩家 ID 的 revoked-key
+`forum_only` 用户，不生成第二套影子用户名；后续 MM 注册按同一玩家 ID 恢复该主体。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐

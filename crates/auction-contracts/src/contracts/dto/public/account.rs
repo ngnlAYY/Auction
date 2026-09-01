@@ -171,6 +171,8 @@ pub struct PublicLoginRequest {
 pub struct PublicLoginResponse {
     pub user_id: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_player_id: Option<String>,
     pub status: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
@@ -182,6 +184,8 @@ pub struct PublicSessionCurrentResponse {
     pub authenticated: bool,
     pub user_id: String,
     pub username: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_player_id: Option<String>,
     pub expires_at: String,
     pub absolute_expires_at: String,
 }

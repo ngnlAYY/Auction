@@ -146,6 +146,14 @@ fn parse_notify_mode<'a>(
 }
 
 pub(super) fn parse_amount(raw: &str) -> Result<i64, ()> {
+    parse_positive_amount(raw, true)
+}
+
+pub(super) fn parse_catalog_amount(raw: &str) -> Result<i64, ()> {
+    parse_positive_amount(raw, false)
+}
+
+fn parse_positive_amount(raw: &str, require_credit_grid: bool) -> Result<i64, ()> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Err(());
@@ -175,7 +183,7 @@ pub(super) fn parse_amount(raw: &str) -> Result<i64, ()> {
         return Err(());
     }
     let amount = total / denominator;
-    if amount % i128::from(CREDIT_GRID) != 0 {
+    if require_credit_grid && amount % i128::from(CREDIT_GRID) != 0 {
         return Err(());
     }
     i64::try_from(amount).map_err(|_| ())

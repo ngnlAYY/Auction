@@ -108,7 +108,7 @@ async fn list_postgres_transaction(
                 l.material,
                 (a.policy_snapshot ->> 'bid_increment_ppm')::bigint AS policy_bid_increment_ppm,
                 (a.policy_snapshot ->> 'minimum_increment')::bigint AS policy_minimum_increment,
-                leader.username AS leader_name,
+                leader.game_player_id AS leader_name,
                 submission.seller AS seller_name,
                 l.effective_end_at,
                 l.state_version,

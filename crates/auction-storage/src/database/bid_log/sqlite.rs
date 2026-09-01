@@ -77,7 +77,7 @@ pub(super) async fn list_sqlite(
             l.category_number AS lot_number,
             e.name AS equipment_name,
             e.category AS equipment_category,
-            users.username AS bidder_name,
+            users.game_player_id AS bidder_name,
             b.amount,
             b.accepted_state_version,
             b.fact_index,

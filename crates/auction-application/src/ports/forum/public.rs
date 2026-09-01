@@ -34,7 +34,7 @@ impl PublicForumThread {
             || self.updated_at.timestamp_micros() == 0
             || !valid_optional_text(self.thread_url.as_deref(), 2048)
             || !valid_optional_text(self.title.as_deref(), 512)
-            || !valid_optional_text(self.body.as_deref(), 1_000_000)
+            || !valid_optional_multiline_text(self.body.as_deref(), 1_000_000)
         {
             return Err("公开论坛同步投影无效");
         }
@@ -55,6 +55,16 @@ fn valid_optional_text(value: Option<&str>, maximum: usize) -> bool {
             && value == value.trim()
             && value.len() <= maximum
             && !value.chars().any(char::is_control)
+    })
+}
+
+fn valid_optional_multiline_text(value: Option<&str>, maximum: usize) -> bool {
+    value.is_none_or(|value| {
+        !value.trim().is_empty()
+            && value.len() <= maximum
+            && !value
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
     })
 }
 

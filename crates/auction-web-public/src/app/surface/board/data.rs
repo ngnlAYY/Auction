@@ -49,8 +49,8 @@ pub(crate) fn AuctionData(
     let auction_id = auction.id.clone();
     let mut session = use_context::<PublicSessionResource>();
     let session_snapshot = session.read().clone();
-    let viewer_name = match session_snapshot.as_ref() {
-        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
+    let viewer_player_id = match session_snapshot.as_ref() {
+        Some(Ok(Some(session))) if session.authenticated => session.game_player_id.clone(),
         _ => None,
     };
     let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
@@ -169,7 +169,7 @@ pub(crate) fn AuctionData(
                     allow_slow: auction.status == "live",
                     session_ready,
                     authenticated,
-                    viewer_name: viewer_name.clone(),
+                    viewer_player_id: viewer_player_id.clone(),
                 }
             }
         }

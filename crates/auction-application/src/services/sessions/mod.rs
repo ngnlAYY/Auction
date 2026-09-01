@@ -73,7 +73,10 @@ impl PublicSessionPort for PublicSessionService {
                     self.config.max_public_sessions,
                 )
                 .await?;
-            if stored.user_id != login.user_id || stored.username != login.username {
+            if stored.user_id != login.user_id
+                || stored.username != login.username
+                || stored.game_player_id != login.game_player_id
+            {
                 return Err(SessionError::InvalidIdentity.into());
             }
             Ok(PublicLoginResult { token, identity: stored })
@@ -250,6 +253,12 @@ fn validate_login_identity(identity: &PublicLoginIdentity) -> Result<(), Applica
         || identity.username.len() > 256
         || identity.username != identity.username.trim()
         || identity.username.chars().any(char::is_control)
+        || identity.game_player_id.as_deref().is_some_and(|value| {
+            value.is_empty()
+                || value.len() > 256
+                || value != value.trim()
+                || value.chars().any(char::is_control)
+        })
     {
         return Err(SessionError::InvalidIdentity.into());
     }

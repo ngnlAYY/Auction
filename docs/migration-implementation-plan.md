@@ -291,8 +291,9 @@ Sent 分页/exact ID 查找、详情资产矩阵解析、Balance 可见值/脚�
 引用，发送前才由 Worker 解密。论坛主题同步和回帖导入已经接入 PostgreSQL Worker：主题发布使用
 持久化 claim/fencing，结果未知时先按精确标题只读对账；未命中必须经 PostgreSQL `000016` 的
 幂等人工授权和追加审计才允许下一次 POST。论坛作者 ID 与 MM 共用 `users.game_player_id`；Users
-owner 在 Serializable 事务内复用已有用户，或建立 revoked-key `forum_only` 临时主体供后续 MM
-注册恢复。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
+owner 在 Serializable 事务内复用已有用户，或建立用户名直接等于玩家 ID 的 revoked-key
+`forum_only` 主体供后续 MM 注册恢复，不生成 `forum-*` 影子用户名。论坛与公开拍卖投影统一展示
+该玩家 ID。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
 post ID 与内容版本，用户命令从 #3 开始；确定竞价结果提交后刷新 #1，解析/编辑/拒绝结果稳定更新
 #2，pending 命令同样显示，并以独立内容 lease/fencing 串行远端编辑；成功扫描持久化下一次五分钟
 due，主题读取按同 origin/thread 的规范 `st` 分页补齐、默认最多 10 页，既有 #2 不是系统标记时不覆盖。

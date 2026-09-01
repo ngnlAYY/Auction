@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use auction_application::AdminForumLot;
 
-use super::commands::parse_amount;
+use super::commands::{parse_amount, parse_catalog_amount};
 use super::{CATALOG_CATEGORIES, CatalogParse, DEFAULT_START_PRICE};
 
 pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
@@ -31,17 +31,11 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
         let Some((raw_code, description)) = catalog_row(trimmed) else {
             continue;
         };
-        let Some(code) = super::helpers::normalize_lot_code(raw_code) else {
-            warnings.push(super::helpers::warning(
-                line_number,
-                "invalid_catalog_row",
-                "catalog row has no valid category or code",
-                Some(trimmed),
-                None,
-            ));
+        // 首个已知分类之前是主题标题和导航链接，不属于拍品目录，不能产生伪解析警告。
+        let Some(category) = category.as_deref() else {
             continue;
         };
-        let Some(category) = category.as_deref() else {
+        let Some(code) = super::helpers::normalize_lot_code(raw_code) else {
             warnings.push(super::helpers::warning(
                 line_number,
                 "invalid_catalog_row",
@@ -110,7 +104,8 @@ fn custom_start_price(description: &str) -> Option<Result<i64, ()>> {
         .split_whitespace()
         .next()?
         .trim_matches(|character: char| matches!(character, ',' | ';' | ')' | ']'));
-    Some(parse_amount(token))
+    // 起拍价是目录事实，可为任意正整数；只有实际竞价命令需要满足 credit 网格。
+    Some(parse_catalog_amount(token))
 }
 
 fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<i64>) {

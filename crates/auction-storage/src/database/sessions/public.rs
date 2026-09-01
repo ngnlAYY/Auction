@@ -28,7 +28,7 @@ pub(super) async fn create_postgres(
         .map_err(|_| storage_error("设置 Public 会话事务隔离级别失败"))?;
 
     let user = sqlx::query(
-        "SELECT id, username
+        "SELECT id, username, game_player_id
          FROM public.users
          WHERE id = $1 AND status = 'active' AND key_status = 'active'
          FOR UPDATE",
@@ -73,6 +73,9 @@ pub(super) async fn create_postgres(
         username: user
             .try_get("username")
             .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
+        game_player_id: user
+            .try_get("game_player_id")
+            .map_err(|_| storage_error("读取 Public 会话游戏玩家标识失败"))?,
         expires_at: record.expires_at,
         absolute_expires_at: record.absolute_expires_at,
     })
@@ -96,7 +99,7 @@ pub(super) async fn touch_postgres(
            AND account.id = session.user_id
            AND account.status = 'active'
            AND account.key_status = 'active'
-         RETURNING session.user_id, account.username, session.expires_at,
+         RETURNING session.user_id, account.username, account.game_player_id, session.expires_at,
                    session.absolute_expires_at",
     )
     .bind(now)
@@ -115,6 +118,9 @@ pub(super) async fn touch_postgres(
         username: row
             .try_get("username")
             .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
+        game_player_id: row
+            .try_get("game_player_id")
+            .map_err(|_| storage_error("读取 Public 会话游戏玩家标识失败"))?,
         expires_at: row
             .try_get("expires_at")
             .map_err(|_| storage_error("读取 Public 会话过期时间失败"))?,
@@ -157,7 +163,7 @@ pub(super) async fn create_sqlite(
         .map_err(|_| storage_error("开始 Lite Public 会话事务失败"))?;
 
     let user = sqlx::query(
-        "SELECT id, username
+        "SELECT id, username, game_player_id
          FROM users
          WHERE id = ? AND status = 'active' AND key_status = 'active'",
     )
@@ -207,6 +213,9 @@ pub(super) async fn create_sqlite(
         username: user
             .try_get("username")
             .map_err(|_| storage_error("读取 Lite 会话用户名失败"))?,
+        game_player_id: user
+            .try_get("game_player_id")
+            .map_err(|_| storage_error("读取 Lite 会话游戏玩家标识失败"))?,
         expires_at: record.expires_at,
         absolute_expires_at: record.absolute_expires_at,
     })
@@ -259,7 +268,8 @@ pub(super) async fn touch_sqlite(
         return Err(SessionError::Unauthenticated.into());
     }
     let row = sqlx::query(
-        "SELECT session.user_id, account.username, session.expires_at, session.absolute_expires_at
+        "SELECT session.user_id, account.username, account.game_player_id,
+                session.expires_at, session.absolute_expires_at
          FROM public_sessions AS session
          INNER JOIN users AS account ON account.id = session.user_id
          WHERE session.token_hash = ?",
@@ -278,6 +288,9 @@ pub(super) async fn touch_sqlite(
             row.try_get("user_id").map_err(|_| storage_error("读取 Lite 会话用户标识失败"))?,
         )?,
         username: row.try_get("username").map_err(|_| storage_error("读取 Lite 会话用户名失败"))?,
+        game_player_id: row
+            .try_get("game_player_id")
+            .map_err(|_| storage_error("读取 Lite 会话游戏玩家标识失败"))?,
         expires_at: parse_timestamp(
             row.try_get("expires_at").map_err(|_| storage_error("读取 Lite 会话过期时间失败"))?,
         )?,

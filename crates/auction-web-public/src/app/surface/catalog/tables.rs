@@ -17,7 +17,7 @@ pub(crate) fn CatalogTable(
     allow_slow: bool,
     session_ready: bool,
     authenticated: bool,
-    viewer_name: Option<String>,
+    viewer_player_id: Option<String>,
 ) -> Element {
     let active = active_category();
     let groups = grouped_catalog_rows(&rows, &active);
@@ -90,7 +90,7 @@ pub(crate) fn CatalogTable(
                         allow_slow,
                         session_ready,
                         authenticated,
-                        viewer_name: viewer_name.clone(),
+                        viewer_player_id: viewer_player_id.clone(),
                     }
                 } else {
                     PreviewCatalogTable { rows: category_rows }
@@ -118,7 +118,7 @@ pub(crate) fn LiveCatalogTable(
     allow_slow: bool,
     session_ready: bool,
     authenticated: bool,
-    viewer_name: Option<String>,
+    viewer_player_id: Option<String>,
 ) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
@@ -148,7 +148,7 @@ pub(crate) fn LiveCatalogTable(
                             allow_slow,
                             session_ready,
                             authenticated,
-                            viewer_name: viewer_name.clone(),
+                            viewer_player_id: viewer_player_id.clone(),
                         }
                     }
                 }
@@ -195,11 +195,11 @@ pub(crate) fn LiveCatalogRow(
     allow_slow: bool,
     session_ready: bool,
     authenticated: bool,
-    viewer_name: Option<String>,
+    viewer_player_id: Option<String>,
 ) -> Element {
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
-    let is_leading = viewer_name
+    let is_leading = viewer_player_id
         .as_deref()
         .zip(row.leader_name.as_deref())
         .is_some_and(|(viewer, leader)| viewer == leader);
