@@ -55,6 +55,10 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
         usize::try_from(current_stats_page.saturating_sub(1).saturating_mul(stats_page_size))
             .unwrap_or(usize::MAX);
     let game_equipment_href = equipment.game_equipment_url.clone();
+    let category_label = equipment
+        .category
+        .as_deref()
+        .map(|category| catalog_category_label(catalog_category_key(category)));
     rsx! {
         div { class: "public-auction-equipment",
             if game_equipment_href.is_empty() {
@@ -85,18 +89,41 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
                     }
                 }
             }
-            dl {
-                if let Some(category) = equipment.category.as_deref() {
-                    dt { {t!("equipment-category")} }
-                    dd { {catalog_category_label(catalog_category_key(category))} }
+            if category_label.is_some()
+                || equipment.level.is_some()
+                || !equipment.info_summary.is_empty()
+            {
+                div { class: "public-auction-equipment__facts",
+                    dl { class: "public-auction-equipment__facts-list",
+                        if let Some(category) = category_label.as_deref() {
+                            div { class: "public-auction-equipment__fact",
+                                dt { {t!("equipment-category")} }
+                                dd {
+                                    TruncatedText {
+                                        value: category.to_owned(),
+                                        size: "compact",
+                                        class_name: "public-auction-equipment__fact-value",
+                                        portal: true,
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(level) = equipment.level {
+                            div { class: "public-auction-equipment__fact",
+                                dt { {t!("equipment-level")} }
+                                dd { "{level}" }
+                            }
+                        }
+                    }
+                    if !equipment.info_summary.is_empty() {
+                        TruncatedText {
+                            value: equipment.info_summary.clone(),
+                            size: "compact",
+                            class_name: "public-auction-equipment__fact-summary",
+                            portal: true,
+                        }
+                    }
                 }
-                if let Some(level) = equipment.level {
-                    dt { {t!("equipment-level")} }
-                    dd { "{level}" }
-                }
-            }
-            if !equipment.info_summary.is_empty() {
-                p { class: "public-auction-item-summary", "{equipment.info_summary}" }
             }
             if let Some(avg_roll) = equipment.avg_roll {
                 p { class: "public-auction-equipment__avg-roll",
@@ -107,7 +134,7 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
             if !equipment.stats.is_empty() {
                 div { class: "public-auction-equipment__stats-wrap",
                     table { class: "public-auction-equipment__stats",
-                        caption { {t!("equipment-stats")} }
+                        caption { class: "public-visually-hidden", {t!("equipment-stats")} }
                         thead {
                             tr {
                                 th { scope: "col", {t!("equipment-stat-name")} }

@@ -2753,7 +2753,6 @@
   max-inline-size: 100%;
 }
 
-.public-auction-equipment dl,
 .public-auction-lot__bidding dl {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2761,19 +2760,68 @@
   margin: 0 0 var(--space-4);
 }
 
-.public-auction-equipment dt,
 .public-auction-lot__bidding dt {
   color: var(--color-text-muted);
 }
 
-.public-auction-equipment dd,
 .public-auction-lot__bidding dd {
   margin: 0;
 }
 
-.public-auction-item-summary {
+.public-auction-equipment__facts {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-inline-size: 0;
   margin: 0 0 var(--space-3);
+  overflow: hidden;
+}
+
+.public-auction-equipment__facts-list {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.public-auction-equipment__fact {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  white-space: nowrap;
+}
+
+.public-auction-equipment__fact dt {
   color: var(--color-text-muted);
+}
+
+.public-auction-equipment__fact dd {
+  min-inline-size: 0;
+  margin: 0;
+}
+
+.public-auction-equipment__fact-value {
+  display: block;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 10rem;
+  vertical-align: baseline;
+}
+
+.public-auction-equipment__fact-summary {
+  display: block;
+  flex: 1 1 auto;
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  color: var(--color-text-muted);
+  vertical-align: baseline;
 }
 
 .public-auction-equipment__link {
@@ -2802,12 +2850,6 @@
 .public-auction-lot__table table {
   inline-size: 100%;
   border-collapse: collapse;
-}
-
-.public-auction-equipment__stats caption {
-  padding-block-end: var(--space-1);
-  color: var(--color-text-muted);
-  text-align: left;
 }
 
 .public-auction-equipment__stats th,
@@ -2847,6 +2889,15 @@
 @media (max-width: 48rem) {
   .public-auction-lot__grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-auction-equipment__facts,
+  .public-auction-equipment__facts-list {
+    gap: var(--space-2);
+  }
+
+  .public-auction-equipment__fact {
+    gap: var(--space-1);
   }
 
   .public-auction-equipment__stats-wrap {
