@@ -399,9 +399,11 @@ send/return transport 已接入：邮件来源的未售/撤回执行原邮件退
 与 MoogleMail payload 固定从 `main` dispatch，异世界 recovery 案件仍保留来源世界。结算 send 的 delivery
 成功不会直接满足履约；Sent 分页/exact ID 查找、详情剩余资产矩阵、Balance 页面一致性校验
 和 Worker 自动对账已经接入，满足时追加不可变 proof，发送成功页没有 exact remote ID 则进入
-`manual_reconcile`。论坛主题同步和回帖竞价导入已由 PostgreSQL Worker 接入：主题发布采用
-`auction_forum_sync` 的 claim/fencing；写入结果未知或本地证明写入失败时先按精确标题 GET，命中只
-补本地证明，未命中则等待 `forum_sync_admin_commands` 的幂等人工授权，未经授权不得再次 POST。
+`manual_reconcile`。论坛主题同步和回帖竞价导入已由 PostgreSQL Worker 接入：主题任务只在拍卖首次进入
+`live` 且已经记录实际开放时间后初始化，发布成功后不会因后续竞价推进 `state_version` 再次领取；主题发布采用
+`auction_forum_sync` 的 claim/fencing。Worker 在渲染 BBCode 前才按 lot 的无 key 装备目标批量解析真实
+HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计或事件。写入结果未知或本地证明写入失败时先按
+精确标题 GET，命中只补本地证明，未命中则等待 `forum_sync_admin_commands` 的幂等人工授权，未经授权不得再次 POST。
 回帖必须经过登记身份、lot
 映射和 `auction_forum_bid_commands` 幂等账本，再调用现有竞价端口。Forum 在独立顺序循环中先
 发布后读取回帖，两阶段错误分别记录，发布失败不会跳过回帖扫描，也不会终止其它 Worker owner；

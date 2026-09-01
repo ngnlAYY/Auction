@@ -129,6 +129,8 @@ Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地�
 `sync/{claims,snapshot,publishing,validation}.rs`，`sync/authorization.rs` 单独拥有未知写入清单、
 幂等人工再授权、命令重放和追加审计事务；`reply.rs` 只做回帖端口装配，已发布主题与
 lot/身份/代理查询、命令账本和扫描游标分别位于 `reply/{queries,commands,cursor,validation}.rs`。
+主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
+快照只输出装备 ID、外部 ID 和不含 key 的目标，真实 URL 由 Worker 的外部链接解析边界生成。
 回帖账本接管会同时核对命令 ID 与冻结自然键；自然键和完整业务负载一致时复用既有旧版命令 ID，
 两种身份命中不同记录或任一负载字段漂移时失败关闭。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。

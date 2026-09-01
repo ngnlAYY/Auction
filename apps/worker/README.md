@@ -111,7 +111,8 @@ PostgreSQL 完整档启用 `[worker.forum]` 后，Worker 还会装配 E-Hentai �
 回帖导入：身份必须先在 `forum_bidder_identities` 登记，`bid`、`proxy` 和 `proxy lower`
 通过现有竞价命令端口执行；`start`、`cancel` 和 PM-only `notify` 在旧版 `forumingest` 中就是
 warning-only，当前不越过该兼容边界；MM `notify` 进入 MoogleMail delivery outbox。主题发布使用
-持久化 claim/fencing；远端写入不确定或本地证明写入失败时先按精确标题只读对账，命中只补本地
+持久化 claim/fencing，只为已经实际开放的 `live` 拍卖创建一次；装备真实 URL 在渲染前由
+`equipment_data_key` 解密边界批量生成，明文 key 不进入快照或日志。远端写入不确定或本地证明写入失败时先按精确标题只读对账，命中只补本地
 证明，未命中停在等待人工授权。只有 `auctionctl authorize-forum-write-retry` 经逐字目标确认写入
 幂等授权和追加审计后才允许下一次 POST；回帖命令使用持久化账本和稳定命令 ID。
 Forum 默认立即执行一轮，再等待一分钟和最多五秒抖动；主题逐条领取，默认 claim 300 秒，发布

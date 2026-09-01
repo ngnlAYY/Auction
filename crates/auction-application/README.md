@@ -118,9 +118,10 @@ movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页�
 PostgreSQL 或 SQLite 类型。
 Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态和已发布内容，不承担
 远程论坛传输。
-论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：`ForumSyncRecoveryPort` 只允许按精确标题读取
-远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段；端口本身不决定 CLI
-确认文字、数据库表或 HTTP 传输实现。
+论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照只携带无 key 的装备链接目标，渲染前由
+`PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取
+远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段。端口本身不决定 CLI
+确认文字、数据库表、装备 key 解密或 HTTP 传输实现。
 Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/装备/投稿的安全快照和
 有界分页；它要求完整 Admin 生命周期投影，不把 Lite 缺失字段填成默认成功值。
 Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许版本 fence 保护的

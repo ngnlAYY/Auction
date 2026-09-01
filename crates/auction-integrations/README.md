@@ -65,10 +65,13 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
  Credits/COD 拒绝、无附件通知、装备来源读取、起拍价指令解析、拍卖入站、用户注册/重绑和
  take/return 编排；用户登录 key 通过独立数据密钥生成密文信封，只有 DeliveryTransport 发送前
  短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
- remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
+remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
 实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建和主题读取；创建 POST 无法证明
-时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责有界主题正文，回帖命令仍先
-经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。
+时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责参考旧帖结构生成有界 BBCode，
+按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
+经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
+正文明确出现登录表单/失效文案时作废；Cloudflare 前置挑战同样可能返回 403，不能据此误删有效
+Cookie，而应保留凭据并以协议/访问失败收口。
 - `src/equipment/`：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
   请求间隔和完整请求超时，`reader.rs` 负责无代理/无重定向读取与应用端口适配，`parser/` 按
   `url.rs`、`page.rs`、`identity.rs`、`stats.rs` 和 `common.rs` 分别解析来源 URL、旧装备页、
@@ -77,8 +80,8 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
   origin 校验。装备页解析器把 `.eq` 直接子项与 `.ex`/`.ep` 分组属性分开处理，避免嵌套 `title`
   被重复解释为主属性；同时兼容旧页的 `Tier A/B/C Soulbound` 头部，但仍严格校验阶段值、类别和
   页面结构。`game_link.rs` 为 P09/P11 已读取的 Public lot 批量绑定密文 owner，核对 world、
-  外部 ID 和无 key 投影后短暂解密，构造固定 HentaVerse origin 的完整 URL；该值只移交最终 HTTP
-  DTO 映射，不进入日志、审计、事件或持久化缓存。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
+  外部 ID 和无 key 投影后短暂解密，构造固定 HentaVerse origin 的完整 URL；该值只移交最终 Public
+  HTTP DTO 或论坛正文渲染边界，不进入日志、审计、事件或持久化缓存。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
   装备 ID 的密文信封，明文 key 不进入应用写端口。
 - `src/credentials/mod.rs`：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
   的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入
