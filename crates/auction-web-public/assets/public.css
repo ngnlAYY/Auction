@@ -2978,7 +2978,7 @@
 
 /* 桌面端拍卖信息以快速浏览为主；压缩留白与控件高度，移动端继续保留触控目标尺寸。 */
 @media (min-width: 48.0625rem) {
-  .public-shell__content:has(> .public-auction-lot) {
+  .public-shell__content:has(> .public-auction-page) {
     inline-size: 80%;
     padding-inline: 0;
   }
