@@ -1,6 +1,13 @@
 //! E-Hentai 主题表单、精确标题查找与发布回执解析。
 
+use std::sync::LazyLock;
+
 use super::*;
+
+static ACKNOWLEDGEMENT_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("title").map_err(|_| ()));
+static ACKNOWLEDGEMENT_REFRESH_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("meta[http-equiv][content]").map_err(|_| ()));
 
 struct FixedPostFormTarget<'a> {
     operation: EhentaiOperation,
@@ -29,21 +36,17 @@ impl EhentaiClient {
             std::str::from_utf8(&body).map_err(|_| EhentaiError::protocol(operation, false))?;
         let document = Html::parse_document(html);
         let form_selector =
-            Selector::parse("form").map_err(|_| EhentaiError::protocol(operation, false))?;
-        let input_selector = Selector::parse("input[type='hidden'][name]")
-            .map_err(|_| EhentaiError::protocol(operation, false))?;
-        let title_selector = Selector::parse("[name='TopicTitle']")
-            .map_err(|_| EhentaiError::protocol(operation, false))?;
-        let post_selector = Selector::parse("[name='Post']")
-            .map_err(|_| EhentaiError::protocol(operation, false))?;
-        for form in document.select(&form_selector) {
-            let Some(values) = posting_form_values(
-                form,
-                &input_selector,
-                &title_selector,
-                &post_selector,
-                board_id,
-            ) else {
+            form_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
+        let input_selector =
+            hidden_input_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
+        let title_selector =
+            topic_title_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
+        let post_selector =
+            post_body_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
+        for form in document.select(form_selector) {
+            let Some(values) =
+                posting_form_values(form, input_selector, title_selector, post_selector, board_id)
+            else {
                 continue;
             };
             let action_value = form.value().attr("action").unwrap_or(target.as_str());
@@ -195,16 +198,16 @@ impl EhentaiClient {
             .map_err(|_| EhentaiError::protocol(target.operation, false))?;
         let document = Html::parse_document(html);
         let form_selector =
-            Selector::parse("form").map_err(|_| EhentaiError::protocol(target.operation, false))?;
-        let input_selector = Selector::parse("input[type='hidden'][name]")
-            .map_err(|_| EhentaiError::protocol(target.operation, false))?;
-        let post_selector = Selector::parse("[name='Post']")
-            .map_err(|_| EhentaiError::protocol(target.operation, false))?;
-        for form in document.select(&form_selector) {
+            form_selector().map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        let input_selector =
+            hidden_input_selector().map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        let post_selector =
+            post_body_selector().map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        for form in document.select(form_selector) {
             let Some(values) = fixed_post_form_values(
                 form,
-                &input_selector,
-                &post_selector,
+                input_selector,
+                post_selector,
                 target.expected_code,
                 target.board_id,
                 target.thread_id,
@@ -302,6 +305,8 @@ impl EhentaiClient {
                     )
                 },
             )
+        } else if status == StatusCode::OK {
+            self.post_from_acknowledgement_page(&form.action, &body, board_id, thread_id, operation)
         } else {
             None
         };
@@ -312,6 +317,49 @@ impl EhentaiClient {
             return Err(EhentaiError::write_unknown(operation));
         }
         Ok(proof)
+    }
+
+    fn post_from_acknowledgement_page(
+        &self,
+        base: &Url,
+        body: &[u8],
+        board_id: i32,
+        thread_id: &str,
+        operation: EhentaiOperation,
+    ) -> Option<ForumPublishedPost> {
+        let html = std::str::from_utf8(body).ok()?;
+        let document = Html::parse_document(html);
+        let title_selector = LazyLock::force(&ACKNOWLEDGEMENT_TITLE_SELECTOR).as_ref().ok()?;
+        let mut titles = document.select(title_selector);
+        let title = clean_line(&titles.next()?.text().collect::<String>());
+        if title != "Please stand by..." || titles.next().is_some() {
+            return None;
+        }
+
+        let refresh_selector = LazyLock::force(&ACKNOWLEDGEMENT_REFRESH_SELECTOR).as_ref().ok()?;
+        let mut refreshes = document.select(refresh_selector).filter(|element| {
+            element
+                .value()
+                .attr("http-equiv")
+                .is_some_and(|value| value.eq_ignore_ascii_case("refresh"))
+        });
+        let refresh = refreshes.next()?;
+        if refreshes.next().is_some() {
+            return None;
+        }
+        let refresh_reference = refresh_reference(refresh.value().attr("content")?)?;
+        let refresh_proof =
+            self.post_from_reference(base, refresh_reference, board_id, thread_id, operation)?;
+
+        let links = link_selector().ok()?;
+        let link_proofs = document
+            .select(links)
+            .filter_map(|link| link.value().attr("href"))
+            .filter_map(|reference| {
+                self.post_from_reference(base, reference, board_id, thread_id, operation)
+            });
+        let link_proof = consistent_post_proof(link_proofs)?;
+        (refresh_proof == link_proof).then_some(refresh_proof)
     }
 
     pub(super) fn find_topic(
@@ -325,10 +373,9 @@ impl EhentaiClient {
         let html =
             std::str::from_utf8(body).map_err(|_| EhentaiError::protocol(operation, false))?;
         let document = Html::parse_document(html);
-        let selector =
-            Selector::parse("a[href]").map_err(|_| EhentaiError::protocol(operation, false))?;
+        let selector = link_selector().map_err(|_| EhentaiError::protocol(operation, false))?;
         let wanted = clean_line(title);
-        for element in document.select(&selector) {
+        for element in document.select(selector) {
             let label = clean_line(&element.text().collect::<String>());
             if label != wanted {
                 continue;
@@ -354,8 +401,8 @@ impl EhentaiClient {
     ) -> Option<auction_application::ForumPublishedThread> {
         let html = std::str::from_utf8(body).ok()?;
         let document = Html::parse_document(html);
-        let selector = Selector::parse("a[href]").ok()?;
-        for element in document.select(&selector) {
+        let selector = link_selector().ok()?;
+        for element in document.select(selector) {
             let Some(reference) = element.value().attr("href") else {
                 continue;
             };
@@ -422,5 +469,98 @@ impl EhentaiClient {
             return None;
         }
         Some(ForumPublishedPost { thread_id: observed_thread, post_id: observed_post })
+    }
+}
+
+fn refresh_reference(content: &str) -> Option<&str> {
+    if content.is_empty() || content.len() > 4 * 1024 || content.chars().any(char::is_control) {
+        return None;
+    }
+    let (_, target) = content.split_once(';')?;
+    let (name, value) = target.trim().split_once('=')?;
+    if !name.trim().eq_ignore_ascii_case("url") {
+        return None;
+    }
+    let value = value.trim();
+    let value = if value.len() >= 2
+        && matches!(value.as_bytes()[0], b'\'' | b'"')
+        && value.as_bytes().last() == value.as_bytes().first()
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    };
+    (!value.is_empty()).then_some(value)
+}
+
+fn consistent_post_proof(
+    mut proofs: impl Iterator<Item = ForumPublishedPost>,
+) -> Option<ForumPublishedPost> {
+    let proof = proofs.next()?;
+    proofs.all(|candidate| candidate == proof).then_some(proof)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_post_acknowledgement_requires_matching_meta_and_link_proof() {
+        let html = br#"
+            <html>
+              <head>
+                <title>Please stand by...</title>
+                <meta http-equiv="refresh" content="2; url=index.php?showtopic=300433&amp;p=6956800#entry6956800">
+              </head>
+              <body>
+                <p>Thanks. The post has been edited.</p>
+                <a href="index.php?showtopic=300433#entry6956800">click here</a>
+              </body>
+            </html>
+        "#;
+        let client = EhentaiClient::with_config(
+            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
+        )
+        .expect("安全论坛客户端应可构造");
+        let base = Url::parse("https://forums.e-hentai.org/index.php").unwrap();
+
+        let proof = client
+            .post_from_acknowledgement_page(&base, html, 4, "300433", EhentaiOperation::EditPost)
+            .expect("两份一致回执应证明固定帖子身份");
+
+        assert_eq!(proof.thread_id, "300433");
+        assert_eq!(proof.post_id, "6956800");
+    }
+
+    #[test]
+    fn fixed_post_acknowledgement_rejects_conflicting_proofs() {
+        let html = br#"
+            <html>
+              <head>
+                <title>Please stand by...</title>
+                <meta http-equiv="refresh" content="2; url=index.php?showtopic=300433&amp;p=6956800#entry6956800">
+              </head>
+              <body>
+                <a href="index.php?showtopic=300433#entry6956801">click here</a>
+              </body>
+            </html>
+        "#;
+        let client = EhentaiClient::with_config(
+            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
+        )
+        .expect("安全论坛客户端应可构造");
+        let base = Url::parse("https://forums.e-hentai.org/index.php").unwrap();
+
+        assert!(
+            client
+                .post_from_acknowledgement_page(
+                    &base,
+                    html,
+                    4,
+                    "300433",
+                    EhentaiOperation::EditPost,
+                )
+                .is_none()
+        );
     }
 }

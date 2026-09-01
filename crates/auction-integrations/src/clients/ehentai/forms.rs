@@ -1,6 +1,48 @@
 //! E-Hentai 隐藏表单提取、URL/origin 校验与响应协议判断。
 
+use std::sync::LazyLock;
+
 use super::*;
+
+static FORM_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("form").map_err(|_| ()));
+static HIDDEN_INPUT_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("input[type='hidden'][name]").map_err(|_| ()));
+static TOPIC_TITLE_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("[name='TopicTitle']").map_err(|_| ()));
+static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("[name='Post']").map_err(|_| ()));
+static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("a[href]").map_err(|_| ()));
+
+fn cached_selector(
+    cache: &'static LazyLock<Result<Selector, ()>>,
+) -> Result<&'static Selector, ()> {
+    match LazyLock::force(cache) {
+        Ok(selector) => Ok(selector),
+        Err(()) => Err(()),
+    }
+}
+
+pub(super) fn form_selector() -> Result<&'static Selector, ()> {
+    cached_selector(&FORM_SELECTOR)
+}
+
+pub(super) fn hidden_input_selector() -> Result<&'static Selector, ()> {
+    cached_selector(&HIDDEN_INPUT_SELECTOR)
+}
+
+pub(super) fn topic_title_selector() -> Result<&'static Selector, ()> {
+    cached_selector(&TOPIC_TITLE_SELECTOR)
+}
+
+pub(super) fn post_body_selector() -> Result<&'static Selector, ()> {
+    cached_selector(&POST_BODY_SELECTOR)
+}
+
+pub(super) fn link_selector() -> Result<&'static Selector, ()> {
+    cached_selector(&LINK_SELECTOR)
+}
 
 pub(super) struct TopicForm {
     pub(super) action: Url,
@@ -128,7 +170,8 @@ pub(super) fn set_form_value(values: &mut Vec<(String, String)>, name: &str, val
 fn single_value_for<'a>(values: &'a [(String, String)], name: &str) -> Option<&'a str> {
     let mut matches = values.iter().filter(|(current, _)| current == name);
     let value = matches.next()?.1.as_str();
-    matches.next().is_none().then_some(value)
+    // 真实论坛编辑表单会重复生成相同的 `st=0`；相同重复不改变编码语义，冲突值仍失败关闭。
+    matches.all(|(_, current)| current == value).then_some(value)
 }
 
 pub(super) fn cookie_header(
@@ -192,7 +235,14 @@ pub(super) fn valid_post_id(value: &str) -> bool {
 }
 
 pub(super) fn clean_line(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut cleaned = String::with_capacity(value.len());
+    for word in value.split_whitespace() {
+        if !cleaned.is_empty() {
+            cleaned.push(' ');
+        }
+        cleaned.push_str(word);
+    }
+    cleaned
 }
 
 pub(super) fn body_looks_like_html(body: &[u8]) -> bool {
@@ -249,4 +299,73 @@ pub(super) fn is_loopback_host(url: &Url) -> bool {
 pub(super) fn build_forum_http_client() -> Result<Client, reqwest::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     Client::builder().no_proxy().redirect(Policy::none()).build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_post_form_accepts_identical_duplicate_offset_fields() {
+        let html = r#"
+            <form action="index.php" method="post">
+              <input type="hidden" name="st" value="0">
+              <input type="hidden" name="act" value="Post">
+              <input type="hidden" name="f" value="4">
+              <input type="hidden" name="auth_key" value="0123456789abcdef0123456789abcdef">
+              <input type="hidden" name="CODE" value="09">
+              <input type="hidden" name="t" value="300433">
+              <input type="hidden" name="p" value="6956800">
+              <input type="hidden" name="st" value="0">
+              <textarea name="Post">System log</textarea>
+            </form>
+        "#;
+        let document = Html::parse_document(html);
+        let form = document.select(form_selector().expect("表单 selector 应合法")).next().unwrap();
+
+        let values = fixed_post_form_values(
+            form,
+            hidden_input_selector().expect("隐藏字段 selector 应合法"),
+            post_body_selector().expect("正文 selector 应合法"),
+            "09",
+            4,
+            "300433",
+            Some("6956800"),
+        )
+        .expect("论坛生成的相同重复 st 应可接受");
+
+        assert_eq!(single_value_for(&values, "st"), Some("0"));
+    }
+
+    #[test]
+    fn fixed_post_form_rejects_conflicting_duplicate_offset_fields() {
+        let html = r#"
+            <form action="index.php" method="post">
+              <input type="hidden" name="st" value="0">
+              <input type="hidden" name="act" value="Post">
+              <input type="hidden" name="f" value="4">
+              <input type="hidden" name="auth_key" value="0123456789abcdef0123456789abcdef">
+              <input type="hidden" name="CODE" value="09">
+              <input type="hidden" name="t" value="300433">
+              <input type="hidden" name="p" value="6956800">
+              <input type="hidden" name="st" value="20">
+              <textarea name="Post">System log</textarea>
+            </form>
+        "#;
+        let document = Html::parse_document(html);
+        let form = document.select(form_selector().expect("表单 selector 应合法")).next().unwrap();
+
+        assert!(
+            fixed_post_form_values(
+                form,
+                hidden_input_selector().expect("隐藏字段 selector 应合法"),
+                post_body_selector().expect("正文 selector 应合法"),
+                "09",
+                4,
+                "300433",
+                Some("6956800"),
+            )
+            .is_none()
+        );
+    }
 }

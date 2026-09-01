@@ -82,6 +82,7 @@ pub(super) async fn configure_forum(
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
     );
     let store_port: Arc<dyn ForumSyncStore> = store.clone();
+    let credential_availability: Arc<dyn ForumCredentialAvailability> = gateway.clone();
     let publisher: Arc<dyn ForumPublisher> = gateway.clone();
     let reader: Arc<dyn ForumTopicReader> = gateway.clone();
     let post_writer: Arc<dyn ForumPostWriter> = gateway.clone();
@@ -101,6 +102,7 @@ pub(super) async fn configure_forum(
     let sync = Some(auction_jobs::ForumSyncRuntime::new(
         auction_jobs::ForumSyncPorts {
             store: store_port,
+            credential_availability,
             publisher,
             reader: reader.clone(),
             post_writer: post_writer.clone(),

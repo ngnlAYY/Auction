@@ -13,6 +13,7 @@ use auction_application::{
     AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
     AdminForumPreviewResult, ApplicationFuture,
 };
+pub(crate) use parser::ParsedHtmlPage;
 use parser::{parse_html, parse_html_documents, parse_thread_text};
 
 /// 无状态的论坛预览解析器。
@@ -51,6 +52,25 @@ impl ForumPreviewAdapter {
         }
         let result =
             parse_html_documents(inputs).map_err(|_| AdminForumPreviewError::ParseFailed)?;
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// 单次构建 DOM 并提取分页校验与帖子读取共用的受限页面事实。
+    pub(crate) fn parse_html_page(
+        &self,
+        input: &str,
+    ) -> Result<ParsedHtmlPage, AdminForumPreviewError> {
+        parser::parse_html_page(input).map_err(|_| AdminForumPreviewError::ParseFailed)
+    }
+
+    /// 合并已经解析的页面事实，校验跨页 post 身份后解释目录和普通出价。
+    pub(crate) fn parse_html_pages(
+        &self,
+        pages: Vec<ParsedHtmlPage>,
+    ) -> Result<AdminForumPreviewResult, AdminForumPreviewError> {
+        let result =
+            parser::parse_html_pages(pages).map_err(|_| AdminForumPreviewError::ParseFailed)?;
         result.validate()?;
         Ok(result)
     }

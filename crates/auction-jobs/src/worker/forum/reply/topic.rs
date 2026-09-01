@@ -27,7 +27,7 @@ pub(super) async fn process_topic(
     let mut command_error = None;
 
     'posts: for post in &preview.posts {
-        if post.post.id == topic.system_log_post_id || post.ignored {
+        if post.post.id == topic.system_log_post_id || !requires_bidder_identity(post) {
             continue;
         }
         let post_number = post_numbers.get(&post.post.id).copied().unwrap_or(3);
@@ -174,6 +174,10 @@ pub(super) async fn process_topic(
     refresh_fixed_posts(runtime, topic, system_entries, clock, poll_interval, scan_completed)
         .await?;
     command_error.map_or(Ok(()), Err)
+}
+
+fn requires_bidder_identity(post: &auction_application::AdminForumBidPost) -> bool {
+    !post.ignored && !post.commands.is_empty()
 }
 
 fn validate_fixed_layout(
@@ -352,4 +356,27 @@ fn target_map(
         return Err(repository_error("论坛 lot 映射为空"));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commandless_post_does_not_require_bidder_identity() {
+        let post = auction_application::AdminForumBidPost {
+            post: auction_application::AdminForumPost {
+                id: "6956957".to_owned(),
+                author_id: Some("5501029".to_owned()),
+                author: Some("ngnlAYY".to_owned()),
+                text: "One01 proxy 999m fast".to_owned(),
+                edited: false,
+            },
+            commands: Vec::new(),
+            warnings: Vec::new(),
+            ignored: false,
+        };
+
+        assert!(!requires_bidder_identity(&post));
+    }
 }

@@ -15,9 +15,7 @@ impl EhentaiGateway {
         client: Arc<EhentaiClient>,
         credentials: EhentaiCredentialSet,
     ) -> Result<Self, EhentaiError> {
-        if credentials.is_empty() {
-            return Err(EhentaiError::credential(EhentaiOperation::CreateTopic));
-        }
+        // 数据库凭据池允许暂时为空；真实操作会返回 credential_unavailable，Worker 仍保持 degraded。
         Ok(Self { client, credentials })
     }
 
@@ -148,6 +146,12 @@ impl EhentaiGateway {
             }
         }
         Err(EhentaiError::credential(EhentaiOperation::EditPost))
+    }
+}
+
+impl ForumCredentialAvailability for EhentaiGateway {
+    fn has_available_forum_credential(&self) -> bool {
+        !self.credentials.is_empty()
     }
 }
 

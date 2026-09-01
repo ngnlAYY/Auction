@@ -110,7 +110,9 @@ fulfillment 满足后把 `refunding` case 收口为 `completed`；这些 resolut
 PostgreSQL 完整档启用 `[worker.forum]` 后，Worker 还会装配 E-Hentai 主题发布、主题读取和
 回帖导入：论坛作者 ID 与 MM 的 `users.game_player_id` 是同一身份。已有用户直接复用；尚未注册
 MM 的作者会在 Users-owner Serializable 事务内建立 revoked-key 的 `forum_only` 临时主体及世界映射，
-后续 MM 注册按同一玩家 ID 恢复该用户。`bid`、`proxy` 和 `proxy lower` 通过现有竞价命令端口执行；
+后续 MM 注册按同一玩家 ID 恢复该用户。论坛只把普通 `bid` 交给现有竞价命令端口；
+`proxy`/`proxy lower` 属于 Web 专属能力，论坛解析入口静默忽略且不写入固定 #2；仅含这些被忽略行的
+帖子不会触发作者身份解析，历史已落账事实仍保留；
 `start`、`cancel` 和 PM-only `notify` 保持 warning-only 并显示在固定 #2；MM `notify` 进入
 MoogleMail delivery outbox。主题发布使用
 持久化 claim/fencing，只为已经实际开放的 `live` 拍卖创建一次；装备真实 URL 在渲染前由
@@ -123,7 +125,9 @@ MoogleMail delivery outbox。主题发布使用
 Forum 默认立即执行一轮，再等待 300 秒和最多五秒抖动；成功扫描把持久化下一次 due 推进一个完整
 论坛周期。主题逐条领取，默认 claim 300 秒，发布和回帖单主题总时限 240 秒；主题读取默认最多
 10 页、硬上限 20 页，超过上限明确失败而不截断出价。发布阶段失败后仍会继续本轮回帖导入。
-论坛完整档不在 SQLite Lite 中伪装提供。
+论坛完整档不在 SQLite Lite 中伪装提供。当前 Worker 内存中存在论坛凭据时，首轮还会一次性释放早于
+本进程启动水位的 `credential_unavailable` 主题任务；同一任务再次失败后不会在本进程内形成紧循环，
+新导入凭据仍按 Admin 的 `restart_required` 提示重启 Worker 才进入新的恢复世代。
 配置 `credential_data_key_id`/`credential_data_key` 后，Worker 会从 PostgreSQL 读取指定 world
 与 shared scope 的 active MoogleMail 凭据池，在内存中逐个解密并按顺序切换；密钥不匹配、密文
 损坏或不是合法 UTF-8 时失败关闭；暂时没有 active 凭据时保留 degraded Worker，实际轮询/写入

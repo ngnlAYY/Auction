@@ -35,3 +35,28 @@ pub(super) fn sort_warnings(warnings: &mut [AdminForumWarning]) {
         left.post_id.cmp(&right.post_id).then_with(|| left.line.cmp(&right.line))
     });
 }
+
+pub(super) fn normalize_lot_code(raw: &str) -> Option<String> {
+    let raw = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    if !raw.is_ascii() {
+        return None;
+    }
+    let mut bytes = [0_u8; 5];
+    let mut length = 0;
+    for byte in raw.bytes().filter(|byte| *byte != b'-') {
+        if length == bytes.len() {
+            return None;
+        }
+        bytes[length] = byte.to_ascii_uppercase();
+        length += 1;
+    }
+    if length != bytes.len()
+        || !bytes[..3].iter().all(u8::is_ascii_uppercase)
+        || !bytes[3..].iter().all(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    bytes[1] = bytes[1].to_ascii_lowercase();
+    bytes[2] = bytes[2].to_ascii_lowercase();
+    String::from_utf8(bytes.to_vec()).ok()
+}

@@ -3,13 +3,13 @@
 //! 该循环只编排“领取数据库快照 → 渲染 → 远端创建/查找 → 写入发布证明”，不包含拍卖状态机。
 //! 远端 POST 无法证明成功时，失败码会进入人工对账状态，避免 Worker 盲目重复发帖。
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use auction_application::{
-    ApplicationError, Clock, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
-    ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
-    ForumSyncClaim, ForumSyncStore, ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError,
-    forum_catalog_marker, forum_system_log_marker,
+    ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedLayout,
+    ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
+    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicReader, PublicEquipmentLinkResolver,
+    RepositoryError, forum_catalog_marker, forum_system_log_marker,
 };
 use chrono::Duration;
 use url::Url;
@@ -23,6 +23,7 @@ const MANUAL_RECONCILIATION_DELAY: Duration = Duration::days(365);
 /// 论坛主题同步运行时依赖。
 pub struct ForumSyncPorts {
     pub store: Arc<dyn ForumSyncStore>,
+    pub credential_availability: Arc<dyn ForumCredentialAvailability>,
     pub publisher: Arc<dyn ForumPublisher>,
     pub reader: Arc<dyn ForumTopicReader>,
     pub post_writer: Arc<dyn ForumPostWriter>,
@@ -33,6 +34,7 @@ pub struct ForumSyncPorts {
 /// 论坛主题同步运行时依赖。
 pub struct ForumSyncRuntime {
     pub(crate) store: Arc<dyn ForumSyncStore>,
+    pub(crate) credential_availability: Arc<dyn ForumCredentialAvailability>,
     pub(crate) publisher: Arc<dyn ForumPublisher>,
     pub(crate) reader: Arc<dyn ForumTopicReader>,
     pub(crate) post_writer: Arc<dyn ForumPostWriter>,
@@ -41,6 +43,7 @@ pub struct ForumSyncRuntime {
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
+    pub(crate) credential_recovery_before: OnceLock<chrono::DateTime<chrono::Utc>>,
 }
 
 impl ForumSyncRuntime {
@@ -58,10 +61,18 @@ impl ForumSyncRuntime {
         {
             return Err(WorkerError::InvalidForumSyncConfiguration);
         }
-        let ForumSyncPorts { store, publisher, reader, post_writer, renderer, equipment_links } =
-            ports;
+        let ForumSyncPorts {
+            store,
+            credential_availability,
+            publisher,
+            reader,
+            post_writer,
+            renderer,
+            equipment_links,
+        } = ports;
         Ok(Self {
             store,
+            credential_availability,
             publisher,
             reader,
             post_writer,
@@ -70,6 +81,7 @@ impl ForumSyncRuntime {
             batch_size,
             item_timeout,
             public_base_url,
+            credential_recovery_before: OnceLock::new(),
         })
     }
 }
@@ -88,12 +100,19 @@ where
     let mut first_error = None;
     while processed < runtime.batch_size {
         let now = worker.clock.now();
+        let recovery_before = *runtime.credential_recovery_before.get_or_init(|| now);
+        let credential_recovery_before = runtime
+            .credential_availability
+            .has_available_forum_credential()
+            .then_some(recovery_before);
         let lease_until = now
             .checked_add_signed(lease_duration)
             .ok_or(WorkerError::InvalidForumSyncConfiguration)?;
         // 旧版按主题顺序逐条领取和发布；只领取即将执行的一条，避免排队任务提前耗尽租约。
-        let mut claims =
-            runtime.store.claim_due(worker.worker_id.clone(), now, lease_until, 1).await?;
+        let mut claims = runtime
+            .store
+            .claim_due(worker.worker_id.clone(), now, lease_until, credential_recovery_before, 1)
+            .await?;
         let Some(claim) = claims.pop() else {
             break;
         };

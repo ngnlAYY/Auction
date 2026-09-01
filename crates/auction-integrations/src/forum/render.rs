@@ -88,8 +88,7 @@ pub fn render_auction_thread(
         "\n[size=4][b]Auction Rules and Bidding[/b][/size]\n\
          • The public auction page is the authoritative live view for prices, leaders and deadlines.\n\
          • Post one command per line. A normal bid looks like [b]One01 200k[/b].\n\
-         • A proxy bid looks like [b]One01 proxy 2m fast[/b] or [b]One01 proxy 2m slow[/b].\n\
-         • Lower an active proxy with [b]One01 proxy lower 1.5m[/b].\n\
+         • Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
          • Enable MoogleMail outbid notices with [b]One01 notify mm[/b].\n\
          • Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\n",
     );
