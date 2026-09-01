@@ -11,7 +11,6 @@ pub(crate) struct EquipmentCardData {
     pub(crate) name: String,
     pub(crate) category: Option<String>,
     pub(crate) level: Option<i64>,
-    pub(crate) info_summary: String,
     pub(crate) stats: BTreeMap<String, PublicEquipmentStatResponse>,
     pub(crate) avg_roll: Option<f64>,
     pub(crate) game_equipment_url: String,
@@ -23,7 +22,6 @@ impl From<EquipmentDetail> for EquipmentCardData {
             name: equipment.name,
             category: Some(equipment.category),
             level: equipment.level,
-            info_summary: equipment.info_summary,
             stats: equipment.stats,
             avg_roll: equipment.avg_roll,
             game_equipment_url: equipment.game_equipment_url,
@@ -37,7 +35,6 @@ impl From<PreviewEquipmentDetail> for EquipmentCardData {
             name: equipment.name,
             category: equipment.category,
             level: equipment.level,
-            info_summary: equipment.info_summary,
             stats: equipment.stats,
             avg_roll: equipment.avg_roll,
             game_equipment_url: equipment.game_equipment_url,
@@ -89,10 +86,7 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
                     }
                 }
             }
-            if category_label.is_some()
-                || equipment.level.is_some()
-                || !equipment.info_summary.is_empty()
-            {
+            if category_label.is_some() || equipment.level.is_some() || equipment.avg_roll.is_some() {
                 div { class: "public-auction-equipment__facts",
                     dl { class: "public-auction-equipment__facts-list",
                         if let Some(category) = category_label.as_deref() {
@@ -114,21 +108,13 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
                                 dd { "{level}" }
                             }
                         }
-                    }
-                    if !equipment.info_summary.is_empty() {
-                        TruncatedText {
-                            value: equipment.info_summary.clone(),
-                            size: "compact",
-                            class_name: "public-auction-equipment__fact-summary",
-                            portal: true,
+                        if let Some(avg_roll) = equipment.avg_roll {
+                            div { class: "public-auction-equipment__fact",
+                                dt { {t!("equipment-avg-roll")} }
+                                dd { class: "public-auction-equipment__avg-roll", "{avg_roll:.1}%" }
+                            }
                         }
                     }
-                }
-            }
-            if let Some(avg_roll) = equipment.avg_roll {
-                p { class: "public-auction-equipment__avg-roll",
-                    span { {t!("equipment-avg-roll")} }
-                    strong { "{avg_roll:.1}%" }
                 }
             }
             if !equipment.stats.is_empty() {
