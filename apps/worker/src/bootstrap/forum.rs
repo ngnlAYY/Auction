@@ -83,10 +83,23 @@ pub(super) async fn configure_forum(
     let store_port: Arc<dyn ForumSyncStore> = store.clone();
     let publisher: Arc<dyn ForumPublisher> = gateway.clone();
     let renderer = Arc::new(ForumThreadRenderer);
+    let (equipment_key_id, equipment_key_material) = config
+        .equipment_data_key_id()
+        .zip(config.equipment_data_key())
+        .context("forum enabled but equipment data key is incomplete")?;
+    let equipment_data_key = DataKey::from_base64(equipment_key_id, equipment_key_material)
+        .map_err(|_| anyhow::anyhow!("forum equipment data key is invalid"))?;
+    let equipment_secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
+    let equipment_links: Arc<dyn PublicEquipmentLinkResolver> =
+        Arc::new(EquipmentGameLinkResolver::new(
+            equipment_secrets,
+            EquipmentKeyOpener::new(equipment_data_key),
+        ));
     let sync = Some(auction_jobs::ForumSyncRuntime::new(
         store_port,
         publisher,
         renderer,
+        equipment_links,
         forum_config.batch_size,
         std::time::Duration::from_secs(forum_config.item_timeout_seconds),
         forum_config.public_base_url.clone(),

@@ -117,7 +117,8 @@ pub(super) fn is_session_expired(
     location: Option<&HeaderValue>,
     body: &[u8],
 ) -> bool {
-    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+    // 论坛前置 Cloudflare 也会返回 403；只有 401 或正文中的明确登录证据才能作废 Cookie。
+    if status == StatusCode::UNAUTHORIZED {
         return true;
     }
     if location
@@ -127,10 +128,13 @@ pub(super) fn is_session_expired(
         return true;
     }
     let text = String::from_utf8_lossy(body).to_ascii_lowercase();
-    text.contains("name=\"username\"")
-        || text.contains("name='username'")
-        || text.contains("name=\"password\"")
-        || text.contains("act=login")
+    let has_username_field = text.contains("name=\"username\"") || text.contains("name='username'");
+    let has_password_field = text.contains("name=\"password\"") || text.contains("name='password'");
+    // 已登录论坛页的导航仍会包含 `act=Login`，只有登录表单或明确错误文案才能证明会话失效。
+    text.contains("you are not logged in")
+        || text.contains("this page requires you to log on")
+        || (has_username_field && has_password_field)
+        || (has_password_field && text.contains("act=login"))
         || text.contains("<title>log in")
 }
 

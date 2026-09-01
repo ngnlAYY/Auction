@@ -49,6 +49,8 @@ Worker 循环，并通过 `realtime_consumer_offsets` / `realtime_failures` 提�
 和显式 replay 边界；旧版只向当前 Public 进程内 Hub 分发，装配根因此不注入不存在的外部 sink，
 未来跨进程广播需要独立协议。结算退信与 MoogleMail
 Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布、主题读取和回帖导入也已接入，
+主题任务只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会因后续状态版本变化再次发帖；
+发布前由装备链接解析端口按快照中的无 key 目标生成真实 HentaVerse URL，再交给 BBCode renderer。
 后者通过 `ForumReplyStore` 的身份/lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
 对应的 MM 通知也会在后续轮次独立重放。接管旧版回帖账本时，Worker 以新算法生成候选 ID，

@@ -11,14 +11,14 @@ use auction_application::{
     ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, Clock,
     CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore, ForumPublisher, ForumReplyStore,
     ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
-    OperationsAlertSourceReader, OperationsAlertStore, RecoveryBuyerBlacklister,
-    RecoveryHealthConfig, RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore,
-    ScheduledRoundStore, SettlementCommandPort, SettlementFulfillmentBalanceEvidence,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentCustodySnapshot, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentRecipientReader, SettlementFulfillmentSentEvidence,
-    SettlementFulfillmentService, SettlementFulfillmentStore, SettlementWorkStore,
-    SlowProxyCommandPort, SlowProxyDueReader,
+    OperationsAlertSourceReader, OperationsAlertStore, PublicEquipmentLinkResolver,
+    PublicEquipmentLinkSecretReader, RecoveryBuyerBlacklister, RecoveryHealthConfig,
+    RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore,
+    SettlementCommandPort, SettlementFulfillmentBalanceEvidence, SettlementFulfillmentCommandPort,
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentCustodySnapshot,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
+    SettlementFulfillmentSentEvidence, SettlementFulfillmentService, SettlementFulfillmentStore,
+    SettlementWorkStore, SlowProxyCommandPort, SlowProxyDueReader,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
@@ -44,11 +44,13 @@ use auction_integrations::mooglemail::{
     into_application_message,
 };
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_integrations::{CredentialSealer, DataKey, ForumThreadRenderer};
+use auction_integrations::{
+    CredentialSealer, DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
+};
 #[cfg(feature = "postgres")]
 use auction_integrations::{
-    EquipmentKeyOpener, EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy,
-    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client,
+    EquipmentKeySealer, EquipmentSourceAdapter, EquipmentSourcePolicy, MoogleMailLoginKeyIssuer,
+    MoogleMailLoginKeyReader, build_equipment_http_client,
 };
 #[cfg(feature = "postgres")]
 use auction_jobs::{

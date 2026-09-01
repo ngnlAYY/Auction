@@ -3,6 +3,8 @@
 //! 论坛是外部投影，不是拍卖事实来源。Worker 只能领取已持久化的同步任务，读取同一数据库
 //! 快照后提交远端证明；远端发帖、回帖解析和竞价命令导入均不得直接修改拍卖状态。
 
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,8 +12,7 @@ use uuid::Uuid;
 
 use auction_domain::{AuctionId, SettlementWorld};
 
-use super::ApplicationFuture;
-use super::RequestHash;
+use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarget, RequestHash};
 
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
@@ -84,6 +85,8 @@ pub struct ForumLotSnapshot {
     pub status: String,
     pub current_bidder: Option<String>,
     pub effective_end_at: Option<DateTime<Utc>>,
+    /// 不含装备 key 的权威链接目标；完整 URL 只在 Worker 渲染前短暂解析。
+    pub equipment_link_target: PublicEquipmentLinkTarget,
 }
 
 /// 论坛主题渲染所需的同源拍卖快照。
@@ -100,11 +103,23 @@ pub struct ForumAuctionSnapshot {
     pub lots: Vec<ForumLotSnapshot>,
 }
 
-/// 论坛主题的纯文本防腐层；不携带 Cookie、数据库行或外部表单字段。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 论坛主题的 BBCode 防腐层；不携带 Cookie、数据库行或外部表单字段。
+///
+/// 正文可能包含公开装备 URL 的 10 位 key，因此 `Debug` 必须始终脱敏。
+#[derive(Clone, PartialEq, Eq)]
 pub struct ForumRenderedThread {
     pub title: String,
     pub body: String,
+}
+
+impl fmt::Debug for ForumRenderedThread {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ForumRenderedThread")
+            .field("title", &self.title)
+            .field("body", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// 远端论坛主题的稳定身份。
@@ -205,6 +220,7 @@ pub trait ForumRenderer: Send + Sync {
     fn render(
         &self,
         snapshot: ForumAuctionSnapshot,
+        equipment_links: Vec<PublicEquipmentGameLink>,
     ) -> Result<ForumRenderedThread, ForumRenderError>;
 }
 

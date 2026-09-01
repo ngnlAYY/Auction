@@ -1,10 +1,10 @@
 //! 论坛主题同步快照的 PostgreSQL 一致性读取。
 
-use auction_application::forum_world_name;
 use auction_application::{
     ApplicationError, ForumAuctionSnapshot, ForumLotSnapshot, ForumSyncClaim,
+    PublicEquipmentLinkTarget, forum_world_name,
 };
-use auction_domain::{AuctionId, SettlementWorld};
+use auction_domain::{AuctionId, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -69,7 +69,8 @@ pub(super) async fn load_snapshot_postgres(
         .map_err(|_| storage_error("读取论坛快照结束时间失败"))?;
 
     let rows = sqlx::query(
-        "SELECT CASE sync.numbering_scheme
+        "SELECT l.id AS lot_id, e.id AS equipment_id, e.external_equipment_id,
+                CASE sync.numbering_scheme
                     WHEN 'legacy_global' THEN l.lot_number
                     WHEN 'category_v1' THEN l.category_number
                 END AS lot_number,
@@ -92,6 +93,13 @@ pub(super) async fn load_snapshot_postgres(
     for row in rows {
         let lot_number: i32 =
             row.try_get("lot_number").map_err(|_| storage_error("读取论坛快照 lot 序号失败"))?;
+        let lot_id: Uuid =
+            row.try_get("lot_id").map_err(|_| storage_error("读取论坛快照 lot 标识失败"))?;
+        let equipment_id: Uuid =
+            row.try_get("equipment_id").map_err(|_| storage_error("读取论坛快照装备标识失败"))?;
+        let external_equipment_id: String = row
+            .try_get("external_equipment_id")
+            .map_err(|_| storage_error("读取论坛快照外部装备标识失败"))?;
         let category: String = row
             .try_get("equipment_category")
             .map_err(|_| storage_error("读取论坛快照装备分类失败"))?;
@@ -126,6 +134,15 @@ pub(super) async fn load_snapshot_postgres(
             status,
             current_bidder: leader_name,
             effective_end_at,
+            equipment_link_target: PublicEquipmentLinkTarget {
+                lot_id,
+                equipment_id: EquipmentId::from_uuid(equipment_id),
+                world_id: forum_world_name(world).to_owned(),
+                projected_game_equipment_url: projected_game_equipment_url(
+                    world,
+                    &external_equipment_id,
+                ),
+            },
         });
     }
     transaction.commit().await.map_err(|_| storage_error("提交论坛同步快照事务失败"))?;
@@ -157,4 +174,12 @@ fn public_auction_path(world: SettlementWorld, auction_id: Uuid) -> String {
     } else {
         format!("/?auction={auction_id}&world={world_name}")
     }
+}
+
+fn projected_game_equipment_url(world: SettlementWorld, external_equipment_id: &str) -> String {
+    let prefix = match world {
+        SettlementWorld::Main => "https://hentaiverse.org/equip/",
+        SettlementWorld::Isekai => "https://hentaiverse.org/isekai/equip/",
+    };
+    format!("{prefix}{external_equipment_id}")
 }

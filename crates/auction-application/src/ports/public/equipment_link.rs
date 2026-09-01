@@ -1,4 +1,4 @@
-//! 公开页面查看游戏装备时使用的窄端口和脱敏值对象。
+//! 公开页面和论坛拍卖主题查看游戏装备时使用的窄端口和脱敏值对象。
 
 use std::fmt;
 
@@ -44,10 +44,10 @@ impl fmt::Debug for PublicEquipmentLinkSecret {
     }
 }
 
-/// 只允许 Public lot 列表/详情 HTTP 映射边界消费的完整游戏装备 URL。
+/// 只允许 Public lot HTTP 映射和论坛主题渲染边界消费的完整游戏装备 URL。
 ///
-/// 该类型不实现 `Display` 或 serde，`Debug` 也始终脱敏，避免完整 key 被日志、JSON 或审计
-/// 辅助结构无意复制。调用方只能在构造 P09/P11 DTO 时取得所有权。
+/// 该类型不实现 `Display`、`Clone` 或 serde，`Debug` 也始终脱敏，避免完整 key 被日志、JSON
+/// 或审计辅助结构无意复制。调用方只能在明确的公开投影边界取得所有权。
 pub struct PublicEquipmentGameLink(String);
 
 impl PublicEquipmentGameLink {
@@ -72,7 +72,7 @@ impl PublicEquipmentGameLink {
         Ok(Self(value))
     }
 
-    /// 把已校验 URL 移交给唯一的 P09/P11 HTTP DTO 映射边界。
+    /// 把已校验 URL 移交给 Public HTTP DTO 或论坛主题渲染边界。
     pub fn into_url(self) -> String {
         self.0
     }
@@ -84,8 +84,8 @@ impl fmt::Debug for PublicEquipmentGameLink {
     }
 }
 
-/// 完整游戏装备 URL 解析所需的公开 lot 内部目标；不进入 HTTP DTO。
-#[derive(Clone)]
+/// 完整游戏装备 URL 解析所需的公开 lot 内部目标；不进入 HTTP DTO 或论坛正文。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicEquipmentLinkTarget {
     pub lot_id: Uuid,
     pub equipment_id: EquipmentId,
@@ -126,6 +126,8 @@ pub trait PublicEquipmentLinkSecretReader: Send + Sync {
 }
 
 /// 为已经从权威投影读取并校验的一批公开 lot 解析同序完整游戏装备 URL。
+///
+/// 返回值只能立即进入 Public HTTP DTO 或论坛主题渲染器，不能写入日志、审计或通用快照。
 pub trait PublicEquipmentLinkResolver: Send + Sync {
     fn resolve_public_equipment_links<'a>(
         &'a self,

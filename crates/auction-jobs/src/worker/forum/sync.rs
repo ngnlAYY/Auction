@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use auction_application::{
     ApplicationError, Clock, ForumPublisher, ForumRenderer, ForumSyncClaim, ForumSyncStore,
-    RepositoryError,
+    PublicEquipmentLinkResolver, RepositoryError,
 };
 use chrono::Duration;
 use url::Url;
@@ -23,6 +23,7 @@ pub struct ForumSyncRuntime {
     pub(crate) store: Arc<dyn ForumSyncStore>,
     pub(crate) publisher: Arc<dyn ForumPublisher>,
     pub(crate) renderer: Arc<dyn ForumRenderer>,
+    pub(crate) equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
@@ -34,6 +35,7 @@ impl ForumSyncRuntime {
         store: Arc<dyn ForumSyncStore>,
         publisher: Arc<dyn ForumPublisher>,
         renderer: Arc<dyn ForumRenderer>,
+        equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
         batch_size: u16,
         item_timeout: std::time::Duration,
         public_base_url: Option<String>,
@@ -45,7 +47,15 @@ impl ForumSyncRuntime {
         {
             return Err(WorkerError::InvalidForumSyncConfiguration);
         }
-        Ok(Self { store, publisher, renderer, batch_size, item_timeout, public_base_url })
+        Ok(Self {
+            store,
+            publisher,
+            renderer,
+            equipment_links,
+            batch_size,
+            item_timeout,
+            public_base_url,
+        })
     }
 }
 
@@ -73,16 +83,7 @@ where
             break;
         };
         processed += 1;
-        if let Err(error) = process_claim(
-            Arc::clone(&runtime.store),
-            Arc::clone(&runtime.publisher),
-            Arc::clone(&runtime.renderer),
-            Arc::clone(&worker.clock),
-            runtime.item_timeout,
-            runtime.public_base_url.clone(),
-            claim,
-        )
-        .await
+        if let Err(error) = process_claim(runtime, Arc::clone(&worker.clock), claim).await
             && first_error.is_none()
         {
             first_error = Some(error);
@@ -92,24 +93,29 @@ where
 }
 
 async fn process_claim<C>(
-    store: Arc<dyn ForumSyncStore>,
-    publisher: Arc<dyn ForumPublisher>,
-    renderer: Arc<dyn ForumRenderer>,
+    runtime: &ForumSyncRuntime,
     clock: Arc<C>,
-    item_timeout: std::time::Duration,
-    public_base_url: Option<String>,
     claim: ForumSyncClaim,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
 {
+    let store = Arc::clone(&runtime.store);
     let failure_store = Arc::clone(&store);
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
     let reconciliation_only = requires_reconciliation(&claim);
     match tokio::time::timeout(
-        item_timeout,
-        process_claim_inner(store, publisher, renderer, clock, public_base_url, claim),
+        runtime.item_timeout,
+        process_claim_inner(
+            store,
+            Arc::clone(&runtime.publisher),
+            Arc::clone(&runtime.renderer),
+            Arc::clone(&runtime.equipment_links),
+            clock,
+            runtime.public_base_url.clone(),
+            claim,
+        ),
     )
     .await
     {
@@ -134,6 +140,7 @@ async fn process_claim_inner<C>(
     store: Arc<dyn ForumSyncStore>,
     publisher: Arc<dyn ForumPublisher>,
     renderer: Arc<dyn ForumRenderer>,
+    equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     clock: Arc<C>,
     public_base_url: Option<String>,
     claim: ForumSyncClaim,
@@ -175,7 +182,24 @@ where
             }
         };
     let world = snapshot.world;
-    let rendered = match renderer.render(snapshot) {
+    let link_targets =
+        snapshot.lots.iter().map(|lot| lot.equipment_link_target.clone()).collect::<Vec<_>>();
+    let equipment_links = match equipment_links.resolve_public_equipment_links(&link_targets).await
+    {
+        Ok(links) => links,
+        Err(error) => {
+            record_failure(
+                store,
+                clock,
+                retry_claim,
+                scoped_failure_code(reconciliation_only, "equipment_links_failed"),
+                error,
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let rendered = match renderer.render(snapshot, equipment_links) {
         Ok(rendered) => rendered,
         Err(error) => {
             record_failure(
@@ -310,6 +334,7 @@ fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
         failure_code.strip_prefix("reconcile_").unwrap_or(failure_code),
         "invalid_snapshot"
             | "body_too_large"
+            | "equipment_links_failed"
             | "configuration"
             | "credential_unavailable"
             | "protocol_drift"

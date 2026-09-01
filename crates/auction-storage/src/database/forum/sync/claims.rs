@@ -19,11 +19,12 @@ pub(super) async fn claim_due_postgres(
 
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛同步领取事务失败"))?;
+    // 旧版只在拍卖首次进入 live 时建立一次主题任务；不能在 Worker 重启后为历史终态拍卖补帖。
     sqlx::query(
         "INSERT INTO public.auction_forum_sync (auction_id, source_revision)
          SELECT a.id, a.state_version
          FROM public.auctions AS a
-         WHERE a.status IN ('preview', 'live', 'final', 'settling', 'settled', 'cancelled')
+         WHERE a.status = 'live'
          ON CONFLICT (auction_id) DO NOTHING",
     )
     .execute(&mut *transaction)
@@ -36,7 +37,7 @@ pub(super) async fn claim_due_postgres(
                      ELSE sync.last_error_code END AS previous_failure_code
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
-         WHERE auction.status IN ('preview', 'live', 'final', 'settling', 'settled', 'cancelled')
+         WHERE auction.opened_at IS NOT NULL
            AND (
                (sync.status IN ('pending', 'failed')
                 AND (sync.last_error_code IS NULL OR sync.last_error_code NOT IN (
@@ -44,7 +45,6 @@ pub(super) async fn claim_due_postgres(
                     'credential_unavailable', 'protocol_drift', 'write_authorization_required'
                 ))
                 AND sync.next_attempt_at <= $1)
-               OR (sync.status = 'published' AND sync.source_revision < auction.state_version)
                OR (sync.status = 'publishing'
                    AND (sync.lease_expires_at IS NULL OR sync.lease_expires_at <= $1))
            )
