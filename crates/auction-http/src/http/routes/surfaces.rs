@@ -63,9 +63,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/compensation-pool/{auction_id}/movements", get(compensation::movements))
         .route("/api/v1/auctions", get(list_auctions))
         .route("/api/v1/auctions/current", get(current_auction))
-        .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/auctions/{auction_id}/bid-log", get(list_bid_log))
-        .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/price-history", get(list_price_history))
         .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
         .route_layer(middleware::from_fn(response_cache::no_cache));
@@ -84,6 +82,9 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
                 .strict_methods("DELETE, GET, POST"),
         )
         .route("/api/v1/me/bids", get(list_my_bids))
+        // P09/P11 lot 投影含完整装备 key，必须禁止浏览器和共享缓存持久化响应。
+        .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
+        .route("/api/v1/lots/{lot_id}", get(lot_detail))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations/mine", get(get_my_proxy_authorization))
         .route("/api/v1/lots/{lot_id}/proxy-authorizations", post(create_proxy_authorization))
         .route(

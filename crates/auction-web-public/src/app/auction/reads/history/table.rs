@@ -1,4 +1,5 @@
 use super::*;
+use auction_web_shared::TruncatedText;
 
 #[component]
 pub(crate) fn PriceHistoryTable(
@@ -93,7 +94,14 @@ pub(crate) fn PriceHistoryRow(row: PriceHistoryEntry) -> Element {
     rsx! {
         tr {
             td { class: "public-history-equipment", "data-label": t!("history-item"),
-                Link { to: lot_href, title: row.equipment_name.clone(), "{row.equipment_name}" }
+                Link { to: lot_href, title: row.equipment_name.clone(), aria_label: row.equipment_name.clone(),
+                    TruncatedText {
+                        value: row.equipment_name.clone(),
+                        size: "wide",
+                        focusable: false,
+                        portal: true,
+                    }
+                }
             }
             td { "data-label": t!("history-category"), "{category}" }
             td { class: "public-history-number", "data-label": t!("history-level"), "{level}" }
@@ -106,8 +114,12 @@ pub(crate) fn PriceHistoryRow(row: PriceHistoryEntry) -> Element {
                 "data-label": t!("history-price"),
                 "{price}"
             }
-            td { "data-label": t!("history-buyer"), "{row.buyer_name}" }
-            td { "data-label": t!("history-seller"), "{row.seller_name}" }
+            td { "data-label": t!("history-buyer"),
+                TruncatedText { value: row.buyer_name, size: "compact", portal: true }
+            }
+            td { "data-label": t!("history-seller"),
+                TruncatedText { value: row.seller_name, size: "compact", portal: true }
+            }
             td { "data-label": t!("history-closed"),
                 time { datetime: row.closed_at.clone(), "{super::format_auction_time(&row.closed_at)}" }
             }

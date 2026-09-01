@@ -35,34 +35,126 @@ pub(crate) fn map_current_auction(auction: CurrentAuctionSnapshot) -> CurrentAuc
     }
 }
 
-pub(crate) fn map_lot_page(page: PublicLotPage, page_number: i64) -> PublicLotEnvelopeResponse {
+pub(crate) fn map_lot_page(
+    page: PublicLotPage,
+    page_number: i64,
+    game_equipment_urls: Vec<String>,
+) -> Option<PublicLotEnvelopeResponse> {
     let projection = page.projection;
+    let expected_links =
+        if projection.projection_kind == "preview" { page.preview.len() } else { page.live.len() };
+    if game_equipment_urls.len() != expected_links {
+        return None;
+    }
+    let mut game_equipment_urls = game_equipment_urls.into_iter();
     let lots = if projection.projection_kind == "preview" {
-        PublicLotListItemsResponse::Preview(page.preview.into_iter().map(map_preview_lot).collect())
+        PublicLotListItemsResponse::Preview(
+            page.preview
+                .into_iter()
+                .map(|lot| {
+                    let mut mapped = map_preview_lot(lot);
+                    mapped.game_equipment_url = game_equipment_urls.next().unwrap_or_default();
+                    mapped
+                })
+                .collect(),
+        )
     } else {
         PublicLotListItemsResponse::Live(
-            page.live.into_iter().map(|lot| map_live_lot(lot, None)).collect(),
+            page.live
+                .into_iter()
+                .map(|lot| {
+                    let mut mapped = map_live_lot(lot, None);
+                    mapped.equipment.game_equipment_url =
+                        game_equipment_urls.next().unwrap_or_default();
+                    mapped
+                })
+                .collect(),
         )
     };
+    if game_equipment_urls.next().is_some() {
+        return None;
+    }
     let response = map_lot_envelope(projection);
-    PublicLotEnvelopeResponse {
+    Some(PublicLotEnvelopeResponse {
         lots: Some(lots),
         total: Some(page.total),
         page: Some(page_number),
         page_size: Some(page.limit),
         category_counts: Some(page.category_counts),
         ..response
-    }
+    })
 }
 
-pub(crate) fn map_lot_detail(detail: PublicLotDetail) -> PublicLotEnvelopeResponse {
+pub(crate) fn lot_page_equipment_targets(
+    page: &PublicLotPage,
+) -> Result<Vec<PublicEquipmentLinkTarget>, ()> {
+    let targets = if page.projection.projection_kind == "preview" {
+        page.preview
+            .iter()
+            .map(|lot| PublicEquipmentLinkTarget {
+                lot_id: lot.id,
+                equipment_id: lot.equipment_id,
+                world_id: page.projection.world_id.clone(),
+                projected_game_equipment_url: lot.game_equipment_url.clone(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        page.live
+            .iter()
+            .map(|lot| PublicEquipmentLinkTarget {
+                lot_id: lot.id,
+                equipment_id: lot.equipment_id,
+                world_id: page.projection.world_id.clone(),
+                projected_game_equipment_url: lot.equipment.game_equipment_url.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+    if targets.iter().any(|target| target.validate().is_err()) {
+        return Err(());
+    }
+    Ok(targets)
+}
+
+pub(crate) fn lot_detail_equipment_target(
+    detail: &PublicLotDetail,
+    lot_id: Uuid,
+) -> Result<PublicEquipmentLinkTarget, ()> {
+    let projected_game_equipment_url = detail
+        .preview
+        .as_ref()
+        .map(|preview| preview.equipment.game_equipment_url.clone())
+        .or_else(|| {
+            detail.live.as_ref().map(|live| live.summary.equipment.game_equipment_url.clone())
+        })
+        .ok_or(())?;
+    let target = PublicEquipmentLinkTarget {
+        lot_id,
+        equipment_id: detail.equipment_id,
+        world_id: detail.projection.world_id.clone(),
+        projected_game_equipment_url,
+    };
+    target.validate().map_err(|_| ())?;
+    Ok(target)
+}
+
+pub(crate) fn map_lot_detail(
+    detail: PublicLotDetail,
+    game_equipment_url: Option<String>,
+) -> PublicLotEnvelopeResponse {
     let response = map_lot_envelope(detail.projection);
     let lot = match (detail.preview, detail.live) {
-        (Some(preview), None) => PublicLotDetailItemResponse::Preview(map_preview_detail(preview)),
-        (None, Some(live)) => PublicLotDetailItemResponse::Live(map_live_lot(
-            live.summary,
-            Some(live.equipment_attributes),
-        )),
+        (Some(preview), None) => {
+            let mut mapped = map_preview_detail(preview);
+            let game_equipment_url = game_equipment_url.unwrap_or_default();
+            mapped.summary.game_equipment_url.clone_from(&game_equipment_url);
+            mapped.equipment.game_equipment_url = game_equipment_url;
+            PublicLotDetailItemResponse::Preview(mapped)
+        }
+        (None, Some(live)) => {
+            let mut mapped = map_live_lot(live.summary, Some(live.equipment_attributes));
+            mapped.equipment.game_equipment_url = game_equipment_url.unwrap_or_default();
+            PublicLotDetailItemResponse::Live(mapped)
+        }
         (None, None) | (Some(_), Some(_)) => {
             // 存储端口的 projection 与分支不一致时由边界校验拦截；这里没有可安全序列化的 fallback。
             return PublicLotEnvelopeResponse { lot: None, ..response };

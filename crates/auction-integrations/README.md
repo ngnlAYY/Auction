@@ -76,7 +76,9 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
   allowlist 也不会放宽固定 origin、精确 world 路径、响应类型、content encoding 和最终响应
   origin 校验。装备页解析器把 `.eq` 直接子项与 `.ex`/`.ep` 分组属性分开处理，避免嵌套 `title`
   被重复解释为主属性；同时兼容旧页的 `Tier A/B/C Soulbound` 头部，但仍严格校验阶段值、类别和
-  页面结构。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
+  页面结构。`game_link.rs` 为 P09/P11 已读取的 Public lot 批量绑定密文 owner，核对 world、
+  外部 ID 和无 key 投影后短暂解密，构造固定 HentaVerse origin 的完整 URL；该值只移交最终 HTTP
+  DTO 映射，不进入日志、审计、事件或持久化缓存。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
   装备 ID 的密文信封，明文 key 不进入应用写端口。
 - `src/credentials/mod.rs`：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
   的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入

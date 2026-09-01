@@ -10,7 +10,7 @@ apps/backend/internal/app/public/features/features.go、apps/backend/internal/ap
 本表统计 feature API 的唯一路径，不把进程健康检查、静态 Web 资源和反向代理自身的路径
 计入。逐项核对后的数量是：
 
-- Public：20 个唯一路径；
+- Public：20 个旧版唯一路径；
 - Admin：37 个唯一路径。
 
 迁移实施计划中原来的 Admin 35 条是旧统计低估，不能继续作为验收数字。
@@ -110,9 +110,9 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 | P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 | features/sessions/publichttp/adapter.go:89 |
 | P07 | GET | /api/v1/auctions | 公开 | 200 | 400, 503/504 | features/auction/publichttp/adapter.go:58 |
 | P08 | GET | /api/v1/auctions/current | 公开 | 200 | 400, 503/504 | features/auction/publichttp/adapter.go:59 |
-| P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:60 |
+| P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:60 |
 | P10 | GET | /api/v1/auctions/{auction_id}/bid-log | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:61 |
-| P11 | GET | /api/v1/lots/{lot_id} | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:62 |
+| P11 | GET | /api/v1/lots/{lot_id} | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:62 |
 | P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:63 |
 | P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:64 |
 | P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开 | 200 | 400, 404, 501, 503/504 | features/auction/publichttp/adapter.go:65 |
@@ -215,7 +215,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留旧的 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
-公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15，展示状态、源版本、更新时间和已发布帖子内容；首页不再读取或轮询该投影。P06 的 Public session 已接入
+公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15，展示状态、源版本、更新时间和已发布帖子内容；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和旧版竞价结果投影。

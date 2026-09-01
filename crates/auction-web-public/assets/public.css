@@ -1429,17 +1429,18 @@
 
 .public-auction-catalog__name {
   min-inline-size: 12em;
-  white-space: normal !important;
+  max-inline-size: 20rem;
 }
 
-.ui-truncated-text.ui-equipment-name {
-  display: inline;
-  inline-size: auto;
-  max-inline-size: none;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+.public-auction-catalog__equipment-link {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.public-auction-catalog__name .ui-equipment-name {
+  display: block;
+  max-inline-size: 100%;
 }
 
 .public-auction-catalog__avg-roll {
@@ -2743,6 +2744,13 @@
   margin: 0 0 var(--space-3);
   color: var(--color-accent);
   font-size: var(--text-lg);
+}
+
+.public-auction-equipment__name-link,
+.public-auction-equipment__name {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .public-auction-equipment dl,

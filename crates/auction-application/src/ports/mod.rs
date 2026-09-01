@@ -52,6 +52,8 @@ mod core_repository;
 mod delivery;
 #[path = "delivery/admin.rs"]
 mod delivery_admin;
+#[path = "public/equipment_link.rs"]
+mod equipment_link;
 #[path = "forum/public.rs"]
 mod forum;
 #[path = "forum/reply.rs"]
@@ -237,6 +239,10 @@ pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
     DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
     MAX_DELIVERY_ADMIN_PAGE_SIZE, MAX_DELIVERY_COD,
+};
+pub use equipment_link::{
+    PublicEquipmentGameLink, PublicEquipmentLinkResolver, PublicEquipmentLinkSecret,
+    PublicEquipmentLinkSecretReader, PublicEquipmentLinkTarget,
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
 pub use forum_reply::{

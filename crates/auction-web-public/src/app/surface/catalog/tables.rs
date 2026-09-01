@@ -227,11 +227,9 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
-                TruncatedText {
-                    value: row.name.clone(),
-                    class_name: "ui-equipment-name",
-                    portal: true,
-                    legacy_dom: true,
+                CatalogEquipmentName {
+                    name: row.name.clone(),
+                    game_equipment_url: row.game_equipment_url.clone(),
                 }
             }
             td {

@@ -23,6 +23,7 @@ pub(in crate::database::lots) async fn detail_postgres(
             "SELECT
                 l.id,
                 l.auction_id,
+                l.equipment_id,
                 l.category_number AS lot_number,
                 l.status,
                 l.start_price,
@@ -46,8 +47,13 @@ pub(in crate::database::lots) async fn detail_postgres(
             transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
             return Ok(None);
         };
+        let equipment_id = EquipmentId::from_uuid(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 PostgreSQL 预览装备标识失败"))?,
+        );
         let world_id = projection.world_id.clone();
         PublicLotDetail {
+            equipment_id,
             projection,
             preview: Some(map_postgres_preview_detail(row, &world_id)?),
             live: None,
@@ -57,6 +63,7 @@ pub(in crate::database::lots) async fn detail_postgres(
             "SELECT
                 l.id,
                 l.auction_id,
+                l.equipment_id,
                 l.category_number AS lot_number,
                 l.status,
                 l.start_price,
@@ -91,9 +98,14 @@ pub(in crate::database::lots) async fn detail_postgres(
             transaction.commit().await.map_err(|_| storage_error("提交公开 lot 详情事务失败"))?;
             return Ok(None);
         };
+        let equipment_id = EquipmentId::from_uuid(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 PostgreSQL 正式装备标识失败"))?,
+        );
         let summary = map_postgres_live(row, &projection.world_id)?;
         let attributes = summary.equipment.attributes.clone();
         PublicLotDetail {
+            equipment_id,
             projection,
             preview: None,
             live: Some(PublicLiveLotDetail { summary, equipment_attributes: attributes }),

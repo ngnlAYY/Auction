@@ -231,6 +231,13 @@ TCP 或 Unix listener 不能冲突。`auctionctl deployment` 的 Admin readiness
 选择的 TCP/Unix listener，不再探测被 runtime 覆盖掉的主配置地址。该比较只给出字段类别，
 不会输出密钥材料。
 
+PostgreSQL 完整档在 P09/P11 Public lot 投影中直接提供真实装备 URL，因此 Public 还必须读取与
+Admin/Worker 相同的装备数据密钥；密钥缺失时这两条读取返回 503，配置成对但无法解析时 Public
+启动失败关闭。storage 批量读取密文 owner，integration 在核对 lot/equipment/world/无 key 投影后
+短暂解密，HTTP 只在最终 DTO 映射时写入完整 URL。该显式产品边界会让 10 位 key 出现在 P09/P11
+JSON 和浏览器链接中，所以两条响应固定 `no-store`，完整值不得进入日志、审计、事件或持久化缓存。
+SQLite Lite 没有 `equipment_secrets`，仍返回 lot 数据，但把 `game_equipment_url` 留空并隐藏链接。
+
 拍卖策略模板位于主 TOML 的 `[auction]` 区块。Admin 创建拍卖时，应用服务会把已校验模板
 交给 PostgreSQL 完整档事务；事务将同一来源写入 schema v4 `policy_snapshot` 以及遗留规则列，
 避免管理端配置与实际规则分叉。竞价和取消事务会在锁内从该快照恢复 PPM、代理限制、final
@@ -245,6 +252,7 @@ phase 及时间规则；MoogleMail 入站默认起拍价继承同一经济模板
 | 写入并发 | Serializable + 明确行锁；队列路径可用 Read Committed + 显式锁 | WAL 下多读并发、写入串行、低并发 |
 | 进程拓扑 | 独立进程与多副本 | 单主机、每个角色一个实例 |
 | Worker | 持久化游标、可扩展并发 | 若启用则游标仍持久化，但实例和并发均为一 |
+| Public 真实装备 URL | P09/P11 核对密文 owner 后直接返回完整 URL，响应 `no-store` | lot 可读，URL 留空 |
 | 高可用与扩展 | 可建设故障转移、只读副本和横向扩展 | 不支持多副本、故障转移或网络共享数据库 |
 
 当前仓库仍处于分阶段迁移，这张表定义的是实现上限和验收边界，不表示所有旧版业务功能已经完成。
@@ -282,7 +290,7 @@ Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 caden
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
 SQLite `000001` 至 `000009`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
-Public 20 条与 Admin 37 条契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
+Public 20 条旧版契约路径与 Admin 37 条旧版契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、Public lot 列表/详情、竞价日志和普通竞价命令返回权威目录或当前公开
 projection，PostgreSQL 完整档的价格历史从结算事实链返回权威成交投影，SQLite Lite 对同一路由返回
@@ -298,7 +306,11 @@ Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowl
 读取之上，关闭 allowlist 也不会放宽这些 transport 防线。远端装备页使用 A32 的 active
 `mail_cookie` 候选池，按目标 world 合并专属与 shared scope；明确登录页会轮换并回写凭据失效，
 不会再映射成不受支持的 URL。Worker 的邮件附件装备校验复用同一启动凭据池。手工输入只在 URL 解析前剥离成对的
-`<URL>` 包裹和明确的中英文句末标点，规范结果仍必须通过相同 origin/path/ID/key 防线。
+`<URL>` 包裹和明确的中英文句末标点，规范结果仍必须通过相同 origin/path/ID/key 防线。存储层公开 lot
+投影仍只保存无 key 的游戏 URL；P09/P11 HTTP 读取会按本页内部 equipment owner 批量读取密文信封，
+核对 world/外部 ID 后短暂解密，并把完整真实 URL 直接写入同名 DTO 字段。完整值只允许出现在这两条
+`no-store` JSON 响应和由用户主动打开的浏览器链接，不进入日志、审计、事件或持久化缓存；SQLite Lite
+保留 lot 响应但把链接留空。
 Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+host（可带端口），空路径与根路径
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 

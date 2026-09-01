@@ -82,10 +82,10 @@ fn BlacklistRow(entry: BlacklistEntry) -> Element {
     rsx! {
         tr {
             td { "data-label": t!("blacklist-player"),
-                TruncatedText { value: entry.game_player_id }
+                TruncatedText { value: entry.game_player_id, portal: true }
             }
             td { "data-label": t!("blacklist-reason"),
-                TruncatedText { value: entry.reason, size: "wide" }
+                TruncatedText { value: entry.reason, size: "wide", portal: true }
             }
             td {
                 "data-label": t!("blacklist-time"),

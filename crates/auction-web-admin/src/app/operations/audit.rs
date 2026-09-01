@@ -67,118 +67,141 @@ fn AuditFilters(
     mut filter: Signal<AdminAuditFilter>,
     on_submit: EventHandler<AdminAuditFilter>,
 ) -> Element {
+    let submit_filter = on_submit;
+    let clear_filter = on_submit;
     rsx! {
         form {
             class: "admin-audit-filter",
             onsubmit: move |event| {
                 event.prevent_default();
-                on_submit.call(filter());
+                submit_filter.call(filter());
             },
-            label { class: "admin-audit-field-wide",
-                {t!("admin-audit-actor")}
-                input {
-                    maxlength: "256",
-                    value: filter().actor,
-                    oninput: move |event| {
-                        filter.write().actor = event.value();
-                    },
+            p { class: "admin-audit-filter__hint", {t!("admin-audit-filter-hint")} }
+            div { class: "admin-audit-filter__primary",
+                label {
+                    {t!("admin-audit-actor-id")}
+                    input {
+                        maxlength: "256",
+                        value: filter().actor,
+                        oninput: move |event| {
+                            filter.write().actor = event.value();
+                        },
+                    }
+                }
+                label {
+                    {t!("admin-audit-entity-identity")}
+                    input {
+                        maxlength: "385",
+                        value: filter().entity,
+                        oninput: move |event| {
+                            filter.write().entity = event.value();
+                        },
+                    }
+                }
+                label {
+                    {t!("admin-audit-action")}
+                    input {
+                        maxlength: "128",
+                        value: filter().action,
+                        oninput: move |event| {
+                            filter.write().action = event.value();
+                        },
+                    }
+                }
+                label {
+                    {t!("admin-audit-request-id")}
+                    input {
+                        maxlength: "128",
+                        value: filter().request_id,
+                        oninput: move |event| {
+                            filter.write().request_id = event.value();
+                        },
+                    }
                 }
             }
-            label { class: "admin-audit-field-actor",
-                {t!("admin-audit-actor-type")}
-                select {
-                    value: filter().actor_type,
-                    onchange: move |event| {
-                        filter.write().actor_type = event.value();
-                    },
-                    option { value: "", {t!("admin-audit-all")} }
-                    option { value: "public_user", {audit_actor_type_label("public_user")} }
-                    option { value: "admin", {audit_actor_type_label("admin")} }
-                    option { value: "worker", {audit_actor_type_label("worker")} }
-                    option { value: "system", {audit_actor_type_label("system")} }
+            details {
+                class: "admin-audit-filter__advanced",
+                open: audit_advanced_filter_active(&filter()),
+                summary { {t!("admin-audit-advanced-filters")} }
+                div { class: "admin-audit-filter__advanced-grid",
+                    label {
+                        {t!("admin-audit-actor-type")}
+                        select {
+                            value: filter().actor_type,
+                            onchange: move |event| {
+                                filter.write().actor_type = event.value();
+                            },
+                            option { value: "", {t!("admin-audit-all")} }
+                            option { value: "public_user", {audit_actor_type_label("public_user")} }
+                            option { value: "admin", {audit_actor_type_label("admin")} }
+                            option { value: "worker", {audit_actor_type_label("worker")} }
+                            option { value: "system", {audit_actor_type_label("system")} }
+                        }
+                    }
+                    label {
+                        {t!("admin-audit-source")}
+                        select {
+                            value: filter().source,
+                            onchange: move |event| {
+                                filter.write().source = event.value();
+                            },
+                            option { value: "", {t!("admin-audit-all")} }
+                            option { value: "public", {audit_source_label("public")} }
+                            option { value: "admin", {audit_source_label("admin")} }
+                            option { value: "worker", {audit_source_label("worker")} }
+                            option { value: "system", {audit_source_label("system")} }
+                        }
+                    }
+                    label {
+                        {t!("admin-audit-result")}
+                        select {
+                            value: filter().result,
+                            onchange: move |event| {
+                                filter.write().result = event.value();
+                            },
+                            option { value: "", {t!("admin-audit-all")} }
+                            option { value: "success", {audit_result_label("success")} }
+                            option { value: "rejected", {audit_result_label("rejected")} }
+                            option { value: "failure", {audit_result_label("failure")} }
+                        }
+                    }
+                    label {
+                        {t!("admin-audit-from")}
+                        input {
+                            r#type: "datetime-local",
+                            value: filter().occurred_from,
+                            oninput: move |event| {
+                                filter.write().occurred_from = event.value();
+                            },
+                        }
+                    }
+                    label {
+                        {t!("admin-audit-to")}
+                        input {
+                            r#type: "datetime-local",
+                            value: filter().occurred_to,
+                            oninput: move |event| {
+                                filter.write().occurred_to = event.value();
+                            },
+                        }
+                    }
                 }
             }
-            label { class: "admin-audit-field-wide",
-                {t!("admin-audit-action")}
-                input {
-                    maxlength: "128",
-                    value: filter().action,
-                    oninput: move |event| {
-                        filter.write().action = event.value();
-                    },
+            div { class: "admin-audit-filter__actions",
+                button {
+                    class: "admin-btn-primary",
+                    r#type: "submit",
+                    {t!("admin-audit-load")}
                 }
-            }
-            label { class: "admin-audit-field-wide",
-                {t!("admin-audit-entity")}
-                input {
-                    maxlength: "385",
-                    value: filter().entity,
-                    oninput: move |event| {
-                        filter.write().entity = event.value();
+                button {
+                    r#type: "button",
+                    onclick: move |_| {
+                        let empty = AdminAuditFilter::default();
+                        filter.set(empty.clone());
+                        clear_filter.call(empty);
                     },
+                    {t!("admin-audit-clear")}
                 }
-            }
-            label { class: "admin-audit-field-source",
-                {t!("admin-audit-source")}
-                select {
-                    value: filter().source,
-                    onchange: move |event| {
-                        filter.write().source = event.value();
-                    },
-                    option { value: "", {t!("admin-audit-all")} }
-                    option { value: "public", {audit_source_label("public")} }
-                    option { value: "admin", {audit_source_label("admin")} }
-                    option { value: "worker", {audit_source_label("worker")} }
-                    option { value: "system", {audit_source_label("system")} }
-                }
-            }
-            label { class: "admin-audit-field-result",
-                {t!("admin-audit-result")}
-                select {
-                    value: filter().result,
-                    onchange: move |event| {
-                        filter.write().result = event.value();
-                    },
-                    option { value: "", {t!("admin-audit-all")} }
-                    option { value: "success", {audit_result_label("success")} }
-                    option { value: "rejected", {audit_result_label("rejected")} }
-                    option { value: "failure", {audit_result_label("failure")} }
-                }
-            }
-            label { class: "admin-audit-field-wide",
-                {t!("admin-audit-request-id")}
-                input {
-                    maxlength: "128",
-                    value: filter().request_id,
-                    oninput: move |event| {
-                        filter.write().request_id = event.value();
-                    },
-                }
-            }
-            label { class: "admin-audit-field-date",
-                {t!("admin-audit-from")}
-                input {
-                    r#type: "datetime-local",
-                    value: filter().occurred_from,
-                    oninput: move |event| {
-                        filter.write().occurred_from = event.value();
-                    },
-                }
-            }
-            label { class: "admin-audit-field-date",
-                {t!("admin-audit-to")}
-                input {
-                    r#type: "datetime-local",
-                    value: filter().occurred_to,
-                    oninput: move |event| {
-                        filter.write().occurred_to = event.value();
-                    },
-                }
-            }
-            button {
-                class: "admin-btn-primary admin-audit-filter__submit",
-                r#type: "submit",
-                {t!("admin-audit-load")}
             }
         }
     }
@@ -188,18 +211,19 @@ fn AuditFilters(
 fn AuditTable(page: AdminAuditPage) -> Element {
     let empty = page.records.is_empty();
     rsx! {
-        div { class: "admin-shell__table-wrap",
-            table { class: "admin-shell__table",
+        div { class: "admin-shell__table-wrap admin-audit-table-wrap",
+            table { class: "admin-shell__table admin-audit-table",
+                caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
                 thead {
                     tr {
-                        th { {t!("admin-audit-at")} }
-                        th { {t!("admin-audit-actor")} }
-                        th { {t!("admin-audit-action")} }
-                        th { {t!("admin-audit-entity")} }
-                        th { {t!("admin-audit-source")} }
-                        th { {t!("admin-audit-result")} }
-                        th { {t!("admin-audit-request-id")} }
-                        th { {t!("admin-audit-metadata")} }
+                        th { class: "admin-audit-table__time", scope: "col", {t!("admin-audit-at")} }
+                        th { class: "admin-audit-table__actor", scope: "col", {t!("admin-audit-actor")} }
+                        th { class: "admin-audit-table__action", scope: "col", {t!("admin-audit-action")} }
+                        th { class: "admin-audit-table__entity", scope: "col", {t!("admin-audit-entity")} }
+                        th { class: "admin-audit-table__source", scope: "col", {t!("admin-audit-source")} }
+                        th { class: "admin-audit-table__result", scope: "col", {t!("admin-audit-result")} }
+                        th { class: "admin-audit-table__request", scope: "col", {t!("admin-audit-request-id")} }
+                        th { class: "admin-audit-table__metadata", scope: "col", {t!("admin-audit-metadata")} }
                     }
                 }
                 tbody {
@@ -220,22 +244,84 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
     let actor_type = audit_actor_type_label(&record.actor_type);
     let source = audit_source_label(&record.source);
     let result = audit_result_label(&record.result);
+    let result_class = match record.result.as_str() {
+        "success" => "admin-audit-result admin-audit-result--success",
+        "rejected" => "admin-audit-result admin-audit-result--rejected",
+        "failure" => "admin-audit-result admin-audit-result--failure",
+        _ => "admin-audit-result admin-audit-result--neutral",
+    };
     let request_id = record.request_id.unwrap_or_else(|| t!("value-empty"));
-    let actor = format!("{}({actor_type})", record.actor_id);
-    let entity = format!("{}({})", record.entity_type, record.entity_id);
     let metadata = metadata_text(&record.metadata);
+    let actor_identity = format!("{}({actor_type})", record.actor_id);
+    let entity_identity = format!("{}({})", record.entity_id, record.entity_type);
     rsx! {
         tr { class: "admin-audit__row",
-            td { time { datetime: record.occurred_at.clone(), "{format_admin_time(&record.occurred_at)}" } }
-            td { TruncatedText { value: actor } }
-            td { TruncatedText { value: record.action } }
-            td { TruncatedText { value: entity } }
-            td { TruncatedText { value: source } }
-            td { TruncatedText { value: result } }
-            td { TruncatedText { value: request_id } }
-            td { class: "admin-audit-metadata", TruncatedText { value: metadata, size: "wide" } }
+            td {
+                class: "admin-audit-table__time",
+                "data-label": t!("admin-audit-at"),
+                time { datetime: record.occurred_at.clone(), "{format_admin_time(&record.occurred_at)}" }
+            }
+            td {
+                class: "admin-audit-table__actor",
+                "data-label": t!("admin-audit-actor"),
+                TruncatedText {
+                    value: actor_identity,
+                    class_name: "admin-audit-table__value admin-audit-identity",
+                }
+            }
+            td {
+                class: "admin-audit-table__action",
+                "data-label": t!("admin-audit-action"),
+                TruncatedText {
+                    value: record.action,
+                    class_name: "admin-audit-table__value admin-audit-action",
+                }
+            }
+            td {
+                class: "admin-audit-table__entity",
+                "data-label": t!("admin-audit-entity"),
+                TruncatedText {
+                    value: entity_identity,
+                    class_name: "admin-audit-table__value admin-audit-identity admin-audit-code",
+                }
+            }
+            td {
+                class: "admin-audit-table__source",
+                "data-label": t!("admin-audit-source"),
+                span { class: "admin-audit-source", "{source}" }
+            }
+            td {
+                class: "admin-audit-table__result",
+                "data-label": t!("admin-audit-result"),
+                span { class: result_class, "{result}" }
+            }
+            td {
+                class: "admin-audit-table__request",
+                "data-label": t!("admin-audit-request-id"),
+                TruncatedText {
+                    value: request_id,
+                    class_name: "admin-audit-table__value admin-audit-code",
+                }
+            }
+            td {
+                class: "admin-audit-table__metadata admin-audit-metadata",
+                "data-label": t!("admin-audit-metadata"),
+                TruncatedText {
+                    value: metadata,
+                    size: "wide",
+                    class_name: "admin-audit-table__value admin-audit-code",
+                }
+            }
         }
     }
+}
+
+fn audit_advanced_filter_active(filter: &AdminAuditFilter) -> bool {
+    !filter.actor_type.is_empty()
+        || !filter.source.is_empty()
+        || !filter.result.is_empty()
+        || !filter.occurred_from.is_empty()
+        || !filter.occurred_to.is_empty()
 }
 
 fn metadata_text(value: &serde_json::Value) -> String {

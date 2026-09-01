@@ -1,7 +1,7 @@
 //! Admin Dashboard 摘要指标。
 
+use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
-use auction_web_shared::legacy_t as t;
 
 use crate::api::{
     AdminAlertingSection, AdminAuctionPage, AdminCredentialData, AdminCredentialSection,
@@ -37,10 +37,10 @@ pub(super) fn DashboardStatusRow(label: String, metric: DashboardMetric) -> Elem
         div { class: "admin-dashboard__status-row",
             div { class: "admin-dashboard__status-label",
                 span { class: "admin-dashboard__status-dot admin-dashboard__status-dot--{metric.tone}", aria_hidden: "true" }
-                span { "{label}" }
+                TruncatedText { value: label, size: "compact", portal: true }
             }
             strong { "{metric.state}" }
-            small { "{metric.detail}" }
+            small { TruncatedText { value: metric.detail, size: "wide", portal: true } }
         }
     }
 }

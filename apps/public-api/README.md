@@ -4,7 +4,7 @@
 
 源码布局：`src/main.rs` 只负责 Tokio 入口；`src/bootstrap/mod.rs` 负责模块装配和稳定启动
 入口；`bootstrap/service.rs` 负责 tracing、HTTP 生命周期与退出 drain；`bootstrap/state.rs`
-负责数据库、端口、heartbeat 和 realtime 状态；`bootstrap/config.rs` 负责安全策略与缓存配置；
+负责数据库、端口、公开真实装备 URL、heartbeat 和 realtime 状态；`bootstrap/config.rs` 负责安全策略与缓存配置；
 `bootstrap/listener.rs` 负责监听器绑定。
 
 职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
@@ -36,6 +36,11 @@ just build-release
 `web-embed` 只在内嵌发布构建中显式启用。API-only 制品始终使用固定空资源集合，即使构建机上
 存在旧的 `target/dx` 也不会误嵌入；进程仍可正常启动，`/health` 与 `/api/v1/health` 照常响应，
 只有静态资源路由返回 503。
+
+PostgreSQL 完整档会使用敏感 TOML 中与装备密文信封匹配的 `equipment_data_key_id`/
+`equipment_data_key` 装配真实装备 URL 解析器；两项都缺失时 P09/P11 lot 读取返回 503，成对配置但
+无效时启动失败关闭。PostgreSQL 只在最终 `no-store` DTO 映射时短暂生成完整 URL；SQLite Lite
+继续返回 lot 投影，但链接字段留空，不伪造可用 URL。
 
 ## Cargo feature
 

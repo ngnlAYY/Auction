@@ -70,6 +70,10 @@ Public session 的登录、当前会话和注销，以及 `/api/v1/me/bids`、
 冻结的完整授权、quota、转换历史、终态原因和本次代理 bid，不在提交后重新读取账户投影。Public
 competition 的普通依赖失败使用旧版 503 `temporarily_unavailable`，全局请求 deadline 仍由 HTTP 边界
 输出 504 `timeout`；账户只读路径继续保留自己的存储错误分类。
+P09/P11 在 PostgreSQL 完整档校验 lot UUID、公开投影和内部 equipment owner 后批量解析完整装备
+URL，并直接覆盖既有 `game_equipment_url` DTO 字段；两条路由固定 `no-store`，完整 key 不进入日志、
+审计、事件或持久化缓存。PostgreSQL 缺密钥/依赖时返回 503；SQLite Lite 仍返回 lot 数据，但把链接
+字段留空。
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
