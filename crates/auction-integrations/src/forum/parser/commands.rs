@@ -36,13 +36,15 @@ pub(super) fn parse_bid_post(
         .clone()
         .or_else(|| post.author.clone())
         .filter(|value| !value.trim().is_empty());
-    for (line_index, line) in super::text::normalized_lines(&post.text).into_iter().enumerate() {
+    for (line_index, line) in super::text::normalized_lines(&post.text).enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
         match parse_command_line(trimmed, line_index + 1, lots, actor.as_deref()) {
-            Ok(command) => commands.push(command),
+            Ok(Some(command)) => commands.push(command),
+            // 论坛只接受普通出价；代理命令属于 Web 专属能力，且按产品约定不写入固定 #2。
+            Ok(None) => {}
             Err((code, message)) => warnings.push(super::helpers::warning(
                 line_index + 1,
                 code,
@@ -66,35 +68,33 @@ fn parse_command_line(
     line_number: usize,
     lots: &[AdminForumLot],
     actor: Option<&str>,
-) -> Result<AdminForumCommand, (&'static str, &'static str)> {
-    let tokens = line.split_whitespace().collect::<Vec<_>>();
-    if tokens.is_empty() {
-        return Err(("invalid_command", "a command must start with one or more lot codes"));
-    }
+) -> Result<Option<AdminForumCommand>, (&'static str, &'static str)> {
+    let mut tokens = line.split_whitespace().peekable();
     let mut codes = Vec::new();
-    let mut index = 0;
-    while index < tokens.len() {
-        let Some(code) = normalize_code(tokens[index]) else {
+    let mut unknown_lot = false;
+    while let Some(raw) = tokens.peek().copied() {
+        let Some(code) = super::helpers::normalize_lot_code(raw) else {
             break;
         };
         if !lots.iter().any(|lot| lot.code == code) {
-            return Err(("unknown_lot", "lot code is not present in the catalog"));
+            unknown_lot = true;
         }
         codes.push(code);
-        index += 1;
+        tokens.next();
     }
     if codes.is_empty() {
         return Err(("invalid_command", "a command must start with one or more lot codes"));
     }
-    if index == tokens.len() {
-        return Err((
-            "missing_action",
-            "a lot code must be immediately followed by a bid or command",
-        ));
+    let action = tokens
+        .next()
+        .ok_or(("missing_action", "a lot code must be immediately followed by a bid or command"))?
+        .to_ascii_lowercase();
+    if action == "proxy" {
+        return Ok(None);
     }
-
-    let action = tokens[index].to_ascii_lowercase();
-    index += 1;
+    if unknown_lot {
+        return Err(("unknown_lot", "lot code is not present in the catalog"));
+    }
     let mut command = AdminForumCommand {
         line: line_number,
         text: line.to_owned(),
@@ -109,40 +109,9 @@ fn parse_command_line(
     match action.as_str() {
         "start" => command.kind = "start".to_owned(),
         "cancel" => command.kind = "cancel".to_owned(),
-        "proxy" => {
-            if index == tokens.len() {
-                return Err(("invalid_proxy", "proxy must be followed by a credits maximum"));
-            }
-            if tokens[index].eq_ignore_ascii_case("lower") {
-                command.proxy_lower = true;
-                index += 1;
-                if index == tokens.len() {
-                    return Err((
-                        "invalid_proxy",
-                        "proxy lower must be followed by a credits maximum",
-                    ));
-                }
-            }
-            command.amount =
-                Some(parse_amount(tokens[index]).map_err(|_| {
-                    ("invalid_proxy", "proxy maximum is not a valid credits amount")
-                })?);
-            index += 1;
-            command.kind = "proxy".to_owned();
-            command.proxy = Some("fast".to_owned());
-            if !command.proxy_lower
-                && index < tokens.len()
-                && (tokens[index].eq_ignore_ascii_case("fast")
-                    || tokens[index].eq_ignore_ascii_case("slow"))
-            {
-                command.proxy = Some(tokens[index].to_ascii_lowercase());
-                index += 1;
-            }
-        }
         "notify" => {
             command.kind = "notify".to_owned();
-            command.notify = Some(parse_notify_mode(&tokens, index)?);
-            index = tokens.len();
+            command.notify = Some(parse_notify_mode(&mut tokens)?);
         }
         _ => {
             command.kind = "bid".to_owned();
@@ -152,46 +121,26 @@ fn parse_command_line(
         }
     }
     if command.kind != "notify"
-        && index < tokens.len()
-        && tokens[index].eq_ignore_ascii_case("notify")
+        && tokens.peek().is_some_and(|token| token.eq_ignore_ascii_case("notify"))
     {
-        index += 1;
-        command.notify = Some(parse_notify_mode(&tokens, index)?);
-        index = tokens.len();
+        tokens.next();
+        command.notify = Some(parse_notify_mode(&mut tokens)?);
     }
-    if index != tokens.len() {
+    if tokens.next().is_some() {
         return Err(("extra_words", "other words are not allowed in a forum bid line"));
     }
-    Ok(command)
+    Ok(Some(command))
 }
 
-fn normalize_code(raw: &str) -> Option<String> {
-    let value = raw
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .replace('-', "")
-        .to_ascii_uppercase();
-    if value.len() != 5
-        || !value.is_ascii()
-        || !value.as_bytes()[..3].iter().all(u8::is_ascii_uppercase)
-        || !value.as_bytes()[3..].iter().all(u8::is_ascii_digit)
-    {
-        return None;
-    }
-    Some(format!("{}{}{}", &value[0..1], value[1..3].to_ascii_lowercase(), &value[3..]))
-}
-
-fn parse_notify_mode(
-    tokens: &[&str],
-    index: usize,
+fn parse_notify_mode<'a>(
+    tokens: &mut impl Iterator<Item = &'a str>,
 ) -> Result<String, (&'static str, &'static str)> {
-    if index == tokens.len() {
+    let Some(mode) = tokens.next() else {
         return Ok("both".to_owned());
-    }
-    match tokens[index].to_ascii_lowercase().as_str() {
-        "pm" if index + 1 == tokens.len() => Ok("pm".to_owned()),
-        "mm" if index + 1 == tokens.len() => Ok("mm".to_owned()),
+    };
+    match mode.to_ascii_lowercase().as_str() {
+        "pm" if tokens.next().is_none() => Ok("pm".to_owned()),
+        "mm" if tokens.next().is_none() => Ok("mm".to_owned()),
         _ => Err(("invalid_notify", "notify must optionally be followed by pm or mm")),
     }
 }
@@ -230,4 +179,40 @@ pub(super) fn parse_amount(raw: &str) -> Result<i64, ()> {
         return Err(());
     }
     i64::try_from(amount).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use auction_application::AdminForumLot;
+
+    use super::*;
+
+    #[test]
+    fn forum_proxy_lines_are_silently_ignored() {
+        let lots = vec![AdminForumLot {
+            code: "One01".to_owned(),
+            category: "One-Handed".to_owned(),
+            description: "Test rapier".to_owned(),
+            seller: Some("seller".to_owned()),
+            start_price: 50_000,
+            material: false,
+            current_bidder: None,
+            current_price: None,
+        }];
+        let post = ParsedPost {
+            id: "6956801".to_owned(),
+            author_id: Some("5501029".to_owned()),
+            author: Some("ngnlAYY".to_owned()),
+            text: "One01 proxy 2m fast\nOne01 proxy lower 1.5m\nBad99 proxy 3m\nOne01 200k"
+                .to_owned(),
+            edited: false,
+        };
+
+        let (parsed, warnings) = parse_bid_post(post, &lots);
+
+        assert!(warnings.is_empty());
+        assert_eq!(parsed.commands.len(), 1);
+        assert_eq!(parsed.commands[0].kind, "bid");
+        assert_eq!(parsed.commands[0].amount, Some(200_000));
+    }
 }

@@ -7,9 +7,10 @@ use std::collections::VecDeque;
 
 use super::forms::{
     PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
-    fixed_post_form_values, is_loopback_host, is_session_expired, optional_query_identity,
-    origin_of, posting_action_matches_board, posting_action_matches_target, posting_form_values,
-    same_origin, set_form_value, valid_cookie, valid_post_id, valid_rendered_post,
+    fixed_post_form_values, form_selector, hidden_input_selector, is_loopback_host,
+    is_session_expired, link_selector, optional_query_identity, origin_of, post_body_selector,
+    posting_action_matches_board, posting_action_matches_target, posting_form_values, same_origin,
+    set_form_value, topic_title_selector, valid_cookie, valid_post_id, valid_rendered_post,
     valid_rendered_thread, valid_topic_id, valid_topic_title,
 };
 use super::*;
@@ -225,13 +226,16 @@ impl EhentaiClient {
         let target = self.index_url(&[("showtopic", thread_id)], operation)?;
         let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
         let html = String::from_utf8(body).map_err(|_| EhentaiError::protocol(operation, false))?;
-        let targets = self.topic_page_targets(&html, thread_id, operation)?;
+        let parser = crate::ForumPreviewAdapter::new();
+        let first_page =
+            parser.parse_html_page(&html).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let targets = self.topic_page_targets(&first_page, thread_id, operation)?;
         let expected_pages = targets.len();
         let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
         let mut remaining = targets.into_iter().skip(1).collect::<VecDeque<_>>();
         let mut pages = Vec::with_capacity(expected_pages);
         let mut total_bytes = html.len();
-        pages.push((0_u64, html));
+        pages.push((0_u64, first_page));
         let mut reads = tokio::task::JoinSet::new();
         let read_context = TopicPageReadContext {
             client: self.clone(),
@@ -245,20 +249,18 @@ impl EhentaiClient {
         while let Some(read) = reads.join_next().await {
             let page = read.map_err(|_| EhentaiError::remote_temporary(operation, false))??;
             total_bytes = total_bytes
-                .checked_add(page.1.len())
+                .checked_add(page.1)
                 .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
                 .ok_or_else(|| EhentaiError::response_too_large(operation))?;
-            pages.push(page);
+            pages.push((page.0, page.2));
             spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
         }
         pages.sort_unstable_by_key(|(offset, _)| *offset);
         if pages.len() != expected_pages || pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
             return Err(EhentaiError::protocol(operation, false));
         }
-        let documents = pages.iter().map(|(_, html)| html.as_str()).collect::<Vec<_>>();
-        crate::ForumPreviewAdapter::new()
-            .parse_html_documents(&documents)
-            .map_err(|_| EhentaiError::protocol(operation, false))
+        let parsed_pages = pages.into_iter().map(|(_, page)| page).collect();
+        parser.parse_html_pages(parsed_pages).map_err(|_| EhentaiError::protocol(operation, false))
     }
 
     /// 建立固定 #2 回复；POST 后必须返回 exact thread/post proof。
@@ -323,7 +325,7 @@ async fn read_topic_page(
     context: TopicPageReadContext,
     offset: u64,
     page_target: Url,
-) -> Result<(u64, String), EhentaiError> {
+) -> Result<(u64, usize, crate::forum::ParsedHtmlPage), EhentaiError> {
     let identity_target = page_target.clone();
     let (body, _) = context
         .client
@@ -331,19 +333,25 @@ async fn read_topic_page(
         .await?;
     let html =
         String::from_utf8(body).map_err(|_| EhentaiError::protocol(context.operation, false))?;
+    let page_bytes = html.len();
+    let page = crate::ForumPreviewAdapter::new()
+        .parse_html_page(&html)
+        .map_err(|_| EhentaiError::protocol(context.operation, false))?;
     context.client.validate_topic_page_identity(
-        &html,
+        &page,
         &identity_target,
         &context.thread_id,
         offset,
         context.known_maximum_offset,
         context.operation,
     )?;
-    Ok((offset, html))
+    Ok((offset, page_bytes, page))
 }
 
 fn spawn_topic_page_reads(
-    reads: &mut tokio::task::JoinSet<Result<(u64, String), EhentaiError>>,
+    reads: &mut tokio::task::JoinSet<
+        Result<(u64, usize, crate::forum::ParsedHtmlPage), EhentaiError>,
+    >,
     remaining: &mut VecDeque<(u64, Url)>,
     context: &TopicPageReadContext,
 ) {

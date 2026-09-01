@@ -68,19 +68,22 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
  短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
 remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
 实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建、固定 #2 回复、固定 post 编辑和主题读取；
-主题读取会从第一页发现规范 `st` 水位，按 20 帖分页补齐全部页面，并用每个已读页面复核该水位没有扩张；额外页面最多四路并发读取且仍
+主题读取按真实 `postcolor`、`post-{id}`、`showuser={id}` 和结构化 `.edit` 锚点把每页 HTML
+单次构建为受限页面事实，分页身份证明与帖子/回复语义解析共享该结果，不再重复构建 DOM；它会从第一页发现规范 `st` 水位，按 20 帖分页补齐全部页面，并用每个已读页面复核该水位没有扩张；额外页面最多四路并发读取且仍
 共享请求起始间隔；每页响应继续受配置上限约束，全部主题 HTML 另有 32 MiB 聚合硬上限。每个响应
 都要用非用户正文区的同 thread permalink 绑定该页真实 post ID；任一 `postcolor` 缺少规范数字 ID、
 非末页不是完整 20 帖、页数超过配置上限、页码不规范或合并后 post ID 重复/逆序都会失败关闭，
 不会把错误主题或前几页结果当作完整出价。
 写入会加载真实表单并核对同源 `/index.php` action、POST 方法及 exact board/thread/post，回复 action
-不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，无法证明时返回
+不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，或真实论坛
+`Please stand by...` 200 回执中完全一致的 meta refresh 与链接双重证明，无法证明时返回
 `write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志，
 按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
 从论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字值，并把它作为论坛/MM 共用玩家 ID
 交给 Users owner 和应用竞价端口；昵称只用于显示，缺少该 ID 时失败关闭，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
 正文明确出现登录表单/失效文案时作废；Cloudflare 前置挑战同样可能返回 403，不能据此误删有效
-Cookie，而应保留凭据并以协议/访问失败收口。
+Cookie，而应保留凭据并以协议/访问失败收口。论坛回复只执行普通出价；代理创建/降低是 Public Web
+专属能力，解析器会在账本前静默丢弃论坛代理行，且不会把它们写入固定 #2。
 - `src/equipment/`：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
   请求间隔和完整请求超时，`reader.rs` 负责无代理/无重定向读取与应用端口适配，`parser/` 按
   `url.rs`、`page.rs`、`identity.rs`、`stats.rs` 和 `common.rs` 分别解析来源 URL、旧装备页、
@@ -97,7 +100,7 @@ Cookie，而应保留凭据并以协议/访问失败收口。
   与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由
   PostgreSQL 完整档提供，SQLite 不返回伪造的 Lite 能力。
 - `src/forum/mod.rs`：只负责 ForumPreviewAdapter 和渲染/解析出口；`src/forum/parser/` 按
-  HTML 抽取、纯文本切分、目录、命令/金额、内部模型和结果辅助拆分有界的 catalog、posts、warnings
+  单次 DOM 页面事实抽取、纯文本切分、目录、命令/金额、内部模型和结果辅助拆分有界的 catalog、posts、warnings
   和命令预览。解析器只在内存中工作。远程主题读写由 `src/clients/ehentai/` 拥有，回帖导入仍由
   `auction-jobs` 通过应用端口执行。
 

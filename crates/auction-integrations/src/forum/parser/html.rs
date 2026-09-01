@@ -1,19 +1,41 @@
-//! 论坛 HTML 帖子抽取、作者识别和正文规整。
+//! 论坛 HTML 的单次 DOM 解析、帖子抽取、作者识别和正文规整。
 
-use scraper::{ElementRef, Html, Selector};
+use std::sync::LazyLock;
+
+use scraper::{ElementRef, Html, Node, Selector};
 use url::Url;
 
-use super::model::ParsedPost;
+use super::model::{ParsedHtmlPage, ParsedPost};
 
-pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
-    super::parse_thread(extract_html_posts(input)?)
+static POST_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("div.postcolor").map_err(|_| ()));
+static EDIT_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse(".edit").map_err(|_| ()));
+static AUTHOR_SELECTOR: LazyLock<Result<Selector, ()>> = LazyLock::new(|| {
+    Selector::parse(".bigusername, .normalname, .author, .username, .post-author, .member_name")
+        .map_err(|_| ())
+});
+static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("a[href]").map_err(|_| ()));
+
+fn cached_selector(
+    cache: &'static LazyLock<Result<Selector, ()>>,
+) -> Result<&'static Selector, ()> {
+    match LazyLock::force(cache) {
+        Ok(selector) => Ok(selector),
+        Err(()) => Err(()),
+    }
 }
 
-pub(super) fn extract_html_posts(input: &str) -> Result<Vec<ParsedPost>, ()> {
+pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
+    super::parse_thread(extract_html_page(input)?.into_posts())
+}
+
+pub(super) fn extract_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
     let document = Html::parse_document(input);
-    let selector = Selector::parse("div.postcolor").map_err(|_| ())?;
+    let post_selector = cached_selector(&POST_SELECTOR)?;
     let mut posts = Vec::new();
-    for element in document.select(&selector) {
+    for element in document.select(post_selector) {
         let id = element
             .attr("id")
             .and_then(|value| value.strip_prefix("post-"))
@@ -29,7 +51,20 @@ pub(super) fn extract_html_posts(input: &str) -> Result<Vec<ParsedPost>, ()> {
             text,
         });
     }
-    (!posts.is_empty()).then_some(posts).ok_or(())
+    if posts.is_empty() {
+        return Err(());
+    }
+
+    // 分页校验只消费用户正文区以外的主题链接；提前形成轻量事实后即可释放完整 DOM。
+    let link_selector = cached_selector(&LINK_SELECTOR)?;
+    let navigation_references = document
+        .select(link_selector)
+        .filter(|link| !link_is_user_content(*link))
+        .filter_map(|link| link.attr("href"))
+        .filter(|reference| topic_reference_candidate(reference))
+        .map(str::to_owned)
+        .collect();
+    Ok(ParsedHtmlPage::new(posts, navigation_references))
 }
 
 pub(super) fn canonical_post_id(value: &str) -> bool {
@@ -42,23 +77,40 @@ pub(super) fn canonical_post_id(value: &str) -> bool {
 
 fn post_was_edited(element: ElementRef<'_>) -> bool {
     // 只信任论坛生成的 edit 元素；普通用户正文包含相同英文句子不能成为绕过命令解析的开关。
-    Selector::parse(".edit").ok().is_some_and(|selector| element.select(&selector).next().is_some())
+    cached_selector(&EDIT_SELECTOR)
+        .ok()
+        .is_some_and(|selector| element.select(selector).next().is_some())
 }
 
 fn render_post_text(element: ElementRef<'_>) -> String {
-    let mut source = element.inner_html();
-    for tag in ["<br>", "<br/>", "<br />", "</p>", "</li>", "</blockquote>", "</div>"] {
-        source = source.replace(tag, "\n");
+    let mut source = String::new();
+    let mut previous_block = None;
+    for node in element.descendants() {
+        match node.value() {
+            Node::Element(value) if value.name() == "br" => source.push('\n'),
+            Node::Text(value) => {
+                let block = node.ancestors().find_map(|ancestor| match ancestor.value() {
+                    Node::Element(value)
+                        if matches!(value.name(), "p" | "li" | "blockquote" | "div") =>
+                    {
+                        Some(ancestor.id())
+                    }
+                    _ => None,
+                });
+                if previous_block.is_some() && block != previous_block {
+                    source.push('\n');
+                }
+                source.push_str(value);
+                previous_block = block;
+            }
+            _ => {}
+        }
     }
-    let fragment = Html::parse_fragment(&source);
-    super::text::normalize_text(&fragment.root_element().text().collect::<String>())
+    super::text::normalize_text(&source)
 }
 
 fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
-    let selector = Selector::parse(
-        ".bigusername, .normalname, .author, .username, .post-author, .member_name",
-    )
-    .ok();
+    let selector = cached_selector(&AUTHOR_SELECTOR).ok();
     let mut current = Some(element);
     for _ in 0..8 {
         let Some(node) = current else {
@@ -70,12 +122,12 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
                 node.attr(key).map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned)
             })
             .and_then(canonical_forum_player_id);
-        let author_element = selector.as_ref().and_then(|selector| node.select(selector).next());
+        let author_element = selector.and_then(|selector| node.select(selector).next());
         let author = author_element.map(render_post_text).filter(|value| !value.is_empty());
         let author_id = author_id.or_else(|| {
             author_element.and_then(|value| {
-                let links = Selector::parse("a[href]").ok()?;
-                value.select(&links).find_map(|link| forum_player_id_from_href(link.attr("href")?))
+                let links = cached_selector(&LINK_SELECTOR).ok()?;
+                value.select(links).find_map(|link| forum_player_id_from_href(link.attr("href")?))
             })
         });
         if author_id.is_some() || author.is_some() {
@@ -84,6 +136,30 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
         current = node.parent().and_then(ElementRef::wrap);
     }
     (None, None)
+}
+
+fn link_is_user_content(link: ElementRef<'_>) -> bool {
+    let mut current = Some(link);
+    for _ in 0..16 {
+        let Some(element) = current else {
+            break;
+        };
+        if element.attr("class").is_some_and(|classes| {
+            classes.split_ascii_whitespace().any(|class| matches!(class, "postcolor" | "signature"))
+        }) {
+            return true;
+        }
+        current = element.parent().and_then(ElementRef::wrap);
+    }
+    false
+}
+
+fn topic_reference_candidate(reference: &str) -> bool {
+    reference.len() <= 4 * 1024
+        && !reference.chars().any(char::is_control)
+        && (reference.contains("showtopic=")
+            || reference.contains("?t=")
+            || reference.contains("&t="))
 }
 
 fn forum_player_id_from_href(href: &str) -> Option<String> {
@@ -116,4 +192,41 @@ fn canonical_forum_player_id(value: String) -> Option<String> {
         && value.as_bytes().first() != Some(&b'0')
         && value.bytes().all(|byte| byte.is_ascii_digit()))
     .then_some(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_live_forum_posts_and_navigation_in_one_pass() {
+        let html = r#"
+            <html><body>
+              <a href="index.php?showtopic=300433&amp;p=6956799#entry6956799">#1</a>
+              <table><tr><td>
+                <span class="bigusername"><a href="index.php?showuser=5501029">ngnlAYY</a></span>
+                <div class="postcolor" id="post-6956799">
+                  One-Handed<br>[One01] Test rapier (seller: seller) — Start: 50k
+                </div>
+              </td></tr></table>
+              <a href="index.php?showtopic=300433&amp;p=6956801#entry6956801">#2</a>
+              <table><tr><td>
+                <span class="bigusername"><a href="index.php?showuser=5501029">ngnlAYY</a></span>
+                <div class="postcolor" id="post-6956801">
+                  One01 200k<br><span class="edit">This post has been edited by ngnlAYY</span>
+                </div>
+              </td></tr></table>
+            </body></html>
+        "#;
+
+        let page = extract_html_page(html).expect("真实论坛结构应能形成受限页面事实");
+
+        assert_eq!(page.post_ids().collect::<Vec<_>>(), ["6956799", "6956801"]);
+        assert_eq!(page.navigation_references().count(), 2);
+        let posts = page.into_posts();
+        assert_eq!(posts.len(), 2);
+        assert_eq!(posts[0].author_id.as_deref(), Some("5501029"));
+        assert_eq!(posts[0].text, "One-Handed\n[One01] Test rapier (seller: seller) — Start: 50k");
+        assert!(posts[1].edited);
+    }
 }

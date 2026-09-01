@@ -201,11 +201,13 @@ pub struct ForumWriteRetryAuthorizationResult {
 
 /// 论坛同步存储端口。
 pub trait ForumSyncStore: Send + Sync {
+    /// 领取 due 任务；恢复水位只放行当前 Worker 首轮之前的凭据失败，`None` 表示内存池不可用。
     fn claim_due(
         &self,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        credential_recovery_before: Option<DateTime<Utc>>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>>;
 
@@ -227,6 +229,11 @@ pub trait ForumSyncStore: Send + Sync {
         failure_code: String,
         safe_detail: String,
     ) -> ApplicationFuture<'_, ()>;
+}
+
+/// 当前 Worker 内存凭据池的只读可用性；不暴露 Cookie、scope 或数据库记录。
+pub trait ForumCredentialAvailability: Send + Sync {
+    fn has_available_forum_credential(&self) -> bool;
 }
 
 /// 论坛未知写入的运维恢复端口；SQLite Lite 明确不提供该能力。

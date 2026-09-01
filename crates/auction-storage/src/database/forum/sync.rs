@@ -71,12 +71,15 @@ impl ForumSyncStore for DatabaseStore {
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
+        credential_recovery_before: Option<DateTime<Utc>>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>> {
         Box::pin(async move {
             if !valid_text(&worker_id, MAX_WORKER_ID_BYTES)
                 || now.timestamp_nanos_opt().is_none()
                 || lease_until <= now
+                || credential_recovery_before
+                    .is_some_and(|value| value.timestamp_nanos_opt().is_none() || value > now)
                 || limit == 0
                 || limit > MAX_CLAIM_BATCH_SIZE
             {
@@ -85,7 +88,15 @@ impl ForumSyncStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    claim_due_postgres(store, &worker_id, now, lease_until, limit).await
+                    claim_due_postgres(
+                        store,
+                        &worker_id,
+                        now,
+                        lease_until,
+                        credential_recovery_before,
+                        limit,
+                    )
+                    .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

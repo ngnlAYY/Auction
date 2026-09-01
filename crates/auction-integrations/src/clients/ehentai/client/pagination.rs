@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use scraper::ElementRef;
+use crate::forum::ParsedHtmlPage;
 
 use super::*;
 
@@ -14,13 +14,12 @@ struct TopicPageIdentity {
 impl EhentaiClient {
     pub(super) fn topic_page_targets(
         &self,
-        first_page_html: &str,
+        first_page: &ParsedHtmlPage,
         thread_id: &str,
         operation: EhentaiOperation,
     ) -> Result<Vec<(u64, Url)>, EhentaiError> {
         let first_target = self.index_url(&[("showtopic", thread_id)], operation)?;
-        let identity =
-            self.topic_page_identity(first_page_html, &first_target, thread_id, operation)?;
+        let identity = self.topic_page_identity(first_page, &first_target, thread_id, operation)?;
         let maximum_offset = identity.offsets.last().copied().unwrap_or(0);
         validate_page_post_count(0, maximum_offset, identity.post_count, operation)?;
         self.topic_page_targets_through(thread_id, maximum_offset, operation)
@@ -67,14 +66,14 @@ impl EhentaiClient {
 
     pub(super) fn validate_topic_page_identity(
         &self,
-        page_html: &str,
+        page: &ParsedHtmlPage,
         page_target: &Url,
         thread_id: &str,
         expected_offset: u64,
         known_maximum_offset: u64,
         operation: EhentaiOperation,
     ) -> Result<(), EhentaiError> {
-        let identity = self.topic_page_identity(page_html, page_target, thread_id, operation)?;
+        let identity = self.topic_page_identity(page, page_target, thread_id, operation)?;
         let discovered_maximum_offset = identity.offsets.last().copied().unwrap_or(0);
         if discovered_maximum_offset > known_maximum_offset {
             return Err(EhentaiError::protocol(operation, false));
@@ -90,22 +89,13 @@ impl EhentaiClient {
 
     fn topic_page_identity(
         &self,
-        page_html: &str,
+        page: &ParsedHtmlPage,
         page_target: &Url,
         thread_id: &str,
         operation: EhentaiOperation,
     ) -> Result<TopicPageIdentity, EhentaiError> {
-        let document = Html::parse_document(page_html);
-        let post_selector = Selector::parse("div.postcolor")
-            .map_err(|_| EhentaiError::protocol(operation, false))?;
         let mut post_ids = BTreeSet::new();
-        for post in document.select(&post_selector) {
-            let post_id = post
-                .value()
-                .attr("id")
-                .and_then(|value| value.strip_prefix("post-"))
-                .filter(|value| canonical_post_id(value))
-                .ok_or_else(|| EhentaiError::protocol(operation, false))?;
+        for post_id in page.post_ids() {
             if !post_ids.insert(post_id.to_owned()) {
                 return Err(EhentaiError::protocol(operation, false));
             }
@@ -114,19 +104,11 @@ impl EhentaiClient {
             return Err(EhentaiError::protocol(operation, false));
         }
 
-        let link_selector =
-            Selector::parse("a[href]").map_err(|_| EhentaiError::protocol(operation, false))?;
         let mut offsets = BTreeSet::from([0_u64]);
         let mut thread_identity_seen = false;
         let mut page_post_identity_seen = false;
 
-        for link in document.select(&link_selector) {
-            if link_is_user_content(link) {
-                continue;
-            }
-            let Some(reference) = link.value().attr("href") else {
-                continue;
-            };
+        for reference in page.navigation_references() {
             let Ok(mut resolved) = page_target.join(reference) else {
                 continue;
             };
@@ -163,6 +145,11 @@ impl EhentaiClient {
             if offset_values.len() != 1 {
                 return Err(EhentaiError::protocol(operation, false));
             }
+            // 论坛 Full Edit 等同主题操作链接会携带合法的空 `st=`；它没有声明分页目标，
+            // 只能忽略，不能把空值降级成第 0 页，也不能因此拒绝整个主题。
+            if offset_values[0].is_empty() {
+                continue;
+            }
             let offset = canonical_page_offset(&offset_values[0])
                 .ok_or_else(|| EhentaiError::protocol(operation, false))?;
             if !offset.is_multiple_of(FORUM_POSTS_PER_PAGE) {
@@ -177,22 +164,6 @@ impl EhentaiClient {
             u64::try_from(post_ids.len()).map_err(|_| EhentaiError::protocol(operation, false))?;
         Ok(TopicPageIdentity { offsets, post_count })
     }
-}
-
-fn link_is_user_content(link: ElementRef<'_>) -> bool {
-    let mut current = Some(link);
-    for _ in 0..16 {
-        let Some(element) = current else {
-            break;
-        };
-        if element.value().attr("class").is_some_and(|classes| {
-            classes.split_ascii_whitespace().any(|class| matches!(class, "postcolor" | "signature"))
-        }) {
-            return true;
-        }
-        current = element.parent().and_then(ElementRef::wrap);
-    }
-    false
 }
 
 fn query_values(url: &Url, names: &[&str]) -> Vec<String> {
@@ -213,14 +184,6 @@ fn canonical_page_offset(value: &str) -> Option<u64> {
         && value.bytes().all(|byte| byte.is_ascii_digit()))
     .then(|| value.parse().ok())
     .flatten()
-}
-
-fn canonical_post_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 32
-        && value.as_bytes()[0].is_ascii_digit()
-        && value.as_bytes()[0] != b'0'
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn validate_target_offset(
@@ -254,4 +217,36 @@ fn validate_page_post_count(
         return Err(EhentaiError::protocol(operation, false));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_edit_offset_is_not_treated_as_topic_pagination() {
+        let html = r#"
+            <html><body>
+              <a href="index.php?showtopic=300433&amp;p=6956799#entry6956799">#1</a>
+              <a href="index.php?act=post&amp;do=edit_post&amp;f=4&amp;t=300433&amp;p=6956799&amp;st=">Full Edit</a>
+              <div class="postcolor" id="post-6956799">Catalog</div>
+              <a href="index.php?showtopic=300433&amp;p=6956800#entry6956800">#2</a>
+              <div class="postcolor" id="post-6956800">System log</div>
+            </body></html>
+        "#;
+        let page = crate::ForumPreviewAdapter::new()
+            .parse_html_page(html)
+            .expect("真实论坛主题页应能形成受限页面事实");
+        let client = EhentaiClient::with_config(
+            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
+        )
+        .expect("安全论坛客户端应可构造");
+
+        let targets = client
+            .topic_page_targets(&page, "300433", EhentaiOperation::FetchTopic)
+            .expect("编辑链接的空 st 不代表分页偏移");
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].0, 0);
+    }
 }

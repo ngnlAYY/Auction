@@ -18,6 +18,7 @@ mod model;
 mod text;
 
 pub(super) use html::parse_html;
+pub(crate) use model::ParsedHtmlPage;
 pub(super) use model::{CatalogParse, ParsedPost};
 pub(super) use text::parse_thread_text;
 
@@ -30,11 +31,24 @@ pub(super) fn parse_html_documents(inputs: &[&str]) -> Result<AdminForumPreviewR
     if inputs.is_empty() {
         return Err(());
     }
+    let pages =
+        inputs.iter().map(|input| html::extract_html_page(input)).collect::<Result<Vec<_>, _>>()?;
+    parse_html_pages(pages)
+}
+
+pub(crate) fn parse_html_page(input: &str) -> Result<ParsedHtmlPage, ()> {
+    html::extract_html_page(input)
+}
+
+pub(crate) fn parse_html_pages(pages: Vec<ParsedHtmlPage>) -> Result<AdminForumPreviewResult, ()> {
+    if pages.is_empty() {
+        return Err(());
+    }
     let mut seen_post_ids = HashSet::new();
     let mut posts = Vec::new();
     let mut previous_post_id = None;
-    for input in inputs {
-        for post in html::extract_html_posts(input)? {
+    for page in pages {
+        for post in page.into_posts() {
             if !html::canonical_post_id(&post.id)
                 || previous_post_id
                     .as_deref()

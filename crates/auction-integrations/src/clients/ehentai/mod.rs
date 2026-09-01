@@ -13,8 +13,8 @@ use std::{
 
 use auction_application::{
     AdminCredentialRuntimeWriter, AdminForumPreviewResult, ApplicationError, ApplicationFuture,
-    ForumPostWriter, ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError,
-    ForumRenderedPost, ForumRenderedThread, ForumTopicReader,
+    ForumCredentialAvailability, ForumPostWriter, ForumPublishedPost, ForumPublishedThread,
+    ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumTopicReader,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;

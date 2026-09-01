@@ -13,6 +13,7 @@ pub(super) async fn claim_due_postgres(
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
+    credential_recovery_before: Option<DateTime<Utc>>,
     limit: u16,
 ) -> Result<Vec<ForumSyncClaim>, ApplicationError> {
     use sqlx::Row;
@@ -46,6 +47,10 @@ pub(super) async fn claim_due_postgres(
                     'write_authorization_required'
                 ))
                 AND sync.next_attempt_at <= $1)
+               OR ($3::timestamptz IS NOT NULL
+                   AND sync.status = 'failed'
+                   AND sync.last_error_code = 'credential_unavailable'
+                   AND sync.updated_at < $3)
                OR (sync.status = 'publishing'
                    AND (sync.lease_expires_at IS NULL OR sync.lease_expires_at <= $1))
                OR (sync.status = 'published'
@@ -57,6 +62,7 @@ pub(super) async fn claim_due_postgres(
     )
     .bind(now)
     .bind(i64::from(limit))
+    .bind(credential_recovery_before)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 due 论坛同步任务失败"))?;

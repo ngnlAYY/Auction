@@ -71,6 +71,7 @@ pub(super) async fn fail_postgres(
     failure_code: &str,
     safe_detail: &str,
 ) -> Result<(), ApplicationError> {
+    // 至少推进到本次 claim 的应用时钟，避免数据库时钟轻微落后时重复越过同一进程恢复水位。
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET status = 'failed',
@@ -80,7 +81,7 @@ pub(super) async fn fail_postgres(
              claim_owner = NULL,
              last_error_code = $3,
              last_error_detail = $4,
-             updated_at = CURRENT_TIMESTAMP
+             updated_at = GREATEST(CURRENT_TIMESTAMP, $9)
          WHERE auction_id = $1
            AND status = 'publishing'
            AND claim_token = $5
@@ -97,6 +98,7 @@ pub(super) async fn fail_postgres(
     .bind(&claim.worker_id)
     .bind(claim.claim_fencing)
     .bind(claim.source_revision)
+    .bind(claim.claimed_at)
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("写入论坛同步失败退避状态失败"))?;

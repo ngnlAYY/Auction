@@ -251,11 +251,11 @@ pub use forum_reply::{
     ForumTopicReader,
 };
 pub use forum_sync::{
-    ForumAuctionSnapshot, ForumLotSnapshot, ForumPostWriter, ForumPublishedLayout,
-    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError,
-    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
-    ForumSyncRecoveryPort, ForumSyncStore, ForumSystemLogEntry,
-    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+    ForumAuctionSnapshot, ForumCredentialAvailability, ForumLotSnapshot, ForumPostWriter,
+    ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread, ForumPublisher,
+    ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
+    ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
+    ForumSystemLogEntry, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
     MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{

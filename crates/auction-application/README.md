@@ -121,7 +121,9 @@ Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本
 论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照只携带无 key 的装备链接目标，渲染前由
 `PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取
 远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段。端口本身不决定 CLI
-确认文字、数据库表、装备 key 解密或 HTTP 传输实现。
+确认文字、数据库表、装备 key 解密或 HTTP 传输实现。`ForumCredentialAvailability` 只暴露当前
+Worker 内存池的布尔可用性；`ForumSyncStore::claim_due` 的恢复水位只用于一次性释放更早的
+`credential_unavailable`，不得放宽未知写入栅栏。
 Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/装备/投稿的安全快照和
 有界分页；它要求完整 Admin 生命周期投影，不把 Lite 缺失字段填成默认成功值。
 Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许版本 fence 保护的

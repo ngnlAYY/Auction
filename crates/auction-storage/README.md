@@ -136,6 +136,9 @@ Serializable 事务内复用 `users.game_player_id`，或为尚未注册 MM 的�
 编辑；历史 published 行保持未对账，不猜测楼层身份。
 主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
 快照只输出装备 ID、外部 ID 和不含 key 的目标，真实 URL 由 Worker 的外部链接解析边界生成。
+`credential_unavailable` 保持非写入失败；只有当前 Worker 确认内存凭据可用时，领取 SQL 才越过一年
+人工退避，并且仅放行早于该进程首轮恢复水位的记录。失败写回会越过该水位，防止同一进程紧循环；
+`write_unknown`、发布证明失败和人工授权状态不经过此分支。
 回帖账本接管会同时核对命令 ID 与冻结自然键；自然键和完整业务负载一致时复用既有旧版命令 ID，
 两种身份命中不同记录或任一负载字段漂移时失败关闭。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。

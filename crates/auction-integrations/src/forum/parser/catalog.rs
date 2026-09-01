@@ -15,7 +15,7 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
     let mut warnings = Vec::new();
     let mut category = None::<String>;
 
-    for (line_index, line) in super::text::normalized_lines(input).into_iter().enumerate() {
+    for (line_index, line) in super::text::normalized_lines(input).enumerate() {
         let line_number = line_index + 1;
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -31,7 +31,7 @@ pub(super) fn parse_catalog(input: &str) -> Result<CatalogParse, ()> {
         let Some((raw_code, description)) = catalog_row(trimmed) else {
             continue;
         };
-        let Some(code) = normalize_code(raw_code) else {
+        let Some(code) = super::helpers::normalize_lot_code(raw_code) else {
             warnings.push(super::helpers::warning(
                 line_number,
                 "invalid_catalog_row",
@@ -99,23 +99,6 @@ fn category_heading(value: &str) -> Option<&'static str> {
         "Heavy Armor" => Some("Heavy"),
         _ => CATALOG_CATEGORIES.iter().copied().find(|category| *category == value),
     }
-}
-
-fn normalize_code(raw: &str) -> Option<String> {
-    let value = raw
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .replace('-', "")
-        .to_ascii_uppercase();
-    if value.len() != 5
-        || !value.is_ascii()
-        || !value.as_bytes()[..3].iter().all(u8::is_ascii_uppercase)
-        || !value.as_bytes()[3..].iter().all(u8::is_ascii_digit)
-    {
-        return None;
-    }
-    Some(format!("{}{}{}", &value[0..1], value[1..3].to_ascii_lowercase(), &value[3..]))
 }
 
 fn custom_start_price(description: &str) -> Option<Result<i64, ()>> {
