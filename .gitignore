@@ -1,5 +1,6 @@
 .codegraph/
 .trellis/
+.gitnexus/
 .agents/
 .claude/
 .codex/
