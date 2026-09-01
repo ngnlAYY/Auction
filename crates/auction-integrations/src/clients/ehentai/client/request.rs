@@ -137,6 +137,8 @@ impl EhentaiClient {
                 || (self.base_url.scheme() == "http" && is_loopback_host(&self.base_url)))
             && self.maximum_response_bytes > 0
             && self.maximum_response_bytes <= HARD_MAXIMUM_RESPONSE_BYTES
+            && self.maximum_topic_pages > 0
+            && self.maximum_topic_pages <= HARD_MAXIMUM_TOPIC_PAGES
             && !self.minimum_request_interval.is_zero()
             && !self.request_timeout.is_zero()
     }

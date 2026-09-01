@@ -10,7 +10,8 @@ use super::*;
 pub(super) async fn process_topic(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
-    now: chrono::DateTime<chrono::Utc>,
+    clock: &dyn auction_application::Clock,
+    poll_interval: chrono::Duration,
 ) -> Result<(), ApplicationError> {
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
     validate_fixed_layout(&topic, &preview)?;
@@ -169,7 +170,9 @@ pub(super) async fn process_topic(
             false,
         ));
     }
-    refresh_fixed_posts(runtime, topic, system_entries, now).await?;
+    let scan_completed = command_error.is_none();
+    refresh_fixed_posts(runtime, topic, system_entries, clock, poll_interval, scan_completed)
+        .await?;
     command_error.map_or(Ok(()), Err)
 }
 
@@ -221,7 +224,9 @@ async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
     system_entries: Vec<ForumSystemLogEntry>,
-    updated_at: chrono::DateTime<chrono::Utc>,
+    clock: &dyn auction_application::Clock,
+    poll_interval: chrono::Duration,
+    scan_completed: bool,
 ) -> Result<(), ApplicationError> {
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
     snapshot.public_url = super::super::forum_sync::resolve_public_url(
@@ -243,7 +248,11 @@ async fn refresh_fixed_posts(
     let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
     let system_log_changed = system_log.body != topic.system_log_body;
     if !catalog_changed && !system_log_changed {
-        return runtime.store.finish_topic_scan(topic, updated_at).await;
+        if !scan_completed {
+            return Ok(());
+        }
+        let (updated_at, next_scan_at) = completed_scan_times(clock, poll_interval)?;
+        return runtime.store.finish_topic_scan(topic, updated_at, next_scan_at).await;
     }
     if catalog_changed {
         let proof = runtime
@@ -275,7 +284,36 @@ async fn refresh_fixed_posts(
             return Err(repository_error("论坛固定 #2 编辑证明不匹配"));
         }
     }
-    runtime.store.record_fixed_posts_update(topic, catalog, system_log, updated_at).await
+    let updated_at = clock.now();
+    if !scan_completed {
+        return runtime
+            .store
+            .record_fixed_posts_progress(topic, catalog, system_log, updated_at)
+            .await;
+    }
+    let next_scan_at = next_scan_at(updated_at, poll_interval)?;
+    runtime
+        .store
+        .record_fixed_posts_update(topic, catalog, system_log, updated_at, next_scan_at)
+        .await
+}
+
+fn completed_scan_times(
+    clock: &dyn auction_application::Clock,
+    poll_interval: chrono::Duration,
+) -> Result<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>), ApplicationError> {
+    let completed_at = clock.now();
+    let next_scan_at = next_scan_at(completed_at, poll_interval)?;
+    Ok((completed_at, next_scan_at))
+}
+
+fn next_scan_at(
+    completed_at: chrono::DateTime<chrono::Utc>,
+    poll_interval: chrono::Duration,
+) -> Result<chrono::DateTime<chrono::Utc>, ApplicationError> {
+    completed_at
+        .checked_add_signed(poll_interval)
+        .ok_or_else(|| repository_error("论坛下一次扫描时间超出可表示范围"))
 }
 
 fn system_entry(

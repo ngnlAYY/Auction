@@ -7,7 +7,8 @@
 - `src/clients/ehentai/` 与 `src/clients/mooglemail/`：各自的传输与认证边界。E-Hentai
   目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和 Cookie 候选集，
   `client/mod.rs` 负责客户端装配与公共入口，`client/request.rs` 持有固定 origin、限速、
-  响应边界和请求安全校验，`client/topic.rs` 持有主题/回复/编辑表单与发布回执解析；`gateway.rs` 持有凭据轮换与 Forum 端口，
+  响应边界和请求安全校验，`client/pagination.rs` 持有同 origin/thread 的主题分页发现与页数上限，
+  `client/topic.rs` 持有主题/回复/编辑表单与发布回执解析；`gateway.rs` 持有凭据轮换与 Forum 端口，
   `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
   gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
   inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
@@ -67,6 +68,11 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
  短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
 remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
 实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建、固定 #2 回复、固定 post 编辑和主题读取；
+主题读取会从第一页发现规范 `st` 水位，按 20 帖分页补齐全部页面，并用每个已读页面复核该水位没有扩张；额外页面最多四路并发读取且仍
+共享请求起始间隔；每页响应继续受配置上限约束，全部主题 HTML 另有 32 MiB 聚合硬上限。每个响应
+都要用非用户正文区的同 thread permalink 绑定该页真实 post ID；任一 `postcolor` 缺少规范数字 ID、
+非末页不是完整 20 帖、页数超过配置上限、页码不规范或合并后 post ID 重复/逆序都会失败关闭，
+不会把错误主题或前几页结果当作完整出价。
 写入会加载真实表单并核对同源 `/index.php` action、POST 方法及 exact board/thread/post，回复 action
 不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，无法证明时返回
 `write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志，

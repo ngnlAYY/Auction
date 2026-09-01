@@ -300,8 +300,10 @@ pub(super) async fn run_worker(
             },
             mail_polls,
             forum: auction_jobs::ForumWorkerRuntimeConfig {
-                poll_interval: auction_poll_interval,
-                jitter: std::time::Duration::from_secs(config.worker.jitter_seconds),
+                poll_interval: std::time::Duration::from_secs(
+                    config.worker.forum.poll_interval_seconds,
+                ),
+                jitter: std::time::Duration::from_secs(config.worker.forum.jitter_seconds),
                 lease_duration: std::time::Duration::from_secs(
                     config.worker.forum.lease_duration_seconds,
                 ),

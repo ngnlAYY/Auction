@@ -35,6 +35,7 @@ pub(crate) async fn run_loop<C>(
                 worker.as_ref(),
                 runtime,
                 worker.forum.lease_duration,
+                worker.forum.poll_interval,
             )
             .await;
             if let Err(error) = result {

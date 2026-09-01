@@ -53,9 +53,12 @@ Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布�
 发布前由装备链接解析端口按快照中的无 key 目标生成真实 HentaVerse URL，再交给 BBCode renderer。
 主题固定 #1 为拍卖目录、#2 为系统编辑/错误记录，只有两个 exact post ID 均持久化后才读取 #3+
 用户命令；竞价事务完成后重新读取权威 lot 快照并按 post ID 编辑 #1，把编辑、解析、身份与确定拒绝
-以及仍待重试的命令稳定投影到 #2，两个远端证明都通过后才推进本地内容版本。每个主题只在即将
-处理时领取独立内容 lease/fencing，无变化也会释放 claim 并推进公平扫描水位，避免多 Worker 交叉
-覆盖远端正文。后者通过 `ForumReplyStore` 按论坛/MM 共用 `game_player_id` 复用或建立 Users 主体，
+以及仍待重试的命令稳定投影到 #2，两个远端证明都通过后才推进本地内容版本。待重试命令可以更新
+#1/#2 的本地正文证明，但不会释放当前 claim 或推进 `content_next_scan_at`；只有整场扫描成功后才
+从完成时刻计算下一次 due。每个主题只在即将处理时领取独立内容 lease/fencing，无变化也会释放
+claim 并推进公平扫描水位，避免多 Worker 交叉覆盖远端正文。成功扫描同时把持久化下一次 due
+推进到完整论坛轮询周期，默认 300 秒；后者通过
+`ForumReplyStore` 按论坛/MM 共用 `game_player_id` 复用或建立 Users 主体，
 再经 world 映射、lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
 对应的 MM 通知也会在后续轮次独立重放。接管旧版回帖账本时，Worker 以新算法生成候选 ID，
@@ -65,8 +68,8 @@ world 的一批主题只有全部成功才推进扫描游标，账本完成写�
 `write_authorization_required`，不会自动重试可能已经成功的远端 POST。只有 `auctionctl` 通过逐字
 auction UUID 确认写入幂等授权账本和追加审计后，Worker 下一次领取才可再次 POST。回帖导入实现又按主题/映射、竞价命令、MoogleMail
 通知和完成/错误辅助拆入 `worker/forum/reply/{topic,command,notification,common}.rs`，
-`reply.rs` 只保留运行时与循环入口。Forum 使用独立顺序循环，先发布后读取回帖；发布失败
-仍继续回帖导入，主题逐条领取而不提前占用整批租约，循环异常退出才使进程失败关闭。
+`reply.rs` 只保留运行时与循环入口。Forum 使用默认 `300s + [0,5s]` 的独立顺序循环，先发布后读取
+回帖；发布失败仍继续回帖导入，主题逐条领取而不提前占用整批租约，循环异常退出才使进程失败关闭。
 Operations alert 的 scan、dispatch 和 reconcile 现在按各自独立 cadence 运行，默认每 60 秒加最多
 5 秒随机抖动，分别应用有界 deadline、结果/耗时/调度延迟指标和错误重试；任一 owner 的临时失败不会
 阻塞另外两类任务，reconcile 上限与通知批次上限保持一致。收到取消后立即跳过抖动等待，不改变 claim

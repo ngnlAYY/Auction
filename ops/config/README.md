@@ -127,8 +127,11 @@ Public 主配置还可以包含 `[realtime]`：`consumer_key` 是持久化 relay
 
 Worker 的 `[worker.forum]` 支持可选 `public_base_url`；它只能是无凭据、无路径和无查询的
 HTTPS origin（本地联调可用回环 HTTP），用于把论坛主题中的拍卖相对地址转换为公开端绝对链接；
-`item_timeout_seconds` 必须覆盖三次请求与请求间隔预算，并小于独立 `lease_duration_seconds`。
-Forum 使用自己的顺序循环，主题只在即将执行时逐条领取，发布失败后仍继续回帖导入。
+`poll_interval_seconds`/`jitter_seconds` 默认使用独立的 300/5 秒周期，不改变 Auction 顶层 60 秒循环；
+成功扫描会把数据库中的下一次 due 推进一个完整论坛周期。`maximum_topic_pages` 默认 10、硬上限 20，
+超过上限会明确失败；`item_timeout_seconds` 必须覆盖分页读取、固定楼层写入、共享请求间隔与收口预算，
+并小于独立 `lease_duration_seconds`。Forum 使用自己的顺序循环，主题只在即将执行时逐条领取，发布
+失败后仍继续回帖导入。
 
 Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手动唤醒器；`schedule` 使用
 旧版同等的标准五字段 cron，默认 `* * * * *`，并支持描述符、`@every` 与显式 IANA 时区前缀。

@@ -38,6 +38,11 @@ const MAXIMUM_COOKIE_BYTES: usize = 16 * 1024;
 const MAXIMUM_CREDENTIAL_CANDIDATES: usize = 32;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_MINIMUM_REQUEST_INTERVAL: Duration = Duration::from_millis(750);
+const DEFAULT_MAXIMUM_TOPIC_PAGES: usize = 10;
+const HARD_MAXIMUM_TOPIC_PAGES: usize = 20;
+const HARD_MAXIMUM_TOPIC_BYTES: usize = 32 * 1024 * 1024;
+const MAXIMUM_CONCURRENT_TOPIC_READS: usize = 4;
+const FORUM_POSTS_PER_PAGE: u64 = 20;
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 
 /// 旧论坛生产入口。

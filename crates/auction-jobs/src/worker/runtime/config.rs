@@ -140,7 +140,7 @@ pub struct ForumWorkerRuntimeConfig {
 impl Default for ForumWorkerRuntimeConfig {
     fn default() -> Self {
         Self {
-            poll_interval: std::time::Duration::from_secs(60),
+            poll_interval: std::time::Duration::from_secs(300),
             jitter: std::time::Duration::from_secs(5),
             lease_duration: std::time::Duration::from_secs(300),
         }

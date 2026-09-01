@@ -174,8 +174,18 @@ pub trait ForumReplyStore: Send + Sync {
         auction_id: AuctionId,
     ) -> ApplicationFuture<'_, ForumAuctionSnapshot>;
 
-    /// 在两个远端固定楼层均已得到 exact post proof 后，以 revision CAS 更新本地正文证明。
+    /// 在两个远端固定楼层均已得到 exact post proof 后，以 revision CAS 更新本地正文证明并推进下次扫描 due。
     fn record_fixed_posts_update(
+        &self,
+        topic: ForumReplyTopic,
+        catalog: ForumRenderedThread,
+        system_log: ForumRenderedPost,
+        updated_at: DateTime<Utc>,
+        next_scan_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
+
+    /// 暂时失败时只记录已取得 exact proof 的固定楼层正文，保留当前 claim 与到期后的重试水位。
+    fn record_fixed_posts_progress(
         &self,
         topic: ForumReplyTopic,
         catalog: ForumRenderedThread,
@@ -183,11 +193,12 @@ pub trait ForumReplyStore: Send + Sync {
         updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
-    /// 本轮没有正文变化时释放内容 lease 并推进公平扫描水位。
+    /// 本轮没有正文变化时释放内容 lease，并把公平扫描水位推进到调用方给出的下一周期。
     fn finish_topic_scan(
         &self,
         topic: ForumReplyTopic,
         scanned_at: DateTime<Utc>,
+        next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
     fn mark_scanned(

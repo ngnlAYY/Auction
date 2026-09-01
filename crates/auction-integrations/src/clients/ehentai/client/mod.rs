@@ -3,6 +3,8 @@
 //! 本模块只负责固定 origin、请求限流、响应大小边界、主题创建/读取以及 POST 后的
 //! write-unknown 栅栏；表单字段和响应判定辅助函数集中在 forms.rs。
 
+use std::collections::VecDeque;
+
 use super::forms::{
     PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
     fixed_post_form_values, is_loopback_host, is_session_expired, optional_query_identity,
@@ -12,6 +14,7 @@ use super::forms::{
 };
 use super::*;
 
+mod pagination;
 mod request;
 mod topic;
 
@@ -22,6 +25,8 @@ pub struct EhentaiClientConfig {
     pub endpoint: Url,
     /// 单次响应最大字节数，不能超过 8 MiB。
     pub maximum_response_bytes: usize,
+    /// 单次主题读取允许抓取的最大页数，不能超过硬上限 20。
+    pub maximum_topic_pages: usize,
     /// 连续请求之间的最小间隔。
     pub minimum_request_interval: Duration,
     /// 单次 HTTP 请求超时时间。
@@ -38,6 +43,7 @@ impl EhentaiClientConfig {
         Ok(Self {
             endpoint,
             maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
+            maximum_topic_pages: DEFAULT_MAXIMUM_TOPIC_PAGES,
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             test_board_mode: false,
@@ -48,12 +54,18 @@ impl EhentaiClientConfig {
     fn validate(&self, operation: EhentaiOperation) -> Result<(), EhentaiError> {
         let valid_scheme = self.endpoint.scheme() == "https"
             || (self.endpoint.scheme() == "http" && is_loopback_host(&self.endpoint));
+        let path_is_root = self.endpoint.path().is_empty() || self.endpoint.path() == "/";
         if !valid_scheme
             || self.endpoint.host_str().is_none()
             || !self.endpoint.username().is_empty()
             || self.endpoint.password().is_some()
+            || !path_is_root
+            || self.endpoint.query().is_some()
+            || self.endpoint.fragment().is_some()
             || self.maximum_response_bytes == 0
             || self.maximum_response_bytes > HARD_MAXIMUM_RESPONSE_BYTES
+            || self.maximum_topic_pages == 0
+            || self.maximum_topic_pages > HARD_MAXIMUM_TOPIC_PAGES
             || self.minimum_request_interval.is_zero()
             || self.request_timeout.is_zero()
             || self.request_timeout > Duration::from_secs(300)
@@ -72,6 +84,7 @@ pub struct EhentaiClient {
     origin: String,
     gate: Arc<Mutex<Instant>>,
     maximum_response_bytes: usize,
+    maximum_topic_pages: usize,
     request_timeout: Duration,
     minimum_request_interval: Duration,
     test_board_mode: bool,
@@ -90,6 +103,7 @@ impl EhentaiClient {
             origin,
             gate: Arc::new(Mutex::new(Instant::now())),
             maximum_response_bytes: DEFAULT_MAXIMUM_RESPONSE_BYTES,
+            maximum_topic_pages: DEFAULT_MAXIMUM_TOPIC_PAGES,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             test_board_mode: false,
@@ -118,6 +132,7 @@ impl EhentaiClient {
             origin,
             gate: Arc::new(Mutex::new(Instant::now())),
             maximum_response_bytes: config.maximum_response_bytes,
+            maximum_topic_pages: config.maximum_topic_pages,
             request_timeout: config.request_timeout,
             minimum_request_interval: config.minimum_request_interval,
             test_board_mode: config.test_board_mode,
@@ -204,15 +219,45 @@ impl EhentaiClient {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world, operation)?;
-        let target = self.index_url(&[("showtopic", thread_id)], operation)?;
-        let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
         if board_id <= 0 {
             return Err(EhentaiError::configuration(operation));
         }
-        let html =
-            std::str::from_utf8(&body).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let target = self.index_url(&[("showtopic", thread_id)], operation)?;
+        let (body, _) = self.get_page(operation, target.clone(), Some(&target), cookie).await?;
+        let html = String::from_utf8(body).map_err(|_| EhentaiError::protocol(operation, false))?;
+        let targets = self.topic_page_targets(&html, thread_id, operation)?;
+        let expected_pages = targets.len();
+        let maximum_offset = targets.last().map(|(offset, _)| *offset).unwrap_or(0);
+        let mut remaining = targets.into_iter().skip(1).collect::<VecDeque<_>>();
+        let mut pages = Vec::with_capacity(expected_pages);
+        let mut total_bytes = html.len();
+        pages.push((0_u64, html));
+        let mut reads = tokio::task::JoinSet::new();
+        let read_context = TopicPageReadContext {
+            client: self.clone(),
+            cookie: cookie.clone(),
+            operation,
+            thread_id: thread_id.to_owned(),
+            known_maximum_offset: maximum_offset,
+            referer: target,
+        };
+        spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
+        while let Some(read) = reads.join_next().await {
+            let page = read.map_err(|_| EhentaiError::remote_temporary(operation, false))??;
+            total_bytes = total_bytes
+                .checked_add(page.1.len())
+                .filter(|total| *total <= HARD_MAXIMUM_TOPIC_BYTES)
+                .ok_or_else(|| EhentaiError::response_too_large(operation))?;
+            pages.push(page);
+            spawn_topic_page_reads(&mut reads, &mut remaining, &read_context);
+        }
+        pages.sort_unstable_by_key(|(offset, _)| *offset);
+        if pages.len() != expected_pages || pages.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+            return Err(EhentaiError::protocol(operation, false));
+        }
+        let documents = pages.iter().map(|(_, html)| html.as_str()).collect::<Vec<_>>();
         crate::ForumPreviewAdapter::new()
-            .parse_html_document(html)
+            .parse_html_documents(&documents)
             .map_err(|_| EhentaiError::protocol(operation, false))
     }
 
@@ -264,12 +309,59 @@ impl EhentaiClient {
     }
 }
 
+#[derive(Clone)]
+struct TopicPageReadContext {
+    client: EhentaiClient,
+    cookie: EhentaiCookie,
+    operation: EhentaiOperation,
+    thread_id: String,
+    known_maximum_offset: u64,
+    referer: Url,
+}
+
+async fn read_topic_page(
+    context: TopicPageReadContext,
+    offset: u64,
+    page_target: Url,
+) -> Result<(u64, String), EhentaiError> {
+    let identity_target = page_target.clone();
+    let (body, _) = context
+        .client
+        .get_page(context.operation, page_target, Some(&context.referer), &context.cookie)
+        .await?;
+    let html =
+        String::from_utf8(body).map_err(|_| EhentaiError::protocol(context.operation, false))?;
+    context.client.validate_topic_page_identity(
+        &html,
+        &identity_target,
+        &context.thread_id,
+        offset,
+        context.known_maximum_offset,
+        context.operation,
+    )?;
+    Ok((offset, html))
+}
+
+fn spawn_topic_page_reads(
+    reads: &mut tokio::task::JoinSet<Result<(u64, String), EhentaiError>>,
+    remaining: &mut VecDeque<(u64, Url)>,
+    context: &TopicPageReadContext,
+) {
+    while reads.len() < MAXIMUM_CONCURRENT_TOPIC_READS {
+        let Some((offset, page_target)) = remaining.pop_front() else {
+            break;
+        };
+        reads.spawn(read_topic_page(context.clone(), offset, page_target));
+    }
+}
+
 impl fmt::Debug for EhentaiClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("EhentaiClient")
             .field("base_url", &self.base_url)
             .field("maximum_response_bytes", &self.maximum_response_bytes)
+            .field("maximum_topic_pages", &self.maximum_topic_pages)
             .field("request_timeout", &self.request_timeout)
             .field("minimum_request_interval", &self.minimum_request_interval)
             .field("test_board_mode", &self.test_board_mode)

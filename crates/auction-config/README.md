@@ -398,9 +398,11 @@ PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当
 后，PostgreSQL Worker 会装配 E-Hentai 主题发布和回帖导入；论坛 Cookie 可从独立凭据池读取，
 或使用敏感配置的兼容 getter。`worker.forum.public_base_url` 可选，填写无路径的公开端
 origin 后会把旧版 `/?auction=...&world=...` 相对链接解析为主题正文中的绝对链接；
-`item_timeout_seconds` 同时控制单个主题发布和回帖导入总时限，必须覆盖三次请求、两次请求间隔
-与收口预算，并小于独立 `lease_duration_seconds`。Forum 使用自己的顺序循环，发布失败不会跳过
-回帖导入，也不会终止其它 Worker owner。论坛完整档不在 SQLite Lite 中伪装提供。
+`poll_interval_seconds` 和 `jitter_seconds` 默认分别为 300 与 5，独立于 Auction 生命周期循环；成功
+扫描会持久化下一次 due。`maximum_topic_pages` 默认 10、允许范围 1-20，越界主题不会被截断处理。
+`item_timeout_seconds` 同时控制单个主题发布和回帖导入总时限，必须覆盖分页读取、固定楼层写入、
+共享请求间隔与收口预算，并小于独立 `lease_duration_seconds`。Forum 使用自己的顺序循环，发布失败
+不会跳过回帖导入，也不会终止其它 Worker owner。论坛完整档不在 SQLite Lite 中伪装提供。
 `sender_allowlist_disabled` 必须显式设为 true 才会读取非 allowlist 发件人的详情。
 `equipment_filter` 启用后按品质、前后缀、分类、类型和等级返回稳定拒绝原因；被拒绝且邮件可退回
 时会安排退回和通知，不能退回时会 fail closed，不会把不符合策略的装备写入拍卖。

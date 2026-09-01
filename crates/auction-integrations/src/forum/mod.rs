@@ -13,7 +13,7 @@ use auction_application::{
     AdminForumPreviewCommand, AdminForumPreviewError, AdminForumPreviewPort,
     AdminForumPreviewResult, ApplicationFuture,
 };
-use parser::{parse_html, parse_thread_text};
+use parser::{parse_html, parse_html_documents, parse_thread_text};
 
 /// 无状态的论坛预览解析器。
 #[derive(Debug, Default, Clone, Copy)]
@@ -34,6 +34,23 @@ impl ForumPreviewAdapter {
         input: &str,
     ) -> Result<AdminForumPreviewResult, AdminForumPreviewError> {
         let result = parse_html(input).map_err(|_| AdminForumPreviewError::ParseFailed)?;
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// 按论坛页码顺序合并一个主题的全部 HTML 页面，再统一解析目录和出价命令。
+    ///
+    /// 每个远端 post ID 在一个主题中必须唯一；重复 ID 代表分页协议漂移，不能静默去重后继续
+    /// 应用出价，否则同一命令可能失去稳定楼层身份。
+    pub fn parse_html_documents(
+        &self,
+        inputs: &[&str],
+    ) -> Result<AdminForumPreviewResult, AdminForumPreviewError> {
+        if inputs.is_empty() {
+            return Err(AdminForumPreviewError::ParseFailed);
+        }
+        let result =
+            parse_html_documents(inputs).map_err(|_| AdminForumPreviewError::ParseFailed)?;
         result.validate()?;
         Ok(result)
     }
