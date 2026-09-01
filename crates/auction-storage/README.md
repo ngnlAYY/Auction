@@ -128,7 +128,12 @@ Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地�
 `sync.rs` 只做主题同步端口装配，领取租约、快照读取、发布/失败状态推进和输入校验分别位于
 `sync/{claims,snapshot,publishing,validation}.rs`，`sync/authorization.rs` 单独拥有未知写入清单、
 幂等人工再授权、命令重放和追加审计事务；`reply.rs` 只做回帖端口装配，已发布主题与
-lot/身份/代理查询、命令账本和扫描游标分别位于 `reply/{queries,commands,cursor,validation}.rs`。
+lot/代理查询、论坛/MM 共用玩家 ID 解析、命令账本、扫描游标和固定楼层内容 CAS 分别位于
+`reply/{queries,identity,commands,cursor,fixed_posts,validation}.rs`。`identity.rs` 在 Users-owner
+Serializable 事务内复用 `users.game_player_id`，或为尚未注册 MM 的作者建立 revoked-key
+`forum_only` 临时主体及 world 映射；`000025` 在同一同步行保存固定 #1/#2
+的真实 post ID、#2 规范正文和内容版本，并通过独立 due 水位、claim/lease/fencing 串行化远端
+编辑；历史 published 行保持未对账，不猜测楼层身份。
 主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
 快照只输出装备 ID、外部 ID 和不含 key 的目标，真实 URL 由 Worker 的外部链接解析边界生成。
 回帖账本接管会同时核对命令 ID 与冻结自然键；自然键和完整业务负载一致时复用既有旧版命令 ID，
@@ -323,7 +328,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000024` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000025` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -331,7 +336,8 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态与成功扫描水位，`000022`
 将配置状态发布时间和扫描水位拆为两条独立单调时钟，避免扫描时间阻断后续启停发布，`000023`
 则为 HV 战斗页导致的余额暂不可读增加 `busy` 状态，并继续保留最后成功余额；`000024` 为 lot
-增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案。SQLite
+增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案；`000025` 追加论坛固定
+#1/#2 的 post proof、内容版本和独立刷新 lease/fencing。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000009` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite

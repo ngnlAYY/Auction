@@ -8,6 +8,8 @@ pub enum EhentaiOperation {
     CreateTopic,
     ReconcileTopic,
     FetchTopic,
+    ReplyTopic,
+    EditPost,
 }
 
 impl EhentaiOperation {
@@ -17,6 +19,8 @@ impl EhentaiOperation {
             Self::CreateTopic => "create_topic",
             Self::ReconcileTopic => "reconcile_topic",
             Self::FetchTopic => "fetch_topic",
+            Self::ReplyTopic => "reply_topic",
+            Self::EditPost => "edit_post",
         }
     }
 }

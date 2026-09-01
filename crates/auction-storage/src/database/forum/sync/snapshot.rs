@@ -15,17 +15,14 @@ pub(super) async fn load_snapshot_postgres(
     store: &PostgresStore,
     claim: &ForumSyncClaim,
 ) -> Result<ForumAuctionSnapshot, ApplicationError> {
-    use sqlx::Row;
-
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛同步快照事务失败"))?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *transaction)
         .await
         .map_err(|_| storage_error("设置论坛同步快照隔离级别失败"))?;
-    let auction_row = sqlx::query(
-        "SELECT auction.id, auction.world_id, auction.sequence, auction.state_version,
-                auction.scheduled_open_at, auction.opened_at, auction.scheduled_end_at
+    let authorized = sqlx::query(
+        "SELECT 1
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.auction_id = $1
@@ -45,8 +42,58 @@ pub(super) async fn load_snapshot_postgres(
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取论坛同步快照租约失败"))?;
-    let Some(auction_row) = auction_row else {
+    if authorized.is_none() {
         return Err(storage_error("论坛同步快照租约已失效"));
+    }
+    let snapshot = read_snapshot(&mut transaction, claim.auction_id).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交论坛同步快照事务失败"))?;
+    if snapshot.auction_id != claim.auction_id
+        || snapshot.state_version != claim.source_revision
+        || snapshot.sequence <= 0
+        || snapshot.lots.is_empty()
+    {
+        return Err(storage_error("论坛同步快照安全投影无效"));
+    }
+    Ok(snapshot)
+}
+
+/// 竞价命令事务完成后读取当前权威快照；只用于刷新已持久化固定楼层，不创建新主题。
+pub(super) async fn load_current_snapshot_postgres(
+    store: &PostgresStore,
+    auction_id: AuctionId,
+) -> Result<ForumAuctionSnapshot, ApplicationError> {
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛刷新快照事务失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置论坛刷新快照隔离级别失败"))?;
+    let snapshot = read_snapshot(&mut transaction, auction_id).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交论坛刷新快照事务失败"))?;
+    if snapshot.auction_id != auction_id || snapshot.sequence <= 0 || snapshot.lots.is_empty() {
+        return Err(storage_error("论坛刷新快照安全投影无效"));
+    }
+    Ok(snapshot)
+}
+
+async fn read_snapshot(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    requested_auction_id: AuctionId,
+) -> Result<ForumAuctionSnapshot, ApplicationError> {
+    use sqlx::Row;
+
+    let auction_row = sqlx::query(
+        "SELECT id, world_id, sequence, state_version,
+                scheduled_open_at, opened_at, scheduled_end_at
+         FROM public.auctions
+         WHERE id = $1",
+    )
+    .bind(requested_auction_id.as_uuid())
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("读取论坛拍卖快照失败"))?;
+    let Some(auction_row) = auction_row else {
+        return Err(storage_error("论坛拍卖快照不存在"));
     };
     let auction_id: Uuid =
         auction_row.try_get("id").map_err(|_| storage_error("读取论坛快照拍卖标识失败"))?;
@@ -86,7 +133,7 @@ pub(super) async fn load_snapshot_postgres(
          ORDER BY l.lot_number, l.id",
     )
     .bind(auction_id)
-    .fetch_all(&mut *transaction)
+    .fetch_all(&mut **transaction)
     .await
     .map_err(|_| storage_error("读取论坛快照 lot 失败"))?;
     let mut lots = Vec::with_capacity(rows.len());
@@ -145,7 +192,6 @@ pub(super) async fn load_snapshot_postgres(
             },
         });
     }
-    transaction.commit().await.map_err(|_| storage_error("提交论坛同步快照事务失败"))?;
     let snapshot = ForumAuctionSnapshot {
         auction_id: AuctionId::from_uuid(auction_id),
         world,
@@ -157,13 +203,6 @@ pub(super) async fn load_snapshot_postgres(
         public_url: Some(public_auction_path(world, auction_id)),
         lots,
     };
-    if snapshot.auction_id != claim.auction_id
-        || snapshot.state_version != claim.source_revision
-        || snapshot.sequence <= 0
-        || snapshot.lots.is_empty()
-    {
-        return Err(storage_error("论坛同步快照安全投影无效"));
-    }
     Ok(snapshot)
 }
 

@@ -31,7 +31,12 @@ pub(crate) async fn run_loop<C>(
         }
 
         if let Some(runtime) = &worker.forum_reply {
-            let result = super::forum_reply::run_cycle(worker.as_ref(), runtime).await;
+            let result = super::forum_reply::run_cycle(
+                worker.as_ref(),
+                runtime,
+                worker.forum.lease_duration,
+            )
+            .await;
             if let Err(error) = result {
                 cycle_result = WorkerResult::Error;
                 tracing::warn!(error = %error, "论坛回帖导入本轮失败；将在下一轮重试");

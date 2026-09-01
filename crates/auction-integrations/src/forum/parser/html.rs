@@ -22,11 +22,16 @@ pub fn parse_html(input: &str) -> Result<super::AdminForumPreviewResult, ()> {
             id: id.to_owned(),
             author_id,
             author,
-            edited: text.to_ascii_lowercase().contains("this post has been edited by"),
+            edited: post_was_edited(element),
             text,
         });
     }
     super::parse_thread(posts)
+}
+
+fn post_was_edited(element: ElementRef<'_>) -> bool {
+    // 只信任论坛生成的 edit 元素；普通用户正文包含相同英文句子不能成为绕过命令解析的开关。
+    Selector::parse(".edit").ok().is_some_and(|selector| element.select(&selector).next().is_some())
 }
 
 fn render_post_text(element: ElementRef<'_>) -> String {
@@ -39,8 +44,10 @@ fn render_post_text(element: ElementRef<'_>) -> String {
 }
 
 fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
-    let selector =
-        Selector::parse(".normalname, .author, .username, .post-author, .member_name").ok();
+    let selector = Selector::parse(
+        ".bigusername, .normalname, .author, .username, .post-author, .member_name",
+    )
+    .ok();
     let mut current = Some(element);
     for _ in 0..8 {
         let Some(node) = current else {
@@ -50,23 +57,14 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
             .iter()
             .find_map(|key| {
                 node.attr(key).map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned)
-            });
+            })
+            .and_then(canonical_forum_player_id);
         let author_element = selector.as_ref().and_then(|selector| node.select(selector).next());
         let author = author_element.map(render_post_text).filter(|value| !value.is_empty());
         let author_id = author_id.or_else(|| {
             author_element.and_then(|value| {
-                let links = Selector::parse("a").ok()?;
-                value.select(&links).find_map(|link| {
-                    let href = link.attr("href")?;
-                    let url = Url::parse(href)
-                        .or_else(|_| Url::parse(&format!("https://invalid.local{href}")))
-                        .ok()?;
-                    ["game_player_id", "player_id"].iter().find_map(|key| {
-                        url.query_pairs()
-                            .find(|(name, _)| name == key)
-                            .map(|(_, value)| value.into_owned())
-                    })
-                })
+                let links = Selector::parse("a[href]").ok()?;
+                value.select(&links).find_map(|link| forum_player_id_from_href(link.attr("href")?))
             })
         });
         if author_id.is_some() || author.is_some() {
@@ -75,4 +73,36 @@ fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
         current = node.parent().and_then(ElementRef::wrap);
     }
     (None, None)
+}
+
+fn forum_player_id_from_href(href: &str) -> Option<String> {
+    let base = Url::parse("https://forums.e-hentai.org/").ok()?;
+    let url = base.join(href).ok()?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("forums.e-hentai.org")
+        || url.path() != "/index.php"
+    {
+        return None;
+    }
+
+    let mut player_id = None;
+    for (name, value) in url.query_pairs() {
+        if !matches!(name.as_ref(), "showuser" | "game_player_id" | "player_id") {
+            continue;
+        }
+        let value = canonical_forum_player_id(value.into_owned())?;
+        if player_id.as_ref().is_some_and(|current| current != &value) {
+            return None;
+        }
+        player_id = Some(value);
+    }
+    player_id
+}
+
+fn canonical_forum_player_id(value: String) -> Option<String> {
+    (value.len() <= 32
+        && value.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        && value.as_bytes().first() != Some(&b'0')
+        && value.bytes().all(|byte| byte.is_ascii_digit()))
+    .then_some(value)
 }

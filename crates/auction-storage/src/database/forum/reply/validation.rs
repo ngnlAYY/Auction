@@ -5,9 +5,10 @@ use auction_application::{ApplicationError, ForumBidCommandRecord, RepositoryErr
 use auction_domain::SettlementWorld;
 
 pub(super) const MAX_REPLY_BATCH_SIZE: u16 = 100;
-pub(super) const MAX_EXTERNAL_ACCOUNT_BYTES: usize = 256;
 pub(super) const MAX_DISPLAY_NAME_BYTES: usize = 256;
+pub(super) const MAX_FORUM_PLAYER_ID_BYTES: usize = 32;
 pub(super) const MAX_THREAD_ID_BYTES: usize = 64;
+pub(super) const MAX_FIXED_POST_ID_BYTES: usize = 32;
 pub(super) const MAX_POST_ID_BYTES: usize = 256;
 pub(super) const MAX_LOT_CODE_BYTES: usize = 16;
 pub(super) const MAX_ACTOR_BYTES: usize = 256;
@@ -39,9 +40,12 @@ pub(super) fn valid_optional_text(value: &str, maximum: usize) -> bool {
     value.is_empty() || valid_text(value, maximum)
 }
 
-#[cfg(feature = "postgres")]
 pub(super) fn valid_decimal_id(value: &str, maximum: usize) -> bool {
-    !value.is_empty() && value.len() <= maximum && value.bytes().all(|byte| byte.is_ascii_digit())
+    !value.is_empty()
+        && value.len() <= maximum
+        && value.as_bytes()[0].is_ascii_digit()
+        && value.as_bytes()[0] != b'0'
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(feature = "postgres")]

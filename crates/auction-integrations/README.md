@@ -7,7 +7,7 @@
 - `src/clients/ehentai/` 与 `src/clients/mooglemail/`：各自的传输与认证边界。E-Hentai
   目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和 Cookie 候选集，
   `client/mod.rs` 负责客户端装配与公共入口，`client/request.rs` 持有固定 origin、限速、
-  响应边界和请求安全校验，`client/topic.rs` 持有主题表单与发布回执解析；`gateway.rs` 持有凭据轮换与 Forum 端口，
+  响应边界和请求安全校验，`client/topic.rs` 持有主题/回复/编辑表单与发布回执解析；`gateway.rs` 持有凭据轮换与 Forum 端口，
   `forms.rs` 持有隐藏表单、URL 和响应安全校验。MoogleMail
   gateway 已进一步按 `gateway/{credentials,model,reader}.rs` 拆分凭据候选池、读取结果模型和
   inbox/Sent/Balance 读取流程，`gateway.rs` 只保留稳定导出与安全错误辅助。
@@ -66,10 +66,13 @@ gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务�
  take/return 编排；用户登录 key 通过独立数据密钥生成密文信封，只有 DeliveryTransport 发送前
  短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
 remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
-实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建和主题读取；创建 POST 无法证明
-时返回 `write_unknown`，不会盲目重发。`ForumThreadRenderer` 负责参考旧帖结构生成有界 BBCode，
+实现固定 origin、受限响应读取、凭据轮换、精确标题查找/主题创建、固定 #2 回复、固定 post 编辑和主题读取；
+写入会加载真实表单并核对同源 `/index.php` action、POST 方法及 exact board/thread/post，回复 action
+不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，无法证明时返回
+`write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志，
 按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
-经过解析器、登记身份和应用竞价端口，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
+从论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字值，并把它作为论坛/MM 共用玩家 ID
+交给 Users owner 和应用竞价端口；昵称只用于显示，缺少该 ID 时失败关闭，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
 正文明确出现登录表单/失效文案时作废；Cloudflare 前置挑战同样可能返回 403，不能据此误删有效
 Cookie，而应保留凭据并以协议/访问失败收口。
 - `src/equipment/`：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享

@@ -91,6 +91,64 @@ impl EhentaiGateway {
         }
         Err(EhentaiError::credential(EhentaiOperation::FetchTopic))
     }
+
+    /// 建立固定 #2；仅在 POST 尚未开始且明确 session 过期时轮换凭据。
+    pub async fn reply_topic(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        body: ForumRenderedPost,
+    ) -> Result<ForumPublishedPost, EhentaiError> {
+        let mut session = self.credentials.begin()?;
+        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
+            match self.client.reply_topic(world, thread_id, body.clone(), session.cookie()).await {
+                Ok(published) => return Ok(published),
+                Err(error) if error.is_session_expired() => {
+                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
+                        return Err(EhentaiError::credential(EhentaiOperation::ReplyTopic));
+                    }
+                }
+                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                    let _ = session.invalidate_current().await;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(EhentaiError::credential(EhentaiOperation::ReplyTopic))
+    }
+
+    /// 编辑固定 #1/#2；POST 开始后绝不切换 Cookie 重发。
+    pub async fn edit_post(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        post_id: &str,
+        title: Option<&str>,
+        body: ForumRenderedPost,
+    ) -> Result<ForumPublishedPost, EhentaiError> {
+        let mut session = self.credentials.begin()?;
+        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
+            match self
+                .client
+                .edit_post(world, thread_id, post_id, title, body.clone(), session.cookie())
+                .await
+            {
+                Ok(published) => return Ok(published),
+                Err(error) if error.is_session_expired() => {
+                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
+                        return Err(EhentaiError::credential(EhentaiOperation::EditPost));
+                    }
+                }
+                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                    let _ = session.invalidate_current().await;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(EhentaiError::credential(EhentaiOperation::EditPost))
+    }
 }
 
 impl fmt::Debug for EhentaiGateway {
@@ -123,6 +181,36 @@ impl ForumPublisher for EhentaiGateway {
     ) -> ApplicationFuture<'_, ForumPublishedThread> {
         Box::pin(async move {
             EhentaiGateway::create_topic(self, world, rendered)
+                .await
+                .map_err(EhentaiError::into_application_error)
+        })
+    }
+}
+
+impl ForumPostWriter for EhentaiGateway {
+    fn reply_topic(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        body: ForumRenderedPost,
+    ) -> ApplicationFuture<'_, ForumPublishedPost> {
+        Box::pin(async move {
+            EhentaiGateway::reply_topic(self, world, &thread_id, body)
+                .await
+                .map_err(EhentaiError::into_application_error)
+        })
+    }
+
+    fn edit_post(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+        title: Option<String>,
+        body: ForumRenderedPost,
+    ) -> ApplicationFuture<'_, ForumPublishedPost> {
+        Box::pin(async move {
+            EhentaiGateway::edit_post(self, world, &thread_id, &post_id, title.as_deref(), body)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })

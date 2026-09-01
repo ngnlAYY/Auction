@@ -121,6 +121,10 @@ where
             .forum_sync
             .as_ref()
             .is_some_and(|runtime| runtime.item_timeout >= worker.forum.lease_duration)
+        || worker
+            .forum_reply
+            .as_ref()
+            .is_some_and(|runtime| runtime.item_timeout >= worker.forum.lease_duration)
     {
         return Err(WorkerError::InvalidForumConfiguration);
     }

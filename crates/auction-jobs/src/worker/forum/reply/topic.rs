@@ -1,42 +1,100 @@
-//! 论坛主题读取、身份解析和 lot 编码映射。
+//! 论坛主题读取、固定楼层校验、身份解析和目录/系统日志刷新。
+
+use auction_application::{
+    ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, forum_catalog_marker,
+    forum_system_log_marker,
+};
 
 use super::*;
 
 pub(super) async fn process_topic(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), ApplicationError> {
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
+    validate_fixed_layout(&topic, &preview)?;
+    let post_numbers = preview
+        .posts
+        .iter()
+        .enumerate()
+        .map(|(index, post)| (post.post.id.clone(), index + 2))
+        .collect::<HashMap<_, _>>();
+    let mut system_entries = warning_entries(&preview, &post_numbers);
     let targets = runtime.store.lot_targets(topic.auction_id).await?;
     let target_by_code = target_map(targets)?;
+    let mut command_error = None;
 
-    for post in preview.posts {
-        if post.ignored {
+    'posts: for post in &preview.posts {
+        if post.post.id == topic.system_log_post_id || post.ignored {
             continue;
         }
-        let Some(actor) = post.post.author_id.clone().or_else(|| post.post.author.clone()) else {
+        let post_number = post_numbers.get(&post.post.id).copied().unwrap_or(3);
+        let Some(actor) = post.post.author_id.clone() else {
             tracing::warn!(
                 auction_id = %topic.auction_id,
                 post_id = %post.post.id,
-                "论坛帖子缺少可解析的身份，跳过命令"
+                "论坛帖子缺少可解析的论坛/MM 共用玩家 ID，跳过命令"
             );
+            system_entries.push(system_entry(
+                post_number,
+                None,
+                "identity_missing",
+                "post author forum/MM player ID could not be resolved",
+                false,
+            ));
             continue;
         };
         let display_name = post.post.author.clone().unwrap_or_else(|| actor.clone());
-        let bidder =
-            match runtime.store.resolve_bidder(topic.world, actor.clone(), display_name).await {
-                Ok(bidder) => bidder,
-                Err(error) => {
-                    tracing::warn!(
-                        auction_id = %topic.auction_id,
-                        post_id = %post.post.id,
-                        error = %error,
-                        "论坛帖子身份未通过登记映射"
-                    );
-                    continue;
-                }
-            };
-        for command in post.commands {
+        let bidder = match runtime.store.resolve_bidder(topic.world, actor, display_name).await {
+            Ok(bidder) => bidder,
+            Err(error) => {
+                tracing::warn!(
+                    auction_id = %topic.auction_id,
+                    post_id = %post.post.id,
+                    error = %error,
+                "论坛帖子玩家 ID 无法解析为可竞价用户"
+                );
+                system_entries.push(system_entry(
+                    post_number,
+                    None,
+                    "identity_unavailable",
+                    "forum/MM player ID could not be linked to an active auction user",
+                    false,
+                ));
+                continue;
+            }
+        };
+        for command in &post.commands {
+            if matches!(command.kind.as_str(), "start" | "cancel") {
+                system_entries.push(system_entry(
+                    post_number,
+                    Some(command.line),
+                    "admin_command_not_supported",
+                    "start and cancel are Admin-only operations and were not applied",
+                    false,
+                ));
+                continue;
+            }
+            let notify_mode = command.notify.as_deref();
+            if matches!(notify_mode, Some("pm" | "both")) {
+                system_entries.push(system_entry(
+                    post_number,
+                    Some(command.line),
+                    "forum_pm_unavailable",
+                    "forum PM notifications are not available; MM processing is independent",
+                    false,
+                ));
+            }
+            if runtime.notifier.is_none() && matches!(notify_mode, Some("mm" | "both")) {
+                system_entries.push(system_entry(
+                    post_number,
+                    Some(command.line),
+                    "mm_notification_unavailable",
+                    "MoogleMail notification delivery is not configured",
+                    false,
+                ));
+            }
             for lot_code in &command.lot_codes {
                 let Some(&lot_id) = target_by_code.get(lot_code) else {
                     tracing::warn!(
@@ -44,22 +102,200 @@ pub(super) async fn process_topic(
                         lot_code = %lot_code,
                         "论坛命令 lot 编码未找到本地映射"
                     );
+                    system_entries.push(system_entry(
+                        post_number,
+                        Some(command.line),
+                        "lot_mapping_missing",
+                        "lot code no longer maps to an active auction lot",
+                        false,
+                    ));
                     continue;
                 };
-                process_command(
+                if let Err(error) = process_command(
                     runtime,
                     &topic,
                     &bidder,
                     &post.post.id,
                     lot_code,
-                    &command,
+                    command,
                     lot_id,
                 )
-                .await?;
+                .await
+                {
+                    // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍先把待重试状态投影到 #2。
+                    system_entries.push(system_entry(
+                        post_number,
+                        Some(command.line),
+                        "command_processing_pending",
+                        "command processing stopped here and will retry",
+                        false,
+                    ));
+                    command_error = Some(error);
+                    break 'posts;
+                }
             }
         }
     }
+
+    let outcomes =
+        runtime.store.command_outcomes(topic.auction_id, topic.thread_id.clone()).await?;
+    for outcome in outcomes {
+        if outcome.status == ForumCommandStatus::Applied {
+            continue;
+        }
+        let Some(post_number) = post_numbers.get(&outcome.post_id).copied() else {
+            continue;
+        };
+        let (code, detail) = match outcome.status {
+            ForumCommandStatus::Pending => (
+                "command_pending",
+                outcome.safe_detail.as_deref().unwrap_or("processing will retry"),
+            ),
+            ForumCommandStatus::Rejected => (
+                "command_rejected",
+                outcome.safe_detail.as_deref().unwrap_or("command was rejected"),
+            ),
+            ForumCommandStatus::Applied => unreachable!("已在上方排除 applied 状态"),
+        };
+        let message = clean_system_message(&format!(
+            "{} {}: {}",
+            outcome.lot_code, outcome.command_kind, detail
+        ));
+        system_entries.push(system_entry(
+            post_number,
+            usize::try_from(outcome.line_number).ok(),
+            code,
+            &message,
+            false,
+        ));
+    }
+    refresh_fixed_posts(runtime, topic, system_entries, now).await?;
+    command_error.map_or(Ok(()), Err)
+}
+
+fn validate_fixed_layout(
+    topic: &auction_application::ForumReplyTopic,
+    preview: &auction_application::AdminForumPreviewResult,
+) -> Result<(), ApplicationError> {
+    let catalog_marker = forum_catalog_marker(topic.auction_id);
+    let system_marker = forum_system_log_marker(topic.auction_id);
+    let Some(second) = preview.posts.first() else {
+        return Err(repository_error("论坛固定 #2 已丢失"));
+    };
+    if preview.catalog_post_id != topic.catalog_post_id
+        || !preview.catalog_post_text.contains(&catalog_marker)
+        || second.post.id != topic.system_log_post_id
+        || !second.post.text.contains(&system_marker)
+    {
+        return Err(repository_error("论坛固定 #1/#2 身份与持久化证明不一致"));
+    }
     Ok(())
+}
+
+fn warning_entries(
+    preview: &auction_application::AdminForumPreviewResult,
+    post_numbers: &HashMap<String, usize>,
+) -> Vec<ForumSystemLogEntry> {
+    preview
+        .warnings
+        .iter()
+        .filter_map(|warning| {
+            let post_number = match warning.post_id.as_ref() {
+                Some(post_id) => post_numbers.get(post_id).copied()?,
+                None => 1,
+            };
+            (post_number == 1 || post_number >= 3).then(|| {
+                system_entry(
+                    post_number,
+                    (warning.line > 0).then_some(warning.line),
+                    &warning.code,
+                    &clean_system_message(&warning.message),
+                    warning.code == "edited_post_ignored",
+                )
+            })
+        })
+        .collect()
+}
+
+async fn refresh_fixed_posts(
+    runtime: &ForumReplyRuntime,
+    topic: auction_application::ForumReplyTopic,
+    system_entries: Vec<ForumSystemLogEntry>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), ApplicationError> {
+    let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
+    snapshot.public_url = super::super::forum_sync::resolve_public_url(
+        runtime.public_base_url.as_deref(),
+        snapshot.public_url.as_deref(),
+    )?;
+    let link_targets =
+        snapshot.lots.iter().map(|lot| lot.equipment_link_target.clone()).collect::<Vec<_>>();
+    let equipment_links =
+        runtime.equipment_links.resolve_public_equipment_links(&link_targets).await?;
+    let catalog = runtime
+        .renderer
+        .render(snapshot, equipment_links)
+        .map_err(|error| repository_error(&error.to_string()))?;
+    let system_log = runtime
+        .renderer
+        .render_system_log(topic.auction_id, system_entries)
+        .map_err(|error| repository_error(&error.to_string()))?;
+    let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
+    let system_log_changed = system_log.body != topic.system_log_body;
+    if !catalog_changed && !system_log_changed {
+        return runtime.store.finish_topic_scan(topic, updated_at).await;
+    }
+    if catalog_changed {
+        let proof = runtime
+            .writer
+            .edit_post(
+                topic.world,
+                topic.thread_id.clone(),
+                topic.catalog_post_id.clone(),
+                Some(catalog.title.clone()),
+                ForumRenderedPost { body: catalog.body.clone() },
+            )
+            .await?;
+        if proof.thread_id != topic.thread_id || proof.post_id != topic.catalog_post_id {
+            return Err(repository_error("论坛固定 #1 编辑证明不匹配"));
+        }
+    }
+    if system_log_changed {
+        let proof = runtime
+            .writer
+            .edit_post(
+                topic.world,
+                topic.thread_id.clone(),
+                topic.system_log_post_id.clone(),
+                None,
+                system_log.clone(),
+            )
+            .await?;
+        if proof.thread_id != topic.thread_id || proof.post_id != topic.system_log_post_id {
+            return Err(repository_error("论坛固定 #2 编辑证明不匹配"));
+        }
+    }
+    runtime.store.record_fixed_posts_update(topic, catalog, system_log, updated_at).await
+}
+
+fn system_entry(
+    post_number: usize,
+    line_number: Option<usize>,
+    code: &str,
+    message: &str,
+    ignored: bool,
+) -> ForumSystemLogEntry {
+    ForumSystemLogEntry {
+        post_number,
+        line_number,
+        code: clean_system_message(code),
+        message: clean_system_message(message),
+        ignored,
+    }
+}
+
+fn clean_system_message(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(512).collect()
 }
 
 fn target_map(

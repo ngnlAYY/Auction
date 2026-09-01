@@ -6,8 +6,10 @@
 use std::sync::Arc;
 
 use auction_application::{
-    ApplicationError, Clock, ForumPublisher, ForumRenderer, ForumSyncClaim, ForumSyncStore,
-    PublicEquipmentLinkResolver, RepositoryError,
+    ApplicationError, Clock, ForumPostWriter, ForumPublishedLayout, ForumPublishedThread,
+    ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
+    ForumSyncClaim, ForumSyncStore, ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError,
+    forum_catalog_marker, forum_system_log_marker,
 };
 use chrono::Duration;
 use url::Url;
@@ -19,9 +21,21 @@ const RETRY_DELAY: Duration = Duration::minutes(1);
 const MANUAL_RECONCILIATION_DELAY: Duration = Duration::days(365);
 
 /// 论坛主题同步运行时依赖。
+pub struct ForumSyncPorts {
+    pub store: Arc<dyn ForumSyncStore>,
+    pub publisher: Arc<dyn ForumPublisher>,
+    pub reader: Arc<dyn ForumTopicReader>,
+    pub post_writer: Arc<dyn ForumPostWriter>,
+    pub renderer: Arc<dyn ForumRenderer>,
+    pub equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
+}
+
+/// 论坛主题同步运行时依赖。
 pub struct ForumSyncRuntime {
     pub(crate) store: Arc<dyn ForumSyncStore>,
     pub(crate) publisher: Arc<dyn ForumPublisher>,
+    pub(crate) reader: Arc<dyn ForumTopicReader>,
+    pub(crate) post_writer: Arc<dyn ForumPostWriter>,
     pub(crate) renderer: Arc<dyn ForumRenderer>,
     pub(crate) equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     pub(crate) batch_size: u16,
@@ -32,10 +46,7 @@ pub struct ForumSyncRuntime {
 impl ForumSyncRuntime {
     /// 建立论坛同步运行时，并限制批次规模、单项处理时限和公开链接 origin。
     pub fn new(
-        store: Arc<dyn ForumSyncStore>,
-        publisher: Arc<dyn ForumPublisher>,
-        renderer: Arc<dyn ForumRenderer>,
-        equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
+        ports: ForumSyncPorts,
         batch_size: u16,
         item_timeout: std::time::Duration,
         public_base_url: Option<String>,
@@ -47,9 +58,13 @@ impl ForumSyncRuntime {
         {
             return Err(WorkerError::InvalidForumSyncConfiguration);
         }
+        let ForumSyncPorts { store, publisher, reader, post_writer, renderer, equipment_links } =
+            ports;
         Ok(Self {
             store,
             publisher,
+            reader,
+            post_writer,
             renderer,
             equipment_links,
             batch_size,
@@ -105,19 +120,8 @@ where
     let failure_clock = Arc::clone(&clock);
     let failure_claim = claim.clone();
     let reconciliation_only = requires_reconciliation(&claim);
-    match tokio::time::timeout(
-        runtime.item_timeout,
-        process_claim_inner(
-            store,
-            Arc::clone(&runtime.publisher),
-            Arc::clone(&runtime.renderer),
-            Arc::clone(&runtime.equipment_links),
-            clock,
-            runtime.public_base_url.clone(),
-            claim,
-        ),
-    )
-    .await
+    match tokio::time::timeout(runtime.item_timeout, process_claim_inner(runtime, clock, claim))
+        .await
     {
         Ok(result) => result,
         Err(_) => {
@@ -137,17 +141,19 @@ where
 }
 
 async fn process_claim_inner<C>(
-    store: Arc<dyn ForumSyncStore>,
-    publisher: Arc<dyn ForumPublisher>,
-    renderer: Arc<dyn ForumRenderer>,
-    equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
+    runtime: &ForumSyncRuntime,
     clock: Arc<C>,
-    public_base_url: Option<String>,
     claim: ForumSyncClaim,
 ) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
 {
+    let store = Arc::clone(&runtime.store);
+    let publisher = Arc::clone(&runtime.publisher);
+    let reader = Arc::clone(&runtime.reader);
+    let post_writer = Arc::clone(&runtime.post_writer);
+    let renderer = Arc::clone(&runtime.renderer);
+    let equipment_links = Arc::clone(&runtime.equipment_links);
     let reconciliation_only = requires_reconciliation(&claim);
     let retry_authorized = claim.previous_failure_code.as_deref() == Some("write_retry_authorized");
     let retry_claim = claim.clone();
@@ -166,21 +172,24 @@ where
         }
     };
     let mut snapshot = snapshot;
-    snapshot.public_url =
-        match resolve_public_url(public_base_url.as_deref(), snapshot.public_url.as_deref()) {
-            Ok(public_url) => public_url,
-            Err(error) => {
-                record_failure(
-                    store,
-                    clock,
-                    retry_claim,
-                    scoped_failure_code(reconciliation_only, "configuration"),
-                    error,
-                )
-                .await?;
-                return Ok(());
-            }
-        };
+    snapshot.public_url = match resolve_public_url(
+        runtime.public_base_url.as_deref(),
+        snapshot.public_url.as_deref(),
+    ) {
+        Ok(public_url) => public_url,
+        Err(error) => {
+            record_failure(
+                store,
+                clock,
+                retry_claim,
+                scoped_failure_code(reconciliation_only, "configuration"),
+                error,
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let auction_id = snapshot.auction_id;
     let world = snapshot.world;
     let link_targets =
         snapshot.lots.iter().map(|lot| lot.equipment_link_target.clone()).collect::<Vec<_>>();
@@ -218,6 +227,28 @@ where
                 ApplicationError::Repository(auction_application::RepositoryError::Failed(
                     error.to_string(),
                 )),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let system_log = match renderer.render_system_log(auction_id, Vec::new()) {
+        Ok(rendered) => rendered,
+        Err(error) => {
+            record_failure(
+                store,
+                clock,
+                retry_claim,
+                scoped_failure_code(
+                    reconciliation_only,
+                    match error {
+                        auction_application::ForumRenderError::InvalidSnapshot => {
+                            "invalid_snapshot"
+                        }
+                        auction_application::ForumRenderError::BodyTooLarge => "body_too_large",
+                    },
+                ),
+                ApplicationError::Repository(RepositoryError::Failed(error.to_string())),
             )
             .await?;
             return Ok(());
@@ -283,10 +314,133 @@ where
             }
         }
     };
-    if let Err(error) = store.publish(claim.clone(), rendered, published, clock.now()).await {
+    let allow_missing_system_log = !reconciliation_only || retry_authorized;
+    let legacy_thread_id = claim.existing_thread_id.clone();
+    let layout = match ensure_fixed_layout(
+        Arc::clone(&reader),
+        Arc::clone(&post_writer),
+        FixedLayoutRequest {
+            world,
+            auction_id,
+            published,
+            catalog: rendered.clone(),
+            system_log: system_log.clone(),
+            allow_missing_system_log,
+            legacy_thread_id,
+        },
+    )
+    .await
+    {
+        Ok(layout) => layout,
+        Err(error) => {
+            let failure_code = if matches!(
+                &error,
+                ApplicationError::ForumRemote(remote) if remote.write_started()
+            ) {
+                "write_unknown"
+            } else {
+                forum_failure_code(&error)
+            };
+            record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
+            return Ok(());
+        }
+    };
+    if let Err(error) =
+        store.publish(claim.clone(), rendered, system_log, layout, clock.now()).await
+    {
         record_failure(store, clock, claim, "publish_proof_failed".to_owned(), error).await?;
     }
     Ok(())
+}
+
+struct FixedLayoutRequest {
+    world: auction_domain::SettlementWorld,
+    auction_id: auction_domain::AuctionId,
+    published: ForumPublishedThread,
+    catalog: ForumRenderedThread,
+    system_log: ForumRenderedPost,
+    allow_missing_system_log: bool,
+    legacy_thread_id: Option<String>,
+}
+
+async fn ensure_fixed_layout(
+    reader: Arc<dyn ForumTopicReader>,
+    writer: Arc<dyn ForumPostWriter>,
+    request: FixedLayoutRequest,
+) -> Result<ForumPublishedLayout, ApplicationError> {
+    let FixedLayoutRequest {
+        world,
+        auction_id,
+        published,
+        catalog,
+        system_log,
+        allow_missing_system_log,
+        legacy_thread_id,
+    } = request;
+    let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
+    let catalog_marker = forum_catalog_marker(auction_id);
+    let system_log_marker = forum_system_log_marker(auction_id);
+    if !preview.catalog_post_text.contains(&catalog_marker) {
+        let belongs_to_other_auction = preview.catalog_post_text.contains("auction-catalog-v1:");
+        let legacy_proof_matches =
+            legacy_thread_id.as_deref() == Some(published.thread_id.as_str());
+        if belongs_to_other_auction || !legacy_proof_matches {
+            return Err(fixed_layout_error("fixed_layout_conflict", false));
+        }
+        let proof = writer
+            .edit_post(
+                world,
+                published.thread_id.clone(),
+                preview.catalog_post_id.clone(),
+                Some(catalog.title.clone()),
+                ForumRenderedPost { body: catalog.body.clone() },
+            )
+            .await?;
+        if proof.thread_id != published.thread_id || proof.post_id != preview.catalog_post_id {
+            return Err(fixed_layout_error("write_unknown", true));
+        }
+        preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
+        if !preview.catalog_post_text.contains(&catalog_marker) {
+            return Err(fixed_layout_error("write_unknown", true));
+        }
+    }
+    let catalog_post_id = preview.catalog_post_id.clone();
+    if let Some(second) = preview.posts.first() {
+        if !second.post.text.contains(&system_log_marker) {
+            return Err(fixed_layout_error("fixed_layout_conflict", false));
+        }
+        return Ok(ForumPublishedLayout {
+            thread: published,
+            catalog_post_id,
+            system_log_post_id: second.post.id.clone(),
+        });
+    }
+    if !allow_missing_system_log {
+        return Err(fixed_layout_error("write_authorization_required", false));
+    }
+    let proof = writer.reply_topic(world, published.thread_id.clone(), system_log).await?;
+    if proof.thread_id != published.thread_id {
+        return Err(fixed_layout_error("write_unknown", true));
+    }
+    let confirmed = reader.fetch_topic(world, published.thread_id.clone()).await?;
+    let Some(second) = confirmed.posts.first() else {
+        return Err(fixed_layout_error("write_unknown", true));
+    };
+    if confirmed.catalog_post_id != catalog_post_id
+        || second.post.id != proof.post_id
+        || !second.post.text.contains(&system_log_marker)
+    {
+        return Err(fixed_layout_error("fixed_layout_conflict", false));
+    }
+    Ok(ForumPublishedLayout {
+        thread: published,
+        catalog_post_id,
+        system_log_post_id: proof.post_id,
+    })
+}
+
+fn fixed_layout_error(code: &'static str, write_started: bool) -> ApplicationError {
+    ApplicationError::ForumRemote(ForumRemoteError::new(code, false, write_started))
 }
 
 async fn record_failure<C>(
@@ -338,6 +492,7 @@ fn is_manual_failure(error: &ApplicationError, failure_code: &str) -> bool {
             | "configuration"
             | "credential_unavailable"
             | "protocol_drift"
+            | "fixed_layout_conflict"
             | "write_authorization_required"
             | "capability_unavailable"
     )
@@ -363,7 +518,7 @@ fn bounded_detail(value: String) -> String {
     if detail.is_empty() { "论坛同步失败".to_owned() } else { detail }
 }
 
-fn valid_public_base_url(value: &str) -> bool {
+pub(super) fn valid_public_base_url(value: &str) -> bool {
     let Ok(parsed) = Url::parse(value) else {
         return false;
     };
@@ -379,7 +534,7 @@ fn valid_public_base_url(value: &str) -> bool {
         && value.trim() == value
 }
 
-fn resolve_public_url(
+pub(super) fn resolve_public_url(
     base_url: Option<&str>,
     reference: Option<&str>,
 ) -> Result<Option<String>, ApplicationError> {

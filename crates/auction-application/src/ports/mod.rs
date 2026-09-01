@@ -246,14 +246,17 @@ pub use equipment_link::{
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
 pub use forum_reply::{
-    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCommandStart,
-    ForumCommandStatus, ForumLotTarget, ForumReplyStore, ForumReplyTopic, ForumTopicReader,
+    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCommandOutcome,
+    ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyStore, ForumReplyTopic,
+    ForumTopicReader,
 };
 pub use forum_sync::{
-    ForumAuctionSnapshot, ForumLotSnapshot, ForumPublishedThread, ForumPublisher, ForumRemoteError,
-    ForumRenderError, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
-    ForumSyncRecoveryPort, ForumSyncStore, ForumWriteRetryAuthorizationCommand,
-    ForumWriteRetryAuthorizationResult, MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_world_name,
+    ForumAuctionSnapshot, ForumLotSnapshot, ForumPostWriter, ForumPublishedLayout,
+    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError,
+    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
+    ForumSyncRecoveryPort, ForumSyncStore, ForumSystemLogEntry,
+    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,

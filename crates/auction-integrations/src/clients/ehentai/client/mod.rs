@@ -4,10 +4,11 @@
 //! write-unknown 栅栏；表单字段和响应判定辅助函数集中在 forms.rs。
 
 use super::forms::{
-    TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
-    is_loopback_host, is_session_expired, origin_of, posting_action_matches_board,
-    posting_form_values, same_origin, set_form_value, valid_cookie, valid_rendered_thread,
-    valid_topic_id, valid_topic_title,
+    PostForm, TopicForm, body_looks_like_html, build_forum_http_client, clean_line, cookie_header,
+    fixed_post_form_values, is_loopback_host, is_session_expired, optional_query_identity,
+    origin_of, posting_action_matches_board, posting_action_matches_target, posting_form_values,
+    same_origin, set_form_value, valid_cookie, valid_post_id, valid_rendered_post,
+    valid_rendered_thread, valid_topic_id, valid_topic_title,
 };
 use super::*;
 
@@ -213,6 +214,53 @@ impl EhentaiClient {
         crate::ForumPreviewAdapter::new()
             .parse_html_document(html)
             .map_err(|_| EhentaiError::protocol(operation, false))
+    }
+
+    /// 建立固定 #2 回复；POST 后必须返回 exact thread/post proof。
+    pub async fn reply_topic(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        body: ForumRenderedPost,
+        cookie: &EhentaiCookie,
+    ) -> Result<ForumPublishedPost, EhentaiError> {
+        let operation = EhentaiOperation::ReplyTopic;
+        if !self.valid_for()
+            || !valid_cookie(cookie)
+            || !valid_topic_id(thread_id)
+            || !valid_rendered_post(&body)
+        {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let form = self.load_reply_form(board_id, thread_id, cookie).await?;
+        self.submit_fixed_post(form, board_id, thread_id, None, body, cookie).await
+    }
+
+    /// 编辑已持久化的固定 #1/#2；目标 post ID 必须由调用方提供，不能从正文猜测。
+    pub async fn edit_post(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        post_id: &str,
+        title: Option<&str>,
+        body: ForumRenderedPost,
+        cookie: &EhentaiCookie,
+    ) -> Result<ForumPublishedPost, EhentaiError> {
+        let operation = EhentaiOperation::EditPost;
+        if !self.valid_for()
+            || !valid_cookie(cookie)
+            || !valid_topic_id(thread_id)
+            || !valid_post_id(post_id)
+            || title.is_some_and(|value| !valid_topic_title(value))
+            || !valid_rendered_post(&body)
+        {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
+        self.submit_fixed_post(form, board_id, thread_id, Some((post_id, title)), body, cookie)
+            .await
     }
 }
 

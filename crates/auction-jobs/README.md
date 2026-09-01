@@ -51,7 +51,12 @@ Worker 循环，并通过 `realtime_consumer_offsets` / `realtime_failures` 提�
 Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布、主题读取和回帖导入也已接入，
 主题任务只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会因后续状态版本变化再次发帖；
 发布前由装备链接解析端口按快照中的无 key 目标生成真实 HentaVerse URL，再交给 BBCode renderer。
-后者通过 `ForumReplyStore` 的身份/lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
+主题固定 #1 为拍卖目录、#2 为系统编辑/错误记录，只有两个 exact post ID 均持久化后才读取 #3+
+用户命令；竞价事务完成后重新读取权威 lot 快照并按 post ID 编辑 #1，把编辑、解析、身份与确定拒绝
+以及仍待重试的命令稳定投影到 #2，两个远端证明都通过后才推进本地内容版本。每个主题只在即将
+处理时领取独立内容 lease/fencing，无变化也会释放 claim 并推进公平扫描水位，避免多 Worker 交叉
+覆盖远端正文。后者通过 `ForumReplyStore` 按论坛/MM 共用 `game_player_id` 复用或建立 Users 主体，
+再经 world 映射、lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
 对应的 MM 通知也会在后续轮次独立重放。接管旧版回帖账本时，Worker 以新算法生成候选 ID，
 但后续竞价、通知和完成写入统一使用存储端返回的实际既有 ID，避免同一自然键反复冲突并阻断

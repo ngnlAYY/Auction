@@ -51,8 +51,8 @@ mod recovery_health;
 #[path = "schedule.rs"]
 mod schedule;
 
-pub use forum_reply::ForumReplyRuntime;
-pub use forum_sync::ForumSyncRuntime;
+pub use forum_reply::{ForumReplyPorts, ForumReplyRuntime};
+pub use forum_sync::{ForumSyncPorts, ForumSyncRuntime};
 pub use mail_poll::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntime, MailPollRuntimeConfig,

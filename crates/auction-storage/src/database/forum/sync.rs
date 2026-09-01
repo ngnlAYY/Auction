@@ -4,9 +4,9 @@
 //! 使用持久化 token/owner/fencing；SQLite Lite 不提供该外部投影能力，明确返回能力缺失。
 
 use auction_application::{
-    ApplicationFuture, ForumAuctionSnapshot, ForumPublishedThread, ForumRenderedThread,
-    ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
-    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+    ApplicationFuture, ForumAuctionSnapshot, ForumPublishedLayout, ForumRenderedPost,
+    ForumRenderedThread, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort,
+    ForumSyncStore, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
     MAX_FORUM_SYNC_RECOVERY_ITEMS,
 };
 use chrono::{DateTime, Utc};
@@ -21,7 +21,7 @@ mod claims;
 mod publishing;
 #[cfg(feature = "postgres")]
 mod snapshot;
-mod validation;
+pub(super) mod validation;
 
 #[cfg(feature = "postgres")]
 use claims::claim_due_postgres;
@@ -33,7 +33,7 @@ use snapshot::load_snapshot_postgres;
 use validation::capability_error;
 use validation::{
     MAX_CLAIM_BATCH_SIZE, MAX_FAILURE_CODE_BYTES, MAX_FAILURE_DETAIL_BYTES, MAX_WORKER_ID_BYTES,
-    storage_error, valid_claim, valid_rendered, valid_text,
+    storage_error, valid_claim, valid_rendered, valid_rendered_post, valid_text,
 };
 #[cfg(feature = "postgres")]
 pub(super) fn lot_code(
@@ -48,6 +48,21 @@ pub(super) fn parse_world(
     value: &str,
 ) -> Result<auction_domain::SettlementWorld, auction_application::ApplicationError> {
     validation::parse_world(value)
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn load_current_snapshot_postgres(
+    store: &super::super::PostgresStore,
+    auction_id: auction_domain::AuctionId,
+) -> Result<ForumAuctionSnapshot, auction_application::ApplicationError> {
+    snapshot::load_current_snapshot_postgres(store, auction_id).await
+}
+
+pub(super) fn valid_fixed_post_update(
+    catalog: &ForumRenderedThread,
+    system_log: &ForumRenderedPost,
+) -> bool {
+    validation::valid_rendered(catalog) && validation::valid_rendered_post(system_log)
 }
 
 impl ForumSyncStore for DatabaseStore {
@@ -96,13 +111,15 @@ impl ForumSyncStore for DatabaseStore {
         &self,
         claim: ForumSyncClaim,
         rendered: ForumRenderedThread,
-        published: ForumPublishedThread,
+        system_log: ForumRenderedPost,
+        published: ForumPublishedLayout,
         published_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
             if !valid_claim(&claim)
                 || !valid_rendered(&rendered)
-                || !validation::valid_published(&published)
+                || !valid_rendered_post(&system_log)
+                || !validation::valid_layout(&published)
                 || published_at.timestamp_nanos_opt().is_none()
             {
                 return Err(storage_error("论坛同步发布确认参数无效"));
@@ -110,7 +127,15 @@ impl ForumSyncStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    publish_postgres(store, &claim, &rendered, &published, published_at).await
+                    publish_postgres(
+                        store,
+                        &claim,
+                        &rendered,
+                        &system_log,
+                        &published,
+                        published_at,
+                    )
+                    .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

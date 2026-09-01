@@ -3,19 +3,66 @@
 //! 论坛帖子只是外部输入。Worker 必须先通过身份和 lot 投影解析，再使用现有竞价命令端口；
 //! 本模块不允许论坛适配器直接写拍卖状态。
 
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use auction_domain::{AuctionId, LotId, ProxyAuthorizationId, SettlementWorld, UserId};
 
-use super::{AdminForumPreviewResult, ApplicationFuture};
+use super::{
+    AdminForumPreviewResult, ApplicationFuture, ForumAuctionSnapshot, ForumRenderedPost,
+    ForumRenderedThread,
+};
 
 /// 已发布论坛主题的最小扫描目标。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ForumReplyTopic {
     pub auction_id: AuctionId,
     pub world: SettlementWorld,
     pub thread_id: String,
+    pub catalog_post_id: String,
+    pub system_log_post_id: String,
+    pub title: String,
+    pub catalog_body: String,
+    pub system_log_body: String,
+    pub content_revision: i64,
+    pub content_claim_token: Uuid,
+    pub content_claim_owner: String,
+    pub content_claim_fencing: i64,
+    pub content_lease_until: DateTime<Utc>,
+}
+
+impl fmt::Debug for ForumReplyTopic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ForumReplyTopic")
+            .field("auction_id", &self.auction_id)
+            .field("world", &self.world)
+            .field("thread_id", &self.thread_id)
+            .field("catalog_post_id", &self.catalog_post_id)
+            .field("system_log_post_id", &self.system_log_post_id)
+            .field("title", &self.title)
+            .field("catalog_body", &"[REDACTED]")
+            .field("system_log_body", &"[REDACTED]")
+            .field("content_revision", &self.content_revision)
+            .field("content_claim_token", &"[REDACTED]")
+            .field("content_claim_owner", &self.content_claim_owner)
+            .field("content_claim_fencing", &self.content_claim_fencing)
+            .field("content_lease_until", &self.content_lease_until)
+            .finish()
+    }
+}
+
+/// 已持久化论坛命令的安全结果，用于固定 #2 的处理摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumCommandOutcome {
+    pub post_id: String,
+    pub line_number: i32,
+    pub lot_code: String,
+    pub command_kind: String,
+    pub status: ForumCommandStatus,
+    pub safe_detail: Option<String>,
 }
 
 /// 论坛目录编码到数据库 lot 的安全映射。
@@ -25,7 +72,7 @@ pub struct ForumLotTarget {
     pub lot_id: LotId,
 }
 
-/// 已登记且仍可参与竞价的论坛身份。
+/// 由论坛/MM 共用玩家 ID 解析且仍可参与竞价的用户身份。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumBidderIdentity {
     pub user_id: UserId,
@@ -77,7 +124,14 @@ pub struct ForumCommandStart {
 
 /// 论坛回帖持久化端口。
 pub trait ForumReplyStore: Send + Sync {
-    fn list_published_topics(&self, limit: u16) -> ApplicationFuture<'_, Vec<ForumReplyTopic>>;
+    /// 领取固定楼层刷新目标；内容 lease 必须覆盖单主题总时限，避免多 Worker 交叉编辑远端帖子。
+    fn claim_published_topics(
+        &self,
+        worker_id: String,
+        now: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>>;
 
     fn lot_targets(&self, auction_id: AuctionId) -> ApplicationFuture<'_, Vec<ForumLotTarget>>;
 
@@ -105,6 +159,35 @@ pub trait ForumReplyStore: Send + Sync {
         status: String,
         error_code: String,
         safe_detail: String,
+    ) -> ApplicationFuture<'_, ()>;
+
+    /// 读取命令账本的确定结果，不返回凭据或请求正文。
+    fn command_outcomes(
+        &self,
+        auction_id: AuctionId,
+        thread_id: String,
+    ) -> ApplicationFuture<'_, Vec<ForumCommandOutcome>>;
+
+    /// 读取当前权威拍卖快照，用于竞价命令提交后刷新固定 #1。
+    fn load_current_snapshot(
+        &self,
+        auction_id: AuctionId,
+    ) -> ApplicationFuture<'_, ForumAuctionSnapshot>;
+
+    /// 在两个远端固定楼层均已得到 exact post proof 后，以 revision CAS 更新本地正文证明。
+    fn record_fixed_posts_update(
+        &self,
+        topic: ForumReplyTopic,
+        catalog: ForumRenderedThread,
+        system_log: ForumRenderedPost,
+        updated_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()>;
+
+    /// 本轮没有正文变化时释放内容 lease 并推进公平扫描水位。
+    fn finish_topic_scan(
+        &self,
+        topic: ForumReplyTopic,
+        scanned_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
     fn mark_scanned(

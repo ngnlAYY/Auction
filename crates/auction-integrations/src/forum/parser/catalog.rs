@@ -94,7 +94,11 @@ fn catalog_row(line: &str) -> Option<(&str, &str)> {
 }
 
 fn category_heading(value: &str) -> Option<&'static str> {
-    CATALOG_CATEGORIES.iter().copied().find(|category| *category == value)
+    match value {
+        "Light Armor" => Some("Light"),
+        "Heavy Armor" => Some("Heavy"),
+        _ => CATALOG_CATEGORIES.iter().copied().find(|category| *category == value),
+    }
 }
 
 fn normalize_code(raw: &str) -> Option<String> {
@@ -138,6 +142,30 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
     let end = content_start + end_offset;
     let seller = description[content_start..end].trim().to_owned();
     let tail = description[end + 1..].trim();
+    let lower_tail = tail.to_ascii_lowercase();
+    if let Some(current_start) = lower_tail.find("| current:") {
+        let current = tail[current_start + "| current:".len()..].trim_start();
+        let amount = current
+            .split_whitespace()
+            .next()
+            .map(|value| value.trim_matches(|character: char| matches!(character, ',' | ';')))
+            .and_then(|value| parse_amount(value).ok());
+        let bidder = current
+            .to_ascii_lowercase()
+            .find(" by ")
+            .map(|start| {
+                current[start + " by ".len()..]
+                    .split_once(" | ")
+                    .map_or(&current[start + " by ".len()..], |(bidder, _)| bidder)
+                    .trim()
+                    .to_owned()
+            })
+            .filter(|value| !value.is_empty());
+        return ((!seller.is_empty()).then_some(seller), bidder, amount);
+    }
+    if lower_tail.contains("start:") {
+        return ((!seller.is_empty()).then_some(seller), None, None);
+    }
     let fields = tail.split_whitespace().collect::<Vec<_>>();
     let mut bidder = None;
     let mut price = None;

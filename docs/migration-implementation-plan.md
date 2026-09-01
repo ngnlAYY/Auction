@@ -155,12 +155,13 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000024`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000025`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
 严格兼容 trigger、已证明 MoogleMail 退信的独立告警 identity，以及 operations alert 的运行状态、
-扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态，以及 lot 的分类内展示编号。
+扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态、lot 的分类内展示编号，
+以及论坛固定 #1/#2 的远端身份和内容版本证明。
 `lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
 不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
@@ -289,8 +290,12 @@ Sent 分页/exact ID 查找、详情资产矩阵解析、Balance 可见值/脚�
 时转入 `manual_reconcile`。用户注册 key 只以密文信封落库，delivery outbox 只保存用户 UUID
 引用，发送前才由 Worker 解密。论坛主题同步和回帖导入已经接入 PostgreSQL Worker：主题发布使用
 持久化 claim/fencing，结果未知时先按精确标题只读对账；未命中必须经 PostgreSQL `000016` 的
-幂等人工授权和追加审计才允许下一次 POST。回帖读取先通过登记身份、lot 映射和命令账本，
-再调用现有竞价端口。MM `notify` 已进入 MoogleMail delivery outbox；结算事务现在会为每个获胜
+幂等人工授权和追加审计才允许下一次 POST。论坛作者 ID 与 MM 共用 `users.game_player_id`；Users
+owner 在 Serializable 事务内复用已有用户，或建立 revoked-key `forum_only` 临时主体供后续 MM
+注册恢复。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
+post ID 与内容版本，用户命令从 #3 开始；确定竞价结果提交后刷新 #1，解析/编辑/拒绝结果稳定更新
+#2，pending 命令同样显示，并以独立内容 lease/fencing 串行远端编辑；既有 #2 不是系统标记时不覆盖。
+MM `notify` 已进入 MoogleMail delivery outbox；结算事务现在会为每个获胜
 lot 同事务建立 `settlement_recoveries`，冻结付款超时和提醒策略。Recovery Worker 的 PostgreSQL
 完整档已接入 due case 推进：付款满足时推进主世界完成或异世界装备交接，付款超时推进
 `payment_overdue` 并创建稳定的 `payment_reminder` action；action 具备持久化 claim/fencing、
@@ -442,7 +447,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000024` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000025` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -925,10 +930,11 @@ Public/Admin HTTP listener。
 - Storage Public 竞价日志已将公共 cursor/结果校验、PostgreSQL 查询/映射和 SQLite Lite 查询/类型转换
   分别拆入 `database/bid_log/{common,postgres,sqlite}.rs`；`bid_log/mod.rs` 只保留端口分派，时间、
   lot、状态版本、事实序号和 bid ID 的 keyset 顺序以及两套后端的非对等 SQL 能力保持不变。
-- Storage 论坛回帖 owner 已将 PostgreSQL 主题、lot/身份/代理查询、命令账本、扫描游标和输入/能力校验
-  分别拆入 `database/forum/reply/{queries,commands,cursor,validation}.rs`；`reply.rs` 只保留
+- Storage 论坛回帖 owner 已将 PostgreSQL 主题、lot/身份/代理查询、命令账本、扫描游标、固定楼层
+  内容版本 CAS 和输入/能力校验分别拆入
+  `database/forum/reply/{queries,commands,cursor,fixed_posts,validation}.rs`；`reply.rs` 只保留
   跨后端端口分派，论坛命令幂等、锁内读取、扫描游标递增和 SQLite Lite 能力边界保持不变。
-- Storage 论坛主题同步 owner 已将 PostgreSQL 领取租约、快照一致性读取、发布/失败状态推进和输入/能力校验
+- Storage 论坛主题同步 owner 已将 PostgreSQL 领取租约、快照一致性读取、固定 #1/#2 发布证明、失败状态推进和输入/能力校验
   分别拆入 `database/forum/sync/{claims,snapshot,publishing,validation}.rs`；`sync.rs` 只保留
   跨后端端口分派，claim token/fencing、REPEATABLE READ 快照和 SQLite Lite 能力边界保持不变。
 - Storage Public 拍卖目录 owner 已将 PostgreSQL 查询、SQLite Lite 查询以及跨后端行映射/列表参数校验
