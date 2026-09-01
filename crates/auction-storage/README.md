@@ -102,6 +102,10 @@ Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派�
 顶层 `mapping.rs` 继续负责跨后端安全投影、装备字段校验和 Lite 时间/UUID 转换。两套后端的
 Lite/完整能力差异在各自 SQL 适配器中显式保留。Public 的 `next_bid` 与普通竞价事务统一使用
 完整加价阶梯；论坛帖专属的代理末口 `+1K` 投影不得进入浏览器竞价契约。
+`src/database/equipment_secrets.rs` 统一拥有 PostgreSQL 装备密文信封的只读 SQL 与结构校验，
+Worker 履约和 Public 真实装备 URL 分别通过自己的应用端口映射错误；Public 列表使用一次有界批量
+读取，避免逐 lot 查询。`src/database/public_equipment_link.rs` 只返回密文投影，SQLite Lite 固定
+报告能力缺失，明文 key 不会越过存储边界。
 Public 拍卖目录读取由 `src/database/auctions/` 持有：`mod.rs` 只做跨后端端口装配，
 `postgres.rs` 与 `sqlite.rs` 分别负责查询，`mapping.rs` 负责行到安全投影的转换和列表参数
 校验；两后端还按启用世界和公开状态闭集提供 WebSocket 预检，不读取事件历史，也不把 draft/cancelled

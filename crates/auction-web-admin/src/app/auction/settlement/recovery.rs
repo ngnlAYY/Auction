@@ -86,6 +86,7 @@ fn AdminRecoveryRow(
 ) -> Element {
     let recovery_id = recovery.id.clone();
     let display_equipment_name = recovery.equipment_name.clone();
+    let display_equipment_identity = format!("{display_equipment_name}({})", recovery.world_id);
     let deadline_attribute = recovery.payment_deadline_at.clone();
     let deadline_text = super::super::format_admin_time(&recovery.payment_deadline_at);
     let lot_code =
@@ -100,16 +101,12 @@ fn AdminRecoveryRow(
         tr {
             td { "{lot_code}" }
             td {
-                TruncatedText { value: display_equipment_name }
-                br {}
-                span { class: "admin-auction-status",
-                    TruncatedText { value: recovery.world_id.clone(), size: "compact" }
-                }
+                TruncatedText { value: display_equipment_identity, size: "wide", portal: true }
             }
             td { {recovery_stage_label(&recovery.stage)} }
             td { time { datetime: deadline_attribute, {deadline_text} } }
-            td { TruncatedText { value: evidence } }
-            td { TruncatedText { value: actions, size: "wide" } }
+            td { TruncatedText { value: evidence, portal: true } }
+            td { TruncatedText { value: actions, size: "wide", portal: true } }
             td {
                 div { class: "admin-auction-actions",
                     for action in recovery.allowed_commands.clone() {

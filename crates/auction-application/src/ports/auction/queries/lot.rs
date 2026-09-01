@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use auction_domain::EquipmentId;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
@@ -182,6 +183,8 @@ impl PublicEquipment {
 #[derive(Debug, Clone)]
 pub struct PublicLiveLotSummary {
     pub id: Uuid,
+    /// 只供同进程完整 URL 解析器绑定密文 owner；HTTP DTO 映射不会公开该 UUID。
+    pub equipment_id: EquipmentId,
     pub auction_id: Uuid,
     pub lot_number: i64,
     pub status: String,
@@ -204,6 +207,7 @@ impl PublicLiveLotSummary {
         opens_at: DateTime<Utc>,
     ) -> Result<(), &'static str> {
         if self.id.is_nil()
+            || self.equipment_id.is_nil()
             || self.auction_id.is_nil()
             || self.lot_number <= 0
             || !matches!(self.status.as_str(), "live" | "sold" | "unsold")
@@ -262,6 +266,8 @@ impl PublicLiveLotDetail {
 #[derive(Debug, Clone)]
 pub struct PublicPreviewLotSummary {
     pub id: Uuid,
+    /// 只供同进程完整 URL 解析器绑定密文 owner；HTTP DTO 映射不会公开该 UUID。
+    pub equipment_id: EquipmentId,
     pub auction_id: Uuid,
     pub code: String,
     pub status: String,
@@ -278,6 +284,7 @@ impl PublicPreviewLotSummary {
     /// 校验预览 lot 的完整摘要事实；分类允许为空以保持旧 wire 语义。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.id.is_nil()
+            || self.equipment_id.is_nil()
             || self.auction_id.is_nil()
             || !public_text(&self.code, 64)
             || self.status != "pending"
@@ -322,6 +329,8 @@ impl PublicPreviewLotDetail {
 /// 当前公开 projection 下的单个 lot 详情。
 #[derive(Debug, Clone)]
 pub struct PublicLotDetail {
+    /// 只供同进程可信适配器绑定加密 key；HTTP DTO 映射不会公开该内部 UUID。
+    pub equipment_id: EquipmentId,
     pub projection: PublicAuctionProjection,
     pub preview: Option<PublicPreviewLotDetail>,
     pub live: Option<PublicLiveLotDetail>,
@@ -330,7 +339,7 @@ pub struct PublicLotDetail {
 impl PublicLotDetail {
     /// 校验详情的 projection 分支、lot 归属和 preview/live 互斥性。
     pub fn validate(&self, lot_id: Uuid) -> Result<(), &'static str> {
-        if lot_id.is_nil() || self.projection.validate().is_err() {
+        if lot_id.is_nil() || self.equipment_id.is_nil() || self.projection.validate().is_err() {
             return Err("公开 lot 详情 projection 无效");
         }
         if self.projection.projection_kind == "preview" {
@@ -339,6 +348,7 @@ impl PublicLotDetail {
             };
             if self.live.is_some()
                 || preview.summary.id != lot_id
+                || preview.summary.equipment_id != self.equipment_id
                 || preview.summary.auction_id != self.projection.auction_id
             {
                 return Err("公开预览 lot 详情归属无效");
@@ -350,6 +360,7 @@ impl PublicLotDetail {
         };
         if self.preview.is_some()
             || live.summary.id != lot_id
+            || live.summary.equipment_id != self.equipment_id
             || live.summary.auction_id != self.projection.auction_id
         {
             return Err("公开正式 lot 详情归属无效");

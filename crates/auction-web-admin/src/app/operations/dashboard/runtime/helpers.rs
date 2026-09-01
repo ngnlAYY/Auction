@@ -1,7 +1,7 @@
 //! Dashboard runtime 详情卡片与状态映射辅助。
 
+use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
-use auction_web_shared::legacy_t as t;
 
 use crate::api::AdminCredentialScope;
 
@@ -9,8 +9,8 @@ use crate::api::AdminCredentialScope;
 pub(crate) fn DashboardDetailCard(title: String, detail: String, tone: String) -> Element {
     rsx! {
         article { class: "admin-dashboard__detail-card admin-dashboard__detail-card--{tone}",
-            h3 { "{title}" }
-            p { "{detail}" }
+            h3 { TruncatedText { value: title, size: "wide", portal: true } }
+            p { TruncatedText { value: detail, size: "wide", portal: true } }
         }
     }
 }

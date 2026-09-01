@@ -32,6 +32,10 @@ pub(super) fn map_postgres_preview(
     map_preview_fields(
         world_id,
         row.try_get("id").map_err(|_| storage_error("读取 PostgreSQL 预览 lot 标识失败"))?,
+        EquipmentId::from_uuid(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 PostgreSQL 预览装备 owner 失败"))?,
+        ),
         row.try_get("auction_id").map_err(|_| storage_error("读取 PostgreSQL 预览拍卖标识失败"))?,
         i64::from(
             row.try_get::<i32, _>("lot_number")
@@ -88,6 +92,10 @@ pub(super) fn map_postgres_preview_detail(
     let equipment = map_equipment(world_id, &external_id, &name, &category, attributes.0, false)?;
     let summary = PublicPreviewLotSummary {
         id,
+        equipment_id: EquipmentId::from_uuid(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 PostgreSQL 预览详情装备 owner 失败"))?,
+        ),
         auction_id,
         code: public_forum_lot_code(&category, lot_number),
         status,
@@ -113,6 +121,10 @@ pub(super) fn map_postgres_live(
     map_live_fields(
         world_id,
         row.try_get("id").map_err(|_| storage_error("读取 PostgreSQL 正式 lot 标识失败"))?,
+        EquipmentId::from_uuid(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 PostgreSQL 正式装备 owner 失败"))?,
+        ),
         row.try_get("auction_id").map_err(|_| storage_error("读取 PostgreSQL 正式拍卖标识失败"))?,
         i64::from(
             row.try_get::<i32, _>("lot_number")

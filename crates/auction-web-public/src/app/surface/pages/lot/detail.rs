@@ -15,7 +15,9 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                 status: lot.summary.status.clone(),
             }
             div { class: "public-auction-lot__grid",
-                EquipmentCard { equipment: EquipmentCardData::from(lot.equipment.clone()) }
+                EquipmentCard {
+                    equipment: EquipmentCardData::from(lot.equipment.clone()),
+                }
                 div { class: "public-auction-lot__bidding",
                     dl {
                         dt { {t!("catalog-start-price")} }
@@ -96,7 +98,9 @@ pub(crate) fn LiveLotDetailView(
                 status: lot.status.clone(),
             }
             div { class: "public-auction-lot__grid",
-                EquipmentCard { equipment: EquipmentCardData::from(lot.equipment.clone()) }
+                EquipmentCard {
+                    equipment: EquipmentCardData::from(lot.equipment.clone()),
+                }
                 div { class: "public-auction-lot__bidding",
                     dl {
                         dt { {t!("lot-current-bid")} }

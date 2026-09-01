@@ -1659,15 +1659,32 @@ fn proxy_status(value: Option<&Value>) -> bool {
     matches!(string(value), Some("active" | "exhausted" | "frozen" | "closed"))
 }
 
+/// PostgreSQL 必须交付真实 ID/key URL；空字符串只表示 SQLite Lite 明确没有该能力。
 fn game_url(value: Option<&Value>) -> bool {
     let Some(value) = string(value) else { return false };
+    if value.is_empty() {
+        return true;
+    }
     let Ok(url) = url::Url::parse(value) else { return false };
+    let Some(path) = value
+        .strip_prefix("https://hentaiverse.org/equip/")
+        .or_else(|| value.strip_prefix("https://hentaiverse.org/isekai/equip/"))
+    else {
+        return false;
+    };
+    let mut parts = path.split('/');
+    let equipment_id = parts.next().unwrap_or_default();
+    let key = parts.next().unwrap_or_default();
     url.scheme() == "https"
         && url.host_str() == Some("hentaiverse.org")
         && url.username().is_empty()
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none()
-        && (value.starts_with("https://hentaiverse.org/equip/")
-            || value.starts_with("https://hentaiverse.org/isekai/equip/"))
+        && !equipment_id.is_empty()
+        && equipment_id.len() <= 32
+        && equipment_id.bytes().all(|byte| byte.is_ascii_digit())
+        && key.len() == 10
+        && key.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && parts.next().is_none()
 }

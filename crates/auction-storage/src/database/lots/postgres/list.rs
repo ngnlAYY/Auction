@@ -53,6 +53,7 @@ async fn list_postgres_transaction(
         let rows = sqlx::query(
             "SELECT
                 l.id,
+                l.equipment_id,
                 l.auction_id,
                 l.category_number AS lot_number,
                 l.status,
@@ -97,6 +98,7 @@ async fn list_postgres_transaction(
         let rows = sqlx::query(
             "SELECT
                 l.id,
+                l.equipment_id,
                 l.auction_id,
                 l.category_number AS lot_number,
                 l.status,

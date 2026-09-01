@@ -51,6 +51,11 @@ pub(super) fn map_sqlite_preview(
             row.try_get("id").map_err(|_| storage_error("读取 Lite 预览 lot 标识失败"))?,
             "Lite 预览 lot 标识",
         )?,
+        EquipmentId::from_uuid(uuid_from_blob(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 Lite 预览装备 owner 失败"))?,
+            "Lite 预览装备 owner",
+        )?),
         uuid_from_blob(
             row.try_get("auction_id").map_err(|_| storage_error("读取 Lite 预览拍卖标识失败"))?,
             "Lite 预览拍卖标识",
@@ -105,6 +110,11 @@ pub(super) fn map_sqlite_preview_detail(
     let equipment = map_equipment(world_id, &external_id, &name, &category, attributes, false)?;
     let summary = PublicPreviewLotSummary {
         id,
+        equipment_id: EquipmentId::from_uuid(uuid_from_blob(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 Lite 预览详情装备 owner 失败"))?,
+            "Lite 预览详情装备 owner",
+        )?),
         auction_id,
         code: public_forum_lot_code(&category, lot_number),
         status,
@@ -134,6 +144,11 @@ pub(super) fn map_sqlite_live(
             row.try_get("id").map_err(|_| storage_error("读取 Lite 正式 lot 标识失败"))?,
             "Lite 正式 lot 标识",
         )?,
+        EquipmentId::from_uuid(uuid_from_blob(
+            row.try_get("equipment_id")
+                .map_err(|_| storage_error("读取 Lite 正式装备 owner 失败"))?,
+            "Lite 正式装备 owner",
+        )?),
         uuid_from_blob(
             row.try_get("auction_id").map_err(|_| storage_error("读取 Lite 正式拍卖标识失败"))?,
             "Lite 正式拍卖标识",

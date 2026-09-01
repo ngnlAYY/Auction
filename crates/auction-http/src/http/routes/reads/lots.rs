@@ -41,7 +41,11 @@ pub(crate) async fn list_lots(
     {
         return Err(lot_dependency_unavailable());
     }
-    let response = map_lot_page(page_result, page);
+    let targets =
+        lot_page_equipment_targets(&page_result).map_err(|_| lot_dependency_unavailable())?;
+    let game_equipment_urls = resolve_equipment_urls(&state, &targets).await?;
+    let response = map_lot_page(page_result, page, game_equipment_urls)
+        .ok_or_else(lot_dependency_unavailable)?;
     Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
 }
 
@@ -66,8 +70,32 @@ pub(crate) async fn lot_detail(
     if !valid_lot_detail(&detail, lot_id) {
         return Err(lot_dependency_unavailable());
     }
-    let response = map_lot_detail(detail);
+    let target =
+        lot_detail_equipment_target(&detail, lot_id).map_err(|_| lot_dependency_unavailable())?;
+    let mut game_equipment_urls = resolve_equipment_urls(&state, &[target]).await?;
+    let game_equipment_url = game_equipment_urls.pop().filter(|url| !url.is_empty());
+    let response = map_lot_detail(detail, game_equipment_url);
     Ok(Json(ApiResponse::ok("拍卖批次已加载", response)))
+}
+
+async fn resolve_equipment_urls(
+    state: &PublicApiState,
+    targets: &[PublicEquipmentLinkTarget],
+) -> Result<Vec<String>, (StatusCode, Json<ApiErrorResponse>)> {
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(resolver) = state.equipment_links() else {
+        return Err(lot_dependency_unavailable());
+    };
+    match resolver.resolve_public_equipment_links(targets).await {
+        Ok(links) if links.len() == targets.len() => {
+            Ok(links.into_iter().map(|link| link.into_url()).collect())
+        }
+        // SQLite Lite 没有装备 key 密文读取能力；保留 lot 投影，但不暴露伪装成真实链接的 keyless URL。
+        Err(ApplicationError::CapabilityUnavailable(_)) => Ok(vec![String::new(); targets.len()]),
+        Ok(_) | Err(_) => Err(lot_dependency_unavailable()),
+    }
 }
 
 fn lot_dependency_unavailable() -> (StatusCode, Json<ApiErrorResponse>) {

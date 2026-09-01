@@ -65,6 +65,9 @@
   `mod.rs` 只保留服务状态、构造函数和 `AdminCredentialPort` 适配。
 - `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
+- `src/ports/public/equipment_link.rs`：公开页面主动查看游戏装备时使用的密文读取与解析窄端口；
+  批量目标只携带内部 lot/equipment owner、world 和无 key 投影；完整 URL 值对象不实现
+  serde/Display，`Debug` 固定脱敏，只允许 P09/P11 HTTP DTO 映射边界取得所有权。
 - `src/ports/admin/intake/` 与 `src/services/admin/intake.rs`：`equipment.rs` 负责 URL/canonical JSON
   装备事实和 key 清理，`commands.rs` 负责命令摘要，`source.rs` 负责来源快照，`records.rs` 负责
   脱敏录入写入计划/结果，`ports.rs` 负责 key 信封与事务端口，`common.rs` 负责错误、字段校验和

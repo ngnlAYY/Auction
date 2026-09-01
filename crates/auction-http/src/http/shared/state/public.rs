@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use auction_application::{
     AuctionReader, CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader,
-    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader, PublicForumReader,
-    PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader,
-    PublicSessionPort, WorldReader,
+    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader,
+    PublicEquipmentLinkResolver, PublicForumReader, PublicLotReader, PublicPriceHistoryReader,
+    PublicRealtimeReader, PublicRulesReader, PublicSessionPort, WorldReader,
 };
 use auction_observability::ProcessMetrics;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
@@ -30,6 +30,7 @@ pub struct PublicApiState {
     forum: Option<Arc<dyn PublicForumReader>>,
     auctions: Option<Arc<dyn AuctionReader>>,
     lots: Option<Arc<dyn PublicLotReader>>,
+    equipment_links: Option<Arc<dyn PublicEquipmentLinkResolver>>,
     bid_log: Option<Arc<dyn PublicBidLogReader>>,
     price_history: Option<Arc<dyn PublicPriceHistoryReader>>,
     realtime: Option<Arc<dyn PublicRealtimeReader>>,
@@ -54,6 +55,7 @@ impl Default for PublicApiState {
             forum: None,
             auctions: None,
             lots: None,
+            equipment_links: None,
             bid_log: None,
             price_history: None,
             realtime: None,
@@ -84,6 +86,7 @@ impl PublicApiState {
         forum: Option<Arc<dyn PublicForumReader>>,
         auctions: Option<Arc<dyn AuctionReader>>,
         lots: Option<Arc<dyn PublicLotReader>>,
+        equipment_links: Option<Arc<dyn PublicEquipmentLinkResolver>>,
         bid_log: Option<Arc<dyn PublicBidLogReader>>,
         price_history: Option<Arc<dyn PublicPriceHistoryReader>>,
         realtime: Option<Arc<dyn PublicRealtimeReader>>,
@@ -100,6 +103,7 @@ impl PublicApiState {
             forum,
             auctions,
             lots,
+            equipment_links,
             bid_log,
             price_history,
             realtime,
@@ -171,6 +175,10 @@ impl PublicApiState {
 
     pub(crate) fn lots(&self) -> Option<&dyn PublicLotReader> {
         self.lots.as_deref()
+    }
+
+    pub(crate) fn equipment_links(&self) -> Option<&dyn PublicEquipmentLinkResolver> {
+        self.equipment_links.as_deref()
     }
 
     pub(crate) fn bid_log(&self) -> Option<&dyn PublicBidLogReader> {

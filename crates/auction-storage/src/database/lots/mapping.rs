@@ -42,6 +42,7 @@ pub(super) fn map_projection(
 pub(super) fn map_preview_fields(
     world_id: &str,
     id: Uuid,
+    equipment_id: EquipmentId,
     auction_id: Uuid,
     lot_number: i64,
     status: String,
@@ -65,6 +66,7 @@ pub(super) fn map_preview_fields(
     )?;
     let summary = PublicPreviewLotSummary {
         id,
+        equipment_id,
         auction_id,
         code: public_forum_lot_code(&equipment_category, lot_number),
         status,
@@ -84,6 +86,7 @@ pub(super) fn map_preview_fields(
 pub(super) fn map_live_fields(
     world_id: &str,
     id: Uuid,
+    equipment_id: EquipmentId,
     auction_id: Uuid,
     lot_number: i64,
     status: String,
@@ -147,6 +150,7 @@ pub(super) fn map_live_fields(
     )?;
     let summary = PublicLiveLotSummary {
         id,
+        equipment_id,
         auction_id,
         lot_number,
         status,

@@ -14,8 +14,8 @@ pub use cryptobox::{
     EquipmentKeySealerError,
 };
 pub use equipment::{
-    EquipmentSourceAdapter, EquipmentSourceConfigurationError, EquipmentSourcePolicy,
-    build_equipment_http_client,
+    EquipmentGameLinkResolver, EquipmentSourceAdapter, EquipmentSourceConfigurationError,
+    EquipmentSourcePolicy, build_equipment_http_client,
 };
 pub use forum::{
     ForumPreviewAdapter, ForumRenderError, ForumThreadRenderer, render_auction_thread,

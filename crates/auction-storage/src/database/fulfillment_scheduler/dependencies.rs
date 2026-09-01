@@ -14,7 +14,9 @@ use uuid::Uuid;
 use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
-use auction_domain::EquipmentKeyEnvelope;
+use super::super::equipment_secrets::{
+    EquipmentSecretReadError, read_stored_equipment_secret_postgres,
+};
 
 impl SettlementFulfillmentRecipientReader for DatabaseStore {
     fn read_recipient(
@@ -113,54 +115,20 @@ async fn read_equipment_secret_postgres(
     pool: &crate::database::TrackedPool<sqlx::Postgres>,
     equipment_id: EquipmentId,
 ) -> Result<SettlementFulfillmentEquipmentSecret, ApplicationError> {
-    if equipment_id.is_nil() {
-        return Err(ApplicationError::FulfillmentDependencyMismatch);
-    }
-
-    let row = sqlx::query(
-        "SELECT equipment.id AS equipment_id,
-                equipment.external_equipment_id,
-                equipment_secrets.ciphertext,
-                equipment_secrets.nonce,
-                equipment_secrets.encryption_key_id,
-                equipment_secrets.fingerprint
-         FROM public.equipment AS equipment
-         INNER JOIN public.equipment_secrets
-             ON equipment_secrets.equipment_id = equipment.id
-         WHERE equipment.id = $1",
-    )
-    .bind(equipment_id.as_uuid())
-    .fetch_optional(pool)
-    .await
-    .map_err(|_| ApplicationError::FulfillmentDependencyUnavailable)?
-    .ok_or(ApplicationError::FulfillmentEquipmentSecretNotFound)?;
-
-    let stored_equipment_id: Uuid =
-        row.try_get("equipment_id").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let external_equipment_id: String = row
-        .try_get("external_equipment_id")
-        .map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let ciphertext: Vec<u8> =
-        row.try_get("ciphertext").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let nonce: Vec<u8> =
-        row.try_get("nonce").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let encryption_key_id: String = row
-        .try_get("encryption_key_id")
-        .map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let fingerprint: String =
-        row.try_get("fingerprint").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-
-    if stored_equipment_id != equipment_id.as_uuid()
-        || stored_equipment_id.is_nil()
-        || !valid_identity(&external_equipment_id)
-    {
-        return Err(ApplicationError::FulfillmentDependencyMismatch);
-    }
-
-    let envelope = EquipmentKeyEnvelope::new(ciphertext, nonce, encryption_key_id, fingerprint)
-        .map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-
-    Ok(SettlementFulfillmentEquipmentSecret { equipment_id, external_equipment_id, envelope })
+    let stored = read_stored_equipment_secret_postgres(pool, equipment_id)
+        .await
+        .map_err(|error| match error {
+            EquipmentSecretReadError::Unavailable => {
+                ApplicationError::FulfillmentDependencyUnavailable
+            }
+            EquipmentSecretReadError::Mismatch => ApplicationError::FulfillmentDependencyMismatch,
+        })?
+        .ok_or(ApplicationError::FulfillmentEquipmentSecretNotFound)?;
+    Ok(SettlementFulfillmentEquipmentSecret {
+        equipment_id: stored.equipment_id,
+        external_equipment_id: stored.external_equipment_id,
+        envelope: stored.envelope,
+    })
 }
 
 #[cfg(feature = "postgres")]

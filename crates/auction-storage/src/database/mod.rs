@@ -114,6 +114,8 @@ mod delivery_admin;
 mod delivery_audit;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod delivery_scheduler;
+#[cfg(feature = "postgres")]
+mod equipment_secrets;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod forum;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -126,6 +128,8 @@ mod lots;
 mod operations_alert;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod price_history;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod public_equipment_link;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod realtime;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

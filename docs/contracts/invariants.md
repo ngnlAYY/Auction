@@ -73,6 +73,14 @@ Admin 装备录入读取外部 URL 或 canonical JSON 时，raw 装备 key 只�
 普通装备字段。提交数据库前必须用配置中的数据密钥封装为带 nonce、key id 和 fingerprint
 的密文信封，数据库只保存信封。
 
+唯一允许离开该密文边界的公开数据路径，是 P09/P11 lot JSON 中既有的
+`game_equipment_url` 字段：服务端必须先核对当前公开 lot、装备 owner、world、无 key 投影和
+密文信封，再在短生命周期内解密并构造固定 HentaVerse origin 的完整 URL。该显式产品边界允许
+10 位 key 出现在 P09/P11 响应体和浏览器 `href` 中，但不得进入日志、审计、事件、命令账本或
+持久化缓存；两条响应必须使用 `no-store` 与全局 `no-referrer`。SQLite Lite 必须保留 lot 读取并
+把该字段留空，不能返回看似可点击的 keyless URL。浏览器向 HentaVerse 发起的用户主动导航会按
+外部装备协议携带 key，这是该功能的显式交付边界。
+
 PostgreSQL 完整档的录入必须在同一 Serializable 事务中完成命令账本占位、世界级目标
 锁、玩家资格检查、装备与密文、submission、pending lot、拍卖版本、审计记录和实时事件；
 任一项失败都必须回滚。外部来源读取发生在写事务之前，来源失败不能留下半个 lot。相同

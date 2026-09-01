@@ -1,6 +1,7 @@
 //! Public 补偿流水详情及其金额/类型展示。
 
 use super::*;
+use auction_web_shared::TruncatedText;
 
 #[component]
 pub(super) fn CompensationMovementDetails(
@@ -96,6 +97,13 @@ fn CompensationMovementRow(
     } else {
         ""
     };
+    let equipment =
+        match (movement.equipment_name.as_deref(), movement.equipment_category.as_deref()) {
+            (Some(name), Some(category)) => format!("{name}({category})"),
+            (Some(name), None) => name.to_owned(),
+            (None, Some(category)) => category.to_owned(),
+            (None, None) => "—".to_owned(),
+        };
     rsx! {
         tr {
             td {
@@ -112,14 +120,7 @@ fn CompensationMovementRow(
                 }
             }
             td {
-                if let Some(name) = movement.equipment_name {
-                    "{name}"
-                } else {
-                    "—"
-                }
-                if let Some(category) = movement.equipment_category {
-                    small { "{category}" }
-                }
+                TruncatedText { value: equipment, size: "wide", portal: true }
             }
             td { "{world_label(&world_id)}" }
             td { span { class: kind_class, "{compensation_kind_label(&movement.kind)}" } }

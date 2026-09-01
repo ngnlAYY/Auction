@@ -17,7 +17,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
     let detail = if projection.projection_kind == "preview" {
         let row = sqlx::query(
             "SELECT
-                l.id, l.auction_id, l.category_number AS lot_number, l.status, l.start_price,
+                l.id, l.auction_id, l.equipment_id, l.category_number AS lot_number, l.status, l.start_price,
                 submission.seller AS seller_name,
                 e.external_equipment_id, e.name AS equipment_name,
                 e.category AS equipment_category, e.attributes AS equipment_attributes
@@ -36,8 +36,13 @@ pub(in crate::database::lots) async fn detail_sqlite(
             transaction.commit().await.map_err(|_| storage_error("提交 Lite lot 详情事务失败"))?;
             return Ok(None);
         };
+        let equipment_id = EquipmentId::from_uuid(uuid_from_blob(
+            row.try_get("equipment_id").map_err(|_| storage_error("读取 Lite 预览装备标识失败"))?,
+            "Lite 预览装备标识",
+        )?);
         let world_id = projection.world_id.clone();
         PublicLotDetail {
+            equipment_id,
             projection,
             preview: Some(map_sqlite_preview_detail(row, &world_id)?),
             live: None,
@@ -45,7 +50,7 @@ pub(in crate::database::lots) async fn detail_sqlite(
     } else {
         let row = sqlx::query(
             "SELECT
-                l.id, l.auction_id, l.category_number AS lot_number, l.status, l.start_price, l.current_price,
+                l.id, l.auction_id, l.equipment_id, l.category_number AS lot_number, l.status, l.start_price, l.current_price,
                 CASE WHEN l.leader_user_id IS NULL THEN 0 ELSE 1 END AS has_leader,
                 l.material,
                 CAST(json_extract(a.policy_snapshot, '$.bid_increment_ppm') AS INTEGER) AS policy_bid_increment_ppm,
@@ -72,9 +77,14 @@ pub(in crate::database::lots) async fn detail_sqlite(
             transaction.commit().await.map_err(|_| storage_error("提交 Lite lot 详情事务失败"))?;
             return Ok(None);
         };
+        let equipment_id = EquipmentId::from_uuid(uuid_from_blob(
+            row.try_get("equipment_id").map_err(|_| storage_error("读取 Lite 正式装备标识失败"))?,
+            "Lite 正式装备标识",
+        )?);
         let summary = map_sqlite_live(row, &projection.world_id)?;
         let attributes = summary.equipment.attributes.clone();
         PublicLotDetail {
+            equipment_id,
             projection,
             preview: None,
             live: Some(PublicLiveLotDetail { summary, equipment_attributes: attributes }),

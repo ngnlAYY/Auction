@@ -54,9 +54,37 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
     let stats_start =
         usize::try_from(current_stats_page.saturating_sub(1).saturating_mul(stats_page_size))
             .unwrap_or(usize::MAX);
+    let game_equipment_href = equipment.game_equipment_url.clone();
     rsx! {
         div { class: "public-auction-equipment",
-            h2 { "{equipment.name}" }
+            if game_equipment_href.is_empty() {
+                h2 {
+                    TruncatedText {
+                        value: equipment.name.clone(),
+                        size: "wide",
+                        class_name: "public-auction-equipment__name",
+                        portal: true,
+                    }
+                }
+            } else {
+                h2 {
+                    a {
+                        class: "public-auction-equipment__name-link",
+                        href: game_equipment_href.clone(),
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        aria_label: equipment.name.clone(),
+                        title: equipment.name.clone(),
+                        TruncatedText {
+                            value: equipment.name.clone(),
+                            size: "wide",
+                            class_name: "public-auction-equipment__name",
+                            focusable: false,
+                            portal: true,
+                        }
+                    }
+                }
+            }
             dl {
                 if let Some(category) = equipment.category.as_deref() {
                     dt { {t!("equipment-category")} }
@@ -91,8 +119,12 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
                         tbody {
                             for (name, stat) in equipment.stats.iter().skip(stats_start).take(stats_page_size as usize) {
                                 tr {
-                                    th { scope: "row", "data-label": t!("equipment-stat-name"), "{name}" }
-                                    td { "data-label": t!("equipment-stat-value"), "{stat.value}" }
+                                    th { scope: "row", "data-label": t!("equipment-stat-name"),
+                                        TruncatedText { value: name.clone(), size: "compact", portal: true }
+                                    }
+                                    td { "data-label": t!("equipment-stat-value"),
+                                        TruncatedText { value: stat.value.clone(), size: "compact", portal: true }
+                                    }
                                     td { "data-label": t!("equipment-stat-base"), {stat.base.map(|value| format!("{value:.2}")).unwrap_or_else(|| t!("value-empty"))} }
                                     td { "data-label": t!("equipment-stat-roll"), {stat.roll.map(|value| format!("{value:.1}%")).unwrap_or_else(|| t!("value-empty"))} }
                                 }
@@ -112,9 +144,9 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
             if !equipment.game_equipment_url.is_empty() {
                 a {
                     class: "public-auction-equipment__link",
-                    href: equipment.game_equipment_url,
+                    href: game_equipment_href.clone(),
                     target: "_blank",
-                    rel: "noreferrer",
+                    rel: "noopener noreferrer",
                     {t!("equipment-view-in-game")}
                 }
             }

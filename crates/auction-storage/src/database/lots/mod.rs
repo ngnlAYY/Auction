@@ -12,7 +12,7 @@ use auction_application::{
     PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicLotReader, PublicPreviewLotDetail,
     PublicPreviewLotSummary, RepositoryError,
 };
-use auction_domain::{AuctionRules, BidAmount};
+use auction_domain::{AuctionRules, BidAmount, EquipmentId};
 #[cfg(feature = "sqlite")]
 use chrono::NaiveDateTime;
 use chrono::{DateTime, Utc};

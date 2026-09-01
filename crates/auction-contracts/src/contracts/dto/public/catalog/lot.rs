@@ -46,6 +46,7 @@ pub struct PublicEquipmentResponse {
     pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
+    /// PostgreSQL 的 P09/P11 返回含 10 位 key 的真实 URL；SQLite Lite 返回空字符串。
     pub game_equipment_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<serde_json::Value>,
@@ -91,6 +92,7 @@ pub struct PublicPreviewLotResponse {
     pub equipment_level: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
+    /// PostgreSQL 的 P09/P11 返回含 10 位 key 的真实 URL；SQLite Lite 返回空字符串。
     pub game_equipment_url: String,
 }
 
@@ -112,6 +114,7 @@ pub struct PublicPreviewEquipmentResponse {
     pub stats: BTreeMap<String, PublicEquipmentStatResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
+    /// PostgreSQL 的 P11 返回含 10 位 key 的真实 URL；SQLite Lite 返回空字符串。
     pub game_equipment_url: String,
 }
 

@@ -34,6 +34,37 @@ pub(crate) fn CatalogParticipant(
     }
 }
 
+/// 装备名称保持单行截断；完整档直接导航真实装备 URL，Lite 档保留纯文本。
+#[component]
+pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {
+    rsx! {
+        if game_equipment_url.is_empty() {
+            TruncatedText {
+                value: name.clone(),
+                class_name: "ui-equipment-name",
+                portal: true,
+                legacy_dom: true,
+            }
+        } else {
+            a {
+                class: "public-auction-catalog__equipment-link",
+                href: game_equipment_url,
+                target: "_blank",
+                rel: "noopener noreferrer",
+                aria_label: name.clone(),
+                title: name.clone(),
+                TruncatedText {
+                    value: name.clone(),
+                    class_name: "ui-equipment-name",
+                    focusable: false,
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
     let status_label = lot_status_label(&row.status);
@@ -52,12 +83,10 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                     "{row.code}"
                 }
             }
-            td { "data-label": t!("catalog-item"),
-                TruncatedText {
-                    value: row.name.clone(),
-                    class_name: "ui-equipment-name",
-                    portal: true,
-                    legacy_dom: true,
+            td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
+                CatalogEquipmentName {
+                    name: row.name.clone(),
+                    game_equipment_url: row.game_equipment_url.clone(),
                 }
             }
             td {

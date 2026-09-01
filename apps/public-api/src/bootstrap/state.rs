@@ -10,7 +10,8 @@ use auction_application::ReadModelCache;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{
     AuctionReader, CachedPublicRulesReader, Clock, CompetitionCommandPort, PublicAccountReader,
-    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader, PublicForumReader,
+    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader,
+    PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader, PublicForumReader,
     PublicLoginAuthenticator, PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader,
     PublicRulesReader, PublicSessionConfig, PublicSessionPort, PublicSessionService,
     PublicSessionStore, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
@@ -20,6 +21,8 @@ use auction_config::AppConfig;
 use auction_http::PublicApiState;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_http::{RealtimeHub, RealtimeHubSink};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+use auction_integrations::{DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener};
 use auction_observability::ProcessMetrics;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{
@@ -27,7 +30,7 @@ use auction_observability::{
     ProcessRole, ServiceName,
 };
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
+use auction_storage::{DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -47,6 +50,26 @@ impl Clock for SystemClock {
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+fn configure_equipment_links(
+    config: &AppConfig,
+    store: &Arc<DatabaseStore>,
+) -> anyhow::Result<Option<Arc<dyn PublicEquipmentLinkResolver>>> {
+    if store.backend() == DatabaseBackend::Sqlite {
+        return Ok(Some(Arc::new(EquipmentGameLinkResolver::unsupported())));
+    }
+    let (key_id, encoded_key) = match (config.equipment_data_key_id(), config.equipment_data_key())
+    {
+        (Some(key_id), Some(encoded_key)) => (key_id, encoded_key),
+        (None, None) => return Ok(None),
+        _ => anyhow::bail!("Public 真实装备 URL 的数据密钥配置不完整"),
+    };
+    let data_key = DataKey::from_base64(key_id, encoded_key)
+        .map_err(|_| anyhow::anyhow!("Public 真实装备 URL 的数据密钥配置无效"))?;
+    let secrets: Arc<dyn PublicEquipmentLinkSecretReader> = store.clone();
+    Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(data_key)))))
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
@@ -57,7 +80,7 @@ pub(super) async fn configure_state(
     let Some(database_url) = config.database_url() else {
         return Ok((
             PublicApiState::new(
-                None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 security,
             ),
             None,
@@ -100,6 +123,7 @@ pub(super) async fn configure_state(
     let forum: Arc<dyn PublicForumReader> = store.clone();
     let auctions: Arc<dyn AuctionReader> = store.clone();
     let lots: Arc<dyn PublicLotReader> = store.clone();
+    let equipment_links = configure_equipment_links(config, &store)?;
     let bid_log: Arc<dyn PublicBidLogReader> = store.clone();
     let price_history: Arc<dyn PublicPriceHistoryReader> = store.clone();
     let realtime: Arc<dyn PublicRealtimeReader> = store.clone();
@@ -142,6 +166,7 @@ pub(super) async fn configure_state(
         Some(forum),
         Some(auctions),
         Some(lots),
+        equipment_links,
         Some(bid_log),
         Some(price_history),
         Some(realtime),
@@ -175,7 +200,8 @@ pub(super) async fn configure_state(
     }
     Ok((
         PublicApiState::new(
-            None, None, None, None, None, None, None, None, None, None, None, None, None, security,
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            security,
         ),
         None,
         None,
