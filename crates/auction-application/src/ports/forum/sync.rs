@@ -17,6 +17,16 @@ use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarge
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
 
+/// 返回固定 #1 的公开布局标记；用于确认首帖属于当前拍卖，而不是只依赖楼层位置。
+pub fn forum_catalog_marker(auction_id: AuctionId) -> String {
+    format!("auction-catalog-v1:{}", auction_id.as_uuid())
+}
+
+/// 返回固定 #2 的公开布局标记；Worker 必须同时核对持久化 post ID，通用解析器不能按正文跳过帖子。
+pub fn forum_system_log_marker(auction_id: AuctionId) -> String {
+    format!("auction-system-log-v1:{}", auction_id.as_uuid())
+}
+
 /// 论坛远程操作的安全失败分类。
 ///
 /// 只保存稳定错误码和重试栅栏，不保存远端 URL、Cookie、响应正文或提交正文。
@@ -69,6 +79,8 @@ pub struct ForumSyncClaim {
     pub claimed_at: DateTime<Utc>,
     pub lease_until: DateTime<Utc>,
     pub source_revision: i64,
+    /// 历史 published 主题的已持久化身份；仅用于首次补齐固定 #1/#2，不允许由标题猜测替代。
+    pub existing_thread_id: Option<String>,
     /// 领取前的稳定失败码；过期 `publishing` 租约由存储适配器合成为 `write_unknown`。
     pub previous_failure_code: Option<String>,
 }
@@ -112,6 +124,18 @@ pub struct ForumRenderedThread {
     pub body: String,
 }
 
+/// 固定论坛楼层的 BBCode 正文；内容可能包含公开装备 URL，`Debug` 始终脱敏。
+#[derive(Clone, PartialEq, Eq)]
+pub struct ForumRenderedPost {
+    pub body: String,
+}
+
+impl fmt::Debug for ForumRenderedPost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("ForumRenderedPost").field("body", &"[REDACTED]").finish()
+    }
+}
+
 impl fmt::Debug for ForumRenderedThread {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -128,6 +152,21 @@ pub struct ForumPublishedThread {
     pub board_id: i32,
     pub thread_id: String,
     pub thread_url: String,
+}
+
+/// 远端论坛单个帖子的稳定身份。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumPublishedPost {
+    pub thread_id: String,
+    pub post_id: String,
+}
+
+/// 一场拍卖固定的论坛楼层布局：#1 目录，#2 系统编辑/错误记录。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumPublishedLayout {
+    pub thread: ForumPublishedThread,
+    pub catalog_post_id: String,
+    pub system_log_post_id: String,
 }
 
 /// 论坛未知写入与人工授权状态的安全运维投影。
@@ -176,7 +215,8 @@ pub trait ForumSyncStore: Send + Sync {
         &self,
         claim: ForumSyncClaim,
         rendered: ForumRenderedThread,
-        published: ForumPublishedThread,
+        system_log: ForumRenderedPost,
+        published: ForumPublishedLayout,
         published_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
@@ -215,6 +255,27 @@ pub trait ForumPublisher: Send + Sync {
     ) -> ApplicationFuture<'_, ForumPublishedThread>;
 }
 
+/// 固定论坛楼层写入端口；实现必须校验 exact thread/post 身份并保持 POST 后未知结果栅栏。
+pub trait ForumPostWriter: Send + Sync {
+    /// 在指定主题追加一条回复；仅用于建立固定 #2。
+    fn reply_topic(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        body: ForumRenderedPost,
+    ) -> ApplicationFuture<'_, ForumPublishedPost>;
+
+    /// 编辑指定稳定 post ID；`title` 仅在编辑 #1 时用于保持主题标题不变。
+    fn edit_post(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+        title: Option<String>,
+        body: ForumRenderedPost,
+    ) -> ApplicationFuture<'_, ForumPublishedPost>;
+}
+
 /// 将同一数据库快照转换为不含内部密钥和数据库行的论坛正文。
 pub trait ForumRenderer: Send + Sync {
     fn render(
@@ -222,6 +283,23 @@ pub trait ForumRenderer: Send + Sync {
         snapshot: ForumAuctionSnapshot,
         equipment_links: Vec<PublicEquipmentGameLink>,
     ) -> Result<ForumRenderedThread, ForumRenderError>;
+
+    /// 渲染固定 #2 的初始系统日志。
+    fn render_system_log(
+        &self,
+        auction_id: AuctionId,
+        entries: Vec<ForumSystemLogEntry>,
+    ) -> Result<ForumRenderedPost, ForumRenderError>;
+}
+
+/// 固定 #2 中展示的有界处理结果；正文只包含论坛公开帖子与安全错误摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumSystemLogEntry {
+    pub post_number: usize,
+    pub line_number: Option<usize>,
+    pub code: String,
+    pub message: String,
+    pub ignored: bool,
 }
 
 /// 将领域世界转换为旧论坛契约使用的稳定名称。

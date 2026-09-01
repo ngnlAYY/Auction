@@ -1,7 +1,7 @@
 //! E-Hentai 论坛固定 origin 网关。
 //!
-//! 该适配器只实现旧论坛协议所需的两类操作：按标题查找或创建主题，以及读取已发布主题。
-//! 所有响应都有硬字节上限；创建主题在 POST 发出后只接受可证明的远端主题身份，否则返回
+//! 该适配器实现主题查找/创建/读取，以及固定 #2 回复和固定 post 编辑。
+//! 所有响应都有硬字节上限；任何写入在 POST 发出后只接受可证明的远端身份，否则返回
 //! `write_unknown`，上层必须先对账，不能盲目重发。
 
 use std::{
@@ -13,7 +13,8 @@ use std::{
 
 use auction_application::{
     AdminCredentialRuntimeWriter, AdminForumPreviewResult, ApplicationError, ApplicationFuture,
-    ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedThread, ForumTopicReader,
+    ForumPostWriter, ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError,
+    ForumRenderedPost, ForumRenderedThread, ForumTopicReader,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;

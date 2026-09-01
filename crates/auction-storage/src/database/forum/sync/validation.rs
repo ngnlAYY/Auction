@@ -1,7 +1,8 @@
 //! 论坛主题同步的输入闭集、编码约束和后端能力错误。
 
 use auction_application::{
-    ApplicationError, ForumPublishedThread, ForumRenderedThread, ForumSyncClaim, RepositoryError,
+    ApplicationError, ForumPublishedLayout, ForumPublishedThread, ForumRenderedPost,
+    ForumRenderedThread, ForumSyncClaim, RepositoryError,
 };
 #[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
@@ -11,6 +12,7 @@ pub(super) const MAX_WORKER_ID_BYTES: usize = 256;
 pub(super) const MAX_FAILURE_CODE_BYTES: usize = 128;
 pub(super) const MAX_FAILURE_DETAIL_BYTES: usize = 2048;
 pub(super) const MAX_THREAD_ID_BYTES: usize = 64;
+pub(super) const MAX_FIXED_POST_ID_BYTES: usize = 32;
 pub(super) const MAX_THREAD_URL_BYTES: usize = 2048;
 pub(super) const MAX_RENDERED_TITLE_BYTES: usize = 512;
 pub(super) const MAX_RENDERED_BODY_BYTES: usize = 65_531;
@@ -21,6 +23,10 @@ pub(super) fn valid_claim(claim: &ForumSyncClaim) -> bool {
         && valid_text(&claim.worker_id, MAX_WORKER_ID_BYTES)
         && claim.claim_fencing > 0
         && claim.source_revision > 0
+        && claim
+            .existing_thread_id
+            .as_ref()
+            .is_none_or(|value| valid_decimal_id(value, MAX_THREAD_ID_BYTES))
         && claim
             .previous_failure_code
             .as_ref()
@@ -42,11 +48,27 @@ pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
             .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
 }
 
+pub(super) fn valid_rendered_post(rendered: &ForumRenderedPost) -> bool {
+    !rendered.body.trim().is_empty()
+        && rendered.body.len() <= MAX_RENDERED_BODY_BYTES
+        && !rendered
+            .body
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+}
+
 pub(super) fn valid_published(published: &ForumPublishedThread) -> bool {
     published.board_id > 0
         && valid_decimal_id(&published.thread_id, MAX_THREAD_ID_BYTES)
         && valid_text(&published.thread_url, MAX_THREAD_URL_BYTES)
         && published.thread_url.starts_with("https://")
+}
+
+pub(super) fn valid_layout(published: &ForumPublishedLayout) -> bool {
+    valid_published(&published.thread)
+        && valid_decimal_id(&published.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
+        && valid_decimal_id(&published.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
+        && published.catalog_post_id != published.system_log_post_id
 }
 
 pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
@@ -57,7 +79,11 @@ pub(super) fn valid_text(value: &str, maximum: usize) -> bool {
 }
 
 fn valid_decimal_id(value: &str, maximum: usize) -> bool {
-    !value.is_empty() && value.len() <= maximum && value.bytes().all(|byte| byte.is_ascii_digit())
+    !value.is_empty()
+        && value.len() <= maximum
+        && value.as_bytes()[0].is_ascii_digit()
+        && value.as_bytes()[0] != b'0'
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(feature = "postgres")]

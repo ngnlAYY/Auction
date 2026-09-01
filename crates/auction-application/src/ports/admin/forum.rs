@@ -110,6 +110,10 @@ pub struct AdminForumWarning {
 /// 完整论坛预览结果。
 #[derive(Debug, Clone)]
 pub struct AdminForumPreviewResult {
+    /// 目录首帖的远端稳定 post ID；Admin HTTP 契约无需暴露该内部写入证明。
+    pub catalog_post_id: String,
+    /// 目录首帖的规范纯文本；只用于固定楼层归属校验，不进入 Admin HTTP 契约。
+    pub catalog_post_text: String,
     pub catalog: AdminForumCatalog,
     pub posts: Vec<AdminForumBidPost>,
     pub warnings: Vec<AdminForumWarning>,
@@ -119,6 +123,9 @@ impl AdminForumPreviewResult {
     /// 校验解析器返回的边界，防止异常输入生成无法安全输出的投影。
     pub fn validate(&self) -> Result<(), AdminForumPreviewError> {
         if self.catalog.lots.is_empty()
+            || !valid_text(&self.catalog_post_id, 256)
+            || self.catalog_post_text.is_empty()
+            || self.catalog_post_text.len() > 1_000_000
             || self.catalog.lots.len() > 10_000
             || self.posts.len() > 10_000
             || self.warnings.len() > 20_000

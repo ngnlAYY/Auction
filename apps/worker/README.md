@@ -108,13 +108,18 @@ PostgreSQL recovery case 的 due 推进独立于 MoogleMail transport；当前�
 fulfillment 满足后把 `refunding` case 收口为 `completed`；这些 resolution 写入与 worker 审计均
 在 PostgreSQL Serializable 事务内完成。
 PostgreSQL 完整档启用 `[worker.forum]` 后，Worker 还会装配 E-Hentai 主题发布、主题读取和
-回帖导入：身份必须先在 `forum_bidder_identities` 登记，`bid`、`proxy` 和 `proxy lower`
-通过现有竞价命令端口执行；`start`、`cancel` 和 PM-only `notify` 在旧版 `forumingest` 中就是
-warning-only，当前不越过该兼容边界；MM `notify` 进入 MoogleMail delivery outbox。主题发布使用
+回帖导入：论坛作者 ID 与 MM 的 `users.game_player_id` 是同一身份。已有用户直接复用；尚未注册
+MM 的作者会在 Users-owner Serializable 事务内建立 revoked-key 的 `forum_only` 临时主体及世界映射，
+后续 MM 注册按同一玩家 ID 恢复该用户。`bid`、`proxy` 和 `proxy lower` 通过现有竞价命令端口执行；
+`start`、`cancel` 和 PM-only `notify` 保持 warning-only 并显示在固定 #2；MM `notify` 进入
+MoogleMail delivery outbox。主题发布使用
 持久化 claim/fencing，只为已经实际开放的 `live` 拍卖创建一次；装备真实 URL 在渲染前由
 `equipment_data_key` 解密边界批量生成，明文 key 不进入快照或日志。远端写入不确定或本地证明写入失败时先按精确标题只读对账，命中只补本地
 证明，未命中停在等待人工授权。只有 `auctionctl authorize-forum-write-retry` 经逐字目标确认写入
-幂等授权和追加审计后才允许下一次 POST；回帖命令使用持久化账本和稳定命令 ID。
+幂等授权和追加审计后才允许下一次 POST。主题固定 #1 拍卖目录、#2 编辑/错误记录；Worker 持久化
+两个 exact post ID 后才处理 #3+，竞价结果提交后刷新 #1，并把编辑、解析、身份和确定拒绝更新到
+#2；仍待重试的命令也会显示在 #2。固定帖刷新逐主题持有独立内容 lease/fencing，既有 #2 不是
+系统标记时不会覆盖。回帖命令使用持久化账本和稳定命令 ID。
 Forum 默认立即执行一轮，再等待一分钟和最多五秒抖动；主题逐条领取，默认 claim 300 秒，发布
 和回帖单主题总时限 93 秒，发布阶段失败后仍会继续本轮回帖导入。
 论坛完整档不在 SQLite Lite 中伪装提供。

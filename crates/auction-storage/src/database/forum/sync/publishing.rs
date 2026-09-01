@@ -1,7 +1,7 @@
 //! 论坛主题同步发布确认与失败退避的 PostgreSQL 状态推进。
 
 use auction_application::{
-    ApplicationError, ForumPublishedThread, ForumRenderedThread, ForumSyncClaim,
+    ApplicationError, ForumPublishedLayout, ForumRenderedPost, ForumRenderedThread, ForumSyncClaim,
 };
 use chrono::{DateTime, Utc};
 
@@ -12,7 +12,8 @@ pub(super) async fn publish_postgres(
     store: &PostgresStore,
     claim: &ForumSyncClaim,
     rendered: &ForumRenderedThread,
-    published: &ForumPublishedThread,
+    system_log: &ForumRenderedPost,
+    published: &ForumPublishedLayout,
     published_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
     let result = sqlx::query(
@@ -25,22 +26,30 @@ pub(super) async fn publish_postgres(
              body = $3,
              thread_id = $4,
              thread_url = $5,
+             catalog_post_id = $6,
+             system_log_post_id = $7,
+             system_log_body = $8,
+             content_revision = CASE WHEN content_revision < 1 THEN 1 ELSE content_revision + 1 END,
+             content_synced_at = $9,
              last_error_code = NULL,
              last_error_detail = NULL,
-             updated_at = $6
+             updated_at = $9
          WHERE auction_id = $1
            AND status = 'publishing'
-           AND claim_token = $7
-           AND claim_owner = $8
-           AND claim_fencing = $9
-           AND source_revision = $10
-           AND lease_expires_at > $6",
+           AND claim_token = $10
+           AND claim_owner = $11
+           AND claim_fencing = $12
+           AND source_revision = $13
+           AND lease_expires_at > $9",
     )
     .bind(claim.auction_id.as_uuid())
     .bind(&rendered.title)
     .bind(&rendered.body)
-    .bind(&published.thread_id)
-    .bind(&published.thread_url)
+    .bind(&published.thread.thread_id)
+    .bind(&published.thread.thread_url)
+    .bind(&published.catalog_post_id)
+    .bind(&published.system_log_post_id)
+    .bind(&system_log.body)
     .bind(published_at)
     .bind(claim.claim_token)
     .bind(&claim.worker_id)

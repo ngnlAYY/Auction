@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000024` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000025` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -279,6 +279,9 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 `000024` 保留 `lots.lot_number` 的场次内全局顺序，并以不可变
 `category_key/category_number` 为七类装备分别分配从 1 开始的用户可见编号；既有已开始发布的
 论坛主题继续使用冻结的旧编号方案，新主题使用分类编号，避免历史帖子命令被迁移重解释；
+`000025` 为 `auction_forum_sync` 增加固定楼层的远端 post ID、系统日志正文、单调内容版本，以及
+独立的刷新 due 水位、claim token、owner、lease 与 fencing；历史 published 行不猜测 #2，必须先
+读取主题并完成 exact post 对账；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -404,8 +407,16 @@ send/return transport 已接入：邮件来源的未售/撤回执行原邮件退
 `auction_forum_sync` 的 claim/fencing。Worker 在渲染 BBCode 前才按 lot 的无 key 装备目标批量解析真实
 HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计或事件。写入结果未知或本地证明写入失败时先按
 精确标题 GET，命中只补本地证明，未命中则等待 `forum_sync_admin_commands` 的幂等人工授权，未经授权不得再次 POST。
-回帖必须经过登记身份、lot
-映射和 `auction_forum_bid_commands` 幂等账本，再调用现有竞价端口。Forum 在独立顺序循环中先
+每个主题固定由系统维护 #1 拍卖目录和 #2 编辑/错误记录；两者的真实 post ID 持久化后才允许
+导入 #3 及后续用户回复。竞价命令事务完成后，Worker 从权威 lot 快照重新渲染 #1，并把编辑帖、
+解析警告、身份失败和确定拒绝稳定渲染到 #2；编辑只命中已保存 post ID，两个远端证明均通过后才以
+内容版本 CAS 更新本地证明。固定帖刷新逐主题领取独立内容 lease/fencing，无正文变化也推进公平扫描
+水位；仍待重试的命令会显示在 #2。既有 #2 不是同拍卖系统标记时失败关闭，不覆盖用户帖子。论坛
+作者链接的 `showuser` 数字 ID 与 MM 的 `users.game_player_id` 是同一身份，论坛昵称不参与身份
+兜底；Users owner 会在 Serializable 事务内复用已有用户，或为尚未注册 MM 的作者建立 revoked-key
+`forum_only` 临时主体及 world 映射，后续 MM 注册按
+同一玩家 ID 恢复该用户。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
+现有竞价端口。Forum 在独立顺序循环中先
 发布后读取回帖，两阶段错误分别记录，发布失败不会跳过回帖扫描，也不会终止其它 Worker owner；
 主题只在即将处理时逐条领取，避免待执行队列提前消耗租约；人工授权由 `auctionctl` 的只读清单、
 逐字目标确认和追加审计命令拥有；SQLite Lite 明确不提供该

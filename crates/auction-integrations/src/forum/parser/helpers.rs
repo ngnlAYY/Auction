@@ -14,11 +14,6 @@ pub(super) fn map_post(post: ParsedPost) -> AdminForumPost {
     }
 }
 
-pub(super) fn is_audit_post(value: &str) -> bool {
-    let value = value.to_ascii_lowercase();
-    value.contains("warning log:") || value.contains("manually ignored posts")
-}
-
 pub(super) fn warning(
     line: usize,
     code: &str,

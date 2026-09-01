@@ -5,8 +5,9 @@
 //! 这条完整档能力。
 
 use auction_application::{
-    ApplicationFuture, ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity,
-    ForumCommandStart, ForumLotTarget, ForumReplyStore, ForumReplyTopic,
+    ApplicationFuture, ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord,
+    ForumBidderIdentity, ForumCommandOutcome, ForumCommandStart, ForumLotTarget, ForumRenderedPost,
+    ForumRenderedThread, ForumReplyStore, ForumReplyTopic,
 };
 use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
 use chrono::{DateTime, Utc};
@@ -16,6 +17,10 @@ use super::super::DatabaseStore;
 
 mod commands;
 mod cursor;
+#[cfg(feature = "postgres")]
+mod fixed_posts;
+#[cfg(feature = "postgres")]
+mod identity;
 mod queries;
 mod validation;
 
@@ -24,28 +29,45 @@ use commands::{begin_command_postgres, finish_command_postgres};
 #[cfg(feature = "postgres")]
 use cursor::mark_scanned_postgres;
 #[cfg(feature = "postgres")]
+use fixed_posts::{finish_topic_scan_postgres, record_fixed_posts_update_postgres};
+#[cfg(feature = "postgres")]
+use identity::resolve_bidder_postgres;
+#[cfg(feature = "postgres")]
 use queries::{
-    active_proxy_postgres, list_published_topics_postgres, lot_targets_postgres,
-    resolve_bidder_postgres,
+    active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
+    lot_targets_postgres,
 };
 #[cfg(feature = "sqlite")]
 use validation::capability_error;
 use validation::{
-    MAX_DISPLAY_NAME_BYTES, MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES,
-    MAX_EXTERNAL_ACCOUNT_BYTES, MAX_REPLY_BATCH_SIZE, storage_error, valid_command_record,
-    valid_optional_text, valid_text,
+    MAX_DISPLAY_NAME_BYTES, MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
+    MAX_FORUM_PLAYER_ID_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES, storage_error,
+    valid_command_record, valid_decimal_id, valid_optional_text, valid_text,
 };
 
 impl ForumReplyStore for DatabaseStore {
-    fn list_published_topics(&self, limit: u16) -> ApplicationFuture<'_, Vec<ForumReplyTopic>> {
+    fn claim_published_topics(
+        &self,
+        worker_id: String,
+        now: DateTime<Utc>,
+        lease_until: DateTime<Utc>,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>> {
         Box::pin(async move {
-            if limit == 0 || limit > MAX_REPLY_BATCH_SIZE {
+            if !valid_text(&worker_id, 256)
+                || now.timestamp_nanos_opt().is_none()
+                || lease_until.timestamp_nanos_opt().is_none()
+                || lease_until <= now
+                || limit == 0
+                || limit > MAX_REPLY_BATCH_SIZE
+            {
                 return Err(storage_error("论坛回帖主题批量大小无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    list_published_topics_postgres(store, limit).await
+                    claim_published_topics_postgres(store, &worker_id, now, lease_until, limit)
+                        .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),
@@ -76,7 +98,7 @@ impl ForumReplyStore for DatabaseStore {
         Box::pin(async move {
             #[cfg(feature = "sqlite")]
             let _ = world;
-            if !valid_text(&external_account_id, MAX_EXTERNAL_ACCOUNT_BYTES)
+            if !valid_decimal_id(&external_account_id, MAX_FORUM_PLAYER_ID_BYTES)
                 || !valid_text(&display_name, MAX_DISPLAY_NAME_BYTES)
             {
                 return Err(storage_error("论坛回帖身份参数无效"));
@@ -149,6 +171,117 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     finish_command_postgres(store, command_id, &status, &error_code, &safe_detail)
                         .await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn command_outcomes(
+        &self,
+        auction_id: AuctionId,
+        thread_id: String,
+    ) -> ApplicationFuture<'_, Vec<ForumCommandOutcome>> {
+        Box::pin(async move {
+            if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
+                return Err(storage_error("论坛命令结果查询参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    command_outcomes_postgres(store, auction_id, &thread_id).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn load_current_snapshot(
+        &self,
+        auction_id: AuctionId,
+    ) -> ApplicationFuture<'_, ForumAuctionSnapshot> {
+        Box::pin(async move {
+            if auction_id.is_nil() {
+                return Err(storage_error("论坛刷新快照拍卖标识无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    super::sync::load_current_snapshot_postgres(store, auction_id).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn record_fixed_posts_update(
+        &self,
+        topic: ForumReplyTopic,
+        catalog: ForumRenderedThread,
+        system_log: ForumRenderedPost,
+        updated_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            if topic.auction_id.is_nil()
+                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
+                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
+                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
+                || topic.catalog_post_id == topic.system_log_post_id
+                || topic.content_revision <= 0
+                || topic.content_claim_token.is_nil()
+                || !valid_text(&topic.content_claim_owner, 256)
+                || topic.content_claim_fencing <= 0
+                || topic.content_lease_until <= updated_at
+                || !super::sync::valid_fixed_post_update(&catalog, &system_log)
+                || updated_at.timestamp_nanos_opt().is_none()
+            {
+                return Err(storage_error("论坛固定楼层更新参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    record_fixed_posts_update_postgres(
+                        store,
+                        &topic,
+                        &catalog,
+                        &system_log,
+                        updated_at,
+                    )
+                    .await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn finish_topic_scan(
+        &self,
+        topic: ForumReplyTopic,
+        scanned_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            if topic.auction_id.is_nil()
+                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
+                || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
+                || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
+                || topic.catalog_post_id == topic.system_log_post_id
+                || topic.content_revision <= 0
+                || topic.content_claim_token.is_nil()
+                || !valid_text(&topic.content_claim_owner, 256)
+                || topic.content_claim_fencing <= 0
+                || scanned_at.timestamp_nanos_opt().is_none()
+                || topic.content_lease_until <= scanned_at
+            {
+                return Err(storage_error("论坛固定楼层扫描完成参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    finish_topic_scan_postgres(store, &topic, scanned_at).await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

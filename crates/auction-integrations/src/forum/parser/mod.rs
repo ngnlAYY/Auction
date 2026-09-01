@@ -1,6 +1,6 @@
 //! 论坛预览的语法分层与结果编排。
 
-use auction_application::{AdminForumBidPost, AdminForumCatalog, AdminForumPreviewResult};
+use auction_application::{AdminForumCatalog, AdminForumPreviewResult};
 
 #[path = "catalog.rs"]
 mod catalog;
@@ -28,8 +28,12 @@ fn parse_thread(posts: Vec<ParsedPost>) -> Result<AdminForumPreviewResult, ()> {
     let Some(catalog_post) = posts.first() else {
         return Err(());
     };
+    let catalog_post_id = catalog_post.id.clone();
+    let catalog_post_text = catalog_post.text.clone();
     let (catalog, catalog_warnings) = catalog::parse_catalog(&catalog_post.text)?;
     let mut result = AdminForumPreviewResult {
+        catalog_post_id,
+        catalog_post_text,
         catalog: AdminForumCatalog {
             categories: catalog.0,
             lots: catalog.1,
@@ -39,15 +43,6 @@ fn parse_thread(posts: Vec<ParsedPost>) -> Result<AdminForumPreviewResult, ()> {
         warnings: catalog_warnings,
     };
     for post in posts.into_iter().skip(1) {
-        if helpers::is_audit_post(&post.text) {
-            result.posts.push(AdminForumBidPost {
-                post: helpers::map_post(post),
-                commands: Vec::new(),
-                warnings: Vec::new(),
-                ignored: true,
-            });
-            continue;
-        }
         let parsed = commands::parse_bid_post(post, &result.catalog.lots);
         result.warnings.extend(parsed.1.iter().cloned());
         result.posts.push(parsed.0);

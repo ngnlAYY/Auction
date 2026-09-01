@@ -1,9 +1,11 @@
 use std::fmt::Write;
 
 use auction_application::{
-    ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError, ForumRenderedThread, ForumRenderer,
-    PublicEquipmentGameLink, forum_world_name,
+    ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
+    ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, PublicEquipmentGameLink,
+    forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
+use auction_domain::AuctionId;
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -53,6 +55,12 @@ pub fn render_auction_thread(
     }
 
     let mut body = String::new();
+    writeln!(
+        &mut body,
+        "[size=1][color=#888888]{}[/color][/size]",
+        forum_catalog_marker(snapshot.auction_id)
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
     writeln!(&mut body, "[center][size=5][b]{title}[/b][/size]")
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if let Some(public_url) = snapshot.public_url.as_deref() {
@@ -150,6 +158,96 @@ impl ForumRenderer for ForumThreadRenderer {
     ) -> Result<ForumRenderedThread, ForumRenderError> {
         render_auction_thread(snapshot, equipment_links)
     }
+
+    fn render_system_log(
+        &self,
+        auction_id: AuctionId,
+        entries: Vec<ForumSystemLogEntry>,
+    ) -> Result<ForumRenderedPost, ForumRenderError> {
+        render_system_log(auction_id, entries)
+    }
+}
+
+/// 稳定渲染固定 #2；相同的命令事实始终得到相同正文，避免无意义远端编辑。
+pub fn render_system_log(
+    auction_id: AuctionId,
+    mut entries: Vec<ForumSystemLogEntry>,
+) -> Result<ForumRenderedPost, ForumRenderError> {
+    if auction_id.is_nil() || entries.len() > 20_000 {
+        return Err(ForumRenderError::InvalidSnapshot);
+    }
+    entries.sort_by(|left, right| {
+        left.post_number
+            .cmp(&right.post_number)
+            .then_with(|| left.line_number.cmp(&right.line_number))
+            .then_with(|| left.code.cmp(&right.code))
+            .then_with(|| left.message.cmp(&right.message))
+            .then_with(|| left.ignored.cmp(&right.ignored))
+    });
+    entries.dedup();
+
+    let mut body = String::new();
+    writeln!(
+        &mut body,
+        "[size=1][color=#888888]{}[/color][/size]",
+        forum_system_log_marker(auction_id)
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    body.push_str(
+        "[b]System processing log[/b]\n\
+         This fixed post records edited or invalid bid commands. User bids begin at post #3.\n\n\
+         [b]Warning Log:[/b]\n",
+    );
+    let mut warning_count = 0_usize;
+    for entry in entries.iter().filter(|entry| !entry.ignored) {
+        if !valid_system_log_entry(entry) {
+            return Err(ForumRenderError::InvalidSnapshot);
+        }
+        warning_count += 1;
+        write!(&mut body, "• #{}", entry.post_number)
+            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        if let Some(line_number) = entry.line_number {
+            write!(&mut body, " line {line_number}").map_err(|_| ForumRenderError::BodyTooLarge)?;
+        }
+        writeln!(&mut body, ": [{}] {}", bbcode_text(&entry.code), bbcode_text(&entry.message))
+            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    }
+    if warning_count == 0 {
+        body.push_str("• None\n");
+    }
+    body.push_str("\n[b]Manually ignored posts (for transparency):[/b]\n");
+    let mut ignored_count = 0_usize;
+    for entry in entries.iter().filter(|entry| entry.ignored) {
+        if !valid_system_log_entry(entry) {
+            return Err(ForumRenderError::InvalidSnapshot);
+        }
+        ignored_count += 1;
+        writeln!(
+            &mut body,
+            "• #{}: [{}] {}",
+            entry.post_number,
+            bbcode_text(&entry.code),
+            bbcode_text(&entry.message)
+        )
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    }
+    if ignored_count == 0 {
+        body.push_str("• None\n");
+    }
+    body.push_str(
+        "\n[i]This post is maintained by the auction worker. Do not place bids here.[/i]\n",
+    );
+    if body.len() > MAX_BODY_BYTES {
+        return Err(ForumRenderError::BodyTooLarge);
+    }
+    Ok(ForumRenderedPost { body })
+}
+
+fn valid_system_log_entry(entry: &ForumSystemLogEntry) -> bool {
+    (entry.post_number == 1 || entry.post_number >= 3)
+        && entry.line_number.is_none_or(|line| line > 0)
+        && valid_text(&entry.code, 128)
+        && valid_text(&entry.message, 512)
 }
 
 fn valid_lot(lot: &ForumLotSnapshot) -> bool {

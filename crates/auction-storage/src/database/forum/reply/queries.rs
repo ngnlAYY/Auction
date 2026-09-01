@@ -1,13 +1,12 @@
 //! 论坛回帖主题、lot、身份和代理的 PostgreSQL 只读查询。
 
 #[cfg(feature = "postgres")]
-use auction_application::forum_world_name;
-#[cfg(feature = "postgres")]
 use auction_application::{
-    ApplicationError, ForumActiveProxy, ForumBidderIdentity, ForumLotTarget, ForumReplyTopic,
+    ApplicationError, ForumActiveProxy, ForumCommandOutcome, ForumCommandStatus, ForumLotTarget,
+    ForumReplyTopic,
 };
 #[cfg(feature = "postgres")]
-use auction_domain::{AuctionId, LotId, SettlementWorld, UserId};
+use auction_domain::{AuctionId, LotId, UserId};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
@@ -15,29 +14,49 @@ use uuid::Uuid;
 use super::super::super::PostgresStore;
 #[cfg(feature = "postgres")]
 use super::validation::{
-    MAX_DISPLAY_NAME_BYTES, MAX_EXTERNAL_ACCOUNT_BYTES, MAX_THREAD_ID_BYTES, parse_world,
-    storage_error, valid_decimal_id, valid_text,
+    MAX_FIXED_POST_ID_BYTES, MAX_THREAD_ID_BYTES, parse_world, storage_error, valid_decimal_id,
 };
 
 #[cfg(feature = "postgres")]
-pub(super) async fn list_published_topics_postgres(
+pub(super) async fn claim_published_topics_postgres(
     store: &PostgresStore,
+    worker_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    lease_until: chrono::DateTime<chrono::Utc>,
     limit: u16,
 ) -> Result<Vec<ForumReplyTopic>, ApplicationError> {
     use sqlx::Row;
 
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛回帖领取事务失败"))?;
     let rows = sqlx::query(
-        "SELECT sync.auction_id, auction.world_id, sync.thread_id
+        "SELECT sync.auction_id, auction.world_id, sync.thread_id,
+                sync.catalog_post_id, sync.system_log_post_id,
+                sync.title, sync.body, sync.system_log_body, sync.content_revision
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
            AND sync.thread_id IS NOT NULL
+           AND sync.catalog_post_id IS NOT NULL
+           AND sync.system_log_post_id IS NOT NULL
+           AND sync.title IS NOT NULL
+           AND sync.body IS NOT NULL
+           AND sync.system_log_body IS NOT NULL
+           AND sync.content_revision > 0
            AND auction.status IN ('live', 'final')
-         ORDER BY sync.updated_at ASC, sync.auction_id ASC
-         LIMIT $1",
+           AND sync.content_next_scan_at <= $1
+           AND (
+               sync.content_claim_token IS NULL
+               OR sync.content_lease_expires_at IS NULL
+               OR sync.content_lease_expires_at <= $1
+           )
+         ORDER BY sync.content_next_scan_at ASC, sync.auction_id ASC
+         LIMIT $2
+         FOR UPDATE OF sync SKIP LOCKED",
     )
+    .bind(now)
     .bind(i64::from(limit))
-    .fetch_all(store.pool())
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取已发布论坛主题失败"))?;
 
@@ -49,17 +68,133 @@ pub(super) async fn list_published_topics_postgres(
             row.try_get("world_id").map_err(|_| storage_error("读取论坛回帖世界失败"))?;
         let thread_id: String =
             row.try_get("thread_id").map_err(|_| storage_error("读取论坛回帖主题标识失败"))?;
+        let catalog_post_id: String = row
+            .try_get("catalog_post_id")
+            .map_err(|_| storage_error("读取论坛目录帖子标识失败"))?;
+        let system_log_post_id: String = row
+            .try_get("system_log_post_id")
+            .map_err(|_| storage_error("读取论坛系统日志帖子标识失败"))?;
+        let title: String =
+            row.try_get("title").map_err(|_| storage_error("读取论坛主题标题失败"))?;
+        let catalog_body: String =
+            row.try_get("body").map_err(|_| storage_error("读取论坛目录正文失败"))?;
+        let system_log_body: String = row
+            .try_get("system_log_body")
+            .map_err(|_| storage_error("读取论坛系统日志正文失败"))?;
+        let content_revision: i64 = row
+            .try_get("content_revision")
+            .map_err(|_| storage_error("读取论坛固定楼层版本失败"))?;
+        let content_claim_token = Uuid::new_v4();
+        let claimed = sqlx::query(
+            "UPDATE public.auction_forum_sync
+             SET content_claim_token = $2,
+                 content_claim_owner = $3,
+                 content_claim_fencing = content_claim_fencing + 1,
+                 content_lease_expires_at = $4
+             WHERE auction_id = $1
+               AND status = 'published'
+               AND content_revision = $5
+             RETURNING content_claim_fencing",
+        )
+        .bind(auction_id)
+        .bind(content_claim_token)
+        .bind(worker_id)
+        .bind(lease_until)
+        .bind(content_revision)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("写入论坛固定楼层内容租约失败"))?;
+        let Some(claimed) = claimed else {
+            return Err(storage_error("论坛固定楼层内容租约在事务内变化"));
+        };
+        let content_claim_fencing: i64 = claimed
+            .try_get("content_claim_fencing")
+            .map_err(|_| storage_error("读取论坛固定楼层 fencing 失败"))?;
         let world = parse_world(&world_id)?;
-        if auction_id.is_nil() || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES) {
+        if auction_id.is_nil()
+            || !valid_decimal_id(&thread_id, MAX_THREAD_ID_BYTES)
+            || !valid_decimal_id(&catalog_post_id, MAX_FIXED_POST_ID_BYTES)
+            || !valid_decimal_id(&system_log_post_id, MAX_FIXED_POST_ID_BYTES)
+            || catalog_post_id == system_log_post_id
+            || title.is_empty()
+            || title.len() > 512
+            || catalog_body.is_empty()
+            || catalog_body.len() > 65_531
+            || system_log_body.is_empty()
+            || system_log_body.len() > 65_531
+            || content_revision <= 0
+        {
             return Err(storage_error("论坛回帖主题投影无效"));
         }
         topics.push(ForumReplyTopic {
             auction_id: AuctionId::from_uuid(auction_id),
             world,
             thread_id,
+            catalog_post_id,
+            system_log_post_id,
+            title,
+            catalog_body,
+            system_log_body,
+            content_revision,
+            content_claim_token,
+            content_claim_owner: worker_id.to_owned(),
+            content_claim_fencing,
+            content_lease_until: lease_until,
         });
     }
+    transaction.commit().await.map_err(|_| storage_error("提交论坛回帖领取事务失败"))?;
     Ok(topics)
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn command_outcomes_postgres(
+    store: &PostgresStore,
+    auction_id: AuctionId,
+    thread_id: &str,
+) -> Result<Vec<ForumCommandOutcome>, ApplicationError> {
+    use sqlx::Row;
+
+    let rows = sqlx::query(
+        "SELECT post_id, line_number, lot_code, command_kind, status, last_error_detail
+         FROM public.auction_forum_bid_commands
+         WHERE auction_id = $1 AND thread_id = $2
+         ORDER BY post_id, line_number, lot_code, command_kind",
+    )
+    .bind(auction_id.as_uuid())
+    .bind(thread_id)
+    .fetch_all(store.pool())
+    .await
+    .map_err(|_| storage_error("读取论坛命令处理结果失败"))?;
+    let mut outcomes = Vec::with_capacity(rows.len());
+    for row in rows {
+        let status: String =
+            row.try_get("status").map_err(|_| storage_error("读取论坛命令状态失败"))?;
+        let status = match status.as_str() {
+            "pending" => ForumCommandStatus::Pending,
+            "applied" => ForumCommandStatus::Applied,
+            "rejected" => ForumCommandStatus::Rejected,
+            _ => return Err(storage_error("论坛命令状态不在闭集内")),
+        };
+        outcomes.push(ForumCommandOutcome {
+            post_id: row
+                .try_get("post_id")
+                .map_err(|_| storage_error("读取论坛命令帖子标识失败"))?,
+            line_number: row
+                .try_get("line_number")
+                .map_err(|_| storage_error("读取论坛命令行号失败"))?,
+            lot_code: row
+                .try_get("lot_code")
+                .map_err(|_| storage_error("读取论坛命令 lot 编码失败"))?,
+            command_kind: row
+                .try_get("command_kind")
+                .map_err(|_| storage_error("读取论坛命令类型失败"))?,
+            status,
+            safe_detail: row
+                .try_get("last_error_detail")
+                .map_err(|_| storage_error("读取论坛命令安全详情失败"))?,
+        });
+    }
+    Ok(outcomes)
 }
 
 #[cfg(feature = "postgres")]
@@ -104,52 +239,6 @@ pub(super) async fn lot_targets_postgres(
         return Err(storage_error("论坛回帖拍卖缺少 lot 映射"));
     }
     Ok(targets)
-}
-
-#[cfg(feature = "postgres")]
-pub(super) async fn resolve_bidder_postgres(
-    store: &PostgresStore,
-    world: SettlementWorld,
-    external_account_id: &str,
-    display_name: &str,
-) -> Result<ForumBidderIdentity, ApplicationError> {
-    use sqlx::Row;
-
-    let row = sqlx::query(
-        "SELECT user_id, external_account_id, display_name
-         FROM public.forum_bidder_identities
-         WHERE world_id = $1
-           AND provider = 'ehentai'
-           AND status = 'active'
-           AND lower(external_account_id) = lower($2)",
-    )
-    .bind(forum_world_name(world))
-    .bind(external_account_id)
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|_| storage_error("读取论坛身份映射失败"))?;
-    let Some(row) = row else {
-        return Err(storage_error("论坛身份未登记或已禁用"));
-    };
-    let user_uuid: Uuid =
-        row.try_get("user_id").map_err(|_| storage_error("读取论坛身份用户标识失败"))?;
-    let registered_account_id: String = row
-        .try_get("external_account_id")
-        .map_err(|_| storage_error("读取论坛身份外部标识失败"))?;
-    let registered_display_name: String =
-        row.try_get("display_name").map_err(|_| storage_error("读取论坛身份显示名失败"))?;
-    if user_uuid.is_nil()
-        || !valid_text(&registered_account_id, MAX_EXTERNAL_ACCOUNT_BYTES)
-        || !valid_text(&registered_display_name, MAX_DISPLAY_NAME_BYTES)
-        || display_name.trim().is_empty()
-    {
-        return Err(storage_error("论坛身份映射违反安全边界"));
-    }
-    Ok(ForumBidderIdentity {
-        user_id: UserId::from_uuid(user_uuid),
-        external_account_id: registered_account_id,
-        display_name: registered_display_name,
-    })
 }
 
 #[cfg(feature = "postgres")]

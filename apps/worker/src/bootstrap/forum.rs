@@ -82,7 +82,9 @@ pub(super) async fn configure_forum(
     );
     let store_port: Arc<dyn ForumSyncStore> = store.clone();
     let publisher: Arc<dyn ForumPublisher> = gateway.clone();
-    let renderer = Arc::new(ForumThreadRenderer);
+    let reader: Arc<dyn ForumTopicReader> = gateway.clone();
+    let post_writer: Arc<dyn ForumPostWriter> = gateway.clone();
+    let renderer: Arc<dyn ForumRenderer> = Arc::new(ForumThreadRenderer);
     let (equipment_key_id, equipment_key_material) = config
         .equipment_data_key_id()
         .zip(config.equipment_data_key())
@@ -96,27 +98,36 @@ pub(super) async fn configure_forum(
             EquipmentKeyOpener::new(equipment_data_key),
         ));
     let sync = Some(auction_jobs::ForumSyncRuntime::new(
-        store_port,
-        publisher,
-        renderer,
-        equipment_links,
+        auction_jobs::ForumSyncPorts {
+            store: store_port,
+            publisher,
+            reader: reader.clone(),
+            post_writer: post_writer.clone(),
+            renderer: renderer.clone(),
+            equipment_links: equipment_links.clone(),
+        },
         forum_config.batch_size,
         std::time::Duration::from_secs(forum_config.item_timeout_seconds),
         forum_config.public_base_url.clone(),
     )?);
     let reply_store: Arc<dyn ForumReplyStore> = store.clone();
-    let reader: Arc<dyn ForumTopicReader> = gateway.clone();
     let commands: Arc<dyn CompetitionCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let notifier: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if delivery_enabled { Some(store.clone()) } else { None };
     let reply = Some(auction_jobs::ForumReplyRuntime::new(
-        reply_store,
-        reader,
-        commands,
-        notifier,
+        auction_jobs::ForumReplyPorts {
+            store: reply_store,
+            reader,
+            writer: post_writer,
+            renderer,
+            equipment_links,
+            commands,
+            notifier,
+        },
         forum_config.batch_size,
         std::time::Duration::from_secs(forum_config.item_timeout_seconds),
+        forum_config.public_base_url.clone(),
     )?);
     Ok((sync, reply))
 }

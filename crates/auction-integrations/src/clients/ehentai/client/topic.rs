@@ -2,6 +2,15 @@
 
 use super::*;
 
+struct FixedPostFormTarget<'a> {
+    operation: EhentaiOperation,
+    url: Url,
+    board_id: i32,
+    thread_id: &'a str,
+    post_id: Option<&'a str>,
+    expected_code: &'static str,
+}
+
 impl EhentaiClient {
     pub(super) async fn load_topic_form(
         &self,
@@ -116,6 +125,195 @@ impl EhentaiClient {
         Err(EhentaiError::write_unknown(operation))
     }
 
+    pub(super) async fn load_reply_form(
+        &self,
+        board_id: i32,
+        thread_id: &str,
+        cookie: &EhentaiCookie,
+    ) -> Result<PostForm, EhentaiError> {
+        let board = board_id.to_string();
+        let target = self.index_url(
+            &[("act", "post"), ("do", "reply_post"), ("f", board.as_str()), ("t", thread_id)],
+            EhentaiOperation::ReplyTopic,
+        )?;
+        self.load_fixed_post_form(
+            FixedPostFormTarget {
+                operation: EhentaiOperation::ReplyTopic,
+                url: target,
+                board_id,
+                thread_id,
+                post_id: None,
+                expected_code: "03",
+            },
+            cookie,
+        )
+        .await
+    }
+
+    pub(super) async fn load_edit_form(
+        &self,
+        board_id: i32,
+        thread_id: &str,
+        post_id: &str,
+        cookie: &EhentaiCookie,
+    ) -> Result<PostForm, EhentaiError> {
+        let board = board_id.to_string();
+        let target = self.index_url(
+            &[
+                ("act", "post"),
+                ("do", "edit_post"),
+                ("f", board.as_str()),
+                ("t", thread_id),
+                ("p", post_id),
+                ("st", "0"),
+            ],
+            EhentaiOperation::EditPost,
+        )?;
+        self.load_fixed_post_form(
+            FixedPostFormTarget {
+                operation: EhentaiOperation::EditPost,
+                url: target,
+                board_id,
+                thread_id,
+                post_id: Some(post_id),
+                expected_code: "09",
+            },
+            cookie,
+        )
+        .await
+    }
+
+    async fn load_fixed_post_form(
+        &self,
+        target: FixedPostFormTarget<'_>,
+        cookie: &EhentaiCookie,
+    ) -> Result<PostForm, EhentaiError> {
+        let topic = self.index_url(&[("showtopic", target.thread_id)], target.operation)?;
+        let (body, _) =
+            self.get_page(target.operation, target.url.clone(), Some(&topic), cookie).await?;
+        let html = std::str::from_utf8(&body)
+            .map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        let document = Html::parse_document(html);
+        let form_selector =
+            Selector::parse("form").map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        let input_selector = Selector::parse("input[type='hidden'][name]")
+            .map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        let post_selector = Selector::parse("[name='Post']")
+            .map_err(|_| EhentaiError::protocol(target.operation, false))?;
+        for form in document.select(&form_selector) {
+            let Some(values) = fixed_post_form_values(
+                form,
+                &input_selector,
+                &post_selector,
+                target.expected_code,
+                target.board_id,
+                target.thread_id,
+                target.post_id,
+            ) else {
+                continue;
+            };
+            let action_value = form.value().attr("action").unwrap_or(target.url.as_str());
+            let action = self.resolve_same_origin(&target.url, action_value, target.operation)?;
+            if !posting_action_matches_target(
+                &action,
+                target.board_id,
+                target.thread_id,
+                target.post_id,
+                target.expected_code,
+            ) || !form.value().attr("method").unwrap_or("GET").eq_ignore_ascii_case("POST")
+            {
+                continue;
+            }
+            return Ok(PostForm { action, referer: target.url, values });
+        }
+        Err(EhentaiError::protocol(target.operation, false))
+    }
+
+    pub(super) async fn submit_fixed_post(
+        &self,
+        form: PostForm,
+        board_id: i32,
+        thread_id: &str,
+        edit: Option<(&str, Option<&str>)>,
+        rendered: ForumRenderedPost,
+        cookie: &EhentaiCookie,
+    ) -> Result<ForumPublishedPost, EhentaiError> {
+        let operation =
+            if edit.is_some() { EhentaiOperation::EditPost } else { EhentaiOperation::ReplyTopic };
+        let mut values = form.values;
+        set_form_value(&mut values, "act", "Post".to_owned());
+        set_form_value(&mut values, "CODE", if edit.is_some() { "09" } else { "03" }.to_owned());
+        set_form_value(&mut values, "f", board_id.to_string());
+        set_form_value(&mut values, "t", thread_id.to_owned());
+        set_form_value(&mut values, "Post", rendered.body);
+        set_form_value(&mut values, "st", "0".to_owned());
+        if let Some((post_id, _)) = edit {
+            set_form_value(&mut values, "p", post_id.to_owned());
+            set_form_value(&mut values, "dosubmit", "Submit Modified Post".to_owned());
+        } else {
+            values.retain(|(name, _)| name != "p");
+            set_form_value(&mut values, "dosubmit", "Add Reply".to_owned());
+        }
+        if let Some(title) = edit.and_then(|(_, title)| title) {
+            set_form_value(&mut values, "TopicTitle", title.to_owned());
+            set_form_value(&mut values, "TopicDesc", String::new());
+        }
+        if values.len() > MAXIMUM_FORM_FIELDS {
+            return Err(EhentaiError::protocol(operation, false));
+        }
+        let encoded = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
+            .finish();
+
+        self.wait_rate(operation).await?;
+        let response = self
+            .client
+            .post(form.action.clone())
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::COOKIE, cookie_header(cookie, operation)?)
+            .header(header::ORIGIN, self.origin.as_str())
+            .header(header::REFERER, form.referer.as_str())
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .timeout(self.request_timeout)
+            .body(encoded)
+            .send()
+            .await
+            .map_err(|_| EhentaiError::write_unknown(operation))?;
+        let status = response.status();
+        let location = response.headers().get(header::LOCATION).cloned();
+        let body = self.read_response(response, operation, true).await?;
+        if is_session_expired(status, location.as_ref(), &body) {
+            return Err(EhentaiError::new(
+                operation,
+                EhentaiErrorCategory::SessionExpired,
+                false,
+                true,
+            ));
+        }
+        let proof = if status.is_redirection() {
+            location.and_then(|value| value.to_str().ok().map(str::to_owned)).and_then(
+                |reference| {
+                    self.post_from_reference(
+                        &form.action,
+                        &reference,
+                        board_id,
+                        thread_id,
+                        operation,
+                    )
+                },
+            )
+        } else {
+            None
+        };
+        let Some(proof) = proof else {
+            return Err(EhentaiError::write_unknown(operation));
+        };
+        if edit.is_some_and(|(expected, _)| proof.post_id != expected) {
+            return Err(EhentaiError::write_unknown(operation));
+        }
+        Ok(proof)
+    }
+
     pub(super) fn find_topic(
         &self,
         board_url: &Url,
@@ -177,15 +375,11 @@ impl EhentaiClient {
         operation: EhentaiOperation,
     ) -> Option<auction_application::ForumPublishedThread> {
         let resolved = self.resolve_same_origin(base, reference, operation).ok()?;
-        let mut topic_id = None;
-        for (key, value) in resolved.query_pairs() {
-            if key == "showtopic" || key == "t" {
-                topic_id = Some(value.into_owned());
-                break;
-            }
-        }
-        let topic_id = topic_id?;
-        if !valid_topic_id(&topic_id) || !posting_action_matches_board(&resolved, board_id) {
+        let topic_id = optional_query_identity(&resolved, &["showtopic", "t"]).ok()??;
+        if resolved.path() != "/index.php"
+            || !valid_topic_id(&topic_id)
+            || !posting_action_matches_board(&resolved, board_id)
+        {
             return None;
         }
         let canonical = self.index_url(&[("showtopic", topic_id.as_str())], operation).ok()?;
@@ -194,5 +388,39 @@ impl EhentaiClient {
             thread_id: topic_id,
             thread_url: canonical.to_string(),
         })
+    }
+
+    fn post_from_reference(
+        &self,
+        base: &Url,
+        reference: &str,
+        board_id: i32,
+        thread_id: &str,
+        operation: EhentaiOperation,
+    ) -> Option<ForumPublishedPost> {
+        let resolved = self.resolve_same_origin(base, reference, operation).ok()?;
+        let observed_thread = optional_query_identity(&resolved, &["showtopic", "t"]).ok()??;
+        let query_post = optional_query_identity(&resolved, &["p", "pid", "gopid"]).ok()?;
+        let fragment_post = resolved.fragment().and_then(|fragment| {
+            fragment
+                .strip_prefix("entry")
+                .or_else(|| fragment.strip_prefix("post-"))
+                .map(str::to_owned)
+        });
+        let observed_post = match (query_post, fragment_post) {
+            (Some(query), Some(fragment)) if query != fragment => return None,
+            (Some(query), _) => query,
+            (None, Some(fragment)) => fragment,
+            (None, None) => return None,
+        };
+        if resolved.path() != "/index.php"
+            || !posting_action_matches_board(&resolved, board_id)
+            || observed_thread != thread_id
+            || !valid_topic_id(&observed_thread)
+            || !valid_post_id(&observed_post)
+        {
+            return None;
+        }
+        Some(ForumPublishedPost { thread_id: observed_thread, post_id: observed_post })
     }
 }

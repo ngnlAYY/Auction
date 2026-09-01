@@ -4,20 +4,19 @@
 //! runtime 配置与 `run_cycle` 入口，不改变游标推进和 warning-only 边界。
 
 use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
 use auction_application::{
     ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
-    ForumBidCommandRecord, ForumCommandStatus, ForumReplyStore, ForumTopicReader,
-    LowerProxyCommand, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
-    MailDeliveryOrigin, MailNotificationTemplate, PlaceBidCommand, RequestHash, forum_world_name,
+    ForumBidCommandRecord, ForumCommandStatus, ForumPostWriter, ForumRenderer, ForumReplyStore,
+    ForumTopicReader, LowerProxyCommand, MailDeliveryCommand, MailDeliveryEnqueuer,
+    MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate, PlaceBidCommand,
+    PublicEquipmentLinkResolver, RequestHash, forum_world_name,
 };
-use auction_domain::{BidAmount, CommandId, ProxyMode, SettlementWorld};
+use auction_domain::{BidAmount, CommandId, ProxyMode};
+use chrono::Duration;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -40,37 +39,67 @@ use topic::process_topic;
 const MAX_BATCH_SIZE: u16 = 100;
 
 /// 论坛回帖导入运行时依赖。
+pub struct ForumReplyPorts {
+    pub store: Arc<dyn ForumReplyStore>,
+    pub reader: Arc<dyn ForumTopicReader>,
+    pub writer: Arc<dyn ForumPostWriter>,
+    pub renderer: Arc<dyn ForumRenderer>,
+    pub equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
+    pub commands: Arc<dyn CompetitionCommandPort>,
+    pub notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
+}
+
+/// 论坛回帖导入运行时依赖。
 pub struct ForumReplyRuntime {
     pub(crate) store: Arc<dyn ForumReplyStore>,
     pub(crate) reader: Arc<dyn ForumTopicReader>,
+    pub(crate) writer: Arc<dyn ForumPostWriter>,
+    pub(crate) renderer: Arc<dyn ForumRenderer>,
+    pub(crate) equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
     pub(crate) commands: Arc<dyn CompetitionCommandPort>,
     pub(crate) notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
-    next_world_index: AtomicUsize,
+    pub(crate) public_base_url: Option<String>,
 }
 
 impl ForumReplyRuntime {
     /// 建立论坛回帖导入运行时，并限制单轮主题读取数量。
     pub fn new(
-        store: Arc<dyn ForumReplyStore>,
-        reader: Arc<dyn ForumTopicReader>,
-        commands: Arc<dyn CompetitionCommandPort>,
-        notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
+        ports: ForumReplyPorts,
         batch_size: u16,
         item_timeout: std::time::Duration,
+        public_base_url: Option<String>,
     ) -> Result<Self, WorkerError> {
-        if batch_size == 0 || batch_size > MAX_BATCH_SIZE || item_timeout.is_zero() {
+        if batch_size == 0
+            || batch_size > MAX_BATCH_SIZE
+            || item_timeout.is_zero()
+            || public_base_url
+                .as_deref()
+                .is_some_and(|value| !super::forum_sync::valid_public_base_url(value))
+        {
             return Err(WorkerError::InvalidForumReplyConfiguration);
         }
+        let ForumReplyPorts {
+            store,
+            reader,
+            writer,
+            renderer,
+            equipment_links,
+            commands,
+            notifier,
+        } = ports;
         Ok(Self {
             store,
             reader,
+            writer,
+            renderer,
+            equipment_links,
             commands,
             notifier,
             batch_size,
             item_timeout,
-            next_world_index: AtomicUsize::new(0),
+            public_base_url,
         })
     }
 }
@@ -78,32 +107,43 @@ impl ForumReplyRuntime {
 pub(crate) async fn run_cycle<C>(
     worker: &PersistentWorker<C>,
     runtime: &ForumReplyRuntime,
+    lease_duration: std::time::Duration,
 ) -> Result<(), WorkerError>
 where
     C: auction_application::Clock + 'static,
 {
-    // 世界闭集只有 main/isekai，且数据库保证每个世界至多一个 live/final 拍卖。额度为 1 时
-    // 多读一个候选并轮换选择，但实际处理量仍严格受 batch_size 限制。
-    let candidate_limit = runtime.batch_size.max(2);
-    let mut topics = runtime.store.list_published_topics(candidate_limit).await?;
-    if runtime.batch_size == 1 && topics.len() > 1 {
-        let preferred_world =
-            if runtime.next_world_index.fetch_add(1, Ordering::Relaxed).is_multiple_of(2) {
-                SettlementWorld::Main
-            } else {
-                SettlementWorld::Isekai
-            };
-        topics.sort_by_key(|topic| topic.world != preferred_world);
-    }
-    topics.truncate(usize::from(runtime.batch_size));
+    let lease_duration =
+        Duration::from_std(lease_duration).map_err(|_| WorkerError::InvalidForumConfiguration)?;
     let mut worlds = Vec::new();
     let mut failed_worlds = Vec::new();
-    for topic in topics {
+    let mut seen_auctions = HashSet::new();
+    let mut processed = 0_u16;
+    while processed < runtime.batch_size {
+        let now = worker.clock.now();
+        let lease_until =
+            now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidForumConfiguration)?;
+        // 每次只领取即将处理的一场拍卖，避免批量候选在等待前序主题时耗尽内容租约。
+        let mut topics = runtime
+            .store
+            .claim_published_topics(worker.worker_id.clone(), now, lease_until, 1)
+            .await?;
+        let Some(topic) = topics.pop() else {
+            break;
+        };
+        if !seen_auctions.insert(topic.auction_id) {
+            // 同一轮不重复读取远端主题；释放刚领取的重复 claim 后等待下一次 poll。
+            runtime.store.finish_topic_scan(topic, worker.clock.now()).await?;
+            break;
+        }
+        processed += 1;
         if !worlds.contains(&topic.world) {
             worlds.push(topic.world);
         }
-        match tokio::time::timeout(runtime.item_timeout, process_topic(runtime, topic.clone()))
-            .await
+        match tokio::time::timeout(
+            runtime.item_timeout,
+            process_topic(runtime, topic.clone(), worker.clock.now()),
+        )
+        .await
         {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
