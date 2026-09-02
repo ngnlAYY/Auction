@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
 use auction_application::{
-    ForumAuctionSnapshot, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
-    ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, PublicEquipmentGameLink,
-    forum_catalog_marker, forum_system_log_marker, forum_world_name,
+    ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError,
+    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSystemLogEntry,
+    PublicEquipmentGameLink, forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
 use auction_domain::AuctionId;
 use sha2::{Digest, Sha256};
@@ -112,20 +112,52 @@ pub fn render_auction_thread(
         let equipment_url = equipment_link.into_url();
         write!(
             &mut body,
-            "[b][{}][/b] [url={}][b]{}[/b][/url] [i](seller: {})[/i] — [b]Start:[/b] {}",
+            "[b][{}][/b] [url={}][b]{}[/b][/url]",
             lot.code,
             equipment_url,
-            bbcode_text(&lot.name),
+            bbcode_text(&lot.name)
+        )
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        let mut equipment_facts = Vec::with_capacity(3);
+        if let Some(level) = lot.equipment_level {
+            equipment_facts.push(format!("Lv.{level}"));
+        }
+        if let Some(initials) = lot.primary_attribute_initials.as_deref() {
+            equipment_facts.push(initials.to_owned());
+        }
+        if let Some(avg_roll_tenths) = lot.avg_roll_tenths {
+            equipment_facts.push(format!("Ave: {}", format_roll(avg_roll_tenths)));
+        }
+        if !equipment_facts.is_empty() {
+            write!(&mut body, " ({})", equipment_facts.join(", "))
+                .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        }
+        // seller/start/current 的纯文本标签由论坛目录回读解析器消费，必须保持稳定。
+        write!(
+            &mut body,
+            " (seller: {}) (start: {})",
             bbcode_text(&lot.seller),
             format_credits(lot.start_price)
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
-        if lot.current_price > lot.start_price {
+        // 首笔合法竞价可以恰好等于起拍价；只要已有领先者，也必须展示当前事实与来源。
+        if lot.current_price > lot.start_price || lot.current_bidder.is_some() {
             write!(&mut body, " | [b]Current: {}[/b]", format_credits(lot.current_price))
                 .map_err(|_| ForumRenderError::BodyTooLarge)?;
             if let Some(bidder) = lot.current_bidder.as_deref() {
                 write!(&mut body, " by {}", bbcode_text(bidder))
                     .map_err(|_| ForumRenderError::BodyTooLarge)?;
+                match lot.current_bid_source.as_ref() {
+                    Some(ForumCurrentBidSource::Forum { post_number, thread_id, post_id }) => {
+                        write!(
+                            &mut body,
+                            "（[url={PRODUCTION_ENDPOINT}/index.php?showtopic={thread_id}&p={post_id}#entry{post_id}]#{post_number}[/url]）"
+                        )
+                        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+                    }
+                    Some(ForumCurrentBidSource::Proxy) => body.push_str("（代理）"),
+                    None => {}
+                }
             }
         }
         if let Some(effective_end_at) = lot.effective_end_at
@@ -285,13 +317,27 @@ fn valid_lot(lot: &ForumLotSnapshot) -> bool {
     valid_code(&lot.code)
         && valid_text(&lot.category, 128)
         && valid_text(&lot.name, 1024)
+        && lot.equipment_level.is_none_or(|level| (1..=100_000).contains(&level))
+        && lot.primary_attribute_initials.as_deref().is_none_or(valid_primary_attribute_initials)
+        && lot.avg_roll_tenths.is_none_or(|value| (0..=1_000).contains(&value))
         && valid_text(&lot.seller, 256)
         && lot.start_price > 0
         && lot.current_price >= lot.start_price
         && valid_text(&lot.status, 64)
         && lot.current_bidder.as_deref().is_none_or(|value| valid_text(value, 256))
+        && lot.current_bid_source.as_ref().is_none_or(valid_current_bid_source)
+        && (lot.current_bid_source.is_none() || lot.current_bidder.is_some())
         && lot.effective_end_at.is_none_or(|value| value.timestamp_nanos_opt().is_some())
         && lot.equipment_link_target.validate().is_ok()
+}
+
+fn valid_current_bid_source(source: &ForumCurrentBidSource) -> bool {
+    match source {
+        ForumCurrentBidSource::Forum { post_number, thread_id, post_id } => {
+            *post_number >= 3 && valid_forum_post_id(thread_id) && valid_forum_post_id(post_id)
+        }
+        ForumCurrentBidSource::Proxy => true,
+    }
 }
 
 fn valid_code(value: &str) -> bool {
@@ -299,6 +345,10 @@ fn valid_code(value: &str) -> bool {
     bytes.len() == 5
         && bytes[..3].iter().all(u8::is_ascii_alphabetic)
         && bytes[3..].iter().all(u8::is_ascii_digit)
+}
+
+fn valid_primary_attribute_initials(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 6 && value.bytes().all(|byte| byte.is_ascii_uppercase())
 }
 
 fn valid_text(value: &str, maximum: usize) -> bool {
@@ -370,4 +420,8 @@ fn format_credits(value: i64) -> String {
         return format!("{}k", value / THOUSAND);
     }
     value.to_string()
+}
+
+fn format_roll(tenths: i64) -> String {
+    format!("{}.{:01}%", tenths / 10, tenths % 10)
 }

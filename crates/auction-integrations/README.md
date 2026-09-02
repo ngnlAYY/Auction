@@ -78,7 +78,12 @@ remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Work
 不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，或真实论坛
 `Please stand by...` 200 回执中完全一致的 meta refresh 与链接双重证明，无法证明时返回
 `write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界、紧凑且适合论坛窄栏的 #1 BBCode
-和确定性 #2 处理日志；#1 保持分类标题和单行拍品目录，#2 只按公开处理事实展示处理水位、真实告警/
+和确定性 #2 处理日志；#1 保持分类标题和单行拍品目录，每行按可用字段展示
+`(Lv.440, SDA, Ave: 56.7%) (seller: name) (start: 30k)`；Primary Attributes 缩写固定按
+Strength、Dexterity、Agility、Endurance、Intelligence、Wisdom 顺序选取已有属性的首字母。
+#1 的领先者继续使用玩家名称；可证明的论坛竞价紧邻显示可点击的 `（#楼层）`，Web 代理只显示
+`（代理）`，论坛回读会剥离该展示后缀，不把它写入玩家名称。
+#2 只按公开处理事实展示处理水位、真实告警/
 人工忽略计数、红色告警标题和紧凑单行记录，并用解析所得真实
 post ID 为楼层号生成 E-Hentai findpost 链接；它还显示本轮能够连续证明已处理到的楼层，待重试命令
 会阻止水位越过对应楼层，不按 post ID 或末楼伪造进度；固定帖 ownership 标记只放在正文末尾供机器

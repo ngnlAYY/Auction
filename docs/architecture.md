@@ -307,8 +307,8 @@ projection，PostgreSQL 完整档的价格历史从结算事实链返回权威�
 所有 Public/Admin `lot_number` 展示投影使用分类内编号，竞价身份仍是 `lot_id` UUID，价格历史
 opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.lot_number`；已结算拍卖仍可在公开安全投影内读取 lot，供历史轮次页面使用，
 竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义；Web 代理事实只展示
-`玩家名称(代理)`，论坛普通竞价在能够由命令账本证明真实楼层时展示
-`玩家名称(论坛 #N)`，普通 Web 出价不伪造来源。价格历史
+`玩家名称（代理）`，论坛普通竞价在能够由命令账本证明真实楼层与帖子身份时展示可点击的
+`玩家名称（#N）`，普通 Web 出价不伪造来源；论坛固定 #1 从同一事实链投影相同来源样式。价格历史
 在完整档保留旧筛选、成交条目与编号页统计；Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和

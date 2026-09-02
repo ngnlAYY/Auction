@@ -86,6 +86,10 @@ pub struct PublicBidLogEntry {
     pub source: Option<String>,
     /// 论坛普通出价对应的真实楼层号；历史无法证明时保持为空。
     pub source_post_number: Option<i32>,
+    /// 论坛普通出价的主题 ID；只供 HTTP 边界生成受限的帖子链接。
+    pub source_thread_id: Option<String>,
+    /// 论坛普通出价的帖子 ID；只供 HTTP 边界生成受限的帖子链接。
+    pub source_post_id: Option<String>,
     pub valid: bool,
     pub accepted_state_version: i64,
     pub fact_index: i32,

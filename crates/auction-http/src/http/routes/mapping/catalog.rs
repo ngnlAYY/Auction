@@ -223,6 +223,7 @@ pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotR
         equipment_name: lot.equipment_name,
         equipment_category: (!lot.equipment_category.is_empty()).then_some(lot.equipment_category),
         equipment_level: lot.equipment_level,
+        primary_attribute_initials: lot.primary_attribute_initials,
         avg_roll: lot.avg_roll,
         game_equipment_url: lot.game_equipment_url,
     }
@@ -236,6 +237,7 @@ pub(crate) fn map_preview_detail(detail: PublicPreviewLotDetail) -> PublicPrevie
 }
 
 fn map_preview_equipment(equipment: PublicEquipment) -> PublicPreviewEquipmentResponse {
+    let primary_attribute_initials = equipment.primary_attribute_initials();
     let stats = equipment
         .stats
         .into_iter()
@@ -250,6 +252,7 @@ fn map_preview_equipment(equipment: PublicEquipment) -> PublicPreviewEquipmentRe
         name: equipment.name,
         category: (!equipment.category.is_empty()).then_some(equipment.category),
         level: equipment.level,
+        primary_attribute_initials,
         info_summary: equipment.info_summary,
         stats,
         avg_roll: equipment.avg_roll,
@@ -261,6 +264,7 @@ pub(crate) fn map_equipment(
     equipment: PublicEquipment,
     attributes: Option<serde_json::Value>,
 ) -> PublicEquipmentResponse {
+    let primary_attribute_initials = equipment.primary_attribute_initials();
     let stats = equipment
         .stats
         .into_iter()
@@ -275,6 +279,7 @@ pub(crate) fn map_equipment(
         name: equipment.name,
         category: equipment.category,
         level: equipment.level,
+        primary_attribute_initials,
         info_summary: equipment.info_summary,
         stats,
         avg_roll: equipment.avg_roll,

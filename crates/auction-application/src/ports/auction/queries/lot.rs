@@ -154,6 +154,26 @@ pub struct PublicEquipment {
 }
 
 impl PublicEquipment {
+    /// 按 HV Primary Attributes 的固定顺序生成论坛与 Web 共用的属性首字母。
+    pub fn primary_attribute_initials(&self) -> Option<String> {
+        const PRIMARY_ATTRIBUTES: [(&str, char); 6] = [
+            ("Strength", 'S'),
+            ("Dexterity", 'D'),
+            ("Agility", 'A'),
+            ("Endurance", 'E'),
+            ("Intelligence", 'I'),
+            ("Wisdom", 'W'),
+        ];
+
+        let mut initials = String::with_capacity(PRIMARY_ATTRIBUTES.len());
+        for (attribute_name, initial) in PRIMARY_ATTRIBUTES {
+            if self.stats.keys().any(|stat_name| stat_name.eq_ignore_ascii_case(attribute_name)) {
+                initials.push(initial);
+            }
+        }
+        (!initials.is_empty()).then_some(initials)
+    }
+
     /// 校验公开装备投影；preview 的空分类由调用方按 preview 语义单独允许。
     pub fn validate(&self, category_required: bool) -> Result<(), &'static str> {
         if !public_text(&self.name, 512)
@@ -276,6 +296,7 @@ pub struct PublicPreviewLotSummary {
     pub equipment_name: String,
     pub equipment_category: String,
     pub equipment_level: Option<i64>,
+    pub primary_attribute_initials: Option<String>,
     pub avg_roll: Option<f64>,
     pub game_equipment_url: String,
 }
@@ -293,6 +314,10 @@ impl PublicPreviewLotSummary {
             || !public_text(&self.equipment_name, 512)
             || !self.equipment_category.is_empty() && !public_text(&self.equipment_category, 128)
             || self.equipment_level.is_some_and(|level| level < 0)
+            || self
+                .primary_attribute_initials
+                .as_deref()
+                .is_some_and(|value| !valid_primary_attribute_initials(value))
             || self.avg_roll.is_some_and(|value| !value.is_finite())
             || !valid_game_equipment_url(&self.game_equipment_url)
         {
@@ -317,6 +342,8 @@ impl PublicPreviewLotDetail {
         if self.equipment.name != self.summary.equipment_name
             || self.equipment.category != self.summary.equipment_category
             || self.equipment.level != self.summary.equipment_level
+            || self.equipment.primary_attribute_initials()
+                != self.summary.primary_attribute_initials
             || self.equipment.avg_roll != self.summary.avg_roll
             || self.equipment.game_equipment_url != self.summary.game_equipment_url
         {
@@ -469,6 +496,20 @@ fn public_text(value: &str, maximum: usize) -> bool {
         && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
+}
+
+fn valid_primary_attribute_initials(value: &str) -> bool {
+    let mut cursor = 0;
+    let ordered = b"SDAEIW";
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            let Some(position) = ordered[cursor..].iter().position(|candidate| *candidate == byte)
+            else {
+                return false;
+            };
+            cursor += position + 1;
+            true
+        })
 }
 
 fn is_go_zero_time(value: DateTime<Utc>) -> bool {

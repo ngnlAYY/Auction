@@ -17,6 +17,9 @@ pub struct PublicBidLogEntryResponse {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_post_number: Option<i64>,
+    /// 仅在论坛主题、帖子与楼层均可证明时返回的真实帖子链接。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_post_url: Option<String>,
     pub valid: bool,
     pub accepted_state_version: i64,
     pub fact_index: i64,

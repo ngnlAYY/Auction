@@ -291,7 +291,6 @@ pub(crate) fn BidLogRow(bid: BidLogEntry) -> Element {
     let lot_code = lot_code_for(&bid.equipment_category, bid.lot_number);
     let lot_id = bid.lot_id.clone();
     let validity = if bid.valid { t!("bidlog-valid") } else { t!("bidlog-invalid") };
-    let trailing = bid_source_trailing(bid.source.as_deref(), bid.source_post_number);
     rsx! {
         tr {
             class: if bid.valid { "public-auction-bid-log-leading" } else { "" },
@@ -302,10 +301,11 @@ pub(crate) fn BidLogRow(bid: BidLogEntry) -> Element {
                 Link { to: Route::LotDetail { lot_code: lot_id }, "{lot_code}" }
             }
             td { class: "public-auction-bid-log-participant", "data-label": t!("bidlog-bidder"),
-                CatalogParticipant {
+                BidHistoryParticipant {
                     name: bid.bidder_name,
-                    marker: None,
-                    trailing,
+                    source: bid.source,
+                    source_post_number: bid.source_post_number,
+                    source_post_url: bid.source_post_url,
                 }
                 span { class: "public-visually-hidden", "{validity}" }
             }

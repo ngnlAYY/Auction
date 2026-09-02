@@ -108,6 +108,7 @@ pub(super) fn map_sqlite_preview_detail(
         .try_get("equipment_category")
         .map_err(|_| storage_error("读取 Lite 预览详情装备分类失败"))?;
     let equipment = map_equipment(world_id, &external_id, &name, &category, attributes, false)?;
+    let primary_attribute_initials = equipment.primary_attribute_initials();
     let summary = PublicPreviewLotSummary {
         id,
         equipment_id: EquipmentId::from_uuid(uuid_from_blob(
@@ -123,6 +124,7 @@ pub(super) fn map_sqlite_preview_detail(
         equipment_name: name,
         equipment_category: category,
         equipment_level: equipment.level,
+        primary_attribute_initials,
         avg_roll: equipment.avg_roll,
         game_equipment_url: equipment.game_equipment_url.clone(),
     };

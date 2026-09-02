@@ -580,7 +580,7 @@ fn valid_bid_log_entry(value: &Value) -> bool {
             "mechanism",
             "created_at",
         ],
-        &["source", "source_post_number"],
+        &["source", "source_post_number", "source_post_url"],
     ) && uuid(string(value.get("id")).unwrap_or_default())
         && uuid(string(value.get("auction_id")).unwrap_or_default())
         && uuid(string(value.get("lot_id")).unwrap_or_default())
@@ -602,10 +602,17 @@ fn valid_bid_log_source(value: &Map<String, Value>) -> bool {
         string(value.get("mechanism")),
         string(value.get("source")),
         int(value.get("source_post_number")),
+        string(value.get("source_post_url")),
     ) {
-        (Some("proxy"), Some("proxy"), None) => true,
-        (Some("ordinary"), Some("forum"), Some(post_number)) => post_number >= 3,
-        (Some("ordinary"), Some("forum"), None) | (Some("ordinary"), None, None) => true,
+        (Some("proxy"), Some("proxy"), None, None) => true,
+        (Some("ordinary"), Some("forum"), Some(post_number), Some(url)) => {
+            post_number >= 3 && forum_post_url(url)
+        }
+        // 兼容尚未增加链接字段的同版本旧响应；新服务会交付可点击的真实帖子 URL。
+        (Some("ordinary"), Some("forum"), Some(post_number), None) => post_number >= 3,
+        (Some("ordinary"), Some("forum"), None, None) | (Some("ordinary"), None, None, None) => {
+            true
+        }
         _ => false,
     }
 }
@@ -935,9 +942,15 @@ fn valid_live_lot(value: &Value, auction_id: &str, lot_id: Option<&str>) -> bool
 fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, detail: bool) -> bool {
     let Some(value) = object(value) else { return false };
     let optional = if detail {
-        &["equipment_category", "equipment_level", "avg_roll", "equipment"][..]
+        &[
+            "equipment_category",
+            "equipment_level",
+            "primary_attribute_initials",
+            "avg_roll",
+            "equipment",
+        ][..]
     } else {
-        &["equipment_category", "equipment_level", "avg_roll"][..]
+        &["equipment_category", "equipment_level", "primary_attribute_initials", "avg_roll"][..]
     };
     only(
         value,
@@ -962,6 +975,7 @@ fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, deta
         && nonempty(value.get("equipment_name"))
         && optional_nonempty(value, "equipment_category")
         && optional_nonnegative(value, "equipment_level")
+        && optional_primary_attribute_initials(value, "primary_attribute_initials")
         && optional_finite(value, "avg_roll")
         && game_url(value.get("game_equipment_url"))
         && (!detail || valid_preview_detail_equipment(value))
@@ -977,6 +991,8 @@ fn valid_preview_detail_equipment(summary: &Map<String, Value>) -> bool {
     string(equipment.get("name")) == string(summary.get("equipment_name"))
         && optional_string(equipment, "category") == optional_string(summary, "equipment_category")
         && optional_int(equipment, "level") == optional_int(summary, "equipment_level")
+        && optional_string(equipment, "primary_attribute_initials")
+            == optional_string(summary, "primary_attribute_initials")
         && string(equipment.get("game_equipment_url")) == string(summary.get("game_equipment_url"))
 }
 
@@ -984,10 +1000,11 @@ fn valid_preview_equipment(value: &Map<String, Value>) -> bool {
     only(
         value,
         &["name", "game_equipment_url"],
-        &["category", "level", "info_summary", "stats", "avg_roll"],
+        &["category", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"],
     ) && nonempty(value.get("name"))
         && optional_nonempty(value, "category")
         && optional_nonnegative(value, "level")
+        && optional_primary_attribute_initials(value, "primary_attribute_initials")
         && optional_nonempty(value, "info_summary")
         && optional_stats(value, "stats")
         && optional_finite(value, "avg_roll")
@@ -997,11 +1014,13 @@ fn valid_preview_equipment(value: &Map<String, Value>) -> bool {
 fn valid_equipment(value: Option<&Value>, full: bool) -> bool {
     let Some(value) = value.and_then(object) else { return false };
     let required = ["name", "category", "game_equipment_url"];
-    let optional = ["attributes", "level", "info_summary", "stats", "avg_roll"];
+    let optional =
+        ["attributes", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"];
     only(value, &required, &optional)
         && nonempty(value.get("name"))
         && nonempty(value.get("category"))
         && optional_nonnegative(value, "level")
+        && optional_primary_attribute_initials(value, "primary_attribute_initials")
         && optional_nonempty(value, "info_summary")
         && optional_stats(value, "stats")
         && optional_finite(value, "avg_roll")
@@ -1538,6 +1557,10 @@ fn optional_finite(value: &Map<String, Value>, key: &str) -> bool {
     value.get(key).is_none() || finite(value.get(key))
 }
 
+fn optional_primary_attribute_initials(value: &Map<String, Value>, key: &str) -> bool {
+    value.get(key).is_none() || string(value.get(key)).is_some_and(valid_primary_attribute_initials)
+}
+
 fn optional_bool(value: &Map<String, Value>, key: &str) -> bool {
     value.get(key).is_none() || bool_value(value.get(key)).is_some()
 }
@@ -1673,6 +1696,35 @@ fn proxy_mode(value: Option<&Value>) -> bool {
 
 fn proxy_status(value: Option<&Value>) -> bool {
     matches!(string(value), Some("active" | "exhausted" | "frozen" | "closed"))
+}
+
+fn valid_primary_attribute_initials(value: &str) -> bool {
+    let mut cursor = 0;
+    let ordered = b"SDAEIW";
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            let Some(position) = ordered[cursor..].iter().position(|candidate| *candidate == byte)
+            else {
+                return false;
+            };
+            cursor += position + 1;
+            true
+        })
+}
+
+fn forum_post_url(value: &str) -> bool {
+    const PREFIX: &str = "https://forums.e-hentai.org/index.php?showtopic=";
+    let Some(rest) = value.strip_prefix(PREFIX) else { return false };
+    let Some((topic_and_post, entry_id)) = rest.split_once("#entry") else { return false };
+    let Some((thread_id, post_id)) = topic_and_post.split_once("&p=") else { return false };
+    canonical_forum_id(thread_id) && canonical_forum_id(post_id) && post_id == entry_id
+}
+
+fn canonical_forum_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && !value.starts_with('0')
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// PostgreSQL 必须交付真实 ID/key URL；空字符串只表示 SQLite Lite 明确没有该能力。

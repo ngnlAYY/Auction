@@ -130,6 +130,7 @@ pub(crate) fn LiveCatalogTable(
                         th { scope: "col", {t!("catalog-item")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
+                        th { scope: "col", {t!("catalog-primary-attributes")} }
                         th { scope: "col", {t!("catalog-seller")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-current")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-next-bid")} }
@@ -169,6 +170,7 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
                         th { scope: "col", {t!("catalog-item")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
+                        th { scope: "col", {t!("catalog-primary-attributes")} }
                         th { scope: "col", {t!("catalog-seller")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("catalog-start-price")} }
                         th { scope: "col", {t!("catalog-leader")} }
@@ -211,6 +213,8 @@ pub(crate) fn LiveCatalogRow(
     };
     let countdown_css_class = countdown_class(&countdown);
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let primary_attribute_initials =
+        row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
     let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
     let seller = row.seller_name.clone();
@@ -242,6 +246,11 @@ pub(crate) fn LiveCatalogRow(
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }
+            td {
+                class: "public-auction-catalog__primary-attributes",
+                "data-label": t!("catalog-primary-attributes"),
+                "{primary_attribute_initials}"
+            }
             td { "data-label": t!("catalog-seller"),
                 TruncatedText {
                     value: seller,

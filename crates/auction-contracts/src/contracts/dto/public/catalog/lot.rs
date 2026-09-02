@@ -40,6 +40,12 @@ pub struct PublicEquipmentResponse {
     pub category: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_nonempty_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub primary_attribute_initials: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_summary: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -90,6 +96,12 @@ pub struct PublicPreviewLotResponse {
     pub equipment_category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipment_level: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_nonempty_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub primary_attribute_initials: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_roll: Option<f64>,
     /// PostgreSQL 的 P09/P11 返回含 10 位 key 的真实 URL；SQLite Lite 返回空字符串。
@@ -108,6 +120,12 @@ pub struct PublicPreviewEquipmentResponse {
     pub category: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_nonempty_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub primary_attribute_initials: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_summary: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
