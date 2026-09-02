@@ -77,11 +77,12 @@ remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Work
 写入会加载真实表单并核对同源 `/index.php` action、POST 方法及 exact board/thread/post，回复 action
 不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，或真实论坛
 `Please stand by...` 200 回执中完全一致的 meta refresh 与链接双重证明，无法证明时返回
-`write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志；
-#2 只按公开处理事实展示真实告警/人工忽略计数、红色告警标题和紧凑单行记录，并用解析所得真实
+`write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界、紧凑且适合论坛窄栏的 #1 BBCode
+和确定性 #2 处理日志；#1 保持分类标题和单行拍品目录，#2 只按公开处理事实展示处理水位、真实告警/
+人工忽略计数、红色告警标题和紧凑单行记录，并用解析所得真实
 post ID 为楼层号生成 E-Hentai findpost 链接；它还显示本轮能够连续证明已处理到的楼层，待重试命令
 会阻止水位越过对应楼层，不按 post ID 或末楼伪造进度；固定帖 ownership 标记只放在正文末尾供机器
-校验，不作为用户可见日志内容。它不按楼层位置猜测远端身份，也不伪造成功竞价数或正文外身份，
+校验并以透明文本渲染，不作为用户可见日志内容。它不按楼层位置猜测远端身份，也不伪造成功竞价数或正文外身份，
 按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
 从同一个论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字账号键和链接文本；数字键作为
 稳定唯一的论坛账号 ID 交给 Users owner，链接文本作为可变的 MoogleMail 收件人/页面显示名称。

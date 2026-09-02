@@ -15,7 +15,7 @@ const MAX_LOTS: usize = 10_000;
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
 
-/// 将同一数据库快照稳定渲染为旧版论坛拍卖主题。
+/// 将同一数据库快照稳定渲染为经典论坛拍卖主题。
 pub fn render_auction_thread(
     snapshot: ForumAuctionSnapshot,
     equipment_links: Vec<PublicEquipmentGameLink>,
@@ -60,33 +60,41 @@ pub fn render_auction_thread(
     writeln!(&mut body, "[center][size=5][b]{title}[/b][/size]")
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if let Some(public_url) = snapshot.public_url.as_deref() {
-        writeln!(&mut body, "[url={public_url}][b]Open the live auction page[/b][/url]")
+        writeln!(&mut body, "[size=3][url={public_url}][b]Open live auction[/b][/url][/size]")
             .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
-    writeln!(&mut body, "[/center]\n").map_err(|_| ForumRenderError::BodyTooLarge)?;
-    writeln!(&mut body, "[b]Auction ID:[/b] {}", snapshot.auction_id.as_uuid())
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     writeln!(
         &mut body,
-        "[b]Scheduled opening:[/b] {}",
+        "[size=1][color=#666666][b]Scheduled opening:[/b] {}[/color][/size]",
         format_forum_time(snapshot.scheduled_open_at)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if let Some(opened_at) = snapshot.opened_at {
-        writeln!(&mut body, "[b]Opened:[/b] {}", format_forum_time(opened_at))
-            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        writeln!(
+            &mut body,
+            "[size=1][color=#666666][b]Opened:[/b] {}[/color][/size]",
+            format_forum_time(opened_at)
+        )
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
     if let Some(scheduled_end_at) = snapshot.scheduled_end_at {
-        writeln!(&mut body, "[b]Nominal end:[/b] {}", format_forum_time(scheduled_end_at))
-            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        writeln!(
+            &mut body,
+            "[size=1][color=#666666][b]Scheduled end:[/b] {}[/color][/size]",
+            format_forum_time(scheduled_end_at)
+        )
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
+    writeln!(&mut body, "[/center]").map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "\n[size=4][b]Auction Rules and Bidding[/b][/size]\n\
-         • The public auction page is the authoritative live view for prices, leaders and deadlines.\n\
-         • Post one command per line. A normal bid looks like [b]One01 200k[/b].\n\
-         • Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
-         • Enable MoogleMail outbid notices with [b]One01 notify mm[/b].\n\
-         • Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\n",
+        "\n[size=3][b]Auction Rules and Bidding[/b][/size]\n\
+         [list]\n\
+         [*]The public auction page is authoritative for prices, leaders and deadlines.\n\
+         [*]Post one command per line. A normal bid looks like [b]One01 200k[/b].\n\
+         [*]Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
+         [*]Enable MoogleMail outbid notices with [b]One01 notify mm[/b].\n\
+         [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
+         [/list]\n",
     );
 
     let nominal_end = snapshot.scheduled_end_at;
@@ -96,14 +104,15 @@ pub fn render_auction_thread(
             if last_category.is_some() {
                 body.push('\n');
             }
-            writeln!(&mut body, "[size=4][b]{}[/b][/size]", category_label(&lot.category))
+            // 分类标题与下一行的 `[code]` 行首是论坛回读解析契约，样式调整不能改变其纯文本形状。
+            writeln!(&mut body, "[size=3][b]{}[/b][/size]", category_label(&lot.category))
                 .map_err(|_| ForumRenderError::BodyTooLarge)?;
             last_category = Some(lot.category.clone());
         }
         let equipment_url = equipment_link.into_url();
         write!(
             &mut body,
-            "[b][{}][/b] [url={}][b]{}[/b][/url] [i](seller: {})[/i] — Start: {}",
+            "[b][{}][/b] [url={}][b]{}[/b][/url] [i](seller: {})[/i] — [b]Start:[/b] {}",
             lot.code,
             equipment_url,
             bbcode_text(&lot.name),
@@ -112,7 +121,7 @@ pub fn render_auction_thread(
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
         if lot.current_price > lot.start_price {
-            write!(&mut body, " | Current: {}", format_credits(lot.current_price))
+            write!(&mut body, " | [b]Current: {}[/b]", format_credits(lot.current_price))
                 .map_err(|_| ForumRenderError::BodyTooLarge)?;
             if let Some(bidder) = lot.current_bidder.as_deref() {
                 write!(&mut body, " by {}", bbcode_text(bidder))
@@ -126,7 +135,7 @@ pub fn render_auction_thread(
                 .map_err(|_| ForumRenderError::BodyTooLarge)?;
         }
         if lot.status != "live" {
-            write!(&mut body, " | Status: {}", bbcode_text(&lot.status))
+            write!(&mut body, " | [b]Status:[/b] {}", bbcode_text(&lot.status))
                 .map_err(|_| ForumRenderError::BodyTooLarge)?;
         }
         body.push('\n');
@@ -134,10 +143,12 @@ pub fn render_auction_thread(
             return Err(ForumRenderError::BodyTooLarge);
         }
     }
-    body.push_str("\n[i]This topic is an external projection. The public auction page remains authoritative.[/i]\n");
+    body.push_str(
+        "\n[size=1][color=#666666][i]The public auction page remains authoritative for live auction state.[/i][/color][/size]\n",
+    );
     writeln!(
         &mut body,
-        "[size=1][color=#F7F7F7]{}[/color][/size]",
+        "[size=1][color=transparent]{}[/color][/size]",
         forum_catalog_marker(snapshot.auction_id)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
@@ -199,40 +210,34 @@ pub fn render_system_log(
     let ignored_label = if ignored_count == 1 { "post" } else { "posts" };
 
     let mut body = String::new();
-    writeln!(&mut body, "Updated up to [b][size=5]#{processed_through_post_number}[/size][/b].")
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     writeln!(
         &mut body,
-        "Processing summary: [b][size=4]{warning_count}[/size][/b] {warning_label}, \
-         [b]{ignored_count}[/b] manually ignored {ignored_label}."
+        "Updated through [b][size=5]#{processed_through_post_number}[/size][/b] — \
+         [b]{warning_count}[/b] {warning_label}, [b]{ignored_count}[/b] manually ignored {ignored_label}."
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "[color=#009900][b]Accepted bids and current prices are reflected in post #1.[/b][/color]\n\
-         [size=1][color=#666666]This fixed post records edited or invalid commands. User bids begin at post #3.[/color][/size]\n\n\
-         [center][b][color=red][size=3]Warning Log:[/size][/color][/b][/center]\n\n",
+        "[size=1][color=#666666]Accepted bids and current prices appear in post #1. This fixed post records only edited or invalid commands; bids begin at post #3.[/color][/size]\n\n\
+         [center][b][color=#B00020][size=3]Warning Log[/size][/color][/b][/center]\n\n",
     );
     for entry in entries.iter().filter(|entry| !entry.ignored) {
         write_system_log_entry(&mut body, entry)?;
     }
     if warning_count == 0 {
-        body.push_str("[color=#888888]None[/color]\n");
+        body.push_str("[color=#666666]No warnings.[/color]\n");
+    }
+    if ignored_count > 0 {
+        body.push_str("\n[center][b][size=3]Ignored Posts[/size][/b][/center]\n\n");
+        for entry in entries.iter().filter(|entry| entry.ignored) {
+            write_system_log_entry(&mut body, entry)?;
+        }
     }
     body.push_str(
-        "\n[center][b][size=3]Manually ignored posts (for transparency):[/size][/b][/center]\n\n",
-    );
-    for entry in entries.iter().filter(|entry| entry.ignored) {
-        write_system_log_entry(&mut body, entry)?;
-    }
-    if ignored_count == 0 {
-        body.push_str("[color=#888888]None[/color]\n");
-    }
-    body.push_str(
-        "\n[i]This post is maintained by the auction worker. Do not place bids here.[/i]\n",
+        "\n[size=1][color=#666666][i]Maintained by the auction worker. Do not place bids in this post.[/i][/color][/size]\n",
     );
     writeln!(
         &mut body,
-        "[size=1][color=#F7F7F7]{}[/color][/size]",
+        "[size=1][color=transparent]{}[/color][/size]",
         forum_system_log_marker(auction_id)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
