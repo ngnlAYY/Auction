@@ -110,32 +110,40 @@ fn render_post_text(element: ElementRef<'_>) -> String {
 }
 
 fn extract_author(element: ElementRef<'_>) -> (Option<String>, Option<String>) {
-    let selector = cached_selector(&AUTHOR_SELECTOR).ok();
-    let mut current = Some(element);
-    for _ in 0..8 {
-        let Some(node) = current else {
-            break;
-        };
-        let author_id = ["data-author-id", "data-user-id", "data-player-id", "data-game-player-id"]
-            .iter()
-            .find_map(|key| {
-                node.attr(key).map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned)
-            })
-            .and_then(canonical_forum_player_id);
-        let author_element = selector.and_then(|selector| node.select(selector).next());
-        let author = author_element.map(render_post_text).filter(|value| !value.is_empty());
-        let author_id = author_id.or_else(|| {
-            author_element.and_then(|value| {
-                let links = cached_selector(&LINK_SELECTOR).ok()?;
-                value.select(links).find_map(|link| forum_player_id_from_href(link.attr("href")?))
-            })
-        });
-        if author_id.is_some() || author.is_some() {
-            return (author_id, author);
+    let Some(row) =
+        element.ancestors().filter_map(ElementRef::wrap).find(|node| node.value().name() == "tr")
+    else {
+        return (None, None);
+    };
+    let Ok(authors) = cached_selector(&AUTHOR_SELECTOR) else {
+        return (None, None);
+    };
+    let Ok(links) = cached_selector(&LINK_SELECTOR) else {
+        return (None, None);
+    };
+    let mut identity = None;
+    for author in row.select(authors) {
+        for link in std::iter::once(author)
+            .chain(author.select(links))
+            .filter(|candidate| candidate.value().name() == "a")
+            .filter(|candidate| !link_is_user_content(*candidate))
+        {
+            let Some(account_id) = link.attr("href").and_then(forum_account_id_from_href) else {
+                continue;
+            };
+            let player_name = render_post_text(link);
+            if player_name.is_empty() {
+                continue;
+            }
+            let candidate = (account_id, player_name);
+            if identity.as_ref().is_some_and(|current| current != &candidate) {
+                // 同一帖子行出现互相矛盾的论坛生成作者链接时失败关闭，不能拼接数字键与名称。
+                return (None, None);
+            }
+            identity = Some(candidate);
         }
-        current = node.parent().and_then(ElementRef::wrap);
     }
-    (None, None)
+    identity.map_or((None, None), |(account_id, player_name)| (Some(account_id), Some(player_name)))
 }
 
 fn link_is_user_content(link: ElementRef<'_>) -> bool {
@@ -162,7 +170,7 @@ fn topic_reference_candidate(reference: &str) -> bool {
             || reference.contains("&t="))
 }
 
-fn forum_player_id_from_href(href: &str) -> Option<String> {
+fn forum_account_id_from_href(href: &str) -> Option<String> {
     let base = Url::parse("https://forums.e-hentai.org/").ok()?;
     let url = base.join(href).ok()?;
     if url.scheme() != "https"
@@ -172,21 +180,21 @@ fn forum_player_id_from_href(href: &str) -> Option<String> {
         return None;
     }
 
-    let mut player_id = None;
+    let mut account_id = None;
     for (name, value) in url.query_pairs() {
-        if !matches!(name.as_ref(), "showuser" | "game_player_id" | "player_id") {
+        if name != "showuser" {
             continue;
         }
-        let value = canonical_forum_player_id(value.into_owned())?;
-        if player_id.as_ref().is_some_and(|current| current != &value) {
+        let value = canonical_forum_account_id(value.into_owned())?;
+        if account_id.as_ref().is_some_and(|current| current != &value) {
             return None;
         }
-        player_id = Some(value);
+        account_id = Some(value);
     }
-    player_id
+    account_id
 }
 
-fn canonical_forum_player_id(value: String) -> Option<String> {
+fn canonical_forum_account_id(value: String) -> Option<String> {
     (value.len() <= 32
         && value.as_bytes().first().is_some_and(u8::is_ascii_digit)
         && value.as_bytes().first() != Some(&b'0')

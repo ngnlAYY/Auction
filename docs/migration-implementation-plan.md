@@ -155,13 +155,13 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000025`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000026`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
 严格兼容 trigger、已证明 MoogleMail 退信的独立告警 identity，以及 operations alert 的运行状态、
 扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态、lot 的分类内展示编号，
-以及论坛固定 #1/#2 的远端身份和内容版本证明。
+以及论坛固定 #1/#2 的远端身份和内容版本证明、同一 world/provider 的单用户论坛账号归属。
 `lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
 不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
@@ -290,10 +290,13 @@ Sent 分页/exact ID 查找、详情资产矩阵解析、Balance 可见值/脚�
 时转入 `manual_reconcile`。用户注册 key 只以密文信封落库，delivery outbox 只保存用户 UUID
 引用，发送前才由 Worker 解密。论坛主题同步和回帖导入已经接入 PostgreSQL Worker：主题发布使用
 持久化 claim/fencing，结果未知时先按精确标题只读对账；未命中必须经 PostgreSQL `000016` 的
-幂等人工授权和追加审计才允许下一次 POST。论坛作者 ID 与 MM 共用 `users.game_player_id`；Users
-owner 在 Serializable 事务内复用已有用户，或建立用户名直接等于玩家 ID 的 revoked-key
-`forum_only` 主体供后续 MM 注册恢复，不生成 `forum-*` 影子用户名。论坛与公开拍卖投影统一展示
-该玩家 ID。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
+幂等人工授权和追加审计才允许下一次 POST。论坛 `showuser` 数字 ID 只作为外部账号键，论坛用户名
+与 MM 共用 `users.game_player_id` 玩家 ID 名称；解析器只接受同一个论坛生成作者链接里的数字键与名称。
+Users owner 在 Serializable 事务内同时核对两者，仅让 active-key 同名用户建立首个映射，revoked 用户
+必须沿用另一世界已经证明的相同数字键；否则建立用户名与 `game_player_id` 都等于玩家名称的 revoked-key
+`forum_only` 主体供后续 MM 注册恢复。PostgreSQL `000026` 再限制同一 world/provider 的单用户账号归属。
+系统不生成 `forum-*` 影子用户名，也不把数字键交给 MM。论坛与公开拍卖投影
+统一展示玩家名称。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
 post ID 与内容版本，用户命令从 #3 开始；确定竞价结果提交后刷新 #1，解析/编辑/拒绝结果稳定更新
 #2，pending 命令同样显示，并以独立内容 lease/fencing 串行远端编辑；成功扫描持久化下一次五分钟
 due，主题读取按同 origin/thread 的规范 `st` 分页补齐、默认最多 10 页，既有 #2 不是系统标记时不覆盖。
@@ -449,7 +452,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000025` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000026` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public

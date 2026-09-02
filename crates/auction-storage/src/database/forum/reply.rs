@@ -43,9 +43,10 @@ use queries::{
 #[cfg(feature = "sqlite")]
 use validation::capability_error;
 use validation::{
-    MAX_DISPLAY_NAME_BYTES, MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
-    MAX_FORUM_PLAYER_ID_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES, storage_error,
-    valid_command_record, valid_decimal_id, valid_optional_text, valid_text,
+    MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
+    MAX_FORUM_ACCOUNT_ID_BYTES, MAX_GAME_PLAYER_ID_BYTES, MAX_REPLY_BATCH_SIZE,
+    MAX_THREAD_ID_BYTES, storage_error, valid_command_record, valid_decimal_id,
+    valid_optional_text, valid_text,
 };
 
 impl ForumReplyStore for DatabaseStore {
@@ -96,20 +97,21 @@ impl ForumReplyStore for DatabaseStore {
         &self,
         world: SettlementWorld,
         external_account_id: String,
-        display_name: String,
+        game_player_id: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity> {
         Box::pin(async move {
             #[cfg(feature = "sqlite")]
             let _ = world;
-            if !valid_decimal_id(&external_account_id, MAX_FORUM_PLAYER_ID_BYTES)
-                || !valid_text(&display_name, MAX_DISPLAY_NAME_BYTES)
+            if !valid_decimal_id(&external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
+                || !valid_text(&game_player_id, MAX_GAME_PLAYER_ID_BYTES)
             {
                 return Err(storage_error("论坛回帖身份参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    resolve_bidder_postgres(store, world, &external_account_id, &display_name).await
+                    resolve_bidder_postgres(store, world, &external_account_id, &game_player_id)
+                        .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

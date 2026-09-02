@@ -6,14 +6,14 @@ SQLite 未实现的完整生产能力必须在 Lite 能力清单或部署说明�
 发布的文件禁止修改。已支持竞价事务的锁、唯一约束、审计事件和 outbox 语义必须与
 [`docs/architecture.md`](../docs/architecture.md) 一起评审。
 
-PostgreSQL `000001` 至 `000025` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
+PostgreSQL `000001` 至 `000026` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
 身份/外部命令、恢复/可观测性、论坛同步、MoogleMail 轮询、Final phase 调度、领先时间修正和
 生命周期/operations alert/lot 结束时间数据库不变量、论坛未知写入的幂等人工再授权账本及
 异世界 carrier dispatch 修正、旧 v28 bid INSERT 在滚动升级期间遗漏有效结束时间列的兼容投影，
 已证明 MoogleMail 退信的独立 operations alert signal 闭集、operations alert 的非敏感
 启用状态与成功扫描水位、配置状态发布时间与扫描水位的独立时钟语义，以及 HV 战斗页占用时
-保留凭据和最后成功余额的 `busy` recovery 状态、分类内 lot 编号，以及论坛固定 #1/#2 的
-远端身份、内容版本和独立刷新租约；
+保留凭据和最后成功余额的 `busy` recovery 状态、分类内 lot 编号、论坛固定 #1/#2 的
+远端身份/内容版本/独立刷新租约，以及同一 world/provider 的单用户论坛账号归属；
 Admin A20 的全局唤醒由 Worker control 处理，不新增数据库触发字段。SQLite `000001` 至
 `000009` 已提交共有 Lite 子集、轮次租约、用户管理、取消/生命周期元数据、Final phase fence、
 领先时间和 lot 结束时间 shape 修正。两者仍只表示当前迁移阶段的 schema，不代表旧系统的全部行为或业务表面已经
