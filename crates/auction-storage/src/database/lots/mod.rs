@@ -61,6 +61,18 @@ impl PublicLotReader for DatabaseStore {
     }
 }
 
+/// 为论坛同步快照复用 Public 装备字段校验和 Roll 算法，不建立第二套属性解释规则。
+#[cfg(feature = "postgres")]
+pub(super) fn map_forum_equipment(
+    world_id: &str,
+    external_id: &str,
+    name: &str,
+    category: &str,
+    attributes: Value,
+) -> Result<PublicEquipment, ApplicationError> {
+    map_equipment(world_id, external_id, name, category, attributes, true)
+}
+
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;

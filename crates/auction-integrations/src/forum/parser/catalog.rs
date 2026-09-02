@@ -132,11 +132,11 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
             .to_ascii_lowercase()
             .find(" by ")
             .map(|start| {
-                current[start + " by ".len()..]
+                let bidder = current[start + " by ".len()..]
                     .split_once(" | ")
                     .map_or(&current[start + " by ".len()..], |(bidder, _)| bidder)
-                    .trim()
-                    .to_owned()
+                    .trim();
+                strip_bid_source_suffix(bidder).to_owned()
             })
             .filter(|value| !value.is_empty());
         return ((!seller.is_empty()).then_some(seller), bidder, amount);
@@ -157,6 +157,21 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
         }
     }
     ((!seller.is_empty()).then_some(seller), bidder, price)
+}
+
+/// 固定 #1 的来源标记只属于展示，不得污染回读后的玩家名称。
+fn strip_bid_source_suffix(value: &str) -> &str {
+    let Some(without_close) = value.strip_suffix('）') else {
+        return value;
+    };
+    let Some((bidder, annotation)) = without_close.rsplit_once('（') else {
+        return value;
+    };
+    let forum_floor = annotation
+        .strip_prefix('#')
+        .and_then(|floor| floor.parse::<i32>().ok())
+        .is_some_and(|floor| floor >= 3);
+    if annotation == "代理" || forum_floor { bidder.trim_end() } else { value }
 }
 
 fn is_material(description: &str) -> bool {

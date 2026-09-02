@@ -133,8 +133,12 @@ P10 竞价日志额外保留
 `world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
 next_cursor/has_more，不得把未知总数伪装成精确 total。条目的可选 `source` 只允许 `forum`/`proxy`：
-论坛普通竞价仅在账本保存了真实楼层时同时返回 `source_post_number`，代理事实不区分 fast/slow 且不
-携带楼层；普通 Web 出价两者都为空。历史论坛事实楼层未知时只标记论坛来源，不从 post ID 猜测。
+论坛普通竞价仅在账本保存了真实楼层时同时返回 `source_post_number`；若同一账本还能证明真实
+thread/post ID，则增加规范 `source_post_url`。链接身份不得由楼层号或数字论坛账号 ID 推算，玩家
+展示继续使用名称。代理事实不区分 fast/slow 且不携带楼层或帖子链接；普通 Web 出价三者都为空。
+历史论坛事实楼层未知时只标记论坛来源，不从 post ID 猜测。
+P09/P11 的 preview/live 装备投影可选返回按 `Strength, Dexterity, Agility, Endurance,
+Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺少对应属性时省略而不是伪造。
 P12 在 PostgreSQL 完整档保留 `name`、`world`、
 日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；SQLite Lite
 因为没有 settlement 事实链固定返回 `501 feature_not_supported`，不能把状态列或空集合当作成交证明。实时事件的 after 也是

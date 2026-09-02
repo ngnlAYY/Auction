@@ -85,17 +85,32 @@ pub struct ForumSyncClaim {
     pub previous_failure_code: Option<String>,
 }
 
+/// 论坛固定 #1 中当前领先事实的可证明来源。
+///
+/// 论坛来源只携带真实主题、帖子和楼层身份；代理只保留统一标记，不暴露 fast/slow 模式。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForumCurrentBidSource {
+    Forum { post_number: i32, thread_id: String, post_id: String },
+    Proxy,
+}
+
 /// 论坛主题中展示的单个 lot 快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumLotSnapshot {
     pub code: String,
     pub category: String,
     pub name: String,
+    pub equipment_level: Option<i64>,
+    /// 按 HentaVerse Primary Attributes 固定顺序生成的大写首字母缩写。
+    pub primary_attribute_initials: Option<String>,
+    /// 平均 Roll 百分比乘以十后的整数，避免论坛快照引入浮点相等语义。
+    pub avg_roll_tenths: Option<i64>,
     pub seller: String,
     pub start_price: i64,
     pub current_price: i64,
     pub status: String,
     pub current_bidder: Option<String>,
+    pub current_bid_source: Option<ForumCurrentBidSource>,
     pub effective_end_at: Option<DateTime<Utc>>,
     /// 不含装备 key 的权威链接目标；完整 URL 只在 Worker 渲染前短暂解析。
     pub equipment_link_target: PublicEquipmentLinkTarget,

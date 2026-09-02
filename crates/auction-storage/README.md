@@ -23,7 +23,8 @@
 继续按同一规则拆分。
 Public 竞价日志由 `src/database/bid_log/mod.rs` 装配，公共 cursor/结果校验、PostgreSQL 查询/映射
 和 SQLite Lite 查询/类型转换分别位于 `bid_log/{common,postgres,sqlite}.rs`；两套后端继续共享
-时间、lot、状态版本、事实序号和 bid ID 的 keyset 排序语义，但保留各自 SQL 与能力边界。
+时间、lot、状态版本、事实序号和 bid ID 的 keyset 排序语义，但保留各自 SQL 与能力边界。完整档
+只为论坛普通出价投影已持久化的主题/帖子身份，数字论坛账号 ID 不进入玩家显示。
 数据库根入口的后端错误与 URL 识别位于 `database/backend.rs`，运行时 Store 选择、迁移目标、
 readiness 和连接池入口位于 `database/store.rs`；`database/migrations/mod.rs` 为 PostgreSQL
 `000005`/`000015` 提供只替换保留字别名、但默认保留历史 checksum 的受限执行视图；它还只读识别
@@ -101,7 +102,8 @@ Public lot 读取由 `src/database/lots/` 持有：`mod.rs` 只做后端分派�
 分别由各自子目录的 `mod.rs`、`list.rs`、`detail.rs` 和 `mapping.rs` 拥有列表、详情与行映射；
 顶层 `mapping.rs` 继续负责跨后端安全投影、装备字段校验和 Lite 时间/UUID 转换。两套后端的
 Lite/完整能力差异在各自 SQL 适配器中显式保留。Public 的 `next_bid` 与普通竞价事务统一使用
-完整加价阶梯；论坛帖专属的代理末口 `+1K` 投影不得进入浏览器竞价契约。
+完整加价阶梯；装备投影按固定顺序生成 Primary Attributes 缩写，供 preview/live Web 目录和论坛
+快照复用；论坛帖专属的代理末口 `+1K` 投影不得进入浏览器竞价契约。
 `src/database/equipment_secrets.rs` 统一拥有 PostgreSQL 装备密文信封的只读 SQL 与结构校验，
 Worker 履约和 Public 真实装备 URL 分别通过自己的应用端口映射错误；Public 列表使用一次有界批量
 读取，避免逐 lot 查询。`src/database/public_equipment_link.rs` 只返回密文投影，SQLite Lite 固定
@@ -140,7 +142,11 @@ Users 主体只有一个论坛账号，`000027` 增加 Users 级唯一论坛账�
 的真实 post ID、#2 规范正文和内容版本，并通过独立 due 水位、claim/lease/fencing 串行化远端
 编辑；历史 published 行保持未对账，不猜测楼层身份。
 主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
-快照只输出装备 ID、外部 ID 和不含 key 的目标，真实 URL 由 Worker 的外部链接解析边界生成。
+快照复用 Public 装备投影的属性校验和 Roll 算法，输出等级、按固定 Primary Attributes 顺序生成的
+首字母缩写、十分之一百分比平均 Roll、装备 ID、外部 ID 和不含 key 的目标；真实 URL 由 Worker 的
+外部链接解析边界生成。固定 #1 的领先来源从与当前领先者和当前价一致的最新追加式 bid fact 读取：
+论坛普通出价只使用命令账本保存的真实楼层与 thread/post ID，代理事实只输出统一标记，普通 Web 出价
+不伪造来源。
 `credential_unavailable` 保持非写入失败；只有当前 Worker 确认内存凭据可用时，领取 SQL 才越过一年
 人工退避，并且仅放行早于该进程首轮恢复水位的记录。失败写回会越过该水位，防止同一进程紧循环；
 `write_unknown`、发布证明失败和人工授权状态不经过此分支。
@@ -148,7 +154,8 @@ Users 主体只有一个论坛账号，`000027` 增加 Users 级唯一论坛账�
 两种身份命中不同记录或任一负载字段漂移时失败关闭。
 `000028` 为账本保存可证明的真实楼层号：既有空值只在同一自然键和完整负载再次匹配时补齐，历史
 未知值不会从远端 post ID 推算。Public 竞价日志据此区分论坛普通竞价与 Web 代理事实，代理来源不再
-暴露 fast/slow 子类型。
+暴露 fast/slow 子类型；论坛楼层链接使用同一账本已有的真实 thread/post ID，不使用楼层号或数字账号
+ID 反推。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期

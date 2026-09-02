@@ -59,13 +59,32 @@ pub(super) fn validate_entries(
 }
 
 fn valid_source(entry: &PublicBidLogEntry) -> bool {
+    let forum_ids = match (entry.source_thread_id.as_deref(), entry.source_post_id.as_deref()) {
+        (Some(thread_id), Some(post_id)) => {
+            canonical_forum_id(thread_id) && canonical_forum_id(post_id)
+        }
+        (None, None) => false,
+        _ => return false,
+    };
     match (entry.mechanism.as_str(), entry.source.as_deref(), entry.source_post_number) {
-        ("proxy", Some("proxy"), None) => true,
-        ("ordinary", Some("forum"), Some(post_number)) => post_number >= 3,
+        ("proxy", Some("proxy"), None) => !forum_ids,
+        ("ordinary", Some("forum"), Some(post_number)) => post_number >= 3 && forum_ids,
         // 000028 之前的论坛事实没有可证明的楼层号，只展示论坛来源。
-        ("ordinary", Some("forum"), None) | ("ordinary", None, None) => true,
+        ("ordinary", Some("forum"), None) => {
+            forum_ids || entry.source_thread_id.is_none() && entry.source_post_id.is_none()
+        }
+        ("ordinary", None, None) => {
+            entry.source_thread_id.is_none() && entry.source_post_id.is_none()
+        }
         _ => false,
     }
+}
+
+fn canonical_forum_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && !value.starts_with('0')
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(super) fn storage_error(message: &str) -> ApplicationError {

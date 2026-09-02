@@ -80,6 +80,8 @@ pub(super) async fn list_sqlite(
             users.username AS bidder_name,
             CASE WHEN b.mechanism = 'proxy' THEN 'proxy' ELSE NULL END AS source,
             CAST(NULL AS INTEGER) AS source_post_number,
+            CAST(NULL AS TEXT) AS source_thread_id,
+            CAST(NULL AS TEXT) AS source_post_id,
             b.amount,
             b.accepted_state_version,
             b.fact_index,
@@ -274,6 +276,12 @@ fn map_sqlite_entry(row: sqlx::sqlite::SqliteRow) -> Result<PublicBidLogEntry, A
             .map(i32::try_from)
             .transpose()
             .map_err(|_| storage_error("SQLite 论坛竞价楼层号超出范围"))?,
+        source_thread_id: row
+            .try_get("source_thread_id")
+            .map_err(|_| storage_error("读取 SQLite 论坛竞价主题标识失败"))?,
+        source_post_id: row
+            .try_get("source_post_id")
+            .map_err(|_| storage_error("读取 SQLite 论坛竞价帖子标识失败"))?,
         valid: row
             .try_get::<i64, _>("valid")
             .map_err(|_| storage_error("读取 SQLite 竞价有效标志失败"))?

@@ -1,14 +1,14 @@
 //! 论坛主题同步快照的 PostgreSQL 一致性读取。
 
 use auction_application::{
-    ApplicationError, ForumAuctionSnapshot, ForumLotSnapshot, ForumSyncClaim,
-    PublicEquipmentLinkTarget, forum_world_name,
+    ApplicationError, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
+    ForumSyncClaim, PublicEquipment, PublicEquipmentLinkTarget, forum_world_name,
 };
 use auction_domain::{AuctionId, EquipmentId, SettlementWorld};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use super::super::super::PostgresStore;
+use super::super::super::{PostgresStore, lots::map_forum_equipment};
 use super::validation::{lot_code, parse_world, storage_error};
 
 pub(super) async fn load_snapshot_postgres(
@@ -123,12 +123,30 @@ async fn read_snapshot(
                 END AS lot_number,
                 l.status, l.start_price, l.current_price,
                 l.effective_end_at, e.name AS equipment_name, e.category AS equipment_category,
-                submission.seller AS seller_name, leader.username AS leader_name
+                e.attributes AS equipment_attributes,
+                submission.seller AS seller_name, leader.username AS leader_name,
+                current_bid.mechanism AS current_bid_mechanism,
+                forum_command.post_number AS current_bid_post_number,
+                forum_command.thread_id AS current_bid_thread_id,
+                forum_command.post_id AS current_bid_post_id
          FROM public.lots AS l
          JOIN public.auction_forum_sync AS sync ON sync.auction_id = l.auction_id
          JOIN public.equipment AS e ON e.id = l.equipment_id
          LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
          LEFT JOIN public.users AS leader ON leader.id = l.leader_user_id
+         LEFT JOIN LATERAL (
+             SELECT bid.command_id, bid.mechanism
+             FROM public.bids AS bid
+             WHERE bid.lot_id = l.id
+               AND bid.bidder_user_id = l.leader_user_id
+               AND bid.amount = l.current_price
+             ORDER BY bid.accepted_state_version DESC, bid.fact_index DESC, bid.id DESC
+             LIMIT 1
+         ) AS current_bid ON TRUE
+         LEFT JOIN public.auction_forum_bid_commands AS forum_command
+           ON forum_command.command_id = current_bid.command_id
+          AND forum_command.auction_id = l.auction_id
+          AND forum_command.command_kind = 'bid'
          WHERE l.auction_id = $1
          ORDER BY l.lot_number, l.id",
     )
@@ -158,6 +176,9 @@ async fn read_snapshot(
             row.try_get("seller_name").map_err(|_| storage_error("读取论坛快照卖家失败"))?;
         let name: String =
             row.try_get("equipment_name").map_err(|_| storage_error("读取论坛快照装备名称失败"))?;
+        let attributes: sqlx::types::Json<serde_json::Value> = row
+            .try_get("equipment_attributes")
+            .map_err(|_| storage_error("读取论坛快照装备属性失败"))?;
         let status: String =
             row.try_get("status").map_err(|_| storage_error("读取论坛快照 lot 状态失败"))?;
         let effective_end_at: Option<DateTime<Utc>> = row
@@ -165,21 +186,52 @@ async fn read_snapshot(
             .map_err(|_| storage_error("读取论坛快照 lot 结束时间失败"))?;
         let leader_name: Option<String> =
             row.try_get("leader_name").map_err(|_| storage_error("读取论坛快照竞价者失败"))?;
+        let current_bid_mechanism: Option<String> = row
+            .try_get("current_bid_mechanism")
+            .map_err(|_| storage_error("读取论坛快照竞价来源失败"))?;
+        let current_bid_post_number: Option<i32> = row
+            .try_get("current_bid_post_number")
+            .map_err(|_| storage_error("读取论坛快照竞价楼层失败"))?;
+        let current_bid_thread_id: Option<String> = row
+            .try_get("current_bid_thread_id")
+            .map_err(|_| storage_error("读取论坛快照竞价主题失败"))?;
+        let current_bid_post_id: Option<String> = row
+            .try_get("current_bid_post_id")
+            .map_err(|_| storage_error("读取论坛快照竞价帖子失败"))?;
+        let current_bid_source = match current_bid_mechanism.as_deref() {
+            Some("proxy") => Some(ForumCurrentBidSource::Proxy),
+            Some("ordinary") => {
+                match (current_bid_post_number, current_bid_thread_id, current_bid_post_id) {
+                    (Some(post_number), Some(thread_id), Some(post_id)) => {
+                        Some(ForumCurrentBidSource::Forum { post_number, thread_id, post_id })
+                    }
+                    _ => None,
+                }
+            }
+            Some(_) => return Err(storage_error("论坛快照竞价机制不在闭集内")),
+            None => None,
+        };
         let code = lot_code(&category, lot_number)?;
         let seller = seller_name.ok_or_else(|| storage_error("论坛快照 lot 缺少卖家"))?;
         let current_price = current_price.unwrap_or(start_price);
         if start_price <= 0 || current_price < start_price {
             return Err(storage_error("论坛快照 lot 金额无效"));
         }
+        let equipment =
+            map_forum_equipment(&world_id, &external_equipment_id, &name, &category, attributes.0)?;
         lots.push(ForumLotSnapshot {
             code,
             category,
             name,
+            equipment_level: equipment.level.filter(|level| *level > 0),
+            primary_attribute_initials: equipment.primary_attribute_initials(),
+            avg_roll_tenths: average_roll_tenths(&equipment),
             seller,
             start_price,
             current_price,
             status,
             current_bidder: leader_name,
+            current_bid_source,
             effective_end_at,
             equipment_link_target: PublicEquipmentLinkTarget {
                 lot_id,
@@ -221,4 +273,11 @@ fn projected_game_equipment_url(world: SettlementWorld, external_equipment_id: &
         SettlementWorld::Isekai => "https://hentaiverse.org/isekai/equip/",
     };
     format!("{prefix}{external_equipment_id}")
+}
+
+fn average_roll_tenths(equipment: &PublicEquipment) -> Option<i64> {
+    equipment
+        .avg_roll
+        .filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
+        .map(|value| (value * 10.0).round() as i64)
 }

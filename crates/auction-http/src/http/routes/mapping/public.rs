@@ -41,6 +41,7 @@ pub(crate) fn map_bid_log_page(
 }
 
 pub(crate) fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryResponse {
+    let source_post_url = forum_post_url(&entry);
     PublicBidLogEntryResponse {
         id: entry.id.to_string(),
         auction_id: entry.auction_id.to_string(),
@@ -52,12 +53,34 @@ pub(crate) fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryRe
         bidder_name: entry.bidder_name,
         source: entry.source,
         source_post_number: entry.source_post_number.map(i64::from),
+        source_post_url,
         valid: entry.valid,
         accepted_state_version: entry.accepted_state_version,
         fact_index: i64::from(entry.fact_index),
         mechanism: entry.mechanism,
         created_at: public_timestamp(entry.created_at),
     }
+}
+
+fn forum_post_url(entry: &PublicBidLogEntry) -> Option<String> {
+    if entry.mechanism != "ordinary"
+        || entry.source.as_deref() != Some("forum")
+        || entry.source_post_number.is_none()
+    {
+        return None;
+    }
+    let thread_id = entry.source_thread_id.as_deref().filter(|value| canonical_forum_id(value))?;
+    let post_id = entry.source_post_id.as_deref().filter(|value| canonical_forum_id(value))?;
+    Some(format!(
+        "https://forums.e-hentai.org/index.php?showtopic={thread_id}&p={post_id}#entry{post_id}"
+    ))
+}
+
+fn canonical_forum_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && !value.starts_with('0')
+        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) fn map_owned_bid(bid: PublicMyBid) -> PublicOwnedBidResponse {

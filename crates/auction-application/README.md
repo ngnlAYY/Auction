@@ -78,7 +78,9 @@
 - `src/ports/auction/queries/`：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
   成交价格历史分别由 `world.rs`、`auction.rs`、`lot.rs`、`account.rs`、`bid_log.rs` 和
   `price_history.rs` 持有；`auction.rs` 还提供单拍卖 WebSocket 升级前的公开状态闭集，避免 HTTP
-  从事件历史猜测 settled 状态；`queries.rs` 只负责稳定公共导出，不把数据库记录暴露给表面层。
+  从事件历史猜测 settled 状态；`lot.rs` 按固定 Primary Attributes 顺序生成论坛与 Web 共用缩写，
+  `bid_log.rs` 只在内部携带生成真实论坛帖子链接所需的主题/帖子身份；`queries.rs` 只负责稳定公共
+  导出，不把数据库记录暴露给表面层。
 - `src/ports/admin/forum.rs`：Admin 论坛 HTML/文本预览的有界输入、catalog/posts/warnings
   安全结果和解析端口；该端口只表达本地预览，不承担远程发布或数据库写入。
 - `src/ports/admin/audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
@@ -118,7 +120,8 @@ movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页�
 PostgreSQL 或 SQLite 类型。
 Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态和已发布内容，不承担
 远程论坛传输。
-论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照只携带无 key 的装备链接目标，渲染前由
+论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照携带等级、Primary Attributes 缩写、
+十分之一百分比精度的平均 Roll、可证明的当前论坛楼层/统一代理来源及无 key 的装备链接目标，渲染前由
 `PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取
 远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段。端口本身不决定 CLI
 确认文字、数据库表、装备 key 解密或 HTTP 传输实现。`ForumCredentialAvailability` 只暴露当前

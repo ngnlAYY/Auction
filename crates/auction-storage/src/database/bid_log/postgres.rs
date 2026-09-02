@@ -71,6 +71,14 @@ pub(super) async fn list_postgres(
                 WHEN b.mechanism = 'ordinary' THEN forum_command.post_number
                 ELSE NULL
             END AS source_post_number,
+            CASE
+                WHEN b.mechanism = 'ordinary' THEN forum_command.thread_id
+                ELSE NULL
+            END AS source_thread_id,
+            CASE
+                WHEN b.mechanism = 'ordinary' THEN forum_command.post_id
+                ELSE NULL
+            END AS source_post_id,
             b.amount,
             b.accepted_state_version,
             b.fact_index,
@@ -251,6 +259,12 @@ fn map_postgres_entry(row: sqlx::postgres::PgRow) -> Result<PublicBidLogEntry, A
         source_post_number: row
             .try_get("source_post_number")
             .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价楼层号失败"))?,
+        source_thread_id: row
+            .try_get("source_thread_id")
+            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价主题标识失败"))?,
+        source_post_id: row
+            .try_get("source_post_id")
+            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价帖子标识失败"))?,
         valid: row
             .try_get("valid")
             .map_err(|_| storage_error("读取 PostgreSQL 竞价有效标志失败"))?,

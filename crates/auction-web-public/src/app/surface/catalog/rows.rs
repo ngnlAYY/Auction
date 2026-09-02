@@ -34,18 +34,55 @@ pub(crate) fn CatalogParticipant(
     }
 }
 
-/// 将公开来源事实压缩成玩家名称后的单一标记，不暴露代理实现模式。
-pub(crate) fn bid_source_trailing(
-    source: Option<&str>,
+/// 竞价历史参与者使用玩家名称；论坛楼层紧贴名称并链接真实帖子，代理只展示统一来源。
+#[component]
+pub(crate) fn BidHistoryParticipant(
+    name: String,
+    source: Option<String>,
     source_post_number: Option<i64>,
-) -> Option<String> {
-    match (source, source_post_number) {
-        (Some("forum"), Some(post_number)) => {
-            Some(t!("bidlog-source-forum", post_number: post_number))
+    source_post_url: Option<String>,
+) -> Element {
+    let forum_post_number =
+        (source.as_deref() == Some("forum")).then_some(source_post_number).flatten();
+    let forum_unknown = source.as_deref() == Some("forum") && forum_post_number.is_none();
+    let proxy = source.as_deref() == Some("proxy");
+    rsx! {
+        span { class: "public-auction-participant-identity public-auction-participant-identity--source",
+            TruncatedText {
+                value: name,
+                size: "compact",
+                class_name: "public-auction-participant-identity__name",
+                portal: true,
+                legacy_dom: true,
+            }
+            if let Some(post_number) = forum_post_number {
+                if let Some(url) = source_post_url {
+                    a {
+                        class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
+                        href: url,
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        aria_label: t!("bidlog-source-forum-link-label", post_number: post_number),
+                        {t!("bidlog-source-forum", post_number: post_number)}
+                    }
+                } else {
+                    span {
+                        class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
+                        {t!("bidlog-source-forum", post_number: post_number)}
+                    }
+                }
+            } else if forum_unknown {
+                span {
+                    class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
+                    {t!("bidlog-source-forum-unknown")}
+                }
+            } else if proxy {
+                span {
+                    class: "public-auction-participant-identity__marker public-auction-participant-identity__marker--trailing",
+                    {t!("bidlog-source-proxy")}
+                }
+            }
         }
-        (Some("forum"), None) => Some(t!("bidlog-source-forum-unknown")),
-        (Some("proxy"), None) => Some(t!("bidlog-source-proxy")),
-        _ => None,
     }
 }
 
@@ -85,6 +122,8 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
+    let primary_attribute_initials =
+        row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
     let avg_roll = row.avg_roll.map(|value| format!("{value:.1}%"));
     let seller = row.seller_name.clone();
     let start_price = format_amount(row.start_price);
@@ -114,6 +153,11 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                 }
             }
             td { "data-label": t!("catalog-level"), "{level}" }
+            td {
+                class: "public-auction-catalog__primary-attributes",
+                "data-label": t!("catalog-primary-attributes"),
+                "{primary_attribute_initials}"
+            }
             td { "data-label": t!("catalog-seller"),
                 TruncatedText {
                     value: seller,

@@ -64,6 +64,7 @@ pub(super) fn map_preview_fields(
         attributes,
         false,
     )?;
+    let primary_attribute_initials = equipment.primary_attribute_initials();
     let summary = PublicPreviewLotSummary {
         id,
         equipment_id,
@@ -75,6 +76,7 @@ pub(super) fn map_preview_fields(
         equipment_name,
         equipment_category,
         equipment_level: equipment.level,
+        primary_attribute_initials,
         avg_roll: equipment.avg_roll,
         game_equipment_url: equipment.game_equipment_url,
     };
