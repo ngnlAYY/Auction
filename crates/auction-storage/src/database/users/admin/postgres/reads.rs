@@ -18,7 +18,7 @@ pub(crate) async fn list_postgres(
         "SELECT count(*)
          FROM public.users
          WHERE ($1::text IS NULL OR strpos(username, $1) > 0
-                OR strpos(game_player_id, $1) > 0)
+                OR strpos(forum_account_id, $1) > 0)
            AND ($2::text IS NULL OR status = $2)",
     )
     .bind(name)
@@ -27,11 +27,11 @@ pub(crate) async fn list_postgres(
     .await
     .map_err(map_storage_error)?;
     let rows = sqlx::query(
-        "SELECT id, username, game_player_id, status, key_status, state_version,
+        "SELECT id, username, forum_account_id, status, key_status, state_version,
                 created_at, updated_at
          FROM public.users
          WHERE ($1::text IS NULL OR strpos(username, $1) > 0
-                OR strpos(game_player_id, $1) > 0)
+                OR strpos(forum_account_id, $1) > 0)
            AND ($2::text IS NULL OR status = $2)
          ORDER BY username COLLATE \"C\", id
          LIMIT $3 OFFSET $4",
@@ -114,7 +114,7 @@ pub(super) async fn load_user_postgres_tx(
     user_id: Uuid,
 ) -> Result<AdminUser, ApplicationError> {
     let row = sqlx::query(
-        "SELECT id, username, game_player_id, status, key_status, state_version,
+        "SELECT id, username, forum_account_id, status, key_status, state_version,
                 created_at, updated_at
          FROM public.users WHERE id = $1 FOR UPDATE",
     )

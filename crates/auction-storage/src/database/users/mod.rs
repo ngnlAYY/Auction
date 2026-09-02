@@ -36,7 +36,7 @@ async fn authenticate_postgres(
 ) -> Result<PublicLoginIdentity, ApplicationError> {
     let key_hash = Sha256::digest(key);
     let row = sqlx::query(
-        "SELECT account.id, account.username, account.game_player_id, account.status, account.key_status,
+        "SELECT account.id, account.username, account.status, account.key_status,
                 blacklist.public_reason
          FROM public.users AS account
          LEFT JOIN public.user_blacklist AS blacklist
@@ -65,9 +65,6 @@ async fn authenticate_postgres(
     Ok(PublicLoginIdentity {
         user_id: row.try_get("id").map_err(|_| storage_error("读取用户标识失败"))?,
         username: row.try_get("username").map_err(|_| storage_error("读取用户名失败"))?,
-        game_player_id: row
-            .try_get("game_player_id")
-            .map_err(|_| storage_error("读取游戏玩家标识失败"))?,
         active,
         public_reason: row
             .try_get("public_reason")
@@ -82,7 +79,7 @@ async fn authenticate_sqlite(
 ) -> Result<PublicLoginIdentity, ApplicationError> {
     let key_hash = Sha256::digest(key);
     let row = sqlx::query(
-        "SELECT account.id, account.username, account.game_player_id, account.status, account.key_status,
+        "SELECT account.id, account.username, account.status, account.key_status,
                 blacklist.public_reason
          FROM users AS account
          LEFT JOIN user_blacklist AS blacklist
@@ -116,9 +113,6 @@ async fn authenticate_sqlite(
     Ok(PublicLoginIdentity {
         user_id: id,
         username: row.try_get("username").map_err(|_| storage_error("读取 Lite 用户名失败"))?,
-        game_player_id: row
-            .try_get("game_player_id")
-            .map_err(|_| storage_error("读取 Lite 游戏玩家标识失败"))?,
         active,
         public_reason: row
             .try_get("public_reason")

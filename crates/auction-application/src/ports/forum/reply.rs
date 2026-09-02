@@ -58,6 +58,8 @@ impl fmt::Debug for ForumReplyTopic {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumCommandOutcome {
     pub post_id: String,
+    /// 命令首次由完整主题读取证明的真实楼层；历史不可证明时保持空。
+    pub post_number: Option<i32>,
     pub line_number: i32,
     pub lot_code: String,
     pub command_kind: String,
@@ -72,14 +74,14 @@ pub struct ForumLotTarget {
     pub lot_id: LotId,
 }
 
-/// 由论坛账号数字键与论坛/MM 共用玩家 ID 名称解析且仍可参与竞价的用户身份。
+/// 由论坛账号数字键与论坛/MM 共用玩家名称解析且仍可参与竞价的用户身份。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumBidderIdentity {
     pub user_id: UserId,
     /// 论坛 `showuser` 的稳定数字键，只用于来源映射和命令账本 actor。
     pub external_account_id: String,
-    /// 与论坛用户名一致的游戏玩家 ID 名称，可作为 MoogleMail 收件人。
-    pub game_player_id: String,
+    /// 当前论坛名称，也是 MoogleMail 使用的可变收件人名称。
+    pub player_name: String,
 }
 
 /// 用户在指定 lot 上的当前活动代理。
@@ -96,6 +98,8 @@ pub struct ForumBidCommandRecord {
     pub world: SettlementWorld,
     pub thread_id: String,
     pub post_id: String,
+    /// 完整主题读取时观察到的真实楼层号；不得由 post ID 推算。
+    pub post_number: i32,
     pub line_number: i32,
     pub lot_code: String,
     pub actor: String,
@@ -141,7 +145,7 @@ pub trait ForumReplyStore: Send + Sync {
         &self,
         world: SettlementWorld,
         external_account_id: String,
-        game_player_id: String,
+        player_name: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity>;
 
     fn active_proxy(

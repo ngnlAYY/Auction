@@ -81,7 +81,6 @@ where
                 command_id,
                 request_hash,
                 username: message.sender.clone(),
-                game_player_id: message.sender.clone(),
                 now,
             })
             .await?;
@@ -144,12 +143,11 @@ where
         let old_key_hash = old_key.public_key_hash();
         let result = self
             .users
-            .rebind_game_identity(MailUserRebindCommand {
+            .rebind_username(MailUserRebindCommand {
                 command_id,
                 request_hash,
                 old_key_hash,
                 next_username: message.sender.clone(),
-                next_game_player_id: message.sender.clone(),
                 history_id: Uuid::new_v4(),
                 now,
             })

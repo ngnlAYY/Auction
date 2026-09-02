@@ -38,6 +38,17 @@ use topic::process_topic;
 
 const MAX_BATCH_SIZE: u16 = 100;
 
+/// 单条论坛命令已经证明的帖子、身份与 lot 上下文。
+struct ForumCommandContext<'a> {
+    topic: &'a auction_application::ForumReplyTopic,
+    bidder: &'a auction_application::ForumBidderIdentity,
+    post_id: &'a str,
+    post_number: usize,
+    lot_code: &'a str,
+    command: &'a auction_application::AdminForumCommand,
+    lot_id: auction_domain::LotId,
+}
+
 /// 论坛回帖导入运行时依赖。
 pub struct ForumReplyPorts {
     pub store: Arc<dyn ForumReplyStore>,

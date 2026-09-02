@@ -37,7 +37,6 @@ pub(crate) async fn login_session(
             let data = PublicLoginResponse {
                 user_id: result.identity.user_id.to_string(),
                 username: result.identity.username,
-                game_player_id: result.identity.game_player_id,
                 status: "active".to_owned(),
                 expires_at: public_timestamp(result.identity.expires_at),
                 absolute_expires_at: public_timestamp(result.identity.absolute_expires_at),

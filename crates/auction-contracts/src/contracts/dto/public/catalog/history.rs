@@ -13,6 +13,10 @@ pub struct PublicBidLogEntryResponse {
     pub equipment_name: String,
     pub equipment_category: String,
     pub bidder_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_post_number: Option<i64>,
     pub valid: bool,
     pub accepted_state_version: i64,
     pub fact_index: i64,

@@ -10,8 +10,7 @@ pub struct AdminUserCreateRequest {
     pub command_id: String,
     #[serde(default, deserialize_with = "null_as_default")]
     pub username: String,
-    #[serde(default, deserialize_with = "null_as_default")]
-    pub game_player_id: String,
+    pub forum_account_id: Option<String>,
     #[serde(default, deserialize_with = "null_as_default")]
     pub key_mode: String,
     pub key: Option<String>,
@@ -23,7 +22,7 @@ impl std::fmt::Debug for AdminUserCreateRequest {
             .debug_struct("AdminUserCreateRequest")
             .field("command_id", &self.command_id)
             .field("username", &self.username)
-            .field("game_player_id", &self.game_player_id)
+            .field("forum_account_id", &self.forum_account_id)
             .field("key_mode", &self.key_mode)
             .field("key", &self.key.as_ref().map(|_| "[REDACTED]"))
             .finish()
@@ -43,7 +42,7 @@ pub struct AdminUserMutationRequest {
     #[serde(default, deserialize_with = "null_as_default")]
     pub action: String,
     pub username: Option<String>,
-    pub game_player_id: Option<String>,
+    pub forum_account_id: Option<String>,
 }
 
 /// Admin 用户黑名单请求。
@@ -92,7 +91,7 @@ where
 pub struct AdminUserResponse {
     pub id: String,
     pub username: String,
-    pub game_player_id: Option<String>,
+    pub forum_account_id: Option<String>,
     pub status: String,
     pub key_status: String,
     pub state_version: i64,

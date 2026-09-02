@@ -4,22 +4,26 @@ use super::*;
 
 pub(super) async fn process_command(
     runtime: &ForumReplyRuntime,
-    topic: &auction_application::ForumReplyTopic,
-    bidder: &auction_application::ForumBidderIdentity,
-    post_id: &str,
-    lot_code: &str,
-    command: &auction_application::AdminForumCommand,
-    lot_id: auction_domain::LotId,
+    context: &ForumCommandContext<'_>,
 ) -> Result<(), ApplicationError> {
+    let topic = context.topic;
+    let bidder = context.bidder;
+    let post_id = context.post_id;
+    let lot_code = context.lot_code;
+    let command = context.command;
+    let lot_id = context.lot_id;
     let command_kind = if command.kind == "proxy" && command.proxy_lower {
         "proxy_lower"
     } else {
         command.kind.as_str()
     };
+    let Some(post_number) = i32::try_from(context.post_number).ok() else {
+        tracing::warn!(post_id, "论坛楼层号超出持久化范围");
+        return Ok(());
+    };
     if !matches!(command_kind, "bid" | "proxy" | "proxy_lower") {
         if command_kind == "notify" {
-            process_notification(runtime, topic, bidder, post_id, lot_code, command, lot_id)
-                .await?;
+            process_notification(runtime, context, post_number).await?;
         }
         tracing::info!(
             auction_id = %topic.auction_id,
@@ -50,6 +54,7 @@ pub(super) async fn process_command(
         world: topic.world,
         thread_id: topic.thread_id.clone(),
         post_id: post_id.to_owned(),
+        post_number,
         line_number,
         lot_code: lot_code.to_owned(),
         actor: bidder.external_account_id.clone(),
@@ -84,8 +89,7 @@ pub(super) async fn process_command(
                 amount,
             )
             .await?;
-            process_notification(runtime, topic, bidder, post_id, lot_code, command, lot_id)
-                .await?;
+            process_notification(runtime, context, post_number).await?;
         }
         return Ok(());
     }
@@ -106,7 +110,7 @@ pub(super) async fn process_command(
         }
     }
     if succeeded && command.notify.as_deref().is_some_and(|mode| !mode.is_empty()) {
-        process_notification(runtime, topic, bidder, post_id, lot_code, command, lot_id).await?;
+        process_notification(runtime, context, post_number).await?;
     }
     Ok(())
 }

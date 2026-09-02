@@ -74,7 +74,7 @@ pub(crate) async fn create(
         .create(AdminUserCreateCommand {
             command_id,
             username: input.username,
-            game_player_id: input.game_player_id,
+            forum_account_id: input.forum_account_id,
             key_mode,
             manual_key,
             actor_id: identity.actor,
@@ -125,7 +125,7 @@ pub(crate) async fn mutate(
     };
     let action = match input.action.as_str() {
         "rename" => AdminUserMutationAction::Rename,
-        "set_game_player_id" => AdminUserMutationAction::SetGamePlayerId,
+        "set_forum_account_id" => AdminUserMutationAction::SetForumAccountId,
         "revoke_key" => AdminUserMutationAction::RevokeKey,
         "reissue_key" => AdminUserMutationAction::ReissueKey,
         _ => return common::invalid_user_command(),
@@ -140,7 +140,7 @@ pub(crate) async fn mutate(
             expected_state_version: input.expected_state_version,
             action,
             username: input.username,
-            game_player_id: input.game_player_id,
+            forum_account_id: input.forum_account_id,
             public_reason: None,
             actor_id: identity.actor,
             request_id: request_id(&headers),

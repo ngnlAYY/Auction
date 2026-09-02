@@ -26,18 +26,14 @@ pub(crate) async fn register_postgres(
     }
 
     let rows = sqlx::query(
-        "SELECT id, username, status, key_status, game_player_id,
-                (lower(username) = lower($1)) AS username_matches,
-                (game_player_id IS NOT NULL AND lower(game_player_id) = lower($2))
-                    AS game_player_matches
+        "SELECT id, username, status, key_status,
+                (lower(username) = lower($1)) AS username_matches
          FROM public.users
          WHERE lower(username) = lower($1)
-            OR lower(game_player_id) = lower($2)
          ORDER BY id
          FOR UPDATE",
     )
     .bind(&write.command.username)
-    .bind(&write.command.game_player_id)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
@@ -53,7 +49,7 @@ pub(crate) async fn register_postgres(
             .bind(write.user_id)
             .bind(&write.command.username)
             .bind(write.public_key_hash.to_vec())
-            .bind(&write.command.game_player_id)
+            .bind(&write.command.username)
             .bind(write.command.now)
             .execute(&mut *transaction)
             .await
@@ -69,10 +65,7 @@ pub(crate) async fn register_postgres(
         }
         [row] => {
             let user = registration_user(row)?;
-            if user.username_matches && user.game_player_matches
-                || user.game_player_matches
-                    && forum_only_identity(&mut transaction, user.id).await?
-            {
+            if user.username_matches {
                 if user.status == "blacklisted" {
                     MailUserResult { user_id: Some(user.id), code: MailUserResultCode::Blacklisted }
                 } else {
@@ -86,22 +79,19 @@ pub(crate) async fn register_postgres(
                     .await
                     .map_err(map_storage_error)?;
                     let reissue = user.key_status != "active" || !envelope_exists;
-                    let identity_changed = user.username != write.command.username
-                        || user.game_player_id.as_deref()
-                            != Some(write.command.game_player_id.as_str());
+                    let identity_changed = user.username != write.command.username;
                     if reissue || identity_changed {
                         sqlx::query(
                             "UPDATE public.users
                              SET username = $1,
-                                 game_player_id = $2,
-                                 public_key_hash = CASE WHEN $3 THEN $4 ELSE public_key_hash END,
-                                 key_status = CASE WHEN $3 THEN 'active' ELSE key_status END,
+                                 game_player_id = $1,
+                                 public_key_hash = CASE WHEN $2 THEN $3 ELSE public_key_hash END,
+                                 key_status = CASE WHEN $2 THEN 'active' ELSE key_status END,
                                  state_version = state_version + 1,
-                                 updated_at = $5
-                             WHERE id = $6",
+                                 updated_at = $4
+                             WHERE id = $5",
                         )
                         .bind(&write.command.username)
-                        .bind(&write.command.game_player_id)
                         .bind(reissue)
                         .bind(write.public_key_hash.to_vec())
                         .bind(write.command.now)
@@ -118,6 +108,18 @@ pub(crate) async fn register_postgres(
                             write.command.now,
                         )
                         .await?;
+                    }
+                    if forum_only_identity(&mut transaction, user.id).await? {
+                        sqlx::query(
+                            "UPDATE public.forum_bidder_identities
+                             SET registration_state = 'mm_bound', updated_at = $2
+                             WHERE user_id = $1 AND registration_state = 'forum_only'",
+                        )
+                        .bind(user.id)
+                        .bind(write.command.now)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(map_storage_error)?;
                     }
                     MailUserResult { user_id: Some(user.id), code: MailUserResultCode::Recovered }
                 }
@@ -162,17 +164,15 @@ pub(crate) async fn rebind_postgres(
     }
 
     let rows = sqlx::query(
-        "SELECT id, username, status, public_key_hash, game_player_id
+        "SELECT id, username, status, public_key_hash
          FROM public.users
          WHERE public_key_hash = $1
             OR lower(username) = lower($2)
-            OR lower(game_player_id) = lower($3)
          ORDER BY id
          FOR UPDATE",
     )
     .bind(command.old_key_hash.to_vec())
     .bind(&command.next_username)
-    .bind(&command.next_game_player_id)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
@@ -197,17 +197,8 @@ pub(crate) async fn rebind_postgres(
                     if other_id == user_id {
                         return false;
                     }
-                    let username_matches = row
-                        .try_get::<String, _>("username")
-                        .is_ok_and(|value| value.eq_ignore_ascii_case(&command.next_username));
-                    let player_matches = row
-                        .try_get::<Option<String>, _>("game_player_id")
-                        .ok()
-                        .flatten()
-                        .is_some_and(|value| {
-                            value.eq_ignore_ascii_case(&command.next_game_player_id)
-                        });
-                    username_matches || player_matches
+                    row.try_get::<String, _>("username")
+                        .is_ok_and(|value| value.eq_ignore_ascii_case(&command.next_username))
                 });
                 if conflict {
                     MailUserResult {
@@ -216,10 +207,7 @@ pub(crate) async fn rebind_postgres(
                     }
                 } else {
                     let username: String = source.try_get("username").map_err(map_storage_error)?;
-                    let game_player_id: Option<String> =
-                        source.try_get("game_player_id").map_err(map_storage_error)?;
-                    let unchanged = username == command.next_username
-                        && game_player_id.as_deref() == Some(command.next_game_player_id.as_str());
+                    let unchanged = username == command.next_username;
                     if unchanged {
                         MailUserResult {
                             user_id: Some(user_id),
@@ -229,13 +217,12 @@ pub(crate) async fn rebind_postgres(
                         let affected = sqlx::query(
                             "UPDATE public.users
                              SET username = $1,
-                                 game_player_id = $2,
+                                 game_player_id = $1,
                                  state_version = state_version + 1,
-                                 updated_at = $3
-                             WHERE id = $4",
+                                 updated_at = $2
+                             WHERE id = $3",
                         )
                         .bind(&command.next_username)
-                        .bind(&command.next_game_player_id)
                         .bind(command.now)
                         .bind(user_id)
                         .execute(&mut *transaction)
@@ -256,8 +243,8 @@ pub(crate) async fn rebind_postgres(
                         .bind(command.command_id.as_uuid())
                         .bind(username)
                         .bind(&command.next_username)
-                        .bind(game_player_id)
-                        .bind(&command.next_game_player_id)
+                        .bind(source.try_get::<String, _>("username").map_err(map_storage_error)?)
+                        .bind(&command.next_username)
                         .bind(command.now)
                         .execute(&mut *transaction)
                         .await

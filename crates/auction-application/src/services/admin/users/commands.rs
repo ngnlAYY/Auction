@@ -53,7 +53,7 @@ where
                 request_hash,
                 user_id,
                 username: command.username,
-                game_player_id: command.game_player_id,
+                forum_account_id: command.forum_account_id,
                 key: AdminUserKeyWrite {
                     public_key_hash,
                     envelope: issue.envelope,
@@ -96,7 +96,7 @@ where
             if wants_key { Some(self.issuer.generate(command.user_id).await?) } else { None };
         let public_key_hash = issue.as_ref().map(|value| value.key.public_key_hash());
         let expected_username = command.username.clone();
-        let expected_game_player_id = command.game_player_id.clone();
+        let expected_forum_account_id = command.forum_account_id.clone();
         let key = issue.as_ref().map(|value| AdminUserKeyWrite {
             public_key_hash: public_key_hash.unwrap_or([0; 32]),
             envelope: value.envelope.clone(),
@@ -111,7 +111,7 @@ where
                 expected_state_version: command.expected_state_version,
                 action: command.action,
                 username: command.username,
-                game_player_id: command.game_player_id,
+                forum_account_id: command.forum_account_id,
                 public_reason: command.public_reason,
                 key,
                 actor_id: command.actor_id,
@@ -125,8 +125,8 @@ where
             AdminUserMutationAction::Rename => {
                 result.user.username == expected_username.as_deref().unwrap_or_default()
             }
-            AdminUserMutationAction::SetGamePlayerId => {
-                result.user.game_player_id.as_deref() == expected_game_player_id.as_deref()
+            AdminUserMutationAction::SetForumAccountId => {
+                result.user.forum_account_id.as_deref() == expected_forum_account_id.as_deref()
             }
             AdminUserMutationAction::RevokeKey => {
                 result.user.key_status == crate::AdminUserKeyStatus::Revoked

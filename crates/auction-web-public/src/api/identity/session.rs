@@ -4,7 +4,7 @@
 //! 组件只持有安全身份投影。
 
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
-use auction_contracts::{ApiResponse, PublicLoginRequest, PublicLoginResponse};
+use auction_contracts::{PublicLoginRequest, PublicLoginResponse};
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
 use uuid::{Uuid, Variant};
@@ -37,9 +37,9 @@ async fn fetch_public_session_once() -> Result<Option<PublicSession>, String> {
         let code = decoder::decode_error_code(response).await;
         return if code == "unauthenticated" { Ok(None) } else { Err(code) };
     }
-    let payload: ApiResponse<Option<PublicSession>> =
-        response.json().await.map_err(|_| "invalid_response".to_owned())?;
-    match payload.data {
+    let payload: Option<PublicSession> =
+        decoder::decode_success(response, valid_current_session_value).await?;
+    match payload {
         None => Ok(None),
         Some(session) if valid_current_session(&session) => Ok(Some(session)),
         Some(_) => Err("invalid_response".to_owned()),
@@ -65,18 +65,18 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     if !response.ok() {
         return Err(parse_api_error(response).await);
     }
-    let payload: ApiResponse<PublicLoginResponse> =
-        response.json().await.map_err(|_| PublicSessionApiError::local("invalid_response"))?;
-    if !valid_login_session(&payload.data) {
+    let payload: PublicLoginResponse = decoder::decode_success(response, valid_login_session_value)
+        .await
+        .map_err(|_| PublicSessionApiError::local("invalid_response"))?;
+    if !valid_login_session(&payload) {
         return Err(PublicSessionApiError::local("invalid_response"));
     }
     Ok(PublicSession {
         authenticated: true,
-        user_id: payload.data.user_id,
-        username: payload.data.username,
-        game_player_id: payload.data.game_player_id,
-        expires_at: payload.data.expires_at,
-        absolute_expires_at: payload.data.absolute_expires_at,
+        user_id: payload.user_id,
+        username: payload.username,
+        expires_at: payload.expires_at,
+        absolute_expires_at: payload.absolute_expires_at,
     })
 }
 
@@ -127,7 +127,6 @@ fn valid_current_session(session: &PublicSession) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
-            session.game_player_id.as_deref(),
             &session.expires_at,
             &session.absolute_expires_at,
         )
@@ -138,16 +137,32 @@ fn valid_login_session(session: &PublicLoginResponse) -> bool {
         && valid_session_fields(
             &session.user_id,
             &session.username,
-            session.game_player_id.as_deref(),
             &session.expires_at,
             &session.absolute_expires_at,
         )
 }
 
+fn valid_current_session_value(value: &Value) -> bool {
+    value.is_null()
+        || has_exact_fields(
+            value,
+            &["authenticated", "user_id", "username", "expires_at", "absolute_expires_at"],
+        )
+}
+
+fn valid_login_session_value(value: &Value) -> bool {
+    has_exact_fields(value, &["user_id", "username", "status", "expires_at", "absolute_expires_at"])
+}
+
+fn has_exact_fields(value: &Value, fields: &[&str]) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == fields.len() && fields.iter().all(|field| object.contains_key(*field))
+    })
+}
+
 fn valid_session_fields(
     user_id: &str,
     username: &str,
-    game_player_id: Option<&str>,
     expires_at: &str,
     absolute_expires_at: &str,
 ) -> bool {
@@ -156,12 +171,6 @@ fn valid_session_fields(
         && username == username.trim()
         && username.len() <= 256
         && !username.chars().any(char::is_control)
-        && game_player_id.is_none_or(|value| {
-            !value.is_empty()
-                && value == value.trim()
-                && value.len() <= 256
-                && !value.chars().any(char::is_control)
-        })
         && valid_legacy_time(expires_at)
         && valid_legacy_time(absolute_expires_at)
 }

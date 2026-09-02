@@ -53,7 +53,7 @@ pub(crate) fn LiveLotDetailView(
     let session = use_context::<PublicSessionResource>();
     let session_snapshot = session.read().clone();
     let viewer_player_id = match session_snapshot.as_ref() {
-        Some(Ok(Some(session))) if session.authenticated => session.game_player_id.clone(),
+        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
         _ => None,
     };
     let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));

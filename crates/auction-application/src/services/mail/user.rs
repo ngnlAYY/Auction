@@ -68,8 +68,8 @@ where
         result.validate(MailUserCommandKind::Register).map_err(ApplicationError::from)
     }
 
-    /// 使用旧 key 摘要原子换绑游戏身份；命令重复时只重放已存结果。
-    pub async fn rebind_game_identity(
+    /// 使用旧 key 摘要原子换绑可变 MM 玩家名称；命令重复时只重放已存结果。
+    pub async fn rebind_username(
         &self,
         command: MailUserRebindCommand,
     ) -> Result<MailUserResult, ApplicationError> {
@@ -86,7 +86,7 @@ where
             return result.validate(MailUserCommandKind::Rebind).map_err(ApplicationError::from);
         }
 
-        let result = self.store.rebind_game_identity(command).await?;
+        let result = self.store.rebind_username(command).await?;
         result.validate(MailUserCommandKind::Rebind).map_err(ApplicationError::from)
     }
 }
@@ -103,11 +103,11 @@ where
         Box::pin(async move { MailUserService::register_or_recover(self, command).await })
     }
 
-    fn rebind_game_identity(
+    fn rebind_username(
         &self,
         command: MailUserRebindCommand,
     ) -> ApplicationFuture<'_, MailUserResult> {
-        Box::pin(async move { MailUserService::rebind_game_identity(self, command).await })
+        Box::pin(async move { MailUserService::rebind_username(self, command).await })
     }
 }
 
@@ -115,7 +115,6 @@ fn validate_register_command(command: &MailUserRegisterCommand) -> Result<(), Ap
     if command.command_id.is_nil()
         || command.request_hash.as_bytes() == [0; 32]
         || !valid_identity(&command.username)
-        || !valid_identity(&command.game_player_id)
         || command.now.timestamp_nanos_opt().is_none()
     {
         return Err(MailProcessingError::InvalidUserCommand.into());
@@ -128,7 +127,6 @@ fn validate_rebind_command(command: &MailUserRebindCommand) -> Result<(), Applic
         || command.request_hash.as_bytes() == [0; 32]
         || command.old_key_hash == [0; 32]
         || !valid_identity(&command.next_username)
-        || !valid_identity(&command.next_game_player_id)
         || command.history_id.is_nil()
         || command.now.timestamp_nanos_opt().is_none()
     {

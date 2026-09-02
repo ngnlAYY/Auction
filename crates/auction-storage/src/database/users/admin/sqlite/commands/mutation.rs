@@ -89,9 +89,11 @@ async fn apply_mutation_sqlite(
             .await
             .map_err(map_sqlite_write_error)?;
             sqlx::query(
-                "UPDATE users SET username = ?, state_version = state_version + 1,
+                "UPDATE users SET username = ?, game_player_id = ?,
+                                  state_version = state_version + 1,
                                   updated_at = ? WHERE id = ?",
             )
+            .bind(username)
             .bind(username)
             .bind(&now)
             .bind(&id)
@@ -99,17 +101,17 @@ async fn apply_mutation_sqlite(
             .await
             .map_err(map_sqlite_write_error)?;
         }
-        AdminUserMutationAction::SetGamePlayerId => {
-            let game_player_id =
-                write.game_player_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
-            if before.game_player_id.as_deref() == Some(game_player_id) {
+        AdminUserMutationAction::SetForumAccountId => {
+            let forum_account_id =
+                write.forum_account_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+            if before.forum_account_id.as_deref() == Some(forum_account_id) {
                 return Err(admin_error(AdminUserError::Conflict));
             }
             sqlx::query(
-                "UPDATE users SET game_player_id = ?, state_version = state_version + 1,
+                "UPDATE users SET forum_account_id = ?, state_version = state_version + 1,
                                   updated_at = ? WHERE id = ?",
             )
-            .bind(game_player_id)
+            .bind(forum_account_id)
             .bind(&now)
             .bind(&id)
             .execute(&mut *connection)

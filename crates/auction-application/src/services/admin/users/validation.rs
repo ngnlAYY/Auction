@@ -8,7 +8,7 @@ use crate::{
 pub(crate) fn validate_create(command: &AdminUserCreateCommand) -> Result<(), ApplicationError> {
     if command.command_id.is_nil()
         || !valid_text(&command.username, 256)
-        || !valid_text(&command.game_player_id, 256)
+        || command.forum_account_id.as_deref().is_some_and(|value| !valid_forum_account_id(value))
         || !valid_text(&command.actor_id, 256)
         || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
         || command.now.timestamp_nanos_opt().is_none()
@@ -28,24 +28,24 @@ pub(crate) fn validate_mutation(
     let fields_valid = match command.action {
         AdminUserMutationAction::Rename => {
             command.username.as_deref().is_some_and(|value| valid_text(value, 256))
-                && command.game_player_id.is_none()
+                && command.forum_account_id.is_none()
                 && command.public_reason.is_none()
         }
-        AdminUserMutationAction::SetGamePlayerId => {
-            command.game_player_id.as_deref().is_some_and(|value| valid_text(value, 256))
+        AdminUserMutationAction::SetForumAccountId => {
+            command.forum_account_id.as_deref().is_some_and(valid_forum_account_id)
                 && command.username.is_none()
                 && command.public_reason.is_none()
         }
         AdminUserMutationAction::Blacklist => {
             command.public_reason.as_deref().is_some_and(|value| valid_text(value, 1024))
                 && command.username.is_none()
-                && command.game_player_id.is_none()
+                && command.forum_account_id.is_none()
         }
         AdminUserMutationAction::RevokeKey
         | AdminUserMutationAction::ReissueKey
         | AdminUserMutationAction::Unblacklist => {
             command.username.is_none()
-                && command.game_player_id.is_none()
+                && command.forum_account_id.is_none()
                 && command.public_reason.is_none()
         }
     };
@@ -80,4 +80,12 @@ fn valid_text(value: &str, maximum: usize) -> bool {
         && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
+}
+
+fn valid_forum_account_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0] != b'0'
+        && bytes.iter().all(u8::is_ascii_digit)
 }

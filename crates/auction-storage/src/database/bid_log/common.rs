@@ -48,13 +48,24 @@ pub(super) fn validate_entries(
             || entry.equipment_name.is_empty()
             || entry.equipment_category.is_empty()
             || entry.bidder_name.is_empty()
-            || entry.mechanism.is_empty()
+            || !matches!(entry.mechanism.as_str(), "ordinary" | "proxy")
+            || !valid_source(entry)
             || entry.created_at.timestamp_micros() == 0
         {
             return Err(storage_error("公开竞价日志包含无效条目"));
         }
     }
     Ok(())
+}
+
+fn valid_source(entry: &PublicBidLogEntry) -> bool {
+    match (entry.mechanism.as_str(), entry.source.as_deref(), entry.source_post_number) {
+        ("proxy", Some("proxy"), None) => true,
+        ("ordinary", Some("forum"), Some(post_number)) => post_number >= 3,
+        // 000028 之前的论坛事实没有可证明的楼层号，只展示论坛来源。
+        ("ordinary", Some("forum"), None) | ("ordinary", None, None) => true,
+        _ => false,
+    }
 }
 
 pub(super) fn storage_error(message: &str) -> ApplicationError {

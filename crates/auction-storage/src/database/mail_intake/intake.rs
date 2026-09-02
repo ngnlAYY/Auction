@@ -76,7 +76,7 @@ pub(super) async fn add_mail_auction_intake_inner(
     }
 
     let player_status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM public.users WHERE game_player_id = $1 FOR SHARE",
+        "SELECT status FROM public.users WHERE username = $1 FOR SHARE",
     )
     .bind(&write.seller)
     .fetch_optional(&mut **transaction)

@@ -16,7 +16,6 @@ pub(crate) fn current_session_response(
         authenticated: true,
         user_id: identity.user_id.to_string(),
         username: identity.username,
-        game_player_id: identity.game_player_id,
         expires_at: public_timestamp(identity.expires_at),
         absolute_expires_at: public_timestamp(identity.absolute_expires_at),
     });

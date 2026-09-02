@@ -21,9 +21,10 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000026`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000028`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
-`000001` 至 `000009` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号修正。旧系统的 `bid_proxies` 不再作为第二份
+`000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
+身份修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
 `bid_proxy_authorizations` 及其历史表。完整适配器、Lite 串行写入和其他业务表面仍在迁移中。
 
@@ -55,13 +56,16 @@ kind/identity 闭集，为已证明的 MoogleMail 退信提供独立提醒，同
 PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 post ID、系统日志正文、内容版本、
 同步时间和独立内容刷新 claim/lease/fencing；历史 published 行保持空身份，必须由 Worker 读取远端
 主题对账，不以 thread ID 或楼层位置伪造 post proof。
-论坛 `showuser` 数字 ID 只写入 `forum_bidder_identities.external_account_id` 作为稳定账号键；论坛用户名
-与 MoogleMail 收件人共用 `users.game_player_id` 玩家 ID 名称，映射表的 `display_name` 保存同一名称的
-论坛侧快照及 `forum_only/mm_bound` 生命周期，不是第二份玩家身份权威源。首次论坛竞价可以在
-Users-owner Serializable 事务内建立用户名和 `game_player_id` 均等于玩家名称的 revoked-key
-`forum_only` 用户，不生成第二套影子用户名；后续 MM 注册按同一玩家名称恢复该主体。PostgreSQL
-`000026` 保证同一 world/provider 下一个 Users 主体只能绑定一个论坛账号；跨世界复用还必须沿用相同
-`showuser` 数字键，不能仅凭同名把 revoked 主体改绑给另一账号。
+论坛 `showuser` 数字 ID 同时写入 `forum_bidder_identities.external_account_id` 和
+`users.forum_account_id`，作为稳定、唯一且规范十进制的论坛账号键；论坛用户名与 MoogleMail
+收件人共用可变的 `users.username`，映射表 `display_name` 只保存论坛侧快照及
+`forum_only/mm_bound` 生命周期，不是第二份名称权威源。旧 `users.game_player_id` 只保留为
+`username` 的数据库兼容镜像，不进入新业务 DTO。首次论坛竞价可以在 Users-owner Serializable
+事务内建立 revoked-key `forum_only` 用户，不生成第二套影子用户名或 active Key；后续 MM 注册按
+当前名称恢复并激活该主体。PostgreSQL `000026` 保证同一 world/provider 下一个 Users 主体只能绑定
+一个论坛账号；`000027` 再把该稳定账号归属提升到 Users 主体，并用延迟约束保证 Users 与该主体全部
+论坛映射在事务提交时一致；跨世界复用必须沿用相同数字键。
+`000028` 为 `auction_forum_bid_commands` 记录可证明的真实楼层号，历史未知值保持空。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -73,7 +77,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | 表 | 旧迁移 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- | --- |
 | worlds | 000001_baseline | auction-application：world | 两者 | 世界边界与启用状态 |
-| users | 000001_baseline | auction-application：users | 两者 | 用户身份、活动状态和版本 |
+| users | 000001_baseline + PostgreSQL 000027_user_forum_account_identity / SQLite 000010_user_forum_account_identity | auction-application：users | 两者 | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；旧 game_player_id 仅作兼容镜像 |
 | user_blacklist | 000001_baseline | auction-application：users | 两者 | 公开资格与封禁原因 |
 | user_renames | 000004_identity_external_admin | auction-application：users | 两者 | 用户名变更追加历史 |
 | public_sessions | 000001_baseline | auction-application：sessions | 两者 | Public 会话权威状态 |
@@ -84,7 +88,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | credential_keys | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 加密后的外部凭据索引 |
 | user_login_key_envelopes | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
 | user_mail_commands | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 注册/重绑命令幂等账本与结果 |
-| user_game_identity_history | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 换绑后的游戏身份追加历史 |
+| user_game_identity_history | 000002_worker_external_adapters | auction-application：users | 完整档 | 旧命名的 MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
 | user_blacklist_history | PostgreSQL 000004_identity_external_admin / SQLite 000001_lite_core | auction-application：users | 两者 | 封禁变更追加历史 |
 | user_admin_commands | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | Admin 用户命令幂等账本与安全投影重放 |
 | credential_admin_commands | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 凭据管理命令幂等账本 |
@@ -162,9 +166,9 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering + 000025_forum_fixed_posts | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本和独立刷新 claim |
 | forum_sync_admin_commands | 000016_forum_sync_write_authorization | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
-| forum_bidder_identities | 000005_recovery_observability_forum + 000026_forum_identity_owner_unique | auction-storage：forum reply + Users owner | 完整档 | world/provider 参与映射、单用户账号归属、显示名及 forum-only/MM-bound 生命周期；玩家身份权威值仍是 users.game_player_id |
+| forum_bidder_identities | 000005_recovery_observability_forum + 000026_forum_identity_owner_unique | auction-storage：forum reply + Users owner | 完整档 | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
 | auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply | 完整档 | 论坛回帖扫描游标 |
-| auction_forum_bid_commands | 000005_recovery_observability_forum | auction-storage：forum reply；auction-jobs：forum reply | 完整档 | 论坛竞价导入命令账本与重试事实 |
+| auction_forum_bid_commands | 000005_recovery_observability_forum + 000028_forum_command_post_number | auction-storage：forum reply；auction-jobs：forum reply | 完整档 | 论坛竞价导入命令账本、可证明的真实楼层号与重试事实 |
 
 A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局
 Worker control 唤醒不写入额外触发表；

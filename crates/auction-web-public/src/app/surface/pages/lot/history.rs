@@ -20,8 +20,11 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                             td { class: "public-auction-lot__participant-cell", "data-label": t!("bidlog-bidder"),
                                 CatalogParticipant {
                                     name: bid.bidder_name.clone(),
-                                    marker: (bid.mechanism == "proxy").then(|| t!("catalog-proxy-marker")),
-                                    trailing: None,
+                                    marker: None,
+                                    trailing: bid_source_trailing(
+                                        bid.source.as_deref(),
+                                        bid.source_post_number,
+                                    ),
                                 }
                             }
                             td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }

@@ -36,6 +36,12 @@ pub(crate) async fn mutate_postgres(
         )
         .await?;
     }
+    if write.action == AdminUserMutationAction::SetForumAccountId {
+        let forum_account_id =
+            write.forum_account_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+        lock_forum_identity_ownership_postgres(&mut transaction, write.user_id, forum_account_id)
+            .await?;
+    }
     let before = load_user_postgres_tx(&mut transaction, write.user_id).await?;
     if before.state_version != write.expected_state_version {
         return Err(admin_error(AdminUserError::VersionConflict {
@@ -101,7 +107,8 @@ async fn apply_mutation_postgres(
             .map_err(map_admin_write_error)?;
             sqlx::query(
                 "UPDATE public.users
-                 SET username = $1, state_version = state_version + 1, updated_at = $2
+                 SET username = $1, game_player_id = $1,
+                     state_version = state_version + 1, updated_at = $2
                  WHERE id = $3",
             )
             .bind(username)
@@ -111,18 +118,31 @@ async fn apply_mutation_postgres(
             .await
             .map_err(map_admin_write_error)?;
         }
-        AdminUserMutationAction::SetGamePlayerId => {
-            let game_player_id =
-                write.game_player_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
-            if before.game_player_id.as_deref() == Some(game_player_id) {
+        AdminUserMutationAction::SetForumAccountId => {
+            let forum_account_id =
+                write.forum_account_id.as_deref().ok_or(AdminUserError::InvalidRequest)?;
+            if before.forum_account_id.as_deref() == Some(forum_account_id) {
                 return Err(admin_error(AdminUserError::Conflict));
             }
+            // showuser 是跨世界稳定账号键；Admin 修正时必须与所有已证明论坛映射同事务更新，
+            // 否则下一轮回帖会把 Users 与映射表的分叉当作身份劫持并永久拒绝。
+            sqlx::query(
+                "UPDATE public.forum_bidder_identities
+                 SET external_account_id = $1, updated_at = $2
+                 WHERE user_id = $3 AND external_account_id IS DISTINCT FROM $1",
+            )
+            .bind(forum_account_id)
+            .bind(now)
+            .bind(id)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_admin_write_error)?;
             sqlx::query(
                 "UPDATE public.users
-                 SET game_player_id = $1, state_version = state_version + 1, updated_at = $2
+                 SET forum_account_id = $1, state_version = state_version + 1, updated_at = $2
                  WHERE id = $3",
             )
-            .bind(game_player_id)
+            .bind(forum_account_id)
             .bind(now)
             .bind(id)
             .execute(&mut **transaction)
@@ -226,5 +246,30 @@ async fn apply_mutation_postgres(
             .map_err(map_storage_error)?;
         }
     }
+    Ok(())
+}
+
+async fn lock_forum_identity_ownership_postgres(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    forum_account_id: &str,
+) -> Result<(), ApplicationError> {
+    // 与论坛 resolver 共用 showuser advisory lock，并先锁映射再锁 Users 行，保持相同锁序。
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(forum_account_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    sqlx::query(
+        "SELECT id
+         FROM public.forum_bidder_identities
+         WHERE user_id = $1
+         ORDER BY world_id, provider
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(map_storage_error)?;
     Ok(())
 }

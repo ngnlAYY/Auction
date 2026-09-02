@@ -76,7 +76,8 @@ impl AdminUserKeyStatus {
 pub struct AdminUser {
     pub id: Uuid,
     pub username: String,
-    pub game_player_id: Option<String>,
+    /// E-Hentai `showuser` 的稳定数字账号 ID；MM 收件人名称始终使用 `username`。
+    pub forum_account_id: Option<String>,
     pub status: AdminUserStatus,
     pub key_status: AdminUserKeyStatus,
     pub state_version: i64,
@@ -89,12 +90,20 @@ impl AdminUser {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && valid_text(&self.username, 256)
-            && valid_optional_text(self.game_player_id.as_deref(), 256)
+            && self.forum_account_id.as_deref().is_none_or(valid_forum_account_id)
             && self.state_version > 0
             && valid_time(self.created_at)
             && valid_time(self.updated_at)
             && self.updated_at >= self.created_at
     }
+}
+
+fn valid_forum_account_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0] != b'0'
+        && bytes.iter().all(u8::is_ascii_digit)
 }
 
 /// Admin 用户列表中展示的黑名单历史安全投影。
@@ -177,7 +186,7 @@ impl AdminUserPage {
                         user.user.username.contains(name)
                             || user
                                 .user
-                                .game_player_id
+                                .forum_account_id
                                 .as_deref()
                                 .is_some_and(|value| value.contains(name))
                     })

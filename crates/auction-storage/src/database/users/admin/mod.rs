@@ -154,7 +154,7 @@ fn validate_create_write(write: &AdminUserCreateWrite) -> Result<(), Application
         || write.user_id.is_nil()
         || write.request_hash.as_bytes() == [0; 32]
         || !valid_text(&write.username, 256)
-        || !valid_text(&write.game_player_id, 256)
+        || write.forum_account_id.as_deref().is_some_and(|value| !valid_forum_account_id(value))
         || !valid_text(&write.actor_id, 256)
         || write.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
         || !valid_time(write.now)
@@ -169,12 +169,12 @@ fn validate_mutation_write(write: &AdminUserMutationWrite) -> Result<(), Applica
     let fields_valid = match write.action {
         AdminUserMutationAction::Rename => {
             write.username.as_deref().is_some_and(|value| valid_text(value, 256))
-                && write.game_player_id.is_none()
+                && write.forum_account_id.is_none()
                 && write.public_reason.is_none()
                 && write.key.is_none()
         }
-        AdminUserMutationAction::SetGamePlayerId => {
-            write.game_player_id.as_deref().is_some_and(|value| valid_text(value, 256))
+        AdminUserMutationAction::SetForumAccountId => {
+            write.forum_account_id.as_deref().is_some_and(valid_forum_account_id)
                 && write.username.is_none()
                 && write.public_reason.is_none()
                 && write.key.is_none()
@@ -182,18 +182,18 @@ fn validate_mutation_write(write: &AdminUserMutationWrite) -> Result<(), Applica
         AdminUserMutationAction::Blacklist => {
             write.public_reason.as_deref().is_some_and(|value| valid_text(value, 1024))
                 && write.username.is_none()
-                && write.game_player_id.is_none()
+                && write.forum_account_id.is_none()
                 && write.key.is_none()
         }
         AdminUserMutationAction::ReissueKey => {
             write.username.is_none()
-                && write.game_player_id.is_none()
+                && write.forum_account_id.is_none()
                 && write.public_reason.is_none()
                 && write.key.as_ref().is_some_and(valid_key_write)
         }
         AdminUserMutationAction::RevokeKey | AdminUserMutationAction::Unblacklist => {
             write.username.is_none()
-                && write.game_player_id.is_none()
+                && write.forum_account_id.is_none()
                 && write.public_reason.is_none()
                 && write.key.is_none()
         }
@@ -245,6 +245,14 @@ fn valid_text(value: &str, maximum: usize) -> bool {
         && value.len() <= maximum
         && value == value.trim()
         && !value.chars().any(char::is_control)
+}
+
+fn valid_forum_account_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0] != b'0'
+        && bytes.iter().all(u8::is_ascii_digit)
 }
 
 fn valid_time(value: DateTime<Utc>) -> bool {

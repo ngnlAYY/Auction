@@ -25,9 +25,9 @@ pub(super) async fn begin_command_postgres(
         store.pool().begin().await.map_err(|_| storage_error("开启论坛命令账本事务失败"))?;
     let inserted = sqlx::query(
         "INSERT INTO public.auction_forum_bid_commands
-            (command_id, auction_id, world_id, thread_id, post_id, line_number, lot_code,
-             actor, command_kind, amount, status, attempt_count)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 1)
+            (command_id, auction_id, world_id, thread_id, post_id, post_number, line_number,
+             lot_code, actor, command_kind, amount, status, attempt_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', 1)
          ON CONFLICT DO NOTHING",
     )
     .bind(record.command_id)
@@ -35,6 +35,7 @@ pub(super) async fn begin_command_postgres(
     .bind(forum_world_name(record.world))
     .bind(&record.thread_id)
     .bind(&record.post_id)
+    .bind(record.post_number)
     .bind(record.line_number)
     .bind(&record.lot_code)
     .bind(&record.actor)
@@ -55,7 +56,8 @@ pub(super) async fn begin_command_postgres(
     // canonical v28 旧账本使用另一套稳定 ID；自然键相同且负载逐项一致时必须复用旧 ID，
     // 否则历史回复会在每轮全主题扫描中持续触发唯一约束并阻断后续新命令。
     let rows = sqlx::query(
-        "SELECT command_id, auction_id, world_id, thread_id, post_id, line_number, lot_code,
+        "SELECT command_id, auction_id, world_id, thread_id, post_id, post_number,
+                line_number, lot_code,
                 actor, command_kind, amount, status
          FROM public.auction_forum_bid_commands
          WHERE command_id = $1
@@ -90,6 +92,8 @@ pub(super) async fn begin_command_postgres(
         row.try_get("thread_id").map_err(|_| storage_error("读取论坛命令主题标识失败"))?;
     let existing_post_id: String =
         row.try_get("post_id").map_err(|_| storage_error("读取论坛命令帖子标识失败"))?;
+    let existing_post_number: Option<i32> =
+        row.try_get("post_number").map_err(|_| storage_error("读取论坛命令楼层号失败"))?;
     let existing_line_number: i32 =
         row.try_get("line_number").map_err(|_| storage_error("读取论坛命令行号失败"))?;
     let existing_lot_code: String =
@@ -106,6 +110,7 @@ pub(super) async fn begin_command_postgres(
         && existing_world == forum_world_name(record.world)
         && existing_thread_id == record.thread_id
         && existing_post_id == record.post_id
+        && existing_post_number.is_none_or(|value| value == record.post_number)
         && existing_line_number == record.line_number
         && existing_lot_code == record.lot_code
         && existing_actor == record.actor
@@ -113,6 +118,18 @@ pub(super) async fn begin_command_postgres(
         && existing_amount == record.amount;
     if !same {
         return Err(storage_error("论坛命令标识与既有负载冲突"));
+    }
+    if existing_post_number.is_none() {
+        sqlx::query(
+            "UPDATE public.auction_forum_bid_commands
+             SET post_number = $2, updated_at = CURRENT_TIMESTAMP
+             WHERE command_id = $1 AND post_number IS NULL",
+        )
+        .bind(existing_command_id)
+        .bind(record.post_number)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("补齐论坛命令真实楼层号失败"))?;
     }
     let (status, should_run) = match stored_status.as_str() {
         "pending" => {

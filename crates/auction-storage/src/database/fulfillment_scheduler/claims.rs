@@ -88,7 +88,7 @@ pub(super) async fn claim_postgres(
                   o.id AS obligation_row_id,
                   o.auction_id, o.lot_id, o.origin_command_id, o.obligation_kind,
                   o.world_id AS obligation_world,
-                  o.recipient_user_id, recipient_user.game_player_id AS recipient_user_game_identity,
+                  o.recipient_user_id, recipient_user.username AS recipient_user_game_identity,
                   o.recipient_game_identity, o.amount, o.carrier_credit, o.equipment_id,
                   equipment.id AS equipment_row_id, equipment.world_id AS equipment_world,
                   equipment.external_equipment_id, equipment.name AS equipment_name,

@@ -25,7 +25,7 @@ pub(super) fn AdminUserCreateForm(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut username = use_signal(String::new);
-    let mut game_player_id = use_signal(String::new);
+    let mut forum_account_id = use_signal(String::new);
     let mut key_mode = use_signal(|| "generated".to_owned());
     let mut manual_key = use_signal(String::new);
     let mut command_id_state = use_signal(|| None::<(Uuid, Uuid)>);
@@ -53,18 +53,17 @@ pub(super) fn AdminUserCreateForm(
                             return;
                         }
                         let username = username().trim().to_owned();
-                        let game_player_id = game_player_id().trim().to_owned();
+                        let forum_account_id = forum_account_id().trim().to_owned();
                         let key_mode = key_mode();
                         let submitted_manual_key = manual_key();
                         if username.is_empty()
-                            || game_player_id.is_empty()
                             || (key_mode == "manual" && submitted_manual_key.is_empty())
                         {
                             return;
                         }
                         let signature = create_signature(
                             &username,
-                            &game_player_id,
+                            &forum_account_id,
                             &key_mode,
                             &submitted_manual_key,
                         );
@@ -98,7 +97,7 @@ pub(super) fn AdminUserCreateForm(
                             let result = create_admin_user(
                                 command_id,
                                 username,
-                                game_player_id,
+                                (!forum_account_id.is_empty()).then_some(forum_account_id),
                                 if key_mode == "manual" { "manual" } else { "generated" },
                                 (key_mode == "manual").then_some(submitted_manual_key),
                             )
@@ -126,16 +125,17 @@ pub(super) fn AdminUserCreateForm(
                         value: username(),
                         oninput: move |event| username.set(event.value()),
                     }
-                    label { r#for: "create-game-id", {t!("admin-users-game-player-id")} }
+                    label { r#for: "create-forum-account-id", {t!("admin-users-forum-account-id")} }
                     input {
-                        id: "create-game-id",
+                        id: "create-forum-account-id",
                         r#type: "text",
-                        required: true,
-                        aria_describedby: "game-id-help",
-                        value: game_player_id(),
-                        oninput: move |event| game_player_id.set(event.value()),
+                        inputmode: "numeric",
+                        pattern: "[1-9][0-9]*",
+                        aria_describedby: "forum-account-id-help",
+                        value: forum_account_id(),
+                        oninput: move |event| forum_account_id.set(event.value()),
                     }
-                    p { id: "game-id-help", {t!("admin-users-game-player-id-help")} }
+                    p { id: "forum-account-id-help", {t!("admin-users-forum-account-id-help")} }
                     label { r#for: "create-key-mode", {t!("admin-users-key-mode")} }
                     select {
                         id: "create-key-mode",
@@ -217,12 +217,12 @@ pub(super) fn AdminUserGeneratedKeyDialog(
 
 fn create_signature(
     username: &str,
-    game_player_id: &str,
+    forum_account_id: &str,
     key_mode: &str,
     manual_key: &str,
 ) -> Uuid {
     let mut payload = Vec::new();
-    for value in [username, game_player_id, key_mode, manual_key] {
+    for value in [username, forum_account_id, key_mode, manual_key] {
         payload.extend_from_slice(&(value.len() as u64).to_be_bytes());
         payload.extend_from_slice(value.as_bytes());
     }
