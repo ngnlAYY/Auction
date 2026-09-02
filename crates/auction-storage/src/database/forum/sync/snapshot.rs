@@ -123,7 +123,7 @@ async fn read_snapshot(
                 END AS lot_number,
                 l.status, l.start_price, l.current_price,
                 l.effective_end_at, e.name AS equipment_name, e.category AS equipment_category,
-                submission.seller AS seller_name, leader.game_player_id AS leader_name
+                submission.seller AS seller_name, leader.username AS leader_name
          FROM public.lots AS l
          JOIN public.auction_forum_sync AS sync ON sync.auction_id = l.auction_id
          JOIN public.equipment AS e ON e.id = l.equipment_id

@@ -69,7 +69,7 @@ impl MailUserStore for DatabaseStore {
         })
     }
 
-    fn rebind_game_identity(
+    fn rebind_username(
         &self,
         _command: MailUserRebindCommand,
     ) -> auction_application::ApplicationFuture<'_, MailUserResult> {

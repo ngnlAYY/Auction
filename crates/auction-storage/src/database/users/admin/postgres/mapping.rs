@@ -8,7 +8,7 @@ pub(super) fn map_postgres_user(row: &PgRow) -> Result<AdminUser, ApplicationErr
     let user = AdminUser {
         id: row.try_get("id").map_err(map_storage_error)?,
         username: row.try_get("username").map_err(map_storage_error)?,
-        game_player_id: row.try_get("game_player_id").map_err(map_storage_error)?,
+        forum_account_id: row.try_get("forum_account_id").map_err(map_storage_error)?,
         status: AdminUserStatus::parse(&status)
             .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
         key_status: auction_application::AdminUserKeyStatus::parse(&key_status)
@@ -120,10 +120,10 @@ pub(super) async fn insert_audit_postgres(
     .bind(Uuid::new_v4())
     .bind(now)
     .bind(actor_id)
-    .bind(format!("user.{}", kind.as_str()))
+    .bind(format!("user.{}", kind.audit_str()))
     .bind(user_id.to_string())
     .bind(request_id)
-    .bind(Json(json!({ "command_id": command_id, "command_kind": kind.as_str() })))
+    .bind(Json(json!({ "command_id": command_id, "command_kind": kind.audit_str() })))
     .execute(&mut **transaction)
     .await
     .record_audit_failure()

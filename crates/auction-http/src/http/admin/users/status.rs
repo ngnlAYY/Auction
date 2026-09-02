@@ -90,7 +90,7 @@ async fn mutate_status(
             expected_state_version,
             action,
             username: None,
-            game_player_id: None,
+            forum_account_id: None,
             public_reason,
             actor_id: identity.actor,
             request_id: request_id(&headers),

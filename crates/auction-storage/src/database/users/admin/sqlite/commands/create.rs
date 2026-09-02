@@ -28,14 +28,15 @@ async fn create_sqlite_inner(
     }
     sqlx::query(
         "INSERT INTO users
-            (id, username, status, public_key_hash, game_player_id,
+            (id, username, status, public_key_hash, game_player_id, forum_account_id,
              key_status, state_version, created_at, updated_at)
-         VALUES (?, ?, 'active', ?, ?, 'active', 1, ?, ?)",
+         VALUES (?, ?, 'active', ?, ?, ?, 'active', 1, ?, ?)",
     )
     .bind(uuid_blob(write.user_id))
     .bind(&write.username)
     .bind(write.key.public_key_hash.to_vec())
-    .bind(&write.game_player_id)
+    .bind(&write.username)
+    .bind(write.forum_account_id.as_deref())
     .bind(sqlite_timestamp(write.now))
     .bind(sqlite_timestamp(write.now))
     .execute(&mut *connection)

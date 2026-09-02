@@ -81,7 +81,7 @@ PostgreSQL 结算提交只对映射为序列化冲突或死锁的错误执行有
 PostgreSQL 完整档的 due case 推进、付款超时 `payment_reminder` action 创建、退回邮件证据绑定、
 evidence mismatch 阻断、ordinal recovery Take、持久化 claim/fencing、recovery delivery 的
 `pending → prepared → enqueued` 两阶段身份和结果收口；prepare/activation 前还会读取 Users
-owner 的 `game_player_id` 与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
+owner 的 `username`（当前 MM 收件人）与 `active` 资格，非 active 收件人只写入持久化退避，不会直接投递。
 `src/database/users/admin/` 负责 recovery 触发的 Users 黑名单幂等命令、黑名单历史和审计；
 其中 `mod.rs` 持有跨后端分派与共享校验，PostgreSQL `postgres.rs` 只负责子模块装配，
 `postgres/commands/{mod,blacklist,create,mutation,revert}.rs` 持有按命令职责拆分的写入流程，
@@ -130,10 +130,13 @@ Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地�
 幂等人工再授权、命令重放和追加审计事务；`reply.rs` 只做回帖端口装配，已发布主题与
 lot/代理查询、论坛账号键与 MM 玩家名称解析、命令账本、扫描游标和固定楼层内容 CAS 分别位于
 `reply/{queries,identity,commands,cursor,fixed_posts,validation}.rs`。`identity.rs` 在 Users-owner
-Serializable 事务内用数字账号键定位论坛映射；active-key 同名用户可以建立首个映射，revoked 用户
-只能沿用另一世界已证明的同一数字键，否则为尚未注册 MM 的作者建立用户名与玩家名称一致的
-revoked-key `forum_only` 临时主体及 world 映射。`000026` 保证同一 world/provider 的一个 Users 主体
-只有一个论坛账号；数字键不会进入 MoogleMail 收件人。`000025` 在同一同步行保存固定 #1/#2
+Serializable 事务内用数字账号键定位论坛映射并同步到唯一的 `users.forum_account_id`；
+`users.username` 是可变的 MM 收件人/页面名称，论坛已绑定主体改名时随作者链接更新。active-key
+同名用户可以建立首个映射，revoked 用户只能沿用另一世界已证明的同一数字键，否则为尚未注册 MM
+的作者建立 revoked-key `forum_only` 临时主体及 world 映射。`000026` 保证同一 world/provider 的一个
+Users 主体只有一个论坛账号，`000027` 增加 Users 级唯一论坛账号 ID，并以延迟约束保证 Users 与该
+主体所有论坛映射在事务提交时一致；Admin 修正数字 ID 时也在同一事务更新全部映射。旧
+`game_player_id` 仅作为 `username` 的数据库兼容镜像，数字键不会进入 MoogleMail 收件人。`000025` 在同一同步行保存固定 #1/#2
 的真实 post ID、#2 规范正文和内容版本，并通过独立 due 水位、claim/lease/fencing 串行化远端
 编辑；历史 published 行保持未对账，不猜测楼层身份。
 主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
@@ -143,6 +146,9 @@ revoked-key `forum_only` 临时主体及 world 映射。`000026` 保证同一 wo
 `write_unknown`、发布证明失败和人工授权状态不经过此分支。
 回帖账本接管会同时核对命令 ID 与冻结自然键；自然键和完整业务负载一致时复用既有旧版命令 ID，
 两种身份命中不同记录或任一负载字段漂移时失败关闭。
+`000028` 为账本保存可证明的真实楼层号：既有空值只在同一自然键和完整负载再次匹配时补齐，历史
+未知值不会从远端 post ID 推算。Public 竞价日志据此区分论坛普通竞价与 Web 代理事实，代理来源不再
+暴露 fast/slow 子类型。
 远程读写仍由 Worker/集成 owner 负责，SQLite Lite 不提供论坛完整档。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期
@@ -333,7 +339,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000026` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000028` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -343,8 +349,9 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 则为 HV 战斗页导致的余额暂不可读增加 `busy` 状态，并继续保留最后成功余额；`000024` 为 lot
 增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案；`000025` 追加论坛固定
 #1/#2 的 post proof、内容版本和独立刷新 lease/fencing，`000026` 固定同一 world/provider 的单用户
-论坛账号归属。SQLite
-`000001_lite_core.up.sql`、`000002` 至 `000009` 的调度、用户管理、取消/
+论坛账号归属，`000027` 增加 Users 级稳定论坛账号 ID、跨表提交约束并把名称权威收敛到 `username`，`000028`
+保存论坛竞价来源的真实楼层号。SQLite
+`000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由

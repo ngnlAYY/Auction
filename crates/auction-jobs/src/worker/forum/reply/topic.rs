@@ -25,12 +25,19 @@ pub(super) async fn process_topic(
     let targets = runtime.store.lot_targets(topic.auction_id).await?;
     let target_by_code = target_map(targets)?;
     let mut command_error = None;
+    let mut processed_through_post_number = 2_usize;
 
     'posts: for post in &preview.posts {
-        if post.post.id == topic.system_log_post_id || !requires_bidder_identity(post) {
+        let Some(post_number) = post_numbers.get(&post.post.id).copied() else {
+            return Err(repository_error("论坛帖子缺少真实楼层映射"));
+        };
+        if post.post.id == topic.system_log_post_id {
             continue;
         }
-        let post_number = post_numbers.get(&post.post.id).copied().unwrap_or(3);
+        if !requires_bidder_identity(post) {
+            processed_through_post_number = post_number;
+            continue;
+        }
         let Some(external_account_id) = post.post.author_id.clone() else {
             tracing::warn!(
                 auction_id = %topic.auction_id,
@@ -45,33 +52,33 @@ pub(super) async fn process_topic(
                 "post author forum account ID could not be resolved",
                 false,
             ));
+            processed_through_post_number = post_number;
             continue;
         };
-        let game_player_id = post.post.author.clone().unwrap_or_default();
-        let bidder = match runtime
-            .store
-            .resolve_bidder(topic.world, external_account_id, game_player_id)
-            .await
-        {
-            Ok(bidder) => bidder,
-            Err(error) => {
-                tracing::warn!(
-                    auction_id = %topic.auction_id,
-                    post_id = %post.post.id,
-                    error = %error,
-                    "论坛帖子玩家 ID 名称无法解析为可竞价用户"
-                );
-                system_entries.push(system_entry(
-                    post_number,
-                    &post.post.id,
-                    None,
-                    "identity_unavailable",
-                    "forum/MM player ID name could not be linked to an active auction user",
-                    false,
-                ));
-                continue;
-            }
-        };
+        let player_name = post.post.author.clone().unwrap_or_default();
+        let bidder =
+            match runtime.store.resolve_bidder(topic.world, external_account_id, player_name).await
+            {
+                Ok(bidder) => bidder,
+                Err(error) => {
+                    tracing::warn!(
+                        auction_id = %topic.auction_id,
+                        post_id = %post.post.id,
+                        error = %error,
+                        "论坛帖子玩家名称无法解析为可竞价用户"
+                    );
+                    system_entries.push(system_entry(
+                        post_number,
+                        &post.post.id,
+                        None,
+                        "identity_unavailable",
+                        "forum/MM player ID name could not be linked to an active auction user",
+                        false,
+                    ));
+                    processed_through_post_number = post_number;
+                    continue;
+                }
+            };
         for command in &post.commands {
             if matches!(command.kind.as_str(), "start" | "cancel") {
                 system_entries.push(system_entry(
@@ -122,17 +129,16 @@ pub(super) async fn process_topic(
                     ));
                     continue;
                 };
-                if let Err(error) = process_command(
-                    runtime,
-                    &topic,
-                    &bidder,
-                    &post.post.id,
+                let context = ForumCommandContext {
+                    topic: &topic,
+                    bidder: &bidder,
+                    post_id: &post.post.id,
+                    post_number,
                     lot_code,
                     command,
                     lot_id,
-                )
-                .await
-                {
+                };
+                if let Err(error) = process_command(runtime, &context).await {
                     // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍先把待重试状态投影到 #2。
                     system_entries.push(system_entry(
                         post_number,
@@ -147,6 +153,7 @@ pub(super) async fn process_topic(
                 }
             }
         }
+        processed_through_post_number = post_number;
     }
 
     let outcomes =
@@ -155,9 +162,17 @@ pub(super) async fn process_topic(
         if outcome.status == ForumCommandStatus::Applied {
             continue;
         }
-        let Some(post_number) = post_numbers.get(&outcome.post_id).copied() else {
-            continue;
-        };
+        let persisted_post_number =
+            outcome.post_number.and_then(|value| usize::try_from(value).ok());
+        let current_post_number = post_numbers.get(&outcome.post_id).copied();
+        let post_number = persisted_post_number.or(current_post_number);
+        if outcome.status == ForumCommandStatus::Pending {
+            // pending 是未完成事实，即使帖子后来被编辑或删除，也不能把 #2 水位推进到它之后。
+            let completed_floor = post_number.map_or(2, |value| value.saturating_sub(1).max(2));
+            processed_through_post_number = processed_through_post_number.min(completed_floor);
+            command_error.get_or_insert_with(|| repository_error("论坛命令账本仍有待重试记录"));
+        }
+        let Some(post_number) = post_number else { continue };
         let (code, detail) = match outcome.status {
             ForumCommandStatus::Pending => (
                 "command_pending",
@@ -183,8 +198,16 @@ pub(super) async fn process_topic(
         ));
     }
     let scan_completed = command_error.is_none();
-    refresh_fixed_posts(runtime, topic, system_entries, clock, poll_interval, scan_completed)
-        .await?;
+    refresh_fixed_posts(
+        runtime,
+        topic,
+        processed_through_post_number,
+        system_entries,
+        clock,
+        poll_interval,
+        scan_completed,
+    )
+    .await?;
     command_error.map_or(Ok(()), Err)
 }
 
@@ -240,6 +263,7 @@ fn warning_entries(
 async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
+    processed_through_post_number: usize,
     system_entries: Vec<ForumSystemLogEntry>,
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
@@ -260,7 +284,7 @@ async fn refresh_fixed_posts(
         .map_err(|error| repository_error(&error.to_string()))?;
     let system_log = runtime
         .renderer
-        .render_system_log(topic.auction_id, system_entries)
+        .render_system_log(topic.auction_id, processed_through_post_number, system_entries)
         .map_err(|error| repository_error(&error.to_string()))?;
     let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
     let system_log_changed = system_log.body != topic.system_log_body;

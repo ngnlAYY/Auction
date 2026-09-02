@@ -11,7 +11,7 @@ use super::create::AdminUserGeneratedKey;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AdminUserDialogKind {
-    GamePlayerId,
+    ForumAccountId,
     ReissueKey,
     RevokeKey,
     Blacklist,
@@ -21,7 +21,9 @@ pub(super) enum AdminUserDialogKind {
 impl AdminUserDialogKind {
     pub(super) fn title(self, username: &str) -> String {
         match self {
-            Self::GamePlayerId => t!("admin-users-game-dialog-title", username: username),
+            Self::ForumAccountId => {
+                t!("admin-users-forum-account-dialog-title", username: username)
+            }
             Self::ReissueKey => t!("admin-users-reissue-dialog-title", username: username),
             Self::RevokeKey => t!("admin-users-revoke-dialog-title", username: username),
             Self::Blacklist => t!("admin-users-blacklist-dialog-title", username: username),

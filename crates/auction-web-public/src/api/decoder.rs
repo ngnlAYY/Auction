@@ -580,7 +580,7 @@ fn valid_bid_log_entry(value: &Value) -> bool {
             "mechanism",
             "created_at",
         ],
-        &[],
+        &["source", "source_post_number"],
     ) && uuid(string(value.get("id")).unwrap_or_default())
         && uuid(string(value.get("auction_id")).unwrap_or_default())
         && uuid(string(value.get("lot_id")).unwrap_or_default())
@@ -593,7 +593,21 @@ fn valid_bid_log_entry(value: &Value) -> bool {
         && positive(value.get("accepted_state_version"))
         && positive(value.get("fact_index"))
         && matches!(string(value.get("mechanism")), Some("ordinary" | "proxy"))
+        && valid_bid_log_source(value)
         && time(value.get("created_at"))
+}
+
+fn valid_bid_log_source(value: &Map<String, Value>) -> bool {
+    match (
+        string(value.get("mechanism")),
+        string(value.get("source")),
+        int(value.get("source_post_number")),
+    ) {
+        (Some("proxy"), Some("proxy"), None) => true,
+        (Some("ordinary"), Some("forum"), Some(post_number)) => post_number >= 3,
+        (Some("ordinary"), Some("forum"), None) | (Some("ordinary"), None, None) => true,
+        _ => false,
+    }
 }
 
 fn valid_price_history_page(value: &Value) -> bool {
@@ -658,11 +672,13 @@ fn valid_rules(value: &Value) -> bool {
 
 fn valid_blacklist_page(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
-    valid_numbered_page(value)
+    only(value, &["users", "total", "page", "page_size"], &[])
+        && valid_numbered_page(value)
         && value.get("users").and_then(Value::as_array).is_some_and(|users| {
             users.iter().all(|entry| {
                 object(entry).is_some_and(|entry| {
-                    account_nonempty(entry.get("game_player_id"))
+                    only(entry, &["username", "reason", "blacklisted_at"], &[])
+                        && account_nonempty(entry.get("username"))
                         && string(entry.get("reason")).is_some()
                         && time(entry.get("blacklisted_at"))
                 })

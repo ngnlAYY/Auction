@@ -34,11 +34,12 @@ pub(super) fn AdminUserRow(
     feedback: Signal<Option<AdminActionFeedback>>,
     on_generated_key: EventHandler<AdminUserGeneratedKey>,
 ) -> Element {
-    let mut game_player_id_value = use_signal(|| user.game_player_id.clone().unwrap_or_default());
+    let mut forum_account_id_value =
+        use_signal(|| user.forum_account_id.clone().unwrap_or_default());
     let mut dialog = use_signal(|| None::<AdminUserDialogKind>);
     let mut dialog_reason = use_signal(String::new);
     let command_state = use_signal(|| None::<(String, Uuid)>);
-    let user_for_game_dialog = user.clone();
+    let user_for_forum_dialog = user.clone();
     let user_for_revoke = user.clone();
     let user_for_reissue = user.clone();
     let user_for_blacklist = user.clone();
@@ -60,10 +61,10 @@ pub(super) fn AdminUserRow(
                 TruncatedText { value: user.username.clone() }
             }
             td {
-                "data-label": t!("admin-users-game-player-id"),
+                "data-label": t!("admin-users-forum-account-id"),
                 TruncatedText {
                     value: user
-                        .game_player_id
+                        .forum_account_id
                         .clone()
                         .unwrap_or_else(|| t!("admin-users-empty")),
                 }
@@ -87,11 +88,11 @@ pub(super) fn AdminUserRow(
                         r#type: "button",
                         disabled: busy(),
                         onclick: move |_| {
-                            game_player_id_value
-                                .set(user.game_player_id.clone().unwrap_or_default());
-                            dialog.set(Some(AdminUserDialogKind::GamePlayerId));
+                            forum_account_id_value
+                                .set(user.forum_account_id.clone().unwrap_or_default());
+                            dialog.set(Some(AdminUserDialogKind::ForumAccountId));
                         },
-                        {t!("admin-users-action-set-game-player-id")}
+                        {t!("admin-users-action-set-forum-account-id")}
                     }
                     button {
                         r#type: "button",
@@ -144,18 +145,18 @@ pub(super) fn AdminUserRow(
                                 }
                             },
                             h2 { id: dialog_title_id.clone(), {dialog_title.clone().unwrap_or_default()} }
-                            if kind == AdminUserDialogKind::GamePlayerId {
+                            if kind == AdminUserDialogKind::ForumAccountId {
                                 form {
                                     onsubmit: move |event| {
                                         event.prevent_default();
                                         if busy() {
                                             return;
                                         }
-                                        let user = user_for_game_dialog.clone();
-                                        let value = game_player_id_value();
+                                        let user = user_for_forum_dialog.clone();
+                                        let value = forum_account_id_value();
                                         let command_id = stable_command_id(
                                             command_state,
-                                            format!("set_game_player_id:{}:{value}", user.state_version),
+                                            format!("set_forum_account_id:{}:{value}", user.state_version),
                                         );
                                         let mut dialog = dialog;
                                         run_user_action(
@@ -168,7 +169,7 @@ pub(super) fn AdminUserRow(
                                                 let result = mutate_admin_user(
                                                     command_id,
                                                     &user,
-                                                    "set_game_player_id",
+                                                    "set_forum_account_id",
                                                     None,
                                                     Some(value),
                                                 )
@@ -181,22 +182,24 @@ pub(super) fn AdminUserRow(
                                         );
                                     },
                                     label {
-                                        r#for: format!("game-{}", user.id),
-                                        {t!("admin-users-game-player-id")}
+                                        r#for: format!("forum-account-{}", user.id),
+                                        {t!("admin-users-forum-account-id")}
                                     }
                                     input {
-                                        id: format!("game-{}", user.id),
+                                        id: format!("forum-account-{}", user.id),
                                         r#type: "text",
+                                        inputmode: "numeric",
+                                        pattern: "[1-9][0-9]*",
                                         autofocus: true,
                                         required: true,
                                         disabled: busy(),
-                                        value: game_player_id_value(),
-                                        oninput: move |event| game_player_id_value.set(event.value()),
+                                        value: forum_account_id_value(),
+                                        oninput: move |event| forum_account_id_value.set(event.value()),
                                     }
                                     AdminUserDialogActions {
                                         busy,
                                         on_cancel: move |_| dialog.set(None),
-                                        confirm_label: t!("admin-users-save-game-id"),
+                                        confirm_label: t!("admin-users-save-forum-account-id"),
                                         confirm_class: "admin-btn-primary".to_owned(),
                                     }
                                 }

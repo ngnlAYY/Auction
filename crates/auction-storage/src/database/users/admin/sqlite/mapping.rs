@@ -8,7 +8,7 @@ pub(super) fn map_sqlite_user(row: &SqliteRow) -> Result<AdminUser, ApplicationE
     let user = AdminUser {
         id: uuid_from_blob(row.try_get("id").map_err(map_sqlite_error)?)?,
         username: row.try_get("username").map_err(map_sqlite_error)?,
-        game_player_id: row.try_get("game_player_id").map_err(map_sqlite_error)?,
+        forum_account_id: row.try_get("forum_account_id").map_err(map_sqlite_error)?,
         status: AdminUserStatus::parse(&status)
             .ok_or_else(|| admin_error(AdminUserError::StoredResultCorrupt))?,
         key_status: auction_application::AdminUserKeyStatus::parse(&key_status)
@@ -118,7 +118,7 @@ pub(super) async fn insert_audit_sqlite(
     now: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
     let metadata =
-        serde_json::to_string(&json!({ "command_id": command_id, "action": kind.as_str() }))?;
+        serde_json::to_string(&json!({ "command_id": command_id, "action": kind.audit_str() }))?;
     sqlx::query(
         "INSERT INTO audit_records
             (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
@@ -128,7 +128,7 @@ pub(super) async fn insert_audit_sqlite(
     .bind(uuid_blob(Uuid::new_v4()))
     .bind(sqlite_timestamp(now))
     .bind(actor_id)
-    .bind(format!("user.{}", kind.as_str()))
+    .bind(format!("user.{}", kind.audit_str()))
     .bind(user_id.to_string())
     .bind(request_id)
     .bind(metadata)

@@ -82,6 +82,10 @@ pub struct PublicBidLogEntry {
     pub equipment_name: String,
     pub equipment_category: String,
     pub bidder_name: String,
+    /// 展示来源闭集：论坛普通出价为 `forum`，所有代理事实统一为 `proxy`。
+    pub source: Option<String>,
+    /// 论坛普通出价对应的真实楼层号；历史无法证明时保持为空。
+    pub source_post_number: Option<i32>,
     pub valid: bool,
     pub accepted_state_version: i64,
     pub fact_index: i32,

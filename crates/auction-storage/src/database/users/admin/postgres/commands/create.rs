@@ -26,14 +26,14 @@ pub(crate) async fn create_postgres(
 
     sqlx::query(
         "INSERT INTO public.users
-            (id, username, status, public_key_hash, game_player_id,
+            (id, username, status, public_key_hash, game_player_id, forum_account_id,
              key_status, state_version, created_at, updated_at)
-         VALUES ($1, $2, 'active', $3, $4, 'active', 1, $5, $5)",
+         VALUES ($1, $2, 'active', $3, $2, $4, 'active', 1, $5, $5)",
     )
     .bind(write.user_id)
     .bind(&write.username)
     .bind(write.key.public_key_hash.to_vec())
-    .bind(&write.game_player_id)
+    .bind(write.forum_account_id.as_deref())
     .bind(write.now)
     .execute(&mut *transaction)
     .await

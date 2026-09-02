@@ -61,7 +61,16 @@ pub(super) async fn list_postgres(
             l.category_number AS lot_number,
             e.name AS equipment_name,
             e.category AS equipment_category,
-            users.game_player_id AS bidder_name,
+            users.username AS bidder_name,
+            CASE
+                WHEN b.mechanism = 'proxy' THEN 'proxy'
+                WHEN forum_command.command_id IS NOT NULL THEN 'forum'
+                ELSE NULL
+            END AS source,
+            CASE
+                WHEN b.mechanism = 'ordinary' THEN forum_command.post_number
+                ELSE NULL
+            END AS source_post_number,
             b.amount,
             b.accepted_state_version,
             b.fact_index,
@@ -75,6 +84,9 @@ pub(super) async fn list_postgres(
          JOIN public.equipment AS e ON e.id = l.equipment_id
          JOIN public.users AS users ON users.id = b.bidder_user_id
          JOIN public.auction_commands AS command ON command.command_id = b.command_id
+         LEFT JOIN public.auction_forum_bid_commands AS forum_command
+           ON forum_command.command_id = b.command_id
+          AND forum_command.auction_id = a.id
          WHERE a.id = $1
            AND a.status IN ('live', 'final', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')
@@ -235,6 +247,10 @@ fn map_postgres_entry(row: sqlx::postgres::PgRow) -> Result<PublicBidLogEntry, A
         bidder_name: row
             .try_get("bidder_name")
             .map_err(|_| storage_error("读取 PostgreSQL 竞价用户名称失败"))?,
+        source: row.try_get("source").map_err(|_| storage_error("读取 PostgreSQL 竞价来源失败"))?,
+        source_post_number: row
+            .try_get("source_post_number")
+            .map_err(|_| storage_error("读取 PostgreSQL 论坛竞价楼层号失败"))?,
         valid: row
             .try_get("valid")
             .map_err(|_| storage_error("读取 PostgreSQL 竞价有效标志失败"))?,

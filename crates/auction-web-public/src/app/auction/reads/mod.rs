@@ -13,8 +13,9 @@ use crate::api::{
 use super::pagination::PublicPager;
 use super::{
     CatalogParticipant, Placeholder, PublicBoardQuery, RetryPlaceholder, Route,
-    catalog_category_key, catalog_category_label, enabled_worlds, format_amount,
-    format_auction_time, read_public_query, set_public_query, update_public_query, world_label,
+    bid_source_trailing, catalog_category_key, catalog_category_label, enabled_worlds,
+    format_amount, format_auction_time, read_public_query, set_public_query, update_public_query,
+    world_label,
 };
 
 mod bid_log;

@@ -155,7 +155,7 @@ pub(super) async fn command_outcomes_postgres(
     use sqlx::Row;
 
     let rows = sqlx::query(
-        "SELECT post_id, line_number, lot_code, command_kind, status, last_error_detail
+        "SELECT post_id, post_number, line_number, lot_code, command_kind, status, last_error_detail
          FROM public.auction_forum_bid_commands
          WHERE auction_id = $1 AND thread_id = $2
          ORDER BY post_id, line_number, lot_code, command_kind",
@@ -175,10 +175,16 @@ pub(super) async fn command_outcomes_postgres(
             "rejected" => ForumCommandStatus::Rejected,
             _ => return Err(storage_error("论坛命令状态不在闭集内")),
         };
+        let post_number: Option<i32> =
+            row.try_get("post_number").map_err(|_| storage_error("读取论坛命令楼层号失败"))?;
+        if post_number.is_some_and(|value| value < 3) {
+            return Err(storage_error("论坛命令楼层号不在用户回复范围内"));
+        }
         outcomes.push(ForumCommandOutcome {
             post_id: row
                 .try_get("post_id")
                 .map_err(|_| storage_error("读取论坛命令帖子标识失败"))?,
+            post_number,
             line_number: row
                 .try_get("line_number")
                 .map_err(|_| storage_error("读取论坛命令行号失败"))?,

@@ -20,7 +20,7 @@ pub trait MailUserStore: Send + Sync {
         write: MailUserRegisterWrite,
     ) -> ApplicationFuture<'_, MailUserResult>;
 
-    fn rebind_game_identity(
+    fn rebind_username(
         &self,
         command: MailUserRebindCommand,
     ) -> ApplicationFuture<'_, MailUserResult>;
@@ -49,7 +49,7 @@ pub trait MailUserPort: Send + Sync {
         command: super::commands::MailUserRegisterCommand,
     ) -> ApplicationFuture<'_, MailUserResult>;
 
-    fn rebind_game_identity(
+    fn rebind_username(
         &self,
         command: MailUserRebindCommand,
     ) -> ApplicationFuture<'_, MailUserResult>;

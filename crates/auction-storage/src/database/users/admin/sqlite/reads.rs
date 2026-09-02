@@ -15,7 +15,7 @@ pub(crate) async fn list_sqlite(
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM users
          WHERE (? IS NULL OR instr(username, ?) > 0
-                OR instr(game_player_id, ?) > 0)
+                OR instr(forum_account_id, ?) > 0)
            AND (? IS NULL OR status = ?)",
     )
     .bind(name)
@@ -27,11 +27,11 @@ pub(crate) async fn list_sqlite(
     .await
     .map_err(map_sqlite_error)?;
     let rows = sqlx::query(
-        "SELECT id, username, game_player_id, status, key_status, state_version,
+        "SELECT id, username, forum_account_id, status, key_status, state_version,
                 created_at, updated_at
          FROM users
          WHERE (? IS NULL OR instr(username, ?) > 0
-                OR instr(game_player_id, ?) > 0)
+                OR instr(forum_account_id, ?) > 0)
            AND (? IS NULL OR status = ?)
          ORDER BY username COLLATE BINARY, id
          LIMIT ? OFFSET ?",
@@ -117,7 +117,7 @@ pub(super) async fn load_user_sqlite(
     user_id: Uuid,
 ) -> Result<AdminUser, ApplicationError> {
     let row = sqlx::query(
-        "SELECT id, username, game_player_id, status, key_status, state_version,
+        "SELECT id, username, forum_account_id, status, key_status, state_version,
                 created_at, updated_at FROM users WHERE id = ?",
     )
     .bind(uuid_blob(user_id))

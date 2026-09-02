@@ -132,7 +132,10 @@ Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot �
 P10 竞价日志额外保留
 `world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
-next_cursor/has_more，不得把未知总数伪装成精确 total。P12 在 PostgreSQL 完整档保留 `name`、`world`、
+next_cursor/has_more，不得把未知总数伪装成精确 total。条目的可选 `source` 只允许 `forum`/`proxy`：
+论坛普通竞价仅在账本保存了真实楼层时同时返回 `source_post_number`，代理事实不区分 fast/slow 且不
+携带楼层；普通 Web 出价两者都为空。历史论坛事实楼层未知时只标记论坛来源，不从 post ID 猜测。
+P12 在 PostgreSQL 完整档保留 `name`、`world`、
 日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；SQLite Lite
 因为没有 settlement 事实链固定返回 `501 feature_not_supported`，不能把状态列或空集合当作成交证明。实时事件的 after 也是
 非负 stream sequence，不得改成时间戳游标。P03 的旧版单拍卖读取要求规范 `auction_id`，可带
@@ -336,12 +339,13 @@ MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全�
 真实生效边界，不是热加载提示；业务区块更新要求重启受影响的 Admin 与 Worker。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
-次数/最近历史/创建时间列表字段、创建、改名、游戏
-身份修改和 key 撤销/重签；A30 `/api/v1/admin/renames/{rename_id}/revert` 已接入改名记录校验、
+次数/最近历史/创建时间列表字段、创建、改名、稳定论坛账号 ID
+修改和 key 撤销/重签；名称是可变的 MM 收件人与页面显示值，`forum_account_id` 是唯一的规范十进制
+`showuser` 账号 ID。A30 `/api/v1/admin/renames/{rename_id}/revert` 已接入改名记录校验、
 state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PUT/DELETE 已接入黑名单当前状态、
 追加历史、版本 fence 和审计。三组命令的 key 明文不会进入命令账本、审计或错误响应。A29
 `GET /api/v1/admin/renames` 继续提供 PostgreSQL/SQLite 的改名历史安全投影，并额外返回当前
-用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、游戏身份修改、key
+用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、论坛账号 ID 修改、key
 撤销/重签、黑名单和改名回滚操作。
 
 A32 `/api/v1/admin/credentials` 已接入 Admin session、origin/CSRF、`command_id` 和

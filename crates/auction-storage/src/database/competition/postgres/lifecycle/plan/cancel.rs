@@ -56,7 +56,7 @@ pub(super) async fn apply_cancel_plan_postgres(
         let seller: Option<String> = lot.try_get("seller").map_err(map_sql_error)?;
         let seller = seller
             .filter(|value| !value.trim().is_empty() && value == value.trim())
-            .ok_or_else(|| invalid_state("取消返还义务缺少卖方游戏身份"))?;
+            .ok_or_else(|| invalid_state("取消返还义务缺少卖方 MM 收件人名称"))?;
         let world_id: String = lot.try_get("world_id").map_err(map_sql_error)?;
         if !matches!(world_id.as_str(), "main" | "isekai") {
             return Err(invalid_state("取消返还义务的世界不在允许集合内"));

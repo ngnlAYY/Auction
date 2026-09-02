@@ -54,9 +54,11 @@ async fn revert_sqlite_inner(
     }
     let now = sqlite_timestamp(write.now);
     sqlx::query(
-        "UPDATE users SET username = ?, state_version = state_version + 1,
+        "UPDATE users SET username = ?, game_player_id = ?,
+                          state_version = state_version + 1,
                           updated_at = ? WHERE id = ?",
     )
+    .bind(&previous_username)
     .bind(&previous_username)
     .bind(&now)
     .bind(uuid_blob(user_id))

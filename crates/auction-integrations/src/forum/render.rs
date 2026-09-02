@@ -57,12 +57,6 @@ pub fn render_auction_thread(
     }
 
     let mut body = String::new();
-    writeln!(
-        &mut body,
-        "[size=1][color=#888888]{}[/color][/size]",
-        forum_catalog_marker(snapshot.auction_id)
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
     writeln!(&mut body, "[center][size=5][b]{title}[/b][/size]")
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if let Some(public_url) = snapshot.public_url.as_deref() {
@@ -141,6 +135,12 @@ pub fn render_auction_thread(
         }
     }
     body.push_str("\n[i]This topic is an external projection. The public auction page remains authoritative.[/i]\n");
+    writeln!(
+        &mut body,
+        "[size=1][color=#F7F7F7]{}[/color][/size]",
+        forum_catalog_marker(snapshot.auction_id)
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if body.len() > MAX_BODY_BYTES {
         return Err(ForumRenderError::BodyTooLarge);
     }
@@ -163,18 +163,20 @@ impl ForumRenderer for ForumThreadRenderer {
     fn render_system_log(
         &self,
         auction_id: AuctionId,
+        processed_through_post_number: usize,
         entries: Vec<ForumSystemLogEntry>,
     ) -> Result<ForumRenderedPost, ForumRenderError> {
-        render_system_log(auction_id, entries)
+        render_system_log(auction_id, processed_through_post_number, entries)
     }
 }
 
 /// 稳定渲染固定 #2；相同的命令事实始终得到相同正文，避免无意义远端编辑。
 pub fn render_system_log(
     auction_id: AuctionId,
+    processed_through_post_number: usize,
     mut entries: Vec<ForumSystemLogEntry>,
 ) -> Result<ForumRenderedPost, ForumRenderError> {
-    if auction_id.is_nil() || entries.len() > 20_000 {
+    if auction_id.is_nil() || processed_through_post_number < 2 || entries.len() > 20_000 {
         return Err(ForumRenderError::InvalidSnapshot);
     }
     entries.sort_by(|left, right| {
@@ -197,12 +199,8 @@ pub fn render_system_log(
     let ignored_label = if ignored_count == 1 { "post" } else { "posts" };
 
     let mut body = String::new();
-    writeln!(
-        &mut body,
-        "[size=1][color=#888888]{}[/color][/size]",
-        forum_system_log_marker(auction_id)
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    writeln!(&mut body, "Updated up to [b][size=5]#{processed_through_post_number}[/size][/b].")
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     writeln!(
         &mut body,
         "Processing summary: [b][size=4]{warning_count}[/size][/b] {warning_label}, \
@@ -232,6 +230,12 @@ pub fn render_system_log(
     body.push_str(
         "\n[i]This post is maintained by the auction worker. Do not place bids here.[/i]\n",
     );
+    writeln!(
+        &mut body,
+        "[size=1][color=#F7F7F7]{}[/color][/size]",
+        forum_system_log_marker(auction_id)
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if body.len() > MAX_BODY_BYTES {
         return Err(ForumRenderError::BodyTooLarge);
     }

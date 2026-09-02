@@ -33,10 +33,10 @@ async fn list_postgres(
     request: PublicBlacklistRequest,
 ) -> Result<PublicBlacklistPage, ApplicationError> {
     let rows = sqlx::query(
-        "SELECT u.game_player_id, b.public_reason, b.created_at AS blacklisted_at
+        "SELECT u.username, b.public_reason, b.created_at AS blacklisted_at
          FROM public.user_blacklist AS b
          JOIN public.users AS u ON u.id = b.user_id
-         WHERE b.revoked_at IS NULL AND u.game_player_id IS NOT NULL
+         WHERE b.revoked_at IS NULL
          ORDER BY b.created_at DESC, b.user_id
          LIMIT $1 OFFSET $2",
     )
@@ -49,7 +49,7 @@ async fn list_postgres(
         "SELECT count(*)
          FROM public.user_blacklist AS b
          JOIN public.users AS u ON u.id = b.user_id
-         WHERE b.revoked_at IS NULL AND u.game_player_id IS NOT NULL",
+         WHERE b.revoked_at IS NULL",
     )
     .fetch_one(store.pool())
     .await
@@ -59,9 +59,9 @@ async fn list_postgres(
         .into_iter()
         .map(|row| {
             Ok(PublicBlacklistEntry {
-                game_player_id: row
-                    .try_get("game_player_id")
-                    .map_err(|_| storage_error("读取黑名单玩家标识失败"))?,
+                username: row
+                    .try_get("username")
+                    .map_err(|_| storage_error("读取黑名单玩家名称失败"))?,
                 public_reason: row
                     .try_get("public_reason")
                     .map_err(|_| storage_error("读取黑名单公开原因失败"))?,
@@ -80,10 +80,10 @@ async fn list_sqlite(
     request: PublicBlacklistRequest,
 ) -> Result<PublicBlacklistPage, ApplicationError> {
     let rows = sqlx::query(
-        "SELECT u.game_player_id, b.public_reason, b.created_at AS blacklisted_at
+        "SELECT u.username, b.public_reason, b.created_at AS blacklisted_at
          FROM user_blacklist AS b
          JOIN users AS u ON u.id = b.user_id
-         WHERE b.revoked_at IS NULL AND u.game_player_id IS NOT NULL
+         WHERE b.revoked_at IS NULL
          ORDER BY b.created_at DESC, b.user_id
          LIMIT ? OFFSET ?",
     )
@@ -96,7 +96,7 @@ async fn list_sqlite(
         "SELECT count(*)
          FROM user_blacklist AS b
          JOIN users AS u ON u.id = b.user_id
-         WHERE b.revoked_at IS NULL AND u.game_player_id IS NOT NULL",
+         WHERE b.revoked_at IS NULL",
     )
     .fetch_one(store.pool())
     .await
@@ -110,9 +110,9 @@ async fn list_sqlite(
                     .map_err(|_| storage_error("读取 Lite 黑名单时间失败"))?,
             )?;
             Ok(PublicBlacklistEntry {
-                game_player_id: row
-                    .try_get("game_player_id")
-                    .map_err(|_| storage_error("读取黑名单玩家标识失败"))?,
+                username: row
+                    .try_get("username")
+                    .map_err(|_| storage_error("读取黑名单玩家名称失败"))?,
                 public_reason: row
                     .try_get("public_reason")
                     .map_err(|_| storage_error("读取黑名单公开原因失败"))?,

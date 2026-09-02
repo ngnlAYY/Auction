@@ -4,13 +4,15 @@ use super::*;
 
 pub(super) async fn process_notification(
     runtime: &ForumReplyRuntime,
-    topic: &auction_application::ForumReplyTopic,
-    bidder: &auction_application::ForumBidderIdentity,
-    post_id: &str,
-    lot_code: &str,
-    command: &auction_application::AdminForumCommand,
-    lot_id: auction_domain::LotId,
+    context: &ForumCommandContext<'_>,
+    post_number: i32,
 ) -> Result<(), ApplicationError> {
+    let topic = context.topic;
+    let bidder = context.bidder;
+    let post_id = context.post_id;
+    let lot_code = context.lot_code;
+    let command = context.command;
+    let lot_id = context.lot_id;
     let mode = command.notify.as_deref().unwrap_or("both");
     if mode == "pm" {
         tracing::warn!(post_id, "论坛 PM 通知 owner 未装配");
@@ -40,6 +42,7 @@ pub(super) async fn process_notification(
         world: topic.world,
         thread_id: topic.thread_id.clone(),
         post_id: post_id.to_owned(),
+        post_number,
         line_number: line,
         lot_code: lot_code.to_owned(),
         actor: bidder.external_account_id.clone(),
@@ -85,7 +88,7 @@ pub(super) async fn process_notification(
             operation: MailDeliveryOperation::Send,
             world_id: forum_world_name(topic.world).to_owned(),
             external_mail_id,
-            recipient: bidder.game_player_id.clone(),
+            recipient: bidder.player_name.clone(),
             template: Some(MailNotificationTemplate::ForumAuctionNotice),
             result_code: Some("forum_auction_notice".to_owned()),
             user_key_user_id: None,

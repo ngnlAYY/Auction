@@ -50,6 +50,8 @@ pub(crate) fn map_bid_log_entry(entry: PublicBidLogEntry) -> PublicBidLogEntryRe
         equipment_name: entry.equipment_name,
         equipment_category: entry.equipment_category,
         bidder_name: entry.bidder_name,
+        source: entry.source,
+        source_post_number: entry.source_post_number.map(i64::from),
         valid: entry.valid,
         accepted_state_version: entry.accepted_state_version,
         fact_index: i64::from(entry.fact_index),

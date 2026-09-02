@@ -171,8 +171,6 @@ pub struct PublicLoginRequest {
 pub struct PublicLoginResponse {
     pub user_id: String,
     pub username: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub game_player_id: Option<String>,
     pub status: String,
     pub expires_at: String,
     pub absolute_expires_at: String,
@@ -184,8 +182,6 @@ pub struct PublicSessionCurrentResponse {
     pub authenticated: bool,
     pub user_id: String,
     pub username: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub game_player_id: Option<String>,
     pub expires_at: String,
     pub absolute_expires_at: String,
 }
@@ -258,7 +254,7 @@ pub struct AdminRuntimeConfigResponse {
 /// Public 黑名单条目的稳定响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicBlacklistEntryResponse {
-    pub game_player_id: String,
+    pub username: String,
     pub reason: String,
     pub blacklisted_at: String,
 }

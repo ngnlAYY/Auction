@@ -23,7 +23,7 @@ use super::{
 struct StrictUser {
     id: String,
     username: String,
-    game_player_id: String,
+    forum_account_id: Option<String>,
     status: String,
     key_status: String,
     state_version: i64,
@@ -43,7 +43,7 @@ struct StrictBlacklistHistory {
 struct StrictListedUser {
     id: String,
     username: String,
-    game_player_id: String,
+    forum_account_id: Option<String>,
     status: String,
     key_status: String,
     state_version: i64,
@@ -86,7 +86,7 @@ struct StrictUserDataWithKey {
 pub(crate) struct AdminUser {
     pub id: String,
     pub username: String,
-    pub game_player_id: Option<String>,
+    pub forum_account_id: Option<String>,
     pub status: String,
     pub key_status: String,
     pub state_version: i64,
@@ -107,7 +107,7 @@ impl From<AdminUserResponse> for AdminUser {
         Self {
             id: user.id,
             username: user.username,
-            game_player_id: user.game_player_id,
+            forum_account_id: user.forum_account_id,
             status: user.status,
             key_status: user.key_status,
             state_version: user.state_version,
@@ -169,7 +169,7 @@ pub(crate) async fn fetch_admin_users(
 pub(crate) async fn create_admin_user(
     command_id: Uuid,
     username: String,
-    game_player_id: String,
+    forum_account_id: Option<String>,
     key_mode: &'static str,
     key: Option<String>,
 ) -> Result<AdminUserMutationResult, String> {
@@ -177,7 +177,7 @@ pub(crate) async fn create_admin_user(
     let command = AdminUserCreateRequest {
         command_id: command_id.to_string(),
         username,
-        game_player_id,
+        forum_account_id,
         key_mode: key_mode.to_owned(),
         key,
     };
@@ -195,13 +195,13 @@ pub(crate) async fn create_admin_user(
     decode_user_mutation(response, key_mode == "generated").await
 }
 
-/// 修改用户名、游戏身份或登录 key 状态。
+/// 修改用户名、论坛账号 ID 或登录 key 状态。
 pub(crate) async fn mutate_admin_user(
     command_id: Uuid,
     user: &AdminUser,
     action: &'static str,
     username: Option<String>,
-    game_player_id: Option<String>,
+    forum_account_id: Option<String>,
 ) -> Result<AdminUserMutationResult, String> {
     let user_id = Uuid::parse_str(&user.id).map_err(|_| "invalid_request".to_owned())?;
     let csrf_token = super::fetch_csrf_token().await?;
@@ -211,7 +211,7 @@ pub(crate) async fn mutate_admin_user(
         expected_state_version: user.state_version,
         action: action.to_owned(),
         username,
-        game_player_id,
+        forum_account_id,
     };
     let response = send_request(|abort_signal| {
         Request::patch("/api/v1/admin/users")
@@ -331,7 +331,7 @@ fn decode_listed_user(value: StrictListedUser) -> Result<AdminUser, &'static str
     let user = decode_user(StrictUser {
         id: value.id,
         username: value.username,
-        game_player_id: value.game_player_id,
+        forum_account_id: value.forum_account_id,
         status: value.status,
         key_status: value.key_status,
         state_version: value.state_version,
@@ -347,7 +347,10 @@ fn decode_listed_user(value: StrictListedUser) -> Result<AdminUser, &'static str
 fn decode_user(value: StrictUser) -> Result<AdminUserResponse, &'static str> {
     if !valid_uuid(&value.id)
         || !valid_safe_text(&value.username, 256)
-        || !valid_safe_text(&value.game_player_id, 256)
+        || value
+            .forum_account_id
+            .as_deref()
+            .is_some_and(|account_id| !valid_forum_account_id(account_id))
         || !matches!(value.status.as_str(), "active" | "blacklisted")
         || !matches!(value.key_status.as_str(), "active" | "revoked")
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
@@ -359,13 +362,21 @@ fn decode_user(value: StrictUser) -> Result<AdminUserResponse, &'static str> {
     Ok(AdminUserResponse {
         id: value.id,
         username: value.username,
-        game_player_id: Some(value.game_player_id),
+        forum_account_id: value.forum_account_id,
         status: value.status,
         key_status: value.key_status,
         state_version: value.state_version,
         created_at: value.created_at,
         updated_at: value.updated_at,
     })
+}
+
+fn valid_forum_account_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0] != b'0'
+        && bytes.iter().all(u8::is_ascii_digit)
 }
 
 fn decode_blacklist_history(

@@ -120,7 +120,8 @@ fn legacy_go_time(value: DateTime<Utc>) -> String {
 pub enum AdminUserCommandKind {
     Create,
     Rename,
-    SetGamePlayerId,
+    /// 账本字符串沿用旧值，避免破坏既有幂等命令；业务语义已改为稳定论坛账号 ID。
+    SetForumAccountId,
     RevokeKey,
     ReissueKey,
     Blacklist,
@@ -129,17 +130,25 @@ pub enum AdminUserCommandKind {
 }
 
 impl AdminUserCommandKind {
-    /// 返回迁移表和审计使用的稳定命令类型。
+    /// 返回既有幂等账本与请求摘要使用的稳定命令类型。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Create => "create",
             Self::Rename => "rename",
-            Self::SetGamePlayerId => "set_game_player_id",
+            Self::SetForumAccountId => "set_game_player_id",
             Self::RevokeKey => "revoke_key",
             Self::ReissueKey => "reissue_key",
             Self::Blacklist => "blacklist",
             Self::Unblacklist => "unblacklist",
             Self::RenameRevert => "rename_revert",
+        }
+    }
+
+    /// 返回面向审计和运维展示的当前业务动作名。
+    pub const fn audit_str(self) -> &'static str {
+        match self {
+            Self::SetForumAccountId => "set_forum_account_id",
+            _ => self.as_str(),
         }
     }
 }
@@ -165,7 +174,7 @@ impl AdminUserKeyMode {
 pub struct AdminUserCreateCommand {
     pub command_id: Uuid,
     pub username: String,
-    pub game_player_id: String,
+    pub forum_account_id: Option<String>,
     pub key_mode: AdminUserKeyMode,
     pub manual_key: Option<MailLoginKey>,
     pub actor_id: String,
@@ -179,7 +188,7 @@ impl fmt::Debug for AdminUserCreateCommand {
             .debug_struct("AdminUserCreateCommand")
             .field("command_id", &self.command_id)
             .field("username", &self.username)
-            .field("game_player_id", &self.game_player_id)
+            .field("forum_account_id", &self.forum_account_id)
             .field("key_mode", &self.key_mode)
             .field("manual_key", &self.manual_key.as_ref().map(|_| "[REDACTED]"))
             .field("actor_id", &self.actor_id)
@@ -193,7 +202,7 @@ impl fmt::Debug for AdminUserCreateCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdminUserMutationAction {
     Rename,
-    SetGamePlayerId,
+    SetForumAccountId,
     RevokeKey,
     ReissueKey,
     Blacklist,
@@ -205,7 +214,7 @@ impl AdminUserMutationAction {
     pub const fn kind(self) -> AdminUserCommandKind {
         match self {
             Self::Rename => AdminUserCommandKind::Rename,
-            Self::SetGamePlayerId => AdminUserCommandKind::SetGamePlayerId,
+            Self::SetForumAccountId => AdminUserCommandKind::SetForumAccountId,
             Self::RevokeKey => AdminUserCommandKind::RevokeKey,
             Self::ReissueKey => AdminUserCommandKind::ReissueKey,
             Self::Blacklist => AdminUserCommandKind::Blacklist,
@@ -227,7 +236,7 @@ pub struct AdminUserMutationCommand {
     pub expected_state_version: i64,
     pub action: AdminUserMutationAction,
     pub username: Option<String>,
-    pub game_player_id: Option<String>,
+    pub forum_account_id: Option<String>,
     pub public_reason: Option<String>,
     pub actor_id: String,
     pub request_id: Option<String>,
@@ -258,7 +267,7 @@ pub struct AdminUserCreateWrite {
     pub request_hash: RequestHash,
     pub user_id: Uuid,
     pub username: String,
-    pub game_player_id: String,
+    pub forum_account_id: Option<String>,
     pub key: AdminUserKeyWrite,
     pub actor_id: String,
     pub request_id: Option<String>,
@@ -273,7 +282,7 @@ pub struct AdminUserMutationWrite {
     pub expected_state_version: i64,
     pub action: AdminUserMutationAction,
     pub username: Option<String>,
-    pub game_player_id: Option<String>,
+    pub forum_account_id: Option<String>,
     pub public_reason: Option<String>,
     pub key: Option<AdminUserKeyWrite>,
     pub actor_id: String,

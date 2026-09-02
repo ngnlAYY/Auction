@@ -34,7 +34,7 @@ impl PublicBlacklistRequest {
 /// Public 黑名单条目的安全投影，不含内部用户 ID 或运营 actor。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBlacklistEntry {
-    pub game_player_id: String,
+    pub username: String,
     pub public_reason: String,
     pub blacklisted_at: DateTime<Utc>,
 }
@@ -60,8 +60,8 @@ impl PublicBlacklistPage {
             || entry_count > self.limit
             || self.total < entry_count
             || self.entries.iter().any(|entry| {
-                entry.game_player_id.trim() != entry.game_player_id
-                    || entry.game_player_id.is_empty()
+                entry.username.trim() != entry.username
+                    || entry.username.is_empty()
                     || entry.public_reason.trim() != entry.public_reason
                     || entry.public_reason.is_empty()
                     || entry.blacklisted_at.timestamp_micros() == 0

@@ -34,6 +34,21 @@ pub(crate) fn CatalogParticipant(
     }
 }
 
+/// 将公开来源事实压缩成玩家名称后的单一标记，不暴露代理实现模式。
+pub(crate) fn bid_source_trailing(
+    source: Option<&str>,
+    source_post_number: Option<i64>,
+) -> Option<String> {
+    match (source, source_post_number) {
+        (Some("forum"), Some(post_number)) => {
+            Some(t!("bidlog-source-forum", post_number: post_number))
+        }
+        (Some("forum"), None) => Some(t!("bidlog-source-forum-unknown")),
+        (Some("proxy"), None) => Some(t!("bidlog-source-proxy")),
+        _ => None,
+    }
+}
+
 /// 装备名称保持单行截断；完整档直接导航真实装备 URL，Lite 档保留纯文本。
 #[component]
 pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {

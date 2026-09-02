@@ -98,7 +98,7 @@ Admin `/api/v1/admin/audit` 已接入 Admin session、精确筛选、时间范�
 数字分页；响应只包含追加式审计的安全字段与 JSON object metadata，不暴露原始 SQL 行。
 Admin `/api/v1/admin/users`、`/api/v1/admin/renames/{rename_id}/revert` 和
 `/api/v1/admin/users/{user_id}/blacklist` 已接入 Admin session、CSRF、稳定命令 DTO 和用户
-安全投影；创建、改名、游戏身份修改、key 撤销/重签、黑名单/解封和改名回滚由 Users owner
+安全投影；创建、改名、论坛账号 ID 修改、key 撤销/重签、黑名单/解封和改名回滚由 Users owner
 负责版本 fence、命令账本与审计。`/api/v1/admin/renames` 继续提供 A29 改名历史读取。key
 明文只可能出现在创建/重签的成功响应，不进入日志或错误响应；未配置用户登录数据密钥时，
 该 Users port 明确报告能力不可用。

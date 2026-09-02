@@ -9,9 +9,7 @@ pub(super) struct RegistrationUser {
     pub(super) username: String,
     pub(super) status: String,
     pub(super) key_status: String,
-    pub(super) game_player_id: Option<String>,
     pub(super) username_matches: bool,
-    pub(super) game_player_matches: bool,
 }
 
 pub(super) fn registration_user(row: &PgRow) -> Result<RegistrationUser, ApplicationError> {
@@ -20,9 +18,7 @@ pub(super) fn registration_user(row: &PgRow) -> Result<RegistrationUser, Applica
         username: row.try_get("username").map_err(map_storage_error)?,
         status: row.try_get("status").map_err(map_storage_error)?,
         key_status: row.try_get("key_status").map_err(map_storage_error)?,
-        game_player_id: row.try_get("game_player_id").map_err(map_storage_error)?,
         username_matches: row.try_get("username_matches").map_err(map_storage_error)?,
-        game_player_matches: row.try_get("game_player_matches").map_err(map_storage_error)?,
     })
 }
 
@@ -199,7 +195,6 @@ pub(super) fn validate_register_write(
         || write.command.command_id.is_nil()
         || write.command.request_hash.as_bytes() == [0; 32]
         || !valid_identity(&write.command.username)
-        || !valid_identity(&write.command.game_player_id)
         || write.command.now.timestamp_nanos_opt().is_none()
     {
         return Err(repository_error("Users MoogleMail 注册写入参数无效"));
@@ -214,7 +209,6 @@ pub(super) fn validate_rebind_command(
         || command.request_hash.as_bytes() == [0; 32]
         || command.old_key_hash == [0; 32]
         || !valid_identity(&command.next_username)
-        || !valid_identity(&command.next_game_player_id)
         || command.history_id.is_nil()
         || command.now.timestamp_nanos_opt().is_none()
     {

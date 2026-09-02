@@ -66,7 +66,7 @@ async fn read_recipient_postgres(
     }
 
     let row = sqlx::query(
-        "SELECT id, game_player_id, status, state_version
+        "SELECT id, username AS player_name, status, state_version
          FROM public.users
          WHERE id = $1",
     )
@@ -78,9 +78,8 @@ async fn read_recipient_postgres(
 
     let stored_user_id: Uuid =
         row.try_get("id").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
-    let game_identity: String = row
-        .try_get("game_player_id")
-        .map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
+    let game_identity: String =
+        row.try_get("player_name").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
     let status: String =
         row.try_get("status").map_err(|_| ApplicationError::FulfillmentDependencyMismatch)?;
     let state_version: i64 = row

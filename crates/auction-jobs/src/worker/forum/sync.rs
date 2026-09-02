@@ -251,7 +251,7 @@ where
             return Ok(());
         }
     };
-    let system_log = match renderer.render_system_log(auction_id, Vec::new()) {
+    let system_log = match renderer.render_system_log(auction_id, 2, Vec::new()) {
         Ok(rendered) => rendered,
         Err(error) => {
             record_failure(

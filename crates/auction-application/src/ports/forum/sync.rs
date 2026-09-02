@@ -291,10 +291,11 @@ pub trait ForumRenderer: Send + Sync {
         equipment_links: Vec<PublicEquipmentGameLink>,
     ) -> Result<ForumRenderedThread, ForumRenderError>;
 
-    /// 渲染固定 #2 的初始系统日志。
+    /// 渲染固定 #2；水位只表示本轮已经完整处理到的连续楼层。
     fn render_system_log(
         &self,
         auction_id: AuctionId,
+        processed_through_post_number: usize,
         entries: Vec<ForumSystemLogEntry>,
     ) -> Result<ForumRenderedPost, ForumRenderError>;
 }

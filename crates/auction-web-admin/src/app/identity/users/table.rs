@@ -64,7 +64,7 @@ pub(super) fn AdminUserTable(
             table { class: "admin-users-table",
                 thead { tr {
                     th { {t!("admin-users-username")} }
-                    th { {t!("admin-users-game-player-id")} }
+                    th { {t!("admin-users-forum-account-id")} }
                     th { {t!("admin-users-status")} }
                     th { {t!("admin-users-blacklist-history")} }
                     th { {t!("admin-users-blacklist-count")} }

@@ -57,7 +57,7 @@ async fn claim_action_in_transaction(
                   recovery.winner_user_id AS buyer_user_id,
                   recovery.payment_obligation_id,
                   source_mail.external_mail_id AS source_external_mail_id,
-                  recipient.game_player_id AS recipient_game_player_id,
+                  recipient.username AS recipient_player_name,
                   COALESCE(recipient.status = 'active', false) AS recipient_eligible,
                   COALESCE(recipient.state_version, 0) AS recipient_state_version
            FROM public.settlement_recovery_actions AS action
@@ -269,7 +269,7 @@ async fn claim_action_in_transaction(
         return Err(repository_error("recovery action 领取结果无效").into());
     }
     let recipient: Option<String> =
-        row.try_get("recipient_game_player_id").map_err(map_storage_error)?;
+        row.try_get("recipient_player_name").map_err(map_storage_error)?;
     let recipient_eligible: bool = row.try_get("recipient_eligible").map_err(map_storage_error)?;
     let recipient_state_version: i64 =
         row.try_get("recipient_state_version").map_err(map_storage_error)?;

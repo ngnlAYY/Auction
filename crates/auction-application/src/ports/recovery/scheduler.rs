@@ -52,7 +52,7 @@ pub struct RecoveryReturnAdvance {
 
 /// Worker 领取的一条 recovery action。
 ///
-/// `recipient` 可能为空，表示 Users owner 没有可用的游戏身份；这种确定性事实必须进入
+/// `recipient` 可能为空，表示 Users owner 没有可用的 MM 收件人名称；这种确定性事实必须进入
 /// manual reconcile，而不能由 Worker 猜测收件人或静默丢弃 action。`recipient_eligible` 是
 /// Users owner 在同一读取投影中给出的 active 状态；prepare/activation 前必须为 true，已经
 /// enqueued 的 action 观察结果时不再用它回滚外部事实。`recipient_state_version` 用于校验

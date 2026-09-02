@@ -75,7 +75,7 @@ fn map_page(
 
 fn map_entry(entry: PublicBlacklistEntry) -> PublicBlacklistEntryResponse {
     PublicBlacklistEntryResponse {
-        game_player_id: entry.game_player_id,
+        username: entry.username,
         reason: entry.public_reason,
         blacklisted_at: public_timestamp(entry.blacklisted_at),
     }

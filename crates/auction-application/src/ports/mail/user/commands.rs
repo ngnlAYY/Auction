@@ -12,7 +12,6 @@ pub struct MailUserRegisterCommand {
     pub command_id: auction_domain::CommandId,
     pub request_hash: RequestHash,
     pub username: String,
-    pub game_player_id: String,
     pub now: DateTime<Utc>,
 }
 
@@ -31,7 +30,6 @@ pub struct MailUserRebindCommand {
     pub request_hash: RequestHash,
     pub old_key_hash: [u8; 32],
     pub next_username: String,
-    pub next_game_player_id: String,
     pub history_id: Uuid,
     pub now: DateTime<Utc>,
 }

@@ -7,7 +7,7 @@ pub(crate) fn map_user(user: auction_application::AdminUser) -> AdminUserRespons
     AdminUserResponse {
         id: user.id.to_string(),
         username: user.username,
-        game_player_id: user.game_player_id,
+        forum_account_id: user.forum_account_id,
         status: user.status.as_str().to_owned(),
         key_status: user.key_status.as_str().to_owned(),
         state_version: user.state_version,

@@ -5,7 +5,7 @@ use auction_application::{ApplicationError, ForumBidCommandRecord, RepositoryErr
 use auction_domain::SettlementWorld;
 
 pub(super) const MAX_REPLY_BATCH_SIZE: u16 = 100;
-pub(super) const MAX_GAME_PLAYER_ID_BYTES: usize = 256;
+pub(super) const MAX_PLAYER_NAME_BYTES: usize = 256;
 pub(super) const MAX_FORUM_ACCOUNT_ID_BYTES: usize = 32;
 pub(super) const MAX_THREAD_ID_BYTES: usize = 64;
 pub(super) const MAX_FIXED_POST_ID_BYTES: usize = 32;
@@ -21,6 +21,7 @@ pub(super) fn valid_command_record(record: &ForumBidCommandRecord) -> bool {
         && !record.auction_id.is_nil()
         && valid_text(&record.thread_id, MAX_THREAD_ID_BYTES)
         && valid_text(&record.post_id, MAX_POST_ID_BYTES)
+        && record.post_number >= 3
         && record.line_number > 0
         && valid_text(&record.lot_code, MAX_LOT_CODE_BYTES)
         && valid_text(&record.actor, MAX_ACTOR_BYTES)

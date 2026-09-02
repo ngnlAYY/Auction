@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000026` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000028` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -282,7 +282,11 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 `000025` 为 `auction_forum_sync` 增加固定楼层的远端 post ID、系统日志正文、单调内容版本，以及
 独立的刷新 due 水位、claim token、owner、lease 与 fencing；历史 published 行不猜测 #2，必须先
 读取主题并完成 exact post 对账；`000026` 保证同一 world/provider 下一个 Users 主体只能绑定一个
-论坛账号，避免同名回帖并发建立多重归属；
+论坛账号，避免同名回帖并发建立多重归属；`000027` 把 `users.username` 固定为唯一的可变
+MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.forum_account_id` 保存稳定
+`showuser` 数字账号 ID，并以延迟约束保证 Users 主体与所有论坛映射在提交时一致；旧
+`game_player_id` 只作为数据库兼容镜像；`000028` 为论坛命令账本保存
+真实楼层号，历史未知值保持空，不从 post ID 猜测楼层；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -292,7 +296,7 @@ PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、1
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
 Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 cadence、100 条分阶段批次、PostgreSQL
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
-SQLite `000001` 至 `000009`、迁移入口和
+SQLite `000001` 至 `000010`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
 Public 20 条旧版契约路径与 Admin 37 条旧版契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
@@ -302,7 +306,9 @@ projection，PostgreSQL 完整档的价格历史从结算事实链返回权威�
 拍卖列表保留页码与 keyset cursor 语义，lot 列表保留 preview/live 互斥投影、分类统计和旧分页；
 所有 Public/Admin `lot_number` 展示投影使用分类内编号，竞价身份仍是 `lot_id` UUID，价格历史
 opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.lot_number`；已结算拍卖仍可在公开安全投影内读取 lot，供历史轮次页面使用，
-竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义，价格历史
+竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义；Web 代理事实只展示
+`玩家名称(代理)`，论坛普通竞价在能够由命令账本证明真实楼层时展示
+`玩家名称(论坛 #N)`，普通 Web 出价不伪造来源。价格历史
 在完整档保留旧筛选、成交条目与编号页统计；Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
@@ -414,21 +420,25 @@ HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计�
 每个主题固定由系统维护 #1 拍卖目录和 #2 编辑/错误记录；两者的真实 post ID 持久化后才允许
 导入 #3 及后续用户回复。竞价命令事务完成后，Worker 从权威 lot 快照重新渲染 #1，并把编辑帖、
 解析警告、身份失败和确定拒绝稳定渲染到 #2；#2 只按这些公开事实生成真实计数摘要和紧凑单行记录，
-并用 HTML 解析所得真实 post ID 为楼层号生成 findpost 链接，不按楼层位置推算远端帖子，也不会伪造
-扫描水位、成功竞价数或正文外身份。论坛只执行普通出价，Web 专属的代理行在解析入口
+并用 HTML 解析所得真实 post ID 为楼层号生成 findpost 链接。它额外显示本轮已连续处理到的真实
+楼层水位；遇到待重试命令便停止推进，不按 post ID 或已读取的末楼伪造已处理进度。论坛只执行普通出价，Web 专属的代理行在解析入口
 静默忽略且不进入 #2，没有可执行命令的帖子也不会提前触发作者身份解析。编辑只命中已保存 post ID；
 同源重定向的唯一 post proof，或 200 中间页里完全一致的 meta refresh/链接双 proof 通过后，才以
 内容版本 CAS 更新本地证明。固定帖刷新逐主题领取独立内容 lease/fencing；仍待重试的命令可以更新
 #2 与本地正文证明，但会保留 claim 且不推进 `content_next_scan_at`，只有成功或成功确认无正文变化才
-从完成时刻推进到下一次配置周期。既有 #2 不是同拍卖系统
-标记时失败关闭，不覆盖用户帖子。论坛
-作者链接的 `showuser` 数字 ID 只作为稳定论坛账号键；同一论坛生成作者链接的 `.bigusername` 文本才是
-与 MM 收件人一致的 `users.game_player_id` 玩家 ID 名称。Users owner 会在 Serializable 事务内同时核对
-两者：已验证 active key 的同名用户可以建立首个论坛映射，revoked 用户只能沿用另一世界已证明的同一
-数字账号键；否则为尚未注册 MM 的作者建立用户名与 `game_player_id` 都等于玩家名称的 revoked-key
-`forum_only` 主体及 world 映射。`000026` 还保证同一 world/provider 的一个 Users 主体只有一个论坛账号。
-系统不生成 `forum-*` 影子用户名，也不把数字账号键当作 MM 收件人；后续
-MM 注册按同一玩家名称恢复该用户。论坛首帖、公开拍卖目录和竞价历史统一展示玩家名称。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
+从完成时刻推进到下一次配置周期。既有 #2 不是同拍卖系统标记时失败关闭，不覆盖用户帖子。机器
+ownership 标记仍保留在固定帖正文末尾供精确校验，但不作为面向用户的可见日志内容。论坛作者链接的
+`showuser` 数字 ID 是稳定且唯一的论坛账号键，保存到 `users.forum_account_id`；同一论坛生成作者
+链接的 `.bigusername` 文本是可变的 MoogleMail 收件人和页面显示名称，唯一权威字段为
+`users.username`。Users owner 会在 Serializable 事务内同时核对两者：已验证 active key 的同名用户
+可以建立首个论坛映射，已绑定主体允许随论坛名称变化更新 `username`；revoked 用户只能沿用另一
+世界已证明的同一数字账号键，否则为尚未注册 MM 的作者建立名称相同、key 已撤销的 `forum_only`
+主体及 world 映射。`000026` 约束映射 owner，`000027` 再约束 Users 主体的稳定论坛账号 ID，并在
+事务提交时核对 `users.forum_account_id` 与该主体全部论坛映射；旧
+`game_player_id` 仅随 `username` 同步以兼容历史 schema，不再出现在新业务 DTO。系统不生成
+`forum-*` 影子用户名，也不把数字账号键当作 MM 收件人；后续 MM 注册按当前名称恢复并激活该主体。
+论坛首帖、公开拍卖目录和竞价历史统一展示当前名称。回帖随后经过 lot 映射和
+`auction_forum_bid_commands` 幂等账本，再调用
 现有竞价端口。Forum 在独立顺序循环中先发布后读取回帖，两阶段错误分别记录，发布失败不会跳过
 回帖扫描，也不会终止其它 Worker owner；该循环默认每 300 秒加最多 5 秒抖动，独立于 Auction 的
 60 秒生命周期循环。主题读取先从第一页发现同 origin、同 thread 的规范 `st` 分页水位，再用每个已读页面复核该水位没有扩张；默认最多 10 页且硬上限
@@ -555,12 +565,13 @@ poller 数量；手动唤醒只让本轮跳过下一次调度时间，实际远�
 失败退避和入站幂等提交负责，不会把唤醒动作伪装成远程读取成功。
 
 Admin A28/A30/A31 用户管理属于“两者”能力：`auction-application` 的 `admin_users` 端口拥有
-用户投影、创建/改名/游戏身份修改、key 撤销/重签、黑名单和改名回滚命令；
+用户投影、创建/改名/论坛账号 ID 修改、key 撤销/重签、黑名单和改名回滚命令；PostgreSQL 修改论坛
+账号 ID 时会在同一 Serializable 事务内同步该主体的全部论坛映射，避免 Users 与回帖身份分叉；
 `auction-storage/src/database/users/admin/` 负责版本 fence、命令账本、密文 key 信封；其中
 `mod.rs` 负责跨后端分派与共享校验，`postgres.rs`/`sqlite.rs` 分别拥有对应 SQL 实现。
 改名/黑名单追加历史与审计。PostgreSQL 使用 Serializable + advisory command lock，SQLite
 使用 `BEGIN IMMEDIATE`；两者都不保存 key 明文。`auction-http` 接入 A28/A30/A31 的 session、
-CSRF 和稳定 DTO，`auction-web-admin` 的 `/users` 页面已接入列表、创建、改名、游戏身份修改、
+CSRF 和稳定 DTO，`auction-web-admin` 的 `/users` 页面已接入列表、创建、改名、论坛账号 ID 修改、
 撤销/重签 key、黑名单和改名回滚操作。A29 改名历史读取继续由 `admin_renames` 端口拥有；MoogleMail 注册/换绑本身仍
 只在 PostgreSQL 完整档提供，不能据此宣称两套数据库能力完全等价。
 

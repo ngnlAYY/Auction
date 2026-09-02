@@ -91,7 +91,7 @@ pub fn canonical_settlement_fulfillment_subject(
 
 /// Worker 从数据库领取的一条结算履约执行事实。
 ///
-/// 这里携带的是不含 secret 的义务快照。领取时的 `game_player_id` 只用于构造初始上下文；
+/// 这里携带的是不含 secret 的义务快照。领取时的当前玩家/MM 名称只用于构造初始上下文；
 /// pending/prepared/enqueued 仍按各自旧阶段规则通过 users owner 复核当前身份。不能在领取阶段
 /// 把密钥或 Cookie 复制到任务对象。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,7 +105,7 @@ pub struct SettlementFulfillmentClaim {
     pub kind: SettlementObligationKind,
     pub state: SettlementFulfillmentState,
     pub operation: SettlementFulfillmentOperation,
-    /// 用户 owner 收件人的稳定 ID；卖家和退回收件人使用冻结的游戏身份时为空。
+    /// Users owner 收件人的稳定内部 ID；卖家和退回收件人使用冻结的 MM 名称时为空。
     pub recipient_user_id: Option<Uuid>,
     pub recipient: String,
     pub amount: i64,
