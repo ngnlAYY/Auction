@@ -53,6 +53,11 @@ fn map_thread(thread: PublicForumThread) -> PublicForumResponse {
         thread_url: thread.thread_url,
         title: thread.title,
         body: thread.body,
+        content_revision: thread.content_revision,
+        content_synced_at: thread.content_synced_at.map(public_timestamp),
+        content_last_success_at: thread.content_last_success_at.map(public_timestamp),
+        content_last_error_at: thread.content_last_error_at.map(public_timestamp),
+        content_last_error_code: thread.content_last_error_code,
         updated_at: public_timestamp(thread.updated_at),
     }
 }

@@ -108,10 +108,16 @@ pub(crate) fn PublicShell() -> Element {
     let location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
+    let mut readiness_generation = use_signal(|| 0_u64);
     // 发现流游标属于整个 Public 外壳；current-auction 刷新导致实时 owner 按 key 重建时也不能丢失。
     let discovery_after = use_signal(|| 0_i64);
+    let auction_after = use_signal(|| None::<(String, i64)>);
+    let mut stable_realtime_target = use_signal(|| PublicRealtimeTarget::Checking);
     let realtime_state = use_signal(|| LiveConnectionState::Connecting);
-    let readiness = use_resource(fetch_public_readiness);
+    let readiness = use_resource(move || {
+        let _ = readiness_generation();
+        fetch_public_readiness()
+    });
     let session = use_resource(fetch_public_session);
     let current_auction = use_resource(move || {
         let _ = refresh_generation();
@@ -119,6 +125,18 @@ pub(crate) fn PublicShell() -> Element {
         async move {
             let result = fetch_current_auction(world.clone()).await;
             (world, result)
+        }
+    });
+    let _readiness_poll = use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(10_000).await;
+            readiness_generation.set(readiness_generation().saturating_add(1));
+        }
+    });
+    let _authoritative_current_poll = use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(60_000).await;
+            refresh_generation.set(refresh_generation().saturating_add(1));
         }
     });
     let boot_prerequisites_ready =
@@ -170,7 +188,7 @@ pub(crate) fn PublicShell() -> Element {
         Some(Ok(Some(identity))) if identity.authenticated
     );
     let selected_world_value = selected_world();
-    let realtime_target = match session_snapshot {
+    let realtime_target_candidate = match session_snapshot {
         None => PublicRealtimeTarget::Checking,
         Some(Err(_)) => PublicRealtimeTarget::SessionError,
         Some(Ok(Some(identity))) if identity.authenticated => {
@@ -190,6 +208,26 @@ pub(crate) fn PublicShell() -> Element {
         }
         Some(Ok(None)) | Some(Ok(Some(_))) => PublicRealtimeTarget::Anonymous,
     };
+    // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
+    let remembered_target = stable_realtime_target();
+    let realtime_target = match realtime_target_candidate {
+        PublicRealtimeTarget::Checking if authenticated => match &remembered_target {
+            PublicRealtimeTarget::Auction { world, .. } if world == &selected_world_value => {
+                remembered_target
+            }
+            PublicRealtimeTarget::Discovery => remembered_target,
+            _ => PublicRealtimeTarget::Checking,
+        },
+        target => target,
+    };
+    use_effect({
+        let remembered = realtime_target.clone();
+        move || {
+            if stable_realtime_target.peek().clone() != remembered {
+                stable_realtime_target.set(remembered.clone());
+            }
+        }
+    });
     let realtime_key = realtime_target.key();
     // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报。
     let _ = realtime_key.as_str();
@@ -214,6 +252,7 @@ pub(crate) fn PublicShell() -> Element {
                 target: realtime_target,
                 refresh_generation,
                 discovery_after,
+                auction_after,
                 realtime_state,
             }
             a { class: "public-shell__skip", href: "#public-content", {t!("skip")} }

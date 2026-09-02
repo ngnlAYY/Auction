@@ -137,6 +137,8 @@ mod realtime_admin;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod realtime_consumer;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use realtime_consumer::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 #[path = "recovery_commands/commands.rs"]
 mod recovery_commands;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

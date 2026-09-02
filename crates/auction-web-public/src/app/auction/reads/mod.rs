@@ -2,7 +2,6 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{
     BidLogEntry, BidLogPage, PriceHistoryEntry, PriceHistoryFetchError, PriceHistoryPage,

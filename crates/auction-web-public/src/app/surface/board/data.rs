@@ -177,9 +177,6 @@ pub(crate) fn AuctionData(
 
     rsx! {
         section { class: "public-auction-page", aria_labelledby: "auction-title",
-            if historical {
-                HistoricalAuctionNavigation { auction: auction.clone() }
-            }
             div { class: "public-auction-live",
                 header { class: "public-auction-round",
                     div { class: "public-auction-round__title",
@@ -191,6 +188,9 @@ pub(crate) fn AuctionData(
                         span {
                             class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
                             "{status_label}"
+                        }
+                        if historical {
+                            HistoricalAuctionNavigation { auction: auction.clone() }
                         }
                     }
                     if is_opening_presentation {

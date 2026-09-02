@@ -55,6 +55,8 @@ pub(super) struct PostForm {
     pub(super) action: Url,
     pub(super) referer: Url,
     pub(super) values: Vec<(String, String)>,
+    /// 服务端编辑表单中的原始 BBCode；回复表单通常为空。
+    pub(super) body: String,
 }
 
 pub(super) fn posting_form_values(

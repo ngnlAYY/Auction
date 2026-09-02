@@ -16,7 +16,6 @@ use uuid::Uuid;
 use super::super::DatabaseStore;
 
 mod commands;
-mod cursor;
 #[cfg(feature = "postgres")]
 mod fixed_posts;
 #[cfg(feature = "postgres")]
@@ -27,10 +26,8 @@ mod validation;
 #[cfg(feature = "postgres")]
 use commands::{begin_command_postgres, finish_command_postgres};
 #[cfg(feature = "postgres")]
-use cursor::mark_scanned_postgres;
-#[cfg(feature = "postgres")]
 use fixed_posts::{
-    finish_topic_scan_postgres, record_fixed_posts_progress_postgres,
+    fail_topic_scan_postgres, finish_topic_scan_postgres, record_fixed_posts_progress_postgres,
     record_fixed_posts_update_postgres,
 };
 #[cfg(feature = "postgres")]
@@ -340,21 +337,32 @@ impl ForumReplyStore for DatabaseStore {
         })
     }
 
-    fn mark_scanned(
+    fn fail_topic_scan(
         &self,
-        world: SettlementWorld,
-        scanned_at: DateTime<Utc>,
+        topic: ForumReplyTopic,
+        failed_at: DateTime<Utc>,
+        retry_at: DateTime<Utc>,
+        failure_code: String,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = world;
-            if scanned_at.timestamp_nanos_opt().is_none() {
-                return Err(storage_error("论坛回帖扫描时间无效"));
+            if topic.auction_id.is_nil()
+                || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
+                || topic.content_claim_token.is_nil()
+                || !valid_text(&topic.content_claim_owner, 256)
+                || topic.content_claim_fencing <= 0
+                || failed_at.timestamp_nanos_opt().is_none()
+                || retry_at.timestamp_nanos_opt().is_none()
+                || retry_at <= failed_at
+                || topic.content_lease_until <= failed_at
+                || !valid_optional_text(&failure_code, MAX_ERROR_CODE_BYTES)
+            {
+                return Err(storage_error("论坛固定楼层扫描失败参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    mark_scanned_postgres(store, world, scanned_at).await
+                    fail_topic_scan_postgres(store, &topic, failed_at, retry_at, &failure_code)
+                        .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

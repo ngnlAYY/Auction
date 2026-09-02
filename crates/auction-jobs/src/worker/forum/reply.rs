@@ -128,10 +128,9 @@ where
         Duration::from_std(lease_duration).map_err(|_| WorkerError::InvalidForumConfiguration)?;
     let poll_interval =
         Duration::from_std(poll_interval).map_err(|_| WorkerError::InvalidForumConfiguration)?;
-    let mut worlds = Vec::new();
-    let mut failed_worlds = Vec::new();
     let mut seen_auctions = HashSet::new();
     let mut processed = 0_u16;
+    let mut topic_failed = false;
     while processed < runtime.batch_size {
         let now = worker.clock.now();
         let lease_until =
@@ -154,9 +153,6 @@ where
             break;
         }
         processed += 1;
-        if !worlds.contains(&topic.world) {
-            worlds.push(topic.world);
-        }
         match tokio::time::timeout(
             runtime.item_timeout,
             process_topic(runtime, topic.clone(), worker.clock.as_ref(), poll_interval),
@@ -171,42 +167,58 @@ where
                     error = %error,
                     "论坛回帖主题导入未完成"
                 );
-                if !failed_worlds.contains(&topic.world) {
-                    failed_worlds.push(topic.world);
-                }
+                record_topic_failure(runtime, topic, worker.clock.now(), poll_interval, &error)
+                    .await?;
+                topic_failed = true;
             }
             Err(_) => {
                 tracing::warn!(
                     auction_id = %topic.auction_id,
                     thread_id = %topic.thread_id,
-                    "论坛回帖主题导入超时，保留该世界游标等待重试"
+                    "论坛回帖主题导入超时，保留该主题等待持久化调度重试"
                 );
-                if !failed_worlds.contains(&topic.world) {
-                    failed_worlds.push(topic.world);
-                }
+                record_topic_failure_code(
+                    runtime,
+                    topic,
+                    worker.clock.now(),
+                    poll_interval,
+                    "write_unknown",
+                )
+                .await?;
+                topic_failed = true;
             }
         }
     }
+    if topic_failed { Err(WorkerError::ForumTopicProcessingFailed) } else { Ok(()) }
+}
 
-    let mut scan_error = None;
-    for world in worlds {
-        // 一个世界可能在本批次包含多个主题；只有全部主题都成功，才允许推进该世界游标。
-        if failed_worlds.contains(&world) {
-            continue;
-        }
-        if let Err(error) = runtime.store.mark_scanned(world, worker.clock.now()).await {
-            tracing::error!(
-                world = ?world,
-                error = %error,
-                "论坛回帖扫描游标写入失败"
-            );
-            if scan_error.is_none() {
-                scan_error = Some(error);
-            }
-        }
-    }
-    if let Some(error) = scan_error {
-        return Err(error.into());
-    }
-    Ok(())
+async fn record_topic_failure(
+    runtime: &ForumReplyRuntime,
+    topic: auction_application::ForumReplyTopic,
+    failed_at: chrono::DateTime<chrono::Utc>,
+    poll_interval: chrono::Duration,
+    error: &ApplicationError,
+) -> Result<(), WorkerError> {
+    let failure_code = match error {
+        ApplicationError::ForumRemote(remote) => remote.code(),
+        _ => "topic_processing_failed",
+    };
+    record_topic_failure_code(runtime, topic, failed_at, poll_interval, failure_code).await
+}
+
+async fn record_topic_failure_code(
+    runtime: &ForumReplyRuntime,
+    topic: auction_application::ForumReplyTopic,
+    failed_at: chrono::DateTime<chrono::Utc>,
+    poll_interval: chrono::Duration,
+    failure_code: &str,
+) -> Result<(), WorkerError> {
+    let retry_at = failed_at
+        .checked_add_signed(poll_interval)
+        .ok_or(WorkerError::InvalidForumConfiguration)?;
+    runtime
+        .store
+        .fail_topic_scan(topic, failed_at, retry_at, failure_code.to_owned())
+        .await
+        .map_err(Into::into)
 }

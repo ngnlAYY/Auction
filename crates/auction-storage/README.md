@@ -346,7 +346,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000028` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000029` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -357,7 +357,7 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案；`000025` 追加论坛固定
 #1/#2 的 post proof、内容版本和独立刷新 lease/fencing，`000026` 固定同一 world/provider 的单用户
 论坛账号归属，`000027` 增加 Users 级稳定论坛账号 ID、跨表提交约束并把名称权威收敛到 `username`，`000028`
-保存论坛竞价来源的真实楼层号。SQLite
+保存论坛竞价来源的真实楼层号，`000029` 增加固定帖刷新健康字段与追加式论坛身份变更历史。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
@@ -400,7 +400,9 @@ SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
 `failures.rs` 与 `replay/` 分别负责安全快照、lag、failure 读取和 replay；replay 再按
 `replay.rs` 公共结果映射、`replay/postgres.rs` 完整档事务和 `replay/sqlite.rs` Lite 事务
 拆分，`common.rs` 负责共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
-`src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`stream.rs`、`read.rs`、
+`src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`ownership.rs` 按
+`consumer_key` 建立 PostgreSQL 会话级 advisory 独占 owner；SQLite 在同主机以数据库标识与 key 摘要
+命名的 0600 非阻塞 sidecar 文件锁拒绝重复 owner，非 Unix 平台失败关闭；`stream.rs`、`read.rs`、
 `acknowledgement.rs`、`failure/` 分别负责 stream 目录、事件读取、连续游标确认和 failure
 生命周期；`failure/mod.rs` 负责稳定导出，`failure/record.rs` 负责失败记录，
 `failure/resolve.rs` 负责 replay 收口，`common.rs` 负责共享校验与 Lite 串行写事务。

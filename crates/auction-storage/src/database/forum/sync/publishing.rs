@@ -31,6 +31,9 @@ pub(super) async fn publish_postgres(
              system_log_body = $8,
              content_revision = CASE WHEN content_revision < 1 THEN 1 ELSE content_revision + 1 END,
              content_synced_at = $9,
+             content_last_success_at = $9,
+             content_last_error_at = NULL,
+             content_last_error_code = NULL,
              last_error_code = NULL,
              last_error_detail = NULL,
              updated_at = $9
@@ -87,8 +90,7 @@ pub(super) async fn fail_postgres(
            AND claim_token = $5
            AND claim_owner = $6
            AND claim_fencing = $7
-           AND source_revision = $8
-           AND lease_expires_at > CURRENT_TIMESTAMP",
+           AND source_revision = $8",
     )
     .bind(claim.auction_id.as_uuid())
     .bind(retry_at)

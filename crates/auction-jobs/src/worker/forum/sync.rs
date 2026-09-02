@@ -154,7 +154,7 @@ where
                 )),
             )
             .await?;
-            Ok(())
+            Err(WorkerError::ForumTopicProcessingFailed)
         }
     }
 }
@@ -187,7 +187,7 @@ where
                 error,
             )
             .await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     let mut snapshot = snapshot;
@@ -205,7 +205,7 @@ where
                 error,
             )
             .await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     let auction_id = snapshot.auction_id;
@@ -224,7 +224,7 @@ where
                 error,
             )
             .await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     let rendered = match renderer.render(snapshot, equipment_links) {
@@ -248,7 +248,7 @@ where
                 )),
             )
             .await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     let system_log = match renderer.render_system_log(auction_id, 2, Vec::new()) {
@@ -270,7 +270,7 @@ where
                 ApplicationError::Repository(RepositoryError::Failed(error.to_string())),
             )
             .await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     let published = if reconciliation_only {
@@ -292,7 +292,7 @@ where
                         };
                         record_failure(store, clock, retry_claim, failure_code.to_owned(), error)
                             .await?;
-                        return Ok(());
+                        return Err(WorkerError::ForumTopicProcessingFailed);
                     }
                 }
             }
@@ -307,12 +307,12 @@ where
                     )),
                 )
                 .await?;
-                return Ok(());
+                return Err(WorkerError::ForumTopicProcessingFailed);
             }
             Err(error) => {
                 let failure_code = scoped_failure_code(true, forum_failure_code(&error));
                 record_failure(store, clock, retry_claim, failure_code, error).await?;
-                return Ok(());
+                return Err(WorkerError::ForumTopicProcessingFailed);
             }
         }
     } else {
@@ -329,7 +329,7 @@ where
                     forum_failure_code(&error)
                 };
                 record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
-                return Ok(());
+                return Err(WorkerError::ForumTopicProcessingFailed);
             }
         }
     };
@@ -361,13 +361,14 @@ where
                 forum_failure_code(&error)
             };
             record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
-            return Ok(());
+            return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
     if let Err(error) =
         store.publish(claim.clone(), rendered, system_log, layout, clock.now()).await
     {
         record_failure(store, clock, claim, "publish_proof_failed".to_owned(), error).await?;
+        return Err(WorkerError::ForumTopicProcessingFailed);
     }
     Ok(())
 }

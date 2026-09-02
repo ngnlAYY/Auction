@@ -309,6 +309,31 @@ impl EhentaiClient {
         self.submit_fixed_post(form, board_id, thread_id, Some((post_id, title)), body, cookie)
             .await
     }
+
+    /// 读取编辑表单中由服务器返回的原始 BBCode，作为固定楼层写入后的精确正文证明。
+    pub async fn read_post_body(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        post_id: &str,
+        cookie: &EhentaiCookie,
+    ) -> Result<ForumRenderedPost, EhentaiError> {
+        let operation = EhentaiOperation::ReadPostBody;
+        if !self.valid_for()
+            || !valid_cookie(cookie)
+            || !valid_topic_id(thread_id)
+            || !valid_post_id(post_id)
+        {
+            return Err(EhentaiError::configuration(operation));
+        }
+        let board_id = self.board_for_world(world, operation)?;
+        let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
+        let body = ForumRenderedPost { body: form.body };
+        if !valid_rendered_post(&body) {
+            return Err(EhentaiError::protocol(operation, false));
+        }
+        Ok(body)
+    }
 }
 
 #[derive(Clone)]

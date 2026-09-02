@@ -35,34 +35,12 @@ fn is_public_lot_id(value: &str) -> bool {
 
 #[component]
 fn ValidLotDetail(lot_id: String) -> Element {
-    let mut refresh_generation = use_context::<Signal<u64>>();
-    let realtime_state = use_context::<Signal<LiveConnectionState>>();
+    let refresh_generation = use_context::<Signal<u64>>();
     let lot_id_for_request = lot_id.clone();
     let detail = use_resource(move || {
         let _ = refresh_generation();
         let lot_id = lot_id_for_request.clone();
         async move { fetch_lot_detail(lot_id).await }
-    });
-    let detail_for_poll = detail;
-    let should_poll = use_memo(move || match &*detail_for_poll.read_unchecked() {
-        None | Some(Err(_)) => true,
-        Some(Ok(page)) => match page.lot.as_ref() {
-            Some(LotDetailItem::Preview(lot)) => {
-                matches!(lot.summary.status.as_str(), "pending" | "live")
-            }
-            Some(LotDetailItem::Live(lot)) => matches!(lot.status.as_str(), "pending" | "live"),
-            None => true,
-        },
-    });
-    let _compatibility_poll = use_future(move || async move {
-        loop {
-            TimeoutFuture::new(60_000).await;
-            // 旧页面只在实时连接正常时保留一分钟兜底轮询；manual/degraded 模式不会
-            // 自动重放永久 404 或服务错误，用户仍可通过隐藏的键盘重试入口显式刷新。
-            if realtime_state() == LiveConnectionState::Live && should_poll() {
-                refresh_generation.set(refresh_generation().saturating_add(1));
-            }
-        }
     });
 
     match &*detail.read_unchecked() {

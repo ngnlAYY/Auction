@@ -296,6 +296,14 @@ pub trait ForumPostWriter: Send + Sync {
         title: Option<String>,
         body: ForumRenderedPost,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
+
+    /// 从已校验的编辑表单读取服务端保存的原始 BBCode；只读操作允许轮换失效凭据。
+    fn read_post_body(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+    ) -> ApplicationFuture<'_, ForumRenderedPost>;
 }
 
 /// 将同一数据库快照转换为不含内部密钥和数据库行的论坛正文。

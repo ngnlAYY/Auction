@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::database::audit_health::AuditWriteResult as _;
+
 use super::super::super::PostgresStore;
 use super::validation::{
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, storage_error, valid_decimal_id, valid_text,
@@ -88,7 +90,16 @@ pub(super) async fn resolve_bidder_postgres(
         {
             return Err(storage_error("论坛身份已被阻止或稳定账号归属不一致"));
         }
-        update_user_identity(&mut transaction, user_id, external_account_id, player_name).await?;
+        update_user_identity(
+            &mut transaction,
+            user_id,
+            world_id,
+            external_account_id,
+            player_name,
+            &username,
+            forum_account_id.as_deref(),
+        )
+        .await?;
         let next_registration_state =
             if key_status == "active" { "mm_bound" } else { registration_state.as_str() };
         sqlx::query(
@@ -191,7 +202,16 @@ pub(super) async fn resolve_bidder_postgres(
         {
             return Err(storage_error("论坛玩家对应用户已被阻止或账号归属无法证明"));
         }
-        update_user_identity(&mut transaction, user_id, external_account_id, player_name).await?;
+        update_user_identity(
+            &mut transaction,
+            user_id,
+            world_id,
+            external_account_id,
+            player_name,
+            &username,
+            forum_account_id.as_deref(),
+        )
+        .await?;
         let registration_state = if key_status == "active" { "mm_bound" } else { "forum_only" };
         (user_id, registration_state)
     } else {
@@ -245,9 +265,52 @@ pub(super) async fn resolve_bidder_postgres(
 async fn update_user_identity(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
+    world_id: &str,
     forum_account_id: &str,
     player_name: &str,
+    previous_username: &str,
+    previous_forum_account_id: Option<&str>,
 ) -> Result<(), ApplicationError> {
+    if previous_username == player_name && previous_forum_account_id == Some(forum_account_id) {
+        return Ok(());
+    }
+    let history_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO public.forum_identity_history
+            (id, user_id, world_id, provider, external_account_id,
+             previous_username, next_username, previous_forum_account_id,
+             next_forum_account_id, created_at)
+         VALUES ($1, $2, $3, 'ehentai', $4, $5, $6, $7, $4,
+                 transaction_timestamp())",
+    )
+    .bind(history_id)
+    .bind(user_id)
+    .bind(world_id)
+    .bind(forum_account_id)
+    .bind(previous_username)
+    .bind(player_name)
+    .bind(previous_forum_account_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("追加论坛身份变更历史失败"))?;
+    sqlx::query(
+        "INSERT INTO public.audit_records
+            (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id,
+             result, source, metadata)
+         VALUES ($1, transaction_timestamp(), 'worker', 'forum-sync',
+                 'user.forum_identity_synced', 'user', $2, 'success', 'worker',
+                 jsonb_build_object('history_id', $3, 'world_id', $4,
+                                    'provider', 'ehentai', 'external_account_id', $5))",
+    )
+    .bind(Uuid::new_v4())
+    .bind(user_id.to_string())
+    .bind(history_id)
+    .bind(world_id)
+    .bind(forum_account_id)
+    .execute(&mut **transaction)
+    .await
+    .record_audit_failure()
+    .map_err(|_| storage_error("追加论坛身份审计记录失败"))?;
     sqlx::query(
         "UPDATE public.users
          SET username = $1,

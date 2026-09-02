@@ -36,6 +36,9 @@ impl EhentaiClient {
         if status.is_server_error() {
             return Err(EhentaiError::remote_temporary(operation, false));
         }
+        if status == StatusCode::FORBIDDEN {
+            return Err(classify_forbidden(operation, &body));
+        }
         if !status.is_success() {
             return Err(EhentaiError::protocol(operation, false));
         }
@@ -160,5 +163,22 @@ impl EhentaiClient {
             tokio::time::sleep(wait).await;
         }
         Ok(())
+    }
+}
+
+fn classify_forbidden(operation: EhentaiOperation, body: &[u8]) -> EhentaiError {
+    let evidence = String::from_utf8_lossy(body).to_ascii_lowercase();
+    if ["cloudflare", "cf-ray", "attention required", "just a moment"]
+        .iter()
+        .any(|marker| evidence.contains(marker))
+    {
+        EhentaiError::cloudflare(operation)
+    } else if ["topic is locked", "topic is closed", "cannot reply", "cannot edit"]
+        .iter()
+        .any(|marker| evidence.contains(marker))
+    {
+        EhentaiError::topic_locked(operation)
+    } else {
+        EhentaiError::permission_denied(operation)
     }
 }

@@ -122,7 +122,9 @@ metrics 时，有效 listener 必须是 loopback TCP 或 Unix；Admin runtime �
 不得出现在主配置。
 
 Public 主配置还可以包含 `[realtime]`：`consumer_key` 是持久化 relay 的稳定非敏感标识，
-多 Public 实例必须各不相同；其余字段限制 relay 批次、轮询间隔和单连接缓冲。缓冲区满时
+多 Public 实例必须各不相同；PostgreSQL 会以会话级 advisory owner lock 拒绝重复 key 的第二个
+实例启动，SQLite Lite 在同主机使用 0600 非阻塞 sidecar 文件锁强制同 key 单实例，非 Unix 平台
+无法取得该互斥证明时拒绝启动。其余字段限制 relay 批次、轮询间隔和单连接缓冲。缓冲区满时
 慢 WebSocket 会被淘汰，不能用增大缓冲替代客户端 catch-up。
 
 Worker 的 `[worker.forum]` 支持可选 `public_base_url`；它只能是无凭据、无路径和无查询的

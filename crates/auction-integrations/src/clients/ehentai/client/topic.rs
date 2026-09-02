@@ -204,6 +204,18 @@ impl EhentaiClient {
         let post_selector =
             post_body_selector().map_err(|_| EhentaiError::protocol(target.operation, false))?;
         for form in document.select(form_selector) {
+            let Some(body) =
+                form.select(post_selector).next().map(|field| field.text().collect::<String>())
+            else {
+                continue;
+            };
+            if body.len() > MAXIMUM_FORUM_BODY_BYTES
+                || body.chars().any(|character| {
+                    character.is_control() && !matches!(character, '\n' | '\r' | '\t')
+                })
+            {
+                continue;
+            }
             let Some(values) = fixed_post_form_values(
                 form,
                 input_selector,
@@ -227,7 +239,7 @@ impl EhentaiClient {
             {
                 continue;
             }
-            return Ok(PostForm { action, referer: target.url, values });
+            return Ok(PostForm { action, referer: target.url, values, body });
         }
         Err(EhentaiError::protocol(target.operation, false))
     }

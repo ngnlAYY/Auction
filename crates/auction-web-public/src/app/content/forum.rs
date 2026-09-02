@@ -107,43 +107,43 @@ fn ForumAuctionHeading(auction: CurrentAuction) -> Element {
 
 #[component]
 fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
-    let refresh_generation = use_context::<Signal<u64>>();
     let retry_generation = use_signal(|| 0_u64);
     let poll_generation = use_signal(|| 0_u64);
     let thread = use_resource({
         let auction_id = auction.id.clone();
         move || {
-            let _ = refresh_generation();
             let _ = retry_generation();
             let _ = poll_generation();
             let auction_id = auction_id.clone();
             async move { fetch_forum_thread(auction_id).await }
         }
     });
-    // 页面可见且帖子仍在处理中时沿用旧版两秒轮询；发布完成、明确失败或请求错误后暂停
-    // 自动轮询。failed 仍可能由 Worker 恢复，因此页面保留显式状态刷新入口。
-    let _poll = use_future({
+    // 发布前两秒轮询；发布后降为三十秒读取本地固定楼层投影，确保 #1/#2 后续更新可见。
+    // 明确失败、内容同步错误或请求错误时暂停；手动重读成功后由 thread 资源变化重新启动计时器。
+    let _poll = use_resource({
         let mut poll_generation = poll_generation;
         move || {
             let _ = retry_generation();
-            async move {
-                loop {
-                    TimeoutFuture::new(2_000).await;
-                    let automatic_poll_paused = {
-                        let current = thread.read_unchecked();
-                        match current.as_ref() {
-                            Some(Ok(thread)) => {
-                                matches!(thread.status.as_str(), "published" | "failed")
-                            }
-                            Some(Err(_)) => true,
-                            None => false,
-                        }
-                    };
-                    if automatic_poll_paused {
-                        break;
+            let _ = poll_generation();
+            let poll_delay = {
+                let current = thread.read();
+                match current.as_ref() {
+                    Some(Ok(thread))
+                        if thread.status == "failed" || thread.content_last_error_at.is_some() =>
+                    {
+                        None
                     }
-                    poll_generation.set(poll_generation().saturating_add(1));
+                    Some(Ok(thread)) if thread.status == "published" => Some(30_000),
+                    Some(Ok(_)) | None => Some(2_000),
+                    Some(Err(_)) => None,
                 }
+            };
+            async move {
+                let Some(poll_delay) = poll_delay else {
+                    return;
+                };
+                TimeoutFuture::new(poll_delay).await;
+                poll_generation.set(poll_generation().saturating_add(1));
             }
         }
     });
@@ -184,7 +184,15 @@ fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) 
     let status_class = forum_status_class(&thread.status);
     let updated_at = format_auction_time(&thread.updated_at);
     let status_accessible_label = format!("{}: {status_label}", t!("forum-status"));
-    let retry_action = (thread.status == "failed").then(|| {
+    let content_synced_at = thread.content_synced_at.as_deref().map(format_auction_time);
+    let content_last_success_at =
+        thread.content_last_success_at.as_deref().map(format_auction_time);
+    let content_error = thread
+        .content_last_error_at
+        .as_deref()
+        .zip(thread.content_last_error_code.as_deref())
+        .map(|(at, code)| (at.to_owned(), format_auction_time(at), code.to_owned()));
+    let retry_action = (thread.status == "failed" || content_error.is_some()).then(|| {
         rsx! {
             button {
                 class: "public-state-retry",
@@ -233,10 +241,36 @@ fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) 
                 p { role: "status", aria_live: "polite", "{status_message}" }
                 {retry_action}
             }
+            if let Some((error_at, formatted_error_at, error_code)) = content_error {
+                p { class: "public-page-status public-page-status--error", role: "alert",
+                    {t!("forum-sync-delayed", code: error_code, time: formatted_error_at)}
+                    time { class: "ui-visually-hidden", datetime: error_at }
+                }
+            }
             dl { class: "public-forum-metadata",
                 div {
                     dt { {t!("forum-source-revision")} }
                     dd { "{thread.source_revision}" }
+                }
+                div {
+                    dt { {t!("forum-content-revision")} }
+                    dd { "{thread.content_revision}" }
+                }
+                if let (Some(raw), Some(formatted)) =
+                    (thread.content_synced_at.as_ref(), content_synced_at)
+                {
+                    div {
+                        dt { {t!("forum-content-synced-at")} }
+                        dd { time { datetime: raw.clone(), "{formatted}" } }
+                    }
+                }
+                if let (Some(raw), Some(formatted)) =
+                    (thread.content_last_success_at.as_ref(), content_last_success_at)
+                {
+                    div {
+                        dt { {t!("forum-last-success-at")} }
+                        dd { time { datetime: raw.clone(), "{formatted}" } }
+                    }
                 }
                 div {
                     dt { {t!("forum-updated-at")} }

@@ -191,6 +191,7 @@ pub struct WorkerControlHandle {
 struct WorkerControlInner {
     state: std::sync::atomic::AtomicU8,
     ready: std::sync::atomic::AtomicBool,
+    degraded_causes: std::sync::atomic::AtomicU8,
     mail_poll_requested: std::sync::atomic::AtomicBool,
     version: String,
     mail_pollers: usize,
@@ -238,6 +239,7 @@ impl WorkerControlHandle {
             inner: Arc::new(WorkerControlInner {
                 state: std::sync::atomic::AtomicU8::new(WorkerControlState::Starting as u8),
                 ready: std::sync::atomic::AtomicBool::new(false),
+                degraded_causes: std::sync::atomic::AtomicU8::new(0),
                 mail_poll_requested: std::sync::atomic::AtomicBool::new(false),
                 version: version.into(),
                 mail_pollers,
@@ -254,18 +256,29 @@ impl WorkerControlHandle {
 
     /// 标记 Worker 已经可以接受控制请求。
     pub fn mark_serving(&self) {
-        self.inner.ready.store(true, std::sync::atomic::Ordering::Release);
-        self.inner
-            .state
-            .store(WorkerControlState::Serving as u8, std::sync::atomic::Ordering::Release);
+        self.inner.degraded_causes.store(0, std::sync::atomic::Ordering::Release);
+        self.refresh_operational_state();
     }
 
     /// 标记 Worker 存活但当前无法接受新工作。
     pub fn mark_degraded(&self) {
-        self.inner.ready.store(false, std::sync::atomic::Ordering::Release);
-        self.inner
-            .state
-            .store(WorkerControlState::Degraded as u8, std::sync::atomic::Ordering::Release);
+        self.inner.degraded_causes.fetch_or(1, std::sync::atomic::Ordering::AcqRel);
+        self.refresh_operational_state();
+    }
+
+    /// 记录论坛循环最近一轮健康状态；成功轮次可以恢复该依赖造成的降级。
+    pub fn mark_forum_cycle(&self, healthy: bool) {
+        if healthy {
+            self.inner.degraded_causes.fetch_and(!2, std::sync::atomic::Ordering::AcqRel);
+        } else {
+            self.inner.degraded_causes.fetch_or(2, std::sync::atomic::Ordering::AcqRel);
+        }
+        self.refresh_operational_state();
+    }
+
+    /// 返回 control 与 heartbeat 共用的进程就绪事实。
+    pub fn is_ready(&self) -> bool {
+        self.inner.ready.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// 标记 Worker 正在收口；之后的手动唤醒会被拒绝。
@@ -274,6 +287,24 @@ impl WorkerControlHandle {
         self.inner
             .state
             .store(WorkerControlState::Draining as u8, std::sync::atomic::Ordering::Release);
+    }
+
+    fn refresh_operational_state(&self) {
+        if matches!(
+            WorkerControlState::from_byte(
+                self.inner.state.load(std::sync::atomic::Ordering::Acquire),
+            ),
+            WorkerControlState::Draining
+        ) {
+            return;
+        }
+        let degraded = self.inner.degraded_causes.load(std::sync::atomic::Ordering::Acquire) != 0;
+        self.inner.ready.store(!degraded, std::sync::atomic::Ordering::Release);
+        self.inner.state.store(
+            (if degraded { WorkerControlState::Degraded } else { WorkerControlState::Serving })
+                as u8,
+            std::sync::atomic::Ordering::Release,
+        );
     }
 
     /// 返回下一轮 MoogleMail 轮询使用的唤醒器。

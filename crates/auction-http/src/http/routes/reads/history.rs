@@ -17,15 +17,20 @@ pub(crate) async fn list_bid_log(
         }
         Some(world) => Some(world.clone()),
     };
-    let lot_id = match query.get("lot") {
-        None => None,
+    let (lot_id, lot_code) = match query.get("lot") {
+        None => (None, None),
         Some(lot) if lot.is_empty() => {
             return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
         }
-        Some(lot) => Some(
-            parse_public_uuid(lot)
-                .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?,
-        ),
+        Some(lot) => match parse_public_uuid(lot) {
+            Ok(lot_id) => (Some(lot_id), None),
+            Err(_) if lot.len() <= 32 && lot.bytes().all(|byte| byte.is_ascii_alphanumeric()) => {
+                (None, Some(lot.clone()))
+            }
+            Err(_) => {
+                return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
+            }
+        },
     };
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
@@ -53,6 +58,7 @@ pub(crate) async fn list_bid_log(
         auction_id,
         world_id,
         lot_id,
+        lot_code,
         limit: page_size,
         offset,
         cursor: cursor.clone(),

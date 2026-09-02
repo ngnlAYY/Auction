@@ -41,6 +41,11 @@ pub(super) fn validate_entries(
             || entry.auction_id != request.auction_id
             || entry.lot_id.is_nil()
             || request.lot_id.is_some_and(|lot_id| entry.lot_id != lot_id)
+            || request.lot_code.as_deref().is_some_and(|needle| {
+                !lot_code(&entry.equipment_category, entry.lot_number)
+                    .to_ascii_lowercase()
+                    .contains(&needle.to_ascii_lowercase())
+            })
             || entry.lot_number <= 0
             || entry.amount <= 0
             || entry.accepted_state_version <= 0
@@ -56,6 +61,20 @@ pub(super) fn validate_entries(
         }
     }
     Ok(())
+}
+
+fn lot_code(category: &str, lot_number: i64) -> String {
+    let prefix = match category {
+        "One-Handed" => "One",
+        "Two-Handed" => "Two",
+        "Staff" => "Sta",
+        "Shield" => "Shd",
+        "Cloth" => "Clo",
+        "Light" => "Lig",
+        "Heavy" => "Hea",
+        _ => "Lot",
+    };
+    format!("{prefix}{lot_number:02}")
 }
 
 fn valid_source(entry: &PublicBidLogEntry) -> bool {

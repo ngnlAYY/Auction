@@ -53,6 +53,8 @@ pub(crate) struct RealtimeCache {
     auction_id: String,
     initial_preview_revision: i64,
     after: i64,
+    /// refetch 后每个尚未见过的 lot 可用首个连续 stream 事件建立一次事实基线。
+    baseline_after: Option<i64>,
     fact_identities: BTreeMap<String, String>,
     last_facts: BTreeMap<String, LastBidFact>,
     seen: Vec<String>,
@@ -67,12 +69,21 @@ impl RealtimeCache {
             auction_id,
             initial_preview_revision: preview_revision,
             after: 0,
+            baseline_after: None,
             fact_identities: BTreeMap::new(),
             last_facts: BTreeMap::new(),
             seen: Vec::new(),
             seen_facts: Vec::new(),
             versions,
         }
+    }
+
+    /// owner 因权威快照 revision 变化而重建时，从已确认 cursor 建立新基线，避免从零重放。
+    pub(crate) fn new_after(auction_id: String, preview_revision: i64, after: i64) -> Self {
+        let mut cache = Self::new(auction_id, preview_revision);
+        cache.after = after.max(0);
+        cache.baseline_after = (cache.after > 0).then_some(cache.after);
+        cache
     }
 
     pub(crate) const fn after(&self) -> i64 {
@@ -174,7 +185,7 @@ impl RealtimeCache {
             .versions
             .get(lot_id)
             .is_some_and(|previous| state_version != previous.saturating_add(1))
-            || !self.ordered_fact_index(lot_id, state_version, fact_index)
+            || !self.ordered_fact_index(lot_id, state_version, fact_index, event.stream_sequence)
         {
             return EventMerge::Gap;
         }
@@ -189,17 +200,31 @@ impl RealtimeCache {
         EventMerge::Applied { refresh: true }
     }
 
-    fn ordered_fact_index(&self, lot_id: &str, state_version: i64, fact_index: i64) -> bool {
-        fact_index == 1
-            || self.last_facts.get(lot_id).is_some_and(|previous| {
-                previous.state_version == state_version - 1 && previous.fact_index + 1 == fact_index
-            })
+    fn ordered_fact_index(
+        &self,
+        lot_id: &str,
+        state_version: i64,
+        fact_index: i64,
+        stream_sequence: i64,
+    ) -> bool {
+        state_version > 0
+            && fact_index > 0
+            && (fact_index == 1
+                || self.last_facts.get(lot_id).is_some_and(|previous| {
+                    previous.state_version == state_version - 1
+                        && previous.fact_index + 1 == fact_index
+                })
+                || (!self.last_facts.contains_key(lot_id)
+                    && self
+                        .baseline_after
+                        .is_some_and(|baseline_after| stream_sequence > baseline_after)))
     }
 
     fn reset_after(&mut self, next_after: i64) {
         let after = self.after.max(next_after);
         *self = Self::new(self.auction_id.clone(), self.initial_preview_revision);
         self.after = after;
+        self.baseline_after = Some(after);
     }
 }
 

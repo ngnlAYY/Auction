@@ -17,6 +17,8 @@ pub struct PublicBidLogListRequest {
     pub auction_id: Uuid,
     pub world_id: Option<String>,
     pub lot_id: Option<Uuid>,
+    /// 人类可读 lot code 的大小写不敏感全局筛选；与 UUID 精确筛选互斥。
+    pub lot_code: Option<String>,
     pub limit: i64,
     pub offset: i64,
     pub cursor: Option<PublicBidLogCursor>,
@@ -31,6 +33,13 @@ impl PublicBidLogListRequest {
                 .as_deref()
                 .is_some_and(|world| world.is_empty() || world.len() > 64 || world != world.trim())
             || self.lot_id.is_some_and(|lot_id| lot_id.is_nil())
+            || self.lot_id.is_some() && self.lot_code.is_some()
+            || self.lot_code.as_deref().is_some_and(|lot_code| {
+                lot_code.is_empty()
+                    || lot_code.len() > 32
+                    || lot_code != lot_code.trim()
+                    || !lot_code.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
             || self.limit < 1
             || self.limit > MAX_PUBLIC_BID_LOG_PAGE_SIZE
             || self.offset < 0

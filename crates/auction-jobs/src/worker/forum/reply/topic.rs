@@ -296,34 +296,24 @@ async fn refresh_fixed_posts(
         return runtime.store.finish_topic_scan(topic, updated_at, next_scan_at).await;
     }
     if catalog_changed {
-        let proof = runtime
-            .writer
-            .edit_post(
-                topic.world,
-                topic.thread_id.clone(),
-                topic.catalog_post_id.clone(),
-                Some(catalog.title.clone()),
-                ForumRenderedPost { body: catalog.body.clone() },
-            )
-            .await?;
-        if proof.thread_id != topic.thread_id || proof.post_id != topic.catalog_post_id {
-            return Err(repository_error("论坛固定 #1 编辑证明不匹配"));
-        }
+        reconcile_or_edit_fixed_post(
+            runtime,
+            &topic,
+            &topic.catalog_post_id,
+            Some(catalog.title.clone()),
+            ForumRenderedPost { body: catalog.body.clone() },
+        )
+        .await?;
     }
     if system_log_changed {
-        let proof = runtime
-            .writer
-            .edit_post(
-                topic.world,
-                topic.thread_id.clone(),
-                topic.system_log_post_id.clone(),
-                None,
-                system_log.clone(),
-            )
-            .await?;
-        if proof.thread_id != topic.thread_id || proof.post_id != topic.system_log_post_id {
-            return Err(repository_error("论坛固定 #2 编辑证明不匹配"));
-        }
+        reconcile_or_edit_fixed_post(
+            runtime,
+            &topic,
+            &topic.system_log_post_id,
+            None,
+            system_log.clone(),
+        )
+        .await?;
     }
     let updated_at = clock.now();
     if !scan_completed {
@@ -337,6 +327,47 @@ async fn refresh_fixed_posts(
         .store
         .record_fixed_posts_update(topic, catalog, system_log, updated_at, next_scan_at)
         .await
+}
+
+async fn reconcile_or_edit_fixed_post(
+    runtime: &ForumReplyRuntime,
+    topic: &auction_application::ForumReplyTopic,
+    post_id: &str,
+    title: Option<String>,
+    expected: ForumRenderedPost,
+) -> Result<(), ApplicationError> {
+    let current = runtime
+        .writer
+        .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+        .await?;
+    if current.body == expected.body {
+        return Ok(());
+    }
+    // 上一轮 POST 结果未知时禁止盲目重发；只有远端正文已经等于目标值才可在上方收敛本地证明。
+    if topic.content_last_error_code.as_deref() == Some("write_unknown") {
+        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+    }
+    let proof = runtime
+        .writer
+        .edit_post(
+            topic.world,
+            topic.thread_id.clone(),
+            post_id.to_owned(),
+            title,
+            expected.clone(),
+        )
+        .await?;
+    if proof.thread_id != topic.thread_id || proof.post_id != post_id {
+        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+    }
+    let observed = runtime
+        .writer
+        .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+        .await?;
+    if observed.body != expected.body {
+        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+    }
+    Ok(())
 }
 
 fn completed_scan_times(

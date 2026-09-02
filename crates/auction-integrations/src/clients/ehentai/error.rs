@@ -10,6 +10,7 @@ pub enum EhentaiOperation {
     FetchTopic,
     ReplyTopic,
     EditPost,
+    ReadPostBody,
 }
 
 impl EhentaiOperation {
@@ -21,6 +22,7 @@ impl EhentaiOperation {
             Self::FetchTopic => "fetch_topic",
             Self::ReplyTopic => "reply_topic",
             Self::EditPost => "edit_post",
+            Self::ReadPostBody => "read_post_body",
         }
     }
 }
@@ -33,6 +35,9 @@ pub enum EhentaiErrorCategory {
     SessionExpired,
     RateLimited,
     RemoteTemporary,
+    Cloudflare,
+    TopicLocked,
+    PermissionDenied,
     ResponseTooLarge,
     ProtocolDrift,
     WriteUnknown,
@@ -47,6 +52,9 @@ impl EhentaiErrorCategory {
             Self::SessionExpired => "session_expired",
             Self::RateLimited => "rate_limited",
             Self::RemoteTemporary => "remote_temporary",
+            Self::Cloudflare => "cloudflare",
+            Self::TopicLocked => "topic_locked",
+            Self::PermissionDenied => "permission_denied",
             Self::ResponseTooLarge => "response_too_large",
             Self::ProtocolDrift => "protocol_drift",
             Self::WriteUnknown => "write_unknown",
@@ -129,6 +137,18 @@ impl EhentaiError {
 
     pub(super) const fn remote_temporary(operation: EhentaiOperation, write_started: bool) -> Self {
         Self::new(operation, EhentaiErrorCategory::RemoteTemporary, !write_started, write_started)
+    }
+
+    pub(super) const fn cloudflare(operation: EhentaiOperation) -> Self {
+        Self::new(operation, EhentaiErrorCategory::Cloudflare, true, false)
+    }
+
+    pub(super) const fn topic_locked(operation: EhentaiOperation) -> Self {
+        Self::new(operation, EhentaiErrorCategory::TopicLocked, false, false)
+    }
+
+    pub(super) const fn permission_denied(operation: EhentaiOperation) -> Self {
+        Self::new(operation, EhentaiErrorCategory::PermissionDenied, false, false)
     }
 
     pub(super) const fn response_too_large(operation: EhentaiOperation) -> Self {

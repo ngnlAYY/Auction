@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000028` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000029` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -286,7 +286,9 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.forum_account_id` 保存稳定
 `showuser` 数字账号 ID，并以延迟约束保证 Users 主体与所有论坛映射在提交时一致；旧
 `game_player_id` 只作为数据库兼容镜像；`000028` 为论坛命令账本保存
-真实楼层号，历史未知值保持空，不从 post ID 猜测楼层；
+真实楼层号，历史未知值保持空，不从 post ID 猜测楼层；`000029` 为固定帖刷新增加最近成功时间、
+最近失败时间和有界安全错误码，并以追加式 `forum_identity_history` 保存论坛数字账号及可变名称的
+新旧快照；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -423,10 +425,13 @@ HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计�
 并用 HTML 解析所得真实 post ID 为楼层号生成 findpost 链接。它额外显示本轮已连续处理到的真实
 楼层水位；遇到待重试命令便停止推进，不按 post ID 或已读取的末楼伪造已处理进度。论坛只执行普通出价，Web 专属的代理行在解析入口
 静默忽略且不进入 #2，没有可执行命令的帖子也不会提前触发作者身份解析。编辑只命中已保存 post ID；
-同源重定向的唯一 post proof，或 200 中间页里完全一致的 meta refresh/链接双 proof 通过后，才以
-内容版本 CAS 更新本地证明。固定帖刷新逐主题领取独立内容 lease/fencing；仍待重试的命令可以更新
-#2 与本地正文证明，但会保留 claim 且不推进 `content_next_scan_at`，只有成功或成功确认无正文变化才
-从完成时刻推进到下一次配置周期。既有 #2 不是同拍卖系统标记时失败关闭，不覆盖用户帖子。机器
+写入前先读取远端 textarea 中的原始 BBCode，若与预期内容逐字一致则直接补齐本地证明；若本地上次
+状态为 `write_unknown` 且远端正文不一致，则失败关闭并等待人工核对，禁止盲目重写。只有同源重定向
+的唯一 post proof，或 200 中间页里完全一致的 meta refresh/链接双 proof 通过，并在编辑后再次读取
+远端原始 BBCode、证明与预期逐字一致，才以内容版本 CAS 更新本地证明。固定帖刷新逐主题领取独立
+内容 lease/fencing；仍待重试的命令可以更新 #2 与本地正文证明，但会保留 claim 且不推进
+`content_next_scan_at`，只有成功或成功确认无正文变化才从完成时刻推进到下一次配置周期。既有 #2
+不是同拍卖系统标记时失败关闭，不覆盖用户帖子。机器
 ownership 标记仍保留在固定帖正文末尾供精确校验，但不作为面向用户的可见日志内容。论坛作者链接的
 `showuser` 数字 ID 是稳定且唯一的论坛账号键，保存到 `users.forum_account_id`；同一论坛生成作者
 链接的 `.bigusername` 文本是可变的 MoogleMail 收件人和页面显示名称，唯一权威字段为
@@ -434,13 +439,18 @@ ownership 标记仍保留在固定帖正文末尾供精确校验，但不作为�
 可以建立首个论坛映射，已绑定主体允许随论坛名称变化更新 `username`；revoked 用户只能沿用另一
 世界已证明的同一数字账号键，否则为尚未注册 MM 的作者建立名称相同、key 已撤销的 `forum_only`
 主体及 world 映射。`000026` 约束映射 owner，`000027` 再约束 Users 主体的稳定论坛账号 ID，并在
-事务提交时核对 `users.forum_account_id` 与该主体全部论坛映射；旧
+事务提交时核对 `users.forum_account_id` 与该主体全部论坛映射；`000029` 还会在同一 Serializable
+事务中把论坛数字账号或名称的旧值与新值追加到 `forum_identity_history`，并写入
+`user.forum_identity_synced` 审计事实，身份变更不再只表现为覆盖当前投影。旧
 `game_player_id` 仅随 `username` 同步以兼容历史 schema，不再出现在新业务 DTO。系统不生成
 `forum-*` 影子用户名，也不把数字账号键当作 MM 收件人；后续 MM 注册按当前名称恢复并激活该主体。
 论坛首帖、公开拍卖目录和竞价历史统一展示当前名称。回帖随后经过 lot 映射和
 `auction_forum_bid_commands` 幂等账本，再调用
-现有竞价端口。Forum 在独立顺序循环中先发布后读取回帖，两阶段错误分别记录，发布失败不会跳过
-回帖扫描，也不会终止其它 Worker owner；该循环默认每 300 秒加最多 5 秒抖动，独立于 Auction 的
+现有竞价端口。Forum 在独立顺序循环中先发布后读取回帖，发布失败不会跳过回帖扫描，也不会终止
+其它 Worker owner；每个主题的成功扫描会更新最近成功时间并清空错误，失败则释放 claim、持久化
+有界安全错误码并推进重试时间。当前扫描调度和健康状态由 `auction_forum_sync` 的逐主题
+`content_next_scan_at` 及健康字段拥有；旧 `auction_forum_reply_cursors` 仅保留历史 schema，不再有
+新的写入者。该循环默认每 300 秒加最多 5 秒抖动，独立于 Auction 的
 60 秒生命周期循环。主题读取先从第一页发现同 origin、同 thread 的规范 `st` 分页水位，再用每个已读页面复核该水位没有扩张；默认最多 10 页且硬上限
 20 页；页数越界、重复/逆序 post ID、响应主题身份或分页身份漂移都会失败关闭，不会静默接受错误
 主题或遗漏后续出价。额外页面最多四路并发读取，仍共享 750 毫秒请求起始间隔；主题 HTML 聚合有
@@ -470,7 +480,11 @@ delivery 引用，合法的历史终态孤儿不会被伪造为 delivery；`0000
 继续只由 Worker 持有。
 Public 进程已补齐持久化 stream relay 和进程内有界 Hub：relay 读取已提交事件、在本地 sink
 接收后推进 `(consumer_key, stream_key)` 游标，Hub 只负责当前进程的 WebSocket 分发并淘汰慢
-连接。该实现恢复了旧版 Public 的低延迟本地广播边界；旧版没有外部广播 sink，未来若新增
+连接。PostgreSQL 为每个 relay `consumer_key` 持有会话级 advisory owner lock，同 key 的第二个
+Public 实例在启动时失败关闭；SQLite Lite 在同主机以数据库标识与 consumer key 的不可逆摘要建立
+0600 非阻塞 sidecar 文件锁，第二个同 key Public 实例同样启动失败；非 Unix 平台无法取得该锁时
+失败关闭。该实现恢复了旧版 Public
+的低延迟本地广播边界；旧版没有外部广播 sink，未来若新增
 跨进程 sink 必须另行冻结协议，不能把它登记为旧版缺口。
 Public v1 wire 同样保持旧版边界：单拍卖 HTTP 回放要求规范 `auction_id`、默认 100 条并回显目标，
 发现回放只能显式使用 `scope=auctions`；WebSocket 只接受一个目标键且每帧发送一个不含内部
@@ -478,7 +492,11 @@ Public v1 wire 同样保持旧版边界：单拍卖 HTTP 回放要求规范 `auc
 close reason；discovery 单独持有每进程 128 槽，普通单拍卖连接不受其限制。连接尝试限流与 mutation
 分账，启用 allowlist 时 origin、query、session 的握手优先级保持旧版；新的 settled 连接由拍卖公开
 读取端口在升级前拒绝，既有连接仍可收到终态事件。Dioxus 客户端先完成握手再执行 HTTP catch-up，
-跳号继续回到持久化回放或权威快照，不要求服务端在 WebSocket 内发送页面。Admin realtime lag/failure 与 delivery 列表恢复
+跳号继续回到持久化回放或权威快照；HTTP 恢复后收到的首个新事件只建立该 lot 的
+`state_version`/`fact_index` 基线，后续事件再执行严格连续性校验，避免把有效的非首条 bid fact
+反复判为缺口。current 快照短暂重读时同 world 的实时 target 与已确认 cursor 留在 Public 外壳，
+不会因一次事实刷新从 0 重放或抖动连接。页面同时保留权威读取兜底：readiness 每 10 秒刷新，当前/共享拍卖、目录和活动 lot
+详情每 60 秒刷新；WebSocket 仍是低延迟路径，不要求服务端在 WebSocket 内发送页面。Admin realtime lag/failure 与 delivery 列表恢复
 旧版 `pagination` 信封；A24 旧请求由 HTTP 防腐层稳定派生命令 ID，核心账本不放宽幂等不变量。
 Admin A08 recovery 报告已接入 PostgreSQL 完整档的一致安全投影，SQLite 明确返回不支持；A14 recovery 确认已接入 PostgreSQL 完整档的 Serializable 版本 fence、证据重校验、命令账本、退款激活、guarded relist、审计和预览目录事件；结算事务已为每个获胜 lot 在同一事务中生成 `settlement_recoveries`，SQLite 明确返回不支持。Recovery Worker 已接入 recovery case 的 due 推进、付款超时提醒 action、持久化 claim/fencing、MoogleMail outbox 关联和 delivery 结果证明，并完成严格退回邮件证据绑定、evidence mismatch 阻断、装备领取/载具取消/装备恢复 Take、目标世界和资产摘要 fence、Users owner 幂等买家黑名单 proof；recovery action delivery 也已使用 `pending → prepared → enqueued` 两阶段 identity 和可重放 activation，并在 prepare/activation 前复核 Users owner 的 active 收件人投影；以及 `relist_pending → refunding/completed → completed` 的持久化 resolution 调度；recovery health 按配置的启用世界独立周期读取 Balance，保留最后成功观测并在同一 PostgreSQL 更新中重算逾期、重挂、失败和人工复核计数。旧版五类 action 的静态闭集已经对齐，剩余是外部回执行为验证；现有 501 只表达 SQLite Lite 或未装配依赖的能力边界。Worker 已接入 `scheduled_rounds` 的持久化 due claim、
 租约、尝试次数、生命周期 preview/open 调用和指数退避失败记录；Auction 主循环的慢速代理阶段也已
@@ -490,7 +508,8 @@ workflow；`auctionctl verify-legacy-settlement` 通过专用应用端口在同�
 `SERIALIZABLE READ ONLY DEFERRABLE` 快照中核验旧 `settlement_complete/OK` 账本、workflow 身份与
 权威结算/lot/义务事实，只输出脱敏摘要，且没有清 fence、通用结算或任何写入分支。结算履约还接入了
 delivery/prepare/activation 身份和 outbox 的成功、失败、
-人工对账终态边界；实时消费 runner 已接入 PostgreSQL/SQLite 的持久化游标、失败记录和
+人工对账终态边界；实时消费 runner 已接入 PostgreSQL/SQLite 的持久化游标、失败记录、同
+consumer key 独占 owner 和
 显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计，
 外部广播 sink 属于尚未冻结的新增扩展；Public 本地 relay/Hub 已接入同一持久化事件边界。公开端首页看板与 lot 详情已经接入同源 Public
 API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，`opening` 过渡态只展示开拍处理中，
@@ -527,8 +546,10 @@ Public/Admin 的 Dioxus 构建配置还分别固定了 WASM 启动前的产品�
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
 并在 Admin session 保护下按 owner 返回安全 section；只有 owner 未装配或读取失败时才显式返回
 `unknown`。Public、Admin、Worker 装配根的周期心跳每轮复用数据库/schema readiness，读取当前
-进程的审计写入失败饱和计数，并接入各自 tracing owner 的安全投影；数据库、schema 或审计异常
-会令 readiness 失败，tracing degraded 会令 heartbeat status 降级。SIGINT/SIGTERM 下会停止周期
+进程的审计写入失败饱和计数，并接入各自 tracing owner 的安全投影；Public 还把已配置 relay 的
+新鲜度纳入 readiness 与同一心跳，Worker 则把论坛循环的终止故障和可恢复降级纳入 control
+readiness/heartbeat。数据库、schema、审计或必须运行的 relay 异常会令 readiness 失败，tracing
+degraded 会令 heartbeat status 降级。SIGINT/SIGTERM 下会停止周期
 任务并发布携带当前审计/tracing 状态的 `stopping`。Worker control 已通过
 安全 runtime 目录、实例锁、固定 group/0660、inode 清理和显式 UID/GID peer credential allowlist
 提供 live/ready/status、同 registry 的 `/metrics` 和

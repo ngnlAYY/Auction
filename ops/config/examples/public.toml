@@ -47,7 +47,7 @@ sample_ratio_ppm = 0
 
 # 可选区块：Public realtime relay 与进程内 WebSocket Hub；省略整个区块使用默认值。
 [realtime]
-# 可选：当前 Public 实例的持久化 consumer 标识；多 Public 实例必须各不相同。
+# 可选：当前 Public 实例的持久化 consumer 标识；多实例必须各不相同，PostgreSQL 会拒绝重复 key 的第二个 owner。
 consumer_key = "public-1"
 # 可选：relay 两次扫描之间的毫秒数，默认 250。
 poll_interval_millis = 250

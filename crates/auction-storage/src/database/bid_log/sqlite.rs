@@ -101,6 +101,21 @@ pub(super) async fn list_sqlite(
            AND l.status IN ('live', 'sold', 'unsold')
            AND (? IS NULL OR a.world_id = ?)
            AND (? IS NULL OR l.id = ?)
+           AND (
+                ? IS NULL
+                OR lower(
+                    CASE e.category
+                        WHEN 'One-Handed' THEN 'One'
+                        WHEN 'Two-Handed' THEN 'Two'
+                        WHEN 'Staff' THEN 'Sta'
+                        WHEN 'Shield' THEN 'Shd'
+                        WHEN 'Cloth' THEN 'Clo'
+                        WHEN 'Light' THEN 'Lig'
+                        WHEN 'Heavy' THEN 'Hea'
+                        ELSE 'Lot'
+                    END || printf('%02d', l.category_number)
+                ) LIKE '%' || lower(?) || '%'
+           )
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
@@ -161,6 +176,8 @@ pub(super) async fn list_sqlite(
     .bind(request.world_id.as_deref())
     .bind(lot_id_blob.as_deref())
     .bind(lot_id_blob.as_deref())
+    .bind(request.lot_code.as_deref())
+    .bind(request.lot_code.as_deref())
     .bind(query_limit)
     .bind(if request.cursor.is_some() { 0 } else { request.offset })
     .fetch_all(&mut *transaction)
@@ -195,6 +212,21 @@ pub(super) async fn list_sqlite(
                    AND l.status IN ('live', 'sold', 'unsold')
                    AND (? IS NULL OR a.world_id = ?)
                    AND (? IS NULL OR l.id = ?)
+                   AND (
+                        ? IS NULL
+                        OR lower(
+                            CASE e.category
+                                WHEN 'One-Handed' THEN 'One'
+                                WHEN 'Two-Handed' THEN 'Two'
+                                WHEN 'Staff' THEN 'Sta'
+                                WHEN 'Shield' THEN 'Shd'
+                                WHEN 'Cloth' THEN 'Clo'
+                                WHEN 'Light' THEN 'Lig'
+                                WHEN 'Heavy' THEN 'Hea'
+                                ELSE 'Lot'
+                            END || printf('%02d', l.category_number)
+                        ) LIKE '%' || lower(?) || '%'
+                   )
                    AND command.command_kind IN (
                         'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
@@ -220,6 +252,8 @@ pub(super) async fn list_sqlite(
             .bind(request.world_id.as_deref())
             .bind(lot_id_blob.as_deref())
             .bind(lot_id_blob.as_deref())
+            .bind(request.lot_code.as_deref())
+            .bind(request.lot_code.as_deref())
             .fetch_one(&mut *transaction)
             .await
             .map_err(|_| storage_error("统计 SQLite 公开竞价日志失败"))?,

@@ -20,12 +20,14 @@ pub(crate) async fn run_loop<C>(
     loop {
         let started = std::time::Instant::now();
         let mut cycle_result = WorkerResult::Success;
+        let mut cycle_healthy = true;
         if let Some(runtime) = &worker.forum_sync {
             let result =
                 super::forum_sync::run_cycle(worker.as_ref(), runtime, worker.forum.lease_duration)
                     .await;
             if let Err(error) = result {
                 cycle_result = WorkerResult::Error;
+                cycle_healthy = false;
                 tracing::warn!(error = %error, "论坛主题同步本轮失败；回帖导入仍将继续");
             }
         }
@@ -40,9 +42,11 @@ pub(crate) async fn run_loop<C>(
             .await;
             if let Err(error) = result {
                 cycle_result = WorkerResult::Error;
+                cycle_healthy = false;
                 tracing::warn!(error = %error, "论坛回帖导入本轮失败；将在下一轮重试");
             }
         }
+        worker.control.mark_forum_cycle(cycle_healthy);
         worker.metrics.observe_iteration(WorkerLoop::Forum, cycle_result, started.elapsed());
 
         let wait = poll_delay(worker.forum.poll_interval, worker.forum.jitter);

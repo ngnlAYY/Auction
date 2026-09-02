@@ -59,6 +59,8 @@ pub enum WorkerError {
     InvalidForumReplyConfiguration,
     #[error("forum worker loop configuration is invalid")]
     InvalidForumConfiguration,
+    #[error("forum topic processing failed after the failure state was persisted")]
+    ForumTopicProcessingFailed,
     #[error("forum worker task failed")]
     ForumTaskJoin(#[source] tokio::task::JoinError),
     #[error("forum worker task exited unexpectedly")]

@@ -27,6 +27,9 @@ pub(super) async fn record_fixed_posts_update_postgres(
              content_lease_expires_at = NULL,
              content_claim_token = NULL,
              content_claim_owner = NULL,
+             content_last_success_at = $5,
+             content_last_error_at = NULL,
+             content_last_error_code = NULL,
              updated_at = $5
          WHERE auction_id = $1
            AND status = 'published'
@@ -119,7 +122,10 @@ pub(super) async fn finish_topic_scan_postgres(
          SET content_next_scan_at = $3,
              content_lease_expires_at = NULL,
              content_claim_token = NULL,
-             content_claim_owner = NULL
+             content_claim_owner = NULL,
+             content_last_success_at = $2,
+             content_last_error_at = NULL,
+             content_last_error_code = NULL
          WHERE auction_id = $1
            AND status = 'published'
            AND thread_id = $4
@@ -146,6 +152,46 @@ pub(super) async fn finish_topic_scan_postgres(
     .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层扫描 claim 已失效"));
+    }
+    Ok(())
+}
+
+pub(super) async fn fail_topic_scan_postgres(
+    store: &PostgresStore,
+    topic: &ForumReplyTopic,
+    failed_at: DateTime<Utc>,
+    retry_at: DateTime<Utc>,
+    failure_code: &str,
+) -> Result<(), ApplicationError> {
+    let result = sqlx::query(
+        "UPDATE public.auction_forum_sync
+         SET content_next_scan_at = $3,
+             content_lease_expires_at = NULL,
+             content_claim_token = NULL,
+             content_claim_owner = NULL,
+             content_last_error_at = $2,
+             content_last_error_code = $4,
+             updated_at = GREATEST(updated_at, $2)
+         WHERE auction_id = $1
+           AND status = 'published'
+           AND thread_id = $5
+           AND content_claim_token = $6
+           AND content_claim_owner = $7
+           AND content_claim_fencing = $8",
+    )
+    .bind(topic.auction_id.as_uuid())
+    .bind(failed_at)
+    .bind(retry_at)
+    .bind(failure_code)
+    .bind(&topic.thread_id)
+    .bind(topic.content_claim_token)
+    .bind(&topic.content_claim_owner)
+    .bind(topic.content_claim_fencing)
+    .execute(store.pool())
+    .await
+    .map_err(|_| storage_error("记录论坛固定楼层扫描失败状态失败"))?;
+    if result.rows_affected() != 1 {
+        return Err(storage_error("论坛固定楼层扫描失败 claim 已失效"));
     }
     Ok(())
 }
