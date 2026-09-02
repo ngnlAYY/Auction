@@ -77,7 +77,9 @@ remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Work
 写入会加载真实表单并核对同源 `/index.php` action、POST 方法及 exact board/thread/post，回复 action
 不得携带 post 目标；固定帖 POST 只接受同源重定向中的唯一 thread/post 身份证明，或真实论坛
 `Please stand by...` 200 回执中完全一致的 meta refresh 与链接双重证明，无法证明时返回
-`write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志，
+`write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志；
+#2 只按公开处理事实展示真实告警/人工忽略计数、红色告警标题和紧凑单行记录，并用解析所得真实
+post ID 为楼层号生成 E-Hentai findpost 链接；它不按楼层位置猜测远端身份，也不伪造扫描水位、成功竞价数或正文外身份，
 按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
 从同一个论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字账号键和链接文本，并把文本作为与
 MM 收件人一致的玩家 ID 名称交给 Users owner；用户正文、签名和泛化 data 属性都不能提供作者身份，

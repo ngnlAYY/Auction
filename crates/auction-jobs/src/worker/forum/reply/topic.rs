@@ -39,6 +39,7 @@ pub(super) async fn process_topic(
             );
             system_entries.push(system_entry(
                 post_number,
+                &post.post.id,
                 None,
                 "identity_missing",
                 "post author forum account ID could not be resolved",
@@ -62,6 +63,7 @@ pub(super) async fn process_topic(
                 );
                 system_entries.push(system_entry(
                     post_number,
+                    &post.post.id,
                     None,
                     "identity_unavailable",
                     "forum/MM player ID name could not be linked to an active auction user",
@@ -74,6 +76,7 @@ pub(super) async fn process_topic(
             if matches!(command.kind.as_str(), "start" | "cancel") {
                 system_entries.push(system_entry(
                     post_number,
+                    &post.post.id,
                     Some(command.line),
                     "admin_command_not_supported",
                     "start and cancel are Admin-only operations and were not applied",
@@ -85,6 +88,7 @@ pub(super) async fn process_topic(
             if matches!(notify_mode, Some("pm" | "both")) {
                 system_entries.push(system_entry(
                     post_number,
+                    &post.post.id,
                     Some(command.line),
                     "forum_pm_unavailable",
                     "forum PM notifications are not available; MM processing is independent",
@@ -94,6 +98,7 @@ pub(super) async fn process_topic(
             if runtime.notifier.is_none() && matches!(notify_mode, Some("mm" | "both")) {
                 system_entries.push(system_entry(
                     post_number,
+                    &post.post.id,
                     Some(command.line),
                     "mm_notification_unavailable",
                     "MoogleMail notification delivery is not configured",
@@ -109,6 +114,7 @@ pub(super) async fn process_topic(
                     );
                     system_entries.push(system_entry(
                         post_number,
+                        &post.post.id,
                         Some(command.line),
                         "lot_mapping_missing",
                         "lot code no longer maps to an active auction lot",
@@ -130,6 +136,7 @@ pub(super) async fn process_topic(
                     // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍先把待重试状态投影到 #2。
                     system_entries.push(system_entry(
                         post_number,
+                        &post.post.id,
                         Some(command.line),
                         "command_processing_pending",
                         "command processing stopped here and will retry",
@@ -168,6 +175,7 @@ pub(super) async fn process_topic(
         ));
         system_entries.push(system_entry(
             post_number,
+            &outcome.post_id,
             usize::try_from(outcome.line_number).ok(),
             code,
             &message,
@@ -211,13 +219,14 @@ fn warning_entries(
         .warnings
         .iter()
         .filter_map(|warning| {
-            let post_number = match warning.post_id.as_ref() {
-                Some(post_id) => post_numbers.get(post_id).copied()?,
-                None => 1,
+            let (post_number, post_id) = match warning.post_id.as_ref() {
+                Some(post_id) => (post_numbers.get(post_id).copied()?, post_id.as_str()),
+                None => (1, preview.catalog_post_id.as_str()),
             };
             (post_number == 1 || post_number >= 3).then(|| {
                 system_entry(
                     post_number,
+                    post_id,
                     (warning.line > 0).then_some(warning.line),
                     &warning.code,
                     &clean_system_message(&warning.message),
@@ -326,6 +335,7 @@ fn next_scan_at(
 
 fn system_entry(
     post_number: usize,
+    post_id: &str,
     line_number: Option<usize>,
     code: &str,
     message: &str,
@@ -333,6 +343,7 @@ fn system_entry(
 ) -> ForumSystemLogEntry {
     ForumSystemLogEntry {
         post_number,
+        post_id: post_id.to_owned(),
         line_number,
         code: clean_system_message(code),
         message: clean_system_message(message),

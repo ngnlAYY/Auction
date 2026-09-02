@@ -9,6 +9,8 @@ use auction_domain::AuctionId;
 use sha2::{Digest, Sha256};
 use url::Url;
 
+use crate::clients::ehentai::PRODUCTION_ENDPOINT;
+
 const MAX_LOTS: usize = 10_000;
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
@@ -178,12 +180,21 @@ pub fn render_system_log(
     entries.sort_by(|left, right| {
         left.post_number
             .cmp(&right.post_number)
+            .then_with(|| left.post_id.cmp(&right.post_id))
             .then_with(|| left.line_number.cmp(&right.line_number))
             .then_with(|| left.code.cmp(&right.code))
             .then_with(|| left.message.cmp(&right.message))
             .then_with(|| left.ignored.cmp(&right.ignored))
     });
     entries.dedup();
+    if entries.iter().any(|entry| !valid_system_log_entry(entry)) {
+        return Err(ForumRenderError::InvalidSnapshot);
+    }
+
+    let warning_count = entries.iter().filter(|entry| !entry.ignored).count();
+    let ignored_count = entries.iter().filter(|entry| entry.ignored).count();
+    let warning_label = if warning_count == 1 { "warning" } else { "warnings" };
+    let ignored_label = if ignored_count == 1 { "post" } else { "posts" };
 
     let mut body = String::new();
     writeln!(
@@ -192,46 +203,31 @@ pub fn render_system_log(
         forum_system_log_marker(auction_id)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    writeln!(
+        &mut body,
+        "Processing summary: [b][size=4]{warning_count}[/size][/b] {warning_label}, \
+         [b]{ignored_count}[/b] manually ignored {ignored_label}."
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "[b]System processing log[/b]\n\
-         This fixed post records edited or invalid bid commands. User bids begin at post #3.\n\n\
-         [b]Warning Log:[/b]\n",
+        "[color=#009900][b]Accepted bids and current prices are reflected in post #1.[/b][/color]\n\
+         [size=1][color=#666666]This fixed post records edited or invalid commands. User bids begin at post #3.[/color][/size]\n\n\
+         [center][b][color=red][size=3]Warning Log:[/size][/color][/b][/center]\n\n",
     );
-    let mut warning_count = 0_usize;
     for entry in entries.iter().filter(|entry| !entry.ignored) {
-        if !valid_system_log_entry(entry) {
-            return Err(ForumRenderError::InvalidSnapshot);
-        }
-        warning_count += 1;
-        write!(&mut body, "• #{}", entry.post_number)
-            .map_err(|_| ForumRenderError::BodyTooLarge)?;
-        if let Some(line_number) = entry.line_number {
-            write!(&mut body, " line {line_number}").map_err(|_| ForumRenderError::BodyTooLarge)?;
-        }
-        writeln!(&mut body, ": [{}] {}", bbcode_text(&entry.code), bbcode_text(&entry.message))
-            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        write_system_log_entry(&mut body, entry)?;
     }
     if warning_count == 0 {
-        body.push_str("• None\n");
+        body.push_str("[color=#888888]None[/color]\n");
     }
-    body.push_str("\n[b]Manually ignored posts (for transparency):[/b]\n");
-    let mut ignored_count = 0_usize;
+    body.push_str(
+        "\n[center][b][size=3]Manually ignored posts (for transparency):[/size][/b][/center]\n\n",
+    );
     for entry in entries.iter().filter(|entry| entry.ignored) {
-        if !valid_system_log_entry(entry) {
-            return Err(ForumRenderError::InvalidSnapshot);
-        }
-        ignored_count += 1;
-        writeln!(
-            &mut body,
-            "• #{}: [{}] {}",
-            entry.post_number,
-            bbcode_text(&entry.code),
-            bbcode_text(&entry.message)
-        )
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        write_system_log_entry(&mut body, entry)?;
     }
     if ignored_count == 0 {
-        body.push_str("• None\n");
+        body.push_str("[color=#888888]None[/color]\n");
     }
     body.push_str(
         "\n[i]This post is maintained by the auction worker. Do not place bids here.[/i]\n",
@@ -242,11 +238,38 @@ pub fn render_system_log(
     Ok(ForumRenderedPost { body })
 }
 
+fn write_system_log_entry(
+    body: &mut String,
+    entry: &ForumSystemLogEntry,
+) -> Result<(), ForumRenderError> {
+    write!(
+        body,
+        "[url={PRODUCTION_ENDPOINT}/index.php?act=findpost&pid={}][b]#{}[/b][/url] \
+         [color=#777777]",
+        entry.post_id, entry.post_number
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    if let Some(line_number) = entry.line_number {
+        write!(body, "line {line_number} · ").map_err(|_| ForumRenderError::BodyTooLarge)?;
+    }
+    writeln!(body, "{}[/color] — {}", bbcode_text(&entry.code), bbcode_text(&entry.message))
+        .map_err(|_| ForumRenderError::BodyTooLarge)
+}
+
 fn valid_system_log_entry(entry: &ForumSystemLogEntry) -> bool {
     (entry.post_number == 1 || entry.post_number >= 3)
+        && valid_forum_post_id(&entry.post_id)
         && entry.line_number.is_none_or(|line| line > 0)
         && valid_text(&entry.code, 128)
         && valid_text(&entry.message, 512)
+}
+
+fn valid_forum_post_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0] != b'0'
+        && bytes.iter().all(u8::is_ascii_digit)
 }
 
 fn valid_lot(lot: &ForumLotSnapshot) -> bool {

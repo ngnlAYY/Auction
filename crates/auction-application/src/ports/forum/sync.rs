@@ -303,6 +303,8 @@ pub trait ForumRenderer: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumSystemLogEntry {
     pub post_number: usize,
+    /// 论坛返回的真实远端 post ID；跳转链接不得由楼层号推算。
+    pub post_id: String,
     pub line_number: Option<usize>,
     pub code: String,
     pub message: String,
