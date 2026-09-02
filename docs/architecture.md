@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000025` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000026` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -281,7 +281,8 @@ PostgreSQL 完整档扩展 operations alert 的持久化 kind/identity 闭集，
 论坛主题继续使用冻结的旧编号方案，新主题使用分类编号，避免历史帖子命令被迁移重解释；
 `000025` 为 `auction_forum_sync` 增加固定楼层的远端 post ID、系统日志正文、单调内容版本，以及
 独立的刷新 due 水位、claim token、owner、lease 与 fencing；历史 published 行不猜测 #2，必须先
-读取主题并完成 exact post 对账；
+读取主题并完成 exact post 对账；`000026` 保证同一 world/provider 下一个 Users 主体只能绑定一个
+论坛账号，避免同名回帖并发建立多重归属；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -419,10 +420,13 @@ HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计�
 #2 与本地正文证明，但会保留 claim 且不推进 `content_next_scan_at`，只有成功或成功确认无正文变化才
 从完成时刻推进到下一次配置周期。既有 #2 不是同拍卖系统
 标记时失败关闭，不覆盖用户帖子。论坛
-作者链接的 `showuser` 数字 ID 与 MM 的 `users.game_player_id` 是同一身份，论坛昵称不参与身份
-兜底；Users owner 会在 Serializable 事务内复用已有用户，或为尚未注册 MM 的作者建立用户名直接等于
-玩家 ID 的 revoked-key `forum_only` 主体及 world 映射，不生成 `forum-*` 影子用户名；后续 MM 注册按
-同一玩家 ID 恢复该用户。论坛首帖、公开拍卖目录和竞价历史也统一展示该玩家 ID。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
+作者链接的 `showuser` 数字 ID 只作为稳定论坛账号键；同一论坛生成作者链接的 `.bigusername` 文本才是
+与 MM 收件人一致的 `users.game_player_id` 玩家 ID 名称。Users owner 会在 Serializable 事务内同时核对
+两者：已验证 active key 的同名用户可以建立首个论坛映射，revoked 用户只能沿用另一世界已证明的同一
+数字账号键；否则为尚未注册 MM 的作者建立用户名与 `game_player_id` 都等于玩家名称的 revoked-key
+`forum_only` 主体及 world 映射。`000026` 还保证同一 world/provider 的一个 Users 主体只有一个论坛账号。
+系统不生成 `forum-*` 影子用户名，也不把数字账号键当作 MM 收件人；后续
+MM 注册按同一玩家名称恢复该用户。论坛首帖、公开拍卖目录和竞价历史统一展示玩家名称。回帖随后经过 lot 映射和 `auction_forum_bid_commands` 幂等账本，再调用
 现有竞价端口。Forum 在独立顺序循环中先发布后读取回帖，两阶段错误分别记录，发布失败不会跳过
 回帖扫描，也不会终止其它 Worker owner；该循环默认每 300 秒加最多 5 秒抖动，独立于 Auction 的
 60 秒生命周期循环。主题读取先从第一页发现同 origin、同 thread 的规范 `st` 分页水位，再用每个已读页面复核该水位没有扩张；默认最多 10 页且硬上限

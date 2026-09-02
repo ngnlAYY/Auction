@@ -79,8 +79,10 @@ remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Work
 `Please stand by...` 200 回执中完全一致的 meta refresh 与链接双重证明，无法证明时返回
 `write_unknown`。`ForumThreadRenderer` 负责参考旧帖结构生成有界 #1 BBCode 和确定性 #2 处理日志，
 按分类列出拍品并把装备名称链接到解析后的真实 HentaVerse URL；回帖命令仍先
-从论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字值，并把它作为论坛/MM 共用玩家 ID
-交给 Users owner 和应用竞价端口；昵称只用于显示，缺少该 ID 时失败关闭，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
+从同一个论坛生成的 `.bigusername` 作者链接读取 `showuser` 数字账号键和链接文本，并把文本作为与
+MM 收件人一致的玩家 ID 名称交给 Users owner；用户正文、签名和泛化 data 属性都不能提供作者身份，
+缺少任一身份分量或同一帖子行出现冲突链接时失败关闭，数字键不用于页面展示或 MM
+收件人，适配器本身不直接写竞价状态。论坛会话只在 HTTP 401 或
 正文明确出现登录表单/失效文案时作废；Cloudflare 前置挑战同样可能返回 403，不能据此误删有效
 Cookie，而应保留凭据并以协议/访问失败收口。论坛回复只执行普通出价；代理创建/降低是 Public Web
 专属能力，解析器会在账本前静默丢弃论坛代理行，且不会把它们写入固定 #2。

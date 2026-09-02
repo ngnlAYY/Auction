@@ -72,12 +72,14 @@ pub struct ForumLotTarget {
     pub lot_id: LotId,
 }
 
-/// 由论坛/MM 共用玩家 ID 解析且仍可参与竞价的用户身份。
+/// 由论坛账号数字键与论坛/MM 共用玩家 ID 名称解析且仍可参与竞价的用户身份。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumBidderIdentity {
     pub user_id: UserId,
+    /// 论坛 `showuser` 的稳定数字键，只用于来源映射和命令账本 actor。
     pub external_account_id: String,
-    pub display_name: String,
+    /// 与论坛用户名一致的游戏玩家 ID 名称，可作为 MoogleMail 收件人。
+    pub game_player_id: String,
 }
 
 /// 用户在指定 lot 上的当前活动代理。
@@ -139,7 +141,7 @@ pub trait ForumReplyStore: Send + Sync {
         &self,
         world: SettlementWorld,
         external_account_id: String,
-        display_name: String,
+        game_player_id: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity>;
 
     fn active_proxy(

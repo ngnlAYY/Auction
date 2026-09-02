@@ -31,36 +31,40 @@ pub(super) async fn process_topic(
             continue;
         }
         let post_number = post_numbers.get(&post.post.id).copied().unwrap_or(3);
-        let Some(actor) = post.post.author_id.clone() else {
+        let Some(external_account_id) = post.post.author_id.clone() else {
             tracing::warn!(
                 auction_id = %topic.auction_id,
                 post_id = %post.post.id,
-                "论坛帖子缺少可解析的论坛/MM 共用玩家 ID，跳过命令"
+                "论坛帖子缺少可解析的论坛账号数字键，跳过命令"
             );
             system_entries.push(system_entry(
                 post_number,
                 None,
                 "identity_missing",
-                "post author forum/MM player ID could not be resolved",
+                "post author forum account ID could not be resolved",
                 false,
             ));
             continue;
         };
-        let display_name = post.post.author.clone().unwrap_or_else(|| actor.clone());
-        let bidder = match runtime.store.resolve_bidder(topic.world, actor, display_name).await {
+        let game_player_id = post.post.author.clone().unwrap_or_default();
+        let bidder = match runtime
+            .store
+            .resolve_bidder(topic.world, external_account_id, game_player_id)
+            .await
+        {
             Ok(bidder) => bidder,
             Err(error) => {
                 tracing::warn!(
                     auction_id = %topic.auction_id,
                     post_id = %post.post.id,
                     error = %error,
-                "论坛帖子玩家 ID 无法解析为可竞价用户"
+                    "论坛帖子玩家 ID 名称无法解析为可竞价用户"
                 );
                 system_entries.push(system_entry(
                     post_number,
                     None,
                     "identity_unavailable",
-                    "forum/MM player ID could not be linked to an active auction user",
+                    "forum/MM player ID name could not be linked to an active auction user",
                     false,
                 ));
                 continue;

@@ -8,7 +8,9 @@ pub type CatalogParse = (CatalogData, Vec<AdminForumWarning>);
 #[derive(Debug, Clone)]
 pub struct ParsedPost {
     pub(super) id: String,
+    /// 论坛 `showuser` 的稳定数字账号键。
     pub(super) author_id: Option<String>,
+    /// 论坛用户名，也是 HentaVerse/MoogleMail 使用的玩家 ID 名称。
     pub(super) author: Option<String>,
     pub(super) text: String,
     pub(super) edited: bool,
