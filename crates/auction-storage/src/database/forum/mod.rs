@@ -43,7 +43,9 @@ async fn forum_postgres(
     use sqlx::Row;
 
     let row = sqlx::query(
-        "SELECT auction_id, status, source_revision, thread_url, title, body, updated_at
+        "SELECT auction_id, status, source_revision, thread_url, title, body,
+                content_revision, content_synced_at, content_last_success_at,
+                content_last_error_at, content_last_error_code, updated_at
          FROM public.auction_forum_sync
          WHERE auction_id = $1",
     )
@@ -66,6 +68,21 @@ async fn forum_postgres(
         thread_url: row.try_get("thread_url").map_err(|_| storage_error("读取公开论坛链接失败"))?,
         title: row.try_get("title").map_err(|_| storage_error("读取公开论坛标题失败"))?,
         body: row.try_get("body").map_err(|_| storage_error("读取公开论坛正文失败"))?,
+        content_revision: row
+            .try_get("content_revision")
+            .map_err(|_| storage_error("读取公开论坛内容版本失败"))?,
+        content_synced_at: row
+            .try_get("content_synced_at")
+            .map_err(|_| storage_error("读取公开论坛内容同步时间失败"))?,
+        content_last_success_at: row
+            .try_get("content_last_success_at")
+            .map_err(|_| storage_error("读取公开论坛最近成功时间失败"))?,
+        content_last_error_at: row
+            .try_get("content_last_error_at")
+            .map_err(|_| storage_error("读取公开论坛最近错误时间失败"))?,
+        content_last_error_code: row
+            .try_get("content_last_error_code")
+            .map_err(|_| storage_error("读取公开论坛最近错误码失败"))?,
         updated_at: row
             .try_get::<DateTime<Utc>, _>("updated_at")
             .map_err(|_| storage_error("读取公开论坛更新时间失败"))?,

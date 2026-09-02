@@ -100,6 +100,24 @@ pub(super) async fn list_postgres(
            AND l.status IN ('live', 'sold', 'unsold')
            AND ($2::text IS NULL OR a.world_id = $2)
            AND ($3::uuid IS NULL OR l.id = $3)
+           AND (
+                $4::text IS NULL
+                OR lower(
+                    CASE e.category
+                        WHEN 'One-Handed' THEN 'One'
+                        WHEN 'Two-Handed' THEN 'Two'
+                        WHEN 'Staff' THEN 'Sta'
+                        WHEN 'Shield' THEN 'Shd'
+                        WHEN 'Cloth' THEN 'Clo'
+                        WHEN 'Light' THEN 'Lig'
+                        WHEN 'Heavy' THEN 'Hea'
+                        ELSE 'Lot'
+                    END || CASE
+                        WHEN l.category_number < 10 THEN '0' || l.category_number::text
+                        ELSE l.category_number::text
+                    END
+                ) LIKE '%' || lower($4) || '%'
+           )
            AND command.command_kind IN (
                 'place_bid', 'create_proxy', 'create_proxy_authorization',
                 'execute_slow_response', 'final_proxy_transition'
@@ -120,38 +138,39 @@ pub(super) async fn list_postgres(
                 )
            )
            AND (
-                NOT $4::boolean
-                OR b.created_at < $5
+                NOT $5::boolean
+                OR b.created_at < $6
                 OR (
-                    b.created_at = $5
-                    AND b.lot_id < $6
+                    b.created_at = $6
+                    AND b.lot_id < $7
                 )
                 OR (
-                    b.created_at = $5
-                    AND b.lot_id = $6
-                    AND b.accepted_state_version < $7
+                    b.created_at = $6
+                    AND b.lot_id = $7
+                    AND b.accepted_state_version < $8
                 )
                 OR (
-                    b.created_at = $5
-                    AND b.lot_id = $6
-                    AND b.accepted_state_version = $7
-                    AND b.fact_index < $8
+                    b.created_at = $6
+                    AND b.lot_id = $7
+                    AND b.accepted_state_version = $8
+                    AND b.fact_index < $9
                 )
                 OR (
-                    b.created_at = $5
-                    AND b.lot_id = $6
-                    AND b.accepted_state_version = $7
-                    AND b.fact_index = $8
-                    AND b.id < $9
+                    b.created_at = $6
+                    AND b.lot_id = $7
+                    AND b.accepted_state_version = $8
+                    AND b.fact_index = $9
+                    AND b.id < $10
                 )
            )
          ORDER BY b.created_at DESC, b.lot_id DESC,
                   b.accepted_state_version DESC, b.fact_index DESC, b.id DESC
-         LIMIT $10 OFFSET $11",
+         LIMIT $11 OFFSET $12",
     )
     .bind(request.auction_id)
     .bind(request.world_id.as_deref())
     .bind(request.lot_id)
+    .bind(request.lot_code.as_deref())
     .bind(use_boundary)
     .bind(boundary_created_at)
     .bind(boundary_lot_id)
@@ -192,6 +211,24 @@ pub(super) async fn list_postgres(
                    AND l.status IN ('live', 'sold', 'unsold')
                    AND ($2::text IS NULL OR a.world_id = $2)
                    AND ($3::uuid IS NULL OR l.id = $3)
+                   AND (
+                        $4::text IS NULL
+                        OR lower(
+                            CASE e.category
+                                WHEN 'One-Handed' THEN 'One'
+                                WHEN 'Two-Handed' THEN 'Two'
+                                WHEN 'Staff' THEN 'Sta'
+                                WHEN 'Shield' THEN 'Shd'
+                                WHEN 'Cloth' THEN 'Clo'
+                                WHEN 'Light' THEN 'Lig'
+                                WHEN 'Heavy' THEN 'Hea'
+                                ELSE 'Lot'
+                            END || CASE
+                                WHEN l.category_number < 10 THEN '0' || l.category_number::text
+                                ELSE l.category_number::text
+                            END
+                        ) LIKE '%' || lower($4) || '%'
+                   )
                    AND command.command_kind IN (
                         'place_bid', 'create_proxy', 'create_proxy_authorization',
                         'execute_slow_response', 'final_proxy_transition'
@@ -215,6 +252,7 @@ pub(super) async fn list_postgres(
             .bind(request.auction_id)
             .bind(request.world_id.as_deref())
             .bind(request.lot_id)
+            .bind(request.lot_code.as_deref())
             .fetch_one(&mut *transaction)
             .await
             .map_err(|_| storage_error("统计 PostgreSQL 公开竞价日志失败"))?,

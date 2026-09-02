@@ -1,7 +1,7 @@
 //! Public 外壳 readiness HTTP 客户端。
 //!
-//! 旧版页头只在挂载时读取一次 `/health/ready`；HTTP 未就绪和网络/解码失败均由外壳映射为
-//! `unavailable`，这里不泄露后端错误正文，也不建立轮询状态。
+//! 外壳按有界周期读取 `/health/ready`；HTTP 未就绪和网络/解码失败均映射为 `unavailable`，
+//! 这里不泄露后端错误正文，轮询生命周期仍由页面 owner 管理。
 
 use auction_contracts::{HealthProbeResponse, HealthReadyData};
 use gloo_net::http::Request;

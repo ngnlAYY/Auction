@@ -2,6 +2,31 @@
 
 use super::*;
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+struct WorkerHeartbeatHealth {
+    database: Arc<dyn HeartbeatHealthReader>,
+    control: WorkerControlHandle,
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl HeartbeatHealthReader for WorkerHeartbeatHealth {
+    fn readiness(&self) -> auction_observability::HeartbeatReadinessFuture<'_> {
+        Box::pin(async move { self.database.readiness().await && self.control.is_ready() })
+    }
+
+    fn audit_failure_count(&self) -> i64 {
+        self.database.audit_failure_count()
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(super) fn worker_heartbeat_health(
+    database: Arc<dyn HeartbeatHealthReader>,
+    control: WorkerControlHandle,
+) -> Arc<dyn HeartbeatHealthReader> {
+    Arc::new(WorkerHeartbeatHealth { database, control })
+}
+
 #[cfg(unix)]
 pub(super) fn worker_control_server_config(
     config: &AppConfig,

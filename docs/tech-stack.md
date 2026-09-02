@@ -131,7 +131,9 @@ PostgreSQL 在吞吐、锁粒度、多副本、故障转移、在线迁移或全
 - PostgreSQL 18.x 使用行锁和完整的生产隔离策略，是生产 schema 与持久化能力的主基线。
 - SQLite 文件库启用 WAL，读事务不阻塞单个写事务；写入仍由 SQLite 写锁串行化，
   `busy_timeout` 决定等锁而非立即失败。不支持多副本或网络文件系统上的共享数据库；
-  Worker 并发必须保持为一，并在部署说明中记录文件锁和备份假设。
+  Worker 并发必须保持为一，并在部署说明中记录文件锁和备份假设。Public realtime consumer 在
+  Unix 同主机使用不可逆数据库/key 摘要命名的 0600 `flock` sidecar 拒绝重复 owner；不能提供该
+  互斥语义的平台失败关闭。
 - Lite 已提供的竞价写入仍必须保证 `command_id` 幂等、事务原子性、审计追加和凭据安全；
   “轻量”只缩减系统能力，不能放宽已声明支持功能的数据正确性。
 - `migrations/postgres/` 维护完整生产 schema；`migrations/sqlite/` 只维护 Lite 能力需要的

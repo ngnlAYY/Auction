@@ -63,7 +63,7 @@ pub(crate) fn bid_log() -> Element {
             let auction_id = selected_auction_id();
             let page = page_number();
             let lot_id = lot_filter().trim().to_owned();
-            let lot_id = Uuid::parse_str(&lot_id).ok().map(|id| id.to_string());
+            let lot_id = (!lot_id.is_empty()).then_some(lot_id);
             async move {
                 if auction_id.is_empty() {
                     Ok(None)
@@ -219,21 +219,7 @@ pub(crate) fn BidLogTable(
     on_page_change: EventHandler<i64>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
-    let needle = lot_filter.trim().to_ascii_lowercase();
-    let server_filtered = Uuid::parse_str(lot_filter.trim()).is_ok();
-    let bids = if needle.is_empty() || server_filtered {
-        page.bids.clone()
-    } else {
-        page.bids
-            .iter()
-            .filter(|bid| {
-                lot_code_for(&bid.equipment_category, bid.lot_number)
-                    .to_ascii_lowercase()
-                    .contains(&needle)
-            })
-            .cloned()
-            .collect()
-    };
+    let bids = page.bids.clone();
     rsx! {
         div {
             div { class: "public-auction-bid-log-toolbar",

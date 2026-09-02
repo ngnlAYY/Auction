@@ -147,6 +147,32 @@ impl EhentaiGateway {
         }
         Err(EhentaiError::credential(EhentaiOperation::EditPost))
     }
+
+    /// 只读回读固定楼层原始 BBCode；session 过期时可以安全轮换 Cookie。
+    pub async fn read_post_body(
+        &self,
+        world: SettlementWorld,
+        thread_id: &str,
+        post_id: &str,
+    ) -> Result<ForumRenderedPost, EhentaiError> {
+        let mut session = self.credentials.begin()?;
+        for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
+            match self.client.read_post_body(world, thread_id, post_id, session.cookie()).await {
+                Ok(body) => return Ok(body),
+                Err(error) if error.is_session_expired() => {
+                    if session.invalidate_current().await.is_err() || session.advance().is_err() {
+                        return Err(EhentaiError::credential(EhentaiOperation::ReadPostBody));
+                    }
+                }
+                Err(error) if error.category() == EhentaiErrorCategory::SessionExpired => {
+                    let _ = session.invalidate_current().await;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(EhentaiError::credential(EhentaiOperation::ReadPostBody))
+    }
 }
 
 impl ForumCredentialAvailability for EhentaiGateway {
@@ -215,6 +241,19 @@ impl ForumPostWriter for EhentaiGateway {
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
         Box::pin(async move {
             EhentaiGateway::edit_post(self, world, &thread_id, &post_id, title.as_deref(), body)
+                .await
+                .map_err(EhentaiError::into_application_error)
+        })
+    }
+
+    fn read_post_body(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+    ) -> ApplicationFuture<'_, ForumRenderedPost> {
+        Box::pin(async move {
+            EhentaiGateway::read_post_body(self, world, &thread_id, &post_id)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })

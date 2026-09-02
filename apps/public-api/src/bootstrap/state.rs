@@ -2,6 +2,11 @@
 
 use std::sync::Arc;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+use std::sync::{
+    RwLock,
+    atomic::{AtomicBool, Ordering},
+};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 use std::time::Duration;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -9,13 +14,14 @@ use anyhow::Context;
 use auction_application::ReadModelCache;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{
-    AuctionReader, CachedPublicRulesReader, Clock, CompetitionCommandPort, PublicAccountReader,
-    PublicBidLogReader, PublicBlacklistReader, PublicCompensationReader,
-    PublicEquipmentLinkResolver, PublicEquipmentLinkSecretReader, PublicForumReader,
-    PublicLoginAuthenticator, PublicLotReader, PublicPriceHistoryReader, PublicRealtimeReader,
-    PublicRulesReader, PublicSessionConfig, PublicSessionPort, PublicSessionService,
-    PublicSessionStore, RealtimeConsumerStore, RealtimeEventSink, RealtimeRelay,
-    RealtimeRelayConfig, RealtimeStreamStore, WorldReader,
+    ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader, Clock,
+    CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader, PublicBidLogReader,
+    PublicBlacklistReader, PublicCompensationReader, PublicEquipmentLinkResolver,
+    PublicEquipmentLinkSecretReader, PublicForumReader, PublicLoginAuthenticator, PublicLotReader,
+    PublicPriceHistoryReader, PublicRealtimeReader, PublicRulesReader, PublicSessionConfig,
+    PublicSessionPort, PublicSessionService, PublicSessionStore, RealtimeConsumerStore,
+    RealtimeEventSink, RealtimeRelay, RealtimeRelayConfig, RealtimeStreamStore, RepositoryError,
+    WorldReader,
 };
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
@@ -26,11 +32,13 @@ use auction_integrations::{DataKey, EquipmentGameLinkResolver, EquipmentKeyOpene
 use auction_observability::ProcessMetrics;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_observability::{
-    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
-    ProcessRole, ServiceName,
+    HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture,
+    HeartbeatStore, ProcessRole, ServiceName,
 };
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_storage::{DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore};
+use auction_storage::{
+    DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore, RealtimeConsumerOwnership,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -41,6 +49,100 @@ use super::config;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 #[derive(Clone, Copy)]
 struct SystemClock;
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+struct PublicRealtimeRelayHealth {
+    healthy: AtomicBool,
+    last_success: RwLock<Option<std::time::Instant>>,
+    stale_after: Duration,
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl PublicRealtimeRelayHealth {
+    fn new(poll_interval: Duration) -> Self {
+        let stale_after = poll_interval.checked_mul(4).unwrap_or(Duration::from_secs(30));
+        Self {
+            healthy: AtomicBool::new(false),
+            last_success: RwLock::new(None),
+            stale_after: stale_after.max(Duration::from_secs(5)),
+        }
+    }
+
+    fn mark_success(&self) {
+        if let Ok(mut last_success) = self.last_success.write() {
+            *last_success = Some(std::time::Instant::now());
+            self.healthy.store(true, Ordering::Release);
+        } else {
+            self.healthy.store(false, Ordering::Release);
+        }
+    }
+
+    fn mark_failure(&self) {
+        self.healthy.store(false, Ordering::Release);
+    }
+
+    fn is_healthy(&self) -> bool {
+        self.healthy.load(Ordering::Acquire)
+            && self
+                .last_success
+                .read()
+                .ok()
+                .and_then(|last_success| *last_success)
+                .is_some_and(|last_success| last_success.elapsed() <= self.stale_after)
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+struct PublicProcessHealth {
+    database: Arc<DatabaseStore>,
+    relay: Arc<PublicRealtimeRelayHealth>,
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl ProcessReadinessPort for PublicProcessHealth {
+    fn check(&self) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            self.database.check().await?;
+            if !self.relay.is_healthy() {
+                return Err(ApplicationError::Repository(RepositoryError::Failed(
+                    "Public realtime relay 尚未取得新鲜成功证明".to_owned(),
+                )));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl HeartbeatHealthReader for PublicProcessHealth {
+    fn readiness(&self) -> HeartbeatReadinessFuture<'_> {
+        Box::pin(async move { self.database.readiness().await && self.relay.is_healthy() })
+    }
+
+    fn audit_failure_count(&self) -> i64 {
+        self.database.audit_failure_count()
+    }
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(super) struct ConfiguredRealtimeRelay {
+    relay: Arc<RealtimeRelay>,
+    health: Arc<PublicRealtimeRelayHealth>,
+    _ownership: RealtimeConsumerOwnership,
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+struct RealtimeRelayTaskHealthGuard {
+    health: Arc<PublicRealtimeRelayHealth>,
+}
+
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+impl Drop for RealtimeRelayTaskHealthGuard {
+    fn drop(&mut self) {
+        // panic、意外返回或 shutdown abort 都立即撤销任务健康证明，不等待新鲜度窗口自然过期。
+        self.health.mark_failure();
+    }
+}
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 impl Clock for SystemClock {
@@ -75,7 +177,11 @@ pub(super) async fn configure_state(
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
     cache: Arc<dyn ReadModelCache>,
-) -> anyhow::Result<(PublicApiState, Option<Arc<HeartbeatPublisher>>, Option<Arc<RealtimeRelay>>)> {
+) -> anyhow::Result<(
+    PublicApiState,
+    Option<Arc<HeartbeatPublisher>>,
+    Option<Arc<ConfiguredRealtimeRelay>>,
+)> {
     let security = config::configure_security(config)?;
     let Some(database_url) = config.database_url() else {
         return Ok((
@@ -93,8 +199,14 @@ pub(super) async fn configure_state(
     metrics
         .register_pool_metrics(store.pool_metrics_source())
         .context("register public database pool metrics")?;
+    let poll_interval = Duration::from_millis(config.realtime.poll_interval_millis);
+    let relay_health = Arc::new(PublicRealtimeRelayHealth::new(poll_interval));
+    let process_health = Arc::new(PublicProcessHealth {
+        database: Arc::clone(&store),
+        relay: Arc::clone(&relay_health),
+    });
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
-    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
+    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = process_health.clone();
     let heartbeat = Arc::new(HeartbeatPublisher::new(
         heartbeat_store,
         HeartbeatPublisherConfig {
@@ -144,6 +256,10 @@ pub(super) async fn configure_state(
     let sink: Arc<dyn RealtimeEventSink> = Arc::new(RealtimeHubSink::new(Arc::clone(&hub)));
     let stream_store: Arc<dyn RealtimeStreamStore> = store.clone();
     let consumer_store: Arc<dyn RealtimeConsumerStore> = store.clone();
+    let ownership = store
+        .acquire_realtime_consumer_ownership(&config.realtime.consumer_key)
+        .await
+        .context("acquire public realtime consumer ownership")?;
     let realtime_relay = Arc::new(
         RealtimeRelay::new(
             stream_store,
@@ -158,6 +274,12 @@ pub(super) async fn configure_state(
         )
         .map_err(anyhow::Error::msg)?,
     );
+    let realtime_relay = Arc::new(ConfiguredRealtimeRelay {
+        relay: realtime_relay,
+        health: relay_health,
+        _ownership: ownership,
+    });
+    let readiness: Arc<dyn ProcessReadinessPort> = process_health;
     let state = PublicApiState::new(
         Some(worlds),
         Some(rules),
@@ -176,7 +298,7 @@ pub(super) async fn configure_state(
         security,
     )
     .with_realtime_hub(hub)
-    .with_readiness(store);
+    .with_readiness(readiness);
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "public heartbeat ready publish failed");
     }
@@ -210,16 +332,23 @@ pub(super) async fn configure_state(
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(super) fn spawn_realtime_relay(
-    relay: Arc<RealtimeRelay>,
+    configured: Arc<ConfiguredRealtimeRelay>,
     poll_interval: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let _task_health_guard =
+            RealtimeRelayTaskHealthGuard { health: Arc::clone(&configured.health) };
         let mut interval = tokio::time::interval(poll_interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            match relay.run_once(Utc::now()).await {
+            match configured.relay.run_once(Utc::now()).await {
                 Ok(batch) if batch.delivered > 0 || batch.failures > 0 => {
+                    if batch.failures == 0 {
+                        configured.health.mark_success();
+                    } else {
+                        configured.health.mark_failure();
+                    }
                     tracing::debug!(
                         streams = batch.streams,
                         delivered = batch.delivered,
@@ -227,8 +356,9 @@ pub(super) fn spawn_realtime_relay(
                         "public realtime relay batch completed"
                     );
                 }
-                Ok(_) => {}
+                Ok(_) => configured.health.mark_success(),
                 Err(error) => {
+                    configured.health.mark_failure();
                     tracing::warn!(error = %error, "public realtime relay batch failed");
                 }
             }

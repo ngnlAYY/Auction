@@ -31,6 +31,8 @@ pub struct ForumReplyTopic {
     pub content_claim_owner: String,
     pub content_claim_fencing: i64,
     pub content_lease_until: DateTime<Utc>,
+    /// 上一轮未恢复的安全错误码；`write_unknown` 要求先读远端正文再决定是否允许写入。
+    pub content_last_error_code: Option<String>,
 }
 
 impl fmt::Debug for ForumReplyTopic {
@@ -50,6 +52,7 @@ impl fmt::Debug for ForumReplyTopic {
             .field("content_claim_owner", &self.content_claim_owner)
             .field("content_claim_fencing", &self.content_claim_fencing)
             .field("content_lease_until", &self.content_lease_until)
+            .field("content_last_error_code", &self.content_last_error_code)
             .finish()
     }
 }
@@ -207,10 +210,13 @@ pub trait ForumReplyStore: Send + Sync {
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
-    fn mark_scanned(
+    /// 失败时释放当前 claim、记录有界错误码并推进单主题重试水位。
+    fn fail_topic_scan(
         &self,
-        world: SettlementWorld,
-        scanned_at: DateTime<Utc>,
+        topic: ForumReplyTopic,
+        failed_at: DateTime<Utc>,
+        retry_at: DateTime<Utc>,
+        failure_code: String,
     ) -> ApplicationFuture<'_, ()>;
 }
 

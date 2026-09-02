@@ -1,7 +1,9 @@
 //! PostgreSQL/SQLite 持久化 Worker 的装配与退出收口。
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use super::control::{abort_worker_task, join_worker_task, spawn_heartbeat};
+use super::control::{
+    abort_worker_task, join_worker_task, spawn_heartbeat, worker_heartbeat_health,
+};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use super::control::{join_worker_control_task, worker_control_server_config};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -44,24 +46,6 @@ pub(super) async fn run_worker(
         .register_pool_metrics(store.pool_metrics_source())
         .context("register worker database pool metrics")?;
     let worker_id = format!("auction-worker-{}", Uuid::new_v4());
-    let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
-    let heartbeat_health: Arc<dyn HeartbeatHealthReader> = store.clone();
-    let heartbeat = Arc::new(HeartbeatPublisher::new(
-        heartbeat_store,
-        HeartbeatPublisherConfig {
-            service_name: ServiceName::Worker,
-            process_role: ProcessRole::Worker,
-            instance_id: worker_id.clone(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            started_at: Utc::now(),
-            ttl: chrono::Duration::seconds(30),
-        },
-        heartbeat_health,
-        tracing_health,
-    ));
-    if let Err(error) = heartbeat.publish_starting().await {
-        tracing::warn!(error = %error, "worker heartbeat starting publish failed");
-    }
     let schedule: Arc<dyn ScheduledRoundStore> = store.clone();
     let lifecycle_store = Arc::clone(&store);
     let lifecycle: Arc<dyn AuctionLifecycleCommandPort> =
@@ -125,6 +109,24 @@ pub(super) async fn run_worker(
         DatabaseBackend::Sqlite => (None, None, None, None, None, None, None),
     };
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len());
+    let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
+    let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
+    let heartbeat = Arc::new(HeartbeatPublisher::new(
+        heartbeat_store,
+        HeartbeatPublisherConfig {
+            service_name: ServiceName::Worker,
+            process_role: ProcessRole::Worker,
+            instance_id: worker_id.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            started_at: Utc::now(),
+            ttl: chrono::Duration::seconds(30),
+        },
+        worker_heartbeat_health(database_health, control.clone()),
+        tracing_health,
+    ));
+    if let Err(error) = heartbeat.publish_starting().await {
+        tracing::warn!(error = %error, "worker heartbeat starting publish failed");
+    }
     let control_shutdown = Arc::new(tokio::sync::Notify::new());
     let mut control_task = if config.worker.control.enabled {
         let server_config = worker_control_server_config(config)?;

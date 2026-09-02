@@ -1,6 +1,8 @@
 //! SQLite Lite 连接池与文件/内存数据库边界。
 
 use super::*;
+#[cfg(feature = "sqlite")]
+use sha2::{Digest, Sha256};
 
 /// SQLite Lite 适配器边界。
 ///
@@ -12,6 +14,7 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     pool: TrackedPool<Sqlite>,
+    ownership_namespace: String,
 }
 
 /// 等待 SQLite 写锁的上限。超过该时长仍拿不到锁才返回错误，避免瞬时争用直接失败。
@@ -44,7 +47,9 @@ impl SqliteStore {
         let pool =
             SqlitePoolOptions::new().max_connections(max_connections).connect_with(options).await?;
 
-        Ok(Self { pool: TrackedPool::new(pool) })
+        // owner lock 只使用不可逆摘要命名，不把数据库绝对路径暴露到临时目录或错误消息。
+        let ownership_namespace = format!("{:x}", Sha256::digest(database_url.as_bytes()));
+        Ok(Self { pool: TrackedPool::new(pool), ownership_namespace })
     }
 
     pub(crate) fn pool(&self) -> &TrackedPool<Sqlite> {
@@ -53,6 +58,10 @@ impl SqliteStore {
 
     pub(crate) fn raw_pool(&self) -> &SqlitePool {
         self.pool.raw()
+    }
+
+    pub(crate) fn ownership_namespace(&self) -> &str {
+        &self.ownership_namespace
     }
 }
 

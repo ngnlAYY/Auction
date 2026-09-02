@@ -32,7 +32,8 @@ pub(super) async fn claim_published_topics_postgres(
     let rows = sqlx::query(
         "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
-                sync.title, sync.body, sync.system_log_body, sync.content_revision
+                sync.title, sync.body, sync.system_log_body, sync.content_revision,
+                sync.content_last_error_code
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
@@ -84,6 +85,9 @@ pub(super) async fn claim_published_topics_postgres(
         let content_revision: i64 = row
             .try_get("content_revision")
             .map_err(|_| storage_error("读取论坛固定楼层版本失败"))?;
+        let content_last_error_code: Option<String> = row
+            .try_get("content_last_error_code")
+            .map_err(|_| storage_error("读取论坛固定楼层错误码失败"))?;
         let content_claim_token = Uuid::new_v4();
         let claimed = sqlx::query(
             "UPDATE public.auction_forum_sync
@@ -140,6 +144,7 @@ pub(super) async fn claim_published_topics_postgres(
             content_claim_owner: worker_id.to_owned(),
             content_claim_fencing,
             content_lease_until: lease_until,
+            content_last_error_code,
         });
     }
     transaction.commit().await.map_err(|_| storage_error("提交论坛回帖领取事务失败"))?;

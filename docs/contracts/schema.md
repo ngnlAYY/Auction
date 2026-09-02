@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000028`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000029`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。旧系统的 `bid_proxies` 不再作为第二份
@@ -65,7 +65,9 @@ PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 pos
 当前名称恢复并激活该主体。PostgreSQL `000026` 保证同一 world/provider 下一个 Users 主体只能绑定
 一个论坛账号；`000027` 再把该稳定账号归属提升到 Users 主体，并用延迟约束保证 Users 与该主体全部
 论坛映射在事务提交时一致；跨世界复用必须沿用相同数字键。
-`000028` 为 `auction_forum_bid_commands` 记录可证明的真实楼层号，历史未知值保持空。
+`000028` 为 `auction_forum_bid_commands` 记录可证明的真实楼层号，历史未知值保持空；`000029`
+为固定帖刷新增加最近成功时间、最近失败时间和有界安全错误码，并建立追加式
+`forum_identity_history` 保存论坛数字账号与名称变更的新旧快照。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -89,6 +91,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | user_login_key_envelopes | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
 | user_mail_commands | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 注册/重绑命令幂等账本与结果 |
 | user_game_identity_history | 000002_worker_external_adapters | auction-application：users | 完整档 | 旧命名的 MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
+| forum_identity_history | 000029_forum_sync_health_identity | auction-storage：forum reply + audit | 完整档 | 论坛稳定数字账号或可变名称变更的追加式新旧快照，不覆盖历史证据 |
 | user_blacklist_history | PostgreSQL 000004_identity_external_admin / SQLite 000001_lite_core | auction-application：users | 两者 | 封禁变更追加历史 |
 | user_admin_commands | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | Admin 用户命令幂等账本与安全投影重放 |
 | credential_admin_commands | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 凭据管理命令幂等账本 |
@@ -164,10 +167,10 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | mail_poll_state | 000001_baseline + 000008_mooglemail_polling | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | user_mail_commands | 000002_worker_external_adapters | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
-| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering + 000025_forum_fixed_posts | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本和独立刷新 claim |
+| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering + 000025_forum_fixed_posts + 000029_forum_sync_health_identity | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、最近成功时间和有界安全错误 |
 | forum_sync_admin_commands | 000016_forum_sync_write_authorization | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
 | forum_bidder_identities | 000005_recovery_observability_forum + 000026_forum_identity_owner_unique | auction-storage：forum reply + Users owner | 完整档 | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
-| auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply | 完整档 | 论坛回帖扫描游标 |
+| auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply（历史兼容） | 完整档 | 保留的旧世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
 | auction_forum_bid_commands | 000005_recovery_observability_forum + 000028_forum_command_post_number | auction-storage：forum reply；auction-jobs：forum reply | 完整档 | 论坛竞价导入命令账本、可证明的真实楼层号与重试事实 |
 
 A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局
@@ -188,7 +191,7 @@ SQLite Lite 不复制这些完整档表。
 | --- | --- | --- | --- | --- |
 | realtime_streams | 000001_baseline + 000011_realtime_discovery_alias | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 持久化 stream 目录；PostgreSQL 完整档包含 `auction:discovery` 派生流 |
 | realtime_events | 000001_baseline + 000007_realtime_replay + 000011_realtime_discovery_alias | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 追加式事件、stream sequence、replay 关系和 PostgreSQL `auction.created` 发现别名 |
-| realtime_consumer_offsets | 000001_baseline | auction-application：Public relay；auction-jobs：外部 consumer | 两者 | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key |
+| realtime_consumer_offsets | 000001_baseline | auction-application：Public relay；auction-jobs：外部 consumer | 两者 | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key；PostgreSQL 以会话级 advisory lock 保证同 key 单 owner，SQLite 在同主机以 0600 非阻塞 sidecar 文件锁拒绝重复 owner，非 Unix 平台无法证明互斥时失败关闭 |
 | realtime_failures | 000001_baseline | auction-application：Public relay；auction-jobs + auction-observability：外部 realtime | 两者 | 事件消费隔离、失败事实和显式 replay 边界 |
 | operations_alert_runtime_state | 000021_operations_alert_runtime_state + 000022_operations_alert_runtime_clock_split | auction-application + auction-storage：alert health；auction-jobs：运行状态与扫描水位 | 完整档 | Worker 配置启用状态的非敏感单例投影，以及与 signal 观察事务同提交的成功扫描水位；两类时间独立单调，不互相覆盖 |
 | operations_alert_signals | 000005_recovery_observability_forum + 000015_operations_alert_state_invariants + 000020_operations_alert_returned_mail | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 完整档 | 告警信号、稳定 identity、版本、通知时间、cooldown 与已证明退信的独立提醒 |

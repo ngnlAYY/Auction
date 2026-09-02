@@ -166,6 +166,10 @@ Worker 使用 `(consumer_key, stream_key)` 读取 `realtime_consumer_offsets`。
 当前游标的下一个连续 `stream_sequence`，成功确认才推进游标；sink 已收到事件但游标提交
 失败时允许按同一 `event_id` 重复投递，因此外部 sink 必须提供幂等键。
 
+PostgreSQL consumer 启动时还会按命名空间化的 `consumer_key` 持有会话级 advisory owner lock；
+同 key 的第二个实例必须启动失败，不能共享游标并竞态确认。SQLite Lite 继续依赖每个角色一个实例
+和串行写入约束。
+
 schema 不可识别、序号出现缺口或外部 sink 失败都会写入 `realtime_failures`，且不会推进游标。
 失败记录未解决前，消费会停在该边界。只有在替代事件已经追加到同一 stream 后，运维流程才
 能写入引用原事件的 `replay_event_id` 并越过原事件序号；原事件不被修改，替代事件仍按自己的
@@ -190,8 +194,11 @@ Public session 和有界并发，服务端从本地 Hub 逐帧发送旧版单事
 Public Rust 客户端完成握手后先从 HTTP 补齐，HTTP 页与 WebSocket 文本帧共用严格事件 decoder。
 单拍卖 WebSocket 的目标 key 同时包含 auction ID 与 world，带 world 的文本帧必须匹配当前目标。
 单拍卖缓存有界维护 cursor、seen event ID、bid fact identity、`state_version` 和 `fact_index`：完全相同
-的重复事件/事实为 no-op，同一事实身份冲突、序号跳号或版本回退触发权威快照恢复。带
+的重复事件/事实为 no-op，同一事实身份冲突、序号跳号或版本回退触发权威快照恢复。HTTP 快照恢复
+后，第一个晚于恢复 cursor 的事件只为对应 lot 建立 state/fact 基线，随后继续执行严格连续性校验，
+避免把合法的 `fact_index > 1` 首事件反复拒绝。带
 `refetch_required` 的页按上述规则保留高水位和现有 socket；只有真实连接结束才按 3 秒间隔重连。
 拍卖页面订阅单一 `auction:{auction_id}` 流，发现目标使用自己的 `auction:discovery` 游标和缓存，
-不能互相污染。Public 本地 relay/Hub 已按旧版恢复低延迟分发。未来若连接外部广播系统，必须使用
+不能互相污染。页面仍按固定周期读取 readiness、当前/共享拍卖、目录和活动 lot 详情作为权威恢复
+兜底；这些读取不替代 WebSocket 的低延迟路径。Public 本地 relay/Hub 已按旧版恢复低延迟分发。未来若连接外部广播系统，必须使用
 独立 relay/sink 协议，并避免把本地发现流误报为远端投递证明。

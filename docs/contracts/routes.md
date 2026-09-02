@@ -39,8 +39,9 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 | GET/HEAD | /health/ready | 200 | 503 | `{"ready": true/false}` |
 
 两条路径均使用统一 `{code,message,data}` 外壳。`/health/live` 不访问下游依赖；`/health/ready`
-通过应用层 readiness 端口只读检查数据库连接和当前二进制的全部 SQLx 迁移。未配置数据库或迁移
-不完整时返回 503，不把启动骨架伪装成可接收业务流量。
+通过应用层 readiness 端口只读检查当前二进制的必需依赖。Public 配置 realtime relay 时还会检查
+relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 503，不把启动骨架伪装成可接收业务
+流量。Admin 继续以数据库连接和当前二进制的全部 SQLx 迁移作为 readiness 边界。
 
 旧 HTTP 层使用统一响应外壳：
 
@@ -130,7 +131,9 @@ Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot �
 `equipment.category` 组合解释为 `One01`、`Two01` 等编码；它不是全局身份。详情和写命令继续只以
 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。
 P10 竞价日志额外保留
-`world` 与 `lot` 筛选；其条目按 `created_at`、`lot_id`、`accepted_state_version`、
+`world` 与 `lot` 筛选；`lot` 可以是 lot UUID，也可以是 `One01`、`Two01` 一类分类编码，二者在
+内部请求中互斥，并在 storage 的全局结果集分页前应用，不能只筛选当前页面。其条目按
+`created_at`、`lot_id`、`accepted_state_version`、
 `fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值。带 cursor 的返回使用
 next_cursor/has_more，不得把未知总数伪装成精确 total。条目的可选 `source` 只允许 `forum`/`proxy`：
 论坛普通竞价仅在账本保存了真实楼层时同时返回 `source_post_number`；若同一账本还能证明真实
@@ -222,7 +225,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留旧的 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
-公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15，展示状态、源版本、更新时间和已发布帖子内容；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
+公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15：`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停自动轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和旧版竞价结果投影。
@@ -287,7 +290,8 @@ A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回
 catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
 输入无效或解析失败返回 400。远程主题发布/读取、回帖竞价导入和通知由 Worker 的独立论坛 owner
-负责，已经接入持久化游标、命令账本和不确定结果停靠，不属于该预览接口的职责。
+负责，已经接入逐主题持久化调度/健康、命令账本和不确定结果停靠；旧世界级回帖 cursor 只保留
+历史 schema，不是当前写入 owner。这些能力不属于该预览接口的职责。
 A33 `/api/v1/admin/audit` 已接入 Admin session 和只读安全投影，保留 actor/action/entity/source/result
 等精确筛选、occurred 时间范围、keyset opaque cursor 与 `page` 数字分页；数字页在同一数据库
 读取事务内取得 total 与记录，keyset 页不伪造 total。metadata 仅允许 JSON object，SQLite Lite
@@ -307,8 +311,9 @@ A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和
 section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下也会停止周期
 任务并发布停止心跳。每轮周期心跳都会重新检查数据库和全部内嵌 migration，读取进程内饱和的
-审计写入失败计数，并由 Public/Admin/Worker 各自的 tracing owner 提供安全状态；数据库、schema
-或审计完整性异常会令 readiness 为 false，tracing degraded 会令 heartbeat status 降级，但不会
+审计写入失败计数，并由 Public/Admin/Worker 各自的 tracing owner 提供安全状态；Public 同时检查
+已配置 relay 的新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。数据库、schema、
+审计完整性或必须运行的 relay 异常会令 readiness 为 false，tracing degraded 会令 heartbeat status 降级，但不会
 单独改变应用 readiness。启动和停止心跳也携带当时的审计计数与 tracing 安全投影，不再发布
 固定占位值。外部广播不属于旧版 dashboard 契约。
 

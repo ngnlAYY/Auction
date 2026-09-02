@@ -15,6 +15,7 @@ serde_json.workspace = true
 serde.workspace = true
 sha2.workspace = true
 futures-util.workspace = true
+libc.workspace = true
 sqlx.workspace = true
 subtle.workspace = true
 thiserror.workspace = true

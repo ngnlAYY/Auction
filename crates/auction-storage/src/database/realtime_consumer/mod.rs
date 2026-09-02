@@ -16,8 +16,11 @@ use super::DatabaseStore;
 mod acknowledgement;
 mod common;
 mod failure;
+mod ownership;
 mod read;
 mod stream;
+
+pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 
 #[cfg(feature = "postgres")]
 use acknowledgement::acknowledge_postgres;

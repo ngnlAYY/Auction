@@ -51,6 +51,7 @@ pub(crate) fn PublicRealtimeOwner(
     target: PublicRealtimeTarget,
     refresh_generation: Signal<u64>,
     mut discovery_after: Signal<i64>,
+    mut auction_after: Signal<Option<(String, i64)>>,
     mut realtime_state: Signal<LiveConnectionState>,
 ) -> Element {
     let _stream = use_resource(use_reactive((&target,), move |(target,)| async move {
@@ -70,8 +71,17 @@ pub(crate) fn PublicRealtimeOwner(
             }
             PublicRealtimeTarget::Discovery => (None, None),
             PublicRealtimeTarget::Auction { auction_id, world, preview_revision } => {
-                let cache =
-                    Rc::new(RefCell::new(RealtimeCache::new(auction_id.clone(), preview_revision)));
+                let initial_after = auction_after
+                    .peek()
+                    .as_ref()
+                    .filter(|(known_auction_id, _)| known_auction_id == &auction_id)
+                    .map(|(_, after)| *after)
+                    .unwrap_or(0);
+                let cache = Rc::new(RefCell::new(RealtimeCache::new_after(
+                    auction_id.clone(),
+                    preview_revision,
+                    initial_after,
+                )));
                 (Some((auction_id, world)), Some(cache))
             }
         };
@@ -88,7 +98,10 @@ pub(crate) fn PublicRealtimeOwner(
             let cursor = Rc::new(Cell::new(after));
             let callback_cursor = Rc::clone(&cursor);
             let callback_cache = cache.clone();
+            let callback_auction_id =
+                auction_target.as_ref().map(|(auction_id, _)| auction_id.clone());
             let mut callback_discovery_after = discovery_after;
+            let mut callback_auction_after = auction_after;
             let mut callback_state = realtime_state;
             let mut callback_refresh = refresh_generation;
             let on_page = move |page: crate::api::RealtimePage| {
@@ -116,6 +129,8 @@ pub(crate) fn PublicRealtimeOwner(
                     // current-auction 刷新会让目标短暂切到 Checking，并按 key 重建 owner；先把
                     // discovery 游标写回外壳，避免重建后从 0 重放同一事件并形成请求风暴。
                     callback_discovery_after.set(next_after);
+                } else if let Some(auction_id) = callback_auction_id.as_ref() {
+                    callback_auction_after.set(Some((auction_id.clone(), next_after)));
                 }
                 if degraded {
                     callback_state.set(LiveConnectionState::Degraded);

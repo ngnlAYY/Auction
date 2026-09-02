@@ -507,11 +507,14 @@
 
 .public-auction-history-nav {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
   gap: var(--space-3);
   align-items: center;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  min-inline-size: 0;
+  white-space: nowrap;
 }
 
 .public-auction-history-nav a {
@@ -645,6 +648,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-3);
+  min-inline-size: 0;
 }
 
 .public-auction-round__title h1 {
