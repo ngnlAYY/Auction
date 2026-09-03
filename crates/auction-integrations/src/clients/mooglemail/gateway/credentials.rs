@@ -1,12 +1,13 @@
-//! MoogleMail 凭据候选池和一次操作内的 Cookie 轮换。
+//! MoogleMail 单 Cookie 会话和一次操作内的写入隔离。
 
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
 };
 
-use auction_application::AdminCredentialRuntimeWriter;
+use auction_application::{AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter};
 use chrono::Utc;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::*;
@@ -17,26 +18,46 @@ struct MoogleMailCredentialCandidate {
     persistent_id: Option<Uuid>,
     world: Option<MoogleMailWorld>,
     cookie: MoogleMailCookie,
+    operation_lock: Arc<AsyncMutex<()>>,
 }
 
-/// 两个本地 `.keyenv` 身份或数据库凭据池的受控 Cookie 集合。
+/// 单个运行时 MoogleMail Cookie 的受控集合。
 ///
-/// `bot` 对应 `hv-ck-key1`，`test` 对应 `hv-ck-key2`。集合只保存脱敏 Cookie 值对象，不
-/// 实现 `Serialize`，也不提供把值写入日志或 DTO 的接口。数据库来源附带持久 ID，远端确认
-/// 登录失效后会通过窄端口回写 `invalid`，并从当前进程池移除。
+/// 集合只保存脱敏 Cookie 值对象，不实现 `Serialize`，也不提供把值写入日志或 DTO 的接口。
+/// 数据库来源附带持久 ID，远端确认登录失效后会通过窄端口回写 `invalid`，并从当前进程移除。
 #[derive(Clone)]
 pub struct MoogleMailCredentialSet {
     candidates: Arc<Mutex<Vec<MoogleMailCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
+    _ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl MoogleMailCredentialSet {
-    /// 由配置层显式 getter 建立 Bot/测试身份集合。
-    pub fn new(bot: &str, test: &str) -> Result<Self, MoogleMailError> {
-        Self::from_cookies(vec![MoogleMailCookie::new(bot)?, MoogleMailCookie::new(test)?])
+    /// 由配置层显式 getter 建立单 Cookie 集合。
+    pub fn new(cookie: &str) -> Result<Self, MoogleMailError> {
+        Self::from_cookies(vec![MoogleMailCookie::new(cookie)?])
     }
 
-    /// 从不带持久 ID 的本地 Cookie 建立稳定顺序的集合。
+    /// 从本地单 Cookie 建立由当前 Worker 独占的集合。
+    pub fn from_owned_cookie(
+        cookie: MoogleMailCookie,
+        ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
+    ) -> Result<Self, MoogleMailError> {
+        Self::from_candidates(
+            vec![MoogleMailCredentialCandidate {
+                key: Uuid::new_v4(),
+                persistent_id: None,
+                world: None,
+                cookie,
+                operation_lock: Arc::new(AsyncMutex::new(())),
+            }],
+            None,
+            Some(ownership),
+            false,
+        )
+    }
+
+    /// 从不带持久 ID 的本地单 Cookie 建立集合。
     pub fn from_cookies(cookies: Vec<MoogleMailCookie>) -> Result<Self, MoogleMailError> {
         Self::from_candidates(
             cookies
@@ -46,14 +67,16 @@ impl MoogleMailCredentialSet {
                     persistent_id: None,
                     world: None,
                     cookie,
+                    operation_lock: Arc::new(AsyncMutex::new(())),
                 })
                 .collect(),
+            None,
             None,
             false,
         )
     }
 
-    /// 从数据库解密后的 Cookie 建立可回写失效状态的集合。
+    /// 从数据库解密后的单 Cookie 建立可回写失效状态的集合。
     pub fn from_runtime_cookies(
         cookies: Vec<(Uuid, MoogleMailCookie)>,
         invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
@@ -66,14 +89,16 @@ impl MoogleMailCredentialSet {
                     persistent_id: Some(persistent_id),
                     world: None,
                     cookie,
+                    operation_lock: Arc::new(AsyncMutex::new(())),
                 })
                 .collect(),
             Some(invalidator),
+            None,
             true,
         )
     }
 
-    /// 从带 world scope 的数据库凭据建立候选池；`None` 表示 shared，可服务两个世界。
+    /// 从带 world scope 的数据库单凭据建立集合；`None` 表示 shared，可服务两个世界。
     pub fn from_runtime_cookies_with_scopes(
         cookies: Vec<(Uuid, Option<MoogleMailWorld>, MoogleMailCookie)>,
         invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
@@ -86,20 +111,46 @@ impl MoogleMailCredentialSet {
                     persistent_id: Some(persistent_id),
                     world,
                     cookie,
+                    operation_lock: Arc::new(AsyncMutex::new(())),
                 })
                 .collect(),
             Some(invalidator),
+            None,
             true,
+        )
+    }
+
+    /// 从带 scope 的数据库单凭据建立由当前 Worker 独占的集合。
+    pub fn from_owned_runtime_cookies_with_scopes(
+        cookies: Vec<(Uuid, Option<MoogleMailWorld>, MoogleMailCookie)>,
+        invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
+        ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
+    ) -> Result<Self, MoogleMailError> {
+        Self::from_candidates(
+            cookies
+                .into_iter()
+                .map(|(persistent_id, world, cookie)| MoogleMailCredentialCandidate {
+                    key: Uuid::new_v4(),
+                    persistent_id: Some(persistent_id),
+                    world,
+                    cookie,
+                    operation_lock: Arc::new(AsyncMutex::new(())),
+                })
+                .collect(),
+            Some(invalidator),
+            Some(ownership),
+            false,
         )
     }
 
     fn from_candidates(
         candidates: Vec<MoogleMailCredentialCandidate>,
         invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
+        ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
         allow_empty: bool,
     ) -> Result<Self, MoogleMailError> {
         if (!allow_empty && candidates.is_empty())
-            || candidates.len() > 64
+            || candidates.len() > 1
             || candidates
                 .iter()
                 .any(|candidate| candidate.persistent_id.is_some_and(|id| id.is_nil()))
@@ -121,39 +172,102 @@ impl MoogleMailCredentialSet {
                 false,
             ));
         }
-        Ok(Self { candidates: Arc::new(Mutex::new(candidates)), invalidator })
+        if ownership.is_some() && candidates.is_empty() {
+            return Err(MoogleMailError::new(
+                MoogleMailOperation::Inbox,
+                MoogleMailWorld::Main,
+                MoogleMailErrorCategory::CredentialUnavailable,
+                false,
+            ));
+        }
+        Ok(Self {
+            candidates: Arc::new(Mutex::new(candidates)),
+            invalidator,
+            _ownership: ownership,
+        })
     }
 
     pub(crate) fn begin(
         &self,
         world: MoogleMailWorld,
     ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
-        let candidate = self
-            .candidates
-            .lock()
-            .map_err(|_| {
-                operation_error(
-                    MoogleMailOperation::Inbox,
-                    world,
-                    MoogleMailErrorCategory::CredentialUnavailable,
-                )
-            })?
-            .iter()
-            .find(|candidate| candidate.world.is_none_or(|scope| scope == world))
-            .cloned()
-            .ok_or_else(|| {
-                operation_error(
-                    MoogleMailOperation::Inbox,
-                    world,
-                    MoogleMailErrorCategory::CredentialUnavailable,
-                )
-            })?;
+        let operation = MoogleMailOperation::Inbox;
+        let mut tried = HashSet::new();
+        let candidate = self.next_candidate(world, operation, &tried)?;
+        tried.insert(candidate.key);
         Ok(MoogleMailCredentialSession {
             set: self.clone(),
             world,
+            operation,
             current: candidate.clone(),
-            tried: HashSet::from([candidate.key]),
+            tried,
+            operation_guard: None,
         })
+    }
+
+    /// 为会修改远端状态的完整逻辑操作取得凭据级独占 guard。
+    pub(crate) async fn begin_exclusive(
+        &self,
+        world: MoogleMailWorld,
+        operation: MoogleMailOperation,
+    ) -> Result<MoogleMailCredentialSession, MoogleMailError> {
+        let mut tried = HashSet::new();
+        for _ in 0..64 {
+            let candidate = self.next_candidate(world, operation, &tried)?;
+            tried.insert(candidate.key);
+            let operation_guard = Arc::clone(&candidate.operation_lock).lock_owned().await;
+            if self.candidate_is_active(candidate.key, world, operation)? {
+                return Ok(MoogleMailCredentialSession {
+                    set: self.clone(),
+                    world,
+                    operation,
+                    current: candidate,
+                    tried,
+                    operation_guard: Some(operation_guard),
+                });
+            }
+        }
+        Err(operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable))
+    }
+
+    fn next_candidate(
+        &self,
+        world: MoogleMailWorld,
+        operation: MoogleMailOperation,
+        tried: &HashSet<Uuid>,
+    ) -> Result<MoogleMailCredentialCandidate, MoogleMailError> {
+        self.candidates
+            .lock()
+            .map_err(|_| {
+                operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable)
+            })?
+            .iter()
+            .find(|candidate| {
+                candidate.world.is_none_or(|scope| scope == world)
+                    && !tried.contains(&candidate.key)
+            })
+            .cloned()
+            .ok_or_else(|| {
+                operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable)
+            })
+    }
+
+    fn candidate_is_active(
+        &self,
+        key: Uuid,
+        world: MoogleMailWorld,
+        operation: MoogleMailOperation,
+    ) -> Result<bool, MoogleMailError> {
+        self.candidates
+            .lock()
+            .map(|candidates| {
+                candidates.iter().any(|candidate| {
+                    candidate.key == key && candidate.world.is_none_or(|scope| scope == world)
+                })
+            })
+            .map_err(|_| {
+                operation_error(operation, world, MoogleMailErrorCategory::CredentialUnavailable)
+            })
     }
 
     /// 返回当前进程中是否至少有一个能够服务目标 world 的凭据。
@@ -168,8 +282,10 @@ impl MoogleMailCredentialSet {
 pub(crate) struct MoogleMailCredentialSession {
     set: MoogleMailCredentialSet,
     world: MoogleMailWorld,
+    operation: MoogleMailOperation,
     current: MoogleMailCredentialCandidate,
     tried: HashSet<Uuid>,
+    operation_guard: Option<OwnedMutexGuard<()>>,
 }
 
 impl MoogleMailCredentialSession {
@@ -184,7 +300,7 @@ impl MoogleMailCredentialSession {
         {
             let mut candidates = self.set.candidates.lock().map_err(|_| {
                 operation_error(
-                    MoogleMailOperation::Inbox,
+                    self.operation,
                     self.world,
                     MoogleMailErrorCategory::CredentialUnavailable,
                 )
@@ -196,7 +312,7 @@ impl MoogleMailCredentialSession {
         {
             invalidator.mark_invalid(persistent_id, Utc::now()).await.map_err(|_| {
                 operation_error(
-                    MoogleMailOperation::Inbox,
+                    self.operation,
                     self.world,
                     MoogleMailErrorCategory::CredentialUnavailable,
                 )
@@ -205,35 +321,33 @@ impl MoogleMailCredentialSession {
         Ok(())
     }
 
-    /// 切换到尚未尝试过的稳定候选。
+    /// 兼容调用边界：当前单 Cookie 模型没有后备凭据，失效后会返回不可用。
     pub(crate) fn advance(&mut self) -> Result<(), MoogleMailError> {
-        let candidate = self
-            .set
-            .candidates
-            .lock()
-            .map_err(|_| {
-                operation_error(
-                    MoogleMailOperation::Inbox,
-                    self.world,
-                    MoogleMailErrorCategory::CredentialUnavailable,
-                )
-            })?
-            .iter()
-            .find(|candidate| {
-                candidate.world.is_none_or(|scope| scope == self.world)
-                    && !self.tried.contains(&candidate.key)
-            })
-            .cloned()
-            .ok_or_else(|| {
-                operation_error(
-                    MoogleMailOperation::Inbox,
-                    self.world,
-                    MoogleMailErrorCategory::CredentialUnavailable,
-                )
-            })?;
+        debug_assert!(self.operation_guard.is_none());
+        let candidate = self.set.next_candidate(self.world, self.operation, &self.tried)?;
         self.tried.insert(candidate.key);
         self.current = candidate;
         Ok(())
+    }
+
+    /// 释放当前凭据 guard；当前单 Cookie 失效后不会自动切换到其它 Cookie。
+    pub(crate) async fn advance_exclusive(&mut self) -> Result<(), MoogleMailError> {
+        self.operation_guard.take();
+        for _ in 0..64 {
+            let candidate = self.set.next_candidate(self.world, self.operation, &self.tried)?;
+            self.tried.insert(candidate.key);
+            let operation_guard = Arc::clone(&candidate.operation_lock).lock_owned().await;
+            if self.set.candidate_is_active(candidate.key, self.world, self.operation)? {
+                self.current = candidate;
+                self.operation_guard = Some(operation_guard);
+                return Ok(());
+            }
+        }
+        Err(operation_error(
+            self.operation,
+            self.world,
+            MoogleMailErrorCategory::CredentialUnavailable,
+        ))
     }
 }
 

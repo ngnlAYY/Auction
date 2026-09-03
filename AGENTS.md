@@ -301,8 +301,9 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
   `admin_secret` 只能放在敏感 TOML；MoogleMail Cookie 生产路径同样使用敏感 TOML，但本地
   联调可由 `auction-config::load_mooglemail_keyenv` 严格读取 `.keyenv` 的
-  `hv-ck-key1`/`hv-ck-key2`。这些字段不通过通用环境变量覆盖；Admin 凭据必须成对配置，
-  secret 至少 16 字节。
+  `hv-ck-key1`/`hv-ck-key2`。Worker 只使用 `hv-ck-key1`；`hv-ck-key2` 只允许显式隔离验证，
+  不得加入运行时候选或自动切换。论坛和游戏邮件每种凭据全局最多一条 active Cookie。这些字段
+  不通过通用环境变量覆盖；Admin 凭据必须成对配置，secret 至少 16 字节。
 - 敏感文件不得提交，部署时应限制为仅运行账号可读。配置错误和日志不得回显连接串、
   Cookie、密钥或包含这些内容的 TOML 原文。
 - 敏感文件中的 `database_url` 支持 `postgres://`、`postgresql://` 和 `sqlite:`，并直接

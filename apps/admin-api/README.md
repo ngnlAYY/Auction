@@ -39,9 +39,9 @@ MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin
 收紧到当前事务时间，实际结算仍由 Worker 领取。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔、总超时和
 `require_tradeable` 也会映射到装备来源适配器及手工录入策略；该开关默认关闭，关闭时允许 Admin
 录入明确标记为 Soulbound 的装备，开启时恢复只接受可交易装备的旧限制。MoogleMail 邮件装备仍由
-独立过滤策略拒绝不可交易来源，不受该 Admin 开关影响。适配器在启动时读取 A32 中目标 world 或 shared scope 的 active `mail_cookie`，
-并在远端明确返回登录页时轮换候选、回写失效状态。没有数据库候选时才兼容敏感配置的单 Cookie
-入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
+独立过滤策略拒绝不可交易来源，不受该 Admin 开关影响。适配器在启动时读取 A32 中目标 world 或 shared scope 的唯一 active `mail_cookie`，
+并在远端明确返回登录页时回写失效状态；单 Cookie 失效后不会自动切换。没有数据库记录时才兼容
+敏感配置的单 Cookie 入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
 路径校验始终保留。
 
 Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful

@@ -218,11 +218,16 @@ Users Mail owner 由 `src/database/users/mail.rs` 只做端口分派；`mail/pos
 Lite 登录 key 信封读取。这样 PostgreSQL 完整档的外部身份命令与 SQLite Lite 的本地信封能力保持
 显式边界，明文 key 仍不进入存储或 HTTP 投影。
 Admin A32 凭据管理由 `src/database/credentials/mod.rs` 装配：`runtime.rs` 负责 active/health
-读取，`read.rs` 负责列表与命令查询，`write.rs` 负责导入/修改/删除事务，`mapping.rs` 与
+读取，`ownership.rs` 负责每种外部 Cookie 的 Worker 进程所有权，`read.rs` 负责列表与
+命令查询，`write.rs` 负责导入/修改/删除事务，`mapping.rs` 与
 `common.rs` 负责安全投影、结果和错误映射。PostgreSQL 在 Serializable 事务中完成
-`mail_cookie`/`forum_cookie` 的安全投影、密文信封、命令幂等、版本 fence 和追加审计；
+`mail_cookie`/`forum_cookie` 的安全投影、密文信封、命令幂等、版本 fence 和追加审计；每种
+Cookie 全局最多一条 active 记录，并由数据库唯一索引保护并发导入/重新启用；
 删除会先保留命令账本与审计，再删除凭据行，外键使用 `ON DELETE SET NULL`。Worker 读取 active
-凭据时也由该模块按 world/shared 返回密文信封；dashboard 聚合同时返回 scope 最近更新时间和
+凭据时也由该模块按 world/shared 返回密文信封；Worker 会在一条专用 PostgreSQL session 上按
+credential kind 取得 advisory lock，同类 Cookie 已由另一 Worker 占用就启动失败。该 session 不持有
+数据库事务跨越远端网络操作，guard 销毁时关闭物理连接而不是带锁返回
+连接池；SQLite Lite 不提供该完整档所有权。dashboard 聚合同时返回 scope 最近更新时间和
 凭据命令账本最近变更时间，供 HTTP 层结合 Worker 心跳判断重启状态，并按旧版要求检查 MoogleMail
 `main`/`isekai` 各自的 active/invalid 水位；`shared` 邮件凭据会继承到两个 world，更新时间取有效
 scope 的最新值，任一有效 scope 存在 invalid 行都会使对应 world 降级；SQLite Lite 明确返回能力不支持，不把凭据导入、
@@ -346,7 +351,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000029` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000030` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -357,7 +362,9 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 增加分类键与分类编号唯一性/不可变防线，并冻结既有论坛主题的编号方案；`000025` 追加论坛固定
 #1/#2 的 post proof、内容版本和独立刷新 lease/fencing，`000026` 固定同一 world/provider 的单用户
 论坛账号归属，`000027` 增加 Users 级稳定论坛账号 ID、跨表提交约束并把名称权威收敛到 `username`，`000028`
-保存论坛竞价来源的真实楼层号，`000029` 增加固定帖刷新健康字段与追加式论坛身份变更历史。SQLite
+保存论坛竞价来源的真实楼层号，`000029` 增加固定帖刷新健康字段与追加式论坛身份变更历史，
+`000030` 以迁移前置检查和 partial unique index 保证 `mail_cookie`/`forum_cookie` 各自全局最多一条
+active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite

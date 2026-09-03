@@ -30,12 +30,14 @@ retry 审计；若结算其实已经提交，settled fence 会阻止误写失败
 take payload。动作前会核对 sender 和预期资产；return 以精确 `mid` 从收件箱消失证明结果，
 take 以同一邮件的资产归零和 Credits/COD/附件回执证明结果；注册/重绑的用户 key 只在发送前由
 独立密钥解密。send 的明确收件人不存在会保留退信 `mid` 和回收标记，并在退信资产取回前进入
-`manual_reconcile`；邮资拒绝在已暂存资产时同样进入人工对账，Worker 不会自动重发。
+`manual_reconcile`；本轮后续 claim 会暂时排除同一 `(world, recipient)`，其他玩家继续发送，
+下一轮重新评估。邮资拒绝在已暂存资产时同样进入人工对账，Worker 不会自动重发。
 Delivery Worker 在 `start_sending` 前调用 transport availability gate；目标 world 暂无
 scoped/shared 凭据时，以完整 lease token/fencing 把 claim 释放回 `pending`，不会误写失败终态。
-该循环使用独立的 poll/jitter/batch/concurrency 配置，每轮完成后等待 `poll + [0, jitter]`，
-只在并发槽空闲后领取下一条，避免等待执行的
-claim 提前耗尽 lease。进入 `sending` 后按配置周期续租，并用完整请求超时限制远端调用；超时、
+该循环使用独立的 poll/jitter/batch/concurrency 配置，每轮完成后等待 `poll + [0, jitter]`；有效
+并发取配置值与 transport 上限的较小值，只在槽位空闲后领取下一条。MoogleMail transport 因账号级
+compose 可变状态把上限固定为 1，避免多个 claim 先进入 `sending` 再等待凭据锁并消耗请求超时。
+进入 `sending` 后按配置周期续租，并用完整请求超时限制远端调用；超时、
 网络错误或凭据竞态按结果未知写入人工对账。终态写回受独立 finalize timeout 限制，续租失效时
 只允许尝试同一 token/fencing 的结果未知写回；若 fence 已失效，则由 lease 加 sending grace
 到期后的防线转入人工对账，禁止重新领取并盲目重发。
@@ -73,7 +75,7 @@ auction UUID 确认写入幂等授权账本和追加审计后，Worker 下一次
 `reply.rs` 只保留运行时与循环入口。Forum 使用默认 `300s + [0,5s]` 的独立顺序循环，先发布后读取
 回帖；发布失败仍继续回帖导入，主题逐条领取而不提前占用整批租约，循环异常退出才使进程失败关闭。
 论坛新回复只允许普通出价进入命令账本；代理创建/降低属于 Public Web 专属能力，解析入口静默
-忽略对应行且不生成 #2 日志，历史已持久化论坛账本仍按既有幂等规则读取。Worker 的论坛凭据池
+忽略对应行且不生成 #2 日志，历史已持久化论坛账本仍按既有幂等规则读取。Worker 的唯一论坛 Cookie
 可为空并保持 degraded；凭据可用时，每个进程世代只恢复早于首轮水位的 `credential_unavailable`
 任务一次，再次失败不会在同一进程形成领取风暴。
 Operations alert 的 scan、dispatch 和 reconcile 现在按各自独立 cadence 运行，默认每 60 秒加最多
@@ -86,7 +88,7 @@ Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Re
 `worker/recovery/loop/{health,cases,returns,actions,resolutions,common}.rs` 保持
 `case → return → action → relist → refund` 顺序，各 phase 失败互不跳过，且不会终止其它 owner。
 MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller，每个 poller 使用独立
-`mailbox_key`、游标、claim/fencing 和固定指标 label；共享凭据池只在 Worker 内复用，不合并
+`mailbox_key`、游标、claim/fencing 和固定指标 label；同一 shared Cookie 只在 Worker 内复用，不合并
 不同世界的持久化状态。轮询实现位于 `src/worker/mail/poll/`，由 `types.rs`、`cycle.rs`、
 `processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
 租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。

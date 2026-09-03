@@ -362,4 +362,5 @@ A32 `/api/v1/admin/credentials` 已接入 Admin session、origin/CSRF、`command
 和删除。secret 只在应用加密边界短暂存在，不进入响应、审计、命令结果或页面；该路由要求
 PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥时返回
 `501 feature_not_supported`。Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作为兼容
-回退入口。
+回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用同类第二条
+时返回 `409 credential_conflict`，调用方必须先通过同一路由停用旧记录并重启 Worker 完成交接。

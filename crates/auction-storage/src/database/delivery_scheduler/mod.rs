@@ -4,8 +4,8 @@
 //! 结果；如果远端结果已经无法确定，调用方必须把记录置为 `manual_reconcile`。
 
 use auction_application::{
-    ApplicationError, DeliverySendResult, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    ApplicationError, DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransportError,
+    DeliveryWorkClaim, DeliveryWorkStore,
 };
 use chrono::{DateTime, Utc};
 
@@ -50,6 +50,7 @@ impl DeliveryWorkStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         sending_grace: std::time::Duration,
+        excluded_recipients: Vec<DeliveryRecipientExclusion>,
         limit: u16,
     ) -> auction_application::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
         Box::pin(async move {
@@ -59,16 +60,31 @@ impl DeliveryWorkStore for DatabaseStore {
                 || lease_until <= now
                 || sending_grace.is_zero()
                 || sending_grace > std::time::Duration::from_secs(86_400)
+                || excluded_recipients.len() > usize::from(u16::MAX)
+                || excluded_recipients.iter().any(|excluded| {
+                    excluded.world.is_empty()
+                        || excluded.world != excluded.world.trim()
+                        || excluded.world.chars().any(char::is_control)
+                        || excluded.recipient.is_empty()
+                        || excluded.recipient != excluded.recipient.trim()
+                        || excluded.recipient.chars().any(char::is_control)
+                })
             {
                 return Err(repository_error("delivery 领取参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => {
-                    claim_postgres(store.pool(), &worker_id, now, lease_until, sending_grace, limit)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
+                Self::Postgres(store) => claim_postgres(
+                    store.pool(),
+                    &worker_id,
+                    now,
+                    lease_until,
+                    sending_grace,
+                    &excluded_recipients,
+                    limit,
+                )
+                .await
+                .map_err(ApplicationError::from),
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
                     "delivery outbox 仅支持 PostgreSQL 完整档",

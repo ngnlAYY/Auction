@@ -129,7 +129,7 @@ recovery_retry_delay_seconds = 60
 
 # 可选区块：Delivery outbox 的独立轮询、并发、lease 和超时边界。
 [worker.delivery]
-# 可选：单轮上限和同时执行数，默认 100/8。
+# 可选：单轮上限和配置并发上限，默认 100/8；transport 可进一步收紧有效并发。
 batch_limit = 100
 concurrency = 8
 # 可选：独立轮询、随机抖动上限、claim lease 和 sending 续租间隔秒数，默认 60/5/60/10。
@@ -340,7 +340,8 @@ max_public_sessions = 5
 `credential_data_key` 是 A32 MoogleMail/E-Hentai 凭据专用的 32 字节标准 Base64 数据密钥，
 必须与 `credential_data_key_id` 成对提供，不能复用装备或用户登录 key。Admin 只有在
 PostgreSQL 完整档且配置这对字段时才启用凭据导入/修改/删除；Worker 配置这对字段时会按
-world 读取 active 凭据池并在内存中解密。没有配置时 Worker 继续使用 `.keyenv` 或
+world/shared 读取唯一 active Cookie 并在内存中解密；`mail_cookie` 与 `forum_cookie` 各自全局
+最多一条 active 记录。没有配置时 Worker 继续使用 `.keyenv` 或
 `mooglemail_cookie` 的兼容入口。
 
 相对 `secrets_file` 路径以主配置文件所在目录解析。敏感文件不得提交，部署时应限制为仅运行
@@ -358,7 +359,8 @@ world 读取 active 凭据池并在内存中解密。没有配置时 Worker 继�
 ## MoogleMail 本地联调凭据
 
 用户明确提供的本地 `.keyenv` 可作为 MoogleMail 联调的窄凭据通道。`auction-config` 的
-`load_mooglemail_keyenv(path)` 只接受两个键：`hv-ck-key1` 是 Bot 号，`hv-ck-key2` 是测试号；
+`load_mooglemail_keyenv(path)` 只接受两个固定键：`hv-ck-key1` 是 Worker 运行账号，
+`hv-ck-key2` 只供显式隔离验证；生产 Worker 只使用前者，不把两者组成候选，也不会自动切换；
 未知键、重复键、空值、控制字符和不安全权限都会失败关闭。Unix 文件必须是 owner-only
 （建议 `chmod 600 .keyenv`）；值可使用成对单引号或双引号包裹。文件本身已被 Git 忽略，不能提交。
 
@@ -371,7 +373,8 @@ Worker 的 control socket（若启用）、Auction `concurrency`/`poll_interval_
 `[worker.delivery]` 的批次/并发/poll 抖动/lease/续租/宽限/超时、`[worker.fulfillment]` 的
 批次/并发/poll 抖动/lease/单项超时/重试，以及 `[worker.recovery]` 的同类调度边界、低余额阈值和
 health 时间边界必须满足各自的路径/正数边界；Delivery 的续租间隔必须小于 lease，sending 宽限
-必须大于完整请求超时；Fulfillment 和 Recovery 的单项超时必须小于各自 lease；
+必须大于完整请求超时；Delivery 配置并发是上限，runner 还会取 transport 上限的较小值，当前
+MoogleMail transport 因账号级 compose 可变状态固定为 1；Fulfillment 和 Recovery 的单项超时必须小于各自 lease；
 其中 recovery 重试间隔不能超过 86400 秒；省略 Auction concurrency 时，配置层按 PostgreSQL=8、
 SQLite Lite=1 计算有效值，显式 SQLite 值也只允许 1，以落实单主机、单写者约束。轮询间隔只负责唤醒持久化调度器，
 不能替代数据库 due/租约状态。MoogleMail 每个 world 使用独立循环和手动唤醒器，读取与单封业务
@@ -395,7 +398,7 @@ listener 启用，TCP listener 必须通过规范且不重复的 `trusted_proxy_
 PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当前 Rust 首片已接入拍卖入站以及
 用户注册/重绑业务处理；注册 key 由独立的数据密钥加密，数据库和 delivery outbox 不保存明文。
 结算退信以及 Sent/Balance 回执对账已由 PostgreSQL Worker owner 接入。启用 `[worker.forum]`
-后，PostgreSQL Worker 会装配 E-Hentai 主题发布和回帖导入；论坛 Cookie 可从独立凭据池读取，
+后，PostgreSQL Worker 会装配 E-Hentai 主题发布和回帖导入；唯一论坛 Cookie 可从独立密文记录读取，
 或使用敏感配置的兼容 getter。`worker.forum.public_base_url` 可选，填写无路径的公开端
 origin 后会把旧版 `/?auction=...&world=...` 相对链接解析为主题正文中的绝对链接；
 `poll_interval_seconds` 和 `jitter_seconds` 默认分别为 300 与 5，独立于 Auction 生命周期循环；成功

@@ -153,7 +153,11 @@ SQLite Lite 不启用结算阶段。
 Worker 的 `[worker.delivery]` 独立控制 delivery outbox 的轮询及随机抖动、批次、并发、claim lease、sending
 续租、过期宽限、完整外部请求和终态写回超时。续租间隔必须小于 lease，sending grace 必须大于
 请求超时；这些字段都是可选非敏感策略，完整中文注释和默认值见 `examples/worker.toml`。该区块
-只影响 PostgreSQL 完整档的外部交付，SQLite Lite 不装配 delivery Worker。
+只影响 PostgreSQL 完整档的外部交付，SQLite Lite 不装配 delivery Worker。`concurrency` 是配置
+上限，实际 runner 还会取 transport 声明上限的较小值；当前 MoogleMail 因账号级 compose 状态固定为 1。
+论坛和游戏邮件分别只允许一个 active Cookie；Worker 按凭据类型取得 PostgreSQL session
+advisory ownership，替换或失效后需要重启 Worker 完成所有权交接。`.keyenv` 兼容入口只把
+`hv-ck-key1` 用作运行 Cookie，`hv-ck-key2` 仅供显式隔离验证，不会自动切换。
 
 Worker 的 `[worker.fulfillment]` 和 `[worker.recovery]` 只在 PostgreSQL 完整档装配。两者默认立即
 执行一轮，再等待 60 秒加最多 5 秒随机抖动；默认批次 100、并发 8、claim lease 60 秒、单项总超时

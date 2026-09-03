@@ -144,6 +144,12 @@ impl MoogleMailDeliveryTransport {
 }
 
 impl DeliveryTransport for MoogleMailDeliveryTransport {
+    fn maximum_concurrency(&self) -> u16 {
+        // MoogleMail compose 是账号级可变状态；先在领取循环形成背压，避免多个 claim 进入
+        // `sending` 后等待凭据锁并把排队时间误计为远端请求超时。
+        1
+    }
+
     fn available(&self, claim: &DeliveryWorkClaim) -> bool {
         let world = match claim.origin_kind.as_str() {
             "settlement" => decode_settlement_payload(claim).map(|(_, world)| world),

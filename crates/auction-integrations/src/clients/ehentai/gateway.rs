@@ -1,4 +1,4 @@
-//! E-Hentai 凭据轮换网关与 Forum 端口适配。
+//! E-Hentai 单 Cookie 网关与 Forum 端口适配。
 
 use super::*;
 
@@ -15,7 +15,7 @@ impl EhentaiGateway {
         client: Arc<EhentaiClient>,
         credentials: EhentaiCredentialSet,
     ) -> Result<Self, EhentaiError> {
-        // 数据库凭据池允许暂时为空；真实操作会返回 credential_unavailable，Worker 仍保持 degraded。
+        // 数据库凭据允许暂时为空；真实操作会返回 credential_unavailable，Worker 仍保持 degraded。
         Ok(Self { client, credentials })
     }
 

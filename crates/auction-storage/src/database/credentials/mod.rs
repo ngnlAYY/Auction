@@ -38,6 +38,8 @@ mod common;
 #[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
+mod ownership;
+#[cfg(feature = "postgres")]
 mod read;
 #[cfg(feature = "postgres")]
 mod runtime;
@@ -47,6 +49,8 @@ mod write;
 use common::*;
 #[cfg(feature = "postgres")]
 use mapping::*;
+#[cfg(feature = "postgres")]
+pub use ownership::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
 #[cfg(feature = "postgres")]
 use read::*;
 #[cfg(feature = "postgres")]

@@ -155,15 +155,15 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000029`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000030`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
 严格兼容 trigger、已证明 MoogleMail 退信的独立告警 identity，以及 operations alert 的运行状态、
 扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态、lot 的分类内展示编号，
 以及论坛固定 #1/#2 的远端身份和内容版本证明、同一 world/provider 的单用户论坛账号归属、
-Users 级稳定论坛账号 ID、论坛命令真实楼层来源、逐主题同步健康/调度事实，以及论坛身份变更历史
-和追加式审计证据。
+Users 级稳定论坛账号 ID、论坛命令真实楼层来源、逐主题同步健康/调度事实、论坛身份变更历史和
+追加式审计证据，以及邮件/论坛两类外部 Cookie 各自唯一 active 的数据库防线。
 `lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
 不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
@@ -274,7 +274,7 @@ workflow 字段的结算 due claim、稳定结算命令、完成 fence 和指数
 `inbound_mail`、`mail_commands` 和 cursor 的同事务幂等提交。Worker 通过
 `[worker.mooglemail]` 显式启用后，会按顶层 world 与 `additional_worlds` 为每个已配置世界装配
 独立的持久化邮箱状态、定向 claim、读取 gateway、业务 processor、拍卖入站事务和 delivery
-outbox；配置独立 `credential_data_key` 且使用 PostgreSQL 时，Worker 优先从 A32 active 凭据池
+outbox；配置独立 `credential_data_key` 且使用 PostgreSQL 时，Worker 优先从 A32 唯一 active Cookie
 读取并在内存解密，未配置时继续兼容固定 `.keyenv` 或敏感配置，数据库只保存安全摘要与无密文
 payload。当前首条
 业务链已覆盖拍卖邮件的 Credits/COD 拒绝、无附件通知、装备来源读取、起拍价指令解析、拍卖
@@ -343,17 +343,17 @@ A05 已先落地为纯本地论坛预览解析：HTML/文本输入
 
 **凭据通道：** A32 已将生产外部 Cookie 的管理入口拆为独立的
 `credential_data_key_id`/`credential_data_key` 密钥域。Admin 只在 PostgreSQL 完整档提供凭据
-导入、改名、启停、删除和安全投影读取；Worker 按 world/shared 读取 active 密文池，在内存
-解密后按顺序尝试，密钥不匹配、密文损坏或已有 active 行全部无法解密时失败关闭；暂时没有
+导入、改名、启停、删除和安全投影读取；Worker 按 world/shared 读取唯一 active 密文 Cookie，在内存
+解密后使用，存在同类重复 active 行、密钥不匹配或密文损坏时失败关闭；暂时没有
 active 行时保留 degraded 运行态，实际操作返回 credential unavailable。该密钥不能复用装备或用户
 登录 key，也不能进入日志、DTO、快照或提交内容。凭据 owner 内部已补齐 scope 最近更新时间、
 最近 Admin 变更时间和 Worker 启动心跳重启判断；旧 v1 dashboard 只投影聚合后的 availability、
 观测时间和最近 Admin 变更时间。Worker 未被可靠观测时保持 unknown，不把未验证状态误报为成功。
 
 兼容回退仍允许 `auction-config` 的 `ehentai_cookie()` / `mooglemail_cookie()` getter，以及
-`auction-config::load_mooglemail_keyenv` 读取 `.keyenv` 的两个固定键：`hv-ck-key1`（Bot）和
-`hv-ck-key2`（测试号）。`.keyenv` 入口只允许 owner-only 文件权限和固定键闭集，不构成通用
-环境变量覆盖；值仍由 `SecretString` 脱敏。
+`auction-config::load_mooglemail_keyenv` 读取 `.keyenv` 的两个固定键：`hv-ck-key1` 是 Worker
+运行 Cookie，`hv-ck-key2` 只供显式隔离验证。`.keyenv` 入口只允许 owner-only 文件权限和固定键
+闭集，不构成通用环境变量覆盖；值仍由 `SecretString` 脱敏，Worker 不把测试值加入候选或自动切换。
 
 ---
 
@@ -470,7 +470,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000029` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000030` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -647,13 +647,16 @@ A32 凭据管理首片已接入：`auction-application` 声明凭据种类、wor
 `credential_data_key` 为 MoogleMail/E-Hentai Cookie 生成带类型域的 AES-256-GCM 密文信封。
 PostgreSQL `000009_credential_admin_compat` 补齐 `forum_cookie` 闭集，并允许删除凭据后保留
 命令账本与审计证据。`auction-storage` 在同一 Serializable 事务内完成导入、改名、启停、
-删除的凭据行、命令账本和追加审计；`auction-http` 与 Admin 页面只接触安全投影，管理页补齐
-kind/world/status 筛选、数字分页、改名对话框和删除确认，导入 secret 不会回显。Worker 配置独立密钥后可按 world/shared 读取 active 凭据池并在内存解密，远端确认
-登录失效时按稳定候选顺序轮换、幂等回写 `invalid` 并从当前进程池移除；凭据 owner 会按 kind/world
+删除的凭据行、命令账本和追加审计；`000030_single_active_external_cookie` 以失败关闭的迁移前置检查
+和 partial unique index 保证 `mail_cookie`/`forum_cookie` 各自全局最多一条 active 记录，已有重复项
+必须先通过上述 Admin 命令停用。`auction-http` 与 Admin 页面只接触安全投影，管理页补齐
+kind/world/status 筛选、数字分页、改名对话框和删除确认，导入 secret 不会回显。Worker 配置独立密钥后可按 world/shared 读取唯一 active Cookie 并在内存解密，远端确认
+登录失效时幂等回写 `invalid` 并从当前进程移除，不自动轮换到第二个 Cookie；凭据 owner 会按 kind/world
 聚合 active/disabled/invalid、scope 更新时间和最近 Admin 变更时间，并结合 Worker 启动心跳判断是否
 需要重启；旧 v1 dashboard 只公开由这些事实计算出的 MoogleMail `main`/`isekai` availability、观测时间
 和最近 Admin 变更时间。未配置独立密钥时继续使用 `.keyenv`/敏感
-配置兼容入口；Admin mail section 在配置 `dashboard_mailboxes` 时还按 Admin runtime 投影核对全量
+配置兼容入口，其中 `.keyenv` 仅将 `hv-ck-key1` 用作 Worker Cookie，`hv-ck-key2` 只供显式隔离
+验证；Admin mail section 在配置 `dashboard_mailboxes` 时还按 Admin runtime 投影核对全量
 mailbox poller；
 SQLite Lite 明确不提供该完整能力。仍需在真实外部服务和旧版数据上完成切换前
 对照，尤其是写入开始后的未知结果边界。
@@ -681,7 +684,7 @@ Public 规则语言读取和登录来源返回也已完成静态修复，其中 
 | `auction-application` / `auction-storage` / `auction-jobs` / `auction-http` / `auction-web-admin` | operations alert 信号、通知批次、Worker control 聚合和完整 dashboard section | 旧版 15 类 signal、阈值 evaluator、fingerprint、观察/恢复、批次 claim lease/fencing、三次 Create 尝试、MoogleMail 通知正文、入队原子 cooldown、稳定失败终态，以及 Admin 的 health/process、Worker、tracing、alerting、全量 mail poller、realtime lag/failure water、delivery、fulfillment、recovery 安全汇总已接入 PostgreSQL 完整档；`000015` 同时修复了普通重试写入会被 CHECK 拒绝、第三次失败误入人工对账和领取时过早消耗 cooldown 的差异。scan、dispatch、reconcile 已恢复为三个独立的一分钟有界循环，错误互不阻塞，阈值、批次窗口、冷却、重试和正文边界默认值与旧版一致。credential scope 聚合和无 active 凭据时的 degraded 启动语义也已接入，SQLite 明确为能力缺失。剩余是通知外部回执、真实部署和切换前验证；外部广播 sink 不属于旧版能力。 |
 | `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter、真实状态心跳与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；配置层已恢复启用 metrics 时有效 listener 必须是 loopback TCP 或 Unix 的旧安全边界，在绑定前拒绝非本地 TCP。Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。当前追加审计 INSERT 均会累加进程内饱和失败计数；三进程周期心跳每轮复用数据库/schema readiness，读取该计数和各自 tracing 安全投影，启动/停止状态也不再使用占位值。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过存储池和审计观测边界的外部原生调用不纳入对应累计统计。剩余是实际部署下的 exporter、心跳 TTL 与故障聚合证据。 |
 | `auction-http` / `auction-web-*` | 旧版全部 Public/Admin 页面真实数据和交互 | Public 核心目录、世界切换、当前/历史拍卖、竞价/代理、账户、规则、黑名单、补偿、论坛、实时与价格历史，以及 Admin 登录、拍卖/lot、邮件、用户、凭据、规则、配置、审计、delivery、realtime、settlement/recovery 与 dashboard 页面均已接入真实 API；URL 状态、权威快照恢复、稳定 `command_id` 重试、五语言资源、移动端表格和主要旧版视觉交互已有源码 owner。Admin API 客户端现统一解析稳定错误 code 并通过五语言 Fluent 映射可操作反馈；配置页恢复旧版启用 world/装备过滤事实卡和业务 runtime JSON；凭据表按旧页面实际语义恢复 last checked/last used/imported by，并保留新版 version。SPA 入口现只提供给 14 + 21 条显式浏览器路由，未知 API/health 与页面 404 已隔离；Public/Admin 读响应及静态文件缓存头也按旧版语义和 Dioxus 稳定 WASM 文件名完成收口。HTTP/stream DTO 已统一由 `auction-contracts` 拥有，两个 `RustEmbed` 类型也已移入各自装配根形成制品级隔离；全部业务路由现恢复旧版严格 JSON、显式方法 405 和错误 `data: null`，Public 规则语言切换与登录来源返回也已有独立 owner。Public 14 条路径已完成 `en` 桌面匿名/空态巡检，规则与补偿池已有五语言浏览器 R1；剩余是补足动态数据行、有效登录与写动作、错误/冲突、移动端逐页状态，以及 Admin 配置保存/重启和其余已认证页面的视觉/交互 R1。 |
-| `auction-integrations` / `auction-storage` | 凭据失效后的自动标记、轮换和 dashboard 聚合 | 读侧 session 失效只轮换未尝试候选，写侧不盲重试但回写 `invalid`；PostgreSQL 幂等状态更新、MoogleMail/E-Hentai 接入和 Admin dashboard 聚合已完成。内部 owner 继续计算 scope 更新时间、Worker 重启状态并核对已配置 `dashboard_mailboxes` 的 poller 完整性；旧 v1 dashboard 只公开由这些事实导出的 MoogleMail `main`/`isekai` availability、观测时间和最近 Admin 变更时间。仍需真实外部服务对照和切换前行为验证。 |
+| `auction-integrations` / `auction-storage` | 凭据失效后的自动标记、单 Cookie 所有权和 dashboard 聚合 | 读侧 session 失效会回写当前 Cookie 为 `invalid`，写侧不盲重试且不会自动轮换；PostgreSQL `000030`、按 kind 的 session advisory ownership、MoogleMail/E-Hentai 接入和 Admin dashboard 聚合已完成。内部 owner 继续计算 scope 更新时间、Worker 重启状态并核对已配置 `dashboard_mailboxes` 的 poller 完整性；旧 v1 dashboard 只公开由这些事实导出的 MoogleMail `main`/`isekai` availability、观测时间和最近 Admin 变更时间。失效或替换后需要重启 Worker 释放旧 ownership 并装配新 Cookie；仍需真实外部服务对照和切换前行为验证。 |
 | `auction-storage` / `auctionctl` / `auction-http` | 旧版 `/health/live`、`/health/ready` 探针与 `migrate-only` 对未知数据库的保护 | Public/Admin 两类兼容健康探针已补齐；`ready` 只读检查数据库、全部内嵌迁移和进程内审计写入完整性，持久化 service heartbeat 复用同一进程 readiness；`auctionctl migrate` 在没有 SQLx 迁移标记但检测到用户对象时失败关闭，不会把未知数据库初始化为 Auction 数据库。同宿主机隔离 PostgreSQL systemd/Caddy 已证明两个 surface 的 live/ready 200、controller 编排和上游停止后的 502；SQLite Lite 与真实生产环境仍需各自的部署证据。 |
 | `apps/auctionctl` / `auction-storage` / `auction-integrations` | 旧版 Worker `-bootstrap-mail-credentials`、`-bootstrap-mail-world`、`-bootstrap-mail-label` 一次性登记邮件凭据 | 已补齐 `bootstrap-mail-credentials --world --label`：Cookie 只从标准输入读取，限制为 `main`/`isekai` 且要求 Worker 已启用对应 world，复用凭据数据密钥和 Admin 凭据服务写入 PostgreSQL；命令不回显 Cookie、密文或密钥。仍需在真实部署中按目标 secret 注入方式做一次切换前演练。 |
 | `ops` / `apps/*` | 旧版 `ops/deploy` 的启动脚本、Caddy 反向代理、环境示例、数据库备份/恢复/保留资料 | 已补充当前三进程/TOML/健康探针的部署目录、启动顺序、安全权限、Caddy 反向代理模板、systemd 单角色与总控示例、`auctionctl deployment-check` 只读预检，以及 Rust `auctionctl deployment start/stop/restart/status` 总控：总控验证 unit 与 TOML 绑定，执行严格预检、地址检查和 forward-only migration，按 Worker → Admin → Public 逐角色等待应用 readiness，失败反序回滚本次启动的 unit，并用 flock 与 systemd InvocationID 发布私有启动回执。PostgreSQL retention、recovery preflight、backup/verify、restore/rebuild 和 canonical v28 接管证据链均已有 owner。部署模板继续由 systemd 发送 SIGTERM；Public/Admin 的共享 Hyper 连接服务会停止接收并排空现有连接，Worker 同时响应 SIGINT/SIGTERM，三进程执行 10 秒有界 drain、停止心跳和 tracing flush，单角色 unit 以 45 秒上限覆盖最长 exporter 关闭余量。旧版 retention 本身明确只做 inventory、禁止 mutation，完整 retention mutation 不是旧版漏迁。 |
@@ -801,7 +804,7 @@ Public/Admin HTTP listener。
 - Storage MoogleMail 拍卖入站 owner 已将端口适配、装备/拍卖写入和审计/realtime 记录分别拆入
   `database/mail_intake/{mod,intake,record}.rs`；命令账本、world/auction/玩家锁、密钥信封、pending lot、
   预览版本和 preview 事件仍由同一个 PostgreSQL 竞价事务原子提交，明文邮件正文与装备 key 边界保持不变。
-- MoogleMail gateway 已将凭据候选池/失效轮换、配置/读取结果模型和 inbox/Sent/Balance 有界读取分别拆入
+- MoogleMail gateway 已将单 Cookie 会话/失效收口、配置/读取结果模型和 inbox/Sent/Balance 有界读取分别拆入
   `clients/mooglemail/gateway/{credentials,model,reader}.rs`；`gateway.rs` 只保留稳定公共导出与错误辅助，
   Cookie、world scope、allowlist、分页 cursor 和摘要/详情一致性证明边界保持不变。
 - MoogleMail parser reads owner 已将 inbox 分页、Sent 分页、Sent 详情附件/CoD 证明和 Item Shop 余额
@@ -922,7 +925,7 @@ Public/Admin HTTP listener。
   stable command ID 和批次 commit 顺序保持不变。
 - Worker bootstrap 的 MoogleMail owner 已将凭据恢复、processor/delivery 装配、world poll runtime/gateway
   和消息 envelope 映射分别拆入 `apps/worker/src/bootstrap/mail/{mod,credentials,processor,runtime,mapping}.rs`；
-  world 配置、凭据轮换、poll cursor/lease、外部错误分类和业务消息字段保持不变。
+  world 配置、单 Cookie 失效、poll cursor/lease、外部错误分类和业务消息字段保持不变。
 - Contracts Public catalog owner 已将拍卖上下文、竞价/价格历史、补偿池、论坛镜像和 lot/装备响应分别拆入
   `contracts/dto/public/catalog/{mod,auction,history,compensation,forum,lot}.rs`；serde 字段、
   untagged preview/live 形状和 Public 稳定导出保持不变。
@@ -940,7 +943,7 @@ Public/Admin HTTP listener。
   Fast/Slow 状态机、版本推进、终态原因闭集和转换事实校验保持不变。
 - Config secrets owner 已将敏感字段/脱敏容器、PostgreSQL 维护密钥读取、MoogleMail `.keyenv`
   解析和 Admin runtime 文件投影分别拆入 `config/settings/secrets/{model,maintenance,keyenv,runtime}.rs`；
-  未知字段拒绝、owner-only 权限、路径/symlink/hard-link 防护、双 Cookie 身份和所有现有 getter 契约保持不变。
+  未知字段拒绝、owner-only 权限、路径/symlink/hard-link 防护、运行/隔离验证身份和所有现有 getter 契约保持不变。
 - Integrations equipment parser 已将来源 URL/allowlist 校验、旧版 HTML 页面、装备身份映射、统计值
   规范化和共用文本边界分别拆入 `equipment/parser/{url,page,identity,stats,common}.rs`；
   `parser/mod.rs` 只保留稳定出口，固定 origin/world 路径、闭集类别、可交易条件、字段上限和 InvalidSource 失败关闭边界保持不变。
@@ -1044,7 +1047,7 @@ Public/Admin HTTP listener。
   两阶段激活和 PostgreSQL 错误/载荷辅助分别拆入
   `database/mail_delivery/{mod,validation,outbox,activation,common}.rs`；命令摘要幂等、
   `prepared → pending` 激活、审计追加和外部结果后置边界保持不变。
-- MoogleMail DeliveryTransport owner 已将入口 operation dispatch、通知/结算消息发送、凭据轮换和
+- MoogleMail DeliveryTransport owner 已将入口 operation dispatch、通知/结算消息发送、单 Cookie 会话和
   return/take 动作前置身份校验与后置 proof 分别拆入
   `clients/mooglemail/transport/delivery/{mod,messages,credentials,actions}.rs`，并将普通邮件
   payload 校验与结算 payload/模板渲染拆入 `transport/payload/{mod,mail,settlement}.rs`；
@@ -1140,7 +1143,8 @@ Public/Admin TCP/Unix listener 的一致性检查，Admin readiness 会跟随 ru
   2026-08-30 已在 Auction-Test 使用有效 main 隔离账号完成两组凭据的 Balance/Inbox 读取、手动唤醒与
   暂停/恢复幂等控制，并用 1 Credit 和 1 件可交易装备逐项证明发送、业务拒绝、通知、`[RTS]` 退回、
   精确 take 和原装备恢复；最终 mail claim、失败、非终态 delivery 与人工对账均为零。该证据不覆盖
-  isekai、凭据失效轮换、论坛写入、生产账号或生产流量。
+  isekai、凭据失效收口、论坛写入、生产账号或生产流量。当前 Worker 已收敛为只装配一条运行 Cookie；
+  该历史双凭据读取事实不代表继续提供自动轮换。
 - canonical PostgreSQL v28 的 backup/verify/adopt/rebuild/restore 安全边界已在隔离旧对照副本完成；
   仍需具有非空 auction/lot/bid/realtime 事实的数据抽样，以及真实部署切换批准；
 - 同宿主机隔离 systemd/Caddy 已核对启动顺序、readiness、失败回滚、Worker control、严格文件权限和
@@ -1770,3 +1774,10 @@ R1；共享语言选择器也修复了刷新后原生下拉与 `hv.lang`/`html l
 写回也会降级本轮健康，过期租约只在 token/owner/fencing 仍未被替换时允许记录失败。公开论坛页同步
 投影与错误暂停轮询、全局竞价日志筛选及历史拍品标题栏同时收敛。
 本轮只完成源码与静态门禁，不宣称真实论坛编辑、异常帧重连或浏览器逐页交互 R1，也未新增或运行测试用例。
+
+本轮又增加 PostgreSQL `000030`，把 `mail_cookie`/`forum_cookie` 各自唯一 active 的约束放入数据库，
+并用按 kind 的 session advisory ownership 防止两个 Worker 同时使用同类 Cookie；失效后不自动轮换，
+替换需要重启 Worker。MoogleMail 明确返回 `recipient_not_found` 时，原 delivery 保留退信资产后果并
+进入人工对账，当前轮次只暂时跳过同一 `(world, recipient)` 的后续 delivery，其他玩家继续处理。
+2026-09-02 对 `11111` 的一次零资产与一次 1 Credit 受控发送均被远端接受，未复现不存在收件人；
+因此没有针对该名称写死规则，异常分支仍以远端明确协议响应为唯一判据。

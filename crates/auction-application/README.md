@@ -91,6 +91,10 @@
 - `src/ports/admin/mail/`：轮询状态和入站安全投影位于 `model.rs`，暂停/触发命令和账本记录位于
   `commands.rs`，应用/事务错误位于 `errors.rs`，查询、命令和事务窄端口位于 `ports.rs`，
   常量、聚合标识和字段校验位于 `common.rs`；`mail/mod.rs` 只负责稳定公共导出。
+- `src/ports/delivery/worker.rs`：delivery claim、外部结果和存储推进窄端口；transport 可以声明
+  不大于配置值的进程内并发上限，使具有账号级可变会话的适配器在 claim 进入 `sending` 前形成
+  背压，而不是在远端请求超时内排队。明确 `recipient_not_found` 后，runner 可按
+  `(world, recipient)` 把该玩家排除到本轮结束；其他玩家继续处理，排除值不持久化为永久封禁。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定

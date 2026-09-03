@@ -180,7 +180,7 @@ pub struct MoogleMailEquipmentFilterConfig {
 /// 单个 MoogleMail 世界的入站轮询配置。
 ///
 /// 世界配置不包含 Cookie 或其他敏感值。Worker 会为每个世界建立独立的持久化邮箱状态，
-/// 但复用同一组已校验的外部凭据池。
+/// 但复用同一个已校验的外部 Cookie。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MoogleMailWorldConfig {

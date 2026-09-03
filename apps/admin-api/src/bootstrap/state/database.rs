@@ -68,12 +68,13 @@ async fn load_equipment_source_credentials(
                 .await
                 .context("load active equipment source credentials")?
             {
-                // shared scope 会同时出现在两个 world 查询中，只向进程内候选池加入一次。
+                // shared scope 会同时出现在两个 world 查询中，只向进程内集合加入一次。
                 if seen_record_ids.insert(record.id) {
                     records.push((record, credential_world));
                 }
             }
         }
+        anyhow::ensure!(records.len() <= 1, "装备来源只允许一个 active mail_cookie");
         cookies.reserve(records.len());
         for (record, credential_world) in records {
             let secret = opener

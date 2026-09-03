@@ -1,4 +1,4 @@
-//! MoogleMail 凭据池恢复与敏感值清理边界。
+//! MoogleMail 单凭据恢复与敏感值清理边界。
 
 use super::super::*;
 
@@ -27,12 +27,23 @@ pub(super) async fn load_credentials(
                 .await
                 .context("load active MoogleMail credentials")?
             {
-                // shared scope 会在 main/isekai 两次查询中出现，只把同一凭据放入池一次。
+                // shared scope 会在 main/isekai 两次查询中出现，只把同一凭据保留一次。
                 if seen_record_ids.insert(record.id) {
                     records.push((record, credential_world));
                 }
             }
         }
+        anyhow::ensure!(records.len() <= 1, "MoogleMail 只允许一个 active mail_cookie");
+        let ownership = if records.is_empty() {
+            None
+        } else {
+            Some(Arc::new(
+                store
+                    .acquire_credential_runtime_ownership(AdminCredentialKind::MailCookie)
+                    .await
+                    .context("acquire active MoogleMail credential ownership")?,
+            ) as Arc<dyn AdminCredentialRuntimeOwnership>)
+        };
         let mut cookies = Vec::with_capacity(records.len());
         for (record, credential_world) in records {
             let secret = opener
@@ -66,15 +77,42 @@ pub(super) async fn load_credentials(
             ));
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();
-        MoogleMailCredentialSet::from_runtime_cookies_with_scopes(cookies, invalidator)
+        if let Some(ownership) = ownership {
+            MoogleMailCredentialSet::from_owned_runtime_cookies_with_scopes(
+                cookies,
+                invalidator,
+                ownership,
+            )
+        } else {
+            MoogleMailCredentialSet::from_runtime_cookies_with_scopes(cookies, invalidator)
+        }
     } else if let Some(path) = &mail_config.keyenv_file {
         let keyenv = load_mooglemail_keyenv(path).context("load MoogleMail keyenv")?;
-        MoogleMailCredentialSet::new(keyenv.bot_cookie(), keyenv.test_cookie())
+        let ownership = Arc::new(
+            store
+                .acquire_credential_runtime_ownership(AdminCredentialKind::MailCookie)
+                .await
+                .context("acquire configured MoogleMail credential ownership")?,
+        ) as Arc<dyn AdminCredentialRuntimeOwnership>;
+        MoogleMailCredentialSet::from_owned_cookie(
+            MoogleMailCookie::new(keyenv.bot_cookie())
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+            ownership,
+        )
     } else {
         let cookie = config.mooglemail_cookie().context(
-            "MoogleMail enabled but no keyenv_file, credential pool, or sensitive mooglemail_cookie",
+            "MoogleMail enabled but no keyenv_file, credential record, or sensitive mooglemail_cookie",
         )?;
-        MoogleMailCredentialSet::new(cookie, cookie)
+        let ownership = Arc::new(
+            store
+                .acquire_credential_runtime_ownership(AdminCredentialKind::MailCookie)
+                .await
+                .context("acquire configured MoogleMail credential ownership")?,
+        ) as Arc<dyn AdminCredentialRuntimeOwnership>;
+        MoogleMailCredentialSet::from_owned_cookie(
+            MoogleMailCookie::new(cookie).map_err(|error| anyhow::Error::msg(error.to_string()))?,
+            ownership,
+        )
     };
     credentials.map_err(|error| anyhow::Error::msg(error.to_string()))
 }

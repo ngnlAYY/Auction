@@ -6,12 +6,12 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Context;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use auction_application::{
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeReader,
-    AdminCredentialRuntimeWriter, AdminCredentialWorld, AdminMailPort, ApplicationError,
-    ApplicationFuture, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, Clock,
-    CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore, ForumCredentialAvailability,
-    ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore, ForumSyncStore,
-    ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
+    AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
+    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
+    AdminMailPort, ApplicationError, ApplicationFuture, AuctionLifecycleCommandPort,
+    AuctionLifecyclePolicy, Clock, CompetitionCommandPort, DeliveryTransport, DeliveryWorkStore,
+    ForumCredentialAvailability, ForumPostWriter, ForumPublisher, ForumRenderer, ForumReplyStore,
+    ForumSyncStore, ForumTopicReader, MailDeliveryEnqueuer, OperationsAlertRuntimeStatus,
     OperationsAlertSourceReader, OperationsAlertStore, PublicEquipmentLinkResolver,
     PublicEquipmentLinkSecretReader, RecoveryBuyerBlacklister, RecoveryHealthConfig,
     RecoveryHealthService, RecoveryResolutionStore, RecoveryWorkStore, ScheduledRoundStore,

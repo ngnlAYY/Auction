@@ -25,6 +25,16 @@ pub struct DeliveryWorkClaim {
     pub claimed_at: DateTime<Utc>,
 }
 
+/// 当前 delivery 领取轮次中暂不再领取的 MoogleMail 收件人。
+///
+/// 玩家名称只在对应 world 内比较，避免主世界的失败误跳过 Isekai 同名玩家。该值不进入
+/// 持久状态；下一轮 Worker 仍会重新判断尚未处理的 delivery。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryRecipientExclusion {
+    pub world: String,
+    pub recipient: String,
+}
+
 /// 外部传输成功后允许写入 delivery 的最小结果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeliverySendResult {
@@ -49,6 +59,14 @@ pub struct DeliveryTransportError {
 
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
+    /// 返回 transport 在单个 Worker 进程内允许同时进入 `sending` 的上限。
+    ///
+    /// 配置并发仍是全局上限；拥有单一远端可变会话的 transport 可以进一步收紧，避免任务先进入
+    /// `sending` 再在适配器内部排队并消耗请求超时。实现必须返回大于零的值。
+    fn maximum_concurrency(&self) -> u16 {
+        u16::MAX
+    }
+
     /// 在 delivery 进入 `sending` 前判断目标 world 当前是否有可用凭据。
     ///
     /// 无效 payload 必须返回 true，让正式发送路径把它收口为确定失败；false 只表示当前外部
@@ -75,6 +93,7 @@ pub trait DeliveryWorkStore: Send + Sync {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         sending_grace: std::time::Duration,
+        excluded_recipients: Vec<DeliveryRecipientExclusion>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 

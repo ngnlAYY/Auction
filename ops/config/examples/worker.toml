@@ -61,7 +61,7 @@ recovery_retry_delay_seconds = 60
 [worker.delivery]
 # 可选：单轮最多领取的 delivery 数量，范围 1-1000，默认 100。
 batch_limit = 100
-# 可选：同时执行的 delivery 数量，范围 1-batch_limit，默认 8。
+# 可选：delivery 配置并发上限，范围 1-batch_limit，默认 8；当前 MoogleMail transport 的有效上限为 1。
 concurrency = 8
 # 可选：Delivery 独立轮询间隔秒数，范围 1-86400，默认 60。
 poll_interval_seconds = 60
@@ -173,7 +173,7 @@ mailbox_key = "mooglemail:main"
 world_id = "main"
 # 可选：拍卖邮件的起拍价覆盖值（Credits）；省略时继承 [auction.economics].start_price。
 # start_price = 1000
-# 可选：`.keyenv` 路径；相对本文件解析。启用时与敏感 mooglemail_cookie 二选一。
+# 可选：`.keyenv` 路径；相对本文件解析。Worker 只使用 hv-ck-key1，且与敏感 mooglemail_cookie 二选一。
 keyenv_file = "../../../.keyenv"
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
 endpoint = "https://hentaiverse.org"

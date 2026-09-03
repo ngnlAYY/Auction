@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000029`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000030`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。旧系统的 `bid_proxies` 不再作为第二份
@@ -68,6 +68,9 @@ PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 pos
 `000028` 为 `auction_forum_bid_commands` 记录可证明的真实楼层号，历史未知值保持空；`000029`
 为固定帖刷新增加最近成功时间、最近失败时间和有界安全错误码，并建立追加式
 `forum_identity_history` 保存论坛数字账号与名称变更的新旧快照。
+`000030` 在建立索引前拒绝仍有同类重复 active 行的数据库，再用 partial unique index 保证
+`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录。迁移不静默选择保留项；已有重复
+凭据必须先通过 Admin 的幂等状态命令停用，使命令账本和追加审计保持完整。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -87,7 +90,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | rules_documents | 000001_baseline | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入旧目录 |
 | audit_records | 000001_baseline | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | 000001_baseline | auction-observability | 两者 | 进程/服务心跳与过期判断 |
-| credential_keys | 000004_identity_external_admin + 000009_credential_admin_compat | auction-application：credentials | 完整档 | 加密后的外部凭据索引 |
+| credential_keys | 000004_identity_external_admin + 000009_credential_admin_compat + 000030_single_active_external_cookie | auction-application：credentials | 完整档 | 加密后的外部凭据索引；邮件与论坛 Cookie 各自全局最多一条 active 记录 |
 | user_login_key_envelopes | 000004_identity_external_admin / 000003_user_admin | auction-application：users | 两者 | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
 | user_mail_commands | 000002_worker_external_adapters | auction-application：users | 完整档 | MoogleMail 注册/重绑命令幂等账本与结果 |
 | user_game_identity_history | 000002_worker_external_adapters | auction-application：users | 完整档 | 旧命名的 MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
@@ -103,7 +106,7 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 并把命令账本到凭据行的引用改为 `ON DELETE SET NULL`。凭据密文本体由 Rust 的
 `AdminCredentialEnvelope` 约束 nonce、key id 和指纹；`credential_admin_commands.result_payload`
 只保存安全投影或删除结果，不能保存 Cookie 明文。该能力只承诺 PostgreSQL 完整档，Worker
-通过独立数据密钥读取 active 池，SQLite 不复制这些完整档表。
+通过独立数据密钥读取唯一 active Cookie，SQLite 不复制这些完整档表。
 
 ## 拍卖与竞价核心
 
