@@ -73,7 +73,7 @@ public_rules_ttl_seconds = 30
 enabled = false
 # 可选：默认 UTC；可改为其他有效 IANA 时区。
 timezone = "UTC"
-# 可选：默认周四 22:00 开放预览，满足开拍前至少两小时的冻结窗口。
+# 可选：默认周四 22:00 开放预览，提供开拍前至少两小时的预览与持续录入窗口。
 preview_day = "Thursday"
 preview_time = "22:00"
 # 可选：默认周五 UTC 00:00 正式开拍。
@@ -222,8 +222,8 @@ request_timeout_seconds = 15
 # 可选：单次读取上限和有界分页上限。
 batch_size = 100
 maximum_pages = 20
-# 可选：每个 world 共用的标准五字段 cron；默认每分钟，也支持旧版描述符、@every 和时区前缀。
-schedule = "* * * * *"
+# 可选：每个 world 共用的标准五字段 cron；默认每 5 分钟，也支持旧版描述符、@every 和时区前缀。
+schedule = "*/5 * * * *"
 # 可选：cron 后随机抖动和可续期 claim 边界。
 jitter_seconds = 5
 lease_duration_seconds = 60

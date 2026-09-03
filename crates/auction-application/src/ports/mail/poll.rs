@@ -116,11 +116,15 @@ impl MailPollBatch {
 /// 只发生在 `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
 /// 后才能推进，避免远端成功而本地丢游标或重复执行不受控。
 pub trait MailPollStore: Send + Sync {
-    /// 确保一个启用的邮箱拥有初始轮询状态；重复调用必须返回现有状态而不递增版本。
+    /// 确保一个启用的邮箱拥有初始轮询状态，并收敛配置缩短后遗留的过晚调度水位。
+    ///
+    /// 已暂停邮箱、活动租约和最近失败的最大退避不得被启动过程越过；没有变化时不能递增版本。
     fn ensure_state(
         &self,
         mailbox_key: String,
         now: DateTime<Utc>,
+        scheduled_next_at: DateTime<Utc>,
+        retry_maximum: std::time::Duration,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
 
     /// 领取指定邮箱中 due 且租约已过期的状态，返回值必须来自数据库锁和条件更新。

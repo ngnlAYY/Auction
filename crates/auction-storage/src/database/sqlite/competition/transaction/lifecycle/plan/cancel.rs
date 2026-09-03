@@ -6,6 +6,7 @@ use super::super::super::*;
 pub(super) async fn apply_cancel_plan_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
     auction: &Auction,
+    successor: Option<&AuctionPreviewSuccessorPlan>,
 ) -> Result<u64, CompetitionTransactionError> {
     let previous_status: String = {
         let connection = transaction.connection_mut()?;
@@ -18,6 +19,9 @@ pub(super) async fn apply_cancel_plan_sqlite(
     };
     if !matches!(previous_status.as_str(), "draft" | "preview") {
         return Err(CompetitionTransactionError::InvalidState);
+    }
+    if (previous_status == "preview") != successor.is_some() {
+        return Err(invalid_state("Lite 取消计划与下一期草稿计划不一致"));
     }
     let now = sqlite_timestamp(auction.updated_at);
     let connection = transaction.connection_mut()?;
@@ -62,6 +66,10 @@ pub(super) async fn apply_cancel_plan_sqlite(
     .map_err(map_sql_error)?;
     if updated.rows_affected() != 1 {
         return Err(CompetitionTransactionError::InvalidState);
+    }
+    if let Some(successor) = successor {
+        super::successor::insert_successor_sqlite(transaction, auction, "cancelled", successor)
+            .await?;
     }
     Ok(withdrawn.rows_affected())
 }

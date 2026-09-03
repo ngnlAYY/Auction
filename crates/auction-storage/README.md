@@ -170,13 +170,14 @@ Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 Po
 用空列表或默认能力掩盖完整档缺失。
 拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配；其 `lifecycle/` 子目录的
 `context.rs`、`plan/` 和 `record.rs` 分别负责上下文锁定、生命周期计划写入和审计/实时事件记录，其中
-`plan/{preview,open,cancel,final_phase,early_settlement}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
+`plan/{preview,open,cancel,successor,final_phase,early_settlement}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
-Preview 在修改状态和转移 intake target 前还要求至少一个 pending lot，防止形成永远无法 Open 的空活跃场次；
+Preview 在修改状态前要求至少一个 pending lot，并保留本期 intake target；Open 才原子创建下一期
+Draft/周轮次并移动 target，防止 Preview 过早冻结录入或形成永远无法 Open 的空活跃场次；
 人工 Final 只收紧较晚的 live lot 截止时间并保留软截止竞价；提前结算只在 PostgreSQL 完整档把截止
 时间收紧到事务时间，使既有 settlement scheduler 可领取，结算事实仍由 Worker 事务写入。取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
-`transaction/lifecycle/{context,plan/{mod,preview,open,cancel,final_phase},record}.rs` 分别负责上下文/资格读取、
+`transaction/lifecycle/{context,plan/{mod,preview,open,cancel,successor,final_phase},record}.rs` 分别负责上下文/资格读取、
 按状态动作的计划写入和审计/realtime 事件记录，并保留 `BEGIN IMMEDIATE` 的单写者边界。两后端通过
 `src/database/lifecycle_audit.rs` 把父命令映射为旧版 action 专属 metadata，审计表 `request_id`
 保持 NULL，HTTP 关联值只进入 metadata；Final slow/失格代理只追加一条
@@ -204,8 +205,9 @@ PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin
 追加审计；SQLite Lite 读取规则安全快照，但发布明确返回能力不支持。
 Admin 装备录入由 `src/database/commands/admin/intake.rs` 与
 `src/database/admin_intake/{mod,write,record}.rs` 持有：PostgreSQL 在 Serializable 事务中按 world、intake
-target、玩家和外部装备身份加锁，`write.rs` 写入装备、`equipment_secrets`、后台投稿、lot、版本和命令
-账本，`record.rs` 追加审计与 realtime 事件；内部 `lot_number` 保持场次内全局顺序，
+target、玩家和外部装备身份加锁，Draft/Preview 都允许写入本期；`write.rs` 写入装备、
+`equipment_secrets`、后台投稿、lot、版本和命令账本，Preview 还会在同一事务追加预览物化项，
+`record.rs` 追加审计与 realtime 事件；内部 `lot_number` 保持场次内全局顺序，
 `category_number` 在装备分类内从 1 独立递增并作为安全展示编号。SQLite Lite 因缺少密文表与完整录入能力明确返回不支持。
 Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin/lot/` 持有：`transaction.rs` 负责事务端口适配，`read.rs`、
@@ -251,7 +253,8 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 `mail_admin_commands` 命令账本和追加审计完成暂停/恢复及历史兼容命令；`src/database/mail_poll/`
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
 `inbound_mail`、`mail_commands`、cursor 的同事务幂等提交；其中 `state.rs` 负责状态/租约，
-`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。入站重放会严格比较
+并在 Worker 启动时只把旧配置遗留的过晚 `next_poll_at` 向当前 cron 收敛，已暂停邮箱、活动 claim
+和尚未结束的最大失败退避保持不变；`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。入站重放会严格比较
 远端身份、内容摘要和业务决定，但保留首次入站轮询写入的 `processed_at`，不把后续本轮时间或
 PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
@@ -259,7 +262,8 @@ PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能
 `admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
 轮询与入站查询、行和安全 metadata 映射；父 `mod.rs` 只保留跨后端端口分派。
 MoogleMail 拍卖入站事务由 `src/database/mail_intake/mod.rs` 装配，`intake.rs` 持有命令账本、world/auction/玩家锁、
-装备与密钥信封、pending lot 和预览版本写入，`record.rs` 持有追加审计与 preview realtime 事件；父模块只保留
+装备与密钥信封、pending lot 和预览版本写入；Draft/Preview 均写入唯一 intake target，Preview 新装备
+同时追加预览物化项。`record.rs` 持有追加审计与 preview realtime 事件；父模块只保留
 端口适配；同批不同分类使用独立分类计数器，撤回条目也保留已占用编号。所有写入仍在同一个
 PostgreSQL 竞价事务中完成，明文邮件正文和装备 key 不进入 storage。
 服务心跳由 `src/database/health/` 持有：`mod.rs` 只负责 `HeartbeatStore` 端口分派，
@@ -364,7 +368,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000031` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000032` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -378,7 +382,8 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 保存论坛竞价来源的真实楼层号，`000029` 增加固定帖刷新健康字段与追加式论坛身份变更历史，
 `000030` 以迁移前置检查和 partial unique index 保证 `mail_cookie`/`forum_cookie` 各自全局最多一条
 active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据；`000031` 为论坛
-主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点。SQLite
+主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点；`000032` 允许唯一录入目标
+指向 Draft/Preview，并以跨状态唯一索引和延迟触发器保护正式开拍时的目标切换。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite

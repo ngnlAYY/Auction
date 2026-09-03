@@ -21,10 +21,7 @@ where
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
             auction.preview(now)?;
-            AuctionLifecycleEffect::Preview {
-                manual: admin_action,
-                successor: successor_plan(context)?,
-            }
+            AuctionLifecycleEffect::Preview { manual: admin_action }
         }
         crate::AuctionLifecycleAction::Open => {
             if !context.world_enabled {
@@ -40,19 +37,22 @@ where
                 return Err(CompetitionTransactionError::InvalidState.into());
             }
             auction.open(context.policy_scheduled_end_at, now)?;
-            AuctionLifecycleEffect::Open { manual_override }
+            AuctionLifecycleEffect::Open { manual_override, successor: successor_plan(context)? }
         }
         crate::AuctionLifecycleAction::Cancel => {
             let reason = command
                 .reason
                 .clone()
                 .unwrap_or_else(|| "Worker lifecycle cancellation".to_owned());
+            let successor = (auction.status == auction_domain::AuctionStatus::Preview)
+                .then(|| successor_plan(context))
+                .transpose()?;
             auction.cancel_before_open_with_metadata(
                 now,
                 reason,
                 command.actor.actor_id.clone(),
             )?;
-            AuctionLifecycleEffect::Cancel
+            AuctionLifecycleEffect::Cancel { successor }
         }
         crate::AuctionLifecycleAction::FinalPhase => {
             let (proxy_plans, earliest_end_at) =

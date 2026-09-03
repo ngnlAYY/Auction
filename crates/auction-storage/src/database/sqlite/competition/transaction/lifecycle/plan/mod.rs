@@ -10,6 +10,7 @@ mod cancel;
 mod final_phase;
 mod open;
 mod preview;
+mod successor;
 
 pub(super) async fn apply_lifecycle_plan_sqlite(
     transaction: &mut SqliteCompetitionTransaction,
@@ -21,18 +22,24 @@ pub(super) async fn apply_lifecycle_plan_sqlite(
     }
     let AuctionLifecyclePlan { auction, effect } = plan;
     match effect {
-        AuctionLifecycleEffect::Preview { manual, successor } => {
-            preview::apply_preview_plan_sqlite(transaction, command, &auction, manual, &successor)
-                .await?;
+        AuctionLifecycleEffect::Preview { manual } => {
+            preview::apply_preview_plan_sqlite(transaction, command, &auction, manual).await?;
             Ok(AuctionLifecycleWriteSummary::default())
         }
-        AuctionLifecycleEffect::Open { manual_override } => {
-            open::apply_open_plan_sqlite(transaction, command, &auction, manual_override).await?;
+        AuctionLifecycleEffect::Open { manual_override, successor } => {
+            open::apply_open_plan_sqlite(
+                transaction,
+                command,
+                &auction,
+                manual_override,
+                &successor,
+            )
+            .await?;
             Ok(AuctionLifecycleWriteSummary::default())
         }
-        AuctionLifecycleEffect::Cancel => {
+        AuctionLifecycleEffect::Cancel { successor } => {
             let return_obligation_count =
-                cancel::apply_cancel_plan_sqlite(transaction, &auction).await?;
+                cancel::apply_cancel_plan_sqlite(transaction, &auction, successor.as_ref()).await?;
             Ok(AuctionLifecycleWriteSummary { return_obligation_count })
         }
         AuctionLifecycleEffect::FinalPhase { proxy_plans, effective_end_at } => {

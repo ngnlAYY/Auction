@@ -95,7 +95,9 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 `processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
 租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。
 每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
-默认 `* * * * *`，并兼容旧版描述符、`@every`、本地时区和显式 IANA 时区前缀。远程读取按暂时
+默认 `*/5 * * * *`（每 5 分钟），并兼容旧版描述符、`@every`、本地时区和显式 IANA
+时区前缀。Worker 启动会协调持久化调度水位：只把旧配置遗留的过晚时刻向当前 cron 收敛，暂停、
+活动 claim 和失败退避仍由数据库状态决定。远程读取按暂时
 错误有界重试；单封业务错误由应用层冻结为 `Retryable`/`Permanent`，只有前者和超时按配置次数
 重试，确定性输入、配置和业务拒绝立即收口。共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责

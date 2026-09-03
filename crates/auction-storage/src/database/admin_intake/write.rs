@@ -48,6 +48,7 @@ pub(super) async fn add_admin_intake_inner(
 
     let target = sqlx::query(
         r#"SELECT target.auction_id,
+                  target.target_status,
                   auction.world_id,
                   auction.sequence,
                   auction.status,
@@ -64,6 +65,7 @@ pub(super) async fn add_admin_intake_inner(
     .map_err(map_sql_error)?
     .ok_or(CompetitionTransactionError::AdminIntakeUnavailable)?;
     let auction_id: Uuid = target.try_get("auction_id").map_err(map_sql_error)?;
+    let target_status: String = target.try_get("target_status").map_err(map_sql_error)?;
     let auction_world_id: String = target.try_get("world_id").map_err(map_sql_error)?;
     let auction_sequence: i64 = target.try_get("sequence").map_err(map_sql_error)?;
     let auction_status: String = target.try_get("status").map_err(map_sql_error)?;
@@ -72,12 +74,14 @@ pub(super) async fn add_admin_intake_inner(
         target.try_get("preview_revision").map_err(map_sql_error)?;
     if auction_world_id != write.world_id
         || auction_sequence <= 0
-        || auction_status != "draft"
+        || !matches!(auction_status.as_str(), "draft" | "preview")
+        || target_status != auction_status
         || current_state_version <= 0
         || current_preview_revision < 0
     {
         return Err(CompetitionTransactionError::InvalidState);
     }
+    let preview_intake = auction_status == "preview";
 
     let player_status = sqlx::query_scalar::<_, String>(
         "SELECT status FROM public.users WHERE username = $1 FOR SHARE",
@@ -215,7 +219,7 @@ pub(super) async fn add_admin_intake_inner(
         r#"UPDATE public.auctions
            SET preview_revision = $1, state_version = $2, updated_at = $3
            WHERE id = $4
-             AND status = 'draft'
+             AND status = $7
              AND preview_revision = $5
              AND state_version = $6
            RETURNING state_version"#,
@@ -226,11 +230,33 @@ pub(super) async fn add_admin_intake_inner(
     .bind(auction_id)
     .bind(current_preview_revision)
     .bind(current_state_version)
+    .bind(&auction_status)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
     if updated.is_none() {
         return Err(CompetitionTransactionError::InvalidState);
+    }
+    if preview_intake {
+        let materialized = sqlx::query(
+            "INSERT INTO public.auction_preview_items
+                (auction_id, equipment_id, display_order, start_price,
+                 source_revision, collected_at)
+             SELECT lot.auction_id, lot.equipment_id, lot.lot_number, lot.start_price,
+                    $1, equipment.collected_at
+             FROM public.lots AS lot
+             INNER JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
+             WHERE lot.id = $2 AND lot.auction_id = $3 AND lot.status = 'pending'",
+        )
+        .bind(next_preview_revision)
+        .bind(write.candidate_lot_id)
+        .bind(auction_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        if materialized.rows_affected() != 1 {
+            return Err(failed("Admin Preview 装备物化失败"));
+        }
     }
 
     let result = AdminIntakeResult {

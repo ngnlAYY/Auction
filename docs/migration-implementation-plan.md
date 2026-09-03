@@ -155,7 +155,7 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000031`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000032`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
@@ -164,7 +164,7 @@ dispatch、生命周期/operations alert/lot 结束时间数据库不变量、�
 以及论坛固定 #1/#2 的远端身份和内容版本证明、同一 world/provider 的单用户论坛账号归属、
 Users 级稳定论坛账号 ID、论坛命令真实楼层来源、逐主题同步健康/调度事实、论坛身份变更历史和
 追加式审计证据，邮件/论坛两类外部 Cookie 各自唯一 active 的数据库防线，以及论坛主题由完整读取
-证明的连续处理楼层水位。
+证明的连续处理楼层水位，以及 Preview 持续录入、Open 原子接管后继 Draft 的数据库防线。
 `lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
 不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
@@ -471,7 +471,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000031` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000032` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -498,7 +498,8 @@ PostgreSQL Serializable 同快照的拍卖/lot/装备/投稿投影、Admin 会�
 Lite 因缺少完整生命周期字段明确返回 `501 feature_not_supported`。Admin 的 settlement-report
 与 recovery-report 已接入 PostgreSQL 完整档一致只读/安全快照；前者保持旧版严格 `auction` 字段闭集，
 并对序列化冲突/死锁最多重试三次，SQLite 明确返回 `501 feature_not_supported`。Admin 的 preview/open/cancel/
-final-phase 已接入统一生命周期端口；preview 建立唯一后继轮次并物化预览，open 校验时间与前序状态，
+final-phase 已接入统一生命周期端口；preview 保持当前录入场次并物化目录，open 校验时间与前序状态后
+原子建立后继 Draft、下一轮调度并切换录入目标，
 cancel 只允许开放前执行，final-phase 在锁内转换可继续的 slow proxy 并冻结失格授权。Admin 请求使用状态版本 fence，取消要求原因，并在同一数据库事务内写入命令账本、状态版本、取消元数据、追加审计和
 注册表内的 lifecycle realtime 事件；A03 GET/POST 拍卖已接入 Admin 会话、旧分页/筛选、PostgreSQL Serializable 生命周期/lot 数量快照、管理端表格和创建表单；其创建命令已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件，主配置 `[auction]` 模板会同时写入 schema v4 快照与遗留规则列；SQLite Lite 创建与列表均返回 `501 feature_not_supported`。Public `/api/v1/events` 已接入 PostgreSQL/SQLite
 持久化事件回放、sequence 游标和 schema 安全边界；Worker 已接入 `scheduled_rounds` 的持久化 due claim、
@@ -535,7 +536,7 @@ case 推进、稳定 payment reminder action、delivery outbox 关联、结果�
 和 resolution 收口已经由 Worker 持久化调度接入。旧版五类 recovery action 的静态闭集和分支均
 已对齐，剩余是用真实外部回执验证未知结果与人工复核边界。Worker 实时消费游标和 Public
 进程内 Hub 已对齐旧版；Web 页面主体已接入。
-Admin A03 GET/POST 拍卖、A06 lot 列表、A15 代理历史和 A25 规则 GET/POST/PUT 已接入 PostgreSQL 完整档的一致安全投影、有限页码/opaque cursor、Admin 会话保护和管理端真实页面；A03 生命周期按钮现在按后端 capability 安全投影过滤，列表补齐预览/开放/结束时间线，A06 lot 页面接入真实页码分页、返回拍卖列表、加载失败重试、draft pending lot 改价/撤回确认、软截止信息、设备属性详情、金额/时间格式化以及代理历史关闭/重试交互；A03 POST 的策略字段现由主配置 `[auction]` 经应用层模板冻结，并同时写入快照与遗留规则列；A04 装备录入已接入 URL/canonical JSON 来源、短生命周期明文 key、AES-256-GCM 密文信封、PostgreSQL Serializable world/intake target/玩家/装备锁、同一事务的装备/密文/投稿/lot/版本/审计/realtime 写入，以及草稿 lot 管理端表单；密钥标识与材料只允许来自敏感 TOML，SQLite Lite 明确返回 `501 feature_not_supported`。A25 PUT 使用规则 revision CAS、命令账本和审计，管理端规则页已补齐旧版的语言标签、动态新增 locale、默认语言提示、版本事实、服务端规范化校验、校验门槛、轻量 Markdown 预览、稳定 command ID、发布冲突和重试反馈；SQLite 规则只读，发布明确
+Admin A03 GET/POST 拍卖、A06 lot 列表、A15 代理历史和 A25 规则 GET/POST/PUT 已接入 PostgreSQL 完整档的一致安全投影、有限页码/opaque cursor、Admin 会话保护和管理端真实页面；A03 生命周期按钮现在按后端 capability 安全投影过滤，列表补齐预览/开放/结束时间线，A06 lot 页面接入真实页码分页、返回拍卖列表、加载失败重试、draft pending lot 改价/撤回确认、软截止信息、设备属性详情、金额/时间格式化以及代理历史关闭/重试交互；A03 POST 的策略字段现由主配置 `[auction]` 经应用层模板冻结，并同时写入快照与遗留规则列；A04 装备录入已接入 URL/canonical JSON 来源、短生命周期明文 key、AES-256-GCM 密文信封、PostgreSQL Serializable world/intake target/玩家/装备锁、同一事务的装备/密文/投稿/lot/版本/审计/realtime 写入，以及 Draft/Preview 当前录入场次的管理端表单；Preview 期间还会在同一事务追加新 revision 的物化展示项。密钥标识与材料只允许来自敏感 TOML，SQLite Lite 明确返回 `501 feature_not_supported`。A25 PUT 使用规则 revision CAS、命令账本和审计，管理端规则页已补齐旧版的语言标签、动态新增 locale、默认语言提示、版本事实、服务端规范化校验、校验门槛、轻量 Markdown 预览、稳定 command ID、发布冲突和重试反馈；SQLite 规则只读，发布明确
 返回 `501 feature_not_supported`。A15 从命令账本恢复代理计划后只输出安全事件字段，不把原始结果负载或代理密钥传给浏览器。Admin A21-A24 realtime 运维接口已接入 PostgreSQL/SQLite 的 lag、failure 安全投影和带命令账本/审计的 replay
 事务；外部广播 sink 作为超出旧版的扩展仍未冻结。源码目录重组已经完成，仍不引入外部服务行为或测试用例。
 A05 论坛预览已接入 Admin session、origin/CSRF、2 MiB 请求体上限、应用端口、本地 HTML/文本
@@ -596,7 +597,9 @@ Worker 主配置继续拥有 transport endpoint、凭据、调度、mailbox dura
 论坛扩展通知仍保留 Rust 固定文案，因为它不属于旧版模板闭集，后续若要配置化需先冻结跨模块契约。
 MoogleMail 调度现已按 world 拆为独立循环，补齐旧版读取/可重试业务处理各三次的超时重试、指数
 退避、周期抖动和全邮箱手动唤醒；Rust 的持久化 claim 在批次执行期间额外续租，失去 fence 后取消
-陈旧处理，不能使用过期 token 推进 cursor。应用错误已冻结 `Retryable`/`Permanent` 分类：确定性
+陈旧处理，不能使用过期 token 推进 cursor。Worker 启动还会把配置缩短前遗留的过晚 `next_poll_at`
+向当前 cron 收敛，同时保留暂停、活动 claim、失败事实和最大退避边界。应用错误已冻结
+`Retryable`/`Permanent` 分类：确定性
 业务、输入和配置错误不再 inline retry，超时及可重试依赖错误才进入有界重试。
 
 A26/A27 Admin runtime 配置已接入：`auction-application` 的严格非敏感文档模型、稳定
@@ -677,10 +680,10 @@ Public 规则语言读取和登录来源返回也已完成静态修复，其中 
 
 | owner | 旧版能力 | 当前状态与下一步 |
 | --- | --- | --- |
-| `auction-domain` / `auction-application` / `auction-storage` / `auction-jobs` | 预览、开放、Final phase、慢速代理 due、关闭与结算的完整生命周期 | preview 后继轮次、物化预览、open 时间/前序约束、开放前取消、Final slow proxy 转换/失格冻结、持久化 Final due fence、结算前 due 校验、精确 lot/代理锁、代理关闭、sold/unsold 投影和 `leader_since` 连续领先语义均已落地；慢速代理恢复了数据库时钟扫描、旧版稳定命令 ID/请求摘要、事务内 generation/due/authorization/截止时间/owner 资格 fence、stale 成功跳过和 `lot.slow_proxy_tick` 审计。PostgreSQL `000012`/`000013` 与 SQLite `000005` 至 `000007` 补齐调度和历史投影，PostgreSQL `000014` 恢复身份不可变、前序顺序和 draft/intake target 的数据库级防线。Auction 生命周期、慢速代理与结算共享独立 `60s + [0,5s]` 主循环，三个阶段各自最多 100 条、PostgreSQL 8 并发波次、30 秒单项总时限，SQLite Lite 有效并发固定为 1 且不启用结算；一阶段错误不再跳过后续阶段或终止其它 owner。剩余是用同库旧数据对照边界时刻、并发重复扫描、锁等待和切换前运行证据。 |
+| `auction-domain` / `auction-application` / `auction-storage` / `auction-jobs` | 预览、开放、Final phase、慢速代理 due、关闭与结算的完整生命周期 | Preview 可变录入、Open 后继轮次、物化预览、open 时间/前序约束、开放前取消、Final slow proxy 转换/失格冻结、持久化 Final due fence、结算前 due 校验、精确 lot/代理锁、代理关闭、sold/unsold 投影和 `leader_since` 连续领先语义均已落地；慢速代理恢复了数据库时钟扫描、旧版稳定命令 ID/请求摘要、事务内 generation/due/authorization/截止时间/owner 资格 fence、stale 成功跳过和 `lot.slow_proxy_tick` 审计。PostgreSQL `000012`/`000013` 与 SQLite `000005` 至 `000007` 补齐调度和历史投影，PostgreSQL `000014` 恢复身份不可变、前序顺序和初始 draft/intake target 防线，`000032` 再把唯一录入目标扩展到 Draft/Preview，并固定 Open 时才创建和切换下一期。Auction 生命周期、慢速代理与结算共享独立 `60s + [0,5s]` 主循环，三个阶段各自最多 100 条、PostgreSQL 8 并发波次、30 秒单项总时限，SQLite Lite 有效并发固定为 1 且不启用结算；一阶段错误不再跳过后续阶段或终止其它 owner。剩余是用同库旧数据对照边界时刻、并发重复扫描、锁等待和切换前运行证据。 |
 | `auction-domain` / `auction-application` / `auction-storage` | 拍卖经济策略在竞价运行时的完整应用（PPM 增量、代理开关/默认模式/次数上限、final phase、旧版默认值和 intake 起拍价统一） | 已完成主要运行时切片：主配置 `[auction]` 经校验后冻结为 schema v4 `policy_snapshot`；PostgreSQL/SQLite 竞价锁内恢复完整 `AuctionRules`，普通/代理/慢速/最终阶段规划使用旧版 PPM 计算，公开 lot 列表/详情的下一口价也读取同一快照，代理禁用、重复进场次数、默认模式和 final phase 慢速限制已接入，取消也按同一拍卖快照读取截止规则。默认值已对齐旧版共享配置（起拍 1000、PPM 50000、软截止/延长 1 分钟、次数上限 3、final phase 1 分钟）；MoogleMail 起拍价默认继承 `[auction.economics]`，仍允许显式覆盖。剩余是与真实旧数据、外部服务及切换前行为的对照验证。 |
 | `auction-application` / `auction-storage` / `auction-jobs` | recovery 退回后的 relist、refund、resolution 和完整 action 对账 | recovery 退回证据、Take、取消/恢复、COD 买家黑名单、guarded relist、buyer refund fulfillment 收口和状态审计已经接入；Worker 已对齐旧版 `case → return → action → relist → refund` 顺序，recovery action 也已补齐 `pending → prepared → enqueued` 两阶段 delivery identity、action fence 和可重放 activation。Fulfillment/Recovery 已从全局 5 秒 tick 拆为独立 `60s + [0,5s]` 循环，恢复 100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限；Recovery 各 phase 聚合失败但继续尝试后续 owner。prepare/activation 前按 Users owner 的 active 收件人投影复核资格，非 active 收件人持久化退避。旧版 recovery health 刷新也已接入：按 world 读取 Balance，持久化 low/stale/unavailable 状态并同步重算 recovery 计数；HV 战斗页另以 busy 状态保留凭据和最后成功余额，结束战斗后由后续刷新自动恢复。仍需更广泛的外部回执对照、真实部署对照和切换前验证。 |
-| `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` | MoogleMail main/isekai 独立轮询、读取/处理重试、超时和失败退避 | 每个已配置 world 现在拥有独立调度任务、持久化 cursor、claim 和手动唤醒器，一个邮箱的读取或数据库失败不会阻塞另一个邮箱，也不会终止 Worker。调度契约和默认值已对齐旧版：`schedule` 接受标准五字段 cron、描述符、`@every`、进程本地时区及 `TZ=` / `CRON_TZ=` IANA 时区前缀，默认 `* * * * *`，再附加最多五秒抖动；共享 HTTP transport 恢复一秒最小请求间隔、15 秒请求超时、固定生产/回环安全 endpoint 和 8 MiB 响应上限；批次为 100 封，读取与可重试业务处理各三次、每次 30 秒，使用 `1s → 30s` 指数退避。读取只对暂时错误内联重试；业务错误由应用层显式分为 `Retryable`/`Permanent`，确定性输入、配置和业务拒绝立即以永久失败收口，超时与可恢复依赖错误才内联重试，游标和持久化退避不会提前推进。成功后按 cron 保存下一次 `next_poll_at`，失败后保存下一 cron 与退避时刻的较大值。Admin 管理的共享 runtime 覆盖 main/isekai、发件人 allowlist、装备过滤和 14 个模板；Worker 主配置继续拥有 transport、凭据、调度、mailbox identity 和全局启用开关。长批次处理期间按 10 秒周期续租 60 秒 claim，token/owner/version 或续租 fence 失效后取消陈旧 future；业务重试只通过显式短生命周期副本携带正文和装备 key，所有副本销毁时清零，稳定命令 ID 负责恢复可能已提交的本地步骤。剩余是用真实 main/isekai 邮箱对照分页、限流、Cookie 失效和写入不确定结果。 |
+| `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` | MoogleMail main/isekai 独立轮询、读取/处理重试、超时和失败退避 | 每个已配置 world 现在拥有独立调度任务、持久化 cursor、claim 和手动唤醒器，一个邮箱的读取或数据库失败不会阻塞另一个邮箱，也不会终止 Worker。`schedule` 接受标准五字段 cron、描述符、`@every`、进程本地时区及 `TZ=` / `CRON_TZ=` IANA 时区前缀；现行产品默认 `*/5 * * * *`（每 5 分钟），再附加最多五秒抖动。共享 HTTP transport 恢复一秒最小请求间隔、15 秒请求超时、固定生产/回环安全 endpoint 和 8 MiB 响应上限；批次为 100 封，读取与可重试业务处理各三次、每次 30 秒，使用 `1s → 30s` 指数退避。读取只对暂时错误内联重试；业务错误由应用层显式分为 `Retryable`/`Permanent`，确定性输入、配置和业务拒绝立即以永久失败收口，超时与可恢复依赖错误才内联重试，游标和持久化退避不会提前推进。成功后按 cron 保存下一次 `next_poll_at`，失败后保存下一 cron 与退避时刻的较大值。Admin 管理的共享 runtime 覆盖 main/isekai、发件人 allowlist、装备过滤和 14 个模板；Worker 主配置继续拥有 transport、凭据、调度、mailbox identity 和全局启用开关。长批次处理期间按 10 秒周期续租 60 秒 claim，token/owner/version 或续租 fence 失效后取消陈旧 future；业务重试只通过显式短生命周期副本携带正文和装备 key，所有副本销毁时清零，稳定命令 ID 负责恢复可能已提交的本地步骤。剩余是用真实 main/isekai 邮箱对照分页、限流、Cookie 失效和写入不确定结果。 |
 | `auction-integrations` / `auction-application` / `auction-storage` / `auction-jobs` / `auctionctl` | 论坛 `start`、`cancel`、PM `notify` 以及对应回执/不确定结果处理 | 经对照 Auction-BF 的 `forumingest`，`start`、`cancel` 和 PM-only `notify` 在旧版本身就是 warning-only，并未连接业务 owner；当前 Rust 保持该边界。MM `notify`、主题发布/读取和回帖竞价导入已接入；Forum 已从全局集成 tick 拆为独立、立即执行的顺序循环，默认五分钟加最多五秒抖动、100 条批次、300 秒逐主题 claim 和 240 秒单主题总时限；成功扫描把下一次 due 持久化到一个完整周期后，多 Worker 不会因 Auction 的一分钟循环提前重复领取。主题读取按同 origin/thread 的规范 `st` 补齐分页，默认最多 10 页且硬上限 20 页，超过上限、分页身份漂移或 post ID 重复时失败关闭；发布失败仍继续回帖扫描，任何一阶段失败都不会终止其它 Worker owner。回帖批次按 world 聚合，只有该批所有主题成功且命令账本完成写入后才推进扫描游标，已入账但通知暂未完成的命令会在后续轮次重放通知；主题正文现在可按 `worker.forum.public_base_url` 生成与旧版一致的公开拍卖绝对链接；发布超时或本地证明写入失败先进入 reconciliation-only：Worker 按精确标题 GET，命中时只补一份本地 topic 证明，未命中时停在 `write_authorization_required`；只有 `auctionctl authorize-forum-write-retry` 经逐字目标确认写入 PostgreSQL `000016` 幂等授权账本与审计后，下一次领取才可再次 POST，禁止盲重发。剩余是用隔离论坛账号核对分页/限流、同标题命中、未命中无授权和授权后单写的 R1。若要让这些 warning-only 命令真正改变论坛或拍卖状态，属于超出旧版等价范围的新契约，需另行冻结 owner、幂等账本和回执证明。 |
 | `auction-application` / `auction-storage` / `auction-jobs` / `auction-http` / `auction-web-admin` | operations alert 信号、通知批次、Worker control 聚合和完整 dashboard section | 旧版 15 类 signal、阈值 evaluator、fingerprint、观察/恢复、批次 claim lease/fencing、三次 Create 尝试、MoogleMail 通知正文、入队原子 cooldown、稳定失败终态，以及 Admin 的 health/process、Worker、tracing、alerting、全量 mail poller、realtime lag/failure water、delivery、fulfillment、recovery 安全汇总已接入 PostgreSQL 完整档；`000015` 同时修复了普通重试写入会被 CHECK 拒绝、第三次失败误入人工对账和领取时过早消耗 cooldown 的差异。scan、dispatch、reconcile 已恢复为三个独立的一分钟有界循环，错误互不阻塞，阈值、批次窗口、冷却、重试和正文边界默认值与旧版一致。credential scope 聚合和无 active 凭据时的 degraded 启动语义也已接入，SQLite 明确为能力缺失。剩余是通知外部回执、真实部署和切换前验证；外部广播 sink 不属于旧版能力。 |
 | `auction-observability` / `auction-process` / `auction-jobs` | Prometheus/OpenTelemetry metrics/tracing exporter、真实状态心跳与进程停机 | Public/Admin 已接入默认关闭、固定 `/metrics` 的进程本地 Prometheus registry、旧版同等的 CPU/内存/文件描述符/线程数/启动时间进程资源指标和安全身份指标；配置层已恢复启用 metrics 时有效 listener 必须是 loopback TCP 或 Unix 的旧安全边界，在绑定前拒绝非本地 TCP。Worker control 的 peer-authenticated Unix socket 也已提供同一 `/metrics` 路径，并注册旧版 9 类 Worker loop 的结果、耗时、批次、重试和调度延迟指标；Public/Worker 主配置与 Admin runtime 均已接入 OTLP/HTTP tracing exporter，使用角色专属敏感 headers、自有有界批处理和队列丢弃计数；三类进程已登记 PostgreSQL/SQLite 连接池当前借出、空闲、总数、最大连接数及 SQLx 存储池边界的十项 acquisition 指标；固定低基数的业务事件结果/耗时指标也已覆盖 Public 竞价/代理命令和 Worker 邮件、拍卖生命周期、履约、recovery、operations-alert 循环。当前追加审计 INSERT 均会累加进程内饱和失败计数；三进程周期心跳每轮复用数据库/schema readiness，读取该计数和各自 tracing 安全投影，启动/停止状态也不再使用占位值。三进程现已统一处理 SIGINT/SIGTERM、10 秒业务 drain、二次信号强制收口、停止心跳及配置有界的 exporter flush；绕过存储池和审计观测边界的外部原生调用不纳入对应累计统计。剩余是实际部署下的 exporter、心跳 TTL 与故障聚合证据。 |
@@ -830,13 +833,15 @@ Public/Admin HTTP listener。
 - Application Public compensation port 已将补偿池批次摘要/分页与逐笔 movement/余额链校验分别拆入
   `ports/public/compensation/{mod,movement}.rs`；稳定导出、守恒约束、编号页和 keyset cursor
   边界保持不变。
-- PostgreSQL 生命周期计划已将 preview/open/cancel/final phase 的事务写入分别拆入
-  `database/competition/postgres/lifecycle/plan/{preview,open,cancel,final_phase}.rs`；
-  `plan.rs` 只保留动作分派，状态版本 fence、锁内物化/lot 转换、取消返还义务和代理子计划写入保持不变。
-- SQLite Lite 生命周期计划也已将 preview/open/cancel/final phase 的 `BEGIN IMMEDIATE` 内写入分别拆入
-  `database/sqlite/competition/transaction/lifecycle/plan/{mod,preview,open,cancel,final_phase}.rs`；
-  `plan/mod.rs` 只保留动作分派和共享状态版本校验，Lite 的串行写入、lot 状态转换、scheduled round fence
-  和 final phase 代理子计划原子性保持不变。
+- PostgreSQL 生命周期计划已将 preview/open/cancel/final phase 的事务写入与后继 Draft 建立分别拆入
+  `database/competition/postgres/lifecycle/plan/{preview,open,cancel,final_phase,successor}.rs`；
+  `plan.rs` 只保留动作分派，状态版本 fence、Preview 持续录入、Open 接管、锁内物化/lot 转换、
+  取消返还义务和代理子计划写入保持不变。
+- SQLite Lite 生命周期计划也已将 preview/open/cancel/final phase 的 `BEGIN IMMEDIATE` 内写入与后继 Draft
+  建立分别拆入
+  `database/sqlite/competition/transaction/lifecycle/plan/{mod,preview,open,cancel,final_phase,successor}.rs`；
+  `plan/mod.rs` 只保留动作分派和共享状态版本校验，Lite 的串行写入、Open 后继接管、lot 状态转换、
+  scheduled round fence 和 final phase 代理子计划原子性保持不变。
 - Forum 预览解析已将 HTML 抽取、纯文本切分、目录字段、命令/金额语法、内部帖子模型和结果辅助分别拆入
   `src/forum/parser/{html,text,catalog,commands,model,helpers}.rs`；`forum/mod.rs` 只保留适配器
   与稳定出口，A05 的有界输入、warning 排序和“只解析不远程写入”边界保持不变。
@@ -938,7 +943,7 @@ Public/Admin HTTP listener。
   快照、公开字段闭集和 SQLite Lite 能力缺失边界保持不变。
 - Storage Admin 装备录入 owner 已将同一 PostgreSQL 竞价事务中的事实写入与审计/realtime 追加分别拆入
   `database/admin_intake/{mod,write,record}.rs`；命令账本占位、world/auction/player/equipment 锁、
-  pending lot、版本推进和提交原子性保持不变。
+  Draft/Preview 目标、pending lot、Preview 展示项追加、版本推进和提交原子性保持不变。
 - Domain proxy owner 已将代理快照/枚举、授权状态变更和追加式转换事实校验分别拆入
   `domain/proxy/{model,authorization,transition}.rs`；`proxy/mod.rs` 只保留稳定导出，
   Fast/Slow 状态机、版本推进、终态原因闭集和转换事实校验保持不变。
@@ -1266,6 +1271,13 @@ draft/intake target 一致性触发器，也确认早期 Rust `000003` 遗漏了
 retention inventory 因策略版本或表覆盖仍停在旧状态而无条件失败。SQLite Lite 不复制
 PostgreSQL 延迟触发器。
 
+后续产品变更追加 PostgreSQL `000032_preview_intake_handoff`：每个 world 只允许一个 Draft 或 Preview
+当前录入场次，录入目标必须精确指向该场次并携带匹配状态。Preview 不再提前建立后继轮次；Admin/MM
+在 Preview 期间继续向当前拍卖写入 pending lot，并在同一事务追加新 revision 的预览展示项和 realtime
+重读信号。Open 才创建后继 Draft、登记下一轮并迁移录入目标；Preview 取消也会建立可继续接收装备的
+后继 Draft。迁移拒绝旧实现留下的 Preview 与后继 Draft 同世界并存窗口，升级必须避开该窗口，不能
+自动猜测数据归属。SQLite Lite 没有外部录入目标，但生命周期同样在 Open 或 Preview 取消时建立后继。
+
 同一轮旧版对照还发现 Rust operations alert 的第一次重试会被既有 CHECK 拒绝：代码曾把非空
 Create 错误码写入 `pending`，并在第三次失败时错误转为 `manual_reconcile`；同时 signal cooldown
 在领取阶段过早生效。追加 `000015_operations_alert_state_invariants` 后，普通失败只持久化无错误码
@@ -1485,7 +1497,7 @@ lot 详情继续恢复旧版登录态代理摘要：读取同一权威代理投�
 协议拒绝链路生成；该链在退信资产取回前保持 `manual_reconcile`，原始 metadata 仍不会离开
 storage owner。
 
-本轮 Admin 拍卖总览恢复旧版在选择 `main` 或 `isekai` 时显示的手工装备录入表单；表单与 lot 草稿页
+本轮 Admin 拍卖总览恢复旧版在选择 `main` 或 `isekai` 时显示的手工装备录入表单；表单与 Draft/Preview lot 页
 共用 `auction-web-admin/src/app/auction/intake.rs`，继续通过稳定 `command_id`、URL/canonical JSON、起拍价
 和卖家玩家名称走既有 A04 契约，避免两个页面的录入校验和幂等语义分叉。
 
@@ -1495,7 +1507,8 @@ storage owner。
 本轮 Users 列表也补齐筛选无结果时的明确空态；用户字段缺失继续使用 `—`，列表无记录则使用独立
 的本地化提示，避免两种状态混淆。
 
-本轮 Admin lot 草稿页也补齐旧版零 lot 空态；有记录时才渲染 lot 表格，分页和 intake 命令契约保持不变。
+本轮 Admin lot 页也补齐旧版零 lot 空态；Draft 与 Preview 均可继续录入装备，有记录时才渲染 lot 表格；
+改价/撤回仍仅限 Draft，分页和 intake 命令契约保持不变。
 
 本轮又将 Admin 的拍卖、lot、代理历史、delivery、凭据、Users、改名、邮件入站、realtime、审计和
 结算/recovery 列表统一接入旧版已有的直接跳页分页交互；页码上限仍由既有安全投影的
@@ -1668,7 +1681,8 @@ Lot 行还补回旧版供辅助技术读取的“#序号 + 装备名”隐藏标
 列表，避免仅关闭弹窗却不给管理员完成确认。可选卖家和提交编号为空时也恢复旧版空单元格呈现。
 
 拍卖生命周期弹窗继续按旧版补齐届次与动作语义：预览、开放、取消和 final phase 标题都显示当前
-sequence，正文分别说明目录冻结、截止时间不变、托管装备退回和 final phase 不可撤销；取消原因同时
+sequence；Preview 正文说明仍可继续录入，Open 正文说明此时才把后续装备切换到下一期，取消说明托管
+装备退回，final phase 说明不可撤销；取消原因同时
 恢复“写入审计历史”的提示。弹窗改为原生表单提交，取消原因获得首焦点，其他动作首焦点仍在取消按钮；
 surface 级焦点陷阱负责关闭后恢复触发控件。成功结果改回页面级 `role=status`，并按动作显示五语言文案，
 失败仍留在动作行供重试；表格首列也补回旧版供辅助技术读取的场次隐藏标题。
@@ -1793,3 +1807,11 @@ Public 独立 `/forum` 页面在发布后只显示可点击的帖子位置和“
 `000031` 为 `auction_forum_sync` 保存由完整主题读取证明的连续处理楼层，初始水位为固定系统帖 #2；
 扫描遇到待重试命令会把水位钳在该楼之前，无正文变化的完整扫描也会推进并释放 claim。该水位不从
 固定帖 `content_revision` 或远端 post ID 推算，SQLite Lite 继续不提供论坛完整档能力。
+
+本轮追加 PostgreSQL `000032_preview_intake_handoff`，将 Draft 与 Preview 统一为当前录入窗口：Preview
+期间 Admin/MM 继续录入当前拍卖并原子更新预览物化项、revision、审计和 realtime；Open 才创建后继
+Draft、下一轮调度并迁移录入目标，Preview 取消也保证留下可用后继。迁移以唯一索引、状态匹配 CHECK、
+延迟一致性触发器和世界级事务 advisory lock 关闭跨表并发缺口，并拒绝旧 Preview+Draft 重叠窗口。
+MoogleMail 自动轮询 cron 已改为可配置且默认 `*/5 * * * *`；Worker 启动会安全收敛旧配置遗留的
+过晚持久化调度水位，而不解除暂停、覆盖活动 claim 或跳过失败退避。本轮未新增或运行测试用例，
+最终静态门禁与 Auction-Test 运行态证据在部署后记录。

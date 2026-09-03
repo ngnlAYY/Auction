@@ -170,7 +170,7 @@ fn lifecycle_result(
             snapshot.preview_manual_open |= *manual;
             // 预览开放只推进生命周期版本；内容修订号已经由录入、lot 编辑或重列命令推进。
         }
-        AuctionLifecycleEffect::Open { manual_override } => {
+        AuctionLifecycleEffect::Open { manual_override, .. } => {
             snapshot.preview_opened_at = snapshot.preview_opened_at.or(Some(auction.updated_at));
             if *manual_override {
                 if snapshot.preview_scheduled_at > auction.updated_at {
@@ -180,7 +180,7 @@ fn lifecycle_result(
             }
             snapshot.opened_at = Some(auction.updated_at);
         }
-        AuctionLifecycleEffect::Cancel => {}
+        AuctionLifecycleEffect::Cancel { .. } => {}
         AuctionLifecycleEffect::FinalPhase { .. } => {
             snapshot.final_phase_at = Some(auction.updated_at);
         }

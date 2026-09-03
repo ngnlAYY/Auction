@@ -11,19 +11,51 @@ pub(crate) async fn ensure(
     pool: &TrackedPool<Postgres>,
     mailbox_key: &str,
     now: DateTime<Utc>,
+    scheduled_next_at: DateTime<Utc>,
+    retry_maximum_seconds: i64,
 ) -> Result<AdminMailPollState, ApplicationError> {
     sqlx::query(
         "INSERT INTO public.mail_poll_state
             (mailbox_key, cursor_value, last_poll_at, next_poll_at,
              consecutive_failures, paused, state_version, updated_at)
-         VALUES ($1, NULL, $2, $2, 0, false, 1, $2)
+         VALUES ($1, NULL, $2, $3, 0, false, 1, $2)
          ON CONFLICT (mailbox_key) DO NOTHING",
     )
     .bind(mailbox_key)
     .bind(now)
+    .bind(scheduled_next_at)
     .execute(pool)
     .await
     .map_err(|_| storage_error("初始化 PostgreSQL MoogleMail 轮询状态失败"))?;
+
+    // 旧配置可能把持久化水位留在很远的未来。启动时只允许把它向当前 cron 收敛；暂停、
+    // 活动 claim 和失败退避仍是权威状态，不能因为进程重启而被跳过。
+    sqlx::query(
+        "UPDATE public.mail_poll_state
+         SET next_poll_at = CASE
+                 WHEN consecutive_failures > 0 AND last_failure_at IS NOT NULL
+                     THEN GREATEST($3, last_failure_at + ($4 * interval '1 second'))
+                 ELSE $3
+             END,
+             state_version = state_version + 1,
+             updated_at = $2
+         WHERE mailbox_key = $1
+           AND paused = false
+           AND (claim_expires_at IS NULL OR claim_expires_at <= $2)
+           AND next_poll_at > CASE
+                 WHEN consecutive_failures > 0 AND last_failure_at IS NOT NULL
+                     THEN GREATEST($3, last_failure_at + ($4 * interval '1 second'))
+                 ELSE $3
+             END",
+    )
+    .bind(mailbox_key)
+    .bind(now)
+    .bind(scheduled_next_at)
+    .bind(retry_maximum_seconds)
+    .execute(pool)
+    .await
+    .map_err(|_| storage_error("收敛 PostgreSQL MoogleMail 调度水位失败"))?;
+
     let row = sqlx::query(
         "SELECT mailbox_key, cursor_value, last_poll_at, next_poll_at,
                 consecutive_failures, paused, state_version, updated_at

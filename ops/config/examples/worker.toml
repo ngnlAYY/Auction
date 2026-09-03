@@ -187,8 +187,8 @@ request_timeout_seconds = 15
 batch_size = 100
 # 可选：单次有界读取的最大页数，范围 1-100，默认 20。
 maximum_pages = 20
-# 可选：标准五字段 cron，默认每分钟；也支持 @hourly/@daily/@every 以及 TZ=/CRON_TZ= 时区前缀。
-schedule = "* * * * *"
+# 可选：标准五字段 cron，默认每 5 分钟；也支持 @hourly/@daily/@every 以及 TZ=/CRON_TZ= 时区前缀。
+schedule = "*/5 * * * *"
 # 可选：每个 cron 触发时刻后附加的随机抖动上限秒数，范围 0-86400，默认 5。
 jitter_seconds = 5
 # 可选：邮箱 claim 租约秒数，范围 1-86400，默认 60；处理期间会续租。
