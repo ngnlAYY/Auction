@@ -9,7 +9,7 @@ use crate::{
     TransactionPolicy, TransactionRunner,
 };
 
-/// Admin 正式开拍前修改计划结束时间的用例。
+/// Admin 正式开拍前修改预览、开拍与计划结束时间的用例。
 pub struct AdminAuctionScheduleService<R> {
     repository: Arc<R>,
 }
@@ -51,7 +51,12 @@ where
                         }
                         let replayed: AdminAuctionSummary =
                             serde_json::from_slice(&stored.result_payload)?;
-                        if !replayed.validate() || replayed.auction.id != command.auction_id {
+                        if !replayed.validate()
+                            || replayed.auction.id != command.auction_id
+                            || replayed.auction.preview_scheduled_at != command.preview_scheduled_at
+                            || replayed.auction.scheduled_open_at != command.scheduled_open_at
+                            || replayed.scheduled_ends_at != Some(command.scheduled_end_at)
+                        {
                             return Err(CompetitionTransactionError::Failed(
                                 "Admin 拍卖计划命令账本结果无效".to_owned(),
                             )
@@ -77,21 +82,50 @@ where
                     if !matches!(auction.status.as_str(), "draft" | "preview")
                         || auction.scheduled_end_at.is_some()
                         || auction.effective_end_at.is_some()
+                        || auction.opened_at.is_some()
+                        || snapshot.open_completed_at.is_some()
+                        || snapshot.final_completed_at.is_some()
                     {
                         return Err(CompetitionTransactionError::InvalidState.into());
                     }
                     // 必须在取得完整写锁后读取适配器的非冻结权威时钟；否则长时间等锁可能让
                     // 已经到期的结束时间通过校验，并把过早时间写入 updated_at。
                     let now = transaction.current_time().await?;
-                    if command.scheduled_end_at <= now {
-                        return Err(CompetitionTransactionError::Conflict.into());
-                    }
-                    if command.scheduled_end_at <= auction.scheduled_open_at {
-                        return Err(CompetitionTransactionError::Conflict.into());
-                    }
-
+                    let previous_preview_scheduled_at = auction.preview_scheduled_at;
+                    let previous_scheduled_open_at = auction.scheduled_open_at;
                     let previous_scheduled_end_at = snapshot.policy_scheduled_end_at;
-                    let changed = previous_scheduled_end_at != command.scheduled_end_at;
+                    let changed = previous_preview_scheduled_at != command.preview_scheduled_at
+                        || previous_scheduled_open_at != command.scheduled_open_at
+                        || previous_scheduled_end_at != command.scheduled_end_at;
+                    match auction.status.as_str() {
+                        "draft" => {
+                            if auction.preview_opened_at.is_some()
+                                || snapshot.preview_completed_at.is_some()
+                            {
+                                return Err(CompetitionTransactionError::InvalidState.into());
+                            }
+                            if command.preview_scheduled_at <= now
+                                || command.scheduled_open_at <= now
+                                || command.scheduled_end_at <= now
+                            {
+                                return Err(CompetitionTransactionError::Conflict.into());
+                            }
+                        }
+                        "preview" => {
+                            // 预览已经成为历史事实；这里只允许延后或提前尚未发生的开拍与结束。
+                            if auction.preview_opened_at.is_none()
+                                || command.preview_scheduled_at != previous_preview_scheduled_at
+                                || command.scheduled_open_at <= now
+                                || command.scheduled_end_at <= now
+                            {
+                                return Err(CompetitionTransactionError::Conflict.into());
+                            }
+                        }
+                        _ => return Err(CompetitionTransactionError::InvalidState.into()),
+                    }
+                    if changed && snapshot.has_active_lease(now) {
+                        return Err(CompetitionTransactionError::Conflict.into());
+                    }
                     let result = if changed {
                         transaction
                             .update_admin_auction_schedule(command.clone(), snapshot, now)
@@ -101,6 +135,8 @@ where
                     };
                     if !result.validate()
                         || result.auction.id != command.auction_id
+                        || result.auction.preview_scheduled_at != command.preview_scheduled_at
+                        || result.auction.scheduled_open_at != command.scheduled_open_at
                         || result.scheduled_ends_at != Some(command.scheduled_end_at)
                     {
                         return Err(CompetitionTransactionError::Failed(
@@ -121,6 +157,8 @@ where
                     transaction
                         .append_admin_auction_schedule_record(
                             command,
+                            previous_preview_scheduled_at,
+                            previous_scheduled_open_at,
                             previous_scheduled_end_at,
                             result.clone(),
                             changed,

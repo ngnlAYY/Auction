@@ -63,6 +63,7 @@ pub(crate) fn AdminAuctionRow(
                     status: lifecycle_status,
                     expected_state_version: auction.state_version,
                     capabilities,
+                    preview_scheduled_at: auction.preview_scheduled_at.clone(),
                     scheduled_open_at: auction.scheduled_open_at.clone(),
                     scheduled_end_at: auction.scheduled_ends_at.clone(),
                     current_time_millis,

@@ -44,7 +44,8 @@ async fn forum_postgres(
 
     let row = sqlx::query(
         "SELECT auction_id, status, source_revision, thread_url, title, body,
-                content_revision, content_synced_at, content_last_success_at,
+                content_revision, processed_through_post_number, content_synced_at,
+                content_last_success_at,
                 content_last_error_at, content_last_error_code, updated_at
          FROM public.auction_forum_sync
          WHERE auction_id = $1",
@@ -71,6 +72,9 @@ async fn forum_postgres(
         content_revision: row
             .try_get("content_revision")
             .map_err(|_| storage_error("读取公开论坛内容版本失败"))?,
+        processed_through_post_number: row
+            .try_get("processed_through_post_number")
+            .map_err(|_| storage_error("读取公开论坛处理楼层失败"))?,
         content_synced_at: row
             .try_get("content_synced_at")
             .map_err(|_| storage_error("读取公开论坛内容同步时间失败"))?,

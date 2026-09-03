@@ -16,6 +16,7 @@ pub struct PublicForumResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
     pub content_revision: i64,
+    pub processed_through_post_number: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_synced_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -149,7 +149,11 @@ where
             let next_scan_at = scanned_at
                 .checked_add_signed(poll_interval)
                 .ok_or(WorkerError::InvalidForumConfiguration)?;
-            runtime.store.finish_topic_scan(topic, scanned_at, next_scan_at).await?;
+            let processed_through_post_number = topic.processed_through_post_number;
+            runtime
+                .store
+                .finish_topic_scan(topic, processed_through_post_number, scanned_at, next_scan_at)
+                .await?;
             break;
         }
         processed += 1;

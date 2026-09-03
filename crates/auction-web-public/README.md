@@ -15,8 +15,9 @@ Dioxus 客户端渲染的公开端 SPA。路由集合包含旧版 Auction-BF
   `auction/reads/history/filters/` 内进一步拆分表单控件、错误模型和输入规范化；
   `auction/commands/` 将普通竞价、代理入口/创建表单/降低表单/成功反馈和共用命令状态/错误映射分开；
   `shared/` 只保存本 surface 内真正通用的基础组件。
-- `src/app/content/forum.rs`：独立 `/forum` 页面，按所选世界读取当前拍卖的 P15 论坛镜像；仅在
-  该页且帖子尚未发布时轮询，首页不再读取论坛同步状态。
+- `src/app/content/forum.rs`：独立 `/forum` 页面，按所选世界读取当前拍卖的 P15 论坛镜像；发布后只
+  显示可点击的帖子位置和持久化的“已更新到 #xx”真实处理楼层，首页不再读取论坛同步状态。发布前
+  每 2 秒、发布后每 30 秒读取本地投影，明确失败时暂停并提供人工重试。
 - `assets/public.css`：公开端 surface 样式，沿用旧版公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。
 

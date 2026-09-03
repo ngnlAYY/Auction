@@ -33,7 +33,7 @@ pub(super) async fn claim_published_topics_postgres(
         "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
                 sync.title, sync.body, sync.system_log_body, sync.content_revision,
-                sync.content_last_error_code
+                sync.processed_through_post_number, sync.content_last_error_code
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
@@ -85,6 +85,9 @@ pub(super) async fn claim_published_topics_postgres(
         let content_revision: i64 = row
             .try_get("content_revision")
             .map_err(|_| storage_error("读取论坛固定楼层版本失败"))?;
+        let processed_through_post_number: i32 = row
+            .try_get("processed_through_post_number")
+            .map_err(|_| storage_error("读取论坛已处理楼层失败"))?;
         let content_last_error_code: Option<String> = row
             .try_get("content_last_error_code")
             .map_err(|_| storage_error("读取论坛固定楼层错误码失败"))?;
@@ -127,6 +130,7 @@ pub(super) async fn claim_published_topics_postgres(
             || system_log_body.is_empty()
             || system_log_body.len() > 65_531
             || content_revision <= 0
+            || processed_through_post_number < 2
         {
             return Err(storage_error("论坛回帖主题投影无效"));
         }
@@ -140,6 +144,7 @@ pub(super) async fn claim_published_topics_postgres(
             catalog_body,
             system_log_body,
             content_revision,
+            processed_through_post_number,
             content_claim_token,
             content_claim_owner: worker_id.to_owned(),
             content_claim_fencing,

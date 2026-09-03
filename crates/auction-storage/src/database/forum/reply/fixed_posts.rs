@@ -13,6 +13,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     topic: &ForumReplyTopic,
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
+    processed_through_post_number: i32,
     updated_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
@@ -21,6 +22,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
          SET title = $2,
              body = $3,
              system_log_body = $4,
+             processed_through_post_number = $14,
              content_revision = content_revision + 1,
              content_synced_at = $5,
              content_next_scan_at = $6,
@@ -55,6 +57,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(topic.content_claim_token)
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
+    .bind(processed_through_post_number)
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("写入论坛固定楼层正文证明失败"))?;
@@ -69,6 +72,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     topic: &ForumReplyTopic,
     catalog: &ForumRenderedThread,
     system_log: &ForumRenderedPost,
+    processed_through_post_number: i32,
     updated_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
     let result = sqlx::query(
@@ -76,6 +80,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
          SET title = $2,
              body = $3,
              system_log_body = $4,
+             processed_through_post_number = $13,
              content_revision = content_revision + 1,
              content_synced_at = $5,
              updated_at = $5
@@ -102,6 +107,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     .bind(topic.content_claim_token)
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
+    .bind(processed_through_post_number)
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("写入论坛固定楼层暂存进度失败"))?;
@@ -114,12 +120,14 @@ pub(super) async fn record_fixed_posts_progress_postgres(
 pub(super) async fn finish_topic_scan_postgres(
     store: &PostgresStore,
     topic: &ForumReplyTopic,
+    processed_through_post_number: i32,
     scanned_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
-         SET content_next_scan_at = $3,
+         SET processed_through_post_number = $11,
+             content_next_scan_at = $3,
              content_lease_expires_at = NULL,
              content_claim_token = NULL,
              content_claim_owner = NULL,
@@ -147,6 +155,7 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(topic.content_claim_token)
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
+    .bind(processed_through_post_number)
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;

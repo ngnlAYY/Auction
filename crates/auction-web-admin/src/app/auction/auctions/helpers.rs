@@ -71,24 +71,44 @@ pub(super) fn valid_auction_schedule(preview: &str, open: &str, end: &str) -> bo
     }
 }
 
-/// 校验计划修改输入：必须晚于当前时间和既有正式开拍时间。
-pub(super) fn valid_schedule_end(open: &str, end: &str) -> bool {
-    let Some(open) = scheduled_time_millis(open) else {
-        return false;
-    };
-
+/// 校验计划修改输入：Draft 三项都在未来；Preview 保留既有预览时间并要求开拍仍在未来。
+pub(super) fn valid_schedule_update(status: &str, preview: &str, open: &str, end: &str) -> bool {
     #[cfg(target_arch = "wasm32")]
     {
-        local_datetime_millis(end)
-            .is_some_and(|end| end > js_sys::Date::new_0().get_time() && end > open as f64)
+        let (Some(preview), Some(open), Some(end)) = (
+            local_datetime_millis(preview),
+            local_datetime_millis(open),
+            local_datetime_millis(end),
+        ) else {
+            return false;
+        };
+        let now = js_sys::Date::new_0().get_time();
+        preview < open
+            && open < end
+            && match status {
+                "draft" => preview > now,
+                "preview" => open > now,
+                _ => false,
+            }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M").ok().is_some_and(|end| {
-            let end = end.and_utc().timestamp_millis();
-            end > chrono::Utc::now().timestamp_millis() && end > open
-        })
+        let (Ok(preview), Ok(open), Ok(end)) = (
+            chrono::NaiveDateTime::parse_from_str(preview, "%Y-%m-%dT%H:%M"),
+            chrono::NaiveDateTime::parse_from_str(open, "%Y-%m-%dT%H:%M"),
+            chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M"),
+        ) else {
+            return false;
+        };
+        let now = chrono::Utc::now().naive_utc();
+        preview < open
+            && open < end
+            && match status {
+                "draft" => preview > now,
+                "preview" => open > now,
+                _ => false,
+            }
     }
 }
 

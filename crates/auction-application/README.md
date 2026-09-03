@@ -125,8 +125,8 @@ Public 规则文档和黑名单只读契约分别位于 `src/ports/public/rules.
 Public 补偿池与账本只读契约位于 `src/ports/public/compensation/`，由批次摘要/分页与逐笔
 movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页和 keyset cursor 边界，不依赖
 PostgreSQL 或 SQLite 类型。
-Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态和已发布内容，不承担
-远程论坛传输。
+Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态、已发布内容和由完整
+主题扫描证明的真实处理楼层，不承担远程论坛传输，也不以固定帖内容版本推算处理进度。
 论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照携带等级、Primary Attributes 缩写、
 十分之一百分比精度的平均 Roll、可证明的当前论坛楼层/统一代理来源及无 key 的装备链接目标，渲染前由
 `PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取
@@ -141,8 +141,10 @@ Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许
 withdrawn-return 履约义务，具体 SQL 不跨过端口。
 Admin 拍卖列表只读契约位于 `src/ports/admin/auctions.rs`，定义 world/status 筛选、旧页码
 分页、生命周期安全快照和 lot 数量；SQLite Lite 缺少完整投影时必须显式报告能力不支持。
-正式开放前的计划结束时间写入契约位于 `src/ports/admin/auction_schedule.rs`；应用层只编排
-状态/版本/时间校验、幂等账本和事务动作，不直接操作策略 JSON 或 `scheduled_rounds`。
+正式开放前的预览、开拍与计划结束时间写入契约位于
+`src/ports/admin/auction_schedule.rs`；Draft 可修改三项时间，Preview 的既有预览事实不可修改；
+应用层只编排状态/版本/严格时间顺序、租约冲突、幂等账本和事务动作，不直接操作策略 JSON 或
+`scheduled_rounds`。
 Admin 规则文档契约位于 `src/ports/admin/rules.rs`，区分候选校验、读取快照和 PostgreSQL
 完整档发布事务；发布使用 `command_id`、request hash 与 revision fence，SQLite 只保留读取。
 Admin 装备录入契约位于 `src/ports/admin/intake/`，区分外部来源读取、key 加密和数据库

@@ -22,6 +22,8 @@ pub struct PublicForumThread {
     pub body: Option<String>,
     /// 固定 #1/#2 的本地 CAS 版本；不暴露 Worker claim 或下次调度时间。
     pub content_revision: i64,
+    /// 最近一次由完整主题读取证明已处理到的真实论坛楼层。
+    pub processed_through_post_number: i32,
     /// 最近一次取得远端固定楼层正文证明的时间。
     pub content_synced_at: Option<DateTime<Utc>>,
     /// 最近一次完整扫描成功的时间。
@@ -42,6 +44,7 @@ impl PublicForumThread {
             || self.status.chars().any(char::is_control)
             || self.source_revision < 0
             || self.content_revision < 0
+            || self.processed_through_post_number < 2
             || self.updated_at.timestamp_micros() == 0
             || !valid_optional_timestamp(self.content_synced_at)
             || !valid_optional_timestamp(self.content_last_success_at)

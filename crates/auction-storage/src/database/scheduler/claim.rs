@@ -30,7 +30,8 @@ pub(super) async fn postgres(
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
                 round.world_id, round.local_week,
-                round.preview_completed_at, round.open_completed_at, round.attempt_count
+                round.preview_completed_at, round.open_completed_at, round.attempt_count,
+                round.state_version
          FROM public.scheduled_rounds AS round
          INNER JOIN public.auctions AS auction ON auction.id = round.auction_id
          LEFT JOIN LATERAL (
@@ -93,13 +94,16 @@ pub(super) async fn postgres(
             .checked_add(1)
             .and_then(|value| u32::try_from(value).ok())
             .ok_or_else(|| repository_error_owned("Worker 尝试次数溢出"))?;
+        let old_state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
         let updated = sqlx::query(
             "UPDATE public.scheduled_rounds
              SET lease_owner = $2, lease_until = $3, attempt_count = $4,
                  state_version = state_version + 1,
                  last_failure_code = NULL, last_failure_detail = NULL,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND status = 'active' AND final_completed_at IS NULL",
+             WHERE id = $1 AND status = 'active' AND final_completed_at IS NULL
+               AND state_version = $5
+             RETURNING state_version",
         )
         .bind(round_id)
         .bind(worker_id)
@@ -108,11 +112,19 @@ pub(super) async fn postgres(
             i32::try_from(attempt_count)
                 .map_err(|_| repository_error_owned("Worker 尝试次数超出数据库范围"))?,
         )
-        .execute(&mut *transaction)
+        .bind(old_state_version)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(map_storage_error)?;
-        if updated.rows_affected() != 1 {
+        let Some(updated) = updated else {
             return Err(repository_error_owned("Worker 领取轮次时状态已变化"));
+        };
+        let state_version: i64 = updated.try_get("state_version").map_err(map_storage_error)?;
+        let expected_state_version = old_state_version
+            .checked_add(1)
+            .ok_or_else(|| repository_error_owned("Worker 调度版本溢出"))?;
+        if state_version != expected_state_version {
+            return Err(repository_error_owned("Worker 领取轮次后的版本无效"));
         }
         claims.push(ScheduledRoundClaim {
             round_id,
@@ -121,6 +133,7 @@ pub(super) async fn postgres(
             command_id: command_id(create_command_id, &world_id, local_week, phase),
             worker_id: worker_id.to_owned(),
             lease_until,
+            state_version,
             attempt_count,
         });
     }
@@ -164,7 +177,8 @@ async fn sqlite_inner(
     let rows = sqlx::query(
         "SELECT round.id, round.auction_id, round.create_command_id,
                 round.world_id, round.local_week,
-                round.preview_completed_at, round.open_completed_at, round.attempt_count
+                round.preview_completed_at, round.open_completed_at, round.attempt_count,
+                round.state_version
          FROM scheduled_rounds AS round
          INNER JOIN auctions AS auction ON auction.id = round.auction_id
          WHERE round.status = 'active'
@@ -238,18 +252,24 @@ async fn sqlite_inner(
             .checked_add(1)
             .and_then(|value| u32::try_from(value).ok())
             .ok_or_else(|| repository_error_owned("Worker 尝试次数溢出"))?;
+        let old_state_version: i64 = row.try_get("state_version").map_err(map_storage_error)?;
+        let state_version = old_state_version
+            .checked_add(1)
+            .ok_or_else(|| repository_error_owned("Worker 调度版本溢出"))?;
         let updated = sqlx::query(
             "UPDATE scheduled_rounds
              SET lease_owner = ?, lease_until = ?, attempt_count = ?,
                  state_version = state_version + 1,
                  last_failure_code = NULL, last_failure_detail = NULL,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND status = 'active' AND final_completed_at IS NULL",
+             WHERE id = ? AND status = 'active' AND final_completed_at IS NULL
+               AND state_version = ?",
         )
         .bind(worker_id)
         .bind(&lease_text)
         .bind(i64::from(attempt_count))
         .bind(super::mapping::uuid_blob(round_id))
+        .bind(old_state_version)
         .execute(&mut *connection)
         .await
         .map_err(map_storage_error)?;
@@ -263,6 +283,7 @@ async fn sqlite_inner(
             command_id: command_id(create_command_id, &world_id, local_week, phase),
             worker_id: worker_id.to_owned(),
             lease_until,
+            state_version,
             attempt_count,
         });
     }

@@ -28,6 +28,7 @@ fn valid_forum_thread(thread: &ForumThread, auction_id: &str) -> bool {
         && valid_legacy_uuid(&thread.auction_id)
         && thread.source_revision >= 0
         && thread.content_revision >= 0
+        && thread.processed_through_post_number >= 2
         && DateTime::parse_from_rfc3339(&thread.updated_at).is_ok()
         && valid_optional_timestamp(thread.content_synced_at.as_deref())
         && valid_optional_timestamp(thread.content_last_success_at.as_deref())

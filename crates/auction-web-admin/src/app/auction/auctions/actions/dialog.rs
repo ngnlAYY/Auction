@@ -23,6 +23,7 @@ pub(super) fn AdminAuctionActions(
     status: String,
     expected_state_version: i64,
     capabilities: AdminAuctionCapabilities,
+    preview_scheduled_at: String,
     scheduled_open_at: String,
     scheduled_end_at: Option<String>,
     current_time_millis: i64,
@@ -56,7 +57,9 @@ pub(super) fn AdminAuctionActions(
                 AdminAuctionScheduleAction {
                     auction_id: auction_id.clone(),
                     auction_sequence,
+                    status: status.clone(),
                     expected_state_version,
+                    preview_scheduled_at: preview_scheduled_at.clone(),
                     scheduled_open_at: scheduled_open_at.clone(),
                     scheduled_end_at,
                     busy,

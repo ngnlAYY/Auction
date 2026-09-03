@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000030` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000031` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -290,7 +290,8 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 最近失败时间和有界安全错误码，并以追加式 `forum_identity_history` 保存论坛数字账号及可变名称的
 新旧快照；`000030` 先拒绝仍有同类重复 active 外部 Cookie 的数据库，再用 partial unique index
 保证 `mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；重复项必须先由 Admin 幂等命令
-停用，迁移不会静默选择凭据或绕过追加审计；
+停用，迁移不会静默选择凭据或绕过追加审计；`000031` 为每个论坛主题单独保存由完整主题读取证明的
+连续处理楼层，初始为固定系统帖 #2，不能从固定帖内容版本或远端 post ID 推算；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -329,7 +330,7 @@ Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+hos
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 
 PostgreSQL 价格历史使用结算账本边界；SQLite Lite 不具备 settlement owner，也不把 `settled`/`sold`
-状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 计划结束时间修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁，同步 schema v4 策略快照与持久调度记录，并提交版本 CAS、命令账本、审计和 `auction.schedule_updated`；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与草稿 lot 管理页已接入，SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
+状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与草稿 lot 管理页已接入，SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
 登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回旧版
 `{ authorization: ... }` 完整命令投影；应用层在竞价事务内冻结授权、quota、完整转换历史、终止原因和
@@ -526,7 +527,7 @@ API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快�
 `settling`/`settled` 只展示终态状态，不把已经过去的计划开放/截止时间渲染为倒计时或落锤状态；
 Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调整 PPM，以正值惩罚/税费、负值折扣的
 闭集语义展示，不在浏览器重算结算事实；Admin 拍卖列表提供带 CSRF、命令 ID
-和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
+和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，发布后只显示可点击的帖子位置和持久化的真实连续处理楼层，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照
 `mail_intake` 新 delivery 的 `origin_id` 使用 `world:external_mail_id:send|return|take`；传输与

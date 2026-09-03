@@ -222,6 +222,7 @@ impl ForumReplyStore for DatabaseStore {
         topic: ForumReplyTopic,
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
+        processed_through_post_number: i32,
         updated_at: DateTime<Utc>,
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
@@ -232,6 +233,8 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
                 || topic.catalog_post_id == topic.system_log_post_id
                 || topic.content_revision <= 0
+                || processed_through_post_number < 2
+                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
@@ -251,6 +254,7 @@ impl ForumReplyStore for DatabaseStore {
                         &topic,
                         &catalog,
                         &system_log,
+                        processed_through_post_number,
                         updated_at,
                         next_scan_at,
                     )
@@ -267,6 +271,7 @@ impl ForumReplyStore for DatabaseStore {
         topic: ForumReplyTopic,
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
+        processed_through_post_number: i32,
         updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -276,6 +281,8 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
                 || topic.catalog_post_id == topic.system_log_post_id
                 || topic.content_revision <= 0
+                || processed_through_post_number < 2
+                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
@@ -293,6 +300,7 @@ impl ForumReplyStore for DatabaseStore {
                         &topic,
                         &catalog,
                         &system_log,
+                        processed_through_post_number,
                         updated_at,
                     )
                     .await
@@ -306,6 +314,7 @@ impl ForumReplyStore for DatabaseStore {
     fn finish_topic_scan(
         &self,
         topic: ForumReplyTopic,
+        processed_through_post_number: i32,
         scanned_at: DateTime<Utc>,
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
@@ -316,6 +325,8 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
                 || topic.catalog_post_id == topic.system_log_post_id
                 || topic.content_revision <= 0
+                || processed_through_post_number < 2
+                || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
@@ -329,7 +340,14 @@ impl ForumReplyStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    finish_topic_scan_postgres(store, &topic, scanned_at, next_scan_at).await
+                    finish_topic_scan_postgres(
+                        store,
+                        &topic,
+                        processed_through_post_number,
+                        scanned_at,
+                        next_scan_at,
+                    )
+                    .await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(_) => Err(capability_error()),

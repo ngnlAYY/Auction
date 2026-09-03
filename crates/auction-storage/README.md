@@ -8,7 +8,7 @@
 `src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令和共享映射
 分别位于同目录的 `postgres/{lifecycle,admin,mapping}.rs`，竞价 owner 拆入
 `postgres/bidding/{mod,ledger,snapshot,eligibility,plan,proxy,facts,audit,realtime}.rs`；其中管理事务再按
-拍卖创建、计划结束时间修改、lot 更新和行映射拆到
+拍卖创建、开拍前计划时间修改、lot 更新和行映射拆到
 `postgres/admin/{create,schedule,mapping}.rs` 与 `postgres/admin/lot/`；
 `lot/` 再按事务适配、锁内读取、状态变更、withdrawn-return 义务和审计/realtime 事件拆到
 `{mod,transaction,read,mutation,obligation,events}.rs`。SQLite Lite 竞价事务
@@ -44,8 +44,9 @@ PostgreSQL 破坏性重建由 `database/rebuild/` 持有：`model.rs` 定义预�
 执行完整预检，避免把连接池自身误计为外部 session。
 Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 `src/database/scheduler/` 持有：`mod.rs` 只做端口分派，`claim.rs` 负责 PostgreSQL/SQLite
-领取，`resolution.rs` 负责完成/失败 fence，`mapping.rs` 负责阶段、命令和 Lite 映射；它不把
-调度状态放进内存或 Redis。
+领取，`resolution.rs` 负责完成/失败 fence，`mapping.rs` 负责阶段、命令和 Lite 映射；claim 会冻结
+领取后 `state_version` 与精确租约期限，完成/失败必须同时匹配 owner、期限和版本，计划修改清除旧租约
+并递增版本后，陈旧 Worker 不能再收口；调度状态不进入内存或 Redis。
 慢速代理使用 lot 自身的 `slow_authorization_id`、`slow_generation` 和 `slow_due_at` 作为持久化
 generation；`src/database/slow_proxy_due.rs` 按数据库时钟无锁有界扫描，随后由两后端竞价事务
 重新锁定 lot/活动代理/用户、核对截止时间并原子写入命令账本、计划、事件和
@@ -127,7 +128,9 @@ Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 
 Public 补偿池与单场账本由 `src/database/compensation/` 持有；`mod.rs` 只负责后端分派，
 `postgres/{rounds,movements}.rs` 分别拥有批次/余额和单场账本查询。PostgreSQL 完整档在同一
 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
-Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影；同目录的
+Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影，其中
+`processed_through_post_number` 是完整主题读取证明的真实连续楼层，不从固定帖内容版本或远端
+post ID 推算；同目录的
 `sync.rs` 只做主题同步端口装配，领取租约、快照读取、发布/失败状态推进和输入校验分别位于
 `sync/{claims,snapshot,publishing,validation}.rs`，`sync/authorization.rs` 单独拥有未知写入清单、
 幂等人工再授权、命令重放和追加审计事务；`reply.rs` 只做回帖端口装配，已发布主题与
@@ -141,7 +144,8 @@ Users 主体只有一个论坛账号，`000027` 增加 Users 级唯一论坛账�
 主体所有论坛映射在事务提交时一致；Admin 修正数字 ID 时也在同一事务更新全部映射。旧
 `game_player_id` 仅作为 `username` 的数据库兼容镜像，数字键不会进入 MoogleMail 收件人。`000025` 在同一同步行保存固定 #1/#2
 的真实 post ID、#2 规范正文和内容版本，并通过独立 due 水位、claim/lease/fencing 串行化远端
-编辑；历史 published 行保持未对账，不猜测楼层身份。
+编辑；`000031` 另存真实处理楼层，历史行从安全的 #2 水位开始并等待下一次完整扫描推进，不猜测楼层
+身份或处理进度。
 主题同步只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会随 `state_version` 变化再次领取；
 快照复用 Public 装备投影的属性校验和 Roll 算法，输出等级、按固定 Primary Attributes 顺序生成的
 首字母缩写、十分之一百分比平均 Roll、装备 ID、外部 ID 和不含 key 的目标；真实 URL 由 Worker 的
@@ -187,10 +191,13 @@ Lite 明确返回能力不支持。策略模板会在同一事务中同时写入
 遗留规则分叉。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在真正开放前
 保持空值，以兼容旧系统创建行为。
 Admin A39 计划修改由同一命令组合器与 PostgreSQL `postgres/admin/schedule.rs` 持有：事务按
-world → scheduled round → auction 加锁，只允许 Draft/Preview，将新的结束时间同步写入 schema v4
-策略快照与 `scheduled_rounds`，通过 auction 版本 CAS 追加命令账本、审计和
-`auction.schedule_updated`；不会提前填充开放后才使用的拍卖运行时结束列，也不会改写 lot 截止时间。
-SQLite Lite 明确不提供这项完整档写入能力。
+world → scheduled round → auction 加锁，只允许 Draft/Preview；Draft 可修改预览、开拍和结束三项
+时间，Preview 固定已经发生的预览时间，只允许修改未来的开拍与结束时间。事务同步拍卖计划列、
+schema v4 结束策略快照和 `scheduled_rounds` 三项 due，并以 auction/round 双版本 CAS 清除旧退避或
+过期租约；尚未到期且有 owner 的活动租约拒绝修改。命令账本、审计和
+`auction.schedule_updated` 同事务追加；事件 v1 继续作为要求客户端重读权威快照的唤醒，不扩张字段。
+该命令不会提前填充开放后才使用的拍卖运行时结束列，也不会改写 lot 截止时间；SQLite Lite 明确不
+提供这项完整档写入能力。
 Admin 规则读取与发布由 `src/database/rules/` 和 `src/database/commands/mod.rs` 持有：
 `rules/{mod,reads,transaction}.rs` 分别保留模块装配、跨后端读取和 PostgreSQL 写事务；
 PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin_commands` 幂等账本和
@@ -357,7 +364,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000030` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000031` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -370,7 +377,8 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 论坛账号归属，`000027` 增加 Users 级稳定论坛账号 ID、跨表提交约束并把名称权威收敛到 `username`，`000028`
 保存论坛竞价来源的真实楼层号，`000029` 增加固定帖刷新健康字段与追加式论坛身份变更历史，
 `000030` 以迁移前置检查和 partial unique index 保证 `mail_cookie`/`forum_cookie` 各自全局最多一条
-active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据。SQLite
+active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据；`000031` 为论坛
+主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
