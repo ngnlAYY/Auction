@@ -25,14 +25,33 @@ impl MailPollStore for DatabaseStore {
         &self,
         mailbox_key: String,
         now: DateTime<Utc>,
+        scheduled_next_at: DateTime<Utc>,
+        retry_maximum: std::time::Duration,
     ) -> ApplicationFuture<'_, AdminMailPollState> {
         Box::pin(async move {
-            if !valid_text(&mailbox_key, 256) || now.timestamp_nanos_opt().is_none() {
+            let Ok(retry_maximum_seconds) = i64::try_from(retry_maximum.as_secs()) else {
+                return Err(storage_error("MoogleMail 邮箱初始化参数无效"));
+            };
+            if !valid_text(&mailbox_key, 256)
+                || now.timestamp_nanos_opt().is_none()
+                || scheduled_next_at.timestamp_nanos_opt().is_none()
+                || scheduled_next_at <= now
+                || retry_maximum_seconds <= 0
+            {
                 return Err(storage_error("MoogleMail 邮箱初始化参数无效"));
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => state::ensure(store.pool(), &mailbox_key, now).await,
+                Self::Postgres(store) => {
+                    state::ensure(
+                        store.pool(),
+                        &mailbox_key,
+                        now,
+                        scheduled_next_at,
+                        retry_maximum_seconds,
+                    )
+                    .await
+                }
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(capability_error()),
             }

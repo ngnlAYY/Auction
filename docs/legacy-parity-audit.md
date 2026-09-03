@@ -355,7 +355,8 @@
 | API-045 | Public 身份化读取认证优先级与 UUID 词法 | P1 | 静态修复，组合输入待 R1 | 旧 `auction/publichttp/account.go` 把 `/me/bids` 与 `/lots/{lot_id}/proxy-authorizations/mine` 只包装在 `Sessions.Require` 下；旧读取边界使用规范小写、带连字符且非零 UUID | 两条身份化读取现先认证且不调用 mutation limiter；mine、forum、bid log 和 compensation movements 的 path/query UUID 统一进入 `parse_public_uuid` | 冻结新版会让只读账户请求消耗写额度，mine 还在认证前暴露 path 分类；若其它读取继续使用宽松 `Uuid::parse_str`，大写/URN/braced 文本可能进入查询 | 身份化 GET 只做 session 认证，不借写限流改变可用性；所有冻结 v1 UUID 文本在 HTTP 防腐层统一失败关闭，领域 ID 不放宽 | auction-http all-targets/all-features 定向静态编译与 rustfmt 已通过；仍需匿名+坏 path/query、认证大写/URN/braced/nil UUID，以及连续 GET 后 mutation quota 不变的 R1 |
 | AUI-096 | Admin 客户端未知路由的认证外壳 | P2 | 静态修复，浏览器待 R1 | 旧 Admin 路由由会话外壳统一拥有，匿名深链接不会先渲染管理内容 | Dioxus `NotFound` 现与 21 条冻结路由同处 `AdminShell` layout；后端未知深链接仍保持 404，不扩大 SPA allowlist | 冻结新版把 catch-all 放在 `#[end_layout]` 之后，客户端导航到未知路径时可绕过 loading/error/login 状态直接显示管理端 404 结构 | 只把客户端 catch-all 收回现有 shell；不新增服务端 SPA 路径、不改变 21 条 manifest 或登录 return 安全边界 | Admin 原生 all-targets/all-features 定向静态编译与 rustfmt 已通过；仍需匿名/loading/error/已认证四态的客户端导航 R1 |
 | OPS-008 | 已发布 PostgreSQL migration 字节、解析与 checksum 双代兼容 | P1 | 静态修复，fresh/两代历史待 R1 | 已发布 migration 必须保持字节与 SQLx checksum 不变；PG18 又会拒绝 `000005`/`000015` 中未加引号的保留字别名 | 两个历史文件已恢复 HEAD 字节；`database/migrations` 只对固定版本、描述、片段和数量生成执行视图。fresh/原始历史使用原 checksum，早期别名修正版只在既有 checksum 精确等于固定替换 SQL 的 SHA-384 时沿用；readiness 和 v28 adoption 复用同一边界 | 直接改历史 SQL 会让原 checksum 库失败；只恢复原 SQL 又会让 fresh PG18 与 v28 前向迁移解析失败；只接受原 checksum 还会阻断已经运行过早期修正版的数据库 | 不修改 `_sqlx_migrations`，不接受任意第三种 checksum；SQLx 对未知历史继续 `VersionMismatch`，执行兼容仅限两个已证明别名 | 两个历史文件对 HEAD 的 diff 为零，Storage all-targets/all-features 静态编译通过；仍需 fresh、原 checksum history、已知修正版 history、未知 checksum 及 v28 adoption 的隔离 R1 |
-| LIF-003 | Preview 非空门禁与不可开放空场次 | P1 | 静态门禁通过；历史空场次已受控取消 | 旧 Preview 会接受零个 pending lot，但 Open 随后拒绝零 lot，能够留下无法自行恢复的 preview 场次 | PostgreSQL 与 SQLite Lite 均在同一生命周期事务内、状态更新和 intake target 转移前要求至少一个 pending lot；历史空场次需要受控取消 | 这是相对旧版的有意不变量强化：拒绝不可达状态早于写入，避免 Worker 对同一 scheduled round 无限重试 | 非空检查复用生命周期已经锁定的 auction/intake scope；不改变有 lot 的 Preview 物化、successor、账本、审计或 realtime 语义 | PostgreSQL/SQLite Storage check、全工作区 check/Clippy、rustfmt 与策略门禁通过；测试库唯一空 preview 通过 Admin 命令从 version 2 取消为 version 3，scheduled round 转为 missed，并追加 `auction.cancel` 成功审计。未把受控修复冒充新门禁的并发 R1 |
+| LIF-003 | Preview 非空门禁与不可开放空场次 | P1 | 静态门禁通过；历史空场次已受控取消 | 旧 Preview 会接受零个 pending lot，但 Open 随后拒绝零 lot，能够留下无法自行恢复的 preview 场次 | PostgreSQL 与 SQLite Lite 均在同一生命周期事务内、状态更新和 intake target 状态切换前要求至少一个 pending lot；历史空场次需要受控取消 | 这是相对旧版的有意不变量强化：拒绝不可达状态早于写入，避免 Worker 对同一 scheduled round 无限重试 | 非空检查复用生命周期已经锁定的 auction/intake scope；只强化非空门禁，本次 Preview 录入产品变更另见 LIF-004 | PostgreSQL/SQLite Storage check、全工作区 check/Clippy、rustfmt 与策略门禁通过；测试库唯一空 preview 通过 Admin 命令从 version 2 取消为 version 3，scheduled round 转为 missed，并追加 `auction.cancel` 成功审计。未把受控修复冒充新门禁的并发 R1 |
+| LIF-004 | Preview 持续录入与 Open 后继接管 | P1 | 用户批准产品变更；静态实施，待运行态 R1 | 旧版与此前 Rust 实现都在 Preview 建立后继 Draft，后续 Admin/MM 装备立即进入下一期 | Preview 继续保留世界唯一录入目标，Admin/MM 新装备进入当前拍卖并追加新 revision 的物化展示项；Open 才原子创建后继 Draft、登记下一轮并迁移目标，Preview 取消也建立可继续录入的后继 | 这是用户明确要求的产品语义，不追求旧版逐字等价；若目标、拍卖状态或后继创建分裂，会把装备投向错误期次 | PostgreSQL `000032` 保证每个 world 至多一个 Draft 或 Preview、目标精确匹配；迁移拒绝旧 Preview+Draft 重叠窗口并要求窗口外升级。SQLite 无外部 target，但保持相同 Open/取消后继时点 | Application/Storage/Config/Admin 文档与源码已更新；完整静态门禁和 Auction-Test 迁移、健康证据待本轮完成 |
 | PUI-029 | Public `opening` 过渡态的倒计时投影 | P1 | 静态修复并部署，真实 opening 画面待 R1 | 计划开放时间到达后，页面不能同时把同一时刻表达为“距开拍”和通用过期“落锤中” | `presentation_mode=opening` 现有独立五语言状态，只显示“开拍处理中”，不渲染过期计划时间；live/lot 的通用过期收尾语义保持不变 | 当前 generic 非 live 分支把合法 opening 投影误当 preview，产生用户报告的矛盾文案和过期时间 | 只在看板页分离 opening；不伪装成 live、不开放竞价、不改变 countdown helper 或权威生命周期状态 | 五份 Public FTL 已同步新键；i18n、Public 原生/WASM、全工作区 check/Clippy、rustfmt 与策略门禁通过。新 Public payload/进程已接管测试环境且 root/live/ready 为 200；空场次已取消，真实 opening 画面仍待下一场非空拍卖的人工 R1 |
 | PUI-030 | Public 普通出价 K 输入与二次确认 | P2 | 用户批准扩展，静态实施待 R1 | 旧普通出价默认显示 `next_bid` 金额缩写，输入允许 K/M 语法，首次提交立即发送命令，没有二次确认 | 新普通出价边界只把纯数字解释为 K，默认值向上投影到可提交的整 K；第一次提交只建立稳定命令并进入确认步骤，明确确认后才发送 Credits 金额 | 这是用户明确批准的防误操作扩展，不追求旧版逐字交互等价；代理创建/降低继续保留旧金额缩写规则 | 复用同一 modal 和按钮焦点，避免嵌套 dialog；返回修改保留输入与命令 ID，服务端失败仍回到编辑状态并刷新权威快照 | 五份 Public FTL、i18n key-set、Public 原生/WASM、Clippy、rustfmt 与差异空白门禁；仍需浏览器确认默认值、键盘输入、返回修改、Escape/关闭和一次实际确认提交 |
 | BID-021 | Public 代理立即反击的竞价日志压缩 | P2 | 已实施，测试环境 fast 历史 R1；slow/多页待证 | 旧版和冻结新版都会把同一普通竞价命令产生的 challenger `ordinary` 事实与随后 `proxy` 自动应价作为两行公开历史返回 | Public 竞价日志只隐藏同一 `place_bid` 命令、同一 lot、连续 fact/state version 且确由另一用户代理自动反击的 ordinary 行；页面直接显示最终代理应价，不公开代理最高上限 | 这是用户明确批准的公开投影扩展，不追求旧版逐行日志等价；内部 append-only bid、审计、命令重放、realtime 与账户“我的出价”仍保留完整事实 | PostgreSQL/SQLite 的明细与 total 使用同一强配对规则；不按 `valid=false`、时间或任意后续代理启发式过滤，slow 代理短暂领先事实不误隐藏 | 两后端 Storage check/Clippy、rustfmt、仓库策略和差异空白门禁通过；测试环境 main 日志返回 200/total 9，保留 1737K、1916K、2113K 的 proxy 应价与 1111K、2334K 的独立 ordinary，配对的 1654K、1824K、2012K ordinary 不再公开。Public 进程已接管且 live/ready 为 200；同价胜出、slow 代理和多页 cursor/total 仍待 R1 |
@@ -1600,7 +1601,7 @@ Storage、Redis feature、Public/Admin WASM 和全特性 `-D warnings` Clippy �
 矩阵中的认证组合、混存账本、损坏结算和迁移两代历史仍明确保留 R1。
 
 2026-08-30 按运行环境反例完成 `LIF-003/PUI-029/API-046`。两后端 Preview writer 都在状态写入和
-intake target 转移前检查 pending lot 非空；Public 把 `opening` 从通用非 live 倒计时中分离为五语言
+intake target 状态切换前检查 pending lot 非空；Public 把 `opening` 从通用非 live 倒计时中分离为五语言
 “开拍处理中”；Admin dashboard 的 MoogleMail availability 与 Worker 一致合并 world 专属和 `shared`
 scope。测试库唯一空 preview 通过既有 Admin 命令从 version 2 取消为 version 3，关联 scheduled round
 转为 missed、auction_id 清空并追加 `auction.cancel` 成功审计；下一周 draft/active round 保持 version 1、
@@ -1638,6 +1639,14 @@ realtime consumer 以 PostgreSQL session lock/SQLite 同主机 sidecar lock 拒�
 回读兜底。竞价日志的分类编码/UUID 条件改为存储层全局筛选后再分页，
 历史拍品的返回入口与届次、世界、已结算状态并入同一标题栏。上述内容只完成源码和静态验证；真实论坛
 编辑、异常帧/停滞 relay、错误恢复轮询和多页筛选仍按对应条目保留 R1。
+
+2026-09-03 按用户批准实施 `LIF-004`：Preview 不再冻结录入或提前建立下一期，Admin/MM 新装备继续
+进入当前拍卖并更新预览物化目录；Open 才在同一生命周期事务建立后继 Draft、下一轮调度并迁移世界级
+录入目标。PostgreSQL `000032` 以唯一索引、状态匹配约束、延迟触发器和 advisory lock 保护跨表一致性，
+并明确拒绝旧实现的 Preview+Draft 重叠升级窗口；SQLite Lite 保留等价的后继创建时点但不声明 MM 录入
+能力。MoogleMail 自动轮询默认值同步为可配置的每五分钟一次。静态和 Auction-Test 证据将在本轮门禁与
+部署完成后补入，不以源码完成冒充运行态验证。Worker 启动会安全收敛旧配置遗留的过晚轮询水位，
+但不会自动解除暂停、覆盖活动 claim 或跳过失败退避。
 
 2026-08-31 第一批审计缺陷实施引用 `WRK-012`、`SET-002`、`SET-005`、`SET-013`、
 `SET-014`、`PUI-011` 和 `AUI-055`：论坛命令账本接管复用 canonical 旧 ID；当前结算重放从

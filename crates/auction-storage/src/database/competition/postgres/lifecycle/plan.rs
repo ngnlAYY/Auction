@@ -12,6 +12,8 @@ mod final_phase;
 mod open;
 #[path = "plan/preview.rs"]
 mod preview;
+#[path = "plan/successor.rs"]
+mod successor;
 
 /// 在同一 PostgreSQL 事务内应用已经由应用层计算并校验的生命周期计划。
 pub(super) async fn apply_lifecycle_plan_postgres(
@@ -24,24 +26,29 @@ pub(super) async fn apply_lifecycle_plan_postgres(
     }
     let AuctionLifecyclePlan { auction, effect } = plan;
     match effect {
-        AuctionLifecycleEffect::Preview { manual, successor } => {
-            preview::apply_preview_plan_postgres(
+        AuctionLifecycleEffect::Preview { manual } => {
+            preview::apply_preview_plan_postgres(transaction, command, &auction, manual).await?;
+            Ok(AuctionLifecycleWriteSummary::default())
+        }
+        AuctionLifecycleEffect::Open { manual_override, successor } => {
+            open::apply_open_plan_postgres(
                 transaction,
                 command,
                 &auction,
-                manual,
+                manual_override,
                 &successor,
             )
             .await?;
             Ok(AuctionLifecycleWriteSummary::default())
         }
-        AuctionLifecycleEffect::Open { manual_override } => {
-            open::apply_open_plan_postgres(transaction, command, &auction, manual_override).await?;
-            Ok(AuctionLifecycleWriteSummary::default())
-        }
-        AuctionLifecycleEffect::Cancel => {
-            let return_obligation_count =
-                cancel::apply_cancel_plan_postgres(transaction, command, &auction).await?;
+        AuctionLifecycleEffect::Cancel { successor } => {
+            let return_obligation_count = cancel::apply_cancel_plan_postgres(
+                transaction,
+                command,
+                &auction,
+                successor.as_ref(),
+            )
+            .await?;
             Ok(AuctionLifecycleWriteSummary { return_obligation_count })
         }
         AuctionLifecycleEffect::FinalPhase { proxy_plans, effective_end_at } => {

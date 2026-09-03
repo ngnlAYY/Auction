@@ -261,11 +261,11 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000031` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000032` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
-顺序和 draft/intake target 一致性的数据库级防线；`000015` 恢复 operations alert 的
+顺序和初始 draft/intake target 一致性的数据库级防线；`000015` 恢复 operations alert 的
 signal identity、三次 Create 重试、lease/fencing、终态错误码及成功入队后 cooldown 防线；
 `000016` 为论坛远端写入结果未知后的人工再授权增加幂等命令账本和追加审计；`000017` 固定
 carrier dispatch 世界，`000018` 恢复 lot 有效结束时间 shape，`000019` 则在滚动升级窗口只为
@@ -291,11 +291,14 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 新旧快照；`000030` 先拒绝仍有同类重复 active 外部 Cookie 的数据库，再用 partial unique index
 保证 `mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；重复项必须先由 Admin 幂等命令
 停用，迁移不会静默选择凭据或绕过追加审计；`000031` 为每个论坛主题单独保存由完整主题读取证明的
-连续处理楼层，初始为固定系统帖 #2，不能从固定帖内容版本或远端 post ID 推算；
+连续处理楼层，初始为固定系统帖 #2，不能从固定帖内容版本或远端 post ID 推算；`000032` 把唯一
+录入目标扩展为 Draft/Preview 可接收状态，并以跨状态唯一索引和延迟一致性触发器保证目标精确匹配；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
-MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
-本地时区和 `TZ=` / `CRON_TZ=` IANA 时区前缀；成功游标和失败退避都从同一调度计算下一时刻，
+MoogleMail 每个 world 的独立 poller 使用标准五字段 cron，现行默认 `*/5 * * * *`（每 5 分钟），
+支持描述符、`@every`、进程本地时区和 `TZ=` / `CRON_TZ=` IANA 时区前缀；成功游标和失败退避
+都从同一调度计算下一时刻。Worker 启动时只把旧配置遗留的过晚持久化水位向当前 cron 收敛，暂停、
+活动 claim 和尚未结束的最大失败退避仍保持权威，
 共享 HTTP transport 同时恢复旧版一秒最小请求间隔、15 秒请求超时和可配置安全 endpoint；
 PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、100 条批次、8 并发、
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
@@ -330,7 +333,7 @@ Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+hos
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 
 PostgreSQL 价格历史使用结算账本边界；SQLite Lite 不具备 settlement owner，也不把 `settled`/`sold`
-状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与草稿 lot 管理页已接入，SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
+状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与 Draft/Preview lot 管理页已接入；录入 target 在正式开拍前始终指向本期，Preview 新增装备会在同一事务追加预览物化项。SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
 登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回旧版
 `{ authorization: ... }` 完整命令投影；应用层在竞价事务内冻结授权、quota、完整转换历史、终止原因和
@@ -338,8 +341,10 @@ command ledger/竞价事务也已接入配置、应用端口与会话/竞价表�
 都经同一防腐层严格重放，历史新版结果只在只读事务按授权版本读取转换历史和冻结策略 quota；
 代理重入的 `usage_number` 在 lot 锁内按用户历史最大值递增，避免重入与命令重放混淆，
 不暴露原始命令账本 payload。Admin 生命周期的 preview/open/cancel/final-phase/early-settlement 已通过统一应用端口接入；
-Preview 在同一权威事务内、任何状态写入或 intake target 转移前要求至少一个 pending lot，PostgreSQL 与
-SQLite Lite 都拒绝会在 Open 阶段永久失败的空预览场次，
+Preview 在同一权威事务内、任何状态写入前要求至少一个 pending lot，随后只公开物化目录并把
+intake target 从 Draft 状态同步为 Preview，正式开拍前的 Admin/MM 新装备仍原子进入本期；Open 才会
+激活全部 pending lot、创建下一期 Draft/周轮次并移动 target。PostgreSQL 与 SQLite Lite 都拒绝会在
+Open 阶段永久失败的空预览场次，
 命令请求携带 `expected_state_version`，取消动作还必须携带原因；存储事务在锁内校验版本并写入取消时间、原因和操作者，随后与命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件在同一数据库事务内提交；Admin A25 规则 GET/POST/PUT 已接入规则 owner，PostgreSQL 使用独立 Serializable revision CAS、`rules_admin_commands` 幂等账本和追加审计，SQLite 只提供规则读取；A05 论坛预览已接入本地 HTML/文本解析端口与管理端契约，限制单次输入为 2 MiB，并只返回 catalog、posts、warnings 等安全预览数据；它不发起远程论坛请求、不写数据库，也不把本地解析结果误报成远程发布成功。A33 Admin 审计已接入两套数据库的追加式安全只读投影、严格精确筛选、keyset/数字分页和 metadata JSON object 校验；数字页的 total 与记录在同一读取事务内取得，管理端不接触原始 SQL 行。Public
 `allow_manual_early_open` 在 Admin 启动时冻结为应用策略，HTTP capability 使用同一来源；计划时间
 之前的人工开放会在存储事务锁定拍卖并读取 `scheduled_open_at` 后失败关闭，计划时间已到的开放和
@@ -392,6 +397,8 @@ Delivery 的创建/准备/激活、Worker claim/发送/释放/终态、过期 se
 及请求摘要，后续幂等重放必须匹配该身份，不能把另一条激活命令误认为成功。
 `000008_mooglemail_polling` 与 `auction-storage/src/database/mail_poll/` 负责持久化状态、
 lease/fencing、失败退避以及 `inbound_mail`/`mail_commands`/cursor 的同事务幂等提交。Worker
+启动时的调度协调只允许降低过晚的 `next_poll_at`，不会自动恢复暂停邮箱、接管活动 claim 或清除
+失败事实；
 只用稳定的远端邮件事实和业务决定校验重复入站；`processed_at` 保留首次入站轮询写入的时间值，
 不参与冲突比较且不被重放覆盖，避免数据库时间精度规范化或新一轮轮询时间产生伪冲突。
 退避时刻、Admin 邮件状态版本和 realtime 连续序号均使用 checked 边界；时间或版本溢出时

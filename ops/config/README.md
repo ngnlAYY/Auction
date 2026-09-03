@@ -139,7 +139,8 @@ HTTPS origin（本地联调可用回环 HTTP），用于把论坛主题中的拍
 失败后仍继续回帖导入。
 
 Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手动唤醒器；`schedule` 使用
-旧版同等的标准五字段 cron，默认 `* * * * *`，并支持描述符、`@every` 与显式 IANA 时区前缀。
+标准五字段 cron，默认 `*/5 * * * *`（每 5 分钟），并支持旧版描述符、`@every` 与显式 IANA
+时区前缀。
 共享客户端使用旧版默认的一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
 `item_timeout_seconds` 必须覆盖该请求预算；读取与单封邮件处理分别配置尝试次数、单次总超时和
 指数退避。批次期间按 `renew_interval_seconds` 延长 claim，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，

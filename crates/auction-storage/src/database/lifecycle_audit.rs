@@ -56,7 +56,7 @@ pub(crate) fn lifecycle_parent_audit_record(
                 }),
             )
         }
-        AuctionLifecycleEffect::Open { manual_override } => {
+        AuctionLifecycleEffect::Open { manual_override, .. } => {
             if context.auction.status != AuctionStatus::Preview
                 || plan.auction.status != AuctionStatus::Live
                 || preview_item_count.is_some()
@@ -82,7 +82,7 @@ pub(crate) fn lifecycle_parent_audit_record(
                 }),
             )
         }
-        AuctionLifecycleEffect::Cancel => {
+        AuctionLifecycleEffect::Cancel { .. } => {
             if !matches!(context.auction.status, AuctionStatus::Draft | AuctionStatus::Preview)
                 || plan.auction.status != AuctionStatus::Cancelled
                 || preview_item_count.is_some()

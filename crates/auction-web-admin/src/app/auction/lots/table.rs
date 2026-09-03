@@ -3,7 +3,7 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminLotPage, fetch_admin_auctions};
+use crate::api::AdminLotPage;
 
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
@@ -31,9 +31,6 @@ pub(super) fn AdminLotTable(
             p { class: "admin-auction-intro",
                 Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
-            if page.auction.status == "preview" {
-                PreviewIntakeHandoff { world_id: page.auction.world_id.clone() }
-            }
             if let Some(notice) = notice() {
                 p { class: "action-feedback action-feedback--success", role: "status",
                     {lot_update_notice_label(notice)}
@@ -43,7 +40,9 @@ pub(super) fn AdminLotTable(
                 h2 { id: "lot-title", class: "admin-visually-hidden",
                     {t!("page-auction-lots-title", auction: page.auction.sequence)}
                 }
-                if page.auction.status == "draft" && page.capabilities.manual_intake {
+                if matches!(page.auction.status.as_str(), "draft" | "preview")
+                    && page.capabilities.manual_intake
+                {
                     AdminIntakeForm {
                         world_id: page.auction.world_id.clone(),
                         reload_generation,
@@ -86,34 +85,6 @@ pub(super) fn AdminLotTable(
             }
             if let Some((lot_id, lot_code)) = selected_lot() {
                 AdminProxyHistory { lot_id, lot_code, selected_lot, reload_generation }
-            }
-        }
-    }
-}
-
-#[component]
-fn PreviewIntakeHandoff(world_id: String) -> Element {
-    let drafts = use_resource({
-        let world_id = world_id.clone();
-        move || fetch_admin_auctions(world_id.clone(), "draft".to_owned(), 1)
-    });
-    let successor_id = drafts
-        .read()
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        .and_then(|page| page.auctions.first())
-        .map(|auction| auction.id.clone());
-
-    rsx! {
-        aside { class: "admin-auction-intro", role: "status",
-            p { {t!("admin-lots-preview-handoff")} }
-            if let Some(auction_id) = successor_id {
-                Link {
-                    to: Route::AuctionLots { auction_id },
-                    {t!("admin-lots-open-successor")}
-                }
-            } else {
-                Link { to: Route::Auctions {}, {t!("admin-lots-back")} }
             }
         }
     }

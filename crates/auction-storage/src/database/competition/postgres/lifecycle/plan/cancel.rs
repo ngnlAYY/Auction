@@ -7,17 +7,49 @@ pub(super) async fn apply_cancel_plan_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
+    successor: Option<&AuctionPreviewSuccessorPlan>,
 ) -> Result<u64, CompetitionTransactionError> {
-    let previous_status: String = {
+    let (previous_status, world_id): (String, String) = {
         let transaction = transaction.transaction_mut()?;
-        sqlx::query_scalar("SELECT status FROM public.auctions WHERE id = $1 FOR UPDATE")
-            .bind(auction.id.as_uuid())
-            .fetch_optional(&mut **transaction)
-            .await
-            .map_err(map_sql_error)?
-            .ok_or(CompetitionTransactionError::NotFound)?
+        let row =
+            sqlx::query("SELECT status, world_id FROM public.auctions WHERE id = $1 FOR UPDATE")
+                .bind(auction.id.as_uuid())
+                .fetch_optional(&mut **transaction)
+                .await
+                .map_err(map_sql_error)?
+                .ok_or(CompetitionTransactionError::NotFound)?;
+        (
+            row.try_get("status").map_err(map_sql_error)?,
+            row.try_get("world_id").map_err(map_sql_error)?,
+        )
     };
     if !matches!(previous_status.as_str(), "draft" | "preview") {
+        return Err(CompetitionTransactionError::InvalidState);
+    }
+    if (previous_status == "preview") != successor.is_some() {
+        return Err(invalid_state("取消计划与下一期草稿计划不一致"));
+    }
+    let intake_target = {
+        let transaction = transaction.transaction_mut()?;
+        sqlx::query(
+            "SELECT auction_id, target_status, state_version
+             FROM public.auction_intake_targets
+             WHERE world_id = $1
+             FOR UPDATE",
+        )
+        .bind(&world_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(CompetitionTransactionError::InvalidState)?
+    };
+    let target_auction_id: Uuid = intake_target.try_get("auction_id").map_err(map_sql_error)?;
+    let target_status: String = intake_target.try_get("target_status").map_err(map_sql_error)?;
+    let target_version: i64 = intake_target.try_get("state_version").map_err(map_sql_error)?;
+    if target_auction_id != auction.id.as_uuid()
+        || target_status != previous_status
+        || target_version <= 0
+    {
         return Err(CompetitionTransactionError::InvalidState);
     }
     let lot_rows = {
@@ -108,16 +140,6 @@ pub(super) async fn apply_cancel_plan_postgres(
 
     {
         let transaction = transaction.transaction_mut()?;
-        if previous_status == "draft" {
-            sqlx::query(
-                "DELETE FROM public.auction_intake_targets
-                 WHERE auction_id = $1",
-            )
-            .bind(auction.id.as_uuid())
-            .execute(&mut **transaction)
-            .await
-            .map_err(map_sql_error)?;
-        }
         sqlx::query(
             "UPDATE public.scheduled_rounds
              SET status = 'missed', auction_id = NULL,
@@ -149,6 +171,55 @@ pub(super) async fn apply_cancel_plan_postgres(
         .map_err(map_sql_error)?;
         if updated.rows_affected() != 1 {
             return Err(CompetitionTransactionError::InvalidState);
+        }
+    }
+
+    match successor {
+        Some(successor) => {
+            super::successor::insert_successor_postgres(
+                transaction,
+                auction,
+                "cancelled",
+                &world_id,
+                successor,
+            )
+            .await?;
+            let transaction = transaction.transaction_mut()?;
+            let moved = sqlx::query(
+                "UPDATE public.auction_intake_targets
+                 SET auction_id = $1, target_status = 'draft',
+                     state_version = state_version + 1, updated_at = $2
+                 WHERE world_id = $3 AND auction_id = $4 AND target_status = 'preview'
+                   AND state_version = $5",
+            )
+            .bind(successor.auction_id.as_uuid())
+            .bind(auction.updated_at)
+            .bind(&world_id)
+            .bind(auction.id.as_uuid())
+            .bind(target_version)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if moved.rows_affected() != 1 {
+                return Err(CompetitionTransactionError::InvalidState);
+            }
+        }
+        None => {
+            let transaction = transaction.transaction_mut()?;
+            let deleted = sqlx::query(
+                "DELETE FROM public.auction_intake_targets
+                 WHERE world_id = $1 AND auction_id = $2 AND target_status = 'draft'
+                   AND state_version = $3",
+            )
+            .bind(&world_id)
+            .bind(auction.id.as_uuid())
+            .bind(target_version)
+            .execute(&mut **transaction)
+            .await
+            .map_err(map_sql_error)?;
+            if deleted.rows_affected() != 1 {
+                return Err(CompetitionTransactionError::InvalidState);
+            }
         }
     }
     Ok(return_obligation_count)

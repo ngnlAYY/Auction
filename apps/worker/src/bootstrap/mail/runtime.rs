@@ -34,10 +34,18 @@ pub(super) async fn build_poll_runtimes(
             )
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
         );
+        let now = Utc::now();
+        let scheduled_next_at =
+            schedule.next_after(now).context("calculate next MoogleMail poll schedule")?;
         store_port
-            .ensure_state(world_config.mailbox_key.clone(), Utc::now())
+            .ensure_state(
+                world_config.mailbox_key.clone(),
+                now,
+                scheduled_next_at,
+                std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
+            )
             .await
-            .context("initialize MoogleMail poll state")?;
+            .context("initialize or reconcile MoogleMail poll state")?;
         gateways.insert(world, Arc::clone(&gateway));
         let gateway_port: Arc<dyn MailPollGateway> =
             Arc::new(MoogleMailWorkerGateway { gateway, world });

@@ -8,6 +8,7 @@ pub(super) async fn apply_open_plan_sqlite(
     command: &AuctionLifecycleCommand,
     auction: &Auction,
     manual_override: bool,
+    successor: &AuctionPreviewSuccessorPlan,
 ) -> Result<(), CompetitionTransactionError> {
     let scheduled_end_at =
         auction.scheduled_end_at.ok_or_else(|| invalid_state("Lite 开拍计划缺少名义结束时间"))?;
@@ -93,6 +94,7 @@ pub(super) async fn apply_open_plan_sqlite(
     if updated.rows_affected() != 1 {
         return Err(CompetitionTransactionError::InvalidState);
     }
+    super::successor::insert_successor_sqlite(transaction, auction, "live", successor).await?;
     if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
         let connection = transaction.connection_mut()?;
         sqlx::query(

@@ -160,7 +160,7 @@ pub struct AuctionLifecycleContext {
     pub scheduled_round_local_week: Option<NaiveDate>,
 }
 
-/// 开启预览时同时建立的下一期草稿与持久化周轮次。
+/// 当前拍卖结束接收装备时建立的下一期草稿与持久化周轮次。
 #[derive(Debug, Clone)]
 pub struct AuctionPreviewSuccessorPlan {
     pub round_id: uuid::Uuid,
@@ -185,12 +185,12 @@ pub struct AuctionFinalProxyPlan {
 /// 生命周期动作在领域状态迁移之外必须原子提交的副作用计划。
 #[derive(Debug, Clone)]
 pub enum AuctionLifecycleEffect {
-    /// 物化预览，建立下一期草稿/轮次，并把收件目标转移到下一期。
-    Preview { manual: bool, successor: AuctionPreviewSuccessorPlan },
-    /// 激活全部 pending lot，并冻结拍卖与 lot 的名义/有效结束时间。
-    Open { manual_override: bool },
-    /// 取消尚未开拍的拍卖，并撤回其 pending lot。
-    Cancel,
+    /// 物化预览，并让当前拍卖继续接收装备。
+    Preview { manual: bool },
+    /// 激活全部 pending lot、冻结结束时间，并把录入目标切换到下一期草稿。
+    Open { manual_override: bool, successor: AuctionPreviewSuccessorPlan },
+    /// 取消尚未开拍的拍卖并撤回 pending lot；取消 Preview 时同时建立下一期草稿。
+    Cancel { successor: Option<AuctionPreviewSuccessorPlan> },
     /// 进入最终阶段，并原子提交代理转换；人工动作还会把有效截止时间收紧到最终窗口。
     FinalPhase { proxy_plans: Vec<AuctionFinalProxyPlan>, effective_end_at: Option<DateTime<Utc>> },
     /// 立即结束竞价并把拍卖交给既有 settlement Worker；结算事实仍由 Worker 独占写入。
@@ -207,7 +207,7 @@ impl AuctionLifecycleEffect {
         match self {
             Self::Preview { .. } => AuctionLifecycleAction::Preview,
             Self::Open { .. } => AuctionLifecycleAction::Open,
-            Self::Cancel => AuctionLifecycleAction::Cancel,
+            Self::Cancel { .. } => AuctionLifecycleAction::Cancel,
             Self::FinalPhase { .. } => AuctionLifecycleAction::FinalPhase,
             Self::EarlySettlement { .. } => AuctionLifecycleAction::EarlySettlement,
         }

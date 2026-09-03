@@ -53,10 +53,12 @@ PostgreSQL 并发 8、单项总时限 30 秒；SQLite Lite 的有效并发固定
 Fulfillment 与 Recovery 分别由
 `[worker.fulfillment]` / `[worker.recovery]` 的独立 poll、jitter、batch、并发、lease 和单项超时
 控制，Recovery 还维护独立 health 刷新周期，避免任一积压或远端余额读取放大普通拍卖任务。
-MoogleMail 的每个 world 也各自拥有标准五字段 cron（默认 `* * * * *`）加 `[0,5s]` 抖动和
+MoogleMail 的每个 world 也各自拥有标准五字段 cron（默认 `*/5 * * * *`，即每 5 分钟）加
+`[0,5s]` 抖动和
 手动唤醒器；调度兼容旧版描述符、`@every` 与 `TZ=` / `CRON_TZ=` 前缀，读取与可重试业务处理默认各
 三次、每次 30 秒；确定性业务/输入/配置错误按 `Permanent` 立即收口，只有 `Retryable` 和超时进入
-有界重试。共享 transport 使用旧版一秒请求间隔与 15 秒请求超时，并在长批次期间续租；
+有界重试。Worker 重启时会把旧配置遗留的过晚 `next_poll_at` 向当前 cron 收敛，但不会恢复已暂停邮箱、
+越过活动 claim 或压缩尚未结束的失败退避。共享 transport 使用旧版一秒请求间隔与 15 秒请求超时，并在长批次期间续租；
 Forum 使用独立循环按“主题发布 → 回帖导入”顺序执行，
 任一阶段失败不会跳过另一阶段或终止其它 owner。
 Lite 档（SQLite）不装配这两类完整档循环；其进程实例数和主并发必须为一，因为写入是串行事务，

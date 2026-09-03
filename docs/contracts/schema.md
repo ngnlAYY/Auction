@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000031`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000032`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。旧系统的 `bid_proxies` 不再作为第二份
@@ -73,6 +73,10 @@ PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 pos
 凭据必须先通过 Admin 的幂等状态命令停用，使命令账本和追加审计保持完整。`000031` 为
 `auction_forum_sync` 增加真实连续处理楼层；历史行从 #2 安全起步，必须由后续完整主题扫描推进，
 不能从固定帖内容版本或远端 post ID 猜测回填。
+PostgreSQL `000032` 把世界级录入目标从仅 `draft` 扩展为唯一的 `draft|preview` 当前场次：Preview
+继续接收并物化新装备，Open 才原子创建后继 Draft、登记下一轮调度并迁移录入目标；若 Preview 被取消，
+取消事务也必须建立后继 Draft，避免世界失去可用录入目标。迁移会拒绝旧实现留下的同世界 Preview 与
+后继 Draft 并存窗口，必须在窗口外升级，不能猜测应折叠或保留哪一期。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -114,9 +118,9 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 
 | 表 | 旧迁移 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- | --- |
-| auctions | 000001_baseline + PostgreSQL 000003_lifecycle_proxy_history + 000014_lifecycle_database_invariants / SQLite 000004_auction_cancellation + 000005_lifecycle_metadata | auction-domain + auction-application：auction | 两者 | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份与前序顺序 |
+| auctions | 000001_baseline + PostgreSQL 000003_lifecycle_proxy_history + 000014_lifecycle_database_invariants + 000032_preview_intake_handoff / SQLite 000004_auction_cancellation + 000005_lifecycle_metadata | auction-domain + auction-application：auction | 两者 | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份、前序顺序与 Draft/Preview 唯一当前录入场次 |
 | equipment | 000001_baseline | auction-domain + auction-application：auction | 两者 | 标的事实与规范化装备属性 |
-| auction_preview_items | 000001_baseline | auction-application：auction | 两者 | 预览阶段的物化展示项 |
+| auction_preview_items | 000001_baseline | auction-application：auction | 两者 | 预览阶段的累积物化展示项；Preview 期间新录入装备按新 revision 追加 |
 | lots | 000001_baseline + PostgreSQL 000018、000024 / SQLite 000008、000009 | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
 | auction_commands | 000001_baseline | auction-application：command-ledger | 两者 | 所有可变命令的幂等账本 |
 | bids | 000001_baseline | auction-domain + auction-application：auction | 两者 | 追加式竞价事实 |
@@ -125,8 +129,8 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 | bid_proxy_authorization_transitions | 000025_auction_bidding_state_model | auction-domain + auction-application：auction | 两者 | 代理授权追加式迁移记录 |
 | bid_proxy_outbid_uses | 000012_auction_policy_snapshot | auction-domain + auction-application：auction | 两者 | 代理出价次数和上限 |
 | bid_proxy_attempts | 000024_proxy_bid_attempt_history | auction-domain + auction-application：auction | 两者 | 代理尝试历史与失败分类 |
-| scheduled_rounds | 000013_auction_scheduled_rounds + 000006_worker_scheduler + PostgreSQL 000012_scheduled_final_phase / SQLite 000006_scheduled_final_phase | auction-application + auction-jobs：auction-lifecycle | 两者 | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态 |
-| auction_intake_targets | 000020_auction_lifecycle_hardening + PostgreSQL 000014_lifecycle_database_invariants | auction-application：auction-intake | 完整档 | 世界级拍品录入目标，并与该世界唯一 draft 保持延迟一致性 |
+| scheduled_rounds | 000013_auction_scheduled_rounds + 000006_worker_scheduler + PostgreSQL 000012_scheduled_final_phase / SQLite 000006_scheduled_final_phase | auction-application + auction-jobs：auction-lifecycle | 两者 | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态；Open 时为后继 Draft 建立下一轮 |
+| auction_intake_targets | 000020_auction_lifecycle_hardening + PostgreSQL 000014_lifecycle_database_invariants + 000032_preview_intake_handoff | auction-application：auction-intake | 完整档 | 世界级拍品录入目标，并与该世界唯一 Draft 或 Preview 当前录入场次保持延迟一致性 |
 | auction_submissions | 000002_worker_external_adapters | auction-application：auction-intake | 完整档 | `mail/admin` owner 闭集的拍品提交事实；Admin 的 URL/JSON 适配器种类只进入来源引用和命令摘要 |
 | equipment_secrets | 000002_worker_external_adapters | auction-application：keymanagement | 完整档 | 标的敏感来源密文 |
 | auction_schema_identity | 000001_baseline | auction-storage：migration | 两者 | 迁移/schema 身份和兼容检查 |

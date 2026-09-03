@@ -213,8 +213,10 @@ fn lifecycle_event_payload(
                 "preview_revision": context.preview_revision,
             }),
         )),
-        AuctionLifecycleEffect::Cancel if context.auction.status == AuctionStatus::Draft => None,
-        AuctionLifecycleEffect::Cancel => Some((
+        AuctionLifecycleEffect::Cancel { .. } if context.auction.status == AuctionStatus::Draft => {
+            None
+        }
+        AuctionLifecycleEffect::Cancel { .. } => Some((
             "auction.cancelled",
             json!({
                 "auction_id": result.auction_id.as_uuid(),

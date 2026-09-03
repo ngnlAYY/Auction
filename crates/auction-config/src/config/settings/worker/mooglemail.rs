@@ -221,7 +221,7 @@ impl Default for MoogleMailWorkerConfig {
             request_timeout_seconds: 15,
             batch_size: 100,
             maximum_pages: 20,
-            schedule: "* * * * *".to_owned(),
+            schedule: "*/5 * * * *".to_owned(),
             jitter_seconds: 5,
             lease_duration_seconds: 60,
             renew_interval_seconds: 10,

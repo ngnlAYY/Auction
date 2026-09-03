@@ -8,11 +8,34 @@ pub(super) async fn apply_open_plan_postgres(
     command: &AuctionLifecycleCommand,
     auction: &Auction,
     manual_override: bool,
+    successor: &AuctionPreviewSuccessorPlan,
 ) -> Result<(), CompetitionTransactionError> {
     let scheduled_end_at =
         auction.scheduled_end_at.ok_or_else(|| invalid_state("开拍计划缺少名义结束时间"))?;
     if auction.effective_end_at != Some(scheduled_end_at) {
         return Err(invalid_state("开拍计划的名义与有效结束时间不一致"));
+    }
+    // 生命周期上下文已经按 world → round → auction 加锁；这里继续锁住同一录入目标，
+    // 让并发装备录入要么先进入本期 Preview，要么在切换完成后进入下一期 Draft。
+    let intake_target = {
+        let transaction = transaction.transaction_mut()?;
+        sqlx::query(
+            "SELECT world_id, target_status, state_version
+             FROM public.auction_intake_targets
+             WHERE auction_id = $1
+             FOR UPDATE",
+        )
+        .bind(auction.id.as_uuid())
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?
+        .ok_or(CompetitionTransactionError::InvalidState)?
+    };
+    let world_id: String = intake_target.try_get("world_id").map_err(map_sql_error)?;
+    let target_status: String = intake_target.try_get("target_status").map_err(map_sql_error)?;
+    let target_version: i64 = intake_target.try_get("state_version").map_err(map_sql_error)?;
+    if target_status != "preview" || target_version <= 0 {
+        return Err(CompetitionTransactionError::InvalidState);
     }
     let lot_rows = {
         let transaction = transaction.transaction_mut()?;
@@ -86,6 +109,30 @@ pub(super) async fn apply_open_plan_postgres(
     };
     if updated.rows_affected() != 1 {
         return Err(CompetitionTransactionError::InvalidState);
+    }
+
+    super::successor::insert_successor_postgres(transaction, auction, "live", &world_id, successor)
+        .await?;
+    {
+        let transaction = transaction.transaction_mut()?;
+        let moved = sqlx::query(
+            "UPDATE public.auction_intake_targets
+             SET auction_id = $1, target_status = 'draft',
+                 state_version = state_version + 1, updated_at = $2
+             WHERE world_id = $3 AND auction_id = $4 AND target_status = 'preview'
+               AND state_version = $5",
+        )
+        .bind(successor.auction_id.as_uuid())
+        .bind(auction.updated_at)
+        .bind(&world_id)
+        .bind(auction.id.as_uuid())
+        .bind(target_version)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_sql_error)?;
+        if moved.rows_affected() != 1 {
+            return Err(CompetitionTransactionError::InvalidState);
+        }
     }
 
     if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
