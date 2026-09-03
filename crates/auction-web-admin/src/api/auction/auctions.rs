@@ -252,7 +252,7 @@ pub(super) fn decode_auction(value: StrictAuction) -> Result<AdminAuction, &'sta
             value.status.as_str(),
             "draft" | "preview" | "live" | "final" | "settling" | "settled" | "cancelled"
         )
-        || scheduled_open_at <= preview_scheduled_at
+        || scheduled_open_at < preview_scheduled_at
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.preview_revision)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
         || !valid_admin_time(&value.created_at)
