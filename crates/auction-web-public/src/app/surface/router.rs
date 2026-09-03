@@ -146,6 +146,7 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(|| selected_world);
     use_context_provider(|| refresh_generation);
     use_context_provider(|| realtime_state);
+    use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;
     use_context_provider(move || session_context);
     let readiness_context = readiness;
@@ -172,10 +173,6 @@ pub(crate) fn PublicShell() -> Element {
             callback.forget();
         }
     });
-    let outlet_generation = location_generation();
-    // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报；显式读取保留门禁整洁。
-    let _ = outlet_generation;
-
     let readiness_state = match &*readiness.read_unchecked() {
         None => PublicReadinessState::Checking,
         Some(Ok(true)) => PublicReadinessState::Ready,
@@ -343,7 +340,7 @@ pub(crate) fn PublicShell() -> Element {
                 }
             }
             main { id: "public-content", class: "public-shell__content", tabindex: "-1",
-                Outlet::<Route> { key: outlet_generation.to_string() }
+                Outlet::<Route> {}
             }
         }
     }

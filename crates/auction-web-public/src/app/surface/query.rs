@@ -123,6 +123,10 @@ pub(crate) struct PublicBoardQuery {
 pub(crate) type PreviewHistoryLoad =
     Result<Option<(Option<CurrentAuction>, Vec<HistoricalAuction>)>, String>;
 
+/// 浏览器 pathname/query 变化版本；查询驱动页面通过独立类型订阅，避免与数据刷新信号混淆。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicLocationRevision(pub(crate) Signal<u64>);
+
 impl Default for PublicBoardQuery {
     fn default() -> Self {
         Self {
