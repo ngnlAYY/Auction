@@ -505,35 +505,6 @@
   min-inline-size: 0;
 }
 
-.public-auction-history-nav {
-  display: flex;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-  gap: var(--space-3);
-  align-items: center;
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  min-inline-size: 0;
-  white-space: nowrap;
-}
-
-.public-auction-history-nav a {
-  padding: var(--space-1) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.public-auction-history-nav a:hover,
-.public-auction-history-nav a:focus-visible {
-  border-color: var(--color-accent);
-  text-decoration: none;
-}
-
-.public-auction-history-nav__label {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
 .public-auction-view-switch {
   display: inline-flex;
   flex-wrap: wrap;

@@ -14,6 +14,7 @@
 /opt/auction/bin/auction-admin-api
 /opt/auction/bin/auction-worker
 /opt/auction/bin/auctionctl
+/etc/auction/common.toml
 /etc/auction/public.toml
 /etc/auction/admin.toml
 /etc/auction/worker.toml
@@ -27,8 +28,8 @@
 /run/hv-auction/worker/           # Worker control socket 等运行时文件
 ```
 
-`*.secret.toml` 只能由对应运行账号读取，父目录不得允许 group/world 写入；Admin runtime
-文件只保存非敏感设置，权限按 `0640` 管理。不要把连接串、Cookie、登录 key 或数据密钥
+三个角色文件必须引用同一份只读 `common.toml`；`*.secret.toml` 只能由对应运行账号读取，父目录
+不得允许 group/world 写入；Admin runtime 文件只保存非敏感设置，权限按 `0640` 管理。不要把连接串、Cookie、登录 key 或数据密钥
 写入 unit 文件、命令行参数、Caddyfile 或日志。
 
 ## 发布制品
@@ -54,7 +55,8 @@ just package
 
 ## 启动顺序
 
-1. 将三个角色的主配置和独立敏感 TOML 放到受信目录；生产 Worker 必须启用
+1. 将公共配置、三个角色配置和独立敏感 TOML 放到受信目录，并确保三个 `common_file` 都解析到
+   同一份普通非符号链接文件；生产 Worker 必须启用
    `[worker.control]`，预建配置中的 runtime 目录与 Unix group，并把实际 Admin/运维 UID 或 GID
    写入 allowlist，以提供经过内核身份认证的 Unix socket readiness。若 Public/Admin 选择 Unix
    listener，也必须预建对应 runtime 目录，并让 unit 运行账号属于配置的 socket group。
@@ -70,8 +72,8 @@ just package
    runtime 目录权限。
 
 只读配置预检可单独运行 `auctionctl deployment-check --config-dir /etc/auction`；默认会报告
-目录、主配置、runtime 和敏感文件的权限警告，`--strict-permissions` 会把这些权限边界作为失败
-条件。无论是否严格，配置目录、主配置、runtime 和敏感 TOML 都不能使用符号链接。
+目录、公共配置、角色配置、runtime 和敏感文件的权限警告，`--strict-permissions` 会把这些权限边界作为失败
+条件。无论是否严格，配置目录、公共/角色配置、runtime 和敏感 TOML 都不能使用符号链接。
 
 示例命令（实际部署应使用已安装的二进制，而不是 `cargo run`）：
 

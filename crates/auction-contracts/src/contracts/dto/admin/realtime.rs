@@ -2,6 +2,24 @@
 
 use super::*;
 
+/// Admin realtime 事件的安全元数据投影；不包含 payload 与内部来源字段。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRealtimeEventResponse {
+    pub event_id: String,
+    pub stream_key: String,
+    pub stream_sequence: i64,
+    pub kind: String,
+    pub schema_version: i32,
+    pub created_at: String,
+}
+
+/// Admin realtime 事件元数据列表响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminRealtimeEventListResponse {
+    pub events: Vec<AdminRealtimeEventResponse>,
+    pub pagination: AdminRealtimePaginationResponse,
+}
+
 /// Admin realtime lag 的安全投影。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeLagResponse {

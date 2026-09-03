@@ -181,6 +181,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         )
+        .route("/api/v1/admin/realtime/events", get(realtime_admin::list_events))
         .route("/api/v1/admin/realtime/lag", get(realtime_admin::list_lag))
         .route("/api/v1/admin/realtime/failures", get(realtime_admin::list_failures))
         .route("/api/v1/admin/realtime/failures/{failure_id}", get(realtime_admin::get_failure))

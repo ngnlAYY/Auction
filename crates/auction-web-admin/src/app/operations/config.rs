@@ -1,7 +1,13 @@
 //! Admin runtime 配置页面。
 //!
-//! 页面只编辑服务端下发的非敏感 JSON 投影；候选必须先经过服务端规范化校验，更新再以
-//! fingerprint 和可重试的 command ID 作为版本与幂等边界。TOML、密钥和命令账本永远不进入浏览器。
+//! 页面用类型化表单编辑服务端下发的完整非敏感投影；候选必须先经过服务端规范化校验，
+//! 更新再以 fingerprint 和可重试的 command ID 作为版本与幂等边界。成功更新会由服务端
+//! 原子写入 runtime TOML，角色启动配置、公共配置、密钥和命令账本永远不进入浏览器。
+
+#[path = "config/form.rs"]
+mod form;
+#[path = "config/model.rs"]
+mod model;
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -12,6 +18,7 @@ use crate::api::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 
+use self::{form::RuntimeConfigFields, model::RuntimeConfigForm};
 use super::admin_api_error_message;
 
 #[derive(Debug, Clone)]
@@ -26,14 +33,15 @@ struct ConfigCommand {
 enum ConfigNotice {
     Validated,
     Saved,
-    InvalidJson,
+    InvalidForm,
     ActionError(String),
     Conflict,
 }
 
 /// 加载并展示 Admin runtime 非敏感配置。
 pub(super) fn page() -> Element {
-    let mut editor = use_signal(|| None::<String>);
+    let mut form = use_signal(RuntimeConfigForm::default);
+    let mut form_ready = use_signal(|| false);
     let mut fingerprint = use_signal(|| None::<String>);
     let mut checked_signature = use_signal(String::new);
     let mut command = use_signal(|| None::<ConfigCommand>);
@@ -46,16 +54,25 @@ pub(super) fn page() -> Element {
         fetch_admin_runtime_config()
     });
 
-    // 只有服务端快照变化时才初始化文本框，不能在普通输入重绘时覆盖用户草稿。
+    // 只有服务端快照变化时才初始化表单，不能在普通输入重绘时覆盖用户草稿。
     use_effect(move || {
         let snapshot = config.read_unchecked().clone();
         if let Some(Ok(value)) = snapshot {
-            editor.set(Some(format_document(&value.document)));
-            fingerprint.set(Some(value.fingerprint));
-            restart_required.set(value.restart_required);
-            checked_signature.set(String::new());
-            command.set(None);
-            notice.set(None);
+            match RuntimeConfigForm::from_document(&value.document) {
+                Ok(next_form) => {
+                    form.set(next_form);
+                    form_ready.set(true);
+                    fingerprint.set(Some(value.fingerprint));
+                    restart_required.set(value.restart_required);
+                    checked_signature.set(String::new());
+                    command.set(None);
+                    notice.set(None);
+                }
+                Err(()) => {
+                    form_ready.set(false);
+                    notice.set(Some(ConfigNotice::InvalidForm));
+                }
+            }
         }
     });
 
@@ -74,16 +91,38 @@ pub(super) fn page() -> Element {
                 }
             }
         },
+        Some(Ok(_)) if !form_ready() => {
+            if matches!(notice(), Some(ConfigNotice::InvalidForm)) {
+                rsx! {
+                    div { class: "admin-config-error", role: "alert",
+                        p { {t!("admin-runtime-invalid-form")} }
+                        button {
+                            class: "admin-btn-secondary",
+                            r#type: "button",
+                            onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                            {t!("admin-retry")}
+                        }
+                    }
+                }
+            } else {
+                rsx! {
+                    p { class: "admin-config-status", role: "status", {t!("admin-runtime-loading")} }
+                }
+            }
+        }
         Some(Ok(snapshot)) => {
-            let editor_value = editor().unwrap_or_else(|| format_document(&snapshot.document));
             let current_fingerprint = fingerprint().unwrap_or_else(|| snapshot.fingerprint.clone());
-            let can_update =
-                !busy() && !editor_value.is_empty() && checked_signature() == editor_value;
-            let validate_text = editor_value.clone();
-            let update_text = editor_value.clone();
+            let candidate_signature = form.read().signature().ok();
+            let can_update = !busy()
+                && candidate_signature
+                    .as_deref()
+                    .is_some_and(|signature| signature == checked_signature());
+            let enabled_worlds = ["main", "isekai"]
+                .into_iter()
+                .filter(|world| form.read().boolean(&format!("worlds.{world}.enabled")))
+                .count();
+            let equipment_filter_enabled = form.read().boolean("equipment_filter.enabled");
             let update_fingerprint = current_fingerprint.clone();
-            let (enabled_worlds, equipment_filter_enabled) =
-                runtime_business_facts(&snapshot.document);
 
             rsx! {
                 div {
@@ -92,46 +131,63 @@ pub(super) fn page() -> Element {
                     div { class: "admin-config-facts",
                         AdminRuntimeConfigFact {
                             detail: format!("{enabled_worlds}/2"),
-                            enabled: enabled_worlds > 0,
+                            state: Some(enabled_worlds > 0),
                             label: t!("admin-runtime-enabled-worlds"),
                         }
                         AdminRuntimeConfigFact {
-                            detail: current_fingerprint.clone(),
-                            enabled: equipment_filter_enabled,
+                            detail: if equipment_filter_enabled {
+                                t!("admin-runtime-enabled")
+                            } else {
+                                t!("admin-runtime-disabled")
+                            },
+                            state: Some(equipment_filter_enabled),
                             label: t!("admin-runtime-equipment-filter"),
+                        }
+                        AdminRuntimeConfigFact {
+                            detail: current_fingerprint.clone(),
+                            state: None,
+                            label: t!("admin-runtime-fingerprint-label"),
                         }
                     }
                     form {
                         class: "admin-runtime-config__form admin-config-form",
                         onsubmit: {
-                            let text = validate_text.clone();
+                            let form = form;
                             move |event| {
                                 event.prevent_default();
                                 notice.set(None);
-                                let document = match parse_document(&text) {
+                                let document = match form.read().to_document() {
                                     Ok(document) => document,
-                                    Err(_) => {
-                                        notice.set(Some(ConfigNotice::InvalidJson));
+                                    Err(()) => {
+                                        notice.set(Some(ConfigNotice::InvalidForm));
                                         return;
                                     }
                                 };
                                 let mut busy = busy;
-                                let mut editor = editor;
+                                let mut form = form;
                                 let mut checked_signature = checked_signature;
                                 let mut command = command;
                                 let mut notice = notice;
-                                let mut restart_required = restart_required;
                                 busy.set(true);
                                 spawn(async move {
                                     match validate_admin_runtime_config(document).await {
-                                        Ok(result) => {
-                                            let normalized = format_document(&result.document);
-                                            editor.set(Some(normalized.clone()));
-                                            checked_signature.set(normalized);
-                                            restart_required.set(result.restart_required);
-                                            command.set(None);
-                                            notice.set(Some(ConfigNotice::Validated));
-                                        }
+                                        Ok(result) => match RuntimeConfigForm::from_document(
+                                            &result.document,
+                                        ) {
+                                            Ok(next_form) => match next_form.signature() {
+                                                Ok(signature) => {
+                                                    form.set(next_form);
+                                                    checked_signature.set(signature);
+                                                    command.set(None);
+                                                    notice.set(Some(ConfigNotice::Validated));
+                                                }
+                                                Err(()) => notice
+                                                    .set(Some(ConfigNotice::InvalidForm)),
+                                            },
+                                            Err(()) => {
+                                                notice.set(Some(ConfigNotice::InvalidForm));
+                                            }
+                                        },
                                         Err(error) => {
                                             notice.set(Some(if error.is_conflict() {
                                                 ConfigNotice::Conflict
@@ -144,23 +200,14 @@ pub(super) fn page() -> Element {
                                 });
                             }
                         },
-                        label { class: "admin-runtime-config__label admin-config-form__label",
-                            for: "admin-runtime-document",
-                            {t!("admin-runtime-editor")}
-                            textarea {
-                                id: "admin-runtime-document",
-                                class: "admin-runtime-config__editor",
-                                disabled: busy(),
-                                required: true,
-                                spellcheck: "false",
-                                value: editor_value.clone(),
-                                oninput: move |event| {
-                                    editor.set(Some(event.value()));
-                                    checked_signature.set(String::new());
-                                    command.set(None);
-                                    notice.set(None);
-                                },
-                            }
+                        RuntimeConfigFields {
+                            form,
+                            disabled: busy(),
+                            on_dirty: move |_| {
+                                checked_signature.set(String::new());
+                                command.set(None);
+                                notice.set(None);
+                            },
                         }
                         if let Some(current_notice) = notice() {
                             p {
@@ -180,7 +227,11 @@ pub(super) fn page() -> Element {
                             }
                         }
                         if restart_required() || snapshot.restart_required {
-                            p { class: "admin-panel__note admin-runtime-config__restart", role: "status", {t!("admin-runtime-restart-required")} }
+                            p {
+                                class: "admin-panel__note admin-runtime-config__restart",
+                                role: "status",
+                                {t!("admin-runtime-restart-required")}
+                            }
                         }
                         div { class: "admin-panel__actions",
                             button {
@@ -188,7 +239,7 @@ pub(super) fn page() -> Element {
                                 r#type: "button",
                                 disabled: busy(),
                                 onclick: move |_| {
-                                    editor.set(None);
+                                    form_ready.set(false);
                                     fingerprint.set(None);
                                     checked_signature.set(String::new());
                                     command.set(None);
@@ -201,30 +252,41 @@ pub(super) fn page() -> Element {
                                 class: "admin-btn-secondary",
                                 r#type: "submit",
                                 disabled: busy(),
-                                if busy() { {t!("admin-action-working")} } else { {t!("admin-runtime-validate")} }
+                                if busy() {
+                                    {t!("admin-action-working")}
+                                } else {
+                                    {t!("admin-runtime-validate")}
+                                }
                             }
                             button {
                                 class: "admin-btn-primary",
                                 r#type: "button",
                                 disabled: !can_update,
                                 onclick: {
-                                    let text = update_text.clone();
-                                    let expected_fingerprint = update_fingerprint.clone();
+                                    let form = form;
                                     move |_| {
-                                        let document = match parse_document(&text) {
+                                        let document = match form.read().to_document() {
                                             Ok(document) => document,
-                                            Err(_) => {
-                                                notice.set(Some(ConfigNotice::InvalidJson));
+                                            Err(()) => {
+                                                notice.set(Some(ConfigNotice::InvalidForm));
                                                 return;
                                             }
                                         };
-                                        let compact = serde_json::to_string(&document).unwrap_or_default();
-                                        let command_key = format!("{}:{compact}", expected_fingerprint);
+                                        let compact = match serde_json::to_string(&document) {
+                                            Ok(compact) => compact,
+                                            Err(_) => {
+                                                notice.set(Some(ConfigNotice::InvalidForm));
+                                                return;
+                                            }
+                                        };
+                                        let command_key =
+                                            format!("{update_fingerprint}:{compact}");
                                         let current_command = match command() {
-                                            Some(existing) if existing.signature == command_key => existing,
+                                            Some(existing)
+                                                if existing.signature == command_key => existing,
                                             _ => ConfigCommand {
                                                 command_id: Uuid::new_v4(),
-                                                fingerprint: expected_fingerprint.clone(),
+                                                fingerprint: update_fingerprint.clone(),
                                                 document: document.clone(),
                                                 signature: command_key,
                                             },
@@ -232,10 +294,11 @@ pub(super) fn page() -> Element {
                                         command.set(Some(current_command.clone()));
                                         let mut busy = busy;
                                         let mut notice = notice;
-                                        let mut editor = editor;
+                                        let mut form = form;
                                         let mut checked_signature = checked_signature;
                                         let mut fingerprint = fingerprint;
                                         let mut restart_required = restart_required;
+                                        let mut command = command;
                                         busy.set(true);
                                         notice.set(None);
                                         spawn(async move {
@@ -246,14 +309,22 @@ pub(super) fn page() -> Element {
                                             )
                                             .await
                                             {
-                                                Ok(result) => {
-                                                    let normalized = format_document(&result.document);
-                                                    editor.set(Some(normalized));
-                                                    checked_signature.set(String::new());
-                                                    fingerprint.set(Some(result.fingerprint));
-                                                    restart_required.set(result.restart_required);
-                                                    notice.set(Some(ConfigNotice::Saved));
-                                                }
+                                                Ok(result) => match RuntimeConfigForm::from_document(
+                                                    &result.document,
+                                                ) {
+                                                    Ok(next_form) => {
+                                                        form.set(next_form);
+                                                        checked_signature.set(String::new());
+                                                        fingerprint
+                                                            .set(Some(result.fingerprint));
+                                                        restart_required
+                                                            .set(result.restart_required);
+                                                        command.set(None);
+                                                        notice.set(Some(ConfigNotice::Saved));
+                                                    }
+                                                    Err(()) => notice
+                                                        .set(Some(ConfigNotice::InvalidForm)),
+                                                },
                                                 Err(error) => {
                                                     notice.set(Some(if error.is_conflict() {
                                                         ConfigNotice::Conflict
@@ -266,7 +337,11 @@ pub(super) fn page() -> Element {
                                         });
                                     }
                                 },
-                                if busy() { {t!("admin-action-working")} } else { {t!("admin-runtime-update")} }
+                                if busy() {
+                                    {t!("admin-action-working")}
+                                } else {
+                                    {t!("admin-runtime-update")}
+                                }
                             }
                         }
                     }
@@ -287,21 +362,27 @@ pub(super) fn page() -> Element {
 }
 
 #[component]
-fn AdminRuntimeConfigFact(detail: String, enabled: bool, label: String) -> Element {
+fn AdminRuntimeConfigFact(detail: String, state: Option<bool>, label: String) -> Element {
     rsx! {
         article {
             div { class: "admin-config-fact-heading",
                 strong { "{label}" }
-                span {
-                    class: if enabled {
-                        "admin-config-fact-enabled"
-                    } else {
-                        "admin-config-fact-disabled"
-                    },
-                    if enabled { {t!("admin-runtime-enabled")} } else { {t!("admin-runtime-disabled")} }
+                if let Some(enabled) = state {
+                    span {
+                        class: if enabled {
+                            "admin-config-fact-enabled"
+                        } else {
+                            "admin-config-fact-disabled"
+                        },
+                        if enabled {
+                            {t!("admin-runtime-enabled")}
+                        } else {
+                            {t!("admin-runtime-disabled")}
+                        }
+                    }
                 }
             }
-            p { "{detail}" }
+            p { title: detail.clone(), "{detail}" }
         }
     }
 }
@@ -310,37 +391,8 @@ fn notice_text(notice: &ConfigNotice) -> String {
     match notice {
         ConfigNotice::Validated => t!("admin-runtime-validated"),
         ConfigNotice::Saved => t!("admin-runtime-action-success"),
-        ConfigNotice::InvalidJson => t!("admin-runtime-invalid-json"),
+        ConfigNotice::InvalidForm => t!("admin-runtime-invalid-form"),
         ConfigNotice::ActionError(code) => admin_api_error_message(code),
         ConfigNotice::Conflict => t!("admin-runtime-conflict"),
     }
-}
-
-fn parse_document(text: &str) -> Result<Value, ()> {
-    let document = serde_json::from_str::<Value>(text).map_err(|_| ())?;
-    if document.is_object() { Ok(document) } else { Err(()) }
-}
-
-fn format_document(document: &Value) -> String {
-    serde_json::to_string_pretty(document).unwrap_or_else(|_| "{}".to_owned())
-}
-
-fn runtime_business_facts(document: &Value) -> (usize, bool) {
-    let enabled_worlds = ["main", "isekai"]
-        .into_iter()
-        .filter(|world| {
-            document
-                .get("worlds")
-                .and_then(|worlds| worlds.get(*world))
-                .and_then(|config| config.get("enabled"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
-        .count();
-    let equipment_filter_enabled = document
-        .get("equipment_filter")
-        .and_then(|config| config.get("enabled"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    (enabled_worlds, equipment_filter_enabled)
 }

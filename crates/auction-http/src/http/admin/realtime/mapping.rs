@@ -1,5 +1,19 @@
-use auction_application::{RealtimeFailureSnapshot, RealtimeLagSnapshot};
-use auction_contracts::{AdminRealtimeFailureResponse, AdminRealtimeLagResponse};
+use auction_application::{RealtimeEventSnapshot, RealtimeFailureSnapshot, RealtimeLagSnapshot};
+use auction_contracts::{
+    AdminRealtimeEventResponse, AdminRealtimeFailureResponse, AdminRealtimeLagResponse,
+};
+
+/// 将已持久化事件映射为不含 payload 和内部来源字段的 Admin 投影。
+pub(crate) fn map_event(event: RealtimeEventSnapshot) -> AdminRealtimeEventResponse {
+    AdminRealtimeEventResponse {
+        event_id: event.event_id.to_string(),
+        stream_key: event.stream_key,
+        stream_sequence: event.stream_sequence,
+        kind: event.kind,
+        schema_version: event.schema_version,
+        created_at: super::timestamp(event.created_at),
+    }
+}
 
 /// 将 realtime lag 映射为安全 HTTP 投影。
 pub(crate) fn map_lag(lag: RealtimeLagSnapshot) -> AdminRealtimeLagResponse {

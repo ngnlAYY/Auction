@@ -9,7 +9,7 @@
 [`legacy-parity-audit.md`](legacy-parity-audit.md) 为准。迁移顺序如下：
 
 1. **契约冻结：** 整理 Public/Admin route、JSON 字段、状态码、WebSocket/SSE 事件、
-   TOML 配置字段和 migration 序号。新 Rust 配置明确采用“普通主配置 + 敏感 TOML”，不为
+   TOML 配置字段和 migration 序号。新 Rust 配置明确采用“公共非敏感 TOML + 角色 TOML + 敏感 TOML”，不为
    旧单文件中的数据库连接串、Cookie 或会话密钥保留兼容读取。
 2. **领域先行：** 用 Rust 重写状态机、竞价、代理竞价、软延时、结算和幂等规则；先
    记录旧系统的边界案例，单元测试按当前要求暂缓。

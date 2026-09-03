@@ -1,0 +1,97 @@
+# 三个进程共同引用的非敏感配置示例。
+#
+# 本文件只拥有跨角色一致的日志、指标、缓存与拍卖策略；listener、tracing、realtime、
+# HTTP 安全、会话、Worker 调度和全部敏感字段仍由各角色文件或敏感文件拥有。
+
+# 可选：tracing 过滤器；省略时使用进程默认过滤器。
+log_filter = "info,auction=debug"
+
+# 可选区块：进程本地 Prometheus 指标；Admin runtime 可在重启时覆盖 Admin 的实际值。
+[metrics]
+# 可选：是否启用固定指标端点；省略时关闭。
+enabled = false
+
+# 可选区块：可丢弃缓存设置；省略整个区块等同于关闭缓存。
+[cache]
+# 可选：缓存后端，可填 disabled 或 redis；省略时为 disabled。
+backend = "disabled"
+# 可选：Public 规则读模型缓存 TTL 秒数，范围 1-3600，默认 30。
+public_rules_ttl_seconds = 30
+
+# 可选区块：每周自动建立拍卖的时间表；省略时使用同样时间但保持关闭。
+[auction.schedule]
+# 可选：是否启用 Worker 周计划，默认 false。
+enabled = false
+# 可选：计划使用的 IANA 时区，默认 UTC。
+timezone = "UTC"
+# 可选：开放预览的星期，默认 Thursday。
+preview_day = "Thursday"
+# 可选：开放预览的本地时间，默认 22:00（距正式开拍两小时）。
+preview_time = "22:00"
+# 可选：正式开拍的星期，默认 Friday。
+open_day = "Friday"
+# 可选：正式开拍的本地时间，默认 00:00。
+open_time = "00:00"
+# 可选：计划结束的星期，默认 Saturday。
+nominal_end_day = "Saturday"
+# 可选：计划结束的本地时间，默认 12:00。
+nominal_end_time = "12:00"
+# 可选：参与周计划的 world，默认 main 和 isekai。
+worlds = ["main", "isekai"]
+
+# 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时使用内置默认值。
+[auction.economics]
+# 可选：默认起始价，必须为正且按 1000 Credits 网格对齐，默认 1000。
+start_price = 1000
+# 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
+bid_increment_ppm = 50000
+# 可选：软截止窗口秒数，默认 60。
+soft_close_window_seconds = 60
+# 可选：命中软截止窗口后的延长秒数，默认 60。
+soft_close_extension_seconds = 60
+# 可选：取消截止窗口秒数，默认 86400。
+cancel_cutoff_seconds = 86400
+# 可选：是否启用代理竞价，默认 true。
+proxy_enabled = true
+# 可选：新代理授权的默认模式，只能为 fast 或 slow，默认 fast。
+proxy_default_mode = "fast"
+# 可选：slow 代理尝试间隔秒数，默认 600。
+proxy_slow_interval_seconds = 600
+# 可选：单个代理授权允许的 outbid 使用次数，默认 3；0 表示不限制。
+proxy_max_outbid_uses = 3
+# 可选：进入 final phase 前的领先秒数，范围 1-604800，默认 900（15 分钟）。
+final_phase_lead_seconds = 900
+
+[auction.settlement]
+# 可选：结算策略版本，当前支持 0 或 1，默认 1。
+version = 1
+# 可选：结算模式，只能为 hold_curve_v1 或 legacy_zero_v0，默认 hold_curve_v1。
+mode = "hold_curve_v1"
+# 可选：补偿池开关；hold_curve_v1 必须为 true，legacy_zero_v0 必须为 false，默认 true。
+compensation_pool_enabled = true
+# 可选：isekai carrier credit 数量；当前领域策略要求为 1。
+isekai_carrier_credit = 1
+# 可选：持有比例与调整比例的 PPM 锚点数组；省略时使用内置曲线。
+# 每个数组元素一旦提供，hold_ppm 与 adjustment_ppm 均为必填字段。
+anchors = [
+  { hold_ppm = 0, adjustment_ppm = 80000 },
+  { hold_ppm = 50000, adjustment_ppm = 64000 },
+  { hold_ppm = 100000, adjustment_ppm = 48000 },
+  { hold_ppm = 150000, adjustment_ppm = 32000 },
+  { hold_ppm = 200000, adjustment_ppm = 16000 },
+  { hold_ppm = 250000, adjustment_ppm = 0 },
+  { hold_ppm = 300000, adjustment_ppm = -4000 },
+  { hold_ppm = 400000, adjustment_ppm = -12000 },
+  { hold_ppm = 500000, adjustment_ppm = -20000 },
+  { hold_ppm = 1000000, adjustment_ppm = -20000 },
+]
+
+[auction.settlement.recovery]
+# 可选：恢复策略版本，当前只支持 1。
+version = 1
+# 可选：恢复模式，当前只支持 remind_v1。
+mode = "remind_v1"
+# 可选：付款超时秒数，默认七天（604800 秒）。
+payment_timeout_seconds = 604800
+# 可选：付款超时提醒次数，当前默认且只支持 1。
+reminder_limit = 1

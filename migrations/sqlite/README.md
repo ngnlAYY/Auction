@@ -15,7 +15,9 @@ SQLite 的串行写入、锁等待、本地文件系统、备份和单节点假�
 Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化 Final phase 完成 fence，
 `000007_leader_since_backfill.up.sql` 从追加式 bid 事实修正可证明的当前连续领先时间，
 `000008_lot_effective_end_invariant.up.sql` 以触发器和失败关闭预检恢复 live/sold lot 的有效结束
-时间 shape；结算、恢复、交付、
+时间 shape，`000009_lot_category_numbering.up.sql` 固化分类内 lot 编号，
+`000010_user_forum_account_identity.up.sql` 保存论坛账号身份，
+`000011_realtime_event_admin_index.up.sql` 为 Admin 最近事件的跨流新到旧读取追加索引；结算、恢复、交付、
 以及外部论坛/邮件对象仍属于 PostgreSQL 完整档，Lite 不建表。
 因此 Lite 不声明 Public 成交价格历史能力；`settled`/`sold` 状态列用于共有模型兼容，不构成可供
 历史查询采信的结算事实链，对应 HTTP 路由固定返回 `501 feature_not_supported`。

@@ -192,14 +192,15 @@ Admin 规则发布成功后按语言删除对应 key。读取 miss、快照损�
 
 ## 配置与敏感信息
 
-每个主配置只包含 `[listener]` 监听策略、日志过滤器、缓存策略和拍卖策略模板等普通字段，并通过 `secrets_file` 引用
-第二个 TOML。Admin 与 Worker 主配置可以通过 `runtime_config_file` 指向同一份 Admin 管理的非敏感
+三个角色配置都通过 `common_file` 引用同一份公共非敏感 TOML；该文件拥有日志过滤器、指标、缓存和
+拍卖策略。角色文件拥有 listener、tracing、realtime、会话或 Worker 调度，并通过 `secrets_file` 引用
+敏感 TOML。Admin 与 Worker 角色配置可以通过 `runtime_config_file` 指向同一份 Admin 管理的非敏感
 runtime TOML；它承载 Admin 监听、安全策略、会话时限、Worker control 路径、可选 dashboard
 world/mailbox 投影，以及旧版 `worlds`、发件人 allowlist、`equipment_filter` 和 14 个
 `mail_templates` 业务区块，不承载数据库 URL、
 Redis URL、会话签名密钥、Admin actor/secret 或外部服务 Cookie。敏感值只存在于敏感文件；
-不兼容旧的单文件字段，也不提供环境变量覆盖。相对路径以主配置所在目录解析，部署时敏感
-文件和 runtime 文件都应置于受信任目录并限制运行账号读取，runtime 更新使用原子替换。
+不兼容旧的单文件字段，也不提供环境变量覆盖。相对路径以角色配置所在目录解析，部署时公共、敏感
+和 runtime 文件都应置于受信任目录并限制写入权限，runtime 更新使用原子替换。
 
 Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-application` 拥有严格文档
 模型、fingerprint fence、恢复服务和命令端口，`auction-config/src/runtime/` 拥有受权限
@@ -225,7 +226,8 @@ cursor。旧 runtime 完全缺少三个顶层业务区块时保持原 canonical 
 Public/Admin 启用 metrics 时，有效 listener 必须是 loopback TCP 或 Unix socket，非本地 TCP 会在
 绑定前失败关闭。Admin runtime 覆盖后的 listener/metrics 也执行同一联合校验。
 
-三进程部署预检会把独立 TOML 重新组合成跨进程拓扑：Admin 与 Worker 必须指向同一 Worker
+三进程部署预检会把独立 TOML 重新组合成跨进程拓扑：Public、Admin 与 Worker 必须引用同一份
+公共非敏感 TOML；Admin 与 Worker 必须指向同一 Worker
 control socket，并使用相同的装备、用户登录和外部凭据数据密钥标识/材料；Public/Admin 的实际
 TCP 或 Unix listener 不能冲突。`auctionctl deployment` 的 Admin readiness 直接跟随 runtime
 选择的 TCP/Unix listener，不再探测被 runtime 覆盖掉的主配置地址。该比较只给出字段类别，
@@ -238,7 +240,7 @@ Admin/Worker 相同的装备数据密钥；密钥缺失时这两条读取返回 
 JSON 和浏览器链接中，所以两条响应固定 `no-store`，完整值不得进入日志、审计、事件或持久化缓存。
 SQLite Lite 没有 `equipment_secrets`，仍返回 lot 数据，但把 `game_equipment_url` 留空并隐藏链接。
 
-拍卖策略模板位于主 TOML 的 `[auction]` 区块。Admin 创建拍卖时，应用服务会把已校验模板
+拍卖策略模板位于三个角色共同引用的公共 TOML `[auction]` 区块。Admin 创建拍卖时，应用服务会把已校验模板
 交给 PostgreSQL 完整档事务；事务将同一来源写入 schema v4 `policy_snapshot` 以及遗留规则列，
 避免管理端配置与实际规则分叉。竞价和取消事务会在锁内从该快照恢复 PPM、代理限制、final
 phase 及时间规则；MoogleMail 入站默认起拍价继承同一经济模板。
@@ -261,7 +263,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000032` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000033` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -293,6 +295,7 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 停用，迁移不会静默选择凭据或绕过追加审计；`000031` 为每个论坛主题单独保存由完整主题读取证明的
 连续处理楼层，初始为固定系统帖 #2，不能从固定帖内容版本或远端 post ID 推算；`000032` 把唯一
 录入目标扩展为 Draft/Preview 可接收状态，并以跨状态唯一索引和延迟一致性触发器保证目标精确匹配；
+`000033` 与 SQLite `000011` 为 Admin realtime 事件的时间倒序分页补齐同义复合索引；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 使用标准五字段 cron，现行默认 `*/5 * * * *`（每 5 分钟），
@@ -304,7 +307,7 @@ PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、1
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
 Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 cadence、100 条分阶段批次、PostgreSQL
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
-SQLite `000001` 至 `000010`、迁移入口和
+SQLite `000001` 至 `000011`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
 Public 20 条旧版契约路径与 Admin 37 条旧版契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
@@ -528,7 +531,9 @@ workflow；`auctionctl verify-legacy-settlement` 通过专用应用端口在同�
 delivery/prepare/activation 身份和 outbox 的成功、失败、
 人工对账终态边界；实时消费 runner 已接入 PostgreSQL/SQLite 的持久化游标、失败记录、同
 consumer key 独占 owner 和
-显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计，
+显式 replay 边界；Admin A21-A24 已接入 lag/failure 安全投影和事务内 replay、命令账本与审计；
+新增的 Admin 最近事件端点只读取事件 ID、流、序号、类型、schema 和时间，SQL、应用端口及 DTO
+均不包含 payload 或内部来源字段，
 外部广播 sink 属于尚未冻结的新增扩展；Public 本地 relay/Hub 已接入同一持久化事件边界。公开端首页看板与 lot 详情已经接入同源 Public
 API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快照，`opening` 过渡态只展示开拍处理中，
 `settling`/`settled` 只展示终态状态，不把已经过去的计划开放/截止时间渲染为倒计时或落锤状态；
@@ -543,8 +548,11 @@ Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调
 Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版本身就是 warning-only，
 没有连接业务 owner，当前 Rust 保持该兼容边界；若未来要让它们真正改变状态，需要另行冻结
 owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settlement/recovery 契约，提供已结算拍卖
-选择、lot 金额表、资金池摘要和带版本 fence 的 recovery 确认；Admin outbox 页面复用已冻结的
-realtime failure/lag/replay 安全投影，不等同于外部广播 sink。SQLite 仍明确返回不支持。
+选择、lot 金额表、资金池摘要和带版本 fence 的 recovery 确认；Admin `/outbox` 页面展示最近事件
+元数据并复用已冻结的 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。事件元数据、
+lag/failure/replay 在 PostgreSQL 与 SQLite Lite 的既有 realtime 表范围内均可用；最近事件元数据的
+总数与当前页由单条 SQL 在同一快照中生成，三类列表共用有界页大小和最大偏移量；SQLite 对其他完整档
+能力仍明确返回不支持。
 Public/Admin 的统一 HTTP boundary 已补齐请求 ID/命令审计关联、W3C trace context、访问日志、
 panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头读取超时、可信代理地址解析和
 4096 项有界限流器。业务写路由还通过共用严格 JSON 边界恢复 `application/json`、路由级 body

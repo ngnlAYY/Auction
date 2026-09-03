@@ -620,6 +620,7 @@ package_release() {
   install_release_file ops/deploy/systemd/auction-worker.service.example systemd/auction-worker.service.example 644 "$package_root"
   install_release_file ops/deploy/systemd/auction-stack.service.example systemd/auction-stack.service.example 644 "$package_root"
   install_release_file ops/config/README.md config/README.md 644 "$package_root"
+  install_release_file ops/config/examples/common.toml config/examples/common.toml 640 "$package_root"
   install_release_file ops/config/examples/public.toml config/examples/public.toml 640 "$package_root"
   install_release_file ops/config/examples/admin.toml config/examples/admin.toml 640 "$package_root"
   install_release_file ops/config/examples/worker.toml config/examples/worker.toml 640 "$package_root"

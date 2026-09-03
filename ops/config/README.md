@@ -1,15 +1,17 @@
 # TOML 配置
 
-运行时配置统一使用两个必需边界和一份可选、由 Admin 管理的共享 runtime 文件：主配置保存普通
-设置，敏感配置保存凭据，runtime TOML 保存可审计的非敏感 Admin 参数与旧版 MoogleMail 业务
-策略。Admin 和 Worker 可以指向同一文件，Public 不读取它。进程会在
+运行时配置统一使用一份必需的公共非敏感文件、三个角色文件、独立敏感文件和一份可选的 Admin
+runtime 文件：`common.toml` 保存日志、指标、缓存和拍卖策略，角色文件保存 listener、tracing、
+realtime、会话或 Worker 调度，敏感配置保存凭据，runtime TOML 保存可审计的非敏感 Admin 参数与
+旧版 MoogleMail 业务策略。Admin 和 Worker 可以指向同一 runtime 文件，Public 不读取它。进程会在
 `ops/config/{role}.toml` 存在时加载对应主配置；`AUCTION_CONFIG_FILE` 只负责选择另一个
 主配置，单个配置项不会从环境变量读取。
 
 已经纳入版本控制的主配置和敏感配置示例位于 [`examples/`](examples/)，runtime 配置示例
 集中在 [`examples/runtime/`](examples/runtime/)，破坏性运维专用敏感模板集中在
-[`examples/secrets/`](examples/secrets/)。主配置必须通过 `secrets_file`
-引用敏感文件；相对路径以主配置所在目录解析。示例主配置引用的 `secrets.toml` 只包含
+[`examples/secrets/`](examples/secrets/)。每个角色文件必须通过 `common_file` 引用同一公共文件，
+并通过 `secrets_file` 引用敏感文件；相对路径都以角色文件所在目录解析。三进程部署预检会拒绝
+角色引用不同公共文件的组合。示例主配置引用的 `secrets.toml` 只包含
 安全的本地占位值，不能直接用于生产环境。
 每个示例赋值字段前都必须紧邻中文“可选”或“必填”注释；`just config-example-check` 会阻止
 遗漏字段状态说明的示例进入默认静态验证。
@@ -44,6 +46,8 @@ Admin 与 Worker 示例的 `runtime_config_file` 都指向
 确保父目录不可被 group/world 写入，并将 runtime 文件设为 `0640`。A26/A27 只在 PostgreSQL
 完整档提供更新命令、fingerprint fence、durable 命令账本和原子替换；SQLite Lite 只可在
 启动时读取已存在的文档，HTTP 更新返回 `501 feature_not_supported`。
+管理页把安全 JSON 投影呈现为分组开关与输入控件，但保存时仍提交完整候选；服务端校验成功后
+原子替换 `runtime_config_file` 指向的 TOML，因此页面修改不会只停留在浏览器内存中。
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
 MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。旧版可编辑的
 `worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
@@ -88,7 +92,7 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 Lite 已实现的写入仍必须满足事务原子性、命令幂等和追加式审计。不要通过额外环境变量
 伪装或覆盖部署档位。
 
-主配置中的 `[cache]` 保存非敏感的 `backend` 和可重建 Public 规则读模型的
+公共配置中的 `[cache]` 保存非敏感的 `backend` 和可重建 Public 规则读模型的
 `public_rules_ttl_seconds`。`backend = "disabled"` 不需要 Redis；`backend = "redis"` 还要求
 对应二进制以 `cache-redis` feature 构建，并在敏感文件提供 `redis_url`。TTL 范围为 1-3600 秒，
 默认 30 秒；缓存关闭或不可用不得影响权威业务结果。
@@ -96,9 +100,9 @@ Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布�
 命中内容必须通过完整文档校验；损坏快照会尽力删除并回源数据库。Redis 失效失败只依赖 TTL
 收敛，不会回滚已经提交的规则事务。
 
-主配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.schedule]`、`[auction.economics]`、
+公共配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.schedule]`、`[auction.economics]`、
 `[auction.settlement]` 和 `[auction.settlement.recovery]`。这些字段都是非敏感的可选字段，
-完整字段、中文注释和默认值见各角色示例。Admin 创建拍卖时，模板会在 PostgreSQL 事务中冻结
+完整字段、中文注释和默认值见 `examples/common.toml`。Admin 创建拍卖时，模板会在 PostgreSQL 事务中冻结
 为 `policy_snapshot`，并同步写入遗留规则列；竞价和取消事务都会从这份快照恢复 PPM、代理
 限制、final phase 及时间规则。MoogleMail 入站的默认起拍价继承同一 `[auction.economics]`
 模板，只有显式覆盖值才会改变它。

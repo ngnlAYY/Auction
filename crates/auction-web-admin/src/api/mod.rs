@@ -63,7 +63,8 @@ pub(crate) use mail::{
 };
 pub(crate) use proxy_events::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 pub(crate) use realtime::{
-    RealtimeFailure, RealtimeFailurePage, RealtimeLagPage, fetch_realtime_failure_page,
+    RealtimeEventPage, RealtimeFailure, RealtimeFailurePage, RealtimeLagPage,
+    fetch_realtime_event_page, fetch_realtime_event_total, fetch_realtime_failure_page,
     fetch_realtime_lag_page, replay_realtime_failure,
 };
 pub(crate) use recovery::{

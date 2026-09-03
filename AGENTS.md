@@ -132,10 +132,10 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - **可观测性：** tracing、tracing-subscriber、结构化字段和 JSON 输出。
 - **命令行：** clap 4.6.6。
 - **标识与时间：** 使用带类型的 UUID 包装和 UTC 时间戳。
-- **运行配置：** 统一使用 TOML；主配置只保存非敏感设置并引用独立敏感 TOML。数据库连接
+- **运行配置：** 统一使用 TOML；三个角色配置引用同一份公共非敏感 TOML，并分别引用独立敏感 TOML。数据库连接
   串、Redis 连接串、Cookie 和会话签名密钥只允许出现在敏感文件中；MoogleMail 本地联调
   允许通过 `auction-config` 的严格 loader 读取 `.keyenv` 中固定的两个键，但这不是通用
-  环境变量覆盖；环境变量 `AUCTION_CONFIG_FILE` 仅用于选择主配置文件。
+  环境变量覆盖；环境变量 `AUCTION_CONFIG_FILE` 仅用于选择角色配置文件。
 
 具体取舍见 [`docs/tech-stack.md`](docs/tech-stack.md)。只有上游正式提供的版本才能称为
 LTS：Tokio 使用官方 LTS；Rust、Axum、Dioxus、SQLx 等没有官方 LTS 的组件使用受支持的
@@ -292,12 +292,13 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 
 ## 配置规则
 
-- 所有运行时配置文件必须是 TOML，主/敏感配置示例位于 `ops/config/examples/`，Admin runtime
+- 所有运行时配置文件必须是 TOML，公共/角色/敏感配置示例位于 `ops/config/examples/`，Admin runtime
   配置示例集中在 `ops/config/examples/runtime/`。
 - `AUCTION_CONFIG_FILE` 只能选择配置文件；单个配置项不能通过环境变量覆盖，业务模块也
   不能自行读取环境变量。
-- 主配置只允许放 `[listener]` 监听策略、日志过滤器、缓存非敏感策略等普通设置，并通过必填的
-  `secrets_file` 引用敏感 TOML。相对路径以主配置文件所在目录解析。
+- Public、Admin 与 Worker 角色配置必须通过必填 `common_file` 引用同一份公共非敏感 TOML；公共
+  文件拥有日志过滤器、指标、缓存和拍卖策略，角色文件拥有 listener、tracing、realtime、会话或
+  Worker 调度，并通过必填 `secrets_file` 引用敏感 TOML。相对路径以角色配置文件所在目录解析。
 - `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
   `admin_secret` 只能放在敏感 TOML；MoogleMail Cookie 生产路径同样使用敏感 TOML，但本地
   联调可由 `auction-config::load_mooglemail_keyenv` 严格读取 `.keyenv` 的

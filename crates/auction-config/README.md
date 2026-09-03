@@ -14,16 +14,21 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 `src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML
 文件锁与原子替换集中在 `src/runtime/`。
 
-## 两层文件结构
+## 公共、角色、敏感与 runtime 文件结构
 
-主配置只放非敏感设置，并通过必填的 `secrets_file` 引用独立敏感 TOML：
+三个角色文件都必须通过 `common_file` 引用同一份公共非敏感 TOML，并通过 `secrets_file`
+引用各自的敏感 TOML；Admin/Worker 还可引用同一份由 Admin 管理的 runtime TOML。以下代码块
+是按 owner 汇总的字段速查，不是一份可直接使用的单文件配置；可运行的四文件组合见
+`ops/config/examples/{common,public,admin,worker}.toml`：
 
 ```toml
+# 必填：三个角色共同引用的公共非敏感 TOML 路径。
+common_file = "common.toml"
 # 必填：敏感 TOML 路径。
 secrets_file = "secrets.toml"
 # 可选：Admin/Worker 可指向同一份 Admin 管理的 runtime；示例位于 examples/runtime/admin.toml。
 runtime_config_file = "runtime/admin.toml"
-# 可选：tracing 过滤器。
+# common.toml 可选：tracing 过滤器。
 log_filter = "info,auction=debug"
 
 # 可选区块：Public/Admin HTTP listener；省略时使用各自 loopback TCP 默认值。
@@ -39,7 +44,7 @@ runtime_directory = ""
 # 可选：直接位于 runtime 目录下的 Unix socket 路径；TCP 模式必须为空。
 socket_path = ""
 
-# 可选区块：Public/Worker 进程本地 Prometheus 指标；Public 使用 HTTP，Worker 需同时启用 control 才有 UDS `/metrics`。
+# common.toml 可选区块：进程本地 Prometheus 指标；Public 使用 HTTP，Worker 需同时启用 control 才有 UDS `/metrics`。
 [metrics]
 # 可选：是否启用固定 scrape endpoint；省略时关闭；启用时 Public/Admin listener 必须为 loopback/Unix。
 enabled = false
@@ -60,14 +65,14 @@ queue_capacity = 256
 # 可选：采样比例，百万分比；启用时范围 1-1000000，省略或关闭时可为 0。
 sample_ratio_ppm = 0
 
-# 可选区块：省略时关闭缓存。
+# common.toml 可选区块：省略时关闭缓存。
 [cache]
 # 可选：disabled 或 redis，默认 disabled。
 backend = "disabled"
 # 可选：Public 规则读模型 TTL 秒数，范围 1-3600，默认 30。
 public_rules_ttl_seconds = 30
 
-# 可选区块：每周自动建立拍卖的时间表；默认关闭。
+# common.toml 可选区块：每周自动建立拍卖的时间表；默认关闭。
 [auction.schedule]
 # 可选：默认关闭，启用后 Worker 按下列本地周时间生成轮次。
 enabled = false
@@ -438,13 +443,13 @@ HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启受
 完整更新能力。运行中的 runtime 文件必须是受信 regular file，目录不可被 group/world 写入，
 文件权限为 `0640`；仓库示例只用于复制模板。
 
-当 Admin 配置了 `runtime_config_file` 时，runtime 文件中的 `[metrics]` 和 `[tracing]` 公共参数
-覆盖主配置同名字段，确保 runtime 页面修改后重启真正改变 Admin 的 `/metrics` 与 OTLP surface；
-Public/Worker 继续使用主配置中的 `[metrics]`、`[tracing]`。Worker 只消费共享 runtime 的
+当 Admin 配置了 `runtime_config_file` 时，runtime 文件中的 `[metrics]` 和 `[tracing]` 参数
+覆盖公共文件或角色文件的对应字段，确保 runtime 页面修改后重启真正改变 Admin 的 `/metrics` 与
+OTLP surface；Public/Worker 的 `[metrics]` 来自公共文件，`[tracing]` 继续来自各自角色文件。Worker 只消费共享 runtime 的
 world/sender/filter/template 业务区块；三个区块完全缺失时保留 Worker 主配置，部分存在时失败关闭。
 完整业务区块存在时，它们覆盖 Worker 直接配置，但不改变 transport、凭据、调度、mailbox identity
 或全局 `enabled`。三类进程的 OTLP headers 只能放在敏感 TOML 的角色专属字段中，不能写入 runtime
-或普通主配置。
+或公共/角色配置。
 
 ## 环境变量边界
 

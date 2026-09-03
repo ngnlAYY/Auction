@@ -37,9 +37,10 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/admin/mail/`：轮询状态、入站列表/详情、暂停/恢复命令、Worker 唤醒和错误映射分别由
   `state.rs`、`intake.rs`、`commands.rs`、`trigger.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定
   处理器出口；邮箱筛选、状态版本、CSRF 和 Worker control 契约保持不变。
-- `src/http/admin/realtime/`：lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
-  `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；realtime
-  旧版嵌套分页、CSRF、request hash 和 replay 状态契约保持不变；旧 replay wire 缺少
+- `src/http/admin/realtime/`：最近事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享
+  分页/错误边界分别由 `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责
+  稳定处理器出口；`GET /api/v1/admin/realtime/events` 是不含 payload 的新增只读端点，三类列表共用
+  有界页大小和最大偏移量，realtime 旧版嵌套分页、CSRF、request hash 和 replay 状态契约保持不变；旧 replay wire 缺少
   `command_id` 时稳定派生，新版显式 ID 仍直接进入核心幂等账本。
 - `src/http/admin/credentials/`：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
   CSRF/分页/错误边界分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只

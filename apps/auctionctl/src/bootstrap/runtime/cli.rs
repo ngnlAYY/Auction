@@ -35,10 +35,10 @@ pub(super) enum Command {
     /// 只读检查三进程配置、数据库档位、监听地址和文件安全边界。
     #[command(name = "deployment-check")]
     DeploymentCheck {
-        /// 包含 public.toml、admin.toml 和 worker.toml 的部署配置目录。
+        /// 包含 common.toml、public.toml、admin.toml 和 worker.toml 的部署配置目录。
         #[arg(long, default_value = "ops/config/examples")]
         config_dir: PathBuf,
-        /// 严格要求部署目录、主/runtime TOML 和敏感 TOML 的权限边界；默认仅报告警告，便于检查示例目录。
+        /// 严格要求部署目录、公共/角色/runtime TOML 和敏感 TOML 的权限边界；默认仅报告警告，便于检查示例目录。
         #[arg(long)]
         strict_permissions: bool,
     },
@@ -252,7 +252,7 @@ pub(super) struct SystemdControllerArgs {
 pub(super) enum DeploymentAction {
     /// 严格预检、迁移数据库并依次启动三个角色；失败只回滚本次启动的 unit。
     Start {
-        /// 包含 public.toml、admin.toml 和 worker.toml 的绝对部署配置目录。
+        /// 包含 common.toml、public.toml、admin.toml 和 worker.toml 的绝对部署配置目录。
         #[arg(long, default_value = "/etc/auction")]
         config_dir: PathBuf,
         /// 每个角色等待应用 readiness 的秒数。
@@ -267,7 +267,7 @@ pub(super) enum DeploymentAction {
     Stop,
     /// 先反序停止，再执行与 start 相同的预检、迁移、启动和失败回滚。
     Restart {
-        /// 包含 public.toml、admin.toml 和 worker.toml 的绝对部署配置目录。
+        /// 包含 common.toml、public.toml、admin.toml 和 worker.toml 的绝对部署配置目录。
         #[arg(long, default_value = "/etc/auction")]
         config_dir: PathBuf,
         /// 每个角色等待应用 readiness 的秒数。

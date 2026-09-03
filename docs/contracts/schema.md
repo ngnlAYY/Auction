@@ -21,9 +21,9 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000032`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000033`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
-`000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
+`000001` 至 `000011` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。旧系统的 `bid_proxies` 不再作为第二份
 权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
 `bid_proxy_authorizations` 及其历史表。完整适配器、Lite 串行写入和其他业务表面仍在迁移中。
@@ -200,7 +200,7 @@ SQLite Lite 不复制这些完整档表。
 | 表 | 旧迁移 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- | --- |
 | realtime_streams | 000001_baseline + 000011_realtime_discovery_alias | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 持久化 stream 目录；PostgreSQL 完整档包含 `auction:discovery` 派生流 |
-| realtime_events | 000001_baseline + 000007_realtime_replay + 000011_realtime_discovery_alias | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 追加式事件、stream sequence、replay 关系和 PostgreSQL `auction.created` 发现别名 |
+| realtime_events | 000001_baseline + 000007_realtime_replay + 000011_realtime_discovery_alias + 000033/000011_realtime_event_admin_index | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 追加式事件、stream sequence、replay 关系、PostgreSQL `auction.created` 发现别名，以及两后端 Admin 时间倒序读取索引 |
 | realtime_consumer_offsets | 000001_baseline | auction-application：Public relay；auction-jobs：外部 consumer | 两者 | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key；PostgreSQL 以会话级 advisory lock 保证同 key 单 owner，SQLite 在同主机以 0600 非阻塞 sidecar 文件锁拒绝重复 owner，非 Unix 平台无法证明互斥时失败关闭 |
 | realtime_failures | 000001_baseline | auction-application：Public relay；auction-jobs + auction-observability：外部 realtime | 两者 | 事件消费隔离、失败事实和显式 replay 边界 |
 | operations_alert_runtime_state | 000021_operations_alert_runtime_state + 000022_operations_alert_runtime_clock_split | auction-application + auction-storage：alert health；auction-jobs：运行状态与扫描水位 | 完整档 | Worker 配置启用状态的非敏感单例投影，以及与 signal 观察事务同提交的成功扫描水位；两类时间独立单调，不互相覆盖 |

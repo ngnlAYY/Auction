@@ -194,8 +194,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 依赖或前置条件失败，`4` 表示 systemd 部署编排失败，`5` 表示其它运维操作失败。错误正文沿用
 配置解析器的脱敏策略；调用方应依赖退出码判断结果，不要解析错误文本。
 
-`deployment-check` 读取 `public.toml`、`admin.toml` 和 `worker.toml`，检查三者的敏感文件、
-runtime 文件、数据库档位、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
+`deployment-check` 读取 `public.toml`、`admin.toml` 和 `worker.toml`，检查三者引用同一份普通、
+非符号链接的公共配置，并检查敏感文件、runtime 文件、数据库档位、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
 以及装备、用户登录和外部凭据三组数据密钥的一致性。启用中的 Worker control 还必须具备安全
 runtime 目录、group 与显式 UID/GID allowlist 配置。
 默认只对敏感文件权限过宽给出警告；生产部署应使用 `--strict-permissions`。该预检不会连接

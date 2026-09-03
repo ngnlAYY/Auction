@@ -47,6 +47,11 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         validate_non_secret_permissions(&path, "主配置", strict_permissions)?;
         let config = AppConfig::load_from_path(role, &path)
             .with_context(|| format!("load {} configuration", role.name()))?;
+        let common_path = config.common_config_path.as_deref().with_context(|| {
+            format!("{} configuration does not declare common_file", role.name())
+        })?;
+        require_regular_file(common_path, "公共配置")?;
+        validate_non_secret_permissions(common_path, "公共配置", strict_permissions)?;
         let backend = config
             .database_url()
             .map(DatabaseBackend::from_url)
@@ -72,9 +77,10 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
             Role::Worker => DeploymentListener::None,
         };
         println!(
-            "ok role={} config={} database_backend={} listener={}",
+            "ok role={} config={} common_config={} database_backend={} listener={}",
             role.name(),
             path.display(),
+            common_path.display(),
             backend,
             listener.description(),
         );
@@ -101,6 +107,13 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         .iter()
         .find(|entry| entry.role == Role::Worker)
         .ok_or_else(|| anyhow::anyhow!("worker config was not loaded"))?;
+    let common_path = public.config.common_config_path.as_deref();
+    if common_path.is_none()
+        || admin.config.common_config_path.as_deref() != common_path
+        || worker.config.common_config_path.as_deref() != common_path
+    {
+        anyhow::bail!("Public、Admin 与 Worker 必须引用同一份 common_file");
+    }
     validate_admin_worker_topology(&admin.config, &worker.config)?;
 
     let public_listener = public_deployment_listener(&public.config)?;

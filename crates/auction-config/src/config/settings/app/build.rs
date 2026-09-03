@@ -7,6 +7,7 @@ impl AppConfig {
     pub(super) fn build(role: Role, input: BuildInput) -> Result<Self, ConfigError> {
         let BuildInput {
             config_path,
+            common_config_path,
             listen_address,
             listener,
             log_filter,
@@ -188,6 +189,7 @@ impl AppConfig {
             http_security,
             session,
             config_path,
+            common_config_path,
             secrets_path,
             runtime_config_path,
             admin_runtime,

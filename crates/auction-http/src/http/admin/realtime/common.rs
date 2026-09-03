@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use auction_application::{ApplicationError, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError};
+use auction_application::{
+    ApplicationError, MAX_REALTIME_ADMIN_OFFSET, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError,
+};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -12,6 +14,9 @@ pub(crate) fn parse_page(query: &BTreeMap<String, String>) -> Result<(i64, i64, 
     let page_size =
         super::parse_positive_i64(query.get("page_size"), 50, Some(MAX_REALTIME_ADMIN_PAGE_SIZE))?;
     let offset = page.checked_sub(1).and_then(|value| value.checked_mul(page_size)).ok_or(())?;
+    if offset > MAX_REALTIME_ADMIN_OFFSET {
+        return Err(());
+    }
     Ok((page, page_size, offset))
 }
 

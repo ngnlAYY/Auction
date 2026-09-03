@@ -1,7 +1,8 @@
 //! Admin realtime 运维端口。
 //!
-//! 这里仅暴露 lag、failure 的安全投影和带幂等命令的显式 replay。原始事件 payload、数据库
-//! 行和驱动错误留在存储 owner；replay 必须在同一事务中追加新事件并解决原 failure。
+//! 这里仅暴露事件元数据、lag、failure 的安全投影和带幂等命令的显式 replay。原始事件
+//! payload、数据库行和驱动错误留在存储 owner；replay 必须在同一事务中追加新事件并解决
+//! 原 failure。
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -12,6 +13,49 @@ use super::{ApplicationFuture, RequestHash};
 
 /// Admin realtime 查询允许的最大单页大小。
 pub const MAX_REALTIME_ADMIN_PAGE_SIZE: i64 = 200;
+
+/// Admin realtime 数字分页允许的最大偏移量，避免深分页把数据库退化为无界扫描。
+pub const MAX_REALTIME_ADMIN_OFFSET: i64 = 1_000_000;
+
+/// realtime 事件元数据查询条件。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealtimeEventListRequest {
+    pub stream_key: Option<String>,
+    pub kind: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+impl RealtimeEventListRequest {
+    /// 校验有界筛选与分页；事件 payload 不属于该查询边界。
+    pub fn validate(&self) -> bool {
+        valid_optional_text(self.stream_key.as_deref(), 256)
+            && valid_optional_text(self.kind.as_deref(), 128)
+            && self.limit > 0
+            && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
+            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
+    }
+}
+
+/// 已持久化 realtime 事件的安全元数据投影。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealtimeEventSnapshot {
+    pub event_id: Uuid,
+    pub stream_key: String,
+    pub stream_sequence: i64,
+    pub kind: String,
+    pub schema_version: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+/// realtime 事件元数据分页结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealtimeEventPage {
+    pub entries: Vec<RealtimeEventSnapshot>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
 
 /// Admin realtime 查询和 replay 的稳定业务错误。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +88,7 @@ impl RealtimeLagListRequest {
             && valid_optional_text(self.consumer_key.as_deref(), 128)
             && self.limit > 0
             && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
-            && self.offset >= 0
+            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
     }
 }
 
@@ -153,7 +197,7 @@ impl RealtimeFailureListRequest {
             && valid_failure_code(self.code.as_deref())
             && self.limit > 0
             && self.limit <= MAX_REALTIME_ADMIN_PAGE_SIZE
-            && self.offset >= 0
+            && (0..=MAX_REALTIME_ADMIN_OFFSET).contains(&self.offset)
     }
 }
 
@@ -229,6 +273,12 @@ pub struct RealtimeReplayResult {
 pub trait RealtimeAdminPort: Send + Sync {
     /// 读取旧版 Admin dashboard 所需的 lag/failure 安全摘要。
     fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot>;
+
+    /// 按新到旧读取事件元数据；不得返回 payload 或内部来源标识。
+    fn list_events(
+        &self,
+        request: RealtimeEventListRequest,
+    ) -> ApplicationFuture<'_, RealtimeEventPage>;
 
     fn list_lag(&self, request: RealtimeLagListRequest) -> ApplicationFuture<'_, RealtimeLagPage>;
 

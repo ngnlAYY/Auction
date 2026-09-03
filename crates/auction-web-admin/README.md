@@ -19,7 +19,7 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
   分别由 `auth/{mod,redirect,session,login,shell}.rs` 持有，`surface/shared.rs` 持有跨页面状态面板、
   错误重试和时间格式化；客户端未知路由也位于 `AdminShell` layout 内，不能绕过会话加载、错误或
   登录外壳直接渲染管理端 404；realtime 页面在
-  `operations/realtime/` 内拆分页面状态/replay、筛选器、lag 表/分页和 failure 表/分页；delivery outbox
+  `operations/realtime/` 内拆分页面状态/replay、筛选器、事件元数据表、lag 表/分页和 failure 表/分页；delivery outbox
   在 `fulfillment/deliveries/` 内拆分页面编排、状态筛选、列表/分页、动作对话框、共享状态模型和标签辅助；
   规则页面在 `content/rules/` 内拆分页面加载、编辑 workspace、Markdown 预览、发布状态模型和字段辅助。
 - `assets/admin.css`：管理端 surface 样式。设计变量来自 `auction-web-shared`。
@@ -83,14 +83,15 @@ release/retry 使用确认对话框，manual_reconcile 支持 retry、succeeded�
 三种决策。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
 命令 ID 供重试。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
 投递状态筛选恢复旧版的轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
-Realtime 运维页面已接入 lag/failure 安全投影、stream/consumer/code/resolved 筛选、分页、
-空结果状态和旧版风格的可展开高级筛选区；已解决 failure 不允许再次发起 replay。replay 使用
+Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
+筛选、分页和明确空结果状态；概览默认显示事件、消费流与未解决异常总数，consumer lag 不再隐藏在
+右上角弹层；事件概览总数不受列表筛选影响，显式刷新会让三类列表回到第一页。已解决 failure 不允许再次发起 replay。replay 使用
 带遮罩的确认对话框，提交期间锁定输入并保留失败反馈；公开 payload 由操作员输入，服务端负责
 schema、幂等、审计和事件关系校验。
 `/status` 沿用旧版静态产品说明，不创建 live/ready 请求；登录外壳仍单独读取 `/health/ready`，
 其 503 按未就绪显示，不与 Dashboard 运维投影混用。
-Realtime 页面恢复旧版标题、连接状态与高级筛选的同一相对定位壳层；宽屏高级筛选作为右上角
-弹层呈现，窄屏自动回到文档流，lag/failure 投影、分页、replay 确认和外部广播 sink 边界保持不变。
+Realtime 页面使用与其他运维列表一致的概览卡、分区标题和静态筛选布局；最近事件只展示安全元数据，
+事件 payload、内部来源、lag/failure 投影、分页、replay 确认和外部广播 sink 边界保持不变。
 审计页面已接入追加式安全记录查询、操作者/实体/来源/结果筛选、UTC 时间范围、有界数字分页和
 加载失败重试；筛选草稿只在提交表单时触发查询，不会在每次按键时制造请求风暴；metadata 只作为
 JSON 文本展示，不提供历史编辑。
@@ -102,20 +103,20 @@ UTC 时间收进可展开的高级条件，并提供一键清除；宽屏四列�
 直接展示服务端投影的持有比例、调整比例和挂牌价，并以明确文字及正负号区分折扣/惩罚，不靠颜色传达含义；
 recovery 确认携带报告中的 state version、CSRF 和按同一输入重试复用的 command ID，服务端仍负责证据重校验、幂等和
 事务结果，页面不在浏览器端计算结算金额或改变 recovery 状态。
-Outbox 页面已接入 realtime failure、consumer lag 和安全 replay 投影；未冻结的外部广播 sink 不会被
-页面伪造成已发送或已成功。
+`/outbox` 页面已接入 realtime 最近事件元数据、failure、consumer lag 和安全 replay 投影；未冻结的
+外部广播 sink 不会被页面伪造成已发送或已成功。
 规则页面已接入按 locale 读取、语言标签、动态新增 locale、版本事实、候选规范化校验、
 轻量 Markdown 预览和带 revision fence 的发布表单；只有最近一次已校验的草稿才允许发布，
 发布会复用稳定的 command ID，并对版本冲突提供重新加载反馈。浏览器只发送版本化 DTO，不持有
 数据库或凭据状态。
 规则编辑器恢复旧版的事实栏间距、36rem Markdown 编辑区、48rem 预览上限和窄屏单列切换；
 校验、发布门槛与 revision fence 不变。
-运行配置页面已接入非敏感 JSON 文档读取、对象解析提示、服务端候选规范化校验、fingerprint
-版本 fence、稳定 command ID、可见的加载失败重试、冲突反馈和重启提示；文档已恢复旧版 main/isekai、
-发件人 allowlist、装备过滤和 14 个通知模板，并用启用 world/装备过滤事实卡恢复旧页面摘要。更新
-不会被页面误报为热加载，业务字段保存后提示重启受影响的 Admin 与 Worker。
-配置编辑器恢复旧版的全宽无圆角代码区和 34rem 最小高度，页面标题、说明和 fingerprint 状态保持
-清晰分层；配置校验、保存和重启提示的契约不变。
+运行配置页面已接入非敏感完整文档读取、类型化分组表单、服务端候选规范化校验、fingerprint
+版本 fence、稳定 command ID、可见的加载失败重试、冲突反馈和重启提示；表单覆盖旧版 main/isekai、
+发件人 allowlist、装备过滤、装备来源、监听/安全/会话、可观测性和 14 个通知模板，并用启用 world、
+装备过滤与配置指纹事实卡提供摘要。浏览器不直接编辑或读取 TOML；服务端校验后以锁、临时文件、
+`fsync` 和 `rename` 原子替换 `runtime_config_file` 指向的配置文件。更新不会被页面误报为热加载，
+保存后提示重启受影响的 Admin 与 Worker。
 邮件页面已接入 A16-A19 的轮询状态、入站安全摘要和暂停/恢复动作；动作携带 CSRF、当前
 状态版本与命令 ID。页面首次打开会聚合全部已配置邮箱的入站记录，输入具体 mailbox 后再
 读取该邮箱的轮询状态；入站列表和轮询状态读取失败都保留当前查询并提供原位重试；入站列表按旧页面支持 world、kind、status 筛选和 10 条分页

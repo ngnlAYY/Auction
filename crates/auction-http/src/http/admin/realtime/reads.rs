@@ -1,10 +1,12 @@
 use std::net::SocketAddr;
 
-use auction_application::{RealtimeFailureListRequest, RealtimeLagListRequest};
+use auction_application::{
+    RealtimeEventListRequest, RealtimeFailureListRequest, RealtimeLagListRequest,
+};
 use auction_contracts::{
-    AdminRealtimeFailureDetailResponse, AdminRealtimeFailureListResponse,
-    AdminRealtimeFailurePaginationResponse, AdminRealtimeLagListResponse,
-    AdminRealtimePaginationResponse, ApiResponse,
+    AdminRealtimeEventListResponse, AdminRealtimeFailureDetailResponse,
+    AdminRealtimeFailureListResponse, AdminRealtimeFailurePaginationResponse,
+    AdminRealtimeLagListResponse, AdminRealtimePaginationResponse, ApiResponse,
 };
 use axum::{
     Json,
@@ -15,9 +17,76 @@ use axum::{
 
 use super::{
     AdminApiState, admin_session_guard, authenticated_admin_session, feature_unavailable,
-    internal_error, map_failure, map_lag, map_realtime_error, no_store_headers, not_found_error,
-    parse_page, parse_query, parse_uuid,
+    internal_error, map_event, map_failure, map_lag, map_realtime_error, no_store_headers,
+    not_found_error, parse_page, parse_query, parse_uuid,
 };
+
+/// 读取已持久化 realtime 事件的安全元数据。
+pub(crate) async fn list_events(
+    State(state): State<AdminApiState>,
+    ConnectInfo(address): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    if let Some(response) = admin_session_guard(&state, &headers, address, false, false) {
+        return response;
+    }
+    if let Err(response) = authenticated_admin_session(&state, &headers).await {
+        return *response;
+    }
+    let query = match parse_query(&uri, &["stream_key", "kind", "page", "page_size"]) {
+        Ok(query) => query,
+        Err(_) => return super::invalid_query(),
+    };
+    let (page, page_size, offset) = match parse_page(&query) {
+        Ok(page) => page,
+        Err(_) => return super::invalid_query(),
+    };
+    let Some(port) = state.realtime_admin() else {
+        return feature_unavailable();
+    };
+    let result = match port
+        .list_events(RealtimeEventListRequest {
+            stream_key: query.get("stream_key").cloned(),
+            kind: query.get("kind").cloned(),
+            limit: page_size,
+            offset,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => return map_realtime_error(error),
+    };
+    let entry_count = match i64::try_from(result.entries.len()) {
+        Ok(count) => count,
+        Err(_) => return internal_error(),
+    };
+    let expected_count = result.total.saturating_sub(offset).clamp(0, page_size);
+    if result.limit != page_size
+        || result.offset != offset
+        || result.total < 0
+        || entry_count != expected_count
+    {
+        return internal_error();
+    }
+    let events = result.entries.into_iter().map(map_event).collect();
+    (
+        StatusCode::OK,
+        no_store_headers(),
+        Json(ApiResponse::ok(
+            "实时事件元数据已加载",
+            AdminRealtimeEventListResponse {
+                events,
+                pagination: AdminRealtimePaginationResponse {
+                    page,
+                    page_size,
+                    total: result.total,
+                },
+            },
+        )),
+    )
+        .into_response()
+}
 
 /// 读取 realtime consumer lag。
 pub(crate) async fn list_lag(
