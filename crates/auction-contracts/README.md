@@ -20,6 +20,8 @@
   `listed_price`、`hold_ppm` 与带符号的 `adjustment_ppm`，供界面区分折扣和惩罚，不暴露数据库行。
 - Public lot/装备响应可选返回固定顺序的 `primary_attribute_initials`；竞价日志仅在真实论坛楼层与
   帖子身份同时可证明时返回受限的 `source_post_url`，玩家仍由名称字段展示。
+- `PublicForumResponse.processed_through_post_number` 只表达 Worker 完整主题扫描证明的真实连续楼层；
+  浏览器不得用 `content_revision`、post ID 或已读取末楼替代该水位。
 
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde
 映射兼容外部旧命名。修改路由、状态码、JSON 字段或事件名时，必须同步更新对应文档。

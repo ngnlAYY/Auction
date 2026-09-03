@@ -24,6 +24,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
+               AND lease_until = $5 AND state_version = $6
                AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
@@ -33,6 +34,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND lease_until = $5 AND state_version = $6
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
                    AND final_completed_at IS NULL",
             "open",
@@ -43,6 +45,7 @@ pub(super) async fn complete_postgres(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND lease_until = $5 AND state_version = $6
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
                    AND final_completed_at IS NULL",
             "final",
@@ -53,6 +56,8 @@ pub(super) async fn complete_postgres(
         .bind(&claim.worker_id)
         .bind(claim.command_id.as_uuid())
         .bind(completed_at)
+        .bind(claim.lease_until)
+        .bind(claim.state_version)
         .execute(pool)
         .await
         .map_err(map_storage_error)?;
@@ -78,6 +83,7 @@ pub(super) async fn fail_postgres(
                      state_version = state_version + 1,
                      last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
                  WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND lease_until = $6 AND state_version = $7
                    AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             )
             .bind(claim.round_id)
@@ -85,6 +91,8 @@ pub(super) async fn fail_postgres(
             .bind(retry_at)
             .bind(failure_code)
             .bind(safe_detail)
+            .bind(claim.lease_until)
+            .bind(claim.state_version)
             .execute(pool)
             .await
         }
@@ -95,6 +103,7 @@ pub(super) async fn fail_postgres(
                      state_version = state_version + 1,
                      last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
                  WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND lease_until = $6 AND state_version = $7
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
                    AND final_completed_at IS NULL",
             )
@@ -103,6 +112,8 @@ pub(super) async fn fail_postgres(
             .bind(retry_at)
             .bind(failure_code)
             .bind(safe_detail)
+            .bind(claim.lease_until)
+            .bind(claim.state_version)
             .execute(pool)
             .await
         }
@@ -113,6 +124,7 @@ pub(super) async fn fail_postgres(
                      state_version = state_version + 1,
                      last_failure_detail = $5, updated_at = CURRENT_TIMESTAMP
                  WHERE id = $1 AND status = 'active' AND lease_owner = $2
+                   AND lease_until = $6 AND state_version = $7
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
                    AND final_completed_at IS NULL",
             )
@@ -121,6 +133,8 @@ pub(super) async fn fail_postgres(
             .bind(retry_at)
             .bind(failure_code)
             .bind(safe_detail)
+            .bind(claim.lease_until)
+            .bind(claim.state_version)
             .execute(pool)
             .await
         }
@@ -145,6 +159,7 @@ pub(super) async fn complete_sqlite(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND lease_until = ? AND state_version = ?
                AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
@@ -154,6 +169,7 @@ pub(super) async fn complete_sqlite(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND lease_until = ? AND state_version = ?
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
                    AND final_completed_at IS NULL",
             "open",
@@ -164,6 +180,7 @@ pub(super) async fn complete_sqlite(
                  state_version = state_version + 1,
                  lease_owner = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND lease_until = ? AND state_version = ?
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
                    AND final_completed_at IS NULL",
             "final",
@@ -174,6 +191,8 @@ pub(super) async fn complete_sqlite(
         .bind(super::mapping::sqlite_timestamp(completed_at))
         .bind(super::mapping::uuid_blob(claim.round_id))
         .bind(&claim.worker_id)
+        .bind(super::mapping::sqlite_timestamp(claim.lease_until))
+        .bind(claim.state_version)
         .execute(pool)
         .await
         .map_err(map_storage_error)?;
@@ -198,6 +217,7 @@ pub(super) async fn fail_sqlite(
                  state_version = state_version + 1,
                  last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+               AND lease_until = ? AND state_version = ?
                AND preview_completed_at IS NULL AND final_completed_at IS NULL",
             "preview",
         ),
@@ -207,6 +227,7 @@ pub(super) async fn fail_sqlite(
                  state_version = state_version + 1,
                  last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND lease_until = ? AND state_version = ?
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NULL
                    AND final_completed_at IS NULL",
             "open",
@@ -217,6 +238,7 @@ pub(super) async fn fail_sqlite(
                  state_version = state_version + 1,
                  last_failure_detail = ?, updated_at = CURRENT_TIMESTAMP
              WHERE id = ? AND status = 'active' AND lease_owner = ?
+                   AND lease_until = ? AND state_version = ?
                    AND preview_completed_at IS NOT NULL AND open_completed_at IS NOT NULL
                    AND final_completed_at IS NULL",
             "final",
@@ -228,6 +250,8 @@ pub(super) async fn fail_sqlite(
         .bind(safe_detail)
         .bind(super::mapping::uuid_blob(claim.round_id))
         .bind(&claim.worker_id)
+        .bind(super::mapping::sqlite_timestamp(claim.lease_until))
+        .bind(claim.state_version)
         .execute(pool)
         .await
         .map_err(map_storage_error)?;

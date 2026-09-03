@@ -152,19 +152,28 @@ pub(crate) async fn create_admin_auction(
     Ok(auction)
 }
 
-/// 修改 Draft/Preview 拍卖的计划结束时间；同一输入重试时由组件复用命令 ID。
+/// 修改 Draft/Preview 拍卖的三项计划时间；同一输入重试时由组件复用命令 ID。
 pub(crate) async fn update_admin_auction_schedule(
     command_id: Uuid,
     auction_id: String,
+    preview_scheduled_at: String,
+    scheduled_open_at: String,
     scheduled_end_at: String,
     expected_state_version: i64,
 ) -> Result<AdminAuction, String> {
     if !valid_uuid(&auction_id) || expected_state_version <= 0 {
         return Err("invalid_request".to_owned());
     }
+    let normalized_preview = normalize_datetime(preview_scheduled_at)?;
+    let normalized_open = normalize_datetime(scheduled_open_at)?;
     let normalized_end = normalize_datetime(scheduled_end_at)?;
+    let expected_preview = normalized_preview.timestamp_millis();
+    let expected_open = normalized_open.timestamp_millis();
+    let expected_end = normalized_end.timestamp_millis();
     let command = AdminUpdateAuctionScheduleRequest {
         command_id: command_id.to_string(),
+        preview_scheduled_at: Some(normalized_preview),
+        scheduled_open_at: Some(normalized_open),
         scheduled_end_at: Some(normalized_end),
         expected_state_version,
     };
@@ -184,14 +193,13 @@ pub(crate) async fn update_admin_auction_schedule(
     let payload: ApiResponse<StrictAuctionData> =
         response.json().await.map_err(invalid_response_error)?;
     let auction = decode_auction(payload.data.auction).map_err(invalid_response_error)?;
-    let expected_end = command
-        .scheduled_end_at
-        .as_ref()
-        .map(DateTime::timestamp_millis)
-        .ok_or_else(|| "invalid_response".to_owned())?;
     if auction.id != auction_id
         || !matches!(auction.status.as_str(), "draft" | "preview")
         || auction.state_version < expected_state_version
+        || parse_admin_time(&auction.preview_scheduled_at).map(|value| value as i64)
+            != Some(expected_preview)
+        || parse_admin_time(&auction.scheduled_open_at).map(|value| value as i64)
+            != Some(expected_open)
         || auction.scheduled_ends_at.as_deref().and_then(parse_admin_time).map(|value| value as i64)
             != Some(expected_end)
     {
@@ -244,7 +252,7 @@ pub(super) fn decode_auction(value: StrictAuction) -> Result<AdminAuction, &'sta
             value.status.as_str(),
             "draft" | "preview" | "live" | "final" | "settling" | "settled" | "cancelled"
         )
-        || scheduled_open_at < preview_scheduled_at
+        || scheduled_open_at <= preview_scheduled_at
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.preview_revision)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
         || !valid_admin_time(&value.created_at)

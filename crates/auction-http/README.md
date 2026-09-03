@@ -47,7 +47,7 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/admin/delivery/`：交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
   分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；
   动作闭集、CSRF、fencing、request hash 和外部结果未知对账边界保持不变。
-- `src/http/admin/auctions/`：拍卖列表、创建命令、计划结束时间修改、DTO 映射和共享错误边界分别由
+- `src/http/admin/auctions/`：拍卖列表、创建命令、开拍前计划时间修改、DTO 映射和共享错误边界分别由
   `list.rs`、`commands.rs`、`schedule.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定
   处理器出口；旧分页、能力投影、零版本创建 fence、Draft/Preview 修改边界、命令幂等和事务错误
   契约保持不变。
@@ -121,8 +121,9 @@ Admin `/api/v1/admin/auctions` 的 GET 已接入 Admin session、`world_id`/`sta
 生命周期与 `manual_intake` 能力。SQLite Lite 对该
 列表返回 `501 feature_not_supported`。A06 lot 列表同样只在 PostgreSQL 完整档提供安全快照。
 `PATCH /api/v1/admin/auctions/{auction_id}/schedule` 已接入 Admin session/CSRF、严格 JSON、
-`command_id` 和状态版本 fence；HTTP 只映射新的计划结束时间，Draft/Preview 资格、数据库时间、
-幂等账本、策略/调度同步、审计和 realtime 事件由应用与 PostgreSQL owner 完成，SQLite Lite 返回
+`command_id` 和状态版本 fence；HTTP 映射计划预览、开拍、结束三项时间。Draft 可修改三项，Preview
+必须原样提交已经发生的预览时间且只修改未来阶段；严格顺序、数据库时间、活动租约、幂等账本、
+策略/调度同步、审计和 realtime 事件由应用与 PostgreSQL owner 完成，SQLite Lite 返回
 `501 feature_not_supported`。
 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session/CSRF 和稳定命令 DTO；HTTP 层只映射
 `withdraw`/`set_start_price` 与版本 fence，事务、审计、预览事件和 withdrawn-return 义务由

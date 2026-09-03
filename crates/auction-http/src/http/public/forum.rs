@@ -54,6 +54,7 @@ fn map_thread(thread: PublicForumThread) -> PublicForumResponse {
         title: thread.title,
         body: thread.body,
         content_revision: thread.content_revision,
+        processed_through_post_number: thread.processed_through_post_number,
         content_synced_at: thread.content_synced_at.map(public_timestamp),
         content_last_success_at: thread.content_last_success_at.map(public_timestamp),
         content_last_error_at: thread.content_last_error_at.map(public_timestamp),

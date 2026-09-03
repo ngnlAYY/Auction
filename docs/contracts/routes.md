@@ -226,7 +226,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留旧的 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
-公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15：`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停自动轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
+公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15：发布成功后只显示可点击的帖子位置和“已更新到 #xx”，`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停自动轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和旧版竞价结果投影。
@@ -267,9 +267,13 @@ lot 不会被反向延长，之后的竞价仍可按冻结软截止策略延期�
 `allow_manual_early_settlement = true` 时声明 capability；开关默认关闭。命令接受 `live`/`final`，把所有
 尚未到期的 live lot 有效截止时间收紧到事务时间并交给既有 settlement scheduler/Worker，HTTP 事务不
 直接写成交、义务或履约事实。A39 只允许 `draft`/`preview`，请求携带 `command_id`、
-`expected_state_version` 与新的 `scheduled_end_at`；PostgreSQL 在同一 Serializable 事务内锁定
-world、scheduled round 和 auction，并同步策略快照与持久调度记录，追加命令账本、审计和
-`auction.schedule_updated` 事件。已经正式开放、开始结算、结算或取消的拍卖不能修改，SQLite Lite
+`expected_state_version`、`preview_scheduled_at`、`scheduled_open_at` 与 `scheduled_end_at`，并要求
+`preview < open < end`。Draft 的三项时间都必须位于数据库当前时间之后；Preview 必须原样保留已经
+发生的预览时间，且开拍、结束仍在未来。PostgreSQL 在同一 Serializable 事务内按 world、scheduled
+round、auction 加锁，同步拍卖计划列、结束策略快照与持久调度记录；有 owner 且未过期的活动租约
+拒绝修改，过期租约或无 owner 的失败退避会在实际变更时清除并递增 round 版本，使陈旧 Worker 的
+完成/失败写回失效。命令账本、审计和 `auction.schedule_updated` 事件同事务追加；事件 v1 保持原字段，
+只唤醒客户端重读权威快照。已经正式开放、开始结算、结算或取消的拍卖不能修改，SQLite Lite
 明确返回 `501 feature_not_supported`。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
 reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；reconcile 的 retry、succeeded、failed
 决策以及对应的外部引用/失败代码由请求体明确表达；列表投影还提供从版本化 send payload

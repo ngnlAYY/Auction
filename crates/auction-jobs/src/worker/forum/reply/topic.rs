@@ -269,6 +269,11 @@ async fn refresh_fixed_posts(
     poll_interval: chrono::Duration,
     scan_completed: bool,
 ) -> Result<(), ApplicationError> {
+    let processed_through_post_number_i32 = i32::try_from(processed_through_post_number)
+        .map_err(|_| repository_error("论坛已处理楼层超出持久化范围"))?;
+    if processed_through_post_number_i32 < topic.processed_through_post_number {
+        return Err(repository_error("论坛已处理楼层不能倒退"));
+    }
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
     snapshot.public_url = super::super::forum_sync::resolve_public_url(
         runtime.public_base_url.as_deref(),
@@ -288,12 +293,29 @@ async fn refresh_fixed_posts(
         .map_err(|error| repository_error(&error.to_string()))?;
     let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
     let system_log_changed = system_log.body != topic.system_log_body;
+    let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
     if !catalog_changed && !system_log_changed {
         if !scan_completed {
-            return Ok(());
+            if !floor_changed {
+                return Ok(());
+            }
+            let updated_at = clock.now();
+            return runtime
+                .store
+                .record_fixed_posts_progress(
+                    topic,
+                    catalog,
+                    system_log,
+                    processed_through_post_number_i32,
+                    updated_at,
+                )
+                .await;
         }
         let (updated_at, next_scan_at) = completed_scan_times(clock, poll_interval)?;
-        return runtime.store.finish_topic_scan(topic, updated_at, next_scan_at).await;
+        return runtime
+            .store
+            .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
+            .await;
     }
     if catalog_changed {
         reconcile_or_edit_fixed_post(
@@ -319,13 +341,26 @@ async fn refresh_fixed_posts(
     if !scan_completed {
         return runtime
             .store
-            .record_fixed_posts_progress(topic, catalog, system_log, updated_at)
+            .record_fixed_posts_progress(
+                topic,
+                catalog,
+                system_log,
+                processed_through_post_number_i32,
+                updated_at,
+            )
             .await;
     }
     let next_scan_at = next_scan_at(updated_at, poll_interval)?;
     runtime
         .store
-        .record_fixed_posts_update(topic, catalog, system_log, updated_at, next_scan_at)
+        .record_fixed_posts_update(
+            topic,
+            catalog,
+            system_log,
+            processed_through_post_number_i32,
+            updated_at,
+            next_scan_at,
+        )
         .await
 }
 

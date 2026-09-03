@@ -6,7 +6,7 @@ use gloo_timers::future::TimeoutFuture;
 
 use crate::api::{CurrentAuction, ForumThread, fetch_forum_thread};
 
-use super::{CurrentAuctionResource, auction_world_label, format_auction_time};
+use super::{CurrentAuctionResource, auction_world_label};
 
 /// 展示所选世界当前拍卖的论坛同步投影；首页不再承担该数据源的轮询。
 pub(super) fn page() -> Element {
@@ -118,8 +118,8 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
             async move { fetch_forum_thread(auction_id).await }
         }
     });
-    // 发布前两秒轮询；发布后降为三十秒读取本地固定楼层投影，确保 #1/#2 后续更新可见。
-    // 明确失败、内容同步错误或请求错误时暂停；手动重读成功后由 thread 资源变化重新启动计时器。
+    // 发布前两秒轮询；发布后降为三十秒读取本地处理楼层。发布或请求明确失败时暂停，
+    // 手动重读成功后由 thread 资源变化重新启动计时器。
     let _poll = use_resource({
         let mut poll_generation = poll_generation;
         move || {
@@ -128,12 +128,8 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
             let poll_delay = {
                 let current = thread.read();
                 match current.as_ref() {
-                    Some(Ok(thread))
-                        if thread.status == "failed" || thread.content_last_error_at.is_some() =>
-                    {
-                        None
-                    }
                     Some(Ok(thread)) if thread.status == "published" => Some(30_000),
+                    Some(Ok(thread)) if thread.status == "failed" => None,
                     Some(Ok(_)) | None => Some(2_000),
                     Some(Err(_)) => None,
                 }
@@ -179,20 +175,7 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
 }
 
 fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) -> Element {
-    let status_label = forum_status_label(&thread.status);
-    let status_message = forum_status_message(&thread.status);
-    let status_class = forum_status_class(&thread.status);
-    let updated_at = format_auction_time(&thread.updated_at);
-    let status_accessible_label = format!("{}: {status_label}", t!("forum-status"));
-    let content_synced_at = thread.content_synced_at.as_deref().map(format_auction_time);
-    let content_last_success_at =
-        thread.content_last_success_at.as_deref().map(format_auction_time);
-    let content_error = thread
-        .content_last_error_at
-        .as_deref()
-        .zip(thread.content_last_error_code.as_deref())
-        .map(|(at, code)| (at.to_owned(), format_auction_time(at), code.to_owned()));
-    let retry_action = (thread.status == "failed" || content_error.is_some()).then(|| {
+    let retry_action = (thread.status == "failed").then(|| {
         rsx! {
             button {
                 class: "public-state-retry",
@@ -204,94 +187,37 @@ fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) 
             }
         }
     });
-    let published_content = match (
-        thread.thread_url.clone(),
-        thread.title.clone(),
-        thread.body.clone(),
-    ) {
-        (Some(thread_url), Some(title), Some(body)) if thread.status == "published" => rsx! {
-            section { class: "public-forum-thread", aria_labelledby: "public-forum-thread-title",
-                div { class: "public-forum-thread__heading",
-                    h3 { id: "public-forum-thread-title", "{title}" }
-                    a {
-                        class: "public-forum-thread__link",
-                        href: thread_url,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        {t!("forum-link")}
-                    }
-                }
-                details { class: "public-forum-thread__body",
-                    summary { {t!("forum-thread-body-summary")} }
-                    pre { "{body}" }
-                }
-            }
-        },
-        _ => rsx! {},
-    };
-
-    rsx! {
-        div { class: "public-forum-card__content",
-            div { class: "public-forum-card__status-line",
-                span {
-                    class: "public-forum-status public-forum-status--{status_class}",
-                    aria_label: status_accessible_label,
-                    "{status_label}"
-                }
-                p { role: "status", aria_live: "polite", "{status_message}" }
-                {retry_action}
-            }
-            if let Some((error_at, formatted_error_at, error_code)) = content_error {
-                p { class: "public-page-status public-page-status--error", role: "alert",
-                    {t!("forum-sync-delayed", code: error_code, time: formatted_error_at)}
-                    time { class: "ui-visually-hidden", datetime: error_at }
-                }
-            }
-            dl { class: "public-forum-metadata",
-                div {
-                    dt { {t!("forum-source-revision")} }
-                    dd { "{thread.source_revision}" }
-                }
-                div {
-                    dt { {t!("forum-content-revision")} }
-                    dd { "{thread.content_revision}" }
-                }
-                if let (Some(raw), Some(formatted)) =
-                    (thread.content_synced_at.as_ref(), content_synced_at)
-                {
+    if let Some(thread_url) = thread.thread_url.filter(|_| thread.status == "published") {
+        return rsx! {
+            div { class: "public-forum-card__content", role: "status", aria_live: "polite",
+                dl { class: "public-forum-metadata",
                     div {
-                        dt { {t!("forum-content-synced-at")} }
-                        dd { time { datetime: raw.clone(), "{formatted}" } }
+                        dt { {t!("forum-location")} }
+                        dd {
+                            a {
+                                class: "public-forum-thread__link",
+                                href: thread_url,
+                                target: "_blank",
+                                rel: "noopener noreferrer",
+                                {t!("forum-link")}
+                            }
+                        }
                     }
-                }
-                if let (Some(raw), Some(formatted)) =
-                    (thread.content_last_success_at.as_ref(), content_last_success_at)
-                {
                     div {
-                        dt { {t!("forum-last-success-at")} }
-                        dd { time { datetime: raw.clone(), "{formatted}" } }
-                    }
-                }
-                div {
-                    dt { {t!("forum-updated-at")} }
-                    dd {
-                        time { datetime: thread.updated_at.clone(), "{updated_at}" }
+                        dt { {t!("forum-progress")} }
+                        dd {
+                            {t!(
+                                "forum-updated-through",
+                                post_number: thread.processed_through_post_number
+                            )}
+                        }
                     }
                 }
             }
-            {published_content}
-        }
+        };
     }
-}
 
-fn forum_status_label(status: &str) -> String {
-    match status {
-        "pending" => t!("forum-state-pending"),
-        "publishing" => t!("forum-state-publishing"),
-        "failed" => t!("forum-state-failed"),
-        "published" => t!("forum-state-published"),
-        _ => t!("forum-unavailable"),
-    }
+    forum_page_state(forum_status_message(&thread.status), thread.status == "failed", retry_action)
 }
 
 fn forum_status_message(status: &str) -> String {
@@ -299,16 +225,6 @@ fn forum_status_message(status: &str) -> String {
         "pending" => t!("forum-syncing-pending"),
         "publishing" => t!("forum-syncing-publishing"),
         "failed" => t!("forum-syncing-failed"),
-        "published" => t!("forum-published"),
         _ => t!("forum-unavailable"),
-    }
-}
-
-fn forum_status_class(status: &str) -> &'static str {
-    match status {
-        "published" => "published",
-        "failed" => "failed",
-        "publishing" => "publishing",
-        _ => "pending",
     }
 }

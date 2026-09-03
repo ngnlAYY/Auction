@@ -29,6 +29,7 @@ pub(super) async fn publish_postgres(
              catalog_post_id = $6,
              system_log_post_id = $7,
              system_log_body = $8,
+             processed_through_post_number = 2,
              content_revision = CASE WHEN content_revision < 1 THEN 1 ELSE content_revision + 1 END,
              content_synced_at = $9,
              content_last_success_at = $9,

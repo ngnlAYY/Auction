@@ -4,7 +4,8 @@
 `../Auction-BF` 中的旧仓库继续作为行为基准；阶段 1 至 7 的代码 owner 和主要表面已经落地，
 阶段 8 的真实数据、外部服务、浏览器产物与部署切换证据尚未完成。2026-08-26 的重新审计还发现
 若干不能由静态路由覆盖掩盖的代码差异；事务安全、实时 wire 和首批 Public 核心 HTTP/Web 流程已
-完成静态修复，HTTP 边界另有隔离环境局部 R1，其余差异、证据和实施顺序以
+完成静态修复，Admin 开拍前的预览/开拍/结束三项计划同步和 Public 论坛真实连续处理楼层也已进入
+对应 PostgreSQL/Worker/Web owner；HTTP 边界另有隔离环境局部 R1，其余差异、证据和实施顺序以
 [`legacy-parity-audit.md`](legacy-parity-audit.md) 为准。迁移顺序如下：
 
 1. **契约冻结：** 整理 Public/Admin route、JSON 字段、状态码、WebSocket/SSE 事件、

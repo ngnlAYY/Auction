@@ -155,7 +155,7 @@ world             411
 但**共有对象保持同名同义**（表名、列名、索引逻辑名）。每个迁移文件在
 `docs/contracts/schema.md` 中有对应条目。
 
-当前已提交 PostgreSQL `000001` 至 `000030`：覆盖基础身份、拍卖与 lot、命令账本、
+当前已提交 PostgreSQL `000001` 至 `000031`：覆盖基础身份、拍卖与 lot、命令账本、
 竞价事实、代理授权及历史、审计/realtime、结算/履约、生命周期、身份/外部命令、恢复/
 可观测性、论坛同步、论坛未知写入人工授权、Final phase 调度、领先时间修正、异世界 carrier
 dispatch、生命周期/operations alert/lot 结束时间数据库不变量、旧 v28 bid 缺失结束时间的
@@ -163,7 +163,8 @@ dispatch、生命周期/operations alert/lot 结束时间数据库不变量、�
 扫描水位和独立时钟语义、HV 战斗页占用时的 recovery `busy` 余额状态、lot 的分类内展示编号，
 以及论坛固定 #1/#2 的远端身份和内容版本证明、同一 world/provider 的单用户论坛账号归属、
 Users 级稳定论坛账号 ID、论坛命令真实楼层来源、逐主题同步健康/调度事实、论坛身份变更历史和
-追加式审计证据，以及邮件/论坛两类外部 Cookie 各自唯一 active 的数据库防线。
+追加式审计证据，邮件/论坛两类外部 Cookie 各自唯一 active 的数据库防线，以及论坛主题由完整读取
+证明的连续处理楼层水位。
 `lots.lot_number` 继续作为拍卖内全局顺序，`category_key`/`category_number` 固化每个装备分类从 1 开始且
 不复用的用户可见编号；论坛同步记录同时固化编号方案，避免重写已经发布的旧主题。旧名 `bid_proxies` 由只读兼容
 视图提供，不再维护第二份权威
@@ -305,8 +306,8 @@ Serializable 事务中写入 `user.forum_identity_synced` 审计事实；Admin �
 `game_player_id` 只作 `username` 的数据库兼容镜像。系统不生成 `forum-*` 影子用户名，也不把数字键交给 MM。论坛与公开
 拍卖投影统一展示当前名称。回帖再通过 world/lot 映射和命令账本调用现有竞价端口。每个主题新增固定 #1 拍卖目录和 #2 编辑/错误记录：`000025` 保存两个 exact
 post ID 与内容版本，用户命令从 #3 开始；确定竞价结果提交后刷新 #1，解析/编辑/拒绝结果稳定更新
-#2，pending 命令同样显示，并以独立内容 lease/fencing 串行远端编辑；`000028` 保存可证明的真实
-楼层号，#2 显示连续已处理水位，待重试命令阻止水位越过对应楼层。固定帖编辑会直接读取编辑页
+#2，pending 命令同样显示，并以独立内容 lease/fencing 串行远端编辑；`000028` 保存每条命令可证明的
+真实楼层号，`000031` 单独保存主题连续已处理水位，待重试命令阻止水位越过对应楼层。固定帖编辑会直接读取编辑页
 textarea 中的原始 BBCode，以写入前后逐字一致作为成功证明；上一轮为 `write_unknown` 时，远端内容
 不等于预期值会失败关闭，不能凭页面渲染结果推断成功。`000029` 还把最近成功时间、连续失败数、
 错误摘要和下一次扫描时间固化到每个主题；成功扫描默认推进五分钟 due，失败按主题退避，不再依赖
@@ -470,7 +471,7 @@ just web-build
 阶段 1 已完成首片：带类型标识、金额值对象、拍卖状态版本、软截止/取消边界、竞价事实、
 代理授权、纯领域 `CompetitionPlan` 和结算值对象已落地。阶段 2 已完成首片：事务策略、
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
-PostgreSQL `000001` 至 `000030` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
+PostgreSQL `000001` 至 `000031` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
 并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
@@ -961,7 +962,7 @@ Public/Admin HTTP listener。
   分别拆入 `database/bid_log/{common,postgres,sqlite}.rs`；`bid_log/mod.rs` 只保留端口分派，时间、
   lot、状态版本、事实序号和 bid ID 的 keyset 顺序以及两套后端的非对等 SQL 能力保持不变。
 - Storage 论坛回帖 owner 已将 PostgreSQL 主题、lot/身份/代理查询、命令账本、论坛身份历史/审计、
-  固定楼层内容版本 CAS 和输入/能力校验分别拆入
+  固定楼层内容版本与连续处理楼层 CAS 和输入/能力校验分别拆入
   `database/forum/reply/{queries,commands,identity,fixed_posts,validation}.rs`；`reply.rs` 只保留
   跨后端端口分派，论坛命令幂等、锁内读取、逐主题健康/调度和 SQLite Lite 能力边界保持不变。
   `auction_forum_reply_cursors` 仅保留为旧迁移兼容表，`cursor` 模块和当前 writer 已移除。
@@ -1781,3 +1782,14 @@ R1；共享语言选择器也修复了刷新后原生下拉与 `hv.lang`/`html l
 进入人工对账，当前轮次只暂时跳过同一 `(world, recipient)` 的后续 delivery，其他玩家继续处理。
 2026-09-02 对 `11111` 的一次零资产与一次 1 Credit 受控发送均被远端接受，未复现不存在收件人；
 因此没有针对该名称写死规则，异常分支仍以远端明确协议响应为唯一判据。
+
+本轮又扩展 A39 开拍前计划修改：Draft 可同时修改未来且严格有序的预览、开拍、结束时间，Preview
+锁定已发生的预览时间，只允许修改未来的开拍与结束。PostgreSQL 在同一 Serializable 事务内同步
+拍卖投影、schema v4 结束策略和持久调度三项 due；活动租约阻止修改，过期租约与失败退避可由实际
+变更清除，Worker 完成/失败写回同时校验 owner、租约截止和领取后的轮次版本，陈旧 claim 不能越过
+计划变更。`auction.schedule_updated` v1 仍只作权威快照重读唤醒，不原地扩展冻结 payload。
+
+Public 独立 `/forum` 页面在发布后只显示可点击的帖子位置和“已更新到 #N”。新增 PostgreSQL
+`000031` 为 `auction_forum_sync` 保存由完整主题读取证明的连续处理楼层，初始水位为固定系统帖 #2；
+扫描遇到待重试命令会把水位钳在该楼之前，无正文变化的完整扫描也会推进并释放 claim。该水位不从
+固定帖 `content_revision` 或远端 post ID 推算，SQLite Lite 继续不提供论坛完整档能力。

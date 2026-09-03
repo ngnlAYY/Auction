@@ -1,20 +1,22 @@
-//! Admin 正式开拍前计划结束时间修改对话框。
+//! Admin 正式开拍前预览、开拍与计划结束时间修改对话框。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
 use uuid::Uuid;
 
-use crate::api::update_admin_auction_schedule;
+use crate::api::{normalize_datetime, update_admin_auction_schedule};
 use crate::app::surface::admin_api_error_message;
 
-use super::super::helpers::{datetime_local_value, valid_schedule_end};
+use super::super::helpers::{datetime_local_value, valid_schedule_update};
 use super::model::AdminAuctionNotice;
 
 #[component]
 pub(super) fn AdminAuctionScheduleAction(
     auction_id: String,
     auction_sequence: i64,
+    status: String,
     expected_state_version: i64,
+    preview_scheduled_at: String,
     scheduled_open_at: String,
     scheduled_end_at: Option<String>,
     busy: Signal<bool>,
@@ -22,9 +24,14 @@ pub(super) fn AdminAuctionScheduleAction(
     reload_generation: Signal<u64>,
 ) -> Element {
     let mut pending = use_signal(|| false);
+    let mut preview_value = use_signal(String::new);
+    let mut open_value = use_signal(String::new);
     let mut end_value = use_signal(String::new);
     let mut feedback = use_signal(|| None::<String>);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let original_preview_scheduled_at = preview_scheduled_at.clone();
+    let original_scheduled_open_at = scheduled_open_at.clone();
+    let original_scheduled_end_at = scheduled_end_at.clone().unwrap_or_default();
 
     rsx! {
         button {
@@ -32,12 +39,20 @@ pub(super) fn AdminAuctionScheduleAction(
             r#type: "button",
             disabled: busy(),
             onclick: {
+                let preview_scheduled_at = preview_scheduled_at.clone();
+                let scheduled_open_at = scheduled_open_at.clone();
                 let scheduled_end_at = scheduled_end_at.clone();
                 move |_| {
                     if busy() {
                         return;
                     }
                     notice.set(None);
+                    preview_value.set(
+                        datetime_local_value(&preview_scheduled_at).unwrap_or_default(),
+                    );
+                    open_value.set(
+                        datetime_local_value(&scheduled_open_at).unwrap_or_default(),
+                    );
                     end_value.set(
                         scheduled_end_at
                             .as_deref()
@@ -55,12 +70,17 @@ pub(super) fn AdminAuctionScheduleAction(
             AdminAuctionScheduleDialog {
                 auction_id,
                 auction_sequence,
+                status,
+                original_preview_scheduled_at,
+                original_scheduled_open_at,
+                original_scheduled_end_at,
                 expected_state_version,
-                scheduled_open_at,
                 busy,
                 notice,
                 reload_generation,
                 pending,
+                preview_value,
+                open_value,
                 end_value,
                 feedback,
                 command_state,
@@ -73,24 +93,35 @@ pub(super) fn AdminAuctionScheduleAction(
 fn AdminAuctionScheduleDialog(
     auction_id: String,
     auction_sequence: i64,
+    status: String,
+    original_preview_scheduled_at: String,
+    original_scheduled_open_at: String,
+    original_scheduled_end_at: String,
     expected_state_version: i64,
-    scheduled_open_at: String,
     busy: Signal<bool>,
     notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
     pending: Signal<bool>,
+    preview_value: Signal<String>,
+    open_value: Signal<String>,
     end_value: Signal<String>,
     feedback: Signal<Option<String>>,
     command_state: Signal<Option<(String, Uuid)>>,
 ) -> Element {
-    let can_submit = !busy() && valid_schedule_end(&scheduled_open_at, &end_value());
+    let preview_locked = status == "preview";
+    let can_submit =
+        !busy() && valid_schedule_update(&status, &preview_value(), &open_value(), &end_value());
     let title_id = format!("schedule-title-{auction_id}");
-    let input_id = format!("schedule-end-{auction_id}");
+    let preview_input_id = format!("schedule-preview-{auction_id}");
+    let open_input_id = format!("schedule-open-{auction_id}");
+    let end_input_id = format!("schedule-end-{auction_id}");
     let signals = ScheduleSignals {
         busy,
         notice,
         reload_generation,
         pending,
+        preview_value,
+        open_value,
         end_value,
         feedback,
         command_state,
@@ -119,19 +150,63 @@ fn AdminAuctionScheduleDialog(
                                 ScheduleRequest {
                                     auction_id: auction_id.clone(),
                                     expected_state_version,
-                                    scheduled_end_at: end_value(),
+                                    // 未编辑的字段保留服务端原始 RFC3339 精度，不能把
+                                    // datetime-local 的分钟显示值回写成另一个时刻。
+                                    preview_scheduled_at: if preview_locked {
+                                        original_preview_scheduled_at.clone()
+                                    } else {
+                                        preserve_unchanged_datetime(
+                                            preview_value(),
+                                            &original_preview_scheduled_at,
+                                        )
+                                    },
+                                    scheduled_open_at: preserve_unchanged_datetime(
+                                        open_value(),
+                                        &original_scheduled_open_at,
+                                    ),
+                                    scheduled_end_at: preserve_unchanged_datetime(
+                                        end_value(),
+                                        &original_scheduled_end_at,
+                                    ),
                                 },
                                 signals,
                             );
                         }
                     },
                     p { class: "admin-panel__note", {t!("admin-auctions-schedule-note")} }
-                    label { r#for: input_id.clone(), {t!("admin-auctions-schedule-end")} }
+                    label { r#for: preview_input_id.clone(), {t!("admin-auctions-schedule-preview")} }
                     input {
-                        id: input_id,
+                        id: preview_input_id,
                         r#type: "datetime-local",
                         required: true,
-                        autofocus: true,
+                        autofocus: !preview_locked,
+                        disabled: busy() || preview_locked,
+                        value: preview_value(),
+                        oninput: move |event| {
+                            preview_value.set(event.value());
+                            feedback.set(None);
+                            command_state.set(None);
+                        },
+                    }
+                    label { r#for: open_input_id.clone(), {t!("admin-auctions-schedule-open")} }
+                    input {
+                        id: open_input_id,
+                        r#type: "datetime-local",
+                        required: true,
+                        autofocus: preview_locked,
+                        disabled: busy(),
+                        value: open_value(),
+                        oninput: move |event| {
+                            open_value.set(event.value());
+                            feedback.set(None);
+                            command_state.set(None);
+                        },
+                    }
+                    label { r#for: end_input_id.clone(), {t!("admin-auctions-schedule-end")} }
+                    input {
+                        id: end_input_id,
+                        r#type: "datetime-local",
+                        required: true,
                         disabled: busy(),
                         value: end_value(),
                         oninput: move |event| {
@@ -140,7 +215,7 @@ fn AdminAuctionScheduleDialog(
                             command_state.set(None);
                         },
                     }
-                    if !end_value().is_empty() && !valid_schedule_end(&scheduled_open_at, &end_value()) {
+                    if !can_submit && !busy() {
                         p { class: "action-feedback action-feedback--error", role: "alert",
                             {t!("admin-auctions-schedule-invalid")}
                         }
@@ -175,6 +250,8 @@ struct ScheduleSignals {
     notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
     pending: Signal<bool>,
+    preview_value: Signal<String>,
+    open_value: Signal<String>,
     end_value: Signal<String>,
     feedback: Signal<Option<String>>,
     command_state: Signal<Option<(String, Uuid)>>,
@@ -183,20 +260,44 @@ struct ScheduleSignals {
 struct ScheduleRequest {
     auction_id: String,
     expected_state_version: i64,
+    preview_scheduled_at: String,
+    scheduled_open_at: String,
     scheduled_end_at: String,
 }
 
 fn close_schedule_dialog(mut signals: ScheduleSignals) {
     signals.pending.set(false);
+    signals.preview_value.set(String::new());
+    signals.open_value.set(String::new());
     signals.end_value.set(String::new());
     signals.feedback.set(None);
     signals.command_state.set(None);
 }
 
-/// 提交计划修改；命令 ID 在相同版本和结束时间的重试期间保持稳定。
+/// `datetime-local` 仅显示到分钟；值未被编辑时保留服务端的秒与小数秒精度。
+fn preserve_unchanged_datetime(display_value: String, original_rfc3339: &str) -> String {
+    if datetime_local_value(original_rfc3339).as_deref() == Some(display_value.as_str()) {
+        original_rfc3339.to_owned()
+    } else {
+        display_value
+    }
+}
+
+/// 提交计划修改；命令 ID 在相同版本和三项规范 UTC 时间的重试期间保持稳定。
 fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
-    let ScheduleRequest { auction_id, expected_state_version, scheduled_end_at } = request;
-    let signature = format!("{expected_state_version}:{scheduled_end_at}");
+    let ScheduleRequest {
+        auction_id,
+        expected_state_version,
+        preview_scheduled_at,
+        scheduled_open_at,
+        scheduled_end_at,
+    } = request;
+    let preview_scheduled_at = normalize_datetime(&preview_scheduled_at);
+    let scheduled_open_at = normalize_datetime(&scheduled_open_at);
+    let scheduled_end_at = normalize_datetime(&scheduled_end_at);
+    let signature = format!(
+        "{expected_state_version}:{preview_scheduled_at}:{scheduled_open_at}:{scheduled_end_at}"
+    );
     let command_id = match (signals.command_state)() {
         Some((current, command_id)) if current == signature => command_id,
         _ => {
@@ -210,6 +311,8 @@ fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
         match update_admin_auction_schedule(
             command_id,
             auction_id,
+            preview_scheduled_at,
+            scheduled_open_at,
             scheduled_end_at,
             expected_state_version,
         )
@@ -218,6 +321,8 @@ fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
             Ok(_) => {
                 signals.notice.set(Some(AdminAuctionNotice::Schedule));
                 signals.pending.set(false);
+                signals.preview_value.set(String::new());
+                signals.open_value.set(String::new());
                 signals.end_value.set(String::new());
                 signals.feedback.set(None);
                 signals.command_state.set(None);

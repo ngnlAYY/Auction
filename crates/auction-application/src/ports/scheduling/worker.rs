@@ -36,6 +36,8 @@ pub struct ScheduledRoundClaim {
     pub command_id: CommandId,
     pub worker_id: String,
     pub lease_until: DateTime<Utc>,
+    /// 领取成功后的轮次版本；完成/失败必须同时匹配它，避免同一 owner 的旧 lease 回写新一代任务。
+    pub state_version: i64,
     pub attempt_count: u32,
 }
 

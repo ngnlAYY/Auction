@@ -12,8 +12,9 @@ Unix socket server 和 Admin client 分别位于 `src/control/transport/{protoco
 `runner.rs` 管理启动、任务装配、drain 顺序和任务退出错误；具体业务循环继续由相邻 owner 模块拥有。
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
-指数退避失败记录和由装配根注入的 shutdown future；它通过生命周期应用端口执行 preview/open，
-不复制状态机。收到 drain 后，各独立循环完成当前有界批次并停止领取新任务；SIGINT/SIGTERM、
+指数退避失败记录和由装配根注入的 shutdown future；claim 冻结领取后的调度版本，完成与失败必须
+同时匹配 owner、精确租约期限和 `state_version`，因此 Admin 修改计划后陈旧任务不能继续收口。它通过
+生命周期应用端口执行 preview/open，不复制状态机。收到 drain 后，各独立循环完成当前有界批次并停止领取新任务；SIGINT/SIGTERM、
 10 秒总上限和二次信号强制收口由 `apps/worker` 与 `auction-process` 拥有。
 `run_persistent_with_settlement_until_shutdown()` 在装配根注入 slow due 读取/命令端口，并在
 PostgreSQL 完整档额外领取结算 workflow。Auction 主循环立即执行首轮，再按一分钟加最多五秒
@@ -55,7 +56,8 @@ Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布�
 发布前由装备链接解析端口按快照中的无 key 目标生成真实 HentaVerse URL，再交给 BBCode renderer。
 主题固定 #1 为拍卖目录、#2 为系统编辑/错误记录，只有两个 exact post ID 均持久化后才读取 #3+
 用户命令；竞价事务完成后重新读取权威 lot 快照并按 post ID 编辑 #1，把编辑、解析、身份与确定拒绝
-以及仍待重试的命令稳定投影到 #2，两个远端证明都通过后才推进本地内容版本。待重试命令可以更新
+以及仍待重试的命令稳定投影到 #2，并把完整主题读取已经连续处理到的真实楼层单独持久化；该水位
+从 #2 起步，遇到待重试命令停在其前一楼，不能从固定帖内容版本或远端 post ID 推算。两个远端证明都通过后才推进本地内容版本。待重试命令可以更新
 #1/#2 的本地正文证明，但不会释放当前 claim 或推进 `content_next_scan_at`；只有整场扫描成功后才
 从完成时刻计算下一次 due。每个主题只在即将处理时领取独立内容 lease/fencing，无变化也会释放
 claim 并推进公平扫描水位，避免多 Worker 交叉覆盖远端正文。成功扫描同时把持久化下一次 due

@@ -21,7 +21,7 @@ use super::{
     no_store_headers, parse_canonical_uuid, request_id,
 };
 
-/// 修改 Draft/Preview 拍卖的计划结束时间。
+/// 修改 Draft/Preview 拍卖的预览、开拍与计划结束时间。
 pub(crate) async fn update(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
@@ -52,7 +52,9 @@ pub(crate) async fn update(
     let Some(command_uuid) = parse_canonical_uuid(&input.command_id) else {
         return invalid_command();
     };
-    let Some(scheduled_end_at) = input.scheduled_end_at else {
+    let (Some(preview_scheduled_at), Some(scheduled_open_at), Some(scheduled_end_at)) =
+        (input.preview_scheduled_at, input.scheduled_open_at, input.scheduled_end_at)
+    else {
         return invalid_command();
     };
     if input.expected_state_version <= 0 {
@@ -73,6 +75,8 @@ pub(crate) async fn update(
         .update_schedule(AdminUpdateAuctionScheduleCommand {
             command_id: CommandId::from_uuid(command_uuid),
             auction_id: AuctionId::from_uuid(auction_uuid),
+            preview_scheduled_at,
+            scheduled_open_at,
             scheduled_end_at,
             expected_state_version: input.expected_state_version,
             actor_id: identity.actor,
@@ -87,6 +91,8 @@ pub(crate) async fn update(
     if !result.validate()
         || result.auction.id.as_uuid() != auction_uuid
         || !matches!(result.auction.status.as_str(), "draft" | "preview")
+        || result.auction.preview_scheduled_at != preview_scheduled_at
+        || result.auction.scheduled_open_at != scheduled_open_at
         || result.scheduled_ends_at != Some(scheduled_end_at)
     {
         return internal_error();
@@ -95,7 +101,7 @@ pub(crate) async fn update(
         StatusCode::OK,
         no_store_headers(),
         Json(ApiResponse::ok(
-            "拍卖计划结束时间已更新",
+            "拍卖计划时间已更新",
             AdminUpdateAuctionScheduleResponse { auction: map_auction(result) },
         )),
     )

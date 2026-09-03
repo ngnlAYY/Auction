@@ -27,6 +27,7 @@ pub struct ForumReplyTopic {
     pub catalog_body: String,
     pub system_log_body: String,
     pub content_revision: i64,
+    pub processed_through_post_number: i32,
     pub content_claim_token: Uuid,
     pub content_claim_owner: String,
     pub content_claim_fencing: i64,
@@ -48,6 +49,7 @@ impl fmt::Debug for ForumReplyTopic {
             .field("catalog_body", &"[REDACTED]")
             .field("system_log_body", &"[REDACTED]")
             .field("content_revision", &self.content_revision)
+            .field("processed_through_post_number", &self.processed_through_post_number)
             .field("content_claim_token", &"[REDACTED]")
             .field("content_claim_owner", &self.content_claim_owner)
             .field("content_claim_fencing", &self.content_claim_fencing)
@@ -189,6 +191,7 @@ pub trait ForumReplyStore: Send + Sync {
         topic: ForumReplyTopic,
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
+        processed_through_post_number: i32,
         updated_at: DateTime<Utc>,
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
@@ -199,6 +202,7 @@ pub trait ForumReplyStore: Send + Sync {
         topic: ForumReplyTopic,
         catalog: ForumRenderedThread,
         system_log: ForumRenderedPost,
+        processed_through_post_number: i32,
         updated_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
@@ -206,6 +210,7 @@ pub trait ForumReplyStore: Send + Sync {
     fn finish_topic_scan(
         &self,
         topic: ForumReplyTopic,
+        processed_through_post_number: i32,
         scanned_at: DateTime<Utc>,
         next_scan_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;

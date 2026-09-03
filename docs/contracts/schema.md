@@ -21,7 +21,7 @@ apps/backend/internal/database/migrations/。
 本表先冻结所有旧对象的归属和候选档位；真正提交 Rust migration 前，必须把 Lite 表项与
 SQLite 事务、锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000030`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000031`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000010` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。旧系统的 `bid_proxies` 不再作为第二份
@@ -70,7 +70,9 @@ PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 pos
 `forum_identity_history` 保存论坛数字账号与名称变更的新旧快照。
 `000030` 在建立索引前拒绝仍有同类重复 active 行的数据库，再用 partial unique index 保证
 `mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录。迁移不静默选择保留项；已有重复
-凭据必须先通过 Admin 的幂等状态命令停用，使命令账本和追加审计保持完整。
+凭据必须先通过 Admin 的幂等状态命令停用，使命令账本和追加审计保持完整。`000031` 为
+`auction_forum_sync` 增加真实连续处理楼层；历史行从 #2 安全起步，必须由后续完整主题扫描推进，
+不能从固定帖内容版本或远端 post ID 猜测回填。
 
 Auction-BF v28 到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改旧 migration，也不
 把 golang-migrate 版本号直接映射成 SQLx 版本。它只在精确旧库预检和外部备份证据通过后补齐
@@ -170,7 +172,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | mail_poll_state | 000001_baseline + 000008_mooglemail_polling | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | user_mail_commands | 000002_worker_external_adapters | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
 | mail_admin_commands | 000004_mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
-| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering + 000025_forum_fixed_posts + 000029_forum_sync_health_identity | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、最近成功时间和有界安全错误 |
+| auction_forum_sync | 000005_recovery_observability_forum + 000010_forum_sync_fencing + 000024_lot_category_numbering + 000025_forum_fixed_posts + 000029_forum_sync_health_identity + 000031_forum_processed_floor | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
 | forum_sync_admin_commands | 000016_forum_sync_write_authorization | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
 | forum_bidder_identities | 000005_recovery_observability_forum + 000026_forum_identity_owner_unique | auction-storage：forum reply + Users owner | 完整档 | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
 | auction_forum_reply_cursors | 000005_recovery_observability_forum | auction-storage：forum reply（历史兼容） | 完整档 | 保留的旧世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
@@ -186,6 +188,7 @@ PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛�
 只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。固定 #1/#2 的
 post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以旧内容版本 CAS 收口，每个主题另以
 独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
+`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼；
 SQLite Lite 不复制这些完整档表。
 
 ## 实时事件与运维告警

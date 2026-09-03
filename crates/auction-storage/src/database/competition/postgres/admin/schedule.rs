@@ -1,4 +1,4 @@
-//! PostgreSQL 管理端开拍前计划结束时间修改及其审计/实时记录。
+//! PostgreSQL 管理端开拍前计划时间修改及其审计/实时记录。
 
 use super::*;
 
@@ -25,6 +25,8 @@ impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {
     fn append_admin_auction_schedule_record(
         &mut self,
         command: AdminUpdateAuctionScheduleCommand,
+        previous_preview_scheduled_at: DateTime<Utc>,
+        previous_scheduled_open_at: DateTime<Utc>,
         previous_scheduled_end_at: DateTime<Utc>,
         result: AdminAuctionSummary,
         changed: bool,
@@ -33,6 +35,8 @@ impl AdminAuctionScheduleTransaction for PostgresCompetitionTransaction {
             append_admin_auction_schedule_record_inner(
                 self,
                 &command,
+                previous_preview_scheduled_at,
+                previous_scheduled_open_at,
                 previous_scheduled_end_at,
                 &result,
                 changed,
@@ -61,10 +65,14 @@ async fn load_admin_auction_schedule_inner(
                    FOR UPDATE OF world
                ),
                locked_round AS MATERIALIZED (
-                   SELECT round.scheduled_end_at
+                   SELECT round.id, round.state_version, round.preview_due_at,
+                          round.open_due_at, round.scheduled_end_at,
+                          round.preview_completed_at, round.open_completed_at,
+                          round.final_completed_at, round.lease_owner, round.lease_until
                    FROM public.scheduled_rounds AS round
                    INNER JOIN target_auction ON target_auction.id = round.auction_id
                    INNER JOIN locked_world ON locked_world.id = target_auction.world_id
+                   WHERE round.status = 'active'
                    FOR UPDATE OF round
                )
              SELECT
@@ -75,7 +83,16 @@ async fn load_admin_auction_schedule_inner(
                 a.scheduled_end_at, a.effective_end_at, a.created_at, a.updated_at,
                 (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
                     AS policy_scheduled_end_at,
+                locked_round.id AS round_id,
+                locked_round.state_version AS round_state_version,
+                locked_round.preview_due_at AS round_preview_due_at,
+                locked_round.open_due_at AS round_open_due_at,
                 locked_round.scheduled_end_at AS round_scheduled_end_at,
+                locked_round.preview_completed_at,
+                locked_round.open_completed_at,
+                locked_round.final_completed_at,
+                locked_round.lease_owner,
+                locked_round.lease_until,
                 (SELECT COUNT(*)::bigint FROM public.lots AS lot WHERE lot.auction_id = a.id)
                     AS lot_count
              FROM public.auctions AS a
@@ -98,7 +115,16 @@ async fn load_admin_auction_schedule_inner(
     let snapshot = AdminAuctionScheduleSnapshot {
         summary,
         policy_scheduled_end_at,
+        round_id: row.try_get("round_id").map_err(map_sql_error)?,
+        round_state_version: row.try_get("round_state_version").map_err(map_sql_error)?,
+        round_preview_due_at: row.try_get("round_preview_due_at").map_err(map_sql_error)?,
+        round_open_due_at: row.try_get("round_open_due_at").map_err(map_sql_error)?,
         round_scheduled_end_at: row.try_get("round_scheduled_end_at").map_err(map_sql_error)?,
+        preview_completed_at: row.try_get("preview_completed_at").map_err(map_sql_error)?,
+        open_completed_at: row.try_get("open_completed_at").map_err(map_sql_error)?,
+        final_completed_at: row.try_get("final_completed_at").map_err(map_sql_error)?,
+        lease_owner: row.try_get("lease_owner").map_err(map_sql_error)?,
+        lease_until: row.try_get("lease_until").map_err(map_sql_error)?,
     };
     if !snapshot.validate() {
         return Err(invalid_state("Admin 拍卖计划锁内快照不一致"));
@@ -113,31 +139,42 @@ async fn update_admin_auction_schedule_inner(
     updated_at: DateTime<Utc>,
 ) -> Result<AdminAuctionSummary, CompetitionTransactionError> {
     let previous_state_version = snapshot.summary.auction.state_version;
+    let previous_round_state_version = snapshot.round_state_version;
+    let previous_preview_scheduled_at = snapshot.summary.auction.preview_scheduled_at;
+    let previous_scheduled_open_at = snapshot.summary.auction.scheduled_open_at;
     let previous_scheduled_end_at = snapshot.policy_scheduled_end_at;
     let row = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
             r#"UPDATE public.auctions
-               SET policy_snapshot = jsonb_set(
+               SET preview_scheduled_at = $2,
+                   scheduled_open_at = $3,
+                   policy_snapshot = jsonb_set(
                        policy_snapshot,
                        '{scheduled_end_at}',
-                       to_jsonb($2::timestamptz),
+                       to_jsonb($4::timestamptz),
                        false
                    ),
                    state_version = state_version + 1,
-                   updated_at = $3
+                   updated_at = $5
                WHERE id = $1
-                 AND state_version = $4
+                 AND state_version = $6
                  AND status IN ('draft', 'preview')
                  AND scheduled_end_at IS NULL
                  AND effective_end_at IS NULL
-                 AND (policy_snapshot ->> 'scheduled_end_at')::timestamptz = $5
+                 AND preview_scheduled_at = $7
+                 AND scheduled_open_at = $8
+                 AND (policy_snapshot ->> 'scheduled_end_at')::timestamptz = $9
                RETURNING state_version, updated_at"#,
         )
         .bind(command.auction_id.as_uuid())
+        .bind(command.preview_scheduled_at)
+        .bind(command.scheduled_open_at)
         .bind(command.scheduled_end_at)
         .bind(updated_at)
         .bind(previous_state_version)
+        .bind(previous_preview_scheduled_at)
+        .bind(previous_scheduled_open_at)
         .bind(previous_scheduled_end_at)
         .fetch_optional(&mut **transaction)
         .await
@@ -149,35 +186,67 @@ async fn update_admin_auction_schedule_inner(
     let state_version: i64 = row.try_get("state_version").map_err(map_sql_error)?;
     let stored_updated_at: DateTime<Utc> = row.try_get("updated_at").map_err(map_sql_error)?;
 
-    let round_rows = {
+    let round_row = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
             r#"UPDATE public.scheduled_rounds
-               SET scheduled_end_at = $2,
+               SET preview_due_at = $2,
+                   open_due_at = $3,
+                   scheduled_end_at = $4,
+                   lease_owner = NULL,
+                   lease_until = NULL,
                    state_version = state_version + 1,
-                   updated_at = $3
-               WHERE auction_id = $1
+                   updated_at = $5
+               WHERE id = $1
                  AND status = 'active'
-                 AND scheduled_end_at = $4"#,
+                 AND state_version = $6
+                 AND preview_due_at = $7
+                 AND open_due_at = $8
+                 AND scheduled_end_at = $9
+                 AND preview_completed_at IS NOT DISTINCT FROM $10
+                 AND open_completed_at IS NOT DISTINCT FROM $11
+                 AND final_completed_at IS NOT DISTINCT FROM $12
+                 AND lease_owner IS NOT DISTINCT FROM $13
+                 AND lease_until IS NOT DISTINCT FROM $14
+               RETURNING state_version"#,
         )
-        .bind(command.auction_id.as_uuid())
+        .bind(snapshot.round_id)
+        .bind(command.preview_scheduled_at)
+        .bind(command.scheduled_open_at)
         .bind(command.scheduled_end_at)
         .bind(updated_at)
-        .bind(previous_scheduled_end_at)
-        .execute(&mut **transaction)
+        .bind(snapshot.round_state_version)
+        .bind(snapshot.round_preview_due_at)
+        .bind(snapshot.round_open_due_at)
+        .bind(snapshot.round_scheduled_end_at)
+        .bind(snapshot.preview_completed_at)
+        .bind(snapshot.open_completed_at)
+        .bind(snapshot.final_completed_at)
+        .bind(snapshot.lease_owner.as_deref())
+        .bind(snapshot.lease_until)
+        .fetch_optional(&mut **transaction)
         .await
         .map_err(map_sql_error)?
-        .rows_affected()
     };
-    if round_rows != 1 {
-        return Err(CompetitionTransactionError::StaleState);
-    }
+    let Some(round_row) = round_row else { return Err(CompetitionTransactionError::StaleState) };
+    let round_state_version: i64 = round_row.try_get("state_version").map_err(map_sql_error)?;
 
     let mut result = snapshot.summary;
     result.auction.state_version = state_version;
     result.auction.updated_at = stored_updated_at;
+    result.auction.preview_scheduled_at = command.preview_scheduled_at;
+    result.auction.scheduled_open_at = command.scheduled_open_at;
     result.scheduled_ends_at = Some(command.scheduled_end_at);
-    if state_version != previous_state_version.saturating_add(1) || !result.validate() {
+    let expected_state_version = previous_state_version
+        .checked_add(1)
+        .ok_or_else(|| invalid_state("Admin 拍卖状态版本溢出"))?;
+    let expected_round_state_version = previous_round_state_version
+        .checked_add(1)
+        .ok_or_else(|| invalid_state("Admin 拍卖调度版本溢出"))?;
+    if state_version != expected_state_version
+        || round_state_version != expected_round_state_version
+        || !result.validate()
+    {
         return Err(invalid_state("Admin 拍卖计划修改后的投影无效"));
     }
     Ok(result)
@@ -186,6 +255,8 @@ async fn update_admin_auction_schedule_inner(
 async fn append_admin_auction_schedule_record_inner(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AdminUpdateAuctionScheduleCommand,
+    previous_preview_scheduled_at: DateTime<Utc>,
+    previous_scheduled_open_at: DateTime<Utc>,
     previous_scheduled_end_at: DateTime<Utc>,
     result: &AdminAuctionSummary,
     changed: bool,
@@ -194,6 +265,10 @@ async fn append_admin_auction_schedule_record_inner(
         "command_id": command.command_id.as_uuid(),
         "auction_id": result.auction.id.as_uuid(),
         "world_id": result.auction.world_id,
+        "previous_preview_scheduled_at": previous_preview_scheduled_at,
+        "preview_scheduled_at": command.preview_scheduled_at,
+        "previous_scheduled_open_at": previous_scheduled_open_at,
+        "scheduled_open_at": command.scheduled_open_at,
         "previous_scheduled_end_at": previous_scheduled_end_at,
         "scheduled_end_at": command.scheduled_end_at,
         "changed": changed,
