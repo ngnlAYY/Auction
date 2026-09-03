@@ -4,6 +4,8 @@
 
 use super::*;
 
+use std::collections::HashSet;
+
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
 ///
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。
@@ -17,6 +19,11 @@ where
     else {
         return Ok(());
     };
+    let transport_concurrency = delivery_transport.maximum_concurrency();
+    if transport_concurrency == 0 {
+        return Err(WorkerError::InvalidDeliveryConfiguration);
+    }
+    let effective_concurrency = usize::from(worker.delivery.concurrency.min(transport_concurrency));
     let delivery_started = std::time::Instant::now();
     let delivery_lease = ChronoDuration::from_std(worker.delivery.lease_duration)
         .map_err(|_| WorkerError::InvalidDeliveryConfiguration)?;
@@ -24,12 +31,13 @@ where
     let mut delivery_result = WorkerResult::Success;
     let mut claim_error: Option<ApplicationError> = None;
     let mut tasks = JoinSet::new();
+    let mut skipped_recipients = HashSet::new();
 
     while delivery_count < usize::from(worker.delivery.batch_limit) {
-        if tasks.len() >= usize::from(worker.delivery.concurrency)
+        if tasks.len() >= effective_concurrency
             && let Some(result) = tasks.join_next().await
         {
-            merge_delivery_task_result(&mut delivery_result, result);
+            merge_delivery_task_result(&mut delivery_result, &mut skipped_recipients, result);
         }
 
         let now = worker.clock.now();
@@ -41,7 +49,20 @@ where
             break;
         };
         let mut claims = match delivery_store
-            .claim_due(worker.worker_id.clone(), now, lease_until, worker.delivery.sending_grace, 1)
+            .claim_due(
+                worker.worker_id.clone(),
+                now,
+                lease_until,
+                worker.delivery.sending_grace,
+                skipped_recipients
+                    .iter()
+                    .map(|(world, recipient)| DeliveryRecipientExclusion {
+                        world: world.clone(),
+                        recipient: recipient.clone(),
+                    })
+                    .collect(),
+                1,
+            )
             .await
         {
             Ok(claims) => claims,
@@ -88,7 +109,7 @@ where
     }
 
     while let Some(result) = tasks.join_next().await {
-        merge_delivery_task_result(&mut delivery_result, result);
+        merge_delivery_task_result(&mut delivery_result, &mut skipped_recipients, result);
     }
     if claim_error.is_none() && delivery_result == WorkerResult::Success {
         worker.metrics.observe_batch(
@@ -113,25 +134,55 @@ where
 
 fn merge_delivery_task_result(
     delivery_result: &mut WorkerResult,
-    result: Result<WorkerResult, tokio::task::JoinError>,
+    skipped_recipients: &mut HashSet<(String, String)>,
+    result: Result<DeliveryTaskResult, tokio::task::JoinError>,
 ) {
     match result {
-        Ok(WorkerResult::Success) => {}
-        Ok(WorkerResult::Error) => *delivery_result = WorkerResult::Error,
-        Ok(WorkerResult::Canceled) => *delivery_result = WorkerResult::Canceled,
+        Ok(result) => {
+            if let Some(recipient) = result.skipped_recipient {
+                skipped_recipients.insert(recipient);
+            }
+            match result.worker_result {
+                WorkerResult::Success => {}
+                WorkerResult::Error => *delivery_result = WorkerResult::Error,
+                WorkerResult::Canceled => *delivery_result = WorkerResult::Canceled,
+            }
+        }
         Err(error) => {
             tracing::error!(error = %error, "delivery worker task join failed");
             *delivery_result = WorkerResult::Canceled;
         }
     }
 }
+
+struct DeliveryTaskResult {
+    worker_result: WorkerResult,
+    skipped_recipient: Option<(String, String)>,
+}
+
+impl DeliveryTaskResult {
+    fn completed(worker_result: WorkerResult) -> Self {
+        Self { worker_result, skipped_recipient: None }
+    }
+
+    fn recipient_not_found(worker_result: WorkerResult, world: &str, recipient: &str) -> Self {
+        Self {
+            worker_result,
+            skipped_recipient: Some((
+                world.trim().to_ascii_lowercase(),
+                recipient.trim().to_ascii_lowercase(),
+            )),
+        }
+    }
+}
+
 async fn process_delivery_claim<C>(
     delivery_store: Arc<dyn DeliveryWorkStore>,
     delivery_transport: Arc<dyn DeliveryTransport>,
     clock: Arc<C>,
     config: DeliveryWorkerRuntimeConfig,
     claim: DeliveryWorkClaim,
-) -> WorkerResult
+) -> DeliveryTaskResult
 where
     C: Clock + 'static,
 {
@@ -152,11 +203,11 @@ where
                 tracing::error!(delivery_id = %claim.delivery_id, "delivery worker timed out while releasing claim after start failure");
             }
         }
-        return WorkerResult::Error;
+        return DeliveryTaskResult::completed(WorkerResult::Error);
     }
     let Ok(lease_span) = ChronoDuration::from_std(config.lease_duration) else {
         tracing::error!(delivery_id = %claim.delivery_id, "delivery worker configured lease span is invalid");
-        return WorkerResult::Error;
+        return DeliveryTaskResult::completed(WorkerResult::Error);
     };
     let mut renew_tick = tokio::time::interval(config.renew_interval);
     renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -213,6 +264,9 @@ where
         }
     };
     let delivery_id = claim.delivery_id;
+    let recipient = claim.recipient.clone();
+    let recipient_world =
+        claim.payload.get("world").and_then(serde_json::Value::as_str).map(str::to_owned);
     let result = result.and_then(normalize_delivery_send_result);
     match result {
         Ok(result) => {
@@ -222,21 +276,21 @@ where
             )
             .await
             {
-                Ok(Ok(())) if lease_failed => WorkerResult::Error,
-                Ok(Ok(())) => WorkerResult::Success,
+                Ok(Ok(())) if lease_failed => DeliveryTaskResult::completed(WorkerResult::Error),
+                Ok(Ok(())) => DeliveryTaskResult::completed(WorkerResult::Success),
                 Ok(Err(error)) => {
                     tracing::error!(error = %error, %delivery_id, "delivery worker failed to persist success");
-                    WorkerResult::Error
+                    DeliveryTaskResult::completed(WorkerResult::Error)
                 }
                 Err(_) => {
                     tracing::error!(%delivery_id, "delivery worker timed out while persisting success");
-                    WorkerResult::Error
+                    DeliveryTaskResult::completed(WorkerResult::Error)
                 }
             }
         }
         Err(error) => {
             let failure_code = error.failure_code.clone();
-            match tokio::time::timeout(
+            let worker_result = match tokio::time::timeout(
                 config.finalize_timeout,
                 delivery_store.fail(claim, error, clock.now()),
             )
@@ -252,6 +306,13 @@ where
                     tracing::error!(%delivery_id, %failure_code, "delivery worker timed out while persisting failure");
                     WorkerResult::Error
                 }
+            };
+            if failure_code == "recipient_not_found"
+                && let Some(world) = recipient_world.as_deref()
+            {
+                DeliveryTaskResult::recipient_not_found(worker_result, world, &recipient)
+            } else {
+                DeliveryTaskResult::completed(worker_result)
             }
         }
     }

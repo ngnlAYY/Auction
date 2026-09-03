@@ -32,14 +32,18 @@ pub(crate) fn send_receipt(
             external_reference: None,
             result_metadata: json!({
                 "stage": "preflight",
+                "operation": MoogleMailOperation::Compose.as_str(),
                 "category": "protocol_drift",
             }),
         }),
         MoogleMailSendOutcome::RecipientNotFound { returned_mail_id } => {
             let mut result_metadata = json!({
                 "stage": "send",
+                "operation": MoogleMailOperation::Send.as_str(),
                 "category": "recipient_not_found",
                 "reason_code": "recipient_not_found",
+                "recipient_skipped_for_cycle": true,
+                "retryable": false,
                 "take_required": true,
             });
             if let Some(returned_mail_id) = returned_mail_id.as_ref() {
@@ -63,29 +67,38 @@ pub(crate) fn send_receipt(
             external_reference: None,
             result_metadata: json!({
                 "stage": "send",
+                "operation": MoogleMailOperation::Send.as_str(),
                 "category": "write_rejected",
             }),
         }),
     }
 }
 
-pub(crate) fn preflight_unproven() -> DeliveryTransportError {
+pub(crate) fn preflight_unproven(operation: MoogleMailOperation) -> DeliveryTransportError {
     DeliveryTransportError {
         failure_code: "preflight_unproven".to_owned(),
         safe_detail: "MoogleMail 动作前置身份或资产无法证明".to_owned(),
         outcome_unknown: true,
         external_reference: None,
-        result_metadata: json!({}),
+        result_metadata: json!({
+            "stage": "action_preflight",
+            "operation": operation.as_str(),
+            "category": "protocol_drift",
+        }),
     }
 }
 
-pub(crate) fn action_proof_unproven() -> DeliveryTransportError {
+pub(crate) fn action_proof_unproven(operation: MoogleMailOperation) -> DeliveryTransportError {
     DeliveryTransportError {
         failure_code: "write_unknown".to_owned(),
         safe_detail: "MoogleMail 外部动作结果无法证明".to_owned(),
         outcome_unknown: true,
         external_reference: None,
-        result_metadata: json!({}),
+        result_metadata: json!({
+            "stage": "action_proof",
+            "operation": operation.as_str(),
+            "category": "protocol_drift",
+        }),
     }
 }
 
@@ -254,12 +267,11 @@ pub(crate) fn valid_notification_body(value: Option<&str>) -> bool {
 }
 
 pub(crate) fn transport_error(error: MoogleMailError, after_write: bool) -> DeliveryTransportError {
-    let outcome_unknown = after_write
-        || error.write_started()
-        || error.category != MoogleMailErrorCategory::Configuration;
+    let write_started = after_write || error.write_started();
+    let outcome_unknown = write_started || error.category != MoogleMailErrorCategory::Configuration;
     DeliveryTransportError {
         failure_code: error.category.as_str().to_owned(),
-        safe_detail: if after_write {
+        safe_detail: if write_started {
             "MoogleMail 外部写入结果未知".to_owned()
         } else {
             "MoogleMail 外部请求失败".to_owned()
@@ -268,6 +280,22 @@ pub(crate) fn transport_error(error: MoogleMailError, after_write: bool) -> Deli
         // 收口为普通失败。availability gate 会在此之前释放已知无凭据的 claim。
         outcome_unknown,
         external_reference: None,
-        result_metadata: json!({}),
+        result_metadata: json!({
+            "stage": transport_stage(error.operation),
+            "operation": error.operation.as_str(),
+            "category": error.category.as_str(),
+            "write_started": write_started,
+        }),
+    }
+}
+
+fn transport_stage(operation: MoogleMailOperation) -> &'static str {
+    match operation {
+        MoogleMailOperation::Compose => "compose_preflight",
+        MoogleMailOperation::AttachAdd => "compose_attach",
+        MoogleMailOperation::AttachCod => "compose_cod",
+        MoogleMailOperation::Send => "send",
+        MoogleMailOperation::ReturnMessage | MoogleMailOperation::Take => "action",
+        _ => "read",
     }
 }

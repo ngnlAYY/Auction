@@ -90,6 +90,8 @@ pub use commands::{
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
     DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
 };
+#[cfg(feature = "postgres")]
+pub use credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod account;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

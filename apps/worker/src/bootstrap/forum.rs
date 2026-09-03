@@ -33,6 +33,17 @@ pub(super) async fn configure_forum(
             .list_active(AdminCredentialKind::ForumCookie, credential_world)
             .await
             .context("load active E-Hentai forum credentials")?;
+        anyhow::ensure!(records.len() <= 1, "E-Hentai 论坛只允许一个 active forum_cookie");
+        let ownership = if records.is_empty() {
+            None
+        } else {
+            Some(Arc::new(
+                store
+                    .acquire_credential_runtime_ownership(AdminCredentialKind::ForumCookie)
+                    .await
+                    .context("acquire active E-Hentai forum credential ownership")?,
+            ) as Arc<dyn AdminCredentialRuntimeOwnership>)
+        };
         let mut cookies = Vec::with_capacity(records.len());
         for record in records {
             let secret = opener
@@ -45,15 +56,26 @@ pub(super) async fn configure_forum(
             ));
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();
-        EhentaiCredentialSet::from_runtime_cookies(cookies, invalidator)
+        if let Some(ownership) = ownership {
+            EhentaiCredentialSet::from_owned_runtime_cookies(cookies, invalidator, ownership)
+        } else {
+            EhentaiCredentialSet::from_runtime_cookies(cookies, invalidator)
+        }
     } else {
         let cookie = config
             .ehentai_cookie()
             .context("forum enabled but no ehentai_cookie or credential data key")?;
-        EhentaiCredentialSet::from_cookies(vec![
+        let ownership = Arc::new(
+            store
+                .acquire_credential_runtime_ownership(AdminCredentialKind::ForumCookie)
+                .await
+                .context("acquire configured E-Hentai forum credential ownership")?,
+        ) as Arc<dyn AdminCredentialRuntimeOwnership>;
+        EhentaiCredentialSet::from_owned_cookie(
             EhentaiCookie::from_bytes(cookie.as_bytes())
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        ])
+            ownership,
+        )
     }
     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
 

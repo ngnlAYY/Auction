@@ -208,6 +208,11 @@ textarea 中的同名短语必须排除。明确的收件人不存在已有拒�
 合法的退信 `mid`、`take_required` 和稳定 reason code，并在退信资产取回前进入人工对账，
 不得直接终结为普通失败。
 
+Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次内暂时排除同一
+`(world, recipient)` 的后续 delivery，并继续处理其他玩家。排除集合不得跨 world、不得批量改写
+未尝试 delivery，也不得形成永久黑名单；下一轮允许重新评估。首条失败 delivery 仍独立保留
+`manual_reconcile`、退信引用和资产回收责任，禁止自动重发。
+
 明确的邮资拒绝只在 compose 中从未暂存 Credits、装备或 COD 时可以作为确定失败；任一
 资产暂存已经通过证明后，拒绝结果必须进入 `manual_reconcile`，禁止自动重发。失败
 transport 元数据只能是有界的安全 object；storage owner 必须覆盖而不是信任其
@@ -278,6 +283,12 @@ Admin 审计读取只能消费追加式 `audit_records` 的安全投影。筛选
 会话签名密钥、论坛 Cookie、邮件 Cookie、数据库密码和其他凭据不得进入日志、
 HTTP DTO、事件 payload、快照、错误消息或提交的配置。错误只能返回可操作的
 分类和关联 ID，不能回显敏感 TOML 原文或连接串。
+
+`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录，最终约束必须由 PostgreSQL 唯一索引
+保护，不能依赖可竞态的“先查后写”。Worker 必须按凭据类型持有进程生命周期 session advisory
+ownership；同类第二个 Worker 获取失败时应拒绝启动。远端确认失效后只允许幂等标记当前 Cookie
+为 `invalid`，不得自动轮换到第二条。ownership 保持到 Worker 退出，因此替换 Cookie 后必须重启
+Worker 完成交接。`.keyenv` 的 `hv-ck-key2` 只供显式隔离验证，不能成为运行时后备。
 
 ### I-12a Public WebSocket 不能成为无界资源或第二个命令入口
 

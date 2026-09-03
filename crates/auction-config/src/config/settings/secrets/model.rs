@@ -100,8 +100,8 @@ impl fmt::Debug for PostgresMaintenanceSecrets {
 
 /// `.keyenv` 中仅允许出现的两个 MoogleMail Cookie 身份。
 ///
-/// `hv-ck-key1` 固定解释为 Bot 号，`hv-ck-key2` 固定解释为测试号。该类型不实现序列化，
-/// getter 只应在装配 MoogleMail 适配器时短暂调用。
+/// `hv-ck-key1` 固定解释为 Worker 运行账号，`hv-ck-key2` 只供显式隔离验证。该类型不实现
+/// 序列化；生产装配不得把二者组成候选池，也不得自动切换到测试号。
 #[derive(Clone)]
 pub struct MoogleMailKeyEnv {
     pub(crate) bot_cookie: SecretString,

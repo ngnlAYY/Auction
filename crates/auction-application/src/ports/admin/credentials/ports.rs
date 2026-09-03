@@ -73,6 +73,12 @@ pub trait AdminCredentialRuntimeWriter: Send + Sync {
     fn mark_invalid(&self, credential_id: Uuid, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
 }
 
+/// Worker 持有数据库凭据运行时所有权的不透明 guard。
+///
+/// 具体互斥机制属于存储适配器；集成层只保留该 guard 的生命周期，不能据此读取数据库连接、
+/// 凭据身份或任何敏感内容。
+pub trait AdminCredentialRuntimeOwnership: Send + Sync {}
+
 /// Admin dashboard 的凭据聚合读取端口。
 pub trait AdminCredentialHealthReader: Send + Sync {
     fn health(&self) -> ApplicationFuture<'_, AdminCredentialHealthSnapshot>;

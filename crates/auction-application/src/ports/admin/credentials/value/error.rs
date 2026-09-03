@@ -9,7 +9,7 @@ pub enum AdminCredentialError {
     InvalidRequest,
     #[error("Admin 凭据不存在")]
     NotFound,
-    #[error("Admin 凭据标签或密文指纹冲突")]
+    #[error("Admin 凭据唯一约束、标签或密文指纹冲突")]
     Conflict,
     #[error("凭据命令 ID 与已有请求负载冲突")]
     CommandConflict,

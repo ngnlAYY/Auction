@@ -15,8 +15,11 @@ impl MoogleMailDeliveryTransport {
             .client
             .detail(world, external_mail_id)
             .map_err(|error| transport_error(error, false))?;
-        let mut session =
-            self.credentials.begin(world).map_err(|error| transport_error(error, false))?;
+        let mut session = self
+            .credentials
+            .begin_exclusive(world, operation)
+            .await
+            .map_err(|error| transport_error(error, false))?;
         for _ in 0..64 {
             let before = match self.client.get(&target, session.cookie()).await {
                 Ok(document) => document,
@@ -25,13 +28,18 @@ impl MoogleMailDeliveryTransport {
                         .invalidate_current()
                         .await
                         .map_err(|error| transport_error(error, false))?;
-                    session.advance().map_err(|error| transport_error(error, false))?;
+                    session
+                        .advance_exclusive()
+                        .await
+                        .map_err(|error| transport_error(error, false))?;
                     continue;
                 }
                 Err(error) => return Err(transport_error(error, false)),
             };
-            let state =
-                self.parser.parse_action_state(&before, world).map_err(|_| preflight_unproven())?;
+            let state = self
+                .parser
+                .parse_action_state(&before, world)
+                .map_err(|_| preflight_unproven(operation))?;
             let preflight_proven = state.sender().eq_ignore_ascii_case(&claim.recipient)
                 && match operation {
                     MoogleMailOperation::ReturnMessage => state.returnable && expected.is_none(),
@@ -44,7 +52,7 @@ impl MoogleMailDeliveryTransport {
                     _ => false,
                 };
             if !preflight_proven {
-                return Err(preflight_unproven());
+                return Err(preflight_unproven(operation));
             }
             let form = match operation {
                 MoogleMailOperation::ReturnMessage => MoogleMailForm::return_message(state.token()),
@@ -69,7 +77,7 @@ impl MoogleMailDeliveryTransport {
                 }
                 _ => unreachable!("validated MoogleMail action operation"),
             }
-            .map_err(|_| action_proof_unproven())?;
+            .map_err(|_| action_proof_unproven(operation))?;
             let mut result_metadata = json!({
                 "operation": action_name(operation),
                 "external_mail_id": external_mail_id,
@@ -97,7 +105,12 @@ impl MoogleMailDeliveryTransport {
             safe_detail: "MoogleMail 没有可用凭据".to_owned(),
             outcome_unknown: false,
             external_reference: None,
-            result_metadata: json!({}),
+            result_metadata: json!({
+                "stage": "credential_session",
+                "operation": operation.as_str(),
+                "category": "credential_unavailable",
+                "write_started": false,
+            }),
         })
     }
 }

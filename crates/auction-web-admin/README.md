@@ -132,7 +132,9 @@ Users 页恢复旧版的标题与创建入口顶栏，创建按钮不再单独�
 创建对话框、一次性 key 展示和命令幂等边界保持不变。
 凭据页面已接入 A32 的安全列表、固定分页、导入、对话框改名、启停和带确认的删除操作；列表按旧版不提供额外筛选栏；
 secret 只通过当前表单请求提交，不会进入响应、持久化状态或页面回显；请求失败时保留当前表单以便用同一 command ID 重试。该页面仅在 PostgreSQL 完整档并配置独立
-`credential_data_key` 时可用，修改成功后提示 Worker 重新加载凭据池。
+`credential_data_key` 时可用，修改成功后提示 Worker 重启并重新加载唯一 active Cookie。
+`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用第二条时返回冲突，
+需要先停用旧记录并重启 Worker 完成所有权交接。
 凭据表还恢复旧页面实际合成的 last checked、last used、imported by 三列：分别使用现有
 `rotated_at`、明确空值和当前 Admin session actor；它没有虚构后端使用记录，也没有扩展 secret DTO，
 state version 只参与写命令 fence，不扩张旧版八列表格。

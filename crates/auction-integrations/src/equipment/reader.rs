@@ -84,10 +84,10 @@ impl EquipmentSourceAdapter {
         Self::new(client, endpoint, policy)
     }
 
-    /// 注入与 MoogleMail 共用的 world-aware Cookie 池。
+    /// 注入与 MoogleMail 共用的 world-aware 单 Cookie 集合。
     ///
-    /// HentaiVerse 装备页要求登录；复用同一凭据池可以在远端明确返回登录页时轮换候选，并
-    /// 通过池内的窄端口把数据库凭据标为失效。Cookie 不进入 URL、错误或日志。
+    /// HentaiVerse 装备页要求登录；复用同一 Cookie 可以在远端明确返回登录页时通过窄端口
+    /// 把数据库凭据标为失效。单 Cookie 失效后不自动切换，且 Cookie 不进入 URL、错误或日志。
     pub fn with_mooglemail_credentials(mut self, credentials: MoogleMailCredentialSet) -> Self {
         self.credentials = Some(credentials);
         self

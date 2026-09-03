@@ -261,7 +261,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000029` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000030` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -288,7 +288,9 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 `game_player_id` 只作为数据库兼容镜像；`000028` 为论坛命令账本保存
 真实楼层号，历史未知值保持空，不从 post ID 猜测楼层；`000029` 为固定帖刷新增加最近成功时间、
 最近失败时间和有界安全错误码，并以追加式 `forum_identity_history` 保存论坛数字账号及可变名称的
-新旧快照；
+新旧快照；`000030` 先拒绝仍有同类重复 active 外部 Cookie 的数据库，再用 partial unique index
+保证 `mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；重复项必须先由 Admin 幂等命令
+停用，迁移不会静默选择凭据或绕过追加审计；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 已恢复旧版标准五字段 cron，支持描述符、`@every`、进程
@@ -315,9 +317,9 @@ opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
 全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
-读取之上，关闭 allowlist 也不会放宽这些 transport 防线。远端装备页使用 A32 的 active
-`mail_cookie` 候选池，按目标 world 合并专属与 shared scope；明确登录页会轮换并回写凭据失效，
-不会再映射成不受支持的 URL。Worker 的邮件附件装备校验复用同一启动凭据池。手工输入只在 URL 解析前剥离成对的
+读取之上，关闭 allowlist 也不会放宽这些 transport 防线。远端装备页使用 A32 唯一 active
+`mail_cookie`，按目标 world 选择专属或 shared scope；明确登录页会回写凭据失效，单 Cookie 失效后
+不会自动切换，也不会再映射成不受支持的 URL。Worker 的邮件附件装备校验复用同一启动 Cookie。手工输入只在 URL 解析前剥离成对的
 `<URL>` 包裹和明确的中英文句末标点，规范结果仍必须通过相同 origin/path/ID/key 防线。存储层公开 lot
 投影仍只保存无 key 的游戏 URL；P09/P11 HTTP 读取会按本页内部 equipment owner 批量读取密文信封，
 核对 world/外部 ID 后短暂解密，并把完整真实 URL 直接写入同名 DTO 字段。完整值只允许出现在这两条
@@ -357,7 +359,7 @@ Admin A07 结算报告已接入 PostgreSQL 完整档的一致只读快照，SQLi
 reconcile 也已接入 PostgreSQL 安全投影、fencing version 与独立命令账本。具体 MoogleMail
 适配器已在 `auction-integrations/src/clients/mooglemail/` 完成固定 URL/响应边界、分页
 cursor、allowlist-first 详情读取、正文与附件资产严格解析、装备 key 双来源交叉校验以及
-Bot/测试 Cookie 切换；写入协议层又补齐 compose/detail typed target、表单闭集、单次 POST、
+单 Cookie 失效收口；写入协议层又补齐 compose/detail typed target、表单闭集、单次 POST、
 `write_unknown` 不确定性分类和发送成功页证明。return/take 另外在动作前冻结邮件身份与
 资产摘要：sender 必须与 delivery 收件人一致，take 的装备 ID、Credits、COD 和附件计数必须与
 outbox 预期值精确一致。POST 后 return 只接受结构正确且目标 `mid` 完全消失的收件箱，take
@@ -369,9 +371,17 @@ outbox 预期值精确一致。POST 后 return 只接受结构正确且目标 `m
 operations alert 只在 delivery 同时满足 `manual_reconcile`、`recipient_not_found` 和布尔型
 `take_required=true` 时追加 `delivery_returned_mail` 提醒；它继续保留总人工对账 signal，并排除
 operations alert 自己的 delivery，避免提醒递归和把其它未知结果误报为退信。
+Worker 一旦在本轮收到明确 `recipient_not_found`，会把同一 `(world, recipient)` 暂时加入 claim
+排除集合，后续继续处理其他玩家；该集合只活到本轮结束，既不批量修改其他 delivery，也不形成
+永久黑名单。首条退信 delivery 仍按独立资产后果进入人工对账，不会被自动重发。
 Delivery Worker 在 `claimed → sending` 前还会按 payload world 查询 scoped/shared 凭据可用性；
-无凭据时以 lease/fencing 释放回 `pending`。进入 `sending` 后的凭据竞态、网络和协议依赖失败必须
-进入人工对账，只有纯本地配置/负载或明确协议拒绝可以成为普通失败。Delivery 使用独立的
+无凭据时以 lease/fencing 释放回 `pending`。同一凭据的 compose/send 与 return/take 从前置读取到
+结果证明全程持有进程内异步 guard；PostgreSQL Worker 启动时还用一条专用 session 按凭据类型
+取得 advisory owner lock，同类 Cookie 的第二个 Worker 必须启动失败。该 session 不持有数据库
+事务跨越远端网络写入，进程退出时关闭连接释放锁；普通读取仍可并发。MoogleMail transport 的
+delivery 并发上限为 1，runner 在领取下一条 claim 前取配置值与该上限的较小值，排队时间不会混入
+已经进入 `sending` 的远端请求预算。进入 `sending` 后的凭据、
+网络和协议依赖失败必须进入人工对账，只有纯本地配置/负载或明确协议拒绝可以成为普通失败。Delivery 使用独立的
 poll/jitter/batch/concurrency、lease/renew、完整请求和 finalize timeout 配置；每轮完成后按
 `poll + [0, jitter]` 再唤醒，单轮持久化错误只记录并延后重试，不终止其它 Worker owner。Worker 只在并发槽空闲后
 领取下一条，多步远端写按配置周期续租。续租失效后只允许使用原 token/fencing 尝试写入结果未知；
@@ -416,7 +426,7 @@ send/return transport 已接入：邮件来源的未售/撤回执行原邮件退
 `auction_forum_sync` 的 claim/fencing。Worker 在渲染 BBCode 前才按 lot 的无 key 装备目标批量解析真实
 HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计或事件。写入结果未知或本地证明写入失败时先按
 精确标题 GET，命中只补本地证明，未命中则等待 `forum_sync_admin_commands` 的幂等人工授权，未经授权不得再次 POST。
-论坛凭据池允许为空并保持 degraded；当前进程内存池可用时，首轮水位只放行更早的
+唯一论坛 Cookie 允许为空并保持 degraded；当前进程凭据可用时，首轮水位只放行更早的
 `credential_unavailable` 任务一次，再次失败后不会在同一进程紧循环。该恢复分支不接触
 `write_unknown`、发布证明失败或人工授权状态。
 每个主题固定由系统维护 #1 拍卖目录和 #2 编辑/错误记录；两者的真实 post ID 持久化后才允许
@@ -603,10 +613,15 @@ AES-256-GCM 信封。`auction-storage/src/database/credentials/` 在同一 Seria
 完成安全投影、命令账本、审计以及导入/改名/启停/删除，删除后仍保留命令与审计证据；凭据 dashboard
 同时按 scope 返回更新时间，并以最近 Admin 变更与 Worker 启动心跳判断重启要求；dashboard 的
 world 健康投影与 Worker 一致，把 `shared` 凭据同时继承给 main/isekai，而不是只精确匹配 world；Worker
-通过 active 凭据读取端口按 world 取池并在内存解密；没有 active 行时保留 degraded Worker，
-实际操作返回 credential unavailable；已有 active 行但密钥不匹配或密文损坏时失败关闭。远端
-确认 session 失效时按稳定顺序轮换、幂等回写 `invalid` 并从当前池移除，写入开始后禁止盲重试。Admin/Web 只接触安全投影，secret
-不进入响应或页面；SQLite Lite 明确返回能力不支持，`.keyenv` 只作为 Worker 兼容回退。
+通过 active 凭据读取端口按 world/shared 取得唯一 Cookie 并在内存解密；没有 active 行时保留 degraded Worker，
+实际操作返回 credential unavailable；已有 active 行时，Worker 在解密前先按稳定 ID 顺序取得
+PostgreSQL session advisory 所有权，同类 Cookie 已被另一个 Worker 占用、存在重复 active 行、
+密钥不匹配或密文损坏都失败关闭。远端确认 session 失效时幂等回写 `invalid` 并从当前进程移除，
+不自动轮换到第二个 Cookie；远端状态写入还由进程内异步 guard 串行化，写入开始后禁止盲重试。
+Admin/Web 只接触安全投影，secret 不进入响应或页面；SQLite Lite 明确返回能力不支持。`.keyenv`
+兼容格式仍严格读取两个固定键，但 Worker 只装配 `hv-ck-key1`；`hv-ck-key2` 仅供显式隔离验证，
+不构成后备候选。失败 metadata 使用闭集 stage/operation/category/write_started，不能包含原始响应
+或凭据内容。失效或替换后，现有 ownership guard 持有到 Worker 退出，必须重启才能完成安全交接。
 
 ## 竞价写入不变量
 

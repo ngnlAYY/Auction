@@ -1,4 +1,4 @@
-//! E-Hentai Cookie 凭据候选集、失效回写与轮换会话。
+//! 单个 E-Hentai Cookie、失效回写与操作会话。
 
 use super::*;
 
@@ -39,15 +39,16 @@ struct EhentaiCredentialCandidate {
     cookie: EhentaiCookie,
 }
 
-/// 一组按稳定顺序尝试的论坛凭据。
+/// 单个论坛凭据的受控集合。
 #[derive(Clone)]
 pub struct EhentaiCredentialSet {
     candidates: Arc<StdMutex<Vec<EhentaiCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
+    _ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl EhentaiCredentialSet {
-    /// 从解密后的 Cookie 建立凭据候选集。
+    /// 从解密后的单个 Cookie 建立凭据集合；空集合只允许数据库 degraded 路径使用。
     pub fn from_cookies(cookies: Vec<EhentaiCookie>) -> Result<Self, EhentaiError> {
         Self::from_candidates(
             cookies
@@ -59,11 +60,12 @@ impl EhentaiCredentialSet {
                 })
                 .collect(),
             None,
+            None,
             false,
         )
     }
 
-    /// 从数据库解密后的 Cookie 建立可回写失效状态的集合。
+    /// 从数据库解密后的单个 Cookie 建立可回写失效状态的集合。
     pub fn from_runtime_cookies(
         cookies: Vec<(Uuid, EhentaiCookie)>,
         invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
@@ -78,17 +80,53 @@ impl EhentaiCredentialSet {
                 })
                 .collect(),
             Some(invalidator),
+            None,
             true,
+        )
+    }
+
+    /// 从数据库解密后的单 Cookie 建立由当前 Worker 独占且可回写失效状态的集合。
+    pub fn from_owned_runtime_cookies(
+        cookies: Vec<(Uuid, EhentaiCookie)>,
+        invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
+        ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
+    ) -> Result<Self, EhentaiError> {
+        Self::from_candidates(
+            cookies
+                .into_iter()
+                .map(|(persistent_id, cookie)| EhentaiCredentialCandidate {
+                    key: Uuid::new_v4(),
+                    persistent_id: Some(persistent_id),
+                    cookie,
+                })
+                .collect(),
+            Some(invalidator),
+            Some(ownership),
+            false,
+        )
+    }
+
+    /// 从本地单 Cookie 建立由当前 Worker 独占的集合。
+    pub fn from_owned_cookie(
+        cookie: EhentaiCookie,
+        ownership: Arc<dyn AdminCredentialRuntimeOwnership>,
+    ) -> Result<Self, EhentaiError> {
+        Self::from_candidates(
+            vec![EhentaiCredentialCandidate { key: Uuid::new_v4(), persistent_id: None, cookie }],
+            None,
+            Some(ownership),
+            false,
         )
     }
 
     fn from_candidates(
         candidates: Vec<EhentaiCredentialCandidate>,
         invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
+        ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
         allow_empty: bool,
     ) -> Result<Self, EhentaiError> {
         if (!allow_empty && candidates.is_empty())
-            || candidates.len() > 64
+            || candidates.len() > 1
             || candidates
                 .iter()
                 .any(|candidate| candidate.persistent_id.is_some_and(|id| id.is_nil()))
@@ -97,16 +135,19 @@ impl EhentaiCredentialSet {
         {
             return Err(EhentaiError::credential(EhentaiOperation::CreateTopic));
         }
-        Ok(Self { candidates: Arc::new(StdMutex::new(candidates)), invalidator })
+        if ownership.is_some() && candidates.is_empty() {
+            return Err(EhentaiError::credential(EhentaiOperation::CreateTopic));
+        }
+        Ok(Self {
+            candidates: Arc::new(StdMutex::new(candidates)),
+            invalidator,
+            _ownership: ownership,
+        })
     }
 
-    /// 从一至两个本地密钥明文建立凭据候选集。
-    pub fn from_secrets(first: &[u8], second: Option<&[u8]>) -> Result<Self, EhentaiError> {
-        let mut cookies = vec![EhentaiCookie::from_bytes(first)?];
-        if let Some(second) = second {
-            cookies.push(EhentaiCookie::from_bytes(second)?);
-        }
-        Self::from_cookies(cookies)
+    /// 从本地单个密钥明文建立凭据集合。
+    pub fn from_secret(secret: &[u8]) -> Result<Self, EhentaiError> {
+        Self::from_cookies(vec![EhentaiCookie::from_bytes(secret)?])
     }
 
     /// 返回候选集是否为空。

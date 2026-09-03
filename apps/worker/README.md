@@ -131,11 +131,12 @@ Forum 默认立即执行一轮，再等待 300 秒和最多五秒抖动；成功
 本进程启动水位的 `credential_unavailable` 主题任务；同一任务再次失败后不会在本进程内形成紧循环，
 新导入凭据仍按 Admin 的 `restart_required` 提示重启 Worker 才进入新的恢复世代。
 配置 `credential_data_key_id`/`credential_data_key` 后，Worker 会从 PostgreSQL 读取指定 world
-与 shared scope 的 active MoogleMail 凭据池，在内存中逐个解密并按顺序切换；密钥不匹配、密文
-损坏或不是合法 UTF-8 时失败关闭；暂时没有 active 凭据时保留 degraded Worker，实际轮询/写入
-再返回 credential unavailable。同一 world-aware 池也供入站邮件的装备详情读取使用，避免把
-HentaiVerse 登录页误判为不受支持的装备来源。未配置该独立密钥时继续兼容 `.keyenv` 的
-`hv-ck-key1` Bot 与 `hv-ck-key2` 测试号，以及敏感配置的单 Cookie 入口。
+或 shared scope 的唯一 active MoogleMail Cookie，在内存中解密；同一种外部 Cookie 由进程生命周期
+advisory lock 保证只有一个 Worker owner。密钥不匹配、密文损坏或不是合法 UTF-8 时失败关闭；
+暂时没有 active 凭据时保留 degraded Worker，实际轮询/写入再返回 credential unavailable。同一
+world-aware Cookie 也供入站邮件的装备详情读取使用，避免把 HentaiVerse 登录页误判为不受支持的
+装备来源。未配置该独立密钥时继续兼容 `.keyenv`，但 Worker 只使用 `hv-ck-key1`；
+`hv-ck-key2` 仅供显式隔离验证，不参与运行时后备或自动切换。敏感配置仍是单 Cookie 入口。
 Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径；周期值每轮读取
 真实数据库/schema readiness、进程内审计写入失败计数和 Worker tracing 安全状态；SIGINT/SIGTERM
 已可靠进入停止发布。各 owner 的内存定时器只负责唤醒，不能代替持久化游标。配置

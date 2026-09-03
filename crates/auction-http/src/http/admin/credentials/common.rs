@@ -48,7 +48,7 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             super::api_error(
                 StatusCode::CONFLICT,
                 "credential_conflict",
-                "凭据标签、指纹或命令负载与当前记录冲突",
+                "同类 active Cookie、凭据标签、指纹或命令负载与当前记录冲突",
             )
             .into_response()
         }

@@ -1,4 +1,4 @@
-//! MoogleMail delivery 的凭据轮换与写入结果未知边界。
+//! MoogleMail delivery 的单 Cookie 会话与写入结果未知边界。
 
 use super::*;
 
@@ -7,7 +7,8 @@ impl MoogleMailDeliveryTransport {
         &self,
         request: MoogleMailSendRequest,
     ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
-        let mut session = self.credentials.begin(request.world)?;
+        let mut session =
+            self.credentials.begin_exclusive(request.world, MoogleMailOperation::Send).await?;
         for _ in 0..64 {
             match self.sender.send(session.cookie(), request.clone()).await {
                 Ok(receipt) => return Ok(receipt),
@@ -17,7 +18,7 @@ impl MoogleMailDeliveryTransport {
                         return Err(error);
                     }
                     session.invalidate_current().await?;
-                    session.advance()?;
+                    session.advance_exclusive().await?;
                 }
                 Err(error) => return Err(error),
             }

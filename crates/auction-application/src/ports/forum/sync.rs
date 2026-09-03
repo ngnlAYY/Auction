@@ -246,7 +246,7 @@ pub trait ForumSyncStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 }
 
-/// 当前 Worker 内存凭据池的只读可用性；不暴露 Cookie、scope 或数据库记录。
+/// 当前 Worker 单 Cookie 的只读可用性；不暴露 Cookie、scope 或数据库记录。
 pub trait ForumCredentialAvailability: Send + Sync {
     fn has_available_forum_credential(&self) -> bool;
 }

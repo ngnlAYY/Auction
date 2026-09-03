@@ -125,11 +125,12 @@ pub use admin_credentials::{
     AdminCredentialHealthScope, AdminCredentialHealthSnapshot, AdminCredentialImportCommand,
     AdminCredentialImportWrite, AdminCredentialKind, AdminCredentialListRequest,
     AdminCredentialMutationWrite, AdminCredentialOpener, AdminCredentialPage, AdminCredentialPort,
-    AdminCredentialRenameCommand, AdminCredentialRuntimeReader, AdminCredentialRuntimeRecord,
-    AdminCredentialRuntimeWriter, AdminCredentialSealer, AdminCredentialSecret,
-    AdminCredentialStatus, AdminCredentialStatusCommand, AdminCredentialStore,
-    AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE,
-    MAX_ADMIN_CREDENTIAL_SECRET_BYTES, credential_scope, credential_secret_hash,
+    AdminCredentialRenameCommand, AdminCredentialRuntimeOwnership, AdminCredentialRuntimeReader,
+    AdminCredentialRuntimeRecord, AdminCredentialRuntimeWriter, AdminCredentialSealer,
+    AdminCredentialSecret, AdminCredentialStatus, AdminCredentialStatusCommand,
+    AdminCredentialStore, AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_OFFSET,
+    MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES, credential_scope,
+    credential_secret_hash,
 };
 pub use admin_forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,
@@ -232,8 +233,8 @@ pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredComm
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use core_repository::{AuctionRepository, RepositoryError};
 pub use delivery::{
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore,
+    DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
+    DeliveryWorkClaim, DeliveryWorkStore,
 };
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
