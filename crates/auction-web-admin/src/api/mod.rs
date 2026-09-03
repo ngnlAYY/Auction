@@ -43,7 +43,7 @@ mod users;
 
 pub(crate) use auctions::{
     AdminAuction, AdminAuctionCapabilities, AdminAuctionPage, create_admin_auction,
-    fetch_admin_auctions,
+    fetch_admin_auctions, update_admin_auction_schedule,
 };
 pub(crate) use audit::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 pub(crate) use credentials::{

@@ -318,7 +318,28 @@ world_id = "main"
 # 可选：告警通知收件人；enabled = true 时必须填写。
 recipient = ""
 
-# 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时沿用旧版共享配置默认值。
+# 可选区块：每周自动建立拍卖的时间表；省略时使用同样时间但保持关闭。
+[auction.schedule]
+# 可选：是否启用 Worker 周计划，默认 false。
+enabled = false
+# 可选：计划使用的 IANA 时区，默认 UTC。
+timezone = "UTC"
+# 可选：开放预览的星期，默认 Thursday。
+preview_day = "Thursday"
+# 可选：开放预览的本地时间，默认 22:00（距正式开拍两小时）。
+preview_time = "22:00"
+# 可选：正式开拍的星期，默认 Friday。
+open_day = "Friday"
+# 可选：正式开拍的本地时间，默认 00:00。
+open_time = "00:00"
+# 可选：计划结束的星期，默认 Saturday。
+nominal_end_day = "Saturday"
+# 可选：计划结束的本地时间，默认 12:00。
+nominal_end_time = "12:00"
+# 可选：参与周计划的 world，默认 main 和 isekai。
+worlds = ["main", "isekai"]
+
+# 可选区块：创建拍卖时冻结的经济、结算和恢复策略；省略时使用内置默认值。
 [auction.economics]
 # 可选：默认起始价，必须为正且按 1000 信用网格对齐，默认 1000。
 start_price = 1000

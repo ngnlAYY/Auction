@@ -67,7 +67,25 @@ backend = "disabled"
 # 可选：Public 规则读模型 TTL 秒数，范围 1-3600，默认 30。
 public_rules_ttl_seconds = 30
 
-# 可选区块：创建拍卖时冻结的策略模板；省略时沿用旧版共享配置默认值。
+# 可选区块：每周自动建立拍卖的时间表；默认关闭。
+[auction.schedule]
+# 可选：默认关闭，启用后 Worker 按下列本地周时间生成轮次。
+enabled = false
+# 可选：默认 UTC；可改为其他有效 IANA 时区。
+timezone = "UTC"
+# 可选：默认周四 22:00 开放预览，满足开拍前至少两小时的冻结窗口。
+preview_day = "Thursday"
+preview_time = "22:00"
+# 可选：默认周五 UTC 00:00 正式开拍。
+open_day = "Friday"
+open_time = "00:00"
+# 可选：默认周六 UTC 12:00 计划结束。
+nominal_end_day = "Saturday"
+nominal_end_time = "12:00"
+# 可选：默认同时为 main 和 isekai 生成轮次。
+worlds = ["main", "isekai"]
+
+# 可选区块：创建拍卖时冻结的策略模板；省略时使用内置默认值。
 [auction.economics]
 # 可选：默认起始价，必须为正且按 1000 信用网格对齐，默认 1000。
 start_price = 1000

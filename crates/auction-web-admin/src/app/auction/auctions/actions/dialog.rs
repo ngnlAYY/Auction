@@ -10,9 +10,11 @@ use crate::api::{
 use crate::app::surface::admin_api_error_message;
 
 use super::model::{
-    lifecycle_action_button_class, lifecycle_action_confirm_note, lifecycle_action_confirm_title,
-    lifecycle_action_label, lifecycle_action_submit_label, lifecycle_actions,
+    AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
+    lifecycle_action_confirm_title, lifecycle_action_label, lifecycle_action_submit_label,
+    lifecycle_actions,
 };
+use super::schedule::AdminAuctionScheduleAction;
 
 #[component]
 pub(super) fn AdminAuctionActions(
@@ -22,8 +24,9 @@ pub(super) fn AdminAuctionActions(
     expected_state_version: i64,
     capabilities: AdminAuctionCapabilities,
     scheduled_open_at: String,
+    scheduled_end_at: Option<String>,
     current_time_millis: i64,
-    notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
 ) -> Element {
     let busy = use_signal(|| false);
@@ -47,6 +50,18 @@ pub(super) fn AdminAuctionActions(
                     busy,
                     notice,
                     pending_action,
+                }
+            }
+            if capabilities.modify_schedule && matches!(status.as_str(), "draft" | "preview") {
+                AdminAuctionScheduleAction {
+                    auction_id: auction_id.clone(),
+                    auction_sequence,
+                    expected_state_version,
+                    scheduled_open_at: scheduled_open_at.clone(),
+                    scheduled_end_at,
+                    busy,
+                    notice,
+                    reload_generation,
                 }
             }
         }
@@ -79,7 +94,7 @@ pub(super) fn AdminAuctionActions(
 fn AdminAuctionActionButton(
     action: AdminAuctionLifecycleAction,
     busy: Signal<bool>,
-    mut notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    mut notice: Signal<Option<AdminAuctionNotice>>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
 ) -> Element {
     rsx! {
@@ -107,7 +122,7 @@ fn AdminAuctionActionDialog(
     action: AdminAuctionLifecycleAction,
     busy: Signal<bool>,
     mut feedback: Signal<Option<String>>,
-    mut notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    mut notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
     mut action_reason: Signal<String>,
@@ -256,7 +271,7 @@ fn AdminAuctionActionDialog(
 struct LifecycleActionSignals {
     busy: Signal<bool>,
     feedback: Signal<Option<String>>,
-    notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
     pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
     action_reason: Signal<String>,
@@ -304,7 +319,7 @@ fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleA
         {
             Ok(_) => {
                 signals.feedback.set(None);
-                signals.notice.set(Some(action));
+                signals.notice.set(Some(AdminAuctionNotice::Lifecycle(action)));
                 signals.pending_action.set(None);
                 signals.action_reason.set(String::new());
                 signals.command_state.set(None);

@@ -321,6 +321,13 @@ fn valid_realtime_event(value: &Value, auction_id: Option<&str>, discovery: bool
                 && positive(payload.get("state_version"))
                 && positive(payload.get("preview_revision"))
         }
+        (Some("auction.schedule_updated"), Some(1)) => {
+            only(payload, &["auction_id", "world_id", "scheduled_end_at", "state_version"], &[])
+                && uuid(string(payload.get("auction_id")).unwrap_or_default())
+                && world(payload.get("world_id"))
+                && time(payload.get("scheduled_end_at"))
+                && positive(payload.get("state_version"))
+        }
         (
             Some(
                 "auction.final_phase_entered"
@@ -400,7 +407,7 @@ fn valid_realtime_event_world(value: &Value, expected_world: Option<&str>) -> bo
     let Some(payload) = event.get("payload").and_then(object) else { return false };
     match string(event.get("kind")) {
         Some("preview_catalog_changed") => string(payload.get("world")) == Some(expected_world),
-        Some("auction.created" | "auction.opened") => {
+        Some("auction.created" | "auction.opened" | "auction.schedule_updated") => {
             string(payload.get("world_id")) == Some(expected_world)
         }
         _ => true,

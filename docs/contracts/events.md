@@ -36,7 +36,7 @@ Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2b
 
 ## 已冻结的事件注册表
 
-生产基线当前注册十种事件 schema。公开端迁移必须保留 kind 字符串和已发布版本；
+生产基线当前注册十一种事件 kind、十二个 schema。公开端迁移必须保留 kind 字符串和已发布版本；
 不兼容修改必须新增 schema_version，不能原地改变已有版本的字段含义。
 
 | kind | 版本 | 必填负载字段 | 目标流或用途 |
@@ -45,6 +45,7 @@ Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2b
 | auction.preview_updated | 1 | auction_id, preview_revision, item_count, manual_open, state_version | 拍卖流 |
 | preview_catalog_changed | 1 | world, auction_id, preview_revision | 拍卖预览目录变化 |
 | auction.opened | 1 | auction_id, world_id, state_version, preview_revision | 拍卖流 |
+| auction.schedule_updated | 1 | auction_id, world_id, scheduled_end_at, state_version | 拍卖流；正式开放前计划结束时间变更 |
 | auction.final_phase_entered | 1 | auction_id, state_version | 拍卖流 |
 | auction.early_settlement_requested | 1 | auction_id, state_version | 拍卖流；Admin 已立即关闭竞价并交给结算 Worker |
 | auction.cancelled | 1 | auction_id, state_version | 拍卖流 |
@@ -123,8 +124,8 @@ Public 提供 GET /api/v1/ws 升级为 WebSocket。连接必须显式选择一�
 查询必须且只能包含上述一个键；`after`、`page_size` 或同时出现两个目标都返回 400。每个文本帧
 是一个旧版公开事件对象，不使用 API 外壳，也不发送事件页；发现流只允许
 `auction.created`。客户端不得把内部 `stream_key` 当作公开字段。
-单拍卖 WebSocket 除核对事件所属 `auction_id` 外，还会把 `auction.created`、`auction.opened` 和
-`preview_catalog_changed` 中的 world 与当前页面 world 核对；HTTP catch-up 保持旧版只冻结
+单拍卖 WebSocket 除核对事件所属 `auction_id` 外，还会把 `auction.created`、`auction.opened`、
+`auction.schedule_updated` 和 `preview_catalog_changed` 中的 world 与当前页面 world 核对；HTTP catch-up 保持旧版只冻结
 `auction_id` 的事件页目标语义。
 
 连接使用已认证会话，服务端只推送事件，不把浏览器消息当作业务命令入口。启用 origin allowlist

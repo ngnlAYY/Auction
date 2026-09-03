@@ -3,20 +3,20 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use crate::api::{AdminAuction, AdminAuctionCapabilities, AdminAuctionLifecycleAction};
+use crate::api::{AdminAuction, AdminAuctionCapabilities};
 
 use super::super::super::format_admin_time;
 use super::super::helpers::{
     admin_auction_status_label, admin_auction_world_label, scheduled_time_millis,
 };
-use super::dialog::AdminAuctionActions;
+use super::{dialog::AdminAuctionActions, model::AdminAuctionNotice};
 
 #[component]
 pub(crate) fn AdminAuctionRow(
     auction: AdminAuction,
     capabilities: AdminAuctionCapabilities,
     clock_millis: Signal<i64>,
-    notice: Signal<Option<AdminAuctionLifecycleAction>>,
+    notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
 ) -> Element {
     let auction_id = auction.id.clone();
@@ -64,6 +64,7 @@ pub(crate) fn AdminAuctionRow(
                     expected_state_version: auction.state_version,
                     capabilities,
                     scheduled_open_at: auction.scheduled_open_at.clone(),
+                    scheduled_end_at: auction.scheduled_ends_at.clone(),
                     current_time_millis,
                     notice,
                     reload_generation,

@@ -142,6 +142,9 @@ fn registered_fields(kind: &str, schema_version: i32) -> Option<&'static [&'stat
         ("auction.opened", 1) => {
             Some(&["auction_id", "world_id", "state_version", "preview_revision"])
         }
+        ("auction.schedule_updated", 1) => {
+            Some(&["auction_id", "world_id", "scheduled_end_at", "state_version"])
+        }
         ("auction.final_phase_entered", 1)
         | ("auction.early_settlement_requested", 1)
         | ("auction.cancelled", 1)
@@ -197,6 +200,12 @@ fn valid_registered_payload(kind: &str, schema_version: i32, payload: &Map<Strin
                 && valid_world(payload.get("world_id"))
                 && positive_value(payload.get("state_version"))
                 && positive_value(payload.get("preview_revision"))
+        }
+        ("auction.schedule_updated", 1) => {
+            auction_id()
+                && valid_world(payload.get("world_id"))
+                && valid_time(payload.get("scheduled_end_at"))
+                && positive_value(payload.get("state_version"))
         }
         (
             "auction.final_phase_entered"

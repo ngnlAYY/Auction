@@ -71,6 +71,56 @@ pub(super) fn valid_auction_schedule(preview: &str, open: &str, end: &str) -> bo
     }
 }
 
+/// 校验计划修改输入：必须晚于当前时间和既有正式开拍时间。
+pub(super) fn valid_schedule_end(open: &str, end: &str) -> bool {
+    let Some(open) = scheduled_time_millis(open) else {
+        return false;
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        local_datetime_millis(end)
+            .is_some_and(|end| end > js_sys::Date::new_0().get_time() && end > open as f64)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M").ok().is_some_and(|end| {
+            let end = end.and_utc().timestamp_millis();
+            end > chrono::Utc::now().timestamp_millis() && end > open
+        })
+    }
+}
+
+/// 将 API 的 RFC3339 时间转换为浏览器 `datetime-local` 当前值。
+pub(super) fn datetime_local_value(value: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(value));
+        if !date.get_time().is_finite() {
+            return None;
+        }
+        return Some(format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}",
+            date.get_full_year(),
+            date.get_month() + 1,
+            date.get_date(),
+            date.get_hours(),
+            date.get_minutes(),
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use chrono::Timelike as _;
+
+        chrono::DateTime::parse_from_rfc3339(value).ok().map(|value| {
+            let value = value.with_timezone(&chrono::Utc);
+            format!("{}T{:02}:{:02}", value.date_naive(), value.hour(), value.minute())
+        })
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn local_datetime_millis(value: &str) -> Option<f64> {
     // `datetime-local` 按浏览器本地时区解释；这里的时间戳必须与提交时的 UTC 转换使用同一

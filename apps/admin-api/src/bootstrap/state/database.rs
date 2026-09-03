@@ -4,14 +4,14 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Context;
 use auction_application::{
-    AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminCredentialHealthReader,
-    AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort, AdminCredentialRuntimeReader,
-    AdminCredentialRuntimeWriter, AdminCredentialService, AdminCredentialWorld,
-    AdminForumPreviewPort, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
-    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigError,
-    AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort,
-    AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService, ApplicationError,
-    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
+    AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
+    AdminCredentialHealthReader, AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort,
+    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialService,
+    AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
+    AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
+    AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig,
+    AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService,
+    ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
     OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
     RecoveryCommandService, RecoveryReportReader, SettlementReportReader,
 };
@@ -181,6 +181,7 @@ pub(super) async fn configure_state(
         config.admin_secret().context("admin_secret is missing from sensitive configuration")?;
     let lifecycle_store = Arc::clone(&store);
     let auction_create_store = Arc::clone(&store);
+    let auction_schedule_store = Arc::clone(&store);
     let admin_rules_store = Arc::clone(&store);
     let admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>> = if store.backend()
         == DatabaseBackend::Postgres
@@ -342,6 +343,12 @@ pub(super) async fn configure_state(
             Arc::new(SystemClock),
             config.auction.policy(),
         ));
+    let auction_schedule: Arc<dyn AdminAuctionSchedulePort> =
+        Arc::new(DatabaseAdminAuctionCommands::new(
+            auction_schedule_store,
+            Arc::new(SystemClock),
+            config.auction.policy(),
+        ));
     let admin_rules: Arc<dyn AdminRulesPort> =
         Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));
     let recovery_commands: Arc<dyn RecoveryCommandPort> =
@@ -375,6 +382,7 @@ pub(super) async fn configure_state(
         worker_control,
         security,
     )
+    .with_auction_schedule(auction_schedule)
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_readiness(store);

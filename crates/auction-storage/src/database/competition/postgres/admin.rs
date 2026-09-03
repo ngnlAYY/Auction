@@ -1,6 +1,6 @@
 //! PostgreSQL 管理端拍卖与标的事务子模块装配。
 //!
-//! 拍卖创建、lot 更新和行映射分别由子模块持有；事务边界仍由父模块统一装配。
+//! 拍卖创建、计划修改、lot 更新和行映射分别由子模块持有；事务边界仍由父模块统一装配。
 
 use super::mapping::*;
 use super::*;
@@ -11,5 +11,7 @@ mod create;
 mod lot;
 #[path = "admin/mapping.rs"]
 mod row_mapping;
+#[path = "admin/schedule.rs"]
+mod schedule;
 
 use row_mapping::*;

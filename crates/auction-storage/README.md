@@ -8,7 +8,8 @@
 `src/database/competition/postgres.rs` 只保留事务装配与稳定端口；生命周期、管理命令和共享映射
 分别位于同目录的 `postgres/{lifecycle,admin,mapping}.rs`，竞价 owner 拆入
 `postgres/bidding/{mod,ledger,snapshot,eligibility,plan,proxy,facts,audit,realtime}.rs`；其中管理事务再按
-拍卖创建、lot 更新和行映射拆到 `postgres/admin/{create,mapping}.rs` 与 `postgres/admin/lot/`；
+拍卖创建、计划结束时间修改、lot 更新和行映射拆到
+`postgres/admin/{create,schedule,mapping}.rs` 与 `postgres/admin/lot/`；
 `lot/` 再按事务适配、锁内读取、状态变更、withdrawn-return 义务和审计/realtime 事件拆到
 `{mod,transaction,read,mutation,obligation,events}.rs`。SQLite Lite 竞价事务
 由 `src/database/sqlite/competition/transaction.rs` 分派，具体生命周期和映射仍由
@@ -185,6 +186,11 @@ Lite 明确返回能力不支持。策略模板会在同一事务中同时写入
 竞价/生命周期仍读取的 `default_start_price`、软截止、取消截止、slow 间隔列，避免配置与
 遗留规则分叉。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在真正开放前
 保持空值，以兼容旧系统创建行为。
+Admin A39 计划修改由同一命令组合器与 PostgreSQL `postgres/admin/schedule.rs` 持有：事务按
+world → scheduled round → auction 加锁，只允许 Draft/Preview，将新的结束时间同步写入 schema v4
+策略快照与 `scheduled_rounds`，通过 auction 版本 CAS 追加命令账本、审计和
+`auction.schedule_updated`；不会提前填充开放后才使用的拍卖运行时结束列，也不会改写 lot 截止时间。
+SQLite Lite 明确不提供这项完整档写入能力。
 Admin 规则读取与发布由 `src/database/rules/` 和 `src/database/commands/mod.rs` 持有：
 `rules/{mod,reads,transaction}.rs` 分别保留模块装配、跨后端读取和 PostgreSQL 写事务；
 PostgreSQL 使用独立 Serializable 事务、规则 revision CAS、`rules_admin_commands` 幂等账本和

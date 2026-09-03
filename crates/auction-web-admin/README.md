@@ -8,7 +8,7 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
 - `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
   安全投影、会话读取和命令请求。
 - `src/app/`：按相同 owner 分组的页面组件；拍卖列表在 `auction/auctions/` 内拆分创建、表格、
-  生命周期动作 `actions/{row,dialog,model}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分拍卖选择、结算报告、recovery 交互和
+  生命周期及计划动作 `actions/{row,dialog,model,schedule}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分拍卖选择、结算报告、recovery 交互和
   辅助映射，用户页在 `identity/users/` 内拆分创建/key、筛选表格、用户行和状态对话框，凭据页在
   `identity/credentials/` 内拆分页面编排、安全录入、凭据表格、确认对话框和安全标签辅助，Dashboard 在
   `operations/dashboard/` 内拆分单快照页面编排、旧版指标内容和邮件控制；lot 页在 `auction/lots/` 内拆分
@@ -56,7 +56,9 @@ just web-serve-admin   # 本地开发监听
 “进入最终时刻”与可选的“提前结算”并列，Final 状态仅保留已启用的提前结算。前者把较晚的 lot 截止
 时间收紧到默认 15 分钟最终窗口并继续允许软截止竞价，后者要求理由且由默认关闭的服务端 capability
 控制，浏览器不直接推断或写入结算事实；lot 页面也已接入同一安全投影和真实分页；创建拍卖命令和管理端创建表单
-已接入 PostgreSQL 完整档。
+已接入 PostgreSQL 完整档。Draft/Preview 行还会按服务端 `modify_schedule` capability 提供计划结束
+时间修改弹窗；输入沿用浏览器本地时间编辑并发送 UTC 时间，命令 ID 在同一版本和输入的失败重试中
+保持稳定，成功后重新读取权威列表。
 拍卖筛选栏恢复旧版的轻量横向布局，手工录入恢复五列/窄屏单列表单，创建弹窗字段改为稳定的纵向
 布局，避免通用操作栏挤压时间和 JSON 输入；手工录入成功后再次修改任一来源或命令字段会清除旧结果，
 避免把上一次提交误认为当前输入的结果；

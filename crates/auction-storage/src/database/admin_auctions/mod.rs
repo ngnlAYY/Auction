@@ -66,8 +66,11 @@ async fn list_postgres(
             a.preview_revision, a.opened_at, a.final_phase_at, a.settled_at,
             a.cancelled_at, a.cancelled_reason, a.cancelled_by, a.state_version,
             a.scheduled_end_at, a.effective_end_at, a.created_at, a.updated_at,
-            MAX(l.effective_end_at) FILTER (
-                WHERE l.status IN ('live', 'sold', 'unsold')
+            COALESCE(
+                MAX(l.effective_end_at) FILTER (
+                    WHERE l.status IN ('live', 'sold', 'unsold')
+                ),
+                (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
             ) AS scheduled_ends_at,
             COUNT(l.id)::bigint AS lot_count
          FROM public.auctions AS a

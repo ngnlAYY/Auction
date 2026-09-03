@@ -46,6 +46,9 @@
   `mod.rs` 只负责模块装配和稳定出口。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
+- `src/ports/admin/auction_schedule.rs` 与 `src/services/admin/auction_schedule.rs`：正式开放前的计划
+  结束时间修改端口和用例；只接受 Draft/Preview，在 Serializable 锁内以数据库时间、状态版本和
+  命令账本保护策略快照与调度记录同步，已成功命令始终先按原结果重放。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
   错误类型和本地边界校验；`business.rs` 冻结旧版 main/isekai、发件人 allowlist、装备过滤和 14 个
   通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`runtime_config.rs` 只负责稳定公共类型出口，
@@ -138,6 +141,8 @@ Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许
 withdrawn-return 履约义务，具体 SQL 不跨过端口。
 Admin 拍卖列表只读契约位于 `src/ports/admin/auctions.rs`，定义 world/status 筛选、旧页码
 分页、生命周期安全快照和 lot 数量；SQLite Lite 缺少完整投影时必须显式报告能力不支持。
+正式开放前的计划结束时间写入契约位于 `src/ports/admin/auction_schedule.rs`；应用层只编排
+状态/版本/时间校验、幂等账本和事务动作，不直接操作策略 JSON 或 `scheduled_rounds`。
 Admin 规则文档契约位于 `src/ports/admin/rules.rs`，区分候选校验、读取快照和 PostgreSQL
 完整档发布事务；发布使用 `command_id`、request hash 与 revision fence，SQLite 只保留读取。
 Admin 装备录入契约位于 `src/ports/admin/intake/`，区分外部来源读取、key 加密和数据库

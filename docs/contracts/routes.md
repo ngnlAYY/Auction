@@ -209,6 +209,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A36 | POST | /api/v1/admin/deliveries/{delivery_id}/retry | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:89 |
 | A37 | POST | /api/v1/admin/deliveries/{delivery_id}/reconcile | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:95 |
 | A38 | POST | /api/v1/admin/auctions/{auction_id}/early-settlement | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | 新增能力，旧代码无对应路径 |
+| A39 | PATCH | /api/v1/admin/auctions/{auction_id}/schedule | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | 新增能力，旧代码无对应路径 |
 
 ## 迁移冻结规则
 
@@ -265,7 +266,11 @@ Admin 拍卖生命周期命令已接入应用端口；请求携带 `command_id` 
 lot 不会被反向延长，之后的竞价仍可按冻结软截止策略延期。A38 只在 PostgreSQL 完整档且
 `allow_manual_early_settlement = true` 时声明 capability；开关默认关闭。命令接受 `live`/`final`，把所有
 尚未到期的 live lot 有效截止时间收紧到事务时间并交给既有 settlement scheduler/Worker，HTTP 事务不
-直接写成交、义务或履约事实。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
+直接写成交、义务或履约事实。A39 只允许 `draft`/`preview`，请求携带 `command_id`、
+`expected_state_version` 与新的 `scheduled_end_at`；PostgreSQL 在同一 Serializable 事务内锁定
+world、scheduled round 和 auction，并同步策略快照与持久调度记录，追加命令账本、审计和
+`auction.schedule_updated` 事件。已经正式开放、开始结算、结算或取消的拍卖不能修改，SQLite Lite
+明确返回 `501 feature_not_supported`。A34-A37 delivery Admin 列表、状态筛选、数字分页、release、retry 和
 reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；reconcile 的 retry、succeeded、failed
 决策以及对应的外部引用/失败代码由请求体明确表达；列表投影还提供从版本化 send payload
 派生的 COD 数值，以及从结果 metadata 派生的 `reason_code`、`take_required`、`returned_mail_id`，
