@@ -105,7 +105,7 @@ pub(crate) fn PublicShell() -> Element {
         matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
     use_route_focus(format!("{current_route:?}"), "public-content");
     let selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
-    let location_generation = use_signal(|| 0_u64);
+    let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
     let mut readiness_generation = use_signal(|| 0_u64);
@@ -172,9 +172,9 @@ pub(crate) fn PublicShell() -> Element {
             callback.forget();
         }
     });
-    let location_generation = location_generation();
+    let outlet_generation = location_generation();
     // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报；显式读取保留门禁整洁。
-    let _ = location_generation;
+    let _ = outlet_generation;
 
     let readiness_state = match &*readiness.read_unchecked() {
         None => PublicReadinessState::Checking,
@@ -188,6 +188,7 @@ pub(crate) fn PublicShell() -> Element {
         Some(Ok(Some(identity))) if identity.authenticated
     );
     let selected_world_value = selected_world();
+    let auction_home_href = public_auction_home_href(&selected_world_value);
     let realtime_target_candidate = match session_snapshot {
         None => PublicRealtimeTarget::Checking,
         Some(Err(_)) => PublicRealtimeTarget::SessionError,
@@ -257,7 +258,14 @@ pub(crate) fn PublicShell() -> Element {
             }
             a { class: "public-shell__skip", href: "#public-content", {t!("skip")} }
             header { class: "public-shell__header",
-                Link { class: "public-shell__logo", to: Route::AuctionIndex {},
+                Link {
+                    class: "public-shell__logo",
+                    to: auction_home_href.clone(),
+                    onclick: move |_| {
+                        // 首页与历史视图共用同一路由；查询被清除时强制重建 Outlet，避免停留在旧拍卖。
+                        location_generation
+                            .set(location_generation().saturating_add(1));
+                    },
                     {t!("app-title")}
                 }
                 button {
@@ -277,7 +285,15 @@ pub(crate) fn PublicShell() -> Element {
                     },
                     aria_label: t!("nav-label"),
                     onclick: move |_| navigation_open.set(false),
-                    Link { to: Route::AuctionIndex {}, {t!("nav-auctions")} }
+                    Link {
+                        to: auction_home_href,
+                        onclick: move |_| {
+                            // Dioxus 路由不把 query 纳入 Route 枚举，同路由回首页需要显式刷新内容。
+                            location_generation
+                                .set(location_generation().saturating_add(1));
+                        },
+                        {t!("nav-auctions")}
+                    }
                     Link { to: Route::BidLog {}, {t!("page-bidlog-title")} }
                     Link { to: Route::AuctionList {}, {t!("nav-auction-history")} }
                     Link { to: Route::History {}, {t!("nav-price-history")} }
@@ -313,7 +329,7 @@ pub(crate) fn PublicShell() -> Element {
                 }
             }
             main { id: "public-content", class: "public-shell__content", tabindex: "-1",
-                Outlet::<Route> { key: location_generation.to_string() }
+                Outlet::<Route> { key: outlet_generation.to_string() }
             }
         }
     }
