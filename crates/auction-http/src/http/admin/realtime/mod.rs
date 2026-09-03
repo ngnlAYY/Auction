@@ -1,7 +1,7 @@
 //! Admin realtime HTTP 适配器的模块装配。
 //!
-//! lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由子模块拥有；
-//! 本模块只保留路由可见的稳定处理器出口。
+//! 事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享分页/错误边界分别由
+//! 子模块拥有；本模块只保留路由可见的稳定处理器出口。
 
 #[path = "common.rs"]
 mod common;
@@ -21,8 +21,8 @@ pub(super) use common::{
     feature_unavailable, invalid_query, invalid_replay, map_realtime_error, map_replay_error,
     parse_page, parse_uuid, replay_unavailable,
 };
-pub(super) use mapping::{map_failure, map_lag};
-pub(super) use reads::{get_failure, list_failures, list_lag};
+pub(super) use mapping::{map_event, map_failure, map_lag};
+pub(super) use reads::{get_failure, list_events, list_failures, list_lag};
 pub(super) use replay::replay;
 
 const REPLAY_COMMAND_KIND: &str = "replay_realtime_failure";

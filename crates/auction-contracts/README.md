@@ -18,6 +18,8 @@
   只能选择一个非空的 HTML/文本字段，输出只包含安全的目录、帖子、命令和警告信息。
 - `AdminSettlementReportResponse`：PostgreSQL 完整档的 Admin 结算安全投影；lot 明细显式返回
   `listed_price`、`hold_ppm` 与带符号的 `adjustment_ppm`，供界面区分折扣和惩罚，不暴露数据库行。
+- `AdminRealtimeEventListResponse`：Admin 最近事件的分页元数据投影；只返回事件 ID、流、序号、
+  类型、schema 与写入时间，不返回公开 payload、命令/竞价来源或数据库内部字段。
 - Public lot/装备响应可选返回固定顺序的 `primary_attribute_initials`；竞价日志仅在真实论坛楼层与
   帖子身份同时可证明时返回受限的 `source_post_url`，玩家仍由名称字段展示。
 - `PublicForumResponse.processed_through_post_number` 只表达 Worker 完整主题扫描证明的真实连续楼层；

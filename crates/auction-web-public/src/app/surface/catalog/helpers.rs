@@ -143,13 +143,6 @@ pub(crate) fn auction_world_label(world: &str) -> String {
     }
 }
 
-pub(crate) fn historical_auction_href(auction_id: &str, world_id: Option<&str>) -> String {
-    let mut query = read_public_query();
-    query.auction_id = Some(auction_id.to_owned());
-    query.world = world_id.and_then(normalize_world_query);
-    public_href("/auction", &query)
-}
-
 pub(crate) fn historical_lots_href(auction_id: &str, world_id: &str) -> String {
     let query = PublicBoardQuery {
         auction_id: Some(auction_id.to_owned()),

@@ -20,7 +20,7 @@ sudo systemctl enable --now auction-stack.service
 ```
 
 不要同时 enable 三个角色 unit；否则系统启动会绕过总控的应用 readiness 顺序。总控会先严格
-检查三个 TOML、敏感文件权限、unit 的 `AUCTION_CONFIG_FILE` 绑定和端口占用，再执行 forward-only
+检查三个角色 TOML 对同一公共 TOML 的引用、各文件权限、unit 的 `AUCTION_CONFIG_FILE` 绑定和端口占用，再执行 forward-only
 migration，并按 Worker → Admin → Public 启动。每个角色通过应用 readiness 后才继续；失败只反序
 停止本次启动的 unit，已提交 migration 不会自动 down/restore。停止顺序固定为
 Public → Admin → Worker。
@@ -55,7 +55,7 @@ sudo /opt/auction/bin/auctionctl deployment restart --config-dir /etc/auction
 
 Admin runtime 更新需要写入 `/etc/auction/runtime/`，Public/Admin Unix listener 需要写入
 `/run/hv-auction`，因此对应 unit 必须显式开放这些目录，并保证运行账号属于配置的 socket group；其余
-敏感 TOML 仍保持只读。Worker unit 预建 `/run/hv-auction/worker`，Worker 会校验目录 owner、
+公共 TOML 和敏感 TOML 仍保持只读。Worker unit 预建 `/run/hv-auction/worker`，Worker 会校验目录 owner、
 不可被 other 写入及 group-write 一致性，再以实例锁和 inode 身份保护 control socket；unit 只在
 SQLite Lite 部署时开放 `/var/lib/auction` 数据目录。
 

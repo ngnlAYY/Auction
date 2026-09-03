@@ -174,10 +174,11 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   密码使用 Argon2id；会话签名密钥只写入权限受限且不提交的敏感 TOML。
 - **HTTP client：** `reqwest` + rustls，用于 E-Hentai 和 MoogleMail 适配器；所有外部
   调用都有 timeout、重试上限、幂等 key 和审计日志。
-- **配置：** `serde` + TOML。主配置保存普通字段，并用 `secrets_file` 引用敏感 TOML；
+- **配置：** `serde` + TOML。三个角色文件用 `common_file` 引用同一份公共非敏感 TOML，并用
+  `secrets_file` 引用敏感 TOML；角色文件继续拥有 listener、tracing、realtime、会话或 Worker 调度，
   `database_url`、`redis_url`、外部 Cookie 和会话签名密钥只允许出现在敏感文件。旧的
   单文件敏感字段不兼容。`AUCTION_CONFIG_FILE` 只选择主配置，不通过环境变量覆盖单个
-  配置字段，也不在 domain/application 中读取环境变量。拍卖策略使用普通主配置的
+  配置字段，也不在 domain/application 中读取环境变量。拍卖策略使用公共配置的
   `[auction]` 模板；创建时冻结为不可变快照，竞价和生命周期事务从快照恢复经济、代理和
   final phase 规则，配置更新不会改变已创建拍卖。
 - **错误：** domain/application 使用 `thiserror`；只在 binary composition root 使用

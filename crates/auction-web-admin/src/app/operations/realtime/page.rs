@@ -5,21 +5,24 @@ use dioxus::{html::Key, prelude::*};
 use uuid::Uuid;
 
 use crate::api::{
-    RealtimeFailure, fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
+    RealtimeFailure, fetch_realtime_event_page, fetch_realtime_event_total,
+    fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
 };
 
+use super::event::{RealtimeEventPager, RealtimeEventTable};
 use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
-use super::filters::RealtimeFailureFilters;
+use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
-/// Outbox 路由复用已冻结的 realtime failure/lag/replay 安全投影；未冻结的外部广播 sink 不在
-/// 页面中虚构状态或成功结果。
+/// Outbox 路由展示已持久化事件元数据与 realtime failure/lag/replay 安全投影；未冻结的外部
+/// 广播 sink 不在页面中虚构状态或成功结果。
 pub(crate) fn outbox_page() -> Element {
     page_with_copy(t!("page-outbox-title"), t!("page-outbox-note"))
 }
 
 fn page_with_copy(page_title: String, page_note: String) -> Element {
+    let mut event_refresh = use_signal(|| 0_u64);
     let mut failure_refresh = use_signal(|| 0_u64);
     let mut lag_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
@@ -29,8 +32,13 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
     let mut replay_busy = use_signal(|| false);
-    let lag_page_number = use_signal(|| 1_i64);
+    let mut lag_page_number = use_signal(|| 1_i64);
+    let mut event_page_number = use_signal(|| 1_i64);
     let mut failure_page_number = use_signal(|| 1_i64);
+    let event_stream_filter = use_signal(String::new);
+    let event_kind_filter = use_signal(String::new);
+    let mut active_event_stream_filter = use_signal(String::new);
+    let mut active_event_kind_filter = use_signal(String::new);
     let failure_stream_filter = use_signal(String::new);
     let failure_consumer_filter = use_signal(String::new);
     let failure_code_filter = use_signal(String::new);
@@ -39,6 +47,18 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut active_failure_consumer_filter = use_signal(String::new);
     let mut active_failure_code_filter = use_signal(String::new);
     let mut active_failure_state_filter = use_signal(String::new);
+    let events = use_resource(move || {
+        let _ = event_refresh();
+        fetch_realtime_event_page(
+            event_page_number(),
+            active_event_stream_filter(),
+            active_event_kind_filter(),
+        )
+    });
+    let event_overview = use_resource(move || {
+        let _ = event_refresh();
+        fetch_realtime_event_total()
+    });
     let lag = use_resource(move || {
         let _ = lag_refresh();
         fetch_realtime_lag_page(lag_page_number(), String::new(), String::new())
@@ -53,7 +73,23 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             active_failure_state_filter(),
         )
     });
+    let unresolved_failures = use_resource(move || {
+        let _ = failure_refresh();
+        fetch_realtime_failure_page(
+            1,
+            String::new(),
+            String::new(),
+            String::new(),
+            "dead_letter".to_owned(),
+        )
+    });
 
+    let load_events = move |_| {
+        active_event_stream_filter.set(event_stream_filter());
+        active_event_kind_filter.set(event_kind_filter());
+        event_page_number.set(1);
+        event_refresh.set(event_refresh().saturating_add(1));
+    };
     let load_failures = move |_| {
         active_failure_stream_filter.set(failure_stream_filter());
         active_failure_consumer_filter.set(failure_consumer_filter());
@@ -64,7 +100,18 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         replay_command_id.set(None);
         failure_refresh.set(failure_refresh().saturating_add(1));
     };
+    let event_state = events.read_unchecked().clone();
+    let event_overview_state = event_overview.read_unchecked().clone();
+    let lag_state = lag.read_unchecked().clone();
     let failure_state = failures.read_unchecked().clone();
+    let unresolved_failure_state = unresolved_failures.read_unchecked().clone();
+    let lag_page = lag_state.as_ref().and_then(|result| result.as_ref().ok());
+    let unresolved_failure_page =
+        unresolved_failure_state.as_ref().and_then(|result| result.as_ref().ok());
+    let event_total =
+        event_overview_state.as_ref().and_then(|result| result.as_ref().ok()).copied();
+    let consumer_total = lag_page.map(|page| page.pagination.total);
+    let failure_total = unresolved_failure_page.map(|page| page.pagination.total);
     let selected_id = selected_failure();
     let selected =
         failure_state.as_ref().and_then(|result| result.as_ref().ok()).and_then(|page| {
@@ -72,6 +119,27 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 .as_ref()
                 .and_then(|id| page.failures.iter().find(|failure| &failure.id == id).cloned())
         });
+    let event_content = match &event_state {
+        None => rsx! {
+            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
+        },
+        Some(Err(error)) => rsx! {
+            p {
+                class: "admin-panel__note action-feedback action-feedback--error",
+                role: "alert",
+                {admin_api_error_message(error)}
+            }
+        },
+        Some(Ok(event_page)) => rsx! {
+            RealtimeEventTable { page: event_page.clone() }
+        },
+    };
+    let event_pager = match &event_state {
+        Some(Ok(event_page)) => rsx! {
+            RealtimeEventPager { page: event_page.clone(), page_number: event_page_number }
+        },
+        _ => rsx! {},
+    };
     let failure_content = match &failure_state {
         None => rsx! {
             p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
@@ -106,7 +174,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
         _ => rsx! {},
     };
-    let lag_content = match &*lag.read_unchecked() {
+    let lag_content = match &lag_state {
         None => rsx! {
             p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
         },
@@ -128,53 +196,122 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
 
     rsx! {
         section { class: "admin-realtime-page", aria_labelledby: "outbox-title",
-            h1 { id: "outbox-title", {page_title} }
+            div { class: "admin-realtime-heading",
+                h1 { id: "outbox-title", {page_title} }
+                button {
+                    r#type: "button",
+                    class: "admin-btn-secondary",
+                    onclick: move |_| {
+                        selected_failure.set(None);
+                        replay_command_id.set(None);
+                        notice.set(None);
+                        event_page_number.set(1);
+                        lag_page_number.set(1);
+                        failure_page_number.set(1);
+                        event_refresh.set(event_refresh().saturating_add(1));
+                        lag_refresh.set(lag_refresh().saturating_add(1));
+                        failure_refresh.set(failure_refresh().saturating_add(1));
+                    },
+                    {t!("realtime-refresh")}
+                }
+            }
             p { class: "admin-realtime-intro", {page_note} }
-            div { class: "admin-realtime-status",
-                label { r#for: "outbox-status",
-                    {t!("realtime-filter-state")}
-                    select {
-                        id: "outbox-status",
-                        value: failure_resolved_filter(),
-                        onchange: move |event| {
-                            let next_state = event.value();
-                            failure_resolved_filter.set(next_state.clone());
-                            active_failure_state_filter.set(next_state);
-                            failure_page_number.set(1);
-                            selected_failure.set(None);
-                            replay_command_id.set(None);
-                            failure_refresh.set(failure_refresh().saturating_add(1));
-                        },
-                        option { value: "", {t!("realtime-filter-all")} }
-                        option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
-                        option { value: "retry", disabled: true, {t!("realtime-state-retry")} }
-                        option { value: "dead_letter", {t!("realtime-state-dead-letter")} }
-                        option { value: "completed", {t!("realtime-state-completed")} }
+            div {
+                class: "admin-realtime-overview",
+                role: "region",
+                aria_label: t!("realtime-overview-title"),
+                {metric_card(
+                    t!("realtime-overview-events"),
+                    metric_value(event_total),
+                    activity_count_state(event_total),
+                )}
+                {metric_card(
+                    t!("realtime-overview-consumers"),
+                    metric_value(consumer_total),
+                    consumer_count_state(consumer_total),
+                )}
+                {metric_card(
+                    t!("realtime-overview-failures"),
+                    metric_value(failure_total),
+                    failure_count_state(failure_total),
+                )}
+            }
+
+            section { class: "admin-realtime-section", aria_labelledby: "realtime-events-title",
+                div { class: "admin-realtime-section__header",
+                    div {
+                        h2 { id: "realtime-events-title", {t!("realtime-event-title")} }
+                        p { {t!("realtime-event-note")} }
                     }
                 }
-            }
-            {failure_content}
-            if let Some(feedback) = notice() {
-                p {
-                    class: if feedback.is_success() {
-                        "admin-panel__note action-feedback action-feedback--success"
-                    } else {
-                        "admin-panel__note action-feedback action-feedback--error"
-                    },
-                    role: if feedback.is_success() { "status" } else { "alert" },
-                    {feedback.message(t!("realtime-replay-success"))}
+                RealtimeEventFilters {
+                    stream_filter: event_stream_filter,
+                    kind_filter: event_kind_filter,
+                    on_load: load_events,
                 }
+                {event_content}
+                {event_pager}
             }
-            {failure_pager}
-            RealtimeFailureFilters {
-                stream_filter: failure_stream_filter,
-                consumer_filter: failure_consumer_filter,
-                code_filter: failure_code_filter,
-                on_load: load_failures,
-            }
-            details { class: "admin-realtime-advanced",
-                summary { {t!("realtime-lag-title")} }
+
+            section { class: "admin-realtime-section", aria_labelledby: "realtime-lag-title",
+                div { class: "admin-realtime-section__header",
+                    div {
+                        h2 { id: "realtime-lag-title", {t!("realtime-lag-title")} }
+                        p { {t!("realtime-lag-note")} }
+                    }
+                }
                 {lag_content}
+            }
+
+            section { class: "admin-realtime-section", aria_labelledby: "realtime-failures-title",
+                div { class: "admin-realtime-section__header",
+                    div {
+                        h2 { id: "realtime-failures-title", {t!("realtime-failure-title")} }
+                        p { {t!("realtime-failure-note")} }
+                    }
+                    div { class: "admin-realtime-status",
+                        label { r#for: "outbox-status",
+                            {t!("realtime-filter-state")}
+                            select {
+                                id: "outbox-status",
+                                value: failure_resolved_filter(),
+                                onchange: move |event| {
+                                    let next_state = event.value();
+                                    failure_resolved_filter.set(next_state.clone());
+                                    active_failure_state_filter.set(next_state);
+                                    failure_page_number.set(1);
+                                    selected_failure.set(None);
+                                    replay_command_id.set(None);
+                                    failure_refresh.set(failure_refresh().saturating_add(1));
+                                },
+                                option { value: "", {t!("realtime-filter-all")} }
+                                option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
+                                option { value: "retry", disabled: true, {t!("realtime-state-retry")} }
+                                option { value: "dead_letter", {t!("realtime-state-dead-letter")} }
+                                option { value: "completed", {t!("realtime-state-completed")} }
+                            }
+                        }
+                    }
+                }
+                {failure_content}
+                if let Some(feedback) = notice() {
+                    p {
+                        class: if feedback.is_success() {
+                            "admin-panel__note action-feedback action-feedback--success"
+                        } else {
+                            "admin-panel__note action-feedback action-feedback--error"
+                        },
+                        role: if feedback.is_success() { "status" } else { "alert" },
+                        {feedback.message(t!("realtime-replay-success"))}
+                    }
+                }
+                {failure_pager}
+                RealtimeFailureFilters {
+                    stream_filter: failure_stream_filter,
+                    consumer_filter: failure_consumer_filter,
+                    code_filter: failure_code_filter,
+                    on_load: load_failures,
+                }
             }
             if let Some(failure) = selected {
                 div { class: "admin-shell__dialog-backdrop", role: "presentation",
@@ -183,6 +320,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         role: "dialog",
                         aria_modal: "true",
                         aria_labelledby: "realtime-replay-title",
+                        aria_describedby: "realtime-replay-warning",
                         onkeydown: move |event| {
                             if event.key() == Key::Escape && !replay_busy() {
                                 event.stop_propagation();
@@ -195,6 +333,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                             {t!("realtime-replay-title", id: failure.id.clone())}
                         }
                         p {
+                            id: "realtime-replay-warning",
                             class: "admin-panel__note",
                             {t!("realtime-replay-warning", event_id: failure.event_id.clone())}
                         }
@@ -204,6 +343,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 r#type: "number",
                                 min: "1",
                                 step: "1",
+                                autofocus: true,
                                 value: schema_version(),
                                 oninput: move |event| {
                                     schema_version.set(event.value());
@@ -271,6 +411,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                                 notice.set(Some(AdminActionFeedback::Success));
                                                 selected_failure.set(None);
                                                 replay_command_id.set(None);
+                                                event_refresh.set(event_refresh() + 1);
                                                 failure_refresh.set(failure_refresh() + 1);
                                                 lag_refresh.set(lag_refresh() + 1);
                                             }
@@ -286,7 +427,6 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                 r#type: "button",
                                 class: "admin-btn-secondary",
                                 disabled: replay_busy(),
-                                autofocus: true,
                                 onclick: move |_| {
                                     selected_failure.set(None);
                                     replay_command_id.set(None);
@@ -298,6 +438,43 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 }
             }
         }
+    }
+}
+
+fn metric_card(label: String, value: String, state: &'static str) -> Element {
+    rsx! {
+        div { class: "admin-realtime-metric", "data-state": state,
+            strong { class: "admin-realtime-metric__value", "{value}" }
+            span { class: "admin-realtime-metric__label", "{label}" }
+        }
+    }
+}
+
+fn metric_value(value: Option<i64>) -> String {
+    value.map_or_else(|| t!("value-empty"), |value| value.to_string())
+}
+
+fn activity_count_state(value: Option<i64>) -> &'static str {
+    match value {
+        None => "unavailable",
+        Some(0) => "neutral",
+        Some(_) => "ok",
+    }
+}
+
+fn consumer_count_state(value: Option<i64>) -> &'static str {
+    match value {
+        None => "unavailable",
+        Some(0) => "warn",
+        Some(_) => "ok",
+    }
+}
+
+fn failure_count_state(value: Option<i64>) -> &'static str {
+    match value {
+        None => "unavailable",
+        Some(0) => "ok",
+        Some(_) => "error",
     }
 }
 

@@ -20,17 +20,13 @@ pub(super) fn RealtimeFailureTable(
             table { class: "admin-shell__table admin-realtime-table",
                 thead {
                     tr {
-                        th { class: "admin-realtime-col-id", {t!("realtime-failure-id")} }
-                        th { class: "admin-realtime-col-event", {t!("realtime-failure-event-id")} }
-                        th { class: "admin-realtime-col-subject", {t!("realtime-failure-subject")} }
-                        th { class: "admin-realtime-col-topic", {t!("realtime-failure-topic")} }
-                        th { class: "admin-realtime-col-status", {t!("realtime-failure-state")} }
-                        th { class: "admin-realtime-col-attempts", {t!("realtime-failure-attempts")} }
-                        th { class: "admin-realtime-col-replays", {t!("realtime-failure-replays")} }
-                        th { class: "admin-realtime-col-available", {t!("realtime-failure-available")} }
                         th { class: "admin-realtime-col-failure", {t!("realtime-failure-time")} }
                         th { class: "admin-realtime-col-error", {t!("realtime-failure-error")} }
-                        th { class: "admin-realtime-col-trace", {t!("realtime-failure-trace")} }
+                        th { class: "admin-realtime-col-subject", {t!("realtime-stream")} }
+                        th { class: "admin-realtime-col-topic", {t!("realtime-consumer")} }
+                        th { class: "admin-realtime-col-event", {t!("realtime-failure-event-id")} }
+                        th { class: "admin-realtime-col-id", {t!("realtime-failure-id")} }
+                        th { class: "admin-realtime-col-status", {t!("realtime-failure-state")} }
                         th { {t!("catalog-actions")} }
                     }
                 }
@@ -41,13 +37,18 @@ pub(super) fn RealtimeFailureTable(
                             let error_detail = format!("{}: {}", failure.code, failure.safe_detail);
                             rsx! {
                                 tr { class: "admin-realtime__row",
-                                    td { "data-label": t!("realtime-failure-id"),
+                                    td { "data-label": t!("realtime-failure-time"),
+                                        time { datetime: failure.failed_at.clone(), "{format_admin_time(&failure.failed_at)}" }
+                                    }
+                                    td { "data-label": t!("realtime-failure-error"), class: "admin-realtime__error",
                                         TruncatedText {
-                                            display: compact_realtime_id(&failure.id),
-                                            size: "compact",
-                                            value: failure.id.clone()
+                                            display: failure.code.clone(),
+                                            size: "wide",
+                                            value: error_detail,
                                         }
                                     }
+                                    td { "data-label": t!("realtime-stream"), TruncatedText { value: failure.stream_key.clone() } }
+                                    td { "data-label": t!("realtime-consumer"), TruncatedText { value: failure.consumer_key.clone() } }
                                     td { "data-label": t!("realtime-failure-event-id"),
                                         TruncatedText {
                                             display: compact_realtime_id(&failure.event_id),
@@ -55,8 +56,13 @@ pub(super) fn RealtimeFailureTable(
                                             value: failure.event_id.clone()
                                         }
                                     }
-                                    td { "data-label": t!("realtime-failure-subject"), TruncatedText { value: failure.stream_key.clone() } }
-                                    td { "data-label": t!("realtime-failure-topic"), TruncatedText { value: failure.consumer_key.clone() } }
+                                    td { "data-label": t!("realtime-failure-id"),
+                                        TruncatedText {
+                                            display: compact_realtime_id(&failure.id),
+                                            size: "compact",
+                                            value: failure.id.clone()
+                                        }
+                                    }
                                     td { "data-label": t!("realtime-failure-state"),
                                         span {
                                             class: if failure.resolved {
@@ -71,20 +77,6 @@ pub(super) fn RealtimeFailureTable(
                                             }
                                         }
                                     }
-                                    td { "data-label": t!("realtime-failure-attempts"), class: "admin-realtime__number", {t!("value-empty")} }
-                                    td { "data-label": t!("realtime-failure-replays"), class: "admin-realtime__number", {t!("value-empty")} }
-                                    td { "data-label": t!("realtime-failure-available"), {t!("value-empty")} }
-                                    td { "data-label": t!("realtime-failure-time"),
-                                        time { datetime: failure.failed_at.clone(), "{format_admin_time(&failure.failed_at)}" }
-                                    }
-                                    td { "data-label": t!("realtime-failure-error"), class: "admin-realtime__error",
-                                        TruncatedText {
-                                            display: failure.code.clone(),
-                                            size: "wide",
-                                            value: error_detail,
-                                        }
-                                    }
-                                    td { "data-label": t!("realtime-failure-trace"), {t!("realtime-trace-no")} }
                                     td { "data-label": t!("catalog-actions"), class: "admin-realtime__actions",
                                         if !failure.resolved {
                                             button {
@@ -102,7 +94,7 @@ pub(super) fn RealtimeFailureTable(
             }
         }
         if is_empty {
-            p { {t!("realtime-failure-empty")} }
+            p { class: "admin-realtime-empty", role: "status", {t!("realtime-failure-empty")} }
         }
     }
 }
@@ -123,7 +115,7 @@ pub(super) fn RealtimeFailurePager(page: RealtimeFailurePage, page_number: Signa
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: page.pagination.total,
-            label: t!("page-outbox-title"),
+            label: t!("realtime-failure-title"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

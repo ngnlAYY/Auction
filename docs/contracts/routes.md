@@ -355,6 +355,8 @@ MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全�
 可交易装备开关；后者默认关闭且不放宽来源安全或邮件过滤。固定 HTTPS origin、无重定向、精确 world
 路径及流式有界读取始终失败关闭。更新成功返回的 `restart_required` 因而是
 真实生效边界，不是热加载提示；业务区块更新要求重启受影响的 Admin 与 Worker。
+Admin WebUI 将这份闭集投影映射成分组开关、数字、列表与文本输入；保存仍提交完整候选文档，
+因此所有页面修改最终由 PUT 的原子文件替换边界写回配置文件，不存在只在浏览器内生效的旁路。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、稳定论坛账号 ID

@@ -1,24 +1,30 @@
-//! Admin realtime lag/failure 查询与 replay 持久化适配器。
+//! Admin realtime 事件元数据、lag/failure 查询与 replay 持久化适配器。
 //!
-//! 本模块只负责端口校验与 PostgreSQL/SQLite 子适配器分派；查询投影、失败读取和 replay
-//! 事务分别由同目录的具名模块持有，避免把两种后端和多类运维职责堆在单一入口文件中。
+//! 本模块只负责端口校验与 PostgreSQL/SQLite 子适配器分派；事件元数据、查询投影、失败读取和
+//! replay 事务分别由同目录的具名模块持有，避免把两种后端和多类运维职责堆在单一入口文件中。
 
 use auction_application::{
     ApplicationFuture, RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot,
-    RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot,
-    RealtimeLagListRequest, RealtimeLagPage, RealtimeReplayCommand, RealtimeReplayResult,
+    RealtimeEventListRequest, RealtimeEventPage, RealtimeFailureListRequest, RealtimeFailurePage,
+    RealtimeFailureSnapshot, RealtimeLagListRequest, RealtimeLagPage, RealtimeReplayCommand,
+    RealtimeReplayResult,
 };
 use uuid::Uuid;
 
 use super::DatabaseStore;
 
 mod common;
+mod events;
 mod failures;
 mod lag;
 mod replay;
 mod snapshot;
 
 use common::admin_error;
+#[cfg(feature = "postgres")]
+use events::list_events_postgres;
+#[cfg(feature = "sqlite")]
+use events::list_events_sqlite;
 #[cfg(feature = "postgres")]
 use failures::{get_failure_postgres, list_failures_postgres};
 #[cfg(feature = "sqlite")]
@@ -44,6 +50,23 @@ impl RealtimeAdminPort for DatabaseStore {
                 DatabaseStore::Postgres(store) => dashboard_snapshot_postgres(store).await,
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => dashboard_snapshot_sqlite(store).await,
+            }
+        })
+    }
+
+    fn list_events(
+        &self,
+        request: RealtimeEventListRequest,
+    ) -> ApplicationFuture<'_, RealtimeEventPage> {
+        Box::pin(async move {
+            if !request.validate() {
+                return Err(admin_error(RealtimeAdminError::InvalidCommand));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => list_events_postgres(store, request).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => list_events_sqlite(store, request).await,
             }
         })
     }

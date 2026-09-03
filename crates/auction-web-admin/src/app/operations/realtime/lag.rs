@@ -13,10 +13,10 @@ use crate::app::surface::pagination::AdminPager;
 pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
     rsx! {
         if page.lags.is_empty() {
-            p { {t!("realtime-lag-empty")} }
+            p { class: "admin-realtime-empty", role: "status", {t!("realtime-lag-empty")} }
         } else {
             div { class: "admin-shell__table-wrap",
-                table { class: "admin-shell__table",
+                table { class: "admin-shell__table admin-realtime-table",
                     thead {
                         tr {
                             th { {t!("realtime-consumer")} }

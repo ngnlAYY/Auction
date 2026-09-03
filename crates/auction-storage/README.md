@@ -368,7 +368,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000032` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000033` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -383,10 +383,11 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 `000030` 以迁移前置检查和 partial unique index 保证 `mail_cookie`/`forum_cookie` 各自全局最多一条
 active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据；`000031` 为论坛
 主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点；`000032` 允许唯一录入目标
-指向 Draft/Preview，并以跨状态唯一索引和延迟触发器保护正式开拍时的目标切换。SQLite
-`000001_lite_core.up.sql`、`000002` 至 `000010` 的调度、用户管理、取消/
+指向 Draft/Preview，并以跨状态唯一索引和延迟触发器保护正式开拍时的目标切换；`000033` 为 Admin
+realtime 事件倒序列表补齐时间与事件 ID 复合索引。SQLite
+`000001_lite_core.up.sql`、`000002` 至 `000011` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
-`BEGIN IMMEDIATE` 竞价和生命周期写适配器均已接入；结算报告属于 PostgreSQL 完整档，SQLite
+`BEGIN IMMEDIATE` 竞价和生命周期写适配器及同义 realtime 读取索引均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由
 `src/database/settlement_scheduler/mod.rs` 装配，due claim/租约和完成/失败 fence 分别由
 `settlement_scheduler/{claim,resolution}.rs` 持有：接管路径局部识别旧
@@ -422,8 +423,9 @@ Admin 交付命令由 `src/database/delivery_admin/` 持有：`mod.rs` 负责端
 `mapping.rs` 负责安全快照、响应元数据投影及旧 Go 完整账本 payload 防腐映射，`transaction.rs`
 负责 Serializable 事务、SQLSTATE 重试闭集和 10ms/20ms 有限退避；SQLite Lite 明确返回能力不支持。
 SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
-`src/database/realtime_admin/` 分层持有：`mod.rs` 负责端口分派，`snapshot.rs`、`lag.rs`、
-`failures.rs` 与 `replay/` 分别负责安全快照、lag、failure 读取和 replay；replay 再按
+`src/database/realtime_admin/` 分层持有：`mod.rs` 负责端口分派，`events.rs`、`snapshot.rs`、
+`lag.rs`、`failures.rs` 与 `replay/` 分别负责不含 payload 的事件元数据、安全快照、lag、failure
+读取和 replay；事件元数据的总数与当前页在同一 SQL 快照中生成，避免并发追加让分页响应自相矛盾；replay 再按
 `replay.rs` 公共结果映射、`replay/postgres.rs` 完整档事务和 `replay/sqlite.rs` Lite 事务
 拆分，`common.rs` 负责共享错误、时间/UUID 映射与 Lite 事务边界。Worker realtime consumer 由
 `src/database/realtime_consumer/` 分层持有：`mod.rs` 负责端口分派，`ownership.rs` 按

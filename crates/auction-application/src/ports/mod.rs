@@ -333,7 +333,8 @@ pub use realtime::{
     PublicRealtimeRequest,
 };
 pub use realtime_admin::{
-    MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError, RealtimeAdminPort, RealtimeDashboardSnapshot,
+    MAX_REALTIME_ADMIN_OFFSET, MAX_REALTIME_ADMIN_PAGE_SIZE, RealtimeAdminError, RealtimeAdminPort,
+    RealtimeDashboardSnapshot, RealtimeEventListRequest, RealtimeEventPage, RealtimeEventSnapshot,
     RealtimeFailureListRequest, RealtimeFailurePage, RealtimeFailureSnapshot, RealtimeFailureWater,
     RealtimeLagListRequest, RealtimeLagPage, RealtimeLagSnapshot, RealtimeReplayCommand,
     RealtimeReplayResult,

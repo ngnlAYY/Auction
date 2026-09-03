@@ -1,4 +1,4 @@
-//! Public 拍卖历史视图切换和历史轮次导航。
+//! Public 拍卖的预览与历史视图切换。
 
 use super::*;
 
@@ -68,34 +68,6 @@ pub(crate) fn preview_history_switch(
                     Link { to: previous_href, {t!("auction-history-previous-view")} }
                 } else {
                     span { {t!("auction-history-no-previous")} }
-                }
-            }
-        }
-    }
-}
-
-/// 历史拍卖页的返回和上一轮导航；当前轮次不显示历史导航，避免污染首屏竞价操作。
-#[component]
-pub(crate) fn HistoricalAuctionNavigation(auction: CurrentAuction) -> Element {
-    let history = use_resource(fetch_auction_list);
-    let previous = match &*history.read_unchecked() {
-        Some(Ok(rows)) => rows
-            .iter()
-            .filter(|row| row.world_id == auction.world && row.sequence < auction.number)
-            .max_by_key(|row| row.sequence)
-            .cloned(),
-        _ => None,
-    };
-
-    rsx! {
-        nav {
-            class: "public-auction-history-nav",
-            aria_label: t!("auction-history-navigation"),
-            Link { to: "/auctions", {t!("auction-history-back")} }
-            if let Some(previous) = previous {
-                Link {
-                    to: historical_auction_href(&previous.id, Some(&previous.world_id)),
-                    {t!("auction-history-previous", number: previous.sequence)}
                 }
             }
         }

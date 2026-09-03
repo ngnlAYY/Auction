@@ -116,13 +116,14 @@ ops/                          # 配置样例、部署和恢复文档
 需要固定的 Rust 1.98.0 当前稳定工具链和 `wasm32-unknown-unknown` 编译目标；workspace
 MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用官方 `1.51.x` LTS，
 其他无 LTS 的 crate 由 `Cargo.lock` 固定并受控升级。运行时配置统一使用 TOML；
-`AUCTION_CONFIG_FILE` 只用于选择主配置文件，不用于覆盖单个配置项。主配置通过
-`secrets_file` 引用独立敏感 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
+`AUCTION_CONFIG_FILE` 只用于选择角色配置文件，不用于覆盖单个配置项。Public、Admin 与 Worker
+角色文件都通过 `common_file` 引用同一份公共非敏感 TOML，并通过 `secrets_file` 引用独立敏感
+TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
 只放在该敏感文件中。Admin 与 Worker 主配置还可通过 `runtime_config_file` 指向同一份由 Admin
 管理的非敏感 runtime TOML；A26/A27 的 PostgreSQL 完整档更新会写入该文件，并要求重启受影响的
 Admin/Worker，SQLite Lite 不提供更新命令。Worker 只消费其中的 world、发件人、装备过滤和通知
 模板业务区块，transport、凭据、调度与全局启用开关仍由 Worker 主配置拥有。
-拍卖策略模板位于主配置的 `[auction]` 区块；Admin 创建拍卖时会把已校验模板冻结到拍卖策略快照，
+拍卖策略模板位于公共配置的 `[auction]` 区块；Admin 创建拍卖时会把已校验模板冻结到拍卖策略快照，
 具体字段和默认值见 [`ops/config/README.md`](ops/config/README.md)。
 
 构建浏览器端产物还需要 dx CLI（`cargo install dioxus-cli --locked`）。dx 会按需从 npm

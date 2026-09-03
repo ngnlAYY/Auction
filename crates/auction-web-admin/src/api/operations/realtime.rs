@@ -1,15 +1,16 @@
 //! Admin realtime 运维 API 客户端。
 //!
-//! 浏览器只接收 lag/failure 的安全投影；replay 的公开 payload 由管理操作员显式输入，
-//! 并由服务端事件注册表、命令账本和数据库事务做最终校验。
+//! 浏览器只接收事件元数据与 lag/failure 的安全投影；replay 的公开 payload 由管理操作员
+//! 显式输入，并由服务端事件注册表、命令账本和数据库事务做最终校验。
 
 pub(crate) use auction_contracts::{
+    AdminRealtimeEventListResponse as RealtimeEventPage,
     AdminRealtimeFailureListResponse as RealtimeFailurePage,
     AdminRealtimeFailureResponse as RealtimeFailure,
     AdminRealtimeLagListResponse as RealtimeLagPage,
 };
 use auction_contracts::{
-    AdminRealtimeFailurePaginationResponse, AdminRealtimeLagResponse,
+    AdminRealtimeEventResponse, AdminRealtimeFailurePaginationResponse, AdminRealtimeLagResponse,
     AdminRealtimePaginationResponse, AdminRealtimeReplayRequest,
 };
 use gloo_net::http::Request;
@@ -20,9 +21,25 @@ use uuid::Uuid;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, TABLE_PAGE_SIZE, invalid_request_error,
-    invalid_response_error, response_error, send_get, valid_admin_time, valid_trimmed_text,
-    valid_uuid,
+    invalid_response_error, response_error, send_get, valid_admin_time, valid_safe_text,
+    valid_trimmed_text, valid_uuid,
 };
+
+#[derive(Debug, Deserialize)]
+struct StrictEvent {
+    created_at: String,
+    event_id: String,
+    kind: String,
+    schema_version: i32,
+    stream_key: String,
+    stream_sequence: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct StrictEventPage {
+    events: Vec<StrictEvent>,
+    pagination: StrictPagination,
+}
 
 /// 旧 realtime decoder 允许对象扩展字段；这里仍要求全部旧字段及其组合语义。
 #[derive(Debug, Deserialize)]
@@ -89,6 +106,49 @@ struct StrictReplay {
     schema_version: i32,
     stream_key: String,
     stream_sequence: i64,
+}
+
+pub(crate) async fn fetch_realtime_event_page(
+    page: i64,
+    stream_key: String,
+    kind: String,
+) -> Result<RealtimeEventPage, String> {
+    fetch_realtime_event_page_with_size(page, TABLE_PAGE_SIZE, stream_key, kind).await
+}
+
+/// 只取全局事件总数，避免概览卡片被列表筛选条件改写。
+pub(crate) async fn fetch_realtime_event_total() -> Result<i64, String> {
+    let page = fetch_realtime_event_page_with_size(1, 1, String::new(), String::new()).await?;
+    Ok(page.pagination.total)
+}
+
+async fn fetch_realtime_event_page_with_size(
+    page: i64,
+    page_size: i64,
+    stream_key: String,
+    kind: String,
+) -> Result<RealtimeEventPage, String> {
+    let requested_page = page.max(1);
+    let requested_page_size = page_size.max(1);
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("page", &requested_page.to_string());
+    query.append_pair("page_size", &requested_page_size.to_string());
+    append_filter(&mut query, "stream_key", &stream_key);
+    append_filter(&mut query, "kind", &kind);
+    let response = send_get(&format!("/api/v1/admin/realtime/events?{}", query.finish())).await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    let payload: ApiResponse<StrictEventPage> =
+        response.json().await.map_err(invalid_response_error)?;
+    decode_event_page(
+        payload.data,
+        requested_page,
+        requested_page_size,
+        stream_key.trim(),
+        kind.trim(),
+    )
+    .map_err(invalid_response_error)
 }
 
 pub(crate) async fn fetch_realtime_lag_page(
@@ -252,6 +312,51 @@ fn decode_lag_page(
     Ok(RealtimeLagPage { lags, pagination })
 }
 
+fn decode_event_page(
+    data: StrictEventPage,
+    requested_page: i64,
+    requested_page_size: i64,
+    stream_key: &str,
+    kind: &str,
+) -> Result<RealtimeEventPage, &'static str> {
+    let pagination = decode_pagination(data.pagination)?;
+    if pagination.page != requested_page
+        || pagination.page_size != requested_page_size
+        || i64::try_from(data.events.len())
+            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
+    {
+        return Err("realtime_event_page");
+    }
+    let events = data.events.into_iter().map(decode_event).collect::<Result<Vec<_>, _>>()?;
+    if events.iter().any(|event| {
+        (!stream_key.is_empty() && event.stream_key != stream_key)
+            || (!kind.is_empty() && event.kind != kind)
+    }) {
+        return Err("realtime_event_filter");
+    }
+    Ok(RealtimeEventPage { events, pagination })
+}
+
+fn decode_event(value: StrictEvent) -> Result<AdminRealtimeEventResponse, &'static str> {
+    if !valid_uuid(&value.event_id)
+        || !valid_safe_text(&value.stream_key, 256)
+        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.stream_sequence)
+        || !valid_safe_text(&value.kind, 128)
+        || value.schema_version <= 0
+        || !valid_admin_time(&value.created_at)
+    {
+        return Err("realtime_event");
+    }
+    Ok(AdminRealtimeEventResponse {
+        event_id: value.event_id,
+        stream_key: value.stream_key,
+        stream_sequence: value.stream_sequence,
+        kind: value.kind,
+        schema_version: value.schema_version,
+        created_at: value.created_at,
+    })
+}
+
 fn decode_lag(value: StrictLag) -> Result<AdminRealtimeLagResponse, &'static str> {
     if !valid_trimmed_text(&value.consumer_key)
         || !valid_trimmed_text(&value.stream_key)
@@ -321,6 +426,7 @@ fn decode_failure(value: StrictFailure) -> Result<RealtimeFailure, &'static str>
         || !valid_trimmed_text(&value.stream_key)
         || !valid_trimmed_text(&value.consumer_key)
         || !valid_trimmed_text(&value.code)
+        || !valid_safe_text(&value.safe_detail, 2_048)
         || !valid_admin_time(&value.failed_at)
         || value.resolved_at.0.as_deref().is_some_and(|time| !valid_admin_time(time))
         || value.resolved != value.resolved_at.0.is_some()

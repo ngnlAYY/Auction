@@ -1,6 +1,6 @@
 //! Public 当前拍卖看板的稳定出口。
 //!
-//! 看板入口、世界选择、实时刷新、拍卖数据展示和历史导航分别归档到子模块；surface
+//! 看板入口、世界选择、实时刷新、拍卖数据展示和预览/历史视图切换分别归档到子模块；surface
 //! 仍通过本模块取得原有的组件与辅助函数。
 
 mod data;
@@ -11,7 +11,7 @@ mod world;
 use super::*;
 
 pub(crate) use data::AuctionData;
-pub(crate) use navigation::{HistoricalAuctionNavigation, preview_history_switch};
+pub(crate) use navigation::preview_history_switch;
 pub(crate) use realtime::{
     PublicConnectionState, PublicReadinessState, PublicRealtimeOwner, PublicRealtimeTarget,
     live_connection_state_name, public_connection_class, public_connection_state,

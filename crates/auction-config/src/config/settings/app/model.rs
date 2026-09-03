@@ -5,18 +5,14 @@ use super::super::*;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FileConfig {
+    /// 必填的公共非敏感 TOML 路径；共享日志、指标、缓存和拍卖策略只从该文件加载。
+    pub(super) common_file: PathBuf,
     /// 兼容旧格式的可选监听地址；与 `listener` 同时提供会失败，建议使用完整 listener 区块。
     #[serde(default)]
     pub(super) listen_address: Option<String>,
     /// 可选 HTTP listener 区块；Public/Admin 可选择 TCP 或 Linux Unix socket。
     #[serde(default)]
     pub(super) listener: Option<HttpListenerConfig>,
-    /// 可选 tracing 过滤器；省略时由装配根采用默认过滤器。
-    #[serde(default)]
-    pub(super) log_filter: Option<String>,
-    /// 可选 metrics 区块；省略时关闭进程本地 Prometheus 导出。
-    #[serde(default)]
-    pub(super) metrics: MetricsConfig,
     /// 可选 tracing 区块；Public/Worker 使用，Admin 有 runtime 文件时由 runtime 覆盖。
     #[serde(default)]
     pub(super) tracing: TracingSettings,
@@ -29,12 +25,6 @@ pub(super) struct FileConfig {
     /// MoogleMail world、发件人、装备过滤和通知模板。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
-    /// 可选缓存区块；省略时使用关闭缓存的默认值。
-    #[serde(default)]
-    pub(super) cache: CacheConfig,
-    /// 可选拍卖策略区块；省略时使用旧版共享配置的默认模板。
-    #[serde(default)]
-    pub(super) auction: AuctionConfig,
     /// 可选 Worker 区块；省略时 PostgreSQL 并发为 8、SQLite 并发为 1，轮询为 60 秒。
     #[serde(default)]
     pub(super) worker: WorkerConfig,
@@ -46,8 +36,23 @@ pub(super) struct FileConfig {
     pub(super) session: Option<SessionConfig>,
 }
 
+/// 三个进程共同引用的非敏感配置；闭集模型同时阻止角色专属字段混入公共文件。
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct CommonFileConfig {
+    /// 可选 tracing 过滤器；省略时由装配根采用默认过滤器。
+    pub(super) log_filter: Option<String>,
+    /// 进程本地 Prometheus 指标公共默认值；Admin runtime 仍可在重启时覆盖。
+    pub(super) metrics: MetricsConfig,
+    /// 可丢弃缓存的公共策略。
+    pub(super) cache: CacheConfig,
+    /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
+    pub(super) auction: AuctionConfig,
+}
+
 pub(super) struct BuildInput {
     pub(super) config_path: Option<PathBuf>,
+    pub(super) common_config_path: Option<PathBuf>,
     pub(super) listen_address: Option<String>,
     pub(super) listener: Option<HttpListenerConfig>,
     pub(super) log_filter: Option<String>,
@@ -92,6 +97,8 @@ pub struct AppConfig {
     pub session: SessionConfig,
     /// 主配置文件路径；程序化默认配置时为 None。
     pub config_path: Option<PathBuf>,
+    /// 公共非敏感配置文件路径；文件配置加载时由必填 common_file 解析得到。
+    pub common_config_path: Option<PathBuf>,
     /// 敏感配置文件路径；主配置加载时由必填 secrets_file 解析得到。
     pub secrets_path: Option<PathBuf>,
     /// Admin 管理 runtime 文件路径；Admin/Worker 可配置，Public 或省略时为 None。
@@ -120,6 +127,7 @@ impl fmt::Debug for AppConfig {
             .field("tracing", &self.tracing)
             .field("realtime", &self.realtime)
             .field("config_path", &self.config_path)
+            .field("common_config_path", &self.common_config_path)
             .field("secrets_path", &self.secrets_path)
             .field("runtime_config_path", &self.runtime_config_path)
             .field("admin_runtime_configured", &self.admin_runtime.is_some())

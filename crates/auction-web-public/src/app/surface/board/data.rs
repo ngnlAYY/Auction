@@ -94,7 +94,7 @@ pub(crate) fn AuctionData(
         }
         _ => true,
     };
-    // 首次揭示要等主要目录已有成功或失败结果；辅助历史导航继续局部异步，避免拖慢整页。
+    // 首次揭示要等主要目录已有成功或失败结果；辅助视图切换继续局部异步，避免拖慢整页。
     use_app_boot_ready(boot_prerequisites_ready && lots.read().is_some());
     let alignment_key = format!(
         "{}:{}:{}:{}:{}",
@@ -188,9 +188,6 @@ pub(crate) fn AuctionData(
                         span {
                             class: "public-auction-round__status public-auction-round__status--{auction_status_class(&auction.status)}",
                             "{status_label}"
-                        }
-                        if historical {
-                            HistoricalAuctionNavigation { auction: auction.clone() }
                         }
                     }
                     if is_opening_presentation {
