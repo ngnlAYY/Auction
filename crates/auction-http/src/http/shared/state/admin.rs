@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use auction_application::{
-    AdminAuctionCreatePort, AdminAuctionReader, AdminAuditPort, AdminCredentialHealthReader,
-    AdminCredentialPort, AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort,
-    AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader,
-    AdminRulesPort, AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort,
+    AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
+    AdminCredentialHealthReader, AdminCredentialPort, AdminCredentialWorld, AdminForumPreviewPort,
+    AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
+    AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort,
     AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
     OperationsAlertStore, ProcessReadinessPort, ReadModelCache, RealtimeAdminPort,
     RecoveryCommandPort, RecoveryReportReader, SettlementReportReader, WorkerControlPort,
@@ -25,6 +25,7 @@ pub struct AdminApiState {
     session: Option<Arc<dyn AdminSessionPort>>,
     lifecycle: Option<Arc<dyn AuctionLifecycleCommandPort>>,
     auction_create: Option<Arc<dyn AdminAuctionCreatePort>>,
+    auction_schedule: Option<Arc<dyn AdminAuctionSchedulePort>>,
     admin_audit: Option<Arc<dyn AdminAuditPort>>,
     health: Option<Arc<dyn HealthReader>>,
     admin_intake: Option<Arc<dyn AdminIntakePort>>,
@@ -92,6 +93,7 @@ impl AdminApiState {
             session,
             lifecycle,
             auction_create,
+            auction_schedule: None,
             admin_audit,
             health,
             admin_intake,
@@ -136,6 +138,12 @@ impl AdminApiState {
         self
     }
 
+    /// 注入正式开拍前的计划结束时间修改端口。
+    pub fn with_auction_schedule(mut self, schedule: Arc<dyn AdminAuctionSchedulePort>) -> Self {
+        self.auction_schedule = Some(schedule);
+        self
+    }
+
     /// 返回与本 state 同源的协议边界，供路由装配时建立全局 middleware。
     pub fn http_boundary(&self) -> HttpBoundary {
         self.security.boundary()
@@ -170,6 +178,10 @@ impl AdminApiState {
 
     pub(crate) fn auction_create(&self) -> Option<&dyn AdminAuctionCreatePort> {
         self.auction_create.as_deref()
+    }
+
+    pub(crate) fn auction_schedule(&self) -> Option<&dyn AdminAuctionSchedulePort> {
+        self.auction_schedule.as_deref()
     }
 
     pub(crate) fn admin_audit(&self) -> Option<&dyn AdminAuditPort> {

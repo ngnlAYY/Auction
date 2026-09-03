@@ -105,6 +105,7 @@ pub(crate) async fn list(
                         .is_some_and(|lifecycle| lifecycle.allows_manual_early_settlement()),
                     manual_intake: state.admin_intake().is_some(),
                     manual_preview_open: true,
+                    modify_schedule: state.auction_schedule().is_some(),
                 },
                 pagination: AdminAuctionPaginationResponse { page, page_size, total: result.total },
             },

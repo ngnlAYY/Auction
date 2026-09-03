@@ -6,11 +6,11 @@ use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::future::TimeoutFuture;
 
-use crate::api::{AdminAuctionLifecycleAction, AdminAuctionPage};
+use crate::api::AdminAuctionPage;
 
 use super::super::intake::AdminIntakeForm;
 use super::super::pagination::AdminPager;
-use super::actions::{AdminAuctionRow, lifecycle_action_success_label};
+use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::helpers::current_time_millis;
 
@@ -22,7 +22,7 @@ pub(super) fn AdminAuctionTable(
     reload_generation: Signal<u64>,
 ) -> Element {
     let clock_millis = use_signal(current_time_millis);
-    let notice = use_signal(|| None::<AdminAuctionLifecycleAction>);
+    let notice = use_signal(|| None::<AdminAuctionNotice>);
     #[cfg(target_arch = "wasm32")]
     let _clock_task = use_future(move || {
         let mut clock_millis = clock_millis;
@@ -117,9 +117,9 @@ pub(super) fn AdminAuctionTable(
                 }
                 AdminAuctionCreateForm { reload_generation }
             }
-            if let Some(action) = notice() {
+            if let Some(notice) = notice() {
                 p { class: "action-feedback action-feedback--success", role: "status",
-                    {lifecycle_action_success_label(action)}
+                    {auction_notice_label(notice)}
                 }
             }
             {list_content}

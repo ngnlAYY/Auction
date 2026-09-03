@@ -36,6 +36,7 @@ pub struct AdminAuctionCapabilitiesResponse {
     pub manual_early_settlement: bool,
     pub manual_intake: bool,
     pub manual_preview_open: bool,
+    pub modify_schedule: bool,
 }
 
 /// Admin 拍卖列表中的生命周期安全投影。

@@ -6,6 +6,13 @@ use crate::api::{AdminAuctionCapabilities, AdminAuctionLifecycleAction};
 
 use super::super::helpers::scheduled_time_millis;
 
+/// 拍卖列表顶部一次只显示一个成功动作，避免各行刷新后残留局部提示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdminAuctionNotice {
+    Lifecycle(AdminAuctionLifecycleAction),
+    Schedule,
+}
+
 pub(super) fn lifecycle_actions(
     status: &str,
     capabilities: &AdminAuctionCapabilities,
@@ -127,5 +134,12 @@ pub(crate) fn lifecycle_action_success_label(action: AdminAuctionLifecycleAction
         AdminAuctionLifecycleAction::EarlySettlement => {
             t!("admin-auctions-action-early-settlement-success")
         }
+    }
+}
+
+pub(crate) fn auction_notice_label(notice: AdminAuctionNotice) -> String {
+    match notice {
+        AdminAuctionNotice::Lifecycle(action) => lifecycle_action_success_label(action),
+        AdminAuctionNotice::Schedule => t!("admin-auctions-schedule-success"),
     }
 }

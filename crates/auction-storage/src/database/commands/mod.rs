@@ -6,16 +6,18 @@
 use std::sync::Arc;
 
 use auction_application::{
-    AdminAuctionCreatePort, AdminAuctionSummary, AdminCreateAuctionCommand, AdminRulesDocument,
-    AdminRulesPort, AdminRulesPublishCommand, AdminRulesReader, AdminRulesRequest,
-    ApplicationFuture, AuctionLifecycleCommand, AuctionLifecycleCommandPort,
-    AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate,
-    Clock, CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService,
-    CreateProxyCommand, ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand,
-    SlowProxyCommandPort,
+    AdminAuctionCreatePort, AdminAuctionSchedulePort, AdminAuctionSummary,
+    AdminCreateAuctionCommand, AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand,
+    AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, ApplicationFuture,
+    AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
+    AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate, Clock,
+    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
+    ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
 };
 #[cfg(feature = "postgres")]
-use auction_application::{AdminAuctionCreateService, AdminRulesService};
+use auction_application::{
+    AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService,
+};
 use auction_domain::CompetitionPlan;
 
 use super::DatabaseStore;
@@ -305,6 +307,35 @@ where
                 DatabaseStore::Sqlite(_) => {
                     Err(auction_application::ApplicationError::CapabilityUnavailable(
                         "Admin 创建拍卖仅支持 PostgreSQL 完整档",
+                    ))
+                }
+            }
+        })
+    }
+}
+
+impl<C> AdminAuctionSchedulePort for DatabaseAdminAuctionCommands<C>
+where
+    C: Clock + 'static,
+{
+    fn update_schedule(
+        &self,
+        command: AdminUpdateAuctionScheduleCommand,
+    ) -> ApplicationFuture<'_, AdminAuctionSummary> {
+        let store = Arc::clone(&self.store);
+        #[cfg(not(feature = "postgres"))]
+        let _ = &command;
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AdminAuctionScheduleService::new(Arc::new(store.clone()));
+                    service.update_schedule(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    Err(auction_application::ApplicationError::CapabilityUnavailable(
+                        "Admin 拍卖计划修改仅支持 PostgreSQL 完整档",
                     ))
                 }
             }

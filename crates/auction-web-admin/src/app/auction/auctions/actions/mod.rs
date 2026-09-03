@@ -6,6 +6,7 @@
 mod dialog;
 mod model;
 mod row;
+mod schedule;
 
-pub(super) use model::lifecycle_action_success_label;
+pub(super) use model::{AdminAuctionNotice, auction_notice_label};
 pub(super) use row::AdminAuctionRow;

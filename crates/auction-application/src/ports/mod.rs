@@ -1,5 +1,7 @@
 #[path = "admin/auction_create.rs"]
 mod admin_auction_create;
+#[path = "admin/auction_schedule.rs"]
+mod admin_auction_schedule;
 #[path = "admin/auctions.rs"]
 mod admin_auctions;
 #[path = "admin/audit.rs"]
@@ -109,6 +111,10 @@ mod worker_control;
 
 pub use admin_auction_create::{
     AdminAuctionCreatePort, AdminAuctionCreateTransaction, AdminCreateAuctionCommand,
+};
+pub use admin_auction_schedule::{
+    ADMIN_AUCTION_SCHEDULE_COMMAND_KIND, AdminAuctionSchedulePort, AdminAuctionScheduleSnapshot,
+    AdminAuctionScheduleTransaction, AdminUpdateAuctionScheduleCommand,
 };
 pub use admin_auctions::{
     ADMIN_AUCTION_STATUSES, AdminAuctionListRequest, AdminAuctionPage, AdminAuctionReader,

@@ -11,6 +11,8 @@ mod common;
 mod list;
 #[path = "mapping.rs"]
 mod mapping;
+#[path = "schedule.rs"]
+mod schedule;
 
 pub(super) use super::{
     AdminApiState, admin_session_guard, api_error, authenticated_admin_mutation,
@@ -24,3 +26,4 @@ pub(super) use common::{
 };
 pub(super) use list::list;
 pub(super) use mapping::{map_auction, map_auction_command};
+pub(super) use schedule::update as update_schedule;

@@ -161,7 +161,7 @@ async fn create_admin_auction_inner(
             created_at,
             updated_at,
         },
-        scheduled_ends_at: None,
+        scheduled_ends_at: Some(command.scheduled_end_at),
         lot_count: 0,
     };
     if !result.validate() {

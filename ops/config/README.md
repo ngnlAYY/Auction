@@ -96,12 +96,15 @@ Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布�
 命中内容必须通过完整文档校验；损坏快照会尽力删除并回源数据库。Redis 失效失败只依赖 TTL
 收敛，不会回滚已经提交的规则事务。
 
-主配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.economics]`、
+主配置还可以包含 `[auction]` 拍卖策略模板，分为 `[auction.schedule]`、`[auction.economics]`、
 `[auction.settlement]` 和 `[auction.settlement.recovery]`。这些字段都是非敏感的可选字段，
 完整字段、中文注释和默认值见各角色示例。Admin 创建拍卖时，模板会在 PostgreSQL 事务中冻结
 为 `policy_snapshot`，并同步写入遗留规则列；竞价和取消事务都会从这份快照恢复 PPM、代理
 限制、final phase 及时间规则。MoogleMail 入站的默认起拍价继承同一 `[auction.economics]`
 模板，只有显式覆盖值才会改变它。
+`[auction.schedule]` 默认关闭；启用后的内置时间为 UTC 周四 22:00 开放预览、周五 00:00
+正式开拍、周六 12:00 计划结束。所有星期、时间、时区和 world 均可在 TOML 中覆盖；默认值
+变化只影响后续生成的新轮次，不会改写数据库中已经存在的拍卖。
 
 Public/Admin 主配置还可以包含 `[listener]`、`[http_security]` 与 `[session]`。`[listener]` 的
 `mode = "tcp"` 使用 `address`；`mode = "unix"`（仅 Linux）要求规范化的绝对

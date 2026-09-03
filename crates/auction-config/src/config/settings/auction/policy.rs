@@ -23,7 +23,7 @@ pub struct AuctionConfig {
     pub schedule: AuctionScheduleConfig,
 }
 
-/// 按旧版共享配置表达的本地周拍卖时间表。
+/// 使用 IANA 时区表达的本地周拍卖时间表。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionScheduleConfig {
@@ -51,13 +51,13 @@ impl Default for AuctionScheduleConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            timezone: "Asia/Shanghai".to_owned(),
-            preview_day: "Friday".to_owned(),
-            preview_time: "10:00".to_owned(),
+            timezone: "UTC".to_owned(),
+            preview_day: "Thursday".to_owned(),
+            preview_time: "22:00".to_owned(),
             open_day: "Friday".to_owned(),
-            open_time: "12:00".to_owned(),
+            open_time: "00:00".to_owned(),
             nominal_end_day: "Saturday".to_owned(),
-            nominal_end_time: "22:00".to_owned(),
+            nominal_end_time: "12:00".to_owned(),
             worlds: vec!["main".to_owned(), "isekai".to_owned()],
         }
     }

@@ -1,8 +1,9 @@
 use std::future::Future;
 
 use auction_application::{
-    AdminAuctionCreateTransaction, AdminAuctionSummary, AdminCreateAuctionCommand, AdminLotSummary,
-    AdminLotUpdateCommand, AdminLotUpdateSnapshot, AdminLotUpdateTransaction,
+    AdminAuctionCreateTransaction, AdminAuctionScheduleSnapshot, AdminAuctionScheduleTransaction,
+    AdminAuctionSummary, AdminCreateAuctionCommand, AdminLotSummary, AdminLotUpdateCommand,
+    AdminLotUpdateSnapshot, AdminLotUpdateTransaction, AdminUpdateAuctionScheduleCommand,
     AuctionLifecycleCommand, AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan,
     AuctionLifecycleResult, AuctionLifecycleTransaction, AuctionLifecycleWriteSummary,
     AuctionPolicyTemplate, AuctionPreviewSuccessorPlan, CommandLedgerError,

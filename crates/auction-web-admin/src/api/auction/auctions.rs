@@ -8,6 +8,7 @@ pub(crate) use auction_contracts::{
 };
 use auction_contracts::{
     AdminAuctionCommandResponse, AdminAuctionPaginationResponse, AdminCreateAuctionRequest,
+    AdminUpdateAuctionScheduleRequest,
 };
 use chrono::{DateTime, Utc};
 use gloo_net::http::{Request, Response};
@@ -55,6 +56,7 @@ struct StrictAuctionCapabilities {
     manual_early_settlement: bool,
     manual_intake: bool,
     manual_preview_open: bool,
+    modify_schedule: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +152,54 @@ pub(crate) async fn create_admin_auction(
     Ok(auction)
 }
 
+/// 修改 Draft/Preview 拍卖的计划结束时间；同一输入重试时由组件复用命令 ID。
+pub(crate) async fn update_admin_auction_schedule(
+    command_id: Uuid,
+    auction_id: String,
+    scheduled_end_at: String,
+    expected_state_version: i64,
+) -> Result<AdminAuction, String> {
+    if !valid_uuid(&auction_id) || expected_state_version <= 0 {
+        return Err("invalid_request".to_owned());
+    }
+    let normalized_end = normalize_datetime(scheduled_end_at)?;
+    let command = AdminUpdateAuctionScheduleRequest {
+        command_id: command_id.to_string(),
+        scheduled_end_at: Some(normalized_end),
+        expected_state_version,
+    };
+    let csrf_token = super::fetch_csrf_token().await?;
+    let url = format!("/api/v1/admin/auctions/{auction_id}/schedule");
+    let response = send_request(|abort_signal| {
+        Request::patch(&url)
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&command)
+            .map_err(invalid_request_error)
+    })
+    .await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    let payload: ApiResponse<StrictAuctionData> =
+        response.json().await.map_err(invalid_response_error)?;
+    let auction = decode_auction(payload.data.auction).map_err(invalid_response_error)?;
+    let expected_end = command
+        .scheduled_end_at
+        .as_ref()
+        .map(DateTime::timestamp_millis)
+        .ok_or_else(|| "invalid_response".to_owned())?;
+    if auction.id != auction_id
+        || !matches!(auction.status.as_str(), "draft" | "preview")
+        || auction.state_version < expected_state_version
+        || auction.scheduled_ends_at.as_deref().and_then(parse_admin_time).map(|value| value as i64)
+            != Some(expected_end)
+    {
+        return Err("invalid_response".to_owned());
+    }
+    Ok(auction)
+}
+
 /// 生命周期与创建命令共用旧版 `{ auction }` 闭集 decoder。
 pub(super) async fn decode_auction_command_response(
     response: Response,
@@ -170,6 +220,7 @@ fn decode_auction_list(data: StrictAuctionList) -> Result<AdminAuctionPage, &'st
             manual_early_settlement: data.capabilities.manual_early_settlement,
             manual_intake: data.capabilities.manual_intake,
             manual_preview_open: data.capabilities.manual_preview_open,
+            modify_schedule: data.capabilities.modify_schedule,
         },
         pagination,
     })

@@ -1,5 +1,7 @@
 #[path = "admin/auction.rs"]
 mod admin_auction;
+#[path = "admin/auction_schedule.rs"]
+mod admin_auction_schedule;
 #[path = "admin/credentials/mod.rs"]
 mod admin_credentials;
 #[path = "admin/intake.rs"]
@@ -39,6 +41,7 @@ mod settlement;
 mod user_mail;
 
 pub use admin_auction::AdminAuctionCreateService;
+pub use admin_auction_schedule::AdminAuctionScheduleService;
 pub use admin_credentials::AdminCredentialService;
 pub use admin_intake::AdminIntakeService;
 pub use admin_lot::AdminLotUpdateService;

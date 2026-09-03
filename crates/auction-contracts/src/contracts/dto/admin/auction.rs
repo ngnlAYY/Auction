@@ -62,6 +62,24 @@ pub struct AdminAuctionCreateResponse {
     pub auction: AdminAuctionCommandResponse,
 }
 
+/// Admin 正式开拍前修改计划结束时间的请求。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminUpdateAuctionScheduleRequest {
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub command_id: String,
+    #[serde(default)]
+    pub scheduled_end_at: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub expected_state_version: i64,
+}
+
+/// Admin 拍卖计划修改成功响应；返回列表同形投影以显式携带新的计划结束时间。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct AdminUpdateAuctionScheduleResponse {
+    pub auction: AdminAuctionResponse,
+}
+
 /// Admin 装备录入请求。
 ///
 /// `source_kind` 缺省时沿用旧契约的 URL 来源；URL 与 canonical JSON 必须二选一。装备 key
