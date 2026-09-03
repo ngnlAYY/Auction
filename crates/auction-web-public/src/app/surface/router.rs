@@ -188,7 +188,13 @@ pub(crate) fn PublicShell() -> Element {
         Some(Ok(Some(identity))) if identity.authenticated
     );
     let selected_world_value = selected_world();
+    let current_public_query = read_public_query();
+    let auction_home_query = public_auction_home_query(&selected_world_value);
     let auction_home_href = public_auction_home_href(&selected_world_value);
+    // Routable 不包含 query；位于 AuctionIndex 时，只有查询不同才需要绕过 Router 的同路由优化。
+    let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
+        && current_public_query != auction_home_query;
+    let logo_home_query = auction_home_query.clone();
     let realtime_target_candidate = match session_snapshot {
         None => PublicRealtimeTarget::Checking,
         Some(Err(_)) => PublicRealtimeTarget::SessionError,
@@ -261,8 +267,12 @@ pub(crate) fn PublicShell() -> Element {
                 Link {
                     class: "public-shell__logo",
                     to: auction_home_href.clone(),
+                    onclick_only: auction_home_needs_query_reset,
                     onclick: move |_| {
-                        // 首页与历史视图共用同一路由；查询被清除时强制重建 Outlet，避免停留在旧拍卖。
+                        if auction_home_needs_query_reset {
+                            // 同一路由时直接写入首页查询，否则 Router 可能保留当前历史拍卖 URL。
+                            set_public_query(&logo_home_query, false);
+                        }
                         location_generation
                             .set(location_generation().saturating_add(1));
                     },
@@ -287,8 +297,12 @@ pub(crate) fn PublicShell() -> Element {
                     onclick: move |_| navigation_open.set(false),
                     Link {
                         to: auction_home_href,
+                        onclick_only: auction_home_needs_query_reset,
                         onclick: move |_| {
-                            // Dioxus 路由不把 query 纳入 Route 枚举，同路由回首页需要显式刷新内容。
+                            if auction_home_needs_query_reset {
+                                // 清除 auction、筛选和分页查询，再重建共享 AuctionIndex 的内容。
+                                set_public_query(&auction_home_query, false);
+                            }
                             location_generation
                                 .set(location_generation().saturating_add(1));
                         },

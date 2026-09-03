@@ -361,12 +361,16 @@ pub(crate) fn public_href(path: &str, query: &PublicBoardQuery) -> String {
 
 /// 生成当前世界的拍卖首页链接，并清除历史轮次、筛选和分页状态。
 pub(crate) fn public_auction_home_href(world: &str) -> String {
+    public_href("/", &public_auction_home_query(world))
+}
+
+/// 生成当前世界的拍卖首页查询；同路由导航可直接用它替换历史视图状态。
+pub(crate) fn public_auction_home_query(world: &str) -> PublicBoardQuery {
     // Main 沿用无参数首页；Isekai 只保留世界参数，避免从其他页面带回不属于首页的查询状态。
-    let query = PublicBoardQuery {
+    PublicBoardQuery {
         world: (world == "isekai").then(|| "isekai".to_owned()),
         ..PublicBoardQuery::default()
-    };
-    public_href("/", &query)
+    }
 }
 
 /// 把旧版公开端别名无历史记录地收敛到 canonical URL，并保留筛选/分页查询参数。
