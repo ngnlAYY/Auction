@@ -3047,11 +3047,10 @@
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--item {
-    inline-size: 17%;
+    inline-size: 20%;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
-  .public-auction-catalog__table--live .public-auction-catalog__column--attributes,
   .public-auction-catalog__table--live .public-auction-catalog__column--current-price,
   .public-auction-catalog__table--live .public-auction-catalog__column--next-bid,
   .public-auction-catalog__table--live .public-auction-catalog__column--remaining {
@@ -3060,6 +3059,10 @@
 
   .public-auction-catalog__table--live .public-auction-catalog__column--level {
     inline-size: 5%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--attributes {
+    inline-size: 6%;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--seller {
@@ -3075,19 +3078,22 @@
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--actions {
-    inline-size: 14%;
+    inline-size: 12%;
   }
 
-  .public-auction-catalog__table--preview .public-auction-catalog__column--code,
   .public-auction-catalog__table--preview .public-auction-catalog__column--leader,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--remaining,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--status,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--actions {
+  .public-auction-catalog__table--preview .public-auction-catalog__column--remaining {
     inline-size: 7%;
   }
 
+  .public-auction-catalog__table--preview .public-auction-catalog__column--code,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--status,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--actions {
+    inline-size: 6%;
+  }
+
   .public-auction-catalog__table--preview .public-auction-catalog__column--item {
-    inline-size: 22%;
+    inline-size: 25%;
   }
 
   .public-auction-catalog__table--preview .public-auction-catalog__column--avg-roll {
@@ -3118,6 +3124,16 @@
 
   .public-auction-catalog__actions-list {
     gap: var(--space-1);
+  }
+
+  .public-auction-catalog .public-auction-catalog__actions-list > a,
+  .public-auction-catalog .public-auction-catalog__actions-list > button {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 0;
+    text-align: center;
   }
 
   .public-auction-catalog__leading-reason {
