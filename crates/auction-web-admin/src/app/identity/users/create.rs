@@ -1,7 +1,7 @@
 //! Admin 用户创建表单和生成 key 展示。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_user;
@@ -32,20 +32,15 @@ pub(super) fn AdminUserCreateForm(
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<AdminActionFeedback>);
 
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；同时修正旧版 aria_labelledby
+    // 指向不存在 id（admin-users-create-title vs create-user-title）的脱节问题。
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "admin-users-create-title",
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !busy() {
-                        event.stop_propagation();
-                        on_close.call(());
-                    }
-                },
-                form {
+        Dialog {
+            title: t!("admin-users-create-title"),
+            close_label: t!("admin-users-create-close"),
+            busy: busy(),
+            on_close: move |_| on_close.call(()),
+            form {
                     class: "admin-users-create",
                     onsubmit: move |event| {
                         event.prevent_default();
@@ -116,7 +111,6 @@ pub(super) fn AdminUserCreateForm(
                             busy.set(false);
                         });
                     },
-                    h2 { id: "create-user-title", {t!("admin-users-create-title")} }
                     label { r#for: "create-username", {t!("admin-users-username")} }
                     input {
                         id: "create-username",
@@ -177,7 +171,6 @@ pub(super) fn AdminUserCreateForm(
                         {t!("admin-users-create-close")}
                     }
                 }
-            }
         }
     }
 }
@@ -188,19 +181,13 @@ pub(super) fn AdminUserGeneratedKeyDialog(
     on_close: EventHandler<()>,
 ) -> Element {
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog admin-users-secret",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "user-key-title",
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape {
-                        event.prevent_default();
-                        on_close.call(());
-                    }
-                },
-                h2 { id: "user-key-title", {t!("admin-users-generated-key-title")} }
+        // 一次性密钥展示弹窗：外壳由共享 Dialog 接管；.admin-users-secret 内容网格
+        // 样式移到面板内的包装 div。
+        Dialog {
+            title: t!("admin-users-generated-key-title"),
+            close_label: t!("admin-users-generated-key-dismiss"),
+            on_close: move |_| on_close.call(()),
+            div { class: "admin-users-secret",
                 p { {t!("admin-users-generated-key-warning")} }
                 code { {generated.key} }
                 div { class: "admin-shell__dialog-actions",

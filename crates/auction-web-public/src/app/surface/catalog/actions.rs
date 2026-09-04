@@ -1,5 +1,7 @@
 //! Public 竞价与代理竞价操作面板。
 
+use auction_web_shared::{Dialog, use_confirm_command};
+
 use super::*;
 
 #[component]
@@ -56,9 +58,17 @@ pub(crate) fn LiveCatalogActions(
     let visually_hide_leading_reason = can_bid && effective_leading;
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
-    // 提交状态提升到弹窗宿主持有：弹窗 scope 一旦销毁，内部 spawn 的成功回调（刷新计数与
-    // on_accepted）会随之丢失，服务端已接受出价但 UI 无反馈；因此提交中必须禁止关闭弹窗。
-    let submitting = use_signal(|| false);
+    // 两阶段确认命令 hook 提升到弹窗宿主持有（整体 Copy）：弹窗 scope 一旦销毁，内部
+    // spawn 的成功回调（刷新计数与 on_accepted）会随之丢失，服务端已接受出价但 UI 无
+    // 反馈；因此提交中必须由 Dialog 的 busy 守卫禁止关闭弹窗。创建与降低上限各持一份，
+    // 与原来两个表单各自独占状态的行为一致。
+    let mut bid_command = commands::BidConfirmCommand(use_confirm_command());
+    let mut proxy_create_command = commands::ProxyConfirmCommand(use_confirm_command());
+    let mut proxy_lower_command = commands::ProxyConfirmCommand(use_confirm_command());
+    let bid_submitting = bid_command.submitting;
+    let proxy_submitting =
+        move || (proxy_create_command.submitting)() || (proxy_lower_command.submitting)();
+    let any_submitting = move || bid_submitting() || proxy_submitting();
     let action_name = action();
     let bid_lot_id = lot_id.clone();
     let bid_lot_code = lot_code.clone();
@@ -84,7 +94,7 @@ pub(crate) fn LiveCatalogActions(
                     },
                     onclick: move |_| {
                         // 提交中不允许通过再次点击动作按钮收起弹窗（会丢失成功回调）。
-                        if submitting() {
+                        if any_submitting() {
                             return;
                         }
                         proxy_success.set(None);
@@ -106,7 +116,7 @@ pub(crate) fn LiveCatalogActions(
                     },
                     onclick: move |_| {
                         // 提交中不允许通过再次点击动作按钮收起弹窗（会丢失成功回调）。
-                        if submitting() {
+                        if any_submitting() {
                             return;
                         }
                         proxy_success.set(None);
@@ -158,110 +168,65 @@ pub(crate) fn LiveCatalogActions(
             }
         }
         if action_name == Some("bid".to_owned()) {
-            div {
-                class: "public-auction-dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_label: bid_dialog_title.clone(),
-                // 提交中禁用遮罩点击关闭，与 admin 端 busy 时禁止关闭的模式一致。
-                onclick: move |_| {
-                    if !submitting() {
-                        action.set(None);
-                    }
+            // 弹窗外壳统一走 shared Dialog：busy 期间 Escape/遮罩/关闭按钮全部禁用，
+            // 焦点循环与背景滚动锁由 PublicShell 的 use_dialog_focus_trap(true) 处理。
+            Dialog {
+                title: bid_dialog_title,
+                close_label: t!("catalog-close"),
+                busy: bid_submitting(),
+                on_close: move |_| {
+                    bid_command.reset();
+                    action.set(None);
                 },
-                // Escape 仅在非提交中生效。
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !submitting() {
-                        event.prevent_default();
+                {commands::bid_form(commands::BidFormInput {
+                    lot_id: bid_lot_id,
+                    lot_code: bid_lot_code,
+                    current_price,
+                    next_bid,
+                    lot_status: bid_lot_status,
+                    can_bid,
+                    blocked: ordinary_blocked,
+                    blocked_reason: action_reason.clone(),
+                    command: bid_command,
+                    on_accepted: EventHandler::new(move |_: ()| action.set(None)),
+                    on_close: EventHandler::new(move |_: ()| {
+                        bid_command.reset();
                         action.set(None);
-                    }
-                },
-                div {
-                    class: "public-auction-dialog__panel",
-                    onclick: move |event| event.stop_propagation(),
-                    div { class: "public-auction-dialog__header",
-                        h2 { "{bid_dialog_title}" }
-                        button {
-                            class: "public-auction-dialog__close",
-                            r#type: "button",
-                            disabled: submitting(),
-                            onclick: move |_| action.set(None),
-                            aria_label: t!("catalog-close"),
-                            {t!("catalog-close")}
-                        }
-                    }
-                    {commands::bid_form(commands::BidFormInput {
-                        lot_id: bid_lot_id,
-                        lot_code: bid_lot_code,
-                        current_price,
-                        next_bid,
-                        lot_status: bid_lot_status,
-                        can_bid,
-                        blocked: ordinary_blocked,
-                        blocked_reason: action_reason.clone(),
-                        submitting,
-                        on_accepted: EventHandler::new(move |_: ()| action.set(None)),
-                        on_close: EventHandler::new(move |_: ()| action.set(None)),
-                    })}
-                }
+                    }),
+                })}
             }
         }
         if action_name == Some("proxy".to_owned()) {
-            div {
-                class: "public-auction-dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_label: proxy_dialog_title.clone(),
-                // 提交中禁用遮罩点击关闭，与 admin 端 busy 时禁止关闭的模式一致。
-                onclick: move |_| {
-                    if !submitting() {
+            Dialog {
+                title: proxy_dialog_title,
+                close_label: t!("catalog-close"),
+                busy: proxy_submitting(),
+                on_close: move |_| {
+                    proxy_create_command.reset();
+                    proxy_lower_command.reset();
+                    proxy_success.set(None);
+                    action.set(None);
+                },
+                {commands::proxy_form(commands::ProxyFormInput {
+                    lot_id: proxy_lot_id,
+                    current_price,
+                    next_bid,
+                    lot_status: proxy_lot_status,
+                    allow_slow,
+                    leading: effective_leading,
+                    blocked_reason: action_reason,
+                    proxy: proxy_snapshot,
+                    refresh_generation,
+                    saved_authorization: proxy_success,
+                    create_command: proxy_create_command,
+                    lower_command: proxy_lower_command,
+                    on_close: EventHandler::new(move |_: ()| {
+                        proxy_create_command.reset();
+                        proxy_lower_command.reset();
                         proxy_success.set(None);
                         action.set(None);
-                    }
-                },
-                // Escape 仅在非提交中生效。
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !submitting() {
-                        event.prevent_default();
-                        proxy_success.set(None);
-                        action.set(None);
-                    }
-                },
-                div {
-                    class: "public-auction-dialog__panel",
-                    onclick: move |event| event.stop_propagation(),
-                    div { class: "public-auction-dialog__header",
-                        h2 { "{proxy_dialog_title}" }
-                        button {
-                            class: "public-auction-dialog__close",
-                            r#type: "button",
-                            disabled: submitting(),
-                            onclick: move |_| {
-                                proxy_success.set(None);
-                                action.set(None);
-                            },
-                            aria_label: t!("catalog-close"),
-                            {t!("catalog-close")}
-                        }
-                    }
-                    {commands::proxy_form(commands::ProxyFormInput {
-                        lot_id: proxy_lot_id,
-                        current_price,
-                        next_bid,
-                        lot_status: proxy_lot_status,
-                        allow_slow,
-                        leading: effective_leading,
-                        blocked_reason: action_reason,
-                        proxy: proxy_snapshot,
-                        refresh_generation,
-                        saved_authorization: proxy_success,
-                        submitting,
-                        on_close: EventHandler::new(move |_: ()| {
-                            proxy_success.set(None);
-                            action.set(None);
-                        }),
-                    })}
-                }
+                    }),
+                })}
             }
         }
     }

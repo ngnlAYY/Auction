@@ -13,6 +13,7 @@ use dioxus::prelude::*;
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 
 use super::super::{AsyncState, AsyncStateKind};
+use super::common::ProxyConfirmCommand;
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
 use success::proxy_success_panel;
@@ -29,9 +30,11 @@ pub struct ProxyFormInput {
     pub proxy: Option<Result<Option<OwnedProxy>, String>>,
     pub refresh_generation: Signal<u64>,
     pub saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
-    /// 由弹窗宿主注入的共享提交状态；宿主据此在提交中禁用遮罩/Escape/关闭按钮，
-    /// 避免弹窗 scope 销毁导致成功后的刷新回调丢失。
-    pub submitting: Signal<bool>,
+    /// 由弹窗宿主注入的两阶段确认命令 hook（创建/降低上限各一份，整体 Copy）；
+    /// 宿主据其 `submitting` 接线 Dialog 的 busy 关闭守卫，避免弹窗 scope 销毁
+    /// 导致成功后的刷新回调丢失。
+    pub create_command: ProxyConfirmCommand,
+    pub lower_command: ProxyConfirmCommand,
     pub on_close: EventHandler<()>,
 }
 
@@ -48,7 +51,8 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         proxy,
         mut refresh_generation,
         saved_authorization,
-        submitting,
+        create_command,
+        lower_command,
         on_close,
     } = input;
     if let Some(authorization) = saved_authorization() {
@@ -78,7 +82,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked: leading,
                 blocked_reason,
                 saved_authorization,
-                submitting,
+                command: create_command,
                 on_close,
             }
         },
@@ -90,7 +94,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 lot_status,
                 proxy: proxy.clone(),
                 saved_authorization,
-                submitting,
+                command: lower_command,
                 on_close,
             }
         },
@@ -105,7 +109,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked: leading,
                 blocked_reason,
                 saved_authorization,
-                submitting,
+                command: create_command,
                 on_close,
             }
         },

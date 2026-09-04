@@ -1,7 +1,7 @@
 //! Delivery release/retry/reconcile 确认对话框。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 
 use crate::api::{Delivery, DeliveryAction};
 
@@ -52,21 +52,16 @@ pub(super) fn DeliveryDialog(
         DeliveryDialogKind::ReconcileRetry => "reconcile-retry",
     };
 
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；key 保留以区分不同 delivery
+    // 动作的弹窗实例。
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation", key: "{dialog_identity}",
-            section {
-                class: "admin-shell__dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "delivery-dialog-title",
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !busy {
-                        event.stop_propagation();
-                        on_cancel.call(());
-                    }
-                },
-                h2 { id: "delivery-dialog-title", {title} }
-                if kind == DeliveryDialogKind::Reconcile {
+        Dialog {
+            key: "{dialog_identity}",
+            title,
+            close_label: t!("delivery-cancel"),
+            busy,
+            on_close: move |_| on_cancel.call(()),
+            if kind == DeliveryDialogKind::Reconcile {
                     form {
                         class: "admin-delivery-reconcile",
                         onsubmit: move |event| {
@@ -171,7 +166,6 @@ pub(super) fn DeliveryDialog(
                         }
                     }
                 }
-            }
         }
     }
 }

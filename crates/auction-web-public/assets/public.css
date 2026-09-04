@@ -1769,61 +1769,6 @@
   justify-self: start;
 }
 
-.public-auction-dialog {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-5);
-  background: var(--color-overlay);
-}
-
-.public-auction-dialog__panel {
-  overflow: auto;
-  inline-size: min(26.25rem, 100%);
-  max-block-size: min(42rem, calc(100vh - 2 * var(--space-5)));
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-2);
-}
-
-.public-auction-dialog__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.public-auction-dialog__header h2 {
-  margin: 0;
-  font-size: var(--text-lg);
-}
-
-.public-auction-dialog__close {
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  background: transparent;
-  font: inherit;
-}
-
-.public-auction-dialog__close:focus-visible {
-  color: var(--color-text);
-  border-color: var(--color-accent);
-}
-
-@media (hover: hover) {
-  .public-auction-dialog__close:hover {
-    color: var(--color-text);
-    border-color: var(--color-accent);
-  }
-}
-
 .public-auction-catalog__actions button {
   display: inline-flex;
   align-items: center;
@@ -2606,15 +2551,6 @@
     min-inline-size: 0;
     justify-content: center;
     text-align: center;
-  }
-
-  .public-auction-dialog {
-    padding: var(--space-3);
-  }
-
-  .public-auction-dialog__panel {
-    max-block-size: calc(100dvh - 2 * var(--space-3));
-    padding: var(--space-3);
   }
 
   .public-history-pagination {

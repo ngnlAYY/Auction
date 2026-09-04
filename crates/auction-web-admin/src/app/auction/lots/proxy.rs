@@ -1,7 +1,7 @@
 //! Admin lot 的代理竞价历史弹窗与分页。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 
 use auction_web_shared::{
     AsyncState, AsyncStateKind, Pager, Time, TruncatedText, format_credit_amount as format_amount,
@@ -51,20 +51,13 @@ pub(super) fn AdminProxyHistory(
     };
 
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog admin-auction-proxy",
-                role: "dialog",
-                aria_modal: "true",
-                aria_label: t!("admin-lots-proxy-title", lot: lot_code.clone()),
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        selected_lot.set(None);
-                    }
-                },
-                h2 { {t!("admin-lots-proxy-title", lot: lot_code.clone())} }
+        // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-auction-proxy 内容网格
+        // 样式移到面板内的包装 div 上（面板 class 已由 .ui-dialog__panel 统一）。
+        Dialog {
+            title: t!("admin-lots-proxy-title", lot: lot_code.clone()),
+            close_label: t!("admin-lots-proxy-close"),
+            on_close: move |_| selected_lot.set(None),
+            div { class: "admin-auction-proxy",
                 {content}
                 div { class: "admin-shell__dialog-actions",
                     button {

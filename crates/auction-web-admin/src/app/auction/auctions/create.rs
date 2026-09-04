@@ -1,7 +1,7 @@
 //! Admin 拍卖创建表单。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_auction;
@@ -32,22 +32,13 @@ pub(super) fn AdminAuctionCreateForm(
             {t!("admin-auctions-create-opener")}
         }
         if open() {
-            div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                section {
-                    class: "admin-shell__dialog",
-                    role: "dialog",
-                    aria_modal: "true",
-                    aria_labelledby: "create-auction-title",
-                    aria_busy: busy().to_string(),
-                    onkeydown: move |event| {
-                        if event.key() == Key::Escape && !busy() {
-                            event.prevent_default();
-                            event.stop_propagation();
-                            open.set(false);
-                        }
-                    },
-                    AdminAuctionCreateFields { reload_generation, open, busy, notice }
-                }
+            // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；aria_busy 改挂到表单上。
+            Dialog {
+                title: t!("admin-auctions-create-title"),
+                close_label: t!("admin-auctions-create-close"),
+                busy: busy(),
+                on_close: move |_| open.set(false),
+                AdminAuctionCreateFields { reload_generation, open, busy, notice }
             }
         }
     }
@@ -74,6 +65,7 @@ fn AdminAuctionCreateFields(
         Fragment {
             form {
             class: "admin-auction-create",
+            aria_busy: busy().to_string(),
             onsubmit: move |event| {
                     event.prevent_default();
                     if busy() {
@@ -142,7 +134,6 @@ fn AdminAuctionCreateFields(
                         busy.set(false);
                     });
                 },
-                h3 { id: "create-auction-title", {t!("admin-auctions-create-title")} }
                 p { class: "admin-panel__note", {t!("admin-auctions-create-timezone")} }
                 label {
                     r#for: "create-world",

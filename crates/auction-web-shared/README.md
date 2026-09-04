@@ -5,10 +5,11 @@
 - `style/base.css`：primitive/semantic 设计变量（颜色、字号、间距、圆角、层级和表面阴影）、基础排版
   和语言切换器样式。两个 surface 的样式都建立在这些变量之上；窄屏表单
   控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
-  另含三组从两端重复块提取的通用组件样式：`.ui-pager*` 分页器（与两端原规则逐字一致）、
-  `.ui-async-state*`/`.ui-empty-state*` 状态面板（两者共享同一组规则），以及
+  另含四组从两端重复块提取的通用组件样式：`.ui-pager*` 分页器（与两端原规则逐字一致）、
+  `.ui-async-state*`/`.ui-empty-state*` 状态面板（两者共享同一组规则）、
   `.ui-table--responsive`（窄断点卡片模式，依赖 td 的 `data-label`）与 `.ui-table--scroll`
-  （横向滚动容器）响应式表格工具类。
+  （横向滚动容器）响应式表格工具类，以及 `.ui-dialog*` 模态弹窗外壳（含 `.ui-dialog--sheet`
+  显式抽屉变体；bp-sm 以下媒体查询自动切换为贴底抽屉）。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
@@ -21,6 +22,18 @@
   `Error` / `Empty`），统一自 Public 的 `RetryPlaceholder`、`Placeholder` 与 Admin 的
   `AdminPanel`。loading/empty 用 `role="status"` + `aria-live="polite"`，error 用
   `role="alert"`；`retry_label` 与 `on_retry` 同时提供才渲染重试按钮。
+- `src/components/dialog.rs`：`Dialog` 模态弹窗外壳，统一自 Public 竞价/代理弹窗与
+  Admin 的 12 处弹窗。提供遮罩、标题栏（`aria-labelledby` 接线）、关闭按钮与
+  Escape / 遮罩点击 / 关闭按钮三条关闭路径；`busy=true` 时三条路径全部禁用（与两端
+  提交中禁止关闭的守卫语义一致）。组件只产出 markup 与关闭语义，焦点循环、初始聚焦、
+  关闭后焦点恢复与背景滚动锁仍由外壳层 `use_dialog_focus_trap` 全局处理；两端迁移时
+  统一以 `true` 调用（原 public=true / admin=false 不一致，统一锁定背景滚动）。移动形态
+  由 base.css 的 bp-sm 媒体查询自动切换为贴底抽屉，组件不感知断点。
+- `src/commands/mod.rs`：`use_confirm_command` 泛型两阶段确认命令状态机，吸收自 Public
+  的 bid/proxy create/proxy authorization 三份骨架与 Admin 的 `stable_command_id`。
+  `begin(签名, build)` 在签名不变时复用已冻结的 `command_id`、变更时重新生成；
+  `submit` 成功清空全部命令状态，失败保留输入、`command_id` 与错误并退出确认态。
+  文案、负载形状、错误类型与提交动作全部由调用方决定。
 - `src/components/time.rs`：`Time` 组件，包装 `format_localized_time` 并输出带原始
   RFC3339 `datetime` 属性的 `<time>` 元素。
 - `src/media/mod.rs`：`use_media_query(query) -> Signal<bool>`，基于 `matchMedia` +

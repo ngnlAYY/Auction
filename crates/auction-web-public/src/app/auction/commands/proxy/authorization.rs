@@ -2,13 +2,14 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
-use crate::api::{CommandError, OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
+use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorization};
 
 use super::super::super::proxy::proxy_status_label;
 use super::super::super::{format_amount, parse_credit_amount};
-use super::super::common::{PendingProxyCommand, amount_hint, proxy_error_message};
+use super::super::common::{
+    PendingProxyCommand, ProxyConfirmCommand, amount_hint, proxy_error_message,
+};
 
 #[component]
 pub(super) fn ProxyAuthorizationForm(
@@ -18,24 +19,24 @@ pub(super) fn ProxyAuthorizationForm(
     lot_status: String,
     proxy: OwnedProxy,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
-    /// 由弹窗宿主注入的共享提交状态（见 ProxyFormInput::submitting）。
-    mut submitting: Signal<bool>,
+    /// 由弹窗宿主注入的两阶段确认命令 hook（降低上限实例；见 ProxyFormInput）。
+    command: ProxyConfirmCommand,
     on_close: EventHandler<()>,
 ) -> Element {
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| format_amount(lower_bound));
-    let mut failure = use_signal(|| None::<CommandError>);
     let mut validation = use_signal(|| None::<String>);
-    let mut command = use_signal(|| None::<PendingProxyCommand>);
-    let mut confirmation = use_signal(|| None::<PendingProxyCommand>);
+    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
+    let mut command = command;
+    let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
     let can_lower = proxy.capabilities.can_lower && bidding_open;
     let blocked_reason =
         if !bidding_open { t!("bid-unavailable") } else { t!("proxy-cannot-lower") };
     let confirmation_id = format!("public-proxy-lower-confirmation-{lot_id}");
-    let confirmation_description = match confirmation() {
+    let confirmation_description = match (command.confirmation)() {
         Some(PendingProxyCommand::Lower { amount, .. }) => Some(t!(
             "proxy-lower-confirm-description",
             maximum: format_amount(amount)
@@ -58,8 +59,10 @@ pub(super) fn ProxyAuthorizationForm(
                         if submitting() || !can_lower {
                             return;
                         }
-                        // 首次提交只冻结新上限与 command_id；确认态再次提交后才调用外部 API。
-                        let pending = if let Some(pending) = confirmation() {
+                        // 首次提交只冻结新上限与 command_id 并进入确认态；确认态再次提交后
+                        // 才调用外部 API。签名取 (amount, authorization_id)：同输入重试复用
+                        // 同一 command_id（幂等）。
+                        let pending = if let Some(pending) = (command.confirmation)() {
                             match &pending {
                                 PendingProxyCommand::Lower {
                                     amount,
@@ -67,31 +70,30 @@ pub(super) fn ProxyAuthorizationForm(
                                     ..
                                 } => {
                                     if authorization_id != &proxy.authorization_id {
-                                        confirmation.set(None);
-                                        command.set(None);
+                                        // 授权已变更：整条命令作废，彻底清空后退回编辑态。
+                                        command.reset();
                                         validation.set(Some(t!("proxy-authorization-not-active")));
-                                        failure.set(None);
                                         return;
                                     }
                                     if *amount >= proxy.maximum_amount {
-                                        confirmation.set(None);
+                                        command.cancel_confirmation();
                                         validation.set(Some(t!("proxy-not-lower")));
-                                        failure.set(None);
+                                        (command.failure).set(None);
                                         return;
                                     }
                                     if *amount < lower_bound {
-                                        confirmation.set(None);
+                                        command.cancel_confirmation();
                                         validation.set(Some(t!(
                                             "proxy-below-minimum",
                                             price: format_amount(lower_bound)
                                         )));
-                                        failure.set(None);
+                                        (command.failure).set(None);
                                         return;
                                     }
                                 }
+                                // 本表单只冻结 Lower；防御性处理串型，退回编辑态。
                                 PendingProxyCommand::Create { .. } => {
-                                    confirmation.set(None);
-                                    command.set(None);
+                                    command.reset();
                                     return;
                                 }
                             }
@@ -99,12 +101,12 @@ pub(super) fn ProxyAuthorizationForm(
                         } else {
                             let Some(value) = parse_credit_amount(&maximum_amount()) else {
                                 validation.set(Some(t!("proxy-invalid-amount")));
-                                failure.set(None);
+                                (command.failure).set(None);
                                 return;
                             };
                             if value >= proxy.maximum_amount {
                                 validation.set(Some(t!("proxy-not-lower")));
-                                failure.set(None);
+                                (command.failure).set(None);
                                 return;
                             }
                             if value < lower_bound {
@@ -112,63 +114,52 @@ pub(super) fn ProxyAuthorizationForm(
                                     "proxy-below-minimum",
                                     price: format_amount(lower_bound)
                                 )));
-                                failure.set(None);
+                                (command.failure).set(None);
                                 return;
                             }
                             let authorization_id = proxy.authorization_id.clone();
-                            let pending = match command() {
-                                Some(PendingProxyCommand::Lower {
-                                    amount,
-                                    authorization_id: existing_id,
-                                    command_id,
-                                }) if amount == value && existing_id == authorization_id => {
-                                    PendingProxyCommand::Lower {
-                                        amount,
-                                        authorization_id,
-                                        command_id,
-                                    }
-                                }
-                                _ => PendingProxyCommand::Lower {
+                            command.begin(
+                                format!("{value}:{authorization_id}"),
+                                |command_id| PendingProxyCommand::Lower {
                                     amount: value,
                                     authorization_id,
-                                    command_id: Uuid::new_v4(),
+                                    command_id,
                                 },
-                            };
-                            command.set(Some(pending.clone()));
-                            confirmation.set(Some(pending));
+                            );
                             validation.set(None);
-                            failure.set(None);
                             return;
                         };
                         validation.set(None);
-                        failure.set(None);
-                        submitting.set(true);
-                        let lot_id = lot_id.clone();
-                        let (amount, authorization_id, command_id) = match pending {
-                            PendingProxyCommand::Lower { amount, authorization_id, command_id } => {
-                                (amount, authorization_id, command_id)
-                            }
-                            PendingProxyCommand::Create { .. } => return,
+                        // 上面的确认守卫已保证此处必为 Lower。
+                        let PendingProxyCommand::Lower { amount, authorization_id, command_id } =
+                            pending.clone()
+                        else {
+                            return;
                         };
-                        spawn(async move {
-                            let command_result =
-                                lower_proxy_authorization(lot_id, authorization_id, amount, command_id)
-                                    .await;
-                            submitting.set(false);
-                            match command_result {
-                                Ok(authorization) => {
-                                    command.set(None);
-                                    saved_authorization.set(Some(Box::new(authorization)));
-                                    refresh_generation.set(refresh_generation().saturating_add(1));
+                        let lot_id = lot_id.clone();
+                        command.submit(
+                            pending,
+                            move |_| {
+                                let lot_id = lot_id.clone();
+                                async move {
+                                    lower_proxy_authorization(
+                                        lot_id,
+                                        authorization_id,
+                                        amount,
+                                        command_id,
+                                    )
+                                    .await
                                 }
-                                Err(error) => {
-                                    confirmation.set(None);
-                                    failure.set(Some(error));
-                                    // 降低失败也要刷新权威 lot/代理状态，但不能清除可重试命令。
-                                    refresh_generation.set(refresh_generation().saturating_add(1));
-                                }
-                            }
-                        });
+                            },
+                            move |authorization| {
+                                saved_authorization.set(Some(Box::new(authorization)));
+                                refresh_generation.set(refresh_generation().saturating_add(1));
+                            },
+                            move || {
+                                // 降低失败也要刷新权威 lot/代理状态；hook 保留可重试命令。
+                                refresh_generation.set(refresh_generation().saturating_add(1));
+                            },
+                        );
                     },
                     if let Some(description) = confirmation_description {
                         p {
@@ -204,7 +195,7 @@ pub(super) fn ProxyAuthorizationForm(
                     if let Some(message) = validation() {
                         p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
                     }
-                    if let Some(error) = failure() {
+                    if let Some(error) = (command.failure)() {
                         p { class: "action-feedback action-feedback--error", role: "alert",
                             "{proxy_error_message(&error, lower_bound)}"
                         }
@@ -214,8 +205,8 @@ pub(super) fn ProxyAuthorizationForm(
                             r#type: "button",
                             disabled: submitting(),
                             onclick: move |_| {
-                                if confirmation().is_some() {
-                                    confirmation.set(None);
+                                if (command.confirmation)().is_some() {
+                                    command.cancel_confirmation();
                                 } else {
                                     on_close.call(());
                                 }

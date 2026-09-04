@@ -2,12 +2,13 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
-use crate::api::{CommandError, ProxyCommandAuthorization, create_proxy_authorization};
+use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 use super::super::super::{format_amount, parse_credit_amount};
-use super::super::common::{PendingProxyCommand, amount_hint, proxy_error_message};
+use super::super::common::{
+    PendingProxyCommand, ProxyConfirmCommand, amount_hint, proxy_error_message,
+};
 
 #[component]
 pub(super) fn ProxyCreateForm(
@@ -20,8 +21,8 @@ pub(super) fn ProxyCreateForm(
     blocked: bool,
     blocked_reason: String,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
-    /// 由弹窗宿主注入的共享提交状态（见 ProxyFormInput::submitting）。
-    mut submitting: Signal<bool>,
+    /// 由弹窗宿主注入的两阶段确认命令 hook（创建实例；见 ProxyFormInput）。
+    command: ProxyConfirmCommand,
     on_close: EventHandler<()>,
 ) -> Element {
     let maximum_id = format!("public-proxy-maximum-{lot_id}");
@@ -35,16 +36,16 @@ pub(super) fn ProxyCreateForm(
         if allow_slow { slow_hint_id.clone() } else { format!("{slow_hint_id} {slow_reason_id}") };
     let mut maximum_amount = use_signal(|| format_amount(initial_minimum));
     let mut mode = use_signal(|| "fast".to_owned());
-    let mut failure = use_signal(|| None::<CommandError>);
     let mut validation = use_signal(|| None::<String>);
-    let mut command = use_signal(|| None::<PendingProxyCommand>);
-    let mut confirmation = use_signal(|| None::<PendingProxyCommand>);
+    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
+    let mut command = command;
+    let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
     let blocked = blocked || !bidding_open;
     let blocked_reason = if bidding_open { blocked_reason } else { t!("bid-unavailable") };
     let confirmation_id = format!("public-proxy-create-confirmation-{lot_id}");
-    let confirmation_description = match confirmation() {
+    let confirmation_description = match (command.confirmation)() {
         Some(PendingProxyCommand::Create { amount, mode, .. }) => {
             let mode_label =
                 if mode == "slow" { t!("proxy-mode-slow") } else { t!("proxy-mode-fast") };
@@ -68,29 +69,30 @@ pub(super) fn ProxyCreateForm(
                     if submitting() || blocked {
                         return;
                     }
-                    // 首次提交只冻结金额、模式与 command_id；确认态再次提交后才调用外部 API。
-                    let pending = if let Some(pending) = confirmation() {
+                    // 首次提交只冻结金额、模式与 command_id 并进入确认态；确认态再次提交后
+                    // 才调用外部 API。签名取 (amount, mode)：同输入重试复用同一 command_id。
+                    let pending = if let Some(pending) = (command.confirmation)() {
                         match &pending {
                             PendingProxyCommand::Create { amount, mode, .. } => {
                                 if *amount < initial_minimum {
-                                    confirmation.set(None);
+                                    command.cancel_confirmation();
                                     validation.set(Some(t!(
                                         "proxy-below-minimum",
                                         price: format_amount(initial_minimum)
                                     )));
-                                    failure.set(None);
+                                    (command.failure).set(None);
                                     return;
                                 }
                                 if mode == "slow" && !allow_slow {
-                                    confirmation.set(None);
+                                    command.cancel_confirmation();
                                     validation.set(Some(t!("proxy-slow-forbidden")));
-                                    failure.set(None);
+                                    (command.failure).set(None);
                                     return;
                                 }
                             }
+                            // 本表单只冻结 Create；防御性处理串型，退回编辑态。
                             PendingProxyCommand::Lower { .. } => {
-                                confirmation.set(None);
-                                command.set(None);
+                                command.reset();
                                 return;
                             }
                         }
@@ -98,7 +100,7 @@ pub(super) fn ProxyCreateForm(
                     } else {
                         let Some(value) = parse_credit_amount(&maximum_amount()) else {
                             validation.set(Some(t!("proxy-invalid-amount")));
-                            failure.set(None);
+                            (command.failure).set(None);
                             return;
                         };
                         if value < initial_minimum {
@@ -106,60 +108,51 @@ pub(super) fn ProxyCreateForm(
                                 "proxy-below-minimum",
                                 price: format_amount(initial_minimum)
                             )));
-                            failure.set(None);
+                            (command.failure).set(None);
                             return;
                         }
                         let selected_mode = mode();
                         if selected_mode == "slow" && !allow_slow {
                             validation.set(Some(t!("proxy-slow-forbidden")));
-                            failure.set(None);
+                            (command.failure).set(None);
                             return;
                         }
-                        let pending = match command() {
-                            Some(PendingProxyCommand::Create { amount, mode, command_id })
-                                if amount == value && mode == selected_mode => {
-                                    PendingProxyCommand::Create { amount, mode, command_id }
-                                }
-                            _ => PendingProxyCommand::Create {
+                        command.begin(
+                            format!("{value}:{selected_mode}"),
+                            |command_id| PendingProxyCommand::Create {
                                 amount: value,
                                 mode: selected_mode,
-                                command_id: Uuid::new_v4(),
+                                command_id,
                             },
-                        };
-                        command.set(Some(pending.clone()));
-                        confirmation.set(Some(pending));
+                        );
                         validation.set(None);
-                        failure.set(None);
                         return;
                     };
                     validation.set(None);
-                    failure.set(None);
-                    submitting.set(true);
-                    let lot_id = lot_id.clone();
-                    let (amount, mode, command_id) = match pending {
-                        PendingProxyCommand::Create { amount, mode, command_id } => {
-                            (amount, mode, command_id)
-                        }
-                        PendingProxyCommand::Lower { .. } => return,
+                    // 上面的确认守卫已保证此处必为 Create。
+                    let PendingProxyCommand::Create { amount, mode, command_id } =
+                        pending.clone()
+                    else {
+                        return;
                     };
-                    spawn(async move {
-                        let command_result =
-                            create_proxy_authorization(lot_id, amount, mode, command_id).await;
-                        submitting.set(false);
-                        match command_result {
-                            Ok(authorization) => {
-                                command.set(None);
-                                saved_authorization.set(Some(Box::new(authorization)));
-                                refresh_generation.set(refresh_generation().saturating_add(1));
+                    let lot_id = lot_id.clone();
+                    command.submit(
+                        pending,
+                        move |_| {
+                            let lot_id = lot_id.clone();
+                            async move {
+                                create_proxy_authorization(lot_id, amount, mode, command_id).await
                             }
-                            Err(error) => {
-                                confirmation.set(None);
-                                failure.set(Some(error));
-                                // 失败后保留输入、command_id 和错误，同时重新读取权威价格与代理状态。
-                                refresh_generation.set(refresh_generation().saturating_add(1));
-                            }
-                        }
-                    });
+                        },
+                        move |authorization| {
+                            saved_authorization.set(Some(Box::new(authorization)));
+                            refresh_generation.set(refresh_generation().saturating_add(1));
+                        },
+                        move || {
+                            // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与代理状态。
+                            refresh_generation.set(refresh_generation().saturating_add(1));
+                        },
+                    );
                 },
                 if let Some(description) = confirmation_description {
                     p {
@@ -241,7 +234,7 @@ pub(super) fn ProxyCreateForm(
                 if let Some(message) = validation() {
                     p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
                 }
-                if let Some(error) = failure() {
+                if let Some(error) = (command.failure)() {
                     p { class: "action-feedback action-feedback--error", role: "alert",
                         "{proxy_error_message(&error, initial_minimum)}"
                     }
@@ -251,8 +244,8 @@ pub(super) fn ProxyCreateForm(
                         r#type: "button",
                         disabled: submitting(),
                         onclick: move |_| {
-                            if confirmation().is_some() {
-                                confirmation.set(None);
+                            if (command.confirmation)().is_some() {
+                                command.cancel_confirmation();
                             } else {
                                 on_close.call(());
                             }

@@ -1,7 +1,7 @@
 //! Admin lot 行、改价和撤回交互。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
@@ -151,37 +151,21 @@ pub(super) fn AdminLotRow(
         if let Some(current_dialog) = dialog() {
             tr { class: "admin-auction-dialog-row",
                 td { colspan: "8",
-                    div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                        section {
-                            class: "admin-shell__dialog",
-                            role: "dialog",
-                            aria_modal: "true",
-                            aria_labelledby: if current_dialog == LotDialog::Reprice {
-                                format!("price-title-{lot_id}")
-                            } else {
-                                format!("withdraw-title-{lot_id}")
-                            },
-                            onkeydown: move |event| {
-                                if event.key() == Key::Escape && !busy() {
-                                    event.prevent_default();
-                                    event.stop_propagation();
-                                    dialog.set(None);
-                                    failure_code.set(None);
-                                    invalid_price.set(false);
-                                }
-                            },
-                            h2 { id: if current_dialog == LotDialog::Reprice {
-                                format!("price-title-{lot_id}")
-                            } else {
-                                format!("withdraw-title-{lot_id}")
-                            },
-                                if current_dialog == LotDialog::Reprice {
-                                    {t!("admin-lots-reprice-title", code: lot_code.clone())}
-                                } else {
-                                    {t!("admin-lots-withdraw-title", code: lot_code.clone())}
-                                }
-                            }
-                            if current_dialog == LotDialog::Reprice {
+                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+                    Dialog {
+                        title: if current_dialog == LotDialog::Reprice {
+                            t!("admin-lots-reprice-title", code: lot_code.clone())
+                        } else {
+                            t!("admin-lots-withdraw-title", code: lot_code.clone())
+                        },
+                        close_label: t!("admin-lots-action-cancel"),
+                        busy: busy(),
+                        on_close: move |_| {
+                            dialog.set(None);
+                            failure_code.set(None);
+                            invalid_price.set(false);
+                        },
+                        if current_dialog == LotDialog::Reprice {
                                 form {
                                     class: "admin-auction-reprice",
                                     onsubmit: move |event| {
@@ -293,7 +277,6 @@ pub(super) fn AdminLotRow(
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }

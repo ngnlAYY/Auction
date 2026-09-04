@@ -456,6 +456,7 @@ dependencies = [
  "dioxus-i18n",
  "js-sys",
  "unic-langid",
+ "uuid",
  "wasm-bindgen",
  "web-sys",
 ]

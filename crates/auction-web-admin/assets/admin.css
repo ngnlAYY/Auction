@@ -1798,58 +1798,7 @@
   font-size: var(--admin-text-note);
 }
 
-.admin-delivery__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 60%);
-}
-
-.admin-delivery__dialog {
-  inline-size: min(100%, 34rem);
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-delivery__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-delivery__dialog form {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.admin-delivery__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-delivery__dialog input,
-.admin-delivery__dialog select {
-  min-block-size: auto;
-  padding: var(--admin-space-compact) var(--admin-space-input-inline);
-  border: var(--border-width) solid var(--color-input-border);
-  border-radius: var(--admin-radius-input);
-  color: var(--color-text);
-  background: var(--color-input-bg);
-}
-
-.admin-delivery__dialog-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--admin-space-compact);
-  margin-block-start: var(--space-2);
-}
+/* 旧版 .admin-delivery__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 /* 总览保留现有数据投影，但使用旧版的扁平标题、指标卡和分组。 */
 .admin-dashboard {
@@ -2301,38 +2250,13 @@
   font-weight: 600;
 }
 
-.admin-shell__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-dialog);
-  display: grid;
-  padding: var(--space-4);
-  background: var(--color-overlay);
-  place-items: center;
-}
-
-.admin-shell__dialog {
-  inline-size: min(100%, 32rem);
-  max-block-size: calc(100vh - 2rem);
-  padding: var(--space-5);
-  overflow: auto;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-surface);
-}
-
-/* shared base 会重置标题/段落；Admin 弹窗恢复旧浏览器默认排版。 */
-.admin-shell__dialog h2 {
-  margin-block: 0.83em;
-  font-size: 1.5em;
-}
-
-.admin-shell__dialog p {
+/* 弹窗外壳（遮罩/面板定位/z-index/标题栏/关闭按钮）已由 shared base.css 的 .ui-dialog
+   系列统一接管；此处仅保留 Admin 弹窗内容区的排版与动作行。 */
+.ui-dialog__panel p {
   margin-block: 1em;
 }
 
-.admin-shell__dialog label {
+.ui-dialog__panel label {
   display: grid;
   gap: var(--space-1);
   margin-block: var(--space-3);
@@ -2563,51 +2487,7 @@
   margin: 0;
 }
 
-.admin-users__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 60%);
-}
-
-.admin-users__dialog {
-  inline-size: min(100%, 36rem);
-  max-block-size: calc(100vh - 2 * var(--space-4));
-  overflow: auto;
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-users__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-users__dialog .admin-users__create-grid {
-  display: grid;
-  align-items: stretch;
-  gap: var(--space-3);
-}
-
-.admin-users__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-users__dialog-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--admin-space-compact);
-  margin-block-start: var(--space-4);
-}
+/* 旧版 .admin-users__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-users-secret {
   display: grid;
@@ -2823,40 +2703,7 @@
   color: var(--color-danger);
 }
 
-.admin-credentials__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 60%);
-}
-
-.admin-credentials__dialog {
-  inline-size: min(100%, 34rem);
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-credentials__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-credentials__dialog form {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.admin-credentials__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
+/* 旧版 .admin-credentials__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-credentials__dialog-row,
 .admin-credentials__dialog-row > td,
@@ -2867,25 +2714,8 @@
   border: 0;
 }
 
-.admin-credentials__dialog-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--admin-space-compact);
-  margin-block-start: var(--space-4);
-}
-
-.admin-users-dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-users-dialog textarea {
-  inline-size: 100%;
-  box-sizing: border-box;
-}
+/* 失效的 .admin-credentials__dialog-actions / .admin-users-dialog 后代规则（无 markup
+   引用）已删除；弹窗 label 排版由上方 .ui-dialog__panel label 统一提供。 */
 
 .admin-auction-page {
   display: block;
@@ -3176,40 +3006,7 @@
   gap: var(--space-1);
 }
 
-.admin-settlement__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 60%);
-}
-
-.admin-settlement__dialog {
-  inline-size: min(100%, 34rem);
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  color: var(--color-text);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-settlement__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-settlement__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-settlement__dialog textarea {
-  inline-size: 100%;
-  box-sizing: border-box;
-}
+/* 旧版 .admin-settlement__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-lots__back {
   margin: 0 0 var(--space-4);
@@ -3247,56 +3044,7 @@
   vertical-align: top;
 }
 
-.admin-lots__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: var(--color-overlay);
-}
-
-.admin-lots__dialog {
-  inline-size: min(100%, 32rem);
-  max-block-size: calc(100vh - 2rem);
-  padding: var(--space-5);
-  overflow: auto;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-lots__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-lots__dialog-form {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.admin-lots__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
-
-.admin-lots__dialog input {
-  inline-size: 100%;
-  box-sizing: border-box;
-}
-
-.admin-lots__dialog-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-block-start: var(--space-4);
-}
+/* 旧版 .admin-lots__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-lots__dialog-row,
 .admin-lots__dialog-row > td,
@@ -3309,88 +3057,17 @@
   border: 0;
 }
 
-.admin-auctions__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: var(--color-overlay);
-}
-
-.admin-auctions__dialog {
-  inline-size: min(100%, 32rem);
-  max-block-size: calc(100vh - 2rem);
-  padding: var(--space-5);
-  overflow: auto;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-auctions__dialog h2 {
-  margin-block-start: 0;
-}
+/* 旧版 .admin-auctions__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-auction-open {
   display: grid;
   gap: var(--space-2);
 }
 
-.admin-auctions__dialog label {
-  display: grid;
-  gap: var(--space-1);
-  color: var(--color-text-muted);
-  font-size: var(--admin-text-label);
-}
+/* 失效的 .admin-auctions__dialog 后代规则（无 markup 引用）已删除。 */
 
-.admin-auctions__dialog textarea {
-  inline-size: 100%;
-  box-sizing: border-box;
-}
-
-.admin-auctions__dialog-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-block-start: var(--space-4);
-}
-
-.admin-renames__dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 60%);
-}
-
-.admin-renames__dialog {
-  inline-size: min(100%, 34rem);
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border);
-  color: var(--color-text);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-surface);
-}
-
-.admin-renames__dialog h2 {
-  margin-block-start: 0;
-}
-
-.admin-renames__dialog p {
-  overflow-wrap: anywhere;
-}
-
-.admin-renames__dialog .admin-panel__actions {
-  justify-content: flex-end;
-  margin-block-end: 0;
-}
+/* 旧版 .admin-auctions__dialog-actions 与 .admin-renames__dialog* 外壳（遮罩/面板，无
+   markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-runtime-config__form,
 .admin-rules-form {

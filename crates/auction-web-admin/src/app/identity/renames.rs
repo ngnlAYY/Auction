@@ -3,8 +3,10 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText, legacy_t as t};
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, Dialog, Pager, Time, TruncatedText, legacy_t as t,
+};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
@@ -128,40 +130,32 @@ pub(super) fn page() -> Element {
             }
             {content}
             if let Some(rename) = selected() {
-                div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                    section {
-                        class: "admin-shell__dialog",
-                        role: "dialog",
-                        aria_modal: "true",
-                        aria_labelledby: "rename-dialog-title",
-                        onkeydown: move |event| {
-                            if event.key() == Key::Escape && busy_rename().is_none() {
-                                event.stop_propagation();
-                                selected.set(None);
-                            }
-                        },
-                        h2 { id: "rename-dialog-title", {t!("admin-renames-revert-confirm-title")} }
-                        p {
-                            {t!(
-                                "admin-renames-revert-confirm-description",
-                                from: rename.next_username,
-                                to: rename.previous_username
-                            )}
+                // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+                Dialog {
+                    title: t!("admin-renames-revert-confirm-title"),
+                    close_label: t!("admin-renames-cancel"),
+                    busy: busy_rename().is_some(),
+                    on_close: move |_| selected.set(None),
+                    p {
+                        {t!(
+                            "admin-renames-revert-confirm-description",
+                            from: rename.next_username,
+                            to: rename.previous_username
+                        )}
+                    }
+                    div { class: "admin-shell__dialog-actions",
+                        button {
+                            r#type: "button",
+                            disabled: busy_rename().is_some(),
+                            onclick: confirm_revert,
+                            {t!("admin-users-action-confirm")}
                         }
-                        div { class: "admin-shell__dialog-actions",
-                            button {
-                                r#type: "button",
-                                disabled: busy_rename().is_some(),
-                                onclick: confirm_revert,
-                                {t!("admin-users-action-confirm")}
-                            }
-                            button {
-                                r#type: "button",
-                                autofocus: true,
-                                disabled: busy_rename().is_some(),
-                                onclick: move |_| selected.set(None),
-                                {t!("admin-renames-cancel")}
-                            }
+                        button {
+                            r#type: "button",
+                            autofocus: true,
+                            disabled: busy_rename().is_some(),
+                            onclick: move |_| selected.set(None),
+                            {t!("admin-renames-cancel")}
                         }
                     }
                 }

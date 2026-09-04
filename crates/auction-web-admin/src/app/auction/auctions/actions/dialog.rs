@@ -1,7 +1,7 @@
 //! Admin 拍卖生命周期动作按钮与确认对话框。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{
@@ -142,7 +142,6 @@ fn AdminAuctionActionDialog(
             | AdminAuctionLifecycleAction::EarlySettlement
     );
     let can_submit = !busy() && (!requires_reason || !action_reason().trim().is_empty());
-    let title_id = lifecycle_action_title_id(action, &auction_id);
     let action_reason_id = format!("action-reason-{auction_id}");
     let action_signals = LifecycleActionSignals {
         busy,
@@ -153,115 +152,102 @@ fn AdminAuctionActionDialog(
         action_reason,
         command_state,
     };
+    // 外壳（遮罩/标题栏/三条关闭路径）由共享 Dialog 接管；Escape 与关闭按钮统一走
+    // close_lifecycle_dialog，清理语义与旧的 Escape 处理器一致。
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: title_id.clone(),
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !busy() {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        pending_action.set(None);
-                        action_reason.set(String::new());
-                        feedback.set(None);
-                        command_state.set(None);
+    Dialog {
+        title: lifecycle_action_confirm_title(action, auction_sequence),
+        close_label: t!("admin-auctions-action-close"),
+        busy: busy(),
+        on_close: move |_| close_lifecycle_dialog(action_signals),
+        if is_final {
+                p { {lifecycle_action_confirm_note(action)} }
+                div { class: "admin-shell__dialog-actions",
+                    button {
+                        r#type: "button",
+                        disabled: busy(),
+                        autofocus: true,
+                        onclick: move |_| close_lifecycle_dialog(action_signals),
+                        {t!("admin-auctions-action-close")}
                     }
-                },
-                h2 { id: title_id,
-                    {lifecycle_action_confirm_title(action, auction_sequence)}
+                    button {
+                        class: "admin-btn-danger",
+                        r#type: "button",
+                        disabled: busy(),
+                        onclick: move |_| run_lifecycle_action(
+                            LifecycleActionRequest {
+                                auction_id: auction_id.clone(),
+                                expected_state_version,
+                                action,
+                                reason: None,
+                            },
+                            action_signals,
+                        ),
+                        if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
+                    }
                 }
-                if is_final {
+            } else {
+                form {
+                    class: "admin-auction-open",
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        if !can_submit {
+                            return;
+                        }
+                        run_lifecycle_action(
+                            LifecycleActionRequest {
+                                auction_id: auction_id.clone(),
+                                expected_state_version,
+                                action,
+                                reason: requires_reason
+                                    .then(|| action_reason().trim().to_owned()),
+                            },
+                            action_signals,
+                        );
+                    },
                     p { {lifecycle_action_confirm_note(action)} }
+                    if requires_reason {
+                        label {
+                            r#for: action_reason_id.clone(),
+                            if is_cancel {
+                                {t!("admin-auctions-cancel-reason")}
+                            } else {
+                                {t!("admin-auctions-early-settlement-reason")}
+                            }
+                        }
+                        textarea {
+                            id: action_reason_id,
+                            maxlength: "1024",
+                            required: true,
+                            autofocus: true,
+                            disabled: busy(),
+                            value: action_reason(),
+                            oninput: move |event| {
+                                action_reason.set(event.value());
+                                feedback.set(None);
+                            },
+                        }
+                        p {
+                            if is_cancel {
+                                {t!("admin-auctions-cancel-reason-hint")}
+                            } else {
+                                {t!("admin-auctions-early-settlement-reason-hint")}
+                            }
+                        }
+                    }
                     div { class: "admin-shell__dialog-actions",
                         button {
                             r#type: "button",
                             disabled: busy(),
-                            autofocus: true,
+                            autofocus: !requires_reason,
                             onclick: move |_| close_lifecycle_dialog(action_signals),
                             {t!("admin-auctions-action-close")}
                         }
                         button {
-                            class: "admin-btn-danger",
-                            r#type: "button",
-                            disabled: busy(),
-                            onclick: move |_| run_lifecycle_action(
-                                LifecycleActionRequest {
-                                    auction_id: auction_id.clone(),
-                                    expected_state_version,
-                                    action,
-                                    reason: None,
-                                },
-                                action_signals,
-                            ),
+                            class: if is_destructive { "admin-btn-danger" } else { "admin-btn-primary" },
+                            r#type: "submit",
+                            disabled: !can_submit,
                             if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
-                        }
-                    }
-                } else {
-                    form {
-                        class: "admin-auction-open",
-                        onsubmit: move |event| {
-                            event.prevent_default();
-                            if !can_submit {
-                                return;
-                            }
-                            run_lifecycle_action(
-                                LifecycleActionRequest {
-                                    auction_id: auction_id.clone(),
-                                    expected_state_version,
-                                    action,
-                                    reason: requires_reason
-                                        .then(|| action_reason().trim().to_owned()),
-                                },
-                                action_signals,
-                            );
-                        },
-                        p { {lifecycle_action_confirm_note(action)} }
-                        if requires_reason {
-                            label {
-                                r#for: action_reason_id.clone(),
-                                if is_cancel {
-                                    {t!("admin-auctions-cancel-reason")}
-                                } else {
-                                    {t!("admin-auctions-early-settlement-reason")}
-                                }
-                            }
-                            textarea {
-                                id: action_reason_id,
-                                maxlength: "1024",
-                                required: true,
-                                autofocus: true,
-                                disabled: busy(),
-                                value: action_reason(),
-                                oninput: move |event| {
-                                    action_reason.set(event.value());
-                                    feedback.set(None);
-                                },
-                            }
-                            p {
-                                if is_cancel {
-                                    {t!("admin-auctions-cancel-reason-hint")}
-                                } else {
-                                    {t!("admin-auctions-early-settlement-reason-hint")}
-                                }
-                            }
-                        }
-                        div { class: "admin-shell__dialog-actions",
-                            button {
-                                r#type: "button",
-                                disabled: busy(),
-                                autofocus: !requires_reason,
-                                onclick: move |_| close_lifecycle_dialog(action_signals),
-                                {t!("admin-auctions-action-close")}
-                            }
-                            button {
-                                class: if is_destructive { "admin-btn-danger" } else { "admin-btn-primary" },
-                                r#type: "submit",
-                                disabled: !can_submit,
-                                if busy() { {t!("admin-action-working")} } else { {lifecycle_action_submit_label(action)} }
-                            }
                         }
                     }
                 }
@@ -332,16 +318,4 @@ fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleA
         }
         signals.busy.set(false);
     });
-}
-
-/// 复用旧版的动作标题锚点，保证同一页面上不同拍卖/动作的 dialog ID 不冲突。
-fn lifecycle_action_title_id(action: AdminAuctionLifecycleAction, auction_id: &str) -> String {
-    let action_name = match action {
-        AdminAuctionLifecycleAction::Preview => "preview",
-        AdminAuctionLifecycleAction::Open => "open",
-        AdminAuctionLifecycleAction::Cancel => "cancel",
-        AdminAuctionLifecycleAction::FinalPhase => "final",
-        AdminAuctionLifecycleAction::EarlySettlement => "early-settlement",
-    };
-    format!("{action_name}-title-{auction_id}")
 }

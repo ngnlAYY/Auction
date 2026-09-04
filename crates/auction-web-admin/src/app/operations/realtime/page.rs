@@ -1,7 +1,7 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{
@@ -328,26 +328,18 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 }
             }
             if let Some(failure) = selected {
-                div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                    section {
-                        class: "admin-shell__dialog admin-realtime-dialog",
-                        role: "dialog",
-                        aria_modal: "true",
-                        aria_labelledby: "realtime-replay-title",
-                        aria_describedby: "realtime-replay-warning",
-                        onkeydown: move |event| {
-                            if event.key() == Key::Escape && !replay_busy() {
-                                event.stop_propagation();
-                                selected_failure.set(None);
-                                replay_command_id.set(None);
-                            }
-                        },
-                        h2 {
-                            id: "realtime-replay-title",
-                            {t!("realtime-replay-title", id: failure.id.clone())}
-                        }
+                // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；.admin-realtime-dialog
+                // 内容样式移到面板内的包装 div；共享组件暂不支持 aria_describedby。
+                Dialog {
+                    title: t!("realtime-replay-title", id: failure.id.clone()),
+                    close_label: t!("realtime-replay-cancel"),
+                    busy: replay_busy(),
+                    on_close: move |_| {
+                        selected_failure.set(None);
+                        replay_command_id.set(None);
+                    },
+                    div { class: "admin-realtime-dialog",
                         p {
-                            id: "realtime-replay-warning",
                             class: "admin-panel__note",
                             {t!("realtime-replay-warning", event_id: failure.event_id.clone())}
                         }
