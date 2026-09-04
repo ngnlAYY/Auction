@@ -1,7 +1,7 @@
 //! Admin 正式开拍前预览、开拍与计划结束时间修改对话框。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{normalize_datetime, update_admin_auction_schedule};
@@ -111,7 +111,6 @@ fn AdminAuctionScheduleDialog(
     let preview_locked = status == "preview";
     let can_submit =
         !busy() && valid_schedule_update(&status, &preview_value(), &open_value(), &end_value());
-    let title_id = format!("schedule-title-{auction_id}");
     let preview_input_id = format!("schedule-preview-{auction_id}");
     let open_input_id = format!("schedule-open-{auction_id}");
     let end_input_id = format!("schedule-end-{auction_id}");
@@ -126,22 +125,14 @@ fn AdminAuctionScheduleDialog(
         feedback,
         command_state,
     };
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；关闭统一走 close_schedule_dialog。
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: title_id.clone(),
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !busy() {
-                        close_schedule_dialog(signals);
-                    }
-                },
-                h2 { id: title_id,
-                    {t!("admin-auctions-schedule-title", number: auction_sequence)}
-                }
-                form {
+        Dialog {
+            title: t!("admin-auctions-schedule-title", number: auction_sequence),
+            close_label: t!("admin-auctions-action-close"),
+            busy: busy(),
+            on_close: move |_| close_schedule_dialog(signals),
+            form {
                     class: "admin-auction-open",
                     onsubmit: move |event| {
                         event.prevent_default();
@@ -238,7 +229,6 @@ fn AdminAuctionScheduleDialog(
                             if busy() { {t!("admin-action-working")} } else { {t!("admin-auctions-schedule-submit")} }
                         }
                     }
-                }
             }
         }
     }

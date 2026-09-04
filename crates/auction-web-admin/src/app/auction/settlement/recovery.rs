@@ -1,7 +1,7 @@
 //! Admin recovery 表格、命令确认对话框和幂等提交交互。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
@@ -164,27 +164,21 @@ pub(super) fn AdminRecoveryDialog(
         return rsx! {};
     };
     let requires_reason = draft.action != "reclaimed";
+    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管；共享组件暂不支持 aria_describedby，
+    // 描述段落保留在内容区首部。
     rsx! {
-        div { class: "admin-shell__dialog-backdrop", role: "presentation",
-            section {
-                class: "admin-shell__dialog",
-                role: "dialog",
-                aria_modal: "true",
-                aria_labelledby: "settlement-recovery-confirm-title",
-                aria_describedby: "settlement-recovery-confirm-description",
-                onkeydown: move |event| {
-                    if event.key() == Key::Escape && !busy() {
-                        event.stop_propagation();
-                        confirmation.set(None);
-                        reason.set(String::new());
-                    }
-                },
-                h2 { id: "settlement-recovery-confirm-title", {recovery_command_label(&draft.action)} }
-                p {
-                    id: "settlement-recovery-confirm-description",
-                    {t!("admin-recovery-confirm-description", lot: draft.lot_code.clone(), equipment: draft.equipment_name.clone())}
-                }
-                form {
+        Dialog {
+            title: recovery_command_label(&draft.action),
+            close_label: t!("admin-recovery-cancel"),
+            busy: busy(),
+            on_close: move |_| {
+                confirmation.set(None);
+                reason.set(String::new());
+            },
+            p {
+                {t!("admin-recovery-confirm-description", lot: draft.lot_code.clone(), equipment: draft.equipment_name.clone())}
+            }
+            form {
                     class: "admin-auction-recovery-confirm",
                     onsubmit: move |event| {
                         event.prevent_default();
@@ -296,7 +290,6 @@ pub(super) fn AdminRecoveryDialog(
                             {t!("admin-recovery-confirm")}
                         }
                     }
-                }
             }
         }
     }

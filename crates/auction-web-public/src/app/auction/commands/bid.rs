@@ -2,12 +2,11 @@
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
-use crate::api::{CommandError, place_bid};
+use crate::api::place_bid;
 
 use super::super::format_amount;
-use super::common::{PendingBidCommand, bid_error_message};
+use super::common::{BidConfirmCommand, PendingBidCommand, bid_error_message};
 
 const CREDIT_K: i64 = 1_000;
 const MAX_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
@@ -22,9 +21,10 @@ pub struct BidFormInput {
     pub can_bid: bool,
     pub blocked: bool,
     pub blocked_reason: String,
-    /// 由弹窗宿主注入的共享提交状态；宿主据此在提交中禁用遮罩/Escape/关闭按钮，
-    /// 避免弹窗 scope 销毁导致成功后的刷新与 on_accepted 回调丢失。
-    pub submitting: Signal<bool>,
+    /// 由弹窗宿主注入的两阶段确认命令 hook（整体 Copy）；宿主据其 `submitting`
+    /// 在提交中禁用遮罩/Escape/关闭按钮（Dialog busy 守卫），避免弹窗 scope 销毁
+    /// 导致成功后的刷新与 on_accepted 回调丢失。
+    pub command: BidConfirmCommand,
     pub on_accepted: EventHandler<()>,
     pub on_close: EventHandler<()>,
 }
@@ -84,18 +84,16 @@ pub fn bid_form(input: BidFormInput) -> Element {
         can_bid,
         blocked,
         blocked_reason,
-        submitting,
+        command,
         on_accepted,
         on_close,
     } = input;
     let amount_id = format!("public-bid-amount-{lot_id}");
     let mut amount = use_signal(|| default_bid_units(next_bid));
-    let mut failure = use_signal(|| None::<CommandError>);
     let mut validation = use_signal(|| None::<String>);
-    // 提交状态由宿主注入（见 BidFormInput::submitting）。
-    let mut submitting = submitting;
-    let mut command = use_signal(|| None::<PendingBidCommand>);
-    let mut confirmation = use_signal(|| None::<PendingBidCommand>);
+    // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
+    let mut command = command;
+    let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = can_bid && lot_status == "live";
     let blocked = blocked || !bidding_open;
@@ -110,58 +108,53 @@ pub fn bid_form(input: BidFormInput) -> Element {
                 if submitting() || blocked {
                     return;
                 }
-                let pending = if let Some(pending) = confirmation() {
+                // 首次提交只冻结金额与 command_id 并进入确认态；确认态再次提交后才调用
+                // 外部 API。签名取金额序列化：同一金额重试复用同一 command_id（幂等）。
+                let pending = if let Some(pending) = (command.confirmation)() {
                     if pending.amount < next_bid {
-                        confirmation.set(None);
+                        command.cancel_confirmation();
                         validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
-                        failure.set(None);
+                        (command.failure).set(None);
                         return;
                     }
                     pending
                 } else {
                     let Some(value) = parse_bid_units(&amount()) else {
                         validation.set(Some(t!("bid-invalid-amount")));
-                        failure.set(None);
+                        (command.failure).set(None);
                         return;
                     };
                     if value < next_bid {
                         validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
-                        failure.set(None);
+                        (command.failure).set(None);
                         return;
                     }
-                    let pending = match command() {
-                        Some(existing) if existing.amount == value => existing,
-                        _ => PendingBidCommand { amount: value, command_id: Uuid::new_v4() },
-                    };
-                    command.set(Some(pending));
-                    confirmation.set(Some(pending));
+                    command.begin(value.to_string(), |command_id| PendingBidCommand {
+                        amount: value,
+                        command_id,
+                    });
                     validation.set(None);
-                    failure.set(None);
                     return;
                 };
                 validation.set(None);
-                failure.set(None);
-                submitting.set(true);
                 let lot_id = lot_id.clone();
-                spawn(async move {
-                    let bid_result = place_bid(lot_id, pending.amount, pending.command_id).await;
-                    submitting.set(false);
-                    match bid_result {
-                        Ok(_) => {
-                            command.set(None);
-                            refresh_generation.set(refresh_generation().saturating_add(1));
-                            on_accepted.call(());
-                        }
-                        Err(error) => {
-                            confirmation.set(None);
-                            failure.set(Some(error));
-                            // 失败后保留输入、command_id 和错误，同时重新读取权威价格与领先者。
-                            refresh_generation.set(refresh_generation().saturating_add(1));
-                        }
-                    }
-                });
+                command.submit(
+                    pending,
+                    move |pending| {
+                        let lot_id = lot_id.clone();
+                        async move { place_bid(lot_id, pending.amount, pending.command_id).await }
+                    },
+                    move |_| {
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                        on_accepted.call(());
+                    },
+                    move || {
+                        // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与领先者。
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                    },
+                );
             },
-            if let Some(pending) = confirmation() {
+            if let Some(pending) = (command.confirmation)() {
                 p {
                     id: "public-bid-confirmation",
                     class: "public-auction-bid-form__confirmation",
@@ -207,7 +200,7 @@ pub fn bid_form(input: BidFormInput) -> Element {
             if let Some(message) = validation() {
                 p { class: "action-feedback action-feedback--error", role: "alert", "{message}" }
             }
-            if let Some(error) = failure() {
+            if let Some(error) = (command.failure)() {
                 p { class: "action-feedback action-feedback--error", role: "alert",
                     "{bid_error_message(&error, next_bid)}"
                 }
@@ -217,13 +210,13 @@ pub fn bid_form(input: BidFormInput) -> Element {
                     r#type: "button",
                     disabled: submitting(),
                     onclick: move |_| {
-                        if confirmation().is_some() {
-                            confirmation.set(None);
+                        if (command.confirmation)().is_some() {
+                            command.cancel_confirmation();
                         } else {
                             on_close.call(());
                         }
                     },
-                    if confirmation().is_some() {
+                    if (command.confirmation)().is_some() {
                         {t!("bid-confirm-back")}
                     } else {
                         {t!("dialog-cancel")}
@@ -232,14 +225,14 @@ pub fn bid_form(input: BidFormInput) -> Element {
                 button {
                     r#type: "submit",
                     disabled: submitting() || blocked,
-                    aria_describedby: if confirmation().is_some() {
+                    aria_describedby: if (command.confirmation)().is_some() {
                         "public-bid-confirmation"
                     } else {
                         ""
                     },
                     if submitting() {
                         {t!("bid-working")}
-                    } else if confirmation().is_some() {
+                    } else if (command.confirmation)().is_some() {
                         {t!("bid-confirm-submit")}
                     } else {
                         {t!("bid-submit")}

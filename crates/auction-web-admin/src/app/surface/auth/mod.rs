@@ -33,8 +33,8 @@ pub(super) use shell::AdminAuthenticatedShell;
 /// 管理端外壳。与公开端外壳完全独立，并沿用旧版的左侧纵向导航布局。
 #[component]
 pub(super) fn AdminShell() -> Element {
-    // 旧 Admin 只限制 dialog 焦点，不锁定 body 滚动；保留滚动条也避免窄屏弹窗宽度跳变。
-    use_dialog_focus_trap(false);
+    // 与 Public 外壳一致：弹窗打开期间锁定背景滚动（原 admin=false 不一致，已统一为 true）。
+    use_dialog_focus_trap(true);
     // layout 在 `/login` 与认证后页面间不会重挂载；必须订阅 Router 的当前路由，不能直接
     // 读取一次 `window.location`，否则登录成功后的 replace 会把旧重定向分支永久留在 DOM。
     let current_route = use_route::<Route>();

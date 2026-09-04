@@ -1,15 +1,13 @@
 //! 凭据列表、状态操作和改名对话框入口。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
-use auction_web_shared::TruncatedText;
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
 
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
 use crate::app::surface::AdminActionFeedback;
-
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time};
 
 use super::{
     credential_kind_label, credential_status_class, credential_status_label,
@@ -79,7 +77,6 @@ pub fn CredentialRow(
     let credential_for_disable = credential.clone();
     let credential_for_delete = credential.clone();
     let feedback_id = format!("admin-credential-feedback-{}", credential.id);
-    let rename_title_id = format!("credential-dialog-title-{}", credential.id);
     let rename_input_id = format!("label-{}", credential.id);
     rsx! {
         tr { class: "admin-credentials__row",
@@ -208,21 +205,13 @@ pub fn CredentialRow(
         if rename_dialog() {
             tr { class: "admin-credentials-dialog-row",
                 td { colspan: "8",
-                    div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                        section {
-                            class: "admin-shell__dialog",
-                            role: "dialog",
-                            aria_modal: "true",
-                            aria_labelledby: rename_title_id.clone(),
-                            onkeydown: move |event| {
-                                if event.key() == Key::Escape && !busy() {
-                                    event.prevent_default();
-                                    event.stop_propagation();
-                                    rename_dialog.set(false);
-                                }
-                            },
-                            h2 { id: rename_title_id.clone(), {t!("admin-credentials-rename-title")} }
-                            form {
+                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+                    Dialog {
+                        title: t!("admin-credentials-rename-title"),
+                        close_label: t!("admin-credentials-cancel"),
+                        busy: busy(),
+                        on_close: move |_| rename_dialog.set(false),
+                        form {
                                 onsubmit: move |event| {
                                     event.prevent_default();
                                     if busy() {
@@ -287,7 +276,6 @@ pub fn CredentialRow(
                                 }
                             }
                         }
-                    }
                 }
             }
         }

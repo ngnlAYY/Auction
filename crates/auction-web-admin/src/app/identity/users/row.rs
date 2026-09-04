@@ -2,8 +2,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use auction_web_shared::{Time, TruncatedText, legacy_t as t};
-use dioxus::{html::Key, prelude::*};
+use auction_web_shared::{Dialog, Time, TruncatedText, legacy_t as t};
+use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
@@ -50,7 +50,6 @@ pub(super) fn AdminUserRow(
         _ => t!("admin-error-invalid-response"),
     };
     let dialog_title = dialog().map(|kind| kind.title(&user.username));
-    let dialog_title_id = format!("admin-user-dialog-title-{}", user.id);
 
     rsx! {
         tr {
@@ -131,20 +130,13 @@ pub(super) fn AdminUserRow(
         if let Some(kind) = dialog() {
             tr { class: "admin-users-dialog-row",
                 td { colspan: "7",
-                    div { class: "admin-shell__dialog-backdrop", role: "presentation",
-                        section {
-                            class: "admin-shell__dialog",
-                            role: "dialog",
-                            aria_modal: "true",
-                            aria_labelledby: dialog_title_id.clone(),
-                            onkeydown: move |event| {
-                                if event.key() == Key::Escape && !busy() {
-                                    event.stop_propagation();
-                                    dialog.set(None);
-                                }
-                            },
-                            h2 { id: dialog_title_id.clone(), {dialog_title.clone().unwrap_or_default()} }
-                            if kind == AdminUserDialogKind::ForumAccountId {
+                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+                    Dialog {
+                        title: dialog_title.clone().unwrap_or_default(),
+                        close_label: t!("admin-users-action-cancel"),
+                        busy: busy(),
+                        on_close: move |_| dialog.set(None),
+                        if kind == AdminUserDialogKind::ForumAccountId {
                                 form {
                                     onsubmit: move |event| {
                                         event.prevent_default();
@@ -345,7 +337,6 @@ pub(super) fn AdminUserRow(
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }

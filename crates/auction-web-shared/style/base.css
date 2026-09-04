@@ -518,3 +518,102 @@ button:disabled {
   max-inline-size: 100%;
   overflow-x: auto;
 }
+
+/* ===== 模态弹窗外壳（Dialog 组件） ===== */
+/* 统一自 public.css 的 .public-auction-dialog* 与 admin.css 的 .admin-shell__dialog* 等
+   12 处弹窗：遮罩 + 居中面板 + 标题栏 + 关闭按钮。视觉取两端交集（surface-raised 面板、
+   radius-lg、shadow-2），z-index 走 token 阶梯的 --z-dialog（原 public 硬编码 20）。
+   键盘焦点循环、初始聚焦与背景滚动锁由外壳层 use_dialog_focus_trap 全局处理，
+   与 CSS 无关。 */
+
+.ui-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: center;
+  padding: var(--space-5);
+  background: var(--color-overlay);
+}
+
+.ui-dialog__panel {
+  overflow: auto;
+  inline-size: min(32rem, 100%);
+  max-block-size: calc(100dvh - 2 * var(--space-5));
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-2);
+}
+
+.ui-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.ui-dialog__title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.ui-dialog__close {
+  min-block-size: var(--size-target);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: transparent;
+  font: inherit;
+}
+
+.ui-dialog__close:focus-visible {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .ui-dialog__close:hover:not(:disabled) {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
+}
+
+/* 移动形态（sheet 变体）：`.ui-dialog--sheet` 为显式 opt-in 修饰类（加在遮罩根上，
+   任意断点强制抽屉形态）；同时 bp-sm（48rem）以下通过媒体查询对所有 `.ui-dialog`
+   自动生效——上口圆角、宽度撑满、最大高度约束在视口 85%。组件无需感知断点。 */
+
+.ui-dialog--sheet {
+  padding: 0;
+  align-items: end;
+  justify-items: stretch;
+}
+
+.ui-dialog--sheet .ui-dialog__panel {
+  inline-size: 100%;
+  max-block-size: 85dvh;
+  padding: var(--space-4);
+  border-block-end: none;
+  border-inline: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+@media (max-width: 48rem) {
+  .ui-dialog {
+    padding: 0;
+    align-items: end;
+    justify-items: stretch;
+  }
+
+  .ui-dialog__panel {
+    inline-size: 100%;
+    max-block-size: 85dvh;
+    padding: var(--space-4);
+    border-block-end: none;
+    border-inline: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+}

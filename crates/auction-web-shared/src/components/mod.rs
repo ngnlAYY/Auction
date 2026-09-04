@@ -1,4 +1,5 @@
 mod async_state;
+mod dialog;
 mod markdown;
 mod pager;
 mod time;
@@ -7,6 +8,7 @@ mod truncated_text;
 use dioxus::prelude::*;
 
 pub use async_state::{AsyncState, AsyncStateKind};
+pub use dialog::Dialog;
 pub use markdown::{MarkdownBlocks, MarkdownDocument, without_leading_title};
 pub use pager::Pager;
 pub use time::Time;
