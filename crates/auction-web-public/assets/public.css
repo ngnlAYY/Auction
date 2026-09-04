@@ -1393,8 +1393,8 @@
 }
 
 .public-auction-catalog__name {
-  min-inline-size: 12em;
-  max-inline-size: 20rem;
+  min-inline-size: 0;
+  max-inline-size: none;
 }
 
 .public-auction-catalog__equipment-link {
@@ -1409,14 +1409,14 @@
 }
 
 .public-auction-catalog__avg-roll {
-  min-inline-size: 6.5rem;
+  min-inline-size: 0;
   color: var(--color-accent);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .public-auction-catalog__primary-attributes {
-  min-inline-size: 3.5rem;
+  min-inline-size: 0;
   font-family: var(--font-mono);
   letter-spacing: 0.04em;
 }
@@ -1428,7 +1428,7 @@
 
 .public-auction-catalog__participant-cell {
   min-inline-size: 0;
-  max-inline-size: 18rem;
+  max-inline-size: none;
 }
 
 .public-auction-participant-identity {
@@ -1674,8 +1674,9 @@
 }
 
 .public-auction-catalog__actions {
-  min-inline-size: 22rem;
+  min-inline-size: 0;
   text-align: left;
+  white-space: normal;
 }
 
 .public-auction-catalog__actions-list {
@@ -1692,6 +1693,19 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   white-space: nowrap;
+}
+
+.public-auction-catalog .public-auction-catalog__actions-list {
+  display: flex;
+  flex-wrap: wrap;
+  inline-size: 100%;
+}
+
+.public-auction-catalog .public-auction-catalog__leading-reason {
+  flex: 1 1 100%;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .public-auction-catalog__inline-form {
@@ -1925,6 +1939,8 @@
 .public-auction-bid-form__mode-hint {
   grid-column: 2;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .public-auction-proxy-summary {
@@ -3018,7 +3034,74 @@
   }
 
   .public-auction-catalog table {
+    min-inline-size: 60rem;
+    table-layout: fixed;
     font-size: var(--text-sm);
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--code {
+    inline-size: 6%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--item {
+    inline-size: 17%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
+  .public-auction-catalog__table--live .public-auction-catalog__column--attributes,
+  .public-auction-catalog__table--live .public-auction-catalog__column--current-price,
+  .public-auction-catalog__table--live .public-auction-catalog__column--next-bid,
+  .public-auction-catalog__table--live .public-auction-catalog__column--remaining {
+    inline-size: 7%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--level {
+    inline-size: 5%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--seller {
+    inline-size: 8%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--leader {
+    inline-size: 9%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--status {
+    inline-size: 6%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--actions {
+    inline-size: 14%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--code,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--leader,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--remaining,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--status,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--actions {
+    inline-size: 7%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--item {
+    inline-size: 22%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--avg-roll {
+    inline-size: 8%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--level {
+    inline-size: 6%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--attributes,
+  .public-auction-catalog__table--preview .public-auction-catalog__column--start-price {
+    inline-size: 9%;
+  }
+
+  .public-auction-catalog__table--preview .public-auction-catalog__column--seller {
+    inline-size: 11%;
   }
 
   .public-auction-catalog th,
@@ -3026,25 +3109,8 @@
     padding: var(--space-1) var(--space-2);
   }
 
-  .public-auction-catalog__name {
-    min-inline-size: 9rem;
-    max-inline-size: 16rem;
-  }
-
-  .public-auction-catalog__avg-roll {
-    min-inline-size: 5.5rem;
-  }
-
-  .public-auction-catalog__participant-cell {
-    max-inline-size: 12rem;
-  }
-
   .public-auction-participant-identity__name {
     max-inline-size: 10rem;
-  }
-
-  .public-auction-catalog__actions {
-    min-inline-size: 15rem;
   }
 
   .public-auction-catalog__actions-list {

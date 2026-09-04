@@ -37,10 +37,25 @@ pub(super) fn ProxyCreateForm(
     let mut validation = use_signal(|| None::<String>);
     let mut submitting = use_signal(|| false);
     let mut command = use_signal(|| None::<PendingProxyCommand>);
+    let mut confirmation = use_signal(|| None::<PendingProxyCommand>);
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
     let blocked = blocked || !bidding_open;
     let blocked_reason = if bidding_open { blocked_reason } else { t!("bid-unavailable") };
+    let confirmation_id = format!("public-proxy-create-confirmation-{lot_id}");
+    let confirmation_description = match confirmation() {
+        Some(PendingProxyCommand::Create { amount, mode, .. }) => {
+            let mode_label =
+                if mode == "slow" { t!("proxy-mode-slow") } else { t!("proxy-mode-fast") };
+            Some(t!(
+                "proxy-create-confirm-description",
+                maximum: format_amount(amount),
+                mode: mode_label
+            ))
+        }
+        _ => None,
+    };
+    let confirming = confirmation_description.is_some();
 
     rsx! {
         section {
@@ -52,34 +67,70 @@ pub(super) fn ProxyCreateForm(
                     if submitting() || blocked {
                         return;
                     }
-                    let Some(value) = parse_credit_amount(&maximum_amount()) else {
-                        validation.set(Some(t!("proxy-invalid-amount")));
-                        failure.set(None);
-                        return;
-                    };
-                    if value < initial_minimum {
-                        validation.set(Some(t!("proxy-below-minimum", price: format_amount(initial_minimum))));
-                        failure.set(None);
-                        return;
-                    }
-                    let selected_mode = mode();
-                    if selected_mode == "slow" && !allow_slow {
-                        validation.set(Some(t!("proxy-slow-forbidden")));
-                        failure.set(None);
-                        return;
-                    }
-                    let pending = match command() {
-                        Some(PendingProxyCommand::Create { amount, mode, command_id })
-                            if amount == value && mode == selected_mode => {
-                                PendingProxyCommand::Create { amount, mode, command_id }
+                    // 首次提交只冻结金额、模式与 command_id；确认态再次提交后才调用外部 API。
+                    let pending = if let Some(pending) = confirmation() {
+                        match &pending {
+                            PendingProxyCommand::Create { amount, mode, .. } => {
+                                if *amount < initial_minimum {
+                                    confirmation.set(None);
+                                    validation.set(Some(t!(
+                                        "proxy-below-minimum",
+                                        price: format_amount(initial_minimum)
+                                    )));
+                                    failure.set(None);
+                                    return;
+                                }
+                                if mode == "slow" && !allow_slow {
+                                    confirmation.set(None);
+                                    validation.set(Some(t!("proxy-slow-forbidden")));
+                                    failure.set(None);
+                                    return;
+                                }
                             }
-                        _ => PendingProxyCommand::Create {
-                            amount: value,
-                            mode: selected_mode,
-                            command_id: Uuid::new_v4(),
-                        },
+                            PendingProxyCommand::Lower { .. } => {
+                                confirmation.set(None);
+                                command.set(None);
+                                return;
+                            }
+                        }
+                        pending
+                    } else {
+                        let Some(value) = parse_credit_amount(&maximum_amount()) else {
+                            validation.set(Some(t!("proxy-invalid-amount")));
+                            failure.set(None);
+                            return;
+                        };
+                        if value < initial_minimum {
+                            validation.set(Some(t!(
+                                "proxy-below-minimum",
+                                price: format_amount(initial_minimum)
+                            )));
+                            failure.set(None);
+                            return;
+                        }
+                        let selected_mode = mode();
+                        if selected_mode == "slow" && !allow_slow {
+                            validation.set(Some(t!("proxy-slow-forbidden")));
+                            failure.set(None);
+                            return;
+                        }
+                        let pending = match command() {
+                            Some(PendingProxyCommand::Create { amount, mode, command_id })
+                                if amount == value && mode == selected_mode => {
+                                    PendingProxyCommand::Create { amount, mode, command_id }
+                                }
+                            _ => PendingProxyCommand::Create {
+                                amount: value,
+                                mode: selected_mode,
+                                command_id: Uuid::new_v4(),
+                            },
+                        };
+                        command.set(Some(pending.clone()));
+                        confirmation.set(Some(pending));
+                        validation.set(None);
+                        failure.set(None);
+                        return;
                     };
-                    command.set(Some(pending.clone()));
                     validation.set(None);
                     failure.set(None);
                     submitting.set(true);
@@ -101,6 +152,7 @@ pub(super) fn ProxyCreateForm(
                                 refresh_generation.set(refresh_generation().saturating_add(1));
                             }
                             Err(error) => {
+                                confirmation.set(None);
                                 failure.set(Some(error));
                                 // 失败后保留输入、command_id 和错误，同时重新读取权威价格与代理状态。
                                 refresh_generation.set(refresh_generation().saturating_add(1));
@@ -108,67 +160,78 @@ pub(super) fn ProxyCreateForm(
                         }
                     });
                 },
-                p { class: "public-auction-bid-form__meta",
-                    {t!("bid-current-price", price: format_amount(current_price))}
-                    " · "
-                    {t!("bid-minimum", price: format_amount(initial_minimum))}
-                }
-                label { for: maximum_id.clone(), {t!("proxy-create-maximum-label")} }
-                input {
-                    id: maximum_id,
-                    r#type: "text",
-                    autofocus: true,
-                    inputmode: "decimal",
-                    aria_describedby: "public-proxy-amount-hint",
-                    disabled: submitting() || blocked,
-                    value: "{maximum_amount}",
-                    oninput: move |event| maximum_amount.set(event.value()),
-                }
-                {amount_hint(
-                    &maximum_amount(),
-                    "public-proxy-amount-hint",
-                    "proxy-invalid-amount",
-                )}
-                p { class: "public-auction-bid-form__meta", {t!("proxy-maximum-hint")} }
-                p { class: "public-auction-bid-form__hint", {t!("proxy-shorthand-hint")} }
-                fieldset {
-                    disabled: submitting() || blocked,
-                    legend { {t!("proxy-create-mode-label")} }
-                    div { class: "public-auction-bid-form__mode",
-                        input {
-                            id: fast_mode_id.clone(),
-                            r#type: "radio",
-                            name: mode_name.clone(),
-                            value: "fast",
-                            checked: mode() == "fast",
-                            aria_describedby: fast_hint_id.clone(),
-                            onchange: move |_| mode.set("fast".to_owned()),
+                if let Some(description) = confirmation_description {
+                    p {
+                        id: confirmation_id.clone(),
+                        class: "public-auction-bid-form__confirmation",
+                        role: "status",
+                        aria_live: "polite",
+                        aria_atomic: "true",
+                        "{description}"
+                    }
+                } else {
+                    p { class: "public-auction-bid-form__meta",
+                        {t!("bid-current-price", price: format_amount(current_price))}
+                        " · "
+                        {t!("bid-minimum", price: format_amount(initial_minimum))}
+                    }
+                    label { for: maximum_id.clone(), {t!("proxy-create-maximum-label")} }
+                    input {
+                        id: maximum_id,
+                        r#type: "text",
+                        autofocus: true,
+                        inputmode: "decimal",
+                        aria_describedby: "public-proxy-amount-hint",
+                        disabled: submitting() || blocked,
+                        value: "{maximum_amount}",
+                        oninput: move |event| maximum_amount.set(event.value()),
+                    }
+                    {amount_hint(
+                        &maximum_amount(),
+                        "public-proxy-amount-hint",
+                        "proxy-invalid-amount",
+                    )}
+                    p { class: "public-auction-bid-form__meta", {t!("proxy-maximum-hint")} }
+                    p { class: "public-auction-bid-form__hint", {t!("proxy-shorthand-hint")} }
+                    fieldset {
+                        disabled: submitting() || blocked,
+                        legend { {t!("proxy-create-mode-label")} }
+                        div { class: "public-auction-bid-form__mode",
+                            input {
+                                id: fast_mode_id.clone(),
+                                r#type: "radio",
+                                name: mode_name.clone(),
+                                value: "fast",
+                                checked: mode() == "fast",
+                                aria_describedby: fast_hint_id.clone(),
+                                onchange: move |_| mode.set("fast".to_owned()),
+                            }
+                            label { for: fast_mode_id, {t!("proxy-mode-fast")} }
+                            p { id: fast_hint_id, class: "public-auction-bid-form__mode-hint",
+                                {t!("proxy-mode-fast-hint")}
+                            }
                         }
-                        label { for: fast_mode_id, {t!("proxy-mode-fast")} }
-                        p { id: fast_hint_id, class: "public-auction-bid-form__mode-hint",
-                            {t!("proxy-mode-fast-hint")}
+                        div { class: "public-auction-bid-form__mode",
+                            input {
+                                id: slow_mode_id.clone(),
+                                r#type: "radio",
+                                name: mode_name,
+                                value: "slow",
+                                checked: mode() == "slow",
+                                disabled: !allow_slow,
+                                aria_describedby: slow_described_by,
+                                onchange: move |_| mode.set("slow".to_owned()),
+                            }
+                            label { for: slow_mode_id, {t!("proxy-mode-slow")} }
+                            p { id: slow_hint_id, class: "public-auction-bid-form__mode-hint",
+                                {t!("proxy-mode-slow-hint")}
+                            }
                         }
                     }
-                    div { class: "public-auction-bid-form__mode",
-                        input {
-                            id: slow_mode_id.clone(),
-                            r#type: "radio",
-                            name: mode_name,
-                            value: "slow",
-                            checked: mode() == "slow",
-                            disabled: !allow_slow,
-                            aria_describedby: slow_described_by,
-                            onchange: move |_| mode.set("slow".to_owned()),
+                    if !allow_slow {
+                        p { id: slow_reason_id, class: "public-auction-bid-form__hint", role: "note",
+                            {t!("proxy-slow-forbidden")}
                         }
-                        label { for: slow_mode_id, {t!("proxy-mode-slow")} }
-                        p { id: slow_hint_id, class: "public-auction-bid-form__mode-hint",
-                            {t!("proxy-mode-slow-hint")}
-                        }
-                    }
-                }
-                if !allow_slow {
-                    p { id: slow_reason_id, class: "public-auction-bid-form__hint", role: "note",
-                        {t!("proxy-slow-forbidden")}
                     }
                 }
                 if blocked {
@@ -185,11 +248,27 @@ pub(super) fn ProxyCreateForm(
                 div { class: "public-auction-bid-form__actions",
                     button {
                         r#type: "button",
-                        onclick: move |_| on_close.call(()),
-                        {t!("dialog-cancel")}
+                        disabled: submitting(),
+                        onclick: move |_| {
+                            if confirmation().is_some() {
+                                confirmation.set(None);
+                            } else {
+                                on_close.call(());
+                            }
+                        },
+                        if confirming { {t!("proxy-confirm-back")} } else { {t!("dialog-cancel")} }
                     }
-                    button { r#type: "submit", disabled: submitting() || blocked,
-                        if submitting() { {t!("proxy-working")} } else { {t!("proxy-create-submit")} }
+                    button {
+                        r#type: "submit",
+                        disabled: submitting() || blocked,
+                        aria_describedby: if confirming { confirmation_id.clone() } else { String::new() },
+                        if submitting() {
+                            {t!("proxy-working")}
+                        } else if confirming {
+                            {t!("proxy-create-confirm-submit")}
+                        } else {
+                            {t!("proxy-create-submit")}
+                        }
                     }
                 }
             }
