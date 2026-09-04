@@ -1,9 +1,7 @@
 //! 管理端跨页面展示辅助组件。
 
-use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-
 use auction_web_shared::format_localized_time;
+use auction_web_shared::legacy_t as t;
 
 /// 按旧版管理端约定把 UTC 时间显示为当前界面语言的 Asia/Shanghai 时间。
 ///
@@ -89,19 +87,6 @@ impl AdminActionFeedback {
         match self {
             Self::Success => success,
             Self::Error(code) => admin_api_error_message(code),
-        }
-    }
-}
-
-/// 管理端异步状态面板。
-///
-/// 页面在加载或等待权威数据时复用该结构；它不是未实现功能的静态占位页。
-#[component]
-pub fn AdminPanel(title: String, detail: String) -> Element {
-    rsx! {
-        section { class: "admin-panel", aria_labelledby: "admin-panel-title",
-            h1 { id: "admin-panel-title", "{title}" }
-            p { class: "admin-panel__note", "{detail}" }
         }
     }
 }

@@ -6,7 +6,7 @@ use super::*;
 pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
-            table {
+            table { class: "ui-table--responsive",
                 thead {
                     tr {
                         th { {t!("bidlog-bidder")} }
@@ -26,7 +26,7 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
                                 }
                             }
                             td { class: "public-auction-lot__amount public-auction-lot__number", "data-label": t!("bidlog-amount"), "{format_amount(bid.amount)}" }
-                            td { "data-label": t!("bidlog-time"), time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" } }
+                            td { "data-label": t!("bidlog-time"), Time { value: bid.created_at.clone() } }
                         }
                     }
                 }

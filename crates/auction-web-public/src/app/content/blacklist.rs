@@ -7,13 +7,10 @@ use auction_web_shared::TruncatedText;
 
 use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
-use super::pagination::PublicPager;
-use super::{
-    Placeholder, RetryPlaceholder, format_auction_time, read_public_query, update_public_query,
-};
+use super::{AsyncState, AsyncStateKind, Pager, Time, read_public_query, update_public_query};
 
 pub(super) fn page() -> Element {
-    let refresh_generation = use_context::<Signal<u64>>();
+    let mut refresh_generation = use_context::<Signal<u64>>();
     let page_number = use_signal(|| read_public_query().page.max(1));
     let blacklist = use_resource(move || {
         let _ = refresh_generation();
@@ -21,13 +18,21 @@ pub(super) fn page() -> Element {
     });
     match &*blacklist.read_unchecked() {
         None => rsx! {
-            Placeholder { title: t!("page-blacklist-title"), detail: t!("data-loading") }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("page-blacklist-title"),
+                detail: t!("data-loading"),
+            }
         },
         Some(Err(_)) => rsx! {
-            RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("page-blacklist-title"),
                 detail: t!("data-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(page)) => rsx! {
@@ -62,12 +67,17 @@ fn BlacklistTable(page: BlacklistPage, mut page_number: Signal<i64>) -> Element 
                     }
                 }
             }
-            PublicPager {
+            Pager {
                 page: page.page,
                 page_size: page.page_size,
                 total: Some(page.total),
                 has_more: false,
                 label: t!("page-blacklist-title"),
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
                 on_page_change: move |next_page| {
                     page_number.set(next_page);
                     update_public_query(|query| query.page = next_page, false);
@@ -89,10 +99,7 @@ fn BlacklistRow(entry: BlacklistEntry) -> Element {
             }
             td {
                 "data-label": t!("blacklist-time"),
-                time {
-                    datetime: entry.blacklisted_at.clone(),
-                    "{format_auction_time(&entry.blacklisted_at)}"
-                }
+                Time { value: entry.blacklisted_at.clone() }
             }
         }
     }

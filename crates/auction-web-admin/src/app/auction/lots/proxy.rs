@@ -3,13 +3,13 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
 
-use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, Pager, Time, TruncatedText, format_credit_amount as format_amount,
+};
 
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 use crate::app::surface::admin_api_error_message;
 
-use super::super::format_admin_time;
-use super::super::pagination::AdminPager;
 use super::helpers::{proxy_mode_label, proxy_status_label};
 
 #[component]
@@ -30,16 +30,19 @@ pub(super) fn AdminProxyHistory(
 
     let content = match &*events.read_unchecked() {
         None => rsx! {
-            p { role: "status", {t!("admin-lots-proxy-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-lots-proxy-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            div {
-                p { role: "alert", {admin_api_error_message(error)} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
-                    {t!("admin-lots-retry")}
-                }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
+                retry_label: t!("admin-lots-retry"),
+                on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
         Some(Ok(page)) => rsx! {
@@ -84,10 +87,14 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
 
     rsx! {
         if page.proxy_events.is_empty() {
-            p { {t!("admin-lots-proxy-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-lots-proxy-empty"),
+                detail: "",
+            }
         } else {
             div { class: "admin-auction-table-wrap",
-                table { class: "admin-auction-table admin-auction-proxy__table",
+                table { class: "admin-auction-table admin-auction-proxy__table ui-table--responsive",
                     caption { class: "admin-visually-hidden", {t!("admin-lots-proxy-pagination")} }
                     thead {
                         tr {
@@ -107,11 +114,18 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
                 }
             }
         }
-        AdminPager {
+        Pager {
             page: current_page,
             page_size,
-            total,
+            total: Some(total),
             label: t!("admin-lots-proxy-pagination"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }
@@ -153,7 +167,7 @@ fn AdminProxyHistoryRow(event: AdminProxyEvent) -> Element {
                     usage_number: event.usage_number
                 )}
             }
-            td { "data-label": t!("admin-lots-proxy-created"), time { datetime: event.created_at.clone(), "{format_admin_time(&event.created_at)}" } }
+            td { "data-label": t!("admin-lots-proxy-created"), Time { value: event.created_at.clone() } }
         }
     }
 }

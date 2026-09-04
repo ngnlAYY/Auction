@@ -15,6 +15,8 @@ use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 /// Outbox 路由展示已持久化事件元数据与 realtime failure/lag/replay 安全投影；未冻结的外部
 /// 广播 sink 不在页面中虚构状态或成功结果。
 pub(crate) fn outbox_page() -> Element {
@@ -121,13 +123,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         });
     let event_content = match &event_state {
         None => rsx! {
-            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("realtime-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p {
-                class: "admin-panel__note action-feedback action-feedback--error",
-                role: "alert",
-                {admin_api_error_message(error)}
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
             }
         },
         Some(Ok(event_page)) => rsx! {
@@ -142,13 +148,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     };
     let failure_content = match &failure_state {
         None => rsx! {
-            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("realtime-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p {
-                class: "admin-panel__note action-feedback action-feedback--error",
-                role: "alert",
-                {admin_api_error_message(error)}
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
             }
         },
         Some(Ok(failure_page)) => rsx! {
@@ -176,13 +186,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     };
     let lag_content = match &lag_state {
         None => rsx! {
-            p { class: "admin-panel__note", role: "status", {t!("realtime-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("realtime-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p {
-                class: "admin-panel__note action-feedback action-feedback--error",
-                role: "alert",
-                {admin_api_error_message(error)}
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
             }
         },
         Some(Ok(lag_page)) => rsx! {

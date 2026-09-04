@@ -3,14 +3,15 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, Pager, Time, TruncatedText, format_credit_amount as format_amount,
+};
 
 use crate::api::{
     AdminRecoveryReport, AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary,
 };
 use crate::app::surface::AdminActionFeedback;
 
-use super::super::{format_admin_time, pagination::AdminPager};
 use super::RecoveryConfirmationDraft;
 use super::helpers::{format_ppm, page_count, page_slice, price_adjustment_label};
 use super::recovery::AdminRecoveryTable;
@@ -61,7 +62,11 @@ pub(super) fn AdminSettlementReportView(
                 }
         }
         if report.lots.is_empty() {
-            p { class: "admin-auction-status", {t!("admin-settlement-no-lots")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-settlement-no-lots"),
+                detail: "",
+            }
         }
         AdminSettlementPager {
             current_page: current_lot_page,
@@ -126,10 +131,7 @@ fn AdminSettlementSummaryCard(summary: Option<AdminSettlementSummary>) -> Elemen
                 p { class: "admin-auction-status",
                     {t!("admin-settlement-summary-meta")}
                     " "
-                    time {
-                        datetime: summary.settled_at.clone(),
-                        {format_admin_time(&summary.settled_at)}
-                    }
+                    Time { value: summary.settled_at.clone() }
                 }
             } else {
                 p { class: "admin-auction-status", {t!("admin-settlement-not-settled")} }
@@ -156,11 +158,18 @@ pub(super) fn AdminSettlementPager(
     label: String,
 ) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: current_page,
             page_size: 1,
-            total: i64::try_from(total_pages).unwrap_or(i64::MAX),
+            total: Some(i64::try_from(total_pages).unwrap_or(i64::MAX)),
             label,
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page.set(next_page),
         }
     }

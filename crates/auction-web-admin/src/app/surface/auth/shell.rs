@@ -9,6 +9,9 @@ pub(crate) fn AdminAuthenticatedShell(
 ) -> Element {
     // 旧凭据表的 importedBy 列由当前登录操作者合成，不扩散到凭据 DTO 或数据库投影。
     use_context_provider(|| session.clone());
+    // 外壳持有唯一的秒级共享时钟；需要每秒刷新的子树（如拍卖列表倒计时）通过
+    // `use_second_tick` 订阅同一个 interval，不再各自起定时器。
+    use_second_ticker();
     let mut navigation_open = use_signal(|| false);
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);

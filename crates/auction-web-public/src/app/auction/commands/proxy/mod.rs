@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 
 use crate::api::{OwnedProxy, ProxyCommandAuthorization};
 
-use super::super::RetryPlaceholder;
+use super::super::{AsyncState, AsyncStateKind};
 use authorization::ProxyAuthorizationForm;
 use create::ProxyCreateForm;
 use success::proxy_success_panel;
@@ -46,7 +46,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         leading,
         blocked_reason,
         proxy,
-        refresh_generation,
+        mut refresh_generation,
         saved_authorization,
         submitting,
         on_close,
@@ -57,10 +57,14 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
     match proxy.as_ref() {
         None => rsx! { p { role: "status", {t!("proxy-loading")} } },
         Some(Err(_)) => rsx! {
-            RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("catalog-proxy"),
                 detail: t!("proxy-load-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(None)) => rsx! {

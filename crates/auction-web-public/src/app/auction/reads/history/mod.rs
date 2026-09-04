@@ -10,7 +10,7 @@ pub(crate) use filters::*;
 pub(crate) use table::*;
 pub(crate) use values::*;
 pub(crate) fn history() -> Element {
-    let refresh_generation = use_context::<Signal<u64>>();
+    let mut refresh_generation = use_context::<Signal<u64>>();
     let query = normalize_history_query(read_public_query());
     let mut world_filter = use_signal(|| query.world.clone().unwrap_or_else(|| "all".to_owned()));
     let mut name_filter = use_signal(|| query.history_name.clone().unwrap_or_default());
@@ -61,16 +61,21 @@ pub(crate) fn history() -> Element {
             p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
         },
         Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
-            Placeholder {
+            AsyncState {
+                kind: AsyncStateKind::Empty,
                 title: t!("page-history-title"),
                 detail: t!("page-history-unsupported"),
             }
         },
         Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
-            RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("page-history-title"),
                 detail: t!("data-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(page)) => rsx! {

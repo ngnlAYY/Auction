@@ -97,12 +97,17 @@ pub(crate) fn CatalogTable(
                 }
             }
         }
-        PublicPager {
+        Pager {
             page: page_number(),
             page_size,
             total: page_total,
             has_more,
             label: t!("auction-pager-label"),
+            previous_label: t!("catalog-previous"),
+            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+            next_label: t!("catalog-next"),
+            jump_label: t!("catalog-page-input"),
+            jump_button_label: t!("catalog-page-go"),
             on_page_change: move |page| {
                 page_number.set(page);
                 update_public_query(|query| query.page = page, false);
@@ -123,7 +128,7 @@ pub(crate) fn LiveCatalogTable(
     // 桌面端由语义化 colgroup 分配百分比宽度；移动端仍由 CSS 切换为字段卡片。
     rsx! {
         div { class: "public-auction-catalog",
-            table { class: "public-auction-catalog__table public-auction-catalog__table--live",
+            table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-lots")} }
                 colgroup {
                     col { class: "public-auction-catalog__column--code" }
@@ -179,7 +184,7 @@ pub(crate) fn LiveCatalogTable(
 pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
-            table { class: "public-auction-catalog__table public-auction-catalog__table--preview",
+            table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
                 colgroup {
                     col { class: "public-auction-catalog__column--code" }

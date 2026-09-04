@@ -6,12 +6,11 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::TruncatedText;
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
 
 use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 
-use super::pagination::AdminPager;
-use super::{admin_api_error_message, format_admin_time};
+use super::admin_api_error_message;
 
 pub(super) fn page() -> Element {
     let filter = use_signal(AdminAuditFilter::default);
@@ -30,25 +29,35 @@ pub(super) fn page() -> Element {
     };
     let content = match &*audit.read_unchecked() {
         None => rsx! {
-            p { class: "admin-shell__status", role: "status", {t!("admin-audit-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-audit-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            div { class: "admin-shell__inline-error", role: "alert",
-                p { {admin_api_error_message(error)} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                    {t!("admin-audit-retry")}
-                }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
+                retry_label: t!("admin-audit-retry"),
+                on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
         Some(Ok(page)) => rsx! {
             AuditTable { page: page.clone() }
-            AdminPager {
+            Pager {
                 page: page.page.unwrap_or(page_number()).max(1),
                 page_size: page.page_size,
-                total: audit_total(page, page_number()),
+                total: Some(audit_total(page, page_number())),
                 label: t!("page-audit-title"),
+                previous_label: t!("admin-pagination-previous"),
+                status: move |(page, pages): (i64, i64)| {
+                    t!("admin-pagination-status", page: page, pages: pages)
+                },
+                next_label: t!("admin-pagination-next"),
+                jump_label: t!("admin-pagination-input"),
+                jump_button_label: t!("admin-pagination-go"),
                 on_page_change: move |next_page| page_number.set(next_page),
             }
         },
@@ -212,7 +221,7 @@ fn AuditTable(page: AdminAuditPage) -> Element {
     let empty = page.records.is_empty();
     rsx! {
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",
-            table { class: "admin-shell__table admin-audit-table",
+            table { class: "admin-shell__table admin-audit-table ui-table--responsive",
                 caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
                 thead {
                     tr {
@@ -234,7 +243,11 @@ fn AuditTable(page: AdminAuditPage) -> Element {
             }
         }
         if empty {
-            p { class: "admin-shell__status", {t!("admin-audit-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-audit-empty"),
+                detail: "",
+            }
         }
     }
 }
@@ -259,7 +272,7 @@ fn AuditRow(record: AdminAuditRecord) -> Element {
             td {
                 class: "admin-audit-table__time",
                 "data-label": t!("admin-audit-at"),
-                time { datetime: record.occurred_at.clone(), "{format_admin_time(&record.occurred_at)}" }
+                Time { value: record.occurred_at.clone() }
             }
             td {
                 class: "admin-audit-table__actor",

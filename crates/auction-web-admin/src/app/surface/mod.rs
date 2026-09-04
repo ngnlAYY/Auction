@@ -29,8 +29,6 @@ mod intake;
 mod lots;
 #[path = "../fulfillment/mail.rs"]
 mod mail;
-#[path = "../shared/pagination.rs"]
-mod pagination;
 #[path = "../operations/realtime/mod.rs"]
 mod realtime;
 #[path = "../identity/renames.rs"]

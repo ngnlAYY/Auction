@@ -11,7 +11,7 @@ mod model;
 #[path = "config/worlds.rs"]
 mod worlds;
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t};
 use dioxus::prelude::*;
 use serde_json::Value;
 use uuid::Uuid;
@@ -80,35 +80,39 @@ pub(super) fn page() -> Element {
 
     let content = match &*config.read_unchecked() {
         None => rsx! {
-            p { class: "admin-config-status", role: "status", {t!("admin-runtime-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-runtime-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            div { class: "admin-config-error", role: "alert",
-                p { {admin_api_error_message(&error.code)} }
-                button {
-                    class: "admin-btn-secondary",
-                    r#type: "button",
-                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                    {t!("admin-retry")}
-                }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(&error.code),
+                detail: "",
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
         Some(Ok(_)) if !form_ready() => {
             if matches!(notice(), Some(ConfigNotice::InvalidForm)) {
                 rsx! {
-                    div { class: "admin-config-error", role: "alert",
-                        p { {t!("admin-runtime-invalid-form")} }
-                        button {
-                            class: "admin-btn-secondary",
-                            r#type: "button",
-                            onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                            {t!("admin-retry")}
-                        }
+                    AsyncState {
+                        kind: AsyncStateKind::Error,
+                        title: t!("admin-runtime-invalid-form"),
+                        detail: "",
+                        retry_label: t!("admin-retry"),
+                        on_retry: move |_| refresh.set(refresh().saturating_add(1)),
                     }
                 }
             } else {
                 rsx! {
-                    p { class: "admin-config-status", role: "status", {t!("admin-runtime-loading")} }
+                    AsyncState {
+                        kind: AsyncStateKind::Loading,
+                        title: t!("admin-runtime-loading"),
+                        detail: "",
+                    }
                 }
             }
         }

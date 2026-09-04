@@ -5,9 +5,29 @@
 - `style/base.css`：primitive/semantic 设计变量（颜色、字号、间距、圆角、层级和表面阴影）、基础排版
   和语言切换器样式。两个 surface 的样式都建立在这些变量之上；窄屏表单
   控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
+  另含三组从两端重复块提取的通用组件样式：`.ui-pager*` 分页器（与两端原规则逐字一致）、
+  `.ui-async-state*`/`.ui-empty-state*` 状态面板（两者共享同一组规则），以及
+  `.ui-table--responsive`（窄断点卡片模式，依赖 td 的 `data-label`）与 `.ui-table--scroll`
+  （横向滚动容器）响应式表格工具类。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
+- `src/components/pager.rs`：`Pager` 长列表分页器，合并自两端原先近逐字重复的
+  `PublicPager`/`AdminPager`。保留钳制契约：渲染期先 clamp 页码、交互从钳制页码出发、
+  越界 effect 只纠偏一次；`total` 缺失时退化为 `has_more` 游标语义。上一页/下一页/跳页
+  文案与「第 X 页 / 共 Y 页」状态模板全部由 props 传入（`status: Callback<(i64, i64), String>`），
+  DOM class 保持 `ui-pager*` 不变。
+- `src/components/async_state.rs`：`AsyncState` 三态面板（`AsyncStateKind::Loading` /
+  `Error` / `Empty`），统一自 Public 的 `RetryPlaceholder`、`Placeholder` 与 Admin 的
+  `AdminPanel`。loading/empty 用 `role="status"` + `aria-live="polite"`，error 用
+  `role="alert"`；`retry_label` 与 `on_retry` 同时提供才渲染重试按钮。
+- `src/components/time.rs`：`Time` 组件，包装 `format_localized_time` 并输出带原始
+  RFC3339 `datetime` 属性的 `<time>` 元素。
+- `src/media/mod.rs`：`use_media_query(query) -> Signal<bool>`，基于 `matchMedia` +
+  `change` 监听的响应式媒体查询；非 WASM 构建返回恒 `false`。
+- `src/clock/mod.rs`：秒级共享时钟。外壳用 `use_second_ticker()` 创建并提供 context，
+  消费方用 `use_second_tick() -> Signal<u64>` 订阅同一修订计数，不再各自起一秒定时器；
+  内部 interval 惰性启停（无订阅者时不运行），生命周期由外壳的 context 范围决定。
 - `src/components/markdown/{mod,model,blocks,inline,render}.rs`：共享 Markdown/GFM 展示器的
   模型、块级解析、行内解析和安全 DOM 渲染；原始 HTML 只作为转义文本展示，链接目标经过
   协议白名单校验。`MarkdownDocument` 提供共享主题容器，`MarkdownBlocks` 只输出安全块节点，

@@ -4,8 +4,9 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use auction_web_shared::Time;
+
 use crate::api::{AdminRules, AdminRulesCandidate, publish_admin_rules, validate_admin_rules};
-use crate::app::surface::format_admin_time;
 
 use super::helpers::{DEFAULT_RULES_LOCALE, draft_signature, notice_text, valid_locale};
 use super::model::{RuleCommand, RuleNotice};
@@ -133,10 +134,7 @@ pub(super) fn AdminRulesWorkspace(
                 }
                 span {
                     {t!("admin-rules-published-at")}
-                    time {
-                        datetime: document.published_at.clone(),
-                        "{format_admin_time(&document.published_at)}"
-                    }
+                    Time { value: document.published_at.clone() }
                 }
             }
 

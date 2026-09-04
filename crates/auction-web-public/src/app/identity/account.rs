@@ -8,13 +8,12 @@ use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
 
-use super::pagination::PublicPager;
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
 use super::{
-    PublicSessionResource, Route, format_amount, format_auction_time,
-    login_href_for_current_location, read_public_query, update_public_query,
+    Pager, PublicSessionResource, Route, Time, format_amount, login_href_for_current_location,
+    read_public_query, update_public_query,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
@@ -157,7 +156,19 @@ fn AccountPager(
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
-        PublicPager { page, page_size, total: Some(total), has_more: false, label, on_page_change }
+        Pager {
+            page,
+            page_size,
+            total: Some(total),
+            has_more: false,
+            label,
+            previous_label: t!("catalog-previous"),
+            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+            next_label: t!("catalog-next"),
+            jump_label: t!("catalog-page-input"),
+            jump_button_label: t!("catalog-page-go"),
+            on_page_change,
+        }
     }
 }
 
@@ -176,7 +187,7 @@ fn BidSection(
                 p { class: "public-account-empty", {t!("account-no-bids")} }
             } else {
                 div { class: "public-account-table-wrap",
-                    table { class: "public-account-table",
+                    table { class: "public-account-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("account-bids-title")} }
                         thead {
                             tr {
@@ -226,7 +237,7 @@ fn BidRow(bid: OwnedBid) -> Element {
                 }
             }
             td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
-            td { "data-label": t!("account-time"), time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" } }
+            td { "data-label": t!("account-time"), Time { value: bid.created_at.clone() } }
         }
     }
 }
@@ -247,7 +258,7 @@ fn ProxySection(
                 p { class: "public-account-empty", {t!("account-no-proxies")} }
             } else {
                 div { class: "public-account-table-wrap",
-                    table { class: "public-account-table",
+                    table { class: "public-account-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("account-proxies-title")} }
                         thead {
                             tr {

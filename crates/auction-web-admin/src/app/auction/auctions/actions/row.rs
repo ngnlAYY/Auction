@@ -3,9 +3,10 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::Time;
+
 use crate::api::{AdminAuction, AdminAuctionCapabilities};
 
-use super::super::super::format_admin_time;
 use super::super::helpers::{
     admin_auction_status_label, admin_auction_world_label, scheduled_time_millis,
 };
@@ -15,13 +16,13 @@ use super::{dialog::AdminAuctionActions, model::AdminAuctionNotice};
 pub(crate) fn AdminAuctionRow(
     auction: AdminAuction,
     capabilities: AdminAuctionCapabilities,
-    clock_millis: Signal<i64>,
+    clock_millis: i64,
     notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
 ) -> Element {
     let auction_id = auction.id.clone();
     let lifecycle_status = auction.status.clone();
-    let current_time_millis = clock_millis();
+    let current_time_millis = clock_millis;
     let open_ready = auction.status == "preview"
         && (capabilities.manual_early_open
             || scheduled_time_millis(&auction.scheduled_open_at)
@@ -40,11 +41,11 @@ pub(crate) fn AdminAuctionRow(
                     {admin_auction_status_label(&auction.status)}
                 }
             }
-            td { "data-label": t!("admin-auctions-open-at"), time { datetime: auction.scheduled_open_at.clone(), "{format_admin_time(&auction.scheduled_open_at)}" } }
+            td { "data-label": t!("admin-auctions-open-at"), Time { value: auction.scheduled_open_at.clone() } }
             td {
                 "data-label": t!("admin-auctions-end-at"),
                 if let Some(ends_at) = auction.scheduled_ends_at.clone() {
-                    time { datetime: ends_at.clone(), "{format_admin_time(&ends_at)}" }
+                    Time { value: ends_at }
                 } else {
                     {t!("value-empty")}
                 }

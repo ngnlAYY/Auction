@@ -35,7 +35,7 @@ pub(crate) fn AuctionPage() -> Element {
 #[component]
 pub(crate) fn AuctionBoard() -> Element {
     let selected_world = use_context::<Signal<String>>();
-    let refresh_generation = use_context::<Signal<u64>>();
+    let mut refresh_generation = use_context::<Signal<u64>>();
     let location_revision = use_context::<PublicLocationRevision>().0;
     let readiness = use_context::<PublicReadinessResource>();
     let session = use_context::<PublicSessionResource>();
@@ -73,17 +73,26 @@ pub(crate) fn AuctionBoard() -> Element {
 
     match current.as_ref() {
         None => rsx! {
-            Placeholder { title: t!("page-auctions-title"), detail: t!("data-loading") }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("page-auctions-title"),
+                detail: t!("data-loading"),
+            }
         },
         Some(Err(_)) => rsx! {
-            RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("page-auctions-title"),
                 detail: t!("data-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(None)) => rsx! {
-            Placeholder {
+            AsyncState {
+                kind: AsyncStateKind::Empty,
                 title: t!("auction-empty-no-auction"),
                 detail: t!("auction-empty-no-auction-hint"),
             }

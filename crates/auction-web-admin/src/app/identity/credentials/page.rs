@@ -4,6 +4,8 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 
 use super::super::{AdminActionFeedback, admin_api_error_message};
@@ -63,13 +65,17 @@ pub fn page() -> Element {
 
     let list_content = match &*credentials.read_unchecked() {
         None => rsx! {
-            p { class: "admin-shell__status", role: "status", {t!("admin-credentials-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-credentials-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p {
-                class: "admin-shell__inline-error",
-                role: "alert",
-                {admin_api_error_message(error)}
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
             }
         },
         Some(Ok(page)) => rsx! {

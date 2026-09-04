@@ -22,7 +22,7 @@ pub(crate) fn PriceHistoryTable(
             } else {
                 div { class: "public-history-table-wrap",
                     table {
-                        class: "public-history-table",
+                        class: "public-history-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("page-history-title")} }
                         thead {
                             tr {
@@ -46,12 +46,17 @@ pub(crate) fn PriceHistoryTable(
                     }
                 }
             }
-            PublicPager {
+            Pager {
                 page: current_page,
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-history-title"),
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
             }
         }
@@ -122,7 +127,7 @@ pub(crate) fn PriceHistoryRow(row: PriceHistoryEntry) -> Element {
                 TruncatedText { value: row.seller_name, size: "compact", portal: true }
             }
             td { "data-label": t!("history-closed"),
-                time { datetime: row.closed_at.clone(), "{super::format_auction_time(&row.closed_at)}" }
+                Time { value: row.closed_at.clone() }
             }
         }
     }

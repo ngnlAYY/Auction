@@ -349,3 +349,172 @@ button:disabled {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* ===== 通用分页器（Pager 组件） ===== */
+/* 提取自 public.css 与 admin.css 中逐字相同的 .ui-pager 块，两端视觉不变。 */
+
+.ui-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-block-start: var(--space-3);
+}
+
+.ui-pager__controls,
+.ui-pager__jump,
+.ui-pager__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-pager button,
+.ui-pager__input {
+  min-block-size: var(--size-target);
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.ui-pager button {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .ui-pager button:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+}
+
+.ui-pager button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ui-pager__status,
+.ui-pager__label {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.ui-pager__input {
+  inline-size: 5rem;
+}
+
+@media (max-width: 48rem) {
+  .ui-pager,
+  .ui-pager__jump {
+    align-items: stretch;
+  }
+
+  .ui-pager__controls,
+  .ui-pager__jump {
+    inline-size: 100%;
+  }
+
+  .ui-pager__controls {
+    justify-content: space-between;
+  }
+}
+
+/* ===== 异步状态面板（AsyncState 组件 / 旧 EmptyState 兼容类） ===== */
+/* 提取自 public.css 的 .ui-empty-state 块；.ui-empty-state* 作为兼容别名与
+   .ui-async-state* 共享同一组规则，两端现有视觉不变。 */
+
+.ui-async-state,
+.ui-empty-state {
+  position: relative;
+  padding: var(--space-6) var(--space-5);
+  border: var(--border-width) dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+.ui-async-state__title,
+.ui-empty-state__title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.ui-async-state__detail,
+.ui-empty-state__hint {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+}
+
+.ui-empty-state__detail {
+  display: block;
+  margin-block-start: var(--space-2);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ui-async-state__retry,
+.ui-empty-state__retry {
+  min-block-size: var(--size-target);
+  margin-block-start: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-weight: var(--font-weight-strong);
+}
+
+.ui-async-state__retry:focus-visible,
+.ui-empty-state__retry:focus-visible {
+  border-color: var(--color-link);
+}
+
+/* ===== 响应式表格工具类 ===== */
+/* .ui-table--responsive：窄断点（bp-sm，48rem）下从行式表格切换为卡片模式——
+   隐藏表头，每行变为块级卡片，单元格通过 data-label 属性回显列名。使用该类的
+   表格必须为每个 td 提供 data-label，且语义与表头一致。
+   提取自 public.css 与 admin.css 中 9 处逐字近重复的响应式表格段。 */
+
+@media (max-width: 48rem) {
+  .ui-table--responsive thead {
+    display: none;
+  }
+
+  .ui-table--responsive,
+  .ui-table--responsive tbody,
+  .ui-table--responsive tr {
+    display: block;
+  }
+
+  .ui-table--responsive tbody tr {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .ui-table--responsive td {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    white-space: normal;
+  }
+
+  .ui-table--responsive td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+}
+
+/* .ui-table--scroll：列数多、不适合卡片化的表格，套一层横向滚动容器，
+   保持桌面与窄屏一致的行式布局。约定该类加在包裹 table 的容器上。 */
+
+.ui-table--scroll {
+  display: block;
+  max-inline-size: 100%;
+  overflow-x: auto;
+}

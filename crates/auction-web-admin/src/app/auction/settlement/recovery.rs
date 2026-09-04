@@ -4,7 +4,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::{html::Key, prelude::*};
 use uuid::Uuid;
 
-use auction_web_shared::TruncatedText;
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
 use crate::app::surface::AdminActionFeedback;
@@ -35,7 +35,11 @@ pub(super) fn AdminRecoveryTable(
             h2 { id: "settlement-recovery-title", {t!("admin-recovery-title")} }
             if let Some(report) = report {
                 if report.recoveries.is_empty() {
-                    p { class: "admin-auction-status", {t!("admin-recovery-empty")} }
+                    AsyncState {
+                        kind: AsyncStateKind::Empty,
+                        title: t!("admin-recovery-empty"),
+                        detail: "",
+                    }
                 } else {
                     div { class: "admin-settlement__table-wrap",
                         table { class: "admin-shell__table admin-auction-table",
@@ -87,8 +91,6 @@ fn AdminRecoveryRow(
     let recovery_id = recovery.id.clone();
     let display_equipment_name = recovery.equipment_name.clone();
     let display_equipment_identity = format!("{display_equipment_name}({})", recovery.world_id);
-    let deadline_attribute = recovery.payment_deadline_at.clone();
-    let deadline_text = super::super::format_admin_time(&recovery.payment_deadline_at);
     let lot_code =
         super::super::lots::admin_lot_code_for(&recovery.equipment_category, recovery.lot_number);
     let evidence = recovery
@@ -104,7 +106,7 @@ fn AdminRecoveryRow(
                 TruncatedText { value: display_equipment_identity, size: "wide", portal: true }
             }
             td { {recovery_stage_label(&recovery.stage)} }
-            td { time { datetime: deadline_attribute, {deadline_text} } }
+            td { Time { value: recovery.payment_deadline_at.clone() } }
             td { TruncatedText { value: evidence, portal: true } }
             td { TruncatedText { value: actions, size: "wide", portal: true } }
             td {

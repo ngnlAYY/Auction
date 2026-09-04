@@ -8,10 +8,9 @@ use crate::api::{
     fetch_compensation_movements, fetch_compensation_pool, lot_code_for,
 };
 
-use super::pagination::PublicPager;
 use super::{
-    Placeholder, RetryPlaceholder, Route, format_amount, format_auction_time, read_public_query,
-    update_public_query, world_label,
+    AsyncState, AsyncStateKind, Pager, Route, Time, format_amount, format_auction_time,
+    read_public_query, update_public_query, world_label,
 };
 
 mod movements;
@@ -51,16 +50,21 @@ pub(super) fn pool_page() -> Element {
 
     match &*pool.read_unchecked() {
         None => rsx! {
-            Placeholder {
+            AsyncState {
+                kind: AsyncStateKind::Loading,
                 title: t!("page-compensation-pool-title"),
                 detail: t!("data-loading"),
             }
         },
         Some(Err(_)) => rsx! {
-            RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("page-compensation-pool-title"),
                 detail: t!("data-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(page)) => {

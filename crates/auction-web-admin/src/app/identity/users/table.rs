@@ -3,10 +3,11 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+
 use crate::api::AdminUserStatusFilter;
 use crate::app::surface::AdminActionFeedback;
 
-use super::super::pagination::AdminPager;
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{parse_status_filter, status_filter_value};
 use super::row::AdminUserRow;
@@ -86,7 +87,11 @@ pub(super) fn AdminUserTable(
             }
         }
         if page.users.is_empty() {
-            p { class: "admin-shell__status", role: "status", {t!("admin-users-no-results")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-users-no-results"),
+                detail: "",
+            }
         }
         if let Some(feedback) = action_feedback() {
             p {
@@ -102,11 +107,18 @@ pub(super) fn AdminUserTable(
         if let Some(notice) = create_notice() {
             p { class: "admin-shell__inline-ok", role: "status", {notice} }
         }
-        AdminPager {
+        Pager {
             page: page.pagination.page,
             page_size: page.pagination.page_size,
-            total: page.pagination.total,
+            total: Some(page.pagination.total),
             label: t!("page-users-title"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

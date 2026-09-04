@@ -10,7 +10,9 @@ pub(crate) fn AuctionData(
     initial_page: i64,
     boot_prerequisites_ready: bool,
 ) -> Element {
+    // 倒计时与开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
     let mut clock = use_signal(estimated_now);
+    let tick = use_second_tick();
     let active_category = use_signal(|| initial_category.clone());
     let page_number = use_signal(|| initial_page.max(1));
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
@@ -21,29 +23,22 @@ pub(crate) fn AuctionData(
     let opening_key = format!("{}:{}", auction.id, auction.opens_at);
     let mut opening_refresh_key = use_signal(|| None::<String>);
     let mut opening_refreshed = use_signal(|| false);
-    let _clock_task = use_future({
-        let opening_key = opening_key.clone();
-        move || {
-            let opening_key = opening_key.clone();
-            async move {
-                loop {
-                    TimeoutFuture::new(1_000).await;
-                    let now = estimated_now();
-                    clock.set(now);
-                    if opening_refresh_key().as_deref() != Some(opening_key.as_str()) {
-                        opening_refresh_key.set(Some(opening_key.clone()));
-                        opening_refreshed.set(false);
-                    }
-                    if should_refresh_at_open
-                        && !opening_refreshed()
-                        && realtime_state() == LiveConnectionState::Live
-                        && opening_at.is_some_and(|opens_at| now >= opens_at)
-                    {
-                        opening_refreshed.set(true);
-                        refresh_generation.set(refresh_generation().saturating_add(1));
-                    }
-                }
-            }
+    use_effect(move || {
+        let _ = tick();
+        let now = estimated_now();
+        clock.set(now);
+        if *opening_refresh_key.peek() != Some(opening_key.clone()) {
+            opening_refresh_key.set(Some(opening_key.clone()));
+            opening_refreshed.set(false);
+        }
+        if should_refresh_at_open
+            && !*opening_refreshed.peek()
+            && *realtime_state.peek() == LiveConnectionState::Live
+            && opening_at.is_some_and(|opens_at| now >= opens_at)
+        {
+            opening_refreshed.set(true);
+            let next_generation = refresh_generation.peek().saturating_add(1);
+            refresh_generation.set(next_generation);
         }
     });
     let auction_id = auction.id.clone();
@@ -138,9 +133,15 @@ pub(crate) fn AuctionData(
         }
         Some(Err(error)) => {
             rsx! {
-                CatalogLoadFailure {
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: t!("data-error"),
                     detail: lot_list_error_message(error),
-                    refresh_generation: lots_refresh_generation,
+                    retry_label: t!("data-retry"),
+                    on_retry: move |_| {
+                        lots_refresh_generation
+                            .set(lots_refresh_generation().saturating_add(1));
+                    },
                 }
             }
         }
@@ -212,7 +213,7 @@ pub(crate) fn AuctionData(
                                 aria_label: t!("auction-countdown"),
                                 "{countdown.label}"
                             }
-                            time { datetime: scheduled_ends_at.clone(), "{format_auction_time(&scheduled_ends_at)}" }
+                            Time { value: scheduled_ends_at.clone() }
                         }
                     }
                     {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
@@ -245,22 +246,6 @@ pub(crate) fn AuctionData(
                 } else {
                     {catalog}
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn CatalogLoadFailure(detail: String, mut refresh_generation: Signal<u64>) -> Element {
-    rsx! {
-        div { class: "ui-empty-state", role: "alert",
-            p { class: "ui-empty-state__title", {t!("data-error")} }
-            span { class: "ui-empty-state__detail", "{detail}" }
-            button {
-                class: "ui-empty-state__retry",
-                r#type: "button",
-                onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
-                {t!("data-retry")}
             }
         }
     }

@@ -9,7 +9,8 @@ use auction_web_shared::TruncatedText;
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
 use crate::app::surface::AdminActionFeedback;
 
-use super::super::{format_admin_time, pagination::AdminPager};
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time};
+
 use super::{
     credential_kind_label, credential_status_class, credential_status_label,
     credential_world_label, run_action, stable_command_id,
@@ -51,7 +52,11 @@ pub fn CredentialTable(
             }
         }
         if is_empty {
-            p { class: "admin-shell__status", {t!("admin-credentials-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-credentials-empty"),
+                detail: "",
+            }
         }
     }
 }
@@ -92,7 +97,7 @@ pub fn CredentialRow(
             }
             td { "data-label": t!("admin-credentials-last-checked"),
                 if let Some(rotated_at) = credential.rotated_at.clone() {
-                    time { datetime: rotated_at.clone(), "{format_admin_time(&rotated_at)}" }
+                    Time { value: rotated_at }
                 } else {
                     {t!("value-empty")}
                 }
@@ -292,11 +297,18 @@ pub fn CredentialRow(
 #[component]
 pub fn CredentialPager(page: AdminCredentialPage, page_number: Signal<i64>) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: page.page,
             page_size: page.page_size,
-            total: page.total,
+            total: Some(page.total),
             label: t!("page-credentials-title"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

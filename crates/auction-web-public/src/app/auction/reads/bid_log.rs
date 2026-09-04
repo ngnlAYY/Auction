@@ -249,7 +249,7 @@ pub(crate) fn BidLogTable(
             } else {
             div { class: "public-auction-bid-log-table-wrap",
                 table {
-                    class: "public-auction-bid-log-table",
+                    class: "public-auction-bid-log-table ui-table--responsive",
                     thead {
                         tr {
                             th { {t!("bidlog-time")} }
@@ -267,12 +267,17 @@ pub(crate) fn BidLogTable(
                 }
             }
             }
-            PublicPager {
+            Pager {
                 page: current_page,
                 page_size: page.page_size,
                 total: page.total,
                 has_more,
                 label: t!("page-bidlog-title"),
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
             }
         }
@@ -288,7 +293,7 @@ pub(crate) fn BidLogRow(bid: BidLogEntry) -> Element {
         tr {
             class: if bid.valid { "public-auction-bid-log-leading" } else { "" },
             td { "data-label": t!("bidlog-time"),
-                time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" }
+                Time { value: bid.created_at.clone() }
             }
             td { class: "public-auction-bid-log-code", "data-label": t!("bidlog-lot"),
                 Link { to: Route::LotDetail { lot_code: lot_id }, "{lot_code}" }

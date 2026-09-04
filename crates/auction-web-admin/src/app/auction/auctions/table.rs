@@ -3,13 +3,11 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use gloo_timers::future::TimeoutFuture;
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, use_second_tick};
 
 use crate::api::AdminAuctionPage;
 
 use super::super::intake::AdminIntakeForm;
-use super::super::pagination::AdminPager;
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::helpers::current_time_millis;
@@ -21,24 +19,26 @@ pub(super) fn AdminAuctionTable(
     mut page_number: Signal<i64>,
     reload_generation: Signal<u64>,
 ) -> Element {
-    let clock_millis = use_signal(current_time_millis);
+    // 订阅外壳提供的共享秒级时钟：读取 tick 让本组件每秒重渲染并刷新当前时间，
+    // 不再为这张表单独起一个 1 秒定时器。
+    let second_tick = use_second_tick();
+    let _ = second_tick();
+    let current_time_millis = current_time_millis();
     let notice = use_signal(|| None::<AdminAuctionNotice>);
-    #[cfg(target_arch = "wasm32")]
-    let _clock_task = use_future(move || {
-        let mut clock_millis = clock_millis;
-        async move {
-            loop {
-                TimeoutFuture::new(1_000).await;
-                clock_millis.set(current_time_millis());
-            }
-        }
-    });
     let list_content = match state {
         None => rsx! {
-            p { class: "admin-auction-status", role: "status", {t!("admin-auctions-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-auctions-loading"),
+                detail: "",
+            }
         },
         Some(Err(detail)) => rsx! {
-            p { class: "admin-auction-error", role: "alert", "{detail}" }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: detail,
+                detail: "",
+            }
         },
         Some(Ok(page)) => {
             let is_empty = page.auctions.is_empty();
@@ -72,7 +72,7 @@ pub(super) fn AdminAuctionTable(
                                     key: "{auction.id}",
                                     auction,
                                     capabilities: capabilities.clone(),
-                                    clock_millis,
+                                    clock_millis: current_time_millis,
                                     notice,
                                     reload_generation,
                                 }
@@ -81,13 +81,24 @@ pub(super) fn AdminAuctionTable(
                     }
                 }
                 if is_empty {
-                    p { class: "admin-auction-empty admin-auction-status", {t!("admin-auctions-empty")} }
+                    AsyncState {
+                        kind: AsyncStateKind::Empty,
+                        title: t!("admin-auctions-empty"),
+                        detail: "",
+                    }
                 }
-                AdminPager {
+                Pager {
                     page: pagination.page,
                     page_size: pagination.page_size,
-                    total: pagination.total,
+                    total: Some(pagination.total),
                     label: t!("admin-auctions-pagination"),
+                    previous_label: t!("admin-pagination-previous"),
+                    status: move |(page, pages): (i64, i64)| {
+                        t!("admin-pagination-status", page: page, pages: pages)
+                    },
+                    next_label: t!("admin-pagination-next"),
+                    jump_label: t!("admin-pagination-input"),
+                    jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next_page| page_number.set(next_page),
                 }
             }

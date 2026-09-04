@@ -100,6 +100,8 @@ pub(crate) fn App() -> Element {
 #[component]
 pub(crate) fn PublicShell() -> Element {
     use_dialog_focus_trap(true);
+    // 秒级共享时钟在外壳根提供；看板与 lot 详情的倒计时通过 use_second_tick 订阅同一节拍。
+    use_second_ticker();
     let current_route = use_route::<Route>();
     let auction_page_owns_initial_boot =
         matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});

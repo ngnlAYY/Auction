@@ -41,7 +41,7 @@ pub(super) fn CompensationMovementDetails(
                     if page.movements.is_empty() {
                         p { class: "public-auction-page__status", {t!("data-empty")} }
                     } else {
-                        div { class: "public-compensation-movement-wrap",
+                        div { class: "public-compensation-movement-wrap ui-table--scroll",
                             table { class: "public-compensation-movement-table",
                                 thead {
                                     tr {
@@ -60,12 +60,17 @@ pub(super) fn CompensationMovementDetails(
                             }
                         }
                     }
-                    PublicPager {
+                    Pager {
                         page: page.page,
                         page_size: page.page_size,
                         total: Some(page.total),
                         has_more: false,
                         label: t!("compensation-movements"),
+                        previous_label: t!("catalog-previous"),
+                        status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                        next_label: t!("catalog-next"),
+                        jump_label: t!("catalog-page-input"),
+                        jump_button_label: t!("catalog-page-go"),
                         on_page_change: on_movement_page_change,
                     }
                 },

@@ -3,14 +3,13 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText, legacy_t as t};
 use dioxus::{html::Key, prelude::*};
 use uuid::Uuid;
 
 use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
 
-use super::pagination::AdminPager;
-use super::{AdminActionFeedback, admin_api_error_message, format_admin_time};
+use super::{AdminActionFeedback, admin_api_error_message};
 
 pub(super) fn page() -> Element {
     let mut name = use_signal(String::new);
@@ -54,10 +53,18 @@ pub(super) fn page() -> Element {
     let state = renames.read_unchecked().clone();
     let content = match state {
         None => rsx! {
-            p { class: "admin-shell__status", role: "status", {t!("admin-renames-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-renames-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p { class: "admin-shell__inline-error", role: "alert", {admin_api_error_message(&error)} }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(&error),
+                detail: "",
+            }
         },
         Some(Ok(page)) => rsx! {
             RenameTable {
@@ -66,7 +73,11 @@ pub(super) fn page() -> Element {
                 busy_rename,
             }
             if page.renames.is_empty() {
-                p { class: "admin-shell__status", {t!("admin-renames-empty")} }
+                AsyncState {
+                    kind: AsyncStateKind::Empty,
+                    title: t!("admin-renames-empty"),
+                    detail: "",
+                }
             }
             if let Some(feedback) = notice() {
                 p {
@@ -79,11 +90,18 @@ pub(super) fn page() -> Element {
                     {feedback.message(t!("admin-renames-revert-success"))}
                 }
             }
-            AdminPager {
+            Pager {
                 page: page.page,
                 page_size: page.page_size,
-                total: page.total,
+                total: Some(page.total),
                 label: t!("page-renames-title"),
+                previous_label: t!("admin-pagination-previous"),
+                status: move |(page, pages): (i64, i64)| {
+                    t!("admin-pagination-status", page: page, pages: pages)
+                },
+                next_label: t!("admin-pagination-next"),
+                jump_label: t!("admin-pagination-input"),
+                jump_button_label: t!("admin-pagination-go"),
                 on_page_change: move |next_page| page_number.set(next_page),
             }
         },
@@ -208,11 +226,11 @@ fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Eleme
                 TruncatedText { value: rename.actor }
             }
             td {
-                time { datetime: rename.created_at.clone(), "{format_admin_time(&rename.created_at)}" }
+                Time { value: rename.created_at.clone() }
             }
             td {
                 if let Some(reverted_at) = rename.reverted_at {
-                    time { datetime: reverted_at.clone(), "{format_admin_time(&reverted_at)}" }
+                    Time { value: reverted_at }
                 }
             }
             td {

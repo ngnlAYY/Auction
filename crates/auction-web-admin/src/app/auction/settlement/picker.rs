@@ -6,7 +6,8 @@ use dioxus::prelude::*;
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
 use crate::app::surface::{AdminActionFeedback, format_admin_time};
 
-use super::super::pagination::AdminPager;
+use auction_web_shared::Pager;
+
 use super::RecoveryConfirmationDraft;
 use super::query::{SettlementQuery, push_settlement_query};
 
@@ -126,11 +127,18 @@ pub(super) fn AdminSettlementCatalogPager(
     mut selection_generation: Signal<u64>,
 ) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: page.page.max(1),
             page_size: page.page_size.max(1),
-            total: page.total,
+            total: Some(page.total),
             label: t!("admin-settlement-auction-pagination"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| {
                 catalog_page.set(next_page);
                 requested_sequence.set(None);

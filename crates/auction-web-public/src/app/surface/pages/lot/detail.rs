@@ -43,12 +43,12 @@ pub(crate) fn LiveLotDetailView(
     let connection_state = realtime_state();
     let connection_state_name = live_connection_state_name(connection_state);
     let connection_message = realtime::live_connection_message(connection_state);
+    // 倒计时每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
     let mut clock = use_signal(estimated_now);
-    let _clock_task = use_future(move || async move {
-        loop {
-            TimeoutFuture::new(1_000).await;
-            clock.set(estimated_now());
-        }
+    let tick = use_second_tick();
+    use_effect(move || {
+        let _ = tick();
+        clock.set(estimated_now());
     });
     let mut refresh_generation = use_context::<Signal<u64>>();
     let session = use_context::<PublicSessionResource>();
@@ -176,12 +176,17 @@ pub(crate) fn LiveLotDetailView(
                     },
                     Some(Ok(page)) => rsx! {
                         BidHistoryTable { page: page.clone() }
-                        PublicPager {
+                        Pager {
                             page: bid_page(),
                             page_size: page.page_size,
                             total: page.total,
                             has_more: page.has_more.unwrap_or(false),
                             label: t!("lot-bid-history"),
+                            previous_label: t!("catalog-previous"),
+                            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                            next_label: t!("catalog-next"),
+                            jump_label: t!("catalog-page-input"),
+                            jump_button_label: t!("catalog-page-go"),
                             on_page_change: move |next_page| bid_page.set(next_page),
                         }
                     },

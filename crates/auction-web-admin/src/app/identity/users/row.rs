@@ -2,14 +2,13 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use auction_web_shared::{TruncatedText, legacy_t as t};
+use auction_web_shared::{Time, TruncatedText, legacy_t as t};
 use dioxus::{html::Key, prelude::*};
 use uuid::Uuid;
 
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
 use crate::app::surface::AdminActionFeedback;
 
-use super::super::format_admin_time;
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{
     AdminUserDialogActions, AdminUserDialogKind, run_user_action, stable_command_id,
@@ -79,7 +78,7 @@ pub(super) fn AdminUserRow(
             }
             td { "data-label": t!("admin-users-blacklist-count"), "{user.blacklist_count}" }
             td { "data-label": t!("admin-users-created-at"),
-                time { datetime: user.created_at.clone(), "{format_admin_time(&user.created_at)}" }
+                Time { value: user.created_at.clone() }
             }
             td {
                 "data-label": t!("admin-users-actions"),
@@ -430,10 +429,7 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
                         for entry in user.blacklist_history.iter().cloned() {
                             li {
                                 span { {entry.public_reason} }
-                                time {
-                                    datetime: entry.blacklisted_at.clone(),
-                                    "{format_admin_time(&entry.blacklisted_at)}"
-                                }
+                                Time { value: entry.blacklisted_at.clone() }
                             }
                         }
                     }

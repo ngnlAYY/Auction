@@ -10,6 +10,8 @@ use crate::api::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use super::super::admin_api_error_message;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,18 +41,24 @@ pub(super) fn AdminBusinessWorlds() -> Element {
             p { class: "admin-panel__note", {t!("admin-business-worlds-note")} }
             match state {
                 None => rsx! {
-                    p { class: "admin-config-status", role: "status", {t!("admin-business-worlds-loading")} }
+                    AsyncState {
+                        kind: AsyncStateKind::Loading,
+                        title: t!("admin-business-worlds-loading"),
+                        detail: "",
+                    }
                 },
                 Some(Err(code)) => rsx! {
-                    div { class: "admin-config-error", role: "alert",
-                        p { {admin_api_error_message(&code)} }
-                        button {
-                            class: "admin-btn-secondary",
-                            r#type: "button",
-                            disabled: busy_world().is_some(),
-                            onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                            {t!("admin-retry")}
-                        }
+                    // 共享面板没有 disabled 态；繁忙时重试点击在回调里直接忽略，行为不变。
+                    AsyncState {
+                        kind: AsyncStateKind::Error,
+                        title: admin_api_error_message(&code),
+                        detail: "",
+                        retry_label: t!("admin-retry"),
+                        on_retry: move |_| {
+                            if busy_world().is_none() {
+                                refresh.set(refresh().saturating_add(1));
+                            }
+                        },
                     }
                 },
                 Some(Ok(worlds)) => rsx! {
