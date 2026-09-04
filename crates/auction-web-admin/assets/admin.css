@@ -2,22 +2,31 @@
 
 :root {
   --color-text-on-accent: var(--color-accent-contrast);
+  /* 危险按钮文字色：需纯白以保证在红底（--color-danger）上的对比度；base 无纯白 token，admin 专属保留。 */
   --color-text-on-danger: #fff;
+  /* 表单控件中性灰边框/底色：沿用旧版管理端表单视觉契约，刻意区别于 base 蓝灰系
+     （--color-border-strong / --color-surface-raised），改动会破坏表单观感，admin 专属保留。 */
   --color-input-border: #747474;
   --color-login-input-border: #858585;
   --color-input-bg: #3b3b3b;
+  /* 状态徽章三色系：比 base 语义色（--color-success/--color-warning/--color-danger）更高明度，
+     用于深色背景上的小字号徽章，并配套下方 12% 透明底色，admin 专属保留。 */
   --color-status-ok: #34d399;
   --color-status-warn: #fbbf24;
   --color-status-error: #f87171;
+  /* 比 --color-border 更暗一档的内部分隔色，仅用于高密度表格/清单的次级分隔。 */
   --color-border-subtle: #232b37;
+  /* 介于 --color-bg 与 --color-surface 之间的弱化底色，用于表体与卡片次级区域。 */
   --color-bg-muted: #12171e;
+  /* 以上状态色与 --color-accent 的 12% 透明度衬底；rgba 透明度无法经 var() 派生，
+     保留字面值，调整对应色相 token 时须同步此处。 */
   --color-status-ok-muted: rgb(52 211 153 / 12%);
   --color-status-warn-muted: rgb(251 191 36 / 12%);
   --color-status-error-muted: rgb(248 113 113 / 12%);
   --color-accent-muted: rgb(217 164 65 / 12%);
-  --radius-round: 999rem;
-  --z-float: 40;
-  --z-dialog: 100;
+  /* 与 base --radius-full 同值，直接引用以避免平行定义。 */
+  --radius-round: var(--radius-full);
+  /* --z-float(40) / --z-dialog(100) 已由 base.css z-index 阶梯定义，此处不再重复声明。 */
   --admin-text-label: 0.8rem;
   --admin-text-note: 0.85rem;
   --admin-text-table: 0.9rem;
@@ -170,10 +179,16 @@
   color: inherit;
 }
 
-.admin-shell__nav a:hover,
 .admin-shell__nav a:focus-visible {
   background: var(--color-surface);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .admin-shell__nav a:hover {
+    background: var(--color-surface);
+    text-decoration: none;
+  }
 }
 
 .admin-shell__nav a[aria-current="page"] {
@@ -182,7 +197,7 @@
   text-decoration: none;
 }
 
-.admin-shell__nav a.active {
+.admin-shell__nav a.admin-shell__nav-link--active {
   color: var(--color-text-on-accent);
   background: var(--color-accent);
   text-decoration: none;
@@ -427,9 +442,11 @@
   cursor: pointer;
 }
 
-.ui-pager button:hover:not(:disabled) {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+@media (hover: hover) {
+  .ui-pager button:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
 }
 
 .ui-pager button:disabled {
@@ -811,8 +828,10 @@
   user-select: none;
 }
 
-.admin-runtime-section > summary:hover {
-  background: var(--color-accent-muted);
+@media (hover: hover) {
+  .admin-runtime-section > summary:hover {
+    background: var(--color-accent-muted);
+  }
 }
 
 .admin-runtime-section > summary:focus-visible {
@@ -911,7 +930,7 @@
 
 .admin-runtime-field--template textarea {
   min-block-size: 7rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   line-height: 1.45;
 }
 
@@ -1165,7 +1184,7 @@
   min-block-size: 36rem;
   padding: var(--space-3);
   resize: vertical;
-  font: 0.9rem / 1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 0.9rem / 1.5 var(--font-mono);
   tab-size: 2;
 }
 
@@ -1219,14 +1238,25 @@
   background: var(--color-surface-raised);
 }
 
-.admin-panel button:not(:disabled):hover,
 .admin-panel button:not(:disabled):focus-visible,
-.admin-dashboard button:not(:disabled):hover,
 .admin-dashboard button:not(:disabled):focus-visible {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
 
+@media (hover: hover) {
+  .admin-panel button:not(:disabled):hover,
+  .admin-dashboard button:not(:disabled):hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+}
+
+/* !important 保留说明（共 9 处，集中于下述三个按钮工具类）：
+   .admin-panel button / .admin-dashboard button 通用规则（特异性 0-1-1）及其
+   :hover/:focus-visible 态（特异性 0-3-1）会改写按钮的 border/color；这三类按钮在
+   对话框、表格行、仪表盘等多种容器中使用，无法靠容器前缀安全提权。若去掉 !important，
+   hover 时主按钮会变成 accent 文字叠 accent 底色而不可读。故以 !important 冻结其色彩契约。 */
 .admin-btn-primary {
   padding: 0.35rem 0.7rem;
   border: 0 !important;
@@ -1248,7 +1278,7 @@
   border: 0 !important;
   border-radius: 0.35rem;
   color: var(--color-text-on-danger) !important;
-  background: #b91c1c !important;
+  background: var(--color-danger) !important;
 }
 
 .admin-btn-primary:disabled,
@@ -1326,9 +1356,11 @@
   inline-size: 11.5rem;
 }
 
-.admin-auctions__row:hover,
-.admin-lots__row:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-auctions__row:hover,
+  .admin-lots__row:hover {
+    background: var(--color-surface);
+  }
 }
 
 .admin-auctions__status {
@@ -1456,12 +1488,14 @@
   }
 }
 
-.admin-delivery__row:hover,
-.admin-credentials__row:hover,
-.admin-users__row:hover,
-.admin-renames__row:hover,
-.admin-realtime__row:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-delivery__row:hover,
+  .admin-credentials__row:hover,
+  .admin-users__row:hover,
+  .admin-renames__row:hover,
+  .admin-realtime__row:hover {
+    background: var(--color-surface);
+  }
 }
 
 .admin-delivery__status,
@@ -1547,8 +1581,10 @@
   gap: var(--space-1);
 }
 
-.admin-mail__row:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-mail__row:hover {
+    background: var(--color-surface);
+  }
 }
 
 .admin-shell .admin-mail-table button.admin-mail__detail-trigger {
@@ -1569,10 +1605,16 @@
   cursor: pointer;
 }
 
-.admin-mail__detail-trigger:hover,
 .admin-mail__detail-trigger:focus-visible {
   color: var(--color-accent);
   text-decoration: underline;
+}
+
+@media (hover: hover) {
+  .admin-mail__detail-trigger:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
 }
 
 .admin-mail__status {
@@ -1675,7 +1717,7 @@
   gap: var(--space-2);
 }
 
-@media (max-width: 70rem) {
+@media (max-width: 75rem) {
   .admin-audit-filter__primary,
   .admin-audit-filter__advanced-grid {
     grid-template-columns: repeat(2, minmax(10rem, 1fr));
@@ -2163,10 +2205,16 @@
   color: var(--color-link);
 }
 
-.admin-quick-link:hover,
 .admin-quick-link:focus-visible {
   background: var(--color-surface);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .admin-quick-link:hover {
+    background: var(--color-surface);
+    text-decoration: none;
+  }
 }
 
 .admin-quick-link__icon {
@@ -2271,7 +2319,7 @@
   margin-block-start: var(--space-5);
 }
 
-@media (max-width: 38rem) {
+@media (max-width: 48rem) {
   .admin-dashboard__runtime-header {
     align-items: start;
     flex-direction: column;
@@ -2641,7 +2689,7 @@
 }
 
 .admin-users__feedback {
-  color: var(--color-success, #2d8a58);
+  color: var(--color-success);
   font-size: var(--admin-text-label);
 }
 
@@ -2829,11 +2877,11 @@
 }
 
 .admin-credentials__feedback--success {
-  color: var(--color-success, #2d8a58);
+  color: var(--color-success);
 }
 
 .admin-credentials__feedback--error {
-  color: var(--color-danger, #b33a3a);
+  color: var(--color-danger);
 }
 
 .admin-credentials__dialog-backdrop {
@@ -3130,12 +3178,16 @@
   font-weight: 600;
 }
 
-.admin-settlement__table-wrap tbody tr:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-settlement__table-wrap tbody tr:hover {
+    background: var(--color-surface);
+  }
 }
 
-.admin-settlement__recovery-row:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-settlement__recovery-row:hover {
+    background: var(--color-surface);
+  }
 }
 
 .admin-settlement__stage--active {
@@ -3410,8 +3462,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.admin-settlement__row:hover {
-  background: var(--color-surface);
+@media (hover: hover) {
+  .admin-settlement__row:hover {
+    background: var(--color-surface);
+  }
 }
 
 .admin-realtime-dialog label {
@@ -3422,7 +3476,7 @@
   margin-block-start: var(--space-4);
 }
 
-@media (max-width: 52rem) {
+@media (max-width: 64rem) {
   .admin-dashboard__hero-actions {
     justify-content: flex-start;
   }
@@ -3534,7 +3588,7 @@
   }
 }
 
-@media (max-width: 38rem) {
+@media (max-width: 48rem) {
   .admin-dashboard__status-row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
@@ -3609,12 +3663,6 @@
 
   .admin-rules-fields textarea {
     min-block-size: 20rem;
-  }
-}
-
-@media (max-width: 38rem) {
-  .admin-audit-filter {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -3775,10 +3823,16 @@
   background: var(--color-surface);
 }
 
-.admin-dashboard-attention__actions a:hover,
 .admin-dashboard-attention__actions a:focus-visible {
   border-color: var(--color-accent);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .admin-dashboard-attention__actions a:hover {
+    border-color: var(--color-accent);
+    text-decoration: none;
+  }
 }
 
 .admin-dashboard-recovery-world {
@@ -3841,15 +3895,21 @@
   border-block-end: 0;
 }
 
-.admin-lots__row:hover,
 .admin-lots__row:focus-within {
   background: var(--color-surface);
 }
 
-.admin-auction-lot-start,
-.admin-auction-lot-current,
-.admin-auction-lot-actions {
-  text-align: right !important;
+@media (hover: hover) {
+  .admin-lots__row:hover {
+    background: var(--color-surface);
+  }
+}
+
+.admin-auction-lot-table .admin-auction-lot-start,
+.admin-auction-lot-table .admin-auction-lot-current,
+.admin-auction-lot-table .admin-auction-lot-actions {
+  /* 特异性 0-2-0，足以覆盖 .admin-auction-table th/td 的 text-align: left（0-1-1），无需 !important。 */
+  text-align: right;
 }
 
 .admin-lots__code {
@@ -3976,7 +4036,8 @@
     min-inline-size: 0;
     padding: var(--space-2) 0;
     border: 0;
-    text-align: start !important;
+    /* 特异性 0-2-1，高于桌面端右对齐规则（0-2-0），无需 !important。 */
+    text-align: start;
     overflow-wrap: anywhere;
   }
 
@@ -4009,7 +4070,7 @@
   }
 }
 
-@media (max-width: 38rem) {
+@media (max-width: 48rem) {
   .admin-auction-lot-table .admin-lots__row {
     padding-inline: var(--space-3);
   }
@@ -4062,9 +4123,14 @@
   border-block-end: 0;
 }
 
-.admin-audit-table tbody .admin-audit__row:hover,
 .admin-audit-table tbody .admin-audit__row:focus-within {
   background: var(--color-accent-muted);
+}
+
+@media (hover: hover) {
+  .admin-audit-table tbody .admin-audit__row:hover {
+    background: var(--color-accent-muted);
+  }
 }
 
 .admin-audit-table__time {
@@ -4238,7 +4304,7 @@
   }
 }
 
-@media (max-width: 38rem) {
+@media (max-width: 48rem) {
   .admin-audit-filter {
     padding: var(--space-3);
   }

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
-    <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico">
     <title>{app_title}</title>
     <style>
       :root {
@@ -92,6 +92,42 @@
         block-size: 2.5rem;
       }
 
+      /* noscript 提示：JS 被禁用时以整屏覆盖层遮住骨架屏，静态说明需要启用 JavaScript。
+         CSP script-src 禁止内联脚本，因此这里只能用纯 HTML + CSS。 */
+      .boot-noscript {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        box-sizing: border-box;
+        display: grid;
+        place-content: center;
+        padding: 1.5rem;
+        background: #0e1116;
+        color: #d7dee8;
+        font: 1rem/1.6 system-ui, sans-serif;
+        text-align: center;
+      }
+
+      /* WASM 加载失败降级：错误提示初始隐藏，仅当应用长时间未就绪（WASM 加载或执行失败）
+         时通过纯 CSS 动画在约 15 秒后自动显现；WASM 正常就绪时 data-app-ready 会隐藏整个
+         .app-boot 骨架，该提示随骨架一起消失，因此全程无需任何脚本。 */
+      .app-boot__error {
+        margin: 2rem 0 0;
+        color: #e3b8b8;
+        font: 0.95rem/1.6 system-ui, sans-serif;
+        text-align: center;
+        opacity: 0;
+        visibility: hidden;
+        animation: app-boot-error-reveal 0.01s linear 15s forwards;
+      }
+
+      @keyframes app-boot-error-reveal {
+        to {
+          opacity: 1;
+          visibility: visible;
+        }
+      }
+
       @media (max-width: 48rem) {
         .app-boot {
           padding-inline: 0.75rem;
@@ -114,7 +150,11 @@
         <div class="app-boot__bar"></div>
         <div class="app-boot__line"></div>
         <div class="app-boot__line"></div>
+        <p class="app-boot__error">无法加载应用，请检查网络连接后刷新页面。</p>
       </div>
+      <noscript>
+        <div class="boot-noscript">此应用需要启用 JavaScript。请在浏览器中启用 JavaScript 后刷新页面。</div>
+      </noscript>
     </div>
   </body>
 </html>

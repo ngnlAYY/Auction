@@ -157,7 +157,7 @@ pub(crate) fn AdminAuthenticatedShell(
     }
 }
 
-/// 恢复旧 React Router `NavLink` 固定输出的 active/空 class 形状。
+/// 输出当前导航项的 BEM 激活修饰类（与 admin.css 的 .admin-shell__nav-link--active 对应）。
 fn admin_nav_class(active: bool) -> &'static str {
-    if active { "active" } else { "" }
+    if active { "admin-shell__nav-link--active" } else { "" }
 }
