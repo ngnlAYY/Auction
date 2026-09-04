@@ -67,7 +67,8 @@ pub(super) fn AdminLotTable(
                         }
                         tbody {
                             for lot in page.lots.clone() {
-                                AdminLotRow { lot, selected_lot, notice, reload_generation, allow_lot_update }
+                                // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
+                                AdminLotRow { key: "{lot.id}", lot, selected_lot, notice, reload_generation, allow_lot_update }
                             }
                         }
                     }

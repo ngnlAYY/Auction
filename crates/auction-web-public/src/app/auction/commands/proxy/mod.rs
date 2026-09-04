@@ -29,6 +29,9 @@ pub struct ProxyFormInput {
     pub proxy: Option<Result<Option<OwnedProxy>, String>>,
     pub refresh_generation: Signal<u64>,
     pub saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
+    /// 由弹窗宿主注入的共享提交状态；宿主据此在提交中禁用遮罩/Escape/关闭按钮，
+    /// 避免弹窗 scope 销毁导致成功后的刷新回调丢失。
+    pub submitting: Signal<bool>,
     pub on_close: EventHandler<()>,
 }
 
@@ -45,6 +48,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
         proxy,
         refresh_generation,
         saved_authorization,
+        submitting,
         on_close,
     } = input;
     if let Some(authorization) = saved_authorization() {
@@ -70,6 +74,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked: leading,
                 blocked_reason,
                 saved_authorization,
+                submitting,
                 on_close,
             }
         },
@@ -81,6 +86,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 lot_status,
                 proxy: proxy.clone(),
                 saved_authorization,
+                submitting,
                 on_close,
             }
         },
@@ -95,6 +101,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked: leading,
                 blocked_reason,
                 saved_authorization,
+                submitting,
                 on_close,
             }
         },

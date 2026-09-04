@@ -39,7 +39,8 @@ pub(crate) fn PriceHistoryTable(
                         }
                         tbody {
                             for row in rows {
-                                PriceHistoryRow { row }
+                                // 成交价历史每个 lot 只成交一次，lot_id 可作稳定 key。
+                                PriceHistoryRow { key: "{row.lot_id}", row }
                             }
                         }
                     }

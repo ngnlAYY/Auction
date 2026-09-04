@@ -36,7 +36,8 @@ pub(super) fn RealtimeFailureTable(
                             let failure_for_action = failure.clone();
                             let error_detail = format!("{}: {}", failure.code, failure.safe_detail);
                             rsx! {
-                                tr { class: "admin-realtime__row",
+                                // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
+                                tr { key: "{failure.id}", class: "admin-realtime__row",
                                     td { "data-label": t!("realtime-failure-time"),
                                         time { datetime: failure.failed_at.clone(), "{format_admin_time(&failure.failed_at)}" }
                                     }

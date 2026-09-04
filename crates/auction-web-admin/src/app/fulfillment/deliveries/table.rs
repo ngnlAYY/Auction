@@ -44,7 +44,9 @@ pub(super) fn DeliveryTable(
                 }
                 tbody {
                     for delivery in page.deliveries.clone() {
+                        // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
                         DeliveryRow {
+                            key: "{delivery.id}",
                             delivery,
                             on_open,
                             busy_delivery,

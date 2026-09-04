@@ -158,6 +158,8 @@ pub(crate) fn LiveCatalogTable(
                 tbody {
                     for row in rows {
                         LiveCatalogRow {
+                            // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
+                            key: "{row.lot_id}",
                             row,
                             now,
                             can_bid,
@@ -209,7 +211,8 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
                 }
                 tbody {
                     for row in rows {
-                        PreviewCatalogRow { row }
+                        // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
+                        PreviewCatalogRow { key: "{row.lot_id}", row }
                     }
                 }
             }

@@ -260,7 +260,8 @@ pub(crate) fn BidLogTable(
                     }
                     tbody {
                         for bid in bids {
-                            BidLogRow { bid }
+                            // 以服务端 bid id 作为稳定 key，避免翻页/筛选刷新后行状态错位。
+                            BidLogRow { key: "{bid.id}", bid }
                         }
                     }
                 }

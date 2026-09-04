@@ -11,6 +11,7 @@ use super::super::helpers::scheduled_time_millis;
 pub(crate) enum AdminAuctionNotice {
     Lifecycle(AdminAuctionLifecycleAction),
     Schedule,
+    Created,
 }
 
 pub(super) fn lifecycle_actions(
@@ -141,5 +142,6 @@ pub(crate) fn auction_notice_label(notice: AdminAuctionNotice) -> String {
     match notice {
         AdminAuctionNotice::Lifecycle(action) => lifecycle_action_success_label(action),
         AdminAuctionNotice::Schedule => t!("admin-auctions-schedule-success"),
+        AdminAuctionNotice::Created => t!("admin-auctions-create-success"),
     }
 }

@@ -56,6 +56,9 @@ pub(crate) fn LiveCatalogActions(
     let visually_hide_leading_reason = can_bid && effective_leading;
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
+    // 提交状态提升到弹窗宿主持有：弹窗 scope 一旦销毁，内部 spawn 的成功回调（刷新计数与
+    // on_accepted）会随之丢失，服务端已接受出价但 UI 无反馈；因此提交中必须禁止关闭弹窗。
+    let submitting = use_signal(|| false);
     let action_name = action();
     let bid_lot_id = lot_id.clone();
     let bid_lot_code = lot_code.clone();
@@ -80,6 +83,10 @@ pub(crate) fn LiveCatalogActions(
                         String::new()
                     },
                     onclick: move |_| {
+                        // 提交中不允许通过再次点击动作按钮收起弹窗（会丢失成功回调）。
+                        if submitting() {
+                            return;
+                        }
                         proxy_success.set(None);
                         action.set(if action() == Some("bid".to_owned()) {
                             None
@@ -98,6 +105,10 @@ pub(crate) fn LiveCatalogActions(
                         String::new()
                     },
                     onclick: move |_| {
+                        // 提交中不允许通过再次点击动作按钮收起弹窗（会丢失成功回调）。
+                        if submitting() {
+                            return;
+                        }
                         proxy_success.set(None);
                         action.set(if action() == Some("proxy".to_owned()) {
                             None
@@ -152,9 +163,15 @@ pub(crate) fn LiveCatalogActions(
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: bid_dialog_title.clone(),
-                onclick: move |_| action.set(None),
+                // 提交中禁用遮罩点击关闭，与 admin 端 busy 时禁止关闭的模式一致。
+                onclick: move |_| {
+                    if !submitting() {
+                        action.set(None);
+                    }
+                },
+                // Escape 仅在非提交中生效。
                 onkeydown: move |event| {
-                    if event.key() == Key::Escape {
+                    if event.key() == Key::Escape && !submitting() {
                         event.prevent_default();
                         action.set(None);
                     }
@@ -167,6 +184,7 @@ pub(crate) fn LiveCatalogActions(
                         button {
                             class: "public-auction-dialog__close",
                             r#type: "button",
+                            disabled: submitting(),
                             onclick: move |_| action.set(None),
                             aria_label: t!("catalog-close"),
                             {t!("catalog-close")}
@@ -181,6 +199,7 @@ pub(crate) fn LiveCatalogActions(
                         can_bid,
                         blocked: ordinary_blocked,
                         blocked_reason: action_reason.clone(),
+                        submitting,
                         on_accepted: EventHandler::new(move |_: ()| action.set(None)),
                         on_close: EventHandler::new(move |_: ()| action.set(None)),
                     })}
@@ -193,12 +212,16 @@ pub(crate) fn LiveCatalogActions(
                 role: "dialog",
                 aria_modal: "true",
                 aria_label: proxy_dialog_title.clone(),
+                // 提交中禁用遮罩点击关闭，与 admin 端 busy 时禁止关闭的模式一致。
                 onclick: move |_| {
-                    proxy_success.set(None);
-                    action.set(None);
+                    if !submitting() {
+                        proxy_success.set(None);
+                        action.set(None);
+                    }
                 },
+                // Escape 仅在非提交中生效。
                 onkeydown: move |event| {
-                    if event.key() == Key::Escape {
+                    if event.key() == Key::Escape && !submitting() {
                         event.prevent_default();
                         proxy_success.set(None);
                         action.set(None);
@@ -212,6 +235,7 @@ pub(crate) fn LiveCatalogActions(
                         button {
                             class: "public-auction-dialog__close",
                             r#type: "button",
+                            disabled: submitting(),
                             onclick: move |_| {
                                 proxy_success.set(None);
                                 action.set(None);
@@ -231,6 +255,7 @@ pub(crate) fn LiveCatalogActions(
                         proxy: proxy_snapshot,
                         refresh_generation,
                         saved_authorization: proxy_success,
+                        submitting,
                         on_close: EventHandler::new(move |_: ()| {
                             proxy_success.set(None);
                             action.set(None);

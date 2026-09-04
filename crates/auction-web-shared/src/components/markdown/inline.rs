@@ -128,7 +128,9 @@ fn safe_link_target(value: &str) -> Option<String> {
     let allowed = lower.starts_with("https://")
         || lower.starts_with("http://")
         || lower.starts_with("mailto:")
-        || value.starts_with('/')
+        // 允许站内绝对路径（以单个 `/` 开头），但拒绝 `//` 开头的协议相对 URL：
+        // 协议相对 URL 会继承当前页面协议并跳转到外部域，从而绕过白名单。
+        || (value.starts_with('/') && !value[1..].starts_with('/'))
         || value.starts_with("./")
         || value.starts_with("../")
         || value.starts_with('#')
