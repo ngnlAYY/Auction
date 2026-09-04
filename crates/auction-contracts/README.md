@@ -18,6 +18,10 @@
   只能选择一个非空的 HTML/文本字段，输出只包含安全的目录、帖子、命令和警告信息。
 - `AdminSettlementReportResponse`：PostgreSQL 完整档的 Admin 结算安全投影；lot 明细显式返回
   `listed_price`、`hold_ppm` 与带符号的 `adjustment_ppm`，供界面区分折扣和惩罚，不暴露数据库行。
+- `AdminSettlementCatalogResponse`：只包含已结算拍卖 UUID、world、期号、结算时间和有界分页，
+  供 Admin 报表选择器使用，不复用包含生命周期命令字段的通用拍卖列表。
+- `AdminWorldListResponse`、`AdminWorldSetEnabledRequest` 与 `AdminWorldSetEnabledResponse`：数据库
+  权威业务世界的安全状态、`policy_revision` fence 和幂等启停命令；不表达 runtime 邮箱开关。
 - `AdminRealtimeEventListResponse`：Admin 最近事件的分页元数据投影；只返回事件 ID、流、序号、
   类型、schema 与写入时间，不返回公开 payload、命令/竞价来源或数据库内部字段。
 - Public lot/装备响应可选返回固定顺序的 `primary_attribute_initials`；竞价日志仅在真实论坛楼层与

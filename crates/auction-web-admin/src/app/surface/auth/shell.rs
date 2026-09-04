@@ -13,9 +13,11 @@ pub(crate) fn AdminAuthenticatedShell(
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);
     let current_route = use_route::<Route>();
+    let settlement_route = matches!(&current_route, Route::Settlement {});
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
-        div { class: "admin-shell",
+        div {
+            class: if settlement_route { "admin-shell admin-shell--settlement" } else { "admin-shell" },
             AdminSessionRefresh {
                 key: "{session.expires_at}",
                 session: session.clone(),
@@ -140,7 +142,14 @@ pub(crate) fn AdminAuthenticatedShell(
                         {t!("nav-audit")}
                     }
                 }
-                main { class: "admin-shell__content", id: "admin-content", tabindex: "-1",
+                main {
+                    class: if settlement_route {
+                        "admin-shell__content admin-shell__content--settlement"
+                    } else {
+                        "admin-shell__content"
+                    },
+                    id: "admin-content",
+                    tabindex: "-1",
                     Outlet::<Route> {}
                 }
             }

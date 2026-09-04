@@ -7,8 +7,8 @@
 heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策略和 dashboard 范围投影，
 `listener.rs` 负责监听器绑定与服务。这样装配根不把状态构造、配置映射和退出流程混在一个文件中。
 
-职责仅限于：加载配置、初始化 tracing、装配缓存、Admin session、拍卖生命周期/ recovery 确认命令
-端口和 PostgreSQL 结算/recovery 报告读取端口、绑定监听器、挂载
+职责仅限于：加载配置、初始化 tracing、装配缓存、Admin session、拍卖生命周期/recovery 确认、
+数据库业务世界启停命令端口，以及 PostgreSQL 结算目录与 settlement/recovery 报告读取端口、绑定监听器、挂载
 `auction_http::admin_router()` 和返回启动错误。Admin Basic Auth 凭据从敏感 TOML 读取，
 session 与 CSRF 只以摘要形式持久化；生命周期命令在数据库事务内追加状态版本、审计和 realtime 事件。
 结算报告和 recovery 报告只读取已提交事实；recovery 确认还会在 PostgreSQL Serializable 事务中
@@ -17,6 +17,9 @@ Admin 论坛预览由本地 `ForumPreviewAdapter` 解析 HTML/文本，限制 2 
 它不执行远程论坛发布，也不产生数据库写入。
 Admin 审计读取由数据库适配器提供两种有界分页形状和安全 metadata 投影；该接口只读，不修改
 审计历史。
+业务 world 状态由数据库而非 runtime TOML 决定。装配根为 A40/A41 注入同一 `DatabaseStore`：
+PostgreSQL 提供 world-first blocker/CAS/账本/审计事务，SQLite 只提供目录读取并明确返回写能力 501。
+结算页的 A42 settled-only 目录同样只在 PostgreSQL 完整档装配；报告继续按目录返回的 UUID 读取。
 Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
 三个进程装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；返回 health/process 安全
 投影，周期值每轮读取真实数据库/schema readiness、进程内审计写入失败计数和对应 tracing 安全

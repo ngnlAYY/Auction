@@ -5,7 +5,9 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/routes/mod.rs`：HTTP 子模块装配、稳定导出和跨 surface 共享类型；`routes/surfaces.rs`
   持有 `public_router()` / `admin_router()` 与冻结契约路径注册，`routes/health.rs` 持有健康检查；
   `routes/admin.rs` 只保留稳定出口，Admin 会话、生命周期、结算/恢复报告和恢复确认分别位于
-  `routes/admin/{session,lifecycle,reports,recovery}.rs`；`routes/public/` 按会话、账户读取和竞价命令拆分 Public，
+  `routes/admin/{session,lifecycle,reports,recovery}.rs`；业务世界启停与 settled-only 报表目录分别由
+  `src/http/admin/{worlds,settlement_catalog}.rs` 持有，不塞入通用配置或拍卖列表。`routes/public/`
+  按会话、账户读取和竞价命令拆分 Public，
   其中竞价与代理命令位于 `routes/public/competition/{bid,proxy}.rs`；
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
@@ -126,6 +128,13 @@ Admin `/api/v1/admin/auctions` 的 GET 已接入 Admin session、`world_id`/`sta
 必须原样提交已经发生的预览时间且只修改未来阶段；严格顺序、数据库时间、活动租约、幂等账本、
 策略/调度同步、审计和 realtime 事件由应用与 PostgreSQL owner 完成，SQLite Lite 返回
 `501 feature_not_supported`。
+`GET /api/v1/admin/worlds` 读取两后端的数据库权威业务世界状态；
+`PATCH /api/v1/admin/worlds/{world_id}` 使用严格 JSON、CSRF、`command_id` 和
+`expected_policy_revision`，把 blocker、CAS、幂等账本和追加审计交给应用/存储 owner。SQLite
+对写入返回 `501 feature_not_supported`。该开关不等同于 A26/A27 runtime 中只控制
+Worker/MoogleMail 入站的 world 配置。
+`GET /api/v1/admin/settlement-catalog` 只接受可选 `world_id`/`sequence` 和有界分页，返回
+PostgreSQL 已结算拍卖的最小稳定目录；结算/recovery 报告仍按目录 UUID 独立读取，SQLite 返回 501。
 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session/CSRF 和稳定命令 DTO；HTTP 层只映射
 `withdraw`/`set_start_price` 与版本 fence，事务、审计、预览事件和 withdrawn-return 义务由
 应用/存储 owner 完成，SQLite Lite 返回 `501 feature_not_supported`。

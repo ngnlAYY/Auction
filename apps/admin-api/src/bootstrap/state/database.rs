@@ -11,9 +11,10 @@ use auction_application::{
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
     AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig,
     AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService,
-    ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
-    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
-    RecoveryCommandService, RecoveryReportReader, SettlementReportReader,
+    AdminWorldPort, ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
+    DeliveryAdminPort, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
+    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
+    SettlementReportReader,
 };
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
@@ -29,7 +30,7 @@ use auction_observability::{
 use auction_storage::{
     DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
-    DatabaseAuctionLifecycleCommands, DatabaseBackend, DatabaseStore,
+    DatabaseAdminWorldCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend, DatabaseStore,
 };
 use chrono::Duration as ChronoDuration;
 use chrono::{DateTime, Utc};
@@ -299,8 +300,11 @@ pub(super) async fn configure_state(
     }
     let session_store: Arc<dyn AdminSessionStore> = store.clone();
     let settlement_report: Arc<dyn SettlementReportReader> = store.clone();
+    let settlement_catalog: Arc<dyn SettlementCatalogReader> = store.clone();
     let recovery_report: Arc<dyn RecoveryReportReader> = store.clone();
     let admin_auctions: Arc<dyn AdminAuctionReader> = store.clone();
+    let admin_worlds: Arc<dyn AdminWorldPort> =
+        Arc::new(DatabaseAdminWorldCommands::new(Arc::clone(&store)));
     let admin_lots: Arc<dyn AdminLotReader> = store.clone();
     let admin_lot_update: Arc<dyn AdminLotUpdatePort> =
         Arc::new(DatabaseAdminLotCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
@@ -383,6 +387,8 @@ pub(super) async fn configure_state(
         security,
     )
     .with_auction_schedule(auction_schedule)
+    .with_admin_worlds(admin_worlds)
+    .with_settlement_catalog(settlement_catalog)
     .with_dashboard_worlds(config::configured_dashboard_worlds(config))
     .with_dashboard_mailbox_keys(config::configured_dashboard_mailbox_keys(config))
     .with_readiness(store);

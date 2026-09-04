@@ -46,6 +46,11 @@
   `mod.rs` 只负责模块装配和稳定出口。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
 - `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
+- `src/ports/admin/worlds.rs` 与 `src/services/admin/worlds.rs`：数据库权威业务世界的读取与启停
+  owner；PostgreSQL 命令使用 Serializable、world-first 行锁、非终态拍卖/活动 round blocker、
+  `policy_revision` CAS、通用命令账本和同事务追加审计。SQLite Lite 只读，不伪装写 capability。
+- `src/ports/admin/settlement_catalog.rs`：Admin 结算报表选择器的 settled-only 窄投影、world/期号
+  筛选和有界分页；报告仍由 `src/ports/settlement/report.rs` 按 UUID 独立读取。
 - `src/ports/admin/auction_schedule.rs` 与 `src/services/admin/auction_schedule.rs`：正式开放前的计划
   结束时间修改端口和用例；只接受 Draft/Preview，在 Serializable 锁内以数据库时间、状态版本和
   命令账本保护策略快照与调度记录同步，已成功命令始终先按原结果重放。

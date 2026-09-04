@@ -474,7 +474,8 @@ just web-build
 命令账本、竞价/结算事务端口和 `place_bid`/`settle_auction` 用例已落地。阶段 3 的
 PostgreSQL `000001` 至 `000033` schema 与竞价/结算/生命周期事务适配器已接入；阶段 4 的
 SQLite Lite schema、迁移入口和 `BEGIN IMMEDIATE` 竞价写适配器已接入，且 Lite Worker
-并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并完成稳定
+并发已在配置层限制为 1。阶段 5 已注册 Public 20 条与 Admin 37 条冻结路径，并另行登记 A38-A42
+五条 Admin 新增路径；当前 Rust feature API 为 Public 20 条、Admin 42 条。稳定
 响应封装、世界/拍卖/lot 目录 DTO、应用只读端口、PostgreSQL/SQLite 查询适配器、Public
 session 与 Admin session 端口、两套启动时状态装配；Admin session 已接入 Basic Auth 登录交换、
 双 Cookie、CSRF 校验、会话轮换/刷新/撤销及两套数据库适配器。`/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
@@ -496,8 +497,9 @@ SQLite Lite 因没有 settlement 事实链返回 `501 feature_not_supported`；P
 并在授权状态版本不一致时失败关闭；代理重入的 `usage_number` 在 lot 锁内按用户历史最大值递增，
 避免重入和命令重放混淆；Admin A06 lot 列表已接入
 PostgreSQL Serializable 同快照的拍卖/lot/装备/投稿投影、Admin 会话保护和管理端表格，SQLite
-Lite 因缺少完整生命周期字段明确返回 `501 feature_not_supported`。Admin 的 settlement-report
-与 recovery-report 已接入 PostgreSQL 完整档一致只读/安全快照；前者保持旧版严格 `auction` 字段闭集，
+Lite 因缺少完整生命周期字段明确返回 `501 feature_not_supported`。Admin 的 settlement catalog、
+settlement-report 与 recovery-report 已接入 PostgreSQL 完整档一致只读/安全快照；目录只列已结算
+场次，支持 world/sequence/有界分页，并以服务端稳定排序提供默认最新一期；报告保持旧版严格 `auction` 字段闭集，
 并对序列化冲突/死锁最多重试三次，SQLite 明确返回 `501 feature_not_supported`。Admin 的 preview/open/cancel/
 final-phase 已接入统一生命周期端口；preview 保持当前录入场次并物化目录，open 校验时间与前序状态后
 原子建立后继 Draft、下一轮调度并切换录入目标，
@@ -520,6 +522,13 @@ workflow 的 due claim、稳定 `settle_auction` 命令、精确拍卖/lot/代�
 `refetch_required` 权威快照恢复；服务端 v1 连接边界已按 RT-002 静态恢复 4 KiB、50/60/5 秒时限、
 稳定 close reason、discovery 专属容量、settled 预检和独立连接尝试限流；Public readiness 已纳入
 relay owner 存活和消费新鲜度，真实帧 R1 仍待专用进程补录。
+新增 A40/A41 把数据库 `worlds.enabled` 权威业务开关与 Admin runtime 的 Worker/MoogleMail 入站
+开关分离：PostgreSQL 关闭命令以 world-first 锁序拒绝任何非 settled/cancelled 拍卖和活动未完成
+调度轮次，再以 policy revision CAS、通用命令账本和追加审计同事务提交；SQLite Lite 只读并对
+mutation 返回 501。Public 当前目录、写入与 discovery 只接受 enabled world，但 disabled world 的
+settled auction/lot/竞价与账户历史、价格历史和补偿事实仍可读。Worker 新一周 bootstrap 每次执行前
+重读数据库，并取 schedule allowlist、runtime-enabled worlds 与数据库 enabled worlds 的交集；既有
+settlement/fulfillment/delivery/recovery 工作继续排空。
 Public 登录错误码/封禁公开原因、页头会话菜单、登录 key 清理、
 `/me` 竞价账户页映射、匿名登录 CTA、普通竞价/代理独立分页及登录/退出后的会话刷新已按旧版补齐；超出旧版 warning-only 边界的论坛命令扩展不属于等价范围。
 Public 只读历史、黑名单、规则、补偿和论坛镜像页面已补齐请求失败重试入口；Web 剩余项收敛为
@@ -558,10 +567,11 @@ poller，不伪造持久化就绪；Admin 现在只请求一次完整安全 dash
 health/process、Worker、tracing、realtime、mail、delivery、fulfillment、recovery、credential availability
 和 alerting。credential scope、重启判断和其它增强诊断仍由内部 owner 计算，但不原地扩张旧 v1 dashboard
 响应；外部广播仍不属于本地 dashboard 汇总。
-Admin 结算页面已接入旧版 `/settlement` 的主要交互：已结算拍卖列表与分页、结算 lot 金额安全投影、
-资金池摘要、recovery 记录和带 state-version fence/CSRF/command ID 的确认对话框。页面仍只消费
-既有 settlement/recovery HTTP 契约，不把浏览器按钮状态当作写入授权；SQLite Lite 继续明确返回
-`501 feature_not_supported`。
+Admin 结算页面已接入旧版 `/settlement` 的报告与 recovery 交互，并增加 A42 已结算目录：左侧按
+world/期号切换、分页并默认选择服务端排序的最新一期，右侧按 UUID 显示结算 lot 金额安全投影、
+资金池摘要、recovery 记录和带 state-version fence/CSRF/command ID 的确认对话框。筛选状态可由 URL
+恢复；桌面左右栏独立滚动，48rem 及以下恢复单列自然滚动。页面不把浏览器按钮状态当作写入授权；
+SQLite Lite 对目录和报告继续明确返回 `501 feature_not_supported`。
 A13 Admin draft lot 修改已接入 `PATCH /api/v1/admin/lots/{lot_id}`：请求携带
 `command_id`、`expected_state_version`、`action` 和可选 `start_price`，由 Admin session/CSRF
 保护后进入 PostgreSQL Serializable 应用事务；事务按 world → auction → lot 顺序锁定并完成

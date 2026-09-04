@@ -8,8 +8,9 @@ Dioxus 客户端渲染的管理端 SPA。路由集合按旧版 Auction-BF 的
 - `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
   安全投影、会话读取和命令请求。
 - `src/app/`：按相同 owner 分组的页面组件；拍卖列表在 `auction/auctions/` 内拆分创建、表格、
-  生命周期及计划动作 `actions/{row,dialog,model,schedule}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分拍卖选择、结算报告、recovery 交互和
-  辅助映射，用户页在 `identity/users/` 内拆分创建/key、筛选表格、用户行和状态对话框，凭据页在
+  生命周期及计划动作 `actions/{row,dialog,model,schedule}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分
+  settled-only 目录、URL query、世界/期号选择、结算报告、recovery 交互和辅助映射，用户页在
+  `identity/users/` 内拆分创建/key、筛选表格、用户行和状态对话框，凭据页在
   `identity/credentials/` 内拆分页面编排、安全录入、凭据表格、确认对话框和安全标签辅助，Dashboard 在
   `operations/dashboard/` 内拆分单快照页面编排、旧版指标内容和邮件控制；lot 页在 `auction/lots/` 内拆分
   页面加载、表格编排、单行更新、代理历史和展示辅助；邮件入站页在 `fulfillment/mail/` 内拆分页面筛选、
@@ -99,8 +100,11 @@ JSON 文本展示，不提供历史编辑。
 UTC 时间收进可展开的高级条件，并提供一键清除；宽屏四列、窄屏两列或单列。审计记录仍为只读安全
 投影；操作者和实体分别合并为 `ID(类型)` 的单行值，长 ID/metadata 可截断查看且不再把所有 metadata
 误标为错误色。记录表在宽屏使用固定列宽和语义状态标签，窄屏按列标题切换为字段卡片。
-结算页面已接入已结算拍卖选择、结算 lot 金额表、资金池摘要、recovery 记录和旧版同语义的确认对话框；lot 表
-直接展示服务端投影的持有比例、调整比例和挂牌价，并以明确文字及正负号区分折扣/惩罚，不靠颜色传达含义；
+结算页面先通过独立 A42 目录读取已结算拍卖：左侧可按 world 与期号切换并分页，默认选择服务端稳定
+排序的第一页第一项；右侧只按选中 UUID 读取结算/recovery 报告。world、sequence、auction 与目录页
+写入 URL，其中 auction 只与 sequence 成对恢复；用户切换建立可返回的 history 项，内部规范化只替换当前项；报告必须与目录中的
+UUID/world/sequence 精确匹配后才展示。桌面端页面使用受限视口的左右两栏并各自滚动，48rem 及以下
+回到单列自然滚动。lot 表直接展示服务端投影的持有比例、调整比例和挂牌价，并以明确文字及正负号区分折扣/惩罚，不靠颜色传达含义；
 recovery 确认携带报告中的 state version、CSRF 和按同一输入重试复用的 command ID，服务端仍负责证据重校验、幂等和
 事务结果，页面不在浏览器端计算结算金额或改变 recovery 状态。
 `/outbox` 页面已接入 realtime 最近事件元数据、failure、consumer lag 和安全 replay 投影；未冻结的
@@ -114,7 +118,9 @@ recovery 确认携带报告中的 state version、CSRF 和按同一输入重试�
 运行配置页面已接入非敏感完整文档读取、类型化分组表单、服务端候选规范化校验、fingerprint
 版本 fence、稳定 command ID、可见的加载失败重试、冲突反馈和重启提示；表单覆盖旧版 main/isekai、
 发件人 allowlist、装备过滤、装备来源、监听/安全/会话、可观测性和 14 个通知模板，并用启用 world、
-装备过滤与配置指纹事实卡提供摘要。浏览器不直接编辑或读取 TOML；服务端校验后以锁、临时文件、
+装备过滤与配置指纹事实卡提供摘要。runtime 中的 world 控件明确标为 Worker/MoogleMail 入站配置；
+同页另由 A40/A41 展示并修改数据库权威业务 world 状态。业务关闭要求 revision fence 和确认，遇到
+未终态拍卖或活动调度轮次会显示稳定冲突，不会把 runtime 文件开关误报成业务已关闭。浏览器不直接编辑或读取 TOML；服务端校验后以锁、临时文件、
 `fsync` 和 `rename` 原子替换 `runtime_config_file` 指向的配置文件。更新不会被页面误报为热加载，
 保存后提示重启受影响的 Admin 与 Worker。
 邮件页面已接入 A16-A19 的轮询状态、入站安全摘要和暂停/恢复动作；动作携带 CSRF、当前

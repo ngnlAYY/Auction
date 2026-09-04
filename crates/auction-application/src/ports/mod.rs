@@ -26,8 +26,12 @@ mod admin_renames;
 mod admin_rules;
 #[path = "admin/runtime_config.rs"]
 mod admin_runtime_config;
+#[path = "admin/settlement_catalog.rs"]
+mod admin_settlement_catalog;
 #[path = "admin/users/mod.rs"]
 mod admin_users;
+#[path = "admin/worlds.rs"]
+mod admin_worlds;
 #[path = "auction/policy.rs"]
 mod auction_policy;
 #[path = "auction/slow_proxy.rs"]
@@ -195,6 +199,10 @@ pub use admin_runtime_config::{
     AdminRuntimeTracingConfig, AdminRuntimeUpdateCommand, AdminRuntimeWorkerControlConfig,
     AdminRuntimeWorldConfig, AdminRuntimeWorldsConfig, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
+pub use admin_settlement_catalog::{
+    MAX_SETTLEMENT_CATALOG_OFFSET, MAX_SETTLEMENT_CATALOG_PAGE_SIZE, SettlementCatalogEntry,
+    SettlementCatalogPage, SettlementCatalogReader, SettlementCatalogRequest,
+};
 pub use admin_users::{
     AdminLoginKeyIssuer, AdminLoginKeyOpener, AdminRenameRevertCommand, AdminRenameRevertWrite,
     AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind, AdminUserCommandResult,
@@ -206,6 +214,10 @@ pub use admin_users::{
     RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
     RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
     RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
+};
+pub use admin_worlds::{
+    ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,
+    AdminWorldSetEnabledCommand, AdminWorldTransaction, admin_world_aggregate_id,
 };
 pub use auction_policy::{AuctionPolicyTemplate, POLICY_MINIMUM_INCREMENT};
 pub use auction_slow_proxy::{

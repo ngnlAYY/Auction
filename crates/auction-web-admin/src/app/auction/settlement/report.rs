@@ -34,7 +34,7 @@ pub(super) fn AdminSettlementReportView(
     let current_recovery_page = recovery_page().clamp(1, recovery_total_pages as i64);
 
     rsx! {
-        div { class: "admin-shell__table-wrap",
+        div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
                     caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
                     thead {

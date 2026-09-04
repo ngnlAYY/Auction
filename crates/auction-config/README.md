@@ -448,7 +448,10 @@ HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启受
 OTLP surface；Public/Worker 的 `[metrics]` 来自公共文件，`[tracing]` 继续来自各自角色文件。Worker 只消费共享 runtime 的
 world/sender/filter/template 业务区块；三个区块完全缺失时保留 Worker 主配置，部分存在时失败关闭。
 完整业务区块存在时，它们覆盖 Worker 直接配置，但不改变 transport、凭据、调度、mailbox identity
-或全局 `enabled`。三类进程的 OTLP headers 只能放在敏感 TOML 的角色专属字段中，不能写入 runtime
+或全局 `enabled`。runtime `worlds[*].enabled` 只是 Worker/MoogleMail 入站和每周调度的候选开关，
+不是数据库权威业务关闭；实际新场次 bootstrap 还必须与 `[auction.schedule].worlds` 及
+`worlds.enabled=true` 取交集。数据库状态由 Admin A40/A41 独立管理，不能通过保存 TOML 绕过活动
+拍卖 blocker 或 `policy_revision` fence。三类进程的 OTLP headers 只能放在敏感 TOML 的角色专属字段中，不能写入 runtime
 或公共/角色配置。
 
 ## 环境变量边界

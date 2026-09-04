@@ -10,7 +10,6 @@ pub(crate) use filters::*;
 pub(crate) use table::*;
 pub(crate) use values::*;
 pub(crate) fn history() -> Element {
-    let mut selected_world = use_context::<Signal<String>>();
     let refresh_generation = use_context::<Signal<u64>>();
     let query = normalize_history_query(read_public_query());
     let mut world_filter = use_signal(|| query.world.clone().unwrap_or_else(|| "all".to_owned()));
@@ -47,33 +46,9 @@ pub(crate) fn history() -> Element {
     });
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => super::enabled_worlds(worlds),
+        Some(Ok(worlds)) => super::supported_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-
-    // 页头世界切换器与旧版筛选共用 world URL 参数；切换页头后同步历史筛选并回到第一页。
-    let initial_world = selected_world();
-    let mut observed_world = use_signal(|| initial_world);
-    use_effect(move || {
-        let current_world = selected_world();
-        if observed_world() == current_world {
-            return;
-        }
-        observed_world.set(current_world.clone());
-        world_filter.set(current_world.clone());
-        let mut next_query = applied_query();
-        next_query.world = Some(current_world.clone());
-        next_query.page = 1;
-        applied_query.set(next_query);
-        page_number.set(1);
-        update_public_query(
-            |query| {
-                query.world = Some(current_world.clone());
-                query.page = 1;
-            },
-            true,
-        );
-    });
 
     let history = use_resource(move || {
         let _ = refresh_generation();
@@ -194,9 +169,6 @@ pub(crate) fn history() -> Element {
             seller: optional_filter_value(&seller_filter()),
             page: 1,
         };
-        if let Some(world) = next_query.world.clone() {
-            selected_world.set(world);
-        }
         page_number.set(1);
         applied_query.set(next_query.clone());
         update_public_query(

@@ -49,7 +49,10 @@ CRLF/CR、`<URL>` 包裹、URL 后的中英文句末标点和空白后开始的 
 Auction 生命周期、慢速代理和结算使用独立 `60s + [0,5s]` 主循环，默认每阶段批次 100、
 PostgreSQL 并发 8、单项总时限 30 秒；SQLite Lite 的有效并发固定为 1 且不启用结算阶段。
 每周轮次的 `[auction.schedule]` 默认关闭；启用后默认按 UTC 周四 22:00 开放预览、周五
-00:00 正式开拍、周六 12:00 计划结束，星期、时间、时区和 world 均可通过 TOML 覆盖。
+00:00 正式开拍、周六 12:00 计划结束，星期、时间、时区和 world 均可通过 TOML 覆盖。配置中的
+world 只是 allowlist：实际 bootstrap 集合还必须与 Admin runtime 中启用的 world 及数据库
+`worlds.enabled=true` 取交集，并在每次 due 前重新读取数据库。业务 world 关闭后不创建新轮次，
+但已持久化的 settlement、fulfillment、delivery 与 recovery 仍继续安全排空。
 Fulfillment 与 Recovery 分别由
 `[worker.fulfillment]` / `[worker.recovery]` 的独立 poll、jitter、batch、并发、lease 和单项超时
 控制，Recovery 还维护独立 health 刷新周期，避免任一积压或远端余额读取放大普通拍卖任务。

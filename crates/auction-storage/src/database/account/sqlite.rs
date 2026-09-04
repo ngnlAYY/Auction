@@ -29,7 +29,7 @@ pub(super) async fn list_sqlite(
          FROM bids AS b
          JOIN lots AS l ON l.id = b.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          WHERE b.bidder_user_id = ?
            AND a.status IN ('live', 'final', 'settled')
@@ -50,7 +50,7 @@ pub(super) async fn list_sqlite(
          FROM bids AS b
          JOIN lots AS l ON l.id = b.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          WHERE b.bidder_user_id = ?
            AND a.status IN ('live', 'final', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')",
@@ -94,7 +94,7 @@ pub(super) async fn list_sqlite(
          FROM bid_proxy_authorizations AS p
          JOIN lots AS l ON l.id = p.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          WHERE p.user_id = ?
            AND a.status IN ('live', 'final', 'settling', 'settled')
@@ -122,7 +122,7 @@ pub(super) async fn list_sqlite(
          FROM bid_proxy_authorizations AS p
          JOIN lots AS l ON l.id = p.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          WHERE p.user_id = ?
            AND a.status IN ('live', 'final', 'settling', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')",

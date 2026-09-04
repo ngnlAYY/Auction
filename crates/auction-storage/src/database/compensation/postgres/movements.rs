@@ -40,7 +40,7 @@ pub(crate) async fn movements(
          FROM public.auction_settlements AS settlement
          JOIN public.auctions AS a
            ON a.id = settlement.auction_id AND a.status = 'settled'
-         JOIN public.worlds AS world ON world.id = a.world_id AND world.enabled
+         JOIN public.worlds AS world ON world.id = a.world_id
          JOIN LATERAL (
              SELECT
                  count(*)::bigint AS movement_count,

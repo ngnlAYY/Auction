@@ -8,12 +8,14 @@ apps/backend/internal/app/public/features/features.go、apps/backend/internal/ap
 以及各 feature 的 publichttp/adminhttp 注册代码。
 
 本表统计 feature API 的唯一路径，不把进程健康检查、静态 Web 资源和反向代理自身的路径
-计入。逐项核对后的数量是：
+计入。逐项核对后的旧版冻结基线是：
 
 - Public：20 个旧版唯一路径；
-- Admin：37 个唯一路径。
+- Admin：37 个旧版唯一路径。
 
-迁移实施计划中原来的 Admin 35 条是旧统计低估，不能继续作为验收数字。
+迁移实施计划中原来的 Admin 35 条是旧统计低估，不能继续作为验收数字。当前 Rust 在完整登记
+旧版路径之外新增 A38-A42 五条产品能力，因而当前实现统计为 Public 20 条、Admin 42 条；新增路径
+不得被计入旧版等价基线。
 
 进程级可观测性路径不计入上述 feature API 统计：Public 与 Admin 在主配置
 `[metrics].enabled = true` 时提供 `GET/HEAD /metrics` Prometheus text scrape；Admin 若配置
@@ -124,7 +126,10 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 | P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:111 |
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:118 |
 
-Public 分页必须保留旧的 page/page_size 与 cursor 语义。P09 的 lot 投影允许读取仍属于公开
+Public 分页必须保留旧的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
+preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已经
+`settled` 的拍卖、lot、竞价/账户历史、价格历史与补偿事实继续通过历史读取边界访问，不能把
+`cancelled` 或禁用世界中的活动拍卖顺带公开。P09 的 lot 投影允许读取仍属于公开
 安全边界的 settled 拍卖；响应上下文固定包含 `auction_id`、`world`、`number`、状态、展示模式、
 开标时间、可选有效结束时间和 `preview_revision`，Public 历史页面据此打开指定轮次而不读取数据库行。
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与
@@ -210,6 +215,9 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A37 | POST | /api/v1/admin/deliveries/{delivery_id}/reconcile | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:95 |
 | A38 | POST | /api/v1/admin/auctions/{auction_id}/early-settlement | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | 新增能力，旧代码无对应路径 |
 | A39 | PATCH | /api/v1/admin/auctions/{auction_id}/schedule | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | 新增能力，旧代码无对应路径 |
+| A40 | GET | /api/v1/admin/worlds | 200 | 400, 401, 503/504 | 新增能力，读取数据库权威业务世界状态 |
+| A41 | PATCH | /api/v1/admin/worlds/{world_id} | 200 | 400, 401, 403, 404, 409, 413/415, 429, 501, 503/504 | 新增能力，旧 runtime world 开关不具备同等语义 |
+| A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 | 新增能力，为结算报表提供已结算拍卖目录 |
 
 ## 迁移冻结规则
 
@@ -222,7 +230,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新 migration plan、契约变更记录和
    对应 owner 的边界说明。
 
-截至当前迁移切片，P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
+截至当前迁移切片，P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A42 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留旧的 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
@@ -255,7 +263,11 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影�
 序列化冲突或死锁时最多重试三次。A07/A08 的 lot 明细同时返回 `equipment_category`，管理端据此
 显示分类编码并允许不同分类各自存在编号 1。A08 recovery-report
 也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
-能力明确返回 `501 feature_not_supported`，不伪造空报告。P18/P19 已接入同一竞价事务、稳定
+能力明确返回 `501 feature_not_supported`，不伪造空报告。A42 只列出 `status=settled` 且有
+`settled_at` 的 PostgreSQL 拍卖，接受可选 `world_id`、`sequence` 与有界 `page`/`page_size`。
+指定世界时按期号降序稳定排序；全世界时按结算时间、世界、期号和 UUID 稳定排序，count 与当前页
+来自同一 Serializable 快照。Admin 结算页以第一页第一项作为权威默认最新一期，再按 UUID 请求
+A07/A08；SQLite Lite 对目录与报告都返回 501。P18/P19 已接入同一竞价事务、稳定
 命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
 终止原因随命令结果在同一事务内冻结，HTTP 不再增加提交后账户读取窗口，也不暴露原始账本
 payload。A09-A12 与 A38 的
@@ -357,6 +369,13 @@ MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全�
 真实生效边界，不是热加载提示；业务区块更新要求重启受影响的 Admin 与 Worker。
 Admin WebUI 将这份闭集投影映射成分组开关、数字、列表与文本输入；保存仍提交完整候选文档，
 因此所有页面修改最终由 PUT 的原子文件替换边界写回配置文件，不存在只在浏览器内生效的旁路。
+
+A40/A41 将数据库 `worlds.enabled` 与 Admin runtime 中只控制 Worker/MoogleMail 入站的 world
+开关明确分离。A40 是无 query 的认证只读目录；A41 使用严格 JSON、`command_id` 与
+`expected_policy_revision`，在 PostgreSQL Serializable 事务中先锁 world，再拒绝任何
+`draft`/`preview`/`live`/`final`/`settling` 拍卖或仍可领取的活动 `scheduled_rounds`，随后以
+revision CAS 更新状态，并把通用命令账本和追加审计与状态同事务提交。相同状态是可重放的有审计
+no-op，不递增 revision；SQLite Lite 只提供目录读取，启停明确返回 `501 feature_not_supported`。
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、稳定论坛账号 ID

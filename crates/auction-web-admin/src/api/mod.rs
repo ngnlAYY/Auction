@@ -36,10 +36,14 @@ mod runtime_config;
 mod session;
 #[path = "auction/settlement.rs"]
 mod settlement;
+#[path = "auction/settlement_catalog.rs"]
+mod settlement_catalog;
 #[path = "operations/status.rs"]
 mod status;
 #[path = "identity/users.rs"]
 mod users;
+#[path = "operations/worlds.rs"]
+mod worlds;
 
 pub(crate) use auctions::{
     AdminAuction, AdminAuctionCapabilities, AdminAuctionPage, create_admin_auction,
@@ -82,10 +86,16 @@ pub(crate) use session::{AdminSession, fetch_admin_session, login_admin, logout_
 pub(crate) use settlement::{
     AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary, fetch_admin_settlement,
 };
+pub(crate) use settlement_catalog::{
+    AdminSettlementCatalogEntry, AdminSettlementCatalogPage, fetch_admin_settlement_catalog,
+};
 pub(crate) use status::{AdminReadinessState, fetch_admin_readiness};
 pub(crate) use users::{
     AdminUser, AdminUserPage, AdminUserStatusFilter, blacklist_admin_user, create_admin_user,
     fetch_admin_users, mutate_admin_user, unblacklist_admin_user,
+};
+pub(crate) use worlds::{
+    AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
 use auction_contracts::{AdminDeliveryCommandRequest, AdminSessionResponse, ApiResponse};

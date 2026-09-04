@@ -55,6 +55,9 @@ Admin 结算报告读取由 `src/database/settlement_report/mod.rs` 持有，只
 完整档读取同一 Serializable 快照内的结算摘要、补偿账本、lot 金额、挂牌价、持有比例和调整比例，对序列化冲突/死锁最多
 重试三次；已存在的结算摘要不会因补偿账本损坏而被静默隐藏，后续闭集校验会失败关闭。SQLite Lite
 明确不支持该能力。
+Admin 结算选择目录由 `src/database/settlement_catalog/mod.rs` 持有，只读取有 `settled_at` 的
+`settled` 拍卖；可按 world/sequence 筛选，并在一个 Serializable 快照中取得 total 与稳定排序的
+当前页。SQLite Lite 固定返回能力不支持，不用空目录冒充完整档结果。
 Admin recovery 报告读取由 `src/database/recovery_report/mod.rs` 持有，在同一 Serializable
 快照内读取 recovery/action 安全投影；`recovery_commands/commands.rs` 只做 PostgreSQL 完整档恢复命令分派；
 确认写入、范围快照、guarded relist 和共享映射分别位于 `recovery_commands/commands/{confirm,scope,relist,mapping}.rs`，
@@ -112,8 +115,11 @@ Worker 履约和 Public 真实装备 URL 分别通过自己的应用端口映射
 报告能力缺失，明文 key 不会越过存储边界。
 Public 拍卖目录读取由 `src/database/auctions/` 持有：`mod.rs` 只做跨后端端口装配，
 `postgres.rs` 与 `sqlite.rs` 分别负责查询，`mapping.rs` 负责行到安全投影的转换和列表参数
-校验；两后端还按启用世界和公开状态闭集提供 WebSocket 预检，不读取事件历史，也不把 draft/cancelled
-伪装成可订阅 projection。cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。
+校验；当前投影和写入始终要求 enabled world，历史读取只让 `settled` 拍卖绕过该门禁。两后端的
+lot、bid log、账户历史和单拍卖 realtime 使用同一 `world.enabled OR auction.status='settled'`
+边界；discovery 还按事件 payload 归属过滤禁用世界的活动拍卖并推进原始游标，不能泄漏旧增量或
+卡住恢复。WebSocket 预检不读取事件历史，也不把 draft/cancelled 伪装成可订阅 projection。
+cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。
 Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 从 `auction_settlements` 与 `lot_settlements` 的已提交事实链查询并负责行映射，
 `mapping.rs` 负责混合游标、名称筛选、统计结果及公共字段校验。SQLite Lite 没有结算事实 owner，
@@ -168,6 +174,10 @@ Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreS
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
+Admin 业务世界启停由 `src/database/competition/postgres/admin/world.rs` 持有：事务先锁
+`worlds`，再检查非终态 auction 和活动未完成 `scheduled_rounds`，通过 `policy_revision` CAS 更新
+状态，并复用 `auction_commands` 与 `audit_records` 原子记录幂等结果和审计。SQLite 只复用
+`WorldReader` 提供安全目录，`DatabaseAdminWorldCommands` 对 mutation 明确返回能力不支持。
 拍卖生命周期事务由 `src/database/competition/postgres/lifecycle.rs` 持有，父文件只负责装配；其 `lifecycle/` 子目录的
 `context.rs`、`plan/` 和 `record.rs` 分别负责上下文锁定、生命周期计划写入和审计/实时事件记录，其中
 `plan/{preview,open,cancel,successor,final_phase,early_settlement}.rs` 按状态动作拆分 PostgreSQL 写入：管理命令锁定拍卖后校验

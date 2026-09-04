@@ -37,7 +37,7 @@ pub(super) async fn list_postgres(
     let projection = sqlx::query(
         "SELECT a.id
          FROM public.auctions AS a
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE a.id = $1
            AND a.status IN ('live', 'final', 'settled')
            AND ($2::text IS NULL OR a.world_id = $2)",
@@ -88,7 +88,7 @@ pub(super) async fn list_postgres(
          FROM public.bids AS b
          JOIN public.lots AS l ON l.id = b.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
          JOIN public.users AS users ON users.id = b.bidder_user_id
          JOIN public.auction_commands AS command ON command.command_id = b.command_id
@@ -202,7 +202,8 @@ pub(super) async fn list_postgres(
                  FROM public.bids AS b
                  JOIN public.lots AS l ON l.id = b.lot_id
                  JOIN public.auctions AS a ON a.id = l.auction_id
-                 JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+                 JOIN public.worlds AS w
+                   ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
                  JOIN public.equipment AS e ON e.id = l.equipment_id
                  JOIN public.users AS users ON users.id = b.bidder_user_id
                  JOIN public.auction_commands AS command ON command.command_id = b.command_id

@@ -37,7 +37,7 @@ pub(super) fn AdminRecoveryTable(
                 if report.recoveries.is_empty() {
                     p { class: "admin-auction-status", {t!("admin-recovery-empty")} }
                 } else {
-                    div { class: "admin-shell__table-wrap",
+                    div { class: "admin-settlement__table-wrap",
                         table { class: "admin-shell__table admin-auction-table",
                             caption { class: "admin-visually-hidden", {t!("admin-recovery-title")} }
                             thead {
@@ -112,6 +112,7 @@ fn AdminRecoveryRow(
                     for action in recovery.allowed_commands.clone() {
                         {
                             let draft = RecoveryConfirmationDraft {
+                                auction_id: recovery.auction_id.clone(),
                                 recovery_id: recovery_id.clone(),
                                 state_version: recovery.state_version,
                                 action: action.clone(),
@@ -146,15 +147,20 @@ fn AdminRecoveryRow(
 
 #[component]
 pub(super) fn AdminRecoveryDialog(
-    draft: RecoveryConfirmationDraft,
+    draft: Option<RecoveryConfirmationDraft>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
     mut reason: Signal<String>,
     mut busy: Signal<bool>,
     mut feedback: Signal<Option<AdminActionFeedback>>,
     mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
+    selected_auction_id: Signal<String>,
+    selection_generation: Signal<u64>,
     mut reload_generation: Signal<u64>,
     mut recovery_reload_generation: Signal<u64>,
 ) -> Element {
+    let Some(draft) = draft else {
+        return rsx! {};
+    };
     let requires_reason = draft.action != "reclaimed";
     rsx! {
         div { class: "admin-shell__dialog-backdrop", role: "presentation",
@@ -204,40 +210,52 @@ pub(super) fn AdminRecoveryDialog(
                         let mut reason = reason;
                         let mut feedback = feedback;
                         let mut command_ids = command_ids;
+                        let selected_auction_id = selected_auction_id;
+                        let selection_generation = selection_generation;
+                        let submitted_selection_generation = selection_generation();
                         let mut reload_generation = reload_generation;
                         let mut recovery_reload_generation = recovery_reload_generation;
                         spawn(async move {
-                            match confirm_admin_recovery(
+                            let submitted_auction_id = draft.auction_id.clone();
+                            let result = confirm_admin_recovery(
                                 command_id,
                                 draft.recovery_id,
                                 draft.state_version,
                                 draft.action,
                                 reason_value,
                             )
-                            .await
-                            {
+                            .await;
+                            let still_selected = selected_auction_id() == submitted_auction_id
+                                && selection_generation() == submitted_selection_generation;
+                            match result {
                                 Ok(_) => {
-                                    confirmation.set(None);
-                                    reason.set(String::new());
-                                    feedback.set(Some(AdminActionFeedback::Success));
                                     command_ids.write().remove(&command_signature);
-                                    // 旧版成功后同时失效 auction、settlement 与 recovery；共享
-                                    // generation 正好驱动这三个权威读取，不能只刷新当前表。
-                                    reload_generation
-                                        .set(reload_generation().saturating_add(1));
+                                    if still_selected {
+                                        confirmation.set(None);
+                                        reason.set(String::new());
+                                        feedback.set(Some(AdminActionFeedback::Success));
+                                        // 旧版成功后同时失效 auction、settlement 与 recovery；共享
+                                        // generation 正好驱动这三个权威读取，不能只刷新当前表。
+                                        reload_generation
+                                            .set(reload_generation().saturating_add(1));
+                                    }
                                 }
                                 Err(error) if error.is_conflict() => {
-                                    // 旧版对全部 409 都关闭失效上下文，但保留错误和命令 ID 供同一动作重试。
-                                    confirmation.set(None);
-                                    reason.set(String::new());
-                                    feedback.set(Some(AdminActionFeedback::Error(error.code)));
-                                    recovery_reload_generation.set(
-                                        recovery_reload_generation().saturating_add(1),
-                                    );
+                                    if still_selected {
+                                        // 旧版对全部 409 都关闭失效上下文，但保留错误和命令 ID 供同一动作重试。
+                                        confirmation.set(None);
+                                        reason.set(String::new());
+                                        feedback.set(Some(AdminActionFeedback::Error(error.code)));
+                                        recovery_reload_generation.set(
+                                            recovery_reload_generation().saturating_add(1),
+                                        );
+                                    }
                                 }
                                 Err(error) => {
-                                    // 400/503 保留对话框、输入和命令，便于同次重试。
-                                    feedback.set(Some(AdminActionFeedback::Error(error.code)));
+                                    if still_selected {
+                                        // 400/503 保留对话框、输入和命令，便于同次重试。
+                                        feedback.set(Some(AdminActionFeedback::Error(error.code)));
+                                    }
                                 }
                             }
                             busy.set(false);

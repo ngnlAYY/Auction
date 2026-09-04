@@ -87,7 +87,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 
 | 表 | 旧迁移 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- | --- |
-| worlds | 000001_baseline | auction-application：world | 两者 | 世界边界与启用状态 |
+| worlds | 000001_baseline | auction-application：world | 两者 | 世界边界、数据库权威启用状态与 `policy_revision` CAS |
 | users | 000001_baseline + PostgreSQL 000027_user_forum_account_identity / SQLite 000010_user_forum_account_identity | auction-application：users | 两者 | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；旧 game_player_id 仅作兼容镜像 |
 | user_blacklist | 000001_baseline | auction-application：users | 两者 | 公开资格与封禁原因 |
 | user_renames | 000004_identity_external_admin | auction-application：users | 两者 | 用户名变更追加历史 |
@@ -139,6 +139,11 @@ A32 复用旧身份/外部命令迁移创建的 `credential_keys` 与
 保存创建拍卖时冻结的 schema v4 结算/恢复及竞价策略。它与 `default_start_price`、软截止、
 取消截止和 slow 间隔等遗留规则列在同一创建事务中写入；配置更新不会回溯改变已创建拍卖。
 竞价和取消事务在锁内读取该快照，恢复 PPM、代理开关/默认模式/次数上限和 final phase 参数。
+
+A40/A41 不新增表或修改迁移：业务世界读取复用 `worlds`；启停命令按 world-first 锁序读取
+`worlds`，以 `auctions` 与 `scheduled_rounds` 判定关闭 blocker，并把结果写入既有
+`auction_commands` 与 `audit_records`。PostgreSQL 完整档在一个 Serializable 事务中完成状态、
+幂等与审计；SQLite Lite 只读取 `worlds`，不声明该 mutation capability。
 
 A38 不新增表或修改结算事实 schema：`auction_early_settlement` 继续写入通用
 `auction_commands`，理由与动作上下文进入追加式 `audit_records`，截止时间只更新 `auctions`/`lots`

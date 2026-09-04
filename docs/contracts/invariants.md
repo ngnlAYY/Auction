@@ -47,6 +47,12 @@ f109146e246c6bbfefd7f4749ac2bba087bcfa0b，核对日期为 2026-08-22。这里�
 CAS，写入文档、`rules_admin_commands` 幂等结果和追加审计；同一 `command_id` 重放原文档，
 摘要或 locale 不同则返回冲突。SQLite Lite 只提供规则读取，不把发布能力降级为无审计写入。
 
+Admin 关闭业务世界同样是关键管理写入：必须先锁定 `worlds` 权威行，再检查该世界是否仍有任何
+非 `settled`/`cancelled` 拍卖或仍可领取的活动未完成调度轮次，以 `policy_revision` 做 CAS，最后将
+`worlds.enabled`、通用 `auction_commands` 结果和追加式 Admin 审计在同一 PostgreSQL
+Serializable 事务中提交。任一 blocker、版本冲突或审计失败都必须整体回滚。SQLite Lite 可以读取
+业务世界状态，但不得伪装提供这项完整档 mutation。
+
 ### I-04 PostgreSQL 与 SQLite 使用不同的并发机制
 
 - PostgreSQL 竞价和关键生命周期写入使用 Serializable 隔离，并配合明确的行锁；
@@ -125,6 +131,13 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 聚合并保存相同状态。后两者是跨行不变量，使用跨状态唯一索引和延迟约束触发器，允许生命周期
 事务先推进状态、再同步或移动 target，但提交时必须一致。
 论坛同步入队不属于这些领域触发器；它由 Worker 从已提交生命周期版本发现并持久化领取。
+
+`worlds.enabled` 是新业务进入当前生命周期的权威门禁。关闭时必须拒绝存在
+Draft/Preview/Live/Final/Settling 拍卖或活动未完成轮次的世界；成功关闭后，Public 当前目录、
+竞价写入、当前实时流和 Worker 新一周 bootstrap 都不得继续处理该世界。已经提交的 settlement、
+fulfillment、delivery 与 recovery 义务仍按持久队列排空，不能因关闭世界而被丢弃。Public 历史读取
+只为 `settled` 拍卖保留例外，即公开谓词为 `world.enabled || auction.status == settled`；该例外不能
+扩张到 cancelled、preview 或其它活动状态。
 
 ### I-07 出价计算必须保留旧业务的离散规则
 

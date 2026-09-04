@@ -29,8 +29,12 @@ mod admin_renames;
 mod admin_rules;
 #[path = "../admin/runtime_config.rs"]
 mod admin_runtime_config;
+#[path = "../admin/settlement_catalog.rs"]
+mod admin_settlement_catalog;
 #[path = "../admin/users/mod.rs"]
 mod admin_users;
+#[path = "../admin/worlds.rs"]
+mod admin_worlds;
 #[path = "../public/blacklist.rs"]
 mod blacklist;
 #[path = "../shared/boundary.rs"]

@@ -1,9 +1,15 @@
 use super::*;
 
 pub(crate) fn bid_log() -> Element {
-    let mut selected_world = use_context::<Signal<String>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let query = read_public_query();
+    let mut world_filter = use_signal(|| {
+        query
+            .world
+            .clone()
+            .filter(|world| matches!(world.as_str(), "main" | "isekai"))
+            .unwrap_or_else(|| "main".to_owned())
+    });
     let mut selected_auction_id = use_signal(|| query.auction_id.clone().unwrap_or_default());
     let mut page_number = use_signal(|| query.page);
     let mut lot_filter = use_signal(|| query.bid_log_lot.clone().unwrap_or_default());
@@ -16,14 +22,14 @@ pub(crate) fn bid_log() -> Element {
     });
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => enabled_worlds(worlds),
-        _ => vec![selected_world()],
+        Some(Ok(worlds)) => supported_worlds(worlds),
+        _ => vec![world_filter()],
     };
     let auctions = use_resource({
         let refresh_generation = refresh_generation;
         move || {
             let _ = refresh_generation();
-            fetch_bid_log_auctions(selected_world())
+            fetch_bid_log_auctions(world_filter())
         }
     });
 
@@ -68,7 +74,7 @@ pub(crate) fn bid_log() -> Element {
                 if auction_id.is_empty() {
                     Ok(None)
                 } else {
-                    fetch_bid_log_page(auction_id, page, selected_world(), lot_id).await.map(Some)
+                    fetch_bid_log_page(auction_id, page, world_filter(), lot_id).await.map(Some)
                 }
             }
         }
@@ -138,11 +144,11 @@ pub(crate) fn bid_log() -> Element {
                     span { {t!("world-label")} }
                     select {
                         id: "public-auction-bid-log-world",
-                        value: selected_world(),
+                        value: world_filter(),
                         disabled: world_options.is_empty(),
                         onchange: move |event| {
                             let world = event.value();
-                            selected_world.set(world.clone());
+                            world_filter.set(world.clone());
                             selected_auction_id.set(String::new());
                             lot_filter.set(String::new());
                             page_number.set(1);

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use auction_web_shared::format_credit_amount as format_amount;
 
-use crate::api::{AdminAuction, AdminRecoveryAction, AdminSettlementLot};
+use crate::api::{AdminRecoveryAction, AdminSettlementLot};
 
 pub(super) fn stable_command_id(
     mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
@@ -18,10 +18,6 @@ pub(super) fn stable_command_id(
     let command_id = Uuid::new_v4();
     command_ids.write().insert(signature, command_id);
     command_id
-}
-
-pub(super) fn auction_option_label(auction: &AdminAuction) -> String {
-    format!("{} #{} ({})", auction.world_id, auction.sequence, auction.status)
 }
 
 pub(super) fn recovery_stage_label(stage: &str) -> String {

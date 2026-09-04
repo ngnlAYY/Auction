@@ -39,8 +39,34 @@ where
         return WorkerResult::Success;
     }
 
+    let Some(world_reader) = worker.worlds.as_deref() else {
+        tracing::error!("周计划缺少数据库业务世界读取端口");
+        return WorkerResult::Error;
+    };
+    let worlds = match world_reader.list_worlds().await {
+        Ok(worlds) => worlds,
+        Err(error) => {
+            tracing::warn!(error = %error, "读取周计划业务世界状态失败");
+            return WorkerResult::Error;
+        }
+    };
+
     let mut result = WorkerResult::Success;
     for world_id in &config.worlds {
+        let Some(world) = worlds.iter().find(|world| world.id.as_str() == world_id.as_str()) else {
+            tracing::error!(world_id, "周计划配置的业务世界不存在");
+            result = WorkerResult::Error;
+            continue;
+        };
+        if !world.validate() {
+            tracing::error!(world_id, "周计划读取到无效的业务世界投影");
+            result = WorkerResult::Error;
+            continue;
+        }
+        if !world.enabled {
+            tracing::debug!(world_id, "业务世界已关闭，跳过当前周拍卖 bootstrap");
+            continue;
+        }
         let identity = identities(world_id, generation.local_week);
         let request = BootstrapRequest {
             round_id: identity.round_id,

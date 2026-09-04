@@ -37,7 +37,7 @@ pub(super) async fn list_postgres(
          FROM public.bids AS b
          JOIN public.lots AS l ON l.id = b.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
          WHERE b.bidder_user_id = $1
            AND a.status IN ('live', 'final', 'settled')
@@ -58,7 +58,7 @@ pub(super) async fn list_postgres(
          FROM public.bids AS b
          JOIN public.lots AS l ON l.id = b.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE b.bidder_user_id = $1
            AND a.status IN ('live', 'final', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')",
@@ -102,7 +102,7 @@ pub(super) async fn list_postgres(
          FROM public.bid_proxy_authorizations AS p
          JOIN public.lots AS l ON l.id = p.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
          WHERE p.user_id = $1
            AND a.status IN ('live', 'final', 'settling', 'settled')
@@ -131,7 +131,7 @@ pub(super) async fn list_postgres(
          FROM public.bid_proxy_authorizations AS p
          JOIN public.lots AS l ON l.id = p.lot_id
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          WHERE p.user_id = $1
            AND a.status IN ('live', 'final', 'settling', 'settled')
            AND l.status IN ('live', 'sold', 'unsold')",

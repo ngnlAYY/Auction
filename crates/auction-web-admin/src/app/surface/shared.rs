@@ -39,6 +39,8 @@ pub fn admin_api_error_message(code: &str) -> String {
         "manual_early_settlement_disabled" => {
             t!("admin-error-manual-early-settlement-disabled")
         }
+        "world_has_active_auction" => t!("admin-error-world-has-active-auction"),
+        "world_not_found" => t!("admin-error-world-not-found"),
         "csrf_invalid" | "origin_forbidden" | "permission_denied" | "http_403" => {
             t!("admin-error-forbidden")
         }

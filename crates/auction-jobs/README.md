@@ -16,6 +16,10 @@ Unix socket server 和 Admin client 分别位于 `src/control/transport/{protoco
 同时匹配 owner、精确租约期限和 `state_version`，因此 Admin 修改计划后陈旧任务不能继续收口。它通过
 生命周期应用端口执行 preview/open，不复制状态机。收到 drain 后，各独立循环完成当前有界批次并停止领取新任务；SIGINT/SIGTERM、
 10 秒总上限和二次信号强制收口由 `apps/worker` 与 `auction-process` 拥有。
+每周场次 bootstrap 只处理 `[auction.schedule].worlds` allowlist、runtime-enabled worlds 和数据库
+`worlds.enabled=true` 的交集；每次达到 due 都通过注入的 `WorldReader` 重读数据库，缺失/损坏 world
+失败关闭，已关闭 world 则安全跳过而不制造重复写入错误。该门禁只阻止新场次，不取消既有
+settlement、fulfillment、delivery 或 recovery durable 工作。
 `run_persistent_with_settlement_until_shutdown()` 在装配根注入 slow due 读取/命令端口，并在
 PostgreSQL 完整档额外领取结算 workflow。Auction 主循环立即执行首轮，再按一分钟加最多五秒
 抖动唤醒，依次运行生命周期、慢速代理和结算三个独立阶段；任一阶段失败仍继续后续阶段，也不会

@@ -8,6 +8,8 @@ use super::*;
 /// 由装配根显式表达能力差异。
 pub struct PersistentWorker<C> {
     pub schedule: Arc<dyn ScheduledRoundStore>,
+    /// 周计划每轮 bootstrap 前读取的数据库业务世界权威状态。
+    pub worlds: Option<Arc<dyn WorldReader>>,
     pub lifecycle: Arc<dyn AuctionLifecycleCommandPort>,
     pub slow_proxy_due: Option<Arc<dyn SlowProxyDueReader>>,
     pub slow_proxy_commands: Option<Arc<dyn SlowProxyCommandPort>>,

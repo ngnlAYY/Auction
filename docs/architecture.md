@@ -221,6 +221,11 @@ cursor。旧 runtime 完全缺少三个顶层业务区块时保持原 canonical 
 摘要和 Worker 主配置行为；Admin GET 可为浏览器物化默认投影，第一次保存后才把显式业务区块写入
 文件。成功更新因此要求重启所有受影响的 Admin/Worker，不提供热加载。
 
+runtime 的 world 开关只控制 Worker/MoogleMail 的入站候选与邮箱装配，不再被描述为整个拍卖业务的
+启停。数据库 `worlds.enabled` 是独立的权威业务开关：Admin A40/A41 读取或修改该状态，关闭操作在
+PostgreSQL Serializable 事务中按 world-first 锁序拒绝任何非终态拍卖或活动未完成调度轮次，并以
+`policy_revision`、通用命令账本和追加审计形成原子 fence。SQLite Lite 只读，不提供该管理写入。
+
 配置默认值继续是安全契约的一部分：省略 origin 策略时仍启用同源 allowlist；Admin 会话默认
 空闲 15 分钟、绝对 8 小时，Public 保持 30 分钟/7 天；装备来源共享请求间隔默认 250 ms。
 Public/Admin 启用 metrics 时，有效 listener 必须是 loopback TCP 或 Unix socket，非本地 TCP 会在
@@ -309,14 +314,18 @@ Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 caden
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
 SQLite `000001` 至 `000011`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
-Public 20 条旧版契约路径与 Admin 37 条旧版契约路径，并完成稳定响应、世界/拍卖/lot 只读查询端口和
+Public 20 条与 Admin 37 条旧版契约路径，并另行登记 A38-A42 五条 Admin 新增路径，当前 Rust
+feature API 因而为 Public 20 条、Admin 42 条；稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、Public lot 列表/详情、竞价日志和普通竞价命令返回权威目录或当前公开
 projection，PostgreSQL 完整档的价格历史从结算事实链返回权威成交投影，SQLite Lite 对同一路由返回
 `501 feature_not_supported`，
 拍卖列表保留页码与 keyset cursor 语义，lot 列表保留 preview/live 互斥投影、分类统计和旧分页；
 所有 Public/Admin `lot_number` 展示投影使用分类内编号，竞价身份仍是 `lot_id` UUID，价格历史
-opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.lot_number`；已结算拍卖仍可在公开安全投影内读取 lot，供历史轮次页面使用，
+opaque cursor、预览物化顺序和事务锁序继续使用内部全局 `lots.lot_number`；公开当前投影只接受
+`worlds.enabled=true`，关闭世界后仍允许该世界已结算拍卖在公开安全投影内读取 auction、lot、
+竞价/账户历史、价格历史与补偿事实，供历史页面使用，但不暴露 preview/live/final/settling 或
+discovery 增量，
 竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义；Web 代理事实只展示
 `玩家名称（代理）`，论坛普通竞价在能够由命令账本证明真实楼层与帖子身份时展示可点击的
 `玩家名称（#N）`，普通 Web 出价不伪造来源；论坛固定 #1 从同一事实链投影相同来源样式。价格历史
@@ -336,7 +345,7 @@ Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+hos
 斜杠视为同一 origin 并在 HTTP 边界归一化；凭据、查询、片段和非根路径始终失败关闭。
 
 PostgreSQL 价格历史使用结算账本边界；SQLite Lite 不具备 settlement owner，也不把 `settled`/`sold`
-状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与 Draft/Preview lot 管理页已接入；录入 target 在正式开拍前始终指向本期，Preview 新增装备会在同一事务追加预览物化项。SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
+状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A40/A41 通过独立 `AdminWorldPort` 暴露数据库权威 world 状态与安全启停命令，不复用只控制 MoogleMail 入站的 runtime 文档开关；关闭检查、revision CAS、命令结果和审计在同一事务内提交。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与 Draft/Preview lot 管理页已接入；录入 target 在正式开拍前始终指向本期，Preview 新增装备会在同一事务追加预览物化项。SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
 登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回旧版
 `{ authorization: ... }` 完整命令投影；应用层在竞价事务内冻结授权、quota、完整转换历史、终止原因和
@@ -362,7 +371,9 @@ owner，因此始终不提供该能力。
 
 `/api/v1/events` 已从 PostgreSQL/SQLite 持久化事件表提供带 sequence 游标的 Catch-up，`/api/v1/ws`
 只提供有界的 Public session 服务端推送，恢复仍以 Catch-up/权威快照为准；
-Admin A07 结算报告已接入 PostgreSQL 完整档的一致只读快照，SQLite 对该完整档能力明确返回不支持；
+Admin A42 结算目录在同一 PostgreSQL Serializable 快照中只读取已结算场次，支持 world、期号和
+有界分页，并以稳定排序提供默认最新一期；A07 结算报告继续按选中 UUID 读取一致只读快照。SQLite
+对目录与报告这两项完整档能力明确返回不支持；
 结算后的履约 claim/fencing、`pending → prepared → enqueued` 状态推进和 delivery outbox
 的持久化领取/发送中 fencing 已由 Worker 阶段接入；Admin delivery 列表、release、retry 和
 reconcile 也已接入 PostgreSQL 安全投影、fencing version 与独立命令账本。具体 MoogleMail
@@ -420,7 +431,10 @@ delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独
 收口，超时和依赖错误按 `Retryable` 重试。批次处理期间周期续租 claim，续租 fence 失效后取消
 陈旧 future，不能推进 cursor。当前首条业务链已覆盖拍卖邮件的 Credits/COD
 拒绝、无附件通知、装备来源校验、起拍价指令解析、拍卖草稿/lot 入站、take/return 动作和静态
-通知发送。起拍价解析兼容空白正文/空行、全附件统一 `start amount`、跨物理行的逐件三元组、
+通知发送。每周新场次 bootstrap 的实际世界集合进一步取 `[auction.schedule].worlds`、上述
+runtime-enabled 世界与数据库 `worlds.enabled=true` 的交集，并在每次 due 执行前重读数据库；关闭
+世界会安全跳过新轮次，不会停止已经持久化的 settlement、fulfillment、delivery 或 recovery 排空。
+起拍价解析兼容空白正文/空行、全附件统一 `start amount`、跨物理行的逐件三元组、
 显式 `#` 注释、规范千分位和可精确换算为整数 Credits 的 `k`/`m` 小数；附件 ID/key 交叉校验、
 逐件唯一覆盖、正数和 checked 溢出边界仍失败关闭。通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
 缺少该区块时由 `[worker.mooglemail]` 直接配置兼容回退；14 个模板在启动时校验占位符并冻结快照；
@@ -547,8 +561,10 @@ Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调
 稳定 command ID、请求摘要、完整 payload 与收件人仍必须逐项一致。
 Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版本身就是 warning-only，
 没有连接业务 owner，当前 Rust 保持该兼容边界；若未来要让它们真正改变状态，需要另行冻结
-owner、幂等账本和回执契约。Admin 结算页面已消费该安全 settlement/recovery 契约，提供已结算拍卖
-选择、lot 金额表、资金池摘要和带版本 fence 的 recovery 确认；Admin `/outbox` 页面展示最近事件
+owner、幂等账本和回执契约。Admin 结算页面先消费 A42 已结算目录，在左侧按 world/期号切换并默认
+选中服务端稳定排序的最新一期，右侧按 UUID 展示 lot 金额表、资金池摘要和带版本 fence 的 recovery
+确认；筛选、场次和目录页写入可恢复的 URL 状态。桌面端左右栏在受限视口内独立滚动，48rem 及以下
+恢复单列自然文档流。Admin `/outbox` 页面展示最近事件
 元数据并复用已冻结的 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。事件元数据、
 lag/failure/replay 在 PostgreSQL 与 SQLite Lite 的既有 realtime 表范围内均可用；最近事件元数据的
 总数与当前页由单条 SQL 在同一快照中生成，三类列表共用有界页大小和最大偏移量；SQLite 对其他完整档
