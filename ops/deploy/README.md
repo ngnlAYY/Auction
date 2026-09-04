@@ -1,8 +1,8 @@
 # Auction Rust 部署资料
 
 本目录只描述当前 Rust 三进程边界的部署契约，不是通用安装器，也不会在部署时改写配置
-字段或自动覆盖数据库。旧版 `Auction-BF/ops/deploy` 依赖 JSON、环境变量和旧的单体启动
-流程，不能直接复制到本项目。
+字段或自动覆盖数据库。本项目只接受仓库内登记的 TOML、`auctionctl` 和三进程部署流程；外部
+脚本或未登记的单体启动流程不能直接套用。
 
 ## 推荐目录
 
@@ -112,12 +112,12 @@ PID、信号、`TimeoutStopSec`、退出码、自动重启和 journald；Rust �
 destructive rebuild 也已由独立的 `auctionctl postgres-rebuild` 契约实现，默认只读，并要求
 verified backup 或一次性环境豁免、双重目标确认、零连接、advisory lock 和私有回执。它不会由
 启动、重启、迁移或任何 unit 隐式执行。
-现有 Auction-BF PostgreSQL v28 使用独立的备份格式、严格表/投影预检和显式接管命令，不能交给
-普通 `migrate` 或当前 Rust backup/restore 猜测处理；完整停机、备份、确认、接管与失败恢复流程见
-[`LEGACY_V28_ADOPTION.md`](LEGACY_V28_ADOPTION.md)。旧版配置目录中的五语言规则不一定存在于 v28
+canonical PostgreSQL v28 历史格式使用独立的备份格式、严格表/投影预检和显式接管命令，不能交给
+普通 `migrate` 或当前 backup/restore 猜测处理；完整停机、备份、确认、接管与失败恢复流程见
+[`LEGACY_V28_ADOPTION.md`](LEGACY_V28_ADOPTION.md)。来源配置目录中的五语言规则不一定存在于 v28
 数据库，必须按同一手册在启动前保存并经 `import-rules-directory` 显式导入。
-旧版 retention 工具本身只允许 inventory 并明确禁止 mutation；当前 Rust 已保持该边界，未来
-完整 retention policy 和 mutation 需要独立设计与授权，不属于旧版功能迁移。
+当前 retention 契约只允许 inventory 并明确禁止 mutation；未来完整 retention policy 和 mutation
+需要独立设计与授权。
 
 只读盘点示例：
 
@@ -167,7 +167,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 必须单独显式运行 `postgres-rebuild --mode empty-for-restore`，完整确认和回执流程见
 [`RECOVERY.md`](RECOVERY.md)。
 
-旧版 v28 的 `postgres-legacy-v28-backup`、离线 verify 和 adoption 使用另一种 manifest。该格式
+v28 历史格式的 `postgres-legacy-v28-backup`、离线 verify 和 adoption 使用另一种 manifest。该格式
 故意不被 `postgres-backup-verify`/`postgres-restore` 接受；接管恢复点不能误当成已经带 SQLx
 历史的当前 Rust 备份。
 

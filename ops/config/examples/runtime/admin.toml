@@ -49,7 +49,7 @@ min = 0
 # 可选：最高装备等级，范围 0-1000 且不小于 min，默认 0。
 max = 0
 
-# 可选区块：MoogleMail 业务通知模板；字段闭集和默认正文与 Auction-BF 一致。
+# 可选区块：MoogleMail 业务通知模板；字段闭集和默认正文由本模板冻结。
 [mail_templates]
 # 可选：拍卖邮件包含资产时的拒绝正文。
 auction_assets_rejected = "Auction assets rejected"

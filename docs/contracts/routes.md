@@ -2,20 +2,17 @@
 
 ## 基线与统计口径
 
-本清单冻结于 2026-08-22，行为基线为相邻旧仓库 Auction-BF 的提交
-f109146e246c6bbfefd7f4749ac2bba087bcfa0b。来源是旧仓库
-apps/backend/internal/app/public/features/features.go、apps/backend/internal/app/admin/features.go
-以及各 feature 的 publichttp/adminhttp 注册代码。
+本清单是 Auction Rust 的 HTTP 权威契约登记表。路径注册由 `auction-http` 持有，稳定请求、响应与
+错误 DTO 由 `auction-contracts` 持有；两者必须与本表同步，不能依赖仓库外的路由清单或实现源码。
 
 本表统计 feature API 的唯一路径，不把进程健康检查、静态 Web 资源和反向代理自身的路径
-计入。逐项核对后的旧版冻结基线是：
+计入。当前冻结统计是：
 
-- Public：20 个旧版唯一路径；
-- Admin：37 个旧版唯一路径。
+- Public：20 个唯一路径；
+- Admin：43 个唯一路径。
 
-迁移实施计划中原来的 Admin 35 条是旧统计低估，不能继续作为验收数字。当前 Rust 在完整登记
-旧版路径之外新增 A38-A42 五条产品能力，因而当前实现统计为 Public 20 条、Admin 42 条；新增路径
-不得被计入旧版等价基线。
+A38-A43 是独立登记的 Admin 产品能力，已经包含在 43 条统计中。路径数量只证明路由注册闭集，不
+代表对应应用端口、存储能力或运行证据已经完成。
 
 进程级可观测性路径不计入上述 feature API 统计：Public 与 Admin 在主配置
 `[metrics].enabled = true` 时提供 `GET/HEAD /metrics` Prometheus text scrape；Admin 若配置
@@ -33,7 +30,7 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 
 ## 进程健康探针
 
-健康探针不计入 Public/Admin feature API 数量，但属于旧版部署契约，两个 HTTP surface 都提供：
+健康探针不计入 Public/Admin feature API 数量；两个 HTTP surface 都提供：
 
 | 方法 | 路径 | 成功 | 未就绪 | 数据 |
 | --- | --- | --- | --- | --- |
@@ -45,12 +42,12 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 503，不把启动骨架伪装成可接收业务
 流量。Admin 继续以数据库连接和当前二进制的全部 SQLx 迁移作为 readiness 边界。
 
-旧 HTTP 层使用统一响应外壳：
+所有业务 API 使用统一响应外壳：
 
     {"code": "...", "message": "...", "data": ...}
 
-成功响应的业务 code、JSON 字段和错误 code 以旧 handler 为准。下表的错误状态码是该
-handler 当前明确产生的稳定集合；依赖错误中的 504 表示 context deadline，503 表示
+成功响应的业务 code、JSON 字段和错误 code 以本表及 `auction-contracts` 为准。下表是当前
+handler 明确产生的稳定集合；依赖错误中的 504 表示 context deadline，503 表示
 其他依赖不可用。冻结契约要求路由器对未注册路径/方法返回 404/405；Rust 路由现已按显式浏览器
 清单封闭 SPA 入口，不再用宽泛 fallback 掩盖未知路径。
 
@@ -69,14 +66,14 @@ handler 当前明确产生的稳定集合；依赖错误中的 504 表示 contex
 | 500 | 服务器内部无法安全完成请求 |
 | 503/504 | 下游依赖不可用或处理超时 |
 
-旧版 JSON 写边界同样属于 v1 契约：请求必须使用 `application/json` 媒体类型（允许合法参数），
+JSON 写边界属于 v1 契约：请求必须使用 `application/json` 媒体类型（允许合法参数），
 body 受每条路由自己的上限约束，解码只接受一个 JSON 值，且请求 DTO 拒绝未知字段。非 JSON、超限、
 语法/未知字段/尾随值分别稳定映射为 415 `unsupported_media_type`、413 `body_too_large` 和
 400 `invalid_json`。所有错误外壳固定包含 `data`；无业务错误数据时序列化为 `null`，Rust 可继续
 附加不含敏感内容的 `request_id`。
 
 Feature API 的方法是严格闭集。GET 路由不会因为 Axum 默认行为额外接受 HEAD；未显式注册的方法
-返回 JSON `405 method_not_allowed`，`Allow` 只列出该路径真实注册的方法并沿用旧版排序。健康探针、
+返回 JSON `405 method_not_allowed`，`Allow` 只列出该路径真实注册的方法并使用冻结排序。健康探针、
 metrics 和静态文件是否接受 HEAD 由各自契约单独决定，不从业务路由推导。
 
 Public/Admin 已恢复统一 HTTP boundary：只接受 1 至 64 字节的 ASCII 字母数字/`-_.`
@@ -90,12 +87,12 @@ Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计�
 
 未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确
 允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受
-GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（14 条旧版路径加独立
-`/forum` 页面）、Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
+GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（含独立 `/forum` 页面）、
+Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
 `auction-http/src/assets/routes.rs` 同步维护，只有这些路径可以读取 `index.html`；批准路径缺少
 构建产物时返回 503。
 
-缓存策略沿用旧版安全边界，并适配 Dioxus 稳定 WASM 文件名：Public 非身份化读取为 `no-cache`；
+缓存策略是当前 HTTP 安全边界，并适配 Dioxus 稳定 WASM 文件名：Public 非身份化读取为 `no-cache`；
 Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
 浏览器路由入口为 `no-store`，直接静态文件中只有 `assets/` 指纹资源使用一年 `immutable`，
 `index.html`、`wasm/*.js`、`*.wasm` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与
@@ -103,30 +100,30 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 
 ## Public
 
-| 编号 | 方法 | 路径 | 认证/边界 | 成功 | 明确错误状态 | 旧代码来源 |
-| --- | --- | --- | --- | --- | --- | --- |
-| P01 | GET | /api/v1/worlds | 公开 | 200 | 400, 503/504 | features/world/publichttp/adapter.go:36 |
-| P02 | GET | /api/v1/rules | 公开；`lang` 可选 | 200 | 400, 503 | features/rules/publichttp/adapter.go:40 |
-| P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；PostgreSQL/SQLite 从持久化事件表回放 | 200 | 400, 404, 503/504 | features/realtime/publichttp/adapter.go:148 |
-| P04 | GET | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | 101 | 400, 403, 404, 429, 503/504 | features/realtime/publichttp/adapter.go:151 |
-| P05 | GET | /api/v1/blacklist | 公开；页码分页 | 200 | 400, 503/504 | features/users/publichttp/adapter.go:43 |
-| P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 | features/sessions/publichttp/adapter.go:89 |
-| P07 | GET | /api/v1/auctions | 公开 | 200 | 400, 503/504 | features/auction/publichttp/adapter.go:58 |
-| P08 | GET | /api/v1/auctions/current | 公开 | 200 | 400, 503/504 | features/auction/publichttp/adapter.go:59 |
-| P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:60 |
-| P10 | GET | /api/v1/auctions/{auction_id}/bid-log | 公开 | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:61 |
-| P11 | GET | /api/v1/lots/{lot_id} | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 | features/auction/publichttp/adapter.go:62 |
-| P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:63 |
-| P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 | features/auction/publichttp/adapter.go:64 |
-| P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开 | 200 | 400, 404, 501, 503/504 | features/auction/publichttp/adapter.go:65 |
-| P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开 | 200 | 400, 404, 501, 503/504 | features/auction/publichttp/forum.go:37 |
-| P16 | GET | /api/v1/me/bids | Public session | 200 | 400, 401, 503/504 | features/auction/publichttp/account.go:90 |
-| P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session | 200 | 400, 401, 404, 503/504 | features/auction/publichttp/account.go:97 |
-| P18 | POST | /api/v1/lots/{lot_id}/proxy-authorizations | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:104 |
-| P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:111 |
-| P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 | features/auction/publichttp/account.go:118 |
+| 编号 | 方法 | 路径 | 认证/边界 | 成功 | 明确错误状态 |
+| --- | --- | --- | --- | --- | --- |
+| P01 | GET | /api/v1/worlds | 公开 | 200 | 400, 503/504 |
+| P02 | GET | /api/v1/rules | 公开；`lang` 可选 | 200 | 400, 503 |
+| P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；PostgreSQL/SQLite 从持久化事件表回放 | 200 | 400, 404, 503/504 |
+| P04 | GET | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | 101 | 400, 403, 404, 429, 503/504 |
+| P05 | GET | /api/v1/blacklist | 公开；页码分页 | 200 | 400, 503/504 |
+| P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 |
+| P07 | GET | /api/v1/auctions | 公开 | 200 | 400, 503/504 |
+| P08 | GET | /api/v1/auctions/current | 公开 | 200 | 400, 503/504 |
+| P09 | GET | /api/v1/auctions/{auction_id}/lots | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 |
+| P10 | GET | /api/v1/auctions/{auction_id}/bid-log | 公开 | 200 | 400, 404, 503/504 |
+| P11 | GET | /api/v1/lots/{lot_id} | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 |
+| P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 |
+| P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 |
+| P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开 | 200 | 400, 404, 501, 503/504 |
+| P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开 | 200 | 400, 404, 501, 503/504 |
+| P16 | GET | /api/v1/me/bids | Public session | 200 | 400, 401, 503/504 |
+| P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session | 200 | 400, 401, 404, 503/504 |
+| P18 | POST | /api/v1/lots/{lot_id}/proxy-authorizations | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
+| P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
+| P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 
-Public 分页必须保留旧的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
+Public 分页必须保留已发布的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
 preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已经
 `settled` 的拍卖、lot、竞价/账户历史、价格历史与补偿事实继续通过历史读取边界访问，不能把
 `cancelled` 或禁用世界中的活动拍卖顺带公开。P09 的 lot 投影允许读取仍属于公开
@@ -150,20 +147,20 @@ Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺�
 P12 在 PostgreSQL 完整档保留 `name`、`world`、
 日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；SQLite Lite
 因为没有 settlement 事实链固定返回 `501 feature_not_supported`，不能把状态列或空集合当作成交证明。实时事件的 after 也是
-非负 stream sequence，不得改成时间戳游标。P03 的旧版单拍卖读取要求规范 `auction_id`，可带
+非负 stream sequence，不得改成时间戳游标。P03 的 v1 单拍卖读取要求规范 `auction_id`，可带
 `after`、`page_size`，默认页大小 100、上限 200；响应除 `events`、`next_after`、`has_more`、
 `refetch_required` 外必须返回相同 `auction_id`。发现流是显式 `scope=auctions` 扩展，不能靠省略
 `auction_id` 隐式进入。HTTP 外层 envelope 允许非破坏性扩展，但 `data`、事件和 payload 使用精确字段
 闭集；缺口/坏投影会隐藏坏事件、置 refetch 并继续扫描有界原始页，`next_after` 指向原始高水位。
-P04 查询只能含一个 `auction_id` 或 `scope=auctions`，每帧发送一个不含内部 `stream_key` 的旧版事件对象；
+P04 查询只能含一个 `auction_id` 或 `scope=auctions`，每帧发送一个不含内部 `stream_key` 的 v1 事件对象；
 启用 allowlist 时要求恰好一个可信 `Origin`，独立连接尝试限流之后按 origin→query→session 返回错误。
 frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008、1013、1002、1001 及 reason
 分别表示客户端写入、慢消费者、事件合同错误和服务 drain，其余读超限、Pong 超时及底层读写失败直接断开。
 只有 discovery 使用每进程 128 槽和 429 `discovery_busy`；单拍卖新连接拒绝 settled，但既有连接可接收
 `auction.settled`。断线补发只走 P03，refetch 保留恢复游标和现有 socket。
 
-所有 Public JSON 时间沿用旧 Go `time.Time` 的 RFC3339Nano 词法：数据库或新版生成的 UTC
-时间使用 `Z`，小数秒裁掉尾随零，整秒不附加 `.000000`。P18-P20 从旧命令账本重放时还必须
+所有 Public JSON 时间使用 RFC3339Nano 词法：数据库或当前实现生成的 UTC 时间使用 `Z`，小数秒
+裁掉尾随零，整秒不附加 `.000000`。P18-P20 从历史命令账本重放时还必须
 保留账本字符串原有的 offset 与纳秒精度，同时以解析后的 UTC instant 做一致性校验。该规则不
 改变 PostgreSQL 关系字段的微秒精度，也不改变 Admin 既有的固定六位微秒投影。
 
@@ -174,76 +171,77 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 命令；Worker 内部命令保持 `None`，避免把 `command_id` 冒充请求关联。具有多个 HTTP 方法的路径
 必须按方法分别保留成功状态。
 
-| 编号 | 方法 | 路径 | 成功 | 明确错误状态 | 旧代码来源 |
-| --- | --- | --- | --- | --- | --- |
-| A01 | POST/GET/DELETE | /api/v1/admin/session | POST/GET/DELETE 200 | 400, 401, 403, 429, 503/504 | features/sessions/adminhttp/adapter.go:89 |
-| A02 | GET | /api/v1/admin/dashboard | 200 | 400, 401, 503/504 | features/servicehealth/adminhttp/adapter.go:112 |
-| A03 | GET/POST | /api/v1/admin/auctions | GET 200；POST 201 | GET: 400, 401, 501, 503/504；POST: 400, 401, 403, 409, 413/415, 501, 503/504 | features/auction/adminhttp/adapter.go:186 |
-| A04 | POST | /api/v1/admin/worlds/{world_id}/auction-intake/items | 201 | 400, 401, 403, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:191 |
-| A05 | POST | /api/v1/admin/auction-forum/preview | 200 | 400, 401, 403, 413/415, 503/504 | features/auction/adminhttp/adapter.go:197 |
-| A06 | GET | /api/v1/admin/auctions/{auction_id}/lots | 200 | 400, 401, 404, 501, 503/504 | features/auction/adminhttp/adapter.go:203 |
-| A07 | GET | /api/v1/admin/auctions/{auction_id}/settlement-report | 200 | 400, 401, 404, 501, 503/504 | features/auction/adminhttp/adapter.go:208 |
-| A08 | GET | /api/v1/admin/auctions/{auction_id}/recovery-report | 200 | 400, 401, 404, 501, 503/504 | features/auction/adminhttp/adapter.go:214 |
-| A09 | POST | /api/v1/admin/auctions/{auction_id}/preview | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:220 |
-| A10 | POST | /api/v1/admin/auctions/{auction_id}/open | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:225 |
-| A11 | POST | /api/v1/admin/auctions/{auction_id}/cancel | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:230 |
-| A12 | POST | /api/v1/admin/auctions/{auction_id}/final-phase | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:235 |
-| A13 | PATCH | /api/v1/admin/lots/{lot_id} | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/auction/adminhttp/adapter.go:241 |
-| A14 | POST | /api/v1/admin/recoveries/{recovery_id}/confirm | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/auction/adminhttp/adapter.go:246 |
-| A15 | GET | /api/v1/admin/lots/{lot_id}/proxy-events | 200 | 400, 401, 404, 501, 503/504 | features/auction/adminhttp/adapter.go:252 |
-| A16 | GET | /api/v1/admin/mail | 200 | 400, 401, 404, 501, 503/504 | features/mail/adminhttp/adapter.go:244 |
-| A17 | GET | /api/v1/admin/mail/intake | 200 | 400, 401, 501, 503/504 | features/mail/adminhttp/adapter.go:247 |
-| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200 | 400, 401, 404, 501, 503/504 | features/mail/adminhttp/adapter.go:250 |
-| A19 | PUT | /api/v1/admin/mail/polling | 200 | 400, 401, 403, 409, 413/415, 501, 503/504 | features/mail/adminhttp/adapter.go:253 |
-| A20 | POST | /api/v1/admin/mail/polls:trigger | 202 | 400, 401, 403, 409, 413/415, 501, 503/504 | features/mail/adminhttp/adapter.go:256 |
-| A21 | GET | /api/v1/admin/realtime/lag | 200 | 400, 401, 501, 503/504 | features/realtime/adminhttp/adapter.go:70 |
-| A22 | GET | /api/v1/admin/realtime/failures | 200 | 400, 401, 501, 503/504 | features/realtime/adminhttp/adapter.go:73 |
-| A23 | GET | /api/v1/admin/realtime/failures/{failure_id} | 200 | 400, 401, 404, 501, 503/504 | features/realtime/adminhttp/adapter.go:76 |
-| A24 | POST | /api/v1/admin/realtime/failures/{failure_id}/replay | 200 | 400, 401, 403, 404, 409, 413, 415, 500, 501, 503/504 | features/realtime/adminhttp/adapter.go:83 |
-| A25 | GET/POST/PUT | /api/v1/admin/rules | GET 可带可选 `lang`；GET/POST/PUT 200；创建时 201 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/rules/adminhttp/adapter.go:91 |
-| A26 | GET/PUT | /api/v1/admin/config | GET/PUT 200；Lite 501 | 400, 401, 403, 409, 413/415, 501, 503/504 | features/adminconfig/adminhttp/adapter.go:74 |
-| A27 | POST | /api/v1/admin/config:validate | 200；Lite 501 | 400, 401, 403, 413/415, 501, 503/504 | features/adminconfig/adminhttp/adapter.go:87 |
-| A28 | GET/POST/PATCH | /api/v1/admin/users | GET 200；POST 201；PATCH 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:105 |
-| A29 | GET | /api/v1/admin/renames | 200 | 400, 401, 503/504 | features/users/adminhttp/adapter.go:112 |
-| A30 | POST | /api/v1/admin/renames/{rename_id}/revert | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:117 |
-| A31 | PUT/DELETE | /api/v1/admin/users/{user_id}/blacklist | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/users/adminhttp/adapter.go:122 |
-| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | features/keymanagement/adminhttp/adapter.go:95 |
-| A33 | GET | /api/v1/admin/audit | 200 | 400, 401, 503/504 | features/audit/adminhttp/adapter.go:62 |
-| A34 | GET | /api/v1/admin/deliveries | 200 | 400, 401, 503/504 | features/delivery/adminhttp/adapter.go:78 |
-| A35 | POST | /api/v1/admin/deliveries/{delivery_id}/release | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:83 |
-| A36 | POST | /api/v1/admin/deliveries/{delivery_id}/retry | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:89 |
-| A37 | POST | /api/v1/admin/deliveries/{delivery_id}/reconcile | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | features/delivery/adminhttp/adapter.go:95 |
-| A38 | POST | /api/v1/admin/auctions/{auction_id}/early-settlement | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 | 新增能力，旧代码无对应路径 |
-| A39 | PATCH | /api/v1/admin/auctions/{auction_id}/schedule | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 | 新增能力，旧代码无对应路径 |
-| A40 | GET | /api/v1/admin/worlds | 200 | 400, 401, 503/504 | 新增能力，读取数据库权威业务世界状态 |
-| A41 | PATCH | /api/v1/admin/worlds/{world_id} | 200 | 400, 401, 403, 404, 409, 413/415, 429, 501, 503/504 | 新增能力，旧 runtime world 开关不具备同等语义 |
-| A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 | 新增能力，为结算报表提供已结算拍卖目录 |
+| 编号 | 方法 | 路径 | 成功 | 明确错误状态 |
+| --- | --- | --- | --- | --- |
+| A01 | POST/GET/DELETE | /api/v1/admin/session | POST/GET/DELETE 200 | 400, 401, 403, 429, 503/504 |
+| A02 | GET | /api/v1/admin/dashboard | 200 | 400, 401, 503/504 |
+| A03 | GET/POST | /api/v1/admin/auctions | GET 200；POST 201 | GET: 400, 401, 501, 503/504；POST: 400, 401, 403, 409, 413/415, 501, 503/504 |
+| A04 | POST | /api/v1/admin/worlds/{world_id}/auction-intake/items | 201 | 400, 401, 403, 409, 413/415, 503/504 |
+| A05 | POST | /api/v1/admin/auction-forum/preview | 200 | 400, 401, 403, 413/415, 503/504 |
+| A06 | GET | /api/v1/admin/auctions/{auction_id}/lots | 200 | 400, 401, 404, 501, 503/504 |
+| A07 | GET | /api/v1/admin/auctions/{auction_id}/settlement-report | 200 | 400, 401, 404, 501, 503/504 |
+| A08 | GET | /api/v1/admin/auctions/{auction_id}/recovery-report | 200 | 400, 401, 404, 501, 503/504 |
+| A09 | POST | /api/v1/admin/auctions/{auction_id}/preview | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A10 | POST | /api/v1/admin/auctions/{auction_id}/open | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A11 | POST | /api/v1/admin/auctions/{auction_id}/cancel | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A12 | POST | /api/v1/admin/auctions/{auction_id}/final-phase | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A13 | PATCH | /api/v1/admin/lots/{lot_id} | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A14 | POST | /api/v1/admin/recoveries/{recovery_id}/confirm | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
+| A15 | GET | /api/v1/admin/lots/{lot_id}/proxy-events | 200 | 400, 401, 404, 501, 503/504 |
+| A16 | GET | /api/v1/admin/mail | 200 | 400, 401, 404, 501, 503/504 |
+| A17 | GET | /api/v1/admin/mail/intake | 200 | 400, 401, 501, 503/504 |
+| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200 | 400, 401, 404, 501, 503/504 |
+| A19 | PUT | /api/v1/admin/mail/polling | 200 | 400, 401, 403, 409, 413/415, 501, 503/504 |
+| A20 | POST | /api/v1/admin/mail/polls:trigger | 202 | 400, 401, 403, 409, 413/415, 501, 503/504 |
+| A21 | GET | /api/v1/admin/realtime/lag | 200 | 400, 401, 501, 503/504 |
+| A22 | GET | /api/v1/admin/realtime/failures | 200 | 400, 401, 501, 503/504 |
+| A23 | GET | /api/v1/admin/realtime/failures/{failure_id} | 200 | 400, 401, 404, 501, 503/504 |
+| A24 | POST | /api/v1/admin/realtime/failures/{failure_id}/replay | 200 | 400, 401, 403, 404, 409, 413, 415, 500, 501, 503/504 |
+| A25 | GET/POST/PUT | /api/v1/admin/rules | GET 可带可选 `lang`；GET/POST/PUT 200；创建时 201 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
+| A26 | GET/PUT | /api/v1/admin/config | GET/PUT 200；Lite 501 | 400, 401, 403, 409, 413/415, 501, 503/504 |
+| A27 | POST | /api/v1/admin/config:validate | 200；Lite 501 | 400, 401, 403, 413/415, 501, 503/504 |
+| A28 | GET/POST/PATCH | /api/v1/admin/users | GET 200；POST 201；PATCH 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A29 | GET | /api/v1/admin/renames | 200 | 400, 401, 503/504 |
+| A30 | POST | /api/v1/admin/renames/{rename_id}/revert | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A31 | PUT/DELETE | /api/v1/admin/users/{user_id}/blacklist | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A32 | GET/POST/PATCH/DELETE | /api/v1/admin/credentials | GET 200；POST 201；PATCH/DELETE 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
+| A33 | GET | /api/v1/admin/audit | 200 | 400, 401, 503/504 |
+| A34 | GET | /api/v1/admin/deliveries | 200 | 400, 401, 503/504 |
+| A35 | POST | /api/v1/admin/deliveries/{delivery_id}/release | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A36 | POST | /api/v1/admin/deliveries/{delivery_id}/retry | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A37 | POST | /api/v1/admin/deliveries/{delivery_id}/reconcile | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A38 | POST | /api/v1/admin/auctions/{auction_id}/early-settlement | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
+| A39 | PATCH | /api/v1/admin/auctions/{auction_id}/schedule | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
+| A40 | GET | /api/v1/admin/worlds | 200 | 400, 401, 503/504 |
+| A41 | PATCH | /api/v1/admin/worlds/{world_id} | 200 | 400, 401, 403, 404, 409, 413/415, 429, 501, 503/504 |
+| A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 |
+| A43 | GET | /api/v1/admin/realtime/events | 200 | 400, 401, 500, 501, 503/504 |
 
-## 迁移冻结规则
+## 契约变更规则
 
-1. Rust 路由必须先在本表登记，再实现 handler；迁移期间不得为了方便重命名旧路径。
-2. DTO 必须在 auction-contracts 中重新定义；不得把旧 SQL 行或 Rust storage model 直接暴露给浏览器。
+1. Rust 路由必须先在本表登记，再实现 handler；已发布路径不得为了方便直接重命名。
+2. DTO 必须在 auction-contracts 中独立定义；不得把 SQL 行或 Rust storage model 直接暴露给浏览器。
 3. 所有改变状态的核心命令必须保留 command_id；同一 ID 搭配不同 request hash 必须返回 409。
-   旧版 A24 wire 没有该字段，由 HTTP 防腐层按 failure 与修正负载稳定派生，不得使用随机 ID。
+   A24 v1 兼容请求没有该字段，由 HTTP 防腐层按 failure 与修正负载稳定派生，不得使用随机 ID。
 4. 公开实时更新不以 HTTP 分页替代 WebSocket；无法保持长连接时只允许按 events catch-up
    语义退化为轮询或 SSE。
-5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新 migration plan、契约变更记录和
+5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新本文件、相关契约记录和
    对应 owner 的边界说明。
 
-截至当前迁移切片，P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A42 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
+当前 P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A43 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
-保留旧的 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
+保留 v1 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
 公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15：发布成功后只显示可点击的帖子位置和“已更新到 #xx”，`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停自动轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
-`command_id`/`request_hash`、应用竞价事务和旧版竞价结果投影。
+`command_id`/`request_hash`、应用竞价事务和 v1 竞价结果投影。
 Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话端口。A03 GET
 `/api/v1/admin/auctions` 已接入 Admin 会话保护、`world_id`/`status` 筛选、有限页码和
 PostgreSQL Serializable 生命周期/lot 数量安全投影；创建拍卖 POST 已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件；SQLite Lite 的创建与列表 GET 均明确返回 `501 feature_not_supported`。A06
 `/api/v1/admin/auctions/{auction_id}/lots` 已接入 Admin 会话保护、有限页码、PostgreSQL
-Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保持旧版
-`auction/lots/pagination` 闭集，内嵌新版 Web 通过非破坏性的
+Serializable 同快照的拍卖/lot/装备/投稿安全投影；响应 body 保持 v1
+`auction/lots/pagination` 闭集，内嵌 Web 通过非破坏性的
 `X-Auction-Capability-Manual-Intake` 响应头读取外部写入能力。SQLite Lite 因缺少完整 Admin 生命周期字段
 明确返回 `501 feature_not_supported`，不填充伪造的默认生命周期数据。A04
 `/api/v1/admin/worlds/{world_id}/auction-intake/items` 已接入 URL/canonical JSON 录入、
@@ -257,7 +255,7 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影�
 列入黑名单时由子命令产生的 `frozen` 转换，不把冻结伪装成竞价事实。SQLite Lite 明确返回
 `501 feature_not_supported`，管理端 lot 页面已提供历史读取入口。A07
 `/api/v1/admin/auctions/{auction_id}/settlement-report` 已接入 PostgreSQL 完整档的一致
-只读报告；报告中的 `auction` 保持旧版基础字段闭集，不额外发送严格旧 Web 客户端会拒绝的
+只读报告；报告中的 `auction` 保持 v1 基础字段闭集，不额外发送该版本字段闭集之外的
 `scheduled_end_at`/`effective_end_at`；lot 明细新增权威 `listed_price`、`hold_ppm` 与带符号
 `adjustment_ppm`，正值表示惩罚/税费、负值表示折扣，界面不从税额反推持有比例。读取遇到
 序列化冲突或死锁时最多重试三次。A07/A08 的 lot 明细同时返回 `equipment_category`，管理端据此
@@ -268,7 +266,7 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影�
 指定世界时按期号降序稳定排序；全世界时按结算时间、世界、期号和 UUID 稳定排序，count 与当前页
 来自同一 Serializable 快照。Admin 结算页以第一页第一项作为权威默认最新一期，再按 UUID 请求
 A07/A08；SQLite Lite 对目录与报告都返回 501。P18/P19 已接入同一竞价事务、稳定
-命令账本、代理状态校验和旧版 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
+命令账本、代理状态校验和 v1 `{ authorization: ... }` 完整命令投影；quota、完整转换历史和
 终止原因随命令结果在同一事务内冻结，HTTP 不再增加提交后账户读取窗口，也不暴露原始账本
 payload。A09-A12 与 A38 的
 Admin 拍卖生命周期命令已接入应用端口；请求携带 `command_id` 和 `expected_state_version`，取消动作
@@ -297,10 +295,10 @@ reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令
 仍返回明确的能力缺失，不会被空结果伪装成已接入。
 A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、证据重校验、命令账本、退款激活、guarded relist、
 审计和预览目录 realtime 事件；结算事务已为获胜 lot 在同一事务中建立 recovery case；SQLite Lite
-明确返回 `501 feature_not_supported`。Recovery Worker 已按旧版 `case → return → action → relist → refund`
-顺序接入持久化调度、回执证明、guarded relist 和买家退款收口；尚缺的是实际 MoogleMail 回执与切换前
-行为对照，不能把静态接入误称为外部流程已经验收。
-A21-A24 realtime 运维面已接入 PostgreSQL/SQLite 的安全 lag/failure 投影和 replay 事务；A24
+明确返回 `501 feature_not_supported`。Recovery Worker 已按已登记的
+`case → return → action → relist → refund` 顺序接入持久化调度、回执证明、guarded relist 和买家退款
+收口；尚缺实际 MoogleMail 回执与目标部署运行证据，不能把静态接入误称为外部流程已经验收。
+A21-A24 与 A43 realtime 运维面已接入 PostgreSQL/SQLite 的事件元数据、lag/failure 安全投影和 replay 事务；A24
 使用 `command_id`、CSRF、命令摘要和审计，重试同一命令返回同一 replay 事件。没有数据库端口的
 骨架制品明确返回 `501 feature_not_supported`；这组接口仍只处理本地 realtime 失败边界，外部
 广播 sink 未冻结时不会伪造远程投递成功。A25 Admin 规则 GET、候选 POST 校验和 PUT 发布已接入
@@ -311,7 +309,7 @@ A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回
 catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
 输入无效或解析失败返回 400。远程主题发布/读取、回帖竞价导入和通知由 Worker 的独立论坛 owner
-负责，已经接入逐主题持久化调度/健康、命令账本和不确定结果停靠；旧世界级回帖 cursor 只保留
+负责，已经接入逐主题持久化调度/健康、命令账本和不确定结果停靠；历史世界级回帖 cursor 只保留
 历史 schema，不是当前写入 owner。这些能力不属于该预览接口的职责。
 A33 `/api/v1/admin/audit` 已接入 Admin session 和只读安全投影，保留 actor/action/entity/source/result
 等精确筛选、occurred 时间范围、keyset opaque cursor 与 `page` 数字分页；数字页在同一数据库
@@ -329,14 +327,14 @@ A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和
 映射为有限 condition，不暴露 transport 错误正文。mail、realtime、delivery section 已分别
 读取全量轮询器、consumer lag/failure water、delivery pending/failed/manual-reconcile 水位及年龄字段；fulfillment、recovery
 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting
-section 也已接入安全投影。旧版所有 dashboard section 已有 owner；owner 未装配或读取失败时返回
+section 也已接入安全投影。所有已登记 dashboard section 都有 owner；owner 未装配或读取失败时返回
 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下也会停止周期
 任务并发布停止心跳。每轮周期心跳都会重新检查数据库和全部内嵌 migration，读取进程内饱和的
 审计写入失败计数，并由 Public/Admin/Worker 各自的 tracing owner 提供安全状态；Public 同时检查
 已配置 relay 的新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。数据库、schema、
 审计完整性或必须运行的 relay 异常会令 readiness 为 false，tracing degraded 会令 heartbeat status 降级，但不会
 单独改变应用 readiness。启动和停止心跳也携带当时的审计计数与 tracing 安全投影，不再发布
-固定占位值。外部广播不属于旧版 dashboard 契约。
+固定占位值。外部广播不属于当前 dashboard 契约。
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
@@ -355,7 +353,7 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 同目录临时文件、权限校验、fsync、rename 和目录同步完成原子替换。文件替换与账本提交
 之间出现不确定结果时会优先恢复旧文件，无法证明恢复成功则锁存 `unknown` 并返回
 `reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
-运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含旧版
+运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含兼容
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 重启时只把这些业务字段投影为
 MoogleMail 启动快照。transport、凭据、调度、mailbox identity 和全局启用开关仍由 Worker 主配置
 拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回

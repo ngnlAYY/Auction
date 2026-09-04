@@ -21,9 +21,9 @@
 - `src/ports/auction/slow_proxy.rs`、`src/services/auction/competition.rs` 与
   `src/services/auction/competition/legacy_ledger.rs`：Public 竞价及 Worker slow due 命令端口和用例；
   父服务使用数据库时间重读 generation/授权/资格 fence，并复用同一竞价事务，不在 Worker 中复制
-  状态机。旧版稳定命令 ID 与请求摘要由端口值对象统一派生；账本防腐层逐字复现 Auction-BF 的
-  `OK + BidResult/ProxyResult`、确定性事实/授权 ID 和严格重放校验，同时只读兼容已存在的新版
-  `accepted + CompetitionPlan` 记录；无公开事实的旧代理结果按 Go nil slice 接受并输出
+  状态机。v1 稳定命令 ID 与请求摘要由端口值对象统一派生；账本防腐层实现已冻结的
+  `OK + BidResult/ProxyResult`、确定性事实/授权 ID 和严格重放校验，同时只读兼容已存在的
+  `accepted + CompetitionPlan` 记录；无公开事实的历史代理结果接受 null facts 并输出
   `facts:null`，但字段缺失、未知字段和非空错误事实仍失败关闭。外部 Public 普通竞价、代理创建和代理降低还通过
   `CompetitionCommandAuditContext` 把命令级审计身份带到同一事务，前置资格冻结只追加代理转换事实，
   不重复占用 Admin 审计记录。命令端口返回独立的 typed outcome：领域计划与代理成功响应所需的
@@ -31,17 +31,17 @@
   `accepted` 行只在同一只读事务按授权版本截取转换历史并读取冻结策略 quota，不重新执行命令，也不以
   当前生命周期或时钟 gate 否定既有成功事实。
 - `src/services/settlement/commands/` 与 `src/ports/settlement/commands.rs`：结算命令在锁定拍卖前先读取
-  命令账本，以保持旧版冲突优先级；当前格式重放时还会从冻结策略、首次结算资金池和锁内 lot
+  命令账本，以保持已发布的冲突优先级；当前格式重放时还会从冻结策略、首次结算资金池和锁内 lot
   事实重算完整计划及义务，只有持久化摘要与 payload 全量一致才返回。接管的旧
   `settlement_complete/OK` 则逐字复现 Go 请求摘要、严格解析完整结果，并与已结算摘要、lot 金额和
-  义务种类数量逐项对账。旧格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
+  义务种类数量逐项对账。历史格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
   `LegacySettlementVerificationPort` 另为 `auctionctl` 提供脱敏只读核验摘要；缺账本时没有写入回退，
-  存储适配器必须在同一一致快照中提供旧命令身份和权威结算事实。`src/ports/settlement/report.rs`
+  存储适配器必须在同一一致快照中提供历史命令身份和权威结算事实。`src/ports/settlement/report.rs`
   的 Admin lot 投影还显式携带挂牌价、持有比例和带符号调整比例，表面层不得从税额反推这些权威事实。
 - `src/services/settlement/fulfillment/`：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
   `intent.rs` 负责无 secret delivery intent，`validation.rs` 与 `evidence.rs` 负责 claim/外部回执
   校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；schema v1 intent/payload 使用
-  与旧版 Go 相同的 canonical JSON、稳定 ID 和摘要，装备 secret 不进入持久化 payload。
+  本仓库冻结的 canonical JSON、稳定 ID 和摘要，装备 secret 不进入持久化 payload。
   `WinnerPaymentCarrierCod` 的义务/装备来源 world 保持 `isekai`，delivery world 固定为 `main`；
   `mod.rs` 只负责模块装配和稳定出口。
 - `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
@@ -55,7 +55,7 @@
   结束时间修改端口和用例；只接受 Draft/Preview，在 Serializable 锁内以数据库时间、状态版本和
   命令账本保护策略快照与调度记录同步，已成功命令始终先按原结果重放。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
-  错误类型和本地边界校验；`business.rs` 冻结旧版 main/isekai、发件人 allowlist、装备过滤和 14 个
+  错误类型和本地边界校验；`business.rs` 冻结 main/isekai、发件人 allowlist、装备过滤和 14 个
   通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`runtime_config.rs` 只负责稳定公共类型出口，
   不执行文件、数据库或网络操作。
 - `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和

@@ -1,14 +1,13 @@
 # AGENTS.md — Auction Rust
 
 本文是 Auction Rust 仓库的项目级协作规范，供 AI 编程代理和人类贡献者共同遵守。
-它说明当前目录结构、模块边界、代码风格、配置方式、验证范围和迁移约束。最后一次按
-工作区核对时间为 2026-08-26。
+它说明当前目录结构、模块边界、代码风格、配置方式、验证范围和交付约束。最后一次按
+工作区核对时间为 2026-09-04。
 
 ## 项目概览
 
-Auction Rust 是相邻 `../Auction-BF` 项目的全 Rust 重构。旧仓库只用于核对业务行为、
-HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户明确要求跨仓库修改，否则不
-得修改旧仓库。
+Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行为、HTTP/事件契约、部署方式和
+数据语义必须由本仓库内的源码、迁移和项目文档定义；实现、构建和验收不得依赖外部源码仓库。
 
 - 产品是面向论坛生态的拍卖系统，包含公开竞价、管理端和负责生命周期、论坛及通知任务
   的后台 Worker。
@@ -22,25 +21,20 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 - PostgreSQL 是完整生产后端；SQLite 是面向本地、演示和单主机低并发部署的 Lite 替代
   后端。敏感 TOML 中的 `database_url` 选择档位，不能通过 `AnyPool` 抹平事务、锁、迁移
   和能力差异，也不要求 SQLite 达到 PostgreSQL 的系统能力。
-- 拍卖页面的现有静态结构和 CSS 以旧版 Auction-BF 为视觉参考；页面样式迁移不等于业务
-  功能已经完成。
-- 当前状态是**功能迁移后期，但尚未达到旧版行为等价**：主要模块、HTTP/浏览器路径、PostgreSQL
-  完整档、SQLite Lite 声明子集、进程生命周期和运维边界已经建立。2026-08-26 的双仓库审计确认了
-  竞价参与者资格锁、黑名单后的代理冻结/会话撤销、慢速代理 Worker owner、论坛未知结果恢复、
-  Public 实时 client/server wire 与旧 v1 契约，以及部分 Public/Admin WebUI 和配置默认值差异。
-  其中竞价资格、黑名单副作用、慢速代理、Public 实时 wire，以及代理模式、严格 JSON/业务方法、
-  错误外壳、Public 规则 locale 和登录返回已完成静态修复；HTTP 边界已有隔离环境局部 R1，其余
-  确认差异仍需按审计矩阵继续实施。
-  当前运行环境中的新版规则页也返回 503，但在核对两侧数据库前不能把它直接归因为代码缺陷。
-  权威差异矩阵、证据等级和实施顺序见
-  [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。canonical v28 隔离接管及灾备链已取得 R1，
-  API-only/embedded 制品和确定性 archive 已建立显式门禁；真实外部服务、目标主机部署切换和完整
-  浏览器逐页对照仍缺运行态证据，因此不得宣称完整功能等价。
+- 拍卖页面的静态结构、CSS 和交互视觉语言由本仓库 Web crate 与样式资源共同定义；页面样式完成
+  不等于业务功能或运行验收已经完成。
+- 当前状态是**功能与运行证据收口阶段**：主要模块、HTTP/浏览器路径、PostgreSQL 完整档、SQLite
+  Lite 声明子集、进程生命周期和运维边界已经建立。竞价参与者资格锁、黑名单后的代理冻结/会话撤销、
+  慢速代理 Worker owner、论坛未知结果恢复、Public 实时 client/server v1 wire，以及代理模式、严格
+  JSON/业务方法、错误外壳、Public 规则 locale 和登录返回已经静态收口；HTTP 边界已有隔离环境局部
+  R1。canonical PostgreSQL v28 历史格式的隔离接管及灾备链也已取得 R1，API-only/embedded 制品和
+  确定性 archive 已建立显式门禁；真实外部服务、非空生产数据、目标主机部署切换和完整浏览器逐页
+  验收仍缺运行态证据，因此不得宣称生产验收完成。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
-  [`docs/tech-stack.md`](docs/tech-stack.md)、[`docs/migration-plan.md`](docs/migration-plan.md)、
-  [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md) 以及各目录的 `README.md` 都属于项目契约。
+  [`docs/tech-stack.md`](docs/tech-stack.md)、[`docs/contracts/`](docs/contracts/) 下的契约清单以及各目录的
+  `README.md` 都属于项目契约。
   架构、外部行为或目录职责变化时要同步更新。
 
 ## 仓库结构
@@ -76,7 +70,7 @@ HTTP 契约、部署方式和数据语义，不是 Cargo 依赖；除非用户�
 │   ├── auction-observability/    # tracing、metrics、健康检查和关联 ID
 │   └── auction-process/          # 终止信号、有界 drain 和任务所有权原语
 ├── migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集迁移
-├── docs/                         # 架构、技术选型和迁移记录
+├── docs/                         # 架构、技术选型和版本化契约
 ├── ops/                          # 配置示例与部署资料
 ├── ci/                           # 持续集成约定和后续辅助脚本
 └── .github/workflows/            # 仓库静态验证工作流
@@ -198,7 +192,7 @@ apps/*
   任再继续加功能。
 - 依赖只向稳定的内层或端口流动。具体数据库、HTTP、外部服务和框架实现不能反向污染
   领域模型。
-- 兼容旧系统时建立防腐层或映射，不把旧表、旧 DTO 或旧命名未经审计地传播到新领域。
+- 兼容既有持久化格式或已发布 wire 时建立防腐层或映射，不把历史表、DTO 或命名传播到新领域。
 - Public、Admin 和 Worker 的差异显式建模；只有真正稳定且无业务偏向的基础能力才进入
   共享模块。
 
@@ -246,8 +240,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   明确的 `id`、`data`、`item` 代替关键业务字段。
 - Dioxus 组件的 props 使用 `#[component]` 函数参数表达；组件事件和状态命名应表达用户
   动作或状态变化。
-- URL 路径、事件名和 JSON 字段必须先遵守已冻结的旧系统契约；新增契约使用小写和连字符
-  的 URL 路径、`snake_case` 的 JSON/TOML/SQL 字段，并通过 serde 映射兼容外部旧命名。
+- URL 路径、事件名和 JSON 字段必须遵守本仓库已冻结的版本化契约；新增契约使用小写和连字符
+  的 URL 路径、`snake_case` 的 JSON/TOML/SQL 字段，并通过 serde 映射历史兼容命名。
 - SQL 表名、列名、索引名和迁移中的逻辑名称使用 `snake_case`；PostgreSQL 与 SQLite
   Lite 中都存在的领域对象保持同名和同一逻辑含义，不要求完整 schema 一一对应。
 - CSS 类使用小写连字符和 BEM 结构，例如 `public-auction-catalog`、
@@ -330,8 +324,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - `migrations/postgres/` 维护完整生产 schema，`migrations/sqlite/` 维护 Lite 所需子集。
   两个迁移树不要求文件、序号或数据库对象一一对应；共有对象必须同名同义。迁移只允许
   追加，已发布文件禁止修改。
-- 新结构必须先对照领域所有权和 Auction-BF 契约评审，不能未经审计复制旧表。需要兼容读
-  时使用防腐层或明确的兼容适配器。
+- 新结构必须先对照领域所有权和 [`docs/contracts/schema.md`](docs/contracts/schema.md) 评审，不能
+  未经审计复制历史表。需要兼容读时使用防腐层或明确的兼容适配器。
 - 每个表、迁移、写入查询、事件和路由只有一个 owner；新增对象时在架构说明中记录职责。
 - SQLx 查询宏需要其所属后端具备可复现的 schema/check 路径。采用离线查询校验后，只更新
   受影响的迁移树和查询元数据；共有查询才要求两个后端都校验。
@@ -343,12 +337,11 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - Public 与 Admin 的组件树、路由树和静态产物保持分离，分别由 `auction-web-public` 与
   `auction-web-admin` 拥有；只有真正通用且没有业务偏向的基础组件才进入
   `auction-web-shared`。公开端二进制不得包含管理端资源。
-- 浏览器端是纯客户端渲染的 Dioxus SPA，与旧系统实际能力一致（旧 `vite.*.config.ts` 无
-  `ssr`/`prerender`）。不启用 SSR 或 hydration：它们不替换任何现有能力，只会新增
+- 浏览器端是纯客户端渲染的 Dioxus SPA。不启用 SSR 或 hydration：它们不替换当前产品能力，只会新增
   hydration mismatch 和双目标构建。
 - 核心竞价、认证和管理命令必须保留显式、版本化的 REST/JSON 契约。Public 实时更新使用
-  带 sequence/version 的 WebSocket 通知，与旧系统 `internal/features/realtime/hub.go`
-  的既有契约一致；跳号或重连后读取权威快照。无法保持长连接的客户端可退化为 SSE。
+  带 sequence/version 的 WebSocket 通知；跳号或重连后读取权威快照。无法保持长连接的客户端可
+  退化为 SSE。
 - 若要切换到 Askama + HTMX 一类服务端渲染方案，必须先由用户明确放宽“浏览器端全 Rust、
   禁止 JavaScript”契约，不能把技术原型直接变成架构变更。
 - 前端静态产物由 `just web-build`（内部调用
@@ -360,16 +353,16 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   集合，不能根据构建机上是否残留 `target/dx` 隐式改变制品。
 - 界面文案一律经由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，**不得在组件里硬编码
   用户可见字符串**。受支持语言为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`；公开端默认 `en`，
-  管理端默认 `zh-CN`（沿用旧 `manifests/admin.locales.json`）。两个 surface 的译文资源彼此
+  管理端默认 `zh-CN`。两个 surface 的译文资源彼此
   隔离，共享的只有 `auction-web-shared` 提供的语言集合、持久化和 `<html lang>` 同步能力。
-- 语言偏好存储键固定为 `hv.lang`，与旧系统 `src/shared/i18n/createI18n.ts` 一致，不得重命名；
+- 语言偏好存储键是已发布的浏览器契约，固定为 `hv.lang`，不得重命名；
   存储值必须在受支持集合内，否则回退到该 surface 的默认语言。
-- Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键统一改为 `nav-home`。新增文案时
+- Fluent 消息 ID 不允许包含点号，使用 `nav-home` 而不是 `nav.home`。新增文案时
   必须同步更新全部 5 个 `*.ftl`——`t!` 在键缺失时 panic，缺一种语言就会让该语言下的页面崩溃。
 - API/流 DTO 放在 `auction-contracts`，浏览器不能直接接收 SQL 行或数据库内部模型。
 - 会改变竞价或管理状态的用户动作必须携带 `command_id`，并显式展示冲突与幂等结果。
-- 拍卖页面的 CSS 和静态资源可以使用旧版 Auction-BF 的结构与视觉契约，但业务逻辑必须
-  留在 Rust；不得引入 React、TypeScript、npm 包依赖或第二套前端构建系统。dx CLI 会
+- 拍卖页面的 CSS 和静态资源必须遵守本仓库已冻结的结构与视觉契约，业务逻辑必须留在 Rust；
+  不得引入 React、TypeScript、npm 包依赖或第二套前端构建系统。dx CLI 会
   按需下载 esbuild 作为构建期工具，这是唯一允许的例外，且不得成为运行时依赖。
 - 当前 Public/Admin 页面已接入版本化 API；不得重新加入会被误认成权威状态的示例竞价行或管理
   数据。演示空态必须使用明确文案，并与契约、应用用例和持久化边界保持分离。
@@ -458,21 +451,21 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 - 提交标题可使用 `type(scope): summary` 的简洁格式，例如
   `feat(domain): add auction state transition` 或 `docs(architecture): define worker ownership`。
 
-## 迁移工作流
+## 交付工作流
 
-重构按阶段推进：
+功能按以下层次推进：
 
-1. 盘点并冻结 Auction-BF 的路由、JSON、事件、配置、数据库和部署契约。
+1. 在本仓库中登记并冻结路由、JSON、事件、配置、数据库和部署契约。
 2. 在不依赖 HTTP、数据库和具体外部服务的情况下明确领域规则与状态机。
 3. 先建立 PostgreSQL 完整结构、仓储、锁、幂等、审计和 outbox，再按 Lite 能力清单建立
    SQLite 子集；不要求迁移树或系统能力对等。
 4. 为用户、规则、交付、实时通信和会话接入应用端口。
 5. 按已冻结契约实现 Public 与 Admin 的 HTTP 表面。
 6. 实现带持久化游标和重试策略的 Worker 任务与外部网关。
-7. 完成 Dioxus 公开端/管理端页面，并保持旧版拍卖页面视觉一致性。
-8. 在用户明确要求行为验证后，再执行对照、双写或切换前验证。
+7. 完成 Dioxus 公开端/管理端页面，并保持本仓库视觉契约一致性。
+8. 在用户明确要求行为验证后，再执行隔离环境、真实外部服务或切换前验证。
 
-不要因为启动骨架可以编译就宣称功能等价。每个迁移阶段至少要有清晰的模块 owner、外部
+不要因为启动骨架可以编译就宣称功能或生产验收完成。每个交付阶段至少要有清晰的模块 owner、外部
 契约和文档；测试相关的编写与运行只有在用户明确要求后才加入验收范围。
 
 <!-- gitnexus:start -->

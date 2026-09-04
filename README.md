@@ -1,8 +1,7 @@
 # Auction Rust
 
-这是 Auction-BF 的全 Rust 重构工作区；相邻的
-`Auction-BF` 仓库只作为旧系统的业务、HTTP、部署和数据行为参考，不作为 Rust
-crate 依赖，也不在本仓库的默认修改范围内。
+这是一个全 Rust 的论坛生态拍卖系统工作区。业务规则、HTTP/事件契约、数据语义和部署
+边界均由本仓库的源码、迁移与文档共同定义，不依赖仓库外的实现或源码树。
 
 ## 设计目标
 
@@ -14,29 +13,27 @@ crate 依赖，也不在本仓库的默认修改范围内。
 - Redis 缓存是可选适配器，默认不编译、不启用；关闭或故障时回退到权威数据源。
 - PostgreSQL 提供完整生产能力；SQLite 作为单主机、低并发 Lite 替代品，只实现明确列入
   Lite 范围的功能。两个后端已支持的竞价写入都必须保证事务、幂等和审计一致性。
-- 保留旧版本拍卖页面的视觉语言，并在 Rust Web 层逐步恢复完整交互和业务数据。
+- 保持本仓库已经冻结的拍卖页面视觉语言，并在 Rust Web 层交付完整交互和业务数据。
 
 ## 当前状态
 
-当前已进入功能迁移后期，不再只是启动骨架。旧版 Public/Admin 的 20 + 37 条业务 HTTP 路径和
-14 + 21 条浏览器路由均有 Rust 注册入口；另有 A38-A42 五条明确登记的 Admin 新增路径，因此当前
-Rust feature API 为 Public 20 条、Admin 42 条。Public 另有独立论坛同步页，当前浏览器入口总数为
-15 + 21。
+当前已进入功能与运行证据收口阶段，不再只是启动骨架。本仓库登记的 feature API 为 Public
+20 条、Admin 43 条，其中 A38-A43 是独立登记的 Admin 能力；浏览器路由为 Public 15 条
+（含独立论坛同步页）和 Admin 21 条。
 PostgreSQL 完整档也已建立竞价、代理、账户、管理命令、
 审计、实时、结算/recovery、凭据、MoogleMail 和论坛的主要 owner；SQLite Lite 只实现已声明的
-单主机能力，完整档端点在 Lite 部署中明确报告不支持。路径和模块存在不代表行为等价：
-2026-08-26 至 2026-08-29 的滚动双侧审计已确认并分批修复参与者资格锁、黑名单副作用、慢速代理、
-生命周期锁序、实时 wire、两代竞价账本、Admin mutation 认证顺序、Public 身份化读取、结算重放
-不变量和若干 HTTP/WebUI/配置边界；其中部分 HTTP、竞价、结算、灾备和浏览器路径已有隔离局部 R1，
-其它组合输入、并发、损坏事实和外部服务仍待证，详见
-[`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。
+单主机能力，完整档端点在 Lite 部署中明确报告不支持。路径和模块存在不代表生产验收完成：
+参与者资格锁、黑名单副作用、慢速代理、生命周期锁序、实时 wire、兼容竞价账本、Admin mutation
+认证顺序、Public 身份化读取、结算重放不变量和若干 HTTP/WebUI/配置边界已经静态收口；部分 HTTP、
+竞价、结算、灾备和浏览器路径已有隔离环境局部 R1，组合输入、并发、损坏事实和真实外部服务仍需
+各自的运行证据。
 
 路由和 owner 齐全不等于运行边界已收口。三进程现已通过共用生命周期原语统一处理
 SIGINT/SIGTERM：首次信号触发 10 秒有界 drain，Public/Admin 停止接收新 HTTP 连接，Worker
 停止领取新任务并完成当前有界批次，随后停止心跳并按配置限时刷新 tracing；排空期间第二次信号
 会强制收口。Public/Admin 现已接入统一 HTTP 边界：请求 ID 与命令审计关联、W3C trace context、
 访问日志、panic recovery、安全响应头、处理/请求头超时、可信代理解析和有界限流器均已落地。
-显式 Public/Admin 浏览器路由、未知 API/health 的 JSON 404、未知页面 404 和旧版读响应缓存策略也已
+显式 Public/Admin 浏览器路由、未知 API/health 的 JSON 404、未知页面 404 和已冻结的读响应缓存策略也已
 恢复。三进程心跳现在每轮复用数据库/schema readiness，读取进程内审计写入失败饱和计数和各自的
 tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提前开放和装备来源策略也已冻结到
 启动装配，并分别在锁内生命周期事务和受限流式 HTTP 读取中生效。浏览器 HTTP/stream DTO 已统一
@@ -44,31 +41,30 @@ tracing 安全状态，不再发布固定占位值。Admin runtime 的人工提�
 `web-embed` feature 区分 API-only 与内嵌 Web 制品，任一部署制品都不会引用另一端资源。
 Public/Admin 已支持共享安全 TCP/Linux Unix listener，`auctionctl`
 已提供稳定退出码和脱敏有效配置诊断；HTTP、配置、Worker、Web surface 与 storage 入口也已按
-职责使用具名实现文件。canonical v28 的隔离 backup/adopt/rebuild/restore 链已经取得 R1；当前剩余
-工作主要是矩阵中逐项保留的并发/损坏输入、非空生产数据、真实外部服务、部署切换和完整浏览器
-证据，以及后续审计可能发现的新差异，不能据此宣称完整行为等价。
+职责使用具名实现文件。canonical PostgreSQL v28 历史格式的隔离 backup/adopt/rebuild/restore 链
+已经取得 R1；当前剩余工作主要是并发/损坏输入、非空生产数据、真实外部服务、部署切换和完整
+浏览器证据，不能据此宣称已经完成生产验收。
 
 MoogleMail 已覆盖远端 HTML 解析、持久化轮询、拍卖/用户入站、send/return/take/notify、
-Sent/Balance 证据和 delivery outbox；recovery 链覆盖旧版五类 action。Public 已建立持久化
-Catch-up、进程内有界 WebSocket Hub 和权威快照恢复组件，旧版逐帧单事件 wire、握手后 HTTP 补齐、
+Sent/Balance 证据和 delivery outbox；recovery 链覆盖五类已登记 action。Public 已建立持久化
+Catch-up、进程内有界 WebSocket Hub 和权威快照恢复组件；v1 逐帧单事件 wire、握手后 HTTP 补齐、
 4 KiB/50-60-5 秒连接边界、稳定关闭原因、discovery 专属容量与 settled 新连预检已静态恢复；真实帧
 R1 仍待补录。Admin 页面均已连接实际 API，realtime/delivery 嵌套分页、严格成功 decoder、稳定错误
 反馈和客户端未知路由的认证外壳也已恢复；对应损坏响应与认证组合仍待 R1。`auctionctl` 还提供
 配置/迁移检查、systemd 三进程顺序控制、部署预检、retention 只读盘点和 PostgreSQL 备份、
-离线校验、默认只读且需要双重确认的数据库重建、空库恢复及回执。canonical Auction-BF
-PostgreSQL v28 另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测旧库形状；旧版
-数据库之外的五语言规则目录由显式 `import-rules-directory` 命令导入，不会用硬编码 seed 或覆盖
+离线校验、默认只读且需要双重确认的数据库重建、空库恢复及回执。canonical PostgreSQL v28
+历史格式另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测未识别的 schema；数据库
+之外的五语言规则目录由显式 `import-rules-directory` 命令导入，不会用硬编码 seed 或覆盖
 不同的 Admin 已发布正文。
-MoogleMail 的标准 cron/时区、请求间隔和请求超时已恢复为可配置旧版合同；Worker control 使用
+MoogleMail 的标准 cron/时区、请求间隔和请求超时属于当前可配置运行契约；Worker control 使用
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。
 
-尚不能据此宣称行为等价：除已确认的代码差异外，真实 MoogleMail/E-Hentai、生产 PostgreSQL 数据、
-部署切换和 Public/Admin 浏览器产物仍未完成对照。旧版 start/stop/restart/status 已由 Rust
-`auctionctl` 与 systemd owner
-边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的显式命令，
-不会进入启动路径。旧版 realtime 没有外部广播 sink，
-旧版 retention 也只做只读盘点，因此这两项不是漏做的旧版功能。
+尚不能据此宣称生产验收完成：真实 MoogleMail/E-Hentai、非空生产 PostgreSQL 数据、目标部署切换
+和 Public/Admin 浏览器产物仍缺运行态证据。start/stop/restart/status 已由 Rust `auctionctl` 与
+systemd owner 边界实现；destructive rebuild 也已成为独立、默认只读且需要备份/双重确认/回执的
+显式命令，不会进入启动路径。外部 realtime 广播 sink 和 retention mutation 均不属于当前已冻结
+能力；若要新增，必须先建立独立契约和授权边界。
 
 “全 Rust”只约束本仓库实现及其程序库依赖。PostgreSQL、SQLite、可选 Redis、反向代理
 等外部组件可以使用各自的官方实现，不要求它们由 Rust 编写。
@@ -99,7 +95,7 @@ crates/                       # 可复用能力，按模块所有权拆分
 ├── auction-config/           # TOML 解析与运行配置
 ├── auction-observability/    # tracing、metrics 和健康检查约定
 └── auction-process/          # SIGINT/SIGTERM、有界排空和任务所有权原语
-docs/                         # 架构、技术选型、兼容性和迁移记录
+docs/                         # 架构、技术选型与版本化契约
 migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集的追加式迁移
 ops/                          # 配置样例、部署和恢复文档
 ```
@@ -166,6 +162,6 @@ Admin runtime 模板位于 [`ops/config/examples/runtime/admin.toml`](ops/config
 摘要中保留 `dirty` 标记。
 
 `just verify` 默认只执行格式化、源码布局/命名、配置示例、五语言 Fluent 键集合门禁、锁定依赖的
-编译检查、Clippy 和 WASM 静态检查，不执行测试。
-Auction-BF 的迁移阶段记录在 [`docs/migration-plan.md`](docs/migration-plan.md)，当前逐项差异、证据
-等级和实施批次见 [`docs/legacy-parity-audit.md`](docs/legacy-parity-audit.md)。
+编译检查、Clippy 和 WASM 静态检查，不执行测试。现行设计与交付边界见
+[`docs/architecture.md`](docs/architecture.md)、[`docs/tech-stack.md`](docs/tech-stack.md) 和
+[`docs/contracts/`](docs/contracts/) 下的路由、事件、数据库对象与领域不变量清单。

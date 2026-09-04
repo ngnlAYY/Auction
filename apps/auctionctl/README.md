@@ -5,7 +5,7 @@
 源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
 `src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分；其中
 `runtime/postgres/commands/{mod,bootstrap,database_bootstrap,forum,rules,settlement,preflight,backup,delegation}.rs` 分别负责命令装配、
-MoogleMail 凭据引导、缺失 PostgreSQL 目标库的非破坏性 bootstrap、论坛未知写入恢复、旧规则目录导入、旧结算账本只读核验、只读预检、备份/manifest 和专用
+MoogleMail 凭据引导、缺失 PostgreSQL 目标库的非破坏性 bootstrap、论坛未知写入恢复、受控规则目录导入、历史结算账本只读核验、只读预检、备份/manifest 和专用
 restore/legacy/rebuild owner 桥接；
 `runtime/postgres/artifacts/` 又将外部 PostgreSQL 环境、manifest/hash、文件系统安全、外部进程、
 来源预检和 stdin Cookie 分别放入 `environment.rs`、`manifest.rs`、`filesystem.rs`、`process.rs`、
@@ -17,7 +17,7 @@ restore/legacy/rebuild owner 桥接；
 `postgres_restore/{mod,verification,process,receipt}.rs`；mod.rs 保留 execute、稳定验证出口和失败关闭顺序，
 `src/bootstrap/postgres_legacy_v28/` 按 `backup.rs`（备份生成）、`verification.rs`（离线 archive/manifest
 校验）、`adoption.rs`（接管编排）、`common.rs`（预检/后置证明）、`model.rs`（证据模型）和
-`receipt.rs`（不可覆盖接管回执）拆分 Auction-BF v28 的专用边界，`mod.rs` 只保留稳定出口，
+`receipt.rs`（不可覆盖接管回执）拆分 canonical PostgreSQL v28 历史格式的专用边界，`mod.rs` 只保留稳定出口，
 `src/bootstrap/postgres_rebuild/` 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
 `validation.rs`（确认和 URL 安全校验）、`postconditions.rs`（空库/迁移证明）以及
 `receipt.rs`（不可覆盖 receipt 发布）拆分默认只读的破坏性重建边界；`mod.rs` 只保留稳定调用路径。
@@ -57,7 +57,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     bootstrap-mail-credentials --world main --label bot-primary \
     < /run/auction/secrets/mooglemail-main.cookie
 
-# 把旧版五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
+# 把受控五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
 AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
   cargo run -p auctionctl --features postgres -- \
     import-rules-directory \
@@ -116,21 +116,21 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --confirm-database auction_production \
     --manifest /secure/auction-backups/auction-2026-08-23.dump.manifest
 
-# 为停止服务后的 canonical Auction-BF PostgreSQL v28 创建专用恢复点。
+# 为停止服务后的 canonical PostgreSQL v28 历史格式创建专用恢复点。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     postgres-legacy-v28-backup \
     --confirm-database auction_production \
-    --output /secure/auction-backups/auction-bf-v28-2026-08-23.dump
+    --output /secure/auction-backups/auction-legacy-v28-2026-08-23.dump
 
-# 离线复核旧版专用 archive/manifest；普通 postgres-backup-verify 不接受这种 manifest。
+# 离线复核 v28 专用 archive/manifest；普通 postgres-backup-verify 不接受这种 manifest。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     postgres-legacy-v28-backup-verify \
     --confirm-database auction_production \
-    --manifest /secure/auction-backups/auction-bf-v28-2026-08-23.dump.manifest
+    --manifest /secure/auction-backups/auction-legacy-v28-2026-08-23.dump.manifest
 
-# 接管命令默认只读；可先不提供备份查看旧库是否精确满足 v28 前置条件。
+# 接管命令默认只读；可先不提供备份查看来源库是否精确满足 v28 前置条件。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     postgres-adopt-legacy-v28 \
@@ -141,7 +141,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     postgres-adopt-legacy-v28 \
     --confirm-database auction_production \
-    --backup-manifest /secure/auction-backups/auction-bf-v28-2026-08-23.dump.manifest \
+    --backup-manifest /secure/auction-backups/auction-legacy-v28-2026-08-23.dump.manifest \
     --execute \
     --confirm-adoption 'ADOPT LEGACY V28 auction_production' \
     --receipt /secure/auction-evidence/adopt-v28-2026-08-23.json
@@ -222,7 +222,7 @@ unit、systemd `InvocationID`、MainPID、单调启动时间和观察时间，�
 `auction-admin-api.service`、`auction-public-api.service`），先持有同一部署控制锁，再读取三个 unit
 状态；任一角色处于运行或状态转换中、unit 状态读取失败或部署锁被占用时都会失败关闭，数据库迁移不会
 开始。需要由总控在受控启动/重启流程中迁移时，仍由 `deployment start/restart` 内部调用
-`migrate_config`，不经过这个独立命令 guard；这保留了旧版启动脚本的受控迁移路径。
+`migrate_config`，不经过这个独立命令 guard；这是部署启动的受控迁移路径。
 
 `postgres-bootstrap` 是普通迁移之外的显式 PostgreSQL 初始建库命令。它只读取 `Public` 配置的
 `database_url`，要求 `--confirm-database` 与 URL path 完全一致，并可选读取仅运行账号可读的
@@ -260,7 +260,7 @@ primary、维护角色 `CREATEDB`、应用角色存在且可分配 owner，拒�
 
 `import-rules-directory` 只支持 PostgreSQL 完整档，并加载 Admin 主配置以取得数据库和可选缓存边界。
 来源目录必须同时包含普通、非符号链接的 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md` 和 `ko.md`；
-命令逐字保持 Auction-BF 的单个开头 BOM 移除和首个非空行标题规则，并在写入前完成五文件校验及
+命令按本仓库导入契约移除单个开头 BOM、把首个非空行作为标题，并在写入前完成五文件校验及
 五语言数据库预检。数据库已有相同标题和正文时报告 `preserved`，任一语言不同则在首次写入前失败，
 缺失语言才通过既有 Admin 规则 CAS、幂等账本和追加审计发布。各语言命令 UUID 由批次
 `--command-id` 稳定派生；中途依赖失败后应以同一批次 UUID 重试。JSON 结果包含每种语言的动作、
@@ -278,7 +278,7 @@ revision、正文 SHA-256 和实际写入命令 UUID。缓存失效失败不会�
 `verify-legacy-settlement` 只支持 PostgreSQL 完整档，并要求目标已经是带完整 workflow、claim、
 complete 身份和 `settlement_complete/OK` 账本的 settled 拍卖。它在
 `SERIALIZABLE READ ONLY DEFERRABLE` 快照内同时读取命令账本、结算摘要、lot 金额和义务种类数量，
-逐字复现旧 Go complete 请求摘要并复用应用层严格重建校验。缺失账本、新版账本、身份漂移、结果
+逐字复现历史 complete 请求摘要并复用应用层严格重建校验。缺失账本、当前格式账本、身份漂移、结果
 损坏或权威事实不一致都会失败关闭；成功 JSON 只包含稳定 UUID、due 时间、状态版本和脱敏计数。
 该入口没有通用 `settle` 回退，不清空 completion fence，也不写命令、审计、实时事件或任何结算事实。
 
@@ -306,15 +306,15 @@ realtime consumer 最小 offset 只作为诊断水位，外键依赖在政策明
 `.pgpass`；archive 和 manifest 使用 0600、不可覆盖的私有文件。`postgres-backup-verify` 只读取
 本地配对文件并重新计算 SHA-256/检查 archive 目录，不连接数据库，也不执行恢复。
 
-`postgres-adopt-legacy-v28` 是普通 `migrate` 之外的显式旧库接管边界。它只接受 PostgreSQL 18.x、
-唯一且干净的 `schema_migrations version=28`、精确的 canonical Auction-BF public 表集合、有效
+`postgres-adopt-legacy-v28` 是普通 `migrate` 之外的显式 v28 历史格式接管边界。它只接受 PostgreSQL 18.x、
+唯一且干净的 `schema_migrations version=28`、本项目定义的精确 canonical public 表集合、有效
 schema identity、零其他 session、尚不存在 SQLx 历史，并证明 policy、lot 领先投影和每条 bid 的
 realtime 截止证据都可无损转换。默认只读；实际执行必须先用
 `postgres-legacy-v28-backup`/`postgres-legacy-v28-backup-verify` 建立专用恢复点，再提供逐字确认和
 新的私有 receipt。实际执行取得 migration advisory lock 后，会在同一物理连接中重新完成完整只读
 预检，再由 bridge 在 Serializable 事务和独占表锁内补齐 Rust v5 兼容结构，将等价覆盖的
 SQLx `1..=5` 与 `7` 写为带当前 checksum 的基线，再运行其余前向迁移。普通备份/恢复命令故意不
-接受旧版专用 manifest，避免把 golang-migrate v28 误报为当前 Rust schema。完整停机、接管、失败
+接受 v28 专用 manifest，避免把来源 migration v28 误报为当前 SQLx schema。完整停机、接管、失败
 恢复和证据保管顺序见
 [`ops/deploy/LEGACY_V28_ADOPTION.md`](../../ops/deploy/LEGACY_V28_ADOPTION.md)。
 

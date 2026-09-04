@@ -11,7 +11,7 @@
 - `src/components/markdown/{mod,model,blocks,inline,render}.rs`：共享 Markdown/GFM 展示器的
   模型、块级解析、行内解析和安全 DOM 渲染；原始 HTML 只作为转义文本展示，链接目标经过
   协议白名单校验。`MarkdownDocument` 提供共享主题容器，`MarkdownBlocks` 只输出安全块节点，
-  供必须由 surface 保留旧容器和排版的页面使用。
+  供必须由 surface 保留既有容器和排版的页面使用。
 - `src/a11y/mod.rs`：共享 `aria-modal` 弹窗的动态初始聚焦、Tab 焦点循环、背景滚动锁和
   关闭后触发器焦点恢复，以及仅在 SPA 路由真正变化后聚焦主内容的通用 hook；首屏和同路由
   数据刷新不会抢占焦点，模块不包含 Public/Admin 业务语义。
@@ -22,11 +22,10 @@
 
 ## 语言选择
 
-受支持语言为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，顺序与旧系统语言切换器一致。中文按脚本
+受支持语言为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，顺序是本仓库冻结的浏览器契约。中文按脚本
 区分简繁，两者不互相回退。
 
-`localStorage` 键固定为 `hv.lang`，与旧 `src/shared/i18n/createI18n.ts` 一致，**不得重命名**
-——用户在新旧系统间切换时语言偏好靠它保持。存储值必须在受支持集合内，否则回退到该 surface
+`localStorage` 键固定为 `hv.lang`，是已发布的兼容键，**不得重命名**。存储值必须在受支持集合内，否则回退到该 surface
 的默认语言；存储不可用（隐私模式、策略禁用）时不让界面崩溃。
 
 `LanguagePicker` 使用原生 `<select>`：它自带键盘操作、屏幕阅读器语义和移动端原生选择面板，

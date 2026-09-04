@@ -63,9 +63,9 @@ control socket 是独立传输面，不能与 HTTP listener 复用。Unix socket
 独立 crate 隔离组件树与路由树；产物是静态 WASM/JS/HTML，由 `auction-http` 内嵌后提供。
 项目不引入 React、TypeScript 或 Node 运行时；CSS 作为静态资源保留，不属于业务运行时。
 
-不使用 SSR，理由是旧系统本身没有 SSR：`../Auction-BF/apps/web/vite.public.config.ts` 与
-`vite.admin.config.ts` 均无 `ssr`/`prerender` 配置，`manifests/*.routes.json` 是 SPA
-fallback 路由表。引入 SSR 会新增 hydration mismatch 和双目标构建，却不替换任何现有能力。
+不使用 SSR：当前产品契约是纯 CSR SPA，显式浏览器路由由本仓库的 Dioxus `Route` 枚举与
+`auction-http/src/assets/routes.rs` 共同维护。引入 SSR 会新增 hydration mismatch 和双目标构建，
+却不替换任何现有能力。
 同理不启用 `dioxus-fullstack`/`dioxus-server`：后者自带 axum 服务器，会与 `apps/*` 装配根
 和 `auction-http` 的路由所有权冲突。
 
@@ -76,8 +76,8 @@ CSR 加载真实 API 投影，不需要 SSR 引入的额外依赖。
 保留以下约束不变：
 
 - 核心竞价、认证和管理命令保持显式、版本化的 REST/JSON 契约。
-- 公开页面实时更新使用 WebSocket，与旧系统 `internal/features/realtime/hub.go` 的既有
-  契约一致；事件带 sequence/version，跳号或重连后重新读取权威快照。
+- 公开页面实时更新使用本仓库 v1 WebSocket 契约；事件带 sequence/version，跳号或重连后重新读取
+  权威快照。
 - 浏览器 crate 只能依赖 contracts 表面，不得让 UI 类型进入领域、存储或外部 API 契约，
   确保以后可以替换前端。
 - Public 与 Admin 的组件树、路由树和静态产物必须完全分离，公开端二进制不得包含管理端资源；
@@ -95,16 +95,16 @@ CSR 加载真实 API 投影，不需要 SSR 引入的额外依赖。
 **选择：`dioxus-i18n` 0.5.1 + `unic-langid` 0.9.6。** 它要求 `dioxus ^0.7`，与当前版本
 匹配，且语言状态本身是 Dioxus 信号，切换语言即触发重渲染，不需要额外的状态桥接。
 
-受支持语言沿用旧系统的 5 种：`en`、`zh-CN`、`zh-TW`、`ja`、`ko`。公开端默认 `en`；管理端
-默认 `zh-CN`，与旧 `manifests/admin.locales.json` 的 `default_locale` 一致。中文按脚本区分
+受支持语言固定为 5 种：`en`、`zh-CN`、`zh-TW`、`ja`、`ko`。公开端默认 `en`；管理端
+默认 `zh-CN`。中文按脚本区分
 简繁，两者不互相回退。
 
 工程约定：
 
 - 译文以 `include_str!` 在编译期内嵌，首屏不额外请求语言资源。
 - 两个 surface 的 `i18n/*.ftl` 彼此隔离；共享的只有 `auction-web-shared` 提供的语言集合、
-  `hv.lang` 持久化和 `<html lang>` 同步。存储键与旧系统一致，用户跨系统切换不丢偏好。
-- Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键改为 `nav-home`。
+  `hv.lang` 持久化和 `<html lang>` 同步。`hv.lang` 是本仓库已发布的浏览器兼容键。
+- Fluent 消息 ID 不允许包含点号，使用 `nav-home` 而不是 `nav.home`。
 - `t!` 在键缺失时 panic，因此新增文案必须同步更新全部 5 个 `*.ftl`。可在评审中用键集比对
   确认一致性；`te!` 返回 `Result`、`tid!` 回退为键名，可用于容错要求更高的位置。
 
@@ -167,7 +167,7 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
 
 ## API、认证与外部服务
 
-- **API：** 先保持 REST + JSON，与 Auction-BF 的 route/status/field 兼容；实时状态
+- **API：** 使用显式版本化的 REST + JSON route/status/field 契约；实时状态
   使用 WebSocket，无法保持长连接的客户端使用 SSE。GraphQL 不作为第一版依赖。
 - **Session：** HttpOnly、Secure、SameSite Cookie；完整生产档的 session store 使用
   PostgreSQL，Lite 档可在对应能力实现后使用 SQLite。Redis 缓存不能成为会话权威存储。
@@ -187,7 +187,7 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   Prometheus `/metrics` text scrape，Worker control 可选提供同一 peer-authenticated UDS surface；
   Public/Worker 主配置和 Admin runtime 均可启用 OTLP/HTTP tracing exporter，使用 Tokio 异步批处理、
   有界队列、角色专属敏感 headers 和限定关闭等待。Worker loop 指标、tracing health 和进程资源
-  指标已接入；SQLx 存储池边界已补齐旧版 pgx 对应的十项连接池指标，业务事件结果/耗时指标也已
+  指标已接入；SQLx 存储池边界提供十项连接池指标，业务事件结果/耗时指标也已
   覆盖 Public 竞价代理命令和 Worker 业务循环。业务指标只使用固定事件与结果枚举，日志和指标
   标签中禁止记录密钥、Cookie、密码、完整连接串、高基数业务主键和完整邮件正文。
 - **契约文档：** REST 稳定后用 `utoipa` 生成 OpenAPI；它不反向决定领域模型。
