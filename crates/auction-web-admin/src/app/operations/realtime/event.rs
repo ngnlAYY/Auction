@@ -3,8 +3,9 @@
 use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time};
+
 use crate::api::RealtimeEventPage;
-use crate::app::surface::{format_admin_time, pagination::AdminPager};
 
 /// 展示不含 payload 与内部来源字段的最近事件元数据。
 #[component]
@@ -27,7 +28,7 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
                     for event in page.events {
                         tr { class: "admin-realtime__row",
                             td { "data-label": t!("realtime-event-created-at"),
-                                time { datetime: event.created_at.clone(), "{format_admin_time(&event.created_at)}" }
+                                Time { value: event.created_at.clone() }
                             }
                             td { "data-label": t!("realtime-event-kind"),
                                 TruncatedText { value: event.kind }
@@ -54,7 +55,11 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
             }
         }
         if is_empty {
-            p { class: "admin-realtime-empty", role: "status", {t!("realtime-event-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("realtime-event-empty"),
+                detail: "",
+            }
         }
     }
 }
@@ -63,11 +68,18 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
 #[component]
 pub(super) fn RealtimeEventPager(page: RealtimeEventPage, page_number: Signal<i64>) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: page.pagination.page,
             page_size: page.pagination.page_size,
-            total: page.pagination.total,
+            total: Some(page.pagination.total),
             label: t!("realtime-event-title"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

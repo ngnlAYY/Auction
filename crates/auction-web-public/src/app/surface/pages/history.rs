@@ -13,7 +13,7 @@ pub(crate) fn AuctionList() -> Element {
         .unwrap_or("settled")
         .to_owned();
     let page_number = use_signal(|| query.page.max(1));
-    let refresh_generation = use_signal(|| 0_u64);
+    let mut refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
@@ -32,13 +32,21 @@ pub(crate) fn AuctionList() -> Element {
     });
     match &*auctions.read_unchecked() {
         None => rsx! {
-            Placeholder { title: t!("page-auctions-title"), detail: t!("data-loading") }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("page-auctions-title"),
+                detail: t!("data-loading"),
+            }
         },
         Some(Err(_)) => rsx! {
-            super::shared::RetryPlaceholder {
+            AsyncState {
+                kind: AsyncStateKind::Error,
                 title: t!("page-auctions-title"),
                 detail: t!("data-error"),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(page)) => rsx! {
@@ -98,12 +106,17 @@ pub(crate) fn AuctionHistoryPage(
             } else {
                 AuctionHistoryTable { rows: page.auctions.clone() }
             }
-            PublicPager {
+            Pager {
                 page: page_number(),
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-auctions-title"),
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
                 on_page_change: move |page| {
                     page_number.set(page);
                     update_public_query(|query| query.page = page, false);
@@ -117,7 +130,7 @@ pub(crate) fn AuctionHistoryPage(
 pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
     rsx! {
         div { class: "public-auction-rounds__table",
-            table {
+            table { class: "ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("page-auctions-title")} }
                 thead {
                     tr {
@@ -154,7 +167,7 @@ pub(crate) fn AuctionHistoryTable(rows: Vec<HistoricalAuction>) -> Element {
                                         }
                                     }
                                     td { "data-label": t!("auction-history-world"), "{auction_world_label(&auction.world_id)}" }
-                                    td { "data-label": t!("auction-history-ended"), time { datetime: ended.clone(), "{format_auction_time(&ended)}" } }
+                                    td { "data-label": t!("auction-history-ended"), Time { value: ended.clone() } }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-lots"), "{auction.lot_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-sold"), "{auction.sold_count}" }
                                     td { class: "public-auction-rounds__number", "data-label": t!("auction-history-unsold"), "{auction.unsold_count}" }

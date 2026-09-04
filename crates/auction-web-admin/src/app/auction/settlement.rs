@@ -9,6 +9,8 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::{
     AdminSettlementCatalogPage, AdminSettlementReport, fetch_admin_recovery,
     fetch_admin_settlement, fetch_admin_settlement_catalog,
@@ -385,10 +387,18 @@ pub(super) fn page() -> Element {
                         selection_generation,
                     }
                     if catalog_loading {
-                        p { class: "admin-auction-status", role: "status", {t!("admin-settlement-catalog-loading")} }
+                        AsyncState {
+                            kind: AsyncStateKind::Loading,
+                            title: t!("admin-settlement-catalog-loading"),
+                            detail: "",
+                        }
                     }
                     if let Some(error) = catalog_error {
-                        p { class: "admin-auction-error", role: "alert", {error} }
+                        AsyncState {
+                            kind: AsyncStateKind::Error,
+                            title: error,
+                            detail: "",
+                        }
                     }
                     if let Some(page) = catalog_data {
                         AdminSettlementCatalogPager {
@@ -414,10 +424,18 @@ pub(super) fn page() -> Element {
                         p { class: "admin-auction-intro", {t!("admin-settlement-pick-prompt")} }
                     } else {
                         if detail_loading {
-                            p { class: "admin-auction-status", role: "status", {t!("admin-settlement-loading")} }
+                            AsyncState {
+                                kind: AsyncStateKind::Loading,
+                                title: t!("admin-settlement-loading"),
+                                detail: "",
+                            }
                         }
                         if let Some(error) = detail_error {
-                            p { class: "admin-auction-error", role: "alert", {error} }
+                            AsyncState {
+                                kind: AsyncStateKind::Error,
+                                title: error,
+                                detail: "",
+                            }
                         }
                         if let Some(report) = report {
                             AdminSettlementReportView {

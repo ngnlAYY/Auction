@@ -3,6 +3,8 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::AdminMailIntakeDetail;
 use crate::app::surface::admin_api_error_message;
 
@@ -24,33 +26,34 @@ pub(super) fn MailIntakeDetailPanel(
 
     if loading {
         return rsx! {
-            section { class: "admin-panel admin-mail-detail", aria_live: "polite",
-                h2 { {t!("admin-mail-detail-title")} }
-                p { class: "admin-panel__note", {t!("admin-mail-detail-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-mail-detail-title"),
+                detail: t!("admin-mail-detail-loading"),
             }
         };
     }
 
     if let Some(code) = error {
         return rsx! {
-            section { class: "admin-panel admin-mail-detail", role: "alert",
-                h2 { {t!("admin-mail-detail-title")} }
-                p { class: "admin-panel__note", {admin_api_error_message(&code)} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                    {t!("admin-retry")}
-                }
-                button { r#type: "button", onclick: move |_| on_close.call(()), {t!("admin-mail-close-detail")} }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: t!("admin-mail-detail-title"),
+                detail: admin_api_error_message(&code),
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
+            // 共享面板只承载一个重试按钮，关闭入口单独保留，行为与旧版一致。
+            button { r#type: "button", onclick: move |_| on_close.call(()), {t!("admin-mail-close-detail")} }
         };
     }
 
     let Some(detail) = detail else {
         return rsx! {
-            section { class: "admin-panel admin-mail-detail",
-                h2 { {t!("admin-mail-detail-title")} }
-                p { class: "admin-panel__note", {t!("admin-mail-no-selection")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-mail-detail-title"),
+                detail: t!("admin-mail-no-selection"),
             }
         };
     };

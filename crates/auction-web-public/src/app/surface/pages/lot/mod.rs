@@ -35,7 +35,7 @@ fn is_public_lot_id(value: &str) -> bool {
 
 #[component]
 fn ValidLotDetail(lot_id: String) -> Element {
-    let refresh_generation = use_context::<Signal<u64>>();
+    let mut refresh_generation = use_context::<Signal<u64>>();
     let lot_id_for_request = lot_id.clone();
     let detail = use_resource(move || {
         let _ = refresh_generation();
@@ -45,12 +45,21 @@ fn ValidLotDetail(lot_id: String) -> Element {
 
     match &*detail.read_unchecked() {
         None => rsx! {
-            p { class: "public-page-status", {t!("common-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("common-loading"),
+                detail: t!("data-loading"),
+            }
         },
         Some(Err(error)) => rsx! {
-            LotLoadFailure {
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: t!("lot-not-found"),
                 detail: lot_detail_error_message(error),
-                refresh_generation,
+                retry_label: t!("data-retry"),
+                on_retry: move |_| {
+                    refresh_generation.set(refresh_generation().saturating_add(1));
+                },
             }
         },
         Some(Ok(page)) => match page.lot.as_ref() {
@@ -66,9 +75,14 @@ fn ValidLotDetail(lot_id: String) -> Element {
                 }
             },
             None => rsx! {
-                LotLoadFailure {
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: t!("lot-not-found"),
                     detail: t!("error-invalid-response"),
-                    refresh_generation,
+                    retry_label: t!("data-retry"),
+                    on_retry: move |_| {
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                    },
                 }
             },
         },
@@ -80,22 +94,6 @@ fn LotMissing() -> Element {
     rsx! {
         div { class: "ui-empty-state", role: "status",
             p { class: "ui-empty-state__title", {t!("lot-not-found")} }
-        }
-    }
-}
-
-#[component]
-fn LotLoadFailure(detail: String, mut refresh_generation: Signal<u64>) -> Element {
-    rsx! {
-        div { class: "ui-empty-state", role: "alert",
-            p { class: "ui-empty-state__title", {t!("lot-not-found")} }
-            span { class: "ui-empty-state__detail", "{detail}" }
-            button {
-                class: "ui-empty-state__retry",
-                r#type: "button",
-                onclick: move |_| refresh_generation.set(refresh_generation().saturating_add(1)),
-                {t!("data-retry")}
-            }
         }
     }
 }

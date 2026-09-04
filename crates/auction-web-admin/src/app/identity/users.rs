@@ -8,6 +8,8 @@ use dioxus::prelude::*;
 
 use crate::api::{AdminUserStatusFilter, fetch_admin_users};
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use super::{AdminActionFeedback, admin_api_error_message};
 
 #[path = "users/create.rs"]
@@ -44,10 +46,18 @@ pub(super) fn page() -> Element {
     let state = users.read_unchecked().clone();
     let content = match state {
         None => rsx! {
-            p { class: "admin-shell__status", role: "status", {t!("admin-users-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-users-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            p { class: "admin-shell__inline-error", role: "alert", {admin_api_error_message(&error)} }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(&error),
+                detail: "",
+            }
         },
         Some(Ok(page)) => rsx! {
             AdminUserTable {

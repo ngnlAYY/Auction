@@ -3,11 +3,12 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+
 use crate::api::AdminLotPage;
 
 use super::super::Route;
 use super::super::intake::AdminIntakeForm;
-use super::super::pagination::AdminPager;
 use super::helpers::lot_update_notice_label;
 use super::proxy::AdminProxyHistory;
 use super::row::AdminLotRow;
@@ -49,7 +50,7 @@ pub(super) fn AdminLotTable(
                     }
                 }
                 div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
-                    table { class: "admin-auction-table admin-auction-lot-table",
+                    table { class: "admin-auction-table admin-auction-lot-table ui-table--responsive",
                         caption { class: "admin-visually-hidden",
                             {t!("page-auction-lots-title", auction: page.auction.sequence)}
                         }
@@ -74,13 +75,24 @@ pub(super) fn AdminLotTable(
                     }
                 }
                 if page.lots.is_empty() {
-                    p { class: "admin-auction-status", {t!("admin-lots-empty")} }
+                    AsyncState {
+                        kind: AsyncStateKind::Empty,
+                        title: t!("admin-lots-empty"),
+                        detail: "",
+                    }
                 }
-                AdminPager {
+                Pager {
                     page: page.pagination.page,
                     page_size: page.pagination.page_size,
-                    total: page.pagination.total,
+                    total: Some(page.pagination.total),
                     label: t!("admin-lots-pagination"),
+                    previous_label: t!("admin-pagination-previous"),
+                    status: move |(page, pages): (i64, i64)| {
+                        t!("admin-pagination-status", page: page, pages: pages)
+                    },
+                    next_label: t!("admin-pagination-next"),
+                    jump_label: t!("admin-pagination-input"),
+                    jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next_page| page_number.set(next_page),
                 }
             }

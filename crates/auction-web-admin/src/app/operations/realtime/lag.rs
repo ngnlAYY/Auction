@@ -5,15 +5,20 @@ use dioxus::prelude::*;
 
 use auction_web_shared::TruncatedText;
 
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+
 use crate::api::RealtimeLagPage;
-use crate::app::surface::pagination::AdminPager;
 
 /// 展示消费者 lag 的安全投影。
 #[component]
 pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
     rsx! {
         if page.lags.is_empty() {
-            p { class: "admin-realtime-empty", role: "status", {t!("realtime-lag-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("realtime-lag-empty"),
+                detail: "",
+            }
         } else {
             div { class: "admin-shell__table-wrap",
                 table { class: "admin-shell__table admin-realtime-table",
@@ -56,11 +61,18 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
 #[component]
 pub(super) fn RealtimeLagPager(page: RealtimeLagPage, page_number: Signal<i64>) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: page.pagination.page,
             page_size: page.pagination.page_size,
-            total: page.pagination.total,
+            total: Some(page.pagination.total),
             label: t!("realtime-lag-title"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

@@ -129,7 +129,7 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Elem
             }
             if !equipment.stats.is_empty() {
                 div { class: "public-auction-equipment__stats-wrap",
-                    table { class: "public-auction-equipment__stats",
+                    table { class: "public-auction-equipment__stats ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("equipment-stats")} }
                         thead {
                             tr {
@@ -155,12 +155,17 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Elem
                         }
                     }
                 }
-                PublicPager {
+                Pager {
                     page: current_stats_page,
                     page_size: stats_page_size,
                     total: Some(stats_total),
                     has_more: false,
                     label: t!("equipment-stats"),
+                    previous_label: t!("catalog-previous"),
+                    status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                    next_label: t!("catalog-next"),
+                    jump_label: t!("catalog-page-input"),
+                    jump_button_label: t!("catalog-page-go"),
                     on_page_change: move |next_page| stats_page.set(next_page),
                 }
             }

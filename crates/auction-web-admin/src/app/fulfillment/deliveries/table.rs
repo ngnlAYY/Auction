@@ -3,10 +3,11 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
+use auction_web_shared::{
+    AsyncState, AsyncStateKind, Pager, TruncatedText, format_credit_amount as format_amount,
+};
 
 use crate::api::{Delivery, DeliveryPage};
-use crate::app::surface::pagination::AdminPager;
 
 use super::dialog::DeliveryDialog;
 use super::helpers::{delivery_display_id, delivery_display_type, delivery_status_label};
@@ -61,7 +62,11 @@ pub(super) fn DeliveryTable(
             }
         }
         if page.deliveries.is_empty() {
-            p { class: "admin-delivery-status", {t!("delivery-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("delivery-empty"),
+                detail: "",
+            }
         }
     }
 }
@@ -185,11 +190,18 @@ pub(super) fn DeliveryRow(
 #[component]
 pub(super) fn DeliveryPager(page: DeliveryPage, mut page_number: Signal<i64>) -> Element {
     rsx! {
-        AdminPager {
+        Pager {
             page: page.pagination.page,
             page_size: page.pagination.page_size,
-            total: page.pagination.total,
+            total: Some(page.pagination.total),
             label: t!("delivery-pagination"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }

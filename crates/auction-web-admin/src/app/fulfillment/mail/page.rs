@@ -3,6 +3,8 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::{
     AdminMailIntakeQuery, fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state,
 };
@@ -59,18 +61,19 @@ pub fn page() -> Element {
 
     let intake_content = match &*intakes.read_unchecked() {
         None => rsx! {
-            p { class: "admin-shell__status", role: "status", {t!("admin-mail-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-mail-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) => rsx! {
-            div {
-                class: "admin-shell__inline-error",
-                role: "alert",
-                p { {admin_api_error_message(error)} }
-                button {
-                    r#type: "button",
-                    onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                    {t!("admin-retry")}
-                }
+            AsyncState {
+                kind: AsyncStateKind::Error,
+                title: admin_api_error_message(error),
+                detail: "",
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
         Some(Ok(intakes)) => rsx! {
@@ -93,20 +96,21 @@ pub fn page() -> Element {
     } else {
         match &*polling.read_unchecked() {
             None => rsx! {
-                p { class: "admin-panel__note", role: "status", {t!("admin-mail-loading")} }
+                AsyncState {
+                    kind: AsyncStateKind::Loading,
+                    title: t!("admin-mail-loading"),
+                    detail: "",
+                }
             },
             Some(Err(error)) => rsx! {
-                div {
-                    class: "admin-panel__note admin-panel__note--error",
-                    role: "alert",
-                    p { {admin_api_error_message(error)} }
-                    button {
-                        r#type: "button",
-                        onclick: move |_| {
-                            polling_refresh.set(polling_refresh().saturating_add(1));
-                        },
-                        {t!("admin-retry")}
-                    }
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: admin_api_error_message(error),
+                    detail: "",
+                    retry_label: t!("admin-retry"),
+                    on_retry: move |_| {
+                        polling_refresh.set(polling_refresh().saturating_add(1));
+                    },
                 }
             },
             Some(Ok(Some(polling))) => rsx! {

@@ -3,6 +3,8 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::fetch_admin_lots;
 
 use super::super::{Route, admin_api_error_message};
@@ -47,7 +49,11 @@ fn AdminLotLoading() -> Element {
                 h2 { id: "lot-title", class: "admin-visually-hidden",
                     {t!("page-auction-lots-title", auction: "…")}
                 }
-                p { class: "admin-auction-status", role: "status", {t!("admin-lots-loading")} }
+                AsyncState {
+                    kind: AsyncStateKind::Loading,
+                    title: t!("admin-lots-loading"),
+                    detail: "",
+                }
             }
         }
     }
@@ -65,11 +71,12 @@ fn AdminLotLoadError(detail: String, mut reload_generation: Signal<u64>) -> Elem
                 h2 { id: "lot-title", class: "admin-visually-hidden",
                     {t!("page-auction-lots-title", auction: "…")}
                 }
-                p { class: "admin-auction-error", role: "alert", "{detail}" }
-                button {
-                    r#type: "button",
-                    onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
-                    {t!("admin-lots-retry")}
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: detail,
+                    detail: "",
+                    retry_label: t!("admin-lots-retry"),
+                    on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
                 }
             }
         }

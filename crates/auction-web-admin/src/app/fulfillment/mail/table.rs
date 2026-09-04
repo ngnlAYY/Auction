@@ -3,12 +3,9 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::TruncatedText;
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
 
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
-
-use super::super::format_admin_time;
-use super::super::pagination::AdminPager;
 
 #[component]
 pub(super) fn MailIntakeTable(
@@ -41,13 +38,24 @@ pub(super) fn MailIntakeTable(
             }
         }
         if is_empty {
-            p { class: "admin-shell__status", {t!("admin-mail-empty")} }
+            AsyncState {
+                kind: AsyncStateKind::Empty,
+                title: t!("admin-mail-empty"),
+                detail: "",
+            }
         }
-        AdminPager {
+        Pager {
             page: page.pagination.page,
             page_size: page.pagination.page_size,
-            total: page.pagination.total,
+            total: Some(page.pagination.total),
             label: t!("page-mails-title"),
+            previous_label: t!("admin-pagination-previous"),
+            status: move |(page, pages): (i64, i64)| {
+                t!("admin-pagination-status", page: page, pages: pages)
+            },
+            next_label: t!("admin-pagination-next"),
+            jump_label: t!("admin-pagination-input"),
+            jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
     }
@@ -89,7 +97,7 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
             }
             td {
                 "data-label": t!("admin-mail-intake-received"),
-                time { datetime: intake.received_at.clone(), "{format_admin_time(&intake.received_at)}" }
+                Time { value: intake.received_at.clone() }
             }
         }
     }

@@ -4,6 +4,8 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use auction_web_shared::{AsyncState, AsyncStateKind};
+
 use crate::api::{AdminApiFailure, Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
 
@@ -154,9 +156,17 @@ pub fn page() -> Element {
                     },
                 }
             } else if let Some(error) = load_error {
-                p { class: "admin-delivery-error", role: "alert", {error} }
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: error,
+                    detail: "",
+                }
             } else {
-                p { class: "admin-delivery-status", role: "status", {t!("data-loading")} }
+                AsyncState {
+                    kind: AsyncStateKind::Loading,
+                    title: t!("data-loading"),
+                    detail: "",
+                }
             }
             if let Some(feedback) = notice() {
                 p {

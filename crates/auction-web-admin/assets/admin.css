@@ -412,74 +412,7 @@
   margin-inline-start: 0;
 }
 
-.ui-pager {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-3);
-  margin-block-start: var(--space-3);
-}
-
-.ui-pager__controls,
-.ui-pager__jump,
-.ui-pager__label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.ui-pager button,
-.ui-pager__input {
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-}
-
-.ui-pager button {
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .ui-pager button:hover:not(:disabled) {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-}
-
-.ui-pager button:disabled {
-  color: var(--color-text-muted);
-  cursor: default;
-  opacity: 0.6;
-}
-
-.ui-pager__status,
-.ui-pager__label {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.ui-pager__input {
-  inline-size: 5rem;
-}
-
-@media (max-width: 48rem) {
-  .ui-pager,
-  .ui-pager__jump {
-    align-items: stretch;
-  }
-
-  .ui-pager__controls,
-  .ui-pager__jump {
-    inline-size: 100%;
-  }
-
-  .ui-pager__controls {
-    justify-content: space-between;
-  }
-}
+/* .ui-pager* 共享规则已迁至 auction-web-shared 的 base.css；此处仅保留 Admin 特有覆写。 */
 
 .admin-realtime-page {
   display: grid;
@@ -1320,8 +1253,14 @@
 }
 
 .admin-auction-lot-table {
-  min-inline-size: 64rem;
   table-layout: fixed;
+}
+
+/* 最小宽度只在桌面行式布局生效；窄屏由 .ui-table--responsive 切换为卡片布局。 */
+@media (min-width: 48rem) {
+  .admin-auction-lot-table {
+    min-inline-size: 64rem;
+  }
 }
 
 .admin-auction-lot-code {
@@ -3546,37 +3485,7 @@
     flex-direction: column;
   }
 
-  .admin-auction-proxy__table thead {
-    display: none;
-  }
-
-  .admin-auction-proxy__table,
-  .admin-auction-proxy__table tbody,
-  .admin-auction-proxy__table tr {
-    display: block;
-  }
-
-  .admin-auction-proxy__table tr {
-    padding-block: var(--space-2);
-    border-block-end: var(--border-width) solid var(--color-border);
-  }
-
-  .admin-auction-proxy__table td {
-    display: grid;
-    grid-template-columns: minmax(7rem, 38%) minmax(0, 1fr);
-    align-items: baseline;
-    gap: var(--space-2);
-    min-inline-size: 0;
-    padding: var(--space-1) 0;
-    border: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .admin-auction-proxy__table td::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--admin-text-label);
-  }
+  /* 代理历史表格的卡片化由 base.css 的 .ui-table--responsive 统一提供。 */
 
   .admin-mail-detail__grid {
     grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);
@@ -3994,91 +3903,9 @@
   text-align: start;
 }
 
-@media (max-width: 75rem) {
-  .admin-auction-lot-table-wrap {
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .admin-auction-lot-table {
-    display: block;
-    min-inline-size: 0;
-    table-layout: auto;
-  }
-
-  .admin-auction-lot-table thead {
-    display: none;
-  }
-
-  .admin-auction-lot-table tbody {
-    display: grid;
-    gap: var(--space-3);
-    background: transparent;
-  }
-
-  .admin-auction-lot-table .admin-lots__row {
-    display: block;
-    padding: var(--space-3) var(--space-4);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-muted);
-    box-shadow: var(--shadow-1);
-  }
-
-  .admin-auction-lot-table .admin-lots__row > td {
-    display: grid;
-    grid-template-columns: minmax(7rem, 30%) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-2);
-    min-inline-size: 0;
-    padding: var(--space-2) 0;
-    border: 0;
-    /* 特异性 0-2-1，高于桌面端右对齐规则（0-2-0），无需 !important。 */
-    text-align: start;
-    overflow-wrap: anywhere;
-  }
-
-  .admin-auction-lot-table .admin-lots__row > td::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--admin-text-label);
-    font-weight: 600;
-  }
-
-  .admin-auction-lot-table .admin-lots__row > .admin-auction-num > * {
-    justify-self: start;
-  }
-
-  .admin-auction-lot-table .admin-lots__slow-schedule {
-    grid-column: 2;
-  }
-
-  .admin-auction-lot-table .admin-auction-actions {
-    align-items: center;
-    flex-direction: row;
-    justify-content: flex-start;
-  }
-
-  .admin-auction-lot-table .admin-auction-dialog-row,
-  .admin-auction-lot-table .admin-auction-dialog-row > td {
-    display: block;
-    padding: 0;
-    border: 0;
-  }
-}
-
+/* 拍品表格的卡片化由 base.css 的 .ui-table--responsive 统一提供（48rem 断点）；
+   此处仅保留动作单元格在窄屏下的纵向排列覆写。 */
 @media (max-width: 48rem) {
-  .admin-auction-lot-table .admin-lots__row {
-    padding-inline: var(--space-3);
-  }
-
-  .admin-auction-lot-table .admin-lots__row > td {
-    grid-template-columns: minmax(6.5rem, 36%) minmax(0, 1fr);
-  }
-
   .admin-auction-lot-table .admin-lots__actions-cell .admin-auction-actions {
     align-items: stretch;
     flex-direction: column;
@@ -4094,8 +3921,14 @@
 }
 
 .admin-audit-table {
-  min-inline-size: 72rem;
   table-layout: fixed;
+}
+
+/* 最小宽度只在桌面行式布局生效；窄屏由 .ui-table--responsive 切换为卡片布局。 */
+@media (min-width: 48rem) {
+  .admin-audit-table {
+    min-inline-size: 72rem;
+  }
 }
 
 .admin-audit-table th,
@@ -4232,78 +4065,7 @@
   color: var(--color-text-muted);
 }
 
-@media (max-width: 75rem) {
-  .admin-audit-table-wrap {
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .admin-audit-table {
-    display: block;
-    min-inline-size: 0;
-    table-layout: auto;
-  }
-
-  .admin-audit-table thead {
-    position: absolute;
-    inline-size: 1px;
-    block-size: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-
-  .admin-audit-table tbody {
-    display: grid;
-    gap: var(--space-3);
-    background: transparent;
-  }
-
-  .admin-audit-table .admin-audit__row {
-    display: block;
-    padding: var(--space-3) var(--space-4);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-muted);
-    box-shadow: var(--shadow-1);
-  }
-
-  .admin-audit-table .admin-audit__row > td {
-    display: grid;
-    grid-template-columns: minmax(7.5rem, 28%) minmax(0, 1fr);
-    align-items: start;
-    gap: var(--space-2);
-    inline-size: auto;
-    min-inline-size: 0;
-    max-inline-size: none;
-    padding: var(--space-2) 0;
-    border: 0;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .admin-audit-table .admin-audit__row > td::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--admin-text-label);
-    font-weight: 600;
-  }
-
-  .admin-audit-table__time time,
-  .admin-audit-source,
-  .admin-audit-result {
-    justify-self: start;
-  }
-
-  .admin-audit-table__time time {
-    white-space: nowrap;
-  }
-}
-
+/* 审计表格的卡片化由 base.css 的 .ui-table--responsive 统一提供（48rem 断点）。 */
 @media (max-width: 48rem) {
   .admin-audit-filter {
     padding: var(--space-3);
@@ -4316,14 +4078,6 @@
 
   .admin-audit-filter__actions > button {
     flex: 1 1 100%;
-  }
-
-  .admin-audit-table .admin-audit__row {
-    padding-inline: var(--space-3);
-  }
-
-  .admin-audit-table .admin-audit__row > td {
-    grid-template-columns: minmax(6.5rem, 36%) minmax(0, 1fr);
   }
 }
 

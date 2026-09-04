@@ -18,8 +18,6 @@ mod commands;
 mod compensation;
 #[path = "../content/forum.rs"]
 mod forum;
-#[path = "../shared/pagination.rs"]
-mod pagination;
 #[path = "../auction/proxy.rs"]
 mod proxy;
 #[path = "../auction/reads/mod.rs"]
@@ -70,12 +68,12 @@ use crate::api::{
     lot_code_for, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
-    BaseStylesheet, LanguagePicker, TruncatedText, format_credit_amount as format_amount,
-    format_localized_time,
+    AsyncState, AsyncStateKind, BaseStylesheet, LanguagePicker, Pager, Time, TruncatedText,
+    format_credit_amount as format_amount, format_localized_time,
     i18n::{DEFAULT_PUBLIC_LOCALE, initial_language},
     legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_route_focus,
+    use_second_tick, use_second_ticker,
 };
-use pagination::PublicPager;
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。
 pub(crate) type PublicSessionResource = Resource<Result<Option<PublicSession>, String>>;

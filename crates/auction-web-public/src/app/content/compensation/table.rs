@@ -36,7 +36,7 @@ pub(super) fn CompensationPoolTable(
             if page.rounds.is_empty() {
                 p { class: "public-compensation-empty", {t!("compensation-empty")} }
             } else {
-                div { class: "public-compensation-table-wrap",
+                div { class: "public-compensation-table-wrap ui-table--scroll",
                     table { class: "public-compensation-table",
                         thead {
                             tr {
@@ -66,12 +66,17 @@ pub(super) fn CompensationPoolTable(
                     }
                 }
             }
-            PublicPager {
+            Pager {
                 page: page.page.unwrap_or(1),
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-compensation-pool-title"),
+                previous_label: t!("catalog-previous"),
+                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
+                next_label: t!("catalog-next"),
+                jump_label: t!("catalog-page-input"),
+                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
             }
         }
@@ -114,7 +119,7 @@ fn CompensationRoundRow(
             td { class: "public-compensation-number", "{format_amount(round.compensation_out)}" }
             td { class: "public-compensation-number public-compensation-closing", "{format_amount(round.closing_balance)}" }
             td {
-                time { datetime: round.settled_at.clone(), "{format_auction_time(&round.settled_at)}" }
+                Time { value: round.settled_at.clone() }
             }
         }
         if open {

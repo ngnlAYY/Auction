@@ -276,21 +276,3 @@ pub(crate) fn countdown_class(countdown: &CountdownDisplay) -> &'static str {
         "public-auction-countdown"
     }
 }
-
-/// Public 数据加载、错误和空结果共用的状态面板。
-///
-/// 该组件只呈现调用方已经判定的安全文案，不吞掉 API 错误，也不把错误正文直接展示给
-/// 浏览器；真实数据页面仍由各自的 API 读取分支负责。
-#[component]
-pub(crate) fn Placeholder(title: String, detail: String) -> Element {
-    rsx! {
-        section {
-            class: "public-auction-empty",
-            role: "status",
-            aria_live: "polite",
-            aria_labelledby: "placeholder-title",
-            h1 { id: "placeholder-title", "{title}" }
-            p { "{detail}" }
-        }
-    }
-}

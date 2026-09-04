@@ -1256,61 +1256,6 @@
   background: var(--color-accent-contrast);
 }
 
-/* ===== 通用分页器 ===== */
-
-.ui-pager {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-3);
-  margin-block-start: var(--space-3);
-}
-
-.ui-pager__controls,
-.ui-pager__jump,
-.ui-pager__label {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.ui-pager button,
-.ui-pager__input {
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  background: var(--color-surface-raised);
-}
-
-.ui-pager button {
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .ui-pager button:hover:not(:disabled) {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-}
-
-.ui-pager button:disabled {
-  color: var(--color-text-muted);
-  cursor: default;
-  opacity: 0.6;
-}
-
-.ui-pager__status,
-.ui-pager__label {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-}
-
-.ui-pager__input {
-  inline-size: 5rem;
-}
-
 /* ===== 账户区（登录引导 / 账户表格） ===== */
 
 .public-account-section {
@@ -1764,37 +1709,8 @@
 }
 
 /* ===== 响应式：出价日志移动端布局 ===== */
+/* 卡片化骨架（隐藏表头 / 块级行 / data-label 回显）由 base.css 的 .ui-table--responsive 提供。 */
 @media (max-width: 48rem) {
-  .public-auction-bid-log-table thead {
-    display: none;
-  }
-
-  .public-auction-bid-log-table,
-  .public-auction-bid-log-table tbody,
-  .public-auction-bid-log-table tr {
-    display: block;
-  }
-
-  .public-auction-bid-log-table tbody tr {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .public-auction-bid-log-table td {
-    display: flex;
-    align-items: baseline;
-    justify-content: flex-start;
-    gap: var(--space-3);
-    padding: var(--space-1) 0;
-    white-space: normal;
-  }
-
-  .public-auction-bid-log-table td::before {
-    content: attr(data-label);
-    flex-shrink: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-  }
-
   .public-auction-bid-log-table .public-auction-bid-log-participant {
     display: grid;
     grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
@@ -2410,10 +2326,7 @@
   color: var(--color-text-muted);
 }
 
-.public-compensation-table-wrap,
-.public-compensation-movement-wrap {
-  overflow-x: auto;
-}
+/* 宽表容器保持横向滚动，由 base.css 的 .ui-table--scroll 承担 overflow-x。 */
 
 .public-compensation-table,
 .public-compensation-movement-table {
@@ -2484,48 +2397,8 @@
   display: none;
 }
 
-/* ===== 空状态（共用 EmptyState / 拍卖空状态） ===== */
-/* 旧 Public 共用 EmptyState：错误详情与重试入口默认只提供给辅助技术和键盘用户。 */
-.ui-empty-state {
-  position: relative;
-  padding: var(--space-6) var(--space-5);
-  border: var(--border-width) dashed var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-  text-align: center;
-}
-
-.ui-empty-state__title {
-  margin: 0;
-  font-size: var(--text-lg);
-}
-
-.ui-empty-state__hint {
-  margin: var(--space-2) 0 0;
-  color: var(--color-text-muted);
-}
-
-.ui-empty-state__retry {
-  min-block-size: var(--size-target);
-  margin-block-start: var(--space-4);
-  padding: var(--space-2) var(--space-4);
-  border: var(--border-width) solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  color: var(--color-accent-contrast);
-  background: var(--color-accent);
-  font-weight: var(--font-weight-strong);
-}
-
-.ui-empty-state__retry:focus-visible {
-  border-color: var(--color-link);
-}
-
-.ui-empty-state__detail {
-  display: block;
-  margin-block-start: var(--space-2);
-  color: var(--color-text-muted);
-  overflow-wrap: anywhere;
-}
+/* ===== 空状态（拍卖空状态） ===== */
+/* .ui-empty-state* 与 .ui-async-state* 已由 auction-web-shared base.css 提供。 */
 
 .public-auction-empty {
   position: relative;
@@ -2666,92 +2539,12 @@
     min-inline-size: 0;
   }
 
-  .public-history-table thead,
-  .public-auction-rounds__table thead {
-    display: none;
-  }
-
-  .public-history-table,
-  .public-history-table tbody,
-  .public-history-table tr,
-  .public-auction-rounds__table table,
-  .public-auction-rounds__table tbody,
-  .public-auction-rounds__table tr {
-    display: block;
-  }
-
-  .public-history-table tbody tr,
-  .public-auction-rounds__table tr {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .public-history-table td,
-  .public-auction-rounds__table td {
-    display: flex;
-    align-items: baseline;
-    justify-content: flex-start;
-    gap: var(--space-3);
-    padding: var(--space-1) 0;
-    white-space: normal;
-  }
-
-  .public-history-table td::before,
-  .public-auction-rounds__table td::before {
-    content: attr(data-label);
-    flex-shrink: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-  }
-
   .public-compensation-heading {
     display: grid;
   }
 
   .public-compensation-balance {
     min-width: 0;
-  }
-
-  .public-account-table thead {
-    display: none;
-  }
-
-  .public-account-table,
-  .public-account-table tbody,
-  .public-account-table tr {
-    display: block;
-  }
-
-  .public-account-table td {
-    display: flex;
-  }
-
-  .public-account-table tbody tr {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .public-account-table td {
-    align-items: baseline;
-    justify-content: flex-start;
-    gap: var(--space-3);
-    padding: var(--space-1) 0;
-    white-space: normal;
-  }
-
-  .public-account-table td::before {
-    content: attr(data-label);
-    flex-shrink: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-  }
-
-  .public-auction-catalog thead {
-    display: none;
-  }
-
-  .public-auction-catalog table,
-  .public-auction-catalog tbody,
-  .public-auction-catalog tr {
-    display: block;
   }
 
   .public-auction-catalog tr {
@@ -2768,12 +2561,6 @@
     padding: var(--space-1) 0;
     border: 0;
     white-space: normal;
-  }
-
-  .public-auction-catalog td::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--text-sm);
   }
 
   .public-auction-catalog td > * {
@@ -2832,20 +2619,6 @@
 
   .public-history-pagination {
     flex-wrap: wrap;
-  }
-
-  .ui-pager,
-  .ui-pager__jump {
-    align-items: stretch;
-  }
-
-  .ui-pager__controls,
-  .ui-pager__jump {
-    inline-size: 100%;
-  }
-
-  .ui-pager__controls {
-    justify-content: space-between;
   }
 }
 
@@ -3043,16 +2816,6 @@
     overflow-x: visible;
   }
 
-  .public-auction-equipment__stats thead {
-    display: none;
-  }
-
-  .public-auction-equipment__stats,
-  .public-auction-equipment__stats tbody,
-  .public-auction-equipment__stats tr {
-    display: block;
-  }
-
   .public-auction-equipment__stats tr {
     padding-block: var(--space-2);
     border-block-end: var(--border-width) solid var(--color-border);
@@ -3070,26 +2833,12 @@
     overflow-wrap: anywhere;
   }
 
-  .public-auction-equipment__stats tbody th::before,
-  .public-auction-equipment__stats td::before {
+  /* 行首 th 的 data-label 回显不在 .ui-table--responsive 的 td 规则覆盖范围内，单列保留。 */
+  .public-auction-equipment__stats tbody th::before {
     color: var(--color-text-muted);
     content: attr(data-label);
     font-size: var(--text-sm);
     font-weight: 400;
-  }
-
-  .public-auction-lot__table thead {
-    display: none;
-  }
-
-  .public-auction-lot__table table,
-  .public-auction-lot__table tbody,
-  .public-auction-lot__table tr {
-    display: block;
-  }
-
-  .public-auction-lot__table tr {
-    padding: var(--space-2) var(--space-3);
   }
 
   .public-auction-lot__table td {
@@ -3103,12 +2852,6 @@
   .public-auction-lot__table .public-auction-lot__participant-cell {
     inline-size: 100%;
     max-inline-size: none;
-  }
-
-  .public-auction-lot__table td::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--text-sm);
   }
 
   .public-forum-card__header,

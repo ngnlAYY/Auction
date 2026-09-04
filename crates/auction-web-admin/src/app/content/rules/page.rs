@@ -1,7 +1,7 @@
 //! 规则页面加载、语言切换和 workspace 装配。
 
-use auction_web_shared::SUPPORTED_LOCALES;
 use auction_web_shared::legacy_t as t;
+use auction_web_shared::{AsyncState, AsyncStateKind, SUPPORTED_LOCALES};
 use dioxus::prelude::*;
 
 use crate::api::fetch_admin_rules;
@@ -43,7 +43,11 @@ pub fn page() -> Element {
 
     let content = match &*rules.read_unchecked() {
         None => rsx! {
-            p { class: "admin-rules-status", role: "status", {t!("admin-rules-loading")} }
+            AsyncState {
+                kind: AsyncStateKind::Loading,
+                title: t!("admin-rules-loading"),
+                detail: "",
+            }
         },
         Some(Err(error)) if error.status == Some(404) => {
             let document = missing_rules_document(target());
@@ -101,15 +105,12 @@ pub fn page() -> Element {
 #[component]
 pub(super) fn AdminRulesLoadError(detail: String, mut reload_generation: Signal<u64>) -> Element {
     rsx! {
-        div {
-            class: "admin-rules-error",
-            role: "alert",
-            p { class: "admin-panel__note", "{detail}" }
-            button {
-                r#type: "button",
-                onclick: move |_| reload_generation.set(reload_generation().saturating_add(1)),
-                {t!("admin-rules-retry")}
-            }
+        AsyncState {
+            kind: AsyncStateKind::Error,
+            title: detail,
+            detail: "",
+            retry_label: t!("admin-rules-retry"),
+            on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
         }
     }
 }
