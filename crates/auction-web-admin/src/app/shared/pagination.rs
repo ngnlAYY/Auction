@@ -17,11 +17,14 @@ pub(super) fn AdminPager(
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = if total <= 0 { 1 } else { total.saturating_add(page_size - 1) / page_size };
-    let mut jump_page = use_signal(|| page.to_string());
+    // 先把页码钳制到当前合法范围，再渲染与派生交互；Dioxus 0.7 不追踪普通 props，
+    // 越界场景下上一页/下一页/跳页全部从钳制后的页码出发，不会先按原始越界页触发一次请求。
+    let valid_page = page.clamp(1, total_pages);
+    let mut jump_page = use_signal(|| valid_page.to_string());
 
-    use_effect(move || jump_page.set(page.to_string()));
+    use_effect(move || jump_page.set(valid_page.to_string()));
+    // 页码越界时只补一次父级状态纠偏；effect 仅在挂载后运行一次，重复收敛天然去重。
     use_effect(move || {
-        let valid_page = page.clamp(1, total_pages);
         if page != valid_page {
             on_page_change.call(valid_page);
         }
@@ -39,17 +42,17 @@ pub(super) fn AdminPager(
             div { class: "ui-pager__controls",
                 button {
                     r#type: "button",
-                    disabled: page <= 1,
-                    onclick: move |_| on_page_change.call(page - 1),
+                    disabled: valid_page <= 1,
+                    onclick: move |_| on_page_change.call(valid_page - 1),
                     {t!("admin-pagination-previous")}
                 }
                 span { class: "ui-pager__status", aria_live: "polite",
-                    {t!("admin-pagination-status", page: page, pages: total_pages)}
+                    {t!("admin-pagination-status", page: valid_page, pages: total_pages)}
                 }
                 button {
                     r#type: "button",
-                    disabled: page >= total_pages,
-                    onclick: move |_| on_page_change.call(page + 1),
+                    disabled: valid_page >= total_pages,
+                    onclick: move |_| on_page_change.call(valid_page + 1),
                     {t!("admin-pagination-next")}
                 }
             }

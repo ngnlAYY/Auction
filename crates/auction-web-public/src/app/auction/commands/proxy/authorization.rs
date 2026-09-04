@@ -18,6 +18,8 @@ pub(super) fn ProxyAuthorizationForm(
     lot_status: String,
     proxy: OwnedProxy,
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
+    /// 由弹窗宿主注入的共享提交状态（见 ProxyFormInput::submitting）。
+    mut submitting: Signal<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
@@ -25,7 +27,6 @@ pub(super) fn ProxyAuthorizationForm(
     let mut maximum_amount = use_signal(|| format_amount(lower_bound));
     let mut failure = use_signal(|| None::<CommandError>);
     let mut validation = use_signal(|| None::<String>);
-    let mut submitting = use_signal(|| false);
     let mut command = use_signal(|| None::<PendingProxyCommand>);
     let mut confirmation = use_signal(|| None::<PendingProxyCommand>);
     let mut refresh_generation = use_context::<Signal<u64>>();

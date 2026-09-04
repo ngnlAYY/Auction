@@ -7,10 +7,14 @@ use uuid::Uuid;
 use crate::api::create_admin_auction;
 use crate::app::surface::AdminActionFeedback;
 
+use super::actions::AdminAuctionNotice;
 use super::helpers::valid_auction_schedule;
 
 #[component]
-pub(super) fn AdminAuctionCreateForm(reload_generation: Signal<u64>) -> Element {
+pub(super) fn AdminAuctionCreateForm(
+    reload_generation: Signal<u64>,
+    mut notice: Signal<Option<AdminAuctionNotice>>,
+) -> Element {
     let mut open = use_signal(|| false);
     let busy = use_signal(|| false);
 
@@ -20,6 +24,8 @@ pub(super) fn AdminAuctionCreateForm(reload_generation: Signal<u64>) -> Element 
             r#type: "button",
             onclick: move |_| {
                 if !open() {
+                    // 打开新流程时清掉上一次的页面级成功提示。
+                    notice.set(None);
                     open.set(true);
                 }
             },
@@ -40,7 +46,7 @@ pub(super) fn AdminAuctionCreateForm(reload_generation: Signal<u64>) -> Element 
                             open.set(false);
                         }
                     },
-                    AdminAuctionCreateFields { reload_generation, open, busy }
+                    AdminAuctionCreateFields { reload_generation, open, busy, notice }
                 }
             }
         }
@@ -52,6 +58,7 @@ fn AdminAuctionCreateFields(
     reload_generation: Signal<u64>,
     mut open: Signal<bool>,
     busy: Signal<bool>,
+    mut notice: Signal<Option<AdminAuctionNotice>>,
 ) -> Element {
     let mut world_id = use_signal(String::new);
     let mut sequence = use_signal(|| "1".to_owned());
@@ -107,6 +114,7 @@ fn AdminAuctionCreateFields(
                     let mut feedback = feedback;
                     let mut validation_error = validation_error;
                     let mut reload_generation = reload_generation;
+                    let mut notice = notice;
                     let mut open = open;
                     busy.set(true);
                     spawn(async move {
@@ -122,7 +130,9 @@ fn AdminAuctionCreateFields(
                         .await;
                         match result {
                             Ok(_) => {
-                                feedback.set(Some(AdminActionFeedback::Success));
+                                // 对话框内反馈随关闭一并销毁；成功提示移交页面级 notice。
+                                feedback.set(None);
+                                notice.set(Some(AdminAuctionNotice::Created));
                                 validation_error.set(false);
                                 reload_generation.set(reload_generation().saturating_add(1));
                                 open.set(false);

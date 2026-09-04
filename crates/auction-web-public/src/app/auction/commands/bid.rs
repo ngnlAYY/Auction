@@ -22,6 +22,9 @@ pub struct BidFormInput {
     pub can_bid: bool,
     pub blocked: bool,
     pub blocked_reason: String,
+    /// 由弹窗宿主注入的共享提交状态；宿主据此在提交中禁用遮罩/Escape/关闭按钮，
+    /// 避免弹窗 scope 销毁导致成功后的刷新与 on_accepted 回调丢失。
+    pub submitting: Signal<bool>,
     pub on_accepted: EventHandler<()>,
     pub on_close: EventHandler<()>,
 }
@@ -81,6 +84,7 @@ pub fn bid_form(input: BidFormInput) -> Element {
         can_bid,
         blocked,
         blocked_reason,
+        submitting,
         on_accepted,
         on_close,
     } = input;
@@ -88,7 +92,8 @@ pub fn bid_form(input: BidFormInput) -> Element {
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut failure = use_signal(|| None::<CommandError>);
     let mut validation = use_signal(|| None::<String>);
-    let mut submitting = use_signal(|| false);
+    // 提交状态由宿主注入（见 BidFormInput::submitting）。
+    let mut submitting = submitting;
     let mut command = use_signal(|| None::<PendingBidCommand>);
     let mut confirmation = use_signal(|| None::<PendingBidCommand>);
     let mut refresh_generation = use_context::<Signal<u64>>();

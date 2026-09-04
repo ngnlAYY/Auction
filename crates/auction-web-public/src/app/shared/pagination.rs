@@ -21,11 +21,15 @@ pub(super) fn PublicPager(
         .map(|total| if total <= 0 { 1 } else { total.saturating_add(page_size - 1) / page_size })
         .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
         .max(1);
-    let mut jump_page = use_signal(|| page.to_string());
+    // 先把页码钳制到当前已知合法范围，再渲染与派生交互；越界场景（如分享链接带上
+    // 过大的 page）下，上一页/下一页/跳页等变更全部从钳制后的页码出发，不会先按
+    // 原始越界页触发一次请求、再由下方纠偏 effect 重发第二次请求。
+    let valid_page = page.clamp(1, total_pages);
+    let mut jump_page = use_signal(|| valid_page.to_string());
 
-    use_effect(move || jump_page.set(page.to_string()));
+    use_effect(move || jump_page.set(valid_page.to_string()));
+    // 页码越界时只补一次父级状态/URL 纠偏；effect 仅在挂载后运行一次，重复收敛天然去重。
     use_effect(move || {
-        let valid_page = page.clamp(1, total_pages);
         if page != valid_page {
             on_page_change.call(valid_page);
         }
@@ -43,17 +47,17 @@ pub(super) fn PublicPager(
             div { class: "ui-pager__controls",
                 button {
                     r#type: "button",
-                    disabled: page <= 1,
-                    onclick: move |_| on_page_change.call(page - 1),
+                    disabled: valid_page <= 1,
+                    onclick: move |_| on_page_change.call(valid_page - 1),
                     {t!("catalog-previous")}
                 }
                 span { class: "ui-pager__status", aria_live: "polite",
-                    {t!("catalog-page", page: page, pages: total_pages)}
+                    {t!("catalog-page", page: valid_page, pages: total_pages)}
                 }
                 button {
                     r#type: "button",
-                    disabled: page >= total_pages,
-                    onclick: move |_| on_page_change.call(page + 1),
+                    disabled: valid_page >= total_pages,
+                    onclick: move |_| on_page_change.call(valid_page + 1),
                     {t!("catalog-next")}
                 }
             }
