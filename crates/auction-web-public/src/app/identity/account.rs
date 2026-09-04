@@ -182,7 +182,6 @@ fn BidSection(
                             tr {
                                 th { scope: "col", {t!("account-lot")} }
                                 th { scope: "col", class: "numeric-column public-account-number", {t!("account-amount")} }
-                                th { scope: "col", {t!("account-bid-status")} }
                                 th { scope: "col", {t!("account-time")} }
                             }
                         }
@@ -207,20 +206,26 @@ fn BidSection(
 
 #[component]
 fn BidRow(bid: OwnedBid) -> Element {
-    let leading = if bid.leading { t!("account-bid-leading") } else { t!("account-bid-outbid") };
     let row_class = if bid.leading { "public-account-leading" } else { "" };
+    let bid_status = if bid.leading { t!("account-bid-leading") } else { t!("account-bid-outbid") };
+    let bid_status_id = format!("public-account-bid-status-{}", bid.id);
     rsx! {
-        tr { class: row_class,
+        tr {
+            class: row_class,
+            aria_describedby: bid_status_id.clone(),
             td { class: "public-account-code", "data-label": t!("account-lot"),
                 Link {
                     to: Route::LotDetail { lot_code: bid.lot_id.clone() },
                     {lot_code_for(&bid.equipment.category, bid.lot_number)}
                 }
+                // 可见领先状态由装备行高亮表达；隐藏文案保留非视觉用户可读取的同等语义。
+                span {
+                    id: bid_status_id.clone(),
+                    class: "public-visually-hidden",
+                    "{bid_status}"
+                }
             }
             td { class: "public-account-amount public-account-number numeric-column", "data-label": t!("account-amount"), {format_amount(bid.amount)} }
-            td { "data-label": t!("account-bid-status"),
-                span { class: if bid.leading { "public-account-status public-account-status--live" } else { "public-account-status" }, {leading} }
-            }
             td { "data-label": t!("account-time"), time { datetime: bid.created_at.clone(), "{format_auction_time(&bid.created_at)}" } }
         }
     }

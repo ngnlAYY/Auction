@@ -206,6 +206,7 @@ pub(crate) fn LiveCatalogRow(
         .zip(row.leader_name.as_deref())
         .is_some_and(|(viewer, leader)| viewer == leader);
     let leading = if is_leading { "public-auction-catalog__leading" } else { "" };
+    let leading_status_id = format!("public-auction-leading-status-{}", row.lot_id);
     let countdown = if row.status == "live" {
         countdown_display(&row.remaining, now)
     } else {
@@ -222,7 +223,9 @@ pub(crate) fn LiveCatalogRow(
     let next_bid = format_amount(row.next_bid);
 
     rsx! {
-        tr { class: "{leading}",
+        tr {
+            class: "{leading}",
+            aria_describedby: if is_leading { leading_status_id.clone() } else { String::new() },
             td { "data-label": t!("catalog-code"),
                 Link {
                     class: "public-auction-catalog__code",
@@ -234,6 +237,13 @@ pub(crate) fn LiveCatalogRow(
                 CatalogEquipmentName {
                     name: row.name.clone(),
                     game_equipment_url: row.game_equipment_url.clone(),
+                }
+                if is_leading {
+                    span {
+                        id: leading_status_id.clone(),
+                        class: "public-visually-hidden",
+                        {t!("bid-leading")}
+                    }
                 }
             }
             td {
@@ -273,7 +283,7 @@ pub(crate) fn LiveCatalogRow(
                     CatalogParticipant {
                         name: leader,
                         marker: None,
-                        trailing: is_leading.then(|| t!("catalog-you")),
+                        trailing: None,
                     }
                 } else {
                     span { class: "public-auction-catalog__none", "{leader}" }

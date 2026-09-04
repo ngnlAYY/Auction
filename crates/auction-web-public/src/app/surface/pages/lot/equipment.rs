@@ -43,7 +43,7 @@ impl From<PreviewEquipmentDetail> for EquipmentCardData {
 }
 
 #[component]
-pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
+pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Element {
     let mut stats_page = use_signal(|| 1_i64);
     let stats_page_size = 10_i64;
     let current_stats_page = stats_page().max(1);
@@ -56,8 +56,18 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData) -> Element {
         .category
         .as_deref()
         .map(|category| catalog_category_label(catalog_category_key(category)));
+    let leading_class = if leading { " public-auction-equipment--leading" } else { "" };
     rsx! {
-        div { class: "public-auction-equipment",
+        div {
+            class: "public-auction-equipment{leading_class}",
+            aria_describedby: if leading { "public-auction-equipment-leading" } else { "" },
+            if leading {
+                span {
+                    id: "public-auction-equipment-leading",
+                    class: "public-visually-hidden",
+                    {t!("bid-leading")}
+                }
+            }
             if game_equipment_href.is_empty() {
                 h2 {
                     TruncatedText {
