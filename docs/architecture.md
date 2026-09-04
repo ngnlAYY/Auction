@@ -81,7 +81,7 @@ HTTP listener 或 socket。
 Public 和 Admin 可以分别绑定端口、Unix socket 或反向代理；Public 的 listener 位于主配置，
 Admin 的主配置 listener 是 fallback，存在 runtime 文件时由 runtime listener 覆盖。Worker 可以读取
 同一 runtime 文件中的 MoogleMail 业务区块，但只把它投影为启动快照，不消费 Admin listener/security/
-session/metrics/tracing，也不暴露业务写入 HTTP；所有写入仍必须经过 application owner 的命令端口。这样保留 Auction-BF 的部署
+session/metrics/tracing，也不暴露业务写入 HTTP；所有写入仍必须经过 application owner 的命令端口。这样保持三个角色的部署
 边界，同时把 apps/*/src/main.rs 与各 crate 的 src/lib.rs 压缩为薄组合根；实际实现按
 职责放入带明确 owner 的 src 子目录，禁止在 src 根目录平铺实现文件。
 
@@ -128,7 +128,7 @@ migration 状态，并读取 `public` 关系的估算行数、存储体积、政
 诊断水位和外键依赖；结果只能以不可覆盖的私有证据文件保存。realtime consumer 最小 offset
 不是权威归档水位，外键依赖在政策明确前视为资格阻断因素。该盘点不执行迁移、备份、恢复、
 归档、删除或任何业务写入，`eligibility_assessed` 与 `eligibility_authorized` 必须保持为
-`false`，不能把盘点结果误报为旧版 retention 策略或生产恢复授权。
+`false`，不能把盘点结果误报为 retention mutation 策略或生产恢复授权。
 
 `auctionctl recovery-preflight` 是 PostgreSQL 完整档的另一项只读运维能力。它在同一
 `REPEATABLE READ READ ONLY` 事务中检查目标数据库的 `current_database()`、主节点可写状态、
@@ -196,7 +196,7 @@ Admin 规则发布成功后按语言删除对应 key。读取 miss、快照损�
 拍卖策略。角色文件拥有 listener、tracing、realtime、会话或 Worker 调度，并通过 `secrets_file` 引用
 敏感 TOML。Admin 与 Worker 角色配置可以通过 `runtime_config_file` 指向同一份 Admin 管理的非敏感
 runtime TOML；它承载 Admin 监听、安全策略、会话时限、Worker control 路径、可选 dashboard
-world/mailbox 投影，以及旧版 `worlds`、发件人 allowlist、`equipment_filter` 和 14 个
+world/mailbox 投影，以及兼容 `worlds`、发件人 allowlist、`equipment_filter` 和 14 个
 `mail_templates` 业务区块，不承载数据库 URL、
 Redis URL、会话签名密钥、Admin actor/secret 或外部服务 Cookie。敏感值只存在于敏感文件；
 不兼容旧的单文件字段，也不提供环境变量覆盖。相对路径以角色配置所在目录解析，部署时公共、敏感
@@ -214,7 +214,7 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 单实例锁、stale socket 身份、owner/group 和 `0660` 权限；当前进程退出时只清理自己创建且身份
 未变化的 socket。
 
-Worker 在启动时只投影 runtime 的四类旧版业务配置：启用的 main/isekai、各 world 发件人
+Worker 在启动时只投影 runtime 的四类业务配置：启用的 main/isekai、各 world 发件人
 allowlist、装备过滤和通知模板。transport endpoint、凭据来源、调度、mailbox durable identity 和
 全局 MoogleMail `enabled` 继续由 Worker 主配置拥有，避免一次运营保存意外启动外部请求或切换
 cursor。旧 runtime 完全缺少三个顶层业务区块时保持原 canonical JSON/fingerprint、durable command
@@ -262,7 +262,7 @@ phase 及时间规则；MoogleMail 入站默认起拍价继承同一经济模板
 | Public 真实装备 URL | P09/P11 核对密文 owner 后直接返回完整 URL，响应 `no-store` | lot 可读，URL 留空 |
 | 高可用与扩展 | 可建设故障转移、只读副本和横向扩展 | 不支持多副本、故障转移或网络共享数据库 |
 
-当前仓库仍处于分阶段迁移，这张表定义的是实现上限和验收边界，不表示所有旧版业务功能已经完成。
+当前仓库仍处于分阶段交付，这张表定义的是实现上限和验收边界，不表示所有产品能力已经完成验收。
 以后新增持久化能力时，必须先标明它属于“完整档”“Lite 档”或“两者”，再决定是否需要
 SQLite migration 和 repository 实现。
 
@@ -302,20 +302,19 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 录入目标扩展为 Draft/Preview 可接收状态，并以跨状态唯一索引和延迟一致性触发器保证目标精确匹配；
 `000033` 与 SQLite `000011` 为 Admin realtime 事件的时间倒序分页补齐同义复合索引；
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
-加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和旧版默认阈值/窗口/冷却/重试策略；
+加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和当前默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 使用标准五字段 cron，现行默认 `*/5 * * * *`（每 5 分钟），
 支持描述符、`@every`、进程本地时区和 `TZ=` / `CRON_TZ=` IANA 时区前缀；成功游标和失败退避
 都从同一调度计算下一时刻。Worker 启动时只把旧配置遗留的过晚持久化水位向当前 cron 收敛，暂停、
 活动 claim 和尚未结束的最大失败退避仍保持权威，
-共享 HTTP transport 同时恢复旧版一秒最小请求间隔、15 秒请求超时和可配置安全 endpoint；
+共享 HTTP transport 使用一秒最小请求间隔、15 秒请求超时和可配置安全 endpoint；
 PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、100 条批次、8 并发、
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
 Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 cadence、100 条分阶段批次、PostgreSQL
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
 SQLite `000001` 至 `000011`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
-Public 20 条与 Admin 37 条旧版契约路径，并另行登记 A38-A42 五条 Admin 新增路径，当前 Rust
-feature API 因而为 Public 20 条、Admin 42 条；稳定响应、世界/拍卖/lot 只读查询端口和
+Public 20 条与 Admin 43 条已登记契约路径；稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、Public lot 列表/详情、竞价日志和普通竞价命令返回权威目录或当前公开
 projection，PostgreSQL 完整档的价格历史从结算事实链返回权威成交投影，SQLite Lite 对同一路由返回
@@ -347,7 +346,7 @@ Public/Admin 的浏览器 origin allowlist 只接受唯一的 HTTP(S) scheme+hos
 PostgreSQL 价格历史使用结算账本边界；SQLite Lite 不具备 settlement owner，也不把 `settled`/`sold`
 状态列当作结算证据。Admin A03 拍卖列表 GET 和 A06 lot 列表在 PostgreSQL 完整档分别从同一 Serializable 快照读取生命周期/lot 数量与拍卖/lot/装备/投稿来源安全投影；A15 代理历史从同一快照读取命令账本中的代理计划并映射为安全事件，保留页码与 opaque cursor 两种分页；三者均保留 Admin 会话边界，SQLite Lite 因缺少完整 Admin 生命周期字段明确返回不支持。A40/A41 通过独立 `AdminWorldPort` 暴露数据库权威 world 状态与安全启停命令，不复用只控制 MoogleMail 入站的 runtime 文档开关；关闭检查、revision CAS、命令结果和审计在同一事务内提交。A03 创建拍卖 POST 已接入 PostgreSQL 完整档的命令账本、world/intake target 锁、策略快照、审计和创建事件；SQLite Lite 明确返回不支持。A39 开拍前计划修改只允许 Draft/Preview，在同一 PostgreSQL Serializable 事务内按 world → scheduled round → auction 加锁；Draft 可修改严格有序且均在未来的预览、开拍、结束三项时间，Preview 固定已经发生的预览时间并只允许修改未来的开拍与结束。事务同步拍卖计划列、schema v4 结束策略快照与持久调度三项 due，活动 Worker 租约拒绝修改；过期租约或失败退避由实际变更清除，round 版本递增后陈旧 Worker 不能完成或写回失败。auction/round 版本 CAS、命令账本、审计和 `auction.schedule_updated` 同事务提交，事件 v1 只作权威快照重读唤醒；开放后的运行时结束列与 lot 截止时间不被提前改写，SQLite Lite 明确返回不支持。A04 装备录入已接入 `AdminIntakePort`、固定 HTTPS 装备来源/规范 JSON 适配器、AES-256-GCM key 信封、PostgreSQL Serializable world/target/玩家/装备锁，以及装备、密文、投稿、lot、版本、审计和 realtime 事件的同一事务；`/api/v1/admin/worlds/{world_id}/auction-intake/items` 与 Draft/Preview lot 管理页已接入；录入 target 在正式开拍前始终指向本期，Preview 新增装备会在同一事务追加预览物化项。SQLite Lite 因没有 `equipment_secrets` 和完整录入事务明确返回 `501 feature_not_supported`。Public session、Admin session、账户读取、普通竞价以及代理创建/降低命令的
 command ledger/竞价事务也已接入配置、应用端口与会话/竞价表；Admin session 已覆盖 Basic
-登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回旧版
+登录交换、双 Cookie、CSRF 和持久化轮换/刷新/撤销；账户读取返回代理历史/配额/最近 bid 和 capability，代理命令返回 v1
 `{ authorization: ... }` 完整命令投影；应用层在竞价事务内冻结授权、quota、完整转换历史、终止原因和
 本次 bid，HTTP 不在提交后读取账户投影。旧 `OK + ProxyResult` 与历史 `accepted + CompetitionPlan`
 都经同一防腐层严格重放，历史新版结果只在只读事务按授权版本读取转换历史和冻结策略 quota；
@@ -495,21 +494,21 @@ ownership 标记仍保留在固定帖正文末尾供精确校验，但不作为�
 逐字目标确认和追加审计命令拥有；SQLite Lite 明确不提供该
 完整档。Recovery health 只读取已配置世界的 Balance；未启用世界的结算履约会安全降级为人工对账。
 
-现有 Auction-BF PostgreSQL 数据不会由普通 `migrate` 自动识别或猜测升级。旧库接管由
+canonical PostgreSQL v28 历史格式不会由普通 `migrate` 自动识别或猜测升级。该格式的接管由
 `auction-storage::database::legacy_v28` 独占：只接受 PostgreSQL 18.x 上 migration 28、dirty=false、
 精确 canonical 表集合、零其他 session 且竞价投影可无损恢复的源库。`auctionctl` 先创建并离线验证
 专用 custom-format 备份，再经逐字确认执行接管。执行路径在持有 migration advisory lock 的同一
 物理连接内重新完成只读预检，避免连接池把命令自身误计为外部 session，随后执行 Serializable
 bridge；bridge 将等价覆盖的 SQLx
-`1..=5` 与 `7` 写入当前 checksum 基线，随后只执行剩余前向迁移。普通 restore manifest 与旧版
+`1..=5` 与 `7` 写入当前 checksum 基线，随后只执行剩余前向迁移。普通 restore manifest 与 v28 专用
 manifest 分离，接管成功回执只在 schema identity 和全部内嵌迁移均通过后发布。
-旧版 Public 还允许 `rules_directory` 在数据库之外成为规则读取权威源，因此 canonical v28 接管本身
-不能证明规则已经迁移。该防腐边界由 `auctionctl import-rules-directory` 持有：它要求五种固定语言
+v28 历史格式不包含文件系统 `rules_directory` 中的权威规则，因此数据库接管本身不能证明规则已经
+导入。该防腐边界由 `auctionctl import-rules-directory` 持有：它要求五种固定语言
 文件齐全，先校验全部来源和数据库现状，拒绝覆盖任一不同的 Admin 规则，再通过既有 PostgreSQL
 Admin rules 端口为缺失语言写入 CAS、命令账本和追加审计，并按语言失效可丢弃缓存。导入完成后
 `rules_documents` 才是 Public/Admin 的统一权威源；目录不进入运行时配置，也不成为第二套长期 owner。
-接管后的前向 `000014` 会用当前定义重建旧版生命周期约束触发器，并移除旧版只在 live
-状态隐式入队的论坛触发器；`000015` 会归一化旧版 operations alert 批次并约束迁移后的
+接管后的前向 `000014` 会用当前定义重建历史生命周期约束触发器，并移除历史格式中只在 live
+状态隐式入队的论坛触发器；`000015` 会归一化历史 operations alert 批次并约束接管后的
 delivery 引用，合法的历史终态孤儿不会被伪造为 delivery；`000016` 会建立论坛未知写入人工
 再授权的幂等命令账本。论坛任务发现、领取和 fencing
 继续只由 Worker 持有。
@@ -518,29 +517,28 @@ Public 进程已补齐持久化 stream relay 和进程内有界 Hub：relay 读�
 连接。PostgreSQL 为每个 relay `consumer_key` 持有会话级 advisory owner lock，同 key 的第二个
 Public 实例在启动时失败关闭；SQLite Lite 在同主机以数据库标识与 consumer key 的不可逆摘要建立
 0600 非阻塞 sidecar 文件锁，第二个同 key Public 实例同样启动失败；非 Unix 平台无法取得该锁时
-失败关闭。该实现恢复了旧版 Public
-的低延迟本地广播边界；旧版没有外部广播 sink，未来若新增
-跨进程 sink 必须另行冻结协议，不能把它登记为旧版缺口。
-Public v1 wire 同样保持旧版边界：单拍卖 HTTP 回放要求规范 `auction_id`、默认 100 条并回显目标，
+失败关闭。该实现提供当前 Public 的低延迟本地广播边界；当前契约没有外部广播 sink，未来若新增
+跨进程 sink 必须另行冻结协议。
+Public v1 wire 使用已冻结边界：单拍卖 HTTP 回放要求规范 `auction_id`、默认 100 条并回显目标，
 发现回放只能显式使用 `scope=auctions`；WebSocket 只接受一个目标键且每帧发送一个不含内部
 `stream_key` 的事件。连接层固定 4 KiB frame/message、50/60 秒 Ping/Pong、5 秒写入期限和四类稳定
 close reason；discovery 单独持有每进程 128 槽，普通单拍卖连接不受其限制。连接尝试限流与 mutation
-分账，启用 allowlist 时 origin、query、session 的握手优先级保持旧版；新的 settled 连接由拍卖公开
+分账，启用 allowlist 时 origin、query、session 的握手优先级由 v1 契约固定；新的 settled 连接由拍卖公开
 读取端口在升级前拒绝，既有连接仍可收到终态事件。Dioxus 客户端先完成握手再执行 HTTP catch-up，
 跳号继续回到持久化回放或权威快照；HTTP 恢复后收到的首个新事件只建立该 lot 的
 `state_version`/`fact_index` 基线，后续事件再执行严格连续性校验，避免把有效的非首条 bid fact
 反复判为缺口。current 快照短暂重读时同 world 的实时 target 与已确认 cursor 留在 Public 外壳，
 不会因一次事实刷新从 0 重放或抖动连接。页面同时保留权威读取兜底：readiness 每 10 秒刷新，当前/共享拍卖、目录和活动 lot
-详情每 60 秒刷新；WebSocket 仍是低延迟路径，不要求服务端在 WebSocket 内发送页面。Admin realtime lag/failure 与 delivery 列表恢复
-旧版 `pagination` 信封；A24 旧请求由 HTTP 防腐层稳定派生命令 ID，核心账本不放宽幂等不变量。
-Admin A08 recovery 报告已接入 PostgreSQL 完整档的一致安全投影，SQLite 明确返回不支持；A14 recovery 确认已接入 PostgreSQL 完整档的 Serializable 版本 fence、证据重校验、命令账本、退款激活、guarded relist、审计和预览目录事件；结算事务已为每个获胜 lot 在同一事务中生成 `settlement_recoveries`，SQLite 明确返回不支持。Recovery Worker 已接入 recovery case 的 due 推进、付款超时提醒 action、持久化 claim/fencing、MoogleMail outbox 关联和 delivery 结果证明，并完成严格退回邮件证据绑定、evidence mismatch 阻断、装备领取/载具取消/装备恢复 Take、目标世界和资产摘要 fence、Users owner 幂等买家黑名单 proof；recovery action delivery 也已使用 `pending → prepared → enqueued` 两阶段 identity 和可重放 activation，并在 prepare/activation 前复核 Users owner 的 active 收件人投影；以及 `relist_pending → refunding/completed → completed` 的持久化 resolution 调度；recovery health 按配置的启用世界独立周期读取 Balance，保留最后成功观测并在同一 PostgreSQL 更新中重算逾期、重挂、失败和人工复核计数。旧版五类 action 的静态闭集已经对齐，剩余是外部回执行为验证；现有 501 只表达 SQLite Lite 或未装配依赖的能力边界。Worker 已接入 `scheduled_rounds` 的持久化 due claim、
+详情每 60 秒刷新；WebSocket 仍是低延迟路径，不要求服务端在 WebSocket 内发送页面。Admin realtime lag/failure 与 delivery 列表使用
+已发布的 `pagination` 信封；A24 兼容请求由 HTTP 防腐层稳定派生命令 ID，核心账本不放宽幂等不变量。
+Admin A08 recovery 报告已接入 PostgreSQL 完整档的一致安全投影，SQLite 明确返回不支持；A14 recovery 确认已接入 PostgreSQL 完整档的 Serializable 版本 fence、证据重校验、命令账本、退款激活、guarded relist、审计和预览目录事件；结算事务已为每个获胜 lot 在同一事务中生成 `settlement_recoveries`，SQLite 明确返回不支持。Recovery Worker 已接入 recovery case 的 due 推进、付款超时提醒 action、持久化 claim/fencing、MoogleMail outbox 关联和 delivery 结果证明，并完成严格退回邮件证据绑定、evidence mismatch 阻断、装备领取/载具取消/装备恢复 Take、目标世界和资产摘要 fence、Users owner 幂等买家黑名单 proof；recovery action delivery 也已使用 `pending → prepared → enqueued` 两阶段 identity 和可重放 activation，并在 prepare/activation 前复核 Users owner 的 active 收件人投影；以及 `relist_pending → refunding/completed → completed` 的持久化 resolution 调度；recovery health 按配置的启用世界独立周期读取 Balance，保留最后成功观测并在同一 PostgreSQL 更新中重算逾期、重挂、失败和人工复核计数。五类已登记 action 的静态闭集已经收口，剩余是外部回执行为验证；现有 501 只表达 SQLite Lite 或未装配依赖的能力边界。Worker 已接入 `scheduled_rounds` 的持久化 due claim、
 租约、尝试次数、生命周期 preview/open 调用和指数退避失败记录；Auction 主循环的慢速代理阶段也已
-接入 PostgreSQL/SQLite 数据库时钟驱动的有界 due 扫描、旧版稳定命令身份，以及事务内的
-generation/due/authorization/截止时间/owner 资格 fence。stale candidate 按旧版成功跳过，失格 owner
+接入 PostgreSQL/SQLite 数据库时钟驱动的有界 due 扫描、稳定命令身份，以及事务内的
+generation/due/authorization/截止时间/owner 资格 fence。stale candidate 按契约成功跳过，失格 owner
 原子冻结，成功执行与 `lot.slow_proxy_tick` 审计、竞价事实和持久事件共同提交。PostgreSQL 完整档还接入结算
 workflow 的持久化领取、稳定结算命令、完成 fence 和失败退避，SQLite Lite 明确不启用该
 workflow；`auctionctl verify-legacy-settlement` 通过专用应用端口在同一
-`SERIALIZABLE READ ONLY DEFERRABLE` 快照中核验旧 `settlement_complete/OK` 账本、workflow 身份与
+`SERIALIZABLE READ ONLY DEFERRABLE` 快照中核验历史 `settlement_complete/OK` 账本、workflow 身份与
 权威结算/lot/义务事实，只输出脱敏摘要，且没有清 fence、通用结算或任何写入分支。结算履约还接入了
 delivery/prepare/activation 身份和 outbox 的成功、失败、
 人工对账终态边界；实时消费 runner 已接入 PostgreSQL/SQLite 的持久化游标、失败记录、同
@@ -555,12 +553,12 @@ Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调
 闭集语义展示，不在浏览器重算结算事实；Admin 拍卖列表提供带 CSRF、命令 ID
 和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，发布后只显示可点击的帖子位置和持久化的真实连续处理楼层，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
-同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对照
+同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对于
 `mail_intake` 新 delivery 的 `origin_id` 使用 `world:external_mail_id:send|return|take`；传输与
 幂等复读只为既有 Rust 数据兼容对应的 `delivery-notice|delivery-return|delivery-take` 后缀，
 稳定 command ID、请求摘要、完整 payload 与收件人仍必须逐项一致。
-Auction-BF 的 `forumingest`，论坛 `start/cancel` 和 PM-only 通知在旧版本身就是 warning-only，
-没有连接业务 owner，当前 Rust 保持该兼容边界；若未来要让它们真正改变状态，需要另行冻结
+论坛命令契约将 `start/cancel` 和 PM-only 通知明确限定为 warning-only，没有连接业务 owner；若未来
+要让它们真正改变状态，需要另行冻结
 owner、幂等账本和回执契约。Admin 结算页面先消费 A42 已结算目录，在左侧按 world/期号切换并默认
 选中服务端稳定排序的最新一期，右侧按 UUID 展示 lot 金额表、资金池摘要和带版本 fence 的 recovery
 确认；筛选、场次和目录页写入可恢复的 URL 状态。桌面端左右栏在受限视口内独立滚动，48rem 及以下
@@ -573,16 +571,16 @@ Public/Admin 的统一 HTTP boundary 已补齐请求 ID/命令审计关联、W3C
 panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头读取超时、可信代理地址解析和
 4096 项有界限流器。业务写路由还通过共用严格 JSON 边界恢复 `application/json`、路由级 body
 上限、单 JSON 值和稳定 400/413/415；三条 Public competition mutation 延迟到 rate limit、Origin、
-authentication、query 和 path 之后读取 body，其余路由继续在 route 边界预解析。业务 MethodRouter 显式拒绝 Axum 隐式 HEAD，并用旧版
-JSON 405/`Allow` 响应。错误 DTO 在无业务数据时仍固定输出 `data: null`。静态分派也只向
+authentication、query 和 path 之后读取 body，其余路由继续在 route 边界预解析。业务 MethodRouter 显式拒绝 Axum 隐式 HEAD，并使用
+已冻结的 JSON 405/`Allow` 响应。错误 DTO 在无业务数据时仍固定输出 `data: null`。静态分派也只向
 15 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
-返回 JSON 404，未知浏览器导航返回页面 404，并按旧版恢复 Public/Admin/静态资源缓存策略。
+返回 JSON 404，未知浏览器导航返回页面 404，并执行已冻结的 Public/Admin/静态资源缓存策略。
 Web DTO 单一 owner、首批缓存读模型和静态资源制品级隔离，以及次级部署/所有权边界均已完成；
 Public/Admin 的 Dioxus 构建配置还分别固定了 WASM 启动前的产品标题，避免首屏短暂显示 CLI 默认标题。
-这些已列 owner 不再作为缺失模块处理；2026-08-26 的重新审计确认的 realtime v1 wire、论坛
-两阶段恢复、邮件 retryability、Admin 业务 runtime/稳定错误/凭据列和四项配置默认/安全差异均已
-静态修复；其余可见一致性与外部/部署证据继续按 `legacy-parity-audit.md` 收口。在真实行为证据完成前
-仍不能宣称完整等价。Admin runtime 的人工提前开放与装备来源策略、三进程 SIGINT/SIGTERM、
+这些已列 owner 不再作为缺失模块处理；realtime v1 wire、论坛两阶段恢复、邮件 retryability、
+Admin 业务 runtime、稳定错误、凭据列和配置安全边界均已静态收口。其余可见一致性与外部/部署
+证据必须由对应 owner 单独取得；在真实行为证据完成前仍不能宣称生产验收完成。Admin runtime 的
+人工提前开放与装备来源策略、三进程 SIGINT/SIGTERM、
 有界排空和真实状态心跳也已进入实际运行 owner。
 
 Admin A02 dashboard 已从两套数据库读取 `service_heartbeats` 的 health/process 安全投影，
@@ -607,7 +605,7 @@ world 的 availability、观测时间和最近 Admin 变更时间，其中每个
 `shared` scope 合并，更新时间取二者最新值；不泄漏内部 scope/restart 诊断。mail、realtime、
 delivery、fulfillment、recovery 的安全汇总也已接入 dashboard，其中 mail 为全量 poller、
 realtime 为 lag/failure water、delivery 为 pending/failed/manual-reconcile 水位及年龄字段；
-外部广播状态不属于旧版 dashboard 契约；未来若新增跨进程 sink，必须用独立 section 表达，
+外部广播状态不属于当前 dashboard 契约；未来若新增跨进程 sink，必须用独立 section 表达，
 Public Hub 的当前连接水位不能替代其健康指标。
 
 Admin draft lot 的 `PATCH /api/v1/admin/lots/{lot_id}` 属于 PostgreSQL 完整档能力：

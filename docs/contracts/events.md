@@ -1,8 +1,8 @@
 # 实时事件契约
 
-本文档冻结 Auction-BF 基线中的 Public 实时事件、回放接口和客户端恢复规则，作为
-Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2bba087bcfa0b，
-核对日期为 2026-08-22。
+本文档定义 Auction Rust 的 Public 实时事件、回放接口和客户端恢复规则。事件注册表与 JSON DTO
+由 `auction-contracts` 持有，HTTP/WebSocket 映射由 `auction-http` 持有；任何不兼容变更都必须新增
+schema version，不能依赖仓库外的协议说明。
 
 ## 事件信封
 
@@ -18,12 +18,12 @@ Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2b
 | payload | 经过注册表校验的对象负载 |
 | created_at | 事件创建时间 |
 
-`stream_key` 是持久化和进程内 Hub 的路由字段，不属于旧版 Public v1 事件 JSON。对外的 HTTP
+`stream_key` 是持久化和进程内 Hub 的路由字段，不属于 Public v1 事件 JSON。对外的 HTTP
 `events[]` 与 WebSocket 单事件帧只包含 `event_id`、`stream_sequence`、`kind`、
 `schema_version`、`payload`、`created_at`；目标流由查询参数和回放响应顶层字段表达。
 `created_at` 以及注册 payload 内的时间字符串按 Public RFC3339Nano 规则输出：UTC 使用 `Z`，
 小数秒裁掉尾随零，整秒不追加固定六位小数。存储层不得为 PostgreSQL 已丢失的亚微秒位伪造精度。
-服务端判断零时间时精确沿用旧 Go `time.Time{}` 的 `0001-01-01T00:00:00Z`；Unix epoch 是合法时间，
+服务端判断零时间时使用 `0001-01-01T00:00:00Z`；Unix epoch 是合法时间，
 不能把两者混为一谈。
 
 事件先以 Draft 形式产生，再由数据库分配流序号。业务状态版本和流序号是两个不同
@@ -36,7 +36,7 @@ Rust 迁移阶段的契约输入。基线提交为 f109146e246c6bbfefd7f4749ac2b
 
 ## 已冻结的事件注册表
 
-生产基线当前注册十一种事件 kind、十二个 schema。公开端迁移必须保留 kind 字符串和已发布版本；
+当前生产注册表包含十一种事件 kind、十二个 schema。公开端必须保留 kind 字符串和已发布版本；
 不兼容修改必须新增 schema_version，不能原地改变已有版本的字段含义。
 
 | kind | 版本 | 必填负载字段 | 目标流或用途 |
@@ -60,7 +60,7 @@ auction.settled 的版本 1 和版本 2 同时属于历史兼容面；新发布�
 `mechanism` 必须是字符串闭集 `ordinary` 或 `proxy`，服务端公开投影和浏览器都必须拒绝
 其他类型或枚举值。
 
-preview_catalog_changed 的负载字段沿用旧系统的命名，其中 world 是外部契约
+preview_catalog_changed 的负载字段属于已发布 v1 契约，其中 world 是外部契约
 字段，不应在 Rust 内部未经映射扩散为数据库列名。其状态版本与预览修订号具有
 明确关联，发布前必须通过应用层校验。
 
@@ -84,8 +84,8 @@ Public 提供 GET /api/v1/events 作为权威事件回放入口。冻结的查�
 
 | 参数 | 约束 |
 | --- | --- |
-| auction_id | 旧版单拍卖读取必填；必须是小写规范 UUID，且不能与 `scope` 同时出现 |
-| scope | 新版发现流扩展；只接受显式 `auctions`，且不能与 `auction_id` 同时出现 |
+| auction_id | v1 单拍卖读取必填；必须是小写规范 UUID，且不能与 `scope` 同时出现 |
+| scope | 发现流扩展；只接受显式 `auctions`，且不能与 `auction_id` 同时出现 |
 | after | 可选；规范非负十进制，默认 0，从该序号之后读取 |
 | page_size | 可选；规范正十进制，默认 100，上限 200 |
 
@@ -94,7 +94,7 @@ Public 提供 GET /api/v1/events 作为权威事件回放入口。冻结的查�
 | 字段 | 含义 |
 | --- | --- |
 | auction_id / scope | 单拍卖响应返回规范 `auction_id`；发现扩展响应返回 `scope=auctions` |
-| events | 按 stream_sequence 递增的旧版公开事件数组，不含内部 `stream_key` |
+| events | 按 stream_sequence 递增的 v1 公开事件数组，不含内部 `stream_key` |
 | next_after | 下一次请求使用的游标 |
 | has_more | 是否仍有可读取事件 |
 | refetch_required | 事件保留窗口不足或无法安全续读时要求读取权威快照 |
@@ -122,10 +122,10 @@ Public 提供 GET /api/v1/ws 升级为 WebSocket。连接必须显式选择一�
 - scope=auctions：订阅公开拍卖发现范围。
 
 查询必须且只能包含上述一个键；`after`、`page_size` 或同时出现两个目标都返回 400。每个文本帧
-是一个旧版公开事件对象，不使用 API 外壳，也不发送事件页；发现流只允许
+是一个 v1 公开事件对象，不使用 API 外壳，也不发送事件页；发现流只允许
 `auction.created`。客户端不得把内部 `stream_key` 当作公开字段。
 单拍卖 WebSocket 除核对事件所属 `auction_id` 外，还会把 `auction.created`、`auction.opened`、
-`auction.schedule_updated` 和 `preview_catalog_changed` 中的 world 与当前页面 world 核对；HTTP catch-up 保持旧版只冻结
+`auction.schedule_updated` 和 `preview_catalog_changed` 中的 world 与当前页面 world 核对；HTTP catch-up 按 v1 只冻结
 `auction_id` 的事件页目标语义。
 
 连接使用已认证会话，服务端只推送事件，不把浏览器消息当作业务命令入口。启用 origin allowlist
@@ -136,7 +136,7 @@ origin→query→session。连接尝试限流使用自己的固定窗口账本�
 期限为 60 秒，收到 Pong 后重新延长 60 秒，服务端每 50 秒发送一次 Ping。事件、Ping 和主动 Close
 的每次写入都受 5 秒期限约束。
 
-连接结束语义沿用旧 v1：客户端发送 Text/Binary 时使用 1008/`实时连接只允许服务端推送`；
+连接结束语义由 v1 固定：客户端发送 Text/Binary 时使用 1008/`实时连接只允许服务端推送`；
 Hub 淘汰慢消费者时使用 1013/`连接消费速度过慢`；服务端发现无法安全公开的事件或 discovery
 收到非 `auction.created` 时使用 1002/`实时事件合同错误`；进程 drain 时使用
 1001/`服务正在关闭`。读超限、Pong 超时、底层 framing/读错误以及事件或 Ping 写失败直接结束连接，
@@ -179,18 +179,18 @@ schema 不可识别、序号出现缺口或外部 sink 失败都会写入 `realt
 Rust 已完成 PostgreSQL/SQLite 的游标、失败记录和重放边界适配器，并把可注入的消费 runner
 接入现有 Worker 调度循环。Public 进程另有独立的持久化 relay：按 `auction:` stream 目录追赶
 事件，把 `auction:discovery` 派生流也交给本地有界 Hub；Hub 队列满时淘汰慢连接，relay 只在
-本地 sink 接收后推进对应游标。该链路正是旧版当前 Public 实例的 WebSocket 分发边界；若未来
+本地 sink 接收后推进对应游标。该链路是当前 Public 实例的 WebSocket 分发边界；若未来
 增加外部广播 sink，它属于需要另行冻结协议的新能力。
 
-Admin A21-A24 已接入同一持久化边界：lag、failure 列表/详情只返回安全投影，列表页码保持旧版
-`data.pagination` 信封；replay 的旧版请求只含 `schema_version` 和公开 payload，HTTP 防腐层按
-failure 与修正负载稳定派生 `command_id`。新版客户端仍可显式携带并在重试中复用
+Admin A21-A24 已接入同一持久化边界：lag、failure 列表/详情只返回安全投影，列表页码保持已发布的
+`data.pagination` 信封；replay 的 v1 兼容请求只含 `schema_version` 和公开 payload，HTTP 防腐层按
+failure 与修正负载稳定派生 `command_id`。当前客户端也可显式携带并在重试中复用
 `command_id`。数据库事务会
 锁定原 failure、追加带 `replay_of_event_id` 的新事件、解决 failure、追加 audit，并把结果
 写入 `auction_commands`；同一命令重试返回同一事件投影，负载或 failure 不同则返回冲突。
 
 当前已完成持久化 Catch-up、生产事件注册表和 `/api/v1/ws` 的只读服务端推送：连接使用
-Public session 和有界并发，服务端从本地 Hub 逐帧发送旧版单事件并定期 ping；客户端发送
+Public session 和有界并发，服务端从本地 Hub 逐帧发送 v1 单事件并定期 ping；客户端发送
 文本/二进制消息会关闭连接，Hub 缓冲区满时对应慢连接会被关闭。
 Public Rust 客户端完成握手后先从 HTTP 补齐，HTTP 页与 WebSocket 文本帧共用严格事件 decoder。
 单拍卖 WebSocket 的目标 key 同时包含 auction ID 与 world，带 world 的文本帧必须匹配当前目标。
@@ -201,5 +201,5 @@ Public Rust 客户端完成握手后先从 HTTP 补齐，HTTP 页与 WebSocket �
 `refetch_required` 的页按上述规则保留高水位和现有 socket；只有真实连接结束才按 3 秒间隔重连。
 拍卖页面订阅单一 `auction:{auction_id}` 流，发现目标使用自己的 `auction:discovery` 游标和缓存，
 不能互相污染。页面仍按固定周期读取 readiness、当前/共享拍卖、目录和活动 lot 详情作为权威恢复
-兜底；这些读取不替代 WebSocket 的低延迟路径。Public 本地 relay/Hub 已按旧版恢复低延迟分发。未来若连接外部广播系统，必须使用
+兜底；这些读取不替代 WebSocket 的低延迟路径。Public 本地 relay/Hub 提供低延迟分发。未来若连接外部广播系统，必须使用
 独立 relay/sink 协议，并避免把本地发现流误报为远端投递证明。

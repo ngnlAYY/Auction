@@ -3,7 +3,7 @@
 运行时配置统一使用一份必需的公共非敏感文件、三个角色文件、独立敏感文件和一份可选的 Admin
 runtime 文件：`common.toml` 保存日志、指标、缓存和拍卖策略，角色文件保存 listener、tracing、
 realtime、会话或 Worker 调度，敏感配置保存凭据，runtime TOML 保存可审计的非敏感 Admin 参数与
-旧版 MoogleMail 业务策略。Admin 和 Worker 可以指向同一 runtime 文件，Public 不读取它。进程会在
+MoogleMail 业务策略。Admin 和 Worker 可以指向同一 runtime 文件，Public 不读取它。进程会在
 `ops/config/{role}.toml` 存在时加载对应主配置；`AUCTION_CONFIG_FILE` 只负责选择另一个
 主配置，单个配置项不会从环境变量读取。
 
@@ -49,7 +49,7 @@ Admin 与 Worker 示例的 `runtime_config_file` 都指向
 管理页把安全 JSON 投影呈现为分组开关与输入控件，但保存时仍提交完整候选；服务端校验成功后
 原子替换 `runtime_config_file` 指向的 TOML，因此页面修改不会只停留在浏览器内存中。
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
-MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。旧版可编辑的
+MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。可编辑的
 `worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
 Worker 重启时把它们投影为 MoogleMail 业务快照。transport endpoint、凭据来源、调度、mailbox
 标识和全局 `worker.mooglemail.enabled` 仍由 Worker 主配置拥有。
@@ -143,14 +143,14 @@ HTTPS origin（本地联调可用回环 HTTP），用于把论坛主题中的拍
 失败后仍继续回帖导入。
 
 Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手动唤醒器；`schedule` 使用
-标准五字段 cron，默认 `*/5 * * * *`（每 5 分钟），并支持旧版描述符、`@every` 与显式 IANA
+标准五字段 cron，默认 `*/5 * * * *`（每 5 分钟），并支持描述符、`@every` 与显式 IANA
 时区前缀。
-共享客户端使用旧版默认的一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
+共享客户端默认使用一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
 `item_timeout_seconds` 必须覆盖该请求预算；读取与单封邮件处理分别配置尝试次数、单次总超时和
 指数退避。批次期间按 `renew_interval_seconds` 延长 claim，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，
 默认值和中文注释见 `examples/worker.toml`。若共享 runtime 同时包含完整的 `worlds`、
 `equipment_filter` 和 `mail_templates`，这些业务字段覆盖 Worker 主配置中的对应直接配置；三个区块
-全部缺失时保留直接配置和旧 runtime fingerprint，部分存在则配置失败。确定性业务/输入/配置错误不
+全部缺失时保留直接配置和兼容 runtime fingerprint，部分存在则配置失败。确定性业务/输入/配置错误不
 执行 inline retry，只有可重试依赖错误和超时按配置尝试次数重试，失败时 cursor 不提前推进。
 
 Worker 顶层 `[worker]` 控制 Auction 生命周期、慢速代理和结算主循环。省略并发时 PostgreSQL 使用
@@ -174,4 +174,4 @@ Worker 的 `[worker.fulfillment]` 和 `[worker.recovery]` 只在 PostgreSQL 完�
 Worker 的 `[worker.operations_alert]` 分别调度 scan、dispatch 和 reconcile 三类循环，默认每 60 秒
 加最多 5 秒随机抖动运行一次；抖动上限不能超过轮询间隔。scan/reconcile 受 claim lease 限时，dispatch
 还会为来源读取预留超时。单类循环失败只在下一轮重试，不阻塞另外两类 owner。批次窗口、冷却、重试、
-阈值和正文边界默认值与旧版一致。
+阈值和正文边界使用本仓库定义的默认值。

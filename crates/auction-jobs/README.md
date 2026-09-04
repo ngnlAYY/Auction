@@ -23,10 +23,10 @@ settlement、fulfillment、delivery 或 recovery durable 工作。
 `run_persistent_with_settlement_until_shutdown()` 在装配根注入 slow due 读取/命令端口，并在
 PostgreSQL 完整档额外领取结算 workflow。Auction 主循环立即执行首轮，再按一分钟加最多五秒
 抖动唤醒，依次运行生命周期、慢速代理和结算三个独立阶段；任一阶段失败仍继续后续阶段，也不会
-终止其它 Worker owner。结算命令的 `now` 使用持久化 claim 的 `due_at`，与旧版 task 时钟语义一致，
+终止其它 Worker owner。结算命令的 `now` 使用持久化 claim 的 `due_at`，遵守冻结的 task 时钟语义，
 不会因 Worker 实际领取延迟改变结算事实；workflow、claim 和 complete 身份继续绑定同一 due 世代。
-完成阶段失败会映射到旧版安全错误闭集，单项超时后还会在独立两秒窗口内尽力提交 attempt、固定退避和
-retry 审计；若结算其实已经提交，settled fence 会阻止误写失败进度。慢速代理每轮只按数据库时钟扫描一次有界候选，使用旧版稳定命令身份，
+完成阶段失败会映射到安全错误闭集，单项超时后还会在独立两秒窗口内尽力提交 attempt、固定退避和
+retry 审计；若结算其实已经提交，settled fence 会阻止误写失败进度。慢速代理每轮只按数据库时钟扫描一次有界候选，使用稳定命令身份，
 再由竞价事务核对 generation/due/authorization、截止时间和 owner 资格；stale candidate 成功跳过，
 失格 owner 原子冻结。各阶段最多处理 100 条、按 8 并发波次和 30 秒单项预算执行；SQLite Lite
 的有效并发由配置层固定为 1，且不启用结算 workflow。PostgreSQL 完整档还提供结算履约的 claim/fencing、
@@ -47,13 +47,13 @@ compose 可变状态把上限固定为 1，避免多个 claim 先进入 `sending
 只允许尝试同一 token/fencing 的结果未知写回；若 fence 已失效，则由 lease 加 sending grace
 到期后的防线转入人工对账，禁止重新领取并盲目重发。
 上述 delivery 状态推进均由 PostgreSQL owner 在状态事务内追加审计，Worker 不另建内存审计或
-在事务提交后补写证据。履约应用端口已经识别的依赖、证据和外部结果会以旧版对应的
+在事务提交后补写证据。履约应用端口已经识别的依赖、证据和外部结果会以已登记的
 `error_code` 写入 `pending`、`failed` 或 `manual_reconcile`；尚未完成状态迁移的 claim/持久化
 错误只结束当前项目并保留原 lease/fencing，由下一轮在租约恢复后重试，不由 Worker 猜测新的
 阶段错误码。单轮错误不会终止整个 Worker；只有循环任务异常退出才使进程失败关闭。
 实时消费 runner 已接入
 Worker 循环，并通过 `realtime_consumer_offsets` / `realtime_failures` 提供连续游标、失败停靠
-和显式 replay 边界；旧版只向当前 Public 进程内 Hub 分发，装配根因此不注入不存在的外部 sink，
+和显式 replay 边界；当前契约只向 Public 进程内 Hub 分发，装配根因此不注入不存在的外部 sink，
 未来跨进程广播需要独立协议。结算退信与 MoogleMail
 Sent/Balance 回执对账已接入；PostgreSQL 完整档的论坛主题发布、主题读取和回帖导入也已接入，
 主题任务只为已经实际开放的 `live` 拍卖初始化一次，已发布记录不会因后续状态版本变化再次发帖；
@@ -71,7 +71,7 @@ claim 并推进公平扫描水位，避免多 Worker 交叉覆盖远端正文。
 来源映射和命令账本 actor，MM 通知使用玩家名称。
 随后再经 world 映射、lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
-对应的 MM 通知也会在后续轮次独立重放。接管旧版回帖账本时，Worker 以新算法生成候选 ID，
+对应的 MM 通知也会在后续轮次独立重放。接管历史回帖账本时，Worker 以当前算法生成候选 ID，
 但后续竞价、通知和完成写入统一使用存储端返回的实际既有 ID，避免同一自然键反复冲突并阻断
 整场扫描。主题远端写入结果未知或本地发布证明写入失败时，Worker
 进入 reconciliation-only 并按精确标题 GET：命中只补本地 topic 证明，未命中则持久化
@@ -99,21 +99,21 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 `processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
 租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。
 每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
-默认 `*/5 * * * *`（每 5 分钟），并兼容旧版描述符、`@every`、本地时区和显式 IANA
+默认 `*/5 * * * *`（每 5 分钟），并兼容描述符、`@every`、本地时区和显式 IANA
 时区前缀。Worker 启动会协调持久化调度水位：只把旧配置遗留的过晚时刻向当前 cron 收敛，暂停、
 活动 claim 和失败退避仍由数据库状态决定。远程读取按暂时
 错误有界重试；单封业务错误由应用层冻结为 `Retryable`/`Permanent`，只有前者和超时按配置次数
-重试，确定性输入、配置和业务拒绝立即收口。共享 transport 由配置层恢复旧版一秒最小请求间隔与 15 秒请求超时；
+重试，确定性输入、配置和业务拒绝立即收口。共享 transport 使用一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责
 恢复超时前可能已完成的本地步骤。
-论坛 `start/cancel` 和 PM-only 通知在旧版 `forumingest` 中就是 warning-only，当前保持该兼容
-边界；MM `notify` 已进入 MoogleMail delivery outbox。若未来要扩展这些命令，需先冻结新的论坛/
+论坛 `start/cancel` 和 PM-only 通知在当前论坛命令契约中是 warning-only；MM `notify` 已进入
+MoogleMail delivery outbox。若未来要扩展这些命令，需先冻结新的论坛/
 拍卖 owner、幂等账本和远程回执契约。
 recovery action 现在也使用 `pending → prepared → enqueued` 的两阶段本地 delivery 边界，
 prepare/activation identity 可在 Worker 重启后幂等重放，并在 prepare/activation 前复核 Users
 owner 的 active 收件人资格；`worker/runtime/recovery.rs` 又按 dispatch、activation、blacklist、
-observation 和 retry 拆入 `worker/runtime/recovery/`，只保留 runtime 稳定出口；更广泛的外部回执
-对照和真实部署验证仍在后续阶段。
+observation 和 retry 拆入 `worker/runtime/recovery/`，只保留 runtime 稳定出口；真实外部回执与
+目标部署验证仍需独立运行证据。
 
 Worker control 已提供 UDS-only 的 `live`、`ready`、`status`、`/metrics` 和 MoogleMail poll 唤醒协议；
 `/metrics` 与 control 共享同一 peer credential 校验的 Unix socket 和 Worker 进程 registry，

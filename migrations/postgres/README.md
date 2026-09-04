@@ -2,7 +2,7 @@
 
 PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000033` 已按 owner 追加核心身份、
 拍卖、竞价、代理、结算/履约、生命周期、身份/外部命令、恢复/可观测性和论坛同步对象；
-它们仍是迁移中的目标 schema，不等于旧系统全部行为已经完成。旧名
+它们是当前目标 schema，但不能单独证明全部业务表面已经完成。历史名称
 `bid_proxies` 由末尾只读兼容视图提供，权威写入只进入新授权与历史表。
 `000006` 为 Worker 轮次表追加租约、尝试次数和失败状态，供 `SKIP LOCKED` 领取使用。
 `000007` 为 realtime replay 放宽原始 bid fact 的唯一性边界：唯一性只约束原始事件，
@@ -48,7 +48,7 @@ trigger 只在遗漏 `bids.effective_end_at` 时复制该权威值；新版显�
 `000029` 保存逐主题固定帖同步健康，并以追加式历史记录论坛数字账号和可变玩家名称的变化；
 `000030` 通过迁移前失败关闭检查与 partial unique index，保证邮件和论坛 Cookie 各自最多一条 active。
 `000031` 单独保存每个主题已连续处理到的真实楼层，初始为固定系统帖 #2，禁止用正文版本或远端
-post ID 推算该水位。`000032` 把唯一 intake target 的状态闭集扩展为 Draft/Preview；迁移拒绝旧版
+post ID 推算该水位。`000032` 把唯一 intake target 的状态闭集扩展为 Draft/Preview；迁移拒绝历史
 Preview 与后继 Draft 同时存在的切换窗口，并以跨状态唯一索引、精确复合外键和延迟触发器保证
 正式开拍前目标仍是本期，Open 后才切换到下一期 Draft。`000033` 为 Admin 最近事件的跨流
 新到旧读取追加 `(created_at, event_id)` 索引，不改变事件内容、顺序或消费游标。
@@ -59,8 +59,8 @@ Preview 与后继 Draft 同时存在的切换窗口，并以跨状态唯一索�
 数据库只在既有值精确等于同一固定替换后 SQL 的 SHA-384 时沿用该值，既不改写历史也不接受第三种
 迁移身份。任何其它历史 SQL 漂移仍由 SQLx 失败关闭。
 
-Auction-BF v28 的接管不伪装成一条普通追加迁移。专用 bridge 位于
-`auction-storage/src/database/legacy_v28/`，只在精确旧库预检、已验证备份、零连接和显式确认后
+canonical PostgreSQL v28 历史格式的接管不伪装成一条普通追加迁移。专用 bridge 位于
+`auction-storage/src/database/legacy_v28/`，只在精确格式预检、已验证备份、零连接和显式确认后
 建立 SQLx 等价基线，再继续执行本目录尚未覆盖的前向迁移。
 
 迁移脚本可以使用 PostgreSQL 专属的 SQL、索引和行锁语义，但必须与
