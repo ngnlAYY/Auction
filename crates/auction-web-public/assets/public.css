@@ -1881,9 +1881,12 @@
 }
 
 .public-auction-bid-form p.public-auction-bid-form__confirmation {
+  min-inline-size: 0;
   color: var(--color-text);
   font-size: var(--text-base);
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .public-auction-bid-form__history {
