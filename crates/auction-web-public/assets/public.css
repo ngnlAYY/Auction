@@ -1,5 +1,7 @@
 /* 公开端样式。布局和视觉契约沿用旧版 Auction-BF 公共页面。 */
 
+/* ===== 壳层：页头 / 导航 / 世界切换 / 连接与会话控件 ===== */
+
 .public-shell {
   display: flex;
   min-block-size: 100vh;
@@ -44,9 +46,14 @@
   letter-spacing: 0.02em;
 }
 
-.public-shell__logo:hover,
 .public-shell__logo:focus-visible {
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .public-shell__logo:hover {
+    text-decoration: none;
+  }
 }
 
 .public-shell__nav {
@@ -70,10 +77,16 @@
   color: var(--color-text-muted);
 }
 
-.public-shell__nav a:hover,
 .public-shell__nav a:focus-visible {
   color: var(--color-text);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .public-shell__nav a:hover {
+    color: var(--color-text);
+    text-decoration: none;
+  }
 }
 
 .public-shell__nav a[aria-current="page"] {
@@ -109,9 +122,14 @@
   font-size: inherit;
 }
 
-.public-world-switcher select:hover,
 .public-world-switcher select:focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-world-switcher select:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-connection-badge {
@@ -159,10 +177,16 @@
   white-space: nowrap;
 }
 
-.public-connection-refresh:hover,
 .public-connection-refresh:focus-visible {
   color: var(--color-text);
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-connection-refresh:hover {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
 }
 
 .public-account-session-menu {
@@ -182,11 +206,18 @@
   color: var(--color-accent);
 }
 
-.public-account-session-login:hover,
 .public-account-session-login:focus-visible {
   color: var(--color-accent-contrast);
   background: var(--color-accent);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .public-account-session-login:hover {
+    color: var(--color-accent-contrast);
+    background: var(--color-accent);
+    text-decoration: none;
+  }
 }
 
 .public-account-session-name {
@@ -203,10 +234,16 @@
   background: transparent;
 }
 
-.public-account-session-logout:hover,
 .public-account-session-logout:focus-visible {
   color: var(--color-danger);
   border-color: var(--color-danger);
+}
+
+@media (hover: hover) {
+  .public-account-session-logout:hover {
+    color: var(--color-danger);
+    border-color: var(--color-danger);
+  }
 }
 
 .public-account-session-logout:disabled {
@@ -251,11 +288,19 @@
   background: var(--color-surface-raised);
 }
 
-.public-state-retry:hover,
 .public-state-retry:focus-visible {
   color: var(--color-text);
   border-color: var(--color-link);
 }
+
+@media (hover: hover) {
+  .public-state-retry:hover {
+    color: var(--color-text);
+    border-color: var(--color-link);
+  }
+}
+
+/* ===== 规则页与状态页 ===== */
 
 .public-rules-page {
   max-inline-size: 47.5rem;
@@ -303,6 +348,8 @@
 .public-status-page p {
   margin-block: 1em;
 }
+
+/* ===== 论坛页 ===== */
 
 .public-forum-page {
   display: grid;
@@ -468,11 +515,18 @@
   background: var(--color-surface-raised);
 }
 
-.public-forum-thread__link:hover,
 .public-forum-thread__link:focus-visible {
   border-color: var(--color-link);
   color: var(--color-text);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .public-forum-thread__link:hover {
+    border-color: var(--color-link);
+    color: var(--color-text);
+    text-decoration: none;
+  }
 }
 
 .public-forum-thread__body summary {
@@ -495,6 +549,8 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+/* ===== 拍卖页骨架与视图切换 ===== */
 
 .public-auction-page {
   display: grid;
@@ -534,16 +590,25 @@
   text-decoration: underline;
 }
 
-.public-auction-view-switch__options a:hover,
 .public-auction-view-switch__options a:focus-visible {
   border-color: transparent;
   color: var(--color-accent);
   text-decoration: underline;
 }
 
+@media (hover: hover) {
+  .public-auction-view-switch__options a:hover {
+    border-color: transparent;
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+}
+
 .public-auction-view-switch__status {
   color: var(--color-text-muted);
 }
+
+/* ===== 拍卖历史查看控件 ===== */
 
 .public-auction-history-controls {
   display: flex;
@@ -570,9 +635,14 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-history-controls select:hover,
 .public-auction-history-controls select:focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-auction-history-controls select:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-history-intro {
@@ -604,6 +674,8 @@
   align-items: center;
   gap: var(--space-3);
 }
+
+/* ===== 拍卖轮次 / 状态徽标 / 倒计时 / 摘要 ===== */
 
 .public-auction-round {
   display: flex;
@@ -784,6 +856,8 @@
   text-align: end;
 }
 
+/* ===== 历史筛选（主筛选 / 设置面板 / 筛选网格） ===== */
+
 .public-history-filters {
   margin-block-end: var(--space-4);
 }
@@ -831,15 +905,20 @@
   font: inherit;
 }
 
-.public-history-primary-filters input:hover,
 .public-history-primary-filters input:focus-visible,
-.public-history-primary-filters select:hover,
 .public-history-primary-filters select:focus-visible,
-.public-history-filter-cell input:hover,
 .public-history-filter-cell input:focus-visible,
-.public-history-filter-cell select:hover,
 .public-history-filter-cell select:focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-history-primary-filters input:hover,
+  .public-history-primary-filters select:hover,
+  .public-history-filter-cell input:hover,
+  .public-history-filter-cell select:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-history-filter-toolbar {
@@ -860,11 +939,16 @@
   font: inherit;
 }
 
-.public-history-filter-toolbar button:not(:disabled):hover,
 .public-history-filter-toolbar button:not(:disabled):focus-visible,
-.public-history-settings-close:hover,
 .public-history-settings-close:focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-history-filter-toolbar button:not(:disabled):hover,
+  .public-history-settings-close:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-history-settings-toggle {
@@ -975,11 +1059,16 @@
   font: inherit;
 }
 
-.public-history-filter-grid input:hover,
 .public-history-filter-grid input:focus-visible,
-.public-history-filter-grid select:hover,
 .public-history-filter-grid select:focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-history-filter-grid input:hover,
+  .public-history-filter-grid select:hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-history-filter-actions {
@@ -1001,11 +1090,16 @@
   font: inherit;
 }
 
-.public-history-filter-actions button:not(:disabled):hover,
 .public-history-filter-actions button:not(:disabled):focus-visible,
-.public-history-pagination button:not(:disabled):hover,
 .public-history-pagination button:not(:disabled):focus-visible {
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-history-filter-actions button:not(:disabled):hover,
+  .public-history-pagination button:not(:disabled):hover {
+    border-color: var(--color-accent);
+  }
 }
 
 .public-history-filter-toolbar .public-history-filter-actions__apply {
@@ -1015,6 +1109,8 @@
   background: var(--color-accent);
   font-weight: 600;
 }
+
+/* ===== 历史表格 / 统计 / 分页 ===== */
 
 .public-history-table-wrap {
   overflow-x: auto;
@@ -1107,6 +1203,8 @@
   font-size: var(--text-sm);
 }
 
+/* ===== 拍卖目录筛选标签 ===== */
+
 .public-auction-filter {
   display: flex;
   flex-wrap: wrap;
@@ -1125,10 +1223,16 @@
   background: var(--color-surface);
 }
 
-.public-auction-filter__tab:hover,
 .public-auction-filter__tab:focus-visible {
   color: var(--color-text);
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-auction-filter__tab:hover {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-filter__tab[aria-pressed="true"] {
@@ -1151,6 +1255,8 @@
   color: var(--color-accent);
   background: var(--color-accent-contrast);
 }
+
+/* ===== 通用分页器 ===== */
 
 .ui-pager {
   display: flex;
@@ -1182,9 +1288,11 @@
   cursor: pointer;
 }
 
-.ui-pager button:hover:not(:disabled) {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+@media (hover: hover) {
+  .ui-pager button:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
 }
 
 .ui-pager button:disabled {
@@ -1202,6 +1310,8 @@
 .ui-pager__input {
   inline-size: 5rem;
 }
+
+/* ===== 账户区（登录引导 / 账户表格） ===== */
 
 .public-account-section {
   margin-block-end: var(--space-6);
@@ -1242,11 +1352,18 @@
   color: var(--color-accent);
 }
 
-.public-account-login-cta:hover,
 .public-account-login-cta:focus-visible {
   color: var(--color-accent-contrast);
   background: var(--color-accent);
   text-decoration: none;
+}
+
+@media (hover: hover) {
+  .public-account-login-cta:hover {
+    color: var(--color-accent-contrast);
+    background: var(--color-accent);
+    text-decoration: none;
+  }
 }
 
 .public-account-table-wrap {
@@ -1303,6 +1420,8 @@
 .public-account-code a {
   font-weight: 600;
 }
+
+/* ===== 拍卖目录（分类 / 表格 / 参与者标识） ===== */
 
 .public-auction-category {
   margin-block-end: var(--space-6);
@@ -1365,8 +1484,10 @@
   border-block-end: 0;
 }
 
-.public-auction-catalog tbody tr:hover {
-  background: var(--color-surface-raised);
+@media (hover: hover) {
+  .public-auction-catalog tbody tr:hover {
+    background: var(--color-surface-raised);
+  }
 }
 
 .public-auction-catalog tbody .public-auction-catalog__leading {
@@ -1374,8 +1495,10 @@
   box-shadow: inset var(--space-1) 0 0 var(--color-live);
 }
 
-.public-auction-catalog tbody .public-auction-catalog__leading:hover {
-  background: color-mix(in srgb, var(--color-live) 16%, var(--color-surface));
+@media (hover: hover) {
+  .public-auction-catalog tbody .public-auction-catalog__leading:hover {
+    background: color-mix(in srgb, var(--color-live) 16%, var(--color-surface));
+  }
 }
 
 .public-auction-catalog__code,
@@ -1477,6 +1600,8 @@
   color: var(--color-live);
 }
 
+/* ===== 出价日志 ===== */
+
 .public-auction-bid-log-controls,
 .public-auction-bid-log-toolbar,
 .public-auction-bid-log-pagination {
@@ -1551,10 +1676,12 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-bid-log-empty button:hover,
-.public-auction-bid-log-pagination button:hover:not(:disabled) {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+@media (hover: hover) {
+  .public-auction-bid-log-empty button:hover,
+  .public-auction-bid-log-pagination button:hover:not(:disabled) {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-bid-log-pagination {
@@ -1624,6 +1751,8 @@
   max-inline-size: 18rem;
 }
 
+/* ===== 工具类 ===== */
+
 .public-visually-hidden {
   position: absolute;
   inline-size: 1px;
@@ -1634,7 +1763,8 @@
   white-space: nowrap;
 }
 
-@media (width < 48rem) {
+/* ===== 响应式：出价日志移动端布局 ===== */
+@media (max-width: 48rem) {
   .public-auction-bid-log-table thead {
     display: none;
   }
@@ -1672,6 +1802,8 @@
     max-inline-size: none;
   }
 }
+
+/* ===== 目录操作 / 内联表单 / 对话框 ===== */
 
 .public-auction-catalog__actions {
   min-inline-size: 0;
@@ -1764,10 +1896,16 @@
   font: inherit;
 }
 
-.public-auction-dialog__close:hover,
 .public-auction-dialog__close:focus-visible {
   color: var(--color-text);
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-auction-dialog__close:hover {
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-catalog__actions button {
@@ -1781,10 +1919,16 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-catalog__actions button:not(:disabled):hover,
 .public-auction-catalog__actions button:not(:disabled):focus-visible {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+
+@media (hover: hover) {
+  .public-auction-catalog__actions button:not(:disabled):hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
 }
 
 .public-auction-catalog__actions button:disabled {
@@ -1805,6 +1949,8 @@
   padding-block: var(--space-6);
   text-align: center;
 }
+
+/* ===== 出价表单 ===== */
 
 .public-auction-bid-form {
   display: grid;
@@ -1946,6 +2092,8 @@
   white-space: normal;
 }
 
+/* ===== 代理出价摘要与状态 ===== */
+
 .public-auction-proxy-summary {
   padding-block-start: var(--space-4);
   margin-block-start: var(--space-4);
@@ -1994,33 +2142,13 @@
   color: var(--color-text-muted);
 }
 
-.action-feedback {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-inline-start: 3px solid var(--color-border-strong);
-  background: var(--color-surface-raised);
-  font-size: var(--text-sm);
-}
-
-.action-feedback--success {
-  color: var(--color-live);
-  border-color: var(--color-live);
-}
-
+/* .action-feedback 基础规则与 --success/--error/--notice 变体与 base.css 重复，已去重上移；此处仅保留 public 特有覆盖。 */
 .public-auction-bid-form p.action-feedback--success {
   color: var(--color-live);
   font-weight: 600;
 }
 
-.action-feedback--error {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-.action-feedback--notice {
-  color: var(--color-text-muted);
-  border-color: var(--color-accent);
-}
+/* ===== 轮次列表 ===== */
 
 .public-auction-rounds__intro,
 .public-history-intro {
@@ -2121,6 +2249,8 @@
   gap: var(--space-3);
 }
 
+/* ===== 登录页 ===== */
+
 .public-account-login-page {
   max-inline-size: 26.25rem;
 }
@@ -2187,6 +2317,8 @@
   font-size: var(--text-sm);
 }
 
+/* ===== 黑名单页 ===== */
+
 .public-blacklist-page {
   display: grid;
   gap: var(--space-3);
@@ -2234,6 +2366,8 @@
   inline-size: 14rem;
   white-space: nowrap;
 }
+
+/* ===== 补偿页 ===== */
 
 .public-compensation-page {
   display: grid;
@@ -2350,6 +2484,7 @@
   display: none;
 }
 
+/* ===== 空状态（共用 EmptyState / 拍卖空状态） ===== */
 /* 旧 Public 共用 EmptyState：错误详情与重试入口默认只提供给辅助技术和键盘用户。 */
 .ui-empty-state {
   position: relative;
@@ -2449,12 +2584,14 @@
   border-color: var(--color-link);
 }
 
+/* ===== 响应式：中等屏幕 ===== */
 @media (max-width: 60rem) {
   .public-shell__content {
     inline-size: 100%;
   }
 }
 
+/* ===== 响应式：移动端全局布局 ===== */
 @media (max-width: 48rem) {
   .public-shell__header {
     gap: var(--space-3);
@@ -2712,6 +2849,8 @@
   }
 }
 
+/* ===== 拍品详情页 ===== */
+
 .public-auction-lot__back {
   margin: 0 0 var(--space-3);
 }
@@ -2885,6 +3024,7 @@
   background: color-mix(in srgb, var(--color-live) 8%, transparent);
 }
 
+/* ===== 响应式：拍品详情与论坛移动端布局 ===== */
 @media (max-width: 48rem) {
   .public-auction-lot__grid {
     grid-template-columns: minmax(0, 1fr);
@@ -2991,6 +3131,7 @@
   }
 }
 
+/* ===== 响应式：桌面端紧凑布局 ===== */
 /* 桌面端拍卖信息以快速浏览为主；压缩留白与控件高度，移动端继续保留触控目标尺寸。 */
 @media (min-width: 48.0625rem) {
   .public-shell__content:has(> .public-auction-page) {

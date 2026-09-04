@@ -2,8 +2,8 @@
 
 本 crate 只放 Public 与 Admin 都需要、且没有业务偏向的内容：
 
-- `style/base.css`：primitive/semantic 设计变量（颜色、字号、间距、圆角、层级和表面阴影）、基础排版、
-  `auction-shell` 外壳布局和语言切换器样式。两个 surface 的样式都建立在这些变量之上；窄屏表单
+- `style/base.css`：primitive/semantic 设计变量（颜色、字号、间距、圆角、层级和表面阴影）、基础排版
+  和语言切换器样式。两个 surface 的样式都建立在这些变量之上；窄屏表单
   控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
