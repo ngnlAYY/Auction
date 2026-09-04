@@ -17,6 +17,7 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
             div { class: "public-auction-lot__grid",
                 EquipmentCard {
                     equipment: EquipmentCardData::from(lot.equipment.clone()),
+                    leading: false,
                 }
                 div { class: "public-auction-lot__bidding",
                     dl {
@@ -100,6 +101,7 @@ pub(crate) fn LiveLotDetailView(
             div { class: "public-auction-lot__grid",
                 EquipmentCard {
                     equipment: EquipmentCardData::from(lot.equipment.clone()),
+                    leading: is_leading,
                 }
                 div { class: "public-auction-lot__bidding",
                     dl {
@@ -113,7 +115,7 @@ pub(crate) fn LiveLotDetailView(
                                 CatalogParticipant {
                                     name: leader,
                                     marker: None,
-                                    trailing: is_leading.then(|| t!("catalog-you")),
+                                    trailing: None,
                                 }
                             } else {
                                 span { class: "public-auction-lot__none", {t!("value-empty")} }

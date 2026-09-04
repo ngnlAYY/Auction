@@ -52,6 +52,8 @@ pub(crate) fn LiveCatalogActions(
     } else {
         String::new()
     };
+    // 领先由装备高亮表达；禁用按钮仍通过隐藏说明保留可访问的原因。
+    let visually_hide_leading_reason = can_bid && effective_leading;
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
     let action_name = action();
@@ -128,7 +130,11 @@ pub(crate) fn LiveCatalogActions(
             if (show_proxy_summary && !can_bid) || ordinary_blocked || !proxy_action_enabled {
                 span {
                     id: action_reason_id,
-                    class: "public-auction-catalog__leading-reason",
+                    class: if visually_hide_leading_reason {
+                        "public-visually-hidden"
+                    } else {
+                        "public-auction-catalog__leading-reason"
+                    },
                     role: "note",
                     "{action_reason}"
                 }
