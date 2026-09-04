@@ -17,7 +17,7 @@ pub(crate) use realtime::{
     live_connection_state_name, public_connection_class, public_connection_state,
     public_connection_state_name,
 };
-pub(crate) use world::{WorldPicker, enabled_worlds, world_label};
+pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 
 #[component]
 pub(crate) fn AuctionIndex() -> Element {

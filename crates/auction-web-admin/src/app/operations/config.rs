@@ -8,6 +8,8 @@
 mod form;
 #[path = "config/model.rs"]
 mod model;
+#[path = "config/worlds.rs"]
+mod worlds;
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -18,7 +20,7 @@ use crate::api::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
 
-use self::{form::RuntimeConfigFields, model::RuntimeConfigForm};
+use self::{form::RuntimeConfigFields, model::RuntimeConfigForm, worlds::AdminBusinessWorlds};
 use super::admin_api_error_message;
 
 #[derive(Debug, Clone)]
@@ -356,6 +358,8 @@ pub(super) fn page() -> Element {
             aria_labelledby: "config-title",
             h1 { id: "config-title", {t!("page-config-title")} }
             p { class: "admin-config-intro", {t!("admin-runtime-note")} }
+            AdminBusinessWorlds {}
+            h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
             {content}
         }
     }

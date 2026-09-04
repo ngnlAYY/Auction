@@ -8,15 +8,16 @@ use std::sync::Arc;
 use auction_application::{
     AdminAuctionCreatePort, AdminAuctionSchedulePort, AdminAuctionSummary,
     AdminCreateAuctionCommand, AdminRulesDocument, AdminRulesPort, AdminRulesPublishCommand,
-    AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, ApplicationFuture,
-    AuctionLifecycleCommand, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    AuctionLifecycleResult, AuctionLifecycleService, AuctionPolicyTemplate, Clock,
-    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionService, CreateProxyCommand,
-    ExecuteSlowProxyCommand, LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
+    AdminRulesReader, AdminRulesRequest, AdminUpdateAuctionScheduleCommand, AdminWorldPort,
+    AdminWorldSetEnabledCommand, ApplicationFuture, AuctionLifecycleCommand,
+    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, AuctionLifecycleResult,
+    AuctionLifecycleService, AuctionPolicyTemplate, Clock, CompetitionCommandOutcome,
+    CompetitionCommandPort, CompetitionService, CreateProxyCommand, ExecuteSlowProxyCommand,
+    LowerProxyCommand, PlaceBidCommand, SlowProxyCommandPort,
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
-    AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService,
+    AdminAuctionCreateService, AdminAuctionScheduleService, AdminRulesService, AdminWorldService,
 };
 use auction_domain::CompetitionPlan;
 
@@ -34,6 +35,54 @@ pub use admin_lot::DatabaseAdminLotCommands;
 #[path = "admin/runtime.rs"]
 mod admin_runtime;
 pub use admin_runtime::DatabaseAdminRuntimeCommands;
+
+/// 绑定运行时数据库的 Admin 业务世界读取与启停命令端口。
+pub struct DatabaseAdminWorldCommands {
+    store: Arc<DatabaseStore>,
+}
+
+impl DatabaseAdminWorldCommands {
+    pub fn new(store: Arc<DatabaseStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl AdminWorldPort for DatabaseAdminWorldCommands {
+    fn list_worlds(&self) -> ApplicationFuture<'_, Vec<auction_application::WorldSnapshot>> {
+        let store = Arc::clone(&self.store);
+        Box::pin(async move {
+            let worlds = auction_application::WorldReader::list_worlds(store.as_ref()).await?;
+            if worlds.iter().any(|world| !world.validate()) {
+                return Err(auction_application::AdminWorldError::StoredResultCorrupt.into());
+            }
+            Ok(worlds)
+        })
+    }
+
+    fn set_enabled(
+        &self,
+        command: AdminWorldSetEnabledCommand,
+    ) -> ApplicationFuture<'_, auction_application::WorldSnapshot> {
+        let store = Arc::clone(&self.store);
+        #[cfg(not(feature = "postgres"))]
+        let _ = &command;
+        Box::pin(async move {
+            match store.as_ref() {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    let service = AdminWorldService::new(Arc::new(store.clone()));
+                    service.set_enabled(command).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => {
+                    Err(auction_application::ApplicationError::CapabilityUnavailable(
+                        "Admin 业务世界启停仅支持 PostgreSQL 完整档",
+                    ))
+                }
+            }
+        })
+    }
+}
 
 /// 绑定运行时数据库和时钟的 Public 竞价命令端口。
 pub struct DatabaseCompetitionCommands<C> {

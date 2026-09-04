@@ -52,7 +52,7 @@
 | 切面 | 旧版冻结基线 | 新版覆盖入口 | 当前结论 |
 | --- | --- | --- | --- |
 | Public 业务 HTTP | 20 个唯一路径 | `auction-http` Public routes | 路径齐全；Final、world/open gate、PostgreSQL 锁序、身份化读取认证优先级及规范 UUID 已静态修复，待同库竞价和组合输入 R1 |
-| Admin 业务 HTTP | 37 个唯一路径 | `auction-http` Admin routes | 路径齐全；统一 mutation 安全顺序和论坛预览会话缺口已静态修复；正常非空结算、零税补偿账本、due 事实时间与 claim/retry/final 审计已有隔离局部 R1，其余报告/事件/资金及认证组合仍待 R1 |
+| Admin 业务 HTTP | 37 个唯一路径 | `auction-http` Admin routes | 37 条旧版路径齐全；A38-A42 为明确登记的新增能力，当前 Rust 共 42 条；统一 mutation 安全顺序和论坛预览会话缺口已静态修复；正常非空结算、零税补偿账本、due 事实时间与 claim/retry/final 审计已有隔离局部 R1，其余报告/事件/资金及认证组合仍待 R1 |
 | Public 浏览器路由 | 14 条 | Dioxus `Route` + SPA allowlist | 路径齐全；14 条路径已有 `en` 桌面匿名/空态巡检，分页大小、Catalog 动作、session 四态和 lot 历史列也已静态修复，待动态同数据 R1 |
 | Admin 浏览器路由 | 21 条 | Dioxus `Route` + SPA allowlist | 路径齐全；未知客户端路由已收回 `AdminShell`，既有局部浏览器 R1 保留，列表页大小、绝对过期刷新、dashboard 聚合和 stale delivery dialog 已静态修复，待动态/认证 R1 |
 | 界面语言 | 旧 Public 为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，旧 Admin 仅 `zh-CN` | 新版两套独立 Fluent 资源均支持五种语言 | 启用闭集、默认语言及 `hv.lang` 持久化已对应；双 surface picker、Public 五语言规则/补偿池和最终 Public populated 根页、Admin 登录页五语言初始化均有浏览器 R1，动态变量已恢复旧版无 FSI/PDI 文本；其余逐页换行仍归 EVD-002 |
@@ -82,7 +82,8 @@
 
 最终矩阵必须覆盖以下权威清单，并为每项给出 `等价`、差异、声明边界或证据缺失结论：
 
-- `docs/contracts/routes.md` 的 Public 20 条、Admin 37 条业务 HTTP 路径及健康/metrics 边界。
+- `docs/contracts/routes.md` 的 Public 20 条、Admin 37 条旧版业务 HTTP 路径、A38-A42 五条新增
+  能力及健康/metrics 边界；新增能力不得计入旧版等价基线。
 - `docs/contracts/events.md` 的事件信封、注册表、catch-up、WebSocket 和 Worker 消费游标。
 - `docs/contracts/invariants.md` 的 I-01 至 I-12，包括所有 I-05/I-09 子项。
 - `docs/contracts/schema.md` 的身份、拍卖、结算/recovery、邮件/论坛、实时与告警对象 owner。
@@ -361,6 +362,10 @@
 | PUI-030 | Public 普通出价 K 输入与二次确认 | P2 | 用户批准扩展，静态实施待 R1 | 旧普通出价默认显示 `next_bid` 金额缩写，输入允许 K/M 语法，首次提交立即发送命令，没有二次确认 | 新普通出价边界只把纯数字解释为 K，默认值向上投影到可提交的整 K；第一次提交只建立稳定命令并进入确认步骤，明确确认后才发送 Credits 金额 | 这是用户明确批准的防误操作扩展，不追求旧版逐字交互等价；代理创建/降低继续保留旧金额缩写规则 | 复用同一 modal 和按钮焦点，避免嵌套 dialog；返回修改保留输入与命令 ID，服务端失败仍回到编辑状态并刷新权威快照 | 五份 Public FTL、i18n key-set、Public 原生/WASM、Clippy、rustfmt 与差异空白门禁；仍需浏览器确认默认值、键盘输入、返回修改、Escape/关闭和一次实际确认提交 |
 | BID-021 | Public 代理立即反击的竞价日志压缩 | P2 | 已实施，测试环境 fast 历史 R1；slow/多页待证 | 旧版和冻结新版都会把同一普通竞价命令产生的 challenger `ordinary` 事实与随后 `proxy` 自动应价作为两行公开历史返回 | Public 竞价日志只隐藏同一 `place_bid` 命令、同一 lot、连续 fact/state version 且确由另一用户代理自动反击的 ordinary 行；页面直接显示最终代理应价，不公开代理最高上限 | 这是用户明确批准的公开投影扩展，不追求旧版逐行日志等价；内部 append-only bid、审计、命令重放、realtime 与账户“我的出价”仍保留完整事实 | PostgreSQL/SQLite 的明细与 total 使用同一强配对规则；不按 `valid=false`、时间或任意后续代理启发式过滤，slow 代理短暂领先事实不误隐藏 | 两后端 Storage check/Clippy、rustfmt、仓库策略和差异空白门禁通过；测试环境 main 日志返回 200/total 9，保留 1737K、1916K、2113K 的 proxy 应价与 1111K、2334K 的独立 ordinary，配对的 1654K、1824K、2012K ordinary 不再公开。Public 进程已接管且 live/ready 为 200；同价胜出、slow 代理和多页 cursor/total 仍待 R1 |
 | API-046 | Dashboard MoogleMail `shared` 凭据继承 | P1 | 已实施，shared-only dashboard R1 | Worker 按目标 world 读取专属加 `shared` 凭据池，dashboard 健康投影必须使用同一有效 scope 语义 | 每个 main/isekai availability 现合并专属与 shared 的 active/invalid 计数，更新时间取最新值；只有 shared 时也会生成两个 world 的安全 availability | 冻结实现只精确匹配 world，导致 Worker 实际可用 shared 凭据时 Admin 错报缺失或 degraded | 不改变凭据密文、列表 DTO、重启判断或 Worker 读取；任一有效 scope 有 invalid 仍使该 world 失败关闭 | HTTP all-targets/all-features、全工作区 check/Clippy、rustfmt 与策略门禁通过；测试库只有一条 active `mooglemail:shared`，重启后的 dashboard 对配置的 main 返回 status ok、available 1、invalid 0、restart false，未回显 secret |
+| API-047 | Admin 业务世界启停 | P1 | 用户批准扩展，静态实施待 R1 | 旧 Admin runtime 的 `worlds` 只投影 Worker/MoogleMail 入站配置，没有数据库权威业务关闭命令 | 新 A40/A41 由独立 `AdminWorldPort` 读取/修改 `worlds.enabled`；PostgreSQL 先锁 world，拒绝非 `settled/cancelled` 拍卖或活动未完成 round，再以 `policy_revision` CAS、通用命令账本和追加审计同事务提交 | 这是把“邮件入站开关”和“整个拍卖业务开关”分离的产品扩展；SQLite Lite 只读并明确拒绝 mutation | 关闭失败不得隐藏活动拍卖或留下部分状态；同状态命令作为有账本/审计的 no-op，既有 settlement/delivery/recovery 继续排空 | Application/Storage/HTTP/Admin Web 与工作区编译已通过；仍需 PostgreSQL blocker、stale revision、重放/冲突、审计回滚及 SQLite 501 的认证 R1 |
+| PUI-031 | 禁用世界的当前与历史可见性 | P1 | 用户批准扩展，静态实施待 R1 | 旧版没有独立数据库业务 world 开关，不能提供直接等价基线 | Public 当前选择器、当前拍卖、活动 lot/竞价与 discovery 只接受 enabled world；历史筛选器保留 main/isekai，并仅让 disabled world 的 `settled` auction、lot、bid/account history、price history 和 compensation 继续读取 | 全局删除 `world.enabled` 会泄漏活动场次，全局保留则会抹掉合法历史；实现按状态显式分离 | 公开谓词固定为 `world.enabled OR auction.status='settled'`，但 current/write/discovery 仍须 enabled；`cancelled` 不进入 Public 历史闭集 | PostgreSQL/SQLite SQL、Public 原生/WASM 与工作区编译已通过；仍需禁用后的 current/settled/discovery/URL 组合和两后端同数据 R1 |
+| WRK-013 | 业务世界与每周 bootstrap 收敛 | P1 | 用户批准扩展，静态实施待 R1 | 旧 Worker 从 runtime-enabled worlds 派生拍卖调度世界；没有独立数据库 world 开关 | 新 Worker 的有效 bootstrap 集合为 `[auction.schedule].worlds` allowlist、runtime-enabled worlds 与每次 due 重读的数据库 enabled worlds 交集；关闭世界安全跳过新轮次 | 只在 storage 写入末端拒绝 disabled world 会制造周期性错误，也无法表达干净停用；停止全部 Worker 又会中断既有履约义务 | 仅阻止新 bootstrap；settlement、fulfillment、delivery、recovery 和既有 durable claim 继续按原 fence 排空 | Jobs/Worker/Storage 与工作区编译已通过；仍需运行态启停、并发 due、配置空交集及重启 R1 |
+| AUI-097 | 结算报表多条件选择与分栏 | P2 | 用户批准扩展，静态实施待浏览器 R1 | 旧结算页只读取 settled auction 列表，未提供 world/期号切换，也不自动选择最新项 | 新 A42 以 PostgreSQL Serializable 快照提供 settled-only world/sequence/page 目录和稳定排序；页面左侧选择 world/期号并默认第一页第一项，右侧按 UUID 读取 settlement/recovery，URL 支持返回/前进 | 这是运营效率与布局扩展，不宣称旧版交互等价；SQLite 仍以 501 表达完整档缺失 | 报告必须与目录中的 UUID/world/sequence 精确匹配；用户切换使用 history push，内部 canonicalization 使用 replace；桌面两栏独立滚动，48rem 以下单列自然滚动 | Contracts/Application/Storage/HTTP/Admin Web、五语言和工作区编译已通过；仍需 populated 默认项、跨页/历史导航、慢响应、两视口滚动及 SQLite 501 浏览器 R1 |
 
 2026-08-27 第二轮源码复核确认了 `BID-004` 至 `BID-006`、`SET-001` 和 `SET-002` 五项 P0。
 这些结论不依赖运行态猜测：Final 状态、竞价 SQL 谓词/锁对象、settling 状态与通用快照谓词，以及
@@ -403,7 +408,7 @@ live、ready 均为 200。第三路独立复核随后证明该标注过早：当
 | P06 | POST/GET/DELETE、Public 7 天/30 分钟会话默认值与登录来源返回已静态对应 | PUI-002 |
 | P18-P20 | 写路由、资格锁、显式 proxy mode、严格 JSON、Final/world/open gate 和 PostgreSQL 锁顺序均已静态恢复；待同库及并发竞价 R1 | BID-001、BID-002、BID-004 至 BID-006、API-002 |
 
-### Admin HTTP A01-A37
+### Admin HTTP 旧版 A01-A37 与新增 A38-A42
 
 | 路由 ID | 复核结论 | 关联差异 |
 | --- | --- | --- |
@@ -421,6 +426,9 @@ live、ready 均为 200。第三路独立复核随后证明该标注过早：当
 | A33 | 审计读取路径和安全投影存在；真实追加记录与 Audit/Outbox WebUI 仍缺同库 R1 | EVD-002、EVD-006 |
 | A34 | Delivery 路径、旧嵌套分页、五动作滚动升级 wire/message/数据库时钟、typed 400/404/409/503、默认排序及 populated WebUI 已取得多组隔离 R1；`40001`、坏响应全集、新 origin 五语言和 settlement 联动终态仍待补 | API-001、API-019、API-020、DLY-002 至 DLY-007、AUI-021 至 AUI-024、AUI-050 至 AUI-059 |
 | A35-A37 | 命令路径、fencing、账本和稳定错误反馈已静态恢复；外部/认证 R1 仍保留 | AUI-002（已静态修复）、EVD-001 |
+| A38-A39 | 人工提前结算与开拍前计划修改是登记后的新增能力；静态 owner 已接入，不能计入旧版等价路径 | LIF-003/LIF-004 及对应架构说明 |
+| A40-A41 | 数据库业务世界目录/启停已与 runtime 入站开关分离；blocker、revision CAS、命令账本和审计待认证同库 R1 | API-047、PUI-031、WRK-013 |
+| A42 | settled-only 结算目录、稳定排序和 Admin 多条件选择已接入；待 populated、历史导航与双视口 R1 | AUI-097 |
 
 ### 浏览器路由与语言
 

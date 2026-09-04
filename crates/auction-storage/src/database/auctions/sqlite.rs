@@ -48,9 +48,10 @@ pub(super) async fn list(
             a.state_version,
             COUNT(*) OVER () AS total_count
          FROM auctions AS a
-         INNER JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         INNER JOIN worlds AS w ON w.id = a.world_id
          LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.status = ?
+           AND (w.enabled = 1 OR a.status = 'settled')
            AND (? IS NULL OR a.world_id = ?)
            AND (
                 ? = 0
@@ -167,9 +168,10 @@ pub(super) async fn realtime_status(
              END AS presentation_mode,
              CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM auctions AS a
-         INNER JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         INNER JOIN worlds AS w ON w.id = a.world_id
          LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.id = ?
+           AND (w.enabled = 1 OR a.status = 'settled')
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
            AND (
                a.status <> 'preview'

@@ -118,7 +118,8 @@ async fn list_postgres_transaction(
                 e.attributes AS equipment_attributes
              FROM public.lots AS l
              JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+             JOIN public.worlds AS w
+               ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
              JOIN public.equipment AS e ON e.id = l.equipment_id
              LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
              LEFT JOIN public.users AS leader ON leader.id = l.leader_user_id
@@ -174,7 +175,8 @@ async fn postgres_list_projection(
             END AS presentation_mode,
             (a.status IN ('live', 'final')) AS bidding_open
          FROM public.auctions AS a
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w
+           ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          WHERE a.id = $1
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
@@ -213,7 +215,8 @@ async fn postgres_category_counts(
             COUNT(*) FILTER (WHERE e.category = 'Heavy')::bigint AS hea_count
          FROM public.lots AS l
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w
+           ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          JOIN public.equipment AS e ON e.id = l.equipment_id
          WHERE l.auction_id = $1
            AND (

@@ -15,7 +15,9 @@ mod realtime;
 mod recovery;
 mod rules;
 mod settlement;
+mod settlement_catalog;
 mod users;
+mod worlds;
 
 pub use auction::*;
 pub use audit::*;
@@ -30,4 +32,6 @@ pub use realtime::*;
 pub use recovery::*;
 pub use rules::*;
 pub use settlement::*;
+pub use settlement_catalog::*;
 pub use users::*;
+pub use worlds::*;

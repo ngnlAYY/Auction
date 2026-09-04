@@ -52,7 +52,7 @@ pub(super) async fn list_postgres(
             l.effective_end_at AS closed_at
          FROM public.lots AS l
          JOIN public.auctions AS a ON a.id = l.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w ON w.id = a.world_id
          JOIN public.equipment AS e ON e.id = l.equipment_id
          JOIN public.users AS buyer ON buyer.id = l.leader_user_id
          LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
@@ -127,7 +127,7 @@ pub(super) async fn list_postgres(
                 )::bigint AS median_price
              FROM public.lots AS l
              JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+             JOIN public.worlds AS w ON w.id = a.world_id
              JOIN public.equipment AS e ON e.id = l.equipment_id
              JOIN public.users AS buyer ON buyer.id = l.leader_user_id
              LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id

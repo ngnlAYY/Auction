@@ -112,6 +112,8 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 .strict_methods("DELETE, GET, POST"),
         )
         .route("/api/v1/admin/dashboard", get(admin_dashboard::get))
+        .route("/api/v1/admin/worlds", get(admin_worlds::list))
+        .route("/api/v1/admin/worlds/{world_id}", patch(admin_worlds::set_enabled))
         .route(
             "/api/v1/admin/auctions",
             axum::routing::get(admin_auctions::list)
@@ -140,6 +142,7 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
             "/api/v1/admin/auctions/{auction_id}/settlement-report",
             get(admin_settlement_report),
         )
+        .route("/api/v1/admin/settlement-catalog", get(admin_settlement_catalog::list))
         .route("/api/v1/admin/auctions/{auction_id}/recovery-report", get(admin_recovery_report))
         .route("/api/v1/admin/auctions/{auction_id}/preview", post(admin_preview_auction))
         .route(

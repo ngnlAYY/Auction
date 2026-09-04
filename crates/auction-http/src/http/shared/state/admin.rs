@@ -7,10 +7,10 @@ use auction_application::{
     AdminCredentialHealthReader, AdminCredentialPort, AdminCredentialWorld, AdminForumPreviewPort,
     AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
     AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort,
-    AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
+    AdminWorldPort, AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
     OperationsAlertStore, ProcessReadinessPort, ReadModelCache, RealtimeAdminPort,
-    RecoveryCommandPort, RecoveryReportReader, SettlementReportReader, WorkerControlPort,
-    public_rules_cache_key,
+    RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
+    WorkerControlPort, public_rules_cache_key,
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
@@ -36,8 +36,10 @@ pub struct AdminApiState {
     admin_credentials: Option<Arc<dyn AdminCredentialPort>>,
     admin_renames: Option<Arc<dyn AdminRenameReader>>,
     admin_users: Option<Arc<dyn AdminUserPort>>,
+    admin_worlds: Option<Arc<dyn AdminWorldPort>>,
     recovery_commands: Option<Arc<dyn RecoveryCommandPort>>,
     settlement_report: Option<Arc<dyn SettlementReportReader>>,
+    settlement_catalog: Option<Arc<dyn SettlementCatalogReader>>,
     recovery_report: Option<Arc<dyn RecoveryReportReader>>,
     admin_auctions: Option<Arc<dyn AdminAuctionReader>>,
     admin_lots: Option<Arc<dyn AdminLotReader>>,
@@ -104,8 +106,10 @@ impl AdminApiState {
             admin_credentials,
             admin_renames,
             admin_users,
+            admin_worlds: None,
             recovery_commands,
             settlement_report,
+            settlement_catalog: None,
             recovery_report,
             admin_auctions,
             admin_lots,
@@ -141,6 +145,18 @@ impl AdminApiState {
     /// 注入正式开拍前的计划结束时间修改端口。
     pub fn with_auction_schedule(mut self, schedule: Arc<dyn AdminAuctionSchedulePort>) -> Self {
         self.auction_schedule = Some(schedule);
+        self
+    }
+
+    /// 注入数据库权威的业务世界读取与启停端口。
+    pub fn with_admin_worlds(mut self, worlds: Arc<dyn AdminWorldPort>) -> Self {
+        self.admin_worlds = Some(worlds);
+        self
+    }
+
+    /// 注入结算报表专用的已结算拍卖目录。
+    pub fn with_settlement_catalog(mut self, catalog: Arc<dyn SettlementCatalogReader>) -> Self {
+        self.settlement_catalog = Some(catalog);
         self
     }
 
@@ -232,12 +248,20 @@ impl AdminApiState {
         self.admin_users.as_deref()
     }
 
+    pub(crate) fn admin_worlds(&self) -> Option<&dyn AdminWorldPort> {
+        self.admin_worlds.as_deref()
+    }
+
     pub(crate) fn recovery_commands(&self) -> Option<&dyn RecoveryCommandPort> {
         self.recovery_commands.as_deref()
     }
 
     pub(crate) fn settlement_report(&self) -> Option<&dyn SettlementReportReader> {
         self.settlement_report.as_deref()
+    }
+
+    pub(crate) fn settlement_catalog(&self) -> Option<&dyn SettlementCatalogReader> {
+        self.settlement_catalog.as_deref()
     }
 
     pub(crate) fn recovery_report(&self) -> Option<&dyn RecoveryReportReader> {

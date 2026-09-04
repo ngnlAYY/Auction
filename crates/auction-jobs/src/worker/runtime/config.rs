@@ -36,6 +36,7 @@ impl AuctionScheduleRuntimeConfig {
             && self.preview_minute < 24 * 60
             && self.open_minute < 24 * 60
             && self.end_minute < 24 * 60
+            && !self.worlds.is_empty()
             && self.worlds.len() <= 2
             && self.worlds.iter().all(|world| matches!(world.as_str(), "main" | "isekai"))
             && self.worlds.windows(2).all(|pair| pair[0] != pair[1])

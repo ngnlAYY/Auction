@@ -53,8 +53,9 @@ async fn list_postgres(
         let visible = sqlx::query(
             "SELECT 1
              FROM public.auctions AS auction
-             JOIN public.worlds AS world ON world.id = auction.world_id AND world.enabled
-             WHERE auction.id = $1",
+             JOIN public.worlds AS world ON world.id = auction.world_id
+             WHERE auction.id = $1
+               AND (world.enabled OR auction.status = 'settled')",
         )
         .bind(auction_id)
         .fetch_optional(&mut *transaction)
@@ -68,11 +69,22 @@ async fn list_postgres(
     }
 
     let rows = sqlx::query(
-        "SELECT event_id, stream_key, stream_sequence, kind, schema_version,
-                public_payload, created_at
-         FROM public.realtime_events
-         WHERE stream_key = $1 AND stream_sequence > $2
-         ORDER BY stream_sequence ASC
+        "SELECT event.event_id, event.stream_key, event.stream_sequence, event.kind,
+                event.schema_version, event.public_payload, event.created_at,
+                CASE
+                    WHEN event.stream_key <> 'auction:discovery' THEN TRUE
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM public.auctions AS auction
+                        JOIN public.worlds AS world ON world.id = auction.world_id
+                        WHERE auction.id::text = (event.public_payload ->> 'auction_id')
+                          AND auction.world_id = (event.public_payload ->> 'world_id')
+                          AND (world.enabled OR auction.status = 'settled')
+                    )
+                END AS public_visible
+         FROM public.realtime_events AS event
+         WHERE event.stream_key = $1 AND event.stream_sequence > $2
+         ORDER BY event.stream_sequence ASC
          LIMIT $3",
     )
     .bind(&stream_key)
@@ -91,6 +103,9 @@ async fn list_postgres(
         if index >= request.page_size as usize {
             break;
         }
+        let public_visible: bool = row
+            .try_get("public_visible")
+            .map_err(|_| storage_error("读取 PostgreSQL 实时事件公开边界失败"))?;
         let event = PublicRealtimeEvent {
             event_id: row
                 .try_get("event_id")
@@ -124,6 +139,12 @@ async fn list_postgres(
             refetch_required = true;
         }
         previous_sequence = event.stream_sequence;
+        if !public_visible {
+            // 发现流是跨世界共享序列；隐藏关闭世界的非终态事件时仍推进原始游标，并要求
+            // 客户端回读权威 current 快照，避免在同一不可见事件上永久重连。
+            refetch_required = true;
+            continue;
+        }
         if event.validate().is_err() {
             refetch_required = true;
             continue;
@@ -149,8 +170,9 @@ async fn list_sqlite(
         let visible = sqlx::query(
             "SELECT 1
              FROM auctions AS auction
-             JOIN worlds AS world ON world.id = auction.world_id AND world.enabled = 1
-             WHERE auction.id = ?",
+             JOIN worlds AS world ON world.id = auction.world_id
+             WHERE auction.id = ?
+               AND (world.enabled = 1 OR auction.status = 'settled')",
         )
         .bind(uuid_blob(auction_id))
         .fetch_optional(&mut *connection)
@@ -163,11 +185,29 @@ async fn list_sqlite(
     }
 
     let rows = sqlx::query(
-        "SELECT event_id, stream_key, stream_sequence, kind, schema_version,
-                public_payload, created_at
-         FROM realtime_events
-         WHERE stream_key = ? AND stream_sequence > ?
-         ORDER BY stream_sequence ASC
+        "SELECT event.event_id, event.stream_key, event.stream_sequence, event.kind,
+                event.schema_version, event.public_payload, event.created_at,
+                CASE
+                    WHEN event.stream_key <> 'auction:discovery' THEN 1
+                    WHEN json_valid(event.public_payload) = 0 THEN 0
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM auctions AS auction
+                        JOIN worlds AS world ON world.id = auction.world_id
+                        WHERE lower(hex(auction.id)) = replace(
+                            lower(CAST(json_extract(event.public_payload, '$.auction_id') AS TEXT)),
+                            '-',
+                            ''
+                        )
+                          AND auction.world_id = CAST(
+                              json_extract(event.public_payload, '$.world_id') AS TEXT
+                          )
+                          AND (world.enabled = 1 OR auction.status = 'settled')
+                    )
+                END AS public_visible
+         FROM realtime_events AS event
+         WHERE event.stream_key = ? AND event.stream_sequence > ?
+         ORDER BY event.stream_sequence ASC
          LIMIT ?",
     )
     .bind(&stream_key)
@@ -185,6 +225,10 @@ async fn list_sqlite(
         if index >= request.page_size as usize {
             break;
         }
+        let public_visible = row
+            .try_get::<i64, _>("public_visible")
+            .map_err(|_| storage_error("读取 Lite 实时事件公开边界失败"))?
+            != 0;
         let event = PublicRealtimeEvent {
             event_id: uuid_from_blob(
                 row.try_get("event_id").map_err(|_| storage_error("读取 Lite 实时事件标识失败"))?,
@@ -219,6 +263,11 @@ async fn list_sqlite(
             refetch_required = true;
         }
         previous_sequence = event.stream_sequence;
+        if !public_visible {
+            // Lite 与 PostgreSQL 保持同一共享发现流语义：过滤时推进游标并请求快照刷新。
+            refetch_required = true;
+            continue;
+        }
         if event.validate().is_err() {
             refetch_required = true;
             continue;

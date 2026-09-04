@@ -5,6 +5,9 @@ use super::*;
 /// 公开端世界选择器；世界是否可用由服务端目录决定，切换后重新读取权威当前拍卖。
 #[component]
 pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
+    let route = use_route::<Route>();
+    let history_owns_world_filter =
+        matches!(&route, Route::AuctionList {} | Route::BidLog {} | Route::History {});
     let worlds = use_resource(fetch_worlds);
     let (options, worlds_loaded) = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => (header_worlds(worlds), true),
@@ -25,7 +28,7 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     use_effect(move || {
         if selected_world() != active_for_effect {
             selected_world.set(active_for_effect.clone());
-            if !can_canonicalize {
+            if !can_canonicalize || history_owns_world_filter {
                 return;
             }
             // 旧版只有服务端目录使当前世界失效时才 replace URL；缺失或非法 world 只在内存回退 Main。
@@ -52,6 +55,9 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
                 onchange: move |event| {
                     let world = event.value();
                     selected_world.set(world.clone());
+                    if history_owns_world_filter {
+                        return;
+                    }
                     update_public_query(
                         |query| {
                             // 主世界沿用旧版无参数 URL；用户主动切换要建立可返回的历史条目。
@@ -82,20 +88,21 @@ fn header_worlds(worlds: &Worlds) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn enabled_worlds(worlds: &Worlds) -> Vec<String> {
-    let mut enabled = worlds
+/// 历史筛选保留两个受支持世界；业务开关只隐藏当前/可操作世界，不抹除 settled 事实。
+pub(crate) fn supported_worlds(worlds: &Worlds) -> Vec<String> {
+    let mut supported = worlds
         .worlds
         .iter()
-        .filter(|(world, status)| is_supported_world(world) && status.enabled)
+        .filter(|(world, _)| is_supported_world(world))
         .map(|(world, _): (&String, &WorldStatus)| world.clone())
         .collect::<Vec<_>>();
     // 旧版页面筛选器固定以 Main 为首项。
-    enabled.sort_by_key(|world| match world.as_str() {
+    supported.sort_by_key(|world| match world.as_str() {
         "main" => 0_u8,
         "isekai" => 1_u8,
         _ => 2_u8,
     });
-    enabled
+    supported
 }
 
 fn is_supported_world(world: &str) -> bool {

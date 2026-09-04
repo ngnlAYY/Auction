@@ -82,7 +82,8 @@ pub(in crate::database::lots) async fn detail_postgres(
                 e.attributes AS equipment_attributes
              FROM public.lots AS l
              JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+             JOIN public.worlds AS w
+               ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
              JOIN public.equipment AS e ON e.id = l.equipment_id
              LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
              LEFT JOIN public.users AS leader ON leader.id = l.leader_user_id
@@ -138,7 +139,8 @@ async fn postgres_detail_projection(
             (a.status IN ('live', 'final')) AS bidding_open
          FROM public.lots AS target
          JOIN public.auctions AS a ON a.id = target.auction_id
-         JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         JOIN public.worlds AS w
+           ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
          LEFT JOIN public.lots AS current_lot ON current_lot.auction_id = a.id
          WHERE target.id = $1
            AND (

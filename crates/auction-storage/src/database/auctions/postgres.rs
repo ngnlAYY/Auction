@@ -50,10 +50,11 @@ pub(super) async fn list(
             a.state_version,
             COUNT(*) OVER ()::bigint AS total_count
          FROM public.auctions AS a
-         INNER JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         INNER JOIN public.worlds AS w ON w.id = a.world_id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          LEFT JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
          WHERE a.status = $1
+           AND (w.enabled OR a.status = 'settled')
            AND ($2::text IS NULL OR a.world_id = $2)
            AND (
                 NOT $3::boolean
@@ -168,9 +169,10 @@ pub(super) async fn realtime_status(
              END AS presentation_mode,
              (a.status IN ('live', 'final')) AS bidding_open
          FROM public.auctions AS a
-         INNER JOIN public.worlds AS w ON w.id = a.world_id AND w.enabled
+         INNER JOIN public.worlds AS w ON w.id = a.world_id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
          WHERE a.id = $1
+           AND (w.enabled OR a.status = 'settled')
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
            AND (
                a.status <> 'preview'

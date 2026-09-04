@@ -16,6 +16,8 @@ mod admin_rules;
 mod admin_runtime_config;
 #[path = "admin/users/mod.rs"]
 mod admin_users;
+#[path = "admin/worlds.rs"]
+mod admin_worlds;
 #[path = "auction/commands.rs"]
 mod auction;
 #[path = "auction/competition.rs"]
@@ -49,6 +51,7 @@ pub use admin_mail::AdminMailService;
 pub use admin_rules::AdminRulesService;
 pub use admin_runtime_config::AdminRuntimeConfigService;
 pub use admin_users::AdminUserService;
+pub use admin_worlds::AdminWorldService;
 pub use auction::{AuctionService, CreateAuctionCommand};
 pub use competition::{
     CREATE_PROXY_COMMAND_KIND, CompetitionService, CreateProxyCommand, LOWER_PROXY_COMMAND_KIND,

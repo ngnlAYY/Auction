@@ -220,6 +220,7 @@ pub(super) async fn run_worker(
     let result = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,
+            worlds: Some(store.clone()),
             lifecycle,
             slow_proxy_due: Some(slow_proxy_due),
             slow_proxy_commands: Some(slow_proxy_commands),
@@ -360,13 +361,19 @@ fn configure_schedule_runtime(
             .map(|value| value.hour() as u16 * 60 + value.minute() as u16)
             .map_err(|_| anyhow::anyhow!("auction.schedule 时间配置无效"))
     };
-    let mailboxes = config
-        .worker
-        .mooglemail
-        .configured_worlds()
-        .into_iter()
-        .map(|world| (world.world_id, world.mailbox_key))
-        .collect();
+    let runtime_worlds =
+        config.worker.mooglemail.configured_worlds().into_iter().collect::<Vec<_>>();
+    let worlds = schedule
+        .worlds
+        .iter()
+        .filter(|world_id| {
+            runtime_worlds.iter().any(|world| world.world_id.as_str() == world_id.as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    anyhow::ensure!(!worlds.is_empty(), "auction.schedule.worlds 与 runtime 启用世界没有交集");
+    let mailboxes =
+        runtime_worlds.into_iter().map(|world| (world.world_id, world.mailbox_key)).collect();
     Ok(Some(auction_jobs::AuctionScheduleRuntimeConfig {
         enabled: true,
         timezone: schedule.timezone.clone(),
@@ -376,7 +383,7 @@ fn configure_schedule_runtime(
         open_minute: parse_clock(&schedule.open_time)?,
         end_weekday: parse_day(&schedule.nominal_end_day)?,
         end_minute: parse_clock(&schedule.nominal_end_time)?,
-        worlds: schedule.worlds.clone(),
+        worlds,
         policy: config.auction.policy(),
         mail,
         mailboxes,

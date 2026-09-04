@@ -8,10 +8,11 @@ use crate::{
     AdminAuditError, AdminCredentialError, AdminForumPreviewError, AdminIntakeError,
     AdminLotUpdateError, AdminMailError, AdminMailTransactionError, AdminRulesError,
     AdminRulesTransactionError, AdminRuntimeCommandError, AdminRuntimeConfigError,
-    AdminRuntimeFileError, AdminUserError, CommandLedgerError, CompetitionTransactionError,
-    DeliveryAdminError, ForumRemoteError, MailProcessingError, OperationsAlertError,
-    RealtimeAdminError, RecoveryCommandError, RepositoryError, SettlementTransactionError,
-    SettlementTransactionFailure, TransactionFailure, TransactionPolicyError,
+    AdminRuntimeFileError, AdminUserError, AdminWorldError, CommandLedgerError,
+    CompetitionTransactionError, DeliveryAdminError, ForumRemoteError, MailProcessingError,
+    OperationsAlertError, RealtimeAdminError, RecoveryCommandError, RepositoryError,
+    SettlementTransactionError, SettlementTransactionFailure, TransactionFailure,
+    TransactionPolicyError,
 };
 use serde_json::Error as JsonError;
 
@@ -126,6 +127,9 @@ pub enum ApplicationError {
 
     #[error(transparent)]
     AdminUser(#[from] AdminUserError),
+
+    #[error(transparent)]
+    AdminWorld(#[from] AdminWorldError),
 
     #[error(transparent)]
     MailProcessing(#[from] MailProcessingError),

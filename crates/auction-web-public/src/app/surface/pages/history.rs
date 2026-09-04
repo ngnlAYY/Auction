@@ -16,7 +16,7 @@ pub(crate) fn AuctionList() -> Element {
     let refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
-        Some(Ok(worlds)) => enabled_worlds(worlds),
+        Some(Ok(worlds)) => supported_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
     let auctions = use_resource({

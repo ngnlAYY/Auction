@@ -50,6 +50,7 @@ where
     run_persistent_with_settlement_until_shutdown(
         PersistentWorker {
             schedule,
+            worlds: None,
             lifecycle,
             slow_proxy_due: None,
             slow_proxy_commands: None,
@@ -132,6 +133,9 @@ where
         return Err(WorkerError::InvalidFulfillmentConfiguration);
     }
     if worker.slow_proxy_due.is_some() != worker.slow_proxy_commands.is_some() {
+        return Err(WorkerError::InvalidAuctionConfiguration);
+    }
+    if worker.schedule_runtime.is_some() && worker.worlds.is_none() {
         return Err(WorkerError::InvalidAuctionConfiguration);
     }
     if worker.worker_id.is_empty() || worker.worker_id != worker.worker_id.trim() {

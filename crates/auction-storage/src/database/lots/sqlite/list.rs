@@ -105,7 +105,8 @@ async fn list_sqlite_transaction(
                 e.attributes AS equipment_attributes
              FROM lots AS l
              JOIN auctions AS a ON a.id = l.auction_id
-             JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+             JOIN worlds AS w
+               ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
              JOIN equipment AS e ON e.id = l.equipment_id
              LEFT JOIN auction_submissions AS submission ON submission.id = l.submission_id
              LEFT JOIN users AS leader ON leader.id = l.leader_user_id
@@ -150,7 +151,8 @@ async fn sqlite_list_projection(
                  WHEN a.status = 'preview' THEN 'opening' ELSE 'live' END AS presentation_mode,
             CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM auctions AS a
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w
+           ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.id = ? AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
            AND (a.status IN ('live', 'final', 'settling', 'settled') OR NOT EXISTS (
@@ -185,7 +187,8 @@ async fn sqlite_category_counts(
             COUNT(CASE WHEN e.category = 'Heavy' THEN 1 END) AS hea_count
          FROM lots AS l
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w
+           ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          WHERE l.auction_id = ?
            AND ((? = 'preview' AND a.status = 'preview' AND l.status = 'pending')

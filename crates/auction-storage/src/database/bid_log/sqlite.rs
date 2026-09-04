@@ -39,7 +39,7 @@ pub(super) async fn list_sqlite(
     let projection = sqlx::query(
         "SELECT a.id
          FROM auctions AS a
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          WHERE a.id = ?
            AND a.status IN ('live', 'final', 'settled')
            AND (? IS NULL OR a.world_id = ?)",
@@ -91,7 +91,7 @@ pub(super) async fn list_sqlite(
          FROM bids AS b
          JOIN lots AS l ON l.id = b.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          JOIN users AS users ON users.id = b.bidder_user_id
          JOIN auction_commands AS command ON command.command_id = b.command_id
@@ -203,7 +203,8 @@ pub(super) async fn list_sqlite(
                  FROM bids AS b
                  JOIN lots AS l ON l.id = b.lot_id
                  JOIN auctions AS a ON a.id = l.auction_id
-                 JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+                 JOIN worlds AS w
+                   ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
                  JOIN equipment AS e ON e.id = l.equipment_id
                  JOIN users AS users ON users.id = b.bidder_user_id
                  JOIN auction_commands AS command ON command.command_id = b.command_id

@@ -73,7 +73,11 @@ pub(crate) async fn fetch_admin_settlement(
     }
     let payload: ApiResponse<StrictSettlementReport> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_settlement_report(payload.data).map_err(invalid_response_error)
+    let report = decode_settlement_report(payload.data).map_err(invalid_response_error)?;
+    if report.auction.id != auction_id || report.auction.status != "settled" {
+        return Err(invalid_response_error("settlement_report_owner"));
+    }
+    Ok(report)
 }
 
 fn decode_settlement_report(

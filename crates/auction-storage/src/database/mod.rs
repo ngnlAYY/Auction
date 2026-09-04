@@ -88,7 +88,7 @@ mod credentials;
 pub use commands::{
     DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
-    DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
+    DatabaseAdminWorldCommands, DatabaseAuctionLifecycleCommands, DatabaseCompetitionCommands,
 };
 #[cfg(feature = "postgres")]
 pub use credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
@@ -158,6 +158,8 @@ mod rules;
 mod scheduler;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod sessions;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod settlement_catalog;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod settlement_commands;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

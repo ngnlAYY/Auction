@@ -61,7 +61,8 @@ pub(in crate::database::lots) async fn detail_sqlite(
                 e.category AS equipment_category, e.attributes AS equipment_attributes
              FROM lots AS l
              JOIN auctions AS a ON a.id = l.auction_id
-             JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+             JOIN worlds AS w
+               ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
              JOIN equipment AS e ON e.id = l.equipment_id
              LEFT JOIN auction_submissions AS submission ON submission.id = l.submission_id
              LEFT JOIN users AS leader ON leader.id = l.leader_user_id
@@ -110,7 +111,8 @@ async fn sqlite_detail_projection(
             CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM lots AS target
          JOIN auctions AS a ON a.id = target.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w
+           ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          LEFT JOIN lots AS current_lot ON current_lot.auction_id = a.id
          WHERE target.id = ?
            AND ((a.status = 'preview' AND target.status = 'pending')
