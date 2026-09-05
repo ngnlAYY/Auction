@@ -4013,3 +4013,21 @@
 [aria-invalid="true"] {
   border-color: var(--color-status-error);
 }
+
+/* ===== 打印样式（@media print） ===== */
+/* 管理端按需最小支持：隐藏壳层导航、头部操作区、告警横幅与弹窗按钮组；
+ * 浅色纸面配色、弹窗/分页器隐藏与表格防截断由 base.css 打印分节统一承担。
+ * 表头排序按钮（.admin-sort-trigger）含有列名文本，不在打印时隐藏，仅隐藏排序箭头。 */
+
+@media print {
+  .admin-shell__skip,
+  .admin-shell__nav,
+  .admin-shell__nav-toggle,
+  .admin-shell__controls,
+  .admin-shell__banner,
+  .admin-shell__dialog-actions,
+  .admin-sort-arrow,
+  .admin-users-history-tooltip {
+    display: none;
+  }
+}

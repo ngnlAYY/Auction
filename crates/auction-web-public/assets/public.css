@@ -108,8 +108,11 @@
 }
 
 .public-world-switcher > span {
+  min-inline-size: 0;
+  overflow: hidden;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -136,12 +139,15 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  min-inline-size: 0;
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-full);
   background: var(--color-surface-raised);
   font-size: var(--text-sm);
-  white-space: nowrap;
+  /* 状态文案（如 en "Manual refresh required"）较长时不 nowrap：仅在头部空间不足
+     溢出的情况下折行，正常宽度下与单行渲染一致。 */
+  white-space: normal;
 }
 
 .public-connection-badge::before {
@@ -955,9 +961,12 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-inline-size: 0;
   padding: var(--space-2) var(--space-4) !important;
   border-radius: var(--radius-md) !important;
-  white-space: nowrap;
+  /* en 长文案在极窄屏下允许折行（按钮内直接文本节点无法用 text-overflow 截断）；
+     正常宽度下与 nowrap 渲染一致，仅在溢出时生效。 */
+  white-space: normal;
 }
 
 .public-history-active-count {
@@ -2661,7 +2670,12 @@
 }
 
 .public-auction-equipment__fact dt {
+  /* en 长标签溢出时截断（值为 TruncatedText 或短数字，自身已有防护）；
+     正常宽度下不触发，视觉不变。 */
+  min-inline-size: 0;
+  overflow: hidden;
   color: var(--color-text-muted);
+  text-overflow: ellipsis;
 }
 
 .public-auction-equipment__fact dd {
@@ -3066,5 +3080,59 @@
   .public-auction-proxy-summary h2 {
     margin-block-end: var(--space-2);
     font-size: var(--text-base);
+  }
+}
+
+/* ===== 打印样式（@media print） ===== */
+/* 规则页 / 黑名单 / 补偿流水是典型存证打印场景：隐藏壳层导航、头部控件（世界切换 /
+ * 连接状态 / 语言）与操作按钮（重试、补偿展开、分页器——分页器由 base.css 统一隐藏）；
+ * 浅色纸面配色与弹窗隐藏由 base.css 打印分节统一承担。
+ * 宽表容器放开横向滚动避免裁切，表格单元格允许折行以适配纸面宽度；
+ * 规则页外部链接打印时附显 URL，便于纸面溯源。 */
+
+@media print {
+  .public-shell__skip,
+  .public-shell__nav,
+  .public-shell__nav-toggle,
+  .public-shell__controls,
+  .public-state-retry,
+  .public-compensation-expand {
+    display: none;
+  }
+
+  /* 壳层页头只保留标识，去掉分隔边框与固定内距，让位给正文。 */
+  .public-shell__header {
+    padding: 0 0 var(--space-3);
+    border-block-end: none;
+  }
+
+  .public-shell__content {
+    padding: 0;
+  }
+
+  /* 横向滚动容器放开溢出（配合单元格折行，宽表不被裁切）。 */
+  .public-blacklist-table-wrap,
+  .public-auction-rounds__table {
+    overflow-x: visible;
+  }
+
+  /* 存证表格单元格打印时允许折行，避免 nowrap 撑出纸面。 */
+  .public-blacklist-table th,
+  .public-blacklist-table td,
+  .public-compensation-table th,
+  .public-compensation-table td,
+  .public-compensation-movement-table th,
+  .public-compensation-movement-table td,
+  .public-auction-rounds__table th,
+  .public-auction-rounds__table td {
+    white-space: normal;
+  }
+
+  /* 规则页外部链接附显 URL（内部锚链接不附显，避免噪音）。 */
+  .public-rules-page__document a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
   }
 }

@@ -2,7 +2,20 @@
 
 use super::model::Inline;
 
+/// 行内解析递归深度上限：恶意或病态嵌套（如 `[[[[…]]]]`、交错强调标记）会逐层递归，
+/// 超限后把剩余内容按纯文本处理，避免栈耗尽或指数级解析开销。
+const MAX_INLINE_DEPTH: usize = 8;
+
 pub(super) fn parse_inline(value: &str) -> Vec<Inline> {
+    parse_inline_at(value, 0)
+}
+
+fn parse_inline_at(value: &str, depth: usize) -> Vec<Inline> {
+    if depth >= MAX_INLINE_DEPTH {
+        // 超限：不再解析任何行内语法，整段按纯文本返回。
+        return vec![Inline::Text(value.to_owned())];
+    }
+
     let mut nodes = Vec::new();
     let mut text = String::new();
     let mut index = 0;
@@ -30,7 +43,7 @@ pub(super) fn parse_inline(value: &str) -> Vec<Inline> {
             && let Some(target) = safe_link_target(&target)
         {
             flush_text(&mut nodes, &mut text);
-            nodes.push(Inline::Link { label: parse_inline(&label), target });
+            nodes.push(Inline::Link { label: parse_inline_at(&label, depth + 1), target });
             index += consumed;
             continue;
         }
@@ -48,7 +61,7 @@ pub(super) fn parse_inline(value: &str) -> Vec<Inline> {
                 && close > 0
             {
                 flush_text(&mut nodes, &mut text);
-                let nested = parse_inline(&inner[..close]);
+                let nested = parse_inline_at(&inner[..close], depth + 1);
                 nodes.push(kind.build(nested));
                 index += marker.len() + close + marker.len();
                 handled = true;

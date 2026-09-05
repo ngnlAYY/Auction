@@ -196,6 +196,8 @@ button:disabled {
 .shared-markdown h5,
 .shared-markdown h6 {
   margin-block: var(--space-5) var(--space-2);
+  /* 标题带锚点 id，# 跳转时预留顶部空间，避免被吸顶头部遮住。 */
+  scroll-margin-block-start: var(--space-6);
 }
 
 .shared-markdown p,
@@ -615,5 +617,102 @@ button:disabled {
     border-block-end: none;
     border-inline: none;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+}
+
+/* ===== 打印样式（@media print） ===== */
+/* 存证打印场景（规则 / 黑名单 / 补偿流水）：整体切换浅色纸面配色（覆盖 dark color-scheme，
+   仅重写 token，组件无需改动）；隐藏弹窗与悬浮 tooltip；截断文本还原全文（存证需要完整
+   内容）；横向滚动容器放开溢出以免打印裁切；响应式卡片表格恢复行式表格形态；表行避免
+   跨页断裂。 */
+
+@media print {
+  :root {
+    color-scheme: light;
+    --color-bg: #ffffff;
+    --color-surface: #ffffff;
+    --color-surface-raised: #ffffff;
+    --color-border: #9aa4b2;
+    --color-border-strong: #5b6675;
+    --color-text: #14181f;
+    --color-text-muted: #4a5462;
+    --color-accent: #8a6410;
+    --color-accent-contrast: #14181f;
+    --color-live: #1f7a45;
+    --color-warning: #8a6410;
+    --color-danger: #b03030;
+    --color-link: #1a56c4;
+    --color-overlay: transparent;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  /* 阴影在纸面上只会形成灰雾，统一去除。 */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+  }
+
+  /* 弹窗遮罩与悬浮 tooltip 不属于纸面内容。 */
+  .ui-dialog,
+  .shared-truncated-text__tooltip,
+  .ui-truncated-text__tooltip {
+    display: none !important;
+  }
+
+  /* 分页器是交互控件，打印时隐藏（存证以当前页全文为准）。 */
+  .ui-pager {
+    display: none;
+  }
+
+  /* 截断文本组件：打印时还原完整文本。 */
+  .shared-truncated-text,
+  .ui-truncated-text {
+    max-inline-size: none;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  /* 横向滚动容器在打印时会裁切超出部分，放开溢出保留完整表格。 */
+  .ui-table--scroll {
+    overflow-x: visible;
+  }
+
+  /* 表行与单元格避免跨页断裂。 */
+  tr,
+  td,
+  th {
+    break-inside: avoid;
+  }
+
+  /* 响应式卡片表格（窄屏卡片模式，A4 纵向默认页宽也会命中 48rem 断点）在打印时
+     恢复行式表格形态：表头回显、行与单元格恢复 table 布局、隐藏 data-label 回显。
+     本块与上方卡片模式规则同优先级且位置靠后，打印时稳定覆盖。 */
+  .ui-table--responsive {
+    display: table;
+  }
+
+  .ui-table--responsive thead {
+    display: table-header-group;
+  }
+
+  .ui-table--responsive tbody {
+    display: table-row-group;
+  }
+
+  .ui-table--responsive tr {
+    display: table-row;
+  }
+
+  .ui-table--responsive td {
+    display: table-cell;
+  }
+
+  .ui-table--responsive td::before {
+    content: none;
   }
 }

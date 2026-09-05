@@ -25,7 +25,7 @@ pub use i18n::{
 };
 
 pub use a11y::{use_dialog_focus_trap, use_route_focus};
-pub use bootstrap::use_app_boot_ready;
+pub use bootstrap::{install_panic_hook, use_app_boot_ready};
 pub use clock::{SecondTicker, use_second_tick, use_second_ticker};
 pub use commands::{ConfirmCommand, use_confirm_command};
 pub use errors::{BaseErrorKind, base_api_error_message, classify_base_error};
