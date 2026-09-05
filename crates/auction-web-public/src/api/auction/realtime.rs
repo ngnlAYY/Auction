@@ -71,7 +71,10 @@ impl SeenSet {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimePageMerge {
+    /// 拍卖级变化或恢复缺口要求重读全部权威快照。
     pub refresh_required: bool,
+    /// 仅已通过防重、事实和版本校验的竞价通知对应资源失效。
+    pub bids_changed: bool,
     pub continue_catch_up: bool,
     pub degraded: bool,
 }
@@ -183,20 +186,24 @@ impl RealtimeCache {
             self.reset_after(page.next_after);
             return RealtimePageMerge {
                 refresh_required: true,
+                bids_changed: false,
                 continue_catch_up: false,
                 degraded: true,
             };
         }
 
         let mut refresh_required = false;
+        let mut bids_changed = false;
         for event in &page.events {
             match self.merge_event(event) {
                 EventMerge::Ignored => {}
                 EventMerge::Applied { refresh } => refresh_required |= refresh,
+                EventMerge::BidApplied => bids_changed = true,
                 EventMerge::Gap => {
                     self.reset_after(page.next_after);
                     return RealtimePageMerge {
                         refresh_required: true,
+                        bids_changed: false,
                         continue_catch_up: false,
                         degraded: true,
                     };
@@ -206,7 +213,12 @@ impl RealtimeCache {
         if page.next_after > self.after {
             self.after = page.next_after;
         }
-        RealtimePageMerge { refresh_required, continue_catch_up: true, degraded: false }
+        RealtimePageMerge {
+            refresh_required,
+            bids_changed,
+            continue_catch_up: true,
+            degraded: false,
+        }
     }
 
     fn merge_event(&mut self, event: &RealtimeEvent) -> EventMerge {
@@ -283,7 +295,7 @@ impl RealtimeCache {
         self.last_facts.insert(lot_id.to_owned(), LastBidFact { fact_index, state_version });
         self.versions.insert(lot_id.to_owned(), state_version);
         self.after = event.stream_sequence;
-        EventMerge::Applied { refresh: true }
+        EventMerge::BidApplied
     }
 
     fn ordered_fact_index(
@@ -318,6 +330,7 @@ impl RealtimeCache {
 enum EventMerge {
     Ignored,
     Applied { refresh: bool },
+    BidApplied,
     Gap,
 }
 

@@ -49,6 +49,10 @@ Public/Admin 装配根各自定义唯一的 `RustEmbed` 类型，`auction-http` 
 任一部署制品都不会引用另一端资源，也不会因构建机残留文件偶然改变内容。API-only 或产物缺失时
 静态路由返回 503 并说明需要构建内嵌发布制品，不影响 `/health` 契约，也不让进程崩溃。
 
+Public 浏览器的竞价资源失效由 `auction-web-public/src/app/surface/board/refresh.rs` 拥有，
+与拍卖生命周期的全局快照刷新分离；目录、详情、竞价记录、账户及激活的代理资源通过该 owner
+合并读取通知。权威状态仍来自 HTTP 快照，序号缺口和生命周期变化继续走全局恢复边界。
+
 发布 owner 位于 `ci/release.sh`：它只装配 PostgreSQL 完整档的 Public/Admin/Worker/`auctionctl`、
 批准的配置与部署模板、依赖摘要和 Web payload 证据。API-only/embedded 二进制分别保存在生成目录，
 门禁直接核对自身 payload 哈希、对端资源缺失和 Worker 无 Web crate；archive 使用显式文件白名单、

@@ -1244,7 +1244,7 @@
   }
 }
 
-.public-auction-filter__tab[aria-pressed="true"] {
+.public-auction-filter__tab[aria-current="true"] {
   color: var(--color-accent-contrast);
   border-color: var(--color-accent);
   background: var(--color-accent);
@@ -1260,7 +1260,7 @@
   text-align: center;
 }
 
-.public-auction-filter__tab[aria-pressed="true"] .public-auction-filter__count {
+.public-auction-filter__tab[aria-current="true"] .public-auction-filter__count {
   color: var(--color-accent);
   background: var(--color-accent-contrast);
 }

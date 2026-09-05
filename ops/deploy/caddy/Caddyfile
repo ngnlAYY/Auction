@@ -10,6 +10,13 @@
 	@auction_public_metrics path /metrics
 	respond @auction_public_metrics 404
 
+	# 只压缩静态资源；API、实时连接和浏览器入口继续沿用各自的响应契约。
+	@auction_public_static {
+		method GET HEAD
+		path /assets/* /favicon.ico
+	}
+	encode @auction_public_static zstd gzip
+
 	reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:127.0.0.1:8090} {
 		header_up Host {hostport}
 	}
@@ -18,6 +25,12 @@
 {$AUCTION_CADDY_ADMIN_SITE:admin.auction.example.com} {
 	@auction_admin_metrics path /metrics
 	respond @auction_admin_metrics 404
+
+	@auction_admin_static {
+		method GET HEAD
+		path /assets/* /favicon.ico
+	}
+	encode @auction_admin_static zstd gzip
 
 	reverse_proxy {$AUCTION_CADDY_ADMIN_UPSTREAM:127.0.0.1:8091} {
 		header_up Host {hostport}

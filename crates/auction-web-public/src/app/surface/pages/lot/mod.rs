@@ -42,6 +42,7 @@ fn ValidLotDetail(lot_id: String) -> Element {
         let lot_id = lot_id_for_request.clone();
         async move { fetch_lot_detail(lot_id).await }
     });
+    use_bid_refresh(detail, true);
 
     match &*detail.read_unchecked() {
         None => rsx! {

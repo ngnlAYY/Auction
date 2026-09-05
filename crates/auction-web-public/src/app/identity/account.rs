@@ -7,6 +7,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use crate::api::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, lot_code_for};
+use crate::app::surface::use_bid_refresh;
 
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
@@ -77,6 +78,7 @@ fn AuthenticatedAccountData() -> Element {
         let _ = account_reload_generation();
         fetch_my_bids(bid_page(), proxy_page())
     });
+    use_bid_refresh(account, true);
 
     match &*account.read_unchecked() {
         None => rsx! {
