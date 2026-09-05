@@ -2,23 +2,25 @@
 
 use super::*;
 
+/// 按分类把目录行分组。返回行下标而非克隆行：调用方持有的行向量全程以 Rc 共享，
+/// 分组不再产生第二层逐字段克隆。
 pub(crate) fn grouped_catalog_rows(
     rows: &[CatalogRow],
     active: &str,
-) -> Vec<(&'static str, Vec<CatalogRow>)> {
-    let mut groups: Vec<(&str, Vec<CatalogRow>)> =
+) -> Vec<(&'static str, Vec<usize>)> {
+    let mut groups: Vec<(&str, Vec<usize>)> =
         CATALOG_CATEGORIES.iter().map(|(category, _)| (*category, Vec::new())).collect();
     let mut other = Vec::new();
 
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
         let category = catalog_category_key(&row.category);
         if active != "all" && active != category {
             continue;
         }
         if let Some((_, entries)) = groups.iter_mut().find(|(key, _)| *key == category) {
-            entries.push(row.clone());
+            entries.push(index);
         } else if active == "all" || active == "other" {
-            other.push(row.clone());
+            other.push(index);
         }
     }
 

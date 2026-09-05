@@ -66,6 +66,15 @@ admin-pagination-status = Page { $page } / { $pages }
 admin-pagination-next = Next
 admin-pagination-input = Page number
 admin-pagination-go = Go
+
+# Column sorting: the server list endpoints accept no sort parameter; sorting applies to the current page only, and the tooltip states that limit.
+admin-sort-inactive-hint = Sort by this column (current page only)
+admin-sort-ascending-hint = Sorted ascending; activate to sort descending (current page only)
+admin-sort-descending-hint = Sorted descending; activate to sort ascending (current page only)
+
+# Shared messages for field-level validation.
+admin-field-required = This field is required.
+admin-field-positive-integer = Enter a whole number greater than 0.
 admin-renames-loading = Loading rename history…
 admin-renames-name-filter = Name
 admin-renames-load = Load
@@ -352,6 +361,9 @@ admin-auctions-create-submit = Create draft auction
 admin-auctions-create-close = Close
 admin-auctions-create-success = Draft auction created.
 admin-auctions-create-invalid = Enter a future preview time, an opening time no earlier than preview, and an end time after opening.
+admin-auctions-create-field-preview-past = The preview time must not be in the past.
+admin-auctions-create-field-open-before-preview = The opening time must not be earlier than the preview time.
+admin-auctions-create-field-end-after-open = The end time must be after the opening time.
 
 admin-intake-title = Add equipment to { $world }
 admin-intake-description = The server resolves the current private intake round. No auction ID is submitted.
@@ -480,6 +492,9 @@ admin-mail-delivery-ids = Delivery IDs
 
 realtime-loading = Loading realtime operations…
 realtime-refresh = Refresh data
+admin-poll-label = Auto-refresh
+admin-poll-off = Off
+admin-poll-interval = Every { $seconds }s
 realtime-overview-title = Realtime event overview
 realtime-overview-events = Persisted events
 realtime-overview-consumers = Consumer streams
@@ -739,6 +754,9 @@ admin-users-create-open = Create user
 admin-users-create-close = Cancel
 admin-users-create-submit = Create
 admin-users-created = { $username } was created.
+admin-users-field-forum-account-id-invalid = The forum account ID must be digits not starting with 0.
+admin-users-field-manual-key-short = The manual key must be at least 32 characters.
+admin-users-field-username-conflict = The username or forum account conflicts with an existing record.
 admin-users-generated-key = Bidder key
 admin-users-generated-key-title = Bidder key
 admin-users-generated-key-warning = Copy this key now. It is shown only once and cannot be recovered after this dialog is closed.
@@ -790,6 +808,9 @@ admin-credentials-label = Account name
 admin-credentials-secret = Cookie value
 admin-credentials-create-submit = Import
 admin-credentials-action-success = Action completed.
+admin-credentials-field-label-invalid = The label is missing or invalid.
+admin-credentials-field-secret-invalid = The secret value is invalid.
+admin-credentials-field-label-conflict = A credential with this label already exists for the same world and kind.
 admin-credentials-status = Status
 admin-credentials-last-checked = Last checked
 admin-credentials-last-used = Last used

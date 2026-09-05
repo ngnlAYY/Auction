@@ -7,13 +7,13 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::fetch_admin_lots;
 
-use super::super::query::{PageQuery, use_page_query_state};
+use super::super::query::use_lots_query_state;
 use super::super::{Route, admin_api_error_message};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
 pub fn page(auction_id: String) -> Element {
-    // 分页跟地址栏双向同步（?page=），刷新与浏览器前进/后退都能恢复页码。
-    let query = use_page_query_state();
+    // 分页与当前页排序跟地址栏双向同步（?page=&sort=&dir=），刷新与浏览器前进/后退都能恢复。
+    let query = use_lots_query_state();
     let query_state = query.state;
     let reload_generation = use_signal(|| 0_u64);
     let lots = use_resource({
@@ -36,10 +36,24 @@ pub fn page(auction_id: String) -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
                 super::table::AdminLotTable {
                     page: page.clone(),
-                    on_page_change: move |next_page| on_page_change.push(PageQuery { page: next_page }),
+                    sort: query_state().sort.clone(),
+                    direction: query_state().direction,
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.page = next_page;
+                        on_page_change.push(next);
+                    },
+                    on_sort_change: move |(sort, direction)| {
+                        // 排序只影响当前页展示顺序；翻页保持不变。
+                        let mut next = query_state();
+                        next.sort = sort;
+                        next.direction = direction;
+                        on_sort_change.push(next);
+                    },
                     reload_generation,
                 }
             }

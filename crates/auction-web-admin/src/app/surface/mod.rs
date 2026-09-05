@@ -31,6 +31,8 @@ mod intake;
 mod lots;
 #[path = "../fulfillment/mail.rs"]
 mod mail;
+#[path = "../poll.rs"]
+mod poll;
 #[path = "../query.rs"]
 mod query;
 #[path = "../operations/realtime/mod.rs"]
@@ -44,10 +46,14 @@ mod rules;
 mod settlement;
 #[path = "shared.rs"]
 mod shared;
+#[path = "../sort.rs"]
+mod sort;
 #[path = "../operations/status.rs"]
 mod status;
 #[path = "../identity/users.rs"]
 mod users;
+#[path = "../validation.rs"]
+mod validation;
 
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::*;

@@ -9,7 +9,10 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use std::cmp::Ordering;
+
 use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
+use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 use crate::app::surface::stable_command_id;
 
 use super::query::use_renames_query_state;
@@ -79,10 +82,20 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
             RenameTable {
                 page: page.clone(),
+                sort: query_state().sort.clone(),
+                direction: query_state().direction,
                 on_select: move |rename| selected.set(Some(rename)),
+                on_sort_change: move |(sort, direction)| {
+                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
+                    let mut next = query_state();
+                    next.sort = sort;
+                    next.direction = direction;
+                    on_sort_change.push(next);
+                },
                 busy_rename,
             }
             if page.renames.is_empty() {
@@ -186,24 +199,55 @@ pub(super) fn page() -> Element {
 #[component]
 fn RenameTable(
     page: AdminRenamePage,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
     on_select: EventHandler<AdminRename>,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     busy_rename: Signal<Option<String>>,
 ) -> Element {
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut renames = page.renames.clone();
+    sort_renames(&mut renames, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table", aria_busy: busy_rename().is_some().to_string(),
                 thead {
                     tr {
-                        th { {t!("admin-renames-previous")} }
-                        th { {t!("admin-renames-next")} }
-                        th { {t!("admin-renames-actor")} }
-                        th { {t!("admin-renames-created")} }
+                        SortableTh {
+                            column: "previous",
+                            label: t!("admin-renames-previous"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "next",
+                            label: t!("admin-renames-next"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "actor",
+                            label: t!("admin-renames-actor"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "created",
+                            label: t!("admin-renames-created"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
                         th { {t!("admin-renames-reverted")} }
                         th { {t!("admin-users-actions")} }
                     }
                 }
                 tbody {
-                    for rename in page.renames {
+                    for rename in renames {
                         RenameRow { rename, on_select }
                     }
                 }
@@ -248,4 +292,23 @@ fn RenameRow(rename: AdminRename, on_select: EventHandler<AdminRename>) -> Eleme
             }
         }
     }
+}
+
+/// 对当前页改名记录排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+fn sort_renames(renames: &mut [AdminRename], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    renames.sort_by(|left, right| {
+        directed(
+            match column {
+                "created" => left.created_at.cmp(&right.created_at),
+                "previous" => left.previous_username.cmp(&right.previous_username),
+                "next" => left.next_username.cmp(&right.next_username),
+                "actor" => left.actor.cmp(&right.actor),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

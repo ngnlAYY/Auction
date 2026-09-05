@@ -69,11 +69,14 @@ pub(super) fn page() -> Element {
             let mut on_name_apply = query.clone();
             let mut on_status_change = query.clone();
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
             AdminUserTable {
                 page,
                 name_draft,
                 status: query_state().status,
+                sort: query_state().sort.clone(),
+                direction: query_state().direction,
                 on_name_apply: move |name: String| {
                     let mut next = query_state();
                     next.name = name;
@@ -90,6 +93,13 @@ pub(super) fn page() -> Element {
                     let mut next = query_state();
                     next.page = next_page;
                     on_page_change.push(next);
+                },
+                on_sort_change: move |(sort, direction)| {
+                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
+                    let mut next = query_state();
+                    next.sort = sort;
+                    next.direction = direction;
+                    on_sort_change.push(next);
                 },
                 reload_generation,
                 action_busy,

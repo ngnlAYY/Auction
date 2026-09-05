@@ -8,7 +8,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 
-use super::super::query::{PageQuery, use_page_query_state};
+use super::super::query::use_page_query_state;
 use super::super::{
     AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
 };
@@ -74,16 +74,28 @@ pub fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
                     CredentialTable {
                         page: page.clone(),
+                        sort: query_state().sort.clone(),
+                        direction: query_state().direction,
+                        on_sort_change: move |(sort, direction)| {
+                            // 排序只影响当前页展示顺序；翻页保持不变。
+                            let mut next = query_state();
+                            next.sort = sort;
+                            next.direction = direction;
+                            on_sort_change.push(next);
+                        },
                         reload_generation,
                         on_delete: open_delete,
                     }
                     CredentialPager {
                         page: page.clone(),
                         on_page_change: move |next_page| {
-                            on_page_change.push(PageQuery { page: next_page });
+                            let mut next = query_state();
+                            next.page = next_page;
+                            on_page_change.push(next);
                         },
                     }
             }

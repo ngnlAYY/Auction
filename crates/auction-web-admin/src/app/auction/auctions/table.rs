@@ -1,34 +1,38 @@
 //! Admin 拍卖列表表格与筛选器。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, use_second_tick};
+use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
 
-use crate::api::AdminAuctionPage;
+use crate::api::{AdminAuction, AdminAuctionPage};
 
 use super::super::intake::AdminIntakeForm;
 use super::super::query::AuctionsQuery;
+use super::super::sort::{SortDirection, SortableTh, directed};
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
-use super::helpers::current_time_millis;
 
 #[component]
 pub(super) fn AdminAuctionTable(
     state: Option<Result<AdminAuctionPage, String>>,
     /// 当前世界筛选（地址栏恢复后的值）；变更经 `on_query_change` 由页面写回 URL。
     world: String,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
     on_query_change: EventHandler<AuctionsQuery>,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
 ) -> Element {
-    // 订阅外壳提供的共享秒级时钟：读取 tick 让本组件每秒重渲染并刷新当前时间，
-    // 不再为这张表单独起一个 1 秒定时器。
-    let second_tick = use_second_tick();
-    let _ = second_tick();
-    let current_time_millis = current_time_millis();
+    // 秒级时钟订阅已下沉到行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
+    // 整表（筛选、表头、分页）不再随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
     let notice = use_signal(|| None::<AdminAuctionNotice>);
-    // 翻页保留当前世界筛选；该闭包在分支内move走一份克隆。
+    // 翻页保留当前世界筛选与排序；该闭包在分支内move走一份克隆。
     let pager_world = world.clone();
+    let pager_sort = sort.clone();
     let list_content = match state {
         None => rsx! {
             AsyncState {
@@ -48,6 +52,9 @@ pub(super) fn AdminAuctionTable(
             let is_empty = page.auctions.is_empty();
             let capabilities = page.capabilities;
             let pagination = page.pagination;
+            // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+            let mut auctions = page.auctions.clone();
+            sort_auctions(&mut auctions, &sort, direction);
             rsx! {
                 if capabilities.manual_intake && matches!(world.as_str(), "main" | "isekai") {
                     AdminIntakeForm {
@@ -60,23 +67,50 @@ pub(super) fn AdminAuctionTable(
                         caption { class: "admin-visually-hidden", {t!("page-auctions-title")} }
                         thead {
                             tr {
-                                th { scope: "col", class: "admin-auction-col-number", {t!("admin-auctions-sequence")} }
+                                SortableTh {
+                                    column: "sequence",
+                                    label: t!("admin-auctions-sequence"),
+                                    active: sort.clone(),
+                                    direction,
+                                    on_sort: on_sort_change,
+                                    class: "admin-auction-col-number",
+                                }
                                 th { scope: "col", class: "admin-auction-col-world", {t!("admin-auctions-world")} }
-                                th { scope: "col", class: "admin-auction-col-status", {t!("admin-auctions-status")} }
-                                th { scope: "col", class: "admin-auction-col-opens", {t!("admin-auctions-open-at")} }
-                                th { scope: "col", class: "admin-auction-col-ends", {t!("admin-auctions-end-at")} }
+                                SortableTh {
+                                    column: "status",
+                                    label: t!("admin-auctions-status"),
+                                    active: sort.clone(),
+                                    direction,
+                                    on_sort: on_sort_change,
+                                    class: "admin-auction-col-status",
+                                }
+                                SortableTh {
+                                    column: "open_at",
+                                    label: t!("admin-auctions-open-at"),
+                                    active: sort.clone(),
+                                    direction,
+                                    on_sort: on_sort_change,
+                                    class: "admin-auction-col-opens",
+                                }
+                                SortableTh {
+                                    column: "end_at",
+                                    label: t!("admin-auctions-end-at"),
+                                    active: sort.clone(),
+                                    direction,
+                                    on_sort: on_sort_change,
+                                    class: "admin-auction-col-ends",
+                                }
                                 th { scope: "col", class: "admin-auction-col-ready", {t!("admin-auctions-readiness")} }
                                 th { scope: "col", {t!("admin-auctions-actions")} }
                             }
                         }
                         tbody {
-                            for auction in page.auctions {
+                            for auction in auctions {
                                 // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
                                 AdminAuctionRow {
                                     key: "{auction.id}",
                                     auction,
                                     capabilities: capabilities.clone(),
-                                    clock_millis: current_time_millis,
                                     notice,
                                     reload_generation,
                                 }
@@ -105,7 +139,12 @@ pub(super) fn AdminAuctionTable(
                     jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next_page| {
                         on_query_change
-                            .call(AuctionsQuery { world: pager_world.clone(), page: next_page });
+                            .call(AuctionsQuery {
+                                world: pager_world.clone(),
+                                page: next_page,
+                                sort: pager_sort.clone(),
+                                direction,
+                            });
                     },
                 }
             }
@@ -126,9 +165,14 @@ pub(super) fn AdminAuctionTable(
                             id: "auction-world",
                             value: world,
                             onchange: move |event| {
-                                // 切换世界筛选回到第一页，由页面 push 到地址栏。
+                                // 切换世界筛选回到第一页并保留排序，由页面 push 到地址栏。
                                 on_query_change
-                                    .call(AuctionsQuery { world: event.value(), page: 1 });
+                                    .call(AuctionsQuery {
+                                        world: event.value(),
+                                        page: 1,
+                                        sort: sort.clone(),
+                                        direction,
+                                    });
                             },
                             option { value: "", {t!("admin-auctions-world-all")} }
                             option { value: "main", {t!("admin-auctions-world-main")} }
@@ -146,4 +190,23 @@ pub(super) fn AdminAuctionTable(
             {list_content}
         }
     }
+}
+
+/// 对当前页拍卖行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+fn sort_auctions(auctions: &mut [AdminAuction], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    auctions.sort_by(|left, right| {
+        directed(
+            match column {
+                "sequence" => left.sequence.cmp(&right.sequence),
+                "status" => left.status.cmp(&right.status),
+                "open_at" => left.scheduled_open_at.cmp(&right.scheduled_open_at),
+                "end_at" => left.scheduled_ends_at.cmp(&right.scheduled_ends_at),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

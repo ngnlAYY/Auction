@@ -73,6 +73,9 @@ admin-credentials-label = アカウント名
 admin-credentials-secret = Cookie 値
 admin-credentials-create-submit = インポート
 admin-credentials-action-success = 操作が完了しました。
+admin-credentials-field-label-invalid = ラベルが未入力または無効です。
+admin-credentials-field-secret-invalid = シークレット値が無効です。
+admin-credentials-field-label-conflict = 同じワールドと種類で同名のラベルが既に存在します。
 admin-credentials-status = ステータス
 admin-credentials-last-checked = 最終確認
 admin-credentials-last-used = 最終使用
@@ -100,6 +103,15 @@ admin-pagination-status = ページ { $page } / { $pages }
 admin-pagination-next = 次へ
 admin-pagination-input = ページ番号
 admin-pagination-go = 移動
+
+# 列ヘッダーの並べ替え：サーバーの一覧エンドポイントは並べ替えパラメータを受け付けないため、現在のページのみに適用され、ツールチップでその旨を明示する。
+admin-sort-inactive-hint = この列で並べ替え（現在のページのみ）
+admin-sort-ascending-hint = 昇順で並べ替え中。クリックで降順に変更（現在のページのみ）
+admin-sort-descending-hint = 降順で並べ替え中。クリックで昇順に変更（現在のページのみ）
+
+# フィールド単位の検証で共通のエラーメッセージ。
+admin-field-required = この項目は必須です。
+admin-field-positive-integer = 0 より大きい整数を入力してください。
 admin-renames-loading = 改名履歴を読み込んでいます…
 admin-renames-name-filter = 名前
 admin-renames-load = 読み込む
@@ -386,6 +398,9 @@ admin-auctions-create-submit = オークション草稿を作成
 admin-auctions-create-close = 閉じる
 admin-auctions-create-success = オークション草稿を作成しました。
 admin-auctions-create-invalid = 未来のプレビュー時刻、プレビュー以降の開始時刻、開始後の終了時刻を入力してください。
+admin-auctions-create-field-preview-past = プレビュー時刻は現在時刻以降にしてください。
+admin-auctions-create-field-open-before-preview = 開始時刻はプレビュー時刻以降にしてください。
+admin-auctions-create-field-end-after-open = 終了時刻は開始時刻より後にしてください。
 
 admin-intake-title = { $world } に装備を追加
 admin-intake-description = サーバーが現在の非公開受付回を決定します。オークション ID は送信しません。
@@ -514,6 +529,9 @@ admin-mail-delivery-ids = 配送 ID
 
 realtime-loading = リアルタイム運用データを読み込み中……
 realtime-refresh = データを更新
+admin-poll-label = 自動更新
+admin-poll-off = オフ
+admin-poll-interval = { $seconds } 秒ごと
 realtime-overview-title = リアルタイムイベント概要
 realtime-overview-events = 永続化イベント
 realtime-overview-consumers = コンシューマーストリーム
@@ -773,6 +791,9 @@ admin-users-create-open = ユーザーを作成
 admin-users-create-close = キャンセル
 admin-users-create-submit = 作成
 admin-users-created = { $username } を作成しました。
+admin-users-field-forum-account-id-invalid = フォーラムアカウント ID は 0 で始まらない数字で入力してください。
+admin-users-field-manual-key-short = 手動キーは 32 文字以上にしてください。
+admin-users-field-username-conflict = ユーザー名またはフォーラムアカウントが既存のレコードと競合しています。
 admin-users-generated-key = 入札 Key
 admin-users-generated-key-title = 入札 Key
 admin-users-generated-key-warning = 今すぐこの Key をコピーしてください。この画面を閉じると再表示も復元もできません。

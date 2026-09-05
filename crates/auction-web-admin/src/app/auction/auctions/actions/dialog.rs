@@ -1,6 +1,6 @@
 //! Admin 拍卖生命周期动作按钮与确认对话框。
 
-use auction_web_shared::{Dialog, legacy_t as t};
+use auction_web_shared::{Dialog, legacy_t as t, use_second_tick};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -8,6 +8,8 @@ use crate::api::{
     AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
 };
 use crate::app::surface::{admin_api_error_message, stable_command_id};
+
+use super::super::helpers::current_time_millis;
 
 use super::model::{
     AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
@@ -26,10 +28,14 @@ pub(super) fn AdminAuctionActions(
     preview_scheduled_at: String,
     scheduled_open_at: String,
     scheduled_end_at: Option<String>,
-    current_time_millis: i64,
     notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
 ) -> Element {
+    // 秒级节拍订阅下沉到本动作单元格：到时自动出现的「开拍」入口每秒只在本叶子组件
+    // 内重算，整行与整表不随秒针重渲染。
+    let second_tick = use_second_tick();
+    let _ = second_tick();
+    let current_time_millis = current_time_millis();
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<String>);
     let pending_action = use_signal(|| None::<AdminAuctionLifecycleAction>);

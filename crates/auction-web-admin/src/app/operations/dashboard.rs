@@ -8,6 +8,8 @@ use dioxus::prelude::*;
 
 use crate::api::fetch_dashboard;
 
+use super::poll::{AutoPollControls, use_auto_poll};
+use super::query::use_dashboard_query_state;
 use super::{AdminReadinessResource, admin_api_error_message};
 
 #[path = "dashboard/content.rs"]
@@ -25,6 +27,13 @@ pub(super) fn page() -> Element {
         let _ = refresh();
         fetch_dashboard()
     });
+    // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
+    // 轮询只重取当前快照，不额外写地址栏。
+    let query = use_dashboard_query_state();
+    let query_state = query.state;
+    let poll_seconds = use_memo(move || query_state().poll_seconds);
+    use_auto_poll(poll_seconds, move || refresh.set(refresh().saturating_add(1)));
+    let mut poll_query = query.clone();
     let readiness = use_context::<AdminReadinessResource>();
     // 默认管理首页的聚合快照无论成功或失败，只要已有结果就一次性揭示真实页面。
     use_app_boot_ready(readiness.read().is_some() && dashboard.read().is_some());
@@ -34,7 +43,18 @@ pub(super) fn page() -> Element {
         section {
             class: "admin-dashboard-page",
             aria_labelledby: "dashboard-title",
-            h1 { id: "dashboard-title", {t!("page-dashboard-title")} }
+            div { class: "admin-dashboard-heading",
+                h1 { id: "dashboard-title", {t!("page-dashboard-title")} }
+                AutoPollControls {
+                    poll_seconds: poll_seconds(),
+                    on_change: move |seconds| {
+                        // 开关与间隔变更立即生效并写回地址栏。
+                        let mut next = query_state();
+                        next.poll_seconds = seconds;
+                        poll_query.push(next);
+                    },
+                }
+            }
             if state.is_none() {
                 AsyncState {
                     kind: AsyncStateKind::Loading,

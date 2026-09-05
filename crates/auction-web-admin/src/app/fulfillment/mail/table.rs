@@ -1,5 +1,7 @@
 //! Admin 邮件入站摘要表格和行展示。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -7,14 +9,23 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText}
 
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
 
+use super::super::sort::{SortDirection, SortableTh, directed};
+
 #[component]
 pub(super) fn MailIntakeTable(
     page: AdminMailIntakePage,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
     /// 翻页回调：由页面把新页码 push 到地址栏并更新查询状态。
     on_page_change: EventHandler<i64>,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     on_select: EventHandler<String>,
 ) -> Element {
     let is_empty = page.intakes.is_empty();
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut intakes = page.intakes.clone();
+    sort_mail_intakes(&mut intakes, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-mail-table",
@@ -22,17 +33,44 @@ pub(super) fn MailIntakeTable(
                 thead {
                     tr {
                         th { scope: "col", class: "admin-mail-col-id", {t!("admin-mail-external-id")} }
-                        th { scope: "col", class: "admin-mail-col-world", {t!("admin-mail-intake-world")} }
+                        SortableTh {
+                            column: "world",
+                            label: t!("admin-mail-intake-world"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-mail-col-world",
+                        }
                         th { scope: "col", class: "admin-mail-col-from", {t!("admin-mail-intake-from")} }
                         th { scope: "col", class: "admin-mail-col-subject", {t!("admin-mail-intake-subject")} }
-                        th { scope: "col", class: "admin-mail-col-kind", {t!("admin-mail-intake-kind")} }
-                        th { scope: "col", class: "admin-mail-col-status", {t!("admin-mail-intake-status")} }
+                        SortableTh {
+                            column: "kind",
+                            label: t!("admin-mail-intake-kind"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-mail-col-kind",
+                        }
+                        SortableTh {
+                            column: "status",
+                            label: t!("admin-mail-intake-status"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-mail-col-status",
+                        }
                         th { scope: "col", class: "admin-mail-col-error", {t!("admin-mail-intake-error")} }
-                        th { scope: "col", {t!("admin-mail-intake-received")} }
+                        SortableTh {
+                            column: "received",
+                            label: t!("admin-mail-intake-received"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
                     }
                 }
                 tbody {
-                    for intake in page.intakes {
+                    for intake in intakes {
                         MailIntakeRow { intake, on_select }
                     }
                 }
@@ -102,4 +140,23 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
             }
         }
     }
+}
+
+/// 对当前页入站邮件行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+fn sort_mail_intakes(intakes: &mut [AdminMailIntake], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    intakes.sort_by(|left, right| {
+        directed(
+            match column {
+                "received" => left.received_at.cmp(&right.received_at),
+                "kind" => left.kind.cmp(&right.kind),
+                "status" => left.status.cmp(&right.status),
+                "world" => left.world_id.cmp(&right.world_id),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

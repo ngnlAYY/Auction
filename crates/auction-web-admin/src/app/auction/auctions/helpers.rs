@@ -41,33 +41,65 @@ pub(super) fn scheduled_time_millis(value: &str) -> Option<i64> {
     }
 }
 
-pub(super) fn valid_auction_schedule(preview: &str, open: &str, end: &str) -> bool {
+/// 创建拍卖的计划时间校验未通过的具体原因，用于把错误定位到对应字段。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AuctionScheduleIssue {
+    /// 任一时间为空或无法解析（datetime-local 正常不会产出，但防御畸形值）。
+    Unparseable,
+    /// 预览时间不晚于现在。
+    PreviewNotFuture,
+    /// 开放时间早于预览时间。
+    OpenBeforePreview,
+    /// 结束时间不晚于开放时间。
+    EndNotAfterOpen,
+}
+
+/// 校验创建拍卖的三项计划时间，返回首个未通过的约束；全部通过返回 None。
+pub(super) fn auction_schedule_issue(
+    preview: &str,
+    open: &str,
+    end: &str,
+) -> Option<AuctionScheduleIssue> {
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(preview) = local_datetime_millis(preview) else {
-            return false;
+        let (Some(preview), Some(open), Some(end)) = (
+            local_datetime_millis(preview),
+            local_datetime_millis(open),
+            local_datetime_millis(end),
+        ) else {
+            return Some(AuctionScheduleIssue::Unparseable);
         };
-        let Some(open) = local_datetime_millis(open) else {
-            return false;
-        };
-        let Some(end) = local_datetime_millis(end) else {
-            return false;
-        };
-        preview >= js_sys::Date::new_0().get_time() && open >= preview && end > open
+        if preview < js_sys::Date::new_0().get_time() {
+            return Some(AuctionScheduleIssue::PreviewNotFuture);
+        }
+        if open < preview {
+            return Some(AuctionScheduleIssue::OpenBeforePreview);
+        }
+        if end <= open {
+            return Some(AuctionScheduleIssue::EndNotAfterOpen);
+        }
+        None
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Ok(preview) = chrono::NaiveDateTime::parse_from_str(preview, "%Y-%m-%dT%H:%M") else {
-            return false;
+        let (Ok(preview), Ok(open), Ok(end)) = (
+            chrono::NaiveDateTime::parse_from_str(preview, "%Y-%m-%dT%H:%M"),
+            chrono::NaiveDateTime::parse_from_str(open, "%Y-%m-%dT%H:%M"),
+            chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M"),
+        ) else {
+            return Some(AuctionScheduleIssue::Unparseable);
         };
-        let Ok(open) = chrono::NaiveDateTime::parse_from_str(open, "%Y-%m-%dT%H:%M") else {
-            return false;
-        };
-        let Ok(end) = chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M") else {
-            return false;
-        };
-        preview >= chrono::Utc::now().naive_utc() && open >= preview && end > open
+        if preview < chrono::Utc::now().naive_utc() {
+            return Some(AuctionScheduleIssue::PreviewNotFuture);
+        }
+        if open < preview {
+            return Some(AuctionScheduleIssue::OpenBeforePreview);
+        }
+        if end <= open {
+            return Some(AuctionScheduleIssue::EndNotAfterOpen);
+        }
+        None
     }
 }
 

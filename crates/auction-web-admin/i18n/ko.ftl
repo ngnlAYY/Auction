@@ -73,6 +73,9 @@ admin-credentials-label = 계정 이름
 admin-credentials-secret = Cookie 값
 admin-credentials-create-submit = 가져오기
 admin-credentials-action-success = 작업이 완료되었습니다.
+admin-credentials-field-label-invalid = 레이블이 누락되었거나 유효하지 않습니다.
+admin-credentials-field-secret-invalid = 시크릿 값이 유효하지 않습니다.
+admin-credentials-field-label-conflict = 같은 월드와 종류에 동일한 레이블이 이미 존재합니다.
 admin-credentials-status = 상태
 admin-credentials-last-checked = 마지막 확인
 admin-credentials-last-used = 마지막 사용
@@ -100,6 +103,15 @@ admin-pagination-status = { $page } / { $pages } 페이지
 admin-pagination-next = 다음
 admin-pagination-input = 페이지 번호
 admin-pagination-go = 이동
+
+# 열 머리글 정렬: 서버 목록 엔드포인트는 정렬 매개변수를 지원하지 않으므로 현재 페이지에만 적용되며, 툴팁에 그 한계를 명시한다.
+admin-sort-inactive-hint = 이 열 기준 정렬(현재 페이지만 적용)
+admin-sort-ascending-hint = 오름차순 정렬 중입니다. 클릭하면 내림차순으로 변경(현재 페이지만 적용)
+admin-sort-descending-hint = 내림차순 정렬 중입니다. 클릭하면 오름차순으로 변경(현재 페이지만 적용)
+
+# 필드 단위 검증의 공통 오류 문구.
+admin-field-required = 이 필드는 필수입니다.
+admin-field-positive-integer = 0보다 큰 정수를 입력하세요.
 admin-renames-loading = 개명 이력을 불러오는 중…
 admin-renames-name-filter = 이름
 admin-renames-load = 불러오기
@@ -386,6 +398,9 @@ admin-auctions-create-submit = 경매 초안 생성
 admin-auctions-create-close = 닫기
 admin-auctions-create-success = 경매 초안을 생성했습니다.
 admin-auctions-create-invalid = 미래의 미리 보기 시간, 미리 보기 이후의 시작 시간, 시작 이후의 종료 시간을 입력하세요.
+admin-auctions-create-field-preview-past = 미리보기 시간은 현재 시간 이후여야 합니다.
+admin-auctions-create-field-open-before-preview = 시작 시간은 미리보기 시간보다 빠를 수 없습니다.
+admin-auctions-create-field-end-after-open = 종료 시간은 시작 시간보다 늦어야 합니다.
 
 admin-intake-title = { $world }에 장비 추가
 admin-intake-description = 서버가 현재 비공개 접수 회차를 결정하며 경매 ID는 전송하지 않습니다.
@@ -514,6 +529,9 @@ admin-mail-delivery-ids = 배송 ID
 
 realtime-loading = 실시간 운영 데이터를 불러오는 중……
 realtime-refresh = 데이터 새로고침
+admin-poll-label = 자동 새로고침
+admin-poll-off = 끄기
+admin-poll-interval = { $seconds }초마다
 realtime-overview-title = 실시간 이벤트 개요
 realtime-overview-events = 저장된 이벤트
 realtime-overview-consumers = 소비 스트림
@@ -773,6 +791,9 @@ admin-users-create-open = 사용자 생성
 admin-users-create-close = 취소
 admin-users-create-submit = 생성
 admin-users-created = { $username } 사용자를 생성했습니다.
+admin-users-field-forum-account-id-invalid = 포럼 계정 ID는 0으로 시작하지 않는 숫자여야 합니다.
+admin-users-field-manual-key-short = 수동 키는 32자 이상이어야 합니다.
+admin-users-field-username-conflict = 사용자 이름 또는 포럼 계정이 기존 레코드와 충돌합니다.
 admin-users-generated-key = 입찰 Key
 admin-users-generated-key-title = 입찰 Key
 admin-users-generated-key-warning = 지금 이 Key를 복사하세요. 창을 닫으면 다시 표시하거나 복구할 수 없습니다.

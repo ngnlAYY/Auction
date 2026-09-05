@@ -9,13 +9,58 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::api::{AdminIntakeResult, add_admin_intake};
+use crate::app::surface::validation::{FieldError, focus_field};
 use crate::app::surface::{admin_api_error_message, run_admin_action};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum IntakeFailure {
-    Invalid,
+/// 录入表单各字段的校验结果；None 表示该字段当前无错误。
+/// 来源字段（URL 或 JSON）共用一个错误位，随来源类型切换到对应控件。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct IntakeFieldErrors {
+    source: Option<IntakeFieldIssue>,
+    price: Option<IntakeFieldIssue>,
+    player: Option<IntakeFieldIssue>,
+}
+
+impl IntakeFieldErrors {
+    /// 是否存在任一字段错误。
+    const fn any(&self) -> bool {
+        self.source.is_some() || self.price.is_some() || self.player.is_some()
+    }
+
+    /// 表单序上第一个错误字段的控件 id；来源字段按当前来源类型取 URL 或 JSON 控件。
+    fn first_invalid_id(&self, source_kind: &str) -> Option<&'static str> {
+        if self.source.is_some() {
+            Some(if source_kind == "url" { "auction-intake-url" } else { "auction-intake-json" })
+        } else if self.price.is_some() {
+            Some("auction-intake-price")
+        } else if self.player.is_some() {
+            Some("auction-intake-player")
+        } else {
+            None
+        }
+    }
+}
+
+/// 字段错误的分类；渲染时翻译，保证切换语言后已展示的错误同步更新。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntakeFieldIssue {
+    Required,
     InvalidJson,
-    Request(String),
+    NotPositiveInteger,
+    /// 服务端返回卖家已被拉黑。
+    PlayerBlacklisted,
+    /// 服务端返回装备冲突。
+    EquipmentConflict,
+}
+
+fn intake_field_issue_message(issue: IntakeFieldIssue) -> String {
+    match issue {
+        IntakeFieldIssue::Required => t!("admin-field-required"),
+        IntakeFieldIssue::InvalidJson => t!("admin-intake-invalid-json"),
+        IntakeFieldIssue::NotPositiveInteger => t!("admin-field-positive-integer"),
+        IntakeFieldIssue::PlayerBlacklisted => t!("admin-error-auction-intake-player-blacklisted"),
+        IntakeFieldIssue::EquipmentConflict => t!("admin-error-equipment-conflict"),
+    }
 }
 
 /// 展示手工装备录入表单，并在成功后触发所属页面重新加载。
@@ -28,7 +73,9 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
     let mut player_id = use_signal(String::new);
     let busy = use_signal(|| false);
     let mut result = use_signal(|| None::<AdminIntakeResult>);
-    let mut failure = use_signal(|| None::<IntakeFailure>);
+    // 服务端返回的错误码；输入层校验错误由各字段信号承担，不再走整页提示。
+    let mut failure = use_signal(|| None::<String>);
+    let mut field_errors = use_signal(IntakeFieldErrors::default);
     let mut command_id_state = use_signal(|| None::<Uuid>);
     let empty_value = t!("value-empty");
 
@@ -50,23 +97,35 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                     let equipment_url_value = equipment_url().trim().to_owned();
                     let equipment_json_value = equipment_json().trim().to_owned();
                     let player_id_value = player_id().trim().to_owned();
-                    let Some(start_price) = start_price().trim().parse::<i64>().ok().filter(|value| *value > 0) else {
-                        failure.set(Some(IntakeFailure::Invalid));
-                        return;
-                    };
-                    if player_id_value.is_empty() || player_id_value.len() > 256 {
-                        failure.set(Some(IntakeFailure::Invalid));
-                        return;
-                    }
+                    // 逐字段校验并定位错误；提交失败聚焦第一个错误字段。
+                    let mut errors = IntakeFieldErrors::default();
                     if source_kind_value == "url" {
                         if equipment_url_value.is_empty() || equipment_url_value.len() > 2048 {
-                            failure.set(Some(IntakeFailure::Invalid));
-                            return;
+                            errors.source = Some(IntakeFieldIssue::Required);
                         }
                     } else if !valid_canonical_equipment_json(&equipment_json_value) {
-                        failure.set(Some(IntakeFailure::InvalidJson));
+                        errors.source = Some(IntakeFieldIssue::InvalidJson);
+                    }
+                    let start_price_value =
+                        start_price().trim().parse::<i64>().ok().filter(|value| *value > 0);
+                    if start_price_value.is_none() {
+                        errors.price = Some(IntakeFieldIssue::NotPositiveInteger);
+                    }
+                    if player_id_value.is_empty() || player_id_value.len() > 256 {
+                        errors.player = Some(IntakeFieldIssue::Required);
+                    }
+                    if errors.any() {
+                        field_errors.set(errors);
+                        if let Some(field_id) = errors.first_invalid_id(&source_kind_value) {
+                            focus_field(field_id);
+                        }
                         return;
                     }
+                    // 起拍价校验未过时 errors 非空并在上面返回，这里必有值。
+                    let Some(start_price) = start_price_value else {
+                        return;
+                    };
+                    field_errors.set(IntakeFieldErrors::default());
                     failure.set(None);
                     let world_id = world_id.clone();
                     let command_id = command_id_state().unwrap_or_else(|| {
@@ -76,6 +135,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                     });
                     let mut result = result;
                     let mut failure = failure;
+                    let mut field_errors = field_errors;
                     let mut reload_generation = reload_generation;
                     run_admin_action(
                         busy,
@@ -94,12 +154,30 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         move |value| {
                             result.set(Some(value));
                             failure.set(None);
+                            field_errors.set(IntakeFieldErrors::default());
                             command_id_state.set(None);
                             reload_generation.set(reload_generation().saturating_add(1));
                         },
                         move |code| {
                             result.set(None);
-                            failure.set(Some(IntakeFailure::Request(code)));
+                            // 可归属字段的服务端错误落到字段旁，其余保持页面级反馈。
+                            match code.as_str() {
+                                "seller_blacklisted" | "auction_intake_player_blacklisted" => {
+                                    field_errors.write().player =
+                                        Some(IntakeFieldIssue::PlayerBlacklisted);
+                                    focus_field("auction-intake-player");
+                                }
+                                "equipment_conflict" => {
+                                    field_errors.write().source =
+                                        Some(IntakeFieldIssue::EquipmentConflict);
+                                    if let Some(field_id) =
+                                        field_errors().first_invalid_id(&source_kind())
+                                    {
+                                        focus_field(field_id);
+                                    }
+                                }
+                                _ => failure.set(Some(code)),
+                            }
                         },
                     );
                 },
@@ -115,6 +193,7 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                             command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
+                            field_errors.write().source = None;
                         },
                         option { value: "url", {t!("admin-intake-source-url")} }
                         option { value: "json", {t!("admin-intake-source-json")} }
@@ -131,14 +210,21 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                             maxlength: "2048",
                             required: true,
                             disabled: busy(),
+                            aria_invalid: field_errors().source.is_some().then_some("true"),
+                            aria_describedby: field_errors().source.is_some().then_some("auction-intake-url-error"),
                             value: equipment_url(),
                             oninput: move |event| {
                                 equipment_url.set(event.value());
                                 command_id_state.set(None);
                                 result.set(None);
                                 failure.set(None);
+                                field_errors.write().source = None;
                             },
                         }
+                    }
+                    FieldError {
+                        id: "auction-intake-url-error",
+                        message: field_errors().source.map(intake_field_issue_message),
                     }
                 } else {
                     div { class: "admin-auction-intake-json",
@@ -148,7 +234,12 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         }
                         textarea {
                             id: "auction-intake-json",
-                            aria_describedby: "auction-intake-json-hint",
+                            aria_describedby: if field_errors().source.is_some() {
+                                "auction-intake-json-hint auction-intake-json-error"
+                            } else {
+                                "auction-intake-json-hint"
+                            },
+                            aria_invalid: field_errors().source.is_some().then_some("true"),
                             rows: "8",
                             maxlength: "65536",
                             placeholder: t!("admin-intake-json-hint"),
@@ -160,9 +251,14 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                                 command_id_state.set(None);
                                 result.set(None);
                                 failure.set(None);
+                                field_errors.write().source = None;
                             },
                         }
                         span { id: "auction-intake-json-hint", {t!("admin-intake-json-hint")} }
+                        FieldError {
+                            id: "auction-intake-json-error",
+                            message: field_errors().source.map(intake_field_issue_message),
+                        }
                     }
                 }
                 label {
@@ -175,14 +271,21 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         step: "1",
                         required: true,
                         disabled: busy(),
+                        aria_invalid: field_errors().price.is_some().then_some("true"),
+                        aria_describedby: field_errors().price.is_some().then_some("auction-intake-price-error"),
                         value: start_price(),
                         oninput: move |event| {
                             start_price.set(event.value());
                             command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
+                            field_errors.write().price = None;
                         },
                     }
+                }
+                FieldError {
+                    id: "auction-intake-price-error",
+                    message: field_errors().price.map(intake_field_issue_message),
                 }
                 label {
                     r#for: "auction-intake-player",
@@ -194,14 +297,21 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         maxlength: "256",
                         required: true,
                         disabled: busy(),
+                        aria_invalid: field_errors().player.is_some().then_some("true"),
+                        aria_describedby: field_errors().player.is_some().then_some("auction-intake-player-error"),
                         value: player_id(),
                         oninput: move |event| {
                             player_id.set(event.value());
                             command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
+                            field_errors.write().player = None;
                         },
                     }
+                }
+                FieldError {
+                    id: "auction-intake-player-error",
+                    message: field_errors().player.map(intake_field_issue_message),
                 }
                 button {
                     r#type: "submit",
@@ -209,14 +319,14 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                     if busy() { {t!("admin-action-working")} } else { {t!("admin-intake-submit")} }
                 }
             }
-            if let Some(current_failure) = failure() {
+            if let Some(code) = failure() {
                 div {
                     role: "alert",
                     aria_live: "assertive",
                     class: "admin-panel__note action-feedback action-feedback--error",
                     strong { {t!("admin-intake-error")} }
                     br {}
-                    span { {intake_failure_message(current_failure)} }
+                    span { {admin_api_error_message(&code)} }
                 }
             }
             if let Some(value) = result() {
@@ -235,14 +345,6 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                 }
             }
         }
-    }
-}
-
-fn intake_failure_message(failure: IntakeFailure) -> String {
-    match failure {
-        IntakeFailure::Invalid => t!("admin-intake-invalid"),
-        IntakeFailure::InvalidJson => t!("admin-intake-invalid-json"),
-        IntakeFailure::Request(code) => admin_api_error_message(&code),
     }
 }
 

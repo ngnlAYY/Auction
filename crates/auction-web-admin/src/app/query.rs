@@ -5,14 +5,18 @@
 //! 挂载时从地址栏读初值，用户变更经 `push`/`replace` 写回，浏览器前进/后退（popstate）
 //! 由 hook 自动恢复状态信号。
 //!
-//! 入 URL 的只有筛选与分页这类「视图状态」；输入草稿、对话框开合、操作反馈等瞬态仍由
+//! 入 URL 的只有筛选、分页与排序这类「视图状态」；输入草稿、对话框开合、操作反馈等瞬态仍由
 //! 各页面的 signal 持有，不写地址栏。
+//!
+//! 排序键为 `sort`（列标识）+ `dir`（仅降序时写入 `desc`）：服务端列表端点不支持排序参数，
+//! 排序由浏览器对当前页执行，列标识只在本地消费，不转发给 API（见 `sort.rs`）。
 
 use auction_web_shared::{QueryState, use_query_state};
 
 use crate::api::{AdminAuditFilter, AdminMailIntakeQuery, AdminUserStatusFilter};
 
 use super::deliveries::helpers::DELIVERY_STATUS_VALUES;
+use super::sort::SortDirection;
 
 /// 取某个键的首个值。
 fn pair_value<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
@@ -60,20 +64,63 @@ fn push_text(pairs: &mut Vec<(String, String)>, key: &str, value: &str) {
     }
 }
 
-// —— 拍卖列表（/auctions）：世界筛选 + 分页 ——
+/// 解析排序列：不在该页允许集合内（含缺省）回退空串，表示保持服务端原始顺序。
+fn parse_sort_column(pairs: &[(String, String)], allowed: &[&str]) -> String {
+    parse_choice(pairs, "sort", allowed)
+}
 
-const AUCTIONS_KEYS: &[&str] = &["world", "page"];
+/// 解析排序方向；只有排序列存在时方向才有意义，非法值回退升序。
+fn parse_sort_direction(pairs: &[(String, String)]) -> SortDirection {
+    SortDirection::parse(pair_value(pairs, "dir"))
+}
+
+/// 解析自动轮询间隔：合法值为 10/30/60 秒；缺省或非法回退 0（关闭）。
+fn parse_poll_seconds(pairs: &[(String, String)]) -> u64 {
+    pair_value(pairs, "poll")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| super::poll::POLL_INTERVAL_VALUES.contains(seconds))
+        .unwrap_or(0)
+}
+
+/// 轮询开启（间隔非 0）时才写入地址栏。
+fn push_poll_seconds(pairs: &mut Vec<(String, String)>, seconds: u64) {
+    if seconds > 0 {
+        pairs.push(("poll".to_owned(), seconds.to_string()));
+    }
+}
+
+/// 排序列非空时才写入地址栏；方向仅降序（非默认）时写入 `dir=desc`。
+fn push_sort(pairs: &mut Vec<(String, String)>, sort: &str, direction: SortDirection) {
+    if sort.is_empty() {
+        return;
+    }
+    pairs.push(("sort".to_owned(), sort.to_owned()));
+    if let Some(direction) = direction.as_query_value() {
+        pairs.push(("dir".to_owned(), direction.to_owned()));
+    }
+}
+
+// —— 拍卖列表（/auctions）：世界筛选 + 分页 + 当前页排序 ——
+
+const AUCTIONS_KEYS: &[&str] = &["world", "page", "sort", "dir"];
+
+/// 拍卖列表可排序列：场次号、状态、开拍时间、结拍时间。
+const AUCTIONS_SORT_COLUMNS: &[&str] = &["sequence", "status", "open_at", "end_at"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AuctionsQuery {
     /// 空串表示全部世界；合法值为 `main` / `isekai`。
     pub world: String,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `AUCTIONS_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for AuctionsQuery {
     fn default() -> Self {
-        Self { world: String::new(), page: 1 }
+        Self { world: String::new(), page: 1, sort: String::new(), direction: SortDirection::Asc }
     }
 }
 
@@ -83,38 +130,92 @@ pub(super) fn use_auctions_query_state() -> QueryState<AuctionsQuery> {
         |pairs| AuctionsQuery {
             world: parse_choice(pairs, "world", &["main", "isekai"]),
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, AUCTIONS_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
             push_text(&mut pairs, "world", &query.world);
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
 }
 
-// —— 仅分页的页面（/auctions/:id/lots、/credentials 等）：页码 ——
+// —— 仅分页 + 当前页排序的页面（/credentials）——
 
-const PAGE_ONLY_KEYS: &[&str] = &["page"];
+const PAGE_ONLY_KEYS: &[&str] = &["page", "sort", "dir"];
+
+/// 凭据列表可排序列：标签、世界、类型、状态、上次检查时间。
+const CREDENTIALS_SORT_COLUMNS: &[&str] = &["label", "world", "kind", "status", "checked"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PageQuery {
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `CREDENTIALS_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for PageQuery {
     fn default() -> Self {
-        Self { page: 1 }
+        Self { page: 1, sort: String::new(), direction: SortDirection::Asc }
     }
 }
 
 pub(super) fn use_page_query_state() -> QueryState<PageQuery> {
     use_query_state(
         PAGE_ONLY_KEYS,
-        |pairs| PageQuery { page: parse_page(pairs, "page") },
+        |pairs| PageQuery {
+            page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, CREDENTIALS_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
+        },
         |query| {
             let mut pairs = Vec::new();
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
+            pairs
+        },
+    )
+}
+
+// —— lot 列表（/auctions/:id/lots）：分页 + 当前页排序 ——
+
+const LOTS_KEYS: &[&str] = &["page", "sort", "dir"];
+
+/// lot 列表可排序列：序号、状态、起拍价、当前价。
+const LOTS_SORT_COLUMNS: &[&str] = &["code", "status", "start_price", "current_price"];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct LotsQuery {
+    pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `LOTS_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
+}
+
+impl Default for LotsQuery {
+    fn default() -> Self {
+        Self { page: 1, sort: String::new(), direction: SortDirection::Asc }
+    }
+}
+
+pub(super) fn use_lots_query_state() -> QueryState<LotsQuery> {
+    use_query_state(
+        LOTS_KEYS,
+        |pairs| LotsQuery {
+            page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, LOTS_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
+        },
+        |query| {
+            let mut pairs = Vec::new();
+            push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
@@ -123,11 +224,14 @@ pub(super) fn use_page_query_state() -> QueryState<PageQuery> {
 // —— 邮件入站（/mails）：世界/类型/状态筛选 + 分页 ——
 // 邮箱轮询输入、详情面板开合是瞬态，不入 URL。
 
-const MAIL_KEYS: &[&str] = &["world", "kind", "status", "page"];
+const MAIL_KEYS: &[&str] = &["world", "kind", "status", "page", "sort", "dir"];
 
 const MAIL_KIND_VALUES: &[&str] =
     &["equipment", "bid", "delivery", "registration", "rebind", "unknown"];
 const MAIL_STATUS_VALUES: &[&str] = &["accepted", "rejected", "failed"];
+
+/// 邮件入站列表可排序列：接收时间、类型、状态、世界。
+const MAIL_SORT_COLUMNS: &[&str] = &["received", "kind", "status", "world"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MailQuery {
@@ -138,11 +242,22 @@ pub(super) struct MailQuery {
     /// 空串表示全部状态；合法值见 `MAIL_STATUS_VALUES`。
     pub status: String,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `MAIL_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for MailQuery {
     fn default() -> Self {
-        Self { world: String::new(), kind: String::new(), status: String::new(), page: 1 }
+        Self {
+            world: String::new(),
+            kind: String::new(),
+            status: String::new(),
+            page: 1,
+            sort: String::new(),
+            direction: SortDirection::Asc,
+        }
     }
 }
 
@@ -169,6 +284,8 @@ pub(super) fn use_mail_query_state() -> QueryState<MailQuery> {
             kind: parse_choice(pairs, "kind", MAIL_KIND_VALUES),
             status: parse_choice(pairs, "status", MAIL_STATUS_VALUES),
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, MAIL_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
@@ -176,6 +293,7 @@ pub(super) fn use_mail_query_state() -> QueryState<MailQuery> {
             push_text(&mut pairs, "kind", &query.kind);
             push_text(&mut pairs, "status", &query.status);
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
@@ -195,21 +313,35 @@ const AUDIT_KEYS: &[&str] = &[
     "from",
     "to",
     "page",
+    "sort",
+    "dir",
 ];
 
 const AUDIT_ACTOR_TYPE_VALUES: &[&str] = &["public_user", "admin", "worker", "system"];
 const AUDIT_SOURCE_VALUES: &[&str] = &["public", "admin", "worker", "system"];
 const AUDIT_RESULT_VALUES: &[&str] = &["success", "rejected", "failure"];
 
+/// 审计列表可排序列：发生时间、操作者、动作、实体、来源、结果。
+const AUDIT_SORT_COLUMNS: &[&str] = &["at", "actor", "action", "entity", "source", "result"];
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct AuditQuery {
     pub filter: AdminAuditFilter,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序（发生时间倒序）。合法值见 `AUDIT_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for AuditQuery {
     fn default() -> Self {
-        Self { filter: AdminAuditFilter::default(), page: 1 }
+        Self {
+            filter: AdminAuditFilter::default(),
+            page: 1,
+            sort: String::new(),
+            direction: SortDirection::Asc,
+        }
     }
 }
 
@@ -229,6 +361,8 @@ pub(super) fn use_audit_query_state() -> QueryState<AuditQuery> {
                 occurred_to: parse_text(pairs, "to", 32),
             },
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, AUDIT_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
@@ -242,25 +376,33 @@ pub(super) fn use_audit_query_state() -> QueryState<AuditQuery> {
             push_text(&mut pairs, "from", &query.filter.occurred_from);
             push_text(&mut pairs, "to", &query.filter.occurred_to);
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
 }
 
-// —— Delivery 列表（/deliveries）：状态筛选 + 分页 ——
+// —— Delivery 列表（/deliveries）：状态筛选 + 分页 + 当前页排序 ——
 
-const DELIVERIES_KEYS: &[&str] = &["status", "page"];
+const DELIVERIES_KEYS: &[&str] = &["status", "page", "sort", "dir"];
+
+/// Delivery 列表可排序列：投递 ID、到付金额、状态、尝试次数。
+const DELIVERIES_SORT_COLUMNS: &[&str] = &["id", "cod", "status", "attempts"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DeliveriesQuery {
     /// 空串表示全部状态；合法值见 `DELIVERY_STATUS_VALUES`。
     pub status: String,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `DELIVERIES_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for DeliveriesQuery {
     fn default() -> Self {
-        Self { status: String::new(), page: 1 }
+        Self { status: String::new(), page: 1, sort: String::new(), direction: SortDirection::Asc }
     }
 }
 
@@ -270,11 +412,14 @@ pub(super) fn use_deliveries_query_state() -> QueryState<DeliveriesQuery> {
         |pairs| DeliveriesQuery {
             status: parse_choice(pairs, "status", &DELIVERY_STATUS_VALUES),
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, DELIVERIES_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
             push_text(&mut pairs, "status", &query.status);
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
@@ -293,6 +438,7 @@ const REALTIME_KEYS: &[&str] = &[
     "failure_state",
     "failure_page",
     "lag_page",
+    "poll",
 ];
 
 /// failure 状态下拉只开放这两个可选值（pending/retry 选项在页面上被禁用）。
@@ -310,6 +456,8 @@ pub(super) struct RealtimeQuery {
     pub failure_state: String,
     pub failure_page: i64,
     pub lag_page: i64,
+    /// 自动轮询间隔秒数；0 表示关闭（默认）。合法值见 `POLL_INTERVAL_VALUES`。
+    pub poll_seconds: u64,
 }
 
 /// realtime 三个分页各自独立入 URL，默认值都是第一页。
@@ -325,6 +473,7 @@ impl Default for RealtimeQuery {
             failure_state: String::new(),
             failure_page: 1,
             lag_page: 1,
+            poll_seconds: 0,
         }
     }
 }
@@ -342,6 +491,7 @@ pub(super) fn use_realtime_query_state() -> QueryState<RealtimeQuery> {
             failure_state: parse_choice(pairs, "failure_state", REALTIME_FAILURE_STATE_VALUES),
             failure_page: parse_page(pairs, "failure_page"),
             lag_page: parse_page(pairs, "lag_page"),
+            poll_seconds: parse_poll_seconds(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
@@ -354,24 +504,55 @@ pub(super) fn use_realtime_query_state() -> QueryState<RealtimeQuery> {
             push_text(&mut pairs, "failure_state", &query.failure_state);
             push_page(&mut pairs, "failure_page", query.failure_page);
             push_page(&mut pairs, "lag_page", query.lag_page);
+            push_poll_seconds(&mut pairs, query.poll_seconds);
             pairs
         },
     )
 }
 
-// —— 改名历史（/renames）：名称即时筛选 + 分页 ——
+// —— 管理总览（/dashboard）：自动轮询开关 ——
+// 快照本身是资源瞬态，只有轮询开关入 URL。
 
-const RENAMES_KEYS: &[&str] = &["name", "page"];
+const DASHBOARD_KEYS: &[&str] = &["poll"];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct DashboardQuery {
+    /// 自动轮询间隔秒数；0 表示关闭（默认）。合法值见 `POLL_INTERVAL_VALUES`。
+    pub poll_seconds: u64,
+}
+
+pub(super) fn use_dashboard_query_state() -> QueryState<DashboardQuery> {
+    use_query_state(
+        DASHBOARD_KEYS,
+        |pairs| DashboardQuery { poll_seconds: parse_poll_seconds(pairs) },
+        |query| {
+            let mut pairs = Vec::new();
+            push_poll_seconds(&mut pairs, query.poll_seconds);
+            pairs
+        },
+    )
+}
+
+// —— 改名历史（/renames）：名称即时筛选 + 分页 + 当前页排序 ——
+
+const RENAMES_KEYS: &[&str] = &["name", "page", "sort", "dir"];
+
+/// 改名历史可排序列：改名时间、原用户名、新用户名、操作者。
+const RENAMES_SORT_COLUMNS: &[&str] = &["created", "previous", "next", "actor"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RenamesQuery {
     pub name: String,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `RENAMES_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for RenamesQuery {
     fn default() -> Self {
-        Self { name: String::new(), page: 1 }
+        Self { name: String::new(), page: 1, sort: String::new(), direction: SortDirection::Asc }
     }
 }
 
@@ -381,31 +562,47 @@ pub(super) fn use_renames_query_state() -> QueryState<RenamesQuery> {
         |pairs| RenamesQuery {
             name: parse_text(pairs, "name", 256),
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, RENAMES_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
             push_text(&mut pairs, "name", &query.name);
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )
 }
 
-// —— 用户管理（/users）：已应用的名称筛选 + 状态筛选 + 分页 ——
+// —— 用户管理（/users）：已应用的名称筛选 + 状态筛选 + 分页 + 当前页排序 ——
 // 名称输入框是提交前草稿，不入 URL。
 
-const USERS_KEYS: &[&str] = &["name", "status", "page"];
+const USERS_KEYS: &[&str] = &["name", "status", "page", "sort", "dir"];
+
+/// 用户列表可排序列：用户名、状态、拉黑次数、创建时间。
+const USERS_SORT_COLUMNS: &[&str] = &["username", "status", "blacklist_count", "created_at"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct UsersQuery {
     pub name: String,
     pub status: AdminUserStatusFilter,
     pub page: i64,
+    /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `USERS_SORT_COLUMNS`。
+    pub sort: String,
+    /// 排序方向；仅 `sort` 非空时有意义。
+    pub direction: SortDirection,
 }
 
 impl Default for UsersQuery {
     fn default() -> Self {
-        Self { name: String::new(), status: AdminUserStatusFilter::All, page: 1 }
+        Self {
+            name: String::new(),
+            status: AdminUserStatusFilter::All,
+            page: 1,
+            sort: String::new(),
+            direction: SortDirection::Asc,
+        }
     }
 }
 
@@ -430,6 +627,8 @@ pub(super) fn use_users_query_state() -> QueryState<UsersQuery> {
                 _ => AdminUserStatusFilter::All,
             },
             page: parse_page(pairs, "page"),
+            sort: parse_sort_column(pairs, USERS_SORT_COLUMNS),
+            direction: parse_sort_direction(pairs),
         },
         |query| {
             let mut pairs = Vec::new();
@@ -438,6 +637,7 @@ pub(super) fn use_users_query_state() -> QueryState<UsersQuery> {
                 pairs.push(("status".to_owned(), status.to_owned()));
             }
             push_page(&mut pairs, "page", query.page);
+            push_sort(&mut pairs, &query.sort, query.direction);
             pairs
         },
     )

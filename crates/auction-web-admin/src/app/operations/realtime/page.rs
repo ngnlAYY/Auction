@@ -1,5 +1,7 @@
 //! Admin realtime 运维页面状态与 replay 对话框。
 
+use std::rc::Rc;
+
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
@@ -9,6 +11,7 @@ use crate::api::{
     fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
 };
 
+use super::super::poll::{AutoPollControls, use_auto_poll};
 use super::super::query::use_realtime_query_state;
 use super::event::{RealtimeEventPager, RealtimeEventTable};
 use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
@@ -37,16 +40,18 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
     let replay_busy = use_signal(|| false);
-    // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿、
-    // replay 对话框与负载输入是瞬态，不入 URL。
+    // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿（留在
+    // 筛选组件本地）、replay 对话框与负载输入是瞬态，不入 URL。
     let query = use_realtime_query_state();
     let query_state = query.state;
-    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与结果保持一致；之后的编辑不落 URL。
-    let event_stream_filter = use_signal(move || query_state.peek().event_stream.clone());
-    let event_kind_filter = use_signal(move || query_state.peek().event_kind.clone());
-    let failure_stream_filter = use_signal(move || query_state.peek().failure_stream.clone());
-    let failure_consumer_filter = use_signal(move || query_state.peek().failure_consumer.clone());
-    let failure_code_filter = use_signal(move || query_state.peek().failure_code.clone());
+    // 自动轮询开关与间隔入 URL（`poll` 键），默认关闭；页面隐藏时轮询挂起。
+    // 轮询只重取三个分区的当前视图数据，不重置分页、不写地址栏。
+    let poll_seconds = use_memo(move || query_state().poll_seconds);
+    use_auto_poll(poll_seconds, move || {
+        event_refresh.set(event_refresh().saturating_add(1));
+        lag_refresh.set(lag_refresh().saturating_add(1));
+        failure_refresh.set(failure_refresh().saturating_add(1));
+    });
     let events = use_resource(move || {
         let _ = event_refresh();
         let current = query_state();
@@ -87,48 +92,57 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     });
 
     let mut load_events_query = query.clone();
-    let load_events = move |_| {
+    let load_events = move |(stream, kind): (String, String)| {
         // 应用草稿筛选并回到第一页；事件分区资源响应查询状态变化自动重新加载。
         let mut next = query_state();
-        next.event_stream = event_stream_filter().trim().to_owned();
-        next.event_kind = event_kind_filter().trim().to_owned();
+        next.event_stream = stream;
+        next.event_kind = kind;
         next.event_page = 1;
         load_events_query.push(next);
     };
     let mut load_failures_query = query.clone();
-    let load_failures = move |_| {
+    let load_failures = move |(stream, consumer, code): (String, String, String)| {
         let mut next = query_state();
-        next.failure_stream = failure_stream_filter().trim().to_owned();
-        next.failure_consumer = failure_consumer_filter().trim().to_owned();
-        next.failure_code = failure_code_filter().trim().to_owned();
+        next.failure_stream = stream;
+        next.failure_consumer = consumer;
+        next.failure_code = code;
         next.failure_page = 1;
         load_failures_query.push(next);
         selected_failure.set(None);
         replay_command_id.set(None);
     };
-    // 顶部手动刷新与 failure 状态选择各持一份 hook 克隆。
+    // 顶部手动刷新、轮询开关与 failure 状态选择各持一份 hook 克隆。
     let mut refresh_query = query.clone();
+    let mut poll_query = query.clone();
     let mut state_query = query.clone();
-    let event_state = events.read_unchecked().clone();
-    let event_overview_state = event_overview.read_unchecked().clone();
-    let lag_state = lag.read_unchecked().clone();
-    let failure_state = failures.read_unchecked().clone();
-    let unresolved_failure_state = unresolved_failures.read_unchecked().clone();
-    let lag_page = lag_state.as_ref().and_then(|result| result.as_ref().ok());
+    // 五个资源快照收敛进 memo（Rc 共享）：仅对应资源结果变化时才深克隆整页数据，
+    // 其他信号驱动的普通重渲染只复制 Rc 指针。
+    let event_state = use_memo(move || Rc::new(events.read_unchecked().clone()));
+    let event_overview_state = use_memo(move || Rc::new(event_overview.read_unchecked().clone()));
+    let lag_state = use_memo(move || Rc::new(lag.read_unchecked().clone()));
+    let failure_state = use_memo(move || Rc::new(failures.read_unchecked().clone()));
+    let unresolved_failure_state =
+        use_memo(move || Rc::new(unresolved_failures.read_unchecked().clone()));
+    let event_state = event_state();
+    let event_overview_state = event_overview_state();
+    let lag_state = lag_state();
+    let failure_state = failure_state();
+    let unresolved_failure_state = unresolved_failure_state();
+    let lag_page = (*lag_state).as_ref().and_then(|result| result.as_ref().ok());
     let unresolved_failure_page =
-        unresolved_failure_state.as_ref().and_then(|result| result.as_ref().ok());
+        (*unresolved_failure_state).as_ref().and_then(|result| result.as_ref().ok());
     let event_total =
-        event_overview_state.as_ref().and_then(|result| result.as_ref().ok()).copied();
+        (*event_overview_state).as_ref().and_then(|result| result.as_ref().ok()).copied();
     let consumer_total = lag_page.map(|page| page.pagination.total);
     let failure_total = unresolved_failure_page.map(|page| page.pagination.total);
     let selected_id = selected_failure();
     let selected =
-        failure_state.as_ref().and_then(|result| result.as_ref().ok()).and_then(|page| {
+        (*failure_state).as_ref().and_then(|result| result.as_ref().ok()).and_then(|page| {
             selected_id
                 .as_ref()
                 .and_then(|id| page.failures.iter().find(|failure| &failure.id == id).cloned())
         });
-    let event_content = match &event_state {
+    let event_content = match &*event_state {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -150,7 +164,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             RealtimeEventTable { page: event_page.clone() }
         },
     };
-    let event_pager = match &event_state {
+    let event_pager = match &*event_state {
         Some(Ok(event_page)) => {
             let mut on_page_change = query.clone();
             rsx! {
@@ -166,7 +180,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         }
         _ => rsx! {},
     };
-    let failure_content = match &failure_state {
+    let failure_content = match &*failure_state {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -198,7 +212,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             }
         },
     };
-    let failure_pager = match &failure_state {
+    let failure_pager = match &*failure_state {
         Some(Ok(failure_page)) => {
             let mut on_page_change = query.clone();
             rsx! {
@@ -214,7 +228,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         }
         _ => rsx! {},
     };
-    let lag_content = match &lag_state {
+    let lag_content = match &*lag_state {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,
@@ -252,7 +266,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         section { class: "admin-realtime-page", aria_labelledby: "outbox-title",
             div { class: "admin-realtime-heading",
                 h1 { id: "outbox-title", {page_title} }
-                button {
+                div { class: "admin-realtime-heading__actions",
+                    AutoPollControls {
+                        poll_seconds: poll_seconds(),
+                        on_change: move |seconds| {
+                            // 开关与间隔变更立即生效并写回地址栏。
+                            let mut next = query_state();
+                            next.poll_seconds = seconds;
+                            poll_query.push(next);
+                        },
+                    }
+                    button {
                     r#type: "button",
                     class: "admin-btn-secondary",
                     onclick: move |_| {
@@ -270,6 +294,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         failure_refresh.set(failure_refresh().saturating_add(1));
                     },
                     {t!("realtime-refresh")}
+                    }
                 }
             }
             p { class: "admin-realtime-intro", {page_note} }
@@ -302,8 +327,8 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                     }
                 }
                 RealtimeEventFilters {
-                    stream_filter: event_stream_filter,
-                    kind_filter: event_kind_filter,
+                    initial_stream: query_state.peek().event_stream.clone(),
+                    initial_kind: query_state.peek().event_kind.clone(),
                     on_load: load_events,
                 }
                 {event_content}
@@ -364,9 +389,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 }
                 {failure_pager}
                 RealtimeFailureFilters {
-                    stream_filter: failure_stream_filter,
-                    consumer_filter: failure_consumer_filter,
-                    code_filter: failure_code_filter,
+                    initial_stream: query_state.peek().failure_stream.clone(),
+                    initial_consumer: query_state.peek().failure_consumer.clone(),
+                    initial_code: query_state.peek().failure_code.clone(),
                     on_load: load_failures,
                 }
             }

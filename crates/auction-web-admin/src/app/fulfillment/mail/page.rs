@@ -81,13 +81,23 @@ pub fn page() -> Element {
         },
         Some(Ok(intakes)) => {
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
                 super::table::MailIntakeTable {
                     page: intakes.clone(),
+                    sort: query_state().sort.clone(),
+                    direction: query_state().direction,
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.page = next_page;
                         on_page_change.push(next);
+                    },
+                    on_sort_change: move |(sort, direction)| {
+                        // 排序只影响当前页展示顺序；筛选与翻页保持不变。
+                        let mut next = query_state();
+                        next.sort = sort;
+                        next.direction = direction;
+                        on_sort_change.push(next);
                     },
                     on_select: move |intake_id| selected_intake.set(Some(intake_id)),
                 }
