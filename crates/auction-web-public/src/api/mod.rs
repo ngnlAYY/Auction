@@ -28,9 +28,9 @@ mod status;
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};
-pub(crate) use clock::{
-    estimated_now, observe_response_date, send_get, send_request, transport_error_code,
-};
+pub(crate) use clock::{estimated_now, observe_response_date, send_get};
+// 传输边界（10 秒取消上限、结构化 TransportError）由 auction-web-shared 统一提供。
+pub(crate) use auction_web_shared::{TransportError, send_request};
 pub(crate) use commands::{
     CommandError, ProxyCommandAuthorization, create_proxy_authorization, lower_proxy_authorization,
     place_bid,

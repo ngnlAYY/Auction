@@ -40,7 +40,7 @@ pub(super) fn decode_admin_session(data: AdminSessionResponse) -> Result<AdminSe
 fn valid_session_time(value: &str) -> bool {
     #[cfg(target_arch = "wasm32")]
     {
-        return js_sys::Date::parse(value).is_finite();
+        js_sys::Date::parse(value).is_finite()
     }
 
     #[cfg(not(target_arch = "wasm32"))]

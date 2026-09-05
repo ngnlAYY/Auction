@@ -3,11 +3,15 @@
 use super::*;
 
 /// 公开端世界选择器；世界是否可用由服务端目录决定，切换后重新读取权威当前拍卖。
+///
+/// URL 写回经外壳共享的 query hook 状态信号（context），保证 hook 缓存与地址栏一致，
+/// 浏览器前进/后退时 hook 的相等判断才能正确触发恢复。
 #[component]
 pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
     let route = use_route::<Route>();
     let history_owns_world_filter =
         matches!(&route, Route::AuctionList {} | Route::BidLog {} | Route::History {});
+    let shell_query_state = use_context::<Signal<PublicBoardQuery>>();
     let worlds = use_resource(fetch_worlds);
     let (options, worlds_loaded) = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => (header_worlds(worlds), true),
@@ -33,12 +37,13 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
             }
             // 旧版只有服务端目录使当前世界失效时才 replace URL；缺失或非法 world 只在内存回退 Main。
             let canonical_world = active_for_effect.clone();
-            update_public_query(
+            update_public_query_state(
+                shell_query_state,
                 move |query| {
                     query.world = (canonical_world != "main").then_some(canonical_world);
                     query.auction_id = None;
                 },
-                true,
+                QueryWriteMode::Replace,
             );
         }
     });
@@ -58,12 +63,13 @@ pub(crate) fn WorldPicker(mut selected_world: Signal<String>) -> Element {
                     if history_owns_world_filter {
                         return;
                     }
-                    update_public_query(
+                    update_public_query_state(
+                        shell_query_state,
                         |query| {
                             // 主世界沿用旧版无参数 URL；用户主动切换要建立可返回的历史条目。
                             query.world = (world != "main").then(|| world.clone());
                         },
-                        false,
+                        QueryWriteMode::Push,
                     );
                 },
                 for world in options {

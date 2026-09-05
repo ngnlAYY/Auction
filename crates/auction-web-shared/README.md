@@ -41,6 +41,21 @@
 - `src/clock/mod.rs`：秒级共享时钟。外壳用 `use_second_ticker()` 创建并提供 context，
   消费方用 `use_second_tick() -> Signal<u64>` 订阅同一修订计数，不再各自起一秒定时器；
   内部 interval 惰性启停（无订阅者时不运行），生命周期由外壳的 context 范围决定。
+- `src/query/mod.rs`：`use_query_state(keys, parse, serialize)` URL query 双向同步 hook，
+  收敛 Admin settlement 页的直写 history 模式与 Public 外壳的 popstate 恢复逻辑。挂载时
+  从地址栏解析初值，`push`/`replace` 写回（只替换本 hook 声明管理的键，同页多实例互不
+  覆盖），popstate 时经同一 `parse` 路径恢复状态；`read_query_pairs`/`write_query_pairs`
+  为低层读写原语。状态形状与键名全部由调用方注入，与 Dioxus Router 共存（不接管路由）。
+- `src/transport/mod.rs`：同源请求共享传输边界，合并两端逐行相同的 fetch 封装。
+  `send_get`/`send_request` 统一 10 秒 `AbortController` 超时（超时后取消浏览器 fetch）与
+  gloo-net 0.6.0 空 QueryParams workaround；错误为结构化 `TransportError`
+  （`Timeout`/`Network(Option<u16>)`/`Decode`），`code()` 给出契约稳定 transport code，
+  彻底取代原先的 "请求超时" 字符串比较。Admin 的 CSRF/Basic Auth 不进本层，由 surface
+  在 `build` 闭包叠加 header。
+- `src/errors/mod.rs`：稳定错误码的通用分类基础层。`classify_base_error` 只识别两端共享的
+  通用码（传输层三码、`http_4xx/5xx` 兜底、`*_conflict`/`stale_*`/`invalid_*` 模式）并归为
+  `BaseErrorKind`，业务码返回 `None`；`base_api_error_message(code, callback)` 由 surface
+  回调按类别取 `t!` 文案（与 `Pager` 的 props 注入同一模式），本 crate 不含任何译文。
 - `src/components/markdown/{mod,model,blocks,inline,render}.rs`：共享 Markdown/GFM 展示器的
   模型、块级解析、行内解析和安全 DOM 渲染；原始 HTML 只作为转义文本展示，链接目标经过
   协议白名单校验。`MarkdownDocument` 提供共享主题容器，`MarkdownBlocks` 只输出安全块节点，

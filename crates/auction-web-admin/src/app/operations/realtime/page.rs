@@ -9,11 +9,14 @@ use crate::api::{
     fetch_realtime_failure_page, fetch_realtime_lag_page, replay_realtime_failure,
 };
 
+use super::super::query::use_realtime_query_state;
 use super::event::{RealtimeEventPager, RealtimeEventTable};
 use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
-use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
+use crate::app::surface::{
+    AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
+};
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
@@ -33,28 +36,24 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     let mut schema_version = use_signal(|| "1".to_owned());
     let mut public_payload = use_signal(|| "{}".to_owned());
     let mut replay_invalid = use_signal(|| false);
-    let mut replay_busy = use_signal(|| false);
-    let mut lag_page_number = use_signal(|| 1_i64);
-    let mut event_page_number = use_signal(|| 1_i64);
-    let mut failure_page_number = use_signal(|| 1_i64);
-    let event_stream_filter = use_signal(String::new);
-    let event_kind_filter = use_signal(String::new);
-    let mut active_event_stream_filter = use_signal(String::new);
-    let mut active_event_kind_filter = use_signal(String::new);
-    let failure_stream_filter = use_signal(String::new);
-    let failure_consumer_filter = use_signal(String::new);
-    let failure_code_filter = use_signal(String::new);
-    let mut failure_resolved_filter = use_signal(String::new);
-    let mut active_failure_stream_filter = use_signal(String::new);
-    let mut active_failure_consumer_filter = use_signal(String::new);
-    let mut active_failure_code_filter = use_signal(String::new);
-    let mut active_failure_state_filter = use_signal(String::new);
+    let replay_busy = use_signal(|| false);
+    // 已应用的事件/failure 筛选与三个分区的分页跟地址栏双向同步；筛选输入框草稿、
+    // replay 对话框与负载输入是瞬态，不入 URL。
+    let query = use_realtime_query_state();
+    let query_state = query.state;
+    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与结果保持一致；之后的编辑不落 URL。
+    let event_stream_filter = use_signal(move || query_state.peek().event_stream.clone());
+    let event_kind_filter = use_signal(move || query_state.peek().event_kind.clone());
+    let failure_stream_filter = use_signal(move || query_state.peek().failure_stream.clone());
+    let failure_consumer_filter = use_signal(move || query_state.peek().failure_consumer.clone());
+    let failure_code_filter = use_signal(move || query_state.peek().failure_code.clone());
     let events = use_resource(move || {
         let _ = event_refresh();
+        let current = query_state();
         fetch_realtime_event_page(
-            event_page_number(),
-            active_event_stream_filter(),
-            active_event_kind_filter(),
+            current.event_page,
+            current.event_stream.clone(),
+            current.event_kind.clone(),
         )
     });
     let event_overview = use_resource(move || {
@@ -63,16 +62,17 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
     });
     let lag = use_resource(move || {
         let _ = lag_refresh();
-        fetch_realtime_lag_page(lag_page_number(), String::new(), String::new())
+        fetch_realtime_lag_page(query_state().lag_page, String::new(), String::new())
     });
     let failures = use_resource(move || {
         let _ = failure_refresh();
+        let current = query_state();
         fetch_realtime_failure_page(
-            failure_page_number(),
-            active_failure_stream_filter(),
-            active_failure_consumer_filter(),
-            active_failure_code_filter(),
-            active_failure_state_filter(),
+            current.failure_page,
+            current.failure_stream.clone(),
+            current.failure_consumer.clone(),
+            current.failure_code.clone(),
+            current.failure_state.clone(),
         )
     });
     let unresolved_failures = use_resource(move || {
@@ -86,22 +86,29 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         )
     });
 
+    let mut load_events_query = query.clone();
     let load_events = move |_| {
-        active_event_stream_filter.set(event_stream_filter());
-        active_event_kind_filter.set(event_kind_filter());
-        event_page_number.set(1);
-        event_refresh.set(event_refresh().saturating_add(1));
+        // 应用草稿筛选并回到第一页；事件分区资源响应查询状态变化自动重新加载。
+        let mut next = query_state();
+        next.event_stream = event_stream_filter().trim().to_owned();
+        next.event_kind = event_kind_filter().trim().to_owned();
+        next.event_page = 1;
+        load_events_query.push(next);
     };
+    let mut load_failures_query = query.clone();
     let load_failures = move |_| {
-        active_failure_stream_filter.set(failure_stream_filter());
-        active_failure_consumer_filter.set(failure_consumer_filter());
-        active_failure_code_filter.set(failure_code_filter());
-        active_failure_state_filter.set(failure_resolved_filter());
-        failure_page_number.set(1);
+        let mut next = query_state();
+        next.failure_stream = failure_stream_filter().trim().to_owned();
+        next.failure_consumer = failure_consumer_filter().trim().to_owned();
+        next.failure_code = failure_code_filter().trim().to_owned();
+        next.failure_page = 1;
+        load_failures_query.push(next);
         selected_failure.set(None);
         replay_command_id.set(None);
-        failure_refresh.set(failure_refresh().saturating_add(1));
     };
+    // 顶部手动刷新与 failure 状态选择各持一份 hook 克隆。
+    let mut refresh_query = query.clone();
+    let mut state_query = query.clone();
     let event_state = events.read_unchecked().clone();
     let event_overview_state = event_overview.read_unchecked().clone();
     let lag_state = lag.read_unchecked().clone();
@@ -144,9 +151,19 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
     };
     let event_pager = match &event_state {
-        Some(Ok(event_page)) => rsx! {
-            RealtimeEventPager { page: event_page.clone(), page_number: event_page_number }
-        },
+        Some(Ok(event_page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
+                RealtimeEventPager {
+                    page: event_page.clone(),
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.event_page = next_page;
+                        on_page_change.push(next);
+                    },
+                }
+            }
+        }
         _ => rsx! {},
     };
     let failure_content = match &failure_state {
@@ -182,12 +199,19 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         },
     };
     let failure_pager = match &failure_state {
-        Some(Ok(failure_page)) => rsx! {
-            RealtimeFailurePager {
-                page: failure_page.clone(),
-                page_number: failure_page_number,
+        Some(Ok(failure_page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
+                RealtimeFailurePager {
+                    page: failure_page.clone(),
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.failure_page = next_page;
+                        on_page_change.push(next);
+                    },
+                }
             }
-        },
+        }
         _ => rsx! {},
     };
     let lag_content = match &lag_state {
@@ -208,13 +232,20 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 on_retry: move |_| lag_refresh.set(lag_refresh().saturating_add(1)),
             }
         },
-        Some(Ok(lag_page)) => rsx! {
-            RealtimeLagTable { page: lag_page.clone() }
-            RealtimeLagPager {
-                page: lag_page.clone(),
-                page_number: lag_page_number,
+        Some(Ok(lag_page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
+                RealtimeLagTable { page: lag_page.clone() }
+                RealtimeLagPager {
+                    page: lag_page.clone(),
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.lag_page = next_page;
+                        on_page_change.push(next);
+                    },
+                }
             }
-        },
+        }
     };
 
     rsx! {
@@ -228,9 +259,12 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                         selected_failure.set(None);
                         replay_command_id.set(None);
                         notice.set(None);
-                        event_page_number.set(1);
-                        lag_page_number.set(1);
-                        failure_page_number.set(1);
+                        // 手动刷新把三个分区都带回第一页并写回地址栏。
+                        let mut next = query_state();
+                        next.event_page = 1;
+                        next.lag_page = 1;
+                        next.failure_page = 1;
+                        refresh_query.push(next);
                         event_refresh.set(event_refresh().saturating_add(1));
                         lag_refresh.set(lag_refresh().saturating_add(1));
                         failure_refresh.set(failure_refresh().saturating_add(1));
@@ -297,15 +331,15 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                             {t!("realtime-filter-state")}
                             select {
                                 id: "outbox-status",
-                                value: failure_resolved_filter(),
+                                value: query_state().failure_state,
                                 onchange: move |event| {
-                                    let next_state = event.value();
-                                    failure_resolved_filter.set(next_state.clone());
-                                    active_failure_state_filter.set(next_state);
-                                    failure_page_number.set(1);
+                                    // 状态筛选选择后立即生效并写回地址栏。
+                                    let mut next = query_state();
+                                    next.failure_state = event.value();
+                                    next.failure_page = 1;
+                                    state_query.push(next);
                                     selected_failure.set(None);
                                     replay_command_id.set(None);
-                                    failure_refresh.set(failure_refresh().saturating_add(1));
                                 },
                                 option { value: "", {t!("realtime-filter-all")} }
                                 option { value: "pending", disabled: true, {t!("realtime-state-pending")} }
@@ -409,32 +443,26 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                         replay_command_id,
                                         format!("{failure_id}:{schema}:{payload}"),
                                     );
-                                    notice.set(None);
-                                    replay_busy.set(true);
-                                    let mut replay_busy = replay_busy;
-                                    spawn(async move {
-                                        let result = replay_realtime_failure(
-                                            failure_id,
-                                            command_id,
-                                            schema,
-                                            payload,
-                                        )
-                                        .await;
-                                        replay_busy.set(false);
-                                        match result {
-                                            Ok(()) => {
-                                                notice.set(Some(AdminActionFeedback::Success));
-                                                selected_failure.set(None);
-                                                replay_command_id.set(None);
-                                                event_refresh.set(event_refresh().saturating_add(1));
-                                                failure_refresh.set(failure_refresh().saturating_add(1));
-                                                lag_refresh.set(lag_refresh().saturating_add(1));
-                                            }
-                                            Err(code) => notice.set(Some(
-                                                AdminActionFeedback::Error(code),
-                                            )),
-                                        }
-                                    });
+                                    run_admin_feedback_action(
+                                        replay_busy,
+                                        notice,
+                                        async move {
+                                            replay_realtime_failure(
+                                                failure_id,
+                                                command_id,
+                                                schema,
+                                                payload,
+                                            )
+                                            .await
+                                        },
+                                        move |()| {
+                                            selected_failure.set(None);
+                                            replay_command_id.set(None);
+                                            event_refresh.set(event_refresh().saturating_add(1));
+                                            failure_refresh.set(failure_refresh().saturating_add(1));
+                                            lag_refresh.set(lag_refresh().saturating_add(1));
+                                        },
+                                    );
                                 },
                                 {t!("realtime-replay-submit")}
                             }
@@ -490,16 +518,5 @@ fn failure_count_state(value: Option<i64>) -> &'static str {
         None => "unavailable",
         Some(0) => "ok",
         Some(_) => "error",
-    }
-}
-
-fn stable_command_id(mut command_state: Signal<Option<(String, Uuid)>>, signature: String) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
     }
 }

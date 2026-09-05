@@ -7,7 +7,7 @@ use uuid::Uuid;
 use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
 
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
-use crate::app::surface::admin_api_error_message;
+use crate::app::surface::{admin_api_error_message, stable_command_id};
 
 use super::super::format_admin_time;
 use super::helpers::{admin_lot_code_for, equipment_details, lot_status_label};
@@ -301,14 +301,7 @@ fn submit_lot_update(
         "{action_key}:{expected_state_version}:{}",
         price.map_or_else(String::new, |value| value.to_string())
     );
-    let command_id = match (signals.command_state)() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            signals.command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    };
+    let command_id = stable_command_id(signals.command_state, signature);
     signals.notice.set(None);
     signals.busy.set(true);
     spawn(async move {

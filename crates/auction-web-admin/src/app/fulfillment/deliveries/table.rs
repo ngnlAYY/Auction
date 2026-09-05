@@ -188,7 +188,7 @@ pub(super) fn DeliveryRow(
 
 /// 控制 delivery 列表分页。
 #[component]
-pub(super) fn DeliveryPager(page: DeliveryPage, mut page_number: Signal<i64>) -> Element {
+pub(super) fn DeliveryPager(page: DeliveryPage, on_page_change: EventHandler<i64>) -> Element {
     rsx! {
         Pager {
             page: page.pagination.page,
@@ -202,7 +202,7 @@ pub(super) fn DeliveryPager(page: DeliveryPage, mut page_number: Signal<i64>) ->
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            on_page_change: move |next_page| page_number.set(next_page),
+            on_page_change,
         }
     }
 }

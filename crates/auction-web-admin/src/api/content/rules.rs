@@ -7,7 +7,6 @@ pub(crate) use auction_contracts::{
     AdminRulesCandidateResponse as AdminRulesCandidate, AdminRulesResponse as AdminRules,
 };
 use gloo_net::http::Request;
-use serde::Deserialize;
 
 use super::{
     AdminApiFailure, ApiResponse, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
@@ -15,24 +14,8 @@ use super::{
     valid_trimmed_text,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictRulesCandidate {
-    locale: String,
-    markdown: String,
-    title: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictRules {
-    locale: String,
-    markdown: String,
-    published_at: String,
-    published_by: String,
-    revision: i64,
-    title: String,
-}
+// 本地 Strict 镜像已删除：contracts 的 `AdminRulesResponse` 与 `AdminRulesCandidateResponse`
+// 已带 `deny_unknown_fields`；本文件只保留 locale/title/发布时间等值域谓词与请求回显校验。
 
 /// Admin 规则请求失败时保留 HTTP 状态，页面可以把版本冲突和普通网络错误区分开。
 pub(crate) type AdminRulesApiError = AdminApiFailure;
@@ -45,7 +28,7 @@ pub(crate) async fn fetch_admin_rules(locale: String) -> Result<AdminRules, Admi
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRules> = response
+    let payload: ApiResponse<AdminRules> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -76,7 +59,7 @@ pub(crate) async fn validate_admin_rules(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRulesCandidate> = response
+    let payload: ApiResponse<AdminRulesCandidate> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -113,7 +96,7 @@ pub(crate) async fn publish_admin_rules(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRules> = response
+    let payload: ApiResponse<AdminRules> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -128,14 +111,14 @@ pub(crate) async fn publish_admin_rules(
     Ok(rules)
 }
 
-fn decode_candidate(value: StrictRulesCandidate) -> Result<AdminRulesCandidate, &'static str> {
+fn decode_candidate(value: AdminRulesCandidate) -> Result<AdminRulesCandidate, &'static str> {
     if !valid_locale(&value.locale) || !valid_trimmed_text(&value.title) {
         return Err("rules_candidate");
     }
-    Ok(AdminRulesCandidate { locale: value.locale, title: value.title, markdown: value.markdown })
+    Ok(value)
 }
 
-fn decode_rules(value: StrictRules) -> Result<AdminRules, &'static str> {
+fn decode_rules(value: AdminRules) -> Result<AdminRules, &'static str> {
     if !valid_locale(&value.locale)
         || !valid_trimmed_text(&value.title)
         || !valid_trimmed_text(&value.published_by)
@@ -144,14 +127,7 @@ fn decode_rules(value: StrictRules) -> Result<AdminRules, &'static str> {
     {
         return Err("rules");
     }
-    Ok(AdminRules {
-        locale: value.locale,
-        title: value.title,
-        markdown: value.markdown,
-        published_by: value.published_by,
-        revision: value.revision,
-        published_at: value.published_at,
-    })
+    Ok(value)
 }
 
 fn valid_locale(value: &str) -> bool {

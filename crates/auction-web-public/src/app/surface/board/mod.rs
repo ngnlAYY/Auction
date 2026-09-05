@@ -103,8 +103,6 @@ pub(crate) fn AuctionBoard() -> Element {
             AuctionData {
                 auction: auction.clone(),
                 historical,
-                initial_category: query.category.clone().unwrap_or_else(|| "all".to_owned()),
-                initial_page: query.page,
                 boot_prerequisites_ready,
             }
         },

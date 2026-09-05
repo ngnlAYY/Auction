@@ -6,7 +6,7 @@
 use auction_contracts::{HealthProbeResponse, HealthReadyData};
 use gloo_net::http::Request;
 
-use super::send_request;
+use super::{TransportError, send_request};
 
 /// 读取 Public 进程 readiness，并保留旧客户端的 JSON Accept 头与 10 秒请求上限。
 pub(crate) async fn fetch_public_readiness() -> Result<bool, String> {
@@ -15,9 +15,10 @@ pub(crate) async fn fetch_public_readiness() -> Result<bool, String> {
             .header("Accept", "application/json")
             .abort_signal(abort_signal)
             .build()
-            .map_err(|error| error.to_string())
+            .map_err(|_| TransportError::Network(None))
     })
-    .await?;
+    .await
+    .map_err(|error| error.code().to_owned())?;
     let response_ok = response.ok();
     let payload: HealthProbeResponse<HealthReadyData> =
         response.json().await.map_err(|_| "invalid_response".to_owned())?;

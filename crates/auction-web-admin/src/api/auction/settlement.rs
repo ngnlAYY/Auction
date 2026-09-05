@@ -11,16 +11,23 @@ pub(crate) use auction_contracts::{
 };
 use serde::Deserialize;
 
-use super::auctions::{StrictAuction, decode_auction};
+use super::auctions::decode_auction;
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, RequiredOption, invalid_response_error,
     response_error, send_get, valid_admin_time, valid_trimmed_text,
 };
 
 /// 旧结算 decoder 只对内嵌 auction 使用字段闭集；report、summary 与 lot 允许兼容扩展字段。
+///
+/// 保留镜像的理由：contracts 的 `AdminSettlementReportResponse`/`AdminSettlementSummaryResponse`/
+/// `AdminSettlementLotResponse`/`AdminSettlementAdjustmentResponse` 对应同一 wire，但旧契约允许
+/// 服务端增加扩展字段，不能加 `deny_unknown_fields`，因此这里保留开放式镜像继续要求旧字段
+/// 显式存在并逐项校验。同步义务：上述 DTO 字段集变化时必须同步本镜像；下方构造 DTO 的穷举
+/// 字段列表会在编译期捕捉漂移。内嵌 auction 已由 contracts 的闭集 `AdminAuctionResponse`
+/// 承担，不再镜像。
 #[derive(Debug, Deserialize)]
 struct StrictSettlementReport {
-    auction: StrictAuction,
+    auction: auction_contracts::AdminAuctionResponse,
     lots: Vec<StrictSettlementLot>,
     settlement: RequiredOption<StrictSettlementSummary>,
 }

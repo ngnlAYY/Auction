@@ -6,7 +6,6 @@
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
 use gloo_net::http::Request;
-use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::{
@@ -14,13 +13,8 @@ use super::{
     invalid_response_error, response_failure, send_get, send_request,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictRuntimeConfig {
-    document: Value,
-    fingerprint: String,
-    restart_required: bool,
-}
+// 本地 Strict 镜像已删除：contracts 的 `AdminRuntimeConfigResponse` 已带
+// `deny_unknown_fields`；`document` 的深度结构与模板谓词仍由下方校验函数承担。
 
 /// Runtime 配置请求失败时保留 HTTP 状态，页面可区分 fingerprint 冲突和普通错误。
 pub(crate) type AdminRuntimeConfigApiError = AdminApiFailure;
@@ -31,7 +25,7 @@ pub(crate) async fn fetch_admin_runtime_config()
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRuntimeConfig> = response
+    let payload: ApiResponse<AdminRuntimeConfig> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -56,7 +50,7 @@ pub(crate) async fn validate_admin_runtime_config(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRuntimeConfig> = response
+    let payload: ApiResponse<AdminRuntimeConfig> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -83,7 +77,7 @@ pub(crate) async fn update_admin_runtime_config(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictRuntimeConfig> = response
+    let payload: ApiResponse<AdminRuntimeConfig> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -91,7 +85,7 @@ pub(crate) async fn update_admin_runtime_config(
 }
 
 fn decode_runtime_config(
-    value: StrictRuntimeConfig,
+    value: AdminRuntimeConfig,
     expected_restart_required: bool,
 ) -> Result<AdminRuntimeConfig, &'static str> {
     if value.restart_required != expected_restart_required
@@ -100,11 +94,7 @@ fn decode_runtime_config(
     {
         return Err("runtime_config");
     }
-    Ok(AdminRuntimeConfig {
-        document: value.document,
-        fingerprint: value.fingerprint,
-        restart_required: value.restart_required,
-    })
+    Ok(value)
 }
 
 fn valid_runtime_document(value: &Value) -> bool {

@@ -4,7 +4,7 @@ use auction_web_shared::legacy_t as t;
 
 use crate::api::Delivery;
 
-pub(super) const DELIVERY_STATUS_VALUES: [&str; 7] =
+pub(crate) const DELIVERY_STATUS_VALUES: [&str; 7] =
     ["prepared", "pending", "claimed", "sending", "succeeded", "failed", "manual_reconcile"];
 
 pub(super) fn delivery_status_label(status: &str) -> String {

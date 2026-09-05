@@ -187,7 +187,11 @@ pub struct PublicSessionCurrentResponse {
 }
 
 /// Admin 登录或当前会话响应。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只
+/// 序列化本 DTO，收紧只影响反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminSessionResponse {
     pub authenticated: bool,
     pub actor: String,
@@ -225,7 +229,10 @@ pub struct PublicRulesResponse {
 }
 
 /// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminRulesResponse {
     pub locale: String,
     pub title: String,
@@ -237,6 +244,7 @@ pub struct AdminRulesResponse {
 
 /// Admin 规则候选校验响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminRulesCandidateResponse {
     pub locale: String,
     pub title: String,
@@ -244,7 +252,10 @@ pub struct AdminRulesCandidateResponse {
 }
 
 /// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminRuntimeConfigResponse {
     pub document: Value,
     pub fingerprint: String,

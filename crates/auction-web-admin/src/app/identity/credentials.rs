@@ -17,8 +17,7 @@ mod table;
 pub(super) use dialogs::CredentialDeleteDialog;
 pub(super) use form::CredentialCreateForm;
 pub(super) use helpers::{
-    credential_kind_label, credential_status_class, credential_status_label,
-    credential_world_label, run_action, stable_command_id,
+    credential_kind_label, credential_status_class, credential_status_label, credential_world_label,
 };
 pub(super) use page::page;
 pub(super) use table::{CredentialPager, CredentialTable};

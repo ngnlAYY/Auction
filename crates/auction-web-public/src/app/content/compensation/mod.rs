@@ -9,8 +9,8 @@ use crate::api::{
 };
 
 use super::{
-    AsyncState, AsyncStateKind, Pager, Route, Time, format_amount, format_auction_time,
-    read_public_query, update_public_query, world_label,
+    AsyncState, AsyncStateKind, Pager, QueryWriteMode, Route, Time, format_amount,
+    format_auction_time, update_public_query_state, use_public_query_state, world_label,
 };
 
 mod movements;
@@ -22,7 +22,11 @@ use table::CompensationPoolTable;
 /// 读取公开补偿池批次，并按旧版公开页面展示流水详情。
 pub(super) fn pool_page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let mut page_number = use_signal(|| read_public_query().page.max(1));
+    // 池页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复；流水详情选中态
+    // 与流水页码仍是页面本地状态（旧版不入 URL）。
+    let query_state = use_public_query_state();
+    let query_state_signal = query_state.state;
+    let page_number = use_memo(move || query_state_signal().page.max(1));
     let mut selected_auction_id = use_signal(String::new);
     let mut movement_page = use_signal(|| 1_i64);
     let pool = use_resource({
@@ -76,10 +80,13 @@ pub(super) fn pool_page() -> Element {
                     movements: movement_state,
                     on_page_change: move |next_page: i64| {
                         let next_page = next_page.max(1);
-                        page_number.set(next_page);
                         selected_auction_id.set(String::new());
                         movement_page.set(1);
-                        update_public_query(|query| query.page = next_page, false);
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.page = next_page,
+                            QueryWriteMode::Push,
+                        );
                     },
                     on_select_round: move |auction_id: String| {
                         if selected_auction_id() == auction_id {

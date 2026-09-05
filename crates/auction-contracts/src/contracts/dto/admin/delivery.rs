@@ -5,7 +5,10 @@ use super::*;
 /// Admin delivery 安全投影；不包含 payload、lease token 或原始 result metadata。
 /// `cod` 只表示经过 owner 校验后从版本化 send payload 提取的金额；其余三个结果字段同样
 /// 由 owner 从版本化 metadata 派生，不把 metadata 原文传给浏览器。
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧
+/// 反序列化，序列化输出（含 `skip_serializing_if` 省略规则）不变。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminDeliveryResponse {
     pub id: String,
     pub origin_kind: String,
@@ -33,6 +36,7 @@ pub struct AdminDeliveryResponse {
 
 /// Admin delivery 列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminDeliveryListResponse {
     pub deliveries: Vec<AdminDeliveryResponse>,
     pub pagination: AdminDeliveryPaginationResponse,
@@ -40,6 +44,7 @@ pub struct AdminDeliveryListResponse {
 
 /// Admin delivery 的旧版页码信封。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminDeliveryPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -62,6 +67,7 @@ pub struct AdminDeliveryCommandRequest {
 
 /// Admin delivery 状态命令响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminDeliveryCommandResponse {
     pub delivery: AdminDeliveryResponse,
 }

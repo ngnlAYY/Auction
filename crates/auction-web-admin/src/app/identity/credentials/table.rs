@@ -7,11 +7,10 @@ use uuid::Uuid;
 use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
 
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, run_admin_feedback_action, stable_command_id};
 
 use super::{
-    credential_kind_label, credential_status_class, credential_status_label,
-    credential_world_label, run_action, stable_command_id,
+    credential_kind_label, credential_status_class, credential_status_label, credential_world_label,
 };
 
 #[component]
@@ -70,7 +69,7 @@ pub fn CredentialRow(
     let mut rename_dialog = use_signal(|| false);
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<AdminActionFeedback>);
-    let command_state = use_signal(|| None::<(String, Uuid)>);
+    let mut command_state = use_signal(|| None::<(String, Uuid)>);
     let credential_for_rename = credential.clone();
     let credential_for_rename_submit = credential.clone();
     let credential_for_enable = credential.clone();
@@ -117,11 +116,9 @@ pub fn CredentialRow(
                             command_state,
                             format!("set_status:{}:{status}", credential.state_version),
                         );
-                        run_action(
+                        run_admin_feedback_action(
                             busy,
                             feedback,
-                            reload_generation,
-                            command_state,
                             async move {
                                 mutate_admin_credential(
                                     command_id,
@@ -132,6 +129,10 @@ pub fn CredentialRow(
                                 )
                                 .await
                                 .map(|_| ())
+                            },
+                            move |()| {
+                                command_state.set(None);
+                                reload_generation.set(reload_generation().saturating_add(1));
                             },
                         );
                     },
@@ -147,11 +148,9 @@ pub fn CredentialRow(
                             command_state,
                             format!("set_status:{}:{status}", credential.state_version),
                         );
-                        run_action(
+                        run_admin_feedback_action(
                             busy,
                             feedback,
-                            reload_generation,
-                            command_state,
                             async move {
                                 mutate_admin_credential(
                                     command_id,
@@ -162,6 +161,10 @@ pub fn CredentialRow(
                                 )
                                 .await
                                 .map(|_| ())
+                            },
+                            move |()| {
+                                command_state.set(None);
+                                reload_generation.set(reload_generation().saturating_add(1));
                             },
                         );
                     },
@@ -224,11 +227,9 @@ pub fn CredentialRow(
                                         format!("rename:{}:{label}", credential.state_version),
                                     );
                                     let mut rename_dialog = rename_dialog;
-                                    run_action(
+                                    run_admin_feedback_action(
                                         busy,
                                         feedback,
-                                        reload_generation,
-                                        command_state,
                                         async move {
                                             let result = mutate_admin_credential(
                                                 command_id,
@@ -243,6 +244,11 @@ pub fn CredentialRow(
                                                 rename_dialog.set(false);
                                             }
                                             result
+                                        },
+                                        move |()| {
+                                            command_state.set(None);
+                                            reload_generation
+                                                .set(reload_generation().saturating_add(1));
                                         },
                                     );
                                 },
@@ -283,7 +289,7 @@ pub fn CredentialRow(
 }
 
 #[component]
-pub fn CredentialPager(page: AdminCredentialPage, page_number: Signal<i64>) -> Element {
+pub fn CredentialPager(page: AdminCredentialPage, on_page_change: EventHandler<i64>) -> Element {
     rsx! {
         Pager {
             page: page.page,
@@ -297,7 +303,7 @@ pub fn CredentialPager(page: AdminCredentialPage, page_number: Signal<i64>) -> E
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            on_page_change: move |next_page| page_number.set(next_page),
+            on_page_change,
         }
     }
 }

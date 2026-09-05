@@ -16,6 +16,12 @@ use super::{
 };
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
+///
+/// 保留镜像的理由：wire 允许兼容扩展，contracts 的 `AdminAuditResponse`/
+/// `AdminAuditRecordResponse`/`AdminAuditCursorResponse` 不能加 `deny_unknown_fields`；
+/// 镜像继续要求旧字段显式存在（`next_cursor`/`request_id` 为必填 nullable）。同步义务：
+/// 上述 DTO 字段集变化时必须同步本文件；decode 函数中构造 DTO 的穷举字段列表会在编译期
+/// 捕捉漂移。
 #[derive(Debug, Deserialize)]
 struct StrictAuditPage {
     has_more: bool,

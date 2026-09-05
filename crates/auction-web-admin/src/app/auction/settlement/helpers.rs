@@ -1,24 +1,10 @@
 //! Admin 结算与 recovery 的标签、金额和分页辅助。
 
 use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::format_credit_amount as format_amount;
 
 use crate::api::{AdminRecoveryAction, AdminSettlementLot};
-
-pub(super) fn stable_command_id(
-    mut command_ids: Signal<std::collections::HashMap<String, Uuid>>,
-    signature: String,
-) -> Uuid {
-    if let Some(command_id) = command_ids.read().get(&signature).copied() {
-        return command_id;
-    }
-    let command_id = Uuid::new_v4();
-    command_ids.write().insert(signature, command_id);
-    command_id
-}
 
 pub(super) fn recovery_stage_label(stage: &str) -> String {
     match stage {

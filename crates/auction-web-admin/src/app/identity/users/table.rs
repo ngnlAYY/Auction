@@ -15,10 +15,13 @@ use super::row::AdminUserRow;
 #[component]
 pub(super) fn AdminUserTable(
     page: crate::api::AdminUserPage,
-    mut name_filter: Signal<String>,
     mut name_draft: Signal<String>,
-    mut status_filter: Signal<AdminUserStatusFilter>,
-    mut page_number: Signal<i64>,
+    /// 当前状态筛选（地址栏恢复后的值）；变更经回调由页面写回 URL。
+    status: AdminUserStatusFilter,
+    /// 提交名称草稿：由页面 push 到地址栏并回到第一页。
+    on_name_apply: EventHandler<String>,
+    on_status_change: EventHandler<AdminUserStatusFilter>,
+    on_page_change: EventHandler<i64>,
     reload_generation: Signal<u64>,
     action_busy: Signal<bool>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
@@ -30,8 +33,7 @@ pub(super) fn AdminUserTable(
             class: "admin-users-filter",
             onsubmit: move |event| {
                 event.prevent_default();
-                name_filter.set(name_draft().trim().to_owned());
-                page_number.set(1);
+                on_name_apply.call(name_draft().trim().to_owned());
             },
             label {
                 r#for: "user-name-filter",
@@ -50,10 +52,9 @@ pub(super) fn AdminUserTable(
                 {t!("admin-users-filter-status")}
                 select {
                     id: "user-status-filter",
-                    value: status_filter_value(status_filter()),
+                    value: status_filter_value(status),
                     onchange: move |event| {
-                        status_filter.set(parse_status_filter(&event.value()));
-                        page_number.set(1);
+                        on_status_change.call(parse_status_filter(&event.value()));
                     },
                     option { value: "all", {t!("admin-users-status-all")} }
                     option { value: "active", {t!("admin-users-status-active")} }
@@ -119,7 +120,7 @@ pub(super) fn AdminUserTable(
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            on_page_change: move |next_page| page_number.set(next_page),
+            on_page_change,
         }
     }
 }

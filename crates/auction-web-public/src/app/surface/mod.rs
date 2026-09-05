@@ -68,11 +68,12 @@ use crate::api::{
     lot_code_for, subscribe_auction_realtime, subscribe_realtime,
 };
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, BaseStylesheet, LanguagePicker, Pager, Time, TruncatedText,
+    AsyncState, AsyncStateKind, BaseErrorKind, BaseStylesheet, LanguagePicker, Pager, QueryState,
+    QueryWriteMode, Time, TruncatedText, base_api_error_message,
     format_credit_amount as format_amount, format_localized_time,
     i18n::{DEFAULT_PUBLIC_LOCALE, initial_language},
-    legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_route_focus,
-    use_second_tick, use_second_ticker,
+    legacy_t as t, use_app_boot_ready, use_dialog_focus_trap, use_locale_effects, use_query_state,
+    use_route_focus, use_second_tick, use_second_ticker, write_query_pairs,
 };
 
 /// Public 外壳唯一拥有的会话快照；页面只消费该资源，避免同一渲染树重复请求 session。
@@ -83,3 +84,34 @@ pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 
 /// Public 外壳按世界读取的当前拍卖快照；结果携带请求世界，切换期间不得消费旧世界缓存。
 pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;
+
+/// 会话资源快照的统一展示投影。
+///
+/// 看板、lot 详情和外壳头部原先各自重复同一段四元解构；认证、就绪、错误与查看者身份
+/// 按同一规则派生，匿名/未就绪/错误一律失败关闭。
+#[derive(Clone)]
+pub(crate) struct PublicSessionView {
+    pub(crate) pending: bool,
+    pub(crate) ready: bool,
+    pub(crate) error: bool,
+    pub(crate) authenticated: bool,
+    pub(crate) viewer_player_id: Option<String>,
+}
+
+impl PublicSessionView {
+    /// 从会话资源当前快照派生展示投影；调用方仍需原始快照时可保留本地副本。
+    pub(crate) fn from_snapshot(snapshot: Option<&Result<Option<PublicSession>, String>>) -> Self {
+        Self {
+            pending: snapshot.is_none(),
+            ready: matches!(snapshot, Some(Ok(_))),
+            error: matches!(snapshot, Some(Err(_))),
+            authenticated: matches!(snapshot, Some(Ok(Some(identity))) if identity.authenticated),
+            viewer_player_id: match snapshot {
+                Some(Ok(Some(identity))) if identity.authenticated => {
+                    Some(identity.username.clone())
+                }
+                _ => None,
+            },
+        }
+    }
+}

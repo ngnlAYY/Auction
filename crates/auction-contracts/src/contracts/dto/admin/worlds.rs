@@ -3,7 +3,10 @@
 use super::*;
 
 /// Admin 可见的业务世界权威状态。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminWorldResponse {
     pub id: String,
     pub enabled: bool,
@@ -13,6 +16,7 @@ pub struct AdminWorldResponse {
 
 /// Admin 业务世界目录响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminWorldListResponse {
     pub worlds: Vec<AdminWorldResponse>,
 }
@@ -28,6 +32,7 @@ pub struct AdminWorldSetEnabledRequest {
 
 /// Admin 业务世界启停成功响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminWorldSetEnabledResponse {
     pub world: AdminWorldResponse,
 }

@@ -115,7 +115,10 @@ fn compact_realtime_id(value: &str) -> String {
 
 /// 控制 failure 列表分页。
 #[component]
-pub(super) fn RealtimeFailurePager(page: RealtimeFailurePage, page_number: Signal<i64>) -> Element {
+pub(super) fn RealtimeFailurePager(
+    page: RealtimeFailurePage,
+    on_page_change: EventHandler<i64>,
+) -> Element {
     rsx! {
         Pager {
             page: page.pagination.page,
@@ -129,7 +132,7 @@ pub(super) fn RealtimeFailurePager(page: RealtimeFailurePage, page_number: Signa
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            on_page_change: move |next_page| page_number.set(next_page),
+            on_page_change,
         }
     }
 }

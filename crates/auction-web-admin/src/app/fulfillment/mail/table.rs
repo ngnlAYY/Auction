@@ -10,7 +10,8 @@ use crate::api::{AdminMailIntake, AdminMailIntakePage};
 #[component]
 pub(super) fn MailIntakeTable(
     page: AdminMailIntakePage,
-    mut page_number: Signal<i64>,
+    /// 翻页回调：由页面把新页码 push 到地址栏并更新查询状态。
+    on_page_change: EventHandler<i64>,
     on_select: EventHandler<String>,
 ) -> Element {
     let is_empty = page.intakes.is_empty();
@@ -56,7 +57,7 @@ pub(super) fn MailIntakeTable(
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
-            on_page_change: move |next_page| page_number.set(next_page),
+            on_page_change,
         }
     }
 }

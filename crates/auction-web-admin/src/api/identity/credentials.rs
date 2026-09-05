@@ -4,8 +4,8 @@
 //! 列表和命令响应都不包含凭据内容。
 
 use auction_contracts::{
-    AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialListResponse,
-    AdminCredentialMutationRequest, AdminCredentialMutationResponse,
+    AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialDeleteResponse,
+    AdminCredentialListResponse, AdminCredentialMutationRequest, AdminCredentialMutationResponse,
     AdminCredentialPaginationResponse,
 };
 pub(crate) use auction_contracts::{
@@ -13,59 +13,18 @@ pub(crate) use auction_contracts::{
     AdminCredentialResponse as AdminCredential,
 };
 use gloo_net::http::Request;
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption, TABLE_PAGE_SIZE, fetch_csrf_token,
-    invalid_request_error, invalid_response_error, response_error, send_get, send_request,
-    valid_admin_time, valid_trimmed_text, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, fetch_csrf_token, invalid_request_error,
+    invalid_response_error, response_error, send_get, send_request, valid_admin_time,
+    valid_trimmed_text, valid_uuid,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictCredential {
-    created_at: String,
-    id: String,
-    kind: String,
-    label: String,
-    rotated_at: RequiredOption<String>,
-    state_version: i64,
-    status: String,
-    updated_at: String,
-    world: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictCredentialPagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictCredentialList {
-    credentials: Vec<StrictCredential>,
-    pagination: StrictCredentialPagination,
-    restart_required: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictCredentialData {
-    credential: StrictCredential,
-    restart_required: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictCredentialDeleteData {
-    credential_id: String,
-    restart_required: bool,
-    state_version: i64,
-}
+// 本地 Strict 镜像已删除：contracts 的 `AdminCredentialResponse`（`rotated_at` 保持必填
+// nullable 语义）、`AdminCredentialListResponse`/`AdminCredentialMutationResponse`/
+// `AdminCredentialDeleteResponse` 均已带 `deny_unknown_fields`；本文件只保留筛选回显、
+// restart_required 与版本递增等跨字段谓词。
 
 /// 凭据列表页的浏览器展示投影；分页字段在这里展平，wire 形状仍由 contracts 拥有。
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +73,7 @@ pub(crate) async fn fetch_admin_credentials(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictCredentialList> =
+    let payload: ApiResponse<AdminCredentialListResponse> =
         response.json().await.map_err(invalid_response_error)?;
     decode_credential_list(payload.data, kind.trim(), world.trim(), status.trim(), page.max(1))
         .map(AdminCredentialPage::from)
@@ -142,7 +101,7 @@ pub(crate) async fn create_admin_credential(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictCredentialData> =
+    let payload: ApiResponse<AdminCredentialMutationResponse> =
         response.json().await.map_err(invalid_response_error)?;
     let data = decode_credential_data(payload.data).map_err(invalid_response_error)?;
     if data.credential.kind != command.kind
@@ -184,7 +143,7 @@ pub(crate) async fn mutate_admin_credential(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictCredentialData> =
+    let payload: ApiResponse<AdminCredentialMutationResponse> =
         response.json().await.map_err(invalid_response_error)?;
     let data = decode_credential_data(payload.data).map_err(invalid_response_error)?;
     let updated = data.credential;
@@ -235,7 +194,7 @@ pub(crate) async fn delete_admin_credential(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictCredentialDeleteData> =
+    let payload: ApiResponse<AdminCredentialDeleteResponse> =
         response.json().await.map_err(invalid_response_error)?;
     decode_credential_delete(
         payload.data,
@@ -246,7 +205,7 @@ pub(crate) async fn delete_admin_credential(
 }
 
 fn decode_credential_list(
-    data: StrictCredentialList,
+    data: AdminCredentialListResponse,
     kind_filter: &str,
     world_filter: &str,
     status_filter: &str,
@@ -255,11 +214,12 @@ fn decode_credential_list(
     if !data.restart_required {
         return Err("credential_restart");
     }
-    let pagination = decode_credential_pagination(data.pagination)?;
-    if pagination.page != requested_page
-        || pagination.page_size != TABLE_PAGE_SIZE
-        || i64::try_from(data.credentials.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
+    decode_credential_pagination(&data.pagination)?;
+    if data.pagination.page != requested_page
+        || data.pagination.page_size != TABLE_PAGE_SIZE
+        || i64::try_from(data.credentials.len()).map_or(true, |count| {
+            count > data.pagination.page_size || count > data.pagination.total
+        })
     {
         return Err("credential_pagination");
     }
@@ -272,11 +232,15 @@ fn decode_credential_list(
     }) {
         return Err("credential_filter");
     }
-    Ok(AdminCredentialListResponse { credentials, pagination, restart_required: true })
+    Ok(AdminCredentialListResponse {
+        credentials,
+        pagination: data.pagination,
+        restart_required: true,
+    })
 }
 
 fn decode_credential_data(
-    data: StrictCredentialData,
+    data: AdminCredentialMutationResponse,
 ) -> Result<AdminCredentialMutationResponse, &'static str> {
     if !data.restart_required {
         return Err("credential_restart");
@@ -288,7 +252,7 @@ fn decode_credential_data(
 }
 
 fn decode_credential_delete(
-    data: StrictCredentialDeleteData,
+    data: AdminCredentialDeleteResponse,
     requested_credential_id: &str,
     expected_state_version: i64,
 ) -> Result<AdminCredentialDeleteResult, &'static str> {
@@ -307,7 +271,8 @@ fn decode_credential_delete(
     })
 }
 
-fn decode_credential(value: StrictCredential) -> Result<AdminCredential, &'static str> {
+/// 跨字段谓词保留为独立校验：类型/世界/状态枚举与值域仍在浏览器边界 fail-closed。
+fn decode_credential(value: AdminCredential) -> Result<AdminCredential, &'static str> {
     if !valid_uuid(&value.id)
         || !matches!(value.kind.as_str(), "forum_cookie" | "mail_cookie")
         || !matches!(value.world.as_str(), "main" | "isekai" | "shared")
@@ -316,36 +281,22 @@ fn decode_credential(value: StrictCredential) -> Result<AdminCredential, &'stati
         || !matches!(value.status.as_str(), "active" | "disabled" | "invalid")
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
         || !valid_admin_time(&value.created_at)
-        || value.rotated_at.0.as_deref().is_some_and(|time| !valid_admin_time(time))
+        || value.rotated_at.as_deref().is_some_and(|time| !valid_admin_time(time))
         || !valid_admin_time(&value.updated_at)
     {
         return Err("credential");
     }
-    Ok(AdminCredential {
-        id: value.id,
-        kind: value.kind,
-        world: value.world,
-        label: value.label,
-        status: value.status,
-        state_version: value.state_version,
-        created_at: value.created_at,
-        rotated_at: value.rotated_at.0,
-        updated_at: value.updated_at,
-    })
+    Ok(value)
 }
 
 fn decode_credential_pagination(
-    value: StrictCredentialPagination,
-) -> Result<AdminCredentialPaginationResponse, &'static str> {
+    value: &AdminCredentialPaginationResponse,
+) -> Result<(), &'static str> {
     if !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page)
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.page_size)
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.total)
     {
         return Err("credential_pagination");
     }
-    Ok(AdminCredentialPaginationResponse {
-        page: value.page,
-        page_size: value.page_size,
-        total: value.total,
-    })
+    Ok(())
 }

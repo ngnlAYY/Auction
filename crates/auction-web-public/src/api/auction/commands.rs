@@ -14,7 +14,7 @@ pub(crate) use auction_contracts::{
 use gloo_net::http::Request;
 use uuid::Uuid;
 
-use super::{decoder, observe_response_date, send_request, transport_error_code};
+use super::{TransportError, decoder, observe_response_date, send_request};
 
 /// Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +24,8 @@ pub(crate) struct CommandError {
 }
 
 impl CommandError {
-    fn transport(error: &str) -> Self {
-        Self { code: transport_error_code(error), status: 0 }
+    fn transport(error: TransportError) -> Self {
+        Self { code: error.code().to_owned(), status: 0 }
     }
 
     fn invalid_response(status: u16) -> Self {
@@ -44,10 +44,10 @@ pub(crate) async fn place_bid(
         Request::post(&url)
             .abort_signal(abort_signal)
             .json(&command)
-            .map_err(|error| error.to_string())
+            .map_err(|_| TransportError::Network(None))
     })
     .await
-    .map_err(|error| CommandError::transport(&error))?;
+    .map_err(CommandError::transport)?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
@@ -73,10 +73,10 @@ pub(crate) async fn create_proxy_authorization(
         Request::post(&url)
             .abort_signal(abort_signal)
             .json(&command)
-            .map_err(|error| error.to_string())
+            .map_err(|_| TransportError::Network(None))
     })
     .await
-    .map_err(|error| CommandError::transport(&error))?;
+    .map_err(CommandError::transport)?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
@@ -101,10 +101,10 @@ pub(crate) async fn lower_proxy_authorization(
         Request::post(&url)
             .abort_signal(abort_signal)
             .json(&command)
-            .map_err(|error| error.to_string())
+            .map_err(|_| TransportError::Network(None))
     })
     .await
-    .map_err(|error| CommandError::transport(&error))?;
+    .map_err(CommandError::transport)?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);

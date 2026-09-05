@@ -2,9 +2,11 @@
 
 use std::collections::HashSet;
 
-use auction_contracts::AdminWorldSetEnabledRequest;
+use auction_contracts::{
+    AdminWorldListResponse, AdminWorldResponse, AdminWorldSetEnabledRequest,
+    AdminWorldSetEnabledResponse,
+};
 use gloo_net::http::Request;
-use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{
@@ -20,26 +22,9 @@ pub(crate) struct AdminBusinessWorld {
     pub policy_revision: i64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictWorld {
-    id: String,
-    enabled: bool,
-    availability: String,
-    policy_revision: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictWorldList {
-    worlds: Vec<StrictWorld>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictWorldMutation {
-    world: StrictWorld,
-}
+// 本地 Strict 镜像已删除：contracts 的 `AdminWorldResponse`/`AdminWorldListResponse`/
+// `AdminWorldSetEnabledResponse` 已带 `deny_unknown_fields`；本文件只保留世界枚举、
+// 数量与排序等跨字段谓词。
 
 /// 读取数据库权威的业务世界状态；它与重启生效的 Worker 入站配置保持独立。
 pub(crate) async fn fetch_admin_business_worlds() -> Result<Vec<AdminBusinessWorld>, String> {
@@ -47,7 +32,7 @@ pub(crate) async fn fetch_admin_business_worlds() -> Result<Vec<AdminBusinessWor
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictWorldList> =
+    let payload: ApiResponse<AdminWorldListResponse> =
         response.json().await.map_err(invalid_response_error)?;
     decode_worlds(payload.data.worlds).map_err(invalid_response_error)
 }
@@ -80,7 +65,7 @@ pub(crate) async fn set_admin_business_world_enabled(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: ApiResponse<StrictWorldMutation> = response
+    let payload: ApiResponse<AdminWorldSetEnabledResponse> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
@@ -99,7 +84,7 @@ pub(crate) async fn set_admin_business_world_enabled(
     Ok(world)
 }
 
-fn decode_worlds(values: Vec<StrictWorld>) -> Result<Vec<AdminBusinessWorld>, &'static str> {
+fn decode_worlds(values: Vec<AdminWorldResponse>) -> Result<Vec<AdminBusinessWorld>, &'static str> {
     if values.len() != 2 {
         return Err("business_world_count");
     }
@@ -118,7 +103,7 @@ fn decode_worlds(values: Vec<StrictWorld>) -> Result<Vec<AdminBusinessWorld>, &'
     Ok(worlds)
 }
 
-fn decode_world(value: StrictWorld) -> Result<AdminBusinessWorld, &'static str> {
+fn decode_world(value: AdminWorldResponse) -> Result<AdminBusinessWorld, &'static str> {
     if !matches!(value.id.as_str(), "main" | "isekai")
         || !matches!(value.availability.as_str(), "available" | "degraded" | "unavailable")
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.policy_revision)

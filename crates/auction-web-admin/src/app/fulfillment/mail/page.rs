@@ -3,24 +3,21 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind};
+use auction_web_shared::{AsyncState, AsyncStateKind, QueryState};
 
-use crate::api::{
-    AdminMailIntakeQuery, fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state,
-};
+use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state};
 
+use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message};
 
 /// 加载并展示指定邮箱的轮询状态和入站邮件摘要。
 pub fn page() -> Element {
+    // 入站列表的世界/类型/状态筛选与分页跟地址栏双向同步，刷新/分享/前进后退可恢复；
+    // 邮箱轮询输入、详情面板开合和操作反馈是瞬态，仍由 signal 持有、不入 URL。
+    let query = use_mail_query_state();
+    let query_state = query.state;
     let mut mailbox_key = use_signal(String::new);
-    let mut world_filter = use_signal(String::new);
-    let mut kind_filter = use_signal(String::new);
-    let mut status_filter = use_signal(String::new);
     let mut active_mailbox = use_signal(String::new);
-    // 旧版邮件页首次打开显示所有邮箱的入站记录；轮询状态只有输入具体邮箱后才读取。
-    let active_query = use_signal(AdminMailIntakeQuery::default);
-    let page_number = use_signal(|| 1_i64);
     let mut refresh = use_signal(|| 0_u64);
     let mut polling_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
@@ -35,7 +32,8 @@ pub fn page() -> Element {
     });
     let intakes = use_resource(move || {
         let _ = refresh();
-        fetch_mail_intakes(active_query(), page_number())
+        let current = query_state();
+        fetch_mail_intakes(current.to_intake_query(), current.page)
     });
     let detail = use_resource(move || {
         let _ = refresh();
@@ -59,6 +57,11 @@ pub fn page() -> Element {
         polling_refresh.set(polling_refresh().saturating_add(1));
     };
 
+    // 三个闭集筛选各持一份 hook 克隆；克隆共享同一状态信号。
+    let mut world_query = query.clone();
+    let mut status_query = query.clone();
+    let mut kind_query = query.clone();
+
     let intake_content = match &*intakes.read_unchecked() {
         None => rsx! {
             AsyncState {
@@ -76,13 +79,20 @@ pub fn page() -> Element {
                 on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
-        Some(Ok(intakes)) => rsx! {
-            super::table::MailIntakeTable {
-                page: intakes.clone(),
-                page_number,
-                on_select: move |intake_id| selected_intake.set(Some(intake_id)),
+        Some(Ok(intakes)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
+                super::table::MailIntakeTable {
+                    page: intakes.clone(),
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.page = next_page;
+                        on_page_change.push(next);
+                    },
+                    on_select: move |intake_id| selected_intake.set(Some(intake_id)),
+                }
             }
-        },
+        }
     };
     let (detail_value, detail_loading, detail_error) = match &*detail.read_unchecked() {
         None => (None, true, None),
@@ -136,25 +146,13 @@ pub fn page() -> Element {
                             select {
                                 id: "mail-world",
                                 class: "admin-mail-world",
-                                value: world_filter(),
+                                value: query_state().world,
                                 onchange: move |event| {
-                                    let world_id = event.value();
-                                    world_filter.set(world_id.clone());
-                                    activate_mail_query(
-                                        active_query,
-                                        page_number,
+                                    apply_mail_filter(
+                                        &mut world_query,
                                         selected_intake,
                                         notice,
-                                        refresh,
-                                        AdminMailIntakeQuery {
-                                            mailbox_key: String::new(),
-                                            world_id,
-                                            kind: kind_filter().trim().to_owned(),
-                                            status: status_filter().trim().to_owned(),
-                                            decision: String::new(),
-                                            received_from: String::new(),
-                                            received_to: String::new(),
-                                        },
+                                        |next| next.world = event.value(),
                                     );
                                 },
                                     option { value: "", {t!("admin-mail-all")} }
@@ -168,25 +166,13 @@ pub fn page() -> Element {
                             select {
                                 id: "mail-status",
                                 class: "admin-mail-state-filter",
-                                value: status_filter(),
+                                value: query_state().status,
                                 onchange: move |event| {
-                                    let status = event.value();
-                                    status_filter.set(status.clone());
-                                    activate_mail_query(
-                                        active_query,
-                                        page_number,
+                                    apply_mail_filter(
+                                        &mut status_query,
                                         selected_intake,
                                         notice,
-                                        refresh,
-                                        AdminMailIntakeQuery {
-                                            mailbox_key: String::new(),
-                                            world_id: world_filter().trim().to_owned(),
-                                            kind: kind_filter().trim().to_owned(),
-                                            status,
-                                            decision: String::new(),
-                                            received_from: String::new(),
-                                            received_to: String::new(),
-                                        },
+                                        |next| next.status = event.value(),
                                     );
                                 },
                                 option { value: "", {t!("admin-mail-all")} }
@@ -201,25 +187,13 @@ pub fn page() -> Element {
                             select {
                                 id: "mail-kind",
                                 class: "admin-mail-kind",
-                                value: kind_filter(),
+                                value: query_state().kind,
                                 onchange: move |event| {
-                                    let kind = event.value();
-                                    kind_filter.set(kind.clone());
-                                    activate_mail_query(
-                                        active_query,
-                                        page_number,
+                                    apply_mail_filter(
+                                        &mut kind_query,
                                         selected_intake,
                                         notice,
-                                        refresh,
-                                        AdminMailIntakeQuery {
-                                            mailbox_key: String::new(),
-                                            world_id: world_filter().trim().to_owned(),
-                                            kind,
-                                            status: status_filter().trim().to_owned(),
-                                            decision: String::new(),
-                                            received_from: String::new(),
-                                            received_to: String::new(),
-                                        },
+                                        |next| next.kind = event.value(),
                                     );
                                 },
                                 option { value: "", {t!("admin-mail-all")} }
@@ -274,18 +248,19 @@ pub fn page() -> Element {
     }
 }
 
-/// 让旧版的闭集筛选在选择变化后立即生效，同时清理详情和操作反馈。
-pub(super) fn activate_mail_query(
-    mut active_query: Signal<AdminMailIntakeQuery>,
-    mut page_number: Signal<i64>,
+/// 闭集筛选选择变化后立即生效：push 到地址栏并回到第一页，同时清理详情与操作反馈——
+/// 旧选择不再属于新结果集。查询资源响应 `query.state` 变化自动重新加载，无需手动刷新。
+fn apply_mail_filter(
+    query: &mut QueryState<MailQuery>,
     mut selected_intake: Signal<Option<String>>,
     mut notice: Signal<Option<AdminActionFeedback>>,
-    mut refresh: Signal<u64>,
-    query: AdminMailIntakeQuery,
+    update: impl FnOnce(&mut MailQuery),
 ) {
-    active_query.set(query);
-    page_number.set(1);
+    let state = query.state;
+    let mut next = state();
+    update(&mut next);
+    next.page = 1;
+    query.push(next);
     selected_intake.set(None);
     notice.set(None);
-    refresh.set(refresh().saturating_add(1));
 }

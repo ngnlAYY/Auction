@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::AdminUserStatusFilter;
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
 use super::create::AdminUserGeneratedKey;
 
@@ -58,7 +58,7 @@ pub(super) fn AdminUserDialogActions(
 }
 
 pub(super) fn run_user_action<F>(
-    mut busy: Signal<bool>,
+    busy: Signal<bool>,
     mut feedback: Signal<Option<AdminActionFeedback>>,
     mut reload_generation: Signal<u64>,
     mut command_state: Signal<Option<(String, Uuid)>>,
@@ -67,38 +67,23 @@ pub(super) fn run_user_action<F>(
 ) where
     F: std::future::Future<Output = Result<Option<String>, String>> + 'static,
 {
-    busy.set(true);
-    spawn(async move {
-        let result = operation.await;
-        let successful = result.is_ok();
-        feedback.set(match result {
-            Ok(Some(key)) => {
+    run_admin_action(
+        busy,
+        async move {
+            let result = operation.await;
+            // 旧版无论成败都刷新一次列表投影。
+            reload_generation.set(reload_generation().saturating_add(1));
+            result
+        },
+        move |key| {
+            if let Some(key) = key {
                 on_generated_key.call(AdminUserGeneratedKey { key });
-                Some(AdminActionFeedback::Success)
             }
-            Ok(None) => Some(AdminActionFeedback::Success),
-            Err(code) => Some(AdminActionFeedback::Error(code)),
-        });
-        if successful {
+            feedback.set(Some(AdminActionFeedback::Success));
             command_state.set(None);
-        }
-        reload_generation.set(reload_generation().saturating_add(1));
-        busy.set(false);
-    });
-}
-
-pub(super) fn stable_command_id(
-    mut command_state: Signal<Option<(String, Uuid)>>,
-    signature: String,
-) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    }
+        },
+        move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
+    );
 }
 
 pub(super) fn status_filter_value(value: AdminUserStatusFilter) -> &'static str {

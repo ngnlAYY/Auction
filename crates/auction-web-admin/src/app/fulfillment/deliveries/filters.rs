@@ -5,11 +5,12 @@ use dioxus::prelude::*;
 
 use super::helpers::{DELIVERY_STATUS_VALUES, delivery_status_label};
 
-/// 选择状态后立即回到第一页；查询资源由父页面响应状态变化。
+/// 选择状态后由父页面写回地址栏并回到第一页；查询资源响应查询状态变化自动重新加载。
 #[component]
 pub(super) fn DeliveryFilters(
-    mut status_filter: Signal<String>,
-    mut page_number: Signal<i64>,
+    /// 当前状态筛选（地址栏恢复后的值）。
+    status: String,
+    on_status_change: EventHandler<String>,
 ) -> Element {
     rsx! {
         div { class: "admin-delivery-filter",
@@ -17,11 +18,8 @@ pub(super) fn DeliveryFilters(
                 {t!("delivery-filter")}
                 select {
                     id: "delivery-status",
-                    value: status_filter(),
-                    onchange: move |event| {
-                        status_filter.set(event.value());
-                        page_number.set(1);
-                    },
+                    value: status,
+                    onchange: move |event| on_status_change.call(event.value()),
                     option { value: "", {t!("delivery-all")} }
                     for status in DELIVERY_STATUS_VALUES {
                         option {

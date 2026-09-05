@@ -8,24 +8,26 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminCredential, delete_admin_credential, fetch_admin_credentials};
 
-use super::super::{AdminActionFeedback, admin_api_error_message};
-use super::{
-    CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable,
-    stable_command_id,
+use super::super::query::{PageQuery, use_page_query_state};
+use super::super::{
+    AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
 };
+use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable};
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
     let mut reload_generation = use_signal(|| 0_u64);
-    let page_number = use_signal(|| 1_i64);
+    // 分页跟地址栏双向同步（?page=）；创建表单与删除确认对话框是瞬态，不入 URL。
+    let query = use_page_query_state();
+    let query_state = query.state;
     let mut pending_delete = use_signal(|| None::<AdminCredential>);
-    let mut delete_busy = use_signal(|| false);
+    let delete_busy = use_signal(|| false);
     let mut delete_feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut delete_command_state = use_signal(|| None::<(String, Uuid)>);
     let credentials = use_resource(move || {
         let _ = reload_generation();
         // 旧版凭据页没有列表筛选器，只按固定分页读取完整安全投影。
-        fetch_admin_credentials(String::new(), String::new(), String::new(), page_number())
+        fetch_admin_credentials(String::new(), String::new(), String::new(), query_state().page)
     });
 
     let open_delete = move |credential: AdminCredential| {
@@ -38,29 +40,18 @@ pub fn page() -> Element {
         if delete_busy() {
             return;
         }
-        delete_feedback.set(None);
-        delete_busy.set(true);
         let signature = format!("delete:{}:{}", credential.id, credential.state_version);
         let command_id = stable_command_id(delete_command_state, signature);
-        let mut delete_busy = delete_busy;
-        let mut delete_feedback = delete_feedback;
-        let mut pending_delete = pending_delete;
-        let mut reload_generation = reload_generation;
-        spawn(async move {
-            let result = delete_admin_credential(command_id, &credential).await;
-            delete_busy.set(false);
-            match result {
-                Ok(_) => {
-                    delete_feedback.set(Some(AdminActionFeedback::Success));
-                    pending_delete.set(None);
-                    delete_command_state.set(None);
-                    reload_generation.set(reload_generation().saturating_add(1));
-                }
-                Err(code) => {
-                    delete_feedback.set(Some(AdminActionFeedback::Error(code)));
-                }
-            }
-        });
+        run_admin_feedback_action(
+            delete_busy,
+            delete_feedback,
+            async move { delete_admin_credential(command_id, &credential).await.map(|_| ()) },
+            move |()| {
+                pending_delete.set(None);
+                delete_command_state.set(None);
+                reload_generation.set(reload_generation().saturating_add(1));
+            },
+        );
     };
 
     let list_content = match &*credentials.read_unchecked() {
@@ -81,14 +72,22 @@ pub fn page() -> Element {
                 on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => rsx! {
+        Some(Ok(page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
                     CredentialTable {
                         page: page.clone(),
                         reload_generation,
                         on_delete: open_delete,
                     }
-                    CredentialPager { page: page.clone(), page_number }
-        },
+                    CredentialPager {
+                        page: page.clone(),
+                        on_page_change: move |next_page| {
+                            on_page_change.push(PageQuery { page: next_page });
+                        },
+                    }
+            }
+        }
     };
     let pending = pending_delete();
 

@@ -3,6 +3,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminSettlementCatalogEntryResponse {
     pub auction_id: String,
     pub world_id: String,
@@ -11,6 +12,7 @@ pub struct AdminSettlementCatalogEntryResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminSettlementCatalogPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -18,6 +20,7 @@ pub struct AdminSettlementCatalogPaginationResponse {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminSettlementCatalogResponse {
     pub auctions: Vec<AdminSettlementCatalogEntryResponse>,
     pub pagination: AdminSettlementCatalogPaginationResponse,

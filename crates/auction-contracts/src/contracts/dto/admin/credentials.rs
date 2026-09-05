@@ -48,7 +48,11 @@ pub struct AdminCredentialDeleteRequest {
 }
 
 /// Admin 凭据安全响应，不包含 secret、密文、密钥标识或指纹。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；nullable 的 `rotated_at`
+/// 在旧 decoder 中必须显式出现（可为 `null`）。wire 冻结后只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminCredentialResponse {
     pub id: String,
     pub kind: String,
@@ -57,12 +61,23 @@ pub struct AdminCredentialResponse {
     pub status: String,
     pub state_version: i64,
     pub created_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub rotated_at: Option<String>,
     pub updated_at: String,
 }
 
+/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 /// Admin 凭据列表分页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminCredentialPaginationResponse {
     pub page: i64,
     pub page_size: i64,
@@ -71,6 +86,7 @@ pub struct AdminCredentialPaginationResponse {
 
 /// Admin 凭据列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminCredentialListResponse {
     pub credentials: Vec<AdminCredentialResponse>,
     pub pagination: AdminCredentialPaginationResponse,
@@ -79,6 +95,7 @@ pub struct AdminCredentialListResponse {
 
 /// Admin 凭据导入/修改响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminCredentialMutationResponse {
     pub credential: AdminCredentialResponse,
     pub restart_required: bool,
@@ -86,6 +103,7 @@ pub struct AdminCredentialMutationResponse {
 
 /// Admin 凭据删除响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminCredentialDeleteResponse {
     pub credential_id: String,
     pub state_version: i64,

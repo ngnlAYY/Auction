@@ -2,48 +2,18 @@
 //!
 //! 浏览器只解码后端的安全代理事件投影；游标、命令账本结果和代理状态机仍由服务端拥有。
 
-use auction_contracts::AdminProxyEventPaginationResponse;
 pub(crate) use auction_contracts::{
     AdminProxyEventListResponse as AdminProxyEventPage, AdminProxyEventResponse as AdminProxyEvent,
 };
-use serde::Deserialize;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_response_error, response_error,
     send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictProxyEvent {
-    authorization_id: String,
-    authorization_sequence: i64,
-    command_id: String,
-    created_at: String,
-    lot_id: String,
-    maximum_amount: i64,
-    mode: String,
-    state_version: i64,
-    status: String,
-    user_id: String,
-    usage_number: i64,
-    username: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictProxyPagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictProxyEventPage {
-    proxy_events: Vec<StrictProxyEvent>,
-    pagination: StrictProxyPagination,
-}
+// 本地 Strict 镜像已删除：contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页）
+// 已带 `deny_unknown_fields`；本文件只保留跨字段谓词（usage 不超过授权序号、请求回显等）
+// 以及页码模式下游标字段必须为空的组合校验。
 
 pub(crate) async fn fetch_admin_proxy_events(
     lot_id: String,
@@ -55,24 +25,28 @@ pub(crate) async fn fetch_admin_proxy_events(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictProxyEventPage> =
+    let payload: ApiResponse<AdminProxyEventPage> =
         response.json().await.map_err(invalid_response_error)?;
     decode_proxy_event_page(payload.data, &lot_id, page).map_err(invalid_response_error)
 }
 
 fn decode_proxy_event_page(
-    data: StrictProxyEventPage,
+    data: AdminProxyEventPage,
     requested_lot_id: &str,
     requested_page: i64,
 ) -> Result<AdminProxyEventPage, &'static str> {
     let pagination = data.pagination;
+    // 页码模式下游标字段必须为空，页码与总数必须显式回显。
     if !valid_uuid(requested_lot_id)
-        || !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
-        || pagination.page != requested_page
+        || pagination.cursor.is_some()
+        || pagination.next_cursor.is_some()
+        || pagination.has_more.is_some()
+        || !pagination.page.is_some_and(|page| (1..=MAX_JSON_SAFE_INTEGER).contains(&page))
+        || pagination.page != Some(requested_page)
         || pagination.page_size != TABLE_PAGE_SIZE
-        || !(0..=MAX_JSON_SAFE_INTEGER).contains(&pagination.total)
+        || !pagination.total.is_some_and(|total| (0..=MAX_JSON_SAFE_INTEGER).contains(&total))
         || i64::try_from(data.proxy_events.len())
-            .map_or(true, |count| count > pagination.page_size || count > pagination.total)
+            .map_or(true, |count| count > pagination.page_size || Some(count) > pagination.total)
     {
         return Err("proxy_pagination");
     }
@@ -82,21 +56,12 @@ fn decode_proxy_event_page(
         .into_iter()
         .map(|event| decode_proxy_event(event, requested_lot_id))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(AdminProxyEventPage {
-        proxy_events,
-        pagination: AdminProxyEventPaginationResponse {
-            page: Some(pagination.page),
-            page_size: pagination.page_size,
-            total: Some(pagination.total),
-            cursor: None,
-            next_cursor: None,
-            has_more: None,
-        },
-    })
+    Ok(AdminProxyEventPage { proxy_events, pagination })
 }
 
+/// 跨字段谓词保留为独立校验：usage 序号不超过授权序号、请求 lot 回显一致。
 fn decode_proxy_event(
-    event: StrictProxyEvent,
+    event: AdminProxyEvent,
     requested_lot_id: &str,
 ) -> Result<AdminProxyEvent, &'static str> {
     if !valid_uuid(&event.command_id)
@@ -117,18 +82,5 @@ fn decode_proxy_event(
         return Err("proxy_event");
     }
 
-    Ok(AdminProxyEvent {
-        authorization_id: event.authorization_id,
-        authorization_sequence: event.authorization_sequence,
-        command_id: event.command_id,
-        created_at: event.created_at,
-        lot_id: event.lot_id,
-        maximum_amount: event.maximum_amount,
-        mode: event.mode,
-        state_version: event.state_version,
-        status: event.status,
-        user_id: event.user_id,
-        usage_number: event.usage_number,
-        username: event.username,
-    })
+    Ok(event)
 }

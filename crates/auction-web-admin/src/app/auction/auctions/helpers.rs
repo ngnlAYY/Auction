@@ -120,14 +120,14 @@ pub(super) fn datetime_local_value(value: &str) -> Option<String> {
         if !date.get_time().is_finite() {
             return None;
         }
-        return Some(format!(
+        Some(format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}",
             date.get_full_year(),
             date.get_month() + 1,
             date.get_date(),
             date.get_hours(),
             date.get_minutes(),
-        ));
+        ))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

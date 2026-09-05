@@ -10,6 +10,7 @@ use crate::api::{AdminUserStatusFilter, fetch_admin_users};
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
+use super::query::use_users_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
 
 #[path = "users/create.rs"]
@@ -28,10 +29,11 @@ use table::AdminUserTable;
 
 /// 加载并展示 Admin 用户管理页面。
 pub(super) fn page() -> Element {
-    let name_filter = use_signal(String::new);
-    let name_draft = use_signal(String::new);
-    let status_filter = use_signal(|| AdminUserStatusFilter::All);
-    let page_number = use_signal(|| 1_i64);
+    // 已应用的名称筛选、状态筛选与分页跟地址栏双向同步；名称输入框草稿只在提交时入 URL。
+    let query = use_users_query_state();
+    let query_state = query.state;
+    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
+    let name_draft = use_signal(move || query_state.peek().name.clone());
     let mut reload_generation = use_signal(|| 0_u64);
     let mut create_open = use_signal(|| false);
     let mut generated_key = use_signal(|| None::<AdminUserGeneratedKey>);
@@ -40,7 +42,8 @@ pub(super) fn page() -> Element {
     let mut create_notice = use_signal(|| None::<String>);
     let users = use_resource(move || {
         let _ = reload_generation();
-        fetch_admin_users(name_filter(), status_filter(), page_number())
+        let current = query_state();
+        fetch_admin_users(current.name.clone(), current.status, current.page)
     });
 
     let state = users.read_unchecked().clone();
@@ -62,20 +65,40 @@ pub(super) fn page() -> Element {
                 on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => rsx! {
+        Some(Ok(page)) => {
+            let mut on_name_apply = query.clone();
+            let mut on_status_change = query.clone();
+            let mut on_page_change = query.clone();
+            rsx! {
             AdminUserTable {
                 page,
-                name_filter,
                 name_draft,
-                status_filter,
-                page_number,
+                status: query_state().status,
+                on_name_apply: move |name: String| {
+                    let mut next = query_state();
+                    next.name = name;
+                    next.page = 1;
+                    on_name_apply.push(next);
+                },
+                on_status_change: move |status: AdminUserStatusFilter| {
+                    let mut next = query_state();
+                    next.status = status;
+                    next.page = 1;
+                    on_status_change.push(next);
+                },
+                on_page_change: move |next_page| {
+                    let mut next = query_state();
+                    next.page = next_page;
+                    on_page_change.push(next);
+                },
                 reload_generation,
                 action_busy,
                 action_feedback,
                 create_notice,
                 on_generated_key: move |key| generated_key.set(Some(key)),
             }
-        },
+            }
+        }
     };
 
     rsx! {

@@ -7,11 +7,17 @@ use auction_web_shared::TruncatedText;
 
 use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
-use super::{AsyncState, AsyncStateKind, Pager, Time, read_public_query, update_public_query};
+use super::{
+    AsyncState, AsyncStateKind, Pager, QueryWriteMode, Time, update_public_query_state,
+    use_public_query_state,
+};
 
 pub(super) fn page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let page_number = use_signal(|| read_public_query().page.max(1));
+    // 页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    let query_state = use_public_query_state();
+    let query_state_signal = query_state.state;
+    let page_number = use_memo(move || query_state_signal().page.max(1));
     let blacklist = use_resource(move || {
         let _ = refresh_generation();
         fetch_blacklist(page_number())
@@ -36,13 +42,22 @@ pub(super) fn page() -> Element {
             }
         },
         Some(Ok(page)) => rsx! {
-            BlacklistTable { page: page.clone(), page_number }
+            BlacklistTable {
+                page: page.clone(),
+                on_page_change: move |next_page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.page = next_page,
+                        QueryWriteMode::Push,
+                    );
+                },
+            }
         },
     }
 }
 
 #[component]
-fn BlacklistTable(page: BlacklistPage, mut page_number: Signal<i64>) -> Element {
+fn BlacklistTable(page: BlacklistPage, on_page_change: EventHandler<i64>) -> Element {
     rsx! {
         section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
             h1 { id: "blacklist-title", {t!("page-blacklist-title")} }
@@ -78,10 +93,7 @@ fn BlacklistTable(page: BlacklistPage, mut page_number: Signal<i64>) -> Element 
                 next_label: t!("catalog-next"),
                 jump_label: t!("catalog-page-input"),
                 jump_button_label: t!("catalog-page-go"),
-                on_page_change: move |next_page| {
-                    page_number.set(next_page);
-                    update_public_query(|query| query.page = next_page, false);
-                },
+                on_page_change,
             }
         }
     }

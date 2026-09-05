@@ -25,6 +25,12 @@ use super::{
     valid_trimmed_text, valid_uuid,
 };
 
+// 保留镜像的理由：旧 realtime decoder 允许对象扩展字段，contracts 的
+// `AdminRealtimeEventListResponse`/`AdminRealtimeLagListResponse`/
+// `AdminRealtimeFailureListResponse`/`AdminRealtimeReplayResponse` 不能加
+// `deny_unknown_fields`；下方镜像继续要求全部旧字段显式存在并保留组合语义校验。
+// 同步义务：上述 DTO 字段集变化时必须同步本文件；decode 函数中构造 DTO 的穷举字段列表
+// 会在编译期捕捉漂移。
 #[derive(Debug, Deserialize)]
 struct StrictEvent {
     created_at: String,
@@ -42,6 +48,7 @@ struct StrictEventPage {
 }
 
 /// 旧 realtime decoder 允许对象扩展字段；这里仍要求全部旧字段及其组合语义。
+/// 对应 contracts DTO：`AdminRealtimeLagResponse`。
 #[derive(Debug, Deserialize)]
 struct StrictLag {
     consumer_key: String,

@@ -9,7 +9,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::api::{AdminIntakeResult, add_admin_intake};
-use crate::app::surface::admin_api_error_message;
+use crate::app::surface::{admin_api_error_message, run_admin_action};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum IntakeFailure {
@@ -74,36 +74,34 @@ pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) 
                         command_id_state.set(Some(value));
                         value
                     });
-                    let mut busy = busy;
                     let mut result = result;
                     let mut failure = failure;
                     let mut reload_generation = reload_generation;
-                    busy.set(true);
-                    spawn(async move {
-                        match add_admin_intake(
-                            command_id,
-                            world_id,
-                            source_kind_value,
-                            equipment_url_value,
-                            equipment_json_value,
-                            start_price,
-                            player_id_value,
-                        )
-                        .await
-                        {
-                            Ok(value) => {
-                                result.set(Some(value));
-                                failure.set(None);
-                                command_id_state.set(None);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            }
-                            Err(code) => {
-                                result.set(None);
-                                failure.set(Some(IntakeFailure::Request(code)));
-                            }
-                        }
-                        busy.set(false);
-                    });
+                    run_admin_action(
+                        busy,
+                        async move {
+                            add_admin_intake(
+                                command_id,
+                                world_id,
+                                source_kind_value,
+                                equipment_url_value,
+                                equipment_json_value,
+                                start_price,
+                                player_id_value,
+                            )
+                            .await
+                        },
+                        move |value| {
+                            result.set(Some(value));
+                            failure.set(None);
+                            command_id_state.set(None);
+                            reload_generation.set(reload_generation().saturating_add(1));
+                        },
+                        move |code| {
+                            result.set(None);
+                            failure.set(Some(IntakeFailure::Request(code)));
+                        },
+                    );
                 },
                 label {
                     r#for: "auction-intake-source",

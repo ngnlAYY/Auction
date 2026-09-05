@@ -10,12 +10,15 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
+use crate::app::surface::stable_command_id;
 
+use super::query::use_renames_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
 
 pub(super) fn page() -> Element {
-    let mut name = use_signal(String::new);
-    let mut page_number = use_signal(|| 1_i64);
+    // 名称即时筛选与分页跟地址栏双向同步；回滚确认对话框和命令上下文是瞬态，不入 URL。
+    let query = use_renames_query_state();
+    let query_state = query.state;
     let mut refresh = use_signal(|| 0_u64);
     let mut busy_rename = use_signal(|| None::<String>);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
@@ -23,9 +26,12 @@ pub(super) fn page() -> Element {
     let mut selected = use_signal(|| None::<AdminRename>);
     let renames = use_resource(move || {
         let _ = refresh();
+        let current = query_state();
         // 旧页面只按名称筛选，输入变化立即成为查询键。
-        fetch_admin_renames("all".to_owned(), name(), page_number())
+        fetch_admin_renames("all".to_owned(), current.name.clone(), current.page)
     });
+    // 名称即时筛选持一份 hook 克隆。
+    let mut name_query = query.clone();
 
     let confirm_revert = move |_| {
         let Some(rename) = selected() else {
@@ -71,7 +77,9 @@ pub(super) fn page() -> Element {
                 on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => rsx! {
+        Some(Ok(page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
             RenameTable {
                 page: page.clone(),
                 on_select: move |rename| selected.set(Some(rename)),
@@ -107,9 +115,14 @@ pub(super) fn page() -> Element {
                 next_label: t!("admin-pagination-next"),
                 jump_label: t!("admin-pagination-input"),
                 jump_button_label: t!("admin-pagination-go"),
-                on_page_change: move |next_page| page_number.set(next_page),
+                on_page_change: move |next_page| {
+                    let mut next = query_state();
+                    next.page = next_page;
+                    on_page_change.push(next);
+                },
             }
-        },
+            }
+        }
     };
 
     rsx! {
@@ -123,10 +136,13 @@ pub(super) fn page() -> Element {
                         id: "rename-name",
                         r#type: "text",
                         maxlength: "256",
-                        value: name(),
+                        value: query_state().name,
                         oninput: move |event| {
-                            name.set(event.value());
-                            page_number.set(1);
+                            // 即时筛选每次击键都同步地址栏；用 replace 避免击键淹没历史栈。
+                            let mut next = query_state();
+                            next.name = event.value();
+                            next.page = 1;
+                            name_query.replace(next);
                         },
                     }
                 }
@@ -163,17 +179,6 @@ pub(super) fn page() -> Element {
                     }
                 }
             }
-        }
-    }
-}
-
-fn stable_command_id(mut command_state: Signal<Option<(String, Uuid)>>, signature: String) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
         }
     }
 }

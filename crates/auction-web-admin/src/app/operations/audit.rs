@@ -11,21 +11,25 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText}
 use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 
 use super::admin_api_error_message;
+use super::query::{AuditQuery, use_audit_query_state};
 
 pub(super) fn page() -> Element {
-    let filter = use_signal(AdminAuditFilter::default);
-    let mut active_filter = use_signal(AdminAuditFilter::default);
-    let mut page_number = use_signal(|| 1_i64);
+    // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
+    let query = use_audit_query_state();
+    let query_state = query.state;
+    // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
+    let filter = use_signal(move || query_state.peek().filter.clone());
     let mut refresh = use_signal(|| 0_u64);
     let audit = use_resource(move || {
         let _ = refresh();
-        fetch_admin_audit(page_number(), active_filter())
+        let current = query_state();
+        fetch_admin_audit(current.page, current.filter.clone())
     });
 
+    let mut apply_query = query.clone();
     let apply_filter = move |next_filter: AdminAuditFilter| {
-        active_filter.set(next_filter);
-        page_number.set(1);
-        refresh.set(refresh().saturating_add(1));
+        // 提交筛选回到第一页；查询资源响应状态变化自动重新加载。
+        apply_query.push(AuditQuery { filter: next_filter, page: 1 });
     };
     let content = match &*audit.read_unchecked() {
         None => rsx! {
@@ -44,12 +48,14 @@ pub(super) fn page() -> Element {
                 on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
-        Some(Ok(page)) => rsx! {
+        Some(Ok(page)) => {
+            let mut on_page_change = query.clone();
+            rsx! {
             AuditTable { page: page.clone() }
             Pager {
-                page: page.page.unwrap_or(page_number()).max(1),
+                page: page.page.unwrap_or(query_state().page).max(1),
                 page_size: page.page_size,
-                total: Some(audit_total(page, page_number())),
+                total: Some(audit_total(page, query_state().page)),
                 label: t!("page-audit-title"),
                 previous_label: t!("admin-pagination-previous"),
                 status: move |(page, pages): (i64, i64)| {
@@ -58,9 +64,14 @@ pub(super) fn page() -> Element {
                 next_label: t!("admin-pagination-next"),
                 jump_label: t!("admin-pagination-input"),
                 jump_button_label: t!("admin-pagination-go"),
-                on_page_change: move |next_page| page_number.set(next_page),
+                on_page_change: move |next_page| {
+                    let mut next = query_state();
+                    next.page = next_page;
+                    on_page_change.push(next);
+                },
             }
-        },
+            }
+        }
     };
     rsx! {
         section { class: "admin-audit-page", aria_labelledby: "admin-audit-title",

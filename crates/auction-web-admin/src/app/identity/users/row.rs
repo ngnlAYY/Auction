@@ -7,12 +7,10 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, stable_command_id};
 
 use super::create::AdminUserGeneratedKey;
-use super::dialogs::{
-    AdminUserDialogActions, AdminUserDialogKind, run_user_action, stable_command_id,
-};
+use super::dialogs::{AdminUserDialogActions, AdminUserDialogKind, run_user_action};
 
 static NEXT_HISTORY_TOOLTIP_ID: AtomicUsize = AtomicUsize::new(1);
 

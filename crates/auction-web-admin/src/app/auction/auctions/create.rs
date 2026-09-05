@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_auction;
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
 use super::actions::AdminAuctionNotice;
 use super::helpers::valid_auction_schedule;
@@ -102,37 +102,35 @@ fn AdminAuctionCreateFields(
                         auction_id_state.set(Some(value));
                         value
                     });
-                    let mut busy = busy;
                     let mut feedback = feedback;
                     let mut validation_error = validation_error;
                     let mut reload_generation = reload_generation;
                     let mut notice = notice;
                     let mut open = open;
-                    busy.set(true);
-                    spawn(async move {
-                        let result = create_admin_auction(
-                            command_id,
-                            auction_id,
-                            world_id,
-                            sequence_value,
-                            preview_scheduled_at,
-                            scheduled_open_at,
-                            scheduled_end_at,
-                        )
-                        .await;
-                        match result {
-                            Ok(_) => {
-                                // 对话框内反馈随关闭一并销毁；成功提示移交页面级 notice。
-                                feedback.set(None);
-                                notice.set(Some(AdminAuctionNotice::Created));
-                                validation_error.set(false);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                                open.set(false);
-                            }
-                            Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
-                        }
-                        busy.set(false);
-                    });
+                    run_admin_action(
+                        busy,
+                        async move {
+                            create_admin_auction(
+                                command_id,
+                                auction_id,
+                                world_id,
+                                sequence_value,
+                                preview_scheduled_at,
+                                scheduled_open_at,
+                                scheduled_end_at,
+                            )
+                            .await
+                        },
+                        move |_| {
+                            // 对话框内反馈随关闭一并销毁；成功提示移交页面级 notice。
+                            feedback.set(None);
+                            notice.set(Some(AdminAuctionNotice::Created));
+                            validation_error.set(false);
+                            reload_generation.set(reload_generation().saturating_add(1));
+                            open.set(false);
+                        },
+                        move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
+                    );
                 },
                 p { class: "admin-panel__note", {t!("admin-auctions-create-timezone")} }
                 label {
