@@ -58,8 +58,11 @@ pub(crate) fn LiveCatalogActions(
     let visually_hide_leading_reason = can_bid && effective_leading;
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
+    // 普通竞价成功投影：命令成功后弹窗内展示成功面板（参照代理 proxy_success），
+    // 不再直接关弹窗导致用户看不到任何反馈。
+    let mut bid_success = use_signal(|| None::<commands::BidSuccess>);
     // 两阶段确认命令 hook 提升到弹窗宿主持有（整体 Copy）：弹窗 scope 一旦销毁，内部
-    // spawn 的成功回调（刷新计数与 on_accepted）会随之丢失，服务端已接受出价但 UI 无
+    // spawn 的成功回调（刷新计数与成功面板投影）会随之丢失，服务端已接受出价但 UI 无
     // 反馈；因此提交中必须由 Dialog 的 busy 守卫禁止关闭弹窗。创建与降低上限各持一份，
     // 与原来两个表单各自独占状态的行为一致。
     let mut bid_command = commands::BidConfirmCommand(use_confirm_command());
@@ -86,6 +89,8 @@ pub(crate) fn LiveCatalogActions(
             if authenticated && (can_bid || show_proxy_summary) {
                 button {
                     r#type: "button",
+                    aria_haspopup: "dialog",
+                    aria_expanded: (action() == Some("bid".to_owned())).to_string(),
                     disabled: !can_bid || ordinary_blocked,
                     aria_describedby: if !can_bid || ordinary_blocked {
                         action_reason_id.clone()
@@ -98,6 +103,7 @@ pub(crate) fn LiveCatalogActions(
                             return;
                         }
                         proxy_success.set(None);
+                        bid_success.set(None);
                         action.set(if action() == Some("bid".to_owned()) {
                             None
                         } else {
@@ -108,6 +114,8 @@ pub(crate) fn LiveCatalogActions(
                 }
                 button {
                     r#type: "button",
+                    aria_haspopup: "dialog",
+                    aria_expanded: (action() == Some("proxy".to_owned())).to_string(),
                     disabled: !can_bid || !proxy_action_enabled,
                     aria_describedby: if !can_bid || !proxy_action_enabled {
                         action_reason_id.clone()
@@ -176,6 +184,7 @@ pub(crate) fn LiveCatalogActions(
                 busy: bid_submitting(),
                 on_close: move |_| {
                     bid_command.reset();
+                    bid_success.set(None);
                     action.set(None);
                 },
                 {commands::bid_form(commands::BidFormInput {
@@ -188,9 +197,10 @@ pub(crate) fn LiveCatalogActions(
                     blocked: ordinary_blocked,
                     blocked_reason: action_reason.clone(),
                     command: bid_command,
-                    on_accepted: EventHandler::new(move |_: ()| action.set(None)),
+                    success: bid_success,
                     on_close: EventHandler::new(move |_: ()| {
                         bid_command.reset();
+                        bid_success.set(None);
                         action.set(None);
                     }),
                 })}

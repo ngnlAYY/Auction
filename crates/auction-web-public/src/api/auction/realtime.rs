@@ -5,7 +5,11 @@
 
 pub(crate) use auction_contracts::PublicRealtimeEventResponse as RealtimeEvent;
 #[cfg(target_arch = "wasm32")]
-use futures_util::{Sink, StreamExt, future::poll_fn};
+use futures_util::{
+    Sink, StreamExt,
+    future::{Either, poll_fn, select},
+    pin_mut,
+};
 use std::collections::BTreeMap;
 #[cfg(target_arch = "wasm32")]
 use std::pin::Pin;
@@ -19,6 +23,8 @@ use super::send_get;
 
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{Message, State as WebSocketState, futures::WebSocket};
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::future::TimeoutFuture;
 
 /// 页面消费的统一实时页；wire 上的旧版单拍卖页和显式发现页在完成目标校验后才投影到这里。
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +43,54 @@ pub(crate) struct RealtimePageMerge {
     pub continue_catch_up: bool,
     pub degraded: bool,
 }
+
+/// 实时订阅失败的结构化错误：页面层按 `kind` 选择重连策略，禁止对错误文案做字符串比较。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RealtimeError {
+    kind: RealtimeErrorKind,
+    /// 失败明细只用于诊断日志，不参与重连决策。
+    detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RealtimeErrorKind {
+    /// 重连无法自愈：游标或拍卖 ID 无效、认证/权限被拒绝、目标拍卖不存在。
+    Permanent,
+    /// 网络抖动、服务端瞬时故障、毒帧超限或活性看门狗等可重试失败。
+    #[cfg(target_arch = "wasm32")]
+    Transient,
+}
+
+impl RealtimeError {
+    fn permanent(detail: impl Into<String>) -> Self {
+        Self { kind: RealtimeErrorKind::Permanent, detail: detail.into() }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn transient(detail: impl Into<String>) -> Self {
+        Self { kind: RealtimeErrorKind::Transient, detail: detail.into() }
+    }
+
+    pub(crate) const fn is_permanent(&self) -> bool {
+        matches!(self.kind, RealtimeErrorKind::Permanent)
+    }
+
+    pub(crate) fn detail(&self) -> &str {
+        &self.detail
+    }
+}
+
+/// 活性看门狗：浏览器对半开 TCP 的感知延迟可达数分钟；90 秒无任何帧就主动断开，
+/// 交给外层按退避策略重连。
+#[cfg(target_arch = "wasm32")]
+const REALTIME_WATCHDOG_MILLIS: u32 = 90_000;
+/// 连续毒帧上限：单帧解码失败只计数降级，连续 5 帧失败才断开整条订阅。
+#[cfg(target_arch = "wasm32")]
+const MAX_CONSECUTIVE_BAD_FRAMES: u32 = 5;
+/// HTTP catch-up 翻页上限：落后超过 50 页（5000 事件）说明逐页重放代价过大，
+/// 转为全量 refetch 降级，由各 resource 重读权威快照。
+#[cfg(target_arch = "wasm32")]
+const MAX_CATCH_UP_PAGES: u32 = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LastBidFact {
@@ -268,11 +322,15 @@ fn remember(values: &mut Vec<String>, value: String) {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn fetch_realtime_page(after: i64, auction_id: Option<&str>) -> Result<RealtimePage, String> {
+async fn fetch_realtime_page(
+    after: i64,
+    auction_id: Option<&str>,
+) -> Result<RealtimePage, RealtimeError> {
     if after < 0 {
-        return Err("实时事件游标无效".to_owned());
+        return Err(RealtimeError::permanent("实时事件游标无效"));
     }
-    let canonical_auction_id = auction_id.map(canonical_auction_id).transpose()?;
+    let canonical_auction_id =
+        auction_id.map(canonical_auction_id).transpose().map_err(RealtimeError::permanent)?;
     let mut query = form_urlencoded::Serializer::new(String::new());
     if let Some(auction_id) = canonical_auction_id.as_deref() {
         query.append_pair("auction_id", auction_id);
@@ -281,12 +339,20 @@ async fn fetch_realtime_page(after: i64, auction_id: Option<&str>) -> Result<Rea
     }
     query.append_pair("after", &after.to_string()).append_pair("page_size", "100");
     let url = format!("/api/v1/events?{}", query.finish());
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(RealtimeError::transient)?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        let status = response.status();
+        // 401/403 认证或权限失败、404 目标拍卖不存在：重连不能自愈，按永久错误处理。
+        return Err(if matches!(status, 401 | 403 | 404) {
+            RealtimeError::permanent(format!("HTTP {status}"))
+        } else {
+            RealtimeError::transient(format!("HTTP {status}"))
+        });
     }
     let page = if let Some(auction_id) = canonical_auction_id.as_deref() {
-        let payload = super::decoder::decode_auction_realtime_page(response, auction_id).await?;
+        let payload = super::decoder::decode_auction_realtime_page(response, auction_id)
+            .await
+            .map_err(RealtimeError::transient)?;
         RealtimePage {
             events: payload.events,
             next_after: payload.next_after,
@@ -294,7 +360,9 @@ async fn fetch_realtime_page(after: i64, auction_id: Option<&str>) -> Result<Rea
             refetch_required: payload.refetch_required,
         }
     } else {
-        let payload = super::decoder::decode_discovery_realtime_page(response).await?;
+        let payload = super::decoder::decode_discovery_realtime_page(response)
+            .await
+            .map_err(RealtimeError::transient)?;
         RealtimePage {
             events: payload.events,
             next_after: payload.next_after,
@@ -302,7 +370,7 @@ async fn fetch_realtime_page(after: i64, auction_id: Option<&str>) -> Result<Rea
             refetch_required: payload.refetch_required,
         }
     };
-    validate_realtime_page_sequence(&page, after)?;
+    validate_realtime_page_sequence(&page, after).map_err(RealtimeError::transient)?;
     Ok(page)
 }
 
@@ -311,7 +379,7 @@ async fn fetch_realtime_page(after: i64, auction_id: Option<&str>) -> Result<Rea
 /// 浏览器 WebSocket 自动携带同源 HttpOnly session Cookie；匿名客户端由服务端拒绝。
 /// 连接建立后先走 HTTP catch-up，期间到达的单事件帧由 WebSocket 缓冲，避免补发与订阅间隙。
 #[cfg(target_arch = "wasm32")]
-pub(crate) async fn subscribe_realtime<F>(after: i64, on_page: F) -> Result<(), String>
+pub(crate) async fn subscribe_realtime<F>(after: i64, on_page: F) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
@@ -325,7 +393,7 @@ pub(crate) async fn subscribe_auction_realtime<F>(
     auction_id: String,
     world: String,
     on_page: F,
-) -> Result<(), String>
+) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
@@ -338,37 +406,74 @@ async fn subscribe_realtime_stream<F>(
     auction_id: Option<&str>,
     world: Option<&str>,
     mut on_page: F,
-) -> Result<(), String>
+) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
     if after < 0 {
-        return Err("实时事件游标无效".to_owned());
+        return Err(RealtimeError::permanent("实时事件游标无效"));
     }
-    let canonical_auction_id = auction_id.map(canonical_auction_id).transpose()?;
+    let canonical_auction_id =
+        auction_id.map(canonical_auction_id).transpose().map_err(RealtimeError::permanent)?;
     let auction_id = canonical_auction_id.as_deref();
-    let url = websocket_url(auction_id)?;
-    let mut socket = WebSocket::open(&url).map_err(|error| error.to_string())?;
+    let url = websocket_url(auction_id).map_err(RealtimeError::permanent)?;
+    let mut socket =
+        WebSocket::open(&url).map_err(|error| RealtimeError::transient(error.to_string()))?;
     poll_fn(|context| Sink::<Message>::poll_ready(Pin::new(&mut socket), context))
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| RealtimeError::transient(error.to_string()))?;
     if !matches!(socket.state(), WebSocketState::Open) {
-        return Err("实时 WebSocket 建立失败".to_owned());
+        return Err(RealtimeError::transient("实时 WebSocket 建立失败"));
     }
     let (_write, mut read) = socket.split();
     let mut expected_after = after;
     catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
-    while let Some(message) = read.next().await {
-        let message = message.map_err(|error| error.to_string())?;
-        let Message::Text(message) = message else {
-            return Err("实时 WebSocket 返回了不支持的二进制消息".to_owned());
+    let mut consecutive_bad_frames = 0_u32;
+    loop {
+        // 活性看门狗：限定时间内没有任何帧（含毒帧）就主动断开，让外层按退避策略重连。
+        let next_frame = read.next();
+        let watchdog = TimeoutFuture::new(REALTIME_WATCHDOG_MILLIS);
+        pin_mut!(next_frame, watchdog);
+        let message = match select(next_frame, watchdog).await {
+            Either::Left((message, _)) => message,
+            Either::Right(((), _)) => {
+                return Err(RealtimeError::transient("实时通道活性看门狗超时，主动断开重连"));
+            }
         };
-        let event = super::decoder::decode_realtime_event(&message, auction_id, world)?;
+        let Some(message) = message else { break };
+        let message = match message {
+            Ok(message) => message,
+            Err(error) => {
+                return Err(RealtimeError::transient(format!("实时 WebSocket 读取失败：{error}")));
+            }
+        };
+        let Message::Text(message) = message else {
+            // 二进制帧不再直接终止订阅：按毒帧计数，连续超限才断开重连。
+            consecutive_bad_frames += 1;
+            if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
+                return Err(RealtimeError::transient("实时 WebSocket 连续返回不支持的二进制帧"));
+            }
+            continue;
+        };
+        let event = match super::decoder::decode_realtime_event(&message, auction_id, world) {
+            Ok(event) => event,
+            Err(error) => {
+                // 单帧解码失败只计毒帧，不终止整条订阅；连续超限才断开重连。
+                consecutive_bad_frames += 1;
+                if consecutive_bad_frames >= MAX_CONSECUTIVE_BAD_FRAMES {
+                    return Err(RealtimeError::transient(format!(
+                        "实时事件帧连续解码失败：{error}"
+                    )));
+                }
+                continue;
+            }
+        };
+        consecutive_bad_frames = 0;
         if event.stream_sequence <= expected_after {
             continue;
         }
         let Some(next_sequence) = expected_after.checked_add(1) else {
-            return Err("实时事件序列超过可表示范围".to_owned());
+            return Err(RealtimeError::permanent("实时事件序列超过可表示范围"));
         };
         if event.stream_sequence != next_sequence {
             catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
@@ -377,10 +482,10 @@ where
             continue;
         }
         let Some(next_sequence) = expected_after.checked_add(1) else {
-            return Err("实时事件序列超过可表示范围".to_owned());
+            return Err(RealtimeError::permanent("实时事件序列超过可表示范围"));
         };
         if event.stream_sequence != next_sequence {
-            return Err("实时事件序列出现断档".to_owned());
+            return Err(RealtimeError::transient("实时事件序列出现断档"));
         }
         expected_after = event.stream_sequence;
         let page = RealtimePage {
@@ -391,7 +496,7 @@ where
         };
         let _ = on_page(page);
     }
-    Err("实时 WebSocket 已关闭".to_owned())
+    Err(RealtimeError::transient("实时 WebSocket 已关闭"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -399,10 +504,11 @@ async fn catch_up_realtime<F>(
     auction_id: Option<&str>,
     expected_after: &mut i64,
     on_page: &mut F,
-) -> Result<(), String>
+) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
+    let mut fetched_pages = 0_u32;
     loop {
         let requested_after = *expected_after;
         let page = fetch_realtime_page(requested_after, auction_id).await?;
@@ -410,7 +516,7 @@ where
         let has_more = page.has_more;
         let refetch_required = page.refetch_required;
         if has_more && next_after == requested_after {
-            return Err("实时事件补发游标未前进".to_owned());
+            return Err(RealtimeError::transient("实时事件补发游标未前进"));
         }
         *expected_after = next_after;
         let continue_catch_up = on_page(page);
@@ -420,15 +526,33 @@ where
         if !has_more {
             return Ok(());
         }
+        fetched_pages += 1;
+        if fetched_pages >= MAX_CATCH_UP_PAGES {
+            // 落后页数超过上限：放弃逐页补齐，合成 refetch 页让各 resource 全量重读权威快照。
+            tracing::warn!(
+                auction_id = ?auction_id,
+                after = *expected_after,
+                fetched_pages,
+                "实时 catch-up 翻页超限，降级为全量 refetch"
+            );
+            let degraded_page = RealtimePage {
+                events: Vec::new(),
+                next_after: *expected_after,
+                has_more: false,
+                refetch_required: true,
+            };
+            let _ = on_page(degraded_page);
+            return Ok(());
+        }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn subscribe_realtime<F>(_after: i64, _on_page: F) -> Result<(), String>
+pub(crate) async fn subscribe_realtime<F>(_after: i64, _on_page: F) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
-    Err("实时 WebSocket 仅在 wasm32 浏览器目标可用".to_owned())
+    Err(RealtimeError::permanent("实时 WebSocket 仅在 wasm32 浏览器目标可用"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -437,11 +561,11 @@ pub(crate) async fn subscribe_auction_realtime<F>(
     _auction_id: String,
     _world: String,
     _on_page: F,
-) -> Result<(), String>
+) -> Result<(), RealtimeError>
 where
     F: FnMut(RealtimePage) -> bool,
 {
-    Err("实时 WebSocket 仅在 wasm32 浏览器目标可用".to_owned())
+    Err(RealtimeError::permanent("实时 WebSocket 仅在 wasm32 浏览器目标可用"))
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -252,10 +252,10 @@ pub(crate) fn BidLogTable(
                     class: "public-auction-bid-log-table ui-table--responsive",
                     thead {
                         tr {
-                            th { {t!("bidlog-time")} }
-                            th { {t!("bidlog-lot")} }
-                            th { {t!("bidlog-bidder")} }
-                            th { class: "public-auction-bid-log-number", {t!("bidlog-amount")} }
+                            th { scope: "col", {t!("bidlog-time")} }
+                            th { scope: "col", {t!("bidlog-lot")} }
+                            th { scope: "col", {t!("bidlog-bidder")} }
+                            th { scope: "col", class: "public-auction-bid-log-number", {t!("bidlog-amount")} }
                         }
                     }
                     tbody {

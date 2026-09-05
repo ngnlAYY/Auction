@@ -66,6 +66,9 @@ pub(super) fn page() -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(&error),
                 detail: "",
+                // 错误态提供页内重试入口，不必刷新浏览器。
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| refresh.set(refresh().saturating_add(1)),
             }
         },
         Some(Ok(page)) => rsx! {

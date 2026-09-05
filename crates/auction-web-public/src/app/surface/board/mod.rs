@@ -6,6 +6,7 @@
 mod data;
 mod navigation;
 mod realtime;
+mod visibility;
 mod world;
 
 use super::*;
@@ -17,6 +18,7 @@ pub(crate) use realtime::{
     live_connection_state_name, public_connection_class, public_connection_state,
     public_connection_state_name,
 };
+pub(crate) use visibility::{PageVisibility, sleep_while_visible};
 pub(crate) use world::{WorldPicker, supported_worlds, world_label};
 
 #[component]

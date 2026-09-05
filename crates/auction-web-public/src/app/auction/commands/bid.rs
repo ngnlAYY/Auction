@@ -11,6 +11,14 @@ use super::common::{BidConfirmCommand, PendingBidCommand, bid_error_message};
 const CREDIT_K: i64 = 1_000;
 const MAX_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
 
+/// 普通竞价成功后的浏览器展示投影；只保留反馈面板所需字段，避免把 api 内部 DTO
+/// 类型（未在 api 出口公开）泄漏到组件参数。
+#[derive(Debug, Clone, PartialEq)]
+pub struct BidSuccess {
+    pub leading: bool,
+    pub current_price: i64,
+}
+
 /// 普通竞价表单参数；关闭与成功动作分开表达，避免调用方误用弹窗生命周期。
 pub struct BidFormInput {
     pub lot_id: String,
@@ -23,9 +31,11 @@ pub struct BidFormInput {
     pub blocked_reason: String,
     /// 由弹窗宿主注入的两阶段确认命令 hook（整体 Copy）；宿主据其 `submitting`
     /// 在提交中禁用遮罩/Escape/关闭按钮（Dialog busy 守卫），避免弹窗 scope 销毁
-    /// 导致成功后的刷新与 on_accepted 回调丢失。
+    /// 导致成功后的刷新与成功面板反馈丢失。
     pub command: BidConfirmCommand,
-    pub on_accepted: EventHandler<()>,
+    /// 成功投影信号由弹窗宿主持有：命令成功后表单设置它，入口据其渲染成功面板
+    /// （与代理 proxy_success 模式一致），宿主在关闭/重新打开弹窗时清零。
+    pub success: Signal<Option<BidSuccess>>,
     pub on_close: EventHandler<()>,
 }
 
@@ -73,6 +83,33 @@ fn bid_amount_hint(value: &str) -> Element {
     }
 }
 
+/// 普通竞价成功后的反馈面板，与代理成功面板（proxy/success.rs）同款模式：
+/// 弹窗保持打开，成功消息以 role=status 公告，用户点关闭按钮才退出弹窗。
+fn bid_success_panel(success: &BidSuccess, on_close: EventHandler<()>) -> Element {
+    let success_message = if success.leading {
+        t!("bid-success-leading", price: format_amount(success.current_price))
+    } else {
+        t!("bid-success")
+    };
+    rsx! {
+        section { class: "public-auction-bid-form",
+            p { class: "action-feedback action-feedback--success", role: "status",
+                "{success_message}"
+            }
+            p { class: "public-auction-bid-form__meta",
+                {t!("bid-current-price", price: format_amount(success.current_price))}
+            }
+            div { class: "public-auction-bid-form__actions",
+                button {
+                    r#type: "button",
+                    onclick: move |_| on_close.call(()),
+                    {t!("catalog-close")}
+                }
+            }
+        }
+    }
+}
+
 /// 显示普通竞价表单；最低价和 lot 状态只用于即时反馈，最终结果由服务端决定。
 pub fn bid_form(input: BidFormInput) -> Element {
     let BidFormInput {
@@ -85,9 +122,13 @@ pub fn bid_form(input: BidFormInput) -> Element {
         blocked,
         blocked_reason,
         command,
-        on_accepted,
+        mut success,
         on_close,
     } = input;
+    // 命令成功后不再直接关弹窗，而是在弹窗内渲染成功面板（参照代理成功面板）。
+    if let Some(success) = success() {
+        return bid_success_panel(&success, on_close);
+    }
     let amount_id = format!("public-bid-amount-{lot_id}");
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
@@ -144,9 +185,13 @@ pub fn bid_form(input: BidFormInput) -> Element {
                         let lot_id = lot_id.clone();
                         async move { place_bid(lot_id, pending.amount, pending.command_id).await }
                     },
-                    move |_| {
+                    move |result| {
+                        // 成功后面板代替直接关弹窗：写入成功投影并刷新权威价格与领先者。
+                        success.set(Some(BidSuccess {
+                            leading: result.leading,
+                            current_price: result.current_price,
+                        }));
                         refresh_generation.set(refresh_generation().saturating_add(1));
-                        on_accepted.call(());
                     },
                     move || {
                         // 失败后 hook 保留输入、command_id 和错误，这里重新读取权威价格与领先者。

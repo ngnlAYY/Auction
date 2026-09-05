@@ -134,6 +134,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
+                // 错误态提供页内重试入口：仅重载事件分区（含总览计数）。
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| event_refresh.set(event_refresh().saturating_add(1)),
             }
         },
         Some(Ok(event_page)) => rsx! {
@@ -159,6 +162,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
+                // 错误态提供页内重试入口：仅重载 failure 分区（含未解决计数）。
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| failure_refresh.set(failure_refresh().saturating_add(1)),
             }
         },
         Some(Ok(failure_page)) => rsx! {
@@ -197,6 +203,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
+                // 错误态提供页内重试入口：仅重载 lag 分区。
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| lag_refresh.set(lag_refresh().saturating_add(1)),
             }
         },
         Some(Ok(lag_page)) => rsx! {
@@ -417,9 +426,9 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
                                                 notice.set(Some(AdminActionFeedback::Success));
                                                 selected_failure.set(None);
                                                 replay_command_id.set(None);
-                                                event_refresh.set(event_refresh() + 1);
-                                                failure_refresh.set(failure_refresh() + 1);
-                                                lag_refresh.set(lag_refresh() + 1);
+                                                event_refresh.set(event_refresh().saturating_add(1));
+                                                failure_refresh.set(failure_refresh().saturating_add(1));
+                                                lag_refresh.set(lag_refresh().saturating_add(1));
                                             }
                                             Err(code) => notice.set(Some(
                                                 AdminActionFeedback::Error(code),

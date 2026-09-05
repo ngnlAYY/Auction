@@ -82,7 +82,7 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                 input {
                     id: "public-login-key",
                     r#type: "password",
-                    autocomplete: "off",
+                    autocomplete: "current-password",
                     maxlength: "1024",
                     placeholder: if submitting() || failed {
                         "••••••••••••••••••••••••••••••••".to_owned()
@@ -238,7 +238,11 @@ pub(super) fn SessionMenu() -> Element {
                 },
             }}
             if logout_error() {
-                span { class: "public-visually-hidden", role: "alert", {t!("logout-error")} }
+                // 登出失败必须给明眼用户可见的反馈（此前仅 visually-hidden 公告，
+                // 只有读屏用户能感知），复用 crate 内既有的错误展示样式。
+                span { class: "action-feedback action-feedback--error", role: "alert",
+                    {t!("logout-error")}
+                }
             }
         }
     }

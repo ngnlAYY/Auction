@@ -40,15 +40,15 @@ pub(super) fn CompensationPoolTable(
                     table { class: "public-compensation-table",
                         thead {
                             tr {
-                                th { class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }
-                                th { {t!("compensation-round-label")} }
-                                th { {t!("compensation-world")} }
-                                th { class: "public-compensation-number", {t!("compensation-opening")} }
-                                th { class: "public-compensation-number", {t!("compensation-tax")} }
-                                th { class: "public-compensation-number", {t!("compensation-discount")} }
-                                th { class: "public-compensation-number", {t!("compensation-out")} }
-                                th { class: "public-compensation-number", {t!("compensation-closing")} }
-                                th { {t!("compensation-settled")} }
+                                th { scope: "col", class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }
+                                th { scope: "col", {t!("compensation-round-label")} }
+                                th { scope: "col", {t!("compensation-world")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-opening")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-tax")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-discount")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-out")} }
+                                th { scope: "col", class: "public-compensation-number", {t!("compensation-closing")} }
+                                th { scope: "col", {t!("compensation-settled")} }
                             }
                         }
                         tbody {
