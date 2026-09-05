@@ -19,6 +19,12 @@ use super::{
 };
 
 /// 旧 rename decoder 允许对象增加字段；`user_state_version` 是新版兼容扩展，不参与回滚 fence。
+///
+/// 保留镜像的理由：wire 允许扩展字段且允许省略 `user_state_version`，而 contracts 的
+/// `AdminRenameResponse` 将该字段作为必填标量、不能加 `deny_unknown_fields`；镜像继续按
+/// 旧语义逐项校验。同步义务：`AdminRenameResponse`/`AdminRenameListResponse`/
+/// `AdminRenamePaginationResponse` 字段集变化时必须同步本文件；decode 函数中构造 DTO 的
+/// 穷举字段列表会在编译期捕捉漂移。
 #[derive(Debug, Deserialize)]
 struct StrictRename {
     actor: String,

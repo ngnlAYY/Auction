@@ -2,9 +2,8 @@
 
 use super::{
     AuctionListPage, BidLogPage, CurrentAuction, LotEnvelope, PriceHistoryPage, PriceHistoryQuery,
-    Worlds, decoder, send_get, transport_error_code,
+    TransportError, Worlds, decoder, send_get,
 };
-use auction_contracts::ApiErrorResponse;
 use gloo_timers::future::TimeoutFuture;
 use url::form_urlencoded;
 
@@ -36,8 +35,8 @@ impl LotDetailFetchError {
         &self.code
     }
 
-    fn transport(error: String) -> Self {
-        Self { status: 0, code: transport_error_code(&error) }
+    fn transport(error: TransportError) -> Self {
+        Self { status: 0, code: error.code().to_owned() }
     }
 
     fn invalid_response(status: u16) -> Self {
@@ -46,9 +45,9 @@ impl LotDetailFetchError {
 }
 
 pub(crate) async fn fetch_worlds() -> Result<Worlds, String> {
-    let response = send_get("/api/v1/worlds").await?;
+    let response = send_get("/api/v1/worlds").await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_worlds(response).await
 }
@@ -60,9 +59,9 @@ pub(crate) async fn fetch_current_auction(
     query.append_pair("world", &world_id);
     let encoded_world = query.finish();
     let url = format!("/api/v1/auctions/current?{encoded_world}");
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     Ok(decoder::decode_current_auction(response, &world_id).await?.auction)
 }
@@ -145,9 +144,9 @@ pub(crate) async fn fetch_bid_log_page(
         query.append_pair("lot", &lot_id);
     }
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{}", query.finish());
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_bid_log_page(response).await
 }
@@ -180,9 +179,9 @@ pub(crate) async fn fetch_lot_bid_log(
         .append_pair("page_size", "10")
         .finish();
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{query}");
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_bid_log_page(response).await
 }
@@ -203,9 +202,9 @@ pub(crate) async fn fetch_auction_page(
         query.append_pair("world", world_id);
     }
     let url = format!("/api/v1/auctions?{}", query.finish());
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(format!("HTTP {}", response.status()));
+        return Err(decoder::decode_error_code(response).await);
     }
     decoder::decode_auction_list(response, world_id.as_deref(), &status).await
 }
@@ -237,8 +236,9 @@ pub(crate) async fn fetch_price_history(
     let response = send_get(&url).await.map_err(|_| PriceHistoryFetchError::Unavailable)?;
     if !response.ok() {
         let status = response.status();
-        let code = response.json::<ApiErrorResponse>().await.ok().map(|error| error.code);
-        return Err(if status == 501 && code.as_deref() == Some("feature_not_supported") {
+        // 与命令路径一致走共享错误 envelope 解码；无效 envelope 归一为 invalid_response。
+        let code = decoder::decode_error_code(response).await;
+        return Err(if status == 501 && code == "feature_not_supported" {
             PriceHistoryFetchError::Unsupported
         } else {
             PriceHistoryFetchError::Unavailable
@@ -277,7 +277,7 @@ async fn fetch_current_lots_once(
         .unwrap_or_default();
     let url =
         format!("/api/v1/auctions/{auction_id}/lots?page={page}&page_size=10{category_query}");
-    let response = send_get(&url).await.map_err(|error| transport_error_code(&error))?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }

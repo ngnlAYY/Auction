@@ -24,6 +24,13 @@ use super::{
 };
 
 /// 旧 Mail decoder 允许非破坏性扩展字段；所有旧字段及新详情的固定 metadata 仍逐项校验。
+///
+/// 保留镜像的理由：contracts 的 `AdminMailStateResponse`/`AdminMailIntakeSummaryResponse`/
+/// `AdminMailIntakeListResponse`/`AdminMailPollTriggerResponse` 对应同一 wire，但旧契约允许
+/// 服务端增加扩展字段，这些 DTO 不能加 `deny_unknown_fields`；镜像继续要求旧字段显式存在。
+/// 同步义务：上述 DTO 字段集变化时必须同步本镜像；下方构造 DTO 的穷举字段列表会在编译期
+/// 捕捉漂移。详情与 metadata 的 wire 是闭集，已由 contracts 的 `AdminMailIntakeDetailResponse`
+/// 与 `AdminMailIntakeMetadataResponse` 承担，不再保留本地镜像。
 #[derive(Debug, Deserialize)]
 struct StrictMailState {
     polling: StrictMailPolling,
@@ -64,37 +71,6 @@ struct StrictMailPagination {
 struct StrictMailIntakePage {
     intakes: Vec<StrictMailIntake>,
     pagination: StrictMailPagination,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictMailMetadata {
-    added_count: i32,
-    attachment_count: i32,
-    auction_id: String,
-    delivery_ids: Vec<String>,
-    existing_count: i32,
-    owner_result_code: String,
-    preview_revision: i64,
-    reason_code: String,
-    submission_id: String,
-    user_id: String,
-    warning_codes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictMailIntakeDetail {
-    decision_code: String,
-    external_mail_id: String,
-    id: String,
-    kind: String,
-    mailbox_key: String,
-    metadata: StrictMailMetadata,
-    processed_at: String,
-    received_at: String,
-    status: String,
-    world_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +145,7 @@ pub(crate) async fn fetch_mail_intake_detail(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictMailIntakeDetail> =
+    let payload: ApiResponse<AdminMailIntakeDetail> =
         response.json().await.map_err(invalid_response_error)?;
     let detail = decode_mail_intake_detail(payload.data).map_err(invalid_response_error)?;
     if detail.id != intake_id {
@@ -326,19 +302,7 @@ fn decode_mail_intake_page(
 }
 
 fn decode_mail_intake(value: StrictMailIntake) -> Result<AdminMailIntake, &'static str> {
-    let received_at = parse_admin_time(&value.received_at).ok_or("mail_received_time")?;
-    let processed_at = parse_admin_time(&value.processed_at).ok_or("mail_processed_time")?;
-    if !valid_uuid(&value.id)
-        || !valid_safe_text(&value.mailbox_key, 256)
-        || !valid_safe_text(&value.external_mail_id, 512)
-        || !valid_safe_text(&value.world_id, 256)
-        || !valid_trimmed_text(&value.kind)
-        || !valid_trimmed_text(&value.status)
-        || processed_at < received_at
-    {
-        return Err("mail_intake");
-    }
-    Ok(AdminMailIntake {
+    let intake = AdminMailIntake {
         id: value.id,
         mailbox_key: value.mailbox_key,
         external_mail_id: value.external_mail_id,
@@ -348,41 +312,49 @@ fn decode_mail_intake(value: StrictMailIntake) -> Result<AdminMailIntake, &'stat
         decision_code: value.decision_code,
         received_at: value.received_at,
         processed_at: value.processed_at,
-    })
+    };
+    valid_mail_intake(&intake).then_some(intake).ok_or("mail_intake")
+}
+
+/// 摘要字段的共享值域谓词；详情路径复用同一校验，保证两个端点的旧字段语义一致。
+fn valid_mail_intake(value: &AdminMailIntake) -> bool {
+    let Some(received_at) = parse_admin_time(&value.received_at) else {
+        return false;
+    };
+    let Some(processed_at) = parse_admin_time(&value.processed_at) else {
+        return false;
+    };
+    valid_uuid(&value.id)
+        && valid_safe_text(&value.mailbox_key, 256)
+        && valid_safe_text(&value.external_mail_id, 512)
+        && valid_safe_text(&value.world_id, 256)
+        && valid_trimmed_text(&value.kind)
+        && valid_trimmed_text(&value.status)
+        && processed_at >= received_at
 }
 
 fn decode_mail_intake_detail(
-    value: StrictMailIntakeDetail,
+    value: AdminMailIntakeDetail,
 ) -> Result<AdminMailIntakeDetail, &'static str> {
-    let summary = decode_mail_intake(StrictMailIntake {
-        decision_code: value.decision_code,
-        external_mail_id: value.external_mail_id,
-        id: value.id,
-        kind: value.kind,
-        mailbox_key: value.mailbox_key,
-        processed_at: value.processed_at,
-        received_at: value.received_at,
-        status: value.status,
-        world_id: value.world_id,
-    })?;
-    let metadata = decode_mail_metadata(value.metadata)?;
-    Ok(AdminMailIntakeDetail {
-        id: summary.id,
-        mailbox_key: summary.mailbox_key,
-        external_mail_id: summary.external_mail_id,
-        world_id: summary.world_id,
-        kind: summary.kind,
-        status: summary.status,
-        decision_code: summary.decision_code,
-        received_at: summary.received_at,
-        processed_at: summary.processed_at,
-        metadata,
-    })
+    let summary = AdminMailIntake {
+        id: value.id.clone(),
+        mailbox_key: value.mailbox_key.clone(),
+        external_mail_id: value.external_mail_id.clone(),
+        world_id: value.world_id.clone(),
+        kind: value.kind.clone(),
+        status: value.status.clone(),
+        decision_code: value.decision_code.clone(),
+        received_at: value.received_at.clone(),
+        processed_at: value.processed_at.clone(),
+    };
+    if !valid_mail_intake(&summary) {
+        return Err("mail_intake");
+    }
+    decode_mail_metadata(&value.metadata)?;
+    Ok(value)
 }
 
-fn decode_mail_metadata(
-    value: StrictMailMetadata,
-) -> Result<AdminMailIntakeMetadataResponse, &'static str> {
+fn decode_mail_metadata(value: &AdminMailIntakeMetadataResponse) -> Result<(), &'static str> {
     if value.added_count < 0
         || value.existing_count < 0
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&value.preview_revision)
@@ -397,19 +369,7 @@ fn decode_mail_metadata(
     {
         return Err("mail_metadata");
     }
-    Ok(AdminMailIntakeMetadataResponse {
-        auction_id: value.auction_id,
-        submission_id: value.submission_id,
-        user_id: value.user_id,
-        added_count: value.added_count,
-        existing_count: value.existing_count,
-        preview_revision: value.preview_revision,
-        attachment_count: value.attachment_count,
-        owner_result_code: value.owner_result_code,
-        reason_code: value.reason_code,
-        warning_codes: value.warning_codes,
-        delivery_ids: value.delivery_ids,
-    })
+    Ok(())
 }
 
 fn optional_query_time(value: &str) -> Result<Option<f64>, &'static str> {

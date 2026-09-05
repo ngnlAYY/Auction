@@ -7,12 +7,10 @@ use uuid::Uuid;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, stable_scoped_command_id};
 
 use super::RecoveryConfirmationDraft;
-use super::helpers::{
-    recovery_action_summary, recovery_command_label, recovery_stage_label, stable_command_id,
-};
+use super::helpers::{recovery_action_summary, recovery_command_label, recovery_stage_label};
 use super::report::AdminSettlementPager;
 
 #[component]
@@ -196,10 +194,8 @@ pub(super) fn AdminRecoveryDialog(
                             "{}:{}:{}:{reason_value}",
                             draft.recovery_id, draft.state_version, draft.action
                         );
-                        let command_id = stable_command_id(
-                            command_ids,
-                            command_signature.clone(),
-                        );
+                        let command_id =
+                            stable_scoped_command_id(command_ids, &command_signature);
                         feedback.set(None);
                         let mut busy = busy;
                         let mut confirmation = confirmation;

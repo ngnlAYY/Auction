@@ -12,8 +12,8 @@ use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
 use super::{
-    Pager, PublicSessionResource, Route, Time, format_amount, login_href_for_current_location,
-    read_public_query, update_public_query,
+    Pager, PublicSessionResource, QueryWriteMode, Route, Time, format_amount,
+    login_href_for_current_location, update_public_query_state, use_public_query_state,
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
@@ -67,8 +67,11 @@ pub(super) fn page() -> Element {
 fn AuthenticatedAccountData() -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut account_reload_generation = use_signal(|| 0_u64);
-    let mut bid_page = use_signal(|| read_public_query().bid_page);
-    let mut proxy_page = use_signal(|| read_public_query().proxy_page);
+    // 竞价与代理页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    let query_state = use_public_query_state();
+    let query_state_signal = query_state.state;
+    let bid_page = use_memo(move || query_state_signal().bid_page);
+    let proxy_page = use_memo(move || query_state_signal().proxy_page);
     let account = use_resource(move || {
         let _ = refresh_generation();
         let _ = account_reload_generation();
@@ -105,12 +108,18 @@ fn AuthenticatedAccountData() -> Element {
                 bid_page: bid_page(),
                 proxy_page: proxy_page(),
                 on_bid_page_change: move |next_page| {
-                    bid_page.set(next_page);
-                    update_public_query(|query| query.bid_page = next_page, false);
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.bid_page = next_page,
+                        QueryWriteMode::Push,
+                    );
                 },
                 on_proxy_page_change: move |next_page| {
-                    proxy_page.set(next_page);
-                    update_public_query(|query| query.proxy_page = next_page, false);
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.proxy_page = next_page,
+                        QueryWriteMode::Push,
+                    );
                 },
             }
         },

@@ -8,6 +8,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Pager, use_second_tick};
 use crate::api::AdminAuctionPage;
 
 use super::super::intake::AdminIntakeForm;
+use super::super::query::AuctionsQuery;
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
 use super::helpers::current_time_millis;
@@ -15,8 +16,9 @@ use super::helpers::current_time_millis;
 #[component]
 pub(super) fn AdminAuctionTable(
     state: Option<Result<AdminAuctionPage, String>>,
-    mut world_filter: Signal<String>,
-    mut page_number: Signal<i64>,
+    /// 当前世界筛选（地址栏恢复后的值）；变更经 `on_query_change` 由页面写回 URL。
+    world: String,
+    on_query_change: EventHandler<AuctionsQuery>,
     reload_generation: Signal<u64>,
 ) -> Element {
     // 订阅外壳提供的共享秒级时钟：读取 tick 让本组件每秒重渲染并刷新当前时间，
@@ -25,6 +27,8 @@ pub(super) fn AdminAuctionTable(
     let _ = second_tick();
     let current_time_millis = current_time_millis();
     let notice = use_signal(|| None::<AdminAuctionNotice>);
+    // 翻页保留当前世界筛选；该闭包在分支内move走一份克隆。
+    let pager_world = world.clone();
     let list_content = match state {
         None => rsx! {
             AsyncState {
@@ -45,9 +49,9 @@ pub(super) fn AdminAuctionTable(
             let capabilities = page.capabilities;
             let pagination = page.pagination;
             rsx! {
-                if capabilities.manual_intake && matches!(world_filter().as_str(), "main" | "isekai") {
+                if capabilities.manual_intake && matches!(world.as_str(), "main" | "isekai") {
                     AdminIntakeForm {
-                        world_id: world_filter(),
+                        world_id: world.clone(),
                         reload_generation,
                     }
                 }
@@ -99,7 +103,10 @@ pub(super) fn AdminAuctionTable(
                     next_label: t!("admin-pagination-next"),
                     jump_label: t!("admin-pagination-input"),
                     jump_button_label: t!("admin-pagination-go"),
-                    on_page_change: move |next_page| page_number.set(next_page),
+                    on_page_change: move |next_page| {
+                        on_query_change
+                            .call(AuctionsQuery { world: pager_world.clone(), page: next_page });
+                    },
                 }
             }
         }
@@ -117,10 +124,11 @@ pub(super) fn AdminAuctionTable(
                         select {
                             class: "admin-auction-world",
                             id: "auction-world",
-                            value: world_filter(),
+                            value: world,
                             onchange: move |event| {
-                                world_filter.set(event.value());
-                                page_number.set(1);
+                                // 切换世界筛选回到第一页，由页面 push 到地址栏。
+                                on_query_change
+                                    .call(AuctionsQuery { world: event.value(), page: 1 });
                             },
                             option { value: "", {t!("admin-auctions-world-all")} }
                             option { value: "main", {t!("admin-auctions-world-main")} }

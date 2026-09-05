@@ -10,16 +10,17 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
+use crate::app::surface::{run_admin_action, stable_scoped_command_id};
 
 #[component]
 pub(super) fn MailPollerControls(
     pollers: Vec<AdminMailPolling>,
     mut refresh: Signal<u64>,
 ) -> Element {
-    let mut trigger_busy = use_signal(|| false);
-    let mut pause_busy = use_signal(|| false);
+    let trigger_busy = use_signal(|| false);
+    let pause_busy = use_signal(|| false);
     let mut trigger_command = use_signal(|| None::<Uuid>);
-    let pause_commands = use_signal(HashMap::<String, Uuid>::new);
+    let mut pause_commands = use_signal(HashMap::<String, Uuid>::new);
     let mut notice = use_signal(|| None::<String>);
     let mut error_code = use_signal(|| None::<String>);
 
@@ -34,7 +35,6 @@ pub(super) fn MailPollerControls(
                         if trigger_busy() {
                             return;
                         }
-                        trigger_busy.set(true);
                         notice.set(None);
                         error_code.set(None);
                         let command_id = trigger_command().unwrap_or_else(|| {
@@ -42,23 +42,18 @@ pub(super) fn MailPollerControls(
                             trigger_command.set(Some(command_id));
                             command_id
                         });
-                        let mut trigger_busy = trigger_busy;
-                        let mut trigger_command = trigger_command;
-                        let mut notice = notice;
-                        let mut error_code = error_code;
-                        spawn(async move {
-                            match trigger_mail_poll(command_id).await {
-                                Ok(count) => {
-                                    trigger_command.set(None);
-                                    notice.set(Some(t!(
-                                        "dashboard-legacy-poll-triggered",
-                                        count: count
-                                    )));
-                                }
-                                Err(error) => error_code.set(Some(error.code)),
-                            }
-                            trigger_busy.set(false);
-                        });
+                        run_admin_action(
+                            trigger_busy,
+                            async move { trigger_mail_poll(command_id).await },
+                            move |count| {
+                                trigger_command.set(None);
+                                notice.set(Some(t!(
+                                    "dashboard-legacy-poll-triggered",
+                                    count: count
+                                )));
+                            },
+                            move |error| error_code.set(Some(error.code)),
+                        );
                     },
                     {t!("dashboard-legacy-trigger-poll")}
                 }
@@ -86,7 +81,6 @@ pub(super) fn MailPollerControls(
                                     if pause_busy() {
                                         return;
                                     }
-                                    pause_busy.set(true);
                                     notice.set(None);
                                     error_code.set(None);
                                     let polling = polling.clone();
@@ -96,28 +90,26 @@ pub(super) fn MailPollerControls(
                                         polling.state_version,
                                         desired_paused
                                     );
-                                    let command_id = pause_command_id(pause_commands, &signature);
-                                    let mut pause_busy = pause_busy;
-                                    let mut pause_commands = pause_commands;
-                                    let mut notice = notice;
-                                    let mut error_code = error_code;
-                                    let mut refresh = refresh;
-                                    spawn(async move {
-                                        match set_mail_paused(command_id, polling, desired_paused).await {
-                                            Ok(_) => {
-                                                pause_commands.write().remove(&signature);
-                                                notice.set(Some(t!("dashboard-legacy-poll-updated")));
+                                    let command_id =
+                                        stable_scoped_command_id(pause_commands, &signature);
+                                    run_admin_action(
+                                        pause_busy,
+                                        async move {
+                                            set_mail_paused(command_id, polling, desired_paused)
+                                                .await
+                                        },
+                                        move |_| {
+                                            pause_commands.write().remove(&signature);
+                                            notice.set(Some(t!("dashboard-legacy-poll-updated")));
+                                            refresh.set(refresh().saturating_add(1));
+                                        },
+                                        move |error| {
+                                            if error.is_conflict() {
                                                 refresh.set(refresh().saturating_add(1));
                                             }
-                                            Err(error) => {
-                                                if error.is_conflict() {
-                                                    refresh.set(refresh().saturating_add(1));
-                                                }
-                                                error_code.set(Some(error.code));
-                                            }
-                                        }
-                                        pause_busy.set(false);
-                                    });
+                                            error_code.set(Some(error.code));
+                                        },
+                                    );
                                 },
                                 "{label}"
                             }
@@ -133,13 +125,4 @@ pub(super) fn MailPollerControls(
             }
         }
     }
-}
-
-fn pause_command_id(mut commands: Signal<HashMap<String, Uuid>>, signature: &str) -> Uuid {
-    if let Some(command_id) = commands.read().get(signature).copied() {
-        return command_id;
-    }
-    let command_id = Uuid::new_v4();
-    commands.write().insert(signature.to_owned(), command_id);
-    command_id
 }

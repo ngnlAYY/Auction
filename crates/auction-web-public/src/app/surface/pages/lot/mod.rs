@@ -98,14 +98,21 @@ fn LotMissing() -> Element {
     }
 }
 
+/// lot 详情读取失败的本地化文案：先处理带状态约束的历史变体码，未命中走共享基础层
+/// （[`base_api_error_message`]），最后落到通用兜底。
 fn lot_detail_error_message(error: &LotDetailFetchError) -> String {
     match (error.status(), error.code()) {
-        (_, "invalid_response") => t!("error-invalid-response"),
-        (0, "network_error") => t!("error-network"),
-        (0, "request_timeout") => t!("error-request-timeout"),
-        (0, "request_cancelled") => t!("error-request-cancelled"),
-        (404, "not_found" | "NOT_FOUND") => t!("error-not-found"),
-        (500, "internal" | "INTERNAL") => t!("error-internal"),
-        _ => t!("common-load-error"),
+        (0, "request_cancelled") => return t!("error-request-cancelled"),
+        (404, "NOT_FOUND") => return t!("error-not-found"),
+        (500, "internal" | "INTERNAL") => return t!("error-internal"),
+        _ => {}
     }
+    base_api_error_message(error.code(), |kind| match kind {
+        BaseErrorKind::Network => t!("error-network"),
+        BaseErrorKind::Timeout => t!("error-request-timeout"),
+        BaseErrorKind::InvalidResponse => t!("error-invalid-response"),
+        BaseErrorKind::NotFound => t!("error-not-found"),
+        _ => t!("common-load-error"),
+    })
+    .unwrap_or_else(|| t!("common-load-error"))
 }

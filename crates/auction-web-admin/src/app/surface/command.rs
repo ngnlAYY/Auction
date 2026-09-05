@@ -1,0 +1,96 @@
+//! Admin 幂等命令与动作执行骨架的统一 helper。
+//!
+//! 原先同一套逻辑分散在各页面（`stable_command_id` 同函数体 5 份以上、内联 3 份以上，
+//! spawn+busy+feedback+command_state 骨架十余处），本模块收敛为唯一实现：
+//!
+//! - [`stable_command_id`]：单命令形态。同一输入签名复用已冻结的 `command_id`（支撑服务端
+//!   幂等重试），签名变更即重新生成；成功/取消后由调用方把状态置回 `None`。
+//! - [`stable_scoped_command_id`]：多目标并行形态（结算 recovery、world 启停、Dashboard
+//!   多 mailbox 暂停等一页多条命令的场景），按签名分别冻结 `command_id`，互不覆盖。
+//! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
+//!   置位/复位与 spawn 边界；结果处理由调用方回调完成，反馈写入可选。
+
+use std::collections::HashMap;
+
+use dioxus::prelude::*;
+use uuid::Uuid;
+
+use super::AdminActionFeedback;
+
+/// 为同一组输入复用 `command_id`，避免重复提交生成不同命令；输入签名变更即重新生成。
+pub fn stable_command_id(
+    mut command_state: Signal<Option<(String, Uuid)>>,
+    signature: String,
+) -> Uuid {
+    match command_state() {
+        Some((current, command_id)) if current == signature => command_id,
+        _ => {
+            let command_id = Uuid::new_v4();
+            command_state.set(Some((signature, command_id)));
+            command_id
+        }
+    }
+}
+
+/// 按签名分别冻结 `command_id` 的多目标形态；不同签名互不覆盖，成功后由调用方
+/// `remove` 对应条目。
+pub fn stable_scoped_command_id(
+    mut command_ids: Signal<HashMap<String, Uuid>>,
+    signature: &str,
+) -> Uuid {
+    if let Some(command_id) = command_ids.read().get(signature).copied() {
+        return command_id;
+    }
+    let command_id = Uuid::new_v4();
+    command_ids.write().insert(signature.to_owned(), command_id);
+    command_id
+}
+
+/// 管理动作统一执行骨架：`busy` 置位 → spawn 执行 → 按结果回调 → `busy` 复位。
+///
+/// 只负责 busy 边界与 spawn；反馈、命令状态清理、权威数据刷新等结果处理全部交给
+/// `on_success` / `on_failure`，错误类型由调用方决定（稳定 code 字符串或
+/// `AdminApiFailure`）。busy 守卫（`if busy() { return; }`）与前置状态清理仍留在调用方。
+pub fn run_admin_action<T, E, F>(
+    mut busy: Signal<bool>,
+    action: F,
+    on_success: impl FnOnce(T) + 'static,
+    on_failure: impl FnOnce(E) + 'static,
+) where
+    T: 'static,
+    E: 'static,
+    F: std::future::Future<Output = Result<T, E>> + 'static,
+{
+    busy.set(true);
+    spawn(async move {
+        match action.await {
+            Ok(value) => on_success(value),
+            Err(error) => on_failure(error),
+        }
+        busy.set(false);
+    });
+}
+
+/// 在 [`run_admin_action`] 上叠加 [`AdminActionFeedback`] 反馈写入的常见形态：
+/// 动作开始前清空旧反馈，成功时先写入 `Success` 再回调 `on_success`，失败时把稳定
+/// code 写入 `Error`。
+pub fn run_admin_feedback_action<T, F>(
+    busy: Signal<bool>,
+    mut feedback: Signal<Option<AdminActionFeedback>>,
+    action: F,
+    on_success: impl FnOnce(T) + 'static,
+) where
+    T: 'static,
+    F: std::future::Future<Output = Result<T, String>> + 'static,
+{
+    feedback.set(None);
+    run_admin_action(
+        busy,
+        action,
+        move |value| {
+            feedback.set(Some(AdminActionFeedback::Success));
+            on_success(value);
+        },
+        move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
+    );
+}

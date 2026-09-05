@@ -58,7 +58,10 @@ pub struct AdminMailIntakeListResponse {
 }
 
 /// Admin 入站邮件详情的固定元数据。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端详情 decoder 的闭集语义对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminMailIntakeMetadataResponse {
     pub auction_id: String,
     pub submission_id: String,
@@ -74,7 +77,10 @@ pub struct AdminMailIntakeMetadataResponse {
 }
 
 /// Admin 入站邮件详情响应。
+///
+/// 详情 wire 是闭集（与列表摘要的兼容扩展语义不同），未知字段一律拒绝。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminMailIntakeDetailResponse {
     pub id: String,
     pub mailbox_key: String,

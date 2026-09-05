@@ -2,12 +2,16 @@
 
 use std::collections::HashSet;
 
-use serde::Deserialize;
+use auction_contracts::AdminSettlementCatalogResponse;
 
 use super::{
     ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_response_error, parse_admin_time,
     response_error, send_get, valid_uuid,
 };
+
+// 本地 Strict 镜像已删除：contracts 的 `AdminSettlementCatalogResponse`（含 entry 与
+// pagination）已带 `deny_unknown_fields`，字段集与旧闭集 decoder 一致；本文件只保留排序、
+// 去重与筛选回显等跨字段谓词。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdminSettlementCatalogEntry {
@@ -23,30 +27,6 @@ pub(crate) struct AdminSettlementCatalogPage {
     pub page: i64,
     pub page_size: i64,
     pub total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictSettlementCatalogEntry {
-    auction_id: String,
-    world_id: String,
-    sequence: i64,
-    settled_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictSettlementCatalogPagination {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictSettlementCatalog {
-    auctions: Vec<StrictSettlementCatalogEntry>,
-    pagination: StrictSettlementCatalogPagination,
 }
 
 /// 读取已结算拍卖目录；`world_id = all` 只存在于页面状态，不进入服务端查询。
@@ -71,7 +51,7 @@ pub(crate) async fn fetch_admin_settlement_catalog(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: ApiResponse<StrictSettlementCatalog> =
+    let payload: ApiResponse<AdminSettlementCatalogResponse> =
         response.json().await.map_err(invalid_response_error)?;
     if payload.code != "ok" || payload.message.trim().is_empty() {
         return Err(invalid_response_error("settlement_catalog_envelope"));
@@ -80,7 +60,7 @@ pub(crate) async fn fetch_admin_settlement_catalog(
 }
 
 fn decode_catalog(
-    data: StrictSettlementCatalog,
+    data: AdminSettlementCatalogResponse,
     world_id: &str,
     sequence: Option<i64>,
     requested_page: i64,

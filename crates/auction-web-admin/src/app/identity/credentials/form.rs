@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_credential;
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, run_admin_feedback_action};
 
 #[component]
 pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
@@ -14,7 +14,7 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
     let mut label = use_signal(String::new);
     let mut secret = use_signal(String::new);
     let mut command_id_state = use_signal(|| None::<Uuid>);
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
 
     rsx! {
@@ -45,28 +45,23 @@ pub fn CredentialCreateForm(reload_generation: Signal<u64>) -> Element {
                             command_id
                         }
                     };
-                    busy.set(true);
-                    feedback.set(None);
-                    let mut busy = busy;
-                    let mut feedback = feedback;
-                    let mut reload_generation = reload_generation;
-                    spawn(async move {
-                        let result =
-                            create_admin_credential(command_id, kind, world, label, raw_secret).await;
-                        match result {
-                            Ok(_) => {
-                                kind_signal.set("mail_cookie".to_owned());
-                                world_signal.set("main".to_owned());
-                                label_signal.set(String::new());
-                                secret_signal.set(String::new());
-                                command_id_state.set(None);
-                                feedback.set(Some(AdminActionFeedback::Success));
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            }
-                            Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
-                        }
-                        busy.set(false);
-                    });
+                    run_admin_feedback_action(
+                        busy,
+                        feedback,
+                        async move {
+                            create_admin_credential(command_id, kind, world, label, raw_secret)
+                                .await
+                                .map(|_| ())
+                        },
+                        move |()| {
+                            kind_signal.set("mail_cookie".to_owned());
+                            world_signal.set("main".to_owned());
+                            label_signal.set(String::new());
+                            secret_signal.set(String::new());
+                            command_id_state.set(None);
+                            reload_generation.set(reload_generation().saturating_add(1));
+                        },
+                    );
                 },
             h2 { {t!("admin-credentials-create-title")} }
             label {

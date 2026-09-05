@@ -52,22 +52,19 @@ pub(crate) fn LiveLotDetailView(
     });
     let mut refresh_generation = use_context::<Signal<u64>>();
     let session = use_context::<PublicSessionResource>();
-    let session_snapshot = session.read().clone();
-    let viewer_player_id = match session_snapshot.as_ref() {
-        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
-        _ => None,
-    };
-    let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
-    let session_error = matches!(session_snapshot.as_ref(), Some(Err(_)));
-    let authenticated = matches!(
-        session_snapshot.as_ref(),
-        Some(Ok(Some(session))) if session.authenticated
-    );
+    let session_view = PublicSessionView::from_snapshot(session.read().as_ref());
+    let viewer_player_id = session_view.viewer_player_id.clone();
+    let session_ready = session_view.ready;
+    let session_error = session_view.error;
+    let authenticated = session_view.authenticated;
     let is_leading = viewer_player_id
         .as_deref()
         .zip(lot.leader_name.as_deref())
         .is_some_and(|(viewer, leader)| viewer == leader);
-    let mut bid_page = use_signal(|| 1_i64);
+    // 竞价历史页码入 URL（`page` 键）：刷新、分享与浏览器前进/后退都能恢复页码。
+    let query_state = use_public_query_state();
+    let query_state_signal = query_state.state;
+    let bid_page = use_memo(move || query_state_signal().page.max(1));
     let bid_log = use_resource({
         let auction_id = auction_id.clone();
         let lot_id = lot.id.clone();
@@ -187,7 +184,13 @@ pub(crate) fn LiveLotDetailView(
                             next_label: t!("catalog-next"),
                             jump_label: t!("catalog-page-input"),
                             jump_button_label: t!("catalog-page-go"),
-                            on_page_change: move |next_page| bid_page.set(next_page),
+                            on_page_change: move |next_page| {
+                                update_public_query_state(
+                                    query_state_signal,
+                                    |query| query.page = next_page,
+                                    QueryWriteMode::Push,
+                                );
+                            },
                         }
                     },
                 }

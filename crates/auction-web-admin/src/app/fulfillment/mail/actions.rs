@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{AdminMailPolling, set_mail_paused, trigger_mail_poll};
+use crate::app::surface::{run_admin_feedback_action, stable_command_id};
 
 use super::super::{AdminActionFeedback, format_admin_time};
 
@@ -13,7 +14,7 @@ pub(super) fn MailTriggerButton(
     mut notice: Signal<Option<AdminActionFeedback>>,
     mut refresh: Signal<u64>,
 ) -> Element {
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
     rsx! {
         button {
@@ -24,25 +25,16 @@ pub(super) fn MailTriggerButton(
                 if busy() {
                     return;
                 }
-                busy.set(true);
-                notice.set(None);
                 let command_id = stable_command_id(command_state, "trigger".to_owned());
-                let mut busy = busy;
-                let mut notice = notice;
-                let mut refresh = refresh;
-                spawn(async move {
-                    match trigger_mail_poll(command_id).await {
-                        Ok(_) => {
-                            notice.set(Some(AdminActionFeedback::Success));
-                            command_state.set(None);
-                            refresh.set(refresh().saturating_add(1));
-                        }
-                        Err(error) => {
-                            notice.set(Some(AdminActionFeedback::Error(error.code)))
-                        }
-                    }
-                    busy.set(false);
-                });
+                run_admin_feedback_action(
+                    busy,
+                    notice,
+                    async move { trigger_mail_poll(command_id).await.map_err(|error| error.code) },
+                    move |_| {
+                        command_state.set(None);
+                        refresh.set(refresh().saturating_add(1));
+                    },
+                );
             },
             if busy() { {t!("admin-action-working")} } else { {t!("admin-mail-trigger")} }
         }
@@ -59,11 +51,9 @@ pub(super) fn MailPollingCard(
     let label = if polling.paused { t!("admin-mail-resume") } else { t!("admin-mail-pause") };
     let state_label =
         if polling.paused { t!("admin-mail-paused") } else { t!("admin-mail-running") };
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
     let pause_polling = polling.clone();
-    let pause_notice = notice;
-    let pause_refresh = refresh;
     rsx! {
         article {
             class: "admin-mail-state",
@@ -94,42 +84,27 @@ pub(super) fn MailPollingCard(
                     if busy() {
                         return;
                     }
-                    busy.set(true);
                     let polling = pause_polling.clone();
                     let command_id = stable_command_id(
                         command_state,
                         format!("pause:{}:{}:{}", polling.mailbox_key, polling.state_version, desired_paused),
                     );
-                    let mut notice = pause_notice;
-                    let mut refresh = pause_refresh;
-                    let mut busy = busy;
-                    spawn(async move {
-                        match set_mail_paused(command_id, polling, desired_paused).await {
-                            Ok(_) => {
-                                notice.set(Some(AdminActionFeedback::Success));
-                                command_state.set(None);
-                                refresh.set(refresh().saturating_add(1));
-                            }
-                            Err(error) => {
-                                notice.set(Some(AdminActionFeedback::Error(error.code)))
-                            }
-                        }
-                        busy.set(false);
-                    });
+                    run_admin_feedback_action(
+                        busy,
+                        notice,
+                        async move {
+                            set_mail_paused(command_id, polling, desired_paused)
+                                .await
+                                .map_err(|error| error.code)
+                        },
+                        move |_| {
+                            command_state.set(None);
+                            refresh.set(refresh().saturating_add(1));
+                        },
+                    );
                 },
                 if busy() { {t!("admin-action-working")} } else { "{label}" }
             }
-        }
-    }
-}
-
-fn stable_command_id(mut command_state: Signal<Option<(String, Uuid)>>, signature: String) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
         }
     }
 }

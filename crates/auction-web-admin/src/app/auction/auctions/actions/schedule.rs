@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{normalize_datetime, update_admin_auction_schedule};
-use crate::app::surface::admin_api_error_message;
+use crate::app::surface::{admin_api_error_message, stable_command_id};
 
 use super::super::helpers::{datetime_local_value, valid_schedule_update};
 use super::model::AdminAuctionNotice;
@@ -288,14 +288,7 @@ fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
     let signature = format!(
         "{expected_state_version}:{preview_scheduled_at}:{scheduled_open_at}:{scheduled_end_at}"
     );
-    let command_id = match (signals.command_state)() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            signals.command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    };
+    let command_id = stable_command_id(signals.command_state, signature);
     signals.busy.set(true);
     spawn(async move {
         match update_admin_auction_schedule(

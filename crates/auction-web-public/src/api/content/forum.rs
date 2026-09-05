@@ -10,7 +10,7 @@ use super::{ApiResponse, send_get};
 
 pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread, String> {
     let url = format!("/api/v1/auctions/{auction_id}/forum");
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

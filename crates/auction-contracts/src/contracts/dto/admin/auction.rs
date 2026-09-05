@@ -3,7 +3,11 @@
 use super::*;
 
 /// Admin 拍卖生命周期命令的旧版兼容成功响应。
+///
+/// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧
+/// 反序列化，序列化输出不变。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminAuctionLifecycleResponse {
     pub auction: AdminAuctionCommandResponse,
 }
@@ -11,8 +15,10 @@ pub struct AdminAuctionLifecycleResponse {
 /// Admin 创建/生命周期命令提交时冻结的完整拍卖投影。
 ///
 /// 旧版生命周期响应不会附带列表专属的 `scheduled_ends_at` 或 `lot_count`，因此这里不复用
-/// `AdminAuctionResponse`，避免把列表扩展字段泄漏进同一 v1 命令 wire。
+/// `AdminAuctionResponse`，避免把列表扩展字段泄漏进同一 v1 命令 wire。nullable 生命周期字段
+/// 在旧 decoder 中必须显式出现（可为 `null`），未知字段一律拒绝。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminAuctionCommandResponse {
     pub id: String,
     pub world_id: String,
@@ -20,18 +26,34 @@ pub struct AdminAuctionCommandResponse {
     pub status: String,
     pub preview_scheduled_at: String,
     pub scheduled_open_at: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub preview_opened_at: Option<String>,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub opened_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub final_phase_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub settled_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub cancelled_at: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub cancelled_reason: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub cancelled_by: Option<String>,
     pub state_version: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// `Option` 默认会把缺失字段折叠成 `None`；旧 v1 decoder 要求 nullable 字段必须显式出现。
+fn deserialize_required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
 }
 
 /// Admin 创建 draft 拍卖请求。
@@ -207,8 +229,10 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-/// Admin 装备录入成功响应；字段与旧版 `addIntakeItem` 契约保持一致。
+/// Admin 装备录入成功响应；字段与旧版 `addIntakeItem` 契约保持一致。nullable 的
+/// `equipment_level` 在旧 decoder 中必须显式出现（可为 `null`），未知字段一律拒绝。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdminIntakeResponse {
     pub auction_id: Uuid,
     pub auction_sequence: i64,
@@ -222,6 +246,7 @@ pub struct AdminIntakeResponse {
     pub external_equipment_id: String,
     pub equipment_name: String,
     pub equipment_category: String,
+    #[serde(deserialize_with = "deserialize_required_option")]
     pub equipment_level: Option<i32>,
     pub start_price: i64,
     pub seller_player_id: String,

@@ -12,7 +12,7 @@ use super::{decoder, send_get};
 pub(crate) async fn fetch_compensation_pool(page: i64) -> Result<CompensationPoolPage, String> {
     let page = page.max(1);
     let url = format!("/api/v1/compensation-pool?page={page}&page_size=25");
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -25,7 +25,7 @@ pub(crate) async fn fetch_compensation_movements(
 ) -> Result<CompensationMovementPage, String> {
     let page = page.max(1);
     let url = format!("/api/v1/compensation-pool/{auction_id}/movements?page={page}&page_size=50");
-    let response = send_get(&url).await?;
+    let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

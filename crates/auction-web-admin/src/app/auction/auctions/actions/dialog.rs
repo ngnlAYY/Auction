@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::api::{
     AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
 };
-use crate::app::surface::admin_api_error_message;
+use crate::app::surface::{admin_api_error_message, stable_command_id};
 
 use super::model::{
     AdminAuctionNotice, lifecycle_action_button_class, lifecycle_action_confirm_note,
@@ -287,14 +287,7 @@ fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleA
     let LifecycleActionRequest { auction_id, expected_state_version, action, reason } = request;
     let signature =
         format!("{action:?}:{expected_state_version}:{}", reason.as_deref().unwrap_or_default());
-    let command_id = match (signals.command_state)() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            signals.command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    };
+    let command_id = stable_command_id(signals.command_state, signature);
     signals.busy.set(true);
     spawn(async move {
         match execute_admin_auction_lifecycle(

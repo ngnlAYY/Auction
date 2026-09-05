@@ -8,8 +8,10 @@ pub(crate) fn CatalogTable(
     now: DateTime<Utc>,
     projection_kind: String,
     category_counts: BTreeMap<String, i64>,
-    mut active_category: Signal<String>,
-    mut page_number: Signal<i64>,
+    active_category: String,
+    page_number: i64,
+    on_category_change: EventHandler<String>,
+    on_page_change: EventHandler<i64>,
     page_total: Option<i64>,
     page_size: i64,
     has_more: bool,
@@ -19,7 +21,7 @@ pub(crate) fn CatalogTable(
     authenticated: bool,
     viewer_player_id: Option<String>,
 ) -> Element {
-    let active = active_category();
+    let active = active_category.clone();
     let groups = grouped_catalog_rows(&rows, &active);
     let is_live = projection_kind == "live";
     let all_count = catalog_count(&category_counts, "all", &rows);
@@ -31,17 +33,7 @@ pub(crate) fn CatalogTable(
                 r#type: "button",
                 // 筛选 tab 表达的是“当前视图”而非开关态，语义上用 aria-current 而非 aria-pressed。
                 aria_current: if active == "all" { "true" } else { "false" },
-                onclick: move |_| {
-                    active_category.set("all".to_owned());
-                    page_number.set(1);
-                    update_public_query(
-                        |query| {
-                            query.category = None;
-                            query.page = 1;
-                        },
-                        false,
-                    );
-                },
+                onclick: move |_| on_category_change.call("all".to_owned()),
                 {t!("filter-all")}
                 span { class: "public-auction-filter__count", "{all_count}" }
             }
@@ -50,17 +42,7 @@ pub(crate) fn CatalogTable(
                     class: "public-auction-filter__tab",
                     r#type: "button",
                     aria_current: if active == category { "true" } else { "false" },
-                    onclick: move |_| {
-                        active_category.set(category.to_owned());
-                        page_number.set(1);
-                        update_public_query(
-                            |query| {
-                                query.category = Some(category.to_owned());
-                                query.page = 1;
-                            },
-                            false,
-                        );
-                    },
+                    onclick: move |_| on_category_change.call(category.to_owned()),
                     {catalog_category_label(category)}
                     span { class: "public-auction-filter__count", "{catalog_count(&category_counts, category, &rows)}" }
                 }
@@ -99,7 +81,7 @@ pub(crate) fn CatalogTable(
             }
         }
         Pager {
-            page: page_number(),
+            page: page_number,
             page_size,
             total: page_total,
             has_more,
@@ -109,10 +91,7 @@ pub(crate) fn CatalogTable(
             next_label: t!("catalog-next"),
             jump_label: t!("catalog-page-input"),
             jump_button_label: t!("catalog-page-go"),
-            on_page_change: move |page| {
-                page_number.set(page);
-                update_public_query(|query| query.page = page, false);
-            },
+            on_page_change,
         }
     }
 }

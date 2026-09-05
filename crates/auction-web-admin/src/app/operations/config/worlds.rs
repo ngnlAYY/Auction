@@ -13,6 +13,7 @@ use crate::api::{
 use auction_web_shared::{AsyncState, AsyncStateKind, Dialog};
 
 use super::super::admin_api_error_message;
+use crate::app::surface::stable_scoped_command_id;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BusinessWorldNotice {
@@ -198,12 +199,7 @@ fn BusinessWorldCard(
                                 return;
                             }
                             confirm_open.set(false);
-                            let existing_command_id = command_ids.read().get(&signature).copied();
-                            let command_id = existing_command_id.unwrap_or_else(|| {
-                                    let command_id = Uuid::new_v4();
-                                    command_ids.write().insert(signature.clone(), command_id);
-                                    command_id
-                                });
+                            let command_id = stable_scoped_command_id(command_ids, &signature);
                             busy_world.set(Some(world_id.clone()));
                             notice.set(None);
                             let world_id = world_id.clone();

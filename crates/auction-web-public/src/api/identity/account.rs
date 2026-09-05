@@ -9,7 +9,7 @@ pub(crate) use auction_contracts::{
 };
 use gloo_timers::future::TimeoutFuture;
 
-use super::{decoder, send_get, transport_error_code};
+use super::{decoder, send_get};
 
 const PUBLIC_QUERY_RETRY_DELAY_MILLIS: u32 = 1_000;
 
@@ -23,7 +23,7 @@ pub(crate) async fn fetch_my_bids(bid_page: i64, proxy_page: i64) -> Result<MyBi
 }
 
 async fn fetch_my_bids_once(url: &str) -> Result<MyBidsPage, String> {
-    let response = send_get(url).await.map_err(|error| transport_error_code(&error))?;
+    let response = send_get(url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }
@@ -40,7 +40,7 @@ pub(crate) async fn fetch_my_proxy(lot_id: String) -> Result<Option<OwnedProxy>,
 }
 
 async fn fetch_my_proxy_once(url: &str, lot_id: &str) -> Result<Option<OwnedProxy>, String> {
-    let response = send_get(url).await.map_err(|error| transport_error_code(&error))?;
+    let response = send_get(url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }

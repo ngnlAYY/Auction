@@ -8,7 +8,9 @@ use super::{decoder, send_get};
 
 pub(crate) async fn fetch_blacklist(page: i64) -> Result<BlacklistPage, String> {
     let page = page.max(1);
-    let response = send_get(&format!("/api/v1/blacklist?page={page}&page_size=10")).await?;
+    let response = send_get(&format!("/api/v1/blacklist?page={page}&page_size=10"))
+        .await
+        .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

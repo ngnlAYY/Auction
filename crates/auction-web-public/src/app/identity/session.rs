@@ -3,7 +3,7 @@
 //! 页面不保存或回显服务端 session token；登录成功后只展示安全身份投影，注销仍通过服务端
 //! 会话端口完成。
 
-use auction_web_shared::legacy_t as t;
+use auction_web_shared::{BaseErrorKind, base_api_error_message, legacy_t as t};
 use dioxus::prelude::*;
 use url::form_urlencoded;
 
@@ -248,17 +248,30 @@ pub(super) fn SessionMenu() -> Element {
     }
 }
 
+/// 登录失败的本地化文案：先匹配登录业务码，未命中走共享基础层（[`base_api_error_message`]
+/// 的传输/通用码），最后落到通用错误兜底。
 fn login_error_message(error: &PublicSessionApiError) -> String {
     match error.code.as_deref() {
-        Some("empty_key" | "invalid_key") => t!("common-error"),
-        Some("invalid_credentials") => t!("login-invalid-credentials"),
-        Some("account_blacklisted") if error.status == Some(403) => t!("login-blacklisted"),
-        Some("session_limit") => t!("login-session-limit"),
-        Some("invalid_response") => t!("login-invalid-response"),
-        Some("network_error") => t!("login-network-error"),
-        Some("request_timeout") => t!("login-request-timeout"),
-        _ => t!("common-error"),
+        Some("empty_key" | "invalid_key") => return t!("common-error"),
+        Some("invalid_credentials") => return t!("login-invalid-credentials"),
+        Some("account_blacklisted") if error.status == Some(403) => {
+            return t!("login-blacklisted");
+        }
+        Some("session_limit") => return t!("login-session-limit"),
+        _ => {}
     }
+    error
+        .code
+        .as_deref()
+        .and_then(|code| {
+            base_api_error_message(code, |kind| match kind {
+                BaseErrorKind::Network => t!("login-network-error"),
+                BaseErrorKind::Timeout => t!("login-request-timeout"),
+                BaseErrorKind::InvalidResponse => t!("login-invalid-response"),
+                _ => t!("common-error"),
+            })
+        })
+        .unwrap_or_else(|| t!("common-error"))
 }
 
 fn login_blacklisted_reason(error: &PublicSessionApiError) -> Option<&str> {

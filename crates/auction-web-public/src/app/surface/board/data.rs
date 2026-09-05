@@ -6,15 +6,18 @@ use super::*;
 pub(crate) fn AuctionData(
     auction: CurrentAuction,
     historical: bool,
-    initial_category: String,
-    initial_page: i64,
     boot_prerequisites_ready: bool,
 ) -> Element {
     // 倒计时与开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
     let mut clock = use_signal(estimated_now);
     let tick = use_second_tick();
-    let active_category = use_signal(|| initial_category.clone());
-    let page_number = use_signal(|| initial_page.max(1));
+    // 分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    let query_state = use_public_query_state();
+    // Signal 为 Copy，两个 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
+    let query_state_signal = query_state.state;
+    let active_category =
+        use_memo(move || query_state_signal().category.clone().unwrap_or_else(|| "all".to_owned()));
+    let page_number = use_memo(move || query_state_signal().page.max(1));
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";
@@ -43,17 +46,11 @@ pub(crate) fn AuctionData(
     });
     let auction_id = auction.id.clone();
     let mut session = use_context::<PublicSessionResource>();
-    let session_snapshot = session.read().clone();
-    let viewer_player_id = match session_snapshot.as_ref() {
-        Some(Ok(Some(session))) if session.authenticated => Some(session.username.clone()),
-        _ => None,
-    };
-    let session_ready = matches!(session_snapshot.as_ref(), Some(Ok(_)));
-    let session_error = matches!(session_snapshot.as_ref(), Some(Err(_)));
-    let authenticated = matches!(
-        session_snapshot.as_ref(),
-        Some(Ok(Some(session))) if session.authenticated
-    );
+    let session_view = PublicSessionView::from_snapshot(session.read().as_ref());
+    let viewer_player_id = session_view.viewer_player_id.clone();
+    let session_ready = session_view.ready;
+    let session_error = session_view.error;
+    let authenticated = session_view.authenticated;
     let history_switch = use_resource({
         let world = auction.world.clone();
         let should_load = historical || auction.presentation_mode != "live";
@@ -161,8 +158,25 @@ pub(crate) fn AuctionData(
                     now,
                     projection_kind: page.projection_kind.clone(),
                     category_counts: page.category_counts.clone().unwrap_or_default(),
-                    active_category,
-                    page_number,
+                    active_category: active_category(),
+                    page_number: page_number(),
+                    on_category_change: move |category: String| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.category = (category != "all").then_some(category.clone());
+                                query.page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
+                    },
+                    on_page_change: move |page| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.page = page,
+                            QueryWriteMode::Push,
+                        );
+                    },
                     page_total: page.total,
                     page_size,
                     has_more,
@@ -251,14 +265,21 @@ pub(crate) fn AuctionData(
     }
 }
 
+/// lot 目录读取失败的本地化文案：先处理本页特有的历史变体码，未命中走共享基础层
+/// （[`base_api_error_message`]），最后落到通用兜底。
 fn lot_list_error_message(error: &str) -> String {
     match error {
-        "invalid_response" => t!("error-invalid-response"),
-        "network_error" => t!("error-network"),
-        "request_timeout" => t!("error-request-timeout"),
-        "request_cancelled" => t!("error-request-cancelled"),
-        "not_found" | "NOT_FOUND" => t!("error-not-found"),
-        "internal" | "INTERNAL" => t!("error-internal"),
-        _ => t!("common-load-error"),
+        "request_cancelled" => return t!("error-request-cancelled"),
+        "NOT_FOUND" => return t!("error-not-found"),
+        "internal" | "INTERNAL" => return t!("error-internal"),
+        _ => {}
     }
+    base_api_error_message(error, |kind| match kind {
+        BaseErrorKind::Network => t!("error-network"),
+        BaseErrorKind::Timeout => t!("error-request-timeout"),
+        BaseErrorKind::InvalidResponse => t!("error-invalid-response"),
+        BaseErrorKind::NotFound => t!("error-not-found"),
+        _ => t!("common-load-error"),
+    })
+    .unwrap_or_else(|| t!("common-load-error"))
 }

@@ -339,7 +339,7 @@ async fn fetch_realtime_page(
     }
     query.append_pair("after", &after.to_string()).append_pair("page_size", "100");
     let url = format!("/api/v1/events?{}", query.finish());
-    let response = send_get(&url).await.map_err(RealtimeError::transient)?;
+    let response = send_get(&url).await.map_err(|error| RealtimeError::transient(error.code()))?;
     if !response.ok() {
         let status = response.status();
         // 401/403 认证或权限失败、404 目标拍卖不存在：重连不能自愈，按永久错误处理。

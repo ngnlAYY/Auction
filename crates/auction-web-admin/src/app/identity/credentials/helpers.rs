@@ -1,50 +1,9 @@
-//! 凭据页面的幂等命令和安全标签映射辅助。
+//! 凭据页面的安全标签映射辅助。
+//!
+//! 幂等 command_id 复用与动作执行骨架已收敛到 `app::surface`（`stable_command_id` /
+//! `run_admin_feedback_action`），本模块只保留凭据专属的展示映射。
 
 use auction_web_shared::legacy_t as t;
-use dioxus::prelude::*;
-use uuid::Uuid;
-
-use crate::app::surface::AdminActionFeedback;
-
-/// 执行一个管理动作并在成功后触发安全投影刷新。
-pub fn run_action<F>(
-    mut busy: Signal<bool>,
-    mut feedback: Signal<Option<AdminActionFeedback>>,
-    mut reload_generation: Signal<u64>,
-    mut command_state: Signal<Option<(String, Uuid)>>,
-    action: F,
-) where
-    F: std::future::Future<Output = Result<(), String>> + 'static,
-{
-    busy.set(true);
-    feedback.set(None);
-    spawn(async move {
-        match action.await {
-            Ok(()) => {
-                feedback.set(Some(AdminActionFeedback::Success));
-                command_state.set(None);
-                reload_generation.set(reload_generation().saturating_add(1));
-            }
-            Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
-        }
-        busy.set(false);
-    });
-}
-
-/// 为同一组表单字段复用 command_id，避免重复提交生成不同命令。
-pub fn stable_command_id(
-    mut command_state: Signal<Option<(String, Uuid)>>,
-    signature: String,
-) -> Uuid {
-    match command_state() {
-        Some((current, command_id)) if current == signature => command_id,
-        _ => {
-            let command_id = Uuid::new_v4();
-            command_state.set(Some((signature, command_id)));
-            command_id
-        }
-    }
-}
 
 pub fn credential_kind_label(kind: &str) -> String {
     match kind {

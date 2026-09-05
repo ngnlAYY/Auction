@@ -4,31 +4,31 @@ use super::super::*;
 
 #[component]
 pub(crate) fn AuctionList() -> Element {
-    let query = read_public_query();
-    let world_filter = use_signal(|| query.world.clone().unwrap_or_else(|| "all".to_owned()));
-    let status_filter = query
-        .status
-        .as_deref()
-        .filter(|status| matches!(*status, "live" | "final" | "settled"))
-        .unwrap_or("settled")
-        .to_owned();
-    let page_number = use_signal(|| query.page.max(1));
+    // 世界/状态/页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    let query_state = use_public_query_state();
+    let query_state_signal = query_state.state;
+    let world_filter =
+        use_memo(move || query_state_signal().world.clone().unwrap_or_else(|| "all".to_owned()));
+    let status_filter = use_memo(move || {
+        let status = query_state_signal().status.clone();
+        status
+            .filter(|status| matches!(status.as_str(), "live" | "final" | "settled"))
+            .unwrap_or_else(|| "settled".to_owned())
+    });
+    let page_number = use_memo(move || query_state_signal().page.max(1));
     let mut refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
         Some(Ok(worlds)) => supported_worlds(worlds),
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
-    let auctions = use_resource({
-        let status_filter = status_filter.clone();
-        move || {
-            let _ = refresh_generation();
-            let world = world_filter();
-            let status = status_filter.clone();
-            let page = page_number();
-            let world = (world != "all").then_some(world);
-            fetch_auction_page(world, status, page, 10)
-        }
+    let auctions = use_resource(move || {
+        let _ = refresh_generation();
+        let world = world_filter();
+        let status = status_filter();
+        let page = page_number();
+        let world = (world != "all").then_some(world);
+        fetch_auction_page(world, status, page, 10)
     });
     match &*auctions.read_unchecked() {
         None => rsx! {
@@ -52,9 +52,28 @@ pub(crate) fn AuctionList() -> Element {
         Some(Ok(page)) => rsx! {
             AuctionHistoryPage {
                 page: page.clone(),
-                world_filter,
-                page_number,
+                world_filter: world_filter(),
+                page_number: page_number(),
                 world_options,
+                on_world_change: move |world: String| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| {
+                            query.world = (world != "all").then_some(world.clone());
+                            query.auction_id = None;
+                            query.category = None;
+                            query.page = 1;
+                        },
+                        QueryWriteMode::Push,
+                    );
+                },
+                on_page_change: move |page| {
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.page = page,
+                        QueryWriteMode::Push,
+                    );
+                },
             }
         },
     }
@@ -63,9 +82,11 @@ pub(crate) fn AuctionList() -> Element {
 #[component]
 pub(crate) fn AuctionHistoryPage(
     page: AuctionListPage,
-    mut world_filter: Signal<String>,
-    mut page_number: Signal<i64>,
+    world_filter: String,
+    page_number: i64,
     world_options: Vec<String>,
+    on_world_change: EventHandler<String>,
+    on_page_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page.page_size.max(1);
     rsx! {
@@ -76,21 +97,8 @@ pub(crate) fn AuctionHistoryPage(
                 label {
                     {t!("auction-history-world")}
                     select {
-                        value: world_filter(),
-                        onchange: move |event| {
-                            let world = event.value();
-                            world_filter.set(world.clone());
-                            page_number.set(1);
-                            update_public_query(
-                                |query| {
-                                    query.world = (world != "all").then_some(world.clone());
-                                    query.auction_id = None;
-                                    query.category = None;
-                                    query.page = 1;
-                                },
-                                false,
-                            );
-                        },
+                        value: world_filter,
+                        onchange: move |event| on_world_change.call(event.value()),
                         option { value: "all", {t!("auction-history-world-all")} }
                         for world in world_options {
                             option { value: world.clone(), {world_label(&world)} }
@@ -107,7 +115,7 @@ pub(crate) fn AuctionHistoryPage(
                 AuctionHistoryTable { rows: page.auctions.clone() }
             }
             Pager {
-                page: page_number(),
+                page: page_number,
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
@@ -117,10 +125,7 @@ pub(crate) fn AuctionHistoryPage(
                 next_label: t!("catalog-next"),
                 jump_label: t!("catalog-page-input"),
                 jump_button_label: t!("catalog-page-go"),
-                on_page_change: move |page| {
-                    page_number.set(page);
-                    update_public_query(|query| query.page = page, false);
-                },
+                on_page_change,
             }
         }
     }

@@ -18,6 +18,12 @@ use super::{
     valid_admin_time, valid_safe_text, valid_uuid,
 };
 
+// 保留镜像的理由：contracts 的 `AdminUserResponse` 被 `AdminUserListItemResponse` 以
+// `#[serde(flatten)]` 内嵌，serde 不支持 flatten 与 `deny_unknown_fields` 组合，因此用户
+// 列表与写命令 wire 无法由 contracts DTO 承担闭集；下方 Strict 镜像继续保持 fail-closed。
+// 同步义务：`AdminUserResponse`/`AdminUserListItemResponse`/`AdminUserBlacklistHistoryResponse`/
+// `AdminUserPaginationResponse`/`AdminUserMutationResponse` 字段集变化时必须同步本文件；
+// decode 函数中构造 DTO 的穷举字段列表会在编译期捕捉漂移。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StrictUser {

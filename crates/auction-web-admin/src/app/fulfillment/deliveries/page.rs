@@ -7,8 +7,9 @@ use uuid::Uuid;
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminApiFailure, Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
-use crate::app::surface::{AdminActionFeedback, admin_api_error_message};
+use crate::app::surface::{AdminActionFeedback, admin_api_error_message, stable_command_id};
 
+use super::super::query::{DeliveriesQuery, use_deliveries_query_state};
 use super::dialog::DeliveryDialog;
 use super::filters::DeliveryFilters;
 use super::model::{
@@ -22,14 +23,16 @@ pub fn page() -> Element {
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
     let mut success_action = use_signal(|| None::<DeliveryAction>);
     let mut busy_delivery = use_signal(|| None::<String>);
-    let status_filter = use_signal(String::new);
-    let page_number = use_signal(|| 1_i64);
+    // 状态筛选与分页跟地址栏双向同步；对话框、对账草稿和命令上下文是瞬态，不入 URL。
+    let query = use_deliveries_query_state();
+    let query_state = query.state;
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
     let deliveries = use_resource(move || {
         let _ = refresh();
-        fetch_deliveries(status_filter(), page_number())
+        let current = query_state();
+        fetch_deliveries(current.status.clone(), current.page)
     });
 
     let open_dialog = move |(delivery, kind): (Delivery, DeliveryDialogKind)| {
@@ -81,14 +84,7 @@ pub fn page() -> Element {
         let signature = format!(
             "{delivery_id}:{action:?}:{expected_fencing_version}:{external_reference:?}:{failure_code:?}"
         );
-        let command_id = match command_state() {
-            Some((current, command_id)) if current == signature => command_id,
-            _ => {
-                let command_id = Uuid::new_v4();
-                command_state.set(Some((signature, command_id)));
-                command_id
-            }
-        };
+        let command_id = stable_command_id(command_state, signature);
         let mut busy_delivery = busy_delivery;
         let mut success_action = success_action;
         spawn(async move {
@@ -135,11 +131,19 @@ pub fn page() -> Element {
     let row_dialog = pending.clone().filter(|dialog| dialog.kind == DeliveryDialogKind::Reconcile);
     let page_dialog = pending.filter(|dialog| dialog.kind != DeliveryDialogKind::Reconcile);
     let success_message = delivery_success_message(success_action());
+    let mut on_status_change = query.clone();
+    let mut on_page_change = query.clone();
 
     rsx! {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
             h1 { id: "delivery-title", {t!("page-deliveries-title")} }
-            DeliveryFilters { status_filter, page_number }
+            DeliveryFilters {
+                status: query_state().status.clone(),
+                on_status_change: move |status| {
+                    // 选择状态后立即回到第一页，由页面 push 到地址栏。
+                    on_status_change.push(DeliveriesQuery { status, page: 1 });
+                },
+            }
             if let Some(page) = page.clone() {
                 DeliveryTable {
                     page,
@@ -183,7 +187,14 @@ pub fn page() -> Element {
                 }
             }
             if let Some(page) = page {
-                DeliveryPager { page, page_number }
+                DeliveryPager {
+                    page,
+                    on_page_change: move |next_page| {
+                        let mut next = query_state();
+                        next.page = next_page;
+                        on_page_change.push(next);
+                    },
+                }
             }
             if let Some(dialog) = page_dialog {
                 DeliveryDialog {

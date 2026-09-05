@@ -106,7 +106,17 @@ pub(crate) fn PublicShell() -> Element {
     let auction_page_owns_initial_boot =
         matches!(&current_route, Route::AuctionIndex {} | Route::AuctionPage {});
     use_route_focus(format!("{current_route:?}"), "public-content");
-    let selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
+    // world 键的浏览器前进/后退恢复由共享 query hook 承担；signal 仍是页头选择器与
+    // 外壳资源的写入点，hook 状态经下面的 effect 单向同步进来。
+    let world_query_state = use_public_query_state();
+    let world_query_signal = world_query_state.state;
+    let mut selected_world = use_signal(|| selected_world_from_query(read_public_query().world));
+    use_effect(move || {
+        let world = selected_world_from_query(world_query_signal().world.clone());
+        if *selected_world.peek() != world {
+            selected_world.set(world);
+        }
+    });
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
@@ -168,6 +178,8 @@ pub(crate) fn PublicShell() -> Element {
     // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
     use_app_boot_ready(boot_prerequisites_ready && !auction_page_owns_initial_boot);
     use_context_provider(|| selected_world);
+    // 页头 WorldPicker 的 URL 写回经外壳 hook 状态信号，保证 popstate 恢复的相等判断不失效。
+    use_context_provider(|| world_query_signal);
     use_context_provider(|| refresh_generation);
     use_context_provider(|| realtime_state);
     use_context_provider(|| PublicLocationRevision(location_generation));
@@ -187,9 +199,8 @@ pub(crate) fn PublicShell() -> Element {
                 return;
             };
             let callback = Closure::<dyn FnMut()>::new(move || {
-                let world = selected_world_from_query(read_browser_public_query().world);
-                let mut selected_world = selected_world;
-                selected_world.set(world);
+                // world 键的恢复已由 query hook 承担；这里只保留查询驱动页面（拍卖看板的
+                // 历史/首页切换）需要的位置版本递增。
                 location_generation.set(location_generation().saturating_add(1));
             });
             let _ = window
@@ -204,11 +215,9 @@ pub(crate) fn PublicShell() -> Element {
         Some(Ok(false) | Err(_)) => PublicReadinessState::Degraded,
     };
     let session_snapshot = session.read().clone();
-    let session_pending = session_snapshot.is_none();
-    let authenticated = matches!(
-        &session_snapshot,
-        Some(Ok(Some(identity))) if identity.authenticated
-    );
+    let session_view = PublicSessionView::from_snapshot(session_snapshot.as_ref());
+    let session_pending = session_view.pending;
+    let authenticated = session_view.authenticated;
     let selected_world_value = selected_world();
     let current_public_query = read_public_query();
     let auction_home_query = public_auction_home_query(&selected_world_value);

@@ -183,16 +183,6 @@ pub(crate) fn read_public_query() -> PublicBoardQuery {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn read_browser_public_query() -> PublicBoardQuery {
-    let Some(window) = web_sys::window() else {
-        return PublicBoardQuery::default();
-    };
-    let pathname = window.location().pathname().unwrap_or_default();
-    let search = window.location().search().unwrap_or_default();
-    parse_public_query(&pathname, &search)
-}
-
-#[cfg(target_arch = "wasm32")]
 fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
     let raw = search.strip_prefix('?').unwrap_or_default();
     let mut query = PublicBoardQuery::default();
@@ -279,18 +269,31 @@ pub(crate) fn is_history_status(value: &str) -> bool {
 }
 
 pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {
+    let pairs = public_query_pairs(query);
+    if pairs.is_empty() {
+        return String::new();
+    }
     let mut serializer = form_urlencoded::Serializer::new(String::new());
+    for (key, value) in &pairs {
+        serializer.append_pair(key, value);
+    }
+    format!("?{}", serializer.finish())
+}
+
+/// 把公开端查询状态序列化为地址栏键值对；等于默认值的键省略，保持地址栏干净。
+pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
     if let Some(world) = query.world.as_deref() {
-        serializer.append_pair("world", world);
+        pairs.push(("world".to_owned(), world.to_owned()));
     }
     if let Some(auction_id) = query.auction_id.as_deref() {
-        serializer.append_pair("auction", auction_id);
+        pairs.push(("auction".to_owned(), auction_id.to_owned()));
     }
     if let Some(category) = query.category.as_deref() {
-        serializer.append_pair("type", category);
+        pairs.push(("type".to_owned(), category.to_owned()));
     }
     if let Some(status) = query.status.as_deref() {
-        serializer.append_pair("status", status);
+        pairs.push(("status".to_owned(), status.to_owned()));
     }
     for (key, value) in [
         ("name", query.history_name.as_deref()),
@@ -303,23 +306,86 @@ pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {
         ("lot", query.bid_log_lot.as_deref()),
     ] {
         if let Some(value) = value {
-            serializer.append_pair(key, value);
+            pairs.push((key.to_owned(), value.to_owned()));
         }
     }
     if query.page > 1 {
-        serializer.append_pair("page", &query.page.to_string());
+        pairs.push(("page".to_owned(), query.page.to_string()));
     }
     if query.bid_page > 1 {
-        serializer.append_pair("bid_page", &query.bid_page.to_string());
+        pairs.push(("bid_page".to_owned(), query.bid_page.to_string()));
     }
     if query.proxy_page > 1 {
-        serializer.append_pair("proxy_page", &query.proxy_page.to_string());
+        pairs.push(("proxy_page".to_owned(), query.proxy_page.to_string()));
     }
     for (key, value) in &query.passthrough {
-        serializer.append_pair(key, value);
+        pairs.push((key.clone(), value.clone()));
     }
-    let encoded = serializer.finish();
-    if encoded.is_empty() { String::new() } else { format!("?{encoded}") }
+    pairs
+}
+
+/// 本 crate 在地址栏管理的全部公开 query 键；含迁移期间曾写出的 `bidlog_page` 别名，
+/// 写回时该别名被清除（序列化只产出 canonical `page`）。
+const PUBLIC_QUERY_KEYS: &[&str] = &[
+    "world",
+    "auction",
+    "type",
+    "status",
+    "name",
+    "from",
+    "to",
+    "min_price",
+    "max_price",
+    "buyer",
+    "seller",
+    "lot",
+    "page",
+    "bidlog_page",
+    "bid_page",
+    "proxy_page",
+];
+
+/// 挂载与地址栏双向同步的公开端查询状态。
+///
+/// 初值与浏览器前进/后退（popstate）恢复共用 `read_public_query` 的既有解析（含 Router
+/// 规范化前保存的首次 query 恢复）；写回只替换本 crate 管理的键，未声明的外部入口参数
+/// 原样保留。每个页面挂载自己的实例；外壳另有独立实例承担 world 键的 popstate 恢复。
+pub(crate) fn use_public_query_state() -> QueryState<PublicBoardQuery> {
+    use_query_state(PUBLIC_QUERY_KEYS, |_| read_public_query(), public_query_pairs)
+}
+
+/// 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键，其余键原样保留）。
+pub(crate) fn write_public_query(query: &PublicBoardQuery, mode: QueryWriteMode) {
+    write_query_pairs(PUBLIC_QUERY_KEYS, &public_query_pairs(query), mode);
+}
+
+/// 读取地址栏最新查询、应用变更并按模式写回（等价旧 `update_public_query` 的读-改-写），
+/// 同时把给定的 hook 状态信号同步到新值。接收 `Signal`（Copy）而非整个 hook 句柄，
+/// 页面内多个事件闭包可以直接共享。
+pub(crate) fn update_public_query_state(
+    mut state: Signal<PublicBoardQuery>,
+    update: impl FnOnce(&mut PublicBoardQuery),
+    mode: QueryWriteMode,
+) {
+    let mut query = read_public_query();
+    update(&mut query);
+    write_public_query(&query, mode);
+    state.set(query);
+}
+
+/// 当前地址栏 pathname；非 WASM 构建恒为 `/`（仅服务静态检查路径）。
+pub(crate) fn current_public_pathname() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .unwrap_or_else(|| "/".to_owned())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        "/".to_owned()
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -352,12 +418,6 @@ fn browser_scroll_state(window: &web_sys::Window) -> js_sys::Array {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn set_public_query(_query: &PublicBoardQuery, _replace: bool) {}
-
-pub(crate) fn update_public_query(update: impl FnOnce(&mut PublicBoardQuery), replace: bool) {
-    let mut query = read_public_query();
-    update(&mut query);
-    set_public_query(&query, replace);
-}
 
 pub(crate) fn public_href(path: &str, query: &PublicBoardQuery) -> String {
     format!("{path}{}", public_query_string(query))

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_user;
-use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct AdminUserGeneratedKey {
@@ -82,34 +82,32 @@ pub(super) fn AdminUserCreateForm(
                         if key_mode == "manual" {
                             manual_key.set(String::new());
                         }
-                        let mut busy = busy;
                         let mut feedback = feedback;
                         let mut reload_generation = reload_generation;
                         let on_created = on_created;
                         feedback.set(None);
-                        busy.set(true);
-                        spawn(async move {
-                            let result = create_admin_user(
-                                command_id,
-                                username,
-                                (!forum_account_id.is_empty()).then_some(forum_account_id),
-                                if key_mode == "manual" { "manual" } else { "generated" },
-                                (key_mode == "manual").then_some(submitted_manual_key),
-                            )
-                            .await;
-                            match result {
-                                Ok(result) => {
-                                    let username = result.user.username;
-                                    let generated_key =
-                                        result.generated_key.map(|key| AdminUserGeneratedKey { key });
-                                    on_created.call(AdminUserCreated { username, generated_key });
-                                    command_id_state.set(None);
-                                    reload_generation.set(reload_generation().saturating_add(1));
-                                }
-                                Err(code) => feedback.set(Some(AdminActionFeedback::Error(code))),
-                            }
-                            busy.set(false);
-                        });
+                        run_admin_action(
+                            busy,
+                            async move {
+                                create_admin_user(
+                                    command_id,
+                                    username,
+                                    (!forum_account_id.is_empty()).then_some(forum_account_id),
+                                    if key_mode == "manual" { "manual" } else { "generated" },
+                                    (key_mode == "manual").then_some(submitted_manual_key),
+                                )
+                                .await
+                            },
+                            move |result| {
+                                let username = result.user.username;
+                                let generated_key =
+                                    result.generated_key.map(|key| AdminUserGeneratedKey { key });
+                                on_created.call(AdminUserCreated { username, generated_key });
+                                command_id_state.set(None);
+                                reload_generation.set(reload_generation().saturating_add(1));
+                            },
+                            move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
+                        );
                     },
                     label { r#for: "create-username", {t!("admin-users-username")} }
                     input {

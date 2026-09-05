@@ -9,7 +9,7 @@ use gloo_net::http::{Request, Response};
 use serde_json::Value;
 use uuid::{Uuid, Variant};
 
-use super::{decoder, observe_response_date, send_get, send_request, transport_error_code};
+use super::{TransportError, decoder, observe_response_date, send_get, send_request};
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,8 +31,7 @@ pub(crate) async fn fetch_public_session() -> Result<Option<PublicSession>, Stri
 }
 
 async fn fetch_public_session_once() -> Result<Option<PublicSession>, String> {
-    let response =
-        send_get("/api/v1/session").await.map_err(|error| transport_error_code(&error))?;
+    let response = send_get("/api/v1/session").await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         let code = decoder::decode_error_code(response).await;
         return if code == "unauthenticated" { Ok(None) } else { Err(code) };
@@ -51,16 +50,12 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
         Request::post("/api/v1/session")
             .abort_signal(abort_signal)
             .json(&PublicLoginRequest { key })
-            .map_err(|error| error.to_string())
+            // 请求体建立失败不携带 HTTP 状态，按网络失败分类。
+            .map_err(|_| TransportError::Network(None))
     })
     .await
-    .map_err(|error| {
-        if error == "请求超时" {
-            PublicSessionApiError::local("request_timeout")
-        } else {
-            PublicSessionApiError::local("network_error")
-        }
-    })?;
+    // 结构化传输错误直接映射为稳定 transport code，不再比较中文字符串。
+    .map_err(|error| PublicSessionApiError::local(error.code()))?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(parse_api_error(response).await);
@@ -111,10 +106,10 @@ pub(crate) async fn logout_public() -> Result<(), String> {
         Request::delete("/api/v1/session")
             .abort_signal(abort_signal)
             .build()
-            .map_err(|error| error.to_string())
+            .map_err(|_| TransportError::Network(None))
     })
     .await
-    .map_err(|error| transport_error_code(&error))?;
+    .map_err(|error| error.code().to_owned())?;
     observe_response_date(&response);
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);

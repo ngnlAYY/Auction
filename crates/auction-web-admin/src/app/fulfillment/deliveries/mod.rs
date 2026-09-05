@@ -5,7 +5,7 @@
 
 mod dialog;
 mod filters;
-mod helpers;
+pub(crate) mod helpers;
 mod model;
 mod page;
 mod table;

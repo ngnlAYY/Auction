@@ -1,23 +1,33 @@
 use super::*;
+use gloo_timers::future::TimeoutFuture;
+
+/// lot 筛选写回地址栏的防抖窗口：输入立即刷新列表，历史条目在停顿后合并为一次 replace。
+const LOT_FILTER_WRITE_DEBOUNCE_MILLIS: u32 = 300;
 
 pub(crate) fn bid_log() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    let query = read_public_query();
-    let mut world_filter = use_signal(|| {
-        query
+    // 世界/拍卖/页码/lot 筛选与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    let query_state = use_public_query_state();
+    let mut query_state_signal = query_state.state;
+    let world_filter = use_memo(move || {
+        query_state_signal()
             .world
             .clone()
             .filter(|world| matches!(world.as_str(), "main" | "isekai"))
             .unwrap_or_else(|| "main".to_owned())
     });
-    let mut selected_auction_id = use_signal(|| query.auction_id.clone().unwrap_or_default());
-    let mut page_number = use_signal(|| query.page);
-    let mut lot_filter = use_signal(|| query.bid_log_lot.clone().unwrap_or_default());
-    let canonical_query = query.clone();
+    let selected_auction_id =
+        use_memo(move || query_state_signal().auction_id.clone().unwrap_or_default());
+    let page_number = use_memo(move || query_state_signal().page);
+    let lot_filter = use_memo(move || query_state_signal().bid_log_lot.clone().unwrap_or_default());
+    let mut lot_write_generation = use_signal(|| 0_u64);
+    // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
     use_effect(move || {
-        if canonical_query.bid_log_page_alias {
-            // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
-            set_public_query(&canonical_query, true);
+        if query_state_signal().bid_log_page_alias {
+            let mut next = query_state_signal.peek().clone();
+            next.bid_log_page_alias = false;
+            write_public_query(&next, QueryWriteMode::Replace);
+            query_state_signal.set(next);
         }
     });
     let worlds = use_resource(fetch_worlds);
@@ -34,31 +44,26 @@ pub(crate) fn bid_log() -> Element {
     });
 
     // 世界切换或分享链接指向另一世界时，自动落到该世界最新一场可公开读取的拍卖。
-    use_effect({
-        let mut selected_auction_id = selected_auction_id;
-        let mut page_number = page_number;
-        move || {
-            let Some(Ok(auction_list)) = &*auctions.read_unchecked() else {
-                return;
-            };
-            let next_auction_id = auction_list
-                .iter()
-                .find(|auction| auction.id == selected_auction_id())
-                .or_else(|| auction_list.first())
-                .map(|auction| auction.id.clone());
-            let next_auction_id = next_auction_id.unwrap_or_default();
-            if selected_auction_id() != next_auction_id {
-                selected_auction_id.set(next_auction_id.clone());
-                page_number.set(1);
-                update_public_query(
-                    |query| {
-                        query.auction_id =
-                            (!next_auction_id.is_empty()).then_some(next_auction_id.clone());
-                        query.page = 1;
-                    },
-                    true,
-                );
-            }
+    use_effect(move || {
+        let Some(Ok(auction_list)) = &*auctions.read_unchecked() else {
+            return;
+        };
+        let next_auction_id = auction_list
+            .iter()
+            .find(|auction| auction.id == selected_auction_id())
+            .or_else(|| auction_list.first())
+            .map(|auction| auction.id.clone());
+        let next_auction_id = next_auction_id.unwrap_or_default();
+        if selected_auction_id() != next_auction_id {
+            update_public_query_state(
+                query_state_signal,
+                |query| {
+                    query.auction_id =
+                        (!next_auction_id.is_empty()).then_some(next_auction_id.clone());
+                    query.page = 1;
+                },
+                QueryWriteMode::Replace,
+            );
         }
     });
 
@@ -118,19 +123,32 @@ pub(crate) fn bid_log() -> Element {
                 current_page,
                 lot_filter: current_lot_filter.clone(),
                 on_lot_filter_change: move |value: String| {
-                    lot_filter.set(value.clone());
-                    page_number.set(1);
-                    update_public_query(
-                        |query| {
-                            query.bid_log_lot = (!value.trim().is_empty()).then_some(value);
-                            query.page = 1;
-                        },
-                        false,
-                    );
+                    // 输入立即更新状态（沿用旧版每击键刷新列表），但地址栏写回合并为
+                    // replace + 防抖，不再每击键 push 一条历史。
+                    let mut next = query_state_signal.peek().clone();
+                    next.bid_log_lot = (!value.trim().is_empty()).then_some(value);
+                    next.page = 1;
+                    query_state_signal.set(next);
+                    let generation = lot_write_generation.peek().saturating_add(1);
+                    lot_write_generation.set(generation);
+                    spawn(async move {
+                        TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS).await;
+                        // 只在新一轮输入停顿后且仍停留在竞价日志页时写回，避免卸载后的
+                        // 迟到任务改写其他页面地址。
+                        if *lot_write_generation.peek() == generation
+                            && current_public_pathname() == "/bidlog"
+                        {
+                            let next = query_state_signal.peek().clone();
+                            write_public_query(&next, QueryWriteMode::Replace);
+                        }
+                    });
                 },
                 on_page_change: move |next_page: i64| {
-                    page_number.set(next_page);
-                    update_public_query(|query| query.page = next_page, false);
+                    update_public_query_state(
+                        query_state_signal,
+                        |query| query.page = next_page,
+                        QueryWriteMode::Push,
+                    );
                 },
             }
         },
@@ -148,11 +166,8 @@ pub(crate) fn bid_log() -> Element {
                         disabled: world_options.is_empty(),
                         onchange: move |event| {
                             let world = event.value();
-                            world_filter.set(world.clone());
-                            selected_auction_id.set(String::new());
-                            lot_filter.set(String::new());
-                            page_number.set(1);
-                            update_public_query(
+                            update_public_query_state(
+                                query_state_signal,
                                 |query| {
                                     // 旧版 Main 使用缺省 URL，非 Main 世界才写入 `world`。
                                     query.world = (world != "main").then_some(world.clone());
@@ -160,7 +175,7 @@ pub(crate) fn bid_log() -> Element {
                                     query.bid_log_lot = None;
                                     query.page = 1;
                                 },
-                                false,
+                                QueryWriteMode::Push,
                             );
                         },
                         for world in world_options.clone() {
@@ -176,16 +191,14 @@ pub(crate) fn bid_log() -> Element {
                         disabled: auction_options.is_empty(),
                         onchange: move |event| {
                             let auction_id = event.value();
-                            selected_auction_id.set(auction_id.clone());
-                            lot_filter.set(String::new());
-                            page_number.set(1);
-                            update_public_query(
+                            update_public_query_state(
+                                query_state_signal,
                                 |query| {
                                     query.auction_id = Some(auction_id.clone());
                                     query.bid_log_lot = None;
                                     query.page = 1;
                                 },
-                                false,
+                                QueryWriteMode::Push,
                             );
                         },
                         for auction in auction_options.clone() {

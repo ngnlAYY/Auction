@@ -8,7 +8,9 @@ use url::form_urlencoded;
 pub(crate) async fn fetch_rules(locale: &str) -> Result<RulesDocument, String> {
     let query =
         form_urlencoded::Serializer::new(String::new()).append_pair("lang", locale).finish();
-    let response = send_get(&format!("/api/v1/rules?{query}")).await?;
+    let response = send_get(&format!("/api/v1/rules?{query}"))
+        .await
+        .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(format!("HTTP {}", response.status()));
     }

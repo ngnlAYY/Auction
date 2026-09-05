@@ -98,19 +98,16 @@ pub(crate) use worlds::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
-use auction_contracts::{AdminDeliveryCommandRequest, AdminSessionResponse, ApiResponse};
+use auction_contracts::{
+    AdminDeliveryCommandRequest, AdminDeliveryCommandResponse, AdminDeliveryListResponse,
+    AdminDeliveryResponse, AdminSessionResponse, ApiResponse,
+};
 pub(crate) use auction_contracts::{
     AdminDeliveryListResponse as DeliveryPage, AdminDeliveryResponse as Delivery,
 };
+use auction_web_shared::TransportError;
 use chrono::{DateTime, Utc};
-#[cfg(target_arch = "wasm32")]
-use futures_util::{
-    future::{Either, select},
-    pin_mut,
-};
 use gloo_net::http::{Request, Response};
-#[cfg(target_arch = "wasm32")]
-use gloo_timers::future::TimeoutFuture;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -175,53 +172,39 @@ pub(crate) async fn response_error(response: Response) -> String {
     response_failure(response).await.code
 }
 
-pub(crate) fn network_error(_error: impl ToString) -> String {
-    "network_error".to_owned()
+fn transport_error_code(error: TransportError) -> String {
+    error.code().to_owned()
 }
 
 /// 发送不改写 URL 的 Admin GET 请求。
 ///
-/// gloo-net 0.6.0 会把自身的空 QueryParams 拼到已有 query 后，产生 `...?a=b&`。旧版直接使用
-/// 浏览器 fetch，因此在共用 GET owner 建立原生请求，再交回 gloo-net 读取响应。
+/// 传输边界复用 `auction-web-shared` 的唯一实现（10 秒取消上限、精确 URL、结构化
+/// [`TransportError`] 分类），本层只负责把结构化错误折回页面消费的稳定 code 字符串。
 pub(crate) async fn send_get(url: &str) -> Result<Response, String> {
-    send_request(|abort_signal| {
-        let options = web_sys::RequestInit::new();
-        options.set_method("GET");
-        options.set_signal(abort_signal);
-        web_sys::Request::new_with_str_and_init(url, &options)
-            .map(Request::from)
-            .map_err(|_| "network_error".to_owned())
-    })
-    .await
+    auction_web_shared::send_get(url).await.map_err(transport_error_code)
 }
 
-const ADMIN_REQUEST_TIMEOUT_MILLIS: u32 = 10_000;
-
-/// 在旧版默认的 10 秒上限内发送一次 Admin 请求；超时后取消浏览器 fetch，避免迟到响应改写页面。
+/// 在共享传输层的统一超时上限内发送一次 Admin 请求。
+///
+/// Admin 特有的 `x-csrf-token` 与 Basic Auth header 仍由调用方在 `build` 闭包中叠加
+/// （surface 职责，共享层不感知凭据）。`build` 失败携带的是稳定业务 code（如请求体
+/// 序列化失败的 `invalid_request`），[`TransportError`] 无法承载，先暂存再原样返回；
+/// 传输层自身的超时/网络失败则按 [`TransportError::code`] 折回稳定字符串。
 pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, String>,
 ) -> Result<Response, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let controller = web_sys::AbortController::new().map_err(|_| "network_error".to_owned())?;
-        let signal = controller.signal();
-        let request = build(Some(&signal))?;
-        let send = request.send();
-        let timeout = TimeoutFuture::new(ADMIN_REQUEST_TIMEOUT_MILLIS);
-        pin_mut!(send, timeout);
-        return match select(send, timeout).await {
-            Either::Left((response, _)) => response.map_err(network_error),
-            Either::Right((_, _)) => {
-                controller.abort();
-                Err("request_timeout".to_owned())
-            }
-        };
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = ADMIN_REQUEST_TIMEOUT_MILLIS;
-        build(None)?.send().await.map_err(network_error)
+    let build_failure = std::cell::RefCell::new(None::<String>);
+    let result = auction_web_shared::send_request(|abort_signal| {
+        build(abort_signal).map_err(|code| {
+            // 占位错误不会被外层使用：build 失败时以暂存的业务 code 为准。
+            *build_failure.borrow_mut() = Some(code);
+            TransportError::Network(None)
+        })
+    })
+    .await;
+    match result {
+        Ok(response) => Ok(response),
+        Err(error) => Err(build_failure.into_inner().unwrap_or_else(|| error.code().to_owned())),
     }
 }
 
@@ -280,7 +263,7 @@ pub(crate) fn parse_admin_time(value: &str) -> Option<f64> {
     #[cfg(target_arch = "wasm32")]
     {
         let timestamp = js_sys::Date::parse(value);
-        return timestamp.is_finite().then_some(timestamp);
+        timestamp.is_finite().then_some(timestamp)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -304,61 +287,17 @@ pub(crate) fn valid_safe_text(value: &str, maximum_bytes: usize) -> bool {
 }
 
 /// Delivery 路由专用的成功响应外壳；不能用宽松的共享 DTO 接受未知字段。
+///
+/// 保留理由：共享的 `auction_contracts::ApiResponse` 同时服务 Public surface，刻意保持开放；
+/// delivery 路由要求信封闭集，因此本地保留该泛型外壳。同步义务：`ApiResponse` 的
+/// code/message/data 形状变化时必须同步此处。data 内部的 DTO 已由 contracts 侧
+/// `deny_unknown_fields` 承担闭集，不再保留本地镜像。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StrictDeliveryEnvelope<T> {
     code: String,
     message: String,
     data: T,
-}
-
-/// Delivery 路由专用的安全投影；可选元数据字段允许服务端按旧契约省略。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictDeliveryResponse {
-    id: String,
-    origin_kind: String,
-    origin_id: String,
-    recipient: String,
-    cod: Option<i64>,
-    status: String,
-    lease_expires_at: Option<String>,
-    fencing_version: i64,
-    attempt_count: u32,
-    claimed_at: Option<String>,
-    sending_at: Option<String>,
-    completed_at: Option<String>,
-    external_reference: Option<String>,
-    failure_code: Option<String>,
-    #[serde(default)]
-    reason_code: Option<String>,
-    #[serde(default)]
-    take_required: bool,
-    #[serde(default)]
-    returned_mail_id: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictDeliveryListResponse {
-    deliveries: Vec<StrictDeliveryResponse>,
-    pagination: StrictDeliveryPaginationResponse,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictDeliveryPaginationResponse {
-    page: i64,
-    page_size: i64,
-    total: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StrictDeliveryCommandResponse {
-    delivery: StrictDeliveryResponse,
 }
 
 pub(crate) const MAX_JSON_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
@@ -369,7 +308,7 @@ fn valid_success_code(code: &str) -> bool {
 }
 
 fn decode_delivery_list(
-    payload: StrictDeliveryEnvelope<StrictDeliveryListResponse>,
+    payload: StrictDeliveryEnvelope<AdminDeliveryListResponse>,
 ) -> Result<DeliveryPage, ()> {
     if !valid_success_code(&payload.code) || payload.message.is_empty() {
         return Err(());
@@ -392,18 +331,11 @@ fn decode_delivery_list(
         return Err(());
     }
 
-    Ok(DeliveryPage {
-        deliveries,
-        pagination: auction_contracts::AdminDeliveryPaginationResponse {
-            page: pagination.page,
-            page_size: pagination.page_size,
-            total: pagination.total,
-        },
-    })
+    Ok(DeliveryPage { deliveries, pagination })
 }
 
 fn decode_delivery_command(
-    payload: StrictDeliveryEnvelope<StrictDeliveryCommandResponse>,
+    payload: StrictDeliveryEnvelope<AdminDeliveryCommandResponse>,
     requested_delivery_id: &str,
     action: DeliveryAction,
     expected_fencing_version: i64,
@@ -429,7 +361,7 @@ fn decode_delivery_command(
     Ok(delivery)
 }
 
-fn decode_delivery(value: StrictDeliveryResponse) -> Result<Delivery, ()> {
+fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     let id = valid_uuid(&value.id).then_some(value.id.clone()).ok_or(())?;
     let created_at = parse_delivery_time(&value.created_at).ok_or(())?;
     let updated_at = parse_delivery_time(&value.updated_at).ok_or(())?;
@@ -563,7 +495,7 @@ fn valid_timeline(
 }
 
 fn valid_state_fields(
-    value: &StrictDeliveryResponse,
+    value: &AdminDeliveryResponse,
     lease_expires_at: Option<DateTime<Utc>>,
     claimed_at: Option<DateTime<Utc>>,
     sending_at: Option<DateTime<Utc>>,
@@ -696,7 +628,7 @@ async fn fetch_deliveries_with_size(
     if !response.ok() {
         return Err(response_error(response).await);
     }
-    let payload: StrictDeliveryEnvelope<StrictDeliveryListResponse> =
+    let payload: StrictDeliveryEnvelope<AdminDeliveryListResponse> =
         response.json().await.map_err(invalid_response_error)?;
     decode_delivery_list(payload).map_err(|_| invalid_response_error("delivery_list"))
 }
@@ -730,7 +662,7 @@ pub(crate) async fn execute_delivery(
     if !response.ok() {
         return Err(response_failure(response).await);
     }
-    let payload: StrictDeliveryEnvelope<StrictDeliveryCommandResponse> = response
+    let payload: StrictDeliveryEnvelope<AdminDeliveryCommandResponse> = response
         .json()
         .await
         .map_err(|error| AdminApiFailure::client(invalid_response_error(error)))?;
