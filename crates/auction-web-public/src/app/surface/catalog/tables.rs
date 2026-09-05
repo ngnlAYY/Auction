@@ -29,7 +29,8 @@ pub(crate) fn CatalogTable(
             button {
                 class: "public-auction-filter__tab",
                 r#type: "button",
-                aria_pressed: active == "all",
+                // 筛选 tab 表达的是“当前视图”而非开关态，语义上用 aria-current 而非 aria-pressed。
+                aria_current: if active == "all" { "true" } else { "false" },
                 onclick: move |_| {
                     active_category.set("all".to_owned());
                     page_number.set(1);
@@ -48,7 +49,7 @@ pub(crate) fn CatalogTable(
                 button {
                     class: "public-auction-filter__tab",
                     r#type: "button",
-                    aria_pressed: active == category,
+                    aria_current: if active == category { "true" } else { "false" },
                     onclick: move |_| {
                         active_category.set(category.to_owned());
                         page_number.set(1);

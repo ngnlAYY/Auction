@@ -440,6 +440,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
+ "tracing",
  "unic-langid",
  "url",
  "uuid",

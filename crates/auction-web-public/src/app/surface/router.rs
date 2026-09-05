@@ -129,16 +129,38 @@ pub(crate) fn PublicShell() -> Element {
             (world, result)
         }
     });
-    let _readiness_poll = use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(10_000).await;
-            readiness_generation.set(readiness_generation().saturating_add(1));
+    // 页面可见性在轮询与实时重连退避之间共享；隐藏时全部挂起（不重置周期），
+    // 恢复可见时立即补偿一次刷新并恢复各自节奏。
+    let page_visibility = use_hook(PageVisibility::new);
+    let readiness_poll_visibility = page_visibility.clone();
+    let _readiness_poll = use_future(move || {
+        let page_visibility = readiness_poll_visibility.clone();
+        async move {
+            loop {
+                sleep_while_visible(&page_visibility, 10_000).await;
+                readiness_generation.set(readiness_generation().saturating_add(1));
+            }
         }
     });
-    let _authoritative_current_poll = use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(60_000).await;
-            refresh_generation.set(refresh_generation().saturating_add(1));
+    let current_poll_visibility = page_visibility.clone();
+    let _authoritative_current_poll = use_future(move || {
+        let page_visibility = current_poll_visibility.clone();
+        async move {
+            loop {
+                sleep_while_visible(&page_visibility, 60_000).await;
+                refresh_generation.set(refresh_generation().saturating_add(1));
+            }
+        }
+    });
+    #[cfg(target_arch = "wasm32")]
+    use_effect({
+        let page_visibility = page_visibility.clone();
+        move || {
+            // 恢复可见时立即补偿一次 readiness 与权威 current 重读，快速回到同步。
+            page_visibility.install(move || {
+                readiness_generation.set(readiness_generation().saturating_add(1));
+                refresh_generation.set(refresh_generation().saturating_add(1));
+            });
         }
     });
     let boot_prerequisites_ready =
@@ -155,6 +177,7 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(move || readiness_context);
     let current_auction_context = current_auction;
     use_context_provider(move || current_auction_context);
+    use_context_provider(move || page_visibility);
 
     #[cfg(target_arch = "wasm32")]
     use_effect({

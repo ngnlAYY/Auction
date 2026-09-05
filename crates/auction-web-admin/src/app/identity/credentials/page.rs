@@ -16,7 +16,7 @@ use super::{
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
-    let reload_generation = use_signal(|| 0_u64);
+    let mut reload_generation = use_signal(|| 0_u64);
     let page_number = use_signal(|| 1_i64);
     let mut pending_delete = use_signal(|| None::<AdminCredential>);
     let mut delete_busy = use_signal(|| false);
@@ -76,6 +76,9 @@ pub fn page() -> Element {
                 kind: AsyncStateKind::Error,
                 title: admin_api_error_message(error),
                 detail: "",
+                // 错误态提供页内重试入口，不必刷新浏览器。
+                retry_label: t!("admin-retry"),
+                on_retry: move |_| reload_generation.set(reload_generation().saturating_add(1)),
             }
         },
         Some(Ok(page)) => rsx! {

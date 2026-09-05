@@ -11,7 +11,7 @@ mod model;
 #[path = "config/worlds.rs"]
 mod worlds;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, legacy_t as t};
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, legacy_t as t};
 use dioxus::prelude::*;
 use serde_json::Value;
 use uuid::Uuid;
@@ -51,6 +51,8 @@ pub(super) fn page() -> Element {
     let mut restart_required = use_signal(|| false);
     let mut refresh = use_signal(|| 0_u64);
     let busy = use_signal(|| false);
+    // 写入是危险操作：点击「写入配置」只准备命令并打开确认对话框。
+    let mut update_confirm_open = use_signal(|| false);
     let config = use_resource(move || {
         let _ = refresh();
         fetch_admin_runtime_config()
@@ -293,54 +295,14 @@ pub(super) fn page() -> Element {
                                             _ => ConfigCommand {
                                                 command_id: Uuid::new_v4(),
                                                 fingerprint: update_fingerprint.clone(),
-                                                document: document.clone(),
+                                                document,
                                                 signature: command_key,
                                             },
                                         };
-                                        command.set(Some(current_command.clone()));
-                                        let mut busy = busy;
-                                        let mut notice = notice;
-                                        let mut form = form;
-                                        let mut checked_signature = checked_signature;
-                                        let mut fingerprint = fingerprint;
-                                        let mut restart_required = restart_required;
-                                        let mut command = command;
-                                        busy.set(true);
+                                        command.set(Some(current_command));
+                                        // 危险写入不直接提交：先打开确认对话框展示变更摘要。
                                         notice.set(None);
-                                        spawn(async move {
-                                            match update_admin_runtime_config(
-                                                current_command.command_id,
-                                                current_command.fingerprint,
-                                                current_command.document,
-                                            )
-                                            .await
-                                            {
-                                                Ok(result) => match RuntimeConfigForm::from_document(
-                                                    &result.document,
-                                                ) {
-                                                    Ok(next_form) => {
-                                                        form.set(next_form);
-                                                        checked_signature.set(String::new());
-                                                        fingerprint
-                                                            .set(Some(result.fingerprint));
-                                                        restart_required
-                                                            .set(result.restart_required);
-                                                        command.set(None);
-                                                        notice.set(Some(ConfigNotice::Saved));
-                                                    }
-                                                    Err(()) => notice
-                                                        .set(Some(ConfigNotice::InvalidForm)),
-                                                },
-                                                Err(error) => {
-                                                    notice.set(Some(if error.is_conflict() {
-                                                        ConfigNotice::Conflict
-                                                    } else {
-                                                        ConfigNotice::ActionError(error.code)
-                                                    }));
-                                                }
-                                            }
-                                            busy.set(false);
-                                        });
+                                        update_confirm_open.set(true);
                                     }
                                 },
                                 if busy() {
@@ -351,6 +313,97 @@ pub(super) fn page() -> Element {
                             }
                         }
                     }
+                    // 写入确认对话框放在表单外，避免 dialog 语义嵌进 <form>。
+                    if update_confirm_open() {
+                            if let Some(pending_command) = command() {
+                                // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+                                Dialog {
+                                    title: t!("admin-runtime-update-confirm-title"),
+                                    close_label: t!("admin-users-action-cancel"),
+                                    busy: busy(),
+                                    on_close: move |_| update_confirm_open.set(false),
+                                    p { class: "admin-panel__note",
+                                        {t!(
+                                            "admin-runtime-update-confirm-summary",
+                                            fingerprint: pending_command.fingerprint.clone(),
+                                            fields: count_leaf_fields(&pending_command.document) as i64
+                                        )}
+                                    }
+                                    div { class: "admin-shell__dialog-actions",
+                                        button {
+                                            class: "admin-btn-danger",
+                                            r#type: "button",
+                                            disabled: busy(),
+                                            onclick: move |_| {
+                                                if busy() {
+                                                    return;
+                                                }
+                                                let Some(current_command) = command() else {
+                                                    update_confirm_open.set(false);
+                                                    return;
+                                                };
+                                                update_confirm_open.set(false);
+                                                let mut busy = busy;
+                                                let mut notice = notice;
+                                                let mut form = form;
+                                                let mut checked_signature = checked_signature;
+                                                let mut fingerprint = fingerprint;
+                                                let mut restart_required = restart_required;
+                                                let mut command = command;
+                                                busy.set(true);
+                                                notice.set(None);
+                                                spawn(async move {
+                                                    match update_admin_runtime_config(
+                                                        current_command.command_id,
+                                                        current_command.fingerprint,
+                                                        current_command.document,
+                                                    )
+                                                    .await
+                                                    {
+                                                        Ok(result) => match RuntimeConfigForm::from_document(
+                                                            &result.document,
+                                                        ) {
+                                                            Ok(next_form) => {
+                                                                form.set(next_form);
+                                                                checked_signature.set(String::new());
+                                                                fingerprint
+                                                                    .set(Some(result.fingerprint));
+                                                                restart_required
+                                                                    .set(result.restart_required);
+                                                                command.set(None);
+                                                                notice.set(Some(ConfigNotice::Saved));
+                                                            }
+                                                            Err(()) => notice
+                                                                .set(Some(ConfigNotice::InvalidForm)),
+                                                        },
+                                                        Err(error) => {
+                                                            notice.set(Some(if error.is_conflict() {
+                                                                ConfigNotice::Conflict
+                                                            } else {
+                                                                ConfigNotice::ActionError(error.code)
+                                                            }));
+                                                        }
+                                                    }
+                                                    busy.set(false);
+                                                });
+                                            },
+                                            if busy() {
+                                                {t!("admin-action-working")}
+                                            } else {
+                                                {t!("admin-users-action-confirm")}
+                                            }
+                                        }
+                                        button {
+                                            class: "admin-btn-secondary",
+                                            r#type: "button",
+                                            disabled: busy(),
+                                            onclick: move |_| update_confirm_open.set(false),
+                                            {t!("admin-users-action-cancel")}
+                                        }
+                                    }
+                                }
+                            }
+                        }
                 }
             }
         }
@@ -392,6 +445,15 @@ fn AdminRuntimeConfigFact(detail: String, state: Option<bool>, label: String) ->
             }
             p { title: detail.clone(), "{detail}" }
         }
+    }
+}
+
+/// 统计候选文档的叶子字段数，用于写入确认对话框的变更摘要。
+fn count_leaf_fields(value: &Value) -> usize {
+    match value {
+        Value::Object(map) => map.values().map(count_leaf_fields).sum(),
+        Value::Array(items) => items.iter().map(count_leaf_fields).sum(),
+        _ => 1,
     }
 }
 

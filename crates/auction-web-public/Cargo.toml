@@ -17,6 +17,7 @@ gloo-timers.workspace = true
 js-sys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 unic-langid.workspace = true
 url.workspace = true
 wasm-bindgen.workspace = true

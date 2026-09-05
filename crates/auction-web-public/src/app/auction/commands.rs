@@ -10,6 +10,6 @@ mod common;
 #[path = "commands/proxy/mod.rs"]
 mod proxy;
 
-pub(super) use bid::{BidFormInput, bid_form};
+pub(super) use bid::{BidFormInput, BidSuccess, bid_form};
 pub(super) use common::{BidConfirmCommand, ProxyConfirmCommand};
 pub(super) use proxy::{ProxyFormInput, proxy_form};

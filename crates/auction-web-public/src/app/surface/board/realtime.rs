@@ -45,6 +45,25 @@ impl PublicRealtimeTarget {
     }
 }
 
+/// 重连退避起点：1 秒起步，避免旧版固定 3 秒在故障初期空等。
+const RECONNECT_BASE_MILLIS: u32 = 1_000;
+/// 重连退避上限：指数翻倍到 30 秒封顶，限制服务端故障期间的重试压力。
+const RECONNECT_MAX_MILLIS: u32 = 30_000;
+/// 连续快速失败达到该次数后认定实时通道不可用：转 Manual 态，页头降级为手动刷新。
+const RECONNECT_MAX_FAILURES: u32 = 8;
+/// 单次连接存活超过该时长视为健康会话，断开后重置退避计数。
+const RECONNECT_HEALTHY_MILLIS: i64 = 30_000;
+
+/// 指数退避 + 随机抖动：1s 起步 ×2 至 30s 上限，实际等待取 [base/2, base] 区间，
+/// 打散多客户端在服务端恢复后的重连同步。
+fn reconnect_delay_millis(failures: u32) -> u32 {
+    // 1 << 5 = 32 已覆盖 30s 上限，更大的失败计数不会再抬升底数。
+    let shift = failures.saturating_sub(1).min(5);
+    let base = RECONNECT_BASE_MILLIS.saturating_mul(1_u32 << shift).min(RECONNECT_MAX_MILLIS);
+    let half = base / 2;
+    half + (js_sys::Math::random() * f64::from(base - half)) as u32
+}
+
 /// 根据共享 session/current 快照建立唯一实时连接；目标变化时取消旧任务并按新目标重建。
 #[component]
 pub(crate) fn PublicRealtimeOwner(
@@ -54,105 +73,143 @@ pub(crate) fn PublicRealtimeOwner(
     mut auction_after: Signal<Option<(String, i64)>>,
     mut realtime_state: Signal<LiveConnectionState>,
 ) -> Element {
-    let _stream = use_resource(use_reactive((&target,), move |(target,)| async move {
-        let (auction_target, cache) = match target {
-            PublicRealtimeTarget::Checking => {
-                realtime_state.set(LiveConnectionState::Connecting);
-                return;
-            }
-            PublicRealtimeTarget::Anonymous => {
-                realtime_state.set(LiveConnectionState::Manual);
-                return;
-            }
-            PublicRealtimeTarget::SessionError => {
-                // 旧版无法确认认证身份时不会建立实时房间，外层按匿名手动刷新模式显示。
-                realtime_state.set(LiveConnectionState::Manual);
-                return;
-            }
-            PublicRealtimeTarget::Discovery => (None, None),
-            PublicRealtimeTarget::Auction { auction_id, world, preview_revision } => {
-                let initial_after = auction_after
-                    .peek()
-                    .as_ref()
-                    .filter(|(known_auction_id, _)| known_auction_id == &auction_id)
-                    .map(|(_, after)| *after)
-                    .unwrap_or(0);
-                let cache = Rc::new(RefCell::new(RealtimeCache::new_after(
-                    auction_id.clone(),
-                    preview_revision,
-                    initial_after,
-                )));
-                (Some((auction_id, world)), Some(cache))
-            }
-        };
+    let page_visibility = use_context::<PageVisibility>();
+    let _stream = use_resource(use_reactive((&target,), move |(target,)| {
+        let page_visibility = page_visibility.clone();
+        async move {
+            let (auction_target, cache) = match target {
+                PublicRealtimeTarget::Checking => {
+                    realtime_state.set(LiveConnectionState::Connecting);
+                    return;
+                }
+                PublicRealtimeTarget::Anonymous => {
+                    realtime_state.set(LiveConnectionState::Manual);
+                    return;
+                }
+                PublicRealtimeTarget::SessionError => {
+                    // 旧版无法确认认证身份时不会建立实时房间，外层按匿名手动刷新模式显示。
+                    realtime_state.set(LiveConnectionState::Manual);
+                    return;
+                }
+                PublicRealtimeTarget::Discovery => (None, None),
+                PublicRealtimeTarget::Auction { auction_id, world, preview_revision } => {
+                    let initial_after = auction_after
+                        .peek()
+                        .as_ref()
+                        .filter(|(known_auction_id, _)| known_auction_id == &auction_id)
+                        .map(|(_, after)| *after)
+                        .unwrap_or(0);
+                    let cache = Rc::new(RefCell::new(RealtimeCache::new_after(
+                        auction_id.clone(),
+                        preview_revision,
+                        initial_after,
+                    )));
+                    (Some((auction_id, world)), Some(cache))
+                }
+            };
 
-        loop {
-            realtime_state.set(LiveConnectionState::Connecting);
-            let after = if let Some(cache) = cache.as_ref() {
-                cache.borrow().after()
-            } else {
-                // 游标只用于建立本轮 catch-up 起点，不是资源依赖；普通读取会让本任务在
-                // 回写游标时取消并重建，重新形成毫秒级连接循环。
-                *discovery_after.peek()
-            };
-            let cursor = Rc::new(Cell::new(after));
-            let callback_cursor = Rc::clone(&cursor);
-            let callback_cache = cache.clone();
-            let callback_auction_id =
-                auction_target.as_ref().map(|(auction_id, _)| auction_id.clone());
-            let mut callback_discovery_after = discovery_after;
-            let mut callback_auction_after = auction_after;
-            let mut callback_state = realtime_state;
-            let mut callback_refresh = refresh_generation;
-            let on_page = move |page: crate::api::RealtimePage| {
-                let (refresh_required, continue_catch_up, degraded, next_after) =
-                    if let Some(cache) = callback_cache.as_ref() {
-                        let merge = cache.borrow_mut().merge_page(&page);
-                        let next_after = cache.borrow().after();
-                        (
-                            merge.refresh_required,
-                            merge.continue_catch_up,
-                            merge.degraded,
-                            next_after,
-                        )
-                    } else {
-                        (
-                            page.refetch_required
-                                || page.events.iter().any(should_refresh_auction_board),
-                            !page.refetch_required,
-                            page.refetch_required,
-                            callback_cursor.get().max(page.next_after),
-                        )
-                    };
-                callback_cursor.set(next_after);
-                if callback_cache.is_none() {
-                    // current-auction 刷新会让目标短暂切到 Checking，并按 key 重建 owner；先把
-                    // discovery 游标写回外壳，避免重建后从 0 重放同一事件并形成请求风暴。
-                    callback_discovery_after.set(next_after);
-                } else if let Some(auction_id) = callback_auction_id.as_ref() {
-                    callback_auction_after.set(Some((auction_id.clone(), next_after)));
+            let mut consecutive_failures = 0_u32;
+            loop {
+                realtime_state.set(LiveConnectionState::Connecting);
+                let after = if let Some(cache) = cache.as_ref() {
+                    cache.borrow().after()
+                } else {
+                    // 游标只用于建立本轮 catch-up 起点，不是资源依赖；普通读取会让本任务在
+                    // 回写游标时取消并重建，重新形成毫秒级连接循环。
+                    *discovery_after.peek()
+                };
+                let cursor = Rc::new(Cell::new(after));
+                let callback_cursor = Rc::clone(&cursor);
+                let callback_cache = cache.clone();
+                let callback_auction_id =
+                    auction_target.as_ref().map(|(auction_id, _)| auction_id.clone());
+                let mut callback_discovery_after = discovery_after;
+                let mut callback_auction_after = auction_after;
+                let mut callback_state = realtime_state;
+                let mut callback_refresh = refresh_generation;
+                let on_page = move |page: crate::api::RealtimePage| {
+                    let (refresh_required, continue_catch_up, degraded, next_after) =
+                        if let Some(cache) = callback_cache.as_ref() {
+                            let merge = cache.borrow_mut().merge_page(&page);
+                            let next_after = cache.borrow().after();
+                            (
+                                merge.refresh_required,
+                                merge.continue_catch_up,
+                                merge.degraded,
+                                next_after,
+                            )
+                        } else {
+                            (
+                                page.refetch_required
+                                    || page.events.iter().any(should_refresh_auction_board),
+                                !page.refetch_required,
+                                page.refetch_required,
+                                callback_cursor.get().max(page.next_after),
+                            )
+                        };
+                    callback_cursor.set(next_after);
+                    if callback_cache.is_none() {
+                        // current-auction 刷新会让目标短暂切到 Checking，并按 key 重建 owner；先把
+                        // discovery 游标写回外壳，避免重建后从 0 重放同一事件并形成请求风暴。
+                        callback_discovery_after.set(next_after);
+                    } else if let Some(auction_id) = callback_auction_id.as_ref() {
+                        callback_auction_after.set(Some((auction_id.clone(), next_after)));
+                    }
+                    if degraded {
+                        callback_state.set(LiveConnectionState::Degraded);
+                    } else if *callback_state.peek() != LiveConnectionState::Degraded {
+                        callback_state.set(LiveConnectionState::Live);
+                    }
+                    if refresh_required {
+                        let next_refresh = callback_refresh.peek().saturating_add(1);
+                        callback_refresh.set(next_refresh);
+                    }
+                    continue_catch_up
+                };
+                let attempt_started_millis = estimated_now().timestamp_millis();
+                let result = if let Some((auction_id, world)) = auction_target.as_ref() {
+                    subscribe_auction_realtime(after, auction_id.clone(), world.clone(), on_page)
+                        .await
+                } else {
+                    subscribe_realtime(after, on_page).await
+                };
+                if cache.is_none() {
+                    discovery_after.set(cursor.get());
                 }
-                if degraded {
-                    callback_state.set(LiveConnectionState::Degraded);
-                } else if *callback_state.peek() != LiveConnectionState::Degraded {
-                    callback_state.set(LiveConnectionState::Live);
+                match &result {
+                    Err(error) if error.is_permanent() => {
+                        // 永久错误（拍卖 ID 无效、认证失败等）重连不能自愈：转 Manual 态，
+                        // 页头降级为手动刷新，不再自动重连。
+                        tracing::warn!(
+                            detail = error.detail(),
+                            "实时订阅遇到永久错误，转手动刷新态"
+                        );
+                        realtime_state.set(LiveConnectionState::Manual);
+                        return;
+                    }
+                    Err(error) => {
+                        // 网络类等可重试错误按退避策略重连；明细只进诊断日志。
+                        tracing::debug!(detail = error.detail(), "实时订阅结束，按退避策略重连");
+                    }
+                    Ok(()) => {}
                 }
-                if refresh_required {
-                    let next_refresh = callback_refresh.peek().saturating_add(1);
-                    callback_refresh.set(next_refresh);
+                // 连接存活足够久视为健康会话，断开后重置退避；快速失败累计退避。
+                let survived_millis = estimated_now().timestamp_millis() - attempt_started_millis;
+                if survived_millis >= RECONNECT_HEALTHY_MILLIS {
+                    consecutive_failures = 0;
+                } else {
+                    consecutive_failures = consecutive_failures.saturating_add(1);
                 }
-                continue_catch_up
-            };
-            let _result = if let Some((auction_id, world)) = auction_target.as_ref() {
-                subscribe_auction_realtime(after, auction_id.clone(), world.clone(), on_page).await
-            } else {
-                subscribe_realtime(after, on_page).await
-            };
-            if cache.is_none() {
-                discovery_after.set(cursor.get());
+                if consecutive_failures >= RECONNECT_MAX_FAILURES {
+                    // 连续快速失败达到上限：放弃自动重连，转 Manual 态交还手动刷新。
+                    realtime_state.set(LiveConnectionState::Manual);
+                    return;
+                }
+                realtime_state.set(LiveConnectionState::Degraded);
+                let delay_millis = reconnect_delay_millis(consecutive_failures.max(1));
+                // 页面隐藏时挂起退避（不重置剩余时长），恢复可见后继续。
+                sleep_while_visible(&page_visibility, delay_millis).await;
             }
-            realtime_state.set(LiveConnectionState::Degraded);
-            TimeoutFuture::new(3_000).await;
         }
     }));
 

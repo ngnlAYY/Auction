@@ -10,7 +10,7 @@ use crate::api::{
     AdminBusinessWorld, fetch_admin_business_worlds, set_admin_business_world_enabled,
 };
 
-use auction_web_shared::{AsyncState, AsyncStateKind};
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog};
 
 use super::super::admin_api_error_message;
 
@@ -112,6 +112,8 @@ fn BusinessWorldCard(
     let action_busy = busy_world().as_deref() == Some(world.id.as_str());
     let any_busy = busy_world().is_some();
     let availability = availability_label(&world.availability);
+    // 启停是危险操作：按钮只打开确认对话框，真正的 mutation 由对话框确认按钮触发。
+    let mut confirm_open = use_signal(|| false);
 
     rsx! {
         article { class: "admin-business-world",
@@ -145,53 +147,13 @@ fn BusinessWorldCard(
                 r#type: "button",
                 disabled: any_busy,
                 aria_busy: action_busy.to_string(),
+                // 危险操作不直接生效：先清掉旧提示并打开确认对话框。
                 onclick: move |_| {
                     if busy_world().is_some() {
                         return;
                     }
-                    let existing_command_id = command_ids.read().get(&signature).copied();
-                    let command_id = existing_command_id.unwrap_or_else(|| {
-                            let command_id = Uuid::new_v4();
-                            command_ids.write().insert(signature.clone(), command_id);
-                            command_id
-                        });
-                    busy_world.set(Some(world_id.clone()));
                     notice.set(None);
-                    let world_id = world_id.clone();
-                    let signature = signature.clone();
-                    spawn(async move {
-                        match set_admin_business_world_enabled(
-                            command_id,
-                            world_id.clone(),
-                            target_enabled,
-                            world.policy_revision,
-                        )
-                        .await
-                        {
-                            Ok(result) => {
-                                command_ids.write().remove(&signature);
-                                notice.set(Some(BusinessWorldNotice {
-                                    world_id: result.id,
-                                    enabled: result.enabled,
-                                    error_code: None,
-                                }));
-                                refresh.set(refresh().saturating_add(1));
-                            }
-                            Err(error) => {
-                                let refresh_required = error.code.starts_with("stale_");
-                                notice.set(Some(BusinessWorldNotice {
-                                    world_id,
-                                    enabled: target_enabled,
-                                    error_code: Some(error.code),
-                                }));
-                                if refresh_required {
-                                    command_ids.write().remove(&signature);
-                                    refresh.set(refresh().saturating_add(1));
-                                }
-                            }
-                        }
-                        busy_world.set(None);
-                    });
+                    confirm_open.set(true);
                 },
                 if action_busy {
                     {t!("admin-action-working")}
@@ -199,6 +161,100 @@ fn BusinessWorldCard(
                     {t!("admin-business-world-disable")}
                 } else {
                     {t!("admin-business-world-enable")}
+                }
+            }
+        }
+        if confirm_open() {
+            // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
+            Dialog {
+                title: if world.enabled {
+                    t!("admin-business-world-disable-confirm-title")
+                } else {
+                    t!("admin-business-world-enable-confirm-title")
+                },
+                close_label: t!("admin-users-action-cancel"),
+                busy: action_busy,
+                on_close: move |_| confirm_open.set(false),
+                p { class: "admin-panel__note",
+                    if world.enabled {
+                        {t!(
+                            "admin-business-world-disable-confirm-description",
+                            world: world_name.clone()
+                        )}
+                    } else {
+                        {t!(
+                            "admin-business-world-enable-confirm-description",
+                            world: world_name.clone()
+                        )}
+                    }
+                }
+                div { class: "admin-shell__dialog-actions",
+                    button {
+                        class: if world.enabled { "admin-btn-danger" } else { "admin-btn-primary" },
+                        r#type: "button",
+                        disabled: any_busy,
+                        onclick: move |_| {
+                            if busy_world().is_some() {
+                                return;
+                            }
+                            confirm_open.set(false);
+                            let existing_command_id = command_ids.read().get(&signature).copied();
+                            let command_id = existing_command_id.unwrap_or_else(|| {
+                                    let command_id = Uuid::new_v4();
+                                    command_ids.write().insert(signature.clone(), command_id);
+                                    command_id
+                                });
+                            busy_world.set(Some(world_id.clone()));
+                            notice.set(None);
+                            let world_id = world_id.clone();
+                            let signature = signature.clone();
+                            spawn(async move {
+                                match set_admin_business_world_enabled(
+                                    command_id,
+                                    world_id.clone(),
+                                    target_enabled,
+                                    world.policy_revision,
+                                )
+                                .await
+                                {
+                                    Ok(result) => {
+                                        command_ids.write().remove(&signature);
+                                        notice.set(Some(BusinessWorldNotice {
+                                            world_id: result.id,
+                                            enabled: result.enabled,
+                                            error_code: None,
+                                        }));
+                                        refresh.set(refresh().saturating_add(1));
+                                    }
+                                    Err(error) => {
+                                        let refresh_required = error.code.starts_with("stale_");
+                                        notice.set(Some(BusinessWorldNotice {
+                                            world_id,
+                                            enabled: target_enabled,
+                                            error_code: Some(error.code),
+                                        }));
+                                        if refresh_required {
+                                            command_ids.write().remove(&signature);
+                                            refresh.set(refresh().saturating_add(1));
+                                        }
+                                    }
+                                }
+                                busy_world.set(None);
+                            });
+                        },
+                        if action_busy {
+                            {t!("admin-action-working")}
+                        } else {
+                            {t!("admin-users-action-confirm")}
+                        }
+                    }
+                    button {
+                        class: "admin-btn-secondary",
+                        r#type: "button",
+                        disabled: action_busy,
+                        onclick: move |_| confirm_open.set(false),
+                        {t!("admin-users-action-cancel")}
+                    }
                 }
             }
         }
