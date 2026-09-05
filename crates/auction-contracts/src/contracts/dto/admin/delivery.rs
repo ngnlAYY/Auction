@@ -26,7 +26,8 @@ pub struct AdminDeliveryResponse {
     pub failure_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    // 已发布 wire 省略 false，解码时以同一默认值补齐；null 和错误类型仍须拒绝。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub take_required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub returned_mail_id: Option<String>,

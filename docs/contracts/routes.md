@@ -288,7 +288,8 @@ round、auction 加锁，同步拍卖计划列、结束策略快照与持久调�
 reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令账本；reconcile 的 retry、succeeded、failed
 决策以及对应的外部引用/失败代码由请求体明确表达；列表投影还提供从版本化 send payload
 派生的 COD 数值，以及从结果 metadata 派生的 `reason_code`、`take_required`、`returned_mail_id`，
-但不返回 payload 或 metadata 原文；SQLite 明确返回
+但不返回 payload 或 metadata 原文。`take_required=false` 在响应中省略，客户端缺失时按 `false`
+解码，显式 `null` 或非布尔类型仍视为无效响应；SQLite 明确返回
 `501 feature_not_supported`。这些动作只推进本地 outbox/履约状态，不会伪造外部 MoogleMail
 回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
 证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令

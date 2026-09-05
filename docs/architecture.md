@@ -563,10 +563,10 @@ Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调
 稳定 command ID、请求摘要、完整 payload 与收件人仍必须逐项一致。
 论坛命令契约将 `start/cancel` 和 PM-only 通知明确限定为 warning-only，没有连接业务 owner；若未来
 要让它们真正改变状态，需要另行冻结
-owner、幂等账本和回执契约。Admin 结算页面先消费 A42 已结算目录，在左侧按 world/期号切换并默认
-选中服务端稳定排序的最新一期，右侧按 UUID 展示 lot 金额表、资金池摘要和带版本 fence 的 recovery
-确认；筛选、场次和目录页写入可恢复的 URL 状态。桌面端左右栏在受限视口内独立滚动，48rem 及以下
-恢复单列自然文档流。Admin `/outbox` 页面展示最近事件
+owner、幂等账本和回执契约。Admin 结算页面先消费 A42 已结算目录，在上方按 world/期号切换并默认
+选中服务端稳定排序的最新一期，下方按 UUID 展示 lot 金额表、资金池摘要和带版本 fence 的 recovery
+确认；筛选、场次和目录页写入可恢复的 URL 状态。所有屏幕均按报表选择在上、报表数据在下的单列
+自然文档流展示，并随页面统一滚动。Admin `/outbox` 页面展示最近事件
 元数据并复用已冻结的 realtime failure/lag/replay 安全投影，不等同于外部广播 sink。事件元数据、
 lag/failure/replay 在 PostgreSQL 与 SQLite Lite 的既有 realtime 表范围内均可用；最近事件元数据的
 总数与当前页由单条 SQL 在同一快照中生成，三类列表共用有界页大小和最大偏移量；SQLite 对其他完整档
