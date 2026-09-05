@@ -1,7 +1,7 @@
 //! Admin 结算与 recovery 页面装配。
 //!
-//! 左侧只拥有已结算场次的世界/期号选择，右侧读取对应 UUID 的结算与 recovery 权威报告；
-//! 两侧在桌面端独立滚动，窄屏恢复单列自然文档流。
+//! 上方选择已结算场次的世界/期号，下方读取对应 UUID 的结算与 recovery 权威报告；
+//! 所有屏幕均使用单列自然文档流，由页面统一滚动。
 
 use std::collections::HashMap;
 
@@ -368,7 +368,7 @@ pub(super) fn page() -> Element {
             aria_labelledby: "settlement-title",
             h1 { id: "settlement-title", {t!("page-settlement-title")} }
             div { class: "admin-settlement-layout",
-                aside {
+                section {
                     class: "admin-settlement-layout__selector",
                     aria_labelledby: "settlement-selector-title",
                     h2 { id: "settlement-selector-title", {t!("admin-settlement-selector-title")} }

@@ -3863,50 +3863,24 @@
   margin-block-start: var(--space-6);
 }
 
-/* 结算页在桌面视口内固定高度，场次选择与报告各自拥有纵向滚动上下文。 */
-.admin-shell--settlement {
-  block-size: 100vh;
-  block-size: 100dvh;
-  min-block-size: 0;
-  overflow: hidden;
-}
-
-.admin-shell--settlement .admin-shell__body,
-.admin-shell--settlement .admin-shell__content--settlement {
-  min-block-size: 0;
-  overflow: hidden;
-}
-
-.admin-shell--settlement .admin-shell__nav {
-  min-block-size: 0;
-  overflow-y: auto;
-}
-
-.admin-settlement-page {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  block-size: 100%;
-  min-block-size: 0;
+/* 结算页始终先选择报表、再展示数据，全部内容随页面自然滚动。 */
+.admin-shell__content--settlement {
+  overflow: visible;
 }
 
 .admin-settlement-layout {
   display: grid;
-  grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
-  min-block-size: 0;
-  overflow: hidden;
 }
 
 .admin-settlement-layout__selector,
 .admin-settlement-layout__report {
   min-inline-size: 0;
-  min-block-size: 0;
   padding: var(--space-4);
-  overflow-y: auto;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
-  scrollbar-gutter: stable;
 }
 
 .admin-settlement-layout__selector > h2,
@@ -3948,36 +3922,6 @@
 @media (max-width: 48rem) {
   .admin-business-worlds__grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .admin-shell--settlement {
-    block-size: auto;
-    min-block-size: 100vh;
-    min-block-size: 100dvh;
-    overflow: visible;
-  }
-
-  .admin-shell--settlement .admin-shell__body,
-  .admin-shell--settlement .admin-shell__content--settlement,
-  .admin-shell--settlement .admin-shell__nav {
-    overflow: visible;
-  }
-
-  .admin-settlement-page {
-    display: block;
-    block-size: auto;
-  }
-
-  .admin-settlement-layout {
-    grid-template-columns: minmax(0, 1fr);
-    overflow: visible;
-  }
-
-  .admin-settlement-layout__selector,
-  .admin-settlement-layout__report {
-    min-block-size: auto;
-    overflow: visible;
-    scrollbar-gutter: auto;
   }
 }
 

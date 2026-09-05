@@ -20,7 +20,7 @@ pub(crate) fn AdminAuthenticatedShell(
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
         div {
-            class: if settlement_route { "admin-shell admin-shell--settlement" } else { "admin-shell" },
+            class: "admin-shell",
             AdminSessionRefresh {
                 key: "{session.expires_at}",
                 session: session.clone(),
