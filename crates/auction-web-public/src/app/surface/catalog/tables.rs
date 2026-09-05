@@ -1,6 +1,8 @@
 //! Public 拍卖目录筛选、分组表格和分页。
 
 use super::*;
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_web_shared::format_credit_amount_full;
 
 #[component]
 pub(crate) fn CatalogTable(
@@ -246,7 +248,16 @@ pub(crate) fn LiveCatalogRow(
     let leader = row.leader_name.clone().unwrap_or_else(|| t!("value-empty"));
     let seller = row.seller_name.clone();
     let current_price = format_amount(row.current_price);
-    let next_bid = format_amount(row.next_bid);
+    let current_price_full =
+        t!("price-exact", amount: format_credit_amount_full(row.current_price));
+    let (next_bid, next_bid_full) = if row.next_bid > MAX_PUBLIC_BID_AMOUNT {
+        (t!("bid-limit-reached"), t!("bid-limit-note"))
+    } else {
+        (
+            format_amount(row.next_bid),
+            t!("price-exact", amount: format_credit_amount_full(row.next_bid)),
+        )
+    };
 
     rsx! {
         tr {
@@ -297,11 +308,15 @@ pub(crate) fn LiveCatalogRow(
             td {
                 class: "public-auction-catalog__amount public-auction-catalog__number",
                 "data-label": t!("catalog-current"),
+                title: current_price_full.clone(),
+                aria_label: current_price_full,
                 "{current_price}"
             }
             td {
                 class: "public-auction-catalog__amount public-auction-catalog__number",
                 "data-label": t!("catalog-next-bid"),
+                title: next_bid_full.clone(),
+                aria_label: next_bid_full,
                 "{next_bid}"
             }
             td { class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),

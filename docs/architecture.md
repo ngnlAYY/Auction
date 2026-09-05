@@ -318,7 +318,7 @@ Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 caden
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
 SQLite `000001` 至 `000011`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
-Public 20 条与 Admin 43 条已登记契约路径；稳定响应、世界/拍卖/lot 只读查询端口和
+Public 21 条与 Admin 43 条已登记契约路径；稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
 `/api/v1/auctions/current`、Public lot 列表/详情、竞价日志和普通竞价命令返回权威目录或当前公开
 projection，PostgreSQL 完整档的价格历史从结算事实链返回权威成交投影，SQLite Lite 对同一路由返回
@@ -498,6 +498,15 @@ ownership 标记仍保留在固定帖正文末尾供精确校验，但不作为�
 逐字目标确认和追加审计命令拥有；SQLite Lite 明确不提供该
 完整档。Recovery health 只读取已配置世界的 Balance；未启用世界的结算履约会安全降级为人工对账。
 
+Public 论坛同步开关查询属于 PostgreSQL 完整档：Worker 装配根从 `[worker.forum].enabled`
+冻结唯一的非敏感布尔值，通过既有心跳发布器写入 `service_heartbeats.details.forum_sync_enabled`。
+`PublicForumReader` 的独立启用状态读取由 storage 的论坛查询适配器实现；只聚合未过期、非停止的
+Worker，任一明确启用返回 true，全部明确关闭返回 false，缺失或无法判定则保留未知。
+Public P21 `/api/v1/forum/sync-status` 只公开 `{enabled: bool}`，未知返回 503，不暴露心跳原文，
+也不读取 Worker 私有 TOML。该状态只供展示，不参与竞价、任务授权、幂等或审计正确性；
+心跳写入仍由 observability/storage health owner 独占，无需新增表或迁移。SQLite Lite 返回 501。
+`/forum` 每 30 秒重读开关，关闭时显示关闭提示并卸载帖子轮询，开启且已发布时只显示真实处理楼层。
+
 canonical PostgreSQL v28 历史格式不会由普通 `migrate` 自动识别或猜测升级。该格式的接管由
 `auction-storage::database::legacy_v28` 独占：只接受 PostgreSQL 18.x 上 migration 28、dirty=false、
 精确 canonical 表集合、零其他 session 且竞价投影可无损恢复的源库。`auctionctl` 先创建并离线验证
@@ -555,7 +564,7 @@ API；公开端看板收到已注册拍卖/竞价事件后重新读取权威快�
 `settling`/`settled` 只展示终态状态，不把已经过去的计划开放/截止时间渲染为倒计时或落锤状态；
 Admin 结算报告从同一 PostgreSQL 快照投影挂牌价、持有 PPM 和调整 PPM，以正值惩罚/税费、负值折扣的
 闭集语义展示，不在浏览器重算结算事实；Admin 拍卖列表提供带 CSRF、命令 ID
-和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；论坛镜像由独立 `/forum` 页面消费，发布后只显示可点击的帖子位置和持久化的真实连续处理楼层，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
+和结果反馈的生命周期操作；公开端规则、黑名单、补偿池/账本、健康和实时 catch-up 页面已消费对应安全 DTO；独立 `/forum` 页面先读取同步开关，关闭时显示关闭提示，开启且发布后只显示持久化的真实连续处理楼层，首页不再读取或轮询该投影；论坛远程发布/回执仍由 Worker 外部适配器负责，MoogleMail 入站的首条
 拍卖/用户注册重绑业务链、结算 delivery transport 和 Sent/Balance 回执对账已接入；论坛远程
 同步与回帖导入已由 Worker 接入；MM `notify` 已进入 MoogleMail delivery outbox。对于
 `mail_intake` 新 delivery 的 `origin_id` 使用 `world:external_mail_id:send|return|take`；传输与
@@ -658,6 +667,10 @@ Admin/Web 只接触安全投影，secret 不进入响应或页面；SQLite Lite 
 或凭据内容。失效或替换后，现有 ownership guard 持有到 Worker 退出，必须重启才能完成安全交接。
 
 ## 竞价写入不变量
+
+两种后端的新竞价均受领域 `MAX_BID_AMOUNT` 的 1B（1,000,000,000 Credits）硬上限保护；普通
+出价、新代理上限和自动代理事实分别在输入和新事实生成边界校验。历史金额与幂等结果不截断，
+结算总额使用独立金额类型；HTTP 编译门禁核对浏览器提示常量，页面不能取代服务端判断。
 
 第一版实现必须以以下顺序落地，不能先做页面再补一致性。PostgreSQL 实现完整用例和
 repository port；SQLite 只实现 Lite 能力需要的端口，但已实现端口的事务细节和不变量

@@ -1,6 +1,7 @@
 //! Public 拍卖目录的分类、状态、链接、金额和倒计时映射。
 
 use super::*;
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 
 /// 按分类把目录行分组。返回行下标而非克隆行：调用方持有的行向量全程以 Rc 共享，
 /// 分组不再产生第二层逐字段克隆。
@@ -175,21 +176,19 @@ pub(crate) fn format_auction_time(value: &str) -> String {
     format_localized_time(value)
 }
 
-/// 解析旧版 Public 使用的 credit 缩写；无后缀和 `k` 表示千，`m` 支持最多两位小数。
+/// 解析 credit 缩写；无后缀或 K 使用整数千，M/B 最多支持三/六位小数，精确到信用网格。
 ///
 /// 浏览器只用该结果做即时提示，服务端仍会再次校验金额、拍卖状态和竞价资格。
 pub(crate) fn parse_credit_amount(input: &str) -> Option<i64> {
-    const MAX_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
-
     let input = input.trim();
     if input.is_empty() {
         return None;
     }
-    let (number, suffix) = match input.chars().last() {
-        Some(character) if matches!(character, 'k' | 'K' | 'm' | 'M') => {
-            (&input[..input.len() - character.len_utf8()], Some(character))
-        }
-        Some(_) => (input, None),
+    let (number, scale, maximum_decimals) = match input.chars().last() {
+        Some('k' | 'K') => (&input[..input.len() - 1], 1_000_i64, 0),
+        Some('m' | 'M') => (&input[..input.len() - 1], 1_000_000_i64, 3),
+        Some('b' | 'B') => (&input[..input.len() - 1], 1_000_000_000_i64, 6),
+        Some(_) => (input, 1_000_i64, 0),
         None => return None,
     };
     let (whole, fraction) =
@@ -199,30 +198,21 @@ pub(crate) fn parse_credit_amount(input: &str) -> Option<i64> {
     }
     if fraction.is_some_and(|value| {
         value.is_empty()
-            || value.len() > 2
+            || value.len() > maximum_decimals
             || !value.chars().all(|character| character.is_ascii_digit())
     }) {
         return None;
     }
-    if suffix.is_some_and(|character| matches!(character, 'k' | 'K')) && fraction.is_some() {
-        return None;
-    }
     let whole = whole.parse::<i64>().ok()?;
-    let amount = match suffix {
-        Some('m' | 'M') => {
-            let base = whole.checked_mul(1_000_000)?;
-            let fraction = fraction
-                .and_then(|value| {
-                    let scale = if value.len() == 1 { 100_000 } else { 10_000 };
-                    value.parse::<i64>().ok()?.checked_mul(scale)
-                })
-                .unwrap_or(0);
-            base.checked_add(fraction)?
+    let fractional_credits = match fraction {
+        Some(fraction) => {
+            let divisor = 10_i64.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+            fraction.parse::<i64>().ok()?.checked_mul(scale / divisor)?
         }
-        Some('k' | 'K') | None => whole.checked_mul(1_000)?,
-        Some(_) => return None,
+        None => 0,
     };
-    (amount > 0 && amount <= MAX_SAFE_JSON_INTEGER).then_some(amount)
+    let amount = whole.checked_mul(scale)?.checked_add(fractional_credits)?;
+    (amount > 0 && amount <= MAX_PUBLIC_BID_AMOUNT).then_some(amount)
 }
 
 pub(crate) struct CountdownDisplay {

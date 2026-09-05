@@ -3,7 +3,7 @@ mod bid;
 mod competition;
 mod policy;
 
-pub use amount::{BidAmount, CREDIT_GRID};
+pub use amount::{BidAmount, CREDIT_GRID, MAX_BID_AMOUNT};
 pub use bid::{AcceptedBid, BidMechanism};
 pub use competition::{CompetitionPlan, CompetitionTrigger, CompetitionTriggerKind};
 pub use policy::{

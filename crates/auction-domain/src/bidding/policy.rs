@@ -118,6 +118,9 @@ impl AuctionRules {
     ) -> Result<BidDecision, DomainError> {
         self.validate()?;
         state.validate()?;
+        if !amount.is_valid_bid_input() {
+            return Err(DomainError::InvalidAmount { value: amount.value() });
+        }
         if bidder_id.is_nil() {
             return Err(DomainError::InvalidBidState("出价人标识不能是 nil UUID"));
         }

@@ -4,12 +4,36 @@ use super::{
     PublicApiState, api_error, not_found_error, parse_public_uuid, parse_query, public_timestamp,
 };
 use auction_application::{ApplicationError, PublicForumThread};
-use auction_contracts::{ApiErrorResponse, ApiResponse, PublicForumResponse};
+use auction_contracts::{
+    ApiErrorResponse, ApiResponse, PublicForumResponse, PublicForumSyncStatusResponse,
+};
 use axum::{
     Json,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
 };
+
+/// 独立于当前拍卖读取论坛同步开关；心跳缺失不等同于明确关闭。
+pub(crate) async fn sync_status(
+    State(state): State<PublicApiState>,
+    uri: Uri,
+) -> Result<Json<ApiResponse<PublicForumSyncStatusResponse>>, (StatusCode, Json<ApiErrorResponse>)>
+{
+    parse_query(&uri, &[])
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let reader = state.forum().ok_or_else(|| {
+        api_error(StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", "论坛同步状态暂不可用")
+    })?;
+    let enabled = reader.public_forum_sync_enabled().await.map_err(map_reader_error)?;
+    let enabled = enabled.ok_or_else(|| {
+        api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "forum_sync_unavailable",
+            "论坛同步启用状态尚无有效观测",
+        )
+    })?;
+    Ok(Json(ApiResponse::ok("论坛同步启用状态已加载", PublicForumSyncStatusResponse { enabled })))
+}
 
 /// 读取单场拍卖的本地论坛镜像状态。
 pub(crate) async fn get(

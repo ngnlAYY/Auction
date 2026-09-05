@@ -5,8 +5,21 @@ use url::Url;
 use uuid::{Uuid, Variant};
 
 pub(crate) use auction_contracts::PublicForumResponse as ForumThread;
+use auction_contracts::PublicForumSyncStatusResponse;
 
 use super::{ApiResponse, send_get};
+
+/// 开关只来自 Public 的安全投影；请求或解码失败不能当作关闭。
+pub(crate) async fn fetch_forum_sync_enabled() -> Result<bool, String> {
+    let response =
+        send_get("/api/v1/forum/sync-status").await.map_err(|error| error.code().to_owned())?;
+    if !response.ok() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let payload: ApiResponse<PublicForumSyncStatusResponse> =
+        response.json().await.map_err(|error| error.to_string())?;
+    Ok(payload.data.enabled)
+}
 
 pub(crate) async fn fetch_forum_thread(auction_id: String) -> Result<ForumThread, String> {
     let url = format!("/api/v1/auctions/{auction_id}/forum");

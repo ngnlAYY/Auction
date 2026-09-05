@@ -21,6 +21,10 @@ pub fn use_app_boot_ready(_ready: bool) {
             return;
         };
 
+        // panic 后不能由另一条已排队的就绪 effect 重新揭示损坏的组件树。
+        if root.has_attribute("data-app-failed") {
+            return;
+        }
         let _ = root.set_attribute("data-app-ready", "true");
         let _ = root.set_attribute("aria-busy", "false");
     }));
@@ -28,10 +32,9 @@ pub fn use_app_boot_ready(_ready: bool) {
 
 /// 安装 WASM panic 兜底钩子。
 /// 必须在 Dioxus 启动前调用。panic 后虚拟 DOM 已不可信，不能指望框架渲染错误界面，
-/// 因此直接操作 index.html 骨架屏：移除 `#main` 的 `data-app-ready` 让 `.app-boot` 骨架
-/// 重新可见（同时隐藏已损坏的 `.app-root`），再把骨架内的静态错误横幅 `.app-boot__error`
-/// 的 15 秒延迟动画取消，使其立即显现。横幅文案由两端 index.html 静态提供（已按站点语言
-/// 本地化），无需任何脚本注入。控制台同时保留原始 panic 信息便于诊断。
+/// 因此直接给 `#main` 写入不可逆的失败标记并移除就绪标记，显示静态错误横幅并隐藏损坏的
+/// 组件树。等待超过 15 秒只显示加载较慢提示，不再被误报为网络故障；错误横幅仅由 panic
+/// 标记触发。两端 index.html 提供站点默认语言的文案，控制台保留原始 panic 信息便于诊断。
 /// 宿主端为空操作，保证非 wasm32 目标（如 `cargo check`）可编译。
 pub fn install_panic_hook() {
     #[cfg(target_arch = "wasm32")]
@@ -48,19 +51,10 @@ fn show_panic_banner() {
         return;
     };
 
-    // 撤掉就绪标记：CSS 会重新显示 .app-boot 骨架并隐藏 .app-root。
+    // 失败状态优先于所有后续就绪回调；刷新页面后才会重新建立干净的根节点。
     if let Some(root) = document.get_element_by_id("main") {
+        let _ = root.set_attribute("data-app-failed", "true");
         let _ = root.remove_attribute("data-app-ready");
         let _ = root.set_attribute("aria-busy", "false");
-    }
-
-    // 骨架容器带 aria-hidden="true"，横幅可见时必须解除，否则屏幕阅读器读不到错误。
-    if let Some(boot) = document.query_selector(".app-boot").ok().flatten() {
-        let _ = boot.set_attribute("aria-hidden", "false");
-    }
-
-    // 取消横幅的延迟动画，立即显示。
-    if let Some(banner) = document.query_selector(".app-boot__error").ok().flatten() {
-        let _ = banner.set_attribute("style", "animation: none; opacity: 1; visibility: visible;");
     }
 }

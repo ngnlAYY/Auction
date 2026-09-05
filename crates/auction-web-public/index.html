@@ -111,17 +111,29 @@
         text-align: center;
       }
 
-      /* WASM 加载失败降级：错误提示初始隐藏，仅当应用长时间未就绪（WASM 加载或执行失败）
-         时通过纯 CSS 动画在约 15 秒后自动显现；WASM 正常就绪时 data-app-ready 会隐藏整个
-         .app-boot 骨架，该提示随骨架一起消失，因此全程无需任何脚本。 */
+      /* 15 秒未就绪只说明等待较久；真实运行异常由 Rust panic 钩子的失败标记单独触发。 */
+      .app-boot__slow,
       .app-boot__error {
         margin: 2rem 0 0;
         color: #e3b8b8;
         font: 0.95rem/1.6 system-ui, sans-serif;
         text-align: center;
+      }
+
+      .app-boot__slow {
+        color: #d7dee8;
         opacity: 0;
         visibility: hidden;
         animation: app-boot-error-reveal 0.01s linear 15s forwards;
+      }
+
+      .app-boot__error,
+      #main[data-app-failed] .app-boot__slow {
+        display: none;
+      }
+
+      #main[data-app-failed] .app-boot__error {
+        display: block;
       }
 
       @keyframes app-boot-error-reveal {
@@ -148,12 +160,13 @@
   </head>
   <body>
     <div id="main" aria-busy="true">
-      <div class="app-boot" aria-hidden="true">
+      <div class="app-boot">
         <div class="app-boot__header"></div>
         <div class="app-boot__bar"></div>
         <div class="app-boot__line"></div>
         <div class="app-boot__line"></div>
-        <p class="app-boot__error">The application could not be loaded. Check your network connection and refresh the page.</p>
+        <p class="app-boot__slow" role="status">Loading is taking longer than usual. Please wait, or refresh the page.</p>
+        <p class="app-boot__error" role="alert">The application encountered an error. Refresh the page to try again.</p>
       </div>
       <noscript>
         <div class="boot-noscript">This application requires JavaScript. Please enable JavaScript in your browser and refresh the page.</div>

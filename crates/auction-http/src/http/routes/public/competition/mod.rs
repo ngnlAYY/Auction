@@ -5,5 +5,8 @@
 mod bid;
 mod proxy;
 
+// 编译期约束浏览器公开常量与领域权威边界，避免只改前端或只改后端造成上限漂移。
+const _: () = assert!(auction_contracts::MAX_PUBLIC_BID_AMOUNT == auction_domain::MAX_BID_AMOUNT);
+
 pub(crate) use bid::place_bid;
 pub(crate) use proxy::{create_proxy_authorization, lower_proxy_authorization};

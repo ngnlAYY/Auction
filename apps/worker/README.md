@@ -144,7 +144,10 @@ advisory lock 保证只有一个 Worker owner。密钥不匹配、密文损坏�
 world-aware Cookie 也供入站邮件的装备详情读取使用，避免把 HentaiVerse 登录页误判为不受支持的
 装备来源。未配置该独立密钥时继续兼容 `.keyenv`，但 Worker 只使用 `hv-ck-key1`；
 `hv-ck-key2` 仅供显式隔离验证，不参与运行时后备或自动切换。敏感配置仍是单 Cookie 入口。
-Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径；周期值每轮读取
+Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径。
+心跳的非敏感 `details.forum_sync_enabled` 固定为启动配置 `[worker.forum].enabled`，供 Public
+只读展示实际启用状态；关闭不会由历史帖子是否存在推断。升级此展示能力时须同时更新 Worker、
+Public API 和公开端产物；修改开关后重启 Worker，页面会在下一轮状态读取时更新。周期心跳每轮读取
 真实数据库/schema readiness、进程内审计写入失败计数和 Worker tracing 安全状态；SIGINT/SIGTERM
 已可靠进入停止发布。各 owner 的内存定时器只负责唤醒，不能代替持久化游标。配置
 `[worker.control].enabled = true` 后，数据库 Worker 和无数据库启动骨架都会

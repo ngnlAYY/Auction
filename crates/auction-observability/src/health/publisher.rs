@@ -87,6 +87,7 @@ pub struct HeartbeatPublisher {
     process_health: Arc<dyn HeartbeatHealthReader>,
     tracing_health: Arc<dyn TracingHealthReader>,
     observation_sequence: AtomicI64,
+    details: Value,
 }
 
 impl HeartbeatPublisher {
@@ -108,7 +109,17 @@ impl HeartbeatPublisher {
             process_health,
             tracing_health,
             observation_sequence: AtomicI64::new(0),
+            details: serde_json::json!({}),
         }
+    }
+
+    /// 冻结装配根提供的非敏感元数据，随每次心跳发布；不得传入凭据或完整配置。
+    pub fn with_details(mut self, details: Value) -> Result<Self, HealthError> {
+        if !valid_details(&details) {
+            return Err(HealthError::InvalidCommand);
+        }
+        self.details = details;
+        Ok(self)
     }
 
     /// 发布指定状态的安全心跳；存储失败由调用方决定是否降级或继续运行。
@@ -137,7 +148,7 @@ impl HeartbeatPublisher {
                 tracing,
                 observation_sequence,
                 ttl: self.ttl,
-                details: serde_json::json!({}),
+                details: self.details.clone(),
             })
             .await
     }

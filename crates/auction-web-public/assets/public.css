@@ -2881,14 +2881,25 @@
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--item {
-    inline-size: 20%;
+    inline-size: 18%;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
-  .public-auction-catalog__table--live .public-auction-catalog__column--current-price,
-  .public-auction-catalog__table--live .public-auction-catalog__column--next-bid,
   .public-auction-catalog__table--live .public-auction-catalog__column--remaining {
     inline-size: 7%;
+  }
+
+  .public-auction-catalog__table--live .public-auction-catalog__column--current-price,
+  .public-auction-catalog__table--live .public-auction-catalog__column--next-bid {
+    inline-size: 9%;
+  }
+
+  .public-auction-catalog .public-auction-catalog__number {
+    text-align: right;
+  }
+
+  .public-auction-catalog th.public-auction-catalog__number {
+    white-space: normal;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--level {
@@ -2900,11 +2911,11 @@
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--seller {
-    inline-size: 8%;
+    inline-size: 7%;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--leader {
-    inline-size: 9%;
+    inline-size: 8%;
   }
 
   .public-auction-catalog__table--live .public-auction-catalog__column--status {

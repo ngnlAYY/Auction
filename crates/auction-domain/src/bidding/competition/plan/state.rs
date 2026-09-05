@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     AcceptedBid, AuctionRules, BidAmount, BidMechanism, CommandId, DomainError, LotBidState,
-    ProxyAuthorization, ProxyAuthorizationId, ProxyTerminalReason, ProxyTransition,
+    MAX_BID_AMOUNT, ProxyAuthorization, ProxyAuthorizationId, ProxyTerminalReason, ProxyTransition,
 };
 
 use super::CompetitionPlan;
@@ -55,6 +55,10 @@ pub(super) fn finalize_plan(
 
     let mut public_bids = Vec::with_capacity(drafts.len());
     for (index, draft) in drafts.into_iter().enumerate() {
+        // 仅约束将要写入的新事实；历史读取和幂等重放仍逐字保留原金额。
+        if draft.amount.value() > MAX_BID_AMOUNT {
+            return Err(DomainError::InvalidAmount { value: draft.amount.value() });
+        }
         let fact_index = u32::try_from(index)
             .ok()
             .and_then(|index| index.checked_add(1))

@@ -1,5 +1,6 @@
 //! 已有代理授权的降低上限表单及其提交状态。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -8,7 +9,8 @@ use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorizatio
 use super::super::super::proxy::proxy_status_label;
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, amount_hint, proxy_error_message,
+    PendingProxyCommand, ProxyConfirmCommand, amount_hint, initial_proxy_amount,
+    proxy_error_message,
 };
 
 #[component]
@@ -25,16 +27,22 @@ pub(super) fn ProxyAuthorizationForm(
 ) -> Element {
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
-    let mut maximum_amount = use_signal(|| format_amount(lower_bound));
+    let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
     let mut validation = use_signal(|| None::<String>);
     // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
-    let can_lower = proxy.capabilities.can_lower && bidding_open;
-    let blocked_reason =
-        if !bidding_open { t!("bid-unavailable") } else { t!("proxy-cannot-lower") };
+    let limit_reached = lower_bound > MAX_PUBLIC_BID_AMOUNT;
+    let can_lower = proxy.capabilities.can_lower && bidding_open && !limit_reached;
+    let blocked_reason = if !bidding_open {
+        t!("bid-unavailable")
+    } else if limit_reached {
+        t!("bid-limit-note")
+    } else {
+        t!("proxy-cannot-lower")
+    };
     let confirmation_id = format!("public-proxy-lower-confirmation-{lot_id}");
     let confirmation_description = match (command.confirmation)() {
         Some(PendingProxyCommand::Lower { amount, .. }) => Some(t!(
@@ -69,6 +77,12 @@ pub(super) fn ProxyAuthorizationForm(
                                     authorization_id,
                                     ..
                                 } => {
+                                    if *amount > MAX_PUBLIC_BID_AMOUNT {
+                                        command.cancel_confirmation();
+                                        validation.set(Some(t!("proxy-invalid-amount")));
+                                        (command.failure).set(None);
+                                        return;
+                                    }
                                     if authorization_id != &proxy.authorization_id {
                                         // 授权已变更：整条命令作废，彻底清空后退回编辑态。
                                         command.reset();

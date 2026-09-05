@@ -462,6 +462,26 @@
   font-size: var(--admin-text-title);
 }
 
+/* 窄屏可把整组控件移到标题下方，自动刷新与手动刷新仍保持同排。 */
+.admin-dashboard-heading__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.admin-dashboard-heading__actions .admin-poll-control {
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+.admin-dashboard-heading__actions select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .admin-realtime-intro {
   margin: calc(-1 * var(--space-3)) 0 0;
   color: var(--color-text-muted);
@@ -2800,20 +2820,6 @@
   inline-size: 4.625rem;
 }
 
-.admin-auction-settlement-select {
-  inline-size: 10.25rem;
-}
-
-:lang(zh-CN) .admin-auction-settlement-select,
-:lang(zh-TW) .admin-auction-settlement-select,
-:lang(ko) .admin-auction-settlement-select {
-  inline-size: 9.1875rem;
-}
-
-:lang(ja) .admin-auction-settlement-select {
-  inline-size: 10.375rem;
-}
-
 :lang(ja) .admin-auction-world {
   inline-size: 4.8125rem;
 }
@@ -3293,32 +3299,35 @@
 }
 
 .admin-dashboard-page > h2 {
-  margin: var(--space-5) 0 var(--space-3);
-  padding-block-start: var(--space-5);
+  margin: var(--space-3) 0 var(--space-2);
+  padding-block-start: var(--space-3);
   border-block-start: var(--border-width) solid var(--color-border);
   font-size: var(--text-lg);
 }
 
 .admin-dashboard-page > h3 {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--text-base);
 }
 
 .admin-dashboard-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
-  gap: var(--space-3);
-  margin-block-end: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: var(--space-2);
+  margin-block-end: var(--space-3);
 }
 
 .admin-dashboard-cards--summary {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
 }
 
 .admin-dashboard-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
   min-inline-size: 0;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-inline-start-width: 3px;
   border-radius: var(--radius-md);
@@ -3341,7 +3350,7 @@
 }
 
 .admin-dashboard-value {
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -3394,18 +3403,13 @@
   margin-block-start: var(--space-5);
 }
 
-.admin-dashboard-actions--refresh {
-  justify-content: flex-end;
-  margin-block: 0 var(--space-4);
-}
-
 .admin-dashboard-attention {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin-block: 0 var(--space-5);
-  padding: var(--space-4);
+  gap: var(--space-3);
+  margin-block: 0 var(--space-3);
+  padding: var(--space-3);
   border: var(--border-width) solid var(--color-status-error);
   border-inline-start-width: 4px;
   border-radius: var(--radius-md);
@@ -3475,9 +3479,6 @@
     text-align: center;
   }
 
-  .admin-dashboard-actions--refresh button {
-    inline-size: 100%;
-  }
 }
 
 /* 管理拍品列表使用独立的高密度数据表层级；其它 Admin 表格暂不受影响。 */
@@ -3891,11 +3892,15 @@
 
 .admin-settlement-selector__fields {
   display: grid;
+  /* 扣除列间距后，世界与结算期号按 30% / 70% 同排，长选项不能撑宽列。 */
+  grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
+  align-items: end;
   gap: var(--space-3);
 }
 
 .admin-settlement-selector__fields label {
   display: grid;
+  min-inline-size: 0;
   gap: var(--admin-space-label);
   color: var(--color-text-muted);
   font-size: var(--admin-text-label);
@@ -3903,6 +3908,7 @@
 
 .admin-settlement-selector__fields select {
   inline-size: 100%;
+  min-inline-size: 0;
   min-block-size: var(--size-target);
   padding: var(--admin-space-compact) var(--admin-space-input-inline);
   border: var(--border-width) solid var(--color-input-border);

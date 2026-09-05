@@ -67,7 +67,6 @@ pub(super) fn AdminSettlementPicker(
                 {t!("admin-settlement-select-period")}
                 select {
                     id: "settlement-period",
-                    class: "admin-auction-settlement-select",
                     disabled: period_disabled,
                     value: selected_auction_id(),
                     onchange: move |event| {
