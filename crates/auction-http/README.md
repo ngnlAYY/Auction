@@ -147,6 +147,10 @@ Admin `/api/v1/admin/rules` 已接入读取、候选校验和发布：PUT 携带
 `expected_revision`，由应用层完成 revision CAS、幂等账本和审计；SQLite Lite 仅支持读取，
 发布返回 `501 feature_not_supported`。管理端规则编辑页面使用同一版本化契约。
 
+Admin A26/A27 的 runtime 文档包含可选 `operations` 分组。HTTP 仍通过应用层严格解析、校验和
+指纹/命令账本端口读写；GET/validate/PUT 响应为浏览器补齐未接管的候选，原物理文件和历史
+命令的指纹不因投影扩展而变化。`managed` 决定是否在重启时覆盖对应部署字段，不是热加载开关。
+
 Admin A16-A19 邮件路由已接入：轮询状态、入站列表/详情使用严格邮箱/分页/时间筛选和
 安全 DTO，暂停/恢复使用 Admin session、CSRF、`command_id` 与 `expected_state_version`。
 PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lite 明确返回

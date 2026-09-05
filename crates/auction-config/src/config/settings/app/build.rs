@@ -33,7 +33,11 @@ impl AppConfig {
         };
         let admin_runtime =
             (role == Role::Admin).then(|| runtime_document.as_ref().cloned()).flatten();
+        let mut auction = auction;
         let mut worker = worker;
+        if let Some(runtime) = &runtime_document {
+            apply_runtime_operations(&mut auction, &mut worker, role, runtime);
+        }
         if role == Role::Worker
             && let Some(runtime) = &runtime_document
         {

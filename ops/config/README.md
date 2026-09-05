@@ -3,7 +3,7 @@
 运行时配置统一使用一份必需的公共非敏感文件、三个角色文件、独立敏感文件和一份可选的 Admin
 runtime 文件：`common.toml` 保存日志、指标、缓存和拍卖策略，角色文件保存 listener、tracing、
 realtime、会话或 Worker 调度，敏感配置保存凭据，runtime TOML 保存可审计的非敏感 Admin 参数与
-MoogleMail 业务策略。Admin 和 Worker 可以指向同一 runtime 文件，Public 不读取它。进程会在
+MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可以指向同一 runtime 文件，Public 不读取它。进程会在
 `ops/config/{role}.toml` 存在时加载对应主配置；`AUCTION_CONFIG_FILE` 只负责选择另一个
 主配置，单个配置项不会从环境变量读取。
 
@@ -51,8 +51,26 @@ Admin 与 Worker 示例的 `runtime_config_file` 都指向
 其中 `dashboard_mailboxes` 是可选的非敏感 world/mailbox 投影；启用后 Admin 会按该范围核对
 MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保持一致。可编辑的
 `worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
-Worker 重启时把它们投影为 MoogleMail 业务快照。transport endpoint、凭据来源、调度、mailbox
+Worker 重启时把它们投影为 MoogleMail 业务快照。MoogleMail transport endpoint、凭据来源、调度、mailbox
 标识和全局 `worker.mooglemail.enabled` 仍由 Worker 主配置拥有。
+
+`operations` 的五组参数均以 `managed = false` 为默认值，沿用公共/角色配置；在管理页勾选
+“使用本页配置”后才接管该组。首次显示的候选默认值不是 Worker 当前运行配置。完整字段与默认值
+见 runtime 示例；分组责任与生效范围如下：
+
+| runtime 分组 | 可编辑范围 | 重启范围 |
+| --- | --- | --- |
+| `operations.economics` | 新场次底价、加价、软截止、取消与代理策略 | Admin、Worker |
+| `operations.schedule` | 周排期开关、IANA 时区、星期/时间与 world 候选 | Admin、Worker |
+| `operations.forum` | 论坛同步开关、批量、轮询、分页、响应/请求和任务预算 | Worker |
+| `operations.alerts` | 告警开关、阈值、冷却、批次、重试、world 与收件人 | Worker |
+| `operations.worker` | 生命周期、delivery、fulfillment、recovery 的独立吞吐/租约/超时边界 | Worker |
+
+接管任一组后，部署预检要求 Admin/Worker 引用同一份 runtime 文件，并要求两者的有效拍卖
+模板和排期一致。新经济参数只用于新拍卖的不可变快照；排期不修改已创建场次。论坛 endpoint、
+凭据 scope、公开链接与测试板块继续由 Worker 部署配置管理。启用论坛或告警仍需满足已有凭据、
+邮件世界与后端能力条件，SQLite 主并发仍只能为一。旧文件省略 `operations` 时保留原指纹与
+历史命令摘要；管理页物化候选只在保存后进入物理文件。
 `allow_manual_early_open`、`allow_manual_early_settlement` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
 `restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
 锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。人工提前结算开关默认关闭，并且只在

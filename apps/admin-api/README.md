@@ -31,10 +31,14 @@ Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL �
 `auction-application` runtime 服务、TOML 原子文件适配器和 durable 命令账本，GET/validate/PUT
 均保留 fingerprint fence 与 `restart_required`；Admin 对外就绪前会先恢复未收口的 pending/unknown
 命令，若结果为 `unknown` 或需要人工核对则保留错误级告警并继续启动，其他恢复错误会阻断启动。
+可证明的 pending/旧文件组合会继续完成原候选；恢复成功后若文件指纹已不同于本次加载的配置，
+Admin 阻断就绪并明确要求重新执行部署重启，不能用旧监听/策略快照冒充新配置已生效。
 文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
 是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围；旧版
 `worlds`、发件人 allowlist、装备过滤和 14 个通知模板也由该文档管理，并在 Worker 重启时投影为
 MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin 与 Worker。
+文档的 `operations` 还可分组接管新经济模板、排期和 Worker 参数；Admin 创建与计划修改端口
+消费启动时覆盖后的经济模板，已有拍卖继续按数据库冻结快照处理。
 重启后，`allow_manual_early_open` 与 `allow_manual_early_settlement` 会作为不可变策略进入生命周期
 服务，且默认均关闭：计划时间已到的开放不受影响，人工提前开放与提前结算则在锁内按同一策略失败
 关闭，HTTP capability 使用同一来源。人工进入 Final 会把较晚的 live lot 截止时间收紧到冻结的最终

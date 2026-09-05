@@ -198,6 +198,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 非符号链接的公共配置，并检查敏感文件、runtime 文件、数据库档位、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
 以及装备、用户登录和外部凭据三组数据密钥的一致性。启用中的 Worker control 还必须具备安全
 runtime 目录、group 与显式 UID/GID allowlist 配置。
+接管 Admin runtime 的任一 `operations` 组时，Admin 与 Worker 必须引用同一份 runtime 普通文件；
+预检按规范文件路径核对身份，并始终核对两者最终经济模板、结算模板与周排期一致，防止管理页已保存
+但 Worker 未接入同一来源。该检查同样不读取外部服务或改写任务状态。
 默认只对敏感文件权限过宽给出警告；生产部署应使用 `--strict-permissions`。该预检不会连接
 数据库、执行迁移、启动服务或访问 MoogleMail/E-Hentai。
 

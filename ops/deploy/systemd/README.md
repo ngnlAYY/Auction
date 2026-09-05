@@ -38,6 +38,9 @@ Public → Admin → Worker。
 不同账号或组名，必须同步修改 unit 和 TOML，不能照抄主机相关数字 ID。
 严格预检还要求 Admin 与 Worker 的 control socket 及三组数据密钥完全一致；Admin runtime 若
 选择 Unix listener，总控会直接通过该 socket 检查 `/health/ready`，不会退回主配置 TCP 地址。
+接管 runtime 的任一 `operations` 组时，Admin/Worker 还必须引用同一份 runtime 文件，且两者的
+有效拍卖默认模板与周排期必须一致。经济模板/排期更新后重启这两个角色，其余运行参数组重启
+Worker；unit 不会把 runtime 文件保存操作解释为热加载。
 
 该总控模板以 system manager 权限运行，默认面向 PostgreSQL 生产档。SQLite Lite 若使用同一模板，
 必须先由部署者保证数据库文件及父目录归 `auction` 运行账号所有；不要让首次 root migration 创建

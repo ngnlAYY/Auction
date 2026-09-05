@@ -11,6 +11,8 @@ mod commands;
 mod document;
 #[path = "runtime_config/errors.rs"]
 mod errors;
+#[path = "runtime_config/operations/mod.rs"]
+mod operations;
 #[path = "runtime_config/ports.rs"]
 mod ports;
 #[path = "runtime_config/validation.rs"]
@@ -32,4 +34,9 @@ pub use document::{
     MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 pub use errors::{AdminRuntimeCommandError, AdminRuntimeConfigError, AdminRuntimeFileError};
+pub use operations::{
+    AdminRuntimeAlertsConfig, AdminRuntimeDeliveryConfig, AdminRuntimeEconomicsConfig,
+    AdminRuntimeForumConfig, AdminRuntimeFulfillmentConfig, AdminRuntimeOperationsConfig,
+    AdminRuntimeRecoveryConfig, AdminRuntimeScheduleConfig, AdminRuntimeWorkerConfig,
+};
 pub use ports::{AdminRuntimeCommandStore, AdminRuntimeConfigPort, AdminRuntimeFileStore};

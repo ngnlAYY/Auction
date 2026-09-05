@@ -1,5 +1,8 @@
 //! 运行时配置的分组表单控件。
 
+#[path = "form/operations/mod.rs"]
+mod operations;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -38,6 +41,8 @@ pub(super) fn RuntimeConfigFields(
                     }
                 }
             }
+
+            operations::OperationalConfigFields { form, disabled, on_dirty }
 
             RuntimeSection { title: t!("admin-runtime-section-equipment"), open: true,
                 RuntimeGroup { title: t!("admin-runtime-equipment-filter-title"),

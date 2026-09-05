@@ -47,6 +47,9 @@ Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 领取，`resolution.rs` 负责完成/失败 fence，`mapping.rs` 负责阶段、命令和 Lite 映射；claim 会冻结
 领取后 `state_version` 与精确租约期限，完成/失败必须同时匹配 owner、期限和版本，计划修改清除旧租约
 并递增版本后，陈旧 Worker 不能再收口；调度状态不进入内存或 Redis。
+`scheduler/lookup.rs` 为 PostgreSQL 完整档和 SQLite Lite 提供只读的 world/local_week 轮次定位，
+复用已有安全投影。Worker 配置变更先读取冻结事实；`bootstrap.rs` 的首次创建、请求摘要和既有
+身份一致性检查保持严格，不把新模板当作旧命令的兼容负载，也不改写既有拍卖策略。
 慢速代理使用 lot 自身的 `slow_authorization_id`、`slow_generation` 和 `slow_due_at` 作为持久化
 generation；`src/database/slow_proxy_due.rs` 按数据库时钟无锁有界扫描，随后由两后端竞价事务
 重新锁定 lot/活动代理/用户、核对截止时间并原子写入命令账本、计划、事件和

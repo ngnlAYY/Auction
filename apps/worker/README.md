@@ -21,10 +21,15 @@ AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
 ```
 
 Worker 配置没有 `listen_address`——该角色的默认监听地址为 `None`。
-Worker 可以通过主配置的 `runtime_config_file` 读取 Admin 管理的共享业务文档，但只消费
+Worker 可以通过主配置的 `runtime_config_file` 读取 Admin 管理的共享业务文档；对 MoogleMail 只消费
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板；Admin listener/security/session/
-metrics/tracing 不会投影到 Worker。transport、凭据、调度、mailbox identity 和全局 MoogleMail
+metrics/tracing 不会投影到 Worker。MoogleMail transport、凭据、调度、mailbox identity 和全局
 `enabled` 继续由 Worker 主配置拥有，runtime 更新后必须重启 Worker 才会生效。
+
+共享文档的 `operations.economics/schedule/forum/alerts/worker` 各自提供默认关闭的 `managed`；
+接管后在启动时覆盖对应经济模板、周排期、论坛同步、运维告警和各独立任务循环参数，再执行完整
+启动校验。旧文件省略区块、或某组未接管时继续使用原公共/角色配置。经济模板和排期需同时重启
+Admin/Worker，其余组重启 Worker；不会改写已有拍卖快照、任务游标、命令账本或租约状态。
 
 ## 拍卖邮件起拍价
 
@@ -145,7 +150,7 @@ world-aware Cookie 也供入站邮件的装备详情读取使用，避免把 Hen
 装备来源。未配置该独立密钥时继续兼容 `.keyenv`，但 Worker 只使用 `hv-ck-key1`；
 `hv-ck-key2` 仅供显式隔离验证，不参与运行时后备或自动切换。敏感配置仍是单 Cookie 入口。
 Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径。
-心跳的非敏感 `details.forum_sync_enabled` 固定为启动配置 `[worker.forum].enabled`，供 Public
+心跳的非敏感 `details.forum_sync_enabled` 固定为启动时完成 runtime 投影后的论坛启用值，供 Public
 只读展示实际启用状态；关闭不会由历史帖子是否存在推断。升级此展示能力时须同时更新 Worker、
 Public API 和公开端产物；修改开关后重启 Worker，页面会在下一轮状态读取时更新。周期心跳每轮读取
 真实数据库/schema readiness、进程内审计写入失败计数和 Worker tracing 安全状态；SIGINT/SIGTERM

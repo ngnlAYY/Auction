@@ -134,7 +134,8 @@ where
                     .await?;
                 self.finish_pending(reopened).await.map(|_| ())
             } else {
-                Ok(())
+                // durable intent 已记录且旧文件仍可证明；继续同一命令，不能永久占用唯一 pending 槽。
+                self.finish_pending(row).await.map(|_| ())
             }
         } else {
             let _ = self

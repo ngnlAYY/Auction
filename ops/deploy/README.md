@@ -32,6 +32,13 @@
 不得允许 group/world 写入；Admin runtime 文件只保存非敏感设置，权限按 `0640` 管理。不要把连接串、Cookie、登录 key 或数据密钥
 写入 unit 文件、命令行参数、Caddyfile 或日志。
 
+管理页接管 `operations` 任一组前，先安装支持该文档的 Admin/Worker，并让两者引用同一份
+runtime 文件；部署预检会拒绝路径不同或有效拍卖模板/排期不一致的组合。五组 `managed` 默认
+关闭，保留已有部署参数。保存经济模板或排期后需重启 Admin 与 Worker；论坛、告警和 Worker
+吞吐组只需重启 Worker。保存不会热改当前进程，也不会回写既有拍卖快照或持久任务。
+若 Admin 启动时报告 runtime 文件与已加载配置不一致，说明恢复或并发编辑已改变文件；先核对
+恢复后的候选，再重新执行部署重启，不能把旧进程的存活视为新配置已经生效。
+
 ## 发布制品
 
 生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制

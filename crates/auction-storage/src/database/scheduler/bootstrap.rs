@@ -494,7 +494,7 @@ fn verify_existing(
 }
 
 #[cfg(feature = "postgres")]
-fn snapshot_postgres(
+pub(super) fn snapshot_postgres(
     row: &sqlx::postgres::PgRow,
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     let active = scheduled_round_active(row.try_get("status").map_err(map_storage_error)?)?;
@@ -517,7 +517,7 @@ fn snapshot_postgres(
 }
 
 #[cfg(feature = "sqlite")]
-fn snapshot_sqlite(
+pub(super) fn snapshot_sqlite(
     row: &sqlx::sqlite::SqliteRow,
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     let round_id = Uuid::from_slice(&row.try_get::<Vec<u8>, _>("id").map_err(map_storage_error)?)

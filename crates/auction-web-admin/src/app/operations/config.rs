@@ -8,6 +8,8 @@
 mod form;
 #[path = "config/model.rs"]
 mod model;
+#[path = "config/operational_fields.rs"]
+mod operational_fields;
 #[path = "config/worlds.rs"]
 mod worlds;
 
