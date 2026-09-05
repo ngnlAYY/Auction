@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::surface::use_bid_refresh;
 use gloo_timers::future::TimeoutFuture;
 
 /// lot 筛选写回地址栏的防抖窗口：输入立即刷新列表，历史条目在停顿后合并为一次 replace。
@@ -84,6 +85,7 @@ pub(crate) fn bid_log() -> Element {
             }
         }
     });
+    use_bid_refresh(bid_log, true);
     let auction_options = match &*auctions.read_unchecked() {
         Some(Ok(auction_list)) => auction_list.clone(),
         _ => Vec::new(),

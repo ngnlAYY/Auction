@@ -69,6 +69,7 @@ pub(crate) fn LiveLotDetailView(
             fetch_lot_bid_log(auction_id.clone(), lot_id.clone(), page)
         }
     });
+    use_bid_refresh(bid_log, true);
     let show_countdown =
         lot.status == "live" && matches!(auction_status.as_str(), "live" | "final");
 

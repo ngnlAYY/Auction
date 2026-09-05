@@ -38,6 +38,10 @@ pub(crate) fn LiveCatalogActions(
             if authenticated && proxy_view_active { fetch_my_proxy(lot_id).await } else { Ok(None) }
         }
     });
+    use_bid_refresh(
+        proxy_state,
+        authenticated && (show_proxy_summary || action() == Some("proxy".to_owned())),
+    );
     let proxy_snapshot = proxy_state.read_unchecked().clone();
     let active_proxy = match proxy_snapshot.as_ref() {
         Some(Ok(Some(proxy))) if proxy.status == "active" => Some(proxy),

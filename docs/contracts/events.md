@@ -114,6 +114,10 @@ Public 提供 GET /api/v1/events 作为权威事件回放入口。冻结的查�
 带 `refetch_required` 的页不合并其中事件：客户端清空本地事实/版本缓存，保留
 `after=max(previous_after,next_after)` 作为恢复游标，并保持已经建立的 WebSocket。
 
+Public 浏览器可将通过上述校验的 `lot.bid_accepted` 合并为竞价资源的重读通知，避免重取
+无关的拍卖元数据和内容页面；该优化不改变游标推进、事件防重或命令确认语义。进行中的权威读取
+不能被连续竞价反复取消，尚未消费的通知在读取完成后补读；生命周期变化和恢复缺口仍触发全局刷新。
+
 ## WebSocket
 
 Public 提供 GET /api/v1/ws 升级为 WebSocket。连接必须显式选择一种范围：

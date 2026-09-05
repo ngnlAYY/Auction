@@ -74,6 +74,7 @@ pub(crate) fn PublicRealtimeOwner(
     mut realtime_state: Signal<LiveConnectionState>,
 ) -> Element {
     let page_visibility = use_context::<PageVisibility>();
+    let bid_refresh = use_context::<PublicBidRefresh>();
     let _stream = use_resource(use_reactive((&target,), move |(target,)| {
         let page_visibility = page_visibility.clone();
         async move {
@@ -128,12 +129,13 @@ pub(crate) fn PublicRealtimeOwner(
                 let mut callback_state = realtime_state;
                 let mut callback_refresh = refresh_generation;
                 let on_page = move |page: crate::api::RealtimePage| {
-                    let (refresh_required, continue_catch_up, degraded, next_after) =
+                    let (refresh_required, bids_changed, continue_catch_up, degraded, next_after) =
                         if let Some(cache) = callback_cache.as_ref() {
                             let merge = cache.borrow_mut().merge_page(&page);
                             let next_after = cache.borrow().after();
                             (
                                 merge.refresh_required,
+                                merge.bids_changed,
                                 merge.continue_catch_up,
                                 merge.degraded,
                                 next_after,
@@ -142,6 +144,7 @@ pub(crate) fn PublicRealtimeOwner(
                             (
                                 page.refetch_required
                                     || page.events.iter().any(should_refresh_auction_board),
+                                false,
                                 !page.refetch_required,
                                 page.refetch_required,
                                 callback_cursor.get().max(page.next_after),
@@ -163,6 +166,9 @@ pub(crate) fn PublicRealtimeOwner(
                     if refresh_required {
                         let next_refresh = callback_refresh.peek().saturating_add(1);
                         callback_refresh.set(next_refresh);
+                    } else if bids_changed {
+                        // 同页的生命周期/缺口刷新优先；普通竞价只使相关读取资源失效。
+                        bid_refresh.notify();
                     }
                     continue_catch_up
                 };

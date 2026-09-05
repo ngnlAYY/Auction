@@ -120,6 +120,7 @@ pub(crate) fn PublicShell() -> Element {
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
+    let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
     let mut readiness_generation = use_signal(|| 0_u64);
     // 发现流游标属于整个 Public 外壳；current-auction 刷新导致实时 owner 按 key 重建时也不能丢失。
     let discovery_after = use_signal(|| 0_i64);
@@ -181,6 +182,7 @@ pub(crate) fn PublicShell() -> Element {
     // 页头 WorldPicker 的 URL 写回经外壳 hook 状态信号，保证 popstate 恢复的相等判断不失效。
     use_context_provider(|| world_query_signal);
     use_context_provider(|| refresh_generation);
+    use_context_provider(|| bid_refresh);
     use_context_provider(|| realtime_state);
     use_context_provider(|| PublicLocationRevision(location_generation));
     let session_context = session;

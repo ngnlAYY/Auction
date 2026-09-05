@@ -176,6 +176,12 @@ SQLite 只用于本地或单主机 Lite 部署：数据库文件必须位于本�
 替代品。
 
 反向代理示例见 [`caddy/Caddyfile`](caddy/Caddyfile)。
+Public/Admin 模板只对 `GET`/`HEAD` 请求中的 `/assets/*` 和 `/favicon.ico` 启用 Zstandard/gzip 响应压缩，
+由 Caddy 按浏览器的 `Accept-Encoding` 与默认内容类型、大小条件协商。压缩覆盖当前内嵌发布的
+指纹 JS、WASM 和 CSS；浏览器页面入口、API、SSE 与 WebSocket 不在匹配范围内。静态资源的
+内嵌所有权、API-only 制品的缺失资源响应以及 HTTP 缓存策略仍由 Rust 服务按
+[`routes.md`](../../docs/contracts/routes.md) 契约提供。
+
 systemd 服务模板见 [`systemd/README.md`](systemd/README.md)；模板必须先替换运行账号和安装路径。
 三个角色 unit 不自动迁移；只有显式启动总控，或在确认三个角色均已停止后显式调用受保护的
 `auctionctl migrate`，才会执行 forward-only migration。任何 unit 都不会自动备份、恢复、

@@ -76,6 +76,7 @@ pub(crate) fn AuctionData(
         let category = (category != "all").then_some(category);
         async move { fetch_current_lots(auction_id, category, page).await }
     });
+    use_bid_refresh(lots, true);
     // 目录行是 lots 快照的纯派生：用 memo 收敛为仅在资源结果变化时重建，
     // 并以 Rc 共享给分组/表格，传参链路不再逐字段克隆整表。
     let rows = use_memo(move || match &*lots.read() {
