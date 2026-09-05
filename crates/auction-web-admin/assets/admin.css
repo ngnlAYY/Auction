@@ -433,6 +433,35 @@
   font-size: var(--admin-text-title);
 }
 
+/* 标题右侧动作组：手动刷新按钮 + 自动轮询开关。 */
+.admin-realtime-heading__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* 自动轮询开关控件（outbox / dashboard 共用）。 */
+.admin-poll-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* dashboard 头部：与 admin-realtime-heading 同布局。 */
+.admin-dashboard-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.admin-dashboard-heading h1 {
+  margin: 0;
+  font-size: var(--admin-text-title);
+}
+
 .admin-realtime-intro {
   margin: calc(-1 * var(--space-3)) 0 0;
   color: var(--color-text-muted);
@@ -3950,4 +3979,37 @@
     overflow: visible;
     scrollbar-gutter: auto;
   }
+}
+
+/* 表头排序触发按钮：占满表头单元格，箭头只做视觉指示（aria-hidden）。 */
+.admin-sort-trigger {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+}
+
+.admin-sort-trigger:hover {
+  color: var(--color-accent);
+}
+
+.admin-sort-arrow {
+  font-size: var(--text-xs, 0.75rem);
+}
+
+/* 字段级校验：控件旁即时错误提示。 */
+.admin-field-error {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-status-error);
+}
+
+/* 字段校验未通过时的控件描边，与错误文本同色系。 */
+[aria-invalid="true"] {
+  border-color: var(--color-status-error);
 }

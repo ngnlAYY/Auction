@@ -43,13 +43,8 @@ pub(crate) fn LiveLotDetailView(
     let connection_state = realtime_state();
     let connection_state_name = live_connection_state_name(connection_state);
     let connection_message = realtime::live_connection_message(connection_state);
-    // 倒计时每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
-    let mut clock = use_signal(estimated_now);
-    let tick = use_second_tick();
-    use_effect(move || {
-        let _ = tick();
-        clock.set(estimated_now());
-    });
+    // 倒计时的秒针订阅已下沉到 LotDetailCountdown 叶子组件，本组件不再持有每秒变化
+    // 的时钟信号，详情页其余部分（竞价历史、操作面板）不随秒针重渲染。
     let mut refresh_generation = use_context::<Signal<u64>>();
     let session = use_context::<PublicSessionResource>();
     let session_view = PublicSessionView::from_snapshot(session.read().as_ref());
@@ -76,10 +71,6 @@ pub(crate) fn LiveLotDetailView(
     });
     let show_countdown =
         lot.status == "live" && matches!(auction_status.as_str(), "live" | "final");
-    let countdown = show_countdown
-        .then_some(lot.effective_end_at.as_deref())
-        .flatten()
-        .map(|ends_at| countdown_display(ends_at, clock()));
 
     rsx! {
         section { class: "public-auction-lot", aria_labelledby: "lot-detail-title",
@@ -121,10 +112,8 @@ pub(crate) fn LiveLotDetailView(
                         if show_countdown {
                             dt { {t!("lot-ends-in")} }
                             dd {
-                                if let (Some(ends_at), Some(countdown)) =
-                                    (lot.effective_end_at.clone(), countdown)
-                                {
-                                    time { datetime: ends_at, class: countdown_class(&countdown), "{countdown.label}" }
+                                if let Some(ends_at) = lot.effective_end_at.clone() {
+                                    LotDetailCountdown { ends_at }
                                 } else {
                                     span { class: "public-auction-lot__none", {t!("value-empty")} }
                                 }
@@ -196,6 +185,17 @@ pub(crate) fn LiveLotDetailView(
                 }
             }
         }
+    }
+}
+
+/// lot 详情的结束倒计时。秒级节拍只在本叶子组件内订阅，详情页其余部分不随秒针重渲染。
+#[component]
+fn LotDetailCountdown(ends_at: String) -> Element {
+    let tick = use_second_tick();
+    let _ = tick();
+    let countdown = countdown_display(&ends_at, estimated_now());
+    rsx! {
+        time { datetime: ends_at.clone(), class: countdown_class(&countdown), "{countdown.label}" }
     }
 }
 

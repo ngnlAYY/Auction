@@ -24,11 +24,18 @@ pub(crate) fn LiveCatalogActions(
     let mut action = use_signal(|| None::<String>);
     let requested_lot_id = lot_id.clone();
     let proxy_state = use_resource(move || {
-        let _ = refresh_generation();
-        let should_load_proxy = show_proxy_summary || action() == Some("proxy".to_owned());
+        // 目录里每行都挂载本资源。若常驻订阅全局 refresh_generation，一次刷新会调度
+        // 与行数相同的资源任务（100 行 = 100 个任务）。闭合状态下资源恒为 Ok(None)，
+        // 跟随刷新不产生任何可见变化；因此只在本行代理视图激活（代理摘要或代理弹窗
+        // 打开）时才订阅刷新节拍，闭合时自动退订。API 没有批量代理查询端点，逐个
+        // 预取会改变网络行为，故不做目录级一次性加载。
+        let proxy_view_active = show_proxy_summary || action() == Some("proxy".to_owned());
+        if proxy_view_active {
+            let _ = refresh_generation();
+        }
         let lot_id = requested_lot_id.clone();
         async move {
-            if authenticated && should_load_proxy { fetch_my_proxy(lot_id).await } else { Ok(None) }
+            if authenticated && proxy_view_active { fetch_my_proxy(lot_id).await } else { Ok(None) }
         }
     });
     let proxy_snapshot = proxy_state.read_unchecked().clone();

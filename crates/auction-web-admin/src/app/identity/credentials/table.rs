@@ -1,5 +1,7 @@
 //! 凭据列表、状态操作和改名对话框入口。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
@@ -7,6 +9,7 @@ use uuid::Uuid;
 use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
 
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
+use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 use crate::app::surface::{AdminActionFeedback, run_admin_feedback_action, stable_command_id};
 
 use super::{
@@ -16,28 +19,65 @@ use super::{
 #[component]
 pub fn CredentialTable(
     page: AdminCredentialPage,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
     on_delete: EventHandler<AdminCredential>,
 ) -> Element {
     let session = use_context::<AdminSession>();
     let is_empty = page.credentials.is_empty();
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut credentials = page.credentials.clone();
+    sort_credentials(&mut credentials, &sort, direction);
     rsx! {
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
                 thead {
                     tr {
-                        th { {t!("admin-credentials-label")} }
-                        th { {t!("admin-credentials-world")} }
-                        th { {t!("admin-credentials-kind")} }
-                        th { {t!("admin-credentials-status")} }
-                        th { {t!("admin-credentials-last-checked")} }
+                        SortableTh {
+                            column: "label",
+                            label: t!("admin-credentials-label"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "world",
+                            label: t!("admin-credentials-world"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "kind",
+                            label: t!("admin-credentials-kind"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "status",
+                            label: t!("admin-credentials-status"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
+                        SortableTh {
+                            column: "checked",
+                            label: t!("admin-credentials-last-checked"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                        }
                         th { {t!("admin-credentials-last-used")} }
                         th { {t!("admin-credentials-imported-by")} }
                         th { {t!("admin-credentials-actions")} }
                     }
                 }
                 tbody {
-                    for credential in page.credentials {
+                    for credential in credentials {
                         CredentialRow {
                             credential,
                             imported_by: session.actor.clone(),
@@ -306,4 +346,25 @@ pub fn CredentialPager(page: AdminCredentialPage, on_page_change: EventHandler<i
             on_page_change,
         }
     }
+}
+
+/// 对当前页凭据行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+/// 上次检查时间缺省（None）在升序时排在最前。
+fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    credentials.sort_by(|left, right| {
+        directed(
+            match column {
+                "label" => left.label.cmp(&right.label),
+                "world" => left.world.cmp(&right.world),
+                "kind" => left.kind.cmp(&right.kind),
+                "status" => left.status.cmp(&right.status),
+                "checked" => left.rotated_at.cmp(&right.rotated_at),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

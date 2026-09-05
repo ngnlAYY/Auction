@@ -10,7 +10,7 @@ use futures_util::{
     future::{Either, poll_fn, select},
     pin_mut,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 #[cfg(target_arch = "wasm32")]
 use std::pin::Pin;
 #[cfg(target_arch = "wasm32")]
@@ -36,6 +36,38 @@ pub(crate) struct RealtimePage {
 }
 
 const SEEN_REALTIME_LIMIT: usize = 256;
+
+/// 有界防重集合：HashSet 提供 O(1) 成员判断，VecDeque 记录插入顺序用于先进先出淘汰，
+/// 维持 256 条上限语义。取代原先「每接受一条 bid 都整体 clone 去重 Vec」的事务写法。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SeenSet {
+    order: VecDeque<String>,
+    members: HashSet<String>,
+}
+
+impl SeenSet {
+    fn new() -> Self {
+        Self { order: VecDeque::new(), members: HashSet::new() }
+    }
+
+    fn contains(&self, value: &str) -> bool {
+        self.members.contains(value)
+    }
+
+    /// 记录一个新键；超出上限时按插入顺序淘汰最旧条目。
+    /// 重复键不改变其原有位置：调用方在重复路径上本就直接忽略事件，
+    /// 不会走到这里依赖重排续期。
+    fn remember(&mut self, value: String) {
+        if self.members.insert(value.clone()) {
+            self.order.push_back(value);
+            while self.order.len() > SEEN_REALTIME_LIMIT {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.members.remove(&oldest);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RealtimePageMerge {
@@ -111,8 +143,8 @@ pub(crate) struct RealtimeCache {
     baseline_after: Option<i64>,
     fact_identities: BTreeMap<String, String>,
     last_facts: BTreeMap<String, LastBidFact>,
-    seen: Vec<String>,
-    seen_facts: Vec<String>,
+    seen: SeenSet,
+    seen_facts: SeenSet,
     versions: BTreeMap<String, i64>,
 }
 
@@ -126,8 +158,8 @@ impl RealtimeCache {
             baseline_after: None,
             fact_identities: BTreeMap::new(),
             last_facts: BTreeMap::new(),
-            seen: Vec::new(),
-            seen_facts: Vec::new(),
+            seen: SeenSet::new(),
+            seen_facts: SeenSet::new(),
             versions,
         }
     }
@@ -190,7 +222,7 @@ impl RealtimeCache {
         let Some((key, version)) = event_version(event) else { return EventMerge::Gap };
         let newer = version > self.versions.get(&key).copied().unwrap_or(0);
         self.after = event.stream_sequence;
-        remember(&mut self.seen, event.event_id.clone());
+        self.seen.remember(event.event_id.clone());
         if newer {
             self.versions.insert(key, version);
         }
@@ -224,14 +256,12 @@ impl RealtimeCache {
         };
         let identity =
             format!("{lot_id}:{state_version}:{fact_index}:{amount}:{mechanism}:{effective_end}");
-        let mut seen = self.seen.clone();
-        remember(&mut seen, event.event_id.clone());
         if let Some(stored_identity) = self.fact_identities.get(bid_id) {
             if stored_identity != &identity {
                 return EventMerge::Gap;
             }
+            self.seen.remember(event.event_id.clone());
             self.after = event.stream_sequence;
-            self.seen = seen;
             return EventMerge::Applied { refresh: false };
         }
 
@@ -244,13 +274,15 @@ impl RealtimeCache {
             return EventMerge::Gap;
         }
 
-        remember(&mut self.seen_facts, bid_id.to_owned());
+        // 校验全部通过后才写入状态：与原先「先克隆 seen、确认无误再写回」的事务语义
+        // 一致，Gap 路径不会污染防重集合。
+        self.seen.remember(event.event_id.clone());
+        self.seen_facts.remember(bid_id.to_owned());
         self.fact_identities.retain(|known_bid_id, _| self.seen_facts.contains(known_bid_id));
         self.fact_identities.insert(bid_id.to_owned(), identity);
         self.last_facts.insert(lot_id.to_owned(), LastBidFact { fact_index, state_version });
         self.versions.insert(lot_id.to_owned(), state_version);
         self.after = event.stream_sequence;
-        self.seen = seen;
         EventMerge::Applied { refresh: true }
     }
 
@@ -311,13 +343,6 @@ fn event_version(event: &RealtimeEvent) -> Option<(String, i64)> {
             Some((auction_id.to_owned(), payload.get("state_version")?.as_i64()?))
         }
         _ => None,
-    }
-}
-
-fn remember(values: &mut Vec<String>, value: String) {
-    values.push(value);
-    if values.len() > SEEN_REALTIME_LIMIT {
-        values.drain(..values.len() - SEEN_REALTIME_LIMIT);
     }
 }
 

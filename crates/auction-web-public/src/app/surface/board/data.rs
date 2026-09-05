@@ -8,8 +8,9 @@ pub(crate) fn AuctionData(
     historical: bool,
     boot_prerequisites_ready: bool,
 ) -> Element {
-    // 倒计时与开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
-    let mut clock = use_signal(estimated_now);
+    // 开场刷新每秒重算：订阅外壳提供的共享秒级节拍，不再自起独立定时器。
+    // 倒计时显示的秒针订阅已下沉到 AuctionHeaderCountdown / LiveRowCountdown 叶子组件，
+    // 顶层不再持有每秒变化的时钟信号，避免整个 AuctionData 子树每秒全量重渲染。
     let tick = use_second_tick();
     // 分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
@@ -29,7 +30,6 @@ pub(crate) fn AuctionData(
     use_effect(move || {
         let _ = tick();
         let now = estimated_now();
-        clock.set(now);
         if *opening_refresh_key.peek() != Some(opening_key.clone()) {
             opening_refresh_key.set(Some(opening_key.clone()));
             opening_refreshed.set(false);
@@ -76,6 +76,12 @@ pub(crate) fn AuctionData(
         let category = (category != "all").then_some(category);
         async move { fetch_current_lots(auction_id, category, page).await }
     });
+    // 目录行是 lots 快照的纯派生：用 memo 收敛为仅在资源结果变化时重建，
+    // 并以 Rc 共享给分组/表格，传参链路不再逐字段克隆整表。
+    let rows = use_memo(move || match &*lots.read() {
+        Some(Ok(page)) => Rc::new(page.rows()),
+        _ => Rc::new(Vec::new()),
+    });
     let aligned = match &*lots.read_unchecked() {
         Some(Ok(page)) => {
             page.auction_id == auction.id
@@ -108,7 +114,6 @@ pub(crate) fn AuctionData(
         }
     });
     let status_label = auction_status_label(&auction.status);
-    let now = clock();
     let is_live_presentation = auction.presentation_mode == "live";
     let is_opening_presentation = auction.presentation_mode == "opening";
     let show_live_countdown =
@@ -123,7 +128,6 @@ pub(crate) fn AuctionData(
         // settling/settled 已进入终态收口，不再把过去的计划截止时间渲染为“落锤中…”。
         None
     };
-    let auction_countdown = auction_end.as_deref().map(|ends_at| countdown_display(ends_at, now));
     let catalog = match &*lots.read_unchecked() {
         None => {
             rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } }
@@ -146,16 +150,14 @@ pub(crate) fn AuctionData(
             p { class: "public-page-status", role: "status", {t!("common-loading")} }
         },
         Some(Ok(page)) => {
-            let rows = page.rows();
             let page_size = page.page_size.filter(|size| *size > 0).unwrap_or(20);
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
             let has_more = page.total.is_none()
-                && i64::try_from(rows.len()).is_ok_and(|row_count| row_count >= page_size);
+                && i64::try_from(rows.read().len()).is_ok_and(|row_count| row_count >= page_size);
             rsx! {
                 CatalogTable {
-                    rows,
-                    now,
+                    rows: rows(),
                     projection_kind: page.projection_kind.clone(),
                     category_counts: page.category_counts.clone().unwrap_or_default(),
                     active_category: active_category(),
@@ -209,25 +211,11 @@ pub(crate) fn AuctionData(
                         p { class: "public-auction-round__end",
                             {t!("auction-header-opening")}
                         }
-                    } else if let (Some(scheduled_ends_at), Some(countdown)) =
-                        (auction_end.clone(), auction_countdown)
-                    {
-                        p { class: "public-auction-round__end",
-                            if is_live_presentation {
-                                if auction.status == "final" {
-                                    {t!("auction-header-final-ends-in")}
-                                } else {
-                                    {t!("auction-header-ends-in")}
-                                }
-                            } else {
-                                {t!("auction-header-opens-in")}
-                            }
-                            span {
-                                class: countdown_class(&countdown),
-                                aria_label: t!("auction-countdown"),
-                                "{countdown.label}"
-                            }
-                            Time { value: scheduled_ends_at.clone() }
+                    } else if let Some(scheduled_ends_at) = auction_end.clone() {
+                        AuctionHeaderCountdown {
+                            scheduled_ends_at,
+                            is_live_presentation,
+                            status: auction.status.clone(),
                         }
                     }
                     {preview_history_switch(&history_switch.read_unchecked(), &auction, historical)}
@@ -261,6 +249,38 @@ pub(crate) fn AuctionData(
                     {catalog}
                 }
             }
+        }
+    }
+}
+
+/// 拍卖头部的开场/结束倒计时。秒级节拍只在本叶子组件内订阅：顶层 [`AuctionData`]
+/// 不再持有每秒变化的时钟信号，目录子树不随秒针重渲染。
+#[component]
+fn AuctionHeaderCountdown(
+    scheduled_ends_at: String,
+    is_live_presentation: bool,
+    status: String,
+) -> Element {
+    let tick = use_second_tick();
+    let _ = tick();
+    let countdown = countdown_display(&scheduled_ends_at, estimated_now());
+    rsx! {
+        p { class: "public-auction-round__end",
+            if is_live_presentation {
+                if status == "final" {
+                    {t!("auction-header-final-ends-in")}
+                } else {
+                    {t!("auction-header-ends-in")}
+                }
+            } else {
+                {t!("auction-header-opens-in")}
+            }
+            span {
+                class: countdown_class(&countdown),
+                aria_label: t!("auction-countdown"),
+                "{countdown.label}"
+            }
+            Time { value: scheduled_ends_at.clone() }
         }
     }
 }

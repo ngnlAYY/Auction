@@ -3,6 +3,8 @@
 //! 审计事实只读且追加式；筛选和分页请求通过 HTTP 安全 DTO 完成，浏览器不修改记录、不接触
 //! 数据库模型，也不把 metadata 当作可执行内容。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -12,6 +14,7 @@ use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin
 
 use super::admin_api_error_message;
 use super::query::{AuditQuery, use_audit_query_state};
+use super::sort::{SortDirection, SortableTh, directed};
 
 pub(super) fn page() -> Element {
     // 已应用的筛选与分页跟地址栏双向同步；表单草稿是提交前的瞬态，只在提交时入 URL。
@@ -28,8 +31,8 @@ pub(super) fn page() -> Element {
 
     let mut apply_query = query.clone();
     let apply_filter = move |next_filter: AdminAuditFilter| {
-        // 提交筛选回到第一页；查询资源响应状态变化自动重新加载。
-        apply_query.push(AuditQuery { filter: next_filter, page: 1 });
+        // 提交筛选回到第一页并保留排序；查询资源响应状态变化自动重新加载。
+        apply_query.push(AuditQuery { filter: next_filter, page: 1, ..query_state() });
     };
     let content = match &*audit.read_unchecked() {
         None => rsx! {
@@ -50,8 +53,20 @@ pub(super) fn page() -> Element {
         },
         Some(Ok(page)) => {
             let mut on_page_change = query.clone();
+            let mut on_sort_change = query.clone();
             rsx! {
-            AuditTable { page: page.clone() }
+            AuditTable {
+                page: page.clone(),
+                sort: query_state().sort.clone(),
+                direction: query_state().direction,
+                on_sort_change: move |(sort, direction)| {
+                    // 排序只影响当前页展示顺序；筛选与翻页保持不变。
+                    let mut next = query_state();
+                    next.sort = sort;
+                    next.direction = direction;
+                    on_sort_change.push(next);
+                },
+            }
             Pager {
                 page: page.page.unwrap_or(query_state().page).max(1),
                 page_size: page.page_size,
@@ -228,26 +243,77 @@ fn AuditFilters(
 }
 
 #[component]
-fn AuditTable(page: AdminAuditPage) -> Element {
+fn AuditTable(
+    page: AdminAuditPage,
+    /// 当前排序列（空串 = 服务端原始顺序，即发生时间倒序）与方向。
+    sort: String,
+    direction: SortDirection,
+    on_sort_change: EventHandler<(String, SortDirection)>,
+) -> Element {
     let empty = page.records.is_empty();
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut records = page.records.clone();
+    sort_audit_records(&mut records, &sort, direction);
     rsx! {
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",
             table { class: "admin-shell__table admin-audit-table ui-table--responsive",
                 caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
                 thead {
                     tr {
-                        th { class: "admin-audit-table__time", scope: "col", {t!("admin-audit-at")} }
-                        th { class: "admin-audit-table__actor", scope: "col", {t!("admin-audit-actor")} }
-                        th { class: "admin-audit-table__action", scope: "col", {t!("admin-audit-action")} }
-                        th { class: "admin-audit-table__entity", scope: "col", {t!("admin-audit-entity")} }
-                        th { class: "admin-audit-table__source", scope: "col", {t!("admin-audit-source")} }
-                        th { class: "admin-audit-table__result", scope: "col", {t!("admin-audit-result")} }
+                        SortableTh {
+                            column: "at",
+                            label: t!("admin-audit-at"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__time",
+                        }
+                        SortableTh {
+                            column: "actor",
+                            label: t!("admin-audit-actor"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__actor",
+                        }
+                        SortableTh {
+                            column: "action",
+                            label: t!("admin-audit-action"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__action",
+                        }
+                        SortableTh {
+                            column: "entity",
+                            label: t!("admin-audit-entity"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__entity",
+                        }
+                        SortableTh {
+                            column: "source",
+                            label: t!("admin-audit-source"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__source",
+                        }
+                        SortableTh {
+                            column: "result",
+                            label: t!("admin-audit-result"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-audit-table__result",
+                        }
                         th { class: "admin-audit-table__request", scope: "col", {t!("admin-audit-request-id")} }
                         th { class: "admin-audit-table__metadata", scope: "col", {t!("admin-audit-metadata")} }
                     }
                 }
                 tbody {
-                    for record in page.records {
+                    for record in records {
                         AuditRow { record }
                     }
                 }
@@ -388,4 +454,25 @@ fn audit_result_label(value: &str) -> String {
         "failure" => t!("admin-audit-result-failure"),
         _ => value.to_owned(),
     }
+}
+
+/// 对当前页审计记录排序；`column` 为空或不在允许集合时保持服务端原始顺序（发生时间倒序）。
+fn sort_audit_records(records: &mut [AdminAuditRecord], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    records.sort_by(|left, right| {
+        directed(
+            match column {
+                "at" => left.occurred_at.cmp(&right.occurred_at),
+                "actor" => left.actor_id.cmp(&right.actor_id),
+                "action" => left.action.cmp(&right.action),
+                "entity" => left.entity_id.cmp(&right.entity_id),
+                "source" => left.source.cmp(&right.source),
+                "result" => left.result.cmp(&right.result),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

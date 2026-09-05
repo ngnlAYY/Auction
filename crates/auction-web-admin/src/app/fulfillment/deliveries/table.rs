@@ -1,5 +1,7 @@
 //! Delivery 列表、行动作和分页组件。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -9,6 +11,7 @@ use auction_web_shared::{
 
 use crate::api::{Delivery, DeliveryPage};
 
+use super::super::sort::{SortDirection, SortableTh, directed};
 use super::dialog::DeliveryDialog;
 use super::helpers::{delivery_display_id, delivery_display_type, delivery_status_label};
 use super::model::{
@@ -19,6 +22,10 @@ use super::model::{
 #[component]
 pub(super) fn DeliveryTable(
     page: DeliveryPage,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     on_open: EventHandler<(Delivery, DeliveryDialogKind)>,
     busy_delivery: Signal<Option<String>>,
     pending_dialog: Option<DeliveryDialogState>,
@@ -27,24 +34,55 @@ pub(super) fn DeliveryTable(
     on_confirm: EventHandler<DeliveryActionRequest>,
     on_cancel: EventHandler<()>,
 ) -> Element {
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut deliveries = page.deliveries.clone();
+    sort_deliveries(&mut deliveries, &sort, direction);
     rsx! {
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
                 caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
                 thead {
                     tr {
-                        th { scope: "col", class: "admin-delivery-col-id", {t!("delivery-id")} }
+                        SortableTh {
+                            column: "id",
+                            label: t!("delivery-id"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-id",
+                        }
                         th { scope: "col", class: "admin-delivery-col-type", {t!("delivery-type")} }
                         th { scope: "col", class: "admin-delivery-col-target", {t!("delivery-to")} }
-                        th { scope: "col", class: "admin-delivery-col-cod", {t!("delivery-cod")} }
-                        th { scope: "col", class: "admin-delivery-col-status", {t!("delivery-status")} }
-                        th { scope: "col", class: "admin-delivery-col-attempts", {t!("delivery-attempts")} }
+                        SortableTh {
+                            column: "cod",
+                            label: t!("delivery-cod"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-cod",
+                        }
+                        SortableTh {
+                            column: "status",
+                            label: t!("delivery-status"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-status",
+                        }
+                        SortableTh {
+                            column: "attempts",
+                            label: t!("delivery-attempts"),
+                            active: sort.clone(),
+                            direction,
+                            on_sort: on_sort_change,
+                            class: "admin-delivery-col-attempts",
+                        }
                         th { scope: "col", class: "admin-delivery-col-error", {t!("delivery-last-error")} }
                         th { scope: "col", {t!("catalog-actions")} }
                     }
                 }
                 tbody {
-                    for delivery in page.deliveries.clone() {
+                    for delivery in deliveries {
                         // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
                         DeliveryRow {
                             key: "{delivery.id}",
@@ -205,4 +243,24 @@ pub(super) fn DeliveryPager(page: DeliveryPage, on_page_change: EventHandler<i64
             on_page_change,
         }
     }
+}
+
+/// 对当前页 delivery 行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+/// 到付金额缺省（None）在升序时排在最前。
+fn sort_deliveries(deliveries: &mut [Delivery], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    deliveries.sort_by(|left, right| {
+        directed(
+            match column {
+                "id" => left.id.cmp(&right.id),
+                "cod" => left.cod.cmp(&right.cod),
+                "status" => left.status.cmp(&right.status),
+                "attempts" => left.attempt_count.cmp(&right.attempt_count),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

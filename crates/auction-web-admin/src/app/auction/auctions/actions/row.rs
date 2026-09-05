@@ -3,12 +3,13 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::Time;
+use auction_web_shared::{Time, use_second_tick};
 
 use crate::api::{AdminAuction, AdminAuctionCapabilities};
 
 use super::super::helpers::{
-    admin_auction_status_label, admin_auction_world_label, scheduled_time_millis,
+    admin_auction_status_label, admin_auction_world_label, current_time_millis,
+    scheduled_time_millis,
 };
 use super::{dialog::AdminAuctionActions, model::AdminAuctionNotice};
 
@@ -16,17 +17,11 @@ use super::{dialog::AdminAuctionActions, model::AdminAuctionNotice};
 pub(crate) fn AdminAuctionRow(
     auction: AdminAuction,
     capabilities: AdminAuctionCapabilities,
-    clock_millis: i64,
     notice: Signal<Option<AdminAuctionNotice>>,
     reload_generation: Signal<u64>,
 ) -> Element {
     let auction_id = auction.id.clone();
     let lifecycle_status = auction.status.clone();
-    let current_time_millis = clock_millis;
-    let open_ready = auction.status == "preview"
-        && (capabilities.manual_early_open
-            || scheduled_time_millis(&auction.scheduled_open_at)
-                .is_some_and(|scheduled| scheduled <= current_time_millis));
     rsx! {
         tr { class: "admin-auctions__row",
             td { "data-label": t!("admin-auctions-sequence"),
@@ -50,12 +45,10 @@ pub(crate) fn AdminAuctionRow(
                     {t!("value-empty")}
                 }
             }
-            td { "data-label": t!("admin-auctions-readiness"),
-                if open_ready {
-                    span { class: "admin-auctions__ready", {t!("admin-auctions-ready")} }
-                } else {
-                    {t!("value-empty")}
-                }
+            AdminAuctionReadinessCell {
+                status: auction.status.clone(),
+                manual_early_open: capabilities.manual_early_open,
+                scheduled_open_at: auction.scheduled_open_at.clone(),
             }
             td { "data-label": t!("admin-auctions-actions"),
                 AdminAuctionActions {
@@ -67,10 +60,35 @@ pub(crate) fn AdminAuctionRow(
                     preview_scheduled_at: auction.preview_scheduled_at.clone(),
                     scheduled_open_at: auction.scheduled_open_at.clone(),
                     scheduled_end_at: auction.scheduled_ends_at.clone(),
-                    current_time_millis,
                     notice,
                     reload_generation,
                 }
+            }
+        }
+    }
+}
+
+/// 「可开拍」就绪单元格。秒级节拍只在本叶子组件内订阅：整行与整表不随秒针重渲染，
+/// 只有依赖当前时间的就绪判定每秒重算一次。
+#[component]
+fn AdminAuctionReadinessCell(
+    status: String,
+    manual_early_open: bool,
+    scheduled_open_at: String,
+) -> Element {
+    let second_tick = use_second_tick();
+    let _ = second_tick();
+    let current_time_millis = current_time_millis();
+    let open_ready = status == "preview"
+        && (manual_early_open
+            || scheduled_time_millis(&scheduled_open_at)
+                .is_some_and(|scheduled| scheduled <= current_time_millis));
+    rsx! {
+        td { "data-label": t!("admin-auctions-readiness"),
+            if open_ready {
+                span { class: "admin-auctions__ready", {t!("admin-auctions-ready")} }
+            } else {
+                {t!("value-empty")}
             }
         }
     }

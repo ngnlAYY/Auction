@@ -39,11 +39,21 @@ pub(super) fn page() -> Element {
         .map(|result| result.clone().map_err(|error| admin_api_error_message(&error)));
 
     let mut on_query_change = query.clone();
+    let mut on_sort_change = query.clone();
     rsx! {
         AdminAuctionTable {
             state,
             world: query_state().world.clone(),
+            sort: query_state().sort.clone(),
+            direction: query_state().direction,
             on_query_change: move |next: AuctionsQuery| on_query_change.push(next),
+            on_sort_change: move |(sort, direction)| {
+                // 排序只影响当前页展示顺序；翻页与其他筛选保持不变。
+                let mut next = query_state();
+                next.sort = sort;
+                next.direction = direction;
+                on_sort_change.push(next);
+            },
             reload_generation,
         }
     }

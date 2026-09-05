@@ -4,8 +4,7 @@ use super::*;
 
 #[component]
 pub(crate) fn CatalogTable(
-    rows: Vec<CatalogRow>,
-    now: DateTime<Utc>,
+    rows: Rc<Vec<CatalogRow>>,
     projection_kind: String,
     category_counts: BTreeMap<String, i64>,
     active_category: String,
@@ -59,7 +58,7 @@ pub(crate) fn CatalogTable(
                 }
             }
         }
-        for (category, category_rows) in groups {
+        for (category, indices) in groups {
             section { class: "public-auction-category",
                 h3 { class: "public-auction-category__title",
                     {catalog_category_label(category)}
@@ -67,8 +66,8 @@ pub(crate) fn CatalogTable(
                 }
                 if is_live {
                     LiveCatalogTable {
-                        rows: category_rows,
-                        now,
+                        rows: Rc::clone(&rows),
+                        indices,
                         can_bid,
                         allow_slow,
                         session_ready,
@@ -76,7 +75,7 @@ pub(crate) fn CatalogTable(
                         viewer_player_id: viewer_player_id.clone(),
                     }
                 } else {
-                    PreviewCatalogTable { rows: category_rows }
+                    PreviewCatalogTable { rows: Rc::clone(&rows), indices }
                 }
             }
         }
@@ -97,8 +96,8 @@ pub(crate) fn CatalogTable(
 }
 #[component]
 pub(crate) fn LiveCatalogTable(
-    rows: Vec<CatalogRow>,
-    now: DateTime<Utc>,
+    rows: Rc<Vec<CatalogRow>>,
+    indices: Vec<usize>,
     can_bid: bool,
     allow_slow: bool,
     session_ready: bool,
@@ -141,12 +140,11 @@ pub(crate) fn LiveCatalogTable(
                     }
                 }
                 tbody {
-                    for row in rows {
+                    for index in indices {
                         LiveCatalogRow {
                             // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
-                            key: "{row.lot_id}",
-                            row,
-                            now,
+                            key: "{rows[index].lot_id}",
+                            row: rows[index].clone(),
                             can_bid,
                             allow_slow,
                             session_ready,
@@ -161,7 +159,7 @@ pub(crate) fn LiveCatalogTable(
 }
 
 #[component]
-pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
+pub(crate) fn PreviewCatalogTable(rows: Rc<Vec<CatalogRow>>, indices: Vec<usize>) -> Element {
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
@@ -195,9 +193,9 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
                     }
                 }
                 tbody {
-                    for row in rows {
+                    for index in indices {
                         // 以 lot_id 作为稳定 key，避免刷新后行状态错位绑定到别的 lot。
-                        PreviewCatalogRow { key: "{row.lot_id}", row }
+                        PreviewCatalogRow { key: "{rows[index].lot_id}", row: rows[index].clone() }
                     }
                 }
             }
@@ -205,10 +203,21 @@ pub(crate) fn PreviewCatalogTable(rows: Vec<CatalogRow>) -> Element {
     }
 }
 
+/// 行内剩余时间倒计时。秒级节拍只在本叶子组件内订阅：整行的装备、价格与操作单元格
+/// 不随秒针重渲染，只有真正显示倒计时的单元格每秒重算。
+#[component]
+fn LiveRowCountdown(remaining: String) -> Element {
+    let tick = use_second_tick();
+    let _ = tick();
+    let countdown = countdown_display(&remaining, estimated_now());
+    rsx! {
+        span { class: countdown_class(&countdown), "{countdown.label}" }
+    }
+}
+
 #[component]
 pub(crate) fn LiveCatalogRow(
     row: CatalogRow,
-    now: DateTime<Utc>,
     can_bid: bool,
     allow_slow: bool,
     session_ready: bool,
@@ -223,12 +232,13 @@ pub(crate) fn LiveCatalogRow(
         .is_some_and(|(viewer, leader)| viewer == leader);
     let leading = if is_leading { "public-auction-catalog__leading" } else { "" };
     let leading_status_id = format!("public-auction-leading-status-{}", row.lot_id);
-    let countdown = if row.status == "live" {
-        countdown_display(&row.remaining, now)
-    } else {
-        CountdownDisplay { label: t!("value-empty"), urgent: false, expired: false, empty: true }
-    };
-    let countdown_css_class = countdown_class(&countdown);
+    // 非 live 行保持原占位倒计时文案与样式；live 行的倒计时下沉到 LiveRowCountdown 叶子组件。
+    let inactive_countdown = (row.status != "live").then(|| CountdownDisplay {
+        label: t!("value-empty"),
+        urgent: false,
+        expired: false,
+        empty: true,
+    });
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
     let primary_attribute_initials =
         row.primary_attribute_initials.clone().unwrap_or_else(|| t!("value-empty"));
@@ -307,7 +317,11 @@ pub(crate) fn LiveCatalogRow(
             }
             td {
                 "data-label": t!("catalog-remaining"),
-                span { class: "{countdown_css_class}", "{countdown.label}" }
+                if row.status == "live" {
+                    LiveRowCountdown { remaining: row.remaining.clone() }
+                } else if let Some(countdown) = inactive_countdown {
+                    span { class: countdown_class(&countdown), "{countdown.label}" }
+                }
             }
             td { "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }

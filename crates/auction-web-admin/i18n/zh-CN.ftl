@@ -67,6 +67,15 @@ admin-pagination-status = 第 { $page } / { $pages } 页
 admin-pagination-next = 下一页
 admin-pagination-input = 页码
 admin-pagination-go = 跳转
+
+# 表头排序：服务端列表端点不支持排序参数，排序只对当前页生效，tooltip 明确该局限。
+admin-sort-inactive-hint = 按此列排序（仅当前页生效）
+admin-sort-ascending-hint = 当前为升序，点击改为降序（仅当前页生效）
+admin-sort-descending-hint = 当前为降序，点击改为升序（仅当前页生效）
+
+# 字段级校验的通用错误文案。
+admin-field-required = 请填写此字段。
+admin-field-positive-integer = 请输入大于 0 的整数。
 admin-renames-loading = 正在加载改名历史……
 admin-renames-name-filter = 名称
 admin-renames-load = 加载
@@ -353,6 +362,9 @@ admin-auctions-create-submit = 创建草稿拍卖
 admin-auctions-create-close = 关闭
 admin-auctions-create-success = 拍卖草稿已创建。
 admin-auctions-create-invalid = 请填写未来的预览时间、不得早于预览时间的开放时间，以及晚于开放时间的结束时间。
+admin-auctions-create-field-preview-past = 预览时间必须不早于当前时间。
+admin-auctions-create-field-open-before-preview = 开放时间不得早于预览时间。
+admin-auctions-create-field-end-after-open = 结束时间必须晚于开放时间。
 
 admin-intake-title = 向 { $world } 录入装备
 admin-intake-description = 服务端会自动选择当前私有收件场次，不会提交拍卖 ID。
@@ -481,6 +493,9 @@ admin-mail-delivery-ids = 投递 ID
 
 realtime-loading = 正在加载实时运维数据……
 realtime-refresh = 刷新数据
+admin-poll-label = 自动刷新
+admin-poll-off = 关闭
+admin-poll-interval = 每 { $seconds } 秒
 realtime-overview-title = 实时事件概览
 realtime-overview-events = 已持久化事件
 realtime-overview-consumers = 消费流
@@ -740,6 +755,9 @@ admin-users-create-open = 创建用户
 admin-users-create-close = 取消
 admin-users-create-submit = 创建
 admin-users-created = 已创建用户{ $username }。
+admin-users-field-forum-account-id-invalid = 论坛账号 ID 必须是不以 0 开头的数字。
+admin-users-field-manual-key-short = 手动 Key 至少 32 个字符。
+admin-users-field-username-conflict = 用户名或论坛账号与现有记录冲突。
 admin-users-generated-key = 出价 Key
 admin-users-generated-key-title = 出价 Key
 admin-users-generated-key-warning = 请立即复制此 Key。关闭窗口后将不再显示，也无法找回。
@@ -791,6 +809,9 @@ admin-credentials-label = 账号名称
 admin-credentials-secret = Cookie 值
 admin-credentials-create-submit = 导入
 admin-credentials-action-success = 操作已完成。
+admin-credentials-field-label-invalid = 账号名称缺失或无效。
+admin-credentials-field-secret-invalid = Cookie 值无效。
+admin-credentials-field-label-conflict = 同一世界与类型下已存在同名账号。
 admin-credentials-status = 状态
 admin-credentials-last-checked = 上次检查
 admin-credentials-last-used = 上次使用

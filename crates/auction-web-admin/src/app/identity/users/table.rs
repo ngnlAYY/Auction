@@ -1,12 +1,15 @@
 //! Admin 用户筛选、列表和分页。
 
+use std::cmp::Ordering;
+
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
 
-use crate::api::AdminUserStatusFilter;
+use crate::api::{AdminUser, AdminUserStatusFilter};
 use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{parse_status_filter, status_filter_value};
@@ -18,16 +21,23 @@ pub(super) fn AdminUserTable(
     mut name_draft: Signal<String>,
     /// 当前状态筛选（地址栏恢复后的值）；变更经回调由页面写回 URL。
     status: AdminUserStatusFilter,
+    /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
+    sort: String,
+    direction: SortDirection,
     /// 提交名称草稿：由页面 push 到地址栏并回到第一页。
     on_name_apply: EventHandler<String>,
     on_status_change: EventHandler<AdminUserStatusFilter>,
     on_page_change: EventHandler<i64>,
+    on_sort_change: EventHandler<(String, SortDirection)>,
     reload_generation: Signal<u64>,
     action_busy: Signal<bool>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
     create_notice: Signal<Option<String>>,
     on_generated_key: EventHandler<AdminUserGeneratedKey>,
 ) -> Element {
+    // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
+    let mut users = page.users.clone();
+    sort_users(&mut users, &sort, direction);
     rsx! {
         form {
             class: "admin-users-filter",
@@ -65,16 +75,40 @@ pub(super) fn AdminUserTable(
         div { class: "admin-users-table-wrap",
             table { class: "admin-users-table",
                 thead { tr {
-                    th { {t!("admin-users-username")} }
+                    SortableTh {
+                        column: "username",
+                        label: t!("admin-users-username"),
+                        active: sort.clone(),
+                        direction,
+                        on_sort: on_sort_change,
+                    }
                     th { {t!("admin-users-forum-account-id")} }
-                    th { {t!("admin-users-status")} }
+                    SortableTh {
+                        column: "status",
+                        label: t!("admin-users-status"),
+                        active: sort.clone(),
+                        direction,
+                        on_sort: on_sort_change,
+                    }
                     th { {t!("admin-users-blacklist-history")} }
-                    th { {t!("admin-users-blacklist-count")} }
-                    th { {t!("admin-users-created-at")} }
+                    SortableTh {
+                        column: "blacklist_count",
+                        label: t!("admin-users-blacklist-count"),
+                        active: sort.clone(),
+                        direction,
+                        on_sort: on_sort_change,
+                    }
+                    SortableTh {
+                        column: "created_at",
+                        label: t!("admin-users-created-at"),
+                        active: sort.clone(),
+                        direction,
+                        on_sort: on_sort_change,
+                    }
                     th { {t!("admin-users-actions")} }
                 } }
                 tbody {
-                    for user in page.users.iter().cloned() {
+                    for user in users {
                         AdminUserRow {
                             key: "{user.id}",
                             user,
@@ -123,4 +157,23 @@ pub(super) fn AdminUserTable(
             on_page_change,
         }
     }
+}
+
+/// 对当前页用户行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
+fn sort_users(users: &mut [AdminUser], column: &str, direction: SortDirection) {
+    if column.is_empty() {
+        return;
+    }
+    users.sort_by(|left, right| {
+        directed(
+            match column {
+                "username" => left.username.cmp(&right.username),
+                "status" => left.status.cmp(&right.status),
+                "blacklist_count" => left.blacklist_count.cmp(&right.blacklist_count),
+                "created_at" => left.created_at.cmp(&right.created_at),
+                _ => Ordering::Equal,
+            },
+            direction,
+        )
+    });
 }

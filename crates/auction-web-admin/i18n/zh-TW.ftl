@@ -73,6 +73,9 @@ admin-credentials-label = 帳號名稱
 admin-credentials-secret = Cookie 值
 admin-credentials-create-submit = 匯入
 admin-credentials-action-success = 操作已完成。
+admin-credentials-field-label-invalid = 帳號名稱缺失或無效。
+admin-credentials-field-secret-invalid = Cookie 值無效。
+admin-credentials-field-label-conflict = 同一世界與類型下已存在同名帳號。
 admin-credentials-status = 狀態
 admin-credentials-last-checked = 上次檢查
 admin-credentials-last-used = 上次使用
@@ -100,6 +103,15 @@ admin-pagination-status = 第 { $page } / { $pages } 頁
 admin-pagination-next = 下一頁
 admin-pagination-input = 頁碼
 admin-pagination-go = 跳轉
+
+# 表頭排序：服務端列表端點不支援排序參數，排序只對目前頁面生效，tooltip 明確該侷限。
+admin-sort-inactive-hint = 按此列排序（僅目前頁面生效）
+admin-sort-ascending-hint = 目前為升序，點擊改為降序（僅目前頁面生效）
+admin-sort-descending-hint = 目前為降序，點擊改為升序（僅目前頁面生效）
+
+# 欄位級校驗的通用錯誤文案。
+admin-field-required = 請填寫此欄位。
+admin-field-positive-integer = 請輸入大於 0 的整數。
 admin-renames-loading = 正在載入改名歷史……
 admin-renames-name-filter = 名稱
 admin-renames-load = 載入
@@ -386,6 +398,9 @@ admin-auctions-create-submit = 建立拍賣草稿
 admin-auctions-create-close = 關閉
 admin-auctions-create-success = 拍賣草稿已建立。
 admin-auctions-create-invalid = 請填寫未來的預覽時間、不得早於預覽時間的開放時間，以及晚於開放時間的結束時間。
+admin-auctions-create-field-preview-past = 預覽時間必須不早於目前時間。
+admin-auctions-create-field-open-before-preview = 開放時間不得早於預覽時間。
+admin-auctions-create-field-end-after-open = 結束時間必須晚於開放時間。
 
 admin-intake-title = 向 { $world } 錄入裝備
 admin-intake-description = 伺服器會自動選擇目前的私人收件場次，不會提交拍賣 ID。
@@ -514,6 +529,9 @@ admin-mail-delivery-ids = 投遞 ID
 
 realtime-loading = 正在載入即時維運資料……
 realtime-refresh = 重新整理資料
+admin-poll-label = 自動重新整理
+admin-poll-off = 關閉
+admin-poll-interval = 每 { $seconds } 秒
 realtime-overview-title = 即時事件概覽
 realtime-overview-events = 已持久化事件
 realtime-overview-consumers = 消費串流
@@ -773,6 +791,9 @@ admin-users-create-open = 建立使用者
 admin-users-create-close = 取消
 admin-users-create-submit = 建立
 admin-users-created = 已建立使用者{ $username }。
+admin-users-field-forum-account-id-invalid = 論壇帳號 ID 必須是不以 0 開頭的數字。
+admin-users-field-manual-key-short = 手動 Key 至少 32 個字元。
+admin-users-field-username-conflict = 用戶名或論壇帳號與現有記錄衝突。
 admin-users-generated-key = 出價 Key
 admin-users-generated-key-title = 出價 Key
 admin-users-generated-key-warning = 請立即複製此 Key。關閉視窗後將不再顯示，也無法找回。

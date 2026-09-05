@@ -9,7 +9,7 @@ use auction_web_shared::{AsyncState, AsyncStateKind};
 use crate::api::{AdminApiFailure, Delivery, DeliveryAction, execute_delivery, fetch_deliveries};
 use crate::app::surface::{AdminActionFeedback, admin_api_error_message, stable_command_id};
 
-use super::super::query::{DeliveriesQuery, use_deliveries_query_state};
+use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
 use super::filters::DeliveryFilters;
 use super::model::{
@@ -133,6 +133,7 @@ pub fn page() -> Element {
     let success_message = delivery_success_message(success_action());
     let mut on_status_change = query.clone();
     let mut on_page_change = query.clone();
+    let mut on_sort_change = query.clone();
 
     rsx! {
         section { class: "admin-delivery-page", aria_labelledby: "delivery-title",
@@ -140,13 +141,25 @@ pub fn page() -> Element {
             DeliveryFilters {
                 status: query_state().status.clone(),
                 on_status_change: move |status| {
-                    // 选择状态后立即回到第一页，由页面 push 到地址栏。
-                    on_status_change.push(DeliveriesQuery { status, page: 1 });
+                    // 选择状态后立即回到第一页并保留排序，由页面 push 到地址栏。
+                    let mut next = query_state();
+                    next.status = status;
+                    next.page = 1;
+                    on_status_change.push(next);
                 },
             }
             if let Some(page) = page.clone() {
                 DeliveryTable {
                     page,
+                    sort: query_state().sort.clone(),
+                    direction: query_state().direction,
+                    on_sort_change: move |(sort, direction)| {
+                        // 排序只影响当前页展示顺序；筛选与翻页保持不变。
+                        let mut next = query_state();
+                        next.sort = sort;
+                        next.direction = direction;
+                        on_sort_change.push(next);
+                    },
                     on_open: open_dialog,
                     busy_delivery,
                     pending_dialog: row_dialog,
