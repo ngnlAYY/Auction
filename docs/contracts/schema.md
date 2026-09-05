@@ -107,6 +107,12 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | runtime_config_admin_commands | auction-application：runtime-config | 完整档 | runtime 配置更新、指纹和 pending/applied/unknown 结果 |
 | rules_admin_commands | auction-application：rules | 完整档 | 规则文档管理命令幂等账本 |
 
+Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`，值来自本进程启动时的
+`[worker.forum].enabled`；observability/storage health owner 继续独占心跳写入。PostgreSQL 完整档
+的 Public forum 读取 owner 仅聚合该字段：忽略过期和停止实例，任一 true 表示启用，全部明确 false
+才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，
+也不将心跳 details 原文公开给浏览器；SQLite Lite 不提供 Public 论坛能力。
+
 A32 复用现有身份/外部命令迁移创建的 `credential_keys` 与
 `credential_admin_commands`，由 `000009_credential_admin_compat` 补齐 `forum_cookie` 闭集，
 并把命令账本到凭据行的引用改为 `ON DELETE SET NULL`。凭据密文本体由 Rust 的

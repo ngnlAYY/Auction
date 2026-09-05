@@ -68,6 +68,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route("/api/v1/auctions/{auction_id}/forum", get(forum::get))
         .route_layer(middleware::from_fn(response_cache::no_cache));
     let no_store_routes = Router::<PublicApiState>::new()
+        .route("/api/v1/forum/sync-status", get(forum::sync_status))
         .route("/api/v1/events", get(realtime::list))
         .route(
             "/api/v1/session",

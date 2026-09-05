@@ -104,7 +104,8 @@ UTC 时间收进可展开的高级条件，并提供一键清除；宽屏四列�
 排序的第一页第一项；下方只按选中 UUID 读取结算/recovery 报告。world、sequence、auction 与目录页
 写入 URL，其中 auction 只与 sequence 成对恢复；用户切换建立可返回的 history 项，内部规范化只替换当前项；报告必须与目录中的
 UUID/world/sequence 精确匹配后才展示。所有屏幕均按“报表选择在上、报表数据在下”纵向排列，
-内容随页面自然滚动。lot 表直接展示服务端投影的持有比例、调整比例和挂牌价，并以明确文字及正负号区分折扣/惩罚，不靠颜色传达含义；
+内容随页面自然滚动；报表选择内的世界与结算期号始终同排，扣除间距后分别占可用宽度的 30% 与 70%，
+下拉框随列宽收缩，不使用按语言固定的宽度。lot 表直接展示服务端投影的持有比例、调整比例和挂牌价，并以明确文字及正负号区分折扣/惩罚，不靠颜色传达含义；
 recovery 确认携带报告中的 state version、CSRF 和按同一输入重试复用的 command ID，服务端仍负责证据重校验、幂等和
 事务结果，页面不在浏览器端计算结算金额或改变 recovery 状态。
 `/outbox` 页面已接入 realtime 最近事件元数据、failure、consumer lag 和安全 replay 投影；未冻结的
@@ -153,6 +154,9 @@ tracing、实时 lag/failure、MoogleMail 轮询、凭据 availability、deliver
 和 alerting 水位；拍卖、投递列表和邮件入站不再创建额外 Dashboard 请求。页面使用扁平指标卡、
 连续卡片流、统一边框几何与邮件动作区，并把拍卖、邮件、投递和 realtime outbox 接成仅导航、不附加
 数据请求的安全快捷入口；快照没有采集的 outbox retry/claimed/attempts 明确显示“未采集”，不再与真实空值混淆。
+仪表盘的自动刷新选择器与刷新快照按钮位于同一行，窄屏可整组移到标题下方；保留 URL 轮询状态和
+页面隐藏时暂停的语义。常规卡片最小宽度为 10rem、摘要卡片为 12rem，并缩小内边距、卡片间距和
+分区标题留白；状态标签、错误反馈和可访问名称仍保留。
 Dashboard section 与嵌套 data 使用 v1 严格字段闭集；扩展凭据 scope 和内部诊断不会原地进入 v1
 响应。MoogleMail `main`/`isekai` availability 按冻结语义分别呈现，避免其他凭据掩盖邮件 world
 缺少 active 凭据；配置 `dashboard_mailboxes` 时服务端会核对所有已配置 mailbox 是否都有轮询器。
@@ -175,3 +179,6 @@ Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话
 管理命令必须走版本化 REST 契约，不在浏览器端重建状态机；凭据与密钥材料不进入浏览器。
 `src/api/` 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`；本 crate 只保留分页展平、
 Dashboard section 解码、表单与交互等浏览器展示状态。
+
+首屏等待超过 15 秒仅提示加载较慢，真实 WASM panic 才显示运行异常；失败标记不会被异步就绪回调
+覆盖。该区分由共享 bootstrap 与两端静态入口共同维护，不把慢请求直接描述为网络故障。

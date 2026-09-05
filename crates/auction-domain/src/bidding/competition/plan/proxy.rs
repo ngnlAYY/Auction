@@ -4,7 +4,7 @@ use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
 use super::state::{BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan};
 use crate::{
-    AuctionRules, AuctionStatus, BidAmount, BidMechanism, DomainError, LotBidState,
+    AuctionRules, AuctionStatus, BidAmount, BidMechanism, DomainError, LotBidState, MAX_BID_AMOUNT,
     ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason, UserId,
 };
 
@@ -151,7 +151,7 @@ pub(super) fn plan_create_proxy(
                 final_state.material,
                 false,
             )?;
-            price = price.min(winner_maximum);
+            price = price.min(winner_maximum).bid_ceiling();
             if let Some(current) = final_state.current_price {
                 price = price.max(current);
             }
@@ -268,8 +268,9 @@ pub(super) fn plan_slow_due(
     let current = state.current_price.ok_or(DomainError::InvalidBidState("慢速代理缺少当前价"))?;
     let amount = rules
         .next_minimum_bid(Some(state.start_price), Some(current), state.material, false)?
-        .min(active.maximum_amount);
-    if amount <= current {
+        .min(active.maximum_amount)
+        .bid_ceiling();
+    if amount < current || (amount == current && current.value() != MAX_BID_AMOUNT) {
         return Err(DomainError::InvalidBidState("慢速代理无法产生更高出价"));
     }
     if bid_ids.len() != 1 {
@@ -326,8 +327,9 @@ pub(super) fn plan_final_proxy(
                 final_state.material,
                 false,
             )?
-            .min(active.maximum_amount);
-        if amount <= current {
+            .min(active.maximum_amount)
+            .bid_ceiling();
+        if amount < current || (amount == current && current.value() != MAX_BID_AMOUNT) {
             return Err(DomainError::InvalidBidState("最终阶段代理无法产生更高出价"));
         }
         if bid_ids.len() != 1 {

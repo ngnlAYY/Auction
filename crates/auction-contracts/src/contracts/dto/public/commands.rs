@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// 浏览器用于即时反馈的 1B 出价上限；新命令仍由领域层校验，HTTP 编译门禁保证两者一致。
+pub const MAX_PUBLIC_BID_AMOUNT: i64 = 1_000_000_000;
+
 /// Public 普通竞价请求。命令 ID 必须由调用方生成并在重试中保持不变。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -133,8 +133,9 @@ Public 规则文档和黑名单只读契约分别位于 `src/ports/public/rules.
 Public 补偿池与账本只读契约位于 `src/ports/public/compensation/`，由批次摘要/分页与逐笔
 movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页和 keyset cursor 边界，不依赖
 PostgreSQL 或 SQLite 类型。
-Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，只表达本地同步状态、已发布内容和由完整
-主题扫描证明的真实处理楼层，不承担远程论坛传输，也不以固定帖内容版本推算处理进度。
+Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，表达本地同步状态、已发布内容和由完整
+主题扫描证明的真实处理楼层；独立的 `public_forum_sync_enabled` 返回 Worker 启用状态，`None`
+明确表示无法判定，不能映射为关闭。端口不承担远程论坛传输，也不以固定帖内容版本推算处理进度。
 论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照携带等级、Primary Attributes 缩写、
 十分之一百分比精度的平均 Roll、可证明的当前论坛楼层/统一代理来源及无 key 的装备链接目标，渲染前由
 `PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取

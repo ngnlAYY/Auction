@@ -79,6 +79,11 @@ URL，并直接覆盖既有 `game_equipment_url` DTO 字段；两条路由固定
 审计、事件或持久化缓存。PostgreSQL 缺密钥/依赖时返回 503；SQLite Lite 仍返回 lot 数据，但把链接
 字段留空。
 
+`GET /api/v1/forum/sync-status` 通过 `PublicForumReader` 独立读取 Worker 启用状态，响应固定
+`no-store`，只接受空 query 并返回 `{enabled: bool}`。没有可靠观测时返回
+`503 forum_sync_unavailable`，未装配/存储错误为 `503 storage_unavailable`，SQLite Lite 为 501。
+现有 P15 镜像响应保持原字段闭集，公开页面仅在明确启用后读取并展示真实同步楼层。
+
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
 只保存摘要。Admin 的拍卖 `preview`、`open`、`cancel`、`final-phase` 和 `early-settlement` 命令也已接入
@@ -214,4 +219,4 @@ release 构建把稳定目录中的产物烘进二进制，dev 构建从同一�
 缓存策略按旧版语义和 Dioxus 产物形状区分：浏览器路由入口 `no-store`；直接读取 `index.html`、
 顶层 `wasm/*.js`/`*.wasm` 和其他稳定文件名使用 `no-cache` 并提供 `Last-Modified` 条件读取；只有
 `assets/` 下带内容指纹的资源使用一年 `immutable`。Public 非身份化读接口统一 `no-cache`，Public
-会话/身份化/变更接口和全部 Admin 业务接口统一 `no-store`，包括错误响应。
+forum/sync-status、会话/身份化/变更接口和全部 Admin 业务接口统一 `no-store`，包括错误响应。

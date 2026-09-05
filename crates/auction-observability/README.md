@@ -46,6 +46,10 @@ aggregation、delivery、fulfillment、recovery 和 operations-alert owner 已�
 启动和停止状态也携带当时的审计/tracing 投影。Worker control 还通过 peer-authenticated Unix
 socket 提供 live/ready/status 和同一指标 registry。
 
+`HeartbeatPublisher::with_details` 允许装配根冻结有界、非敏感 JSON 对象，随启动、周期和停止心跳
+一同发布；默认仍为空对象。Worker 仅写入论坛同步开关布尔值，Public 通过专属只读端口取得该布尔
+投影；dashboard 不返回 details 原文，发布器也不读取配置或决定论坛业务行为。
+
 ## 指标与剩余验收证据
 
 Public/Admin 已提供默认关闭的进程本地 Prometheus `/metrics`，暴露旧版同等的进程资源快照

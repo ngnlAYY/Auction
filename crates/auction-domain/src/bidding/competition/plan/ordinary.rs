@@ -1,8 +1,8 @@
 //! 普通竞价规划。
 
 use crate::{
-    AuctionRules, BidMechanism, DomainError, LotBidState, ProxyAuthorization, ProxyMode,
-    ProxyTerminalReason,
+    AuctionRules, BidMechanism, DomainError, LotBidState, MAX_BID_AMOUNT, ProxyAuthorization,
+    ProxyMode, ProxyTerminalReason,
 };
 
 use super::super::trigger::CompetitionTrigger;
@@ -79,8 +79,9 @@ pub(super) fn plan_ordinary_bid(
                 final_state.material,
                 false,
             )?;
-            let response = response.min(active.maximum_amount);
-            if response <= amount {
+            let response = response.min(active.maximum_amount).bid_ceiling();
+            // 历史授权可能高于现行上限；到达 1B 后按旧代理的同价优先级收口，不能继续抬价。
+            if response < amount || (response == amount && amount.value() != MAX_BID_AMOUNT) {
                 return Err(DomainError::InvalidBidState("快速代理无法产生更高出价"));
             }
             let bid_id = *bid_ids

@@ -126,18 +126,16 @@ pub(super) fn validate_trigger_basics(trigger: &CompetitionTrigger) -> Result<()
         }
     }
     match trigger {
-        CompetitionTrigger::OrdinaryBid { amount, .. } if !amount.is_credit_grid_aligned() => {
+        CompetitionTrigger::OrdinaryBid { amount, .. } if !amount.is_valid_bid_input() => {
             return Err(DomainError::InvalidAmount { value: amount.value() });
         }
         CompetitionTrigger::CreateProxy { maximum_amount, previous_maximum, .. }
-            if !maximum_amount.is_credit_grid_aligned()
+            if !maximum_amount.is_valid_bid_input()
                 || previous_maximum.is_some_and(|amount| !amount.is_credit_grid_aligned()) =>
         {
             return Err(DomainError::InvalidProxyMaximum);
         }
-        CompetitionTrigger::LowerProxy { new_maximum, .. }
-            if !new_maximum.is_credit_grid_aligned() =>
-        {
+        CompetitionTrigger::LowerProxy { new_maximum, .. } if !new_maximum.is_valid_bid_input() => {
             return Err(DomainError::InvalidProxyMaximum);
         }
         _ => {}

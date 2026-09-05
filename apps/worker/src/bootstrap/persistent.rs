@@ -111,19 +111,23 @@ pub(super) async fn run_worker(
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len());
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
     let database_health: Arc<dyn HeartbeatHealthReader> = store.clone();
-    let heartbeat = Arc::new(HeartbeatPublisher::new(
-        heartbeat_store,
-        HeartbeatPublisherConfig {
-            service_name: ServiceName::Worker,
-            process_role: ProcessRole::Worker,
-            instance_id: worker_id.clone(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            started_at: Utc::now(),
-            ttl: chrono::Duration::seconds(30),
-        },
-        worker_heartbeat_health(database_health, control.clone()),
-        tracing_health,
-    ));
+    let heartbeat = Arc::new(
+        HeartbeatPublisher::new(
+            heartbeat_store,
+            HeartbeatPublisherConfig {
+                service_name: ServiceName::Worker,
+                process_role: ProcessRole::Worker,
+                instance_id: worker_id.clone(),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                started_at: Utc::now(),
+                ttl: chrono::Duration::seconds(30),
+            },
+            worker_heartbeat_health(database_health, control.clone()),
+            tracing_health,
+        )
+        .with_details(serde_json::json!({ "forum_sync_enabled": config.worker.forum.enabled }))
+        .context("configure worker heartbeat details")?,
+    );
     if let Err(error) = heartbeat.publish_starting().await {
         tracing::warn!(error = %error, "worker heartbeat starting publish failed");
     }

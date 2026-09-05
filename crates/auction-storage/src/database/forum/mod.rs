@@ -1,7 +1,7 @@
 //! Public 论坛镜像读取适配器。
 //!
-//! 这里只读取 `auction_forum_sync` 的本地投影；论坛发布 Worker 和远程网关仍由独立 owner
-//! 管理，读取路径不会把 pending/publishing 状态伪造成 published。
+//! 这里只读取 `auction_forum_sync` 的本地投影及 Worker 心跳中的非敏感启用状态；论坛发布
+//! Worker 和远程网关仍由独立 owner 管理，读取路径不会把待发布或未知状态伪造成成功或关闭。
 
 mod reply;
 mod sync;
@@ -14,6 +14,19 @@ use uuid::Uuid;
 use super::DatabaseStore;
 
 impl PublicForumReader for DatabaseStore {
+    fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => forum_sync_enabled_postgres(store).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "公开论坛同步状态仅支持 PostgreSQL 完整档",
+                )),
+            }
+        })
+    }
+
     fn public_forum_thread(
         &self,
         auction_id: Uuid,
@@ -32,6 +45,29 @@ impl PublicForumReader for DatabaseStore {
             }
         })
     }
+}
+
+/// 任一有效 Worker 明确启用即可返回 true；只有全部明确关闭才返回 false。
+/// 旧版、缺失或损坏的布尔值不能成为关闭证据，过期和正在停止的实例不参与判断。
+#[cfg(feature = "postgres")]
+async fn forum_sync_enabled_postgres(
+    store: &super::PostgresStore,
+) -> Result<Option<bool>, ApplicationError> {
+    sqlx::query_scalar(
+        "SELECT CASE
+             WHEN bool_or(details -> 'forum_sync_enabled' = 'true'::jsonb) THEN true
+             WHEN bool_and(COALESCE(details -> 'forum_sync_enabled' = 'false'::jsonb, false))
+                 THEN false
+             ELSE NULL
+         END
+         FROM public.service_heartbeats
+         WHERE service_name = 'auction-worker' AND process_role = 'worker'
+           AND status IN ('starting', 'ready', 'degraded')
+           AND expires_at > clock_timestamp()",
+    )
+    .fetch_one(store.pool())
+    .await
+    .map_err(|_| storage_error("读取公开论坛同步启用状态失败"))
 }
 
 #[cfg(feature = "postgres")]

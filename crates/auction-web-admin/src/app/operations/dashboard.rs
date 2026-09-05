@@ -45,14 +45,22 @@ pub(super) fn page() -> Element {
             aria_labelledby: "dashboard-title",
             div { class: "admin-dashboard-heading",
                 h1 { id: "dashboard-title", {t!("page-dashboard-title")} }
-                AutoPollControls {
-                    poll_seconds: poll_seconds(),
-                    on_change: move |seconds| {
-                        // 开关与间隔变更立即生效并写回地址栏。
-                        let mut next = query_state();
-                        next.poll_seconds = seconds;
-                        poll_query.push(next);
-                    },
+                div { class: "admin-dashboard-heading__actions",
+                    AutoPollControls {
+                        poll_seconds: poll_seconds(),
+                        on_change: move |seconds| {
+                            // 开关与间隔变更立即生效并写回地址栏。
+                            let mut next = query_state();
+                            next.poll_seconds = seconds;
+                            poll_query.push(next);
+                        },
+                    }
+                    button {
+                        class: "admin-btn-secondary",
+                        r#type: "button",
+                        onclick: move |_| refresh.set(refresh().saturating_add(1)),
+                        {t!("dashboard-refresh")}
+                    }
                 }
             }
             if state.is_none() {
@@ -72,14 +80,6 @@ pub(super) fn page() -> Element {
                 }
             }
             if let Some(Ok(snapshot)) = state.as_ref() {
-                div { class: "admin-dashboard-actions admin-dashboard-actions--refresh",
-                    button {
-                        class: "admin-btn-secondary",
-                        r#type: "button",
-                        onclick: move |_| refresh.set(refresh().saturating_add(1)),
-                        {t!("dashboard-refresh")}
-                    }
-                }
                 DashboardContent { snapshot: snapshot.clone() }
                 MailPollerControls {
                     pollers: snapshot

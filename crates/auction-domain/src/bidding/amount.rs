@@ -10,6 +10,9 @@ use crate::DomainError;
 /// 论坛信用金额的最小离散网格。
 pub const CREDIT_GRID: i64 = 1_000;
 
+/// 新竞价事实及新提交代理上限的绝对边界：1B Credits；历史事实与结算总额不受该上限截断。
+pub const MAX_BID_AMOUNT: i64 = 1_000_000_000;
+
 /// 拍卖金额值对象，保证金额为正数。
 ///
 /// 外部普通出价、代理上限和规则默认值通过 [`BidAmount::new`] 额外保证信用网格对齐；
@@ -52,6 +55,16 @@ impl BidAmount {
     /// 判断金额是否满足外部竞价命令使用的信用网格。
     pub const fn is_credit_grid_aligned(self) -> bool {
         self.0 % CREDIT_GRID == 0
+    }
+
+    /// 校验新外部出价或代理上限；保留通用反序列化与历史命令重放的原金额语义。
+    pub const fn is_valid_bid_input(self) -> bool {
+        self.is_credit_grid_aligned() && self.0 <= MAX_BID_AMOUNT
+    }
+
+    /// 自动代理使用的有效价格上限，不改写已持久化的历史授权金额。
+    pub(crate) fn bid_ceiling(self) -> Self {
+        Self(self.0.min(MAX_BID_AMOUNT))
     }
 
     /// 追加一个正增量并保留当前金额的网格余数；超过整数边界时失败关闭。

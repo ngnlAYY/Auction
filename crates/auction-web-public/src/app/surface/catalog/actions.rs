@@ -1,5 +1,6 @@
 //! Public 竞价与代理竞价操作面板。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{Dialog, use_confirm_command};
 
 use super::*;
@@ -50,12 +51,19 @@ pub(crate) fn LiveCatalogActions(
     let proxy_leading =
         active_proxy.and_then(|proxy| proxy.bid.as_ref()).is_some_and(|bid| bid.leading);
     let effective_leading = leading || proxy_leading;
-    let ordinary_blocked =
-        effective_leading || (block_ordinary_for_active_proxy && active_proxy.is_some());
-    let proxy_action_enabled =
-        active_proxy.map_or(!effective_leading, |proxy| proxy.capabilities.can_lower);
+    let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
+    let ordinary_blocked = limit_reached
+        || effective_leading
+        || (block_ordinary_for_active_proxy && active_proxy.is_some());
+    // 无法新增出价时，仍允许持有者把已有授权降低到有效绑定价格。
+    let proxy_action_enabled = active_proxy.map_or(!effective_leading && !limit_reached, |proxy| {
+        let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
+        proxy.capabilities.can_lower && lower_bound <= MAX_PUBLIC_BID_AMOUNT
+    });
     let action_reason = if !can_bid {
         t!("bid-unavailable")
+    } else if limit_reached {
+        t!("bid-limit-note")
     } else if active_proxy.is_some() && !effective_leading {
         t!("proxy-active")
     } else if effective_leading {
@@ -66,7 +74,7 @@ pub(crate) fn LiveCatalogActions(
         String::new()
     };
     // 领先由装备高亮表达；禁用按钮仍通过隐藏说明保留可访问的原因。
-    let visually_hide_leading_reason = can_bid && effective_leading;
+    let visually_hide_leading_reason = can_bid && (effective_leading || limit_reached);
     let action_reason_id = format!("public-auction-action-reason-{lot_id}");
     let mut proxy_success = use_signal(|| None::<Box<ProxyCommandAuthorization>>);
     // 普通竞价成功投影：命令成功后弹窗内展示成功面板（参照代理 proxy_success），
@@ -151,7 +159,7 @@ pub(crate) fn LiveCatalogActions(
                         {t!("catalog-proxy")}
                     }
                 }
-            } else if can_bid && session_ready {
+            } else if can_bid && session_ready && !limit_reached {
                 Link { to: login_href_for_current_location(), {t!("catalog-login-to-bid")} }
             } else if show_proxy_summary {
                 button {
@@ -198,7 +206,7 @@ pub(crate) fn LiveCatalogActions(
                     bid_success.set(None);
                     action.set(None);
                 },
-                {commands::bid_form(commands::BidFormInput {
+                commands::BidForm { input: commands::BidFormInput {
                     lot_id: bid_lot_id,
                     lot_code: bid_lot_code,
                     current_price,
@@ -214,7 +222,7 @@ pub(crate) fn LiveCatalogActions(
                         bid_success.set(None);
                         action.set(None);
                     }),
-                })}
+                } }
             }
         }
         if action_name == Some("proxy".to_owned()) {

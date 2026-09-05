@@ -8,7 +8,7 @@
 本表统计 feature API 的唯一路径，不把进程健康检查、静态 Web 资源和反向代理自身的路径
 计入。当前冻结统计是：
 
-- Public：20 个唯一路径；
+- Public：21 个唯一路径；
 - Admin：43 个唯一路径。
 
 A38-A43 是独立登记的 Admin 产品能力，已经包含在 43 条统计中。路径数量只证明路由注册闭集，不
@@ -93,7 +93,7 @@ Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
 构建产物时返回 503。
 
 缓存策略是当前 HTTP 安全边界，并适配 Dioxus 稳定 WASM 文件名：Public 非身份化读取为 `no-cache`；
-Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
+Public forum/sync-status、events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
 浏览器路由入口为 `no-store`，直接静态文件中只有 `assets/` 指纹资源使用一年 `immutable`，
 `index.html`、`wasm/*.js`、`*.wasm` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与
 `If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
@@ -122,6 +122,16 @@ Public events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-st
 | P18 | POST | /api/v1/lots/{lot_id}/proxy-authorizations | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
+| P21 | GET | /api/v1/forum/sync-status | 公开；不接受 query；响应 `no-store` | 200 | 400, 501, 503/504 |
+
+P21 使用 `PublicForumSyncStatusResponse`，成功响应固定为 `code=ok`、`data={"enabled": true/false}`，
+不依赖当前世界或当前拍卖是否存在。布尔值来自 Worker 按 `[worker.forum].enabled` 发布的非敏感心跳
+字段，仅采纳数据库时钟下未过期且非 `stopping` 的 Worker：任一明确 true 表示启用，所有有效实例
+均明确 false 才表示关闭。没有实例、旧版心跳缺字段或无法证明开关值时返回 `503 forum_sync_unavailable`；
+未装配存储或查询失败返回 `503 storage_unavailable`，SQLite Lite 返回 `501 feature_not_supported`。
+启用状态不表示主题已经发布或扫描成功；真实楼层仍由 P15 的 `processed_through_post_number` 提供。
+Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍状态，且关闭时不挂载 P15 轮询；
+未知和请求失败显示不可用并允许重试，不解释为关闭。升级须同时更新 Worker、Public API 与公开端产物。
 
 Public 分页必须保留已发布的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
 preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已经
@@ -129,6 +139,12 @@ preview/live/final/settling 投影、写入入口和 discovery 增量都必须�
 `cancelled` 或禁用世界中的活动拍卖顺带公开。P09 的 lot 投影允许读取仍属于公开
 安全边界的 settled 拍卖；响应上下文固定包含 `auction_id`、`world`、`number`、状态、展示模式、
 开标时间、可选有效结束时间和 `preview_revision`，Public 历史页面据此打开指定轮次而不读取数据库行。
+P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000,000,000 Credits），仍要求 1000
+网格；新命令由领域层校验并沿用 `invalid_amount`/`invalid_maximum_amount` 错误，既有 command_id
+的成功重放不被重新解释。P09/P11 的 `next_bid` 保留数学最低价和严格抬价关系；超过 1B 时表示
+没有可提交的新出价，浏览器显示“已达上限”，不能把值压低到 1B 后提交。普通输入继续使用整数 K；
+代理输入扩展为 K/M/B，其中 M/B 最多三/六位小数，均须精确落在 1K 网格且不超过 1B。
+
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与
 `equipment.category` 组合解释为 `One01`、`Two01` 等编码；它不是全局身份。详情和写命令继续只以
 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。
@@ -228,11 +244,11 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新本文件、相关契约记录和
    对应 owner 的边界说明。
 
-当前 P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A43 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
+当前 P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、P21、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A43 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留 v1 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
-公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面单独消费 P15：发布成功后只显示可点击的帖子位置和“已更新到 #xx”，`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停自动轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
+公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面在 P21 明确启用后消费 P15：发布成功后只显示“当前同步到 #xx”，`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停帖子轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和 v1 竞价结果投影。

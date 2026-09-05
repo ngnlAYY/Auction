@@ -1,25 +1,37 @@
 //! 浏览器端共用的金额展示格式。
 
-/// 按旧版 Auction-BF 的规则展示 credit 金额。
+/// 使用精确的 K/M/B 单位展示 credit 金额，不对出价金额取近似值。
 ///
 /// 该函数只负责本地展示，不参与金额解析、校验或任何服务端业务判断。
 pub fn format_credit_amount(amount: i64) -> String {
     let sign = if amount < 0 { "-" } else { "" };
     let absolute = amount.unsigned_abs();
-    if absolute >= 1_000_000 && absolute.is_multiple_of(10_000) {
-        let hundredths = absolute / 10_000;
-        let whole = hundredths / 100;
-        let fraction = (hundredths % 100).to_string();
-        let fraction = fraction.trim_end_matches('0');
-        if fraction.is_empty() {
-            format!("{sign}{whole}M")
-        } else {
-            format!("{sign}{whole}.{fraction}M")
-        }
+    if absolute >= 1_000_000_000 && absolute.is_multiple_of(1_000_000) {
+        format_scaled_amount(sign, absolute, 1_000_000_000, "B")
+    } else if absolute >= 1_000_000 && absolute.is_multiple_of(1_000) {
+        format_scaled_amount(sign, absolute, 1_000_000, "M")
     } else if absolute.is_multiple_of(1_000) {
         format!("{sign}{}K", absolute / 1_000)
     } else {
         format!("{sign}{}c", format_thousands(absolute))
+    }
+}
+
+/// 返回带千位分隔符的完整整数，单位文案由各 surface 的译文提供。
+pub fn format_credit_amount_full(amount: i64) -> String {
+    let sign = if amount < 0 { "-" } else { "" };
+    format!("{sign}{}", format_thousands(amount.unsigned_abs()))
+}
+
+fn format_scaled_amount(sign: &str, amount: u64, scale: u64, suffix: &str) -> String {
+    let whole = amount / scale;
+    // 小数必须先补足前导零，再删除尾零，否则 1.05M 会错误显示成 1.5M。
+    let fraction = format!("{:03}", amount % scale / (scale / 1_000));
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.is_empty() {
+        format!("{sign}{whole}{suffix}")
+    } else {
+        format!("{sign}{whole}.{fraction}{suffix}")
     }
 }
 

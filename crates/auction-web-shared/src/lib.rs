@@ -37,4 +37,4 @@ pub use components::{
     AsyncState, AsyncStateKind, BASE_CSS, BaseStylesheet, Dialog, MarkdownBlocks, MarkdownDocument,
     Pager, Time, TruncatedText, without_leading_title,
 };
-pub use format::format_credit_amount;
+pub use format::{format_credit_amount, format_credit_amount_full};

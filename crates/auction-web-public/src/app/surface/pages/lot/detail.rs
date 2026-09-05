@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::app::surface::realtime;
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
+use auction_web_shared::format_credit_amount_full;
 
 #[component]
 pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element {
@@ -95,9 +97,23 @@ pub(crate) fn LiveLotDetailView(
                 div { class: "public-auction-lot__bidding",
                     dl {
                         dt { {t!("lot-current-bid")} }
-                        dd { class: "public-auction-lot__price", "{format_amount(lot.current_price)}" }
+                        dd {
+                            class: "public-auction-lot__price",
+                            title: t!("price-exact", amount: format_credit_amount_full(lot.current_price)),
+                            "{format_amount(lot.current_price)}"
+                        }
                         dt { {t!("lot-next-bid")} }
-                        dd { class: "public-auction-lot__price", "{format_amount(lot.next_bid)}" }
+                        dd {
+                            class: "public-auction-lot__price",
+                            if lot.next_bid > MAX_PUBLIC_BID_AMOUNT {
+                                span { title: t!("bid-limit-note"), {t!("bid-limit-reached")} }
+                            } else {
+                                span {
+                                    title: t!("price-exact", amount: format_credit_amount_full(lot.next_bid)),
+                                    "{format_amount(lot.next_bid)}"
+                                }
+                            }
+                        }
                         dt { {t!("lot-leader")} }
                         dd {
                             if let Some(leader) = lot.leader_name.clone() {

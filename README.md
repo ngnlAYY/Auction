@@ -18,7 +18,7 @@
 ## 当前状态
 
 当前已进入功能与运行证据收口阶段，不再只是启动骨架。本仓库登记的 feature API 为 Public
-20 条、Admin 43 条，其中 A38-A43 是独立登记的 Admin 能力；浏览器路由为 Public 15 条
+21 条、Admin 43 条，其中 A38-A43 是独立登记的 Admin 能力；浏览器路由为 Public 15 条
 （含独立论坛同步页）和 Admin 21 条。
 PostgreSQL 完整档也已建立竞价、代理、账户、管理命令、
 审计、实时、结算/recovery、凭据、MoogleMail 和论坛的主要 owner；SQLite Lite 只实现已声明的

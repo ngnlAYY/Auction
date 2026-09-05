@@ -97,6 +97,9 @@ fn valid_optional_multiline_text(value: Option<&str>, maximum: usize) -> bool {
 
 /// Public 论坛镜像读取端口。
 pub trait PublicForumReader: Send + Sync {
+    /// 读取仍在运行的 Worker 公布的启用状态；没有可靠观测时返回 None，不能猜测为关闭。
+    fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>>;
+
     fn public_forum_thread(
         &self,
         auction_id: Uuid,

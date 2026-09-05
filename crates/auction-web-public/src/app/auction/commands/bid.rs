@@ -1,5 +1,6 @@
 //! 普通竞价表单和命令提交。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -9,7 +10,6 @@ use super::super::format_amount;
 use super::common::{BidConfirmCommand, PendingBidCommand, bid_error_message};
 
 const CREDIT_K: i64 = 1_000;
-const MAX_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// 普通竞价成功后的浏览器展示投影；只保留反馈面板所需字段，避免把 api 内部 DTO
 /// 类型（未在 api 出口公开）泄漏到组件参数。
@@ -20,6 +20,7 @@ pub struct BidSuccess {
 }
 
 /// 普通竞价表单参数；关闭与成功动作分开表达，避免调用方误用弹窗生命周期。
+#[derive(Clone, PartialEq)]
 pub struct BidFormInput {
     pub lot_id: String,
     pub lot_code: String,
@@ -52,11 +53,7 @@ fn parse_bid_units(input: &str) -> Option<i64> {
         return None;
     }
     let amount = units.parse::<i64>().ok()?.checked_mul(CREDIT_K)?;
-    (amount > 0 && amount <= MAX_SAFE_JSON_INTEGER).then_some(amount)
-}
-
-fn format_bid_units(amount: i64) -> String {
-    format!("{}K", amount / CREDIT_K)
+    (amount > 0 && amount <= MAX_PUBLIC_BID_AMOUNT).then_some(amount)
 }
 
 fn bid_amount_hint(value: &str) -> Element {
@@ -69,7 +66,7 @@ fn bid_amount_hint(value: &str) -> Element {
                 id: "public-bid-amount-hint",
                 class: "public-auction-bid-form__amount-hint",
                 role: "status",
-                "= {format_bid_units(amount)}"
+                "= {format_amount(amount)}"
             }
         },
         None => rsx! {
@@ -110,8 +107,14 @@ fn bid_success_panel(success: &BidSuccess, on_close: EventHandler<()>) -> Elemen
     }
 }
 
-/// 显示普通竞价表单；最低价和 lot 状态只用于即时反馈，最终结果由服务端决定。
-pub fn bid_form(input: BidFormInput) -> Element {
+/// 为表单建立独立组件作用域，避免弹窗开关改变父组件的 Hook 顺序。
+#[component]
+pub fn BidForm(input: BidFormInput) -> Element {
+    bid_form(input)
+}
+
+/// 显示普通竞价表单；只由 BidForm 无条件调用，最低价与 lot 状态的最终判断留在服务端。
+fn bid_form(input: BidFormInput) -> Element {
     let BidFormInput {
         lot_id,
         lot_code,
@@ -125,10 +128,6 @@ pub fn bid_form(input: BidFormInput) -> Element {
         mut success,
         on_close,
     } = input;
-    // 命令成功后不再直接关弹窗，而是在弹窗内渲染成功面板（参照代理成功面板）。
-    if let Some(success) = success() {
-        return bid_success_panel(&success, on_close);
-    }
     let amount_id = format!("public-bid-amount-{lot_id}");
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
@@ -136,9 +135,20 @@ pub fn bid_form(input: BidFormInput) -> Element {
     let mut command = command;
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
+    // 成功视图也在全部 Hook 之后选择，保证该组件每次渲染的状态槽顺序稳定。
+    if let Some(success) = success() {
+        return bid_success_panel(&success, on_close);
+    }
     let bidding_open = can_bid && lot_status == "live";
-    let blocked = blocked || !bidding_open;
-    let blocked_reason = if bidding_open { blocked_reason } else { t!("bid-unavailable") };
+    let limit_reached = next_bid > MAX_PUBLIC_BID_AMOUNT;
+    let blocked = blocked || !bidding_open || limit_reached;
+    let blocked_reason = if !bidding_open {
+        t!("bid-unavailable")
+    } else if limit_reached {
+        t!("bid-limit-note")
+    } else {
+        blocked_reason
+    };
 
     rsx! {
         form {
@@ -152,6 +162,12 @@ pub fn bid_form(input: BidFormInput) -> Element {
                 // 首次提交只冻结金额与 command_id 并进入确认态；确认态再次提交后才调用
                 // 外部 API。签名取金额序列化：同一金额重试复用同一 command_id（幂等）。
                 let pending = if let Some(pending) = (command.confirmation)() {
+                    if pending.amount > MAX_PUBLIC_BID_AMOUNT {
+                        command.cancel_confirmation();
+                        validation.set(Some(t!("bid-invalid-amount")));
+                        (command.failure).set(None);
+                        return;
+                    }
                     if pending.amount < next_bid {
                         command.cancel_confirmation();
                         validation.set(Some(t!("bid-below-minimum", price: format_amount(next_bid))));
@@ -208,7 +224,7 @@ pub fn bid_form(input: BidFormInput) -> Element {
                     aria_atomic: "true",
                     {t!(
                         "bid-confirm-description",
-                        amount: format_bid_units(pending.amount),
+                        amount: format_amount(pending.amount),
                         code: lot_code.clone()
                     )}
                 }

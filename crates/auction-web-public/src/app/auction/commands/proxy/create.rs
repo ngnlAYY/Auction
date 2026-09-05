@@ -1,5 +1,6 @@
 //! 代理授权创建表单及其提交状态。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
@@ -7,7 +8,8 @@ use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, amount_hint, proxy_error_message,
+    PendingProxyCommand, ProxyConfirmCommand, amount_hint, initial_proxy_amount,
+    proxy_error_message,
 };
 
 #[component]
@@ -34,7 +36,7 @@ pub(super) fn ProxyCreateForm(
     let slow_reason_id = format!("{mode_name}-slow-disabled");
     let slow_described_by =
         if allow_slow { slow_hint_id.clone() } else { format!("{slow_hint_id} {slow_reason_id}") };
-    let mut maximum_amount = use_signal(|| format_amount(initial_minimum));
+    let mut maximum_amount = use_signal(|| initial_proxy_amount(initial_minimum));
     let mut mode = use_signal(|| "fast".to_owned());
     let mut validation = use_signal(|| None::<String>);
     // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
@@ -42,8 +44,15 @@ pub(super) fn ProxyCreateForm(
     let submitting = command.submitting;
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
-    let blocked = blocked || !bidding_open;
-    let blocked_reason = if bidding_open { blocked_reason } else { t!("bid-unavailable") };
+    let limit_reached = initial_minimum > MAX_PUBLIC_BID_AMOUNT;
+    let blocked = blocked || !bidding_open || limit_reached;
+    let blocked_reason = if !bidding_open {
+        t!("bid-unavailable")
+    } else if limit_reached {
+        t!("bid-limit-note")
+    } else {
+        blocked_reason
+    };
     let confirmation_id = format!("public-proxy-create-confirmation-{lot_id}");
     let confirmation_description = match (command.confirmation)() {
         Some(PendingProxyCommand::Create { amount, mode, .. }) => {
@@ -74,6 +83,12 @@ pub(super) fn ProxyCreateForm(
                     let pending = if let Some(pending) = (command.confirmation)() {
                         match &pending {
                             PendingProxyCommand::Create { amount, mode, .. } => {
+                                if *amount > MAX_PUBLIC_BID_AMOUNT {
+                                    command.cancel_confirmation();
+                                    validation.set(Some(t!("proxy-invalid-amount")));
+                                    (command.failure).set(None);
+                                    return;
+                                }
                                 if *amount < initial_minimum {
                                     command.cancel_confirmation();
                                     validation.set(Some(t!(

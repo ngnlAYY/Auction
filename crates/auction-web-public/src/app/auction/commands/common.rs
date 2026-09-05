@@ -1,5 +1,6 @@
 //! 竞价命令组件共用的短生命周期状态和安全错误映射。
 
+use auction_contracts::MAX_PUBLIC_BID_AMOUNT;
 use auction_web_shared::{BaseErrorKind, ConfirmCommand, base_api_error_message, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
@@ -78,6 +79,15 @@ impl std::ops::DerefMut for ProxyConfirmCommand {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+/// 只为代理输入框生成可解析的默认值：向上取到 1K 网格，不修改服务端下限或用户输入。
+pub(super) fn initial_proxy_amount(minimum: i64) -> String {
+    if !(1..=MAX_PUBLIC_BID_AMOUNT).contains(&minimum) {
+        return String::new();
+    }
+    let amount = (minimum + 999) / 1_000 * 1_000;
+    format_amount(amount)
 }
 
 pub(super) fn amount_hint(value: &str, id: &'static str, invalid_key: &'static str) -> Element {

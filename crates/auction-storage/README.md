@@ -134,7 +134,9 @@ Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 
 Public 补偿池与单场账本由 `src/database/compensation/` 持有；`mod.rs` 只负责后端分派，
 `postgres/{rounds,movements}.rs` 分别拥有批次/余额和单场账本查询。PostgreSQL 完整档在同一
 Serializable 快照中读取结算摘要、账本和最新余额，SQLite Lite 明确返回能力不支持。
-Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影，其中
+Public 论坛镜像由 `src/database/forum/mod.rs` 读取 PostgreSQL 的本地同步投影，并独立聚合未过期、
+非停止 Worker 心跳中的布尔 `forum_sync_enabled`；任一 true 表示启用，全部明确 false 才表示关闭，
+缺失或损坏的观测保留未知。读取不返回心跳原文、不写任务，SQLite Lite 明确返回能力不支持。
 `processed_through_post_number` 是完整主题读取证明的真实连续楼层，不从固定帖内容版本或远端
 post ID 推算；同目录的
 `sync.rs` 只做主题同步端口装配，领取租约、快照读取、发布/失败状态推进和输入校验分别位于

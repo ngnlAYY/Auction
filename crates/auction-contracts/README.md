@@ -14,6 +14,8 @@
   `env!("CARGO_PKG_VERSION")` 只会得到契约 crate 自己的版本，而运维需要的是运行进程的版本。
   装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
+- `MAX_PUBLIC_BID_AMOUNT`：浏览器即时反馈使用的 1B 上限；HTTP 编译时核对它与领域常量一致，
+  最终新命令仍由领域层校验。既有价格 DTO 字段保持不变，超过上限的 `next_bid` 表达不可继续出价。
 - `AdminForumPreviewRequest` 与 `AdminForumPreviewResponse`：管理端论坛内容预览契约；输入
   只能选择一个非空的 HTML/文本字段，输出只包含安全的目录、帖子、命令和警告信息。
 - `AdminSettlementReportResponse`：PostgreSQL 完整档的 Admin 结算安全投影；lot 明细显式返回
@@ -28,6 +30,8 @@
   帖子身份同时可证明时返回受限的 `source_post_url`，玩家仍由名称字段展示。
 - `PublicForumResponse.processed_through_post_number` 只表达 Worker 完整主题扫描证明的真实连续楼层；
   浏览器不得用 `content_revision`、post ID 或已读取末楼替代该水位。
+- `PublicForumSyncStatusResponse`：P21 独立论坛同步开关，只包含必填布尔 `enabled`；未观测到可靠
+  状态时使用 503 错误响应，不能把缺失值反序列化为 false，也不扩张 P15 的既有字段闭集。
 
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde
 映射兼容外部旧命名。修改路由、状态码、JSON 字段或事件名时，必须同步更新对应文档。

@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Public 论坛同步启用状态；未知状态通过错误响应表达，不伪造默认布尔值。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicForumSyncStatusResponse {
+    pub enabled: bool,
+}
+
 /// Public 论坛镜像同步状态响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
