@@ -9,6 +9,7 @@ use super::{
         AdminRuntimeWorldsConfig,
     },
     errors::AdminRuntimeConfigError,
+    operations::AdminRuntimeOperationsConfig,
     validation::{
         valid_fingerprint, validate_business_config, validate_dashboard_mailboxes,
         validate_equipment_source, validate_listener, validate_security, validate_session,
@@ -261,6 +262,13 @@ pub struct AdminRuntimeDocument {
     pub tracing: AdminRuntimeTracingConfig,
     /// Worker 控制面 socket 路径。
     pub worker_control: AdminRuntimeWorkerControlConfig,
+    /// 新增的分组运行参数；省略时保持旧文件和命令指纹，各组默认不接管部署配置。
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::operations::deserialize_optional"
+    )]
+    pub operations: Option<AdminRuntimeOperationsConfig>,
 }
 
 impl AdminRuntimeDocument {
@@ -301,10 +309,28 @@ impl AdminRuntimeDocument {
         validate_session(&self.session)?;
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;
+        if let Some(operations) = &self.operations {
+            operations.validate()?;
+            if operations.alerts.managed
+                && operations.alerts.enabled
+                && let Some(worlds) = &self.worlds
+            {
+                let enabled = match operations.alerts.world_id.as_str() {
+                    "main" => worlds.main.enabled,
+                    "isekai" => worlds.isekai.enabled,
+                    _ => false,
+                };
+                if !enabled {
+                    return Err(AdminRuntimeConfigError::InvalidDocument(
+                        "operations.alerts.world_id 必须属于已启用的入站 world".to_owned(),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
-    /// 为浏览器和新 runtime 文件补齐 Auction-BF 的三组业务默认值。
+    /// 为浏览器和新 runtime 文件补齐业务默认值与未接管的运行参数候选。
     ///
     /// 升级前文件在内存中继续保留 `None`，因此其既有 fingerprint 与 durable command 摘要
     /// 不会变化；只有 API 投影或用户保存的新候选会显式携带这些字段。
@@ -314,6 +340,9 @@ impl AdminRuntimeDocument {
             self.worlds = Some(AdminRuntimeWorldsConfig::default());
             self.equipment_filter = Some(AdminRuntimeEquipmentFilterConfig::default());
             self.mail_templates = Some(AdminRuntimeMailTemplatesConfig::default());
+        }
+        if self.operations.is_none() {
+            self.operations = Some(AdminRuntimeOperationsConfig::default());
         }
     }
 

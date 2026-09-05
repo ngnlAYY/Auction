@@ -10,6 +10,7 @@ use super::DatabaseStore;
 
 mod bootstrap;
 mod claim;
+mod lookup;
 mod mapping;
 mod resolution;
 
@@ -23,6 +24,28 @@ impl ScheduledRoundStore for DatabaseStore {
                     .map_err(ApplicationError::from),
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(store) => bootstrap::database_now_sqlite(store.pool())
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
+    fn find_current_round(
+        &self,
+        world_id: String,
+        local_week: chrono::NaiveDate,
+    ) -> auction_application::ApplicationFuture<
+        '_,
+        Option<auction_application::ScheduledRoundSnapshot>,
+    > {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => lookup::postgres(store.pool(), &world_id, local_week)
+                    .await
+                    .map_err(ApplicationError::from),
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(store) => lookup::sqlite(store.pool(), &world_id, local_week)
                     .await
                     .map_err(ApplicationError::from),
             }

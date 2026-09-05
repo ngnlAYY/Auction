@@ -181,6 +181,7 @@ fn deployment_listeners_conflict(left: &DeploymentListener, right: &DeploymentLi
 }
 
 fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
+    validate_runtime_topology(admin, worker)?;
     if admin.worker_control_socket_path() != worker.worker.control.socket_path.as_str() {
         anyhow::bail!("Admin 与 Worker 必须配置相同的 Worker control socket_path");
     }
@@ -216,6 +217,43 @@ fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyh
         if admin_id != worker_id || admin_key != worker_key {
             anyhow::bail!("Admin 与 Worker 必须使用相同的 {name} 标识和材料");
         }
+    }
+    Ok(())
+}
+
+/// 管理页接管参数后，两类创建者必须从同一 runtime 文件取得一致的新场次模板。
+fn validate_runtime_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
+    let managed =
+        admin.admin_runtime.as_ref().and_then(|runtime| runtime.operations.as_ref()).is_some_and(
+            |operations| {
+                operations.economics.managed
+                    || operations.schedule.managed
+                    || operations.forum.managed
+                    || operations.alerts.managed
+                    || operations.worker.managed
+            },
+        );
+    if managed {
+        let admin_path = admin
+            .runtime_config_path
+            .as_deref()
+            .map(fs::canonicalize)
+            .transpose()
+            .context("读取 Admin runtime 文件身份失败")?;
+        let worker_path = worker
+            .runtime_config_path
+            .as_deref()
+            .map(fs::canonicalize)
+            .transpose()
+            .context("读取 Worker runtime 文件身份失败")?;
+        if admin_path.is_none() || admin_path != worker_path {
+            anyhow::bail!(
+                "启用 operations 接管后，Admin 与 Worker 必须引用同一份 runtime_config_file"
+            );
+        }
+    }
+    if admin.auction != worker.auction {
+        anyhow::bail!("Admin 与 Worker 的有效拍卖默认策略或排期不一致");
     }
     Ok(())
 }

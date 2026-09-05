@@ -208,6 +208,18 @@ pub(super) async fn configure_state(
                     }
                     _ => return Err(anyhow::Error::msg(error.to_string())),
                 }
+            } else {
+                // 恢复可能补写候选；不能把旧启动快照装配为新 runtime 已生效的 Admin。
+                let restored = service.current().await.context("读取恢复后的 runtime 配置")?;
+                if config
+                    .admin_runtime
+                    .as_ref()
+                    .is_none_or(|loaded| loaded.fingerprint() != restored.fingerprint)
+                {
+                    anyhow::bail!(
+                        "runtime 文件与已加载的启动配置不一致；请重新执行部署重启，加载最新的 Admin/Worker 配置"
+                    );
+                }
             }
             Some(service)
         } else {

@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Number, Value};
 
+use super::operational_fields;
+
 const TEXT_FIELDS: &[&str] = &[
     "listener.address",
     "listener.group",
@@ -80,17 +82,17 @@ pub(super) struct RuntimeConfigForm {
 impl RuntimeConfigForm {
     pub(super) fn from_document(document: &Value) -> Result<Self, ()> {
         let mut inputs = BTreeMap::new();
-        for path in TEXT_FIELDS {
+        for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
             let value = nested_value(document, path).and_then(Value::as_str).ok_or(())?;
             inputs.insert((*path).to_owned(), value.to_owned());
         }
-        for path in LIST_FIELDS {
+        for path in LIST_FIELDS.iter().chain(operational_fields::LIST_FIELDS) {
             let values = nested_value(document, path).and_then(Value::as_array).ok_or(())?;
             let text =
                 values.iter().map(Value::as_str).collect::<Option<Vec<_>>>().ok_or(())?.join("\n");
             inputs.insert((*path).to_owned(), text);
         }
-        for path in UNSIGNED_NUMBER_FIELDS {
+        for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {
             let value = nested_value(document, path).and_then(Value::as_u64).ok_or(())?;
             inputs.insert((*path).to_owned(), value.to_string());
         }
@@ -174,10 +176,16 @@ impl RuntimeConfigForm {
     /// 生成服务端要求的完整闭集文档；任一数字处于空白或非法中间态时拒绝提交。
     pub(super) fn to_document(&self) -> Result<Value, ()> {
         let mut document = self.document.clone();
-        for path in TEXT_FIELDS {
+        for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
+            if !self.edits_field(path) {
+                continue;
+            }
             set_nested_value(&mut document, path, Value::String(self.required_input(path)?))?;
         }
-        for path in LIST_FIELDS {
+        for path in LIST_FIELDS.iter().chain(operational_fields::LIST_FIELDS) {
+            if !self.edits_field(path) {
+                continue;
+            }
             let values = self
                 .required_input(path)?
                 .lines()
@@ -187,7 +195,10 @@ impl RuntimeConfigForm {
                 .collect();
             set_nested_value(&mut document, path, Value::Array(values))?;
         }
-        for path in UNSIGNED_NUMBER_FIELDS {
+        for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {
+            if !self.edits_field(path) {
+                continue;
+            }
             let value = self.required_input(path)?.parse::<u64>().map_err(|_| ())?;
             set_nested_value(&mut document, path, Value::Number(Number::from(value)))?;
         }
@@ -215,6 +226,10 @@ impl RuntimeConfigForm {
 
     fn required_input(&self, path: &str) -> Result<String, ()> {
         self.inputs.get(path).cloned().ok_or(())
+    }
+
+    fn edits_field(&self, path: &str) -> bool {
+        operational_fields::management_path(path).is_none_or(|managed| self.boolean(managed))
     }
 }
 

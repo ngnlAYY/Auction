@@ -201,6 +201,7 @@ dependencies = [
  "auction-domain",
  "base64",
  "chrono",
+ "chrono-tz",
  "ipnet",
  "serde",
  "serde_json",

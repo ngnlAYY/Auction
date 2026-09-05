@@ -3,6 +3,9 @@
 //! 浏览器只编辑非敏感 JSON 文档，并把服务端返回的 fingerprint 原样作为更新 fence；TOML
 //! 文件、密钥和命令账本永远不进入浏览器。
 
+#[path = "runtime_config/operations.rs"]
+mod operations;
+
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
 use gloo_net::http::Request;
@@ -109,6 +112,7 @@ fn valid_runtime_document(value: &Value) -> bool {
             "listener",
             "mail_templates",
             "metrics",
+            "operations",
             "security",
             "session",
             "tracing",
@@ -131,6 +135,7 @@ fn valid_runtime_document(value: &Value) -> bool {
         && valid_session(&document["session"])
         && valid_tracing(&document["tracing"])
         && valid_worker_control(&document["worker_control"])
+        && operations::valid_operations(&document["operations"])
 }
 
 fn valid_worlds(value: &Value) -> bool {
@@ -310,7 +315,8 @@ fn valid_listener(value: &Value) -> bool {
             address.parse::<std::net::SocketAddr>().is_ok()
                 && group.is_empty()
                 && socket_path.is_empty()
-                && valid_path(runtime_directory)
+                // TCP 不使用 Unix runtime 目录，必须接受服务端允许的空值或普通文本。
+                && valid_text(runtime_directory, 512, true)
         }
         "unix" => {
             address.is_empty()

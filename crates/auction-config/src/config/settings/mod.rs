@@ -25,12 +25,14 @@ const CONFIG_FILE_ENV: &str = "AUCTION_CONFIG_FILE";
 mod app;
 mod auction;
 mod errors;
+mod operations;
 mod secrets;
 mod security;
 mod validation;
 mod worker;
 mod worker_validation;
 
+use self::operations::apply_runtime_operations;
 use self::secrets::{AppSecrets, SecretString};
 use self::secrets::{
     load_admin_runtime_file, load_secret_file, runtime_http_security, runtime_session,

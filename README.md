@@ -119,8 +119,11 @@ MSRV 为 1.94.1。Rust 官方没有 LTS 且只支持最新 stable；Tokio 使用
 TOML；数据库连接串、Redis 连接串、Cookie 和会话签名密钥
 只放在该敏感文件中。Admin 与 Worker 主配置还可通过 `runtime_config_file` 指向同一份由 Admin
 管理的非敏感 runtime TOML；A26/A27 的 PostgreSQL 完整档更新会写入该文件，并要求重启受影响的
-Admin/Worker，SQLite Lite 不提供更新命令。Worker 只消费其中的 world、发件人、装备过滤和通知
-模板业务区块，transport、凭据、调度与全局启用开关仍由 Worker 主配置拥有。
+Admin/Worker，SQLite Lite 不提供更新命令。Worker 对 MoogleMail 只消费其中的 world、发件人、装备过滤和通知
+模板业务区块，其 transport、凭据、邮件调度与全局启用开关仍由 Worker 主配置拥有。runtime 的
+`operations` 另提供新拍卖默认策略、自动排期、论坛同步、运维告警和各 Worker 循环参数；每组
+`managed` 默认关闭，勾选后才在对应进程重启时接管。新经济模板仅用于之后创建的拍卖，完整字段与
+部署要求见 [`ops/config/README.md`](ops/config/README.md)。
 拍卖策略模板位于公共配置的 `[auction]` 区块；Admin 创建拍卖时会把已校验模板冻结到拍卖策略快照，
 具体字段和默认值见 [`ops/config/README.md`](ops/config/README.md)。
 

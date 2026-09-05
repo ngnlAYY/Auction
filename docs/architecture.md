@@ -218,12 +218,30 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 单实例锁、stale socket 身份、owner/group 和 `0660` 权限；当前进程退出时只清理自己创建且身份
 未变化的 socket。
 
-Worker 在启动时只投影 runtime 的四类业务配置：启用的 main/isekai、各 world 发件人
-allowlist、装备过滤和通知模板。transport endpoint、凭据来源、调度、mailbox durable identity 和
+Worker 对 MoogleMail 在启动时只投影 runtime 的四类业务配置：启用的 main/isekai、各 world 发件人
+allowlist、装备过滤和通知模板。MoogleMail transport endpoint、凭据来源、邮件调度、mailbox durable identity 和
 全局 MoogleMail `enabled` 继续由 Worker 主配置拥有，避免一次运营保存意外启动外部请求或切换
 cursor。旧 runtime 完全缺少三个顶层业务区块时保持原 canonical JSON/fingerprint、durable command
 摘要和 Worker 主配置行为；Admin GET 可为浏览器物化默认投影，第一次保存后才把显式业务区块写入
 文件。成功更新因此要求重启所有受影响的 Admin/Worker，不提供热加载。
+
+runtime 的可选 `[operations]` 区块继续复用 A26/A27 完整档的命令账本、文件锁和恢复流程，
+由 `auction-application` 按 economics、schedule、forum、alerts、worker 五组持有严格文档。
+每组的 `managed` 默认关闭：关闭时沿用公共/角色 TOML，开启后才由共享 runtime 覆盖该组公开的
+非敏感参数。旧文件省略整个区块时不改变指纹或历史命令摘要；HTTP 为编辑器补齐关闭接管的候选值，
+不会把候选默认值描述成当前 Worker 的生效配置。
+`auction-config` 在启动时把 economics/schedule 投影给 Admin 与 Worker，把论坛、告警和各 Worker
+循环参数投影给 Worker，再执行完整配置校验。经济参数仅供新拍卖创建时冻结，已建立的拍卖快照、
+任务游标、租约、命令记录和结算策略不回写；调度参数不能替代持久化 due 和 fencing。
+论坛 endpoint、凭据 scope、测试板块、公开链接，以及 MoogleMail transport、全局开关和邮箱身份
+仍由部署配置拥有。SQLite Lite 仍不提供 runtime 管理写入，启动时仍执行单实例/单并发约束。
+`auctionctl deployment-check` 在 Admin 接管任一组时要求 Admin/Worker 引用同一 runtime 普通文件，
+并核对两者有效经济/结算模板和周排期一致，避免两个创建入口采用不同的策略来源。
+周计划的只读 `find_current_round` 由同一 `ScheduledRoundStore` 在完整档和 Lite 档提供；调度器
+先读取既有本地周的冻结时间和身份，只有缺失轮次才按当前模板首次创建。原创建命令的摘要/身份
+冲突规则不放宽，邮件暂停/恢复沿用数据库中的开拍时间，避免模板更新后反复冲突。
+runtime 恢复会继续完成 pending/旧指纹状态；若启动恢复改变了文件，Admin 必须拒绝使用旧启动
+快照就绪，并要求重新执行部署重启，加载恢复后的配置。
 
 runtime 的 world 开关只控制 Worker/MoogleMail 的入站候选与邮箱装配，不再被描述为整个拍卖业务的
 启停。数据库 `worlds.enabled` 是独立的权威业务开关：Admin A40/A41 读取或修改该状态，关闭操作在
@@ -249,7 +267,8 @@ Admin/Worker 相同的装备数据密钥；密钥缺失时这两条读取返回 
 JSON 和浏览器链接中，所以两条响应固定 `no-store`，完整值不得进入日志、审计、事件或持久化缓存。
 SQLite Lite 没有 `equipment_secrets`，仍返回 lot 数据，但把 `game_equipment_url` 留空并隐藏链接。
 
-拍卖策略模板位于三个角色共同引用的公共 TOML `[auction]` 区块。Admin 创建拍卖时，应用服务会把已校验模板
+拍卖策略模板默认位于三个角色共同引用的公共 TOML `[auction]` 区块；Admin/Worker 可由同一 runtime
+显式覆盖新经济模板与周排期。Admin 创建拍卖时，应用服务会把已校验模板
 交给 PostgreSQL 完整档事务；事务将同一来源写入 schema v4 `policy_snapshot` 以及遗留规则列，
 避免管理端配置与实际规则分叉。竞价和取消事务会在锁内从该快照恢复 PPM、代理限制、final
 phase 及时间规则；MoogleMail 入站默认起拍价继承同一经济模板。

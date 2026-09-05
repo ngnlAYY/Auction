@@ -293,6 +293,11 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - Public、Admin 与 Worker 角色配置必须通过必填 `common_file` 引用同一份公共非敏感 TOML；公共
   文件拥有日志过滤器、指标、缓存和拍卖策略，角色文件拥有 listener、tracing、realtime、会话或
   Worker 调度，并通过必填 `secrets_file` 引用敏感 TOML。相对路径以角色配置文件所在目录解析。
+- Admin/Worker 可以共享 `runtime_config_file`。其 `operations` 五组分别接管后续新拍卖经济模板、
+  自动排期、论坛同步、告警和 Worker 循环参数；每组 `managed` 默认关闭，沿用公共/角色配置。
+  保存后重启对应进程才生效，不回写已有拍卖快照、任务游标或租约。接管任一组时部署预检必须
+  核对两者引用同一 runtime 文件及有效拍卖模板/排期一致；MoogleMail transport、凭据、邮件调度、
+  mailbox identity 和全局启用仍由部署配置拥有。
 - `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
   `admin_secret` 只能放在敏感 TOML；MoogleMail Cookie 生产路径同样使用敏感 TOML，但本地
   联调可由 `auction-config::load_mooglemail_keyenv` 严格读取 `.keyenv` 的

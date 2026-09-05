@@ -35,10 +35,6 @@ where
         tracing::error!("生成当前本地周拍卖计划失败");
         return WorkerResult::Error;
     };
-    if now < generation.preview_due_at && now < generation.open_due_at - MAIL_PAUSE_LEAD {
-        return WorkerResult::Success;
-    }
-
     let Some(world_reader) = worker.worlds.as_deref() else {
         tracing::error!("周计划缺少数据库业务世界读取端口");
         return WorkerResult::Error;
@@ -67,40 +63,22 @@ where
             tracing::debug!(world_id, "业务世界已关闭，跳过当前周拍卖 bootstrap");
             continue;
         }
-        let identity = identities(world_id, generation.local_week);
-        let request = BootstrapRequest {
-            round_id: identity.round_id,
-            auction_id: identity.auction_id,
-            create_command_id: identity.create_command_id,
-            world_id: world_id.clone(),
-            local_week: generation.local_week,
-            preview_due_at: generation.preview_due_at,
-            open_due_at: generation.open_due_at,
-            scheduled_end_at: generation.scheduled_end_at,
-            policy: config.policy.clone(),
-        };
-        let request = match request.into_bootstrap() {
-            Ok(request) => request,
-            Err(error) => {
-                tracing::error!(world_id, error = %error, "当前周拍卖 bootstrap 命令摘要生成失败");
-                result = WorkerResult::Error;
-                continue;
-            }
-        };
-        let snapshot = match worker.schedule.ensure_current_round(request).await {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                tracing::warn!(world_id, error = %error, "当前周拍卖轮次 bootstrap 失败");
-                result = WorkerResult::Error;
-                continue;
-            }
-        };
+        let snapshot =
+            match load_or_bootstrap_round(worker, config, world_id, &generation, now).await {
+                Ok(Some(snapshot)) => snapshot,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::warn!(world_id, error = %error, "当前周拍卖轮次 bootstrap 失败");
+                    result = WorkerResult::Error;
+                    continue;
+                }
+            };
         if let Err(error) = reconcile_mail(
             config,
             &snapshot,
             world_id,
-            generation.local_week,
-            generation.open_due_at,
+            snapshot.local_week,
+            snapshot.open_due_at,
             now,
         )
         .await
@@ -110,6 +88,57 @@ where
         }
     }
     result
+}
+
+async fn load_or_bootstrap_round<C>(
+    worker: &PersistentWorker<C>,
+    config: &super::AuctionScheduleRuntimeConfig,
+    world_id: &str,
+    generation: &Generation,
+    now: DateTime<Utc>,
+) -> Result<Option<ScheduledRoundSnapshot>, ApplicationError>
+where
+    C: Clock + 'static,
+{
+    // 先读冻结事实，避免新经济模板或排期被当成旧 command_id 的另一份创建负载。
+    // 即使新配置的预览窗口尚未到达，也必须按既有轮次的时间继续对账邮箱暂停/恢复。
+    let existing =
+        worker.schedule.find_current_round(world_id.to_owned(), generation.local_week).await?;
+    let snapshot = if let Some(snapshot) = existing {
+        snapshot
+    } else {
+        if now < generation.preview_due_at && now < generation.open_due_at - MAIL_PAUSE_LEAD {
+            return Ok(None);
+        }
+        let identity = identities(world_id, generation.local_week);
+        let request = BootstrapRequest {
+            round_id: identity.round_id,
+            auction_id: identity.auction_id,
+            create_command_id: identity.create_command_id,
+            world_id: world_id.to_owned(),
+            local_week: generation.local_week,
+            preview_due_at: generation.preview_due_at,
+            open_due_at: generation.open_due_at,
+            scheduled_end_at: generation.scheduled_end_at,
+            policy: config.policy.clone(),
+        }
+        .into_bootstrap()?;
+        // 只在尚无轮次时发起创建；并发创建仍由存储层的锁、摘要和既有一致性检查保护。
+        worker.schedule.ensure_current_round(request).await?
+    };
+    let identity = identities(world_id, generation.local_week);
+    if snapshot.world_id != world_id
+        || snapshot.local_week != generation.local_week
+        || snapshot.round_id != identity.round_id
+        || snapshot.create_command_id != identity.create_command_id.as_uuid()
+        || snapshot.auction_id != snapshot.active.then_some(identity.auction_id)
+        || snapshot.preview_due_at >= snapshot.open_due_at
+        || snapshot.open_due_at - snapshot.preview_due_at < MAIL_PAUSE_LEAD
+        || snapshot.open_due_at >= snapshot.scheduled_end_at
+    {
+        return Err(ApplicationError::CapabilityUnavailable("周计划冻结投影无效"));
+    }
+    Ok(Some(snapshot))
 }
 
 #[derive(Debug, Clone)]

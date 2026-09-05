@@ -1,6 +1,6 @@
 # Admin runtime 非敏感配置示例。
 #
-# runtime 文件的所有字段都支持省略；省略时使用应用模型的默认值。
+# runtime 文件的字段都支持省略；旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
 # 本文件不能放 database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥。
 # 生产部署请将文件置于受信任目录并设置为 0640，修改后需要重启受影响的 Admin/Worker 才会生效。
 
@@ -196,3 +196,200 @@ shutdown_timeout_seconds = 5
 [worker_control]
 # 可选：Worker 控制面 Unix socket 绝对路径；默认 /run/hv-auction/worker/control.sock。
 socket_path = "/run/hv-auction/worker/control.sock"
+
+# 可选区块：各组 managed 默认 false，沿用公共/角色 TOML；本示例的候选值不接管已有部署。
+# economics/schedule 接管后需重启 Admin 与 Worker，其余组需重启 Worker；不改写既有拍卖和任务事实。
+
+# 可选区块：后续新拍卖经济模板；managed 为 true 时才覆盖本组部署参数。
+[operations.economics]
+# 可选：由管理页配置；省略时为 false。
+managed = false
+# 可选：默认底价（Credits），范围 1000-1000000000；省略时为 1000。
+start_price = 1000
+# 可选：加价幅度（PPM），范围 0-1000000；省略时为 50000。
+bid_increment_ppm = 50000
+# 可选：软截止窗口（秒），范围 0-604800；省略时为 60。
+soft_close_window_seconds = 60
+# 可选：软截止延长（秒），范围 1-604800；省略时为 60。
+soft_close_extension_seconds = 60
+# 可选：取消截止窗口（秒），范围 0-604800；省略时为 86400。
+cancel_cutoff_seconds = 86400
+# 可选：允许代理竞价；省略时为 true。
+proxy_enabled = true
+# 可选：默认代理模式；省略时为 "fast"。
+proxy_default_mode = "fast"
+# 可选：慢速代理间隔（秒），范围 1-604800；省略时为 600。
+proxy_slow_interval_seconds = 600
+# 可选：被超价使用次数上限（0 为不限），范围 0-1000；省略时为 3。
+proxy_max_outbid_uses = 3
+# 可选：最终阶段提前量（秒），范围 1-604800；省略时为 900。
+final_phase_lead_seconds = 900
+
+# 可选区块：自动周排期；managed 为 true 时才覆盖本组部署参数。
+[operations.schedule]
+# 可选：由管理页配置；省略时为 false。
+managed = false
+# 可选：启用自动排期；省略时为 false。
+enabled = false
+# 可选：排期时区（IANA）；省略时为 "UTC"。
+timezone = "UTC"
+# 可选：预览星期；省略时为 "Thursday"。
+preview_day = "Thursday"
+# 可选：预览时间（HH:MM）；省略时为 "22:00"。
+preview_time = "22:00"
+# 可选：开拍星期；省略时为 "Friday"。
+open_day = "Friday"
+# 可选：开拍时间（HH:MM）；省略时为 "00:00"。
+open_time = "00:00"
+# 可选：结束星期；省略时为 "Saturday"。
+nominal_end_day = "Saturday"
+# 可选：结束时间（HH:MM）；省略时为 "12:00"。
+nominal_end_time = "12:00"
+# 可选：排期世界；省略时为 ["main","isekai"]。
+worlds = ["main","isekai"]
+
+# 可选区块：论坛同步；managed 为 true 时才覆盖本组部署参数。
+[operations.forum]
+# 可选：是否由管理页覆盖论坛同步参数，默认关闭；省略时为 false。
+managed = false
+# 可选：是否启用主题发布和回帖同步；省略时为 false。
+enabled = false
+# 可选：每轮论坛任务批量上限，范围 1-100；省略时为 100。
+batch_size = 100
+# 可选：论坛轮询间隔秒数，范围 1-86400；省略时为 300。
+poll_interval_seconds = 300
+# 可选：论坛轮询随机抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：单次响应最大字节数，范围 1-8388608；省略时为 2097152。
+maximum_response_bytes = 2097152
+# 可选：单次主题扫描最多页数，范围 1-20；省略时为 10。
+maximum_topic_pages = 10
+# 可选：连续论坛请求的最小间隔毫秒数，范围 1-60000；省略时为 750。
+minimum_request_interval_millis = 750
+# 可选：单次 HTTP 请求超时秒数，范围 1-300；省略时为 30。
+request_timeout_seconds = 30
+# 可选：单个主题任务的完整超时秒数，范围 1-3600；省略时为 240。
+item_timeout_seconds = 240
+# 可选：单个主题任务 claim 租约秒数，范围 1-86400；省略时为 300。
+lease_duration_seconds = 300
+
+# 可选区块：运维告警；managed 为 true 时才覆盖本组部署参数。
+[operations.alerts]
+# 可选：是否由管理页覆盖运维告警参数，默认关闭；省略时为 false。
+managed = false
+# 可选：是否启用告警扫描和通知；省略时为 false。
+enabled = false
+# 可选：各告警循环的扫描间隔秒数，范围 1-86400；省略时为 60。
+scan_interval_seconds = 60
+# 可选：不大于扫描间隔的随机抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：健康来源读取超时秒数，范围 1-30；省略时为 5。
+source_timeout_seconds = 5
+# 可选：同轮告警合并窗口秒数，范围 1-3600；省略时为 120。
+batch_window_seconds = 120
+# 可选：同类告警通知冷却秒数，范围 1-604800；省略时为 1_800。
+cooldown_seconds = 1_800
+# 可选：告警批次租约秒数，必须覆盖四倍来源读取超时，范围 1-86400；省略时为 120。
+claim_lease_seconds = 120
+# 可选：失败告警的持久化重试间隔秒数，范围 1-86400；省略时为 300。
+retry_delay_seconds = 300
+# 可选：每轮最多处理的告警信号数，范围 1-64；省略时为 64。
+max_signals_per_scan = 64
+# 可选：单个通知批次最多信号数，范围 1-64；省略时为 20。
+max_batch_items = 20
+# 可选：单条告警正文的最大字节数，范围 256-16384；省略时为 4096。
+max_body_bytes = 4096
+# 可选：待投递数量阈值，范围 1-9007199254740991；省略时为 1。
+delivery_pending_count_threshold = 1
+# 可选：待投递最老记录年龄阈值秒数，范围 1-2592000；省略时为 900。
+delivery_pending_age_seconds = 900
+# 可选：投递人工对账数量阈值，范围 1-9007199254740991；省略时为 1。
+delivery_manual_reconcile_count_threshold = 1
+# 可选：履约积压数量阈值，范围 1-9007199254740991；省略时为 1。
+fulfillment_backlog_count_threshold = 1
+# 可选：履约积压年龄阈值秒数，范围 1-2592000；省略时为 900。
+fulfillment_backlog_age_seconds = 900
+# 可选：恢复付款逾期数量阈值，范围 1-9007199254740991；省略时为 1。
+recovery_overdue_count_threshold = 1
+# 可选：恢复付款逾期年龄阈值秒数，范围 1-2592000；省略时为 900。
+recovery_overdue_age_seconds = 900
+# 可选：通知使用的游戏世界，只允许 main 或 isekai；省略时为 "main"。
+world_id = "main"
+# 可选：通知收件人，启用并接管告警时必填；省略时为 ""。
+recipient = ""
+
+# 可选区块：Worker 主循环；managed 为 true 时才覆盖本组部署参数。
+[operations.worker]
+# 可选：由管理页配置；省略时为 false。
+managed = false
+# 可选：并发数，范围 1-1000；省略时为 8。
+concurrency = 8
+# 可选：轮询间隔秒数，范围 1-86400；省略时为 60。
+poll_interval_seconds = 60
+# 可选：每轮批量上限，范围 1-1000；省略时为 100。
+batch_limit = 100
+# 可选：轮询随机抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：单项处理超时秒数，范围 1-86400；省略时为 30。
+item_timeout_seconds = 30
+# 可选：恢复任务持久化重试间隔秒数，范围 1-86400；省略时为 60。
+recovery_retry_delay_seconds = 60
+
+# 可选区块：独立投递循环；由 operations.worker.managed 统一决定是否接管。
+[operations.worker.delivery]
+# 可选：每轮投递批量上限，范围 1-1000；省略时为 100。
+batch_limit = 100
+# 可选：投递并发上限，实际值仍受 transport 约束，范围 1-1000；省略时为 8。
+concurrency = 8
+# 可选：投递轮询间隔秒数，范围 1-86400；省略时为 60。
+poll_interval_seconds = 60
+# 可选：投递轮询抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：投递 claim 租约秒数，范围 1-86400；省略时为 60。
+lease_duration_seconds = 60
+# 可选：发送期间续租间隔秒数，范围 1-86400；省略时为 10。
+renew_interval_seconds = 10
+# 可选：发送结果写回宽限秒数，范围 1-86400；省略时为 120。
+sending_grace_seconds = 120
+# 可选：完整投递请求超时秒数，范围 1-86400；省略时为 30。
+request_timeout_seconds = 30
+# 可选：投递终态写回超时秒数，范围 1-300；省略时为 5。
+finalize_timeout_seconds = 5
+
+# 可选区块：独立履约循环；由 operations.worker.managed 统一决定是否接管。
+[operations.worker.fulfillment]
+# 可选：每轮履约批量上限，范围 1-1000；省略时为 100。
+batch_limit = 100
+# 可选：履约并发上限，范围 1-1000；省略时为 8。
+concurrency = 8
+# 可选：履约轮询间隔秒数，范围 1-86400；省略时为 60。
+poll_interval_seconds = 60
+# 可选：履约轮询抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：履约 claim 租约秒数，范围 1-86400；省略时为 60。
+lease_duration_seconds = 60
+# 可选：单项履约超时秒数，范围 1-86400；省略时为 30。
+item_timeout_seconds = 30
+# 可选：履约持久化重试间隔秒数，范围 1-86400；省略时为 60。
+retry_delay_seconds = 60
+
+# 可选区块：独立恢复循环；由 operations.worker.managed 统一决定是否接管。
+[operations.worker.recovery]
+# 可选：每阶段恢复批量上限，范围 1-1000；省略时为 100。
+batch_limit = 100
+# 可选：恢复 action 并发上限，范围 1-1000；省略时为 8。
+concurrency = 8
+# 可选：恢复轮询间隔秒数，范围 1-86400；省略时为 60。
+poll_interval_seconds = 60
+# 可选：恢复轮询抖动秒数，范围 0-86400；省略时为 5。
+jitter_seconds = 5
+# 可选：恢复 action 租约秒数，范围 1-86400；省略时为 60。
+lease_duration_seconds = 60
+# 可选：单项恢复超时秒数，范围 1-86400；省略时为 30。
+item_timeout_seconds = 30
+# 可选：余额低水位阈值，单位 Credits，范围 0-9007199254740991；省略时为 100。
+low_balance_threshold = 100
+# 可选：余额健康信息刷新间隔秒数，范围 1-86400；省略时为 60。
+health_refresh_interval_seconds = 60
+# 可选：余额证据陈旧阈值秒数，范围 1-86400；省略时为 300。
+evidence_stale_after_seconds = 300

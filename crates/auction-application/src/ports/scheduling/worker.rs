@@ -83,6 +83,13 @@ pub trait ScheduledRoundStore: Send + Sync {
     /// 返回数据库权威当前时间；周身份和 due 判断不得使用进程本地时钟。
     fn database_now(&self) -> ApplicationFuture<'_, DateTime<Utc>>;
 
+    /// 只读获取已冻结的本地周轮次；配置变化不能作为重发旧创建命令或改写既有策略的理由。
+    fn find_current_round(
+        &self,
+        world_id: String,
+        local_week: chrono::NaiveDate,
+    ) -> ApplicationFuture<'_, Option<ScheduledRoundSnapshot>>;
+
     /// 幂等确保当前本地周轮次；若窗口已结束则只建立 missed 轮次，不创建过期拍卖。
     fn ensure_current_round(
         &self,
