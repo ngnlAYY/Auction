@@ -1055,3 +1055,4 @@ admin-runtime-op-fetch-timeout-seconds = 전체 가져오기 제한 시간 (초)
 admin-runtime-op-process-attempts = 처리 시도 횟수
 admin-runtime-op-retry-base-seconds = 초기 재시도 대기 (초)
 admin-runtime-op-retry-maximum-seconds = 최대 재시도 대기 (초)
+admin-runtime-op-mail-batch-size = 한 번에 가져올 최대 메일 수
