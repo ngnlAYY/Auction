@@ -2547,7 +2547,8 @@
 }
 
 .public-auction-equipment__name-link,
-.public-auction-equipment__name {
+/* 装备详情标题跟随卡片宽度，优先于通用 wide 文本上限，避免窄屏被长名称撑开。 */
+.public-auction-equipment__name.shared-truncated-text {
   display: block;
   min-inline-size: 0;
   max-inline-size: 100%;
