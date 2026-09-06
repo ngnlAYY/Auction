@@ -36,7 +36,7 @@ pub(super) fn CompensationPoolTable(
             if page.rounds.is_empty() {
                 p { class: "public-compensation-empty", {t!("compensation-empty")} }
             } else {
-                div { class: "public-compensation-table-wrap ui-table--scroll",
+                div { class: "public-compensation-table-wrap ui-table--fit",
                     table { class: "public-compensation-table",
                         thead {
                             tr {

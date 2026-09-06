@@ -243,7 +243,7 @@ button:disabled {
 
 .shared-markdown__table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .shared-markdown table {
@@ -322,7 +322,9 @@ button:disabled {
   box-shadow: var(--shadow-surface);
   overflow-wrap: anywhere;
   white-space: normal;
-  pointer-events: none;
+  /* 浮层支持移入后滚动、选择和复制；离开宽限与关闭由组件事件负责。 */
+  pointer-events: auto;
+  user-select: text;
 }
 
 .shared-truncated-text__tooltip[data-placement="above"],
@@ -474,51 +476,55 @@ button:disabled {
   border-color: var(--color-link);
 }
 
-/* ===== 响应式表格工具类 ===== */
-/* .ui-table--responsive：窄断点（bp-sm，48rem）下从行式表格切换为卡片模式——
-   隐藏表头，每行变为块级卡片，单元格通过 data-label 属性回显列名。使用该类的
-   表格必须为每个 td 提供 data-label，且语义与表头一致。
-   提取自 public.css 与 admin.css 中 9 处逐字近重复的响应式表格段。 */
-
-@media (max-width: 48rem) {
-  .ui-table--responsive thead {
-    display: none;
-  }
-
-  .ui-table--responsive,
-  .ui-table--responsive tbody,
-  .ui-table--responsive tr {
-    display: block;
-  }
-
-  .ui-table--responsive tbody tr {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .ui-table--responsive td {
-    display: flex;
-    align-items: baseline;
-    justify-content: flex-start;
-    gap: var(--space-3);
-    padding: var(--space-1) 0;
-    white-space: normal;
-  }
-
-  .ui-table--responsive td::before {
-    content: attr(data-label);
-    flex-shrink: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-  }
+/* ===== 全站百分比表格契约 ===== */
+/* 所有业务与 Markdown 表格均占满容器。已有列宽只允许百分比，未指定的列等分剩余空间。
+   窄屏保留表头和行结构；数据截断与悬浮说明替代横向滚动或卡片化。
+   ui-table--responsive 保留为兼容类名，不再改变 table 的结构。 */
+table {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  table-layout: fixed;
 }
 
-/* .ui-table--scroll：列数多、不适合卡片化的表格，套一层横向滚动容器，
-   保持桌面与窄屏一致的行式布局。约定该类加在包裹 table 的容器上。 */
-
-.ui-table--scroll {
-  display: block;
+.ui-table--fit,
+:is(.public-shell, .admin-shell) :is(div, section):has(> table) {
+  min-inline-size: 0;
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
+}
+
+@media screen {
+  :is(.public-shell, .admin-shell, .shared-markdown) table > :is(thead, tbody, tfoot) > tr > :is(th, td):not([colspan]) {
+    overflow: hidden;
+    padding-inline: clamp(1px, 0.6vw, var(--space-3));
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :is(.public-shell, .admin-shell, .shared-markdown) table :is(th, td):not([colspan]) > :is(a, span, time, code, strong, small):not([role="tooltip"]) {
+    display: inline-block;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+
+  :is(.public-shell, .admin-shell, .shared-markdown) table :is(th, td):not([colspan]) :is(button, select, input) {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    padding-inline: min(var(--space-2), 1vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 单元格需要截断内容，焦点轮廓向内偏移以免同时被裁掉。 */
+  :is(.public-shell, .admin-shell, .shared-markdown) table :is(th, td) :focus-visible {
+    outline-offset: calc(-2 * var(--border-width));
+  }
 }
 
 /* ===== 模态弹窗外壳（Dialog 组件） ===== */
@@ -677,8 +683,8 @@ button:disabled {
     white-space: normal;
   }
 
-  /* 横向滚动容器在打印时会裁切超出部分，放开溢出保留完整表格。 */
-  .ui-table--scroll {
+  /* 打印时保留完整数据。 */
+  .ui-table--fit {
     overflow-x: visible;
   }
 
@@ -689,9 +695,7 @@ button:disabled {
     break-inside: avoid;
   }
 
-  /* 响应式卡片表格（窄屏卡片模式，A4 纵向默认页宽也会命中 48rem 断点）在打印时
-     恢复行式表格形态：表头回显、行与单元格恢复 table 布局、隐藏 data-label 回显。
-     本块与上方卡片模式规则同优先级且位置靠后，打印时稳定覆盖。 */
+  /* 打印继续保留表头与行结构，兼容类名不产生 data-label 副本。 */
   .ui-table--responsive {
     display: table;
   }

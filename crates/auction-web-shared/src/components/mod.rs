@@ -2,6 +2,7 @@ mod async_state;
 mod dialog;
 mod markdown;
 mod pager;
+mod table_hints;
 mod time;
 mod truncated_text;
 
@@ -30,6 +31,7 @@ pub const FAVICON: Asset = asset!("/assets/favicon.svg");
 /// surface 规则之前生效。
 #[component]
 pub fn BaseStylesheet() -> Element {
+    table_hints::use_table_hints();
     // favicon 由两个 surface 的静态 HTML 通过稳定 `/favicon.ico` 路径声明；这里保留 asset
     // 引用，使构建产物继续携带供 HTTP 映射使用的同一份带 hash SVG。
     let _ = FAVICON;

@@ -4,12 +4,18 @@
 //! 更新再以 fingerprint 和可重试的 command ID 作为版本与幂等边界。成功更新会由服务端
 //! 原子写入 runtime TOML，角色启动配置、公共配置、密钥和命令账本永远不进入浏览器。
 
+#[path = "config/draft.rs"]
+mod draft;
 #[path = "config/form.rs"]
 mod form;
 #[path = "config/model.rs"]
 mod model;
 #[path = "config/operational_fields.rs"]
 mod operational_fields;
+#[path = "config/review.rs"]
+mod review;
+#[path = "config/validation.rs"]
+mod validation;
 #[path = "config/worlds.rs"]
 mod worlds;
 
@@ -24,6 +30,11 @@ use crate::api::{
 
 use self::{form::RuntimeConfigFields, model::RuntimeConfigForm, worlds::AdminBusinessWorlds};
 use super::admin_api_error_message;
+
+/// 在认证外壳内安装配置草稿与整页离开提示。
+pub(super) fn use_config_draft() {
+    draft::use_config_draft();
+}
 
 #[derive(Debug, Clone)]
 struct ConfigCommand {
@@ -44,17 +55,24 @@ enum ConfigNotice {
 
 /// 加载并展示 Admin runtime 非敏感配置。
 pub(super) fn page() -> Element {
-    let mut form = use_signal(RuntimeConfigForm::default);
+    let draft::ConfigDraft {
+        mut form,
+        mut baseline,
+        mut fingerprint,
+        mut checked_signature,
+        mut command,
+        mut notice,
+        mut restart_required,
+        dirty,
+    } = use_context::<draft::ConfigDraft>();
     let mut form_ready = use_signal(|| false);
-    let mut fingerprint = use_signal(|| None::<String>);
-    let mut checked_signature = use_signal(String::new);
-    let mut command = use_signal(|| None::<ConfigCommand>);
-    let mut notice = use_signal(|| None::<ConfigNotice>);
-    let mut restart_required = use_signal(|| false);
+    let mut issues = use_signal(Vec::<validation::FieldIssue>::new);
+    use_context_provider(|| validation::FormIssues(issues));
     let mut refresh = use_signal(|| 0_u64);
     let busy = use_signal(|| false);
     // 写入是危险操作：点击「写入配置」只准备命令并打开确认对话框。
     let mut update_confirm_open = use_signal(|| false);
+    let mut reload_confirm_open = use_signal(|| false);
     let config = use_resource(move || {
         let _ = refresh();
         fetch_admin_runtime_config()
@@ -64,8 +82,22 @@ pub(super) fn page() -> Element {
     use_effect(move || {
         let snapshot = config.read_unchecked().clone();
         if let Some(Ok(value)) = snapshot {
+            // 返回本页时保留当前会话草稿；外部版本变化也不能静默覆盖尚未保存的输入。
+            if baseline.peek().is_some() {
+                if fingerprint.peek().as_deref() == Some(value.fingerprint.as_str()) {
+                    form_ready.set(true);
+                    return;
+                }
+                if *dirty.peek() {
+                    checked_signature.set(String::new());
+                    notice.set(Some(ConfigNotice::Conflict));
+                    form_ready.set(true);
+                    return;
+                }
+            }
             match RuntimeConfigForm::from_document(&value.document) {
                 Ok(next_form) => {
+                    baseline.set(Some(next_form.clone()));
                     form.set(next_form);
                     form_ready.set(true);
                     fingerprint.set(Some(value.fingerprint));
@@ -73,6 +105,7 @@ pub(super) fn page() -> Element {
                     checked_signature.set(String::new());
                     command.set(None);
                     notice.set(None);
+                    issues.set(Vec::new());
                 }
                 Err(()) => {
                     form_ready.set(false);
@@ -81,6 +114,18 @@ pub(super) fn page() -> Element {
             }
         }
     });
+
+    let mut discard_and_reload = move || {
+        baseline.set(None);
+        form_ready.set(false);
+        fingerprint.set(None);
+        checked_signature.set(String::new());
+        command.set(None);
+        notice.set(None);
+        issues.set(Vec::new());
+        reload_confirm_open.set(false);
+        refresh.set(refresh().saturating_add(1));
+    };
 
     let content = match &*config.read_unchecked() {
         None => rsx! {
@@ -124,6 +169,7 @@ pub(super) fn page() -> Element {
             let current_fingerprint = fingerprint().unwrap_or_else(|| snapshot.fingerprint.clone());
             let candidate_signature = form.read().signature().ok();
             let can_update = !busy()
+                && dirty()
                 && candidate_signature
                     .as_deref()
                     .is_some_and(|signature| signature == checked_signature());
@@ -133,6 +179,18 @@ pub(super) fn page() -> Element {
                 .count();
             let equipment_filter_enabled = form.read().boolean("equipment_filter.enabled");
             let update_fingerprint = current_fingerprint.clone();
+            let config_changes = if update_confirm_open() {
+                command
+                    .read()
+                    .as_ref()
+                    .zip(baseline.read().as_ref())
+                    .map(|(pending, original)| {
+                        review::changes(original.source_document(), &pending.document)
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
             rsx! {
                 div {
@@ -161,11 +219,20 @@ pub(super) fn page() -> Element {
                     }
                     form {
                         class: "admin-runtime-config__form admin-config-form",
+                        novalidate: true,
                         onsubmit: {
                             let form = form;
                             move |event| {
                                 event.prevent_default();
+                                if busy() { return; }
                                 notice.set(None);
+                                let field_issues = validation::collect_issues(&form.read());
+                                if !field_issues.is_empty() {
+                                    issues.set(field_issues);
+                                    validation::focus_summary();
+                                    return;
+                                }
+                                issues.set(Vec::new());
                                 let document = match form.read().to_document() {
                                     Ok(document) => document,
                                     Err(()) => {
@@ -210,6 +277,12 @@ pub(super) fn page() -> Element {
                                 });
                             }
                         },
+                        if dirty() {
+                            p { class: "admin-config-draft", role: "status", {t!("admin-runtime-unsaved")} }
+                        }
+                        if !issues.read().is_empty() {
+                            validation::ErrorSummary { issues: issues() }
+                        }
                         RuntimeConfigFields {
                             form,
                             disabled: busy(),
@@ -217,6 +290,9 @@ pub(super) fn page() -> Element {
                                 checked_signature.set(String::new());
                                 command.set(None);
                                 notice.set(None);
+                                if !issues.peek().is_empty() {
+                                    issues.set(validation::collect_issues(&form.read()));
+                                }
                             },
                         }
                         if let Some(current_notice) = notice() {
@@ -249,12 +325,8 @@ pub(super) fn page() -> Element {
                                 r#type: "button",
                                 disabled: busy(),
                                 onclick: move |_| {
-                                    form_ready.set(false);
-                                    fingerprint.set(None);
-                                    checked_signature.set(String::new());
-                                    command.set(None);
-                                    notice.set(None);
-                                    refresh.set(refresh().saturating_add(1));
+                                    if dirty() { reload_confirm_open.set(true); }
+                                    else { discard_and_reload(); }
                                 },
                                 {t!("admin-runtime-reload")}
                             }
@@ -328,9 +400,10 @@ pub(super) fn page() -> Element {
                                         {t!(
                                             "admin-runtime-update-confirm-summary",
                                             fingerprint: pending_command.fingerprint.clone(),
-                                            fields: count_leaf_fields(&pending_command.document) as i64
+                                            fields: config_changes.len() as i64
                                         )}
                                     }
+                                    review::ConfigChangeList { changes: config_changes.clone() }
                                     div { class: "admin-shell__dialog-actions",
                                         button {
                                             class: "admin-btn-danger",
@@ -348,6 +421,7 @@ pub(super) fn page() -> Element {
                                                 let mut busy = busy;
                                                 let mut notice = notice;
                                                 let mut form = form;
+                                                let mut baseline = baseline;
                                                 let mut checked_signature = checked_signature;
                                                 let mut fingerprint = fingerprint;
                                                 let mut restart_required = restart_required;
@@ -366,6 +440,7 @@ pub(super) fn page() -> Element {
                                                             &result.document,
                                                         ) {
                                                             Ok(next_form) => {
+                                                                baseline.set(Some(next_form.clone()));
                                                                 form.set(next_form);
                                                                 checked_signature.set(String::new());
                                                                 fingerprint
@@ -420,6 +495,24 @@ pub(super) fn page() -> Element {
             AdminBusinessWorlds {}
             h2 { class: "admin-config-page__runtime-title", {t!("admin-runtime-document-title")} }
             {content}
+            if reload_confirm_open() {
+                Dialog {
+                    title: t!("admin-runtime-discard-title"),
+                    close_label: t!("admin-runtime-keep-editing"),
+                    on_close: move |_| reload_confirm_open.set(false),
+                    p { {t!("admin-runtime-discard-detail")} }
+                    div { class: "admin-shell__dialog-actions",
+                        button { class: "admin-btn-secondary", r#type: "button",
+                            onclick: move |_| reload_confirm_open.set(false),
+                            {t!("admin-runtime-keep-editing")}
+                        }
+                        button { class: "admin-btn-danger", r#type: "button",
+                            onclick: move |_| discard_and_reload(),
+                            {t!("admin-runtime-discard-reload")}
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -447,15 +540,6 @@ fn AdminRuntimeConfigFact(detail: String, state: Option<bool>, label: String) ->
             }
             p { title: detail.clone(), "{detail}" }
         }
-    }
-}
-
-/// 统计候选文档的叶子字段数，用于写入确认对话框的变更摘要。
-fn count_leaf_fields(value: &Value) -> usize {
-    match value {
-        Value::Object(map) => map.values().map(count_leaf_fields).sum(),
-        Value::Array(items) => items.iter().map(count_leaf_fields).sum(),
-        _ => 1,
     }
 }
 

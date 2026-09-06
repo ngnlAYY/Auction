@@ -2,8 +2,9 @@
 
 :root {
   --color-text-on-accent: var(--color-accent-contrast);
-  /* 危险按钮文字色：需纯白以保证在红底（--color-danger）上的对比度；base 无纯白 token，admin 专属保留。 */
+  /* 危险按钮底色与错误文字色分离；白字在此深红底上的对比度约为 5.70:1。 */
   --color-text-on-danger: #fff;
+  --color-danger-button: #b93838;
   /* 表单控件中性灰边框/底色：沿用旧版管理端表单视觉契约，刻意区别于 base 蓝灰系
      （--color-border-strong / --color-surface-raised），改动会破坏表单观感，admin 专属保留。 */
   --color-input-border: #747474;
@@ -54,6 +55,71 @@
   flex-direction: column;
   color: var(--color-text);
   background: var(--color-bg);
+}
+
+/* 配置校验与确认共享字段节奏；长配置值可选择、换行，不依赖悬浮提示。 */
+.admin-config-draft,
+.admin-config-errors {
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.admin-config-errors {
+  border-color: var(--color-status-error);
+}
+
+.admin-config-errors ul {
+  margin-block-end: 0;
+  padding-inline-start: var(--space-5);
+}
+
+.admin-config-field-error {
+  color: var(--color-status-error);
+}
+
+.admin-runtime-field input[aria-invalid="true"] {
+  border-color: var(--color-status-error);
+}
+
+.admin-runtime-field input,
+.admin-config-errors {
+  scroll-margin-block: var(--space-5);
+}
+
+.admin-config-changes {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.admin-config-changes__entry {
+  min-inline-size: 0;
+  padding-block-end: var(--space-3);
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.admin-config-changes dt {
+  font-weight: var(--font-weight-strong);
+  overflow-wrap: anywhere;
+}
+
+.admin-config-changes dd {
+  margin: var(--space-2) 0 0;
+}
+
+.admin-config-changes__label {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.admin-config-changes pre {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .admin-shell__skip {
@@ -362,7 +428,7 @@
 }
 
 .admin-mail-table {
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .admin-mail-polling {
@@ -605,7 +671,7 @@
 }
 
 .admin-realtime-table {
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .admin-realtime-table th,
@@ -615,7 +681,7 @@
 }
 
 .admin-realtime-event-table {
-  min-inline-size: 64rem;
+  min-inline-size: 0;
   table-layout: fixed;
 }
 
@@ -1260,7 +1326,7 @@
   border: 0 !important;
   border-radius: 0.35rem;
   color: var(--color-text-on-danger) !important;
-  background: var(--color-danger) !important;
+  background: var(--color-danger-button) !important;
 }
 
 .admin-btn-primary:disabled,
@@ -1305,43 +1371,37 @@
   table-layout: fixed;
 }
 
-/* 最小宽度只在桌面行式布局生效；窄屏由 .ui-table--responsive 切换为卡片布局。 */
-@media (min-width: 48rem) {
-  .admin-auction-lot-table {
-    min-inline-size: 64rem;
-  }
-}
 
 .admin-auction-lot-code {
-  inline-size: 5.5rem;
+  inline-size: 8%;
 }
 
 .admin-auction-lot-equipment {
-  inline-size: 14rem;
+  inline-size: 22%;
 }
 
 .admin-auction-lot-seller {
-  inline-size: 7rem;
+  inline-size: 10%;
 }
 
 .admin-auction-lot-submission {
-  inline-size: 6rem;
+  inline-size: 9%;
 }
 
 .admin-auction-lot-status {
-  inline-size: 7rem;
+  inline-size: 10%;
 }
 
 .admin-auction-lot-start {
-  inline-size: 6.5rem;
+  inline-size: 10%;
 }
 
 .admin-auction-lot-current {
-  inline-size: 6.5rem;
+  inline-size: 10%;
 }
 
 .admin-auction-lot-actions {
-  inline-size: 11.5rem;
+  inline-size: 21%;
 }
 
 @media (hover: hover) {
@@ -1782,7 +1842,7 @@
 
 .admin-delivery-table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-delivery-table {
@@ -2277,7 +2337,7 @@
 
 .admin-shell__table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-shell__table {
@@ -2381,7 +2441,7 @@
 
 .admin-users-table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-users-table {
@@ -2642,7 +2702,7 @@
 
 .admin-credentials-table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-credentials-table {
@@ -2854,7 +2914,7 @@
 
 .admin-auction-table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-auction-table th,
@@ -2960,7 +3020,7 @@
 
 .admin-settlement__table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-settlement__table-wrap table {
@@ -3063,7 +3123,7 @@
 
 .admin-lots__proxy-table-wrap {
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .admin-lots__proxy-table {
@@ -3197,7 +3257,6 @@
     flex-direction: column;
   }
 
-  /* 代理历史表格的卡片化由 base.css 的 .ui-table--responsive 统一提供。 */
 
   .admin-mail-detail__grid {
     grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);
@@ -3631,12 +3690,6 @@
   table-layout: fixed;
 }
 
-/* 最小宽度只在桌面行式布局生效；窄屏由 .ui-table--responsive 切换为卡片布局。 */
-@media (min-width: 48rem) {
-  .admin-audit-table {
-    min-inline-size: 72rem;
-  }
-}
 
 .admin-audit-table th,
 .admin-audit-table td {
@@ -3674,7 +3727,7 @@
 }
 
 .admin-audit-table__time {
-  inline-size: 10.75rem;
+  inline-size: 12%;
   white-space: nowrap;
 }
 
@@ -3691,11 +3744,11 @@
 }
 
 .admin-audit-table__source {
-  inline-size: 6.75rem;
+  inline-size: 9%;
 }
 
 .admin-audit-table__result {
-  inline-size: 7rem;
+  inline-size: 9%;
 }
 
 .admin-audit-table__request {
@@ -3772,7 +3825,6 @@
   color: var(--color-text-muted);
 }
 
-/* 审计表格的卡片化由 base.css 的 .ui-table--responsive 统一提供（48rem 断点）。 */
 @media (max-width: 48rem) {
   .admin-audit-filter {
     padding: var(--space-3);

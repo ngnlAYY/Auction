@@ -72,7 +72,7 @@ pub(super) struct RuntimeMailboxForm {
 }
 
 /// 页面保留服务端的完整安全投影，并只把可编辑标量转成适合浏览器输入的文本。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct RuntimeConfigForm {
     document: Value,
     inputs: BTreeMap<String, String>,
@@ -80,6 +80,11 @@ pub(super) struct RuntimeConfigForm {
 }
 
 impl RuntimeConfigForm {
+    /// 读取编辑开始时的完整非敏感投影，供变更清单比对；不参与服务端授权。
+    pub(super) fn source_document(&self) -> &Value {
+        &self.document
+    }
+
     pub(super) fn from_document(document: &Value) -> Result<Self, ()> {
         let mut inputs = BTreeMap::new();
         for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
@@ -228,7 +233,8 @@ impl RuntimeConfigForm {
         self.inputs.get(path).cloned().ok_or(())
     }
 
-    fn edits_field(&self, path: &str) -> bool {
+    /// 未接管的分组既不提交草稿输入，也不参与本地字段错误摘要。
+    pub(super) fn edits_field(&self, path: &str) -> bool {
         operational_fields::management_path(path).is_none_or(|managed| self.boolean(managed))
     }
 }
