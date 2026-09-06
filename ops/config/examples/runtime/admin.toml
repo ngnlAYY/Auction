@@ -393,3 +393,38 @@ low_balance_threshold = 100
 health_refresh_interval_seconds = 60
 # 可选：余额证据陈旧阈值秒数，范围 1-86400；省略时为 300。
 evidence_stale_after_seconds = 300
+
+# 可选区块：邮件调度和处理预算；省略时保持旧文件指纹并沿用 Worker 部署配置。
+[operations.mail]
+# 可选：是否由管理页接管以下参数，默认 false；重启 Worker 后生效，不开启全局邮件开关。
+managed = false
+# 可选：五字段 cron、旧版描述符或 @every；支持 TZ=/CRON_TZ= 时区前缀，默认每五分钟。
+schedule = "*/5 * * * *"
+# 可选：单次响应最大字节数，范围 1-8388608；默认 8388608（8 MiB）。
+maximum_response_bytes = 8388608
+# 可选：连续请求最小间隔毫秒数，范围 1-60000；默认 1000。
+minimum_request_interval_millis = 1000
+# 可选：单次 HTTP 请求超时秒数，范围 1-300；默认 15。
+request_timeout_seconds = 15
+# 可选：每轮邮件读取上限，范围 1-1000；默认 100。
+batch_size = 100
+# 可选：每轮读取页数上限，范围 1-100；默认 20。
+maximum_pages = 20
+# 可选：计划触发后随机抖动上限秒数，范围 0-86400；默认 5。
+jitter_seconds = 5
+# 可选：邮箱 claim 租约秒数，范围 1-86400；默认 60，不改写已持有的租约。
+lease_duration_seconds = 60
+# 可选：续租间隔秒数，必须大于零且小于租约；默认 10。
+renew_interval_seconds = 10
+# 可选：每轮读取的内联尝试次数，范围 1-10；默认 3。
+fetch_attempts = 3
+# 可选：单次读取总超时秒数，范围 1-300 且大于 request_timeout_seconds；默认 30。
+fetch_timeout_seconds = 30
+# 可选：每封邮件处理的内联尝试次数，范围 1-10；默认 3。
+process_attempts = 3
+# 可选：单次邮件处理总超时秒数，范围 1-300 且大于 request_timeout_seconds；默认 30。
+item_timeout_seconds = 30
+# 可选：指数退避基础秒数，范围 1-300；默认 1。
+retry_base_seconds = 1
+# 可选：指数退避上限秒数，范围 1-300 且不小于 retry_base_seconds；默认 30。
+retry_maximum_seconds = 30

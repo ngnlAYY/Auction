@@ -7,7 +7,8 @@ use super::mooglemail::{
 
 /// 将 Admin 管理的旧版业务区块投影到 Worker 的 MoogleMail 启动快照。
 ///
-/// transport endpoint、凭据来源、调度和全局 `enabled` 仍由 Worker 主配置拥有；共享 runtime
+/// transport endpoint、凭据来源和全局 `enabled` 仍由 Worker 主配置拥有；调度可由 operations/mail
+/// 独立接管。此处的共享 runtime
 /// 只决定旧版管理页实际可写的 world、发件人、装备过滤和通知模板。邮箱标识优先沿用主配置
 /// 中同 world 的值，避免一次运营更新意外切换 durable cursor。
 pub(in crate::config::settings) fn apply_runtime_document(

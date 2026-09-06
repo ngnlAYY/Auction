@@ -14,6 +14,15 @@ use super::{
 
 /// runtime 文件适配器端口。
 pub trait AdminRuntimeFileStore: Send + Sync {
+    /// 只做配置适配器的本地语法校验；不得读取文件、写命令账本或访问外部服务。
+    ///
+    /// cron 等部署格式的解析仍由配置 owner 提供，应用层只传入统一的校验时刻。
+    fn validate_candidate(
+        &self,
+        document: &AdminRuntimeDocument,
+        now: DateTime<Utc>,
+    ) -> Result<(), ApplicationError>;
+
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
 
     fn replace(

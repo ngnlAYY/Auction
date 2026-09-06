@@ -3,6 +3,7 @@
 mod alerts;
 mod economics;
 mod forum;
+mod mail;
 mod schedule;
 mod worker;
 
@@ -21,6 +22,7 @@ pub(super) fn OperationalConfigFields(
     on_dirty: EventHandler<()>,
 ) -> Element {
     rsx! {
+        mail::MailFields { form, disabled, on_dirty }
         forum::ForumFields { form, disabled, on_dirty }
         economics::EconomicsFields { form, disabled, on_dirty }
         schedule::ScheduleFields { form, disabled, on_dirty }

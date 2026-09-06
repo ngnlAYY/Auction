@@ -56,12 +56,15 @@
   命令账本保护策略快照与调度记录同步，已成功命令始终先按原结果重放。
 - `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
   错误类型和本地边界校验；`business.rs` 冻结 main/isekai、发件人 allowlist、装备过滤和 14 个
-  通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`operations/` 按经济、周排期、论坛、告警与
-  Worker 循环拆分新增参数及纯文档校验，各组 `managed` 默认关闭。旧文档省略整个区块时保留原
+  通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`operations/` 按经济、周排期、论坛、告警、
+  Worker 循环与邮件预算拆分新增参数及纯文档校验，各组 `managed` 默认关闭。旧文档省略整个区块或
+  `operations.mail` 时保留原
   指纹和 durable 摘要；浏览器物化的是未接管候选。`runtime_config.rs` 只负责稳定公共类型出口，
   不执行文件、数据库或网络操作。
   runtime 恢复对“账本 pending、文件仍为旧指纹”的可证明状态继续完成原命令，避免永久占用唯一
   未完成命令槽；文件冲突仍失败关闭，不删除账本或重写审计。
+  配置服务在新命令写入账本前调用文件适配器的无 I/O 候选校验，cron 解析仍由配置层拥有；已接受
+  命令保留原幂等结果，应用层不引入部署格式解析依赖。
 - `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
   dashboard 端口位于 `ports.rs`；`value/{model,secret,runtime,health,error,common}.rs` 分别负责闭集模型、
   明文/密文安全值、运行记录、dashboard 聚合、业务错误和共用边界；`credentials.rs` 只负责稳定公共类型出口，

@@ -6,7 +6,7 @@ use super::{bool_field, exact_object, string_field, u64_field, valid_string_list
 
 pub(super) fn valid_operations(value: &Value) -> bool {
     let Some(document) =
-        exact_object(value, &["economics", "schedule", "forum", "alerts", "worker"])
+        exact_object(value, &["economics", "schedule", "forum", "alerts", "worker", "mail"])
     else {
         return false;
     };
@@ -15,6 +15,35 @@ pub(super) fn valid_operations(value: &Value) -> bool {
         && valid_forum(&document["forum"])
         && valid_alerts(&document["alerts"])
         && valid_worker(&document["worker"])
+        && valid_mail(&document["mail"])
+}
+
+fn valid_mail(value: &Value) -> bool {
+    valid_scalars(
+        value,
+        &["managed"],
+        &[("schedule", false)],
+        &[
+            ("maximum_response_bytes", 1, 8_388_608),
+            ("minimum_request_interval_millis", 1, 60_000),
+            ("request_timeout_seconds", 1, 300),
+            ("batch_size", 1, 1000),
+            ("maximum_pages", 1, 100),
+            ("jitter_seconds", 0, 86_400),
+            ("lease_duration_seconds", 1, 86_400),
+            ("renew_interval_seconds", 1, 86_399),
+            ("fetch_attempts", 1, 10),
+            ("fetch_timeout_seconds", 1, 300),
+            ("process_attempts", 1, 10),
+            ("item_timeout_seconds", 1, 300),
+            ("retry_base_seconds", 1, 300),
+            ("retry_maximum_seconds", 1, 300),
+        ],
+        &[],
+    ) && value["renew_interval_seconds"].as_u64() < value["lease_duration_seconds"].as_u64()
+        && value["fetch_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
+        && value["item_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
+        && value["retry_base_seconds"].as_u64() <= value["retry_maximum_seconds"].as_u64()
 }
 
 fn valid_economics(value: &Value) -> bool {

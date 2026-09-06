@@ -8,7 +8,7 @@ use crate::api::AdminDashboardSnapshot;
 use super::super::Route;
 
 #[component]
-pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
+pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot, children: Element) -> Element {
     let process = snapshot.process.data.as_ref();
     let mail = snapshot.mail.data.as_ref();
     let poll_paused = mail.is_some_and(|data| data.pollers.iter().any(|poller| poller.paused));
@@ -135,43 +135,30 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
             section {
                 class: "admin-dashboard-shortcuts",
                 aria_labelledby: "dashboard-shortcuts-title",
-                h2 { id: "dashboard-shortcuts-title", {t!("dashboard-shortcuts-title")} }
-                p { class: "admin-dashboard-status", {t!("dashboard-shortcuts-note")} }
+                h2 { class: "admin-visually-hidden", id: "dashboard-shortcuts-title", {t!("dashboard-shortcuts-title")} }
                 nav { class: "admin-quick-links", aria_label: t!("dashboard-shortcuts-title"),
-                    Link { class: "admin-quick-link", to: Route::Auctions {},
-                        span { class: "admin-quick-link__icon" }
-                        span { class: "admin-quick-link__copy",
-                            strong { {t!("dashboard-open-auctions")} }
-                            small { {t!("dashboard-open-auctions-note")} }
-                        }
+                    Link { class: "admin-quick-link", to: Route::Auctions {}, title: t!("dashboard-open-auctions-note"),
+                        span { class: "admin-quick-link__icon", aria_hidden: "true" }
+                        strong { {t!("dashboard-open-auctions")} }
                     }
-                    Link { class: "admin-quick-link", to: Route::Mails {},
-                        span { class: "admin-quick-link__icon admin-quick-link__icon--mail" }
-                        span { class: "admin-quick-link__copy",
-                            strong { {t!("dashboard-open-mail")} }
-                            small { {t!("dashboard-open-mail-note")} }
-                        }
+                    Link { class: "admin-quick-link", to: Route::Mails {}, title: t!("dashboard-open-mail-note"),
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--mail", aria_hidden: "true" }
+                        strong { {t!("dashboard-open-mail")} }
                     }
-                    Link { class: "admin-quick-link", to: Route::Deliveries {},
-                        span { class: "admin-quick-link__icon admin-quick-link__icon--delivery" }
-                        span { class: "admin-quick-link__copy",
-                            strong { {t!("dashboard-open-deliveries")} }
-                            small { {t!("dashboard-open-deliveries-note")} }
-                        }
+                    Link { class: "admin-quick-link", to: Route::Deliveries {}, title: t!("dashboard-open-deliveries-note"),
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--delivery", aria_hidden: "true" }
+                        strong { {t!("dashboard-open-deliveries")} }
                     }
-                    Link { class: "admin-quick-link", to: Route::Settlement {},
-                        span { class: "admin-quick-link__icon admin-quick-link__icon--settlement" }
-                        span { class: "admin-quick-link__copy",
-                            strong { {t!("nav-settlement")} }
-                            small { {t!("dashboard-open-settlement-note")} }
-                        }
+                    Link { class: "admin-quick-link", to: Route::Settlement {}, title: t!("dashboard-open-settlement-note"),
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--settlement", aria_hidden: "true" }
+                        strong { {t!("nav-settlement")} }
                     }
-                    Link { class: "admin-quick-link", to: Route::Outbox {},
-                        span { class: "admin-quick-link__icon admin-quick-link__icon--status" }
-                        span { class: "admin-quick-link__copy",
-                            strong { {t!("dashboard-open-status")} }
-                            small { {t!("dashboard-open-status-note")} }
-                        }
+                    Link { class: "admin-quick-link", to: Route::Outbox {}, title: t!("dashboard-open-status-note"),
+                        span { class: "admin-quick-link__icon admin-quick-link__icon--status", aria_hidden: "true" }
+                        strong { {t!("dashboard-open-status")} }
+                    }
+                    Link { class: "admin-quick-link", to: Route::Config {},
+                        strong { {t!("nav-config")} }
                     }
                 }
             }
@@ -213,7 +200,12 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 )}
             }
 
-            h2 { {t!("dashboard-legacy-audit-health")} }
+            {children}
+
+            // 每个分组是完整阅读单元；宽屏分栏，窄屏按原有 DOM 顺序展开。
+            div { class: "admin-dashboard-panels",
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-audit-title",
+            h2 { id: "dashboard-audit-title", {t!("dashboard-legacy-audit-health")} }
             div { class: "admin-dashboard-cards",
                 {card(
                     t!("dashboard-legacy-audit-health"),
@@ -231,12 +223,17 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                     worker: availability(&snapshot, "worker")
                 )}
             }
+            details { class: "admin-dashboard-details",
+            summary { {t!("dashboard-metrics-details")} }
             p { class: "admin-dashboard-status", {t!("dashboard-legacy-audit-scope")} }
             if audit_failures == 0 && !audit_metrics_unavailable {
                 p { class: "admin-dashboard-status", {t!("dashboard-legacy-audit-no-failures")} }
             }
+            }
+            }
 
-            h2 { {t!("dashboard-legacy-tracing-health")} }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-tracing-title",
+            h2 { id: "dashboard-tracing-title", {t!("dashboard-legacy-tracing-health")} }
             if process.is_none_or(|data| data.processes.is_empty()) {
                 p { class: "admin-dashboard-status",
                     {t!("dashboard-legacy-tracing-status-unavailable")}
@@ -275,7 +272,9 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            h2 { {t!("dashboard-legacy-outbox-health")} }
+            }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-outbox-title",
+            h2 { id: "dashboard-outbox-title", {t!("dashboard-legacy-outbox-health")} }
             div { class: "admin-dashboard-cards",
                 {card(
                     t!("dashboard-legacy-outbox-health"),
@@ -292,20 +291,12 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                     }),
                 )}
                 {card(
-                    t!("dashboard-legacy-outbox-retry"),
-                    text(t!("dashboard-legacy-metric-not-collected")),
-                )}
-                {card(
                     t!("dashboard-legacy-outbox-dead-letter"),
                     text(if realtime.is_none() {
                         t!("dashboard-legacy-no-data")
                     } else {
                         failures.to_string()
                     }),
-                )}
-                {card(
-                    t!("dashboard-legacy-outbox-claimed"),
-                    text(t!("dashboard-legacy-metric-not-collected")),
                 )}
             }
             if realtime.is_none() {
@@ -322,10 +313,16 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                     )}
                 }
             }
+            details { class: "admin-dashboard-details",
+            summary { {t!("dashboard-metrics-details")} }
+            p { class: "admin-dashboard-status", {t!("dashboard-uncollected-metrics")} }
             h3 { {t!("dashboard-legacy-outbox-attempts")} }
             p { class: "admin-dashboard-status", {t!("dashboard-legacy-metric-not-collected")} }
+            }
+            }
 
-            h2 { {t!("dashboard-legacy-cookie-readiness-by-world")} }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-credentials-title",
+            h2 { id: "dashboard-credentials-title", {t!("dashboard-legacy-cookie-readiness-by-world")} }
             if credentials.is_none_or(|data| data.availability.is_empty()) {
                 p { class: "admin-dashboard-status", {t!("dashboard-legacy-no-data")} }
             } else if let Some(credentials) = credentials {
@@ -351,7 +348,7 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            h2 { {t!("dashboard-legacy-cookies-by-world")} }
+            h3 { {t!("dashboard-legacy-cookies-by-world")} }
             if sorted_availability.is_empty() {
                 p { class: "admin-dashboard-status", {t!("dashboard-legacy-no-data")} }
             } else {
@@ -370,7 +367,9 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            h2 { {t!("dashboard-legacy-deliveries-by-status")} }
+            }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-deliveries-title",
+            h2 { id: "dashboard-deliveries-title", {t!("dashboard-legacy-deliveries-by-status")} }
             if let Some(delivery) = delivery {
                 div { class: "admin-dashboard-cards",
                     {card(
@@ -410,7 +409,9 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 p { class: "admin-dashboard-status", {t!("dashboard-legacy-no-data")} }
             }
 
-            h2 { {t!("dashboard-legacy-fulfillment-health")} }
+            }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-fulfillment-title",
+            h2 { id: "dashboard-fulfillment-title", {t!("dashboard-legacy-fulfillment-health")} }
             if let Some(fulfillment) = fulfillment {
                 div { class: "admin-dashboard-cards",
                     {semantic_card(
@@ -484,7 +485,9 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            h2 { {t!("dashboard-legacy-recovery-health")} }
+            }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-recovery-title",
+            h2 { id: "dashboard-recovery-title", {t!("dashboard-legacy-recovery-health")} }
             if let Some(recovery) = recovery {
                 div { class: "admin-dashboard-cards",
                     {card(
@@ -577,7 +580,9 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                 }
             }
 
-            h2 { {t!("dashboard-legacy-alerting-health")} }
+            }
+            section { class: "admin-dashboard-panel", aria_labelledby: "dashboard-alerting-title",
+            h2 { id: "dashboard-alerting-title", {t!("dashboard-legacy-alerting-health")} }
             if let Some(alerting) = alerting {
                 div { class: "admin-dashboard-cards",
                     {card(
@@ -623,6 +628,10 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                         t!("dashboard-legacy-alerting-manual-reconcile"),
                         text(alerting.manual_reconcile_count.to_string()),
                     )}
+                }
+                details { class: "admin-dashboard-details",
+                    summary { {t!("dashboard-metrics-details")} }
+                    div { class: "admin-dashboard-cards admin-dashboard-cards--timestamps",
                     {card(
                         t!("dashboard-legacy-alerting-last-observed"),
                         text(alerting.last_observed_at.clone().unwrap_or_else(|| {
@@ -649,11 +658,14 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot) -> Element {
                             alerting.last_error_code.clone()
                         }),
                     )}
+                    }
                 }
             } else {
                 p { class: "admin-dashboard-status",
                     {t!("dashboard-legacy-alerting-status-unavailable")}
                 }
+            }
+            }
             }
         }
     }

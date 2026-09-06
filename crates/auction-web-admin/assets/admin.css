@@ -2153,17 +2153,17 @@
 
 .admin-quick-links {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  gap: var(--admin-space-compact);
-  margin-block-start: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+  gap: var(--space-2);
+  margin: 0;
 }
 
 .admin-quick-link {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-block-size: var(--size-target);
-  padding: var(--admin-space-control) var(--admin-space-table-inline);
+  gap: var(--space-2);
+  min-block-size: 2.25rem;
+  padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--admin-radius-button);
   color: var(--color-link);
@@ -2207,7 +2207,7 @@
 }
 
 .admin-dashboard-shortcuts {
-  margin-block-end: var(--space-5);
+  margin: 0;
 }
 
 .admin-dashboard-shortcuts h2,
@@ -3315,25 +3315,55 @@
 /* 旧版 Dashboard 的卡片、状态徽章和动作区视觉契约。 */
 .admin-dashboard-page {
   display: grid;
+  align-content: start;
+  gap: var(--space-3);
   min-inline-size: 0;
 }
 
-.admin-dashboard-page > h1 {
-  margin: 0 0 var(--space-4);
-  font-size: var(--admin-text-title);
+/* 分组按 DOM 顺序逐栏阅读，避免等高网格在短状态面板下留下大片空白。 */
+.admin-dashboard-panels {
+  columns: 2;
+  column-gap: var(--space-3);
+  min-inline-size: 0;
 }
 
-.admin-dashboard-page > h2 {
-  margin: var(--space-3) 0 var(--space-2);
-  padding-block-start: var(--space-3);
-  border-block-start: var(--border-width) solid var(--color-border);
-  font-size: var(--text-lg);
+.admin-dashboard-panel {
+  display: inline-block;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  margin-block-end: var(--space-3);
+  padding: var(--space-3);
+  break-inside: avoid;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 
-.admin-dashboard-page > h3 {
+.admin-dashboard-panel h2 {
   margin: 0 0 var(--space-2);
-  color: var(--color-text-muted);
   font-size: var(--text-base);
+}
+
+.admin-dashboard-panel h3 {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--admin-text-label);
+}
+
+.admin-dashboard-panel p {
+  margin: var(--admin-space-compact) 0;
+  font-size: var(--admin-text-label);
+}
+
+.admin-dashboard-details {
+  margin-block-start: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-dashboard-details summary {
+  padding-block: var(--space-1);
+  cursor: pointer;
 }
 
 .admin-dashboard-cards {
@@ -3345,6 +3375,47 @@
 
 .admin-dashboard-cards--summary {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  margin: 0;
+}
+
+.admin-dashboard-cards--summary .admin-dashboard-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.admin-dashboard-panel .admin-dashboard-cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+  gap: var(--admin-space-compact);
+  margin-block-end: var(--space-1);
+}
+
+.admin-dashboard-panel .admin-dashboard-card {
+  padding: var(--admin-space-compact) var(--space-2);
+  gap: var(--admin-space-tiny);
+  border-inline-start-width: var(--border-width);
+  box-shadow: none;
+}
+
+.admin-dashboard-panel .admin-dashboard-value {
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+
+.admin-dashboard-panel .admin-dashboard-cards--timestamps {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 100rem) {
+  .admin-dashboard-panels {
+    columns: 3;
+  }
+}
+
+@media (max-width: 64rem) {
+  .admin-dashboard-panels {
+    columns: 1;
+  }
 }
 
 .admin-dashboard-card {
@@ -3425,16 +3496,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--admin-space-compact);
-  margin-block-start: var(--space-5);
+  margin: 0;
 }
 
 .admin-dashboard-attention {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin-block: 0 var(--space-3);
-  padding: var(--space-3);
+  gap: var(--space-2);
+  margin-block: var(--space-2) 0;
+  padding: var(--space-2);
   border: var(--border-width) solid var(--color-status-error);
   border-inline-start-width: 4px;
   border-radius: var(--radius-md);

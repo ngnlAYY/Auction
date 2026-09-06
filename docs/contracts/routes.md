@@ -372,7 +372,7 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 `reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
 运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含兼容
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为
-启动快照。MoogleMail transport、凭据、邮件调度、mailbox identity 和全局启用开关仍由 Worker 主配置
+启动快照。MoogleMail transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置
 拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
 `501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 与
 `allow_manual_early_settlement` 会分别决定人工提前开放、人工提前结算 capability 和对应的锁内校验；
@@ -385,13 +385,18 @@ main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 
 Admin WebUI 将这份闭集投影映射成分组开关、数字、列表与文本输入；保存仍提交完整候选文档，
 因此所有页面修改最终由 PUT 的原子文件替换边界写回配置文件，不存在只在浏览器内生效的旁路。
 
-runtime 文档新增可选 `operations`，响应投影会补齐五组候选参数：`economics`（后续新拍卖的
+runtime 文档提供可选 `operations`，响应投影会补齐六组候选参数：`economics`（后续新拍卖的
 底价、增幅、软截止、取消与代理策略）、`schedule`（自动周排期）、`forum`（论坛开关与有界轮询）、
-`alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）。
+`alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）、
+`mail`（邮件 cron、读取批量/分页、HTTP 预算、租约续期、读取/处理尝试和退避）。
 每组的 `managed` 默认 `false`，表示沿用公共/角色 TOML；只有设为 `true` 才在对应进程重启时覆盖
 该组字段。首次 GET 的候选值不代表未接入 runtime 的 Worker 当前配置。严格候选校验覆盖金额网格及
-1B 底价上限、周时间顺序、分页请求预算、并发/批量、租约/超时、告警冷却与收件人。
-缺少整个 `operations` 的旧物理文件和 durable 候选继续保持原指纹；物化只发生在浏览器投影，
+1B 底价上限、周时间顺序、分页请求预算、并发/批量、租约/超时、告警冷却与收件人。邮件 cron 校验
+复用 Worker 配置解析器，并要求存在未来触发时刻；无效候选在新命令写入账本前拒绝。`mail` 完整字段、
+单位、默认值和范围见 `ops/config/examples/runtime/admin.toml`，读取与处理超时必须大于 HTTP 超时，
+续租周期必须小于租约，退避上限不能小于基础退避。
+缺少整个 `operations` 或其中 `mail` 的旧物理文件和 durable 候选继续保持原指纹；显式 `mail:null`
+被拒绝。物化只发生在浏览器投影，
 不改写历史命令。API envelope、命令摘要版本和 `restart_required` 语义不变，不增加热加载路径。
 保存中断后，pending 命令与旧文件指纹一致时继续完成同一候选，不永久占用唯一未完成命令槽。
 若 Admin 启动恢复补写了文件，启动校验会要求重新加载恢复后的配置；未证明的冲突仍需人工核对。
