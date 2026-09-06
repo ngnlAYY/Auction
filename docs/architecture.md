@@ -287,7 +287,8 @@ SQLite Lite 没有 `equipment_secrets`，仍返回 lot 数据，但把 `game_equ
 显式覆盖新经济模板与周排期。Admin 创建拍卖时，应用服务会把已校验模板
 交给 PostgreSQL 完整档事务；事务将同一来源写入 schema v4 `policy_snapshot` 以及遗留规则列，
 避免管理端配置与实际规则分叉。竞价和取消事务会在锁内从该快照恢复 PPM、代理限制、final
-phase 及时间规则；MoogleMail 入站默认起拍价继承同一经济模板。
+phase 及时间规则。MoogleMail 正文未填写 `start` 时，每件装备默认以 50,000 Credits 起拍；
+该邮件专属默认价只接受 `[worker.mooglemail].start_price` 显式覆盖，不继承公共经济模板。
 
 ### Lite 能力边界
 
@@ -472,7 +473,8 @@ delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独
 通知发送。每周新场次 bootstrap 的实际世界集合进一步取 `[auction.schedule].worlds`、上述
 runtime-enabled 世界与数据库 `worlds.enabled=true` 的交集，并在每次 due 执行前重读数据库；关闭
 世界会安全跳过新轮次，不会停止已经持久化的 settlement、fulfillment、delivery 或 recovery 排空。
-起拍价解析兼容空白正文/空行、全附件统一 `start amount`、跨物理行的逐件三元组、
+起拍价解析在正文未填写 `start` 时使用邮件默认价，允许空白、说明或装备链接；填写指令后
+仍严格解析全附件统一 `start amount` 或跨物理行的逐件三元组，并兼容空行、
 显式 `#` 注释、规范千分位和可精确换算为整数 Credits 的 `k`/`m` 小数；附件 ID/key 交叉校验、
 逐件唯一覆盖、正数和 checked 溢出边界仍失败关闭。通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
 缺少该区块时由 `[worker.mooglemail]` 直接配置兼容回退；14 个模板在启动时校验占位符并冻结快照；

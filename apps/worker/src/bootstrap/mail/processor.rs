@@ -91,9 +91,7 @@ pub(super) fn build_processor_and_delivery(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),
                     MailProcessorConfig {
-                        start_price: mail_config
-                            .start_price
-                            .unwrap_or(config.auction.economics.start_price),
+                        start_price: mail_config.start_price.unwrap_or(50_000),
                         equipment_filter: MailEquipmentFilter {
                             enabled: mail_config.equipment_filter.enabled,
                             qualities: mail_config.equipment_filter.qualities.clone(),

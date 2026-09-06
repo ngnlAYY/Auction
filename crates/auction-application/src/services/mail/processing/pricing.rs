@@ -4,8 +4,8 @@ use super::*;
 
 /// 解析拍卖邮件中的兼容起拍价指令。
 ///
-/// 空白正文使用配置默认价；单条 `start amount` 对全部附件生效，其余输入按连续的
-/// `URL start amount` 三元组解析。空行、常见换行、显式 `#` 注释和物理行边界不影响指令，
+/// 未填写 `start` 的正文使用邮件配置默认价；单条 `start amount` 对全部附件生效，其余
+/// 定价输入按连续的 `URL start amount` 三元组解析。空行、换行、显式 `#` 注释不影响指令，
 /// 但装备 ID 与 key 仍会同时和详情页附件交叉校验，避免只凭正文中的可伪造 URL 录入资产。
 pub(super) fn resolve_start_price_plan(
     body: &str,
@@ -31,18 +31,18 @@ pub(super) fn resolve_start_price_plan(
     }
     let mut prices = vec![default_price; attachments.len()];
     let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
+    if !contains_start_price_directive(&normalized) {
+        return Ok(prices);
+    }
+    let body_fields =
+        normalized.split('\n').flat_map(|line| strip_start_price_comment(line).split_whitespace());
     let maximum_fields = attachments.len().checked_mul(3).ok_or(INVALID)?.max(2);
     let mut fields = Vec::with_capacity(maximum_fields);
-    for raw_line in normalized.split('\n') {
-        for field in strip_start_price_comment(raw_line).split_whitespace() {
-            if fields.len() == maximum_fields {
-                return Err(INVALID);
-            }
-            fields.push(field);
+    for field in body_fields {
+        if fields.len() == maximum_fields {
+            return Err(INVALID);
         }
-    }
-    if fields.is_empty() {
-        return Ok(prices);
+        fields.push(field);
     }
     if fields.len() == 2 && fields[0].eq_ignore_ascii_case("start") {
         let price = parse_start_price_amount(fields[1]).ok_or(INVALID)?;
@@ -79,6 +79,43 @@ pub(super) fn resolve_start_price_plan(
         return Err(MISSING);
     }
     Ok(prices)
+}
+
+/// 按指令位置识别 start，普通单词或句中的无价格说明不触发退回；明显误写仍进入严格校验。
+fn contains_start_price_directive(body: &str) -> bool {
+    let mut fields = body
+        .split('\n')
+        .flat_map(|line| strip_start_price_comment(line).split_whitespace().enumerate())
+        .peekable();
+    let mut previous_field = "";
+    while let Some((line_index, field)) = fields.next() {
+        let marker = field
+            .trim_start_matches(['"', '\'', '`', '[', '('])
+            .trim_end_matches(['"', '\'', '`', ']', ')']);
+        if marker.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("start")) {
+            let suffix = &marker[5..];
+            // starting、starter 等普通单词不是指令；start=10k、start:10k 和 start10k
+            // 等形式则不能因缺少空格而悄悄按默认价收件。
+            let compact_amount = suffix
+                .trim_start_matches(['+', '-', '.', ','])
+                .starts_with(|character: char| character.is_ascii_digit());
+            if suffix.starts_with(['=', ':'])
+                || compact_amount
+                || (suffix.is_empty()
+                    && (line_index == 0
+                        || previous_field.contains("/equip/")
+                        || fields.peek().is_some_and(|(_, amount)| {
+                            amount.starts_with(|character: char| {
+                                character.is_ascii_digit() || matches!(character, '+' | '-' | '.')
+                            })
+                        })))
+            {
+                return true;
+            }
+        }
+        previous_field = field;
+    }
+    false
 }
 
 /// 只有行首或空白后的 `#` 才开始注释，装备 URL 自身的 fragment 仍属于 URL token。

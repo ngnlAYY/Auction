@@ -125,6 +125,8 @@
   `user/mod.rs` 只负责稳定公共导出。
 - `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
   `processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、命令幂等辅助和起拍价/装备身份解析；
+  正文未填写 `start` 时，全部真实附件使用 Worker 注入的邮件默认价（默认 50,000 Credits），
+  普通说明和无定价的链接不会触发价格拒绝；显式指令仍校验金额、附件 ID/key 和逐件唯一覆盖。
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
