@@ -257,7 +257,9 @@ impl DialogFocusTrapGuard {
                 let _ = body.style().set_property("overflow", &previous);
             }
         }
-        if let Some(target) = self.opener.borrow().clone().filter(|target| target.is_connected()) {
+        // focus 会同步派发焦点事件；先释放借用，再把控制权交给浏览器监听器。
+        let opener = self.opener.borrow().clone();
+        if let Some(target) = opener.filter(|target| target.is_connected()) {
             let _ = target.focus();
         }
     }
@@ -333,7 +335,10 @@ fn synchronize_dialog_state(
             let _ = body.style().set_property("overflow", &previous);
         }
     }
-    if let Some(target) = opener.borrow().clone().filter(|target| target.is_connected()) {
+    // focus 会同步触发 focusin，监听器会写回 opener；快照必须先释放 RefCell 只读借用，
+    // 避免 if let 条件的临时借用跨越 focus 调用并在关闭弹窗时触发重入 panic。
+    let opener = opener.borrow().clone();
+    if let Some(target) = opener.filter(|target| target.is_connected()) {
         let _ = target.focus();
     }
 }
