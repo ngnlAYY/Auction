@@ -38,6 +38,8 @@ pub(super) fn CompensationPoolTable(
             } else {
                 div { class: "public-compensation-table-wrap ui-table--fit",
                     table { class: "public-compensation-table",
+                        // 列序：展开、拍卖、世界、期初、税收、折扣、支出、期末、时间；按字段预期内容分配比例。
+                        auction_web_shared::TableColumns { layout: "public-compensation", widths: vec![3, 6, 8, 10, 14, 16, 14, 10, 19] }
                         thead {
                             tr {
                                 th { scope: "col", class: "public-compensation-toggle-cell", aria_label: t!("compensation-details") }

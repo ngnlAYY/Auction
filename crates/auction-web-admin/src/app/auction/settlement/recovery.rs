@@ -42,6 +42,8 @@ pub(super) fn AdminRecoveryTable(
                     div { class: "admin-settlement__table-wrap",
                         table { class: "admin-shell__table admin-auction-table",
                             caption { class: "admin-visually-hidden", {t!("admin-recovery-title")} }
+                            // 列序：拍品、装备、阶段、截止时间、证据、恢复操作、命令；按字段预期内容分配比例。
+                            auction_web_shared::TableColumns { layout: "admin-recovery", widths: vec![6, 27, 10, 18, 14, 12, 13] }
                             thead {
                                 tr {
                                     th { scope: "col", {t!("admin-recovery-lot")} }

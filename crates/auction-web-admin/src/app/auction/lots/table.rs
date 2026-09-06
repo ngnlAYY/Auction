@@ -65,6 +65,8 @@ pub(super) fn AdminLotTable(
                         caption { class: "admin-visually-hidden",
                             {t!("page-auction-lots-title", auction: page.auction.sequence)}
                         }
+                        // 列序：拍品、装备、卖家、批次、状态、起拍价、当前价、操作；按字段预期内容分配比例。
+                        auction_web_shared::TableColumns { layout: "admin-lots", widths: vec![7, 28, 10, 7, 9, 9, 12, 18] }
                         thead {
                             tr {
                                 SortableTh {

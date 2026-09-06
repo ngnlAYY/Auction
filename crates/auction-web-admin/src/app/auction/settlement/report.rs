@@ -38,6 +38,8 @@ pub(super) fn AdminSettlementReportView(
         div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
                     caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
+                    // 列序：编号、装备、卖家、得主、成交价、持有比例、调整比例、折扣/惩罚、挂牌价、补偿、买家应付、卖家应收；按字段预期内容分配比例。
+                    auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![6, 18, 7, 5, 9, 8, 7, 9, 9, 5, 10, 7] }
                     thead {
                         tr {
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-lot-id")} }

@@ -265,6 +265,8 @@ pub(crate) fn BidLogTable(
             div { class: "public-auction-bid-log-table-wrap",
                 table {
                     class: "public-auction-bid-log-table ui-table--responsive",
+                    // 列序：时间、拍品、竞价者、金额；按字段预期内容分配比例。
+                    auction_web_shared::TableColumns { layout: "public-bid-log", widths: vec![30, 12, 40, 18] }
                     thead {
                         tr {
                             th { scope: "col", {t!("bidlog-time")} }

@@ -111,20 +111,7 @@ pub(crate) fn LiveCatalogTable(
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-lots")} }
-                colgroup {
-                    col { class: "public-auction-catalog__column--code" }
-                    col { class: "public-auction-catalog__column--item" }
-                    col { class: "public-auction-catalog__column--avg-roll" }
-                    col { class: "public-auction-catalog__column--level" }
-                    col { class: "public-auction-catalog__column--attributes" }
-                    col { class: "public-auction-catalog__column--seller" }
-                    col { class: "public-auction-catalog__column--current-price" }
-                    col { class: "public-auction-catalog__column--next-bid" }
-                    col { class: "public-auction-catalog__column--leader" }
-                    col { class: "public-auction-catalog__column--remaining" }
-                    col { class: "public-auction-catalog__column--status" }
-                    col { class: "public-auction-catalog__column--actions" }
-                }
+                auction_web_shared::TableColumns { layout: "public-catalog-live", widths: vec![6, 23, 6, 4, 4, 7, 9, 9, 6, 8, 6, 12] }
                 thead {
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
@@ -166,19 +153,7 @@ pub(crate) fn PreviewCatalogTable(rows: Rc<Vec<CatalogRow>>, indices: Vec<usize>
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
-                colgroup {
-                    col { class: "public-auction-catalog__column--code" }
-                    col { class: "public-auction-catalog__column--item" }
-                    col { class: "public-auction-catalog__column--avg-roll" }
-                    col { class: "public-auction-catalog__column--level" }
-                    col { class: "public-auction-catalog__column--attributes" }
-                    col { class: "public-auction-catalog__column--seller" }
-                    col { class: "public-auction-catalog__column--start-price" }
-                    col { class: "public-auction-catalog__column--leader" }
-                    col { class: "public-auction-catalog__column--remaining" }
-                    col { class: "public-auction-catalog__column--status" }
-                    col { class: "public-auction-catalog__column--actions" }
-                }
+                auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: vec![6, 32, 7, 5, 7, 11, 11, 4, 4, 6, 7] }
                 thead {
                     tr {
                         th { scope: "col", {t!("catalog-code")} }

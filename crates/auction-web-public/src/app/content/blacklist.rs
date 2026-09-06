@@ -67,6 +67,8 @@ fn BlacklistTable(page: BlacklistPage, on_page_change: EventHandler<i64>) -> Ele
             } else {
                 div { class: "public-blacklist-table-wrap",
                     table { class: "public-blacklist-table",
+                        // 列序：玩家、理由、时间；按字段预期内容分配比例。
+                        auction_web_shared::TableColumns { layout: "public-blacklist", widths: vec![22, 54, 24] }
                         thead {
                             tr {
                                 th { {t!("blacklist-player")} }

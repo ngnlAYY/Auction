@@ -200,6 +200,7 @@ fn BidSection(
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("account-bids-title")} }
+                        auction_web_shared::TableColumns { layout: "public-account-bids", widths: vec![18, 28, 54] }
                         thead {
                             tr {
                                 th { scope: "col", {t!("account-lot")} }
@@ -271,6 +272,7 @@ fn ProxySection(
                 div { class: "public-account-table-wrap",
                     table { class: "public-account-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("account-proxies-title")} }
+                        auction_web_shared::TableColumns { layout: "public-account-proxies", widths: vec![10, 18, 38, 10, 10, 14] }
                         thead {
                             tr {
                                 th { scope: "col", {t!("account-lot")} }

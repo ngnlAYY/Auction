@@ -19,6 +19,8 @@ pub(super) fn RealtimeFailureTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table",
+                // 列序：时间、失败信息、流、消费者、事件 ID、ID、状态、操作；按字段预期内容分配比例。
+                auction_web_shared::TableColumns { layout: "admin-realtime-failures", widths: vec![17, 20, 17, 9, 12, 12, 7, 6] }
                 thead {
                     tr {
                         th { class: "admin-realtime-col-failure", {t!("realtime-failure-time")} }

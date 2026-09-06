@@ -2216,13 +2216,11 @@
 
 .public-blacklist-table th:first-child,
 .public-blacklist-table td:first-child {
-  inline-size: 20%;
   font-variant-numeric: tabular-nums;
 }
 
 .public-blacklist-table th:last-child,
 .public-blacklist-table td:last-child {
-  inline-size: 30%;
   white-space: nowrap;
 }
 
@@ -2288,7 +2286,6 @@
 }
 
 .public-compensation-table .public-compensation-toggle-cell {
-  width: 2.5rem;
   text-align: center;
 }
 
@@ -2713,24 +2710,7 @@
   }
 }
 
-/* ===== 拍品表百分比列宽：所有屏幕共享，超长内容通过提示查看 ===== */
-.public-auction-catalog__table--live .public-auction-catalog__column--code {
-  inline-size: 6%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--item {
-  inline-size: 18%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
-.public-auction-catalog__table--live .public-auction-catalog__column--remaining {
-  inline-size: 7%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--current-price,
-.public-auction-catalog__table--live .public-auction-catalog__column--next-bid {
-  inline-size: 9%;
-}
+/* 拍品列比例由 live/preview 表的 TableColumns 分别声明；样式仅拥有对齐和密度。 */
 
 .public-auction-catalog .public-auction-catalog__number {
   text-align: right;
@@ -2738,62 +2718,6 @@
 
 .public-auction-catalog th.public-auction-catalog__number {
   white-space: nowrap;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--level {
-  inline-size: 5%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--attributes {
-  inline-size: 6%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--seller {
-  inline-size: 7%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--leader {
-  inline-size: 8%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--status {
-  inline-size: 6%;
-}
-
-.public-auction-catalog__table--live .public-auction-catalog__column--actions {
-  inline-size: 12%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--leader,
-.public-auction-catalog__table--preview .public-auction-catalog__column--remaining {
-  inline-size: 7%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--code,
-.public-auction-catalog__table--preview .public-auction-catalog__column--status,
-.public-auction-catalog__table--preview .public-auction-catalog__column--actions {
-  inline-size: 6%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--item {
-  inline-size: 25%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--avg-roll {
-  inline-size: 8%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--level {
-  inline-size: 6%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--attributes,
-.public-auction-catalog__table--preview .public-auction-catalog__column--start-price {
-  inline-size: 9%;
-}
-
-.public-auction-catalog__table--preview .public-auction-catalog__column--seller {
-  inline-size: 11%;
 }
 
 @media (width > 64rem) {
