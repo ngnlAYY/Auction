@@ -212,6 +212,8 @@ fn RenameTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table", aria_busy: busy_rename().is_some().to_string(),
+                // 列序：旧名、新名、方式、时间、回滚时间、操作；按字段预期内容分配比例。
+                auction_web_shared::TableColumns { layout: "admin-renames", widths: vec![21, 21, 9, 20, 20, 9] }
                 thead {
                     tr {
                         SortableTh {

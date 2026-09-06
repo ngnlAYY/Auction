@@ -63,7 +63,10 @@ Public 浏览器的竞价资源失效由 `auction-web-public/src/app/surface/boa
 `ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
 （受支持集合、`hv.lang` 持久化、`<html lang>` 同步）由 `auction-web-shared` 统一提供。
 
-Web 表格统一采用 100% 容器宽度、百分比列宽与固定表格布局，未指定宽度的列等分剩余空间。
+Web 表格采用 100% 容器宽度、百分比列宽与固定表格布局。每张业务表按预计字段内容独立定义
+完整列比例，由 `auction-web-shared/src/components/table_columns.rs` 归一化并渲染 `colgroup`；
+共享组件不持有业务比例。Markdown 渲染器按表头与前 32 行典型内容长度计算权重，具体规则与
+各业务表的比例登记在 [`table-layouts.md`](table-layouts.md)。
 Public/Admin 和安全 Markdown 渲染器都不提供横向滚动条或窄屏卡片化；长文本截断后由
 `auction-web-shared/src/components/table_hints.rs` 提供普通文本提示，复杂内容由
 `truncated_text.rs` 与 `truncated_text/interaction.rs` 提供可操作浮层。各 surface 只拥有

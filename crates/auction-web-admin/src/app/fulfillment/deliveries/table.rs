@@ -41,6 +41,8 @@ pub(super) fn DeliveryTable(
         div { class: "admin-delivery-table-wrap",
             table { class: "admin-delivery-table",
                 caption { class: "admin-visually-hidden", {t!("page-deliveries-title")} }
+                // 列序：ID、类型、收件人、COD、状态、次数、错误、操作；按字段预期内容分配比例。
+                auction_web_shared::TableColumns { layout: "admin-deliveries", widths: vec![8, 10, 15, 12, 9, 8, 22, 16] }
                 thead {
                     tr {
                         SortableTh {

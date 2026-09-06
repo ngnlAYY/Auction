@@ -29,9 +29,12 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
         MarkdownBlock::Quote(nodes) => rsx! {
             blockquote { MarkdownInline { nodes } }
         },
-        MarkdownBlock::Table { headers, rows } => rsx! {
+        MarkdownBlock::Table { headers, rows } => {
+            let widths = table_column_weights(&headers, &rows);
+            rsx! {
             div { class: "shared-markdown__table-wrap",
                 table {
+                    crate::TableColumns { layout: "markdown-content", widths }
                     thead {
                         tr {
                             for (index, nodes) in headers.into_iter().enumerate() {
@@ -51,7 +54,8 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
                     }
                 }
             }
-        },
+            }
+        }
         MarkdownBlock::Code { language, value } => rsx! {
             pre {
                 if let Some(language) = language {
@@ -63,6 +67,33 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
         },
         MarkdownBlock::Rule => rsx! { hr {} },
     }
+}
+
+/// 文档表格没有固定业务字段，按表头与前 32 行的典型可见长度估算列权重。
+///
+/// 使用第 75 百分位并限制极端长文，避免单条长 URL/说明挤占整张表；CJK 字符按双宽计。
+fn table_column_weights(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> Vec<u16> {
+    headers
+        .iter()
+        .enumerate()
+        .map(|(index, header)| {
+            let mut lengths = rows
+                .iter()
+                .take(32)
+                .filter_map(|row| row.get(index))
+                .map(|nodes| visible_units(nodes))
+                .collect::<Vec<_>>();
+            lengths.sort_unstable();
+            let typical = lengths.get(lengths.len() * 3 / 4).copied().unwrap_or(0);
+            visible_units(header).max(typical).clamp(8, 48)
+        })
+        .collect()
+}
+
+fn visible_units(nodes: &[Inline]) -> u16 {
+    let mut text = String::new();
+    collect_text(nodes, &mut text);
+    text.chars().take(96).map(|character| if character.is_ascii() { 1_u16 } else { 2 }).sum()
 }
 
 fn render_heading(level: u8, nodes: Vec<Inline>) -> Element {
@@ -97,7 +128,7 @@ fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
-/// 递归收集行内节点的可见纯文本，供标题锚点 slug 化使用。
+/// 递归收集行内节点的可见纯文本，供标题锚点与表格列权重使用。
 fn collect_text(nodes: &[Inline], output: &mut String) {
     for node in nodes {
         match node {

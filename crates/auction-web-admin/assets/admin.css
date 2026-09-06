@@ -1371,39 +1371,6 @@
   table-layout: fixed;
 }
 
-
-.admin-auction-lot-code {
-  inline-size: 8%;
-}
-
-.admin-auction-lot-equipment {
-  inline-size: 22%;
-}
-
-.admin-auction-lot-seller {
-  inline-size: 10%;
-}
-
-.admin-auction-lot-submission {
-  inline-size: 9%;
-}
-
-.admin-auction-lot-status {
-  inline-size: 10%;
-}
-
-.admin-auction-lot-start {
-  inline-size: 10%;
-}
-
-.admin-auction-lot-current {
-  inline-size: 10%;
-}
-
-.admin-auction-lot-actions {
-  inline-size: 21%;
-}
-
 @media (hover: hover) {
   .admin-auctions__row:hover,
   .admin-lots__row:hover {
@@ -3257,7 +3224,6 @@
     flex-direction: column;
   }
 
-
   .admin-mail-detail__grid {
     grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);
     column-gap: var(--space-2);
@@ -3669,8 +3635,7 @@
   text-align: start;
 }
 
-/* 拍品表格的卡片化由 base.css 的 .ui-table--responsive 统一提供（48rem 断点）；
-   此处仅保留动作单元格在窄屏下的纵向排列覆写。 */
+/* 窄屏保留拍品表头与列结构，动作在各自百分比列内纵向排列。 */
 @media (max-width: 48rem) {
   .admin-auction-lot-table .admin-lots__actions-cell .admin-auction-actions {
     align-items: stretch;
@@ -3689,7 +3654,6 @@
 .admin-audit-table {
   table-layout: fixed;
 }
-
 
 .admin-audit-table th,
 .admin-audit-table td {
@@ -3727,32 +3691,7 @@
 }
 
 .admin-audit-table__time {
-  inline-size: 12%;
   white-space: nowrap;
-}
-
-.admin-audit-table__actor {
-  inline-size: 12%;
-}
-
-.admin-audit-table__action {
-  inline-size: 14%;
-}
-
-.admin-audit-table__entity {
-  inline-size: 15%;
-}
-
-.admin-audit-table__source {
-  inline-size: 9%;
-}
-
-.admin-audit-table__result {
-  inline-size: 9%;
-}
-
-.admin-audit-table__request {
-  inline-size: 12%;
 }
 
 .admin-audit-table__time time {

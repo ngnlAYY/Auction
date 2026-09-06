@@ -22,6 +22,8 @@ pub(super) fn RealtimeLagTable(page: RealtimeLagPage) -> Element {
         } else {
             div { class: "admin-shell__table-wrap",
                 table { class: "admin-shell__table admin-realtime-table",
+                    // 列序：消费者、流、偏移、最新序号、延迟；按字段预期内容分配比例。
+                    auction_web_shared::TableColumns { layout: "admin-realtime-lag", widths: vec![22, 45, 11, 12, 10] }
                     thead {
                         tr {
                             th { {t!("realtime-consumer")} }

@@ -7,14 +7,17 @@
   控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
   另含四组从两端重复块提取的通用组件样式：`.ui-pager*` 分页器（与两端原规则逐字一致）、
   `.ui-async-state*`/`.ui-empty-state*` 状态面板（两者共享同一组规则）、
-  所有业务与 Markdown 表格统一为 100% 宽度、百分比列宽和固定表格布局；未指定宽度的列等分
-  剩余空间。窄屏保留表头与行结构，超长数据和控件文字截断，不提供横向滚动条；
+  所有业务与 Markdown 表格采用 100% 宽度、百分比列宽和固定表格布局；每张业务表按预计内容
+  独立分配完整列比例。窄屏保留表头与行结构，超长数据和控件文字截断，不提供横向滚动条；
   `.ui-table--responsive` 仅保留兼容类名，`.ui-table--fit` 为受容器约束的包装类。
   另有 `.ui-dialog*` 模态弹窗外壳（含 `.ui-dialog--sheet`
   显式抽屉变体；bp-sm 以下媒体查询自动切换为贴底抽屉）。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
+- `src/components/table_columns.rs`：`TableColumns` 将调用方的列权重归一化为百分比并输出
+  `colgroup`。业务组件拥有各自的比例，见 [表格列宽登记](../../docs/table-layouts.md)；
+  Markdown 按表头与前 32 行可见长度的第 75 百分位估算权重，并限制极端长文本的影响。
 - `src/components/table_hints.rs`：由 `BaseStylesheet` 安装一次的表格提示委托。普通单元格、表头
   与动作文字提供原生完整文本提示，当前悬浮内容随 DOM 文本更新；已声明的 title 和复杂文本
   浮层保持各自所有权，不复制表单输入或弹窗内容到 title。
