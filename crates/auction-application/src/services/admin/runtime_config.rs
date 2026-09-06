@@ -46,8 +46,8 @@ where
         &self,
         document: AdminRuntimeDocument,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
-        let _ = self;
         document.validate().map_err(ApplicationError::from)?;
+        self.files.validate_candidate(&document, self.clock.now())?;
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
             document,
@@ -79,6 +79,8 @@ where
             return self.finish_existing(stored).await;
         }
 
+        // 新命令在写 durable intent 前完成部署格式校验；已接受命令仍返回原有幂等结果。
+        self.files.validate_candidate(&command.document, self.clock.now())?;
         let current = self.files.current().await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint != command.expected_fingerprint {

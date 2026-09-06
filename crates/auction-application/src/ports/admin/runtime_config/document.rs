@@ -344,6 +344,9 @@ impl AdminRuntimeDocument {
         if self.operations.is_none() {
             self.operations = Some(AdminRuntimeOperationsConfig::default());
         }
+        if let Some(operations) = &mut self.operations {
+            operations.mail.get_or_insert_with(Default::default);
+        }
     }
 
     /// 计算不依赖 TOML 排版的稳定文档指纹。

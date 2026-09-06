@@ -1,6 +1,7 @@
 //! 运行参数表单的标量路径；统一供输入投影与完整文档提交使用。
 
 pub(super) const TEXT_FIELDS: &[&str] = &[
+    "operations.mail.schedule",
     "operations.economics.proxy_default_mode",
     "operations.schedule.timezone",
     "operations.schedule.preview_day",
@@ -14,6 +15,20 @@ pub(super) const TEXT_FIELDS: &[&str] = &[
 ];
 
 pub(super) const NUMBER_FIELDS: &[&str] = &[
+    "operations.mail.maximum_response_bytes",
+    "operations.mail.minimum_request_interval_millis",
+    "operations.mail.request_timeout_seconds",
+    "operations.mail.batch_size",
+    "operations.mail.maximum_pages",
+    "operations.mail.jitter_seconds",
+    "operations.mail.lease_duration_seconds",
+    "operations.mail.renew_interval_seconds",
+    "operations.mail.fetch_attempts",
+    "operations.mail.fetch_timeout_seconds",
+    "operations.mail.process_attempts",
+    "operations.mail.item_timeout_seconds",
+    "operations.mail.retry_base_seconds",
+    "operations.mail.retry_maximum_seconds",
     "operations.economics.start_price",
     "operations.economics.bid_increment_ppm",
     "operations.economics.soft_close_window_seconds",
@@ -86,6 +101,7 @@ pub(super) const LIST_FIELDS: &[&str] = &["operations.schedule.worlds"];
 /// 返回参数组的接管开关；未接管组的临时输入不会覆盖原始候选。
 pub(super) fn management_path(path: &str) -> Option<&'static str> {
     match path.strip_prefix("operations.")?.split('.').next()? {
+        "mail" => Some("operations.mail.managed"),
         "economics" => Some("operations.economics.managed"),
         "schedule" => Some("operations.schedule.managed"),
         "forum" => Some("operations.forum.managed"),

@@ -80,15 +80,16 @@ pub(super) fn page() -> Element {
                 }
             }
             if let Some(Ok(snapshot)) = state.as_ref() {
-                DashboardContent { snapshot: snapshot.clone() }
-                MailPollerControls {
-                    pollers: snapshot
-                        .mail
-                        .data
-                        .as_ref()
-                        .map(|data| data.pollers.clone())
-                        .unwrap_or_default(),
-                    refresh,
+                DashboardContent { snapshot: snapshot.clone(),
+                    MailPollerControls {
+                        pollers: snapshot
+                            .mail
+                            .data
+                            .as_ref()
+                            .map(|data| data.pollers.clone())
+                            .unwrap_or_default(),
+                        refresh,
+                    }
                 }
             }
         }

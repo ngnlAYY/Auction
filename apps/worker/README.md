@@ -23,13 +23,15 @@ AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
 Worker 配置没有 `listen_address`——该角色的默认监听地址为 `None`。
 Worker 可以通过主配置的 `runtime_config_file` 读取 Admin 管理的共享业务文档；对 MoogleMail 只消费
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板；Admin listener/security/session/
-metrics/tracing 不会投影到 Worker。MoogleMail transport、凭据、调度、mailbox identity 和全局
+metrics/tracing 不会投影到 Worker。MoogleMail transport、凭据、mailbox identity 和全局
 `enabled` 继续由 Worker 主配置拥有，runtime 更新后必须重启 Worker 才会生效。
 
-共享文档的 `operations.economics/schedule/forum/alerts/worker` 各自提供默认关闭的 `managed`；
-接管后在启动时覆盖对应经济模板、周排期、论坛同步、运维告警和各独立任务循环参数，再执行完整
+共享文档的 `operations.economics/schedule/forum/alerts/worker/mail` 各自提供默认关闭的 `managed`；
+接管后在启动时覆盖对应经济模板、周排期、论坛同步、运维告警、各独立任务循环及邮件调度/处理参数，再执行完整
 启动校验。旧文件省略区块、或某组未接管时继续使用原公共/角色配置。经济模板和排期需同时重启
 Admin/Worker，其余组重启 Worker；不会改写已有拍卖快照、任务游标、命令账本或租约状态。
+邮件组支持 cron、读取批量/分页、HTTP 预算、租约续期和内联/持久化退避。管理页保存不会立即轮询，
+调度仍服从已有的持久化 due、暂停状态和邮箱身份；参数范围见 runtime 示例。
 
 ## 拍卖邮件起拍价
 

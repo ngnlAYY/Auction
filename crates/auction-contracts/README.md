@@ -15,7 +15,8 @@
   装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
 - `AdminRuntimeConfigResponse`：runtime JSON 文档、fingerprint 和重启要求的稳定信封；文档新增
-  `operations` 五组非敏感候选，字段闭集和校验由应用 owner 定义，浏览器严格消费同一投影。
+  `operations` 六组非敏感候选（含 `mail` 邮件预算），字段闭集由应用 owner 定义，cron 语法由配置
+  owner 复用 Worker 解析器校验，浏览器严格消费同一投影。
 - `MAX_PUBLIC_BID_AMOUNT`：浏览器即时反馈使用的 1B 上限；HTTP 编译时核对它与领域常量一致，
   最终新命令仍由领域层校验。既有价格 DTO 字段保持不变，超过上限的 `next_bid` 表达不可继续出价。
 - `AdminForumPreviewRequest` 与 `AdminForumPreviewResponse`：管理端论坛内容预览契约；输入

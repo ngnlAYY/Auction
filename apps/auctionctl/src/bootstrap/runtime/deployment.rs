@@ -223,16 +223,18 @@ fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyh
 
 /// 管理页接管参数后，两类创建者必须从同一 runtime 文件取得一致的新场次模板。
 fn validate_runtime_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
-    let managed =
-        admin.admin_runtime.as_ref().and_then(|runtime| runtime.operations.as_ref()).is_some_and(
-            |operations| {
-                operations.economics.managed
-                    || operations.schedule.managed
-                    || operations.forum.managed
-                    || operations.alerts.managed
-                    || operations.worker.managed
-            },
-        );
+    let managed = [admin, worker]
+        .iter()
+        .filter_map(|config| config.admin_runtime.as_ref())
+        .filter_map(|runtime| runtime.operations.as_ref())
+        .any(|operations| {
+            operations.economics.managed
+                || operations.schedule.managed
+                || operations.forum.managed
+                || operations.alerts.managed
+                || operations.worker.managed
+                || operations.mail.as_ref().is_some_and(|mail| mail.managed)
+        });
     if managed {
         let admin_path = admin
             .runtime_config_path

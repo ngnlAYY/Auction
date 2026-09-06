@@ -3,6 +3,7 @@
 mod alerts;
 mod economics;
 mod forum;
+mod mail;
 mod schedule;
 mod worker;
 
@@ -13,13 +14,14 @@ use super::errors::AdminRuntimeConfigError;
 pub use alerts::AdminRuntimeAlertsConfig;
 pub use economics::AdminRuntimeEconomicsConfig;
 pub use forum::AdminRuntimeForumConfig;
+pub use mail::AdminRuntimeMailConfig;
 pub use schedule::AdminRuntimeScheduleConfig;
 pub use worker::{
     AdminRuntimeDeliveryConfig, AdminRuntimeFulfillmentConfig, AdminRuntimeRecoveryConfig,
     AdminRuntimeWorkerConfig,
 };
 
-/// 五组可独立接管的参数；保存只更新候选文件，进程重启后才消费。
+/// 可独立接管的参数；保存只更新候选文件，进程重启后才消费。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeOperationsConfig {
@@ -33,6 +35,13 @@ pub struct AdminRuntimeOperationsConfig {
     pub alerts: AdminRuntimeAlertsConfig,
     /// 各 Worker 循环的吞吐、租约和重试边界。
     pub worker: AdminRuntimeWorkerConfig,
+    /// 邮件调度与处理预算；省略时不改变升级前文件和命令账本的序列化指纹。
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "mail::deserialize_optional"
+    )]
+    pub mail: Option<AdminRuntimeMailConfig>,
 }
 
 impl AdminRuntimeOperationsConfig {
@@ -42,7 +51,11 @@ impl AdminRuntimeOperationsConfig {
         self.schedule.validate()?;
         self.forum.validate()?;
         self.alerts.validate()?;
-        self.worker.validate()
+        self.worker.validate()?;
+        if let Some(mail) = &self.mail {
+            mail.validate()?;
+        }
+        Ok(())
     }
 }
 

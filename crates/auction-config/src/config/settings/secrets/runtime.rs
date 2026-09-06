@@ -21,9 +21,8 @@ pub(crate) fn load_admin_runtime_file(path: &Path) -> Result<AdminRuntimeDocumen
         .map_err(|source| ConfigError::RuntimeRead { path: path.to_owned(), source })?;
     let document: AdminRuntimeDocument = toml::from_str(&contents)
         .map_err(|_| ConfigError::RuntimeParse { path: path.to_owned() })?;
-    document.validate().map_err(|error| ConfigError::InvalidRuntimeConfig {
-        path: path.to_owned(),
-        reason: error.to_string(),
+    crate::runtime::validate_runtime_document(&document, chrono::Utc::now()).map_err(|error| {
+        ConfigError::InvalidRuntimeConfig { path: path.to_owned(), reason: error.to_string() }
     })?;
     Ok(document)
 }

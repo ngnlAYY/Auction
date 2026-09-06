@@ -232,19 +232,22 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 未变化的 socket。
 
 Worker 对 MoogleMail 在启动时只投影 runtime 的四类业务配置：启用的 main/isekai、各 world 发件人
-allowlist、装备过滤和通知模板。MoogleMail transport endpoint、凭据来源、邮件调度、mailbox durable identity 和
+allowlist、装备过滤和通知模板。MoogleMail transport endpoint、凭据来源、mailbox durable identity 和
 全局 MoogleMail `enabled` 继续由 Worker 主配置拥有，避免一次运营保存意外启动外部请求或切换
 cursor。旧 runtime 完全缺少三个顶层业务区块时保持原 canonical JSON/fingerprint、durable command
 摘要和 Worker 主配置行为；Admin GET 可为浏览器物化默认投影，第一次保存后才把显式业务区块写入
 文件。成功更新因此要求重启所有受影响的 Admin/Worker，不提供热加载。
 
 runtime 的可选 `[operations]` 区块继续复用 A26/A27 完整档的命令账本、文件锁和恢复流程，
-由 `auction-application` 按 economics、schedule、forum、alerts、worker 五组持有严格文档。
+由 `auction-application` 按 economics、schedule、forum、alerts、worker、mail 六组持有严格文档。
 每组的 `managed` 默认关闭：关闭时沿用公共/角色 TOML，开启后才由共享 runtime 覆盖该组公开的
 非敏感参数。旧文件省略整个区块时不改变指纹或历史命令摘要；HTTP 为编辑器补齐关闭接管的候选值，
 不会把候选默认值描述成当前 Worker 的生效配置。
-`auction-config` 在启动时把 economics/schedule 投影给 Admin 与 Worker，把论坛、告警和各 Worker
-循环参数投影给 Worker，再执行完整配置校验。经济参数仅供新拍卖创建时冻结，已建立的拍卖快照、
+`auction-config` 在启动时把 economics/schedule 投影给 Admin 与 Worker，把论坛、告警、各 Worker
+循环和邮件预算投影给 Worker，再执行完整配置校验。`operations.mail` 包含 cron、批量/分页、请求预算、
+租约续期和退避；旧文档缺少该组时继续省略序列化以保持指纹。应用服务通过 `AdminRuntimeFileStore`
+的无 I/O 候选校验方法，在新命令落账前调用 `auction-config/src/runtime/validation.rs`，复用 Worker 的
+标准 cron 解析器；读取、原子编码与启动 loader 也走同一校验。经济参数仅供新拍卖创建时冻结，已建立的拍卖快照、
 任务游标、租约、命令记录和结算策略不回写；调度参数不能替代持久化 due 和 fencing。
 论坛 endpoint、凭据 scope、测试板块、公开链接，以及 MoogleMail transport、全局开关和邮箱身份
 仍由部署配置拥有。SQLite Lite 仍不提供 runtime 管理写入，启动时仍执行单实例/单并发约束。

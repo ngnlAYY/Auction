@@ -47,10 +47,34 @@ pub(super) fn apply_runtime_operations(
         };
     }
     if role == Role::Worker {
+        apply_mail(worker, operations);
         apply_forum(worker, operations);
         apply_alerts(worker, operations);
         apply_worker(worker, operations);
     }
+}
+
+fn apply_mail(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConfig) {
+    let Some(candidate) = operations.mail.as_ref().filter(|mail| mail.managed) else {
+        return;
+    };
+    let mail = &mut worker.mooglemail;
+    // 不覆盖 endpoint、Cookie、全局 enabled 或邮箱身份，持久化 due、游标和租约也不在此改写。
+    mail.schedule = candidate.schedule.clone();
+    mail.maximum_response_bytes = candidate.maximum_response_bytes;
+    mail.minimum_request_interval_millis = candidate.minimum_request_interval_millis;
+    mail.request_timeout_seconds = candidate.request_timeout_seconds;
+    mail.batch_size = candidate.batch_size;
+    mail.maximum_pages = candidate.maximum_pages;
+    mail.jitter_seconds = candidate.jitter_seconds;
+    mail.lease_duration_seconds = candidate.lease_duration_seconds;
+    mail.renew_interval_seconds = candidate.renew_interval_seconds;
+    mail.fetch_attempts = candidate.fetch_attempts;
+    mail.fetch_timeout_seconds = candidate.fetch_timeout_seconds;
+    mail.process_attempts = candidate.process_attempts;
+    mail.item_timeout_seconds = candidate.item_timeout_seconds;
+    mail.retry_base_seconds = candidate.retry_base_seconds;
+    mail.retry_maximum_seconds = candidate.retry_maximum_seconds;
 }
 
 fn apply_forum(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConfig) {

@@ -19,6 +19,10 @@ use auction_application::{
     AdminRuntimeSnapshot, ApplicationError, ApplicationFuture, MAX_ADMIN_RUNTIME_DOCUMENT_BYTES,
 };
 
+mod validation;
+
+pub(crate) use validation::validate_runtime_document;
+
 /// runtime 文件构造和本地持久化错误；不回显 TOML 原文。
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeFileStoreError {
@@ -111,8 +115,7 @@ impl TomlRuntimeFileStore {
         let contents = String::from_utf8(bytes).map_err(|_| RuntimeFileStoreError::Parse)?;
         let document: AdminRuntimeDocument =
             toml::from_str(&contents).map_err(|_| RuntimeFileStoreError::Parse)?;
-        document
-            .validate()
+        validate_runtime_document(&document, chrono::Utc::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         Ok(AdminRuntimeSnapshot {
             fingerprint: document.fingerprint(),
@@ -122,8 +125,7 @@ impl TomlRuntimeFileStore {
     }
 
     fn encode(document: &AdminRuntimeDocument) -> Result<Vec<u8>, RuntimeFileStoreError> {
-        document
-            .validate()
+        validate_runtime_document(document, chrono::Utc::now())
             .map_err(|error| RuntimeFileStoreError::InvalidDocument(error.to_string()))?;
         let encoded = toml::to_string_pretty(document).map_err(|_| RuntimeFileStoreError::Parse)?;
         let bytes = format!("{encoded}\n").into_bytes();
@@ -177,6 +179,14 @@ impl TomlRuntimeFileStore {
 }
 
 impl AdminRuntimeFileStore for TomlRuntimeFileStore {
+    fn validate_candidate(
+        &self,
+        document: &AdminRuntimeDocument,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), ApplicationError> {
+        validate_runtime_document(document, now).map_err(ApplicationError::from)
+    }
+
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot> {
         Box::pin(async move { self.with_lock(|| self.read_snapshot()).map_err(map_file_error) })
     }

@@ -138,8 +138,8 @@ recovery 确认携带报告中的 state version、CSRF 和按同一输入重试�
 未终态拍卖或活动调度轮次会显示稳定冲突，不会把 runtime 文件开关误报成业务已关闭。浏览器不直接编辑或读取 TOML；服务端校验后以锁、临时文件、
 `fsync` 和 `rename` 原子替换 `runtime_config_file` 指向的配置文件。更新不会被页面误报为热加载，
 保存后提示重启受影响的 Admin 与 Worker。
-新增运行参数由 `operations/config/form/operations/` 按论坛、经济模板、周排期、告警和 Worker
-循环分组展示，`operational_fields.rs` 统一持有新增标量路径；HTTP 客户端的
+新增运行参数由 `operations/config/form/operations/` 按邮件、论坛、经济模板、周排期、告警和 Worker
+循环分组展示；`mail.rs` 提供邮件调度、读取预算与处理/重试三组字段，`operational_fields.rs` 统一持有新增标量路径；HTTP 客户端的
 `runtime_config/operations.rs` 校验对应 JSON 闭集。每组“使用本页配置”默认关闭，显示沿用部署
 配置；开启后才编辑候选。未接管组的未完成输入不会阻止保存其它组，也不会覆盖原候选。
 新底价按 1K 网格且最高 1B，周排期提供本地时间与五语言星期选择，Worker 子组区分生命周期、
@@ -174,12 +174,13 @@ secret 只通过当前表单请求提交，不会进入响应、持久化状态�
 state version 只参与写命令 fence，不扩张已发布的八列表格。
 管理总览每次只请求一份完整安全 dashboard snapshot，并提供显式刷新动作；页面按冻结顺序展示 health/process、Worker、
 tracing、实时 lag/failure、MoogleMail 轮询、凭据 availability、delivery、fulfillment、recovery
-和 alerting 水位；拍卖、投递列表和邮件入站不再创建额外 Dashboard 请求。页面使用扁平指标卡、
-连续卡片流、统一边框几何与邮件动作区，并把拍卖、邮件、投递和 realtime outbox 接成仅导航、不附加
-数据请求的安全快捷入口；快照没有采集的 outbox retry/claimed/attempts 明确显示“未采集”，不再与真实空值混淆。
+和 alerting 水位；拍卖、投递列表和邮件入站不再创建额外 Dashboard 请求。页面按完整业务分组紧凑分栏，
+宽屏两栏、大屏三栏、窄屏单栏；常用入口、Worker 状态和邮件动作集中在顶部。拍卖、邮件、投递、
+realtime outbox 与参数配置均为仅导航入口。快照没有采集的 outbox retry/claimed/attempts 移到可展开
+说明中并明确标为“未采集”，不占据主要指标卡；审计说明和告警历史时间也可展开查看。
 仪表盘的自动刷新选择器与刷新快照按钮位于同一行，窄屏可整组移到标题下方；保留 URL 轮询状态和
-页面隐藏时暂停的语义。常规卡片最小宽度为 10rem、摘要卡片为 12rem，并缩小内边距、卡片间距和
-分区标题留白；状态标签、错误反馈和可访问名称仍保留。
+页面隐藏时暂停的语义。分组内指标以 7.5rem 为自动排列基准，摘要卡片为 12rem；各项均可缩至容器
+宽度。状态标签、错误反馈和可访问名称仍保留，邮件命令的 ID、冲突刷新和持久化语义不变。
 Dashboard section 与嵌套 data 使用 v1 严格字段闭集；扩展凭据 scope 和内部诊断不会原地进入 v1
 响应。MoogleMail `main`/`isekai` availability 按冻结语义分别呈现，避免其他凭据掩盖邮件 world
 缺少 active 凭据；配置 `dashboard_mailboxes` 时服务端会核对所有已配置 mailbox 是否都有轮询器。

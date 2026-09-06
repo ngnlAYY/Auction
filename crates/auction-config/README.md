@@ -9,12 +9,13 @@ TOML 配置解析与敏感配置加载。
 划分模型、维护库密钥、`.keyenv` 和 Admin runtime owner；`settings/app/` 再按输入模型、加载、公共 getter 和最终构建拆分；Worker 配置进一步按 Auction、control、Delivery、Fulfillment、Recovery、
 Forum、MoogleMail 和 Operations Alert 放在 `settings/worker/` 子目录，`settings/worker/runtime.rs`
 只负责把 Admin 管理的旧版业务区块投影为 Worker MoogleMail 启动快照；`settings/operations/`
-负责把显式接管的经济/周排期参数投影给 Admin/Worker，把论坛/告警/各任务循环参数投影给 Worker。
+负责把显式接管的经济/周排期参数投影给 Admin/Worker，把论坛/告警/各任务循环/邮件预算投影给 Worker。
 普通配置校验再按
 拍卖、listener、安全、tracing 和路径 owner 放入 `settings/validation/{mod,auction,listener,security,tracing,paths}.rs`，
 Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共模型、字段解析和 duration 解析分别位于
 `src/scheduling/standard_cron/{mod,fields,duration}.rs`，Admin runtime TOML
-文件锁与原子替换集中在 `src/runtime/`。
+文件锁与原子替换集中在 `src/runtime/`；其中 `validation.rs` 复用 Worker 的 cron 解析器，供候选校验、
+文件读取/编码和启动 loader 共用。候选校验不执行 I/O，保存邮件参数不会触发远程轮询。
 
 ## 公共、角色、敏感与 runtime 文件结构
 
@@ -439,7 +440,7 @@ Admin 与 Worker 主配置的 `runtime_config_file` 可以指向同一份、由 
 TOML，仓库模板位于 `ops/config/examples/runtime/admin.toml`。该文档由严格应用模型解析，包含
 Admin listener、安全策略、会话时限、metrics/tracing 公共参数、Worker control socket、可选的
 dashboard MoogleMail world/mailbox 清单，以及旧版 `worlds`、发件人 allowlist、
-`equipment_filter`、14 个 `mail_templates` 和可选的五组 `operations`，
+`equipment_filter`、14 个 `mail_templates` 和可选的六组 `operations`，
 不包含 database URL、Cookie、密码、签名密钥或装备数据密钥。PostgreSQL 完整档通过 Admin
 HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启受影响的 Admin/Worker，SQLite Lite 不提供该
 完整更新能力。运行中的 runtime 文件必须是受信 regular file，目录不可被 group/world 写入，
@@ -447,7 +448,7 @@ HTTP 的 GET/validate/PUT 读取和原子更新；更新写入后必须重启受
 
 当 Admin 配置了 `runtime_config_file` 时，runtime 文件中的 `[metrics]` 和 `[tracing]` 参数
 覆盖公共文件或角色文件的对应字段，确保 runtime 页面修改后重启真正改变 Admin 的 `/metrics` 与
-OTLP surface；Public/Worker 的 `[metrics]` 来自公共文件，`[tracing]` 继续来自各自角色文件。Worker 对 MoogleMail 只消费共享 runtime 的
+OTLP surface；Public/Worker 的 `[metrics]` 来自公共文件，`[tracing]` 继续来自各自角色文件。Worker 先消费共享 runtime 的
 world/sender/filter/template 业务区块；三个区块完全缺失时保留 Worker 主配置，部分存在时失败关闭。
 完整业务区块存在时，它们覆盖 Worker 直接配置，但不改变 MoogleMail transport、凭据、调度、mailbox identity
 或全局 `enabled`。runtime `worlds[*].enabled` 只是 Worker/MoogleMail 入站和每周调度的候选开关，
@@ -456,13 +457,14 @@ world/sender/filter/template 业务区块；三个区块完全缺失时保留 Wo
 拍卖 blocker 或 `policy_revision` fence。三类进程的 OTLP headers 只能放在敏感 TOML 的角色专属字段中，不能写入 runtime
 或公共/角色配置。
 
-`[operations]` 分成 `economics`、`schedule`、`forum`、`alerts`、`worker` 五组，每组的
+`[operations]` 分成 `economics`、`schedule`、`forum`、`alerts`、`worker`、`mail` 六组，每组的
 `managed` 默认关闭，沿用原公共/角色 TOML；开启后才覆盖该组已公开字段。Worker 组还包含
-`delivery`、`fulfillment` 和 `recovery` 三套独立循环边界。旧文件完全省略 `operations` 时不改变
+`delivery`、`fulfillment` 和 `recovery` 三套独立循环边界；Mail 组独立接管邮件 cron 与读取/处理预算。
+旧文件完全省略 `operations` 或 `operations.mail` 时不改变
 fingerprint 或历史命令摘要；HTTP 补齐的是未接管候选，不能据此显示进程的当前生效值。
-新候选使用同一纯文档校验；启动完成投影后还执行凭据、邮件 world、后端能力和 SQLite 主并发等
+新候选使用同一文档及 cron 校验；启动完成投影后还执行凭据、邮件 world、后端能力和 SQLite 主并发等
 部署关联校验。`economics` 只影响新拍卖的冻结模板；`schedule` 只用于后续轮次生成。
-这两组变更须重启 Admin 与 Worker，其余三组须重启 Worker。部署预检在接管任一组时要求
+这两组变更须重启 Admin 与 Worker，其余四组须重启 Worker。部署预检在接管任一组时要求
 Admin/Worker 引用同一份 runtime 文件，并核对两者有效拍卖模板和排期一致。
 
 ## 环境变量边界
