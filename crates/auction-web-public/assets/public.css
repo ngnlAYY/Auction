@@ -332,9 +332,9 @@
 }
 
 .public-rules-page__document table {
-  display: block;
+  display: table;
   max-inline-size: 100%;
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .public-rules-page__document th,
@@ -1122,7 +1122,7 @@
 /* ===== 历史表格 / 统计 / 分页 ===== */
 
 .public-history-table-wrap {
-  overflow-x: auto;
+  overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1321,7 +1321,7 @@
 }
 
 .public-account-table-wrap {
-  overflow-x: auto;
+  overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1404,7 +1404,7 @@
 }
 
 .public-auction-catalog {
-  overflow-x: auto;
+  overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1648,7 +1648,7 @@
 }
 
 .public-auction-bid-log-table-wrap {
-  overflow-x: auto;
+  overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -1715,17 +1715,6 @@
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-/* ===== 响应式：出价日志移动端布局 ===== */
-/* 卡片化骨架（隐藏表头 / 块级行 / data-label 回显）由 base.css 的 .ui-table--responsive 提供。 */
-@media (max-width: 48rem) {
-  .public-auction-bid-log-table .public-auction-bid-log-participant {
-    display: grid;
-    grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
-    align-items: center;
-    max-inline-size: none;
-  }
 }
 
 /* ===== 目录操作 / 内联表单 / 对话框 ===== */
@@ -2050,7 +2039,7 @@
 }
 
 .public-auction-rounds__table {
-  overflow-x: auto;
+  overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -2209,7 +2198,7 @@
 }
 
 .public-blacklist-table-wrap {
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .public-blacklist-table {
@@ -2227,13 +2216,13 @@
 
 .public-blacklist-table th:first-child,
 .public-blacklist-table td:first-child {
-  inline-size: 8rem;
+  inline-size: 20%;
   font-variant-numeric: tabular-nums;
 }
 
 .public-blacklist-table th:last-child,
 .public-blacklist-table td:last-child {
-  inline-size: 14rem;
+  inline-size: 30%;
   white-space: nowrap;
 }
 
@@ -2280,7 +2269,7 @@
   color: var(--color-text-muted);
 }
 
-/* 宽表容器保持横向滚动，由 base.css 的 .ui-table--scroll 承担 overflow-x。 */
+/* 补偿表与流水表使用共享百分比布局，ui-table--fit 保证容器不产生横向滚动。 */
 
 .public-compensation-table,
 .public-compensation-movement-table {
@@ -2412,7 +2401,7 @@
 }
 
 /* ===== 响应式：中等屏幕 ===== */
-@media (max-width: 60rem) {
+@media (max-width: 75rem) {
   .public-shell__content {
     inline-size: 100%;
   }
@@ -2501,67 +2490,9 @@
     min-width: 0;
   }
 
-  .public-auction-catalog tr {
-    padding: var(--space-2) var(--space-3);
-    border-block-end: var(--border-width) solid var(--color-border);
-  }
+}
 
-  .public-auction-catalog td {
-    display: grid;
-    grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
-    align-items: baseline;
-    gap: var(--space-3);
-    min-inline-size: 0;
-    padding: var(--space-1) 0;
-    border: 0;
-    white-space: normal;
-  }
-
-  .public-auction-catalog td > * {
-    min-inline-size: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .public-auction-catalog .public-auction-catalog__participant-cell {
-    inline-size: 100%;
-    max-inline-size: none;
-    align-items: center;
-  }
-
-  .public-auction-participant-identity__name {
-    inline-size: 0;
-    max-inline-size: 100%;
-  }
-
-  .public-auction-participant-identity--source .public-auction-participant-identity__name {
-    inline-size: auto;
-  }
-
-  .public-auction-catalog__name {
-    min-inline-size: 0;
-    text-align: left;
-  }
-
-  .public-auction-catalog__actions-list {
-    display: flex;
-    flex-wrap: wrap;
-    inline-size: 100%;
-    justify-content: flex-start;
-  }
-
-  .public-auction-catalog__leading-reason {
-    flex: 0 1 auto;
-    white-space: normal;
-  }
-
-  .public-auction-catalog__actions-list > a,
-  .public-auction-catalog__actions-list > button {
-    flex: 1 1 8rem;
-    min-inline-size: 0;
-    justify-content: center;
-    text-align: center;
-  }
-
+@media (max-width: 48rem) {
   .public-history-pagination {
     flex-wrap: wrap;
   }
@@ -2704,7 +2635,7 @@
 
 .public-auction-equipment__stats-wrap,
 .public-auction-lot__table {
-  overflow-x: auto;
+  overflow-x: clip;
 }
 
 .public-auction-equipment__stats,
@@ -2762,48 +2693,6 @@
     gap: var(--space-1);
   }
 
-  .public-auction-equipment__stats-wrap {
-    overflow-x: visible;
-  }
-
-  .public-auction-equipment__stats tr {
-    padding-block: var(--space-2);
-    border-block-end: var(--border-width) solid var(--color-border);
-  }
-
-  .public-auction-equipment__stats tbody th,
-  .public-auction-equipment__stats td {
-    display: grid;
-    grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
-    align-items: baseline;
-    gap: var(--space-3);
-    min-inline-size: 0;
-    padding: var(--space-1) 0;
-    border: 0;
-    overflow-wrap: anywhere;
-  }
-
-  /* 行首 th 的 data-label 回显不在 .ui-table--responsive 的 td 规则覆盖范围内，单列保留。 */
-  .public-auction-equipment__stats tbody th::before {
-    color: var(--color-text-muted);
-    content: attr(data-label);
-    font-size: var(--text-sm);
-    font-weight: 400;
-  }
-
-  .public-auction-lot__table td {
-    display: grid;
-    grid-template-columns: minmax(6rem, 35%) minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-1) 0;
-  }
-
-  .public-auction-lot__table .public-auction-lot__participant-cell {
-    inline-size: 100%;
-    max-inline-size: none;
-  }
-
   .public-forum-card__header,
   .public-forum-card__content,
   .public-forum-state {
@@ -2824,11 +2713,92 @@
   }
 }
 
-/* ===== 响应式：桌面端紧凑布局 ===== */
-/* 桌面端拍卖信息以快速浏览为主；压缩留白与控件高度，移动端继续保留触控目标尺寸。 */
-@media (min-width: 48.0625rem) {
+/* ===== 拍品表百分比列宽：所有屏幕共享，超长内容通过提示查看 ===== */
+.public-auction-catalog__table--live .public-auction-catalog__column--code {
+  inline-size: 6%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--item {
+  inline-size: 18%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
+.public-auction-catalog__table--live .public-auction-catalog__column--remaining {
+  inline-size: 7%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--current-price,
+.public-auction-catalog__table--live .public-auction-catalog__column--next-bid {
+  inline-size: 9%;
+}
+
+.public-auction-catalog .public-auction-catalog__number {
+  text-align: right;
+}
+
+.public-auction-catalog th.public-auction-catalog__number {
+  white-space: nowrap;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--level {
+  inline-size: 5%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--attributes {
+  inline-size: 6%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--seller {
+  inline-size: 7%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--leader {
+  inline-size: 8%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--status {
+  inline-size: 6%;
+}
+
+.public-auction-catalog__table--live .public-auction-catalog__column--actions {
+  inline-size: 12%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--leader,
+.public-auction-catalog__table--preview .public-auction-catalog__column--remaining {
+  inline-size: 7%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--code,
+.public-auction-catalog__table--preview .public-auction-catalog__column--status,
+.public-auction-catalog__table--preview .public-auction-catalog__column--actions {
+  inline-size: 6%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--item {
+  inline-size: 25%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--avg-roll {
+  inline-size: 8%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--level {
+  inline-size: 6%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--attributes,
+.public-auction-catalog__table--preview .public-auction-catalog__column--start-price {
+  inline-size: 9%;
+}
+
+.public-auction-catalog__table--preview .public-auction-catalog__column--seller {
+  inline-size: 11%;
+}
+
+@media (width > 64rem) {
   .public-shell__content:has(> .public-auction-page) {
-    inline-size: 80%;
+    inline-size: 100%;
     padding-inline: 0;
   }
 
@@ -2871,91 +2841,9 @@
   }
 
   .public-auction-catalog table {
-    min-inline-size: 60rem;
+    min-inline-size: 0;
     table-layout: fixed;
     font-size: var(--text-sm);
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--code {
-    inline-size: 6%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--item {
-    inline-size: 18%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--avg-roll,
-  .public-auction-catalog__table--live .public-auction-catalog__column--remaining {
-    inline-size: 7%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--current-price,
-  .public-auction-catalog__table--live .public-auction-catalog__column--next-bid {
-    inline-size: 9%;
-  }
-
-  .public-auction-catalog .public-auction-catalog__number {
-    text-align: right;
-  }
-
-  .public-auction-catalog th.public-auction-catalog__number {
-    white-space: normal;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--level {
-    inline-size: 5%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--attributes {
-    inline-size: 6%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--seller {
-    inline-size: 7%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--leader {
-    inline-size: 8%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--status {
-    inline-size: 6%;
-  }
-
-  .public-auction-catalog__table--live .public-auction-catalog__column--actions {
-    inline-size: 12%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--leader,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--remaining {
-    inline-size: 7%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--code,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--status,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--actions {
-    inline-size: 6%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--item {
-    inline-size: 25%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--avg-roll {
-    inline-size: 8%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--level {
-    inline-size: 6%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--attributes,
-  .public-auction-catalog__table--preview .public-auction-catalog__column--start-price {
-    inline-size: 9%;
-  }
-
-  .public-auction-catalog__table--preview .public-auction-catalog__column--seller {
-    inline-size: 11%;
   }
 
   .public-auction-catalog th,
@@ -3091,6 +2979,13 @@
   .public-auction-proxy-summary h2 {
     margin-block-end: var(--space-2);
     font-size: var(--text-base);
+  }
+}
+
+/* 宽桌面继续沿用紧凑居中版式，中屏保留完整可用宽度。 */
+@media (width > 75rem) {
+  .public-shell__content:has(> .public-auction-page) {
+    inline-size: 80%;
   }
 }
 

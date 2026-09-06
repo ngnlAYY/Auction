@@ -63,6 +63,16 @@ Public 浏览器的竞价资源失效由 `auction-web-public/src/app/surface/boa
 `ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
 （受支持集合、`hv.lang` 持久化、`<html lang>` 同步）由 `auction-web-shared` 统一提供。
 
+Web 表格统一采用 100% 容器宽度、百分比列宽与固定表格布局，未指定宽度的列等分剩余空间。
+Public/Admin 和安全 Markdown 渲染器都不提供横向滚动条或窄屏卡片化；长文本截断后由
+`auction-web-shared/src/components/table_hints.rs` 提供普通文本提示，复杂内容由
+`truncated_text.rs` 与 `truncated_text/interaction.rs` 提供可操作浮层。各 surface 只拥有
+业务列的比例与展示内容，布局和通用提示不进入领域或 HTTP 契约。
+Admin runtime 草稿、字段校验反馈和安全配置差异展示分别由
+`auction-web-admin/src/app/operations/config/{draft,validation,review}.rs` 拥有。
+草稿限当前认证会话内存，保留站内切页与同输入失败重试，不承担持久化、热加载、授权或版本
+判定；服务端规范化、fingerprint fence、幂等命令和 TOML 原子写入继续由原 owner 负责。
+
 ## 运行进程
 
 ```text

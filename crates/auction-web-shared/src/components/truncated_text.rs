@@ -1,3 +1,11 @@
+//! 长文本截断展示与可操作浮层；悬停、聚焦和点击共享同一份完整文本。
+
+mod interaction;
+
+#[cfg(target_arch = "wasm32")]
+use interaction::PopupListeners;
+use interaction::TooltipInteraction;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
@@ -41,6 +49,7 @@ impl Drop for ResizeMeasureHandle {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
 struct TooltipRequest {
     value: String,
     tooltip_id: String,
@@ -52,7 +61,8 @@ struct TooltipRequest {
 struct TooltipDismissHandle {
     window: web_sys::Window,
     resize_callback: Closure<dyn FnMut()>,
-    scroll_callback: Closure<dyn FnMut()>,
+    scroll_callback: Closure<dyn FnMut(web_sys::Event)>,
+    _popup_listeners: Option<PopupListeners>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -120,7 +130,13 @@ pub fn TruncatedText(
     let data_full_value = (!legacy_dom).then(|| value.clone());
     let truncated = use_signal(|| false);
     let mut focused = use_signal(|| false);
-    let mut tooltip_position = use_signal(|| None::<TooltipPosition>);
+    let hovered = use_signal(|| false);
+    let popup_hovered = use_signal(|| false);
+    let popup_focused = use_signal(|| false);
+    let pinned = use_signal(|| false);
+    let dismissed = use_signal(|| false);
+    let close_revision = use_signal(|| 0_u64);
+    let tooltip_position = use_signal(|| None::<TooltipPosition>);
     let tooltip_id = use_signal(|| {
         format!("shared-truncated-tooltip-{}", NEXT_TOOLTIP_ID.fetch_add(1, Ordering::Relaxed))
     });
@@ -145,6 +161,18 @@ pub fn TruncatedText(
     }
     #[cfg(target_arch = "wasm32")]
     let dismiss_handle = use_hook(|| Rc::new(RefCell::new(None::<TooltipDismissHandle>)));
+    let mut interaction = TooltipInteraction {
+        position: tooltip_position,
+        focused,
+        hovered,
+        popup_hovered,
+        popup_focused,
+        pinned,
+        dismissed,
+        close_revision,
+        #[cfg(target_arch = "wasm32")]
+        portal: portal_element,
+    };
     #[cfg(target_arch = "wasm32")]
     {
         let cleanup_handle = Rc::clone(&dismiss_handle);
@@ -155,6 +183,7 @@ pub fn TruncatedText(
         use_effect(move || {
             if tooltip_position().is_none() {
                 effect_handle.borrow_mut().take();
+                interaction.pinned.set(false);
                 return;
             }
             if effect_handle.borrow().is_some() {
@@ -163,16 +192,26 @@ pub fn TruncatedText(
             let Some(window) = web_sys::window() else {
                 return;
             };
-            let resize_position = tooltip_position;
-            let resize_portal = portal_element;
             let resize_callback = Closure::<dyn FnMut()>::new(move || {
-                hide_tooltip(resize_position, resize_portal);
+                interaction.close();
             });
-            let scroll_position = tooltip_position;
-            let scroll_portal = portal_element;
-            let scroll_callback = Closure::<dyn FnMut()>::new(move || {
-                hide_tooltip(scroll_position, scroll_portal);
-            });
+            let popup_id = tooltip_id();
+            let scroll_popup_id = popup_id.clone();
+            let scroll_callback =
+                Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+                    // 浮层自身的滚动必须保留内容；页面或外层容器滚动后关闭以免定位过期。
+                    let target =
+                        event.target().and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+                    let inside_popup = web_sys::window()
+                        .and_then(|window| window.document())
+                        .and_then(|document| document.get_element_by_id(&scroll_popup_id))
+                        .is_some_and(|popup| {
+                            target.as_ref().is_some_and(|target| popup.contains(Some(target)))
+                        });
+                    if !inside_popup {
+                        interaction.close();
+                    }
+                });
             let resize_added = window
                 .add_event_listener_with_callback(
                     "resize",
@@ -202,8 +241,18 @@ pub fn TruncatedText(
                 }
                 return;
             }
-            *effect_handle.borrow_mut() =
-                Some(TooltipDismissHandle { window, resize_callback, scroll_callback });
+            let popup_listeners = window
+                .document()
+                .and_then(|document| document.get_element_by_id(&popup_id))
+                .and_then(|element| {
+                    PopupListeners::attach(element, format!("{popup_id}-trigger"), interaction)
+                });
+            *effect_handle.borrow_mut() = Some(TooltipDismissHandle {
+                window,
+                resize_callback,
+                scroll_callback,
+                _popup_listeners: popup_listeners,
+            });
         });
     }
 
@@ -213,24 +262,30 @@ pub fn TruncatedText(
     let tabindex = (focusable && truncated()).then_some("0");
     let data_truncated = truncated().then_some("true");
     #[cfg(target_arch = "wasm32")]
-    let enter_value = value.clone();
+    let request = TooltipRequest {
+        value: value.clone(),
+        tooltip_id: tooltip_id.clone(),
+        class_name: tooltip_class_name.to_owned(),
+        portal,
+    };
     #[cfg(target_arch = "wasm32")]
-    let enter_tooltip_id = tooltip_id.clone();
+    let enter_request = request.clone();
     #[cfg(target_arch = "wasm32")]
-    let enter_tooltip_class_name = tooltip_class_name.to_owned();
+    let focus_request = request.clone();
     #[cfg(target_arch = "wasm32")]
-    let focus_value = value.clone();
+    let click_request = request.clone();
     #[cfg(target_arch = "wasm32")]
-    let focus_tooltip_id = tooltip_id.clone();
-    #[cfg(target_arch = "wasm32")]
-    let focus_tooltip_class_name = tooltip_class_name.to_owned();
+    let keyboard_request = request;
 
     rsx! {
         span {
+            id: "{tooltip_id}-trigger",
             class: trigger_class,
             title,
             tabindex,
             aria_describedby: described_by,
+            role: (focusable && truncated()).then_some("button"),
+            aria_expanded: (focusable && truncated()).then(|| tooltip.is_some().to_string()),
             "data-truncated": data_truncated,
             "data-full-value": data_full_value,
             onmounted: move |event| {
@@ -301,6 +356,8 @@ pub fn TruncatedText(
                 let _ = event;
             },
             onmouseenter: move |_| {
+                interaction.hovered.set(true);
+                interaction.dismissed.set(false);
                 #[cfg(target_arch = "wasm32")]
                 show_tooltip(
                     mounted_element(),
@@ -308,64 +365,88 @@ pub fn TruncatedText(
                     truncated,
                     tooltip_position,
                     portal_element,
-                    TooltipRequest {
-                        value: enter_value.clone(),
-                        tooltip_id: enter_tooltip_id.clone(),
-                        class_name: enter_tooltip_class_name.clone(),
-                        portal,
-                    },
+                    enter_request.clone(),
                 );
             },
             onmouseleave: move |_| {
-                if !focused() {
-                    tooltip_position.set(None);
-                    #[cfg(target_arch = "wasm32")]
-                    hide_tooltip(tooltip_position, portal_element);
-                }
+                interaction.hovered.set(false);
+                interaction.defer_close();
             },
             onfocus: move |_| {
                 focused.set(true);
                 #[cfg(target_arch = "wasm32")]
-                show_tooltip(
-                    mounted_element(),
-                    display_differs,
-                    truncated,
-                    tooltip_position,
-                    portal_element,
-                    TooltipRequest {
-                        value: focus_value.clone(),
-                        tooltip_id: focus_tooltip_id.clone(),
-                        class_name: focus_tooltip_class_name.clone(),
-                        portal,
-                    },
-                );
+                if !*interaction.dismissed.peek() {
+                    show_tooltip(
+                        mounted_element(),
+                        display_differs,
+                        truncated,
+                        tooltip_position,
+                        portal_element,
+                        focus_request.clone(),
+                    );
+                }
             },
             onblur: move |_| {
                 focused.set(false);
-                tooltip_position.set(None);
-                #[cfg(target_arch = "wasm32")]
-                hide_tooltip(tooltip_position, portal_element);
+                interaction.dismissed.set(false);
+                interaction.defer_close();
+            },
+            onclick: move |event| {
+                if focusable && truncated() {
+                    event.stop_propagation();
+                    #[cfg(target_arch = "wasm32")]
+                    toggle_tooltip(interaction, mounted_element(), display_differs, truncated, click_request.clone());
+                }
             },
             onkeydown: move |event| {
                 if event.key() == Key::Escape && tooltip_position().is_some() {
                     event.stop_propagation();
-                    tooltip_position.set(None);
+                    event.prevent_default();
+                    interaction.close();
+                } else if focusable && truncated() && (event.key() == Key::Enter || event.key() == Key::Character(" ".to_owned())) {
+                    event.prevent_default();
+                    event.stop_propagation();
                     #[cfg(target_arch = "wasm32")]
-                    hide_tooltip(tooltip_position, portal_element);
+                    toggle_tooltip(interaction, mounted_element(), display_differs, truncated, keyboard_request.clone());
                 }
             },
             "{display}"
         }
         if let Some(position) = tooltip.filter(|_| !portal) {
             span {
-                id: tooltip_id,
+                id: tooltip_id.clone(),
                 class: tooltip_class_name,
                 role: "tooltip",
+                tabindex: "0",
                 "data-placement": position.placement,
                 style: "--truncated-text-tooltip-left: {position.left}px; --truncated-text-tooltip-top: {position.top}px; --truncated-text-tooltip-width: {position.width}px; --truncated-text-tooltip-max-height: {position.maximum_height}px;",
                 "{value}"
             }
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn toggle_tooltip(
+    mut interaction: TooltipInteraction,
+    element: Option<web_sys::Element>,
+    display_differs: bool,
+    truncated: Signal<bool>,
+    request: TooltipRequest,
+) {
+    if *interaction.pinned.peek() {
+        interaction.close();
+    } else {
+        interaction.dismissed.set(false);
+        show_tooltip(
+            element,
+            display_differs,
+            truncated,
+            interaction.position,
+            interaction.portal,
+            request,
+        );
+        interaction.pinned.set(interaction.position.peek().is_some());
     }
 }
 
@@ -506,6 +587,7 @@ fn render_portal_tooltip(
     let _ = tooltip.set_attribute("id", tooltip_id);
     let _ = tooltip.set_attribute("class", tooltip_class_name);
     let _ = tooltip.set_attribute("role", "tooltip");
+    let _ = tooltip.set_attribute("tabindex", "0");
     let _ = tooltip.set_attribute("data-placement", position.placement);
     tooltip.set_text_content(Some(value));
     let style = tooltip.style();

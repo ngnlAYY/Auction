@@ -7,12 +7,21 @@
   控件保持可缩放字号，`prefers-reduced-motion` 会关闭非必要平滑滚动和过渡动画。
   另含四组从两端重复块提取的通用组件样式：`.ui-pager*` 分页器（与两端原规则逐字一致）、
   `.ui-async-state*`/`.ui-empty-state*` 状态面板（两者共享同一组规则）、
-  `.ui-table--responsive`（窄断点卡片模式，依赖 td 的 `data-label`）与 `.ui-table--scroll`
-  （横向滚动容器）响应式表格工具类，以及 `.ui-dialog*` 模态弹窗外壳（含 `.ui-dialog--sheet`
+  所有业务与 Markdown 表格统一为 100% 宽度、百分比列宽和固定表格布局；未指定宽度的列等分
+  剩余空间。窄屏保留表头与行结构，超长数据和控件文字截断，不提供横向滚动条；
+  `.ui-table--responsive` 仅保留兼容类名，`.ui-table--fit` 为受容器约束的包装类。
+  另有 `.ui-dialog*` 模态弹窗外壳（含 `.ui-dialog--sheet`
   显式抽屉变体；bp-sm 以下媒体查询自动切换为贴底抽屉）。
 - `src/i18n/mod.rs`：受支持语言集合、`hv.lang` 偏好持久化、`<html lang>` 同步和
   `LanguagePicker` 组件。
 - `src/components/mod.rs`：无领域语义的共享基础组件。
+- `src/components/table_hints.rs`：由 `BaseStylesheet` 安装一次的表格提示委托。普通单元格、表头
+  与动作文字提供原生完整文本提示，当前悬浮内容随 DOM 文本更新；已声明的 title 和复杂文本
+  浮层保持各自所有权，不复制表单输入或弹窗内容到 title。
+- `src/components/truncated_text.rs` 与 `src/components/truncated_text/interaction.rs`：复杂长文本的
+  截断展示、180 毫秒悬停宽限、点击/Enter/Space 固定、Escape 关闭与浮层内滚动选择。
+  内联和 portal 浮层共享事件清理；移入浮层不会提前关闭，页面滚动或外部点击会关闭定位浮层。
+  `focusable=false` 的链接内文本保留链接行为；普通文本和操作提示不引入第二套业务状态。
 - `src/components/pager.rs`：`Pager` 长列表分页器，合并自两端原先近逐字重复的
   `PublicPager`/`AdminPager`。保留钳制契约：渲染期先 clamp 页码、交互从钳制页码出发、
   越界 effect 只纠偏一次；`total` 缺失时退化为 `has_more` 游标语义。上一页/下一页/跳页

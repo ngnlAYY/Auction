@@ -20,7 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 unic-langid.workspace = true
 # 补齐 Dioxus 的 `Location` 及精确 GET 请求所需 web-sys feature，详见根 Cargo.toml 说明。
-web-sys.workspace = true
+web-sys = { workspace = true, features = ["BeforeUnloadEvent"] }
 uuid.workspace = true
 url.workspace = true
 wasm-bindgen.workspace = true

@@ -6,7 +6,10 @@ mod operations;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use super::model::RuntimeConfigForm;
+use super::{
+    model::RuntimeConfigForm,
+    validation::{self, FormIssues},
+};
 
 #[component]
 pub(super) fn RuntimeConfigFields(
@@ -268,6 +271,8 @@ fn SwitchField(
     rsx! {
         label { class: "admin-runtime-switch",
             input {
+                id: validation::field_id(path),
+                "data-runtime-label": label.clone(),
                 r#type: "checkbox",
                 disabled,
                 checked,
@@ -295,6 +300,8 @@ fn TextField(
         label { class: "admin-runtime-field",
             span { "{label}" }
             input {
+                id: validation::field_id(path),
+                "data-runtime-label": label.clone(),
                 r#type: "text",
                 disabled,
                 value,
@@ -318,10 +325,19 @@ fn NumberField(
     on_dirty: EventHandler<()>,
 ) -> Element {
     let value = form.read().input(path);
+    let issues = use_context::<FormIssues>();
+    let message =
+        issues.0.read().iter().find(|issue| issue.path == path).map(|issue| issue.message.clone());
+    let error_id = format!("{}-error", validation::field_id(path));
     rsx! {
         label { class: "admin-runtime-field",
             span { "{label}" }
             input {
+                id: validation::field_id(path),
+                "data-runtime-number": path,
+                "data-runtime-label": label.clone(),
+                aria_invalid: message.as_ref().map(|_| "true"),
+                aria_describedby: message.as_ref().map(|_| error_id.clone()),
                 r#type: "number",
                 disabled,
                 min: minimum,
@@ -332,6 +348,9 @@ fn NumberField(
                     form.write().set_input(path, event.value());
                     on_dirty.call(());
                 },
+            }
+            if let Some(message) = message.as_ref() {
+                small { id: error_id.clone(), class: "admin-config-field-error", "{message}" }
             }
         }
     }
@@ -350,6 +369,8 @@ fn ListField(
         label { class: "admin-runtime-field admin-runtime-field--list",
             span { "{label}" }
             textarea {
+                id: validation::field_id(path),
+                "data-runtime-label": label.clone(),
                 disabled,
                 rows: "3",
                 value,
@@ -376,6 +397,8 @@ fn TemplateField(
         label { class: "admin-runtime-field admin-runtime-field--template",
             span { "{label}" }
             textarea {
+                id: validation::field_id(path),
+                "data-runtime-label": label.clone(),
                 disabled,
                 rows: "4",
                 value,
@@ -402,6 +425,8 @@ fn SelectField(
         label { class: "admin-runtime-field",
             span { "{label}" }
             select {
+                id: validation::field_id(path),
+                "data-runtime-label": label.clone(),
                 disabled,
                 value,
                 onchange: move |event: FormEvent| {

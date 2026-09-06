@@ -41,7 +41,7 @@ pub(super) fn CompensationMovementDetails(
                     if page.movements.is_empty() {
                         p { class: "public-auction-page__status", {t!("data-empty")} }
                     } else {
-                        div { class: "public-compensation-movement-wrap ui-table--scroll",
+                        div { class: "public-compensation-movement-wrap ui-table--fit",
                             table { class: "public-compensation-movement-table",
                                 thead {
                                     tr {
