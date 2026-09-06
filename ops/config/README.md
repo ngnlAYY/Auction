@@ -126,8 +126,8 @@ Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布�
 `[auction.settlement]` 和 `[auction.settlement.recovery]`。这些字段都是非敏感的可选字段，
 完整字段、中文注释和默认值见 `examples/common.toml`。Admin 创建拍卖时，模板会在 PostgreSQL 事务中冻结
 为 `policy_snapshot`，并同步写入遗留规则列；竞价和取消事务都会从这份快照恢复 PPM、代理
-限制、final phase 及时间规则。MoogleMail 入站的默认起拍价继承同一 `[auction.economics]`
-模板，只有显式覆盖值才会改变它。
+限制、final phase 及时间规则。MoogleMail 正文未填写 `start` 时，每件装备默认使用
+50,000 Credits；可由 `[worker.mooglemail].start_price` 显式覆盖，与公共经济模板独立。
 `[auction.schedule]` 默认关闭；启用后的内置时间为 UTC 周四 22:00 开放预览、周五 00:00
 正式开拍、周六 12:00 计划结束。所有星期、时间、时区和 world 均可在 TOML 中覆盖；默认值
 变化只影响后续生成的新轮次，不会改写数据库中已经存在的拍卖。

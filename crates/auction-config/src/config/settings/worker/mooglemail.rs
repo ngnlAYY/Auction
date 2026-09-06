@@ -15,7 +15,7 @@ pub struct MoogleMailWorkerConfig {
     pub mailbox_key: String,
     /// 游戏世界，只允许 `main` 或 `isekai`。
     pub world_id: String,
-    /// MoogleMail 拍卖邮件使用的起拍价覆盖值；省略时继承 `[auction.economics].start_price`。
+    /// MoogleMail 未填写 `start` 时的起拍价覆盖值；省略时使用邮件专属默认值 50,000 Credits。
     pub start_price: Option<i64>,
     /// MoogleMail 拍卖装备过滤策略；省略时关闭过滤但仍要求来源标记为可交易。
     pub equipment_filter: MoogleMailEquipmentFilterConfig,

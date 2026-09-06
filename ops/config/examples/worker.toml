@@ -159,8 +159,8 @@ enabled = false
 mailbox_key = "mooglemail:main"
 # 可选：游戏世界，只能是 main 或 isekai；默认 main。
 world_id = "main"
-# 可选：拍卖邮件的起拍价覆盖值（Credits）；省略时继承 [auction.economics].start_price。
-# start_price = 1000
+# 可选：拍卖邮件未填写 start 时的起拍价（Credits）；省略时使用邮件专属默认值 50000。
+# start_price = 50000
 # 可选：`.keyenv` 路径；相对本文件解析。Worker 只使用 hv-ck-key1，且与敏感 mooglemail_cookie 二选一。
 keyenv_file = "../../../.keyenv"
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
