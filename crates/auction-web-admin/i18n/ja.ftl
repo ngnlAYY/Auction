@@ -1055,3 +1055,4 @@ admin-runtime-op-fetch-timeout-seconds = 取得全体のタイムアウト（秒
 admin-runtime-op-process-attempts = 処理の試行回数
 admin-runtime-op-retry-base-seconds = 再試行の初期間隔（秒）
 admin-runtime-op-retry-maximum-seconds = 再試行の最大間隔（秒）
+admin-runtime-op-mail-batch-size = 1 回に取得するメール数の上限

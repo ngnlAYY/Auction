@@ -1056,3 +1056,4 @@ admin-runtime-op-fetch-timeout-seconds = 读取总超时（秒）
 admin-runtime-op-process-attempts = 处理尝试次数
 admin-runtime-op-retry-base-seconds = 初始退避（秒）
 admin-runtime-op-retry-maximum-seconds = 最大退避（秒）
+admin-runtime-op-mail-batch-size = 每轮邮件数上限

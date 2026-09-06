@@ -23,7 +23,7 @@ pub(super) fn MailFields(
             }
             RuntimeGroup { title: t!("admin-runtime-op-mail-fetch"),
                 div { class: "admin-runtime-field-grid",
-                NumberField { form, disabled, path: "operations.mail.batch_size", label: t!("admin-runtime-op-batch-size"), minimum: "1", maximum: "1000", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.batch_size", label: t!("admin-runtime-op-mail-batch-size"), minimum: "1", maximum: "1000", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.maximum_pages", label: t!("admin-runtime-op-maximum-pages"), minimum: "1", maximum: "100", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.maximum_response_bytes", label: t!("admin-runtime-op-maximum-response-bytes"), minimum: "1", maximum: "8388608", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.minimum_request_interval_millis", label: t!("admin-runtime-op-minimum-request-interval-millis"), minimum: "1", maximum: "60000", on_dirty }

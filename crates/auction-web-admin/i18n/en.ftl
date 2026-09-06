@@ -1055,3 +1055,4 @@ admin-runtime-op-fetch-timeout-seconds = Total fetch timeout (seconds)
 admin-runtime-op-process-attempts = Processing attempts
 admin-runtime-op-retry-base-seconds = Initial retry delay (seconds)
 admin-runtime-op-retry-maximum-seconds = Maximum retry delay (seconds)
+admin-runtime-op-mail-batch-size = Maximum emails per fetch
