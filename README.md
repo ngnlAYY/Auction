@@ -163,6 +163,8 @@ Admin runtime 模板位于 [`ops/config/examples/runtime/admin.toml`](ops/config
 发布命令只装配 PostgreSQL 完整档的四个二进制、受批准的配置/部署模板、依赖摘要、Web payload
 清单和 SHA-256；正式 package 拒绝脏工作树，本地迁移取证必须显式传入 `--allow-dirty`，并在名称和
 摘要中保留 `dirty` 标记。
+发布构建在 Web/native 编译前冻结源码身份，并在各阶段及装包发布前核对；期间发生源码修改或
+提交会使门禁失败，需重新构建，不能把旧产物标记成新提交。
 
 `just verify` 默认只执行格式化、源码布局/命名、配置示例、五语言 Fluent 键集合门禁、锁定依赖的
 编译检查、Clippy 和 WASM 静态检查，不执行测试。现行设计与交付边界见

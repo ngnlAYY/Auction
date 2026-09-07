@@ -416,6 +416,8 @@ recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化�
 `http_security` 只保存 origin、速率限制、Cookie 属性、普通请求超时和可信代理 CIDR 等非敏感
 策略；默认不信任任何 `X-Forwarded-For`。`trusted_unix_proxy` 仅允许有效的 Public/Admin Unix
 listener 启用，TCP listener 必须通过规范且不重复的 `trusted_proxy_cidrs` 明确信任上游。
+Admin 主配置 fallback 与 runtime 覆盖值分别校验；`AppConfig.listener` 保存最终生效的 TCP/Unix
+配置，供监听器装配、origin/metrics 校验和部署预检共用。
 `session` 保存 Public 与 Admin 会话的空闲/绝对时限及 Public 并发上限。登录 key、Admin secret、
 会话 token 和数据库连接串不得写入主配置。
 

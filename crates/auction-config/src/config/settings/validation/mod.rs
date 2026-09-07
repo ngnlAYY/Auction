@@ -7,7 +7,7 @@ mod security;
 mod tracing;
 
 pub(super) use auction::validate_auction;
-pub(super) use listener::resolve_http_listener;
+pub(super) use listener::{resolve_http_listener, validate_http_listener};
 pub(super) use paths::{
     database_url_is_sqlite, resolve_config_path, resolve_secrets_path, resolve_worker_paths,
 };

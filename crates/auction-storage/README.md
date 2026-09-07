@@ -130,6 +130,9 @@ Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只
 会话持久化由 `src/database/sessions/` 持有：`mod.rs` 只做 Admin/Public 端口装配，
 `admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`common.rs` 负责
 共享错误和 Lite 时间/UUID 映射；会话真值不进入 Redis。
+SQLite 会话创建和刷新使用 SQLx 跟踪的 `BEGIN IMMEDIATE` 事务，错误返回及 future 取消由事务
+析构回滚；成功刷新按 `MIN(absolute_expires_at, MAX(expires_at, now + idle_ttl))` 延长有效期，
+与 PostgreSQL 保持同一滑动过期语义，绝不复活已过期或已撤销会话。
 Public 账户竞价与代理历史由 `src/database/account/` 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责快照查询；`mapping/` 下的 `bids.rs`、`proxy.rs` 和
 `common.rs` 分别维护普通/代理竞价事实、代理状态投影以及跨后端读取与分页校验，`mapping/mod.rs`
@@ -198,6 +201,8 @@ Draft/周轮次并移动 target，防止 Preview 过早冻结录入或形成永�
 保持 NULL，HTTP 关联值只进入 metadata；Final slow/失格代理只追加一条
 `lot.proxy_final_transition` 命令级审计，不再为同一子命令重复写逐 bid/transition 通用审计。内部
 `final_fast` 状态仍保留，只有兼容审计边界投影为 `mode=fast/status=active`。
+该状态仍可降低上限：领域事实和 PostgreSQL `000034` 都保留 `final_fast → final_fast`，
+不得借降额改变代理模式或状态。
 Admin 拍卖创建由 `src/database/commands/mod.rs` 与 PostgreSQL
 `src/database/competition/postgres/admin/create.rs` 共同持有：应用服务使用 `admin_auction_create` 命令账本，
 事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
@@ -383,7 +388,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000033` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000034` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -399,7 +404,7 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据；`000031` 为论坛
 主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点；`000032` 允许唯一录入目标
 指向 Draft/Preview，并以跨状态唯一索引和延迟触发器保护正式开拍时的目标切换；`000033` 为 Admin
-realtime 事件倒序列表补齐时间与事件 ID 复合索引。SQLite
+realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修正 FinalFast 降额的同状态转换矩阵。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000011` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器及同义 realtime 读取索引均已接入；结算报告属于 PostgreSQL 完整档，SQLite
@@ -458,3 +463,9 @@ operations alert 由 `src/database/operations_alert/` 分层持有：`mod.rs` �
 pending，cooldown 只在 delivery 入队确认事务中生效。退信水位只统计同时具有
 `failure_code=recipient_not_found`、同名 reason code 和布尔型 `take_required=true` 的
 `manual_reconcile` delivery，并排除 operations alert 自身 delivery；SQLite Lite 不提供该完整档能力。
+旧批次的 recipient/world 与当前配置不同时，会在同一领取事务终止旧批次并继续为新目标建批，
+不会重新指定旧 delivery 的收件人。`delivery.rs` 同步把可证明从未激活的投递收口为 `failed`，
+保留零 attempt/fencing 和空执行时间，写入 `operations_alert_batch_terminal` 原因及 `delivery.fail`
+审计；重试耗尽路径复用同一收口。每轮分别最多处理 100 个耗尽租约批次与 100 个历史 failed/prepared
+孤儿，已发送或无法证明未激活的记录不会由该路径重写。Delivery Admin 投影只为该闭集失败形状
+允许从创建直接到完成的时间链。

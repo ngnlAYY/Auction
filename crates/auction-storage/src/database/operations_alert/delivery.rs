@@ -4,6 +4,72 @@
 
 use super::*;
 
+use crate::database::delivery_audit::{DeliveryAudit, FAIL, append as append_delivery_audit};
+
+/// 终结可证明从未激活的告警投递；保持零发送尝试和空执行时间，并原子追加失败审计。
+pub(super) async fn terminalize_prepared_delivery(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    delivery_id: uuid::Uuid,
+    now: chrono::DateTime<chrono::Utc>,
+    failure_code: &str,
+) -> Result<(), ApplicationError> {
+    if !matches!(failure_code, "dependency_mismatch" | "retry_exhausted") {
+        return Err(storage_error("operations alert prepared delivery 错误码无效"));
+    }
+    let updated = sqlx::query(
+        "UPDATE public.deliveries
+         SET status = 'failed',
+             lease_token = NULL,
+             lease_expires_at = NULL,
+             claimed_at = NULL,
+             sending_at = NULL,
+             completed_at = GREATEST(updated_at, $2),
+             external_reference = NULL,
+             failure_code = $3,
+             result_metadata = jsonb_build_object(
+                 'outcome_unknown', false,
+                 'reason_code', 'operations_alert_batch_terminal'
+             ),
+             updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1 AND origin_kind = 'operations_alert' AND status = 'prepared'
+           AND lease_token IS NULL AND lease_expires_at IS NULL
+           AND claimed_at IS NULL AND sending_at IS NULL AND completed_at IS NULL
+           AND external_reference IS NULL AND failure_code IS NULL AND activation_command_id IS NULL
+           AND activation_request_digest IS NULL AND activated_at IS NULL
+           AND fencing_version = 0 AND attempt_count = 0",
+    )
+    .bind(delivery_id)
+    .bind(now)
+    .bind(failure_code)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("收口 operations alert prepared delivery 失败"))?;
+    if updated.rows_affected() == 1 {
+        let request_id = delivery_id.to_string();
+        append_delivery_audit(
+            transaction,
+            DeliveryAudit {
+                occurred_at: now,
+                actor_type: "system",
+                actor_id: "delivery-service",
+                action: FAIL,
+                delivery_id,
+                request_id: Some(&request_id),
+                source: "system",
+                metadata: serde_json::json!({
+                    "status": "failed",
+                    "failure_code": failure_code,
+                    "reason_code": "operations_alert_batch_terminal",
+                    "outcome_unknown": false,
+                }),
+            },
+        )
+        .await
+        .map_err(|_| storage_error("追加 operations alert prepared delivery 收口审计失败"))?;
+    }
+    Ok(())
+}
+
 pub(super) async fn mark_enqueued_postgres(
     pool: &super::TrackedPool<sqlx::Postgres>,
     claim: &OperationsAlertBatchClaim,
@@ -152,6 +218,19 @@ pub(super) async fn mark_claim_failed_postgres(
     if updated.rows_affected() != 1 {
         let _ = transaction.rollback().await;
         return Err(ApplicationError::OperationsAlert(OperationsAlertError::StaleClaim));
+    }
+    if terminal {
+        terminalize_prepared_delivery(
+            &mut transaction,
+            claim.delivery_id,
+            updated_at,
+            if error_code == OperationsAlertDispatchErrorCode::DependencyMismatch {
+                "dependency_mismatch"
+            } else {
+                "retry_exhausted"
+            },
+        )
+        .await?;
     }
     transaction.commit().await.map_err(|_| storage_error("提交 operations alert 失败退避事务失败"))
 }

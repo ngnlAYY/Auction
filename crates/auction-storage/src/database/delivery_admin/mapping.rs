@@ -18,7 +18,10 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
     let payload: Value = row.try_get("payload").map_err(map_storage_error)?;
     let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
     // 旧版 CanonicalObject 要求两个持久化 JSON 都是对象；不能把损坏正文降级成空投影。
-    if !payload.is_object() || !result_metadata.is_object() {
+    if !payload.is_object()
+        || !result_metadata.is_object()
+        || !valid_terminal_alert_metadata(&result_metadata)
+    {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
     let snapshot = DeliveryAdminSnapshot {
@@ -183,6 +186,7 @@ impl LegacyDeliveryPayload {
             || self.request_digest == [0; 32]
             || !self.payload.is_object()
             || !self.result_metadata.is_object()
+            || !valid_terminal_alert_metadata(&self.result_metadata)
             || !valid_activation_snapshot(self)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);
@@ -276,6 +280,30 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         return false;
     }
 
+    // 告警在激活前确定终止没有 claimed/sending 事实，不能套用已发送投递的时间链。
+    if snapshot.status == "failed"
+        && snapshot.origin_kind == "operations_alert"
+        && snapshot.reason_code.as_deref() == Some("operations_alert_batch_terminal")
+    {
+        return snapshot.lease_expires_at.is_none()
+            && snapshot.claimed_at.is_none()
+            && snapshot.sending_at.is_none()
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && completed <= snapshot.updated_at
+            })
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && matches!(
+                snapshot.failure_code.as_deref(),
+                Some("dependency_mismatch" | "retry_exhausted")
+            )
+            && snapshot.fencing_version == 0
+            && snapshot.attempt_count == 0;
+    }
+
     if snapshot.lease_expires_at.is_some_and(is_zero_time)
         || !valid_timeline(
             snapshot.created_at,
@@ -340,6 +368,11 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         }
         _ => false,
     }
+}
+
+fn valid_terminal_alert_metadata(metadata: &Value) -> bool {
+    metadata.get("reason_code").and_then(Value::as_str) != Some("operations_alert_batch_terminal")
+        || metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
 }
 
 fn valid_timeline(

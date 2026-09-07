@@ -121,14 +121,15 @@ impl AppConfig {
             .unwrap_or("/run/hv-auction/worker/control.sock")
     }
 
-    /// 返回 Admin runtime 选择的 Unix listener socket；TCP 模式和其它角色返回 `None`。
+    /// 返回 Admin 当前生效的 Unix listener socket；TCP 模式和其它角色返回 `None`。
     ///
     /// 该 getter 只暴露非敏感监听路径，供部署预检和 readiness 探针与 Admin 装配根使用同一
     /// 权威配置，避免部署控制器仍探测已经被 runtime 覆盖掉的 TCP 地址。
     pub fn admin_unix_listener_socket_path(&self) -> Option<&str> {
-        self.admin_runtime.as_ref().and_then(|document| {
-            (document.listener.mode == auction_application::AdminRuntimeListenMode::Unix)
-                .then_some(document.listener.socket_path.as_str())
-        })
+        (self.role == Role::Admin).then_some(self.listener.as_ref()).flatten().and_then(
+            |listener| {
+                (listener.mode == HttpListenMode::Unix).then_some(listener.socket_path.as_str())
+            },
+        )
     }
 }

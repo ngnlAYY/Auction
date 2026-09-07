@@ -14,6 +14,8 @@
 - archive、manifest、preflight 和 receipt 使用规范化绝对路径；父目录必须已存在且不得允许
   group/other 写入，文件不得允许 group/other 读取。
 - 数据库密码只通过短生命周期的 0600 `.pgpass` 交给 PostgreSQL 客户端，不进入参数、receipt 或日志。
+- 备份/恢复的敏感 `database_url` 必须显式提供 host 和 port，默认端口也写为 `5432`；外部工具
+  清除继承的 `PGHOST`、`PGHOSTADDR`、`PGPORT`，仅使用该 URL 的目标，避免与 SQLx 预检分歧。
 
 ## 1. 停止流量并创建备份
 

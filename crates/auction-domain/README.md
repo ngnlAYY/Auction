@@ -15,6 +15,8 @@
   代理生命周期和 `state.rs` 软截止/状态收口拆分职责，`competition/mod.rs` 只负责稳定导出。
 - `src/proxy/`：`model.rs` 定义 Fast/Slow 代理授权和转换事实，`authorization.rs` 负责授权
   创建/状态变更，`transition.rs` 负责追加式转换事实校验；`mod.rs` 只保留稳定导出。
+  降额允许 `Active → Active` 和 `FinalFast → FinalFast`；后者保持 Fast 模式，所有降额都保持
+  状态与模式不变、上限严格下降、版本推进及空终止原因。
 - `src/identity/mod.rs`：带类型的 UUID 包装，避免不同标识符互相混用。
 - `src/errors/mod.rs`：领域错误分类。
 - `src/settlement/`：结算领域 owner；`policy.rs` 维护策略/恢复参数，`amount.rs` 维护非负金额

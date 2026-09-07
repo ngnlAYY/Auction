@@ -170,7 +170,9 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 ```
 
 备份命令只允许新的绝对路径，拒绝覆盖已有 archive/manifest；源库必须是当前 Auction schema，
-并在 `pg_dump` 前后保持同一迁移版本。恢复必须由操作员先停止外部进程并准备同名空库；
+并在 `pg_dump` 前后保持同一迁移版本。恢复必须由操作员先停止外部进程并准备同名空库。
+备份/恢复所用敏感 `database_url` 必须显式写明 host 与 port（默认端口也写 `5432`），
+外部工具不会继承 `PGHOST`、`PGHOSTADDR` 或 `PGPORT` 来选择目标。
 `postgres-restore` 不会终止连接、清理现有 schema 或破坏性重建数据库。需要由仓库工具准备空库时，
 必须单独显式运行 `postgres-rebuild --mode empty-for-restore`，完整确认和回执流程见
 [`RECOVERY.md`](RECOVERY.md)。

@@ -310,6 +310,10 @@ reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令
 回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
 证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令
 仍返回明确的能力缺失，不会被空结果伪装成已接入。
+Delivery 列表允许一种确定未发送的失败形状：仅 `operations_alert`、
+`reason_code=operations_alert_batch_terminal`、错误码 `dependency_mismatch|retry_exhausted`，
+attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间有效。Storage 与 Admin Web
+按同一闭集接受该形状，其他投递终态仍必须提供完整执行轨迹；HTTP 不新增 metadata 原文字段。
 A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、证据重校验、命令账本、退款激活、guarded relist、
 审计和预览目录 realtime 事件；结算事务已为获胜 lot 在同一事务中建立 recovery case；SQLite Lite
 明确返回 `501 feature_not_supported`。Recovery Worker 已按已登记的

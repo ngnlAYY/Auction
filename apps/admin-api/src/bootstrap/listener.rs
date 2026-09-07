@@ -7,7 +7,6 @@
 use std::{future::Future, io};
 
 use anyhow::Context;
-use auction_application::AdminRuntimeListenMode;
 use auction_config::AppConfig;
 #[cfg(target_os = "linux")]
 use auction_http::{UnixHttpListener, UnixListenerOptions};
@@ -37,27 +36,20 @@ impl AdminListener {
 
 /// 按已解析的 Admin runtime 选择并绑定监听器。
 pub(crate) async fn bind(config: &AppConfig) -> anyhow::Result<AdminListener> {
-    let mode = config
-        .admin_runtime
-        .as_ref()
-        .map(|runtime| runtime.listener.mode)
-        .unwrap_or(AdminRuntimeListenMode::Tcp);
+    let listener = config.listener.as_ref().context("admin-api must have a listener")?;
+    let mode = listener.mode;
     match mode {
-        AdminRuntimeListenMode::Tcp => {
+        auction_config::HttpListenMode::Tcp => {
             let address = config.listen_addr.context("admin-api must have a listen address")?;
             Ok(AdminListener::Tcp(TcpListener::bind(address).await?))
         }
-        AdminRuntimeListenMode::Unix => {
+        auction_config::HttpListenMode::Unix => {
             #[cfg(target_os = "linux")]
             {
-                let runtime = config
-                    .admin_runtime
-                    .as_ref()
-                    .context("Unix listener requires an Admin runtime document")?;
                 let listener = UnixHttpListener::bind(UnixListenerOptions {
-                    runtime_directory: runtime.listener.runtime_directory.clone().into(),
-                    socket_path: runtime.listener.socket_path.clone().into(),
-                    group: runtime.listener.group.clone(),
+                    runtime_directory: listener.runtime_directory.clone().into(),
+                    socket_path: listener.socket_path.clone().into(),
+                    group: listener.group.clone(),
                     lock_file_name: ".admin-api-listener.lock",
                 })
                 .await
