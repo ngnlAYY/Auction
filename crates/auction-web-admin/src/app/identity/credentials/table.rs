@@ -81,6 +81,7 @@ pub fn CredentialTable(
                 tbody {
                     for credential in credentials {
                         CredentialRow {
+                            key: "{credential.id}",
                             credential,
                             imported_by: session.actor.clone(),
                             reload_generation,
@@ -156,7 +157,10 @@ pub fn CredentialRow(
                         let status = "active";
                         let command_id = stable_command_id(
                             command_state,
-                            format!("set_status:{}:{status}", credential.state_version),
+                            format!(
+                                "{}:set_status:{}:{status}",
+                                credential.id, credential.state_version
+                            ),
                         );
                         run_admin_feedback_action(
                             busy,
@@ -188,7 +192,10 @@ pub fn CredentialRow(
                         let status = "disabled";
                         let command_id = stable_command_id(
                             command_state,
-                            format!("set_status:{}:{status}", credential.state_version),
+                            format!(
+                                "{}:set_status:{}:{status}",
+                                credential.id, credential.state_version
+                            ),
                         );
                         run_admin_feedback_action(
                             busy,
@@ -266,7 +273,10 @@ pub fn CredentialRow(
                                     let label = rename_value();
                                     let command_id = stable_command_id(
                                         command_state,
-                                        format!("rename:{}:{label}", credential.state_version),
+                                        format!(
+                                            "{}:rename:{}:{label}",
+                                            credential.id, credential.state_version
+                                        ),
                                     );
                                     let mut rename_dialog = rename_dialog;
                                     run_admin_feedback_action(

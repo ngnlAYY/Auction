@@ -6,6 +6,8 @@
 `src/bootstrap/service.rs` 负责 tracing、HTTP 生命周期和有界 drain，`state.rs` 负责数据库/端口/
 heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策略和 dashboard 范围投影，
 `listener.rs` 负责监听器绑定与服务。这样装配根不把状态构造、配置映射和退出流程混在一个文件中。
+主配置的 TCP/Unix listener 是有效 fallback；Admin runtime 存在时覆盖为同一配置层的有效 listener。
+装配根、origin/metrics 校验和部署预检共同读取该结果，Unix 监听不要求额外配置 runtime 文件。
 
 职责仅限于：加载配置、初始化 tracing、装配缓存、Admin session、拍卖生命周期/recovery 确认、
 数据库业务世界启停命令端口，以及 PostgreSQL 结算目录与 settlement/recovery 报告读取端口、绑定监听器、挂载

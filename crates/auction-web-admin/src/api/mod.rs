@@ -369,6 +369,21 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     let claimed_at = parse_optional_delivery_time(value.claimed_at.as_ref())?;
     let sending_at = parse_optional_delivery_time(value.sending_at.as_ref())?;
     let completed_at = parse_optional_delivery_time(value.completed_at.as_ref())?;
+    // 服务端只为从未激活的告警投递使用该终态，时间链从创建直接到完成。
+    let before_activation = value.status == "failed"
+        && value.origin_kind == "operations_alert"
+        && value.reason_code.as_deref() == Some("operations_alert_batch_terminal");
+    let timeline_valid = if before_activation {
+        claimed_at.is_none()
+            && sending_at.is_none()
+            && completed_at.is_some_and(|completed| {
+                !is_zero_delivery_time(completed)
+                    && completed >= created_at
+                    && completed <= updated_at
+            })
+    } else {
+        valid_timeline(created_at, claimed_at, sending_at, completed_at)
+    };
 
     if !valid_origin_kind(&value.origin_kind)
         || !valid_stored_text(&value.origin_id)
@@ -382,7 +397,7 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
         || is_zero_delivery_time(updated_at)
         || updated_at < created_at
         || lease_expires_at.is_some_and(is_zero_delivery_time)
-        || !valid_timeline(created_at, claimed_at, sending_at, completed_at)
+        || !timeline_valid
         || !valid_optional_text(value.external_reference.as_deref())
         || !valid_optional_text(value.failure_code.as_deref())
         || !valid_optional_text(value.reason_code.as_deref())
@@ -541,14 +556,31 @@ fn valid_state_fields(
                 && value.attempt_count > 0
         }
         "failed" | "manual_reconcile" => {
-            lease_expires_at.is_none()
-                && claimed_at.is_some()
-                && sending_at.is_some()
+            let before_activation = value.status == "failed"
+                && value.origin_kind == "operations_alert"
+                && value.reason_code.as_deref() == Some("operations_alert_batch_terminal")
+                && lease_expires_at.is_none()
+                && claimed_at.is_none()
+                && sending_at.is_none()
                 && completed_at.is_some()
                 && value.external_reference.is_none()
-                && value.failure_code.as_deref().is_some_and(valid_stored_text)
-                && value.fencing_version > 0
-                && value.attempt_count > 0
+                && !value.take_required
+                && value.returned_mail_id.is_none()
+                && matches!(
+                    value.failure_code.as_deref(),
+                    Some("dependency_mismatch" | "retry_exhausted")
+                )
+                && value.fencing_version == 0
+                && value.attempt_count == 0;
+            before_activation
+                || (lease_expires_at.is_none()
+                    && claimed_at.is_some()
+                    && sending_at.is_some()
+                    && completed_at.is_some()
+                    && value.external_reference.is_none()
+                    && value.failure_code.as_deref().is_some_and(valid_stored_text)
+                    && value.fencing_version > 0
+                    && value.attempt_count > 0)
         }
         _ => false,
     }

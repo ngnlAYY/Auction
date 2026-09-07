@@ -74,8 +74,8 @@ pub struct AppConfig {
     pub role: Role,
     /// 解析后的可选监听地址；Worker 通常为 None。
     pub listen_addr: Option<SocketAddr>,
-    /// Public/Admin 主配置中的 listener；Worker 始终为 None。Admin runtime 存在时，实际
-    /// Admin listener 由 runtime 文档覆盖，但该字段仍保留主配置的安全 fallback。
+    /// Public/Admin 当前生效的 listener；Worker 始终为 None。Admin runtime 存在时，字段已
+    /// 按 runtime 文档覆盖，主配置只在 runtime 缺失时作为 fallback。
     pub listener: Option<HttpListenerConfig>,
     /// 可选日志过滤器。
     pub log_filter: Option<String>,

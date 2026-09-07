@@ -13,17 +13,76 @@ pub(crate) async fn claim_postgres(
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 operations alert 领取事务失败"))?;
 
-    sqlx::query(
-        "UPDATE public.operations_alert_batches
-         SET status = 'failed', claim_token = NULL, claimed_at = NULL,
-             claim_expires_at = NULL, next_attempt_at = NULL,
-             delivery_error_code = 'retry_exhausted', updated_at = $1, completed_at = $1
-         WHERE status = 'claimed' AND claim_expires_at <= $1 AND attempt_count >= 3",
+    let expired_rows = sqlx::query(
+        "SELECT id, delivery_id
+         FROM public.operations_alert_batches
+         WHERE status = 'claimed' AND claim_expires_at <= $1 AND attempt_count >= 3
+         ORDER BY claim_expires_at, id
+         LIMIT 100
+         FOR UPDATE SKIP LOCKED",
     )
     .bind(request.now)
-    .execute(&mut *transaction)
+    .fetch_all(&mut *transaction)
     .await
-    .map_err(|_| storage_error("收口 operations alert 过期重试批次失败"))?;
+    .map_err(|_| storage_error("读取 operations alert 过期重试批次失败"))?;
+    for row in expired_rows {
+        let batch_id: Uuid = row
+            .try_get("id")
+            .map_err(|_| storage_error("读取 operations alert 过期批次 ID 失败"))?;
+        let delivery_id: Uuid = row
+            .try_get("delivery_id")
+            .map_err(|_| storage_error("读取 operations alert 过期 delivery ID 失败"))?;
+        sqlx::query(
+            "UPDATE public.operations_alert_batches
+             SET status = 'failed', claim_token = NULL, claimed_at = NULL,
+                 claim_expires_at = NULL, next_attempt_at = NULL,
+                 delivery_error_code = 'retry_exhausted', updated_at = $2, completed_at = $2
+             WHERE id = $1 AND status = 'claimed' AND attempt_count >= 3",
+        )
+        .bind(batch_id)
+        .bind(request.now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("收口 operations alert 过期重试批次失败"))?;
+        terminalize_prepared_delivery(
+            &mut transaction,
+            delivery_id,
+            request.now,
+            "retry_exhausted",
+        )
+        .await?;
+    }
+
+    let orphan_rows = sqlx::query(
+        "SELECT batch.delivery_id, batch.delivery_error_code
+         FROM public.operations_alert_batches AS batch
+         INNER JOIN public.deliveries AS delivery ON delivery.id = batch.delivery_id
+         WHERE batch.status = 'failed' AND delivery.origin_kind = 'operations_alert'
+           AND delivery.status = 'prepared'
+           AND batch.delivery_error_code IN ('dependency_mismatch', 'retry_exhausted')
+           AND delivery.fencing_version = 0 AND delivery.attempt_count = 0
+           AND delivery.lease_token IS NULL AND delivery.lease_expires_at IS NULL
+           AND delivery.claimed_at IS NULL AND delivery.sending_at IS NULL
+           AND delivery.completed_at IS NULL AND delivery.external_reference IS NULL
+           AND delivery.failure_code IS NULL AND delivery.activation_command_id IS NULL
+           AND delivery.activation_request_digest IS NULL AND delivery.activated_at IS NULL
+         ORDER BY batch.updated_at, batch.id
+         LIMIT 100
+         FOR UPDATE OF batch SKIP LOCKED",
+    )
+    .fetch_all(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("读取 operations alert prepared 孤儿失败"))?;
+    for row in orphan_rows {
+        let delivery_id: Uuid = row
+            .try_get("delivery_id")
+            .map_err(|_| storage_error("读取 operations alert 孤儿 delivery ID 失败"))?;
+        let failure_code: String = row
+            .try_get("delivery_error_code")
+            .map_err(|_| storage_error("读取 operations alert 孤儿批次错误码失败"))?;
+        terminalize_prepared_delivery(&mut transaction, delivery_id, request.now, &failure_code)
+            .await?;
+    }
 
     let reclaim_row = sqlx::query(
         "SELECT id, command_id, delivery_id, request_digest, body_digest,

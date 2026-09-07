@@ -4,6 +4,8 @@ use auction_application::{
     AdminSessionIdentity, AdminSessionRecord, ApplicationError, SessionError,
 };
 use chrono::{DateTime, Utc};
+#[cfg(feature = "sqlite")]
+use sqlx::Connection;
 use sqlx::Row;
 
 use super::common::storage_error;
@@ -133,8 +135,8 @@ pub(super) async fn create_sqlite(
 ) -> Result<AdminSessionIdentity, ApplicationError> {
     let mut connection =
         store.pool().acquire().await.map_err(|_| storage_error("获取 Lite Admin 会话连接失败"))?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| storage_error("开始 Lite Admin 会话事务失败"))?;
     sqlx::query(
@@ -144,7 +146,7 @@ pub(super) async fn create_sqlite(
     )
     .bind(sqlite_timestamp(record.created_at))
     .bind(&record.actor)
-    .execute(&mut *connection)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("轮换 Lite 旧 Admin 会话失败"))?;
     sqlx::query(
@@ -159,13 +161,10 @@ pub(super) async fn create_sqlite(
     .bind(sqlite_timestamp(record.created_at))
     .bind(sqlite_timestamp(record.expires_at))
     .bind(sqlite_timestamp(record.absolute_expires_at))
-    .execute(&mut *connection)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("创建 Lite Admin 会话失败"))?;
-    sqlx::query("COMMIT")
-        .execute(&mut *connection)
-        .await
-        .map_err(|_| storage_error("提交 Lite Admin 会话事务失败"))?;
+    transaction.commit().await.map_err(|_| storage_error("提交 Lite Admin 会话事务失败"))?;
     Ok(AdminSessionIdentity {
         actor: record.actor,
         expires_at: record.expires_at,
@@ -183,20 +182,16 @@ pub(super) async fn touch_sqlite(
 ) -> Result<AdminSessionIdentity, ApplicationError> {
     let mut connection =
         store.pool().acquire().await.map_err(|_| storage_error("获取 Lite Admin 会话连接失败"))?;
-    sqlx::query("BEGIN IMMEDIATE")
-        .execute(&mut *connection)
+    let mut transaction = connection
+        .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|_| storage_error("开始 Lite Admin 会话刷新事务失败"))?;
     let now_text = sqlite_timestamp(now);
     let next_text = sqlite_timestamp(next_expires_at);
     let result = sqlx::query(
         "UPDATE admin_sessions
-         SET last_activity_at = CASE WHEN last_activity_at < ? THEN ? ELSE last_activity_at END,
-             expires_at = CASE
-                 WHEN absolute_expires_at < ? THEN absolute_expires_at
-                 WHEN expires_at < ? THEN ?
-                 ELSE expires_at
-             END
+             SET last_activity_at = CASE WHEN last_activity_at < ? THEN ? ELSE last_activity_at END,
+             expires_at = MIN(absolute_expires_at, MAX(expires_at, ?))
          WHERE token_hash = ?
            AND csrf_hash = ?
            AND revoked_at IS NULL
@@ -205,12 +200,10 @@ pub(super) async fn touch_sqlite(
     .bind(&now_text)
     .bind(&now_text)
     .bind(&next_text)
-    .bind(&now_text)
-    .bind(&next_text)
     .bind(token_hash.to_vec())
     .bind(csrf_hash.to_vec())
     .bind(&now_text)
-    .execute(&mut *connection)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("刷新 Lite Admin 会话失败"))?;
     if result.rows_affected() != 1 {
@@ -222,13 +215,10 @@ pub(super) async fn touch_sqlite(
          WHERE token_hash = ?",
     )
     .bind(token_hash.to_vec())
-    .fetch_one(&mut *connection)
+    .fetch_one(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 Lite Admin 会话投影失败"))?;
-    sqlx::query("COMMIT")
-        .execute(&mut *connection)
-        .await
-        .map_err(|_| storage_error("提交 Lite Admin 会话刷新事务失败"))?;
+    transaction.commit().await.map_err(|_| storage_error("提交 Lite Admin 会话刷新事务失败"))?;
     Ok(AdminSessionIdentity {
         actor: row.try_get("actor").map_err(|_| storage_error("读取 Lite Admin 会话主体失败"))?,
         expires_at: parse_timestamp(

@@ -21,7 +21,7 @@
 本表冻结当前对象的归属和档位；提交 Rust migration 前，必须把 Lite 表项与 SQLite 事务、
 锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000033`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000034`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000011` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。`bid_proxies` 不再作为第二份
@@ -77,6 +77,8 @@ PostgreSQL `000032` 把世界级录入目标从仅 `draft` 扩展为唯一的 `d
 继续接收并物化新装备，Open 才原子创建后继 Draft、登记下一轮调度并迁移录入目标；若 Preview 被取消，
 取消事务也必须建立后继 Draft，避免世界失去可用录入目标。迁移会拒绝同世界 Preview 与
 后继 Draft 并存窗口，必须在窗口外升级，不能猜测应折叠或保留哪一期。
+PostgreSQL `000034` 允许代理降额保持 `final_fast` 状态和 Fast 模式；仍要求旧新状态一致、
+上限严格下降、模式不变和原因为空，其他代理转换矩阵分支保持既有语义。
 
 canonical PostgreSQL v28 历史格式到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改
 来源 migration，也不把来源版本号直接映射成 SQLx 版本。它只在精确格式预检和外部备份证据通过后补齐
@@ -91,8 +93,8 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | users | auction-application：users | 两者 | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；历史 game_player_id 仅作兼容镜像 |
 | user_blacklist | auction-application：users | 两者 | 公开资格与封禁原因 |
 | user_renames | auction-application：users | 两者 | 用户名变更追加历史 |
-| public_sessions | auction-application：sessions | 两者 | Public 会话权威状态 |
-| admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态 |
+| public_sessions | auction-application：sessions | 两者 | Public 会话权威状态；滑动闲置有效期受绝对有效期限制，SQLite 使用可取消回滚的串行写事务 |
+| admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态；两后端均保持滑动有效期和绝对上限 |
 | rules_documents | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
 | audit_records | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | auction-observability | 两者 | 进程/服务心跳与过期判断 |
@@ -218,6 +220,12 @@ SQLite Lite 不复制这些完整档表。
 | operations_alert_signals | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 完整档 | 告警信号、稳定 identity、版本、通知时间、cooldown 与已证明退信的独立提醒 |
 | operations_alert_batches | auction-storage：alert batch；auction-jobs：claim/dispatch | 完整档 | 告警批次、租约/fencing、三次 Create 重试、稳定终态和 delivery 对账 |
 | operations_alert_batch_items | auction-storage：alert batch | 完整档 | 告警批次成员、版本、冻结摘要和 signal 反查索引 |
+
+告警目标变更时，旧待重试批次在领取事务内以 `dependency_mismatch` 终止，然后允许为新目标建批。
+确定从未激活的关联 delivery 以 `failed` 收口，保留零 attempt/fencing 和空 claimed/sending 时间；
+`reason_code=operations_alert_batch_terminal` 且 `outcome_unknown=false` 明确记录未发生外部发送。
+错误码仅为 `dependency_mismatch` 或 `retry_exhausted`，收口与 `delivery.fail` 审计同事务提交。
+每轮最多收口 100 个耗尽租约批次和 100 个符合相同未激活形状的历史孤儿，不改写发送过的 delivery。
 
 ## 共有约束
 

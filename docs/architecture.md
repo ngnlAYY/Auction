@@ -58,6 +58,8 @@ Public 浏览器的竞价资源失效由 `auction-web-public/src/app/surface/boa
 门禁直接核对自身 payload 哈希、对端资源缺失和 Worker 无 Web crate；archive 使用显式文件白名单、
 权限、root 数字 owner、`SOURCE_DATE_EPOCH`、两次相同 tar+gzip 与内外 SHA-256。正式 package 必须来自
 干净工作树；显式 dirty 模式只用于本地迁移取证，并把状态和源码指纹写入名称及摘要。
+源码身份在双端 Web/native 构建前冻结，各构建阶段结束及产物发布前重新核对；装包期间的源码
+变化也会阻断发布。构建中发生的修改或提交不能被事后写入 `BUILD-INFO` 冒充产物来源。
 
 界面文案由 `dioxus-i18n` 从各 surface 的 `i18n/*.ftl` 取用，支持 `en`/`zh-CN`/`zh-TW`/
 `ja`/`ko`。公开端默认英文，管理端默认简体中文。译文资源按 surface 隔离，语言选择能力
@@ -308,7 +310,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000033` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000034` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -341,6 +343,8 @@ MoogleMail 收件人/页面名称，新增唯一、规范十进制的 `users.for
 连续处理楼层，初始为固定系统帖 #2，不能从固定帖内容版本或远端 post ID 推算；`000032` 把唯一
 录入目标扩展为 Draft/Preview 可接收状态，并以跨状态唯一索引和延迟一致性触发器保证目标精确匹配；
 `000033` 与 SQLite `000011` 为 Admin realtime 事件的时间倒序分页补齐同义复合索引；
+`000034` 只调整 PostgreSQL 代理降额转换矩阵，允许 `final_fast → final_fast`，同时保留
+Fast 模式、同状态、严格降额及空原因约束；既有迁移和历史转换事实不改写。
 operations alert 的 scan、dispatch 和 reconcile 也已从共享 Worker tick 拆为三个独立循环，默认每 60 秒
 加最多 5 秒随机抖动，分别使用有界 deadline、错误隔离和当前默认阈值/窗口/冷却/重试策略；
 MoogleMail 每个 world 的独立 poller 使用标准五字段 cron，现行默认 `*/5 * * * *`（每 5 分钟），

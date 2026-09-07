@@ -43,8 +43,9 @@ impl AppConfig {
         {
             apply_runtime_document(&mut worker.mooglemail, runtime);
         }
-        let listener = resolve_http_listener(role, listener, listen_address)?;
-        let fallback_listen_addr = listener
+        // 先保留主配置 listener，校验其 fallback 安全策略；runtime 覆盖必须在该阶段之后生效。
+        let main_listener = resolve_http_listener(role, listener, listen_address)?;
+        let main_listen_addr = main_listener
             .as_ref()
             .filter(|listener| listener.mode == HttpListenMode::Tcp)
             .map(|listener| {
@@ -141,30 +142,40 @@ impl AppConfig {
             return Err(ConfigError::MissingEhentaiCredentials);
         }
         // 即使 Admin runtime 随后覆盖该区块，也拒绝主配置中无法解析的备用安全策略。
-        resolve_http_security_origins(&mut http_security, fallback_listen_addr)?;
+        resolve_http_security_origins(&mut http_security, main_listen_addr)?;
         validate_http_security(&http_security)?;
         validate_session(&session)?;
         if role == Role::Worker && database_is_sqlite && worker_concurrency != 1 {
             return Err(ConfigError::LiteWorkerConcurrency { concurrency: worker_concurrency });
         }
 
-        let admin_uses_unix = role == Role::Admin
-            && admin_runtime.as_ref().is_some_and(|runtime| {
-                runtime.listener.mode == auction_application::AdminRuntimeListenMode::Unix
-            });
-        let runtime_listen_addr = admin_runtime
+        let listener = if role == Role::Admin {
+            runtime_document
+                .as_ref()
+                .map(admin_runtime_listener)
+                .transpose()
+                .map_err(|error| ConfigError::InvalidRuntimeConfig {
+                    path: runtime_config_path.clone().unwrap_or_default(),
+                    reason: error.to_string(),
+                })?
+                .or(main_listener)
+        } else {
+            main_listener
+        };
+        let effective_listen_addr = listener
             .as_ref()
-            .filter(|runtime| {
-                runtime.listener.mode == auction_application::AdminRuntimeListenMode::Tcp
+            .filter(|listener| listener.mode == HttpListenMode::Tcp)
+            .map(|listener| {
+                listener.address.parse().map_err(|source| ConfigError::InvalidAddress {
+                    field: "listener.address",
+                    value: listener.address.clone(),
+                    source,
+                })
             })
-            .map(AdminRuntimeDocument::tcp_address)
-            .transpose()
-            .map_err(|error| ConfigError::InvalidRuntimeConfig {
-                path: runtime_config_path.clone().unwrap_or_default(),
-                reason: error.to_string(),
-            })?;
-        let listen_addr =
-            if admin_uses_unix { None } else { runtime_listen_addr.or(fallback_listen_addr) };
+            .transpose()?;
+        let admin_uses_unix = role == Role::Admin
+            && listener.as_ref().is_some_and(|listener| listener.mode == HttpListenMode::Unix);
+        let listen_addr = if admin_uses_unix { None } else { effective_listen_addr };
         let mut http_security =
             admin_runtime.as_ref().map(runtime_http_security).unwrap_or(http_security);
         resolve_http_security_origins(&mut http_security, listen_addr)?;
@@ -200,4 +211,28 @@ impl AppConfig {
             secrets,
         })
     }
+}
+
+fn admin_runtime_listener(
+    runtime: &AdminRuntimeDocument,
+) -> Result<HttpListenerConfig, ConfigError> {
+    let listener = &runtime.listener;
+    let effective = match listener.mode {
+        auction_application::AdminRuntimeListenMode::Tcp => HttpListenerConfig {
+            address: listener.address.clone(),
+            group: String::new(),
+            mode: HttpListenMode::Tcp,
+            runtime_directory: String::new(),
+            socket_path: String::new(),
+        },
+        auction_application::AdminRuntimeListenMode::Unix => HttpListenerConfig {
+            address: String::new(),
+            group: listener.group.clone(),
+            mode: HttpListenMode::Unix,
+            runtime_directory: listener.runtime_directory.clone(),
+            socket_path: listener.socket_path.clone(),
+        },
+    };
+    validate_http_listener(&effective)?;
+    Ok(effective)
 }

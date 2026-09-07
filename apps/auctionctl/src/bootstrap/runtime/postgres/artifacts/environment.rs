@@ -29,25 +29,28 @@ impl PostgresCommandEnvironment {
         }
         let username = decode_uri_component(url.username())?;
         let password = url.password().map(decode_uri_component).transpose()?;
-        let host = url.host_str().map(decode_uri_component).transpose()?;
-        if host.as_deref().is_some_and(|host| host.is_empty() || host.contains(',')) {
+        // SQLx 会从环境补齐省略的 host/port；外部 libpq 工具清理环境后必须仍使用同一目标。
+        let host = url
+            .host_str()
+            .map(decode_uri_component)
+            .transpose()?
+            .context("PostgreSQL 备份/恢复 database_url 必须显式提供 host")?;
+        let port = url
+            .port()
+            .context("PostgreSQL 备份/恢复 database_url 必须显式提供 port（默认端口也要写明）")?;
+        if host.is_empty() || host.contains(',') {
             anyhow::bail!("database_url host is empty or uses an unsupported multi-host form");
         }
 
         let mut variables = vec![
             ("PGDATABASE".to_owned(), confirmed_database_name.to_owned()),
             ("PGUSER".to_owned(), username.clone()),
+            ("PGHOST".to_owned(), host.clone()),
+            ("PGPORT".to_owned(), port.to_string()),
             // 外部 PostgreSQL 工具不得继承机器级的无限连接等待或非 UTF-8 客户端编码。
             ("PGCONNECT_TIMEOUT".to_owned(), "5".to_owned()),
             ("PGCLIENTENCODING".to_owned(), "UTF8".to_owned()),
         ];
-        if let Some(host) = &host {
-            variables.push(("PGHOST".to_owned(), host.clone()));
-        }
-        if let Some(port) = url.port() {
-            variables.push(("PGPORT".to_owned(), port.to_string()));
-        }
-
         let mut seen_query_keys = HashSet::new();
         for (key, value) in url.query_pairs() {
             let key = key.into_owned();
@@ -111,11 +114,10 @@ impl PostgresCommandEnvironment {
                 let mut file = options.open(&passfile).with_context(|| {
                     format!("create private PostgreSQL passfile: {}", passfile.display())
                 })?;
-                let host_value = host.as_deref().unwrap_or("*");
-                let port_value = url.port().map_or_else(|| "*".to_owned(), |port| port.to_string());
+                let port_value = port.to_string();
                 let line = format!(
                     "{}:{}:{}:{}:{}\n",
-                    pgpass_escape(host_value),
+                    pgpass_escape(&host),
                     pgpass_escape(&port_value),
                     pgpass_escape(confirmed_database_name),
                     pgpass_escape(&username),
@@ -150,6 +152,9 @@ impl PostgresCommandEnvironment {
             "PGGSSDELEGATION",
             "PGGSSENCMODE",
             "PGGSSLIB",
+            // hostaddr 在 libpq 中优先于 host，不能把目标选择交给继承的机器环境。
+            "PGHOST",
+            "PGHOSTADDR",
             "PGKRBSRVNAME",
             "PGLOADBALANCEHOSTS",
             "PGMAXPROTOCOLVERSION",

@@ -116,14 +116,20 @@ build_variant() {
       "$api_only_public_root" "$api_only_admin_root" >&2
     exit 1
   fi
-  if [[ "$variant" == embedded ]]; then
-    verify_web_root public >/dev/null
-    verify_web_root admin >/dev/null
-  fi
-
   mkdir -p "$artifact_root"
   rm -rf "$next"
   mkdir -p "$next/bin"
+
+  # 在任何 Web/native 构建前冻结源码身份；构建期间的修改不得被事后标记成产物来源。
+  write_build_info "$next/BUILD-INFO" "$variant" "$features"
+  if [[ "$variant" == embedded ]]; then
+    bash ci/web-bundle.sh public
+    verify_build_info "$next" "$variant"
+    bash ci/web-bundle.sh admin
+    verify_web_root public >/dev/null
+    verify_web_root admin >/dev/null
+  fi
+  verify_build_info "$next" "$variant"
 
   # 强制重新展开两个 RustEmbed 类型，避免 Cargo 复用前一份 Web payload 的过程宏结果。
   if [[ -f "$build_root/CACHEDIR.TAG" ]]; then
@@ -142,13 +148,12 @@ build_variant() {
     -p auction-worker \
     -p auctionctl \
     --features "$features"
+  verify_build_info "$next" "$variant"
 
   local binary
   for binary in "${binaries[@]}"; do
     install -m 0755 "$build_root/release/$binary" "$next/bin/$binary"
   done
-  write_build_info "$next/BUILD-INFO" "$variant" "$features"
-
   if [[ "$variant" == embedded ]]; then
     install -m 0644 \
       target/dx/build/auction-web-public/web/PAYLOAD-SHA256 \
@@ -164,6 +169,7 @@ build_variant() {
       "$next/WEB-ADMIN-MANIFEST.v1"
   fi
 
+  verify_build_info "$next" "$variant"
   replace_generated_directory "$next" "$artifact_directory"
   printf '%s 发布二进制已生成：%s\n' "$variant" "$artifact_directory"
 }
@@ -691,6 +697,13 @@ package_release() {
     printf '%s  %s\n' "$(sha256_file "$package_name.tar.gz")" "$package_name.tar.gz"
   ) > "$publish_next/SHA256SUMS"
   chmod 0644 "$publish_next/SHA256SUMS"
+  # 文档与配置也属于源码身份；装包期间发生变化时保留上一份发布目录，拒绝发布混合快照。
+  if [[ $(git rev-parse --verify 'HEAD^{commit}') != "$commit" \
+    || $(source_fingerprint) != "$fingerprint" ]]; then
+    rm -rf "$temporary_root" "$publish_next"
+    printf '装包期间源码发生变化，请重新构建并装包\n' >&2
+    return 1
+  fi
   replace_generated_directory "$publish_next" "$package_output_root"
 
   printf 'release package 检查通过：commit=%s state=%s fingerprint=%s\n' \
@@ -715,9 +728,7 @@ case "${1:-}" in
       printf 'build-embedded 不接受额外参数\n' >&2
       exit 2
     fi
-    # 内嵌发布不能接受历史稳定目录；每次先按 source 重建并核验两端优化 payload。
-    bash ci/web-bundle.sh public
-    bash ci/web-bundle.sh admin
+    # build_variant 在同一源码身份约束内重建双端 Web 和 native 制品。
     build_variant \
       embedded \
       "$embedded_build_root" \

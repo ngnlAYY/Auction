@@ -225,7 +225,7 @@ use common::*;
 #[cfg(feature = "postgres")]
 use delivery::{
     list_enqueued_postgres, mark_claim_failed_postgres, mark_enqueued_postgres,
-    mark_terminal_postgres,
+    mark_terminal_postgres, terminalize_prepared_delivery,
 };
 #[cfg(feature = "postgres")]
 use health::{health_postgres, publish_runtime_status_postgres};

@@ -31,6 +31,11 @@ pub(super) async fn reclaim_batch(
         .execute(&mut **transaction)
         .await
         .map_err(|_| storage_error("写入 operations alert 重试耗尽状态失败"))?;
+        let delivery_id: Uuid = row
+            .try_get("delivery_id")
+            .map_err(|_| storage_error("读取 operations alert delivery ID 失败"))?;
+        terminalize_prepared_delivery(transaction, delivery_id, request.now, "retry_exhausted")
+            .await?;
         return Ok(None);
     }
     let command_id: Uuid = row
@@ -60,7 +65,21 @@ pub(super) async fn reclaim_batch(
     if recipient != request.target.recipient
         || payload_world != Some(request.target.world_id.as_str())
     {
-        return Err(ApplicationError::OperationsAlert(OperationsAlertError::IdentityConflict));
+        sqlx::query(
+            "UPDATE public.operations_alert_batches
+             SET status = 'failed', claim_token = NULL, claimed_at = NULL,
+                 claim_expires_at = NULL, next_attempt_at = NULL,
+                 delivery_error_code = 'dependency_mismatch', completed_at = $2, updated_at = $2
+             WHERE id = $1 AND status IN ('pending', 'claimed')",
+        )
+        .bind(batch_id)
+        .bind(request.now)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|_| storage_error("收口 operations alert target 变更批次失败"))?;
+        terminalize_prepared_delivery(transaction, delivery_id, request.now, "dependency_mismatch")
+            .await?;
+        return Ok(None);
     }
     let item_rows = sqlx::query(
         "SELECT fingerprint, signal_version, ordinal, rendered_summary

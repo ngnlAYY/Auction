@@ -35,8 +35,14 @@ impl ProxyTransition {
                 };
                 if self.state_version <= 1
                     || self.old_mode != Some(self.new_mode)
-                    || self.old_status != Some(ProxyStatus::Active)
-                    || self.new_status != ProxyStatus::Active
+                    || !matches!(
+                        self.old_status,
+                        Some(ProxyStatus::Active | ProxyStatus::FinalFast)
+                    )
+                    || self.old_status != Some(self.new_status)
+                    || (self.new_status == ProxyStatus::FinalFast
+                        && self.new_mode != ProxyMode::Fast)
+                    || !matches!(self.new_status, ProxyStatus::Active | ProxyStatus::FinalFast)
                     || self.new_maximum >= old_maximum
                     || self.reason.is_some()
                 {

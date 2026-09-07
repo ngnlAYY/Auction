@@ -172,6 +172,10 @@ secret 只通过当前表单请求提交，不会进入响应、持久化状态�
 凭据表还恢复旧页面实际合成的 last checked、last used、imported by 三列：分别使用现有
 `rotated_at`、明确空值和当前 Admin session actor；它没有虚构后端使用记录，也没有扩展 secret DTO，
 state version 只参与写命令 fence，不扩张已发布的八列表格。
+凭据行按稳定 credential ID 绑定组件身份，当前页排序不会转移对话框、草稿、忙碌状态或反馈；
+启停和改名重试的命令签名同时绑定 credential ID、版本与动作负载。
+Delivery 解码同时接受告警在激活前确定终止的窄失败形状：特定 origin/reason/error code、零
+attempt/fencing、空执行时间和有效完成时间；其余失败投递仍要求完整发送轨迹。
 管理总览每次只请求一份完整安全 dashboard snapshot，并提供显式刷新动作；页面按冻结顺序展示 health/process、Worker、
 tracing、实时 lag/failure、MoogleMail 轮询、凭据 availability、delivery、fulfillment、recovery
 和 alerting 水位；拍卖、投递列表和邮件入站不再创建额外 Dashboard 请求。页面按完整业务分组紧凑分栏，
