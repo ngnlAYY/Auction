@@ -34,8 +34,8 @@ pub fn CredentialTable(
     rsx! {
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
-                // 列序：名称、世界、类型、状态、检查时间、使用时间、导入者、操作；按字段预期内容分配比例。
-                auction_web_shared::TableColumns { layout: "admin-credentials", widths: vec![22, 7, 12, 7, 17, 17, 8, 10] }
+                // 列序：名称、世界、类型、状态、检查时间、使用时间、导入者、操作；为四个操作按钮预留同排空间。
+                auction_web_shared::TableColumns { layout: "admin-credentials", widths: vec![14, 6, 10, 6, 14, 14, 6, 30] }
                 thead {
                     tr {
                         SortableTh {
