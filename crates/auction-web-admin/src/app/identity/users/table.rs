@@ -74,8 +74,8 @@ pub(super) fn AdminUserTable(
         }
         div { class: "admin-users-table-wrap",
             table { class: "admin-users-table",
-                // 列序：名称、论坛 ID、状态、封禁理由、次数、注册时间、操作；按字段预期内容分配比例。
-                auction_web_shared::TableColumns { layout: "admin-users", widths: vec![16, 11, 7, 20, 8, 18, 20] }
+                // 列序：名称、论坛 ID、状态、封禁理由、次数、注册时间、操作；为四个操作按钮预留同排空间。
+                auction_web_shared::TableColumns { layout: "admin-users", widths: vec![12, 10, 6, 14, 5, 13, 40] }
                 thead { tr {
                     SortableTh {
                         column: "username",
