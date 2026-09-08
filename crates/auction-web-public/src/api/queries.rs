@@ -157,8 +157,29 @@ pub(crate) async fn fetch_bid_log_auctions(
 ) -> Result<Vec<super::HistoricalAuction>, String> {
     let mut auctions = Vec::new();
     for status in ["live", "final", "settled"] {
-        let page = fetch_auction_page(Some(world_id.clone()), status.to_owned(), 1, 200).await?;
-        auctions.extend(page.auctions);
+        let mut page_number = 1_i64;
+        loop {
+            let page =
+                fetch_auction_page(Some(world_id.clone()), status.to_owned(), page_number, 200)
+                    .await?;
+            let row_count =
+                i64::try_from(page.auctions.len()).map_err(|_| "拍卖目录页过大".to_owned())?;
+            let page_size = page.page_size;
+            if page_size <= 0 {
+                return Err("拍卖目录分页大小无效".to_owned());
+            }
+            let total = page.total;
+            auctions.extend(page.auctions);
+            // 编号分页的旧 Public wire 没有 cursor/has_more；总数或短页是唯一可靠的
+            // 完成条件。满页且没有 total 时继续读取，避免选择器静默截断到前 200 条。
+            if row_count < page_size
+                || total.is_some_and(|total| page_number.saturating_mul(page_size) >= total)
+            {
+                break;
+            }
+            page_number =
+                page_number.checked_add(1).ok_or_else(|| "拍卖目录页码溢出".to_owned())?;
+        }
     }
     auctions.sort_by(|left, right| {
         right.sequence.cmp(&left.sequence).then_with(|| right.id.cmp(&left.id))

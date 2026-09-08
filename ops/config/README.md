@@ -74,6 +74,9 @@ Worker 重启时把它们投影为 MoogleMail 业务快照。MoogleMail transpor
 历史命令摘要；管理页物化候选只在保存后进入物理文件。
 旧文档省略 `operations.mail` 同样保持指纹，显式 null 不被接受。邮件调度支持标准五字段 cron、
 旧版描述符、`@every` 以及 `TZ=`/`CRON_TZ=`；未指定时区时使用 Worker 本地时区，部署时宜显式指定。
+`operations.mail.batch_timeout_seconds` 省略时为 600 秒；默认值仍省略序列化，因此不会仅因
+升级新增字段而改变旧 runtime 文档的 fingerprint。Admin 表单会显示该默认值，非默认值随完整
+候选文档保存，并在受影响进程重启后生效。
 候选校验与 Worker 启动复用同一解析器；保存不会立即轮询，也不修改已有 due、游标或租约。
 `allow_manual_early_open`、`allow_manual_early_settlement` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
 `restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
@@ -169,7 +172,10 @@ Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手�
 时区前缀。
 共享客户端默认使用一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
 `item_timeout_seconds` 必须覆盖该请求预算；读取与单封邮件处理分别配置尝试次数、单次总超时和
-指数退避。批次期间按 `renew_interval_seconds` 延长 claim，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，
+指数退避。`batch_timeout_seconds` 为一次拉取及业务批次的总预算，默认 600 秒，范围 1–86400 秒，
+至少覆盖一次 `fetch_timeout_seconds + item_timeout_seconds`；总预算可以先于所有重试完成而到期。
+到期时只提交已完成前缀及末封邮件 ID 游标，剩余邮件下轮继续；没有完成项则记录失败退避。
+批次期间按 `renew_interval_seconds` 延长 claim，总预算无需小于 lease，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，
 默认值和中文注释见 `examples/worker.toml`。若共享 runtime 同时包含完整的 `worlds`、
 `equipment_filter` 和 `mail_templates`，这些业务字段覆盖 Worker 主配置中的对应直接配置；三个区块
 全部缺失时保留直接配置和兼容 runtime fingerprint，部分存在则配置失败。确定性业务/输入/配置错误不

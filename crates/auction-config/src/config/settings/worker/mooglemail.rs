@@ -51,6 +51,8 @@ pub struct MoogleMailWorkerConfig {
     pub process_attempts: u16,
     /// 单次业务处理尝试的总超时秒数。
     pub item_timeout_seconds: u64,
+    /// 单次邮箱 claim 的总处理预算秒数；耗尽时只提交已完成前缀并推进到其邮件 ID。
+    pub batch_timeout_seconds: u64,
     /// 内联与持久化指数退避的基础秒数。
     pub retry_base_seconds: u64,
     /// 内联与持久化指数退避的最大秒数。
@@ -229,6 +231,7 @@ impl Default for MoogleMailWorkerConfig {
             fetch_timeout_seconds: 30,
             process_attempts: 3,
             item_timeout_seconds: 30,
+            batch_timeout_seconds: 600,
             retry_base_seconds: 1,
             retry_maximum_seconds: 30,
             sender_allowlist: Vec::new(),

@@ -1,9 +1,7 @@
 //! Admin 运维页面的可选自动轮询：开关与间隔状态由页面持有（入 URL query），本模块提供
 //! 页面可见性感知、分片睡眠、轮询调度 hook 与开关控件。
 //!
-//! 页面可见性部分复刻自公开端 `auction-web-public` 的 `app/surface/board/visibility.rs`。
-//! 本批次改动范围限定在 admin crate，无法把该实现上移到 shared 供两端共用；若后续解禁，
-//! 应优先抽到 `auction-web-shared` 并删除这里的副本。
+//! 每个页面拥有独立的可见性监听，卸载时释放回调；开关和轮询代数不改变其它页面的状态。
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -26,17 +24,27 @@ pub(crate) const POLL_INTERVAL_VALUES: &[u64] = &[10, 30, 60];
 pub(crate) struct PageVisibility {
     hidden: Rc<Cell<bool>>,
     wakers: Rc<RefCell<Vec<Waker>>>,
+    #[cfg(target_arch = "wasm32")]
+    listener: Rc<RefCell<Option<PageVisibilityListener>>>,
 }
 
 impl PageVisibility {
     pub(crate) fn new() -> Self {
-        Self { hidden: Rc::new(Cell::new(false)), wakers: Rc::new(RefCell::new(Vec::new())) }
+        Self {
+            hidden: Rc::new(Cell::new(false)),
+            wakers: Rc::new(RefCell::new(Vec::new())),
+            #[cfg(target_arch = "wasm32")]
+            listener: Rc::new(RefCell::new(None)),
+        }
     }
 
     /// 安装 `visibilitychange` 监听（仅浏览器目标）；恢复可见时唤醒所有挂起的轮询等待。
     /// 与页面组件同寿命，只安装一次。
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn install(&self) {
+        if self.listener.borrow().is_some() {
+            return;
+        }
         let Some(document) = web_sys::window().and_then(|window| window.document()) else {
             return;
         };
@@ -55,7 +63,18 @@ impl PageVisibility {
             "visibilitychange",
             callback.as_ref().unchecked_ref(),
         );
-        callback.forget();
+        *self.listener.borrow_mut() = Some(PageVisibilityListener { document, callback });
+    }
+
+    /// 卸载页面可见性监听，避免路由反复挂载时监听器累积。
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn cleanup(&self) {
+        if let Some(listener) = self.listener.borrow_mut().take() {
+            let _ = listener.document.remove_event_listener_with_callback(
+                "visibilitychange",
+                listener.callback.as_ref().unchecked_ref(),
+            );
+        }
     }
 
     /// 非浏览器目标没有隐藏事件，安装是无操作。
@@ -65,7 +84,9 @@ impl PageVisibility {
     // 仅 visibilitychange 监听器（wasm）会主动唤醒；非浏览器目标没有隐藏事件。
     #[cfg(target_arch = "wasm32")]
     fn wake_waiters(&self) {
-        for waker in self.wakers.borrow_mut().drain(..) {
+        // 先释放列表借用，再调用可能重新注册等待者的运行时回调。
+        let wakers = std::mem::take(&mut *self.wakers.borrow_mut());
+        for waker in wakers {
             waker.wake();
         }
     }
@@ -85,6 +106,12 @@ impl PageVisibility {
         })
         .await;
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PageVisibilityListener {
+    document: web_sys::Document,
+    callback: Closure<dyn FnMut()>,
 }
 
 /// 分片睡眠：隐藏时挂起剩余时长（不重置计时），恢复可见后继续走完剩余分片。
@@ -114,6 +141,11 @@ pub(crate) fn use_auto_poll(interval_seconds: Memo<u64>, on_poll: impl FnMut() +
         let visibility = visibility.clone();
         move || visibility.install()
     });
+    #[cfg(target_arch = "wasm32")]
+    {
+        let cleanup_visibility = visibility.clone();
+        use_drop(move || cleanup_visibility.cleanup());
+    }
     // 轮询代数：每次间隔变化自增，旧循环检测到代数过期即退出。
     let mut generation = use_signal(|| 0_u64);
     use_effect(move || {

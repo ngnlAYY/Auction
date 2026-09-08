@@ -1,8 +1,8 @@
 //! Admin runtime 配置应用服务。
 //!
 //! 服务负责文档校验、指纹 fence、命令重放和 pending/unknown 恢复；文件和数据库的具体
-//! 持久化仍分别由外层适配器实现。文件替换完成而账本提交失败时，服务优先恢复旧文档，
-//! 无法证明恢复结果才把命令锁存为 `unknown`。
+//! 持久化仍分别由外层适配器实现。文件替换完成后即视为 durable intent 已向前推进；账本
+//! 应用失败时保留新文档，后续恢复根据账本实际状态重试或收口，避免提交结果未知时回退旧文档。
 
 use std::sync::Arc;
 
@@ -203,22 +203,10 @@ where
 
         match self.apply_row(&stored).await {
             Ok(applied) => self.finish_applied(applied),
-            Err(error) => {
-                if self.files.restore(replacement).await.is_ok() {
-                    Err(error)
-                } else {
-                    let _ = self
-                        .commands
-                        .mark_unknown(
-                            stored.command_id,
-                            stored.request_hash,
-                            "replace_unknown".to_owned(),
-                            self.clock.now(),
-                        )
-                        .await;
-                    Err(AdminRuntimeConfigError::OutcomeUnknown.into())
-                }
-            }
+            // 文件已经替换成功；不能因数据库错误而恢复旧文件。错误可能发生在事务提交
+            // 后，恢复旧文件会把 Applied 账本与实际配置永久分离。保留新文件后，若事务
+            // 回滚，pending 行会在下一次恢复中重新应用；若已提交，则直接收口。
+            Err(_) => Err(AdminRuntimeConfigError::OutcomeUnknown.into()),
         }
     }
 
@@ -233,7 +221,10 @@ where
         {
             return Err(AdminRuntimeConfigError::StoredResultCorrupt.into());
         }
-        let applied = self.apply_row(&stored).await?;
+        // 当前文件已经证明是候选版本；账本错误的提交结果未知，必须保留 durable intent，
+        // 让下一次恢复依据数据库实际状态收口，不能把底层错误伪装成可安全回退的失败。
+        let applied =
+            self.apply_row(&stored).await.map_err(|_| AdminRuntimeConfigError::OutcomeUnknown)?;
         self.finish_applied(applied)
     }
 

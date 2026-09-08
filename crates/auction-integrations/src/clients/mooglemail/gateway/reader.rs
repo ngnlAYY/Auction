@@ -43,7 +43,7 @@ impl MoogleMailGateway {
         Ok(Self { client, credentials, config, parser: MoogleMailParser })
     }
 
-    /// 读取一个 world 的新邮件，cursor 只在完整批次成功后由调用方提交。
+    /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。
     pub async fn fetch(
         &self,
         world: MoogleMailWorld,
@@ -227,7 +227,12 @@ impl MoogleMailGateway {
                     continue;
                 }
                 // allowlist 必须在占用详情配额前生效，不能让大量无关发件人挤掉真正需要解析的邮件。
-                if self.allowed_sender(&summary.sender) && window.len() < limit {
+                if self.allowed_sender(&summary.sender) {
+                    // 页面按远端收件箱顺序扫描；窗口满时丢弃队首，保留游标之前最旧的
+                    // limit 条，避免 backlog 超过 limit 时跳过尚未处理的旧邮件。
+                    if window.len() == limit {
+                        window.pop_front();
+                    }
                     window.push_back(summary);
                 }
             }

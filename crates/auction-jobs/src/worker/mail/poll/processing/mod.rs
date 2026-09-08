@@ -108,6 +108,7 @@ where
         metrics,
         loop_kind,
     } = context;
+    let batch_deadline = std::time::Instant::now() + config.batch_timeout;
     let metric_context = MailPollMetricContext { metrics: Arc::clone(&metrics), loop_kind };
     let failure_context = MailPollFailureContext {
         schedule: Arc::clone(&schedule),
@@ -121,22 +122,51 @@ where
         limit: config.batch_size,
     };
     let polled_at = clock.now();
-    let page =
-        match fetch_with_retry(gateway.as_ref(), request, config, metric_context.clone()).await {
-            Ok(page) => page,
-            Err(error) => {
-                record_failure(
-                    store,
-                    clock,
-                    claim,
-                    safe_failure_code(&error.failure_code),
-                    safe_failure_detail(&error.safe_detail),
-                    failure_context,
-                )
-                .await;
-                return WorkerResult::Error;
-            }
-        };
+    let Some(fetch_remaining) = batch_deadline.checked_duration_since(std::time::Instant::now())
+    else {
+        record_failure(
+            store,
+            clock,
+            claim,
+            "batch_timeout".to_owned(),
+            "MoogleMail 邮箱批次预算已耗尽，游标保持不变".to_owned(),
+            failure_context,
+        )
+        .await;
+        return WorkerResult::Error;
+    };
+    let page = match tokio::time::timeout(
+        fetch_remaining,
+        fetch_with_retry(gateway.as_ref(), request, config, metric_context.clone()),
+    )
+    .await
+    {
+        Ok(Ok(page)) => page,
+        Ok(Err(error)) => {
+            record_failure(
+                store,
+                clock,
+                claim,
+                safe_failure_code(&error.failure_code),
+                safe_failure_detail(&error.safe_detail),
+                failure_context,
+            )
+            .await;
+            return WorkerResult::Error;
+        }
+        Err(_) => {
+            record_failure(
+                store,
+                clock,
+                claim,
+                "batch_timeout".to_owned(),
+                "MoogleMail 邮箱批次预算已耗尽，游标保持不变".to_owned(),
+                failure_context,
+            )
+            .await;
+            return WorkerResult::Error;
+        }
+    };
     if !valid_page(&page, &claim, &world_id, config.batch_size) {
         record_failure(
             store,
@@ -163,19 +193,29 @@ where
         return WorkerResult::Error;
     };
     let mut items = Vec::with_capacity(page.messages.len());
+    let mut budget_exhausted = false;
+    let mut last_completed_external_mail_id = None;
     for mut message in page.messages {
+        let Some(remaining) = batch_deadline.checked_duration_since(std::time::Instant::now())
+        else {
+            budget_exhausted = true;
+            break;
+        };
         let decision = match (processor.as_ref(), message.business.take()) {
             (Some(processor), Some(business)) => {
-                let decision = match process_with_retry(
-                    processor.as_ref(),
-                    business,
-                    config,
-                    metric_context.clone(),
+                let decision = match tokio::time::timeout(
+                    remaining,
+                    process_with_retry(
+                        processor.as_ref(),
+                        business,
+                        config,
+                        metric_context.clone(),
+                    ),
                 )
                 .await
                 {
-                    Ok(decision) => decision,
-                    Err(failure) => {
+                    Ok(Ok(decision)) => decision,
+                    Ok(Err(failure)) => {
                         record_failure(
                             Arc::clone(&store),
                             Arc::clone(&clock),
@@ -186,6 +226,10 @@ where
                         )
                         .await;
                         return WorkerResult::Error;
+                    }
+                    Err(_) => {
+                        budget_exhausted = true;
+                        break;
                     }
                 };
                 if decision.validate().is_err() {
@@ -216,12 +260,28 @@ where
             }
             (None, Some(_)) | (None, None) => pending_decision(&message),
         };
+        let external_mail_id = message.external_mail_id.clone();
         items.push(intake_from_message(&claim.mailbox_key, message, decision, polled_at));
+        last_completed_external_mail_id = Some(external_mail_id);
+    }
+    if budget_exhausted && items.is_empty() {
+        record_failure(
+            store,
+            clock,
+            claim,
+            "batch_timeout".to_owned(),
+            "MoogleMail 邮箱批次预算已耗尽，未完成任何邮件".to_owned(),
+            failure_context,
+        )
+        .await;
+        return WorkerResult::Error;
     }
     let batch = MailPollBatch {
         mailbox_key: claim.mailbox_key.clone(),
         claim_token: claim.claim_token,
-        next_cursor: page.next_cursor,
+        // cursor 由最后一封已完成邮件推进；预算耗尽时未完成后缀不进入本批次，下一轮从
+        // 该 cursor 继续读取，已完成前缀由入站/命令账本幂等校验防止重复副作用。
+        next_cursor: last_completed_external_mail_id.or(page.next_cursor),
         polled_at,
         next_poll_at,
         items,

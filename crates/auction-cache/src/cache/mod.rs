@@ -5,11 +5,27 @@
 
 use std::{fmt, time::Duration};
 
+#[cfg(feature = "redis")]
+use std::sync::Arc;
+
 use auction_application::{ReadModelCache, ReadModelCacheError, ReadModelCacheFuture};
 use thiserror::Error;
 
 #[cfg(feature = "redis")]
-use redis::aio::ConnectionManager;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
+#[cfg(feature = "redis")]
+use tokio::sync::Semaphore;
+#[cfg(feature = "redis")]
+use tokio::time::timeout;
+
+#[cfg(feature = "redis")]
+const CACHE_OPERATION_TIMEOUT: Duration = Duration::from_millis(750);
+#[cfg(feature = "redis")]
+const CACHE_COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(feature = "redis")]
+const CACHE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(feature = "redis")]
+const CACHE_CONCURRENCY_LIMIT: usize = 32;
 
 /// 当前进程实际装配的缓存后端。
 pub enum CacheStore {
@@ -127,6 +143,8 @@ impl fmt::Debug for CacheStore {
 #[derive(Clone)]
 pub struct RedisCache {
     connection: ConnectionManager,
+    /// 在进入 Redis 命令前限制并发，令排队时间也受操作总预算约束。
+    limiter: Arc<Semaphore>,
 }
 
 #[cfg(feature = "redis")]
@@ -135,43 +153,62 @@ impl RedisCache {
         // 整个工作区统一使用 ring，避免 reqwest、SQLx 和 Redis 各自引入不同加密 provider。
         let _ = rustls::crypto::ring::default_provider().install_default();
         let client = redis::Client::open(redis_url).map_err(|_| CacheError::RedisConfiguration)?;
+        let config = ConnectionManagerConfig::new()
+            .set_connection_timeout(Some(CACHE_CONNECTION_TIMEOUT))
+            .set_response_timeout(Some(CACHE_COMMAND_TIMEOUT))
+            .set_concurrency_limit(CACHE_CONCURRENCY_LIMIT);
         let connection = client
-            .get_connection_manager_lazy(Default::default())
+            .get_connection_manager_lazy(config)
             .map_err(|_| CacheError::RedisConfiguration)?;
 
-        Ok(Self { connection })
+        Ok(Self { connection, limiter: Arc::new(Semaphore::new(CACHE_CONCURRENCY_LIMIT)) })
     }
 
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError> {
-        let mut connection = self.connection.clone();
-        redis::cmd("GET")
-            .arg(key)
-            .query_async(&mut connection)
-            .await
-            .map_err(CacheError::RedisCommand)
+        timeout(CACHE_OPERATION_TIMEOUT, async {
+            let _permit = self.limiter.try_acquire().map_err(|_| CacheError::BackendUnavailable)?;
+            let mut connection = self.connection.clone();
+            redis::cmd("GET")
+                .arg(key)
+                .query_async(&mut connection)
+                .await
+                .map_err(CacheError::RedisCommand)
+        })
+        .await
+        .map_err(|_| CacheError::OperationTimeout)?
     }
 
     async fn set(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), CacheError> {
-        let mut connection = self.connection.clone();
         // Redis PX 使用毫秒；亚毫秒正值向上取 1 ms，超大 Duration 则饱和到 u64 上限。
         let ttl_millis = u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX).max(1);
-        redis::cmd("SET")
-            .arg(key)
-            .arg(value)
-            .arg("PX")
-            .arg(ttl_millis)
-            .exec_async(&mut connection)
-            .await
-            .map_err(CacheError::RedisCommand)
+        timeout(CACHE_OPERATION_TIMEOUT, async {
+            let _permit = self.limiter.try_acquire().map_err(|_| CacheError::BackendUnavailable)?;
+            let mut connection = self.connection.clone();
+            redis::cmd("SET")
+                .arg(key)
+                .arg(value)
+                .arg("PX")
+                .arg(ttl_millis)
+                .exec_async(&mut connection)
+                .await
+                .map_err(CacheError::RedisCommand)
+        })
+        .await
+        .map_err(|_| CacheError::OperationTimeout)?
     }
 
     async fn invalidate(&self, key: &str) -> Result<(), CacheError> {
-        let mut connection = self.connection.clone();
-        redis::cmd("DEL")
-            .arg(key)
-            .exec_async(&mut connection)
-            .await
-            .map_err(CacheError::RedisCommand)
+        timeout(CACHE_OPERATION_TIMEOUT, async {
+            let _permit = self.limiter.try_acquire().map_err(|_| CacheError::BackendUnavailable)?;
+            let mut connection = self.connection.clone();
+            redis::cmd("DEL")
+                .arg(key)
+                .exec_async(&mut connection)
+                .await
+                .map_err(CacheError::RedisCommand)
+        })
+        .await
+        .map_err(|_| CacheError::OperationTimeout)?
     }
 }
 
@@ -190,6 +227,14 @@ pub enum CacheError {
 
     #[error("cache TTL must be greater than zero")]
     ZeroTtl,
+
+    #[cfg(feature = "redis")]
+    #[error("Redis cache operation exceeded its time budget")]
+    OperationTimeout,
+
+    #[cfg(feature = "redis")]
+    #[error("Redis cache concurrency limiter is unavailable")]
+    BackendUnavailable,
 
     #[cfg(feature = "redis")]
     #[error("invalid Redis cache configuration")]

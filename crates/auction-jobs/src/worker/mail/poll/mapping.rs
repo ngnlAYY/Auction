@@ -22,9 +22,16 @@ pub(super) fn valid_page(
                 && value == value.trim()
                 && !value.chars().any(char::is_control)
         })
+        && if page.messages.is_empty() {
+            page.next_cursor.as_deref() == claim.cursor_value.as_deref()
+        } else {
+            page.next_cursor.as_deref()
+                == page.messages.last().map(|message| message.external_mail_id.as_str())
+        }
         && page.messages.iter().enumerate().all(|(index, message)| {
             !message.external_mail_id.is_empty()
-                && message.external_mail_id.len() <= 512
+                // 任意成功前缀的末封邮件都可能成为 cursor，必须满足持久化游标的长度边界。
+                && message.external_mail_id.len() <= 256
                 && message.external_mail_id == message.external_mail_id.trim()
                 && !message.external_mail_id.chars().any(char::is_control)
                 && message.world_id == world_id

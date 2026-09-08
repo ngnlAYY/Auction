@@ -713,6 +713,7 @@ admin-runtime-op-maximum-topic-pages = Maximum pages per topic
 admin-runtime-op-minimum-request-interval-millis = Minimum request interval (milliseconds)
 admin-runtime-op-request-timeout-seconds = Full request timeout (seconds)
 admin-runtime-op-item-timeout-seconds = Task timeout (seconds)
+admin-runtime-op-mail-batch-timeout-seconds = Mail batch budget (seconds)
 admin-runtime-op-lease-duration-seconds = Task lease duration (seconds)
 admin-runtime-op-scan-interval-seconds = Alert scan interval (seconds)
 admin-runtime-op-source-timeout-seconds = Health source timeout (seconds)

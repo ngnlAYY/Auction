@@ -371,9 +371,10 @@ A20 远程轮询触发在至少一个邮箱未暂停时返回 `202 accepted`：�
 A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影
 和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用
 `command_id` 与 fingerprint fence 写入 durable pending/applied/unknown 命令账本，并通过
-同目录临时文件、权限校验、fsync、rename 和目录同步完成原子替换。文件替换与账本提交
-之间出现不确定结果时会优先恢复旧文件，无法证明恢复成功则锁存 `unknown` 并返回
-`reconciliation_required`；成功更新明确返回 `restart_required`，不伪造热加载。Admin
+同目录临时文件、权限校验、fsync、rename 和目录同步完成原子替换。文件替换成功后若账本应用
+出现错误，保留新文件并返回 `503 reconciliation_required`，表示结果仍需核对；同一命令重试或
+启动恢复按数据库实际 pending/applied 状态向前收口，不能把提交确认丢失误当成可回滚旧文件。
+成功更新明确返回 `restart_required`，不伪造热加载。Admin
 运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含兼容
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为
 启动快照。MoogleMail transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置
@@ -392,13 +393,16 @@ Admin WebUI 将这份闭集投影映射成分组开关、数字、列表与文�
 runtime 文档提供可选 `operations`，响应投影会补齐六组候选参数：`economics`（后续新拍卖的
 底价、增幅、软截止、取消与代理策略）、`schedule`（自动周排期）、`forum`（论坛开关与有界轮询）、
 `alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）、
-`mail`（邮件 cron、读取批量/分页、HTTP 预算、租约续期、读取/处理尝试和退避）。
+`mail`（邮件 cron、读取批量/分页、HTTP 与批次处理预算、租约续期、读取/处理尝试和退避）。
 每组的 `managed` 默认 `false`，表示沿用公共/角色 TOML；只有设为 `true` 才在对应进程重启时覆盖
 该组字段。首次 GET 的候选值不代表未接入 runtime 的 Worker 当前配置。严格候选校验覆盖金额网格及
 1B 底价上限、周时间顺序、分页请求预算、并发/批量、租约/超时、告警冷却与收件人。邮件 cron 校验
 复用 Worker 配置解析器，并要求存在未来触发时刻；无效候选在新命令写入账本前拒绝。`mail` 完整字段、
 单位、默认值和范围见 `ops/config/examples/runtime/admin.toml`，读取与处理超时必须大于 HTTP 超时，
 续租周期必须小于租约，退避上限不能小于基础退避。
+`mail.batch_timeout_seconds` 范围为 1–86400 秒，至少为 `fetch_timeout_seconds + item_timeout_seconds`，
+省略时为 600 秒；该默认值省略序列化以保留旧 fingerprint，Admin 闭集 decoder 和表单接受缺省值。
+此预算覆盖一轮拉取及业务处理，可在重试耗尽前结束；完成前缀与其 cursor 由 Worker 原子提交。
 缺少整个 `operations` 或其中 `mail` 的旧物理文件和 durable 候选继续保持原指纹；显式 `mail:null`
 被拒绝。物化只发生在浏览器投影，
 不改写历史命令。API envelope、命令摘要版本和 `restart_required` 语义不变，不增加热加载路径。

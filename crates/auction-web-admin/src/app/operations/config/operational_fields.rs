@@ -27,6 +27,7 @@ pub(super) const NUMBER_FIELDS: &[&str] = &[
     "operations.mail.fetch_timeout_seconds",
     "operations.mail.process_attempts",
     "operations.mail.item_timeout_seconds",
+    "operations.mail.batch_timeout_seconds",
     "operations.mail.retry_base_seconds",
     "operations.mail.retry_maximum_seconds",
     "operations.economics.start_price",

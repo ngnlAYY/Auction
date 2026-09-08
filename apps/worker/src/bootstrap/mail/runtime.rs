@@ -65,6 +65,7 @@ pub(super) async fn build_poll_runtimes(
                 fetch_timeout: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
                 process_attempts: mail_config.process_attempts,
                 item_timeout: std::time::Duration::from_secs(mail_config.item_timeout_seconds),
+                batch_timeout: std::time::Duration::from_secs(mail_config.batch_timeout_seconds),
                 retry_base: std::time::Duration::from_secs(mail_config.retry_base_seconds),
                 retry_maximum: std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             },

@@ -2,7 +2,7 @@
 
 use auction_application::{
     ApplicationError, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistoryStats,
+    PublicPriceHistoryListRequest, PublicPriceHistoryPage,
 };
 use chrono::{DateTime, Utc};
 use serde_json::Value;
@@ -10,24 +10,26 @@ use sqlx::Row;
 
 use super::mapping::{
     cursor_values, entry_cursor, equipment_level, history_name_patterns, storage_error,
-    validate_entries, validate_stats,
+    validate_entries,
 };
 use crate::database::PostgresStore;
+
+mod numbered;
 
 pub(super) async fn list_postgres(
     store: &PostgresStore,
     request: PublicPriceHistoryListRequest,
 ) -> Result<PublicPriceHistoryPage, ApplicationError> {
+    if request.cursor.is_none() {
+        return numbered::list(store, request).await;
+    }
     let name_patterns = history_name_patterns(&request);
     let use_boundary =
         matches!(request.cursor.as_ref(), Some(PublicPriceHistoryCursor::Boundary { .. }));
     let (boundary_closed_at, boundary_sequence, boundary_lot_number, boundary_lot_id) =
         cursor_values(&request);
-    let query_limit = if request.cursor.is_some() {
-        request.limit.checked_add(1).ok_or_else(|| storage_error("公开价格历史分页上限溢出"))?
-    } else {
-        request.limit
-    };
+    let query_limit =
+        request.limit.checked_add(1).ok_or_else(|| storage_error("公开价格历史分页上限溢出"))?;
 
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;
@@ -84,9 +86,9 @@ pub(super) async fn list_postgres(
                 )
            )
          ORDER BY l.effective_end_at DESC, a.sequence DESC, l.lot_number, l.id
-         LIMIT $14 OFFSET $15",
+         LIMIT $14",
     )
-    .bind(name_patterns.clone())
+    .bind(name_patterns)
     .bind(request.world_id.as_deref())
     .bind(request.closed_from)
     .bind(request.closed_before)
@@ -100,7 +102,6 @@ pub(super) async fn list_postgres(
     .bind(boundary_lot_number)
     .bind(boundary_lot_id)
     .bind(query_limit)
-    .bind(if request.cursor.is_some() { 0 } else { request.offset })
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL 公开价格历史失败"))?;
@@ -108,65 +109,18 @@ pub(super) async fn list_postgres(
     validate_entries(&entries)?;
     let entry_count =
         i64::try_from(entries.len()).map_err(|_| storage_error("公开价格历史页大小溢出"))?;
-    let has_more = request.cursor.is_some() && entry_count > request.limit;
+    let has_more = entry_count > request.limit;
     if has_more {
         entries.truncate(request.limit as usize);
     }
     let next_cursor = has_more.then(|| entries.last().map(entry_cursor)).flatten();
-    let (total, stats) = if request.cursor.is_some() {
-        (None, None)
-    } else {
-        let row = sqlx::query(
-            "SELECT
-                count(*)::bigint AS total,
-                COALESCE(min(l.current_price), 0)::bigint AS minimum_price,
-                COALESCE(max(l.current_price), 0)::bigint AS maximum_price,
-                COALESCE(
-                    percentile_cont(0.5) WITHIN GROUP (ORDER BY l.current_price),
-                    0
-                )::bigint AS median_price
-             FROM public.lots AS l
-             JOIN public.auctions AS a ON a.id = l.auction_id
-             JOIN public.worlds AS w ON w.id = a.world_id
-             JOIN public.equipment AS e ON e.id = l.equipment_id
-             JOIN public.users AS buyer ON buyer.id = l.leader_user_id
-             LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
-             JOIN public.lot_settlements AS ls ON ls.lot_id = l.id
-             JOIN public.auction_settlements AS settlement ON settlement.auction_id = a.id
-             WHERE a.status = 'settled'
-               AND l.status = 'sold'
-               AND l.leader_user_id IS NOT NULL
-               AND ($1::text[] IS NULL OR e.name ILIKE ALL($1::text[]))
-               AND ($2::text IS NULL OR a.world_id = $2)
-               AND ($3::timestamptz IS NULL OR l.effective_end_at >= $3)
-               AND ($4::timestamptz IS NULL OR l.effective_end_at < $4)
-               AND ($5::bigint IS NULL OR l.current_price >= $5)
-               AND ($6::bigint IS NULL OR l.current_price <= $6)
-               AND ($7::text IS NULL OR lower(buyer.username) = lower($7))
-               AND ($8::text IS NULL OR lower(submission.seller) = lower($8))",
-        )
-        .bind(name_patterns)
-        .bind(request.world_id.as_deref())
-        .bind(request.closed_from)
-        .bind(request.closed_before)
-        .bind(request.minimum_price)
-        .bind(request.maximum_price)
-        .bind(request.buyer.as_deref())
-        .bind(request.seller.as_deref())
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(|_| storage_error("统计 PostgreSQL 公开价格历史失败"))?;
-        let stats = map_postgres_stats(row)?;
-        (Some(stats.count), Some(stats))
-    };
-    let offset = if request.cursor.is_some() { 0 } else { request.offset };
     transaction.commit().await.map_err(|_| storage_error("提交公开价格历史读取事务失败"))?;
     Ok(PublicPriceHistoryPage {
         entries,
-        total,
-        stats,
+        total: None,
+        stats: None,
         limit: request.limit,
-        offset,
+        offset: 0,
         next_cursor,
         has_more,
     })
@@ -217,22 +171,4 @@ fn map_postgres_entry(
             .try_get::<DateTime<Utc>, _>("closed_at")
             .map_err(|_| storage_error("读取 PostgreSQL 历史结束时间失败"))?,
     })
-}
-
-fn map_postgres_stats(
-    row: sqlx::postgres::PgRow,
-) -> Result<PublicPriceHistoryStats, ApplicationError> {
-    let stats = PublicPriceHistoryStats {
-        count: row.try_get("total").map_err(|_| storage_error("读取 PostgreSQL 历史总数失败"))?,
-        minimum: row
-            .try_get("minimum_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史最低价失败"))?,
-        maximum: row
-            .try_get("maximum_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史最高价失败"))?,
-        median: row
-            .try_get("median_price")
-            .map_err(|_| storage_error("读取 PostgreSQL 历史中位价失败"))?,
-    };
-    validate_stats(stats)
 }

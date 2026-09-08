@@ -73,6 +73,7 @@ fn apply_mail(worker: &mut WorkerConfig, operations: &AdminRuntimeOperationsConf
     mail.fetch_timeout_seconds = candidate.fetch_timeout_seconds;
     mail.process_attempts = candidate.process_attempts;
     mail.item_timeout_seconds = candidate.item_timeout_seconds;
+    mail.batch_timeout_seconds = candidate.batch_timeout_seconds;
     mail.retry_base_seconds = candidate.retry_base_seconds;
     mail.retry_maximum_seconds = candidate.retry_maximum_seconds;
 }

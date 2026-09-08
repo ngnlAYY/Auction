@@ -50,7 +50,9 @@ impl PublicRulesReader for CachedPublicRulesReader {
                 return authority.get_public_rules(request).await;
             };
 
-            if let Ok(Some(value)) = cache.get(key.clone()).await {
+            let cached = cache.get(key.clone()).await;
+            let cache_available = cached.is_ok();
+            if let Ok(Some(value)) = cached {
                 if let Ok(document) = serde_json::from_slice::<PublicRulesDocument>(&value)
                     && document.locale == request.locale
                     && document.validate().is_ok()
@@ -67,7 +69,9 @@ impl PublicRulesReader for CachedPublicRulesReader {
                 return Ok(result);
             }
 
-            if let Some(document) = result.as_ref()
+            // 已知缓存不可用时不再尝试回填，避免权威读取成功后再次消耗同一故障的等待预算。
+            if cache_available
+                && let Some(document) = result.as_ref()
                 && document.validate().is_ok()
                 && let Ok(value) = serde_json::to_vec(document)
             {

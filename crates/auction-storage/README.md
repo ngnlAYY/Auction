@@ -125,6 +125,9 @@ lot、bid log、账户历史和单拍卖 realtime 使用同一 `world.enabled OR
 cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。
 Public 成交价格历史由 `src/database/price_history/` 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 从 `auction_settlements` 与 `lot_settlements` 的已提交事实链查询并负责行映射，
+`postgres/numbered.rs` 在一个 Serializable 快照内物化一次筛选后的窄行，供编号页和完整统计
+共同读取；装备属性只为当前页联表读取，空页仍返回完整 total/stats。cursor 页继续使用原有
+keyset 查询，不执行全量统计或物化筛选集。
 `mapping.rs` 负责混合游标、名称筛选、统计结果及公共字段校验。SQLite Lite 没有结算事实 owner，
 对应端口固定返回 `CapabilityUnavailable`；不得把可手工写入的 `settled`/`sold` 状态行伪装成完整成交历史。
 会话持久化由 `src/database/sessions/` 持有：`mod.rs` 只做 Admin/Public 端口装配，
@@ -358,6 +361,9 @@ SQL 模型、查询、连接池、事务和后端锁策略只放在本 crate；�
 不使用 `sqlx::Any` 抹平后端差异——锁、事务、能力缺失和迁移必须显式可审查。PostgreSQL
 竞价和关键生命周期使用 Serializable、最多 3 次序列化冲突重试并配合明确行锁；队列路径
 才可使用 Read Committed 加显式锁。SQLite 使用明确的串行写事务，不能假设存在 `FOR UPDATE`。
+普通/代理/慢速竞价按 world → auction → lot 顺序取得锁：只读的 world/auction 使用 `FOR SHARE`，
+lot、活动代理、参与者资格与命令账本保持原有排他锁。共享锁仍阻止世界启停和拍卖生命周期更新；
+生命周期持有既有排他锁，不允许通过无锁读取或降低事务隔离来换取吞吐。
 
 ## SQLite 连接选项
 

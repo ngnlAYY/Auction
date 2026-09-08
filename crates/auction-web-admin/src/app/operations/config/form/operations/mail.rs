@@ -36,6 +36,7 @@ pub(super) fn MailFields(
                 div { class: "admin-runtime-field-grid",
                 NumberField { form, disabled, path: "operations.mail.process_attempts", label: t!("admin-runtime-op-process-attempts"), minimum: "1", maximum: "10", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.item_timeout_seconds", label: t!("admin-runtime-op-item-timeout-seconds"), minimum: "1", maximum: "300", on_dirty }
+                NumberField { form, disabled, path: "operations.mail.batch_timeout_seconds", label: t!("admin-runtime-op-mail-batch-timeout-seconds"), minimum: "1", maximum: "86400", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.retry_base_seconds", label: t!("admin-runtime-op-retry-base-seconds"), minimum: "1", maximum: "300", on_dirty }
                 NumberField { form, disabled, path: "operations.mail.retry_maximum_seconds", label: t!("admin-runtime-op-retry-maximum-seconds"), minimum: "1", maximum: "300", on_dirty }
                 }

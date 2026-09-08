@@ -19,6 +19,14 @@ pub(super) fn valid_operations(value: &Value) -> bool {
 }
 
 fn valid_mail(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if !object.contains_key("batch_timeout_seconds") {
+        let mut normalized = object.clone();
+        normalized.insert("batch_timeout_seconds".to_owned(), Value::from(600_u64));
+        return valid_mail(&Value::Object(normalized));
+    }
     valid_scalars(
         value,
         &["managed"],
@@ -36,6 +44,7 @@ fn valid_mail(value: &Value) -> bool {
             ("fetch_timeout_seconds", 1, 300),
             ("process_attempts", 1, 10),
             ("item_timeout_seconds", 1, 300),
+            ("batch_timeout_seconds", 1, 86_400),
             ("retry_base_seconds", 1, 300),
             ("retry_maximum_seconds", 1, 300),
         ],
@@ -43,6 +52,11 @@ fn valid_mail(value: &Value) -> bool {
     ) && value["renew_interval_seconds"].as_u64() < value["lease_duration_seconds"].as_u64()
         && value["fetch_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
         && value["item_timeout_seconds"].as_u64() > value["request_timeout_seconds"].as_u64()
+        && value["batch_timeout_seconds"].as_u64().unwrap_or_default()
+            >= value["fetch_timeout_seconds"]
+                .as_u64()
+                .unwrap_or_default()
+                .saturating_add(value["item_timeout_seconds"].as_u64().unwrap_or_default())
         && value["retry_base_seconds"].as_u64() <= value["retry_maximum_seconds"].as_u64()
 }
 

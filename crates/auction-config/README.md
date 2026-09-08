@@ -241,6 +241,8 @@ fetch_attempts = 3
 fetch_timeout_seconds = 30
 process_attempts = 3
 item_timeout_seconds = 30
+# 可选：单批远程拉取及业务处理总预算秒数，默认 600，至少覆盖一次 fetch 与一次 item 超时。
+batch_timeout_seconds = 600
 # 可选：内联与持久化指数退避范围。
 retry_base_seconds = 1
 retry_maximum_seconds = 30
@@ -406,6 +408,11 @@ SQLite Lite=1 计算有效值，显式 SQLite 值也只允许 1，以落实单�
 不能替代数据库 due/租约状态。MoogleMail 每个 world 使用独立循环和手动唤醒器，读取与单封业务
 处理分别按配置进行有界内联重试；批次执行期间周期续租，续租失败后取消陈旧 future，不能绕过
 token、owner 和版本 fence 提交 cursor。
+MoogleMail `batch_timeout_seconds` 范围为 1–86400 秒，默认 600 秒，且不得小于
+`fetch_timeout_seconds + item_timeout_seconds`；它覆盖拉取和业务处理的重试总耗时，独立于
+可续期 lease。预算耗尽后只提交已完成邮件前缀及其 cursor，未完成邮件不会被跳过。该字段也可
+由 `operations.mail.managed` 接管；旧 runtime 文档省略字段时使用默认值，序列化继续省略默认值
+以保持既有 fingerprint 和历史命令摘要。
 
 启用 `[worker.operations_alert]` 后，PostgreSQL Worker 会读取 process、delivery、fulfillment 和
 recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化告警，使用 cooldown/lease/重试

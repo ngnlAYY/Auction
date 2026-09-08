@@ -10,17 +10,27 @@ use std::task::{Poll, Waker};
 pub(crate) struct PageVisibility {
     hidden: Rc<Cell<bool>>,
     wakers: Rc<RefCell<Vec<Waker>>>,
+    #[cfg(target_arch = "wasm32")]
+    listener: Rc<RefCell<Option<PageVisibilityListener>>>,
 }
 
 impl PageVisibility {
     pub(crate) fn new() -> Self {
-        Self { hidden: Rc::new(Cell::new(false)), wakers: Rc::new(RefCell::new(Vec::new())) }
+        Self {
+            hidden: Rc::new(Cell::new(false)),
+            wakers: Rc::new(RefCell::new(Vec::new())),
+            #[cfg(target_arch = "wasm32")]
+            listener: Rc::new(RefCell::new(None)),
+        }
     }
 
     /// 安装 `visibilitychange` 监听（仅浏览器目标）；恢复可见时先执行 `on_visible`
     /// 补偿一次权威重读，再唤醒所有挂起的轮询/退避。与 PublicShell 同寿命，只安装一次。
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn install(&self, mut on_visible: impl FnMut() + 'static) {
+        if self.listener.borrow().is_some() {
+            return;
+        }
         let Some(document) = web_sys::window().and_then(|window| window.document()) else {
             return;
         };
@@ -40,13 +50,26 @@ impl PageVisibility {
             "visibilitychange",
             callback.as_ref().unchecked_ref(),
         );
-        callback.forget();
+        *self.listener.borrow_mut() = Some(PageVisibilityListener { document, callback });
+    }
+
+    /// 卸载 `visibilitychange` 监听，确保 PublicShell 销毁后不保留浏览器回调。
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn cleanup(&self) {
+        if let Some(listener) = self.listener.borrow_mut().take() {
+            let _ = listener.document.remove_event_listener_with_callback(
+                "visibilitychange",
+                listener.callback.as_ref().unchecked_ref(),
+            );
+        }
     }
 
     // 仅 visibilitychange 监听器（wasm）会主动唤醒；非浏览器目标没有隐藏事件。
     #[cfg(target_arch = "wasm32")]
     fn wake_waiters(&self) {
-        for waker in self.wakers.borrow_mut().drain(..) {
+        // 先释放列表借用，再调用可能重新注册等待者的运行时回调。
+        let wakers = std::mem::take(&mut *self.wakers.borrow_mut());
+        for waker in wakers {
             waker.wake();
         }
     }
@@ -66,6 +89,12 @@ impl PageVisibility {
         })
         .await;
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PageVisibilityListener {
+    document: web_sys::Document,
+    callback: Closure<dyn FnMut()>,
 }
 
 impl Default for PageVisibility {
