@@ -19,13 +19,14 @@ pub(crate) async fn claim(
     limit: u16,
     force: bool,
 ) -> Result<Vec<MailPollClaim>, ApplicationError> {
+    // force 只允许本次手动唤醒越过 paused/next_poll_at，租约、owner 和版本 fence 仍照常生效。
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 领取事务失败"))?;
     let rows = sqlx::query(
-        "SELECT mailbox_key, cursor_value, consecutive_failures, state_version
+        "SELECT mailbox_key, cursor_value, consecutive_failures, paused, state_version
          FROM public.mail_poll_state
          WHERE mailbox_key = $1
-           AND paused = false
+           AND ($2 = true OR paused = false)
            AND ($2 = true OR next_poll_at <= $3)
            AND (claim_expires_at IS NULL OR claim_expires_at <= $3)
            ORDER BY next_poll_at, mailbox_key
@@ -50,6 +51,8 @@ pub(crate) async fn claim(
         let failures: i32 = row
             .try_get("consecutive_failures")
             .map_err(|_| storage_error("读取 MoogleMail 失败次数失败"))?;
+        let paused: bool =
+            row.try_get("paused").map_err(|_| storage_error("读取 MoogleMail 暂停状态失败"))?;
         let state_version: i64 = row
             .try_get("state_version")
             .map_err(|_| storage_error("读取 MoogleMail 状态版本失败"))?;
@@ -64,7 +67,7 @@ pub(crate) async fn claim(
                  last_failure_code = NULL, last_failure_detail = NULL, last_failure_at = NULL,
                  state_version = state_version + 1, updated_at = CURRENT_TIMESTAMP
              WHERE mailbox_key = $1
-               AND paused = false
+               AND ($6 = true OR paused = false)
                AND (claim_expires_at IS NULL OR claim_expires_at <= $5)",
         )
         .bind(&mailbox_key)
@@ -72,6 +75,7 @@ pub(crate) async fn claim(
         .bind(worker_id)
         .bind(lease_until)
         .bind(now)
+        .bind(force)
         .execute(&mut *transaction)
         .await
         .map_err(|_| storage_error("写入 MoogleMail 租约失败"))?;
@@ -86,7 +90,7 @@ pub(crate) async fn claim(
             state_version: state_version
                 .checked_add(1)
                 .ok_or_else(|| storage_error("MoogleMail 状态版本溢出"))?,
-            paused: false,
+            paused,
             attempt_count,
             lease_until,
         });

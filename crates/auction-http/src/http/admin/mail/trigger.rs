@@ -47,13 +47,9 @@ pub(crate) async fn trigger_poll(
         Ok(snapshot) => snapshot,
         Err(_) => return worker_unavailable(),
     };
-    if snapshot.pollers.is_empty() || snapshot.pollers.iter().all(|poller| poller.paused) {
-        return super::api_error(
-            StatusCode::CONFLICT,
-            "poll_rejected",
-            "所有邮箱轮询均已暂停；请先恢复至少一个邮箱",
-        )
-        .into_response();
+    if snapshot.pollers.is_empty() {
+        return super::api_error(StatusCode::CONFLICT, "poll_rejected", "没有已装配的邮箱轮询器")
+            .into_response();
     }
     let Some(worker_control) = state.worker_control() else {
         return worker_unavailable();

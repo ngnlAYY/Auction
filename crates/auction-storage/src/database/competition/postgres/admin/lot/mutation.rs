@@ -8,6 +8,8 @@ pub(super) async fn update_admin_lot_inner(
     now: DateTime<Utc>,
 ) -> Result<AdminLotSummary, CompetitionTransactionError> {
     let start_price = command.start_price;
+    // 邮件来源时间或时钟回拨可能令既有更新时间领先本机；修改必须保持时间单调，
+    // 否则撤拍后的安全投影会因 updated_at < created_at 被拒绝并回滚整笔事务。
     let updated = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
@@ -16,7 +18,7 @@ pub(super) async fn update_admin_lot_inner(
                  start_price = CASE WHEN $1 = 'set_start_price' THEN $2 ELSE start_price END,
                  current_price = CASE WHEN $1 = 'set_start_price' THEN $2 ELSE current_price END,
                  state_version = state_version + 1,
-                 updated_at = $3
+                 updated_at = GREATEST(updated_at, $3)
              WHERE id = $4 AND auction_id = (
                  SELECT auction_id FROM public.lots WHERE id = $4
              ) AND status = 'pending' AND state_version = $5
