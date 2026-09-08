@@ -10,8 +10,20 @@ pub(super) async fn fetch_with_retry(
     metric_context: MailPollMetricContext,
 ) -> Result<MailPollPage, MailPollGatewayError> {
     for attempt in 1..=config.fetch_attempts {
-        let result =
-            tokio::time::timeout(config.fetch_timeout, gateway.fetch(request.clone())).await;
+        let deadline =
+            std::time::Instant::now().checked_add(config.fetch_timeout).ok_or_else(|| {
+                MailPollGatewayError {
+                    failure_code: "fetch_timeout".to_owned(),
+                    safe_detail: "MoogleMail 远程读取预算无效".to_owned(),
+                    temporary: true,
+                }
+            })?;
+        let request = MailPollFetchRequest { deadline: Some(deadline), ..request.clone() };
+        let result = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(deadline),
+            gateway.fetch(request),
+        )
+        .await;
         match result {
             Ok(Ok(page)) => return Ok(page),
             Ok(Err(error)) if error.temporary && attempt < config.fetch_attempts => {

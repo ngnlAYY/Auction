@@ -8,7 +8,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Component, Path, PathBuf},
-    sync::Mutex,
 };
 
 #[cfg(unix)]
@@ -40,11 +39,22 @@ pub enum RuntimeFileStoreError {
     OutcomeUnknown(String),
 }
 
+/// 覆盖一次 runtime 更新/恢复流程的跨进程锁；离开作用域时自动释放 OS 文件锁。
+pub struct TomlRuntimeWorkflowGuard {
+    lock: File,
+    lock_path: PathBuf,
+}
+
+impl Drop for TomlRuntimeWorkflowGuard {
+    fn drop(&mut self) {
+        let _ = self.lock.unlock();
+    }
+}
+
 /// 生产 Admin runtime TOML 文件存储。
 pub struct TomlRuntimeFileStore {
     path: PathBuf,
     lock_path: PathBuf,
-    mutex: Mutex<()>,
 }
 
 impl TomlRuntimeFileStore {
@@ -64,21 +74,10 @@ impl TomlRuntimeFileStore {
         }
         let directory = path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?;
         validate_directory(directory)?;
-        Ok(Self {
-            lock_path: directory.join(".admin-runtime-config.lock"),
-            path,
-            mutex: Mutex::new(()),
-        })
+        Ok(Self { lock_path: directory.join(".admin-runtime-config.lock"), path })
     }
 
-    fn with_lock<T>(
-        &self,
-        operation: impl FnOnce() -> Result<T, RuntimeFileStoreError>,
-    ) -> Result<T, RuntimeFileStoreError> {
-        let _guard = self
-            .mutex
-            .lock()
-            .map_err(|_| RuntimeFileStoreError::Io("runtime 文件进程内锁损坏".to_owned()))?;
+    fn open_lock(&self) -> Result<File, RuntimeFileStoreError> {
         validate_directory(self.path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?)?;
         let lock = OpenOptions::new()
             .create(true)
@@ -88,14 +87,20 @@ impl TomlRuntimeFileStore {
             .mode(0o600)
             .open(&self.lock_path)
             .map_err(io_message)?;
-        if let Err(error) = lock.try_lock() {
-            return Err(match error {
-                std::fs::TryLockError::WouldBlock => {
-                    RuntimeFileStoreError::Io("runtime 配置正由另一个进程更新".to_owned())
-                }
-                std::fs::TryLockError::Error(error) => io_message(error),
-            });
-        }
+        lock.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => {
+                RuntimeFileStoreError::Io("runtime 配置正由另一个进程更新".to_owned())
+            }
+            std::fs::TryLockError::Error(error) => io_message(error),
+        })?;
+        Ok(lock)
+    }
+
+    fn with_lock<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, RuntimeFileStoreError>,
+    ) -> Result<T, RuntimeFileStoreError> {
+        let lock = self.open_lock()?;
         let result = operation();
         let unlock_result = lock.unlock();
         match (result, unlock_result) {
@@ -176,9 +181,55 @@ impl TomlRuntimeFileStore {
         }
         result
     }
+
+    fn replace_unlocked(
+        &self,
+        expected_fingerprint: String,
+        document: AdminRuntimeDocument,
+    ) -> Result<AdminRuntimeReplacement, RuntimeFileStoreError> {
+        let current = self.read_snapshot()?;
+        if current.fingerprint != expected_fingerprint {
+            return Err(RuntimeFileStoreError::Conflict);
+        }
+        self.atomic_write(&document)?;
+        let updated = self.read_snapshot()?;
+        if updated.fingerprint != document.fingerprint() {
+            return Err(RuntimeFileStoreError::OutcomeUnknown(
+                "替换后 fingerprint 不匹配".to_owned(),
+            ));
+        }
+        Ok(AdminRuntimeReplacement {
+            old_document: current.document,
+            old_fingerprint: current.fingerprint,
+            new_document: updated.document,
+            new_fingerprint: updated.fingerprint,
+        })
+    }
+
+    fn ensure_workflow_guard(
+        &self,
+        guard: &TomlRuntimeWorkflowGuard,
+    ) -> Result<(), RuntimeFileStoreError> {
+        if guard.lock_path != self.lock_path {
+            return Err(RuntimeFileStoreError::Io(
+                "runtime workflow 锁不属于当前配置文件".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl AdminRuntimeFileStore for TomlRuntimeFileStore {
+    type WorkflowGuard = TomlRuntimeWorkflowGuard;
+
+    fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, Self::WorkflowGuard> {
+        Box::pin(async move {
+            self.open_lock()
+                .map(|lock| TomlRuntimeWorkflowGuard { lock, lock_path: self.lock_path.clone() })
+                .map_err(map_file_error)
+        })
+    }
+
     fn validate_candidate(
         &self,
         document: &AdminRuntimeDocument,
@@ -191,32 +242,36 @@ impl AdminRuntimeFileStore for TomlRuntimeFileStore {
         Box::pin(async move { self.with_lock(|| self.read_snapshot()).map_err(map_file_error) })
     }
 
+    fn current_locked<'a>(
+        &'a self,
+        guard: &'a Self::WorkflowGuard,
+    ) -> ApplicationFuture<'a, AdminRuntimeSnapshot> {
+        Box::pin(async move {
+            self.ensure_workflow_guard(guard).map_err(map_file_error)?;
+            self.read_snapshot().map_err(map_file_error)
+        })
+    }
+
     fn replace(
         &self,
         expected_fingerprint: String,
         document: AdminRuntimeDocument,
     ) -> ApplicationFuture<'_, AdminRuntimeReplacement> {
         Box::pin(async move {
-            self.with_lock(|| {
-                let current = self.read_snapshot()?;
-                if current.fingerprint != expected_fingerprint {
-                    return Err(RuntimeFileStoreError::Conflict);
-                }
-                self.atomic_write(&document)?;
-                let updated = self.read_snapshot()?;
-                if updated.fingerprint != document.fingerprint() {
-                    return Err(RuntimeFileStoreError::OutcomeUnknown(
-                        "替换后 fingerprint 不匹配".to_owned(),
-                    ));
-                }
-                Ok(AdminRuntimeReplacement {
-                    old_document: current.document,
-                    old_fingerprint: current.fingerprint,
-                    new_document: updated.document,
-                    new_fingerprint: updated.fingerprint,
-                })
-            })
-            .map_err(map_file_error)
+            self.with_lock(|| self.replace_unlocked(expected_fingerprint, document))
+                .map_err(map_file_error)
+        })
+    }
+
+    fn replace_locked<'a>(
+        &'a self,
+        guard: &'a Self::WorkflowGuard,
+        expected_fingerprint: String,
+        document: AdminRuntimeDocument,
+    ) -> ApplicationFuture<'a, AdminRuntimeReplacement> {
+        Box::pin(async move {
+            self.ensure_workflow_guard(guard).map_err(map_file_error)?;
+            self.replace_unlocked(expected_fingerprint, document).map_err(map_file_error)
         })
     }
 

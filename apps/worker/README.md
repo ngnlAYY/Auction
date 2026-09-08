@@ -32,6 +32,8 @@ metrics/tracing 不会投影到 Worker。MoogleMail transport、凭据、mailbox
 Admin/Worker，其余组重启 Worker；不会改写已有拍卖快照、任务游标、命令账本或租约状态。
 邮件组支持 cron、读取批量/分页、HTTP 预算、租约续期和内联/持久化退避。管理页保存不会立即轮询，
 调度仍服从已有的持久化 due、暂停状态和邮箱身份；参数范围见 runtime 示例。
+mail gateway 复用已校验的 `fetch_timeout_seconds`，每次尝试由 Worker 传入绝对截止时刻；
+同一预算覆盖限速和详情拉取，返回的完成前缀仍由 Worker 在业务处理及持久化证明后提交。
 
 ## 拍卖邮件起拍价
 

@@ -16,6 +16,50 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
+/// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权
+/// 当前 delivery。论坛通知沿用 MailIntake origin，但通过论坛命令账本证明其真实 owner。
+#[cfg(feature = "postgres")]
+macro_rules! delivery_completion_gate {
+    () => {
+        r#"(
+    deliveries.origin_kind <> 'mail_intake'
+    OR (
+    (
+        deliveries.origin_kind = 'mail_intake'
+        AND deliveries.payload ->> 'template' = 'forum_auction_notice'
+        AND deliveries.payload ->> 'operation' = 'send'
+        AND EXISTS (
+            SELECT 1
+            FROM public.auction_forum_bid_commands AS forum_command
+            WHERE forum_command.command_id = deliveries.command_id
+              AND forum_command.command_kind = 'notify'
+              AND forum_command.world_id = deliveries.payload ->> 'world'
+        )
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM public.inbound_mail AS inbound
+        INNER JOIN public.mail_commands AS command ON command.mail_id = inbound.id
+        WHERE inbound.world_id = deliveries.payload ->> 'world'
+          AND inbound.external_mail_id = deliveries.payload ->> 'external_mail_id'
+          AND inbound.status IN ('accepted', 'rejected', 'failed')
+          AND inbound.decision_code <> 'parsed_pending_processing'
+          AND jsonb_typeof(inbound.decision_metadata -> 'delivery_ids') = 'array'
+          AND inbound.decision_metadata -> 'delivery_ids' ? (deliveries.id::text)
+          AND octet_length(inbound.content_digest) = 32
+          AND inbound.content_digest <> decode(repeat('00', 32), 'hex')
+          AND command.mail_id = inbound.id
+          AND command.request_digest = inbound.content_digest
+          AND command.result_payload = jsonb_build_object(
+              'mail_id', inbound.id,
+              'status', inbound.status,
+              'decision_code', inbound.decision_code
+          )
+) )
+)"#
+    };
+}
+
 #[cfg(feature = "postgres")]
 mod claims;
 mod mapping;

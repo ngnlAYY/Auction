@@ -60,7 +60,8 @@ where
     /// 启动装配层负责决定哪些结果可以带着告警继续运行；服务层只负责执行与更新流程
     /// 相同的恢复逻辑，避免启动恢复和用户重试各自维护一套状态判断。
     pub async fn recover(&self) -> Result<(), ApplicationError> {
-        self.recover_unresolved().await
+        let guard = self.files.acquire_workflow_lock().await?;
+        self.recover_unresolved_locked(&guard).await
     }
 
     /// 执行一次带 durable intent 的 runtime 更新。
@@ -69,19 +70,20 @@ where
         command: AdminRuntimeUpdateCommand,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
         command.validate().map_err(ApplicationError::from)?;
-        self.recover_unresolved().await?;
+        let guard = self.files.acquire_workflow_lock().await?;
+        self.recover_unresolved_locked(&guard).await?;
 
         if let Some(stored) = self.commands.find(command.command_id).await? {
             stored.validate().map_err(ApplicationError::from)?;
             if !stored.matches_request(command.request_hash) {
                 return Err(AdminRuntimeConfigError::CommandConflict.into());
             }
-            return self.finish_existing(stored).await;
+            return self.finish_existing(&guard, stored).await;
         }
 
         // 新命令在写 durable intent 前完成部署格式校验；已接受命令仍返回原有幂等结果。
         self.files.validate_candidate(&command.document, self.clock.now())?;
-        let current = self.files.current().await?;
+        let current = self.files.current_locked(&guard).await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint != command.expected_fingerprint {
             return Err(AdminRuntimeConfigError::StaleFingerprint.into());
@@ -112,10 +114,13 @@ where
             })
             .await?;
         stored.validate().map_err(ApplicationError::from)?;
-        self.finish_pending(stored).await
+        self.finish_pending(&guard, stored).await
     }
 
-    async fn recover_unresolved(&self) -> Result<(), ApplicationError> {
+    async fn recover_unresolved_locked(
+        &self,
+        guard: &F::WorkflowGuard,
+    ) -> Result<(), ApplicationError> {
         let rows = self.commands.list_unresolved().await?;
         if rows.len() > 1 {
             return Err(AdminRuntimeConfigError::StoredResultCorrupt.into());
@@ -124,20 +129,20 @@ where
             return Ok(());
         };
         row.validate().map_err(ApplicationError::from)?;
-        let current = self.files.current().await?;
+        let current = self.files.current_locked(guard).await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint == row.new_fingerprint {
-            self.apply_verified(row).await.map(|_| ())
+            self.apply_verified(guard, row).await.map(|_| ())
         } else if current.fingerprint == row.old_fingerprint {
             if row.state == AdminRuntimeCommandState::Unknown {
                 let reopened = self
                     .commands
                     .reopen(row.command_id, row.request_hash, self.clock.now())
                     .await?;
-                self.finish_pending(reopened).await.map(|_| ())
+                self.finish_pending(guard, reopened).await.map(|_| ())
             } else {
                 // durable intent 已记录且旧文件仍可证明；继续同一命令，不能永久占用唯一 pending 槽。
-                self.finish_pending(row).await.map(|_| ())
+                self.finish_pending(guard, row).await.map(|_| ())
             }
         } else {
             let _ = self
@@ -155,11 +160,12 @@ where
 
     async fn finish_existing(
         &self,
+        guard: &F::WorkflowGuard,
         stored: AdminRuntimeStoredCommand,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
         match stored.state {
             AdminRuntimeCommandState::Applied => self.finish_applied(stored),
-            AdminRuntimeCommandState::Pending => self.finish_pending(stored).await,
+            AdminRuntimeCommandState::Pending => self.finish_pending(guard, stored).await,
             AdminRuntimeCommandState::Unknown => {
                 Err(AdminRuntimeConfigError::ReconciliationRequired.into())
             }
@@ -168,15 +174,16 @@ where
 
     async fn finish_pending(
         &self,
+        guard: &F::WorkflowGuard,
         stored: AdminRuntimeStoredCommand,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
         if stored.state != AdminRuntimeCommandState::Pending {
             return Err(AdminRuntimeConfigError::StoredResultCorrupt.into());
         }
-        let current = self.files.current().await?;
+        let current = self.files.current_locked(guard).await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint == stored.new_fingerprint {
-            return self.apply_verified(stored).await;
+            return self.apply_verified(guard, stored).await;
         }
         if current.fingerprint != stored.old_fingerprint {
             let _ = self
@@ -193,7 +200,11 @@ where
 
         let replacement = self
             .files
-            .replace(stored.old_fingerprint.clone(), stored.candidate_document.clone())
+            .replace_locked(
+                guard,
+                stored.old_fingerprint.clone(),
+                stored.candidate_document.clone(),
+            )
             .await?;
         if replacement.old_fingerprint != stored.old_fingerprint
             || replacement.new_fingerprint != stored.new_fingerprint
@@ -212,9 +223,10 @@ where
 
     async fn apply_verified(
         &self,
+        guard: &F::WorkflowGuard,
         stored: AdminRuntimeStoredCommand,
     ) -> Result<AdminRuntimeSnapshot, ApplicationError> {
-        let current = self.files.current().await?;
+        let current = self.files.current_locked(guard).await?;
         current.validate().map_err(ApplicationError::from)?;
         if current.fingerprint != stored.new_fingerprint
             || stored.candidate_document.fingerprint() != stored.new_fingerprint

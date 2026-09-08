@@ -282,6 +282,9 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner
 负责；每个已启用 world 通过 mailbox_key 定向 claim，避免多个 world poller 领取彼此的邮箱状态。
+`inbound.rs` 还提供处理前完成证明读取：核对确定性入站/命令 UUID、mailbox/world/邮件 ID、
+数据库精度下的接收时间、原摘要与命令结果的一致性。取件后的可变摘要不再触发已完成邮件的
+重新业务解释；缺失或损坏命令账本、全零摘要及 `parsed_pending_processing` 均不能作为完成证明。
 `admin_mail/transaction.rs`、`reads.rs` 和 `mapping.rs` 分别拥有 PostgreSQL 邮件事务/命令写入、
 轮询与入站查询、行和安全 metadata 映射；父 `mod.rs` 只保留跨后端端口分派。
 MoogleMail 拍卖入站事务由 `src/database/mail_intake/mod.rs` 装配，`intake.rs` 持有命令账本、world/auction/玩家锁、
@@ -433,6 +436,11 @@ claim 以 obligation owner 顺序锁定并支持历史数据缺失 execution 行
 推进、提醒 outbox 关联和结果 fence，
 `src/database/delivery_scheduler/mod.rs` 装配 delivery outbox owner；`claims.rs`、`state.rs`、
 `outcome.rs` 和 `mapping.rs` 分别负责领取、发送前安全释放/发送中续租、成功/失败终态和共享映射。
+MailIntake 的完成门禁在 claim 候选、领取条件更新和 `start_sending` 三处复用同一 SQL：入站
+世界/邮件 ID 匹配、`decision_metadata.delivery_ids` 数组包含当前 delivery，且邮件命令账本与
+入站摘要/结果相符才允许发送。delivery 自己的请求摘要属于另一种命令，不能与邮件内容摘要
+相等比较。`forum_auction_notice` 的 send 由同 command ID/world 的论坛 notify 账本证明，其他
+origin 保留各自的 owner 门禁；没有完成证明的普通入站投递保持待处理，不绕过屏障。
 `src/database/mail_delivery/mod.rs` 只负责 MailDeliveryEnqueuer 的跨后端分派；命令闭集校验、普通
 outbox 入队、recovery 两阶段激活和 PostgreSQL 错误/载荷辅助分别位于
 `mail_delivery/{validation,outbox,activation,common}.rs`，保留命令摘要幂等、`prepared → pending`

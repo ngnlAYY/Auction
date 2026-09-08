@@ -14,6 +14,14 @@ use super::{
 
 /// runtime 文件适配器端口。
 pub trait AdminRuntimeFileStore: Send + Sync {
+    /// 覆盖一次 runtime 更新/恢复全流程的跨进程排他锁。
+    ///
+    /// 锁必须使用非阻塞方式获取，并由返回的 RAII guard 持有到调用方完成 apply；
+    /// `current`/`replace` 等单操作方法不能在 guard 存活期间再次获取同一把锁。
+    type WorkflowGuard: Send + Sync;
+
+    fn acquire_workflow_lock(&self) -> ApplicationFuture<'_, Self::WorkflowGuard>;
+
     /// 只做配置适配器的本地语法校验；不得读取文件、写命令账本或访问外部服务。
     ///
     /// cron 等部署格式的解析仍由配置 owner 提供，应用层只传入统一的校验时刻。
@@ -25,11 +33,25 @@ pub trait AdminRuntimeFileStore: Send + Sync {
 
     fn current(&self) -> ApplicationFuture<'_, AdminRuntimeSnapshot>;
 
+    /// 在调用方已经持有 workflow guard 时读取当前文件，避免递归获取文件锁。
+    fn current_locked<'a>(
+        &'a self,
+        guard: &'a Self::WorkflowGuard,
+    ) -> ApplicationFuture<'a, AdminRuntimeSnapshot>;
+
     fn replace(
         &self,
         expected_fingerprint: String,
         document: AdminRuntimeDocument,
     ) -> ApplicationFuture<'_, AdminRuntimeReplacement>;
+
+    /// 在调用方已经持有 workflow guard 时替换文件，避免递归获取文件锁。
+    fn replace_locked<'a>(
+        &'a self,
+        guard: &'a Self::WorkflowGuard,
+        expected_fingerprint: String,
+        document: AdminRuntimeDocument,
+    ) -> ApplicationFuture<'a, AdminRuntimeReplacement>;
 
     fn restore(&self, replacement: AdminRuntimeReplacement) -> ApplicationFuture<'_, ()>;
 }

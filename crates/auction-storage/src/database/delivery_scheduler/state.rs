@@ -10,15 +10,17 @@ pub(super) async fn start_sending_postgres(
     started_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    let result = sqlx::query(
-        r#"UPDATE public.deliveries
+    let result = sqlx::query(concat!(
+        r#"UPDATE public.deliveries AS deliveries
            SET status = 'sending', sending_at = $2, updated_at = CURRENT_TIMESTAMP
            WHERE id = $1
              AND status = 'claimed'
              AND lease_token = $3
              AND fencing_version = $4
-             AND lease_expires_at > $2"#,
-    )
+             AND lease_expires_at > $2
+             AND "#,
+        delivery_completion_gate!()
+    ))
     .bind(claim.delivery_id)
     .bind(started_at)
     .bind(claim.lease_token)

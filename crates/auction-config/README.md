@@ -413,6 +413,14 @@ MoogleMail `batch_timeout_seconds` 范围为 1–86400 秒，默认 600 秒，�
 可续期 lease。预算耗尽后只提交已完成邮件前缀及其 cursor，未完成邮件不会被跳过。该字段也可
 由 `operations.mail.managed` 接管；旧 runtime 文档省略字段时使用默认值，序列化继续省略默认值
 以保持既有 fingerprint 和历史命令摘要。
+`fetch_timeout_seconds` 仍限制每次拉取尝试；Worker 将其绝对截止时刻传给 gateway，详情预算
+耗尽时返回已解析的最旧前缀，不要求默认 100 封详情全部在一次 30 秒尝试内完成。空收件箱或无
+allowlist 命中是正常空结果，列表尚未完整定位 cursor 或末尾时仍不得推进。
+
+Admin runtime 文件存储的更新/恢复锁使用非阻塞 `File::try_lock()`，从首次恢复检查持续持有到
+文件和账本收口；竞争流程返回既有不可用错误，不阻塞等待。guard 绑定锁路径，取消或异常时
+通过 RAII 释放；锁文件不会随每次操作删除，避免多进程锁住不同 inode。普通文件读取/替换仍
+使用同一锁域，流程内部只调用已持锁接口，不重复获取锁。
 
 启用 `[worker.operations_alert]` 后，PostgreSQL Worker 会读取 process、delivery、fulfillment 和
 recovery 四类安全水位，按旧版 15 类 signal 和阈值生成持久化告警，使用 cooldown/lease/重试

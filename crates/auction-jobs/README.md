@@ -109,12 +109,21 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 重试，确定性输入、配置和业务拒绝立即收口。共享 transport 使用一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责
 恢复超时前可能已完成的本地步骤。
+每次 fetch 尝试通过 `MailPollFetchRequest.deadline` 将同一绝对截止时刻传给真实 gateway，
+继续保留 `fetch_attempts × fetch_timeout` 和有界退避契约；gateway 可以在一次预算内只返回
+完成的详情前缀。普通空窗口成功，不因未达到配置批量上限而失败。
 `batch_timeout_seconds` 默认 600 秒，限制一次 claim 的远程拉取、内联重试和整页业务处理，
 与可续期 lease 独立。邮件页按旧到新处理，cursor 表示最后完成邮件的 `external_mail_id`；总预算
 耗尽时，已完成前缀和其 cursor 在同一受 fence 保护的事务中提交，未完成邮件留待下一轮。
 一封都未完成时记录 `batch_timeout` 并退避，不提交空成功批次。普通读取/业务失败仍保持原有
 整页重试边界；超时前已经提交的业务步骤由稳定命令 ID 重放补齐。最终数据库提交在处理预算后
 按既有租约 fence 收口，不能把“处理预算”误称为包含数据库收口的硬耗时保证。
+每封邮件在进入 `MailProcessor` 前核验持久化完成证明；已完成的旧邮件不再按取件后变化的摘要
+重新路由，但可计入可提交的连续前缀。查询完成证明后重新计算剩余处理预算。即使本轮没有新
+intake，只要前缀已获完整证明，也允许在租约 fence 下推进游标；缺失证明的邮件不能跳过。
+普通入站 take/return/notice 的 delivery 领取及进入 sending 均要求入站决定明确列出其 delivery ID，
+且相应 `mail_commands` 已提交，防止邮件处理尚未完成时先改变远端资产。论坛通知由独立的论坛
+命令 owner 证明，不依赖不存在的入站邮件记录。
 论坛 `start/cancel` 和 PM-only 通知在当前论坛命令契约中是 warning-only；MM `notify` 已进入
 MoogleMail delivery outbox。若未来要扩展这些命令，需先冻结新的论坛/
 拍卖 owner、幂等账本和远程回执契约。

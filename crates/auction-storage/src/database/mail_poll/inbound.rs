@@ -8,6 +8,96 @@ use uuid::Uuid;
 
 use super::storage_error;
 
+pub(crate) async fn lookup_completion(
+    pool: &crate::database::TrackedPool<sqlx::Postgres>,
+    mailbox_key: &str,
+    world_id: &str,
+    external_mail_id: &str,
+    received_at: DateTime<Utc>,
+) -> Result<auction_application::MailPollCompletion, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT inbound.id, inbound.world_id, inbound.mailbox_key,
+                inbound.received_at, inbound.content_digest, inbound.status,
+                inbound.decision_code,
+                command.command_id, command.mail_id, command.request_digest,
+                command.result_payload
+         FROM public.inbound_mail AS inbound
+         LEFT JOIN public.mail_commands AS command ON command.mail_id = inbound.id
+         WHERE inbound.mailbox_key = $1 AND inbound.external_mail_id = $2",
+    )
+    .bind(mailbox_key)
+    .bind(external_mail_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| storage_error("读取 MoogleMail 已完成事实失败"))?;
+    let Some(row) = row else {
+        return Ok(auction_application::MailPollCompletion::Missing);
+    };
+    let inbound_id: Uuid =
+        row.try_get("id").map_err(|_| storage_error("读取 MoogleMail 完成事实 ID 失败"))?;
+    let stored_mailbox: String = row
+        .try_get("mailbox_key")
+        .map_err(|_| storage_error("读取 MoogleMail 完成事实邮箱失败"))?;
+    let stored_world: String =
+        row.try_get("world_id").map_err(|_| storage_error("读取 MoogleMail 完成事实世界失败"))?;
+    let stored_received: DateTime<Utc> = row
+        .try_get("received_at")
+        .map_err(|_| storage_error("读取 MoogleMail 完成事实时间失败"))?;
+    let stored_digest: Vec<u8> = row
+        .try_get("content_digest")
+        .map_err(|_| storage_error("读取 MoogleMail 完成事实摘要失败"))?;
+    let stored_status: String =
+        row.try_get("status").map_err(|_| storage_error("读取 MoogleMail 完成事实状态失败"))?;
+    let stored_code: String = row
+        .try_get("decision_code")
+        .map_err(|_| storage_error("读取 MoogleMail 完成事实决定码失败"))?;
+    if stored_mailbox != mailbox_key
+        || stored_world != world_id
+        || stored_received.timestamp_micros() != received_at.timestamp_micros()
+    {
+        return Err(storage_error("MoogleMail 完成事实身份冲突"));
+    }
+    let expected_id = Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("auction/inbound-mail-v1/{mailbox_key}/{world_id}/{external_mail_id}").as_bytes(),
+    );
+    let command_id: Option<Uuid> =
+        row.try_get("command_id").map_err(|_| storage_error("读取 MoogleMail 完成命令 ID 失败"))?;
+    let mail_id: Option<Uuid> = row
+        .try_get("mail_id")
+        .map_err(|_| storage_error("读取 MoogleMail 完成命令邮件 ID 失败"))?;
+    let request_digest: Option<Vec<u8>> = row
+        .try_get("request_digest")
+        .map_err(|_| storage_error("读取 MoogleMail 完成命令摘要失败"))?;
+    let result_payload: Option<Json<Value>> = row
+        .try_get("result_payload")
+        .map_err(|_| storage_error("读取 MoogleMail 完成命令结果失败"))?;
+    let expected_command = Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("auction/mail-intake-command-v1/{mailbox_key}/{external_mail_id}").as_bytes(),
+    );
+    if inbound_id != expected_id
+        || command_id != Some(expected_command)
+        || mail_id != Some(inbound_id)
+        || stored_digest.len() != 32
+        || stored_digest.iter().all(|byte| *byte == 0)
+        || !matches!(stored_status.as_str(), "accepted" | "rejected" | "failed")
+        || request_digest.as_ref() != Some(&stored_digest)
+        || result_payload.as_ref().is_none_or(|payload| {
+            payload.0
+                != serde_json::json!({
+                    "mail_id": inbound_id,
+                    "status": stored_status,
+                    "decision_code": stored_code,
+                })
+        })
+        || stored_code == "parsed_pending_processing"
+    {
+        return Err(storage_error("MoogleMail 完成事实或命令账本损坏"));
+    }
+    Ok(auction_application::MailPollCompletion::Completed)
+}
+
 pub(crate) async fn insert_or_verify_intake(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     mailbox_key: &str,

@@ -30,6 +30,7 @@ pub(super) async fn build_poll_runtimes(
                     maximum_pages: mail_config.maximum_pages,
                     sender_allowlist: world_config.sender_allowlist,
                     sender_allowlist_disabled: world_config.sender_allowlist_disabled,
+                    fetch_budget: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
                 },
             )
             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
@@ -96,7 +97,12 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                 });
             }
             let page = gateway
-                .fetch(world, request.cursor_value.as_deref(), usize::from(request.limit))
+                .fetch_with_deadline(
+                    world,
+                    request.cursor_value.as_deref(),
+                    usize::from(request.limit),
+                    request.deadline,
+                )
                 .await
                 .map_err(|error| MailPollGatewayError {
                     failure_code: error.category.as_str().to_owned(),
