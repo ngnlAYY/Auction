@@ -206,7 +206,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A15 | GET | /api/v1/admin/lots/{lot_id}/proxy-events | 200 | 400, 401, 404, 501, 503/504 |
 | A16 | GET | /api/v1/admin/mail | 200 | 400, 401, 404, 501, 503/504 |
 | A17 | GET | /api/v1/admin/mail/intake | 200；列表含可空 `sender`/`subject` 与 `has_message_display` | 400, 401, 501, 503/504 |
-| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200；详情返回 `sender`/`subject` 与按存在性返回的脱敏 `message_display` | 400, 401, 404, 501, 503/504 |
+| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200；详情返回 `sender`/`subject`、脱敏 `message_display` 与可选 `equipment_diagnostic` | 400, 401, 404, 501, 503/504 |
 | A19 | PUT | /api/v1/admin/mail/polling | 200 | 400, 401, 403, 409, 413/415, 501, 503/504 |
 | A20 | POST | /api/v1/admin/mail/polls:trigger | 202 | 400, 401, 403, 409, 413/415, 501, 503/504 |
 | A21 | GET | /api/v1/admin/realtime/lag | 200 | 400, 401, 501, 503/504 |
@@ -374,7 +374,9 @@ A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
 列表 A17 只返回 `sender`、`subject` 这两个可空 scalar 与 `has_message_display`，不返回正文；A18
-详情返回同样的 `sender`、`subject`，并且 `message_display` 只返回 schema/redaction version、已脱敏正文、附件外部 ID、Credits 和 COD，
+详情返回同样的 `sender`、`subject`，并且 `message_display` 只返回 schema/redaction version、已脱敏正文、附件外部 ID、Credits 和 COD；
+被拒绝装备邮件还可返回非权威 `equipment_diagnostic`，包含装备 ID、1-based 附件位置、stage/category、可选 detail_code、
+真实可用的 HTTP status、受限耗时、evidence UUID 和 retention status/error。该诊断不进入决定 metadata 或 cursor。
 上限为正文 64 KiB、JSON 128 KiB、附件 1000 条，装备 key 和认证邮件正文隐藏。该展示投影只用于敏感审查，
 不参与幂等或 cursor，响应继续使用 `no-store`；历史 NULL 不由普通 replay 补写。
 A20 远程轮询触发在至少一个邮箱已装配时返回 `202 accepted`：请求经过 Admin session/CSRF

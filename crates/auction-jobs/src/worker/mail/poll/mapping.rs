@@ -90,6 +90,19 @@ pub(super) fn intake_from_message(
     );
     let processed_at = processed_at.max(message.received_at);
     let headers_present = message.sender.is_some();
+    // 非权威诊断损坏时丢弃旁路投影，不能让日志数据阻断原业务提交或游标推进。
+    let equipment_diagnostic = decision.equipment_diagnostic.filter(|diagnostic| {
+        let valid =
+            mail_kind == "equipment" && decision.status == "rejected" && diagnostic.validate();
+        if !valid {
+            tracing::warn!(
+                world_id = %message.world_id,
+                external_mail_id = %message.external_mail_id,
+                "MoogleMail equipment diagnostic projection discarded"
+            );
+        }
+        valid
+    });
     MailPollIntake {
         id,
         external_mail_id: message.external_mail_id,
@@ -97,6 +110,7 @@ pub(super) fn intake_from_message(
         sender: message.sender.filter(|_| headers_present),
         subject: headers_present.then_some(message.subject),
         message_display: headers_present.then_some(message.message_display).flatten(),
+        equipment_diagnostic,
         mail_kind,
         status: decision.status,
         content_digest: message.content_digest,
@@ -112,6 +126,7 @@ pub(super) fn pending_decision(message: &MailPollFetchedMessage) -> MailProcessi
         mail_kind: classify_kind(&message.subject).to_owned(),
         status: "accepted".to_owned(),
         decision_code: "parsed_pending_processing".to_owned(),
+        equipment_diagnostic: None,
         metadata: json!({
             "processor_state": "pending",
             "attachment_count": message.attachment_count,

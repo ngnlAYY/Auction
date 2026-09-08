@@ -205,6 +205,21 @@ Worker 的命令账本、outbox、消费游标、领取状态、重试次数和�
 重读已取件邮件时先核验持久化完成证明，不能用已变化的远端资产重新解释已完成业务。既有
 事实和账本仍严格保留原摘要；缺失或损坏证明不能跳过，游标只越过已获证明或本轮成功提交的前缀。
 
+装备来源适配器必须为每个完整响应先加密 prepare，只有读取、解析、身份、snapshot 或 filter 失败才在有界
+2 秒窗口内 retain；成功读取必须丢弃密文。每封装备邮件只保留首个失败的诊断 sidecar，且 sidecar 是非权威
+投影，不得进入 `decision_metadata`、command digest、completion proof 或 cursor。阶段只能是
+`request`/`response`/`parse`/`validate`，category 必须来自闭集；detail_code 只允许 snapshot/filter 对应的
+闭集值。HTTP status 只记录真实取得的 100—599 状态，耗时最多 300000 毫秒；网络、超时、截断或超大响应只能
+标记 `body_unavailable`，不能伪称完整响应。日志必须保留安全关联，即使留证 disabled、prepare/save 失败或
+completion 未确认；证据 UUID 不保证文件永久存在，旧邮件没有底层失败 trace 时不得补因或重放。
+诊断留证不得触发业务定时器：application 只返回原始 Result 与 `pendingEquipmentDiagnostic`，
+`process_with_retry` 只收集结束尝试的句柄；`process_claim_inner` 的 `timeout(process_remaining, process_with_retry)`
+结束后，才在 `item_timeout` 与 batch `process_remaining` 之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接
+sidecar，中间 `Err` 留证/日志后保留原 retryability；实际 retention elapsed 必须延长后续 batch deadline。Worker 注入
+同步日志 callback，integration 不新增 tracing 依赖；raw recorder 按开关同实例注入。HTTP body timeout 只保留
+`body_unavailable` 与最后实际观测 status，不伪称 partial body；session expired 在凭据耗尽或失效写回失败时保留
+最后已取得的 body/status/elapsed。
+
 ### I-09a Operations alert 的通知冷却不能早于入队证明
 
 Operations alert 批次创建时即持有第一次 claim，`claim_fencing` 与 `attempt_count` 从 1 开始；

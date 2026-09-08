@@ -47,6 +47,15 @@ take 以同一邮件的资产归零和 Credits/COD/附件回执证明结果；�
 `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，引用为
 `mooglemail:world:send:mid`。Return/Take 维持独立 action proof。ComposeSend 默认 delivery timeout/grace 为
 180/300 秒，启用 MM 时 timeout 必须大于两倍 fetch budget，并复用 `maximum_pages`/`fetch_timeout`。
+装备读取失败只保留首个非权威诊断 sidecar；完整响应先 prepare，失败才在 2 秒内 retain，成功读取丢弃密文。
+诊断不参与 decision metadata、command digest、completion 或 cursor；日志关联字段始终保留，留证状态区分 disabled、
+prepare_failed、save_failed、completion_unconfirmed、retained 和 body_unavailable。
+`process_with_retry` 只收集每次结束尝试的 `pendingEquipmentDiagnostic`；`process_claim_inner` 的
+`timeout(process_remaining, process_with_retry)` 结束后，才在 `item_timeout` 与 batch `process_remaining` 两层业务
+定时器之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接 sidecar，中间 Err 也留证/写日志但保留原
+retryability；实际 retention elapsed 延长后续 batch deadline。Worker 注入同步日志 callback；integration 不新增
+tracing 依赖。HTTP body timeout 只保留 body_unavailable 与最后实际 status，session expired 在凭据耗尽/失效写回失败
+时保留最后 body/status/elapsed。
 Delivery Worker 在 `start_sending` 前调用 transport availability gate；目标 world 暂无
 scoped/shared 凭据时，以完整 lease token/fencing 把 claim 释放回 `pending`，不会误写失败终态。
 该循环使用独立的 poll/jitter/batch/concurrency 配置，每轮完成后等待 `poll + [0, jitter]`；有效

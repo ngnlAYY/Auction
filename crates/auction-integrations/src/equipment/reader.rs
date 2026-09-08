@@ -3,10 +3,21 @@
 //! 这里负责请求节流、无重定向读取、响应边界、world 路径选择和短生命周期 key 交接；页面
 //! 事实解析与 canonical JSON 校验分别由 `parser`/`model` 拥有。
 
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
+    time::Instant as StdInstant,
+};
+
 use auction_application::{
     AdminIntakeError, AdminIntakeSourceReader, AdminIntakeSourceSnapshot, ApplicationError,
-    ApplicationFuture, CanonicalEquipment, EquipmentKeySealerPort, MailEquipmentAttachment,
-    MailEquipmentReader,
+    ApplicationFuture, CanonicalEquipment, EquipmentKeySealerPort, MailDiagnosticContext,
+    MailDiagnosticOutcome, MailDiagnosticRecorder, MailDiagnosticStage, MailEquipmentAttachment,
+    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext,
+    MailEquipmentDiagnosticSnapshot, MailEquipmentDiagnosticStage, MailEquipmentEvidenceStatus,
+    MailEquipmentObservation, MailEquipmentReadOutcome, MailEquipmentReader, PreparedMailEvidence,
 };
 use auction_domain::{EquipmentId, EquipmentKey};
 use chrono::Utc;
@@ -26,9 +37,17 @@ use crate::{
 
 use super::{
     config::{DEFAULT_USER_AGENT, EquipmentSourceConfigurationError, EquipmentSourcePolicy},
-    model::{canonical_facts, canonical_fingerprint, sha256},
+    model::{EquipmentFacts, canonical_facts, canonical_fingerprint, sha256},
     parser::{parse_equipment_page, parse_equipment_url},
 };
+
+#[path = "reader/diagnostics.rs"]
+mod diagnostics;
+#[path = "reader/fetch.rs"]
+mod fetch;
+
+type DiagnosticReporter =
+    dyn Fn(&MailEquipmentDiagnosticContext, &MailEquipmentDiagnosticSnapshot) + Send + Sync;
 
 /// canonical JSON 与旧装备页共用的来源适配器。
 pub struct EquipmentSourceAdapter {
@@ -36,12 +55,15 @@ pub struct EquipmentSourceAdapter {
     endpoint: Url,
     policy: EquipmentSourcePolicy,
     credentials: Option<MoogleMailCredentialSet>,
+    diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
+    diagnostic_reporter: Option<Arc<DiagnosticReporter>>,
     next_request_at: Mutex<Instant>,
 }
 
 enum EquipmentFetchError {
     Intake(AdminIntakeError),
     SessionExpired,
+    Observed(fetch::EquipmentFetchFailure),
 }
 
 impl EquipmentSourceAdapter {
@@ -70,6 +92,8 @@ impl EquipmentSourceAdapter {
             endpoint,
             policy,
             credentials: None,
+            diagnostics: None,
+            diagnostic_reporter: None,
             next_request_at: Mutex::new(Instant::now()),
         })
     }
@@ -90,6 +114,24 @@ impl EquipmentSourceAdapter {
     /// 把数据库凭据标为失效。单 Cookie 失效后不自动切换，且 Cookie 不进入 URL、错误或日志。
     pub fn with_mooglemail_credentials(mut self, credentials: MoogleMailCredentialSet) -> Self {
         self.credentials = Some(credentials);
+        self
+    }
+
+    /// 注入与邮件读取共用的诊断归档器；归档器只接收已脱敏关联字段和加密前的短缓冲。
+    pub fn with_diagnostics(mut self, diagnostics: Arc<dyn MailDiagnosticRecorder>) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// 注入装配根拥有的安全日志出口；即使不留存原始响应，也可以记录失败摘要。
+    pub fn with_diagnostic_reporter(
+        mut self,
+        reporter: impl Fn(&MailEquipmentDiagnosticContext, &MailEquipmentDiagnosticSnapshot)
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.diagnostic_reporter = Some(Arc::new(reporter));
         self
     }
 
@@ -146,6 +188,9 @@ impl EquipmentSourceAdapter {
                 Err(EquipmentFetchError::SessionExpired) => {
                     Err(AdminIntakeError::SourceUnavailable)
                 }
+                Err(EquipmentFetchError::Observed(_)) => {
+                    return Err(AdminIntakeError::SourceUnavailable);
+                }
             };
         };
         let mut session =
@@ -162,6 +207,9 @@ impl EquipmentSourceAdapter {
                     if session.advance().is_err() {
                         return Err(AdminIntakeError::SourceUnavailable);
                     }
+                }
+                Err(EquipmentFetchError::Observed(_)) => {
+                    return Err(AdminIntakeError::SourceUnavailable);
                 }
             }
         }
@@ -184,75 +232,138 @@ impl EquipmentSourceAdapter {
         target: Url,
         cookie: Option<&MoogleMailCookie>,
     ) -> Result<Vec<u8>, EquipmentFetchError> {
-        let mut request =
-            self.client.get(target).header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT);
-        if let Some(cookie) = cookie {
-            request = request.header(reqwest::header::COOKIE, cookie.expose());
-        }
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?;
-        if response.url().scheme() != self.endpoint.scheme()
-            || response.url().host_str() != self.endpoint.host_str()
-            || response.url().port_or_known_default() != self.endpoint.port_or_known_default()
-        {
-            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
-        }
-        if response
-            .content_length()
-            .is_some_and(|length| length > self.policy.maximum_response_bytes as u64)
-        {
-            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
-        }
-        let content_encoding = response
-            .headers()
-            .get(reqwest::header::CONTENT_ENCODING)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .trim();
-        if !content_encoding.is_empty() && !content_encoding.eq_ignore_ascii_case("identity") {
-            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
-        }
-        let status = response.status();
-        let location = response.headers().get(reqwest::header::LOCATION).cloned();
-        let is_html = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .is_some_and(|value| matches!(value.trim(), "text/html" | "application/xhtml+xml"));
-        let mut body = Vec::with_capacity(
-            response
-                .content_length()
-                .and_then(|length| usize::try_from(length).ok())
-                .unwrap_or_default()
-                .min(self.policy.maximum_response_bytes),
-        );
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable))?
-        {
-            let next_length = body
-                .len()
-                .checked_add(chunk.len())
-                .ok_or(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource))?;
-            if next_length > self.policy.maximum_response_bytes {
-                return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
+        match self.fetch_document_once_observed(target, cookie, None).await {
+            Ok(body) => Ok(body.body),
+            Err(EquipmentFetchError::SessionExpired) => Err(EquipmentFetchError::SessionExpired),
+            Err(EquipmentFetchError::Observed(failure))
+                if failure.category == MailEquipmentDiagnosticCategory::SessionExpired =>
+            {
+                Err(EquipmentFetchError::SessionExpired)
             }
-            body.extend_from_slice(&chunk);
+            Err(EquipmentFetchError::Observed(failure)) => {
+                let error = match failure.category {
+                    MailEquipmentDiagnosticCategory::RateLimited
+                    | MailEquipmentDiagnosticCategory::ServerError
+                    | MailEquipmentDiagnosticCategory::Timeout
+                    | MailEquipmentDiagnosticCategory::Network => {
+                        AdminIntakeError::SourceUnavailable
+                    }
+                    _ => AdminIntakeError::InvalidSource,
+                };
+                Err(EquipmentFetchError::Intake(error))
+            }
+            Err(EquipmentFetchError::Intake(error)) => Err(EquipmentFetchError::Intake(error)),
         }
-        if is_hentaiverse_login_response(status, location.as_ref(), &body) {
-            return Err(EquipmentFetchError::SessionExpired);
+    }
+
+    async fn fetch_document_for_world_observed(
+        &self,
+        world: MoogleMailWorld,
+        target: Url,
+    ) -> Result<fetch::EquipmentFetchSuccess, fetch::EquipmentFetchFailure> {
+        let Some(credentials) = self.credentials.as_ref() else {
+            self.await_request_slot().await;
+            let status_slot = Arc::new(AtomicU16::new(0));
+            let started = std::time::Instant::now();
+            return timeout(
+                self.policy.request_timeout,
+                self.fetch_document_once_observed(target, None, Some(Arc::clone(&status_slot))),
+            )
+            .await
+            .map_err(|_| fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::Timeout,
+                status: fetch::nonzero_status(&status_slot),
+                elapsed_millis: fetch::elapsed_millis(started),
+                body: None,
+            })?
+            .map_err(|error| match error {
+                EquipmentFetchError::Observed(failure) => failure,
+                EquipmentFetchError::SessionExpired => fetch::EquipmentFetchFailure {
+                    category: MailEquipmentDiagnosticCategory::SessionExpired,
+                    status: None,
+                    elapsed_millis: None,
+                    body: None,
+                },
+                EquipmentFetchError::Intake(_) => fetch::EquipmentFetchFailure {
+                    category: MailEquipmentDiagnosticCategory::Network,
+                    status: None,
+                    elapsed_millis: None,
+                    body: None,
+                },
+            });
+        };
+        let mut session = credentials.begin(world).map_err(|_| fetch::EquipmentFetchFailure {
+            category: MailEquipmentDiagnosticCategory::CredentialUnavailable,
+            status: None,
+            elapsed_millis: None,
+            body: None,
+        })?;
+        for attempt in 0..64 {
+            self.await_request_slot().await;
+            let status_slot = Arc::new(AtomicU16::new(0));
+            let started = std::time::Instant::now();
+            let result = timeout(
+                self.policy.request_timeout,
+                self.fetch_document_once_observed(
+                    target.clone(),
+                    Some(session.cookie()),
+                    Some(Arc::clone(&status_slot)),
+                ),
+            )
+            .await
+            .map_err(|_| fetch::EquipmentFetchFailure {
+                category: MailEquipmentDiagnosticCategory::Timeout,
+                status: fetch::nonzero_status(&status_slot),
+                elapsed_millis: fetch::elapsed_millis(started),
+                body: None,
+            })?;
+            match result {
+                Ok(body) => return Ok(body),
+                Err(EquipmentFetchError::Observed(failure))
+                    if failure.category == MailEquipmentDiagnosticCategory::SessionExpired =>
+                {
+                    // 已看到的登录页和状态码属于这次失败证据，不能在凭据耗尽后丢弃。
+                    if session.invalidate_current().await.is_err()
+                        || session.advance().is_err()
+                        || attempt == 63
+                    {
+                        return Err(failure);
+                    }
+                }
+                Err(EquipmentFetchError::Observed(failure)) => return Err(failure),
+                Err(EquipmentFetchError::SessionExpired) => {
+                    return Err(fetch::EquipmentFetchFailure {
+                        category: MailEquipmentDiagnosticCategory::SessionExpired,
+                        status: None,
+                        elapsed_millis: None,
+                        body: None,
+                    });
+                }
+                Err(EquipmentFetchError::Intake(_)) => {
+                    return Err(fetch::EquipmentFetchFailure {
+                        category: MailEquipmentDiagnosticCategory::Network,
+                        status: None,
+                        elapsed_millis: None,
+                        body: None,
+                    });
+                }
+            }
         }
-        if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-            return Err(EquipmentFetchError::Intake(AdminIntakeError::SourceUnavailable));
-        }
-        if !status.is_success() || !is_html {
-            return Err(EquipmentFetchError::Intake(AdminIntakeError::InvalidSource));
-        }
-        Ok(body)
+        Err(fetch::EquipmentFetchFailure {
+            category: MailEquipmentDiagnosticCategory::SessionExpired,
+            status: None,
+            elapsed_millis: None,
+            body: None,
+        })
+    }
+
+    async fn fetch_document_once_observed(
+        &self,
+        target: Url,
+        cookie: Option<&MoogleMailCookie>,
+        status_slot: Option<Arc<AtomicU16>>,
+    ) -> Result<fetch::EquipmentFetchSuccess, EquipmentFetchError> {
+        fetch::document_once(self, target, cookie, status_slot).await
     }
 
     async fn read_mail_attachment_inner(
@@ -269,6 +380,140 @@ impl EquipmentSourceAdapter {
         let mut target = self.endpoint.clone();
         target.set_path(&format!("{prefix}{}/{key}", attachment.external_equipment_id));
         self.read_url_inner(world_id, target.to_string()).await
+    }
+
+    async fn read_mail_attachment_diagnostic_inner(
+        &self,
+        context: MailEquipmentDiagnosticContext,
+        attachment: MailEquipmentAttachment,
+    ) -> MailEquipmentReadOutcome {
+        let invalid = || {
+            diagnostics::prepare_observation(
+                self,
+                context.clone(),
+                MailEquipmentDiagnosticStage::Request,
+                MailEquipmentDiagnosticCategory::Configuration,
+                None,
+                None,
+                None,
+            )
+        };
+        if !context.validate() || attachment.external_equipment_id != context.external_equipment_id
+        {
+            return MailEquipmentReadOutcome::Failed {
+                error: ApplicationError::from(AdminIntakeError::InvalidCommand),
+                observation: invalid(),
+            };
+        }
+        let world = match MoogleMailWorld::parse(&context.world_id) {
+            Some(world) => world,
+            None => {
+                return MailEquipmentReadOutcome::Failed {
+                    error: ApplicationError::from(AdminIntakeError::InvalidCommand),
+                    observation: invalid(),
+                };
+            }
+        };
+        let prefix = if context.world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
+        let target = match attachment.key.with_bytes(|bytes| {
+            std::str::from_utf8(bytes).map(|key| {
+                let mut target = self.endpoint.clone();
+                target.set_path(&format!("{prefix}{}/{}", context.external_equipment_id, key));
+                target
+            })
+        }) {
+            Ok(Ok(target)) => target,
+            _ => {
+                return MailEquipmentReadOutcome::Failed {
+                    error: ApplicationError::from(AdminIntakeError::InvalidSource),
+                    observation: diagnostics::prepare_observation(
+                        self,
+                        context,
+                        MailEquipmentDiagnosticStage::Request,
+                        MailEquipmentDiagnosticCategory::Configuration,
+                        None,
+                        None,
+                        None,
+                    ),
+                };
+            }
+        };
+        let result = self.fetch_document_for_world_observed(world, target).await;
+        let fetched = match result {
+            Ok(fetched) => fetched,
+            Err(mut failure) => {
+                let body = std::mem::take(&mut failure.body);
+                let observation = diagnostics::prepare_observation(
+                    self,
+                    context,
+                    MailEquipmentDiagnosticStage::Response,
+                    failure.category,
+                    failure.status,
+                    failure.elapsed_millis,
+                    body,
+                );
+                return MailEquipmentReadOutcome::Failed {
+                    error: ApplicationError::from(match failure.category {
+                        MailEquipmentDiagnosticCategory::Configuration
+                        | MailEquipmentDiagnosticCategory::Redirect
+                        | MailEquipmentDiagnosticCategory::ResponseTooLarge
+                        | MailEquipmentDiagnosticCategory::ContentEncoding
+                        | MailEquipmentDiagnosticCategory::HttpStatus
+                        | MailEquipmentDiagnosticCategory::ContentType => {
+                            AdminIntakeError::InvalidSource
+                        }
+                        _ => AdminIntakeError::SourceUnavailable,
+                    }),
+                    observation,
+                };
+            }
+        };
+        let response_status = Some(fetched.status);
+        let response_elapsed = fetched.elapsed_millis;
+        let body = fetched.body;
+        let equipment_id = context.external_equipment_id.clone();
+        let parsed = parse_equipment_page(&body, &equipment_id);
+        let owned_body = body;
+        match parsed {
+            Ok(facts) => match facts_to_snapshot(&context.world_id, facts, attachment.key) {
+                Ok(snapshot) => MailEquipmentReadOutcome::Loaded {
+                    snapshot,
+                    observation: diagnostics::prepare_observation(
+                        self,
+                        context,
+                        MailEquipmentDiagnosticStage::Parse,
+                        MailEquipmentDiagnosticCategory::ProtocolDrift,
+                        response_status,
+                        response_elapsed,
+                        Some(owned_body),
+                    ),
+                },
+                Err(error) => MailEquipmentReadOutcome::Failed {
+                    error: ApplicationError::from(error),
+                    observation: diagnostics::prepare_observation(
+                        self,
+                        context,
+                        MailEquipmentDiagnosticStage::Validate,
+                        MailEquipmentDiagnosticCategory::SnapshotInvalid,
+                        response_status,
+                        response_elapsed,
+                        Some(owned_body),
+                    ),
+                },
+            },
+            Err(error) => MailEquipmentReadOutcome::Failed {
+                error: ApplicationError::from(error),
+                observation: diagnostics::prepare_observation(
+                    self,
+                    context,
+                    MailEquipmentDiagnosticStage::Parse,
+                    MailEquipmentDiagnosticCategory::ProtocolDrift,
+                    response_status,
+                    response_elapsed,
+                    Some(owned_body),
+                ),
+            },
+        }
     }
 
     async fn read_json_inner(
@@ -333,6 +578,31 @@ impl MailEquipmentReader for EquipmentSourceAdapter {
                 .map_err(ApplicationError::from)
         })
     }
+
+    fn read_diagnostic(
+        &self,
+        context: MailEquipmentDiagnosticContext,
+        attachment: MailEquipmentAttachment,
+    ) -> auction_application::MailEquipmentReadFuture<'_> {
+        Box::pin(self.read_mail_attachment_diagnostic_inner(context, attachment))
+    }
+
+    fn retain_failure(
+        &self,
+        observation: MailEquipmentObservation,
+        stage: MailEquipmentDiagnosticStage,
+        category: MailEquipmentDiagnosticCategory,
+        detail_code: Option<String>,
+    ) -> auction_application::MailEquipmentRetentionFuture<'static> {
+        Box::pin(diagnostics::retain_failure(
+            self.diagnostics.clone(),
+            self.diagnostic_reporter.clone(),
+            observation,
+            stage,
+            category,
+            detail_code,
+        ))
+    }
 }
 
 impl EquipmentKeySealerPort for EquipmentKeySealer {
@@ -344,6 +614,31 @@ impl EquipmentKeySealerPort for EquipmentKeySealer {
         EquipmentKeySealer::seal(self, equipment_id, key)
             .map_err(|_: EquipmentKeySealerError| AdminIntakeError::KeyUnavailable)
     }
+}
+
+fn facts_to_snapshot(
+    world_id: &str,
+    facts: EquipmentFacts,
+    key: EquipmentKey,
+) -> Result<AdminIntakeSourceSnapshot, AdminIntakeError> {
+    let attributes = facts.attributes()?;
+    let mut fingerprint_input = Vec::new();
+    fingerprint_input.extend_from_slice(b"hentaiverse-equipment-v1\0");
+    fingerprint_input.extend_from_slice(world_id.as_bytes());
+    fingerprint_input.push(0);
+    fingerprint_input.extend_from_slice(facts.external_equipment_id.as_bytes());
+    Ok(AdminIntakeSourceSnapshot {
+        adapter: "hentaiverse-equipment-v1".to_owned(),
+        source_fingerprint: sha256(fingerprint_input),
+        external_equipment_id: facts.external_equipment_id,
+        name: facts.name,
+        category: facts.category,
+        level: facts.level,
+        tradeable: facts.tradeable,
+        attributes,
+        collected_at: Utc::now(),
+        key,
+    })
 }
 
 /// 创建关闭代理和重定向的来源 HTTP client。

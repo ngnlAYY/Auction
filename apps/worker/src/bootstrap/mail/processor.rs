@@ -37,14 +37,17 @@ pub(super) fn build_processor_and_delivery(
             let delivery_opener = EquipmentKeyOpener::new(delivery_data_key);
             let equipment_client = build_equipment_http_client()
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let equipment = Arc::new(
-                EquipmentSourceAdapter::production(
-                    equipment_client,
-                    EquipmentSourcePolicy::default(),
-                )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?
-                .with_mooglemail_credentials(credentials.clone()),
-            );
+            let mut equipment = EquipmentSourceAdapter::production(
+                equipment_client,
+                EquipmentSourcePolicy::default(),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .with_mooglemail_credentials(credentials.clone())
+            .with_diagnostic_reporter(super::diagnostics::report_equipment_failure);
+            if let Some(recorder) = client.diagnostic_recorder() {
+                equipment = equipment.with_diagnostics(recorder);
+            }
+            let equipment = Arc::new(equipment);
             let custody_equipment: Arc<dyn MailEquipmentReader> = equipment.clone();
             let equipment_secrets: Arc<dyn SettlementFulfillmentEquipmentSecretReader> =
                 store.clone();

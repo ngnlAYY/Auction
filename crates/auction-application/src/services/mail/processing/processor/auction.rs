@@ -3,6 +3,10 @@
 use super::super::commands::{auction_request_hash, decision, stable_command_id};
 use super::super::pricing::resolve_start_price_plan;
 use super::*;
+use crate::{
+    MailEquipmentDiagnosticCategory, MailEquipmentDiagnosticContext, MailEquipmentDiagnosticStage,
+    MailEquipmentEvidenceStatus, MailEquipmentObservation, MailEquipmentReadOutcome,
+};
 
 impl<E, A, D, U, C> MailProcessorService<E, A, D, U, C>
 where
@@ -16,6 +20,7 @@ where
         &self,
         mut message: MailMessage,
         now: DateTime<Utc>,
+        pending_equipment_diagnostic: &mut Option<crate::PendingMailEquipmentDiagnostic>,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         let attachment_ids = message.sorted_attachment_ids();
         if message.credits > 0 || message.cod > 0 {
@@ -85,54 +90,112 @@ where
         let mut items = Vec::with_capacity(attachments.len());
         for (index, attachment) in attachments.into_iter().enumerate() {
             let external_equipment_id = attachment.external_equipment_id.clone();
-            let mut snapshot = match self.equipment.read(message.world_id.clone(), attachment).await
-            {
-                Ok(snapshot) => snapshot,
-                Err(_) if message.returnable => {
-                    return self
-                        .reject_with_return_and_notice(
-                            &message,
-                            attachment_ids,
-                            MailNotificationTemplate::AuctionEquipmentRejected,
-                            "auction_equipment_rejected",
-                            "auction_equipment_rejected",
-                        )
-                        .await;
-                }
-                Err(_) => return Err(MailProcessingError::UnsafeDisposition.into()),
+            let context = MailEquipmentDiagnosticContext {
+                mailbox_key: message.mailbox_key.clone(),
+                world_id: message.world_id.clone(),
+                external_mail_id: message.external_mail_id.clone(),
+                external_equipment_id: external_equipment_id.clone(),
+                attachment_position: u16::try_from(index + 1).unwrap_or(u16::MAX),
             };
-            if snapshot.external_equipment_id != external_equipment_id
-                || snapshot.validate_for_mail(now).is_err()
-            {
-                snapshot.clear_secret();
-                if message.returnable {
-                    return self
-                        .reject_with_return_and_notice(
+            let (read_result, mut observation) =
+                match self.equipment.read_diagnostic(context.clone(), attachment).await {
+                    MailEquipmentReadOutcome::Loaded { snapshot, observation } => {
+                        (Ok(snapshot), observation)
+                    }
+                    MailEquipmentReadOutcome::Failed { error, observation } => {
+                        (Err(error), observation)
+                    }
+                };
+            if observation.context != context {
+                // 错误关联的证据不能归入本封邮件；诊断损坏仍不得改变原始读取结果。
+                observation.context = context;
+                observation.prepared = None;
+                observation.preparation_status = MailEquipmentEvidenceStatus::PrepareFailed;
+                observation.preparation_error = Some("invalid_context".to_owned());
+            }
+            let mut snapshot = match read_result {
+                Ok(snapshot) => snapshot,
+                Err(_) => {
+                    let result = if message.returnable {
+                        self.reject_with_return_and_notice(
                             &message,
                             attachment_ids,
                             MailNotificationTemplate::AuctionEquipmentRejected,
                             "auction_equipment_rejected",
                             "auction_equipment_rejected",
                         )
-                        .await;
+                        .await
+                    } else {
+                        Err(MailProcessingError::UnsafeDisposition.into())
+                    };
+                    let stage = observation.stage;
+                    let category = observation.category;
+                    return self.defer_equipment_diagnostic(
+                        result,
+                        observation,
+                        stage,
+                        category,
+                        None,
+                        pending_equipment_diagnostic,
+                    );
                 }
-                return Err(MailProcessingError::UnsafeDisposition.into());
+            };
+            let validation_issue = snapshot.mail_validation_issue(now);
+            let identity_mismatch = snapshot.external_equipment_id != external_equipment_id;
+            if identity_mismatch || validation_issue.is_some() {
+                snapshot.clear_secret();
+                let result = if message.returnable {
+                    self.reject_with_return_and_notice(
+                        &message,
+                        attachment_ids,
+                        MailNotificationTemplate::AuctionEquipmentRejected,
+                        "auction_equipment_rejected",
+                        "auction_equipment_rejected",
+                    )
+                    .await
+                } else {
+                    Err(MailProcessingError::UnsafeDisposition.into())
+                };
+                let (category, detail) = if identity_mismatch {
+                    (MailEquipmentDiagnosticCategory::IdentityMismatch, None)
+                } else {
+                    (
+                        MailEquipmentDiagnosticCategory::SnapshotInvalid,
+                        validation_issue.map(str::to_owned),
+                    )
+                };
+                return self.defer_equipment_diagnostic(
+                    result,
+                    observation,
+                    MailEquipmentDiagnosticStage::Validate,
+                    category,
+                    detail,
+                    pending_equipment_diagnostic,
+                );
             }
             let rejection_reason = self.equipment_filter.evaluate(&snapshot);
             if !rejection_reason.is_empty() {
                 snapshot.clear_secret();
-                if message.returnable {
-                    return self
-                        .reject_with_return_and_notice(
-                            &message,
-                            attachment_ids,
-                            MailNotificationTemplate::AuctionEquipmentRejected,
-                            "auction_equipment_rejected",
-                            rejection_reason,
-                        )
-                        .await;
-                }
-                return Err(MailProcessingError::UnsafeDisposition.into());
+                let result = if message.returnable {
+                    self.reject_with_return_and_notice(
+                        &message,
+                        attachment_ids,
+                        MailNotificationTemplate::AuctionEquipmentRejected,
+                        "auction_equipment_rejected",
+                        rejection_reason,
+                    )
+                    .await
+                } else {
+                    Err(MailProcessingError::UnsafeDisposition.into())
+                };
+                return self.defer_equipment_diagnostic(
+                    result,
+                    observation,
+                    MailEquipmentDiagnosticStage::Validate,
+                    MailEquipmentDiagnosticCategory::FilterRejected,
+                    Some(rejection_reason.to_owned()),
+                    pending_equipment_diagnostic,
+                );
             }
             items.push(crate::MailAuctionItem {
                 external_equipment_id: snapshot.external_equipment_id.clone(),
@@ -182,5 +245,24 @@ where
                 "delivery_ids": [delivery_id],
             }),
         )
+    }
+
+    fn defer_equipment_diagnostic(
+        &self,
+        result: Result<MailProcessingDecision, ApplicationError>,
+        observation: MailEquipmentObservation,
+        stage: MailEquipmentDiagnosticStage,
+        category: MailEquipmentDiagnosticCategory,
+        detail_code: Option<String>,
+        pending: &mut Option<crate::PendingMailEquipmentDiagnostic>,
+    ) -> Result<MailProcessingDecision, ApplicationError> {
+        // 这里只构造任务，不轮询留证 future；Worker 会在业务 item_timeout 结束后执行。
+        *pending = Some(crate::PendingMailEquipmentDiagnostic::new(self.equipment.retain_failure(
+            observation,
+            stage,
+            category,
+            detail_code,
+        )));
+        result
     }
 }

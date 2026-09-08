@@ -2,12 +2,12 @@ use std::net::SocketAddr;
 
 use auction_application::{
     AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakeSummary,
-    ApplicationError, MailDisplaySnapshot,
+    ApplicationError, MailDisplaySnapshot, MailEquipmentDiagnosticSnapshot,
 };
 use auction_contracts::{
-    AdminMailDisplayResponse, AdminMailIntakeDetailResponse, AdminMailIntakeListResponse,
-    AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse, AdminMailPaginationResponse,
-    ApiResponse,
+    AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse, AdminMailIntakeDetailResponse,
+    AdminMailIntakeListResponse, AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse,
+    AdminMailPaginationResponse, ApiResponse,
 };
 use axum::{
     Json,
@@ -221,6 +221,7 @@ fn map_detail(detail: AdminMailIntakeDetail) -> AdminMailIntakeDetailResponse {
         subject: summary.subject,
         metadata: map_metadata(detail.metadata),
         message_display: detail.message_display.map(map_display),
+        equipment_diagnostic: detail.equipment_diagnostic.map(map_equipment_diagnostic),
     }
 }
 
@@ -232,6 +233,24 @@ fn map_display(display: MailDisplaySnapshot) -> AdminMailDisplayResponse {
         attachment_ids: display.attachment_ids,
         credits: display.credits,
         cod: display.cod,
+    }
+}
+
+fn map_equipment_diagnostic(
+    diagnostic: MailEquipmentDiagnosticSnapshot,
+) -> AdminMailEquipmentDiagnosticResponse {
+    AdminMailEquipmentDiagnosticResponse {
+        schema_version: diagnostic.schema_version,
+        equipment_id: diagnostic.equipment_id,
+        attachment_position: diagnostic.attachment_position,
+        stage: diagnostic.stage.as_str().to_owned(),
+        category: diagnostic.category.as_str().to_owned(),
+        detail_code: diagnostic.detail_code,
+        http_status: diagnostic.http_status,
+        elapsed_millis: diagnostic.elapsed_millis,
+        evidence_id: diagnostic.evidence_id.map(|id| id.to_string()),
+        evidence_status: diagnostic.evidence_status.as_str().to_owned(),
+        retention_error: diagnostic.retention_error,
     }
 }
 

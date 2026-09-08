@@ -145,6 +145,18 @@ pub(super) fn decode_message_display(
     display.validate().then_some(display).ok_or_else(|| storage_error("邮件原始信息安全投影无效"))
 }
 
+pub(super) fn decode_equipment_diagnostic(
+    value: Value,
+) -> Result<auction_application::MailEquipmentDiagnosticSnapshot, ApplicationError> {
+    let diagnostic =
+        serde_json::from_value::<auction_application::MailEquipmentDiagnosticSnapshot>(value)
+            .map_err(|_| storage_error("邮件装备诊断格式无效"))?;
+    diagnostic
+        .validate()
+        .then_some(diagnostic)
+        .ok_or_else(|| storage_error("邮件装备诊断安全投影无效"))
+}
+
 fn to_i32(value: i64) -> Result<i32, ApplicationError> {
     i32::try_from(value).map_err(|_| storage_error("邮件决定计数超出安全范围"))
 }

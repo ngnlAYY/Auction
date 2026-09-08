@@ -61,6 +61,8 @@ impl MoogleMailClient {
             world_id: error.world.as_str().to_owned(),
             mailbox_key: None,
             external_mail_id,
+            external_equipment_id: None,
+            attachment_position: None,
         };
         let outcome = MailDiagnosticOutcome {
             failure_code: error.category.as_str().to_owned(),

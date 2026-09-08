@@ -67,6 +67,7 @@ pub(super) fn decision(
         status: status.to_owned(),
         decision_code: decision_code.to_owned(),
         metadata,
+        equipment_diagnostic: None,
     };
     result.validate()?;
     Ok(result)

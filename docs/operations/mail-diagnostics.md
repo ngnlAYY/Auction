@@ -84,3 +84,33 @@ Return/Take 使用独立 action proof，不属于主动 ComposeSend。
 Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_reference` 填成 `succeeded`；后端会按既有
 invalid 条件拒绝，Admin Web 隐藏该成功选项。`retry` 和 `failed` 仍需显式管理员命令与审计，Return/Take 保留
 独立人工核对路径。该防御不增加 HTTP 字段或错误类别。
+
+## 装备读取失败诊断
+
+每个完整装备响应先执行加密 prepare；只有 request、response、parse 或 validate 阶段的读取/解析/身份/
+snapshot/filter 失败才在有界 2 秒内 retain，成功读取直接丢弃密文。装备邮件只保存首个失败的非权威
+`equipment_diagnostic` sidecar，不进入 `decision_metadata`、command digest、completion proof 或 cursor。
+
+Admin A18 详情可展示装备 ID、1-based 附件位置、`stage`（`request`、`response`、`parse`、`validate`）、闭集
+`category`、可选 `detail_code`、真实可用的 HTTP status、`elapsed_millis`（最多 300000）、evidence UUID 和
+retention status/error。`snapshot_invalid` 与 `filter_rejected` 才允许对应闭集 `detail_code`；其它 category 不带
+细节原文。网络、超时、截断或超大响应只标记 `body_unavailable`，不伪称取得完整响应。
+
+安全日志始终包含 world/mailbox/external mail ID/equipment ID/附件位置等关联字段，即使留证 disabled、
+prepare_failed、save_failed 或 completion_unconfirmed。状态需区分 `disabled`、`prepare_failed`、`save_failed`、
+`completion_unconfirmed`、`retained` 和 `body_unavailable`；evidence UUID 不保证文件永久存在，可能因保留期或
+容量清理后导出为 `not_found`。旧邮件若没有底层失败 trace，不补写失败原因，也不重放旧邮件。
+装备诊断上下文的 `external_equipment_id` 与 `attachment_position` 在通用邮件诊断中保持 optional；缺省时省略，
+以保持既有 v2 AAD 字节逐字兼容，不升级证据格式。
+装备证据复用现有 MoogleMail diagnostics 的父密钥、保留期、容量上限和 `mail-evidence export` CLI，不新增配置字段。
+
+留证不占用业务定时器：应用层返回 `MailProcessingAttempt`，其中保留原始处理结果和可选的
+`pendingEquipmentDiagnostic`，只构造句柄，不轮询 static future。`process_with_retry` 只收集每次已结束尝试的句柄；
+`process_claim_inner` 在 `timeout(process_remaining, process_with_retry)` 结束后，才于 `item_timeout` 和 batch
+`process_remaining` 两层业务定时器之外，以 2 秒上限 resolve。只有 terminal `OkRejected` 才挂接 equipment sidecar；
+中间 `Err` 也留证/写日志，但保留原 retryability 分类。实际 retention elapsed 会延长后续 batch deadline，避免本封
+留证占用下一封业务预算。日志由 Worker 始终注入的同步 callback 出口提供；integration 不新增 tracing 依赖，raw
+recorder 只在开关启用且同一实例满足条件时注入。
+
+HTTP body timeout 仍只保留 `body_unavailable` 与最后实际观测到的 header status，不把 partial body 伪称完整响应；
+session expired 在凭据耗尽或失效写回失败时保留最后已取得的响应 body、status 和 elapsed。

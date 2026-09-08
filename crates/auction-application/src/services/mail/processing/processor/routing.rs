@@ -17,6 +17,7 @@ where
     pub(super) async fn process_message(
         &self,
         message: MailMessage,
+        pending_equipment_diagnostic: &mut Option<crate::PendingMailEquipmentDiagnostic>,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         message.validate()?;
         if !self.world_ids.iter().any(|world_id| world_id == &message.world_id) {
@@ -27,7 +28,7 @@ where
         // 兼容合法的大小写变体，同时不把带隐藏空白的未知标题误认成业务命令。
         let routing_subject = message.subject.to_ascii_lowercase();
         match routing_subject.as_str() {
-            "auction" => self.process_auction(message, now).await,
+            "auction" => self.process_auction(message, now, pending_equipment_diagnostic).await,
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
             subject if settlement_return_subject(subject) => {

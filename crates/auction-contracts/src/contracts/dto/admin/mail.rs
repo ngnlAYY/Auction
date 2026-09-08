@@ -98,6 +98,7 @@ pub struct AdminMailIntakeDetailResponse {
     pub subject: Option<String>,
     pub metadata: AdminMailIntakeMetadataResponse,
     pub message_display: Option<AdminMailDisplayResponse>,
+    pub equipment_diagnostic: Option<AdminMailEquipmentDiagnosticResponse>,
 }
 
 /// Admin 入站邮件原始信息的安全展示响应。
@@ -124,4 +125,21 @@ impl std::fmt::Debug for AdminMailDisplayResponse {
             .field("cod", &self.cod)
             .finish()
     }
+}
+
+/// Admin 入站邮件装备读取诊断的独立安全响应。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminMailEquipmentDiagnosticResponse {
+    pub schema_version: u8,
+    pub equipment_id: String,
+    pub attachment_position: u16,
+    pub stage: String,
+    pub category: String,
+    pub detail_code: Option<String>,
+    pub http_status: Option<u16>,
+    pub elapsed_millis: Option<u64>,
+    pub evidence_id: Option<String>,
+    pub evidence_status: String,
+    pub retention_error: Option<String>,
 }

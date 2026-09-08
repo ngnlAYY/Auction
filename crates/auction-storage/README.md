@@ -406,7 +406,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000035` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000036` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -441,6 +441,8 @@ Sent baseline、post-Sent scan、唯一 exact payload proof 和 defense gate 由
 在成功写回前校验；成功 metadata 必须含 `sent_verified=true`、`external_reference_proven=true`、
 `proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。不完整或多匹配结果保持
 `manual_reconcile`，不自动重寄。PostgreSQL 完整档的
+`inbound_mail.equipment_diagnostic` 由 admin_mail 读取/映射 owner 持有，仅写入被拒绝装备邮件的首个失败 sidecar；
+它是非权威 projection，不参与 decision metadata、command digest、completion proof 或 cursor，SQLite 不新增列。
 `src/database/fulfillment_scheduler/mod.rs` 装配结算履约 owner；`claims.rs`、`delivery.rs`、
 `reconcile.rs` 和 `mapping.rs` 分别持有 claim、prepared/activation、证据收口和共享映射；
 claim 以 obligation owner 顺序锁定并支持历史数据缺失 execution 行的惰性补齐；claim 同时保留装备来源

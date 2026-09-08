@@ -228,6 +228,7 @@ pub struct AdminMailIntakeDetail {
     pub summary: AdminMailIntakeSummary,
     pub metadata: AdminMailIntakeMetadata,
     pub message_display: Option<MailDisplaySnapshot>,
+    pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
 }
 
 /// 入站邮件数字分页结果。

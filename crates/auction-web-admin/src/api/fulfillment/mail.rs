@@ -4,8 +4,9 @@
 //! A20 触发动作使用单个 command ID 唤醒全部 Worker poller，浏览器不推导邮件处理状态。
 
 use auction_contracts::{
-    AdminMailDisplayResponse, AdminMailIntakeMetadataResponse, AdminMailPaginationResponse,
-    AdminMailPollTriggerRequest, AdminMailPollingRequest,
+    AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
+    AdminMailIntakeMetadataResponse, AdminMailPaginationResponse, AdminMailPollTriggerRequest,
+    AdminMailPollingRequest,
 };
 pub(crate) use auction_contracts::{
     AdminMailIntakeDetailResponse as AdminMailIntakeDetail,
@@ -363,7 +364,116 @@ fn decode_mail_intake_detail(
     }
     decode_mail_metadata(&value.metadata)?;
     decode_mail_display(value.message_display.as_ref())?;
+    decode_mail_equipment_diagnostic(value.equipment_diagnostic.as_ref())?;
     Ok(value)
+}
+
+fn decode_mail_equipment_diagnostic(
+    value: Option<&AdminMailEquipmentDiagnosticResponse>,
+) -> Result<(), &'static str> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let detail_valid = match (value.category.as_str(), value.detail_code.as_deref()) {
+        ("snapshot_invalid", Some(detail)) => matches!(
+            detail,
+            "adapter_invalid"
+                | "fingerprint_invalid"
+                | "equipment_id_invalid"
+                | "name_invalid"
+                | "category_invalid"
+                | "level_invalid"
+                | "collected_at_invalid"
+                | "collected_at_future"
+                | "attributes_invalid"
+        ),
+        ("filter_rejected", Some(detail)) => matches!(
+            detail,
+            "quality_not_allowed"
+                | "prefix_not_allowed"
+                | "suffix_not_allowed"
+                | "category_not_allowed"
+                | "equipment_type_not_allowed"
+                | "level_not_allowed"
+                | "attributes_invalid"
+                | "tradeable_required"
+        ),
+        (_, None) => true,
+        _ => false,
+    };
+    let evidence_valid = match value.evidence_status.as_str() {
+        "retained" | "body_unavailable" => {
+            value.evidence_id.as_deref().is_some_and(valid_evidence_id)
+                && value.retention_error.is_none()
+        }
+        "save_failed" | "completion_unconfirmed" => {
+            value.evidence_id.as_deref().is_some_and(valid_evidence_id)
+                && value.retention_error.as_deref().is_some_and(valid_machine_code)
+        }
+        "prepare_failed" => {
+            value.evidence_id.is_none()
+                && value.retention_error.as_deref().is_some_and(valid_machine_code)
+        }
+        "disabled" => value.evidence_id.is_none() && value.retention_error.is_none(),
+        _ => false,
+    };
+    if value.schema_version != 1
+        || !valid_safe_text(&value.equipment_id, 64)
+        || !value.equipment_id.bytes().all(|byte| byte.is_ascii_digit())
+        || !(1..=1000).contains(&value.attachment_position)
+        || !matches!(value.stage.as_str(), "request" | "response" | "parse" | "validate")
+        || !matches!(
+            value.category.as_str(),
+            "configuration"
+                | "credential_unavailable"
+                | "session_expired"
+                | "timeout"
+                | "network"
+                | "redirect"
+                | "response_too_large"
+                | "content_encoding"
+                | "rate_limited"
+                | "server_error"
+                | "http_status"
+                | "content_type"
+                | "protocol_drift"
+                | "identity_mismatch"
+                | "snapshot_invalid"
+                | "filter_rejected"
+        )
+        || !detail_valid
+        || value.http_status.is_some_and(|status| !(100..=599).contains(&status))
+        || value.elapsed_millis.is_some_and(|elapsed| elapsed > 300_000)
+        || !evidence_valid
+    {
+        return Err("mail_equipment_diagnostic");
+    }
+    Ok(())
+}
+
+fn valid_evidence_id(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok_and(|id| !id.is_nil())
+}
+
+fn valid_machine_code(value: &str) -> bool {
+    matches!(
+        value,
+        "invalid_context"
+            | "invalid_outcome"
+            | "invalid_message"
+            | "payload_too_large"
+            | "body_unavailable"
+            | "encryption"
+            | "serialization"
+            | "io"
+            | "capacity"
+            | "not_found"
+            | "authentication"
+            | "unsupported_platform"
+            | "retention_timeout"
+            | "retention_cancelled"
+            | "recorder_unavailable"
+    )
 }
 
 fn decode_mail_display(value: Option<&AdminMailDisplayResponse>) -> Result<(), &'static str> {

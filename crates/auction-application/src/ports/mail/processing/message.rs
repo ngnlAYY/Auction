@@ -178,4 +178,50 @@ pub trait MailEquipmentReader: Send + Sync {
         world_id: String,
         attachment: MailEquipmentAttachment,
     ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot>;
+
+    /// 读取同一装备并携带非权威诊断；旧读取器默认保留原结果。
+    fn read_diagnostic(
+        &self,
+        context: crate::MailEquipmentDiagnosticContext,
+        attachment: MailEquipmentAttachment,
+    ) -> crate::MailEquipmentReadFuture<'_> {
+        Box::pin(async move {
+            let result = self.read(context.world_id.clone(), attachment).await;
+            let observation = crate::MailEquipmentObservation::unavailable(context);
+            match result {
+                Ok(snapshot) => crate::MailEquipmentReadOutcome::Loaded { snapshot, observation },
+                Err(error) => crate::MailEquipmentReadOutcome::Failed { error, observation },
+            }
+        })
+    }
+
+    /// 有界留存失败证据并生成安全摘要；诊断失败不能成为业务错误。
+    fn retain_failure(
+        &self,
+        observation: crate::MailEquipmentObservation,
+        stage: crate::MailEquipmentDiagnosticStage,
+        category: crate::MailEquipmentDiagnosticCategory,
+        detail_code: Option<String>,
+    ) -> crate::MailEquipmentRetentionFuture<'static> {
+        Box::pin(async move {
+            let evidence_id = observation.prepared.as_ref().map(|evidence| evidence.evidence_id());
+            crate::MailEquipmentDiagnosticSnapshot {
+                schema_version: 1,
+                equipment_id: observation.context.external_equipment_id,
+                attachment_position: observation.context.attachment_position,
+                stage,
+                category,
+                detail_code,
+                http_status: observation.http_status,
+                elapsed_millis: observation.elapsed_millis,
+                evidence_id,
+                evidence_status: if evidence_id.is_some() {
+                    crate::MailEquipmentEvidenceStatus::SaveFailed
+                } else {
+                    crate::MailEquipmentEvidenceStatus::Disabled
+                },
+                retention_error: evidence_id.map(|_| "recorder_unavailable".to_owned()),
+            }
+        })
+    }
 }

@@ -107,8 +107,8 @@ pub(crate) async fn insert_or_verify_intake(
         "INSERT INTO public.inbound_mail
             (id, mailbox_key, external_mail_id, world_id, mail_kind, content_digest,
              received_at, status, decision_code, decision_metadata, processed_at,
-             sender, subject, message_display)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             sender, subject, message_display, equipment_diagnostic)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          ON CONFLICT (mailbox_key, external_mail_id) DO NOTHING",
     )
     .bind(item.id)
@@ -125,6 +125,7 @@ pub(crate) async fn insert_or_verify_intake(
     .bind(&item.sender)
     .bind(&item.subject)
     .bind(item.message_display.as_ref().map(Json))
+    .bind(item.equipment_diagnostic.as_ref().map(Json))
     .execute(&mut **transaction)
     .await
     .map_err(|_| storage_error("写入 MoogleMail 入站事实失败"))?;

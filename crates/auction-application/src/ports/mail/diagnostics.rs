@@ -22,6 +22,8 @@ pub struct MailDiagnosticContext {
     pub world_id: String,
     pub mailbox_key: Option<String>,
     pub external_mail_id: Option<String>,
+    pub external_equipment_id: Option<String>,
+    pub attachment_position: Option<u16>,
 }
 
 /// 业务决定及安全失败分类。
@@ -157,6 +159,14 @@ pub type MailDiagnosticFuture<'a, T> =
 
 /// 敏感邮件诊断证据记录器。
 pub trait MailDiagnosticRecorder: Send + Sync {
+    /// 同步加密已完整读取的响应，是否落盘由后续业务失败决定。
+    fn prepare_response(
+        &self,
+        context: MailDiagnosticContext,
+        status: Option<u16>,
+        body: Option<&[u8]>,
+    ) -> Result<PreparedMailEvidence, MailDiagnosticError>;
+
     fn prepare_message(
         &self,
         context: MailDiagnosticContext,
