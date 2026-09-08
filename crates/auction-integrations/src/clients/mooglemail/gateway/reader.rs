@@ -25,7 +25,10 @@ impl MoogleMailGateway {
         credentials: MoogleMailCredentialSet,
         config: MoogleMailGatewayConfig,
     ) -> Result<Self, MoogleMailError> {
-        if config.maximum_pages == 0 || config.maximum_pages > MAX_HARD_PAGES {
+        if config.maximum_pages == 0
+            || config.maximum_pages > MAX_HARD_PAGES
+            || config.fetch_budget.is_zero()
+        {
             return Err(configuration(MoogleMailWorld::Main));
         }
         for (index, sender) in config.sender_allowlist.iter().enumerate() {
@@ -50,23 +53,48 @@ impl MoogleMailGateway {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<MoogleMailPage, MoogleMailError> {
+        self.fetch_with_deadline(world, cursor, limit, None).await
+    }
+
+    /// 使用调用方提供的绝对截止时刻读取 inbox。
+    pub async fn fetch_with_deadline(
+        &self,
+        world: MoogleMailWorld,
+        cursor: Option<&str>,
+        limit: usize,
+        requested_deadline: Option<std::time::Instant>,
+    ) -> Result<MoogleMailPage, MoogleMailError> {
         if limit == 0
             || limit > MAX_FETCH_LIMIT
             || cursor.is_some_and(|value| !valid_opaque_id(value))
         {
             return Err(configuration(world));
         }
+        let deadline = match requested_deadline {
+            Some(deadline) => tokio::time::Instant::from_std(deadline),
+            None => tokio::time::Instant::now()
+                .checked_add(self.config.fetch_budget)
+                .ok_or_else(|| configuration(world))?,
+        };
         let mut session = self.credentials.begin(world)?;
         for _ in 0..64 {
-            match self.fetch_with_cookie(world, cursor, limit, session.cookie()).await {
-                Ok(page) => return Ok(page),
-                Err(error) if error.category == MoogleMailErrorCategory::SessionExpired => {
-                    session.invalidate_current().await?;
+            match tokio::time::timeout_at(
+                deadline,
+                self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline),
+            )
+            .await
+            {
+                Err(_) => return Err(fetch_budget_exhausted(world)),
+                Ok(Ok(page)) => return Ok(page),
+                Ok(Err(error)) if error.category == MoogleMailErrorCategory::SessionExpired => {
+                    tokio::time::timeout_at(deadline, session.invalidate_current())
+                        .await
+                        .map_err(|_| fetch_budget_exhausted(world))??;
                     if session.advance().is_err() {
                         return Err(error);
                     }
                 }
-                Err(error) => return Err(error),
+                Ok(Err(error)) => return Err(error),
             }
         }
         Err(operation_error(
@@ -208,12 +236,16 @@ impl MoogleMailGateway {
         cursor: Option<&str>,
         limit: usize,
         cookie: &MoogleMailCookie,
+        deadline: tokio::time::Instant,
     ) -> Result<MoogleMailPage, MoogleMailError> {
         let mut seen = HashSet::new();
         let mut window = VecDeque::with_capacity(limit);
         let mut found_cursor = false;
         let mut reached_end = false;
         for page_index in 0..self.config.maximum_pages {
+            if deadline.checked_duration_since(tokio::time::Instant::now()).is_none() {
+                return Err(fetch_budget_exhausted(world));
+            }
             let target = self.client.inbox_page(world, page_index)?;
             let document = self.client.get(&target, cookie).await?;
             let inbox_page =
@@ -247,11 +279,20 @@ impl MoogleMailGateway {
         if !found_cursor && !reached_end {
             return Err(protocol_error(world));
         }
-        let newest = window.front().map(|summary| summary.external_mail_id.clone());
+        let had_candidates = !window.is_empty();
+        let detail_deadline =
+            deadline.checked_sub(std::time::Duration::from_millis(100)).unwrap_or(deadline);
         let mut messages = Vec::with_capacity(window.len());
         for summary in window.into_iter().rev() {
             let target = self.client.detail(world, &summary.external_mail_id)?;
-            let document = self.client.get(&target, cookie).await?;
+            let document =
+                match tokio::time::timeout_at(detail_deadline, self.client.get(&target, cookie))
+                    .await
+                {
+                    Ok(Ok(document)) => document,
+                    Err(_) => break,
+                    Ok(Err(error)) => return Err(error),
+                };
             let message = self.parser.parse_detail(&document, &summary)?;
             if message.external_mail_id != summary.external_mail_id
                 || message.world != summary.world
@@ -267,9 +308,15 @@ impl MoogleMailGateway {
             }
             messages.push(message);
         }
+        if messages.is_empty() && !had_candidates {
+            return Ok(MoogleMailPage { messages, next_cursor: cursor.map(str::to_owned) });
+        }
+        if messages.is_empty() {
+            return Err(fetch_budget_exhausted(world));
+        }
         // 没有任何 allowlist 命中的详情时不能推进 cursor，否则后续补充 allowlist 会永久错过
         // 已经扫描过的邮件；有成功解析的邮件时才允许跳过同一窗口内明确忽略的发件人。
-        let next_cursor = if messages.is_empty() { cursor.map(str::to_owned) } else { newest };
+        let next_cursor = messages.last().map(|message| message.external_mail_id.clone());
         Ok(MoogleMailPage { messages, next_cursor })
     }
 
@@ -281,4 +328,13 @@ impl MoogleMailGateway {
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(sender))
     }
+}
+
+fn fetch_budget_exhausted(world: MoogleMailWorld) -> MoogleMailError {
+    MoogleMailError::new(
+        MoogleMailOperation::Inbox,
+        world,
+        MoogleMailErrorCategory::RemoteTemporary,
+        true,
+    )
 }

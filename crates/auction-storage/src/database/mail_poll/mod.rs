@@ -7,7 +7,7 @@
 use auction_application::{
     AdminMailPollState, ApplicationFuture, MAX_MAIL_POLL_BATCH_SIZE,
     MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch,
-    MailPollClaim, MailPollStore,
+    MailPollClaim, MailPollCompletion, MailPollStore,
 };
 use chrono::{DateTime, Utc};
 
@@ -21,6 +21,39 @@ mod poll;
 mod state;
 
 impl MailPollStore for DatabaseStore {
+    fn lookup_completion(
+        &self,
+        mailbox_key: String,
+        world_id: String,
+        external_mail_id: String,
+        received_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, MailPollCompletion> {
+        Box::pin(async move {
+            if !valid_text(&mailbox_key, 256)
+                || !valid_text(&world_id, 256)
+                || !valid_text(&external_mail_id, 512)
+                || received_at.timestamp_nanos_opt().is_none()
+            {
+                return Err(storage_error("MoogleMail 完成事实查询参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    inbound::lookup_completion(
+                        store.pool(),
+                        &mailbox_key,
+                        &world_id,
+                        &external_mail_id,
+                        received_at,
+                    )
+                    .await
+                }
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
     fn ensure_state(
         &self,
         mailbox_key: String,

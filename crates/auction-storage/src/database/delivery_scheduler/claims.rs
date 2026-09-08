@@ -78,7 +78,7 @@ pub(super) async fn claim_postgres(
         excluded_recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names =
         excluded_recipients.iter().map(|excluded| excluded.recipient.as_str()).collect::<Vec<_>>();
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
                   recipient, payload, fencing_version, attempt_count
            FROM public.deliveries AS deliveries
@@ -109,6 +109,9 @@ pub(super) async fn claim_postgres(
                        )
                    )
                  )
+             AND "#,
+        delivery_completion_gate!(),
+        r#"
              AND NOT EXISTS (
                  SELECT 1
                  FROM unnest($3::text[], $4::text[]) AS excluded(world, recipient)
@@ -117,8 +120,8 @@ pub(super) async fn claim_postgres(
              )
            ORDER BY created_at, id
            LIMIT $2
-           FOR UPDATE SKIP LOCKED"#,
-    )
+           FOR UPDATE SKIP LOCKED"#
+    ))
     .bind(now)
     .bind(i64::from(limit))
     .bind(excluded_worlds)
@@ -142,7 +145,7 @@ pub(super) async fn claim_postgres(
             .ok_or_else(|| repository_error_owned("delivery 尝试次数溢出"))?;
         let attempt_count_db = i32::try_from(attempt_count)
             .map_err(|_| repository_error_owned("delivery 尝试次数超出数据库范围"))?;
-        let updated = sqlx::query(
+        let updated = sqlx::query(concat!(
             r#"UPDATE public.deliveries AS deliveries
                SET status = 'claimed',
                    lease_token = $2,
@@ -183,8 +186,10 @@ pub(super) async fn claim_postgres(
                                )
                            )
                        )
-                 )"#,
-        )
+                 )
+                 AND "#,
+            delivery_completion_gate!()
+        ))
         .bind(delivery_id)
         .bind(lease_token)
         .bind(lease_until)

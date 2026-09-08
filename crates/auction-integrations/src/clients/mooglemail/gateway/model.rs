@@ -1,6 +1,7 @@
 //! MoogleMail gateway 的配置和安全读取结果模型。
 
 use super::*;
+use std::time::Duration;
 
 /// MoogleMail 收件箱 gateway 的有界扫描配置。
 #[derive(Debug, Clone)]
@@ -11,6 +12,8 @@ pub struct MoogleMailGatewayConfig {
     pub sender_allowlist: Vec<String>,
     /// 明确关闭 allowlist 后才允许读取所有发件人详情。
     pub sender_allowlist_disabled: bool,
+    /// 单次 inbox 扫描及详情读取共享的总预算，覆盖限速、凭据切换和 HTTP 正文读取。
+    pub fetch_budget: Duration,
 }
 
 impl Default for MoogleMailGatewayConfig {
@@ -19,6 +22,7 @@ impl Default for MoogleMailGatewayConfig {
             maximum_pages: MAX_HARD_PAGES,
             sender_allowlist: Vec::new(),
             sender_allowlist_disabled: false,
+            fetch_budget: Duration::from_secs(30),
         }
     }
 }

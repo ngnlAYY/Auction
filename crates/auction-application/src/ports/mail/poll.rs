@@ -65,6 +65,13 @@ pub struct MailPollIntake {
     pub processed_at: DateTime<Utc>,
 }
 
+/// 远端邮件是否已有完整的本地处理证明。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailPollCompletion {
+    Missing,
+    Completed,
+}
+
 impl MailPollIntake {
     /// 校验入站事实的闭集、摘要、JSON 对象和时间边界。
     pub fn validate(&self) -> bool {
@@ -116,6 +123,15 @@ impl MailPollBatch {
 /// 只发生在 `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
 /// 后才能推进，避免远端成功而本地丢游标或重复执行不受控。
 pub trait MailPollStore: Send + Sync {
+    /// 在业务处理器或外部副作用前核验一封邮件是否已有完整处理证明。
+    fn lookup_completion(
+        &self,
+        mailbox_key: String,
+        world_id: String,
+        external_mail_id: String,
+        received_at: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, MailPollCompletion>;
+
     /// 确保一个启用的邮箱拥有初始轮询状态，并收敛配置缩短后遗留的过晚调度水位。
     ///
     /// 已暂停邮箱、活动租约和最近失败的最大退避不得被启动过程越过；没有变化时不能递增版本。

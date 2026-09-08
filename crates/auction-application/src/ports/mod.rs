@@ -303,8 +303,8 @@ pub use lifecycle::{
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
-    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollIntake,
-    MailPollStore,
+    MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollCompletion,
+    MailPollIntake, MailPollStore,
 };
 pub use mail_processing::{
     MailAuctionIntakeCommand, MailAuctionIntakePort, MailAuctionIntakeRecord,

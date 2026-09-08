@@ -19,6 +19,8 @@ pub struct MailPollFetchRequest {
     /// 已完成邮件的 external_mail_id；gateway 必须只返回该 ID 之前的未完成窗口。
     pub cursor_value: Option<String>,
     pub limit: u16,
+    /// 当前尝试的绝对截止时刻。
+    pub deadline: Option<std::time::Instant>,
 }
 
 /// 已由 integrations 解析完成、等待业务处理器消费的 MoogleMail 邮件。

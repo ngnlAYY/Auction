@@ -236,6 +236,9 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 监听器装配已支持 TCP 与 Linux Unix socket：Unix 模式在绑定前校验受信任 runtime 目录、目录级
 单实例锁、stale socket 身份、owner/group 和 `0660` 权限；当前进程退出时只清理自己创建且身份
 未变化的 socket。
+runtime 更新与恢复通过 `AdminRuntimeFileStore::WorkflowGuard` 在同一 `.admin-runtime-config.lock`
+锁域内串行执行，guard 从首次账本读取保持到 apply 返回；带锁的文件方法核对锁域并复用原锁。
+取消/异常由 RAII 释放锁，竞争请求非阻塞失败，防止旧指纹重新出现时陈旧请求覆盖后续配置。
 
 Worker 对 MoogleMail 在启动时只投影 runtime 的四类业务配置：启用的 main/isekai、各 world 发件人
 allowlist、装备过滤和通知模板。MoogleMail transport endpoint、凭据来源、mailbox durable identity 和
@@ -482,6 +485,11 @@ delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独
 总预算；gateway 保留最旧的未处理窗口并按旧到新返回，预算到期时只提交已完成前缀，cursor
 与其最后一封邮件的 ID 同事务推进；无完成项则失败退避，未完成邮件不被跳过。最终存储收口仍
 受既有租约 fence 保护。runtime 中省略该新字段使用默认值且不改变原 fingerprint。
+每次 fetch 仍有独立 `fetch_timeout`，该绝对截止时刻贯穿 adapter、gateway、限速和请求读取；
+完整定位窗口后，详情可以返回已校验前缀，空窗口正常成功。业务解释前由 `mail_poll` 核对
+`inbound_mail` 和 `mail_commands` 的持久化完成证明，已完成的取件邮件不会再次进入无附件等分支。
+普通入站投递在 `delivery_scheduler` 的 claim 与 sending 边界等待该完成证明和精确 delivery ID
+授权，避免入站提交前的外部动作改变下一次重读内容；论坛通知使用独立论坛 notify owner 证明。
 当前首条业务链已覆盖拍卖邮件的 Credits/COD
 拒绝、无附件通知、装备来源校验、起拍价指令解析、拍卖草稿/lot 入站、take/return 动作和静态
 通知发送。每周新场次 bootstrap 的实际世界集合进一步取 `[auction.schedule].worlds`、上述

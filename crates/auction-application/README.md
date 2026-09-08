@@ -65,6 +65,8 @@
   未完成命令槽；文件冲突仍失败关闭，不删除账本或重写审计。
   文件替换成功后只向前恢复：账本应用失败返回结果未知并保留新文件，后续按实际账本状态补齐或
   收口，不能因为提交确认丢失而恢复旧文件。旧 Applied 命令仍返回原有幂等结果，不与更晚配置混淆。
+  更新和恢复入口先获取 `AdminRuntimeFileStore::WorkflowGuard`，将跨进程排他锁保持到整个流程
+  收口；带 guard 的读取/替换端口复用同一锁，阻止配置变回旧指纹时陈旧请求再次通过 CAS。
   配置服务在新命令写入账本前调用文件适配器的无 I/O 候选校验，cron 解析仍由配置层拥有；已接受
   命令保留原幂等结果，应用层不引入部署格式解析依赖。
 - `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
@@ -117,6 +119,8 @@
   `(world, recipient)` 把该玩家排除到本轮结束；其他玩家继续处理，排除值不持久化为永久封禁。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
+  `lookup_completion` 在业务解释前返回 `MailPollCompletion`：只有稳定身份与完整入站/命令账本
+  相符时才允许跳过已完成邮件；缺失记录继续正常处理，损坏或仅解析记录失败关闭。
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。

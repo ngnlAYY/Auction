@@ -172,7 +172,9 @@ Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手�
 时区前缀。
 共享客户端默认使用一秒请求间隔与 15 秒请求超时，`fetch_timeout_seconds` 和
 `item_timeout_seconds` 必须覆盖该请求预算；读取与单封邮件处理分别配置尝试次数、单次总超时和
-指数退避。`batch_timeout_seconds` 为一次拉取及业务批次的总预算，默认 600 秒，范围 1–86400 秒，
+指数退避。`batch_size` 是上限；每次拉取在同一绝对截止时刻内返回已解析的最旧详情前缀，
+无需一次读满默认 100 封。列表未完整定位 cursor 或末尾仍失败关闭，空窗口则正常成功。
+`batch_timeout_seconds` 为一次拉取及业务批次的总预算，默认 600 秒，范围 1–86400 秒，
 至少覆盖一次 `fetch_timeout_seconds + item_timeout_seconds`；总预算可以先于所有重试完成而到期。
 到期时只提交已完成前缀及末封邮件 ID 游标，剩余邮件下轮继续；没有完成项则记录失败退避。
 批次期间按 `renew_interval_seconds` 延长 claim，总预算无需小于 lease，续租失败后取消陈旧处理；这些字段都是非敏感可选策略，

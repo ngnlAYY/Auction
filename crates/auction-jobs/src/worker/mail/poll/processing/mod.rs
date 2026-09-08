@@ -6,7 +6,8 @@
 use std::sync::Arc;
 
 use auction_application::{
-    Clock, MailMessage, MailPollBatch, MailPollClaim, MailProcessingDecision, MailProcessor,
+    Clock, MailMessage, MailPollBatch, MailPollClaim, MailPollCompletion, MailProcessingDecision,
+    MailProcessor,
 };
 use auction_observability::WorkerResult;
 use chrono::Duration as ChronoDuration;
@@ -120,6 +121,7 @@ where
         world_id: world_id.clone(),
         cursor_value: claim.cursor_value.clone(),
         limit: config.batch_size,
+        deadline: None,
     };
     let polled_at = clock.now();
     let Some(fetch_remaining) = batch_deadline.checked_duration_since(std::time::Instant::now())
@@ -196,7 +198,49 @@ where
     let mut budget_exhausted = false;
     let mut last_completed_external_mail_id = None;
     for mut message in page.messages {
-        let Some(remaining) = batch_deadline.checked_duration_since(std::time::Instant::now())
+        let Some(lookup_remaining) =
+            batch_deadline.checked_duration_since(std::time::Instant::now())
+        else {
+            budget_exhausted = true;
+            break;
+        };
+        let completion = tokio::time::timeout(
+            lookup_remaining,
+            store.lookup_completion(
+                claim.mailbox_key.clone(),
+                message.world_id.clone(),
+                message.external_mail_id.clone(),
+                message.received_at,
+            ),
+        )
+        .await;
+        match completion {
+            Err(_) => {
+                budget_exhausted = true;
+                break;
+            }
+            Ok(Ok(MailPollCompletion::Completed)) => {
+                // 已有完整入站事实和命令账本时，远端 mutable digest 不得触发再次路由。
+                last_completed_external_mail_id = Some(message.external_mail_id);
+                continue;
+            }
+            Ok(Ok(MailPollCompletion::Missing)) => {}
+            Ok(Err(error)) => {
+                record_failure(
+                    Arc::clone(&store),
+                    Arc::clone(&clock),
+                    claim,
+                    "completion_lookup_failed".to_owned(),
+                    "MoogleMail 已完成事实核验失败，游标保持不变".to_owned(),
+                    failure_context,
+                )
+                .await;
+                tracing::error!(error = %error, "MoogleMail 已完成事实核验失败");
+                return WorkerResult::Error;
+            }
+        }
+        let Some(process_remaining) =
+            batch_deadline.checked_duration_since(std::time::Instant::now())
         else {
             budget_exhausted = true;
             break;
@@ -204,7 +248,7 @@ where
         let decision = match (processor.as_ref(), message.business.take()) {
             (Some(processor), Some(business)) => {
                 let decision = match tokio::time::timeout(
-                    remaining,
+                    process_remaining,
                     process_with_retry(
                         processor.as_ref(),
                         business,
@@ -264,7 +308,7 @@ where
         items.push(intake_from_message(&claim.mailbox_key, message, decision, polled_at));
         last_completed_external_mail_id = Some(external_mail_id);
     }
-    if budget_exhausted && items.is_empty() {
+    if budget_exhausted && last_completed_external_mail_id.is_none() {
         record_failure(
             store,
             clock,
