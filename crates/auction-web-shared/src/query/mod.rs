@@ -168,6 +168,18 @@ pub fn use_query_state<T: Clone + PartialEq + 'static>(
 
     #[cfg(target_arch = "wasm32")]
     {
+        // parse 可能读取调用方的 Context；原生事件必须恢复创建组件的 Runtime 与 Scope，
+        // 让浏览器前进/后退与挂载初值使用相同的解析上下文。
+        let on_popstate = use_callback({
+            let parse = Rc::clone(&parse);
+            let mut state = state;
+            move |()| {
+                let value = parse(&read_query_pairs());
+                if value != *state.peek() {
+                    state.set(value);
+                }
+            }
+        });
         let guard = use_hook(|| Rc::new(RefCell::new(None::<PopstateGuard>)));
         let cleanup_guard = Rc::clone(&guard);
         use_drop(move || {
@@ -176,7 +188,6 @@ pub fn use_query_state<T: Clone + PartialEq + 'static>(
             }
         });
         let effect_guard = Rc::clone(&guard);
-        let effect_parse = Rc::clone(&parse);
         use_effect(move || {
             // 只安装一次监听；effect 重跑（本 hook 无响应式依赖，不会重跑）时守卫已存在。
             if effect_guard.borrow().is_some() {
@@ -185,14 +196,8 @@ pub fn use_query_state<T: Clone + PartialEq + 'static>(
             let Some(window) = web_sys::window() else {
                 return;
             };
-            let mut state = state;
-            let parse = Rc::clone(&effect_parse);
             let callback = Closure::<dyn FnMut()>::new(move || {
-                // 浏览器前进/后退：重新解析地址栏并恢复状态，与挂载初值同一路径。
-                let value = parse(&read_query_pairs());
-                if value != *state.peek() {
-                    state.set(value);
-                }
+                on_popstate.call(());
             });
             if window
                 .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref())
