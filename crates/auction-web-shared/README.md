@@ -60,6 +60,8 @@
   从地址栏解析初值，`push`/`replace` 写回（只替换本 hook 声明管理的键，同页多实例互不
   覆盖），popstate 时经同一 `parse` 路径恢复状态；`read_query_pairs`/`write_query_pairs`
   为低层读写原语。状态形状与键名全部由调用方注入，与 Dioxus Router 共存（不接管路由）。
+  原生 popstate 监听通过组件的稳定回调恢复 Runtime 与 Scope，允许解析器读取调用方的
+  Context；监听器随组件卸载移除，避免公开端返回无 query 地址时在运行时之外消费 Context。
 - `src/transport/mod.rs`：同源请求共享传输边界，合并两端逐行相同的 fetch 封装。
   `send_get`/`send_request` 统一 10 秒 `AbortController` 超时（超时后取消浏览器 fetch）与
   gloo-net 0.6.0 空 QueryParams workaround；错误为结构化 `TransportError`
