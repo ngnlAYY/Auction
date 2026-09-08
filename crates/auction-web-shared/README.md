@@ -24,6 +24,8 @@
 - `src/components/truncated_text.rs` 与 `src/components/truncated_text/interaction.rs`：复杂长文本的
   截断展示、180 毫秒悬停宽限、点击/Enter/Space 固定、Escape 关闭与浮层内滚动选择。
   内联和 portal 浮层共享事件清理；移入浮层不会提前关闭，页面滚动或外部点击会关闭定位浮层。
+  原生 `mouseleave`/`focusout` 事件通过组件的稳定回调恢复 Dioxus Runtime 与 Scope，再创建
+  延迟关闭任务；组件卸载同时取消任务并移除监听，避免原生回调直接 `spawn` 引发 WASM panic。
   `focusable=false` 的链接内文本保留链接行为；普通文本和操作提示不引入第二套业务状态。
 - `src/components/pager.rs`：`Pager` 长列表分页器，合并自两端原先近逐字重复的
   `PublicPager`/`AdminPager`。保留钳制契约：渲染期先 clamp 页码、交互从钳制页码出发、

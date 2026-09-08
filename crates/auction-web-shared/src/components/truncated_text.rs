@@ -175,6 +175,8 @@ pub fn TruncatedText(
     };
     #[cfg(target_arch = "wasm32")]
     {
+        // 原生 DOM 回调没有 Dioxus 上下文；稳定回调恢复本组件 scope，让延迟任务随组件卸载取消。
+        let defer_close = use_callback(move |()| interaction.defer_close());
         let cleanup_handle = Rc::clone(&dismiss_handle);
         use_drop(move || {
             cleanup_handle.borrow_mut().take();
@@ -245,7 +247,12 @@ pub fn TruncatedText(
                 .document()
                 .and_then(|document| document.get_element_by_id(&popup_id))
                 .and_then(|element| {
-                    PopupListeners::attach(element, format!("{popup_id}-trigger"), interaction)
+                    PopupListeners::attach(
+                        element,
+                        format!("{popup_id}-trigger"),
+                        interaction,
+                        defer_close,
+                    )
                 });
             *effect_handle.borrow_mut() = Some(TooltipDismissHandle {
                 window,
