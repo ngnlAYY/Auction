@@ -361,10 +361,10 @@ A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
-A20 远程轮询触发在至少一个邮箱未暂停时返回 `202 accepted`：请求经过 Admin session/CSRF
+A20 远程轮询触发在至少一个邮箱已装配时返回 `202 accepted`：请求经过 Admin session/CSRF
 与单个 `command_id` 校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与
-`pollers`。空快照或全部邮箱暂停时返回 `409 poll_rejected`；混合状态只唤醒未暂停邮箱，不会隐式
-恢复暂停状态。该响应只表示当前 Worker 接受了本轮调度唤醒，不表示外部读取已经完成；Worker
+`pollers`。空快照时返回 `409 poll_rejected`；手动触发会让已暂停邮箱执行一次领取，但不会修改
+`paused` 状态，也不会隐式恢复自动轮询。该响应只表示当前 Worker 接受了本轮调度唤醒，不表示外部读取已经完成；Worker
 后续仍以持久化 lease 执行实际 MoogleMail GET。SQLite Lite 明确返回
 `501 feature_not_supported`。
 

@@ -74,11 +74,12 @@ pub(crate) async fn renew(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
 ) -> Result<MailPollClaim, ApplicationError> {
+    // 手动触发可以持有 paused 快照；续租仍必须匹配该快照，避免改变自动调度语义。
     let updated = sqlx::query(
         "UPDATE public.mail_poll_state
          SET claim_expires_at = $4, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $2 AND claim_owner = $5
-               AND state_version = $6 AND paused = false
+               AND state_version = $6 AND paused = $7
                AND claim_expires_at > $3 AND claim_expires_at < $4",
     )
     .bind(&claim.mailbox_key)
@@ -87,6 +88,7 @@ pub(crate) async fn renew(
     .bind(lease_until)
     .bind(&claim.worker_id)
     .bind(claim.state_version)
+    .bind(claim.paused)
     .execute(pool)
     .await
     .map_err(|_| storage_error("续租 PostgreSQL MoogleMail 轮询状态失败"))?;

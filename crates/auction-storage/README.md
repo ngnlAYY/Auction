@@ -182,6 +182,9 @@ ID 反推。
 Admin lot 列表由 `src/database/admin_lots/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取拍卖生命周期、lot、装备和投稿来源安全投影；SQLite Lite 因没有完整 Admin 生命周期
 列明确返回能力不支持。
+Admin lot 更新与撤拍在同一事务内以 `GREATEST(updated_at, now)` 更新 lot 和拍卖预览的时间，
+避免远端来源时间偏快或本地时钟回拨使更新时间倒退；状态版本、命令幂等、撤拍退回义务和
+审计/realtime 事件仍原子提交，不修改既有创建时间或放宽快照校验。
 Admin 拍卖列表由 `src/database/admin_auctions/mod.rs` 持有，在同一 PostgreSQL Serializable
 快照中读取 world/status 筛选下的生命周期和 lot 数量；SQLite Lite 明确返回能力不支持，不能
 用空列表或默认能力掩盖完整档缺失。
@@ -277,7 +280,9 @@ Admin 邮件 A16-A19 由 `src/database/admin_mail/mod.rs` 与
 又持有 PostgreSQL `000008_mooglemail_polling` 的邮箱租约、失败退避，以及
 `inbound_mail`、`mail_commands`、cursor 的同事务幂等提交；其中 `state.rs` 负责状态/租约，
 并在 Worker 启动时只把旧配置遗留的过晚 `next_poll_at` 向当前 cron 收敛，已暂停邮箱、活动 claim
-和尚未结束的最大失败退避保持不变；`poll.rs` 负责 claim/commit/fail，`inbound.rs` 负责入站与命令账本幂等校验。入站重放会严格比较
+和尚未结束的最大失败退避保持不变；`poll.rs` 负责 claim/commit/fail。手动触发仅本次越过暂停和
+调度水位，不修改 `paused`；领取、续租及提交继续受 owner、token、状态版本和有效租约约束，
+续租还校验领取时的暂停快照。`inbound.rs` 负责入站与命令账本幂等校验。入站重放会严格比较
 远端身份、内容摘要和业务决定，但保留首次入站轮询写入的 `processed_at`，不把后续本轮时间或
 PostgreSQL 微秒精度规范化当作内容冲突。SQLite Lite 明确返回能力不支持，
 不创建伪造的空邮件状态。该模块不打开 MoogleMail 连接，远程读取仍由 Worker/集成 owner

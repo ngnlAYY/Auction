@@ -47,6 +47,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
         now: DateTime<Utc>,
     ) -> impl Future<Output = Result<i64, CompetitionTransactionError>> + Send {
         async move {
+            // 拍卖和 lot 使用同一时间单调性边界，避免来源时间领先时回退拍卖更新时间。
             let next_revision = expected_revision
                 .checked_add(1)
                 .ok_or_else(|| invalid_state("Admin lot 预览修订溢出"))?;
@@ -56,7 +57,7 @@ impl AdminLotUpdateTransaction for PostgresCompetitionTransaction {
                     "UPDATE public.auctions
                      SET preview_revision = $1,
                          state_version = state_version + 1,
-                         updated_at = $2
+                         updated_at = GREATEST(updated_at, $2)
                      WHERE id = $3 AND status = 'draft' AND preview_revision = $4
                      RETURNING state_version",
                 )

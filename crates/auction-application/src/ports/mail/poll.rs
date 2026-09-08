@@ -34,13 +34,15 @@ pub struct MailPollClaim {
 
 impl MailPollClaim {
     /// 校验存储适配器返回的租约边界，防止错误状态进入远程请求路径。
+    ///
+    /// `paused` 只表示领取时的自动调度状态；管理员手动触发可以在不改变该状态的情况下
+    /// 执行一次轮询，因此这里不能把暂停本身视为租约无效。
     pub fn validate(&self) -> bool {
         valid_text(&self.mailbox_key, 256)
             && valid_text(&self.worker_id, 256)
             && !self.claim_token.is_nil()
             && valid_optional_text(self.cursor_value.as_deref(), 256)
             && self.state_version > 0
-            && !self.paused
             && self.attempt_count > 0
             && self.lease_until.timestamp_nanos_opt().is_some()
     }
