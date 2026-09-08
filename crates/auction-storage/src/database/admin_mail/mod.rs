@@ -1,10 +1,7 @@
 //! Admin 邮件轮询状态与入站审查的 PostgreSQL 适配器。
 //!
-//! `inbound_mail` 的正文和内容摘要不跨越存储边界；详情只从 `decision_metadata` 的批准字段
-//! 生成固定安全投影。SQLite Lite 没有这些完整档邮件表，因此所有对应能力显式返回 501。
-
-#[cfg(feature = "postgres")]
-use std::future::Future;
+//! `inbound_mail` 不保存原始密文；详情只从批准字段和经过脱敏、限界校验的展示投影生成。
+//! SQLite Lite 没有这些完整档邮件表，因此所有对应能力显式返回 501。
 
 use auction_application::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
@@ -29,6 +26,8 @@ use serde_json::Value;
 use sqlx::Row;
 #[cfg(feature = "postgres")]
 use sqlx::{Postgres, Transaction, types::Json};
+#[cfg(feature = "postgres")]
+use std::future::Future;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
@@ -36,6 +35,10 @@ use crate::database::audit_health::AuditWriteResult as _;
 
 use super::DatabaseStore;
 
+#[cfg(feature = "postgres")]
+mod backfill;
+#[cfg(feature = "postgres")]
+pub use backfill::{MailDisplayBackfillInput, MailDisplayBackfillResult};
 #[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]

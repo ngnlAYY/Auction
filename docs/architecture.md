@@ -304,8 +304,15 @@ MoogleMail 异常诊断属于 PostgreSQL 完整档 Worker 的本地运维证据�
 异常时实际取得的响应字节或实际提取的邮件字段进入独立加密证据文件。普通成功邮件、数据库、DTO 和普通日志
 不保留正文、Cookie、请求表单、token 或装备 key 明文。证据保存不参与退回、投递、重试、游标和幂等决策；
 `body_unavailable` 只表示留证当时未取得响应正文，容量或保留期淘汰后的 UUID 导出返回 `not_found`。父密钥优先使用
-`equipment_data_key`，通过独立 HMAC 域派生诊断子密钥并认证 key 来源/标识；这不是凭据 AES 密钥的直接复用。
+`credential_data_key`，缺少时使用 `equipment_data_key`，通过独立 HMAC 域派生诊断子密钥并认证 key 来源/标识；这不是凭据 AES 密钥的直接复用。
 SQLite Lite 不装配该能力，运维边界和导出命令见 [`docs/operations/mail-diagnostics.md`](operations/mail-diagnostics.md)。
+
+MoogleMail 第一写入从完整 `MailMessage` 生成 Admin 审查展示投影：入站列表只暴露可空的 `sender`、`subject`
+标量和 `has_message_display`，详情才返回受限 `sanitized snapshot`。snapshot 正文上限 64 KiB、序列化 JSON
+上限 128 KiB、附件 ID 上限 1000；附件 key、认证邮件正文和认证相关敏感内容均隐藏，正文中的装备 key/URL key
+片段也会脱敏。该投影只是 PostgreSQL 完整档的敏感审查展示，不是权威业务事实，不参与幂等或 cursor，普通 replay
+不会把历史 NULL 补齐。历史回填只接受认证的 `parsed_message` 诊断证据，并要求 world/mailbox/mid/content digest
+精确匹配后以 CAS 和审计落账；相同幂等身份但内容不同必须冲突，缺少证据的历史邮件显示未留存。
 
 ### Lite 能力边界
 
@@ -325,7 +332,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000034` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000035` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -440,7 +447,12 @@ reconcile 也已接入 PostgreSQL 安全投影、fencing version 与独立命令
 适配器已在 `auction-integrations/src/clients/mooglemail/` 完成固定 URL/响应边界、分页
 cursor、allowlist-first 详情读取、正文与附件资产严格解析、装备 key 双来源交叉校验以及
 单 Cookie 失效收口；写入协议层又补齐 compose/detail typed target、表单闭集、单次 POST、
-`write_unknown` 不确定性分类和发送成功页证明。return/take 另外在动作前冻结邮件身份与
+`write_unknown` 不确定性分类和发送成功页解析。所有主动 ComposeSend 还必须执行统一 Sent baseline：
+任意 POST 前对 Sent 做一次完整且有界的读取（覆盖所有 MID），POST 后再独立执行有界 Sent scan；只有新增
+且唯一、同 world/recipient/subject、canonical body digest、Credits、COD 和装备 ID 全部精确匹配的真实 MID
+才算成功。0 资产通知也必须取得对应的 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、扫描未完成或超时
+一律进入结果未知的 `manual_reconcile`，不得自动重寄；成功页、空 compose 和本地 UUID 都不是外部证明。
+return/take 另外在动作前冻结邮件身份与
 资产摘要：sender 必须与 delivery 收件人一致，take 的装备 ID、Credits、COD 和附件计数必须与
 outbox 预期值精确一致。POST 后 return 只接受结构正确且目标 `mid` 完全消失的收件箱，take
 只接受同一邮件身份、资产归零且正文追加唯一 Credits/COD/附件回执的页面；任一证据缺失都进入
@@ -484,6 +496,12 @@ Worker Auction claim lease 的派生时长和 Public 补偿页的条目序号/�
 Application、HTTP 和存储层的 Public/Admin、账户、实时与价格/竞价历史分页投影，以及 retention
 inventory 汇总，也统一使用 checked 转换和加法；MoogleMail 附件计数与 Worker control 计数超出
 协议或契约可表示范围时拒绝投影，不把异常值映射成最大整数。
+主动 ComposeSend 的外层 delivery timeout 默认 180 秒，sending grace 默认 300 秒；启用 MoogleMail 时要求
+该 timeout 严格大于两倍 fetch budget。实现复用既有 `maximum_pages` 与 `fetch_timeout`，不新增配置字段。
+成功结果 metadata 固定写入 `sent_verified=true`、`external_reference_proven=true` 和
+`proof=sent_exact_payload_v1`，真实外部引用为 `mooglemail:world:send:mid`。sender/proof.rs 与
+Sent `parserSentContentProof` 负责协议证明，storage 成功写回前再执行 defense gate。Return/Take 仍使用独立
+action proof，不算主动 ComposeSend。
 Worker 在 `[worker.mooglemail]` 显式启用后，会优先按共享 runtime 的 `worlds` 业务区块、否则按
 主配置顶层 world 与 `additional_worlds`，为每个已启用世界装配独立的持久化邮箱状态、claim、读取 gateway、业务 processor、拍卖入站事务、
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，

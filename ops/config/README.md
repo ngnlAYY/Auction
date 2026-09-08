@@ -78,6 +78,7 @@ Worker 重启时把它们投影为 MoogleMail 业务快照。MoogleMail transpor
 升级新增字段而改变旧 runtime 文档的 fingerprint。Admin 表单会显示该默认值，非默认值随完整
 候选文档保存，并在受影响进程重启后生效。
 候选校验与 Worker 启动复用同一解析器；保存不会立即轮询，也不修改已有 due、游标或租约。
+Delivery 默认完整请求超时为 180 秒、sending 宽限为 300 秒；启用 MoogleMail 时完整请求超时必须大于其读取超时的两倍。
 `allow_manual_early_open`、`allow_manual_early_settlement` 与 `[equipment_source]` 已接入实际运行 owner，但仍遵守 runtime 更新的
 `restart_required` 边界，不会热改当前进程；业务区块变更要求重启受影响的 Admin 与 Worker。重启后，前者决定 HTTP capability，并在生命周期事务
 锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。人工提前结算开关默认关闭，并且只在

@@ -1,4 +1,10 @@
-//! MoogleMail 异常证据的离线导出命令。
+//! MoogleMail 证据导出、认证展示回填和只读 Sent 核查命令。
+
+mod backfill;
+mod sent;
+
+pub(super) use backfill::backfill_display;
+pub(super) use sent::inspect_sent;
 
 use super::cli::MailEvidenceKeySourceArg;
 use std::path::Path;

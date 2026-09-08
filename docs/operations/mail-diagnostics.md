@@ -48,3 +48,39 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 ```
 
 可用 `--key-source credential` 或 `--key-source equipment` 指定历史父密钥来源；省略时优先 credential，缺失时使用 equipment。输出路径使用 `create_new` 和 `0600`，已存在文件不会覆盖；命令不把正文打印到 stdout。证据已被容量或保留期清理时按 UUID 导出会返回 `not_found`。历史导出必须继续保留对应旧父密钥备份，当前实现不会自动轮换或迁移诊断密钥。
+
+## Admin 审查展示投影
+
+完整 `MailMessage` 首次写入 `inbound_mail` 时同步生成敏感审查投影。列表只返回可空的 `sender`、`subject`
+scalar 和 `has_message_display`；详情才返回 `message_display`。snapshot 固定 schema/redaction version，
+正文最多 64 KiB、JSON 最多 128 KiB、附件外部 ID 最多 1000 条；Credits/COD 保留为非负数。装备 key、URL key
+片段、认证邮件正文和认证相关敏感内容均隐藏。该投影属于 PostgreSQL 完整档的非权威展示数据，不参与入站幂等
+或 cursor，普通 replay 不会补写历史 NULL；SQLite Lite 不新增列或能力。
+
+历史回填只接受认证的 `parsed_message` 诊断证据，并要求 world、mailbox、external mail ID 和 content digest
+精确匹配，再以 CAS 和追加审计写入。相同幂等身份但内容不同必须冲突；没有匹配证据的历史邮件显示未留存。证据
+保存期限和本地权限沿用本页配置，回填不会把证据变成业务权威事实。
+
+`auctionctl mail-evidence inspect-sent <obligation-id> --output <path>` 是 PostgreSQL 完整档的只读 Sent 诊断，
+范围仅限 `withdrawn_return` 单件装备、零 Credits、`COD=0` 的义务。命令按页数和总 deadline 读取，要求唯一且
+精确匹配 world、recipient、canonical subject 和装备 ID，并把结果标记为 `time_unverified`；它不是通用 payment
+核对，也不是已送达证明。`collected` 只表示结果尚未取得充分证明，不会自动 reconcile、send，也不领取或修改
+delivery、fulfillment、lease 或远端邮件；输出文件必须是新的私有路径。
+
+## 主动 ComposeSend 的 Sent 证明
+
+所有主动 ComposeSend 都必须先对 Sent 做覆盖所有 MID 的完整有界 baseline，再发送，随后执行独立有界 Sent scan。
+成功条件是新增且唯一的真实 MID，并同时精确匹配 world、recipient、subject、canonical body digest、Credits、
+COD 和装备 ID；0 资产通知也要求 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、未扫完或超时均标记
+结果未知并进入 `manual_reconcile`，不自动重寄；成功页、空 compose、本地 UUID 都不能替代证明。
+
+该规则覆盖静态通知、注册/重绑 key、运维告警及所有结算/返还金钱和装备。外层 delivery timeout 默认 180 秒、
+sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，读取复用既有
+`maximum_pages` 和 `fetch_timeout`，不新增配置字段。成功 metadata 为 `sent_verified=true`、
+`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。
+`sender/proof.rs` 的 `parserSentContentProof` 负责内容证明，storage 成功写回前执行 defense gate。
+Return/Take 使用独立 action proof，不属于主动 ComposeSend。
+
+Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_reference` 填成 `succeeded`；后端会按既有
+invalid 条件拒绝，Admin Web 隐藏该成功选项。`retry` 和 `failed` 仍需显式管理员命令与审计，Return/Take 保留
+独立人工核对路径。该防御不增加 HTTP 字段或错误类别。

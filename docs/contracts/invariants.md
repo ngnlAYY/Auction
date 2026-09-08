@@ -263,6 +263,23 @@ payload；但业务拒绝、业务失败、处理超时以及 HTTP/解析异常�
 [`docs/operations/mail-diagnostics.md`](../operations/mail-diagnostics.md) 写入独立的加密异常证据，
 证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
+所有主动 ComposeSend（通知、注册/重绑 key、运维告警以及结算/返还的金钱或装备）必须在任意 POST 前完成
+统一 Sent baseline，读取所有 MID；POST 后必须独立执行有界 Sent scan。只有新增且唯一、同 world、recipient、
+subject、canonical body digest、Credits、COD 和装备 ID 精确匹配的真实 MID 才能成功；0 资产通知也必须有 0
+资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、扫描未完成或超时一律进入结果未知的 `manual_reconcile`，
+禁止自动重寄，也不能凭成功页、空 compose 或本地 UUID 判定成功。Return/Take 使用独立 action proof，不属于
+主动 ComposeSend。
+
+主动 ComposeSend 的 delivery timeout 默认 180 秒，sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须
+大于两倍 fetch budget，并复用 `maximum_pages`/`fetch_timeout`，不增加新配置字段。成功 metadata 必须包含
+`sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用必须是
+`mooglemail:world:send:mid`；Sent proof 通过 defense gate 后才能写回成功。
+
+Admin 人工 reconcile 不能绕过上述 defense gate：`payload.operation=send` 搭配裸
+`external_reference` 的 `succeeded` 请求必须失败关闭，不能伪造主动寄送成功。管理端隐藏该成功选项；
+`retry` 与 `failed` 仍只能通过显式管理员命令、版本 fence 和审计推进。Return/Take 的独立 action proof
+和人工核对路径继续保留，不得把它们改写成主动 ComposeSend 的 Sent proof。
+
 Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据。当前无凭据时
 只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload
 仍必须越过 availability gate 进入确定失败路径，避免永久滞留。进入 `sending` 后发生的凭据竞态、

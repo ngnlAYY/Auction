@@ -168,6 +168,19 @@ pub struct SettlementFulfillmentCustodySnapshot {
     pub digest: [u8; 32],
 }
 
+/// 只读诊断所需的已冻结结算发送目标；不包含 secret、claim 或 lease 身份。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettlementFulfillmentSentLookupTarget {
+    pub obligation_id: SettlementId,
+    pub world: SettlementWorld,
+    pub recipient: String,
+    pub external_equipment_id: String,
+    pub credits: i64,
+    pub cod: i64,
+    pub sending_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
 /// users owner 的当前收件人读取端口。
 pub trait SettlementFulfillmentRecipientReader: Send + Sync {
     fn read_recipient(
@@ -192,6 +205,14 @@ pub trait SettlementFulfillmentCustodyReader: Send + Sync {
         world: SettlementWorld,
         external_equipment_id: String,
     ) -> ApplicationFuture<'_, SettlementFulfillmentCustodySnapshot>;
+}
+
+/// 读取冻结 delivery 目标供离线 Sent 核对；实现不得领取、续租或写回状态。
+pub trait SettlementFulfillmentSentLookupReader: Send + Sync {
+    fn read_sent_lookup_target(
+        &self,
+        obligation_id: Uuid,
+    ) -> ApplicationFuture<'_, SettlementFulfillmentSentLookupTarget>;
 }
 
 /// Sent 页面返回的、可进入履约证明的安全快照。

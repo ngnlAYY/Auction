@@ -80,6 +80,12 @@ async fn run_command(command: Command) -> anyhow::Result<()> {
             MailEvidenceAction::Export { evidence_id, output, key_source } => {
                 mail_diagnostics::export(evidence_id, &output, key_source)?;
             }
+            MailEvidenceAction::InspectSent { obligation_id, output } => {
+                mail_diagnostics::inspect_sent(obligation_id, output).await?;
+            }
+            MailEvidenceAction::BackfillDisplay { evidence_id, key_source } => {
+                mail_diagnostics::backfill_display(evidence_id, key_source).await?;
+            }
         },
         Command::Migrate { controller } => {
             migrate(controller).await?;

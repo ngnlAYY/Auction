@@ -27,6 +27,46 @@ impl MoogleMailSentSummary {
     }
 }
 
+/// Sent 详情正文与当前资产的安全 proof；不保存正文，只保存其 canonical digest。
+#[derive(Clone, PartialEq, Eq)]
+pub struct MoogleMailSentContentProof {
+    pub external_mail_id: String,
+    pub world: MoogleMailWorld,
+    pub recipient: String,
+    pub subject: String,
+    pub body_digest: [u8; 32],
+    pub remaining_credits: i64,
+    pub cod_pending: i64,
+    pub remaining_equipment_ids: Vec<String>,
+}
+
+impl fmt::Debug for MoogleMailSentContentProof {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MoogleMailSentContentProof")
+            .field("external_mail_id", &self.external_mail_id)
+            .field("world", &self.world)
+            .field("recipient", &"[REDACTED]")
+            .field("subject", &"[REDACTED]")
+            .field("body_digest", &self.body_digest)
+            .field("remaining_credits", &self.remaining_credits)
+            .field("cod_pending", &self.cod_pending)
+            .field("remaining_equipment_ids", &self.remaining_equipment_ids)
+            .finish()
+    }
+}
+
+impl MoogleMailSentContentProof {
+    pub fn validate(&self) -> bool {
+        valid_opaque_id(&self.external_mail_id)
+            && valid_line(&self.recipient, 256, false)
+            && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
+            && self.remaining_credits >= 0
+            && self.cod_pending >= 0
+            && canonical_equipment_ids(&self.remaining_equipment_ids)
+    }
+}
+
 /// 单页已发送邮件解析结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailSentPage {

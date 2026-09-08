@@ -123,6 +123,17 @@ pub(crate) fn canonical_mail_body(body: &str) -> String {
     body.replace("\r\n", "\n").trim_end_matches([' ', '\t', '\n']).to_owned()
 }
 
+/// 计算 Sent/发送证明共用的正文 canonical digest；临时 canonical 文本在返回前清零。
+pub(crate) fn canonical_mail_body_digest(body: &str) -> [u8; 32] {
+    let mut canonical = canonical_mail_body(body);
+    let digest = Sha256::digest(canonical.as_bytes());
+    let mut output = [0_u8; 32];
+    output.copy_from_slice(&digest);
+    let mut bytes = std::mem::take(&mut canonical).into_bytes();
+    bytes.fill(0);
+    output
+}
+
 pub(crate) fn take_cod_receipt_amount(value: &str) -> Option<i64> {
     const MARKER: &str = "CoD Paid: ";
     let matches = value.match_indices(MARKER).take(2).collect::<Vec<_>>();

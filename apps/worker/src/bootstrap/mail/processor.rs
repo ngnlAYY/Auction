@@ -85,6 +85,11 @@ pub(super) fn build_processor_and_delivery(
                     login_keys,
                     notification_templates,
                 )
+                .with_send_verification(
+                    mail_config.maximum_pages,
+                    std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
+                )
+                .map_err(|error| anyhow::Error::msg(error.to_string()))?
                 .with_settlement_equipment_secrets(equipment_secrets, delivery_opener),
             );
             let processor: Arc<dyn MailProcessor> = Arc::new(

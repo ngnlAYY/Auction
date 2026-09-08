@@ -5,6 +5,7 @@ use auction_application::{
     MailMessage,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const MAX_PAYLOAD: usize = 8 * 1024 * 1024;
 pub const FORMAT_VERSION: u8 = 2;
@@ -53,7 +54,8 @@ pub struct PublicHeader {
     pub body_available: bool,
     pub status: Option<u16>,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParsedMessagePayload {
     pub received_at: String,
     pub sender: String,
@@ -65,6 +67,50 @@ pub struct ParsedMessagePayload {
     pub returnable: bool,
     pub claimable: bool,
     pub content_digest: String,
+}
+
+/// 按 MoogleMail v1 envelope 规则重算业务内容摘要，保持历史字节格式不变。
+pub(super) fn content_digest(message: &MailMessage) -> Result<[u8; 32], MailDiagnosticError> {
+    let mut digest = Sha256::new();
+    write_digest_string(&mut digest, "mooglemail-envelope-v1");
+    let received_at = message.received_at.to_rfc3339();
+    let sender = message.sender.to_ascii_lowercase();
+    for value in [
+        message.external_mail_id.as_str(),
+        message.world_id.as_str(),
+        received_at.as_str(),
+        sender.as_str(),
+        message.subject.as_str(),
+        message.body.as_str(),
+    ] {
+        write_digest_string(&mut digest, value);
+    }
+    digest.update(message.credits.to_be_bytes());
+    digest.update(message.cod.to_be_bytes());
+    digest.update([u8::from(message.returnable), u8::from(message.claimable)]);
+    let mut equipment_ids = message.sorted_attachment_ids();
+    equipment_ids.sort_unstable();
+    for equipment_id in equipment_ids {
+        write_digest_string(&mut digest, &equipment_id);
+        let attachment = message
+            .attachments
+            .iter()
+            .find(|attachment| attachment.external_equipment_id == equipment_id)
+            .ok_or(MailDiagnosticError::InvalidMessage)?;
+        attachment
+            .key
+            .with_bytes(|raw| digest.update(raw))
+            .map_err(|_| MailDiagnosticError::InvalidMessage)?;
+    }
+    let bytes = digest.finalize();
+    let mut result = [0_u8; 32];
+    result.copy_from_slice(&bytes);
+    Ok(result)
+}
+
+fn write_digest_string(digest: &mut Sha256, value: &str) {
+    digest.update((value.len() as u64).to_be_bytes());
+    digest.update(value.as_bytes());
 }
 
 impl Drop for ParsedMessagePayload {

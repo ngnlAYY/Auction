@@ -118,7 +118,8 @@
   背压，而不是在远端请求超时内排队。明确 `recipient_not_found` 后，runner 可按
   `(world, recipient)` 把该玩家排除到本轮结束；其他玩家继续处理，排除值不持久化为永久封禁。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
-  失败退避和同事务幂等提交端口；普通端口结果不保存原始 HTML、Cookie、token、正文或装备 key。
+  失败退避和同事务幂等提交端口；普通端口结果不保存原始 HTML、Cookie、token 或装备 key。完整邮件的
+  `sender`/`subject` 与受限 `MailDisplaySnapshot` 作为一次入站写入的非权威审查投影提交，不能参与幂等或 cursor。
   异常留证由独立诊断端口按 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)
   加密保存，不进入入站事实、幂等 metadata 或 DTO。
   `lookup_completion` 在业务解释前返回 `MailPollCompletion`：只有稳定身份与完整入站/命令账本
@@ -138,6 +139,8 @@
   ID/key 和重复定价；统一定价和旧跨行三元组形式继续兼容，原始 body 不因解析而被改写。
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
+- `src/ports/mail/display.rs`：从完整 `MailMessage` 生成 Admin 审查用脱敏快照；正文、附件 ID、Credits/COD
+  受固定大小限制，装备 key 与认证邮件正文隐藏。该快照是敏感展示投影，不是业务权威或幂等输入。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
   不把告警结果混入拍卖或外部传输事实。`delivery_returned_mail` 是已证明收件人不存在且需要取回

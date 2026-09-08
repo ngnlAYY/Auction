@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use super::{AdminMailPollState, ApplicationFuture};
+use super::{AdminMailPollState, ApplicationFuture, MailDisplaySnapshot};
 
 /// 单次 MoogleMail 拉取允许提交的最大邮件数。
 pub const MAX_MAIL_POLL_BATCH_SIZE: u16 = 1000;
@@ -57,6 +57,8 @@ impl MailPollClaim {
 pub struct MailPollIntake {
     pub id: Uuid,
     pub external_mail_id: String,
+    pub sender: Option<String>,
+    pub subject: Option<String>,
     pub world_id: String,
     pub mail_kind: String,
     pub status: String,
@@ -64,6 +66,7 @@ pub struct MailPollIntake {
     pub received_at: DateTime<Utc>,
     pub decision_code: String,
     pub decision_metadata: Value,
+    pub message_display: Option<MailDisplaySnapshot>,
     pub processed_at: DateTime<Utc>,
 }
 
@@ -79,6 +82,9 @@ impl MailPollIntake {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && valid_text(&self.external_mail_id, 512)
+            && self.sender.is_some() == self.subject.is_some()
+            && self.sender.as_deref().is_none_or(|value| valid_text(value, 256))
+            && self.subject.as_deref().is_none_or(|value| valid_text(value, 512))
             && valid_text(&self.world_id, 256)
             && matches!(
                 self.mail_kind.as_str(),
@@ -88,6 +94,8 @@ impl MailPollIntake {
             && self.content_digest != [0; 32]
             && valid_text(&self.decision_code, MAX_MAIL_POLL_DECISION_BYTES)
             && self.decision_metadata.is_object()
+            && (self.message_display.is_none() || self.sender.is_some() && self.subject.is_some())
+            && self.message_display.as_ref().is_none_or(MailDisplaySnapshot::validate)
             && self.received_at.timestamp_nanos_opt().is_some()
             && self.processed_at.timestamp_nanos_opt().is_some()
             && self.processed_at >= self.received_at

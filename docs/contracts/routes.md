@@ -205,8 +205,8 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A14 | POST | /api/v1/admin/recoveries/{recovery_id}/confirm | 200 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
 | A15 | GET | /api/v1/admin/lots/{lot_id}/proxy-events | 200 | 400, 401, 404, 501, 503/504 |
 | A16 | GET | /api/v1/admin/mail | 200 | 400, 401, 404, 501, 503/504 |
-| A17 | GET | /api/v1/admin/mail/intake | 200 | 400, 401, 501, 503/504 |
-| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200 | 400, 401, 404, 501, 503/504 |
+| A17 | GET | /api/v1/admin/mail/intake | 200；列表含可空 `sender`/`subject` 与 `has_message_display` | 400, 401, 501, 503/504 |
+| A18 | GET | /api/v1/admin/mail/intake/{intake_id} | 200；详情返回 `sender`/`subject` 与按存在性返回的脱敏 `message_display` | 400, 401, 404, 501, 503/504 |
 | A19 | PUT | /api/v1/admin/mail/polling | 200 | 400, 401, 403, 409, 413/415, 501, 503/504 |
 | A20 | POST | /api/v1/admin/mail/polls:trigger | 202 | 400, 401, 403, 409, 413/415, 501, 503/504 |
 | A21 | GET | /api/v1/admin/realtime/lag | 200 | 400, 401, 501, 503/504 |
@@ -310,10 +310,20 @@ reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令
 回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
 证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令
 仍返回明确的能力缺失，不会被空结果伪装成已接入。
+Admin `reconcile` 的 `succeeded` 分支不能用 `payload.operation=send` 加裸 `external_reference`
+完成状态；缺少 Sent exact payload proof 的请求由后端按既有 invalid 条件拒绝。Admin Web 隐藏该成功选项，
+`retry`/`failed` 仍须由管理员提交显式命令并审计；Return/Take 继续保留独立人工核对路径。该防御不新增
+HTTP 字段或错误类别。
 Delivery 列表允许一种确定未发送的失败形状：仅 `operations_alert`、
 `reason_code=operations_alert_batch_terminal`、错误码 `dependency_mismatch|retry_exhausted`，
 attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间有效。Storage 与 Admin Web
 按同一闭集接受该形状，其他投递终态仍必须提供完整执行轨迹；HTTP 不新增 metadata 原文字段。
+主动 MoogleMail ComposeSend 的 Sent baseline、POST 后独立 Sent scan 和 exact payload proof 属于 Worker
+delivery 内部契约，不新增 HTTP 路由。所有通知、注册/重绑 key、告警及结算/返还金钱/装备的成功都必须写入
+`sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1` 和真实
+`mooglemail:world:send:mid`；不满足唯一新增 MID、同 world/recipient/subject/body digest、Credits/COD/装备
+精确匹配时只返回/投影 `manual_reconcile`，不能把成功页或本地 UUID 当作证明。Return/Take 的 action proof
+仍独立处理。
 A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、证据重校验、命令账本、退款激活、guarded relist、
 审计和预览目录 realtime 事件；结算事务已为获胜 lot 在同一事务中建立 recovery case；SQLite Lite
 明确返回 `501 feature_not_supported`。Recovery Worker 已按已登记的
@@ -363,6 +373,10 @@ A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
 `mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
+列表 A17 只返回 `sender`、`subject` 这两个可空 scalar 与 `has_message_display`，不返回正文；A18
+详情返回同样的 `sender`、`subject`，并且 `message_display` 只返回 schema/redaction version、已脱敏正文、附件外部 ID、Credits 和 COD，
+上限为正文 64 KiB、JSON 128 KiB、附件 1000 条，装备 key 和认证邮件正文隐藏。该展示投影只用于敏感审查，
+不参与幂等或 cursor，响应继续使用 `no-store`；历史 NULL 不由普通 replay 补写。
 A20 远程轮询触发在至少一个邮箱已装配时返回 `202 accepted`：请求经过 Admin session/CSRF
 与单个 `command_id` 校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与
 `pollers`。空快照时返回 `409 poll_rejected`；手动触发会让已暂停邮箱执行一次领取，但不会修改

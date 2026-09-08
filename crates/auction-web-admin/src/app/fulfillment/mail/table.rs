@@ -30,8 +30,8 @@ pub(super) fn MailIntakeTable(
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-mail-table",
                 caption { class: "admin-visually-hidden", {t!("admin-mail-intake-title")} }
-                // 列序：邮件 ID、世界、发件人、标题、类型、状态、错误、时间；按字段预期内容分配比例。
-                auction_web_shared::TableColumns { layout: "admin-mails", widths: vec![8, 6, 12, 23, 9, 9, 16, 17] }
+                // 列序：邮件 ID、世界、发件人、标题、类型、状态、错误、原始信息、时间；比例总和为 100%。
+                auction_web_shared::TableColumns { layout: "admin-mails", widths: vec![7, 6, 13, 19, 8, 9, 15, 12, 11] }
                 thead {
                     tr {
                         th { scope: "col", class: "admin-mail-col-id", {t!("admin-mail-external-id")} }
@@ -62,6 +62,7 @@ pub(super) fn MailIntakeTable(
                             class: "admin-mail-col-status",
                         }
                         th { scope: "col", class: "admin-mail-col-error", {t!("admin-mail-intake-error")} }
+                        th { scope: "col", class: "admin-mail-col-original", {t!("admin-mail-original")} }
                         SortableTh {
                             column: "received",
                             label: t!("admin-mail-intake-received"),
@@ -114,6 +115,13 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
     } else {
         intake.decision_code.clone()
     };
+    let sender = intake.sender.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
+    let subject = intake.subject.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
+    let original = if intake.has_message_display {
+        t!("admin-mail-original-available")
+    } else {
+        t!("admin-mail-original-not-retained")
+    };
     rsx! {
         tr { class: "admin-mail__row",
             td { "data-label": t!("admin-mail-external-id"),
@@ -127,8 +135,8 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
                 }
             }
             td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: intake.world_id, size: "compact" } }
-            td { "data-label": t!("admin-mail-intake-from"), {t!("value-empty")} }
-            td { "data-label": t!("admin-mail-intake-subject"), {t!("value-empty")} }
+            td { "data-label": t!("admin-mail-intake-from"), TruncatedText { value: sender, size: "compact" } }
+            td { "data-label": t!("admin-mail-intake-subject"), TruncatedText { value: subject, size: "wide" } }
             td { "data-label": t!("admin-mail-intake-kind"), TruncatedText { value: intake.kind } }
             td { "data-label": t!("admin-mail-intake-status"),
                 span { class: "admin-mail-badge", TruncatedText { value: intake.status, size: "compact" } }
@@ -136,6 +144,7 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
             td { "data-label": t!("admin-mail-intake-error"),
                 TruncatedText { value: decision, size: "wide" }
             }
+            td { "data-label": t!("admin-mail-original"), TruncatedText { value: original, size: "compact" } }
             td {
                 "data-label": t!("admin-mail-intake-received"),
                 Time { value: intake.received_at.clone() }

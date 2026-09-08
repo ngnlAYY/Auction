@@ -15,6 +15,8 @@ use sqlx::{PgPool, Postgres, postgres::PgPoolOptions};
 mod admin_intake;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod admin_mail;
+#[cfg(feature = "postgres")]
+pub use admin_mail::{MailDisplayBackfillInput, MailDisplayBackfillResult};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod audit_health;
 #[cfg(feature = "postgres")]

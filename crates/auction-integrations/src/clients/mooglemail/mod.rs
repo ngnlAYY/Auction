@@ -26,6 +26,7 @@ pub use error::{MoogleMailError, MoogleMailErrorCategory};
 pub use forms::{MoogleMailForm, MoogleMailMessageFields};
 pub use gateway::{
     MoogleMailCredentialSet, MoogleMailGateway, MoogleMailGatewayConfig, MoogleMailPage,
+    MoogleMailSentLookupReport, MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
 };
 pub use parser::{
     MoogleMailActionState, MoogleMailAttachment, MoogleMailBalanceSnapshot, MoogleMailInboxPage,

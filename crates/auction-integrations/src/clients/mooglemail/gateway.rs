@@ -16,7 +16,10 @@ mod model;
 mod reader;
 
 pub use credentials::MoogleMailCredentialSet;
-pub use model::{MoogleMailGatewayConfig, MoogleMailPage};
+pub use model::{
+    MoogleMailGatewayConfig, MoogleMailPage, MoogleMailSentLookupReport,
+    MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,
+};
 pub use reader::MoogleMailGateway;
 
 fn configuration(world: MoogleMailWorld) -> MoogleMailError {

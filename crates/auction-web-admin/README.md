@@ -94,8 +94,9 @@ delivery、凭据、Users、改名、realtime、邮件入站、审计和结算/R
 表格时不会再撑开空白行，窄屏审计筛选会自动收缩为两列或单列。列表中的长标识、名称和详情统一
 保持单行省略，鼠标悬浮或键盘聚焦可查看完整值，不以自然换行撑高记录。
 delivery 页面已接入 PostgreSQL 安全投影、状态筛选、数字分页，以及 release/retry/人工对账动作；
-release/retry 使用确认对话框，manual_reconcile 支持 retry、succeeded（外部引用）和 failed（失败代码）
-三种决策。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
+release/retry 使用确认对话框，manual_reconcile 隐藏主动 send 的 succeeded 选项，仅保留显式 retry/failed
+管理员命令。后端拒绝 `payload.operation=send` 加裸 external_reference 的成功写回；Return/Take 仍保留独立
+人工核对路径。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
 命令 ID 供重试。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
 投递状态筛选使用轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
 Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
@@ -154,7 +155,9 @@ TCP listener 不使用的 runtime 目录字段按服务端契约接受空值或�
 邮件页面已接入 A16-A19 的轮询状态、入站安全摘要和暂停/恢复动作；动作携带 CSRF、当前
 状态版本与命令 ID。页面首次打开会聚合全部已配置邮箱的入站记录，输入具体 mailbox 后再
 读取该邮箱的轮询状态；入站列表和轮询状态读取失败都保留当前查询并提供原位重试；入站列表按旧页面支持 world、kind、status 筛选和 10 条分页
-和安全元数据详情；页面不接收原始邮件正文、Cookie、轮询游标或外部凭据。A20 触发按钮已由
+和安全元数据详情；列表显示 sender/subject scalar 与是否存在原始信息投影的 `has_message_display`，
+详情显示 sender/subject、脱敏正文、附件外部 ID、Credits/COD；装备 key、认证邮件正文、Cookie、轮询游标
+和外部凭据不进入页面。A20 触发按钮已由
 HTTP/Worker 链路接入，使用单个 command ID 唤醒全部已装配 poller，返回的是接受状态，不代表业务邮件处理完成。管理总览会展示全部 mailbox
 的轮询状态，并提供逐邮箱暂停/恢复与全局立即轮询操作。管理命令统一显示忙碌、禁用重复提交并以
 成功/失败语义反馈；全部 Admin API 会先解析稳定错误 code，再通过五语言 Fluent 映射 stale version、

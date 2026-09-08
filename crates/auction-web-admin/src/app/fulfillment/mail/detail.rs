@@ -69,6 +69,9 @@ pub(super) fn MailIntakeDetailPanel(
     } else {
         metadata.delivery_ids.join(", ")
     };
+    let original = detail.message_display;
+    let sender = detail.sender.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
+    let subject = detail.subject.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
 
     rsx! {
         section { class: "admin-panel admin-mail-detail", aria_labelledby: "admin-mail-detail-title",
@@ -83,6 +86,10 @@ pub(super) fn MailIntakeDetailPanel(
                 dd { "{detail.external_mail_id}" }
                 dt { {t!("admin-mail-mailbox")} }
                 dd { "{detail.mailbox_key}" }
+                dt { {t!("admin-mail-intake-from")} }
+                dd { "{sender}" }
+                dt { {t!("admin-mail-intake-subject")} }
+                dd { "{subject}" }
                 dt { {t!("admin-mail-intake-world")} }
                 dd { "{detail.world_id}" }
                 dt { {t!("admin-mail-intake-kind")} }
@@ -121,6 +128,34 @@ pub(super) fn MailIntakeDetailPanel(
                 dd { "{warnings}" }
                 dt { {t!("admin-mail-delivery-ids")} }
                 dd { "{delivery_ids}" }
+            }
+            section { class: "admin-mail-original", aria_labelledby: "admin-mail-original-title",
+                h3 { id: "admin-mail-original-title", {t!("admin-mail-original")} }
+                if let Some(original) = original {
+                    dl { class: "admin-mail-original__grid",
+                        dt { {t!("admin-mail-original-body")} }
+                        dd { pre { class: "admin-mail-original__body", "{original.body}" } }
+                        dt { {t!("admin-mail-original-attachments")} }
+                        dd {
+                            if original.attachment_ids.is_empty() {
+                                {t!("value-empty")}
+                            } else {
+                                ul { class: "admin-mail-original__attachments",
+                                    for attachment_id in original.attachment_ids {
+                                        li { "{attachment_id}" }
+                                    }
+                                }
+                            }
+                        }
+                        dt { {t!("admin-mail-original-credits")} }
+                        dd { "{original.credits}" }
+                        dt { {t!("admin-mail-original-cod")} }
+                        dd { "{original.cod}" }
+                    }
+                    p { class: "admin-mail-original__note", {t!("admin-mail-original-redacted")} }
+                } else {
+                    p { class: "admin-mail-original__missing", {t!("admin-mail-original-not-retained")} }
+                }
             }
         }
     }

@@ -4,9 +4,12 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use auction_application::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
-    MailDiagnosticReceipt, MailDiagnosticRecorder, MailMessage, PreparedMailEvidence,
+    MailDiagnosticReceipt, MailDiagnosticRecorder, MailEquipmentAttachment, MailMessage,
+    PreparedMailEvidence,
 };
+use auction_domain::EquipmentKey;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -62,6 +65,78 @@ impl MoogleMailDiagnosticArchive {
     ) -> Result<Self, MailDiagnosticError> {
         filesystem::validate_config(&config)?;
         Ok(Self { config, data_key })
+    }
+
+    /// 读取并认证 parsed_message 证据，直接恢复为短生命周期 MailMessage。
+    ///
+    /// 该入口只信任归档文件中的 AEAD 认证头和 payload digest，不读取或信任外部导出的 JSON。
+    pub fn read_parsed_message(
+        &self,
+        evidence_id: Uuid,
+    ) -> Result<MailMessage, MailDiagnosticError> {
+        let (header, ciphertext) = filesystem::read(&self.config, evidence_id)?;
+        payload::validate_header(&header, evidence_id)?;
+        if header.key_source != self.config.key_source
+            || header.key_id != self.data_key.id()
+            || header.payload_kind != "parsed_message"
+            || !header.body_available
+        {
+            return Err(MailDiagnosticError::Authentication);
+        }
+        let plain = crypto::open(
+            &self.data_key,
+            &self.config.key_source,
+            &authenticated_header(&header)?,
+            &ciphertext,
+        )?;
+        verify_payload(&header, &plain.0)?;
+        let mut value: payload::ParsedMessagePayload =
+            serde_json::from_slice(&plain.0).map_err(|_| MailDiagnosticError::Serialization)?;
+        let mailbox_key =
+            header.context.mailbox_key.clone().ok_or(MailDiagnosticError::Authentication)?;
+        let external_mail_id =
+            header.context.external_mail_id.clone().ok_or(MailDiagnosticError::Authentication)?;
+        let received_at = DateTime::parse_from_rfc3339(&value.received_at)
+            .map_err(|_| MailDiagnosticError::InvalidMessage)?
+            .with_timezone(&Utc);
+        let mut digest = [0_u8; 32];
+        decode_hex_digest(&value.content_digest, &mut digest)?;
+        let mut raw_attachments = std::mem::take(&mut value.attachments);
+        let mut attachments = Vec::with_capacity(raw_attachments.len());
+        while let Some((external_equipment_id, mut raw_key)) = raw_attachments.pop() {
+            let parsed_key = EquipmentKey::new(&raw_key);
+            payload::clear_string(&mut raw_key);
+            let Ok(key) = parsed_key else {
+                for (_, mut remaining_key) in raw_attachments.drain(..) {
+                    payload::clear_string(&mut remaining_key);
+                }
+                return Err(MailDiagnosticError::InvalidMessage);
+            };
+            attachments.push(MailEquipmentAttachment { external_equipment_id, key });
+        }
+        let sender = std::mem::take(&mut value.sender);
+        let subject = std::mem::take(&mut value.subject);
+        let body = std::mem::take(&mut value.body);
+        let message = MailMessage {
+            mailbox_key,
+            external_mail_id,
+            world_id: header.context.world_id,
+            received_at,
+            sender,
+            subject,
+            body,
+            credits: value.credits,
+            cod: value.cod,
+            attachments,
+            returnable: value.returnable,
+            claimable: value.claimable,
+            content_digest: digest,
+        };
+        message.validate().map_err(|_| MailDiagnosticError::InvalidMessage)?;
+        if payload::content_digest(&message)? != digest {
+            return Err(MailDiagnosticError::Authentication);
+        }
+        Ok(message)
     }
 
     fn prepare(
@@ -139,6 +214,25 @@ impl MoogleMailDiagnosticArchive {
             sha256: prepared.sha256().to_owned(),
             body_available: final_header.body_available,
         })
+    }
+}
+
+fn decode_hex_digest(value: &str, output: &mut [u8; 32]) -> Result<(), MailDiagnosticError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(MailDiagnosticError::Authentication);
+    }
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        output[index] = (hex_nibble(pair[0]) << 4) | hex_nibble(pair[1]);
+    }
+    Ok(())
+}
+
+fn hex_nibble(value: u8) -> u8 {
+    match value {
+        b'0'..=b'9' => value - b'0',
+        b'a'..=b'f' => value - b'a' + 10,
+        b'A'..=b'F' => value - b'A' + 10,
+        _ => 0,
     }
 }
 

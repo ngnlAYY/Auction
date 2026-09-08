@@ -59,10 +59,10 @@ jitter_seconds = 5
 lease_duration_seconds = 60
 # 可选：sending 期间的续租间隔秒数，必须小于 lease，默认 10。
 renew_interval_seconds = 10
-# 可选：lease 过期后再等待多久才转人工对账；必须大于请求超时，默认 120。
-sending_grace_seconds = 120
-# 可选：单次完整外部发送调用的总超时秒数，范围 1-86400，默认 30。
-request_timeout_seconds = 30
+# 可选：lease 过期后再等待多久才转人工对账；必须大于请求超时，默认 300。
+sending_grace_seconds = 300
+# 可选：单次完整外部发送调用的总超时秒数，范围 1-86400，默认 180；MoogleMail 启用时须大于其读取超时两倍。
+request_timeout_seconds = 180
 # 可选：释放、续租和终态写回的超时秒数，范围 1-300，默认 5。
 finalize_timeout_seconds = 5
 

@@ -31,7 +31,7 @@
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
   inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
   单 Cookie 失效收口。写入侧已实现 compose/detail typed target、表单闭集、无重定向
-  单次 POST、write_unknown 不确定性分类、发送成功页证明，以及 return/take 的动作前身份/资产
+  单次 POST、write_unknown 不确定性分类、发送成功页解析，以及 return/take 的动作前身份/资产
   fence 和动作后结构化证明；解析结果不携带原始 HTML，token 只在短生命周期状态对象中
   受控引用，Cookie 不进入返回值。`auction-application`
   已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，严格解码
@@ -55,8 +55,9 @@
   写入 guard。Worker 启动时还按 Cookie 类型取得不透明的 PostgreSQL session 所有权，防止多个
   Worker 共享同一种 Cookie；transport 失败 metadata 只记录闭集 `stage`、`operation`、`category` 和
   `write_started`，普通 metadata 不保存 URL、Cookie、token 或原始响应。HTTP/解析异常的实际响应字节，以及业务拒绝、
-  失败和超时的实际邮件字段，只能进入独立加密异常证据；普通 transport metadata、数据库和 DTO 仍不含这些
-  原始数据，边界见 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)。
+  失败和超时的实际邮件字段，只能进入独立加密异常证据；普通 transport metadata、数据库和 DTO 仍不含未脱敏的
+  原始数据。Admin 的 `message_display` 是应用层从完整 `MailMessage` 生成的受限脱敏审查投影，不是 transport
+  原始字段，边界见 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)。
   MoogleMail transport 同时向 delivery runner 声明进程内并发上限为 1，使背压发生在领取下一条
   claim 之前；凭据锁仍作为 direct caller 和未来装配路径的最后一道写入隔离。
   transport 还会在 delivery 进入 `sending` 前按 payload world 检查 scoped/shared 凭据；无凭据时
@@ -64,6 +65,13 @@
   `MoogleMailSender` 提供了可复用的高层发送编排：GET compose 后要求干净状态，逐步附加
   Credits/装备/CoD，并在每次 POST 后证明状态，最后证明发送结果；它只接受已解析的远端装备
   ID，不负责把内部装备 UUID 或密钥信封转换成远端附件身份。
+  所有主动 ComposeSend 统一在任意 POST 前读取覆盖所有 MID 的 Sent baseline，POST 后独立扫描 Sent；只有新增且
+  唯一、同 world/recipient/subject/canonical body digest、Credits/COD/装备 ID 精确匹配的 MID 才成功，0 资产
+  通知也必须有 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、未扫完或超时均为未知并进入
+  `manual_reconcile`，不自动重寄，不接受成功页、空 compose 或本地 UUID fallback。成功 metadata 为
+  `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为
+  `mooglemail:world:send:mid`。Return/Take 保持独立 action proof；sender/proof.rs 的
+  `parserSentContentProof` 提供 Sent 内容证明。
 
 调用顺序是：用 `MoogleMailClient::production()` 建立受限客户端；Worker 优先从 PostgreSQL
 读取 A32 唯一 active Cookie 并用独立数据密钥解密；暂时没有 active 行时保留 degraded 运行态，实际

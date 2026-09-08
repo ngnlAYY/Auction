@@ -273,7 +273,8 @@
   min-inline-size: 0;
   flex: 1;
   padding: var(--admin-space-content) var(--space-5);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .admin-shell__banner {
@@ -757,6 +758,52 @@
   min-inline-size: 0;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.admin-mail-original {
+  margin-block-start: var(--space-5);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.admin-mail-original h3 {
+  margin-block: 0 var(--space-3);
+}
+
+.admin-mail-original__grid {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+}
+
+.admin-mail-original__grid dt {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-mail-original__grid dd {
+  min-inline-size: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-mail-original__body {
+  max-block-size: 24rem;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+.admin-mail-original__attachments {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.admin-mail-original__note,
+.admin-mail-original__missing {
+  color: var(--color-text-muted);
 }
 
 .admin-panel__actions label,

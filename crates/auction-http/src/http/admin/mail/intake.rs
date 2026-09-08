@@ -2,11 +2,12 @@ use std::net::SocketAddr;
 
 use auction_application::{
     AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakeSummary,
-    ApplicationError,
+    ApplicationError, MailDisplaySnapshot,
 };
 use auction_contracts::{
-    AdminMailIntakeDetailResponse, AdminMailIntakeListResponse, AdminMailIntakeMetadataResponse,
-    AdminMailIntakeSummaryResponse, AdminMailPaginationResponse, ApiResponse,
+    AdminMailDisplayResponse, AdminMailIntakeDetailResponse, AdminMailIntakeListResponse,
+    AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse, AdminMailPaginationResponse,
+    ApiResponse,
 };
 use axum::{
     Json,
@@ -198,6 +199,9 @@ fn map_summary(summary: AdminMailIntakeSummary) -> AdminMailIntakeSummaryRespons
         decision_code: summary.decision_code,
         received_at: timestamp(summary.received_at),
         processed_at: timestamp(summary.processed_at),
+        sender: summary.sender,
+        subject: summary.subject,
+        has_message_display: summary.has_message_display,
     }
 }
 
@@ -213,7 +217,21 @@ fn map_detail(detail: AdminMailIntakeDetail) -> AdminMailIntakeDetailResponse {
         decision_code: summary.decision_code,
         received_at: summary.received_at,
         processed_at: summary.processed_at,
+        sender: summary.sender,
+        subject: summary.subject,
         metadata: map_metadata(detail.metadata),
+        message_display: detail.message_display.map(map_display),
+    }
+}
+
+fn map_display(display: MailDisplaySnapshot) -> AdminMailDisplayResponse {
+    AdminMailDisplayResponse {
+        schema_version: display.schema_version,
+        redaction_version: display.redaction_version,
+        body: display.body,
+        attachment_ids: display.attachment_ids,
+        credits: display.credits,
+        cod: display.cod,
     }
 }
 

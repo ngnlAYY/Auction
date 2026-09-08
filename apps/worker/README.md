@@ -104,10 +104,21 @@ compose 的固定附件计数器同样兼容当前受限 CSS 字形，但仍需�
 查询闭集仍逐项校验。
 Sent 详情要求当前 `mail_state=2`；Inbox 含资产邮件要求可领取态 `1`，空附件邮件兼容打开详情前后
 的 `1`/`2`，但不会放宽含资产邮件的领取状态。
+每封完整 `MailMessage` 在首次 `inbound_mail` 写入时生成一次 Admin 审查投影：列表只保存并展示可空
+`sender`/`subject` 和 `has_message_display`，详情才读取脱敏正文、附件外部 ID、Credits/COD。正文最多 64 KiB、
+JSON 最多 128 KiB、附件最多 1000 条；装备 key、URL key 片段和认证邮件正文隐藏。该投影不参与幂等或 cursor，
+普通 replay 不补历史 NULL；历史回填必须使用匹配的认证 `parsed_message` 诊断证据、CAS 和审计，缺证据则显示未留存。
 共享 runtime 的 `[mail_templates]` 可按旧版 14 个通知键覆盖正文；字段、占位符和控制字符会在
 启动时闭集校验，成功后冻结为本进程模板快照。旧 runtime 完全缺少业务区块时，才沿用
 `[worker.mooglemail.mail_templates]`、直接 world/sender 和装备过滤兼容配置。
 远端 POST 无法证明时进入人工对账，不自动重发；结算退信以及 Sent/Balance 回执对账已接入。
+所有主动 ComposeSend（静态通知、注册/重绑 key、告警及结算/返还金钱或装备）都在任意 POST 前完成覆盖所有
+MID 的有界 Sent baseline，发送后再独立执行有界 Sent scan。只有新增且唯一、同 world/recipient/subject/body
+digest、Credits/COD/装备 ID 精确匹配的真实 MID 才成功；0 资产通知也必须有 0 资产 Sent 证明。资产不符、秒
+领取、无匹配、多匹配、未扫完或超时进入 `manual_reconcile`，不自动重寄，不接受成功页、空 compose 或本地 UUID。
+成功 metadata 为 `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，引用
+为 `mooglemail:world:send:mid`。外层 timeout/grace 默认 180/300 秒，复用 `maximum_pages`/`fetch_timeout`；
+启用 MM 时 timeout 必须大于两倍 fetch budget。Return/Take 仍是独立 action proof。
 return 动作同时支持当前只读 `[RTS]` 回执与旧版 Inbox 缺席证明；当前回执必须把前后身份、固定
 正文后缀、Credits/CoD/装备清单和动作消失逐项绑定，不能只凭标题前缀判定成功。
 每个邮箱的持久化 claim 在批次执行期间按配置续租；token、owner、版本或续租 fence 失效后会

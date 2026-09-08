@@ -10,6 +10,12 @@ pub(super) async fn succeed_postgres(
     result: &DeliverySendResult,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
+    // 所有主动寄送共享同一成功门，通知、告警与结算不能绕过真实 Sent 证明。
+    if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
+        && !verified_sent_result(claim, result)
+    {
+        return Err(repository_error_owned("MoogleMail send 成功结果缺少完整 Sent 核验"));
+    }
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     let updated = sqlx::query(
         r#"UPDATE public.deliveries
@@ -58,21 +64,8 @@ pub(super) async fn succeed_postgres(
                     return Err(repository_error_owned("结算 return 成功结果缺少动作完成证明"));
                 }
             }
-            // send 的 POST 响应最多只能证明请求已被提交。旧版还会读取 Sent
-            // 明细和余额来核对远端事实；在该证据接入前必须保持 enqueued，
-            // 不能因为 delivery 成功就伪造 satisfied。
-            "send" => {
-                if result
-                    .result_metadata
-                    .get("external_reference_proven")
-                    .and_then(serde_json::Value::as_bool)
-                    .is_none()
-                {
-                    return Err(repository_error_owned(
-                        "结算 send 成功结果缺少 external_reference_proven",
-                    ));
-                }
-            }
+            // Sent 证明寄送成立；后续领取/COD 支付仍由 fulfillment owner 独立对账。
+            "send" if verified_sent_result(claim, result) => {}
             _ => return Err(repository_error_owned("结算 delivery operation 无效")),
         }
     }
@@ -99,6 +92,33 @@ pub(super) async fn succeed_postgres(
     .map_err(map_storage_error)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(())
+}
+
+fn verified_sent_result(claim: &DeliveryWorkClaim, result: &DeliverySendResult) -> bool {
+    let Some(world @ ("main" | "isekai")) =
+        claim.payload.get("world").and_then(serde_json::Value::as_str)
+    else {
+        return false;
+    };
+    let prefix = format!("mooglemail:{world}:send:");
+    let Some(mail_id) = result.external_reference.strip_prefix(&prefix) else {
+        return false;
+    };
+    !mail_id.is_empty()
+        && mail_id.len() <= 256
+        && mail_id == mail_id.trim()
+        && !mail_id.chars().any(char::is_control)
+        && result.result_metadata.get("operation").and_then(serde_json::Value::as_str)
+            == Some("send")
+        && result
+            .result_metadata
+            .get("external_reference_proven")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        && result.result_metadata.get("sent_verified").and_then(serde_json::Value::as_bool)
+            == Some(true)
+        && result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
+            == Some("sent_exact_payload_v1")
 }
 
 #[cfg(feature = "postgres")]

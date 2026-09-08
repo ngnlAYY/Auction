@@ -2,6 +2,8 @@
 
 use super::super::*;
 
+use auction_application::MailDisplaySnapshot;
+
 pub(super) fn map_mooglemail_message(
     message: MoogleMailMessage,
     mailbox_key: String,
@@ -22,11 +24,19 @@ pub(super) fn map_mooglemail_message(
     let returnable = message.returnable;
     let claimable = message.claimable;
     let business = into_application_message(message, mailbox_key)?;
+    let sender = (!business.sender.is_empty()).then(|| business.sender.clone());
+    let display_subject = (!business.subject.is_empty()).then(|| business.subject.clone());
+    let headers_present = sender.is_some() && display_subject.is_some();
+    let sender = sender.filter(|_| headers_present);
+    let message_display =
+        headers_present.then(|| MailDisplaySnapshot::from_message(&business)).flatten();
     Ok(MailPollFetchedMessage {
         external_mail_id,
         world_id,
         received_at,
+        sender,
         subject,
+        message_display,
         content_digest,
         attachment_count,
         credits,

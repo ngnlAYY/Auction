@@ -1,16 +1,15 @@
-//! MoogleMail Sent 详情及附件/CoD 一致性解析。
+//! MoogleMail Sent 详情及正文/附件一致性解析。
 
 use super::super::super::*;
 
 impl MoogleMailParser {
-    /// 严格解析与 Sent 摘要身份一致的详情快照。
-    pub fn parse_sent_detail(
+    /// 解析 Sent 详情中的正文摘要与当前资产，不依赖远端 sent_at 的时区归属。
+    pub(crate) fn parse_sent_content_proof(
         &self,
         document: &[u8],
         summary: &MoogleMailSentSummary,
-        observed_at: DateTime<Utc>,
-    ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
-        if !summary.validate() || observed_at < summary.sent_at {
+    ) -> Result<MoogleMailSentContentProof, MoogleMailError> {
+        if !summary.validate() {
             return Err(detail_error_for(
                 MoogleMailOperation::SentDetail,
                 summary.world,
@@ -32,88 +31,96 @@ impl MoogleMailParser {
             ));
         }
         let document = Html::parse_document(source);
-        parse_token_for_operation(&document, summary.world, MoogleMailOperation::SentDetail)?;
-        let envelope_selector =
-            selector("#mmail_outer", MoogleMailOperation::SentDetail, summary.world)?;
-        let form_selector =
-            selector("form#mailform", MoogleMailOperation::SentDetail, summary.world)?;
-        let panes_selector =
-            selector("#mmail_attachpanes", MoogleMailOperation::SentDetail, summary.world)?;
+        let operation = MoogleMailOperation::SentDetail;
+        parse_token_for_operation(&document, summary.world, operation)?;
+        let envelope_selector = selector("#mmail_outer", operation, summary.world)?;
+        let form_selector = selector("form#mailform", operation, summary.world)?;
+        let panes_selector = selector("#mmail_attachpanes", operation, summary.world)?;
         let envelopes = document.select(&envelope_selector).collect::<Vec<_>>();
         let forms = document.select(&form_selector).collect::<Vec<_>>();
         let panes = document.select(&panes_selector).collect::<Vec<_>>();
-        if envelopes.len() != 1 || forms.len() != 1 || panes.len() != 1 {
-            return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
-                summary.world,
-                MoogleMailErrorCategory::ProtocolDrift,
-            ));
-        }
-        if envelopes[0].select(&form_selector).count() != 1
+        if envelopes.len() != 1
+            || forms.len() != 1
+            || panes.len() != 1
+            || envelopes[0].select(&form_selector).count() != 1
             || envelopes[0].select(&panes_selector).count() != 1
         {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-        let fields =
-            parse_detail_fields_for(forms[0], summary.world, MoogleMailOperation::SentDetail)?;
+        let fields = parse_detail_fields_for(forms[0], summary.world, operation)?;
         if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
             || fields.subject != summary.subject
         {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::IdentityMismatch,
             ));
         }
 
-        let script = script_text(&document, summary.world, MoogleMailOperation::SentDetail)?;
-        let executable = executable_javascript(&script).ok_or_else(|| {
-            detail_error_for(
-                MoogleMailOperation::SentDetail,
+        let textarea_selector = selector("textarea", operation, summary.world)?;
+        let textareas = forms[0].select(&textarea_selector).collect::<Vec<_>>();
+        if textareas.len() != 1 {
+            return Err(detail_error_for(
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
-            )
+            ));
+        }
+        let mut body = textareas[0].text().collect::<String>();
+        if !valid_message_body(&body) {
+            clear_sent_body(&mut body);
+            return Err(detail_error_for(
+                operation,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        let body_digest = canonical_mail_body_digest(&body);
+        clear_sent_body(&mut body);
+
+        let script = script_text(&document, summary.world, operation)?;
+        let executable = executable_javascript(&script).ok_or_else(|| {
+            detail_error_for(operation, summary.world, MoogleMailErrorCategory::ProtocolDrift)
         })?;
         let count = required_script_value(&executable, "attach_count");
         let cod = required_script_value(&executable, "attach_cod");
         let state = required_script_value(&executable, "mail_state");
         if count.is_none()
             || cod.is_none()
-            // 当前 Sent 详情使用 mail_state=2；Inbox 独立区分含资产可领取态与空附件已读态。
             || state != Some(2)
             || count.is_some_and(|value| !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&value))
             || cod.is_some_and(|value| value < 0)
         {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
         let (Some(count), Some(cod)) = (count, cod) else {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         };
 
-        let list_selector =
-            selector("#mmail_attachlist", MoogleMailOperation::SentDetail, summary.world)?;
+        let list_selector = selector("#mmail_attachlist", operation, summary.world)?;
         let all_lists = document.select(&list_selector).collect::<Vec<_>>();
         let nested_lists = panes[0].select(&list_selector).collect::<Vec<_>>();
         if all_lists.len() != nested_lists.len() || nested_lists.len() > 1 {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-        let (remaining_equipment_ids, remaining_credits, entries) =
+        let (mut remaining_equipment_ids, remaining_credits, entries) =
             if let Some(list) = nested_lists.first() {
                 let (equipment_ids, credits, entries) =
                     parse_attachment_manifest(*list, summary.world)?;
@@ -127,14 +134,12 @@ impl MoogleMailParser {
             || (cod > 0 && count == 0)
         {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-
-        let current_cod_selector =
-            selector("#mmail_currentcod", MoogleMailOperation::SentDetail, summary.world)?;
+        let current_cod_selector = selector("#mmail_currentcod", operation, summary.world)?;
         let current_cod = document.select(&current_cod_selector).collect::<Vec<_>>();
         if current_cod.len() > 1
             || current_cod.first().is_some_and(|element| {
@@ -142,23 +147,59 @@ impl MoogleMailParser {
             })
         {
             return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
+                operation,
                 summary.world,
                 MoogleMailErrorCategory::ProtocolDrift,
             ));
         }
-        let mut remaining_equipment_ids = remaining_equipment_ids;
         remaining_equipment_ids.sort_unstable();
-        let snapshot = MoogleMailSentSnapshot {
+        let proof = MoogleMailSentContentProof {
             external_mail_id: summary.external_mail_id.clone(),
             world: summary.world,
             recipient: summary.recipient.clone(),
             subject: summary.subject.clone(),
-            sent_at: summary.sent_at,
+            body_digest,
             remaining_credits,
             cod_pending: cod,
-            collected: count == 0 && cod == 0,
             remaining_equipment_ids,
+        };
+        if !proof.validate() {
+            return Err(detail_error_for(
+                operation,
+                summary.world,
+                MoogleMailErrorCategory::ProtocolDrift,
+            ));
+        }
+        Ok(proof)
+    }
+
+    /// 严格解析与 Sent 摘要身份一致的详情快照，并保留旧的时间契约。
+    pub fn parse_sent_detail(
+        &self,
+        document: &[u8],
+        summary: &MoogleMailSentSummary,
+        observed_at: DateTime<Utc>,
+    ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
+        if observed_at < summary.sent_at {
+            return Err(detail_error_for(
+                MoogleMailOperation::SentDetail,
+                summary.world,
+                MoogleMailErrorCategory::Configuration,
+            ));
+        }
+        let proof = self.parse_sent_content_proof(document, summary)?;
+        let snapshot = MoogleMailSentSnapshot {
+            external_mail_id: proof.external_mail_id,
+            world: proof.world,
+            recipient: proof.recipient,
+            subject: proof.subject,
+            sent_at: summary.sent_at,
+            remaining_credits: proof.remaining_credits,
+            cod_pending: proof.cod_pending,
+            collected: proof.remaining_credits == 0
+                && proof.cod_pending == 0
+                && proof.remaining_equipment_ids.is_empty(),
+            remaining_equipment_ids: proof.remaining_equipment_ids,
             observed_at,
         };
         if !snapshot.validate() {
@@ -170,4 +211,9 @@ impl MoogleMailParser {
         }
         Ok(snapshot)
     }
+}
+
+fn clear_sent_body(body: &mut String) {
+    let mut bytes = std::mem::take(body).into_bytes();
+    bytes.fill(0);
 }
