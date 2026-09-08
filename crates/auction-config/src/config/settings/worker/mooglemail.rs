@@ -21,6 +21,8 @@ pub struct MoogleMailWorkerConfig {
     pub equipment_filter: MoogleMailEquipmentFilterConfig,
     /// MoogleMail 业务通知模板；省略时使用旧版默认英文模板。
     pub mail_templates: MoogleMailNotificationTemplatesConfig,
+    /// MoogleMail 异常原始响应证据的本地保存策略；不由 Admin runtime 接管。
+    pub diagnostics: MoogleMailDiagnosticsConfig,
     /// 可选 `.keyenv` 路径；相对路径相对于主 Worker 配置文件解析。
     pub keyenv_file: Option<PathBuf>,
     /// MoogleMail 固定生产 origin 或显式回环联调 origin。
@@ -66,6 +68,34 @@ pub struct MoogleMailWorkerConfig {
     /// 顶层字段继续描述第一个世界，以保持现有单世界配置可用；新增世界通过
     /// `[[worker.mooglemail.additional_worlds]]` 声明。每个条目的存在即表示该世界启用。
     pub additional_worlds: Vec<MoogleMailWorldConfig>,
+}
+
+/// MoogleMail 异常响应原始数据的本地诊断保存策略。
+///
+/// 诊断归档只属于 PostgreSQL 完整档的 Worker 部署配置；原始正文由 Worker 使用父数据密钥
+/// 派生的独立子密钥加密后保存，配置层不接触明文或密钥材料。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MoogleMailDiagnosticsConfig {
+    /// 是否保存异常响应的原始诊断数据；默认启用。
+    pub enabled: bool,
+    /// 诊断归档目录；相对路径按主 Worker 配置文件所在目录解析。
+    pub directory: PathBuf,
+    /// 诊断归档保留天数；范围 1 至 365 天。
+    pub retention_days: u16,
+    /// 诊断归档总字节上限；范围 16 MiB 至 1 GiB。
+    pub maximum_total_bytes: u64,
+}
+
+impl Default for MoogleMailDiagnosticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            directory: PathBuf::from("mail-diagnostics"),
+            retention_days: 7,
+            maximum_total_bytes: 256 * 1024 * 1024,
+        }
+    }
 }
 
 /// MoogleMail 业务通知模板配置。
@@ -216,6 +246,7 @@ impl Default for MoogleMailWorkerConfig {
             start_price: None,
             equipment_filter: MoogleMailEquipmentFilterConfig::default(),
             mail_templates: MoogleMailNotificationTemplatesConfig::default(),
+            diagnostics: MoogleMailDiagnosticsConfig::default(),
             keyenv_file: None,
             endpoint: "https://hentaiverse.org".to_owned(),
             maximum_response_bytes: 8 * 1024 * 1024,

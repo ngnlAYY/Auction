@@ -156,6 +156,11 @@ advisory lock 保证只有一个 Worker owner。密钥不匹配、密文损坏�
 world-aware Cookie 也供入站邮件的装备详情读取使用，避免把 HentaiVerse 登录页误判为不受支持的
 装备来源。未配置该独立密钥时继续兼容 `.keyenv`，但 Worker 只使用 `hv-ck-key1`；
 `hv-ck-key2` 仅供显式隔离验证，不参与运行时后备或自动切换。敏感配置仍是单 Cookie 入口。
+启用 `[worker.mooglemail.diagnostics]` 后，业务拒绝、业务失败、处理超时以及 HTTP/解析异常会在普通安全日志
+之外生成独立加密证据；证据保存不改变原有退回、投递、重试、游标或幂等结果。只保存异常实际取得的响应或提取
+字段，正常邮件不保存；`body_unavailable` 只表示留证当时未取得完整响应，容量淘汰后的 UUID 导出返回
+`not_found`。目录权限、容量淘汰和留证状态边界见
+[`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)。
 Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径。
 心跳的非敏感 `details.forum_sync_enabled` 固定为启动时完成 runtime 投影后的论坛启用值，供 Public
 只读展示实际启用状态；关闭不会由历史帖子是否存在推断。升级此展示能力时须同时更新 Worker、

@@ -109,6 +109,11 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 重试，确定性输入、配置和业务拒绝立即收口。共享 transport 使用一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责
 恢复超时前可能已完成的本地步骤。
+每封异常邮件还按 `world/mailbox/external_mail_id/stage/outcome` 写入安全结构化日志；业务拒绝的
+`pricing_diagnostic` 只含有界细分字段。HTTP/解析异常保留实际响应，业务拒绝/失败/超时保留实际提取邮件字段，
+均进入独立加密证据文件，不进入普通日志、入站事实或幂等 metadata。留证失败、容量淘汰和未取得响应不改变
+原有退回、投递、重试或游标结果；`body_unavailable` 只表示留证当时未取得响应正文，容量淘汰后的 UUID 导出
+返回 `not_found`，两者通过独立状态暴露边界。
 每次 fetch 尝试通过 `MailPollFetchRequest.deadline` 将同一绝对截止时刻传给真实 gateway，
 继续保留 `fetch_attempts × fetch_timeout` 和有界退避契约；gateway 可以在一次预算内只返回
 完成的详情前缀。普通空窗口成功，不因未达到配置批量上限而失败。

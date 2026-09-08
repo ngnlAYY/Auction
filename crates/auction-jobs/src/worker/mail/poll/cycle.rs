@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use auction_application::{Clock, MailPollStore, MailProcessor, RecurringSchedule};
+use auction_application::{
+    Clock, MailDiagnosticRecorder, MailPollStore, MailProcessor, RecurringSchedule,
+};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult};
 use chrono::Duration as ChronoDuration;
 
@@ -127,6 +129,7 @@ where
         store: Arc::clone(&runtime.store),
         gateway: Arc::clone(&runtime.gateway),
         processor: runtime.processor.clone(),
+        diagnostics: runtime.diagnostics.clone(),
         clock: Arc::clone(&worker.clock),
         world_id: runtime.world_id.clone(),
         mailbox_key: runtime.mailbox_key.clone(),
@@ -147,6 +150,7 @@ pub(super) struct MailPollProcessContext<C> {
     pub(super) store: Arc<dyn MailPollStore>,
     pub(super) gateway: Arc<dyn MailPollGateway>,
     pub(super) processor: Option<Arc<dyn MailProcessor>>,
+    pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub(super) clock: Arc<C>,
     pub(super) world_id: String,
     pub(super) mailbox_key: String,
@@ -162,6 +166,7 @@ impl<C> Clone for MailPollProcessContext<C> {
             store: Arc::clone(&self.store),
             gateway: Arc::clone(&self.gateway),
             processor: self.processor.clone(),
+            diagnostics: self.diagnostics.clone(),
             clock: Arc::clone(&self.clock),
             world_id: self.world_id.clone(),
             mailbox_key: self.mailbox_key.clone(),

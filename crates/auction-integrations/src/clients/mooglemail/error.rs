@@ -58,12 +58,12 @@ impl fmt::Display for MoogleMailErrorCategory {
 
 /// MoogleMail 外部错误。
 ///
-/// 错误只保留操作、世界、分类和是否可重试，不保存 URL、Cookie、token、原始 HTML 或底层
+/// 错误只保留操作、世界、分类、是否可重试和加密证据引用，不保存 URL、Cookie、token、原始 HTML 或底层
 /// HTTP 错误，避免错误被日志或 Admin DTO 间接回显敏感数据。`write_started` 用于区分“读侧
 /// 登录失效可安全轮换”和“写请求已发出只能标记失效、不能盲目重试”。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error(
-    "MoogleMail 请求失败: operation={operation} world={world} category={category} temporary={temporary} write_started={write_started}"
+    "MoogleMail 请求失败: operation={operation} world={world} category={category} temporary={temporary} write_started={write_started} evidence_status={evidence_status} evidence_id={evidence_id:?}"
 )]
 pub struct MoogleMailError {
     /// 发生错误的远端操作。
@@ -76,6 +76,12 @@ pub struct MoogleMailError {
     pub temporary: bool,
     /// 请求是否已经进入远端写入阶段。
     write_started: bool,
+    /// 仅引用独立加密文件；普通错误对象不持有原始响应或密文内容。
+    pub evidence_id: Option<uuid::Uuid>,
+    /// 留证状态使用固定代码，便于区分缺少响应与保存失败。
+    pub evidence_status: &'static str,
+    /// 诊断自身失败时的安全分类，不包含文件系统或底层密码库错误文本。
+    pub evidence_failure: Option<&'static str>,
 }
 
 impl MoogleMailError {
@@ -90,7 +96,16 @@ impl MoogleMailError {
         category: MoogleMailErrorCategory,
         temporary: bool,
     ) -> Self {
-        Self { operation, world, category, temporary, write_started: false }
+        Self {
+            operation,
+            world,
+            category,
+            temporary,
+            write_started: false,
+            evidence_id: None,
+            evidence_status: "not_captured",
+            evidence_failure: None,
+        }
     }
 
     /// 建立已进入远端写入阶段的错误；该结果永远不能被自动重发。
@@ -99,7 +114,7 @@ impl MoogleMailError {
         world: MoogleMailWorld,
         category: MoogleMailErrorCategory,
     ) -> Self {
-        Self { operation, world, category, temporary: false, write_started: true }
+        Self { write_started: true, ..Self::new(operation, world, category, false) }
     }
 
     /// 返回是否可以由外层有限退避重试。

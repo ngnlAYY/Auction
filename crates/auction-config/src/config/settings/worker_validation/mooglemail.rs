@@ -4,6 +4,25 @@ pub(crate) fn validate_mooglemail_worker(
     config: &MoogleMailWorkerConfig,
 ) -> Result<(), ConfigError> {
     validate_mooglemail_world(&config.world_id, &config.mailbox_key, &config.sender_allowlist)?;
+    if config.diagnostics.retention_days == 0 || config.diagnostics.retention_days > 365 {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "diagnostics.retention_days 必须位于 1 至 365",
+        ));
+    }
+    if config.diagnostics.maximum_total_bytes < 16 * 1024 * 1024
+        || config.diagnostics.maximum_total_bytes > 1024 * 1024 * 1024
+    {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "diagnostics.maximum_total_bytes 必须位于 16 MiB 至 1 GiB",
+        ));
+    }
+    if config.diagnostics.directory.as_os_str().is_empty()
+        || config.diagnostics.directory.to_string_lossy().chars().any(char::is_control)
+    {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "diagnostics.directory 必须是非空且不含控制字符的路径",
+        ));
+    }
     if config.start_price.is_some_and(|value| value <= 0) {
         return Err(ConfigError::InvalidMoogleMailConfig("start_price 覆盖值必须大于零"));
     }

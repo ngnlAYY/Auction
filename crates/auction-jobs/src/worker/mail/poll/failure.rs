@@ -32,6 +32,13 @@ pub(super) async fn record_failure<C>(
     };
     let retry_at =
         schedule.next_after(now).map_or(backoff_at, |scheduled_at| scheduled_at.max(backoff_at));
+    tracing::warn!(
+        mailbox_key = %claim.mailbox_key,
+        attempt_count = claim.attempt_count,
+        failure_code = %failure_code,
+        retry_at = %retry_at,
+        "MoogleMail mailbox processing failed"
+    );
     if let Err(error) = store.fail(claim, retry_at, failure_code, safe_detail).await {
         tracing::error!(error = %error, "MoogleMail Worker 保存失败退避状态失败");
     }

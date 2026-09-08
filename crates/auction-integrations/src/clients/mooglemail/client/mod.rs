@@ -3,6 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use auction_application::MailDiagnosticRecorder;
 use reqwest::{Client, StatusCode, header};
 use tokio::time;
 use url::Url;
@@ -14,6 +15,7 @@ use super::{
 };
 use super::{forms::MoogleMailForm, protocol::MoogleMailUrlBuilder};
 
+mod diagnostics;
 mod request;
 mod security;
 
@@ -58,6 +60,7 @@ pub struct MoogleMailClient {
     gate: Arc<IntervalGate>,
     maximum_response_bytes: usize,
     request_timeout: Duration,
+    diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
 }
 
 impl MoogleMailClient {
@@ -115,7 +118,19 @@ impl MoogleMailClient {
             gate: Arc::new(IntervalGate::new(config.minimum_request_interval)),
             maximum_response_bytes,
             request_timeout: config.request_timeout,
+            diagnostics: None,
         })
+    }
+
+    /// 注入异常证据记录器；诊断失败不能改变远端结果分类或触发额外请求。
+    pub fn with_diagnostics(mut self, diagnostics: Arc<dyn MailDiagnosticRecorder>) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// 让同一客户端的 Worker 业务处理复用诊断 owner，避免并发写入绕过容量边界。
+    pub fn diagnostic_recorder(&self) -> Option<Arc<dyn MailDiagnosticRecorder>> {
+        self.diagnostics.clone()
     }
 
     /// 使用指定固定 endpoint 和默认限速/超时构造适配器。

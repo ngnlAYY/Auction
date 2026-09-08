@@ -100,9 +100,16 @@ impl MoogleMailSender {
         }
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
-        let mut state = match self.parser.parse_compose_state(&initial, request.world) {
-            Ok(state) if state.is_clean() => state,
-            Ok(_) | Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven),
+        let initial_parse = match self.parser.parse_compose_state(&initial, request.world) {
+            Ok(state) if state.is_clean() => Ok(state),
+            Ok(_) => {
+                Err(MoogleMailError::protocol_drift(MoogleMailOperation::Compose, request.world))
+            }
+            Err(error) => Err(error),
+        };
+        let mut state = match self.client.diagnose_parse(&compose, &initial, initial_parse).await {
+            Ok(state) => state,
+            Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven),
         };
 
         let mut equipment_ids = Vec::with_capacity(request.equipment_ids.len());
@@ -118,15 +125,20 @@ impl MoogleMailSender {
                     })?;
             let response = self.client.post(&compose, cookie, form).await?;
             state = self
-                .parser
-                .prove_staged_compose(
+                .client
+                .diagnose_parse(
+                    &compose,
                     &response,
-                    request.world,
-                    &request.message,
-                    request.credits,
-                    &equipment_ids,
-                    0,
+                    self.parser.prove_staged_compose(
+                        &response,
+                        request.world,
+                        &request.message,
+                        request.credits,
+                        &equipment_ids,
+                        0,
+                    ),
                 )
+                .await
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
         }
 
@@ -137,15 +149,20 @@ impl MoogleMailSender {
             let response = self.client.post(&compose, cookie, form).await?;
             equipment_ids.push(equipment_id.clone());
             state = self
-                .parser
-                .prove_staged_compose(
+                .client
+                .diagnose_parse(
+                    &compose,
                     &response,
-                    request.world,
-                    &request.message,
-                    request.credits,
-                    &equipment_ids,
-                    0,
+                    self.parser.prove_staged_compose(
+                        &response,
+                        request.world,
+                        &request.message,
+                        request.credits,
+                        &equipment_ids,
+                        0,
+                    ),
                 )
+                .await
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachAdd))?;
         }
 
@@ -154,15 +171,20 @@ impl MoogleMailSender {
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
             let response = self.client.post(&compose, cookie, form).await?;
             state = self
-                .parser
-                .prove_staged_compose(
+                .client
+                .diagnose_parse(
+                    &compose,
                     &response,
-                    request.world,
-                    &request.message,
-                    request.credits,
-                    &equipment_ids,
-                    request.cod,
+                    self.parser.prove_staged_compose(
+                        &response,
+                        request.world,
+                        &request.message,
+                        request.credits,
+                        &equipment_ids,
+                        request.cod,
+                    ),
                 )
+                .await
                 .map_err(|_| write_unknown(request.world, MoogleMailOperation::AttachCod))?;
         }
 
@@ -181,8 +203,13 @@ impl MoogleMailSender {
         })?;
         let response = self.client.post(&compose, cookie, form).await?;
         if let Some(failure) = self
-            .parser
-            .classify_send_response_failure(&response, request.world)
+            .client
+            .diagnose_parse(
+                &compose,
+                &response,
+                self.parser.classify_send_response_failure(&response, request.world),
+            )
+            .await
             .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?
         {
             return Ok(match failure {
@@ -195,8 +222,13 @@ impl MoogleMailSender {
             });
         }
         let external_mail_id = self
-            .parser
-            .prove_send_completed(&response, request.world)
+            .client
+            .diagnose_parse(
+                &compose,
+                &response,
+                self.parser.prove_send_completed(&response, request.world),
+            )
+            .await
             .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?;
         Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
     }

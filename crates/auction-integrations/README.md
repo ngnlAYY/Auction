@@ -54,7 +54,9 @@
   guard；不同 delivery 不会再交错修改同一个远端 compose，普通 inbox/Sent/Balance 读取不占用该
   写入 guard。Worker 启动时还按 Cookie 类型取得不透明的 PostgreSQL session 所有权，防止多个
   Worker 共享同一种 Cookie；transport 失败 metadata 只记录闭集 `stage`、`operation`、`category` 和
-  `write_started`，不保存 URL、Cookie、token 或原始响应。
+  `write_started`，普通 metadata 不保存 URL、Cookie、token 或原始响应。HTTP/解析异常的实际响应字节，以及业务拒绝、
+  失败和超时的实际邮件字段，只能进入独立加密异常证据；普通 transport metadata、数据库和 DTO 仍不含这些
+  原始数据，边界见 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)。
   MoogleMail transport 同时向 delivery runner 声明进程内并发上限为 1，使背压发生在领取下一条
   claim 之前；凭据锁仍作为 direct caller 和未来装配路径的最后一道写入隔离。
   transport 还会在 delivery 进入 `sending` 前按 payload world 检查 scoped/shared 凭据；无凭据时

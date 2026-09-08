@@ -70,6 +70,8 @@ mod forum_sync;
 mod fulfillment;
 #[path = "auction/lifecycle.rs"]
 mod lifecycle;
+#[path = "mail/diagnostics.rs"]
+mod mail_diagnostics;
 #[path = "mail/poll.rs"]
 mod mail_poll;
 #[path = "mail/processing.rs"]
@@ -300,6 +302,10 @@ pub use lifecycle::{
     AuctionLifecycleContext, AuctionLifecycleEffect, AuctionLifecyclePlan, AuctionLifecyclePolicy,
     AuctionLifecycleResult, AuctionLifecycleSnapshot, AuctionLifecycleTransaction,
     AuctionLifecycleWriteSummary, AuctionPreviewSuccessorPlan,
+};
+pub use mail_diagnostics::{
+    MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
+    MailDiagnosticReceipt, MailDiagnosticRecorder, MailDiagnosticStage, PreparedMailEvidence,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

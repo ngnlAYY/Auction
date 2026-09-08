@@ -208,6 +208,10 @@ post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以
 `processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼；
 SQLite Lite 不复制这些完整档表。
 
+MoogleMail 异常原始数据不进入数据库 schema：PostgreSQL 完整档 Worker 按独立运维契约写入本地加密证据文件，
+SQLite Lite 不新增该能力。证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通
+数据库投影仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
+
 ## 实时事件与运维告警
 
 | 表 | 逻辑 owner | 档位 | 关键职责 |

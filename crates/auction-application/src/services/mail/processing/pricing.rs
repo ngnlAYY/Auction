@@ -2,6 +2,35 @@
 
 use super::*;
 
+/// 起拍价解析失败时用于审计的安全诊断；只允许固定代码和数字上下文。
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PricingFailure {
+    pub(super) reason_code: &'static str,
+    pub(super) detail_code: &'static str,
+    pub(super) body_bytes: usize,
+    pub(super) token_count: usize,
+    pub(super) field_index: Option<usize>,
+    pub(super) attachment_count: usize,
+}
+
+fn pricing_failure(
+    reason_code: &'static str,
+    detail_code: &'static str,
+    body: &str,
+    token_count: usize,
+    field_index: Option<usize>,
+    attachment_count: usize,
+) -> PricingFailure {
+    PricingFailure {
+        reason_code,
+        detail_code,
+        body_bytes: body.len(),
+        token_count,
+        field_index,
+        attachment_count,
+    }
+}
+
 /// 解析拍卖邮件中的兼容起拍价指令。
 ///
 /// 未填写 `start` 的正文使用邮件配置默认价；单条 `start amount` 对全部附件生效，其余
@@ -11,22 +40,47 @@ pub(super) fn resolve_start_price_plan(
     body: &str,
     attachments: &[MailEquipmentAttachment],
     default_price: i64,
-) -> Result<Vec<i64>, &'static str> {
+) -> Result<Vec<i64>, PricingFailure> {
     const INVALID: &str = "start_price_invalid";
     const MISSING: &str = "start_price_missing";
     const DUPLICATE: &str = "start_price_duplicate";
     const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
     const NOT_FOUND: &str = "start_price_attachment_not_found";
+    let attachment_count = attachments.len();
 
-    if default_price <= 0 || attachments.is_empty() {
-        return Err(INVALID);
+    if default_price <= 0 {
+        return Err(pricing_failure(
+            INVALID,
+            "invalid_default_price",
+            body,
+            0,
+            None,
+            attachment_count,
+        ));
+    }
+    if attachments.is_empty() {
+        return Err(pricing_failure(
+            INVALID,
+            "invalid_attachment_count",
+            body,
+            0,
+            None,
+            attachment_count,
+        ));
     }
     let mut index_by_id = HashMap::with_capacity(attachments.len());
     for (index, attachment) in attachments.iter().enumerate() {
         if !decimal_identity(&attachment.external_equipment_id)
             || index_by_id.insert(attachment.external_equipment_id.as_str(), index).is_some()
         {
-            return Err(INVALID);
+            return Err(pricing_failure(
+                INVALID,
+                "invalid_attachment_id",
+                body,
+                0,
+                Some(index),
+                attachment_count,
+            ));
         }
     }
     let mut prices = vec![default_price; attachments.len()];
@@ -36,47 +90,135 @@ pub(super) fn resolve_start_price_plan(
     }
     let body_fields =
         normalized.split('\n').flat_map(|line| strip_start_price_comment(line).split_whitespace());
-    let maximum_fields = attachments.len().checked_mul(3).ok_or(INVALID)?.max(2);
+    // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
+    let token_count = body_fields.clone().count();
+    let maximum_fields = attachments
+        .len()
+        .checked_mul(3)
+        .ok_or_else(|| {
+            pricing_failure(INVALID, "invalid_field_count", body, 0, None, attachment_count)
+        })?
+        .max(2);
     let mut fields = Vec::with_capacity(maximum_fields);
     for field in body_fields {
         if fields.len() == maximum_fields {
-            return Err(INVALID);
+            return Err(pricing_failure(
+                INVALID,
+                "too_many_fields",
+                body,
+                token_count,
+                Some(fields.len()),
+                attachment_count,
+            ));
         }
         fields.push(field);
     }
     if fields.len() == 2 && fields[0].eq_ignore_ascii_case("start") {
-        let price = parse_start_price_amount(fields[1]).ok_or(INVALID)?;
+        let price = parse_start_price_amount(fields[1]).ok_or_else(|| {
+            pricing_failure(
+                INVALID,
+                "invalid_amount",
+                body,
+                fields.len(),
+                Some(1),
+                attachment_count,
+            )
+        })?;
         prices.fill(price);
         return Ok(prices);
     }
     let (directives, remainder) = fields.as_chunks::<3>();
     if !remainder.is_empty() {
-        return Err(INVALID);
+        let detail_code =
+            if fields.len() == 2 { "expected_start_keyword" } else { "invalid_field_count" };
+        return Err(pricing_failure(
+            INVALID,
+            detail_code,
+            body,
+            fields.len(),
+            Some(fields.len().saturating_sub(remainder.len())),
+            attachment_count,
+        ));
     }
 
     let mut seen = vec![false; attachments.len()];
-    for directive in directives {
+    for (index, directive) in directives.iter().enumerate() {
         if !directive[1].eq_ignore_ascii_case("start") {
-            return Err(INVALID);
+            return Err(pricing_failure(
+                INVALID,
+                "expected_start_keyword",
+                body,
+                fields.len(),
+                Some(index * 3 + 1),
+                attachment_count,
+            ));
         }
-        let (equipment_id, equipment_key) =
-            parse_start_equipment_reference(directive[0]).ok_or(INVALID)?;
-        let target = *index_by_id.get(equipment_id).ok_or(NOT_FOUND)?;
+        let (equipment_id, equipment_key) = parse_start_equipment_reference(directive[0])
+            .ok_or_else(|| {
+                pricing_failure(
+                    INVALID,
+                    "invalid_equipment_reference",
+                    body,
+                    fields.len(),
+                    Some(index * 3),
+                    attachment_count,
+                )
+            })?;
+        let target = *index_by_id.get(equipment_id).ok_or_else(|| {
+            pricing_failure(
+                NOT_FOUND,
+                "attachment_not_found",
+                body,
+                fields.len(),
+                Some(index * 3),
+                attachment_count,
+            )
+        })?;
         let matched = attachments[target]
             .key
             .with_bytes(|key| key.eq_ignore_ascii_case(equipment_key.as_bytes()))
             .unwrap_or(false);
         if !matched {
-            return Err(IDENTITY_MISMATCH);
+            return Err(pricing_failure(
+                IDENTITY_MISMATCH,
+                "identity_mismatch",
+                body,
+                fields.len(),
+                Some(index * 3),
+                attachment_count,
+            ));
         }
         if seen[target] {
-            return Err(DUPLICATE);
+            return Err(pricing_failure(
+                DUPLICATE,
+                "duplicate_attachment",
+                body,
+                fields.len(),
+                Some(index * 3),
+                attachment_count,
+            ));
         }
-        prices[target] = parse_start_price_amount(directive[2]).ok_or(INVALID)?;
+        prices[target] = parse_start_price_amount(directive[2]).ok_or_else(|| {
+            pricing_failure(
+                INVALID,
+                "invalid_amount",
+                body,
+                fields.len(),
+                Some(index * 3 + 2),
+                attachment_count,
+            )
+        })?;
         seen[target] = true;
     }
     if seen.iter().any(|found| !found) {
-        return Err(MISSING);
+        return Err(pricing_failure(
+            MISSING,
+            "missing_attachment_directive",
+            body,
+            fields.len(),
+            None,
+            attachment_count,
+        ));
     }
     Ok(prices)
 }

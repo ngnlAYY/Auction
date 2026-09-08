@@ -202,6 +202,17 @@ sender_allowlist = []
 # 可选：明确设为 true 才读取所有发件人详情；生产环境应保持 false。
 sender_allowlist_disabled = false
 
+# 可选区块：MoogleMail 异常原始数据诊断归档；默认启用，仅完整档 Worker 使用。
+[worker.mooglemail.diagnostics]
+# 可选：是否保存远端拒绝/异常响应的原始诊断数据；默认 true。
+enabled = true
+# 可选：诊断归档目录；相对主 Worker 配置文件解析，默认 mail-diagnostics。
+directory = "mail-diagnostics"
+# 可选：诊断归档保留天数，范围 1-365，默认 7。
+retention_days = 7
+# 可选：诊断归档总字节上限，范围 16 MiB-1 GiB，默认 268435456（256 MiB）。
+maximum_total_bytes = 268435456
+
 # 可选区块：拍卖邮件装备过滤；默认关闭。来源仍必须标记为可交易。
 [worker.mooglemail.equipment_filter]
 # 可选：是否启用品质、前后缀、分类、类型和等级过滤；默认 false。

@@ -250,6 +250,13 @@ retry_maximum_seconds = 30
 sender_allowlist = []
 sender_allowlist_disabled = false
 
+# 可选区块：MoogleMail 异常原始数据诊断归档；默认启用，仅完整档 Worker 使用。
+[worker.mooglemail.diagnostics]
+enabled = true
+directory = "mail-diagnostics"
+retention_days = 7
+maximum_total_bytes = 268435456
+
 # 可选区块：拍卖装备过滤；默认关闭，但来源仍必须标记为可交易。
 [worker.mooglemail.equipment_filter]
 enabled = false
@@ -440,6 +447,11 @@ Admin 主配置 fallback 与 runtime 覆盖值分别校验；`AppConfig.listener
 持久化状态，再通过独立租约读取 MoogleMail。解析成功的入站安全事实、`mail_commands` 幂等记录和 cursor 在同一
 PostgreSQL 事务中提交；远端失败只更新退避和安全失败码。当前 Rust 首片已接入拍卖入站以及
 用户注册/重绑业务处理；注册 key 由独立的数据密钥加密，数据库和 delivery outbox 不保存明文。
+`[worker.mooglemail.diagnostics]` 用于保留 MoogleMail 拒绝或异常响应的原始数据，目录相对主 Worker
+配置文件解析，默认保留 7 天且总量上限为 256 MiB；`retention_days` 只能为 1–365 天，
+`maximum_total_bytes` 只能为 16 MiB–1 GiB。该归档仅属于 PostgreSQL 完整档，配置不新增 secret；
+Worker 装配使用已有 credential data key 或 equipment data key 派生独立诊断加密子 key，Admin runtime
+不会接管这组部署配置。
 结算退信以及 Sent/Balance 回执对账已由 PostgreSQL Worker owner 接入。启用 `[worker.forum]`
 后，PostgreSQL Worker 会装配 E-Hentai 主题发布和回帖导入；唯一论坛 Cookie 可从独立密文记录读取，
 或使用敏感配置的兼容 getter。`worker.forum.public_base_url` 可选，填写无路径的公开端

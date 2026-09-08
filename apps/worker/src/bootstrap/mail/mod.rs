@@ -11,6 +11,8 @@ use super::*;
 #[cfg(feature = "postgres")]
 mod credentials;
 #[cfg(feature = "postgres")]
+mod diagnostics;
+#[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
 mod processor;
@@ -53,19 +55,19 @@ pub(super) async fn configure_mail_poll(
             credentials::load_credentials(config, mail_config, &world_configs, Arc::clone(&store))
                 .await?;
         let endpoint = Url::parse(&mail_config.endpoint).context("parse MoogleMail endpoint")?;
-        let client = Arc::new(
-            MoogleMailClient::with_config(MoogleMailClientConfig {
-                endpoint,
-                maximum_response_bytes: mail_config.maximum_response_bytes,
-                minimum_request_interval: std::time::Duration::from_millis(
-                    mail_config.minimum_request_interval_millis,
-                ),
-                request_timeout: std::time::Duration::from_secs(
-                    mail_config.request_timeout_seconds,
-                ),
-            })
-            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
+        let mut client = MoogleMailClient::with_config(MoogleMailClientConfig {
+            endpoint,
+            maximum_response_bytes: mail_config.maximum_response_bytes,
+            minimum_request_interval: std::time::Duration::from_millis(
+                mail_config.minimum_request_interval_millis,
+            ),
+            request_timeout: std::time::Duration::from_secs(mail_config.request_timeout_seconds),
+        })
+        .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+        if let Some(recorder) = diagnostics::configure(config)? {
+            client = client.with_diagnostics(recorder);
+        }
+        let client = Arc::new(client);
         let (processor, delivery_transport, custody_reader) =
             processor::build_processor_and_delivery(
                 config,

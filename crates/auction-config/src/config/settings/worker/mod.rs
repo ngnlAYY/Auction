@@ -21,8 +21,8 @@ pub use delivery::DeliveryWorkerConfig;
 pub use forum::ForumSyncWorkerConfig;
 pub use fulfillment::FulfillmentWorkerConfig;
 pub use mooglemail::{
-    MoogleMailEquipmentFilterConfig, MoogleMailNotificationTemplatesConfig, MoogleMailWorkerConfig,
-    MoogleMailWorldConfig,
+    MoogleMailDiagnosticsConfig, MoogleMailEquipmentFilterConfig,
+    MoogleMailNotificationTemplatesConfig, MoogleMailWorkerConfig, MoogleMailWorldConfig,
 };
 pub use operations_alert::OperationsAlertWorkerConfig;
 pub use recovery::RecoveryWorkerConfig;

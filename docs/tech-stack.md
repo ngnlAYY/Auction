@@ -189,7 +189,9 @@ SQLx migration 与 `query!`/`query_as!` 用于把每个已实现后端路径的 
   有界队列、角色专属敏感 headers 和限定关闭等待。Worker loop 指标、tracing health 和进程资源
   指标已接入；SQLx 存储池边界提供十项连接池指标，业务事件结果/耗时指标也已
   覆盖 Public 竞价代理命令和 Worker 业务循环。业务指标只使用固定事件与结果枚举，日志和指标
-  标签中禁止记录密钥、Cookie、密码、完整连接串、高基数业务主键和完整邮件正文。
+  标签中禁止记录密钥、Cookie、密码、完整连接串、高基数业务主键和完整邮件正文。MoogleMail 异常原始数据
+  只按独立运维契约加密保存到本地证据文件，不进入普通日志、指标、数据库或 DTO；见
+  [`docs/operations/mail-diagnostics.md`](operations/mail-diagnostics.md)。
 - **契约文档：** REST 稳定后用 `utoipa` 生成 OpenAPI；它不反向决定领域模型。
 
 ## 依赖精简原则

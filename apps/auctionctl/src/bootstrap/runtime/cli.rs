@@ -15,6 +15,12 @@ pub(super) enum Command {
         #[arg(value_enum, default_value = "public")]
         role: RoleArg,
     },
+    /// 离线解密一个 MoogleMail 异常证据文件并导出 JSON；不会连接数据库或远端服务。
+    #[command(name = "mail-evidence")]
+    MailEvidence {
+        #[command(subcommand)]
+        action: MailEvidenceAction,
+    },
     /// 在确认 Public/Admin/Worker 均未运行后执行数据库 forward-only 迁移。
     Migrate {
         #[command(flatten)]
@@ -227,6 +233,27 @@ pub(super) enum Command {
         #[arg(long)]
         receipt: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum MailEvidenceAction {
+    /// 按证据 UUID 导出 MoogleMail 异常原始数据；输出文件已存在时拒绝覆盖。
+    Export {
+        /// 诊断证据 UUID；只按 UUID 定位归档文件。
+        evidence_id: Uuid,
+        /// 新建的 JSON 输出文件路径。
+        #[arg(long)]
+        output: PathBuf,
+        /// 可选历史父 key 来源；省略时优先 credential，缺失时使用 equipment。
+        #[arg(long, value_enum)]
+        key_source: Option<MailEvidenceKeySourceArg>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub(super) enum MailEvidenceKeySourceArg {
+    Credential,
+    Equipment,
 }
 
 #[derive(Debug, Args)]
