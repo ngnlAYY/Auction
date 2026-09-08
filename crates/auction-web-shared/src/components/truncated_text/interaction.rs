@@ -62,10 +62,12 @@ pub(super) struct PopupListeners {
 #[cfg(target_arch = "wasm32")]
 impl PopupListeners {
     /// 同时支持 Dioxus 内联浮层和挂到 body 的 portal；关闭时成对清理监听器。
+    /// 延迟关闭经由组件创建的回调恢复 Runtime 与 Scope，不能在原生 DOM 回调中直接 spawn。
     pub(super) fn attach(
         element: web_sys::Element,
         trigger_id: String,
         mut state: TooltipInteraction,
+        defer_close: EventHandler<()>,
     ) -> Option<Self> {
         use wasm_bindgen::{JsCast, closure::Closure};
         let document = web_sys::window()?.document()?;
@@ -76,12 +78,12 @@ impl PopupListeners {
                 "mouseenter" => state.popup_hovered.set(true),
                 "mouseleave" => {
                     state.popup_hovered.set(false);
-                    state.defer_close();
+                    defer_close.call(());
                 }
                 "focusin" => state.popup_focused.set(true),
                 "focusout" => {
                     state.popup_focused.set(false);
-                    state.defer_close();
+                    defer_close.call(());
                 }
                 "keydown"
                     if event
