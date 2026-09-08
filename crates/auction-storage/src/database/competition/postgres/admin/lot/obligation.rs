@@ -1,4 +1,4 @@
-//! withdrawn-return fulfillment 义务写入。
+//! 撤拍装备的单件零金额寄回义务写入。
 
 use super::super::super::*;
 
@@ -44,7 +44,7 @@ pub(super) async fn insert_withdrawn_return_obligation_inner(
         sqlx::query(
             "INSERT INTO public.settlement_obligation_fulfillments
                 (obligation_id, execution_state, dispatch_world, delivery_operation)
-             VALUES ($1, 'pending', $2, 'return')",
+             VALUES ($1, 'pending', $2, 'send')",
         )
         .bind(obligation_id)
         .bind(&snapshot.world_id)

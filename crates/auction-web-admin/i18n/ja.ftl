@@ -295,7 +295,7 @@ admin-lots-reprice-save = 保存
 admin-lots-reprice-done = 開始価格を更新しました。
 admin-lots-withdraw = 取り下げ
 admin-lots-withdraw-confirm = 取り下げを確認
-admin-lots-withdraw-done = 出品を取り下げました。
+admin-lots-withdraw-done = 出品を取り下げ、元の装備を個別に返送する手配をしました。
 admin-lots-invalid-price = 正の整数金額を入力してください。
 admin-lots-proxy-open = 代理履歴
 admin-lots-proxy-title = 代理入札履歴 — #{ $lot }
@@ -322,7 +322,7 @@ admin-lots-retry = 再試行
 admin-lots-slow-schedule = ソフト締切第 { $generation } 世代、締切：{ $time }
 admin-lots-reprice-title = 開始価格を変更 — { $code }
 admin-lots-withdraw-title = { $code } を取り下げ
-admin-lots-withdraw-warning = この出品は取り下げられ、装備は { $seller } に返送されます（COD 0）。この操作は取り消せません。
+admin-lots-withdraw-warning = この出品は取り下げられ、元の装備は元のワールドで { $seller } に個別に返送されます（COD 0）。この操作は取り消せません。
 admin-lots-action-cancel = キャンセル
 admin-lots-proxy-close = 閉じる
 

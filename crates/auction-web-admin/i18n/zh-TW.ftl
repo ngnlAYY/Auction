@@ -295,7 +295,7 @@ admin-lots-reprice-save = 儲存
 admin-lots-reprice-done = 起拍價已更新。
 admin-lots-withdraw = 撤拍
 admin-lots-withdraw-confirm = 確認撤拍
-admin-lots-withdraw-done = 拍品已撤拍。
+admin-lots-withdraw-done = 拍品已撤拍，已安排單獨寄回原裝備。
 admin-lots-invalid-price = 請輸入正整數金額。
 admin-lots-proxy-open = 代理記錄
 admin-lots-proxy-title = 代理出價記錄 — #{ $lot }
@@ -322,7 +322,7 @@ admin-lots-retry = 重試
 admin-lots-slow-schedule = 軟截止第 { $generation } 代，截止時間：{ $time }
 admin-lots-reprice-title = 修改起拍價 — { $code }
 admin-lots-withdraw-title = 撤拍 { $code }
-admin-lots-withdraw-warning = 此拍品將被撤拍，裝備將寄回給 { $seller }（COD 0）。此操作無法復原。
+admin-lots-withdraw-warning = 此拍品將被撤拍，原裝備將在原世界單獨寄回給 { $seller }（COD 0）。此操作無法復原。
 admin-lots-action-cancel = 取消
 admin-lots-proxy-close = 關閉
 

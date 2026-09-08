@@ -295,7 +295,7 @@ admin-lots-reprice-save = 저장
 admin-lots-reprice-done = 시작가를 업데이트했습니다.
 admin-lots-withdraw = 출품 철회
 admin-lots-withdraw-confirm = 철회 확인
-admin-lots-withdraw-done = 출품을 철회했습니다.
+admin-lots-withdraw-done = 출품을 철회하고 원래 장비의 개별 반송을 예약했습니다.
 admin-lots-invalid-price = 양의 정수 금액을 입력하세요.
 admin-lots-proxy-open = 대리 기록
 admin-lots-proxy-title = 대리 입찰 기록 — #{ $lot }
@@ -322,7 +322,7 @@ admin-lots-retry = 재시도
 admin-lots-slow-schedule = 소프트 마감 { $generation }세대, 마감: { $time }
 admin-lots-reprice-title = 시작가 변경 — { $code }
 admin-lots-withdraw-title = { $code } 철회
-admin-lots-withdraw-warning = 이 출품이 철회되고 장비는 { $seller }에게 반송됩니다 (COD 0). 이 작업은 되돌릴 수 없습니다.
+admin-lots-withdraw-warning = 이 출품이 철회되고 원래 장비는 원래 월드에서 { $seller }에게 개별 반송됩니다 (COD 0). 이 작업은 되돌릴 수 없습니다.
 admin-lots-action-cancel = 취소
 admin-lots-proxy-close = 닫기
 

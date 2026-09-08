@@ -268,7 +268,7 @@ async fn insert_cancellation_return_obligation_postgres(
     sqlx::query(
         "INSERT INTO public.settlement_obligation_fulfillments
             (obligation_id, execution_state, dispatch_world, delivery_operation)
-         VALUES ($1, 'pending', $2, 'return')",
+         VALUES ($1, 'pending', $2, 'send')",
     )
     .bind(obligation_id)
     .bind(world_id)

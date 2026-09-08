@@ -39,16 +39,24 @@ mail gateway 复用已校验的 `fetch_timeout_seconds`，每次尝试由 Worker
 
 拍卖邮件正文未填写 `start` 时，每件装备默认以 50,000 Credits 起拍，正文可以留空、只写
 说明或装备链接。可通过 `[worker.mooglemail].start_price` 显式覆盖邮件默认价，不继承公共
-拍卖经济模板。单条 `start amount` 对邮件中的全部装备生效；逐件定价使用重复的
-`<equipment-url> start amount` 三元组，三元组可以换行或放在同一行。普通空行、尾换行、
-CRLF/CR、`<URL>` 包裹、URL 后的中英文句末标点和空白后开始的 `#` 注释都会被兼容处理。
+拍卖经济模板。单条 `start amount` 对邮件中的全部装备生效；逐件定价按行识别
+`<equipment-url> start amount`，标准写法将三个字段放在同一行，同行前后和其他行的说明、MM 自动
+附带的 Attachment 说明块会被忽略，未写指令的附件保留默认价。普通空行、尾换行、CRLF/CR、
+`<URL>` 包裹、URL 后的中英文句末标点和空白后开始的 `#` 注释都会被兼容处理。旧的跨物理行
+连续三元组形式继续兼容；不同排版下未指定价格的附件都使用默认价。
 
-`start` 位于行首、跟在装备链接后或带有金额时按定价输入校验；`starting`、`starter` 等普通
-单词及句中的无价格说明不算指令。`start=10k`、`start:10k` 或 `start10k` 等误写仍会拒绝，
+`start` 跟在装备链接后或带有金额时按定价输入校验；单独一行的 `start` 仍表示缺少金额。
+`starting`、`starter` 和 `start with...` 等普通说明不算指令。`start=10k`、`start:10k` 或 `start10k` 等误写仍会拒绝，
 不能静默改用默认价。金额接受正整数、规范千分位以及能精确换算为整数 Credits 的 `k`/`m` 小数，例如
-`1000`、`10,000`、`1.5k` 和 `0.5m`。零、负数、非整数换算和溢出继续失败关闭。逐件定价仍
-必须恰好覆盖每个真实附件一次；未知装备 ID、ID/key 不匹配、重复或缺失指令不会被兼容逻辑
-猜测或默认补齐。
+`1000`、`10,000`、`1.5k` 和 `0.5m`。零、负数、非整数换算和溢出继续失败关闭。未知装备 ID、
+ID/key 不匹配、重复定价和已写 `URL start` 但缺少金额不会被忽略或改用默认价。
+
+## 撤拍装备寄回
+
+PostgreSQL 的撤拍事务创建 `withdrawn_return` 和 pending/send 履约记录，Worker 随后把该
+lot 的原装备在原世界单独寄给冻结卖家，Credits/COD 均为零。邮件来源的装备也走 compose
+Send，不退回已经 Take 的整封原邮件；同封其他 lot 不受影响。寄送与 Sent 领取证明继续使用
+现有幂等、租约和精确附件校验；旧未知结果不自动重发，旧冻结 Return 请求不能直接改为 Send。
 
 ## Cargo feature
 

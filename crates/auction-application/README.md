@@ -133,8 +133,9 @@
   `user/mod.rs` 只负责稳定公共导出。
 - `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
   `processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、命令幂等辅助和起拍价/装备身份解析；
-  正文未填写 `start` 时，全部真实附件使用 Worker 注入的邮件默认价（默认 50,000 Credits），
-  普通说明和无定价的链接不会触发价格拒绝；显式指令仍校验金额、附件 ID/key 和逐件唯一覆盖。
+  逐行提取 `URL start amount`，忽略同行前后及其他行的说明文本和 MM 附件说明；未指定价格的
+  真实附件使用 Worker 注入的邮件默认价（默认 50,000 Credits）。显式指令仍校验金额、附件
+  ID/key 和重复定价；统一定价和旧跨行三元组形式继续兼容，原始 body 不因解析而被改写。
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
@@ -165,7 +166,9 @@ Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/
 有界分页；它要求完整 Admin 生命周期投影，不把 Lite 缺失字段填成默认成功值。
 Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许版本 fence 保护的
 撤回与起拍价动作；服务层统一编排命令账本、Serializable 事务、预览 revision、审计和
-withdrawn-return 履约义务，具体 SQL 不跨过端口。
+withdrawn-return 履约义务，具体 SQL 不跨过端口。撤拍返还统一生成原装备的单件零 Credits、
+零 COD Send；mail/admin 来源都寄给冻结卖家，不复用已 Take 的原邮件 Return。Sent 对账要求
+原 equipment ID，旧未知结果或冻结 Return 请求不自动迁移或重寄。
 Admin 拍卖列表只读契约位于 `src/ports/admin/auctions.rs`，定义 world/status 筛选、旧页码
 分页、生命周期安全快照和 lot 数量；SQLite Lite 缺少完整投影时必须显式报告能力不支持。
 正式开放前的预览、开拍与计划结束时间写入契约位于

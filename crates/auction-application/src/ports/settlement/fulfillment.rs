@@ -71,20 +71,19 @@ pub struct SettlementFulfillmentDeliverySnapshot {
 
 /// 返回旧版 MoogleMail fulfillment 发送与 Sent 证据共同使用的 canonical 主题。
 ///
-/// reference 固定为稳定 obligation ID；退回义务复用原邮件，不应生成新的发送主题。
+/// reference 固定为稳定 obligation ID；邮件来源的 UnsoldReturn 复用原邮件，WithdrawnReturn 发送原装备。
 pub fn canonical_settlement_fulfillment_subject(
     kind: SettlementObligationKind,
     obligation_id: SettlementId,
 ) -> Option<String> {
     let subject = match kind {
         SettlementObligationKind::WinnerEquipmentCod
-        | SettlementObligationKind::WinnerEquipmentHandoff => "Auction equipment delivery",
+        | SettlementObligationKind::WinnerEquipmentHandoff
+        | SettlementObligationKind::WithdrawnReturn => "Auction equipment delivery",
         SettlementObligationKind::WinnerPaymentCarrierCod => "Auction payment request",
         SettlementObligationKind::SellerPayout => "Auction seller payout",
         SettlementObligationKind::BuyerRefund => "Auction buyer refund",
-        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
-            return None;
-        }
+        SettlementObligationKind::UnsoldReturn => return None,
     };
     Some(format!("{subject} [{obligation_id}]"))
 }
@@ -118,7 +117,7 @@ pub struct SettlementFulfillmentClaim {
     /// 结算通知正文使用的装备名称；只允许来自同一数据库快照。
     pub equipment_name: String,
     pub submission_id: Option<SubmissionId>,
-    /// 投稿来源闭集；邮件来源才能执行远端原邮件退回。
+    /// 投稿来源闭集；仅 UnsoldReturn 的邮件来源执行远端原邮件退回，WithdrawnReturn 发送原装备。
     pub submission_source_kind: Option<String>,
     /// 旧邮件的远端 ID，仅在邮件来源时使用；不保存正文或 Cookie。
     pub submission_external_mail_id: Option<String>,

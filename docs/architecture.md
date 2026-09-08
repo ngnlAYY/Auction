@@ -503,10 +503,11 @@ delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独
 通知发送。每周新场次 bootstrap 的实际世界集合进一步取 `[auction.schedule].worlds`、上述
 runtime-enabled 世界与数据库 `worlds.enabled=true` 的交集，并在每次 due 执行前重读数据库；关闭
 世界会安全跳过新轮次，不会停止已经持久化的 settlement、fulfillment、delivery 或 recovery 排空。
-起拍价解析在正文未填写 `start` 时使用邮件默认价，允许空白、说明或装备链接；填写指令后
-仍严格解析全附件统一 `start amount` 或跨物理行的逐件三元组，并兼容空行、
-显式 `#` 注释、规范千分位和可精确换算为整数 Credits 的 `k`/`m` 小数；附件 ID/key 交叉校验、
-逐件唯一覆盖、正数和 checked 溢出边界仍失败关闭。通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
+起拍价解析按行提取 `URL start amount`，同行前后和其他行的说明、MM 附件说明块不参与
+定价字段计数；未单独指定价格的附件使用邮件默认价。保留全附件统一 `start amount` 和旧的
+跨物理行连续三元组输入，以及空行、显式 `#` 注释、规范千分位和可精确换算为整数 Credits
+的 `k`/`m` 小数；明确指令的金额、附件 ID/key 交叉校验、重复定价和 checked 溢出边界仍失败
+关闭，未指定附件统一保留默认价。通知模板、装备过滤和发件人 allowlist 优先来自 Admin 管理的 runtime 业务区块，旧文件
 缺少该区块时由 `[worker.mooglemail]` 直接配置兼容回退；14 个模板在启动时校验占位符并冻结快照；
 用户注册/重绑已经通过 Users owner 的 PostgreSQL Serializable 事务接入，结果通知
 只保存安全结果，注册 key 以独立数据密钥加密，outbox 只保存用户 UUID 引用，发送前才解密。
@@ -693,6 +694,11 @@ Admin draft lot 的 `PATCH /api/v1/admin/lots/{lot_id}` 属于 PostgreSQL 完整
 world → auction → lot 锁顺序、lot 更新、预览 revision、审计、realtime 事件和
 `withdrawn_return` 履约义务写入；`auction-http` 与 `auction-web-admin` 只负责 DTO、会话/CSRF
 和页面交互。SQLite Lite 不暴露该完整管理写入，明确返回能力缺失。
+新建撤拍返还（含取消拍卖产生的同类义务）固定使用 compose Send，将该 lot 的原装备在原
+世界单独寄给冻结卖家，Credits/COD 均为零；不按邮件来源复用整封 Return。装备 UUID 通过
+不可变的 world/external ID 和密文 key 信封解析为唯一附件；compose 暂存及 Sent 领取证据
+继续严格核对装备、收件人和金额。旧的冻结 Return 请求不自动转换或重寄；不能匹配新事实的
+旧执行记录进入人工确认。`unsold_return` 保持既有来源分流语义。
 
 Admin A16-A19 邮件状态与入站审查同样属于 PostgreSQL 完整档：
 `auction-application` 的 `admin_mail` 端口/服务负责安全投影、状态版本 fence 和命令幂等，
@@ -702,7 +708,7 @@ CSRF、严格筛选和稳定 DTO，`auction-web-admin` 只负责页面交互。�
 Cookie、外部凭据、游标或未审核 metadata；SQLite Lite 没有对应完整表/外部能力，明确返回
 `501 feature_not_supported`。A20 `POST /api/v1/admin/mail/polls:trigger` 通过 Worker control
 使用单个 `command_id` 全局唤醒已装配的 MoogleMail poller，返回 `202 accepted` 及接受的
-poller 数量；手动唤醒只让本轮跳过下一次调度时间，实际远程 GET 仍由 Worker 的持久化 lease、
+poller 数量；手动唤醒只让本轮越过暂停和下一次调度时间，不改变自动轮询暂停标记，实际远程 GET 仍由 Worker 的持久化 lease、
 失败退避和入站幂等提交负责，不会把唤醒动作伪装成远程读取成功。
 
 Admin A28/A30/A31 用户管理属于“两者”能力：`auction-application` 的 `admin_users` 端口拥有
