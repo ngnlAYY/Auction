@@ -40,6 +40,9 @@ pub struct AdminMailIntakeSummaryResponse {
     pub decision_code: String,
     pub received_at: String,
     pub processed_at: String,
+    pub sender: Option<String>,
+    pub subject: Option<String>,
+    pub has_message_display: bool,
 }
 
 /// Admin 入站邮件数字分页。
@@ -91,5 +94,34 @@ pub struct AdminMailIntakeDetailResponse {
     pub decision_code: String,
     pub received_at: String,
     pub processed_at: String,
+    pub sender: Option<String>,
+    pub subject: Option<String>,
     pub metadata: AdminMailIntakeMetadataResponse,
+    pub message_display: Option<AdminMailDisplayResponse>,
+}
+
+/// Admin 入站邮件原始信息的安全展示响应。
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminMailDisplayResponse {
+    pub schema_version: u8,
+    pub redaction_version: u8,
+    pub body: String,
+    pub attachment_ids: Vec<String>,
+    pub credits: i64,
+    pub cod: i64,
+}
+
+impl std::fmt::Debug for AdminMailDisplayResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AdminMailDisplayResponse")
+            .field("schema_version", &self.schema_version)
+            .field("redaction_version", &self.redaction_version)
+            .field("body_bytes", &self.body.len())
+            .field("attachment_count", &self.attachment_ids.len())
+            .field("credits", &self.credits)
+            .field("cod", &self.cod)
+            .finish()
+    }
 }

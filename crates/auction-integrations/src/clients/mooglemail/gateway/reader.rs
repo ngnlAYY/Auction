@@ -141,6 +141,109 @@ impl MoogleMailGateway {
         ))
     }
 
+    /// 在有界页数和绝对截止时间内按收件人、主题和装备剩余资产核对 Sent。
+    pub async fn lookup_sent(
+        &self,
+        request: MoogleMailSentLookupRequest,
+    ) -> Result<MoogleMailSentLookupReport, MoogleMailError> {
+        if !request.validate(self.config.maximum_pages) {
+            return Err(operation_error(
+                MoogleMailOperation::Sent,
+                request.world,
+                MoogleMailErrorCategory::Configuration,
+            ));
+        }
+        let configured_deadline = std::time::Instant::now()
+            .checked_add(self.config.fetch_budget)
+            .ok_or_else(|| configuration(request.world))?;
+        let deadline = tokio::time::Instant::from_std(request.deadline.min(configured_deadline));
+        let session = self.credentials.begin(request.world)?;
+        self.lookup_sent_with_cookie(&request, session.cookie(), deadline).await
+    }
+
+    async fn lookup_sent_with_cookie(
+        &self,
+        request: &MoogleMailSentLookupRequest,
+        cookie: &MoogleMailCookie,
+        deadline: tokio::time::Instant,
+    ) -> Result<MoogleMailSentLookupReport, MoogleMailError> {
+        let mut seen = HashSet::new();
+        let mut candidates = Vec::new();
+        for page_index in 0..request.maximum_pages {
+            let target = self.client.sent_page(request.world, page_index)?;
+            let document = tokio::time::timeout_at(deadline, self.client.get(&target, cookie))
+                .await
+                .map_err(|_| fetch_budget_exhausted(request.world))??;
+            let page =
+                self.parser.scan_sent_page(&document, request.world, page_index, &mut seen)?;
+            if tokio::time::Instant::now() >= deadline {
+                return Err(fetch_budget_exhausted(request.world));
+            }
+            for summary in page.summaries.iter().filter(|summary| {
+                summary.recipient.eq_ignore_ascii_case(&request.recipient)
+                    && summary.subject == request.subject
+            }) {
+                let detail_target =
+                    self.client.sent_detail(request.world, &summary.external_mail_id)?;
+                let detail_document =
+                    tokio::time::timeout_at(deadline, self.client.get(&detail_target, cookie))
+                        .await
+                        .map_err(|_| fetch_budget_exhausted(request.world))??;
+                let snapshot = self.parser.parse_sent_detail(
+                    &detail_document,
+                    summary,
+                    request.observed_at,
+                )?;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(fetch_budget_exhausted(request.world));
+                }
+                if snapshot.recipient.eq_ignore_ascii_case(&request.recipient)
+                    && snapshot.subject == request.subject
+                    && snapshot.remaining_credits == 0
+                    && snapshot.cod_pending == 0
+                    && (snapshot.collected
+                        || snapshot.remaining_equipment_ids
+                            == vec![request.external_equipment_id.clone()])
+                {
+                    candidates.push(snapshot);
+                    if candidates.len() >= 2 {
+                        return Ok(MoogleMailSentLookupReport {
+                            status: MoogleMailSentLookupStatus::Multiple,
+                            candidates,
+                            pages_scanned: page_index + 1,
+                            scan_complete: false,
+                            observed_at: request.observed_at,
+                        });
+                    }
+                }
+            }
+            if !page.has_next_page {
+                let status = match candidates.as_slice() {
+                    [] => MoogleMailSentLookupStatus::NotObserved,
+                    [candidate] if candidate.collected => {
+                        MoogleMailSentLookupStatus::CollectedUnproven
+                    }
+                    [_] => MoogleMailSentLookupStatus::Unique,
+                    _ => MoogleMailSentLookupStatus::Multiple,
+                };
+                return Ok(MoogleMailSentLookupReport {
+                    status,
+                    candidates,
+                    pages_scanned: page_index + 1,
+                    scan_complete: true,
+                    observed_at: request.observed_at,
+                });
+            }
+        }
+        Ok(MoogleMailSentLookupReport {
+            status: MoogleMailSentLookupStatus::Incomplete,
+            candidates,
+            pages_scanned: request.maximum_pages,
+            scan_complete: false,
+            observed_at: request.observed_at,
+        })
+    }
+
     /// 读取并校验一个 world 的 Item Shop Credits 余额。
     pub async fn read_balance(
         &self,

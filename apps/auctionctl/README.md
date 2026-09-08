@@ -21,6 +21,8 @@ restore/legacy/rebuild owner 桥接；
 `src/bootstrap/postgres_rebuild/` 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
 `validation.rs`（确认和 URL 安全校验）、`postconditions.rs`（空库/迁移证明）以及
 `receipt.rs`（不可覆盖 receipt 发布）拆分默认只读的破坏性重建边界；`mod.rs` 只保留稳定调用路径。
+`src/bootstrap/runtime/mail_diagnostics/` 持有 MoogleMail 证据导出、只读 Sent 核对和历史展示投影回填的
+PostgreSQL 完整档运维命令边界；这些命令不把敏感正文写入 stdout。
 
 ```bash
 # 校验配置并显示解析结果（不回显凭据）
@@ -63,6 +65,18 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   cargo run -p auctionctl --features postgres -- \
     mail-evidence export 00000000-0000-4000-8000-000000000001 \
     --output /secure/auction-evidence/00000000-0000-4000-8000-000000000001.json
+
+# 只读核对一条结算义务对应的 Sent；不会领取、对账、发送或修改状态。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    mail-evidence inspect-sent 00000000-0000-4000-8000-000000000001 \
+    --output /secure/auction-evidence/sent-00000000-0000-4000-8000-000000000001.json
+
+# 使用已认证的 parsed_message 诊断证据回填历史审查投影；可显式指定历史父密钥来源。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    mail-evidence backfill-display 00000000-0000-4000-8000-000000000001 \
+    --key-source credential
 
 # 把受控五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
 AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
@@ -201,6 +215,17 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 解密异常证据并使用 `create_new`/`0600` 创建 JSON 输出；可用 `--key-source credential|equipment`
 指定历史父密钥来源，省略时优先 credential，缺失时使用 equipment。命令不连接数据库、Worker、MoogleMail
 或其他远端服务，也不把正文输出到 stdout。历史导出必须保留对应旧父密钥备份；该命令不会自动轮换密钥。
+
+`mail-evidence inspect-sent <obligation-id> --output <path>` 只属于 PostgreSQL 完整档的离线 Sent
+诊断，且仅限 `withdrawn_return` 单件装备、零 Credits、`COD=0` 的义务：按页数上限和总 deadline 读取 Sent，
+要求唯一且精确匹配 world、recipient、canonical subject 和装备 ID，并标记 `time_unverified`。它不是通用
+payment 核对或已送达证明。即使查询得到 `collected`，也只表示外部事实尚未证明，不会自动 reconcile 或 send；
+输出使用新的私有文件路径，命令不修改 delivery、fulfillment、lease 或远端邮件。
+
+`mail-evidence backfill-display <evidence-id> [--key-source credential|equipment]` 只接受认证的
+`parsed_message` 证据，并以 world/mailbox/mid/content digest 精确匹配、CAS 和追加审计回填 `sender`、`subject`
+及脱敏展示快照。相同幂等身份但内容不同必须冲突；找不到或不匹配证据时保持“未留存”。命令不能把诊断证据
+当作业务事实或幂等输入。
 
 `auctionctl` 的退出码是稳定的：`0` 表示成功，`2` 表示 CLI 用法或配置错误，`3` 表示数据库/外部
 依赖或前置条件失败，`4` 表示 systemd 部署编排失败，`5` 表示其它运维操作失败。错误正文沿用

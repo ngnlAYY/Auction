@@ -59,6 +59,15 @@ pub(super) fn valid_page(
                         && business.cod == message.cod
                         && business.returnable == message.returnable
                         && business.claimable == message.claimable
+                        && message.sender.as_deref().is_some_and(|sender| sender == business.sender)
+                        && message.subject == business.subject
+                        && message.message_display.as_ref().is_none_or(|display| {
+                            message.sender.is_some()
+                                && display.validate()
+                                && display.credits == business.credits
+                                && display.cod == business.cod
+                                && display.attachment_ids == business.sorted_attachment_ids()
+                        })
                         && business.validate().is_ok()
                 })
         })
@@ -80,10 +89,14 @@ pub(super) fn intake_from_message(
         .as_bytes(),
     );
     let processed_at = processed_at.max(message.received_at);
+    let headers_present = message.sender.is_some();
     MailPollIntake {
         id,
         external_mail_id: message.external_mail_id,
         world_id: message.world_id,
+        sender: message.sender.filter(|_| headers_present),
+        subject: headers_present.then_some(message.subject),
+        message_display: headers_present.then_some(message.message_display).flatten(),
         mail_kind,
         status: decision.status,
         content_digest: message.content_digest,

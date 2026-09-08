@@ -63,9 +63,9 @@ pub struct AdminRuntimeDeliveryConfig {
     pub lease_duration_seconds: u64,
     /// 发送期间续租间隔秒数。
     pub renew_interval_seconds: u64,
-    /// 发送结果写回宽限秒数。
+    /// 发送结果写回宽限秒数；省略时为 300。
     pub sending_grace_seconds: u64,
-    /// 完整投递请求超时秒数。
+    /// 完整投递请求超时秒数；省略时为 180。
     pub request_timeout_seconds: u64,
     /// 投递终态写回超时秒数。
     pub finalize_timeout_seconds: u64,
@@ -80,8 +80,8 @@ impl Default for AdminRuntimeDeliveryConfig {
             jitter_seconds: 5,
             lease_duration_seconds: 60,
             renew_interval_seconds: 10,
-            sending_grace_seconds: 120,
-            request_timeout_seconds: 30,
+            sending_grace_seconds: 300,
+            request_timeout_seconds: 180,
             finalize_timeout_seconds: 5,
         }
     }

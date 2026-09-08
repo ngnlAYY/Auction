@@ -154,7 +154,9 @@ Admin A26/A27 的 runtime 文档包含可选 `operations` 分组。HTTP 仍通�
 Admin A16-A19 邮件路由已接入：轮询状态、入站列表/详情使用严格邮箱/分页/时间筛选和
 安全 DTO，暂停/恢复使用 Admin session、CSRF、`command_id` 与 `expected_state_version`。
 PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lite 明确返回
-`501 feature_not_supported`。HTTP 层不返回原始邮件正文、Cookie、轮询游标或任意 metadata，
+`501 feature_not_supported`。A17 列表返回可空 `sender`/`subject` scalar 与 `has_message_display`；A18
+详情返回同样的 `sender`/`subject` 以及受限脱敏 `message_display`（正文 64 KiB、JSON 128 KiB、附件 1000 条），
+不返回装备 key、认证邮件正文、Cookie、轮询游标或任意未脱敏 metadata，
 A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 MoogleMail poller，返回带
 `pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 

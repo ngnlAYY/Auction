@@ -1,6 +1,7 @@
 //! PostgreSQL Admin 邮件行、轮询状态和安全 metadata 映射。
 
 use super::*;
+use auction_application::MailDisplaySnapshot;
 
 pub(super) fn map_sql_error(error: sqlx::Error) -> AdminMailTransactionError {
     match &error {
@@ -86,6 +87,11 @@ pub(super) fn map_intake_summary(
         processed_at: row
             .try_get("processed_at")
             .map_err(|_| storage_error("读取邮件处理时间失败"))?,
+        sender: row.try_get("sender").map_err(|_| storage_error("读取邮件发件人失败"))?,
+        subject: row.try_get("subject").map_err(|_| storage_error("读取邮件标题失败"))?,
+        has_message_display: row
+            .try_get("has_message_display")
+            .map_err(|_| storage_error("读取邮件原始信息状态失败"))?,
     };
     if summary.validate() {
         Ok(summary)
@@ -129,6 +135,14 @@ pub(super) fn decode_metadata(value: Value) -> Result<AdminMailIntakeMetadata, A
         delivery_ids: value.delivery_ids.unwrap_or_default(),
     };
     Ok(metadata)
+}
+
+pub(super) fn decode_message_display(
+    value: Value,
+) -> Result<MailDisplaySnapshot, ApplicationError> {
+    let display = serde_json::from_value::<MailDisplaySnapshot>(value)
+        .map_err(|_| storage_error("邮件原始信息格式无效"))?;
+    display.validate().then_some(display).ok_or_else(|| storage_error("邮件原始信息安全投影无效"))
 }
 
 fn to_i32(value: i64) -> Result<i32, ApplicationError> {

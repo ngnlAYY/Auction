@@ -28,8 +28,8 @@ impl MoogleMailDeliveryTransport {
             .await
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;
-        let external_reference_proven = receipt.external_mail_id.is_some();
-        let identity = receipt.external_mail_id.unwrap_or_else(|| claim.delivery_id.to_string());
+        let external_reference_proven = true;
+        let identity = receipt.external_mail_id;
         // 旧版 fulfillment snapshot 使用 world/operation 前缀区分远端 ID 与本地 fallback；
         // reconcile 必须先校验此前缀，不能把任意 delivery 引用当作 Sent 邮件 ID。
         let external_reference = format!("mooglemail:{world}:send:{identity}");
@@ -39,6 +39,8 @@ impl MoogleMailDeliveryTransport {
                 "operation": "send",
                 "template": payload.template,
                 "external_reference_proven": external_reference_proven,
+                "sent_verified": true,
+                "proof": "sent_exact_payload_v1",
                 "settlement_obligation_id": payload.variables.get("reference"),
             }),
         })
@@ -91,9 +93,8 @@ impl MoogleMailDeliveryTransport {
             .await
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;
-        let external_reference_proven = receipt.external_mail_id.is_some();
-        let reference_identity =
-            receipt.external_mail_id.unwrap_or_else(|| claim.delivery_id.to_string());
+        let external_reference_proven = true;
+        let reference_identity = receipt.external_mail_id;
         let external_reference = format!("mooglemail:{world}:send:{reference_identity}");
         Ok(DeliverySendResult {
             external_reference,
@@ -101,6 +102,8 @@ impl MoogleMailDeliveryTransport {
                 "operation": "send",
                 "template": template,
                 "external_reference_proven": external_reference_proven,
+                "sent_verified": true,
+                "proof": "sent_exact_payload_v1",
             }),
         })
     }

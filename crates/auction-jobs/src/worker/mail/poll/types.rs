@@ -32,7 +32,9 @@ pub struct MailPollFetchedMessage {
     pub external_mail_id: String,
     pub world_id: String,
     pub received_at: DateTime<Utc>,
+    pub sender: Option<String>,
     pub subject: String,
+    pub message_display: Option<auction_application::MailDisplaySnapshot>,
     pub content_digest: [u8; 32],
     pub attachment_count: u32,
     pub credits: i64,
@@ -49,7 +51,9 @@ impl std::fmt::Debug for MailPollFetchedMessage {
             .field("external_mail_id", &self.external_mail_id)
             .field("world_id", &self.world_id)
             .field("received_at", &self.received_at)
+            .field("sender", &self.sender.as_deref().map(|_| "[PRESENT]"))
             .field("subject", &"[REDACTED]")
+            .field("message_display", &self.message_display.as_ref().map(|_| "[PRESENT]"))
             .field("content_digest", &self.content_digest)
             .field("attachment_count", &self.attachment_count)
             .field("credits", &self.credits)

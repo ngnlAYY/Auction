@@ -349,10 +349,10 @@ jitter_seconds = 5
 lease_duration_seconds = 60
 # 可选：发送期间续租间隔秒数，范围 1-86400；省略时为 10。
 renew_interval_seconds = 10
-# 可选：发送结果写回宽限秒数，范围 1-86400；省略时为 120。
-sending_grace_seconds = 120
-# 可选：完整投递请求超时秒数，范围 1-86400；省略时为 30。
-request_timeout_seconds = 30
+# 可选：发送结果写回宽限秒数，范围 1-86400；省略时为 300。
+sending_grace_seconds = 300
+# 可选：完整投递请求超时秒数，范围 1-86400；省略时为 180；MoogleMail 启用时须大于其读取超时两倍。
+request_timeout_seconds = 180
 # 可选：投递终态写回超时秒数，范围 1-300；省略时为 5。
 finalize_timeout_seconds = 5
 

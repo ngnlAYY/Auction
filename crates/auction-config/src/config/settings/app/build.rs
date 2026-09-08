@@ -111,6 +111,14 @@ impl AppConfig {
         validate_auction(&auction)?;
         validate_worker_control(&worker.control)?;
         validate_mooglemail_worker(&worker.mooglemail)?;
+        if worker.mooglemail.enabled
+            && worker.delivery.request_timeout_seconds
+                <= worker.mooglemail.fetch_timeout_seconds.saturating_mul(2)
+        {
+            return Err(ConfigError::InvalidDeliveryWorkerConfig(
+                "MoogleMail 启用时 delivery.request_timeout_seconds 必须大于 fetch_timeout_seconds 的两倍",
+            ));
+        }
         validate_forum_worker(&worker.forum)?;
         validate_operations_alert_worker(&worker.operations_alert, &worker.mooglemail)?;
         validate_realtime(&realtime)?;

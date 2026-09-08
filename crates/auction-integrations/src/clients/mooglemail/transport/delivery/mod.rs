@@ -8,6 +8,16 @@ mod messages;
 mod settlement_secrets;
 
 impl MoogleMailDeliveryTransport {
+    /// 配置所有 Send 操作的发送前后 Sent 核对边界。
+    pub fn with_send_verification(
+        mut self,
+        maximum_pages: usize,
+        budget: std::time::Duration,
+    ) -> Result<Self, MoogleMailError> {
+        self.sender = self.sender.with_send_verification(maximum_pages, budget)?;
+        Ok(self)
+    }
+
     /// 使用已经由配置层校验的 MoogleMail client 和凭据构造 transport。
     pub fn new(
         client: MoogleMailClient,

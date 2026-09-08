@@ -72,6 +72,8 @@ mod fulfillment;
 mod lifecycle;
 #[path = "mail/diagnostics.rs"]
 mod mail_diagnostics;
+#[path = "mail/display.rs"]
+mod mail_display;
 #[path = "mail/poll.rs"]
 mod mail_poll;
 #[path = "mail/processing.rs"]
@@ -293,8 +295,10 @@ pub use fulfillment::{
     SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
-    SettlementFulfillmentResult, SettlementFulfillmentSentEvidence, SettlementFulfillmentState,
-    SettlementFulfillmentStore, canonical_settlement_fulfillment_subject,
+    SettlementFulfillmentResult, SettlementFulfillmentSentEvidence,
+    SettlementFulfillmentSentLookupReader, SettlementFulfillmentSentLookupTarget,
+    SettlementFulfillmentState, SettlementFulfillmentStore,
+    canonical_settlement_fulfillment_subject,
 };
 pub use lifecycle::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActor,
@@ -307,6 +311,7 @@ pub use mail_diagnostics::{
     MailDiagnosticContext, MailDiagnosticError, MailDiagnosticFuture, MailDiagnosticOutcome,
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailDiagnosticStage, PreparedMailEvidence,
 };
+pub use mail_display::MailDisplaySnapshot;
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
     MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollCompletion,

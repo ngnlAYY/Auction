@@ -22,10 +22,10 @@ use auction_domain::{
     AuctionId, EquipmentId, LotId, SettlementId, SettlementObligationKind, SettlementWorld,
     SubmissionId,
 };
-#[cfg(feature = "postgres")]
-use uuid::Uuid;
 
 use super::DatabaseStore;
+#[cfg(feature = "postgres")]
+use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
 mod claims;
@@ -35,6 +35,8 @@ mod dependencies;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reconcile;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod sent_lookup;
 
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{ACTIVATE, DeliveryAudit, PREPARE, append as append_delivery_audit};

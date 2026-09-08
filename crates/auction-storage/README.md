@@ -299,7 +299,8 @@ MoogleMail 拍卖入站事务由 `src/database/mail_intake/mod.rs` 装配，`int
 装备与密钥信封、pending lot 和预览版本写入；Draft/Preview 均写入唯一 intake target，Preview 新装备
 同时追加预览物化项。`record.rs` 持有追加审计与 preview realtime 事件；父模块只保留
 端口适配；同批不同分类使用独立分类计数器，撤回条目也保留已占用编号。所有写入仍在同一个
-PostgreSQL 竞价事务中完成，明文邮件正文和装备 key 不进入 storage。
+PostgreSQL 竞价事务中完成；原始正文和装备 key 不进入业务事实，完整 `MailMessage` 生成的 sender/subject
+与脱敏 `message_display` 仅作为 Admin 审查投影进入 `inbound_mail`，不参与幂等或 cursor。
 服务心跳由 `src/database/health/` 持有：`mod.rs` 只负责 `HeartbeatStore` 端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责两个后端的条件 upsert/读取，`mapping.rs` 负责闭集
 身份、状态和安全错误映射。PostgreSQL 使用数据库时钟和 observation sequence 条件 upsert，
@@ -405,7 +406,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000034` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000035` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -421,7 +422,10 @@ operations alert 的退信 signal 闭集，`000021` 建立非敏感运行状态�
 active 记录；已有重复项必须先通过 Admin 命令停用，迁移不会静默选择或改写凭据；`000031` 为论坛
 主题增加由完整读取证明的真实连续处理楼层，历史行以 #2 为安全起点；`000032` 允许唯一录入目标
 指向 Draft/Preview，并以跨状态唯一索引和延迟触发器保护正式开拍时的目标切换；`000033` 为 Admin
-realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修正 FinalFast 降额的同状态转换矩阵。SQLite
+realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修正 FinalFast 降额的同状态转换矩阵；`000035`
+为 MoogleMail `inbound_mail` 增加 nullable sender/subject 和脱敏 message_display，供
+`src/database/admin_mail/{reads,mapping}.rs` 提供列表 scalar/has 与详情 snapshot，历史回填 owner 由
+`admin_mail` 事务/审计边界负责，普通 replay 不补历史 NULL。SQLite
 `000001_lite_core.up.sql`、`000002` 至 `000011` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器及同义 realtime 读取索引均已接入；结算报告属于 PostgreSQL 完整档，SQLite
@@ -432,7 +436,11 @@ realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修�
 Serializable 最多三次的同一事务中原子递增 attempt、计算固定退避并追加 retry 审计。结算命令装配由
 `src/database/settlement_commands/mod.rs` 持有，并通过独立 `legacy.rs` 暴露只读旧 complete 核验；
 SQLite Lite 明确不启用该 workflow，结算履约
-外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。PostgreSQL 完整档的
+外部传输由 Worker/集成 owner 执行，结算 Sent/Balance 回执对账已由 Worker 接入。所有主动 ComposeSend 的
+Sent baseline、post-Sent scan、唯一 exact payload proof 和 defense gate 由 PostgreSQL 完整档 storage owner
+在成功写回前校验；成功 metadata 必须含 `sent_verified=true`、`external_reference_proven=true`、
+`proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。不完整或多匹配结果保持
+`manual_reconcile`，不自动重寄。PostgreSQL 完整档的
 `src/database/fulfillment_scheduler/mod.rs` 装配结算履约 owner；`claims.rs`、`delivery.rs`、
 `reconcile.rs` 和 `mapping.rs` 分别持有 claim、prepared/activation、证据收口和共享映射；
 claim 以 obligation owner 顺序锁定并支持历史数据缺失 execution 行的惰性补齐；claim 同时保留装备来源
@@ -449,6 +457,8 @@ MailIntake 的完成门禁在 claim 候选、领取条件更新和 `start_sendin
 入站摘要/结果相符才允许发送。delivery 自己的请求摘要属于另一种命令，不能与邮件内容摘要
 相等比较。`forum_auction_notice` 的 send 由同 command ID/world 的论坛 notify 账本证明，其他
 origin 保留各自的 owner 门禁；没有完成证明的普通入站投递保持待处理，不绕过屏障。
+ComposeSend 的 timeout/grace 默认 180/300 秒，启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，并复用
+`maximum_pages`/`fetch_timeout`，不新增配置字段。
 `src/database/mail_delivery/mod.rs` 只负责 MailDeliveryEnqueuer 的跨后端分派；命令闭集校验、普通
 outbox 入队、recovery 两阶段激活和 PostgreSQL 错误/载荷辅助分别位于
 `mail_delivery/{validation,outbox,activation,common}.rs`，保留命令摘要幂等、`prepared → pending`

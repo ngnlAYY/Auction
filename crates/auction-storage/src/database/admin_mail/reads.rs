@@ -105,7 +105,8 @@ pub(super) async fn list_intakes_postgres(
     .map_err(|_| storage_error("统计邮件入站记录失败"))?;
     let rows = sqlx::query(
         "SELECT id, mailbox_key, external_mail_id, world_id, mail_kind, status,
-                decision_code, received_at, processed_at
+                decision_code, received_at, processed_at, sender, subject,
+                (message_display IS NOT NULL) AS has_message_display
          FROM public.inbound_mail
          WHERE ($1::text IS NULL OR mailbox_key = $1)
            AND ($2::text IS NULL OR world_id = $2)
@@ -147,7 +148,9 @@ pub(super) async fn get_intake_postgres(
 ) -> Result<Option<AdminMailIntakeDetail>, ApplicationError> {
     let row = sqlx::query(
         "SELECT id, mailbox_key, external_mail_id, world_id, mail_kind, status,
-                decision_code, received_at, processed_at, decision_metadata
+                decision_code, received_at, processed_at, sender, subject,
+                (message_display IS NOT NULL) AS has_message_display,
+                message_display, decision_metadata
          FROM public.inbound_mail WHERE id = $1",
     )
     .bind(intake_id)
@@ -161,8 +164,13 @@ pub(super) async fn get_intake_postgres(
     let decision_metadata: Json<Value> =
         row.try_get("decision_metadata").map_err(|_| storage_error("读取邮件决定元数据失败"))?;
     let metadata = super::mapping::decode_metadata(decision_metadata.0)?;
+    let message_display = row
+        .try_get::<Option<Json<Value>>, _>("message_display")
+        .map_err(|_| storage_error("读取邮件原始信息失败"))?
+        .map(|value| super::mapping::decode_message_display(value.0))
+        .transpose()?;
     if !summary.validate() || !metadata.validate() {
         return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
     }
-    Ok(Some(AdminMailIntakeDetail { summary, metadata }))
+    Ok(Some(AdminMailIntakeDetail { summary, metadata, message_display }))
 }

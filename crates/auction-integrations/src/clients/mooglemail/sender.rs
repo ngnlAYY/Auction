@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fmt};
+//! MoogleMail 分步写入与发送后 Sent 完成证明。
+
+use std::{collections::HashSet, fmt, time::Duration};
+
+mod proof;
 
 use super::{
     MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
@@ -49,17 +53,17 @@ impl fmt::Debug for MoogleMailSendRequest {
     }
 }
 
-/// 已经由发送成功页证明的 MoogleMail 结果。
+/// 已经由新增 Sent 邮件的身份、正文和精确资产证明的寄送结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailSendReceipt {
-    /// 成功页暴露的远端邮件 ID；旧页面未暴露时为 None。
-    pub external_mail_id: Option<String>,
+    /// 通过发送前后 Sent 差异核对得到的真实远端邮件 ID。
+    pub external_mail_id: String,
 }
 
 /// 最终 send POST 的结构化结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MoogleMailSendOutcome {
-    /// 远端成功页已通过证明。
+    /// 新增 Sent 邮件已通过完整内容核验。
     Sent(MoogleMailSendReceipt),
     /// compose 初始页无法证明为干净状态，可能残留上一次结果未知的资产。
     PreflightUnproven,
@@ -74,12 +78,38 @@ pub enum MoogleMailSendOutcome {
 pub struct MoogleMailSender {
     client: MoogleMailClient,
     parser: MoogleMailParser,
+    verification_pages: usize,
+    verification_budget: Duration,
 }
 
 impl MoogleMailSender {
     /// 使用共享 MoogleMail client 构造发送编排器。
     pub fn new(client: MoogleMailClient) -> Self {
-        Self { client, parser: MoogleMailParser }
+        Self {
+            client,
+            parser: MoogleMailParser,
+            verification_pages: 100,
+            verification_budget: Duration::from_secs(30),
+        }
+    }
+
+    /// 设置发送前后 Sent 核对的页数和总预算。
+    pub fn with_send_verification(
+        mut self,
+        maximum_pages: usize,
+        budget: Duration,
+    ) -> Result<Self, MoogleMailError> {
+        if maximum_pages == 0 || maximum_pages > 100 || budget.is_zero() {
+            return Err(MoogleMailError::new(
+                MoogleMailOperation::Send,
+                MoogleMailWorld::Main,
+                MoogleMailErrorCategory::Configuration,
+                false,
+            ));
+        }
+        self.verification_pages = maximum_pages;
+        self.verification_budget = budget;
+        Ok(self)
     }
 
     /// 执行 compose、附件/COD 分步写入并证明最终发送结果。
@@ -98,6 +128,15 @@ impl MoogleMailSender {
                 MoogleMailErrorCategory::Configuration,
             ));
         }
+        let baseline_deadline =
+            tokio::time::Instant::now().checked_add(self.verification_budget).ok_or_else(|| {
+                write_error(
+                    request.world,
+                    MoogleMailOperation::Sent,
+                    MoogleMailErrorCategory::Configuration,
+                )
+            })?;
+        let baseline = self.scan_sent_baseline(request.world, cookie, baseline_deadline).await?;
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
         let initial_parse = match self.parser.parse_compose_state(&initial, request.world) {
@@ -210,7 +249,8 @@ impl MoogleMailSender {
                 self.parser.classify_send_response_failure(&response, request.world),
             )
             .await
-            .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?
+            .ok()
+            .flatten()
         {
             return Ok(match failure {
                 MoogleMailSendResponseFailure::RecipientNotFound { returned_mail_id } => {
@@ -221,7 +261,7 @@ impl MoogleMailSender {
                 }
             });
         }
-        let external_mail_id = self
+        let confirmation_hint = self
             .client
             .diagnose_parse(
                 &compose,
@@ -229,8 +269,24 @@ impl MoogleMailSender {
                 self.parser.prove_send_completed(&response, request.world),
             )
             .await
-            .map_err(|_| write_unknown(request.world, MoogleMailOperation::Send))?;
-        Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
+            .ok()
+            .flatten();
+        match self.verify_new_sent(&request, cookie, &baseline, confirmation_hint.as_deref()).await
+        {
+            Ok(external_mail_id) => {
+                Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
+            }
+            Err(_) => {
+                // 即使 POST 有成功提示，缺少 Sent 证明也要留存这次响应，不能记成功或重寄。
+                self.client
+                    .diagnose_parse(
+                        &compose,
+                        &response,
+                        Err(write_unknown(request.world, MoogleMailOperation::Send)),
+                    )
+                    .await
+            }
+        }
     }
 }
 

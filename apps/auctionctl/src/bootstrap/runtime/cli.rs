@@ -15,7 +15,7 @@ pub(super) enum Command {
         #[arg(value_enum, default_value = "public")]
         role: RoleArg,
     },
-    /// 离线解密一个 MoogleMail 异常证据文件并导出 JSON；不会连接数据库或远端服务。
+    /// 导出 MoogleMail 证据、认证回填展示信息或只读核查已发送邮件。
     #[command(name = "mail-evidence")]
     MailEvidence {
         #[command(subcommand)]
@@ -244,6 +244,22 @@ pub(super) enum MailEvidenceAction {
         /// 新建的 JSON 输出文件路径。
         #[arg(long)]
         output: PathBuf,
+        /// 可选历史父 key 来源；省略时优先 credential，缺失时使用 equipment。
+        #[arg(long, value_enum)]
+        key_source: Option<MailEvidenceKeySourceArg>,
+    },
+    /// 只读核查装备交付对应的已发送邮件；不会重新发送或修改交付状态。
+    InspectSent {
+        /// 装备交付 obligation UUID；冻结收件人、world 和附件必须完整。
+        obligation_id: Uuid,
+        /// 新建的安全 JSON 证据文件；不包含正文、Cookie 或装备 key。
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// 由认证归档补齐历史收件展示字段；不会重放邮件业务或覆盖已有展示值。
+    BackfillDisplay {
+        /// 包含完整 parsed_message 的诊断证据 UUID。
+        evidence_id: Uuid,
         /// 可选历史父 key 来源；省略时优先 credential，缺失时使用 equipment。
         #[arg(long, value_enum)]
         key_source: Option<MailEvidenceKeySourceArg>,

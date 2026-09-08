@@ -13,8 +13,7 @@ use super::*;
 impl MoogleMailParser {
     /// 证明最终发送响应成功，并尽可能提取远端邮件 ID。
     ///
-    /// 返回 None 只表示成功页面没有暴露唯一 mid，不表示发送失败；调用方仍应保存整个
-    /// outbox 的 request digest 并进入后续 sent/reconciliation 流程。
+    /// 返回 None 只表示明确成功页没有暴露唯一 mid；没有明确成功页时必须进入 write_unknown。
     pub fn prove_send_completed(
         &self,
         document: &[u8],
@@ -27,27 +26,19 @@ impl MoogleMailParser {
         }
         let parsed = Html::parse_document(source);
         let confirmation_selector = selector("#mmail_fin", world)?;
-        let form_selector = selector("form#mailform", world)?;
         let confirmations = parsed.select(&confirmation_selector).collect::<Vec<_>>();
-        let forms = parsed.select(&form_selector).count();
         if confirmations.len() > 1 {
             return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
-        if confirmations.len() == 1 && forms == 0 {
+        if confirmations.len() == 1 {
             let phrase = visible_confirmation_text(confirmations[0], world)?;
-            if !phrase.to_ascii_lowercase().contains("message has been sent")
-                && !is_css_send_confirmation(confirmations[0])
+            if phrase.to_ascii_lowercase().contains("message has been sent")
+                || is_css_send_confirmation(confirmations[0])
             {
-                return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
+                return Ok(response_mail_id(source));
             }
-            return Ok(response_mail_id(source));
         }
-
-        let state = self.parse_compose_state(document, world)?;
-        if !state.is_clean() {
-            return Err(compose_error(world, MoogleMailErrorCategory::ProtocolDrift));
-        }
-        Ok(response_mail_id(source))
+        Err(compose_error(world, MoogleMailErrorCategory::WriteUnknown))
     }
 
     /// 只从可见文字识别旧版冻结的明确发送失败。

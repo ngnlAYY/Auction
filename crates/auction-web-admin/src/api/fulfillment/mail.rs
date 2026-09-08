@@ -3,15 +3,15 @@
 //! 浏览器只读取轮询状态和入站安全摘要；暂停动作携带服务端快照中的 state version，
 //! A20 触发动作使用单个 command ID 唤醒全部 Worker poller，浏览器不推导邮件处理状态。
 
+use auction_contracts::{
+    AdminMailDisplayResponse, AdminMailIntakeMetadataResponse, AdminMailPaginationResponse,
+    AdminMailPollTriggerRequest, AdminMailPollingRequest,
+};
 pub(crate) use auction_contracts::{
     AdminMailIntakeDetailResponse as AdminMailIntakeDetail,
     AdminMailIntakeListResponse as AdminMailIntakePage,
     AdminMailIntakeSummaryResponse as AdminMailIntake,
     AdminMailPollingResponse as AdminMailPolling,
-};
-use auction_contracts::{
-    AdminMailIntakeMetadataResponse, AdminMailPaginationResponse, AdminMailPollTriggerRequest,
-    AdminMailPollingRequest,
 };
 use gloo_net::http::Request;
 use serde::Deserialize;
@@ -51,12 +51,15 @@ struct StrictMailPolling {
 struct StrictMailIntake {
     decision_code: String,
     external_mail_id: String,
+    has_message_display: bool,
     id: String,
     kind: String,
     mailbox_key: String,
     processed_at: String,
     received_at: String,
+    sender: Option<String>,
     status: String,
+    subject: Option<String>,
     world_id: String,
 }
 
@@ -306,12 +309,15 @@ fn decode_mail_intake(value: StrictMailIntake) -> Result<AdminMailIntake, &'stat
         id: value.id,
         mailbox_key: value.mailbox_key,
         external_mail_id: value.external_mail_id,
+        has_message_display: value.has_message_display,
         world_id: value.world_id,
         kind: value.kind,
         status: value.status,
         decision_code: value.decision_code,
         received_at: value.received_at,
         processed_at: value.processed_at,
+        sender: value.sender,
+        subject: value.subject,
     };
     valid_mail_intake(&intake).then_some(intake).ok_or("mail_intake")
 }
@@ -328,6 +334,8 @@ fn valid_mail_intake(value: &AdminMailIntake) -> bool {
         && valid_safe_text(&value.mailbox_key, 256)
         && valid_safe_text(&value.external_mail_id, 512)
         && valid_safe_text(&value.world_id, 256)
+        && value.sender.as_deref().is_none_or(|sender| valid_safe_text(sender, 256))
+        && value.subject.as_deref().is_none_or(|subject| valid_safe_text(subject, 512))
         && valid_trimmed_text(&value.kind)
         && valid_trimmed_text(&value.status)
         && processed_at >= received_at
@@ -340,18 +348,45 @@ fn decode_mail_intake_detail(
         id: value.id.clone(),
         mailbox_key: value.mailbox_key.clone(),
         external_mail_id: value.external_mail_id.clone(),
+        has_message_display: value.message_display.is_some(),
         world_id: value.world_id.clone(),
         kind: value.kind.clone(),
         status: value.status.clone(),
         decision_code: value.decision_code.clone(),
         received_at: value.received_at.clone(),
         processed_at: value.processed_at.clone(),
+        sender: value.sender.clone(),
+        subject: value.subject.clone(),
     };
     if !valid_mail_intake(&summary) {
         return Err("mail_intake");
     }
     decode_mail_metadata(&value.metadata)?;
+    decode_mail_display(value.message_display.as_ref())?;
     Ok(value)
+}
+
+fn decode_mail_display(value: Option<&AdminMailDisplayResponse>) -> Result<(), &'static str> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value.schema_version != 1
+        || value.redaction_version != 1
+        || value.body.len() > 64 * 1024
+        || value
+            .body
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+        || value.attachment_ids.len() > 1000
+        || value.attachment_ids.iter().enumerate().any(|(index, id)| {
+            !valid_safe_text(id, 128) || (index > 0 && value.attachment_ids[index - 1] >= *id)
+        })
+        || value.credits < 0
+        || value.cod < 0
+    {
+        return Err("mail_display");
+    }
+    Ok(())
 }
 
 fn decode_mail_metadata(value: &AdminMailIntakeMetadataResponse) -> Result<(), &'static str> {

@@ -79,6 +79,14 @@ async fn execute_transaction(
     if current.fencing_version != command.expected_fencing_version {
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
+    if command.action == DeliveryAdminAction::ReconcileSucceeded {
+        let payload: serde_json::Value =
+            row.try_get("payload").map_err(DeliveryAdminTransactionError::Sqlx)?;
+        // 裸 external_reference 不是 Sent 内容证明；人工对账不能绕过主动寄送的成功门。
+        if payload.get("operation").and_then(serde_json::Value::as_str) == Some("send") {
+            return Err(DeliveryAdminError::Invalid.into());
+        }
+    }
 
     let next_status = apply_delivery_action(&mut transaction, command, &current).await?;
     if command.action == DeliveryAdminAction::RetryFailed

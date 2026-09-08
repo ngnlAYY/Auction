@@ -21,7 +21,7 @@
 本表冻结当前对象的归属和档位；提交 Rust migration 前，必须把 Lite 表项与 SQLite 事务、
 锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000034`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000035`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000011` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。`bid_proxies` 不再作为第二份
@@ -184,7 +184,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 
 | 表 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- |
-| inbound_mail | auction-storage：mail projection | 完整档 | 入站邮件原始事实索引的安全读取来源 |
+| inbound_mail | auction-storage：mail projection | 完整档 | 入站邮件事实索引及 Admin 审查安全投影；`sender`/`subject` 为可空标量，`message_display` 为受限脱敏快照 |
 | mail_commands | auction-integrations + auction-jobs：mail | 完整档 | 邮件发送 outbox/命令 |
 | mail_poll_state | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | user_mail_commands | auction-integrations + auction-jobs：mail | 完整档 | 用户邮件外部写入幂等账本 |
@@ -211,6 +211,16 @@ SQLite Lite 不复制这些完整档表。
 MoogleMail 异常原始数据不进入数据库 schema：PostgreSQL 完整档 Worker 按独立运维契约写入本地加密证据文件，
 SQLite Lite 不新增该能力。证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通
 数据库投影仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
+
+`migrations/postgres/000035_mail_intake_display_snapshot` 仅属于 PostgreSQL 完整档：向 `inbound_mail` 追加
+nullable `sender`、`subject` 和 `message_display`。sender/subject 必须成对出现并受 256/512 字节边界约束；
+展示快照固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件 ID 最多 1000 条，且只含
+正文脱敏结果、附件外部 ID、Credits 和 COD。装备 key 与认证邮件正文不会进入快照。它是非权威展示投影，不能
+参与入站幂等或 cursor；普通 replay 不会为历史 NULL 自动补写。SQLite Lite 不新增对应列或能力。
+
+主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；
+`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全
+结果投影。Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
 
 ## 实时事件与运维告警
 

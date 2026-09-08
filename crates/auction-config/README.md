@@ -163,9 +163,9 @@ poll_interval_seconds = 60
 jitter_seconds = 5
 lease_duration_seconds = 60
 renew_interval_seconds = 10
-# 可选：过期 sending 宽限、完整外部请求和终态写回超时秒数，默认 120/30/5。
-sending_grace_seconds = 120
-request_timeout_seconds = 30
+# 可选：过期 sending 宽限、完整外部请求和终态写回超时秒数，默认 300/180/5。
+sending_grace_seconds = 300
+request_timeout_seconds = 180
 finalize_timeout_seconds = 5
 
 # 可选区块：Settlement fulfillment 的独立调度边界；默认 100/8/60/5/60/30/60。
@@ -408,7 +408,7 @@ Worker 的 control socket（若启用）、Auction `concurrency`/`poll_interval_
 `[worker.delivery]` 的批次/并发/poll 抖动/lease/续租/宽限/超时、`[worker.fulfillment]` 的
 批次/并发/poll 抖动/lease/单项超时/重试，以及 `[worker.recovery]` 的同类调度边界、低余额阈值和
 health 时间边界必须满足各自的路径/正数边界；Delivery 的续租间隔必须小于 lease，sending 宽限
-必须大于完整请求超时；Delivery 配置并发是上限，runner 还会取 transport 上限的较小值，当前
+必须大于完整请求超时；启用 MoogleMail 时 Delivery 完整请求超时还必须大于 MoogleMail 读取超时的两倍；Delivery 配置并发是上限，runner 还会取 transport 上限的较小值，当前
 MoogleMail transport 因账号级 compose 可变状态固定为 1；Fulfillment 和 Recovery 的单项超时必须小于各自 lease；
 其中 recovery 重试间隔不能超过 86400 秒；省略 Auction concurrency 时，配置层按 PostgreSQL=8、
 SQLite Lite=1 计算有效值，显式 SQLite 值也只允许 1，以落实单主机、单写者约束。轮询间隔只负责唤醒持久化调度器，

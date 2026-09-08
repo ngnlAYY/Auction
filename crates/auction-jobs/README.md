@@ -40,6 +40,13 @@ take 以同一邮件的资产归零和 Credits/COD/附件回执证明结果；�
 独立密钥解密。send 的明确收件人不存在会保留退信 `mid` 和回收标记，并在退信资产取回前进入
 `manual_reconcile`；本轮后续 claim 会暂时排除同一 `(world, recipient)`，其他玩家继续发送，
 下一轮重新评估。邮资拒绝在已暂存资产时同样进入人工对账，Worker 不会自动重发。
+所有主动 ComposeSend 均在 POST 前读取覆盖所有 MID 的有界 Sent baseline，POST 后再独立扫描 Sent；只有新增
+且唯一、同 world/recipient/subject/body digest、Credits/COD/装备 ID 精确匹配的 MID 才成功。0 资产通知也必须
+有 0 资产 Sent 证明；资产不符、秒领取、无匹配、多匹配、扫描未完或超时均为未知并进入 `manual_reconcile`，
+不得自动重寄，也不接受成功页、空 compose 或本地 UUID fallback。成功 metadata 固定为
+`sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，引用为
+`mooglemail:world:send:mid`。Return/Take 维持独立 action proof。ComposeSend 默认 delivery timeout/grace 为
+180/300 秒，启用 MM 时 timeout 必须大于两倍 fetch budget，并复用 `maximum_pages`/`fetch_timeout`。
 Delivery Worker 在 `start_sending` 前调用 transport availability gate；目标 world 暂无
 scoped/shared 凭据时，以完整 lease token/fencing 把 claim 释放回 `pending`，不会误写失败终态。
 该循环使用独立的 poll/jitter/batch/concurrency 配置，每轮完成后等待 `poll + [0, jitter]`；有效
@@ -126,6 +133,9 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 每封邮件在进入 `MailProcessor` 前核验持久化完成证明；已完成的旧邮件不再按取件后变化的摘要
 重新路由，但可计入可提交的连续前缀。查询完成证明后重新计算剩余处理预算。即使本轮没有新
 intake，只要前缀已获完整证明，也允许在租约 fence 下推进游标；缺失证明的邮件不能跳过。
+首次入站写入从完整 `MailMessage` 同步生成 sender/subject scalar 和脱敏展示 snapshot；它们是审查投影，
+不参与幂等或 cursor。普通 replay 不补 NULL；历史回填只接受 world/mailbox/mid/content digest 匹配的认证
+`parsed_message` 证据，并以 CAS/审计收口，同一幂等身份的内容冲突必须失败关闭。
 普通入站 take/return/notice 的 delivery 领取及进入 sending 均要求入站决定明确列出其 delivery ID，
 且相应 `mail_commands` 已提交，防止邮件处理尚未完成时先改变远端资产。论坛通知由独立的论坛
 命令 owner 证明，不依赖不存在的入站邮件记录。

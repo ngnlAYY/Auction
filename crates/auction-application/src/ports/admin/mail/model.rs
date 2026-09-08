@@ -10,6 +10,7 @@ use super::common::{
     valid_status, valid_string_list, valid_text,
 };
 use super::errors::AdminMailError;
+use crate::MailDisplaySnapshot;
 
 /// Admin 邮箱轮询状态的安全投影。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +164,9 @@ pub struct AdminMailIntakeSummary {
     pub decision_code: String,
     pub received_at: DateTime<Utc>,
     pub processed_at: DateTime<Utc>,
+    pub sender: Option<String>,
+    pub subject: Option<String>,
+    pub has_message_display: bool,
 }
 
 impl AdminMailIntakeSummary {
@@ -178,6 +182,10 @@ impl AdminMailIntakeSummary {
             && !self.received_at.timestamp_nanos_opt().is_none()
             && !self.processed_at.timestamp_nanos_opt().is_none()
             && self.processed_at >= self.received_at
+            && self.sender.is_some() == self.subject.is_some()
+            && (!self.has_message_display || self.sender.is_some())
+            && self.sender.as_deref().is_none_or(|value| valid_optional_text(Some(value), 256))
+            && self.subject.as_deref().is_none_or(|value| valid_optional_text(Some(value), 512))
     }
 }
 
@@ -219,6 +227,7 @@ impl AdminMailIntakeMetadata {
 pub struct AdminMailIntakeDetail {
     pub summary: AdminMailIntakeSummary,
     pub metadata: AdminMailIntakeMetadata,
+    pub message_display: Option<MailDisplaySnapshot>,
 }
 
 /// 入站邮件数字分页结果。
