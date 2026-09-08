@@ -268,22 +268,28 @@ impl MailDiagnosticRecorder for MoogleMailDiagnosticArchive {
         body: Option<&[u8]>,
         outcome: MailDiagnosticOutcome,
     ) -> MailDiagnosticFuture<'_, MailDiagnosticReceipt> {
+        let prepared = self.prepare_response(context, status, body);
+        let archive = self.clone();
+        Box::pin(async move {
+            let prepared = prepared?;
+            tokio::task::spawn_blocking(move || archive.retain_blocking(prepared, outcome))
+                .await
+                .map_err(|_| MailDiagnosticError::Io)?
+        })
+    }
+
+    fn prepare_response(
+        &self,
+        context: MailDiagnosticContext,
+        status: Option<u16>,
+        body: Option<&[u8]>,
+    ) -> Result<PreparedMailEvidence, MailDiagnosticError> {
         if body.is_some_and(|bytes| bytes.len() > payload::MAX_PAYLOAD) {
-            return Box::pin(async { Err(MailDiagnosticError::PayloadTooLarge) });
+            return Err(MailDiagnosticError::PayloadTooLarge);
         }
         let available = body.is_some();
         let bytes = SensitiveBytes(body.unwrap_or_default().to_vec());
-        let archive = self.clone();
-        Box::pin(async move {
-            // HTML 的编码、摘要、加密和磁盘操作同处一个阻塞任务，避免占住异步执行线程。
-            tokio::task::spawn_blocking(move || {
-                let prepared =
-                    archive.prepare(context, "raw_response", bytes, status, available)?;
-                archive.retain_blocking(prepared, outcome)
-            })
-            .await
-            .map_err(|_| MailDiagnosticError::Io)?
-        })
+        self.prepare(context, "raw_response", bytes, status, available)
     }
 }
 

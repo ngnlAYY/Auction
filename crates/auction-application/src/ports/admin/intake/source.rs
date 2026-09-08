@@ -37,19 +37,35 @@ impl fmt::Debug for AdminIntakeSourceSnapshot {
 impl AdminIntakeSourceSnapshot {
     /// 校验适配器输出的结构、时间和属性形状，但保留 `tradeable` 供邮件策略给出稳定拒绝原因。
     pub fn validate_for_mail(&self, now: DateTime<Utc>) -> Result<(), AdminIntakeError> {
-        if !valid_text(&self.adapter, 128)
-            || self.source_fingerprint == [0; 32]
-            || !decimal_identity(&self.external_equipment_id)
-            || !valid_text(&self.name, 512)
-            || !valid_text(&self.category, 128)
-            || self.level.is_some_and(|level| !(0..=100_000).contains(&level))
-            || self.collected_at.timestamp_micros() == 0
-            || self.collected_at > now
-            || !self.attributes.is_object()
-        {
+        if self.mail_validation_issue(now).is_some() {
             return Err(AdminIntakeError::InvalidSource);
         }
         Ok(())
+    }
+
+    /// 返回不含字段原文的首个失败分类；与原有快照校验共用唯一规则。
+    pub fn mail_validation_issue(&self, now: DateTime<Utc>) -> Option<&'static str> {
+        if !valid_text(&self.adapter, 128) {
+            Some("adapter_invalid")
+        } else if self.source_fingerprint == [0; 32] {
+            Some("fingerprint_invalid")
+        } else if !decimal_identity(&self.external_equipment_id) {
+            Some("equipment_id_invalid")
+        } else if !valid_text(&self.name, 512) {
+            Some("name_invalid")
+        } else if !valid_text(&self.category, 128) {
+            Some("category_invalid")
+        } else if self.level.is_some_and(|level| !(0..=100_000).contains(&level)) {
+            Some("level_invalid")
+        } else if self.collected_at.timestamp_micros() == 0 {
+            Some("collected_at_invalid")
+        } else if self.collected_at > now {
+            Some("collected_at_future")
+        } else if !self.attributes.is_object() {
+            Some("attributes_invalid")
+        } else {
+            None
+        }
     }
 
     /// 按 Admin 手工录入策略校验适配器输出；策略关闭时保留不可交易事实并继续录入。

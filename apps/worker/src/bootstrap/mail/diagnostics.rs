@@ -61,7 +61,39 @@ struct LoggedMailDiagnostics {
     archive: MoogleMailDiagnosticArchive,
 }
 
+/// 安全失败日志独立于原始留证开关，装配根始终将这个出口传给装备来源适配器。
+pub(super) fn report_equipment_failure(
+    context: &auction_application::MailEquipmentDiagnosticContext,
+    snapshot: &auction_application::MailEquipmentDiagnosticSnapshot,
+) {
+    tracing::warn!(
+        mailbox_key = %context.mailbox_key,
+        world_id = %context.world_id,
+        external_mail_id = %context.external_mail_id,
+        external_equipment_id = %snapshot.equipment_id,
+        attachment_position = snapshot.attachment_position,
+        stage = snapshot.stage.as_str(),
+        category = snapshot.category.as_str(),
+        detail_code = ?snapshot.detail_code,
+        http_status = ?snapshot.http_status,
+        elapsed_millis = ?snapshot.elapsed_millis,
+        evidence_id = ?snapshot.evidence_id,
+        evidence_status = snapshot.evidence_status.as_str(),
+        retention_error = ?snapshot.retention_error,
+        "MoogleMail equipment processing failed"
+    );
+}
+
 impl MailDiagnosticRecorder for LoggedMailDiagnostics {
+    fn prepare_response(
+        &self,
+        context: MailDiagnosticContext,
+        status: Option<u16>,
+        body: Option<&[u8]>,
+    ) -> Result<PreparedMailEvidence, MailDiagnosticError> {
+        self.archive.prepare_response(context, status, body)
+    }
+
     fn prepare_message(
         &self,
         context: MailDiagnosticContext,
@@ -138,6 +170,8 @@ impl Drop for RetentionReportGuard {
                 operation = %self.context.operation,
                 mailbox_key = ?self.context.mailbox_key,
                 external_mail_id = ?self.context.external_mail_id,
+                external_equipment_id = ?self.context.external_equipment_id,
+                attachment_position = ?self.context.attachment_position,
                 failure_code = %self.outcome.failure_code,
                 evidence_id = ?self.evidence_id,
                 evidence_status = "completion_unconfirmed",
@@ -161,6 +195,8 @@ fn report(
             world_id = %context.world_id,
             mailbox_key = ?context.mailbox_key,
             external_mail_id = ?context.external_mail_id,
+            external_equipment_id = ?context.external_equipment_id,
+            attachment_position = ?context.attachment_position,
             failure_code = %outcome.failure_code,
             decision_code = ?outcome.decision_code,
             evidence_id = %receipt.evidence_id,
@@ -176,6 +212,8 @@ fn report(
             world_id = %context.world_id,
             mailbox_key = ?context.mailbox_key,
             external_mail_id = ?context.external_mail_id,
+            external_equipment_id = ?context.external_equipment_id,
+            attachment_position = ?context.attachment_position,
             failure_code = %outcome.failure_code,
             evidence_status = "save_failed",
             diagnostic_error = error.as_str(),

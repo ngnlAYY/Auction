@@ -141,6 +141,9 @@
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
 - `src/ports/mail/display.rs`：从完整 `MailMessage` 生成 Admin 审查用脱敏快照；正文、附件 ID、Credits/COD
   受固定大小限制，装备 key 与认证邮件正文隐藏。该快照是敏感展示投影，不是业务权威或幂等输入。
+- `src/ports/mail/equipment_diagnostics.rs`：持有装备读取失败的首个非权威诊断投影、stage/category/detail_code
+  闭集、证据留存状态和有界关联字段；它不进入决定 metadata、command digest、completion proof 或 cursor。
+  应用处理只返回原始 Result 与 `pendingEquipmentDiagnostic` 句柄，不在 `item_timeout` 内 await static future。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
   不把告警结果混入拍卖或外部传输事实。`delivery_returned_mail` 是已证明收件人不存在且需要取回

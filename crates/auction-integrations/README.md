@@ -72,6 +72,12 @@
   `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为
   `mooglemail:world:send:mid`。Return/Take 保持独立 action proof；sender/proof.rs 的
   `parserSentContentProof` 提供 Sent 内容证明。
+  装备来源适配器对每个完整响应先加密 prepare，只有读取/解析/身份/snapshot/filter 失败才在 2 秒内 retain；
+  成功读取丢弃密文。装备失败诊断只保存首个低基数 category/detail_code 和安全关联，网络/超时/截断/超大响应
+  只能标记 `body_unavailable`，不伪称完整响应。
+  诊断 prepare/retain 不由 integration 自行 await 或创建 tracing 出口；Worker 通过同步 callback 注入日志和 raw
+  recorder。HTTP body timeout 只保留 `body_unavailable` 与最后实际观测 status，不伪称 partial body；session expired
+  在凭据耗尽或失效写回失败时保留最后已取得的 body/status/elapsed。
 
 调用顺序是：用 `MoogleMailClient::production()` 建立受限客户端；Worker 优先从 PostgreSQL
 读取 A32 唯一 active Cookie 并用独立数据密钥解密；暂时没有 active 行时保留 degraded 运行态，实际

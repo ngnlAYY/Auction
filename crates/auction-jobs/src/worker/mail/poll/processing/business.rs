@@ -14,6 +14,8 @@ pub(super) async fn process_with_retry(
     business: MailMessage,
     config: MailPollRuntimeConfig,
     metric_context: MailPollMetricContext,
+    pending_diagnostics: &mut Vec<auction_application::PendingMailEquipmentDiagnostic>,
+    decision_diagnostic: &mut Option<usize>,
 ) -> Result<MailProcessingDecision, MailProcessFailure> {
     let mut original = Some(business);
     for attempt in 1..=config.process_attempts {
@@ -36,6 +38,19 @@ pub(super) async fn process_with_retry(
             message.duplicate_for_retry()
         };
         let result = tokio::time::timeout(config.item_timeout, processor.process(message)).await;
+        let result = match result {
+            Ok(mut attempt) => {
+                // 这里只转移句柄；留证由 caller 在单封和批次两层业务 timeout 之外执行。
+                if let Some(pending) = attempt.pending_equipment_diagnostic.take() {
+                    if attempt.result.is_ok() {
+                        *decision_diagnostic = Some(pending_diagnostics.len());
+                    }
+                    pending_diagnostics.push(pending);
+                }
+                Ok(attempt.result)
+            }
+            Err(elapsed) => Err(elapsed),
+        };
         match result {
             Ok(Ok(decision)) => return Ok(decision),
             Ok(Err(error)) => match error.mail_processing_retryability() {

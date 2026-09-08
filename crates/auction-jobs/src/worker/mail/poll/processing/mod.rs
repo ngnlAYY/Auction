@@ -111,7 +111,7 @@ where
         metrics,
         loop_kind,
     } = context;
-    let batch_deadline = std::time::Instant::now() + config.batch_timeout;
+    let mut batch_deadline = std::time::Instant::now() + config.batch_timeout;
     let metric_context = MailPollMetricContext { metrics: Arc::clone(&metrics), loop_kind };
     let failure_context = MailPollFailureContext {
         schedule: Arc::clone(&schedule),
@@ -251,17 +251,43 @@ where
             (Some(processor), Some(business)) => {
                 let diagnostic =
                     diagnostics::MailMessageDiagnostic::prepare(diagnostics.clone(), &business);
-                let decision = match tokio::time::timeout(
+                let mut pending_diagnostics =
+                    Vec::with_capacity(usize::from(config.process_attempts));
+                let mut decision_diagnostic = None;
+                let mut processed = tokio::time::timeout(
                     process_remaining,
                     process_with_retry(
                         processor.as_ref(),
                         business,
                         config,
                         metric_context.clone(),
+                        &mut pending_diagnostics,
+                        &mut decision_diagnostic,
                     ),
                 )
-                .await
-                {
+                .await;
+                // 业务结果及其超时已冻结；留证不占后续邮件的业务预算，也不更改重试分类。
+                if !pending_diagnostics.is_empty() {
+                    let retention_started = std::time::Instant::now();
+                    for (index, pending) in pending_diagnostics.into_iter().enumerate() {
+                        let diagnostic = pending.resolve().await;
+                        if decision_diagnostic == Some(index)
+                            && let Ok(Ok(decision)) = &mut processed
+                            && decision.mail_kind == "equipment"
+                            && decision.status == "rejected"
+                            && diagnostic.validate()
+                        {
+                            decision.equipment_diagnostic = Some(diagnostic);
+                        }
+                    }
+                    if let Some(extended) = batch_deadline.checked_add(retention_started.elapsed())
+                    {
+                        batch_deadline = extended;
+                    } else {
+                        tracing::warn!("MoogleMail diagnostic budget extension overflow");
+                    }
+                }
+                let decision = match processed {
                     Ok(Ok(decision)) => decision,
                     Ok(Err(failure)) => {
                         diagnostic.retain_failure(failure.failure_code).await;

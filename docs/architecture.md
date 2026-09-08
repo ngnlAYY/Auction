@@ -314,6 +314,24 @@ MoogleMail 第一写入从完整 `MailMessage` 生成 Admin 审查展示投影�
 不会把历史 NULL 补齐。历史回填只接受认证的 `parsed_message` 诊断证据，并要求 world/mailbox/mid/content digest
 精确匹配后以 CAS 和审计落账；相同幂等身份但内容不同必须冲突，缺少证据的历史邮件显示未留存。
 
+装备来源读取为每个完整响应先执行加密 prepare；只有 request/response/parse/validate 阶段的读取、解析、身份、
+snapshot 或 filter 失败才在 2 秒有界窗口内 retain，成功读取直接丢弃密文。PostgreSQL `000036` 将首个装备
+失败写入 `inbound_mail.equipment_diagnostic` 独立非权威 sidecar，不进入 `decision_metadata`、command digest、
+completion proof 或 cursor。投影包含装备 ID、1-based 附件位置、阶段、闭集 category、可选 detail_code、真实可用的
+HTTP status、最多 300000 毫秒耗时、evidence UUID 和 retention status/error；网络、超时、截断或超大不完整响应只
+标记 `body_unavailable`，不伪称取得完整响应。日志始终保留安全关联，即使留证 disabled 或失败；旧邮件没有底层失败
+trace 时不回填原因，也不重放旧邮件。该 sidecar 只属于 PostgreSQL 完整档，SQLite Lite 不新增能力。
+通用诊断上下文的 `external_equipment_id`/`attachment_position` 保持 optional，缺省时省略以保持既有 v2 AAD
+字节逐字兼容，不因装备诊断升级证据格式。
+装备诊断 resolve 不延长业务定时器：application 返回 `MailProcessingAttempt`，保存原始 Result 与
+`pendingEquipmentDiagnostic` 句柄而不 await static future；`process_with_retry` 只收集每次结束尝试的句柄，
+`process_claim_inner` 的 `timeout(process_remaining, process_with_retry)` 结束后，才在 `item_timeout` 和 batch
+`process_remaining` 之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接 sidecar，中间 `Err` 仍留证/日志并
+保留原 retry 分类；实际 retention elapsed 延长后续 batch deadline，避免占用下一封业务预算。Worker 注入同步
+callback 作为日志出口，integration 不新增 tracing 依赖，raw recorder 仅在开关启用且同一实例可用时注入。HTTP
+body timeout 只保留 `body_unavailable` 与最后实际观测的 status，不伪称 partial body；session expired 在凭据耗尽
+或失效写回失败时保留最后已取得的 body/status/elapsed。
+
 ### Lite 能力边界
 
 | 能力 | PostgreSQL 完整档 | SQLite Lite 档 |
@@ -332,7 +350,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000035` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000036` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序

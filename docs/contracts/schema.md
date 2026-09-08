@@ -21,7 +21,7 @@
 本表冻结当前对象的归属和档位；提交 Rust migration 前，必须把 Lite 表项与 SQLite 事务、
 锁等待、备份和 Worker 并发约束再次核对。
 
-当前已提交 PostgreSQL `000001` 至 `000035`，覆盖核心竞价、结算/履约、生命周期、
+当前已提交 PostgreSQL `000001` 至 `000036`，覆盖核心竞价、结算/履约、生命周期、
 代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 已提交
 `000001` 至 `000011` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
 身份修正。`bid_proxies` 不再作为第二份
@@ -221,6 +221,11 @@ nullable `sender`、`subject` 和 `message_display`。sender/subject 必须成�
 主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；
 `sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全
 结果投影。Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
+
+`migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加
+nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入
+`decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。SQLite Lite
+不增加该列或能力。
 
 ## 实时事件与运维告警
 

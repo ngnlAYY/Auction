@@ -119,6 +119,15 @@ digest、Credits/COD/装备 ID 精确匹配的真实 MID 才成功；0 资产通
 成功 metadata 为 `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，引用
 为 `mooglemail:world:send:mid`。外层 timeout/grace 默认 180/300 秒，复用 `maximum_pages`/`fetch_timeout`；
 启用 MM 时 timeout 必须大于两倍 fetch budget。Return/Take 仍是独立 action proof。
+装备来源每个完整响应先加密 prepare，只有 request/response/parse/validate 阶段失败才在 2 秒窗口内留证；成功读取
+丢弃密文。被拒绝装备邮件只保留首个 `equipment_diagnostic` sidecar，日志始终保留安全关联；网络、超时、截断或
+超大响应标记 `body_unavailable`，不伪称完整响应。该 sidecar 不进入决定 metadata、command digest、completion
+或 cursor，证据 UUID 也不保证永久存在。
+`process_with_retry` 只收集结束尝试的诊断句柄，`process_claim_inner` 在两层业务定时器
+（`item_timeout` 与 batch `process_remaining`）之外以 2 秒上限 resolve；只有 terminal `OkRejected` 挂接 sidecar，
+中间 Err 也留证/日志并保留原 retryability，实际 retention elapsed 延长后续 batch deadline。Worker 始终注入同步
+日志 callback，raw recorder 仅在 diagnostics 开关启用且同一实例可用时注入。HTTP body timeout 只保留
+`body_unavailable` 与最后实际 status；session expired 在凭据耗尽/失效写回失败时保留最后 body/status/elapsed。
 return 动作同时支持当前只读 `[RTS]` 回执与旧版 Inbox 缺席证明；当前回执必须把前后身份、固定
 正文后缀、Credits/CoD/装备清单和动作消失逐项绑定，不能只凭标题前缀判定成功。
 每个邮箱的持久化 claim 在批次执行期间按配置续租；token、owner、版本或续租 fence 失效后会

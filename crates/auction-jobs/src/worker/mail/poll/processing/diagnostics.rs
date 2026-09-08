@@ -25,6 +25,8 @@ impl MailMessageDiagnostic {
             world_id: message.world_id.clone(),
             mailbox_key: Some(message.mailbox_key.clone()),
             external_mail_id: Some(message.external_mail_id.clone()),
+            external_equipment_id: None,
+            attachment_position: None,
         };
         let (prepared, unavailable) = match &recorder {
             Some(recorder) => match recorder.prepare_message(context.clone(), message) {

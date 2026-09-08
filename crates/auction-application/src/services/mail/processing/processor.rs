@@ -104,7 +104,11 @@ where
     U: MailUserPort + 'static,
     C: Clock + 'static,
 {
-    fn process(&self, message: MailMessage) -> ApplicationFuture<'_, MailProcessingDecision> {
-        Box::pin(async move { self.process_message(message).await })
+    fn process(&self, message: MailMessage) -> crate::MailProcessingFuture<'_> {
+        Box::pin(async move {
+            let mut pending_equipment_diagnostic = None;
+            let result = self.process_message(message, &mut pending_equipment_diagnostic).await;
+            crate::MailProcessingAttempt { result, pending_equipment_diagnostic }
+        })
     }
 }

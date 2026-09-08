@@ -157,7 +157,8 @@ TCP listener 不使用的 runtime 目录字段按服务端契约接受空值或�
 读取该邮箱的轮询状态；入站列表和轮询状态读取失败都保留当前查询并提供原位重试；入站列表按旧页面支持 world、kind、status 筛选和 10 条分页
 和安全元数据详情；列表显示 sender/subject scalar 与是否存在原始信息投影的 `has_message_display`，
 详情显示 sender/subject、脱敏正文、附件外部 ID、Credits/COD；装备 key、认证邮件正文、Cookie、轮询游标
-和外部凭据不进入页面。A20 触发按钮已由
+和外部凭据不进入页面；被拒绝装备邮件详情还显示 equipment ID、1-based 附件位置、stage/category、可选
+detail_code、真实 HTTP status、耗时、evidence UUID 与 retention status/error。A20 触发按钮已由
 HTTP/Worker 链路接入，使用单个 command ID 唤醒全部已装配 poller，返回的是接受状态，不代表业务邮件处理完成。管理总览会展示全部 mailbox
 的轮询状态，并提供逐邮箱暂停/恢复与全局立即轮询操作。管理命令统一显示忙碌、禁用重复提交并以
 成功/失败语义反馈；全部 Admin API 会先解析稳定错误 code，再通过五语言 Fluent 映射 stale version、

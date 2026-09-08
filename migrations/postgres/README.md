@@ -1,6 +1,6 @@
 # PostgreSQL 迁移
 
-PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000035` 已按 owner 追加核心身份、
+PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000036` 已按 owner 追加核心身份、
 拍卖、竞价、代理、结算/履约、生命周期、身份/外部命令、恢复/可观测性和论坛同步对象；
 它们是当前目标 schema，但不能单独证明全部业务表面已经完成。历史名称
 `bid_proxies` 由末尾只读兼容视图提供，权威写入只进入新授权与历史表。
@@ -57,6 +57,9 @@ Preview 与后继 Draft 同时存在的切换窗口，并以跨状态唯一索�
 `000035` 为 MoogleMail `inbound_mail` 追加 nullable `sender`、`subject` 和 `message_display`，
 用于 PostgreSQL Admin 邮件列表的 scalar/has 投影和详情脱敏 snapshot。它不改变业务事实、幂等或 cursor，
 不为 SQLite Lite 增加对应列；普通 replay 不补历史 NULL。
+`000036` 为被拒绝装备邮件追加 nullable `equipment_diagnostic` sidecar；它只保留首个失败的低基数诊断和
+证据留存状态，不进入决定 metadata、命令摘要、完成证明或 cursor。成功读取不会落盘准备好的密文，SQLite Lite
+不增加该列。
 
 `000005` 与 `000015` 的历史文件字节和 SQLx checksum 保持不可变。两者曾使用 PostgreSQL
 保留字作为未加引号的查询别名；`auction-storage` 的迁移执行视图只对这两个固定版本、描述和

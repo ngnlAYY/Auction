@@ -70,8 +70,37 @@ pub(super) fn MailIntakeDetailPanel(
         metadata.delivery_ids.join(", ")
     };
     let original = detail.message_display;
+    let equipment_diagnostic = detail.equipment_diagnostic;
     let sender = detail.sender.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
     let subject = detail.subject.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
+    let diagnostic_detail = equipment_diagnostic
+        .as_ref()
+        .and_then(|diagnostic| diagnostic.detail_code.clone())
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_http_status = equipment_diagnostic
+        .as_ref()
+        .and_then(|diagnostic| diagnostic.http_status.map(|value| value.to_string()))
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_elapsed = equipment_diagnostic
+        .as_ref()
+        .and_then(|diagnostic| diagnostic.elapsed_millis.map(|value| value.to_string()))
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_evidence_id = equipment_diagnostic
+        .as_ref()
+        .and_then(|diagnostic| diagnostic.evidence_id.clone())
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_retention_error = equipment_diagnostic
+        .as_ref()
+        .and_then(|diagnostic| diagnostic.retention_error.clone())
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_stage = equipment_diagnostic
+        .as_ref()
+        .map(|diagnostic| equipment_diagnostic_stage_label(&diagnostic.stage))
+        .unwrap_or_else(|| t!("value-empty"));
+    let diagnostic_evidence_status = equipment_diagnostic
+        .as_ref()
+        .map(|diagnostic| equipment_evidence_status_label(&diagnostic.evidence_status))
+        .unwrap_or_else(|| t!("value-empty"));
 
     rsx! {
         section { class: "admin-panel admin-mail-detail", aria_labelledby: "admin-mail-detail-title",
@@ -157,6 +186,57 @@ pub(super) fn MailIntakeDetailPanel(
                     p { class: "admin-mail-original__missing", {t!("admin-mail-original-not-retained")} }
                 }
             }
+            section { class: "admin-mail-equipment-diagnostic", aria_labelledby: "admin-mail-equipment-diagnostic-title",
+                h3 { id: "admin-mail-equipment-diagnostic-title", {t!("admin-mail-equipment-diagnostic")} }
+                if let Some(diagnostic) = equipment_diagnostic {
+                    dl { class: "admin-mail-equipment-diagnostic__grid",
+                        dt { {t!("admin-mail-equipment-id")} }
+                        dd { "{diagnostic.equipment_id}" }
+                        dt { {t!("admin-mail-attachment-position")} }
+                        dd { "{diagnostic.attachment_position}" }
+                        dt { {t!("admin-mail-diagnostic-stage")} }
+                        dd { "{diagnostic_stage}" }
+                        dt { {t!("admin-mail-diagnostic-category")} }
+                        dd { "{diagnostic.category}" }
+                        dt { {t!("admin-mail-diagnostic-detail")} }
+                        dd { "{diagnostic_detail}" }
+                        dt { {t!("admin-mail-diagnostic-http-status")} }
+                        dd { "{diagnostic_http_status}" }
+                        dt { {t!("admin-mail-diagnostic-elapsed")} }
+                        dd { "{diagnostic_elapsed}" }
+                        dt { {t!("admin-mail-diagnostic-evidence-id")} }
+                        dd { "{diagnostic_evidence_id}" }
+                        dt { {t!("admin-mail-diagnostic-evidence-status")} }
+                        dd { "{diagnostic_evidence_status}" }
+                        dt { {t!("admin-mail-diagnostic-retention-error")} }
+                        dd { "{diagnostic_retention_error}" }
+                    }
+                } else {
+                    p { class: "admin-mail-equipment-diagnostic__missing", {t!("admin-mail-equipment-diagnostic-not-retained")} }
+                }
+            }
         }
+    }
+}
+
+fn equipment_diagnostic_stage_label(value: &str) -> String {
+    match value {
+        "request" => t!("admin-mail-diagnostic-stage-request"),
+        "response" => t!("admin-mail-diagnostic-stage-response"),
+        "parse" => t!("admin-mail-diagnostic-stage-parse"),
+        "validate" => t!("admin-mail-diagnostic-stage-validate"),
+        _ => value.to_owned(),
+    }
+}
+
+fn equipment_evidence_status_label(value: &str) -> String {
+    match value {
+        "retained" => t!("admin-mail-diagnostic-evidence-retained"),
+        "body_unavailable" => t!("admin-mail-diagnostic-evidence-body-unavailable"),
+        "save_failed" => t!("admin-mail-diagnostic-evidence-save-failed"),
+        "completion_unconfirmed" => t!("admin-mail-diagnostic-evidence-completion-unconfirmed"),
+        "prepare_failed" => t!("admin-mail-diagnostic-evidence-prepare-failed"),
+        "disabled" => t!("admin-mail-diagnostic-evidence-disabled"),
+        _ => value.to_owned(),
     }
 }

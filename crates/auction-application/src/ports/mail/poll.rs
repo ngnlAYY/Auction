@@ -67,6 +67,7 @@ pub struct MailPollIntake {
     pub decision_code: String,
     pub decision_metadata: Value,
     pub message_display: Option<MailDisplaySnapshot>,
+    pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
     pub processed_at: DateTime<Utc>,
 }
 
@@ -96,6 +97,9 @@ impl MailPollIntake {
             && self.decision_metadata.is_object()
             && (self.message_display.is_none() || self.sender.is_some() && self.subject.is_some())
             && self.message_display.as_ref().is_none_or(MailDisplaySnapshot::validate)
+            && self.equipment_diagnostic.as_ref().is_none_or(|diagnostic| {
+                self.mail_kind == "equipment" && self.status == "rejected" && diagnostic.validate()
+            })
             && self.received_at.timestamp_nanos_opt().is_some()
             && self.processed_at.timestamp_nanos_opt().is_some()
             && self.processed_at >= self.received_at

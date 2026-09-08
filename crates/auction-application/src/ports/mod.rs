@@ -72,6 +72,9 @@ mod fulfillment;
 mod lifecycle;
 #[path = "mail/diagnostics.rs"]
 mod mail_diagnostics;
+#[path = "mail/equipment_diagnostics.rs"]
+mod mail_equipment_diagnostics;
+pub use mail_equipment_diagnostics::*;
 #[path = "mail/display.rs"]
 mod mail_display;
 #[path = "mail/poll.rs"]
@@ -323,7 +326,8 @@ pub use mail_processing::{
     MailAuctionItemWrite, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
     MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment,
     MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNotificationTemplate,
-    MailProcessingDecision, MailProcessingError, MailProcessor, mail_auction_aggregate_id,
+    MailProcessingAttempt, MailProcessingDecision, MailProcessingError, MailProcessingFuture,
+    MailProcessor, mail_auction_aggregate_id,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,

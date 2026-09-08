@@ -156,7 +156,7 @@ Admin A16-A19 邮件路由已接入：轮询状态、入站列表/详情使用�
 PostgreSQL 完整档负责一致读取和 Serializable 状态命令；SQLite Lite 明确返回
 `501 feature_not_supported`。A17 列表返回可空 `sender`/`subject` scalar 与 `has_message_display`；A18
 详情返回同样的 `sender`/`subject` 以及受限脱敏 `message_display`（正文 64 KiB、JSON 128 KiB、附件 1000 条），
-不返回装备 key、认证邮件正文、Cookie、轮询游标或任意未脱敏 metadata，
+拒绝装备邮件还可返回独立 `equipment_diagnostic` 安全投影；不返回装备 key、认证邮件正文、Cookie、轮询游标或任意未脱敏 metadata，
 A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 MoogleMail poller，返回带
 `pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 

@@ -32,6 +32,11 @@ pub struct ContextWire {
     pub world_id: String,
     pub mailbox_key: Option<String>,
     pub external_mail_id: Option<String>,
+    /// 装备诊断的关联字段；None 时省略以保持既有 AAD 字节不变。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_equipment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_position: Option<u16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +137,9 @@ pub fn context(c: &MailDiagnosticContext) -> Result<ContextWire, MailDiagnosticE
         || !matches!(c.world_id.as_str(), "main" | "isekai")
         || !valid_opt(&c.mailbox_key, 256)
         || !valid_opt(&c.external_mail_id, 512)
+        || !valid_equipment_id(&c.external_equipment_id)
+        || c.attachment_position.is_some_and(|position| !(1..=1000).contains(&position))
+        || c.external_equipment_id.is_some() != c.attachment_position.is_some()
     {
         return Err(MailDiagnosticError::InvalidContext);
     }
@@ -146,6 +154,8 @@ pub fn context(c: &MailDiagnosticContext) -> Result<ContextWire, MailDiagnosticE
         world_id: c.world_id.clone(),
         mailbox_key: c.mailbox_key.clone(),
         external_mail_id: c.external_mail_id.clone(),
+        external_equipment_id: c.external_equipment_id.clone(),
+        attachment_position: c.attachment_position,
     })
 }
 pub fn outcome(o: &MailDiagnosticOutcome) -> Result<OutcomeWire, MailDiagnosticError> {
@@ -163,6 +173,12 @@ pub fn code(s: &str) -> bool {
 fn valid_opt(v: &Option<String>, max: usize) -> bool {
     v.as_ref().is_none_or(|s| {
         !s.is_empty() && s.len() <= max && s == s.trim() && !s.chars().any(|c| c.is_control())
+    })
+}
+
+fn valid_equipment_id(value: &Option<String>) -> bool {
+    value.as_ref().is_none_or(|value| {
+        !value.is_empty() && value.len() <= 64 && value.bytes().all(|byte| byte.is_ascii_digit())
     })
 }
 pub fn validate_status(status: Option<u16>) -> Result<(), MailDiagnosticError> {
@@ -219,6 +235,8 @@ pub(super) fn validate_header(
         world_id: header.context.world_id.clone(),
         mailbox_key: header.context.mailbox_key.clone(),
         external_mail_id: header.context.external_mail_id.clone(),
+        external_equipment_id: header.context.external_equipment_id.clone(),
+        attachment_position: header.context.attachment_position,
     })?;
     outcome(&MailDiagnosticOutcome {
         failure_code: header.outcome.failure_code.clone(),

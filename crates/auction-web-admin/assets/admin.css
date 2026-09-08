@@ -806,6 +806,34 @@
   color: var(--color-text-muted);
 }
 
+.admin-mail-equipment-diagnostic {
+  margin-block-start: var(--space-5);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.admin-mail-equipment-diagnostic h3 {
+  margin-block: 0 var(--space-3);
+}
+
+.admin-mail-equipment-diagnostic__grid {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+}
+
+.admin-mail-equipment-diagnostic__grid dt {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-label);
+}
+
+.admin-mail-equipment-diagnostic__grid dd,
+.admin-mail-equipment-diagnostic__missing {
+  min-inline-size: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .admin-panel__actions label,
 .admin-runtime-config__label {
   display: grid;
