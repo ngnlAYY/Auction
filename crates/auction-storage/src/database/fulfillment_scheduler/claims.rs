@@ -13,8 +13,8 @@ pub(super) async fn claim_postgres(
     limit: u16,
 ) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    // 接管旧版数据库时，ready obligation 可能尚未有 execution 行；先按旧版语义惰性补齐，
-    // 再由下面同一事务领取。候选 obligation 由锁保护，避免两个 Worker 同时补写同一行。
+    // ready obligation 可能尚未有 execution 行；只为缺失行补齐当前派发语义，
+    // 不回写已有 delivery 的冻结操作。候选由锁保护，避免两个 Worker 同时补写同一行。
     sqlx::query(
         r#"WITH candidates AS MATERIALIZED (
                SELECT o.id, o.obligation_kind, o.world_id, o.submission_id
@@ -45,7 +45,7 @@ pub(super) async fn claim_postgres(
                       ELSE candidates.world_id
                   END,
                   CASE
-                      WHEN candidates.obligation_kind IN ('unsold_return', 'withdrawn_return')
+                      WHEN candidates.obligation_kind = 'unsold_return'
                            AND submission.source_kind = 'mail' THEN 'return'
                       ELSE 'send'
                   END

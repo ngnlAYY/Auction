@@ -13,6 +13,13 @@ pub(super) struct PricingFailure {
     pub(super) attachment_count: usize,
 }
 
+struct PricingToken<'a> {
+    value: &'a str,
+    index: usize,
+    is_line_start: bool,
+    is_line_end: bool,
+}
+
 fn pricing_failure(
     reason_code: &'static str,
     detail_code: &'static str,
@@ -33,9 +40,9 @@ fn pricing_failure(
 
 /// 解析拍卖邮件中的兼容起拍价指令。
 ///
-/// 未填写 `start` 的正文使用邮件配置默认价；单条 `start amount` 对全部附件生效，其余
-/// 定价输入按连续的 `URL start amount` 三元组解析。空行、换行、显式 `#` 注释不影响指令，
-/// 但装备 ID 与 key 仍会同时和详情页附件交叉校验，避免只凭正文中的可伪造 URL 录入资产。
+/// 未填写明确起拍价的附件使用邮件配置默认价；统一 `start amount` 仍可覆盖全部附件，逐件
+/// `URL start amount` 指令允许夹在网页说明中并可跨行提取。空行、显式 `#` 注释和普通说明
+/// 不计入指令字段，但装备 ID 与 key 仍会和详情页附件交叉校验，避免只凭正文 URL 录入资产。
 pub(super) fn resolve_start_price_plan(
     body: &str,
     attachments: &[MailEquipmentAttachment],
@@ -47,13 +54,17 @@ pub(super) fn resolve_start_price_plan(
     const IDENTITY_MISMATCH: &str = "start_price_identity_mismatch";
     const NOT_FOUND: &str = "start_price_attachment_not_found";
     let attachment_count = attachments.len();
+    let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
+    let tokens = collect_pricing_tokens(&normalized);
+    // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
+    let token_count = tokens.len();
 
     if default_price <= 0 {
         return Err(pricing_failure(
             INVALID,
             "invalid_default_price",
             body,
-            0,
+            token_count,
             None,
             attachment_count,
         ));
@@ -63,7 +74,7 @@ pub(super) fn resolve_start_price_plan(
             INVALID,
             "invalid_attachment_count",
             body,
-            0,
+            token_count,
             None,
             attachment_count,
         ));
@@ -77,50 +88,106 @@ pub(super) fn resolve_start_price_plan(
                 INVALID,
                 "invalid_attachment_id",
                 body,
-                0,
-                Some(index),
+                token_count,
+                None,
                 attachment_count,
             ));
         }
     }
     let mut prices = vec![default_price; attachments.len()];
-    let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
-    if !contains_start_price_directive(&normalized) {
+    if !tokens.iter().enumerate().any(|(index, _)| is_explicit_start_token(&tokens, index)) {
         return Ok(prices);
     }
-    let body_fields =
-        normalized.split('\n').flat_map(|line| strip_start_price_comment(line).split_whitespace());
-    // 正文已受 64 KiB 边界限制，诊断记录完整分词数量，而不是首次超限时的数量下界。
-    let token_count = body_fields.clone().count();
     let maximum_fields = attachments
         .len()
         .checked_mul(3)
         .ok_or_else(|| {
-            pricing_failure(INVALID, "invalid_field_count", body, 0, None, attachment_count)
-        })?
-        .max(2);
-    let mut fields = Vec::with_capacity(maximum_fields);
-    for field in body_fields {
-        if fields.len() == maximum_fields {
-            return Err(pricing_failure(
+            pricing_failure(
                 INVALID,
-                "too_many_fields",
+                "invalid_field_count",
                 body,
                 token_count,
-                Some(fields.len()),
+                None,
+                attachment_count,
+            )
+        })?
+        .max(2);
+    // 网页复制的 Attachment 说明不能改变指令字段计数；明确的 URL/start 指令允许跨行，
+    // 但其余显式 start 形态仍须失败，避免一条合法指令掩盖另一条畸形指令。
+    let mut consumed = vec![false; tokens.len()];
+    let mut explicit_fields = Vec::new();
+    let mut explicit_indices = Vec::new();
+    for index in 0..tokens.len() {
+        if consumed[index]
+            || !tokens[index].value.contains("/equip/")
+            || !tokens.get(index + 1).is_some_and(|token| token.value.eq_ignore_ascii_case("start"))
+        {
+            continue;
+        }
+        let Some(amount) = tokens.get(index + 2) else {
+            return Err(pricing_failure(
+                INVALID,
+                "invalid_amount",
+                body,
+                token_count,
+                Some(tokens[index + 1].index + 1),
                 attachment_count,
             ));
-        }
-        fields.push(field);
+        };
+        consumed[index] = true;
+        consumed[index + 1] = true;
+        consumed[index + 2] = true;
+        explicit_fields.extend([tokens[index].value, tokens[index + 1].value, amount.value]);
+        explicit_indices.extend([tokens[index].index, tokens[index + 1].index, amount.index]);
     }
+    if !explicit_fields.is_empty() {
+        for (index, token) in tokens.iter().enumerate() {
+            if !consumed[index] && is_explicit_start_token(&tokens, index) {
+                let detail_code = if token.value.eq_ignore_ascii_case("start") {
+                    "mixed_pricing_directives"
+                } else {
+                    "invalid_amount"
+                };
+                return Err(pricing_failure(
+                    INVALID,
+                    detail_code,
+                    body,
+                    token_count,
+                    Some(token.index),
+                    attachment_count,
+                ));
+            }
+        }
+    }
+    let (fields, field_indices, has_explicit_directive) = if !explicit_fields.is_empty() {
+        (explicit_fields, explicit_indices, true)
+    } else {
+        let mut fields = Vec::with_capacity(maximum_fields);
+        let mut field_indices = Vec::with_capacity(maximum_fields);
+        for token in &tokens {
+            if fields.len() == maximum_fields {
+                return Err(pricing_failure(
+                    INVALID,
+                    "too_many_fields",
+                    body,
+                    token_count,
+                    Some(token.index),
+                    attachment_count,
+                ));
+            }
+            fields.push(token.value);
+            field_indices.push(token.index);
+        }
+        (fields, field_indices, false)
+    };
     if fields.len() == 2 && fields[0].eq_ignore_ascii_case("start") {
         let price = parse_start_price_amount(fields[1]).ok_or_else(|| {
             pricing_failure(
                 INVALID,
                 "invalid_amount",
                 body,
-                fields.len(),
-                Some(1),
+                token_count,
+                Some(field_indices[1]),
                 attachment_count,
             )
         })?;
@@ -135,8 +202,8 @@ pub(super) fn resolve_start_price_plan(
             INVALID,
             detail_code,
             body,
-            fields.len(),
-            Some(fields.len().saturating_sub(remainder.len())),
+            token_count,
+            Some(field_indices[fields.len().saturating_sub(remainder.len())]),
             attachment_count,
         ));
     }
@@ -148,8 +215,8 @@ pub(super) fn resolve_start_price_plan(
                 INVALID,
                 "expected_start_keyword",
                 body,
-                fields.len(),
-                Some(index * 3 + 1),
+                token_count,
+                Some(field_indices[index * 3 + 1]),
                 attachment_count,
             ));
         }
@@ -159,8 +226,8 @@ pub(super) fn resolve_start_price_plan(
                     INVALID,
                     "invalid_equipment_reference",
                     body,
-                    fields.len(),
-                    Some(index * 3),
+                    token_count,
+                    Some(field_indices[index * 3]),
                     attachment_count,
                 )
             })?;
@@ -169,8 +236,8 @@ pub(super) fn resolve_start_price_plan(
                 NOT_FOUND,
                 "attachment_not_found",
                 body,
-                fields.len(),
-                Some(index * 3),
+                token_count,
+                Some(field_indices[index * 3]),
                 attachment_count,
             )
         })?;
@@ -183,8 +250,8 @@ pub(super) fn resolve_start_price_plan(
                 IDENTITY_MISMATCH,
                 "identity_mismatch",
                 body,
-                fields.len(),
-                Some(index * 3),
+                token_count,
+                Some(field_indices[index * 3]),
                 attachment_count,
             ));
         }
@@ -193,8 +260,8 @@ pub(super) fn resolve_start_price_plan(
                 DUPLICATE,
                 "duplicate_attachment",
                 body,
-                fields.len(),
-                Some(index * 3),
+                token_count,
+                Some(field_indices[index * 3]),
                 attachment_count,
             ));
         }
@@ -203,19 +270,19 @@ pub(super) fn resolve_start_price_plan(
                 INVALID,
                 "invalid_amount",
                 body,
-                fields.len(),
-                Some(index * 3 + 2),
+                token_count,
+                Some(field_indices[index * 3 + 2]),
                 attachment_count,
             )
         })?;
         seen[target] = true;
     }
-    if seen.iter().any(|found| !found) {
+    if !has_explicit_directive && seen.iter().any(|found| !found) {
         return Err(pricing_failure(
             MISSING,
             "missing_attachment_directive",
             body,
-            fields.len(),
+            token_count,
             None,
             attachment_count,
         ));
@@ -223,41 +290,51 @@ pub(super) fn resolve_start_price_plan(
     Ok(prices)
 }
 
-/// 按指令位置识别 start，普通单词或句中的无价格说明不触发退回；明显误写仍进入严格校验。
-fn contains_start_price_directive(body: &str) -> bool {
-    let mut fields = body
-        .split('\n')
-        .flat_map(|line| strip_start_price_comment(line).split_whitespace().enumerate())
-        .peekable();
-    let mut previous_field = "";
-    while let Some((line_index, field)) = fields.next() {
-        let marker = field
-            .trim_start_matches(['"', '\'', '`', '[', '('])
-            .trim_end_matches(['"', '\'', '`', ']', ')']);
-        if marker.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("start")) {
-            let suffix = &marker[5..];
-            // starting、starter 等普通单词不是指令；start=10k、start:10k 和 start10k
-            // 等形式则不能因缺少空格而悄悄按默认价收件。
-            let compact_amount = suffix
-                .trim_start_matches(['+', '-', '.', ','])
-                .starts_with(|character: char| character.is_ascii_digit());
-            if suffix.starts_with(['=', ':'])
-                || compact_amount
-                || (suffix.is_empty()
-                    && (line_index == 0
-                        || previous_field.contains("/equip/")
-                        || fields.peek().is_some_and(|(_, amount)| {
-                            amount.starts_with(|character: char| {
-                                character.is_ascii_digit() || matches!(character, '+' | '-' | '.')
-                            })
-                        })))
-            {
-                return true;
-            }
-        }
-        previous_field = field;
-    }
-    false
+fn collect_pricing_tokens(body: &str) -> Vec<PricingToken<'_>> {
+    body.split('\n')
+        .flat_map(|line| {
+            let fields = strip_start_price_comment(line).split_whitespace().collect::<Vec<_>>();
+            let field_count = fields.len();
+            fields.into_iter().enumerate().map(move |(line_index, value)| {
+                (line_index == 0, line_index + 1 == field_count, value)
+            })
+        })
+        .enumerate()
+        .map(|(index, (is_line_start, is_line_end, value))| PricingToken {
+            value,
+            index,
+            is_line_start,
+            is_line_end,
+        })
+        .collect()
+}
+
+/// 识别明确的 start 形态；普通说明中的 starting/starter 或非金额句子不触发定价。
+fn is_explicit_start_token(tokens: &[PricingToken<'_>], index: usize) -> bool {
+    let value = tokens[index].value;
+    let marker = value
+        .trim_start_matches(['"', '\'', '`', '[', '('])
+        .trim_end_matches(['"', '\'', '`', ']', ')']);
+    let Some(suffix) = marker.get(5..).filter(|_| marker[..5].eq_ignore_ascii_case("start")) else {
+        return false;
+    };
+    let compact_amount = suffix
+        .trim_start_matches(['+', '-', '.', ','])
+        .starts_with(|character: char| character.is_ascii_digit());
+    suffix.starts_with(['=', ':'])
+        || compact_amount
+        || (suffix.is_empty()
+            && (index
+                .checked_sub(1)
+                .and_then(|previous| tokens.get(previous))
+                .is_some_and(|token| token.value.contains("/equip/"))
+                || tokens.get(index + 1).is_some_and(|token| {
+                    token.value.starts_with(|character: char| {
+                        character.is_ascii_digit() || matches!(character, '+' | '-' | '.')
+                    })
+                })
+                || (tokens[index].is_line_start
+                    && (tokens[index].is_line_end || tokens.len() == 2 && index == 0))))
 }
 
 /// 只有行首或空白后的 `#` 才开始注释，装备 URL 自身的 fragment 仍属于 URL token。

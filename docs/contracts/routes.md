@@ -340,7 +340,9 @@ A13 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session、CSRF、空查�
 `command_id`；请求的 `action` 只允许 `withdraw` 与 `set_start_price`，后者必须提供正的
 `start_price`，并携带 `expected_state_version`。PostgreSQL 完整档在同一 Serializable 事务
 中锁定 world/auction/lot，完成 lot 版本 CAS、命令账本、审计和预览 realtime 事件；withdraw
-还会创建 `withdrawn_return` 义务及 pending fulfillment。成功响应为 `200` 的
+还会创建 `withdrawn_return` 义务及 pending/send fulfillment，由 Worker 在事务提交后将该 lot
+的原装备在原世界单独寄给原卖家，Credits/COD 均为零。成功响应只确认撤拍和寄回义务入队，
+不表示远端已经寄达；投递与领取证明继续由履约流程确认。成功响应为 `200` 的
 `{ lot: ... }` 安全投影，SQLite Lite 明确返回 `501 feature_not_supported`。
 A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和两套数据库的
 `service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control 通过

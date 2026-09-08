@@ -9,7 +9,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{ApplicationError, RequestHash, SettlementFulfillmentClaim};
+use crate::{
+    ApplicationError, RequestHash, SettlementFulfillmentClaim, SettlementFulfillmentOperation,
+};
 
 use super::canonical::to_go_json_bytes;
 use super::model::{SettlementDeliveryActivation, SettlementDeliveryIntent};
@@ -106,7 +108,24 @@ pub(super) fn build_delivery_intent(
             intent.reference = claim.obligation_id.to_string();
             intent.credits = claim.amount;
         }
-        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
+        SettlementObligationKind::WithdrawnReturn => {
+            // 返还必须保持原世界与零金额；旧 Return 或损坏派发事实交由现有错误路径隔离，不能重写请求。
+            if claim.operation != SettlementFulfillmentOperation::Send
+                || claim.world != claim.equipment_world
+                || claim.amount != 0
+                || claim.carrier_credit != 0
+            {
+                return Err(repository_error("撤拍返还派发事实不符合原装备零金额寄回约束"));
+            }
+            if !matches!(claim.submission_source_kind.as_deref(), Some("mail" | "admin")) {
+                return Err(repository_error("撤拍返还来源缺少可执行身份"));
+            }
+            intent.template = "settlement_equipment_handoff";
+            intent.reference = claim.obligation_id.to_string();
+            intent.item_name = claim.equipment_name.clone();
+            intent.equipment_id = Some(claim.equipment_id.as_uuid());
+        }
+        SettlementObligationKind::UnsoldReturn => {
             match (
                 claim.submission_source_kind.as_deref(),
                 claim.submission_external_mail_id.as_deref(),

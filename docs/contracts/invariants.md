@@ -235,6 +235,12 @@ take 必须证明 To/From/Subject 不变、资产与 COD 归零、claimable 消�
 的前缀，预期的 `CoD Paid` 和 `Removed attachment` 回执数量与金额精确一致。仅出现“成功”文字、
 `[RTS]` 标题或动作按钮消失都不足以证明完成；后置证明失败必须进入 `manual_reconcile`，不得盲目重发。
 
+PostgreSQL 撤拍的 `withdrawn_return` 必须逐件 compose Send：使用原 lot/equipment 身份、
+原世界和冻结卖家，Credits/COD 均为零，暂存与 Sent 证据只能包含这一件原装备。拍卖收件已
+Take 的装备不能通过原邮件 Return 找回，也不能因一个 lot 撤拍而退整封多附件邮件。
+撤拍事务仅原子记录义务，外部寄送在提交后执行；稳定 delivery/prepare/activate 身份、租约
+和未知结果门禁保持不变。历史已冻结的 Return 请求不得自动改写为 Send 或重寄。
+
 ### I-09c MoogleMail 明确发送失败必须保留资产后果
 
 send 只能从能证明为无收件人、正文、附件和 COD 残留的干净 compose 页开始；无法证明时

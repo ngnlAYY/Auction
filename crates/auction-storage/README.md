@@ -240,7 +240,10 @@ Admin draft lot 修改由 `src/database/commands/admin/lot.rs` 与 PostgreSQL
 `mutation.rs`、`obligation.rs` 和 `events.rs` 分别负责锁内读取、lot 状态/价格变更、withdrawn-return
 义务及审计/realtime 事件；事务按 world → auction → lot 加锁，完成 lot/auction 版本 fence、预览
 revision 和命令账本。withdrawn 同一事务创建 `withdrawn_return` obligation 与 pending fulfillment，
-SQLite Lite 明确返回不支持。
+派发操作为 `send`：Worker 按该 lot 的原 equipment UUID 和世界，把唯一原装备以零 Credits、
+零 COD 寄给冻结的卖家，而不是退回已领取附件的整封原邮件。取消拍卖产生的同类义务使用
+相同规则；既有冻结的 Return 投递不改写，无法匹配新返还事实时隔离到人工确认。SQLite Lite
+明确返回不支持。
 Admin runtime 命令账本由 `src/database/commands/admin/runtime.rs` 装配，跨后端分派、PostgreSQL
 只读查询、pending/applied/unknown/reopen 事务、行映射和错误/SQLite Lite 能力边界分别位于
 `admin/runtime/{dispatch,queries,mutations,mapping,errors}.rs`；命令摘要、状态 fence、审计

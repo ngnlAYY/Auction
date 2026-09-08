@@ -44,9 +44,7 @@ pub(super) async fn insert_obligations(
         .map_err(map_sql_error)?;
 
         let operation = match obligation.kind {
-            SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
-                "return"
-            }
+            SettlementObligationKind::UnsoldReturn => "return",
             _ => "send",
         };
         let dispatch_world = match obligation.kind {

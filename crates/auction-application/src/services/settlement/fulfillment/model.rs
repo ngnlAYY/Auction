@@ -25,7 +25,7 @@ pub(super) struct SettlementDeliveryIntent {
 }
 
 impl SettlementDeliveryIntent {
-    /// 按旧版 `FulfillmentDeliveryIntent.Validate` 校验完整闭集组合。
+    /// 按义务种类校验完整闭集组合，撤拍返还必须单独发送原装备。
     pub(super) fn validate(&self) -> bool {
         if self.obligation_id.is_nil()
             || !matches!(self.operation, "send" | "return")
@@ -81,7 +81,9 @@ impl SettlementDeliveryIntent {
             SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
                 match self.operation {
                     "return" => {
-                        self.template.is_empty()
+                        // 撤拍发生在附件领取之后，整封原邮件 Return 不能返还这件库存装备。
+                        self.kind == SettlementObligationKind::UnsoldReturn
+                            && self.template.is_empty()
                             && self.reference.is_empty()
                             && self.item_name.is_empty()
                             && self.credits == 0

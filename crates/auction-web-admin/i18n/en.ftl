@@ -258,7 +258,7 @@ admin-lots-reprice-save = Save
 admin-lots-reprice-done = Start price updated.
 admin-lots-withdraw = Withdraw
 admin-lots-withdraw-confirm = Confirm withdrawal
-admin-lots-withdraw-done = Lot withdrawn.
+admin-lots-withdraw-done = Lot withdrawn. Return of the original equipment has been queued.
 admin-lots-invalid-price = Enter a positive whole-number amount.
 admin-lots-proxy-open = Proxy history
 admin-lots-proxy-title = Proxy bid history — #{ $lot }
@@ -285,7 +285,7 @@ admin-lots-retry = Retry
 admin-lots-slow-schedule = Slow generation { $generation } due { $time }
 admin-lots-reprice-title = Edit start price — { $code }
 admin-lots-withdraw-title = Withdraw lot { $code }
-admin-lots-withdraw-warning = The lot will be withdrawn and its equipment returned to { $seller } (COD 0). This cannot be undone.
+admin-lots-withdraw-warning = The lot will be withdrawn and the original equipment sent separately to { $seller } in its original world (COD 0). This cannot be undone.
 admin-lots-action-cancel = Cancel
 admin-lots-proxy-close = Close
 
