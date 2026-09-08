@@ -57,6 +57,13 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     bootstrap-mail-credentials --world main --label bot-primary \
     < /run/auction/secrets/mooglemail-main.cookie
 
+# 离线解密并导出一条 MoogleMail 异常证据；不连接数据库、Worker 或远端服务。
+# output 必须是新的私有路径，正文不会打印到 stdout。
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+  cargo run -p auctionctl --features postgres -- \
+    mail-evidence export 00000000-0000-4000-8000-000000000001 \
+    --output /secure/auction-evidence/00000000-0000-4000-8000-000000000001.json
+
 # 把受控五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
 AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
   cargo run -p auctionctl --features postgres -- \
@@ -189,6 +196,11 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 模板数量和配置来源状态。
 它不会输出数据库 URL、Redis URL、Cookie、会话签名密钥、OTLP headers 或
 任何 `.keyenv` 内容。
+
+`mail-evidence export <UUID> --output <new-path>` 只在本地加载 Worker 配置和诊断目录，按 UUID
+解密异常证据并使用 `create_new`/`0600` 创建 JSON 输出；可用 `--key-source credential|equipment`
+指定历史父密钥来源，省略时优先 credential，缺失时使用 equipment。命令不连接数据库、Worker、MoogleMail
+或其他远端服务，也不把正文输出到 stdout。历史导出必须保留对应旧父密钥备份；该命令不会自动轮换密钥。
 
 `auctionctl` 的退出码是稳定的：`0` 表示成功，`2` 表示 CLI 用法或配置错误，`3` 表示数据库/外部
 依赖或前置条件失败，`4` 表示 systemd 部署编排失败，`5` 表示其它运维操作失败。错误正文沿用

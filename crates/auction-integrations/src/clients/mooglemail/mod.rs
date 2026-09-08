@@ -5,6 +5,7 @@
 //! 不进入返回值。应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
 
 mod client;
+mod diagnostics;
 mod error;
 mod forms;
 mod gateway;
@@ -18,6 +19,9 @@ mod writer;
 
 pub(crate) use client::is_hentaiverse_login_response;
 pub use client::{MoogleMailClient, MoogleMailClientConfig};
+pub use diagnostics::{
+    MoogleMailDiagnosticArchive, MoogleMailDiagnosticArchiveConfig, export_mooglemail_diagnostic,
+};
 pub use error::{MoogleMailError, MoogleMailErrorCategory};
 pub use forms::{MoogleMailForm, MoogleMailMessageFields};
 pub use gateway::{

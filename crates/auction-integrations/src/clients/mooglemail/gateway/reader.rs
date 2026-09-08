@@ -159,7 +159,13 @@ impl MoogleMailGateway {
             let result = async {
                 let target = self.client.balance(world)?;
                 let document = self.client.get(&target, session.cookie()).await?;
-                self.parser.parse_balance(&document, world, observed_at)
+                self.client
+                    .diagnose_parse(
+                        &target,
+                        &document,
+                        self.parser.parse_balance(&document, world, observed_at),
+                    )
+                    .await
             }
             .await;
             match result {
@@ -191,7 +197,14 @@ impl MoogleMailGateway {
         for page_index in 0..self.config.maximum_pages {
             let target = self.client.sent_page(world, page_index)?;
             let document = self.client.get(&target, cookie).await?;
-            let sent_page = self.parser.scan_sent_page(&document, world, page_index, &mut seen)?;
+            let sent_page = self
+                .client
+                .diagnose_parse(
+                    &target,
+                    &document,
+                    self.parser.scan_sent_page(&document, world, page_index, &mut seen),
+                )
+                .await?;
             if let Some(summary) = sent_page
                 .summaries
                 .iter()
@@ -199,19 +212,32 @@ impl MoogleMailGateway {
             {
                 let detail_target = self.client.sent_detail(world, external_mail_id)?;
                 let detail_document = self.client.get(&detail_target, cookie).await?;
-                let snapshot =
-                    self.parser.parse_sent_detail(&detail_document, summary, observed_at)?;
+                let snapshot = self
+                    .client
+                    .diagnose_parse(
+                        &detail_target,
+                        &detail_document,
+                        self.parser.parse_sent_detail(&detail_document, summary, observed_at),
+                    )
+                    .await?;
                 if snapshot.external_mail_id != external_mail_id
                     || snapshot.world != world
                     || !snapshot.recipient.eq_ignore_ascii_case(&summary.recipient)
                     || snapshot.subject != summary.subject
                     || snapshot.sent_at != summary.sent_at
                 {
-                    return Err(operation_error(
-                        MoogleMailOperation::SentDetail,
-                        world,
-                        MoogleMailErrorCategory::IdentityMismatch,
-                    ));
+                    return self
+                        .client
+                        .diagnose_parse(
+                            &detail_target,
+                            &detail_document,
+                            Err(operation_error(
+                                MoogleMailOperation::SentDetail,
+                                world,
+                                MoogleMailErrorCategory::IdentityMismatch,
+                            )),
+                        )
+                        .await;
                 }
                 return Ok(snapshot);
             }
@@ -248,8 +274,14 @@ impl MoogleMailGateway {
             }
             let target = self.client.inbox_page(world, page_index)?;
             let document = self.client.get(&target, cookie).await?;
-            let inbox_page =
-                self.parser.scan_inbox_page(&document, world, page_index, &mut seen)?;
+            let inbox_page = self
+                .client
+                .diagnose_parse(
+                    &target,
+                    &document,
+                    self.parser.scan_inbox_page(&document, world, page_index, &mut seen),
+                )
+                .await?;
             for summary in inbox_page.summaries {
                 if found_cursor {
                     continue;
@@ -293,18 +325,28 @@ impl MoogleMailGateway {
                     Err(_) => break,
                     Ok(Err(error)) => return Err(error),
                 };
-            let message = self.parser.parse_detail(&document, &summary)?;
+            let message = self
+                .client
+                .diagnose_parse(&target, &document, self.parser.parse_detail(&document, &summary))
+                .await?;
             if message.external_mail_id != summary.external_mail_id
                 || message.world != summary.world
                 || message.received_at != summary.received_at
                 || !message.sender.eq_ignore_ascii_case(&summary.sender)
             {
-                return Err(MoogleMailError::new(
-                    MoogleMailOperation::Detail,
-                    world,
-                    MoogleMailErrorCategory::IdentityMismatch,
-                    false,
-                ));
+                return self
+                    .client
+                    .diagnose_parse(
+                        &target,
+                        &document,
+                        Err(MoogleMailError::new(
+                            MoogleMailOperation::Detail,
+                            world,
+                            MoogleMailErrorCategory::IdentityMismatch,
+                            false,
+                        )),
+                    )
+                    .await;
             }
             messages.push(message);
         }

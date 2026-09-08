@@ -252,7 +252,10 @@ Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次�
 明确的邮资拒绝只在 compose 中从未暂存 Credits、装备或 COD 时可以作为确定失败；任一
 资产暂存已经通过证明后，拒绝结果必须进入 `manual_reconcile`，禁止自动重发。失败
 transport 元数据只能是有界的安全 object；storage owner 必须覆盖而不是信任其
-`safe_detail` / `outcome_unknown`，且不得保存原始响应、Cookie 或请求 payload。
+`safe_detail` / `outcome_unknown`。普通日志、数据库和 DTO 不得保存原始响应、Cookie 或请求
+payload；但业务拒绝、业务失败、处理超时以及 HTTP/解析异常可以按
+[`docs/operations/mail-diagnostics.md`](../operations/mail-diagnostics.md) 写入独立的加密异常证据，
+证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
 Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据。当前无凭据时
 只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload

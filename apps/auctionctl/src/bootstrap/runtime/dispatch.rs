@@ -57,7 +57,8 @@ impl Command {
             | Self::ImportRulesDirectory { .. }
             | Self::ForumWriteRecoveryList { .. }
             | Self::AuthorizeForumWriteRetry { .. }
-            | Self::VerifyLegacySettlement { .. } => EXIT_OPERATION,
+            | Self::VerifyLegacySettlement { .. }
+            | Self::MailEvidence { .. } => EXIT_OPERATION,
         }
     }
 }
@@ -75,6 +76,11 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
         Command::CheckConfig { role } => check_config(role.into())?,
+        Command::MailEvidence { action } => match action {
+            MailEvidenceAction::Export { evidence_id, output, key_source } => {
+                mail_diagnostics::export(evidence_id, &output, key_source)?;
+            }
+        },
         Command::Migrate { controller } => {
             migrate(controller).await?;
         }

@@ -8,12 +8,27 @@ use super::*;
 impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
     ///
-    /// 调用方必须在完成详情解析后立即丢弃响应正文；本方法不会把正文放进错误对象或日志
-    /// 字段。Cookie 仅在建立请求时短暂复制到 HTTP header。
+    /// 正文不进入错误对象或普通日志；异常响应只允许交给独立加密证据记录器。
+    /// Cookie 仅在建立请求时短暂复制到 HTTP header，不参与响应留证。
     pub async fn get(
         &self,
         target: &MoogleMailTarget,
         cookie: &MoogleMailCookie,
+    ) -> Result<Vec<u8>, MoogleMailError> {
+        let mut response = DiagnosticResponse::default();
+        match self.get_inner(target, cookie, &mut response).await {
+            Ok(body) => Ok(body),
+            Err(error) => Err(self
+                .diagnose_http(target, response.status, response.body.as_deref(), error)
+                .await),
+        }
+    }
+
+    async fn get_inner(
+        &self,
+        target: &MoogleMailTarget,
+        cookie: &MoogleMailCookie,
+        diagnostic: &mut DiagnosticResponse,
     ) -> Result<Vec<u8>, MoogleMailError> {
         if target.origin != self.builder.origin {
             return Err(self.configuration(target));
@@ -43,6 +58,7 @@ impl MoogleMailClient {
                 true,
             )
         })?;
+        diagnostic.status = Some(response.status().as_u16());
 
         if response.url().as_str() != target.url.as_str() {
             return Err(self.protocol(target));
@@ -85,6 +101,7 @@ impl MoogleMailClient {
         if body.len() > self.maximum_response_bytes {
             return Err(self.response_too_large(target));
         }
+        diagnostic.body = Some(body.to_vec());
 
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(MoogleMailError::new(
@@ -121,7 +138,7 @@ impl MoogleMailClient {
         if !status.is_success() || !is_html {
             return Err(self.protocol(target));
         }
-        Ok(body.to_vec())
+        diagnostic.body.take().ok_or_else(|| self.protocol(target))
     }
 
     /// 对 compose/detail typed target 执行恰好一次表单 POST。
@@ -133,6 +150,22 @@ impl MoogleMailClient {
         target: &MoogleMailTarget,
         cookie: &MoogleMailCookie,
         form: MoogleMailForm,
+    ) -> Result<Vec<u8>, MoogleMailError> {
+        let mut response = DiagnosticResponse::default();
+        match self.post_inner(target, cookie, form, &mut response).await {
+            Ok(body) => Ok(body),
+            Err(error) => Err(self
+                .diagnose_http(target, response.status, response.body.as_deref(), error)
+                .await),
+        }
+    }
+
+    async fn post_inner(
+        &self,
+        target: &MoogleMailTarget,
+        cookie: &MoogleMailCookie,
+        form: MoogleMailForm,
+        diagnostic: &mut DiagnosticResponse,
     ) -> Result<Vec<u8>, MoogleMailError> {
         let operation = form.operation();
         if target.origin != self.builder.origin || !post_allowed(target.operation, operation) {
@@ -163,6 +196,7 @@ impl MoogleMailClient {
             .execute(request)
             .await
             .map_err(|_| self.write_unknown(operation, target.world))?;
+        diagnostic.status = Some(response.status().as_u16());
 
         if response.url().as_str() != target.url.as_str() {
             return Err(self.write_unknown(operation, target.world));
@@ -190,6 +224,7 @@ impl MoogleMailClient {
         if body.len() > self.maximum_response_bytes {
             return Err(self.write_unknown(operation, target.world));
         }
+        diagnostic.body = Some(body.to_vec());
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(MoogleMailError::after_write(
                 operation,
@@ -204,7 +239,7 @@ impl MoogleMailClient {
         {
             return Err(self.write_unknown(operation, target.world));
         }
-        Ok(body.to_vec())
+        diagnostic.body.take().ok_or_else(|| self.write_unknown(operation, target.world))
     }
 
     fn configuration(&self, target: &MoogleMailTarget) -> MoogleMailError {
@@ -248,6 +283,21 @@ impl MoogleMailClient {
             MoogleMailErrorCategory::ResponseTooLarge,
             false,
         )
+    }
+}
+
+/// 响应头仅保留状态码；未取得完整、合规大小的正文时明确保持 None。
+#[derive(Default)]
+struct DiagnosticResponse {
+    status: Option<u16>,
+    body: Option<Vec<u8>>,
+}
+
+impl Drop for DiagnosticResponse {
+    fn drop(&mut self) {
+        if let Some(body) = &mut self.body {
+            body.fill(0);
+        }
     }
 }
 

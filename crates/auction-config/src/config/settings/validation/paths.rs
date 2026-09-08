@@ -24,6 +24,8 @@ pub(crate) fn resolve_worker_paths(
 ) -> WorkerConfig {
     worker.mooglemail.keyenv_file =
         worker.mooglemail.keyenv_file.map(|path| resolve_config_path(config_path, path));
+    worker.mooglemail.diagnostics.directory =
+        resolve_config_path(config_path, worker.mooglemail.diagnostics.directory);
     worker
 }
 

@@ -66,6 +66,9 @@ R1 仍待补录。Admin 页面均已连接实际 API，realtime/delivery 嵌套�
 历史格式另由专用 backup/verify/adopt 链路接管，普通迁移和恢复不会猜测未识别的 schema；数据库
 之外的五语言规则目录由显式 `import-rules-directory` 命令导入，不会用硬编码 seed 或覆盖
 不同的 Admin 已发布正文。
+MoogleMail 异常路径还会按独立运维契约保存加密原始响应或实际提取的邮件字段；普通成功邮件、日志、数据库和
+DTO 不保留正文，SQLite Lite 不新增该能力。离线证据导出使用 `auctionctl mail-evidence export`，具体边界见
+[`docs/operations/mail-diagnostics.md`](docs/operations/mail-diagnostics.md)。
 MoogleMail 的标准 cron/时区、请求间隔和请求超时属于当前可配置运行契约；Worker control 使用
 安全 runtime 目录、实例锁、固定 group/权限和显式 UID/GID allowlist。部署预检会校验
 Admin/Worker control socket、三组数据密钥和实际 TCP/Unix listener 拓扑。

@@ -24,6 +24,7 @@ use super::{
 };
 
 mod business;
+mod diagnostics;
 mod fetch;
 
 use business::process_with_retry;
@@ -101,6 +102,7 @@ where
         store,
         gateway,
         processor,
+        diagnostics,
         clock,
         world_id,
         mailbox_key: _,
@@ -247,6 +249,8 @@ where
         };
         let decision = match (processor.as_ref(), message.business.take()) {
             (Some(processor), Some(business)) => {
+                let diagnostic =
+                    diagnostics::MailMessageDiagnostic::prepare(diagnostics.clone(), &business);
                 let decision = match tokio::time::timeout(
                     process_remaining,
                     process_with_retry(
@@ -260,6 +264,7 @@ where
                 {
                     Ok(Ok(decision)) => decision,
                     Ok(Err(failure)) => {
+                        diagnostic.retain_failure(failure.failure_code).await;
                         record_failure(
                             Arc::clone(&store),
                             Arc::clone(&clock),
@@ -272,11 +277,13 @@ where
                         return WorkerResult::Error;
                     }
                     Err(_) => {
+                        diagnostic.retain_failure("batch_processing_timeout").await;
                         budget_exhausted = true;
                         break;
                     }
                 };
                 if decision.validate().is_err() {
+                    diagnostic.retain_failure("invalid_business_decision").await;
                     record_failure(
                         Arc::clone(&store),
                         Arc::clone(&clock),
@@ -288,7 +295,7 @@ where
                     .await;
                     return WorkerResult::Error;
                 }
-                decision
+                diagnostic.retain_decision(decision).await
             }
             (Some(_), None) => {
                 record_failure(

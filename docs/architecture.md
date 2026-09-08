@@ -299,6 +299,14 @@ SQLite Lite 没有 `equipment_secrets`，仍返回 lot 数据，但把 `game_equ
 phase 及时间规则。MoogleMail 正文未填写 `start` 时，每件装备默认以 50,000 Credits 起拍；
 该邮件专属默认价只接受 `[worker.mooglemail].start_price` 显式覆盖，不继承公共经济模板。
 
+MoogleMail 异常诊断属于 PostgreSQL 完整档 Worker 的本地运维证据能力，不新增数据库表或迁移。业务拒绝、
+业务失败、处理超时以及 HTTP/解析异常会由 Worker 记录关联世界、邮箱、邮件 ID、阶段、结果和安全定价诊断；
+异常时实际取得的响应字节或实际提取的邮件字段进入独立加密证据文件。普通成功邮件、数据库、DTO 和普通日志
+不保留正文、Cookie、请求表单、token 或装备 key 明文。证据保存不参与退回、投递、重试、游标和幂等决策；
+`body_unavailable` 只表示留证当时未取得响应正文，容量或保留期淘汰后的 UUID 导出返回 `not_found`。父密钥优先使用
+`equipment_data_key`，通过独立 HMAC 域派生诊断子密钥并认证 key 来源/标识；这不是凭据 AES 密钥的直接复用。
+SQLite Lite 不装配该能力，运维边界和导出命令见 [`docs/operations/mail-diagnostics.md`](operations/mail-diagnostics.md)。
+
 ### Lite 能力边界
 
 | 能力 | PostgreSQL 完整档 | SQLite Lite 档 |
@@ -723,7 +731,8 @@ PostgreSQL session advisory 所有权，同类 Cookie 已被另一个 Worker 占
 Admin/Web 只接触安全投影，secret 不进入响应或页面；SQLite Lite 明确返回能力不支持。`.keyenv`
 兼容格式仍严格读取两个固定键，但 Worker 只装配 `hv-ck-key1`；`hv-ck-key2` 仅供显式隔离验证，
 不构成后备候选。失败 metadata 使用闭集 stage/operation/category/write_started，不能包含原始响应
-或凭据内容。失效或替换后，现有 ownership guard 持有到 Worker 退出，必须重启才能完成安全交接。
+或凭据内容；异常原始数据仅按独立诊断证据契约加密留存，不进入该 metadata。失效或替换后，现有 ownership
+guard 持有到 Worker 退出，必须重启才能完成安全交接。
 
 ## 竞价写入不变量
 

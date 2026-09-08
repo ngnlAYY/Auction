@@ -58,10 +58,15 @@ mod cli;
 mod deployment;
 #[path = "runtime/dispatch.rs"]
 mod dispatch;
+#[path = "runtime/mail_diagnostics/mod.rs"]
+mod mail_diagnostics;
 #[path = "runtime/postgres/mod.rs"]
 mod postgres;
 
-use cli::{Cli, Command, DeploymentAction, PostgresRebuildModeArg, SystemdControllerArgs};
+use cli::{
+    Cli, Command, DeploymentAction, MailEvidenceAction, PostgresRebuildModeArg,
+    SystemdControllerArgs,
+};
 use deployment::{
     DeploymentListener, admin_deployment_listener, deployment_check, public_deployment_listener,
 };

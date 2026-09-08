@@ -50,7 +50,7 @@ pub(super) async fn build_poll_runtimes(
         gateways.insert(world, Arc::clone(&gateway));
         let gateway_port: Arc<dyn MailPollGateway> =
             Arc::new(MoogleMailWorkerGateway { gateway, world });
-        runtimes.push(MailPollRuntime::new(
+        let mut runtime = MailPollRuntime::new(
             Arc::clone(&store_port),
             gateway_port,
             Some(Arc::clone(&processor)),
@@ -70,7 +70,11 @@ pub(super) async fn build_poll_runtimes(
                 retry_base: std::time::Duration::from_secs(mail_config.retry_base_seconds),
                 retry_maximum: std::time::Duration::from_secs(mail_config.retry_maximum_seconds),
             },
-        )?);
+        )?;
+        if let Some(recorder) = client.diagnostic_recorder() {
+            runtime = runtime.with_diagnostics(recorder);
+        }
+        runtimes.push(runtime);
     }
     Ok((runtimes, gateways))
 }
@@ -104,10 +108,27 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                     request.deadline,
                 )
                 .await
-                .map_err(|error| MailPollGatewayError {
-                    failure_code: error.category.as_str().to_owned(),
-                    safe_detail: format!("MoogleMail {} 操作失败", error.category),
-                    temporary: error.is_temporary(),
+                .map_err(|error| {
+                    tracing::warn!(
+                        world_id = error.world.as_str(),
+                        mailbox_key = %request.mailbox_key,
+                        operation = error.operation.as_str(),
+                        failure_code = error.category.as_str(),
+                        temporary = error.temporary,
+                        evidence_id = ?error.evidence_id,
+                        evidence_status = error.evidence_status,
+                        diagnostic_error = error.evidence_failure,
+                        "MoogleMail remote fetch failed"
+                    );
+                    MailPollGatewayError {
+                        failure_code: error.category.as_str().to_owned(),
+                        safe_detail: format!(
+                            "MoogleMail {} 操作失败：{}",
+                            error.operation.as_str(),
+                            error.category
+                        ),
+                        temporary: error.is_temporary(),
+                    }
                 })?;
             let messages = page
                 .messages

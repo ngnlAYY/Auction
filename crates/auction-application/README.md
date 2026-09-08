@@ -118,7 +118,9 @@
   背压，而不是在远端请求超时内排队。明确 `recipient_not_found` 后，runner 可按
   `(world, recipient)` 把该玩家排除到本轮结束；其他玩家继续处理，排除值不持久化为永久封禁。
 - `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
-  失败退避和同事务幂等提交端口；不保存原始 HTML、Cookie、token、正文或装备 key。
+  失败退避和同事务幂等提交端口；普通端口结果不保存原始 HTML、Cookie、token、正文或装备 key。
+  异常留证由独立诊断端口按 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)
+  加密保存，不进入入站事实、幂等 metadata 或 DTO。
   `lookup_completion` 在业务解释前返回 `MailPollCompletion`：只有稳定身份与完整入站/命令账本
   相符时才允许跳过已完成邮件；缺失记录继续正常处理，损坏或仅解析记录失败关闭。
 - `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定

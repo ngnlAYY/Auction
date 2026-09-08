@@ -3,7 +3,8 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    MAX_MAIL_POLL_BATCH_SIZE, MailMessage, MailPollStore, MailProcessor, RecurringSchedule,
+    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollStore, MailProcessor,
+    RecurringSchedule,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -151,6 +152,7 @@ pub struct MailPollRuntime {
     pub store: Arc<dyn MailPollStore>,
     pub gateway: Arc<dyn MailPollGateway>,
     pub processor: Option<Arc<dyn MailProcessor>>,
+    pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
     pub world_id: String,
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
@@ -173,6 +175,7 @@ impl MailPollRuntime {
             store,
             gateway,
             processor,
+            diagnostics: None,
             world_id,
             mailbox_key,
             config,
@@ -183,6 +186,12 @@ impl MailPollRuntime {
             return Err(WorkerError::InvalidMailPollConfiguration);
         }
         Ok(runtime)
+    }
+
+    /// 为异常邮件注入独立证据记录器；不参与命令、游标或租约的正确性判断。
+    pub fn with_diagnostics(mut self, diagnostics: Arc<dyn MailDiagnosticRecorder>) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
     }
 
     /// 合并一次手动触发；轮询正在执行时，通知会保留到下一轮领取。

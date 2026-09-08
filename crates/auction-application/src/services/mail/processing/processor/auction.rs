@@ -52,16 +52,31 @@ where
         let start_prices =
             match resolve_start_price_plan(&message.body, &message.attachments, self.start_price) {
                 Ok(prices) => prices,
-                Err(reason_code) if message.returnable => {
-                    return self
+                Err(failure) if message.returnable => {
+                    let mut result = self
                         .reject_with_return_and_notice(
                             &message,
                             attachment_ids,
                             MailNotificationTemplate::AuctionEquipmentRejected,
                             "auction_equipment_rejected",
-                            reason_code,
+                            failure.reason_code,
                         )
                         .await;
+                    if let Ok(decision) = &mut result
+                        && let Some(metadata) = decision.metadata.as_object_mut()
+                    {
+                        metadata.insert(
+                            "pricing_diagnostic".to_owned(),
+                            json!({
+                                "detail_code": failure.detail_code,
+                                "body_bytes": failure.body_bytes,
+                                "token_count": failure.token_count,
+                                "field_index": failure.field_index,
+                                "attachment_count": failure.attachment_count,
+                            }),
+                        );
+                    }
+                    return result;
                 }
                 Err(_) => return Err(MailProcessingError::UnsafeDisposition.into()),
             };
