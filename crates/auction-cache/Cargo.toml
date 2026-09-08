@@ -9,8 +9,9 @@ publish.workspace = true
 auction-application.workspace = true
 redis = { workspace = true, optional = true, features = ["connection-manager", "tokio-rustls-comp"] }
 rustls = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["sync", "time"] }
 thiserror.workspace = true
 
 [features]
 default = []
-redis = ["dep:redis", "dep:rustls"]
+redis = ["dep:redis", "dep:rustls", "dep:tokio"]

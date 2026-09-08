@@ -8,6 +8,7 @@ Dioxus 客户端渲染的公开端 SPA。`Route` 枚举冻结 15 条路径，其
 - `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求；
   `clock.rs` 负责服务端时间校准和 GET 边界，`model.rs` 负责 lot 展示模型，`queries.rs` 负责
   拍卖、lot、竞价日志和价格历史查询，`mod.rs` 只保留模块装配与稳定导出，不接触存储模型。
+  竞价日志选择器会逐页读取各状态目录，直到总数或短页证明完成，不再只展示前 200 场。
 - `src/app/`：按相同 owner 分组的公开端路由、页面和交互组件；`surface/` 进一步按路由、
   看板、目录、页面和查询状态拆分跨页面职责；`surface/board/` 将看板入口、世界选择、实时刷新、
   拍卖数据和预览/历史视图切换分开，`refresh.rs` 拥有竞价资源失效与合并读取；`surface/catalog/` 继续按表格、竞价动作、行组件
@@ -72,6 +73,8 @@ just web-serve-public   # 本地开发监听
 之间的切换。页头与当前拍卖选择器只展示数据库中 enabled 的 world；价格历史、拍卖历史和 bid log
 筛选器仍保留受支持但已关闭的 world，以便读取其中已经 settled 的历史。服务端同时强制
 `world.enabled OR auction.status=settled`，因此 URL 不能借历史筛选值打开禁用世界的活动投影或写入。
+PublicShell 保存 `visibilitychange` 和 `popstate` 回调句柄，并在外壳卸载时移除监听、释放闭包；
+离开外壳再返回不会累积历史回调。
 代理表单继续支持已发布的金额缩写，普通出价使用纯数字 K 单位、最低价提示和提交前二次确认，
 同时保留幂等重试、代理终态重建和最终阶段限制；实时客户端会校验事件信封、
 schema、连续游标，并在断档或服务端要求时回到权威快照。公开发现范围使用持久化

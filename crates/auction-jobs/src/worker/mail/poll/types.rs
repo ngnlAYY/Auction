@@ -16,6 +16,7 @@ use super::super::WorkerError;
 pub struct MailPollFetchRequest {
     pub mailbox_key: String,
     pub world_id: String,
+    /// 已完成邮件的 external_mail_id；gateway 必须只返回该 ID 之前的未完成窗口。
     pub cursor_value: Option<String>,
     pub limit: u16,
 }
@@ -62,6 +63,7 @@ impl std::fmt::Debug for MailPollFetchedMessage {
 pub struct MailPollPage {
     pub mailbox_key: String,
     pub world_id: String,
+    /// 本页最后一封消息的 external_mail_id；只有该页全部处理成功时才可提交。
     pub next_cursor: Option<String>,
     pub messages: Vec<MailPollFetchedMessage>,
 }
@@ -93,6 +95,8 @@ pub struct MailPollRuntimeConfig {
     pub fetch_timeout: std::time::Duration,
     pub process_attempts: u16,
     pub item_timeout: std::time::Duration,
+    /// 单次 mailbox claim 的总处理预算；耗尽时只提交已完成前缀并推进到其邮件 ID。
+    pub batch_timeout: std::time::Duration,
     pub retry_base: std::time::Duration,
     pub retry_maximum: std::time::Duration,
 }
@@ -108,6 +112,7 @@ impl Default for MailPollRuntimeConfig {
             fetch_timeout: std::time::Duration::from_secs(30),
             process_attempts: 3,
             item_timeout: std::time::Duration::from_secs(30),
+            batch_timeout: std::time::Duration::from_secs(600),
             retry_base: std::time::Duration::from_secs(1),
             retry_maximum: std::time::Duration::from_secs(30),
         }
@@ -129,6 +134,9 @@ impl MailPollRuntimeConfig {
             && (1..=10).contains(&self.process_attempts)
             && !self.item_timeout.is_zero()
             && self.item_timeout <= std::time::Duration::from_secs(300)
+            && !self.batch_timeout.is_zero()
+            && self.batch_timeout <= std::time::Duration::from_secs(86_400)
+            && self.batch_timeout >= self.fetch_timeout.saturating_add(self.item_timeout)
             && !self.retry_base.is_zero()
             && self.retry_base <= self.retry_maximum
             && self.retry_maximum <= std::time::Duration::from_secs(300)

@@ -750,6 +750,7 @@ admin-runtime-op-maximum-topic-pages = トピックごとの最大ページ数
 admin-runtime-op-minimum-request-interval-millis = リクエストの最小間隔（ミリ秒）
 admin-runtime-op-request-timeout-seconds = リクエスト全体のタイムアウト（秒）
 admin-runtime-op-item-timeout-seconds = タスクのタイムアウト（秒）
+admin-runtime-op-mail-batch-timeout-seconds = メールバッチ予算（秒）
 admin-runtime-op-lease-duration-seconds = タスクのリース期間（秒）
 admin-runtime-op-scan-interval-seconds = アラート走査間隔（秒）
 admin-runtime-op-source-timeout-seconds = 稼働情報の読取タイムアウト（秒）

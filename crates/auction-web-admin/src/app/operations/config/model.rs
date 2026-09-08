@@ -98,8 +98,17 @@ impl RuntimeConfigForm {
             inputs.insert((*path).to_owned(), text);
         }
         for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {
-            let value = nested_value(document, path).and_then(Value::as_u64).ok_or(())?;
-            inputs.insert((*path).to_owned(), value.to_string());
+            let value = nested_value(document, path).and_then(Value::as_u64);
+            if let Some(value) = value {
+                inputs.insert((*path).to_owned(), value.to_string());
+            } else if *path == "operations.mail.batch_timeout_seconds"
+                && nested_value(document, "operations.mail").is_some()
+            {
+                // 新字段对旧 runtime document 使用解析器默认值，避免历史文档无法打开。
+                inputs.insert((*path).to_owned(), "600".to_owned());
+            } else {
+                return Err(());
+            }
         }
         for path in SIGNED_NUMBER_FIELDS {
             let value = nested_value(document, path).and_then(Value::as_i64).ok_or(())?;
@@ -205,6 +214,12 @@ impl RuntimeConfigForm {
                 continue;
             }
             let value = self.required_input(path)?.parse::<u64>().map_err(|_| ())?;
+            if *path == "operations.mail.batch_timeout_seconds"
+                && nested_value(&document, path).is_none()
+                && value == 600
+            {
+                continue;
+            }
             set_nested_value(&mut document, path, Value::Number(Number::from(value)))?;
         }
         for path in SIGNED_NUMBER_FIELDS {

@@ -109,6 +109,12 @@ MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller
 重试，确定性输入、配置和业务拒绝立即收口。共享 transport 使用一秒最小请求间隔与 15 秒请求超时；
 批次期间周期续租；续租 fence 失效后取消陈旧处理，稳定命令 ID 负责
 恢复超时前可能已完成的本地步骤。
+`batch_timeout_seconds` 默认 600 秒，限制一次 claim 的远程拉取、内联重试和整页业务处理，
+与可续期 lease 独立。邮件页按旧到新处理，cursor 表示最后完成邮件的 `external_mail_id`；总预算
+耗尽时，已完成前缀和其 cursor 在同一受 fence 保护的事务中提交，未完成邮件留待下一轮。
+一封都未完成时记录 `batch_timeout` 并退避，不提交空成功批次。普通读取/业务失败仍保持原有
+整页重试边界；超时前已经提交的业务步骤由稳定命令 ID 重放补齐。最终数据库提交在处理预算后
+按既有租约 fence 收口，不能把“处理预算”误称为包含数据库收口的硬耗时保证。
 论坛 `start/cancel` 和 PM-only 通知在当前论坛命令契约中是 warning-only；MM `notify` 已进入
 MoogleMail delivery outbox。若未来要扩展这些命令，需先冻结新的论坛/
 拍卖 owner、幂等账本和远程回执契约。

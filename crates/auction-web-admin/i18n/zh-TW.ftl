@@ -750,6 +750,7 @@ admin-runtime-op-maximum-topic-pages = 每個主題最大頁數
 admin-runtime-op-minimum-request-interval-millis = 最小請求間隔（毫秒）
 admin-runtime-op-request-timeout-seconds = 完整請求逾時（秒）
 admin-runtime-op-item-timeout-seconds = 單項工作逾時（秒）
+admin-runtime-op-mail-batch-timeout-seconds = 郵件批次預算（秒）
 admin-runtime-op-lease-duration-seconds = 工作租約時長（秒）
 admin-runtime-op-scan-interval-seconds = 警示掃描間隔（秒）
 admin-runtime-op-source-timeout-seconds = 健康資訊讀取逾時（秒）

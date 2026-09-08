@@ -750,6 +750,7 @@ admin-runtime-op-maximum-topic-pages = 주제당 최대 페이지 수
 admin-runtime-op-minimum-request-interval-millis = 최소 요청 간격 (밀리초)
 admin-runtime-op-request-timeout-seconds = 전체 요청 제한 시간 (초)
 admin-runtime-op-item-timeout-seconds = 작업 제한 시간 (초)
+admin-runtime-op-mail-batch-timeout-seconds = 메일 배치 예산 (초)
 admin-runtime-op-lease-duration-seconds = 작업 임대 시간 (초)
 admin-runtime-op-scan-interval-seconds = 알림 확인 간격 (초)
 admin-runtime-op-source-timeout-seconds = 상태 정보 읽기 제한 시간 (초)

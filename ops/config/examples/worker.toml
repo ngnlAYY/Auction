@@ -191,6 +191,8 @@ fetch_timeout_seconds = 30
 process_attempts = 3
 # 可选：单次邮件业务处理尝试总超时秒数，范围 1-300，且须大于 request_timeout_seconds；默认 30。
 item_timeout_seconds = 30
+# 可选：单次邮箱 claim 的总处理预算秒数，范围 1-86400 且至少覆盖一次 fetch_timeout_seconds 与 item_timeout_seconds；默认 600。
+batch_timeout_seconds = 600
 # 可选：内联与持久化指数退避基础秒数，默认 1。
 retry_base_seconds = 1
 # 可选：内联与持久化指数退避上限秒数，默认 30。

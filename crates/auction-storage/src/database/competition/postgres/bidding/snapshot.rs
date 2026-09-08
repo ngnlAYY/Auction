@@ -41,6 +41,8 @@ impl PostgresCompetitionTransaction {
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
             let transaction = self.transaction_mut()?;
+            // 竞价只读世界启停和拍卖生命周期，共享锁允许不同 lot 同时通过门禁，仍阻止
+            // 管理/生命周期更新；lot 保持排他锁，锁顺序仍是 world → auction → lot。
             sqlx::query(
                 r#"WITH target_lot AS MATERIALIZED (
                        SELECT lot.auction_id, auction.world_id
@@ -52,7 +54,7 @@ impl PostgresCompetitionTransaction {
                        SELECT world.id, world.enabled
                        FROM public.worlds AS world
                        INNER JOIN target_lot ON target_lot.world_id = world.id
-                       FOR UPDATE OF world
+                       FOR SHARE OF world
                    ),
                    locked_auction AS MATERIALIZED (
                        SELECT
@@ -63,7 +65,7 @@ impl PostgresCompetitionTransaction {
                        FROM public.auctions AS auction
                        INNER JOIN target_lot ON target_lot.auction_id = auction.id
                        INNER JOIN locked_world ON locked_world.id = auction.world_id
-                       FOR UPDATE OF auction
+                       FOR SHARE OF auction
                    )
                    SELECT
                     l.start_price, l.current_price, l.leader_user_id, l.leader_proxy_last,

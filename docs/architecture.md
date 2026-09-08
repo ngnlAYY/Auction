@@ -208,6 +208,9 @@ Admin 规则发布成功后按语言删除对应 key。读取 miss、快照损�
 回退到 PostgreSQL/SQLite 规则表，失效失败由 TTL 收敛，不能回滚已提交规则事务。竞价事务、
 资格判断、命令幂等、锁、会话真值和审计不能依赖缓存。由此，未编译 Redis feature、运行时
 选择 `disabled` 或 Redis 临时故障都不改变业务正确性。
+缓存适配器为每次 get/set/invalidate 设置 750 毫秒总预算，覆盖连接重试和响应等待；共享适配器
+最多接受 32 个在途操作，满额立即回源。计时与并发控制只随 Redis feature 装配，Admin 发布后的
+缓存失效也受相同预算约束。
 
 ## 配置与敏感信息
 
@@ -226,7 +229,8 @@ Admin A26/A27 的 runtime 更新属于 PostgreSQL 完整档：`auction-applicati
 约束的 TOML 文件锁与原子替换，`auction-storage` 拥有
 `runtime_config_admin_commands`、审计外键和 pending/applied/unknown 账本。更新后只写文件
 和 durable intent，不在当前进程内热改 listener/security/session；成功响应必须带
-`restart_required`。Admin 对外就绪前会执行同一恢复服务；可证明的 pending/applied 状态自动
+`restart_required`。文件替换成功后，账本应用异常保留新文档并报告结果未知，后续只向前恢复；
+不得在提交确认丢失时回退文件，造成 Applied 账本与实际配置错位。Admin 对外就绪前会执行同一恢复服务；可证明的 pending/applied 状态自动
 收口，`unknown` 或文件冲突会保留人工核对告警，其他恢复错误阻断启动。SQLite Lite 读取
 启动时 runtime 文档但不提供这项完整更新能力，HTTP 返回 `501 feature_not_supported`。Public/Admin
 监听器装配已支持 TCP 与 Linux Unix socket：Unix 模式在绑定前校验受信任 runtime 目录、目录级
@@ -372,7 +376,9 @@ discovery 增量，
 竞价日志保留 world/lot 筛选、完整降序 keyset 边界和 cursor 页未知 total 语义；Web 代理事实只展示
 `玩家名称（代理）`，论坛普通竞价在能够由命令账本证明真实楼层与帖子身份时展示可点击的
 `玩家名称（#N）`，普通 Web 出价不伪造来源；论坛固定 #1 从同一事实链投影相同来源样式。价格历史
-在完整档保留旧筛选、成交条目与编号页统计；Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
+在完整档保留旧筛选、成交条目与编号页统计；`auction-storage/src/database/price_history/postgres/numbered.rs`
+在同一 Serializable 快照内复用一次筛选后的窄行，减少分页与统计的重复联表，装备属性仅对当前页读取，
+cursor 分支继续独立使用 keyset。Public 补偿池与单场账本在 PostgreSQL 完整档使用结算
 账本的同一 Serializable 快照、守恒校验和 keyset 游标，SQLite Lite 对该完整档能力明确返回不支持。
 Admin A04 的 URL 装备来源会在启动时冻结 runtime 的 host/path allowlist、响应上限、共享请求间隔和
 全请求超时；该业务策略叠加在固定 HTTPS origin、无重定向、精确 world 路径、响应类型和流式有界
@@ -472,7 +478,11 @@ Worker 在 `[worker.mooglemail]` 显式启用后，会优先按共享 runtime �
 delivery outbox 和 `MoogleMailDeliveryTransport`。每个 world 同时拥有独立调度任务和手动唤醒器，
 读取与可重试单封业务处理分别执行有界超时重试；确定性业务/输入/配置错误按 `Permanent` 立即
 收口，超时和依赖错误按 `Retryable` 重试。批次处理期间周期续租 claim，续租 fence 失效后取消
-陈旧 future，不能推进 cursor。当前首条业务链已覆盖拍卖邮件的 Credits/COD
+陈旧 future，不能推进 cursor。另以 `batch_timeout_seconds`（默认 600 秒）限制拉取和业务处理
+总预算；gateway 保留最旧的未处理窗口并按旧到新返回，预算到期时只提交已完成前缀，cursor
+与其最后一封邮件的 ID 同事务推进；无完成项则失败退避，未完成邮件不被跳过。最终存储收口仍
+受既有租约 fence 保护。runtime 中省略该新字段使用默认值且不改变原 fingerprint。
+当前首条业务链已覆盖拍卖邮件的 Credits/COD
 拒绝、无附件通知、装备来源校验、起拍价指令解析、拍卖草稿/lot 入站、take/return 动作和静态
 通知发送。每周新场次 bootstrap 的实际世界集合进一步取 `[auction.schedule].worlds`、上述
 runtime-enabled 世界与数据库 `worlds.enabled=true` 的交集，并在每次 due 执行前重读数据库；关闭

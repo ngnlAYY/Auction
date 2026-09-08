@@ -78,6 +78,14 @@ pub(crate) fn validate_mooglemail_worker(
             "item_timeout_seconds 必须位于 1 至 300 且大于 request_timeout_seconds",
         ));
     }
+    if !(1..=86_400).contains(&config.batch_timeout_seconds)
+        || config.batch_timeout_seconds
+            < config.fetch_timeout_seconds.saturating_add(config.item_timeout_seconds)
+    {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "batch_timeout_seconds 必须位于 1 至 86400 且至少覆盖一次 fetch_timeout_seconds 与 item_timeout_seconds",
+        ));
+    }
     if config.retry_base_seconds == 0
         || config.retry_base_seconds > config.retry_maximum_seconds
         || config.retry_maximum_seconds > 300

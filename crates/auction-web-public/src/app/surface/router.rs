@@ -174,6 +174,11 @@ pub(crate) fn PublicShell() -> Element {
             });
         }
     });
+    #[cfg(target_arch = "wasm32")]
+    {
+        let cleanup_visibility = page_visibility.clone();
+        use_drop(move || cleanup_visibility.cleanup());
+    }
     let boot_prerequisites_ready =
         readiness.read().is_some() && session.read().is_some() && current_auction.read().is_some();
     // 默认拍卖页还要等待首屏 lots；其他路由在三项外壳请求都有结果后即可接管静态骨架。
@@ -194,9 +199,24 @@ pub(crate) fn PublicShell() -> Element {
     use_context_provider(move || page_visibility);
 
     #[cfg(target_arch = "wasm32")]
+    let popstate_guard = use_hook(|| Rc::new(RefCell::new(None::<PublicPopstateGuard>)));
+    #[cfg(target_arch = "wasm32")]
+    {
+        let cleanup_guard = popstate_guard.clone();
+        use_drop(move || {
+            if let Some(guard) = cleanup_guard.borrow_mut().take() {
+                guard.cleanup();
+            }
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
     use_effect({
         let mut location_generation = location_generation;
+        let guard = popstate_guard.clone();
         move || {
+            if guard.borrow().is_some() {
+                return;
+            }
             let Some(window) = web_sys::window() else {
                 return;
             };
@@ -207,8 +227,7 @@ pub(crate) fn PublicShell() -> Element {
             });
             let _ = window
                 .add_event_listener_with_callback("popstate", callback.as_ref().unchecked_ref());
-            // PublicShell 与页面同寿命；监听器在整个 SPA 生命周期内只安装一次。
-            callback.forget();
+            *guard.borrow_mut() = Some(PublicPopstateGuard { window, callback });
         }
     });
     let readiness_state = match &*readiness.read_unchecked() {
@@ -379,6 +398,22 @@ pub(crate) fn PublicShell() -> Element {
                 Outlet::<Route> {}
             }
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PublicPopstateGuard {
+    window: web_sys::Window,
+    callback: Closure<dyn FnMut()>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl PublicPopstateGuard {
+    fn cleanup(self) {
+        let _ = self.window.remove_event_listener_with_callback(
+            "popstate",
+            self.callback.as_ref().unchecked_ref(),
+        );
     }
 }
 

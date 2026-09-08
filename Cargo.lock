@@ -219,6 +219,7 @@ dependencies = [
  "redis",
  "rustls",
  "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]

@@ -36,10 +36,17 @@ pub struct AdminRuntimeMailConfig {
     pub process_attempts: u16,
     /// 单次邮件处理总超时秒数，范围 1–300，且大于 HTTP 请求超时。
     pub item_timeout_seconds: u64,
+    /// 单次邮箱 claim 的总处理预算秒数；耗尽时只提交已完成前缀并推进到其邮件 ID。
+    #[serde(skip_serializing_if = "is_default_batch_timeout")]
+    pub batch_timeout_seconds: u64,
     /// 指数退避基础秒数，范围 1–300。
     pub retry_base_seconds: u64,
     /// 指数退避上限秒数，范围 1–300，且不小于基础退避。
     pub retry_maximum_seconds: u64,
+}
+
+fn is_default_batch_timeout(value: &u64) -> bool {
+    *value == 600
 }
 
 impl Default for AdminRuntimeMailConfig {
@@ -59,6 +66,7 @@ impl Default for AdminRuntimeMailConfig {
             fetch_timeout_seconds: 30,
             process_attempts: 3,
             item_timeout_seconds: 30,
+            batch_timeout_seconds: 600,
             retry_base_seconds: 1,
             retry_maximum_seconds: 30,
         }
@@ -106,6 +114,12 @@ impl AdminRuntimeMailConfig {
             (1..=300).contains(&self.item_timeout_seconds)
                 && self.item_timeout_seconds > self.request_timeout_seconds,
             "mail.item_timeout_seconds",
+        )?;
+        require(
+            (1..=86_400).contains(&self.batch_timeout_seconds)
+                && self.batch_timeout_seconds
+                    >= self.fetch_timeout_seconds.saturating_add(self.item_timeout_seconds),
+            "mail.batch_timeout_seconds",
         )?;
         require(
             self.retry_base_seconds > 0

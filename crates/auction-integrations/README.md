@@ -71,7 +71,10 @@
 对应 world，shared Cookie 才能跨 world 复用。数据库与兼容来源都在 Worker 启动时按凭据类型
 取得进程生命周期所有权；再以明确的 sender allowlist
 构造 `MoogleMailGateway` 并调用 `fetch(world, cursor, limit)`。只有摘要扫描、allowlist 筛选、详情读取和全部一致性校验成功后，
-gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务分类。当前首条业务链已完成拍卖邮件的
+gateway 才返回可提交的新 cursor；应用层负责幂等入库和业务分类。收件箱从新到旧扫描时，
+有界窗口保留 cursor 之后最旧的 `limit` 封目标邮件，再按旧到新读取详情，防止积压量超过批量
+上限时跳过旧邮件。cursor 对应最后返回邮件的 `external_mail_id`，Worker 可据此安全提交完成前缀。
+当前首条业务链已完成拍卖邮件的
  Credits/COD 拒绝、无附件通知、装备来源读取、起拍价指令解析、拍卖入站、用户注册/重绑和
  take/return 编排；用户登录 key 通过独立数据密钥生成密文信封，只有 DeliveryTransport 发送前
  短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
