@@ -461,6 +461,22 @@ delivery-reconcile-action-failed = 標記為失敗
 delivery-external-reference = 外部參照
 delivery-failure-code = 失敗代碼
 
+admin-mail-deliveries-title = 關聯郵件任務
+admin-mail-deliveries-help = 失敗或待人工對帳的任務可手動重新排隊。待處理、執行中和已成功的任務不能重複提交。
+admin-mail-deliveries-empty = 沒有可顯示的關聯投遞任務。
+admin-mail-delivery-operation = 操作類型
+admin-mail-delivery-id = 投遞 ID
+admin-mail-delivery-send = 傳送郵件
+admin-mail-delivery-return = 退回原信
+admin-mail-delivery-take = 領取附件
+admin-mail-delivery-resend = 重新傳送
+admin-mail-delivery-return-again = 重新退回
+admin-mail-delivery-take-again = 重新領取
+admin-mail-delivery-no-retry = 目前無法重試
+admin-mail-delivery-confirm = 確認重新執行與 { $recipient } 相關的這項郵件操作？任務會重新排隊，由背景執行。
+admin-mail-delivery-confirm-unknown = 上次操作結果尚未確認。請先核對 MM 中的郵件與附件，確認操作尚未完成，避免重複處理。
+admin-mail-delivery-requeued = 已重新排隊，等待背景執行；這不表示郵件已傳送、退回或領取成功。
+
 admin-mail-loading = 正在載入郵件資料……
 admin-mail-mailbox = 寄件者
 admin-mail-load = 確認

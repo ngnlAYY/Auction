@@ -476,6 +476,9 @@ Admin 交付命令由 `src/database/delivery_admin/` 持有：`mod.rs` 负责端
 `reads.rs` 负责安全列表读取，`commands.rs` 负责幂等人工命令、状态迁移、结算履约联动和追加审计，
 `mapping.rs` 负责安全快照、响应元数据投影及历史完整账本 payload 防腐映射，`transaction.rs`
 负责 Serializable 事务、SQLSTATE 重试闭集和 10ms/20ms 有限退避；SQLite Lite 明确返回能力不支持。
+收件详情关联 delivery 只由 `metadata.delivery_ids` 触发有界批量读取，并同时匹配 mail_intake 来源、world、
+external MID、operation、origin_id；历史收件业务决定不重放，页面不暴露 payload、装备 key 或正文。手动重发沿用
+既有 delivery retry/reconcile 命令、fencing 和审计，不新增表或迁移。
 SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
 `src/database/realtime_admin/` 分层持有：`mod.rs` 负责端口分派，`events.rs`、`snapshot.rs`、
 `lag.rs`、`failures.rs` 与 `replay/` 分别负责不含 payload 的事件元数据、安全快照、lag、failure

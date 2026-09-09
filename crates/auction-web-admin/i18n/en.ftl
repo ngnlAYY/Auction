@@ -424,6 +424,22 @@ delivery-reconcile-action-failed = Mark failed
 delivery-external-reference = External reference
 delivery-failure-code = Failure code
 
+admin-mail-deliveries-title = Related mail tasks
+admin-mail-deliveries-help = Failed tasks and tasks awaiting reconciliation can be queued again. Pending, running, and successful tasks cannot be submitted again.
+admin-mail-deliveries-empty = No related delivery tasks are available.
+admin-mail-delivery-operation = Operation
+admin-mail-delivery-id = Delivery ID
+admin-mail-delivery-send = Send mail
+admin-mail-delivery-return = Return original mail
+admin-mail-delivery-take = Claim attachments
+admin-mail-delivery-resend = Send again
+admin-mail-delivery-return-again = Return again
+admin-mail-delivery-take-again = Claim again
+admin-mail-delivery-no-retry = Retry unavailable
+admin-mail-delivery-confirm = Queue this mail operation involving { $recipient } again? It will run in the background.
+admin-mail-delivery-confirm-unknown = The previous outcome is unconfirmed. Check the mail and attachments in MM and confirm that the operation has not completed before retrying.
+admin-mail-delivery-requeued = Queued again for background processing. Sending, returning, or claiming has not yet been confirmed.
+
 admin-mail-loading = Loading mail data…
 admin-mail-mailbox = From
 admin-mail-load = Confirm

@@ -760,6 +760,26 @@
   overflow-wrap: anywhere;
 }
 
+.admin-mail-deliveries {
+  margin-block-start: var(--space-5);
+  padding-block-start: var(--space-4);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.admin-mail-deliveries h3 {
+  margin-block: 0 var(--space-3);
+}
+
+.admin-mail-deliveries__table button {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.admin-mail-deliveries__warning {
+  color: var(--color-danger);
+}
+
 .admin-mail-original {
   margin-block-start: var(--space-5);
   padding-block-start: var(--space-4);

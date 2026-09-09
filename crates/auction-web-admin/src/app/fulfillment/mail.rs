@@ -2,6 +2,8 @@
 
 #[path = "mail/actions.rs"]
 mod actions;
+#[path = "mail/deliveries.rs"]
+mod deliveries;
 #[path = "mail/detail.rs"]
 mod detail;
 #[path = "mail/helpers.rs"]

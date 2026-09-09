@@ -425,6 +425,22 @@ delivery-reconcile-action-failed = 标记为失败
 delivery-external-reference = 外部引用
 delivery-failure-code = 失败代码
 
+admin-mail-deliveries-title = 关联邮件任务
+admin-mail-deliveries-help = 失败或待人工对账的任务可手动重新排队。待处理、执行中和已成功的任务不能重复提交。
+admin-mail-deliveries-empty = 没有可展示的关联投递任务。
+admin-mail-delivery-operation = 操作类型
+admin-mail-delivery-id = 投递 ID
+admin-mail-delivery-send = 发送邮件
+admin-mail-delivery-return = 退回原信
+admin-mail-delivery-take = 领取附件
+admin-mail-delivery-resend = 重新发送
+admin-mail-delivery-return-again = 重新退回
+admin-mail-delivery-take-again = 重新领取
+admin-mail-delivery-no-retry = 当前不可重试
+admin-mail-delivery-confirm = 确认重新执行与 { $recipient } 相关的这项邮件操作？任务会重新排队，由后台执行。
+admin-mail-delivery-confirm-unknown = 上次操作结果尚未确认。请先核对 MM 中的邮件和附件，确认操作尚未完成，避免重复处理。
+admin-mail-delivery-requeued = 已重新排队，等待后台执行；这不表示邮件已发送、退回或领取成功。
+
 admin-mail-loading = 正在加载邮件数据……
 admin-mail-mailbox = 发件人
 admin-mail-load = 确认

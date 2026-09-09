@@ -1,6 +1,8 @@
 //! PostgreSQL Admin 邮件轮询状态、dashboard 与入站记录查询。
 
-use super::mapping::{map_intake_summary, map_mail_poller, map_poll_state, storage_error};
+use super::mapping::{
+    map_intake_delivery, map_intake_summary, map_mail_poller, map_poll_state, storage_error,
+};
 use super::*;
 
 pub(super) async fn get_poll_state_postgres(
@@ -164,6 +166,45 @@ pub(super) async fn get_intake_postgres(
     let decision_metadata: Json<Value> =
         row.try_get("decision_metadata").map_err(|_| storage_error("读取邮件决定元数据失败"))?;
     let metadata = super::mapping::decode_metadata(decision_metadata.0)?;
+    if !summary.validate() || !metadata.validate() {
+        return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
+    }
+    let delivery_ids = metadata
+        .delivery_ids
+        .iter()
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect::<Vec<_>>();
+    let deliveries = if delivery_ids.is_empty() {
+        Vec::new()
+    } else {
+        let rows = sqlx::query(
+            "SELECT id, payload ->> 'operation' AS operation, recipient, status,
+                    fencing_version, attempt_count, failure_code, external_reference
+             FROM public.deliveries
+             WHERE origin_kind = 'mail_intake'
+               AND id = ANY($1::uuid[])
+               AND payload ->> 'world' = $2
+               AND payload ->> 'external_mail_id' = $3
+               AND payload ->> 'operation' IN ('send', 'return', 'take')
+               AND (
+                   origin_id = concat($2, ':', $3, ':', payload ->> 'operation')
+                   OR (payload ->> 'operation' = 'send'
+                       AND origin_id = concat($2, ':', $3, ':delivery-notice'))
+                   OR (payload ->> 'operation' = 'return'
+                       AND origin_id = concat($2, ':', $3, ':delivery-return'))
+                   OR (payload ->> 'operation' = 'take'
+                       AND origin_id = concat($2, ':', $3, ':delivery-take'))
+               )
+             ORDER BY id",
+        )
+        .bind(delivery_ids)
+        .bind(&summary.world_id)
+        .bind(&summary.external_mail_id)
+        .fetch_all(store.pool())
+        .await
+        .map_err(|_| storage_error("读取邮件关联 delivery 失败"))?;
+        rows.iter().map(map_intake_delivery).collect::<Result<Vec<_>, _>>()?
+    };
     let message_display = row
         .try_get::<Option<Json<Value>>, _>("message_display")
         .map_err(|_| storage_error("读取邮件原始信息失败"))?
@@ -174,8 +215,14 @@ pub(super) async fn get_intake_postgres(
         .map_err(|_| storage_error("读取邮件装备诊断失败"))?
         .map(|value| super::mapping::decode_equipment_diagnostic(value.0))
         .transpose()?;
-    if !summary.validate() || !metadata.validate() {
+    if deliveries.iter().any(|value| !value.validate()) {
         return Err(ApplicationError::AdminMail(AdminMailError::InvalidProjection));
     }
-    Ok(Some(AdminMailIntakeDetail { summary, metadata, message_display, equipment_diagnostic }))
+    Ok(Some(AdminMailIntakeDetail {
+        summary,
+        metadata,
+        deliveries,
+        message_display,
+        equipment_diagnostic,
+    }))
 }

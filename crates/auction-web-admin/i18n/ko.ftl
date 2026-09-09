@@ -461,6 +461,22 @@ delivery-reconcile-action-failed = 실패로 표시
 delivery-external-reference = 외부 참조
 delivery-failure-code = 실패 코드
 
+admin-mail-deliveries-title = 관련 메일 작업
+admin-mail-deliveries-help = 실패하거나 수동 대조를 기다리는 작업을 다시 대기열에 넣을 수 있습니다. 대기 중, 실행 중 또는 성공한 작업은 다시 제출할 수 없습니다.
+admin-mail-deliveries-empty = 표시할 관련 발송 작업이 없습니다.
+admin-mail-delivery-operation = 작업 유형
+admin-mail-delivery-id = 발송 ID
+admin-mail-delivery-send = 메일 보내기
+admin-mail-delivery-return = 원본 메일 반환
+admin-mail-delivery-take = 첨부품 수령
+admin-mail-delivery-resend = 다시 보내기
+admin-mail-delivery-return-again = 반환 다시 시도
+admin-mail-delivery-take-again = 수령 다시 시도
+admin-mail-delivery-no-retry = 다시 시도 불가
+admin-mail-delivery-confirm = { $recipient } 관련 메일 작업을 다시 대기열에 넣으시겠습니까? 백그라운드에서 실행됩니다.
+admin-mail-delivery-confirm-unknown = 이전 작업의 결과가 확인되지 않았습니다. 중복 처리를 피하려면 MM의 메일과 첨부품을 확인하고 작업이 완료되지 않았는지 확인하세요.
+admin-mail-delivery-requeued = 백그라운드 처리 대기열에 다시 넣었습니다. 발송, 반환 또는 수령 성공은 아직 확인되지 않았습니다.
+
 admin-mail-loading = 메일 데이터를 불러오는 중…
 admin-mail-mailbox = 보낸 사람
 admin-mail-load = 확인

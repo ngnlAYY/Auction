@@ -222,11 +222,47 @@ impl AdminMailIntakeMetadata {
     }
 }
 
+/// 入站邮件关联 delivery 的安全重发投影；不包含 payload 或密钥材料。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminMailIntakeDelivery {
+    pub id: Uuid,
+    pub operation: String,
+    pub recipient: String,
+    pub status: String,
+    pub fencing_version: i64,
+    pub attempt_count: u32,
+    pub failure_code: Option<String>,
+    pub external_reference: Option<String>,
+}
+
+impl AdminMailIntakeDelivery {
+    /// 校验 delivery 只暴露可供 Admin 重发/对账使用的稳定字段。
+    pub fn validate(&self) -> bool {
+        !self.id.is_nil()
+            && matches!(self.operation.as_str(), "send" | "return" | "take")
+            && valid_text(&self.recipient, 512)
+            && matches!(
+                self.status.as_str(),
+                "prepared"
+                    | "pending"
+                    | "claimed"
+                    | "sending"
+                    | "succeeded"
+                    | "failed"
+                    | "manual_reconcile"
+            )
+            && self.fencing_version >= 0
+            && self.failure_code.as_deref().is_none_or(|value| valid_text(value, 512))
+            && self.external_reference.as_deref().is_none_or(|value| valid_text(value, 512))
+    }
+}
+
 /// 入站邮件详情安全投影。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminMailIntakeDetail {
     pub summary: AdminMailIntakeSummary,
     pub metadata: AdminMailIntakeMetadata,
+    pub deliveries: Vec<AdminMailIntakeDelivery>,
     pub message_display: Option<MailDisplaySnapshot>,
     pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
 }

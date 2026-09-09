@@ -18,6 +18,7 @@ pub(super) fn MailIntakeDetailPanel(
     loading: bool,
     error: Option<String>,
     mut refresh: Signal<u64>,
+    delivery_notice: Signal<Option<(String, super::super::AdminActionFeedback)>>,
     on_close: EventHandler<()>,
 ) -> Element {
     if !visible {
@@ -157,6 +158,13 @@ pub(super) fn MailIntakeDetailPanel(
                 dd { "{warnings}" }
                 dt { {t!("admin-mail-delivery-ids")} }
                 dd { "{delivery_ids}" }
+            }
+            super::deliveries::MailDeliveriesPanel {
+                key: "{detail.id}",
+                intake_id: detail.id.clone(),
+                deliveries: detail.deliveries,
+                notice: delivery_notice,
+                refresh,
             }
             section { class: "admin-mail-original", aria_labelledby: "admin-mail-original-title",
                 h3 { id: "admin-mail-original-title", {t!("admin-mail-original")} }
