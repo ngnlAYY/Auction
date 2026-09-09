@@ -79,6 +79,20 @@ pub struct AdminMailIntakeMetadataResponse {
     pub delivery_ids: Vec<String>,
 }
 
+/// Admin 入站邮件关联 delivery 的安全重发响应；不包含 payload 或密钥材料。
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminMailIntakeDeliveryResponse {
+    pub id: String,
+    pub operation: String,
+    pub recipient: String,
+    pub status: String,
+    pub fencing_version: i64,
+    pub attempt_count: u32,
+    pub failure_code: Option<String>,
+    pub external_reference: Option<String>,
+}
+
 /// Admin 入站邮件详情响应。
 ///
 /// 详情 wire 是闭集（与列表摘要的兼容扩展语义不同），未知字段一律拒绝。
@@ -97,6 +111,7 @@ pub struct AdminMailIntakeDetailResponse {
     pub sender: Option<String>,
     pub subject: Option<String>,
     pub metadata: AdminMailIntakeMetadataResponse,
+    pub deliveries: Vec<AdminMailIntakeDeliveryResponse>,
     pub message_display: Option<AdminMailDisplayResponse>,
     pub equipment_diagnostic: Option<AdminMailEquipmentDiagnosticResponse>,
 }

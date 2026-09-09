@@ -100,6 +100,39 @@ pub(super) fn map_intake_summary(
     }
 }
 
+pub(super) fn map_intake_delivery(
+    row: &sqlx::postgres::PgRow,
+) -> Result<AdminMailIntakeDelivery, ApplicationError> {
+    let attempt_count: i32 = row
+        .try_get("attempt_count")
+        .map_err(|_| storage_error("读取邮件 delivery 尝试次数失败"))?;
+    let delivery = AdminMailIntakeDelivery {
+        id: row.try_get("id").map_err(|_| storage_error("读取邮件 delivery 标识失败"))?,
+        operation: row
+            .try_get("operation")
+            .map_err(|_| storage_error("读取邮件 delivery 操作失败"))?,
+        recipient: row
+            .try_get("recipient")
+            .map_err(|_| storage_error("读取邮件 delivery 收件人失败"))?,
+        status: row.try_get("status").map_err(|_| storage_error("读取邮件 delivery 状态失败"))?,
+        fencing_version: row
+            .try_get("fencing_version")
+            .map_err(|_| storage_error("读取邮件 delivery fencing 版本失败"))?,
+        attempt_count: u32::try_from(attempt_count)
+            .map_err(|_| storage_error("读取邮件 delivery 尝试次数无效"))?,
+        failure_code: row
+            .try_get("failure_code")
+            .map_err(|_| storage_error("读取邮件 delivery 失败码失败"))?,
+        external_reference: row
+            .try_get("external_reference")
+            .map_err(|_| storage_error("读取邮件 delivery 外部引用失败"))?,
+    };
+    delivery
+        .validate()
+        .then_some(delivery)
+        .ok_or_else(|| storage_error("邮件 delivery 安全投影无效"))
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct DecisionMetadata {
     auction_id: Option<String>,

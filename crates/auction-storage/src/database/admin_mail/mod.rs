@@ -10,11 +10,11 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_application::{
-    AdminMailIntakeMetadata, AdminMailIntakeSummary, AdminMailPollTriggerCommand,
-    AdminMailPollerSnapshot, AdminMailPollingCommand, AdminMailStoredCommand, AdminMailTransaction,
-    AdminMailTransactionError, AdminMailTransactionFailure, AdminMailTransactionRunner,
-    MAX_ADMIN_MAIL_POLLER_COUNT, RequestHash, TransactionFuture, TransactionIsolation,
-    TransactionPolicy,
+    AdminMailIntakeDelivery, AdminMailIntakeMetadata, AdminMailIntakeSummary,
+    AdminMailPollTriggerCommand, AdminMailPollerSnapshot, AdminMailPollingCommand,
+    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
+    AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_POLLER_COUNT,
+    RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
 };
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};

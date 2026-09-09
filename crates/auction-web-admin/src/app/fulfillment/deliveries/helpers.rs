@@ -7,7 +7,7 @@ use crate::api::Delivery;
 pub(crate) const DELIVERY_STATUS_VALUES: [&str; 7] =
     ["prepared", "pending", "claimed", "sending", "succeeded", "failed", "manual_reconcile"];
 
-pub(super) fn delivery_status_label(status: &str) -> String {
+pub(crate) fn delivery_status_label(status: &str) -> String {
     match status {
         "prepared" => t!("delivery-status-prepared"),
         "pending" => t!("delivery-status-pending"),

@@ -61,9 +61,9 @@ pub(crate) use lots::{
     AdminLot, AdminLotPage, AdminLotUpdateAction, fetch_admin_lots, update_admin_lot,
 };
 pub(crate) use mail::{
-    AdminMailIntake, AdminMailIntakeDetail, AdminMailIntakePage, AdminMailIntakeQuery,
-    AdminMailPolling, fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state,
-    set_mail_paused, trigger_mail_poll,
+    AdminMailIntake, AdminMailIntakeDelivery, AdminMailIntakeDetail, AdminMailIntakePage,
+    AdminMailIntakeQuery, AdminMailPolling, fetch_mail_intake_detail, fetch_mail_intakes,
+    fetch_mail_state, set_mail_paused, trigger_mail_poll,
 };
 pub(crate) use proxy_events::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 pub(crate) use realtime::{

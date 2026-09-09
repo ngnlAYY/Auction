@@ -98,6 +98,11 @@ release/retry 使用确认对话框，manual_reconcile 隐藏主动 send 的 suc
 管理员命令。后端拒绝 `payload.operation=send` 加裸 external_reference 的成功写回；Return/Take 仍保留独立
 人工核对路径。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
 命令 ID 供重试。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
+收件详情新增“关联邮件任务”表，组件位于 `fulfillment/mail/deliveries.rs`，使用 `admin-mail-deliveries` 列宽登记。
+表格按 operation、recipient、id、status、attempt、failure、actions 展示；`Send`/`Return`/`Take` 的按钮文案分别为
+“重新发送”/“重新退回”/“重新领取”。仅 `failed`/`manual_reconcile` 可操作，确认后复用 delivery retry/reconcile
+的 `action=retry`，携带 `command_id`、CSRF 和 `expected_fencing_version`；成功只提示重新排队，结果未知提示先核对 MM。
+数据仅在收件详情中从有界 `metadata.delivery_ids` 批量读取，不把 payload、装备 key 或正文送入页面；历史收件决定不重放。
 投递状态筛选使用轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
 Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
 筛选、分页和明确空结果状态；概览默认显示事件、消费流与未解决异常总数，consumer lag 不再隐藏在

@@ -144,6 +144,8 @@
 - `src/ports/mail/equipment_diagnostics.rs`：持有装备读取失败的首个非权威诊断投影、stage/category/detail_code
   闭集、证据留存状态和有界关联字段；它不进入决定 metadata、command digest、completion proof 或 cursor。
   应用处理只返回原始 Result 与 `pendingEquipmentDiagnostic` 句柄，不在 `item_timeout` 内 await static future。
+- Admin 收件详情的关联 delivery 查询只接受 `metadata.delivery_ids` 的有界批量，必须同时匹配 mail_intake 来源、
+  world、external MID、operation 和 origin_id；返回安全 delivery DTO，不暴露 payload、装备 key 或正文。
 - `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
   不把告警结果混入拍卖或外部传输事实。`delivery_returned_mail` 是已证明收件人不存在且需要取回

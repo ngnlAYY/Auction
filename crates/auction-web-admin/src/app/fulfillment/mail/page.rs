@@ -21,6 +21,8 @@ pub fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let mut polling_refresh = use_signal(|| 0_u64);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
+    // 重排反馈由页面持有，详情刷新或切换期间不会把成功排队误报为已送达。
+    let mut delivery_notice = use_signal(|| None::<(String, AdminActionFeedback)>);
     let mut selected_intake = use_signal(|| None::<String>);
 
     let polling = use_resource(move || {
@@ -99,7 +101,10 @@ pub fn page() -> Element {
                         next.direction = direction;
                         on_sort_change.push(next);
                     },
-                    on_select: move |intake_id| selected_intake.set(Some(intake_id)),
+                    on_select: move |intake_id| {
+                        delivery_notice.set(None);
+                        selected_intake.set(Some(intake_id));
+                    },
                 }
             }
         }
@@ -223,7 +228,24 @@ pub fn page() -> Element {
                         loading: detail_loading,
                         error: detail_error,
                         refresh,
-                        on_close: move |_| selected_intake.set(None),
+                        delivery_notice,
+                        on_close: move |_| {
+                            delivery_notice.set(None);
+                            selected_intake.set(None);
+                        },
+                    }
+                    if let Some((intake_id, feedback)) = delivery_notice()
+                        && selected_intake().as_ref() == Some(&intake_id)
+                    {
+                        p {
+                            class: if feedback.is_success() {
+                                "admin-panel__note action-feedback action-feedback--success"
+                            } else {
+                                "admin-panel__note action-feedback action-feedback--error"
+                            },
+                            role: if feedback.is_success() { "status" } else { "alert" },
+                            {feedback.message(t!("admin-mail-delivery-requeued"))}
+                        }
                     }
                     details { class: "admin-mail-polling",
                         summary { id: "mail-polling-title", {t!("admin-mail-polling-title")} }

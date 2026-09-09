@@ -9,6 +9,7 @@ use auction_contracts::{
     AdminMailPollingRequest,
 };
 pub(crate) use auction_contracts::{
+    AdminMailIntakeDeliveryResponse as AdminMailIntakeDelivery,
     AdminMailIntakeDetailResponse as AdminMailIntakeDetail,
     AdminMailIntakeListResponse as AdminMailIntakePage,
     AdminMailIntakeSummaryResponse as AdminMailIntake,
@@ -363,9 +364,38 @@ fn decode_mail_intake_detail(
         return Err("mail_intake");
     }
     decode_mail_metadata(&value.metadata)?;
+    decode_mail_deliveries(&value)?;
     decode_mail_display(value.message_display.as_ref())?;
     decode_mail_equipment_diagnostic(value.equipment_diagnostic.as_ref())?;
     Ok(value)
+}
+
+/// 关联任务只接受本封邮件列出的唯一 delivery；重试仍由服务端状态版本最终裁决。
+fn decode_mail_deliveries(value: &AdminMailIntakeDetail) -> Result<(), &'static str> {
+    let mut seen = std::collections::HashSet::new();
+    if value.deliveries.len() > value.metadata.delivery_ids.len() {
+        return Err("mail_deliveries");
+    }
+    for delivery in &value.deliveries {
+        if !valid_uuid(&delivery.id)
+            || !seen.insert(&delivery.id)
+            || !value.metadata.delivery_ids.contains(&delivery.id)
+            || !matches!(delivery.operation.as_str(), "send" | "return" | "take")
+            || !valid_safe_text(&delivery.recipient, 512)
+            || !super::valid_status(&delivery.status)
+            || !(0..=MAX_JSON_SAFE_INTEGER).contains(&delivery.fencing_version)
+            || (matches!(delivery.status.as_str(), "failed" | "manual_reconcile")
+                && delivery.fencing_version == 0)
+            || !delivery.failure_code.as_deref().is_none_or(|value| valid_safe_text(value, 512))
+            || !delivery
+                .external_reference
+                .as_deref()
+                .is_none_or(|value| valid_safe_text(value, 512))
+        {
+            return Err("mail_deliveries");
+        }
+    }
+    Ok(())
 }
 
 fn decode_mail_equipment_diagnostic(

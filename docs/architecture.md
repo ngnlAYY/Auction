@@ -746,6 +746,11 @@ Cookie、外部凭据、游标或未审核 metadata；SQLite Lite 没有对应�
 使用单个 `command_id` 全局唤醒已装配的 MoogleMail poller，返回 `202 accepted` 及接受的
 poller 数量；手动唤醒只让本轮越过暂停和下一次调度时间，不改变自动轮询暂停标记，实际远程 GET 仍由 Worker 的持久化 lease、
 失败退避和入站幂等提交负责，不会把唤醒动作伪装成远程读取成功。
+Admin 收件详情的 `deliveries` 只从 `metadata.delivery_ids` 进行有界批量查询，并同时匹配 mail_intake 来源、
+world、external MID、operation 和 origin_id；仅详情返回，不扩展列表或新增 HTTP 路径。数据投影只含安全 delivery
+字段，不含 payload、装备 key 或正文。`failed`/`manual_reconcile` 才能通过既有 retry/reconcile（`action=retry`）
+重新排队，使用稳定 command_id、CSRF 与 expected fencing version；pending/claimed/sending/succeeded/prepared
+不可重试，历史收件业务决定不重放。
 
 Admin A28/A30/A31 用户管理属于“两者”能力：`auction-application` 的 `admin_users` 端口拥有
 用户投影、创建/改名/论坛账号 ID 修改、key 撤销/重签、黑名单和改名回滚命令；PostgreSQL 修改论坛

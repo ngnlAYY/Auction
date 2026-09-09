@@ -85,6 +85,12 @@ Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_refer
 invalid 条件拒绝，Admin Web 隐藏该成功选项。`retry` 和 `failed` 仍需显式管理员命令与审计，Return/Take 保留
 独立人工核对路径。该防御不增加 HTTP 字段或错误类别。
 
+收件详情的“关联邮件任务”表仅用于查看与手动重发：`operation` 为 `Send`、`Return` 或 `Take`，对应按钮分别为
+“重新发送”“重新退回”“重新领取”。只有 `failed` 或 `manual_reconcile` 可操作；`pending`、`claimed`、`sending`、
+`succeeded`、`prepared` 均不可重试。确认后复用既有 delivery retry/reconcile（`action=retry`），携带稳定
+`command_id`、CSRF 和 `expected_fencing_version`；成功文案只表示“重新排队”。结果未知时提示先核对 MM，不在历史
+收件业务决定上重放，也不执行当前 MM 中已有任务。该表不是新的 HTTP 路由、迁移或配置能力。
+
 ## 装备读取失败诊断
 
 每个完整装备响应先执行加密 prepare；只有 request、response、parse 或 validate 阶段的读取/解析/身份/

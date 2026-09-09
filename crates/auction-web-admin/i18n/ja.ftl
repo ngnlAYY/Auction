@@ -461,6 +461,22 @@ delivery-reconcile-action-failed = 失敗として確定
 delivery-external-reference = 外部参照
 delivery-failure-code = 失敗コード
 
+admin-mail-deliveries-title = 関連するメール処理
+admin-mail-deliveries-help = 失敗した処理や手動照合待ちの処理は、手動で再登録できます。待機中、実行中、成功済みの処理は再送信できません。
+admin-mail-deliveries-empty = 表示できる関連配信処理がありません。
+admin-mail-delivery-operation = 処理の種類
+admin-mail-delivery-id = 配信 ID
+admin-mail-delivery-send = メール送信
+admin-mail-delivery-return = 元のメールを返送
+admin-mail-delivery-take = 添付品を受け取る
+admin-mail-delivery-resend = 再送信
+admin-mail-delivery-return-again = 返送を再試行
+admin-mail-delivery-take-again = 受け取りを再試行
+admin-mail-delivery-no-retry = 再試行不可
+admin-mail-delivery-confirm = { $recipient } に関連するこのメール処理を再登録しますか？バックグラウンドで実行されます。
+admin-mail-delivery-confirm-unknown = 前回の結果は未確認です。重複処理を避けるため、MM のメールと添付品を確認し、処理が未完了であることを確かめてください。
+admin-mail-delivery-requeued = バックグラウンド処理に再登録しました。送信、返送、受け取りの成功はまだ確認されていません。
+
 admin-mail-loading = メールデータを読み込んでいます…
 admin-mail-mailbox = 差出人
 admin-mail-load = 確認

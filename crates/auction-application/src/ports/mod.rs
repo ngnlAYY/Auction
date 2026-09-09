@@ -169,11 +169,11 @@ pub use admin_lots::{
     MAX_ADMIN_LOT_PAGE_SIZE,
 };
 pub use admin_mail::{
-    AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail,
-    AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakePage, AdminMailIntakeSummary,
-    AdminMailPollState, AdminMailPollStateRequest, AdminMailPollTriggerCommand,
-    AdminMailPollerSnapshot, AdminMailPollingCommand, AdminMailPort, AdminMailReader,
-    AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
+    AdminMailCommandPort, AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDelivery,
+    AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakePage,
+    AdminMailIntakeSummary, AdminMailPollState, AdminMailPollStateRequest,
+    AdminMailPollTriggerCommand, AdminMailPollerSnapshot, AdminMailPollingCommand, AdminMailPort,
+    AdminMailReader, AdminMailStoredCommand, AdminMailTransaction, AdminMailTransactionError,
     AdminMailTransactionFailure, AdminMailTransactionRunner, MAX_ADMIN_MAIL_DECISION_BYTES,
     MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE, MAX_ADMIN_MAIL_POLLER_COUNT,
     MAX_ADMIN_MAILBOX_KEY_BYTES, admin_mail_aggregate_id,

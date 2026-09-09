@@ -1,13 +1,14 @@
 use std::net::SocketAddr;
 
 use auction_application::{
-    AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata, AdminMailIntakeSummary,
-    ApplicationError, MailDisplaySnapshot, MailEquipmentDiagnosticSnapshot,
+    AdminMailIntakeDelivery, AdminMailIntakeDetail, AdminMailIntakeFilter, AdminMailIntakeMetadata,
+    AdminMailIntakeSummary, ApplicationError, MailDisplaySnapshot, MailEquipmentDiagnosticSnapshot,
 };
 use auction_contracts::{
-    AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse, AdminMailIntakeDetailResponse,
-    AdminMailIntakeListResponse, AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse,
-    AdminMailPaginationResponse, ApiResponse,
+    AdminMailDisplayResponse, AdminMailEquipmentDiagnosticResponse,
+    AdminMailIntakeDeliveryResponse, AdminMailIntakeDetailResponse, AdminMailIntakeListResponse,
+    AdminMailIntakeMetadataResponse, AdminMailIntakeSummaryResponse, AdminMailPaginationResponse,
+    ApiResponse,
 };
 use axum::{
     Json,
@@ -167,7 +168,10 @@ pub(crate) async fn detail_intake(
     let Some(result) = result else {
         return not_found_error().into_response();
     };
-    if !result.summary.validate() || !result.metadata.validate() {
+    if !result.summary.validate()
+        || !result.metadata.validate()
+        || result.deliveries.iter().any(|delivery| !delivery.validate())
+    {
         return internal_error();
     }
     (
@@ -220,8 +224,22 @@ fn map_detail(detail: AdminMailIntakeDetail) -> AdminMailIntakeDetailResponse {
         sender: summary.sender,
         subject: summary.subject,
         metadata: map_metadata(detail.metadata),
+        deliveries: detail.deliveries.into_iter().map(map_delivery).collect(),
         message_display: detail.message_display.map(map_display),
         equipment_diagnostic: detail.equipment_diagnostic.map(map_equipment_diagnostic),
+    }
+}
+
+fn map_delivery(delivery: AdminMailIntakeDelivery) -> AdminMailIntakeDeliveryResponse {
+    AdminMailIntakeDeliveryResponse {
+        id: delivery.id.to_string(),
+        operation: delivery.operation,
+        recipient: delivery.recipient,
+        status: delivery.status,
+        fencing_version: delivery.fencing_version,
+        attempt_count: delivery.attempt_count,
+        failure_code: delivery.failure_code,
+        external_reference: delivery.external_reference,
     }
 }
 
