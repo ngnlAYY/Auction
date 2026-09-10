@@ -24,6 +24,7 @@ admin-error-network = 暂时无法连接服务器。请检查网络后重试。
 admin-error-invalid-response = 服务器返回了无效响应。请重新加载后再试。
 admin-error-invalid-request = 请求参数无效。请检查输入内容后重试。
 admin-error-invalid-auction-command = 拍卖操作参数或状态已失效。请重新加载拍卖后再试。
+admin-error-invalid-auction-state = 当前拍卖状态或排期不允许此操作。请检查拍卖状态、拍品状态及计划时间。
 admin-error-manual-early-settlement-disabled = 提前结算功能尚未启用。请在运行时配置中开启并重启管理服务后再试。
 admin-error-world-has-active-auction = 该世界仍有未结束的拍卖或活动排期，暂时不能关闭。
 admin-error-world-not-found = 该业务世界已不存在，请重新加载当前状态。

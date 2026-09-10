@@ -23,6 +23,7 @@ admin-error-network = The server could not be reached. Check the connection and 
 admin-error-invalid-response = The server returned an invalid response. Reload before trying again.
 admin-error-invalid-request = The request is invalid. Check the entered values and try again.
 admin-error-invalid-auction-command = The auction action is no longer valid. Reload the auction and try again.
+admin-error-invalid-auction-state = The current auction state or schedule does not allow this action. Check the auction status, lot status, and scheduled times.
 admin-error-manual-early-settlement-disabled = Early settlement is disabled. Enable it in runtime configuration and restart Admin before trying again.
 admin-error-world-has-active-auction = This world still has an unfinished auction or active schedule and cannot be closed.
 admin-error-world-not-found = The business world no longer exists. Reload the current state.

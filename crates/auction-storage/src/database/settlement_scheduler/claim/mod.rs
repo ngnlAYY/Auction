@@ -94,6 +94,7 @@ async fn claim_transaction(
         .execute(&mut *transaction)
         .await
         .map_err(map_storage_error)?;
+    // 初次领取与失败重试均只统计未撤回的 lot，且必须至少一件全部为已到期 live。
     let rows = sqlx::query(
         r#"SELECT a.id, a.status, a.state_version,
                   CASE
@@ -111,7 +112,7 @@ async fn claim_transaction(
                        WHERE l.status = 'live' AND l.effective_end_at IS NOT NULL
                    )::bigint AS live_lot_count
                FROM public.lots AS l
-               WHERE l.auction_id = a.id
+               WHERE l.auction_id = a.id AND l.status <> 'withdrawn'
            ) AS lot_schedule ON TRUE
            WHERE (
                a.status = 'final'

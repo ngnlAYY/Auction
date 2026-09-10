@@ -51,12 +51,24 @@ pub(super) async fn apply_open_plan_postgres(
         .await
         .map_err(map_sql_error)?
     };
-    if lot_rows.is_empty()
-        || lot_rows.iter().any(|row| {
-            row.try_get::<String, _>("status").ok().as_deref() != Some("pending")
-                || row.try_get::<Option<Uuid>, _>("submission_id").ok().flatten().is_none()
-        })
-    {
+    // 已撤回的拍品是保留的历史事实，不再参与开拍；仍锁住并检查全部记录，避免把其他
+    // 非法状态当作可忽略历史。只有具备收件来源的 pending 拍品才能进入本次激活集合。
+    let mut pending_count = 0_usize;
+    for row in &lot_rows {
+        let status: String = row.try_get("status").map_err(map_sql_error)?;
+        match status.as_str() {
+            "pending" => {
+                if row.try_get::<Option<Uuid>, _>("submission_id").map_err(map_sql_error)?.is_none()
+                {
+                    return Err(CompetitionTransactionError::InvalidState);
+                }
+                pending_count += 1;
+            }
+            "withdrawn" => {}
+            _ => return Err(CompetitionTransactionError::InvalidState),
+        }
+    }
+    if pending_count == 0 {
         return Err(CompetitionTransactionError::InvalidState);
     }
     let activated = {
@@ -78,7 +90,7 @@ pub(super) async fn apply_open_plan_postgres(
         .map_err(map_sql_error)?
         .rows_affected()
     };
-    if usize::try_from(activated).ok() != Some(lot_rows.len()) {
+    if usize::try_from(activated).ok() != Some(pending_count) {
         return Err(CompetitionTransactionError::InvalidState);
     }
 

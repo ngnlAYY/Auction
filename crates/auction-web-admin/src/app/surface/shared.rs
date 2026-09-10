@@ -25,6 +25,7 @@ pub fn format_admin_time(value: &str) -> String {
 pub fn admin_api_error_message(code: &str) -> String {
     match code {
         "invalid_auction_command" => return t!("admin-error-invalid-auction-command"),
+        "invalid_auction_state" => return t!("admin-error-invalid-auction-state"),
         "invalid_auction_intake" => return t!("admin-error-invalid-auction-intake"),
         "unsupported_equipment_source" => return t!("admin-error-unsupported-equipment-source"),
         "equipment_source_unavailable" => {

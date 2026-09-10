@@ -23,6 +23,7 @@ admin-error-network = 서버에 연결할 수 없습니다. 연결을 확인한 
 admin-error-invalid-response = 서버가 유효하지 않은 응답을 반환했습니다. 다시 불러온 뒤 재시도하세요.
 admin-error-invalid-request = 요청이 유효하지 않습니다. 입력값을 확인한 뒤 재시도하세요.
 admin-error-invalid-auction-command = 경매 작업의 입력 또는 상태가 더 이상 유효하지 않습니다. 경매를 다시 불러온 뒤 재시도하세요.
+admin-error-invalid-auction-state = 현재 경매 상태 또는 일정에서는 이 작업을 수행할 수 없습니다. 경매 상태, 물품 상태와 예정 시간을 확인하세요.
 admin-error-manual-early-settlement-disabled = 조기 정산이 비활성화되어 있습니다. runtime 설정에서 활성화하고 Admin을 다시 시작한 뒤 재시도하세요.
 admin-error-world-has-active-auction = 이 월드에는 완료되지 않은 경매 또는 활성 일정이 있어 닫을 수 없습니다.
 admin-error-world-not-found = 비즈니스 월드가 존재하지 않습니다. 현재 상태를 다시 불러오세요.
