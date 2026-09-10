@@ -23,6 +23,7 @@ admin-error-network = サーバーに接続できません。接続を確認し�
 admin-error-invalid-response = サーバーから無効な応答が返されました。再読み込みしてから再試行してください。
 admin-error-invalid-request = リクエストが無効です。入力内容を確認して再試行してください。
 admin-error-invalid-auction-command = オークション操作の入力または状態が無効です。オークションを再読み込みして再試行してください。
+admin-error-invalid-auction-state = 現在のオークションの状態または予定では、この操作を実行できません。オークション、出品物の状態と予定時刻を確認してください。
 admin-error-manual-early-settlement-disabled = 早期精算は無効です。runtime 設定で有効にし、Admin を再起動してから再試行してください。
 admin-error-world-has-active-auction = このワールドには未完了のオークションまたは有効なスケジュールがあるため閉じられません。
 admin-error-world-not-found = ビジネスワールドが存在しません。現在の状態を再読み込みしてください。

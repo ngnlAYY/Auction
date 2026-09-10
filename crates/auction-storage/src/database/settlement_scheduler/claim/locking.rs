@@ -28,6 +28,10 @@ pub(super) async fn lock_initial_lots(
     let mut latest_end = None;
     for row in rows {
         let status: String = row.try_get("status")?;
+        // 撤回记录仍保留行锁，但不参与结算截止世代；其他非 live 状态继续失败关闭。
+        if status == "withdrawn" {
+            continue;
+        }
         let effective_end_at: Option<DateTime<Utc>> = row.try_get("effective_end_at")?;
         let Some(effective_end_at) = effective_end_at else {
             return Ok(None);

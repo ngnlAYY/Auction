@@ -23,6 +23,7 @@ admin-error-network = 暫時無法連線至伺服器。請檢查網路後重試�
 admin-error-invalid-response = 伺服器傳回無效回應。請重新載入後再試。
 admin-error-invalid-request = 請求參數無效。請檢查輸入內容後重試。
 admin-error-invalid-auction-command = 拍賣操作參數或狀態已失效。請重新載入拍賣後再試。
+admin-error-invalid-auction-state = 目前拍賣狀態或排程不允許此操作。請檢查拍賣狀態、拍品狀態及計畫時間。
 admin-error-manual-early-settlement-disabled = 提前結算功能尚未啟用。請在 runtime 設定中開啟並重新啟動管理服務後再試。
 admin-error-world-has-active-auction = 該世界仍有未結束的拍賣或活動排程，暫時不能關閉。
 admin-error-world-not-found = 該業務世界已不存在，請重新載入目前狀態。

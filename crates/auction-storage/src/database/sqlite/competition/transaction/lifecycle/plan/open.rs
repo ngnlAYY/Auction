@@ -25,12 +25,27 @@ pub(super) async fn apply_open_plan_sqlite(
         .await
         .map_err(map_sql_error)?
     };
-    if lot_rows.is_empty()
-        || lot_rows.iter().any(|row| {
-            row.try_get::<String, _>("status").ok().as_deref() != Some("pending")
-                || row.try_get::<Option<Vec<u8>>, _>("submission_id").ok().flatten().is_none()
-        })
-    {
+    // 单写者事务中保留 withdrawn 历史，只激活有投稿来源的 pending 拍品；其他状态
+    // 仍然失败关闭，不能通过过滤查询掩盖损坏的生命周期记录。
+    let mut pending_count = 0_usize;
+    for row in &lot_rows {
+        let status: String = row.try_get("status").map_err(map_sql_error)?;
+        match status.as_str() {
+            "pending" => {
+                if row
+                    .try_get::<Option<Vec<u8>>, _>("submission_id")
+                    .map_err(map_sql_error)?
+                    .is_none()
+                {
+                    return Err(CompetitionTransactionError::InvalidState);
+                }
+                pending_count += 1;
+            }
+            "withdrawn" => {}
+            _ => return Err(CompetitionTransactionError::InvalidState),
+        }
+    }
+    if pending_count == 0 {
         return Err(CompetitionTransactionError::InvalidState);
     }
     let now = sqlite_timestamp(auction.updated_at);
@@ -53,7 +68,7 @@ pub(super) async fn apply_open_plan_sqlite(
         .map_err(map_sql_error)?
         .rows_affected()
     };
-    if usize::try_from(activated).ok() != Some(lot_rows.len()) {
+    if usize::try_from(activated).ok() != Some(pending_count) {
         return Err(CompetitionTransactionError::InvalidState);
     }
     let updated = {

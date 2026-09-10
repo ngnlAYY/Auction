@@ -46,9 +46,11 @@ pub(super) async fn close_settlement_lots(
     }
 
     let transaction = transaction.transaction_mut().map_err(map_competition_error)?;
+    // 撤回记录不属于结算明细，但它们残留的活动代理同样必须阻止结算提交。
     let counts = sqlx::query(
         r#"SELECT
-               COUNT(DISTINCT l.id)::bigint AS lot_count,
+               COUNT(DISTINCT l.id)
+                   FILTER (WHERE l.status <> 'withdrawn')::bigint AS lot_count,
                COUNT(DISTINCT l.id) FILTER (WHERE l.status = 'live')::bigint AS live_count,
                COUNT(DISTINCT p.authorization_id)
                    FILTER (WHERE p.status IN ('active', 'final_fast'))::bigint AS active_proxy_count
@@ -65,7 +67,11 @@ pub(super) async fn close_settlement_lots(
     let active_proxy_count: i64 = counts.try_get("active_proxy_count").map_err(map_sql_error)?;
     let planned_lot_count =
         i64::try_from(plan.lines.len()).map_err(|_| invalid("结算 lot 数量超出数据库范围"))?;
-    if lot_count != planned_lot_count || live_count != 0 || active_proxy_count != 0 {
+    if planned_lot_count == 0
+        || lot_count != planned_lot_count
+        || live_count != 0
+        || active_proxy_count != 0
+    {
         return Err(invalid("结算后仍有未关闭 lot 或活动代理授权"));
     }
     Ok(())

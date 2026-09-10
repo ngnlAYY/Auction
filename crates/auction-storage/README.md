@@ -198,6 +198,10 @@ Admin 业务世界启停由 `src/database/competition/postgres/admin/world.rs` �
 `expected_state_version`，人工提前开放还会用装配时冻结的策略和锁内 `scheduled_open_at` 失败关闭；
 Preview 在修改状态前要求至少一个 pending lot，并保留本期 intake target；Open 才原子创建下一期
 Draft/周轮次并移动 target，防止 Preview 过早冻结录入或形成永远无法 Open 的空活跃场次；
+PostgreSQL 与 SQLite Open 均保留 `withdrawn` 拍品历史，只校验并激活有投稿来源的 `pending`
+拍品，激活行数必须等于待拍数量；全部撤回或存在其它非法状态时仍拒绝开拍。
+PostgreSQL 结算候选、截止复核及关闭计数也排除撤回记录，但仍锁定全部拍品并检查全体
+活动代理，避免保留历史记录导致无法结算或掩盖异常授权。
 人工 Final 只收紧较晚的 live lot 截止时间并保留软截止竞价；提前结算只在 PostgreSQL 完整档把截止
 时间收紧到事务时间，使既有 settlement scheduler 可领取，结算事实仍由 Worker 事务写入。取消动作同时写入取消时间、原因和操作者。SQLite Lite 通过追加迁移提供同名取消元数据列和形状
 触发器；SQLite `src/database/sqlite/competition/transaction/lifecycle.rs` 也只负责端口装配，
