@@ -149,6 +149,10 @@ pub(crate) struct AppSecrets {
 
 impl AppSecrets {
     pub(crate) fn from_file(secret: SecretFileConfig) -> Result<Self, ConfigError> {
+        // 提前拒绝 Basic Auth 不能表达的账号，避免配置检查通过后启动一个无法登录的管理端。
+        if secret.admin_actor.as_ref().is_some_and(|actor| actor.contains(':')) {
+            return Err(ConfigError::InvalidAdminActor);
+        }
         Ok(Self {
             database_url: secret
                 .database_url

@@ -245,6 +245,7 @@ impl EquipmentSourceAdapter {
                     MailEquipmentDiagnosticCategory::RateLimited
                     | MailEquipmentDiagnosticCategory::ServerError
                     | MailEquipmentDiagnosticCategory::Timeout
+                    | MailEquipmentDiagnosticCategory::CredentialUnavailable
                     | MailEquipmentDiagnosticCategory::Network => {
                         AdminIntakeError::SourceUnavailable
                     }

@@ -21,6 +21,54 @@ pub(crate) fn LiveCatalogActions(
     show_view: bool,
     show_proxy_summary: bool,
 ) -> Element {
+    let session = use_context::<PublicSessionResource>();
+    let owner = session.read().as_ref().and_then(|snapshot| {
+        snapshot
+            .as_ref()
+            .ok()
+            .and_then(|session| session.as_ref())
+            .filter(|identity| identity.authenticated)
+            .map(|identity| identity.user_id.clone())
+    });
+    // lot UUID 唯一归属拍卖；用户或 lot 改变即销毁原命令与任务，不能跨上下文复用 ID。
+    let command_scope = format!("{lot_id}:{}", owner.as_deref().unwrap_or_default());
+    rsx! {
+        ScopedCatalogActions {
+            key: "{command_scope}",
+            lot_id,
+            lot_code,
+            can_bid,
+            current_price,
+            next_bid,
+            lot_status,
+            allow_slow,
+            session_ready,
+            block_ordinary_for_active_proxy,
+            authenticated: authenticated && owner.is_some(),
+            leading,
+            show_view,
+            show_proxy_summary,
+        }
+    }
+}
+
+/// 命令状态仅存在于宿主确定的 lot/用户作用域内。
+#[component]
+fn ScopedCatalogActions(
+    lot_id: String,
+    lot_code: String,
+    can_bid: bool,
+    current_price: i64,
+    next_bid: i64,
+    lot_status: String,
+    allow_slow: bool,
+    session_ready: bool,
+    block_ordinary_for_active_proxy: bool,
+    authenticated: bool,
+    leading: bool,
+    show_view: bool,
+    show_proxy_summary: bool,
+) -> Element {
     let refresh_generation = use_context::<Signal<u64>>();
     let mut action = use_signal(|| None::<String>);
     let requested_lot_id = lot_id.clone();
@@ -206,7 +254,20 @@ pub(crate) fn LiveCatalogActions(
                     bid_success.set(None);
                     action.set(None);
                 },
-                commands::BidForm { input: commands::BidFormInput {
+                if (bid_command.uncertain)() {
+                    commands::BidRetry {
+                        lot_id: bid_lot_id,
+                        lot_code: bid_lot_code,
+                        command: bid_command,
+                        success: bid_success,
+                        on_close: move |_| {
+                            bid_command.reset();
+                            bid_success.set(None);
+                            action.set(None);
+                        },
+                    }
+                } else {
+                    commands::BidForm { input: commands::BidFormInput {
                     lot_id: bid_lot_id,
                     lot_code: bid_lot_code,
                     current_price,
@@ -222,7 +283,8 @@ pub(crate) fn LiveCatalogActions(
                         bid_success.set(None);
                         action.set(None);
                     }),
-                } }
+                    } }
+                }
             }
         }
         if action_name == Some("proxy".to_owned()) {

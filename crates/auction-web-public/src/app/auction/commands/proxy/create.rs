@@ -25,6 +25,8 @@ pub(super) fn ProxyCreateForm(
     mut saved_authorization: Signal<Option<Box<ProxyCommandAuthorization>>>,
     /// 由弹窗宿主注入的两阶段确认命令 hook（创建实例；见 ProxyFormInput）。
     command: ProxyConfirmCommand,
+    /// 另一代理命令的在飞状态；实时快照切换表单后仍必须保持同一宿主互斥。
+    peer_submitting: Signal<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
     let maximum_id = format!("public-proxy-maximum-{lot_id}");
@@ -41,7 +43,8 @@ pub(super) fn ProxyCreateForm(
     let mut validation = use_signal(|| None::<String>);
     // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
     let mut command = command;
-    let submitting = command.submitting;
+    let own_submitting = command.submitting;
+    let submitting = move || own_submitting() || peer_submitting();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let bidding_open = lot_status == "live";
     let limit_reached = initial_minimum > MAX_PUBLIC_BID_AMOUNT;
@@ -159,6 +162,7 @@ pub(super) fn ProxyCreateForm(
                                 create_proxy_authorization(lot_id, amount, mode, command_id).await
                             }
                         },
+                        crate::api::CommandError::outcome_uncertain,
                         move |authorization| {
                             saved_authorization.set(Some(Box::new(authorization)));
                             refresh_generation.set(refresh_generation().saturating_add(1));

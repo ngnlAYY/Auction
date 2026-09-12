@@ -41,6 +41,7 @@ pub(super) async fn load_lifecycle_context_sqlite(
                 a.world_id, a.sequence, a.preview_scheduled_at, a.scheduled_open_at,
                 a.preview_opened_at, a.preview_manual_open, a.preview_revision,
                 a.opened_at, a.final_phase_at, a.settled_at,
+                a.policy_snapshot,
                 world.enabled AS world_enabled,
                 json_extract(a.policy_snapshot, '$.scheduled_end_at') AS policy_scheduled_end_at,
                 CAST(json_extract(a.policy_snapshot, '$.final_phase_lead_seconds') AS INTEGER)
@@ -142,6 +143,13 @@ pub(super) async fn load_lifecycle_context_sqlite(
         preview_opened_at,
         policy_scheduled_end_at,
         policy_final_phase_lead: Duration::seconds(final_phase_lead_seconds),
+        policy_settlement: crate::database::settlement_policy::decode(
+            &serde_json::from_str::<serde_json::Value>(
+                &row.try_get::<String, _>("policy_snapshot").map_err(map_sql_error)?,
+            )
+            .map_err(|_| invalid_state("Lite 结算策略快照不是有效 JSON"))?,
+        )
+        .map_err(invalid_state)?,
         preview_manual_open: row.try_get::<i64, _>("preview_manual_open").map_err(map_sql_error)?
             != 0,
         preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,

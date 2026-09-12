@@ -35,6 +35,7 @@ async fn start_inner(
     if running == START_ORDER.len() {
         let records = controller
             .observe_ready_roles(&prepared, startup_timeout)
+            .await
             .map_err(|error| StartFailure::new("start-state", error))?;
         controller
             .publish_receipt("adopted", records)
@@ -56,7 +57,7 @@ async fn start_inner(
     migrate_config(&prepared.migration_config)
         .await
         .map_err(|error| StartFailure::new("migration", error))?;
-    controller.launch(&prepared, startup_timeout)
+    controller.launch(&prepared, startup_timeout).await
 }
 
 pub(super) fn stop(options: ControllerOptions) -> anyhow::Result<()> {
@@ -98,7 +99,7 @@ async fn restart_inner(
     migrate_config(&prepared.migration_config)
         .await
         .map_err(|error| StartFailure::new("migration", error))?;
-    controller.launch(&prepared, startup_timeout)
+    controller.launch(&prepared, startup_timeout).await
 }
 
 pub(super) fn status(options: ControllerOptions) -> anyhow::Result<()> {

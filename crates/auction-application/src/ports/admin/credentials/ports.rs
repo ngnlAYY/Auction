@@ -75,9 +75,16 @@ pub trait AdminCredentialRuntimeWriter: Send + Sync {
 
 /// Worker 持有数据库凭据运行时所有权的不透明 guard。
 ///
-/// 具体互斥机制属于存储适配器；集成层只保留该 guard 的生命周期，不能据此读取数据库连接、
-/// 凭据身份或任何敏感内容。
-pub trait AdminCredentialRuntimeOwnership: Send + Sync {}
+/// 具体互斥机制属于存储适配器；集成层在后续外部请求前检查所有权，不能读取数据库连接、
+/// 凭据身份或任何敏感内容。检查失败或取消后永久失效，不自动重新获取所有权。
+pub trait AdminCredentialRuntimeOwnership: Send + Sync {
+    /// 检查原持锁会话；调用方必须施加总时限，超时丢弃 future 会永久撤销所有权。
+    /// 成功只证明检查时仍可使用，不撤销已经到达远端的请求。
+    fn check(&self) -> ApplicationFuture<'_, ()>;
+
+    /// 同步读取已知失效状态；正常检查进行中仍有效，不能把它当作实时数据库探测。
+    fn is_valid(&self) -> bool;
+}
 
 /// Admin dashboard 的凭据聚合读取端口。
 pub trait AdminCredentialHealthReader: Send + Sync {

@@ -7,43 +7,7 @@ use super::*;
 pub(super) fn parse_settlement_policy(
     snapshot: &Value,
 ) -> Result<(SettlementPolicy, RecoveryPolicy), SettlementTransactionError> {
-    let settlement = snapshot
-        .get("settlement")
-        .and_then(Value::as_object)
-        .ok_or_else(|| invalid("拍卖策略快照缺少 settlement"))?;
-    let version = json_u32(settlement.get("version"), "结算策略版本")?;
-    let mode = match settlement.get("mode").and_then(Value::as_str) {
-        Some("legacy_zero_v0") => SettlementMode::LegacyZeroV0,
-        Some("hold_curve_v1") => SettlementMode::HoldCurveV1,
-        _ => return Err(invalid("结算策略模式未知")),
-    };
-    let compensation_pool_enabled = settlement
-        .get("compensation_pool_enabled")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| invalid("补偿池策略字段无效"))?;
-    let isekai_carrier_credit =
-        json_u32(settlement.get("isekai_carrier_credit"), "isekai carrier credit")?;
-    let anchors = settlement
-        .get("anchors")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid("结算锚点字段无效"))?
-        .iter()
-        .map(|anchor| {
-            let object = anchor.as_object().ok_or_else(|| invalid("结算锚点不是对象"))?;
-            Ok(auction_domain::AdjustmentAnchor {
-                hold_ppm: json_i64(object.get("hold_ppm"), "结算锚点 hold_ppm")?,
-                adjustment_ppm: json_i64(object.get("adjustment_ppm"), "结算锚点 adjustment_ppm")?,
-            })
-        })
-        .collect::<Result<Vec<_>, SettlementTransactionError>>()?;
-    let policy = SettlementPolicy {
-        version,
-        mode,
-        compensation_pool_enabled,
-        isekai_carrier_credit,
-        anchors,
-    };
-    policy.validate().map_err(|_| invalid("结算策略快照校验失败"))?;
+    let policy = crate::database::settlement_policy::decode(snapshot).map_err(invalid)?;
 
     let recovery = snapshot
         .get("recovery")

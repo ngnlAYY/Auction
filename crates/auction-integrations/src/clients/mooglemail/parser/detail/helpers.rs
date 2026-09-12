@@ -71,11 +71,30 @@ pub(crate) fn parse_terminal_empty_detail(
     if document.select(&onclick_selector).next().is_some()
         || document.select(&asset_selector).next().is_some()
         || document.select(&equipment_selector).next().is_some()
-        || ["attach_count", "attach_cod", "mail_state", "equips.set("]
-            .iter()
-            .any(|marker| source.contains(marker))
     {
         return Err(action_proof_error(operation, world));
+    }
+
+    // 用户正文和 HTML 注释不属于协议状态；仅在脚本与可执行属性中保守检查原始标记。
+    for element in document.root_element().descendants().filter_map(ElementRef::wrap) {
+        if element.value().name() == "script" {
+            reject_terminal_protocol_state(&element.text().collect::<String>(), world)?;
+        }
+        for (name, value) in element.value().attrs() {
+            if name.starts_with("on") {
+                reject_terminal_protocol_state(value, world)?;
+            } else if matches!(name, "href" | "src" | "action" | "formaction") {
+                // HTML 实体已由 DOM 解码；URL 还会移除 tab/CR/LF，不能让拆开的 scheme 绕过检查。
+                let normalized = value.replace(['\t', '\r', '\n'], "");
+                if let Some((scheme, script)) = normalized
+                    .trim_start_matches(|character: char| character <= '\u{20}')
+                    .split_once(':')
+                    && scheme.eq_ignore_ascii_case("javascript")
+                {
+                    reject_terminal_protocol_state(script, world)?;
+                }
+            }
+        }
     }
 
     let fields = parse_detail_fields_for(forms[0], world, operation)
@@ -91,6 +110,20 @@ pub(crate) fn parse_terminal_empty_detail(
         return Err(action_proof_error(operation, world));
     }
     Ok((fields, body))
+}
+
+/// 脚本的字符串、注释和不完整赋值中出现协议标记时仍拒绝，避免漏掉属性索引或模板插值。
+fn reject_terminal_protocol_state(
+    script: &str,
+    world: MoogleMailWorld,
+) -> Result<(), MoogleMailError> {
+    if ["attach_count", "attach_cod", "mail_state", "equips.set("]
+        .iter()
+        .any(|marker| script.contains(marker))
+    {
+        return Err(action_proof_error(MoogleMailOperation::Take, world));
+    }
+    Ok(())
 }
 
 pub(crate) fn prove_take_identity_and_receipts(

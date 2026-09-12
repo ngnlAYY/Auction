@@ -19,6 +19,7 @@ impl EhentaiClient {
         if let Some(referer) = referer {
             request = request.header(header::REFERER, referer.as_str());
         }
+        self.check_ownership().await.map_err(|_| EhentaiError::credential(operation))?;
         let response = request
             .timeout(self.request_timeout)
             .send()

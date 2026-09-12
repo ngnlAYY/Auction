@@ -14,6 +14,8 @@ static POST_BODY_SELECTOR: LazyLock<Result<Selector, ()>> =
     LazyLock::new(|| Selector::parse("[name='Post']").map_err(|_| ()));
 static LINK_SELECTOR: LazyLock<Result<Selector, ()>> =
     LazyLock::new(|| Selector::parse("a[href]").map_err(|_| ()));
+static LOGIN_FIELD_SELECTOR: LazyLock<Result<Selector, ()>> =
+    LazyLock::new(|| Selector::parse("input[name]").map_err(|_| ()));
 
 fn cached_selector(
     cache: &'static LazyLock<Result<Selector, ()>>,
@@ -261,21 +263,40 @@ pub(super) fn is_session_expired(
     if status == StatusCode::UNAUTHORIZED {
         return true;
     }
-    if location
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.to_ascii_lowercase().contains("login"))
-    {
+    if location.and_then(|value| value.to_str().ok()).is_some_and(login_location) {
         return true;
     }
-    let text = String::from_utf8_lossy(body).to_ascii_lowercase();
-    let has_username_field = text.contains("name=\"username\"") || text.contains("name='username'");
-    let has_password_field = text.contains("name=\"password\"") || text.contains("name='password'");
-    // 已登录论坛页的导航仍会包含 `act=Login`，只有登录表单或明确错误文案才能证明会话失效。
-    text.contains("you are not logged in")
-        || text.contains("this page requires you to log on")
-        || (has_username_field && has_password_field)
-        || (has_password_field && text.contains("act=login"))
-        || text.contains("<title>log in")
+    let document = Html::parse_document(&String::from_utf8_lossy(body));
+    // 用户帖子、主题标题和签名中的登录文案不代表会话失效；只接受正文区外的登录表单。
+    let (Ok(forms), Ok(fields)) = (form_selector(), cached_selector(&LOGIN_FIELD_SELECTOR)) else {
+        return false;
+    };
+    document.select(forms).any(|form| {
+        if form.ancestors().filter_map(scraper::ElementRef::wrap).any(|element| {
+            element.value().classes().any(|class| matches!(class, "postcolor" | "signature"))
+        }) {
+            return false;
+        }
+        let mut username = false;
+        let mut password = false;
+        for field in form.select(fields) {
+            let name = field.attr("name").unwrap_or_default();
+            username |= name.eq_ignore_ascii_case("username");
+            password |=
+                name.eq_ignore_ascii_case("password") || name.eq_ignore_ascii_case("userpass");
+        }
+        password && (username || form.attr("action").is_some_and(login_location))
+    })
+}
+
+fn login_location(reference: &str) -> bool {
+    let Ok(url) = Url::parse("https://forums.e-hentai.org/").and_then(|base| base.join(reference))
+    else {
+        return false;
+    };
+    url.query_pairs()
+        .any(|(key, value)| key.eq_ignore_ascii_case("act") && value.eq_ignore_ascii_case("login"))
+        || matches!(url.path().trim_end_matches('/'), "/login" | "/login.php")
 }
 
 pub(super) fn same_origin(left: &Url, right: &Url) -> bool {
@@ -323,18 +344,24 @@ mod tests {
             </form>
         "#;
         let document = Html::parse_document(html);
-        let form = document.select(form_selector().expect("表单 selector 应合法")).next().unwrap();
+        let form = document
+            .select(
+                form_selector().unwrap_or_else(|error| panic!("表单 selector 应合法: {error:?}")),
+            )
+            .next()
+            .unwrap_or_else(|| panic!("表单应存在"));
 
         let values = fixed_post_form_values(
             form,
-            hidden_input_selector().expect("隐藏字段 selector 应合法"),
-            post_body_selector().expect("正文 selector 应合法"),
+            hidden_input_selector()
+                .unwrap_or_else(|error| panic!("隐藏字段 selector 应合法: {error:?}")),
+            post_body_selector().unwrap_or_else(|error| panic!("正文 selector 应合法: {error:?}")),
             "09",
             4,
             "300433",
             Some("6956800"),
         )
-        .expect("论坛生成的相同重复 st 应可接受");
+        .unwrap_or_else(|| panic!("论坛生成的相同重复 st 应可接受"));
 
         assert_eq!(single_value_for(&values, "st"), Some("0"));
     }
@@ -355,13 +382,20 @@ mod tests {
             </form>
         "#;
         let document = Html::parse_document(html);
-        let form = document.select(form_selector().expect("表单 selector 应合法")).next().unwrap();
+        let form = document
+            .select(
+                form_selector().unwrap_or_else(|error| panic!("表单 selector 应合法: {error:?}")),
+            )
+            .next()
+            .unwrap_or_else(|| panic!("表单应存在"));
 
         assert!(
             fixed_post_form_values(
                 form,
-                hidden_input_selector().expect("隐藏字段 selector 应合法"),
-                post_body_selector().expect("正文 selector 应合法"),
+                hidden_input_selector()
+                    .unwrap_or_else(|error| panic!("隐藏字段 selector 应合法: {error:?}")),
+                post_body_selector()
+                    .unwrap_or_else(|error| panic!("正文 selector 应合法: {error:?}")),
                 "09",
                 4,
                 "300433",

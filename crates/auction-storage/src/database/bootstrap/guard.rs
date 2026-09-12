@@ -27,7 +27,10 @@ impl PostgresDatabaseBootstrap {
     ) -> Result<Self, PostgresDatabaseBootstrapError> {
         sql::validate_database_name(database_name)?;
         sql::validate_owner(owner)?;
-        let mut maintenance_connection = PgConnection::connect(maintenance_database_url)
+        let options =
+            crate::deployment_identity::postgres_connect_options(maintenance_database_url)
+                .map_err(|_| PostgresDatabaseBootstrapError::MaintenanceConnection)?;
+        let mut maintenance_connection = PgConnection::connect_with(&options)
             .await
             .map_err(|_| PostgresDatabaseBootstrapError::MaintenanceConnection)?;
         configure_session(&mut maintenance_connection).await?;
@@ -229,7 +232,9 @@ async fn verify_application_connection(
     database_name: &str,
     owner: &str,
 ) -> Result<(), PostgresDatabaseBootstrapError> {
-    let mut connection = PgConnection::connect(application_database_url)
+    let options = crate::deployment_identity::postgres_connect_options(application_database_url)
+        .map_err(|_| PostgresDatabaseBootstrapError::ApplicationConnection)?;
+    let mut connection = PgConnection::connect_with(&options)
         .await
         .map_err(|_| PostgresDatabaseBootstrapError::ApplicationConnection)?;
     let row = sqlx::query("SELECT current_database()::text, current_user::text")

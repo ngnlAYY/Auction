@@ -56,6 +56,8 @@ mod postgres_restore;
 mod cli;
 #[path = "runtime/deployment.rs"]
 mod deployment;
+#[path = "runtime/deployment_identity/mod.rs"]
+mod deployment_identity;
 #[path = "runtime/dispatch.rs"]
 mod dispatch;
 #[path = "runtime/mail_diagnostics/mod.rs"]

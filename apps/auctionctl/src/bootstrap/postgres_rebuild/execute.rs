@@ -88,9 +88,9 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
         Ok(result) => result,
         Err(error) => {
             if let Some((stage, database_dropped, database_recreated)) = error.mutation_state()
-                && database_dropped
+                && database_dropped != Some(false)
             {
-                publish_receipt(
+                let receipt_result = publish_receipt(
                     &mut receipt_reservation,
                     ReceiptContext {
                         options: &options,
@@ -98,17 +98,20 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
                         source_schema_version,
                         preflight: &maintenance_preflight,
                         rebuild: None,
-                        status: "mutation_failed",
+                        status: if database_dropped.is_none() || database_recreated.is_none() {
+                            "mutation_unknown"
+                        } else {
+                            "mutation_failed"
+                        },
                         failure_stage: Some(stage),
                         database_dropped,
                         database_recreated,
                         postcondition: None,
                         migration_version: None,
                     },
-                )
-                .context(
-                    "database changed but publishing PostgreSQL rebuild failure receipt failed",
-                )?;
+                );
+                return Err(preserve_operation_error(error.into(), receipt_result))
+                    .context("recreate empty PostgreSQL database; keep all roles stopped");
             }
             return Err(error).context("recreate empty PostgreSQL database");
         }
@@ -122,19 +125,15 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
             Ok(version) => {
                 publish_receipt(
                     &mut receipt_reservation,
-                    ReceiptContext {
-                        options: &options,
-                        authorization: authorization.receipt(),
+                    ReceiptContext::completed(
+                        &options,
+                        authorization.receipt(),
                         source_schema_version,
-                        preflight: &maintenance_preflight,
-                        rebuild: Some(&rebuild_result),
-                        status: "completed",
-                        failure_stage: None,
-                        database_dropped: true,
-                        database_recreated: true,
-                        postcondition: Some("fresh_schema"),
-                        migration_version: Some(version),
-                    },
+                        &maintenance_preflight,
+                        &rebuild_result,
+                        "fresh_schema",
+                        Some(version),
+                    ),
                 )?;
                 println!(
                     "postgres-rebuild completed database={} mode={} previous_oid={} new_oid={} migration_version={} receipt={}",
@@ -150,7 +149,7 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
                 return Ok(());
             }
             Err(error) => {
-                publish_postcondition_failure(
+                let receipt_result = publish_postcondition_failure(
                     &mut receipt_reservation,
                     &options,
                     authorization.receipt(),
@@ -158,14 +157,14 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
                     &maintenance_preflight,
                     &rebuild_result,
                     "migrate_fresh_schema",
-                )?;
-                return Err(error).context(
+                );
+                return Err(preserve_operation_error(error, receipt_result)).context(
                     "database was recreated but fresh schema migration failed; keep all roles stopped",
                 );
             }
         },
         Err(error) => {
-            publish_postcondition_failure(
+            let receipt_result = publish_postcondition_failure(
                 &mut receipt_reservation,
                 &options,
                 authorization.receipt(),
@@ -173,8 +172,8 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
                 &maintenance_preflight,
                 &rebuild_result,
                 "verify_empty_database",
-            )?;
-            return Err(error).context(
+            );
+            return Err(preserve_operation_error(error, receipt_result)).context(
                 "database was recreated but empty target verification failed; keep all roles stopped",
             );
         }
@@ -182,19 +181,15 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
 
     publish_receipt(
         &mut receipt_reservation,
-        ReceiptContext {
-            options: &options,
-            authorization: authorization.receipt(),
+        ReceiptContext::completed(
+            &options,
+            authorization.receipt(),
             source_schema_version,
-            preflight: &maintenance_preflight,
-            rebuild: Some(&rebuild_result),
-            status: "completed",
-            failure_stage: None,
-            database_dropped: true,
-            database_recreated: true,
-            postcondition: Some(postcondition),
-            migration_version: None,
-        },
+            &maintenance_preflight,
+            &rebuild_result,
+            postcondition,
+            None,
+        ),
     )?;
     println!(
         "postgres-rebuild completed database={} mode={} previous_oid={} new_oid={} receipt={}",
@@ -205,4 +200,17 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
         options.receipt.map_or_else(|| "<missing>".into(), |path| path.display().to_string()),
     );
     Ok(())
+}
+
+/// 留证失败作为附加上下文，不能掩盖数据库操作本身的原始错误链。
+fn preserve_operation_error(
+    error: anyhow::Error,
+    receipt_result: anyhow::Result<()>,
+) -> anyhow::Error {
+    match receipt_result {
+        Ok(()) => error,
+        Err(receipt_error) => error.context(format!(
+            "database may have changed and publishing its failure receipt also failed: {receipt_error:#}"
+        )),
+    }
 }

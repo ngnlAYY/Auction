@@ -9,7 +9,7 @@ use gloo_net::http::{Request, Response};
 use serde_json::Value;
 use uuid::{Uuid, Variant};
 
-use super::{TransportError, decoder, observe_response_date, send_get, send_request};
+use super::{TransportError, decoder, send_get, send_request};
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +56,6 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     .await
     // 结构化传输错误直接映射为稳定 transport code，不再比较中文字符串。
     .map_err(|error| PublicSessionApiError::local(error.code()))?;
-    observe_response_date(&response);
     if !response.ok() {
         return Err(parse_api_error(response).await);
     }
@@ -110,7 +109,6 @@ pub(crate) async fn logout_public() -> Result<(), String> {
     })
     .await
     .map_err(|error| error.code().to_owned())?;
-    observe_response_date(&response);
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }

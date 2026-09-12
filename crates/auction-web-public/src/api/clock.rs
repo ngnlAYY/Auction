@@ -5,7 +5,7 @@
 //! 字符串形式的 "请求超时" 比较已彻底移除。
 
 use chrono::{DateTime, Utc};
-use gloo_net::http::Response;
+use gloo_net::http::{Request, Response};
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
@@ -86,7 +86,12 @@ pub(crate) fn estimated_now() -> DateTime<Utc> {
 /// 传输实现复用 `auction-web-shared` 的唯一边界；结构化错误直接向调用方传播，由调用方
 /// 用 [`TransportError::code`] 折回页面消费的稳定 transport code。
 pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {
-    let response = auction_web_shared::send_get(url).await?;
-    observe_response_date(&response);
-    Ok(response)
+    auction_web_shared::send_get_observed(url, observe_response_date).await
+}
+
+/// 在响应头到达时校时，并在共享总预算内完整读取命令响应正文。
+pub(crate) async fn send_request(
+    build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, TransportError>,
+) -> Result<Response, TransportError> {
+    auction_web_shared::send_request_observed(build, observe_response_date).await
 }

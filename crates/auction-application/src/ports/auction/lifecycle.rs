@@ -152,6 +152,8 @@ pub struct AuctionLifecycleContext {
     pub preview_opened_at: Option<DateTime<Utc>>,
     pub policy_scheduled_end_at: DateTime<Utc>,
     pub policy_final_phase_lead: chrono::Duration,
+    /// 后继草稿继承的冻结结算策略；仅新建后继时应用新模板门禁。
+    pub policy_settlement: auction_domain::SettlementPolicy,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
     pub opened_at: Option<DateTime<Utc>>,

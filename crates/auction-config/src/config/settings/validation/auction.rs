@@ -17,7 +17,7 @@ pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError
         validate_schedule(&config.schedule)?;
     }
     config
-        .policy()
+        .policy()?
         .validate()
         .map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
 }

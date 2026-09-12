@@ -432,3 +432,4 @@ command-login-required = Log in with your bidder key first.
 command-not-found = The requested content does not exist.
 command-conflict = This command conflicts with an earlier request.
 command-session-expired = Your session expired. Sign in again and retry.
+command-retry-unchanged = The previous result could not be confirmed. Retry sends the same command and amount; cancel to start a new action.

@@ -45,6 +45,8 @@ where
             }
         };
         let public_key_hash = issue.key.public_key_hash();
+        let expected_username = command.username.clone();
+        let expected_forum_account_id = command.forum_account_id.clone();
         let response_envelope = wants_key.then(|| issue.envelope.clone());
         let result = self
             .store
@@ -65,16 +67,15 @@ where
             })
             .await?;
         if !result.validate()
-            || result.user.id != user_id
+            || result.user.username != expected_username
+            || result.user.forum_account_id != expected_forum_account_id
             || result.user.state_version != 1
             || result.response_envelope.is_some() != wants_key
         {
             return Err(AdminUserError::StoredResultCorrupt.into());
         }
-        Ok(AdminUserMutationResult {
-            user: result.user,
-            generated_key: wants_key.then_some(issue.key),
-        })
+        // 事务内可能重放另一并发请求的结果；用户 ID 和返回 key 必须取自已提交结果。
+        self.replay(result, wants_key).await
     }
 
     /// 执行带 state_version fence 的用户修改。
@@ -149,8 +150,8 @@ where
         {
             return Err(AdminUserError::StoredResultCorrupt.into());
         }
-        let generated_key = issue.map(|value| value.key);
-        Ok(AdminUserMutationResult { user: result.user, generated_key })
+        // 并发重放可能返回另一请求密封的 key，不能返回本次尚未入库的候选 key。
+        self.replay(result, wants_key).await
     }
 
     /// 回滚一条未被回滚且仍满足版本 fence 的改名事实。

@@ -19,6 +19,7 @@ use super::{
     MoogleMailErrorCategory, MoogleMailForm, MoogleMailMessageFields, MoogleMailOperation,
     MoogleMailParser, MoogleMailSendOutcome, MoogleMailSendReceipt, MoogleMailSendRequest,
     MoogleMailSender, MoogleMailWorld,
+    forms::valid_body,
     protocol::{valid_decimal_id, valid_line, valid_opaque_id},
 };
 

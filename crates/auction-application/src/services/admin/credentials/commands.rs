@@ -39,6 +39,7 @@ where
         let scope = credential_scope(command.kind, command.world);
         let envelope =
             self.sealer.seal(command.kind, credential_id, &scope, command.secret.as_bytes())?;
+        let expected_label = command.label.clone();
         let result = self
             .store
             .import(AdminCredentialImportWrite {
@@ -55,7 +56,8 @@ where
             })
             .await?;
         let credential = replay_credential(result)?;
-        if credential.id != credential_id
+        // 事务内重放的凭据 ID 由已提交命令拥有；只核对请求固定字段和导入结果状态。
+        if credential.label != expected_label
             || credential.kind != command.kind
             || credential.world != command.world
             || credential.state_version != 1

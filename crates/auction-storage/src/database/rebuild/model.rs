@@ -79,12 +79,14 @@ pub enum PostgresRebuildError {
     UnsafePreflight { reason: &'static str },
 
     #[error(
-        "PostgreSQL rebuild mutation failed at {stage}; database_dropped={database_dropped} database_recreated={database_recreated}"
+        "PostgreSQL rebuild mutation failed at {stage}; database_dropped={database_dropped:?} database_recreated={database_recreated:?}; None means outcome unknown"
     )]
     Mutation {
         stage: &'static str,
-        database_dropped: bool,
-        database_recreated: bool,
+        /// None 表示命令已开始但未取得完整响应，不能据连接错误推断数据库未变更。
+        database_dropped: Option<bool>,
+        /// None 表示 CREATE 的远端结果未知；Some(false) 只用于尚未执行 CREATE。
+        database_recreated: Option<bool>,
         #[source]
         source: sqlx::Error,
     },
@@ -96,13 +98,13 @@ pub enum PostgresRebuildError {
 }
 
 impl PostgresRebuildError {
-    /// 返回已经发生的破坏性状态，供运维层决定是否必须发布失败回执。
-    pub const fn mutation_state(&self) -> Option<(&'static str, bool, bool)> {
+    /// 返回已知或未知的破坏性状态；结果未知也必须发布失败回执，不能当成未变更。
+    pub const fn mutation_state(&self) -> Option<(&'static str, Option<bool>, Option<bool>)> {
         match self {
             Self::Mutation { stage, database_dropped, database_recreated, .. } => {
                 Some((stage, *database_dropped, *database_recreated))
             }
-            Self::Postcondition { stage } => Some((stage, true, true)),
+            Self::Postcondition { stage } => Some((stage, Some(true), Some(true))),
             _ => None,
         }
     }

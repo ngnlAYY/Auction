@@ -41,10 +41,19 @@ pub fn page() -> Element {
         let _ = refresh();
         let intake_id = selected_intake();
         async move {
-            match intake_id {
-                Some(intake_id) => fetch_mail_intake_detail(intake_id).await.map(Some),
+            let result = match intake_id.as_ref() {
+                Some(intake_id) => {
+                    fetch_mail_intake_detail(intake_id.clone()).await.and_then(|detail| {
+                        if &detail.id == intake_id {
+                            Ok(Some(detail))
+                        } else {
+                            Err("invalid_response".to_owned())
+                        }
+                    })
+                }
                 None => Ok(None),
-            }
+            };
+            (intake_id, result)
         }
     });
 
@@ -109,7 +118,12 @@ pub fn page() -> Element {
             }
         }
     };
-    let (detail_value, detail_loading, detail_error) = match &*detail.read_unchecked() {
+    // Resource 重启会保留旧值；只有同一收件的快照可继续展示和操作。
+    let detail_state = detail.read_unchecked();
+    let current_detail = detail_state
+        .as_ref()
+        .and_then(|(intake_id, result)| (intake_id == &selected_intake()).then_some(result));
+    let (detail_value, detail_loading, detail_error) = match current_detail {
         None => (None, true, None),
         Some(Err(code)) => (None, false, Some(code.clone())),
         Some(Ok(value)) => (value.clone(), false, None),

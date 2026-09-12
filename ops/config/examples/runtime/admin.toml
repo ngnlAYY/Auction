@@ -136,7 +136,8 @@ socket_path = ""
 # runtime_directory = "/run/hv-auction"
 # 可选：直接位于 runtime_directory 下的 Unix socket 路径。
 # socket_path = "/run/hv-auction/admin.sock"
-# runtime_directory 必须预先存在，由运行账号拥有，且不能对其他用户开放写权限。
+# runtime_directory 必须预先存在，由运行账号拥有且禁止 group/other 写入。
+# 全部祖先须由 root 或运行账号拥有、禁止 group/other 写入且无符号链接；root-owned sticky 祖先允许例外。
 
 # 可选区块：metrics 设置；省略整个区块时关闭导出。
 [metrics]

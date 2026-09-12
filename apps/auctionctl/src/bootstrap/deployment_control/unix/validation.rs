@@ -9,7 +9,7 @@ use std::{
 use anyhow::Context;
 use chrono::{SecondsFormat, Utc};
 
-use super::super::systemd::ManagedRole;
+use super::super::systemd::{ManagedRole, UnitSnapshot};
 
 pub(in crate::bootstrap::deployment_control::unix) fn validate_private_state_dir(
     path: &Path,
@@ -27,6 +27,7 @@ pub(in crate::bootstrap::deployment_control::unix) fn validate_private_state_dir
         anyhow::bail!("部署控制状态目录必须是无符号链接的目录")
     }
     // systemd StateDirectory 与手工控制都要求操作者拥有目录，避免特权进程写入低权限用户可替换的路径。
+    // SAFETY: geteuid 不接收指针，也不访问 Rust 管理的内存，只返回当前进程的有效 UID。
     let effective_uid = unsafe { libc::geteuid() };
     if metadata.uid() != effective_uid {
         anyhow::bail!("部署控制状态目录必须归当前有效用户所有")
@@ -77,14 +78,43 @@ pub(in crate::bootstrap::deployment_control::unix) fn ensure_unit_config(
     role: ManagedRole,
     unit: &str,
     config_path: &Path,
-    environment: &str,
+    snapshot: &UnitSnapshot,
 ) -> anyhow::Result<()> {
-    let expected = format!("AUCTION_CONFIG_FILE={}", config_path.display());
-    let matches = environment
-        .split_ascii_whitespace()
-        .map(|entry| entry.trim_matches('"'))
-        .any(|entry| entry == expected);
-    if !matches {
+    // 外部环境源或最终删除规则可覆盖 Environment；不解析通用 systemd 转义与间接输入。
+    for (setting, value) in [
+        ("EnvironmentFiles", &snapshot.environment_files),
+        ("UnsetEnvironment", &snapshot.unset_environment),
+        ("PassEnvironment", &snapshot.pass_environment),
+        ("PAMName", &snapshot.pam_name),
+    ] {
+        if !value.trim().is_empty() {
+            anyhow::bail!(
+                "{} unit {} 配置了不支持的 {}，无法证明最终 AUCTION_CONFIG_FILE 绑定",
+                role.name(),
+                unit,
+                setting,
+            );
+        }
+    }
+    let mut configured = None;
+    for entry in snapshot.environment.split_ascii_whitespace() {
+        let entry = if entry.starts_with('"') && entry.ends_with('"') && entry.len() >= 2 {
+            &entry[1..entry.len() - 1]
+        } else {
+            entry
+        };
+        // 拒绝引号内空白和转义，防止另一个变量的值伪装成独立配置赋值；错误不回显环境值。
+        if entry.contains(['"', '\\', '\'']) {
+            anyhow::bail!("systemd Environment 包含不支持的引号或转义，无法证明配置绑定");
+        }
+        let (name, value) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("systemd Environment 不是受支持的简单赋值"))?;
+        if name == "AUCTION_CONFIG_FILE" && configured.replace(value).is_some() {
+            anyhow::bail!("systemd Environment 重复声明 AUCTION_CONFIG_FILE");
+        }
+    }
+    if configured != config_path.to_str() {
         anyhow::bail!(
             "{} unit {} 未声明预期的 AUCTION_CONFIG_FILE={}；请先 daemon-reload",
             role.name(),

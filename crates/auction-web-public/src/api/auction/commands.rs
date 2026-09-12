@@ -14,7 +14,7 @@ pub(crate) use auction_contracts::{
 use gloo_net::http::Request;
 use uuid::Uuid;
 
-use super::{TransportError, decoder, observe_response_date, send_request};
+use super::{TransportError, decoder, send_request};
 
 /// Public 命令失败的稳定错误投影；不把服务端说明正文带入浏览器展示。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +24,11 @@ pub(crate) struct CommandError {
 }
 
 impl CommandError {
+    /// 缺少明确业务结果时只允许重放原命令；新输入仍须经过正常表单校验。
+    pub(crate) fn outcome_uncertain(&self) -> bool {
+        self.status == 0 || self.status >= 500 || self.code == "invalid_response"
+    }
+
     fn transport(error: TransportError) -> Self {
         Self { code: error.code().to_owned(), status: 0 }
     }
@@ -48,7 +53,6 @@ pub(crate) async fn place_bid(
     })
     .await
     .map_err(CommandError::transport)?;
-    observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }
@@ -77,7 +81,6 @@ pub(crate) async fn create_proxy_authorization(
     })
     .await
     .map_err(CommandError::transport)?;
-    observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }
@@ -105,7 +108,6 @@ pub(crate) async fn lower_proxy_authorization(
     })
     .await
     .map_err(CommandError::transport)?;
-    observe_response_date(&response);
     if !response.ok() {
         return Err(read_command_error(response).await);
     }

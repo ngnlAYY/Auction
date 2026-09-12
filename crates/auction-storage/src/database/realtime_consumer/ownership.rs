@@ -1,22 +1,25 @@
 //! Public realtime consumer key 的进程生命周期互斥。
 
 #[cfg(feature = "sqlite")]
-use std::fs::{File, OpenOptions};
-#[cfg(all(feature = "sqlite", unix))]
-use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
-
-#[cfg(feature = "sqlite")]
-use sha2::{Digest, Sha256};
+use super::super::sqlite_ownership::SqliteConsumerLock;
 use thiserror::Error;
 
 use super::super::DatabaseStore;
 
-/// 持有 consumer key 的数据库 session；guard 存活期间同库中的重复实例必须启动失败。
-pub enum RealtimeConsumerOwnership {
+/// 将 consumer key 的互斥与全部 relay 数据访问绑定到同一生命周期。
+///
+/// PostgreSQL 消费事务只使用持锁连接，连接失效后不会从池重新领取连接继续确认游标；
+/// SQLite 在所有消费操作完成前持续持有同主机文件锁。
+pub struct RealtimeConsumerOwnership {
+    pub(super) consumer_key: String,
+    pub(super) backend: OwnedRealtimeBackend,
+}
+
+pub(super) enum OwnedRealtimeBackend {
     #[cfg(feature = "postgres")]
-    Postgres(sqlx::pool::PoolConnection<sqlx::Postgres>),
+    Postgres(futures_util::lock::Mutex<sqlx::pool::PoolConnection<sqlx::Postgres>>),
     #[cfg(feature = "sqlite")]
-    Sqlite { _lock_file: File },
+    Sqlite { store: super::super::SqliteStore, _lock: SqliteConsumerLock },
 }
 
 /// realtime consumer key 互斥获取失败。
@@ -51,6 +54,8 @@ impl DatabaseStore {
                     .acquire()
                     .await
                     .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
+                // 在锁查询前设置：响应到达前取消也必须关闭 session，不能把已持锁连接归池。
+                connection.close_on_drop();
                 let lock_name = format!("auction/public-realtime/v1/{consumer_key}");
                 let acquired = sqlx::query_scalar::<_, bool>(
                     "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
@@ -62,7 +67,12 @@ impl DatabaseStore {
                 if !acquired {
                     return Err(RealtimeConsumerOwnershipError::AlreadyOwned);
                 }
-                Ok(RealtimeConsumerOwnership::Postgres(connection))
+                Ok(RealtimeConsumerOwnership {
+                    consumer_key: consumer_key.to_owned(),
+                    backend: OwnedRealtimeBackend::Postgres(futures_util::lock::Mutex::new(
+                        connection,
+                    )),
+                })
             }
             #[cfg(feature = "sqlite")]
             DatabaseStore::Sqlite(store) => acquire_sqlite_ownership(store, consumer_key),
@@ -75,35 +85,9 @@ fn acquire_sqlite_ownership(
     store: &super::super::SqliteStore,
     consumer_key: &str,
 ) -> Result<RealtimeConsumerOwnership, RealtimeConsumerOwnershipError> {
-    #[cfg(unix)]
-    {
-        let lock_identity = format!("{}:{consumer_key}", store.ownership_namespace());
-        let digest = Sha256::digest(lock_identity.as_bytes());
-        let lock_path =
-            std::env::temp_dir().join(format!("auction-realtime-consumer-{:x}.lock", digest));
-        let lock_file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-            .open(lock_path)
-            .map_err(|_| RealtimeConsumerOwnershipError::Unavailable)?;
-        // SAFETY: fd 在本 guard 内保持有效；flock 不取得 Rust 内存别名，也不读写文件内容。
-        let result = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if result != 0 {
-            let error = std::io::Error::last_os_error();
-            return if error.kind() == std::io::ErrorKind::WouldBlock {
-                Err(RealtimeConsumerOwnershipError::AlreadyOwned)
-            } else {
-                Err(RealtimeConsumerOwnershipError::Unavailable)
-            };
-        }
-        Ok(RealtimeConsumerOwnership::Sqlite { _lock_file: lock_file })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (store, consumer_key);
-        Err(RealtimeConsumerOwnershipError::Unavailable)
-    }
+    let lock = store.ownership().acquire(consumer_key)?;
+    Ok(RealtimeConsumerOwnership {
+        consumer_key: consumer_key.to_owned(),
+        backend: OwnedRealtimeBackend::Sqlite { store: store.clone(), _lock: lock },
+    })
 }

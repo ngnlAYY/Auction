@@ -13,6 +13,9 @@
 - Public、Admin、Worker 和其他数据库客户端必须由部署 owner 在维护窗口外部停止，并阻止自动重连。
 - archive、manifest、preflight 和 receipt 使用规范化绝对路径；父目录必须已存在且不得允许
   group/other 写入，文件不得允许 group/other 读取。
+- 文件内容和父目录均完成同步后，archive、manifest 和 receipt 才能报告发布成功；跨目录发布同步
+  源、目标两个目录。恢复、重建及 v28 接管在数据库 mutation 前也同步用户提供的既有恢复证据。
+  不支持目录同步的平台或文件系统失败关闭；仅成功读取或匹配 SHA-256 不足以证明断电后的可恢复性。
 - 数据库密码只通过短生命周期的 0600 `.pgpass` 交给 PostgreSQL 客户端，不进入参数、receipt 或日志。
 - 备份/恢复的敏感 `database_url` 必须显式提供 host 和 port，默认端口也写为 `5432`；外部工具
   清除继承的 `PGHOST`、`PGHOSTADDR`、`PGPORT`，仅使用该 URL 的目标，避免与 SQLx 预检分歧。
@@ -58,7 +61,12 @@ tablespace、自定义 database ACL 和 database/role setting。自定义 tables
 重建而额外授予全局 tablespace 权限。维护连接从 Worker `database_url` 派生到
 同集群 `postgres` 数据库；生产环境推荐改用 owner-only 的独立 `--maintenance-secrets-file`，其
 高权限 URL 必须连接同 endpoint/TLS profile 的 `postgres` 数据库，且不会进入命令行、日志或
-receipt。自定义 ACL/setting 会失败关闭，因为删库后静默丢失这些安全策略比拒绝自动化更危险。
+receipt。应用和维护 URL 均须显式写出单一 host、非零 port（包括默认 5432）和数据库名；端点
+由实际 SQLx 解析结果比较，不能依赖 `PGHOST`/`PGPORT` 的环境默认值。IPv6 字面量在 URI 中保留
+方括号，实际 SQLx TCP host、libpq 的 `PGHOST` 和临时密码文件统一使用去括号的地址；密码文件
+继续转义冒号。查询参数仅接受
+`application_name`、`sslmode`；请用 `sslmode` 替代 SQLx 忽略的 `ssl=true`，并移除其同样忽略的
+`connect_timeout`。两边 `sslmode` 必须相同或同时省略；未配置独立维护文件时只替换数据库名。自定义 ACL/setting 会失败关闭，因为删库后静默丢失这些安全策略比拒绝自动化更危险。
 
 预检通过后，实际准备同名空库必须使用新的 receipt 路径和逐字确认短语：
 
@@ -83,10 +91,13 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 migration 表，也不能存在用户 schema、类型、关系、函数、扩展、publication、subscription、
 large object 或 default ACL。
 
-若回执状态为 `mutation_failed` 或 `postcondition_failed`，说明破坏性步骤已经开始；保持全部角色
-停止，按 `database_dropped`、`database_recreated` 和 `failure_stage` 人工恢复。命令失败不等于原库
-仍然存在。进程在 DROP 后被强制终止等极端情况可能来不及发布回执，因此数据库 catalog 和备份仍是
-最终证据。
+新回执格式为 `auction-postgres-rebuild.v2`；历史 `auction-postgres-rebuild.v1` 不改写。v2 的 `database_dropped`、
+`database_recreated` 和 `forced_drop` 可为 `true`、`false` 或 `null`，`null` 表示未取得完成证明，
+不能按未发生处理。若状态为 `mutation_unknown`、`mutation_failed` 或 `postcondition_failed`，
+保持全部角色停止，按上述状态和 `failure_stage` 人工核对数据库 catalog/OID 与备份后恢复；
+不要盲目再次 DROP。DROP/CREATE 响应丢失时也会尝试发布未知结果回执，留证失败会附加到原错误链。
+命令失败不等于原库仍然存在。进程在 DROP 后被强制终止等极端情况可能来不及发布回执，
+因此数据库 catalog 和备份仍是最终证据。
 
 恢复到不同数据库名会因 manifest 身份不匹配而失败。需要恢复演练时，应在隔离 PostgreSQL 实例中
 使用同名数据库，而不是放宽该确认条件。

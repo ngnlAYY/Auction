@@ -16,6 +16,7 @@ impl EhentaiGateway {
         credentials: EhentaiCredentialSet,
     ) -> Result<Self, EhentaiError> {
         // 数据库凭据允许暂时为空；真实操作会返回 credential_unavailable，Worker 仍保持 degraded。
+        let client = Arc::new(client.as_ref().clone().with_ownership(credentials.ownership()));
         Ok(Self { client, credentials })
     }
 

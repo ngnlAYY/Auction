@@ -58,6 +58,17 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
     if let Some(authorization) = saved_authorization() {
         return proxy_success_panel(&authorization, on_close);
     }
+    // 不确定结果必须优先于新快照的 create/lower 分支，避免已生效操作失去幂等重试入口。
+    let uncertain_command = if (create_command.uncertain)() {
+        Some(create_command)
+    } else if (lower_command.uncertain)() {
+        Some(lower_command)
+    } else {
+        None
+    };
+    if let Some(command) = uncertain_command {
+        return rsx! { super::retry::ProxyRetry { lot_id, command, saved_authorization, on_close } };
+    }
     match proxy.as_ref() {
         None => rsx! { p { role: "status", {t!("proxy-loading")} } },
         Some(Err(_)) => rsx! {
@@ -83,6 +94,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked_reason,
                 saved_authorization,
                 command: create_command,
+                peer_submitting: lower_command.submitting,
                 on_close,
             }
         },
@@ -95,6 +107,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 proxy: proxy.clone(),
                 saved_authorization,
                 command: lower_command,
+                peer_submitting: create_command.submitting,
                 on_close,
             }
         },
@@ -110,6 +123,7 @@ pub fn proxy_form(input: ProxyFormInput) -> Element {
                 blocked_reason,
                 saved_authorization,
                 command: create_command,
+                peer_submitting: lower_command.submitting,
                 on_close,
             }
         },

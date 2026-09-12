@@ -78,7 +78,7 @@ impl MoogleMailDeliveryTransport {
             )
             .ok_or_else(invalid_payload)?
         };
-        if !valid_line(&subject, 512, false) || !valid_line(&body, 64 * 1024, true) {
+        if !valid_line(&subject, 512, false) || !valid_body(&body) {
             return Err(invalid_payload());
         }
         let message = MoogleMailMessageFields { recipient: claim.recipient.clone(), subject, body };

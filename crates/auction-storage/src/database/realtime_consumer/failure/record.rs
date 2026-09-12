@@ -6,17 +6,17 @@ use chrono::{DateTime, Utc};
 use sqlx::SqliteConnection;
 use uuid::Uuid;
 
-#[cfg(feature = "postgres")]
-use super::super::super::PostgresStore;
 #[cfg(feature = "sqlite")]
 use super::super::super::SqliteStore;
 use super::super::common::storage_error;
 #[cfg(feature = "sqlite")]
 use super::super::common::{SqliteRealtimeTransaction, uuid_blob};
+#[cfg(feature = "postgres")]
+use sqlx::Connection;
 
 #[cfg(feature = "postgres")]
 pub(crate) async fn record_failure_postgres(
-    store: &PostgresStore,
+    connection: &mut sqlx::PgConnection,
     consumer_key: &str,
     stream_key: &str,
     event_id: Uuid,
@@ -24,8 +24,7 @@ pub(crate) async fn record_failure_postgres(
     safe_detail: &str,
     failed_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
-    let mut transaction = store
-        .pool()
+    let mut transaction = connection
         .begin()
         .await
         .map_err(|_| storage_error("打开 PostgreSQL 实时失败记录事务失败"))?;

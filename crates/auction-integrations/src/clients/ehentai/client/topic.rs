@@ -77,31 +77,8 @@ impl EhentaiClient {
         set_form_value(&mut values, "REPLIER", "1".to_owned());
         set_form_value(&mut values, "bbmode", "normal".to_owned());
         set_form_value(&mut values, "enableemo", "yes".to_owned());
-        if values.len() > MAXIMUM_FORM_FIELDS {
-            return Err(EhentaiError::protocol(operation, false));
-        }
-        let encoded = form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
-            .finish();
-
-        self.wait_rate(operation).await?;
-        let response = self
-            .client
-            .post(form.action.clone())
-            .header(header::USER_AGENT, USER_AGENT)
-            .header(header::COOKIE, cookie_header(cookie, operation)?)
-            .header(header::ORIGIN, self.origin.as_str())
-            .header(header::REFERER, form.referer.as_str())
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .timeout(self.request_timeout)
-            .body(encoded)
-            .send()
-            .await
-            .map_err(|_| EhentaiError::write_unknown(operation))?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let body = self.read_response(response, operation, true).await?;
-
+        let (status, location, body) =
+            self.submit_form(&form.action, &form.referer, values, operation, cookie).await?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(EhentaiError::new(
                 operation,
@@ -126,6 +103,43 @@ impl EhentaiClient {
             return Ok(published);
         }
         Err(EhentaiError::write_unknown(operation))
+    }
+
+    async fn submit_form(
+        &self,
+        action: &Url,
+        referer: &Url,
+        values: Vec<(String, String)>,
+        operation: EhentaiOperation,
+        cookie: &EhentaiCookie,
+    ) -> Result<(StatusCode, Option<HeaderValue>, Vec<u8>), EhentaiError> {
+        if values.len() > MAXIMUM_FORM_FIELDS {
+            return Err(EhentaiError::protocol(operation, false));
+        }
+        let encoded = form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
+            .finish();
+
+        self.wait_rate(operation).await?;
+        // 即使此次 POST 尚未发出，前面可能已有远端写入，必须保守保留未知结果。
+        self.check_ownership().await.map_err(|_| EhentaiError::write_unknown(operation))?;
+        let response = self
+            .client
+            .post(action.clone())
+            .header(header::USER_AGENT, USER_AGENT)
+            .header(header::COOKIE, cookie_header(cookie, operation)?)
+            .header(header::ORIGIN, self.origin.as_str())
+            .header(header::REFERER, referer.as_str())
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .timeout(self.request_timeout)
+            .body(encoded)
+            .send()
+            .await
+            .map_err(|_| EhentaiError::write_unknown(operation))?;
+        let status = response.status();
+        let location = response.headers().get(header::LOCATION).cloned();
+        let body = self.read_response(response, operation, true).await?;
+        Ok((status, location, body))
     }
 
     pub(super) async fn load_reply_form(
@@ -273,30 +287,8 @@ impl EhentaiClient {
             set_form_value(&mut values, "TopicTitle", title.to_owned());
             set_form_value(&mut values, "TopicDesc", String::new());
         }
-        if values.len() > MAXIMUM_FORM_FIELDS {
-            return Err(EhentaiError::protocol(operation, false));
-        }
-        let encoded = form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(values.iter().map(|(name, value)| (name.as_str(), value.as_str())))
-            .finish();
-
-        self.wait_rate(operation).await?;
-        let response = self
-            .client
-            .post(form.action.clone())
-            .header(header::USER_AGENT, USER_AGENT)
-            .header(header::COOKIE, cookie_header(cookie, operation)?)
-            .header(header::ORIGIN, self.origin.as_str())
-            .header(header::REFERER, form.referer.as_str())
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .timeout(self.request_timeout)
-            .body(encoded)
-            .send()
-            .await
-            .map_err(|_| EhentaiError::write_unknown(operation))?;
-        let status = response.status();
-        let location = response.headers().get(header::LOCATION).cloned();
-        let body = self.read_response(response, operation, true).await?;
+        let (status, location, body) =
+            self.submit_form(&form.action, &form.referer, values, operation, cookie).await?;
         if is_session_expired(status, location.as_ref(), &body) {
             return Err(EhentaiError::new(
                 operation,
@@ -530,15 +522,16 @@ mod tests {
               </body>
             </html>
         "#;
-        let client = EhentaiClient::with_config(
-            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
-        )
-        .expect("安全论坛客户端应可构造");
-        let base = Url::parse("https://forums.e-hentai.org/index.php").unwrap();
+        let config = EhentaiClientConfig::production()
+            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
+        let client = EhentaiClient::with_config(config)
+            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
+        let base = Url::parse("https://forums.e-hentai.org/index.php")
+            .unwrap_or_else(|error| panic!("固定论坛地址应合法: {error:?}"));
 
         let proof = client
             .post_from_acknowledgement_page(&base, html, 4, "300433", EhentaiOperation::EditPost)
-            .expect("两份一致回执应证明固定帖子身份");
+            .unwrap_or_else(|| panic!("两份一致回执应证明固定帖子身份"));
 
         assert_eq!(proof.thread_id, "300433");
         assert_eq!(proof.post_id, "6956800");
@@ -557,11 +550,12 @@ mod tests {
               </body>
             </html>
         "#;
-        let client = EhentaiClient::with_config(
-            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
-        )
-        .expect("安全论坛客户端应可构造");
-        let base = Url::parse("https://forums.e-hentai.org/index.php").unwrap();
+        let config = EhentaiClientConfig::production()
+            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
+        let client = EhentaiClient::with_config(config)
+            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
+        let base = Url::parse("https://forums.e-hentai.org/index.php")
+            .unwrap_or_else(|error| panic!("固定论坛地址应合法: {error:?}"));
 
         assert!(
             client

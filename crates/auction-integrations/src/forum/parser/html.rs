@@ -86,6 +86,17 @@ fn render_post_text(element: ElementRef<'_>) -> String {
     let mut source = String::new();
     let mut previous_block = None;
     for node in element.descendants() {
+        // IPB 的引用标题/正文和 blockquote 属于被引用作者，不能归到当前回帖者的竞价命令。
+        if node.ancestors().filter_map(ElementRef::wrap).any(|ancestor| {
+            ancestor.value().name() == "blockquote"
+                || ancestor
+                    .value()
+                    .classes()
+                    .any(|class| matches!(class, "quotetop" | "quotemain" | "quote" | "blockquote"))
+        }) {
+            source.push('\n');
+            continue;
+        }
         match node.value() {
             Node::Element(value) if value.name() == "br" => source.push('\n'),
             Node::Text(value) => {
@@ -227,7 +238,8 @@ mod tests {
             </body></html>
         "#;
 
-        let page = extract_html_page(html).expect("真实论坛结构应能形成受限页面事实");
+        let page = extract_html_page(html)
+            .unwrap_or_else(|error| panic!("真实论坛结构应能形成受限页面事实: {error:?}"));
 
         assert_eq!(page.post_ids().collect::<Vec<_>>(), ["6956799", "6956801"]);
         assert_eq!(page.navigation_references().count(), 2);

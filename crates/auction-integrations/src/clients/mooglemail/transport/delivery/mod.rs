@@ -39,6 +39,8 @@ impl MoogleMailDeliveryTransport {
         login_keys: Arc<dyn MailLoginKeyReader>,
         templates: MoogleMailNotificationTemplates,
     ) -> Self {
+        // 必须先附加 owner，再交给 sender 克隆，覆盖全部 compose/Sent 请求。
+        let client = client.with_ownership(credentials.ownership());
         let sender = MoogleMailSender::new(client.clone());
         Self {
             client,

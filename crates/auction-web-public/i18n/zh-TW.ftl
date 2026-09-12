@@ -431,3 +431,4 @@ command-login-required = 請先使用競拍 Key 登入。
 command-not-found = 要求的內容不存在。
 command-conflict = 此命令與先前的請求衝突。
 command-session-expired = 登入工作階段已過期，請重新登入後再試。
+command-retry-unchanged = 上次操作結果尚未確認。重試會傳送相同命令與金額；如需變更，請取消後重新操作。

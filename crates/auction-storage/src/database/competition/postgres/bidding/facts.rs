@@ -38,12 +38,16 @@ pub(in crate::database::competition) async fn update_lot(
         .state_version
         .checked_sub(plan.public_bids.len() as u64)
         .ok_or_else(|| invalid_state("lot 状态版本回退失败"))?;
+    // 同一命令可先接受其他用户出价，再由原领先者的代理反超；即使最终领先者不变，
+    // 连续领先区间也必须从本次事实重新开始，与追加式 bid 重建规则一致。
+    let leadership_interrupted =
+        plan.public_bids.iter().any(|bid| Some(bid.bidder_id) != plan.final_lot.leader_id);
     let transaction = transaction.transaction_mut()?;
     let result = sqlx::query(
         r#"UPDATE public.lots
          SET current_price = $2, leader_user_id = $3,
              leader_since = CASE
-                 WHEN leader_user_id IS DISTINCT FROM $3 THEN CURRENT_TIMESTAMP
+                 WHEN leader_user_id IS DISTINCT FROM $3 OR $12 THEN CURRENT_TIMESTAMP
                  WHEN $3 IS NULL THEN NULL
                  ELSE leader_since
              END,
@@ -63,6 +67,7 @@ pub(in crate::database::competition) async fn update_lot(
     .bind(i64_version(plan.final_lot.last_proxy_sequence, "代理序号")?)
     .bind(i64_version(plan.final_lot.state_version, "lot 状态版本")?)
     .bind(i64_version(previous_version, "lot 前一版本")?)
+    .bind(leadership_interrupted)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

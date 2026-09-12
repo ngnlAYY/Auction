@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::AdminUserStatusFilter;
-use crate::app::surface::{AdminActionFeedback, run_admin_action};
+use crate::app::surface::{AdminActionFeedback, run_admin_owned_action};
 
 use super::create::AdminUserGeneratedKey;
 
@@ -67,7 +67,7 @@ pub(super) fn run_user_action<F>(
 ) where
     F: std::future::Future<Output = Result<Option<String>, String>> + 'static,
 {
-    run_admin_action(
+    run_admin_owned_action(
         busy,
         async move {
             let result = operation.await;
@@ -80,7 +80,10 @@ pub(super) fn run_user_action<F>(
                 on_generated_key.call(AdminUserGeneratedKey { key });
             }
             feedback.set(Some(AdminActionFeedback::Success));
-            command_state.set(None);
+            // 用户行可能已因筛选/分页卸载；页面结果仍需交付，旧行命令状态仅在存活时清理。
+            if let Ok(mut command_state) = command_state.try_write() {
+                *command_state = None;
+            }
         },
         move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
     );

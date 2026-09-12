@@ -34,6 +34,7 @@ pub(super) async fn load_lifecycle_context_postgres(
                 a.world_id, a.sequence, a.preview_scheduled_at, a.scheduled_open_at,
                 a.preview_opened_at, a.preview_manual_open, a.preview_revision,
                 a.opened_at, a.final_phase_at, a.settled_at,
+                a.policy_snapshot,
                 locked_world.enabled AS world_enabled,
                 (a.policy_snapshot ->> 'scheduled_end_at')::timestamptz
                     AS policy_scheduled_end_at,
@@ -84,6 +85,10 @@ pub(super) async fn load_lifecycle_context_postgres(
         preview_opened_at: row.try_get("preview_opened_at").map_err(map_sql_error)?,
         policy_scheduled_end_at: row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?,
         policy_final_phase_lead: Duration::seconds(final_phase_lead_seconds),
+        policy_settlement: crate::database::settlement_policy::decode(
+            &row.try_get::<Value, _>("policy_snapshot").map_err(map_sql_error)?,
+        )
+        .map_err(invalid_state)?,
         preview_manual_open: row.try_get("preview_manual_open").map_err(map_sql_error)?,
         preview_revision: row.try_get("preview_revision").map_err(map_sql_error)?,
         opened_at: row.try_get("opened_at").map_err(map_sql_error)?,

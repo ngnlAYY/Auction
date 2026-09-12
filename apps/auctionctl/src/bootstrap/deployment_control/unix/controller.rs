@@ -3,12 +3,8 @@
 use std::{
     fs::{self, OpenOptions},
     net::TcpListener,
-    os::unix::{
-        fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-        io::AsRawFd,
-    },
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -71,14 +67,16 @@ impl Controller {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
                 .context("收紧部署控制锁权限失败")?;
         }
-        // 非阻塞 flock 只协调 auctionctl 控制操作；systemd 仍拥有 unit 自身的事务锁。
-        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if result != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                anyhow::bail!("另一个 auctionctl deployment 操作正在运行")
+        // 非阻塞文件锁只协调 auctionctl 控制操作；systemd 仍拥有 unit 自身的事务锁。
+        if let Err(error) = file.try_lock() {
+            match error {
+                std::fs::TryLockError::WouldBlock => {
+                    anyhow::bail!("另一个 auctionctl deployment 操作正在运行")
+                }
+                std::fs::TryLockError::Error(error) => {
+                    return Err(error).context("获取部署控制锁失败");
+                }
             }
-            return Err(error).context("获取部署控制锁失败");
         }
         Ok(DeploymentLock { file })
     }
@@ -136,7 +134,7 @@ impl Controller {
             if snapshot.load_state != "loaded" {
                 anyhow::bail!("{} unit 未装载：{}", role.name(), self.unit(role))
             }
-            ensure_unit_config(role, self.unit(role), path, &snapshot.environment)?;
+            ensure_unit_config(role, self.unit(role), path, &snapshot)?;
         }
 
         Ok(PreparedDeployment {
@@ -183,7 +181,7 @@ impl Controller {
         self.systemd.stop_all()
     }
 
-    pub(in crate::bootstrap::deployment_control::unix) fn launch(
+    pub(in crate::bootstrap::deployment_control::unix) async fn launch(
         &self,
         prepared: &PreparedDeployment,
         startup_timeout: Duration,
@@ -198,7 +196,7 @@ impl Controller {
                 return Err(self
                     .rollback_failure(StartFailure::new(plan.role.start_code(), error), &started));
             }
-            let snapshot = match self.wait_ready(plan, startup_timeout) {
+            let snapshot = match self.wait_ready(plan, startup_timeout).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     return Err(self.rollback_failure(
@@ -243,7 +241,7 @@ impl Controller {
         failure
     }
 
-    pub(in crate::bootstrap::deployment_control::unix) fn observe_ready_roles(
+    pub(in crate::bootstrap::deployment_control::unix) async fn observe_ready_roles(
         &self,
         prepared: &PreparedDeployment,
         startup_timeout: Duration,
@@ -251,7 +249,7 @@ impl Controller {
         let mut receipts = Vec::with_capacity(prepared.plans.len());
         let mut previous_started = 0;
         for plan in &prepared.plans {
-            let snapshot = self.wait_ready(plan, startup_timeout)?;
+            let snapshot = self.wait_ready(plan, startup_timeout).await?;
             if snapshot.started_monotonic_micros == 0
                 || (previous_started > 0 && snapshot.started_monotonic_micros <= previous_started)
             {
@@ -264,7 +262,7 @@ impl Controller {
         Ok(receipts)
     }
 
-    fn wait_ready(
+    async fn wait_ready(
         &self,
         plan: &RolePlan,
         startup_timeout: Duration,
@@ -284,7 +282,7 @@ impl Controller {
                     self.unit(plan.role),
                 )
             }
-            if snapshot.running() && readiness_probe(&plan.probe) {
+            if snapshot.running() && readiness_probe(&plan.probe, deadline).await {
                 println!(
                     "role={} unit={} readiness=ready main_pid={}",
                     plan.role.name(),
@@ -301,7 +299,10 @@ impl Controller {
                     self.unit(plan.role),
                 )
             }
-            thread::sleep(PROBE_INTERVAL);
+            tokio::time::sleep(
+                PROBE_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+            )
+            .await;
         }
     }
 

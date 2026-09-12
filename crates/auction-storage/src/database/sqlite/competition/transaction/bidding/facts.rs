@@ -38,12 +38,16 @@ pub(in crate::database::sqlite::competition) async fn update_lot(
         .state_version
         .checked_sub(plan.public_bids.len() as u64)
         .ok_or_else(|| invalid_state("lot 状态版本回退失败"))?;
+    // 同一命令内的普通出价和代理反超同样构成领先中断，不能只比较事务前后领先者。
+    // SQLite 的 CURRENT_TIMESTAMP 按语句取时，必须使用最终接受事实的时间，避免跨秒漂移。
+    let leadership_interrupted =
+        plan.public_bids.iter().any(|bid| Some(bid.bidder_id) != plan.final_lot.leader_id);
     let connection = transaction.connection_mut()?;
     let result = sqlx::query(
         "UPDATE lots
          SET current_price = ?,
              leader_since = CASE
-                 WHEN leader_user_id IS NOT ? THEN CURRENT_TIMESTAMP
+                 WHEN leader_user_id IS NOT ? OR ? THEN (SELECT created_at FROM bids WHERE id = ?)
                  WHEN ? IS NULL THEN NULL
                  ELSE leader_since
              END,
@@ -54,6 +58,8 @@ pub(in crate::database::sqlite::competition) async fn update_lot(
     )
     .bind(plan.final_lot.current_price.map(BidAmount::value))
     .bind(plan.final_lot.leader_id.map(|id| uuid_blob(id.as_uuid())))
+    .bind(leadership_interrupted)
+    .bind(plan.public_bids.last().map(|bid| uuid_blob(bid.id.as_uuid())))
     .bind(plan.final_lot.leader_id.map(|id| uuid_blob(id.as_uuid())))
     .bind(plan.final_lot.leader_id.map(|id| uuid_blob(id.as_uuid())))
     .bind(if plan.final_lot.leader_proxy_last { 1_i64 } else { 0_i64 })

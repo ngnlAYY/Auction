@@ -40,6 +40,11 @@ runtime 文件；部署预检会拒绝路径不同或有效拍卖模板/排期�
 若 Admin 启动时报告 runtime 文件与已加载配置不一致，说明恢复或并发编辑已改变文件；先核对
 恢复后的候选，再重新执行部署重启，不能把旧进程的存活视为新配置已经生效。
 
+三个角色还必须指向同一数据库目标，允许使用不同数据库账号。PostgreSQL 在各敏感 TOML 中显式
+填写 host、port 与数据库，使用同一规范主机名或同一实际 Unix socket 目录；部署预检按 SQLx
+解析后的目标比较，拒绝未知参数和 `options` 会话覆盖。SQLite 部署使用绝对磁盘路径；相对路径
+会因 CLI/systemd 的工作目录可能不同而被拒绝，内存库与自定义 VFS 也不能用于三进程部署。
+
 ## 发布制品
 
 生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制
@@ -60,6 +65,9 @@ just package
 两端资源。正式 `package` 拒绝脏工作树；`--allow-dirty` 只供迁移期间受控取证，输出名称、依赖摘要和
 源码指纹都会保留 dirty 事实，不得作为正式上线批准。解包后仍需按下文把示例复制到 `/etc/auction`、
 注入真实敏感文件并完成目标主机权限/readiness 演练。
+
+迁移前只有 systemd `inactive`/`failed` 且 `MainPID=0` 才表示停止完成；`deactivating` 和停止钩子
+仍在执行时不能开始迁移。`restart` 会等待 systemd stop 完成并复核严格停止状态。
 
 ## 启动顺序
 

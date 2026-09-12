@@ -50,6 +50,15 @@ impl MoogleMailClient {
             .timeout(self.request_timeout)
             .build()
             .map_err(|_| self.configuration(target))?;
+        // 限速等待后、真正发出请求前重新证明原 session 仍持有凭据 owner。
+        self.check_ownership().await.map_err(|_| {
+            MoogleMailError::new(
+                target.operation,
+                target.world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+                false,
+            )
+        })?;
         let response = self.client.execute(request).await.map_err(|_| {
             MoogleMailError::new(
                 target.operation,
@@ -80,30 +89,11 @@ impl MoogleMailClient {
         let location = response.headers().get(header::LOCATION).cloned();
         let is_html = is_html_content_type(response.headers());
 
-        let body = time::timeout(self.request_timeout, response.bytes())
-            .await
-            .map_err(|_| {
-                MoogleMailError::new(
-                    target.operation,
-                    target.world,
-                    MoogleMailErrorCategory::RemoteTemporary,
-                    true,
-                )
-            })?
-            .map_err(|_| {
-                MoogleMailError::new(
-                    target.operation,
-                    target.world,
-                    MoogleMailErrorCategory::RemoteTemporary,
-                    true,
-                )
-            })?;
-        if body.len() > self.maximum_response_bytes {
-            return Err(self.response_too_large(target));
-        }
-        diagnostic.body = Some(body.to_vec());
+        diagnostic.body =
+            Some(self.read_response_body(response, target.operation, target.world, false).await?);
+        let body = diagnostic.body.as_deref().ok_or_else(|| self.protocol(target))?;
 
-        if is_session_expired(status, location.as_ref(), &body) {
+        if is_session_expired(status, location.as_ref(), body) {
             return Err(MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -111,7 +101,7 @@ impl MoogleMailClient {
                 false,
             ));
         }
-        if is_hentaiverse_battle_response(&body) {
+        if is_hentaiverse_battle_response(body) {
             return Err(MoogleMailError::new(
                 target.operation,
                 target.world,
@@ -191,6 +181,8 @@ impl MoogleMailClient {
             .body(encoded.0.clone())
             .build()
             .map_err(|_| self.configuration_for(operation, target.world))?;
+        // 先前 compose 步骤可能已经暂存资产；失锁不能被降级为可安全重发。
+        self.check_ownership().await.map_err(|_| self.write_unknown(operation, target.world))?;
         let response = self
             .client
             .execute(request)
@@ -217,15 +209,13 @@ impl MoogleMailClient {
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let is_html = is_html_content_type(response.headers());
-        let body = time::timeout(self.request_timeout, response.bytes())
-            .await
-            .map_err(|_| self.write_unknown(operation, target.world))?
-            .map_err(|_| self.write_unknown(operation, target.world))?;
-        if body.len() > self.maximum_response_bytes {
-            return Err(self.write_unknown(operation, target.world));
-        }
-        diagnostic.body = Some(body.to_vec());
-        if is_session_expired(status, location.as_ref(), &body) {
+        diagnostic.body =
+            Some(self.read_response_body(response, operation, target.world, true).await?);
+        let body = diagnostic
+            .body
+            .as_deref()
+            .ok_or_else(|| self.write_unknown(operation, target.world))?;
+        if is_session_expired(status, location.as_ref(), body) {
             return Err(MoogleMailError::after_write(
                 operation,
                 target.world,
@@ -240,6 +230,50 @@ impl MoogleMailClient {
             return Err(self.write_unknown(operation, target.world));
         }
         diagnostic.body.take().ok_or_else(|| self.write_unknown(operation, target.world))
+    }
+
+    /// 每块正文入缓冲前校验总量；无 Content-Length 的响应也不能绕过内存边界。
+    async fn read_response_body(
+        &self,
+        mut response: reqwest::Response,
+        operation: MoogleMailOperation,
+        world: MoogleMailWorld,
+        write_started: bool,
+    ) -> Result<Vec<u8>, MoogleMailError> {
+        let read_error = || {
+            if write_started {
+                self.write_unknown(operation, world)
+            } else {
+                MoogleMailError::new(
+                    operation,
+                    world,
+                    MoogleMailErrorCategory::RemoteTemporary,
+                    true,
+                )
+            }
+        };
+        time::timeout(self.request_timeout, async {
+            // 失败或超时取消时清理半截正文；诊断只允许保留完整且未超限的响应。
+            let mut body = SensitiveBytes(Vec::new());
+            while let Some(chunk) = response.chunk().await.map_err(|_| read_error())? {
+                if body.0.len().saturating_add(chunk.len()) > self.maximum_response_bytes {
+                    return Err(if write_started {
+                        self.write_unknown(operation, world)
+                    } else {
+                        MoogleMailError::new(
+                            operation,
+                            world,
+                            MoogleMailErrorCategory::ResponseTooLarge,
+                            false,
+                        )
+                    });
+                }
+                body.0.extend_from_slice(&chunk);
+            }
+            Ok(std::mem::take(&mut body.0))
+        })
+        .await
+        .map_err(|_| read_error())?
     }
 
     fn configuration(&self, target: &MoogleMailTarget) -> MoogleMailError {

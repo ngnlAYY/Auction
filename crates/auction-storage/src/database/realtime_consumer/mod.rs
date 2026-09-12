@@ -16,6 +16,7 @@ use super::DatabaseStore;
 mod acknowledgement;
 mod common;
 mod failure;
+mod owned;
 mod ownership;
 mod read;
 mod stream;
@@ -52,7 +53,12 @@ impl RealtimeStreamStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    list_streams_postgres(store, &prefix, &after, limit).await
+                    let mut connection = store
+                        .pool()
+                        .acquire()
+                        .await
+                        .map_err(|_| storage_error("打开 PostgreSQL 实时 stream 连接失败"))?;
+                    list_streams_postgres(&mut connection, &prefix, &after, limit).await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => {
@@ -72,7 +78,14 @@ impl RealtimeConsumerStore for DatabaseStore {
             request.validate().map_err(storage_error)?;
             match self {
                 #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => read_postgres(store, request).await,
+                DatabaseStore::Postgres(store) => {
+                    let mut connection = store
+                        .pool()
+                        .acquire()
+                        .await
+                        .map_err(|_| storage_error("打开 PostgreSQL 实时消费连接失败"))?;
+                    read_postgres(&mut connection, request).await
+                }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => read_sqlite(store, request).await,
             }
@@ -92,8 +105,13 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
+                    let mut connection = store
+                        .pool()
+                        .acquire()
+                        .await
+                        .map_err(|_| storage_error("打开 PostgreSQL 实时游标连接失败"))?;
                     acknowledge_postgres(
-                        store,
+                        &mut connection,
                         &consumer_key,
                         &stream_key,
                         event_id,
@@ -126,8 +144,13 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
+                    let mut connection = store
+                        .pool()
+                        .acquire()
+                        .await
+                        .map_err(|_| storage_error("打开 PostgreSQL 实时失败记录连接失败"))?;
                     record_failure_postgres(
-                        store,
+                        &mut connection,
                         &consumer_key,
                         &stream_key,
                         event_id,
@@ -172,8 +195,13 @@ impl RealtimeConsumerStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
+                    let mut connection = store
+                        .pool()
+                        .acquire()
+                        .await
+                        .map_err(|_| storage_error("打开 PostgreSQL 实时重放连接失败"))?;
                     resolve_failure_postgres(
-                        store,
+                        &mut connection,
                         &consumer_key,
                         &stream_key,
                         event_id,

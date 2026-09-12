@@ -26,14 +26,23 @@ pub fn page() -> Element {
     let busy = use_signal(|| false);
     let rules = use_resource(move || {
         let _ = reload_generation();
-        fetch_admin_rules(target())
+        let locale = target();
+        async move {
+            let result = fetch_admin_rules(locale.clone()).await;
+            (locale, result)
+        }
     });
 
     // 规则请求成功后才初始化编辑器，避免用户编辑过程中普通重绘把草稿覆盖掉。
     use_effect(move || {
         let requested_locale = target();
+        let state = rules.state().cloned();
         let snapshot = rules.read_unchecked().clone();
-        if let Some(Ok(document)) = snapshot {
+        if state == UseResourceState::Ready
+            && let Some((loaded_locale, Ok(document))) = snapshot
+            && loaded_locale == requested_locale
+            && document.locale == requested_locale
+        {
             draft.set(Some(to_draft(&document, &requested_locale)));
             checked_signature.set(String::new());
             command.set(None);
@@ -41,7 +50,16 @@ pub fn page() -> Element {
         }
     });
 
-    let content = match &*rules.read_unchecked() {
+    // Resource 重读时保留旧值；旧语言的文档与错误均不能装配成新语言编辑器。
+    let snapshot = if rules.state().cloned() == UseResourceState::Ready {
+        rules
+            .read_unchecked()
+            .clone()
+            .and_then(|(loaded_locale, result)| (loaded_locale == target()).then_some(result))
+    } else {
+        None
+    };
+    let content = match snapshot.as_ref() {
         None => rsx! {
             AsyncState {
                 kind: AsyncStateKind::Loading,

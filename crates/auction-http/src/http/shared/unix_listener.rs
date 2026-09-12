@@ -61,7 +61,7 @@ impl UnixHttpListener {
             return Err(invalid("Unix socket 必须直接位于 runtime_directory 下"));
         }
         let group_id = resolve_group_id(&options.group)?;
-        validate_runtime_directory(&options.runtime_directory, group_id)?;
+        validate_runtime_directory(&options.runtime_directory)?;
         let lock = acquire_instance_lock(&options.runtime_directory, options.lock_file_name)?;
         prepare_socket_path(&options.socket_path).await?;
 
@@ -136,22 +136,32 @@ fn resolve_group_id(group: &str) -> io::Result<u32> {
     Ok(unsafe { (*record).gr_gid })
 }
 
-fn validate_runtime_directory(path: &Path, group_id: u32) -> io::Result<()> {
+fn validate_runtime_directory(path: &Path) -> io::Result<()> {
     let resolved = fs::canonicalize(path)
         .map_err(|error| with_context(error, "规范化 Unix listener runtime 目录失败"))?;
-    if resolved != path {
-        return Err(invalid("Unix listener runtime 目录不能通过符号链接访问"));
+    if !path.is_absolute() || resolved != path {
+        return Err(invalid("Unix listener runtime 目录必须是无符号链接的规范化绝对路径"));
     }
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| with_context(error, "读取 Unix listener runtime 目录失败"))?;
-    let mode = metadata.permissions().mode();
-    if metadata.file_type().is_symlink()
-        || !metadata.is_dir()
-        || metadata.uid() != current_uid()
-        || mode & 0o002 != 0
-        || mode & 0o020 != 0 && metadata.gid() != group_id
-    {
-        return Err(invalid("Unix listener runtime 目录不满足 owner/group/权限约束"));
+    let owner = current_uid();
+    // 从根向下确认目录链不可被其他账号替换；仅保护末级目录仍会留下祖先重命名竞态。
+    // 代理组只需遍历目录和连接 socket，不能拥有目录写权限；root 和运行账号属于信任边界。
+    let ancestors = path.ancestors().collect::<Vec<_>>();
+    for directory in ancestors.into_iter().rev() {
+        let metadata = fs::symlink_metadata(directory)
+            .map_err(|error| with_context(error, "读取 Unix listener 目录链失败"))?;
+        let mode = metadata.permissions().mode();
+        // /tmp 一类 root-owned sticky 祖先不能被其他账号用于替换后续已验证的目录。
+        let protected_shared_ancestor =
+            directory != path && metadata.uid() == 0 && mode & 0o1000 != 0;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || mode & 0o022 != 0 && !protected_shared_ancestor
+            || metadata.uid() != owner && (directory == path || metadata.uid() != 0)
+        {
+            return Err(invalid(
+                "Unix listener 目录链必须由 root 或运行账号拥有且禁止 group/other 写入，runtime 目录必须由运行账号拥有",
+            ));
+        }
     }
     Ok(())
 }
@@ -243,6 +253,10 @@ fn socket_identity(path: &Path) -> io::Result<FileIdentity> {
 }
 
 fn secure_bound_socket(path: &Path, group_id: u32, identity: FileIdentity) -> io::Result<()> {
+    // 目录链校验阻止非受信账号替换路径；副作用前还需拒绝已经变化的 socket 身份。
+    if socket_identity(path)? != identity {
+        return Err(invalid("Unix listener socket 身份已变化，拒绝修改权限"));
+    }
     let encoded = CString::new(path.to_string_lossy().as_bytes())
         .map_err(|_| invalid("Unix listener socket 路径包含非法字符"))?;
     // SAFETY: encoded 是已校验路径的 NUL 结尾副本；geteuid/gid 使用当前进程和已解析组。

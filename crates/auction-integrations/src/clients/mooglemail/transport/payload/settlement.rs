@@ -133,8 +133,7 @@ pub(crate) fn render_settlement(
         )?,
         _ => return None,
     };
-    (valid_line(&subject, 512, false) && valid_line(&body, 64 * 1024, true))
-        .then_some((subject, body))
+    (valid_line(&subject, 512, false) && valid_body(&body)).then_some((subject, body))
 }
 
 fn valid_settlement_template(value: &str) -> bool {

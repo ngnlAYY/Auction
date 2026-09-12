@@ -163,8 +163,10 @@ pub(super) fn AdminUserRow(
                                                     Some(value),
                                                 )
                                                 .await;
-                                                if result.is_ok() {
-                                                    dialog.set(None);
+                                                if result.is_ok()
+                                                    && let Ok(mut dialog) = dialog.try_write()
+                                                {
+                                                    *dialog = None;
                                                 }
                                                 result.map(|_| None)
                                             },
@@ -219,8 +221,10 @@ pub(super) fn AdminUserRow(
                                                     reason,
                                                 )
                                                 .await;
-                                                if result.is_ok() {
-                                                    dialog.set(None);
+                                                if result.is_ok()
+                                                    && let Ok(mut dialog) = dialog.try_write()
+                                                {
+                                                    *dialog = None;
                                                 }
                                                 result.map(|_| None)
                                             },
@@ -320,8 +324,10 @@ pub(super) fn AdminUserRow(
                                                         }
                                                         _ => Ok(None),
                                                     };
-                                                    if result.is_ok() {
-                                                        dialog.set(None);
+                                                    if result.is_ok()
+                                                        && let Ok(mut dialog) = dialog.try_write()
+                                                    {
+                                                        *dialog = None;
                                                     }
                                                     result
                                                 },

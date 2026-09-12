@@ -30,15 +30,22 @@
   `writer/{model,common,compose,response}.rs` 按状态模型、共用安全解析、compose 证明和最终响应分类拆分。
   已实现固定 endpoint、无重定向 GET、响应大小/内容类型/限速边界、session 失效分类、
   inbox 分页与 cursor 扫描、摘要/详情一致性校验、正文/附件/Credits/COD/动作状态解析，以及
-  单 Cookie 失效收口。写入侧已实现 compose/detail typed target、表单闭集、无重定向
-  单次 POST、write_unknown 不确定性分类、发送成功页解析，以及 return/take 的动作前身份/资产
+  单 Cookie 失效收口。GET/POST 正文按块累计并在追加前检查大小，无 Content-Length 的响应也受同一上限约束；
+  超时、截断或超限不留存半截正文。邮件、装备、余额及战斗页面中的用户文案不构成登录失效证明，
+  仅受限认证重定向或排除用户输入区后的登录页面证据允许作废 Cookie。装备链接中的固定长度 key
+  使用安全 UTF-8 切片；通知和结算模板正文共用表单正文校验，允许配置支持的换行和制表符。
+  写入侧已实现 compose/detail typed target、表单闭集、无重定向单次 POST、write_unknown 不确定性分类、
+  发送成功页解析，以及 return/take 的动作前身份/资产
   fence 和动作后结构化证明；解析结果不携带原始 HTML，token 只在短生命周期状态对象中
   受控引用，Cookie 不进入返回值。`auction-application`
   已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，严格解码
   旧版 schema v1 payload 后执行静态通知、结算 send/return、return 和 take；装备 key 只在实际发送前
   按装备 ID 从密文 owner 读取并解密，不进入 intent、payload、日志或回执。return 必须在写入前核对
   sender，写入后证明收件箱中精确 `mid` 消失；take 还必须精确核对装备 ID、Credits、COD 和
-  附件计数，并以资产归零、邮件身份不变与唯一回执证明收口。结算 send 的 compose 成功页不会
+  附件计数，并以资产归零、邮件身份不变与唯一回执证明收口。无脚本 Take 终态页只从脚本和
+  可执行属性保守匹配原始协议标记，包括其中的字符串、注释和不完整赋值；URL 按浏览器
+  空白规则归一化。用户正文、textarea 与 HTML 注释不参与判定。
+  结算 send 的 compose 成功页不会
   直接满足履约，还需要 Sent 明细与余额证据；POST 后
   无法证明的结果进入 `manual_reconcile`，不会自动重发。`WinnerPaymentCarrierCod` 的结算
   payload 按旧版契约固定使用 `main` world。
@@ -167,3 +174,10 @@ HentaiVerse 装备来源共用按 world/scoped/shared 选择的单 Cookie。远�
 loader 只接受 `.keyenv` 中的 `hv-ck-key1`（Worker）和 `hv-ck-key2`（隔离验证），强制
 owner-only 权限并拒绝未知/重复键；Worker 只装配前者，后者不自动回退。`.keyenv` 仍不得提交或
 进入普通配置、日志和 DTO。
+
+Worker 的 MoogleMail/论坛凭据 owner 会由凭据集合自动传给 gateway 与 delivery HTTP client；
+client 克隆及 sender、分页上下文继续共享同一 owner。每次物理 HTTP 请求在限速等待后、发出前
+核验原持锁 session；装备来源的独立 reqwest client 也读取同一 MoogleMail 凭据 owner。
+失锁状态不可恢复，集合停止提供凭据，GET 返回凭据不可用；POST 前发现失锁仍保守归为
+`write_unknown`，避免先前 compose 已暂存资产时被误判为可安全重发。显式不带 owner 的本地构造
+保持原行为。该边界不能撤回已经发出的请求，也不能把 `check → send` 与远端操作原子化。

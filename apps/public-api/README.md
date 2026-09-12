@@ -17,6 +17,12 @@ shutdown，停止 heartbeat/realtime relay 并发布停止心跳，整个 HTTP/�
 **业务逻辑不属于这里。** relay 只负责当前 Public 实例的
 持久化事件分发，外部广播 sink 仍由独立协议负责。
 
+relay 的目录读取和消费确认共用持锁数据库连接；PostgreSQL 持锁连接失效时停止推进游标并
+撤销 readiness 证明，不以新池连接继续消费。数据库恢复后需要重启该 Public 实例重新取得
+owner；SQLite 文件库在实际数据库同目录保持 sidecar 文件锁，不依赖 `/tmp`。运行账号需
+能在可信数据库目录创建 0600 锁文件；锁文件退出时保留，数据库不得使用硬链接别名。
+文件库 owner 还要求 Linux `statx` mount 身份，拒绝单文件 bind mount；可挂载整个数据库目录。
+
 默认监听 `127.0.0.1:8090`。
 
 ```bash
