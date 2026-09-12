@@ -29,7 +29,7 @@ struct MoogleMailCredentialCandidate {
 pub struct MoogleMailCredentialSet {
     candidates: Arc<Mutex<Vec<MoogleMailCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
-    _ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl MoogleMailCredentialSet {
@@ -180,11 +180,16 @@ impl MoogleMailCredentialSet {
                 false,
             ));
         }
-        Ok(Self {
-            candidates: Arc::new(Mutex::new(candidates)),
-            invalidator,
-            _ownership: ownership,
-        })
+        Ok(Self { candidates: Arc::new(Mutex::new(candidates)), invalidator, ownership })
+    }
+
+    /// 将同一 owner 传给每物理请求的 HTTP 边界，不重新获取连接或凭据。
+    pub(crate) fn ownership(&self) -> Option<Arc<dyn AdminCredentialRuntimeOwnership>> {
+        self.ownership.clone()
+    }
+
+    fn ownership_valid(&self) -> bool {
+        self.ownership.as_ref().is_none_or(|ownership| ownership.is_valid())
     }
 
     pub(crate) fn begin(
@@ -236,6 +241,13 @@ impl MoogleMailCredentialSet {
         operation: MoogleMailOperation,
         tried: &HashSet<Uuid>,
     ) -> Result<MoogleMailCredentialCandidate, MoogleMailError> {
+        if !self.ownership_valid() {
+            return Err(operation_error(
+                operation,
+                world,
+                MoogleMailErrorCategory::CredentialUnavailable,
+            ));
+        }
         self.candidates
             .lock()
             .map_err(|_| {
@@ -258,6 +270,9 @@ impl MoogleMailCredentialSet {
         world: MoogleMailWorld,
         operation: MoogleMailOperation,
     ) -> Result<bool, MoogleMailError> {
+        if !self.ownership_valid() {
+            return Ok(false);
+        }
         self.candidates
             .lock()
             .map(|candidates| {
@@ -272,9 +287,12 @@ impl MoogleMailCredentialSet {
 
     /// 返回当前进程中是否至少有一个能够服务目标 world 的凭据。
     pub(crate) fn available(&self, world: MoogleMailWorld) -> bool {
-        self.candidates.lock().is_ok_and(|candidates| {
-            candidates.iter().any(|candidate| candidate.world.is_none_or(|scope| scope == world))
-        })
+        self.ownership_valid()
+            && self.candidates.lock().is_ok_and(|candidates| {
+                candidates
+                    .iter()
+                    .any(|candidate| candidate.world.is_none_or(|scope| scope == world))
+            })
     }
 }
 

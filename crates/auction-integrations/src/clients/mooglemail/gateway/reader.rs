@@ -43,6 +43,7 @@ impl MoogleMailGateway {
                 return Err(configuration(MoogleMailWorld::Main));
             }
         }
+        let client = Arc::new(client.as_ref().clone().with_ownership(credentials.ownership()));
         Ok(Self { client, credentials, config, parser: MoogleMailParser })
     }
 

@@ -357,13 +357,13 @@ pub(super) async fn configure_state(
         Arc::new(DatabaseAdminAuctionCommands::new(
             auction_create_store,
             Arc::new(SystemClock),
-            config.auction.policy(),
+            config.auction.policy()?,
         ));
     let auction_schedule: Arc<dyn AdminAuctionSchedulePort> =
         Arc::new(DatabaseAdminAuctionCommands::new(
             auction_schedule_store,
             Arc::new(SystemClock),
-            config.auction.policy(),
+            config.auction.policy()?,
         ));
     let admin_rules: Arc<dyn AdminRulesPort> =
         Arc::new(DatabaseAdminRulesCommands::new(admin_rules_store, Arc::new(SystemClock)));

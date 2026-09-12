@@ -15,7 +15,7 @@ pub struct MailUserRegisterCommand {
     pub now: DateTime<Utc>,
 }
 
-/// Users owner 原子注册写入；候选用户与密钥信封必须在同一事务中提交。
+/// Users owner 原子注册写入；信封 AAD 绑定 user_id，锁内实际用户 UUID 必须与之相同。
 pub struct MailUserRegisterWrite {
     pub command: MailUserRegisterCommand,
     pub user_id: Uuid,

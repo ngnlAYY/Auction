@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -54,12 +54,8 @@ impl PublicSessionPort for PublicSessionService {
             }
 
             let (token, token_hash) = generate_token()?;
-            let expires_at = now
-                .checked_add_signed(self.config.idle_ttl)
-                .ok_or(SessionError::InvalidConfiguration)?;
-            let absolute_expires_at = now
-                .checked_add_signed(self.config.absolute_ttl)
-                .ok_or(SessionError::InvalidConfiguration)?;
+            let (expires_at, absolute_expires_at) =
+                session_expiration_window(now, self.config.idle_ttl, self.config.absolute_ttl)?;
             let stored = self
                 .store
                 .create_public(
@@ -86,15 +82,9 @@ impl PublicSessionPort for PublicSessionService {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, PublicSessionIdentity> {
         Box::pin(async move {
-            let token_hash = hash_token(&raw_token)?;
-            self.store
-                .touch_public(
-                    token_hash,
-                    now,
-                    now.checked_add_signed(self.config.idle_ttl)
-                        .ok_or(SessionError::InvalidConfiguration)?,
-                )
-                .await
+            let (token_hash, next_expires_at) =
+                prepare_session_token(&raw_token, now, self.config.idle_ttl)?;
+            self.store.touch_public(token_hash, now, next_expires_at).await
         })
     }
 
@@ -158,12 +148,8 @@ impl AdminSessionPort for AdminSessionService {
 
             let (token, token_hash) = generate_token()?;
             let (csrf_token, csrf_hash) = generate_token()?;
-            let expires_at = now
-                .checked_add_signed(self.config.idle_ttl)
-                .ok_or(SessionError::InvalidConfiguration)?;
-            let absolute_expires_at = now
-                .checked_add_signed(self.config.absolute_ttl)
-                .ok_or(SessionError::InvalidConfiguration)?;
+            let (expires_at, absolute_expires_at) =
+                session_expiration_window(now, self.config.idle_ttl, self.config.absolute_ttl)?;
             let identity = self
                 .store
                 .create_admin(AdminSessionRecord {
@@ -192,17 +178,10 @@ impl AdminSessionPort for AdminSessionService {
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, AdminSessionIdentity> {
         Box::pin(async move {
-            let token_hash = hash_token(&raw_token)?;
+            let (token_hash, next_expires_at) =
+                prepare_session_token(&raw_token, now, self.config.idle_ttl)?;
             let csrf_hash = hash_token(&raw_csrf_token)?;
-            self.store
-                .touch_admin(
-                    token_hash,
-                    csrf_hash,
-                    now,
-                    now.checked_add_signed(self.config.idle_ttl)
-                        .ok_or(SessionError::InvalidConfiguration)?,
-                )
-                .await
+            self.store.touch_admin(token_hash, csrf_hash, now, next_expires_at).await
         })
     }
 
@@ -214,6 +193,31 @@ impl AdminSessionPort for AdminSessionService {
     }
 }
 
+/// 统一计算会话过期时间；时间溢出必须失败关闭，不能写入不可持久化的时间。
+fn session_expiration_window(
+    now: DateTime<Utc>,
+    idle_ttl: Duration,
+    absolute_ttl: Duration,
+) -> Result<(DateTime<Utc>, DateTime<Utc>), ApplicationError> {
+    Ok((next_session_expiration(now, idle_ttl)?, next_session_expiration(now, absolute_ttl)?))
+}
+
+fn next_session_expiration(
+    now: DateTime<Utc>,
+    ttl: Duration,
+) -> Result<DateTime<Utc>, ApplicationError> {
+    now.checked_add_signed(ttl).ok_or(SessionError::InvalidConfiguration.into())
+}
+
+/// 统一把原始 session token 转为摘要并计算滑动过期时间，避免 Public/Admin 入口分叉。
+fn prepare_session_token(
+    raw_token: &str,
+    now: DateTime<Utc>,
+    idle_ttl: Duration,
+) -> Result<([u8; 32], DateTime<Utc>), ApplicationError> {
+    Ok((hash_token(raw_token)?, next_session_expiration(now, idle_ttl)?))
+}
+
 fn validate_login_key(key: &[u8]) -> Result<(), ApplicationError> {
     let value = std::str::from_utf8(key).map_err(|_| SessionError::InvalidLoginKey)?;
     if value.is_empty() || value.len() > 1024 || value != value.trim() {
@@ -223,7 +227,9 @@ fn validate_login_key(key: &[u8]) -> Result<(), ApplicationError> {
 }
 
 fn validate_admin_actor(actor: &str) -> Result<(), ApplicationError> {
+    // Basic Auth 以首个冒号分隔账号与口令；带冒号的账号无法由 HTTP 登录入口表达。
     if actor.is_empty()
+        || actor.contains(':')
         || actor.len() > 256
         || actor != actor.trim()
         || actor.chars().any(char::is_control)

@@ -12,8 +12,9 @@ use std::{
 use auction_contracts::ApiErrorResponse;
 use axum::{
     Json,
+    body::Body,
     extract::{ConnectInfo, MatchedPath, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -171,6 +172,57 @@ pub(crate) async fn enforce(
         "HTTP request completed"
     );
     finish_response(response, &request_id)
+}
+
+/// 仅业务 API 路由使用：把 Path/Bytes 等默认纯文本拒绝收敛为稳定 JSON 外壳。
+/// 不提前提取参数或正文，保留原有认证、限流、状态码及已经映射的 JSON 错误语义。
+pub(crate) async fn normalize_api_rejection(request: Request, next: Next) -> Response {
+    let is_head = request.method() == Method::HEAD;
+    let request_id = request_id(request.headers());
+    let response = next.run(request).await;
+    let plain_text = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/plain"));
+    if !plain_text {
+        return response;
+    }
+    let (code, message) = match response.status() {
+        StatusCode::BAD_REQUEST => ("invalid_query", "请求参数无效"),
+        StatusCode::PAYLOAD_TOO_LARGE => ("body_too_large", "请求体过大"),
+        StatusCode::INTERNAL_SERVER_ERROR => ("internal_error", "服务内部错误"),
+        _ => return response,
+    };
+    let (mut parts, _) = response.into_parts();
+    // 原始框架正文可能包含参数或实现细节，直接丢弃，不能复制其长度、编码或实体校验值。
+    for name in [
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "content-range",
+        "content-md5",
+        "digest",
+        "etag",
+        "last-modified",
+    ] {
+        parts.headers.remove(name);
+    }
+    parts.headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let body = if is_head {
+        Body::empty()
+    } else {
+        Json(ApiErrorResponse {
+            code: code.to_owned(),
+            message: message.to_owned(),
+            data: None,
+            request_id,
+        })
+        .into_response()
+        .into_body()
+    };
+    Response::from_parts(parts, body)
 }
 
 /// 返回请求边界规范化后的关联标识；handler 只使用该值写入命令审计。

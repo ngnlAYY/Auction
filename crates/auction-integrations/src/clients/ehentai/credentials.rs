@@ -44,7 +44,7 @@ struct EhentaiCredentialCandidate {
 pub struct EhentaiCredentialSet {
     candidates: Arc<StdMutex<Vec<EhentaiCredentialCandidate>>>,
     invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
-    _ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl EhentaiCredentialSet {
@@ -138,11 +138,7 @@ impl EhentaiCredentialSet {
         if ownership.is_some() && candidates.is_empty() {
             return Err(EhentaiError::credential(EhentaiOperation::CreateTopic));
         }
-        Ok(Self {
-            candidates: Arc::new(StdMutex::new(candidates)),
-            invalidator,
-            _ownership: ownership,
-        })
+        Ok(Self { candidates: Arc::new(StdMutex::new(candidates)), invalidator, ownership })
     }
 
     /// 从本地单个密钥明文建立凭据集合。
@@ -150,12 +146,24 @@ impl EhentaiCredentialSet {
         Self::from_cookies(vec![EhentaiCookie::from_bytes(secret)?])
     }
 
-    /// 返回候选集是否为空。
+    pub(crate) fn ownership(&self) -> Option<Arc<dyn AdminCredentialRuntimeOwnership>> {
+        self.ownership.clone()
+    }
+
+    fn ownership_valid(&self) -> bool {
+        self.ownership.as_ref().is_none_or(|ownership| ownership.is_valid())
+    }
+
+    /// 返回候选集是否为空；已失去 owner 的集合不再提供凭据。
     pub fn is_empty(&self) -> bool {
-        self.candidates.lock().map(|candidates| candidates.is_empty()).unwrap_or(true)
+        !self.ownership_valid()
+            || self.candidates.lock().map(|candidates| candidates.is_empty()).unwrap_or(true)
     }
 
     pub(super) fn begin(&self) -> Result<EhentaiCredentialSession, EhentaiError> {
+        if !self.ownership_valid() {
+            return Err(EhentaiError::credential(EhentaiOperation::FetchTopic));
+        }
         let candidate = self
             .candidates
             .lock()
@@ -217,6 +225,9 @@ impl EhentaiCredentialSession {
     }
 
     pub(super) fn advance(&mut self) -> Result<(), EhentaiError> {
+        if !self.set.ownership_valid() {
+            return Err(EhentaiError::credential(EhentaiOperation::FetchTopic));
+        }
         let candidate = self
             .set
             .candidates

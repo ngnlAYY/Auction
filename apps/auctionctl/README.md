@@ -41,10 +41,10 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml \
     --maintenance-secrets-file /etc/auction/postgres-maintenance.secret.toml
 
 # 只读预检三进程配置；不会连接数据库、迁移 schema 或触发外部请求。
-cargo run -p auctionctl -- deployment-check --config-dir /etc/auction
+cargo run -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction
 
 # 生产切换前把敏感 TOML 的 group/other 权限作为硬门槛。
-cargo run -p auctionctl -- deployment-check --config-dir /etc/auction --strict-permissions
+cargo run -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction --strict-permissions
 
 # 控制已安装的 systemd unit；start/restart 会严格预检、迁移并等待三角色 readiness。
 sudo /opt/auction/bin/auctionctl deployment start --config-dir /etc/auction
@@ -232,9 +232,18 @@ payment 核对或已送达证明。即使查询得到 `collected`，也只表示
 配置解析器的脱敏策略；调用方应依赖退出码判断结果，不要解析错误文本。
 
 `deployment-check` 读取 `public.toml`、`admin.toml` 和 `worker.toml`，检查三者引用同一份普通、
-非符号链接的公共配置，并检查敏感文件、runtime 文件、数据库档位、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
+非符号链接的公共配置，并检查敏感文件、runtime 文件、数据库档位与实际目标身份、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
 以及装备、用户登录和外部凭据三组数据密钥的一致性。启用中的 Worker control 还必须具备安全
 runtime 目录、group 与显式 UID/GID allowlist 配置。
+数据库目标检查由 `src/bootstrap/runtime/deployment_identity/` 拥有部署限制，并复用 storage 的 SQLx
+连接参数解析；允许不同数据库账号访问同一个目标。PostgreSQL 必须显式指定 host、port 和数据库，
+支持 SQLx 的 host/hostaddr/port/dbname 查询参数覆盖以及 Unix socket；不能依赖环境默认值、使用
+未知参数或 `options` 会话覆盖。DNS 别名不做网络解析，部署配置应使用同一规范主机名。
+标准 IPv6 URI 的方括号只用于 URI 表达；SQLx 实际 TCP 连接会使用去括号的地址，外部备份/恢复
+工具的 `PGHOST` 和临时 pgpass 同步使用裸 IPv6（pgpass 的冒号仍按原规则转义）。查询参数覆盖、
+Unix socket 和显式目标/TLS 门禁保持不变，不将连接原文或凭据写入诊断。
+SQLite 必须使用绝对磁盘路径，已有文件按实际路径比较，新文件按已存在的实际父目录比较；
+不允许相对路径、内存库或自定义 VFS，避免 CLI 与 systemd 工作目录不同造成同名异库。
 接管 Admin runtime 的任一 `operations` 组时，Admin 与 Worker 必须引用同一份 runtime 普通文件；
 预检按规范文件路径核对身份，并始终核对两者最终经济模板、结算模板与周排期一致，防止管理页已保存
 但 Worker 未接入同一来源。该检查同样不读取外部服务或改写任务状态。
@@ -244,11 +253,17 @@ runtime 目录、group 与显式 UID/GID allowlist 配置。
 `deployment start/restart/stop/status` 是 Linux/systemd 宿主机总控。单角色 PID、信号、停止超时、
 自动重启和日志由 systemd 拥有；总控校验 unit 已加载且其 `AUCTION_CONFIG_FILE` 与指定绝对
 `config-dir` 精确一致。`start` 在三个 unit 全部停止时执行严格预检、监听地址占用检查和
-forward-only migration，再按 Worker → Admin → Public 启动并分别读取 Worker Unix control
+forward-only migration；只有 `inactive`/`failed` 且 `MainPID=0` 才视为停止，
+`deactivating` 等转换状态必须先收敛。随后按 Worker → Admin → Public 启动并分别读取 Worker Unix control
 `/v1/health/ready`、Public 实际选择的 TCP 或 Unix `/health/ready`，以及 Admin runtime 实际选择的 TCP 或 Unix
 `/health/ready`。任一角色失败时只按反序停止本次启动的 unit，
 不会回退已经提交的 migration。`restart` 会先完成配置/unit 预检，再按 Public → Admin → Worker
 停止并重新执行同一流程；`stop` 的终止等待和最终强制策略由各 unit 的 `TimeoutStopSec` 管理。
+
+配置绑定仅支持 `Environment` 的简单赋值（可整体用双引号包裹，不能含空白或转义）。
+`EnvironmentFiles`、`UnsetEnvironment`、`PassEnvironment` 和 `PAMName` 非空时预检失败，
+避免其他环境来源覆盖或删除 `AUCTION_CONFIG_FILE`；失败信息不输出环境值。TCP/Unix readiness
+均使用异步非阻塞连接，连接、请求写入和状态行读取共用最多 1 秒预算，且不超过当前角色的剩余启动时间。
 
 总控要求 Worker 启用 `[worker.control]`，要求私有 `--state-dir` 已存在、路径规范化、归当前
 有效用户所有且权限至多 `0700`，并以非阻塞文件锁拒绝并发控制操作。配置目录和三个主 TOML
@@ -266,8 +281,9 @@ unit、systemd `InvocationID`、MainPID、单调启动时间和观察时间，�
 
 `postgres-bootstrap` 是普通迁移之外的显式 PostgreSQL 初始建库命令。它只读取 `Public` 配置的
 `database_url`，要求 `--confirm-database` 与 URL path 完全一致，并可选读取仅运行账号可读的
-maintenance sensitive TOML；未提供时把同一 endpoint/TLS profile 的应用 URL 切换到 `postgres`
-维护库。命令先取得与 `migrate` 相同的部署状态目录锁，再确认 Public/Admin/Worker 均处于明确的
+maintenance sensitive TOML；应用与维护 URL 都必须显式给出 host、非零 port 和数据库名，
+不能依赖 `PGHOST`/`PGPORT` 补齐目标；未提供维护文件时只把应用 URL 的数据库名切换到 `postgres`
+维护库。端点按实际 SQLx 解析结果比较，并沿用下述 rebuild 的严格查询参数和 TLS 约束。命令先取得与 `migrate` 相同的部署状态目录锁，再确认 Public/Admin/Worker 均处于明确的
 `inactive`/`failed` 或 `not-found` 收敛状态；锁生命周期覆盖 PostgreSQL catalog 检查、建库和应用
 连接后置验证。PostgreSQL 适配器随后取得与 rebuild 共用的集群级 advisory lock，确认 writable
 primary、维护角色 `CREATEDB`、应用角色存在且可分配 owner，拒绝 `postgres`/`template0`/`template1`
@@ -390,7 +406,11 @@ JSON receipt。archive 版本可以旧于当前二进制，恢复后通过正常
 维护连接必须观察到零目标 session、零 prepared transaction、零 subscription 和零活动 logical slot。
 生产环境推荐通过 `--maintenance-secrets-file` 使用独立 owner-only TOML；其中唯一的
 `database_url` 必须指向同 endpoint/TLS profile 的 `postgres` 维护库，且不会进入命令行、日志或
-receipt。未提供该文件时才从 Worker `database_url` 派生维护连接。对应数据库角色必须是 superuser，
+receipt。连接源库之前，两条 URL 都必须显式给出单一 host、非零 port 和数据库名；默认端口也要
+写明，避免 `PGPORT` 让源库预检和破坏性操作落到不同实例。通过实际 SQLx 解析结果比较端点，
+查询参数只接受 `application_name` 和 `sslmode`；SQLx 会忽略的 `ssl=true`、`connect_timeout`
+在此拒绝。两边 `sslmode` 必须相同或同时省略，不能把继承环境的省略值当成显式 `prefer`。
+未提供该文件时仅从 Worker URL 替换数据库名为 `postgres`，其余目标与策略不变。对应数据库角色必须是 superuser，
 或同时是目标 owner 并拥有 `CREATEDB`。为避免静默降低安全策略，存在自定义
 database ACL 或 database/role setting 时失败关闭。重建以 `template0` 保留原 owner、UTF8 编码、
 locale provider、tablespace 和 connection limit，并在集群 advisory lock 下用
@@ -400,11 +420,20 @@ locale provider、tablespace 和 connection limit，并在集群 advisory lock �
 
 `--mode empty-for-restore` 只创建并证明空库，且强制要求 backup manifest；随后仍需显式运行
 `postgres-restore`。`--mode fresh-schema` 在空库证明后运行当前内嵌迁移，允许 verified backup 或
-明确的一次性环境豁免。破坏性步骤开始后若建库或后置验证失败，命令会尽可能发布状态为
-`mutation_failed`/`postcondition_failed` 的 `auction-postgres-rebuild.v1` 回执；出现这类结果时必须
-保持全部角色停止并按回执状态人工恢复，不能把进程退出失败误当成数据库未变化。
+明确的一次性环境豁免。破坏性步骤开始后若响应丢失或后置验证失败，命令会尽可能发布
+`auction-postgres-rebuild.v2` 回执：`database_dropped`、`database_recreated` 和 `forced_drop`
+使用 `true`/`false`/`null`，分别表示已证明发生、已证明未发生、结果未知；DROP/CREATE 执行错误
+在缺少独立证明时记录 `mutation_unknown`，不会把 I/O 错误推断成 `false`。已证明完成的后置失败
+仍为 `postcondition_failed`，并保留 `mutation_failed` 的明确失败语义。历史 `auction-postgres-rebuild.v1` 回执不改写，读取方
+必须按 `format` 区分，不能把 v2 的 `null` 当作 `false`。失败回执写入错误仅附加到原操作错误链，
+不会掩盖原始失败。出现上述结果时必须保持全部角色停止，先核对 catalog/OID 与备份再人工恢复，
+不能把进程退出失败误当成数据库未变化，也不能盲目再次执行 DROP。
 
 ## 安全约束
 
 破坏性数据库操作必须使用独立命令、明确运行手册、精确目标确认、可验证备份和不可覆盖回执。
 不得把 `DROP DATABASE`、恢复或 retention mutation 放入启动、迁移、unit 或普通开发脚本。
+
+灾备 archive、manifest 与回执发布只有在文件内容和父目录同步完成后才报告成功；恢复、重建及
+v28 接管在 mutation 前也同步既有恢复证据。跨目录发布会同步源、目标两个目录；不支持目录同步的
+平台或文件系统失败关闭。文件可读或 SHA-256 匹配不代替这项持久化证明。

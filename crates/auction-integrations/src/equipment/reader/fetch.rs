@@ -69,6 +69,20 @@ pub(super) async fn document_once(
     if let Some(cookie) = cookie {
         request = request.header(reqwest::header::COOKIE, cookie.expose());
     }
+    // 装备读取使用独立 reqwest client，但共享同一个 MoogleMail 凭据 owner。
+    if let Some(ownership) =
+        adapter.credentials.as_ref().and_then(|credentials| credentials.ownership())
+        && !timeout(std::time::Duration::from_secs(1), ownership.check())
+            .await
+            .is_ok_and(|result| result.is_ok())
+    {
+        return Err(observed_failure(
+            MailEquipmentDiagnosticCategory::CredentialUnavailable,
+            None,
+            started,
+            None,
+        ));
+    }
     let mut response = request.send().await.map_err(|_| {
         EquipmentFetchError::Observed(EquipmentFetchFailure {
             category: MailEquipmentDiagnosticCategory::Network,

@@ -40,6 +40,14 @@ Redis、反向代理和系统服务可使用非 Rust 官方实现，并通过适
 | `auction-observability` | tracing、metrics、health、correlation id、心跳安全投影；Public/Admin 与 Worker control 的可选 `/metrics` scrape、进程资源指标和三类进程的有界 OTLP/HTTP exporter | 业务日志内容 |
 | `auction-process` | SIGINT/SIGTERM 订阅、10 秒默认 drain、二次信号分类和 abort-on-drop Tokio 任务守卫 | 配置、listener、心跳发布和业务停止顺序 |
 
+`auction-storage/src/deployment_identity/` 拥有两后端只读数据库目标解析；`auctionctl`
+部署预检比较规范化目标身份，允许同库不同账号，无法确定目标时失败关闭。Public relay 的
+`realtime_consumer/owned.rs` 将目录读取、游标和失败记录绑定至持锁连接；PostgreSQL 连接
+失效后不从池另取 session 消费。SQLite 的 `database/sqlite_ownership/` 从连接取得实际 main
+文件身份，将 sidecar 锁放在可信数据库目录；内存库使用进程内同身份注册表。两种锁均由
+消费 owner 持有，不依赖 systemd 的私有 `/tmp`。`database/settlement_policy/` 拥有两后端
+冻结结算策略的纯解码；历史结构校验与新拍卖安全折扣门禁分离，后继创建也须通过新门禁。
+
 浏览器端是纯 CSR SPA。发布构建使用 `dx bundle --platform web --profile wasm-release` 为每个 surface
 生成优化 WASM/JS/HTML，清除该 surface 的历史 Dioxus 输出后复制到稳定的
 `target/dx/build/<package>/web/public/` 目录。payload 的排序文件哈希另写入
@@ -350,7 +358,7 @@ SQLite migration 和 repository 实现。
 
 当前已落地的实现切片包括：纯领域 `CompetitionPlan`、代理转换与结算值对象，应用层
 `TransactionPolicy`、`CommandLedger`、竞价/结算事务端口、`place_bid` 与
-`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000036` schema migration。
+`settle_auction` 用例，以及 PostgreSQL `000001` 至 `000037` schema migration。
 PostgreSQL 竞价、生命周期和结算适配器已把命令账本、锁定的权威状态、事实、状态版本、审计、履约
 初始状态和 realtime 事件放进对应事务，并对关键 Serializable 冲突最多重试三次；旧名
 `bid_proxies` 仅由兼容视图投影。`000014` 在 PostgreSQL 完整档恢复拍卖身份不可变、前序
@@ -396,7 +404,7 @@ PostgreSQL fulfillment/recovery 同样恢复独立的 `60s + [0,5s]` cadence、1
 60 秒 lease/持久化重试和 30 秒单项总时限，Recovery 保持五阶段顺序且各 owner 错误相互隔离；
 Auction 生命周期、慢速代理和结算主循环也恢复该一分钟 cadence、100 条分阶段批次、PostgreSQL
 8 并发和 30 秒单项总时限，SQLite Lite 的有效并发由配置层固定为 1 且不启用结算阶段；
-SQLite `000001` 至 `000011`、迁移入口和
+SQLite `000001` 至 `000012`、迁移入口和
 `BEGIN IMMEDIATE` 竞价写适配器已接入，Lite Worker 并发也由配置层固定为 1。HTTP 已注册
 Public 21 条与 Admin 43 条已登记契约路径；稳定响应、世界/拍卖/lot 只读查询端口和
 PostgreSQL/SQLite 数据库适配；配置数据库后 `/api/v1/worlds`、`/api/v1/rules`、`/api/v1/blacklist`、`/api/v1/auctions`、
@@ -488,7 +496,11 @@ Delivery Worker 在 `claimed → sending` 前还会按 payload world 查询 scop
 无凭据时以 lease/fencing 释放回 `pending`。同一凭据的 compose/send 与 return/take 从前置读取到
 结果证明全程持有进程内异步 guard；PostgreSQL Worker 启动时还用一条专用 session 按凭据类型
 取得 advisory owner lock，同类 Cookie 的第二个 Worker 必须启动失败。该 session 不持有数据库
-事务跨越远端网络写入，进程退出时关闭连接释放锁；普通读取仍可并发。MoogleMail transport 的
+事务跨越远端网络写入，进程退出时关闭连接释放锁；普通读取仍可并发。邮件、论坛和装备读取在
+每次物理 HTTP 请求发送前、限速等待后，以一秒总预算检查原持锁 session；失败、超时或取消后
+永久撤销本进程的凭据可用性，不重新取连接或自动取得新 owner。写入路径在此处失去所有权时
+保守进入 `write_unknown`，避免把多步 compose 已放入的资产当作未写入。检查与远端发送无法
+组成原子事务，已发出的请求仍可能在远端完成，不能据此宣称跨接管的在途写入互斥。MoogleMail transport 的
 delivery 并发上限为 1，runner 在领取下一条 claim 前取配置值与该上限的较小值，排队时间不会混入
 已经进入 `sending` 的远端请求预算。进入 `sending` 后的凭据、
 网络和协议依赖失败必须进入人工对账，只有纯本地配置/负载或明确协议拒绝可以成为普通失败。Delivery 使用独立的
@@ -547,6 +559,12 @@ runtime-enabled 世界与数据库 `worlds.enabled=true` 的交集，并在每�
 缺少该区块时由 `[worker.mooglemail]` 直接配置兼容回退；14 个模板在启动时校验占位符并冻结快照；
 用户注册/重绑已经通过 Users owner 的 PostgreSQL Serializable 事务接入，结果通知
 只保存安全结果，注册 key 以独立数据密钥加密，outbox 只保存用户 UUID 引用，发送前才解密。
+
+注册或找回签发前按 MM 名称预读用户 UUID，写入事务再以相同匹配规则锁定用户并核对该
+UUID，防止恢复既有用户时使用随机候选身份的 AAD；身份变化只返回可重试错误，不写结果。
+新换绑要求源 key 仍为 active，撤销后的旧 key 不再授权变更 MM 收件人；同命令账本重放
+仍只返回原结果。已存在但无法解密的 active 信封不会被 Register 静默重签：需核实用户身份
+及数据密钥配置后由既有 Admin 重发 Key 操作按实际 UUID 修复，再核对通知收件人和投递状态。
 POST 后无法证明的结果进入 `manual_reconcile`，不会盲目重试。结算 intent 与 MoogleMail
 send/return transport 已接入：邮件来源的未售/撤回执行原邮件退回，后台来源执行装备交接通知，
 付款及退款通知使用数据库快照中的收件人和装备外部 ID；`WinnerPaymentCarrierCod` 的 delivery
@@ -561,6 +579,8 @@ HentaVerse URL，明文装备 key 不进入论坛同步快照、日志、审计�
 唯一论坛 Cookie 允许为空并保持 degraded；当前进程凭据可用时，首轮水位只放行更早的
 `credential_unavailable` 任务一次，再次失败后不会在同一进程紧循环。该恢复分支不接触
 `write_unknown`、发布证明失败或人工授权状态。
+首次发布和发布恢复都须读取 #1/#2 的原始 BBCode，并与本轮渲染逐字核对后才登记同步证明。
+拍卖 marker 仅证明楼层身份；正文不一致时，必须先取得显式写入重试授权，编辑后再次读回证明。
 每个主题固定由系统维护 #1 拍卖目录和 #2 编辑/错误记录；两者的真实 post ID 持久化后才允许
 导入 #3 及后续用户回复。竞价命令事务完成后，Worker 从权威 lot 快照重新渲染 #1，并把编辑帖、
 解析警告、身份失败和确定拒绝稳定渲染到 #2；#2 只按这些公开事实生成真实计数摘要和紧凑单行记录，
@@ -689,7 +709,10 @@ panic recovery、安全响应头、普通请求超时、5 秒 HTTP/1 请求头�
 4096 项有界限流器。业务写路由还通过共用严格 JSON 边界恢复 `application/json`、路由级 body
 上限、单 JSON 值和稳定 400/413/415；三条 Public competition mutation 延迟到 rate limit、Origin、
 authentication、query 和 path 之后读取 body，其余路由继续在 route 边界预解析。业务 MethodRouter 显式拒绝 Axum 隐式 HEAD，并使用
-已冻结的 JSON 405/`Allow` 响应。错误 DTO 在无业务数据时仍固定输出 `data: null`。静态分派也只向
+已冻结的 JSON 405/`Allow` 响应。业务路由的框架参数提取拒绝也统一为 JSON：非法 UTF-8 path
+使用 400 `invalid_query`，超限正文使用 413 `body_too_large`；不读取或回显框架原始错误正文。
+错误 DTO 在无业务数据时仍固定输出 `data: null`。Admin actor 在配置和服务初始化时均拒绝冒号，
+保证能由 Basic Auth 的用户名部分表达。静态分派也只向
 15 + 21 条显式浏览器路由提供 SPA 入口，未知 API/health
 返回 JSON 404，未知浏览器导航返回页面 404，并执行已冻结的 Public/Admin/静态资源缓存策略。
 Web DTO 单一 owner、首批缓存读模型和静态资源制品级隔离，以及次级部署/所有权边界均已完成；

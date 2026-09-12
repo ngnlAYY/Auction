@@ -221,7 +221,7 @@ fn clear_string(value: &mut String) {
     bytes.fill(0);
 }
 
-fn valid_body(value: &str) -> bool {
+pub(super) fn valid_body(value: &str) -> bool {
     value.len() <= MAX_BODY_BYTES
         && !value
             .chars()

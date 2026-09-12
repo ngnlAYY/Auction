@@ -2,6 +2,31 @@
 
 持久化适配器边界：PostgreSQL 完整后端与 SQLite Lite 后端。
 
+Users/MoogleMail 的注册身份预读与写事务使用相同的名称匹配规则，锁内实际 UUID 必须与
+签发信封所用 UUID 相同；并发注册或改名不一致时回滚并交由既有邮件重试重新签发。新换绑
+只允许源 key 为 active，revoked 目标用户仍占用原名称，不能通过过滤冲突查询绕过唯一身份。
+
+`src/deployment_identity/` 为两后端提供只读的 SQLx 数据库目标解析，供部署预检比较实际
+endpoint/database 或 SQLite 文件身份；标识不携带账号密码，也不允许日志输出连接原文。
+该 owner 同时规范化 PostgreSQL 连接选项：先由 SQLx 确认 URI/query 覆盖后的最终 TCP host，
+若为带方括号的 IPv6，则在原 URI 追加裸 IPv6 host 后重新解析，使 pgpass 查找与实际连接目标一致。
+普通连接池、bootstrap/rebuild 维护连接及部署预检共用此入口；Unix socket、DNS/IPv4、显式密码与
+环境密码的优先级和 TLS 选项保持驱动解析语义。
+`database/credentials/ownership.rs` 只检查原持锁 session，不从池补取连接；集成层以一秒预算
+覆盖排队与检查，失败或取消会永久失效并关闭连接，正常检查期间的同步可用性不会短暂变为不可用。
+Public relay 的 `database/realtime_consumer/owned.rs` 将 stream 读取、游标确认与失败记录
+绑定到同一 `RealtimeConsumerOwnership`。PostgreSQL 全程使用持锁物理连接且关闭时不归池，
+连接失效后操作失败，不重新取连接越过 owner 边界。
+`database/sqlite_ownership/` 从实际连接的 `main` 路径确认文件身份，并在数据库同目录持有
+0600 sidecar 锁；等价 URL、符号链接和 systemd 私有临时目录不会分裂同库的锁。文件数据库
+必须单链接，目录链不可由非信任账号替换，所在目录须允许运行账号创建 sidecar；允许 root
+拥有且带 sticky bit 的临时目录祖先，但数据库所在目录不能对 group/other 可写。锁文件退出时
+不删除。文件库还要求 Linux 内核提供 `statx` mount 身份，拒绝单文件 bind mount；整个数据库
+目录的 bind mount 可以共享 sidecar。无法提供该证明的平台在申请文件库 owner 时失败关闭。
+内存库使用进程内注册表：私有库及非 URI 名称隔离，命名共享库及 SQLx 匿名库按有效名称绑定；
+共享名称只接受 `file:` 加字母、数字、点、下划线或连字符。特殊 URI、自定义 VFS、内存库的
+`immutable` 包装不能提供 relay 独占保证，会在申请 owner 时失败关闭。
+
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 `src/database/mod.rs`，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool/{mod,metrics}.rs`；PostgreSQL 竞价事务按职责放在
@@ -410,7 +435,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000036` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000037` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -430,7 +455,7 @@ realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修�
 为 MoogleMail `inbound_mail` 增加 nullable sender/subject 和脱敏 message_display，供
 `src/database/admin_mail/{reads,mapping}.rs` 提供列表 scalar/has 与详情 snapshot，历史回填 owner 由
 `admin_mail` 事务/审计边界负责，普通 replay 不补历史 NULL。SQLite
-`000001_lite_core.up.sql`、`000002` 至 `000011` 的调度、用户管理、取消/
+`000001_lite_core.up.sql`、`000002` 至 `000012` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器及同义 realtime 读取索引均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由
@@ -510,3 +535,9 @@ pending，cooldown 只在 delivery 入队确认事务中生效。退信水位只
 审计；重试耗尽路径复用同一收口。每轮分别最多处理 100 个耗尽租约批次与 100 个历史 failed/prepared
 孤儿，已发送或无法证明未激活的记录不会由该路径重写。Delivery Admin 投影只为该闭集失败形状
 允许从创建直接到完成的时间链。
+
+竞价的 `leader_since` 按本次全部接受事实判断连续领先是否中断；普通出价随后被原领先者的
+快速代理反超，也会重新计时。PostgreSQL `000037` 与 SQLite `000012` 只从追加式 bid
+重建未结算 live lot 的该投影；不能证明的行不猜测，已结算金额、终态 lot 和历史审计不改写。
+`database/settlement_policy/` 统一解码冻结结算策略，供两后端生命周期上下文与 PostgreSQL
+结算读取复用；解码只校验历史结构，后继创建的新曲线门禁由应用/领域层执行。

@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use auction_application::MailDiagnosticRecorder;
+use auction_application::{AdminCredentialRuntimeOwnership, MailDiagnosticRecorder};
 use reqwest::{Client, StatusCode, header};
 use tokio::time;
 use url::Url;
@@ -61,6 +61,7 @@ pub struct MoogleMailClient {
     maximum_response_bytes: usize,
     request_timeout: Duration,
     diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
+    ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl MoogleMailClient {
@@ -119,7 +120,30 @@ impl MoogleMailClient {
             maximum_response_bytes,
             request_timeout: config.request_timeout,
             diagnostics: None,
+            ownership: None,
         })
+    }
+
+    /// 由凭据集合继承持锁 owner；所有客户端副本共享同一个永久失效状态。
+    pub(crate) fn with_ownership(
+        mut self,
+        ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    ) -> Self {
+        if ownership.is_some() {
+            self.ownership = ownership;
+        }
+        self
+    }
+
+    async fn check_ownership(&self) -> Result<(), ()> {
+        if let Some(ownership) = &self.ownership {
+            // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
+            time::timeout(Duration::from_secs(1), ownership.check())
+                .await
+                .map_err(|_| ())?
+                .map_err(|_| ())?;
+        }
+        Ok(())
     }
 
     /// 注入异常证据记录器；诊断失败不能改变远端结果分类或触发额外请求。

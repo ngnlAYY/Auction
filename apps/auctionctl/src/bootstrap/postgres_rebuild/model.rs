@@ -78,6 +78,9 @@ impl Authorization<'_> {
         {
             anyhow::bail!("backup archive or manifest changed during PostgreSQL rebuild preflight");
         }
+        // 用户提供的既有备份也必须同步，不能只依赖当前页缓存内可读的摘要。
+        super::super::sync_private_artifact(&current.archive_path)?;
+        super::super::sync_private_artifact(manifest_path)?;
         Ok(())
     }
 }
@@ -90,8 +93,34 @@ pub(super) struct ReceiptContext<'a> {
     pub(super) rebuild: Option<&'a PostgresRebuildResult>,
     pub(super) status: &'static str,
     pub(super) failure_stage: Option<&'static str>,
-    pub(super) database_dropped: bool,
-    pub(super) database_recreated: bool,
+    pub(super) database_dropped: Option<bool>,
+    pub(super) database_recreated: Option<bool>,
     pub(super) postcondition: Option<&'static str>,
     pub(super) migration_version: Option<i64>,
+}
+
+impl<'a> ReceiptContext<'a> {
+    pub(super) fn completed(
+        options: &'a Options<'a>,
+        authorization: &'a AuthorizationReceipt,
+        source_schema_version: i64,
+        preflight: &'a PostgresRebuildPreflight,
+        rebuild: &'a PostgresRebuildResult,
+        postcondition: &'static str,
+        migration_version: Option<i64>,
+    ) -> Self {
+        Self {
+            options,
+            authorization,
+            source_schema_version,
+            preflight,
+            rebuild: Some(rebuild),
+            status: "completed",
+            failure_stage: None,
+            database_dropped: Some(true),
+            database_recreated: Some(true),
+            postcondition: Some(postcondition),
+            migration_version,
+        }
+    }
 }

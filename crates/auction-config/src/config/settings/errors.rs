@@ -65,6 +65,9 @@ pub enum ConfigError {
     #[error("sensitive field {field} must not be empty")]
     EmptySensitiveField { field: &'static str },
 
+    #[error("admin_actor 不能包含 Basic Auth 分隔符冒号")]
+    InvalidAdminActor,
+
     #[error("cache backend redis requires sensitive field redis_url")]
     MissingRedisUrl,
 

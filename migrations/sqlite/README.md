@@ -23,3 +23,6 @@ Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化
 历史查询采信的结算事实链，对应 HTTP 路由固定返回 `501 feature_not_supported`。
 SQLite 竞价事务必须使用 `BEGIN IMMEDIATE` 的串行写入口，不能因为 migration 已存在就绕过
 该适配器边界。
+
+`000012_live_leader_since_repair.up.sql` 从追加式接受事实修正未结算 live lot 的连续领先
+起点，与 PostgreSQL `000037` 同义；不改变 Lite 的结算能力边界或已保留的终态记录。

@@ -35,6 +35,11 @@ impl PostgresCommandEnvironment {
             .map(decode_uri_component)
             .transpose()?
             .context("PostgreSQL 备份/恢复 database_url 必须显式提供 host")?;
+        // PGHOST 是 libpq 的 host 参数而非 URI authority；IPv6 去括号后同时用于 pgpass 匹配。
+        let host = match url.host() {
+            Some(url::Host::Ipv6(address)) => address.to_string(),
+            _ => host,
+        };
         let port = url
             .port()
             .context("PostgreSQL 备份/恢复 database_url 必须显式提供 port（默认端口也要写明）")?;

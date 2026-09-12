@@ -431,3 +431,4 @@ command-login-required = 请先使用竞拍密钥登录。
 command-not-found = 请求的内容不存在。
 command-conflict = 此命令与之前的请求冲突。
 command-session-expired = 登录会话已过期，请重新登录后重试。
+command-retry-unchanged = 上次操作结果尚未确认。重试会发送相同命令和金额；如需更改，请取消后重新操作。

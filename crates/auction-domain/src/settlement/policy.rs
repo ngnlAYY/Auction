@@ -139,6 +139,20 @@ impl SettlementPolicy {
         Ok(())
     }
 
+    /// 校验新拍卖模板；保留历史结构校验范围，避免改变已结算记录的读取与重放。
+    ///
+    /// 补偿最多再抵扣一份折扣，50% 折扣在足额资金池下会产生零付款，违反 COD 义务
+    /// 必须为正的不变量；更高折扣会产生负数。因此新曲线每个锚点都必须严格高于 -50%。
+    pub fn validate_for_new_auction(&self) -> Result<(), DomainError> {
+        self.validate()?;
+        if self.anchors.iter().any(|anchor| anchor.adjustment_ppm <= -SETTLEMENT_PPM / 2) {
+            return Err(DomainError::InvalidSettlementPolicy(
+                "新拍卖结算折扣必须小于 50%，以保证足额补偿后的付款为正",
+            ));
+        }
+        Ok(())
+    }
+
     /// 按旧系统的整数 half-away-from-zero 规则插值调整比例。
     pub fn interpolate_adjustment(&self, hold_ppm: i64) -> Result<i64, DomainError> {
         self.validate()?;

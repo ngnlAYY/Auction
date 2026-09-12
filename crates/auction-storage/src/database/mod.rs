@@ -45,6 +45,8 @@ mod recovery_preflight;
 #[cfg(feature = "postgres")]
 mod settlement;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod settlement_policy;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod settlement_report;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod slow_proxy_due;
@@ -187,6 +189,8 @@ mod backend;
 #[cfg(feature = "postgres")]
 mod postgres_store;
 #[cfg(feature = "sqlite")]
+mod sqlite_ownership;
+#[cfg(feature = "sqlite")]
 mod sqlite_store;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod store;
@@ -228,7 +232,9 @@ mod tests {
     #[cfg(feature = "sqlite")]
     #[tokio::test]
     async fn connects_to_sqlite_memory_database() {
-        let store = DatabaseStore::connect("sqlite::memory:").await.unwrap();
+        let store = DatabaseStore::connect("sqlite::memory:")
+            .await
+            .unwrap_or_else(|error| panic!("SQLite 内存数据库应能连接: {error:?}"));
 
         assert_eq!(store.backend(), DatabaseBackend::Sqlite);
         assert!(store.sqlite_pool().is_some());

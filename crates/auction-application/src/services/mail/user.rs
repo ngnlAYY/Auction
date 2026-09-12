@@ -48,7 +48,12 @@ where
             return result.validate(MailUserCommandKind::Register).map_err(ApplicationError::from);
         }
 
-        let user_id = Uuid::new_v4();
+        // 已有用户恢复必须沿用实际 UUID；锁内身份 fence 防止查询后并发注册/改名错配 AAD。
+        let user_id = self
+            .store
+            .find_registration_user_id(command.username.clone())
+            .await?
+            .unwrap_or_else(Uuid::new_v4);
         let issue = self.issuer.issue(user_id).await?;
         if user_id.is_nil()
             || issue.public_key_hash == [0; 32]

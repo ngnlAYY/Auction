@@ -47,6 +47,10 @@
   的 bid/proxy create/proxy authorization 三份骨架与 Admin 的 `stable_command_id`。
   `begin(签名, build)` 在签名不变时复用已冻结的 `command_id`、变更时重新生成；
   `submit` 成功清空全部命令状态，失败保留输入、`command_id` 与错误并退出确认态。
+  调用方负责分类结果是否不确定；`uncertain` 在原命令重试期间保持，成功取得原结果或取消后清除，
+  供 surface 展示只读的冻结负载重试入口，避免用新状态校验阻断幂等重放。
+  后续 401/429 等前置拒绝不能清除先前的不确定状态。提交任务归属 hook 创建时的宿主作用域，
+  表单子组件替换不取消请求；宿主卸载仍会取消任务，不使用越过身份作用域的全局任务。
   文案、负载形状、错误类型与提交动作全部由调用方决定。
 - `src/components/time.rs`：`Time` 组件，包装 `format_localized_time` 并输出带原始
   RFC3339 `datetime` 属性的 `<time>` 元素。
@@ -63,7 +67,9 @@
   原生 popstate 监听通过组件的稳定回调恢复 Runtime 与 Scope，允许解析器读取调用方的
   Context；监听器随组件卸载移除，避免公开端返回无 query 地址时在运行时之外消费 Context。
 - `src/transport/mod.rs`：同源请求共享传输边界，合并两端逐行相同的 fetch 封装。
-  `send_get`/`send_request` 统一 10 秒 `AbortController` 超时（超时后取消浏览器 fetch）与
+  `send_get`/`send_request` 以统一 10 秒预算完整读取响应头和正文，再返回保留状态与响应头的内存响应；
+  超时或调用方任务取消时由 `AbortController` 终止 fetch。正文解码仍由各 surface 拥有。
+  `send_get_observed`/`send_request_observed` 供 Public 在响应头到达时校时，避免正文传输延迟污染时钟样本。传输层同时处理
   gloo-net 0.6.0 空 QueryParams workaround；错误为结构化 `TransportError`
   （`Timeout`/`Network(Option<u16>)`/`Decode`），`code()` 给出契约稳定 transport code，
   彻底取代原先的 "请求超时" 字符串比较。Admin 的 CSRF/Basic Auth 不进本层，由 surface

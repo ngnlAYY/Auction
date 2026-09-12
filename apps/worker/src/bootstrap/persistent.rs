@@ -388,7 +388,7 @@ fn configure_schedule_runtime(
         end_weekday: parse_day(&schedule.nominal_end_day)?,
         end_minute: parse_clock(&schedule.nominal_end_time)?,
         worlds,
-        policy: config.auction.policy(),
+        policy: config.auction.policy()?,
         mail,
         mailboxes,
     }))

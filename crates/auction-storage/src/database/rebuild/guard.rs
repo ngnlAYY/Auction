@@ -32,9 +32,11 @@ impl PostgresDatabaseRebuildGuard {
             return Err(PostgresRebuildError::ProtectedDatabase);
         }
 
-        let mut connection = PgConnection::connect(maintenance_database_url)
-            .await
-            .map_err(PostgresRebuildError::Connect)?;
+        let options =
+            crate::deployment_identity::postgres_connect_options(maintenance_database_url)
+                .map_err(PostgresRebuildError::Connect)?;
+        let mut connection =
+            PgConnection::connect_with(&options).await.map_err(PostgresRebuildError::Connect)?;
         configure_session(&mut connection).await?;
         let advisory_lock_acquired = sqlx::query_scalar::<_, bool>(
             "SELECT pg_try_advisory_lock(hashtextextended($1 || $2, 0))",
@@ -88,8 +90,9 @@ impl PostgresDatabaseRebuildGuard {
         sqlx::query(AssertSqlSafe(drop_sql)).execute(&mut self.connection).await.map_err(
             |source| PostgresRebuildError::Mutation {
                 stage: "drop_database",
-                database_dropped: false,
-                database_recreated: false,
+                // 响应丢失时 DROP 可能已经提交；此处没有独立 catalog 证明，必须保留未知结果。
+                database_dropped: None,
+                database_recreated: Some(false),
                 source,
             },
         )?;
@@ -97,8 +100,8 @@ impl PostgresDatabaseRebuildGuard {
         sqlx::query(AssertSqlSafe(create_sql)).execute(&mut self.connection).await.map_err(
             |source| PostgresRebuildError::Mutation {
                 stage: "create_database",
-                database_dropped: true,
-                database_recreated: false,
+                database_dropped: Some(true),
+                database_recreated: None,
                 source,
             },
         )?;
@@ -109,8 +112,8 @@ impl PostgresDatabaseRebuildGuard {
                 .map_err(|error| match error {
                 PostgresRebuildError::Query { source, .. } => PostgresRebuildError::Mutation {
                     stage: "verify_recreated_database",
-                    database_dropped: true,
-                    database_recreated: true,
+                    database_dropped: Some(true),
+                    database_recreated: Some(true),
                     source,
                 },
                 _ => PostgresRebuildError::Postcondition { stage: "verify_recreated_database" },

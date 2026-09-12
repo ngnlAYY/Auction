@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn successor_plan(
     context: &AuctionLifecycleContext,
 ) -> Result<AuctionPreviewSuccessorPlan, ApplicationError> {
+    context.policy_settlement.validate_for_new_auction()?;
     let current_week = context.scheduled_round_local_week.unwrap_or_else(|| {
         context.preview_scheduled_at.date_naive()
             - Duration::days(i64::from(

@@ -96,7 +96,8 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 - `session_signing_key`：会话签名密钥；
 - `ehentai_cookie`、`mooglemail_cookie`：外部服务 Cookie；
 - `public_otlp_headers`、`worker_otlp_headers`、`admin_otlp_headers`：角色专属 OTLP 认证或路由头；
-- `admin_actor`、`admin_secret`：Admin 登录交换身份与共享密钥，必须成对配置；
+- `admin_actor`、`admin_secret`：Admin 登录交换身份与共享密钥，必须成对配置；actor 不得包含
+  Basic Auth 用户名分隔符冒号，配置加载和服务初始化均会拒绝；
 - `equipment_data_key_id`、`equipment_data_key`：Admin 装备 key 信封的轮换标识与 32 字节
   Base64 数据密钥；两者必须成对配置，且只在 PostgreSQL 完整档启用装备录入时使用。
 - `user_login_data_key_id`、`user_login_data_key`：MoogleMail Users 注册/换绑登录 key 信封的
@@ -141,7 +142,9 @@ Public/Admin 主配置还可以包含 `[listener]`、`[http_security]` 与 `[ses
 `runtime_directory`、直接位于该目录下的 `socket_path` 和 Unix `group`，TCP 模式下后三者必须
 为空。Public 和 Admin 都支持这两种模式；Admin 若加载 runtime 文件，则由 runtime 的 listener
 覆盖主配置 fallback。Unix listener 绑定前会检查目录 owner/group/权限、目录级单实例锁、stale
-socket 身份和 `0660` 权限，Public/Admin 使用不同锁文件名，不能复用 Worker control socket。启用
+socket 身份和 `0660` 权限。runtime 目录必须由运行账号拥有且禁止 group/other 写入；全部祖先必须
+由 root 或运行账号拥有、禁止 group/other 写入，仅允许 root-owned sticky 祖先（例如 `/tmp`）例外。
+目录链不得包含符号链接；代理组只需目录遍历及 socket 连接权限。Public/Admin 使用不同锁文件名，不能复用 Worker control socket。启用
 metrics 时，有效 listener 必须是 loopback TCP 或 Unix；Admin runtime 覆盖后的有效组合也执行
 同一校验，非本地 TCP 会在绑定前失败关闭。
 

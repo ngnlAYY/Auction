@@ -114,10 +114,10 @@ fn CompensationMovementRow(
     rsx! {
         tr {
             td {
-                if let Some((lot_code, Some(_lot_id))) = lot {
+                if let Some((lot_code, Some(lot_id))) = lot {
                     Link {
                         class: "public-compensation-lot-link",
-                        to: Route::LotDetail { lot_code: lot_code.clone() },
+                        to: Route::LotDetail { lot_code: lot_id },
                         "{lot_code}"
                     }
                 } else if let Some((lot_code, None)) = lot {

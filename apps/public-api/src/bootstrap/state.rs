@@ -36,9 +36,7 @@ use auction_observability::{
     HeartbeatStore, ProcessRole, ServiceName,
 };
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_storage::{
-    DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore, RealtimeConsumerOwnership,
-};
+use auction_storage::{DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 use chrono::{DateTime, Utc};
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -128,7 +126,6 @@ impl HeartbeatHealthReader for PublicProcessHealth {
 pub(super) struct ConfiguredRealtimeRelay {
     relay: Arc<RealtimeRelay>,
     health: Arc<PublicRealtimeRelayHealth>,
-    _ownership: RealtimeConsumerOwnership,
 }
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -254,12 +251,15 @@ pub(super) async fn configure_state(
     let hub =
         Arc::new(RealtimeHub::new(config.realtime.client_buffer).map_err(anyhow::Error::msg)?);
     let sink: Arc<dyn RealtimeEventSink> = Arc::new(RealtimeHubSink::new(Arc::clone(&hub)));
-    let stream_store: Arc<dyn RealtimeStreamStore> = store.clone();
-    let consumer_store: Arc<dyn RealtimeConsumerStore> = store.clone();
-    let ownership = store
-        .acquire_realtime_consumer_ownership(&config.realtime.consumer_key)
-        .await
-        .context("acquire public realtime consumer ownership")?;
+    let ownership = Arc::new(
+        store
+            .acquire_realtime_consumer_ownership(&config.realtime.consumer_key)
+            .await
+            .context("acquire public realtime consumer ownership")?,
+    );
+    // 目录扫描和游标写入共用持锁 session；断线后不能回退到普通连接池继续消费。
+    let stream_store: Arc<dyn RealtimeStreamStore> = ownership.clone();
+    let consumer_store: Arc<dyn RealtimeConsumerStore> = ownership;
     let realtime_relay = Arc::new(
         RealtimeRelay::new(
             stream_store,
@@ -274,11 +274,8 @@ pub(super) async fn configure_state(
         )
         .map_err(anyhow::Error::msg)?,
     );
-    let realtime_relay = Arc::new(ConfiguredRealtimeRelay {
-        relay: realtime_relay,
-        health: relay_health,
-        _ownership: ownership,
-    });
+    let realtime_relay =
+        Arc::new(ConfiguredRealtimeRelay { relay: realtime_relay, health: relay_health });
     let readiness: Arc<dyn ProcessReadinessPort> = process_health;
     let state = PublicApiState::new(
         Some(worlds),

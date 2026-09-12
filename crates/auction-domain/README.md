@@ -32,3 +32,8 @@
 
 修改竞价写入、状态迁移或结算逻辑时，必须在代码或变更说明中写明保护了哪些不变量，
 清单见根 AGENTS.md 和 docs/contracts/invariants.md。
+
+新拍卖模板通过 `SettlementPolicy::validate_for_new_auction` 要求折扣严格小于 50%
+（最小 `adjustment_ppm` 为 -499999），保证足额补偿后 COD 付款仍为正。历史策略仍使用
+原结构校验，已结算金额和重放不因模板限制改变；已有冻结曲线若产生非正付款，仍由原公式与义务校验失败关闭，
+不得静默调整经济快照。

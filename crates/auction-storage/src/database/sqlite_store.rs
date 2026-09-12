@@ -1,8 +1,8 @@
 //! SQLite Lite 连接池与文件/内存数据库边界。
 
+use super::sqlite_ownership::SqliteOwnershipIdentity;
 use super::*;
-#[cfg(feature = "sqlite")]
-use sha2::{Digest, Sha256};
+use sqlx::ConnectOptions;
 
 /// SQLite Lite 适配器边界。
 ///
@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     pool: TrackedPool<Sqlite>,
-    ownership_namespace: String,
+    ownership: Arc<SqliteOwnershipIdentity>,
 }
 
 /// 等待 SQLite 写锁的上限。超过该时长仍拿不到锁才返回错误，避免瞬时争用直接失败。
@@ -28,8 +28,11 @@ const SQLITE_FILE_MAX_CONNECTIONS: u32 = 5;
 #[cfg(feature = "sqlite")]
 impl SqliteStore {
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
-        let in_memory = is_in_memory_sqlite(database_url);
         let mut options: SqliteConnectOptions = database_url.parse()?;
+        let in_memory = options
+            .to_url_lossy()
+            .query_pairs()
+            .any(|(key, value)| key == "mode" && value == "memory");
 
         options = options
             // Lite 档面向本地与单主机部署，数据库文件不存在时创建而不是启动失败。
@@ -44,12 +47,12 @@ impl SqliteStore {
 
         // 内存库必须单连接：新连接会得到各自独立的空库，池化会让数据看起来随机消失。
         let max_connections = if in_memory { 1 } else { SQLITE_FILE_MAX_CONNECTIONS };
-        let pool =
-            SqlitePoolOptions::new().max_connections(max_connections).connect_with(options).await?;
-
-        // owner lock 只使用不可逆摘要命名，不把数据库绝对路径暴露到临时目录或错误消息。
-        let ownership_namespace = format!("{:x}", Sha256::digest(database_url.as_bytes()));
-        Ok(Self { pool: TrackedPool::new(pool), ownership_namespace })
+        let pool = SqlitePoolOptions::new()
+            .max_connections(max_connections)
+            .connect_with(options.clone())
+            .await?;
+        let ownership = Arc::new(SqliteOwnershipIdentity::from_connected(&pool, &options).await?);
+        Ok(Self { pool: TrackedPool::new(pool), ownership })
     }
 
     pub(crate) fn pool(&self) -> &TrackedPool<Sqlite> {
@@ -60,32 +63,7 @@ impl SqliteStore {
         self.pool.raw()
     }
 
-    pub(crate) fn ownership_namespace(&self) -> &str {
-        &self.ownership_namespace
+    pub(super) fn ownership(&self) -> &SqliteOwnershipIdentity {
+        &self.ownership
     }
-}
-
-/// 判断 SQLite URL 是否指向内存数据库。
-///
-/// SQLx 的 `in_memory` 字段是 `pub(crate)`，外部无法读取，因此这里按它的解析规则识别两种
-/// 写法：`:memory:` 路径和 `mode=memory` 查询参数。判断结果只用于选择 journal 模式与连接数，
-/// 误判为文件库的后果是给内存库设了无效的 WAL，不影响正确性。
-#[cfg(feature = "sqlite")]
-fn is_in_memory_sqlite(database_url: &str) -> bool {
-    let without_scheme = database_url
-        .strip_prefix("sqlite://")
-        .or_else(|| database_url.strip_prefix("sqlite:"))
-        .unwrap_or(database_url);
-    let (path, query) = match without_scheme.split_once('?') {
-        Some((path, query)) => (path, Some(query)),
-        None => (without_scheme, None),
-    };
-
-    if path == ":memory:" {
-        return true;
-    }
-
-    query.is_some_and(|query| {
-        query.split('&').any(|pair| pair.split_once('=') == Some(("mode", "memory")))
-    })
 }

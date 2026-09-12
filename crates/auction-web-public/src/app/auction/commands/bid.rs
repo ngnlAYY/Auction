@@ -201,6 +201,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         let lot_id = lot_id.clone();
                         async move { place_bid(lot_id, pending.amount, pending.command_id).await }
                     },
+                    crate::api::CommandError::outcome_uncertain,
                     move |result| {
                         // 成功后面板代替直接关弹窗：写入成功投影并刷新权威价格与领先者。
                         success.set(Some(BidSuccess {

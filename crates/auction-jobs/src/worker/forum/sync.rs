@@ -345,6 +345,7 @@ where
             catalog: rendered.clone(),
             system_log: system_log.clone(),
             allow_missing_system_log,
+            allow_content_update: retry_authorized,
             legacy_thread_id,
         },
     )
@@ -352,15 +353,15 @@ where
     {
         Ok(layout) => layout,
         Err(error) => {
-            let failure_code = if matches!(
-                &error,
-                ApplicationError::ForumRemote(remote) if remote.write_started()
-            ) {
-                "write_unknown"
+            // 已取得主题创建/查找证明；后续 GET 或固定楼层失败不能退回可自动发新主题的路径。
+            let code = forum_failure_code(&error);
+            // 人工补写授权使用已冻结的精确错误码，领取门禁会阻止自动重试。
+            let failure_code = if code == "write_authorization_required" {
+                code.to_owned()
             } else {
-                forum_failure_code(&error)
+                scoped_failure_code(true, code)
             };
-            record_failure(store, clock, retry_claim, failure_code.to_owned(), error).await?;
+            record_failure(store, clock, retry_claim, failure_code, error).await?;
             return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
@@ -380,6 +381,7 @@ struct FixedLayoutRequest {
     catalog: ForumRenderedThread,
     system_log: ForumRenderedPost,
     allow_missing_system_log: bool,
+    allow_content_update: bool,
     legacy_thread_id: Option<String>,
 }
 
@@ -395,6 +397,7 @@ async fn ensure_fixed_layout(
         catalog,
         system_log,
         allow_missing_system_log,
+        allow_content_update,
         legacy_thread_id,
     } = request;
     let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
@@ -425,38 +428,86 @@ async fn ensure_fixed_layout(
         }
     }
     let catalog_post_id = preview.catalog_post_id.clone();
-    if let Some(second) = preview.posts.first() {
+    let system_log_post_id = if let Some(second) = preview.posts.first() {
         if !second.post.text.contains(&system_log_marker) {
             return Err(fixed_layout_error("fixed_layout_conflict", false));
         }
-        return Ok(ForumPublishedLayout {
-            thread: published,
-            catalog_post_id,
-            system_log_post_id: second.post.id.clone(),
-        });
+        second.post.id.clone()
+    } else {
+        if !allow_missing_system_log {
+            return Err(fixed_layout_error("write_authorization_required", false));
+        }
+        let proof =
+            writer.reply_topic(world, published.thread_id.clone(), system_log.clone()).await?;
+        if proof.thread_id != published.thread_id {
+            return Err(fixed_layout_error("write_unknown", true));
+        }
+        let confirmed = reader.fetch_topic(world, published.thread_id.clone()).await?;
+        let Some(second) = confirmed.posts.first() else {
+            return Err(fixed_layout_error("write_unknown", true));
+        };
+        if confirmed.catalog_post_id != catalog_post_id
+            || second.post.id != proof.post_id
+            || !second.post.text.contains(&system_log_marker)
+        {
+            return Err(fixed_layout_error("fixed_layout_conflict", false));
+        }
+        proof.post_id
+    };
+
+    // 标记只证明固定楼层的身份，不证明本轮重新渲染的正文已经发布。正常创建和未知
+    // 写入恢复都须读取原始 BBCode；否则本地新正文会令后续刷新误判为无需更新。
+    prove_fixed_post_body(
+        writer.as_ref(),
+        world,
+        &published.thread_id,
+        &catalog_post_id,
+        Some(catalog.title.clone()),
+        ForumRenderedPost { body: catalog.body },
+        allow_content_update,
+    )
+    .await?;
+    prove_fixed_post_body(
+        writer.as_ref(),
+        world,
+        &published.thread_id,
+        &system_log_post_id,
+        None,
+        system_log,
+        allow_content_update,
+    )
+    .await?;
+    Ok(ForumPublishedLayout { thread: published, catalog_post_id, system_log_post_id })
+}
+
+/// 只有原始正文相等才返回发布证明；更改既有正文必须具有本轮人工重试授权。
+async fn prove_fixed_post_body(
+    writer: &dyn ForumPostWriter,
+    world: auction_domain::SettlementWorld,
+    thread_id: &str,
+    post_id: &str,
+    title: Option<String>,
+    expected: ForumRenderedPost,
+    allow_update: bool,
+) -> Result<(), ApplicationError> {
+    let observed = writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
+    if observed.body == expected.body {
+        return Ok(());
     }
-    if !allow_missing_system_log {
+    if !allow_update {
         return Err(fixed_layout_error("write_authorization_required", false));
     }
-    let proof = writer.reply_topic(world, published.thread_id.clone(), system_log).await?;
-    if proof.thread_id != published.thread_id {
+    let proof = writer
+        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), title, expected.clone())
+        .await?;
+    if proof.thread_id != thread_id || proof.post_id != post_id {
         return Err(fixed_layout_error("write_unknown", true));
     }
-    let confirmed = reader.fetch_topic(world, published.thread_id.clone()).await?;
-    let Some(second) = confirmed.posts.first() else {
+    let confirmed = writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
+    if confirmed.body != expected.body {
         return Err(fixed_layout_error("write_unknown", true));
-    };
-    if confirmed.catalog_post_id != catalog_post_id
-        || second.post.id != proof.post_id
-        || !second.post.text.contains(&system_log_marker)
-    {
-        return Err(fixed_layout_error("fixed_layout_conflict", false));
     }
-    Ok(ForumPublishedLayout {
-        thread: published,
-        catalog_post_id,
-        system_log_post_id: proof.post_id,
-    })
+    Ok(())
 }
 
 fn fixed_layout_error(code: &'static str, write_started: bool) -> ApplicationError {

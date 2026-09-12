@@ -172,8 +172,12 @@ Worker 使用 `(consumer_key, stream_key)` 读取 `realtime_consumer_offsets`。
 失败时允许按同一 `event_id` 重复投递，因此外部 sink 必须提供幂等键。
 
 PostgreSQL consumer 启动时还会按命名空间化的 `consumer_key` 持有会话级 advisory owner lock；
-同 key 的第二个实例必须启动失败，不能共享游标并竞态确认。SQLite Lite 继续依赖每个角色一个实例
-和串行写入约束。
+同 key 的第二个实例必须启动失败，不能共享游标并竞态确认。SQLite Lite 文件库按实际 main
+路径在数据库同目录取得同 key 的 0600 sidecar 锁，不能按 URL 或临时目录命名；内存库只在
+同进程的同一有效内存身份内互斥。Lite 继续遵守每个角色一个实例和串行写入约束。
+Public relay 的目录、消费快照、游标确认及失败记录全部使用该持锁物理连接；连接失效时
+失败关闭并撤销 relay readiness，不从普通连接池自动重连继续确认。锁查询前即设置关闭时
+丢弃连接，确保取消或退出不会把 session lock 遗留到池内；恢复消费需重新启动并取得 owner。
 
 schema 不可识别、序号出现缺口或外部 sink 失败都会写入 `realtime_failures`，且不会推进游标。
 失败记录未解决前，消费会停在该边界。只有在替代事件已经追加到同一 stream 后，运维流程才

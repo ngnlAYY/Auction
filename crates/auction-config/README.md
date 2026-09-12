@@ -17,6 +17,9 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 文件锁与原子替换集中在 `src/runtime/`；其中 `validation.rs` 复用 Worker 的 cron 解析器，供候选校验、
 文件读取/编码和启动 loader 共用。候选校验不执行 I/O，保存邮件参数不会触发远程轮询。
 
+`AuctionConfig::policy()` 返回 `Result`：秒数超出 chrono 可表示范围时返回 `ConfigError`，
+配置加载与预检不会因极端整数触发 panic；可表示的秒数继续由原有策略规则校验，不做截断。
+
 ## 公共、角色、敏感与 runtime 文件结构
 
 三个角色文件都必须通过 `common_file` 引用同一份公共非敏感 TOML，并通过 `secrets_file`
@@ -513,3 +516,7 @@ Admin/Worker 引用同一份 runtime 文件，并核对两者有效拍卖模板�
 
 当前格式不兼容旧的单文件敏感字段，旧格式必须以明确错误失败。配置字段变化必须同时更新解析
 代码、`ops/config/examples/`、相关 README 和部署说明。
+
+启用 Origin allowlist 而省略列表时，确定的 TCP listener 会推导规范 HTTP(S) Origin：
+HTTP 的 80 端口与 HTTPS 的 443 端口省略，IPv6 和其他端口保留 URL 标准表示。
+显式填写的来源仍须通过原有严格格式校验；Unix 或未指定 IP 的 listener 仍须显式填写。

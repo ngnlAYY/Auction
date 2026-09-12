@@ -184,7 +184,7 @@ pub(super) async fn proxy_sqlite(
          FROM bid_proxy_authorizations AS p
          JOIN lots AS l ON l.id = p.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          WHERE p.lot_id = ? AND p.user_id = ? AND p.authorization_id = ?
            AND a.status IN ('live', 'final', 'settling', 'settled')
@@ -224,7 +224,7 @@ pub(super) async fn proxy_sqlite(
          FROM bid_proxy_authorizations AS p
          JOIN lots AS l ON l.id = p.lot_id
          JOIN auctions AS a ON a.id = l.auction_id
-         JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
+         JOIN worlds AS w ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
          JOIN equipment AS e ON e.id = l.equipment_id
          WHERE p.lot_id = ? AND p.user_id = ?
            AND a.status IN ('live', 'final', 'settling', 'settled')

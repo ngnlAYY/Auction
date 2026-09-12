@@ -65,6 +65,13 @@ pub(crate) async fn register_postgres(
         }
         [row] => {
             let user = registration_user(row)?;
+            // 身份预读与写锁之间可能发生注册或改名；不允许把别的 UUID 的 AAD 信封写入此用户。
+            // Repository 错误由现有邮件重试重新执行 lookup 与签发，此处不写入结果账本。
+            if user.id != write.user_id {
+                return Err(repository_error(
+                    "Users MoogleMail 注册身份已变化，必须重新读取后重试",
+                ));
+            }
             if user.username_matches {
                 if user.status == "blacklisted" {
                     MailUserResult { user_id: Some(user.id), code: MailUserResultCode::Blacklisted }
@@ -164,7 +171,7 @@ pub(crate) async fn rebind_postgres(
     }
 
     let rows = sqlx::query(
-        "SELECT id, username, status, public_key_hash
+        "SELECT id, username, status, key_status, public_key_hash
          FROM public.users
          WHERE public_key_hash = $1
             OR lower(username) = lower($2)
@@ -187,8 +194,12 @@ pub(crate) async fn rebind_postgres(
         Some(source) => {
             let user_id: Uuid = source.try_get("id").map_err(map_storage_error)?;
             let status: String = source.try_get("status").map_err(map_storage_error)?;
+            let key_status: String = source.try_get("key_status").map_err(map_storage_error)?;
             if status == "blacklisted" {
                 MailUserResult { user_id: Some(user_id), code: MailUserResultCode::Blacklisted }
+            } else if key_status != "active" {
+                // 撤销的 key 不再授权新换绑；冲突目标仍保留在完整查询中，不能复用其名称。
+                MailUserResult { user_id: None, code: MailUserResultCode::InvalidKey }
             } else {
                 let conflict = rows.iter().any(|row| {
                     let Ok(other_id) = row.try_get::<Uuid, _>("id") else {

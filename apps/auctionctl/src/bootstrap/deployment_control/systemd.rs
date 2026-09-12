@@ -62,6 +62,10 @@ pub(super) struct UnitSnapshot {
     pub(super) invocation_id: String,
     pub(super) started_monotonic_micros: u64,
     pub(super) environment: String,
+    pub(super) environment_files: String,
+    pub(super) unset_environment: String,
+    pub(super) pass_environment: String,
+    pub(super) pam_name: String,
 }
 
 impl UnitSnapshot {
@@ -70,7 +74,7 @@ impl UnitSnapshot {
     }
 
     pub(super) fn stopped(&self) -> bool {
-        self.main_pid == 0 && self.active_state != "active" && self.active_state != "activating"
+        self.safely_stopped_for_migration()
     }
 
     /// 独立迁移只接受 systemd 明确收敛后的停止状态。
@@ -136,6 +140,10 @@ impl SystemdClient {
                 OsStr::new("--property=InvocationID"),
                 OsStr::new("--property=ExecMainStartTimestampMonotonic"),
                 OsStr::new("--property=Environment"),
+                OsStr::new("--property=EnvironmentFiles"),
+                OsStr::new("--property=UnsetEnvironment"),
+                OsStr::new("--property=PassEnvironment"),
+                OsStr::new("--property=PAMName"),
                 OsStr::new(unit),
             ],
         )?;
@@ -152,16 +160,12 @@ impl SystemdClient {
     pub(super) fn stop_unit(&self, role: ManagedRole) -> anyhow::Result<()> {
         let unit = self.unit(role);
         let before = self.snapshot(role)?;
-        if before.load_state == "not-found" {
+        if before.stopped() {
             println!("role={} unit={} action=already-stopped", role.name(), unit);
             return Ok(());
         }
         if before.load_state != "loaded" {
             anyhow::bail!("{} unit 未装载：{}", role.name(), unit)
-        }
-        if before.stopped() {
-            println!("role={} unit={} action=already-stopped", role.name(), unit);
-            return Ok(());
         }
         self.output("停止 systemd unit", [OsStr::new("stop"), OsStr::new(unit)])?;
         let after = self.snapshot(role)?;
@@ -273,6 +277,10 @@ fn parse_snapshot(bytes: &[u8]) -> anyhow::Result<UnitSnapshot> {
         invocation_id: required("InvocationID")?.to_owned(),
         started_monotonic_micros,
         environment: required("Environment")?.to_owned(),
+        environment_files: required("EnvironmentFiles")?.to_owned(),
+        unset_environment: required("UnsetEnvironment")?.to_owned(),
+        pass_environment: required("PassEnvironment")?.to_owned(),
+        pam_name: required("PAMName")?.to_owned(),
     })
 }
 

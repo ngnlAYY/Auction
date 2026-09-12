@@ -174,11 +174,12 @@ pub(crate) fn LiveLotDetailView(
                             }
                         }
                     },
-                    Some(Ok(page)) if page.bids.is_empty() => rsx! {
-                        p { class: "public-auction-lot__none", {t!("lot-no-bids")} }
-                    },
                     Some(Ok(page)) => rsx! {
-                        BidHistoryTable { page: page.clone() }
+                        if page.bids.is_empty() {
+                            p { class: "public-auction-lot__none", {t!("lot-no-bids")} }
+                        } else {
+                            BidHistoryTable { page: page.clone() }
+                        }
                         Pager {
                             page: bid_page(),
                             page_size: page.page_size,

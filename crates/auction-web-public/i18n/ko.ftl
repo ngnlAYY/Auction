@@ -431,3 +431,4 @@ command-login-required = 먼저 입찰 Key로 로그인해 주세요.
 command-not-found = 요청한 콘텐츠가 존재하지 않아요.
 command-conflict = 이 명령은 이전 요청과 충돌합니다.
 command-session-expired = 세션이 만료되었습니다. 다시 로그인한 후 재시도하세요.
+command-retry-unchanged = 이전 작업 결과를 확인하지 못했습니다. 재시도하면 동일한 명령과 금액을 전송합니다. 변경하려면 취소한 후 새로 진행하세요.

@@ -11,7 +11,7 @@ Public 与 Admin 的 HTTP 表面适配器。
   其中竞价与代理命令位于 `routes/public/competition/{bid,proxy}.rs`；
   handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
-  安全逻辑；Admin 写入统一由守卫保持限流 → Origin → CSRF → session 顺序，Admin 读取不消耗
+  安全逻辑；Basic Auth 保持首个冒号分隔账号与口令，配置和会话服务初始化拒绝含冒号的 actor；Admin 写入统一由守卫保持限流 → Origin → CSRF → session 顺序，Admin 读取不消耗
   mutation 限流额度。`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
   lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
   `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
@@ -24,7 +24,10 @@ Public 与 Admin 的 HTTP 表面适配器。
 - `src/http/shared/state/`：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
   `mod.rs` 只保留 `PublicApiState`/`AdminApiState` 稳定导出；状态容器不跨 surface 共用业务端口。
 - `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
-  访问日志；`server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
+  访问日志；业务 API 路由额外挂接默认纯文本拒绝的 JSON 外壳转换，400/413/500 分别使用
+  `invalid_query`/`body_too_large`/`internal_error`，保留状态码和已映射 JSON，不改认证或读取正文的
+  顺序；替换正文时移除旧实体描述头，HEAD 保持空正文，健康检查、metrics 和静态资源不接入。
+  `server.rs`：固定请求头读取超时和连接级优雅排空；`response_cache.rs`：冻结路由的
   `no-cache`/`no-store` 响应策略；`strict_json.rs`：旧版写路由的媒体类型、body 上限和单 JSON
   值边界，并允许 Public 竞价命令在限流、Origin 和认证之后延迟解码 body；`method_strict.rs`：业务
   路由显式 HEAD/405 与 `Allow` 契约。

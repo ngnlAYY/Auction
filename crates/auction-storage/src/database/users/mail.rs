@@ -32,6 +32,24 @@ mod sqlite;
 use super::DatabaseStore;
 
 impl MailUserStore for DatabaseStore {
+    fn find_registration_user_id(
+        &self,
+        _username: String,
+    ) -> auction_application::ApplicationFuture<'_, Option<Uuid>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    postgres::find_registration_user_id(store, &_username).await
+                }
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
+                    "Users MoogleMail 注册 owner 仅支持 PostgreSQL 完整档",
+                )),
+            }
+        })
+    }
+
     fn find_mail_command(
         &self,
         _command_id: CommandId,

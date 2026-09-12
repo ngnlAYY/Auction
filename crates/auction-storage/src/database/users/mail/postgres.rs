@@ -12,4 +12,6 @@ mod mapping;
 mod reads;
 
 pub(super) use commands::{rebind_postgres, register_postgres};
-pub(super) use reads::{find_mail_command_postgres, load_envelope_postgres};
+pub(super) use reads::{
+    find_mail_command_postgres, find_registration_user_id, load_envelope_postgres,
+};

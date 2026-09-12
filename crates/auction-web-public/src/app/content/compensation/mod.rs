@@ -43,11 +43,18 @@ pub(super) fn pool_page() -> Element {
             let auction_id = selected_auction_id();
             let page = movement_page();
             async move {
-                if auction_id.is_empty() {
+                let result = if auction_id.is_empty() {
                     Ok(None)
                 } else {
-                    fetch_compensation_movements(auction_id, page).await.map(Some)
-                }
+                    fetch_compensation_movements(auction_id.clone(), page).await.and_then(|page| {
+                        if page.round.auction_id == auction_id {
+                            Ok(Some(page))
+                        } else {
+                            Err("invalid_response".to_owned())
+                        }
+                    })
+                };
+                (auction_id, result)
             }
         }
     });
@@ -72,7 +79,11 @@ pub(super) fn pool_page() -> Element {
             }
         },
         Some(Ok(page)) => {
-            let movement_state = movements.read_unchecked().clone();
+            // 同轮次刷新保留快照；切换轮次不能把旧流水与新轮次余额、世界拼在一起。
+            let movement_state =
+                movements.read_unchecked().as_ref().and_then(|(auction_id, result)| {
+                    (auction_id == &selected_auction_id()).then(|| result.clone())
+                });
             rsx! {
                 CompensationPoolTable {
                     page: page.clone(),

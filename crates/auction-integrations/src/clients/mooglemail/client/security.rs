@@ -1,5 +1,7 @@
 //! MoogleMail HTTP 客户端的安全响应判定、限速器和敏感数据边界。
 
+use scraper::{ElementRef, Html, Node};
+
 use super::*;
 
 /// 构造不跟随重定向、关闭环境代理的 MoogleMail HTTP client。
@@ -21,18 +23,70 @@ pub(crate) fn is_hentaiverse_login_response(
     location: Option<&header::HeaderValue>,
     body: &[u8],
 ) -> bool {
-    if status.is_redirection() {
-        let location = location.and_then(|value| value.to_str().ok()).unwrap_or_default();
-        let location = location.to_ascii_lowercase();
-        if location.contains("bounce_login") {
-            return true;
+    if status.is_redirection()
+        && location.and_then(|value| value.to_str().ok()).is_some_and(is_login_reference)
+    {
+        return true;
+    }
+    let document = Html::parse_document(&String::from_utf8_lossy(body));
+    let root = document.root_element();
+    // 正常邮件、装备和余额页面存在时，正文中的短语或链接不能作废凭据；矛盾响应交给协议校验。
+    if root.descendants().filter_map(ElementRef::wrap).any(is_authenticated_content) {
+        return false;
+    }
+    let mut text = String::new();
+    for node in root.descendants() {
+        if node.ancestors().filter_map(ElementRef::wrap).any(|element| {
+            matches!(element.value().name(), "textarea" | "script" | "style" | "noscript")
+        }) {
+            continue;
+        }
+        match node.value() {
+            Node::Text(value) => {
+                text.push_str(value);
+                text.push(' ');
+            }
+            Node::Element(element) => {
+                let reference = match element.name() {
+                    "a" => element.attr("href"),
+                    "form" => element.attr("action"),
+                    _ => None,
+                };
+                if reference.is_some_and(is_login_reference) {
+                    return true;
+                }
+            }
+            _ => {}
         }
     }
-    let body = String::from_utf8_lossy(body).to_ascii_lowercase();
-    body.contains("bounce_login.php")
-        || body.contains("you are not logged in")
-        || body.contains("this page requires you to log on")
-        || body.contains("you must be logged on to visit the hentaiverse")
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    text.contains("you are not logged in")
+        || text.contains("this page requires you to log on")
+        || text.contains("you must be logged on to visit the hentaiverse")
+}
+
+fn is_authenticated_content(element: ElementRef<'_>) -> bool {
+    matches!(
+        element.value().attr("id"),
+        Some("mmail_outer" | "mmail_list" | "networth" | "battle_main")
+    ) || element.value().classes().any(|class| class == "showequip")
+}
+
+fn login_reference_url(reference: &str) -> Option<Url> {
+    let base = Url::parse("https://hentaiverse.org/").ok()?;
+    let url = base.join(reference).ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none())
+    .then_some(url)
+}
+
+fn is_login_reference(reference: &str) -> bool {
+    login_reference_url(reference).is_some_and(|url| {
+        matches!(url.host_str(), Some("hentaiverse.org" | "e-hentai.org"))
+            && url.path() == "/bounce_login.php"
+    })
 }
 
 pub(super) fn is_session_expired(
@@ -44,9 +98,9 @@ pub(super) fn is_session_expired(
         return true;
     }
     status.is_redirection()
-        && location
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.to_ascii_lowercase().contains("e-hentai.org"))
+        && location.and_then(|value| value.to_str().ok()).and_then(login_reference_url).is_some_and(
+            |url| matches!(url.host_str(), Some("e-hentai.org" | "forums.e-hentai.org")),
+        )
 }
 
 /// HV 会在角色处于战斗时用战斗页替代 Item Shop/MoogleMail 页面。

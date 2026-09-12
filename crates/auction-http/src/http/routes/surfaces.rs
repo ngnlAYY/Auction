@@ -96,7 +96,7 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         .route_layer(middleware::from_fn(response_cache::no_store));
     let routes =
         no_cache_routes.merge(no_store_routes).route("/api/v1/ws", get(realtime::websocket));
-    router.merge(routes)
+    router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection)))
 }
 
 /// 注册已冻结的 Admin 路径。
@@ -290,5 +290,9 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
             ),
         );
-    router.merge(routes.route_layer(middleware::from_fn(response_cache::no_store)))
+    router.merge(
+        routes
+            .route_layer(middleware::from_fn(response_cache::no_store))
+            .route_layer(middleware::from_fn(boundary::normalize_api_rejection)),
+    )
 }

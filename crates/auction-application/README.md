@@ -1,6 +1,13 @@
 # auction-application
 
+MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信封 AAD 使用该身份；Users
+写事务仍须重新锁定并核对 UUID，身份变化时返回可重试错误，不提交错误信封或命令结果。
+撤销的 key 不能授权新的 MM 换绑；已经完成的相同命令继续按账本重放，不再次修改身份。
+
 应用层：用例、窄端口和事务编排。
+
+`AdminCredentialRuntimeOwnership` 提供发送前有界检查及已知失效状态；检查失败或取消后
+不恢复所有权，不暴露数据库连接或凭据。Admin 会话初始化拒绝 Basic Auth 无法表达的含冒号账号。
 
 源码布局：`src/lib.rs` 只保留模块声明和公共导出；实现按端口、服务和错误职责放在对应子目录。
 `ports/` 与 `services/` 再按 `admin/`、`auction/`、`mail/`、`realtime/`、`recovery/`、
@@ -202,3 +209,8 @@ Admin 拍卖创建会在 PostgreSQL Serializable 事务中把已校验的策略�
 `TransactionPolicy::serializable()` 固定三次最大尝试，`read_committed()` 固定一次；
 存储适配器不得把竞价写入和队列领取路径合并成同一种事务语义。命令账本的
 `request_hash` 必须是固定 32 字节 SHA-256 摘要，结果负载由边界适配器保证为 JSON object。
+
+`AuctionPolicyTemplate::validate` 对新模板调用结算领域的新拍卖门禁，拒绝达到或超过 50%
+的折扣，避免新建拍卖在补偿池足额时产生零或负数 COD 付款；历史结算读取仍沿用冻结策略。
+后继草稿的 `AuctionLifecycleContext` 携带锁内冻结结算策略，`successor_plan` 同样应用
+新模板门禁，不能通过复制旧快照绕过新建约束；普通历史读取不应用该门禁。

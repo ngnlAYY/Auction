@@ -1,6 +1,6 @@
 //! Unix 部署控制器的内部状态模型。
 
-use std::{fs::File, os::unix::io::AsRawFd, path::PathBuf};
+use std::{fs::File, path::PathBuf};
 
 use super::super::probe::ReadinessProbe;
 use super::super::systemd::{ManagedRole, SystemdClient};
@@ -18,7 +18,7 @@ pub(in crate::bootstrap::deployment_control::unix) struct DeploymentLock {
 impl Drop for DeploymentLock {
     fn drop(&mut self) {
         // 文件描述符关闭也会释放锁；显式 unlock 让失败路径的所有权更容易审计。
-        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+        let _ = self.file.unlock();
     }
 }
 

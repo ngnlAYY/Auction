@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use anyhow::Context;
-use auction_storage::postgres_expected_migration_version;
+use auction_storage::{deployment_database_identity, postgres_expected_migration_version};
 use url::Url;
 
 use super::super::{decode_uri_component, require_pg_value};
@@ -91,26 +91,27 @@ pub(crate) fn resolve_maintenance_database_url(
         confirmed_database_name,
         "application database_url",
     )?;
+    let mut application_maintenance = application.clone();
+    application_maintenance.set_path("/postgres");
     let maintenance = match configured_maintenance_database_url {
         Some(database_url) => {
-            let maintenance =
-                parse_secure_postgres_url(database_url, "postgres", "maintenance database_url")?;
-            if application.host_str() != maintenance.host_str()
-                || application.port().unwrap_or(5432) != maintenance.port().unwrap_or(5432)
-                || postgres_tls_profile(&application) != postgres_tls_profile(&maintenance)
-            {
-                anyhow::bail!(
-                    "maintenance database_url must use the application database endpoint and TLS profile"
-                );
-            }
-            maintenance
+            parse_secure_postgres_url(database_url, "postgres", "maintenance database_url")?
         }
-        None => {
-            let mut maintenance = application;
-            maintenance.set_path("/postgres");
-            maintenance
-        }
+        None => application_maintenance.clone(),
     };
+    // 显式目标通过实际驱动解析后比较；统一数据库名只为比较同一维护端点，不能
+    // 用 URL 的缺省 5432 代替 SQLx 会继承 PGPORT 的真实连接语义。
+    let application_identity = deployment_database_identity(application_maintenance.as_str())
+        .context("确认 PostgreSQL 应用连接端点失败")?;
+    let maintenance_identity = deployment_database_identity(maintenance.as_str())
+        .context("确认 PostgreSQL 维护连接端点失败")?;
+    if application_identity != maintenance_identity
+        || postgres_tls_profile(&application) != postgres_tls_profile(&maintenance)
+    {
+        anyhow::bail!(
+            "maintenance database_url must use the application database endpoint and TLS profile"
+        );
+    }
     Ok(maintenance.into())
 }
 
@@ -145,8 +146,12 @@ fn parse_secure_postgres_url(
     if database != expected_database_name || database.is_empty() || database.contains('/') {
         anyhow::bail!("{label} path does not match its required database");
     }
-    if url.host_str().is_some_and(|host| host.is_empty() || host.contains(',')) {
-        anyhow::bail!("database_url host is empty or uses an unsupported multi-host form");
+    if url.host_str().is_none_or(|host| host.is_empty() || host.contains(','))
+        || url.port().is_none_or(|port| port == 0)
+    {
+        anyhow::bail!(
+            "PostgreSQL 维护命令的应用与维护 URL 必须显式提供单一 host 和非零 port，不能依赖环境默认值"
+        );
     }
 
     let mut seen_query_keys = HashSet::new();
@@ -156,48 +161,32 @@ fn parse_secure_postgres_url(
         if !seen_query_keys.insert(key.clone()) {
             anyhow::bail!("database_url contains a duplicate PostgreSQL query parameter");
         }
-        if (key == "ssl" && seen_query_keys.contains("sslmode"))
-            || (key == "sslmode" && seen_query_keys.contains("ssl"))
-        {
-            anyhow::bail!("database_url cannot combine ssl and sslmode");
-        }
         match key.as_str() {
             "application_name" => require_pg_value(&value, "application_name", 63)?,
-            "connect_timeout" => {
-                value
-                    .parse::<u16>()
-                    .ok()
-                    .filter(|timeout| (1..=300).contains(timeout))
-                    .ok_or_else(|| anyhow::anyhow!("connect_timeout must be 1..=300"))?;
-            }
             "sslmode"
                 if matches!(
                     value.as_str(),
                     "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full"
                 ) => {}
-            "ssl" if value == "true" => {}
-            _ => anyhow::bail!(
-                "database_url query parameter is not supported by the rebuild adapter: {key}"
-            ),
+            // SQLx 不识别的参数可能被静默忽略；维护路径不能据此声称目标或 TLS 已受约束。
+            _ => anyhow::bail!("PostgreSQL 维护 URL 仅支持 application_name 和 sslmode 查询参数"),
         }
     }
     Ok(url)
 }
 
-fn postgres_tls_profile(url: &Url) -> &str {
-    url.query_pairs()
-        .find_map(|(key, value)| match key.as_ref() {
-            "sslmode" => Some(match value.as_ref() {
-                "disable" => "disable",
-                "allow" => "allow",
-                "prefer" => "prefer",
-                "require" => "require",
-                "verify-ca" => "verify-ca",
-                "verify-full" => "verify-full",
-                _ => "invalid",
-            }),
-            "ssl" if value == "true" => Some("require"),
-            _ => None,
-        })
-        .unwrap_or("prefer")
+// 省略 sslmode 会继承进程环境；不能把省略与显式 prefer 误认为相同 TLS 策略。
+fn postgres_tls_profile(url: &Url) -> Option<&str> {
+    url.query_pairs().find_map(|(key, value)| match key.as_ref() {
+        "sslmode" => Some(match value.as_ref() {
+            "disable" => "disable",
+            "allow" => "allow",
+            "prefer" => "prefer",
+            "require" => "require",
+            "verify-ca" => "verify-ca",
+            "verify-full" => "verify-full",
+            _ => "invalid",
+        }),
+        _ => None,
+    })
 }

@@ -104,6 +104,8 @@ pub(in crate::bootstrap) async fn adopt(
         anyhow::bail!("live legacy v28 source shape does not match the verified backup manifest");
     }
 
+    super::super::sync_private_artifact(&reverified.archive_path)?;
+    super::super::sync_private_artifact(manifest_path)?;
     let adoption = postgres
         .adopt_legacy_v28(confirmed_database_name)
         .await

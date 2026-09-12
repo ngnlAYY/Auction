@@ -22,7 +22,7 @@ pub(super) fn validate_stream_directory_query(
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_streams_postgres(
-    store: &super::super::PostgresStore,
+    connection: &mut sqlx::PgConnection,
     prefix: &str,
     after: &str,
     limit: u16,
@@ -38,7 +38,7 @@ pub(super) async fn list_streams_postgres(
     .bind(pattern)
     .bind(after)
     .bind(i64::from(limit))
-    .fetch_all(store.pool())
+    .fetch_all(connection)
     .await
     .map_err(|_| storage_error("读取 PostgreSQL 实时 stream 目录失败"))
 }

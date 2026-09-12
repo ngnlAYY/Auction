@@ -90,7 +90,13 @@ pub(crate) fn resolve_http_security_origins(
         ));
     }
     let scheme = if config.cookie_secure { "https" } else { "http" };
-    config.allowed_origins.push(format!("{scheme}://{address}"));
+    // 与显式来源校验使用同一 URL 规范化规则：默认 80/443 不保留端口，IPv6 与
+    // 非默认端口由 URL origin 序列化处理，避免自动推导出随后会被自身拒绝的来源。
+    let origin = Url::parse(&format!("{scheme}://{address}"))
+        .map_err(|_| ConfigError::InvalidHttpSecurity("无法从 TCP listener 推导浏览器 origin"))?
+        .origin()
+        .ascii_serialization();
+    config.allowed_origins.push(origin);
     Ok(())
 }
 

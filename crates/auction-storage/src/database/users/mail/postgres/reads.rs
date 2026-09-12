@@ -1,7 +1,29 @@
 //! PostgreSQL Users/MoogleMail 幂等命令与密文信封读取。
 
-use super::mapping::{map_storage_error, parse_mail_command};
+use super::mapping::{map_storage_error, parse_mail_command, valid_identity};
 use super::*;
+
+/// 只选择签发所需的候选 UUID；最终身份由注册写事务重新核对。
+pub(crate) async fn find_registration_user_id(
+    store: &crate::database::PostgresStore,
+    username: &str,
+) -> Result<Option<Uuid>, ApplicationError> {
+    if !valid_identity(username) {
+        return Err(repository_error("Users MoogleMail 注册身份查询参数无效"));
+    }
+    let ids = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM public.users WHERE lower(username) = lower($1) ORDER BY id LIMIT 2",
+    )
+    .bind(username)
+    .fetch_all(store.pool())
+    .await
+    .map_err(map_storage_error)?;
+    match ids.as_slice() {
+        [] => Ok(None),
+        [user_id] if !user_id.is_nil() => Ok(Some(*user_id)),
+        _ => Err(repository_error("Users MoogleMail 注册身份不唯一或无效")),
+    }
+}
 
 pub(crate) async fn find_mail_command_postgres(
     store: &crate::database::PostgresStore,

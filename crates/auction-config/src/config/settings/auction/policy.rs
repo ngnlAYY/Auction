@@ -3,6 +3,7 @@
 use chrono::Duration;
 use serde::Deserialize;
 
+use super::super::ConfigError;
 use auction_application::AuctionPolicyTemplate;
 use auction_domain::{
     AdjustmentAnchor, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
@@ -64,8 +65,13 @@ impl Default for AuctionScheduleConfig {
 }
 
 impl AuctionConfig {
-    /// 将已通过主配置校验的 TOML 设置转换为应用层策略模板。
-    pub fn policy(&self) -> AuctionPolicyTemplate {
+    /// 将 TOML 设置转换为应用层策略模板；秒数超出 chrono 范围时返回配置错误。
+    pub fn policy(&self) -> Result<AuctionPolicyTemplate, ConfigError> {
+        // 此公开转换也可能在主配置校验之前调用，不能依赖调用方先排除极端 i64。
+        let duration = |seconds| {
+            Duration::try_seconds(seconds)
+                .ok_or(ConfigError::InvalidAuctionConfig("策略秒数超出可表示范围"))
+        };
         let settlement_mode = match self.settlement.mode.as_str() {
             "legacy_zero_v0" => SettlementMode::LegacyZeroV0,
             _ => SettlementMode::HoldCurveV1,
@@ -74,17 +80,17 @@ impl AuctionConfig {
             "remind_v1" => RecoveryMode::RemindV1,
             _ => RecoveryMode::RemindV1,
         };
-        AuctionPolicyTemplate {
+        Ok(AuctionPolicyTemplate {
             start_price: self.economics.start_price,
             bid_increment_ppm: self.economics.bid_increment_ppm,
-            soft_close_window: Duration::seconds(self.economics.soft_close_window_seconds),
-            soft_close_extension: Duration::seconds(self.economics.soft_close_extension_seconds),
+            soft_close_window: duration(self.economics.soft_close_window_seconds)?,
+            soft_close_extension: duration(self.economics.soft_close_extension_seconds)?,
             proxy_enabled: self.economics.proxy_enabled,
             proxy_default_mode: self.economics.proxy_default_mode.clone(),
-            proxy_slow_interval: Duration::seconds(self.economics.proxy_slow_interval_seconds),
+            proxy_slow_interval: duration(self.economics.proxy_slow_interval_seconds)?,
             proxy_max_outbid_uses: self.economics.proxy_max_outbid_uses,
-            final_phase_lead: Duration::seconds(self.economics.final_phase_lead_seconds),
-            cancel_cutoff: Duration::seconds(self.economics.cancel_cutoff_seconds),
+            final_phase_lead: duration(self.economics.final_phase_lead_seconds)?,
+            cancel_cutoff: duration(self.economics.cancel_cutoff_seconds)?,
             settlement: SettlementPolicy {
                 version: self.settlement.version,
                 mode: settlement_mode,
@@ -103,12 +109,10 @@ impl AuctionConfig {
             recovery: RecoveryPolicy {
                 version: self.settlement.recovery.version,
                 mode: recovery_mode,
-                payment_timeout: Duration::seconds(
-                    self.settlement.recovery.payment_timeout_seconds,
-                ),
+                payment_timeout: duration(self.settlement.recovery.payment_timeout_seconds)?,
                 reminder_limit: self.settlement.recovery.reminder_limit,
             },
-        }
+        })
     }
 }
 

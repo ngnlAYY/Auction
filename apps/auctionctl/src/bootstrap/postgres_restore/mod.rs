@@ -13,8 +13,8 @@ use auction_storage::{
 use chrono::Utc;
 
 use super::{
-    PostgresBackupManifest, PostgresCommandEnvironment, create_private_temp_path,
-    manifest_archive_path, read_backup_manifest, require_absent_artifact, run_external_command,
+    PostgresBackupManifest, PostgresCommandEnvironment, PrivateReceiptReservation,
+    RestoreReceiptSpec, manifest_archive_path, read_backup_manifest, run_external_command,
     sha256_file, sha256_text, validate_backup_manifest, validate_private_evidence_path,
     verify_archive, verify_private_regular_file,
 };
@@ -109,6 +109,8 @@ pub(super) async fn execute(
         anyhow::bail!("backup archive or manifest changed during PostgreSQL restore preflight");
     }
 
+    super::sync_private_artifact(&reverified.archive_path)?;
+    super::sync_private_artifact(manifest_path)?;
     run_pg_restore(&command_environment, confirmed_database_name, &reverified.archive_path)?;
 
     let restored_store = DatabaseStore::connect(database_url)

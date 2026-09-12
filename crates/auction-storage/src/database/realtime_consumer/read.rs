@@ -5,6 +5,8 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use serde_json::Value;
+#[cfg(feature = "postgres")]
+use sqlx::Connection;
 use sqlx::Row;
 #[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
@@ -16,14 +18,11 @@ use super::common::storage_error;
 use super::common::{parse_timestamp, uuid_from_blob};
 #[cfg(feature = "postgres")]
 pub(super) async fn read_postgres(
-    store: &super::super::PostgresStore,
+    connection: &mut sqlx::PgConnection,
     request: RealtimeConsumerRequest,
 ) -> Result<Option<RealtimeConsumerBatch>, ApplicationError> {
-    let mut transaction = store
-        .pool()
-        .begin()
-        .await
-        .map_err(|_| storage_error("打开 PostgreSQL 实时消费快照失败"))?;
+    let mut transaction =
+        connection.begin().await.map_err(|_| storage_error("打开 PostgreSQL 实时消费快照失败"))?;
     let stream_exists: Option<i32> =
         sqlx::query_scalar("SELECT 1 FROM public.realtime_streams WHERE stream_key = $1")
             .bind(&request.stream_key)

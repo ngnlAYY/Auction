@@ -107,7 +107,7 @@ impl AuctionPolicyTemplate {
         {
             return Err(DomainError::InvalidRules("经济策略字段超出允许范围"));
         }
-        self.settlement.validate()?;
+        self.settlement.validate_for_new_auction()?;
         self.recovery.validate()?;
         Ok(())
     }

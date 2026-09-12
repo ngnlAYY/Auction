@@ -217,7 +217,7 @@ pub(super) fn validate_rebind_command(
     Ok(())
 }
 
-fn valid_identity(value: &str) -> bool {
+pub(super) fn valid_identity(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
         && value == value.trim()

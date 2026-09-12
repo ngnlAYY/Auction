@@ -37,7 +37,9 @@ async fn observe_action_in_transaction(
     audit_id: Uuid,
 ) -> Result<RecoveryActionOutcome, RecoveryActionTransactionError> {
     let row = sqlx::query(
-        "SELECT status, external_reference, failure_code, result_metadata
+        "SELECT status, external_reference, failure_code, result_metadata,
+                command_id, request_digest, origin_kind, origin_id, recipient, payload,
+                activation_command_id, activation_request_digest
          FROM public.deliveries WHERE id = $1",
     )
     .bind(delivery_id)
@@ -55,6 +57,11 @@ async fn observe_action_in_transaction(
     let (outcome, terminal) = match status.as_str() {
         "pending" | "claimed" | "sending" => return Ok(RecoveryActionOutcome::Retry),
         "prepared" => manual_outcome("recovery_delivery_conflict"),
+        "succeeded"
+            if claim.kind == "payment_reminder" && !valid_reminder_delivery(claim, &row)? =>
+        {
+            manual_outcome("recovery_delivery_conflict")
+        }
         "succeeded" => succeeded_outcome(
             claim,
             delivery_id,
@@ -90,13 +97,17 @@ fn succeeded_outcome(
             "send",
             "main",
             "delivery_recovery_reminder_sent",
-            claim.payment_reference.as_str(),
+            None,
             result_metadata.get("external_reference_proven").and_then(serde_json::Value::as_bool)
                 == Some(true)
                 && result_metadata.get("operation").and_then(serde_json::Value::as_str)
                     == Some("send")
                 && result_metadata.get("template").and_then(serde_json::Value::as_str)
-                    == Some("recovery_payment_reminder"),
+                    == Some("recovery_payment_reminder")
+                && result_metadata.get("sent_verified").and_then(serde_json::Value::as_bool)
+                    == Some(true)
+                && result_metadata.get("proof").and_then(serde_json::Value::as_str)
+                    == Some("sent_exact_payload_v1"),
         ),
         "reclaim_equipment_take" | "cancel_carrier_take" | "recover_equipment_take" => {
             let Some(expected_reference) = claim.source_external_mail_id.as_deref() else {
@@ -106,7 +117,7 @@ fn succeeded_outcome(
                 "take",
                 claim.world_id.as_str(),
                 "delivery_recovery_take_succeeded",
-                expected_reference,
+                Some(expected_reference),
                 result_metadata.get("operation").and_then(serde_json::Value::as_str)
                     == Some("take")
                     && result_metadata.get("external_mail_id").and_then(serde_json::Value::as_str)
@@ -141,7 +152,7 @@ fn succeeded_outcome(
         return Ok(manual_outcome("recovery_outcome_unknown"));
     };
     if !proven
-        || reference != expected_reference
+        || expected_reference.is_some_and(|expected| reference != expected)
         || observed_at < claim.claimed_at
         || observed_at > claim.lease_until
     {
@@ -168,6 +179,70 @@ fn succeeded_outcome(
             proof_observed_at: observed_at,
         },
     ))
+}
+
+#[cfg(feature = "postgres")]
+fn valid_reminder_delivery(
+    claim: &RecoveryActionClaim,
+    row: &sqlx::postgres::PgRow,
+) -> Result<bool, RecoveryActionTransactionError> {
+    let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
+    let request_digest: Vec<u8> = row.try_get("request_digest").map_err(map_storage_error)?;
+    let origin_kind: String = row.try_get("origin_kind").map_err(map_storage_error)?;
+    let origin_id: String = row.try_get("origin_id").map_err(map_storage_error)?;
+    let recipient: String = row.try_get("recipient").map_err(map_storage_error)?;
+    let payload: serde_json::Value = row.try_get("payload").map_err(map_storage_error)?;
+    let activation_command_id: Option<Uuid> =
+        row.try_get("activation_command_id").map_err(map_storage_error)?;
+    let activation_digest: Option<Vec<u8>> =
+        row.try_get("activation_request_digest").map_err(map_storage_error)?;
+    // 付款 UUID 绑定冻结请求，远端 Sent MID 绑定成功回执；两种身份不能互相比较。
+    // 使用 delivery 冻结收件人重算摘要，避免后来的用户名修改改变已发送事实。
+    let expected_hash = RequestHash::from_request(
+        "recovery_payment_reminder",
+        claim.action_id.as_uuid(),
+        &ReminderRequest {
+            recovery_id: claim.recovery_id.as_uuid(),
+            action_id: claim.action_id.as_uuid(),
+            recipient: &recipient,
+            payment_reference: &claim.payment_reference,
+        },
+    )
+    .map_err(|_| repository_error("recovery 提醒请求摘要编码失败"))?;
+    Ok(claim.prepare_command_id.map(CommandId::as_uuid) == Some(command_id)
+        && claim.prepare_request_hash == Some(expected_hash)
+        && request_digest == expected_hash.as_bytes()
+        && activation_command_id.is_some()
+        && activation_command_id == claim.activate_command_id.map(CommandId::as_uuid)
+        && claim
+            .activate_request_hash
+            .is_some_and(|hash| activation_digest.as_deref() == Some(hash.as_bytes().as_slice()))
+        && origin_kind == "settlement_recovery_action"
+        && origin_id == format!("recovery:{}", claim.recovery_id)
+        && payload
+            == serde_json::json!({
+                "schema_version": 1,
+                "operation": "send",
+                "world": "main",
+                "external_mail_id": claim.payment_reference,
+                "template": "recovery_payment_reminder",
+                "result_code": "payment_overdue",
+                "user_key_user_id": null,
+                "credits": 0,
+                "cod": 0,
+                "attachment_ids": [],
+                "body": null,
+            }))
+}
+
+/// 字段顺序与 Worker 冻结的 recovery_payment_reminder 请求契约一致。
+#[cfg(feature = "postgres")]
+#[derive(Serialize)]
+struct ReminderRequest<'a> {
+    recovery_id: Uuid,
+    action_id: Uuid,
+    recipient: &'a str,
+    payment_reference: &'a str,
 }
 
 #[cfg(feature = "postgres")]

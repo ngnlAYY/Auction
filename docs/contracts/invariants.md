@@ -371,7 +371,14 @@ HTTP DTO、事件 payload、快照、错误消息或提交的配置。错误只�
 保护，不能依赖可竞态的“先查后写”。Worker 必须按凭据类型持有进程生命周期 session advisory
 ownership；同类第二个 Worker 获取失败时应拒绝启动。远端确认失效后只允许幂等标记当前 Cookie
 为 `invalid`，不得自动轮换到第二条。ownership 保持到 Worker 退出，因此替换 Cookie 后必须重启
-Worker 完成交接。`.keyenv` 的 `hv-ck-key2` 只供显式隔离验证，不能成为运行时后备。
+Worker 完成交接。每次外部 HTTP 请求发送前必须有界检查原持锁 session；检查失败或取消后
+永久失效，不能换连接继续使用保留的 Cookie。同步可用性仅反映已知失效状态，不代替发送前
+检查。该检查不能撤销已到达远端的请求；多步写入失锁须保持结果未知，不能降为可盲重试失败。
+`.keyenv` 的 `hv-ck-key2` 只供显式隔离验证，不能成为运行时后备。
+
+Users/MoogleMail 登录 key 信封的 AAD 必须绑定最终持久化用户 UUID，不能把候选新用户的
+信封写到既有用户。注册身份预读不授予写入权限，事务须重新核对 UUID；身份变化回滚后
+重新签发。撤销 key 不能授权新的 MM 换绑，但不改写此前完成命令的幂等账本结果。
 
 ### I-12a Public WebSocket 不能成为无界资源或第二个命令入口
 

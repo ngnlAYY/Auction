@@ -8,10 +8,12 @@
 //! - [`stable_scoped_command_id`]：多目标并行形态（结算 recovery、world 启停、Dashboard
 //!   多 mailbox 暂停等一页多条命令的场景），按签名分别冻结 `command_id`，互不覆盖。
 //! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
-//!   置位/复位与 spawn 边界；结果处理由调用方回调完成，反馈写入可选。
+//!   置位/复位与 spawn 边界；取消任务同样清理 busy，结果处理由调用方回调完成。
+//! - [`run_admin_owned_action`]：把动作登记到 busy 信号的宿主；分页移除行组件不会取消页面命令。
 
 use std::collections::HashMap;
 
+use dioxus::core::Runtime;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -48,7 +50,7 @@ pub fn stable_scoped_command_id(
 
 /// 管理动作统一执行骨架：`busy` 置位 → spawn 执行 → 按结果回调 → `busy` 复位。
 ///
-/// 只负责 busy 边界与 spawn；反馈、命令状态清理、权威数据刷新等结果处理全部交给
+/// 只负责 busy 边界与 spawn；正常结束或取消均复位 busy，反馈、命令状态清理、权威数据刷新交给
 /// `on_success` / `on_failure`，错误类型由调用方决定（稳定 code 字符串或
 /// `AdminApiFailure`）。busy 守卫（`if busy() { return; }`）与前置状态清理仍留在调用方。
 pub fn run_admin_action<T, E, F>(
@@ -62,13 +64,43 @@ pub fn run_admin_action<T, E, F>(
     F: std::future::Future<Output = Result<T, E>> + 'static,
 {
     busy.set(true);
+    // 在 spawn 前建立 guard，任务尚未首次 poll 就被取消时也能释放宿主的 busy 状态。
+    let guard = AdminActionBusyGuard(busy);
     spawn(async move {
+        let _guard = guard;
         match action.await {
             Ok(value) => on_success(value),
             Err(error) => on_failure(error),
         }
-        busy.set(false);
     });
+}
+
+/// 在 busy 的稳定宿主中运行命令，宿主卸载时仍由 Dioxus 取消，不跨页面或身份分离运行。
+/// 回调若保留子组件信号，必须用 try_write 等存活检查，不能无条件访问已经卸载的行状态。
+pub fn run_admin_owned_action<T, E, F>(
+    busy: Signal<bool>,
+    action: F,
+    on_success: impl FnOnce(T) + 'static,
+    on_failure: impl FnOnce(E) + 'static,
+) where
+    T: 'static,
+    E: 'static,
+    F: std::future::Future<Output = Result<T, E>> + 'static,
+{
+    Runtime::current().in_scope(busy.origin_scope(), || {
+        run_admin_action(busy, action, on_success, on_failure);
+    });
+}
+
+struct AdminActionBusyGuard(Signal<bool>);
+
+impl Drop for AdminActionBusyGuard {
+    fn drop(&mut self) {
+        // 页面销毁也可能释放信号；清理不得因为失效 Signal 再次 panic。
+        if let Ok(mut busy) = self.0.try_write() {
+            *busy = false;
+        }
+    }
 }
 
 /// 在 [`run_admin_action`] 上叠加 [`AdminActionFeedback`] 反馈写入的常见形态：

@@ -431,3 +431,4 @@ command-login-required = 先に入札用 Key でログインしてください�
 command-not-found = 指定された内容は存在しません。
 command-conflict = このコマンドは以前のリクエストと競合しています。
 command-session-expired = セッションの有効期限が切れました。再度ログインして試してください。
+command-retry-unchanged = 前回の操作結果を確認できませんでした。再試行では同じコマンドと金額を送信します。変更する場合はキャンセルしてやり直してください。

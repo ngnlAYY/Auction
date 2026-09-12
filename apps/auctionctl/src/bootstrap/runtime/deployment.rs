@@ -95,6 +95,18 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
         );
     }
 
+    let expected_database = super::deployment_identity::database_identity(
+        configs[0].config.database_url().context("Public 数据库配置缺失")?,
+    )?;
+    for entry in &configs[1..] {
+        let identity = super::deployment_identity::database_identity(
+            entry.config.database_url().context("部署数据库配置缺失")?,
+        )?;
+        if identity != expected_database {
+            anyhow::bail!("Public、Admin 与 Worker 必须指向同一个数据库目标");
+        }
+    }
+
     let public = configs
         .iter()
         .find(|entry| entry.role == Role::Public)

@@ -12,7 +12,8 @@ pub struct PostgresStore {
 #[cfg(feature = "postgres")]
 impl PostgresStore {
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
-        let pool = PgPoolOptions::new().max_connections(16).connect(database_url).await?;
+        let options = crate::deployment_identity::postgres_connect_options(database_url)?;
+        let pool = PgPoolOptions::new().max_connections(16).connect_with(options).await?;
 
         Ok(Self { pool: TrackedPool::new(pool) })
     }

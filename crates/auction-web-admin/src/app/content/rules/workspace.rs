@@ -48,12 +48,12 @@ pub(super) fn AdminRulesWorkspace(
                         r#type: "button",
                         role: "tab",
                         aria_selected: (locale == target).to_string(),
-                        disabled: busy() && locale == target,
+                        disabled: busy(),
                         onclick: {
                             let current_target = target.clone();
                             let next_locale = locale.clone();
                             move |_| {
-                                if next_locale.as_str() == current_target.as_str() {
+                                if busy() || next_locale.as_str() == current_target.as_str() {
                                     return;
                                 }
                                 draft.set(None);
@@ -153,13 +153,24 @@ pub(super) fn AdminRulesWorkspace(
                             let mut checked_signature = checked_signature;
                             let mut command = command;
                             let mut notice = notice;
+                            let requested_signature = draft_signature(&candidate);
                             let locale = candidate.locale.clone();
                             let title = candidate.title.clone();
                             let markdown = candidate.markdown.clone();
                             busy.set(true);
                             notice.set(None);
                             spawn(async move {
-                                match validate_admin_rules(locale, title, markdown).await {
+                                let result = validate_admin_rules(locale.clone(), title, markdown).await;
+                                // 校验只可回写发起时的语言与草稿，不能覆盖已切换的编辑目标。
+                                if target_signal() != locale
+                                    || draft().as_ref().is_some_and(|current| {
+                                        draft_signature(current) != requested_signature
+                                    })
+                                {
+                                    busy.set(false);
+                                    return;
+                                }
+                                match result {
                                     Ok(normalized) => {
                                         checked_signature.set(draft_signature(&normalized));
                                         draft.set(Some(normalized));
@@ -270,6 +281,12 @@ pub(super) fn AdminRulesWorkspace(
                                 let publish_value = value.clone();
                                 move |_| {
                                     let signature = draft_signature(&publish_value);
+                                    if busy()
+                                        || target_signal() != publish_value.locale
+                                        || checked_signature() != signature
+                                    {
+                                        return;
+                                    }
                                     let command_key = format!("{}:{signature}", document.revision);
                                     let current_command = match command() {
                                         Some(existing) if existing.signature == command_key => existing,
@@ -286,6 +303,7 @@ pub(super) fn AdminRulesWorkspace(
                                     let mut reload_generation = reload_generation;
                                     busy.set(true);
                                     notice.set(None);
+                                    let requested_locale = current_command.draft.locale.clone();
                                     spawn(async move {
                                         let result = publish_admin_rules(
                                             current_command.command_id,
@@ -295,6 +313,10 @@ pub(super) fn AdminRulesWorkspace(
                                             current_command.draft.markdown,
                                         )
                                         .await;
+                                        if target_signal() != requested_locale {
+                                            busy.set(false);
+                                            return;
+                                        }
                                         match result {
                                             Ok(_) => {
                                                 notice.set(Some(RuleNotice::Published));

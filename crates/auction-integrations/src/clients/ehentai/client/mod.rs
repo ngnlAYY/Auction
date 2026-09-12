@@ -89,6 +89,7 @@ pub struct EhentaiClient {
     request_timeout: Duration,
     minimum_request_interval: Duration,
     test_board_mode: bool,
+    ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 }
 
 impl EhentaiClient {
@@ -108,6 +109,7 @@ impl EhentaiClient {
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             test_board_mode: false,
+            ownership: None,
         }
     }
 
@@ -137,7 +139,30 @@ impl EhentaiClient {
             request_timeout: config.request_timeout,
             minimum_request_interval: config.minimum_request_interval,
             test_board_mode: config.test_board_mode,
+            ownership: None,
         })
+    }
+
+    /// 网关注入凭据 owner；分页上下文与克隆客户端共享原持锁 session 的有效性。
+    pub(crate) fn with_ownership(
+        mut self,
+        ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    ) -> Self {
+        if ownership.is_some() {
+            self.ownership = ownership;
+        }
+        self
+    }
+
+    async fn check_ownership(&self) -> Result<(), ()> {
+        if let Some(ownership) = &self.ownership {
+            // 预算同时覆盖持锁连接的排队与探测；超时取消会永久撤销 owner。
+            tokio::time::timeout(Duration::from_secs(1), ownership.check())
+                .await
+                .map_err(|_| ())?
+                .map_err(|_| ())?;
+        }
+        Ok(())
     }
 
     /// 返回底层 HTTP client，供需要共享连接池的装配代码使用。

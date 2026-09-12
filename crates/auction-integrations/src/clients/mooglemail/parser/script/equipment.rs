@@ -69,15 +69,17 @@ pub(crate) fn body_equipment_keys(
         let equipment_id = &body[start..index];
         let key_start = index + 1;
         let key_end = key_start.saturating_add(10);
-        if key_end > body.len() || !valid_hex_key(&body[key_start..key_end]) {
+        // 邮件正文允许 Unicode；固定长度 key 必须先验证切片边界，不能因无效链接使 Worker panic。
+        let Some(raw_key) = body.get(key_start..key_end).filter(|value| valid_hex_key(value))
+        else {
             offset = key_start;
             continue;
-        }
+        };
         if body.as_bytes().get(key_end).is_some_and(|byte| byte.is_ascii_hexdigit()) {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
         if wanted.contains(equipment_id) {
-            let key = MoogleMailEquipmentKey::new(&body[key_start..key_end])
+            let key = MoogleMailEquipmentKey::new(raw_key)
                 .ok_or_else(|| detail_error(world, MoogleMailErrorCategory::ProtocolDrift))?;
             if keys.insert(equipment_id.to_owned(), key).is_some() {
                 return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
