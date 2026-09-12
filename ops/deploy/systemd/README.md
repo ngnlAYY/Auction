@@ -27,7 +27,9 @@ Public → Admin → Worker。
 
 角色 unit 的配置绑定只支持 `Environment` 中无空白、无转义的简单赋值；可整体包裹双引号。
 总控会拒绝非空 `EnvironmentFiles`、`UnsetEnvironment`、`PassEnvironment` 和 `PAMName`，
-避免间接覆盖或删除 `AUCTION_CONFIG_FILE`，也不会把环境原值写进诊断。readiness 的 TCP/Unix
+避免间接覆盖或删除 `AUCTION_CONFIG_FILE`，也不会把环境原值写进诊断。`systemctl show` 会省略
+空的 `EnvironmentFiles` 复合数组，因此仅该属性允许缺行表示空；其余身份和环境属性仍必须返回。
+readiness 的 TCP/Unix
 连接均为非阻塞异步操作，连接和 HTTP 写入/读取共用单次 1 秒上限，并受角色启动剩余预算约束。
 
 三个角色 unit 都以 SIGTERM 进入同一关闭路径：先进行最多 10 秒的 HTTP/Worker drain，再按配置

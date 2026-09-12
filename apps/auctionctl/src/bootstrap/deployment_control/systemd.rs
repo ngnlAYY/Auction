@@ -277,7 +277,9 @@ fn parse_snapshot(bytes: &[u8]) -> anyhow::Result<UnitSnapshot> {
         invocation_id: required("InvocationID")?.to_owned(),
         started_monotonic_micros,
         environment: required("Environment")?.to_owned(),
-        environment_files: required("EnvironmentFiles")?.to_owned(),
+        // systemctl 对空的 a(sb) 数组不输出 EnvironmentFiles 行（即使使用 --all）；
+        // 只有此复合属性允许缺行表示空，其他身份和环境属性仍须明确存在。
+        environment_files: values.get("EnvironmentFiles").copied().unwrap_or("").to_owned(),
         unset_environment: required("UnsetEnvironment")?.to_owned(),
         pass_environment: required("PassEnvironment")?.to_owned(),
         pam_name: required("PAMName")?.to_owned(),
