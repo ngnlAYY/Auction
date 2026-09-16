@@ -1,4 +1,18 @@
-# HTTP 契约清单
+# HTTP 路由与响应契约
+
+[文档导航](../README.md) · [路由注册](../../crates/auction-http/src/http/routes/surfaces.rs) · [稳定 DTO](../../crates/auction-contracts/src/contracts) · [浏览器入口](../../crates/auction-http/src/assets/routes.rs)
+
+路由、方法和状态码的冻结清单；请求/响应 DTO 与 handler 必须同步维护。
+
+## 本页导航
+
+- [基线与统计口径](#基线与统计口径)
+- [进程健康探针](#进程健康探针)
+- [通用响应与错误](#通用响应与错误)
+- [Public](#public)
+- [Admin](#admin)
+- [已实现路径的补充约束](#已实现路径的补充约束)
+- [契约变更规则](#契约变更规则)
 
 ## 基线与统计口径
 
@@ -36,11 +50,17 @@ OTLP headers 只能放在敏感 TOML 中。tracing 默认关闭，启用时使�
 | --- | --- | --- | --- | --- |
 | GET/HEAD | /health/live | 200 | — | `{"live": true}` |
 | GET/HEAD | /health/ready | 200 | 503 | `{"ready": true/false}` |
+| GET/HEAD | /health、/api/v1/health | 200 | — | `HealthResponse`：status、service、version |
 
-两条路径均使用统一 `{code,message,data}` 外壳。`/health/live` 不访问下游依赖；`/health/ready`
+live/ready 两条路径均使用统一 `{code,message,data}` 外壳。`/health/live` 不访问下游依赖；`/health/ready`
 通过应用层 readiness 端口只读检查当前二进制的必需依赖。Public 配置 realtime relay 时还会检查
 relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 503，不把启动骨架伪装成可接收业务
 流量。Admin 继续以数据库连接和当前二进制的全部 SQLx 迁移作为 readiness 边界。
+
+
+## 通用响应与错误
+
+`/health` 与 `/api/v1/health` 是兼容的进程信息入口，返回 status/service/version，不能替代 readiness。
 
 所有业务 API 使用统一响应外壳：
 
@@ -64,7 +84,11 @@ handler 明确产生的稳定集合；依赖错误中的 504 表示 context dead
 | 413/415 | 请求体过大或 Content-Type 不支持 |
 | 429 | 限流或有界连接资源耗尽 |
 | 500 | 服务器内部无法安全完成请求 |
+| 501 | 当前部署档位或端口不提供该能力 |
 | 503/504 | 下游依赖不可用或处理超时 |
+
+
+### 严格 JSON 与方法闭集
 
 JSON 写边界属于 v1 契约：请求必须使用 `application/json` 媒体类型（允许合法参数），
 body 受每条路由自己的上限约束，解码只接受一个 JSON 值，且请求 DTO 拒绝未知字段。非 JSON、超限、
@@ -76,6 +100,9 @@ Feature API 的方法是严格闭集。GET 路由不会因为 Axum 默认行为�
 返回 JSON `405 method_not_allowed`，`Allow` 只列出该路径真实注册的方法并使用冻结排序。健康探针、
 metrics 和静态文件是否接受 HEAD 由各自契约单独决定，不从业务路由推导。
 
+
+### 请求边界
+
 Public/Admin 已恢复统一 HTTP boundary：只接受 1 至 64 字节的 ASCII 字母数字/`-_.`
 `X-Request-ID`，缺失时生成并在响应回传，重复或非法值返回 `400 invalid_request_id`；同一值会进入
 Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计，但不参与命令请求哈希。边界还
@@ -85,6 +112,9 @@ Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计�
 整体丢弃。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
+
+### 静态入口与缓存
+
 未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确
 允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受
 GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（含独立 `/forum` 页面）、
@@ -93,7 +123,7 @@ Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
 构建产物时返回 503。
 
 缓存策略是当前 HTTP 安全边界，并适配 Dioxus 稳定 WASM 文件名：Public 非身份化读取为 `no-cache`；
-Public forum/sync-status、events/session/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
+Public forum/sync-status、events/session/lot 列表与详情/账户/竞价/代理与全部 Admin 业务接口为 `no-store`，错误响应使用相同策略；
 浏览器路由入口为 `no-store`，直接静态文件中只有 `assets/` 指纹资源使用一年 `immutable`，
 `index.html`、`wasm/*.js`、`*.wasm` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与
 `If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
@@ -124,6 +154,9 @@ Public forum/sync-status、events/session/账户/竞价/代理与全部 Admin �
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P21 | GET | /api/v1/forum/sync-status | 公开；不接受 query；响应 `no-store` | 200 | 400, 501, 503/504 |
 
+
+### P21 论坛同步开关
+
 P21 使用 `PublicForumSyncStatusResponse`，成功响应固定为 `code=ok`、`data={"enabled": true/false}`，
 不依赖当前世界或当前拍卖是否存在。布尔值来自 Worker 按 `[worker.forum].enabled` 发布的非敏感心跳
 字段，仅采纳数据库时钟下未过期且非 `stopping` 的 Worker：任一明确 true 表示启用，所有有效实例
@@ -132,6 +165,9 @@ P21 使用 `PublicForumSyncStatusResponse`，成功响应固定为 `code=ok`、`
 启用状态不表示主题已经发布或扫描成功；真实楼层仍由 P15 的 `processed_through_post_number` 提供。
 Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍状态，且关闭时不挂载 P15 轮询；
 未知和请求失败显示不可用并允许重试，不解释为关闭。升级须同时更新 Worker、Public API 与公开端产物。
+
+
+### Public 分页、世界与金额
 
 Public 分页必须保留已发布的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
 preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已经
@@ -144,6 +180,9 @@ P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000
 的成功重放不被重新解释。P09/P11 的 `next_bid` 保留数学最低价和严格抬价关系；超过 1B 时表示
 没有可提交的新出价，浏览器显示“已达上限”，不能把值压低到 1B 后提交。普通输入继续使用整数 K；
 代理输入扩展为 K/M/B，其中 M/B 最多三/六位小数，均须精确落在 1K 网格且不超过 1B。
+
+
+### 标的编号、来源与历史读取
 
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与
 `equipment.category` 组合解释为 `One01`、`Two01` 等编码；它不是全局身份。详情和写命令继续只以
@@ -171,9 +210,13 @@ P12 在 PostgreSQL 完整档保留 `name`、`world`、
 P04 查询只能含一个 `auction_id` 或 `scope=auctions`，每帧发送一个不含内部 `stream_key` 的 v1 事件对象；
 启用 allowlist 时要求恰好一个可信 `Origin`，独立连接尝试限流之后按 origin→query→session 返回错误。
 frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008、1013、1002、1001 及 reason
-分别表示客户端写入、慢消费者、事件合同错误和服务 drain，其余读超限、Pong 超时及底层读写失败直接断开。
+分别表示客户端写入、慢消费者、事件合同错误和服务 drain；`MessageTooLong` 读超限尝试发送空 reason 的
+1009 close，其余 Pong 超时及底层读写失败直接断开。
 只有 discovery 使用每进程 128 槽和 429 `discovery_busy`；单拍卖新连接拒绝 settled，但既有连接可接收
 `auction.settled`。断线补发只走 P03，refetch 保留恢复游标和现有 socket。
+
+
+### Public 时间词法
 
 所有 Public JSON 时间使用 RFC3339Nano 词法：数据库或当前实现生成的 UTC 时间使用 `Z`，小数秒
 裁掉尾随零，整秒不附加 `.000000`。P18-P20 从历史命令账本重放时还必须
@@ -233,16 +276,9 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 |
 | A43 | GET | /api/v1/admin/realtime/events | 200 | 400, 401, 500, 501, 503/504 |
 
-## 契约变更规则
+## 已实现路径的补充约束
 
-1. Rust 路由必须先在本表登记，再实现 handler；已发布路径不得为了方便直接重命名。
-2. DTO 必须在 auction-contracts 中独立定义；不得把 SQL 行或 Rust storage model 直接暴露给浏览器。
-3. 所有改变状态的核心命令必须保留 command_id；同一 ID 搭配不同 request hash 必须返回 409。
-   A24 v1 兼容请求没有该字段，由 HTTP 防腐层按 failure 与修正负载稳定派生，不得使用随机 ID。
-4. 公开实时更新不以 HTTP 分页替代 WebSocket；无法保持长连接时只允许按 events catch-up
-   语义退化为轮询或 SSE。
-5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新本文件、相关契约记录和
-   对应 owner 的边界说明。
+### 公开读取与命令结果
 
 当前 P01、P02、P05、P06、P07、P08、P09、P10、P11、P12、P13、P14、P15、P16、P17、P18、P19、P20、P21、A03 GET/POST、A04、A06、A15、A25 GET/POST/PUT、A40-A43 已接入应用端口；P02 保留 `lang` 语言选择和缺失语言回退英文，P05 保留公开安全投影和页码分页；P07 保留
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
@@ -252,6 +288,8 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和 v1 竞价结果投影。
+### 管理拍卖与报表
+
 Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话端口。A03 GET
 `/api/v1/admin/auctions` 已接入 Admin 会话保护、`world_id`/`status` 筛选、有限页码和
 PostgreSQL Serializable 生命周期/lot 数量安全投影；创建拍卖 POST 已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件；SQLite Lite 的创建与列表 GET 均明确返回 `501 feature_not_supported`。A06
@@ -274,7 +312,7 @@ PostgreSQL Serializable 命令账本快照和代理安全事件投影；投影�
 只读报告；报告中的 `auction` 保持 v1 基础字段闭集，不额外发送该版本字段闭集之外的
 `scheduled_end_at`/`effective_end_at`；lot 明细新增权威 `listed_price`、`hold_ppm` 与带符号
 `adjustment_ppm`，正值表示惩罚/税费、负值表示折扣，界面不从税额反推持有比例。读取遇到
-序列化冲突或死锁时最多重试三次。A07/A08 的 lot 明细同时返回 `equipment_category`，管理端据此
+序列化冲突或死锁时最多尝试三次（含首次）。A07/A08 的 lot 明细同时返回 `equipment_category`，管理端据此
 显示分类编码并允许不同分类各自存在编号 1。A08 recovery-report
 也已接入 PostgreSQL 完整档的一致安全投影；SQLite Lite 对两项
 能力明确返回 `501 feature_not_supported`，不伪造空报告。A42 只列出 `status=settled` 且有
@@ -310,6 +348,8 @@ reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令
 回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
 证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令
 仍返回明确的能力缺失，不会被空结果伪装成已接入。
+### 投递对账与远端证明
+
 Admin `reconcile` 的 `succeeded` 分支不能用 `payload.operation=send` 加裸 `external_reference`
 完成状态；缺少 Sent exact payload proof 的请求由后端按既有 invalid 条件拒绝。Admin Web 隐藏该成功选项，
 `retry`/`failed` 仍须由管理员提交显式命令并审计；Return/Take 继续保留独立人工核对路径。该防御不新增
@@ -324,6 +364,8 @@ delivery 内部契约，不新增 HTTP 路由。所有通知、注册/重绑 key
 `mooglemail:world:send:mid`；不满足唯一新增 MID、同 world/recipient/subject/body digest、Credits/COD/装备
 精确匹配时只返回/投影 `manual_reconcile`，不能把成功页或本地 UUID 当作证明。Return/Take 的 action proof
 仍独立处理。
+### Recovery 与实时运维
+
 A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、证据重校验、命令账本、退款激活、guarded relist、
 审计和预览目录 realtime 事件；结算事务已为获胜 lot 在同一事务中建立 recovery case；SQLite Lite
 明确返回 `501 feature_not_supported`。Recovery Worker 已按已登记的
@@ -336,6 +378,9 @@ A21-A24 与 A43 realtime 运维面已接入 PostgreSQL/SQLite 的事件元数据
 规则 owner；PUT 保留 `command_id`、`expected_revision`、命令摘要、Serializable revision CAS、
 幂等账本和审计，SQLite Lite 只提供 GET，发布明确返回 `501 feature_not_supported`。
 
+
+### 论坛预览与审计读取
+
 A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 边界和 2 MiB
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回
 catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
@@ -346,6 +391,9 @@ A33 `/api/v1/admin/audit` 已接入 Admin session 和只读安全投影，保留
 等精确筛选、occurred 时间范围、keyset opaque cursor 与 `page` 数字分页；数字页在同一数据库
 读取事务内取得 total 与记录，keyset 页不伪造 total。metadata 仅允许 JSON object，SQLite Lite
 也从同名追加式审计表读取。
+
+### 拍品管理与撤拍义务
+
 A13 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session、CSRF、空查询校验和稳定
 `command_id`；请求的 `action` 只允许 `withdraw` 与 `set_start_price`，后者必须提供正的
 `start_price`，并携带 `expected_state_version`。PostgreSQL 完整档在同一 Serializable 事务
@@ -354,6 +402,9 @@ A13 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session、CSRF、空查�
 的原装备在原世界单独寄给原卖家，Credits/COD 均为零。成功响应只确认撤拍和寄回义务入队，
 不表示远端已经寄达；投递与领取证明继续由履约流程确认。成功响应为 `200` 的
 `{ lot: ... }` 安全投影，SQLite Lite 明确返回 `501 feature_not_supported`。
+
+### Dashboard 与 readiness
+
 A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和两套数据库的
 `service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control 通过
 配置的 Unix socket 读取 live/ready/status，并将 unavailable/timeout/incompatible/rejected
@@ -368,6 +419,9 @@ section 也已接入安全投影。所有已登记 dashboard section 都有 owne
 审计完整性或必须运行的 relay 异常会令 readiness 为 false，tracing degraded 会令 heartbeat status 降级，但不会
 单独改变应用 readiness。启动和停止心跳也携带当时的审计计数与 tracing 安全投影，不再发布
 固定占位值。外部广播不属于当前 dashboard 契约。
+
+
+### 邮件审查与轮询
 
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
@@ -388,6 +442,9 @@ A20 远程轮询触发在至少一个邮箱已装配时返回 `202 accepted`：�
 `paused` 状态，也不会隐式恢复自动轮询。该响应只表示当前 Worker 接受了本轮调度唤醒，不表示外部读取已经完成；Worker
 后续仍以持久化 lease 执行实际 MoogleMail GET。SQLite Lite 明确返回
 `501 feature_not_supported`。
+
+
+### Runtime 配置与文件事务
 
 A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影
 和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用
@@ -413,6 +470,9 @@ Admin WebUI 将这份闭集投影映射成分组开关、数字、列表与文�
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁；锁竞争返回既有
 `503 storage_unavailable`，客户端可复用原 command ID 重试，不能在另一流程处理中绕过锁。
 
+
+### Runtime 六组接管
+
 runtime 文档提供可选 `operations`，响应投影会补齐六组候选参数：`economics`（后续新拍卖的
 底价、增幅、软截止、取消与代理策略）、`schedule`（自动周排期）、`forum`（论坛开关与有界轮询）、
 `alerts`（告警阈值、通知目标与批次边界）、`worker`（生命周期、投递、履约、恢复循环的吞吐与重试）、
@@ -432,12 +492,18 @@ runtime 文档提供可选 `operations`，响应投影会补齐六组候选参�
 保存中断后，pending 命令与旧文件指纹一致时继续完成同一候选，不永久占用唯一未完成命令槽。
 若 Admin 启动恢复补写了文件，启动校验会要求重新加载恢复后的配置；未证明的冲突仍需人工核对。
 
+
+### 数据库业务世界
+
 A40/A41 将数据库 `worlds.enabled` 与 Admin runtime 中只控制 Worker/MoogleMail 入站的 world
 开关明确分离。A40 是无 query 的认证只读目录；A41 使用严格 JSON、`command_id` 与
 `expected_policy_revision`，在 PostgreSQL Serializable 事务中先锁 world，再拒绝任何
 `draft`/`preview`/`live`/`final`/`settling` 拍卖或仍可领取的活动 `scheduled_rounds`，随后以
 revision CAS 更新状态，并把通用命令账本和追加审计与状态同事务提交。相同状态是可重放的有审计
 no-op，不递增 revision；SQLite Lite 只提供目录读取，启停明确返回 `501 feature_not_supported`。
+
+
+### 用户、改名与黑名单
 
 Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分页、用户安全投影及黑名单
 次数/最近历史/创建时间列表字段、创建、改名、稳定论坛账号 ID
@@ -449,6 +515,9 @@ state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PU
 用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、论坛账号 ID 修改、key
 撤销/重签、黑名单和改名回滚操作。
 
+
+### 外部凭据
+
 A32 `/api/v1/admin/credentials` 已接入 Admin session、origin/CSRF、`command_id` 和
 `expected_state_version`，支持 `mail_cookie`/`forum_cookie` 的安全投影列表、导入、改名、启停
 和删除。secret 只在应用加密边界短暂存在，不进入响应、审计、命令结果或页面；该路由要求
@@ -456,3 +525,14 @@ PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥�
 `501 feature_not_supported`。Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作为兼容
 回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用同类第二条
 时返回 `409 credential_conflict`，调用方必须先通过同一路由停用旧记录并重启 Worker 完成交接。
+
+## 契约变更规则
+
+1. Rust 路由必须先在本表登记，再实现 handler；已发布路径不得为了方便直接重命名。
+2. DTO 必须在 auction-contracts 中独立定义；不得把 SQL 行或 Rust storage model 直接暴露给浏览器。
+3. 所有改变状态的核心命令必须保留 command_id；同一 ID 搭配不同 request hash 必须返回 409。
+   A24 v1 兼容请求没有该字段，由 HTTP 防腐层按 failure 与修正负载稳定派生，不得使用随机 ID。
+4. 公开实时更新不以 HTTP 分页替代 WebSocket；无法保持长连接时按 events catch-up 语义恢复。
+   SSE 尚无登记路由，不能将该扩展方向描述为现有客户端通道。
+5. 本表的状态码、JSON 字段和错误 code 变化必须同时更新本文件、相关契约记录和
+   对应 owner 的边界说明。

@@ -1,4 +1,24 @@
-# TOML 配置
+# 运行配置与敏感文件
+
+[文档导航](../../docs/README.md) · [loader 与校验](../../crates/auction-config/README.md) · [公共模板](examples/common.toml) · [Public 模板](examples/public.toml) · [Admin 模板](examples/admin.toml) · [Worker 模板](examples/worker.toml) · [runtime 模板](examples/runtime/admin.toml) · [敏感占位模板](examples/secrets.toml)
+
+公共、角色、敏感与 runtime 文件分离；配置保存、生效与数据库权威事实分别由不同 owner 负责。
+
+## 本页导航
+
+- [文件职责](#文件职责)
+- [准备私有配置](#准备私有配置)
+- [PostgreSQL 维护凭据](#postgresql-维护凭据)
+- [Runtime 共享与重启](#runtime-共享与重启)
+- [敏感字段](#敏感字段)
+- [后端和拓扑](#后端和拓扑)
+- [缓存与拍卖模板](#缓存与拍卖模板)
+- [HTTP listener 与安全](#http-listener-与安全)
+- [Public 实时 relay](#public-实时-relay)
+- [论坛与邮件](#论坛与邮件)
+- [Worker 循环预算](#worker-循环预算)
+
+## 文件职责
 
 运行时配置统一使用一份必需的公共非敏感文件、三个角色文件、独立敏感文件和一份可选的 Admin
 runtime 文件：`common.toml` 保存日志、指标、缓存和拍卖策略，角色文件保存 listener、tracing、
@@ -19,6 +39,9 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 三进程部署目录、启动顺序、健康探针、权限和 Caddy 上游模板见
 [`../deploy/README.md`](../deploy/README.md)。该资料不替代具体主机的服务管理器配置。
 
+
+## 准备私有配置
+
 生产或本地真实配置可按以下方式准备：
 
 ```bash
@@ -31,7 +54,10 @@ chmod 600 ops/config/auction.secret.toml
 生产环境宜为 Public、Admin、Worker 分别挂载敏感文件，并只提供该角色实际需要的字段；
 仓库中的单一 `secrets.toml` 只是共享结构示例。
 
-`auctionctl postgres-rebuild` 可通过 `--maintenance-secrets-file` 短暂加载独立 TOML，结构见
+
+## PostgreSQL 维护凭据
+
+`auctionctl postgres-rebuild` 和 `postgres-bootstrap` 可通过 `--maintenance-secrets-file` 短暂加载独立 TOML，结构见
 [`examples/secrets/postgres-rebuild.toml`](examples/secrets/postgres-rebuild.toml)。该文件只有一个
 必填 `database_url`，必须指向与 Worker 数据库相同 endpoint/TLS profile 的 `postgres` 维护库；
 用户名和密码可以属于独立高权限维护角色。文件路径必须是规范化绝对路径，文件不得是 symlink，
@@ -39,6 +65,9 @@ chmod 600 ops/config/auction.secret.toml
 权限为 owner-only。它不是三进程 runtime 配置，不得由 Public/Admin/Worker 的
 `secrets_file` 引用；未提供时重建命令才会从普通 `database_url` 派生维护连接并要求该应用角色拥有
 对应 owner/`CREATEDB` 权限。
+
+
+## Runtime 共享与重启
 
 Admin 与 Worker 示例的 `runtime_config_file` 都指向
 [`examples/runtime/admin.toml`](examples/runtime/admin.toml)。
@@ -89,6 +118,9 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 装备；MoogleMail 邮件装备过滤仍独立拒绝不可交易来源。适配器始终保留固定 HTTPS origin、无重定向、
 精确 world 路径和流式有界读取。示例默认 2 MiB、250 ms、10 秒和关闭可交易限制。
 
+
+## 敏感字段
+
 以下字段只能出现在敏感 TOML：
 
 - `database_url`：数据库连接串；
@@ -108,6 +140,9 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 旧的单文件格式不兼容；把这些字段放入主配置会因未知字段而启动失败。解析错误和日志不得
 输出敏感 TOML 原文或上述字段值。
 
+
+## 后端和拓扑
+
 `database_url` 同时决定数据库和部署档位：
 
 - `postgres://` 或 `postgresql://` 选择完整生产档，支持独立进程和完整持久化能力。
@@ -118,6 +153,9 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 
 Lite 已实现的写入仍必须满足事务原子性、命令幂等和追加式审计。不要通过额外环境变量
 伪装或覆盖部署档位。
+
+
+## 缓存与拍卖模板
 
 公共配置中的 `[cache]` 保存非敏感的 `backend` 和可重建 Public 规则读模型的
 `public_rules_ttl_seconds`。`backend = "disabled"` 不需要 Redis；`backend = "redis"` 还要求
@@ -136,6 +174,9 @@ Public 规则读取会按语言使用该 TTL 执行 `get`/`set`，规则发布�
 `[auction.schedule]` 默认关闭；启用后的内置时间为 UTC 周四 22:00 开放预览、周五 00:00
 正式开拍、周六 12:00 计划结束。所有星期、时间、时区和 world 均可在 TOML 中覆盖；默认值
 变化只影响后续生成的新轮次，不会改写数据库中已经存在的拍卖。
+
+
+## HTTP listener 与安全
 
 Public/Admin 主配置还可以包含 `[listener]`、`[http_security]` 与 `[session]`。`[listener]` 的
 `mode = "tcp"` 使用 `address`；`mode = "unix"`（仅 Linux）要求规范化的绝对
@@ -157,11 +198,17 @@ metrics 时，有效 listener 必须是 loopback TCP 或 Unix；Admin runtime �
 绝对 7 天，Admin runtime 默认空闲 15 分钟、绝对 8 小时。原始登录 key、会话 token 和数据库 URL
 不得出现在主配置。
 
+
+## Public 实时 relay
+
 Public 主配置还可以包含 `[realtime]`：`consumer_key` 是持久化 relay 的稳定非敏感标识，
 多 Public 实例必须各不相同；PostgreSQL 会以会话级 advisory owner lock 拒绝重复 key 的第二个
 实例启动，SQLite Lite 在同主机使用 0600 非阻塞 sidecar 文件锁强制同 key 单实例，非 Unix 平台
 无法取得该互斥证明时拒绝启动。其余字段限制 relay 批次、轮询间隔和单连接缓冲。缓冲区满时
 慢 WebSocket 会被淘汰，不能用增大缓冲替代客户端 catch-up。
+
+
+## 论坛与邮件
 
 Worker 的 `[worker.forum]` 支持可选 `public_base_url`；它只能是无凭据、无路径和无查询的
 HTTPS origin（本地联调可用回环 HTTP），用于把论坛主题中的拍卖相对地址转换为公开端绝对链接；
@@ -186,6 +233,9 @@ Worker 的 `[worker.mooglemail]` 为每个 world 建立独立轮询任务和手�
 `equipment_filter` 和 `mail_templates`，这些业务字段覆盖 Worker 主配置中的对应直接配置；三个区块
 全部缺失时保留直接配置和兼容 runtime fingerprint，部分存在则配置失败。确定性业务/输入/配置错误不
 执行 inline retry，只有可重试依赖错误和超时按配置尝试次数重试，失败时 cursor 不提前推进。
+
+
+## Worker 循环预算
 
 Worker 顶层 `[worker]` 控制 Auction 生命周期、慢速代理和结算主循环。省略并发时 PostgreSQL 使用
 8、SQLite Lite 使用 1；默认轮询 60 秒、抖动上限 5 秒、每阶段批次 100、单项总时限 30 秒。

@@ -1,13 +1,43 @@
 # 管理端浏览器界面
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+纯 CSR Admin SPA，拥有管理认证、查询、命令和配置编辑。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [页面与源码布局](#页面与源码布局)
+- [配置草稿与表格展示](#配置草稿与表格展示)
+- [国际化](#国际化)
+- [构建与资源边界](#构建与资源边界)
+- [管理数据与命令](#管理数据与命令)
+- [规则及运行配置](#规则及运行配置)
+- [认证与首屏边界](#认证与首屏边界)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/app](src/app) | 管理页面与会话内草稿 |
+| [src/api](src/api) | 管理请求及严格 DTO 解码 |
+| [assets](assets) | 管理端视觉资源 |
+| [i18n](i18n) | 五语言 Fluent 文案 |
+
+## 职责与实现边界
+
 Dioxus 客户端渲染的管理端 SPA。`Route` 枚举冻结 21 条路径，并与
 [`docs/contracts/routes.md`](../../docs/contracts/routes.md) 及
 `auction-http/src/assets/routes.rs` 的后端入口清单同步维护。
 
-- `src/main.rs`：薄启动入口。
-- `src/api/`：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
+## 页面与源码布局
+
+- [src/main.rs](src/main.rs)：薄启动入口。
+- [src/api/](src/api/)：按 `auction/`、`content/`、`fulfillment/`、`identity/`、`operations/` 分组的
   安全投影、会话读取和命令请求。
-- `src/app/`：按相同 owner 分组的页面组件；拍卖列表在 `auction/auctions/` 内拆分创建、表格、
+- [src/app/](src/app/)：按相同 owner 分组的页面组件；拍卖列表在 `auction/auctions/` 内拆分创建、表格、
   生命周期及计划动作 `actions/{row,dialog,model,schedule}.rs` 和共享映射，结算页在 `auction/settlement/` 内拆分
   settled-only 目录、URL query、世界/期号选择、结算报告、recovery 交互和辅助映射，用户页在
   `identity/users/` 内拆分创建/key、筛选表格、用户行和状态对话框，凭据页在
@@ -25,8 +55,10 @@ Dioxus 客户端渲染的管理端 SPA。`Route` 枚举冻结 21 条路径，并
   规则页面在 `content/rules/` 内拆分页面加载、编辑 workspace、Markdown 预览、发布状态模型和字段辅助。
   邮件详情保留请求 intake ID 并核对响应 ID；切换收件时隐藏旧详情与投递动作，同一收件刷新
   可以继续展示上次成功快照。
-- `assets/admin.css`：管理端 surface 样式。设计变量来自 `auction-web-shared`。
+- [assets/admin.css](assets/admin.css)：管理端 surface 样式。设计变量来自 `auction-web-shared`。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认简体中文。
+
+## 配置草稿与表格展示
 
 运行配置的编辑辅助由 `operations/config/` 内的 `draft.rs`、`validation.rs`、`review.rs` 分别拥有：
 非敏感草稿与稳定重试命令保留在当前认证外壳内，站内切页不会丢失，退出登录后清空；不写入
@@ -53,6 +85,8 @@ Fluent 消息 ID 不允许包含点号，使用 `nav-home` 而不是 `nav.home`�
 语言下的页面崩溃。语言集合、偏好持久化和 `<html lang>` 同步由 `auction-web-shared` 提供，
 本 crate 只拥有自己的译文。
 
+## 构建与资源边界
+
 构建：
 
 ```bash
@@ -66,6 +100,8 @@ just web-serve-admin   # 本地开发监听
 `Dioxus.toml` 固定为 `Auction 管理站点`，静态入口通过 `/favicon.ico` 引用共享品牌图标；产物由 Admin 装配根独占的
 `RustEmbed` 类型内嵌，再交给 `auction-http` 提供。依赖图不引用 Public 产物；未知路径保持 404，
 不获得 Admin SPA 入口。
+
+## 管理数据与命令
 
 管理端与公开端是不同 surface：本 crate 独立拥有自己的组件树和路由树，不复用公开端组件，
 公开端也不得依赖本 crate。拍卖列表已接入 PostgreSQL 只读安全投影、world 筛选、时间线和分页，
@@ -137,6 +173,8 @@ Dashboard 和 Outbox 的自动轮询可见性监听由各页面持有，页面�
 反复切换路由不会累积 `visibilitychange` 回调。
 规则加载只展示与当前 locale 对齐的已完成响应；校验或发布期间禁用全部语言切换，
 异步校验回写前再次核对目标语言与草稿，防止迟到响应覆盖其他语言内容。
+
+## 规则及运行配置
 
 规则页面已接入按 locale 读取、语言标签、动态新增 locale、版本事实、候选规范化校验、
 轻量 Markdown 预览和带 revision fence 的发布表单；只有最近一次已校验的草稿才允许发布，
@@ -216,6 +254,9 @@ Dashboard section 与嵌套 data 使用 v1 严格字段闭集；扩展凭据 sco
 secret、状态动作和 PostgreSQL 完整档边界不变。
 页面提供逐 mailbox 的运维动作、显式的不可用状态、手动刷新和常用运维页面
 快捷入口；总览不会用前端假数据填充尚未接入的能力。
+
+## 认证与首屏边界
+
 Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话读取、CSRF 注销和会话失效后的
 安全回退；未认证访问深链接时会保存受限的站内 `return` 地址，登录成功后无历史记录返回原页面；
 浏览器还会按服务端 idle expiry 触发会话 touch，失败时按间隔重试；绝对过期仍由服务端决定。
@@ -227,8 +268,18 @@ Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话
 的局部动作反馈按成功/失败分别使用 `status`/`alert`，并以行名称组成可访问标签和描述关系；认证后
 真正换页会聚焦主内容，首屏和同路由刷新不会抢占当前控件。
 管理命令必须走版本化 REST 契约，不在浏览器端重建状态机；凭据与密钥材料不进入浏览器。
-`src/api/` 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`；本 crate 只保留分页展平、
+[src/api/](src/api/) 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`；本 crate 只保留分页展平、
 Dashboard section 解码、表单与交互等浏览器展示状态。
 
 首屏等待超过 15 秒仅提示加载较慢，真实 WASM panic 才显示运行异常；失败标记不会被异步就绪回调
 覆盖。该区分由共享 bootstrap 与两端静态入口共同维护，不把慢请求直接描述为网络故障。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

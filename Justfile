@@ -9,6 +9,10 @@ fmt:
 fmt-fix:
     cargo fmt --all
 
+# 文档链接、导航覆盖和决策笔记的静态门禁，不运行产品或行为测试。
+docs-check:
+    @bash ci/check-docs.sh
+
 repository-policy-check:
     @bash ci/check-policy.sh repository
 
@@ -36,7 +40,7 @@ wasm-check:
     cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
     cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
-verify: fmt repository-policy-check layout-check config-example-check i18n-check check feature-check lint wasm-check
+verify: fmt docs-check repository-policy-check layout-check config-example-check i18n-check check feature-check lint wasm-check
 
 # 构建包含前端资源的 PostgreSQL 完整档可部署制品。
 build: build-release

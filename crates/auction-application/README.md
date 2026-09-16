@@ -1,5 +1,35 @@
 # auction-application
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+用例、窄端口和事务编排；具体 SQL、HTTP、配置与外部 I/O 由适配器实现。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [身份与凭据约束](#身份与凭据约束)
+- [源码分组](#源码分组)
+- [竞价与生命周期端口](#竞价与生命周期端口)
+- [结算与恢复端口](#结算与恢复端口)
+- [管理端口与服务](#管理端口与服务)
+- [Public 读模型与装备入口](#public-读模型与装备入口)
+- [论坛、审计与运维投影](#论坛审计与运维投影)
+- [投递与邮件处理](#投递与邮件处理)
+- [调度、告警与错误](#调度告警与错误)
+- [读取、实时与会话](#读取实时与会话)
+- [冻结策略与事务约束](#冻结策略与事务约束)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/ports](src/ports) | 输入输出、事务和外部能力端口 |
+| [src/services](src/services) | 竞价、管理、结算、恢复与邮件用例 |
+| [src/errors](src/errors) | 错误分类和可重试性 |
+
+## 身份与凭据约束
+
 MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信封 AAD 使用该身份；Users
 写事务仍须重新锁定并核对 UUID，身份变化时返回可重试错误，不提交错误信封或命令结果。
 撤销的 key 不能授权新的 MM 换绑；已经完成的相同命令继续按账本重放，不再次修改身份。
@@ -9,15 +39,19 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 `AdminCredentialRuntimeOwnership` 提供发送前有界检查及已知失效状态；检查失败或取消后
 不恢复所有权，不暴露数据库连接或凭据。Admin 会话初始化拒绝 Basic Auth 无法表达的含冒号账号。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；实现按端口、服务和错误职责放在对应子目录。
+## 源码分组
+
+源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；实现按端口、服务和错误职责放在对应子目录。
 `ports/` 与 `services/` 再按 `admin/`、`auction/`、`mail/`、`realtime/`、`recovery/`、
 `settlement/` 等 owner 分组，避免 `admin_*`、`recovery_*` 一类文件在同层堆叠。
 
+## 竞价与生命周期端口
+
 - `src/ports/core/{policy,ledger,repository,competition,clock}.rs`：事务策略、命令幂等账本、
-  拍卖仓储、竞价事务和 UTC 时钟核心端口；`src/ports/mod.rs` 只保留模块装配与稳定公共导出。
+  拍卖仓储、竞价事务和 UTC 时钟核心端口；[src/ports/mod.rs](src/ports/mod.rs) 只保留模块装配与稳定公共导出。
   使用 Rust 原生 async trait 返回类型，不依赖 `async-trait` 宏。
-- `src/services/auction/commands.rs`：拍卖创建用例，例如 `AuctionService::create`。
-- `src/services/auction/lifecycle/`：Admin/Worker 共享的拍卖生命周期用例；`mod.rs` 持有服务状态、
+- [src/services/auction/commands.rs](src/services/auction/commands.rs)：拍卖创建用例，例如 `AuctionService::create`。
+- [src/services/auction/lifecycle/](src/services/auction/lifecycle/)：Admin/Worker 共享的拍卖生命周期用例；`mod.rs` 持有服务状态、
   命令幂等事务编排和端口实现，`plan.rs` 持有状态迁移与 final proxy 计划，`schedule.rs` 持有后继轮次、
   安全日期计算和稳定 schedule ID；
   人工提前开放与提前结算使用启动时冻结且默认关闭的策略，并在事务锁内失败关闭；已到期的计划开放和
@@ -25,8 +59,8 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   软截止竞价；提前结算只把截止时间收紧到当前事务时间，让既有 Worker 继续拥有结算事实。生命周期端口会把锁前上下文、动作计划和后端实际写入摘要
   一并交给同事务审计边界，使 Preview/Open/Cancel/Final 与新增 EarlySettlement 的 action metadata 可精确恢复，
   又不把 PostgreSQL/SQLite 行模型泄漏到应用层。
-- `src/ports/auction/slow_proxy.rs`、`src/services/auction/competition.rs` 与
-  `src/services/auction/competition/legacy_ledger.rs`：Public 竞价及 Worker slow due 命令端口和用例；
+- [src/ports/auction/slow_proxy.rs](src/ports/auction/slow_proxy.rs)、[src/services/auction/competition.rs](src/services/auction/competition.rs) 与
+  [src/services/auction/competition/legacy_ledger.rs](src/services/auction/competition/legacy_ledger.rs)：Public 竞价及 Worker slow due 命令端口和用例；
   父服务使用数据库时间重读 generation/授权/资格 fence，并复用同一竞价事务，不在 Worker 中复制
   状态机。v1 稳定命令 ID 与请求摘要由端口值对象统一派生；账本防腐层实现已冻结的
   `OK + BidResult/ProxyResult`、确定性事实/授权 ID 和严格重放校验，同时只读兼容已存在的
@@ -37,31 +71,37 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   授权、quota、完整转换历史和终态原因在同一事务内冻结，HTTP 不需要在提交后读取账户投影；历史
   `accepted` 行只在同一只读事务按授权版本截取转换历史并读取冻结策略 quota，不重新执行命令，也不以
   当前生命周期或时钟 gate 否定既有成功事实。
-- `src/services/settlement/commands/` 与 `src/ports/settlement/commands.rs`：结算命令在锁定拍卖前先读取
+
+## 结算与恢复端口
+
+- [src/services/settlement/commands/](src/services/settlement/commands/) 与 [src/ports/settlement/commands.rs](src/ports/settlement/commands.rs)：结算命令在锁定拍卖前先读取
   命令账本，以保持已发布的冲突优先级；当前格式重放时还会从冻结策略、首次结算资金池和锁内 lot
   事实重算完整计划及义务，只有持久化摘要与 payload 全量一致才返回。接管的旧
   `settlement_complete/OK` 则逐字复现 Go 请求摘要、严格解析完整结果，并与已结算摘要、lot 金额和
   义务种类数量逐项对账。历史格式只返回从权威事实重建的只读计划，不重新执行结算，也不改写历史账本。
   `LegacySettlementVerificationPort` 另为 `auctionctl` 提供脱敏只读核验摘要；缺账本时没有写入回退，
-  存储适配器必须在同一一致快照中提供历史命令身份和权威结算事实。`src/ports/settlement/report.rs`
+  存储适配器必须在同一一致快照中提供历史命令身份和权威结算事实。[src/ports/settlement/report.rs](src/ports/settlement/report.rs)
   的 Admin lot 投影还显式携带挂牌价、持有比例和带符号调整比例，表面层不得从税额反推这些权威事实。
-- `src/services/settlement/fulfillment/`：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
+- [src/services/settlement/fulfillment/](src/services/settlement/fulfillment/)：结算履约应用服务；`service.rs` 编排 prepare/activate/reconcile，
   `intent.rs` 负责无 secret delivery intent，`validation.rs` 与 `evidence.rs` 负责 claim/外部回执
   校验，`proof.rs` 负责稳定摘要，`model.rs` 持有跨 owner 载荷模型；schema v1 intent/payload 使用
   本仓库冻结的 canonical JSON、稳定 ID 和摘要，装备 secret 不进入持久化 payload。
   `WinnerPaymentCarrierCod` 的义务/装备来源 world 保持 `isekai`，delivery world 固定为 `main`；
   `mod.rs` 只负责模块装配和稳定出口。
-- `src/services/recovery/commands.rs`：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
-- `src/services/admin/rules.rs`：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
-- `src/ports/admin/worlds.rs` 与 `src/services/admin/worlds.rs`：数据库权威业务世界的读取与启停
+- [src/services/recovery/commands.rs](src/services/recovery/commands.rs)：Admin/Worker 共用的 recovery 确认入口校验与结果 fence。
+
+## 管理端口与服务
+
+- [src/services/admin/rules.rs](src/services/admin/rules.rs)：规则文档的候选校验、revision CAS、命令重放和发布事务编排。
+- [src/ports/admin/worlds.rs](src/ports/admin/worlds.rs) 与 [src/services/admin/worlds.rs](src/services/admin/worlds.rs)：数据库权威业务世界的读取与启停
   owner；PostgreSQL 命令使用 Serializable、world-first 行锁、非终态拍卖/活动 round blocker、
   `policy_revision` CAS、通用命令账本和同事务追加审计。SQLite Lite 只读，不伪装写 capability。
-- `src/ports/admin/settlement_catalog.rs`：Admin 结算报表选择器的 settled-only 窄投影、world/期号
-  筛选和有界分页；报告仍由 `src/ports/settlement/report.rs` 按 UUID 独立读取。
-- `src/ports/admin/auction_schedule.rs` 与 `src/services/admin/auction_schedule.rs`：正式开放前的计划
+- [src/ports/admin/settlement_catalog.rs](src/ports/admin/settlement_catalog.rs)：Admin 结算报表选择器的 settled-only 窄投影、world/期号
+  筛选和有界分页；报告仍由 [src/ports/settlement/report.rs](src/ports/settlement/report.rs) 按 UUID 独立读取。
+- [src/ports/admin/auction_schedule.rs](src/ports/admin/auction_schedule.rs) 与 [src/services/admin/auction_schedule.rs](src/services/admin/auction_schedule.rs)：正式开放前的计划
   结束时间修改端口和用例；只接受 Draft/Preview，在 Serializable 锁内以数据库时间、状态版本和
   命令账本保护策略快照与调度记录同步，已成功命令始终先按原结果重放。
-- `src/ports/admin/runtime_config/`：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
+- [src/ports/admin/runtime_config/](src/ports/admin/runtime_config/)：Admin runtime 的非敏感文档模型、命令账本模型、适配器端口、
   错误类型和本地边界校验；`business.rs` 冻结 main/isekai、发件人 allowlist、装备过滤和 14 个
   通知模板的闭集，供 Admin 编辑并由 Worker 启动时投影；`operations/` 按经济、周排期、论坛、告警、
   Worker 循环与邮件预算拆分新增参数及纯文档校验，各组 `managed` 默认关闭。旧文档省略整个区块或
@@ -76,124 +116,140 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   收口；带 guard 的读取/替换端口复用同一锁，阻止配置变回旧指纹时陈旧请求再次通过 CAS。
   配置服务在新命令写入账本前调用文件适配器的无 I/O 候选校验，cron 解析仍由配置层拥有；已接受
   命令保留原幂等结果，应用层不引入部署格式解析依赖。
-- `src/ports/admin/credentials/`：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
+- [src/ports/admin/credentials/](src/ports/admin/credentials/)：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
   dashboard 端口位于 `ports.rs`；`value/{model,secret,runtime,health,error,common}.rs` 分别负责闭集模型、
   明文/密文安全值、运行记录、dashboard 聚合、业务错误和共用边界；`credentials.rs` 只负责稳定公共类型出口，
   明文和密文的安全边界保持不变。
-- `src/ports/admin/users/`：安全用户投影、列表请求和分页位于 `model.rs`，用户/恢复命令、写入
+- [src/ports/admin/users/](src/ports/admin/users/)：安全用户投影、列表请求和分页位于 `model.rs`，用户/恢复命令、写入
   载荷和安全结果位于 `commands.rs`，密钥、Users 存储和 recovery 黑名单窄端口位于 `ports.rs`，
   共享字段校验位于 `common.rs`；`users/mod.rs` 只负责稳定公共类型出口。
-- `src/services/admin/users/`：`query.rs` 负责有界用户列表，`commands.rs` 负责创建/修改/改名回滚
+- [src/services/admin/users/](src/services/admin/users/)：`query.rs` 负责有界用户列表，`commands.rs` 负责创建/修改/改名回滚
   事务编排，`digest.rs` 负责幂等请求摘要，`validation.rs` 负责动作字段校验；`mod.rs` 只保留
   服务状态、构造函数和 `AdminUserPort` 适配。
-- `src/services/admin/credentials/`：`query.rs` 负责有界凭据安全投影，`commands.rs` 负责导入/改名/启停/删除
+- [src/services/admin/credentials/](src/services/admin/credentials/)：`query.rs` 负责有界凭据安全投影，`commands.rs` 负责导入/改名/启停/删除
   事务编排与安全结果重放，`digest.rs` 负责不包含明文 secret 的幂等请求摘要，`validation.rs` 负责命令字段校验；
   `mod.rs` 只保留服务状态、构造函数和 `AdminCredentialPort` 适配。
-- `src/ports/public/cache.rs` 与 `src/services/public/rules_cache.rs`：可重建读模型缓存端口和
+
+## Public 读模型与装备入口
+
+- [src/ports/public/cache.rs](src/ports/public/cache.rs) 与 [src/services/public/rules_cache.rs](src/services/public/rules_cache.rs)：可重建读模型缓存端口和
   Public 规则快照装饰器；只缓存完整有效文档，miss、损坏、TTL 到期或后端失败都回源权威规则表。
-- `src/ports/public/equipment_link.rs`：公开页面主动查看游戏装备时使用的密文读取与解析窄端口；
+- [src/ports/public/equipment_link.rs](src/ports/public/equipment_link.rs)：公开页面主动查看游戏装备时使用的密文读取与解析窄端口；
   批量目标只携带内部 lot/equipment owner、world 和无 key 投影；完整 URL 值对象不实现
   serde/Display，`Debug` 固定脱敏，只允许 P09/P11 HTTP DTO 映射边界取得所有权。
-- `src/ports/admin/intake/` 与 `src/services/admin/intake.rs`：`equipment.rs` 负责 URL/canonical JSON
+- [src/ports/admin/intake/](src/ports/admin/intake/) 与 [src/services/admin/intake.rs](src/services/admin/intake.rs)：`equipment.rs` 负责 URL/canonical JSON
   装备事实和 key 清理，`commands.rs` 负责命令摘要，`source.rs` 负责来源快照，`records.rs` 负责
   脱敏录入写入计划/结果，`ports.rs` 负责 key 信封与事务端口，`common.rs` 负责错误、字段校验和
   启动时冻结的可交易限制策略；`mod.rs` 只负责稳定导出，明文 key 不进入写端口。默认策略允许
   Soulbound 装备，只有 Admin runtime 显式开启时才在事务前拒绝；邮件过滤使用自己的严格策略。
-- `src/ports/auction/policy.rs`：拍卖创建时冻结的经济、结算和恢复策略模板；配置适配器只
+- [src/ports/auction/policy.rs](src/ports/auction/policy.rs)：拍卖创建时冻结的经济、结算和恢复策略模板；配置适配器只
   转换为该类型，应用服务和 PostgreSQL 创建事务共享同一份策略来源。
-- `src/ports/auction/queries/`：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
+- [src/ports/auction/queries/](src/ports/auction/queries/)：Public 世界/拍卖目录、lot/装备投影、账户代理、竞价日志和
   成交价格历史分别由 `world.rs`、`auction.rs`、`lot.rs`、`account.rs`、`bid_log.rs` 和
   `price_history.rs` 持有；`auction.rs` 还提供单拍卖 WebSocket 升级前的公开状态闭集，避免 HTTP
   从事件历史猜测 settled 状态；`lot.rs` 按固定 Primary Attributes 顺序生成论坛与 Web 共用缩写，
   `bid_log.rs` 只在内部携带生成真实论坛帖子链接所需的主题/帖子身份；`queries.rs` 只负责稳定公共
   导出，不把数据库记录暴露给表面层。
-- `src/ports/admin/forum.rs`：Admin 论坛 HTML/文本预览的有界输入、catalog/posts/warnings
+
+## 论坛、审计与运维投影
+
+- [src/ports/admin/forum.rs](src/ports/admin/forum.rs)：Admin 论坛 HTML/文本预览的有界输入、catalog/posts/warnings
   安全结果和解析端口；该端口只表达本地预览，不承担远程发布或数据库写入。
-- `src/ports/admin/audit.rs`：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
+- [src/ports/admin/audit.rs](src/ports/admin/audit.rs)：Admin 审计精确筛选、时间范围、keyset/数字分页和安全 metadata
   投影端口；只读结果不暴露数据库行。
-- `src/ports/admin/mail/` 与 `src/services/admin/mail.rs`：Admin 邮件轮询状态、入站审查
+- [src/ports/admin/mail/](src/ports/admin/mail/) 与 [src/services/admin/mail.rs](src/services/admin/mail.rs)：Admin 邮件轮询状态、入站审查
   安全投影、状态版本 fence、暂停/恢复及历史兼容命令端口和命令账本；Admin A20 的全局
   唤醒结果由 Worker control 端口负责，不承载 MoogleMail 远程传输。
-- `src/ports/admin/mail/`：轮询状态和入站安全投影位于 `model.rs`，暂停/触发命令和账本记录位于
+- [src/ports/admin/mail/](src/ports/admin/mail/)：轮询状态和入站安全投影位于 `model.rs`，暂停/触发命令和账本记录位于
   `commands.rs`，应用/事务错误位于 `errors.rs`，查询、命令和事务窄端口位于 `ports.rs`，
   常量、聚合标识和字段校验位于 `common.rs`；`mail/mod.rs` 只负责稳定公共导出。
-- `src/ports/realtime/admin.rs`：Admin 最近事件元数据、consumer lag、failure 与 replay 的窄端口；
+- [src/ports/realtime/admin.rs](src/ports/realtime/admin.rs)：Admin 最近事件元数据、consumer lag、failure 与 replay 的窄端口；
   事件列表只暴露标识、流、序号、类型、schema 和时间，不允许 payload 或内部来源字段越过应用边界；
   三类数字分页统一限制单页大小和最大偏移量，避免运维查询形成无界深分页。
-- `src/ports/delivery/worker.rs`：delivery claim、外部结果和存储推进窄端口；transport 可以声明
+
+## 投递与邮件处理
+
+- [src/ports/delivery/worker.rs](src/ports/delivery/worker.rs)：delivery claim、外部结果和存储推进窄端口；transport 可以声明
   不大于配置值的进程内并发上限，使具有账号级可变会话的适配器在 claim 进入 `sending` 前形成
   背压，而不是在远端请求超时内排队。明确 `recipient_not_found` 后，runner 可按
   `(world, recipient)` 把该玩家排除到本轮结束；其他玩家继续处理，排除值不持久化为永久封禁。
-- `src/ports/mail/poll.rs`：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
+- [src/ports/mail/poll.rs](src/ports/mail/poll.rs)：Worker 按 mailbox_key 领取邮箱的 claim、lease/fencing、解析后安全入站事实、cursor、
   失败退避和同事务幂等提交端口；普通端口结果不保存原始 HTML、Cookie、token 或装备 key。完整邮件的
   `sender`/`subject` 与受限 `MailDisplaySnapshot` 作为一次入站写入的非权威审查投影提交，不能参与幂等或 cursor。
   异常留证由独立诊断端口按 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)
   加密保存，不进入入站事实、幂等 metadata 或 DTO。
   `lookup_completion` 在业务解释前返回 `MailPollCompletion`：只有稳定身份与完整入站/命令账本
   相符时才允许跳过已完成邮件；缺失记录继续正常处理，损坏或仅解析记录失败关闭。
-- `src/ports/mail/processing/`：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
+- [src/ports/mail/processing/](src/ports/mail/processing/)：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
-- `src/errors/mod.rs` 的 `MailProcessingRetryability` 把应用错误冻结为 `Retryable`/`Permanent`；Worker
+- [src/errors/mod.rs](src/errors/mod.rs) 的 `MailProcessingRetryability` 把应用错误冻结为 `Retryable`/`Permanent`；Worker
   只可对前者和超时执行有界 inline retry，确定性输入、配置和业务拒绝必须立即失败关闭。
-- `src/ports/mail/user/`：`model.rs` 负责注册/换绑结果闭集，`security.rs` 负责短生命周期登录 key
+- [src/ports/mail/user/](src/ports/mail/user/)：`model.rs` 负责注册/换绑结果闭集，`security.rs` 负责短生命周期登录 key
   与密文信封，`commands.rs` 负责 Users owner 写入载荷，`ports.rs` 负责存储、签发、读取和用例窄端口；
   `user/mod.rs` 只负责稳定公共导出。
-- `src/services/mail/processing.rs` 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
+- [src/services/mail/processing.rs](src/services/mail/processing.rs) 只负责 MoogleMail 应用服务的模块出口；`processing/intake.rs`、
   `processing/commands.rs`、`processing/pricing.rs` 分别持有拍卖入站、命令幂等辅助和起拍价/装备身份解析；
   逐行提取 `URL start amount`，忽略同行前后及其他行的说明文本和 MM 附件说明；未指定价格的
   真实附件使用 Worker 注入的邮件默认价（默认 50,000 Credits）。显式指令仍校验金额、附件
   ID/key 和重复定价；统一定价和旧跨行三元组形式继续兼容，原始 body 不因解析而被改写。
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
-- `src/ports/mail/display.rs`：从完整 `MailMessage` 生成 Admin 审查用脱敏快照；正文、附件 ID、Credits/COD
+- [src/ports/mail/display.rs](src/ports/mail/display.rs)：从完整 `MailMessage` 生成 Admin 审查用脱敏快照；正文、附件 ID、Credits/COD
   受固定大小限制，装备 key 与认证邮件正文隐藏。该快照是敏感展示投影，不是业务权威或幂等输入。
-- `src/ports/mail/equipment_diagnostics.rs`：持有装备读取失败的首个非权威诊断投影、stage/category/detail_code
+- [src/ports/mail/equipment_diagnostics.rs](src/ports/mail/equipment_diagnostics.rs)：持有装备读取失败的首个非权威诊断投影、stage/category/detail_code
   闭集、证据留存状态和有界关联字段；它不进入决定 metadata、command digest、completion proof 或 cursor。
   应用处理只返回原始 Result 与 `pendingEquipmentDiagnostic` 句柄，不在 `item_timeout` 内 await static future。
 - Admin 收件详情的关联 delivery 查询只接受 `metadata.delivery_ids` 的有界批量，必须同时匹配 mail_intake 来源、
   world、external MID、operation 和 origin_id；返回安全 delivery DTO，不暴露 payload、装备 key 或正文。
-- `src/ports/operations/alert.rs` 只负责 operations alert 端口出口；`operations/alert/` 下按
+
+## 调度、告警与错误
+
+- [src/ports/operations/alert.rs](src/ports/operations/alert.rs) 只负责 operations alert 端口出口；`operations/alert/` 下按
   signals、model、evaluate、delivery、health、digest 拆分领域投影、阈值评估、批次状态和摘要哈希，
   不把告警结果混入拍卖或外部传输事实。`delivery_returned_mail` 是已证明收件人不存在且需要取回
   资产的人工对账子信号；它保留独立 fingerprint，同时不替代 delivery 人工对账总水位。
-- `src/ports/scheduling/recurring.rs`：Worker 读取下一次 UTC 触发时刻的窄端口；cron 与下一次触发
+- [src/ports/scheduling/recurring.rs](src/ports/scheduling/recurring.rs)：Worker 读取下一次 UTC 触发时刻的窄端口；cron 与下一次触发
   时刻计算留在配置适配器，runtime 候选仅本地校验 IANA 名称和周时间顺序，不能替代持久化 due、
   游标或租约。
-- `src/errors/mod.rs`：应用错误，保留领域错误分类。
+- [src/errors/mod.rs](src/errors/mod.rs)：应用错误，保留领域错误分类。
 
-Public 规则文档和黑名单只读契约分别位于 `src/ports/public/rules.rs` 与
-`src/ports/public/blacklist.rs`；它们只定义安全投影、语言/分页边界和 owner 端口，不包含 SQL。
-Public 补偿池与账本只读契约位于 `src/ports/public/compensation/`，由批次摘要/分页与逐笔
+## 读取、实时与会话
+
+Public 规则文档和黑名单只读契约分别位于 [src/ports/public/rules.rs](src/ports/public/rules.rs) 与
+[src/ports/public/blacklist.rs](src/ports/public/blacklist.rs)；它们只定义安全投影、语言/分页边界和 owner 端口，不包含 SQL。
+Public 补偿池与账本只读契约位于 [src/ports/public/compensation/](src/ports/public/compensation/)，由批次摘要/分页与逐笔
 movement 校验分别拥有，定义守恒摘要、闭集 movement、编号页和 keyset cursor 边界，不依赖
 PostgreSQL 或 SQLite 类型。
-Public 论坛镜像只读契约位于 `src/ports/forum/public.rs`，表达本地同步状态、已发布内容和由完整
+Public 论坛镜像只读契约位于 [src/ports/forum/public.rs](src/ports/forum/public.rs)，表达本地同步状态、已发布内容和由完整
 主题扫描证明的真实处理楼层；独立的 `public_forum_sync_enabled` 返回 Worker 启用状态，`None`
 明确表示无法判定，不能映射为关闭。端口不承担远程论坛传输，也不以固定帖内容版本推算处理进度。
-论坛远端同步恢复契约位于 `src/ports/forum/sync.rs`：lot 快照携带等级、Primary Attributes 缩写、
+论坛远端同步恢复契约位于 [src/ports/forum/sync.rs](src/ports/forum/sync.rs)：lot 快照携带等级、Primary Attributes 缩写、
 十分之一百分比精度的平均 Roll、可证明的当前论坛楼层/统一代理来源及无 key 的装备链接目标，渲染前由
 `PublicEquipmentLinkResolver` 批量解析真实 HentaVerse URL；`ForumSyncRecoveryPort` 只允许按精确标题读取
 远端 topic，并把未知写入分成“只读对账”和“等待持久人工授权”两个阶段。端口本身不决定 CLI
 确认文字、数据库表、装备 key 解密或 HTTP 传输实现。`ForumCredentialAvailability` 只暴露当前
 Worker 内存池的布尔可用性；`ForumSyncStore::claim_due` 的恢复水位只用于一次性释放更早的
 `credential_unavailable`，不得放宽未知写入栅栏。
-Admin lot 列表只读契约位于 `src/ports/admin/lots.rs`，定义拍卖/lot/装备/投稿的安全快照和
+Admin lot 列表只读契约位于 [src/ports/admin/lots.rs](src/ports/admin/lots.rs)，定义拍卖/lot/装备/投稿的安全快照和
 有界分页；它要求完整 Admin 生命周期投影，不把 Lite 缺失字段填成默认成功值。
-Admin draft lot 修改契约位于 `src/ports/admin/lot_commands.rs`，只允许版本 fence 保护的
+Admin draft lot 修改契约位于 [src/ports/admin/lot_commands.rs](src/ports/admin/lot_commands.rs)，只允许版本 fence 保护的
 撤回与起拍价动作；服务层统一编排命令账本、Serializable 事务、预览 revision、审计和
 withdrawn-return 履约义务，具体 SQL 不跨过端口。撤拍返还统一生成原装备的单件零 Credits、
 零 COD Send；mail/admin 来源都寄给冻结卖家，不复用已 Take 的原邮件 Return。Sent 对账要求
 原 equipment ID，旧未知结果或冻结 Return 请求不自动迁移或重寄。
-Admin 拍卖列表只读契约位于 `src/ports/admin/auctions.rs`，定义 world/status 筛选、旧页码
+Admin 拍卖列表只读契约位于 [src/ports/admin/auctions.rs](src/ports/admin/auctions.rs)，定义 world/status 筛选、旧页码
 分页、生命周期安全快照和 lot 数量；SQLite Lite 缺少完整投影时必须显式报告能力不支持。
 正式开放前的预览、开拍与计划结束时间写入契约位于
-`src/ports/admin/auction_schedule.rs`；Draft 可修改三项时间，Preview 的既有预览事实不可修改；
+[src/ports/admin/auction_schedule.rs](src/ports/admin/auction_schedule.rs)；Draft 可修改三项时间，Preview 的既有预览事实不可修改；
 应用层只编排状态/版本/严格时间顺序、租约冲突、幂等账本和事务动作，不直接操作策略 JSON 或
 `scheduled_rounds`。
-Admin 规则文档契约位于 `src/ports/admin/rules.rs`，区分候选校验、读取快照和 PostgreSQL
+Admin 规则文档契约位于 [src/ports/admin/rules.rs](src/ports/admin/rules.rs)，区分候选校验、读取快照和 PostgreSQL
 完整档发布事务；发布使用 `command_id`、request hash 与 revision fence，SQLite 只保留读取。
-Admin 装备录入契约位于 `src/ports/admin/intake/`，区分外部来源读取、key 加密和数据库
+Admin 装备录入契约位于 [src/ports/admin/intake/](src/ports/admin/intake/)，区分外部来源读取、key 加密和数据库
 写入；来源失败或可选的可交易策略拒绝不会打开数据库写事务，重复命令只重放已持久化的安全结果。
+
+## 冻结策略与事务约束
 
 Admin 拍卖创建会在 PostgreSQL Serializable 事务中把已校验的策略模板同时写入 schema v4
 `policy_snapshot` 和当前仍被竞价/生命周期读取的遗留规则列；HTTP 创建命令不能注入策略字段。
@@ -214,3 +270,13 @@ Admin 拍卖创建会在 PostgreSQL Serializable 事务中把已校验的策略�
 的折扣，避免新建拍卖在补偿池足额时产生零或负数 COD 付款；历史结算读取仍沿用冻结策略。
 后继草稿的 `AuctionLifecycleContext` 携带锁内冻结结算策略，`successor_plan` 同样应用
 新模板门禁，不能通过复制旧快照绕过新建约束；普通历史读取不应用该门禁。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-application
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

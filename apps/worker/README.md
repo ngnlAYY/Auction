@@ -1,11 +1,43 @@
 # auction-worker
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+持久化生命周期、论坛、邮件、投递和恢复循环的装配根。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [装配与生命周期](#装配与生命周期)
+- [部署配置与 runtime](#部署配置与-runtime)
+- [拍卖邮件起拍价](#拍卖邮件起拍价)
+- [撤拍装备寄回](#撤拍装备寄回)
+- [Cargo feature](#cargo-feature)
+- [部署约束](#部署约束)
+- [邮件调度](#邮件调度)
+- [持久化与外部结果证明](#持久化与外部结果证明)
+- [Recovery 推进](#recovery-推进)
+- [论坛同步](#论坛同步)
+- [心跳与论坛启用状态](#心跳与论坛启用状态)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/bootstrap](src/bootstrap) | 配置、角色生命周期和任务装配 |
+| [src/bootstrap/mail](src/bootstrap/mail) | 邮件凭据、处理器、transport 与轮询 |
+
+## 职责与实现边界
+
 持久化生命周期与集成 Worker 进程入口。
 
-源码布局：`src/main.rs` 只负责 Tokio 入口；`src/bootstrap/mod.rs` 负责配置、缓存和运行模式
-选择，`src/bootstrap/persistent.rs` 负责持久化 Worker 装配，`forum.rs`、`operations_alert.rs`、
+## 装配与生命周期
+
+源码布局：[src/main.rs](src/main.rs) 只负责 Tokio 入口；[src/bootstrap/mod.rs](src/bootstrap/mod.rs) 负责配置、缓存和运行模式
+选择，[src/bootstrap/persistent.rs](src/bootstrap/persistent.rs) 负责持久化 Worker 装配，`forum.rs`、`operations_alert.rs`、
 `fulfillment.rs`、`control.rs` 和 `skeleton.rs` 分别负责各自的集成、履约、本地控制和无数据库启动 owner。
-MoogleMail 装配位于 `src/bootstrap/mail/`：`mod.rs` 只负责组合，`credentials.rs`、`processor.rs`、
+MoogleMail 装配位于 [src/bootstrap/mail/](src/bootstrap/mail/)：`mod.rs` 只负责组合，`credentials.rs`、`processor.rs`、
 `runtime.rs` 和 `mapping.rs` 分别负责凭据恢复、业务/delivery、world poll runtime 和安全 envelope 映射。
 
 Worker **不监听业务写入 HTTP 表面**，只从配置读取数据库与缓存设置，然后运行
@@ -17,8 +49,10 @@ draining，通知各 owner 完成当前有界批次但不再领取新工作，�
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
-  cargo run -p auction-worker
+  cargo run --locked -p auction-worker --features sqlite
 ```
+
+## 部署配置与 runtime
 
 Worker 配置没有 `listen_address`——该角色的默认监听地址为 `None`。
 Worker 可以通过主配置的 `runtime_config_file` 读取 Admin 管理的共享业务文档；对 MoogleMail 只消费
@@ -76,6 +110,9 @@ world 只是 allowlist：实际 bootstrap 集合还必须与 Admin runtime 中�
 Fulfillment 与 Recovery 分别由
 `[worker.fulfillment]` / `[worker.recovery]` 的独立 poll、jitter、batch、并发、lease 和单项超时
 控制，Recovery 还维护独立 health 刷新周期，避免任一积压或远端余额读取放大普通拍卖任务。
+
+## 邮件调度
+
 MoogleMail 的每个 world 也各自拥有标准五字段 cron（默认 `*/5 * * * *`，即每 5 分钟）加
 `[0,5s]` 抖动和
 手动唤醒器；调度兼容旧版描述符、`@every` 与 `TZ=` / `CRON_TZ=` 前缀，读取与可重试业务处理默认各
@@ -86,6 +123,8 @@ Forum 使用独立循环按“主题发布 → 回帖导入”顺序执行，
 任一阶段失败不会跳过另一阶段或终止其它 owner。
 Lite 档（SQLite）不装配这两类完整档循环；其进程实例数和主并发必须为一，因为写入是串行事务，
 运行手册需说明文件锁、锁等待和备份假设。
+
+## 持久化与外部结果证明
 
 有数据库时，轮次 due、租约、尝试次数、完成标记和失败原因写入 `scheduled_rounds`；慢速代理
 阶段直接扫描 `bid_proxy_authorizations.slow_due_at`，随后以旧版稳定身份进入竞价命令账本和事务
@@ -145,6 +184,9 @@ Recovery health 会按 `[worker.recovery]` 的独立周期读取两个 world
 的 Balance，低余额、过期证据和来源不可用都会进入安全投影，读取失败不会覆盖最后成功余额。
 告警 delivery 在批次确认 `enqueued` 前不会被普通发送循环领取，
 避免发送竞态；SQLite Lite 明确不提供该能力。
+
+## Recovery 推进
+
 PostgreSQL recovery case 的 due 推进独立于 MoogleMail transport；当前已覆盖付款满足后的阶段推进、
 付款超时与稳定 `payment_reminder` action。退回邮件会先按 obligation UUID 和 Credits/COD/附件摘要
 严格绑定 recovery；匹配后 Worker 按 ordinal 领取 recovery Take，关联来源邮件、目标世界和预期资产
@@ -154,6 +196,9 @@ PostgreSQL recovery case 的 due 推进独立于 MoogleMail transport；当前�
 持久化 due 和 1-86400 秒可配置退避推进 `relist_pending` 的 guarded relist，并在 buyer refund
 fulfillment 满足后把 `refunding` case 收口为 `completed`；这些 resolution 写入与 worker 审计均
 在 PostgreSQL Serializable 事务内完成。
+
+## 论坛同步
+
 PostgreSQL 完整档启用 `[worker.forum]` 后，Worker 还会装配 E-Hentai 主题发布、主题读取和
 回帖导入：作者链接的 `showuser` 数字 ID 记录为稳定唯一的 `users.forum_account_id`，链接文本记录为
 可变的 `users.username`，也是实际 MM 收件人和页面显示名称。已有用户直接复用；尚未注册 MM 的
@@ -189,6 +234,9 @@ world-aware Cookie 也供入站邮件的装备详情读取使用，避免把 Hen
 字段，正常邮件不保存；`body_unavailable` 只表示留证当时未取得完整响应，容量淘汰后的 UUID 导出返回
 `not_found`。目录权限、容量淘汰和留证状态边界见
 [`docs/operations/mail-diagnostics.md`](../../docs/operations/mail-diagnostics.md)。
+
+## 心跳与论坛启用状态
+
 Worker 在数据库可用时已有持久化启动、就绪、周期和正常退出后的停止心跳路径。
 心跳的非敏感 `details.forum_sync_enabled` 固定为启动时完成 runtime 投影后的论坛启用值，供 Public
 只读展示实际启用状态；关闭不会由历史帖子是否存在推断。升级此展示能力时须同时更新 Worker、
@@ -198,3 +246,13 @@ Public API 和公开端产物；修改开关后重启 Worker，页面会在下�
 `[worker.control].enabled = true` 后，数据库 Worker 和无数据库启动骨架都会
 提供由安全 runtime 目录、实例锁、固定 group/0660 和显式 UID/GID peer allowlist 保护的本地
 `live`、`ready`、`status` 控制面；后者只报告进程状态和零个 poller，不会伪造数据库或任务就绪。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-worker
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

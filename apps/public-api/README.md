@@ -1,8 +1,35 @@
 # auction-public-api
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [装配与依赖](#装配与依赖)
+- [持锁 relay 与故障边界](#持锁-relay-与故障边界)
+- [监听与运行配置](#监听与运行配置)
+- [前端产物](#前端产物)
+- [Cargo feature](#cargo-feature)
+- [边界约束](#边界约束)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/bootstrap](src/bootstrap) | 依赖装配、监听、心跳与关闭顺序 |
+| [src/web_assets](src/web_assets) | 仅 Public 的显式内嵌资源类型 |
+
+## 职责与实现边界
+
 公开端进程装配根。
 
-源码布局：`src/main.rs` 只负责 Tokio 入口；`src/bootstrap/mod.rs` 负责模块装配和稳定启动
+## 装配与依赖
+
+源码布局：[src/main.rs](src/main.rs) 只负责 Tokio 入口；[src/bootstrap/mod.rs](src/bootstrap/mod.rs) 负责模块装配和稳定启动
 入口；`bootstrap/service.rs` 负责 tracing、HTTP 生命周期与退出 drain；`bootstrap/state.rs`
 负责数据库、端口、公开真实装备 URL、heartbeat 和 realtime 状态；`bootstrap/config.rs` 负责安全策略与缓存配置；
 `bootstrap/listener.rs` 负责监听器绑定。
@@ -17,22 +44,26 @@ shutdown，停止 heartbeat/realtime relay 并发布停止心跳，整个 HTTP/�
 **业务逻辑不属于这里。** relay 只负责当前 Public 实例的
 持久化事件分发，外部广播 sink 仍由独立协议负责。
 
+## 持锁 relay 与故障边界
+
 relay 的目录读取和消费确认共用持锁数据库连接；PostgreSQL 持锁连接失效时停止推进游标并
 撤销 readiness 证明，不以新池连接继续消费。数据库恢复后需要重启该 Public 实例重新取得
 owner；SQLite 文件库在实际数据库同目录保持 sidecar 文件锁，不依赖 `/tmp`。运行账号需
 能在可信数据库目录创建 0600 锁文件；锁文件退出时保留，数据库不得使用硬链接别名。
 文件库 owner 还要求 Linux `statx` mount 身份，拒绝单文件 bind mount；可挂载整个数据库目录。
 
+## 监听与运行配置
+
 默认监听 `127.0.0.1:8090`。
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
-  cargo run -p auction-public-api
+  cargo run --locked -p auction-public-api --features sqlite
 ```
 
 ## 前端产物
 
-公开端 SPA 由 `auction-http` 内嵌，构建命令：
+公开端 SPA 由本装配根的 `RustEmbed` 类型内嵌，交给 `auction-http` 提供，构建命令：
 
 ```bash
 just web-build-public
@@ -59,3 +90,13 @@ PostgreSQL 完整档会使用敏感 TOML 中与装备密文信封匹配的 `equi
 
 公开端**不得**依赖管理端 UI 模块或管理专属命令。Public `RustEmbed` 类型由本装配根独占，
 `auction-http` 只接收该泛型资源类型；依赖图不引用 Admin 产物，不依赖链接器裁剪保证制品隔离。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-public-api
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

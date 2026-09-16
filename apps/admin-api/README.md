@@ -1,9 +1,38 @@
 # auction-admin-api
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+管理 HTTP、管理会话与 Admin runtime 服务的进程装配。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [装配与依赖](#装配与依赖)
+- [管理查询和命令能力](#管理查询和命令能力)
+- [Dashboard 与可观测性](#dashboard-与可观测性)
+- [Runtime 恢复与启动快照](#runtime-恢复与启动快照)
+- [生命周期与监听](#生命周期与监听)
+- [前端产物](#前端产物)
+- [Cargo feature](#cargo-feature)
+- [边界约束](#边界约束)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/bootstrap](src/bootstrap) | 管理端口、runtime 恢复、生命周期与安全策略 |
+| [src/web_assets](src/web_assets) | 仅 Admin 的显式内嵌资源类型 |
+
+## 职责与实现边界
+
 管理端进程装配根。
 
-源码布局：`src/main.rs` 只负责 Tokio 入口，`src/bootstrap/mod.rs` 只负责启动装配入口；
-`src/bootstrap/service.rs` 负责 tracing、HTTP 生命周期和有界 drain，`state.rs` 负责数据库/端口/
+## 装配与依赖
+
+源码布局：[src/main.rs](src/main.rs) 只负责 Tokio 入口，[src/bootstrap/mod.rs](src/bootstrap/mod.rs) 只负责启动装配入口；
+[src/bootstrap/service.rs](src/bootstrap/service.rs) 负责 tracing、HTTP 生命周期和有界 drain，`state.rs` 负责数据库/端口/
 heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策略和 dashboard 范围投影，
 `listener.rs` 负责监听器绑定与服务。这样装配根不把状态构造、配置映射和退出流程混在一个文件中。
 主配置的 TCP/Unix listener 是有效 fallback；Admin runtime 存在时覆盖为同一配置层的有效 listener。
@@ -15,6 +44,9 @@ heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策�
 session 与 CSRF 只以摘要形式持久化；生命周期命令在数据库事务内追加状态版本、审计和 realtime 事件。
 结算报告和 recovery 报告只读取已提交事实；recovery 确认还会在 PostgreSQL Serializable 事务中
 重校验证据、激活退款、guarded relist 并追加审计；SQLite Lite 不提供这些完整档能力并返回明确的 501。
+
+## 管理查询和命令能力
+
 Admin 论坛预览由本地 `ForumPreviewAdapter` 解析 HTML/文本，限制 2 MiB 输入并返回安全预览；
 它不执行远程论坛发布，也不产生数据库写入。
 Admin 审计读取由数据库适配器提供两种有界分页形状和安全 metadata 投影；该接口只读，不修改
@@ -22,6 +54,9 @@ Admin 审计读取由数据库适配器提供两种有界分页形状和安全 m
 业务 world 状态由数据库而非 runtime TOML 决定。装配根为 A40/A41 注入同一 `DatabaseStore`：
 PostgreSQL 提供 world-first blocker/CAS/账本/审计事务，SQLite 只提供目录读取并明确返回写能力 501。
 结算页的 A42 settled-only 目录同样只在 PostgreSQL 完整档装配；报告继续按目录返回的 UUID 读取。
+
+## Dashboard 与可观测性
+
 Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
 三个进程装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；返回 health/process 安全
 投影，周期值每轮读取真实数据库/schema readiness、进程内审计写入失败计数和对应 tracing 安全
@@ -29,6 +64,9 @@ Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service 
 通过 runtime 文档指定的 Worker control Unix socket 读取 live/ready/status，socket 只允许
 命中 Worker 显式 UID/GID allowlist 的内核认证 peer，失败时显示有限 condition；mail、realtime、credential、delivery、fulfillment、
 recovery 和 alerting section 分别由对应 owner 提供安全摘要，owner 未装配时才显式标记为 `unknown`。
+
+## Runtime 恢复与启动快照
+
 Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL 完整档装配
 `auction-application` runtime 服务、TOML 原子文件适配器和 durable 命令账本，GET/validate/PUT
 均保留 fingerprint fence 与 `restart_required`；Admin 对外就绪前会先恢复未收口的 pending/unknown
@@ -53,6 +91,8 @@ MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin
 敏感配置的单 Cookie 入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
 路径校验始终保留。
 
+## 生命周期与监听
+
 Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
 shutdown、停止 heartbeat 并发布停止状态，整个 HTTP/后台任务 drain 最多 10 秒，排空期间第二次
 信号会强制收口，最后按配置限时刷新 tracing exporter。稳定退出码仍待统一。
@@ -65,7 +105,7 @@ group 与 `0660` 权限。检测到仍在使用的 socket、非安全路径或�
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \
-  cargo run -p auction-admin-api
+  cargo run --locked -p auction-admin-api --features sqlite
 ```
 
 ## 前端产物
@@ -92,3 +132,13 @@ just build-release
 
 Public 与 Admin 是不同表面，可以分别绑定端口、Unix socket 或反向代理。管理命令必须走版本化
 REST 契约并留下审计记录；凭据与密钥材料只在服务端处理，不进入浏览器。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-admin-api
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

@@ -1,50 +1,94 @@
 # auctionctl
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+配置诊断、迁移、systemd 总控、备份、恢复及显式维护命令。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [实现入口](#实现入口)
+- [命令示例](#命令示例)
+- [配置诊断与退出结果](#配置诊断与退出结果)
+- [邮件证据命令](#邮件证据命令)
+- [稳定退出码](#稳定退出码)
+- [部署预检](#部署预检)
+- [Systemd 总控](#systemd-总控)
+- [停机迁移与初始建库](#停机迁移与初始建库)
+- [Cargo feature](#cargo-feature)
+- [凭据与规则导入](#凭据与规则导入)
+- [论坛与结算核验](#论坛与结算核验)
+- [保留盘点与恢复预检](#保留盘点与恢复预检)
+- [备份与历史接管](#备份与历史接管)
+- [恢复与破坏性重建](#恢复与破坏性重建)
+- [安全约束](#安全约束)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/bootstrap/runtime/cli.rs](src/bootstrap/runtime/cli.rs) | 命令、选项、默认值与确认参数 |
+| [src/bootstrap/runtime/dispatch.rs](src/bootstrap/runtime/dispatch.rs) | 角色配置选择和命令分派 |
+| [src/bootstrap/deployment_control](src/bootstrap/deployment_control) | systemd 状态、顺序、探针与回执 |
+| [src/bootstrap/postgres_rebuild](src/bootstrap/postgres_rebuild) | 独立重建确认与执行边界 |
+| [src/bootstrap/postgres_restore](src/bootstrap/postgres_restore) | 单事务恢复与后置校验 |
+| [src/bootstrap/postgres_legacy_v28](src/bootstrap/postgres_legacy_v28) | 历史格式专用备份与接管 |
+
+## 职责与实现边界
+
 配置、迁移和运维命令行工具。
 
-源码布局：`src/main.rs` 只负责进程入口，`src/bootstrap/runtime.rs` 保留兼容装配边界，
-`src/bootstrap/runtime/` 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分；其中
+## 实现入口
+
+源码布局：[src/main.rs](src/main.rs) 只负责进程入口，[src/bootstrap/runtime.rs](src/bootstrap/runtime.rs) 保留兼容装配边界，
+[src/bootstrap/runtime/](src/bootstrap/runtime/) 按 CLI 类型、分派、部署检查和 PostgreSQL 运维 artifact/命令拆分；其中
 `runtime/postgres/commands/{mod,bootstrap,database_bootstrap,forum,rules,settlement,preflight,backup,delegation}.rs` 分别负责命令装配、
 MoogleMail 凭据引导、缺失 PostgreSQL 目标库的非破坏性 bootstrap、论坛未知写入恢复、受控规则目录导入、历史结算账本只读核验、只读预检、备份/manifest 和专用
 restore/legacy/rebuild owner 桥接；
 `runtime/postgres/artifacts/` 又将外部 PostgreSQL 环境、manifest/hash、文件系统安全、外部进程、
 来源预检和 stdin Cookie 分别放入 `environment.rs`、`manifest.rs`、`filesystem.rs`、`process.rs`、
 `source.rs` 与 `input.rs`，`artifacts.rs` 只保留稳定导出，
-`src/bootstrap/deployment_control/` 按总控装配、Unix 生命周期、systemd 适配、readiness 探针和 receipt
+[src/bootstrap/deployment_control/](src/bootstrap/deployment_control/) 按总控装配、Unix 生命周期、systemd 适配、readiness 探针和 receipt
 文件边界拆分，其中 `deployment_control/unix/` 又将生命周期、内部状态模型和路径/unit 校验分别放入
 `lifecycle.rs`、`controller.rs`、`model.rs` 与 `validation.rs`，`unix/mod.rs` 只承载稳定包装，
-`src/bootstrap/postgres_restore/` 按恢复编排、备份/模式证明、pg_restore 外部进程和不可覆盖 receipt 分别拆入
+[src/bootstrap/postgres_restore/](src/bootstrap/postgres_restore/) 按恢复编排、备份/模式证明、pg_restore 外部进程和不可覆盖 receipt 分别拆入
 `postgres_restore/{mod,verification,process,receipt}.rs`；mod.rs 保留 execute、稳定验证出口和失败关闭顺序，
-`src/bootstrap/postgres_legacy_v28/` 按 `backup.rs`（备份生成）、`verification.rs`（离线 archive/manifest
+[src/bootstrap/postgres_legacy_v28/](src/bootstrap/postgres_legacy_v28/) 按 `backup.rs`（备份生成）、`verification.rs`（离线 archive/manifest
 校验）、`adoption.rs`（接管编排）、`common.rs`（预检/后置证明）、`model.rs`（证据模型）和
 `receipt.rs`（不可覆盖接管回执）拆分 canonical PostgreSQL v28 历史格式的专用边界，`mod.rs` 只保留稳定出口，
-`src/bootstrap/postgres_rebuild/` 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
+[src/bootstrap/postgres_rebuild/](src/bootstrap/postgres_rebuild/) 按 `model.rs`（授权/参数）、`execute.rs`（破坏性执行）、
 `validation.rs`（确认和 URL 安全校验）、`postconditions.rs`（空库/迁移证明）以及
 `receipt.rs`（不可覆盖 receipt 发布）拆分默认只读的破坏性重建边界；`mod.rs` 只保留稳定调用路径。
-`src/bootstrap/runtime/mail_diagnostics/` 持有 MoogleMail 证据导出、只读 Sent 核对和历史展示投影回填的
+[src/bootstrap/runtime/mail_diagnostics/](src/bootstrap/runtime/mail_diagnostics/) 持有 MoogleMail 证据导出、只读 Sent 核对和历史展示投影回填的
 PostgreSQL 完整档运维命令边界；这些命令不把敏感正文写入 stdout。
+
+## 命令示例
+
 
 ```bash
 # 校验配置并显示解析结果（不回显凭据）
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
-  cargo run -p auctionctl -- check-config public
+  cargo run --locked -p auctionctl -- check-config public
 
 # 独立数据库迁移；默认复用 systemd unit owner，并要求 Public/Admin/Worker 全部停止
-cargo run -p auctionctl -- migrate
+AUCTION_CONFIG_FILE=/etc/auction/public.toml \
+  cargo run --locked -p auctionctl --features postgres -- migrate
 
 # PostgreSQL 初始建库；只在目标库缺失时 CREATE DATABASE，不运行迁移，也不修改已有库。
 # 该命令与 migrate 使用相同的 systemd 状态目录锁和三角色停机门禁；执行成功后再显式运行 migrate。
 AUCTION_CONFIG_FILE=/etc/auction/public.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-bootstrap \
     --confirm-database auction_production \
     --maintenance-secrets-file /etc/auction/postgres-maintenance.secret.toml
 
 # 只读预检三进程配置；不会连接数据库、迁移 schema 或触发外部请求。
-cargo run -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction
+cargo run --locked -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction
 
 # 生产切换前把敏感 TOML 的 group/other 权限作为硬门槛。
-cargo run -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction --strict-permissions
+cargo run --locked -p auctionctl --features postgres -- deployment-check --config-dir /etc/auction --strict-permissions
 
 # 控制已安装的 systemd unit；start/restart 会严格预检、迁移并等待三角色 readiness。
 sudo /opt/auction/bin/auctionctl deployment start --config-dir /etc/auction
@@ -55,32 +99,32 @@ sudo /opt/auction/bin/auctionctl deployment stop
 # 一次性登记 MoogleMail 凭据；Cookie 只从标准输入读取，不放入参数或日志。
 # 生产环境应使用仅运行账号可读的 secret 文件或 secret manager 管道：
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     bootstrap-mail-credentials --world main --label bot-primary \
     < /run/auction/secrets/mooglemail-main.cookie
 
 # 离线解密并导出一条 MoogleMail 异常证据；不连接数据库、Worker 或远端服务。
 # output 必须是新的私有路径，正文不会打印到 stdout。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     mail-evidence export 00000000-0000-4000-8000-000000000001 \
     --output /secure/auction-evidence/00000000-0000-4000-8000-000000000001.json
 
 # 只读核对一条结算义务对应的 Sent；不会领取、对账、发送或修改状态。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     mail-evidence inspect-sent 00000000-0000-4000-8000-000000000001 \
     --output /secure/auction-evidence/sent-00000000-0000-4000-8000-000000000001.json
 
 # 使用已认证的 parsed_message 诊断证据回填历史审查投影；可显式指定历史父密钥来源。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     mail-evidence backfill-display 00000000-0000-4000-8000-000000000001 \
     --key-source credential
 
 # 把受控五语言 Markdown 目录首次导入 Admin 指向的 PostgreSQL；不会覆盖不同的已发布正文。
 AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     import-rules-directory \
     --directory /secure/auction-migration/rules \
     --command-id 123e4567-e89b-42d3-a456-426614174000 \
@@ -88,13 +132,13 @@ AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
 
 # 只读列出论坛写入结果未知、只读对账中或等待人工授权的任务。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     forum-write-recovery-list --limit 100
 
 # 精确标题对账未命中后，显式授权某一拍卖再次尝试创建主题。
 # command-id 必须稳定且非零；confirm-write 必须逐字包含同一 auction UUID。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     authorize-forum-write-retry \
     --auction-id 00000000-0000-4000-8000-000000000001 \
     --command-id 00000000-0000-4000-8000-000000000002 \
@@ -104,20 +148,20 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 # 在同一 Serializable 只读快照中核验已迁移的旧 settlement_complete/OK 账本。
 # 该命令只输出脱敏身份与数量，不补 fence、不重新结算，也不追加任何数据库事实。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     verify-legacy-settlement \
     --auction-id 00000000-0000-4000-8000-000000000001
 
 # 只读收集 PostgreSQL 保留盘点；目标证据文件不可覆盖，且不会归档或删除数据。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     retention-inventory \
     --confirm-database auction_production \
     --output /secure/auction-evidence/retention-2026-08-23.json
 
 # 只读检查 PostgreSQL 恢复目标；不会执行 pg_restore、创建或删除数据库。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     recovery-preflight \
     --confirm-database auction_restore \
     --output /secure/auction-evidence/recovery-preflight-2026-08-23.json
@@ -125,41 +169,41 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 # 创建 PostgreSQL custom-format 备份和配对 manifest；archive/manifest 均不可覆盖。
 # 运行账号需要能够调用 pg_dump 和 pg_restore。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-backup \
     --confirm-database auction_production \
     --output /secure/auction-backups/auction-2026-08-23.dump
 
 # 在不连接数据库的情况下校验 archive、SHA-256、manifest 配对关系和 pg_restore 目录。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-backup-verify \
     --confirm-database auction_production \
     --manifest /secure/auction-backups/auction-2026-08-23.dump.manifest
 
 # 为停止服务后的 canonical PostgreSQL v28 历史格式创建专用恢复点。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-legacy-v28-backup \
     --confirm-database auction_production \
     --output /secure/auction-backups/auction-legacy-v28-2026-08-23.dump
 
 # 离线复核 v28 专用 archive/manifest；普通 postgres-backup-verify 不接受这种 manifest。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-legacy-v28-backup-verify \
     --confirm-database auction_production \
     --manifest /secure/auction-backups/auction-legacy-v28-2026-08-23.dump.manifest
 
 # 接管命令默认只读；可先不提供备份查看来源库是否精确满足 v28 前置条件。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-adopt-legacy-v28 \
     --confirm-database auction_production
 
 # 真正接管还要求已验证备份、逐字确认和新的不可覆盖 receipt。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-adopt-legacy-v28 \
     --confirm-database auction_production \
     --backup-manifest /secure/auction-backups/auction-legacy-v28-2026-08-23.dump.manifest \
@@ -169,7 +213,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 # 停止全部角色并准备同名空库后，先只读验证实际恢复的全部前置条件。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-restore \
     --confirm-database auction_production \
     --manifest /secure/auction-backups/auction-2026-08-23.dump.manifest \
@@ -177,7 +221,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 # 单事务恢复并发布不可覆盖的成功 receipt；命令不会 DROP/CREATE 数据库或停止连接。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-restore \
     --confirm-database auction_production \
     --manifest /secure/auction-backups/auction-2026-08-23.dump.manifest \
@@ -185,7 +229,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 # 重建命令默认只读：验证当前 Auction 源库、零外部连接、备份证据、维护权限和 catalog 状态。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-rebuild \
     --confirm-database auction_production \
     --mode empty-for-restore \
@@ -193,7 +237,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 # 实际 DROP/CREATE 还必须显式 execute、逐字确认目标，并预留新的私有 receipt。
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  cargo run -p auctionctl --features postgres -- \
+  cargo run --locked -p auctionctl --features postgres -- \
     postgres-rebuild \
     --confirm-database auction_production \
     --mode empty-for-restore \
@@ -204,12 +248,16 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --receipt /secure/auction-evidence/rebuild-2026-08-23.json
 ```
 
+## 配置诊断与退出结果
+
 `check-config` 接受 `public` / `admin` / `worker`，输出 JSON 格式的有效配置安全投影：监听模式与
 非敏感路径、数据库后端类型、缓存 TTL、tracing/metrics 开关、HTTP 安全计数、Worker control
 边界、Admin 装备来源请求间隔、有效 MoogleMail 启用状态/world、allowlist 总数、装备过滤开关、
 模板数量和配置来源状态。
 它不会输出数据库 URL、Redis URL、Cookie、会话签名密钥、OTLP headers 或
 任何 `.keyenv` 内容。
+
+## 邮件证据命令
 
 `mail-evidence export <UUID> --output <new-path>` 只在本地加载 Worker 配置和诊断目录，按 UUID
 解密异常证据并使用 `create_new`/`0600` 创建 JSON 输出；可用 `--key-source credential|equipment`
@@ -227,15 +275,19 @@ payment 核对或已送达证明。即使查询得到 `collected`，也只表示
 及脱敏展示快照。相同幂等身份但内容不同必须冲突；找不到或不匹配证据时保持“未留存”。命令不能把诊断证据
 当作业务事实或幂等输入。
 
+## 稳定退出码
+
 `auctionctl` 的退出码是稳定的：`0` 表示成功，`2` 表示 CLI 用法或配置错误，`3` 表示数据库/外部
 依赖或前置条件失败，`4` 表示 systemd 部署编排失败，`5` 表示其它运维操作失败。错误正文沿用
 配置解析器的脱敏策略；调用方应依赖退出码判断结果，不要解析错误文本。
+
+## 部署预检
 
 `deployment-check` 读取 `public.toml`、`admin.toml` 和 `worker.toml`，检查三者引用同一份普通、
 非符号链接的公共配置，并检查敏感文件、runtime 文件、数据库档位与实际目标身份、Public/Admin TCP/Unix 监听冲突、Admin/Worker control socket 一致性，
 以及装备、用户登录和外部凭据三组数据密钥的一致性。启用中的 Worker control 还必须具备安全
 runtime 目录、group 与显式 UID/GID allowlist 配置。
-数据库目标检查由 `src/bootstrap/runtime/deployment_identity/` 拥有部署限制，并复用 storage 的 SQLx
+数据库目标检查由 [src/bootstrap/runtime/deployment_identity/](src/bootstrap/runtime/deployment_identity/) 拥有部署限制，并复用 storage 的 SQLx
 连接参数解析；允许不同数据库账号访问同一个目标。PostgreSQL 必须显式指定 host、port 和数据库，
 支持 SQLx 的 host/hostaddr/port/dbname 查询参数覆盖以及 Unix socket；不能依赖环境默认值、使用
 未知参数或 `options` 会话覆盖。DNS 别名不做网络解析，部署配置应使用同一规范主机名。
@@ -249,6 +301,8 @@ SQLite 必须使用绝对磁盘路径，已有文件按实际路径比较，新�
 但 Worker 未接入同一来源。该检查同样不读取外部服务或改写任务状态。
 默认只对敏感文件权限过宽给出警告；生产部署应使用 `--strict-permissions`。该预检不会连接
 数据库、执行迁移、启动服务或访问 MoogleMail/E-Hentai。
+
+## Systemd 总控
 
 `deployment start/restart/stop/status` 是 Linux/systemd 宿主机总控。单角色 PID、信号、停止超时、
 自动重启和日志由 systemd 拥有；总控校验 unit 已加载且其 `AUCTION_CONFIG_FILE` 与指定绝对
@@ -272,6 +326,8 @@ unit、systemd `InvocationID`、MainPID、单调启动时间和观察时间，�
 如果三个 unit 已经运行，`start` 会验证 readiness 与启动时间顺序后以 `adopted` 模式刷新回执。
 推荐通过 [`ops/deploy/systemd/auction-stack.service.example`](../../ops/deploy/systemd/auction-stack.service.example)
 在开机时进入同一控制边界，而不要分别 enable 三个角色 unit。
+
+## 停机迁移与初始建库
 
 独立 `migrate` 同样读取 `SystemdControllerArgs` 的默认 unit（`auction-worker.service`、
 `auction-admin-api.service`、`auction-public-api.service`），先持有同一部署控制锁，再读取三个 unit
@@ -310,6 +366,8 @@ primary、维护角色 `CREATEDB`、应用角色存在且可分配 owner，拒�
 迁移前会先检查目标是否为空或已有 SQLx 迁移历史；发现没有 Auction 迁移标记但存在其他用户对象时会
 失败关闭，不会把未知数据库当作空库初始化。
 
+## 凭据与规则导入
+
 `bootstrap-mail-credentials` 只允许 `main` / `isekai`，要求对应 world 已在 Worker 配置中启用，
 并使用敏感 TOML 中的 `credential_data_key` 加密后写入 PostgreSQL。Cookie 通过标准输入读取并在
 导入服务完成后释放；命令不会回显 Cookie、密文或数据密钥。
@@ -324,6 +382,8 @@ revision、正文 SHA-256 和实际写入命令 UUID。缓存失效失败不会�
 `cache_invalidation_failures`；配置选择 Redis 时必须同时启用 `postgres,cache-redis`，否则命令失败
 关闭而不会静默禁用缓存。
 
+## 论坛与结算核验
+
 `forum-write-recovery-list` 只读返回 PostgreSQL 中需要论坛写入对账的安全投影，不发起远端请求或
 修改状态。Worker 会先按精确标题 GET；命中时只补本地发布证明，未命中时停在
 `write_authorization_required`。此后只有 `authorize-forum-write-retry` 可以写入幂等授权命令、
@@ -337,6 +397,8 @@ complete 身份和 `settlement_complete/OK` 账本的 settled 拍卖。它在
 逐字复现历史 complete 请求摘要并复用应用层严格重建校验。缺失账本、当前格式账本、身份漂移、结果
 损坏或权威事实不一致都会失败关闭；成功 JSON 只包含稳定 UUID、due 时间、状态版本和脱敏计数。
 该入口没有通用 `settle` 回退，不清空 completion fence，也不写命令、审计、实时事件或任何结算事实。
+
+## 保留盘点与恢复预检
 
 `retention-inventory` 只支持 PostgreSQL 完整档，要求 `--confirm-database` 与连接实际返回的
 `current_database()` 完全一致。命令会把版本化的
@@ -355,6 +417,8 @@ realtime consumer 最小 offset 只作为诊断水位，外键依赖在政策明
 可写主节点的基础条件，不验证 backup archive 或恢复内容，也不会停止连接、执行 `pg_restore` 或
 覆盖现有对象。user mapping 只经普通数据库 owner 可读的 `pg_catalog.pg_user_mappings` 安全视图
 计数，不要求为该只读盘点授予 superuser。
+
+## 备份与历史接管
 
 `postgres-backup` 只支持 PostgreSQL 完整档，要求源库通过 schema identity、SQLx 迁移完整性和数据库
 身份检查；命令调用外部 `pg_dump --format=custom`，随后用 `pg_restore --list` 校验 archive，并在
@@ -382,6 +446,8 @@ SQLx `1..=5` 与 `7` 写为带当前 checksum 的基线，再运行其余前向�
 角色必须继续停止；此时不得再次运行接管命令。先运行普通 `auctionctl migrate` 复核前向迁移，再
 保存 recovery preflight、数据库审计和新的当前 schema 备份作为异常证据。只有正常执行中的 schema
 identity 和全部内嵌迁移都通过后才会发布 `auction-postgres-legacy-v28-adoption.v1` receipt。
+
+## 恢复与破坏性重建
 
 `postgres-restore` 复用同一 manifest/哈希校验，并要求 `--confirm-database` 同时匹配 Worker
 连接和 manifest 数据库身份。目标必须是可写主节点、没有其他连接且不存在任何用户 schema、类型、
@@ -437,3 +503,13 @@ locale provider、tablespace 和 connection limit，并在集群 advisory lock �
 灾备 archive、manifest 与回执发布只有在文件内容和父目录同步完成后才报告成功；恢复、重建及
 v28 接管在 mutation 前也同步既有恢复证据。跨目录发布会同步源、目标两个目录；不支持目录同步的
 平台或文件系统失败关闭。文件可读或 SHA-256 匹配不代替这项持久化证明。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auctionctl
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

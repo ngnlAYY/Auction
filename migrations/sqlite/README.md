@@ -1,4 +1,34 @@
-# SQLite 迁移
+# SQLite Lite 迁移
+
+[文档导航](../../docs/README.md) · [能力矩阵](../../docs/architecture.md#部署档位与能力) · [串行写适配](../../crates/auction-storage/src/database/sqlite) · [完整档边界](../postgres/README.md)
+
+只维护已声明 Lite 子集，使用本地文件与显式串行写入；不承担结算、外部邮件或论坛能力。
+
+## 本页导航
+
+- [迁移文件索引](#迁移文件索引)
+- [范围与约束](#范围与约束)
+- [迁移序列](#迁移序列)
+- [连续领先时间修复](#连续领先时间修复)
+
+## 迁移文件索引
+
+| 迁移 | 职责 |
+| --- | --- |
+| [000001_lite_core.up.sql](000001_lite_core.up.sql) | Lite 核心对象 |
+| [000002_worker_scheduler.up.sql](000002_worker_scheduler.up.sql) | Worker 轮次租约与失败状态 |
+| [000003_user_admin.up.sql](000003_user_admin.up.sql) | 用户管理命令 |
+| [000004_auction_cancellation.up.sql](000004_auction_cancellation.up.sql) | 拍卖取消元数据 |
+| [000005_lifecycle_metadata.up.sql](000005_lifecycle_metadata.up.sql) | 生命周期与前后轮元数据 |
+| [000006_scheduled_final_phase.up.sql](000006_scheduled_final_phase.up.sql) | Final phase 调度 fence |
+| [000007_leader_since_backfill.up.sql](000007_leader_since_backfill.up.sql) | 可证明的领先时间回填 |
+| [000008_lot_effective_end_invariant.up.sql](000008_lot_effective_end_invariant.up.sql) | Lot 有效结束时间不变量 |
+| [000009_lot_category_numbering.up.sql](000009_lot_category_numbering.up.sql) | 分类内标的编号 |
+| [000010_user_forum_account_identity.up.sql](000010_user_forum_account_identity.up.sql) | 用户论坛账号身份 |
+| [000011_realtime_event_admin_index.up.sql](000011_realtime_event_admin_index.up.sql) | Admin 跨流事件索引 |
+| [000012_live_leader_since_repair.up.sql](000012_live_leader_since_repair.up.sql) | 未结算 live lot 连续领先时间修复 |
+
+## 范围与约束
 
 SQLite 迁移必须保持只追加。本目录只维护 Lite 档明确支持能力所需的 schema 子集，允许
 使用 SQLite 专属的 SQL 和事务初始化方式，不要求与 [`../postgres/`](../postgres/) 的
@@ -7,6 +37,9 @@ SQLite 迁移必须保持只追加。本目录只维护 Lite 档明确支持能�
 SQLite 的串行写入、锁等待、本地文件系统、备份和单节点假设必须在涉及竞价写入的迁移与
 架构文档中明确说明。Lite 可以减少系统能力，但已支持的竞价写入仍必须保持事务、幂等和
 追加式审计不变量。已经发布的迁移文件禁止修改；结构修正应通过新的追加迁移完成。
+
+
+## 迁移序列
 
 当前 `000001_lite_core.up.sql` 已提交共有身份、拍卖、竞价、代理、审计、realtime、会话和
 调度对象，`000002_worker_scheduler.up.sql` 追加调度租约、尝试次数和失败状态，
@@ -23,6 +56,9 @@ Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化
 历史查询采信的结算事实链，对应 HTTP 路由固定返回 `501 feature_not_supported`。
 SQLite 竞价事务必须使用 `BEGIN IMMEDIATE` 的串行写入口，不能因为 migration 已存在就绕过
 该适配器边界。
+
+
+## 连续领先时间修复
 
 `000012_live_leader_since_repair.up.sql` 从追加式接受事实修正未结算 live lot 的连续领先
 起点，与 PostgreSQL `000037` 同义；不改变 Lite 的结算能力边界或已保留的终态记录。

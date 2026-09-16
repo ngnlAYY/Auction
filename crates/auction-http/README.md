@@ -1,29 +1,58 @@
 # auction-http
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [路由与源码布局](#路由与源码布局)
+- [职责边界](#职责边界)
+- [命令结果与能力边界](#命令结果与能力边界)
+- [实时连接与恢复](#实时连接与恢复)
+- [静态产物内嵌](#静态产物内嵌)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/http/routes/surfaces.rs](src/http/routes/surfaces.rs) | 完整路由注册闭集 |
+| [src/http/public](src/http/public) | Public handlers |
+| [src/http/admin](src/http/admin) | Admin handlers |
+| [src/http/shared](src/http/shared) | 边界中间件及 surface 状态 |
+| [src/assets](src/assets) | 静态入口、缓存与错误分派 |
+
+## 职责与实现边界
+
 Public 与 Admin 的 HTTP 表面适配器。
 
-- `src/http/routes/mod.rs`：HTTP 子模块装配、稳定导出和跨 surface 共享类型；`routes/surfaces.rs`
+## 路由与源码布局
+
+- [src/http/routes/mod.rs](src/http/routes/mod.rs)：HTTP 子模块装配、稳定导出和跨 surface 共享类型；`routes/surfaces.rs`
   持有 `public_router()` / `admin_router()` 与冻结契约路径注册，`routes/health.rs` 持有健康检查；
   `routes/admin.rs` 只保留稳定出口，Admin 会话、生命周期、结算/恢复报告和恢复确认分别位于
   `routes/admin/{session,lifecycle,reports,recovery}.rs`；业务世界启停与 settled-only 报表目录分别由
   `src/http/admin/{worlds,settlement_catalog}.rs` 持有，不塞入通用配置或拍卖列表。`routes/public/`
-  按会话、账户读取和竞价命令拆分 Public，
+  按会话、账户读取和竞价命令拆分 Public handler，
   其中竞价与代理命令位于 `routes/public/competition/{bid,proxy}.rs`；
-  handler，`routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
+  `routes/session/` 按 `guards.rs`（限流/认证）、`errors.rs`（错误映射）、`cookies.rs`
   （Cookie/Basic Auth/CSRF）、`responses.rs`（会话响应）和 `metrics.rs`（业务指标）拆分共享会话
   安全逻辑；Basic Auth 保持首个冒号分隔账号与口令，配置和会话服务初始化拒绝含冒号的 actor；Admin 写入统一由守卫保持限流 → Origin → CSRF → session 顺序，Admin 读取不消耗
   mutation 限流额度。`routes/session.rs` 只负责装配与稳定出口；`routes/reads/` 按世界/拍卖目录、竞价与价格历史、
   lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
-  `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。`src/http/mod.rs` 只负责
-  surface 导出边界。`src/http/public/realtime/` 再按列表读取、WebSocket 生命周期、目标解析和事件校验/映射
+  `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。[src/http/mod.rs](src/http/mod.rs) 只负责
+  surface 导出边界。[src/http/public/realtime/](src/http/public/realtime/) 再按列表读取、WebSocket 生命周期、目标解析和事件校验/映射
   拆分为 `{mod,list,websocket,target,mapping}.rs`：单拍卖回放保留旧版必填 `auction_id` 和响应信封，
   发现回放使用显式 `scope=auctions` 扩展，WebSocket 逐帧发送旧版单事件，并拥有 4 KiB 读取、
   50/60 秒 Ping/Pong、5 秒写入、稳定 close reason、settled 预检和 discovery 专属容量边界。
-- `src/http/public/`、`src/http/admin/`：分别持有两个 surface 的 handler；跨 surface 状态和
-  realtime Hub 只放在 `src/http/shared/`。
-- `src/http/shared/state/`：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
+- [src/http/public/](src/http/public/)、[src/http/admin/](src/http/admin/)：分别持有两个 surface 的 handler；跨 surface 状态和
+  realtime Hub 只放在 [src/http/shared/](src/http/shared/)。
+- [src/http/shared/state/](src/http/shared/state/)：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
   `mod.rs` 只保留 `PublicApiState`/`AdminApiState` 稳定导出；状态容器不跨 surface 共用业务端口。
-- `src/http/shared/boundary.rs`：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
+- [src/http/shared/boundary.rs](src/http/shared/boundary.rs)：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
   访问日志；业务 API 路由额外挂接默认纯文本拒绝的 JSON 外壳转换，400/413/500 分别使用
   `invalid_query`/`body_too_large`/`internal_error`，保留状态码和已映射 JSON，不改认证或读取正文的
   顺序；替换正文时移除旧实体描述头，HEAD 保持空正文，健康检查、metrics 和静态资源不接入。
@@ -31,33 +60,33 @@ Public 与 Admin 的 HTTP 表面适配器。
   `no-cache`/`no-store` 响应策略；`strict_json.rs`：旧版写路由的媒体类型、body 上限和单 JSON
   值边界，并允许 Public 竞价命令在限流、Origin 和认证之后延迟解码 body；`method_strict.rs`：业务
   路由显式 HEAD/405 与 `Allow` 契约。
-- `src/http/security/`、`src/http/metrics/`：origin/Cookie/有界限流策略与进程指标表面。
-- `src/http/admin/dashboard/`：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections/{mail,realtime,
+- [src/http/security/](src/http/security/)、[src/http/metrics/](src/http/metrics/)：origin/Cookie/有界限流策略与进程指标表面。
+- [src/http/admin/dashboard/](src/http/admin/dashboard/)：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections/{mail,realtime,
   operations,credentials,alerting,fallback}.rs` 分别负责邮件、realtime、履约/投递/recovery、凭据、
   alerting 和 unknown 降级 section，`mapping.rs` 负责 health/process/worker 与稳定 Admin 响应 DTO 映射，
   不改变 JSON 字段或状态码契约。
-- `src/http/admin/users/`：用户列表、创建/属性命令、黑名单与改名状态动作、DTO 映射和共享错误边界
+- [src/http/admin/users/](src/http/admin/users/)：用户列表、创建/属性命令、黑名单与改名状态动作、DTO 映射和共享错误边界
   分别由 `list.rs`、`commands.rs`、`status.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责
   稳定处理器出口；Admin Users 的 session、CSRF、命令 ID 和版本 fence 契约保持不变。
-- `src/http/admin/mail/`：轮询状态、入站列表/详情、暂停/恢复命令、Worker 唤醒和错误映射分别由
+- [src/http/admin/mail/](src/http/admin/mail/)：轮询状态、入站列表/详情、暂停/恢复命令、Worker 唤醒和错误映射分别由
   `state.rs`、`intake.rs`、`commands.rs`、`trigger.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定
   处理器出口；邮箱筛选、状态版本、CSRF 和 Worker control 契约保持不变。
-- `src/http/admin/realtime/`：最近事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享
+- [src/http/admin/realtime/](src/http/admin/realtime/)：最近事件元数据、lag/failure 读取、replay 命令、安全投影映射和共享
   分页/错误边界分别由 `reads.rs`、`replay.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责
   稳定处理器出口；`GET /api/v1/admin/realtime/events` 是不含 payload 的新增只读端点，三类列表共用
   有界页大小和最大偏移量，realtime 旧版嵌套分页、CSRF、request hash 和 replay 状态契约保持不变；旧 replay wire 缺少
   `command_id` 时稳定派生，新版显式 ID 仍直接进入核心幂等账本。
-- `src/http/admin/credentials/`：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
+- [src/http/admin/credentials/](src/http/admin/credentials/)：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
   CSRF/分页/错误边界分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只
   负责稳定处理器出口；凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
-- `src/http/admin/delivery/`：交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
+- [src/http/admin/delivery/](src/http/admin/delivery/)：交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
   分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；
   动作闭集、CSRF、fencing、request hash 和外部结果未知对账边界保持不变。
-- `src/http/admin/auctions/`：拍卖列表、创建命令、开拍前计划时间修改、DTO 映射和共享错误边界分别由
+- [src/http/admin/auctions/](src/http/admin/auctions/)：拍卖列表、创建命令、开拍前计划时间修改、DTO 映射和共享错误边界分别由
   `list.rs`、`commands.rs`、`schedule.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定
   处理器出口；旧分页、能力投影、零版本创建 fence、Draft/Preview 修改边界、命令幂等和事务错误
   契约保持不变。
-- `src/assets/mod.rs`：前端静态产物、条件读取和 404 分派；`assets/routes.rs`：15 + 21 条允许获得
+- [src/assets/mod.rs](src/assets/mod.rs)：前端静态产物、条件读取和 404 分派；[src/assets/routes.rs](src/assets/routes.rs)：15 + 21 条允许获得
   SPA 入口的显式浏览器路由。
 
 ## 职责边界
@@ -86,6 +115,8 @@ URL，并直接覆盖既有 `game_equipment_url` DTO 字段；两条路由固定
 `no-store`，只接受空 query 并返回 `{enabled: bool}`。没有可靠观测时返回
 `503 forum_sync_unavailable`，未装配/存储错误为 `503 storage_unavailable`，SQLite Lite 为 501。
 现有 P15 镜像响应保持原字段闭集，公开页面仅在明确启用后读取并展示真实同步楼层。
+
+## 命令结果与能力边界
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
@@ -143,6 +174,9 @@ Admin `/api/v1/admin/auctions` 的 GET 已接入 Admin session、`world_id`/`sta
 Worker/MoogleMail 入站的 world 配置。
 `GET /api/v1/admin/settlement-catalog` 只接受可选 `world_id`/`sequence` 和有界分页，返回
 PostgreSQL 已结算拍卖的最小稳定目录；结算/recovery 报告仍按目录 UUID 独立读取，SQLite 返回 501。
+
+## 实时连接与恢复
+
 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session/CSRF 和稳定命令 DTO；HTTP 层只映射
 `withdraw`/`set_start_price` 与版本 fence，事务、审计、预览事件和 withdrawn-return 义务由
 应用/存储 owner 完成，SQLite Lite 返回 `501 feature_not_supported`。
@@ -231,3 +265,13 @@ release 构建把稳定目录中的产物烘进二进制，dev 构建从同一�
 顶层 `wasm/*.js`/`*.wasm` 和其他稳定文件名使用 `no-cache` 并提供 `Last-Modified` 条件读取；只有
 `assets/` 下带内容指纹的资源使用一年 `immutable`。Public 非身份化读接口统一 `no-cache`，Public
 forum/sync-status、会话/身份化/变更接口和全部 Admin 业务接口统一 `no-store`，包括错误响应。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-http
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

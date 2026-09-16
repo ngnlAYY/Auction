@@ -1,15 +1,46 @@
 # auction-jobs
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+数据库驱动的调度、重试、游标与 Worker control；不复制拍卖状态机。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [源码布局](#源码布局)
+- [生命周期、慢速代理与结算](#生命周期慢速代理与结算)
+- [Worker control](#worker-control)
+- [边界约束](#边界约束)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/worker/runtime](src/worker/runtime) | 循环组合、任务所有权与退出 |
+| [src/worker/auction](src/worker/auction) | 生命周期调度 |
+| [src/worker/mail](src/worker/mail) | 邮件轮询及完成前缀 |
+| [src/worker/forum](src/worker/forum) | 论坛同步和命令导入 |
+| [src/worker/recovery](src/worker/recovery) | 恢复阶段编排 |
+| [src/control](src/control) | Unix control 协议与 peer 认证 |
+
+## 职责与实现边界
+
 Worker 任务编排：调度、重试、游标推进和生命周期任务。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 `src/worker/`，
+## 源码布局
+
+源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；Worker 生命周期与调度实现放在 [src/worker/](src/worker/)，
 并按 `auction/`、`forum/`、`mail/`、`realtime/`、`recovery/`、`settlement/` 和 `operations/`
-分组。Worker control 传输层独立归属 `src/control/`，入口只负责装配；协议 DTO、HTTP handler、
+分组。Worker control 传输层独立归属 [src/control/](src/control/)，入口只负责装配；协议 DTO、HTTP handler、
 Unix socket server 和 Admin client 分别位于 `src/control/transport/{protocol,handlers,server/{mod,listener,security},client}.rs`，
 其中 server 再按生命周期、peer allowlist 和 Unix socket 文件安全划分 owner；调度器只通过
 `WorkerControlHandle` 接入状态与唤醒端口。
-`src/worker/runtime/` 的 `mod.rs` 只保留跨 owner 装配与稳定导出，`model.rs` 管理 Worker 端口/运行参数，
+[src/worker/runtime/](src/worker/runtime/) 的 `mod.rs` 只保留跨 owner 装配与稳定导出，`model.rs` 管理 Worker 端口/运行参数，
 `runner.rs` 管理启动、任务装配、drain 顺序和任务退出错误；具体业务循环继续由相邻 owner 模块拥有。
+
+## 生命周期、慢速代理与结算
 
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
 指数退避失败记录和由装配根注入的 shutdown future；claim 冻结领取后的调度版本，完成与失败必须
@@ -114,7 +145,7 @@ Fulfillment 按并发波次领取，避免未开始任务提前消耗 lease；Re
 `case → return → action → relist → refund` 顺序，各 phase 失败互不跳过，且不会终止其它 owner。
 MoogleMail 入站按已配置的 `main`/`isekai` world 分别运行独立 poller，每个 poller 使用独立
 `mailbox_key`、游标、claim/fencing 和固定指标 label；同一 shared Cookie 只在 Worker 内复用，不合并
-不同世界的持久化状态。轮询实现位于 `src/worker/mail/poll/`，由 `types.rs`、`cycle.rs`、
+不同世界的持久化状态。轮询实现位于 [src/worker/mail/poll/](src/worker/mail/poll/)，由 `types.rs`、`cycle.rs`、
 `processing/{mod,fetch,business}.rs`、`mapping.rs` 和 `failure.rs` 分别负责协议/运行时、调度领取、
 租约与批次提交编排、远程读取 retry、单封业务 retry、事实映射和失败退避。
 每个 poller 还拥有按标准五字段 cron 驱动的独立定时器和手动唤醒器；
@@ -157,6 +188,8 @@ owner 的 active 收件人资格；`worker/runtime/recovery.rs` 又按 dispatch�
 observation 和 retry 拆入 `worker/runtime/recovery/`，只保留 runtime 稳定出口；真实外部回执与
 目标部署验证仍需独立运行证据。
 
+## Worker control
+
 Worker control 已提供 UDS-only 的 `live`、`ready`、`status`、`/metrics` 和 MoogleMail poll 唤醒协议；
 `/metrics` 与 control 共享同一 peer credential 校验的 Unix socket 和 Worker 进程 registry，
 不会启动第二个监听器。Worker recorder 使用固定的 9 类循环、3 类结果和 2 类重试 label，
@@ -180,9 +213,19 @@ Worker 游标和命令账本必须持久化：内存定时器或内存游标不�
 Lite 档下 Worker 实例数和并发都必须保持为一，但游标仍然要持久化。
 入口接收配置层已校验的并发数；SQLite Lite 档固定为 1，不能依赖运行时自行降级。
 
-本 crate 不暴露业务写入 HTTP 表面；`src/control/` 的 HTTP 仅是本机 peer-authenticated 运维
+本 crate 不暴露业务写入 HTTP 表面；[src/control/](src/control/) 的 HTTP 仅是本机 peer-authenticated 运维
 传输，不能承载拍卖或管理业务写入，也不与 Public/Admin 的 `auction-http` 路由混用。
 
 论坛首次发布与未知写入恢复在登记本地同步正文前，都读取稳定 #1/#2 的原始 BBCode，
 逐字证明与本轮渲染结果一致；拍卖标记只证明楼层身份。已有正文不一致时等待人工重试授权，
 获授权后仅编辑已证明的 post ID，并再次读回验证；缺失 #2 仍遵守独立的补写权限。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-jobs
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

@@ -1,8 +1,22 @@
-# 实时事件契约
+# 实时事件与客户端恢复契约
 
-本文档定义 Auction Rust 的 Public 实时事件、回放接口和客户端恢复规则。事件注册表与 JSON DTO
-由 `auction-contracts` 持有，HTTP/WebSocket 映射由 `auction-http` 持有；任何不兼容变更都必须新增
+[文档导航](../README.md) · [事件 DTO](../../crates/auction-contracts/src/contracts) · [HTTP 与 WebSocket](../../crates/auction-http/src/http/public/realtime) · [浏览器严格解码](../../crates/auction-web-public/src/api/decoder/realtime.rs)
+
+区分数据库事件信封、Public v1 wire 和客户端快照恢复，任何已发布字段变更均须评审。
+
+本文档定义 Auction Rust 的 Public 实时事件、回放接口和客户端恢复规则。事件注册表与负载校验由
+[应用 realtime 端口](../../crates/auction-application/src/ports/realtime/public.rs)持有，JSON DTO 由
+`auction-contracts` 持有，HTTP/WebSocket 映射由 `auction-http` 持有；任何不兼容变更都必须新增
 schema version，不能依赖仓库外的协议说明。
+
+## 本页导航
+
+- [事件信封](#事件信封)
+- [已冻结的事件注册表](#已冻结的事件注册表)
+- [流和游标](#流和游标)
+- [Catch-up HTTP](#catch-up-http)
+- [WebSocket](#websocket)
+- [兼容和实现边界](#兼容和实现边界)
 
 ## 事件信封
 
@@ -143,7 +157,8 @@ origin→query→session。连接尝试限流使用自己的固定窗口账本�
 连接结束语义由 v1 固定：客户端发送 Text/Binary 时使用 1008/`实时连接只允许服务端推送`；
 Hub 淘汰慢消费者时使用 1013/`连接消费速度过慢`；服务端发现无法安全公开的事件或 discovery
 收到非 `auction.created` 时使用 1002/`实时事件合同错误`；进程 drain 时使用
-1001/`服务正在关闭`。读超限、Pong 超时、底层 framing/读错误以及事件或 Ping 写失败直接结束连接，
+1001/`服务正在关闭`。Tungstenite `MessageTooLong` 读超限会尝试发送空 reason 的 1009 close；
+Pong 超时、其他底层 framing/读错误以及事件或 Ping 写失败直接结束连接，
 不得伪装成上述四种应用原因。慢客户端不能无限占用内存，也不能阻塞竞价事务或事件持久化。
 
 `scope=auctions` 的 discovery 容量是每个 Public 进程独立的 128 条连接；第 129 条在升级前返回
@@ -153,8 +168,8 @@ HTTP 429 `discovery_busy`，连接结束后释放槽位。普通 `auction_id` �
 
 WebSocket 只负责低延迟通知，不替代 Catch-up。浏览器先完成 WebSocket 握手，再从已确认序号
 调用 HTTP 回放；握手后到达的帧会在 catch-up 期间缓冲，从而关闭“先回放后订阅”的竞态窗口。
-收到不连续序号时再次切换到回放/快照流程。无法保持长连接的
-客户端可以使用 SSE，但必须复用同一事件信封、序号和恢复语义。
+收到不连续序号时再次切换到回放/快照流程。无法保持长连接时使用已登记的 HTTP Catch-up 与权威快照。
+SSE 是尚未注册 endpoint 的扩展方向；若后续实现，必须复用同一事件信封、序号和恢复语义。
 
 ## 兼容和实现边界
 

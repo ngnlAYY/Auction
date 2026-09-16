@@ -1,10 +1,40 @@
 # auction-integrations
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [HTTP 与协议解析](#http-与协议解析)
+- [凭据装配与外部请求](#凭据装配与外部请求)
+- [装备来源与密钥适配](#装备来源与密钥适配)
+- [边界约束](#边界约束)
+- [凭据 owner 与取消传播](#凭据-owner-与取消传播)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/clients](src/clients) | 受限 HTTP、论坛与邮件传输/解析 |
+| [src/equipment](src/equipment) | 装备来源策略、读取与解析 |
+| [src/credentials](src/credentials) | 外部 Cookie 加密 |
+| [src/cryptobox](src/cryptobox) | 数据密钥与装备 key 信封 |
+| [src/forum](src/forum) | 本地论坛解析与 BBCode 渲染 |
+| [src/login_key](src/login_key) | 用户登录 key 签发/读取 |
+
+## 职责与实现边界
+
 外部服务网关：E-Hentai 论坛、MoogleMail，以及 Admin 装备来源。
 
-- `src/clients/http.rs`：`build_http_client()` 构建统一使用 rustls/ring 的 `reqwest::Client`。
+## HTTP 与协议解析
+
+- [src/clients/http.rs](src/clients/http.rs)：`build_http_client()` 构建统一使用 rustls/ring 的 `reqwest::Client`。
   外部适配器应复用该客户端，避免每个网关各自维护连接池或选择不同 TLS provider。
-- `src/clients/ehentai/` 与 `src/clients/mooglemail/`：各自的传输与认证边界。E-Hentai
+- [src/clients/ehentai/](src/clients/ehentai/) 与 [src/clients/mooglemail/](src/clients/mooglemail/)：各自的传输与认证边界。E-Hentai
   目录由 `mod.rs` 负责公开导出，`error.rs`/`credentials.rs` 持有错误和单 Cookie 会话，
   `client/mod.rs` 负责客户端装配与公共入口，`client/request.rs` 持有固定 origin、限速、
   响应边界和请求安全校验，`client/pagination.rs` 持有同 origin/thread 的主题分页发现与页数上限，
@@ -86,6 +116,8 @@
   recorder。HTTP body timeout 只保留 `body_unavailable` 与最后实际观测 status，不伪称 partial body；session expired
   在凭据耗尽或失效写回失败时保留最后已取得的 body/status/elapsed。
 
+## 凭据装配与外部请求
+
 调用顺序是：用 `MoogleMailClient::production()` 建立受限客户端；Worker 优先从 PostgreSQL
 读取 A32 唯一 active Cookie 并用独立数据密钥解密；暂时没有 active 行时保留 degraded 运行态，实际
 操作返回 credential unavailable；未配置该能力时再使用
@@ -136,7 +168,10 @@ post ID 为楼层号生成 E-Hentai findpost 链接；它还显示本轮能够�
 正文明确出现登录表单/失效文案时作废；Cloudflare 前置挑战同样可能返回 403，不能据此误删有效
 Cookie，而应保留凭据并以协议/访问失败收口。论坛回复只执行普通出价；代理创建/降低是 Public Web
 专属能力，解析器会在账本前静默丢弃论坛代理行，且不会把它们写入固定 #2。
-- `src/equipment/`：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
+
+## 装备来源与密钥适配
+
+- [src/equipment/](src/equipment/)：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
   请求间隔和完整请求超时，`reader.rs` 负责无代理/无重定向读取与应用端口适配，`parser/` 按
   `url.rs`、`page.rs`、`identity.rs`、`stats.rs` 和 `common.rs` 分别解析来源 URL、旧装备页、
   闭集属性、统计值和共用边界，`parser/mod.rs` 只保留稳定出口；`model.rs` 负责 canonical JSON 事实与稳定指纹。关闭业务
@@ -145,15 +180,15 @@ Cookie，而应保留凭据并以协议/访问失败收口。论坛回复只执�
   被重复解释为主属性；同时兼容旧页的 `Tier A/B/C Soulbound` 头部，但仍严格校验阶段值、类别和
   页面结构。`game_link.rs` 为 P09/P11 已读取的 Public lot 批量绑定密文 owner，核对 world、
   外部 ID 和无 key 投影后短暂解密，构造固定 HentaVerse origin 的完整 URL；该值只移交最终 Public
-  HTTP DTO 或论坛正文渲染边界，不进入日志、审计、事件或持久化缓存。`src/cryptobox/mod.rs` 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
+  HTTP DTO 或论坛正文渲染边界，不进入日志、审计、事件或持久化缓存。[src/cryptobox/mod.rs](src/cryptobox/mod.rs) 只在适配器边界使用敏感数据密钥，以 AES-256-GCM 生成绑定
   装备 ID 的密文信封，明文 key 不进入应用写端口。
-- `src/credentials/mod.rs`：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
+- [src/credentials/mod.rs](src/credentials/mod.rs)：A32 外部凭据加密适配器。MoogleMail 与 E-Hentai Cookie 使用独立
   的 AAD/HMAC 域和 `credential_data_key`，密文信封只保存 nonce、key id 和指纹；Admin 导入
   与 Worker 解密都不返回 secret，密钥不进入日志、DTO 或审计 metadata。凭据管理只由
   PostgreSQL 完整档提供，SQLite 不返回伪造的 Lite 能力。
-- `src/forum/mod.rs`：只负责 ForumPreviewAdapter 和渲染/解析出口；`src/forum/parser/` 按
+- [src/forum/mod.rs](src/forum/mod.rs)：只负责 ForumPreviewAdapter 和渲染/解析出口；[src/forum/parser/](src/forum/parser/) 按
   单次 DOM 页面事实抽取、纯文本切分、目录、命令/金额、内部模型和结果辅助拆分有界的 catalog、posts、warnings
-  和命令预览。解析器只在内存中工作。远程主题读写由 `src/clients/ehentai/` 拥有，回帖导入仍由
+  和命令预览。解析器只在内存中工作。远程主题读写由 [src/clients/ehentai/](src/clients/ehentai/) 拥有，回帖导入仍由
   `auction-jobs` 通过应用端口执行。
 
 ## 边界约束
@@ -175,9 +210,21 @@ loader 只接受 `.keyenv` 中的 `hv-ck-key1`（Worker）和 `hv-ck-key2`（隔
 owner-only 权限并拒绝未知/重复键；Worker 只装配前者，后者不自动回退。`.keyenv` 仍不得提交或
 进入普通配置、日志和 DTO。
 
+## 凭据 owner 与取消传播
+
 Worker 的 MoogleMail/论坛凭据 owner 会由凭据集合自动传给 gateway 与 delivery HTTP client；
 client 克隆及 sender、分页上下文继续共享同一 owner。每次物理 HTTP 请求在限速等待后、发出前
 核验原持锁 session；装备来源的独立 reqwest client 也读取同一 MoogleMail 凭据 owner。
 失锁状态不可恢复，集合停止提供凭据，GET 返回凭据不可用；POST 前发现失锁仍保守归为
 `write_unknown`，避免先前 compose 已暂存资产时被误判为可安全重发。显式不带 owner 的本地构造
 保持原行为。该边界不能撤回已经发出的请求，也不能把 `check → send` 与远端操作原子化。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-integrations
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
