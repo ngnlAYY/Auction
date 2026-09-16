@@ -1,8 +1,31 @@
 # auction-cache
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+默认关闭、按需启用 Redis 的可丢弃读模型缓存。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [启用条件](#启用条件)
+- [正确性约束](#正确性约束)
+- [实现说明](#实现说明)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/cache](src/cache) | disabled/Redis 实现、预算和错误脱敏 |
+
+## 职责与实现边界
+
 可选缓存边界。默认**完全关闭**，不编译任何缓存客户端。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；缓存实现集中在 `src/cache/mod.rs`。
+## 启用条件
+
+源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；缓存实现集中在 [src/cache/mod.rs](src/cache/mod.rs)。
 
 启用 Redis 需要两件事同时成立：
 
@@ -42,3 +65,13 @@ Public 规则读模型是当前首个消费者：按 `auction:read-model:public-
 缓存装饰器不缓存空结果，命中快照解析失败会尽力删除并回源。禁用缓存、Redis 故障、序列化
 失败或失效失败都只影响命中率，不改变规则、竞价、会话、幂等和审计的权威结果。
 一次规则读取已经确认缓存不可用时，回源成功后跳过回填，避免再次等待同一故障后端。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-cache --no-default-features --features redis
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

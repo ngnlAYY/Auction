@@ -1,15 +1,44 @@
 # 公开端浏览器界面
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+纯 CSR Public SPA，拥有公开端交互、读取、命令与实时恢复。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [页面与源码布局](#页面与源码布局)
+- [国际化](#国际化)
+- [构建与资源边界](#构建与资源边界)
+- [权威数据与命令交互](#权威数据与命令交互)
+- [监听器所有权与实时恢复](#监听器所有权与实时恢复)
+- [依赖与首屏边界](#依赖与首屏边界)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/app](src/app) | 路由、页面与 surface 状态 |
+| [src/api](src/api) | 同源请求及严格 DTO 解码 |
+| [assets](assets) | 公开端视觉资源 |
+| [i18n](i18n) | 五语言 Fluent 文案 |
+
+## 职责与实现边界
+
 Dioxus 客户端渲染的公开端 SPA。`Route` 枚举冻结 15 条路径，其中 `/forum` 是独立论坛同步页；
 修改前必须确认 [`docs/contracts/routes.md`](../../docs/contracts/routes.md) 的 URL 契约，并同步
 `auction-http/src/assets/routes.rs` 的后端入口清单。
 
-- `src/main.rs`：薄启动入口。
-- `src/api/`：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求；
+## 页面与源码布局
+
+- [src/main.rs](src/main.rs)：薄启动入口。
+- [src/api/](src/api/)：按 `auction/`、`content/`、`identity/` 分组的同源 Public API DTO 解码与请求；
   `clock.rs` 负责服务端时间校准和 GET 边界，`model.rs` 负责 lot 展示模型，`queries.rs` 负责
   拍卖、lot、竞价日志和价格历史查询，`mod.rs` 只保留模块装配与稳定导出，不接触存储模型。
   竞价日志选择器会逐页读取各状态目录，直到总数或短页证明完成，不再只展示前 200 场。
-- `src/app/`：按相同 owner 分组的公开端路由、页面和交互组件；`surface/` 进一步按路由、
+- [src/app/](src/app/)：按相同 owner 分组的公开端路由、页面和交互组件；`surface/` 进一步按路由、
   看板、目录、页面和查询状态拆分跨页面职责；`surface/board/` 将看板入口、世界选择、实时刷新、
   拍卖数据和预览/历史视图切换分开，`refresh.rs` 拥有竞价资源失效与合并读取；`surface/catalog/` 继续按表格、竞价动作、行组件
   和展示映射拆分；`surface/pages/` 将历史列表、lot 详情/竞价、通用重试和路由薄包装分开；价格历史筛选器在
@@ -19,12 +48,12 @@ Dioxus 客户端渲染的公开端 SPA。`Route` 枚举冻结 15 条路径，其
   当前价格/领先限制；取消后重新操作仍走完整校验。命令宿主按 lot UUID 与当前用户 UUID
   隔离，切换目标或身份会销毁旧状态与任务。
   `shared/` 只保存本 surface 内真正通用的基础组件。
-- `src/app/content/forum.rs`：独立 `/forum` 页面，先通过 P21 每 30 秒读取论坛同步开关；明确关闭时
+- [src/app/content/forum.rs](src/app/content/forum.rs)：独立 `/forum` 页面，先通过 P21 每 30 秒读取论坛同步开关；明确关闭时
   只显示“当前论坛同步已关闭”，即使当前没有拍卖也一样，且不挂载帖子轮询。启用后按所选世界读取
   当前拍卖的 P15 镜像，发布后只显示持久化的“当前同步到 #xx”真实处理楼层。发布前每 2 秒、发布后
   每 30 秒读取本地投影，明确失败时暂停帖子轮询并提供人工重试；开关未知显示不可用并继续定期重读，
   不把缺失状态伪装成关闭。首页不读取论坛同步状态。
-- `assets/public.css`：公开端 surface 样式，持有公共拍卖页的 BEM 类名与视觉契约。
+- [assets/public.css](assets/public.css)：公开端 surface 样式，持有公共拍卖页的 BEM 类名与视觉契约。
 - `i18n/*.ftl`：5 种语言的 Fluent 译文（`en`、`zh-CN`、`zh-TW`、`ja`、`ko`），默认英文。
 
 ## 国际化
@@ -40,6 +69,8 @@ Fluent 消息 ID 不允许包含点号，使用 `nav-home` 而不是 `nav.home`�
 切换语言会取消/替换旧读取，避免界面文案与规则正文串语言。规则成功态继续由
 `public-rules-page` 拥有容器，并通过无外层主题的安全 Markdown 块保持冻结宽度和默认排版。
   设计变量来自 `auction-web-shared`。
+
+## 构建与资源边界
 
 构建：
 
@@ -58,6 +89,8 @@ just web-serve-public   # 本地开发监听
 lot 详情的竞价历史即使当前页为空也保留分页控制，越界分享链接可在原页返回有效页码。
 补偿流水响应与选中拍卖 ID 对齐；跨轮次加载隐藏旧流水，同轮次刷新可保留旧快照。
 流水拍品链接使用持久化 lot UUID，展示标签继续使用分类编码。
+
+## 权威数据与命令交互
 
 当前首页看板、lot 详情、规则文档、公开黑名单、论坛同步、竞价日志、价格历史、Public session、账户竞价/代理读取、live lot
 普通出价和持久化实时事件游标页已经通过同源 HTTP 读取或提交 Public API；lot 详情现在消费完整装备安全投影，展示
@@ -80,6 +113,9 @@ lot 详情的竞价历史即使当前页为空也保留分页控制，越界分�
 之间的切换。页头与当前拍卖选择器只展示数据库中 enabled 的 world；价格历史、拍卖历史和 bid log
 筛选器仍保留受支持但已关闭的 world，以便读取其中已经 settled 的历史。服务端同时强制
 `world.enabled OR auction.status=settled`，因此 URL 不能借历史筛选值打开禁用世界的活动投影或写入。
+
+## 监听器所有权与实时恢复
+
 PublicShell 保存 `visibilitychange` 和 `popstate` 回调句柄，并在外壳卸载时移除监听、释放闭包；
 离开外壳再返回不会累积历史回调。
 代理表单继续支持已发布的金额缩写，普通出价使用纯数字 K 单位、最低价提示和提交前二次确认，
@@ -135,9 +171,21 @@ Fast/Slow 单选模式；最终阶段的 Slow 禁用原因通过对应控件的�
 避免慢请求被反复取消。生命周期、发现事件与恢复缺口仍立即触发全局权威刷新；命令结果和游标校验
 保持原有边界，不用事件负载推导下一口价格、领先者或代理权限。
 
+## 依赖与首屏边界
+
 本 crate 只允许依赖稳定 HTTP DTO 与 `auction-web-shared`，不得导入存储、配置、凭据或管理端
-组件。`src/api/` 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`，只保留查询、展示和
+组件。[src/api/](src/api/) 的 HTTP/stream wire DTO 已直接复用 `auction-contracts`，只保留查询、展示和
 交互状态。
 
 首屏超过 15 秒未就绪时只显示“加载较慢”；网络尚未完成不能被误报为应用崩溃。只有真实 WASM
 panic 才显示运行异常横幅，失败标记不会被后续就绪 effect 覆盖；原始错误继续保留在浏览器控制台。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

@@ -1,14 +1,41 @@
 # auction-contracts
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+稳定 REST、实时消息、错误和分页 DTO；不承载数据库或领域写入。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [DTO 布局与消费方](#dto-布局与消费方)
+- [稳定投影](#稳定投影)
+- [命名与依赖边界](#命名与依赖边界)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/contracts/dto/public](src/contracts/dto/public) | Public 请求、响应与实时投影 |
+| [src/contracts/dto/admin](src/contracts/dto/admin) | Admin 请求与安全响应 |
+| [src/contracts](src/contracts) | 公共信封及稳定导出 |
+
+## 职责与实现边界
+
 稳定的对外契约：REST/流 DTO、错误编码、分页和版本约定。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；`src/contracts/mod.rs` 负责统一导出，
-`src/contracts/dto/` 再按通用、Public 和 Admin 以及各自业务职责细分 DTO。Public catalog
+## DTO 布局与消费方
+
+源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；[src/contracts/mod.rs](src/contracts/mod.rs) 负责统一导出，
+[src/contracts/dto/](src/contracts/dto/) 再按通用、Public 和 Admin 以及各自业务职责细分 DTO。Public catalog
 继续由 `dto/public/catalog/{mod,auction,history,compensation,forum,lot}.rs` 分别持有拍卖上下文、
 竞价/价格历史、补偿池、论坛镜像和 lot/装备响应，`catalog/mod.rs` 只保留稳定导出。
 
 浏览器和外部客户端只能看到这里的类型。数据库记录和领域聚合都不得直接当作对外 DTO，
 转换在边界完成。
+
+## 稳定投影
 
 - `HealthResponse`：健康检查响应。`service` 与 `version` 都由调用方传入——在本 crate 内展开
   `env!("CARGO_PKG_VERSION")` 只会得到契约 crate 自己的版本，而运维需要的是运行进程的版本。
@@ -36,7 +63,19 @@
 - `PublicForumSyncStatusResponse`：P21 独立论坛同步开关，只包含必填布尔 `enabled`；未观测到可靠
   状态时使用 503 错误响应，不能把缺失值反序列化为 false，也不扩张 P15 的既有字段闭集。
 
+## 命名与依赖边界
+
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde
 映射兼容外部旧命名。修改路由、状态码、JSON 字段或事件名时，必须同步更新对应文档。
 
 本 crate 只依赖 serde，不引入 Axum、SQLx 或任何适配器类型。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-contracts
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

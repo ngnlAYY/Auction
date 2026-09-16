@@ -1,8 +1,20 @@
-# Auction Rust 部署资料
+# 部署与发布手册
+
+[文档导航](../../docs/README.md) · [CLI 参数](../../apps/auctionctl/README.md) · [发布装配](../../ci/release.sh) · [systemd 模板](systemd/README.md) · [备份与恢复](RECOVERY.md) · [v28 接管](LEGACY_V28_ADOPTION.md)
+
+按当前三进程边界说明安装、预检、顺序、制品和运维入口；执行前必须准备真实配置与维护环境。
 
 本目录只描述当前 Rust 三进程边界的部署契约，不是通用安装器，也不会在部署时改写配置
 字段或自动覆盖数据库。本项目只接受仓库内登记的 TOML、`auctionctl` 和三进程部署流程；外部
 脚本或未登记的单体启动流程不能直接套用。
+
+## 本页导航
+
+- [推荐目录](#推荐目录)
+- [发布制品](#发布制品)
+- [启动顺序](#启动顺序)
+- [数据库恢复与保留](#数据库恢复与保留)
+- [反向代理与 systemd](#反向代理与-systemd)
 
 ## 推荐目录
 
@@ -193,10 +205,13 @@ SQLite 只用于本地或单主机 Lite 部署：数据库文件必须位于本�
 个实例，Worker 并发为一。不能用本目录的 PostgreSQL 备份流程把 SQLite 当作生产高可用
 替代品。
 
+
+## 反向代理与 systemd
+
 反向代理示例见 [`caddy/Caddyfile`](caddy/Caddyfile)。
 Public/Admin 模板只对 `GET`/`HEAD` 请求中的 `/assets/*` 和 `/favicon.ico` 启用 Zstandard/gzip 响应压缩，
 由 Caddy 按浏览器的 `Accept-Encoding` 与默认内容类型、大小条件协商。压缩覆盖当前内嵌发布的
-指纹 JS、WASM 和 CSS；浏览器页面入口、API、SSE 与 WebSocket 不在匹配范围内。静态资源的
+指纹 JS、WASM 和 CSS；浏览器页面入口、API 与 WebSocket 不在匹配范围内。静态资源的
 内嵌所有权、API-only 制品的缺失资源响应以及 HTTP 缓存策略仍由 Rust 服务按
 [`routes.md`](../../docs/contracts/routes.md) 契约提供。
 

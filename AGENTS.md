@@ -2,7 +2,28 @@
 
 本文是 Auction Rust 仓库的项目级协作规范，供 AI 编程代理和人类贡献者共同遵守。
 它说明当前目录结构、模块边界、代码风格、配置方式、验证范围和交付约束。最后一次按
-工作区核对时间为 2026-09-04。
+工作区核对时间为 2026-09-16。
+
+[文档导航](docs/README.md) · [默认验证](docs/development.md)
+
+## 本页导航
+
+- [项目概览](#项目概览)
+- [仓库结构](#仓库结构)
+- [技术栈](#技术栈)
+- [依赖方向与模块所有权](#依赖方向与模块所有权)
+- [领域不变量](#领域不变量)
+- [命名规则](#命名规则)
+- [中文注释与文档要求](#中文注释与文档要求)
+- [代码风格](#代码风格)
+- [配置规则](#配置规则)
+- [数据库与迁移](#数据库与迁移)
+- [Web 规则](#web-规则)
+- [默认验证与测试范围](#默认验证与测试范围)
+- [运行进程](#运行进程)
+- [变更与 Git 纪律](#变更与-git-纪律)
+- [文档与决策维护](#文档与决策维护)
+- [交付工作流](#交付工作流)
 
 ## 项目概览
 
@@ -23,13 +44,8 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
   和能力差异，也不要求 SQLite 达到 PostgreSQL 的系统能力。
 - 拍卖页面的静态结构、CSS 和交互视觉语言由本仓库 Web crate 与样式资源共同定义；页面样式完成
   不等于业务功能或运行验收已经完成。
-- 当前状态是**功能与运行证据收口阶段**：主要模块、HTTP/浏览器路径、PostgreSQL 完整档、SQLite
-  Lite 声明子集、进程生命周期和运维边界已经建立。竞价参与者资格锁、黑名单后的代理冻结/会话撤销、
-  慢速代理 Worker owner、论坛未知结果恢复、Public 实时 client/server v1 wire，以及代理模式、严格
-  JSON/业务方法、错误外壳、Public 规则 locale 和登录返回已经静态收口；HTTP 边界已有隔离环境局部
-  R1。canonical PostgreSQL v28 历史格式的隔离接管及灾备链也已取得 R1，API-only/embedded 制品和
-  确定性 archive 已建立显式门禁；真实外部服务、非空生产数据、目标主机部署切换和完整浏览器逐页
-  验收仍缺运行态证据，因此不得宣称生产验收完成。
+- 当前处于功能与运行证据收口阶段。源码能力、历史隔离验证声明和待补运行证据分别登记在
+  [实现与验证状态](docs/status.md)，不得以路由存在、静态编译或既有“局部 R1”措辞宣称生产验收完成。
 - 除非用户明确要求，暂缓新增或运行单元测试、集成测试、功能测试用例、端到端测试和浏
   览器测试。已有测试文件保留，不因这条规则删除。
 - 根目录 [`README.md`](README.md)、[`docs/architecture.md`](docs/architecture.md)、
@@ -42,7 +58,7 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 ```text
 .
 ├── Cargo.toml / Cargo.lock       # Rust 工作区与锁定后的依赖图
-├── rust-toolchain.toml           # Rust 1.98.0 当前 stable、rustfmt、Clippy 和 WASM 目标
+├── rust-toolchain.toml           # Rust 1.98.0 仓库固定工具链、rustfmt、Clippy 和 WASM 目标
 ├── rustfmt.toml                  # Rust 格式化策略
 ├── clippy.toml                   # Clippy 与最低支持 Rust 版本策略
 ├── .editorconfig                 # 多语言编辑器默认设置
@@ -98,7 +114,7 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 
 ## 技术栈
 
-- **语言：** Rust 1.98.0 当前 stable，edition 2024；workspace MSRV 为 1.94.1。Rust 官方
+- **语言：** Rust 1.98.0 仓库固定工具链，edition 2024；workspace MSRV 为 1.94.1。Rust 官方
   没有 LTS，且只支持最新 stable，不能把 MSRV 当作 LTS。
 - **异步运行时：** Tokio 1.51.x 官方 LTS，当前下限 1.51.4。
 - **HTTP 服务：** Axum 0.8.9，使用其 Tower 中间件模型；连接层直接使用同依赖图的
@@ -106,7 +122,7 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
   能力直接引入 `tower-http`。
 - **浏览器界面：** Dioxus 0.7.10 纯客户端渲染；产物由 `just web-build`（内部调用
   `dx bundle --platform web`）生成，
-  编译目标为 `wasm32-unknown-unknown`，再由 `auction-http` 用 `rust-embed` 内嵌。
+  编译目标为 `wasm32-unknown-unknown`，再由 Public/Admin 装配根分别用 `rust-embed` 内嵌，交给 `auction-http` 提供。
   不启用 `dioxus-fullstack`/`dioxus-server`，避免第二套 HTTP 服务器与 `auction-http`
   的路由所有权冲突。
 - **国际化：** `dioxus-i18n` 0.5.1（Project Fluent 后端）与 `unic-langid` 0.9.6；
@@ -119,8 +135,8 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
   `redis` crate 1.6.0 对接 Redis。缓存只保存可重建数据，不能参与竞价正确性、幂等、锁、
   会话权威状态或审计。
 - **HTTP 客户端：** reqwest 0.13.4，外部服务使用 rustls。
-- **序列化：** serde 和明确的契约 DTO；当前没有为未使用的手工 JSON 路径直接引入
-  `serde_json`。
+- **序列化：** serde、serde_json 和明确的契约 DTO；稳定请求/响应由 `auction-contracts` 拥有，
+  不以数据库行或动态 JSON 绕过边界。
 - **错误处理：** 库、领域和应用层使用 `thiserror`；二进制装配根可以使用
   `anyhow::Context`。
 - **可观测性：** tracing、tracing-subscriber、结构化字段和 JSON 输出。
@@ -351,8 +367,8 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
 - 浏览器端是纯客户端渲染的 Dioxus SPA。不启用 SSR 或 hydration：它们不替换当前产品能力，只会新增
   hydration mismatch 和双目标构建。
 - 核心竞价、认证和管理命令必须保留显式、版本化的 REST/JSON 契约。Public 实时更新使用
-  带 sequence/version 的 WebSocket 通知；跳号或重连后读取权威快照。无法保持长连接的客户端可
-  退化为 SSE。
+  带 sequence/version 的 WebSocket 通知；跳号或重连后读取权威快照。当前重连使用 HTTP Catch-up 与权威快照恢复；SSE 降级方向尚无
+  已登记 endpoint，新增前必须冻结独立契约。
 - 若要切换到 Askama + HTMX 一类服务端渲染方案，必须先由用户明确放宽“浏览器端全 Rust、
   禁止 JavaScript”契约，不能把技术原型直接变成架构变更。
 - 前端静态产物由 `just web-build`（内部调用
@@ -388,6 +404,7 @@ just
 
 # 默认静态验证
 just fmt
+just docs-check
 just repository-policy-check
 just layout-check
 just config-example-check
@@ -398,6 +415,7 @@ just verify
 
 # 等价的直接命令
 cargo fmt --all -- --check
+just docs-check
 just repository-policy-check
 just layout-check
 just config-example-check
@@ -427,21 +445,23 @@ cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
 ## 运行进程
 
+所有 apps 的默认 Cargo feature 不含数据库驱动；以下命令明确选择 SQLite Lite。真实敏感配置和
+数据库迁移须先按[开发指南](docs/development.md)与[部署手册](ops/deploy/README.md)准备。
 公开端和管理端使用不同监听地址，默认分别为 `127.0.0.1:8090` 和 `127.0.0.1:8091`。
 运行时配置通过 TOML 选择：
 
 ```bash
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
-  cargo run -p auction-public-api
+  cargo run --locked -p auction-public-api --features sqlite
 
 AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \
-  cargo run -p auction-admin-api
+  cargo run --locked -p auction-admin-api --features sqlite
 
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml \
-  cargo run -p auction-worker
+  cargo run --locked -p auction-worker --features sqlite
 
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
-  cargo run -p auctionctl -- check-config public
+  cargo run --locked -p auctionctl -- check-config public
 ```
 
 前端产物构建需要 dx CLI（`cargo install dioxus-cli --locked`），命令为
@@ -461,6 +481,14 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
   同步更新对应契约和文档。
 - 提交标题可使用 `type(scope): summary` 的简洁格式，例如
   `feat(domain): add auction state transition` 或 `docs(architecture): define worker ownership`。
+
+## 文档与决策维护
+
+全部正式文档从[文档导航](docs/README.md)进入，职责划分见[文档维护](docs/documentation.md)。
+重要改动必须同步已有决策笔记或新增一篇 `.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md`；
+机械修改不新建笔记，决定理由翻转不得覆盖旧理由。笔记使用中文正文并保留技能规定的头块与章节。
+活跃笔记纳入版本控制，链接、状态和导航由 `just docs-check` 检查；归档前另行建立不可变封印门禁。
+维护文档不能暗中修改 wire、迁移、安全策略或默认测试范围。
 
 ## 交付工作流
 

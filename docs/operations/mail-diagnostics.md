@@ -1,6 +1,19 @@
-# MoogleMail 异常诊断与原始数据留证
+# 邮件诊断与审查证据
+
+[文档导航](../README.md) · [加密证据](../../crates/auction-integrations/src/clients/mooglemail/diagnostics) · [离线导出和显式回填](../../apps/auctionctl/src/bootstrap/runtime/mail_diagnostics) · [审查与诊断端口](../../crates/auction-application/src/ports/mail)
+
+区分加密原始证据、脱敏审查投影和业务完成证明；普通成功邮件不归档原始正文。
 
 MoogleMail 的业务拒绝、解析异常、HTTP 异常和处理超时需要同时保留可检索的安全日志，以及在确有异常时保留原始数据，便于确认邮件正文到底被怎样解析。普通成功邮件不留证；业务结果、数据库、DTO 和普通日志仍只保存安全字段，不能写入正文、Cookie、请求表单、token 或装备 key 明文。
+
+## 本页导航
+
+- [普通日志](#普通日志)
+- [保存内容与边界](#保存内容与边界)
+- [配置与离线导出](#配置与离线导出)
+- [Admin 审查展示投影](#admin-审查展示投影)
+- [主动 ComposeSend 的 Sent 证明](#主动-composesend-的-sent-证明)
+- [装备读取失败诊断](#装备读取失败诊断)
 
 ## 普通日志
 

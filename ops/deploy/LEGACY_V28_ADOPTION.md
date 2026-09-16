@@ -1,8 +1,35 @@
-# canonical PostgreSQL v28 历史格式接管手册
+# canonical PostgreSQL v28 接管手册
+
+[文档导航](../../docs/README.md) · [格式与 bridge](../../crates/auction-storage/src/database/legacy_v28) · [备份与接管编排](../../apps/auctionctl/src/bootstrap/postgres_legacy_v28) · [当前格式恢复](RECOVERY.md)
+
+只接受本仓库定义的精确 v28 格式；禁止普通迁移猜测 schema 或伪造 SQLx 标记。
 
 本手册只适用于本项目 `legacy_v28` 适配器定义的 canonical PostgreSQL migration 28 历史格式。普通
 `auctionctl migrate` 遇到没有 SQLx 标记但已有用户对象的数据库会失败关闭；不得绕过保护，
 也不得手工伪造 `_sqlx_migrations`。
+
+## 本页导航
+
+- [使用范围与结果判读](#使用范围与结果判读)
+- [接管前提](#接管前提)
+- [1. 停止角色并只读预检](#1-停止角色并只读预检)
+- [2. 创建并离线校验专用恢复点](#2-创建并离线校验专用恢复点)
+- [3. 执行接管](#3-执行接管)
+- [4. 导入数据库之外的规则](#4-导入数据库之外的规则)
+- [5. 失败处理](#5-失败处理)
+- [6. 启动门槛](#6-启动门槛)
+
+## 使用范围与结果判读
+
+本页命令供获准维护窗口中的操作员执行；库名、安装路径、证据文件名和日期均为示例，执行前替换为精确目标。
+阅读或更新文档不执行命令。源码与原始证据共同决定结果，进程退出或文件存在不能单独证明数据库操作成功。
+
+| 阶段 | 成功依据 | 不能替代 |
+| --- | --- | --- |
+| 专用备份 | v28 manifest、哈希和精确格式预检 | 当前 Rust backup manifest |
+| 接管 | bridge、前向迁移、postflight 和正常 receipt | 五语言规则目录导入 |
+| 规则导入 | 五语言 imported/preserved 和原始正文哈希 | 数据库之外未保管的来源内容 |
+| 提交后异常 | 失败记录、审计事实、前向迁移与新恢复点组成替代证据包 | 伪造正常 receipt 或再次执行 adoption |
 
 ## 接管前提
 

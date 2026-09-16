@@ -1,10 +1,37 @@
 # auction-observability
 
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+
+结构化日志、进程指标、心跳和健康安全投影。
+
+## 本页导航
+
+- [源码入口](#源码入口)
+- [职责与实现边界](#职责与实现边界)
+- [实现布局与 tracing](#实现布局与-tracing)
+- [结构化日志约定](#结构化日志约定)
+- [禁止记录的内容](#禁止记录的内容)
+- [健康 dashboard](#健康-dashboard)
+- [指标与剩余验收证据](#指标与剩余验收证据)
+- [维护与验证](#维护与验证)
+
+## 源码入口
+
+| 入口 | 职责 |
+| --- | --- |
+| [src/health](src/health) | 心跳端口、发布器与 dashboard |
+| [src/metrics](src/metrics) | 进程、连接池、业务和 Worker 指标 |
+| [src/telemetry](src/telemetry) | tracing 初始化、队列、exporter 与健康 |
+
+## 职责与实现边界
+
 tracing 初始化、指标约定、健康检查语义和关联 ID。
 
-源码布局：`src/lib.rs` 只保留模块声明和公共导出；指标入口 `src/metrics/mod.rs` 只负责
+## 实现布局与 tracing
+
+源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；指标入口 [src/metrics/mod.rs](src/metrics/mod.rs) 只负责
 分组与稳定 re-export，进程、业务、连接池、Worker、tracing collector 分别位于其子文件；
-tracing 入口 `src/telemetry/mod.rs` 只负责稳定导出，配置、健康状态、批处理器和进程运行时分别
+tracing 入口 [src/telemetry/mod.rs](src/telemetry/mod.rs) 只负责稳定导出，配置、健康状态、批处理器和进程运行时分别
 位于 `src/telemetry/{config,health,processor,runtime}.rs`，心跳与 dashboard 安全投影实现在
 `src/health/{model,publisher,dashboard}.rs`，`health/mod.rs` 只负责模块装配和稳定导出。
 
@@ -66,3 +93,13 @@ Prometheus 同步；数据库适配器也会登记 PostgreSQL/SQLite 的当前�
 业务指标不携带用户、拍品、命令 ID、邮箱或外部错误文本；需要逐笔证据时仍以数据库审计和事实
 记录为准。真实部署切换仍需对照；外部广播 sink 是超出旧版的可选扩展，只有冻结新协议后才新增
 对应状态指标。
+
+## 维护与验证
+
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+
+```bash
+cargo check --locked -p auction-observability
+```
+
+该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。

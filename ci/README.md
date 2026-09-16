@@ -1,30 +1,59 @@
-# 持续集成约定
+# 静态验证、文档门禁与发布脚本
 
-持续集成与本地 `just verify` 使用同一组默认门禁：`ci/check-policy.sh` 检查项目契约文件的 Git 规则、每个 src 的职责
-子目录、src 根目录平铺与命名、同前缀文件聚集、配置示例中文可选/必填注释、五语言 Fluent
-文件/键集合/字面量引用/重复与点号规则；随后执行
-Rust 格式化、带 `--locked` 的 Cargo 工作区编译检查、Clippy 静态检查和两个浏览器端 crate 的
-`wasm32-unknown-unknown` 目标编译检查。Rust 工具链固定为
-`1.98.0` 当前 stable，并用独立 job 验证 SQLx 0.9 对应的 workspace MSRV `1.94.1`；
-Tokio 使用官方 `1.51.x` LTS，其他无官方 LTS 的依赖以 `Cargo.lock` 为准。
+[文档导航](../docs/README.md) · [开发指南](../docs/development.md) · [部署手册](../ops/deploy/README.md)
 
-持续集成不安装 dx CLI，也不构建前端产物：`auction-http` 的内嵌声明使用 `allow_missing`，
-缺少产物时仍能通过全部静态门禁，因此 CI 不依赖 npm 下载 esbuild。前端产物的实际构建属于
-发布流程，由 `just web-build` 在具备 dx CLI 的环境执行。
+## 本地与 CI 入口
 
-`ci/web-bundle.sh` 按 surface 清理自己的 Dioxus 中间目录，使用 `wasm-release` profile 生成优化
-payload，固定权限/mtime，并把排除自身的文件清单 SHA-256 写进可内嵌标记。`ci/release.sh` 分别构建
-API-only 与显式 `web-embed` PostgreSQL 制品，直接扫描二进制中的 payload 标记和对端缺失，复核 Worker
-依赖图，再按文件白名单、mode、root owner、统一 mtime、双次相同 archive、内外 SHA-256 和依赖摘要
-装配发布包。这些都是制品门禁，不执行单元、功能、端到端或浏览器测试。
+| 范围 | 本地入口 | 实现或工作流 |
+| --- | --- | --- |
+| 全部默认静态验证 | `just verify` | [Justfile](../Justfile) |
+| 文档、导航与笔记 | `just docs-check` | [check-docs.sh](check-docs.sh)、[Documentation 工作流](../.github/workflows/docs.yml) |
+| 项目规范、布局、配置、i18n | 四项 `*-check` 配方 | [check-policy.sh](check-policy.sh) |
+| 格式、工作区、后端/缓存 feature、Clippy、WASM | `just fmt/check/feature-check/lint/wasm-check` 分别调用 | [Rust 工作流](../.github/workflows/ci.yml) |
+| MSRV | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` | Rust 工作流独立 job |
+| Web payload | `just web-build` | [web-bundle.sh](web-bundle.sh) |
+| API-only/embedded 与 archive | `just build-api/build-release/verify-artifacts/release-check` 分别调用 | [release.sh](release.sh) |
 
-默认工作区检查验证最小依赖图；独立 feature 检查分别编译 PostgreSQL、SQLite 和可选
-Redis 路径，Clippy 与 MSRV job 使用 `--all-features` 验证组合图。这样默认制品不会仅为
-备用后端或关闭的缓存携带驱动，同时每条受支持路径仍进入静态门禁。
+带斜杠的配方说明表示多个独立命令，不是一个可执行命令名。Cargo 检查使用 `--locked`。
+默认图检查、独立 PostgreSQL/SQLite/Redis feature 检查及 all-features Clippy 分别覆盖不同依赖图。
+Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期支持承诺。
 
-除非用户明确要求，暂不编写或运行单元测试、集成测试、功能测试用例、端到端测试和浏览器
-测试。已有测试代码保留，但不在默认持续集成流程中扩展或执行。
+## 文档检查器
 
-将来恢复测试时，SQLite 只验证 Lite 能力清单，可直接使用临时文件或内存数据库；
-PostgreSQL 使用服务容器或临时实例验证完整能力。SQLite 不需要运行完整后端的所有契约，
-也不能代替 PostgreSQL 专属的隔离、行锁和并发验证。
+[ci/docs/main.rs](docs/main.rs)装配三个静态 owner：
+
+- [scan.rs](docs/scan.rs)：发现正式 Markdown、检查 Cargo 包 README、扫描代码围栏外的 ATX 标题和行内链接。
+- [links.rs](docs/links.rs)：核对本地目标和 Markdown 标题锚点，构建从根 README 可达的文档图。
+- [notes.rs](docs/notes.rs)：检查活跃笔记路径、日期形状、状态、必备章节、Git 忽略规则及 implemented 禁用计划标题。
+
+`check-docs.sh` 先对工具执行 rustfmt 检查，再用 `rustc --edition=2024 -D warnings` 编译到被忽略的 target 目录。
+工具只依赖 Rust 标准库，不使用 Node、npm、Python 库或网络，也不启动任何服务。
+
+正式范围是根 README/AGENTS，以及 docs、apps、crates、ops、migrations、ci 和 `.agents/notes` 下的 Markdown。
+本地工具目录、构建产物及机器日志不属于项目文档。所有正式文档必须能从根 README 通过本地链接到达。
+当前支持行内相对链接、目录 README 和普通 ATX 标题；引用式链接需先扩展解析器，外链不联网检查。
+笔记正文为中文，格式章节使用技能的英文固定名称；当前没有归档笔记，首次归档前须增加 manifest 哈希与只增不改验证。
+
+检查器不证明源码描述、数据库事务或运维命令的业务正确性。文档重建时仍需人工核对源码、模板、CLI 和证据口径。
+
+## 仓库策略
+
+`check-policy.sh` 检查契约文件的 Git 规则、src 根入口和职责目录、命名与同前缀聚集；
+配置示例要求每个赋值字段前紧邻中文“可选/必填”说明；五语言 Fluent 必须文件齐全、键集一致、
+无重复或点号，并覆盖 Rust 中的字面量引用。
+
+## 发布边界
+
+普通静态 CI 不安装 dx，不构建或启动浏览器产物。Public/Admin 的 `allow_missing` 保证没有 Web 文件时也能编译；
+真实内嵌资源、隔离与哈希由独立发布门禁检查，不能从 cargo check 推导。
+
+`web-bundle.sh` 按 surface 清理中间目录，用 `wasm-release` profile 构建并固定权限/mtime，生成 payload 哈希标记。
+`release.sh` 分别构建 API-only 和显式 `web-embed` 的 PostgreSQL 制品，检查实际二进制标记、对端资源缺失及 Worker 依赖，
+随后按白名单、权限、统一时间与两次相同 archive 装包，保存内外 SHA-256 和依赖摘要。
+源码身份在构建前冻结并在阶段边界复核，正式 package 拒绝脏工作树。工具依赖和实际参数以脚本为准。
+
+## 验证限制
+
+所有上述检查均不运行单元、集成、功能、端到端或浏览器测试，已有测试只在 all-targets 检查时编译。
+默认不扩展或执行行为测试，也不运行手工冒烟。授权恢复测试后，SQLite 只验证 Lite 范围；
+PostgreSQL 的行锁、隔离与并发必须在相应后端验证。剩余运行证据见[状态页](../docs/status.md)。

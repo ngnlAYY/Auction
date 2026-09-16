@@ -1,7 +1,8 @@
 .codegraph/
 .trellis/
 .gitnexus/
-.agents/
+.agents/*
+!.agents/notes/
 .claude/
 .codex/
 .grok/
