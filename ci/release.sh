@@ -13,7 +13,7 @@ embedded_build_root="$repository_root/target/release-build/embedded"
 package_output_root="$repository_root/target/release-package"
 api_only_public_root="$repository_root/target/auction-api-only-assets/public"
 api_only_admin_root="$repository_root/target/auction-api-only-assets/admin"
-assets_missing_message='web assets are not included in this binary; run `just build-release`'
+assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
 
 binaries=(
   auction-public-api
@@ -87,7 +87,7 @@ write_build_info() {
     "source_fingerprint=$fingerprint" \
     "cargo_lock_sha256=$lock_sha" \
     "features=$features" \
-    > "$destination"
+    >"$destination"
   chmod 0644 "$destination"
 }
 
@@ -177,22 +177,22 @@ build_variant() {
 verify_web_root() {
   local surface=$1 package other expected_title other_title
   case "$surface" in
-    public)
-      package=auction-web-public
-      other=admin
-      expected_title='Auction 公开站点'
-      other_title='Auction 管理站点'
-      ;;
-    admin)
-      package=auction-web-admin
-      other=public
-      expected_title='Auction 管理站点'
-      other_title='Auction 公开站点'
-      ;;
-    *)
-      printf '未知 Web surface：%s\n' "$surface" >&2
-      return 2
-      ;;
+  public)
+    package=auction-web-public
+    other='admin'
+    expected_title='Auction 公开站点'
+    other_title='Auction 管理站点'
+    ;;
+  admin)
+    package=auction-web-admin
+    other='public'
+    expected_title='Auction 管理站点'
+    other_title='Auction 公开站点'
+    ;;
+  *)
+    printf '未知 Web surface：%s\n' "$surface" >&2
+    return 2
+    ;;
   esac
 
   local stable_root="$repository_root/target/dx/build/$package/web"
@@ -207,13 +207,13 @@ verify_web_root() {
       return 1
     fi
   done
-  if [[ -n $(find "$root" -type l -print -quit) ]] \
-    || [[ -n $(find "$root" ! -type f ! -type d -print -quit) ]]; then
+  if [[ -n $(find "$root" -type l -print -quit) ]] ||
+    [[ -n $(find "$root" ! -type f ! -type d -print -quit) ]]; then
     printf '%s Web payload 含符号链接或特殊文件\n' "$surface" >&2
     return 1
   fi
-  if ! grep -Fq "<title>$expected_title</title>" "$root/index.html" \
-    || grep -Fq "$other_title" "$root/index.html"; then
+  if ! grep -Fq "<title>$expected_title</title>" "$root/index.html" ||
+    grep -Fq "$other_title" "$root/index.html"; then
     printf '%s Web 入口混入错误 surface 标题\n' "$surface" >&2
     return 1
   fi
@@ -225,10 +225,10 @@ verify_web_root() {
   marker_surface=$(read_build_info "$marker" surface)
   marker_profile=$(read_build_info "$marker" profile)
   marker_sha=$(read_build_info "$marker" payload_sha256)
-  if [[ $(read_build_info "$marker" schema) != auction-web-assets/1 \
-    || "$marker_surface" != "$surface" \
-    || "$marker_profile" != wasm-release \
-    || ! "$marker_sha" =~ ^[0-9a-f]{64}$ ]]; then
+  if [[ $(read_build_info "$marker" schema) != auction-web-assets/1 ||
+  "$marker_surface" != "$surface" ||
+  "$marker_profile" != wasm-release ||
+  ! "$marker_sha" =~ ^[0-9a-f]{64}$ ]]; then
     printf '%s Web 制品标记无效\n' "$surface" >&2
     return 1
   fi
@@ -236,10 +236,10 @@ verify_web_root() {
   actual_payload=$(mktemp)
   (
     cd "$root"
-    find . -type f ! -name auction-web-manifest.v1 -print0 \
-      | LC_ALL=C sort -z \
-      | xargs -0 -r sha256sum
-  ) > "$actual_payload"
+    find . -type f ! -name auction-web-manifest.v1 -print0 |
+      LC_ALL=C sort -z |
+      xargs -0 -r sha256sum
+  ) >"$actual_payload"
   if ! cmp -s "$expected_payload" "$actual_payload"; then
     rm -f "$actual_payload"
     printf '%s Web payload 与固定清单不一致\n' "$surface" >&2
@@ -290,11 +290,11 @@ verify_build_info() {
   current_commit=$(git rev-parse --verify 'HEAD^{commit}')
   current_fingerprint=$(source_fingerprint)
   current_lock=$(sha256_file Cargo.lock)
-  if [[ $(read_build_info "$info" schema) != auction-release-build/1 \
-    || $(read_build_info "$info" variant) != "$expected_variant" \
-    || $(read_build_info "$info" source_commit) != "$current_commit" \
-    || $(read_build_info "$info" source_fingerprint) != "$current_fingerprint" \
-    || $(read_build_info "$info" cargo_lock_sha256) != "$current_lock" ]]; then
+  if [[ $(read_build_info "$info" schema) != auction-release-build/1 ||
+  $(read_build_info "$info" variant) != "$expected_variant" ||
+  $(read_build_info "$info" source_commit) != "$current_commit" ||
+  $(read_build_info "$info" source_fingerprint) != "$current_fingerprint" ||
+  $(read_build_info "$info" cargo_lock_sha256) != "$current_lock" ]]; then
     printf '发布构建信息与当前源码不一致，请重新构建：%s\n' "$root" >&2
     return 1
   fi
@@ -305,15 +305,15 @@ verify_dependency_boundaries() {
   worker_tree=$(cargo tree --locked -e normal,build -p auction-worker)
   public_tree=$(cargo tree --locked -e normal,build -p auction-public-api)
   admin_tree=$(cargo tree --locked -e normal,build -p auction-admin-api)
-  if grep -Eq 'auction-web-(public|admin|shared)' <<< "$worker_tree"; then
+  if grep -Eq 'auction-web-(public|admin|shared)' <<<"$worker_tree"; then
     printf 'Worker 依赖图不得包含浏览器 crate\n' >&2
     return 1
   fi
-  if grep -Fq 'auction-web-admin' <<< "$public_tree"; then
+  if grep -Fq 'auction-web-admin' <<<"$public_tree"; then
     printf 'Public 依赖图不得包含 Admin Web crate\n' >&2
     return 1
   fi
-  if grep -Fq 'auction-web-public' <<< "$admin_tree"; then
+  if grep -Fq 'auction-web-public' <<<"$admin_tree"; then
     printf 'Admin 依赖图不得包含 Public Web crate\n' >&2
     return 1
   fi
@@ -334,8 +334,8 @@ verify_artifacts() {
     printf 'Public/Admin Web payload 哈希不得相同\n' >&2
     return 1
   fi
-  if [[ $(read_build_info "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" payload_sha256) != "$public_web_sha" \
-    || $(read_build_info "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" payload_sha256) != "$admin_web_sha" ]]; then
+  if [[ $(read_build_info "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" payload_sha256) != "$public_web_sha" ||
+  $(read_build_info "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" payload_sha256) != "$admin_web_sha" ]]; then
     printf '嵌入构建保存的 Web 标记与当前 payload 不一致\n' >&2
     return 1
   fi
@@ -379,8 +379,8 @@ verify_artifacts() {
 
   if cmp -s \
     "$api_artifact_root/bin/auction-public-api" \
-    "$embedded_artifact_root/bin/auction-public-api" \
-    || cmp -s \
+    "$embedded_artifact_root/bin/auction-public-api" ||
+    cmp -s \
       "$api_artifact_root/bin/auction-admin-api" \
       "$embedded_artifact_root/bin/auction-admin-api"; then
     printf 'API-only 与嵌入 Web 的 surface 二进制不得相同\n' >&2
@@ -415,37 +415,37 @@ write_dependencies() {
   public_web_sha=$(read_build_info "$embedded_artifact_root/WEB-PUBLIC-MANIFEST.v1" payload_sha256)
   admin_web_sha=$(read_build_info "$embedded_artifact_root/WEB-ADMIN-MANIFEST.v1" payload_sha256)
   dependency_list=$(mktemp)
-  cargo tree --locked --workspace --all-features --prefix none --format '{p}' \
-    | sed "s# ($repository_root[^)]*)# (workspace)#" \
-    | LC_ALL=C sort -u \
-    > "$dependency_list"
+  cargo tree --locked --workspace --all-features --prefix none --format '{p}' |
+    sed "s# (${repository_root}[^)]*)# (workspace)#" |
+    LC_ALL=C sort -u \
+      >"$dependency_list"
 
   {
     printf '# 发布与依赖摘要\n\n'
     printf '## 发布证据\n\n'
-    printf -- '- Schema：`auction-release/1`\n'
-    printf -- '- Source commit：`%s`\n' "$commit"
-    printf -- '- Application version：`%s`\n' "$version"
-    printf -- '- Source worktree：`%s`\n' "$state"
-    printf -- '- Source fingerprint：`%s`\n' "$fingerprint"
-    printf -- '- SOURCE_DATE_EPOCH：`%s`\n' "$epoch"
-    printf -- '- Cargo.lock SHA-256：`%s`\n' "$(sha256_file Cargo.lock)"
-    printf -- '- Public Web payload SHA-256：`%s`\n' "$public_web_sha"
-    printf -- '- Admin Web payload SHA-256：`%s`\n' "$admin_web_sha"
-    printf -- '- 数据库发布档位：`PostgreSQL full`\n'
-    printf -- '- 浏览器交付：`Public/Admin 独立 RustEmbed`\n\n'
+    printf -- "- Schema：\`auction-release/1\`\n"
+    printf -- "- Source commit：\`%s\`\n" "$commit"
+    printf -- "- Application version：\`%s\`\n" "$version"
+    printf -- "- Source worktree：\`%s\`\n" "$state"
+    printf -- "- Source fingerprint：\`%s\`\n" "$fingerprint"
+    printf -- "- SOURCE_DATE_EPOCH：\`%s\`\n" "$epoch"
+    printf -- "- Cargo.lock SHA-256：\`%s\`\n" "$(sha256_file Cargo.lock)"
+    printf -- "- Public Web payload SHA-256：\`%s\`\n" "$public_web_sha"
+    printf -- "- Admin Web payload SHA-256：\`%s\`\n" "$admin_web_sha"
+    printf -- "- 数据库发布档位：\`PostgreSQL full\`\n"
+    printf -- "- 浏览器交付：\`Public/Admin 独立 RustEmbed\`\n\n"
     printf '## 工具链\n\n'
-    printf -- '- `%s`\n' "$(first_version_line git --version)"
-    printf -- '- `%s`\n' "$(first_version_line rustc --version --verbose)"
-    printf -- '- `%s`\n' "$(first_version_line cargo --version --verbose)"
-    printf -- '- `%s`\n' "$(first_version_line dx --version)"
-    printf -- '- `%s`\n' "$(first_version_line tar --version)"
-    printf -- '- `%s`\n\n' "$(first_version_line gzip --version)"
+    printf -- "- \`%s\`\n" "$(first_version_line git --version)"
+    printf -- "- \`%s\`\n" "$(first_version_line rustc --version --verbose)"
+    printf -- "- \`%s\`\n" "$(first_version_line cargo --version --verbose)"
+    printf -- "- \`%s\`\n" "$(first_version_line dx --version)"
+    printf -- "- \`%s\`\n" "$(first_version_line tar --version)"
+    printf -- "- \`%s\`\n\n" "$(first_version_line gzip --version)"
     printf '## Cargo 解析依赖\n\n'
     while IFS= read -r dependency; do
-      printf -- '- `%s`\n' "$dependency"
-    done < "$dependency_list"
-  } > "$destination"
+      printf -- "- \`%s\`\n" "$dependency"
+    done <"$dependency_list"
+  } >"$destination"
   rm -f "$dependency_list"
   chmod 0644 "$destination"
 }
@@ -474,11 +474,11 @@ verify_staged_package() {
   local package_root=$1 expected_list actual_list index target mode actual_mode
   expected_list=$(mktemp)
   actual_list=$(mktemp)
-  printf '%s\n' "${release_targets[@]}" | LC_ALL=C sort > "$expected_list"
+  printf '%s\n' "${release_targets[@]}" | LC_ALL=C sort >"$expected_list"
   (
     cd "$package_root"
     find . -type f -printf '%P\n' | LC_ALL=C sort
-  ) > "$actual_list"
+  ) >"$actual_list"
   if ! diff -u "$expected_list" "$actual_list"; then
     rm -f "$expected_list" "$actual_list"
     printf 'release package 文件白名单不一致\n' >&2
@@ -486,8 +486,8 @@ verify_staged_package() {
   fi
   rm -f "$expected_list" "$actual_list"
 
-  if [[ -n $(find "$package_root" -type l -print -quit) ]] \
-    || [[ -n $(find "$package_root" ! -type f ! -type d -print -quit) ]]; then
+  if [[ -n $(find "$package_root" -type l -print -quit) ]] ||
+    [[ -n $(find "$package_root" ! -type f ! -type d -print -quit) ]]; then
     printf 'release package 禁止符号链接或特殊文件\n' >&2
     return 1
   fi
@@ -540,7 +540,7 @@ verify_archive() {
       printf 'release archive member 路径非法：%s\n' "$member" >&2
       return 1
     fi
-  done <<< "$members"
+  done <<<"$members"
   duplicates=$(printf '%s\n' "$members" | LC_ALL=C sort | uniq -d)
   if [[ -n "$duplicates" ]]; then
     printf 'release archive member 重复：%s\n' "$duplicates" >&2
@@ -550,13 +550,13 @@ verify_archive() {
   verbose=$(LANG=C LC_ALL=C TZ=UTC tar \
     --list --verbose --numeric-owner --full-time --gzip --file "$archive")
   local invalid_verbose
-  invalid_verbose=$(grep -Ev '^[dl-][rwx-]{9} 0/0 ' <<< "$verbose" || true)
+  invalid_verbose=$(grep -Ev '^[dl-][rwx-]{9} 0/0 ' <<<"$verbose" || true)
   if [[ -n "$invalid_verbose" ]]; then
     printf 'release archive owner 或 mode 输出异常\n' >&2
     return 1
   fi
   expected_timestamp=$(date -u -d "@$epoch" '+%Y-%m-%d %H:%M:%S')
-  invalid_verbose=$(grep -Fv "$expected_timestamp" <<< "$verbose" || true)
+  invalid_verbose=$(grep -Fv "$expected_timestamp" <<<"$verbose" || true)
   if [[ -n "$invalid_verbose" ]]; then
     printf 'release archive mtime 未统一为 SOURCE_DATE_EPOCH\n' >&2
     return 1
@@ -656,18 +656,18 @@ package_release() {
     done | LC_ALL=C sort
     printf '644 RELEASE-MANIFEST.v1\n'
     printf '644 SHA256SUMS\n'
-  } > "$package_root/RELEASE-MANIFEST.v1"
+  } >"$package_root/RELEASE-MANIFEST.v1"
   chmod 0644 "$package_root/RELEASE-MANIFEST.v1"
   register_generated_file RELEASE-MANIFEST.v1 644
 
   (
     cd "$package_root"
-    printf '%s\n' "${release_targets[@]}" \
-      | LC_ALL=C sort \
-      | while IFS= read -r target; do
-          printf '%s  %s\n' "$(sha256_file "$target")" "$target"
-        done
-  ) > "$package_root/SHA256SUMS"
+    printf '%s\n' "${release_targets[@]}" |
+      LC_ALL=C sort |
+      while IFS= read -r target; do
+        printf '%s  %s\n' "$(sha256_file "$target")" "$target"
+      done
+  ) >"$package_root/SHA256SUMS"
   chmod 0644 "$package_root/SHA256SUMS"
   register_generated_file SHA256SUMS 644
 
@@ -695,11 +695,11 @@ package_release() {
     cd "$publish_next"
     printf '%s  %s\n' "$(sha256_file DEPENDENCIES.md)" DEPENDENCIES.md
     printf '%s  %s\n' "$(sha256_file "$package_name.tar.gz")" "$package_name.tar.gz"
-  ) > "$publish_next/SHA256SUMS"
+  ) >"$publish_next/SHA256SUMS"
   chmod 0644 "$publish_next/SHA256SUMS"
   # 文档与配置也属于源码身份；装包期间发生变化时保留上一份发布目录，拒绝发布混合快照。
-  if [[ $(git rev-parse --verify 'HEAD^{commit}') != "$commit" \
-    || $(source_fingerprint) != "$fingerprint" ]]; then
+  if [[ $(git rev-parse --verify 'HEAD^{commit}') != "$commit" ||
+  $(source_fingerprint) != "$fingerprint" ]]; then
     rm -rf "$temporary_root" "$publish_next"
     printf '装包期间源码发生变化，请重新构建并装包\n' >&2
     return 1
@@ -716,42 +716,42 @@ package_release() {
 }
 
 case "${1:-}" in
-  build-api)
-    if [[ $# -ne 1 ]]; then
-      printf 'build-api 不接受额外参数\n' >&2
-      exit 2
-    fi
-    build_variant api-only "$api_build_root" "$api_artifact_root" postgres
-    ;;
-  build-embedded)
-    if [[ $# -ne 1 ]]; then
-      printf 'build-embedded 不接受额外参数\n' >&2
-      exit 2
-    fi
-    # build_variant 在同一源码身份约束内重建双端 Web 和 native 制品。
-    build_variant \
-      embedded \
-      "$embedded_build_root" \
-      "$embedded_artifact_root" \
-      'postgres,auction-public-api/web-embed,auction-admin-api/web-embed'
-    ;;
-  verify-artifacts)
-    if [[ $# -ne 1 ]]; then
-      printf 'verify-artifacts 不接受额外参数\n' >&2
-      exit 2
-    fi
-    verify_artifacts
-    ;;
-  package)
-    shift
-    package_release "$@"
-    ;;
-  *)
-    printf '%s\n' \
-      '用法：ci/release.sh build-api' \
-      '      ci/release.sh build-embedded' \
-      '      ci/release.sh verify-artifacts' \
-      '      ci/release.sh package [--allow-dirty]' >&2
+build-api)
+  if [[ $# -ne 1 ]]; then
+    printf 'build-api 不接受额外参数\n' >&2
     exit 2
-    ;;
+  fi
+  build_variant api-only "$api_build_root" "$api_artifact_root" postgres
+  ;;
+build-embedded)
+  if [[ $# -ne 1 ]]; then
+    printf 'build-embedded 不接受额外参数\n' >&2
+    exit 2
+  fi
+  # build_variant 在同一源码身份约束内重建双端 Web 和 native 制品。
+  build_variant \
+    embedded \
+    "$embedded_build_root" \
+    "$embedded_artifact_root" \
+    'postgres,auction-public-api/web-embed,auction-admin-api/web-embed'
+  ;;
+verify-artifacts)
+  if [[ $# -ne 1 ]]; then
+    printf 'verify-artifacts 不接受额外参数\n' >&2
+    exit 2
+  fi
+  verify_artifacts
+  ;;
+package)
+  shift
+  package_release "$@"
+  ;;
+*)
+  printf '%s\n' \
+    '用法：ci/release.sh build-api' \
+    '      ci/release.sh build-embedded' \
+    '      ci/release.sh verify-artifacts' \
+    '      ci/release.sh package [--allow-dirty]' >&2
+  exit 2
+  ;;
 esac

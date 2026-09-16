@@ -11,22 +11,19 @@ use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-pub(super) fn export(
-    evidence_id: Uuid,
-    output: &Path,
-    requested_key_source: Option<MailEvidenceKeySourceArg>,
-) -> anyhow::Result<()> {
-    use anyhow::Context;
-    use auction_config::Role;
-    use auction_integrations::{
-        DataKey,
-        mooglemail::{MoogleMailDiagnosticArchiveConfig, export_mooglemail_diagnostic},
-    };
-    use std::sync::Arc;
-    use std::time::Duration;
+use anyhow::Context;
+#[cfg(feature = "postgres")]
+use auction_config::{AppConfig, Role};
+#[cfg(feature = "postgres")]
+use auction_integrations::{DataKey, mooglemail::MoogleMailDiagnosticArchiveConfig};
+#[cfg(feature = "postgres")]
+use std::{sync::Arc, time::Duration};
 
-    let config =
-        auction_config::AppConfig::load(Role::Worker).context("load Worker configuration")?;
+#[cfg(feature = "postgres")]
+fn load_diagnostic_archive_context(
+    config: &AppConfig,
+    requested_key_source: Option<MailEvidenceKeySourceArg>,
+) -> anyhow::Result<(MoogleMailDiagnosticArchiveConfig, Arc<DataKey>)> {
     let diagnostics = &config.worker.mooglemail.diagnostics;
     let (key_source, key_id, key_material) = match requested_key_source {
         Some(MailEvidenceKeySourceArg::Credential) => {
@@ -45,15 +42,29 @@ pub(super) fn export(
         key_material.context("selected MoogleMail diagnostic parent key is unavailable")?;
     let data_key = DataKey::from_base64(key_id, key_material)
         .context("decode selected MoogleMail diagnostic parent key")?;
-    let archive_config = MoogleMailDiagnosticArchiveConfig {
-        directory: diagnostics.directory.clone(),
-        retention: Duration::from_secs(u64::from(diagnostics.retention_days) * 86_400),
-        maximum_total_bytes: diagnostics.maximum_total_bytes,
-        key_source: key_source.to_owned(),
-    };
-    export_mooglemail_diagnostic(
-        archive_config,
+    Ok((
+        MoogleMailDiagnosticArchiveConfig {
+            directory: diagnostics.directory.clone(),
+            retention: Duration::from_secs(u64::from(diagnostics.retention_days) * 86_400),
+            maximum_total_bytes: diagnostics.maximum_total_bytes,
+            key_source: key_source.to_owned(),
+        },
         Arc::new(data_key),
+    ))
+}
+
+#[cfg(feature = "postgres")]
+pub(super) fn export(
+    evidence_id: Uuid,
+    output: &Path,
+    requested_key_source: Option<MailEvidenceKeySourceArg>,
+) -> anyhow::Result<()> {
+    let config = AppConfig::load(Role::Worker).context("load Worker configuration")?;
+    let (archive_config, data_key) =
+        load_diagnostic_archive_context(&config, requested_key_source)?;
+    auction_integrations::mooglemail::export_mooglemail_diagnostic(
+        archive_config,
+        data_key,
         evidence_id,
         output.to_owned(),
     )

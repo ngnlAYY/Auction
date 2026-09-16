@@ -236,15 +236,15 @@ mod tests {
         "#;
         let page = crate::ForumPreviewAdapter::new()
             .parse_html_page(html)
-            .expect("真实论坛主题页应能形成受限页面事实");
-        let client = EhentaiClient::with_config(
-            EhentaiClientConfig::production().expect("固定论坛配置应合法"),
-        )
-        .expect("安全论坛客户端应可构造");
+            .unwrap_or_else(|error| panic!("真实论坛主题页应能形成受限页面事实: {error:?}"));
+        let config = EhentaiClientConfig::production()
+            .unwrap_or_else(|error| panic!("固定论坛配置应合法: {error:?}"));
+        let client = EhentaiClient::with_config(config)
+            .unwrap_or_else(|error| panic!("安全论坛客户端应可构造: {error:?}"));
 
         let targets = client
             .topic_page_targets(&page, "300433", EhentaiOperation::FetchTopic)
-            .expect("编辑链接的空 st 不代表分页偏移");
+            .unwrap_or_else(|error| panic!("编辑链接的空 st 不代表分页偏移: {error:?}"));
 
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].0, 0);

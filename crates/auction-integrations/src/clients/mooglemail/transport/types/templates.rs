@@ -70,7 +70,7 @@ impl Default for MoogleMailNotificationTemplates {
             ),
             ("operations_alert".to_owned(), "Operations alert: {summary}".to_owned()),
         ]))
-        .expect("内置 MoogleMail 模板必须通过启动校验")
+        .unwrap_or_else(|error| panic!("内置 MoogleMail 模板必须通过启动校验: {error}"))
     }
 }
 
@@ -83,7 +83,9 @@ impl MoogleMailNotificationTemplates {
             return Err("MoogleMail mail_templates 必须包含且仅包含旧版闭集模板键".to_owned());
         }
         for key in MOOGLEMAIL_TEMPLATE_KEYS {
-            let value = values.get(*key).expect("已通过模板键闭集检查");
+            let Some(value) = values.get(*key) else {
+                return Err("MoogleMail mail_templates 必须包含且仅包含旧版闭集模板键".to_owned());
+            };
             validate_template_body(key, value)?;
         }
         Ok(Self { values })

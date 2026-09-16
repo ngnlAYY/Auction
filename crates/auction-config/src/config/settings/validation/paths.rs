@@ -3,14 +3,15 @@
 use super::super::*;
 
 pub(crate) fn resolve_secrets_path(config_path: Option<&Path>, requested_path: PathBuf) -> PathBuf {
-    if requested_path.is_absolute() {
-        return requested_path;
-    }
-
-    config_path.and_then(Path::parent).unwrap_or_else(|| Path::new(".")).join(requested_path)
+    resolve_relative_path(config_path, requested_path)
 }
 
 pub(crate) fn resolve_config_path(config_path: Option<&Path>, requested_path: PathBuf) -> PathBuf {
+    resolve_relative_path(config_path, requested_path)
+}
+
+/// 以角色配置文件所在目录解析相对路径；绝对路径保持不变。
+fn resolve_relative_path(config_path: Option<&Path>, requested_path: PathBuf) -> PathBuf {
     if requested_path.is_absolute() {
         return requested_path;
     }
