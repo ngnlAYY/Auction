@@ -141,17 +141,7 @@ impl Auction {
         reason: impl Into<String>,
         actor: impl Into<String>,
     ) -> Result<(), DomainError> {
-        let reason = reason.into();
-        let actor = actor.into();
-        if reason.trim().is_empty()
-            || reason.len() > 1024
-            || reason.chars().any(char::is_control)
-            || actor.trim().is_empty()
-            || actor.len() > 128
-            || actor.chars().any(char::is_control)
-        {
-            return Err(DomainError::InvalidCancellationMetadata);
-        }
+        let (reason, actor) = Self::validate_cancellation_metadata(reason, actor)?;
         self.cancel_with_rules(now, rules)?;
         self.cancelled_at = Some(now);
         self.cancelled_reason = Some(reason);
@@ -237,17 +227,7 @@ impl Auction {
         reason: impl Into<String>,
         actor: impl Into<String>,
     ) -> Result<(), DomainError> {
-        let reason = reason.into();
-        let actor = actor.into();
-        if reason.trim().is_empty()
-            || reason.len() > 1024
-            || reason.chars().any(char::is_control)
-            || actor.trim().is_empty()
-            || actor.len() > 128
-            || actor.chars().any(char::is_control)
-        {
-            return Err(DomainError::InvalidCancellationMetadata);
-        }
+        let (reason, actor) = Self::validate_cancellation_metadata(reason, actor)?;
         if !matches!(self.status, AuctionStatus::Draft | AuctionStatus::Preview) {
             return Err(DomainError::InvalidTransition {
                 from: self.status,
@@ -260,6 +240,25 @@ impl Auction {
         self.cancelled_reason = Some(reason);
         self.cancelled_by = Some(actor);
         Ok(())
+    }
+
+    /// 统一校验取消原因和操作者，避免不同取消入口产生不一致的审计边界。
+    fn validate_cancellation_metadata(
+        reason: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> Result<(String, String), DomainError> {
+        let reason = reason.into();
+        let actor = actor.into();
+        if reason.trim().is_empty()
+            || reason.len() > 1024
+            || reason.chars().any(char::is_control)
+            || actor.trim().is_empty()
+            || actor.len() > 128
+            || actor.chars().any(char::is_control)
+        {
+            return Err(DomainError::InvalidCancellationMetadata);
+        }
+        Ok((reason, actor))
     }
 
     fn transition(&mut self, next: AuctionStatus, now: DateTime<Utc>) -> Result<(), DomainError> {
@@ -288,26 +287,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draft_follows_the_initial_lifecycle() {
+    fn draft_follows_the_initial_lifecycle() -> Result<(), DomainError> {
         let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
-        let mut auction = Auction::draft(AuctionId::new(), "Example", now).unwrap();
+        let mut auction = Auction::draft(AuctionId::new(), "Example", now)?;
 
-        auction.preview(now).unwrap();
-        auction.go_live(now).unwrap();
-        auction.enter_final(now).unwrap();
-        auction.begin_settlement(now).unwrap();
-        auction.settle(now).unwrap();
+        auction.preview(now)?;
+        auction.go_live(now)?;
+        auction.enter_final(now)?;
+        auction.begin_settlement(now)?;
+        auction.settle(now)?;
 
         assert_eq!(auction.status, AuctionStatus::Settled);
+        Ok(())
     }
 
     #[test]
-    fn invalid_transitions_are_rejected() {
+    fn invalid_transitions_are_rejected() -> Result<(), DomainError> {
         let now = DateTime::<Utc>::from(SystemTime::UNIX_EPOCH);
-        let mut auction = Auction::draft(AuctionId::new(), "Example", now).unwrap();
+        let mut auction = Auction::draft(AuctionId::new(), "Example", now)?;
 
-        let error = auction.settle(now).unwrap_err();
+        let result = auction.settle(now);
 
-        assert!(matches!(error, DomainError::InvalidTransition { .. }));
+        assert!(matches!(result, Err(DomainError::InvalidTransition { .. })));
+        Ok(())
     }
 }

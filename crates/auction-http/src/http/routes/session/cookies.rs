@@ -3,21 +3,7 @@
 use super::*;
 
 pub(crate) fn read_public_session_cookie(headers: &HeaderMap) -> Option<String> {
-    let mut found = None;
-    for value in headers.get_all(header::COOKIE).iter() {
-        let value = value.to_str().ok()?;
-        for pair in value.split(';') {
-            let (name, cookie_value) = pair.trim().split_once('=')?;
-            if name != PUBLIC_SESSION_COOKIE {
-                continue;
-            }
-            if found.is_some() || cookie_value.is_empty() {
-                return None;
-            }
-            found = Some(cookie_value.to_owned());
-        }
-    }
-    found
+    read_cookie(headers, PUBLIC_SESSION_COOKIE, false)
 }
 
 pub(crate) fn read_admin_basic_auth(headers: &HeaderMap) -> Option<(String, Vec<u8>)> {
@@ -38,12 +24,16 @@ pub(crate) fn read_admin_basic_auth(headers: &HeaderMap) -> Option<(String, Vec<
 }
 
 pub(crate) fn read_admin_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    read_cookie(headers, name, true)
+}
+
+fn read_cookie(headers: &HeaderMap, name: &str, skip_empty_pairs: bool) -> Option<String> {
     let mut found = None;
     for value in headers.get_all(header::COOKIE).iter() {
         let value = value.to_str().ok()?;
         for pair in value.split(';') {
             let pair = pair.trim();
-            if pair.is_empty() {
+            if skip_empty_pairs && pair.is_empty() {
                 continue;
             }
             let (cookie_name, cookie_value) = pair.split_once('=')?;

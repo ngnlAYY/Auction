@@ -49,9 +49,7 @@ fn valid_auction_realtime_page(value: &Value, auction_id: &str) -> bool {
         && string(value.get("auction_id")) == Some(auction_id)
         && uuid(auction_id)
         && valid_realtime_events(value.get("events"), Some(auction_id), false)
-        && nonnegative(value.get("next_after"))
-        && bool_value(value.get("has_more")).is_some()
-        && bool_value(value.get("refetch_required")).is_some()
+        && valid_realtime_page_metadata(value)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -60,7 +58,12 @@ fn valid_discovery_realtime_page(value: &Value) -> bool {
     only(value, &["scope", "events", "next_after", "has_more", "refetch_required"], &[])
         && string(value.get("scope")) == Some("auctions")
         && valid_realtime_events(value.get("events"), None, true)
-        && nonnegative(value.get("next_after"))
+        && valid_realtime_page_metadata(value)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn valid_realtime_page_metadata(value: &serde_json::Map<String, Value>) -> bool {
+    nonnegative(value.get("next_after"))
         && bool_value(value.get("has_more")).is_some()
         && bool_value(value.get("refetch_required")).is_some()
 }

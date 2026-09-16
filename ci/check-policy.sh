@@ -162,10 +162,12 @@ check_i18n() {
       fi
     done
 
+    # $1 是 Perl 捕获组，不是 Shell 参数，必须保留单引号避免 Shell 展开。
+    # shellcheck disable=SC2016
     referenced=$(
-      rg --files "crates/$surface/src" -g '*.rs' \
-        | xargs perl -0777 -ne 'while (/\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }' \
-        | sort -u
+      rg --files "crates/$surface/src" -g '*.rs' |
+        xargs perl -0777 -ne 'while (/\bt!\(\s*"([A-Za-z0-9_.-]+)"/g) { print "$1\n" }' |
+        sort -u
     )
     missing=$(comm -23 <(printf '%s\n' "$referenced") <(fluent_ids "$base" | uniq))
     if [[ -n "$missing" ]]; then
@@ -189,7 +191,7 @@ check_i18n() {
       if [[ -n "$repeated" ]]; then
         while IFS= read -r key; do
           printf '%s: %s\n' "$file" "$key"
-        done <<< "$repeated"
+        done <<<"$repeated"
       fi
     done < <(rg --files crates/auction-web-public/i18n crates/auction-web-admin/i18n -g '*.ftl' | sort)
   )
@@ -201,26 +203,26 @@ check_i18n() {
 }
 
 case "${1:-all}" in
-  layout)
-    check_layout
-    ;;
-  config)
-    check_config_examples
-    ;;
-  i18n)
-    check_i18n
-    ;;
-  repository)
-    check_repository_contracts
-    ;;
-  all)
-    check_repository_contracts
-    check_layout
-    check_config_examples
-    check_i18n
-    ;;
-  *)
-    printf '未知静态策略检查：%s\n' "$1" >&2
-    exit 2
-    ;;
+layout)
+  check_layout
+  ;;
+config)
+  check_config_examples
+  ;;
+i18n)
+  check_i18n
+  ;;
+repository)
+  check_repository_contracts
+  ;;
+all)
+  check_repository_contracts
+  check_layout
+  check_config_examples
+  check_i18n
+  ;;
+*)
+  printf '未知静态策略检查：%s\n' "$1" >&2
+  exit 2
+  ;;
 esac

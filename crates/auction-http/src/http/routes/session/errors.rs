@@ -2,6 +2,43 @@
 
 use super::*;
 
+macro_rules! map_temporarily_unavailable {
+    () => {
+        ApplicationError::FulfillmentEvidenceNotObserved
+            | ApplicationError::FulfillmentDependencyUnavailable
+            | ApplicationError::FulfillmentAccountBusy
+            | ApplicationError::FulfillmentDependencyMismatch
+            | ApplicationError::FulfillmentEquipmentSecretNotFound
+            | ApplicationError::Domain(_)
+            | ApplicationError::Repository(_)
+            | ApplicationError::DeliveryAdmin(_)
+            | ApplicationError::CompetitionTransaction(_)
+            | ApplicationError::TransactionPolicy(_)
+            | ApplicationError::CommandLedger(_)
+            | ApplicationError::Serialization(_)
+            | ApplicationError::RecoveryCommand(_)
+            | ApplicationError::RealtimeAdmin(_)
+            | ApplicationError::SettlementTransaction(_)
+            | ApplicationError::AdminRules(_)
+            | ApplicationError::AdminRulesTransaction(_)
+            | ApplicationError::AdminIntake(_)
+            | ApplicationError::AdminForumPreview(_)
+            | ApplicationError::AdminAudit(_)
+            | ApplicationError::AdminCredential(_)
+            | ApplicationError::AdminMail(_)
+            | ApplicationError::AdminMailTransaction(_)
+            | ApplicationError::AdminRuntime(_)
+            | ApplicationError::AdminRuntimeFile(_)
+            | ApplicationError::AdminRuntimeCommand(_)
+            | ApplicationError::AdminUser(_)
+            | ApplicationError::AdminWorld(_)
+            | ApplicationError::MailProcessing(_)
+            | ApplicationError::ForumRemote(_)
+            | ApplicationError::Session(_)
+            | ApplicationError::OperationsAlert(_)
+    };
+}
+
 pub(crate) fn map_login_error(error: ApplicationError) -> Response {
     match error {
         ApplicationError::Session(SessionError::InvalidLoginKey) => {
@@ -90,10 +127,7 @@ pub(crate) fn map_admin_lifecycle_error(
             CommandLedgerError::Conflict,
         )) => api_error(StatusCode::CONFLICT, "command_conflict", "请求与既有命令冲突")
             .into_response(),
-        _ => {
-            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
-                .into_response()
-        }
+        _ => competition_unavailable(),
     }
 }
 
@@ -186,41 +220,7 @@ pub(crate) fn map_competition_error(error: ApplicationError) -> Response {
             "当前部署档位不支持该功能",
         )
         .into_response(),
-        ApplicationError::FulfillmentEvidenceNotObserved
-        | ApplicationError::FulfillmentDependencyUnavailable
-        | ApplicationError::FulfillmentAccountBusy
-        | ApplicationError::FulfillmentDependencyMismatch
-        | ApplicationError::FulfillmentEquipmentSecretNotFound
-        | ApplicationError::Domain(_)
-        | ApplicationError::Repository(_)
-        | ApplicationError::DeliveryAdmin(_)
-        | ApplicationError::CompetitionTransaction(_)
-        | ApplicationError::TransactionPolicy(_)
-        | ApplicationError::CommandLedger(_)
-        | ApplicationError::Serialization(_)
-        | ApplicationError::RecoveryCommand(_)
-        | ApplicationError::RealtimeAdmin(_)
-        | ApplicationError::SettlementTransaction(_)
-        | ApplicationError::AdminRules(_)
-        | ApplicationError::AdminRulesTransaction(_)
-        | ApplicationError::AdminIntake(_)
-        | ApplicationError::AdminForumPreview(_)
-        | ApplicationError::AdminAudit(_)
-        | ApplicationError::AdminCredential(_)
-        | ApplicationError::AdminMail(_)
-        | ApplicationError::AdminMailTransaction(_)
-        | ApplicationError::AdminRuntime(_)
-        | ApplicationError::AdminRuntimeFile(_)
-        | ApplicationError::AdminRuntimeCommand(_)
-        | ApplicationError::AdminUser(_)
-        | ApplicationError::AdminWorld(_)
-        | ApplicationError::MailProcessing(_)
-        | ApplicationError::ForumRemote(_)
-        | ApplicationError::Session(_)
-        | ApplicationError::OperationsAlert(_) => {
-            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
-                .into_response()
-        }
+        map_temporarily_unavailable!() => competition_unavailable(),
     }
 }
 
@@ -259,41 +259,7 @@ pub(crate) fn map_recovery_command_error(error: ApplicationError) -> Response {
             "恢复确认仅支持 PostgreSQL 完整档",
         )
         .into_response(),
-        ApplicationError::FulfillmentEvidenceNotObserved
-        | ApplicationError::FulfillmentDependencyUnavailable
-        | ApplicationError::FulfillmentAccountBusy
-        | ApplicationError::FulfillmentDependencyMismatch
-        | ApplicationError::FulfillmentEquipmentSecretNotFound
-        | ApplicationError::RecoveryCommand(_)
-        | ApplicationError::Serialization(_)
-        | ApplicationError::Repository(_)
-        | ApplicationError::DeliveryAdmin(_)
-        | ApplicationError::TransactionPolicy(_)
-        | ApplicationError::CompetitionTransaction(_)
-        | ApplicationError::SettlementTransaction(_)
-        | ApplicationError::CommandLedger(_)
-        | ApplicationError::Domain(_)
-        | ApplicationError::RealtimeAdmin(_)
-        | ApplicationError::AdminRules(_)
-        | ApplicationError::AdminRulesTransaction(_)
-        | ApplicationError::AdminIntake(_)
-        | ApplicationError::AdminForumPreview(_)
-        | ApplicationError::AdminAudit(_)
-        | ApplicationError::AdminCredential(_)
-        | ApplicationError::AdminMail(_)
-        | ApplicationError::AdminMailTransaction(_)
-        | ApplicationError::AdminRuntime(_)
-        | ApplicationError::AdminRuntimeFile(_)
-        | ApplicationError::AdminRuntimeCommand(_)
-        | ApplicationError::AdminUser(_)
-        | ApplicationError::AdminWorld(_)
-        | ApplicationError::MailProcessing(_)
-        | ApplicationError::ForumRemote(_)
-        | ApplicationError::Session(_)
-        | ApplicationError::OperationsAlert(_) => {
-            api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
-                .into_response()
-        }
+        map_temporarily_unavailable!() => competition_unavailable(),
     }
 }
 

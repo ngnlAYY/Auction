@@ -55,6 +55,7 @@ pub fn load_postgres_maintenance_secrets(
     {
         // 维护 URL 可能具备删库权限；除 mode 外还要求单 hard-link 且由当前有效用户拥有，避免
         // root/共享目录外的另一个账号替换同 inode 后继续复用。
+        // SAFETY: geteuid 不接收指针，也不访问 Rust 管理的内存，只返回当前进程的有效 UID。
         let effective_uid = unsafe { libc::geteuid() };
         if metadata.permissions().mode() & 0o077 != 0
             || metadata.nlink() != 1

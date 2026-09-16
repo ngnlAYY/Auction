@@ -267,10 +267,13 @@ pub(super) async fn manual_reconcile_in_transaction(
 }
 
 #[cfg(feature = "postgres")]
-pub(super) async fn manual_reconcile_postgres(
+async fn finalize_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
     claim: &SettlementFulfillmentClaim,
     failure_code: &str,
+    execution_state: &str,
+    audit_action: &str,
+    invalid_claim_message: &str,
 ) -> Result<(), auction_application::RepositoryError> {
     validate_claim_identity(claim)?;
     let state_version = i64::try_from(claim.state_version)
@@ -279,23 +282,24 @@ pub(super) async fn manual_reconcile_postgres(
     run_reconcile_transaction!(pool, transaction, {
         let updated = sqlx::query(
             r#"UPDATE public.settlement_obligation_fulfillments
-                   SET execution_state = 'manual_reconcile',
+                   SET execution_state = $1,
                        claim_token = NULL,
                        claimed_at = NULL,
                        claim_expires_at = NULL,
                        completed_at = statement_timestamp(),
                        state_version = state_version + 1,
                        next_attempt_at = NULL,
-                       last_error_code = $1,
+                       last_error_code = $2,
                        updated_at = statement_timestamp()
-                   WHERE obligation_id = $2
-                     AND execution_state = $3
-                     AND state_version = $4
-                     AND claim_token = $5
-                     AND claim_fencing = $6
+                   WHERE obligation_id = $3
+                     AND execution_state = $4
+                     AND state_version = $5
+                     AND claim_token = $6
+                     AND claim_fencing = $7
                      AND claim_expires_at > clock_timestamp()
                    RETURNING updated_at"#,
         )
+        .bind(execution_state)
         .bind(failure_code)
         .bind(claim.obligation_id.as_uuid())
         .bind(fulfillment_state_name(claim.state))
@@ -307,9 +311,7 @@ pub(super) async fn manual_reconcile_postgres(
         .map_err(ReconcileTransactionError::Storage)?;
         let updated_at: DateTime<Utc> = updated
             .ok_or_else(|| {
-                ReconcileTransactionError::Repository(repository_error_owned(
-                    "结算履约人工复核的 claim 已失效",
-                ))
+                ReconcileTransactionError::Repository(repository_error_owned(invalid_claim_message))
             })?
             .try_get("updated_at")
             .map_err(ReconcileTransactionError::Storage)?;
@@ -317,8 +319,8 @@ pub(super) async fn manual_reconcile_postgres(
             &mut transaction,
             audit_id,
             claim,
-            "manual_reconcile",
-            "auction.fulfillment.manual_reconcile",
+            execution_state,
+            audit_action,
             Some(failure_code),
             None,
             0,
@@ -329,6 +331,23 @@ pub(super) async fn manual_reconcile_postgres(
         Ok(())
     })?;
     Ok(())
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn manual_reconcile_postgres(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &SettlementFulfillmentClaim,
+    failure_code: &str,
+) -> Result<(), auction_application::RepositoryError> {
+    finalize_postgres(
+        pool,
+        claim,
+        failure_code,
+        "manual_reconcile",
+        "auction.fulfillment.manual_reconcile",
+        "结算履约人工复核的 claim 已失效",
+    )
+    .await
 }
 
 #[cfg(feature = "postgres")]
@@ -369,63 +388,15 @@ pub(super) async fn mark_failed_postgres(
     claim: &SettlementFulfillmentClaim,
     failure_code: &str,
 ) -> Result<(), auction_application::RepositoryError> {
-    validate_claim_identity(claim)?;
-    let state_version = i64::try_from(claim.state_version)
-        .map_err(|_| repository_error_owned("结算履约状态版本超出数据库范围"))?;
-    let audit_id = Uuid::new_v4();
-    run_reconcile_transaction!(pool, transaction, {
-        let updated = sqlx::query(
-            r#"UPDATE public.settlement_obligation_fulfillments
-                   SET execution_state = 'failed',
-                       claim_token = NULL,
-                       claimed_at = NULL,
-                       claim_expires_at = NULL,
-                       completed_at = statement_timestamp(),
-                       state_version = state_version + 1,
-                       next_attempt_at = NULL,
-                       last_error_code = $1,
-                       updated_at = statement_timestamp()
-                   WHERE obligation_id = $2
-                     AND execution_state = $3
-                     AND state_version = $4
-                     AND claim_token = $5
-                     AND claim_fencing = $6
-                     AND claim_expires_at > clock_timestamp()
-                   RETURNING updated_at"#,
-        )
-        .bind(failure_code)
-        .bind(claim.obligation_id.as_uuid())
-        .bind(fulfillment_state_name(claim.state))
-        .bind(state_version)
-        .bind(claim.claim_token)
-        .bind(claim.claim_fencing)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(ReconcileTransactionError::Storage)?;
-        let updated_at: DateTime<Utc> = updated
-            .ok_or_else(|| {
-                ReconcileTransactionError::Repository(repository_error_owned(
-                    "结算履约确定失败的 claim 已失效",
-                ))
-            })?
-            .try_get("updated_at")
-            .map_err(ReconcileTransactionError::Storage)?;
-        append_terminal_audit(
-            &mut transaction,
-            audit_id,
-            claim,
-            "failed",
-            "auction.fulfillment.failed",
-            Some(failure_code),
-            None,
-            0,
-            updated_at,
-        )
-        .await
-        .map_err(ReconcileTransactionError::Storage)?;
-        Ok(())
-    })?;
-    Ok(())
+    finalize_postgres(
+        pool,
+        claim,
+        failure_code,
+        "failed",
+        "auction.fulfillment.failed",
+        "结算履约确定失败的 claim 已失效",
+    )
+    .await
 }
 
 #[cfg(feature = "postgres")]

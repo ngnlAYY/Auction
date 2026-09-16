@@ -10,47 +10,19 @@ pub(in super::super) async fn backfill_display(
 ) -> anyhow::Result<()> {
     use anyhow::Context;
     use auction_application::MailDisplaySnapshot;
-    use auction_config::Role;
-    use auction_integrations::DataKey;
-    use auction_integrations::mooglemail::{
-        MoogleMailDiagnosticArchive, MoogleMailDiagnosticArchiveConfig,
-    };
+    use auction_integrations::mooglemail::MoogleMailDiagnosticArchive;
     use auction_storage::{DatabaseBackend, DatabaseStore, MailDisplayBackfillInput};
-    use std::{sync::Arc, time::Duration};
 
     if evidence_id.is_nil() {
         anyhow::bail!("evidence-id 必须是非零 UUID");
     }
-    let config =
-        auction_config::AppConfig::load(Role::Worker).context("load Worker configuration")?;
-    let diagnostics = &config.worker.mooglemail.diagnostics;
-    let (key_source, key_id, key_material) = match requested_key_source {
-        Some(MailEvidenceKeySourceArg::Credential) => {
-            ("credential", config.credential_data_key_id(), config.credential_data_key())
-        }
-        Some(MailEvidenceKeySourceArg::Equipment) => {
-            ("equipment", config.equipment_data_key_id(), config.equipment_data_key())
-        }
-        None if config.credential_data_key_configured() => {
-            ("credential", config.credential_data_key_id(), config.credential_data_key())
-        }
-        None => ("equipment", config.equipment_data_key_id(), config.equipment_data_key()),
-    };
-    let key_id = key_id.context("selected MoogleMail diagnostic parent key_id is unavailable")?;
-    let key_material =
-        key_material.context("selected MoogleMail diagnostic parent key is unavailable")?;
-    let data_key = DataKey::from_base64(key_id, key_material)
-        .context("decode selected MoogleMail diagnostic parent key")?;
-    let archive = MoogleMailDiagnosticArchive::new(
-        MoogleMailDiagnosticArchiveConfig {
-            directory: diagnostics.directory.clone(),
-            retention: Duration::from_secs(u64::from(diagnostics.retention_days) * 86_400),
-            maximum_total_bytes: diagnostics.maximum_total_bytes,
-            key_source: key_source.to_owned(),
-        },
-        Arc::new(data_key),
-    )
-    .map_err(|error| anyhow::anyhow!("open MoogleMail diagnostic archive: {}", error.as_str()))?;
+    let config = auction_config::AppConfig::load(auction_config::Role::Worker)
+        .context("load Worker configuration")?;
+    let (archive_config, data_key) =
+        super::load_diagnostic_archive_context(&config, requested_key_source)?;
+    let archive = MoogleMailDiagnosticArchive::new(archive_config, data_key).map_err(|error| {
+        anyhow::anyhow!("open MoogleMail diagnostic archive: {}", error.as_str())
+    })?;
     let message = archive.read_parsed_message(evidence_id).map_err(|error| {
         anyhow::anyhow!("read authenticated parsed_message evidence: {}", error.as_str())
     })?;
