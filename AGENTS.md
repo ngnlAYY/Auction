@@ -40,7 +40,8 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 - “全 Rust”只约束本仓库代码和直接引入的程序库使用 Rust；PostgreSQL、SQLite、Redis、
   反向代理和操作系统服务等外部组件不受实现语言限制。
 - PostgreSQL 是完整生产后端；SQLite 是面向本地、演示和单主机低并发部署的 Lite 替代
-  后端。敏感 TOML 中的 `database_url` 选择档位，不能通过 `AnyPool` 抹平事务、锁、迁移
+  后端。敏感 TOML 的 `[database]` 选择 PostgreSQL，兼容的 `database_url` 按 scheme 选择档位；
+  不能通过 `AnyPool` 抹平事务、锁、迁移
   和能力差异，也不要求 SQLite 达到 PostgreSQL 的系统能力。
 - 拍卖页面的静态结构、CSS 和交互视觉语言由本仓库 Web crate 与样式资源共同定义；页面样式完成
   不等于业务功能或运行验收已经完成。
@@ -83,6 +84,7 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 │   ├── auction-integrations/     # E-Hentai、MoogleMail 和外部网关
 │   ├── auction-jobs/             # Worker 调度与任务编排
 │   ├── auction-config/           # TOML 解析与进程配置
+│   ├── auction-setup/            # PostgreSQL 单机首次部署的独立设置表面
 │   ├── auction-observability/    # tracing、metrics、健康检查和关联 ID
 │   └── auction-process/          # 终止信号、有界 drain 和任务所有权原语
 ├── migrations/                   # PostgreSQL 完整 schema 与 SQLite Lite 子集迁移
@@ -188,6 +190,8 @@ apps/*
   `auction-web-shared` 只放真正通用、无业务偏向的基础能力。
 - `auction-jobs` 负责调度、重试、游标和 Worker 编排，不得创建第二套拍卖状态机。
 - `auction-config` 负责 TOML 解析和配置校验；不要在业务模块中散落环境变量读取。
+- `auction-setup` 仅在无配置首次部署时提供 loopback 初始化 API 和一次性令牌门禁；配置
+  生成仍由 `auction-config` 拥有，正式 Admin 路由不得挂载初始化写接口。
 - `auction-observability` 负责日志、指标、健康检查和关联信息；敏感值不得进入日志。
 - `auction-process` 只提供终止信号、有界 drain 和 abort-on-drop 任务守卫；不得读取配置、打开
   监听器、发布心跳或决定业务任务的停止顺序。
@@ -315,7 +319,7 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   核对两者引用同一 runtime 文件及有效拍卖模板/排期一致；MoogleMail transport、凭据、
   mailbox identity 和全局启用仍由部署配置拥有。
   `operations.mail` 省略时保持旧指纹；其 cron 在校验、保存及启动时均复用配置层的 Worker 解析器。
-- `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
+- `[database]` 的五项连接参数、兼容的 `database_url`、`redis_url`、论坛 Cookie、`session_signing_key`、`admin_actor` 和
   `admin_secret` 只能放在敏感 TOML；MoogleMail Cookie 生产路径同样使用敏感 TOML，但本地
   联调可由 `auction-config::load_mooglemail_keyenv` 严格读取 `.keyenv` 的
   `hv-ck-key1`/`hv-ck-key2`。Worker 只使用 `hv-ck-key1`；`hv-ck-key2` 只允许显式隔离验证，
@@ -323,8 +327,10 @@ Lite 可以不实现某项系统功能，但不能用“轻量版”为已实现
   不通过通用环境变量覆盖；Admin 凭据必须成对配置，secret 至少 16 字节。
 - 敏感文件不得提交，部署时应限制为仅运行账号可读。配置错误和日志不得回显连接串、
   Cookie、密钥或包含这些内容的 TOML 原文。
-- 敏感文件中的 `database_url` 支持 `postgres://`、`postgresql://` 和 `sqlite:`，并直接
-  决定部署档位。
+- PostgreSQL 敏感配置优先使用 `[database]`，分别填写必填的 `host`、`port`、`username`、
+  `password`、`name`；账号、密码和库名按原文填写，由配置层生成敏感 URL。端口必须非零，
+  不从环境或账号推导目标。旧 `database_url` 保留 `postgres://`、`postgresql://` 和 `sqlite:`
+  兼容入口，与 `[database]` 同时提供时失败关闭；SQLite Lite 继续使用 `database_url`。
   PostgreSQL 是完整生产后端；SQLite 是本地、演示和明确单主机低并发部署的 Lite 后端，
   每个角色至多一个实例、Worker 并发为一，并说明串行写入、锁等待、备份和本地文件系统
   假设。不得把 SQLite 文件放在网络共享文件系统上作为横向扩展方案。

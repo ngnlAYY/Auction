@@ -11,6 +11,7 @@
 - [通用响应与错误](#通用响应与错误)
 - [Public](#public)
 - [Admin](#admin)
+- [首次部署初始化](#首次部署初始化)
 - [已实现路径的补充约束](#已实现路径的补充约束)
 - [契约变更规则](#契约变更规则)
 
@@ -27,6 +28,9 @@
 
 A38-A43 是独立登记的 Admin 产品能力，已经包含在 43 条统计中。路径数量只证明路由注册闭集，不
 代表对应应用端口、存储能力或运行证据已经完成。
+
+首次部署另有独立进程的 `/setup` 和两个写接口，不属于 Public/Admin feature API 计数；
+正式 Admin 进程不注册它们，`/setup` 在正式静态入口中返回 404。
 
 进程级可观测性路径不计入上述 feature API 统计：Public 与 Admin 在主配置
 `[metrics].enabled = true` 时提供 `GET/HEAD /metrics` Prometheus text scrape；Admin 若配置
@@ -275,6 +279,29 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A41 | PATCH | /api/v1/admin/worlds/{world_id} | 200 | 400, 401, 403, 404, 409, 413/415, 429, 501, 503/504 |
 | A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 |
 | A43 | GET | /api/v1/admin/realtime/events | 200 | 400, 401, 500, 501, 503/504 |
+
+## 首次部署初始化
+
+仅 `auction-admin-api` 的 PostgreSQL + `web-embed` 初始化模式在 `127.0.0.1:8091` 挂载以下入口；
+正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，写接口
+必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`。请求体最多 8 KiB，DTO 拒绝未知字段。
+配置文件尚未存在时无参数启动会自动进入该模式；显式 `AUCTION_CONFIG_FILE` 缺失或配置解析失败
+仍按正常启动失败关闭，不触发初始化。完成后进程退出，正式服务由部署控制器启动。
+
+请求使用 `database` 对象，包含五个必填字段：`host`（主机名/IP）、`port`（1-65535 的整数）、
+`username`、`password`、`name`。账号、密码和库名按原文提交，不做 URL 编码；不接受旧的
+`database_url` 表单字段。接口映射到配置层的独立模型，连接检查和落盘均使用同一校验与转换；
+保存结果为敏感 TOML 的 `[database]` 区块。其他管理员、origin 与基础/进阶字段保持既有语义。
+
+| 方法 | 路径 | 成功 | 明确失败 |
+| --- | --- | --- | --- |
+| GET/HEAD | `/setup` | 200，Admin WASM 初始化页 | 404/503（无资源） |
+| POST | `/api/v1/setup/validate` | 200 `{"status":"validated"}` | 400 `invalid_input`/`configuration_invalid`，403 `setup_auth`，503 `database_unavailable` |
+| POST | `/api/v1/setup/complete` | 200 `{"status":"completed"}`；写出完整配置并退出 | 同上，另有 409 `setup_busy`/`setup_locked`/`setup_completed`，500 `setup_io`/`setup_outcome_unknown` |
+
+数据库凭据、管理员密码只在请求与目标敏感 TOML 中存在；响应只返回稳定错误码，不返回输入、
+SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁移；保存后目标配置目录存在即禁止
+再次首次设置。完整运行参数仍在正式 Admin `A26/A27` runtime 页面管理。
 
 ## 已实现路径的补充约束
 

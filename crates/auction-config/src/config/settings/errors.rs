@@ -65,6 +65,12 @@ pub enum ConfigError {
     #[error("sensitive field {field} must not be empty")]
     EmptySensitiveField { field: &'static str },
 
+    #[error("数据库配置字段 {0} 无效；主机、端口、账号、密码、数据库名称必须分别填写")]
+    InvalidDatabaseConfig(&'static str),
+
+    #[error("数据库配置不能同时提供 [database] 和 database_url，请保留一种写法")]
+    ConflictingDatabaseConfiguration,
+
     #[error("admin_actor 不能包含 Basic Auth 分隔符冒号")]
     InvalidAdminActor,
 

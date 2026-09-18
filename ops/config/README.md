@@ -1,13 +1,15 @@
 # 运行配置与敏感文件
 
-[文档导航](../../docs/README.md) · [loader 与校验](../../crates/auction-config/README.md) · [公共模板](examples/common.toml) · [Public 模板](examples/public.toml) · [Admin 模板](examples/admin.toml) · [Worker 模板](examples/worker.toml) · [runtime 模板](examples/runtime/admin.toml) · [敏感占位模板](examples/secrets.toml)
+[文档导航](../../docs/README.md) · [loader 与校验](../../crates/auction-config/README.md) · [公共模板](examples/common.toml) · [Public 模板](examples/public.toml) · [Admin 模板](examples/admin.toml) · [Worker 模板](examples/worker.toml) · [runtime 模板](examples/runtime/admin.toml) · [SQLite 敏感模板](examples/secrets.toml) · [PostgreSQL 敏感模板](examples/secrets/postgres.toml)
 
 公共、角色、敏感与 runtime 文件分离；配置保存、生效与数据库权威事实分别由不同 owner 负责。
 
 ## 本页导航
 
 - [文件职责](#文件职责)
+- [首次部署配置生成](#首次部署配置生成)
 - [准备私有配置](#准备私有配置)
+- [PostgreSQL 连接参数](#postgresql-连接参数)
 - [PostgreSQL 维护凭据](#postgresql-维护凭据)
 - [Runtime 共享与重启](#runtime-共享与重启)
 - [敏感字段](#敏感字段)
@@ -28,8 +30,8 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 主配置，单个配置项不会从环境变量读取。
 
 已经纳入版本控制的主配置和敏感配置示例位于 [`examples/`](examples/)，runtime 配置示例
-集中在 [`examples/runtime/`](examples/runtime/)，破坏性运维专用敏感模板集中在
-[`examples/secrets/`](examples/secrets/)。每个角色文件必须通过 `common_file` 引用同一公共文件，
+集中在 [`examples/runtime/`](examples/runtime/)，PostgreSQL 常驻连接与独立维护凭据的模板
+集中在 [`examples/secrets/`](examples/secrets/)。每个角色文件必须通过 `common_file` 引用同一公共文件，
 并通过 `secrets_file` 引用敏感文件；相对路径都以角色文件所在目录解析。三进程部署预检会拒绝
 角色引用不同公共文件的组合。示例主配置引用的 `secrets.toml` 只包含
 安全的本地占位值，不能直接用于生产环境。
@@ -39,31 +41,69 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 三进程部署目录、启动顺序、健康探针、权限和 Caddy 上游模板见
 [`../deploy/README.md`](../deploy/README.md)。该资料不替代具体主机的服务管理器配置。
 
+## 首次部署配置生成
+
+内嵌 PostgreSQL Admin 制品通过 `setup --output-dir <绝对路径>` 提供仅监听 loopback 的一次性
+设置页；无默认配置且没有显式 `AUCTION_CONFIG_FILE` 时，也会自动进入该入口。页面分别接收
+数据库主机、端口、账号、密码、库名、管理员、两个 origin 和基础/进阶参数，目标目录必须不存在。
+
+`auction-config::FirstRunConfig` 复用 `examples/` 中的公共、三角色与 runtime 通用模板，写出
+权限受限的 `secrets.toml`，并让三个角色的正式 loader 校验完整目录。未由页面覆盖的参数沿用
+通用模板；Public/Admin 信任本机反向代理，Worker control 启用并绑定初始化进程提供的服务 UID，
+邮件本地联调 `.keyenv` 路径不进入生成配置。普通 Admin 进程不开放初始化 API。
+
+保存后进程退出，运行目录、用户组、systemd 与 Caddy 仍按[部署手册](../deploy/README.md)准备，
+再执行严格部署预检和总控启动。真实敏感文件不得提交到仓库。
 
 ## 准备私有配置
 
-生产或本地真实配置可按以下方式准备：
+PostgreSQL 完整档可按以下方式准备敏感配置，随后填写五项数据库参数：
 
 ```bash
-cp ops/config/examples/secrets.toml ops/config/auction.secret.toml
+cp ops/config/examples/secrets/postgres.toml ops/config/auction.secret.toml
 chmod 600 ops/config/auction.secret.toml
 ```
 
 然后把主配置的 `secrets_file` 指向 `../auction.secret.toml`。`*.secret.toml` 和
 `*.local.toml` 已被 Git 忽略，但部署者仍需保证备份、文件所有者和读取权限正确。
 生产环境宜为 Public、Admin、Worker 分别挂载敏感文件，并只提供该角色实际需要的字段；
-仓库中的单一 `secrets.toml` 只是共享结构示例。
+SQLite Lite 则使用 `examples/secrets.toml` 的文件连接串示例。首次设置页生成的共享敏感文件
+同样受权限限制，按需拆分后应更新各角色的 `secrets_file`。
 
+
+## PostgreSQL 连接参数
+
+敏感 TOML 的 `[database]` 分别填写以下五项，完整示例见
+[PostgreSQL 敏感模板](examples/secrets/postgres.toml)：
+
+```toml
+[database]
+host = "127.0.0.1"
+port = 5432
+username = "auction"
+password = "CHANGE_ME"
+name = "auction"
+```
+
+五项均必填；`host` 只接受主机名或 IP（支持 IPv4/IPv6），不填协议、端口或路径；端口范围为
+1-65535。账号、密码和数据库名按原文填写，包括 `@`、`:`、`%` 等字符，配置层负责 URL 编码，
+不得预先转义。`admin_actor`、`admin_secret` 等其他敏感项仍是根字段，放在 `[database]` 前面。
+首次设置页使用同样五项并保存同一结构，数据库连接检查与正式启动共用转换逻辑。
+
+旧 `database_url` 可继续读取，用于 SQLite 或需要 Unix socket、显式 TLS 参数的 PostgreSQL
+部署；与 `[database]` 同时出现时明确报错，不猜测优先级。五字段格式使用现有驱动的默认 TLS
+策略，不会新增 TLS 覆盖；需要显式策略时继续使用带对应参数的旧 URL。两种形式都只允许放在
+敏感文件中，不通过环境变量覆盖，也不修改已有配置文件。
 
 ## PostgreSQL 维护凭据
 
 `auctionctl postgres-rebuild` 和 `postgres-bootstrap` 可通过 `--maintenance-secrets-file` 短暂加载独立 TOML，结构见
-[`examples/secrets/postgres-rebuild.toml`](examples/secrets/postgres-rebuild.toml)。该文件只有一个
-必填 `database_url`，必须指向与 Worker 数据库相同 endpoint/TLS profile 的 `postgres` 维护库；
+[`examples/secrets/postgres-rebuild.toml`](examples/secrets/postgres-rebuild.toml)。该文件只接受数据库配置，可填写 `[database]` 五项或兼容的
+`database_url`，两者不能混用；必须指向与 Worker 数据库相同 endpoint/TLS profile 的 `postgres` 维护库；
 用户名和密码可以属于独立高权限维护角色。文件路径必须是规范化绝对路径，文件不得是 symlink，
 父目录不得允许 group/other 写入；Unix 文件必须归命令当前有效用户所有、只有一个 hard link 且
 权限为 owner-only。它不是三进程 runtime 配置，不得由 Public/Admin/Worker 的
-`secrets_file` 引用；未提供时重建命令才会从普通 `database_url` 派生维护连接并要求该应用角色拥有
+`secrets_file` 引用；未提供时重建命令才会从配置层解析后的普通连接派生维护连接并要求该应用角色拥有
 对应 owner/`CREATEDB` 权限。
 
 
@@ -123,7 +163,7 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 
 以下字段只能出现在敏感 TOML：
 
-- `database_url`：数据库连接串；
+- `[database]`：PostgreSQL 主机、端口、账号、密码和库名；兼容的 `database_url` 与其二选一；
 - `redis_url`：启用 Redis 缓存时的连接串；
 - `session_signing_key`：会话签名密钥；
 - `ehentai_cookie`、`mooglemail_cookie`：外部服务 Cookie；
@@ -143,7 +183,7 @@ PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live l
 
 ## 后端和拓扑
 
-`database_url` 同时决定数据库和部署档位：
+`[database]` 选择 PostgreSQL 完整档；兼容的 `database_url` 按 scheme 决定数据库和部署档位：
 
 - `postgres://` 或 `postgresql://` 选择完整生产档，支持独立进程和完整持久化能力。
   部署基线固定 PostgreSQL major 18，并及时安装 18.x 当前修复版本。

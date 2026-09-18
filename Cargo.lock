@@ -185,9 +185,11 @@ dependencies = [
  "auction-jobs",
  "auction-observability",
  "auction-process",
+ "auction-setup",
  "auction-storage",
  "axum",
  "chrono",
+ "libc",
  "rust-embed",
  "tokio",
  "tracing",
@@ -236,7 +238,9 @@ dependencies = [
  "serde",
  "thiserror 2.0.20",
  "toml",
+ "tracing-subscriber",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -380,6 +384,21 @@ dependencies = [
  "rust-embed",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "auction-setup"
+version = "0.1.0"
+dependencies = [
+ "auction-config",
+ "auction-contracts",
+ "auction-http",
+ "auction-storage",
+ "axum",
+ "rust-embed",
+ "subtle",
+ "tokio",
  "uuid",
 ]
 

@@ -1,0 +1,21 @@
+[package]
+name = "auction-setup"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+auction-config.workspace = true
+auction-contracts.workspace = true
+auction-http.workspace = true
+auction-storage = { workspace = true, optional = true }
+axum.workspace = true
+rust-embed.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[features]
+default = []
+postgres = ["dep:auction-storage", "auction-storage/postgres"]

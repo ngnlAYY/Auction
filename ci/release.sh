@@ -631,7 +631,7 @@ package_release() {
   install_release_file ops/config/examples/admin.toml config/examples/admin.toml 640 "$package_root"
   install_release_file ops/config/examples/worker.toml config/examples/worker.toml 640 "$package_root"
   install_release_file ops/config/examples/runtime/admin.toml config/examples/runtime/admin.toml 640 "$package_root"
-  install_release_file ops/config/examples/secrets.toml config/examples/secrets.toml.example 600 "$package_root"
+  install_release_file ops/config/examples/secrets/postgres.toml config/examples/secrets.toml.example 600 "$package_root"
   install_release_file ops/config/examples/secrets/postgres-rebuild.toml config/examples/secrets/postgres-rebuild.toml.example 600 "$package_root"
   install_release_file "$embedded_artifact_root/WEB-PUBLIC-SHA256" docs/WEB-PUBLIC-SHA256 644 "$package_root"
   install_release_file "$embedded_artifact_root/WEB-ADMIN-SHA256" docs/WEB-ADMIN-SHA256 644 "$package_root"

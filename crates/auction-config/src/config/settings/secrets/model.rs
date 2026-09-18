@@ -5,12 +5,15 @@ use std::fmt;
 use serde::Deserialize;
 
 use super::super::ConfigError;
+use super::database::{PostgresConnectionConfig, resolve_database_url};
 
 /// 独立敏感 TOML 的稳定字段集合。新增外部凭据时必须显式扩展，禁止任意键值透传。
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct SecretFileConfig {
-    /// 数据库连接串；数据库进程按需读取，不能写入主配置。
+    /// PostgreSQL 独立连接字段；不能与兼容的 `database_url` 同时提供。
+    pub(crate) database: Option<PostgresConnectionConfig>,
+    /// SQLite 或旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
     /// Redis 连接串；仅启用 Redis 缓存时需要。
     pub(crate) redis_url: Option<String>,
@@ -68,12 +71,14 @@ impl fmt::Debug for SecretString {
     }
 }
 
-/// 维护 PostgreSQL 同集群 `postgres` 数据库所需的单字段敏感模型。
+/// 维护 PostgreSQL 同集群 `postgres` 数据库所需的独立敏感模型。
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PostgresMaintenanceSecretFile {
+    /// 维护库的独立连接字段；与兼容 URL 二选一。
+    pub(crate) database: Option<PostgresConnectionConfig>,
     /// 只供破坏性运维命令连接同集群 `postgres` 维护库的高权限 URL。
-    pub(crate) database_url: String,
+    pub(crate) database_url: Option<String>,
 }
 
 /// 独立 PostgreSQL 维护敏感 TOML 的脱敏结果。
@@ -154,10 +159,7 @@ impl AppSecrets {
             return Err(ConfigError::InvalidAdminActor);
         }
         Ok(Self {
-            database_url: secret
-                .database_url
-                .map(|value| SecretString::new("database_url", value))
-                .transpose()?,
+            database_url: resolve_database_url(secret.database, secret.database_url)?,
             redis_url: secret
                 .redis_url
                 .map(|value| SecretString::new("redis_url", value))

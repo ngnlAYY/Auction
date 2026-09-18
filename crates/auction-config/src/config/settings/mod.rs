@@ -45,7 +45,7 @@ pub use app::*;
 pub use auction::*;
 pub use errors::ConfigError;
 pub use secrets::{
-    MoogleMailKeyEnv, PostgresMaintenanceSecrets, load_mooglemail_keyenv,
+    MoogleMailKeyEnv, PostgresConnectionConfig, PostgresMaintenanceSecrets, load_mooglemail_keyenv,
     load_postgres_maintenance_secrets,
 };
 pub use security::*;

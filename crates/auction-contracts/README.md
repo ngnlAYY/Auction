@@ -20,6 +20,7 @@
 | [src/contracts/dto/public](src/contracts/dto/public) | Public 请求、响应与实时投影 |
 | [src/contracts/dto/admin](src/contracts/dto/admin) | Admin 请求与安全响应 |
 | [src/contracts](src/contracts) | 公共信封及稳定导出 |
+| [src/contracts/setup.rs](src/contracts/setup.rs) | 仅用于首次部署的五字段数据库输入、表单、阶段和稳定错误码 |
 
 ## 职责与实现边界
 

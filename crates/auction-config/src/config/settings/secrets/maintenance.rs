@@ -6,7 +6,8 @@ use std::{fs, io::Read, path::Path};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use super::super::ConfigError;
-use super::model::{PostgresMaintenanceSecretFile, PostgresMaintenanceSecrets, SecretString};
+use super::database::resolve_database_url;
+use super::model::{PostgresMaintenanceSecretFile, PostgresMaintenanceSecrets};
 
 /// 加载破坏性 PostgreSQL 运维专用的独立敏感 TOML。
 ///
@@ -78,6 +79,7 @@ pub fn load_postgres_maintenance_secrets(
     let secret: PostgresMaintenanceSecretFile =
         toml::from_str(&contents).map_err(|_| ConfigError::SecretParse { path: path.clone() })?;
     Ok(PostgresMaintenanceSecrets {
-        database_url: SecretString::new("maintenance_database_url", secret.database_url)?,
+        database_url: resolve_database_url(secret.database, secret.database_url)?
+            .ok_or(ConfigError::InvalidDatabaseConfig("database"))?,
     })
 }

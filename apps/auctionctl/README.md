@@ -425,7 +425,8 @@ realtime consumer 最小 offset 只作为诊断水位，外键依赖在政策明
 前后核对迁移版本。密码不会出现在参数或日志中，而是短生命周期写入仅运行账号可读的临时
 `.pgpass`；archive 和 manifest 使用 0600、不可覆盖的私有文件。`postgres-backup-verify` 只读取
 本地配对文件并重新计算 SHA-256/检查 archive 目录，不连接数据库，也不执行恢复。
-调用外部 PostgreSQL 工具的连接 profile 要求敏感 `database_url` 显式提供 host 和 port
+调用外部 PostgreSQL 工具的连接 profile 消费配置层生成的 URL；敏感 `[database]` 五项或兼容
+`database_url` 必须显式提供 host 和 port
 （包括默认端口 `5432`）；缺失时直接拒绝。工具清除继承的 `PGHOST`、`PGHOSTADDR`、`PGPORT`
 后只从同一 URL 设置目标，避免 SQLx 预检和 libpq 工具使用不同的机器环境默认值；
 普通备份、恢复和 v28 备份/接管的同一连接 profile 都遵守此限制。
@@ -470,8 +471,8 @@ JSON receipt。archive 版本可以旧于当前二进制，恢复后通过正常
 
 目标必须已经是当前且 clean 的 Auction schema，Public/Admin/Worker 和其他客户端必须先停止，
 维护连接必须观察到零目标 session、零 prepared transaction、零 subscription 和零活动 logical slot。
-生产环境推荐通过 `--maintenance-secrets-file` 使用独立 owner-only TOML；其中唯一的
-`database_url` 必须指向同 endpoint/TLS profile 的 `postgres` 维护库，且不会进入命令行、日志或
+生产环境推荐通过 `--maintenance-secrets-file` 使用独立 owner-only TOML；其中的
+`[database]` 五项或兼容 `database_url`（二选一）必须指向同 endpoint/TLS profile 的 `postgres` 维护库，且不会进入命令行、日志或
 receipt。连接源库之前，两条 URL 都必须显式给出单一 host、非零 port 和数据库名；默认端口也要
 写明，避免 `PGPORT` 让源库预检和破坏性操作落到不同实例。通过实际 SQLx 解析结果比较端点，
 查询参数只接受 `application_name` 和 `sslmode`；SQLx 会忽略的 `ssl=true`、`connect_timeout`
