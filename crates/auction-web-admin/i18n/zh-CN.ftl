@@ -1,4 +1,43 @@
 # 管理端简体中文文案（管理端默认语言）。
+setup-title = 首次部署设置
+setup-intro = 配置本机 PostgreSQL 部署。初始化服务只监听本机，远程访问请使用 SSH 隧道。
+setup-access = 一次性访问
+setup-token = 终端显示的设置令牌
+setup-database = 数据库
+setup-database-host = 数据库主机
+setup-database-port = 数据库端口
+setup-database-username = 数据库账号
+setup-database-password = 数据库密码
+setup-database-name = 数据库名称
+setup-database-help = 请先建立 PostgreSQL 18 数据库与应用账号。主机、端口、账号、密码和数据库名称分别填写，特殊字符按原文输入。验证只检查连通性，正式启动时才执行迁移。
+setup-admin = 管理员
+setup-admin-actor = 管理员用户名
+setup-admin-secret = 管理员密码（至少 16 字节）
+setup-basic = 基础设置
+setup-public-origin = 公开站点 Origin
+setup-admin-origin = 管理站点 Origin
+setup-start-price = 默认起拍价
+setup-metrics = 启用本机指标
+setup-schedule = 启用自动拍卖排期
+setup-advanced = 进阶设置
+setup-log-filter = 日志过滤器
+setup-worker-concurrency = Worker 并发数
+setup-worker-poll = Worker 轮询间隔（秒）
+setup-realtime-poll = 实时更新轮询间隔（毫秒）
+setup-validate = 检查连接和设置
+setup-save = 保存配置并完成
+setup-valid = 数据库连接和设置有效，可以保存。
+setup-complete = 配置已保存，初始化进程将退出。启动部署栈后登录管理端，可继续编辑其余运行设置。
+setup-error-input = 请检查表单数值后重试。
+setup-error-database = 无法连接 PostgreSQL；请检查地址、数据库、账号和密码。
+setup-error-config = 生成的配置未通过校验，请检查设置。
+setup-error-locked = 配置已存在，首次设置不会覆盖它。
+setup-error-busy = 另一项设置请求正在处理，请稍后重试。
+setup-error-token = 一次性设置令牌不正确。
+setup-error-io = 无法保存配置，请检查目录权限；服务尚未启动。
+setup-error-outcome-unknown = 保存结果暂无法确认。重试前请检查目标配置目录，不要覆盖其中的文件。
+setup-error-network = 无法连接设置服务，请检查本机连接或 SSH 隧道。
+setup-error-unknown = 设置服务返回未知结果，请先检查服务终端再重试。
 # Fluent 消息 ID 不允许包含点号，旧系统的 `nav.home` 一类键统一改为 `nav-home`。
 
 language-label = 语言

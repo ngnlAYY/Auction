@@ -1,5 +1,6 @@
 //! Admin API 的 tracing、HTTP 服务生命周期和有界 drain。
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,8 +14,12 @@ use tokio::sync::oneshot;
 
 use super::{config, listener, state};
 
-pub async fn run() -> anyhow::Result<()> {
-    let config = AppConfig::load(Role::Admin).context("load admin-api configuration")?;
+pub async fn run(config_path: Option<PathBuf>) -> anyhow::Result<()> {
+    let config = match config_path {
+        Some(path) => AppConfig::load_from_path(Role::Admin, path),
+        None => AppConfig::load(Role::Admin),
+    }
+    .context("load admin-api configuration")?;
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_admin_api",

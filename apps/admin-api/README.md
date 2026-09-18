@@ -35,6 +35,11 @@
 [src/bootstrap/service.rs](src/bootstrap/service.rs) 负责 tracing、HTTP 生命周期和有界 drain，`state.rs` 负责数据库/端口/
 heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策略和 dashboard 范围投影，
 `listener.rs` 负责监听器绑定与服务。这样装配根不把状态构造、配置映射和退出流程混在一个文件中。
+`first_run.rs` 在读取角色配置前选择启动模式：显式角色文件或现有默认文件进入正常 Admin；无配置
+且无显式 `AUCTION_CONFIG_FILE` 时，内嵌 PostgreSQL Web 制品自动在 loopback 提供一次性设置页，
+输出到当前目录的 `auction-config/`。也可使用 `setup --output-dir <绝对路径>` 明确指定目标。
+缺失的显式配置、解析错误或已有但不完整的目录不会降级为设置页；首次设置完成后进程退出，
+不自动迁移数据库或启动其它角色。
 主配置的 TCP/Unix listener 是有效 fallback；Admin runtime 存在时覆盖为同一配置层的有效 listener。
 装配根、origin/metrics 校验和部署预检共同读取该结果，Unix 监听不要求额外配置 runtime 文件。
 

@@ -30,6 +30,7 @@
 | [src/config](src/config) | 主配置、敏感文件、默认值与约束 |
 | [src/runtime](src/runtime) | Admin runtime 编解码、文件锁和原子替换 |
 | [src/scheduling](src/scheduling) | Worker cron 与时区解析 |
+| [src/setup](src/setup) | 基于通用模板的首次部署配置物化、敏感文件与三角色校验 |
 
 ## 职责与实现边界
 
@@ -72,7 +73,7 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 
 ## 敏感字段与数据密钥
 
-敏感文件的稳定字段集合：`database_url`、`redis_url`、`session_signing_key`、
+敏感文件的稳定字段集合：`database`、兼容的 `database_url`、`redis_url`、`session_signing_key`、
 `ehentai_cookie`、`mooglemail_cookie`、`admin_actor`、`admin_secret`、
 `equipment_data_key_id`、`equipment_data_key`、`credential_data_key_id`、
 `credential_data_key`、`user_login_data_key_id`、`user_login_data_key`、
@@ -80,6 +81,13 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 [敏感模型](src/config/settings/secrets/model.rs)定义。新增外部凭据必须显式
 扩展该结构，禁止任意键值透传。Admin 凭据只由 Admin 装配根读取，`admin_secret` 至少需要
 16 个字节；Admin 凭据和装备数据密钥的两项字段都必须成对出现，才能建立对应能力。
+
+[secrets/database.rs](src/config/settings/secrets/database.rs) 拥有 PostgreSQL 的 `host`、`port`、
+`username`、`password`、`name` 五字段校验和唯一 URL 转换。`PostgresConnectionConfig` 的
+`Debug` 固定脱敏，未知/缺失字段和零端口拒绝，账号/密码按原文做一次百分号编码；库名作为单个
+路径段编码，不允许点段触发默认库。新旧两种输入互斥，内部 `AppConfig::database_url()` 保持
+原接口，部署目标比对、SQLx 与维护命令都消费同一结果。首次设置页也复用该转换并保存五字段
+结构，兼容 URL 不被重写；需要 Unix socket 或显式 TLS profile 时继续使用兼容写法。
 
 `equipment_data_key` 必须是 32 字节标准 Base64 数据密钥，`equipment_data_key_id` 是非秘密
 轮换标识。Admin/Worker 用它封装或读取装备 key；Public 为 P09/P11 的受限 `no-store` 装备链接读取
@@ -98,7 +106,8 @@ world/shared 读取唯一 active Cookie 并在内存中解密；`mail_cookie` �
 ## PostgreSQL 维护敏感配置
 
 `load_postgres_maintenance_secrets(path)` 服务于 `auctionctl postgres-rebuild` 与 `postgres-bootstrap`。它解析一个与
-常驻三进程敏感文件隔离的 TOML，唯一必填字段是指向 `postgres` 维护库的 `database_url`；结构模板
+常驻三进程敏感文件隔离的 TOML，接受 `[database]` 五项或兼容的 `database_url`，必须指向
+`postgres` 维护库且不能混用；结构模板
 位于 `ops/config/examples/secrets/postgres-rebuild.toml`。路径必须是规范化绝对路径，目标必须是
 普通非 symlink 文件，父目录不得允许 group/other 写入；Unix 文件必须归当前有效用户所有、只有
 一个 hard link，并去除全部 group/other 权限位。类型的 `Debug` 固定脱敏，解析错误

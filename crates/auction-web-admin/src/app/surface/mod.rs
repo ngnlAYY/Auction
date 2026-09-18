@@ -44,6 +44,8 @@ mod router;
 mod rules;
 #[path = "../auction/settlement.rs"]
 mod settlement;
+#[path = "../operations/setup.rs"]
+mod setup;
 #[path = "shared.rs"]
 mod shared;
 #[path = "../sort.rs"]

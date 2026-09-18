@@ -2,16 +2,17 @@
 
 [文档导航](../../docs/README.md) · [CLI 参数](../../apps/auctionctl/README.md) · [发布装配](../../ci/release.sh) · [systemd 模板](systemd/README.md) · [备份与恢复](RECOVERY.md) · [v28 接管](LEGACY_V28_ADOPTION.md)
 
-按当前三进程边界说明安装、预检、顺序、制品和运维入口；执行前必须准备真实配置与维护环境。
+按当前三进程边界说明安装、预检、顺序、制品和运维入口；常规部署前必须准备真实配置与维护环境，
+PostgreSQL 单机首次部署可通过独立设置页生成配置，但仍需先准备 PostgreSQL 数据库和应用账号。
 
-本目录只描述当前 Rust 三进程边界的部署契约，不是通用安装器，也不会在部署时改写配置
-字段或自动覆盖数据库。本项目只接受仓库内登记的 TOML、`auctionctl` 和三进程部署流程；外部
-脚本或未登记的单体启动流程不能直接套用。
+本目录只描述当前 Rust 三进程边界的部署契约，不提供安装脚本，也不会在部署时改写配置
+字段或自动覆盖数据库。外部脚本或未登记的单体启动流程不能直接套用。
 
 ## 本页导航
 
 - [推荐目录](#推荐目录)
 - [发布制品](#发布制品)
+- [首次部署配置](#首次部署配置)
 - [启动顺序](#启动顺序)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
@@ -53,17 +54,19 @@ runtime 文件；部署预检会拒绝路径不同或有效拍卖模板/排期�
 恢复后的候选，再重新执行部署重启，不能把旧进程的存活视为新配置已经生效。
 
 三个角色还必须指向同一数据库目标，允许使用不同数据库账号。PostgreSQL 在各敏感 TOML 中显式
-填写 host、port 与数据库，使用同一规范主机名或同一实际 Unix socket 目录；部署预检按 SQLx
+填写 `[database]` 的 host、port、username、password、name（或使用兼容 URL），使用同一规范主机名或同一实际 Unix socket 目录；部署预检按 SQLx
 解析后的目标比较，拒绝未知参数和 `options` 会话覆盖。SQLite 部署使用绝对磁盘路径；相对路径
 会因 CLI/systemd 的工作目录可能不同而被拒绝，内存库与自定义 VFS 也不能用于三进程部署。
 
 ## 发布制品
 
 生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制
-某次 `cargo build` 的 `target/release`。发布包只包含四个内嵌发布二进制、配置/敏感配置示例、
-systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 Web payload 清单；不会包含数据库、
-Cookie、`.keyenv`、日志或运行时目录。archive 内 `SHA256SUMS` 绑定全部批准文件，外层
+某次 `cargo build` 的 `target/release`。发布包只包含四个内嵌发布二进制、
+配置/敏感配置示例、systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 Web payload 清单；
+不会包含数据库、Cookie、`.keyenv`、日志或运行时目录。archive 内 `SHA256SUMS` 绑定全部批准文件，外层
 `target/release-package/SHA256SUMS` 再绑定 archive 与 `DEPENDENCIES.md`。
+完整档归档中的 `config/examples/secrets.toml.example` 使用 PostgreSQL `[database]` 五字段模板；
+填写主机、端口、账号、密码和库名即可，由配置层生成内部连接串。
 
 ```bash
 just build-api
@@ -77,6 +80,18 @@ just package
 两端资源。正式 `package` 拒绝脏工作树；`--allow-dirty` 只供迁移期间受控取证，输出名称、依赖摘要和
 源码指纹都会保留 dirty 事实，不得作为正式上线批准。解包后仍需按下文把示例复制到 `/etc/auction`、
 注入真实敏感文件并完成目标主机权限/readiness 演练。
+
+## 首次部署配置
+
+内嵌 PostgreSQL 制品支持 `auction-admin-api setup --output-dir <绝对路径>`；也可在没有默认配置
+且未设置 `AUCTION_CONFIG_FILE` 时直接运行 `auction-admin-api`，输出目录为当前目录下的
+`auction-config/`。目标目录必须不存在，父目录须由运行账号拥有；先准备 PostgreSQL 18 数据库
+和应用账号，再以实际服务账号运行初始化进程，确保配置 owner 和 Worker control UID 与部署一致。
+设置页只监听 `127.0.0.1:8091`，访问时填写终端输出的一次性令牌，远程访问使用 SSH 隧道。
+
+配置生成复用通用模板，写出公共、三角色、敏感和共享 runtime TOML。保存成功后初始化进程退出；
+随后按下文准备运行目录、Worker control 组和 systemd unit，审阅 Caddy 配置，并通过
+`auctionctl deployment-check --strict-permissions` 与总控完成迁移和启动。
 
 迁移前只有 systemd `inactive`/`failed` 且 `MainPID=0` 才表示停止完成；`deactivating` 和停止钩子
 仍在执行时不能开始迁移。`restart` 会等待 systemd stop 完成并复核严格停止状态。
@@ -191,7 +206,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 备份命令只允许新的绝对路径，拒绝覆盖已有 archive/manifest；源库必须是当前 Auction schema，
 并在 `pg_dump` 前后保持同一迁移版本。恢复必须由操作员先停止外部进程并准备同名空库。
-备份/恢复所用敏感 `database_url` 必须显式写明 host 与 port（默认端口也写 `5432`），
+备份/恢复消费配置层生成的数据库连接；`[database]` 五项或兼容 `database_url` 必须显式提供
+host 与 port（默认端口也写 `5432`），
 外部工具不会继承 `PGHOST`、`PGHOSTADDR` 或 `PGPORT` 来选择目标。
 `postgres-restore` 不会终止连接、清理现有 schema 或破坏性重建数据库。需要由仓库工具准备空库时，
 必须单独显式运行 `postgres-rebuild --mode empty-for-restore`，完整确认和回执流程见

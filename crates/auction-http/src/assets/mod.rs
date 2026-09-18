@@ -38,19 +38,37 @@ const ADMIN_NOT_FOUND_HTML: &str = "<!doctype html><html lang=\"zh-CN\"><head><m
 
 /// 处理公开端的静态产物与显式浏览器路由。
 pub(crate) async fn serve_public_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    serve::<A>(Surface::Public, request)
+    serve::<A>(Surface::Public, request, false)
 }
 
 /// 处理管理端的静态产物与显式浏览器路由。
 pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    serve::<A>(Surface::Admin, request)
+    serve::<A>(Surface::Admin, request, false)
+}
+
+/// 只向一次性初始化进程提供 Admin 的 `/setup` 页面和必要静态资源。
+pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
+    serve::<A>(Surface::Admin, request, true)
 }
 
 /// 按“保留路径 → 精确静态文件 → 批准浏览器路由 → 404”顺序封闭分派请求。
-fn serve<A: rust_embed::RustEmbed>(surface: Surface, request: Request) -> Response {
+fn serve<A: rust_embed::RustEmbed>(
+    surface: Surface,
+    request: Request,
+    setup_only: bool,
+) -> Response {
     let method = request.method();
     let path = request.uri().path();
     let request_headers = request.headers();
+
+    if setup_only
+        && path != "/setup"
+        && path != "/favicon.ico"
+        && path != "/index.html"
+        && !path.starts_with("/assets/")
+    {
+        return not_found(surface, method, request_headers);
+    }
 
     if path == "/favicon.ico" {
         if !static_method(method) {
@@ -74,7 +92,7 @@ fn serve<A: rust_embed::RustEmbed>(surface: Surface, request: Request) -> Respon
         return asset_response(file, method, request_headers, exact_asset_cache(relative_path));
     }
 
-    if routes::browser_route(surface, path) {
+    if (setup_only && path == "/setup") || (!setup_only && routes::browser_route(surface, path)) {
         if !static_method(method) {
             return method_not_allowed(request_headers);
         }

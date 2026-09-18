@@ -55,6 +55,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](../crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](../crates/auction-observability/README.md) |
 | auction-process | 终止信号、有界 drain 与任务守卫 | [README](../crates/auction-process/README.md) |
+| auction-setup | PostgreSQL 单机档的一次性 loopback 初始化 API 与令牌门禁；不参与正式 Admin 路由 | [README](../crates/auction-setup/README.md) |
 
 `apps/*` 只负责配置、依赖注入、资源绑定、关闭顺序和退出码。每个 `src` 根只保留必要 `main.rs`/`lib.rs`，
 实现放入具名职责目录。不得用共享大结构体、私有持久化访问或 `common`/`misc` 绕过 owner。
@@ -63,7 +64,9 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 
 ## 部署档位与能力
 
-敏感 TOML 的 `database_url` scheme 选择档位；对应驱动必须显式编译，不使用 `sqlx::Any` 隐藏差异。
+敏感 TOML 的 `[database]` 五项连接参数选择 PostgreSQL 完整档，由 `auction-config` 的
+`settings/secrets/database.rs` 校验并生成内部 URL；兼容的 `database_url` 按 scheme 选择档位，
+两种输入不能混用。对应驱动必须显式编译，不使用 `sqlx::Any` 隐藏差异。
 
 | 能力 | PostgreSQL 完整档 | SQLite Lite |
 | --- | --- | --- |

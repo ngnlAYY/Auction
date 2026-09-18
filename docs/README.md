@@ -52,6 +52,7 @@
 | [auction-jobs](../crates/auction-jobs/README.md) | `crates/auction-jobs/README.md` |
 | [auction-observability](../crates/auction-observability/README.md) | `crates/auction-observability/README.md` |
 | [auction-process](../crates/auction-process/README.md) | `crates/auction-process/README.md` |
+| [auction-setup](../crates/auction-setup/README.md) | `crates/auction-setup/README.md` |
 | [auction-storage](../crates/auction-storage/README.md) | `crates/auction-storage/README.md` |
 | [auction-web-admin · 管理端浏览器界面](../crates/auction-web-admin/README.md) | `crates/auction-web-admin/README.md` |
 | [auction-web-public · 公开端浏览器界面](../crates/auction-web-public/README.md) | `crates/auction-web-public/README.md` |
@@ -81,3 +82,6 @@
 | 文档 | 仓库位置 |
 | --- | --- |
 | [Agent Note: 全库文档重建与静态维护边界](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md) | `.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md` |
+| [Agent Note: 发布包收敛到正式程序与通用配置](../.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md) | `.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md` |
+| [Agent Note: 无配置首次启动与管理页初始化](../.agents/notes/implemented/feature/2026-09-17-first-run-setup.md) | `.agents/notes/implemented/feature/2026-09-17-first-run-setup.md` |
+| [Agent Note: PostgreSQL 连接参数独立填写](../.agents/notes/implemented/feature/2026-09-18-database-connection-fields.md) | `.agents/notes/implemented/feature/2026-09-18-database-connection-fields.md` |

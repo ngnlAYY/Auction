@@ -52,6 +52,10 @@ Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期�
 随后按白名单、权限、统一时间与两次相同 archive 装包，保存内外 SHA-256 和依赖摘要。
 源码身份在构建前冻结并在阶段边界复核，正式 package 拒绝脏工作树。工具依赖和实际参数以脚本为准。
 
+发布包的可执行文件仅包含 `auction-public-api`、`auction-admin-api`、`auction-worker` 和
+`auctionctl`，并携带 PostgreSQL 五字段敏感模板。首次部署通过 Admin 自带的独立设置入口生成配置，再由 `auctionctl deployment`
+执行严格预检、forward-only migration 与 readiness；不在 CI 中启动设置页或连接真实数据库。
+
 ## 验证限制
 
 所有上述检查均不运行单元、集成、功能、端到端或浏览器测试，已有测试只在 all-targets 检查时编译。

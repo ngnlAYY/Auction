@@ -4,5 +4,7 @@
 //! 契约实现细节与 crate 根混在一起。
 
 mod dto;
+mod setup;
 
 pub use dto::*;
+pub use setup::*;

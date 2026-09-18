@@ -3,6 +3,7 @@
 mod assets;
 mod http;
 
+pub use assets::serve_admin_setup_asset;
 pub use http::{
     AdminApiState, AdminHttpSecurity, HttpBoundary, HttpSecurityOptions, PublicApiState,
     PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,

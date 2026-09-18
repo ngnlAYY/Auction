@@ -21,6 +21,7 @@
 | SQLite Lite | 共有竞价、会话、部分管理、持久调度和实时读取 | PostgreSQL 系统能力、行锁或并发语义对等 |
 | 迁移 | PostgreSQL 37、SQLite 12 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁 | 本次文档修改已经构建或部署了新制品 |
+| 无配置首次启动 | 独立 loopback 设置页、五字段数据库输入与连接检查、三角色及敏感/runtime TOML 生成入口已实现 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 灾备 | 独立 backup/verify/rebuild/restore 与 canonical v28 接管流程 | 备份可用于未经验证的生产恢复或任意历史 schema |
 
 注册数由[路由](contracts/routes.md)、[静态入口](../crates/auction-http/src/assets/routes.rs)及

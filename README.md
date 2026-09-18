@@ -54,6 +54,8 @@ just verify-artifacts
 可连接数据库的部署制品。
 
 运行配置分为公共、角色和敏感 TOML；`AUCTION_CONFIG_FILE` 只选择角色文件。
+内嵌 PostgreSQL 制品可通过 `auction-admin-api setup --output-dir <绝对路径>` 打开本机首次设置页，
+分别填写数据库主机、端口、账号、密码、库名，以及管理员和部署参数并生成配置；完成后按[部署手册](ops/deploy/README.md)执行严格预检和启动。
 提交的示例包含占位值，使用前按[配置说明](ops/config/README.md)准备权限受限的真实敏感文件。
 首次迁移、启动与停机要求见[部署手册](ops/deploy/README.md)，不在普通静态验证中自动执行。
 

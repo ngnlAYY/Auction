@@ -1,5 +1,45 @@
 # Admin English copy.
 
+setup-title = First-run setup
+setup-intro = Configure this PostgreSQL deployment. The setup server listens only on loopback; use an SSH tunnel for remote access.
+setup-access = One-time access
+setup-token = Setup token from the terminal
+setup-database = Database
+setup-database-host = Database host
+setup-database-port = Database port
+setup-database-username = Database username
+setup-database-password = Database password
+setup-database-name = Database name
+setup-database-help = Create the PostgreSQL 18 database and application role first. Enter the host, port, username, password, and database name separately; enter special characters as written. Validation checks connectivity; migrations run when the stack starts.
+setup-admin = Administrator
+setup-admin-actor = Admin username
+setup-admin-secret = Admin password (at least 16 bytes)
+setup-basic = Basic settings
+setup-public-origin = Public site origin
+setup-admin-origin = Admin site origin
+setup-start-price = Default starting price
+setup-metrics = Enable local metrics
+setup-schedule = Enable automatic auction scheduling
+setup-advanced = Advanced settings
+setup-log-filter = Log filter
+setup-worker-concurrency = Worker concurrency
+setup-worker-poll = Worker poll interval (seconds)
+setup-realtime-poll = Realtime poll interval (milliseconds)
+setup-validate = Check connection and settings
+setup-save = Save configuration and finish
+setup-valid = Connection and settings are valid. Save when ready.
+setup-complete = Configuration saved. Setup will stop; start the stack, then sign in to Admin for the remaining settings.
+setup-error-input = Check the form values and try again.
+setup-error-database = Cannot connect to PostgreSQL. Check the host, database, role, and password.
+setup-error-config = The generated configuration did not pass validation. Review the settings.
+setup-error-locked = Configuration already exists. First-run setup will not overwrite it.
+setup-error-busy = Another setup request is in progress. Wait and retry.
+setup-error-token = The one-time setup token is incorrect.
+setup-error-io = Configuration could not be saved. Check directory permissions; services were not started.
+setup-error-outcome-unknown = The save result is uncertain. Inspect the target configuration directory before retrying; do not overwrite it.
+setup-error-network = Cannot reach setup. Check the local connection or SSH tunnel.
+setup-error-unknown = Unknown setup result. Check the server terminal before retrying.
+
 language-label = Language
 skip = Skip to main content
 

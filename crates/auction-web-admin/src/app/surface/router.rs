@@ -18,6 +18,9 @@ use dioxus::prelude::*;
 #[rustfmt::skip]
 // 路径字面量必须与 auction-http/src/assets/routes.rs 的 Admin 清单同步，未知路径不能获得 SPA 入口。
 pub(super) enum Route {
+    #[route("/setup")]
+    Setup {},
+
     #[layout(AdminShell)]
         #[route("/")]
         Dashboard {},
@@ -84,6 +87,11 @@ pub(super) enum Route {
 
         #[route("/:..segments")]
         NotFound { segments: Vec<String> },
+}
+
+#[component]
+fn Setup() -> Element {
+    super::setup::page()
 }
 
 #[component]

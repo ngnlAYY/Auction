@@ -31,6 +31,9 @@
 Dioxus 客户端渲染的管理端 SPA。`Route` 枚举冻结 21 条路径，并与
 [`docs/contracts/routes.md`](../../docs/contracts/routes.md) 及
 `auction-http/src/assets/routes.rs` 的后端入口清单同步维护。
+`/setup` 的数据库表单分别填写主机、端口、账号、密码和数据库名称，账号密码按原文输入。
+该页只由独立一次性初始化进程提供，正式 Admin HTTP 入口仍返回 404；该页不经过
+普通 Admin 会话外壳，写入只走一次性令牌保护的初始化 API。
 
 ## 页面与源码布局
 
