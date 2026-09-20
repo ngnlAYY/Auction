@@ -126,9 +126,9 @@ Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session
 runtime capability 保护，只在 PostgreSQL 完整档要求理由并把到期事实交给既有 Worker，HTTP 不直接
 写结算结果。Public `/api/v1/events` 已接入两套数据库的持久化
 Catch-up，`/api/v1/ws` 提供带 Public session 的只读服务端推送；连接尝试与 mutation 独立限流，
-只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。Public `/status`
-页面已在已认证会话下自动订阅该流，收到
-跳号或 `refetch_required` 后停止并回到权威快照边界。Admin 结算报告已接入 PostgreSQL 完整档的一致只读
+只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。已认证会话的
+发现流由 Public 外壳订阅，拍卖页面订阅对应单拍卖流；`/status` 仅显示静态说明，不建立额外订阅。
+跳号或 `refetch_required` 会触发回放/权威快照恢复，后者保留恢复高水位与现有 socket。Admin 结算报告已接入 PostgreSQL 完整档的一致只读
 快照，并把 lot 挂牌价、持有 PPM 与带符号调整 PPM 映射为稳定安全字段；Admin recovery 报告也已接入同一 PostgreSQL 完整档读取边界；SQLite Lite 对这两项能力
 返回 `501 feature_not_supported`。A14 recovery 确认已接入 PostgreSQL 完整档的版本 fence、
 证据重校验、命令账本、退款激活、guarded relist、审计和预览目录 realtime 事件；SQLite 对
@@ -200,8 +200,8 @@ A20 使用单个 `command_id` 调用 Worker control，全局唤醒已装配的 M
 `pollers` 的 `202 accepted`；不把唤醒动作伪装成远程读取成功。
 
 Public 与 Admin 是不同 surface，路由只提供各自静态产物。`RustEmbed` 类型由对应装配根独占，
-本 crate 通过泛型资源类型提供通用分派；任一部署制品都不引用另一端资源，不把链接器裁剪当作
-隔离保证。
+本 crate 通过泛型资源类型提供通用分派；默认分体制品不引用另一端资源，不把链接器裁剪当作
+隔离保证。可选 `auction-server` 同时链接两个资源类型，但子进程各自只向对应 surface 提供资源，不能跨路由泄漏。
 已登记路径均由对应 owner 负责真实投影或明确的 Lite 能力响应；未装配 owner、数据库档位不支持
 的能力返回明确的 `feature_not_supported`/`feature_not_migrated`，不伪造旧系统成功数据。未登记
 的 `/api`、`/health` 路径返回带请求 ID 的 JSON 404；未知浏览器导航按 `Accept` 返回 404 页面，
@@ -235,9 +235,9 @@ Axum 的隐式 HEAD：未显式注册的方法返回
 
 ## 静态产物内嵌
 
-两个 surface 各自内嵌对应的 Web 产物。根目录 `Justfile` 的 `web-build-public` 与
-`web-build-admin` 使用 `dx bundle` 先完成构建，再复制到稳定目录；路径由 `rust-embed` 按本
-crate 的 `CARGO_MANIFEST_DIR` 解析：
+两个 surface 由 Public/Admin 装配根各自声明 `RustEmbed` 类型，本 crate 仅提供资源响应适配。
+根目录 `Justfile` 的 `web-build-public` 与 `web-build-admin` 使用 `dx bundle` 先构建，再复制到
+以下仓库根下的稳定目录；嵌入路径相对于对应 app 的 `CARGO_MANIFEST_DIR` 解析：
 
 ```text
 target/dx/build/auction-web-public/web/public
@@ -245,7 +245,7 @@ target/dx/build/auction-web-admin/web/public
 ```
 
 `allow_missing = true` 是必需的。`rust-embed` 默认在目标目录不存在时**编译期报错**，而前端
-产物由独立的 `dx build` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端的构建都会
+产物由独立的 `dx bundle` 生成；没有这个属性，首次克隆仓库、CI 静态检查或只改后端的构建都会
 因为缺少产物而无法编译。批准的浏览器路由在产物缺失时以 503 明确报告，不 panic；未知路径仍
 按 404 处理。
 

@@ -80,10 +80,11 @@
 
 ## 决策记录
 
-[可选单文件服务与首次配置后启动](../.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md)
+既有笔记记录当时的决定与证据；当前实现缺口及核对快照见[状态说明](status.md)。
 
 | 文档 | 仓库位置 |
 | --- | --- |
+| [Agent Note: 可选单文件服务与首次配置后启动](../.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md) | `.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md` |
 | [Agent Note: 全库文档重建与静态维护边界](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md) | `.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md` |
 | [Agent Note: 发布包收敛到正式程序与通用配置](../.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md) | `.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md` |
 | [Agent Note: 无配置首次启动与管理页初始化](../.agents/notes/implemented/feature/2026-09-17-first-run-setup.md) | `.agents/notes/implemented/feature/2026-09-17-first-run-setup.md` |

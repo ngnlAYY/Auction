@@ -232,7 +232,7 @@ Worker 的命令账本、outbox、消费游标、领取状态、重试次数和�
 闭集值。HTTP status 只记录真实取得的 100—599 状态，耗时最多 300000 毫秒；网络、超时、截断或超大响应只能
 标记 `body_unavailable`，不能伪称完整响应。日志必须保留安全关联，即使留证 disabled、prepare/save 失败或
 completion 未确认；证据 UUID 不保证文件永久存在，旧邮件没有底层失败 trace 时不得补因或重放。
-诊断留证不得触发业务定时器：application 只返回原始 Result 与 `pendingEquipmentDiagnostic`，
+诊断留证不得触发业务定时器：application 只返回原始 Result 与 `PendingMailEquipmentDiagnostic` 句柄，
 `process_with_retry` 只收集结束尝试的句柄；`process_claim_inner` 的 `timeout(process_remaining, process_with_retry)`
 结束后，才在 `item_timeout` 与 batch `process_remaining` 之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接
 sidecar，中间 `Err` 留证/日志后保留原 retryability；实际 retention elapsed 必须延长后续 batch deadline。Worker 注入

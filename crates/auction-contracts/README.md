@@ -42,6 +42,9 @@
   `env!("CARGO_PKG_VERSION")` 只会得到契约 crate 自己的版本，而运维需要的是运行进程的版本。
   装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
+- `SetupRequest` 与 `SetupResponse`：独立首次设置契约，前者包含 PostgreSQL 五字段
+  `database` 及默认 false 的 `confirm_initialize`，后者以 `initialize_and_start` 区分分体保存与合并后续初始化；
+  `completed` 只确认配置保存，不承诺迁移或 readiness。正式 Admin 不挂载设置 API。
 - `AdminRuntimeConfigResponse`：runtime JSON 文档、fingerprint 和重启要求的稳定信封；文档新增
   `operations` 六组非敏感候选（含 `mail` 邮件预算），字段闭集由应用 owner 定义，cron 语法由配置
   owner 复用 Worker 解析器校验，浏览器严格消费同一投影。
@@ -69,7 +72,7 @@
 字段命名必须先遵守已冻结的旧系统契约；新增契约使用 `snake_case` JSON 字段，并通过 serde
 映射兼容外部旧命名。修改路由、状态码、JSON 字段或事件名时，必须同步更新对应文档。
 
-本 crate 只依赖 serde，不引入 Axum、SQLx 或任何适配器类型。
+本 crate 只依赖 serde 与 serde_json，不引入 Axum、SQLx 或任何适配器类型。
 
 ## 维护与验证
 

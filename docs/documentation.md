@@ -12,7 +12,7 @@
 | contracts | 路由、事件、schema 与不变量 | 对外契约或持久化语义变化 |
 | apps/*、crates/* README | 本模块入口、行为边界、适配与排错 | 本模块目录或实现变化 |
 | ops、migrations、ci README | 操作前提、命令、结果和失败边界 | 配置、部署、迁移或门禁变化 |
-| status | 实现/验证口径和未闭合事项 | 新增可追溯运行证据 |
+| status | 实现/验证口径、源码缺口和未闭合事项 | 实现范围变化、发现契约偏差或新增可追溯运行证据 |
 | .agents/notes | 决策原因、真实备选与后果 | 非平凡决定或理由翻转 |
 
 实现事实用源码、Cargo.lock、迁移和脚本核对；用户及 AGENTS.md 的规范约束不能因源码暂未实现就静默放宽。
@@ -56,7 +56,8 @@ Status: implemented
 部分重叠互链；过时提案 reject 或删除，不进入归档。落地时同时迁移路径、状态和正文为现在时，移除计划性标题。
 归档仅用于已落地且参考价值降低的笔记，必须冻结内容并建立可核验的封印；当前仓库尚无归档笔记。
 
-本轮决定见[全库文档重建](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md)。
+文档维护方式沿用[全库文档重建](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md)的既有决定；
+后续事实修订不改写该笔记当时的理由和验证结论。当前核对快照与实现缺口见[状态说明](status.md)。
 
 ## 静态检查与人工核对
 

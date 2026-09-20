@@ -31,9 +31,10 @@
 
 ## 职责与实现边界
 
-Dioxus 客户端渲染的管理端 SPA。`Route` 枚举冻结 21 条路径，并与
+Dioxus 客户端渲染的管理端 SPA。正式 Admin surface 冻结 21 条浏览器路径，并与
 [`docs/contracts/routes.md`](../../docs/contracts/routes.md) 及
-`auction-http/src/assets/routes.rs` 的后端入口清单同步维护。
+`auction-http/src/assets/routes.rs` 的后端入口清单同步维护。`Route` 另外声明仅由独立设置服务提供的
+`/setup`，不计入这 21 条正式入口；catch-all 也不计入。
 `/setup` 初始仅展示一次性部署码输入与验证按钮；独立 `POST /api/v1/setup/verify` 返回
 `verified` 后才显示数据库、管理员、基础及进阶配置。部署码验证不提交配置、不连接数据库；
 可重试失败保留输入，等待时禁止重复提交。部署码与已验证状态只保存在页面内存，刷新需重新
@@ -164,7 +165,7 @@ release/retry 使用确认对话框，manual_reconcile 隐藏主动 send 的 suc
 的 `action=retry`，携带 `command_id`、CSRF 和 `expected_fencing_version`；成功只提示重新排队，结果未知提示先核对 MM。
 数据仅在收件详情中从有界 `metadata.delivery_ids` 批量读取，不把 payload、装备 key 或正文送入页面；历史收件决定不重放。
 投递状态筛选使用轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
-Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
+`/outbox` 的 Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
 筛选、分页和明确空结果状态；概览默认显示事件、消费流与未解决异常总数，consumer lag 不再隐藏在
 右上角弹层；事件概览总数不受列表筛选影响，显式刷新会让三类列表回到第一页。已解决 failure 不允许再次发起 replay。replay 使用
 带遮罩的确认对话框，提交期间锁定输入并保留失败反馈；公开 payload 由操作员输入，服务端负责

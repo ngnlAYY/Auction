@@ -4,7 +4,9 @@
 
 PostgreSQL 完整档和 SQLite Lite 的 SQL、事务、查询、迁移及锁 owner。
 `src/database/initialization` 仅拥有合并入口首次空 PostgreSQL 库初始化：在 SQLx 迁移锁下拒绝
-已有关系与其他客户端，再应用追加迁移；不建库、不删对象、不升级已有库。普通启动不调用它。
+已有用户对象与其他客户端，再应用追加迁移；不建库、不删对象、不升级已有库。普通启动不调用它。
+当前该入口直接运行原始内嵌迁移，未复用 `database/migrations/` 的历史别名兼容执行视图；
+此差异已登记为[实现缺口](../../docs/status.md#源码核对发现的实现缺口)，不能据此声明首次启动链路已验收。
 `src/deployment_identity/strict.rs` 让分体 CLI 与合并入口共用显式数据库目标、参数闭集校验。
 
 ## 本页导航
@@ -287,9 +289,9 @@ PostgreSQL 结算候选、截止复核及关闭计数也排除撤回记录，但
 不得借降额改变代理模式或状态。
 Admin 拍卖创建由 [src/database/commands/mod.rs](src/database/commands/mod.rs) 与 PostgreSQL
 [src/database/competition/postgres/admin/create.rs](src/database/competition/postgres/admin/create.rs) 共同持有：应用服务使用 `admin_auction_create` 命令账本，
-事务锁定 world 和 intake target，写入 draft、策略快照、审计、拍卖专属流中的 `auction.created`
-事件及公开发现流的持久化派生别名；SQLite
-Lite 明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
+事务锁定 world 和 intake target，写入 draft、策略快照、审计及拍卖专属流中的 `auction.created`
+事件；此时不写公开发现流。进入 Preview 时才由 `lifecycle/record.rs` 追加发现别名，避免通知浏览器读取
+尚不可公开的 Draft。SQLite Lite 对 Admin 创建明确返回能力不支持。策略模板会在同一事务中同时写入 schema v4 `policy_snapshot` 和
 竞价/生命周期仍读取的 `default_start_price`、软截止、取消截止、slow 间隔列，避免配置与
 遗留规则分叉。A03 请求中的 `scheduled_end_at` 当前冻结在策略快照，生命周期列在真正开放前
 保持空值，以兼容 v1 创建契约。
@@ -432,7 +434,8 @@ PostgreSQL 初始数据库 bootstrap 由独立的 `database/bootstrap/` 持有�
 
 ## 后端选择
 
-`database_url` 的 scheme 决定实际后端，也决定部署档位：
+存储入口消费配置层已经校验的 URL：敏感 TOML 的 `[database]` 五字段生成 PostgreSQL URL，
+兼容 `database_url` 直接按 scheme 选择；存储层不解析 TOML。URL scheme 决定实际后端与部署档位：
 
 | scheme | 档位 | 能力 |
 | --- | --- | --- |

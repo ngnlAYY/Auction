@@ -50,6 +50,7 @@ just verify
 | 目标 | Cargo feature | 附加条件 |
 | --- | --- | --- |
 | PostgreSQL 完整档 | `postgres` | 使用 PostgreSQL 配置和迁移树 |
+| 可选合并 supervisor | `auction-server` 的 `postgres`，首次向导另需 `web-embed` | 仅 Linux/PostgreSQL 单主机，不支持 SQLite；`auctionctl` 仍独立 |
 | SQLite Lite | `sqlite` | 单主机、每角色一个实例、Worker 并发 1 |
 | Redis | 在目标进程增加 `cache-redis` | 配置选择 Redis，敏感文件提供 URL |
 | 内嵌页面 | Public/Admin 增加 `web-embed` | 先构建对应前端产物 |
@@ -82,10 +83,17 @@ AUCTION_CONFIG_FILE=ops/config/examples/admin.toml cargo run --locked -p auction
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml cargo run --locked -p auction-worker --features sqlite
 ```
 
-普通启动不隐式迁移。合并入口只有首次网页明确确认后才初始化专用空库，详情见
-[auction-server](../apps/server/README.md)；`auctionctl migrate` 使用 systemd 总控参数、状态目录锁和三角色停机门禁；
-不应把它描述为无需环境准备的便捷 seed 命令。初始 PostgreSQL 建库与迁移分离，详见
-[auctionctl 命令手册](../apps/auctionctl/README.md)。
+单角色及合并服务的普通启动不隐式迁移；显式迁移入口按部署方式区分：
+
+- 分体部署：`auctionctl migrate` 使用 systemd 总控参数、状态目录锁和三角色停机门禁；
+  `auctionctl deployment start/restart` 也会在严格停机检查后迁移再启动，三角色已运行的 start 只重新检查 readiness。
+- 合并部署：停止整个 `auction-server` 后，由同一账号执行 `auctionctl migrate-managed --config-dir <绝对目录>`，
+  核验既有 supervisor/子进程共享锁；不依赖分体 systemd 总控。
+
+两者均不是无需准备的 seed 命令。合并入口只有首次网页明确确认后才进入专用空库初始化；其实现缺口与
+未验证边界见[状态说明](status.md#源码核对发现的实现缺口)。`auction-server` 使用 `--config-dir`，
+检测到 `AUCTION_CONFIG_FILE` 已设置时拒绝启动。初始 PostgreSQL 建库与迁移分离，详见
+[auctionctl 命令手册](../apps/auctionctl/README.md)及[合并服务手册](../apps/server/README.md)。
 
 ## 浏览器与发布构建
 

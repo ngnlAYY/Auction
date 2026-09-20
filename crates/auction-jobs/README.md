@@ -81,7 +81,7 @@ take 以同一邮件的资产归零和 Credits/COD/附件回执证明结果；�
 装备读取失败只保留首个非权威诊断 sidecar；完整响应先 prepare，失败才在 2 秒内 retain，成功读取丢弃密文。
 诊断不参与 decision metadata、command digest、completion 或 cursor；日志关联字段始终保留，留证状态区分 disabled、
 prepare_failed、save_failed、completion_unconfirmed、retained 和 body_unavailable。
-`process_with_retry` 只收集每次结束尝试的 `pendingEquipmentDiagnostic`；`process_claim_inner` 的
+`process_with_retry` 只收集每次结束尝试的 `PendingMailEquipmentDiagnostic` 句柄；`process_claim_inner` 的
 `timeout(process_remaining, process_with_retry)` 结束后，才在 `item_timeout` 与 batch `process_remaining` 两层业务
 定时器之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接 sidecar，中间 Err 也留证/写日志但保留原
 retryability；实际 retention elapsed 延长后续 batch deadline。Worker 注入同步日志 callback；integration 不新增

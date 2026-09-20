@@ -2,11 +2,12 @@
 
 [文档导航](../../docs/README.md) · [CLI 参数](../../apps/auctionctl/README.md) · [发布装配](../../ci/release.sh) · [systemd 模板](systemd/README.md) · [备份与恢复](RECOVERY.md) · [v28 接管](LEGACY_V28_ADOPTION.md)
 
-按当前三进程边界说明安装、预检、顺序、制品和运维入口；常规部署前必须准备真实配置与维护环境，
-PostgreSQL 单机首次部署可通过独立设置页生成配置，但仍需先准备 PostgreSQL 数据库和应用账号。
+按当前 Public/Admin/Worker 进程边界说明默认分体部署及可选合并 supervisor 的安装、预检、制品和运维入口。
+部署前必须准备真实配置与维护环境；PostgreSQL 单机首次部署可通过独立设置页生成配置，
+但仍需先准备 PostgreSQL 数据库和应用账号。
 
-本目录只描述当前 Rust 三进程边界的部署契约，不提供安装脚本，也不会在部署时改写配置
-字段或自动覆盖数据库。外部脚本或未登记的单体启动流程不能直接套用。
+本目录不提供安装脚本，也不会在部署时自动覆盖数据库。分体 systemd 总控与合并 supervisor 使用不同的
+进程所有权及迁移门禁；不得混用，外部脚本或未登记的单体启动流程不能直接套用。
 
 ## 本页导航
 
@@ -29,11 +30,13 @@ PostgreSQL 单机首次部署可通过独立设置页生成配置，但仍需先
 专用空 PostgreSQL 库、顺序启动 Worker → Admin → Public。已有配置启动只校验 schema，不隐式迁移。
 合并部署的路径、显式 HTTPS 远程设置、失败处理与升级命令详见 [server 手册](../../apps/server/README.md)。
 使用 [单 unit 模板](systemd/auction-server.service.example)，不要同时启用分体 unit 或总控；
-配置保存不代表所有角色就绪，本次构建不替代目标主机运行验收。
+配置保存不代表所有角色就绪。当前设置拒绝响应的安全头及首次迁移兼容层有
+[已登记实现缺口](../../docs/status.md#源码核对发现的实现缺口)，静态构建不替代修复及目标主机运行验收。
 
 ## 推荐目录
 
-生产环境可以采用以下目录布局；实际安装路径可以改变，但同一部署中的配置引用、权限和
+默认分体生产部署可以采用以下目录布局；合并部署使用上节的配置与私有运行目录。
+实际安装路径可以改变，但同一部署中的配置引用、权限和
 反向代理上游必须保持一致：
 
 ```text
@@ -75,7 +78,7 @@ runtime 文件；部署预检会拒绝路径不同或有效拍卖模板/排期�
 ## 发布制品
 
 生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制
-某次 `cargo build` 的 `target/release`。发布包只包含四个内嵌发布二进制、
+某次 `cargo build` 的 `target/release`。默认分体包只包含四个发布二进制（仅 Public/Admin 内嵌页面）、
 配置/敏感配置示例、systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 Web payload 清单；
 不会包含数据库、Cookie、`.keyenv`、日志或运行时目录。archive 内 `SHA256SUMS` 绑定全部批准文件，外层
 `target/release-package/SHA256SUMS` 再绑定 archive 与 `DEPENDENCIES.md`。
@@ -139,10 +142,11 @@ just package
 2. 安装并审阅三个角色 unit 与 `auction-stack.service`，确保 unit 中的
    `AUCTION_CONFIG_FILE` 分别精确指向 `/etc/auction/public.toml`、`admin.toml` 和
    `worker.toml`。
-3. 通过 `auctionctl deployment start` 或启用 `auction-stack.service`。总控会执行严格配置
-   预检、TCP/Unix listener 冲突检查、Admin/Worker control socket 与数据密钥一致性检查和
-   forward-only migration，再按 Worker → Admin → Public 顺序逐个等待实际 listener 的
-   readiness；失败只回滚本次启动的 unit，migration 不自动回退。
+3. 通过 `auctionctl deployment start` 或启用 `auction-stack.service`。总控执行严格配置
+   预检、TCP/Unix listener 冲突检查和 Admin/Worker control socket 与数据密钥一致性检查；
+   三角色均已停止时，执行 forward-only migration，再按 Worker → Admin → Public 顺序等待各角色
+   readiness。三角色已运行时只复核 readiness 并更新启动回执，不再迁移；部分运行或处于转换状态则拒绝。
+   `restart` 先停止并确认全部角色，再迁移和启动；失败只回滚本次启动的 unit，migration 不自动回退。
 4. 反向代理只连接 Public/Admin 的 TCP 地址或 Unix socket；不要把 `/metrics` 暴露给公网，
    Caddy 模板已默认返回 `404`。切换到 Unix upstream 时要同步修改 Caddy 上游值和 unit 的
    runtime 目录权限。
