@@ -153,8 +153,9 @@ REST DTO 与 WebSocket v1 由 contracts 定义。事件是重读提示，跳号�
 第二次信号或超时强制收口。装配根停止周期心跳后发布 stopping，再按配置限时刷新 tracing。
 systemd 示例 `TimeoutStopSec=45` 覆盖业务 drain、最长 30 秒 exporter 刷新与退出余量。
 
-systemd 拥有单进程 PID、信号和重启；`auctionctl deployment` 拥有跨角色配置核对、迁移、
-Worker → Admin → Public 启动及反向停止。只读盘点、备份、重建、恢复和 v28 接管是独立命令，
+分体部署由 systemd 拥有单进程 PID、信号和重启；`auctionctl deployment start/restart` 在三角色
+严格停机检查后迁移，再按 Worker → Admin → Public 启动，关闭则反向执行。
+三角色已经运行时 start 只重新检查 readiness 并更新回执；这与单角色普通启动不迁移的边界不同。只读盘点、备份、重建、恢复和 v28 接管是独立命令，
 不得进入自动启动路径。具体前提、确认、回执和失败处理见[部署](../ops/deploy/README.md)、
 [灾备](../ops/deploy/RECOVERY.md)及[v28 接管](../ops/deploy/LEGACY_V28_ADOPTION.md)。
 
@@ -163,5 +164,7 @@ Worker → Admin → Public 启动及反向停止。只读盘点、备份、重�
 初始化完成后的普通启动只验证 schema readiness；显式升级使用 `auctionctl migrate-managed`，复用
 supervisor 及继承锁的子进程所有权门禁。合并 unit 使用 155 秒停止预算，不复用分体 systemd 总控。
 这些文件锁仅保护同机支持的部署流程，不能作为跨主机隔离证明；合并和分体不得混合运行同一数据库。
+首次初始化尚未接入历史迁移兼容执行视图，设置安全头也存在拒绝路径缺口；
+当前源码证据与待闭合事项统一见[状态登记](status.md#源码核对发现的实现缺口)，不以架构路径存在推导运行成功。
 
 workspace、`crates/*` 和工程目录组织借鉴 Honk；拍卖行为与验收由本仓库独立拥有。

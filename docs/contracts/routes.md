@@ -287,14 +287,16 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，三个 API
 均必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`（页面称为一次性部署码）。
 请求体最多 8 KiB，配置 DTO 拒绝未知字段。
-配置文件尚未存在时无参数启动会自动进入该模式；默认路径的现有目录、悬空符号链接等条目仍按
-已有配置处理，权限等元数据读取错误直接阻止启动。显式 `AUCTION_CONFIG_FILE` 缺失或配置解析失败
-仍按正常启动失败关闭，不触发初始化。分体 Admin 完成后退出；合并入口须明确确认后才在设置
-服务关闭后执行空库初始化并启动角色，普通启动不隐式迁移。
+分体 Admin 无默认配置且未设置 `AUCTION_CONFIG_FILE` 时，无参数启动会自动进入该模式；默认路径的
+现有目录、悬空符号链接等条目仍按已有配置处理，元数据读取错误直接阻止启动。显式指定的角色配置缺失或
+解析失败时仍失败关闭，不触发初始化。合并 `auction-server` 则按 `--config-dir`（默认 `auction-config`）
+判断首次启动，检测到 `AUCTION_CONFIG_FILE` 已设置时直接拒绝。分体 Admin 完成后退出；合并入口须明确
+确认后才在设置服务关闭后执行空库初始化并启动角色，单角色和合并服务的普通启动不隐式迁移。
 
 合并入口通过 `--allow-remote-setup`、`--setup-origin` 和 `--setup-proxy-ip` 明确允许远程 HTTPS 代理。
 非 loopback 监听无此授权失败。HTTP 门禁检查 TCP peer、精确 Host、HTTPS 转发头与写请求 Origin；
-本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有响应禁止缓存。
+本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有响应必须禁止缓存；
+当前门禁拒绝路径的实现偏差见[状态登记](../status.md#源码核对发现的实现缺口)，该要求不因偏差而放宽。
 成功响应新增布尔 `initialize_and_start`，默认分体为 false、合并为 true；旧客户端可忽略新增字段。
 配置 DTO 新增可省略的 `confirm_initialize`（默认 false）；合并 `complete` 要求 true，否则返回
 400 `setup_confirmation_required`。网页只在用户主动勾选专用空库及启动授权后发送 true；

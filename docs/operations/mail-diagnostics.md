@@ -91,7 +91,9 @@ COD 和装备 ID；0 资产通知也要求 0 资产 Sent 证明。资产不符�
 sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，读取复用既有
 `maximum_pages` 和 `fetch_timeout`，不新增配置字段。成功 metadata 为 `sent_verified=true`、
 `external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。
-`sender/proof.rs` 的 `parserSentContentProof` 负责内容证明，storage 成功写回前执行 defense gate。
+[sender/proof.rs](../../crates/auction-integrations/src/clients/mooglemail/sender/proof.rs) 编排 baseline 与新增 Sent 核验，
+内容解析由 [parser/reads/sent/detail.rs](../../crates/auction-integrations/src/clients/mooglemail/parser/reads/sent/detail.rs) 的
+`MoogleMailParser::parse_sent_content_proof` 负责；storage 成功写回前执行 defense gate。
 Return/Take 使用独立 action proof，不属于主动 ComposeSend。
 
 Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_reference` 填成 `succeeded`；后端会按既有
@@ -124,7 +126,7 @@ prepare_failed、save_failed 或 completion_unconfirmed。状态需区分 `disab
 装备证据复用现有 MoogleMail diagnostics 的父密钥、保留期、容量上限和 `mail-evidence export` CLI，不新增配置字段。
 
 留证不占用业务定时器：应用层返回 `MailProcessingAttempt`，其中保留原始处理结果和可选的
-`pendingEquipmentDiagnostic`，只构造句柄，不轮询 static future。`process_with_retry` 只收集每次已结束尝试的句柄；
+`PendingMailEquipmentDiagnostic` 句柄，只构造而不轮询其中的 `'static` future。`process_with_retry` 只收集每次已结束尝试的句柄；
 `process_claim_inner` 在 `timeout(process_remaining, process_with_retry)` 结束后，才于 `item_timeout` 和 batch
 `process_remaining` 两层业务定时器之外，以 2 秒上限 resolve。只有 terminal `OkRejected` 才挂接 equipment sidecar；
 中间 `Err` 也留证/写日志，但保留原 retryability 分类。实际 retention elapsed 会延长后续 batch deadline，避免本封

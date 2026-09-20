@@ -2,7 +2,7 @@
 
 本文是 Auction Rust 仓库的项目级协作规范，供 AI 编程代理和人类贡献者共同遵守。
 它说明当前目录结构、模块边界、代码风格、配置方式、验证范围和交付约束。最后一次按
-工作区核对时间为 2026-09-16。
+工作区核对时间为 2026-09-20。
 
 [文档导航](docs/README.md) · [默认验证](docs/development.md)
 
@@ -35,7 +35,8 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 - Public、Admin、Worker 是可以独立部署的进程边界；`auctionctl` 负责配置、迁移和运维
   命令行操作。可选 `auction-server` 以同一二进制自管三角色子进程，`auctionctl` 不合并；
   默认分体发布不变，合并档仅支持 Linux/PostgreSQL 单主机。首次网页确认后的空库初始化是
-  明确授权的启动例外，普通启动不隐式迁移；详见 [server](apps/server/README.md)。
+  明确授权的启动例外，角色及合并服务普通启动不隐式迁移；分体 `auctionctl deployment start/restart`
+  在严格停机门禁后执行迁移。详见 [server](apps/server/README.md) 和[部署手册](ops/deploy/README.md)。
 - 浏览器端同样使用 Rust：Dioxus 客户端渲染，产物编译为 `wasm32-unknown-unknown` 后由
   后端内嵌提供。不引入
   React、TypeScript、Node 或第二套前端构建链。
@@ -193,8 +194,9 @@ apps/*
   `auction-web-shared` 只放真正通用、无业务偏向的基础能力。
 - `auction-jobs` 负责调度、重试、游标和 Worker 编排，不得创建第二套拍卖状态机。
 - `auction-config` 负责 TOML 解析和配置校验；不要在业务模块中散落环境变量读取。
-- `auction-setup` 仅在无配置首次部署时提供 loopback 初始化 API 和一次性令牌门禁；配置
-  生成仍由 `auction-config` 拥有，正式 Admin 路由不得挂载初始化写接口。
+- `auction-setup` 仅在无配置首次部署时提供默认 loopback 初始化 API 和一次性令牌门禁；
+  可选合并入口只有显式声明精确 HTTPS origin 与受信代理 IP 后才允许远程设置，不能信任任意转发头。
+  配置生成仍由 `auction-config` 拥有，正式 Admin 路由不得挂载初始化写接口。
 - `auction-observability` 负责日志、指标、健康检查和关联信息；敏感值不得进入日志。
 - `auction-process` 只提供终止信号、有界 drain 和 abort-on-drop 任务守卫；不得读取配置、打开
   监听器、发布心跳或决定业务任务的停止顺序。

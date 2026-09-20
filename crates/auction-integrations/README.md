@@ -107,8 +107,10 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
   通知也必须有 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、未扫完或超时均为未知并进入
   `manual_reconcile`，不自动重寄，不接受成功页、空 compose 或本地 UUID fallback。成功 metadata 为
   `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为
-  `mooglemail:world:send:mid`。Return/Take 保持独立 action proof；sender/proof.rs 的
-  `parserSentContentProof` 提供 Sent 内容证明。
+  `mooglemail:world:send:mid`。Return/Take 保持独立 action proof；
+  [sender/proof.rs](src/clients/mooglemail/sender/proof.rs) 编排 baseline 与新增 Sent 核验，内容证明由
+  [parser/reads/sent/detail.rs](src/clients/mooglemail/parser/reads/sent/detail.rs) 的
+  `MoogleMailParser::parse_sent_content_proof` 提供。
   装备来源适配器对每个完整响应先加密 prepare，只有读取/解析/身份/snapshot/filter 失败才在 2 秒内 retain；
   成功读取丢弃密文。装备失败诊断只保存首个低基数 category/detail_code 和安全关联，网络/超时/截断/超大响应
   只能标记 `body_unavailable`，不伪称完整响应。

@@ -33,6 +33,17 @@ SQLite `000001` 至
 任一后端。
 
 
+## 迁移执行边界
+
+- 分体部署由受保护的 `auctionctl migrate` 单独迁移，或由 `auctionctl deployment start/restart` 在严格停机检查后迁移再启动。
+- 合并部署升级先停止 `auction-server`，再以同一账号执行 `auctionctl migrate-managed --config-dir <绝对目录>`，
+  该命令复用既有 supervisor/子进程共享锁，不以分体 unit 状态代替合并进程停止证明。
+- 单角色和合并服务普通启动不迁移；首次网页明确确认是合并入口进入专用空库初始化的例外，不能用于旧库接管。
+  当前初始化未复用 `000005`/`000015` 历史兼容执行视图，详见[实现缺口](../docs/status.md#源码核对发现的实现缺口)。
+
+具体参数、权限和失败处理见[部署手册](../ops/deploy/README.md)及[CLI 手册](../apps/auctionctl/README.md)。
+迁移失败保留现场，不自动回滚，不修改已发布文件或 checksum。
+
 ## 验证边界
 
 除非用户明确要求，迁移目录不编写或运行功能测试用例；迁移结构变更仍需通过编译检查、

@@ -53,10 +53,12 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 邮件本地联调 `.keyenv` 路径不进入生成配置。普通 Admin 进程不开放初始化 API。
 
 保存后进程退出，运行目录、用户组、systemd 与 Caddy 仍按[部署手册](../deploy/README.md)准备，
-再执行严格部署预检和总控启动。真实敏感文件不得提交到仓库。
+再执行严格部署预检和分体总控的停机迁移/启动流程。真实敏感文件不得提交到仓库。
 可选 [auction-server](../../apps/server/README.md) 保留上述 TOML 格式，通过 `write_managed_to`
 将 Worker/Admin control socket 改为配置目录同级私有运行目录，并使用当前账号组和 UID。
-合并入口在网页明确确认后初始化专用空库并启动；默认分体设置仍保存后退出。
+合并入口使用 `--config-dir`，检测到 `AUCTION_CONFIG_FILE` 已设置会拒绝启动；网页明确确认后才进入
+专用空库初始化和启动路径，默认分体设置仍保存后退出。当前首次设置及迁移的实现缺口见
+[状态说明](../../docs/status.md#源码核对发现的实现缺口)。
 配置文件不会记录部署码、首次确认布尔值或临时 HTTPS 代理策略。
 
 ## 准备私有配置
@@ -157,7 +159,8 @@ Delivery 默认完整请求超时为 180 秒、sending 宽限为 300 秒；启�
 锁内约束计划时间之前的人工开放；计划时间已到的开放不受影响。人工提前结算开关默认关闭，并且只在
 PostgreSQL 完整档声明 capability；启用后要求操作理由，把 live lot 截止时间收紧到事务时间，再由
 既有 settlement Worker 写入结算与履约事实。`[equipment_source]` 配置 host/path allowlist、
-64 KiB 至 8 MiB 响应上限、1 至 60 秒共享请求间隔、1 至 30 秒总超时，以及仅用于 Admin 手工
+64 KiB 至 8 MiB 响应上限、1 至 60000 毫秒共享请求间隔（`minimum_request_interval_millis`）、
+1 至 30 秒总超时，以及仅用于 Admin 手工
 录入的 `require_tradeable` 开关。该开关默认关闭，关闭时允许 Soulbound 装备，开启时只接受可交易
 装备；MoogleMail 邮件装备过滤仍独立拒绝不可交易来源。适配器始终保留固定 HTTPS origin、无重定向、
 精确 world 路径和流式有界读取。示例默认 2 MiB、250 ms、10 秒和关闭可交易限制。

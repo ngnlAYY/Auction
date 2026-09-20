@@ -54,8 +54,11 @@ Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期�
 源码身份在构建前冻结并在阶段边界复核，正式 package 拒绝脏工作树。工具依赖和实际参数以脚本为准。
 
 默认发布包的可执行文件仅包含 `auction-public-api`、`auction-admin-api`、`auction-worker` 和
-`auctionctl`，并携带 PostgreSQL 五字段敏感模板。首次部署通过 Admin 自带的独立设置入口生成配置，再由 `auctionctl deployment`
-执行严格预检、forward-only migration 与 readiness；不在 CI 中启动设置页或连接真实数据库。
+`auctionctl`，并携带 PostgreSQL 五字段敏感模板。首次部署通过 Admin 自带的独立设置入口生成配置，
+再由 `auctionctl deployment-check --strict-permissions` 预检，通过 `auctionctl deployment start` 在
+三角色停机门禁通过后执行迁移、顺序启动并检查 readiness；也可先用受保护的 `auctionctl migrate` 单独迁移。
+完整参数见[部署手册](../ops/deploy/README.md#启动顺序)。这是分体总控的显式运维行为，不是角色普通启动或
+合并 `auction-server` 普通启动的隐式迁移；CI 不启动设置页或连接真实数据库。
 
 `--single-binary` 变体先通过原分体门禁，再验证 `auction-server` 同时包含两个 payload 标记、
 独立 `auctionctl` 不含 Web 且不进入 server 依赖图。合并归档只含这两个二进制及合并 unit，
