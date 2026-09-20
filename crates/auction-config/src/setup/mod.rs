@@ -6,10 +6,10 @@
 use std::{
     ffi::CString,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{ErrorKind, Write},
     os::unix::{
         ffi::OsStrExt,
-        fs::{OpenOptionsExt, PermissionsExt},
+        fs::{DirBuilderExt, OpenOptionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -97,37 +97,34 @@ impl FirstRunConfig {
     /// 原子发布完整配置目录；已存在目录或文件绝不被首次设置覆盖。
     pub fn write_to(&self, destination: &Path) -> Result<(), FirstRunError> {
         self.validate()?;
-        if destination.exists() || destination.is_symlink() {
-            return Err(FirstRunError::AlreadyExists);
-        }
+        ensure_destination_absent(destination)?;
         let parent = destination.parent().ok_or(FirstRunError::InvalidInput)?;
         if !parent.is_dir() || parent.is_symlink() {
             return Err(FirstRunError::InvalidInput);
         }
         let temporary = parent.join(format!(".auction-first-run-{}", Uuid::new_v4().simple()));
-        fs::create_dir(&temporary).map_err(|_| FirstRunError::Io)?;
-        if fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700)).is_err() {
-            let _ = fs::remove_dir(&temporary);
-            return Err(FirstRunError::Io);
-        }
+        // 创建瞬间就限制访问，不依赖后续 chmod 缩小目录权限。
+        fs::DirBuilder::new().mode(0o700).create(&temporary).map_err(|_| FirstRunError::Io)?;
         let result = (|| {
             self.write_files(&temporary)?;
             for role in [Role::Public, Role::Admin, Role::Worker] {
                 AppConfig::load_from_path(role, temporary.join(format!("{}.toml", role.name())))
                     .map_err(|_| FirstRunError::InvalidConfig)?;
             }
-            if destination.exists() || destination.is_symlink() {
-                return Err(FirstRunError::AlreadyExists);
+            ensure_destination_absent(destination)?;
+            // 文件 fsync 不持久化目录项；先同步 runtime 子目录，再同步其父目录。
+            for directory in [temporary.join("runtime"), temporary.clone()] {
+                fs::File::open(directory)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|_| FirstRunError::Io)?;
             }
-            fs::File::open(&temporary)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|_| FirstRunError::Io)?;
             publish_directory(&temporary, destination)?;
             fs::File::open(parent)
                 .and_then(|directory| directory.sync_all())
                 .map_err(|_| FirstRunError::OutcomeUnknown)
         })();
-        if result.is_err() && temporary.exists() {
+        if result.is_err() {
+            // 仅清理本次临时名称；发布后父目录同步失败也不能删除已出现的目标目录。
             let _ = fs::remove_dir_all(&temporary);
         }
         result
@@ -178,8 +175,9 @@ impl FirstRunConfig {
         worker["runtime_config_file"] = Value::String("runtime/admin.toml".to_owned());
         write_toml(directory.join("worker.toml"), &worker, 0o640)?;
 
-        fs::create_dir(directory.join("runtime")).map_err(|_| FirstRunError::Io)?;
-        fs::set_permissions(directory.join("runtime"), fs::Permissions::from_mode(0o750))
+        fs::DirBuilder::new()
+            .mode(0o750)
+            .create(directory.join("runtime"))
             .map_err(|_| FirstRunError::Io)?;
         let mut runtime =
             template(include_str!("../../../../ops/config/examples/runtime/admin.toml"))?;
@@ -200,6 +198,15 @@ impl FirstRunConfig {
         secrets.insert("admin_actor".to_owned(), Value::String(self.admin_actor.clone()));
         secrets.insert("admin_secret".to_owned(), Value::String(self.admin_secret.clone()));
         write_toml(directory.join("secrets.toml"), &Value::Table(secrets), 0o600)
+    }
+}
+
+/// 权限错误等无法证明目标不存在的情况失败关闭，不用布尔 exists 吞掉 I/O 错误。
+fn ensure_destination_absent(destination: &Path) -> Result<(), FirstRunError> {
+    match fs::symlink_metadata(destination) {
+        Ok(_) => Err(FirstRunError::AlreadyExists),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(FirstRunError::Io),
     }
 }
 

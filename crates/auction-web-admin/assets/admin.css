@@ -4122,8 +4122,7 @@
   border-color: var(--color-status-error);
 }
 
-/* ===== 打印样式（@media print） ===== */
-/* 首次部署页独立于认证外壳，表单在窄屏保持单列且不展示任何密钥摘要。 */
+/* 首次部署页独立于认证外壳，配置在宽屏双列、窄屏单列，不展示任何密钥摘要。 */
 .admin-setup {
   min-block-size: 100vh;
   padding: var(--space-5);
@@ -4132,23 +4131,88 @@
 }
 
 .admin-setup__card {
-  inline-size: min(100%, 44rem);
+  inline-size: min(100%, 56rem);
   padding: var(--space-5);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
 }
 
+.admin-setup__card--access {
+  inline-size: min(100%, 36rem);
+}
+
 .admin-setup__form,
 .admin-setup__form fieldset {
+  display: grid;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.admin-setup__form fieldset {
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.admin-setup__form legend {
+  padding-inline: var(--space-2);
+  font-weight: 600;
+}
+
+.admin-setup__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.admin-setup__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.admin-setup__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.admin-setup__options,
+.admin-setup__advanced {
   display: grid;
   gap: var(--space-2);
 }
 
-.admin-setup__form fieldset {
-  margin-block: var(--space-3);
+.admin-setup__toggle {
+  justify-self: start;
+}
+
+.admin-setup__errors {
   padding: var(--space-3);
-  border: var(--border-width) solid var(--color-border);
+  border: var(--border-width) solid var(--color-status-error);
+  border-radius: var(--radius-md);
+}
+
+.admin-setup__errors h2 {
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.admin-setup__errors ul {
+  margin-block: var(--space-2) 0;
+  padding-inline-start: var(--space-5);
+}
+
+.admin-setup__errors a {
+  overflow-wrap: anywhere;
+}
+
+.admin-setup__field input {
+  scroll-margin-block: var(--space-5);
 }
 
 .admin-setup__form input:not([type="checkbox"]) {
@@ -4167,6 +4231,22 @@
 .admin-setup__actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .admin-setup,
+  .admin-setup__card,
+  .admin-setup__form fieldset {
+    padding: var(--space-3);
+  }
+
+  .admin-setup__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-setup__actions button {
+    inline-size: 100%;
+  }
 }
 
 /* ===== 打印样式（@media print） ===== */

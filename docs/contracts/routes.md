@@ -29,7 +29,7 @@
 A38-A43 是独立登记的 Admin 产品能力，已经包含在 43 条统计中。路径数量只证明路由注册闭集，不
 代表对应应用端口、存储能力或运行证据已经完成。
 
-首次部署另有独立进程的 `/setup` 和两个写接口，不属于 Public/Admin feature API 计数；
+首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不属于 Public/Admin feature API 计数；
 正式 Admin 进程不注册它们，`/setup` 在正式静态入口中返回 404。
 
 进程级可观测性路径不计入上述 feature API 统计：Public 与 Admin 在主配置
@@ -283,12 +283,34 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 ## 首次部署初始化
 
 仅 `auction-admin-api` 的 PostgreSQL + `web-embed` 初始化模式在 `127.0.0.1:8091` 挂载以下入口；
-正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，写接口
-必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`。请求体最多 8 KiB，DTO 拒绝未知字段。
-配置文件尚未存在时无参数启动会自动进入该模式；显式 `AUCTION_CONFIG_FILE` 缺失或配置解析失败
+正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，三个 API
+均必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`（页面称为一次性部署码）。
+请求体最多 8 KiB，配置 DTO 拒绝未知字段。
+配置文件尚未存在时无参数启动会自动进入该模式；默认路径的现有目录、悬空符号链接等条目仍按
+已有配置处理，权限等元数据读取错误直接阻止启动。显式 `AUCTION_CONFIG_FILE` 缺失或配置解析失败
 仍按正常启动失败关闭，不触发初始化。完成后进程退出，正式服务由部署控制器启动。
 
-请求使用 `database` 对象，包含五个必填字段：`host`（主机名/IP）、`port`（1-65535 的整数）、
+页面初始只展示部署码输入和验证按钮；`POST /api/v1/setup/verify` 无请求体，仅校验令牌与完成状态，
+不连接数据库、不生成文件、不消费令牌，也不建立免鉴权会话或全局解锁状态。三个 API 在鉴权后
+获取同一非阻塞操作锁，竞争返回 409 `setup_busy`；检查与保存的锁覆盖输入校验、数据库等待及
+目录发布。保存成功后到退出前返回 409 `setup_completed`；服务端目录已发布但持久化结果无法
+确认时保持结果不确定终态，后续已鉴权请求均返回 500 `setup_outcome_unknown`，不再连接数据库或
+写入配置，需人工停止进程并核对目录。输入错误、连接失败和发布前明确失败仍可重试。
+成功返回 `verified`
+后才渲染配置字段及校验/保存按钮；可重试的验证失败或网络异常停留在第一步。部署码与验证
+状态仅保存在当前页面内存，刷新后重新验证；后续 `setup_auth` 清空部署码和所有密码后退回第一步，
+完成后也清空这些值并隐藏配置表单。`validate`、`complete` 每次仍独立鉴权，不依赖浏览器验证标志。
+配置步骤的管理员密码确认仅在浏览器比较，不加入请求 DTO；所有数字按原始输入校验，空值或解析
+失败不得沿用旧值。字段错误以五语言说明和可定位摘要展示，进阶字段有错时自动展开；浏览器校验
+不替代 `auction-config` 的权威校验。输入改变后清除旧检查成功提示，检查通过不表示配置已写入。
+浏览器对三个接口的每次请求分别设置 10 秒传输总预算，不合并计算三个步骤，也不自动重试；
+保存发生超时、断连或无法识别响应时按 `setup_outcome_unknown` 保守分类。任一接口返回该码后，
+当前页面清空部署码与全部密码并锁定输入、部署码验证、检查和保存；提交回调也检查此页面状态，
+不能仅靠按钮 disabled 阻止重试。提示保持可见且随语言切换翻译，页面不提供解除锁定或重试入口；
+操作者须先停止初始化进程并核对目标目录，不能刷新后直接重试。客户端保守分类不新增服务端状态码，
+也不能用中止浏览器请求证明服务端未完成写入。
+
+配置校验和保存请求使用 `database` 对象，包含五个必填字段：`host`（主机名/IP）、`port`（1-65535 的整数）、
 `username`、`password`、`name`。账号、密码和库名按原文提交，不做 URL 编码；不接受旧的
 `database_url` 表单字段。接口映射到配置层的独立模型，连接检查和落盘均使用同一校验与转换；
 保存结果为敏感 TOML 的 `[database]` 区块。其他管理员、origin 与基础/进阶字段保持既有语义。
@@ -296,8 +318,9 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | 方法 | 路径 | 成功 | 明确失败 |
 | --- | --- | --- | --- |
 | GET/HEAD | `/setup` | 200，Admin WASM 初始化页 | 404/503（无资源） |
-| POST | `/api/v1/setup/validate` | 200 `{"status":"validated"}` | 400 `invalid_input`/`configuration_invalid`，403 `setup_auth`，503 `database_unavailable` |
-| POST | `/api/v1/setup/complete` | 200 `{"status":"completed"}`；写出完整配置并退出 | 同上，另有 409 `setup_busy`/`setup_locked`/`setup_completed`，500 `setup_io`/`setup_outcome_unknown` |
+| POST | `/api/v1/setup/verify` | 200 `{"status":"verified"}` | 403 `setup_auth`，409 `setup_busy`/`setup_completed`，500 `setup_outcome_unknown` |
+| POST | `/api/v1/setup/validate` | 200 `{"status":"validated"}` | 同 verify，另有 400 `invalid_input`/`configuration_invalid`，503 `database_unavailable` |
+| POST | `/api/v1/setup/complete` | 200 `{"status":"completed"}`；写出完整配置并退出 | 同 validate，另有 409 `setup_locked`，500 `setup_io` |
 
 数据库凭据、管理员密码只在请求与目标敏感 TOML 中存在；响应只返回稳定错误码，不返回输入、
 SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁移；保存后目标配置目录存在即禁止

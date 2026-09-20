@@ -33,7 +33,8 @@ pub struct SetupRequest {
     pub realtime_poll_interval_millis: u64,
 }
 
-/// 初始化接口的成功阶段；完成后初始化进程退出。
+/// 初始化接口的成功阶段：`verified` 仅验证部署码，`validated` 检查配置输入和数据库连接，
+/// `completed` 表示写入完成且初始化进程退出；验证响应不授予后续请求的免鉴权资格。
 #[derive(Deserialize, Serialize)]
 pub struct SetupResponse {
     pub status: String,
