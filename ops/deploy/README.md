@@ -10,12 +10,26 @@ PostgreSQL 单机首次部署可通过独立设置页生成配置，但仍需先
 
 ## 本页导航
 
+- [可选单文件部署](#可选单文件部署)
 - [推荐目录](#推荐目录)
 - [发布制品](#发布制品)
 - [首次部署配置](#首次部署配置)
 - [启动顺序](#启动顺序)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
+
+## 可选单文件部署
+
+`just release-check --single-binary` 生成 `target/release-package-single/` 下的归档，仅含
+`auction-server` 与独立 `auctionctl` 两个可执行文件。默认分体发布及下文原有四程序流程不变。
+单文件服务仍派生三个独立角色进程，不合并 Public/Admin 的端口、权限或路由。
+
+首次以实际服务账号运行 `auction-server --config-dir /var/lib/auction/config`，父目录须受信且
+归该账号所有，配置目录必须不存在。网页验证部署码并明确确认后，保存配置、初始化预先准备的
+专用空 PostgreSQL 库、顺序启动 Worker → Admin → Public。已有配置启动只校验 schema，不隐式迁移。
+合并部署的路径、显式 HTTPS 远程设置、失败处理与升级命令详见 [server 手册](../../apps/server/README.md)。
+使用 [单 unit 模板](systemd/auction-server.service.example)，不要同时启用分体 unit 或总控；
+配置保存不代表所有角色就绪，本次构建不替代目标主机运行验收。
 
 ## 推荐目录
 

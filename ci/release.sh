@@ -10,6 +10,10 @@ api_artifact_root="$artifact_root/api"
 embedded_artifact_root="$artifact_root/embedded"
 api_build_root="$repository_root/target/release-build/api"
 embedded_build_root="$repository_root/target/release-build/embedded"
+single_artifact_root="$artifact_root/single"
+single_build_root="$repository_root/target/release-build/single"
+# 合并变体只声明函数，底层构建及归档门禁仍由本脚本拥有。
+source "$repository_root/ci/release-single.sh"
 package_output_root="$repository_root/target/release-package"
 api_only_public_root="$repository_root/target/auction-api-only-assets/public"
 api_only_admin_root="$repository_root/target/auction-api-only-assets/admin"
@@ -109,6 +113,8 @@ replace_generated_directory() {
 
 build_variant() {
   local variant=$1 build_root=$2 artifact_directory=$3 features=$4
+  local selected_binaries=("${@:5}")
+  if [[ ${#selected_binaries[@]} -eq 0 ]]; then selected_binaries=("${binaries[@]}"); fi
   local next="$artifact_root/.${variant}.next.$$"
 
   if [[ "$variant" == api-only ]] && { [[ -e "$api_only_public_root" ]] || [[ -e "$api_only_admin_root" ]]; }; then
@@ -138,23 +144,22 @@ build_variant() {
     # 该路径由本脚本独占；没有 Cargo 标记时只可能是中断后留下的未初始化生成目录。
     rm -rf "$build_root"
   fi
+  local packages=() package
+  for package in "${selected_binaries[@]}"; do packages+=(-p "$package"); done
   cargo build \
     --locked \
     --release \
     --target-dir "$build_root" \
     --no-default-features \
-    -p auction-public-api \
-    -p auction-admin-api \
-    -p auction-worker \
-    -p auctionctl \
+    "${packages[@]}" \
     --features "$features"
   verify_build_info "$next" "$variant"
 
   local binary
-  for binary in "${binaries[@]}"; do
+  for binary in "${selected_binaries[@]}"; do
     install -m 0755 "$build_root/release/$binary" "$next/bin/$binary"
   done
-  if [[ "$variant" == embedded ]]; then
+  if [[ "$variant" == embedded || "$variant" == single ]]; then
     install -m 0644 \
       target/dx/build/auction-web-public/web/PAYLOAD-SHA256 \
       "$next/WEB-PUBLIC-SHA256"
@@ -426,6 +431,7 @@ write_dependencies() {
     printf -- "- Schema：\`auction-release/1\`\n"
     printf -- "- Source commit：\`%s\`\n" "$commit"
     printf -- "- Application version：\`%s\`\n" "$version"
+    printf -- "- Single binary：\`%s\`\n" "${single_binary:-false}"
     printf -- "- Source worktree：\`%s\`\n" "$state"
     printf -- "- Source fingerprint：\`%s\`\n" "$fingerprint"
     printf -- "- SOURCE_DATE_EPOCH：\`%s\`\n" "$epoch"
@@ -571,15 +577,28 @@ verify_archive() {
 }
 
 package_release() {
-  local allow_dirty=false
-  if [[ ${1:-} == --allow-dirty && $# -eq 1 ]]; then
-    allow_dirty=true
-  elif [[ $# -ne 0 ]]; then
-    printf '用法：ci/release.sh package [--allow-dirty]\n' >&2
-    return 2
+  local allow_dirty=false single_binary=false argument
+  for argument in "$@"; do
+    case "$argument" in
+    --allow-dirty) allow_dirty=true ;;
+    --single-binary) single_binary=true ;;
+    *)
+      printf '用法：ci/release.sh package [--single-binary] [--allow-dirty]\n' >&2
+      return 2
+      ;;
+    esac
+  done
+  local selected_root="$embedded_artifact_root" selected_binaries=("${binaries[@]}")
+  local package_output_root="$package_output_root" variant_suffix=
+  if [[ "$single_binary" == true ]]; then
+    verify_single_artifacts
+    selected_root="$single_artifact_root"
+    selected_binaries=(auction-server auctionctl)
+    package_output_root="$repository_root/target/release-package-single"
+    variant_suffix=-single
+  else
+    verify_artifacts
   fi
-
-  verify_artifacts
   local commit state fingerprint epoch version suffix package_name temporary_root package_root
   commit=$(git rev-parse --verify 'HEAD^{commit}')
   state=$(worktree_state)
@@ -598,7 +617,7 @@ package_release() {
   if [[ "$state" == dirty ]]; then
     suffix=-dirty
   fi
-  package_name="auction-rust-${version}-${commit:0:12}${suffix}"
+  package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}"
   mkdir -p "$repository_root/target"
   temporary_root=$(mktemp -d "$repository_root/target/auction-release.XXXXXX")
   package_root="$temporary_root/$package_name"
@@ -607,9 +626,9 @@ package_release() {
   release_targets=()
   release_modes=()
   local binary
-  for binary in "${binaries[@]}"; do
+  for binary in "${selected_binaries[@]}"; do
     install_release_file \
-      "$embedded_artifact_root/bin/$binary" \
+      "$selected_root/bin/$binary" \
       "bin/$binary" \
       755 \
       "$package_root"
@@ -621,10 +640,16 @@ package_release() {
   install_release_file ops/deploy/retention-policy.v1.json retention-policy.v1.json 644 "$package_root"
   install_release_file ops/deploy/caddy/Caddyfile caddy/Caddyfile 644 "$package_root"
   install_release_file ops/deploy/systemd/README.md systemd/README.md 644 "$package_root"
-  install_release_file ops/deploy/systemd/auction-public-api.service.example systemd/auction-public-api.service.example 644 "$package_root"
-  install_release_file ops/deploy/systemd/auction-admin-api.service.example systemd/auction-admin-api.service.example 644 "$package_root"
-  install_release_file ops/deploy/systemd/auction-worker.service.example systemd/auction-worker.service.example 644 "$package_root"
-  install_release_file ops/deploy/systemd/auction-stack.service.example systemd/auction-stack.service.example 644 "$package_root"
+  if [[ "$single_binary" == true ]]; then
+    install_release_file ops/deploy/systemd/auction-server.service.example systemd/auction-server.service.example 644 "$package_root"
+    install_release_file apps/server/README.md docs/SINGLE-SERVER.md 644 "$package_root"
+    install_release_file ops/deploy/caddy/setup.Caddyfile.example caddy/setup.Caddyfile.example 644 "$package_root"
+  else
+    install_release_file ops/deploy/systemd/auction-public-api.service.example systemd/auction-public-api.service.example 644 "$package_root"
+    install_release_file ops/deploy/systemd/auction-admin-api.service.example systemd/auction-admin-api.service.example 644 "$package_root"
+    install_release_file ops/deploy/systemd/auction-worker.service.example systemd/auction-worker.service.example 644 "$package_root"
+    install_release_file ops/deploy/systemd/auction-stack.service.example systemd/auction-stack.service.example 644 "$package_root"
+  fi
   install_release_file ops/config/README.md config/README.md 644 "$package_root"
   install_release_file ops/config/examples/common.toml config/examples/common.toml 640 "$package_root"
   install_release_file ops/config/examples/public.toml config/examples/public.toml 640 "$package_root"
@@ -716,6 +741,18 @@ package_release() {
 }
 
 case "${1:-}" in
+release-check)
+  shift
+  release_check "$@"
+  ;;
+build-single)
+  [[ $# -eq 1 ]] || exit 2
+  build_single
+  ;;
+verify-single)
+  [[ $# -eq 1 ]] || exit 2
+  verify_single_artifacts
+  ;;
 build-api)
   if [[ $# -ne 1 ]]; then
     printf 'build-api 不接受额外参数\n' >&2
@@ -748,7 +785,9 @@ package)
   ;;
 *)
   printf '%s\n' \
-    '用法：ci/release.sh build-api' \
+    '用法：ci/release.sh release-check [--single-binary] [--allow-dirty]' \
+    '      ci/release.sh build-single | verify-single' \
+    '      ci/release.sh build-api' \
     '      ci/release.sh build-embedded' \
     '      ci/release.sh verify-artifacts' \
     '      ci/release.sh package [--allow-dirty]' >&2

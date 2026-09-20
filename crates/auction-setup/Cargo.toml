@@ -9,6 +9,8 @@ publish.workspace = true
 auction-config.workspace = true
 auction-contracts.workspace = true
 auction-http.workspace = true
+auction-process.workspace = true
+url.workspace = true
 auction-storage = { workspace = true, optional = true }
 axum.workspace = true
 rust-embed.workspace = true

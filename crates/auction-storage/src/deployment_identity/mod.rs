@@ -4,6 +4,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+mod strict;
+pub use strict::strict_deployment_database_identity;
+
 /// 可比较但不输出内部字段的部署目标身份；用户名、密码不参与数据库身份。
 #[derive(PartialEq, Eq)]
 pub struct DeploymentDatabaseIdentity {

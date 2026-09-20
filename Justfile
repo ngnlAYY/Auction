@@ -53,6 +53,11 @@ build-api:
 build-release:
     @bash ci/release.sh build-embedded
 
+# 构建可选合并服务，先保留分体制品与资源隔离证明。
+build-single: build-api build-release
+    @bash ci/release.sh build-single
+    @bash ci/release.sh verify-single
+
 # 核对 API-only、嵌入资源、依赖图和 Public/Admin 制品隔离。
 verify-artifacts:
     @bash ci/release.sh verify-artifacts
@@ -62,8 +67,8 @@ package *args: verify-artifacts
     @bash ci/release.sh package {{args}}
 
 # 完整执行两类构建、制品门禁和发布装配；不会运行测试。
-release-check *args: build-api build-release verify-artifacts
-    @bash ci/release.sh package {{args}}
+release-check *args:
+    @bash ci/release.sh release-check {{args}}
 
 run-public:
     cargo run -p auction-public-api --features web-embed

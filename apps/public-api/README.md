@@ -3,6 +3,8 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配。
+`src/lib.rs` 导出独立 `run` 和显式配置路径 `run_from_path`，`main.rs` 调用同一库入口；
+[可选 supervisor](../server/README.md) 只在独立 Public 子进程内复用该装配，不合并路由。
 
 ## 本页导航
 

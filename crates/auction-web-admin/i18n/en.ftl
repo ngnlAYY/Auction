@@ -1,7 +1,13 @@
 # Admin English copy.
 
 setup-title = First-run setup
-setup-intro = Enter the one-time deployment code from the terminal. Verify it before continuing to configuration. The setup server listens only on loopback; use an SSH tunnel for remote access.
+setup-intro = Enter the one-time deployment code from the terminal. Use a local connection, SSH tunnel, or an explicitly authorized HTTPS proxy.
+setup-confirm-initialize = I confirm this is a dedicated empty PostgreSQL database and authorize initialization and service startup after saving.
+setup-initialize-help = Checking writes nothing. Confirming saves configuration, initializes the existing empty database, then starts Worker, Admin, and Public. Existing configuration is never overwritten.
+setup-save-start = Confirm, save and start
+setup-starting = Configuration saved. The server will initialize the database and start services. Check terminal readiness before opening Admin; on failure, inspect the saved configuration and database. Do not repeat setup.
+setup-open-admin = Open Admin after the services are ready
+setup-error-origin = Setup access was denied. Check the HTTPS origin, trusted proxy, or local tunnel.
 setup-access = Step 1: Verify deployment code
 setup-token = One-time deployment code (setup token from the terminal)
 setup-verify = Verify and continue

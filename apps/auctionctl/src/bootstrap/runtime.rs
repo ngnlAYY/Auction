@@ -62,6 +62,9 @@ mod deployment_identity;
 mod dispatch;
 #[path = "runtime/mail_diagnostics/mod.rs"]
 mod mail_diagnostics;
+#[cfg(unix)]
+#[path = "runtime/managed.rs"]
+mod managed;
 #[path = "runtime/postgres/mod.rs"]
 mod postgres;
 

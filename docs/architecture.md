@@ -16,7 +16,10 @@
 ## 系统边界
 
 Auction Rust 在一个 Cargo workspace 内实现领域、用例、数据库适配、HTTP、浏览器及后台任务。
-Public、Admin、Worker 独立部署；`auctionctl` 承担配置、迁移和运维。实现与验收不依赖外部源码仓库。
+Public、Admin、Worker 保留独立进程；`auctionctl` 承担配置、迁移和运维。可选
+[auction-server](../apps/server/README.md) 复用三个 app 的 lib 入口，以同一个二进制自管三个子进程；
+仅该合并制品允许同时包含两端资源，Public/Admin HTTP router 仍按类型隔离资源。默认分体发布不变。
+实现与验收不依赖外部源码仓库。
 PostgreSQL、SQLite、Redis、反向代理和系统服务作为外部组件，不受仓库全 Rust 语言约束。
 
 ```mermaid
@@ -55,7 +58,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](../crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](../crates/auction-observability/README.md) |
 | auction-process | 终止信号、有界 drain 与任务守卫 | [README](../crates/auction-process/README.md) |
-| auction-setup | PostgreSQL 单机档的一次性 loopback 初始化 API 与令牌门禁；不参与正式 Admin 路由 | [README](../crates/auction-setup/README.md) |
+| auction-setup | PostgreSQL 单机档的一次性初始化 API、令牌与显式 HTTPS 代理门禁；默认 loopback，不参与正式 Admin 路由 | [README](../crates/auction-setup/README.md) |
 
 `apps/*` 只负责配置、依赖注入、资源绑定、关闭顺序和退出码。每个 `src` 根只保留必要 `main.rs`/`lib.rs`，
 实现放入具名职责目录。不得用共享大结构体、私有持久化访问或 `common`/`misc` 绕过 owner。
@@ -82,6 +85,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | 外部凭据、论坛、邮件和告警 | 完整档 owner | 不提供对应外部业务链 |
 | 持久化生命周期与慢速代理 | 支持；另有结算 workflow | 支持 Lite 阶段，不启用结算 workflow |
 | 灾备与 canonical v28 接管 CLI | 显式完整档流程 | 不使用 PostgreSQL 维护流程 |
+| 单文件 supervisor / 首次确认后初始化 | Linux 单主机；专用空库迁移与三角色进程编排，无新增业务表 | 不支持该变体 |
 
 各路由的具体成功和缺失状态以[HTTP 契约](contracts/routes.md)为准。表中“支持”描述代码能力，不代表运行验收。
 新增持久化能力必须先在本表登记完整档、Lite 或两者，再决定迁移与端口范围。
@@ -153,5 +157,11 @@ systemd 拥有单进程 PID、信号和重启；`auctionctl deployment` 拥有�
 Worker → Admin → Public 启动及反向停止。只读盘点、备份、重建、恢复和 v28 接管是独立命令，
 不得进入自动启动路径。具体前提、确认、回执和失败处理见[部署](../ops/deploy/README.md)、
 [灾备](../ops/deploy/RECOVERY.md)及[v28 接管](../ops/deploy/LEGACY_V28_ADOPTION.md)。
+
+合并入口由 `apps/server/src/bootstrap` 拥有进程树、角色预检和启动次序，`auction-config::managed_runtime_directory`
+拥有确定性运行目录布局，`auction-storage::initialize_empty_postgres` 在迁移锁下检查空库与零其他客户端。
+初始化完成后的普通启动只验证 schema readiness；显式升级使用 `auctionctl migrate-managed`，复用
+supervisor 及继承锁的子进程所有权门禁。合并 unit 使用 155 秒停止预算，不复用分体 systemd 总控。
+这些文件锁仅保护同机支持的部署流程，不能作为跨主机隔离证明；合并和分体不得混合运行同一数据库。
 
 workspace、`crates/*` 和工程目录组织借鉴 Honk；拍卖行为与验收由本仓库独立拥有。

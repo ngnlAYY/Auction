@@ -19,6 +19,17 @@ use tokio::{
 };
 use uuid::Uuid;
 
+mod access;
+pub use access::{FirstRunPolicy, RemoteSetupAccess};
+
+/// 设置服务退出的确定结果；只有 Completed 允许后续首次初始化。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstRunOutcome {
+    Completed,
+    Interrupted,
+    OutcomeUnknown,
+}
+
 /// 只由装配根提供的本地初始化边界；不读取任何角色配置。
 pub struct FirstRunServerOptions {
     pub output_dir: PathBuf,
@@ -29,6 +40,7 @@ pub struct FirstRunServerOptions {
 struct FirstRunState {
     options: FirstRunServerOptions,
     token: String,
+    policy: FirstRunPolicy,
     operation: Mutex<SetupStatus>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -47,18 +59,34 @@ type SetupResult = Result<Json<SetupResponse>, SetupFailure>;
 pub async fn run_first_run<A: RustEmbed + 'static>(
     options: FirstRunServerOptions,
 ) -> Result<(), &'static str> {
+    match run_first_run_with_policy::<A>(options, FirstRunPolicy::default()).await? {
+        FirstRunOutcome::Completed => Ok(()),
+        FirstRunOutcome::Interrupted => Err("setup was interrupted"),
+        FirstRunOutcome::OutcomeUnknown => Err("setup output requires manual verification"),
+    }
+}
+
+/// 通过独立策略启用受信 HTTPS 代理或合并入口的初始化确认，不挂载普通 Admin 写接口。
+pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
+    options: FirstRunServerOptions,
+    policy: FirstRunPolicy,
+) -> Result<FirstRunOutcome, &'static str> {
+    policy.validate()?;
+    let mut signals = auction_process::TerminationSignals::subscribe()
+        .map_err(|_| "cannot subscribe setup termination signals")?;
     match fs::symlink_metadata(&options.output_dir) {
         Ok(_) => return Err("setup output directory already exists"),
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(_) => return Err("cannot inspect setup output directory"),
     }
     let listener =
-        TcpListener::bind("127.0.0.1:8091").await.map_err(|_| "cannot bind setup listener")?;
+        TcpListener::bind(policy.listen).await.map_err(|_| "cannot bind setup listener")?;
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
     let state = Arc::new(FirstRunState {
         options,
         token,
+        policy: policy.clone(),
         operation: Mutex::new(SetupStatus::Pending),
         shutdown: Mutex::new(Some(shutdown_sender)),
     });
@@ -68,25 +96,31 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
         .route("/api/v1/setup/complete", post(complete))
         .fallback(auction_http::serve_admin_setup_asset::<A>)
         .layer(DefaultBodyLimit::max(8 * 1024))
+        .layer(axum::middleware::from_fn_with_state(policy.clone(), access::enforce))
         .with_state(Arc::clone(&state));
 
-    eprintln!("首次部署页面：http://127.0.0.1:8091/setup");
+    let origin = policy
+        .remote
+        .as_ref()
+        .map(|remote| remote.origin.clone())
+        .unwrap_or_else(|| format!("http://{}", policy.listen));
+    eprintln!("首次部署页面：{origin}/setup");
     eprintln!("一次性设置令牌：{}", state.token);
-    eprintln!("远程主机请先建立 SSH 本地端口转发；不要公开转发 8091。");
+    eprintln!("仅使用 SSH 隧道或已显式授权的 HTTPS 代理；不要公开明文初始化监听器。");
 
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async move {
             tokio::select! {
                 _ = shutdown_receiver => {},
-                _ = tokio::signal::ctrl_c() => {},
+                _ = signals.recv() => {},
             }
         })
         .await
         .map_err(|_| "setup HTTP server failed")?;
     match *state.operation.lock().await {
-        SetupStatus::Completed => Ok(()),
-        SetupStatus::Pending => Err("setup was interrupted"),
-        SetupStatus::OutcomeUnknown => Err("setup output requires manual verification"),
+        SetupStatus::Completed => Ok(FirstRunOutcome::Completed),
+        SetupStatus::Pending => Ok(FirstRunOutcome::Interrupted),
+        SetupStatus::OutcomeUnknown => Ok(FirstRunOutcome::OutcomeUnknown),
     }
 }
 
@@ -94,7 +128,10 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
 async fn verify(State(state): State<Arc<FirstRunState>>, headers: HeaderMap) -> SetupResult {
     authorize(&state, &headers)?;
     let _operation = begin_operation(&state)?;
-    Ok(Json(SetupResponse { status: "verified".to_owned() }))
+    Ok(Json(SetupResponse {
+        status: "verified".to_owned(),
+        initialize_and_start: state.policy.initialize_and_start,
+    }))
 }
 
 async fn validate(
@@ -108,7 +145,10 @@ async fn validate(
     let options = config(&state, request);
     options.validate().map_err(config_error)?;
     check_database(&options.database).await?;
-    Ok(Json(SetupResponse { status: "validated".to_owned() }))
+    Ok(Json(SetupResponse {
+        status: "validated".to_owned(),
+        initialize_and_start: state.policy.initialize_and_start,
+    }))
 }
 
 async fn complete(
@@ -119,10 +159,18 @@ async fn complete(
     authorize(&state, &headers)?;
     let mut operation = begin_operation(&state)?;
     let Json(request) = request.map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
+    if state.policy.initialize_and_start && !request.confirm_initialize {
+        return Err(error(StatusCode::BAD_REQUEST, "setup_confirmation_required"));
+    }
     let options = config(&state, request);
     options.validate().map_err(config_error)?;
     check_database(&options.database).await?;
-    match options.write_to(&state.options.output_dir) {
+    let written = if state.policy.initialize_and_start {
+        options.write_managed_to(&state.options.output_dir)
+    } else {
+        options.write_to(&state.options.output_dir)
+    };
+    match written {
         Ok(()) => *operation = SetupStatus::Completed,
         Err(FirstRunError::OutcomeUnknown) => {
             // 目录可能已经发布，保留终态直到人工检查并停止此进程，不能恢复为可重试状态。
@@ -134,7 +182,10 @@ async fn complete(
     if let Some(sender) = state.shutdown.lock().await.take() {
         let _ = sender.send(());
     }
-    Ok(Json(SetupResponse { status: "completed".to_owned() }))
+    Ok(Json(SetupResponse {
+        status: "completed".to_owned(),
+        initialize_and_start: state.policy.initialize_and_start,
+    }))
 }
 
 /// 三个接口先独立鉴权再获取同一非阻塞门禁；锁覆盖数据库等待、目录发布和终态写入。
@@ -195,7 +246,13 @@ async fn check_database(
         database.connection_url().map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
     match tokio::time::timeout(Duration::from_secs(8), DatabaseStore::connect(&database_url)).await
     {
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(store)) => {
+            // 首次空库迁移要求无其他客户端；主动关闭连通性检查池，不遗留后台关闭窗口。
+            if let Some(pool) = store.postgres_pool() {
+                pool.close().await;
+            }
+            Ok(())
+        }
         _ => Err(error(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable")),
     }
 }

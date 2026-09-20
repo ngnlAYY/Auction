@@ -8,6 +8,9 @@ Status: implemented
 制品边界。用户明确要求移除整套附加内容；只删归档中的控制脚本会留下无用的安装入口，
 直接删模板又会破坏首次部署配置生成时的 `include_str!` 依赖。
 
+可选两二进制归档由 [单文件 supervisor 决定](../architecture/2026-09-20-unified-server-supervisor.md)
+扩展，以下默认分体白名单、通用模板和不恢复测试安装器的理由不变。
+
 ## Decision
 
 发布包的可执行文件仅包含 `auction-public-api`、`auction-admin-api`、`auction-worker` 和

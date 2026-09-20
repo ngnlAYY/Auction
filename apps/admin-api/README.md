@@ -3,6 +3,9 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 管理 HTTP、管理会话与 Admin runtime 服务的进程装配。
+`src/lib.rs` 导出 `run`、显式配置路径 `run_from_path` 与 Admin 资源类型；`main.rs` 保留独立启动。
+[可选 supervisor](../server/README.md) 在独立子进程内调用 `run_from_path`，不重新解析父进程 CLI，
+也不对损坏配置开放首次设置。分体 Admin 原有保存后退出行为不变。
 
 ## 本页导航
 

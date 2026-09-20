@@ -13,6 +13,7 @@
 | MSRV | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` | Rust 工作流独立 job |
 | Web payload | `just web-build` | [web-bundle.sh](web-bundle.sh) |
 | API-only/embedded 与 archive | `just build-api/build-release/verify-artifacts/release-check` 分别调用 | [release.sh](release.sh) |
+| 可选单文件服务 | `just build-single`、`just release-check --single-binary` | [release-single.sh](release-single.sh) |
 
 带斜杠的配方说明表示多个独立命令，不是一个可执行命令名。Cargo 检查使用 `--locked`。
 默认图检查、独立 PostgreSQL/SQLite/Redis feature 检查及 all-features Clippy 分别覆盖不同依赖图。
@@ -52,9 +53,14 @@ Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期�
 随后按白名单、权限、统一时间与两次相同 archive 装包，保存内外 SHA-256 和依赖摘要。
 源码身份在构建前冻结并在阶段边界复核，正式 package 拒绝脏工作树。工具依赖和实际参数以脚本为准。
 
-发布包的可执行文件仅包含 `auction-public-api`、`auction-admin-api`、`auction-worker` 和
+默认发布包的可执行文件仅包含 `auction-public-api`、`auction-admin-api`、`auction-worker` 和
 `auctionctl`，并携带 PostgreSQL 五字段敏感模板。首次部署通过 Admin 自带的独立设置入口生成配置，再由 `auctionctl deployment`
 执行严格预检、forward-only migration 与 readiness；不在 CI 中启动设置页或连接真实数据库。
+
+`--single-binary` 变体先通过原分体门禁，再验证 `auction-server` 同时包含两个 payload 标记、
+独立 `auctionctl` 不含 Web 且不进入 server 依赖图。合并归档只含这两个二进制及合并 unit，
+输出 `target/release-package-single/`，仍受源码指纹、权限、白名单与干净工作树限制。
+`just build-single` 仅构建及核验，可在开发工作树执行，不将其当作正式归档。
 
 ## 验证限制
 

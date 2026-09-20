@@ -1,0 +1,9 @@
+# 首次配置期间单独启用；替换域名并确认 DNS/TLS 后使用。
+# 服务参数：--allow-remote-setup --setup-origin https://setup.example.com --setup-proxy-ip 127.0.0.1
+# 不开放后端 8091 到公网；配置成功后删除此临时站点，再安装正常业务 Caddyfile。
+setup.example.com {
+    reverse_proxy 127.0.0.1:8091 {
+        header_up Host setup.example.com
+        header_up X-Forwarded-Proto https
+    }
+}

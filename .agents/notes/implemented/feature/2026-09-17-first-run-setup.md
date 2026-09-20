@@ -14,6 +14,10 @@ Status: implemented
 文档门禁，没有功能重叠。
 数据库的五项输入、编码和兼容边界由[连接参数决定](2026-09-18-database-connection-fields.md)拥有。
 
+可选合并入口的首次确认后初始化和显式 HTTPS 代理由
+[单文件 supervisor 决定](../architecture/2026-09-20-unified-server-supervisor.md)部分扩展；
+以下分体 Admin 的保存后退出、禁止覆盖与未知结果保护理由仍保留。
+
 ## Decision
 
 `auction-admin-api` 在无参数、无显式 `AUCTION_CONFIG_FILE` 且没有现有角色配置时，先于

@@ -26,6 +26,12 @@ pub(super) enum Command {
         #[command(flatten)]
         controller: SystemdControllerArgs,
     },
+    /// 在取得合并部署独占锁后执行 forward-only 迁移；必须先停止 auction-server。
+    MigrateManaged {
+        /// 已经由 auction-server 初始化的绝对配置目录。
+        #[arg(long)]
+        config_dir: PathBuf,
+    },
     /// 在全部角色明确停止后，安全创建缺失的 PostgreSQL 目标库；不会运行迁移或修改已有库。
     #[command(name = "postgres-bootstrap")]
     PostgresBootstrap {

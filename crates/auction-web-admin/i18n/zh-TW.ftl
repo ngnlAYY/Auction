@@ -1,6 +1,12 @@
 # 管理端繁體中文文案。
 setup-title = 首次部署設定
-setup-intro = 請先輸入終端機顯示的一次性部署碼，驗證通過後才能進入設定。初始化服務只監聽本機，遠端請使用 SSH 通道。
+setup-intro = 請先輸入終端機顯示的一次性部署碼。請使用本機連線、SSH 通道或已明確授權的 HTTPS 代理。
+setup-confirm-initialize = 我確認目標為專用空 PostgreSQL 資料庫，並授權儲存後初始化資料庫及啟動服務。
+setup-initialize-help = 檢查不寫入檔案。確認後儲存設定、初始化既有空資料庫，再依序啟動 Worker、Admin、Public；絕不覆蓋既有設定。
+setup-save-start = 確認、儲存並啟動
+setup-starting = 設定已儲存，伺服器接下來會初始化資料庫並啟動服務。請確認終端機的就緒訊息後進入管理端；失敗時核對設定與資料庫，不要重複初始化。
+setup-open-admin = 服務就緒後進入管理端
+setup-error-origin = 設定入口拒絕存取，請檢查 HTTPS origin、受信任代理或本機通道。
 setup-access = 第一步：驗證部署碼
 setup-token = 一次性部署碼（終端機顯示的設定權杖）
 setup-verify = 驗證並進入下一步

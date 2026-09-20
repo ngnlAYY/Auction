@@ -1,6 +1,6 @@
 # auction-setup
 
-本 crate 只拥有 PostgreSQL 单机部署的首次部署 HTTP 入口。它在 loopback 上提供一次性
+本 crate 只拥有 PostgreSQL 单机部署的首次部署 HTTP 入口。它默认在 loopback 上提供一次性
 `/setup` 页面及受随机令牌保护的部署码验证、配置校验/完成接口；不挂载普通管理命令，也不迁移数据库。
 `POST /api/v1/setup/verify` 无请求体，仅检查 `x-setup-token` 与操作状态，不访问数据库或文件，
 不消费令牌或建立全局解锁状态。页面收到 `verified` 后才开放配置步骤；后续 `validate` 和
@@ -13,4 +13,12 @@
 启动时只有输出路径明确不存在才绑定监听器，无法读取元数据也失败关闭。
 表单分别接收数据库主机、端口、账号、密码和库名，再映射到 `auction-config` 的连接模型。
 连接串生成、配置模板、敏感文件写入和三角色校验由 `auction-config` 拥有，数据库连通性由
-`auction-storage` 检查。完成后进程退出，再由部署控制器执行严格预检、迁移和正式启动。
+`auction-storage` 检查。默认分体完成后进程退出，再由部署控制器执行严格预检、迁移和正式启动。
+
+`run_first_run_with_policy` 为可选合并入口返回 `Completed`、`Interrupted`、`OutcomeUnknown`；
+只有 Completed 允许装配根进入首次空库初始化。API 本身不迁移，成功响应的
+`initialize_and_start` 仅说明后续动作，不代表服务已就绪；合并 complete 要求
+`confirm_initialize=true`，否则 400 `setup_confirmation_required`。
+`server/access.rs` 拥有默认 loopback Host/Origin 门禁，以及显式 HTTPS origin/受信代理 IP 的
+远程策略；不信任任意转发头，不匹配返回 403 `setup_origin`，响应禁止缓存。
+已有或损坏配置不降级为设置页；正常 Admin 仍不注册上述写接口。

@@ -41,6 +41,7 @@ pub(super) fn validate(draft: &SetupDraft) -> Result<SetupRequest, Vec<SetupIssu
         worker_concurrency: number(draft, SetupField::WorkerConcurrency)?,
         worker_poll_interval_seconds: number(draft, SetupField::WorkerPoll)?,
         realtime_poll_interval_millis: number(draft, SetupField::RealtimePoll)?,
+        confirm_initialize: false,
     })
 }
 

@@ -31,6 +31,9 @@ pub struct SetupRequest {
     pub worker_concurrency: u32,
     pub worker_poll_interval_seconds: u64,
     pub realtime_poll_interval_millis: u64,
+    /// 合并入口明确确认在配置保存后初始化专用空库并启动；旧分体请求可省略。
+    #[serde(default)]
+    pub confirm_initialize: bool,
 }
 
 /// 初始化接口的成功阶段：`verified` 仅验证部署码，`validated` 检查配置输入和数据库连接，
@@ -38,6 +41,9 @@ pub struct SetupRequest {
 #[derive(Deserialize, Serialize)]
 pub struct SetupResponse {
     pub status: String,
+    /// 当前初始化表面是否在保存后由 supervisor 初始化并启动；不表示服务已经就绪。
+    #[serde(default)]
+    pub initialize_and_start: bool,
 }
 
 /// 不包含底层数据库、TOML 或文件内容的失败响应。

@@ -23,6 +23,9 @@ use auction_domain::{CREDIT_GRID, MAX_BID_AMOUNT};
 
 use crate::{AppConfig, PostgresConnectionConfig, Role};
 
+mod managed;
+pub use managed::managed_runtime_directory;
+
 /// 管理页提交、但不依赖浏览器 DTO 的一次性部署选项。
 pub struct FirstRunConfig {
     pub database: PostgresConnectionConfig,
@@ -96,6 +99,20 @@ impl FirstRunConfig {
 
     /// 原子发布完整配置目录；已存在目录或文件绝不被首次设置覆盖。
     pub fn write_to(&self, destination: &Path) -> Result<(), FirstRunError> {
+        self.write_directory(destination, None)
+    }
+
+    /// 合并部署仍原子生成三角色配置，仅将 Worker control 指向同级私有运行目录。
+    pub fn write_managed_to(&self, destination: &Path) -> Result<(), FirstRunError> {
+        let runtime = managed_runtime_directory(destination)?;
+        self.write_directory(destination, Some(&runtime))
+    }
+
+    fn write_directory(
+        &self,
+        destination: &Path,
+        runtime: Option<&Path>,
+    ) -> Result<(), FirstRunError> {
         self.validate()?;
         ensure_destination_absent(destination)?;
         let parent = destination.parent().ok_or(FirstRunError::InvalidInput)?;
@@ -106,7 +123,7 @@ impl FirstRunConfig {
         // 创建瞬间就限制访问，不依赖后续 chmod 缩小目录权限。
         fs::DirBuilder::new().mode(0o700).create(&temporary).map_err(|_| FirstRunError::Io)?;
         let result = (|| {
-            self.write_files(&temporary)?;
+            self.write_files(&temporary, runtime)?;
             for role in [Role::Public, Role::Admin, Role::Worker] {
                 AppConfig::load_from_path(role, temporary.join(format!("{}.toml", role.name())))
                     .map_err(|_| FirstRunError::InvalidConfig)?;
@@ -130,7 +147,11 @@ impl FirstRunConfig {
         result
     }
 
-    fn write_files(&self, directory: &Path) -> Result<(), FirstRunError> {
+    fn write_files(
+        &self,
+        directory: &Path,
+        managed_runtime: Option<&Path>,
+    ) -> Result<(), FirstRunError> {
         let mut common = template(include_str!("../../../../ops/config/examples/common.toml"))?;
         common["log_filter"] = Value::String(self.log_filter.clone());
         common["metrics"]["enabled"] = Value::Boolean(self.metrics_enabled);
@@ -173,6 +194,9 @@ impl FirstRunConfig {
             .ok_or(FirstRunError::InvalidConfig)?
             .remove("keyenv_file");
         worker["runtime_config_file"] = Value::String("runtime/admin.toml".to_owned());
+        if let Some(runtime) = managed_runtime {
+            managed::configure_worker(&mut worker, runtime)?;
+        }
         write_toml(directory.join("worker.toml"), &worker, 0o640)?;
 
         fs::DirBuilder::new()
@@ -188,6 +212,9 @@ impl FirstRunConfig {
             Value::Boolean(self.admin_origin.starts_with("https://"));
         runtime["security"]["trusted_proxy_cidrs"] =
             Value::Array(vec![Value::String("127.0.0.1/32".to_owned())]);
+        if let Some(directory) = managed_runtime {
+            managed::configure_admin(&mut runtime, directory)?;
+        }
         write_toml(directory.join("runtime/admin.toml"), &runtime, 0o640)?;
 
         let mut secrets = toml::map::Map::new();

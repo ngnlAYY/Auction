@@ -1,0 +1,28 @@
+# 合并制品专用模板；不得与三个分体 unit 同时启用。
+[Unit]
+Description=Auction single-binary supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=auction
+Group=auction
+WorkingDirectory=/var/lib/auction
+StateDirectory=auction
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/auction/bin/auction-server --config-dir /var/lib/auction/config
+# 首次初始化失败须人工核对，不用自动重启掩盖迁移结果。
+Restart=no
+# 首次仅通知 supervisor；超时后 systemd 杀死整个 cgroup。
+KillMode=mixed
+TimeoutStopSec=155s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/auction
+
+[Install]
+WantedBy=multi-user.target

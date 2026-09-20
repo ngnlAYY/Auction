@@ -4,6 +4,7 @@ members = [
     "apps/admin-api",
     "apps/auctionctl",
     "apps/public-api",
+    "apps/server",
     "apps/worker",
     "crates/auction-application",
     "crates/auction-cache",

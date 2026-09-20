@@ -388,17 +388,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "auction-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "auction-admin-api",
+ "auction-application",
+ "auction-config",
+ "auction-process",
+ "auction-public-api",
+ "auction-setup",
+ "auction-storage",
+ "auction-worker",
+ "clap",
+ "libc",
+ "tokio",
+]
+
+[[package]]
 name = "auction-setup"
 version = "0.1.0"
 dependencies = [
  "auction-config",
  "auction-contracts",
  "auction-http",
+ "auction-process",
  "auction-storage",
  "axum",
  "rust-embed",
  "subtle",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -420,6 +440,7 @@ dependencies = [
  "subtle",
  "thiserror 2.0.20",
  "tokio",
+ "url",
  "uuid",
 ]
 
