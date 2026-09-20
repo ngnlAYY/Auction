@@ -15,6 +15,17 @@ use super::{config, listener, state};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Public).context("load public-api configuration")?;
+    run_config(config).await
+}
+
+/// 从显式角色路径启动，不受父进程配置环境变量影响。
+pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
+    let config = AppConfig::load_from_path(Role::Public, path)
+        .context("load explicit public-api configuration")?;
+    run_config(config).await
+}
+
+async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_public_api",

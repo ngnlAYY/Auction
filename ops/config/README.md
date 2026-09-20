@@ -54,6 +54,10 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 
 保存后进程退出，运行目录、用户组、systemd 与 Caddy 仍按[部署手册](../deploy/README.md)准备，
 再执行严格部署预检和总控启动。真实敏感文件不得提交到仓库。
+可选 [auction-server](../../apps/server/README.md) 保留上述 TOML 格式，通过 `write_managed_to`
+将 Worker/Admin control socket 改为配置目录同级私有运行目录，并使用当前账号组和 UID。
+合并入口在网页明确确认后初始化专用空库并启动；默认分体设置仍保存后退出。
+配置文件不会记录部署码、首次确认布尔值或临时 HTTPS 代理策略。
 
 ## 准备私有配置
 

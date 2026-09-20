@@ -2,7 +2,13 @@
 
 [文档导航](../../../docs/README.md) · [总控 unit](auction-stack.service.example) · [Public unit](auction-public-api.service.example) · [Admin unit](auction-admin-api.service.example) · [Worker unit](auction-worker.service.example) · [控制 owner](../../../apps/auctionctl/src/bootstrap/deployment_control)
 
-模板需替换账号、路径和权限；单进程生命周期属于 systemd，跨角色顺序属于 auctionctl。
+模板需替换账号、路径和权限；默认分体的单进程生命周期属于 systemd，跨角色顺序属于 auctionctl。
+可选合并包使用 [auction-server.service.example](auction-server.service.example)，只启用这个 unit，
+不要同时启用下述分体 unit。先用相同账号手动完成首次向导，正常启动命令为
+`auction-server --config-dir /var/lib/auction/config`；升级前停止 unit，使用同账号
+`auctionctl migrate-managed --config-dir /var/lib/auction/config`，然后重新启动。
+合并 supervisor 反序关闭最多 135 秒，强制回收最多每角色 5 秒，模板设 `KillMode=mixed` 和
+`TimeoutStopSec=155s`，由 systemd 在超时后杀死整个 cgroup；不得套用分体的 45 秒预算。
 
 ## 本页导航
 

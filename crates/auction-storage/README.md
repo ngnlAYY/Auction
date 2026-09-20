@@ -3,6 +3,9 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 PostgreSQL 完整档和 SQLite Lite 的 SQL、事务、查询、迁移及锁 owner。
+`src/database/initialization` 仅拥有合并入口首次空 PostgreSQL 库初始化：在 SQLx 迁移锁下拒绝
+已有关系与其他客户端，再应用追加迁移；不建库、不删对象、不升级已有库。普通启动不调用它。
+`src/deployment_identity/strict.rs` 让分体 CLI 与合并入口共用显式数据库目标、参数闭集校验。
 
 ## 本页导航
 

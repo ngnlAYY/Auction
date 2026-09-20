@@ -1,6 +1,12 @@
 # 관리 화면 한국어 문안.
 setup-title = 최초 배포 설정
-setup-intro = 터미널에 표시된 일회용 배포 코드를 먼저 입력하세요. 검증을 통과해야 설정으로 진행할 수 있습니다. 초기 설정 서버는 로컬에서만 수신합니다. 원격에서는 SSH 터널을 사용하세요.
+setup-intro = 터미널에 표시된 일회용 배포 코드를 입력하세요. 로컬 연결, SSH 터널 또는 명시적으로 허용된 HTTPS 프록시를 사용하세요.
+setup-confirm-initialize = 전용 빈 PostgreSQL 데이터베이스임을 확인하며 저장 후 초기화와 서비스 시작을 승인합니다.
+setup-initialize-help = 확인은 쓰기를 수행하지 않습니다. 승인하면 설정을 저장하고 기존 빈 데이터베이스를 초기화한 후 Worker, Admin, Public을 순서대로 시작합니다. 기존 설정은 덮어쓰지 않습니다.
+setup-save-start = 확인, 저장 및 시작
+setup-starting = 설정이 저장되었습니다. 서버가 데이터베이스를 초기화하고 서비스를 시작합니다. 터미널의 준비 완료 메시지를 확인한 후 관리 화면을 여세요. 실패하면 설정과 데이터베이스를 점검하고 초기 설정을 반복하지 마세요.
+setup-open-admin = 서비스 준비 후 관리 화면 열기
+setup-error-origin = 설정 접근이 거부되었습니다. HTTPS origin, 신뢰할 프록시 또는 로컬 터널을 확인하세요.
 setup-access = 1단계: 배포 코드 검증
 setup-token = 일회용 배포 코드(터미널의 설정 토큰)
 setup-verify = 검증하고 다음 단계로

@@ -11,11 +11,11 @@ use rust_embed::Embed;
 #[derive(Embed)]
 #[folder = "../../target/dx/build/auction-web-admin/web/public"]
 #[allow_missing = true]
-pub(crate) struct AdminWebAssets;
+pub struct AdminWebAssets;
 
 /// API-only 制品使用的确定性空资源集合。
 #[cfg(not(feature = "web-embed"))]
 #[derive(Embed)]
 #[folder = "../../target/auction-api-only-assets/admin"]
 #[allow_missing = true]
-pub(crate) struct AdminWebAssets;
+pub struct AdminWebAssets;

@@ -43,6 +43,7 @@ impl Command {
             Self::CheckConfig { .. } | Self::DeploymentCheck { .. } => EXIT_USAGE_OR_CONFIG,
             Self::Deployment { .. } => EXIT_DEPLOYMENT,
             Self::Migrate { .. }
+            | Self::MigrateManaged { .. }
             | Self::PostgresBootstrap { .. }
             | Self::RetentionInventory { .. }
             | Self::RecoveryPreflight { .. }
@@ -76,6 +77,15 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
         Command::CheckConfig { role } => check_config(role.into())?,
+        Command::MigrateManaged { config_dir } => {
+            #[cfg(unix)]
+            managed::migrate(&config_dir).await?;
+            #[cfg(not(unix))]
+            {
+                let _ = config_dir;
+                anyhow::bail!("managed migration requires Unix");
+            }
+        }
         Command::MailEvidence { action } => match action {
             MailEvidenceAction::Export { evidence_id, output, key_source } => {
                 mail_diagnostics::export(evidence_id, &output, key_source)?;
@@ -323,6 +333,8 @@ async fn migrate(controller: SystemdControllerArgs) -> anyhow::Result<()> {
 }
 
 pub(super) async fn migrate_config(config: &AppConfig) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    let _managed_guard = managed::guard(config)?;
     let database_url = config.database_url().context("database_url is required for migration")?;
 
     #[cfg(any(feature = "postgres", feature = "sqlite"))]

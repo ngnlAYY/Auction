@@ -107,8 +107,20 @@ type SettlementPorts = (
     Option<Arc<dyn SettlementFulfillmentEvidenceReader>>,
 );
 
+/// 启动独立 Worker，沿用角色配置选择器。
 pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::load(Role::Worker).context("load worker configuration")?;
+    run_config(config).await
+}
+
+/// 从显式角色路径启动，供单文件 supervisor 派生的独立进程使用。
+pub async fn run_from_path(path: std::path::PathBuf) -> anyhow::Result<()> {
+    let config = AppConfig::load_from_path(Role::Worker, path)
+        .context("load explicit worker configuration")?;
+    run_config(config).await
+}
+
+async fn run_config(config: AppConfig) -> anyhow::Result<()> {
     let tracing_config = tracing_config(&config.tracing);
     let telemetry = auction_observability::init_with_config(
         "auction_worker",

@@ -282,13 +282,23 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 
 ## 首次部署初始化
 
-仅 `auction-admin-api` 的 PostgreSQL + `web-embed` 初始化模式在 `127.0.0.1:8091` 挂载以下入口；
+`auction-admin-api` 与可选 `auction-server` 的 PostgreSQL + `web-embed` 初始化模式默认在
+`127.0.0.1:8091` 挂载以下入口；
 正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，三个 API
 均必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`（页面称为一次性部署码）。
 请求体最多 8 KiB，配置 DTO 拒绝未知字段。
 配置文件尚未存在时无参数启动会自动进入该模式；默认路径的现有目录、悬空符号链接等条目仍按
 已有配置处理，权限等元数据读取错误直接阻止启动。显式 `AUCTION_CONFIG_FILE` 缺失或配置解析失败
-仍按正常启动失败关闭，不触发初始化。完成后进程退出，正式服务由部署控制器启动。
+仍按正常启动失败关闭，不触发初始化。分体 Admin 完成后退出；合并入口须明确确认后才在设置
+服务关闭后执行空库初始化并启动角色，普通启动不隐式迁移。
+
+合并入口通过 `--allow-remote-setup`、`--setup-origin` 和 `--setup-proxy-ip` 明确允许远程 HTTPS 代理。
+非 loopback 监听无此授权失败。HTTP 门禁检查 TCP peer、精确 Host、HTTPS 转发头与写请求 Origin；
+本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有响应禁止缓存。
+成功响应新增布尔 `initialize_and_start`，默认分体为 false、合并为 true；旧客户端可忽略新增字段。
+配置 DTO 新增可省略的 `confirm_initialize`（默认 false）；合并 `complete` 要求 true，否则返回
+400 `setup_confirmation_required`。网页只在用户主动勾选专用空库及启动授权后发送 true；
+`completed` 只表示配置已落盘，绝不声称数据库初始化或三个角色已就绪。
 
 页面初始只展示部署码输入和验证按钮；`POST /api/v1/setup/verify` 无请求体，仅校验令牌与完成状态，
 不连接数据库、不生成文件、不消费令牌，也不建立免鉴权会话或全局解锁状态。三个 API 在鉴权后
@@ -317,14 +327,16 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 
 | 方法 | 路径 | 成功 | 明确失败 |
 | --- | --- | --- | --- |
-| GET/HEAD | `/setup` | 200，Admin WASM 初始化页 | 404/503（无资源） |
-| POST | `/api/v1/setup/verify` | 200 `{"status":"verified"}` | 403 `setup_auth`，409 `setup_busy`/`setup_completed`，500 `setup_outcome_unknown` |
-| POST | `/api/v1/setup/validate` | 200 `{"status":"validated"}` | 同 verify，另有 400 `invalid_input`/`configuration_invalid`，503 `database_unavailable` |
-| POST | `/api/v1/setup/complete` | 200 `{"status":"completed"}`；写出完整配置并退出 | 同 validate，另有 409 `setup_locked`，500 `setup_io` |
+| GET/HEAD | `/setup` | 200，Admin WASM 初始化页 | 403 `setup_origin`，404/503（无资源） |
+| POST | `/api/v1/setup/verify` | 200 `{"status":"verified","initialize_and_start":false}` | 403 `setup_auth`，409 `setup_busy`/`setup_completed`，500 `setup_outcome_unknown` |
+| POST | `/api/v1/setup/validate` | 200 `{"status":"validated","initialize_and_start":false}` | 同 verify，另有 400 `invalid_input`/`configuration_invalid`，503 `database_unavailable` |
+| POST | `/api/v1/setup/complete` | 200 `{"status":"completed","initialize_and_start":false}`；写出完整配置并关闭设置服务 | 同 validate，另有 409 `setup_locked`，500 `setup_io` |
 
 数据库凭据、管理员密码只在请求与目标敏感 TOML 中存在；响应只返回稳定错误码，不返回输入、
 SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁移；保存后目标配置目录存在即禁止
-再次首次设置。完整运行参数仍在正式 Admin `A26/A27` runtime 页面管理。
+再次首次设置。表中成功 JSON 以分体模式为例，合并模式布尔值为 true；所有接口可返回
+403 `setup_origin`，合并 complete 还可返回 400 `setup_confirmation_required`。
+完整运行参数仍在正式 Admin `A26/A27` runtime 页面管理。
 
 ## 已实现路径的补充约束
 

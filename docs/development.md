@@ -82,7 +82,8 @@ AUCTION_CONFIG_FILE=ops/config/examples/admin.toml cargo run --locked -p auction
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml cargo run --locked -p auction-worker --features sqlite
 ```
 
-迁移不是服务器启动副作用。`auctionctl migrate` 使用 systemd 总控参数、状态目录锁和三角色停机门禁；
+普通启动不隐式迁移。合并入口只有首次网页明确确认后才初始化专用空库，详情见
+[auction-server](../apps/server/README.md)；`auctionctl migrate` 使用 systemd 总控参数、状态目录锁和三角色停机门禁；
 不应把它描述为无需环境准备的便捷 seed 命令。初始 PostgreSQL 建库与迁移分离，详见
 [auctionctl 命令手册](../apps/auctionctl/README.md)。
 
@@ -101,6 +102,10 @@ just build-api
 just build-release
 just verify-artifacts
 just release-check
+
+# 可选单文件部署，auctionctl 仍独立。
+just build-single
+just release-check --single-binary
 ```
 
 Web 构建使用 `wasm-release` profile，清理对应 surface 中间输出后复制到稳定嵌入目录并生成 payload 清单。

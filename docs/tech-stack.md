@@ -43,6 +43,8 @@ Actix、Poem、Rocket 不进入当前依赖图，迁换框架不能替代领域�
 
 TCP 与 Linux Unix listener 共用安全绑定器，业务监听配置由装配根选择；Worker control 是独立 Unix 面。
 `auction-process` 共用信号与任务原语，具体停止顺序仍由三个应用决定。
+可选 `auction-server` 使用 Tokio process 和 Linux parent-death signal 自管三角色子进程，
+复用 app 的 lib 装配而不拼接 ELF 或增加第二种运行时；默认分体依赖及发布链不变。
 
 ## 浏览器与国际化
 

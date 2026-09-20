@@ -1,0 +1,26 @@
+[package]
+name = "auction-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+auction-public-api = { path = "../public-api", default-features = false }
+auction-admin-api = { path = "../admin-api", default-features = false }
+auction-worker = { path = "../worker", default-features = false }
+auction-config.workspace = true
+auction-application.workspace = true
+auction-process.workspace = true
+auction-setup.workspace = true
+auction-storage.workspace = true
+clap.workspace = true
+libc.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[features]
+default = []
+postgres = ["auction-public-api/postgres", "auction-admin-api/postgres", "auction-worker/postgres", "auction-storage/postgres", "auction-setup/postgres"]
+web-embed = ["auction-public-api/web-embed", "auction-admin-api/web-embed"]
+cache-redis = ["auction-public-api/cache-redis", "auction-admin-api/cache-redis", "auction-worker/cache-redis"]

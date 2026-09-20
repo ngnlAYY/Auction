@@ -3,6 +3,8 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 持久化生命周期、论坛、邮件、投递和恢复循环的装配根。
+`src/lib.rs` 导出 `run` 与显式路径 `run_from_path`；薄 `main.rs` 和
+[可选 supervisor](../server/README.md) 的独立 Worker 子进程复用相同装配。
 
 ## 本页导航
 

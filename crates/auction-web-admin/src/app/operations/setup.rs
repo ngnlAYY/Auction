@@ -24,6 +24,7 @@ pub(super) fn page() -> Element {
     let mut busy = use_signal(|| false);
     let mut notice = use_signal(|| None::<(bool, String)>);
     let mut completed = use_signal(|| false);
+    let mut initialize_and_start = use_signal(|| false);
     // 页面内不可逆的停靠状态；输入变化或组件重渲染不能解除结果不确定的门禁。
     let mut outcome_unknown = use_signal(|| false);
 
@@ -46,7 +47,10 @@ pub(super) fn page() -> Element {
                             let submitted_token = token();
                             spawn(async move {
                                 match verify_first_run(&submitted_token).await {
-                                    Ok(()) => verified.set(true),
+                                    Ok(initialize) => {
+                                        initialize_and_start.set(initialize);
+                                        verified.set(true);
+                                    },
                                     Err(code) => {
                                         if code == "setup_outcome_unknown" {
                                             outcome_unknown.set(true);
@@ -93,6 +97,7 @@ pub(super) fn page() -> Element {
                         draft,
                         notice,
                         outcome_unknown,
+                        initialize_and_start: initialize_and_start(),
                         on_auth_failure: move |_| {
                             draft.write().clear_passwords();
                             verified.set(false);
@@ -103,6 +108,9 @@ pub(super) fn page() -> Element {
                             completed.set(true);
                         },
                     }
+                }
+                if completed() && initialize_and_start() {
+                    a { href: draft.read().value(draft::SetupField::AdminOrigin).to_owned(), {t!("setup-open-admin")} }
                 }
                 if let Some((success, key)) = notice() {
                     p {
@@ -119,6 +127,8 @@ pub(super) fn page() -> Element {
 fn error_key(code: &str) -> &'static str {
     match code {
         "invalid_input" => "setup-error-input",
+        "setup_origin" => "setup-error-origin",
+        "setup_confirmation_required" => "setup-confirm-initialize",
         "database_unavailable" => "setup-error-database",
         "configuration_invalid" => "setup-error-config",
         "setup_locked" | "setup_completed" => "setup-error-locked",

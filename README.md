@@ -26,6 +26,7 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 | [auction-admin-api](apps/admin-api/README.md) | 管理 API、管理会话和后台页面 | `127.0.0.1:8091` |
 | [auction-worker](apps/worker/README.md) | 持久化调度、生命周期、论坛、邮件和履约 | 无业务 TCP HTTP；可选 Unix control |
 | [auctionctl](apps/auctionctl/README.md) | 配置诊断、迁移、systemd 总控与受控灾备 | 无监听 |
+| [auction-server](apps/server/README.md) | 可选单文件 supervisor，自管上述三角色子进程 | 沿用 Public/Admin 两个入口 |
 
 三个服务独立装配，领域和用例通过窄端口共享。浏览器只消费稳定 DTO，数据库记录不直接进入页面。
 完整目录与 owner 见[架构](docs/architecture.md)。
@@ -47,6 +48,9 @@ just build-api
 # 包含 Public/Admin 页面；需要 dx CLI，详见开发指南。
 just build-release
 just verify-artifacts
+
+# 可选单文件发布：auction-server + 独立 auctionctl；正式归档要求干净工作树。
+just release-check --single-binary
 ```
 
 `apps/*` 的默认 Cargo feature 不包含数据库驱动或 Web 资源。自行运行 `cargo` 时必须明确选择
@@ -58,6 +62,9 @@ just verify-artifacts
 分别填写数据库主机、端口、账号、密码、库名，以及管理员和部署参数并生成配置；完成后按[部署手册](ops/deploy/README.md)执行严格预检和启动。
 提交的示例包含占位值，使用前按[配置说明](ops/config/README.md)准备权限受限的真实敏感文件。
 首次迁移、启动与停机要求见[部署手册](ops/deploy/README.md)，不在普通静态验证中自动执行。
+可选 `auction-server --config-dir <配置目录>` 在目录不存在时进入同一网页向导，经明确确认后
+初始化专用空 PostgreSQL 库并启动三角色；普通启动不迁移。显式远程 HTTPS 设置和合并部署维护
+见 [auction-server](apps/server/README.md)，默认分体发布不变。
 
 ## 当前交付边界
 

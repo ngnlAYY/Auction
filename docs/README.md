@@ -37,6 +37,7 @@
 | [auctionctl](../apps/auctionctl/README.md) | `apps/auctionctl/README.md` |
 | [public-api · auction-public-api](../apps/public-api/README.md) | `apps/public-api/README.md` |
 | [worker · auction-worker](../apps/worker/README.md) | `apps/worker/README.md` |
+| [server · auction-server](../apps/server/README.md) | `apps/server/README.md` |
 
 ## 共享能力
 
@@ -78,6 +79,8 @@
 | [SQLite Lite 迁移](../migrations/sqlite/README.md) | `migrations/sqlite/README.md` |
 
 ## 决策记录
+
+[可选单文件服务与首次配置后启动](../.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md)
 
 | 文档 | 仓库位置 |
 | --- | --- |

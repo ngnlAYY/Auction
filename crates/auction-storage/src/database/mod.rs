@@ -22,6 +22,10 @@ mod audit_health;
 #[cfg(feature = "postgres")]
 mod bootstrap;
 #[cfg(feature = "postgres")]
+mod initialization;
+#[cfg(feature = "postgres")]
+pub use initialization::{FirstDatabaseInitializationError, initialize_empty_postgres};
+#[cfg(feature = "postgres")]
 #[path = "competition/postgres.rs"]
 mod competition;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]

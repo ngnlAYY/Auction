@@ -18,19 +18,25 @@ pub(super) fn ConfigurationForm(
     mut draft: Signal<SetupDraft>,
     mut notice: Signal<Option<(bool, String)>>,
     mut outcome_unknown: Signal<bool>,
+    initialize_and_start: bool,
     on_auth_failure: EventHandler<()>,
     on_completed: EventHandler<()>,
 ) -> Element {
     let mut pending = use_signal(|| None::<bool>);
     let mut issues = use_signal(Vec::<SetupIssue>::new);
     let mut advanced_open = use_signal(|| false);
+    let mut confirm_initialize = use_signal(|| false);
     let submit = use_callback(move |complete: bool| {
         // 回调内也检查门禁，防止键盘提交或尚未重渲染的按钮绕过 disabled。
         if pending.read().is_some() || outcome_unknown() {
             return;
         }
+        if complete && initialize_and_start && !confirm_initialize() {
+            notice.set(Some((false, "setup-confirm-initialize".to_owned())));
+            return;
+        }
         notice.set(None);
-        let request = match validation::validate(&draft.read()) {
+        let mut request = match validation::validate(&draft.read()) {
             Ok(request) => request,
             Err(errors) => {
                 if errors.iter().any(|issue| SetupField::ADVANCED.contains(&issue.field)) {
@@ -43,6 +49,7 @@ pub(super) fn ConfigurationForm(
                 return;
             }
         };
+        request.confirm_initialize = initialize_and_start && confirm_initialize();
         issues.write().clear();
         pending.set(Some(complete));
         let submitted_token = token();
@@ -52,7 +59,11 @@ pub(super) fn ConfigurationForm(
             match result {
                 Ok(()) if complete => {
                     draft.write().clear_passwords();
-                    notice.set(Some((true, "setup-complete".to_owned())));
+                    notice.set(Some((
+                        true,
+                        if initialize_and_start { "setup-starting" } else { "setup-complete" }
+                            .to_owned(),
+                    )));
                     on_completed.call(());
                 }
                 Ok(()) => notice.set(Some((true, "setup-valid".to_owned()))),
@@ -157,7 +168,16 @@ pub(super) fn ConfigurationForm(
                     }
                 }
             }
-            p { class: "admin-setup__hint", {t!("setup-save-help")} }
+            p { class: "admin-setup__hint", if initialize_and_start { {t!("setup-initialize-help")} } else { {t!("setup-save-help")} } }
+            if initialize_and_start {
+                label { class: "admin-setup__check",
+                    input {
+                        r#type: "checkbox", checked: confirm_initialize(), disabled: busy,
+                        onchange: move |event| { if !busy { confirm_initialize.set(event.checked()); } },
+                    }
+                    {t!("setup-confirm-initialize")}
+                }
+            }
             div { class: "admin-setup__actions",
                 button {
                     r#type: "button",
@@ -168,8 +188,8 @@ pub(super) fn ConfigurationForm(
                 button {
                     class: "admin-btn-primary",
                     r#type: "submit",
-                    disabled: busy,
-                    if pending() == Some(true) { {t!("setup-saving")} } else { {t!("setup-save")} }
+                    disabled: busy || (initialize_and_start && !confirm_initialize()),
+                    if pending() == Some(true) { {t!("setup-saving")} } else if initialize_and_start { {t!("setup-save-start")} } else { {t!("setup-save")} }
                 }
             }
         }

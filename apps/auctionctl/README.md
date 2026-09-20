@@ -3,6 +3,11 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 配置诊断、迁移、systemd 总控、备份、恢复及显式维护命令。
+可选合并部署使用 `migrate-managed --config-dir <绝对目录>`：先停止 `auction-server`，再以相同
+服务账号执行。该入口做严格配置预检，并取得同级私有运行目录 `owner.lock` 的独占锁；
+子进程也继承此锁，因此仅父进程退出不足以授权迁移。无既有合并锁时拒绝，失败使用依赖类退出码 3。
+`runtime/managed.rs` 拥有此本机门禁；普通 `migrate` 及 systemd 总控也复查该锁，不能趁合并服务运行迁移。
+合并和分体不得在同一数据库混合运行；其他备份/恢复/重建仍按原手册显式停机，不受合并服务自动调用。
 
 ## 本页导航
 

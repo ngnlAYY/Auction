@@ -3,6 +3,9 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 公共、角色、敏感和 runtime TOML 的解析、校验及安全文件适配。
+`src/setup/managed.rs` 拥有可选合并部署的运行目录推导；`FirstRunConfig::write_managed_to` 保留
+原子发布与三角色校验，只将 Worker/Admin control socket 指向配置目录同级的私有目录。
+配置 schema 不变，不把配置合并为含敏感值的单文件。
 
 ## 本页导航
 

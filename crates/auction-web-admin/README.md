@@ -3,6 +3,9 @@
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 纯 CSR Admin SPA，拥有管理认证、查询、命令和配置编辑。
+首次设置根据 verify 的 `initialize_and_start` 区分分体保存与合并初始化：合并模式必须勾选
+专用空库/启动授权，发送 `confirm_initialize`，保存后仅提示后续启动并提供管理入口，
+不把保存响应当作 readiness。相关确认、代理错误与提示均覆盖五种语言。
 
 ## 本页导航
 

@@ -33,7 +33,9 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 - 产品是面向论坛生态的拍卖系统，包含公开竞价、管理端和负责生命周期、论坛及通知任务
   的后台 Worker。
 - Public、Admin、Worker 是可以独立部署的进程边界；`auctionctl` 负责配置、迁移和运维
-  命令行操作。
+  命令行操作。可选 `auction-server` 以同一二进制自管三角色子进程，`auctionctl` 不合并；
+  默认分体发布不变，合并档仅支持 Linux/PostgreSQL 单主机。首次网页确认后的空库初始化是
+  明确授权的启动例外，普通启动不隐式迁移；详见 [server](apps/server/README.md)。
 - 浏览器端同样使用 Rust：Dioxus 客户端渲染，产物编译为 `wasm32-unknown-unknown` 后由
   后端内嵌提供。不引入
   React、TypeScript、Node 或第二套前端构建链。
@@ -70,6 +72,7 @@ Auction Rust 是一个自包含的全 Rust 论坛生态拍卖系统。业务行�
 │   ├── public-api/               # 公开 HTTP 表面与公开端前端产物服务
 │   ├── admin-api/                # 管理 HTTP 表面与管理端前端产物服务
 │   ├── worker/                   # 持久化生命周期/集成 Worker 入口
+│   ├── server/                   # 可选单文件 supervisor，复用三角色 lib 装配
 │   └── auctionctl/               # 配置、迁移和运维命令行工具
 ├── crates/                       # 按模块所有权拆分的可复用能力
 │   ├── auction-domain/           # 纯实体、值对象和领域不变量
