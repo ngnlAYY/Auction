@@ -1,13 +1,6 @@
 //! 初始化页面的令牌门禁、数据库连通性检查与单次提交。
 
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{fs, io::ErrorKind, path::PathBuf, sync::Arc, time::Duration};
 
 use auction_config::{FirstRunConfig, FirstRunError, PostgresConnectionConfig};
 use auction_contracts::{SetupErrorResponse, SetupRequest, SetupResponse};
@@ -22,7 +15,7 @@ use rust_embed::RustEmbed;
 use subtle::ConstantTimeEq;
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, oneshot},
+    sync::{Mutex, MutexGuard, oneshot},
 };
 use uuid::Uuid;
 
@@ -36,19 +29,28 @@ pub struct FirstRunServerOptions {
 struct FirstRunState {
     options: FirstRunServerOptions,
     token: String,
-    completed: AtomicBool,
-    commit_lock: Mutex<()>,
+    operation: Mutex<SetupStatus>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
 }
 
-type SetupResult = Result<Json<SetupResponse>, (StatusCode, Json<SetupErrorResponse>)>;
+/// 终态只能在同一操作锁下写入；结果不确定也禁止本进程继续校验或写入。
+enum SetupStatus {
+    Pending,
+    Completed,
+    OutcomeUnknown,
+}
+
+type SetupFailure = (StatusCode, Json<SetupErrorResponse>);
+type SetupResult = Result<Json<SetupResponse>, SetupFailure>;
 
 /// 启动仅绑定 127.0.0.1 的初始化进程；完成写入后退出，不自动进入正式 Admin 模式。
 pub async fn run_first_run<A: RustEmbed + 'static>(
     options: FirstRunServerOptions,
 ) -> Result<(), &'static str> {
-    if options.output_dir.exists() || options.output_dir.is_symlink() {
-        return Err("setup output directory already exists");
+    match fs::symlink_metadata(&options.output_dir) {
+        Ok(_) => return Err("setup output directory already exists"),
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(_) => return Err("cannot inspect setup output directory"),
     }
     let listener =
         TcpListener::bind("127.0.0.1:8091").await.map_err(|_| "cannot bind setup listener")?;
@@ -57,11 +59,11 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
     let state = Arc::new(FirstRunState {
         options,
         token,
-        completed: AtomicBool::new(false),
-        commit_lock: Mutex::new(()),
+        operation: Mutex::new(SetupStatus::Pending),
         shutdown: Mutex::new(Some(shutdown_sender)),
     });
     let app = Router::new()
+        .route("/api/v1/setup/verify", post(verify))
         .route("/api/v1/setup/validate", post(validate))
         .route("/api/v1/setup/complete", post(complete))
         .fallback(auction_http::serve_admin_setup_asset::<A>)
@@ -81,7 +83,18 @@ pub async fn run_first_run<A: RustEmbed + 'static>(
         })
         .await
         .map_err(|_| "setup HTTP server failed")?;
-    if state.completed.load(Ordering::Acquire) { Ok(()) } else { Err("setup was interrupted") }
+    match *state.operation.lock().await {
+        SetupStatus::Completed => Ok(()),
+        SetupStatus::Pending => Err("setup was interrupted"),
+        SetupStatus::OutcomeUnknown => Err("setup output requires manual verification"),
+    }
+}
+
+/// 仅验证部署码和操作状态，不接收配置、不连接数据库，也不消费令牌或建立全局已验证状态。
+async fn verify(State(state): State<Arc<FirstRunState>>, headers: HeaderMap) -> SetupResult {
+    authorize(&state, &headers)?;
+    let _operation = begin_operation(&state)?;
+    Ok(Json(SetupResponse { status: "verified".to_owned() }))
 }
 
 async fn validate(
@@ -90,6 +103,7 @@ async fn validate(
     request: Result<Json<SetupRequest>, JsonRejection>,
 ) -> SetupResult {
     authorize(&state, &headers)?;
+    let _operation = begin_operation(&state)?;
     let Json(request) = request.map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
     let options = config(&state, request);
     options.validate().map_err(config_error)?;
@@ -103,21 +117,37 @@ async fn complete(
     request: Result<Json<SetupRequest>, JsonRejection>,
 ) -> SetupResult {
     authorize(&state, &headers)?;
+    let mut operation = begin_operation(&state)?;
     let Json(request) = request.map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
-    let _lock =
-        state.commit_lock.try_lock().map_err(|_| error(StatusCode::CONFLICT, "setup_busy"))?;
-    if state.completed.load(Ordering::Acquire) {
-        return Err(error(StatusCode::CONFLICT, "setup_completed"));
-    }
     let options = config(&state, request);
     options.validate().map_err(config_error)?;
     check_database(&options.database).await?;
-    options.write_to(&state.options.output_dir).map_err(config_error)?;
-    state.completed.store(true, Ordering::Release);
+    match options.write_to(&state.options.output_dir) {
+        Ok(()) => *operation = SetupStatus::Completed,
+        Err(FirstRunError::OutcomeUnknown) => {
+            // 目录可能已经发布，保留终态直到人工检查并停止此进程，不能恢复为可重试状态。
+            *operation = SetupStatus::OutcomeUnknown;
+            return Err(config_error(FirstRunError::OutcomeUnknown));
+        }
+        Err(error) => return Err(config_error(error)),
+    }
     if let Some(sender) = state.shutdown.lock().await.take() {
         let _ = sender.send(());
     }
     Ok(Json(SetupResponse { status: "completed".to_owned() }))
+}
+
+/// 三个接口先独立鉴权再获取同一非阻塞门禁；锁覆盖数据库等待、目录发布和终态写入。
+fn begin_operation(state: &FirstRunState) -> Result<MutexGuard<'_, SetupStatus>, SetupFailure> {
+    let operation =
+        state.operation.try_lock().map_err(|_| error(StatusCode::CONFLICT, "setup_busy"))?;
+    match *operation {
+        SetupStatus::Pending => Ok(operation),
+        SetupStatus::Completed => Err(error(StatusCode::CONFLICT, "setup_completed")),
+        SetupStatus::OutcomeUnknown => {
+            Err(error(StatusCode::INTERNAL_SERVER_ERROR, "setup_outcome_unknown"))
+        }
+    }
 }
 
 fn authorize(

@@ -130,6 +130,9 @@ Public P09/P11 的完整装备 URL 是受限例外：HTTP 核对 equipment owner
 ## 浏览器、实时与制品
 
 Public/Admin 为分离的 Dioxus CSR SPA，独立路由、译文和产物；共享层只拥有基础能力。
+首次部署页由 Admin 的 `operations/setup.rs` 编排，`operations/setup/` 拆分短生命周期草稿、字段
+校验、控件与配置提交；不使用普通 Admin 会话，不持久化凭据。数据库与完整配置校验仍由
+`auction-setup`/`auction-config` 拥有，浏览器的密码确认和字段提示不扩展配置 DTO。
 REST DTO 与 WebSocket v1 由 contracts 定义。事件是重读提示，跳号或重连通过 HTTP Catch-up/权威快照恢复；
 当前没有 SSE 路由或外部广播 sink。实时 sequence、版本、帧限制与关闭原因见[事件契约](contracts/events.md)。
 

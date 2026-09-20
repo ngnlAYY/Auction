@@ -91,7 +91,7 @@ pub(crate) use settlement::{
 pub(crate) use settlement_catalog::{
     AdminSettlementCatalogEntry, AdminSettlementCatalogPage, fetch_admin_settlement_catalog,
 };
-pub(crate) use setup::submit_first_run;
+pub(crate) use setup::{submit_first_run, verify_first_run};
 pub(crate) use status::{AdminReadinessState, fetch_admin_readiness};
 pub(crate) use users::{
     AdminUser, AdminUserPage, AdminUserStatusFilter, blacklist_admin_user, create_admin_user,

@@ -3,6 +3,8 @@
 use std::{
     env,
     ffi::OsString,
+    fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
@@ -27,12 +29,13 @@ pub(super) fn select_mode() -> anyhow::Result<StartMode> {
         }
         return parse_setup(args);
     }
-    if env::var_os("AUCTION_CONFIG_FILE").is_some() || Path::new("ops/config/admin.toml").is_file()
+    if env::var_os("AUCTION_CONFIG_FILE").is_some()
+        || config_entry_exists(Path::new("ops/config/admin.toml"))?
     {
         return Ok(StartMode::Normal(None));
     }
     let local = PathBuf::from("auction-config/admin.toml");
-    if local.is_file() {
+    if config_entry_exists(&local)? {
         return Ok(StartMode::Normal(Some(local)));
     }
     Ok(StartMode::Setup(SetupOptions {
@@ -43,6 +46,15 @@ pub(super) fn select_mode() -> anyhow::Result<StartMode> {
         // SAFETY：只读取当前进程的有效 UID，不解引用外部指针。
         control_uid: unsafe { libc::geteuid() },
     }))
+}
+
+/// 只有明确不存在才能进入首次设置；目录、悬空链接等现有条目交给正式 loader 拒绝。
+fn config_entry_exists(path: &Path) -> anyhow::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).context("cannot inspect admin configuration path"),
+    }
 }
 
 fn parse_setup(mut args: impl Iterator<Item = OsString>) -> anyhow::Result<StartMode> {

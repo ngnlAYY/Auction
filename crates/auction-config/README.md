@@ -56,6 +56,13 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 `AuctionConfig::policy()` 返回 `Result`：秒数超出 chrono 可表示范围时返回 `ConfigError`，
 配置加载与预检不会因极端整数触发 panic；可表示的秒数继续由原有策略规则校验，不做截断。
 
+首次部署的 `FirstRunConfig::write_to` 只在目标明确不存在时生成配置；元数据读取失败不能当作
+目标缺失，现有条目（包括悬空符号链接）拒绝覆盖。临时目录与 `runtime/` 子目录在创建时就分别
+以 `0700`/`0750` 限制权限，实际权限仍受进程 umask 收紧；文件写入并同步、三角色 loader 校验后，
+依次同步 `runtime/`、临时根目录，再执行 Linux `RENAME_NOREPLACE` 发布并同步目标父目录。
+发布前失败只清理本次临时目录；发布后父目录同步失败返回 `OutcomeUnknown`，保留目标供人工核对，
+不得删除或回滚。该流程仍要求父目录受信且不被并发替换，不将路径探测当作对恶意目录竞态的隔离。
+
 ## 公共、角色、敏感与 runtime 文件结构
 
 三个角色文件都必须通过 `common_file` 引用同一份公共非敏感 TOML，并通过 `secrets_file`
