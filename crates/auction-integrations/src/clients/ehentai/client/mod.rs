@@ -11,7 +11,7 @@ use super::forms::{
     is_session_expired, link_selector, optional_query_identity, origin_of, post_body_selector,
     posting_action_matches_board, posting_action_matches_target, posting_form_values, same_origin,
     set_form_value, topic_title_selector, valid_cookie, valid_post_id, valid_rendered_post,
-    valid_rendered_thread, valid_topic_id, valid_topic_title,
+    valid_rendered_thread, valid_topic_description, valid_topic_id, valid_topic_title,
 };
 use super::*;
 
@@ -192,6 +192,16 @@ impl EhentaiClient {
         if let Some(published) = existing {
             return Ok(published);
         }
+        if let Some(legacy_title) =
+            rendered.legacy_title.as_deref().filter(|legacy_title| *legacy_title != rendered.title)
+        {
+            let (_, _, legacy_existing) = self
+                .find_topic_by_title_with_operation(world, cookie, legacy_title, operation)
+                .await?;
+            if let Some(published) = legacy_existing {
+                return Ok(published);
+            }
+        }
 
         let form = self.load_topic_form(board_id, &board_url, cookie).await?;
         self.submit_topic(form, board_id, rendered, cookie).await
@@ -315,7 +325,7 @@ impl EhentaiClient {
         world: SettlementWorld,
         thread_id: &str,
         post_id: &str,
-        title: Option<&str>,
+        metadata: Option<&ForumTopicMetadata>,
         body: ForumRenderedPost,
         cookie: &EhentaiCookie,
     ) -> Result<ForumPublishedPost, EhentaiError> {
@@ -324,15 +334,32 @@ impl EhentaiClient {
             || !valid_cookie(cookie)
             || !valid_topic_id(thread_id)
             || !valid_post_id(post_id)
-            || title.is_some_and(|value| !valid_topic_title(value))
+            || metadata.is_some_and(|metadata| {
+                metadata.title.as_deref().is_some_and(|value| !valid_topic_title(value))
+                    || metadata
+                        .description
+                        .as_deref()
+                        .is_some_and(|value| !valid_topic_description(value))
+            })
             || !valid_rendered_post(&body)
         {
             return Err(EhentaiError::configuration(operation));
         }
         let board_id = self.board_for_world(world, operation)?;
         let form = self.load_edit_form(board_id, thread_id, post_id, cookie).await?;
-        self.submit_fixed_post(form, board_id, thread_id, Some((post_id, title)), body, cookie)
-            .await
+        self.submit_fixed_post(
+            form,
+            board_id,
+            thread_id,
+            Some((
+                post_id,
+                metadata.and_then(|metadata| metadata.title.as_deref()),
+                metadata.and_then(|metadata| metadata.description.as_deref()),
+            )),
+            body,
+            cookie,
+        )
+        .await
     }
 
     /// 读取编辑表单中由服务器返回的原始 BBCode，作为固定楼层写入后的精确正文证明。

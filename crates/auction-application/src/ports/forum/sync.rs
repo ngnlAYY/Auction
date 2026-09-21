@@ -135,7 +135,12 @@ pub struct ForumAuctionSnapshot {
 /// 正文可能包含公开装备 URL 的 10 位 key，因此 `Debug` 必须始终脱敏。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ForumRenderedThread {
+    /// 远端主题标题；必须包含拍卖世界，且参与主题精确对账。
     pub title: String,
+    /// 远端 Topic Description；只放时间等主题备注，不混入目录正文。
+    pub description: String,
+    /// 旧版标题兼容值；仅用于标题迁移期间的精确只读对账。
+    pub legacy_title: Option<String>,
     pub body: String,
 }
 
@@ -156,6 +161,8 @@ impl fmt::Debug for ForumRenderedThread {
         formatter
             .debug_struct("ForumRenderedThread")
             .field("title", &self.title)
+            .field("description", &self.description)
+            .field("legacy_title", &self.legacy_title)
             .field("body", &"[REDACTED]")
             .finish()
     }
@@ -167,6 +174,13 @@ pub struct ForumPublishedThread {
     pub board_id: i32,
     pub thread_id: String,
     pub thread_url: String,
+}
+
+/// 编辑论坛主题元数据；`None` 字段保持服务器现值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumTopicMetadata {
+    pub title: Option<String>,
+    pub description: Option<String>,
 }
 
 /// 远端论坛单个帖子的稳定身份。
@@ -287,13 +301,13 @@ pub trait ForumPostWriter: Send + Sync {
         body: ForumRenderedPost,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 
-    /// 编辑指定稳定 post ID；`title` 仅在编辑 #1 时用于保持主题标题不变。
+    /// 编辑指定稳定 post ID；`title`/`description` 仅在编辑 #1 时写入主题元数据。
     fn edit_post(
         &self,
         world: SettlementWorld,
         thread_id: String,
         post_id: String,
-        title: Option<String>,
+        metadata: Option<ForumTopicMetadata>,
         body: ForumRenderedPost,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 

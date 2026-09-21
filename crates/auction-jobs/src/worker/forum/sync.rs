@@ -8,8 +8,8 @@ use std::sync::{Arc, OnceLock};
 use auction_application::{
     ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedLayout,
     ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
-    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicReader, PublicEquipmentLinkResolver,
-    RepositoryError, forum_catalog_marker, forum_system_log_marker,
+    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicMetadata, ForumTopicReader,
+    PublicEquipmentLinkResolver, RepositoryError, forum_catalog_marker, forum_system_log_marker,
 };
 use chrono::Duration;
 use url::Url;
@@ -274,7 +274,7 @@ where
         }
     };
     let published = if reconciliation_only {
-        match publisher.find_topic_by_title(world, rendered.title.clone()).await {
+        match find_reconciliation_topic(publisher.as_ref(), world, &rendered).await {
             Ok(Some(published)) => published,
             Ok(None) if retry_authorized => {
                 match publisher.create_topic(world, rendered.clone()).await {
@@ -374,6 +374,23 @@ where
     Ok(())
 }
 
+async fn find_reconciliation_topic(
+    publisher: &dyn ForumPublisher,
+    world: auction_domain::SettlementWorld,
+    rendered: &ForumRenderedThread,
+) -> Result<Option<ForumPublishedThread>, ApplicationError> {
+    if let Some(published) = publisher.find_topic_by_title(world, rendered.title.clone()).await? {
+        return Ok(Some(published));
+    }
+    let Some(legacy_title) = rendered.legacy_title.as_deref() else {
+        return Ok(None);
+    };
+    if legacy_title == rendered.title {
+        return Ok(None);
+    }
+    publisher.find_topic_by_title(world, legacy_title.to_owned()).await
+}
+
 struct FixedLayoutRequest {
     world: auction_domain::SettlementWorld,
     auction_id: auction_domain::AuctionId,
@@ -415,7 +432,10 @@ async fn ensure_fixed_layout(
                 world,
                 published.thread_id.clone(),
                 preview.catalog_post_id.clone(),
-                Some(catalog.title.clone()),
+                Some(ForumTopicMetadata {
+                    title: Some(catalog.title.clone()),
+                    description: Some(catalog.description.clone()),
+                }),
                 ForumRenderedPost { body: catalog.body.clone() },
             )
             .await?;
@@ -462,7 +482,10 @@ async fn ensure_fixed_layout(
         world,
         &published.thread_id,
         &catalog_post_id,
-        Some(catalog.title.clone()),
+        Some(ForumTopicMetadata {
+            title: Some(catalog.title.clone()),
+            description: Some(catalog.description.clone()),
+        }),
         ForumRenderedPost { body: catalog.body },
         allow_content_update,
     )
@@ -486,7 +509,7 @@ async fn prove_fixed_post_body(
     world: auction_domain::SettlementWorld,
     thread_id: &str,
     post_id: &str,
-    title: Option<String>,
+    metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
     allow_update: bool,
 ) -> Result<(), ApplicationError> {
@@ -498,7 +521,7 @@ async fn prove_fixed_post_body(
         return Err(fixed_layout_error("write_authorization_required", false));
     }
     let proof = writer
-        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), title, expected.clone())
+        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), metadata, expected.clone())
         .await?;
     if proof.thread_id != thread_id || proof.post_id != post_id {
         return Err(fixed_layout_error("write_unknown", true));

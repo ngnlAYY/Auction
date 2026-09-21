@@ -123,14 +123,14 @@ impl EhentaiGateway {
         world: SettlementWorld,
         thread_id: &str,
         post_id: &str,
-        title: Option<&str>,
+        metadata: Option<&ForumTopicMetadata>,
         body: ForumRenderedPost,
     ) -> Result<ForumPublishedPost, EhentaiError> {
         let mut session = self.credentials.begin()?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
             match self
                 .client
-                .edit_post(world, thread_id, post_id, title, body.clone(), session.cookie())
+                .edit_post(world, thread_id, post_id, metadata, body.clone(), session.cookie())
                 .await
             {
                 Ok(published) => return Ok(published),
@@ -237,11 +237,11 @@ impl ForumPostWriter for EhentaiGateway {
         world: SettlementWorld,
         thread_id: String,
         post_id: String,
-        title: Option<String>,
+        metadata: Option<ForumTopicMetadata>,
         body: ForumRenderedPost,
     ) -> ApplicationFuture<'_, ForumPublishedPost> {
         Box::pin(async move {
-            EhentaiGateway::edit_post(self, world, &thread_id, &post_id, title.as_deref(), body)
+            EhentaiGateway::edit_post(self, world, &thread_id, &post_id, metadata.as_ref(), body)
                 .await
                 .map_err(EhentaiError::into_application_error)
         })

@@ -15,6 +15,7 @@ pub(super) const MAX_THREAD_ID_BYTES: usize = 64;
 pub(super) const MAX_FIXED_POST_ID_BYTES: usize = 32;
 pub(super) const MAX_THREAD_URL_BYTES: usize = 2048;
 pub(super) const MAX_RENDERED_TITLE_BYTES: usize = 512;
+pub(super) const MAX_RENDERED_DESCRIPTION_BYTES: usize = 512;
 pub(super) const MAX_RENDERED_BODY_BYTES: usize = 65_531;
 
 pub(super) fn valid_claim(claim: &ForumSyncClaim) -> bool {
@@ -40,6 +41,11 @@ pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
         && rendered.title == rendered.title.trim()
         && rendered.title.len() <= MAX_RENDERED_TITLE_BYTES
         && !rendered.title.chars().any(char::is_control)
+        && valid_text(&rendered.description, MAX_RENDERED_DESCRIPTION_BYTES)
+        && rendered
+            .legacy_title
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_RENDERED_TITLE_BYTES))
         && !rendered.body.trim().is_empty()
         && rendered.body.len() <= MAX_RENDERED_BODY_BYTES
         && !rendered
