@@ -5,7 +5,7 @@ use auction_application::{
     ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSystemLogEntry,
     PublicEquipmentGameLink, forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
-use auction_domain::AuctionId;
+use auction_domain::{AuctionId, SettlementWorld};
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -14,6 +14,8 @@ use crate::clients::ehentai::PRODUCTION_ENDPOINT;
 const MAX_LOTS: usize = 10_000;
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
+const FORUM_SEPARATOR: &str =
+    "=========================================================================================";
 
 /// 将同一数据库快照稳定渲染为经典论坛拍卖主题。
 pub fn render_auction_thread(
@@ -42,8 +44,12 @@ pub fn render_auction_thread(
             .then_with(|| left.0.code.cmp(&right.0.code))
     });
 
+    let world_title = match snapshot.world {
+        SettlementWorld::Main => "Main",
+        SettlementWorld::Isekai => "Isekai",
+    };
     let digest = Sha256::digest(snapshot.auction_id.as_uuid().as_bytes());
-    let title = format!(
+    let legacy_title = format!(
         "[Auction] HV#{} {} {:02x}{:02x}{:02x}{:02x}",
         snapshot.sequence,
         forum_world_name(snapshot.world),
@@ -52,57 +58,89 @@ pub fn render_auction_thread(
         digest[2],
         digest[3]
     );
-    if title.len() > MAX_TITLE_BYTES || title.chars().count() > 50 {
+    let title =
+        format!("[Auction] {world_title} Equipment Auction - Session {:03}", snapshot.sequence);
+    let description = snapshot.scheduled_end_at.map_or_else(
+        || {
+            format!(
+                "Bid Start:{} / Bid End:Not scheduled",
+                format_forum_time(snapshot.scheduled_open_at)
+            )
+        },
+        |scheduled_end_at| {
+            format!(
+                "Bid Start:{} / Bid End:{}",
+                format_forum_time(snapshot.scheduled_open_at),
+                format_forum_time(scheduled_end_at)
+            )
+        },
+    );
+    if title.len() > MAX_TITLE_BYTES
+        || title.chars().count() > 50
+        || legacy_title.len() > MAX_TITLE_BYTES
+        || description.len() > MAX_TITLE_BYTES
+    {
         return Err(ForumRenderError::InvalidSnapshot);
     }
 
     let mut body = String::new();
-    writeln!(&mut body, "[center][size=5][b]{title}[/b][/size]")
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    if let Some(public_url) = snapshot.public_url.as_deref() {
-        writeln!(&mut body, "[size=3][url={public_url}][b]Open live auction[/b][/url][/size]")
-            .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    }
+    // 采用参考主题的左对齐标题、分隔线、嵌套列表和代码块；拍品行仍保持纯文本形状，供目录回读解析。
     writeln!(
         &mut body,
-        "[size=1][color=#666666][b]Scheduled opening:[/b] {}[/color][/size]",
+        "[size=5][b][HV Auction System] {world_title} World Equipment Auction - Session {:03}[/b][/size]",
+        snapshot.sequence
+    )
+    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
+    body.push_str("[list]\n[*][b]World:[/b] ");
+    body.push_str(forum_world_name(snapshot.world));
+    body.push('\n');
+    writeln!(
+        &mut body,
+        "[*][b]Intake opens:[/b] {}",
         format_forum_time(snapshot.scheduled_open_at)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if let Some(opened_at) = snapshot.opened_at {
-        writeln!(
-            &mut body,
-            "[size=1][color=#666666][b]Opened:[/b] {}[/color][/size]",
-            format_forum_time(opened_at)
-        )
-        .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        writeln!(&mut body, "[*][b]Opened:[/b] {}", format_forum_time(opened_at))
+            .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
     if let Some(scheduled_end_at) = snapshot.scheduled_end_at {
+        writeln!(&mut body, "[*][b]Bidding deadline:[/b] {}", format_forum_time(scheduled_end_at))
+            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    }
+    if let Some(public_url) = snapshot.public_url.as_deref() {
         writeln!(
             &mut body,
-            "[size=1][color=#666666][b]Scheduled end:[/b] {}[/color][/size]",
-            format_forum_time(scheduled_end_at)
+            "[*][b]Public auction:[/b] [url={public_url}][b]Open live auction[/b][/url]"
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
-    writeln!(&mut body, "[/center]").map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "\n[size=3][b]Auction Rules and Bidding[/b][/size]\n\
+        "[/list]\n\
+         [size=3][b]Auction Rules and Bidding[/b][/size]\n\
          [list]\n\
          [*]The public auction page is authoritative for prices, leaders and deadlines.\n\
-         [*]Post one command per line. A normal bid looks like [b]One01 200k[/b].\n\
+         [*][b]Bidding commands:[/b]\n\
+         [list]\n\
+         [*]Post one command per line.\n\
+         [*]Example: [code]One01 200k[/code]\n\
          [*]Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
-         [*]Enable MoogleMail outbid notices with [b]One01 notify mm[/b].\n\
+         [*]Enable MoogleMail outbid notices by posting this command:\n\
+         [code]One01 notify mm[/code]\n\
          [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
+         [/list]\n\
          [/list]\n",
     );
+    writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
 
     let nominal_end = snapshot.scheduled_end_at;
     let mut last_category = None::<String>;
     for (lot, equipment_link) in lots {
         if last_category.as_deref() != Some(lot.category.as_str()) {
             if last_category.is_some() {
-                body.push('\n');
+                // 分类之间保留两行空白，避免长目录中标题和上一类最后一件装备粘连。
+                body.push_str("\n\n");
             }
             // 分类标题与下一行的 `[code]` 行首是论坛回读解析契约，样式调整不能改变其纯文本形状。
             writeln!(&mut body, "[size=3][b]{}[/b][/size]", category_label(&lot.category))
@@ -175,8 +213,9 @@ pub fn render_auction_thread(
             return Err(ForumRenderError::BodyTooLarge);
         }
     }
+    writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "\n[size=1][color=#666666][i]The public auction page remains authoritative for live auction state.[/i][/color][/size]\n",
+        "[size=1][color=#666666][i]The public auction page remains authoritative for live auction state.[/i][/color][/size]\n",
     );
     writeln!(
         &mut body,
@@ -187,7 +226,7 @@ pub fn render_auction_thread(
     if body.len() > MAX_BODY_BYTES {
         return Err(ForumRenderError::BodyTooLarge);
     }
-    Ok(ForumRenderedThread { title, body })
+    Ok(ForumRenderedThread { title, description, legacy_title: Some(legacy_title), body })
 }
 
 /// 无状态的论坛主题渲染器，供 Worker 通过窄端口调用。

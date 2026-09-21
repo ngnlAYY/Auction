@@ -192,6 +192,8 @@ pub(super) fn valid_cookie(cookie: &EhentaiCookie) -> bool {
 pub(super) fn valid_rendered_thread(rendered: &ForumRenderedThread) -> bool {
     let body = rendered.body.trim();
     valid_topic_title(&rendered.title)
+        && valid_topic_description(&rendered.description)
+        && rendered.legacy_title.as_deref().is_none_or(valid_topic_title)
         && !body.is_empty()
         && rendered.body.len() <= MAXIMUM_FORUM_BODY_BYTES
         && rendered
@@ -215,6 +217,14 @@ pub(super) fn valid_topic_title(title: &str) -> bool {
         && title == title.trim()
         && title.chars().count() <= MAXIMUM_FORUM_TITLE_RUNES
         && title.chars().all(|character| !character.is_control())
+}
+
+pub(super) fn valid_topic_description(description: &str) -> bool {
+    description == description.trim()
+        && description.len() <= MAXIMUM_FORM_FIELD_BYTES
+        && !description
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\t'))
 }
 
 pub(super) fn valid_form_field(name: &str, value: &str) -> bool {

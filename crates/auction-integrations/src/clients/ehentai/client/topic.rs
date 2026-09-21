@@ -71,7 +71,7 @@ impl EhentaiClient {
         let operation = EhentaiOperation::CreateTopic;
         let mut values = form.values;
         set_form_value(&mut values, "TopicTitle", rendered.title);
-        set_form_value(&mut values, "TopicDesc", String::new());
+        set_form_value(&mut values, "TopicDesc", rendered.description);
         set_form_value(&mut values, "Post", rendered.body);
         set_form_value(&mut values, "f", board_id.to_string());
         set_form_value(&mut values, "REPLIER", "1".to_owned());
@@ -263,7 +263,7 @@ impl EhentaiClient {
         form: PostForm,
         board_id: i32,
         thread_id: &str,
-        edit: Option<(&str, Option<&str>)>,
+        edit: Option<(&str, Option<&str>, Option<&str>)>,
         rendered: ForumRenderedPost,
         cookie: &EhentaiCookie,
     ) -> Result<ForumPublishedPost, EhentaiError> {
@@ -276,16 +276,20 @@ impl EhentaiClient {
         set_form_value(&mut values, "t", thread_id.to_owned());
         set_form_value(&mut values, "Post", rendered.body);
         set_form_value(&mut values, "st", "0".to_owned());
-        if let Some((post_id, _)) = edit {
+        if let Some((post_id, _, _)) = edit {
             set_form_value(&mut values, "p", post_id.to_owned());
             set_form_value(&mut values, "dosubmit", "Submit Modified Post".to_owned());
         } else {
             values.retain(|(name, _)| name != "p");
             set_form_value(&mut values, "dosubmit", "Add Reply".to_owned());
         }
-        if let Some(title) = edit.and_then(|(_, title)| title) {
-            set_form_value(&mut values, "TopicTitle", title.to_owned());
-            set_form_value(&mut values, "TopicDesc", String::new());
+        if let Some((_, title, description)) = edit {
+            if let Some(title) = title {
+                set_form_value(&mut values, "TopicTitle", title.to_owned());
+            }
+            if let Some(description) = description {
+                set_form_value(&mut values, "TopicDesc", description.to_owned());
+            }
         }
         let (status, location, body) =
             self.submit_form(&form.action, &form.referer, values, operation, cookie).await?;
@@ -317,7 +321,7 @@ impl EhentaiClient {
         let Some(proof) = proof else {
             return Err(EhentaiError::write_unknown(operation));
         };
-        if edit.is_some_and(|(expected, _)| proof.post_id != expected) {
+        if edit.is_some_and(|(expected, _, _)| proof.post_id != expected) {
             return Err(EhentaiError::write_unknown(operation));
         }
         Ok(proof)

@@ -15,7 +15,7 @@ use auction_application::{
     AdminCredentialRuntimeOwnership, AdminCredentialRuntimeWriter, AdminForumPreviewResult,
     ApplicationError, ApplicationFuture, ForumCredentialAvailability, ForumPostWriter,
     ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost,
-    ForumRenderedThread, ForumTopicReader,
+    ForumRenderedThread, ForumTopicMetadata, ForumTopicReader,
 };
 use auction_domain::SettlementWorld;
 use chrono::Utc;

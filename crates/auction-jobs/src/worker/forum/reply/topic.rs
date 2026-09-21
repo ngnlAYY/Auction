@@ -1,8 +1,8 @@
 //! 论坛主题读取、固定楼层校验、身份解析和目录/系统日志刷新。
 
 use auction_application::{
-    ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, forum_catalog_marker,
-    forum_system_log_marker,
+    ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, ForumTopicMetadata,
+    forum_catalog_marker, forum_system_log_marker,
 };
 
 use super::*;
@@ -322,7 +322,10 @@ async fn refresh_fixed_posts(
             runtime,
             &topic,
             &topic.catalog_post_id,
-            Some(catalog.title.clone()),
+            Some(ForumTopicMetadata {
+                title: Some(catalog.title.clone()),
+                description: Some(catalog.description.clone()),
+            }),
             ForumRenderedPost { body: catalog.body.clone() },
         )
         .await?;
@@ -368,7 +371,7 @@ async fn reconcile_or_edit_fixed_post(
     runtime: &ForumReplyRuntime,
     topic: &auction_application::ForumReplyTopic,
     post_id: &str,
-    title: Option<String>,
+    metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
 ) -> Result<(), ApplicationError> {
     let current = runtime
@@ -388,7 +391,7 @@ async fn reconcile_or_edit_fixed_post(
             topic.world,
             topic.thread_id.clone(),
             post_id.to_owned(),
-            title,
+            metadata,
             expected.clone(),
         )
         .await?;
