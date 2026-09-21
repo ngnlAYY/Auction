@@ -18,7 +18,7 @@ pub(super) struct Document {
 
 pub(super) fn documents(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
     let mut paths = BTreeSet::new();
-    for entry in ["README.md", "AGENTS.md"] {
+    for entry in ["README.md", "AGENTS.md", "DESIGN.md"] {
         let path = root.join(entry);
         if !path.is_file() {
             return Err(format!("缺少正式入口：{entry}"));
