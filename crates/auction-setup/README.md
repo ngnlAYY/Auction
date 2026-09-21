@@ -14,6 +14,12 @@
 此时进程留待操作者停止并核对目标目录，不能靠再次验证部署码解除状态；停止时返回失败而非成功。
 启动时只有输出路径明确不存在才绑定监听器，无法读取元数据也失败关闭。
 表单分别接收数据库主机、端口、账号、密码和库名，再映射到 `auction-config` 的连接模型。
+正式服务另接受可省略的 `public_listener_port`/`admin_listener_port`，默认 8090/8091；传给
+配置 owner 校验非零且不同后，仅生成回环监听地址，Admin 角色与 runtime 同步。它们不改变
+本次设置服务的 listener 或 Origin/代理门禁；API 不探测端口占用和绑定权限。
+可省略的 `schedule` 对象接受时区与预览/开拍/结束的星期及时间，缺省沿用旧计划；顶层
+`schedule_enabled` 控制启用。HTTP 只映射到配置 owner 的 `AuctionScheduleConfig`，世界固定为
+`main`、`isekai`，即使关闭也在连库前校验候选；不修改已有拍卖或在设置接口中执行调度。
 连接串生成、配置模板、敏感文件写入和三角色校验由 `auction-config` 拥有，数据库连通性由
 `auction-storage` 检查。默认分体完成后进程退出；随后用 `auctionctl deployment-check` 严格预检，
 由 `auctionctl deployment start` 在三角色停机门禁通过后迁移并正式启动；也可先用受保护的

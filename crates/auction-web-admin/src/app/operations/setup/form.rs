@@ -101,11 +101,14 @@ pub(super) fn ConfigurationForm(
                 ("setup-database", SetupField::DATABASE.to_vec()),
                 ("setup-admin", SetupField::ADMIN.to_vec()),
                 ("setup-basic", SetupField::BASIC.to_vec()),
+                ("setup-listener", SetupField::LISTENER.to_vec()),
             ] {
                 fieldset { key: "{legend}", disabled: busy,
                     legend { {t!(legend)} }
                     if legend == "setup-database" {
                         p { class: "admin-setup__hint", {t!("setup-database-help")} }
+                    } else if legend == "setup-listener" {
+                        p { class: "admin-setup__hint", {t!("setup-listener-help")} }
                     }
                     div { class: "admin-setup__grid",
                         for field in fields {
@@ -128,21 +131,31 @@ pub(super) fn ConfigurationForm(
                                 {t!("setup-metrics")}
                             }
                             p { id: "setup-metrics-help", class: "admin-setup__hint", {t!("setup-metrics-help")} }
-                            label { class: "admin-setup__check",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: draft.read().schedule_enabled,
-                                    aria_describedby: "setup-schedule-help",
-                                    onchange: move |event| {
-                                        if busy { return; }
-                                        draft.write().schedule_enabled = event.checked();
-                                        notice.set(None);
-                                    },
-                                }
-                                {t!("setup-schedule")}
-                            }
-                            p { id: "setup-schedule-help", class: "admin-setup__hint", {t!("setup-schedule-help")} }
                         }
+                    }
+                }
+            }
+            fieldset { disabled: busy,
+                legend { {t!("setup-schedule-settings")} }
+                label { class: "admin-setup__check",
+                    input {
+                        r#type: "checkbox",
+                        checked: draft.read().schedule_enabled,
+                        aria_describedby: "setup-schedule-help",
+                        onchange: move |event| {
+                            if pending.read().is_some() || outcome_unknown() { return; }
+                            draft.write().schedule_enabled = event.checked();
+                            issues.write().retain(|issue| !SetupField::SCHEDULE.contains(&issue.field));
+                            notice.set(None);
+                        },
+                    }
+                    {t!("setup-schedule")}
+                }
+                p { id: "setup-schedule-help", class: "admin-setup__hint", {t!("setup-schedule-help")} }
+                SetupInput { field: SetupField::ScheduleTimezone, draft, issues, busy }
+                div { class: "admin-setup__grid",
+                    for field in SetupField::SCHEDULE.into_iter().skip(1) {
+                        SetupInput { key: "{field.id()}", field, draft, issues, busy }
                     }
                 }
             }
@@ -160,6 +173,20 @@ pub(super) fn ConfigurationForm(
                 div { id: "setup-advanced-fields", hidden: !advanced_open(),
                     fieldset { disabled: busy,
                         legend { {t!("setup-advanced")} }
+                        button {
+                            class: "admin-setup__reset",
+                            r#type: "button",
+                            disabled: busy,
+                            aria_describedby: "setup-advanced-reset-help",
+                            onclick: move |_| {
+                                if pending.read().is_some() || outcome_unknown() { return; }
+                                draft.write().reset_advanced();
+                                issues.write().retain(|issue| !SetupField::ADVANCED.contains(&issue.field));
+                                notice.set(None);
+                            },
+                            {t!("setup-advanced-reset")}
+                        }
+                        p { id: "setup-advanced-reset-help", class: "admin-setup__hint", {t!("setup-advanced-reset-help")} }
                         div { class: "admin-setup__grid",
                             for field in SetupField::ADVANCED {
                                 SetupInput { key: "{field.id()}", field, draft, issues, busy }

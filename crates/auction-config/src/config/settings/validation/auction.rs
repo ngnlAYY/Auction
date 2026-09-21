@@ -14,12 +14,19 @@ pub(crate) fn validate_auction(config: &AuctionConfig) -> Result<(), ConfigError
         return Err(ConfigError::InvalidAuctionConfig("settlement.recovery.mode 只能是 remind_v1"));
     }
     if config.schedule.enabled {
-        validate_schedule(&config.schedule)?;
+        config.schedule.validate()?;
     }
     config
         .policy()?
         .validate()
         .map_err(|_| ConfigError::InvalidAuctionConfig("经济、结算或恢复字段边界无效"))
+}
+
+impl AuctionScheduleConfig {
+    /// 校验本地周计划，即使暂未启用也可检查候选；首次设置与正式 loader 共用同一规则。
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        validate_schedule(self)
+    }
 }
 
 fn validate_schedule(schedule: &AuctionScheduleConfig) -> Result<(), ConfigError> {

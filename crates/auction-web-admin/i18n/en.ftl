@@ -1,5 +1,37 @@
 # Admin English copy.
 
+setup-listener = Service listening ports
+setup-listener-help = Both services bind only to 127.0.0.1. These ports do not change the current setup endpoint or automatically update the site origins above. Update reverse proxy upstreams or SSH tunnels accordingly. Checking does not probe port availability or binding permissions.
+setup-public-listener-port = Public listening port
+setup-public-listener-port-help = An integer from 1 to 65535, default 8090. Saved as 127.0.0.1:port; must differ from Admin. Ports below 1024 may require additional permissions.
+setup-admin-listener-port = Admin listening port
+setup-admin-listener-port-help = An integer from 1 to 65535, default 8091. Written to both Admin role and runtime configuration; must differ from Public. Ports below 1024 may require additional permissions.
+setup-listener-conflict = Public and Admin listening ports must be different.
+setup-advanced-reset = Restore advanced defaults
+setup-advanced-reset-help = Restores only the log filter, Worker concurrency and polling, and realtime polling. Credentials, site origins, listening ports, and basic settings are unchanged. Check the settings again afterward.
+setup-schedule-settings = Weekly auction schedule
+setup-schedule-timezone = Schedule time zone
+setup-schedule-timezone-help = Default UTC. Enter an IANA time zone, such as Asia/Shanghai, up to 128 UTF-8 bytes. Times below use this zone, not the browser's zone. The server checks time zone validity.
+setup-schedule-preview-day = Preview weekday
+setup-schedule-preview-day-help = Default Thursday. All stages must fall within the same Monday–Sunday week.
+setup-schedule-preview-time = Preview time
+setup-schedule-preview-time-help = Local HH:MM, default 22:00. Preview must precede opening by at least 120 minutes.
+setup-schedule-open-day = Opening weekday
+setup-schedule-open-day-help = Default Friday. Must not precede the preview weekday.
+setup-schedule-open-time = Opening time
+setup-schedule-open-time-help = Local HH:MM, default 00:00. At least 120 minutes after preview and before the nominal end.
+setup-schedule-end-day = Nominal ending weekday
+setup-schedule-end-day-help = Default Saturday. Must be in the same week as preview and opening; dates do not wrap to the next week.
+setup-schedule-end-time = Nominal ending time
+setup-schedule-end-time-help = Local HH:MM, default 12:00. Must be after opening; soft-close rules can still extend the actual end.
+setup-day-monday = Monday
+setup-day-tuesday = Tuesday
+setup-day-wednesday = Wednesday
+setup-day-thursday = Thursday
+setup-day-friday = Friday
+setup-day-saturday = Saturday
+setup-day-sunday = Sunday
+setup-schedule-order = In the same Monday–Sunday week, preview must be at least 120 minutes before opening, and opening must precede the nominal end. Cross-week schedules are not supported.
 setup-title = First-run setup
 setup-intro = Enter the one-time deployment code from the terminal. Use a local connection, SSH tunnel, or an explicitly authorized HTTPS proxy.
 setup-confirm-initialize = I confirm this is a dedicated empty PostgreSQL database and authorize initialization and service startup after saving.
@@ -62,7 +94,7 @@ setup-public-origin-help = For example, https://auction.example.com. Enter the e
 setup-admin-origin-help = For example, https://admin.example.com. Follow the public origin rules and use a different origin.
 setup-start-price-help = From 1000 to 1000000000, in multiples of 1000. Sets the default starting price for future auctions.
 setup-metrics-help = Controls local metrics endpoints. Restrict access to trusted operators; do not expose them through the reverse proxy.
-setup-schedule-help = Off by default. When enabled, Worker creates auctions using the generated schedule. Review it before starting services.
+setup-schedule-help = Off by default. The schedule below is still saved and validated while off, without creating auctions. When enabled, Worker schedules future weekly auctions for main and isekai without changing existing auctions. Restoring advanced defaults does not change the schedule.
 setup-log-filter-help = Default: info,auction=debug. Maximum 256 UTF-8 bytes. The server checks the full syntax; do not enter credentials.
 setup-worker-concurrency-help = An integer from 1 to 8, default 4. Applies to this PostgreSQL deployment only.
 setup-worker-poll-help = An integer from 11 to 300 seconds, default 15.

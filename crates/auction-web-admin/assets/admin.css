@@ -4187,7 +4187,8 @@
   gap: var(--space-2);
 }
 
-.admin-setup__toggle {
+.admin-setup__toggle,
+.admin-setup__reset {
   justify-self: start;
 }
 
@@ -4211,11 +4212,13 @@
   overflow-wrap: anywhere;
 }
 
-.admin-setup__field input {
+.admin-setup__field input,
+.admin-setup__field select {
   scroll-margin-block: var(--space-5);
 }
 
-.admin-setup__form input:not([type="checkbox"]) {
+.admin-setup__form input:not([type="checkbox"]),
+.admin-setup__form select {
   inline-size: 100%;
   min-block-size: var(--size-target);
   padding: var(--space-2);

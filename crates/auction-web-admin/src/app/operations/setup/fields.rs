@@ -28,26 +28,45 @@ pub(super) fn SetupInput(
     rsx! {
         div { class: "admin-setup__field",
             label { r#for: id, {t!(id)} }
-            input {
-                id,
-                r#type: field.input_type(),
-                inputmode: if bounds.is_some() { "numeric" } else if field.input_type() == "url" { "url" } else { "text" },
-                autocomplete: field.autocomplete(),
-                spellcheck: "false",
-                required: true,
-                disabled: busy,
-                min: bounds.map(|(minimum, _, _)| minimum.to_string()),
-                max: bounds.map(|(_, maximum, _)| maximum.to_string()),
-                step: bounds.map(|(_, _, step)| step.to_string()),
-                maxlength: field.maximum_bytes().map(|maximum| maximum as i64),
-                aria_invalid: invalid.to_string(),
-                aria_describedby: description,
-                value: draft.read().value(field).to_owned(),
-                oninput: move |event| {
-                    if busy { return; }
-                    draft.write().set(field, event.value());
-                    issues.write().retain(|issue| !field.related(issue.field));
-                },
+            if field.is_weekday() {
+                select {
+                    id,
+                    required: true,
+                    disabled: busy,
+                    aria_invalid: invalid.to_string(),
+                    aria_describedby: description.clone(),
+                    value: draft.read().value(field).to_owned(),
+                    oninput: move |event| {
+                        if busy { return; }
+                        draft.write().set(field, event.value());
+                        issues.write().retain(|issue| !field.related(issue.field));
+                    },
+                    for (value, label) in SetupField::WEEKDAYS {
+                        option { value, {t!(label)} }
+                    }
+                }
+            } else {
+                input {
+                    id,
+                    r#type: field.input_type(),
+                    inputmode: if bounds.is_some() { "numeric" } else if field.input_type() == "url" { "url" } else { "text" },
+                    autocomplete: field.autocomplete(),
+                    spellcheck: "false",
+                    required: true,
+                    disabled: busy,
+                    min: bounds.map(|(minimum, _, _)| minimum.to_string()),
+                    max: bounds.map(|(_, maximum, _)| maximum.to_string()),
+                    step: if field.is_schedule_time() { Some("60".to_owned()) } else { bounds.map(|(_, _, step)| step.to_string()) },
+                    maxlength: field.maximum_bytes().map(|maximum| maximum as i64),
+                    aria_invalid: invalid.to_string(),
+                    aria_describedby: description,
+                    value: draft.read().value(field).to_owned(),
+                    oninput: move |event| {
+                        if busy { return; }
+                        draft.write().set(field, event.value());
+                        issues.write().retain(|issue| !field.related(issue.field));
+                    },
+                }
             }
             p { id: help_id, class: "admin-setup__hint", {t!(&format!("{id}-help"))} }
             FieldError { id: error_id, message: error }

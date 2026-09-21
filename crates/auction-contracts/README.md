@@ -43,7 +43,12 @@
   装配根应传入自身的 `CARGO_PKG_VERSION`。
 - `ApiErrorResponse`：统一错误响应。
 - `SetupRequest` 与 `SetupResponse`：独立首次设置契约，前者包含 PostgreSQL 五字段
-  `database` 及默认 false 的 `confirm_initialize`，后者以 `initialize_and_start` 区分分体保存与合并后续初始化；
+  `database`、默认 8090/8091 的可省略 `public_listener_port`/`admin_listener_port`，以及默认 false
+  的 `confirm_initialize`；端口只选择正式回环监听，范围 1–65535 且必须不同，不推导 Origin。
+  前者另外接受可省略的 `schedule`（`SetupScheduleRequest`），含时区与三组星期/时间，省略对象或
+  单项时沿用 UTC、周四 22:00 预览、周五 00:00 开拍、周六 12:00 结束；启用仍由原顶层
+  `schedule_enabled` 决定。星期使用英文完整名称，时间为 `HH:MM`；不开放 `worlds`/`managed`。
+  后者以 `initialize_and_start` 区分分体保存与合并后续初始化；
   `completed` 只确认配置保存，不承诺迁移或 readiness。正式 Admin 不挂载设置 API。
 - `AdminRuntimeConfigResponse`：runtime JSON 文档、fingerprint 和重启要求的稳定信封；文档新增
   `operations` 六组非敏感候选（含 `mail` 邮件预算），字段闭集由应用 owner 定义，cron 语法由配置

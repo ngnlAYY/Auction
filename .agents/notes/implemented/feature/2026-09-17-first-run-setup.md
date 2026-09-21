@@ -41,6 +41,26 @@ Status: implemented
 不加入 DTO；浏览器只检查可明确表达的格式/范围/字节边界，EnvFilter 语法及完整配置合法性仍由
 配置 owner 判定。修改输入清除上次检查结果，检查通过不表示已经保存或完成运行验收。
 
+后续参数调整仅新增正式 Public/Admin 监听端口，独立于精确 Origin 和当前设置入口；配置请求的
+`public_listener_port`/`admin_listener_port` 可省略并分别使用 8090/8091，显式值须为 1–65535
+且互不相同。配置 owner 只生成 `127.0.0.1:<port>`，Admin 角色 fallback 与 runtime 同步，
+不让 runtime 覆盖表单选择；不扩展任意绑定地址、代理信任或会话安全参数，完整 runtime 调整继续
+由正式 `/config` 拥有。页面新增监听端口分组，按数值检查相等（包括前导零），字段修改清除联动错误。
+检查不探测操作系统端口占用和权限，修改端口后反向代理/SSH 隧道以及直连 Origin 仍需操作者核对。
+“恢复进阶默认值”只恢复现有日志/Worker 并发/两种轮询草稿，保留凭据、Origin、监听端口和基础
+开关；清除进阶错误与旧检查结果，但不发请求或落盘，等待中及未知结果终态禁止此动作。
+
+随后按用户选择补齐每周排期，而不扩大到完整经济或安全配置面。`SetupScheduleRequest` 作为可省略
+的 `schedule` 对象持有 IANA 时区及三组星期/时间；对象和单项省略均沿用 UTC、周四 22:00、
+周五 00:00、周六 12:00，原顶层 `schedule_enabled` 保留。服务端映射成配置模型并固定世界
+`main`、`isekai`；`AuctionScheduleConfig::validate` 复用原周计划规则，不另建状态机。首次表单
+额外要求精确 `HH:MM`、时区至多 128 字节且关闭时也校验；普通 loader 的启用门禁和文本兼容范围
+不变。预览、开拍、结束必须在同一周内，预览至少提前两小时，开拍严格早于名义结束。
+计划写入公共 TOML，runtime 排期接管明确为 false；不回写已有拍卖快照、持久化任务游标或租约。
+页面新增独立排期组，星期用翻译后的下拉选项并发送英文值，时间不按浏览器时区换算；联动修改
+和开关变化清除旧排期提示，进阶默认值恢复不影响排期。IANA 时区有效性仍由服务器判定，浏览器
+只校验文本边界与本地周分钟顺序；代价是无效 IANA 名称在服务端检查时返回统一 `invalid_input`。
+
 三个接口使用同一浏览器传输实现，每次请求各有 10 秒总预算，不合并计算三个步骤，也不自动
 重试。保存超时、断连或响应无法识别时以 `setup_outcome_unknown` 保守分类；任一初始化接口收到
 该码后，页面清空部署码和全部密码，锁定输入、部署码验证、检查和保存。`outcome_unknown` 由页面
@@ -116,3 +136,20 @@ PostgreSQL-only 依赖组合下遇到既有 `auction-storage/src/database/admin_
 本轮后端收紧继续使用 `just verify`、`auction-admin-api` 的 `postgres,web-embed` 编译检查和
 `git diff --check`；HTTP 并发、元数据错误、发布后的同步失败和进程中断路径未做行为或故障注入验证，
 需要用户明确恢复测试范围后再补运行证据。
+
+后续监听端口与进阶默认值调整已执行 `cargo fmt --all -- --check`、文档/仓库策略/布局/配置示例/i18n
+静态门禁、`git diff --check`、`cargo check --locked --workspace --all-targets`、
+`cargo check --locked -p auction-server --features postgres,web-embed`、Admin WASM check，以及
+工作区 `--all-targets --all-features` 和 Admin WASM 的 Clippy（均 `--locked`、`-D warnings`），全部通过。
+未新增或运行测试、连接真实数据库、启动服务、执行浏览器流程或重建 Web/发布产物；端口冲突、
+旧请求默认值及生成 TOML 的行为只做源码核对，静态结果不证明实际绑定或运行验收。
+交付复核确认 `AppConfig::build` 优先选用 Admin runtime listener，因此此次同时更新角色 fallback
+和 runtime；合并模式的 `configure_admin` 只调整 Worker control socket，不会再次覆盖 HTTP 端口。
+
+周排期参数补充后再次通过上述格式、文档/仓库策略/布局/配置示例/i18n、workspace/server/Admin WASM
+编译以及工作区全 feature/Admin WASM Clippy 门禁，并核对 `ci/release.sh` 与原捕获 diff 完全一致。
+源码复核确认旧请求的排期缺省、两小时/同周顺序规则、关闭状态仍校验、完整公共 TOML 映射和 runtime
+接管关闭；这些不是行为测试证据。未运行单元/集成/浏览器测试、服务、数据库连接或重建发布产物，
+未声称 DST 周计划、真实自动创建拍卖或部署启动已验收。
+排期部分缺省的语义还核对了锁定的 `serde_derive 1.0.229` 实现：容器级 default 先构造默认实例，
+缺字段读取其对应成员，因此不另加七套字段默认函数；该结论来自依赖源码审阅，并非执行反序列化测试。
