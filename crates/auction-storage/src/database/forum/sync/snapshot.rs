@@ -148,6 +148,7 @@ async fn read_snapshot(
           AND forum_command.auction_id = l.auction_id
           AND forum_command.command_kind = 'bid'
          WHERE l.auction_id = $1
+           AND l.status IN ('live', 'sold', 'unsold')
          ORDER BY l.lot_number, l.id",
     )
     .bind(auction_id)
