@@ -65,6 +65,14 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 依次同步 `runtime/`、临时根目录，再执行 Linux `RENAME_NOREPLACE` 发布并同步目标父目录。
 发布前失败只清理本次临时目录；发布后父目录同步失败返回 `OutcomeUnknown`，保留目标供人工核对，
 不得删除或回滚。该流程仍要求父目录受信且不被并发替换，不将路径探测当作对恶意目录竞态的隔离。
+首次表单的 `public_listener_port`/`admin_listener_port` 必须非零且不同，只生成
+`127.0.0.1:<port>`，Admin 角色与 runtime listener 同步写入，避免 runtime 覆盖用户选择。
+它们不修改设置服务地址、浏览器 Origin 或代理信任策略，校验不探测端口占用与绑定权限。
+首次排期候选使用 `AuctionScheduleConfig::validate` 复用正式计划规则，不依赖数据库：IANA 时区、
+英文星期、同一周内至少提前两小时预览且开拍早于结束。首次表单额外要求精确 `HH:MM` 与时区
+128 字节上限，关闭时也校验；不改变普通 loader 仅在排期启用时校验的既有语义。
+计划写入公共 `[auction.schedule]`，生成的 runtime 明确保持 `operations.schedule.managed=false`，
+防止模板覆盖；只影响后续周拍卖，不改已有策略快照、游标或租约。
 
 ## 公共、角色、敏感与 runtime 文件结构
 

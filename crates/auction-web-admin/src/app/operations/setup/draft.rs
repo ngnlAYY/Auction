@@ -13,6 +13,15 @@ pub(super) enum SetupField {
     AdminConfirmation,
     PublicOrigin,
     AdminOrigin,
+    PublicListenerPort,
+    AdminListenerPort,
+    ScheduleTimezone,
+    SchedulePreviewDay,
+    SchedulePreviewTime,
+    ScheduleOpenDay,
+    ScheduleOpenTime,
+    ScheduleEndDay,
+    ScheduleEndTime,
     StartPrice,
     LogFilter,
     WorkerConcurrency,
@@ -31,11 +40,36 @@ impl SetupField {
     pub(super) const ADMIN: [Self; 3] =
         [Self::AdminActor, Self::AdminSecret, Self::AdminConfirmation];
     pub(super) const BASIC: [Self; 3] = [Self::PublicOrigin, Self::AdminOrigin, Self::StartPrice];
+    pub(super) const LISTENER: [Self; 2] = [Self::PublicListenerPort, Self::AdminListenerPort];
+    pub(super) const SCHEDULE: [Self; 7] = [
+        Self::ScheduleTimezone,
+        Self::SchedulePreviewDay,
+        Self::SchedulePreviewTime,
+        Self::ScheduleOpenDay,
+        Self::ScheduleOpenTime,
+        Self::ScheduleEndDay,
+        Self::ScheduleEndTime,
+    ];
+    pub(super) const WEEKDAYS: [(&'static str, &'static str); 7] = [
+        ("Monday", "setup-day-monday"),
+        ("Tuesday", "setup-day-tuesday"),
+        ("Wednesday", "setup-day-wednesday"),
+        ("Thursday", "setup-day-thursday"),
+        ("Friday", "setup-day-friday"),
+        ("Saturday", "setup-day-saturday"),
+        ("Sunday", "setup-day-sunday"),
+    ];
     pub(super) const ADVANCED: [Self; 4] =
         [Self::LogFilter, Self::WorkerConcurrency, Self::WorkerPoll, Self::RealtimePoll];
 
     pub(super) fn all() -> impl Iterator<Item = Self> {
-        Self::DATABASE.into_iter().chain(Self::ADMIN).chain(Self::BASIC).chain(Self::ADVANCED)
+        Self::DATABASE
+            .into_iter()
+            .chain(Self::ADMIN)
+            .chain(Self::BASIC)
+            .chain(Self::LISTENER)
+            .chain(Self::SCHEDULE)
+            .chain(Self::ADVANCED)
     }
 
     /// 控件 ID 复用既有标签键，辅助文案固定使用 `-help` 后缀。
@@ -51,6 +85,15 @@ impl SetupField {
             Self::AdminConfirmation => "setup-admin-confirmation",
             Self::PublicOrigin => "setup-public-origin",
             Self::AdminOrigin => "setup-admin-origin",
+            Self::PublicListenerPort => "setup-public-listener-port",
+            Self::AdminListenerPort => "setup-admin-listener-port",
+            Self::ScheduleTimezone => "setup-schedule-timezone",
+            Self::SchedulePreviewDay => "setup-schedule-preview-day",
+            Self::SchedulePreviewTime => "setup-schedule-preview-time",
+            Self::ScheduleOpenDay => "setup-schedule-open-day",
+            Self::ScheduleOpenTime => "setup-schedule-open-time",
+            Self::ScheduleEndDay => "setup-schedule-end-day",
+            Self::ScheduleEndTime => "setup-schedule-end-time",
             Self::StartPrice => "setup-start-price",
             Self::LogFilter => "setup-log-filter",
             Self::WorkerConcurrency => "setup-worker-concurrency",
@@ -61,7 +104,9 @@ impl SetupField {
 
     pub(super) const fn number_bounds(self) -> Option<(u64, u64, u64)> {
         match self {
-            Self::DatabasePort => Some((1, 65_535, 1)),
+            Self::DatabasePort | Self::PublicListenerPort | Self::AdminListenerPort => {
+                Some((1, 65_535, 1))
+            }
             Self::StartPrice => Some((1_000, 1_000_000_000, 1_000)),
             Self::WorkerConcurrency => Some((1, 8, 1)),
             Self::WorkerPoll => Some((11, 300, 1)),
@@ -78,6 +123,9 @@ impl SetupField {
             Self::DatabasePassword => Some(4096),
             Self::AdminSecret | Self::AdminConfirmation => Some(512),
             Self::LogFilter => Some(256),
+            Self::ScheduleTimezone => Some(128),
+            _ if self.is_weekday() => Some(9),
+            _ if self.is_schedule_time() => Some(5),
             _ => None,
         }
     }
@@ -86,6 +134,7 @@ impl SetupField {
         match self {
             Self::DatabasePassword | Self::AdminSecret | Self::AdminConfirmation => "password",
             Self::PublicOrigin | Self::AdminOrigin => "url",
+            _ if self.is_schedule_time() => "time",
             _ if self.number_bounds().is_some() => "number",
             _ => "text",
         }
@@ -99,20 +148,30 @@ impl SetupField {
         }
     }
 
-    /// 联动字段修改时一并清除旧错误，避免密码确认或 Origin 冲突提示过期。
+    pub(super) const fn is_weekday(self) -> bool {
+        matches!(self, Self::SchedulePreviewDay | Self::ScheduleOpenDay | Self::ScheduleEndDay)
+    }
+
+    pub(super) const fn is_schedule_time(self) -> bool {
+        matches!(self, Self::SchedulePreviewTime | Self::ScheduleOpenTime | Self::ScheduleEndTime)
+    }
+
+    /// 联动字段修改时一并清除旧错误，避免密码、Origin、端口或排期顺序提示过期。
     pub(super) fn related(self, other: Self) -> bool {
         self == other
             || (matches!(self, Self::AdminSecret | Self::AdminConfirmation)
                 && matches!(other, Self::AdminSecret | Self::AdminConfirmation))
             || (matches!(self, Self::PublicOrigin | Self::AdminOrigin)
                 && matches!(other, Self::PublicOrigin | Self::AdminOrigin))
+            || (Self::LISTENER.contains(&self) && Self::LISTENER.contains(&other))
+            || (Self::SCHEDULE.contains(&self) && Self::SCHEDULE.contains(&other))
     }
 }
 
 /// 固定字段集的短生命周期草稿；不实现 Debug，避免敏感输入被意外记录。
 #[derive(Clone, PartialEq)]
 pub(super) struct SetupDraft {
-    values: [String; 15],
+    values: [String; 24],
     pub(super) metrics_enabled: bool,
     pub(super) schedule_enabled: bool,
 }
@@ -128,6 +187,8 @@ impl Default for SetupDraft {
             (SetupField::DatabaseHost, "127.0.0.1"),
             (SetupField::DatabasePort, "5432"),
             (SetupField::DatabaseName, "auction"),
+            (SetupField::PublicListenerPort, "8090"),
+            (SetupField::AdminListenerPort, "8091"),
             (SetupField::StartPrice, "1000"),
             (SetupField::LogFilter, "info,auction=debug"),
             (SetupField::WorkerConcurrency, "4"),
@@ -135,6 +196,19 @@ impl Default for SetupDraft {
             (SetupField::RealtimePoll, "250"),
         ] {
             draft.set(field, value.to_owned());
+        }
+        // 排期草稿与首次 wire 的兼容默认值一致，恢复进阶参数不触碰这些值。
+        let schedule = auction_contracts::SetupScheduleRequest::default();
+        for (field, value) in [
+            (SetupField::ScheduleTimezone, schedule.timezone),
+            (SetupField::SchedulePreviewDay, schedule.preview_day),
+            (SetupField::SchedulePreviewTime, schedule.preview_time),
+            (SetupField::ScheduleOpenDay, schedule.open_day),
+            (SetupField::ScheduleOpenTime, schedule.open_time),
+            (SetupField::ScheduleEndDay, schedule.nominal_end_day),
+            (SetupField::ScheduleEndTime, schedule.nominal_end_time),
+        ] {
+            draft.set(field, value);
         }
         draft
     }
@@ -147,6 +221,14 @@ impl SetupDraft {
 
     pub(super) fn set(&mut self, field: SetupField, value: String) {
         self.values[field as usize] = value;
+    }
+
+    /// 只恢复性能与日志草稿；凭据、站点、监听端口和业务开关不受影响。
+    pub(super) fn reset_advanced(&mut self) {
+        let defaults = Self::default();
+        for field in SetupField::ADVANCED {
+            self.set(field, defaults.value(field).to_owned());
+        }
     }
 
     /// 完成部署后清空所有密码，包括仅用于浏览器确认、不进入 DTO 的重复输入。

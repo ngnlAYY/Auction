@@ -327,6 +327,36 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 `database_url` 表单字段。接口映射到配置层的独立模型，连接检查和落盘均使用同一校验与转换；
 保存结果为敏感 TOML 的 `[database]` 区块。其他管理员、origin 与基础/进阶字段保持既有语义。
 
+配置请求另外接受两个可省略的整数：`public_listener_port`（默认 8090）和
+`admin_listener_port`（默认 8091），范围均为 1–65535；零、越界或两个端口相同返回
+400 `invalid_input`，不自动修正。仅影响正式服务，分别生成 `127.0.0.1:<port>`；Admin 角色文件与
+`runtime/admin.toml` 的 listener 同步写入。当前设置服务的监听地址、`public_origin`/`admin_origin`、
+受信代理与 Cookie 策略均不随端口调整，反向代理/SSH 隧道须由操作者同步配置。校验不探测端口占用或
+绑定权限，检查通过不保证正式启动能绑定端口；旧请求省略新增字段时保持原有监听端口。
+页面将正式监听端口单独分组，按数值检查冲突并联动清除旧字段错误；“恢复进阶默认值”只重置
+日志过滤器、Worker 并发/轮询及实时轮询，保留凭据、Origin、端口和基础设置，并清除旧检查结果。
+该动作不发请求、不写配置，处理中及结果不确定时均禁用。
+
+配置请求还接受可省略的 `schedule` 对象，启用状态仍由原必填布尔 `schedule_enabled` 决定。
+整个对象或内部单项省略时使用下表默认值；显式空串、`null`、错误类型或未知字段失败关闭，不自动纠正。
+
+| `schedule` 字段 | 默认值 | 首次设置约束 |
+| --- | --- | --- |
+| `timezone` | `UTC` | 有效 IANA 时区，不超过 128 个 UTF-8 字节 |
+| `preview_day` / `preview_time` | `Thursday` / `22:00` | 预览星期与当地分钟时间 |
+| `open_day` / `open_time` | `Friday` / `00:00` | 开拍星期与当地分钟时间 |
+| `nominal_end_day` / `nominal_end_time` | `Saturday` / `12:00` | 名义结束星期与当地分钟时间 |
+
+星期只接受 `Monday` 至 `Sunday` 的完整英文名称，时间必须为精确 24 小时制 `HH:MM`。
+三个阶段在同一个周一至周日周期内按当地分钟排序，满足 `preview + 120 <= open < nominal_end`；
+不自动跨周或使用浏览器时区。服务端在连接数据库前复用配置 owner 的排期校验，非法输入返回
+400 `invalid_input`，即使 `schedule_enabled=false` 也必须保存合法候选；关闭不创建拍卖。
+完整计划保存到 `common.toml` 的 `[auction.schedule]`，世界固定为 `main`、`isekai`，表单不接受
+`worlds` 或 `managed`。生成的 runtime 明确保持 `operations.schedule.managed=false`，不覆盖公共计划；
+后续仅影响 Worker 新建的周拍卖，不改已有拍卖、任务游标或租约。页面星期使用五语言下拉框但发送英文值，
+时间使用分钟控件；格式/顺序错误可定位，修改排期或启用开关清除旧提示，恢复进阶默认值不影响排期。
+浏览器仅做时区文本边界检查，IANA 有效性与实际周计划仍由服务端判定。
+
 | 方法 | 路径 | 成功 | 明确失败 |
 | --- | --- | --- | --- |
 | GET/HEAD | `/setup` | 200，Admin WASM 初始化页 | 403 `setup_origin`，404/503（无资源） |

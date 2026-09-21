@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use auction_domain::{CREDIT_GRID, MAX_BID_AMOUNT};
 
-use crate::{AppConfig, PostgresConnectionConfig, Role};
+use crate::{AppConfig, AuctionScheduleConfig, PostgresConnectionConfig, Role};
 
 mod managed;
 pub use managed::managed_runtime_directory;
@@ -33,8 +33,13 @@ pub struct FirstRunConfig {
     pub admin_secret: String,
     pub public_origin: String,
     pub admin_origin: String,
+    /// 正式 Public 回环 TCP 端口；必须非零且与 Admin 不同。
+    pub public_listener_port: u16,
+    /// 正式 Admin 回环 TCP 端口；同时用于角色 fallback 与 runtime。
+    pub admin_listener_port: u16,
     pub metrics_enabled: bool,
-    pub schedule_enabled: bool,
+    /// 新拍卖使用的周计划；首次设置即使关闭排期也必须保存合法候选。
+    pub schedule: AuctionScheduleConfig,
     pub start_price: i64,
     pub log_filter: String,
     pub worker_concurrency: u32,
@@ -63,6 +68,22 @@ impl FirstRunConfig {
     /// 在触碰磁盘或数据库前校验表单闭集和部署边界。
     pub fn validate(&self) -> Result<(), FirstRunError> {
         self.database.connection_url().map_err(|_| FirstRunError::InvalidInput)?;
+        self.schedule.validate().map_err(|_| FirstRunError::InvalidInput)?;
+        // 首次表单只接受规范的分钟精度时间；不改写正式 loader 既有的文本兼容范围。
+        if self.schedule.timezone.len() > 128
+            || [
+                &self.schedule.preview_time,
+                &self.schedule.open_time,
+                &self.schedule.nominal_end_time,
+            ]
+            .iter()
+            .any(|value| {
+                !chrono::NaiveTime::parse_from_str(value, "%H:%M")
+                    .is_ok_and(|time| time.format("%H:%M").to_string() == value.as_str())
+            })
+        {
+            return Err(FirstRunError::InvalidInput);
+        }
         if self.admin_actor.is_empty()
             || self.admin_actor.len() > 128
             || self.admin_actor.contains([':', '\r', '\n', '\0'])
@@ -71,6 +92,9 @@ impl FirstRunConfig {
             || self.public_origin == self.admin_origin
             || !valid_origin(&self.public_origin)
             || !valid_origin(&self.admin_origin)
+            || self.public_listener_port == 0
+            || self.admin_listener_port == 0
+            || self.public_listener_port == self.admin_listener_port
             || !(CREDIT_GRID..=MAX_BID_AMOUNT).contains(&self.start_price)
             || self.start_price % CREDIT_GRID != 0
             || self.log_filter.is_empty()
@@ -155,11 +179,27 @@ impl FirstRunConfig {
         let mut common = template(include_str!("../../../../ops/config/examples/common.toml"))?;
         common["log_filter"] = Value::String(self.log_filter.clone());
         common["metrics"]["enabled"] = Value::Boolean(self.metrics_enabled);
-        common["auction"]["schedule"]["enabled"] = Value::Boolean(self.schedule_enabled);
+        common["auction"]["schedule"]["enabled"] = Value::Boolean(self.schedule.enabled);
+        for (key, value) in [
+            ("timezone", &self.schedule.timezone),
+            ("preview_day", &self.schedule.preview_day),
+            ("preview_time", &self.schedule.preview_time),
+            ("open_day", &self.schedule.open_day),
+            ("open_time", &self.schedule.open_time),
+            ("nominal_end_day", &self.schedule.nominal_end_day),
+            ("nominal_end_time", &self.schedule.nominal_end_time),
+        ] {
+            common["auction"]["schedule"][key] = Value::String(value.clone());
+        }
+        common["auction"]["schedule"]["worlds"] =
+            Value::Array(self.schedule.worlds.iter().cloned().map(Value::String).collect());
         common["auction"]["economics"]["start_price"] = Value::Integer(self.start_price);
         write_toml(directory.join("common.toml"), &common, 0o640)?;
 
         let mut public = template(include_str!("../../../../ops/config/examples/public.toml"))?;
+        // 首次部署只调整回环端口；不从浏览器 Origin 推导监听地址或扩大访问范围。
+        public["listener"]["address"] =
+            Value::String(format!("127.0.0.1:{}", self.public_listener_port));
         public["http_security"]["allowed_origins"] =
             Value::Array(vec![Value::String(self.public_origin.clone())]);
         public["http_security"]["cookie_secure"] =
@@ -171,6 +211,8 @@ impl FirstRunConfig {
         write_toml(directory.join("public.toml"), &public, 0o640)?;
 
         let mut admin = template(include_str!("../../../../ops/config/examples/admin.toml"))?;
+        admin["listener"]["address"] =
+            Value::String(format!("127.0.0.1:{}", self.admin_listener_port));
         admin["http_security"]["allowed_origins"] =
             Value::Array(vec![Value::String(self.admin_origin.clone())]);
         admin["http_security"]["cookie_secure"] =
@@ -205,6 +247,11 @@ impl FirstRunConfig {
             .map_err(|_| FirstRunError::Io)?;
         let mut runtime =
             template(include_str!("../../../../ops/config/examples/runtime/admin.toml"))?;
+        // 首次排期由公共文件拥有，不能被 runtime 模板中的候选意外接管。
+        runtime["operations"]["schedule"]["managed"] = Value::Boolean(false);
+        // 正式 Admin 优先读取 runtime listener，必须与角色文件的 fallback 同步。
+        runtime["listener"]["address"] =
+            Value::String(format!("127.0.0.1:{}", self.admin_listener_port));
         runtime["metrics"]["enabled"] = Value::Boolean(self.metrics_enabled);
         runtime["security"]["allowed_origins"] =
             Value::Array(vec![Value::String(self.admin_origin.clone())]);

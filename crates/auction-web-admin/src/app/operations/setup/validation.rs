@@ -2,7 +2,8 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use auction_contracts::{SetupDatabaseRequest, SetupRequest};
+use auction_contracts::{SetupDatabaseRequest, SetupRequest, SetupScheduleRequest};
+use chrono::{NaiveTime, Timelike};
 use url::{Host, Url};
 
 use super::draft::{SetupDraft, SetupField};
@@ -34,8 +35,19 @@ pub(super) fn validate(draft: &SetupDraft) -> Result<SetupRequest, Vec<SetupIssu
         admin_secret: draft.value(SetupField::AdminSecret).to_owned(),
         public_origin: draft.value(SetupField::PublicOrigin).to_owned(),
         admin_origin: draft.value(SetupField::AdminOrigin).to_owned(),
+        public_listener_port: number(draft, SetupField::PublicListenerPort)?,
+        admin_listener_port: number(draft, SetupField::AdminListenerPort)?,
         metrics_enabled: draft.metrics_enabled,
         schedule_enabled: draft.schedule_enabled,
+        schedule: SetupScheduleRequest {
+            timezone: draft.value(SetupField::ScheduleTimezone).to_owned(),
+            preview_day: draft.value(SetupField::SchedulePreviewDay).to_owned(),
+            preview_time: draft.value(SetupField::SchedulePreviewTime).to_owned(),
+            open_day: draft.value(SetupField::ScheduleOpenDay).to_owned(),
+            open_time: draft.value(SetupField::ScheduleOpenTime).to_owned(),
+            nominal_end_day: draft.value(SetupField::ScheduleEndDay).to_owned(),
+            nominal_end_time: draft.value(SetupField::ScheduleEndTime).to_owned(),
+        },
         start_price: number(draft, SetupField::StartPrice)?,
         log_filter: draft.value(SetupField::LogFilter).to_owned(),
         worker_concurrency: number(draft, SetupField::WorkerConcurrency)?,
@@ -53,14 +65,35 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
     if field.maximum_bytes().is_some_and(|maximum| value.len() > maximum) {
         return Some("setup-field-invalid");
     }
-    if let Some((minimum, maximum, step)) = field.number_bounds() {
-        return (!value.bytes().all(|byte| byte.is_ascii_digit())
+    if let Some((minimum, maximum, step)) = field.number_bounds()
+        && (!value.bytes().all(|byte| byte.is_ascii_digit())
             || !value
                 .parse::<u64>()
                 .is_ok_and(|number| (minimum..=maximum).contains(&number) && number % step == 0))
-        .then_some("setup-field-invalid");
+    {
+        return Some("setup-field-invalid");
+    }
+    if SetupField::LISTENER.contains(&field)
+        && let (Ok(public), Ok(admin)) = (
+            draft.value(SetupField::PublicListenerPort).parse::<u16>(),
+            draft.value(SetupField::AdminListenerPort).parse::<u16>(),
+        )
+        && public == admin
+    {
+        // 按数值比较，避免前导零绕过两个回环监听器的端口互斥。
+        return Some("setup-listener-conflict");
+    }
+    if field == SetupField::ScheduleOpenTime
+        && let Some(key) = schedule_order_issue(draft)
+    {
+        return Some(key);
     }
     let valid = match field {
+        SetupField::ScheduleTimezone => value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'+')),
+        _ if field.is_weekday() => SetupField::WEEKDAYS.iter().any(|(day, _)| *day == value),
+        _ if field.is_schedule_time() => schedule_time(value).is_some(),
         SetupField::DatabaseHost => database_text(value) && valid_host(value),
         SetupField::DatabaseUsername | SetupField::DatabasePassword => database_text(value),
         SetupField::DatabaseName => database_text(value) && !matches!(value, "." | ".."),
@@ -81,6 +114,24 @@ fn issue(draft: &SetupDraft, field: SetupField) -> Option<&'static str> {
         _ => true,
     };
     (!valid).then_some("setup-field-invalid")
+}
+
+/// 页面只提示本地周内的分钟顺序；IANA 时区有效性和真实排期由服务端决定。
+fn schedule_order_issue(draft: &SetupDraft) -> Option<&'static str> {
+    let minute = |day, time| {
+        let day = SetupField::WEEKDAYS.iter().position(|(value, _)| *value == draft.value(day))?;
+        let time = schedule_time(draft.value(time))?;
+        Some(u32::try_from(day).ok()? * 24 * 60 + time.hour() * 60 + time.minute())
+    };
+    let preview = minute(SetupField::SchedulePreviewDay, SetupField::SchedulePreviewTime)?;
+    let open = minute(SetupField::ScheduleOpenDay, SetupField::ScheduleOpenTime)?;
+    let end = minute(SetupField::ScheduleEndDay, SetupField::ScheduleEndTime)?;
+    (preview + 120 > open || open >= end).then_some("setup-schedule-order")
+}
+
+fn schedule_time(value: &str) -> Option<NaiveTime> {
+    let time = NaiveTime::parse_from_str(value, "%H:%M").ok()?;
+    (time.format("%H:%M").to_string() == value).then_some(time)
 }
 
 fn database_text(value: &str) -> bool {

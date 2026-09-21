@@ -137,6 +137,10 @@ Public/Admin 为分离的 Dioxus CSR SPA，独立路由、译文和产物；共�
 首次部署页由 Admin 的 `operations/setup.rs` 编排，`operations/setup/` 拆分短生命周期草稿、字段
 校验、控件与配置提交；不使用普通 Admin 会话，不持久化凭据。数据库与完整配置校验仍由
 `auction-setup`/`auction-config` 拥有，浏览器的密码确认和字段提示不扩展配置 DTO。
+首次表单的正式 Public/Admin 端口通过独立 setup DTO 传给配置 owner，只生成回环 listener，Admin
+角色与 runtime 同步；不改变设置入口或代理信任范围，其他安全配置继续由正式配置 owner 管理。
+首次周排期由独立 setup DTO 映射到 `AuctionScheduleConfig`，复用配置规则且关闭时也校验候选；
+公共文件拥有生成计划，runtime 不接管。Web 只给出本地时间/顺序提示，不执行调度或改变已有拍卖。
 REST DTO 与 WebSocket v1 由 contracts 定义。事件是重读提示，跳号或重连通过 HTTP Catch-up/权威快照恢复；
 当前没有 SSE 路由或外部广播 sink。实时 sequence、版本、帧限制与关闭原因见[事件契约](contracts/events.md)。
 
