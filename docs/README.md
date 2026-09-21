@@ -10,6 +10,7 @@
 | 文档 | 仓库位置 |
 | --- | --- |
 | [Auction Rust](../README.md) | `README.md` |
+| [Auction Rust 系统设计](../DESIGN.md) | `DESIGN.md` |
 | [AGENTS.md — Auction Rust](../AGENTS.md) | `AGENTS.md` |
 | [系统架构与模块所有权](architecture.md) | `docs/architecture.md` |
 | [技术栈与取舍](tech-stack.md) | `docs/tech-stack.md` |
