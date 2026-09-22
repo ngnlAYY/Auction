@@ -24,7 +24,7 @@ pub(crate) struct SettlementSendWirePayload {
     pub(crate) equipment_secret_refs: Vec<SettlementEquipmentSecretReference>,
 }
 
-/// 旧版 BuildPayload 生成的 return 线协议。
+/// 仅用于识别并隔离历史记录的 return 线协议，禁止重新发送。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SettlementReturnWirePayload {
@@ -43,5 +43,4 @@ pub(crate) struct SettlementDeliveryPayload {
     pub(crate) credits: i64,
     pub(crate) cod: i64,
     pub(crate) equipment_secret_refs: Vec<SettlementEquipmentSecretReference>,
-    pub(crate) source_external_mail_id: Option<String>,
 }

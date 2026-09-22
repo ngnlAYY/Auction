@@ -246,6 +246,23 @@ async fn apply_mutation_postgres(
             .map_err(map_storage_error)?;
         }
     }
+    if matches!(
+        write.action,
+        AdminUserMutationAction::RevokeKey | AdminUserMutationAction::ReissueKey
+    ) {
+        // 会话撤销与凭据变更原子提交；后续重新启用 Key 不能恢复旧 token。
+        // 保留已撤销事实，并容忍登录请求时钟领先于本次管理命令。
+        sqlx::query(
+            "UPDATE public.public_sessions
+             SET revoked_at = GREATEST(created_at, $1)
+             WHERE user_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(now)
+        .bind(id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
+    }
     Ok(())
 }
 

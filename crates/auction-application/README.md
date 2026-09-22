@@ -51,6 +51,7 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   拍卖仓储、竞价事务和 UTC 时钟核心端口；[src/ports/mod.rs](src/ports/mod.rs) 只保留模块装配与稳定公共导出。
   使用 Rust 原生 async trait 返回类型，不依赖 `async-trait` 宏。
 - [src/services/auction/commands.rs](src/services/auction/commands.rs)：拍卖创建用例，例如 `AuctionService::create`。
+  Admin 创建先重放同摘要的命令结果，再对新命令核对当前时间，避免已接受创建在预览开始后无法重试。
 - [src/services/auction/lifecycle/](src/services/auction/lifecycle/)：Admin/Worker 共享的拍卖生命周期用例；`mod.rs` 持有服务状态、
   命令幂等事务编排和端口实现，`plan.rs` 持有状态迁移与 final proxy 计划，`schedule.rs` 持有后继轮次、
   安全日期计算和稳定 schedule ID；
@@ -59,6 +60,11 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   软截止竞价；提前结算只把截止时间收紧到当前事务时间，让既有 Worker 继续拥有结算事实。生命周期端口会把锁前上下文、动作计划和后端实际写入摘要
   一并交给同事务审计边界，使 Preview/Open/Cancel/Final 与新增 EarlySettlement 的 action metadata 可精确恢复，
   又不把 PostgreSQL/SQLite 行模型泄漏到应用层。
+  普通竞价和生命周期的时间在数据库取得权威锁后读取，同次计划、领先时间、截止和事实共用该时刻；
+  Final 与调度完成标记原子提交，后续完成确认按同一命令幂等。
+  [src/ports/scheduling/source.rs](src/ports/scheduling/source.rs) 拥有自动周排期冻结的 IANA 时区与原始本地时间；
+  后继先按本地日期加七天，再复用既有 DST 解析规则。Admin 改期只更新实际改变的钟点，当前 UTC 时间照请求保存；
+  后继遇回拨歧义取较早实例，本地顺序无法合法继承时失败关闭。没有来源的历史及手工轮次保留 UTC 周期。
 - [src/ports/auction/slow_proxy.rs](src/ports/auction/slow_proxy.rs)、[src/services/auction/competition.rs](src/services/auction/competition.rs) 与
   [src/services/auction/competition/legacy_ledger.rs](src/services/auction/competition/legacy_ledger.rs)：Public 竞价及 Worker slow due 命令端口和用例；
   父服务使用数据库时间重读 generation/授权/资格 fence，并复用同一竞价事务，不在 Worker 中复制
@@ -183,6 +189,8 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 - [src/ports/mail/processing/](src/ports/mail/processing/)：装备过滤、短生命周期邮件 envelope、拍卖入站、delivery outbox 和业务决定
   分别位于 `filter.rs`、`message.rs`、`auction.rs`、`delivery.rs`、`decision.rs`；`processing.rs`
   只负责稳定公共导出，并由 `common.rs` 统一持有安全错误和敏感值清理辅助。
+  `acceptance.rs` 从持久投稿、原命令及完整 lot/equipment 集合恢复接受决定，Take 入队失败后继续恢复原决定，
+  不把重复装备转为退件；未知主题中 Credits 非零也按资产邮件处理。
 - [src/errors/mod.rs](src/errors/mod.rs) 的 `MailProcessingRetryability` 把应用错误冻结为 `Retryable`/`Permanent`；Worker
   只可对前者和超时执行有界 inline retry，确定性输入、配置和业务拒绝必须立即失败关闭。
 - [src/ports/mail/user/](src/ports/mail/user/)：`model.rs` 负责注册/换绑结果闭集，`security.rs` 负责短生命周期登录 key
@@ -215,6 +223,9 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 - [src/errors/mod.rs](src/errors/mod.rs)：应用错误，保留领域错误分类。
 
 ## 读取、实时与会话
+
+Public 认证端口返回登录时用户版本，会话创建端口在存储锁内再次核对；Key 撤销/重签永久废止旧会话。
+浏览器与 HTTP DTO 不接收这个内部版本门禁字段。
 
 Public 规则文档和黑名单只读契约分别位于 [src/ports/public/rules.rs](src/ports/public/rules.rs) 与
 [src/ports/public/blacklist.rs](src/ports/public/blacklist.rs)；它们只定义安全投影、语言/分页边界和 owner 端口，不包含 SQL。

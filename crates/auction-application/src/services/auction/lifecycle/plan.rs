@@ -4,12 +4,30 @@ pub(super) async fn lifecycle_plan<T>(
     transaction: &mut T,
     command: &AuctionLifecycleCommand,
     context: &AuctionLifecycleContext,
-    now: chrono::DateTime<chrono::Utc>,
     policy: AuctionLifecyclePolicy,
 ) -> Result<AuctionLifecyclePlan, ApplicationError>
 where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
 {
+    let final_inputs = match command.action {
+        crate::AuctionLifecycleAction::FinalPhase => {
+            Some(load_final_proxy_inputs(transaction, command).await?)
+        }
+        crate::AuctionLifecycleAction::EarlySettlement
+            if context.auction.status == auction_domain::AuctionStatus::Live =>
+        {
+            Some(load_final_proxy_inputs(transaction, command).await?)
+        }
+        crate::AuctionLifecycleAction::EarlySettlement => {
+            if transaction.list_final_lot_ids_for_update(command.auction_id).await?.is_empty() {
+                return Err(CompetitionTransactionError::InvalidState.into());
+            }
+            None
+        }
+        _ => None,
+    };
+    // 生命周期、代理竞价事实和提前截止使用锁齐备后的同一个数据库时间；重试会重新读取。
+    let now = transaction.current_time().await?;
     let mut auction = context.auction.clone();
     let admin_action = command.actor.actor_type == crate::AuctionLifecycleActorType::Admin;
     let effect = match command.action {
@@ -56,7 +74,7 @@ where
         }
         crate::AuctionLifecycleAction::FinalPhase => {
             let (proxy_plans, earliest_end_at) =
-                final_proxy_plans(transaction, command, now).await?;
+                final_proxy_plans(command, final_inputs.unwrap_or_default(), now)?;
             if !admin_action {
                 let due_at = earliest_end_at
                     .checked_sub_signed(context.policy_final_phase_lead)
@@ -96,18 +114,9 @@ where
                 .ok_or(CompetitionTransactionError::InvalidState)?;
             let proxy_plans = match auction.status {
                 auction_domain::AuctionStatus::Live => {
-                    final_proxy_plans(transaction, command, now).await?.0
+                    final_proxy_plans(command, final_inputs.unwrap_or_default(), now)?.0
                 }
-                auction_domain::AuctionStatus::Final => {
-                    if transaction
-                        .list_final_lot_ids_for_update(command.auction_id)
-                        .await?
-                        .is_empty()
-                    {
-                        return Err(CompetitionTransactionError::InvalidState.into());
-                    }
-                    Vec::new()
-                }
+                auction_domain::AuctionStatus::Final => Vec::new(),
                 _ => return Err(CompetitionTransactionError::InvalidState.into()),
             };
             auction.request_early_settlement(now)?;
@@ -117,11 +126,11 @@ where
     Ok(AuctionLifecyclePlan { auction, effect })
 }
 
-async fn final_proxy_plans<T>(
+/// 先锁定全部 lot、代理与参与者，再统一计时和生成计划，避免等待期间使用过期截止时间。
+async fn load_final_proxy_inputs<T>(
     transaction: &mut T,
     parent: &AuctionLifecycleCommand,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<(Vec<AuctionFinalProxyPlan>, chrono::DateTime<chrono::Utc>), ApplicationError>
+) -> Result<Vec<(crate::CompetitionSnapshot, bool)>, ApplicationError>
 where
     T: CompetitionTransaction + AuctionLifecycleTransaction,
 {
@@ -129,10 +138,40 @@ where
     if lot_ids.is_empty() {
         return Err(CompetitionTransactionError::InvalidState.into());
     }
+    let mut snapshots = Vec::with_capacity(lot_ids.len());
+    for lot_id in lot_ids {
+        snapshots.push(transaction.load_final_lot_for_update(lot_id).await?);
+    }
+    let mut participants: Vec<_> = snapshots
+        .iter()
+        .filter_map(|snapshot| snapshot.active_proxy.map(|proxy| proxy.user_id))
+        .collect();
+    participants.sort_unstable();
+    participants.dedup();
+    let mut eligibility = std::collections::BTreeMap::new();
+    for user_id in participants {
+        eligibility.insert(user_id, transaction.participant_is_eligible_for_update(user_id).await?);
+    }
+    Ok(snapshots
+        .into_iter()
+        .map(|snapshot| {
+            let eligible = snapshot
+                .active_proxy
+                .is_none_or(|proxy| eligibility.get(&proxy.user_id).copied().unwrap_or(false));
+            (snapshot, eligible)
+        })
+        .collect())
+}
+
+fn final_proxy_plans(
+    parent: &AuctionLifecycleCommand,
+    snapshots: Vec<(crate::CompetitionSnapshot, bool)>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(Vec<AuctionFinalProxyPlan>, chrono::DateTime<chrono::Utc>), ApplicationError> {
     let mut plans = Vec::new();
     let mut earliest_end_at: Option<chrono::DateTime<chrono::Utc>> = None;
-    for lot_id in lot_ids {
-        let snapshot = transaction.load_final_lot_for_update(lot_id, now).await?;
+    for (snapshot, eligible) in snapshots {
+        let lot_id = snapshot.state.lot_id;
         earliest_end_at =
             Some(earliest_end_at.map_or(snapshot.state.effective_end_at, |current| {
                 current.min(snapshot.state.effective_end_at)
@@ -145,7 +184,6 @@ where
         let Some(active) = snapshot.active_proxy else {
             continue;
         };
-        let eligible = transaction.participant_is_eligible_for_update(active.user_id).await?;
         if eligible && active.mode == ProxyMode::Fast {
             continue;
         }

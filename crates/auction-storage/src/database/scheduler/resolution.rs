@@ -62,7 +62,22 @@ pub(super) async fn complete_postgres(
         .await
         .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+        // Final 已由生命周期事务完成，后续 complete 只确认同一轮次和同一命令的持久化结果。
+        let completed = claim.phase == ScheduledRoundPhase::Final
+            && sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM public.scheduled_rounds
+                 WHERE id = $1 AND auction_id = $2 AND final_command_id = $3
+                   AND final_completed_at IS NOT NULL)",
+            )
+            .bind(claim.round_id)
+            .bind(claim.auction_id.as_uuid())
+            .bind(claim.command_id.as_uuid())
+            .fetch_one(pool)
+            .await
+            .map_err(map_storage_error)?;
+        if !completed {
+            return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+        }
     }
     Ok(())
 }
@@ -197,7 +212,22 @@ pub(super) async fn complete_sqlite(
         .await
         .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
-        return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+        // Lite 使用相同的命令身份确认，不能让失效旧 lease 覆盖另一次 Final。
+        let completed = claim.phase == ScheduledRoundPhase::Final
+            && sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM scheduled_rounds
+                 WHERE id = ? AND auction_id = ? AND final_command_id = ?
+                   AND final_completed_at IS NOT NULL)",
+            )
+            .bind(super::mapping::uuid_blob(claim.round_id))
+            .bind(super::mapping::uuid_blob(claim.auction_id.as_uuid()))
+            .bind(super::mapping::uuid_blob(claim.command_id.as_uuid()))
+            .fetch_one(pool)
+            .await
+            .map_err(map_storage_error)?;
+        if !completed {
+            return Err(repository_error_owned(&format!("Worker {phase} 阶段完成租约已失效")));
+        }
     }
     Ok(())
 }

@@ -49,6 +49,7 @@ pub struct AdminAuctionScheduleSnapshot {
     pub round_preview_due_at: DateTime<Utc>,
     pub round_open_due_at: DateTime<Utc>,
     pub round_scheduled_end_at: DateTime<Utc>,
+    pub schedule_source: Option<super::AuctionScheduleSource>,
     pub preview_completed_at: Option<DateTime<Utc>>,
     pub open_completed_at: Option<DateTime<Utc>>,
     pub final_completed_at: Option<DateTime<Utc>>,
@@ -69,6 +70,7 @@ impl AdminAuctionScheduleSnapshot {
             && auction.preview_scheduled_at == self.round_preview_due_at
             && auction.scheduled_open_at == self.round_open_due_at
             && self.policy_scheduled_end_at == self.round_scheduled_end_at
+            && self.schedule_source.as_ref().is_none_or(|source| source.resolve().is_ok())
             && valid_optional_time(self.preview_completed_at)
             && valid_optional_time(self.open_completed_at)
             && valid_optional_time(self.final_completed_at)

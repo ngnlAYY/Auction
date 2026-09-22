@@ -45,8 +45,11 @@ Unix socket server 和 Admin client 分别位于 `src/control/transport/{protoco
 `run_persistent_until_shutdown()` 已接入持久化 `scheduled_rounds` claim、租约、尝试次数、
 指数退避失败记录和由装配根注入的 shutdown future；claim 冻结领取后的调度版本，完成与失败必须
 同时匹配 owner、精确租约期限和 `state_version`，因此 Admin 修改计划后陈旧任务不能继续收口。它通过
-生命周期应用端口执行 preview/open，不复制状态机。收到 drain 后，各独立循环完成当前有界批次并停止领取新任务；SIGINT/SIGTERM、
+生命周期应用端口执行 preview/open，不复制状态机。收到 drain 后，各独立循环在每次领取及并发槽等待结束后
+检查不可逆的进程门禁，停止剩余批次的新领取，只收口已经在途的 claim；健康回调不能重新打开门禁。SIGINT/SIGTERM、
 10 秒总上限和二次信号强制收口由 `apps/worker` 与 `auction-process` 拥有。
+某个任务或任务组收口失败时仍继续等待其他在途 owner，全部收口后报告首个错误；所有组共享
+同一总截止时间，不为后续组延长排空预算。
 每周场次 bootstrap 只处理 `[auction.schedule].worlds` allowlist、runtime-enabled worlds 和数据库
 `worlds.enabled=true` 的交集；每次达到 due 都通过注入的 `WorldReader` 重读数据库，缺失/损坏 world
 失败关闭，已关闭 world 则安全跳过而不制造重复写入错误。该门禁只阻止新场次，不取消既有
@@ -89,6 +92,8 @@ tracing 依赖。HTTP body timeout 只保留 body_unavailable 与最后实际 st
 时保留最后 body/status/elapsed。
 Delivery Worker 在 `start_sending` 前调用 transport availability gate；目标 world 暂无
 scoped/shared 凭据时，以完整 lease token/fencing 把 claim 释放回 `pending`，不会误写失败终态。
+本轮后续领取排除该世界并继续处理其他可用世界；不可用项不消耗可执行批次容量，因此容量为一时
+也不会被较早的不可投递项永久阻塞。世界排除仅在本轮有效，下一轮重新检查凭据可用性。
 该循环使用独立的 poll/jitter/batch/concurrency 配置，每轮完成后等待 `poll + [0, jitter]`；有效
 并发取配置值与 transport 上限的较小值，只在槽位空闲后领取下一条。MoogleMail transport 因账号级
 compose 可变状态把上限固定为 1，避免多个 claim 先进入 `sending` 再等待凭据锁并消耗请求超时。
@@ -119,6 +124,8 @@ claim 并推进公平扫描水位，避免多 Worker 交叉覆盖远端正文。
 `ForumReplyStore` 只为至少含一条可执行命令的帖子按论坛数字账号键定位映射，再按论坛/MM 共用的
 可变玩家名称解析 Users 主体；首次同名复用必须由 active key 或跨世界相同数字键证明，数字键只进入
 来源映射和命令账本 actor，MM 通知使用玩家名称。
+身份 owner 只有在明确输入、账号归属或封禁事实拒绝时返回 `ForumIdentityRejected` 并跳过该楼层；
+数据库连接、查询、提交或序列化冲突均保留可重试错误，立即停止后续楼层，不能令较晚的同价竞价先入账。
 随后再经 world 映射、lot 映射、稳定命令 ID 和命令账本调用现有竞价端口；同一
 world 的一批主题只有全部成功才推进扫描游标，账本完成写入失败会保留重试边界，已应用竞价
 对应的 MM 通知也会在后续轮次独立重放。接管历史回帖账本时，Worker 以当前算法生成候选 ID，
@@ -219,6 +226,13 @@ Lite 档下 Worker 实例数和并发都必须保持为一，但游标仍然要�
 论坛首次发布与未知写入恢复在登记本地同步正文前，都读取稳定 #1/#2 的原始 BBCode，
 逐字证明与本轮渲染结果一致；拍卖标记只证明楼层身份。已有正文不一致时等待人工重试授权，
 获授权后仅编辑已证明的 post ID，并再次读回验证；缺失 #2 仍遵守独立的补写权限。
+已发布主题的内容扫描通过 `ForumWriteProgress` 区分纯读取/本地处理与实际 POST；进度仅在预读、
+限速、凭据所有权校验和请求构造完成后、发送前标记，并在原始正文精确回读证明后清除。
+没有未确认 POST 的扫描超时记录为 `topic_processing_timeout`，允许下轮正常重试；真正未知的 POST
+及历史 `write_unknown` 继续保守隔离，后续 GET 或数据库错误不能把它们覆盖为可自动编辑状态。
+历史未知状态只有在两个固定楼层的原始正文都与目标精确一致后才能完成扫描并解除；本地正文
+未变化或只改变另一个楼层都不能替代这项回读证明。
+当前不提供未知正文自动恢复，也不自动重放后来渲染的新正文。
 
 ## 维护与验证
 

@@ -36,7 +36,7 @@ async fn authenticate_postgres(
 ) -> Result<PublicLoginIdentity, ApplicationError> {
     let key_hash = Sha256::digest(key);
     let row = sqlx::query(
-        "SELECT account.id, account.username, account.status, account.key_status,
+        "SELECT account.id, account.state_version, account.username, account.status, account.key_status,
                 blacklist.public_reason
          FROM public.users AS account
          LEFT JOIN public.user_blacklist AS blacklist
@@ -64,6 +64,9 @@ async fn authenticate_postgres(
     };
     Ok(PublicLoginIdentity {
         user_id: row.try_get("id").map_err(|_| storage_error("读取用户标识失败"))?,
+        user_state_version: row
+            .try_get("state_version")
+            .map_err(|_| storage_error("读取用户认证版本失败"))?,
         username: row.try_get("username").map_err(|_| storage_error("读取用户名失败"))?,
         active,
         public_reason: row
@@ -79,7 +82,7 @@ async fn authenticate_sqlite(
 ) -> Result<PublicLoginIdentity, ApplicationError> {
     let key_hash = Sha256::digest(key);
     let row = sqlx::query(
-        "SELECT account.id, account.username, account.status, account.key_status,
+        "SELECT account.id, account.state_version, account.username, account.status, account.key_status,
                 blacklist.public_reason
          FROM users AS account
          LEFT JOIN user_blacklist AS blacklist
@@ -112,6 +115,9 @@ async fn authenticate_sqlite(
     .map_err(|_| storage_error("Lite 用户标识格式无效"))?;
     Ok(PublicLoginIdentity {
         user_id: id,
+        user_state_version: row
+            .try_get("state_version")
+            .map_err(|_| storage_error("读取 Lite 用户认证版本失败"))?,
         username: row.try_get("username").map_err(|_| storage_error("读取 Lite 用户名失败"))?,
         active,
         public_reason: row

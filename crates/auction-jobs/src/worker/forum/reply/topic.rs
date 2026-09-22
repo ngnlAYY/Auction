@@ -12,6 +12,7 @@ pub(super) async fn process_topic(
     topic: auction_application::ForumReplyTopic,
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
     let preview = runtime.reader.fetch_topic(topic.world, topic.thread_id.clone()).await?;
     validate_fixed_layout(&topic, &preview)?;
@@ -60,7 +61,7 @@ pub(super) async fn process_topic(
             match runtime.store.resolve_bidder(topic.world, external_account_id, player_name).await
             {
                 Ok(bidder) => bidder,
-                Err(error) => {
+                Err(error @ ApplicationError::ForumIdentityRejected(_)) => {
                     tracing::warn!(
                         auction_id = %topic.auction_id,
                         post_id = %post.post.id,
@@ -77,6 +78,25 @@ pub(super) async fn process_topic(
                     ));
                     processed_through_post_number = post_number;
                     continue;
+                }
+                Err(error) => {
+                    // 只有权威身份拒绝允许跳过；暂时存储失败不能让较晚楼层先接受竞价。
+                    tracing::warn!(
+                        auction_id = %topic.auction_id,
+                        post_id = %post.post.id,
+                        error = %error,
+                        "论坛身份解析暂时失败，停止后续楼层并等待重试"
+                    );
+                    system_entries.push(system_entry(
+                        post_number,
+                        &post.post.id,
+                        None,
+                        "identity_processing_pending",
+                        "identity processing stopped here and will retry",
+                        false,
+                    ));
+                    command_error = Some(error);
+                    break 'posts;
                 }
             };
         for command in &post.commands {
@@ -201,11 +221,10 @@ pub(super) async fn process_topic(
     refresh_fixed_posts(
         runtime,
         topic,
-        processed_through_post_number,
-        system_entries,
+        TopicScanProgress { processed_through_post_number, system_entries, scan_completed },
         clock,
         poll_interval,
-        scan_completed,
+        write_progress,
     )
     .await?;
     command_error.map_or(Ok(()), Err)
@@ -260,15 +279,21 @@ fn warning_entries(
         .collect()
 }
 
+struct TopicScanProgress {
+    processed_through_post_number: usize,
+    system_entries: Vec<ForumSystemLogEntry>,
+    scan_completed: bool,
+}
+
 async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
     topic: auction_application::ForumReplyTopic,
-    processed_through_post_number: usize,
-    system_entries: Vec<ForumSystemLogEntry>,
+    scan: TopicScanProgress,
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
-    scan_completed: bool,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
+    let TopicScanProgress { processed_through_post_number, system_entries, scan_completed } = scan;
     let processed_through_post_number_i32 = i32::try_from(processed_through_post_number)
         .map_err(|_| repository_error("论坛已处理楼层超出持久化范围"))?;
     if processed_through_post_number_i32 < topic.processed_through_post_number {
@@ -294,6 +319,29 @@ async fn refresh_fixed_posts(
     let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
     let system_log_changed = system_log.body != topic.system_log_body;
     let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
+    let reconciliation_only = topic.content_last_error_code.as_deref() == Some("write_unknown");
+    if reconciliation_only {
+        // 本地旧正文不证明远端状态；即使重新渲染后已无变化，也必须回读两个固定楼层，
+        // 才能走会清除历史 unknown 的完成路径。该状态下正文不等只失败，绝不发新 POST。
+        reconcile_or_edit_fixed_post(
+            runtime,
+            &topic,
+            &topic.catalog_post_id,
+            None,
+            ForumRenderedPost { body: catalog.body.clone() },
+            write_progress,
+        )
+        .await?;
+        reconcile_or_edit_fixed_post(
+            runtime,
+            &topic,
+            &topic.system_log_post_id,
+            None,
+            system_log.clone(),
+            write_progress,
+        )
+        .await?;
+    }
     if !catalog_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
@@ -317,7 +365,7 @@ async fn refresh_fixed_posts(
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
             .await;
     }
-    if catalog_changed {
+    if catalog_changed && !reconciliation_only {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
@@ -327,16 +375,18 @@ async fn refresh_fixed_posts(
                 description: Some(catalog.description.clone()),
             }),
             ForumRenderedPost { body: catalog.body.clone() },
+            write_progress,
         )
         .await?;
     }
-    if system_log_changed {
+    if system_log_changed && !reconciliation_only {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
             &topic.system_log_post_id,
             None,
             system_log.clone(),
+            write_progress,
         )
         .await?;
     }
@@ -373,6 +423,7 @@ async fn reconcile_or_edit_fixed_post(
     post_id: &str,
     metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
     let current = runtime
         .writer
@@ -387,12 +438,13 @@ async fn reconcile_or_edit_fixed_post(
     }
     let proof = runtime
         .writer
-        .edit_post(
+        .edit_post_with_progress(
             topic.world,
             topic.thread_id.clone(),
             post_id.to_owned(),
             metadata,
             expected.clone(),
+            write_progress.clone(),
         )
         .await?;
     if proof.thread_id != topic.thread_id || proof.post_id != post_id {
@@ -405,6 +457,7 @@ async fn reconcile_or_edit_fixed_post(
     if observed.body != expected.body {
         return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
     }
+    write_progress.confirm_write();
     Ok(())
 }
 

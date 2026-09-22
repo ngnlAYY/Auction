@@ -13,7 +13,9 @@ use crate::api::{Delivery, DeliveryPage};
 
 use super::super::sort::{SortDirection, SortableTh, directed};
 use super::dialog::DeliveryDialog;
-use super::helpers::{delivery_display_id, delivery_display_type, delivery_status_label};
+use super::helpers::{
+    delivery_display_id, delivery_display_type, delivery_status_label, is_mail_disposition_conflict,
+};
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
@@ -125,7 +127,7 @@ pub(super) fn DeliveryRow(
 ) -> Element {
     let kind = match delivery.status.as_str() {
         "claimed" => Some(DeliveryDialogKind::Release),
-        "failed" => Some(DeliveryDialogKind::Retry),
+        "failed" if !is_mail_disposition_conflict(&delivery) => Some(DeliveryDialogKind::Retry),
         "manual_reconcile" => Some(DeliveryDialogKind::Reconcile),
         _ => None,
     };
@@ -214,7 +216,7 @@ pub(super) fn DeliveryRow(
                         kind: dialog.kind,
                         busy: busy_delivery().is_some(),
                         draft: draft.unwrap_or_else(|| {
-                            DeliveryReconcileDraft::for_delivery(delivery.id.clone())
+                            DeliveryReconcileDraft::for_delivery(&delivery)
                         }),
                         on_draft_change,
                         on_confirm,

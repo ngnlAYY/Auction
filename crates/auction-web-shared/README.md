@@ -59,7 +59,7 @@
   `focusable=false` 的链接内文本保留链接行为；普通文本和操作提示不引入第二套业务状态。
 - [src/components/pager.rs](src/components/pager.rs)：`Pager` 长列表分页器，合并自两端原先近逐字重复的
   `PublicPager`/`AdminPager`。保留钳制契约：渲染期先 clamp 页码、交互从钳制页码出发、
-  越界 effect 只纠偏一次；`total` 缺失时退化为 `has_more` 游标语义。上一页/下一页/跳页
+  挂载及页码、总量变化后同步跳页输入并通知父级纠偏；`total` 缺失时退化为 `has_more` 游标语义。上一页/下一页/跳页
   文案与「第 X 页 / 共 Y 页」状态模板全部由 props 传入（`status: Callback<(i64, i64), String>`），
   DOM class 保持 `ui-pager*` 不变。
 - [src/components/async_state.rs](src/components/async_state.rs)：`AsyncState` 三态面板（`AsyncStateKind::Loading` /

@@ -140,20 +140,20 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
             async move { fetch_forum_thread(auction_id).await }
         }
     });
-    // 发布前两秒轮询；发布后降为三十秒读取本地处理楼层。发布或请求明确失败时暂停，
-    // 手动重读成功后由 thread 资源变化重新启动计时器。
+    // 每次读取完成后才开始轮询间隔，不能用两秒节拍取消尚未完成的慢请求。
+    // 发布前两秒、发布后三十秒；明确失败时暂停，手动重读成功后恢复。
     let _poll = use_resource({
         let mut poll_generation = poll_generation;
         move || {
-            let _ = retry_generation();
-            let _ = poll_generation();
-            let poll_delay = {
+            let poll_delay = if thread.state().cloned() != UseResourceState::Ready {
+                None
+            } else {
                 let current = thread.read();
                 match current.as_ref() {
                     Some(Ok(thread)) if thread.status == "published" => Some(30_000),
                     Some(Ok(thread)) if thread.status == "failed" => None,
-                    Some(Ok(_)) | None => Some(2_000),
-                    Some(Err(_)) => None,
+                    Some(Ok(_)) => Some(2_000),
+                    Some(Err(_)) | None => None,
                 }
             };
             async move {
@@ -161,7 +161,8 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
                     return;
                 };
                 TimeoutFuture::new(poll_delay).await;
-                poll_generation.set(poll_generation().saturating_add(1));
+                let next_generation = poll_generation.peek().saturating_add(1);
+                poll_generation.set(next_generation);
             }
         }
     });

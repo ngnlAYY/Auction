@@ -31,7 +31,8 @@ use schedule::successor_plan;
 /// Admin/Worker 共享的拍卖生命周期用例。
 pub struct AuctionLifecycleService<R, C> {
     repository: Arc<R>,
-    clock: Arc<C>,
+    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
+    _clock: Arc<C>,
     policy: AuctionLifecyclePolicy,
 }
 
@@ -43,7 +44,7 @@ where
 {
     /// 建立只依赖事务 runner、时钟端口和启动期冻结策略的生命周期服务。
     pub fn new(repository: Arc<R>, clock: Arc<C>, policy: AuctionLifecyclePolicy) -> Self {
-        Self { repository, clock, policy }
+        Self { repository, _clock: clock, policy }
     }
 
     /// 在 Serializable 事务中查重、锁定聚合、应用领域迁移并追加账本记录。
@@ -59,7 +60,6 @@ where
                 CompetitionTransactionError::Failed("生命周期命令发起者无效".to_owned()).into()
             );
         }
-        let now = self.clock.now();
         let policy = self.policy;
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
@@ -126,7 +126,7 @@ where
                     {
                         return Err(CompetitionTransactionError::StaleState.into());
                     }
-                    let plan = lifecycle_plan(transaction, &command, &context, now, policy).await?;
+                    let plan = lifecycle_plan(transaction, &command, &context, policy).await?;
                     let result = lifecycle_result(&command, &context, &plan)?;
                     let stored = StoredCommand {
                         command_id: command.command_id,

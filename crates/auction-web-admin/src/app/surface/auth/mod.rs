@@ -14,8 +14,8 @@ use auction_web_shared::{
 };
 
 use crate::api::{
-    AdminReadinessState, AdminSession, fetch_admin_readiness, fetch_admin_session, login_admin,
-    logout_admin,
+    AdminReadinessState, AdminSession, AdminSessionCheckTrigger, fetch_admin_readiness,
+    fetch_admin_session, login_admin, logout_admin,
 };
 
 use super::{AdminReadinessResource, Route, admin_api_error_message};
@@ -41,14 +41,16 @@ pub(super) fn AdminShell() -> Element {
     let is_login_path = matches!(&current_route, Route::Login {});
     let is_dashboard_path = matches!(&current_route, Route::Dashboard {});
     let mut reload_generation = use_signal(|| 0_u64);
+    use_context_provider(move || AdminSessionCheckTrigger(reload_generation));
     let readiness = use_resource(fetch_admin_readiness);
     let session = use_resource(move || {
-        let _ = reload_generation();
-        fetch_admin_session()
+        let generation = reload_generation();
+        async move { (generation, fetch_admin_session().await) }
     });
     let readiness_context: AdminReadinessResource = readiness;
     use_context_provider(move || readiness_context);
-    let session_snapshot = session.read().clone();
+    let (checked_generation, session_snapshot) =
+        session.read().clone().map_or((0, None), |(generation, result)| (generation, Some(result)));
     let shell_boot_ready = readiness.read().is_some()
         && match session_snapshot.as_ref() {
             Some(Err(_)) => true,
@@ -100,6 +102,7 @@ pub(super) fn AdminShell() -> Element {
         Some(Ok(Some(current))) => rsx! {
             AdminAuthenticatedShell {
                 session: current.clone(),
+                checked_generation,
                 reload_generation,
                 readiness: readiness_state,
             }

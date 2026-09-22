@@ -17,10 +17,12 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
         row.try_get::<Option<uuid::Uuid>, _>("lease_token").map_err(map_storage_error)?;
     let payload: Value = row.try_get("payload").map_err(map_storage_error)?;
     let result_metadata: Value = row.try_get("result_metadata").map_err(map_storage_error)?;
+    let status: String = row.try_get("status").map_err(map_storage_error)?;
     // 旧版 CanonicalObject 要求两个持久化 JSON 都是对象；不能把损坏正文降级成空投影。
     if !payload.is_object()
         || !result_metadata.is_object()
         || !valid_terminal_alert_metadata(&result_metadata)
+        || !valid_quarantined_mail_metadata(&result_metadata, &status)
     {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
@@ -30,7 +32,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
         origin_id: row.try_get("origin_id").map_err(map_storage_error)?,
         recipient: row.try_get("recipient").map_err(map_storage_error)?,
         cod: cod_from_payload(&payload),
-        status: row.try_get("status").map_err(map_storage_error)?,
+        status,
         lease_expires_at: row.try_get("lease_expires_at").map_err(map_storage_error)?,
         fencing_version: row.try_get("fencing_version").map_err(map_storage_error)?,
         attempt_count,
@@ -187,6 +189,7 @@ impl LegacyDeliveryPayload {
             || !self.payload.is_object()
             || !self.result_metadata.is_object()
             || !valid_terminal_alert_metadata(&self.result_metadata)
+            || !valid_quarantined_mail_metadata(&self.result_metadata, &self.status)
             || !valid_activation_snapshot(self)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);
@@ -278,6 +281,34 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
         || snapshot.updated_at < snapshot.created_at
     {
         return false;
+    }
+
+    // 历史资产处置冲突在发送之前隔离，不能为了适配终态投影而伪造 sending 事实。
+    if snapshot.reason_code.as_deref() == Some("mail_disposition_conflict") {
+        return matches!(snapshot.status.as_str(), "manual_reconcile" | "failed")
+            && snapshot.origin_kind == "mail_intake"
+            && if snapshot.status == "manual_reconcile" {
+                snapshot.failure_code.as_deref() == Some("mail_disposition_conflict")
+            } else {
+                snapshot.failure_code.as_deref().is_some_and(valid_stored_text)
+            }
+            && snapshot.lease_expires_at.is_none()
+            && snapshot.sending_at.is_none()
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot.claimed_at.is_none_or(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.attempt_count > 0
+            })
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= snapshot.updated_at
+            });
     }
 
     // 告警在激活前确定终止没有 claimed/sending 事实，不能套用已发送投递的时间链。
@@ -373,6 +404,22 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
 fn valid_terminal_alert_metadata(metadata: &Value) -> bool {
     metadata.get("reason_code").and_then(Value::as_str) != Some("operations_alert_batch_terminal")
         || metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
+}
+
+fn valid_quarantined_mail_metadata(metadata: &Value, status: &str) -> bool {
+    if metadata.get("reason_code").and_then(Value::as_str) != Some("mail_disposition_conflict") {
+        return true;
+    }
+    if metadata.get("preflight_blocked").and_then(Value::as_bool) != Some(true) {
+        return false;
+    }
+    let outcome_unknown = metadata.get("outcome_unknown").and_then(Value::as_bool);
+    let resolution = metadata.get("resolution").and_then(Value::as_str);
+    match status {
+        "manual_reconcile" => outcome_unknown == Some(true) && resolution.is_none(),
+        "failed" => outcome_unknown == Some(false) && resolution == Some("admin_reconciled_failed"),
+        _ => false,
+    }
 }
 
 fn valid_timeline(

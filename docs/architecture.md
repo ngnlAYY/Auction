@@ -99,6 +99,7 @@ SQLite 文件只能位于受支持的本地文件系统，不能以共享网络�
 
 领域 `CompetitionPlan` 只计算计划。PostgreSQL 的共享门禁锁与 lot 排他锁、SQLite 串行写入分别由存储 owner 执行。
 用户黑名单、会话撤销与代理冻结保持锁内资格一致性；慢速代理用持久化 generation/due 校验阻止陈旧执行。
+Public 会话随 Key 撤销/重签原子失效，登录创建复核用户版本；SQLite 写入由 SQLx 事务守卫保证取消回滚。
 `leader_since` 依据本次所有接受事实判断连续领先，不能只比较事务前后的最终领先者。
 
 生命周期、结算与恢复共享应用入口；预览要求非空待拍标的，Draft/Preview 接收本期录入，Open 才移动 intake target。
@@ -109,9 +110,12 @@ SQLite 文件只能位于受支持的本地文件系统，不能以共享网络�
 
 Worker 的 due、游标、尝试、租约和 fencing 由数据库持有。领取可使用队列专属隔离与显式锁，业务命令仍走原事务边界。
 配置改变只影响后续调度参数，不修改已冻结轮次和命令身份。关闭业务世界阻止新场次，不取消既有履约与恢复工作。
+Final 与调度完成 fence 同事务提交；两后端 `scheduled_rounds.schedule_snapshot` 保存自动排期的本地时间来源，
+后继保持原时区的周历时间。历史及无时区输入的手工轮次保持 UTC 周期；drain 后各任务 owner 停止领取。
 
 邮件/论坛写入必须发生在本地提交之后。MoogleMail 处理在批次预算内按连续前缀提交完成证明和 cursor，
 随后才能触发取件、退回和通知。主动 ComposeSend 成功要求唯一新增 Sent MID 与精确 payload proof；
+拍卖收件的已接受决定可跨 Take 入队失败恢复；流拍与撤拍返还均逐件发送原装备，禁止复用已取件原邮件的 Return。
 未知结果停靠人工对账，不能凭成功页或本地 UUID 重发。论坛未知创建结果先只读对账，重试写入需显式授权。
 完整时序见 [Worker](../apps/worker/README.md)、[任务编排](../crates/auction-jobs/README.md)和
 [外部适配](../crates/auction-integrations/README.md)。

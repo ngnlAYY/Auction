@@ -94,8 +94,13 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
         )
         .route("/api/v1/lots/{lot_id}/bids", post(place_bid))
         .route_layer(middleware::from_fn(response_cache::no_store));
-    let routes =
-        no_cache_routes.merge(no_store_routes).route("/api/v1/ws", get(realtime::websocket));
+    let routes = no_cache_routes.merge(no_store_routes).route(
+        "/api/v1/ws",
+        // HTTP/1.1 使用 GET Upgrade，HTTP/2 使用扩展 CONNECT；两者共用会话与范围门禁。
+        axum::routing::get(realtime::websocket)
+            .connect(realtime::websocket)
+            .strict_methods("CONNECT, GET"),
+    );
     router.merge(routes.route_layer(middleware::from_fn(boundary::normalize_api_rejection)))
 }
 

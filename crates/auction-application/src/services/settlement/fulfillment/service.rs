@@ -26,7 +26,7 @@ use super::intent::{
     stable_prepare_command_id,
 };
 use super::model::SettlementDeliveryIntent;
-use super::proof::{proof_digest, return_proof_digest};
+use super::proof::proof_digest;
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
 
 /// 结算履约应用服务。
@@ -186,6 +186,11 @@ impl SettlementFulfillmentService {
         let Some(delivery_id) = claim.delivery_id else {
             return Err(repository_error("发送回执缺少 delivery identity"));
         };
+        if claim.operation == SettlementFulfillmentOperation::Return {
+            return self
+                .manual_reconcile_now(claim, delivery_id, "legacy_return_requires_review")
+                .await;
+        }
         let claim = match authorize_enqueued_recipient(
             self.store.as_ref(),
             self.recipient_reader.as_ref(),
@@ -258,16 +263,6 @@ impl SettlementFulfillmentService {
             SettlementFulfillmentDeliveryStatus::Prepared => {
                 return self.manual_reconcile_now(claim, delivery_id, "delivery_conflict").await;
             }
-        }
-        if claim.operation == SettlementFulfillmentOperation::Return {
-            return self
-                .reconcile_return_now(
-                    claim,
-                    delivery_id,
-                    external_reference.as_deref(),
-                    external_reference_proven,
-                )
-                .await;
         }
         let Some(external_reference) = external_reference.as_deref() else {
             return self
@@ -342,53 +337,6 @@ impl SettlementFulfillmentService {
             reference: remote_id.to_owned(),
             digest: proof_digest(&claim, delivery_id, &sent, None)?,
             observed_at: sent.observed_at,
-        };
-        self.store.satisfy(claim, proof).await
-    }
-
-    async fn reconcile_return_now(
-        &self,
-        claim: SettlementFulfillmentClaim,
-        delivery_id: Uuid,
-        external_reference: Option<&str>,
-        external_reference_proven: bool,
-    ) -> Result<SettlementFulfillmentReconcileResult, ApplicationError> {
-        let Some(source_external_mail_id) = claim.submission_external_mail_id.as_deref() else {
-            return self.manual_reconcile_now(claim, delivery_id, "delivery_conflict").await;
-        };
-        let Some(external_reference) = external_reference else {
-            return self
-                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
-                .await;
-        };
-        let reference = fulfillment_reference_suffix(
-            external_reference,
-            claim.world,
-            SettlementFulfillmentOperation::Return,
-        );
-        if claim.submission_source_kind.as_deref() != Some("mail")
-            || !valid_external_mail_id(source_external_mail_id)
-            || !external_reference_proven
-            || reference != Some(source_external_mail_id)
-        {
-            return self
-                .manual_reconcile_now(claim, delivery_id, "fulfillment_outcome_unknown")
-                .await;
-        }
-        let checked_at = self.clock.now();
-        if checked_at < claim.claimed_at {
-            return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
-        }
-        let proof = SettlementFulfillmentProof {
-            kind: "delivery_return_succeeded".to_owned(),
-            reference: source_external_mail_id.to_owned(),
-            digest: return_proof_digest(
-                &claim,
-                delivery_id,
-                external_reference,
-                source_external_mail_id,
-            )?,
-            observed_at: checked_at,
         };
         self.store.satisfy(claim, proof).await
     }

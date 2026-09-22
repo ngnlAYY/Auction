@@ -12,7 +12,8 @@ use crate::{
 /// Admin 创建拍卖用例。
 pub struct AdminAuctionCreateService<R, C> {
     repository: Arc<R>,
-    clock: Arc<C>,
+    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
+    _clock: Arc<C>,
     policy: AuctionPolicyTemplate,
 }
 
@@ -24,7 +25,7 @@ where
 {
     /// 建立只依赖事务端口和时钟的创建用例。
     pub fn new(repository: Arc<R>, clock: Arc<C>, policy: AuctionPolicyTemplate) -> Self {
-        Self { repository, clock, policy }
+        Self { repository, _clock: clock, policy }
     }
 
     /// 在同一 Serializable 事务中创建 draft、登记 intake target、账本、审计和创建事件。
@@ -35,11 +36,6 @@ where
         if !command.validate() {
             return Err(DomainError::InvalidSchedule("后台拍卖创建命令字段无效").into());
         }
-        let now = self.clock.now();
-        if command.preview_scheduled_at < now {
-            return Err(DomainError::InvalidSchedule("预览计划时间不能早于当前时间").into());
-        }
-        self.policy.validate()?;
 
         let policy = self.policy.clone();
         let title = command.generated_title();
@@ -79,6 +75,14 @@ where
                         return Ok(replayed);
                     }
 
+                    // 已完成命令不受当前时刻或新模板影响；时间门禁只约束首次创建。
+                    let now = transaction.current_time().await?;
+                    if command.preview_scheduled_at < now {
+                        return Err(
+                            DomainError::InvalidSchedule("预览计划时间不能早于当前时间").into()
+                        );
+                    }
+                    policy.validate()?;
                     let result = transaction
                         .create_admin_auction(command.clone(), title, policy, now)
                         .await?;

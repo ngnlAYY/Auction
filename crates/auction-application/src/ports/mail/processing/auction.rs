@@ -7,6 +7,7 @@ use uuid::Uuid;
 use auction_domain::{CommandId, EquipmentId, EquipmentKey, EquipmentKeyEnvelope};
 
 use super::super::{ApplicationFuture, CompetitionTransactionError, RequestHash};
+use super::acceptance::{MailAuctionAcceptance, MailAuctionIntakeLookup};
 use super::common::MailProcessingError;
 
 /// 单件进入拍卖 owner 的已验证事实和短生命周期 key。
@@ -135,6 +136,12 @@ impl MailAuctionIntakeResult {
 
 /// MoogleMail 拍卖入站事务能力。
 pub trait MailAuctionIntakeTransaction: Send {
+    /// 恢复已提交投稿及其原附件；无命令返回 None，身份或账本不一致必须失败关闭。
+    fn load_mail_auction_acceptance(
+        &mut self,
+        lookup: MailAuctionIntakeLookup,
+    ) -> impl Future<Output = Result<Option<MailAuctionAcceptance>, CompetitionTransactionError>> + Send;
+
     fn add_mail_auction_intake(
         &mut self,
         write: MailAuctionIntakeWrite,
@@ -148,6 +155,12 @@ pub trait MailAuctionIntakeTransaction: Send {
 
 /// MoogleMail 拍卖入站用例端口。
 pub trait MailAuctionIntakePort: Send + Sync {
+    /// 在重新执行外部读取、过滤或退回前恢复已有接受决定。
+    fn find_accepted(
+        &self,
+        lookup: MailAuctionIntakeLookup,
+    ) -> ApplicationFuture<'_, Option<MailAuctionAcceptance>>;
+
     fn ingest_mail(
         &self,
         command: MailAuctionIntakeCommand,

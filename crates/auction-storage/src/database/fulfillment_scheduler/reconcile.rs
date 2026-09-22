@@ -111,11 +111,11 @@ pub(super) async fn satisfy_postgres(
         return Err(repository_error_owned("结算履约满足证明缺少 delivery 快照"));
     };
     if claim.state != SettlementFulfillmentState::Enqueued
+        || claim.operation != SettlementFulfillmentOperation::Send
         || delivery.id != delivery_id
         || delivery.status != auction_application::SettlementFulfillmentDeliveryStatus::Succeeded
         || !delivery.external_reference_proven
-        || proof.kind.is_empty()
-        || proof.kind != proof.kind.trim()
+        || proof.kind != "mooglemail_sent_collected"
         || proof.reference.is_empty()
         || proof.reference != proof.reference.trim()
         || proof.digest == [0; 32]
@@ -150,6 +150,7 @@ pub(super) async fn satisfy_postgres(
                      AND claim_token = $8
                      AND claim_fencing = $9
                      AND delivery_id = $10
+                     AND delivery_operation = 'send'
                      AND claim_expires_at > clock_timestamp()
                    RETURNING updated_at"#,
         )

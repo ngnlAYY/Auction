@@ -105,6 +105,8 @@ mod recovery_scheduler;
 mod recurring_schedule;
 #[path = "public/rules.rs"]
 mod rules;
+#[path = "scheduling/source.rs"]
+mod schedule_source;
 #[path = "scheduling/worker.rs"]
 mod scheduler;
 #[path = "public/sessions.rs"]
@@ -262,8 +264,8 @@ pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredComm
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use core_repository::{AuctionRepository, RepositoryError};
 pub use delivery::{
-    DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
-    DeliveryWorkClaim, DeliveryWorkStore,
+    DeliveryClaimExclusions, DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport,
+    DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
 };
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
@@ -285,9 +287,9 @@ pub use forum_sync::{
     ForumPostWriter, ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread,
     ForumPublisher, ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread,
     ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
-    ForumSystemLogEntry, ForumTopicMetadata, ForumWriteRetryAuthorizationCommand,
-    ForumWriteRetryAuthorizationResult, MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker,
-    forum_system_log_marker, forum_world_name,
+    ForumSystemLogEntry, ForumTopicMetadata, ForumWriteProgress,
+    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
@@ -322,13 +324,14 @@ pub use mail_poll::{
     MailPollIntake, MailPollStore,
 };
 pub use mail_processing::{
-    MailAuctionIntakeCommand, MailAuctionIntakePort, MailAuctionIntakeRecord,
-    MailAuctionIntakeResult, MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItem,
-    MailAuctionItemWrite, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryOperation, MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment,
-    MailEquipmentFilter, MailEquipmentReader, MailMessage, MailNotificationTemplate,
-    MailProcessingAttempt, MailProcessingDecision, MailProcessingError, MailProcessingFuture,
-    MailProcessor, mail_auction_aggregate_id,
+    MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
+    MailAuctionIntakePort, MailAuctionIntakeRecord, MailAuctionIntakeResult,
+    MailAuctionIntakeTransaction, MailAuctionIntakeWrite, MailAuctionItem, MailAuctionItemWrite,
+    MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
+    MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
+    MailEquipmentReader, MailMessage, MailNotificationTemplate, MailProcessingAttempt,
+    MailProcessingDecision, MailProcessingError, MailProcessingFuture, MailProcessor,
+    mail_auction_aggregate_id,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,
@@ -425,3 +428,5 @@ pub use user_mail::{
 pub use worker_control::{
     WorkerControlCondition, WorkerControlPort, WorkerControlStatus, WorkerControlTrigger,
 };
+
+pub use schedule_source::{AuctionScheduleSource, AuctionScheduleTimes};

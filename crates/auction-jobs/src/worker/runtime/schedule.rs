@@ -2,13 +2,11 @@
 
 use auction_application::{
     AdminMailPollStateRequest, AdminMailPollingCommand, AdminMailTransactionError,
-    ApplicationError, AuctionPolicyTemplate, Clock, RequestHash, ScheduledRoundBootstrap,
-    ScheduledRoundSnapshot,
+    ApplicationError, AuctionPolicyTemplate, AuctionScheduleSource, Clock, RequestHash,
+    ScheduledRoundBootstrap, ScheduledRoundSnapshot,
 };
 use auction_domain::{AuctionId, CommandId, legacy_natural_key_uuid};
-use chrono::{
-    DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc,
-};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
 
@@ -121,6 +119,7 @@ where
             open_due_at: generation.open_due_at,
             scheduled_end_at: generation.scheduled_end_at,
             policy: config.policy.clone(),
+            schedule_source: generation.schedule_source.clone(),
         }
         .into_bootstrap()?;
         // 只在尚无轮次时发起创建；并发创建仍由存储层的锁、摘要和既有一致性检查保护。
@@ -152,6 +151,7 @@ struct BootstrapRequest {
     open_due_at: DateTime<Utc>,
     scheduled_end_at: DateTime<Utc>,
     policy: AuctionPolicyTemplate,
+    schedule_source: AuctionScheduleSource,
 }
 
 impl BootstrapRequest {
@@ -168,6 +168,7 @@ impl BootstrapRequest {
             open_due_at,
             scheduled_end_at,
             policy,
+            schedule_source,
         } = self;
         #[derive(Serialize)]
         struct IdentityRequest<'a> {
@@ -177,6 +178,7 @@ impl BootstrapRequest {
             open_due_at: DateTime<Utc>,
             scheduled_end_at: DateTime<Utc>,
             policy: serde_json::Value,
+            schedule_source: &'a AuctionScheduleSource,
         }
         let request_hash = RequestHash::from_request(
             "scheduled_round_create",
@@ -188,6 +190,7 @@ impl BootstrapRequest {
                 open_due_at,
                 scheduled_end_at,
                 policy: policy.snapshot(scheduled_end_at),
+                schedule_source: &schedule_source,
             },
         )?;
         Ok(ScheduledRoundBootstrap {
@@ -201,6 +204,7 @@ impl BootstrapRequest {
             scheduled_end_at,
             request_hash,
             policy,
+            schedule_source,
         })
     }
 }
@@ -286,35 +290,30 @@ fn generation(
     let local = now.with_timezone(&timezone);
     let week_start =
         local.date_naive() - Duration::days(i64::from(local.weekday().num_days_from_monday()));
+    let local_at = |weekday: u8, minute: u16| {
+        let date = week_start.checked_add_signed(Duration::days(i64::from(weekday))).ok_or(())?;
+        let time =
+            NaiveTime::from_num_seconds_from_midnight_opt(u32::from(minute) * 60, 0).ok_or(())?;
+        Ok::<_, ()>(NaiveDateTime::new(date, time))
+    };
+    let schedule_source = AuctionScheduleSource {
+        timezone: config.timezone.clone(),
+        preview_local: local_at(config.preview_weekday, config.preview_minute)?,
+        open_local: local_at(config.open_weekday, config.open_minute)?,
+        end_local: local_at(config.end_weekday, config.end_minute)?,
+    };
+    let times = schedule_source.resolve().map_err(|_| ())?;
     Ok(Generation {
         local_week: week_start,
-        preview_due_at: at(&timezone, week_start, config.preview_weekday, config.preview_minute)?,
-        open_due_at: at(&timezone, week_start, config.open_weekday, config.open_minute)?,
-        scheduled_end_at: at(&timezone, week_start, config.end_weekday, config.end_minute)?,
+        preview_due_at: times.preview_due_at,
+        open_due_at: times.open_due_at,
+        scheduled_end_at: times.scheduled_end_at,
+        schedule_source,
     })
 }
 
-fn at(timezone: &Tz, week_start: NaiveDate, weekday: u8, minute: u16) -> Result<DateTime<Utc>, ()> {
-    let date = week_start + Duration::days(i64::from(weekday));
-    let time = NaiveTime::from_num_seconds_from_midnight_opt(u32::from(minute) * 60, 0).ok_or(())?;
-    let local = NaiveDateTime::new(date, time);
-    if let Some(value) = timezone.from_local_datetime(&local).earliest() {
-        return Ok(value.with_timezone(&Utc));
-    }
-
-    // Go `time.Date` 对春季跳时使用跳时后的 offset 归一化不存在的墙上时间；沿用该行为，
-    // 避免旧版可生成的周计划在 IANA DST 边界被新版直接拒绝。
-    let offset = (1_i64..=48 * 60).find_map(|minutes| {
-        local
-            .checked_add_signed(Duration::minutes(minutes))
-            .and_then(|candidate| timezone.offset_from_local_datetime(&candidate).earliest())
-    });
-    let offset_seconds = i64::from(offset.ok_or(())?.fix().local_minus_utc());
-    let utc = local.checked_sub_signed(Duration::seconds(offset_seconds)).ok_or(())?;
-    Ok(DateTime::from_naive_utc_and_offset(utc, Utc))
-}
-
 struct Generation {
+    schedule_source: AuctionScheduleSource,
     local_week: NaiveDate,
     preview_due_at: DateTime<Utc>,
     open_due_at: DateTime<Utc>,

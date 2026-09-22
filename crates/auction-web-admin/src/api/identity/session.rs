@@ -5,10 +5,32 @@
 
 use auction_contracts::{AdminSessionResponse, ApiResponse};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use dioxus::{
+    core::Runtime,
+    prelude::{Signal, WritableExt, try_consume_context},
+};
 use gloo_net::http::Request;
 use serde_json::Value;
 
-use super::{invalid_response_error, response_error, response_failure, send_get, send_request};
+use super::{
+    invalid_response_error, read_response_failure, response_error, send_get, send_request,
+};
+
+/// 当前认证外壳拥有的会话检查触发器；API 只发出重读请求，不据网络错误推断已登出。
+#[derive(Clone, Copy)]
+pub(crate) struct AdminSessionCheckTrigger(pub(crate) Signal<u64>);
+
+/// 业务 API 明确返回未认证后重新检查会话，统一退出旧登录态或展示会话读取错误。
+pub(super) fn request_admin_session_check() {
+    let Some(runtime) = Runtime::try_current() else { return };
+    if runtime.try_current_scope_id().is_none() {
+        return;
+    }
+    let Some(AdminSessionCheckTrigger(mut generation)) = try_consume_context() else { return };
+    if let Ok(mut current) = generation.try_write() {
+        *current = current.saturating_add(1);
+    }
+}
 
 /// 已认证 Admin 会话的浏览器状态；`authenticated = false` 不会构造该类型。
 #[derive(Debug, Clone, PartialEq)]
@@ -53,7 +75,8 @@ fn valid_session_time(value: &str) -> bool {
 pub(crate) async fn fetch_admin_session() -> Result<Option<AdminSession>, String> {
     let response = send_get("/api/v1/admin/session").await?;
     if response.status() == 401 {
-        let failure = response_failure(response).await;
+        // 会话读取自身的 401 直接完成本次检查，不能再次触发自己而形成无限重读。
+        let failure = read_response_failure(response).await;
         return if failure.code == "unauthenticated" { Ok(None) } else { Err(failure.code) };
     }
     if !response.ok() {

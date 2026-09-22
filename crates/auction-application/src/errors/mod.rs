@@ -33,6 +33,10 @@ pub enum ApplicationError {
     #[error("capability unavailable: {0}")]
     CapabilityUnavailable(&'static str),
 
+    /// 论坛身份已被权威事实明确拒绝；数据库故障不得使用此类别跳过较早楼层。
+    #[error("论坛竞价身份不可用: {0}")]
+    ForumIdentityRejected(&'static str),
+
     /// 外部回执读取已完成，但在受限观察窗口内没有发现指定远端对象。
     #[error("履约外部证明尚未观察到")]
     FulfillmentEvidenceNotObserved,

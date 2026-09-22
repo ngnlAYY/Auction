@@ -10,12 +10,13 @@ pub(super) async fn claim_postgres(
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
     sending_grace: std::time::Duration,
-    excluded_recipients: &[DeliveryRecipientExclusion],
+    exclusions: &DeliveryClaimExclusions,
     limit: u16,
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
     let expired_rows = sqlx::query(
         r#"WITH expired_sending AS (
                SELECT id
@@ -75,9 +76,12 @@ pub(super) async fn claim_postgres(
         .map_err(map_storage_error)?;
     }
     let excluded_worlds =
-        excluded_recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
-    let excluded_names =
-        excluded_recipients.iter().map(|excluded| excluded.recipient.as_str()).collect::<Vec<_>>();
+        exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
+    let excluded_names = exclusions
+        .recipients
+        .iter()
+        .map(|excluded| excluded.recipient.as_str())
+        .collect::<Vec<_>>();
     let rows = sqlx::query(concat!(
         r#"SELECT id, command_id, request_digest, origin_kind, origin_id,
                   recipient, payload, fencing_version, attempt_count
@@ -118,6 +122,11 @@ pub(super) async fn claim_postgres(
                  WHERE lower(deliveries.payload ->> 'world') = excluded.world
                    AND lower(deliveries.recipient) = excluded.recipient
              )
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM unnest($5::text[]) AS excluded(world)
+                 WHERE lower(deliveries.payload ->> 'world') = excluded.world
+             )
            ORDER BY created_at, id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#
@@ -126,6 +135,7 @@ pub(super) async fn claim_postgres(
     .bind(i64::from(limit))
     .bind(excluded_worlds)
     .bind(excluded_names)
+    .bind(&exclusions.unavailable_worlds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

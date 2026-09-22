@@ -13,7 +13,7 @@ SQLite 未实现的完整生产能力必须在 Lite 能力清单或部署说明�
 
 ## 完整档与 Lite
 
-PostgreSQL `000001` 至 `000037` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
+PostgreSQL `000001` 至 `000039` 已按新领域 owner 追加核心竞价、结算/履约、生命周期、
 身份/外部命令、恢复/可观测性、论坛同步、MoogleMail 轮询、Final phase 调度、领先时间修正和
 生命周期/operations alert/lot 结束时间数据库不变量、论坛未知写入的幂等人工再授权账本及
 异世界 carrier dispatch 修正、v28 bid INSERT 在滚动升级期间遗漏有效结束时间列的兼容投影，
@@ -27,10 +27,14 @@ Admin A20 的全局唤醒由 Worker control 处理，不新增数据库触发字
 `000036` 仅为 PostgreSQL `inbound_mail` 增加装备失败诊断 nullable sidecar，SQLite 不跟随新增；该投影不参与
 幂等、command digest、completion 或 cursor。
 SQLite `000001` 至
-`000012` 已提交共有 Lite 子集、轮次租约、用户管理、取消/生命周期元数据、Final phase fence、
+`000013` 已提交共有 Lite 子集、轮次租约、用户管理、取消/生命周期元数据、Final phase fence、
 领先时间、lot 结束时间 shape、分类内编号、论坛账号身份与 Admin 最近事件读取索引。两者只表示
 当前 schema 能力，不能单独证明全部业务表面已经验收；外部数据库表也不能未经审计地整体复制到
 任一后端。
+
+PostgreSQL `000038` 仅转换未开始的流拍返还；PostgreSQL `000039` 与 SQLite `000013` 为轮次增加
+nullable 本地排期来源，并只根据唯一且匹配的成功 Final 事实补齐遗留完成标记。旧排期来源不回填时区，
+无法证明的轮次不自动修复；迁移的具体边界见[对象契约](../docs/contracts/schema.md#追加迁移与历史事实)。
 
 
 ## 迁移执行边界

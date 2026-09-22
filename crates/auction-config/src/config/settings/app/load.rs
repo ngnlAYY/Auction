@@ -37,7 +37,11 @@ impl AppConfig {
     }
 
     pub fn load_from_path(role: Role, path: impl AsRef<Path>) -> Result<Self, ConfigError> {
-        let path = path.as_ref().to_owned();
+        // 先固定角色文件的绝对位置，再解析其相对引用；不解析 symlink，保留 runtime
+        // 存储对路径与文件类型的安全检查，避免默认发现路径在正式装配时被当成相对路径拒绝。
+        let requested_path = path.as_ref();
+        let path = std::path::absolute(requested_path)
+            .map_err(|source| ConfigError::Read { path: requested_path.to_owned(), source })?;
         let contents = fs::read_to_string(&path)
             .map_err(|source| ConfigError::Read { path: path.clone(), source })?;
         let file: FileConfig =

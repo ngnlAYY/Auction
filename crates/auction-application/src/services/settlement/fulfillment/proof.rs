@@ -58,17 +58,6 @@ pub(super) fn proof_digest(
     legacy_proof_digest("mooglemail_sent_collected", delivery_id, Some(sent))
 }
 
-/// 为已由 delivery owner 证明成功的原邮件退回生成稳定 proof 摘要。
-pub(super) fn return_proof_digest(
-    _claim: &SettlementFulfillmentClaim,
-    delivery_id: uuid::Uuid,
-    _external_reference: &str,
-    _source_external_mail_id: &str,
-) -> Result<[u8; 32], ApplicationError> {
-    // 旧版 return 路径传入 nil evidence，外部引用只用于前置校验，不进入摘要载荷。
-    legacy_proof_digest("delivery_return_succeeded", delivery_id, None)
-}
-
 fn legacy_proof_digest(
     kind: &str,
     delivery_id: uuid::Uuid,

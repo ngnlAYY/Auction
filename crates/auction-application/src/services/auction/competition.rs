@@ -301,7 +301,8 @@ const fn proxy_mode_name(mode: ProxyMode) -> &'static str {
 /// 竞价用例服务，只编排端口和纯领域规划器。
 pub struct CompetitionService<R, C> {
     repository: Arc<R>,
-    clock: Arc<C>,
+    // 保留既有装配签名；命令时刻由锁后的事务端口提供。
+    _clock: Arc<C>,
 }
 
 impl<R, C> CompetitionService<R, C>
@@ -312,7 +313,7 @@ where
 {
     /// 建立不持有具体数据库或网络实现的竞价用例。
     pub fn new(repository: Arc<R>, clock: Arc<C>) -> Self {
-        Self { repository, clock }
+        Self { repository, _clock: clock }
     }
 
     /// 锁定竞价快照、计算计划并交给仓储在同一事务中原子应用。
@@ -371,8 +372,7 @@ where
                         return Ok(replayed);
                     }
 
-                    let now = transaction.current_time().await?;
-                    let snapshot = match transaction.load_for_update(lot_id, now).await {
+                    let snapshot = match transaction.load_for_update(lot_id).await {
                         Ok(snapshot) => snapshot,
                         Err(crate::CompetitionTransactionError::NotFound) => {
                             return Err(crate::CompetitionTransactionError::StaleSlowProxy.into());
@@ -382,6 +382,9 @@ where
                     let Some(active) = snapshot.active_proxy else {
                         return Err(crate::CompetitionTransactionError::StaleSlowProxy.into());
                     };
+                    let eligible =
+                        transaction.participant_is_eligible_for_update(active.user_id).await?;
+                    let now = transaction.current_time().await?;
                     if snapshot.auction_status != AuctionStatus::Live
                         || active.id != command.authorization_id
                         || active.mode != ProxyMode::Slow
@@ -395,8 +398,6 @@ where
                         return Err(crate::CompetitionTransactionError::StaleSlowProxy.into());
                     }
 
-                    let eligible =
-                        transaction.participant_is_eligible_for_update(active.user_id).await?;
                     let trigger = if eligible {
                         CompetitionTrigger::SlowDue {
                             command_id,
@@ -451,12 +452,10 @@ where
         &self,
         command: CompetitionCommand,
     ) -> Result<CompetitionCommandOutcome, ApplicationError> {
-        let now = self.clock.now();
         let command_id = command.command_id();
         let lot_id = command.lot_id();
         let request_hash = command.request_hash();
         let command_kind = command.kind();
-        let audit = command.audit_context(now);
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
@@ -525,7 +524,7 @@ where
                         };
                     }
 
-                    let mut snapshot = transaction.load_for_update(lot_id, now).await?;
+                    let mut snapshot = transaction.load_for_update(lot_id).await?;
                     let quota_limit = snapshot.rules.proxy_max_outbid_uses;
                     if let CompetitionCommand::CreateProxy(create) = &command {
                         CompetitionPlan::validate_proxy_creation_policy(
@@ -591,6 +590,12 @@ where
                         return Err(crate::CompetitionTransactionError::BidderIneligible.into());
                     }
 
+                    // 用户资格锁同样可能等待；每次序列化重试都在全部锁齐备后重新计时。
+                    let now = transaction.current_time().await?;
+                    if now >= snapshot.state.effective_end_at {
+                        return Err(crate::CompetitionTransactionError::InvalidState.into());
+                    }
+                    let audit = command.audit_context(now);
                     let mut prerequisite_plans = Vec::new();
                     if let Some(active) = snapshot.active_proxy
                         && active.user_id != bidder_id
@@ -637,9 +642,9 @@ where
                         })
                         .await?;
                     for prerequisite in prerequisite_plans {
-                        transaction.apply_plan(prerequisite, None).await?;
+                        transaction.apply_plan(prerequisite, None, now).await?;
                     }
-                    transaction.apply_plan(plan.clone(), Some(audit)).await?;
+                    transaction.apply_plan(plan.clone(), Some(audit), now).await?;
                     let effective_end_at =
                         CompetitionWireTimestamp::from_utc(plan.final_lot.effective_end_at);
                     Ok(CompetitionCommandOutcome { plan, proxy, effective_end_at })

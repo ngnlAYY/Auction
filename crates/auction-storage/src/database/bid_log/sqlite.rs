@@ -166,7 +166,7 @@ pub(super) async fn list_sqlite(
          LIMIT ? OFFSET ?",
     )
     .bind(if use_boundary { 1_i64 } else { 0_i64 })
-    .bind(sqlite_timestamp_seconds(boundary_created_at))
+    .bind(sqlite_timestamp(boundary_created_at))
     .bind(uuid_blob(boundary_lot_id))
     .bind(boundary_state_version)
     .bind(i64::from(boundary_fact_index))
@@ -343,8 +343,9 @@ fn uuid_from_blob(bytes: Vec<u8>, label: &str) -> Result<Uuid, ApplicationError>
     Uuid::from_slice(&bytes).map_err(|_| storage_error(label))
 }
 
-fn sqlite_timestamp_seconds(value: DateTime<Utc>) -> String {
-    value.format("%Y-%m-%d %H:%M:%S").to_string()
+fn sqlite_timestamp(value: DateTime<Utc>) -> String {
+    // 新事实使用锁后数据库时间，分页游标必须保留同秒内精度，不能跳过剩余事实。
+    value.format("%Y-%m-%d %H:%M:%S%.f").to_string()
 }
 
 fn parse_timestamp(value: String, label: &str) -> Result<DateTime<Utc>, ApplicationError> {

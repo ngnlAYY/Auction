@@ -57,6 +57,8 @@ pub struct ScheduledRoundBootstrap {
     pub scheduled_end_at: DateTime<Utc>,
     pub request_hash: super::RequestHash,
     pub policy: AuctionPolicyTemplate,
+    /// 新轮次必须冻结原始 IANA 本地计划，后继不按 UTC 固定时长推算。
+    pub schedule_source: super::AuctionScheduleSource,
 }
 
 /// 周计划 ensure 后返回的安全投影，供调度器决定 Mail owner 的暂停/恢复期望。

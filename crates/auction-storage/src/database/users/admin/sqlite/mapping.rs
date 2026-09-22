@@ -141,27 +141,22 @@ pub(super) async fn insert_audit_sqlite(
 
 pub(super) async fn begin_sqlite_write(
     store: &crate::database::SqliteStore,
-) -> Result<PoolConnection<sqlx::Sqlite>, ApplicationError> {
-    let mut connection = store.pool().acquire().await.map_err(map_sqlite_error)?;
-    sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await.map_err(map_sqlite_error)?;
-    Ok(connection)
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, ApplicationError> {
+    let connection = store.pool().acquire().await.map_err(map_sqlite_error)?;
+    // SQLx 跟踪事务深度并在 Drop 时回滚，覆盖 HTTP 超时和任务取消。
+    sqlx::Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+        .await
+        .map_err(map_sqlite_error)
 }
 
 pub(super) async fn finish_sqlite_write<T>(
-    mut connection: PoolConnection<sqlx::Sqlite>,
+    transaction: sqlx::Transaction<'static, sqlx::Sqlite>,
     result: Result<T, ApplicationError>,
 ) -> Result<T, ApplicationError> {
     match result {
-        Ok(value) => match sqlx::query("COMMIT").execute(&mut *connection).await {
-            Ok(_) => Ok(value),
-            Err(error) => {
-                // 提交失败时尽力回滚，避免连接回收到连接池时仍保留未完成事务。
-                let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-                Err(map_sqlite_error(error))
-            }
-        },
+        Ok(value) => transaction.commit().await.map(|()| value).map_err(map_sqlite_error),
         Err(error) => {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+            let _ = transaction.rollback().await;
             Err(error)
         }
     }

@@ -77,8 +77,8 @@ pub(super) async fn insert_successor_sqlite(
         "INSERT INTO scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at,
              open_due_at, scheduled_end_at, create_command_id,
-             state_version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, 1, ?, ?)",
+             state_version, created_at, updated_at, schedule_snapshot)
+         VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, 1, ?, ?, ?)",
     )
     .bind(uuid_blob(successor.round_id))
     .bind(world_id)
@@ -90,6 +90,14 @@ pub(super) async fn insert_successor_sqlite(
     .bind(uuid_blob(successor.create_command_id.as_uuid()))
     .bind(&now)
     .bind(&now)
+    .bind(
+        successor
+            .schedule_source
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| invalid_record())?,
+    )
     .execute(&mut *connection)
     .await
     .map_err(map_sql_error)?;

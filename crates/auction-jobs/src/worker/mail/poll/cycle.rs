@@ -21,7 +21,7 @@ pub(crate) async fn run_loop<C>(
     C: Clock + 'static,
 {
     loop {
-        if *shutdown.borrow() {
+        if *shutdown.borrow() || worker.control.is_draining() {
             return;
         }
         let now = worker.clock.now();
@@ -103,6 +103,9 @@ where
 {
     if !runtime.validate() {
         return Err(WorkerError::InvalidMailPollConfiguration);
+    }
+    if worker.control.is_draining() {
+        return Ok(WorkerResult::Success);
     }
     let now = worker.clock.now();
     let lease_duration = ChronoDuration::from_std(runtime.config.lease_duration)

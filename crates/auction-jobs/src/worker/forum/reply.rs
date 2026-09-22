@@ -11,9 +11,9 @@ use std::{
 use auction_application::{
     ApplicationError, CompetitionCommandPort, CompetitionTransactionError, CreateProxyCommand,
     ForumBidCommandRecord, ForumCommandStatus, ForumPostWriter, ForumRenderer, ForumReplyStore,
-    ForumTopicReader, LowerProxyCommand, MailDeliveryCommand, MailDeliveryEnqueuer,
-    MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate, PlaceBidCommand,
-    PublicEquipmentLinkResolver, RequestHash, forum_world_name,
+    ForumTopicReader, ForumWriteProgress, LowerProxyCommand, MailDeliveryCommand,
+    MailDeliveryEnqueuer, MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+    PlaceBidCommand, PublicEquipmentLinkResolver, RequestHash, forum_world_name,
 };
 use auction_domain::{BidAmount, CommandId, ProxyMode};
 use chrono::Duration;
@@ -131,7 +131,7 @@ where
     let mut seen_auctions = HashSet::new();
     let mut processed = 0_u16;
     let mut topic_failed = false;
-    while processed < runtime.batch_size {
+    while processed < runtime.batch_size && !worker.control.is_draining() {
         let now = worker.clock.now();
         let lease_until =
             now.checked_add_signed(lease_duration).ok_or(WorkerError::InvalidForumConfiguration)?;
@@ -150,16 +150,37 @@ where
                 .checked_add_signed(poll_interval)
                 .ok_or(WorkerError::InvalidForumConfiguration)?;
             let processed_through_post_number = topic.processed_through_post_number;
-            runtime
-                .store
-                .finish_topic_scan(topic, processed_through_post_number, scanned_at, next_scan_at)
-                .await?;
+            if let Some(failure_code) = topic.content_last_error_code.clone() {
+                // 重复领取没有读取远端证明，不能借 finish 清掉上一轮的未知写入门禁。
+                runtime
+                    .store
+                    .fail_topic_scan(topic, scanned_at, next_scan_at, failure_code)
+                    .await?;
+                topic_failed = true;
+            } else {
+                runtime
+                    .store
+                    .finish_topic_scan(
+                        topic,
+                        processed_through_post_number,
+                        scanned_at,
+                        next_scan_at,
+                    )
+                    .await?;
+            }
             break;
         }
         processed += 1;
+        let write_progress = ForumWriteProgress::default();
         match tokio::time::timeout(
             runtime.item_timeout,
-            process_topic(runtime, topic.clone(), worker.clock.as_ref(), poll_interval),
+            process_topic(
+                runtime,
+                topic.clone(),
+                worker.clock.as_ref(),
+                poll_interval,
+                &write_progress,
+            ),
         )
         .await
         {
@@ -171,8 +192,15 @@ where
                     error = %error,
                     "论坛回帖主题导入未完成"
                 );
-                record_topic_failure(runtime, topic, worker.clock.now(), poll_interval, &error)
-                    .await?;
+                record_topic_failure(
+                    runtime,
+                    topic,
+                    worker.clock.now(),
+                    poll_interval,
+                    &error,
+                    &write_progress,
+                )
+                .await?;
                 topic_failed = true;
             }
             Err(_) => {
@@ -186,7 +214,8 @@ where
                     topic,
                     worker.clock.now(),
                     poll_interval,
-                    "write_unknown",
+                    "topic_processing_timeout",
+                    write_progress.has_unconfirmed_write(),
                 )
                 .await?;
                 topic_failed = true;
@@ -202,12 +231,22 @@ async fn record_topic_failure(
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     error: &ApplicationError,
+    write_progress: &ForumWriteProgress,
 ) -> Result<(), WorkerError> {
     let failure_code = match error {
-        ApplicationError::ForumRemote(remote) => remote.code(),
+        // 精确进度已证明未发送 POST 时，ownership 等预检的保守 write_unknown 不能锁死正文。
+        ApplicationError::ForumRemote(remote) if remote.code() != "write_unknown" => remote.code(),
         _ => "topic_processing_failed",
     };
-    record_topic_failure_code(runtime, topic, failed_at, poll_interval, failure_code).await
+    record_topic_failure_code(
+        runtime,
+        topic,
+        failed_at,
+        poll_interval,
+        failure_code,
+        write_progress.has_unconfirmed_write(),
+    )
+    .await
 }
 
 async fn record_topic_failure_code(
@@ -216,7 +255,15 @@ async fn record_topic_failure_code(
     failed_at: chrono::DateTime<chrono::Utc>,
     poll_interval: chrono::Duration,
     failure_code: &str,
+    unconfirmed_write: bool,
 ) -> Result<(), WorkerError> {
+    // 历史未知写入不能因后续 GET/数据库错误被覆盖成可重试状态，必须等待原有回读证明。
+    let failure_code =
+        if unconfirmed_write || topic.content_last_error_code.as_deref() == Some("write_unknown") {
+            "write_unknown"
+        } else {
+            failure_code
+        };
     let retry_at = failed_at
         .checked_add_signed(poll_interval)
         .ok_or(WorkerError::InvalidForumConfiguration)?;

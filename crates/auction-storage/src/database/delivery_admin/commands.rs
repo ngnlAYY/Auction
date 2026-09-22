@@ -273,6 +273,12 @@ async fn apply_delivery_action(
     if current.status != expected_status {
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }
+    let quarantined_mail = current.reason_code.as_deref() == Some("mail_disposition_conflict");
+    if quarantined_mail && command.action != DeliveryAdminAction::ReconcileFailed {
+        // 隔离发生在发送前；旧 payload 没有重新发送或伪装外部成功的授权。人工核对后
+        // 只能终结这一意图，资产修复必须保留独立证据，不能借通用 retry 绕过接受事实。
+        return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Invalid));
+    }
     let (external_reference, failure_code, metadata) = match command.action {
         DeliveryAdminAction::ReconcileSucceeded => (
             command.external_reference.as_deref(),
@@ -282,7 +288,16 @@ async fn apply_delivery_action(
         DeliveryAdminAction::ReconcileFailed => (
             None,
             command.failure_code.as_deref(),
-            serde_json::json!({"resolution":"admin_reconciled_failed"}),
+            if quarantined_mail {
+                serde_json::json!({
+                    "resolution": "admin_reconciled_failed",
+                    "reason_code": "mail_disposition_conflict",
+                    "preflight_blocked": true,
+                    "outcome_unknown": false,
+                })
+            } else {
+                serde_json::json!({"resolution":"admin_reconciled_failed"})
+            },
         ),
         _ => (None, None, serde_json::json!({})),
     };

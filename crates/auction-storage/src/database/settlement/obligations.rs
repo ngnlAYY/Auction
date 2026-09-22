@@ -43,10 +43,7 @@ pub(super) async fn insert_obligations(
         .await
         .map_err(map_sql_error)?;
 
-        let operation = match obligation.kind {
-            SettlementObligationKind::UnsoldReturn => "return",
-            _ => "send",
-        };
+        // 投稿装备已经由入库流程领取；流拍与撤拍均须逐件发送库存装备，不能 Return 原邮件。
         let dispatch_world = match obligation.kind {
             SettlementObligationKind::WinnerPaymentCarrierCod
             | SettlementObligationKind::SellerPayout
@@ -57,11 +54,10 @@ pub(super) async fn insert_obligations(
             r#"INSERT INTO public.settlement_obligation_fulfillments
                    (obligation_id, execution_state, dispatch_world, delivery_operation,
                     created_at, updated_at)
-               VALUES ($1, 'pending', $2, $3, $4, $4)"#,
+               VALUES ($1, 'pending', $2, 'send', $3, $3)"#,
         )
         .bind(obligation.id.as_uuid())
         .bind(settlement_world_name(dispatch_world))
-        .bind(operation)
         .bind(occurred_at)
         .execute(&mut **transaction)
         .await

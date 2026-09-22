@@ -104,7 +104,8 @@ async fn ensure_postgres_once(
         .map_err(PostgresBootstrapError::Storage)?;
     if let Some(row) = sqlx::query(
         "SELECT id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at
+                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at,
+                schedule_snapshot
          FROM public.scheduled_rounds WHERE world_id = $1 AND local_week = $2 FOR UPDATE",
     )
     .bind(&request.world_id)
@@ -115,6 +116,16 @@ async fn ensure_postgres_once(
     {
         let result = snapshot_postgres(&row)?;
         verify_existing(&result, &request)?;
+        if let Some(source) = row
+            .try_get::<Option<serde_json::Value>, _>("schedule_snapshot")
+            .map_err(map_storage_error)?
+        {
+            let source: auction_application::AuctionScheduleSource = serde_json::from_value(source)
+                .map_err(|_| repository_error_owned("周计划来源快照无效"))?;
+            if source != request.schedule_source {
+                return Err(repository_error_owned("周计划来源快照冲突").into());
+            }
+        }
         if result.active {
             let auction = sqlx::query("SELECT policy_snapshot FROM public.auctions WHERE id = $1")
                 .bind(request.auction_id.as_uuid())
@@ -188,8 +199,8 @@ async fn ensure_postgres_once(
     sqlx::query(
         "INSERT INTO public.scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-             scheduled_end_at, create_command_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)",
+             scheduled_end_at, create_command_id, created_at, updated_at, schedule_snapshot)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)",
     )
     .bind(request.round_id)
     .bind(&request.world_id)
@@ -201,6 +212,10 @@ async fn ensure_postgres_once(
     .bind(request.scheduled_end_at)
     .bind(request.create_command_id.as_uuid())
     .bind(db_now)
+    .bind(
+        serde_json::to_value(&request.schedule_source)
+            .map_err(|_| repository_error_owned("周计划来源无法编码"))?,
+    )
     .execute(&mut *transaction)
     .await
     .map_err(PostgresBootstrapError::Storage)?;
@@ -279,16 +294,20 @@ pub(super) async fn ensure_sqlite(
     request: ScheduledRoundBootstrap,
 ) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
     validate_request(&request)?;
-    let mut connection = pool.acquire().await.map_err(map_storage_error)?;
-    sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await.map_err(map_storage_error)?;
-    let result = ensure_sqlite_inner(&mut connection, request).await;
+    let connection = pool.acquire().await.map_err(map_storage_error)?;
+    // 调度超时取消也必须释放写锁；不能用未受 SQLx 跟踪的原始 BEGIN。
+    let mut transaction =
+        sqlx::Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+            .await
+            .map_err(map_storage_error)?;
+    let result = ensure_sqlite_inner(&mut transaction, request).await;
     match result {
         Ok(result) => {
-            sqlx::query("COMMIT").execute(&mut *connection).await.map_err(map_storage_error)?;
+            transaction.commit().await.map_err(map_storage_error)?;
             Ok(result)
         }
         Err(error) => {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+            let _ = transaction.rollback().await;
             Err(error)
         }
     }
@@ -313,7 +332,8 @@ async fn ensure_sqlite_inner(
     }
     if let Some(row) = sqlx::query(
         "SELECT id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at
+                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at,
+                schedule_snapshot
          FROM scheduled_rounds WHERE world_id = ? AND local_week = ?",
     )
     .bind(&request.world_id)
@@ -324,6 +344,15 @@ async fn ensure_sqlite_inner(
     {
         let result = snapshot_sqlite(&row)?;
         verify_existing(&result, &request)?;
+        if let Some(source) =
+            row.try_get::<Option<String>, _>("schedule_snapshot").map_err(map_storage_error)?
+        {
+            let source: auction_application::AuctionScheduleSource = serde_json::from_str(&source)
+                .map_err(|_| repository_error_owned("周计划来源快照无效"))?;
+            if source != request.schedule_source {
+                return Err(repository_error_owned("周计划来源快照冲突"));
+            }
+        }
         if result.active {
             let policy_snapshot: String =
                 sqlx::query_scalar("SELECT policy_snapshot FROM auctions WHERE id = ?")
@@ -397,8 +426,8 @@ async fn ensure_sqlite_inner(
     sqlx::query(
         "INSERT INTO scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-             scheduled_end_at, create_command_id, state_version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+             scheduled_end_at, create_command_id, state_version, created_at, updated_at, schedule_snapshot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
     )
     .bind(uuid_blob(request.round_id))
     .bind(&request.world_id)
@@ -411,6 +440,7 @@ async fn ensure_sqlite_inner(
     .bind(uuid_blob(request.create_command_id.as_uuid()))
     .bind(sqlite_timestamp(db_now))
     .bind(sqlite_timestamp(db_now))
+    .bind(serde_json::to_string(&request.schedule_source).map_err(|_| repository_error_owned("周计划来源无法编码"))?)
     .execute(&mut *connection)
     .await
     .map_err(map_storage_error)?;
@@ -469,6 +499,14 @@ fn validate_request(
         || request.request_hash.as_bytes() == [0; 32]
     {
         return Err(repository_error_owned("周计划 bootstrap 参数无效"));
+    }
+    let times =
+        request.schedule_source.resolve().map_err(|_| repository_error_owned("周计划来源无效"))?;
+    if times.preview_due_at != request.preview_due_at
+        || times.open_due_at != request.open_due_at
+        || times.scheduled_end_at != request.scheduled_end_at
+    {
+        return Err(repository_error_owned("周计划时间与来源不一致"));
     }
     request.policy.validate().map_err(|_| repository_error_owned("周计划策略无效"))
 }

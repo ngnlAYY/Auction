@@ -57,6 +57,7 @@
   最终新命令仍由领域层校验。既有价格 DTO 字段保持不变，超过上限的 `next_bid` 表达不可继续出价。
 - `AdminForumPreviewRequest` 与 `AdminForumPreviewResponse`：管理端论坛内容预览契约；输入
   只能选择一个非空的 HTML/文本字段，输出只包含安全的目录、帖子、命令和警告信息。
+  为 false 的 `proxy_lower` 与空命令/警告列表可以省略，反序列化恢复相同默认值。
 - `AdminSettlementReportResponse`：PostgreSQL 完整档的 Admin 结算安全投影；lot 明细显式返回
   `listed_price`、`hold_ppm` 与带符号的 `adjustment_ppm`，供界面区分折扣和惩罚，不暴露数据库行。
 - `AdminSettlementCatalogResponse`：只包含已结算拍卖 UUID、world、期号、结算时间和有界分页，

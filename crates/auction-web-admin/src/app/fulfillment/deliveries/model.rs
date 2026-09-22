@@ -3,6 +3,8 @@
 use crate::api::{Delivery, DeliveryAction};
 use auction_web_shared::legacy_t as t;
 
+use super::helpers::is_mail_disposition_conflict;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct DeliveryDialogState {
     pub(super) delivery: Delivery,
@@ -19,10 +21,11 @@ pub(super) struct DeliveryReconcileDraft {
 }
 
 impl DeliveryReconcileDraft {
-    pub(super) fn for_delivery(delivery_id: String) -> Self {
+    pub(super) fn for_delivery(delivery: &Delivery) -> Self {
         Self {
-            delivery_id,
-            action: "retry".to_owned(),
+            delivery_id: delivery.id.clone(),
+            action: if is_mail_disposition_conflict(delivery) { "failed" } else { "retry" }
+                .to_owned(),
             external_reference: String::new(),
             failure_code: String::new(),
         }

@@ -14,31 +14,32 @@ pub(super) async fn apply_final_plan_sqlite(
     effective_end_at: Option<DateTime<Utc>>,
 ) -> Result<(), CompetitionTransactionError> {
     let now = sqlite_timestamp(auction.updated_at);
-    let effective_end_at = effective_end_at.map(sqlite_timestamp);
+    // 上下文已把历史格式解析为 UTC；拍卖层直接比较完整精度，不能通过文本或毫秒取整延长期限。
+    let scheduled_end_at = auction.scheduled_end_at.map(|deadline| {
+        sqlite_timestamp(effective_end_at.map_or(deadline, |cap| deadline.min(cap)))
+    });
+    let clamped_end_at = auction.effective_end_at.map(|deadline| {
+        sqlite_timestamp(effective_end_at.map_or(deadline, |cap| deadline.min(cap)))
+    });
+    let effective_end_at = effective_end_at.map(|deadline| {
+        (
+            sqlite_timestamp(deadline),
+            deadline.naive_utc().format("%Y-%m-%d %H:%M:%S%.9f").to_string(),
+        )
+    });
     // Lite 同样保留 effective >= scheduled；人工 Final 必须同步收紧两个拍卖层时间列。
     let updated = {
         let connection = transaction.connection_mut()?;
         sqlx::query(
             "UPDATE auctions
              SET status = 'final', final_phase_at = ?,
-                 scheduled_end_at = CASE
-                     WHEN ? IS NOT NULL AND scheduled_end_at > ? THEN ?
-                     ELSE scheduled_end_at
-                 END,
-                 effective_end_at = CASE
-                     WHEN ? IS NOT NULL AND effective_end_at > ? THEN ?
-                     ELSE effective_end_at
-                 END,
+                 scheduled_end_at = ?, effective_end_at = ?,
                  state_version = ?, updated_at = ?
              WHERE id = ? AND status = 'live' AND state_version = ?",
         )
         .bind(&now)
-        .bind(&effective_end_at)
-        .bind(&effective_end_at)
-        .bind(&effective_end_at)
-        .bind(&effective_end_at)
-        .bind(&effective_end_at)
-        .bind(&effective_end_at)
+        .bind(&scheduled_end_at)
+        .bind(&clamped_end_at)
         .bind(i64_version(auction.state_version, "Lite 最终阶段状态版本")?)
         .bind(&now)
         .bind(uuid_blob(auction.id.as_uuid()))
@@ -56,25 +57,40 @@ pub(super) async fn apply_final_plan_sqlite(
         }
         let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
         transaction.insert_command_inner(proxy_plan.command).await?;
-        transaction.apply_public_command_plan_inner(proxy_plan.competition, None).await?;
+        transaction
+            .apply_public_command_plan_inner(proxy_plan.competition, None, auction.updated_at)
+            .await?;
         insert_lifecycle_audit(transaction, audit).await?;
     }
-    if let Some(effective_end_at) = effective_end_at {
+    if let Some((effective_end_at, precise_end_at)) = effective_end_at {
         let connection = transaction.connection_mut()?;
+        // julianday 只保留毫秒；并列时仅对已知 UTC 写入格式补齐小数比较，未知 offset 不当作 UTC。
         sqlx::query(
             "UPDATE lots
-             SET effective_end_at = ?, state_version = state_version + 1, updated_at = ?
-             WHERE auction_id = ? AND status = 'live' AND effective_end_at > ?",
+             SET effective_end_at = ?1, state_version = state_version + 1, updated_at = ?2
+             WHERE auction_id = ?3 AND status = 'live'
+               AND (julianday(effective_end_at) > julianday(?1)
+                    OR (julianday(effective_end_at) = julianday(?1)
+                        AND CASE WHEN substr(effective_end_at, -6) = '+00:00'
+                                      OR substr(effective_end_at, -1) = 'Z'
+                                      OR (substr(effective_end_at, 11, 1) = ' '
+                                          AND substr(effective_end_at, 20) NOT GLOB '*[+-]*')
+                            THEN substr(replace(replace(replace(effective_end_at,
+                                'T', ' '), '+00:00', ''), 'Z', '')
+                                || CASE WHEN substr(effective_end_at, 20, 1) = '.'
+                                    THEN '000000000' ELSE '.000000000' END, 1, 29)
+                        END > ?4))",
         )
         .bind(&effective_end_at)
         .bind(&now)
         .bind(uuid_blob(auction.id.as_uuid()))
-        .bind(&effective_end_at)
+        .bind(&precise_end_at)
         .execute(&mut *connection)
         .await
         .map_err(map_sql_error)?;
     }
-    if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
+    // Worker 的 Final 与轮次完成标记必须原子提交，不能在两次写入之间留下不可再次领取的轮次。
+    {
         let connection = transaction.connection_mut()?;
         sqlx::query(
             "UPDATE scheduled_rounds

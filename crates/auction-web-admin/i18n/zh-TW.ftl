@@ -568,6 +568,7 @@ delivery-reconcile-action-retry = 重新排隊
 delivery-reconcile-action-succeeded = 標記為成功
 delivery-reconcile-send-proof-required = 寄送必須通過 Sent 核驗後才能完成。
 delivery-reconcile-action-failed = 標記為失敗
+delivery-mail-disposition-conflict = 資產處置衝突已在寄送前隔離。僅允許將此任務標記為失敗，不能重試或標記成功。
 delivery-external-reference = 外部參照
 delivery-failure-code = 失敗代碼
 

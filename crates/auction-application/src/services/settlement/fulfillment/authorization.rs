@@ -5,8 +5,8 @@ use chrono::Duration;
 
 use crate::{
     ApplicationError, Clock, SettlementFulfillmentClaim, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentEvidenceReader, SettlementFulfillmentRecipientReader,
-    SettlementFulfillmentStore,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentOperation,
+    SettlementFulfillmentRecipientReader, SettlementFulfillmentStore,
 };
 
 use super::evidence::validate_balance_evidence;
@@ -34,6 +34,10 @@ pub(super) async fn authorize_pending_or_prepared(
     AuthorizationResult<(SettlementFulfillmentClaim, SettlementDeliveryIntent)>,
     ApplicationError,
 > {
+    // 已冻结的旧 Return 不能改写成新 Send，也不能凭原邮件动作继续推进装备返还。
+    if claim.operation == SettlementFulfillmentOperation::Return {
+        return manual(store, claim, "legacy_return_requires_review").await;
+    }
     let claim = match resolve_recipient(
         store,
         recipients,

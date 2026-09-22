@@ -16,9 +16,8 @@ use dioxus::prelude::*;
 /// - `total: None` + `has_more`：只有游标语义的兼容投影，可跳转范围限制到当前已知的下一页。
 ///
 /// 钳制契约（两端迁移时必须保留的行为）：渲染期先把 `page` 钳制到当前已知合法范围
-/// 得到 `valid_page`，上一页/下一页/跳页等交互全部从钳制后的页码出发；越界场景
-/// （如分享链接带上过大的 page）不会先按原始越界页触发一次请求，挂载后的纠偏
-/// effect 只补一次父级状态/URL 收敛。
+/// 得到 `valid_page`，上一页/下一页/跳页等交互全部从钳制后的页码出发；挂载或页码、总量
+/// 变化后，纠偏 effect 通知父级把状态与 URL 收敛到合法页。
 #[component]
 pub fn Pager(
     page: i64,
@@ -48,18 +47,19 @@ pub fn Pager(
         .map(|total| if total <= 0 { 1 } else { total.saturating_add(page_size - 1) / page_size })
         .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
         .max(1);
-    // 先把页码钳制到当前已知合法范围，再渲染与派生交互；Dioxus 0.7 不追踪普通 props，
-    // 越界场景下上一页/下一页/跳页全部从钳制后的页码出发，不会先按原始越界页触发一次请求。
+    // 先把页码钳制到当前已知合法范围，再渲染与派生交互；输入同步与纠偏显式订阅 props。
     let valid_page = page.clamp(1, total_pages);
     let mut jump_page = use_signal(|| valid_page.to_string());
 
-    use_effect(move || jump_page.set(valid_page.to_string()));
-    // 页码越界时只补一次父级状态纠偏；effect 仅在挂载后运行一次，重复收敛天然去重。
-    use_effect(move || {
+    use_effect(use_reactive((&valid_page,), move |(valid_page,)| {
+        jump_page.set(valid_page.to_string());
+    }));
+    // 普通 props 不会被 effect 自动追踪；总量收缩后也须让父级重新读取有效页。
+    use_effect(use_reactive((&page, &valid_page), move |(page, valid_page)| {
         if page != valid_page {
             on_page_change.call(valid_page);
         }
-    });
+    }));
 
     let clean = jump_page().trim().to_owned();
     let jump_target = (!clean.is_empty() && clean.bytes().all(|value| value.is_ascii_digit()))

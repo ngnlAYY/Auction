@@ -34,6 +34,7 @@ macro_rules! map_temporarily_unavailable {
             | ApplicationError::AdminWorld(_)
             | ApplicationError::MailProcessing(_)
             | ApplicationError::ForumRemote(_)
+            | ApplicationError::ForumIdentityRejected(_)
             | ApplicationError::Session(_)
             | ApplicationError::OperationsAlert(_)
     };

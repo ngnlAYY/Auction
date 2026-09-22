@@ -37,10 +37,13 @@ pub(super) async fn process_actions<C>(
     let mut phase_result = WorkerResult::Success;
     let mut remaining = capacity;
     let mut exhausted = false;
-    while remaining > 0 && !exhausted {
+    while remaining > 0 && !exhausted && !worker.control.is_draining() {
         let wave_size = usize::from(worker.recovery.concurrency).min(remaining);
         let mut tasks = JoinSet::new();
         for _ in 0..wave_size {
+            if worker.control.is_draining() {
+                break;
+            }
             let item_started = std::time::Instant::now();
             let now = worker.clock.now();
             let Some(lease_until) = now.checked_add_signed(lease_duration) else {

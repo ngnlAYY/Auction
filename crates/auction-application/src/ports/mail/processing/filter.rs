@@ -15,7 +15,8 @@ pub const EQUIPMENT_TRADEABLE_REQUIRED: &str = "tradeable_required";
 
 /// MoogleMail 入站装备过滤策略。
 ///
-/// 空的 allowlist 表示不限制对应维度；启用策略时至少要配置一个维度或等级范围。
+/// 空的 allowlist 表示不限制对应维度；等级上下限分别用 0 表示不限制。
+/// 启用策略时至少要配置一个维度或等级范围。
 /// 策略只消费已由装备来源适配器生成的安全快照，不接触外部页面正文或装备 key。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MailEquipmentFilter {
@@ -32,7 +33,10 @@ pub struct MailEquipmentFilter {
 impl MailEquipmentFilter {
     /// 校验配置边界，避免运行时用未审计的 token 或空策略拦截所有邮件。
     pub fn validate(&self) -> Result<(), MailProcessingError> {
-        if self.level_min < 0 || self.level_max < self.level_min || self.level_max > 1000 {
+        if !(0..=1000).contains(&self.level_min)
+            || !(0..=1000).contains(&self.level_max)
+            || self.level_max != 0 && self.level_max < self.level_min
+        {
             return Err(MailProcessingError::InvalidConfiguration);
         }
         let values = [
@@ -126,7 +130,9 @@ impl MailEquipmentFilter {
             return EQUIPMENT_TYPE_NOT_ALLOWED;
         }
         if (self.level_min != 0 || self.level_max != 0)
-            && level.is_none_or(|value| value < self.level_min || value > self.level_max)
+            && level.is_none_or(|value| {
+                value < self.level_min || self.level_max != 0 && value > self.level_max
+            })
         {
             return EQUIPMENT_LEVEL_NOT_ALLOWED;
         }

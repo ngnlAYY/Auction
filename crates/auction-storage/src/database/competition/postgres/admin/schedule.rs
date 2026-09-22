@@ -68,7 +68,8 @@ async fn load_admin_auction_schedule_inner(
                    SELECT round.id, round.state_version, round.preview_due_at,
                           round.open_due_at, round.scheduled_end_at,
                           round.preview_completed_at, round.open_completed_at,
-                          round.final_completed_at, round.lease_owner, round.lease_until
+                          round.final_completed_at, round.lease_owner, round.lease_until,
+                          round.schedule_snapshot
                    FROM public.scheduled_rounds AS round
                    INNER JOIN target_auction ON target_auction.id = round.auction_id
                    INNER JOIN locked_world ON locked_world.id = target_auction.world_id
@@ -93,6 +94,7 @@ async fn load_admin_auction_schedule_inner(
                 locked_round.final_completed_at,
                 locked_round.lease_owner,
                 locked_round.lease_until,
+                locked_round.schedule_snapshot,
                 (SELECT COUNT(*)::bigint FROM public.lots AS lot WHERE lot.auction_id = a.id)
                     AS lot_count
              FROM public.auctions AS a
@@ -112,7 +114,14 @@ async fn load_admin_auction_schedule_inner(
     let policy_scheduled_end_at: DateTime<Utc> =
         row.try_get("policy_scheduled_end_at").map_err(map_sql_error)?;
     let summary = map_schedule_summary(&row, Some(policy_scheduled_end_at))?;
+    let schedule_source = row
+        .try_get::<Option<Value>, _>("schedule_snapshot")
+        .map_err(map_sql_error)?
+        .map(serde_json::from_value::<auction_application::AuctionScheduleSource>)
+        .transpose()
+        .map_err(|_| invalid_state("Admin 拍卖排期来源无效"))?;
     let snapshot = AdminAuctionScheduleSnapshot {
+        schedule_source,
         summary,
         policy_scheduled_end_at,
         round_id: row.try_get("round_id").map_err(map_sql_error)?,
@@ -193,6 +202,7 @@ async fn update_admin_auction_schedule_inner(
                SET preview_due_at = $2,
                    open_due_at = $3,
                    scheduled_end_at = $4,
+                   schedule_snapshot = $15,
                    lease_owner = NULL,
                    lease_until = NULL,
                    state_version = state_version + 1,
@@ -224,6 +234,14 @@ async fn update_admin_auction_schedule_inner(
         .bind(snapshot.final_completed_at)
         .bind(snapshot.lease_owner.as_deref())
         .bind(snapshot.lease_until)
+        .bind(
+            snapshot
+                .schedule_source
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(|_| invalid_record())?,
+        )
         .fetch_optional(&mut **transaction)
         .await
         .map_err(map_sql_error)?

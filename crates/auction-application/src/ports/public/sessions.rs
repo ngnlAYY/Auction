@@ -46,6 +46,8 @@ impl AdminSessionConfig {
 #[derive(Debug, Clone)]
 pub struct PublicLoginIdentity {
     pub user_id: Uuid,
+    /// 认证时读取的用户版本；创建会话时必须在写事务内复核，阻止凭据轮换后的旧认证结果。
+    pub user_state_version: i64,
     pub username: String,
     pub active: bool,
     pub public_reason: Option<String>,
@@ -65,6 +67,8 @@ pub struct PublicSessionIdentity {
 pub struct PublicSessionRecord {
     pub token_hash: [u8; 32],
     pub user_id: Uuid,
+    /// 仅用于创建会话的版本门禁，不持久化凭据摘要或改变既有会话的响应契约。
+    pub authenticated_user_version: i64,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub absolute_expires_at: DateTime<Utc>,

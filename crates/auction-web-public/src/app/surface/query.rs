@@ -349,14 +349,36 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
 ///
 /// 初值与浏览器前进/后退（popstate）恢复共用 `read_public_query` 的既有解析（含 Router
 /// 规范化前保存的首次 query 恢复）；写回只替换本 crate 管理的键，未声明的外部入口参数
-/// 原样保留。每个页面挂载自己的实例；外壳另有独立实例承担 world 键的 popstate 恢复。
+/// 原样保留。每个页面挂载自己的实例，同时订阅外壳程序化导航的位置版本；外壳另有独立
+/// 实例承担 world 键的 popstate 恢复。
 pub(crate) fn use_public_query_state() -> QueryState<PublicBoardQuery> {
-    use_query_state(PUBLIC_QUERY_KEYS, |_| read_public_query(), public_query_pairs)
+    let query =
+        use_query_state(PUBLIC_QUERY_KEYS, |_| read_public_query(), managed_public_query_pairs);
+    let location_revision = try_consume_context::<PublicLocationRevision>();
+    let mut state = query.state;
+    use_effect(move || {
+        let Some(PublicLocationRevision(revision)) = location_revision else { return };
+        let _ = revision();
+        // pushState 不触发 popstate；首页清理查询后，已挂载目录仍须同步到新的地址栏状态。
+        let current = read_public_query();
+        if *state.peek() != current {
+            state.set(current);
+        }
+    });
+    query
 }
 
 /// 把完整查询状态按既有序列化规则写回地址栏（只替换本 crate 管理的键，其余键原样保留）。
 pub(crate) fn write_public_query(query: &PublicBoardQuery, mode: QueryWriteMode) {
-    write_query_pairs(PUBLIC_QUERY_KEYS, &public_query_pairs(query), mode);
+    write_query_pairs(PUBLIC_QUERY_KEYS, &managed_public_query_pairs(query), mode);
+}
+
+/// 原地写回时未知参数由共享层保留一次；完整链接仍通过 `public_query_pairs` 携带 passthrough。
+fn managed_public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)> {
+    public_query_pairs(query)
+        .into_iter()
+        .filter(|(key, _)| PUBLIC_QUERY_KEYS.contains(&key.as_str()))
+        .collect()
 }
 
 /// 读取地址栏最新查询、应用变更并按模式写回（等价旧 `update_public_query` 的读-改-写），

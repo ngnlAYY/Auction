@@ -6,13 +6,14 @@ use super::super::*;
 pub(in crate::database::competition) async fn insert_bid(
     transaction: &mut PostgresCompetitionTransaction,
     bid: &AcceptedBid,
+    occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let transaction = transaction.transaction_mut()?;
     sqlx::query(
         r#"INSERT INTO public.bids
             (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
-             effective_end_at, accepted_state_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+             effective_end_at, accepted_state_version, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
     )
     .bind(bid.id.as_uuid())
     .bind(bid.command_id.as_uuid())
@@ -23,6 +24,7 @@ pub(in crate::database::competition) async fn insert_bid(
     .bind(bid_mechanism(bid.mechanism))
     .bind(bid.effective_end_at)
     .bind(i64_version(bid.state_version, "竞价状态版本")?)
+    .bind(occurred_at)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
@@ -32,12 +34,14 @@ pub(in crate::database::competition) async fn insert_bid(
 pub(in crate::database::competition) async fn update_lot(
     transaction: &mut PostgresCompetitionTransaction,
     plan: &CompetitionPlan,
+    occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let previous_version = plan
         .final_lot
         .state_version
         .checked_sub(plan.public_bids.len() as u64)
         .ok_or_else(|| invalid_state("lot 状态版本回退失败"))?;
+    // 事实创建时间与领先起点共同使用锁后数据库时间，不能回退到事务开始时间。
     // 同一命令可先接受其他用户出价，再由原领先者的代理反超；即使最终领先者不变，
     // 连续领先区间也必须从本次事实重新开始，与追加式 bid 重建规则一致。
     let leadership_interrupted =
@@ -47,13 +51,13 @@ pub(in crate::database::competition) async fn update_lot(
         r#"UPDATE public.lots
          SET current_price = $2, leader_user_id = $3,
              leader_since = CASE
-                 WHEN leader_user_id IS DISTINCT FROM $3 OR $12 THEN CURRENT_TIMESTAMP
+                 WHEN leader_user_id IS DISTINCT FROM $3 OR $12 THEN $13
                  WHEN $3 IS NULL THEN NULL
                  ELSE leader_since
              END,
              leader_proxy_last = $4, effective_end_at = $5,
              slow_authorization_id = $6, slow_due_at = $7, slow_generation = $8,
-             last_proxy_sequence = $9, state_version = $10, updated_at = CURRENT_TIMESTAMP
+             last_proxy_sequence = $9, state_version = $10, updated_at = $13
          WHERE id = $1 AND state_version = $11"#,
     )
     .bind(plan.final_lot.lot_id.as_uuid())
@@ -68,6 +72,7 @@ pub(in crate::database::competition) async fn update_lot(
     .bind(i64_version(plan.final_lot.state_version, "lot 状态版本")?)
     .bind(i64_version(previous_version, "lot 前一版本")?)
     .bind(leadership_interrupted)
+    .bind(occurred_at)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

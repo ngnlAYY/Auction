@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 
 use crate::api::{Delivery, DeliveryAction};
 
-use super::helpers::delivery_display_id;
+use super::helpers::{delivery_display_id, is_mail_disposition_conflict};
 use super::model::{DeliveryActionRequest, DeliveryDialogKind, DeliveryReconcileDraft};
 
 /// 展示 delivery 动作的确认和人工对账字段。
@@ -20,6 +20,7 @@ pub(super) fn DeliveryDialog(
     on_cancel: EventHandler<()>,
 ) -> Element {
     let display_id = delivery_display_id(&delivery);
+    let disposition_conflict = is_mail_disposition_conflict(&delivery);
     let title = match kind {
         DeliveryDialogKind::Release => t!("delivery-release"),
         DeliveryDialogKind::Retry | DeliveryDialogKind::ReconcileRetry => t!("delivery-retry"),
@@ -68,7 +69,8 @@ pub(super) fn DeliveryDialog(
                         class: "admin-delivery-reconcile",
                         onsubmit: move |event| {
                             event.prevent_default();
-                            if busy || send_success_blocked {
+                            if busy || send_success_blocked
+                                || (disposition_conflict && submit_action != "failed") {
                                 return;
                             }
                             let external = submit_external_reference.trim().to_owned();
@@ -89,6 +91,9 @@ pub(super) fn DeliveryDialog(
                             });
                         },
                         label { r#for: "delivery-reconcile-action-{delivery_id}", {t!("delivery-reconcile-action")} }
+                        if disposition_conflict {
+                            p { class: "admin-delivery-reconcile__warning", {t!("delivery-mail-disposition-conflict")} }
+                        }
                         if send_success_blocked {
                             p { class: "admin-delivery-reconcile__warning", {t!("delivery-reconcile-send-proof-required")} }
                             button {
@@ -109,8 +114,10 @@ pub(super) fn DeliveryDialog(
                                         failure_code: select_failure_code.clone(),
                                     });
                                 },
-                                option { value: "retry", {t!("delivery-reconcile-action-retry")} }
-                                if !is_send_delivery {
+                                if !disposition_conflict {
+                                    option { value: "retry", {t!("delivery-reconcile-action-retry")} }
+                                }
+                                if !is_send_delivery && !disposition_conflict {
                                     option { value: "succeeded", {t!("delivery-reconcile-action-succeeded")} }
                                 }
                                 option { value: "failed", {t!("delivery-reconcile-action-failed")} }

@@ -114,11 +114,6 @@ pub(crate) fn bid_log() -> Element {
                 p { class: "public-auction-empty__title", {t!("bidlog-no-rounds")} }
             }
         },
-        Some(Ok(Some(page))) if page.bids.is_empty() => rsx! {
-            div { class: "public-auction-empty", role: "status",
-                p { class: "public-auction-empty__title", {t!("bidlog-empty")} }
-            }
-        },
         Some(Ok(Some(page))) => rsx! {
             BidLogTable {
                 page: page.clone(),
@@ -260,7 +255,13 @@ pub(crate) fn BidLogTable(
                 }
             }
             if bids.is_empty() {
-                p { class: "public-auction-bid-log-empty", {t!("bidlog-filter-empty")} }
+                p { class: "public-auction-bid-log-empty",
+                    if lot_filter.is_empty() {
+                        {t!("bidlog-empty")}
+                    } else {
+                        {t!("bidlog-filter-empty")}
+                    }
+                }
             } else {
             div { class: "public-auction-bid-log-table-wrap",
                 table {

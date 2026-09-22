@@ -222,6 +222,9 @@ fn MailDeliveryRow(
 }
 
 fn retry_action(delivery: &AdminMailIntakeDelivery) -> Option<DeliveryAction> {
+    if delivery.reason_code.as_deref() == Some("mail_disposition_conflict") {
+        return None;
+    }
     match delivery.status.as_str() {
         "failed" => Some(DeliveryAction::Retry),
         "manual_reconcile" => Some(DeliveryAction::ReconcileRetry),

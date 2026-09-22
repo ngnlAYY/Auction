@@ -14,6 +14,7 @@ MoogleMail 的业务拒绝、解析异常、HTTP 异常和处理超时需要同�
 - [Admin 审查展示投影](#admin-审查展示投影)
 - [主动 ComposeSend 的 Sent 证明](#主动-composesend-的-sent-证明)
 - [装备读取失败诊断](#装备读取失败诊断)
+- [历史资产处置核对](#历史资产处置核对)
 
 ## 普通日志
 
@@ -135,3 +136,18 @@ recorder 只在开关启用且同一实例满足条件时注入。
 
 HTTP body timeout 仍只保留 `body_unavailable` 与最后实际观测到的 header status，不把 partial body 伪称完整响应；
 session expired 在凭据耗尽或失效写回失败时保留最后已取得的响应 body、status 和 elapsed。
+
+## 历史资产处置核对
+
+2026-09-22 的[审计修复](../../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md)区分可恢复的本地接受决定和
+无法自动确认的远端资产。升级按既有停机/迁移流程执行；不要通过修改旧 payload、命令 ID 或账本解除阻断。
+
+- `legacy_return_requires_review`：旧流拍 Return 已冻结或有过执行，保持隔离。核对原投稿、逐件装备库存和
+  Sent/原邮件动作证据，不能直接将它改为 Send。迁移 `000038` 只自动转换从未开始且无关联 delivery 的记录。
+- `mail_disposition_conflict`：同一邮件存在已接受投稿与 Return，或同时存在 Take/Return 意图。后台保留原负载，
+  在发送前转人工核对。确认后只能将该任务标记失败；这不会消除资产矛盾，也不会开放重试或伪造发送成功。
+  后续处置须根据权威投稿、库存及远端回执另行确认，保留追加式审计。
+- 修复前已归档的未知标题 Credits 邮件：新逻辑不会重写既有完成事实或自动越过原游标重放。
+  应按 world、邮箱、外部 MID 对照原入站记录及当前远端资产盘点；没有证据时不能推定款项已领取或退回。
+
+以上是升级后需要核对的边界。本轮只完成静态修复，没有执行迁移、盘点真实资产或开展外部写入。

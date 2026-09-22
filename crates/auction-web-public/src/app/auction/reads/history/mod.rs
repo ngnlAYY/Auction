@@ -174,10 +174,7 @@ pub(crate) fn history() -> Element {
                 }
             };
         if validation_error.is_none()
-            && minimum_price
-                .as_deref()
-                .zip(maximum_price.as_deref())
-                .is_some_and(|(minimum, maximum)| minimum > maximum)
+            && history_price_range_reversed(minimum_price.as_deref(), maximum_price.as_deref())
         {
             validation_error = Some(HistoryFilterError::PriceRange);
         }

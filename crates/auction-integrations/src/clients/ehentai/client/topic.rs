@@ -123,7 +123,7 @@ impl EhentaiClient {
         self.wait_rate(operation).await?;
         // 即使此次 POST 尚未发出，前面可能已有远端写入，必须保守保留未知结果。
         self.check_ownership().await.map_err(|_| EhentaiError::write_unknown(operation))?;
-        let response = self
+        let request = self
             .client
             .post(action.clone())
             .header(header::USER_AGENT, USER_AGENT)
@@ -132,10 +132,12 @@ impl EhentaiClient {
             .header(header::REFERER, referer.as_str())
             .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
             .timeout(self.request_timeout)
-            .body(encoded)
-            .send()
-            .await
-            .map_err(|_| EhentaiError::write_unknown(operation))?;
+            .body(encoded);
+        if let Some(progress) = &self.write_progress {
+            // 预读、限速、ownership 和请求构造均已完成；从此处起取消不能证明远端未写入。
+            progress.mark_write_started();
+        }
+        let response = request.send().await.map_err(|_| EhentaiError::write_unknown(operation))?;
         let status = response.status();
         let location = response.headers().get(header::LOCATION).cloned();
         let body = self.read_response(response, operation, true).await?;

@@ -101,7 +101,9 @@ impl ForumReplyStore for DatabaseStore {
             if !valid_decimal_id(&external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
                 || !valid_text(&player_name, MAX_PLAYER_NAME_BYTES)
             {
-                return Err(storage_error("论坛回帖身份参数无效"));
+                return Err(auction_application::ApplicationError::ForumIdentityRejected(
+                    "论坛回帖身份参数无效",
+                ));
             }
             match self {
                 #[cfg(feature = "postgres")]

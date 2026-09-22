@@ -9,11 +9,13 @@ use auction_web_shared::{
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::HashMap};
 
-use crate::api::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
+use crate::api::{
+    AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
+    prepare_admin_rename_revert, revert_admin_rename,
+};
 use crate::app::surface::sort::{SortDirection, SortableTh, directed};
-use crate::app::surface::stable_command_id;
 
 use super::query::use_renames_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
@@ -25,7 +27,8 @@ pub(super) fn page() -> Element {
     let mut refresh = use_signal(|| 0_u64);
     let mut busy_rename = use_signal(|| None::<String>);
     let mut notice = use_signal(|| None::<AdminActionFeedback>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    // 按改名事实保留完整请求；关闭确认框或切换目标不能丢弃结果尚未确认的命令。
+    let mut commands = use_signal(HashMap::<String, AdminRenameRevertCommand>::new);
     let mut selected = use_signal(|| None::<AdminRename>);
     let renames = use_resource(move || {
         let _ = refresh();
@@ -45,17 +48,38 @@ pub(super) fn page() -> Element {
         }
         notice.set(None);
         busy_rename.set(Some(rename.id.clone()));
-        let command_id = stable_command_id(command_state, format!("revert:{}", rename.id));
+        let existing_command = commands.read().get(&rename.id).cloned();
         let mut busy_rename = busy_rename;
         spawn(async move {
-            match revert_admin_rename(command_id, &rename).await {
+            let result = async {
+                let command = match existing_command {
+                    Some(command) => command,
+                    None => {
+                        let command = prepare_admin_rename_revert(Uuid::new_v4(), &rename).await?;
+                        // 在发送 mutation 前冻结；传输失败、正文无效或取消确认都不能换 fence。
+                        commands.write().insert(rename.id.clone(), command.clone());
+                        command
+                    }
+                };
+                revert_admin_rename(&command).await
+            }
+            .await;
+            match result {
                 Ok(_) => {
                     notice.set(Some(AdminActionFeedback::Success));
-                    command_state.set(None);
+                    commands.write().remove(&rename.id);
                     selected.set(None);
                     refresh.set(refresh().saturating_add(1));
                 }
-                Err(code) => notice.set(Some(AdminActionFeedback::Error(code))),
+                Err(code) => {
+                    if matches!(code.as_str(), "stale_user_state" | "rename_not_revertable") {
+                        // 明确的业务拒绝没有写入当前命令；重新读取后才能由操作者开启新命令。
+                        commands.write().remove(&rename.id);
+                        selected.set(None);
+                        refresh.set(refresh().saturating_add(1));
+                    }
+                    notice.set(Some(AdminActionFeedback::Error(code)));
+                }
             }
             busy_rename.set(None);
         });

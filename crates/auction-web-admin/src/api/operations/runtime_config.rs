@@ -181,7 +181,10 @@ fn valid_equipment_filter(value: &Value) -> bool {
     let Some(maximum) = level["max"].as_i64() else {
         return false;
     };
-    if minimum < 0 || maximum < minimum || maximum > 1000 {
+    if !(0..=1000).contains(&minimum)
+        || !(0..=1000).contains(&maximum)
+        || maximum != 0 && maximum < minimum
+    {
         return false;
     }
     !enabled

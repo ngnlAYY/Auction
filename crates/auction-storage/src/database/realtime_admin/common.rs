@@ -4,13 +4,13 @@ use auction_application::{ApplicationError, RealtimeAdminError, RepositoryError}
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sqlite")]
-use sqlx::{Sqlite, SqliteConnection, pool::PoolConnection};
+use sqlx::{Sqlite, SqliteConnection, Transaction, pool::PoolConnection};
 #[cfg(feature = "sqlite")]
 use uuid::Uuid;
 
 #[cfg(feature = "sqlite")]
 pub(super) struct SqliteRealtimeAdminTransaction {
-    connection: Option<PoolConnection<Sqlite>>,
+    transaction: Option<Transaction<'static, Sqlite>>,
 }
 
 #[cfg(feature = "sqlite")]
@@ -18,38 +18,36 @@ impl SqliteRealtimeAdminTransaction {
     pub(super) async fn begin(
         connection: PoolConnection<Sqlite>,
     ) -> Result<Self, ApplicationError> {
-        let mut transaction = Self { connection: Some(connection) };
-        sqlx::query("BEGIN IMMEDIATE")
-            .execute(transaction.connection_mut()?)
-            .await
-            .map_err(|_| storage_error("开始 Lite realtime replay 写事务失败"))?;
-        Ok(transaction)
+        // 重放请求被超时取消时，SQLx 事务守卫仍负责回滚，不能把持锁连接归池。
+        let transaction =
+            Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+                .await
+                .map_err(|_| storage_error("开始 Lite realtime replay 写事务失败"))?;
+        Ok(Self { transaction: Some(transaction) })
     }
 
     pub(super) async fn commit(mut self) -> Result<(), ApplicationError> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        let result = sqlx::query("COMMIT").execute(&mut *connection).await;
-        if result.is_err() {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-        }
-        result.map(|_| ()).map_err(|_| storage_error("提交 Lite realtime replay 写事务失败"))
+        transaction
+            .commit()
+            .await
+            .map_err(|_| storage_error("提交 Lite realtime replay 写事务失败"))
     }
 
     pub(super) async fn rollback(mut self) -> Result<(), ApplicationError> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        sqlx::query("ROLLBACK")
-            .execute(&mut *connection)
+        transaction
+            .rollback()
             .await
-            .map(|_| ())
             .map_err(|_| storage_error("回滚 Lite realtime replay 写事务失败"))
     }
 
     pub(super) fn connection_mut(&mut self) -> Result<&mut SqliteConnection, ApplicationError> {
-        self.connection
+        self.transaction
             .as_deref_mut()
             .ok_or_else(|| storage_error("Lite realtime replay 事务已经结束"))
     }

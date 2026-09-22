@@ -23,7 +23,7 @@ pub(super) async fn resolve_bidder_postgres(
     if !valid_decimal_id(external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
         || !valid_text(player_name, MAX_PLAYER_NAME_BYTES)
     {
-        return Err(storage_error("论坛账号数字 ID 或玩家名称无效"));
+        return Err(ApplicationError::ForumIdentityRejected("论坛账号数字 ID 或玩家名称无效"));
     }
     let world_id = forum_world_name(world);
     let mut transaction =
@@ -88,7 +88,9 @@ pub(super) async fn resolve_bidder_postgres(
             || forum_account_id.as_deref().is_some_and(|value| value != external_account_id)
             || !valid_text(&username, MAX_PLAYER_NAME_BYTES)
         {
-            return Err(storage_error("论坛身份已被阻止或稳定账号归属不一致"));
+            return Err(ApplicationError::ForumIdentityRejected(
+                "论坛身份已被阻止或稳定账号归属不一致",
+            ));
         }
         update_user_identity(
             &mut transaction,
@@ -143,7 +145,7 @@ pub(super) async fn resolve_bidder_postgres(
         if user_id.is_nil()
             || linked_user_id.is_some_and(|existing_user_id| existing_user_id != user_id)
         {
-            return Err(storage_error("论坛账号跨世界归属不一致"));
+            return Err(ApplicationError::ForumIdentityRejected("论坛账号跨世界归属不一致"));
         }
         linked_user_id = Some(user_id);
     }
@@ -174,7 +176,9 @@ pub(super) async fn resolve_bidder_postgres(
     .await
     .map_err(|_| storage_error("读取论坛账号对应用户失败"))?;
     if rows.len() > 1 {
-        return Err(storage_error("论坛账号数字 ID 与玩家名称指向不同用户"));
+        return Err(ApplicationError::ForumIdentityRejected(
+            "论坛账号数字 ID 与玩家名称指向不同用户",
+        ));
     }
 
     let (user_id, registration_state) = if let Some(row) = rows.first() {
@@ -200,7 +204,9 @@ pub(super) async fn resolve_bidder_postgres(
             || forum_account_id.as_deref().is_some_and(|value| value != external_account_id)
             || (key_status == "revoked" && linked_user_id != Some(user_id))
         {
-            return Err(storage_error("论坛玩家对应用户已被阻止或账号归属无法证明"));
+            return Err(ApplicationError::ForumIdentityRejected(
+                "论坛玩家对应用户已被阻止或账号归属无法证明",
+            ));
         }
         update_user_identity(
             &mut transaction,
@@ -216,7 +222,7 @@ pub(super) async fn resolve_bidder_postgres(
         (user_id, registration_state)
     } else {
         if linked_user_id.is_some() {
-            return Err(storage_error("论坛账号既有归属用户不存在"));
+            return Err(ApplicationError::ForumIdentityRejected("论坛账号既有归属用户不存在"));
         }
         let user_id = Uuid::new_v4();
         let placeholder_hash = revoked_key_placeholder_hash(world_id, external_account_id);

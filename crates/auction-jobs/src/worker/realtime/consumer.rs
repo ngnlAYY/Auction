@@ -185,6 +185,9 @@ pub(crate) async fn run_loop<C>(
     C: Clock + 'static,
 {
     loop {
+        if worker.control.is_draining() {
+            return;
+        }
         let started = std::time::Instant::now();
         let now = worker.clock.now();
         let result = if let Some(consumer) = &worker.realtime_consumer {

@@ -7,17 +7,27 @@
 use std::future::Future;
 
 use auction_application::{
-    CompetitionTransactionError, MailAuctionIntakeRecord, MailAuctionIntakeResult,
-    MailAuctionIntakeTransaction, MailAuctionIntakeWrite,
+    CompetitionTransactionError, MailAuctionAcceptance, MailAuctionIntakeLookup,
+    MailAuctionIntakeRecord, MailAuctionIntakeResult, MailAuctionIntakeTransaction,
+    MailAuctionIntakeWrite,
 };
 
 use super::competition::{PostgresCompetitionTransaction, map_sql_error};
 
+mod acceptance;
 mod intake;
 mod record;
 
 #[allow(clippy::manual_async_fn)]
 impl MailAuctionIntakeTransaction for PostgresCompetitionTransaction {
+    fn load_mail_auction_acceptance(
+        &mut self,
+        lookup: MailAuctionIntakeLookup,
+    ) -> impl Future<Output = Result<Option<MailAuctionAcceptance>, CompetitionTransactionError>> + Send
+    {
+        async move { acceptance::load_accepted(self, lookup).await }
+    }
+
     fn add_mail_auction_intake(
         &mut self,
         write: MailAuctionIntakeWrite,

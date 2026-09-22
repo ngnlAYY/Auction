@@ -9,7 +9,7 @@ use std::collections::HashSet;
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
 ///
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。
-/// 凭据暂不可用时释放当前 claim 并停止本轮，防止同一条 pending 记录被紧密重复领取。
+/// 凭据暂不可用时释放 claim 并在本轮排除对应世界，避免重复领取或阻塞其他世界。
 pub(super) async fn run_delivery_cycle<C>(worker: &PersistentWorker<C>) -> Result<(), WorkerError>
 where
     C: Clock + 'static,
@@ -32,12 +32,18 @@ where
     let mut claim_error: Option<ApplicationError> = None;
     let mut tasks = JoinSet::new();
     let mut skipped_recipients = HashSet::new();
+    let mut unavailable_worlds = HashSet::new();
 
-    while delivery_count < usize::from(worker.delivery.batch_limit) {
+    while delivery_count < usize::from(worker.delivery.batch_limit) && !worker.control.is_draining()
+    {
         if tasks.len() >= effective_concurrency
             && let Some(result) = tasks.join_next().await
         {
             merge_delivery_task_result(&mut delivery_result, &mut skipped_recipients, result);
+        }
+
+        if worker.control.is_draining() {
+            break;
         }
 
         let now = worker.clock.now();
@@ -54,13 +60,16 @@ where
                 now,
                 lease_until,
                 worker.delivery.sending_grace,
-                skipped_recipients
-                    .iter()
-                    .map(|(world, recipient)| DeliveryRecipientExclusion {
-                        world: world.clone(),
-                        recipient: recipient.clone(),
-                    })
-                    .collect(),
+                DeliveryClaimExclusions {
+                    unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
+                    recipients: skipped_recipients
+                        .iter()
+                        .map(|(world, recipient)| DeliveryRecipientExclusion {
+                            world: world.clone(),
+                            recipient: recipient.clone(),
+                        })
+                        .collect(),
+                },
                 1,
             )
             .await
@@ -74,11 +83,6 @@ where
         let Some(claim) = claims.pop() else {
             break;
         };
-        delivery_count += 1;
-        if claim.attempt_count > 1 {
-            worker.metrics.observe_retry(WorkerLoop::Delivery, WorkerRetryKind::Persisted);
-        }
-
         if !delivery_transport.available(&claim) {
             let release = tokio::time::timeout(
                 worker.delivery.finalize_timeout,
@@ -96,7 +100,22 @@ where
                     delivery_result = WorkerResult::Error;
                 }
             }
-            break;
+            let world = claim.payload.get("world").and_then(serde_json::Value::as_str);
+            let Some(world @ ("main" | "isekai")) = world else {
+                // false 只能表示有效世界没有凭据；违约适配器不能令同一 claim 紧密重复领取。
+                claim_error = Some(ApplicationError::CapabilityUnavailable(
+                    "delivery transport 为无效世界返回了不可用状态",
+                ));
+                break;
+            };
+            unavailable_worlds.insert(world.to_owned());
+            // 跳过的世界不消耗可执行批次容量，batch_limit=1 时也能继续处理其他世界。
+            continue;
+        }
+
+        delivery_count += 1;
+        if claim.attempt_count > 1 {
+            worker.metrics.observe_retry(WorkerLoop::Delivery, WorkerRetryKind::Persisted);
         }
 
         tasks.spawn(process_delivery_claim(

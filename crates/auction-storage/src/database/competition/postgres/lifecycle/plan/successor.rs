@@ -79,8 +79,8 @@ pub(super) async fn insert_successor_postgres(
     sqlx::query(
         "INSERT INTO public.scheduled_rounds
             (id, world_id, local_week, auction_id, status, preview_due_at,
-             open_due_at, scheduled_end_at, create_command_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $9)",
+             open_due_at, scheduled_end_at, create_command_id, created_at, updated_at, schedule_snapshot)
+         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $9, $10)",
     )
     .bind(successor.round_id)
     .bind(world_id)
@@ -91,6 +91,7 @@ pub(super) async fn insert_successor_postgres(
     .bind(successor.scheduled_end_at)
     .bind(successor.create_command_id.as_uuid())
     .bind(auction.updated_at)
+    .bind(successor.schedule_source.as_ref().map(serde_json::to_value).transpose().map_err(|_| invalid_record())?)
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;

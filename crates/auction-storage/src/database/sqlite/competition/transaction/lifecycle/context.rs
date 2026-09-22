@@ -46,7 +46,8 @@ pub(super) async fn load_lifecycle_context_sqlite(
                 json_extract(a.policy_snapshot, '$.scheduled_end_at') AS policy_scheduled_end_at,
                 CAST(json_extract(a.policy_snapshot, '$.final_phase_lead_seconds') AS INTEGER)
                     AS policy_final_phase_lead_seconds,
-                round.local_week AS scheduled_round_local_week
+                round.local_week AS scheduled_round_local_week,
+                round.schedule_snapshot
              FROM auctions AS a
              INNER JOIN worlds AS world ON world.id = a.world_id
              LEFT JOIN scheduled_rounds AS round ON round.auction_id = a.id
@@ -133,7 +134,17 @@ pub(super) async fn load_lifecycle_context_sqlite(
                 .map_err(|_| invalid_state("Lite 周轮次日期格式无效"))
         })
         .transpose()?;
+    let schedule_source = row
+        .try_get::<Option<String>, _>("schedule_snapshot")
+        .map_err(map_sql_error)?
+        .map(|value| serde_json::from_str::<auction_application::AuctionScheduleSource>(&value))
+        .transpose()
+        .map_err(|_| invalid_state("Lite 周排期来源快照无效"))?;
+    if let Some(source) = &schedule_source {
+        source.resolve().map_err(|_| invalid_state("Lite 周排期来源无法解析"))?;
+    }
     Ok(Some(AuctionLifecycleContext {
+        schedule_source,
         auction,
         world_id: row.try_get("world_id").map_err(map_sql_error)?,
         world_enabled: row.try_get::<i64, _>("world_enabled").map_err(map_sql_error)? != 0,

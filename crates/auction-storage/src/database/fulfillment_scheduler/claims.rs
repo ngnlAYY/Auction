@@ -17,7 +17,7 @@ pub(super) async fn claim_postgres(
     // 不回写已有 delivery 的冻结操作。候选由锁保护，避免两个 Worker 同时补写同一行。
     sqlx::query(
         r#"WITH candidates AS MATERIALIZED (
-               SELECT o.id, o.obligation_kind, o.world_id, o.submission_id
+               SELECT o.id, o.obligation_kind, o.world_id
                FROM public.settlement_obligations AS o
                LEFT JOIN public.settlement_obligation_fulfillments AS f
                    ON f.obligation_id = o.id
@@ -44,14 +44,8 @@ pub(super) async fn claim_postgres(
                       ) THEN 'main'
                       ELSE candidates.world_id
                   END,
-                  CASE
-                      WHEN candidates.obligation_kind = 'unsold_return'
-                           AND submission.source_kind = 'mail' THEN 'return'
-                      ELSE 'send'
-                  END
+                  'send'
            FROM candidates
-           LEFT JOIN public.auction_submissions AS submission
-               ON submission.id = candidates.submission_id
            ON CONFLICT (obligation_id) DO NOTHING"#,
     )
     .bind(i64::from(limit))

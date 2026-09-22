@@ -239,6 +239,7 @@ fn map_delivery(delivery: AdminMailIntakeDelivery) -> AdminMailIntakeDeliveryRes
         fencing_version: delivery.fencing_version,
         attempt_count: delivery.attempt_count,
         failure_code: delivery.failure_code,
+        reason_code: delivery.reason_code,
         external_reference: delivery.external_reference,
     }
 }

@@ -123,6 +123,9 @@ pub(super) fn map_intake_delivery(
         failure_code: row
             .try_get("failure_code")
             .map_err(|_| storage_error("读取邮件 delivery 失败码失败"))?,
+        reason_code: row
+            .try_get("reason_code")
+            .map_err(|_| storage_error("读取邮件 delivery 隔离原因失败"))?,
         external_reference: row
             .try_get("external_reference")
             .map_err(|_| storage_error("读取邮件 delivery 外部引用失败"))?,

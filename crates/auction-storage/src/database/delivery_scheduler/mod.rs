@@ -4,7 +4,7 @@
 //! 结果；如果远端结果已经无法确定，调用方必须把记录置为 `manual_reconcile`。
 
 use auction_application::{
-    ApplicationError, DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransportError,
+    ApplicationError, DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError,
     DeliveryWorkClaim, DeliveryWorkStore,
 };
 use chrono::{DateTime, Utc};
@@ -16,12 +16,46 @@ use uuid::Uuid;
 
 use super::DatabaseStore;
 
+/// 邮件资产处置的发送资格同时供领取、发送前 fence 和历史隔离扫描使用。
+#[cfg(feature = "postgres")]
+macro_rules! delivery_mail_disposition_gate {
+    () => {
+        r#"(
+    deliveries.origin_kind <> 'mail_intake'
+    OR deliveries.payload ->> 'operation' = 'send'
+    OR (
+        deliveries.payload ->> 'operation' IN ('take', 'return')
+        AND NOT EXISTS (
+            SELECT 1 FROM public.deliveries AS opposite
+            WHERE opposite.origin_kind = 'mail_intake'
+              AND opposite.payload ->> 'world' = deliveries.payload ->> 'world'
+              AND opposite.payload ->> 'external_mail_id' = deliveries.payload ->> 'external_mail_id'
+              AND opposite.payload ->> 'operation' = CASE
+                  WHEN deliveries.payload ->> 'operation' = 'take' THEN 'return'
+                  ELSE 'take'
+              END
+        )
+        AND ((deliveries.payload ->> 'operation' = 'take') = EXISTS (
+            SELECT 1 FROM public.auction_submissions AS submission
+            INNER JOIN public.auctions AS auction ON auction.id = submission.auction_id
+            WHERE submission.source_kind = 'mail'
+              AND auction.world_id = deliveries.payload ->> 'world'
+              AND submission.external_mail_id = deliveries.payload ->> 'external_mail_id'
+        ))
+    )
+)"#
+    };
+}
+
 /// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权
 /// 当前 delivery。论坛通知沿用 MailIntake origin，但通过论坛命令账本证明其真实 owner。
+/// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该额外门禁覆盖升级前已经
+/// pending/claimed 的冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
 #[cfg(feature = "postgres")]
 macro_rules! delivery_completion_gate {
     () => {
-        r#"(
+        concat!(
+            r#"(
     deliveries.origin_kind <> 'mail_intake'
     OR (
     (
@@ -56,7 +90,10 @@ macro_rules! delivery_completion_gate {
               'decision_code', inbound.decision_code
           )
 ) )
-)"#
+)"#,
+            " AND ",
+            delivery_mail_disposition_gate!()
+        )
     };
 }
 
@@ -65,6 +102,8 @@ mod claims;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod outcome;
+#[cfg(feature = "postgres")]
+mod quarantine;
 #[cfg(feature = "postgres")]
 mod state;
 
@@ -94,7 +133,7 @@ impl DeliveryWorkStore for DatabaseStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         sending_grace: std::time::Duration,
-        excluded_recipients: Vec<DeliveryRecipientExclusion>,
+        exclusions: DeliveryClaimExclusions,
         limit: u16,
     ) -> auction_application::ApplicationFuture<'_, Vec<DeliveryWorkClaim>> {
         Box::pin(async move {
@@ -104,8 +143,13 @@ impl DeliveryWorkStore for DatabaseStore {
                 || lease_until <= now
                 || sending_grace.is_zero()
                 || sending_grace > std::time::Duration::from_secs(86_400)
-                || excluded_recipients.len() > usize::from(u16::MAX)
-                || excluded_recipients.iter().any(|excluded| {
+                || exclusions.unavailable_worlds.len() > 2
+                || exclusions
+                    .unavailable_worlds
+                    .iter()
+                    .any(|world| !matches!(world.as_str(), "main" | "isekai"))
+                || exclusions.recipients.len() > usize::from(u16::MAX)
+                || exclusions.recipients.iter().any(|excluded| {
                     excluded.world.is_empty()
                         || excluded.world != excluded.world.trim()
                         || excluded.world.chars().any(char::is_control)
@@ -124,7 +168,7 @@ impl DeliveryWorkStore for DatabaseStore {
                     now,
                     lease_until,
                     sending_grace,
-                    &excluded_recipients,
+                    &exclusions,
                     limit,
                 )
                 .await

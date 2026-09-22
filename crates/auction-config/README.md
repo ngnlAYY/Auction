@@ -58,10 +58,14 @@ Worker 专属校验放入 `worker_validation/` 子目录；标准 cron 的公共
 
 `AuctionConfig::policy()` 返回 `Result`：秒数超出 chrono 可表示范围时返回 `ConfigError`，
 配置加载与预检不会因极端整数触发 panic；可表示的秒数继续由原有策略规则校验，不做截断。
+文件加载先将角色文件定位为绝对路径，再以其所在目录解析公共、敏感与 runtime 引用；默认发现和
+相对 `AUCTION_CONFIG_FILE` 因而使用相同基址。该步骤不解析 symlink，runtime 的路径和文件类型检查仍保留。
 
 首次部署的 `FirstRunConfig::write_to` 只在目标明确不存在时生成配置；元数据读取失败不能当作
 目标缺失，现有条目（包括悬空符号链接）拒绝覆盖。临时目录与 `runtime/` 子目录在创建时就分别
-以 `0700`/`0750` 限制权限，实际权限仍受进程 umask 收紧；文件写入并同步、三角色 loader 校验后，
+以 `0700`/`0750` 限制权限，目录权限仍受进程 umask 收紧；文件在私有临时目录内显式设为
+非敏感 `0640`、敏感 `0600` 后同步，避免 `umask 077` 生成无法被正式 Admin 接受的 runtime 文件。
+三角色 loader 和正式 runtime 文件读取校验均通过后，
 依次同步 `runtime/`、临时根目录，再执行 Linux `RENAME_NOREPLACE` 发布并同步目标父目录。
 发布前失败只清理本次临时目录；发布后父目录同步失败返回 `OutcomeUnknown`，保留目标供人工核对，
 不得删除或回滚。该流程仍要求父目录受信且不被并发替换，不将路径探测当作对恶意目录竞态的隔离。
@@ -212,6 +216,8 @@ origin 后会把旧版 `/?auction=...&world=...` 相对链接解析为主题正�
 `sender_allowlist_disabled` 必须显式设为 true 才会读取非 allowlist 发件人的详情。
 `equipment_filter` 启用后按品质、前后缀、分类、类型和等级返回稳定拒绝原因；被拒绝且邮件可退回
 时会安排退回和通知，不能退回时会 fail closed，不会把不符合策略的装备写入拍卖。
+等级上下限各为 `0–1000`，`0` 分别表示不限制该边界；非零上限不能小于下限。
+例如 `level_min = 300`、`level_max = 0` 只限制最低等级；启用任一等级边界时，缺少等级的装备仍拒绝。
 
 ## Runtime 生效范围
 

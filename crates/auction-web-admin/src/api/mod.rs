@@ -77,14 +77,19 @@ pub(crate) use recovery::{
     AdminRecovery, AdminRecoveryAction, AdminRecoveryReport, confirm_admin_recovery,
     fetch_admin_recovery,
 };
-pub(crate) use renames::{AdminRename, AdminRenamePage, fetch_admin_renames, revert_admin_rename};
+pub(crate) use renames::{
+    AdminRename, AdminRenamePage, AdminRenameRevertCommand, fetch_admin_renames,
+    prepare_admin_rename_revert, revert_admin_rename,
+};
 pub(crate) use rules::{
     AdminRules, AdminRulesCandidate, fetch_admin_rules, publish_admin_rules, validate_admin_rules,
 };
 pub(crate) use runtime_config::{
     fetch_admin_runtime_config, update_admin_runtime_config, validate_admin_runtime_config,
 };
-pub(crate) use session::{AdminSession, fetch_admin_session, login_admin, logout_admin};
+pub(crate) use session::{
+    AdminSession, AdminSessionCheckTrigger, fetch_admin_session, login_admin, logout_admin,
+};
 pub(crate) use settlement::{
     AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary, fetch_admin_settlement,
 };
@@ -160,6 +165,15 @@ impl AdminApiFailure {
 
 /// 将同源错误 envelope 缩减为稳定错误码；正文无效时只保留 HTTP 状态兜底。
 pub(crate) async fn response_failure(response: Response) -> AdminApiFailure {
+    let failure = read_response_failure(response).await;
+    if failure.status == Some(401) && failure.code == "unauthenticated" {
+        session::request_admin_session_check();
+    }
+    failure
+}
+
+/// 读取错误 envelope 而不触发认证副作用，供会话检查自身消费确定的未认证结果。
+async fn read_response_failure(response: Response) -> AdminApiFailure {
     let status = response.status();
     let code = response
         .json::<AdminApiErrorResponse>()
@@ -376,7 +390,19 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
     let before_activation = value.status == "failed"
         && value.origin_kind == "operations_alert"
         && value.reason_code.as_deref() == Some("operations_alert_batch_terminal");
-    let timeline_valid = if before_activation {
+    let disposition_conflict = value.reason_code.as_deref() == Some("mail_disposition_conflict");
+    let timeline_valid = if disposition_conflict {
+        sending_at.is_none()
+            && claimed_at.is_none_or(|claimed| {
+                !is_zero_delivery_time(claimed) && claimed >= created_at && value.attempt_count > 0
+            })
+            && completed_at.is_some_and(|completed| {
+                !is_zero_delivery_time(completed)
+                    && completed >= created_at
+                    && claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= updated_at
+            })
+    } else if before_activation {
         claimed_at.is_none()
             && sending_at.is_none()
             && completed_at.is_some_and(|completed| {
@@ -519,6 +545,24 @@ fn valid_state_fields(
     sending_at: Option<DateTime<Utc>>,
     completed_at: Option<DateTime<Utc>>,
 ) -> bool {
+    // 资产处置冲突只能在发送前隔离；人工失败后仍保留原因，不能混入普通可重试失败。
+    if value.reason_code.as_deref() == Some("mail_disposition_conflict") {
+        return value.origin_kind == "mail_intake"
+            && match value.status.as_str() {
+                "manual_reconcile" => {
+                    value.failure_code.as_deref() == Some("mail_disposition_conflict")
+                }
+                "failed" => value.failure_code.as_deref().is_some_and(valid_stored_text),
+                _ => false,
+            }
+            && lease_expires_at.is_none()
+            && sending_at.is_none()
+            && completed_at.is_some()
+            && value.external_reference.is_none()
+            && !value.take_required
+            && value.returned_mail_id.is_none()
+            && value.fencing_version > 0;
+    }
     match value.status.as_str() {
         "prepared" | "pending" => {
             lease_expires_at.is_none()

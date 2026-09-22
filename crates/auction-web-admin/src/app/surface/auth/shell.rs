@@ -4,6 +4,7 @@ use super::*;
 #[component]
 pub(crate) fn AdminAuthenticatedShell(
     session: AdminSession,
+    checked_generation: u64,
     mut reload_generation: Signal<u64>,
     readiness: AdminReadinessState,
 ) -> Element {
@@ -22,8 +23,9 @@ pub(crate) fn AdminAuthenticatedShell(
     rsx! {
         div {
             class: "admin-shell",
+            // 达到绝对过期上限后 expires_at 不再增加；每次已完成的读取仍须重新安排检查。
             AdminSessionRefresh {
-                key: "{session.expires_at}",
+                key: "{checked_generation}:{session.expires_at}",
                 session: session.clone(),
                 reload_generation,
             }

@@ -52,7 +52,7 @@ pub(super) async fn apply_final_plan_postgres(
         )
         .await?;
     }
-    mark_admin_final_schedule_postgres(transaction, command, auction).await?;
+    mark_final_schedule_postgres(transaction, command, auction).await?;
     Ok(())
 }
 
@@ -68,7 +68,9 @@ pub(super) async fn apply_final_proxy_plans_postgres(
         }
         let audit = final_proxy_audit_record(command, auction.updated_at, &proxy_plan)?;
         transaction.insert_command_inner(proxy_plan.command).await?;
-        transaction.apply_public_command_plan_inner(proxy_plan.competition, None).await?;
+        transaction
+            .apply_public_command_plan_inner(proxy_plan.competition, None, auction.updated_at)
+            .await?;
         insert_lifecycle_audit(transaction, audit).await?;
     }
     Ok(())
@@ -95,27 +97,26 @@ pub(super) async fn clamp_live_lot_deadlines_postgres(
     Ok(())
 }
 
-pub(super) async fn mark_admin_final_schedule_postgres(
+pub(super) async fn mark_final_schedule_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     command: &AuctionLifecycleCommand,
     auction: &Auction,
 ) -> Result<(), CompetitionTransactionError> {
-    if command.actor.actor_type == auction_application::AuctionLifecycleActorType::Admin {
-        let transaction = transaction.transaction_mut()?;
-        sqlx::query(
-            "UPDATE public.scheduled_rounds
+    // 生命周期和轮次完成必须原子提交；Worker 不能依赖提交后的第二次 complete 才收口。
+    let transaction = transaction.transaction_mut()?;
+    sqlx::query(
+        "UPDATE public.scheduled_rounds
              SET final_command_id = $1, final_completed_at = $2,
                  lease_owner = NULL, lease_until = NULL,
                  state_version = state_version + 1, updated_at = $2
              WHERE auction_id = $3 AND status = 'active'
                AND open_completed_at IS NOT NULL AND final_completed_at IS NULL",
-        )
-        .bind(command.command_id.as_uuid())
-        .bind(auction.updated_at)
-        .bind(auction.id.as_uuid())
-        .execute(&mut **transaction)
-        .await
-        .map_err(map_sql_error)?;
-    }
+    )
+    .bind(command.command_id.as_uuid())
+    .bind(auction.updated_at)
+    .bind(auction.id.as_uuid())
+    .execute(&mut **transaction)
+    .await
+    .map_err(map_sql_error)?;
     Ok(())
 }

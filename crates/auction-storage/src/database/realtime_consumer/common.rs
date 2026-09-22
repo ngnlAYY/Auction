@@ -4,12 +4,12 @@ use auction_application::{ApplicationError, RealtimeConsumerRequest, RepositoryE
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sqlite")]
-use sqlx::{Sqlite, SqliteConnection, pool::PoolConnection};
+use sqlx::{Sqlite, SqliteConnection, Transaction, pool::PoolConnection};
 use uuid::Uuid;
 
 #[cfg(feature = "sqlite")]
 pub(super) struct SqliteRealtimeTransaction {
-    connection: Option<PoolConnection<Sqlite>>,
+    transaction: Option<Transaction<'static, Sqlite>>,
 }
 
 #[cfg(feature = "sqlite")]
@@ -17,38 +17,30 @@ impl SqliteRealtimeTransaction {
     pub(super) async fn begin(
         connection: PoolConnection<Sqlite>,
     ) -> Result<Self, ApplicationError> {
-        let mut transaction = Self { connection: Some(connection) };
-        sqlx::query("BEGIN IMMEDIATE")
-            .execute(transaction.connection_mut()?)
-            .await
-            .map_err(|_| storage_error("开始 Lite 实时写事务失败"))?;
-        Ok(transaction)
+        // 使用 SQLx 事务守卫，消费任务取消时也会回滚并释放单写者锁。
+        let transaction =
+            Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+                .await
+                .map_err(|_| storage_error("开始 Lite 实时写事务失败"))?;
+        Ok(Self { transaction: Some(transaction) })
     }
 
     pub(super) async fn commit(mut self) -> Result<(), ApplicationError> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        let result = sqlx::query("COMMIT").execute(&mut *connection).await;
-        if result.is_err() {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-        }
-        result.map(|_| ()).map_err(|_| storage_error("提交 Lite 实时写事务失败"))
+        transaction.commit().await.map_err(|_| storage_error("提交 Lite 实时写事务失败"))
     }
 
     pub(super) async fn rollback(mut self) -> Result<(), ApplicationError> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        sqlx::query("ROLLBACK")
-            .execute(&mut *connection)
-            .await
-            .map(|_| ())
-            .map_err(|_| storage_error("回滚 Lite 实时写事务失败"))
+        transaction.rollback().await.map_err(|_| storage_error("回滚 Lite 实时写事务失败"))
     }
 
     pub(super) fn connection_mut(&mut self) -> Result<&mut SqliteConnection, ApplicationError> {
-        self.connection.as_deref_mut().ok_or_else(|| storage_error("Lite 实时写事务已经结束"))
+        self.transaction.as_deref_mut().ok_or_else(|| storage_error("Lite 实时写事务已经结束"))
     }
 }
 

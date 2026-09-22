@@ -1,4 +1,7 @@
 //! SQLite Lite Public lot 列表查询与分类统计。
+//!
+//! 拍卖截止投影按实际时刻选择；毫秒并列时仅规范化已知 UTC RFC3339／空格格式，
+//! 补齐小数以保留亚毫秒次序，未知偏移量不按 UTC 字符串解释。
 
 use std::collections::BTreeMap;
 
@@ -145,7 +148,20 @@ async fn sqlite_list_projection(
     let row = sqlx::query(
         "SELECT
             a.id, a.world_id, a.sequence, a.status, a.scheduled_open_at,
-            MAX(CASE WHEN l.status IN ('live', 'sold', 'unsold') THEN l.effective_end_at END) AS scheduled_ends_at,
+            (SELECT deadline.effective_end_at FROM lots AS deadline
+             WHERE deadline.auction_id = a.id AND deadline.status IN ('live', 'sold', 'unsold')
+               AND deadline.effective_end_at IS NOT NULL
+             ORDER BY julianday(deadline.effective_end_at) DESC,
+                 CASE WHEN substr(deadline.effective_end_at, -6) = '+00:00'
+                           OR substr(deadline.effective_end_at, -1) = 'Z'
+                           OR (substr(deadline.effective_end_at, 11, 1) = ' '
+                               AND substr(deadline.effective_end_at, 20) NOT GLOB '*[+-]*')
+                     THEN substr(replace(replace(replace(deadline.effective_end_at,
+                         'T', ' '), '+00:00', ''), 'Z', '')
+                         || CASE WHEN substr(deadline.effective_end_at, 20, 1) = '.'
+                             THEN '000000000' ELSE '.000000000' END, 1, 29)
+                 END DESC,
+                 deadline.id DESC LIMIT 1) AS scheduled_ends_at,
             a.preview_revision,
             CASE WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
                  WHEN a.status = 'preview' THEN 'opening' ELSE 'live' END AS presentation_mode,
@@ -153,14 +169,12 @@ async fn sqlite_list_projection(
          FROM auctions AS a
          JOIN worlds AS w
            ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
-         LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.id = ? AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
            AND (a.status IN ('live', 'final', 'settling', 'settled') OR NOT EXISTS (
                 SELECT 1 FROM auctions AS active
                 WHERE active.world_id = a.world_id
                   AND active.status IN ('live', 'final', 'settling')
-           ))
-         GROUP BY a.id",
+           ))",
     )
     .bind(auction_id.as_bytes().to_vec())
     .fetch_optional(&mut **transaction)

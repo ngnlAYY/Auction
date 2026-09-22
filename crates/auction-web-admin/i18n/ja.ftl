@@ -568,6 +568,7 @@ delivery-reconcile-action-retry = 再キュー
 delivery-reconcile-action-succeeded = 成功として確定
 delivery-reconcile-send-proof-required = 送信は Sent 検証後にのみ完了できます。
 delivery-reconcile-action-failed = 失敗として確定
+delivery-mail-disposition-conflict = 資産処分の競合により送信前に隔離されました。このタスクは失敗としてのみ確定でき、再試行や成功としての確定はできません。
 delivery-external-reference = 外部参照
 delivery-failure-code = 失敗コード
 

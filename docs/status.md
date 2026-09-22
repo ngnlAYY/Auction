@@ -2,9 +2,9 @@
 
 [文档导航](README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
 
-本页统一说明能力与证据的区别。本次于 2026-09-20 按工作区源码、Cargo 清单、迁移、配置模板和构建脚本
-核对文档，源码基线为 `7830d38`，已包含首次设置、PostgreSQL 五字段配置和可选 `auction-server`。
-工作区原有的 `ci/release.sh` 未提交修改予以保留；本次文档修订不对应新发布版本，也不构成运行验收。
+本页统一说明能力与证据的区别。本次于 2026-09-22 在 `a463248` 基线上完成源码审计问题修复，
+覆盖 29 项报告问题及论坛 DTO 省略字段附项；逐项范围见[修复记录](../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md)。
+当前包含工作区修复与三份追加迁移，不对应已发布制品，也不构成运行验收。
 
 核对范围覆盖根目录、docs、apps、crates、ops、migrations、ci 的正式文档，以及既有决策笔记的引用与状态。
 仍准确的内容按原样保留；历史笔记记录当时理由与验证声明，不将其改写成当前运行证据。
@@ -25,7 +25,7 @@
 | HTTP 与页面 | Public 21、Admin 43 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | SQLite Lite | 共有竞价、会话、部分管理、持久调度和实时读取 | PostgreSQL 系统能力、行锁或并发语义对等 |
-| 迁移 | PostgreSQL 37、SQLite 12 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 39、SQLite 13 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁 | 本次文档修改已经构建或部署了新制品 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -49,18 +49,25 @@
 
 ## 本轮静态检查
 
-2026-09-20 使用仓库 Rust/Cargo `1.98.0` 和 just `1.58.0` 执行以下命令，退出码均为 0：
+2026-09-22 使用仓库 Rust/Cargo `1.98.0` 和 just `1.58.0` 执行完整 `just verify` 及
+`git diff --check`，退出码均为 0。完整门禁包括：
 
 - `just fmt`、`git diff --check`；
-- `just docs-check`：覆盖 49 份文档，本地链接、锚点、导航、包 README 与笔记结构通过；
-- `just repository-policy-check`、`just layout-check`、`just config-example-check`、`just i18n-check`。
+- `just docs-check`：覆盖 51 份文档，本地链接、锚点、导航、包 README 与笔记结构通过；
+- `just repository-policy-check`、`just layout-check`、`just config-example-check`、`just i18n-check`；
+- 工作区 `--locked --all-targets` 编译、独立 PostgreSQL/SQLite storage 与 Redis cache 特性编译；
+- 工作区 `--locked --all-targets --all-features` Clippy，`-D warnings`；
+- Public/Admin 的 `wasm32-unknown-unknown` 编译。
 
-本轮只修改 Markdown，保留原有脚本改动；未运行 Cargo 编译/Clippy/WASM 全套门禁或发布构建，
-也未启动服务、连接数据库、执行迁移或行为测试。上述结果不能替代 `just verify`、制品或生产验收。
+本轮同时完成各修复范围的独立源码复核；完整门禁中发现的借用、错误映射及特性编译问题已修正后重跑。
+未运行行为测试、发布构建、浏览器流程、服务、数据库或迁移。上述结果不能替代制品或生产验收。
+历史流拍 Return、入站资产冲突、已错误归档的 Credits 与缺少排期来源的旧数据保留证据边界，
+不会通过静默重写或自动重发宣称修复远端资产；见[邮件核对](operations/mail-diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
 
-以下为静态源码核对发现的问题，本次仅登记，不修改实现，也不降低既有契约：
+以下两项是此前文档核对已登记、且本轮再次确认仍存在的初始化缺口，不属于上述 29 项审计报告。
+本轮保留登记，不把已完成的报告修复解释为全项目不存在其他缺陷：
 
 | 问题 | 源码依据与影响 | 待闭合边界 |
 | --- | --- | --- |

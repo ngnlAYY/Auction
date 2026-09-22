@@ -179,7 +179,8 @@ pub(super) async fn get_intake_postgres(
     } else {
         let rows = sqlx::query(
             "SELECT id, payload ->> 'operation' AS operation, recipient, status,
-                    fencing_version, attempt_count, failure_code, external_reference
+                    fencing_version, attempt_count, failure_code, external_reference,
+                    result_metadata ->> 'reason_code' AS reason_code
              FROM public.deliveries
              WHERE origin_kind = 'mail_intake'
                AND id = ANY($1::uuid[])
