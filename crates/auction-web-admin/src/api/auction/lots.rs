@@ -59,7 +59,7 @@ pub(crate) async fn fetch_admin_lots(
         .map(decode_lot)
         .collect::<Result<Vec<_>, _>>()
         .map_err(invalid_response_error)?;
-    if lots.iter().any(|lot| lot.auction_id != auction.id) {
+    if auction.id != auction_id || lots.iter().any(|lot| lot.auction_id != auction.id) {
         return Err("invalid_response".to_owned());
     }
     let pagination = payload.data.pagination;

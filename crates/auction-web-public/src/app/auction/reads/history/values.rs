@@ -18,12 +18,10 @@ pub(crate) fn normalize_history_query(
         query.history_from = None;
         query.history_to = None;
     }
-    if query
-        .history_min_price
-        .as_deref()
-        .zip(query.history_max_price.as_deref())
-        .is_some_and(|(minimum, maximum)| minimum > maximum)
-    {
+    if history_price_range_reversed(
+        query.history_min_price.as_deref(),
+        query.history_max_price.as_deref(),
+    ) {
         query.history_min_price = None;
         query.history_max_price = None;
     }
@@ -48,10 +46,23 @@ pub(crate) fn history_price_parts(value: Option<&str>) -> (String, HistoryPriceU
         return (String::new(), HistoryPriceUnit::K);
     };
     if amount >= 1_000_000 && amount % 10_000 == 0 {
-        ((amount / 1_000_000).to_string(), HistoryPriceUnit::M)
+        let whole = amount / 1_000_000;
+        let fraction = format!("{:02}", amount % 1_000_000 / 10_000);
+        let fraction = fraction.trim_end_matches('0');
+        let value =
+            if fraction.is_empty() { whole.to_string() } else { format!("{whole}.{fraction}") };
+        (value, HistoryPriceUnit::M)
     } else {
         ((amount / 1_000).to_string(), HistoryPriceUnit::K)
     }
+}
+
+/// 已完成单值校验的金额区间按整数 Credits 比较；URL 恢复和表单提交必须使用同一规则。
+pub(crate) fn history_price_range_reversed(minimum: Option<&str>, maximum: Option<&str>) -> bool {
+    minimum
+        .and_then(|value| value.parse::<u64>().ok())
+        .zip(maximum.and_then(|value| value.parse::<u64>().ok()))
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
 }
 
 pub(crate) fn history_is_valid_date(value: &str) -> bool {

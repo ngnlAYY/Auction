@@ -105,20 +105,9 @@ impl MoogleMailDeliveryTransport {
                 let (payload, world) = decode_settlement_payload(&claim)?;
                 match payload.operation.as_str() {
                     "send" => self.send_settlement(&claim, &payload, world).await,
-                    "return" => {
-                        let external_mail_id = payload
-                            .source_external_mail_id
-                            .as_deref()
-                            .ok_or_else(invalid_payload)?;
-                        self.send_action(
-                            &claim,
-                            external_mail_id,
-                            world,
-                            MoogleMailOperation::ReturnMessage,
-                            None,
-                        )
-                        .await
-                    }
+                    // 旧 payload 只允许读取并隔离；原邮件的 Return 不能证明已入库装备返还。
+                    // 历史执行结果无法在此证明，保留人工态，且不执行任何远端写入。
+                    "return" => Err(legacy_settlement_return()),
                     _ => Err(invalid_payload()),
                 }
             }
@@ -164,7 +153,10 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
 
     fn available(&self, claim: &DeliveryWorkClaim) -> bool {
         let world = match claim.origin_kind.as_str() {
-            "settlement" => decode_settlement_payload(claim).map(|(_, world)| world),
+            "settlement" => match decode_settlement_payload(claim) {
+                Ok((payload, _)) if payload.operation == "return" => return true,
+                result => result.map(|(_, world)| world),
+            },
             "mail_intake" | "settlement_recovery_action" | "operations_alert" => {
                 decode_payload(claim).map(|(_, world)| world)
             }
@@ -181,5 +173,18 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
     ) -> Pin<Box<dyn Future<Output = Result<DeliverySendResult, DeliveryTransportError>> + Send + '_>>
     {
         Box::pin(async move { self.send_claim(claim).await })
+    }
+}
+
+fn legacy_settlement_return() -> DeliveryTransportError {
+    DeliveryTransportError {
+        failure_code: "legacy_return_requires_review".to_owned(),
+        safe_detail: "旧结算 Return 无法证明装备返还，须人工核对库存与历史发送记录".to_owned(),
+        outcome_unknown: true,
+        external_reference: None,
+        result_metadata: serde_json::json!({
+            "category": "legacy_settlement_return",
+            "write_started": false,
+        }),
     }
 }

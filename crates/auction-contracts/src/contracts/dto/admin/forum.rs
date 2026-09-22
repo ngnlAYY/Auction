@@ -69,7 +69,7 @@ pub struct AdminForumCommandResponse {
     pub amount: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub proxy_lower: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify: Option<String>,
@@ -79,9 +79,9 @@ pub struct AdminForumCommandResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumBidPostResponse {
     pub post: AdminForumPostResponse,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<AdminForumCommandResponse>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<AdminForumWarningResponse>,
     pub ignored: bool,
 }
@@ -103,6 +103,6 @@ pub struct AdminForumWarningResponse {
 pub struct AdminForumPreviewResponse {
     pub catalog: AdminForumCatalogResponse,
     pub posts: Vec<AdminForumBidPostResponse>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<AdminForumWarningResponse>,
 }

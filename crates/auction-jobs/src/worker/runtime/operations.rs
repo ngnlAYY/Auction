@@ -43,11 +43,15 @@ pub(super) async fn run_operations_alert_loop<C>(
     clock: Arc<C>,
     metrics: Arc<dyn WorkerRecorder>,
     action: OperationsAlertLoopAction,
+    control: WorkerControlHandle,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) where
     C: Clock + 'static,
 {
     loop {
+        if control.is_draining() {
+            return;
+        }
         let started = std::time::Instant::now();
         let now = clock.now();
         let attempt = tokio::time::timeout(action.timeout(runtime.config), async {

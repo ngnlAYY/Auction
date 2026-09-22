@@ -160,11 +160,14 @@ pub struct AuctionLifecycleContext {
     pub final_phase_at: Option<DateTime<Utc>>,
     pub settled_at: Option<DateTime<Utc>>,
     pub scheduled_round_local_week: Option<NaiveDate>,
+    /// 旧轮次没有来源时保留历史 UTC 七天规则，不推测时区或重写既定时间。
+    pub schedule_source: Option<super::AuctionScheduleSource>,
 }
 
 /// 当前拍卖结束接收装备时建立的下一期草稿与持久化周轮次。
 #[derive(Debug, Clone)]
 pub struct AuctionPreviewSuccessorPlan {
+    pub schedule_source: Option<super::AuctionScheduleSource>,
     pub round_id: uuid::Uuid,
     pub auction_id: AuctionId,
     pub create_command_id: CommandId,
@@ -256,7 +259,6 @@ pub trait AuctionLifecycleTransaction: Send {
     fn load_final_lot_for_update(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<super::CompetitionSnapshot, CompetitionTransactionError>> + Send;
 
     /// 在同一事务内追加管理审计和可重放的生命周期事件。

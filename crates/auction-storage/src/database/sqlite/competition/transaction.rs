@@ -21,7 +21,7 @@ use auction_domain::{
 };
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 use serde_json::{Value, json};
-use sqlx::{Row, Sqlite, SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
+use sqlx::{Row, Sqlite, SqliteConnection, Transaction, pool::PoolConnection, sqlite::SqliteRow};
 use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
@@ -38,45 +38,36 @@ pub(crate) use mapping::*;
 
 /// SQLite 竞价事务持有的唯一连接。
 ///
-/// 连接在 `BEGIN IMMEDIATE` 到提交/回滚之间不能交还连接池，避免同一命令的账本、
-/// lot 状态和追加事实被拆到不同事务。
+/// SQLx 跟踪 `BEGIN IMMEDIATE` 的事务生命周期，错误、超时或任务取消时也会先回滚，
+/// 再把连接归池，避免留下写锁或让后续命令进入未完成事务。
 pub struct SqliteCompetitionTransaction {
-    connection: Option<PoolConnection<Sqlite>>,
+    transaction: Option<Transaction<'static, Sqlite>>,
 }
 
 impl SqliteCompetitionTransaction {
     async fn begin(connection: PoolConnection<Sqlite>) -> Result<Self, sqlx::Error> {
-        let mut transaction = Self { connection: Some(connection) };
-        sqlx::query("BEGIN IMMEDIATE")
-            .execute(
-                transaction
-                    .connection_mut()
-                    .map_err(|_| sqlx::Error::Protocol("SQLite 事务连接不可用".to_owned()))?,
-            )
-            .await?;
-        Ok(transaction)
+        let transaction =
+            Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+                .await?;
+        Ok(Self { transaction: Some(transaction) })
     }
 
     async fn commit(mut self) -> Result<(), sqlx::Error> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        let result = sqlx::query("COMMIT").execute(&mut *connection).await;
-        if result.is_err() {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-        }
-        result.map(|_| ())
+        transaction.commit().await
     }
 
     async fn rollback(mut self) -> Result<(), sqlx::Error> {
-        let Some(mut connection) = self.connection.take() else {
+        let Some(transaction) = self.transaction.take() else {
             return Ok(());
         };
-        sqlx::query("ROLLBACK").execute(&mut *connection).await.map(|_| ())
+        transaction.rollback().await
     }
 
     fn connection_mut(&mut self) -> Result<&mut SqliteConnection, CompetitionTransactionError> {
-        self.connection
+        self.transaction
             .as_deref_mut()
             .ok_or_else(|| CompetitionTransactionError::Failed("竞价事务已经结束".to_owned()))
     }
@@ -190,9 +181,8 @@ impl CompetitionTransaction for SqliteCompetitionTransaction {
     fn load_for_update(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send {
-        async move { self.load_for_update_inner(lot_id, now).await }
+        async move { self.load_for_update_inner(lot_id).await }
     }
 
     fn participant_is_eligible_for_update(
@@ -230,8 +220,9 @@ impl CompetitionTransaction for SqliteCompetitionTransaction {
         &mut self,
         plan: CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.apply_public_command_plan_inner(plan, audit).await }
+        async move { self.apply_public_command_plan_inner(plan, audit, occurred_at).await }
     }
 
     fn apply_slow_proxy_plan(

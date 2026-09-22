@@ -149,16 +149,20 @@ pub(super) async fn sqlite(
     lease_until: DateTime<Utc>,
     limit: u16,
 ) -> Result<Vec<ScheduledRoundClaim>, auction_application::RepositoryError> {
-    let mut connection = pool.acquire().await.map_err(map_storage_error)?;
-    sqlx::query("BEGIN IMMEDIATE").execute(&mut *connection).await.map_err(map_storage_error)?;
-    let result = sqlite_inner(&mut connection, worker_id, now, lease_until, limit).await;
+    let connection = pool.acquire().await.map_err(map_storage_error)?;
+    // 领取 future 被取消时依赖 SQLx 的 Drop 回滚，避免持锁连接进入池的下一次借用。
+    let mut transaction =
+        sqlx::Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
+            .await
+            .map_err(map_storage_error)?;
+    let result = sqlite_inner(&mut transaction, worker_id, now, lease_until, limit).await;
     match result {
         Ok(claims) => {
-            sqlx::query("COMMIT").execute(&mut *connection).await.map_err(map_storage_error)?;
+            transaction.commit().await.map_err(map_storage_error)?;
             Ok(claims)
         }
         Err(error) => {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
+            let _ = transaction.rollback().await;
             Err(error)
         }
     }

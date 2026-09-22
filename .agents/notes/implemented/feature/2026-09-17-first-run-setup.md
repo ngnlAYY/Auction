@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续路径解析与生成权限问题见[源码审计修复](../bug-fix/2026-09-22-source-audit-remediation.md)，原首次设置架构决定不变。
+
 ## Problem
 
 手工部署要求操作者先准备真实敏感 TOML 和两个站点 origin。首次部署需要在无配置状态进入

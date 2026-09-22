@@ -90,6 +90,7 @@ pub struct EhentaiClient {
     minimum_request_interval: Duration,
     test_board_mode: bool,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    write_progress: Option<auction_application::ForumWriteProgress>,
 }
 
 impl EhentaiClient {
@@ -110,6 +111,7 @@ impl EhentaiClient {
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             test_board_mode: false,
             ownership: None,
+            write_progress: None,
         }
     }
 
@@ -140,6 +142,7 @@ impl EhentaiClient {
             minimum_request_interval: config.minimum_request_interval,
             test_board_mode: config.test_board_mode,
             ownership: None,
+            write_progress: None,
         })
     }
 
@@ -151,6 +154,15 @@ impl EhentaiClient {
         if ownership.is_some() {
             self.ownership = ownership;
         }
+        self
+    }
+
+    /// 为一次固定楼层编辑注入独立进度；克隆仍共享限速器和凭据所有权。
+    pub(crate) fn with_write_progress(
+        mut self,
+        progress: auction_application::ForumWriteProgress,
+    ) -> Self {
+        self.write_progress = Some(progress);
         self
     }
 

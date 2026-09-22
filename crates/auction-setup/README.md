@@ -21,7 +21,10 @@
 `schedule_enabled` 控制启用。HTTP 只映射到配置 owner 的 `AuctionScheduleConfig`，世界固定为
 `main`、`isekai`，即使关闭也在连库前校验候选；不修改已有拍卖或在设置接口中执行调度。
 连接串生成、配置模板、敏感文件写入和三角色校验由 `auction-config` 拥有，数据库连通性由
-`auction-storage` 检查。默认分体完成后进程退出；随后用 `auctionctl deployment-check` 严格预检，
+`auction-storage` 检查。配置 owner 在私有临时目录内固定非敏感文件 `0640`、敏感文件 `0600`，
+并在发布前复用正式 runtime 文件读取校验；`umask 077` 不会把已发布的 runtime 文件变为不可用。
+角色 loader 会先固定主配置的绝对位置，再解析相对引用，适用于后续默认发现生成目录的启动方式。
+默认分体完成后进程退出；随后用 `auctionctl deployment-check` 严格预检，
 由 `auctionctl deployment start` 在三角色停机门禁通过后迁移并正式启动；也可先用受保护的
 `auctionctl migrate` 独立迁移。设置 API 和单角色普通启动都不执行迁移。
 

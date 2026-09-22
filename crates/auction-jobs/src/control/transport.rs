@@ -190,6 +190,7 @@ pub struct WorkerControlHandle {
 
 struct WorkerControlInner {
     state: std::sync::atomic::AtomicU8,
+    draining: std::sync::atomic::AtomicBool,
     ready: std::sync::atomic::AtomicBool,
     degraded_causes: std::sync::atomic::AtomicU8,
     mail_poll_requested: std::sync::atomic::AtomicBool,
@@ -238,6 +239,7 @@ impl WorkerControlHandle {
         Self {
             inner: Arc::new(WorkerControlInner {
                 state: std::sync::atomic::AtomicU8::new(WorkerControlState::Starting as u8),
+                draining: std::sync::atomic::AtomicBool::new(false),
                 ready: std::sync::atomic::AtomicBool::new(false),
                 degraded_causes: std::sync::atomic::AtomicU8::new(0),
                 mail_poll_requested: std::sync::atomic::AtomicBool::new(false),
@@ -278,11 +280,17 @@ impl WorkerControlHandle {
 
     /// 返回 control 与 heartbeat 共用的进程就绪事实。
     pub fn is_ready(&self) -> bool {
-        self.inner.ready.load(std::sync::atomic::Ordering::Acquire)
+        !self.is_draining() && self.inner.ready.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// 返回不可逆的排空门禁；循环在每次领取新工作前检查，在途 claim 仍由原 owner 收口。
+    pub fn is_draining(&self) -> bool {
+        self.inner.draining.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// 标记 Worker 正在收口；之后的手动唤醒会被拒绝。
     pub fn mark_draining(&self) {
+        self.inner.draining.store(true, std::sync::atomic::Ordering::Release);
         self.inner.ready.store(false, std::sync::atomic::Ordering::Release);
         self.inner
             .state
@@ -290,12 +298,7 @@ impl WorkerControlHandle {
     }
 
     fn refresh_operational_state(&self) {
-        if matches!(
-            WorkerControlState::from_byte(
-                self.inner.state.load(std::sync::atomic::Ordering::Acquire),
-            ),
-            WorkerControlState::Draining
-        ) {
+        if self.is_draining() {
             return;
         }
         let degraded = self.inner.degraded_causes.load(std::sync::atomic::Ordering::Acquire) != 0;
@@ -322,19 +325,22 @@ impl WorkerControlHandle {
     }
 
     fn ready(&self) -> ReadyResult {
-        ReadyResult { ready: self.inner.ready.load(std::sync::atomic::Ordering::Acquire) }
+        ReadyResult { ready: self.is_ready() }
     }
 
     fn status(&self) -> StatusResult {
         StatusResult {
             mail_pollers: self.inner.mail_pollers,
-            ready: self.inner.ready.load(std::sync::atomic::Ordering::Acquire),
+            ready: self.is_ready(),
             state: self.state_name().to_owned(),
             version: self.inner.version.clone(),
         }
     }
 
     fn state_name(&self) -> &'static str {
+        if self.is_draining() {
+            return WorkerControlState::Draining.as_str();
+        }
         WorkerControlState::from_byte(self.inner.state.load(std::sync::atomic::Ordering::Acquire))
             .as_str()
     }
@@ -353,7 +359,7 @@ impl WorkerControlHandle {
         if let Some(result) = history.results.get(&command.command_id).cloned() {
             return Ok(result);
         }
-        if !self.inner.ready.load(std::sync::atomic::Ordering::Acquire)
+        if !self.is_ready()
             || !matches!(
                 WorkerControlState::from_byte(
                     self.inner.state.load(std::sync::atomic::Ordering::Acquire),

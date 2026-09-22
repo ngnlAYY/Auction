@@ -20,6 +20,9 @@ pub(super) async fn run_loop<C>(
     C: Clock + 'static,
 {
     loop {
+        if worker.control.is_draining() {
+            return;
+        }
         let started = std::time::Instant::now();
         let result = run_batch(worker.as_ref()).await;
         if result != WorkerResult::Success {
@@ -62,7 +65,7 @@ where
     let capacity = usize::from(worker.fulfillment.batch_limit);
     let mut processed = 0_usize;
     let mut batch_result = WorkerResult::Success;
-    while processed < capacity {
+    while processed < capacity && !worker.control.is_draining() {
         let wave_limit = usize::from(worker.fulfillment.concurrency).min(capacity - processed);
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.fulfillment.concurrency);
         let now = worker.clock.now();

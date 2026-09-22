@@ -15,11 +15,15 @@ use super::DatabaseStore;
 mod activation;
 mod common;
 #[cfg(feature = "postgres")]
+mod disposition;
+#[cfg(feature = "postgres")]
 mod outbox;
 mod validation;
 
 #[cfg(feature = "postgres")]
 use activation::activate_postgres;
+#[cfg(feature = "postgres")]
+pub(super) use disposition::has_return_intent;
 #[cfg(feature = "postgres")]
 use outbox::{enqueue_postgres, prepare_postgres};
 use validation::validate_command;

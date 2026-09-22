@@ -23,6 +23,11 @@ where
         if !self.world_ids.iter().any(|world_id| world_id == &message.world_id) {
             return Err(MailProcessingError::InvalidConfiguration.into());
         }
+        // 标的提交与领取入队之间可能发生取消；接受事实优先于当前远端内容，禁止重试时
+        // 因页面暂时不可读或附件已被领取而改判为退回。
+        if let Some(decision) = self.resume_accepted_auction(&message).await? {
+            return Ok(decision);
+        }
         let now = self.clock.now().max(message.received_at);
         // 旧版使用 Unicode CaseFold 路由，但刻意不裁剪标题首尾空白；保持这一边界可以
         // 兼容合法的大小写变体，同时不把带隐藏空白的未知标题误认成业务命令。
@@ -186,7 +191,7 @@ where
         message: MailMessage,
     ) -> Result<MailProcessingDecision, ApplicationError> {
         let attachment_ids = message.sorted_attachment_ids();
-        if attachment_ids.is_empty() {
+        if !has_user_assets(&message) {
             return decision("unknown", "accepted", "archived", json!({}));
         }
         if !message.returnable {

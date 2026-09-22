@@ -20,7 +20,8 @@ pub(crate) fn AdminSessionRetry(mut reload_generation: Signal<u64>) -> Element {
     rsx! {}
 }
 
-/// 在 Admin 会话滑动过期前后触发一次 GET，复用服务端的 touch 语义刷新 Cookie 会话。
+/// 每次会话读取成功后安排下一次 GET；即使绝对过期上限使 deadline 不变，也会由父组件
+/// 的已完成检查代数重挂载，在截止点之后读到服务端权威的未认证结果。
 #[component]
 pub(crate) fn AdminSessionRefresh(
     session: AdminSession,

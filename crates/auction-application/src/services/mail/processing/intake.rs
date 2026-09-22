@@ -22,6 +22,30 @@ where
         Self { repository, sealer, clock }
     }
 
+    /// 从持久化接受事实恢复原领取资产；不得重新请求远端页面来决定是否退回。
+    pub async fn find_accepted(
+        &self,
+        lookup: MailAuctionIntakeLookup,
+    ) -> Result<Option<MailAuctionAcceptance>, ApplicationError> {
+        lookup.validate()?;
+        let accepted = self
+            .repository
+            .run(TransactionPolicy::read_committed(), move |transaction| {
+                let lookup = lookup.clone();
+                Box::pin(async move {
+                    transaction
+                        .load_mail_auction_acceptance(lookup)
+                        .await
+                        .map_err(ApplicationError::from)
+                })
+            })
+            .await?;
+        if let Some(accepted) = &accepted {
+            accepted.validate()?;
+        }
+        Ok(accepted)
+    }
+
     /// 将一封已经完成装备读取的 MoogleMail 原子写入拍卖预览。
     pub async fn ingest_mail(
         &self,
@@ -131,6 +155,13 @@ where
     K: EquipmentKeySealerPort + 'static,
     C: Clock + 'static,
 {
+    fn find_accepted(
+        &self,
+        lookup: MailAuctionIntakeLookup,
+    ) -> ApplicationFuture<'_, Option<MailAuctionAcceptance>> {
+        Box::pin(async move { MailAuctionIntakeService::find_accepted(self, lookup).await })
+    }
+
     fn ingest_mail(
         &self,
         command: MailAuctionIntakeCommand,

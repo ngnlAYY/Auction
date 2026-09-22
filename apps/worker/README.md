@@ -46,7 +46,8 @@ Worker **不监听业务写入 HTTP 表面**，只从配置读取数据库与缓
 `auction_jobs::run_persistent_with_settlement_until_shutdown()`；没有数据库时才保留不执行任务的启动骨架。
 Worker 的主配置 `[tracing]` 可启用有界 OTLP/HTTP exporter，headers 只从敏感 TOML 的 Worker
 专属字段读取。进程通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号将 control 标记为
-draining，通知各 owner 完成当前有界批次但不再领取新工作，并在 10 秒上限内停止 heartbeat、发布
+draining，各 owner 在每次领取及并发等待结束后检查停止门禁，不再启动剩余批次的新 claim，
+已经在途的 claim 沿原有租约与结果确认路径收口，并在 10 秒上限内停止 heartbeat、发布
 停止状态；排空期间第二次信号会强制收口，最后按配置限时刷新 exporter。
 
 ```bash

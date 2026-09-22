@@ -6,13 +6,14 @@ use super::super::*;
 pub(in crate::database::sqlite::competition) async fn insert_bid(
     transaction: &mut SqliteCompetitionTransaction,
     bid: &AcceptedBid,
+    occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let connection = transaction.connection_mut()?;
     sqlx::query(
         "INSERT INTO bids
             (id, command_id, fact_index, lot_id, bidder_user_id, amount, mechanism,
              effective_end_at, accepted_state_version, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(uuid_blob(bid.id.as_uuid()))
     .bind(uuid_blob(bid.command_id.as_uuid()))
@@ -21,8 +22,9 @@ pub(in crate::database::sqlite::competition) async fn insert_bid(
     .bind(uuid_blob(bid.bidder_id.as_uuid()))
     .bind(bid.amount.value())
     .bind(bid_mechanism(bid.mechanism))
-    .bind(bid.effective_end_at.to_rfc3339())
+    .bind(sqlite_timestamp(bid.effective_end_at))
     .bind(i64_version(bid.state_version, "竞价状态版本")?)
+    .bind(sqlite_timestamp(occurred_at))
     .execute(&mut *connection)
     .await
     .map_err(map_sql_error)?;
@@ -32,6 +34,7 @@ pub(in crate::database::sqlite::competition) async fn insert_bid(
 pub(in crate::database::sqlite::competition) async fn update_lot(
     transaction: &mut SqliteCompetitionTransaction,
     plan: &CompetitionPlan,
+    occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let previous_version = plan
         .final_lot
@@ -39,7 +42,7 @@ pub(in crate::database::sqlite::competition) async fn update_lot(
         .checked_sub(plan.public_bids.len() as u64)
         .ok_or_else(|| invalid_state("lot 状态版本回退失败"))?;
     // 同一命令内的普通出价和代理反超同样构成领先中断，不能只比较事务前后领先者。
-    // SQLite 的 CURRENT_TIMESTAMP 按语句取时，必须使用最终接受事实的时间，避免跨秒漂移。
+    // 事实与领先起点使用同一锁后数据库时间，避免语句取时跨秒漂移。
     let leadership_interrupted =
         plan.public_bids.iter().any(|bid| Some(bid.bidder_id) != plan.final_lot.leader_id);
     let connection = transaction.connection_mut()?;
@@ -53,7 +56,7 @@ pub(in crate::database::sqlite::competition) async fn update_lot(
              END,
              leader_user_id = ?, leader_proxy_last = ?, effective_end_at = ?,
              slow_authorization_id = ?, slow_due_at = ?, slow_generation = ?,
-             last_proxy_sequence = ?, state_version = ?, updated_at = CURRENT_TIMESTAMP
+             last_proxy_sequence = ?, state_version = ?, updated_at = ?
          WHERE id = ? AND state_version = ?",
     )
     .bind(plan.final_lot.current_price.map(BidAmount::value))
@@ -63,12 +66,13 @@ pub(in crate::database::sqlite::competition) async fn update_lot(
     .bind(plan.final_lot.leader_id.map(|id| uuid_blob(id.as_uuid())))
     .bind(plan.final_lot.leader_id.map(|id| uuid_blob(id.as_uuid())))
     .bind(if plan.final_lot.leader_proxy_last { 1_i64 } else { 0_i64 })
-    .bind(plan.final_lot.effective_end_at.to_rfc3339())
+    .bind(sqlite_timestamp(plan.final_lot.effective_end_at))
     .bind(plan.final_lot.slow_authorization_id.map(|id| uuid_blob(id.as_uuid())))
-    .bind(plan.final_lot.slow_due_at.map(|value| value.to_rfc3339()))
+    .bind(plan.final_lot.slow_due_at.map(sqlite_timestamp))
     .bind(i64_version(plan.final_lot.slow_generation, "慢速代理世代")?)
     .bind(i64_version(plan.final_lot.last_proxy_sequence, "代理序号")?)
     .bind(i64_version(plan.final_lot.state_version, "lot 状态版本")?)
+    .bind(sqlite_timestamp(occurred_at))
     .bind(uuid_blob(plan.final_lot.lot_id.as_uuid()))
     .bind(i64_version(previous_version, "lot 前一版本")?)
     .execute(&mut *connection)

@@ -22,6 +22,7 @@ pub enum SettlementFulfillmentState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettlementFulfillmentOperation {
     Send,
+    /// 仅为读取并隔离旧执行记录保留；不得用于新的结算履约。
     Return,
 }
 
@@ -64,14 +65,14 @@ pub struct SettlementFulfillmentDeliverySnapshot {
     pub recipient: String,
     pub payload: Value,
     pub external_reference: Option<String>,
-    /// send 由成功页中的远端邮件 ID 证明；return 由动作完成页或原邮件消失证明。
+    /// Send 由远端 Sent 身份证明；旧 Return 标记仅用于历史快照，不能证明装备返还。
     pub external_reference_proven: bool,
     pub failure_code: Option<String>,
 }
 
 /// 返回旧版 MoogleMail fulfillment 发送与 Sent 证据共同使用的 canonical 主题。
 ///
-/// reference 固定为稳定 obligation ID；邮件来源的 UnsoldReturn 复用原邮件，WithdrawnReturn 发送原装备。
+/// reference 固定为稳定 obligation ID；流拍与撤拍均逐件发送原装备。
 pub fn canonical_settlement_fulfillment_subject(
     kind: SettlementObligationKind,
     obligation_id: SettlementId,
@@ -79,11 +80,11 @@ pub fn canonical_settlement_fulfillment_subject(
     let subject = match kind {
         SettlementObligationKind::WinnerEquipmentCod
         | SettlementObligationKind::WinnerEquipmentHandoff
+        | SettlementObligationKind::UnsoldReturn
         | SettlementObligationKind::WithdrawnReturn => "Auction equipment delivery",
         SettlementObligationKind::WinnerPaymentCarrierCod => "Auction payment request",
         SettlementObligationKind::SellerPayout => "Auction seller payout",
         SettlementObligationKind::BuyerRefund => "Auction buyer refund",
-        SettlementObligationKind::UnsoldReturn => return None,
     };
     Some(format!("{subject} [{obligation_id}]"))
 }
@@ -117,7 +118,7 @@ pub struct SettlementFulfillmentClaim {
     /// 结算通知正文使用的装备名称；只允许来自同一数据库快照。
     pub equipment_name: String,
     pub submission_id: Option<SubmissionId>,
-    /// 投稿来源闭集；仅 UnsoldReturn 的邮件来源执行远端原邮件退回，WithdrawnReturn 发送原装备。
+    /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,
     /// 旧邮件的远端 ID，仅在邮件来源时使用；不保存正文或 Cookie。
     pub submission_external_mail_id: Option<String>,

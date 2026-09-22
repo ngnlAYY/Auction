@@ -181,7 +181,7 @@ pub trait CompetitionTransaction: Send {
         command: StoredCommand,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 
-    /// 返回数据库事务当前时间；慢速代理截止 fence 不使用 Worker 主机时钟。
+    /// 返回数据库当前时间；调用方在业务锁齐备后读取，截止与事实不使用进程时钟。
     fn current_time(
         &mut self,
     ) -> impl Future<Output = Result<DateTime<Utc>, CompetitionTransactionError>> + Send;
@@ -189,7 +189,6 @@ pub trait CompetitionTransaction: Send {
     fn load_for_update(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send;
 
     /// 在 lot 与活动代理之后锁定参与用户，并核对用户状态和当前黑名单事实。
@@ -228,6 +227,7 @@ pub trait CompetitionTransaction: Send {
         &mut self,
         plan: CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 
     /// 原子应用慢速代理计划，并写入 Auction-BF 稳定的 Worker 审计语义。

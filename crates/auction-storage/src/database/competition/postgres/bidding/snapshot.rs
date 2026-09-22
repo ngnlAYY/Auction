@@ -18,9 +18,8 @@ impl PostgresCompetitionTransaction {
     pub(crate) async fn load_for_update_inner(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
-        self.load_for_update_with_deadline_gate(lot_id, now, true).await
+        self.load_for_update_with_deadline_gate(lot_id, true).await
     }
 
     /// 生命周期 Final 转换复用竞价快照形状，但允许读取已经到期的 live lot；公开竞价仍必须
@@ -28,15 +27,13 @@ impl PostgresCompetitionTransaction {
     pub(crate) async fn load_for_final_transition_inner(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
-        self.load_for_update_with_deadline_gate(lot_id, now, false).await
+        self.load_for_update_with_deadline_gate(lot_id, false).await
     }
 
     async fn load_for_update_with_deadline_gate(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
         require_unexpired: bool,
     ) -> Result<CompetitionSnapshot, CompetitionTransactionError> {
         let row = {
@@ -107,6 +104,8 @@ impl PostgresCompetitionTransaction {
             return Err(CompetitionTransactionError::NotFound);
         };
 
+        // 连接与行锁等待可能跨过开放或截止边界，门禁必须使用锁后数据库时间。
+        let now = self.current_time_inner().await?;
         let world_enabled: bool = row.try_get("world_enabled").map_err(map_sql_error)?;
         let auction_status =
             parse_auction_status(row.try_get("auction_status").map_err(map_sql_error)?)?;

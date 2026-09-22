@@ -29,7 +29,7 @@ use uuid::Uuid;
 use crate::database::audit_health::AuditWriteResult as _;
 
 #[cfg(feature = "sqlite")]
-use sqlx::{SqliteConnection, pool::PoolConnection, sqlite::SqliteRow};
+use sqlx::{SqliteConnection, sqlite::SqliteRow};
 #[cfg(feature = "postgres")]
 use sqlx::{postgres::PgRow, types::Json};
 

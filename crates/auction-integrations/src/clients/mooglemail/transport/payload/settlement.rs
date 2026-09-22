@@ -59,7 +59,6 @@ fn decode_send_payload(
             credits: payload.credits,
             cod: payload.cod,
             equipment_secret_refs: payload.equipment_secret_refs,
-            source_external_mail_id: None,
         },
         world,
     ))
@@ -85,7 +84,6 @@ fn decode_return_payload(
             credits: 0,
             cod: 0,
             equipment_secret_refs: Vec::new(),
-            source_external_mail_id: Some(payload.external_mail_id),
         },
         world,
     ))

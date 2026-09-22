@@ -15,6 +15,9 @@ where
     let mut count = 0_usize;
     let mut phase_result = WorkerResult::Success;
     for _ in 0..worker.recovery.batch_limit {
+        if worker.control.is_draining() {
+            break;
+        }
         match tokio::time::timeout(
             worker.recovery.item_timeout,
             store.advance_due_case(worker.clock.now()),

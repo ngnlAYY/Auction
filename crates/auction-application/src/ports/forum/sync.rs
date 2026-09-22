@@ -4,6 +4,10 @@
 //! 快照后提交远端证明；远端发帖、回帖解析和竞价命令导入均不得直接修改拍卖状态。
 
 use std::fmt;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -66,6 +70,32 @@ impl ForumRemoteError {
     /// 返回是否已经进入远端写入阶段。
     pub const fn write_started(self) -> bool {
         self.write_started
+    }
+}
+
+/// 单次论坛内容扫描的远端写入进度；仅记录是否存在尚未回读确认的 POST。
+///
+/// 传输适配器必须在预读、限速和凭据校验全部完成、即将发送 POST 时标记；调用方只有在
+/// 原始正文回读与冻结目标完全相等后才能确认。该对象不替代持久化的未知结果门禁。
+#[derive(Debug, Clone, Default)]
+pub struct ForumWriteProgress {
+    unconfirmed: Arc<AtomicBool>,
+}
+
+impl ForumWriteProgress {
+    /// 在实际 POST 发送前标记，供外层超时取消后识别不确定的外部写入。
+    pub fn mark_write_started(&self) {
+        self.unconfirmed.store(true, Ordering::Release);
+    }
+
+    /// 原始正文已回读证明与目标一致，解除本轮这一笔写入的未知标记。
+    pub fn confirm_write(&self) {
+        self.unconfirmed.store(false, Ordering::Release);
+    }
+
+    /// 返回本轮是否已经发送过尚未通过权威回读确认的 POST。
+    pub fn has_unconfirmed_write(&self) -> bool {
+        self.unconfirmed.load(Ordering::Acquire)
     }
 }
 
@@ -309,6 +339,17 @@ pub trait ForumPostWriter: Send + Sync {
         post_id: String,
         metadata: Option<ForumTopicMetadata>,
         body: ForumRenderedPost,
+    ) -> ApplicationFuture<'_, ForumPublishedPost>;
+
+    /// 编辑稳定 post 并报告实际 POST 边界；预读或限速超时不得标记为已写入。
+    fn edit_post_with_progress(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+        metadata: Option<ForumTopicMetadata>,
+        body: ForumRenderedPost,
+        progress: ForumWriteProgress,
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 
     /// 从已校验的编辑表单读取服务端保存的原始 BBCode；只读操作允许轮换失效凭据。

@@ -22,20 +22,27 @@ pub(super) fn poll_delay(
 pub(super) async fn drain_delivery_tasks(
     tasks: &mut JoinSet<Result<(), WorkerError>>,
 ) -> Result<(), WorkerError> {
+    let mut first_error = None;
     while let Some(result) = tasks.join_next().await {
-        result.map_err(WorkerError::DeliveryTaskJoin)??;
+        if let Err(error) = result.map_err(WorkerError::DeliveryTaskJoin).and_then(|result| result)
+        {
+            first_error.get_or_insert(error);
+        }
     }
-    Ok(())
+    first_error.map_or(Ok(()), Err)
 }
 
 pub(super) async fn drain_worker_tasks(
     tasks: &mut JoinSet<()>,
     group: &'static str,
 ) -> Result<(), WorkerError> {
+    let mut first_error = None;
     while let Some(result) = tasks.join_next().await {
-        result.map_err(|source| WorkerError::DrainTaskJoin { group, source })?;
+        if let Err(source) = result {
+            first_error.get_or_insert(WorkerError::DrainTaskJoin { group, source });
+        }
     }
-    Ok(())
+    first_error.map_or(Ok(()), Err)
 }
 
 /// 等待下一轮 deadline；收到 drain 后立即跳过休眠，且不再领取新工作。

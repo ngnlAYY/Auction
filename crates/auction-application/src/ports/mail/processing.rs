@@ -4,6 +4,8 @@
 //! Worker 调用应用用例期间存在；进入持久化端口前必须转换为装备事实、密钥信封和无密文
 //! delivery payload。
 
+#[path = "processing/acceptance.rs"]
+mod acceptance;
 #[path = "processing/auction.rs"]
 mod auction;
 #[path = "processing/common.rs"]
@@ -17,6 +19,7 @@ mod filter;
 #[path = "processing/message.rs"]
 mod message;
 
+pub use acceptance::*;
 pub use auction::*;
 pub use common::{MailProcessingError, mail_auction_aggregate_id};
 pub use decision::*;

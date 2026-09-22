@@ -8,17 +8,17 @@ use std::sync::Arc;
 use crate::WorkerControlHandle;
 use auction_application::{
     ApplicationError, AuctionLifecycleActor, AuctionLifecycleActorType, AuctionLifecycleCommand,
-    AuctionLifecycleCommandPort, Clock, DeliveryRecipientExclusion, DeliverySendResult,
-    DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
-    MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer, MailDeliveryOperation,
-    MailDeliveryOrigin, MailNotificationTemplate, RECOVERY_BUYER_BLACKLIST_ACTOR,
-    RECOVERY_BUYER_BLACKLIST_PROOF_KIND, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
-    RecoveryActionOutcome, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklister,
-    RecoveryResolutionStore, RecoveryWorkStore, RequestHash, ScheduledRoundClaim,
-    ScheduledRoundPhase, ScheduledRoundStore, SettleAuctionCommand, SettlementCommandPort,
-    SettlementFulfillmentClaim, SettlementFulfillmentCommandPort, SettlementFulfillmentStore,
-    SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort, SlowProxyDueReader,
-    WorldReader,
+    AuctionLifecycleCommandPort, Clock, DeliveryClaimExclusions, DeliveryRecipientExclusion,
+    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
+    DeliveryWorkStore, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,
+    MailDeliveryOperation, MailDeliveryOrigin, MailNotificationTemplate,
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryActionOutcome, RecoveryBuyerBlacklistCommand,
+    RecoveryBuyerBlacklister, RecoveryResolutionStore, RecoveryWorkStore, RequestHash,
+    ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore, SettleAuctionCommand,
+    SettlementCommandPort, SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
+    SettlementFulfillmentStore, SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort,
+    SlowProxyDueReader, WorldReader,
 };
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};

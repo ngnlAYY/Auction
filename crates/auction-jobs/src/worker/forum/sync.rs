@@ -98,7 +98,7 @@ where
         .map_err(|_| WorkerError::InvalidForumSyncConfiguration)?;
     let mut processed = 0_u16;
     let mut first_error = None;
-    while processed < runtime.batch_size {
+    while processed < runtime.batch_size && !worker.control.is_draining() {
         let now = worker.clock.now();
         let recovery_before = *runtime.credential_recovery_before.get_or_init(|| now);
         let credential_recovery_before = runtime

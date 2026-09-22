@@ -32,7 +32,8 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 已经纳入版本控制的主配置和敏感配置示例位于 [`examples/`](examples/)，runtime 配置示例
 集中在 [`examples/runtime/`](examples/runtime/)，PostgreSQL 常驻连接与独立维护凭据的模板
 集中在 [`examples/secrets/`](examples/secrets/)。每个角色文件必须通过 `common_file` 引用同一公共文件，
-并通过 `secrets_file` 引用敏感文件；相对路径都以角色文件所在目录解析。三进程部署预检会拒绝
+并通过 `secrets_file` 引用敏感文件；loader 先固定角色文件的绝对位置，再以其所在目录解析相对引用，
+默认发现和相对 `AUCTION_CONFIG_FILE` 同样适用。runtime 的路径及文件权限检查不会因此放宽。三进程部署预检会拒绝
 角色引用不同公共文件的组合。示例主配置引用的 `secrets.toml` 只包含
 安全的本地占位值，不能直接用于生产环境。
 每个示例赋值字段前都必须紧邻中文“可选”或“必填”注释；`just config-example-check` 会阻止
@@ -48,7 +49,8 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 数据库主机、端口、账号、密码、库名、管理员、两个 origin 和基础/进阶参数，目标目录必须不存在。
 
 `auction-config::FirstRunConfig` 复用 `examples/` 中的公共、三角色与 runtime 通用模板，写出
-权限受限的 `secrets.toml`，并让三个角色的正式 loader 校验完整目录。未由页面覆盖的参数沿用
+`0600` 的 `secrets.toml` 和 `0640` 的非敏感文件；权限在私有临时目录内显式设置，不受 `umask 077`
+影响。三个角色的正式 loader 与 runtime 文件读取校验通过后才发布完整目录。未由页面覆盖的参数沿用
 通用模板；Public/Admin 信任本机反向代理，Worker control 启用并绑定初始化进程提供的服务 UID，
 邮件本地联调 `.keyenv` 路径不进入生成配置。普通 Admin 进程不开放初始化 API。
 
@@ -128,6 +130,9 @@ MoogleMail poller 和凭据 availability，必须与 Worker 的对应配置保�
 `worlds`、各 world 发件人 allowlist、`equipment_filter` 和 14 个 `mail_templates` 也位于该文件；
 Worker 重启时把它们投影为 MoogleMail 业务快照。MoogleMail transport endpoint、凭据来源、mailbox
 标识和全局 `worker.mooglemail.enabled` 仍由 Worker 主配置拥有。
+装备等级 `min`、`max` 各限 `0–1000`，`0` 分别关闭对应边界；非零 `max` 必须不小于 `min`。
+例如 `min = 300`、`max = 0` 只设下限，主配置的 `level_min`、`level_max` 使用相同语义；
+只要启用了任一等级边界，缺少等级的装备仍拒绝。
 
 `operations` 的六组参数均以 `managed = false` 为默认值，沿用公共/角色配置；在管理页勾选
 “使用本页配置”后才接管该组。首次显示的候选默认值不是 Worker 当前运行配置。完整字段与默认值

@@ -177,6 +177,7 @@ where
                 Arc::clone(&worker.clock),
                 Arc::clone(&worker.metrics),
                 action,
+                worker.control.clone(),
                 drain_sender.subscribe(),
             ));
         }
@@ -219,16 +220,20 @@ where
             () = &mut shutdown => {
                 worker.control.mark_draining();
                 let _ = drain_sender.send(true);
-                drain_delivery_tasks(&mut delivery_cycles).await?;
-                drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await?;
-                drain_worker_tasks(&mut auction_tasks, "auction").await?;
-                drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await?;
-                drain_worker_tasks(&mut recovery_tasks, "recovery").await?;
-                drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await?;
-                drain_worker_tasks(&mut forum_tasks, "forum").await?;
-                drain_worker_tasks(&mut realtime_tasks, "realtime").await?;
+                // 单组错误不能提前 drop 其他在途 owner；共享装配根的总排空截止时间，
+                // 按原顺序等待所有组之后再返回首个错误，不为每组重置预算。
+                let results = [
+                    drain_delivery_tasks(&mut delivery_cycles).await,
+                    drain_worker_tasks(&mut operations_alert_tasks, "operations alert").await,
+                    drain_worker_tasks(&mut auction_tasks, "auction").await,
+                    drain_worker_tasks(&mut fulfillment_tasks, "fulfillment").await,
+                    drain_worker_tasks(&mut recovery_tasks, "recovery").await,
+                    drain_worker_tasks(&mut mail_poll_tasks, "MoogleMail").await,
+                    drain_worker_tasks(&mut forum_tasks, "forum").await,
+                    drain_worker_tasks(&mut realtime_tasks, "realtime").await,
+                ];
                 tracing::info!(worker_id = %worker.worker_id, "auction worker stopping");
-                return Ok(());
+                return results.into_iter().find_map(Result::err).map_or(Ok(()), Err);
             }
             _ = &mut delivery_sleep, if delivery_enabled && delivery_cycles.is_empty() =>
             {

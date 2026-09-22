@@ -42,9 +42,8 @@ impl AuctionLifecycleTransaction for SqliteCompetitionTransaction {
     fn load_final_lot_for_update(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send {
-        async move { self.load_for_final_transition_inner(lot_id, now).await }
+        async move { self.load_for_final_transition_inner(lot_id).await }
     }
 
     fn append_lifecycle_record(

@@ -40,6 +40,17 @@ pub(super) async fn add_mail_auction_intake_inner(
     if !world_enabled {
         return Err(CompetitionTransactionError::Conflict);
     }
+    // 退回与录入共享 world 锁；已安排退回的邮件不能在重试中重新成为可拍卖资产。
+    if crate::database::mail_delivery::has_return_intent(
+        transaction,
+        &write.world_id,
+        &write.external_mail_id,
+    )
+    .await
+    .map_err(map_sql_error)?
+    {
+        return Err(CompetitionTransactionError::Conflict);
+    }
 
     let target = sqlx::query(
         r#"SELECT target.auction_id,

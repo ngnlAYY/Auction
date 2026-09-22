@@ -108,6 +108,17 @@ pub(crate) async fn register_postgres(
                         .map_err(map_storage_error)?;
                     }
                     if reissue {
+                        // 邮件找回触发的重签与 Admin 重签采用相同规则，旧 token 不随新 Key 恢复。
+                        sqlx::query(
+                            "UPDATE public.public_sessions
+                             SET revoked_at = GREATEST(created_at, $1)
+                             WHERE user_id = $2 AND revoked_at IS NULL",
+                        )
+                        .bind(write.command.now)
+                        .bind(user.id)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(map_storage_error)?;
                         insert_login_key_envelope(
                             &mut transaction,
                             user.id,

@@ -13,6 +13,9 @@ pub(super) async fn run_phase<C>(worker: &PersistentWorker<C>) -> WorkerResult
 where
     C: Clock + 'static,
 {
+    if worker.control.is_draining() {
+        return WorkerResult::Success;
+    }
     let (Some(reader), Some(commands)) = (&worker.slow_proxy_due, &worker.slow_proxy_commands)
     else {
         return WorkerResult::Success;
@@ -39,6 +42,9 @@ where
     let mut phase_result = WorkerResult::Success;
     let concurrency = usize::from(worker.auction.concurrency);
     for wave in candidates.chunks(concurrency) {
+        if worker.control.is_draining() {
+            break;
+        }
         let mut tasks = JoinSet::new();
         for due in wave.iter().copied() {
             let commands = Arc::clone(commands);

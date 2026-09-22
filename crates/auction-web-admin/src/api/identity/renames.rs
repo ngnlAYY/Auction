@@ -1,7 +1,7 @@
 //! Admin 改名历史 API 客户端。
 //!
-//! 页面只接收改名事实的安全投影；回滚前按旧版语义重新读取目标用户，并用最新版本、
-//! CSRF 和新命令 ID 提交。浏览器不自行推导用户状态；同一条改名事实的重试会复用同一个命令 ID。
+//! 页面只接收改名事实的安全投影；首次回滚按稳定用户 ID 读取当前版本，再冻结完整命令。
+//! 浏览器不自行推导用户状态；结果不确定时必须重放同一个命令 ID 与版本，不能重新读取后改写负载。
 
 pub(crate) use auction_contracts::AdminRenameResponse as AdminRename;
 use auction_contracts::{
@@ -13,12 +13,13 @@ use uuid::Uuid;
 
 use super::users::decode_user_mutation;
 use super::{
-    AdminUser, AdminUserStatusFilter, ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption,
-    TABLE_PAGE_SIZE, fetch_admin_users, invalid_request_error, invalid_response_error,
-    response_error, send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
+    AdminUser, ApiResponse, MAX_JSON_SAFE_INTEGER, RequiredOption, TABLE_PAGE_SIZE,
+    invalid_request_error, invalid_response_error, response_error, send_get, valid_admin_time,
+    valid_trimmed_text, valid_uuid,
 };
 
-/// 旧 rename decoder 允许对象增加字段；`user_state_version` 是新版兼容扩展，不参与回滚 fence。
+/// 旧 rename decoder 允许对象增加字段；普通展示仍允许省略 `user_state_version`，准备回滚时
+/// 则必须从按稳定用户 ID 重新读取的当前投影取得非零版本，不能把兼容零值当作 fence。
 ///
 /// 保留镜像的理由：wire 允许扩展字段且允许省略 `user_state_version`，而 contracts 的
 /// `AdminRenameResponse` 将该字段作为必填标量、不能加 `deny_unknown_fields`；镜像继续按
@@ -96,30 +97,56 @@ pub(crate) async fn fetch_admin_renames(
         .map_err(invalid_response_error)
 }
 
-/// 回滚一条改名事实；提交前重新读取目标用户，避免使用历史行中的过期版本 fence。
-pub(crate) async fn revert_admin_rename(
+/// 当前页面冻结的回滚命令；只有首次准备读取版本，后续重试不再改变路径或请求正文。
+#[derive(Debug, Clone)]
+pub(crate) struct AdminRenameRevertCommand {
+    rename_id: Uuid,
+    user_id: Uuid,
+    request: AdminRenameRevertRequest,
+}
+
+/// 复用改名历史的精确用户筛选读取当前版本，不依赖用户名、匹配数量或目标历史所在页码。
+pub(crate) async fn prepare_admin_rename_revert(
     command_id: Uuid,
     rename: &AdminRename,
-) -> Result<AdminUser, String> {
+) -> Result<AdminRenameRevertCommand, String> {
     let rename_id = Uuid::parse_str(&rename.id).map_err(|_| "invalid_request".to_owned())?;
     let user_id = Uuid::parse_str(&rename.user_id).map_err(|_| "invalid_request".to_owned())?;
-    let users =
-        fetch_admin_users(rename.next_username.clone(), AdminUserStatusFilter::All, 1).await?;
-    let current_user = users
-        .users
-        .into_iter()
-        .find(|user| user.id == rename.user_id)
+    if command_id.is_nil() || rename_id.is_nil() || user_id.is_nil() {
+        return Err("invalid_request".to_owned());
+    }
+    let history = fetch_admin_renames(user_id.to_string(), String::new(), 1).await?;
+    // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
+    let expected_state_version = history
+        .renames
+        .first()
+        .map(|record| record.user_state_version)
+        .filter(|version| *version > 0)
         .ok_or_else(|| "invalid_response".to_owned())?;
-    let expected_state_version = current_user.state_version;
+    if history.renames.iter().any(|record| record.user_state_version != expected_state_version) {
+        return Err("invalid_response".to_owned());
+    }
+    Ok(AdminRenameRevertCommand {
+        rename_id,
+        user_id,
+        request: AdminRenameRevertRequest {
+            command_id: command_id.to_string(),
+            expected_state_version,
+        },
+    })
+}
+
+/// 发送已冻结的回滚命令；响应丢失后的重试直接进入服务端命令账本重放。
+pub(crate) async fn revert_admin_rename(
+    command: &AdminRenameRevertCommand,
+) -> Result<AdminUser, String> {
     let csrf_token = super::fetch_csrf_token().await?;
-    let url = format!("/api/v1/admin/renames/{rename_id}/revert");
-    let command =
-        AdminRenameRevertRequest { command_id: command_id.to_string(), expected_state_version };
+    let url = format!("/api/v1/admin/renames/{}/revert", command.rename_id);
     let response = super::send_request(|abort_signal| {
         Request::post(&url)
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
-            .json(&command)
+            .json(&command.request)
             .map_err(invalid_request_error)
     })
     .await?;
@@ -127,8 +154,8 @@ pub(crate) async fn revert_admin_rename(
         return Err(response_error(response).await);
     }
     let user = decode_user_mutation(response, false).await?.user;
-    if user.id != user_id.to_string()
-        || Some(user.state_version) != expected_state_version.checked_add(1)
+    if user.id != command.user_id.to_string()
+        || Some(user.state_version) != command.request.expected_state_version.checked_add(1)
     {
         return Err("invalid_response".to_owned());
     }

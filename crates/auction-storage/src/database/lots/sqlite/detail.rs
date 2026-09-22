@@ -1,4 +1,7 @@
 //! SQLite Lite Public lot 详情查询与当前拍卖投影解析。
+//!
+//! 拍卖截止投影按实际时刻选择；毫秒并列时仅规范化已知 UTC RFC3339／空格格式，
+//! 补齐小数以保留亚毫秒次序，未知偏移量不按 UTC 字符串解释。
 
 use super::super::*;
 use super::mapping::{map_sqlite_live, map_sqlite_preview_detail, map_sqlite_projection};
@@ -104,7 +107,20 @@ async fn sqlite_detail_projection(
     let row = sqlx::query(
         "SELECT
             a.id, a.world_id, a.sequence, a.status, a.scheduled_open_at,
-            MAX(CASE WHEN current_lot.status IN ('live', 'sold', 'unsold') THEN current_lot.effective_end_at END) AS scheduled_ends_at,
+            (SELECT deadline.effective_end_at FROM lots AS deadline
+             WHERE deadline.auction_id = a.id AND deadline.status IN ('live', 'sold', 'unsold')
+               AND deadline.effective_end_at IS NOT NULL
+             ORDER BY julianday(deadline.effective_end_at) DESC,
+                 CASE WHEN substr(deadline.effective_end_at, -6) = '+00:00'
+                           OR substr(deadline.effective_end_at, -1) = 'Z'
+                           OR (substr(deadline.effective_end_at, 11, 1) = ' '
+                               AND substr(deadline.effective_end_at, 20) NOT GLOB '*[+-]*')
+                     THEN substr(replace(replace(replace(deadline.effective_end_at,
+                         'T', ' '), '+00:00', ''), 'Z', '')
+                         || CASE WHEN substr(deadline.effective_end_at, 20, 1) = '.'
+                             THEN '000000000' ELSE '.000000000' END, 1, 29)
+                 END DESC,
+                 deadline.id DESC LIMIT 1) AS scheduled_ends_at,
             a.preview_revision,
             CASE WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
                  WHEN a.status = 'preview' THEN 'opening' ELSE 'live' END AS presentation_mode,
@@ -113,7 +129,6 @@ async fn sqlite_detail_projection(
          JOIN auctions AS a ON a.id = target.auction_id
          JOIN worlds AS w
            ON w.id = a.world_id AND (w.enabled = 1 OR a.status = 'settled')
-         LEFT JOIN lots AS current_lot ON current_lot.auction_id = a.id
          WHERE target.id = ?
            AND ((a.status = 'preview' AND target.status = 'pending')
                 OR (a.status IN ('live', 'final', 'settling') AND target.status IN ('live', 'sold', 'unsold'))
@@ -122,8 +137,7 @@ async fn sqlite_detail_projection(
                 SELECT 1 FROM auctions AS active
                 WHERE active.world_id = a.world_id
                   AND active.status IN ('live', 'final', 'settling')
-           ))
-         GROUP BY a.id",
+           ))",
     )
     .bind(lot_id.as_bytes().to_vec())
     .fetch_optional(&mut **transaction)

@@ -8,14 +8,15 @@ impl PostgresCompetitionTransaction {
         &mut self,
         plan: CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
+        occurred_at: DateTime<Utc>,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         super::apply_proxy_changes(self, &plan).await?;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid).await?;
+            super::insert_bid(self, bid, occurred_at).await?;
             super::insert_realtime_event(self, bid).await?;
         }
-        super::update_lot(self, &plan).await?;
+        super::update_lot(self, &plan, occurred_at).await?;
         if let Some(audit) = audit {
             super::insert_audit_for_public_command(self, &plan, audit).await?;
         }
@@ -27,18 +28,19 @@ impl PostgresCompetitionTransaction {
         &mut self,
         plan: CompetitionPlan,
         request_id: Option<String>,
+        occurred_at: DateTime<Utc>,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(&plan)?;
         super::apply_proxy_changes(self, &plan).await?;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid).await?;
+            super::insert_bid(self, bid, occurred_at).await?;
             super::insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
             super::insert_realtime_event(self, bid).await?;
         }
         super::insert_audit_for_proxy_changes(self, &plan, command_id, request_id.as_deref())
             .await?;
-        super::update_lot(self, &plan).await
+        super::update_lot(self, &plan, occurred_at).await
     }
 
     /// 慢速代理计划沿用竞价事实/事件写入，但使用 Worker 专属旧版审计语义。
@@ -49,12 +51,13 @@ impl PostgresCompetitionTransaction {
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         context.validate()?;
+        let occurred_at = context.executed_at;
         super::apply_proxy_changes(self, &plan).await?;
         for bid in &plan.public_bids {
-            super::insert_bid(self, bid).await?;
+            super::insert_bid(self, bid, occurred_at).await?;
             super::insert_realtime_event(self, bid).await?;
         }
-        super::update_lot(self, &plan).await?;
+        super::update_lot(self, &plan, occurred_at).await?;
         super::insert_audit_for_slow_proxy(self, &plan, context).await
     }
 }

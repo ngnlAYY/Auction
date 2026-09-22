@@ -9,7 +9,7 @@ use std::{
     io::{ErrorKind, Write},
     os::unix::{
         ffi::OsStrExt,
-        fs::{DirBuilderExt, OpenOptionsExt},
+        fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -21,7 +21,9 @@ use uuid::Uuid;
 
 use auction_domain::{CREDIT_GRID, MAX_BID_AMOUNT};
 
-use crate::{AppConfig, AuctionScheduleConfig, PostgresConnectionConfig, Role};
+use crate::{
+    AppConfig, AuctionScheduleConfig, PostgresConnectionConfig, Role, TomlRuntimeFileStore,
+};
 
 mod managed;
 pub use managed::managed_runtime_directory;
@@ -149,8 +151,19 @@ impl FirstRunConfig {
         let result = (|| {
             self.write_files(&temporary, runtime)?;
             for role in [Role::Public, Role::Admin, Role::Worker] {
-                AppConfig::load_from_path(role, temporary.join(format!("{}.toml", role.name())))
-                    .map_err(|_| FirstRunError::InvalidConfig)?;
+                let config = AppConfig::load_from_path(
+                    role,
+                    temporary.join(format!("{}.toml", role.name())),
+                )
+                .map_err(|_| FirstRunError::InvalidConfig)?;
+                if role == Role::Admin {
+                    let runtime_path = config
+                        .runtime_config_path
+                        .as_deref()
+                        .ok_or(FirstRunError::InvalidConfig)?;
+                    TomlRuntimeFileStore::validate_initial_file(runtime_path)
+                        .map_err(|_| FirstRunError::InvalidConfig)?;
+                }
             }
             ensure_destination_absent(destination)?;
             // 文件 fsync 不持久化目录项；先同步 runtime 子目录，再同步其父目录。
@@ -348,5 +361,8 @@ fn write_file(path: PathBuf, contents: &[u8], mode: u32) -> Result<(), FirstRunE
         .open(path)
         .map_err(|_| FirstRunError::Io)?;
     file.write_all(contents).map_err(|_| FirstRunError::Io)?;
+    // 临时根目录只允许 owner 访问；在发布前固定契约权限，避免 umask 077 把正式 runtime
+    // 要求的 0640 收紧为 0600，导致向导成功后 Admin 自身无法读取。敏感文件仍固定为 0600。
+    file.set_permissions(fs::Permissions::from_mode(mode)).map_err(|_| FirstRunError::Io)?;
     file.sync_all().map_err(|_| FirstRunError::Io)
 }

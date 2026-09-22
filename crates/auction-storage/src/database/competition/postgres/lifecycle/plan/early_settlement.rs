@@ -4,7 +4,7 @@ use super::super::record::previous_lifecycle_version;
 use super::super::*;
 use super::final_phase::{
     apply_final_proxy_plans_postgres, clamp_live_lot_deadlines_postgres,
-    mark_admin_final_schedule_postgres,
+    mark_final_schedule_postgres,
 };
 
 /// 立即封闭竞价并让既有 settlement scheduler 在事务提交后领取到期拍卖。
@@ -53,6 +53,6 @@ pub(super) async fn apply_early_settlement_plan_postgres(
         auction.updated_at,
     )
     .await?;
-    mark_admin_final_schedule_postgres(transaction, command, auction).await?;
+    mark_final_schedule_postgres(transaction, command, auction).await?;
     Ok(())
 }

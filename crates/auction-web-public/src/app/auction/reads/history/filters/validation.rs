@@ -128,7 +128,7 @@ pub(crate) fn history_price_value(
             let fraction = fraction.parse::<u64>().unwrap_or_default();
             whole
                 .checked_mul(1_000_000)
-                .and_then(|credits| credits.checked_add(fraction * 10u64.pow(4 - fraction_digits)))
+                .and_then(|credits| credits.checked_add(fraction * 10u64.pow(6 - fraction_digits)))
         }
     };
     let Some(credits) = credits else {

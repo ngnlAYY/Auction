@@ -134,7 +134,8 @@ Public 浏览器可将通过上述校验的 `lot.bid_accepted` 合并为竞价�
 
 ## WebSocket
 
-Public 提供 GET /api/v1/ws 升级为 WebSocket。连接必须显式选择一种范围：
+Public 提供 `/api/v1/ws`：HTTP/1.1 通过 GET Upgrade 返回 101，HTTP/2 通过扩展 CONNECT 返回 200，
+其他方法返回 405；两种握手共用会话、Origin、限流与范围门禁。连接必须显式选择一种范围：
 
 - auction_id=<uuid>：订阅单一拍卖流；
 - scope=auctions：订阅公开拍卖发现范围。

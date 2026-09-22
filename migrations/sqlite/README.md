@@ -27,6 +27,7 @@
 | [000010_user_forum_account_identity.up.sql](000010_user_forum_account_identity.up.sql) | 用户论坛账号身份 |
 | [000011_realtime_event_admin_index.up.sql](000011_realtime_event_admin_index.up.sql) | Admin 跨流事件索引 |
 | [000012_live_leader_since_repair.up.sql](000012_live_leader_since_repair.up.sql) | 未结算 live lot 连续领先时间修复 |
+| [000013_schedule_source_and_final_completion.up.sql](000013_schedule_source_and_final_completion.up.sql) | 冻结本地排期来源并补齐可证明的 Final 完成标记 |
 
 ## 范围与约束
 

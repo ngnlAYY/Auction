@@ -179,9 +179,12 @@ pub(crate) fn valid_mooglemail_endpoint(value: &str) -> bool {
 pub(crate) fn validate_mooglemail_equipment_filter(
     config: &MoogleMailEquipmentFilterConfig,
 ) -> Result<(), ConfigError> {
-    if config.level_min < 0 || config.level_max < config.level_min || config.level_max > 1000 {
+    if !(0..=1000).contains(&config.level_min)
+        || !(0..=1000).contains(&config.level_max)
+        || config.level_max != 0 && config.level_max < config.level_min
+    {
         return Err(ConfigError::InvalidMoogleMailConfig(
-            "equipment_filter 的等级范围必须位于 0 至 1000 且 max 不小于 min",
+            "equipment_filter 的等级边界必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min",
         ));
     }
     let lists = [

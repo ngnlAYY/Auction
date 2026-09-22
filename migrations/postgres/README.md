@@ -54,10 +54,12 @@
 | [000035_mail_intake_display_snapshot.up.sql](000035_mail_intake_display_snapshot.up.sql) | 入站邮件脱敏展示投影 |
 | [000036_mail_intake_equipment_diagnostic.up.sql](000036_mail_intake_equipment_diagnostic.up.sql) | 装备读取失败诊断投影 |
 | [000037_live_leader_since_repair.up.sql](000037_live_leader_since_repair.up.sql) | 未结算 live lot 连续领先时间修复 |
+| [000038_unsold_return_send.up.sql](000038_unsold_return_send.up.sql) | 未领取且未冻结的流拍返还改为逐件 Send |
+| [000039_schedule_source_and_final_completion.up.sql](000039_schedule_source_and_final_completion.up.sql) | 冻结本地排期来源并补齐可证明的 Final 完成标记 |
 
 ## 原则与基线
 
-PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000037` 已按 owner 追加核心身份、
+PostgreSQL 迁移必须保持只追加。当前 `000001` 至 `000039` 已按 owner 追加核心身份、
 拍卖、竞价、代理、结算/履约、生命周期、身份/外部命令、恢复/可观测性和论坛同步对象；
 它们是当前目标 schema，但不能单独证明全部业务表面已经完成。历史名称
 `bid_proxies` 由末尾只读兼容视图提供，权威写入只进入新授权与历史表。

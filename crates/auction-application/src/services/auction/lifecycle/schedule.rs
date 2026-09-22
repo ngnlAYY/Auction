@@ -11,10 +11,19 @@ pub(super) fn successor_plan(
             ))
     });
     let local_week = checked_add_days(current_week, 7, "下一期周日期超出范围")?;
-    let preview_due_at = checked_add_week(context.preview_scheduled_at, "下一期预览时间超出范围")?;
-    let open_due_at = checked_add_week(context.scheduled_open_at, "下一期开拍时间超出范围")?;
-    let scheduled_end_at =
-        checked_add_week(context.policy_scheduled_end_at, "下一期结束时间超出范围")?;
+    let schedule_source =
+        context.schedule_source.as_ref().map(|source| source.next_week()).transpose()?;
+    let (preview_due_at, open_due_at, scheduled_end_at) = if let Some(source) = &schedule_source {
+        let times = source.resolve()?;
+        (times.preview_due_at, times.open_due_at, times.scheduled_end_at)
+    } else {
+        // 历史轮次未保存时区来源，保留原 UTC 间隔；不能用当前配置重解释已冻结计划。
+        (
+            checked_add_week(context.preview_scheduled_at, "下一期预览时间超出范围")?,
+            checked_add_week(context.scheduled_open_at, "下一期开拍时间超出范围")?,
+            checked_add_week(context.policy_scheduled_end_at, "下一期结束时间超出范围")?,
+        )
+    };
     let sequence =
         context.sequence.checked_add(1).ok_or_else(|| lifecycle_state("下一期拍卖序号溢出"))?;
     let local_week_text = local_week.format("%Y-%m-%d").to_string();
@@ -33,6 +42,8 @@ pub(super) fn successor_plan(
         preview_due_at: chrono::DateTime<chrono::Utc>,
         open_due_at: chrono::DateTime<chrono::Utc>,
         scheduled_end_at: chrono::DateTime<chrono::Utc>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        schedule_source: &'a Option<crate::AuctionScheduleSource>,
     }
     let create_request_hash = RequestHash::from_request(
         "scheduled_auction_create",
@@ -44,10 +55,12 @@ pub(super) fn successor_plan(
             preview_due_at,
             open_due_at,
             scheduled_end_at,
+            schedule_source: &schedule_source,
         },
     )?;
 
     Ok(AuctionPreviewSuccessorPlan {
+        schedule_source,
         round_id,
         auction_id,
         create_command_id,

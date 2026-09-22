@@ -12,6 +12,7 @@ use crate::app::surface::{AdminActionFeedback, admin_api_error_message, stable_c
 use super::super::query::use_deliveries_query_state;
 use super::dialog::DeliveryDialog;
 use super::filters::DeliveryFilters;
+use super::helpers::is_mail_disposition_conflict;
 use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
@@ -40,10 +41,12 @@ pub fn page() -> Element {
             notice.set(None);
             success_action.set(None);
             if kind == DeliveryDialogKind::Reconcile
-                && reconcile_draft().as_ref().is_none_or(|draft| draft.delivery_id != delivery.id)
+                && reconcile_draft().as_ref().is_none_or(|draft| {
+                    draft.delivery_id != delivery.id
+                        || (is_mail_disposition_conflict(&delivery) && draft.action != "failed")
+                })
             {
-                reconcile_draft
-                    .set(Some(DeliveryReconcileDraft::for_delivery(delivery.id.clone())));
+                reconcile_draft.set(Some(DeliveryReconcileDraft::for_delivery(&delivery)));
             }
             pending_dialog.set(Some(DeliveryDialogState { delivery, kind }));
         }
@@ -58,6 +61,12 @@ pub fn page() -> Element {
     };
     let confirm_action = move |request: DeliveryActionRequest| {
         if busy_delivery().is_some() {
+            return;
+        }
+        if pending_dialog().is_some_and(|dialog| {
+            is_mail_disposition_conflict(&dialog.delivery)
+                && request.action != DeliveryAction::ReconcileFailed
+        }) {
             return;
         }
         if request.action == DeliveryAction::ReconcileRetry
@@ -215,7 +224,7 @@ pub fn page() -> Element {
                     kind: dialog.kind,
                     busy: busy_delivery().is_some(),
                     draft: draft.clone().unwrap_or_else(|| {
-                        DeliveryReconcileDraft::for_delivery(dialog.delivery.id.clone())
+                        DeliveryReconcileDraft::for_delivery(&dialog.delivery)
                     }),
                     on_draft_change: move |_| {},
                     on_confirm: confirm_action,

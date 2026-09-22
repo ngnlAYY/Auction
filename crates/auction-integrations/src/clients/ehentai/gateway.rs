@@ -247,6 +247,33 @@ impl ForumPostWriter for EhentaiGateway {
         })
     }
 
+    fn edit_post_with_progress(
+        &self,
+        world: SettlementWorld,
+        thread_id: String,
+        post_id: String,
+        metadata: Option<ForumTopicMetadata>,
+        body: ForumRenderedPost,
+        progress: auction_application::ForumWriteProgress,
+    ) -> ApplicationFuture<'_, ForumPublishedPost> {
+        let gateway = Self {
+            client: Arc::new(self.client.as_ref().clone().with_write_progress(progress)),
+            credentials: self.credentials.clone(),
+        };
+        Box::pin(async move {
+            EhentaiGateway::edit_post(
+                &gateway,
+                world,
+                &thread_id,
+                &post_id,
+                metadata.as_ref(),
+                body,
+            )
+            .await
+            .map_err(EhentaiError::into_application_error)
+        })
+    }
+
     fn read_post_body(
         &self,
         world: SettlementWorld,

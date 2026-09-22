@@ -77,6 +77,12 @@ impl TomlRuntimeFileStore {
         Ok(Self { lock_path: directory.join(".admin-runtime-config.lock"), path })
     }
 
+    /// 首次部署在私有临时目录中复用正式读取校验；发布前不创建运行时锁文件。
+    #[cfg(unix)]
+    pub(crate) fn validate_initial_file(path: &Path) -> Result<(), RuntimeFileStoreError> {
+        Self::new(path)?.read_snapshot().map(|_| ())
+    }
+
     fn open_lock(&self) -> Result<File, RuntimeFileStoreError> {
         validate_directory(self.path.parent().ok_or(RuntimeFileStoreError::InvalidPath)?)?;
         let lock = OpenOptions::new()

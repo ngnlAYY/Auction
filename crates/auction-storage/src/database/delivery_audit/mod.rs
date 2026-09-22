@@ -19,6 +19,7 @@ pub(super) const CREATE: &str = "delivery.create";
 pub(super) const FAIL: &str = "delivery.fail";
 pub(super) const OUTCOME_UNKNOWN: &str = "delivery.outcome_unknown";
 pub(super) const PREPARE: &str = "delivery.prepare";
+pub(super) const QUARANTINE_MAIL_DISPOSITION: &str = "delivery.quarantine_mail_disposition";
 pub(super) const RECONCILE_EXPIRED_SENDING: &str = "delivery.reconcile_expired_sending";
 pub(super) const RELEASE: &str = "delivery.release";
 pub(super) const START_SENDING: &str = "delivery.start_sending";

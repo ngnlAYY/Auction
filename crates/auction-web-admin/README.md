@@ -154,6 +154,8 @@ draft pending lot 还提供起拍价修改与撤回按钮；动作使用确认�
 成功后重新读取权威 lot 页面，并展示软截止信息、设备属性悬浮详情、金额/时间格式化和代理历史关闭/重试入口；
 代理历史表补齐 caption、列标题与百分比列宽与截断提示，
 不在浏览器端复制 lot 状态机。
+lot 页面以拍卖 UUID 绑定组件身份；切换同一路由的拍卖参数时重新建立查询、分页和动作状态，
+响应中的拍卖 UUID 也必须与请求一致，浏览器历史跳转不能继续展示或操作上一场拍卖。
 管理端外壳使用冻结的扁平导航顺序与 `/cookies` 单一凭据入口；窄屏时导航折叠为带明确展开状态的
 顶部菜单，主内容不再被固定宽侧栏挤压；不在导航中显示重复别名和
 `/status` 状态入口；登录页使用无卡片边框的窄表单布局，并移除会与卡片外边距叠加的根节点
@@ -170,11 +172,14 @@ release/retry 使用确认对话框，manual_reconcile 隐藏主动 send 的 suc
 管理员命令。后端拒绝 `payload.operation=send` 加裸 external_reference 的成功写回；Return/Take 仍保留独立
 人工核对路径。操作员取消人工对账即显式放弃本次草稿和命令状态，普通提交失败仍保留输入与稳定
 命令 ID 供重试。命令携带 `command_id`、CSRF 和 fencing version，服务端仍负责最终校验，浏览器不推断外部回执。
+历史资产处置冲突以持久 `reason_code=mail_disposition_conflict` 区分，人工对账仅允许标记失败；
+失败后仍保留隔离原因并禁止重试。对账框提供五语言说明，不开放成功或重新排队动作。
 收件详情新增“关联邮件任务”表，组件位于 `fulfillment/mail/deliveries.rs`，使用 `admin-mail-deliveries` 列宽登记。
 表格按 operation、recipient、id、status、attempt、failure、actions 展示；`Send`/`Return`/`Take` 的按钮文案分别为
 “重新发送”/“重新退回”/“重新领取”。仅 `failed`/`manual_reconcile` 可操作，确认后复用 delivery retry/reconcile
 的 `action=retry`，携带 `command_id`、CSRF 和 `expected_fencing_version`；成功只提示重新排队，结果未知提示先核对 MM。
 数据仅在收件详情中从有界 `metadata.delivery_ids` 批量读取，不把 payload、装备 key 或正文送入页面；历史收件决定不重放。
+关联任务的可选 `reason_code` 保留处置冲突标记，此类任务在详情中不提供重试按钮。
 投递状态筛选使用轻量横向控件，窄屏时切换为全宽纵向控件；列表和外部回执状态展示保持不变。
 `/outbox` 的 Realtime 运维页面已接入最近事件元数据、lag/failure 安全投影、stream/kind/consumer/code/resolved
 筛选、分页和明确空结果状态；概览默认显示事件、消费流与未解决异常总数，consumer lag 不再隐藏在
@@ -250,6 +255,10 @@ command conflict、权限、限流和依赖错误，未知 code 才使用兜底�
 操作；创建用户使用对话框，自动生成和重签的登录 key 使用独立的一次性展示框；论坛账号 ID、key 和黑名单动作使用确认对话框并要求黑名单原因；A30 回滚命令已接入 HTTP/API owner，
 改名历史页面提供 A29 的名称筛选表格和 A30 回滚按钮；名称变化后立即刷新第一页，
 不增加 user ID 查询控件。
+首次回滚复用 A29 的精确 `user_id` 筛选读取当前用户版本，不依赖用户名搜索或目标历史所在页。
+页面按改名事实冻结 `command_id`、目标 ID 和版本 fence；响应丢失后的重试直接发送原请求，
+关闭确认框或切换目标不丢弃未确认命令。成功或明确的版本/不可回滚拒绝才释放该命令；
+后者先刷新权威列表，再由操作者决定是否开启新操作。命令只保留在当前页面，不跨身份持久化。
 页面只持有
 安全用户投影，生成 key 仅在创建/重签成功响应中短暂展示，不保存数据库状态或外部凭据。
 Users 页使用标题与创建入口顶栏，创建按钮不再单独占用一行；窄屏时顶栏改为纵向排列，
@@ -268,7 +277,8 @@ state version 只参与写命令 fence，不扩张已发布的八列表格。
 凭据行按稳定 credential ID 绑定组件身份，当前页排序不会转移对话框、草稿、忙碌状态或反馈；
 启停和改名重试的命令签名同时绑定 credential ID、版本与动作负载。
 Delivery 解码同时接受告警在激活前确定终止的窄失败形状：特定 origin/reason/error code、零
-attempt/fencing、空执行时间和有效完成时间；其余失败投递仍要求完整发送轨迹。
+attempt/fencing、空执行时间和有效完成时间。邮件处置冲突仅接受发送前隔离的 `manual_reconcile` 或
+人工失败形状，要求命名原因、正 fencing、空发送及回执、有效创建/可选领取/完成时间链；其余失败投递仍要求完整发送轨迹。
 管理总览每次只请求一份完整安全 dashboard snapshot，并提供显式刷新动作；页面按冻结顺序展示 health/process、Worker、
 tracing、实时 lag/failure、MoogleMail 轮询、凭据 availability、delivery、fulfillment、recovery
 和 alerting 水位；拍卖、投递列表和邮件入站不再创建额外 Dashboard 请求。页面按完整业务分组紧凑分栏，
@@ -293,6 +303,9 @@ secret、状态动作和 PostgreSQL 完整档边界不变。
 Admin 登录页面已接入已有的 Basic Auth 登录交换、双 Cookie 会话读取、CSRF 注销和会话失效后的
 安全回退；未认证访问深链接时会保存受限的站内 `return` 地址，登录成功后无历史记录返回原页面；
 浏览器还会按服务端 idle expiry 触发会话 touch，失败时按间隔重试；绝对过期仍由服务端决定。
+每次完成会话读取后都会重新安排下一次检查；达到绝对上限、返回相同过期时间时也继续检查。
+业务请求明确返回 `401/unauthenticated` 时触发统一会话重读，只有会话接口确认未认证才返回
+登录流程；网络失败或无法识别的响应保持会话读取错误与重试入口，不推断为已登出。
 浏览器只保存 actor、CSRF token 和过期时间，不保存数据库或外部凭据。
 登录页与已认证外壳还会读取 `/health/ready` 并提供屏幕阅读器可见的 checking/ready/degraded
 状态提示；该提示保持视觉隐藏，也不改变 `/status` 的静态说明职责。

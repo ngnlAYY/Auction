@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 /// auction owner 在生成通用 MoogleMail schema-v1 payload 前校验的 typed intent。
 ///
-/// 字段集合与旧版 `FulfillmentDeliveryIntent` 一致。拍卖、标的、投稿等授权上下文只留在
+/// 保留旧版 `FulfillmentDeliveryIntent` 的 Send 语义。拍卖、标的、投稿等授权上下文只留在
 /// fulfillment claim，不得混入 delivery owner 的稳定载荷或请求摘要。
 #[derive(Debug)]
 pub(super) struct SettlementDeliveryIntent {
@@ -21,14 +21,13 @@ pub(super) struct SettlementDeliveryIntent {
     pub(super) credits: i64,
     pub(super) cod: i64,
     pub(super) equipment_id: Option<Uuid>,
-    pub(super) source_external_mail_id: String,
 }
 
 impl SettlementDeliveryIntent {
-    /// 按义务种类校验完整闭集组合，撤拍返还必须单独发送原装备。
+    /// 按义务种类校验完整闭集组合，流拍与撤拍返还必须单独发送原装备。
     pub(super) fn validate(&self) -> bool {
         if self.obligation_id.is_nil()
-            || !matches!(self.operation, "send" | "return")
+            || self.operation != "send"
             || !matches!(self.world, "main" | "isekai")
             || !trimmed_non_empty(&self.recipient)
             || self.credits < 0
@@ -48,7 +47,6 @@ impl SettlementDeliveryIntent {
                     && self.credits == 0
                     && self.cod > 0
                     && has_equipment
-                    && self.source_external_mail_id.is_empty()
             }
             SettlementObligationKind::WinnerPaymentCarrierCod => {
                 self.operation == "send"
@@ -59,7 +57,6 @@ impl SettlementDeliveryIntent {
                     && self.credits > 0
                     && self.cod > self.credits
                     && self.equipment_id.is_none()
-                    && self.source_external_mail_id.is_empty()
             }
             SettlementObligationKind::WinnerEquipmentHandoff => {
                 self.operation == "send"
@@ -70,7 +67,6 @@ impl SettlementDeliveryIntent {
                     && self.credits == 0
                     && self.cod == 0
                     && has_equipment
-                    && self.source_external_mail_id.is_empty()
             }
             SettlementObligationKind::SellerPayout => {
                 valid_credit_delivery(self, "settlement_seller_payout")
@@ -79,29 +75,12 @@ impl SettlementDeliveryIntent {
                 valid_credit_delivery(self, "settlement_buyer_refund")
             }
             SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
-                match self.operation {
-                    "return" => {
-                        // 撤拍发生在附件领取之后，整封原邮件 Return 不能返还这件库存装备。
-                        self.kind == SettlementObligationKind::UnsoldReturn
-                            && self.template.is_empty()
-                            && self.reference.is_empty()
-                            && self.item_name.is_empty()
-                            && self.credits == 0
-                            && self.cod == 0
-                            && self.equipment_id.is_none()
-                            && trimmed_non_empty(&self.source_external_mail_id)
-                    }
-                    "send" => {
-                        self.template == "settlement_equipment_handoff"
-                            && self.reference == self.obligation_id.to_string()
-                            && trimmed_non_empty(&self.item_name)
-                            && self.credits == 0
-                            && self.cod == 0
-                            && has_equipment
-                            && self.source_external_mail_id.is_empty()
-                    }
-                    _ => false,
-                }
+                self.template == "settlement_equipment_handoff"
+                    && self.reference == self.obligation_id.to_string()
+                    && trimmed_non_empty(&self.item_name)
+                    && self.credits == 0
+                    && self.cod == 0
+                    && has_equipment
             }
         }
     }
@@ -116,7 +95,6 @@ fn valid_credit_delivery(intent: &SettlementDeliveryIntent, template: &str) -> b
         && intent.credits > 0
         && intent.cod == 0
         && intent.equipment_id.is_none()
-        && intent.source_external_mail_id.is_empty()
 }
 
 fn trimmed_non_empty(value: &str) -> bool {

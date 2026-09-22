@@ -125,7 +125,8 @@ Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session
 在同一事务内提交。人工 Final 收紧较晚的 live lot 截止时间但保留竞价和软截止；提前结算受默认关闭的
 runtime capability 保护，只在 PostgreSQL 完整档要求理由并把到期事实交给既有 Worker，HTTP 不直接
 写结算结果。Public `/api/v1/events` 已接入两套数据库的持久化
-Catch-up，`/api/v1/ws` 提供带 Public session 的只读服务端推送；连接尝试与 mutation 独立限流，
+Catch-up，`/api/v1/ws` 通过 HTTP/1.1 GET Upgrade 或 HTTP/2 扩展 CONNECT 提供带 Public session 的只读服务端推送；
+两种握手共用认证和范围门禁，其他方法返回 405；连接尝试与 mutation 独立限流，
 只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。已认证会话的
 发现流由 Public 外壳订阅，拍卖页面订阅对应单拍卖流；`/status` 仅显示静态说明，不建立额外订阅。
 跳号或 `refetch_required` 会触发回放/权威快照恢复，后者保留恢复高水位与现有 socket。Admin 结算报告已接入 PostgreSQL 完整档的一致只读

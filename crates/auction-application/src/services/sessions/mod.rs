@@ -62,6 +62,7 @@ impl PublicSessionPort for PublicSessionService {
                     PublicSessionRecord {
                         token_hash,
                         user_id: login.user_id,
+                        authenticated_user_version: login.user_state_version,
                         created_at: now,
                         expires_at,
                         absolute_expires_at,
@@ -252,6 +253,7 @@ fn is_valid_admin_secret(secret: &[u8]) -> bool {
 
 fn validate_login_identity(identity: &PublicLoginIdentity) -> Result<(), ApplicationError> {
     if identity.user_id.is_nil()
+        || identity.user_state_version <= 0
         || identity.username.is_empty()
         || identity.username.len() > 256
         || identity.username != identity.username.trim()

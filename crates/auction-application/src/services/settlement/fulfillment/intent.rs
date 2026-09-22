@@ -47,16 +47,7 @@ struct SettlementSendPayload<'a> {
     equipment_secret_refs: Vec<EquipmentSecretReference>,
 }
 
-/// 字段声明顺序与旧版 BuildPayload 的匿名 return struct 完全一致。
-#[derive(Serialize)]
-struct SettlementReturnPayload<'a> {
-    schema_version: u8,
-    operation: &'static str,
-    world: &'a str,
-    external_mail_id: &'a str,
-}
-
-/// 根据数据库 claim 生成与旧版相同的无 secret typed intent。
+/// 根据数据库 claim 生成无 secret 的发送 intent，保留既有 Send 的 canonical 字段顺序。
 pub(super) fn build_delivery_intent(
     claim: &SettlementFulfillmentClaim,
 ) -> Result<SettlementDeliveryIntent, ApplicationError> {
@@ -72,7 +63,6 @@ pub(super) fn build_delivery_intent(
         credits: 0,
         cod: 0,
         equipment_id: None,
-        source_external_mail_id: String::new(),
     };
 
     match claim.kind {
@@ -108,39 +98,22 @@ pub(super) fn build_delivery_intent(
             intent.reference = claim.obligation_id.to_string();
             intent.credits = claim.amount;
         }
-        SettlementObligationKind::WithdrawnReturn => {
+        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
             // 返还必须保持原世界与零金额；旧 Return 或损坏派发事实交由现有错误路径隔离，不能重写请求。
             if claim.operation != SettlementFulfillmentOperation::Send
                 || claim.world != claim.equipment_world
                 || claim.amount != 0
                 || claim.carrier_credit != 0
             {
-                return Err(repository_error("撤拍返还派发事实不符合原装备零金额寄回约束"));
+                return Err(repository_error("装备返还派发事实不符合原装备零金额寄回约束"));
             }
             if !matches!(claim.submission_source_kind.as_deref(), Some("mail" | "admin")) {
-                return Err(repository_error("撤拍返还来源缺少可执行身份"));
+                return Err(repository_error("装备返还来源缺少可执行身份"));
             }
             intent.template = "settlement_equipment_handoff";
             intent.reference = claim.obligation_id.to_string();
             intent.item_name = claim.equipment_name.clone();
             intent.equipment_id = Some(claim.equipment_id.as_uuid());
-        }
-        SettlementObligationKind::UnsoldReturn => {
-            match (
-                claim.submission_source_kind.as_deref(),
-                claim.submission_external_mail_id.as_deref(),
-            ) {
-                (Some("mail"), Some(external_mail_id)) => {
-                    intent.source_external_mail_id = external_mail_id.to_owned();
-                }
-                (Some("admin"), None) => {
-                    intent.template = "settlement_equipment_handoff";
-                    intent.reference = claim.obligation_id.to_string();
-                    intent.item_name = claim.equipment_name.clone();
-                    intent.equipment_id = Some(claim.equipment_id.as_uuid());
-                }
-                _ => return Err(repository_error("结算退回来源缺少可执行身份")),
-            }
         }
     }
 
@@ -199,12 +172,6 @@ pub(super) fn build_canonical_delivery(
                 equipment_secret_refs,
             })?
         }
-        "return" => to_go_json_bytes(&SettlementReturnPayload {
-            schema_version: 1,
-            operation: "return",
-            world: intent.world,
-            external_mail_id: &intent.source_external_mail_id,
-        })?,
         _ => return Err(repository_error("结算履约 payload 操作无效")),
     };
     if encoded.len() > MAXIMUM_PAYLOAD_BYTES {

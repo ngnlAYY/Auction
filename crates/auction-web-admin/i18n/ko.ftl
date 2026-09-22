@@ -568,6 +568,7 @@ delivery-reconcile-action-retry = 다시 대기열에 넣기
 delivery-reconcile-action-succeeded = 성공으로 표시
 delivery-reconcile-send-proof-required = 발송은 Sent 검증 후에만 완료할 수 있습니다.
 delivery-reconcile-action-failed = 실패로 표시
+delivery-mail-disposition-conflict = 자산 처분 충돌로 전송 전에 격리되었습니다. 이 작업은 실패로만 표시할 수 있으며 재시도하거나 성공으로 표시할 수 없습니다.
 delivery-external-reference = 외부 참조
 delivery-failure-code = 실패 코드
 

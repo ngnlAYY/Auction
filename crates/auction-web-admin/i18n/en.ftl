@@ -532,6 +532,7 @@ delivery-reconcile-action-retry = Requeue
 delivery-reconcile-action-succeeded = Mark succeeded
 delivery-reconcile-send-proof-required = Sending can be completed only after Sent verification.
 delivery-reconcile-action-failed = Mark failed
+delivery-mail-disposition-conflict = Conflicting asset dispositions were blocked before sending. Only marking this task as failed is allowed; it cannot be retried or marked successful.
 delivery-external-reference = External reference
 delivery-failure-code = Failure code
 

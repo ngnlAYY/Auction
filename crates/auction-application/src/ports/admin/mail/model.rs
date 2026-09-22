@@ -232,6 +232,8 @@ pub struct AdminMailIntakeDelivery {
     pub fencing_version: i64,
     pub attempt_count: u32,
     pub failure_code: Option<String>,
+    /// 保留人工终结后仍有效的隔离原因，避免把失败码修改误认为允许重发。
+    pub reason_code: Option<String>,
     pub external_reference: Option<String>,
 }
 
@@ -253,6 +255,7 @@ impl AdminMailIntakeDelivery {
             )
             && self.fencing_version >= 0
             && self.failure_code.as_deref().is_none_or(|value| valid_text(value, 512))
+            && self.reason_code.as_deref().is_none_or(|value| valid_text(value, 512))
             && self.external_reference.as_deref().is_none_or(|value| valid_text(value, 512))
     }
 }

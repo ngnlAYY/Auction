@@ -7,6 +7,11 @@ use crate::api::Delivery;
 pub(crate) const DELIVERY_STATUS_VALUES: [&str; 7] =
     ["prepared", "pending", "claimed", "sending", "succeeded", "failed", "manual_reconcile"];
 
+/// 历史资产处置冲突即使已人工标为失败也禁止重发。
+pub(super) fn is_mail_disposition_conflict(delivery: &Delivery) -> bool {
+    delivery.reason_code.as_deref() == Some("mail_disposition_conflict")
+}
+
 pub(crate) fn delivery_status_label(status: &str) -> String {
     match status {
         "prepared" => t!("delivery-status-prepared"),

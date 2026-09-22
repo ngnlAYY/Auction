@@ -35,6 +35,15 @@ pub struct DeliveryRecipientExclusion {
     pub recipient: String,
 }
 
+/// 当前领取轮次的暂时排除项；不修改 delivery 权威状态或冻结负载。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeliveryClaimExclusions {
+    /// 当前没有可用传输凭据的世界；下一轮重新检查可用性。
+    pub unavailable_worlds: Vec<String>,
+    /// 本轮已被远端明确报告不存在的收件人。
+    pub recipients: Vec<DeliveryRecipientExclusion>,
+}
+
 /// 外部传输成功后允许写入 delivery 的最小结果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeliverySendResult {
@@ -93,7 +102,7 @@ pub trait DeliveryWorkStore: Send + Sync {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
         sending_grace: std::time::Duration,
-        excluded_recipients: Vec<DeliveryRecipientExclusion>,
+        exclusions: DeliveryClaimExclusions,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<DeliveryWorkClaim>>;
 

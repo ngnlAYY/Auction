@@ -286,6 +286,7 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
     matches!(
         value,
         "invalid_fulfillment_fact"
+            | "legacy_return_requires_review"
             | "recipient_unavailable"
             | "balance_unavailable"
             | "balance_insufficient"

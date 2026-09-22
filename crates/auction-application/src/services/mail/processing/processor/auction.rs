@@ -16,6 +16,30 @@ where
     U: MailUserPort,
     C: Clock,
 {
+    pub(super) async fn resume_accepted_auction(
+        &self,
+        message: &MailMessage,
+    ) -> Result<Option<MailProcessingDecision>, ApplicationError> {
+        let Some(accepted) = self
+            .auctions
+            .find_accepted(MailAuctionIntakeLookup {
+                command_id: stable_command_id(message, AUCTION_OPERATION),
+                world_id: message.world_id.clone(),
+                mailbox_key: message.mailbox_key.clone(),
+                external_mail_id: message.external_mail_id.clone(),
+                seller: message.sender.clone(),
+                received_at: message.received_at,
+            })
+            .await?
+        else {
+            return Ok(None);
+        };
+        accepted.validate()?;
+        self.finish_accepted_auction(message, accepted.result, accepted.attachment_ids)
+            .await
+            .map(Some)
+    }
+
     pub(super) async fn process_auction(
         &self,
         mut message: MailMessage,
@@ -229,8 +253,17 @@ where
                 now,
             })
             .await?;
+        self.finish_accepted_auction(&message, result, attachment_ids).await
+    }
+
+    async fn finish_accepted_auction(
+        &self,
+        message: &MailMessage,
+        result: MailAuctionIntakeResult,
+        attachment_ids: Vec<String>,
+    ) -> Result<MailProcessingDecision, ApplicationError> {
         result.validate()?;
-        let delivery_id = self.enqueue_take(&message, attachment_ids).await?;
+        let delivery_id = self.enqueue_take(message, attachment_ids).await?;
         decision(
             "equipment",
             "accepted",

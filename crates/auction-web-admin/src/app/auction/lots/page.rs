@@ -12,6 +12,12 @@ use super::super::{Route, admin_api_error_message};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
 pub fn page(auction_id: String) -> Element {
+    // Router 会复用相同路由组件；按拍卖身份重挂载资源与交互状态，历史跳转不能沿用旧场次。
+    rsx! { AdminAuctionLotsPage { key: "{auction_id}", auction_id } }
+}
+
+#[component]
+fn AdminAuctionLotsPage(auction_id: String) -> Element {
     // 分页与当前页排序跟地址栏双向同步（?page=&sort=&dir=），刷新与浏览器前进/后退都能恢复。
     let query = use_lots_query_state();
     let query_state = query.state;

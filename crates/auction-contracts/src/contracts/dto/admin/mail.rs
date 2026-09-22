@@ -90,6 +90,9 @@ pub struct AdminMailIntakeDeliveryResponse {
     pub fencing_version: i64,
     pub attempt_count: u32,
     pub failure_code: Option<String>,
+    /// 具名隔离原因独立于人工填写的失败码；旧响应省略时按 None 读取。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
     pub external_reference: Option<String>,
 }
 

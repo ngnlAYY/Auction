@@ -26,10 +26,16 @@ pub(super) async fn run_loop<C>(
     C: Clock + 'static,
 {
     loop {
+        if worker.control.is_draining() {
+            return;
+        }
         let started = std::time::Instant::now();
         let mut result = run_schedule_bootstrap(worker.as_ref()).await;
         let lifecycle_result = run_lifecycle_phase(worker.as_ref()).await;
         merge_worker_result(&mut result, lifecycle_result);
+        if worker.control.is_draining() {
+            return;
+        }
         let schedule_result = run_schedule_bootstrap(worker.as_ref()).await;
         merge_worker_result(&mut result, schedule_result);
         let slow_proxy_result = slow_proxy::run_phase(worker.as_ref()).await;
@@ -66,7 +72,7 @@ where
     let capacity = usize::from(worker.auction.batch_limit);
     let mut processed = 0_usize;
     let mut phase_result = WorkerResult::Success;
-    while processed < capacity {
+    while processed < capacity && !worker.control.is_draining() {
         let wave_limit = usize::from(worker.auction.concurrency).min(capacity - processed);
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.auction.concurrency);
         let now = match worker.schedule.database_now().await {
@@ -82,6 +88,9 @@ where
             phase_result = WorkerResult::Error;
             break;
         };
+        if worker.control.is_draining() {
+            break;
+        }
         let item_started = std::time::Instant::now();
         let claims = match tokio::time::timeout(
             worker.auction.item_timeout,
@@ -155,7 +164,7 @@ where
     let capacity = usize::from(worker.auction.batch_limit);
     let mut processed = 0_usize;
     let mut phase_result = WorkerResult::Success;
-    while processed < capacity {
+    while processed < capacity && !worker.control.is_draining() {
         let wave_limit = usize::from(worker.auction.concurrency).min(capacity - processed);
         let wave_limit = u16::try_from(wave_limit).unwrap_or(worker.auction.concurrency);
         let now = worker.clock.now();

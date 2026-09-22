@@ -208,5 +208,21 @@ async fn apply_mutation_sqlite(
             .map_err(map_sqlite_error)?;
         }
     }
+    if matches!(
+        write.action,
+        AdminUserMutationAction::RevokeKey | AdminUserMutationAction::ReissueKey
+    ) {
+        // 与凭据变更处于同一串行写事务；重签后仍保留旧 token 的永久撤销事实。
+        sqlx::query(
+            "UPDATE public_sessions
+             SET revoked_at = MAX(created_at, ?)
+             WHERE user_id = ? AND revoked_at IS NULL",
+        )
+        .bind(&now)
+        .bind(&id)
+        .execute(&mut *connection)
+        .await
+        .map_err(map_sqlite_error)?;
+    }
     Ok(())
 }

@@ -72,6 +72,11 @@ Public relay 的 `database/realtime_consumer/owned.rs` 将 stream 读取、游�
 
 ## 竞价事务和后端入口
 
+SQLite 的竞价、身份、调度及实时写事务均由 SQLx 守卫跟踪 `BEGIN IMMEDIATE`，异常或取消后回滚再归池。
+Final 截止比较和公开最大截止投影按实际时刻计算，兼容存量 RFC3339 与空格格式；新写入统一 UTC 表示。
+普通竞价和生命周期在取得锁后读取数据库时间，同一计划的领先时间、截止、审计及接受事实使用同一时刻。
+Final 状态与轮次完成 fence 同事务写入，后续完成确认只重放对应命令。
+
 源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
 [src/database/mod.rs](src/database/mod.rs)，SQLx 连接池 acquisition 追踪位于独立的
 `src/database/pool/{mod,metrics}.rs`；PostgreSQL 竞价事务按职责放在
@@ -207,6 +212,8 @@ keyset 查询，不执行全量统计或物化筛选集。
 会话持久化由 [src/database/sessions/](src/database/sessions/) 持有：`mod.rs` 只做 Admin/Public 端口装配，
 `admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`common.rs` 负责
 共享错误和 Lite 时间/UUID 映射；会话真值不进入 Redis。
+Public Key 撤销或重签与旧会话永久撤销同事务提交，覆盖 Admin 和邮件重签；会话创建在用户锁内
+复核认证版本。原命令重放不再次撤销后来建立的会话，Key 恢复不复活旧 token。
 SQLite 会话创建和刷新使用 SQLx 跟踪的 `BEGIN IMMEDIATE` 事务，错误返回及 future 取消由事务
 析构回滚；成功刷新按 `MIN(absolute_expires_at, MAX(expires_at, now + idle_ttl))` 延长有效期，
 与 PostgreSQL 保持同一滑动过期语义，绝不复活已过期或已撤销会话。
@@ -379,6 +386,8 @@ MoogleMail 拍卖入站事务由 [src/database/mail_intake/mod.rs](src/database/
 端口适配；同批不同分类使用独立分类计数器，撤回条目也保留已占用编号。所有写入仍在同一个
 PostgreSQL 竞价事务中完成；原始正文和装备 key 不进入业务事实，完整 `MailMessage` 生成的 sender/subject
 与脱敏 `message_display` 仅作为 Admin 审查投影进入 `inbound_mail`，不参与幂等或 cursor。
+`mail_intake/acceptance.rs` 从原投稿、账本与完整 lot/equipment 集合恢复接受决定，补 Take 时不重新按远端资产判退。
+`mail_delivery/disposition.rs` 在 Serializable 事务与 world 锁内保护接受、Take、Return 的互斥。
 服务心跳由 [src/database/health/](src/database/health/) 持有：`mod.rs` 只负责 `HeartbeatStore` 端口分派，
 `postgres.rs` 与 `sqlite.rs` 分别负责两个后端的条件 upsert/读取，`mapping.rs` 负责闭集
 身份、状态和安全错误映射。PostgreSQL 使用数据库时钟和 observation sequence 条件 upsert，
@@ -491,7 +500,7 @@ PostgreSQL `000005`/`000015` 的历史字节保持不变；当前 PostgreSQL 解
 
 新增持久化能力前必须在 `docs/architecture.md` 标明它属于「完整档」「Lite 档」还是「两者」。
 
-当前 PostgreSQL `000001` 至 `000037` 已提交核心竞价、结算/履约、生命周期、身份/
+当前 PostgreSQL `000001` 至 `000039` 已提交核心竞价、结算/履约、生命周期、身份/
 外部命令、凭据兼容修正、恢复/可观测性、论坛同步及 `forum_sync_admin_commands` 人工授权账本；
 `PostgresCompetitionTransaction` 已接入竞价、
 生命周期审计/realtime 事务，结算事务也已接入首片；`000018` 恢复 live/sold lot 的有效结束
@@ -511,7 +520,7 @@ realtime 事件倒序列表补齐时间与事件 ID 复合索引；`000034` 修�
 为 MoogleMail `inbound_mail` 增加 nullable sender/subject 和脱敏 message_display，供
 `src/database/admin_mail/{reads,mapping}.rs` 提供列表 scalar/has 与详情 snapshot，历史回填 owner 由
 `admin_mail` 事务/审计边界负责，普通 replay 不补历史 NULL。SQLite
-`000001_lite_core.up.sql`、`000002` 至 `000012` 的调度、用户管理、取消/
+`000001_lite_core.up.sql`、`000002` 至 `000013` 的调度、用户管理、取消/
 生命周期、Final phase、领先时间与同义 lot 结束时间防线，以及
 `BEGIN IMMEDIATE` 竞价和生命周期写适配器及同义 realtime 读取索引均已接入；结算报告属于 PostgreSQL 完整档，SQLite
 不提供结算表；PostgreSQL 完整档的 Worker 结算 workflow 由
@@ -530,6 +539,8 @@ Sent baseline、post-Sent scan、唯一 exact payload proof 和 defense gate 由
 它是非权威 projection，不参与 decision metadata、command digest、completion proof 或 cursor，SQLite 不新增列。
 [src/database/fulfillment_scheduler/mod.rs](src/database/fulfillment_scheduler/mod.rs) 装配结算履约 owner；`claims.rs`、`delivery.rs`、
 `reconcile.rs` 和 `mapping.rs` 分别持有 claim、prepared/activation、证据收口和共享映射；
+流拍和撤拍均以原世界、原卖家、原装备的单件零 Credits/COD Send 返还，并要求 Sent 领取证明。
+`000038` 仅转换从未领取、冻结或关联 delivery 的初始 pending 流拍记录；其他历史 Return 保留身份并转人工核对。
 claim 以 obligation owner 顺序锁定并支持历史数据缺失 execution 行的惰性补齐；claim 同时保留装备来源
 世界和外部派发世界，custody 按前者核对、余额与发送按后者核对。坏的可选上下文
 只隔离当前 claim 为 `manual_reconcile`，不阻断同批其他任务，execution/delivery 事实损坏则失败关闭。
@@ -551,6 +562,9 @@ outbox 入队、recovery 两阶段激活和 PostgreSQL 错误/载荷辅助分别
 `mail_delivery/{validation,outbox,activation,common}.rs`，保留命令摘要幂等、`prepared → pending`
 激活和外部结果后置边界。`mail_intake` 新记录使用 operation 后缀的规范 `origin_id`；幂等复读
 只在请求摘要、收件人和完整 payload 仍相同时兼容既有 `delivery-*` 后缀，不接受通用 origin 改写。
+`delivery_scheduler/quarantine.rs` 每轮最多隔离 100 条历史 pending/claimed 资产处置冲突，原负载和命令不变，
+写入 `mail_disposition_conflict`、清租约并追加审计；领取与开始发送继续检查同一门禁。
+这类发送前隔离允许没有 `sending_at`，Admin 只能核对后标失败，禁止成功确认和重试；失败后仍保留原因与资产互斥。
 目标 world 暂无凭据时只能从 `claimed` 以完整 lease/fencing
 释放回 `pending`。过期 `claimed` 可以安全重领；过期 `sending` 只有在额外 sending grace 到期后
 才批量隔离为 `manual_reconcile`，不能作为 pending 重发。失败写回会保留 transport 已校验的可选外部引用和有界安全
@@ -564,6 +578,7 @@ Admin 交付命令由 [src/database/delivery_admin/](src/database/delivery_admin
 收件详情关联 delivery 只由 `metadata.delivery_ids` 触发有界批量读取，并同时匹配 mail_intake 来源、world、
 external MID、operation、origin_id；历史收件业务决定不重放，页面不暴露 payload、装备 key 或正文。手动重发沿用
 既有 delivery retry/reconcile 命令、fencing 和审计，不新增表或迁移。
+关联投影可省略的 `reason_code` 与 delivery 列表来自同一持久化结果元数据，用于保留上述隔离限制。
 SQLite Lite 对这些完整档能力明确返回不支持。realtime Admin 由
 [src/database/realtime_admin/](src/database/realtime_admin/) 分层持有：`mod.rs` 负责端口分派，`events.rs`、`snapshot.rs`、
 `lag.rs`、`failures.rs` 与 `replay/` 分别负责不含 payload 的事件元数据、安全快照、lag、failure

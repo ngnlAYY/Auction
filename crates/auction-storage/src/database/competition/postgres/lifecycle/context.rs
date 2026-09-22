@@ -21,7 +21,7 @@ pub(super) async fn load_lifecycle_context_postgres(
                    FOR UPDATE OF world
                ),
                locked_round AS MATERIALIZED (
-                   SELECT round.local_week
+                   SELECT round.local_week, round.schedule_snapshot
                    FROM public.scheduled_rounds AS round
                    INNER JOIN target_auction ON target_auction.id = round.auction_id
                    INNER JOIN locked_world ON locked_world.id = target_auction.world_id
@@ -40,7 +40,8 @@ pub(super) async fn load_lifecycle_context_postgres(
                     AS policy_scheduled_end_at,
                 (a.policy_snapshot ->> 'final_phase_lead_seconds')::bigint
                     AS policy_final_phase_lead_seconds,
-                locked_round.local_week AS scheduled_round_local_week
+                locked_round.local_week AS scheduled_round_local_week,
+                locked_round.schedule_snapshot
              FROM public.auctions AS a
              INNER JOIN target_auction ON target_auction.id = a.id
              INNER JOIN locked_world ON locked_world.id = a.world_id
@@ -75,7 +76,17 @@ pub(super) async fn load_lifecycle_context_postgres(
     if final_phase_lead_seconds <= 0 {
         return Err(invalid_state("最终阶段领先时间无效"));
     }
+    let schedule_source = row
+        .try_get::<Option<Value>, _>("schedule_snapshot")
+        .map_err(map_sql_error)?
+        .map(serde_json::from_value::<auction_application::AuctionScheduleSource>)
+        .transpose()
+        .map_err(|_| invalid_state("周排期来源快照无效"))?;
+    if let Some(source) = &schedule_source {
+        source.resolve().map_err(|_| invalid_state("周排期来源无法解析"))?;
+    }
     Ok(Some(AuctionLifecycleContext {
+        schedule_source,
         auction,
         world_id: row.try_get("world_id").map_err(map_sql_error)?,
         world_enabled: row.try_get("world_enabled").map_err(map_sql_error)?,

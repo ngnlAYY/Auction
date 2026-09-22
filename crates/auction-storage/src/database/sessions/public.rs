@@ -30,7 +30,7 @@ pub(super) async fn create_postgres(
         .map_err(|_| storage_error("设置 Public 会话事务隔离级别失败"))?;
 
     let user = sqlx::query(
-        "SELECT id, username
+        "SELECT id, username, state_version
          FROM public.users
          WHERE id = $1 AND status = 'active' AND key_status = 'active'
          FOR UPDATE",
@@ -42,6 +42,15 @@ pub(super) async fn create_postgres(
     let Some(user) = user else {
         return Err(SessionError::AccountInactive { public_reason: None }.into());
     };
+    // 用户行锁一直持有到会话提交；凭据撤销/重签也锁定同一行并永久撤销旧会话。
+    // 因此轮换先提交时旧认证不能创建新会话，登录先提交时新会话会被轮换事务撤销。
+    let current_user_version: i64 =
+        user.try_get("state_version").map_err(|_| storage_error("读取 Public 会话认证版本失败"))?;
+    if record.authenticated_user_version <= 0
+        || record.authenticated_user_version != current_user_version
+    {
+        return Err(SessionError::InvalidCredentials.into());
+    }
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public.public_sessions
@@ -159,7 +168,7 @@ pub(super) async fn create_sqlite(
         .map_err(|_| storage_error("开始 Lite Public 会话事务失败"))?;
 
     let user = sqlx::query(
-        "SELECT id, username
+        "SELECT id, username, state_version
          FROM users
          WHERE id = ? AND status = 'active' AND key_status = 'active'",
     )
@@ -170,6 +179,15 @@ pub(super) async fn create_sqlite(
     let Some(user) = user else {
         return Err(SessionError::AccountInactive { public_reason: None }.into());
     };
+    // BEGIN IMMEDIATE 与 Users 的串行写入共用同一排他边界，版本比较覆盖认证后的轮换。
+    let current_user_version: i64 = user
+        .try_get("state_version")
+        .map_err(|_| storage_error("读取 Lite Public 会话认证版本失败"))?;
+    if record.authenticated_user_version <= 0
+        || record.authenticated_user_version != current_user_version
+    {
+        return Err(SessionError::InvalidCredentials.into());
+    }
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*)
          FROM public_sessions

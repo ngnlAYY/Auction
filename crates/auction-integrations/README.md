@@ -69,7 +69,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
   fence 和动作后结构化证明；解析结果不携带原始 HTML，token 只在短生命周期状态对象中
   受控引用，Cookie 不进入返回值。`auction-application`
   已定义窄的 `DeliveryTransport` 端口；Worker 现已装配 MoogleMail delivery transport，严格解码
-  旧版 schema v1 payload 后执行静态通知、结算 send/return、return 和 take；装备 key 只在实际发送前
+  旧版 schema v1 payload 后执行静态通知、结算 send、入站 return 和 take；装备 key 只在实际发送前
   按装备 ID 从密文 owner 读取并解密，不进入 intent、payload、日志或回执。return 必须在写入前核对
   sender，写入后证明收件箱中精确 `mid` 消失；take 还必须精确核对装备 ID、Credits、COD 和
   附件计数，并以资产归零、邮件身份不变与唯一回执证明收口。无脚本 Take 终态页只从脚本和
@@ -79,6 +79,12 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
   直接满足履约，还需要 Sent 明细与余额证据；POST 后
   无法证明的结果进入 `manual_reconcile`，不会自动重发。`WinnerPaymentCarrierCod` 的结算
   payload 按旧版契约固定使用 `main` world。
+  流拍 `UnsoldReturn` 与撤拍 `WithdrawnReturn` 均使用 `settlement_equipment_handoff`，按原世界
+  向原卖家逐件 Send 原装备，Credits/COD 均为零；邮件和 Admin 投稿来源共用
+  `Auction equipment delivery [obligation_id]` canonical 主题与 Sent 领取证明。
+  历史结算 Return payload 仅用于识别，在任何远端写入前以 `legacy_return_requires_review`
+  隔离到 `manual_reconcile`；即使当前无可用凭据也执行本地隔离。原邮件 Return 成功不能作为装备
+  返还证明，已冻结请求不得自动改写或重发，须核对原世界库存、既有 delivery 和 Sent 记录。
   send 前置要求 compose 页能够证明为无收件人/正文/附件/COD 的干净状态，否则以
   `preflight_unproven` 进入人工对账，不会覆盖可能属于上一次未知写入的资产。最终 send 响应只从
   排除 script/style/noscript/textarea 后的可见文字识别旧版闭集失败：
@@ -138,7 +144,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
 当前首条业务链已完成拍卖邮件的
  Credits/COD 拒绝、无附件通知、装备来源读取、起拍价指令解析、拍卖入站、用户注册/重绑和
  take/return 编排；用户登录 key 通过独立数据密钥生成密文信封，只有 DeliveryTransport 发送前
- 短暂解密。结算邮件来源退信和后台来源装备交接通知已接入；Sent/Balance 回执严格解析、exact
+ 短暂解密。邮件及后台来源的流拍装备逐件寄回已接入；Sent/Balance 回执严格解析、exact
 remote ID 查找、proof 持久化和人工复核边界也已由 PostgreSQL Worker 接入。E-Hentai 论坛网关已
 实现固定 origin、受限响应读取、单 Cookie 失效收口、精确标题查找/主题创建、固定 #2 回复、固定 post 编辑和主题读取；
 主题读取按真实 `postcolor`、`post-{id}`、`showuser={id}` 和结构化 `.edit` 锚点把每页 HTML

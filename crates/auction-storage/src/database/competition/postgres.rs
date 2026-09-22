@@ -160,9 +160,8 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
     fn load_for_update(
         &mut self,
         lot_id: LotId,
-        now: DateTime<Utc>,
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send {
-        async move { self.load_for_update_inner(lot_id, now).await }
+        async move { self.load_for_update_inner(lot_id).await }
     }
 
     fn participant_is_eligible_for_update(
@@ -200,8 +199,9 @@ impl CompetitionTransaction for PostgresCompetitionTransaction {
         &mut self,
         plan: CompetitionPlan,
         audit: Option<CompetitionCommandAuditContext>,
+        occurred_at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send {
-        async move { self.apply_public_command_plan_inner(plan, audit).await }
+        async move { self.apply_public_command_plan_inner(plan, audit, occurred_at).await }
     }
 
     fn apply_slow_proxy_plan(

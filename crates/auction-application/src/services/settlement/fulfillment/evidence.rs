@@ -15,13 +15,9 @@ pub(super) fn validate_sent_evidence(
     external_mail_id: &str,
     evidence: &SettlementFulfillmentSentEvidence,
 ) -> Result<(), ApplicationError> {
-    let expected_subject = match claim.kind {
-        SettlementObligationKind::UnsoldReturn => {
-            return Err(repository_error("退回义务不应进入发送回执对账"));
-        }
-        _ => canonical_settlement_fulfillment_subject(claim.kind, claim.obligation_id)
-            .ok_or_else(|| repository_error("结算履约主题闭集无效"))?,
-    };
+    let expected_subject =
+        canonical_settlement_fulfillment_subject(claim.kind, claim.obligation_id)
+            .ok_or_else(|| repository_error("结算履约主题闭集无效"))?;
     let (remaining_credits, remaining_cod, remaining_equipment) =
         if evidence.collected { (0, 0, Vec::new()) } else { expected_remaining(claim)? };
     if evidence.external_mail_id != external_mail_id
@@ -56,8 +52,7 @@ pub(super) fn expected_remaining(
         SettlementObligationKind::SellerPayout | SettlementObligationKind::BuyerRefund => {
             Ok((claim.amount, 0, Vec::new()))
         }
-        SettlementObligationKind::UnsoldReturn => Ok((0, 0, Vec::new())),
-        SettlementObligationKind::WithdrawnReturn => {
+        SettlementObligationKind::UnsoldReturn | SettlementObligationKind::WithdrawnReturn => {
             Ok((0, 0, vec![claim.external_equipment_id.clone()]))
         }
     }

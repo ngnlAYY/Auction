@@ -139,7 +139,7 @@ Public forum/sync-status、events/session/lot 列表与详情/账户/竞价/代�
 | P01 | GET | /api/v1/worlds | 公开 | 200 | 400, 503/504 |
 | P02 | GET | /api/v1/rules | 公开；`lang` 可选 | 200 | 400, 503 |
 | P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；PostgreSQL/SQLite 从持久化事件表回放 | 200 | 400, 404, 503/504 |
-| P04 | GET | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | 101 | 400, 403, 404, 429, 503/504 |
+| P04 | GET/CONNECT | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | HTTP/1.1 101；HTTP/2 200 | 400, 403, 404, 429, 503/504 |
 | P05 | GET | /api/v1/blacklist | 公开；页码分页 | 200 | 400, 503/504 |
 | P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 |
 | P07 | GET | /api/v1/auctions | 公开 | 200 | 400, 503/504 |
@@ -378,13 +378,16 @@ SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁
 `page`/`page_size`/`total` 分页和 `cursor`/`next_cursor`/`has_more` keyset 分页，P09
 保留 v1 preview/live 互斥 lot 数组、分类统计和页码字段，P11 保留当前公开 projection
 下的 lot 详情边界，P10 保留 world/lot 筛选、编号页与 keyset cursor 两种分页形状以及
-公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面在 P21 明确启用后消费 P15：发布成功后只显示“当前同步到 #xx”，`pending`/`publishing` 每 2 秒刷新，`published` 每 30 秒刷新，`failed` 或请求错误后暂停帖子轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
+公开 bid fact 字段，P12 保留成交条目、筛选条件和编号页统计；P13/P14 保留补偿池批次、余额守恒摘要、opaque keyset cursor 和单场账本分页，PostgreSQL 完整档从同一 Serializable 快照读取，SQLite Lite 明确返回 `501 feature_not_supported`；P15 读取本地论坛同步镜像，返回源版本、内容版本、由完整主题扫描证明的真实连续处理楼层、同步时间、最近成功时间及有界安全的最近错误，未把远程网关状态伪造成成功，SQLite Lite 同样明确返回 `501 feature_not_supported`。Public `/forum` 页面在 P21 明确启用后消费 P15：发布成功后只显示“当前同步到 #xx”，`pending`/`publishing` 在请求完成后等待 2 秒刷新，`published` 等待 30 秒刷新，`failed` 或请求错误后暂停帖子轮询并提供人工重试；首页不再读取或轮询该投影。P09/P11 在 PostgreSQL 完整档按已校验的 lot/equipment/world 批量读取密文信封并短暂解密，把完整 HentaVerse URL 直接写入既有 `game_equipment_url` 字段；10 位 key 因用户主动导航需求允许出现在这两条 JSON 中，但不得进入日志、审计、事件或持久化缓存，响应固定 `no-store`。SQLite Lite 保留 P09/P11 的 200 lot 投影并把该字段留空。P06 的 Public session 已接入
 配置、应用端口和 PostgreSQL/SQLite 存储；P16/P17 已接入 Public session、账户读取端口以及
 PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy bid 和 owner capability 投影；P20 的普通竞价已接入 Public session、稳定
 `command_id`/`request_hash`、应用竞价事务和 v1 竞价结果投影。
 ### 管理拍卖与报表
 
-Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话端口。A03 GET
+Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话端口。
+会话每次确认成功后重新安排下一次检查，即使绝对到期上限使 `expires_at` 不再变化也保持检查；
+业务接口明确返回 `401/unauthenticated` 时触发会话确认，网络错误不解释为退出登录。
+以下管理读取均使用相同会话边界。A03 GET
 `/api/v1/admin/auctions` 已接入 Admin 会话保护、`world_id`/`status` 筛选、有限页码和
 PostgreSQL Serializable 生命周期/lot 数量安全投影；创建拍卖 POST 已接入零版本 fence、命令账本、world/intake target 锁、策略快照、审计和 `auction.created` 事件；SQLite Lite 的创建与列表 GET 均明确返回 `501 feature_not_supported`。A06
 `/api/v1/admin/auctions/{auction_id}/lots` 已接入 Admin 会话保护、有限页码、PostgreSQL
@@ -439,7 +442,7 @@ reconcile 已接入 PostgreSQL 的安全投影、fencing version 和独立命令
 但不返回 payload 或 metadata 原文。`take_required=false` 在响应中省略，客户端缺失时按 `false`
 解码，显式 `null` 或非布尔类型仍视为无效响应；SQLite 明确返回
 `501 feature_not_supported`。这些动作只推进本地 outbox/履约状态，不会伪造外部 MoogleMail
-回执；Worker 已接入基础通知、结算 send/return transport 以及 Sent/Balance 回执对账，满足
+回执；Worker 已接入基础通知、结算 Send 及入站 Return/Take transport，以及 Sent/Balance 回执对账，满足
 证明会写入履约 proof，无法取得 exact remote ID 则进入人工复核；其余未登记的 Admin 查询/命令
 仍返回明确的能力缺失，不会被空结果伪装成已接入。
 ### 投递对账与远端证明
@@ -448,10 +451,14 @@ Admin `reconcile` 的 `succeeded` 分支不能用 `payload.operation=send` 加�
 完成状态；缺少 Sent exact payload proof 的请求由后端按既有 invalid 条件拒绝。Admin Web 隐藏该成功选项，
 `retry`/`failed` 仍须由管理员提交显式命令并审计；Return/Take 继续保留独立人工核对路径。该防御不新增
 HTTP 字段或错误类别。
-Delivery 列表允许一种确定未发送的失败形状：仅 `operations_alert`、
+Delivery 列表允许告警确定未发送的失败形状：仅 `operations_alert`、
 `reason_code=operations_alert_batch_terminal`、错误码 `dependency_mismatch|retry_exhausted`，
 attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间有效。Storage 与 Admin Web
 按同一闭集接受该形状，其他投递终态仍必须提供完整执行轨迹；HTTP 不新增 metadata 原文字段。
+另一个具名例外是 `mail_intake` 的 `reason_code=mail_disposition_conflict`：历史待发送资产冲突可在没有
+`sending_at` 的情况下进入 `manual_reconcile`，保留原 payload/命令和隔离原因。只允许人工确认 `failed`，
+禁止确认成功、重试和失败后重新激活。收件详情的关联 delivery 同步返回可省略的 `reason_code`，
+浏览器据此保留同一门禁；不暴露原始 metadata。
 主动 MoogleMail ComposeSend 的 Sent baseline、POST 后独立 Sent scan 和 exact payload proof 属于 Worker
 delivery 内部契约，不新增 HTTP 路由。所有通知、注册/重绑 key、告警及结算/返还金钱/装备的成功都必须写入
 `sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1` 和真实
@@ -608,6 +615,9 @@ state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PU
 `GET /api/v1/admin/renames` 继续提供 PostgreSQL/SQLite 的改名历史安全投影，并额外返回当前
 用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、论坛账号 ID 修改、key
 撤销/重签、黑名单和改名回滚操作。
+回滚首次按精确 `user_id` 读取版本并冻结包含理由、版本与 `command_id` 的完整请求；
+结果未知时继续重放同一请求，不按用户名子串或新读取版本重新拼装。成功或明确拒绝后才释放该请求。
+撤销或重签 Key 同事务永久撤销旧 Public 会话，邮件重签遵守相同语义。
 
 
 ### 外部凭据

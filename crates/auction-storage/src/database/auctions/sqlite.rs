@@ -1,4 +1,7 @@
 //! SQLite Lite 档的公开拍卖查询。
+//!
+//! 历史截止时间混用 UTC RFC3339 与空格格式；先按时刻排序，毫秒并列时仅对已知 UTC
+//! 写入格式规范化并补齐小数精度，再返回原文。未知偏移量不进入 UTC 字符串次序。
 
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest,
@@ -37,7 +40,20 @@ pub(super) async fn list(
             a.scheduled_open_at,
             NULL AS opened_at,
             NULL AS final_phase_at,
-            MAX(CASE WHEN l.status IN ('live', 'sold', 'unsold') THEN l.effective_end_at END)
+            (SELECT deadline.effective_end_at FROM lots AS deadline
+             WHERE deadline.auction_id = a.id AND deadline.status IN ('live', 'sold', 'unsold')
+               AND deadline.effective_end_at IS NOT NULL
+             ORDER BY julianday(deadline.effective_end_at) DESC,
+                 CASE WHEN substr(deadline.effective_end_at, -6) = '+00:00'
+                           OR substr(deadline.effective_end_at, -1) = 'Z'
+                           OR (substr(deadline.effective_end_at, 11, 1) = ' '
+                               AND substr(deadline.effective_end_at, 20) NOT GLOB '*[+-]*')
+                     THEN substr(replace(replace(replace(deadline.effective_end_at,
+                         'T', ' '), '+00:00', ''), 'Z', '')
+                         || CASE WHEN substr(deadline.effective_end_at, 20, 1) = '.'
+                             THEN '000000000' ELSE '.000000000' END, 1, 29)
+                 END DESC,
+                 deadline.id DESC LIMIT 1)
                 AS effective_end_at,
             a.settled_at,
             COUNT(CASE WHEN l.status IN ('live', 'sold', 'unsold') THEN l.id END) AS lot_count,
@@ -118,7 +134,20 @@ pub(super) async fn current(
             a.sequence,
             a.status,
             a.scheduled_open_at,
-            MAX(CASE WHEN l.status IN ('live', 'sold', 'unsold') THEN l.effective_end_at END)
+            (SELECT deadline.effective_end_at FROM lots AS deadline
+             WHERE deadline.auction_id = a.id AND deadline.status IN ('live', 'sold', 'unsold')
+               AND deadline.effective_end_at IS NOT NULL
+             ORDER BY julianday(deadline.effective_end_at) DESC,
+                 CASE WHEN substr(deadline.effective_end_at, -6) = '+00:00'
+                           OR substr(deadline.effective_end_at, -1) = 'Z'
+                           OR (substr(deadline.effective_end_at, 11, 1) = ' '
+                               AND substr(deadline.effective_end_at, 20) NOT GLOB '*[+-]*')
+                     THEN substr(replace(replace(replace(deadline.effective_end_at,
+                         'T', ' '), '+00:00', ''), 'Z', '')
+                         || CASE WHEN substr(deadline.effective_end_at, 20, 1) = '.'
+                             THEN '000000000' ELSE '.000000000' END, 1, 29)
+                 END DESC,
+                 deadline.id DESC LIMIT 1)
                 AS scheduled_ends_at,
             a.preview_revision,
             CASE
@@ -129,10 +158,8 @@ pub(super) async fn current(
             CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM auctions AS a
          INNER JOIN worlds AS w ON w.id = a.world_id AND w.enabled = 1
-         LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.world_id = ?
            AND a.status IN ('preview', 'live', 'final', 'settling')
-         GROUP BY a.id
          ORDER BY
             CASE WHEN a.status IN ('live', 'final', 'settling') THEN 0 ELSE 1 END,
             a.sequence DESC,
@@ -158,7 +185,20 @@ pub(super) async fn realtime_status(
              a.sequence,
              a.status,
              a.scheduled_open_at,
-             MAX(CASE WHEN l.status IN ('live', 'sold', 'unsold') THEN l.effective_end_at END)
+             (SELECT deadline.effective_end_at FROM lots AS deadline
+              WHERE deadline.auction_id = a.id AND deadline.status IN ('live', 'sold', 'unsold')
+                AND deadline.effective_end_at IS NOT NULL
+              ORDER BY julianday(deadline.effective_end_at) DESC,
+                 CASE WHEN substr(deadline.effective_end_at, -6) = '+00:00'
+                           OR substr(deadline.effective_end_at, -1) = 'Z'
+                           OR (substr(deadline.effective_end_at, 11, 1) = ' '
+                               AND substr(deadline.effective_end_at, 20) NOT GLOB '*[+-]*')
+                     THEN substr(replace(replace(replace(deadline.effective_end_at,
+                         'T', ' '), '+00:00', ''), 'Z', '')
+                         || CASE WHEN substr(deadline.effective_end_at, 20, 1) = '.'
+                             THEN '000000000' ELSE '.000000000' END, 1, 29)
+                 END DESC,
+                 deadline.id DESC LIMIT 1)
                  AS scheduled_ends_at,
              a.preview_revision,
              CASE
@@ -169,7 +209,6 @@ pub(super) async fn realtime_status(
              CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM auctions AS a
          INNER JOIN worlds AS w ON w.id = a.world_id
-         LEFT JOIN lots AS l ON l.auction_id = a.id
          WHERE a.id = ?
            AND (w.enabled = 1 OR a.status = 'settled')
            AND a.status IN ('preview', 'live', 'final', 'settling', 'settled')
@@ -181,8 +220,7 @@ pub(super) async fn realtime_status(
                    WHERE active.world_id = a.world_id
                      AND active.status IN ('live', 'final', 'settling')
                )
-           )
-         GROUP BY a.id",
+           )",
     )
     .bind(auction_id.as_bytes().to_vec())
     .fetch_optional(store.pool())

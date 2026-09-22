@@ -65,9 +65,13 @@ fn validate_runtime_world(
 fn validate_runtime_equipment_filter(
     config: &AdminRuntimeEquipmentFilterConfig,
 ) -> Result<(), AdminRuntimeConfigError> {
-    if config.level.min < 0 || config.level.max < config.level.min || config.level.max > 1000 {
+    if !(0..=1000).contains(&config.level.min)
+        || !(0..=1000).contains(&config.level.max)
+        || config.level.max != 0 && config.level.max < config.level.min
+    {
         return Err(AdminRuntimeConfigError::InvalidDocument(
-            "equipment_filter.level 必须位于 0 至 1000 且 max 不小于 min".to_owned(),
+            "equipment_filter.level 必须位于 0 至 1000；0 表示不限制，非零 max 不能小于 min"
+                .to_owned(),
         ));
     }
     let lists = [
