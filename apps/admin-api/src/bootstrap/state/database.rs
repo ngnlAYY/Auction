@@ -333,12 +333,17 @@ pub(super) async fn configure_state(
         idle_ttl: ChronoDuration::seconds(config.session.idle_ttl_seconds as i64),
         absolute_ttl: ChronoDuration::seconds(config.session.absolute_ttl_seconds as i64),
     };
-    let session: Arc<dyn AdminSessionPort> = Arc::new(AdminSessionService::new(
-        session_store,
-        actor.to_owned(),
-        secret.as_bytes().to_vec(),
-        session_config,
-    )?);
+    let session: Arc<dyn AdminSessionPort> = Arc::new(
+        AdminSessionService::new(
+            session_store,
+            actor.to_owned(),
+            secret.as_bytes().to_vec(),
+            session_config,
+            Utc::now(),
+        )
+        .await
+        .context("initialize Admin session authority")?,
+    );
     let lifecycle_policy = AuctionLifecyclePolicy::new(
         config.admin_runtime.as_ref().is_some_and(|runtime| runtime.allow_manual_early_open),
         store.backend() == DatabaseBackend::Postgres

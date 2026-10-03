@@ -5,8 +5,8 @@
 PostgreSQL 完整档和 SQLite Lite 的 SQL、事务、查询、迁移及锁 owner。
 `src/database/initialization` 仅拥有合并入口首次空 PostgreSQL 库初始化：在 SQLx 迁移锁下拒绝
 已有用户对象与其他客户端，再应用追加迁移；不建库、不删对象、不升级已有库。普通启动不调用它。
-当前该入口直接运行原始内嵌迁移，未复用 `database/migrations/` 的历史别名兼容执行视图；
-此差异已登记为[实现缺口](../../docs/status.md#源码核对发现的实现缺口)，不能据此声明首次启动链路已验收。
+该入口在原迁移锁内复用 `database/migrations/` 的历史别名兼容执行视图，保留原文件和 checksum；
+不重复获取迁移锁。源码修复与运行证据边界见[状态说明](../../docs/status.md#源码核对发现的实现缺口)。
 `src/deployment_identity/strict.rs` 让分体 CLI 与合并入口共用显式数据库目标、参数闭集校验。
 
 ## 本页导航
@@ -44,6 +44,10 @@ PostgreSQL 完整档和 SQLite Lite 的 SQL、事务、查询、迁移及锁 own
 持久化适配器边界：PostgreSQL 完整后端与 SQLite Lite 后端。
 
 ## 用户身份与消费 owner
+
+`database/sessions/admin.rs` 在 Admin 启动前用单条原子 UPDATE 撤销所有未撤销会话；
+PostgreSQL 与 Lite 共用该安全语义，保留已有撤销时间且不触及 Public。token_hash 的凭据绑定
+由应用层拥有，数据库只保存固定 32 字节摘要，不保存口令校验值；不新增或改写迁移。
 
 Users/MoogleMail 的注册身份预读与写事务使用相同的名称匹配规则，锁内实际 UUID 必须与
 签发信封所用 UUID 相同；并发注册或改名不一致时回滚并交由既有邮件重试重新签发。新换绑

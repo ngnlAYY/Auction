@@ -25,6 +25,10 @@ config-example-check:
 i18n-check:
     @bash ci/check-policy.sh i18n
 
+# 联网审计锁定依赖公告；需 cargo-audit 0.22.2，独立于默认本地 verify。
+dependency-audit:
+    cargo audit --deny yanked --deny unsound
+
 check:
     cargo check --locked --workspace --all-targets
 

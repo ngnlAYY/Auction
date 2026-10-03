@@ -83,7 +83,7 @@ mime = "0.3.17"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
 scraper = "0.24.0"
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5.8"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
@@ -123,6 +123,8 @@ chrono-tz = "0.10.4"
 croner = { version = "3.0.1", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# HMAC 0.12 与现有 SHA-256 0.10 共用 digest 类型，不为会话修复升级整个哈希依赖图。
+hmac = "0.12.1"
 sha2 = "0.10.9"
 ring = "0.17.14"
 subtle = "2.6.1"

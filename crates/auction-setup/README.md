@@ -7,7 +7,7 @@
 `POST /api/v1/setup/verify` 无请求体，仅检查 `x-setup-token` 与操作状态，不访问数据库或文件，
 不消费令牌或建立全局解锁状态。页面收到 `verified` 后才开放配置步骤；后续 `validate` 和
 `complete` 仍逐请求校验令牌，正式 Admin 不注册这三个接口。
-三个接口在鉴权后获取同一非阻塞操作锁，竞争返回 409 `setup_busy`；配置检查和保存从输入校验到
+三个接口先鉴权，再于读取正文前获取同一非阻塞操作锁，竞争返回 409 `setup_busy`；配置检查和保存从输入校验到
 数据库等待、目录发布和终态写入都持有该锁，避免并发检查在保存后误报可继续配置。保存成功后
 到进程退出前的新请求返回 409 `setup_completed`；目录发布后持久化确认失败则进入本进程不可逆的
 结果不确定状态，后续已鉴权请求均返回 500 `setup_outcome_unknown`，不再连接数据库或写配置。
@@ -33,6 +33,12 @@
 `initialize_and_start` 仅说明后续动作，不代表服务已就绪；合并 complete 要求
 `confirm_initialize=true`，否则 400 `setup_confirmation_required`。
 `server/access.rs` 拥有默认 loopback Host/Origin 门禁，以及显式 HTTPS origin/受信代理 IP 的
-远程策略；不信任任意转发头，不匹配返回 403 `setup_origin`。契约要求全部响应禁止缓存；
-当前拒绝路径提前返回而遗漏安全头，已登记为[实现缺口](../../docs/status.md#源码核对发现的实现缺口)，不能将其视为已满足契约。
+远程策略；不信任任意转发头，不匹配返回 403 `setup_origin`。所有应用响应，包括门禁拒绝、
+框架错误及超时，均由同一出口补齐 `no-store` 与 `auction-http` 的浏览器安全头，包含
+`frame-ancestors 'none'`、`X-Frame-Options: DENY` 和 `no-referrer`，不复制或放宽 Dioxus CSP。
+`server/lifecycle.rs` 复用 `auction-http::serve_http` 的固定 5 秒 HTTP/1 请求头限制与连接任务所有权；
+`access.rs` 给正文读取与异步处理共计 10 秒预算，超时为 504 `request_timeout`，保存仍按未知结果处理。
+停止接收后由 `auction-process` 最多排空 10 秒，二次信号或超时会取消连接；终止信号不会触发
+后续数据库初始化，强制收口后非阻塞核对终态，无法确认则失败关闭。同步目录发布到终态写入之间
+没有 await，不能把请求取消解释为目录未发布。这里不承诺操作系统阻塞磁盘调用可以被异步 deadline 抢占。
 已有或损坏配置不降级为设置页；正常 Admin 仍不注册上述写接口。

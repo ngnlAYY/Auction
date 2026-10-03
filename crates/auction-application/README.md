@@ -227,6 +227,11 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 Public 认证端口返回登录时用户版本，会话创建端口在存储锁内再次核对；Key 撤销/重签永久废止旧会话。
 浏览器与 HTTP DTO 不接收这个内部版本门禁字段。
 
+Admin 服务通过异步构造在接受请求前调用持久化撤销端口，永久废止全部旧 Admin 会话；撤销失败
+阻断启动，重启后需重新登录。HMAC-SHA256 将随机 token 摘要绑定当前 actor/secret，`current`
+另核对返回 actor；不把独立口令校验值写入数据库，也不改变 Public 会话、Cookie 或响应 DTO。
+恢复旧配置不能恢复已撤销行，具体多实例维护约束见[会话契约](../../docs/contracts/routes.md#管理拍卖与报表)。
+
 Public 规则文档和黑名单只读契约分别位于 [src/ports/public/rules.rs](src/ports/public/rules.rs) 与
 [src/ports/public/blacklist.rs](src/ports/public/blacklist.rs)；它们只定义安全投影、语言/分页边界和 owner 端口，不包含 SQL。
 Public 补偿池与账本只读契约位于 [src/ports/public/compensation/](src/ports/public/compensation/)，由批次摘要/分页与逐笔

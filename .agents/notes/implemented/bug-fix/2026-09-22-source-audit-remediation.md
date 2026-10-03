@@ -2,6 +2,9 @@
 
 Status: implemented
 
+后续 Admin 会话撤销、设置安全头/有界退出与首次迁移兼容修复见
+[2026-10-03 审计修复](../bug-fix/2026-10-03-session-setup-audit-remediation.md)；保留本篇原有理由与历史验证口径。
+
 ## Problem
 
 2026-09-22 对 `a463248` 源码进行模块审计，确认 29 项问题和一项论坛 DTO 省略字段问题。

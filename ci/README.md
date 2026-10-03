@@ -10,6 +10,7 @@
 | 文档、导航与笔记 | `just docs-check` | [check-docs.sh](check-docs.sh)、[Documentation 工作流](../.github/workflows/docs.yml) |
 | 项目规范、布局、配置、i18n | 四项 `*-check` 配方 | [check-policy.sh](check-policy.sh) |
 | 格式、工作区、后端/缓存 feature、Clippy、WASM | `just fmt/check/feature-check/lint/wasm-check` 分别调用 | [Rust 工作流](../.github/workflows/ci.yml) |
+| 锁定依赖安全公告 | `just dependency-audit` | Rust 工作流独立 `security-audit` job，固定 `cargo-audit 0.22.2` |
 | MSRV | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` | Rust 工作流独立 job |
 | Web payload | `just web-build` | [web-bundle.sh](web-bundle.sh) |
 | API-only/embedded 与 archive | `just build-api/build-release/verify-artifacts/release-check` 分别调用 | [release.sh](release.sh) |
@@ -18,6 +19,10 @@
 带斜杠的配方说明表示多个独立命令，不是一个可执行命令名。Cargo 检查使用 `--locked`。
 默认图检查、独立 PostgreSQL/SQLite/Redis feature 检查及 all-features Clippy 分别覆盖不同依赖图。
 Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期支持承诺。
+依赖审计需要联网获取 RustSec 数据库，读取 `Cargo.lock`，不运行产品或改写依赖；本地 `verify`
+不新增网络要求。`cargo audit --deny yanked --deny unsound` 阻断漏洞、撤回版本与 unsound 提示，
+停维提示仍显示，未设置公告忽略列表。
+当前 `fxhash` 停维提示属于[有期限维护债](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)，不能把退出码 0 描述为没有任何警告。
 
 ## 文档检查器
 

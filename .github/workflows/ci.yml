@@ -32,6 +32,23 @@ jobs:
       - run: cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
       - run: cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
 
+  security-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.98.0
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        with:
+          key: cargo-audit-0.22.2
+      # 只审计 Cargo.lock，不运行产品或行为测试；维护提示仍输出，不忽略漏洞公告。
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      - run: cargo audit --deny yanked --deny unsound
+
   msrv:
     runs-on: ubuntu-latest
     steps:

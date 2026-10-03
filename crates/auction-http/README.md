@@ -60,6 +60,8 @@ Public 与 Admin 的 HTTP 表面适配器。
   `no-cache`/`no-store` 响应策略；`strict_json.rs`：旧版写路由的媒体类型、body 上限和单 JSON
   值边界，并允许 Public 竞价命令在限流、Origin 和认证之后延迟解码 body；`method_strict.rs`：业务
   路由显式 HEAD/405 与 `Allow` 契约。
+- [src/http/security/headers.rs](src/http/security/headers.rs)：正式表面与首次设置共享的 CSP、防嵌入、
+  Referrer、MIME 与浏览器能力限制；缓存、认证和超时继续由各表面独立拥有。
 - [src/http/security/](src/http/security/)、[src/http/metrics/](src/http/metrics/)：origin/Cookie/有界限流策略与进程指标表面。
 - [src/http/admin/dashboard/](src/http/admin/dashboard/)：`mod.rs` 只负责认证后的 dashboard 请求编排；`sections/{mail,realtime,
   operations,credentials,alerting,fallback}.rs` 分别负责邮件、realtime、履约/投递/recovery、凭据、
@@ -120,7 +122,8 @@ URL，并直接覆盖既有 `game_equipment_url` DTO 字段；两条路由固定
 
 Admin `/api/v1/admin/session` 已接入 Basic Auth 登录交换、独立 session/CSRF Cookie、
 `X-CSRF-Token` 校验、滑动刷新、actor 会话轮换和注销；原始 token 不进入数据库，PostgreSQL/SQLite
-只保存摘要。Admin 的拍卖 `preview`、`open`、`cancel`、`final-phase` 和 `early-settlement` 命令也已接入
+只保存摘要。应用服务在启动时永久撤销全部旧 Admin 会话，并把 token 摘要绑定当前 actor/secret；
+重启后需要重新登录，旧会话保持 401，Public 会话与 Cookie/CSRF wire 不变。Admin 的拍卖 `preview`、`open`、`cancel`、`final-phase` 和 `early-settlement` 命令也已接入
 生命周期应用端口：命令账本、拍卖状态版本、追加审计记录和已注册 lifecycle realtime 事件
 在同一事务内提交。人工 Final 收紧较晚的 live lot 截止时间但保留竞价和软截止；提前结算受默认关闭的
 runtime capability 保护，只在 PostgreSQL 完整档要求理由并把到期事实交给既有 Worker，HTTP 不直接

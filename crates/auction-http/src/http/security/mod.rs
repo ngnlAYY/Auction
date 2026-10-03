@@ -12,6 +12,9 @@ use url::Url;
 
 use super::boundary::HttpBoundary;
 
+mod headers;
+pub use headers::apply_browser_security_headers;
+
 const MAX_RATE_LIMIT_ENTRIES: usize = 4096;
 
 /// 装配根传入 HTTP 安全适配器的非敏感参数。

@@ -128,7 +128,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | user_blacklist | auction-application：users | 两者 | 公开资格与封禁原因 |
 | user_renames | auction-application：users | 两者 | 用户名变更追加历史 |
 | public_sessions | auction-application：sessions | 两者 | Public 会话权威状态；滑动闲置有效期受绝对有效期限制，SQLite 使用可取消回滚的串行写事务 |
-| admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态；两后端均保持滑动有效期和绝对上限 |
+| admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态；token_hash 为绑定 actor/secret 的 HMAC-SHA256 摘要，Admin 启动永久撤销所有未撤销行；保留滑动有效期、绝对上限与原撤销时间，不新增凭据校验值或列 |
 | rules_documents | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
 | audit_records | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | auction-observability | 两者 | 进程/服务心跳与过期判断 |

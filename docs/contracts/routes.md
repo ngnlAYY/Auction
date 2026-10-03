@@ -286,7 +286,10 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 `127.0.0.1:8091` 挂载以下入口；
 正常 Admin 路由不挂载，未知 API/页面不能通过 SPA fallback 进入。页面静态资源可匿名读取，三个 API
 均必须携带终端输出的 64 字符十六进制随机令牌 `x-setup-token`（页面称为一次性部署码）。
-请求体最多 8 KiB，配置 DTO 拒绝未知字段。
+请求体最多 8 KiB，配置 DTO 拒绝未知字段；令牌和非阻塞操作门禁先于正文读取。
+连接层 HTTP/1 请求头预算为 5 秒；完整正文与异步处理共用 10 秒预算，超时返回
+504 `request_timeout`。停止接收后最多排空 10 秒，超时或再次终止信号取消所属连接；
+只有已确认的 Completed 且未收到终止信号才允许合并入口继续，无法非阻塞确认终态则按结果不确定失败关闭。
 分体 Admin 无默认配置且未设置 `AUCTION_CONFIG_FILE` 时，无参数启动会自动进入该模式；默认路径的
 现有目录、悬空符号链接等条目仍按已有配置处理，元数据读取错误直接阻止启动。显式指定的角色配置缺失或
 解析失败时仍失败关闭，不触发初始化。合并 `auction-server` 则按 `--config-dir`（默认 `auction-config`）
@@ -295,8 +298,10 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 
 合并入口通过 `--allow-remote-setup`、`--setup-origin` 和 `--setup-proxy-ip` 明确允许远程 HTTPS 代理。
 非 loopback 监听无此授权失败。HTTP 门禁检查 TCP peer、精确 Host、HTTPS 转发头与写请求 Origin；
-本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有响应必须禁止缓存；
-当前门禁拒绝路径的实现偏差见[状态登记](../status.md#源码核对发现的实现缺口)，该要求不因偏差而放宽。
+本机模式也检查 loopback peer 与 Host/Origin，失败返回 403 `setup_origin`。所有应用响应（含拒绝、
+框架错误和超时）统一设置 `Cache-Control: no-store`、`Referrer-Policy: no-referrer`，
+复用正式表面的 CSP（含 `frame-ancestors 'none'`）、`X-Frame-Options: DENY`、`nosniff` 与
+浏览器能力限制；保持既有 Dioxus WASM/解释器和内联样式所需策略，不放宽 Origin 或令牌门禁。
 成功响应新增布尔 `initialize_and_start`，默认分体为 false、合并为 true；旧客户端可忽略新增字段。
 配置 DTO 新增可省略的 `confirm_initialize`（默认 false）；合并 `complete` 要求 true，否则返回
 400 `setup_confirmation_required`。网页只在用户主动勾选专用空库及启动授权后发送 true；
@@ -367,7 +372,8 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 数据库凭据、管理员密码只在请求与目标敏感 TOML 中存在；响应只返回稳定错误码，不返回输入、
 SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁移；保存后目标配置目录存在即禁止
 再次首次设置。表中成功 JSON 以分体模式为例，合并模式布尔值为 true；所有接口可返回
-403 `setup_origin`，合并 complete 还可返回 400 `setup_confirmation_required`。
+403 `setup_origin` 或 504 `request_timeout`，合并 complete 还可返回 400 `setup_confirmation_required`。
+保存的超时响应也由浏览器按 `setup_outcome_unknown` 处理，不新增自动重试或目录覆盖入口。
 完整运行参数仍在正式 Admin `A26/A27` runtime 页面管理。
 
 ## 已实现路径的补充约束
@@ -385,6 +391,11 @@ PostgreSQL/SQLite 的普通竞价、代理 quota、转换历史、最近 proxy b
 ### 管理拍卖与报表
 
 Admin 的 `/api/v1/admin/session` 已接入 Basic Auth、CSRF 和持久化会话端口。
+每次数据库会话服务装配先永久撤销全部既有 Admin 会话，失败阻断启动；Admin 重启后必须重新登录。
+随机 token 的存储摘要使用 HMAC-SHA256 绑定当前 actor 与 secret，读取再核对 actor；更换凭据后的
+旧会话保持 `401 unauthenticated`，恢复旧配置也不能复活启动前已撤销的会话。凭据摘要不写入数据库，
+PostgreSQL/SQLite 均复用原会话表与撤销标记；Public 会话、Cookie 名称、CSRF 与响应字段不变。
+同库多 Admin 实例必须使用一致凭据；任一实例启动会撤销既有管理会话，凭据轮换须停掉全部旧凭据实例。
 会话每次确认成功后重新安排下一次检查，即使绝对到期上限使 `expires_at` 不再变化也保持检查；
 业务接口明确返回 `401/unauthenticated` 时触发会话确认，网络错误不解释为退出登录。
 以下管理读取均使用相同会话边界。A03 GET
