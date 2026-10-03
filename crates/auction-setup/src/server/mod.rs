@@ -7,7 +7,7 @@ use auction_contracts::{SetupErrorResponse, SetupRequest, SetupResponse};
 use auction_storage::DatabaseStore;
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, State, rejection::JsonRejection},
+    extract::{DefaultBodyLimit, FromRequest, Request, State},
     http::{HeaderMap, StatusCode},
     routing::post,
 };
@@ -20,6 +20,7 @@ use tokio::{
 use uuid::Uuid;
 
 mod access;
+mod lifecycle;
 pub use access::{FirstRunPolicy, RemoteSetupAccess};
 
 /// 设置服务退出的确定结果；只有 Completed 允许后续首次初始化。
@@ -72,7 +73,7 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     policy: FirstRunPolicy,
 ) -> Result<FirstRunOutcome, &'static str> {
     policy.validate()?;
-    let mut signals = auction_process::TerminationSignals::subscribe()
+    let signals = auction_process::TerminationSignals::subscribe()
         .map_err(|_| "cannot subscribe setup termination signals")?;
     match fs::symlink_metadata(&options.output_dir) {
         Ok(_) => return Err("setup output directory already exists"),
@@ -108,19 +109,17 @@ pub async fn run_first_run_with_policy<A: RustEmbed + 'static>(
     eprintln!("一次性设置令牌：{}", state.token);
     eprintln!("仅使用 SSH 隧道或已显式授权的 HTTPS 代理；不要公开明文初始化监听器。");
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                _ = shutdown_receiver => {},
-                _ = signals.recv() => {},
-            }
-        })
-        .await
-        .map_err(|_| "setup HTTP server failed")?;
-    match *state.operation.lock().await {
-        SetupStatus::Completed => Ok(FirstRunOutcome::Completed),
-        SetupStatus::Pending => Ok(FirstRunOutcome::Interrupted),
+    let reason = lifecycle::serve(listener, app, signals, shutdown_receiver).await?;
+    // 强制收口后不再次无界等待操作锁；无法确认终态时禁止后续迁移和角色启动。
+    let Ok(operation) = state.operation.try_lock() else {
+        return Ok(FirstRunOutcome::OutcomeUnknown);
+    };
+    match &*operation {
+        SetupStatus::Completed if matches!(reason, lifecycle::ShutdownReason::Completed) => {
+            Ok(FirstRunOutcome::Completed)
+        }
         SetupStatus::OutcomeUnknown => Ok(FirstRunOutcome::OutcomeUnknown),
+        _ => Ok(FirstRunOutcome::Interrupted),
     }
 }
 
@@ -134,14 +133,12 @@ async fn verify(State(state): State<Arc<FirstRunState>>, headers: HeaderMap) -> 
     }))
 }
 
-async fn validate(
-    State(state): State<Arc<FirstRunState>>,
-    headers: HeaderMap,
-    request: Result<Json<SetupRequest>, JsonRejection>,
-) -> SetupResult {
-    authorize(&state, &headers)?;
+async fn validate(State(state): State<Arc<FirstRunState>>, request: Request) -> SetupResult {
+    authorize(&state, request.headers())?;
     let _operation = begin_operation(&state)?;
-    let Json(request) = request.map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
+    let Json(request) = Json::<SetupRequest>::from_request(request, &())
+        .await
+        .map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
     let options = config(&state, request);
     options.validate().map_err(config_error)?;
     check_database(&options.database).await?;
@@ -151,14 +148,12 @@ async fn validate(
     }))
 }
 
-async fn complete(
-    State(state): State<Arc<FirstRunState>>,
-    headers: HeaderMap,
-    request: Result<Json<SetupRequest>, JsonRejection>,
-) -> SetupResult {
-    authorize(&state, &headers)?;
+async fn complete(State(state): State<Arc<FirstRunState>>, request: Request) -> SetupResult {
+    authorize(&state, request.headers())?;
     let mut operation = begin_operation(&state)?;
-    let Json(request) = request.map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
+    let Json(request) = Json::<SetupRequest>::from_request(request, &())
+        .await
+        .map_err(|_| error(StatusCode::BAD_REQUEST, "invalid_input"))?;
     if state.policy.initialize_and_start && !request.confirm_initialize {
         return Err(error(StatusCode::BAD_REQUEST, "setup_confirmation_required"));
     }

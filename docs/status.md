@@ -2,9 +2,10 @@
 
 [文档导航](README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
 
-本页统一说明能力与证据的区别。本次于 2026-09-22 在 `a463248` 基线上完成源码审计问题修复，
-覆盖 29 项报告问题及论坛 DTO 省略字段附项；逐项范围见[修复记录](../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md)。
-当前包含工作区修复与三份追加迁移，不对应已发布制品，也不构成运行验收。
+本页统一说明能力与证据的区别。2026-10-03 在 `5cca279` 基线上完成最近全仓静态审计的 7 项源码修复，
+范围与取舍见[本轮修复记录](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)。
+本轮不新增或改写迁移，不对应已发布制品，也不构成运行验收。此前 2026-09-22 的 29 项报告问题、
+论坛 DTO 附项及三份追加迁移仍由[历史修复记录](../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md)拥有。
 
 核对范围覆盖根目录、docs、apps、crates、ops、migrations、ci 的正式文档，以及既有决策笔记的引用与状态。
 仍准确的内容按原样保留；历史笔记记录当时理由与验证声明，不将其改写成当前运行证据。
@@ -49,6 +50,32 @@
 
 ## 本轮静态检查
 
+### 2026-10-03
+
+使用仓库 Rust/Cargo `1.98.0`，以下命令退出码均为 0：
+
+- `just verify`：格式、52 份文档、仓库/布局/配置/i18n、工作区和独立 PG/SQLite/Redis feature、
+  all-features Clippy（`-D warnings`）与双 WASM 编译。
+- `cargo check --locked --workspace --all-targets --all-features`。
+- `cargo +1.94.1 check --locked --workspace --all-targets --all-features`。
+- `just dependency-audit`：cargo-audit `0.22.2` 使用 `--deny yanked --deny unsound`，检查 543 个
+  crate 条目，未命中漏洞、撤回或 unsound，保留一项 `fxhash` 停维提示；公告库提交为
+  `f8dee89e1b2f2f1eaf548312df7655fe5202a302`。额外发现的撤回版本 chacha20 0.10.1 已升至 0.10.2。
+- `git diff --check`；历史 SQL 文件无修改。
+
+辅助 SQL 静态扫描覆盖 39 份 PostgreSQL 迁移与 737 个 Rust SQL 候选；两份受限兼容执行视图
+解析通过，686 条可识别直接绑定链未见参数数量不匹配。历史原文保留保留字错误，由兼容视图执行；
+HTTP/Redis 文字和动态拼接片段的误报已人工区分。8 份 PL/pgSQL 的解析器 JSON 输出存在工具限制，
+不据此声称全部函数体、schema、事务或运行行为已验证。
+LSP 未完成：固定工具链缺少 `rust-analyzer`，返回
+`Unknown binary 'rust-analyzer' in official toolchain '1.98.0-x86_64-unknown-linux-gnu'.`；
+可安装对应组件或修正 `pi-lsp.json` 的 server command，本轮不改全局工具链。
+编译及 Clippy 结果独立有效，不冒充 LSP 通过。
+
+未新增或运行行为测试、发布构建、浏览器流程、产品服务、数据库或迁移；上述结果不构成生产验收。
+
+### 2026-09-22 历史记录
+
 2026-09-22 使用仓库 Rust/Cargo `1.98.0` 和 just `1.58.0` 执行完整 `just verify` 及
 `git diff --check`，退出码均为 0。完整门禁包括：
 
@@ -66,13 +93,19 @@
 
 ## 源码核对发现的实现缺口
 
-以下两项是此前文档核对已登记、且本轮再次确认仍存在的初始化缺口，不属于上述 29 项审计报告。
-本轮保留登记，不把已完成的报告修复解释为全项目不存在其他缺陷：
+最近全仓审计的 7 项问题均已在本轮源码修复；其中两项初始化缺口沿用此前登记，
+不重算为首次发现。下表区分源码闭合与仍未执行的运行验证，不宣称全项目不存在其他缺陷：
 
-| 问题 | 源码依据与影响 | 待闭合边界 |
+| 问题 | 源码修复 | 待闭合边界 |
 | --- | --- | --- |
-| 设置门禁拒绝响应缺少安全头 | [access.rs](../crates/auction-setup/src/server/access.rs) 的 `setup_origin` 403 提前返回，跳过后续 `Cache-Control: no-store` 与 `Referrer-Policy: no-referrer` 设置 | 保留[全部设置响应禁止缓存](contracts/routes.md#首次部署初始化)的要求；不能把成功路径已加头视为拒绝路径也已覆盖 |
-| 首次初始化未复用 PostgreSQL 历史迁移兼容层 | [initialization/mod.rs](../crates/auction-storage/src/database/initialization/mod.rs) 直接运行原始 `sqlx::migrate!`；[migrations/mod.rs](../crates/auction-storage/src/database/migrations/mod.rs) 为 `000005`/`000015` 提供的保留字别名执行修正未在此入口使用 | 存在首次空库迁移的解析兼容风险；应复用受限执行视图并保持历史 checksum，不修改已发布 SQL。未经修复及另行授权验证，不能宣称向导到三角色启动链路已验收 |
+| F1 · Admin 凭据轮换后旧会话仍有效 | [session 服务](../crates/auction-application/src/services/sessions/mod.rs) 异步启动先永久撤销旧会话，HMAC 绑定 actor/secret，读取复核 actor；两后端共用既有表 | 重启需重新登录；凭据切换、恢复旧配置、多实例维护仍缺运行证据 |
+| F2 · 首次初始化绕过迁移兼容层 | [initialization](../crates/auction-storage/src/database/initialization/mod.rs) 在既有迁移锁内复用受限执行视图，原 SQL/checksum 不变 | 仍须独立验证空库迁移、失败现场与三角色启动 |
+| F3/F6 · rustls/h2 漏洞公告 | [锁图](../Cargo.lock) 为 rustls 0.23.45、h2 0.4.19；rustls 下限同步，CI 新增依赖审计 | 版本范围修复不等于生产可达性或未知漏洞证明 |
+| F4 · 设置慢请求与无界退出 | [access](../crates/auction-setup/src/server/access.rs) 限正文/异步处理 10 秒，令牌先于正文；[lifecycle](../crates/auction-setup/src/server/lifecycle.rs) 复用 5 秒请求头与 10 秒排空；终止不继续初始化 | 未执行慢请求、断连、信号或阻塞文件系统运行验证 |
+| F5/F7 · 设置防嵌入及拒绝响应安全头 | 正式表面与设置复用 [headers](../crates/auction-http/src/http/security/headers.rs)，包括拒绝、框架错误及超时应用响应 | 未执行浏览器/代理验证 |
+
+`fxhash 0.2.1` 的 RUSTSEC-2025-0057 是停维提示而非已确认漏洞，暂保留解析依赖，
+2026-11-03 前复查上游兼容迁移；CI 不隐藏该提示，详情见[修复决定](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)。
 
 初始化失败应保留配置和数据库现场，停止进程后按[合并部署维护](../apps/server/README.md#生命周期与维护)
 显式处理，不通过删除配置、修改历史迁移或自动重试来绕过问题。
@@ -82,7 +115,7 @@
 - PostgreSQL 并发竞价、资格变化、序列化冲突、故障重启、损坏事实与恢复边界。
 - SQLite 单主机串行写入、文件锁、维护窗口和备份恢复；不能替代 PostgreSQL 验证。
 - 真实 MoogleMail/E-Hentai 的认证、未知写入结果、Sent/Balance 证明与人工恢复。
-- Public/Admin 完整页面、五语言、认证组合、严格 decoder、实时帧和断线恢复。
+- Public/Admin 完整页面、五语言、认证组合、Admin 重启/凭据轮换及旧配置恢复、严格 decoder、实时帧和断线恢复。
 - 非空生产数据、目标主机权限与服务编排、制品切换、备份恢复和回执保管。
 - 首次设置的本机/HTTPS 代理门禁、未知保存结果与空库初始化；合并部署的 readiness、信号、父进程强杀、迁移失败和升级。
 

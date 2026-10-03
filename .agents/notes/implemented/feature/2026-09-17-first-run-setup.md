@@ -2,6 +2,9 @@
 
 Status: implemented
 
+后续 Admin 会话撤销、设置安全头/有界退出与首次迁移兼容修复见
+[2026-10-03 审计修复](../bug-fix/2026-10-03-session-setup-audit-remediation.md)；保留本篇原有理由与历史验证口径。
+
 后续路径解析与生成权限问题见[源码审计修复](../bug-fix/2026-09-22-source-audit-remediation.md)，原首次设置架构决定不变。
 
 ## Problem

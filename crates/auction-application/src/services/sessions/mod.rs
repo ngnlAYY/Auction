@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, Utc};
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
@@ -100,31 +101,45 @@ impl PublicSessionPort for PublicSessionService {
 /// Admin session 应用服务。
 ///
 /// 管理凭据只在装配时输入并立即转换为摘要；HTTP 只提交 Basic Auth 字段，持久化层只接收
-/// session/CSRF 摘要。Admin 会话不复用 Public 用户会话，也不依赖缓存。
+/// session/CSRF 摘要。session 摘要绑定当前 actor 和 secret；Admin 不复用 Public 会话或缓存。
 pub struct AdminSessionService {
     store: Arc<dyn AdminSessionStore>,
     expected_actor: String,
     secret_hash: [u8; 32],
+    token_digest: Hmac<Sha256>,
     config: AdminSessionConfig,
 }
 
 impl AdminSessionService {
-    /// 创建并校验 Admin session 用例服务；原始登录 secret 不会保存在服务对象中。
-    pub fn new(
+    /// 创建服务前永久撤销既有 Admin 会话；失败阻断启动，重启后必须重新登录。
+    ///
+    /// 不能只依赖确定性凭据摘要：配置从 A 改为 B 再改回 A 时，旧 token 也不能复活。
+    /// 原始 secret 和可独立校验口令的摘要均不进入持久化层。
+    pub async fn new(
         store: Arc<dyn AdminSessionStore>,
         actor: String,
         secret: Vec<u8>,
         config: AdminSessionConfig,
+        now: DateTime<Utc>,
     ) -> Result<Self, ApplicationError> {
         config.validate()?;
         validate_admin_actor(&actor)?;
         validate_admin_secret(&secret)?;
-        Ok(Self {
-            store,
-            expected_actor: actor,
-            secret_hash: Sha256::digest(secret).into(),
-            config,
-        })
+        let secret_hash: [u8; 32] = Sha256::digest(secret).into();
+        let mut token_digest = Hmac::<Sha256>::new_from_slice(&secret_hash)
+            .map_err(|_| SessionError::InvalidConfiguration)?;
+        token_digest.update(b"auction.admin-session.token.v2\0");
+        token_digest.update(&(actor.len() as u64).to_be_bytes());
+        token_digest.update(actor.as_bytes());
+        store.revoke_all_admin(now).await?;
+        Ok(Self { store, expected_actor: actor, secret_hash, token_digest, config })
+    }
+
+    /// 使用标准 HMAC 绑定随机 token 摘要；数据库仍只接收固定 32 字节，不接收凭据校验值。
+    fn scoped_token_hash(&self, token_hash: [u8; 32]) -> [u8; 32] {
+        let mut digest = self.token_digest.clone();
+        digest.update(&token_hash);
+        digest.finalize().into_bytes().into()
     }
 }
 
@@ -148,6 +163,7 @@ impl AdminSessionPort for AdminSessionService {
             }
 
             let (token, token_hash) = generate_token()?;
+            let token_hash = self.scoped_token_hash(token_hash);
             let (csrf_token, csrf_hash) = generate_token()?;
             let (expires_at, absolute_expires_at) =
                 session_expiration_window(now, self.config.idle_ttl, self.config.absolute_ttl)?;
@@ -181,14 +197,20 @@ impl AdminSessionPort for AdminSessionService {
         Box::pin(async move {
             let (token_hash, next_expires_at) =
                 prepare_session_token(&raw_token, now, self.config.idle_ttl)?;
+            let token_hash = self.scoped_token_hash(token_hash);
             let csrf_hash = hash_token(&raw_csrf_token)?;
-            self.store.touch_admin(token_hash, csrf_hash, now, next_expires_at).await
+            let identity =
+                self.store.touch_admin(token_hash, csrf_hash, now, next_expires_at).await?;
+            if identity.actor != self.expected_actor {
+                return Err(SessionError::Unauthenticated.into());
+            }
+            Ok(identity)
         })
     }
 
     fn logout(&self, raw_token: String, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            let token_hash = hash_token(&raw_token)?;
+            let token_hash = self.scoped_token_hash(hash_token(&raw_token)?);
             self.store.revoke_admin(token_hash, now).await
         })
     }

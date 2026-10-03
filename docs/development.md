@@ -45,6 +45,16 @@ just verify
 不证明业务描述正确。静态命令的实现和 CI/MSRV 差异见 [ci/README.md](../ci/README.md)。
 单元、集成、功能、端到端、浏览器测试与手工冒烟默认暂缓；已有测试不删除。
 
+依赖安全公告检查独立执行，需要联网获取 RustSec 数据库，不启动产品、不改写锁图：
+
+```bash
+cargo install cargo-audit --locked --version 0.22.2
+just dependency-audit
+```
+
+CI 的独立 `security-audit` job 执行相同检查；漏洞、撤回版本与 unsound 提示阻断，停维维护提示保留输出。
+已登记的 `fxhash` 提示及复查期限见[审计修复决定](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)。
+
 ## 选择制品 feature
 
 | 目标 | Cargo feature | 附加条件 |
@@ -90,7 +100,7 @@ AUCTION_CONFIG_FILE=ops/config/examples/worker.toml cargo run --locked -p auctio
 - 合并部署：停止整个 `auction-server` 后，由同一账号执行 `auctionctl migrate-managed --config-dir <绝对目录>`，
   核验既有 supervisor/子进程共享锁；不依赖分体 systemd 总控。
 
-两者均不是无需准备的 seed 命令。合并入口只有首次网页明确确认后才进入专用空库初始化；其实现缺口与
+两者均不是无需准备的 seed 命令。合并入口只有首次网页明确确认后才进入专用空库初始化；其源码修复与
 未验证边界见[状态说明](status.md#源码核对发现的实现缺口)。`auction-server` 使用 `--config-dir`，
 检测到 `AUCTION_CONFIG_FILE` 已设置时拒绝启动。初始 PostgreSQL 建库与迁移分离，详见
 [auctionctl 命令手册](../apps/auctionctl/README.md)及[合并服务手册](../apps/server/README.md)。

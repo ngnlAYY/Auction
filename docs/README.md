@@ -85,6 +85,7 @@
 
 | 文档 | 仓库位置 |
 | --- | --- |
+| [Agent Note: 管理会话撤销与首次设置安全收口](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md) | `.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md` |
 | [Agent Note: 源码审计问题修复与恢复边界](../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md) | `.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md` |
 | [Agent Note: 可选单文件服务与首次配置后启动](../.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md) | `.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md` |
 | [Agent Note: 全库文档重建与静态维护边界](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md) | `.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md` |

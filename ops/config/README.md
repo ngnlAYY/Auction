@@ -59,7 +59,7 @@ MoogleMail 业务策略及可分组接管的运行参数。Admin 和 Worker 可�
 可选 [auction-server](../../apps/server/README.md) 保留上述 TOML 格式，通过 `write_managed_to`
 将 Worker/Admin control socket 改为配置目录同级私有运行目录，并使用当前账号组和 UID。
 合并入口使用 `--config-dir`，检测到 `AUCTION_CONFIG_FILE` 已设置会拒绝启动；网页明确确认后才进入
-专用空库初始化和启动路径，默认分体设置仍保存后退出。当前首次设置及迁移的实现缺口见
+专用空库初始化和启动路径，默认分体设置仍保存后退出。当前首次设置及迁移的源码修复与运行证据边界见
 [状态说明](../../docs/status.md#源码核对发现的实现缺口)。
 配置文件不会记录部署码、首次确认布尔值或临时 HTTPS 代理策略。
 

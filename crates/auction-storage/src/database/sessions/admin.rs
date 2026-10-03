@@ -16,6 +16,20 @@ use crate::database::PostgresStore;
 #[cfg(feature = "sqlite")]
 use crate::database::SqliteStore;
 
+/// 启动时的单语句原子撤销不依赖 actor；更换账号、口令或回退配置都不能复活旧会话。
+#[cfg(feature = "postgres")]
+pub(super) async fn revoke_all_postgres(
+    store: &PostgresStore,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
+    sqlx::query("UPDATE public.admin_sessions SET revoked_at = $1 WHERE revoked_at IS NULL")
+        .bind(now)
+        .execute(store.pool())
+        .await
+        .map_err(|_| storage_error("撤销启动前的 Admin 会话失败"))?;
+    Ok(())
+}
+
 #[cfg(feature = "postgres")]
 pub(super) async fn create_postgres(
     store: &PostgresStore,
@@ -125,6 +139,20 @@ pub(super) async fn revoke_postgres(
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("撤销 Admin 会话失败"))?;
+    Ok(())
+}
+
+/// Lite 复用单语句串行写入，保留原撤销时间与 Public 会话；失败不得启动管理表面。
+#[cfg(feature = "sqlite")]
+pub(super) async fn revoke_all_sqlite(
+    store: &SqliteStore,
+    now: DateTime<Utc>,
+) -> Result<(), ApplicationError> {
+    sqlx::query("UPDATE admin_sessions SET revoked_at = ? WHERE revoked_at IS NULL")
+        .bind(sqlite_timestamp(now))
+        .execute(store.pool())
+        .await
+        .map_err(|_| storage_error("撤销启动前的 Lite Admin 会话失败"))?;
     Ok(())
 }
 

@@ -1,13 +1,18 @@
 //! 首次设置的显式远程授权；只有指定代理可提供 HTTPS 转发证明。
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 初始化期间的监听与后续行为，不读取业务角色配置。
 #[derive(Clone)]
@@ -67,21 +72,18 @@ pub(super) async fn enforce(
     request: Request,
     next: Next,
 ) -> Response {
-    let permitted = permitted(&policy, peer, request.headers(), request.method());
-    if !permitted {
-        return (
-            StatusCode::FORBIDDEN,
-            axum::Json(auction_contracts::SetupErrorResponse { code: "setup_origin".to_owned() }),
-        )
-            .into_response();
-    }
-    let mut response = next.run(request).await;
-    response
-        .headers_mut()
-        .insert("cache-control", axum::http::HeaderValue::from_static("no-store"));
-    response
-        .headers_mut()
-        .insert("referrer-policy", axum::http::HeaderValue::from_static("no-referrer"));
+    let mut response = if !permitted(&policy, peer, request.headers(), request.method()) {
+        super::error(StatusCode::FORBIDDEN, "setup_origin").into_response()
+    } else {
+        // 同时限制正文读取与异步处理；complete 的发布与终态确认之间没有可取消的 await。
+        match tokio::time::timeout(REQUEST_TIMEOUT, next.run(request)).await {
+            Ok(response) => response,
+            Err(_) => super::error(StatusCode::GATEWAY_TIMEOUT, "request_timeout").into_response(),
+        }
+    };
+    // 门禁拒绝、框架错误和超时也必须经过同一出口，不能跳过禁止缓存与防嵌入策略。
+    auction_http::apply_browser_security_headers(response.headers_mut());
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 

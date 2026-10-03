@@ -131,6 +131,9 @@ Cookie、会话/数据密钥及 URL 凭据仅由敏感配置和专用加密边�
 Public P09/P11 的完整装备 URL 是受限例外：HTTP 核对 equipment owner 后短暂解密，响应 `no-store`；
 不进入日志或缓存。邮件审查只返回脱敏展示投影，异常原始证据独立加密保留。
 详见[配置](../ops/config/README.md)和[邮件诊断](operations/mail-diagnostics.md)。
+Admin 会话属于两后端共有能力：应用服务启动时永久撤销旧管理会话，并以当前 actor/secret 对随机
+session token 摘要作 HMAC 绑定；数据库仍为权威，只保存摘要与撤销状态，无新增表或凭据校验值。
+重启后重新登录，Public 会话不变；跨实例停机轮换约束见[HTTP 契约](contracts/routes.md#管理拍卖与报表)。
 
 缓存默认禁用，目前只加速 Public 规则读取。有限 TTL、总超时和并发上限控制成本；miss、损坏、不可用及失效失败回源。
 缓存不能持有资格、锁、会话真值、命令账本或审计。具体预算见[缓存适配器](../crates/auction-cache/README.md)。
@@ -172,7 +175,8 @@ systemd 示例 `TimeoutStopSec=45` 覆盖业务 drain、最长 30 秒 exporter �
 初始化完成后的普通启动只验证 schema readiness；显式升级使用 `auctionctl migrate-managed`，复用
 supervisor 及继承锁的子进程所有权门禁。合并 unit 使用 155 秒停止预算，不复用分体 systemd 总控。
 这些文件锁仅保护同机支持的部署流程，不能作为跨主机隔离证明；合并和分体不得混合运行同一数据库。
-首次初始化尚未接入历史迁移兼容执行视图，设置安全头也存在拒绝路径缺口；
-当前源码证据与待闭合事项统一见[状态登记](status.md#源码核对发现的实现缺口)，不以架构路径存在推导运行成功。
+首次初始化复用历史迁移兼容执行视图并保留迁移锁/checksum；设置响应共用 HTTP 安全头，
+设置 owner 独立拥有请求预算及有界退出，终止或终态不明时禁止自动初始化。
+当前源码修复与待补运行证据见[状态登记](status.md#源码核对发现的实现缺口)，不以静态通过推导运行成功。
 
 workspace、`crates/*` 和工程目录组织借鉴 Honk；拍卖行为与验收由本仓库独立拥有。

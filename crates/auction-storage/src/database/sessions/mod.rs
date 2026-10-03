@@ -16,6 +16,17 @@ mod common;
 mod public;
 
 impl AdminSessionStore for DatabaseStore {
+    fn revoke_all_admin(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => admin::revoke_all_postgres(store, now).await,
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => admin::revoke_all_sqlite(store, now).await,
+            }
+        })
+    }
+
     fn create_admin(
         &self,
         record: AdminSessionRecord,

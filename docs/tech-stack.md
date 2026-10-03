@@ -25,14 +25,18 @@
 | 国际化 | dioxus-i18n `0.5.1`、unic-langid `0.9.6` | Fluent 编译期内嵌，五语言键集合一致 |
 | 数据库 | SQLx `0.9.0` | PostgreSQL / SQLite 独立 feature 与迁移树 |
 | 缓存 | redis `1.6.0`，默认关闭 | 只缓存可重建值 |
-| 外部 HTTP | reqwest `0.13.4`、rustls/ring | 限定来源、预算、凭据及结果证明 |
+| 外部 HTTP | reqwest `0.13.4`、rustls `0.23.45`/ring | 限定来源、预算、凭据及结果证明 |
 | 数据与配置 | serde、serde_json、TOML、UUID、chrono | DTO/领域/SQL 记录分离；敏感信息独立 |
 | 运维 | clap、tracing、Prometheus、OpenTelemetry | 安全错误、低基数指标、有界 exporter |
 
 完整档部署以 PostgreSQL major 18 为边界，patch 更新与 major 迁移分开评审。
 SQLite 使用锁定 SQLx/libsqlite3-sys 图对应的捆绑引擎，不把系统动态库版本当作制品版本。
 升级逐组件核对 MSRV、WASM、后端适配与发布依赖；本地和 CI 使用 `--locked`，禁止发布时隐式刷新依赖图。
-上游支持期限或安全状态应在升级评审时重新核查，本页不宣称它们已经在本轮外网复核。
+上游支持期限或安全状态应在升级评审时重新核查。2026-10-03 按 RustSec 核对并将 rustls 下限/锁图
+升级至 `0.23.45`、h2 锁图升级至 `0.4.19`，覆盖 RUSTSEC-2026-0285 与 RUSTSEC-2026-0258；
+撤回的 chacha20 `0.10.1` 升至未撤回的 `0.10.2`。
+依赖公告由独立静态门禁持续检查；`fxhash 0.2.1` 停维维护债及复查期限见
+[修复决定](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)，不把版本命中当作生产可利用性证明。
 
 ## HTTP 与进程
 
@@ -83,6 +87,8 @@ SQLite Lite 提供 WAL、本地文件、等待锁和 `BEGIN IMMEDIATE` 单写者
 故障必须回源，不能影响已提交命令。当前无需进程内第二级缓存或通用 Redis 连接池。
 
 Public 登录 key 与 Admin Basic 凭据交换后由数据库会话边界管理，Admin mutation 另校验 CSRF。
+Admin 启动先永久撤销旧会话，并使用 HMAC-SHA256 绑定 actor/secret 与随机 token 摘要；
+选用兼容现有 sha2 0.10 的 hmac 0.12，不自制 MAC，也不向数据库新增口令校验值。
 当前没有 Argon2id 密码账户实现，不能把该算法写成现有登录能力。
 Cookie、安全属性、轮换与撤销的实际协议见[HTTP 契约](contracts/routes.md)。
 

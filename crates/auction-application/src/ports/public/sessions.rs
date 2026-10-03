@@ -89,7 +89,7 @@ pub struct AdminSessionIdentity {
     pub absolute_expires_at: DateTime<Utc>,
 }
 
-/// sessions owner 接收的 Admin 会话和 CSRF 摘要记录。
+/// sessions owner 接收的 Admin 会话和 CSRF 摘要记录；token 摘要已绑定当前管理凭据。
 #[derive(Debug, Clone)]
 pub struct AdminSessionRecord {
     pub token_hash: [u8; 32],
@@ -133,6 +133,9 @@ pub trait PublicSessionStore: Send + Sync {
 
 /// Admin 会话持久化窄端口；数据库只保存 token 和 CSRF 摘要。
 pub trait AdminSessionStore: Send + Sync {
+    /// Admin 启动前持久撤销全部旧会话；重复执行不改写既有撤销时间，也不触及 Public。
+    fn revoke_all_admin(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
+
     fn create_admin(
         &self,
         record: AdminSessionRecord,

@@ -50,7 +50,9 @@ heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策�
 职责仅限于：加载配置、初始化 tracing、装配缓存、Admin session、拍卖生命周期/recovery 确认、
 数据库业务世界启停命令端口，以及 PostgreSQL 结算目录与 settlement/recovery 报告读取端口、绑定监听器、挂载
 `auction_http::admin_router()` 和返回启动错误。Admin Basic Auth 凭据从敏感 TOML 读取，
-session 与 CSRF 只以摘要形式持久化；生命周期命令在数据库事务内追加状态版本、审计和 realtime 事件。
+session 与 CSRF 只以摘要形式持久化。异步装配 session 服务前永久撤销所有旧 Admin 会话，失败
+阻断启动；每次重启后需重新登录。token 摘要绑定当前 actor/secret，不影响 Public，会话表结构不变；
+同库多实例须统一凭据，轮换前停止所有旧凭据实例。生命周期命令在数据库事务内追加状态版本、审计和 realtime 事件。
 结算报告和 recovery 报告只读取已提交事实；recovery 确认还会在 PostgreSQL Serializable 事务中
 重校验证据、激活退款、guarded relist 并追加审计；SQLite Lite 不提供这些完整档能力并返回明确的 501。
 

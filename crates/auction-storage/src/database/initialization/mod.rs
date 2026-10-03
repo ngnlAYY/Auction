@@ -54,7 +54,9 @@ async fn initialize(connection: &mut PgConnection) -> Result<(), FirstDatabaseIn
     if occupied {
         return Err(FirstDatabaseInitializationError);
     }
-    let mut migrator = sqlx::migrate!("../../migrations/postgres");
+    // 复用普通迁移的保留字兼容执行视图，保留历史 checksum；本连接已经持有迁移锁。
+    let mut migrator =
+        super::migrations::postgres_migrator().map_err(|_| FirstDatabaseInitializationError)?;
     migrator.set_locking(false);
     migrator.run(&mut *connection).await.map_err(|_| FirstDatabaseInitializationError)
 }
