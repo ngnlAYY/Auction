@@ -2,42 +2,32 @@
 
 [系统设计](../../DESIGN.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Public 设计](../auction-web-public/DESIGN.md)
 
-> 核对日期：2026-10-13。本文只描述管理端；依据当前源码、样式和已登记契约整理，不提出新的视觉改版。
-> 它不授权执行管理命令，也不代表源码已部署或通过运行验收。证据边界见 [状态说明](../../docs/status.md)。
+本页描述现有 Admin 界面；操作授权与运行证据另行确认，源码和线上制品边界见[状态页](../../docs/status.md)。
 
 ## 1. 定位与隔离
 
 管理端服务可信操作员，目标是清楚地区分当前事实、候选修改、已接受命令和外部最终结果。
 界面优先保证可审查、可追踪、可恢复，而不是复用 Public 的竞价看板或把危险动作包装为普通快捷按钮。
 
-| 边界 | owner |
-| --- | --- |
-| 管理页面、路由与认证内状态 | [src/app/](src/app/) |
-| 同源 Admin API、DTO 解码与命令提交 | [src/api/](src/api/) |
-| 管理端专属样式 | [assets/admin.css](assets/admin.css) |
-| 五语言界面文案 | [i18n/](i18n/) |
-| 浏览器构建入口 | [Dioxus.toml](Dioxus.toml) |
-| 默认内嵌宿主 | [auction-admin-api](../../apps/admin-api/README.md) |
-
-本 crate 不导入 `auction-web-public`。管理导航、身份、CSRF、配置草稿、危险动作和诊断文案由 Admin 独立持有。
-同名 `/rules` 等路径不是同一页面：Public 阅读已发布内容，Admin 校验和发布候选。
-共享层可以提供弹窗、分页与传输机制，但不能拥有管理权限或业务命令负载。
+管理页面及认证内状态由 [src/app/](src/app/) 拥有，API/命令提交由 [src/api/](src/api/) 拥有；
+专属样式为 [admin.css](assets/admin.css)，文案为 [i18n/](i18n/)，构建与嵌入入口见[模块说明](README.md)。
+Admin 不导入 Public。其 `/rules` 别名转到独立的校验/发布页；共享层不拥有权限、配置草稿或业务命令。
 
 ## 2. 信息架构
 
 | 页面族 | 入口示例 | 操作员关注点 |
 | --- | --- | --- |
-| 总览 | `/dashboard` | 单份安全快照、进程与 Worker、邮件轮询、凭据可用性及任务水位 |
+| 总览 | `/` | 单份安全快照、进程与 Worker、邮件轮询、凭据可用性及任务水位 |
 | 拍卖与拍品 | `/auctions`、`/auctions/{auction_id}/lots` | 创建、计划时间、生命周期、手工录入、起拍价及撤回 |
 | 结算与恢复 | `/settlement` | 已结算轮次、金额事实、交付及 recovery 状态 |
-| 邮件与投递 | `/mail`、`/deliveries` | 收件诊断、关联任务、轮询、重试及人工对账 |
+| 邮件与投递 | `/mails`、`/deliveries` | 收件诊断、关联任务、轮询、重试及人工对账 |
 | 用户与改名 | `/users`、`/renames` | 账号投影、登录 Key、论坛身份、黑名单及改名历史 |
 | 外部凭据 | `/cookies` | 论坛/游戏 Cookie 的安全录入、状态及手动只读校验 |
-| 规则内容 | `/rules` | 语言、版本、正文草稿、校验、预览与发布 |
+| 规则内容 | `/rules-content` | 语言、版本、正文草稿、校验、预览与发布 |
 | 运行配置 | `/config` | 候选配置、版本指纹、实际差异、影响范围及重启要求 |
 | 实时与审计 | `/outbox`、`/audit` | 安全事件元数据、lag/failure、受控 replay 及追加式审计读取 |
 
-这里列入口示例，不更改 canonical 路径、别名或导航顺序。完整登记见 [HTTP 契约](../../docs/contracts/routes.md)
+上表使用正式入口；兼容别名与导航顺序以源码为准。完整登记见 [HTTP 契约](../../docs/contracts/routes.md)
 和 [入口清单](../auction-http/src/assets/routes.rs)。`/status` 等保留入口不因存在路由就进入主导航。
 
 ## 3. 外壳、认证与布局
@@ -66,29 +56,15 @@
 
 ## 4. 视觉基底
 
-Admin 共享 [base.css](../auction-web-shared/style/base.css) 的深色背景、文字、强调色、系统字体与基础间距，
-但表单、状态徽章及高密度表格由 [admin.css](assets/admin.css) 独立拥有，不影响 Public。
-
-| 用途 | 管理端变量与当前值 | 使用边界 |
-| --- | --- | --- |
-| 表单底色 | `--color-input-bg: #3b3b3b` | 保留管理端中性灰控件语言 |
-| 输入边框 | `--color-input-border: #747474`、`--color-login-input-border: #858585` | 普通表单与登录分别处理 |
-| 危险操作 | `--color-danger-button: #b93838`、`--color-text-on-danger: #fff` | 按钮底色与错误文字色分离 |
-| 正常状态 | `--color-status-ok: #34d399` | 配合文字与低透明度衬底 |
-| 待处理或警告 | `--color-status-warn: #fbbf24` | 不等同于业务成功 |
-| 错误状态 | `--color-status-error: #f87171` | 失败反馈及需要注意的状态 |
-| 内容节奏 | `--admin-space-content: 1.25rem`、`--admin-text-table: 0.9rem` | 管理主区与高密度数据表 |
-
-数值为源码核对快照，修改仍由样式 owner 维护。深红危险按钮与白字的既有对比度约为 5.70:1，
-不能为了统一色板而直接换成较亮的错误文字色。
-断点沿用共享 `48rem`、`64rem`、`75rem`；浮层与弹窗使用共享层级机制，不新增外部字体或 UI 框架。
+共享 [base.css](../auction-web-shared/style/base.css) 的背景、文字、强调色、字体、间距与断点；
+表单、状态徽章和高密度表格由 [admin.css](assets/admin.css) 独立维护。
+控件沿用中性灰底，普通/登录输入框边界分开；危险按钮使用深红底/白字，不能直接套用较亮的错误文字色。
+正常、待处理和错误状态均配文字，待处理不代表成功。浮层使用共享层级，不引入外部字体或 UI 框架。
 
 ## 5. 表格、表单与确认
 
-业务表及规则预览的 Markdown 表占满容器，每张业务表独立登记总和为 100 的百分比列宽，见
-[表格布局契约](../../docs/table-layouts.md)。窄屏保持表头与行列结构，不做卡片化、固定最小宽度或横向滚动。
-长 ID、玩家名、状态与说明截断后可查看完整值；操作按钮可在动作列内换行。完整配置差异、诊断详情和
-JSON 文本允许在自己的查看区域换行，不能为了单行显示隐藏关键审查信息。
+表格遵守[布局契约](../../docs/table-layouts.md)：100% 容器宽、独立百分比列宽、窄屏保留行列，
+长值截断后可查看全文，操作按钮可换行。配置差异、诊断和 JSON 在自己的查看区域换行，不隐藏审查信息。
 
 命令交互遵循：
 
@@ -179,16 +155,7 @@ Admin 默认 `zh-CN`，支持 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`。界面文
 
 ## 9. 构建与维护
 
-```bash
-just i18n-check
-cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
-just web-build-admin
-```
-
-前两项为静态检查，第三项只生成 Admin 页面产物。稳定目录为
-`target/dx/build/auction-web-admin/web/public/`；上线还需重新编译并部署启用 `web-embed` 的 Admin 宿主。
-分体 Public 制品不得包含这些资源；可选合并制品也必须保持两个 router 的资源隔离。
-
-不新增 React、TypeScript、Node 运行时或第二套前端构建链。改动同步模块 README、文案及受影响的
-契约；涉及共享控件时核对 Public，但不以统一外观为由合并两个业务外壳。
-默认不新增或运行单元、集成、功能、端到端、浏览器测试或手工冒烟；静态通过不能证明真实外部写入成功。
+静态检查用 `just i18n-check` 和 `cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown`；
+`just web-build-admin` 只生成 Admin 页面，上线还需重编并部署启用 `web-embed` 的宿主，见[开发指南](../../docs/development.md)。
+分体 Public 不含管理资源，合并制品也保持 router 隔离。修改同步模块说明、五语言与受影响契约，
+共享控件变化核对两端；技术栈和默认测试限制见[协作规范](../../AGENTS.md#web-规则)。

@@ -2,10 +2,8 @@
 
 [文档导航](../../docs/README.md) · [恢复 owner](../../apps/auctionctl/src/bootstrap/postgres_restore) · [重建 owner](../../apps/auctionctl/src/bootstrap/postgres_rebuild) · [v28 手册](LEGACY_V28_ADOPTION.md)
 
-适用于当前 Auction schema 的备份、显式空库准备及单事务恢复；历史 v28 使用另一套入口。
-
-本文冻结 Auction Rust 仓库拥有的 PostgreSQL 备份、显式空库重建、恢复和证据边界。它不替代
-部署平台的维护窗口、进程停止、异地备份、加密、保留期限和恢复演练。
+适用于当前 Auction schema 的备份、显式空库准备和单事务恢复；历史 v28 使用专用入口。
+维护窗口、进程停止、异地备份、加密、保留期限和恢复演练由部署方负责。
 
 ## 本页导航
 
@@ -19,8 +17,8 @@
 
 ## 使用范围与结果判读
 
-本页命令供获准维护窗口中的操作员执行；库名、安装路径、证据文件名和日期均为示例，执行前替换为精确目标。
-阅读或更新文档不执行命令。源码与原始证据共同决定结果，进程退出或文件存在不能单独证明数据库操作成功。
+命令只供获准维护窗口执行；库名、路径和日期须替换为精确目标，输出文件不得预先存在。
+文档维护不执行命令；进程退出或文件存在不能单独证明数据库操作成功。
 
 | 阶段 | 成功依据 | 失败后的边界 |
 | --- | --- | --- |
@@ -79,22 +77,21 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   /opt/auction/bin/auctionctl postgres-rebuild \
     --confirm-database auction_production \
     --mode empty-for-restore \
-    --backup-manifest /secure/auction-backups/auction-2026-08-23.dump.manifest
+    --backup-manifest /secure/auction-backups/auction-2026-08-23.dump.manifest \
+    --maintenance-secrets-file /etc/auction/postgres-rebuild.secret.toml
 ```
 
-预检要求目标仍是当前且 clean 的 Auction schema，并检查 PostgreSQL 18 主节点、零外部 session、
-零 prepared transaction、零 subscription/活动 logical slot、目标 owner/`CREATEDB` 权限、locale、
-tablespace、自定义 database ACL 和 database/role setting。自定义 tablespace 要求维护角色具有显式
-`CREATE` 权限；`pg_default` 使用 PostgreSQL 允许 `CREATEDB` owner 采用的隐式默认路径，不要求为了
-重建而额外授予全局 tablespace 权限。维护连接从 Worker `database_url` 派生到
-同集群 `postgres` 数据库；生产环境推荐改用 owner-only 的独立 `--maintenance-secrets-file`，其
-高权限 URL 必须连接同 endpoint/TLS profile 的 `postgres` 数据库，且不会进入命令行、日志或
-receipt。应用和维护 URL 均须显式写出单一 host、非零 port（包括默认 5432）和数据库名；端点
-由实际 SQLx 解析结果比较，不能依赖 `PGHOST`/`PGPORT` 的环境默认值。IPv6 字面量在 URI 中保留
-方括号，实际 SQLx TCP host、libpq 的 `PGHOST` 和临时密码文件统一使用去括号的地址；密码文件
-继续转义冒号。查询参数仅接受
-`application_name`、`sslmode`；请用 `sslmode` 替代 SQLx 忽略的 `ssl=true`，并移除其同样忽略的
-`connect_timeout`。两边 `sslmode` 必须相同或同时省略；未配置独立维护文件时只替换数据库名。自定义 ACL/setting 会失败关闭，因为删库后静默丢失这些安全策略比拒绝自动化更危险。
+预检要求当前 clean Auction schema、PostgreSQL 18 可写主节点、零外部 session/prepared transaction/
+subscription/活动 logical slot；维护角色须是 superuser，或同时为目标 owner 并有 CREATEDB。
+自定义 database ACL 或 database/role setting 失败关闭，避免重建丢失安全策略。
+自定义 tablespace 需显式 CREATE 权限，pg_default 不需额外全局授权。
+
+维护连接默认从 Worker URL 仅替换库名为 postgres；生产宜使用 owner-only 的
+[`--maintenance-secrets-file`](../config/README.md#postgresql-维护凭据)，只连接同 endpoint/TLS profile。
+应用和维护 URL 均显式提供单一 host、非零 port 和库名；不依赖 PGHOST/PGPORT。
+SQLx/libpq/临时 pgpass 使用去方括号的 IPv6 host，pgpass 继续转义冒号。
+查询参数只接受 application_name、sslmode；拒绝驱动忽略的 ssl=true、connect_timeout。
+双方 sslmode 必须相同或同时省略。dry-run 与实际执行必须使用同一配置和维护凭据。
 
 预检通过后，实际准备同名空库必须使用新的 receipt 路径和逐字确认短语：
 
@@ -110,14 +107,16 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --receipt /secure/auction-evidence/rebuild-2026-08-23.json
 ```
 
-命令在取得集群 advisory lock 并二次校验 archive/manifest 后执行
-`DROP DATABASE ... WITH (FORCE)`，再以 `template0`、原 owner、UTF8、locale provider、tablespace
-和 connection limit 重建，并重新连接证明目标为空。目标为 `pg_default` 时 DDL 省略显式
-`TABLESPACE` 子句，以符合普通 `CREATEDB` owner 的 PostgreSQL 权限语义；非默认 tablespace 仍逐字
-保留并要求前述权限。`empty-for-restore` 强制要求 backup manifest，
-不能使用 unrecoverable ephemeral 豁免。不要先运行 `auctionctl migrate`：恢复目标必须没有 Auction
+命令持有集群 advisory lock、二次校验备份后执行 `DROP DATABASE ... WITH (FORCE)`，
+以 template0、原 owner、UTF8、locale provider、tablespace、connection limit 重建并证明空库。
+pg_default 省略显式 TABLESPACE，其他 tablespace 保留。`empty-for-restore` 强制 backup manifest，
+不接受 ephemeral 豁免。不要先迁移：恢复目标必须没有 Auction
 migration 表，也不能存在用户 schema、类型、关系、函数、扩展、publication、subscription、
 large object 或 default ACL。
+
+独立的 `--mode fresh-schema` 则在空库上执行当前迁移，仍要求上述停机、目标确认和回执。
+只有明确可丢弃的一次性数据库可用 `--allow-unrecoverable-ephemeral` 加
+`--confirm-ephemeral 'EPHEMERAL <数据库名>'` 替代备份；该豁免不得用于持久数据或恢复流程。
 
 新回执格式为 `auction-postgres-rebuild.v2`；历史 `auction-postgres-rebuild.v1` 不改写。v2 的 `database_dropped`、
 `database_recreated` 和 `forced_drop` 可为 `true`、`false` 或 `null`，`null` 表示未取得完成证明，
@@ -181,15 +180,16 @@ schema 校验或 receipt 发布失败，数据库不再是空库；保持全部�
 
 ## 5. 前向迁移与重新放量
 
-旧 archive 的 schema 版本可以低于当前二进制，但不能高于当前内嵌迁移版本。恢复成功后先执行正常
-前向迁移，再检查 readiness：
+旧 archive 可低于但不能高于当前内嵌迁移版本。恢复成功后保持停机，按部署方式前向迁移。
+分体部署使用同一 systemd unit 和状态目录参数：
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/public.toml \
   /opt/auction/bin/auctionctl migrate
 ```
 
-随后按 Worker → Admin → Public 顺序启动，并检查两个 HTTP 进程的 `/health/live` 和
-`/health/ready`。保留 archive、manifest、preflight、restore receipt、迁移输出、操作员、维护窗口和
+合并部署改由同一服务账号执行 `auctionctl migrate-managed --config-dir <绝对配置目录>`，
+不得用分体命令绕过 supervisor 锁。随后按[部署手册](README.md#启动顺序)启动并检查 Worker control
+与两端 HTTP readiness。保留 archive、manifest、preflight、restore receipt、迁移输出、操作员、维护窗口和
 最终 readiness 结果。任何切换连接、回收恢复点或 retention mutation 都需要独立授权；
 `postgres-rebuild` 的授权只覆盖命令中精确确认的同名数据库和该次不可覆盖回执。

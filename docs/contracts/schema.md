@@ -16,108 +16,52 @@
 
 ## 基线与 owner 规则
 
-本清单定义 Auction Rust 当前数据库对象的逻辑 owner 与部署档位。权威 SQL 来自
-`migrations/postgres/`、`migrations/sqlite/` 和 `auction-storage` 的查询/映射；仓库外的 schema、
-迁移编号或实现源码不属于本项目契约。
+权威 SQL 来自 `migrations/postgres/`、`migrations/sqlite/` 和 `auction-storage` 的查询/映射。
+SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
+“两者”表示 PostgreSQL 与 SQLite Lite 共有对象；“完整档”只承诺 PostgreSQL。表存在不授予
+完整写能力，例如 Lite 的 `auction_submissions` 仅支持来源及生命周期读取。
 
-这里区分两种 owner：
-
-- SQL owner：所有 Rust migration、查询和数据库记录映射统一由 auction-storage 持有；
-- 逻辑 owner：决定表中业务事实含义的领域/应用/适配器边界。它不是当前代码已经
-  实现的证明，而是变更时必须遵守的唯一事实 owner。
-
-档位含义：
-
-- 两者：目标是 PostgreSQL 完整档与 SQLite Lite 档都支持，但 Lite 仍受单主机、单写者和
-  能力子集约束；
-- 完整档：只承诺 PostgreSQL；SQLite 不得因为误建表而被误认为支持该能力。
-
-本表冻结当前对象的归属和档位；提交 Rust migration 前，必须把 Lite 表项与 SQLite 事务、
-锁等待、备份和 Worker 并发约束再次核对。
-
-当前提供 PostgreSQL `000001` 至 `000039`，覆盖核心竞价、结算/履约、生命周期、
-代理历史、身份/外部命令、A32 凭据兼容修正、恢复/可观测性和论坛同步对象；SQLite 提供
-`000001` 至 `000013` 作为共有能力子集及生命周期/领先时间/lot 结束时间、分类编号与用户论坛账号
-身份修正。`bid_proxies` 不再作为第二份
-权威表维护，PostgreSQL 与 SQLite 均以只读兼容视图投影新授权模型；写入只进入
-`bid_proxy_authorizations` 及其历史表。完整适配器和 Lite 串行写入的 owner 已建立；具体实现范围与未完成的运行验收见[状态说明](../status.md)。
-
+当前迁移范围为 PostgreSQL `000001`—`000039`、SQLite `000001`—`000013`。
+Lite 仍受单主机、串行写、锁等待、备份和单 Worker 约束；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
 
-PostgreSQL `000037` 与 SQLite `000012` 从追加式接受事实修正未结算 live lot 的连续领先
-起点，覆盖同一命令内普通出价后被快速代理反超的情况；不修改已结算金额、竞价事实或审计。
+所有修复只追加迁移，不改写已发布 SQL。以下边界影响升级与历史解释：
 
-PostgreSQL `000038` 只把 ready 流拍义务下从未领取、未冻结、没有关联 delivery 的初始 pending
-execution 从 Return 转为 Send，并追加迁移审计。已冻结、已有尝试、结果未知和历史完成记录
-保持原事实，运行时隔离旧 Return，不能自动重写投递身份或重发。
-
-PostgreSQL `000039` 与 SQLite `000013` 为 `scheduled_rounds` 增加 nullable `schedule_snapshot`，
-由应用调度 owner 定义冻结的 IANA 时区与三个本地时间，存储 owner 分别保存为 JSONB/TEXT。
-带来源的新轮次按下一本地周转换 UTC；历史及无时区输入的手工轮次保持 NULL 与原 UTC 间隔，
-不能使用当前配置猜测历史来源。
-迁移同时只为可唯一匹配成功 Final 命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次补齐完成 fence；
-缺失或歧义证据保持原状态，不重放生命周期或外部动作。
-
+| 对象/迁移 | 可自动修复的范围 | 必须保留的历史边界 |
+| --- | --- | --- |
+| 连续领先时间：PostgreSQL `000013`/`000037`，SQLite `000007`/`000012` | 由追加式 bid 事实证明的 `leader_since`；后者覆盖未结算 live lot 同命令被快速代理反超 | 不猜测无证据时间，不改结算金额、bid 或审计 |
+| 流拍寄回：PostgreSQL `000038` | ready 义务下从未领取、未冻结、无 delivery 的初始 pending execution 从 Return 转 Send，并追加审计 | 已尝试、冻结、未知或完成记录保持原身份；旧 Return 进入人工核对，禁止自动重寄 |
+| Final 完成：PostgreSQL `000012`/`000039`，SQLite `000006`/`000013` | 持久化 Final fence；后者仅补齐唯一匹配成功命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次 | 缺失或歧义证据不补写，不重放生命周期或外部动作 |
+| 排期来源：PostgreSQL `000039`，SQLite `000013` | nullable `scheduled_rounds.schedule_snapshot`，分别为 JSONB/TEXT，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
 
 ### 迁移语义与兼容边界
 
-核心竞价切片额外把竞价规则快照字段放在 `auctions`，把 `leader_proxy_last`、慢速代理
-调度字段和状态版本放在 `lots`；`auction-storage` 的 PostgreSQL 事务适配器只读取并更新
-这些权威字段，不在内存中另存一份竞价状态。PostgreSQL `000012` 与 SQLite `000006` 为
-持久化轮次补齐 Final phase 完成 fence；PostgreSQL `000013` 与 SQLite `000007` 只修正可由
-追加式 bid 事实证明的 `leader_since`，无法证明时不猜测历史。PostgreSQL `000014` 先为早期
-Rust schema 中可唯一映射的既有 draft 回填 intake target，再追加拍卖身份、前序顺序和
-draft/target 跨行一致性触发器；这是完整档数据库防线，不要求 SQLite 复制 PostgreSQL 的延迟
-约束触发器机制。
-PostgreSQL `000015` 统一 operations alert signal identity、批次 lease/retry/terminal 形状与稳定
-错误码；普通退避保持空错误码，第三次 Create 失败固定为 `failed/retry_exhausted`，signal cooldown
-只在批次和 delivery 原子确认入队后推进。
-PostgreSQL `000016` 为论坛主题写入结果未知后的人工再授权新增
-`forum_sync_admin_commands`：精确标题只读对账未命中时，只有幂等运维命令和追加审计可以打开下一次
-远端 POST；该账本不保存 Cookie、远端响应或任意敏感配置。
-PostgreSQL `000017` 固定 Isekai carrier 的派发 world；`000018` 为 live/sold lot 恢复非空有效结束
-时间约束；`000019` 只为已先更新同一 lot 投影的 v28 兼容 INSERT 补齐遗漏的 bid 有效结束时间，当前
-显式写入和无法逐字段证明属于同一事实的行都不经过该兼容分支；`000020` 扩展 operations alert
-kind/identity 闭集，为已证明的 MoogleMail 退信提供独立提醒，同时保留总人工对账 signal；
-`000021` 保存 Worker 发布的非敏感启用状态和成功扫描水位，Admin 不从 signal 是否为空推断配置；
-`000022` 解除配置状态发布时间与扫描水位之间不存在的先后约束，状态发布仍按自身时间单调校验，
-成功扫描只推进自己的水位；`000023` 扩展 recovery 余额状态闭集，以 `busy` 表达 HV 账号仍有效
-但因处于战斗页而暂时无法读取 Item Shop 的可恢复状态；PostgreSQL `000024` 与 SQLite `000009`
-为 `lots` 增加不可变 `category_key/category_number`：`lot_number` 继续作为场次内全局顺序，
-用户可见编号则在 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy 各分类内从 1
-独立递增。PostgreSQL 还为已开始发布的论坛主题冻结历史全局编号方案，避免改变既有帖子命令。
-PostgreSQL `000025` 追加固定 #1 拍卖目录与 #2 系统日志的远端 post ID、系统日志正文、内容版本、
-同步时间和独立内容刷新 claim/lease/fencing；历史 published 行保持空身份，必须由 Worker 读取远端
-主题对账，不以 thread ID 或楼层位置伪造 post proof。
-论坛 `showuser` 数字 ID 同时写入 `forum_bidder_identities.external_account_id` 和
-`users.forum_account_id`，作为稳定、唯一且规范十进制的论坛账号键；论坛用户名与 MoogleMail
-收件人共用可变的 `users.username`，映射表 `display_name` 只保存论坛侧快照及
-`forum_only/mm_bound` 生命周期，不是第二份名称权威源。历史 `users.game_player_id` 只保留为
-`username` 的数据库兼容镜像，不进入新业务 DTO。首次论坛竞价可以在 Users-owner Serializable
-事务内建立 revoked-key `forum_only` 用户，不生成第二套影子用户名或 active Key；后续 MM 注册按
-当前名称恢复并激活该主体。PostgreSQL `000026` 保证同一 world/provider 下一个 Users 主体只能绑定
-一个论坛账号；`000027` 再把该稳定账号归属提升到 Users 主体，并用延迟约束保证 Users 与该主体全部
-论坛映射在事务提交时一致；跨世界复用必须沿用相同数字键。
-`000028` 为 `auction_forum_bid_commands` 记录可证明的真实楼层号，历史未知值保持空；`000029`
-为固定帖刷新增加最近成功时间、最近失败时间和有界安全错误码，并建立追加式
-`forum_identity_history` 保存论坛数字账号与名称变更的新旧快照。
-`000030` 在建立索引前拒绝仍有同类重复 active 行的数据库，再用 partial unique index 保证
-`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录。迁移不静默选择保留项；已有重复
-凭据必须先通过 Admin 的幂等状态命令停用，使命令账本和追加审计保持完整。`000031` 为
-`auction_forum_sync` 增加真实连续处理楼层；历史行从 #2 安全起步，必须由后续完整主题扫描推进，
-不能从固定帖内容版本或远端 post ID 猜测回填。
-PostgreSQL `000032` 把世界级录入目标从仅 `draft` 扩展为唯一的 `draft|preview` 当前场次：Preview
-继续接收并物化新装备，Open 才原子创建后继 Draft、登记下一轮调度并迁移录入目标；若 Preview 被取消，
-取消事务也必须建立后继 Draft，避免世界失去可用录入目标。迁移会拒绝同世界 Preview 与
-后继 Draft 并存窗口，必须在窗口外升级，不能猜测应折叠或保留哪一期。
-PostgreSQL `000034` 允许代理降额保持 `final_fast` 状态和 Fast 模式；仍要求旧新状态一致、
-上限严格下降、模式不变和原因为空，其他代理转换矩阵分支保持既有语义。
+当前结构按下列语义解释，迁移编号用于定位 SQL，不代表另一套业务版本：
 
-canonical PostgreSQL v28 历史格式到当前 schema 的转换由专用 `legacy_v28` bridge 持有，不修改
-来源 migration，也不把来源版本号直接映射成 SQLx 版本。它只在精确格式预检和外部备份证据通过后补齐
-Rust 需要的生命周期列、lot 领先投影、逐 bid 截止事实、代理兼容表/视图及索引，并为等价覆盖的
-SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向前执行。
+- 拍卖身份、前序顺序及唯一 Draft/Preview 录入目标由完整档延迟约束保护（`000014`/`000032`）。
+  Preview 继续接收并物化装备，Open 或取消 Preview 才建立后继 Draft 并移动目标；升级时同世界
+  Preview 与后继 Draft 并存会被拒绝，不自动选择保留哪一期。
+- `bid_proxies` 在两后端都是只读兼容视图；代理写入只进入 `bid_proxy_authorizations` 和历史表。
+  `final_fast` 降额保持 Fast 模式、原状态及空终止原因，只能严格降额（PostgreSQL `000034`）。
+- live/sold lot 必须有有效结束时间。PostgreSQL `000019` 仅为已先更新同 lot 投影、逐字段可证明的
+  v28 INSERT 补齐 bid 截止事实，不干预当前显式写入。Isekai carrier 的派发 world 由 `000017` 冻结。
+- 分类编号覆盖 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy；每类从 1 递增。
+  内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`、SQLite `000009`）。
+- 论坛 `showuser` 数字 ID 为规范十进制，同步到 `users.forum_account_id` 与
+  `forum_bidder_identities.external_account_id`。一个 Users 主体跨 world/provider 只能沿用同一账号键；
+  延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，
+  `game_player_id` 只是名称兼容镜像。首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册
+  按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
+- 固定 #1/#2 的远端 post ID 必须真实对账；历史 published 行没有身份时保留空值。
+  `auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从 #2 安全起步，只由完整主题扫描推进，
+  不由 thread/post ID 或内容版本推算。账号与名称变化追加到 `forum_identity_history`（PostgreSQL `000025`—`000031`）。
+- `mail_cookie`/`forum_cookie` 各自全局最多一条 active；`000030` 遇重复行拒绝迁移，必须先通过 Admin
+  幂等停用并保留审计，不静默删除或选择凭据。告警状态与重试形状见[实时事件与运维告警](#实时事件与运维告警)。
+
+canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预检和外部备份证据通过后，
+补齐生命周期、领先投影、逐 bid 截止、代理兼容表/视图与索引，为等价覆盖的 SQLx `1..=5`、`7`
+写入当前 checksum，再执行其余追加迁移；不修改来源 migration 或把来源版本号当作 SQLx 版本。
 
 ## 基础身份、配置与审计
 
@@ -149,12 +93,10 @@ Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`
 才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，
 也不将心跳 details 原文公开给浏览器；SQLite Lite 不提供 Public 论坛能力。
 
-A32 复用现有身份/外部命令迁移创建的 `credential_keys` 与
-`credential_admin_commands`，由 `000009_credential_admin_compat` 补齐 `forum_cookie` 闭集，
-并把命令账本到凭据行的引用改为 `ON DELETE SET NULL`。凭据密文本体由 Rust 的
-`AdminCredentialEnvelope` 约束 nonce、key id 和指纹；`credential_admin_commands.result_payload`
-只保存安全投影或删除结果，不能保存 Cookie 明文。该能力只承诺 PostgreSQL 完整档，Worker
-通过独立数据密钥读取唯一 active Cookie，SQLite 不复制这些完整档表。
+A32 使用 `credential_keys` 与 `credential_admin_commands`；后者到凭据行的引用为
+`ON DELETE SET NULL`（`000009_credential_admin_compat`）。`AdminCredentialEnvelope` 校验 nonce、
+key id 和指纹，账本只保存安全投影/删除结果。Worker 用独立数据密钥读取唯一 active Cookie，
+Cookie 明文不进入账本，SQLite 不提供该完整档能力。
 
 ## 拍卖与竞价核心
 
@@ -164,7 +106,7 @@ A32 复用现有身份/外部命令迁移创建的 `credential_keys` 与
 | equipment | auction-domain + auction-application：auction | 两者 | 标的事实与规范化装备属性 |
 | auction_preview_items | auction-application：auction | 两者 | 预览阶段的累积物化展示项；Preview 期间新录入装备按新 revision 追加 |
 | lots | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
-| auction_commands | auction-application：command-ledger | 两者 | 所有可变命令的幂等账本 |
+| auction_commands | auction-application：command-ledger | 两者 | 拍卖、竞价、世界启停与 realtime replay 等共用命令账本；其他 owner 使用下列专用账本 |
 | bids | auction-domain + auction-application：auction | 两者 | 追加式竞价事实 |
 | bid_proxies | auction-storage：兼容视图 | 两者 | 历史代理字段的只读兼容投影，非权威状态 |
 | bid_proxy_authorizations | auction-domain + auction-application：auction | 两者 | Fast/Slow 代理授权状态机 |
@@ -177,29 +119,22 @@ A32 复用现有身份/外部命令迁移创建的 `credential_keys` 与
 | equipment_secrets | auction-application：keymanagement | 完整档 | 标的敏感来源密文 |
 | auction_schema_identity | auction-storage：migration | 两者 | 迁移/schema 身份和兼容检查 |
 
-当前 Rust 迁移中的 `auctions.policy_snapshot` 由 PostgreSQL `000002_settlement_core` 建立，
-保存创建拍卖时冻结的 schema v4 结算/恢复及竞价策略。它与 `default_start_price`、软截止、
-取消截止和 slow 间隔等遗留规则列在同一创建事务中写入；配置更新不会回溯改变已创建拍卖。
-竞价和取消事务在锁内读取该快照，恢复 PPM、代理开关/默认模式/次数上限和 final phase 参数。
+`auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
+`default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。
+竞价和取消在锁内读取快照中的 PPM、代理开关/默认模式/次数上限及 final phase 参数；
+`lots` 的 `leader_proxy_last`、慢速调度和状态版本同样是数据库权威状态。
 
 两后端应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与
 `bid_proxy_authorization_transitions.created_at` 的新写入显式绑定计划统一的锁后数据库时间，
 与命令结果内的转换时间一致；不依赖列默认值另行取时。既有表、迁移及历史记录保持不变。
 
-A40/A41 不新增表或修改迁移：业务世界读取复用 `worlds`；启停命令按 world-first 锁序读取
-`worlds`，以 `auctions` 与 `scheduled_rounds` 判定关闭 blocker，并把结果写入既有
-`auction_commands` 与 `audit_records`。PostgreSQL 完整档在一个 Serializable 事务中完成状态、
-幂等与审计；SQLite Lite 只读取 `worlds`，不声明该 mutation capability。
+管理命令复用既有对象，不另建状态表：
 
-A38 不新增表或修改结算事实 schema：`auction_early_settlement` 继续写入通用
-`auction_commands`，理由与动作上下文进入追加式 `audit_records`，截止时间只更新 `auctions`/`lots`
-现有字段，并追加已登记的 realtime 事件。事务提交后仍由 PostgreSQL settlement scheduler 建立
-workflow 并写入下方结算、义务与恢复表；SQLite Lite 没有该 owner，因此不声明 capability。
-
-A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 复用 `auctions`、`lots`、
-`auction_commands`、`audit_records`、`realtime_streams`/`realtime_events`，撤回时再写入下方
-已有的 `settlement_obligations` 与 `settlement_obligation_fulfillments`。应用层仍只通过窄端口
-决定动作和事务顺序，不能在 HTTP 或页面层直接访问这些表。
+| 命令 | 完整档事务写入边界 |
+| --- | --- |
+| A40/A41 世界目录/启停 | `worlds` 先锁，仅从启用变为关闭时检查 `auctions`/`scheduled_rounds` blocker，状态、`auction_commands`、`audit_records` 同事务提交；Lite 只读 |
+| A38 提前结算 | `auction_early_settlement` 写通用账本，理由写审计，更新 `auctions`/`lots` 截止并追加 realtime；提交后由 settlement scheduler 建 workflow/义务，Lite 不提供 |
+| A13 draft lot 修改 | 复用 `auctions`、`lots`、通用账本、审计与 realtime；撤回另写 `settlement_obligations`/`settlement_obligation_fulfillments` |
 
 ## 结算、恢复与交付
 
@@ -223,7 +158,7 @@ A13 不新增表：Admin draft lot 修改由 `auction-storage` 作为 SQL owner 
 | 表 | 逻辑 owner | 档位 | 关键职责 |
 | --- | --- | --- | --- |
 | inbound_mail | auction-storage：mail projection | 完整档 | 入站邮件事实索引及 Admin 审查安全投影；`sender`/`subject` 为可空标量，`message_display` 为受限脱敏快照 |
-| mail_commands | auction-integrations + auction-jobs：mail | 完整档 | 邮件发送 outbox/命令 |
+| mail_commands | auction-application + auction-jobs：mail intake | 完整档 | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
 | mail_poll_state | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
 | mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |

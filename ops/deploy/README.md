@@ -1,13 +1,10 @@
 # 部署与发布手册
 
-[文档导航](../../docs/README.md) · [CLI 参数](../../apps/auctionctl/README.md) · [发布装配](../../ci/release.sh) · [systemd 模板](systemd/README.md) · [备份与恢复](RECOVERY.md) · [v28 接管](LEGACY_V28_ADOPTION.md)
+[文档导航](../../docs/README.md) · [CLI](../../apps/auctionctl/README.md) · [配置](../config/README.md) · [systemd](systemd/README.md) · [恢复](RECOVERY.md) · [v28 接管](LEGACY_V28_ADOPTION.md)
 
-按当前 Public/Admin/Worker 进程边界说明默认分体部署及可选合并 supervisor 的安装、预检、制品和运维入口。
-部署前必须准备真实配置与维护环境；PostgreSQL 单机首次部署可通过独立设置页生成配置，
-但仍需先准备 PostgreSQL 数据库和应用账号。
-
-本目录不提供安装脚本，也不会在部署时自动覆盖数据库。分体 systemd 总控与合并 supervisor 使用不同的
-进程所有权及迁移门禁；不得混用，外部脚本或未登记的单体启动流程不能直接套用。
+默认按 Public/Admin/Worker 分体部署，可选 Linux/PostgreSQL 单主机 supervisor。
+部署前准备真实配置、PostgreSQL 数据库与应用账号；本目录提供审阅模板，不自动安装或覆盖数据库。
+以下命令供获准维护窗口执行，阅读或更新文档不授权启动、迁移或行为验证。
 
 ## 本页导航
 
@@ -21,29 +18,21 @@
 
 ## 可选单文件部署
 
-`just release-check --single-binary` 生成 `target/release-package-single/` 下的归档，仅含
-`auction-server` 与独立 `auctionctl` 两个可执行文件。默认分体发布及下文原有四程序流程不变。
-单文件服务仍派生三个独立角色进程，不合并 Public/Admin 的端口、权限或路由。
+`just release-check --single-binary` 生成 `target/release-package-single/`，仅含 auction-server、auctionctl
+两个可执行文件；server 仍派生三个独立角色进程。以服务账号执行
+`auction-server --config-dir /var/lib/auction/config`，仅配置目录明确不存在时开放首次向导。
+网页明确确认后才保存、初始化预先准备的专用空库并启动；已有配置普通启动只校验 schema，不隐式迁移。
 
-首次以实际服务账号运行 `auction-server --config-dir /var/lib/auction/config`，父目录须受信且
-归该账号所有，配置目录必须不存在。网页验证部署码并明确确认后，保存配置、初始化预先准备的
-专用空 PostgreSQL 库、顺序启动 Worker → Admin → Public。已有配置启动只校验 schema，不隐式迁移。
-合并部署的路径、显式 HTTPS 远程设置、失败处理与升级命令详见 [server 手册](../../apps/server/README.md)。
-使用 [单 unit 模板](systemd/auction-server.service.example)，不要同时启用分体 unit 或总控；
-配置保存不代表所有角色就绪。设置响应安全头、请求/退出预算与首次迁移兼容层已在源码修复，
-[状态说明](../../docs/status.md#源码核对发现的实现缺口)仍保留待补运行证据，静态构建不替代目标主机验收。
+路径/锁、远程 HTTPS 设置、失败处置和 `migrate-managed` 见[server 手册](../../apps/server/README.md)。
+只启用[合并 unit](systemd/auction-server.service.example)，同库不得并行运行分体或远端角色。
+合并锁和分体 systemd 停机门禁互不替代；保存响应、静态构建和运行验收须分别判读。
 
 ## 推荐目录
 
-默认分体生产部署可以采用以下目录布局；合并部署使用上节的配置与私有运行目录。
-实际安装路径可以改变，但同一部署中的配置引用、权限和
-反向代理上游必须保持一致：
+分体部署示例：
 
 ```text
-/opt/auction/bin/auction-public-api
-/opt/auction/bin/auction-admin-api
-/opt/auction/bin/auction-worker
-/opt/auction/bin/auctionctl
+/opt/auction/bin/                 # Public、Admin、Worker、auctionctl
 /etc/auction/common.toml
 /etc/auction/public.toml
 /etc/auction/admin.toml
@@ -52,38 +41,23 @@
 /etc/auction/admin.secret.toml
 /etc/auction/worker.secret.toml
 /etc/auction/runtime/admin.toml
-/var/lib/auction/deployment/       # systemd 总控锁与无敏感信息的启动回执
-/var/lib/auction/                  # SQLite Lite 时还保存本地数据库文件
-/run/hv-auction/                  # Public/Admin HTTP Unix socket 与运行时目录
-/run/hv-auction/worker/           # Worker control socket 等运行时文件
+/var/lib/auction/deployment/       # 总控锁与启动回执
+/var/lib/auction/                  # Lite 本地数据库或已配置的私有运行数据
+/run/hv-auction/                  # Public/Admin HTTP Unix socket
+/run/hv-auction/worker/           # Worker control socket
 ```
 
-三个角色文件必须引用同一份只读 `common.toml`；`*.secret.toml` 只能由对应运行账号读取，父目录
-不得允许 group/world 写入；Admin runtime 文件只保存非敏感设置，权限按 `0640` 管理。不要把连接串、Cookie、登录 key 或数据密钥
-写入 unit 文件、命令行参数、Caddyfile 或日志。
+三个 common_file 指向同一只读普通文件；敏感 TOML 仅对应服务账号可读，父目录不得 group/other 可写。
+Admin runtime 按 0640 管理。连接串、Cookie、登录 key、数据密钥不得进入 unit、参数、代理配置或日志。
 
-管理页接管 `operations` 任一组前，先安装支持该文档的 Admin/Worker，并让两者引用同一份
-runtime 文件；部署预检会拒绝路径不同或有效拍卖模板/排期不一致的组合。六组 `managed` 默认
-关闭，保留已有部署参数。保存经济模板或排期后需重启 Admin 与 Worker；论坛、告警和 Worker
-吞吐组及邮件调度/处理组只需重启 Worker。保存不会热改当前进程，也不会回写既有拍卖快照或持久任务。
-邮件调度由 `operations.mail` 接管时仍保留部署侧的远程地址、凭据、邮箱身份和全局启用开关。
-若 Admin 启动时报告 runtime 文件与已加载配置不一致，说明恢复或并发编辑已改变文件；先核对
-恢复后的候选，再重新执行部署重启，不能把旧进程的存活视为新配置已经生效。
-
-三个角色还必须指向同一数据库目标，允许使用不同数据库账号。PostgreSQL 在各敏感 TOML 中显式
-填写 `[database]` 的 host、port、username、password、name（或使用兼容 URL），使用同一规范主机名或同一实际 Unix socket 目录；部署预检按 SQLx
-解析后的目标比较，拒绝未知参数和 `options` 会话覆盖。SQLite 部署使用绝对磁盘路径；相对路径
-会因 CLI/systemd 的工作目录可能不同而被拒绝，内存库与自定义 VFS 也不能用于三进程部署。
+三角色同一数据库目标、可用不同账号。PostgreSQL 使用统一规范主机名或 Unix socket 目录并显式填写 host/port；
+预检按 SQLx 解析目标比较，拒绝未知参数和 options 覆盖。Lite 必须绝对本地磁盘路径，拒绝内存库、自定义 VFS 和相对路径。
+Admin/Worker 的 runtime 共享、operations 接管及重启范围统一见[配置手册](../config/README.md#runtime-共享与重启)。
+恢复后 runtime 指纹与已加载值不同须重新部署重启，不能以旧进程存活证明新配置生效。
 
 ## 发布制品
 
-生产安装应使用 `just release-check` 在干净工作树生成的 PostgreSQL 完整档 archive，而不是直接复制
-某次 `cargo build` 的 `target/release`。默认分体包只包含四个发布二进制（仅 Public/Admin 内嵌页面）、
-配置/敏感配置示例、systemd/Caddy 模板、恢复文档、retention policy、依赖摘要和 Web payload 清单；
-不会包含数据库、Cookie、`.keyenv`、日志或运行时目录。archive 内 `SHA256SUMS` 绑定全部批准文件，外层
-`target/release-package/SHA256SUMS` 再绑定 archive 与 `DEPENDENCIES.md`。
-完整档归档中的 `config/examples/secrets.toml.example` 使用 PostgreSQL `[database]` 五字段模板；
-填写主机、端口、账号、密码和库名即可，由配置层生成内部连接串。
+生产使用干净工作树的 `just release-check` 归档，或逐步执行：
 
 ```bash
 just build-api
@@ -92,95 +66,57 @@ just verify-artifacts
 just package
 ```
 
-`build-api` 明确关闭 `web-embed`，即使本机已有前端文件也只生成静态路由 503 的 API-only 二进制；
-`build-release` 只让 Public 嵌入 Public payload、Admin 嵌入 Admin payload，Worker/`auctionctl` 不含
-两端资源。正式 `package` 拒绝脏工作树；`--allow-dirty` 只供迁移期间受控取证，输出名称、依赖摘要和
-源码指纹都会保留 dirty 事实，不得作为正式上线批准。解包后仍需按下文把示例复制到 `/etc/auction`、
-注入真实敏感文件并完成目标主机权限/readiness 演练。
+默认分体归档位于 `target/release-package/`，仅包含四程序、配置示例、systemd/Caddy 模板、恢复文档、
+retention policy、依赖摘要和 payload 清单。包内 SHA256SUMS 绑定全部批准文件，外层清单绑定 archive/依赖摘要；
+不包含数据库、Cookie、.keyenv 或运行数据。敏感模板使用 PostgreSQL 五字段格式，解包后注入真实值。
 
-仅针对已登记两台 AMD KVM 的编译候选见 [ops/build](../build/README.md)。该目录拥有显式
-Cargo 参数、目标特性白名单与本机测量说明，不属于默认归档；目标 CPU/ABI、内嵌资源、
-制品身份和目标机运行证据仍需核对。不能把候选配置或 `cargo check` 当作正式发布批准。
+API-only 固定空 Web 资源集合；内嵌档 Public/Admin 各只含自身 payload，Worker/auctionctl 不含页面。
+构建前冻结源码身份，各阶段复查。正式 package 拒绝脏树；`--allow-dirty` 只供受控本地取证，
+不能当作上线批准。发布脚本职责见[CI 说明](../../ci/README.md#发布边界)。
+
+[AMD KVM 候选](../build/README.md)是指定 CPUID/ABI 的本地定向构建，不属于通用发行归档；
+需分别核对资源身份、目标指令集及运行证据，不能由型号或 cargo check 推导兼容性/性能。
 
 ## 首次部署配置
 
-内嵌 PostgreSQL 制品支持 `auction-admin-api setup --output-dir <绝对路径>`；也可在没有默认配置
-且未设置 `AUCTION_CONFIG_FILE` 时直接运行 `auction-admin-api`，输出目录为当前目录下的
-`auction-config/`。目标目录必须不存在，父目录须由运行账号拥有；先准备 PostgreSQL 18 数据库
-和应用账号，再以实际服务账号运行初始化进程，确保配置 owner 和 Worker control UID 与部署一致。
-设置页只监听 `127.0.0.1:8091`，远程访问使用 SSH 隧道。第一步填写终端输出的一次性部署码
-（设置令牌），点击“验证并进入下一步”；只有服务端验证通过后才显示数据库、管理员和基础/进阶
-配置。部署码验证本身不连接数据库或写入文件；错误时可核对当前进程的终端输出后重试。
-页面刷新后需重新验证，部署码不会写入浏览器存储；后续配置校验和保存仍逐次验证部署码。
+以实际服务账号准备 PostgreSQL 18 空数据库及应用账号，在该账号拥有的受信父目录运行：
 
-第二步按数据库、管理员和基础参数填写；管理员密码需确认两次，确认值只留在浏览器。每项说明
-列出格式、数值范围或 UTF-8 字节长度，进阶参数默认折叠且预填默认值。检查和保存都会先检查输入，
-错误摘要可跳到对应字段，进阶字段有错时自动展开。修改参数会清除上次检查结果；“检查连接和设置”
-不写入文件，保存仍会重新检查。令牌失效后返回第一步，并清空所有密码，重新验证后需要再次填写。
-三个接口的每次请求各有 10 秒总预算，并非三个步骤合计 10 秒；保存超时、连接丢失或返回内容
-无法确认时，页面会清空部署码和所有密码，锁定验证、检查、保存及输入控件，并保留结果不确定
-提示。先停止初始化进程、核对目标配置目录和进程状态，不要刷新后直接重试、删除或覆盖目录；
-当前页面不提供解除锁定按钮。浏览器未收到成功响应不代表服务端未写入。
+```bash
+/opt/auction/bin/auction-admin-api setup --output-dir /var/lib/auction/initial-config
+```
 
-“正式服务监听端口”可分别调整 Public/Admin 的端口，默认 8090/8091，范围 1–65535 且必须不同；
-仅生成 `127.0.0.1` 回环监听，Admin 角色与 runtime 同步保存。它不改变当前 `/setup` 入口或站点
-Origin；使用自定义端口后须同步修改 Caddy 上游或 SSH 隧道，直连时还须自行核对所填 Origin。
-设置检查不会探测端口占用或绑定权限，低于 1024 的端口可能需要额外权限，不能把检查成功视为可启动。
-进阶区可恢复日志过滤器、Worker 并发/轮询和实时轮询的默认值；凭据、Origin、所选端口及基础
-设置保持不变，恢复后旧检查结果清除，需要重新检查。
+目标目录必须不存在。也可在无默认配置且未设置 AUCTION_CONFIG_FILE 时直接运行内嵌 PostgreSQL Admin，
+生成当前目录的 auction-config/。缺失显式配置、已有残缺目录、符号链接或权限错误不会降级为向导。
+分体设置监听 `127.0.0.1:8091/setup`，远程访问用 SSH 隧道；普通 Admin 不注册 setup 写接口。
 
-“每周拍卖排期”可调整 IANA 时区、预览/开拍/计划结束的星期和分钟时间。默认关闭，计划为 UTC
-周四 22:00、周五 00:00、周六 12:00；关闭仍保存并校验候选，启用后由 Worker 建立后续周拍卖，
-不改变已有拍卖。三阶段必须在同一个周一至周日周期内，预览至少提前 120 分钟且开拍早于结束，
-不支持自动跨周；使用所填时区而非浏览器时区，服务器负责核验 IANA 名称。世界沿用 `main`、`isekai`。
-生成计划保存在 `common.toml`，runtime 的排期接管保持关闭；以后若在正式 `/config` 启用接管，
-应重新审阅其中候选并按既有流程重启 Admin/Worker。恢复进阶默认值不会重置首次排期。
+1. 用终端一次性部署码验证，随后填写数据库五字段、管理员和精确站点 origin；令牌不写浏览器存储。
+2. 检查连接与候选设置；检查不写文件，保存仍重新验证。修改参数清除旧检查结果，失效令牌需重新验证并填写密码。
+3. 保存公共、角色、敏感与共享 runtime TOML。分体设置保存后退出，不迁移或启动其他角色。
+4. 审阅生成文件，安装到正式配置目录；准备运行目录/用户组/unit/代理，再做严格预检和受控迁移启动。
 
-初始化进程内三个接口共用非阻塞操作门禁；其他页面正在检查或保存时返回忙碌提示，不排队连接
-数据库。服务端若在目录发布后无法确认持久化结果，会保持结果不确定状态，禁止后续校验或保存；
-重新输入部署码不会解除该状态，应停止初始化进程后核对目标目录，不能把它当成普通连接失败重试。
-默认配置路径若已是目录、悬空符号链接，或因权限等原因无法探测，也不会自动开放设置页。
+正式 Public/Admin 端口默认 8090/8091，可设 1–65535 且不同，生成 loopback listener；不改变当前 setup 端口或 origin。
+同步调整代理/隧道并核对占用和低端口权限，设置检查不会试绑定。
+周排期默认关闭，可设 IANA 时区和同一周一至周日周期内的预览/开拍/结束，预览至少提前 120 分钟、开拍早于结束；
+不自动跨周，使用所填时区。计划写入 common.toml，runtime 排期接管默认关闭，新设置不改变已有拍卖。
 
-配置生成复用通用模板，写出公共、三角色、敏感和共享 runtime TOML。临时目录在创建时即限制
-访问权限，发布前依次同步所有文件、`runtime/` 子目录及临时根目录；发布后同步目标父目录，
-目标名称始终禁止覆盖，发布后结果不确定时保留目标而不回滚。保存成功后初始化进程退出；
-随后按下文准备运行目录、Worker control 组和 systemd unit，审阅 Caddy 配置，并通过
-`auctionctl deployment-check --strict-permissions` 与总控完成迁移和启动。
+三个设置接口逐请求验证部署码，共享非阻塞操作门禁，每个请求总预算 10 秒，忙碌时不排队连接数据库。
+保存超时、连接丢失或终态无法确认时，页面清空令牌/密码并锁定；浏览器未收到成功不代表没有写入。
+先停止初始化进程并核对配置目录和数据库现场，不刷新重试、删除或覆盖目录；重新输入部署码不能解除服务端未知状态。
 
-迁移前只有 systemd `inactive`/`failed` 且 `MainPID=0` 才表示停止完成；`deactivating` 和停止钩子
-仍在执行时不能开始迁移。`restart` 会等待 systemd stop 完成并复核严格停止状态。
+生成器在私有临时目录设定权限，依次同步文件、runtime 子目录和根目录后禁止覆盖地发布，再同步父目录。
+发布后结果未知保留现场。合并服务另在明确确认后初始化空库，处理边界见 server 手册。
 
 ## 启动顺序
 
-Admin 的数据库会话服务每次启动都会永久撤销所有既有 Admin 会话，操作者须重新登录；
-这同样适用于仅更新配置或升级制品，Public 会话不受影响。轮换管理 actor/secret 前停止所有
-旧凭据 Admin 实例，并统一新配置后再启动；不能把新实例的检查当作仍运行旧实例的全局权限栅栏。
-恢复旧配置不会复活启动前已撤销的会话，撤销写入失败会阻断 Admin 启动。
-
-1. 将公共配置、三个角色配置和独立敏感 TOML 放到受信目录，并确保三个 `common_file` 都解析到
-   同一份普通非符号链接文件；生产 Worker 必须启用
-   `[worker.control]`，预建配置中的 runtime 目录与 Unix group，并把实际 Admin/运维 UID 或 GID
-   写入 allowlist，以提供经过内核身份认证的 Unix socket readiness。若 Public/Admin 选择 Unix
-   listener，也必须预建对应 runtime 目录，并让 unit 运行账号属于配置的 socket group。
-2. 安装并审阅三个角色 unit 与 `auction-stack.service`，确保 unit 中的
-   `AUCTION_CONFIG_FILE` 分别精确指向 `/etc/auction/public.toml`、`admin.toml` 和
-   `worker.toml`。
-3. 通过 `auctionctl deployment start` 或启用 `auction-stack.service`。总控执行严格配置
-   预检、TCP/Unix listener 冲突检查和 Admin/Worker control socket 与数据密钥一致性检查；
-   三角色均已停止时，执行 forward-only migration，再按 Worker → Admin → Public 顺序等待各角色
-   readiness。三角色已运行时只复核 readiness 并更新启动回执，不再迁移；部分运行或处于转换状态则拒绝。
-   `restart` 先停止并确认全部角色，再迁移和启动；失败只回滚本次启动的 unit，migration 不自动回退。
-4. 反向代理只连接 Public/Admin 的 TCP 地址或 Unix socket；不要把 `/metrics` 暴露给公网，
-   Caddy 模板已默认返回 `404`。切换到 Unix upstream 时要同步修改 Caddy 上游值和 unit 的
-   runtime 目录权限。
-
-只读配置预检可单独运行 `auctionctl deployment-check --config-dir /etc/auction`；默认会报告
-目录、公共配置、角色配置、runtime 和敏感文件的权限警告，`--strict-permissions` 会把这些权限边界作为失败
-条件。无论是否严格，配置目录、公共/角色配置、runtime 和敏感 TOML 都不能使用符号链接。
-
-示例命令（实际部署应使用已安装的二进制，而不是 `cargo run`）：
+1. 安装三角色/common/敏感/runtime 配置并核对路径和 owner。Worker 必须启用 control，预建运行目录/组，
+   allowlist 包含实际 Admin/运维 UID 或 GID。HTTP Unix listener 也须预建目录并配置 socket 组。
+2. 审阅三角色 unit 与 auction-stack.service，绑定准确的 AUCTION_CONFIG_FILE；不要分别 enable 三个角色绕过总控。
+3. 严格预检并通过总控启动。三角色均 `inactive`/`failed` 且 `MainPID=0` 才可迁移，转换中或停机钩子未完时拒绝。
+   迁移后 Worker → Admin → Public 逐个 readiness；全部已运行时 start 只复核顺序/就绪并更新 adopted 回执，部分运行拒绝。
+4. 代理只连实际 Public/Admin listener，禁止公开 metrics；Unix upstream 须同步目录权限。
 
 ```bash
+/opt/auction/bin/auctionctl deployment-check --config-dir /etc/auction --strict-permissions
 sudo install -d -m 0700 /var/lib/auction/deployment
 sudo /opt/auction/bin/auctionctl deployment start --config-dir /etc/auction
 sudo /opt/auction/bin/auctionctl deployment status
@@ -188,110 +124,42 @@ sudo /opt/auction/bin/auctionctl deployment restart --config-dir /etc/auction
 sudo /opt/auction/bin/auctionctl deployment stop
 ```
 
-`AUCTION_CONFIG_FILE` 只用于 unit 选择主配置文件，不能覆盖单个配置项。systemd 拥有单角色的
-PID、信号、`TimeoutStopSec`、退出码、自动重启和 journald；Rust 总控只拥有跨角色顺序、严格预检、
-应用 readiness、失败回滚、互斥锁和私有启动回执。默认状态目录是
-`/var/lib/auction/deployment`，必须是已存在、规范化、归总控当前有效用户所有且权限至多 `0700`
-的绝对路径；配置目录和三个主 TOML 不得是符号链接或允许 group/other 写入。完整 unit
-安装方式见 [`systemd/README.md`](systemd/README.md)。
+预检不连接数据库。配置目录/common/角色/runtime/敏感文件均禁 symlink；strict-permissions 将权限警告升为失败。
+总控状态目录必须预建、规范绝对路径、归其有效用户所有且至多 0700。restart 先预检并反序停机，再迁移和启动；
+失败只回滚本次启动的 unit，迁移不自动回退。独立建库/迁移命令见[auctionctl](../../apps/auctionctl/README.md#停机迁移与初始建库)。
 
-单角色收到 systemd 的 SIGTERM 后先执行最多 10 秒的 HTTP/Worker drain，再按
-`tracing.shutdown_timeout_seconds` 刷新 exporter；该字段允许的最大值为 30 秒。因此示例 unit
-使用 `TimeoutStopSec=45s`，为最长关闭路径保留 5 秒进程回收余量。不要把该值缩短到两段上限之
-和以下；排空期间再次发送 SIGINT/SIGTERM 会立即强制收口，但 exporter 刷新仍由自身超时保护。
+每次 Admin 启动永久撤销旧管理会话，需重新登录，Public 不受影响；撤销失败阻断启动。
+轮换 actor/secret 前停止所有旧凭据实例并统一新值；恢复旧配置也不会复活已撤销会话。
+角色 SIGTERM drain 最多 10 秒，再刷新 exporter 最多 30 秒；分体 unit 预留 45 秒，合并 unit 预算不同。
+unit 依赖可能联动其他角色，单角色重启前核对 Requires/After，详见[systemd 手册](systemd/README.md)。
 
 ## 数据库恢复与保留
 
-生产 PostgreSQL 的备份、恢复、保留期限和 destructive rebuild 必须由部署方先确定权限、
-目标数据库和维护窗口。当前 Rust 已提供迁移目标保护、应用 readiness、
-`auctionctl retention-inventory` 只读盘点，以及不修改源库的 `postgres-backup`/
-`postgres-backup-verify` 和只向空库写入的 `postgres-restore`；盘点加载版本化的
-[`retention-policy.v1.json`](retention-policy.v1.json)，输出政策 SHA-256、schema/迁移/关系大小、
-行数估计、政策表覆盖和数据族汇总，但不判断保留资格。`postgres-backup` 依赖部署环境提供
-`pg_dump`/`pg_restore`，输出 custom-format archive 和带数据库身份摘要、schema 版本及 SHA-256
-的不可覆盖 manifest；`postgres-backup-verify` 可离线重新校验配对文件。恢复命令使用单事务、
-空库/连接检查、artifact 二次校验、恢复后 schema 证明和不可覆盖 receipt；详细流程见
-[`RECOVERY.md`](RECOVERY.md)。宿主机 start/stop/restart/status 总控已经迁移；数据库
-destructive rebuild 也已由独立的 `auctionctl postgres-rebuild` 契约实现，默认只读，并要求
-verified backup 或一次性环境豁免、双重目标确认、零连接、advisory lock 和私有回执。它不会由
-启动、重启、迁移或任何 unit 隐式执行。
-canonical PostgreSQL v28 历史格式使用独立的备份格式、严格表/投影预检和显式接管命令，不能交给
-普通 `migrate` 或当前 backup/restore 猜测处理；完整停机、备份、确认、接管与失败恢复流程见
-[`LEGACY_V28_ADOPTION.md`](LEGACY_V28_ADOPTION.md)。来源配置目录中的五语言规则不一定存在于 v28
-数据库，必须按同一手册在启动前保存并经 `import-rules-directory` 显式导入。
-当前 retention 契约只允许 inventory 并明确禁止 mutation；未来完整 retention policy 和 mutation
-需要独立设计与授权。
-
-只读盘点示例：
+| 任务 | 权威流程 | 边界 |
+| --- | --- | --- |
+| 当前 schema 备份、离线 verify、空库恢复 | [RECOVERY.md](RECOVERY.md) | 备份身份/哈希、零连接、同名空库、单事务恢复、后验与 receipt |
+| 显式破坏性重建 | 同一恢复手册 | 默认只读；独立 execute、目标确认、恢复点和回执，不由启动触发 |
+| canonical v28 接管 | [LEGACY_V28_ADOPTION.md](LEGACY_V28_ADOPTION.md) | 专用 manifest、精确格式、bridge 与前向迁移；另导入外部五语言规则 |
+| 保留盘点 | 下例与[CLI 说明](../../apps/auctionctl/README.md#保留盘点与恢复预检) | inventory only，不判断删除资格、不归档/删除 |
 
 ```bash
 AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  /opt/auction/bin/auctionctl \
-    retention-inventory \
+  /opt/auction/bin/auctionctl retention-inventory \
     --confirm-database auction_production \
-    --output /secure/auction-evidence/retention-2026-08-23.json
+    --output /secure/auction-evidence/retention-inventory.json
 ```
 
-证据文件必须是新的绝对路径，父目录必须已存在且不得允许 group/other 写入；命令不会覆盖已有
-文件、执行迁移、锁业务行或修改数据库。
-
-恢复前只读预检示例：
-
-```bash
-AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  /opt/auction/bin/auctionctl \
-    recovery-preflight \
-    --confirm-database auction_restore \
-    --output /secure/auction-evidence/recovery-preflight-2026-08-23.json
-```
-
-预检只确认目标连接、主节点可写状态、其他连接、用户对象、schema identity 和迁移历史；
-`restore_preflight_passed=true` 不代表 archive 已验证或可以直接恢复。它不会停止进程、执行
-`pg_restore`、创建/删除数据库或覆盖已有对象。
-
-备份示例：
-
-```bash
-AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
-  /opt/auction/bin/auctionctl \
-    postgres-backup \
-    --confirm-database auction_production \
-    --output /secure/auction-backups/auction-2026-08-23.dump
-
-/opt/auction/bin/auctionctl \
-  postgres-backup-verify \
-  --confirm-database auction_production \
-  --manifest /secure/auction-backups/auction-2026-08-23.dump.manifest
-```
-
-备份命令只允许新的绝对路径，拒绝覆盖已有 archive/manifest；源库必须是当前 Auction schema，
-并在 `pg_dump` 前后保持同一迁移版本。恢复必须由操作员先停止外部进程并准备同名空库。
-备份/恢复消费配置层生成的数据库连接；`[database]` 五项或兼容 `database_url` 必须显式提供
-host 与 port（默认端口也写 `5432`），
-外部工具不会继承 `PGHOST`、`PGHOSTADDR` 或 `PGPORT` 来选择目标。
-`postgres-restore` 不会终止连接、清理现有 schema 或破坏性重建数据库。需要由仓库工具准备空库时，
-必须单独显式运行 `postgres-rebuild --mode empty-for-restore`，完整确认和回执流程见
-[`RECOVERY.md`](RECOVERY.md)。
-
-v28 历史格式的 `postgres-legacy-v28-backup`、离线 verify 和 adoption 使用另一种 manifest。该格式
-故意不被 `postgres-backup-verify`/`postgres-restore` 接受；接管恢复点不能误当成已经带 SQLx
-历史的当前 Rust 备份。
-
-SQLite 只用于本地或单主机 Lite 部署：数据库文件必须位于本地文件系统，每个角色至多一
-个实例，Worker 并发为一。不能用本目录的 PostgreSQL 备份流程把 SQLite 当作生产高可用
-替代品。
-
+证据为新绝对路径，父目录预先存在且不可被 group/other 写入。输出绑定[retention policy](retention-policy.v1.json)
+SHA-256，含 schema/迁移/关系大小、估算行数、表覆盖及数据族摘要；不锁业务行或修改数据库。
+`eligibility_assessed` 和 `eligibility_authorized` 固定 false；保留期限和 mutation 仍需独立设计/授权。
+SQLite 的本地文件备份另按 Lite 约束准备，不能套用 PostgreSQL 恢复流程或声称高可用对等。
 
 ## 反向代理与 systemd
 
-反向代理示例见 [`caddy/Caddyfile`](caddy/Caddyfile)。
-Public/Admin 模板只对 `GET`/`HEAD` 请求中的 `/assets/*` 和 `/favicon.ico` 启用 Zstandard/gzip 响应压缩，
-由 Caddy 按浏览器的 `Accept-Encoding` 与默认内容类型、大小条件协商。压缩覆盖当前内嵌发布的
-指纹 JS、WASM 和 CSS；浏览器页面入口、API 与 WebSocket 不在匹配范围内。静态资源的
-内嵌所有权、API-only 制品的缺失资源响应以及 HTTP 缓存策略仍由 Rust 服务按
-[`routes.md`](../../docs/contracts/routes.md) 契约提供。
+[Caddy 模板](caddy/Caddyfile)仅压缩 GET/HEAD 的 `/assets/*` 和 `/favicon.ico`，由浏览器 Accept-Encoding
+协商 Zstandard/gzip；页面入口、API 和 WebSocket 不在范围。资源所有权、缓存和缺资源响应见
+[HTTP 契约](../../docs/contracts/routes.md)。metrics 默认对公网返回 404。
 
-systemd 服务模板见 [`systemd/README.md`](systemd/README.md)；模板必须先替换运行账号和安装路径。
-三个角色 unit 不自动迁移；只有显式启动总控，或在确认三个角色均已停止后显式调用受保护的
-`auctionctl migrate`，才会执行 forward-only migration。任何 unit 都不会自动备份、恢复、
-DROP/CREATE 数据库或执行 retention 删除。
+[systemd 模板](systemd/README.md)需替换服务账号/安装路径并核对权限。单角色 unit 不迁移；
+分体总控 start/restart 或受停机门禁保护的显式 migrate 才前向迁移。
+任何 unit 都不自动备份、恢复、DROP/CREATE 或执行 retention 删除。

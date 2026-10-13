@@ -2,11 +2,8 @@
 
 [文档导航](../../docs/README.md) · [格式与 bridge](../../crates/auction-storage/src/database/legacy_v28) · [备份与接管编排](../../apps/auctionctl/src/bootstrap/postgres_legacy_v28) · [当前格式恢复](RECOVERY.md)
 
-只接受本仓库定义的精确 v28 格式；禁止普通迁移猜测 schema 或伪造 SQLx 标记。
-
-本手册只适用于本项目 `legacy_v28` 适配器定义的 canonical PostgreSQL migration 28 历史格式。普通
-`auctionctl migrate` 遇到没有 SQLx 标记但已有用户对象的数据库会失败关闭；不得绕过保护，
-也不得手工伪造 `_sqlx_migrations`。
+只适用于本仓库 legacy_v28 适配器定义的 canonical PostgreSQL migration 28 历史格式。
+普通 migrate 对无 SQLx 标记且已有用户对象的库失败关闭；禁止跳过保护或伪造 `_sqlx_migrations`。
 
 ## 本页导航
 
@@ -21,14 +18,14 @@
 
 ## 使用范围与结果判读
 
-本页命令供获准维护窗口中的操作员执行；库名、安装路径、证据文件名和日期均为示例，执行前替换为精确目标。
-阅读或更新文档不执行命令。源码与原始证据共同决定结果，进程退出或文件存在不能单独证明数据库操作成功。
+命令只供获准维护窗口执行；库名、路径和日期须替换为精确目标，证据不可覆盖。
+文档维护不执行命令；进程退出或文件存在不能单独证明数据库操作成功。
 
 | 阶段 | 成功依据 | 不能替代 |
 | --- | --- | --- |
 | 专用备份 | v28 manifest、哈希和精确格式预检 | 当前 Rust backup manifest |
 | 接管 | bridge、前向迁移、postflight 和正常 receipt | 五语言规则目录导入 |
-| 规则导入 | 五语言 imported/preserved 和原始正文哈希 | 数据库之外未保管的来源内容 |
+| 规则导入 | 五语言 imported/preserved 和去 BOM 正文哈希 | 数据库之外未保管的来源内容 |
 | 提交后异常 | 失败记录、审计事实、前向迁移与新恢复点组成替代证据包 | 伪造正常 receipt 或再次执行 adoption |
 
 ## 接管前提
@@ -38,16 +35,16 @@
 - Public、Admin、Worker、来源服务、后台脚本和人工 SQL 客户端必须全部停止；
 - archive、manifest 和 receipt 的父目录必须预先创建，只允许运行账号访问，目标文件不得存在；
 - 停止来源服务前必须从其有效配置确认 `rules_directory`；把五个语言文件逐字复制为私有普通文件并保存
-  SHA-256，不能假设 `rules_documents` 表含有 Public 当前展示的规则；
+  原文件及移除单个开头 UTF-8 BOM 后正文的 SHA-256，不能假设 rules_documents 含有当前展示规则；
 - 操作员必须保留 v28 专用 archive/manifest，直到切换和恢复窗口正式结束。
 
 只读预检还会核对 canonical public 表集合、schema identity、旧约束/索引/追加式 bid 触发器，
-并证明每个 policy、lot 领先投影和原始 bid realtime 截止事实都能确定性转换。任一计数不为零都
+并证明每个 policy、lot 领先投影和原始 bid realtime 截止事实都能确定性转换。任一不匹配或无法转换计数不为零都
 表示源库不是受支持形状，不能靠手工删列、改标记或跳过检查继续。
 
 ## 1. 停止角色并只读预检
 
-先通过部署总控停止 Rust 三角色，并停止所有来源进程和数据库客户端：
+按实际部署方式停止 Rust 角色、所有来源进程和数据库客户端。以下为分体总控示例：
 
 ```bash
 sudo /opt/auction/bin/auctionctl deployment stop
@@ -108,9 +105,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
     --receipt /secure/auction-evidence/adopt-v28-2026-08-23.json
 ```
 
-接管取得 SQLx migration advisory lock 后，会在同一物理连接的只读事务中重新执行完整预检，避免
-连接池把命令自身的空闲连接误计为外部 session；随后才在 Serializable 事务和关键表独占锁内完成
-以下转换：
+持有 SQLx migration advisory lock 后，在同一物理连接重新预检，避免自有池连接误计为外部 session；
+随后以 Serializable 事务和关键表独占锁执行转换：
 
 - 从冻结 policy 和论坛同步投影补齐 Rust 生命周期读取列；未开放拍卖的结束时间继续为空；
 - 把 v28“无领先者时 `current_price=start_price`”转换为当前 schema 的空当前价，并从最后一条 bid
@@ -119,13 +115,10 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
   触发器只在独占锁事务内短暂关闭，回填后立即恢复；
 - 保留旧 final-fast transition 证据，只把可变代理授权投影升级为显式 `final_fast`，并补齐兼容
   历史表、只读 `bid_proxies` 视图及当前查询索引；
-- 为已经等价覆盖的 SQLx `1..=5`、`7` 写入当前二进制内嵌 checksum，再依次运行 `6`、`8` 及
-  后续所有尚未应用的前向迁移；`000014` 会先核对并补齐可唯一恢复的 draft target，再重建
-  拍卖身份、前序顺序和 draft/target 一致性防线，同时移除 v28 论坛自动入队 trigger，使论坛
-  任务只由 Worker 发现和领取；`000015` 会归一化 operations alert 的错误码、重试终态和 signal
-  cooldown。接管前形成且没有 delivery 的 pending/claimed 批次会安全终结为
-  `retry_exhausted`；历史终态孤儿继续保留，外键会约束所有迁移后新写入，并在不存在历史孤儿时
-  完成全表验证。
+- 为等价覆盖的 SQLx `1..=5`、`7` 写入当前 checksum，再执行 `6`、`8` 及后续迁移。
+  后续迁移校验 draft/target 顺序与身份、移除论坛自动入队 trigger、归一化告警重试和 cooldown；
+  无 delivery 的旧 pending/claimed 告警批次终结为 retry_exhausted，历史终态孤儿保留，约束保护所有新写入。
+  完整 SQL 见[迁移树](../../migrations/README.md)。
 
 成功后命令重新读取 schema identity 和完整 SQLx 历史，只有两者均为当前版本才发布
 `auction-postgres-legacy-v28-adoption.v1` receipt。回执包含数据库名摘要、备份/manifest 哈希、
@@ -149,8 +142,9 @@ AUCTION_CONFIG_FILE=/etc/auction/admin.toml \
 目录必须包含 `en.md`、`zh-CN.md`、`zh-TW.md`、`ja.md` 和 `ko.md` 五个 UTF-8 普通文件。命令先
 完整读取五个来源，再读取五种数据库文档；任一现有文档的标题或正文不同都会在首次写入前阻断，
 相同文档报告 `preserved`，只有缺失文档才通过 Admin rules 的 CAS、幂等命令账本和追加审计发布。
-JSON 输出中的正文 SHA-256 必须与停机前保存的五个来源哈希一致。若命令在部分发布后因瞬时依赖
-失败，以同一 `--command-id` 重试；不得生成新正文或直接修改表来绕过冲突。
+JSON 的 sha256 对应移除单个开头 UTF-8 BOM 后的完整 Markdown（标题仍保留于正文），
+须与预先保存的去 BOM 哈希一致；无 BOM 时才等于原文件哈希。首个非空行去前导 # 后用于标题。
+部分发布后因依赖失败，以同一 command-id 重试，不改正文或直接改表绕过冲突。
 
 有效 Admin 配置选择 Redis 时，制品还必须启用 `cache-redis` feature。此时正常启动门槛要求
 `cache_invalidation_failures` 为空；若失效失败，应先按缓存运行手册清除对应
@@ -167,7 +161,7 @@ JSON 输出中的正文 SHA-256 必须与停机前保存的五个来源哈希一
 也不得启动任何角色；先使用同一二进制和配置继续或复核普通前向迁移：
 
 ```bash
-AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
+AUCTION_CONFIG_FILE=/etc/auction/public.toml \
   /opt/auction/bin/auctionctl migrate
 ```
 
@@ -189,7 +183,7 @@ schema 恢复点。该异常路径不会补造一次原接管成功 receipt；�
 - adoption 命令正常退出并发布新的不可覆盖 receipt；
 - receipt 的 archive/manifest SHA-256 与保管的恢复点一致；
 - 普通 `auctionctl migrate` 已无待执行迁移；
-- 规则导入报告覆盖五种语言且每项均为 `imported` 或 `preserved`，正文 SHA-256 与来源目录证据一致；
+- 规则导入覆盖五语言 imported/preserved，正文 SHA-256 与来源目录的去 BOM 证据一致；
 - Public、Admin、Worker 的目标配置仍指向同一已接管数据库。
 
 若进入“bridge 已提交、后续 migration 失败”或“接管已提交、postflight/receipt 失败”的异常路径，

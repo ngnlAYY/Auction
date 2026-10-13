@@ -1,160 +1,86 @@
 # auction-admin-api
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/deploy/README.md)
 
-管理 HTTP、管理会话与 Admin runtime 服务的进程装配。
-`src/lib.rs` 导出 `run`、显式配置路径 `run_from_path` 与 Admin 资源类型；`main.rs` 保留独立启动。
-[可选 supervisor](../server/README.md) 在独立子进程内调用 `run_from_path`，不重新解析父进程 CLI，
-也不对损坏配置开放首次设置。分体 Admin 原有保存后退出行为不变。
-
-## 本页导航
-
-- [源码入口](#源码入口)
-- [职责与实现边界](#职责与实现边界)
-- [装配与依赖](#装配与依赖)
-- [管理查询和命令能力](#管理查询和命令能力)
-- [Dashboard 与可观测性](#dashboard-与可观测性)
-- [Runtime 恢复与启动快照](#runtime-恢复与启动快照)
-- [生命周期与监听](#生命周期与监听)
-- [前端产物](#前端产物)
-- [Cargo feature](#cargo-feature)
-- [边界约束](#边界约束)
-- [维护与验证](#维护与验证)
+管理 HTTP、会话和 runtime 服务的进程装配根。`src/lib.rs` 导出 `run`、`run_from_path` 与 Admin 资源类型；
+独立 `main.rs` 和[合并服务](../server/README.md)的 Admin 子进程复用装配。
 
 ## 源码入口
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/bootstrap](src/bootstrap) | 管理端口、runtime 恢复、生命周期与安全策略 |
-| [src/web_assets](src/web_assets) | 仅 Admin 的显式内嵌资源类型 |
+| [src/bootstrap](src/bootstrap) | 管理端口、首次模式选择、runtime 恢复与生命周期 |
+| [src/web_assets](src/web_assets) | Admin 专属内嵌资源类型 |
 
 ## 职责与实现边界
 
-管理端进程装配根。
+只加载配置、装配管理应用端口与适配器、挂载 `auction_http::admin_router()` 并管理进程生命周期。
+管理命令、事务和外部服务调用由各自 owner 实现，不能放入装配根。
 
 ## 装配与依赖
 
-源码布局：[src/main.rs](src/main.rs) 只负责 Tokio 入口，[src/bootstrap/mod.rs](src/bootstrap/mod.rs) 只负责启动装配入口；
-[src/bootstrap/service.rs](src/bootstrap/service.rs) 负责 tracing、HTTP 生命周期和有界 drain，`state.rs` 负责数据库/端口/
-heartbeat 状态装配，`config.rs` 负责缓存、Worker control、安全策略和 dashboard 范围投影，
-`listener.rs` 负责监听器绑定与服务。这样装配根不把状态构造、配置映射和退出流程混在一个文件中。
-`first_run.rs` 在读取角色配置前选择启动模式：显式角色文件或现有默认文件进入正常 Admin；无配置
-且无显式 `AUCTION_CONFIG_FILE` 时，内嵌 PostgreSQL Web 制品自动在 loopback 提供一次性设置页，
-输出到当前目录的 `auction-config/`。也可使用 `setup --output-dir <绝对路径>` 明确指定目标。
-缺失的显式配置、解析错误或已有但不完整的目录不会降级为设置页；默认路径探测使用不跟随末级
-符号链接的元数据读取，现有目录或悬空链接均视为已有配置交由正式 loader 拒绝，权限等读取错误
-直接阻止启动，不能当成未配置。首次设置完成后进程退出，不自动迁移数据库或启动其它角色。
-主配置的 TCP/Unix listener 是有效 fallback；Admin runtime 存在时覆盖为同一配置层的有效 listener。
-装配根、origin/metrics 校验和部署预检共同读取该结果，Unix 监听不要求额外配置 runtime 文件。
+`bootstrap/service.rs` 拥有 tracing 与 HTTP 生命周期，`state.rs` 装配数据库/端口/心跳，
+`config.rs` 映射缓存、Worker control、安全和 dashboard 范围，`listener.rs` 绑定监听器。
+`first_run.rs` 在正式 loader 前选择模式：内嵌 PostgreSQL Web 制品只有在无默认配置且未显式设置
+`AUCTION_CONFIG_FILE` 时自动开放 loopback 设置页；也可显式执行 `setup --output-dir <绝对路径>`。
+损坏、缺失的显式配置、已有残缺目录或符号链接都不会降级为设置页。分体设置保存后退出，
+不自动迁移或启动其他角色；完整操作见[首次部署](../../ops/deploy/README.md#首次部署配置)。
 
-职责仅限于：加载配置、初始化 tracing、装配缓存、Admin session、拍卖生命周期/recovery 确认、
-数据库业务世界启停命令端口，以及 PostgreSQL 结算目录与 settlement/recovery 报告读取端口、绑定监听器、挂载
-`auction_http::admin_router()` 和返回启动错误。Admin Basic Auth 凭据从敏感 TOML 读取，
-session 与 CSRF 只以摘要形式持久化。异步装配 session 服务前永久撤销所有旧 Admin 会话，失败
-阻断启动；每次重启后需重新登录。token 摘要绑定当前 actor/secret，不影响 Public，会话表结构不变；
-同库多实例须统一凭据，轮换前停止所有旧凭据实例。生命周期命令在数据库事务内追加状态版本、审计和 realtime 事件。
-结算报告和 recovery 报告只读取已提交事实；recovery 确认还会在 PostgreSQL Serializable 事务中
-重校验证据、激活退款、guarded relist 并追加审计；SQLite Lite 不提供这些完整档能力并返回明确的 501。
+Admin 凭据只从敏感 TOML 读取。每次启动在 session 服务就绪前永久撤销旧 Admin 会话，失败阻断启动；
+token 摘要绑定当前 actor/secret，Public 会话不受影响。多实例轮换前须停止全部旧凭据实例。
 
 ## 管理查询和命令能力
 
-Admin 论坛预览由本地 `ForumPreviewAdapter` 解析 HTML/文本，限制 2 MiB 输入并返回安全预览；
-它不执行远程论坛发布，也不产生数据库写入。
-Admin 审计读取由数据库适配器提供两种有界分页形状和安全 metadata 投影；该接口只读，不修改
-审计历史。
-业务 world 状态由数据库而非 runtime TOML 决定。装配根为 A40/A41 注入同一 `DatabaseStore`：
-PostgreSQL 提供 world-first blocker/CAS/账本/审计事务，SQLite 只提供目录读取并明确返回写能力 501。
-结算页的 A42 settled-only 目录同样只在 PostgreSQL 完整档装配；报告继续按目录返回的 UUID 读取。
+装配生命周期、业务 world、规则、审计、凭据、结算/恢复报告等窄端口；精确路由与错误码见 HTTP 契约。
+论坛预览只在本地解析不超过 2 MiB 的输入，不远程发布或写库。业务 world 状态来自数据库。
+PostgreSQL 提供完整写入与报告；SQLite Lite 对未支持的 world 写入、settlement/recovery 等能力返回 501。
+生命周期和 recovery 确认沿用应用/存储 owner 的锁、幂等、追加审计与持久化事件边界。
 
 ## Dashboard 与可观测性
 
-Admin dashboard 读取由 `auction-observability::HealthService` 聚合 service heartbeat，
-三个进程装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；返回 health/process 安全
-投影，周期值每轮读取真实数据库/schema readiness、进程内审计写入失败计数和对应 tracing 安全
-状态。Admin 同时
-通过 runtime 文档指定的 Worker control Unix socket 读取 live/ready/status，socket 只允许
-命中 Worker 显式 UID/GID allowlist 的内核认证 peer，失败时显示有限 condition；mail、realtime、credential、delivery、fulfillment、
-recovery 和 alerting section 分别由对应 owner 提供安全摘要，owner 未装配时才显式标记为 `unknown`。
+`HealthService` 聚合三角色心跳；Admin 另通过内核 peer 认证的 Worker control Unix socket 读取 live/ready/status。
+mail、realtime、credential、delivery、fulfillment、recovery 与 alerting 各自提供安全摘要，缺失 owner 才显示 `unknown`。
+心跳每轮读取数据库/schema readiness、审计失败计数和 tracing 状态；socket 不可用只产生有限 condition。
 
 ## Runtime 恢复与启动快照
 
-Admin runtime 配置由主配置的 `runtime_config_file` 选择；PostgreSQL 完整档装配
-`auction-application` runtime 服务、TOML 原子文件适配器和 durable 命令账本，GET/validate/PUT
-均保留 fingerprint fence 与 `restart_required`；Admin 对外就绪前会先恢复未收口的 pending/unknown
-命令，若结果为 `unknown` 或需要人工核对则保留错误级告警并继续启动，其他恢复错误会阻断启动。
-可证明的 pending/旧文件组合会继续完成原候选；恢复成功后若文件指纹已不同于本次加载的配置，
-Admin 阻断就绪并明确要求重新执行部署重启，不能用旧监听/策略快照冒充新配置已生效。
-文件更新不会热改当前进程，SQLite Lite 明确返回 501。runtime 可选的 `dashboard_mailboxes`
-是非敏感 world/mailbox 投影，Admin 用它核对 MoogleMail poller 数量、邮箱标识和凭据范围；旧版
-`worlds`、发件人 allowlist、装备过滤和 14 个通知模板也由该文档管理，并在 Worker 重启时投影为
-MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin 与 Worker。
-文档的 `operations` 还可分组接管新经济模板、排期和 Worker 参数；Admin 创建与计划修改端口
-消费启动时覆盖后的经济模板，已有拍卖继续按数据库冻结快照处理。
-重启后，`allow_manual_early_open` 与 `allow_manual_early_settlement` 会作为不可变策略进入生命周期
-服务，且默认均关闭：计划时间已到的开放不受影响，人工提前开放与提前结算则在锁内按同一策略失败
-关闭，HTTP capability 使用同一来源。人工进入 Final 会把较晚的 live lot 截止时间收紧到冻结的最终
-窗口（默认 15 分钟），保留竞价与软截止延期；提前结算则要求理由并仅在 PostgreSQL 完整档把截止时间
-收紧到当前事务时间，实际结算仍由 Worker 领取。`[equipment_source]` 的 host/path allowlist、响应上限、共享请求间隔、总超时和
-`require_tradeable` 也会映射到装备来源适配器及手工录入策略；该开关默认关闭，关闭时允许 Admin
-录入明确标记为 Soulbound 的装备，开启时恢复只接受可交易装备的旧限制。MoogleMail 邮件装备仍由
-独立过滤策略拒绝不可交易来源，不受该 Admin 开关影响。适配器在启动时读取 A32 中目标 world 或 shared scope 的唯一 active `mail_cookie`，
-并在远端明确返回登录页时回写失效状态；单 Cookie 失效后不会自动切换。没有数据库记录时才兼容
-敏感配置的单 Cookie 入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
-路径校验始终保留。
+PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命令账本，保留 fingerprint fence 与
+`restart_required`。就绪前恢复 pending/unknown 命令：未知结果或需人工核对时保留错误告警，其他恢复错误阻断启动。
+恢复后文件指纹若不同于已加载配置，必须重新部署重启，不能用旧监听/策略快照报告新配置生效。
+SQLite Lite 的 HTTP 更新返回 501；文件保存不会热改当前进程。
 
-同一 PostgreSQL `credential_data_key` 另外装配 A44 手动只读校验服务；每次请求读取指定 ID 的
-当前数据库信封，不复用启动时的 active Cookie 快照，也不回退敏感配置来源。论坛/游戏 GET
-探测通过窄应用端口返回三态与时间，缺少密钥或 Lite 档保持 501；不改 Worker 所有权、状态或
-重启要求。新页面生效仍需重新构建内嵌 Admin 资源并按部署手册替换程序，本轮不自动部署。
+共享业务区块、六组 `operations`、重启范围及默认值统一见[配置说明](../../ops/config/README.md#runtime-共享与重启)。
+新经济模板只影响后续拍卖，人工提前开放/结算由启动快照和事务内策略共同约束。
+Admin 装备来源的 `require_tradeable` 默认关闭，仅影响手工录入；MoogleMail 过滤独立执行。
+
+装备来源适配器使用启动时的唯一 active `mail_cookie`，无数据库记录时才兼容敏感文件单 Cookie；
+远端明确登录失效后标记失效，不自动切换。A44 手动只读校验则每次读取指定凭据 ID 的当前信封，
+不复用该快照或回退配置；缺密钥和 Lite 档保持 501，不改变 Worker owner 或重启要求。
 
 ## 生命周期与监听
 
-Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
-shutdown、停止 heartbeat 并发布停止状态，整个 HTTP/后台任务 drain 最多 10 秒，排空期间第二次
-信号会强制收口，最后按配置限时刷新 tracing exporter。稳定退出码仍待统一。
-
-默认监听 `127.0.0.1:8091`，与公开端不同端口。Admin runtime 的 `listener.mode` 支持 TCP；
-Linux 部署还支持 Unix socket。Unix 模式要求 `runtime_directory` 预先存在并由运行账号拥有，
-`socket_path` 必须直接位于该目录中，启动时会取得目录级单实例锁，并将 socket 固定为配置的
-group 与 `0660` 权限。检测到仍在使用的 socket、非安全路径或不满足 owner/group 的目录时，
-启动会失败；失效的 stale socket 只会在身份校验通过后清理。
-
-```bash
-AUCTION_CONFIG_FILE=ops/config/examples/admin.toml \
-  cargo run --locked -p auction-admin-api --features sqlite
-```
+默认 `127.0.0.1:8091`。主配置 TCP/Unix listener 是 fallback，加载 runtime 后使用其有效 listener；
+Linux Unix 模式的目录、owner/group、锁和 `0660` socket 门禁见[配置说明](../../ops/config/README.md#http-listener-与安全)。
+SIGINT/SIGTERM 停止接收 HTTP、停止 heartbeat 并发布停止状态，drain 最多 10 秒；
+第二次信号强制收口，随后按配置限时刷新 exporter。稳定退出码仍待统一。
 
 ## 前端产物
 
-管理端 SPA 由本装配根的 `RustEmbed` 类型内嵌，再交给 `auction-http` 提供，构建命令：
-
-```bash
-just web-build-admin
-just build-release
-```
-
-路由只提供管理端产物；本装配根不引用 Public `RustEmbed` 类型，因此制品级资源隔离不依赖
-链接器裁剪。`web-embed` 默认关闭，API-only 制品使用固定空资源集合并以 503 报告静态资源未包含；
-内嵌发布构建才显式选择 Admin 的优化 payload。
+`just web-build-admin` 生成 Admin SPA，`just build-release` 构建内嵌发布制品。
+本 app 不引用 Public 资源类型；API-only 使用固定空集合，静态路由以 503 报告页面未包含。
 
 ## Cargo feature
 
-- `cache-redis`：编译 Redis 缓存客户端。
-- `postgres`：编译 PostgreSQL 完整存储适配器。
-- `sqlite`：编译 SQLite Lite 存储适配器。
-- `web-embed`：只嵌入 Admin 的优化 Web payload；默认关闭，API-only 发布不得启用。
+默认 feature 为空；`postgres` / `sqlite` 选择存储，`cache-redis` 选择可选 Redis，
+`web-embed` 只包含 Admin payload。首次设置需要 `postgres,web-embed`。
+配置和显式运行见[开发指南](../../docs/development.md)。
 
 ## 边界约束
 
-Public 与 Admin 是不同表面，可以分别绑定端口、Unix socket 或反向代理。管理命令必须走版本化
-REST 契约并留下审计记录；凭据与密钥材料只在服务端处理，不进入浏览器。
+Admin 与 Public 保持独立路由、监听和静态产物。管理变更走版本化 REST、认证/CSRF 与审计边界；
+凭据、密钥和数据库内部模型不得进入浏览器 DTO。
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
-
-```bash
-cargo check --locked -p auction-admin-api
-```
-
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+`cargo check --locked -p auction-admin-api` 只做默认 feature 静态编译。
+完整门禁见[开发指南](../../docs/development.md)，运行证据见[验证状态](../../docs/status.md)。

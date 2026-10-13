@@ -1,146 +1,107 @@
 # 开发与静态验证
 
-[文档导航](README.md) · [协作规范](../AGENTS.md) · [部署手册](../ops/deploy/README.md)
-
-## 本页导航
-
-- [工具与依赖来源](#工具与依赖来源)
-- [默认检查](#默认检查)
-- [选择制品 feature](#选择制品-feature)
-- [配置准备与显式运行](#配置准备与显式运行)
-- [浏览器与发布构建](#浏览器与发布构建)
-- [常见边界](#常见边界)
+[文档导航](README.md) · [协作规范](../AGENTS.md) · [部署](../ops/deploy/README.md) · [CI](../ci/README.md)
 
 ## 工具与依赖来源
 
-| 工具或输入 | 本仓库要求 | 核对入口 |
+| 输入 | 仓库要求 | 核对入口 |
 | --- | --- | --- |
-| Rust | 工具链固定 `1.98.0`，edition 2024，MSRV `1.94.1` | [工具链](../rust-toolchain.toml)、[workspace](../Cargo.toml) |
-| Rust 组件 | rustfmt、Clippy、`wasm32-unknown-unknown` | [工具链](../rust-toolchain.toml) |
-| Rust 依赖 | 检查与发布使用 `--locked` | [Cargo.lock](../Cargo.lock) |
-| 命令编排 | `just`；CI/构建脚本使用 Bash 与各脚本声明的系统工具 | [Justfile](../Justfile)、[CI 说明](../ci/README.md) |
-| 浏览器构建 | Dioxus `dx`，只在构建/开发页面时需要 | [Web 构建脚本](../ci/web-bundle.sh) |
+| Rust | 固定 1.98.0，edition 2024；MSRV 1.94.1 | [工具链](../rust-toolchain.toml)、[workspace](../Cargo.toml) |
+| 组件 | rustfmt、Clippy、wasm32-unknown-unknown | 工具链文件 |
+| 依赖 | 检查/发布使用 --locked | [Cargo.lock](../Cargo.lock) |
+| 编排 | just，脚本使用 Bash 和其声明的系统工具 | [Justfile](../Justfile)、[CI 说明](../ci/README.md) |
+| 页面构建 | 配套 Dioxus dx CLI，仅构建页面时需要 | [web-bundle.sh](../ci/web-bundle.sh) |
 
-这里的版本描述仓库配置，不声称是上游此刻最新版本。依赖选择和升级边界见[技术栈](tech-stack.md)。
+版本描述仓库配置，不声称上游最新；取舍和升级约束见[技术栈](tech-stack.md)。
 
 ## 默认检查
 
 ```bash
-just fmt
-just docs-check
-just repository-policy-check
-just layout-check
-just config-example-check
-just i18n-check
-just check
-just feature-check
-just lint
-just wasm-check
-
-# 串行执行以上静态门禁。
 just verify
 ```
 
-`cargo check --all-targets` 编译已有目标，不运行测试。`docs-check` 检查文档链接、锚点、导航覆盖和包 README，
-不证明业务描述正确。静态命令的实现和 CI/MSRV 差异见 [ci/README.md](../ci/README.md)。
-单元、集成、功能、端到端、浏览器测试与手工冒烟默认暂缓；已有测试不删除。
+等价分项为 `just fmt`、`docs-check`、`repository-policy-check`、`layout-check`、`config-example-check`、
+`i18n-check`、`check`、`feature-check`、`lint`、`wasm-check`，verify 按配方顺序执行。
+按变更选择必要分项；完整交付按协作规范运行门禁。cargo check --all-targets 只编译已有目标。
+文档检查核验链接/锚点/导航/包 README，不证明业务描述正确；实现与 CI/MSRV 差异见 CI 说明。
 
-依赖安全公告检查独立执行，需要联网获取 RustSec 数据库，不启动产品、不改写锁图：
+未经明确要求，不新增或运行单元、集成、功能、端到端、浏览器测试与手工冒烟；已有测试保留。
+依赖审计独立联网获取 RustSec，不启动产品或修改锁图：
 
 ```bash
 cargo install cargo-audit --locked --version 0.22.2
 just dependency-audit
 ```
 
-CI 的独立 `security-audit` job 执行相同检查；漏洞、撤回版本与 unsound 提示阻断，停维维护提示保留输出。
-已登记的 `fxhash` 提示及复查期限见[依赖维护边界](tech-stack.md#版本与升级)。
+CI security-audit 执行同一检查；漏洞、撤回版本、unsound 阻断，停维提示保留。
+[fxhash 维护债](tech-stack.md#版本与升级)和审计退出码不能混同于无风险证明。
 
 ## 选择制品 feature
 
-| 目标 | Cargo feature | 附加条件 |
+| 目标 | feature | 条件 |
 | --- | --- | --- |
-| PostgreSQL 完整档 | `postgres` | 使用 PostgreSQL 配置和迁移树 |
-| 可选合并 supervisor | `auction-server` 的 `postgres`，首次向导另需 `web-embed` | 仅 Linux/PostgreSQL 单主机，不支持 SQLite；`auctionctl` 仍独立 |
-| SQLite Lite | `sqlite` | 单主机、每角色一个实例、Worker 并发 1 |
-| Redis | 在目标进程增加 `cache-redis` | 配置选择 Redis，敏感文件提供 URL |
-| 内嵌页面 | Public/Admin 增加 `web-embed` | 先构建对应前端产物 |
-| API-only | 不启用 `web-embed` | 静态页面缺失明确返回 503 |
+| PostgreSQL 完整档 | postgres | PostgreSQL 配置和迁移树 |
+| SQLite Lite | sqlite | 本地单主机、每角色一个实例、Worker 并发 1 |
+| Redis | cache-redis | 配置选择 Redis 并提供敏感 URL |
+| 内嵌页面 | Public/Admin 的 web-embed | 先构建对应 payload |
+| API-only | 不启用 web-embed | 页面路由 503，API 仍可使用 |
+| 合并 supervisor | server 的 postgres；首次向导另需 web-embed | 仅 Linux/PostgreSQL 单主机，auctionctl 独立 |
 
-`apps/*` 与 `auction-storage` 的默认 feature 均为空。仓库的 `run-public`/`run-admin`
-配方只增加 `web-embed`，`run-worker` 不选择数据库驱动；连接数据库的本地运行应使用下面的显式命令。
-发布流程另由 `just build-api`/`just build-release` 固定选择 PostgreSQL。
-
-```bash
-cargo check --locked -p auction-public-api --features sqlite
-cargo check --locked -p auction-admin-api --features sqlite
-cargo check --locked -p auction-worker --features sqlite
-cargo check --locked -p auctionctl --features sqlite
-```
+apps/* 和 auction-storage 的默认 feature 为空。run-public/run-admin 只增加 web-embed，run-worker
+不选驱动；连接数据库须显式选 feature。发布配方 build-api/build-release 固定 PostgreSQL。
+例如 `cargo check --locked -p auction-public-api --features sqlite` 只编译所选路径。
 
 ## 配置准备与显式运行
 
-先按[配置说明](../ops/config/README.md)准备角色、公共和真实敏感 TOML，确保路径及权限满足 loader。
-下面的示例路径仍指向仓库角色模板；执行前须让模板引用有效的私有敏感文件。
-命令只作为操作说明，本节不授权自动启动或功能验证。
+按[配置手册](../ops/config/README.md)准备公共、角色和真实敏感 TOML，替换示例占位值并核对相对路径/权限。
+以下命令指向示例角色文件，须先使其引用有效私有配置；运行说明不授予自动启动或功能验证授权。
 
 ```bash
-# 配置诊断只输出安全投影，不连接数据库。
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml cargo run --locked -p auctionctl -- check-config public
 
-# API-only 的 SQLite Lite 进程；数据库应已通过独立迁移流程准备。
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml cargo run --locked -p auction-public-api --features sqlite
 AUCTION_CONFIG_FILE=ops/config/examples/admin.toml cargo run --locked -p auction-admin-api --features sqlite
 AUCTION_CONFIG_FILE=ops/config/examples/worker.toml cargo run --locked -p auction-worker --features sqlite
 ```
 
-单角色及合并服务的普通启动不隐式迁移；显式迁移入口按部署方式区分：
+check-config 只输出安全投影、不连接数据库；角色运行前数据库须已迁移。
+迁移与建库按[CLI 手册](../apps/auctionctl/README.md#停机迁移与初始建库)准备，不是无前提 seed：
 
-- 分体部署：`auctionctl migrate` 使用 systemd 总控参数、状态目录锁和三角色停机门禁；
-  `auctionctl deployment start/restart` 也会在严格停机检查后迁移再启动，三角色已运行的 start 只重新检查 readiness。
-- 合并部署：停止整个 `auction-server` 后，由同一账号执行 `auctionctl migrate-managed --config-dir <绝对目录>`，
-  核验既有 supervisor/子进程共享锁；不依赖分体 systemd 总控。
+- 分体 migrate 使用 systemd 状态锁与三角色严格停机门禁；deployment start/restart 在同一门禁后迁移再启动。
+- 合并部署停止整个 server 后，以同一账号 migrate-managed 并取得既有 supervisor/子进程共享锁。
+- 角色及合并服务普通启动不隐式迁移；合并入口只有首次网页明确确认后才初始化专用空库。
 
-两者均不是无需准备的 seed 命令。合并入口只有首次网页明确确认后才进入专用空库初始化；其源码修复与
-未验证边界见[状态说明](status.md#源码核对发现的实现缺口)。`auction-server` 使用 `--config-dir`，
-检测到 `AUCTION_CONFIG_FILE` 已设置时拒绝启动。初始 PostgreSQL 建库与迁移分离，详见
-[auctionctl 命令手册](../apps/auctionctl/README.md)及[合并服务手册](../apps/server/README.md)。
+server 使用 --config-dir，若 AUCTION_CONFIG_FILE 已设置即拒绝；完整流程见[server 手册](../apps/server/README.md)。
 
 ## 浏览器与发布构建
 
 ```bash
-# 安装与仓库 Dioxus 版本配套的 CLI。
 cargo install dioxus-cli --version 0.7.10 --locked
 just web-build
 
-# 已构建页面后的单端 Lite 本地启动示例。
+# 已构建对应页面后的 Lite 本地启动。
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml cargo run --locked -p auction-public-api --features sqlite,web-embed
 
-# 完整档制品、隔离门禁、干净工作树上的发布归档。
-just build-api
-just build-release
-just verify-artifacts
+# 干净工作树上的完整分体归档；含构建、资源隔离和哈希核验。
 just release-check
 
-# 可选单文件部署，auctionctl 仍独立。
+# 可选合并服务，auctionctl 仍独立。
 just build-single
 just release-check --single-binary
 ```
 
-Web 构建使用 `wasm-release` profile，清理对应 surface 中间输出后复制到稳定嵌入目录并生成 payload 清单。
-dx 可下载 esbuild 作为构建工具；项目不增加 Node 运行时、npm 依赖或第二套前端构建链。
-正式归档要求干净工作树，源码身份在构建前冻结并在各阶段重查。
-`--allow-dirty` 只用于显式本地取证，不能据此发布正式制品；细节见[发布与部署](../ops/deploy/README.md)。
-
-指定 AMD KVM 的本地定向候选通过 [ops/build](../ops/build/README.md) 显式选择 Cargo 配置，
-不修改默认 release/WASM 或正式发行范围。先独立构建 Web，再按目标白名单构建原生后端；
-本机微基准不能替代部署机、PostgreSQL 并发或 PGO 的代表性负载验证。
+Web 使用 wasm-release，清理对应 surface 中间输出后复制至稳定内嵌目录并生成 payload 清单。
+dx 可下载 esbuild 作为允许的构建工具，不增加 Node 运行时、npm 依赖或第二套前端链。
+分步构建、正式干净树要求和 --allow-dirty 的取证限制见[发布手册](../ops/deploy/README.md#发布制品)。
+[AMD KVM 候选](../ops/build/README.md)仅用于显式目标白名单，先独立构建 Web，不改默认 release/WASM；
+本机微基准不能替代目标机、PostgreSQL 并发或代表性 PGO 负载。
 
 ## 常见边界
 
 | 现象 | 优先核对 |
 | --- | --- |
-| 数据库已配置但驱动不可用 | 制品是否显式启用与 URL scheme 对应的 feature |
-| API 可用而页面 503 | 对应 Web payload 是否已构建，二进制是否启用 `web-embed` |
-| Lite 接口返回 501 | [能力矩阵](architecture.md#部署档位与能力)是否将该操作列为完整档 |
-| runtime 保存成功但参数未生效 | 按 `restart_required` 重启受影响的 Admin/Worker |
-| 配置校验拒绝示例 | 替换占位凭据、核对文件权限与相对路径，不能放松 loader |
+| 配置数据库但驱动不可用 | 二进制是否选择对应 postgres/sqlite feature |
+| API 可用、页面 503 | 对应 payload 与 web-embed |
+| Lite 接口 501 | [能力矩阵](architecture.md#部署档位与能力)是否支持 |
+| runtime 保存但未生效 | restart_required 与受影响角色重启 |
+| 配置示例被拒绝 | 占位凭据、权限、相对路径；不得放松 loader |

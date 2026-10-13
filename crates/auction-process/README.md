@@ -2,7 +2,7 @@
 
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
-三个服务共享的信号、有界 drain 和 abort-on-drop 任务原语。
+共享操作系统信号、有界 drain 和 Tokio 任务所有权原语。
 
 ## 本页导航
 
@@ -14,32 +14,27 @@
 
 ## 源码入口
 
-| 入口 | 职责 |
-| --- | --- |
-| [src/lifecycle](src/lifecycle) | 信号、drain 结果和 TaskGuard |
+[src/lifecycle/mod.rs](src/lifecycle/mod.rs) 定义 `TerminationSignals`、`DrainOutcome`、`wait_for_drain` 与 `TaskGuard`。
 
 ## 职责与实现边界
 
-三个可部署进程共用的操作系统生命周期原语。
+只提供进程生命周期原语，不读取配置、打开监听器、发布心跳或决定业务停止顺序；这些职责由各装配根持有。
 
 ## 资源所有权
 
-该 crate 只负责订阅 SIGINT/SIGTERM、区分首次与二次终止信号、执行默认 10 秒有界 drain，
-以及用 abort-on-drop 守卫防止 Tokio 任务在强制收口时脱离。它不读取配置、不打开监听器、
-不发布心跳，也不决定任何业务任务的停止顺序；这些所有权仍属于 `apps/public-api`、
-`apps/admin-api` 与 `apps/worker` 装配根。
+默认 drain 上限为 10 秒。超时或二次信号会丢弃 drain future，但具体监听器和资源仍须由调用方关闭。
+`TaskGuard` 在尚未 join 时自动 abort，避免普通 `JoinHandle` 被丢弃后留下脱离所有权的任务。
 
 ## 平台与第二次信号
 
-非 Unix 平台使用 Tokio 的 Ctrl-C 抽象。Unix 平台显式订阅 SIGINT 与 SIGTERM，使本地终止和
-systemd 默认停止信号进入同一条路径；drain 期间第二次信号会要求装配根立即强制收口。
+Unix 同时订阅 SIGINT/SIGTERM，非 Unix 使用 Tokio Ctrl-C。订阅失败应阻断启动；
+第二次信号要求立即强制收口，不为剩余任务重新延长总预算。
 
 ## 维护与验证
-
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-process
 ```
 
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+仅静态编译；默认检查与禁止默认运行的测试范围见[开发指南](../../docs/development.md)，
+运行证据见[验证状态](../../docs/status.md)。修改公共行为时同步对应契约。

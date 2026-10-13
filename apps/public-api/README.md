@@ -1,104 +1,63 @@
 # auction-public-api
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/deploy/README.md)
 
-公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配。
-`src/lib.rs` 导出独立 `run` 和显式配置路径 `run_from_path`，`main.rs` 调用同一库入口；
-[可选 supervisor](../server/README.md) 只在独立 Public 子进程内复用该装配，不合并路由。
-
-## 本页导航
-
-- [源码入口](#源码入口)
-- [职责与实现边界](#职责与实现边界)
-- [装配与依赖](#装配与依赖)
-- [持锁 relay 与故障边界](#持锁-relay-与故障边界)
-- [监听与运行配置](#监听与运行配置)
-- [前端产物](#前端产物)
-- [Cargo feature](#cargo-feature)
-- [边界约束](#边界约束)
-- [维护与验证](#维护与验证)
+公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配根。
+`src/lib.rs` 导出 `run`、`run_from_path`；独立 `main.rs` 和[合并服务](../server/README.md)的 Public 子进程复用同一入口。
 
 ## 源码入口
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/bootstrap](src/bootstrap) | 依赖装配、监听、心跳与关闭顺序 |
-| [src/web_assets](src/web_assets) | 仅 Public 的显式内嵌资源类型 |
+| [src/bootstrap](src/bootstrap) | 配置、依赖、监听、心跳与关闭顺序 |
+| [src/web_assets](src/web_assets) | Public 专属内嵌资源类型 |
 
 ## 职责与实现边界
 
-公开端进程装配根。
+只加载配置、装配应用端口与适配器、挂载 `auction_http::public_router()` 并管理进程生命周期。
+竞价规则、事务和 DTO 映射分别由 domain/application、storage、http 拥有。
 
 ## 装配与依赖
 
-源码布局：[src/main.rs](src/main.rs) 只负责 Tokio 入口；[src/bootstrap/mod.rs](src/bootstrap/mod.rs) 负责模块装配和稳定启动
-入口；`bootstrap/service.rs` 负责 tracing、HTTP 生命周期与退出 drain；`bootstrap/state.rs`
-负责数据库、端口、公开真实装备 URL、heartbeat 和 realtime 状态；`bootstrap/config.rs` 负责安全策略与缓存配置；
-`bootstrap/listener.rs` 负责监听器绑定。
+`bootstrap/service.rs` 拥有 tracing 与 HTTP 生命周期，`state.rs` 装配数据库、端口、装备 URL、心跳和 realtime，
+`config.rs` 映射安全/缓存策略，`listener.rs` 绑定 TCP 或 Linux Unix socket。
 
-职责仅限于：加载配置、初始化 tracing、装配缓存和数据库安全心跳、装配 Public realtime
-relay/Hub、绑定监听器、挂载 `auction_http::public_router()` 和返回启动错误。Public 的
-`[tracing]` 使用主配置，OTLP headers 使用敏感 TOML 的 Public 专属字段；exporter 采用有界
-异步队列。周期心跳每轮读取数据库/schema readiness、进程内审计写入失败计数和 Public tracing
-安全状态。进程通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 Axum graceful
-shutdown，停止 heartbeat/realtime relay 并发布停止心跳，整个 HTTP/后台任务 drain 最多 10 秒，
-排空期间第二次信号会强制收口，最后按配置限时刷新 exporter。稳定退出码仍待统一。
-**业务逻辑不属于这里。** relay 只负责当前 Public 实例的
-持久化事件分发，外部广播 sink 仍由独立协议负责。
+PostgreSQL 的真实装备 URL 需要成对有效的 `equipment_data_key_id`/`equipment_data_key`；缺失时 P09/P11 返回 503，
+无效时启动失败。URL 只在最终 `no-store` DTO 映射时生成；SQLite Lite 保留 lot 投影但链接为空。
+OTLP headers 只从敏感 TOML 读取。周期心跳报告数据库/schema、审计写入失败计数和 tracing 安全状态。
 
 ## 持锁 relay 与故障边界
 
-relay 的目录读取和消费确认共用持锁数据库连接；PostgreSQL 持锁连接失效时停止推进游标并
-撤销 readiness 证明，不以新池连接继续消费。数据库恢复后需要重启该 Public 实例重新取得
-owner；SQLite 文件库在实际数据库同目录保持 sidecar 文件锁，不依赖 `/tmp`。运行账号需
-能在可信数据库目录创建 0600 锁文件；锁文件退出时保留，数据库不得使用硬链接别名。
-文件库 owner 还要求 Linux `statx` mount 身份，拒绝单文件 bind mount；可挂载整个数据库目录。
+relay 的目录读取和消费确认共用持锁连接。PostgreSQL owner 连接失效后停止推进游标并撤销 readiness；
+数据库恢复后须重启该实例重新取得 owner，不能换池连接继续消费。
+SQLite 文件库在数据库同目录保留 0600 sidecar 锁；运行账号须能创建它，数据库不能使用硬链接别名。
+文件库 owner 要求 Linux `statx` mount 身份，拒绝单文件 bind mount，可挂载整个数据库目录。
+consumer 标识与缓冲配置见[配置说明](../../ops/config/README.md#public-实时-relay)。
 
 ## 监听与运行配置
 
-默认监听 `127.0.0.1:8090`。
-
-```bash
-AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
-  cargo run --locked -p auction-public-api --features sqlite
-```
+默认 `127.0.0.1:8090`；配置准备和显式启动见[开发指南](../../docs/development.md#配置准备与显式运行)。
+普通启动不迁移数据库。SIGINT/SIGTERM 触发 HTTP 停止接收、heartbeat/relay 停止和停止心跳，
+整个 drain 最多 10 秒；第二次信号强制收口，随后按配置限时刷新 exporter。稳定退出码仍待统一。
 
 ## 前端产物
 
-公开端 SPA 由本装配根的 `RustEmbed` 类型内嵌，交给 `auction-http` 提供，构建命令：
-
-```bash
-just web-build-public
-just build-release
-```
-
-`web-embed` 只在内嵌发布构建中显式启用。API-only 制品始终使用固定空资源集合，即使构建机上
-存在旧的 `target/dx` 也不会误嵌入；进程仍可正常启动，`/health` 与 `/api/v1/health` 照常响应，
-只有静态资源路由返回 503。
-
-PostgreSQL 完整档会使用敏感 TOML 中与装备密文信封匹配的 `equipment_data_key_id`/
-`equipment_data_key` 装配真实装备 URL 解析器；两项都缺失时 P09/P11 lot 读取返回 503，成对配置但
-无效时启动失败关闭。PostgreSQL 只在最终 `no-store` DTO 映射时短暂生成完整 URL；SQLite Lite
-继续返回 lot 投影，但链接字段留空，不伪造可用 URL。
+Public SPA 由本 app 的 `RustEmbed` 类型内嵌，再交给 `auction-http` 提供。
+`just web-build-public` 生成页面，`just build-release` 构建内嵌发布制品。
+API-only 使用固定空资源集合；即使构建机残留 `target/dx`，也不会误嵌入。
+缺少页面只使静态路由返回 503，不阻止 API 和健康接口工作。
 
 ## Cargo feature
 
-- `cache-redis`：编译 Redis 缓存客户端。仅在配置里填 `redis_url` 不会引入该依赖。
-- `postgres` / `sqlite`：分别编译对应数据库适配器；数据库 URL 的 scheme 必须与制品 feature
-  一致。未编译数据库 feature 时，含 `database_url` 的配置会在启动装配阶段明确失败。
-- `web-embed`：只嵌入 Public 的优化 Web payload；默认关闭，API-only 发布不得启用。
+默认 feature 为空；`postgres` / `sqlite` 选择数据库适配器，`cache-redis` 编译可选 Redis，
+`web-embed` 只包含 Public payload。数据库配置必须匹配已编译驱动，详见[制品选择](../../docs/development.md#选择制品-feature)。
 
 ## 边界约束
 
-公开端**不得**依赖管理端 UI 模块或管理专属命令。Public `RustEmbed` 类型由本装配根独占，
-`auction-http` 只接收该泛型资源类型；依赖图不引用 Admin 产物，不依赖链接器裁剪保证制品隔离。
+不依赖 Admin UI、管理命令或 Admin 资源类型；隔离由依赖图和显式 feature 保证，不依赖链接器裁剪。
+relay 只分发本实例的持久化事件，未实现的外部广播 sink 不属于其能力声明。
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
-
-```bash
-cargo check --locked -p auction-public-api
-```
-
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+本模块可用 `cargo check --locked -p auction-public-api` 静态编译；数据库路径须另外选择对应 feature。
+完整门禁见[开发指南](../../docs/development.md)，运行证据见[验证状态](../../docs/status.md)。
