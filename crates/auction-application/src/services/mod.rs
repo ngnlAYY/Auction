@@ -44,7 +44,7 @@ mod user_mail;
 
 pub use admin_auction::AdminAuctionCreateService;
 pub use admin_auction_schedule::AdminAuctionScheduleService;
-pub use admin_credentials::AdminCredentialService;
+pub use admin_credentials::{AdminCredentialCheckService, AdminCredentialService};
 pub use admin_intake::AdminIntakeService;
 pub use admin_lot::AdminLotUpdateService;
 pub use admin_mail::AdminMailService;

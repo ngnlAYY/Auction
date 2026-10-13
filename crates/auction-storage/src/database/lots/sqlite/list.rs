@@ -163,7 +163,7 @@ async fn sqlite_list_projection(
                  END DESC,
                  deadline.id DESC LIMIT 1) AS scheduled_ends_at,
             a.preview_revision,
-            CASE WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
+            CASE WHEN a.status = 'preview' AND julianday('now') < julianday(a.scheduled_open_at) THEN 'preview'
                  WHEN a.status = 'preview' THEN 'opening' ELSE 'live' END AS presentation_mode,
             CASE WHEN a.status IN ('live', 'final') THEN 1 ELSE 0 END AS bidding_open
          FROM auctions AS a

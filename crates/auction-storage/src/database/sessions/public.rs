@@ -89,6 +89,45 @@ pub(super) async fn create_postgres(
     })
 }
 
+/// 长连接只读权威会话，不让协议心跳刷新 last_activity_at 或 expires_at。
+#[cfg(feature = "postgres")]
+pub(super) async fn inspect_postgres(
+    store: &PostgresStore,
+    token_hash: [u8; 32],
+    now: DateTime<Utc>,
+) -> Result<PublicSessionIdentity, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT session.user_id, account.username,
+                session.expires_at, session.absolute_expires_at
+         FROM public.public_sessions AS session
+         JOIN public.users AS account ON account.id = session.user_id
+         WHERE session.token_hash = $1
+           AND session.revoked_at IS NULL
+           AND session.expires_at > $2 AND session.absolute_expires_at > $2
+           AND account.status = 'active' AND account.key_status = 'active'",
+    )
+    .bind(token_hash.as_slice())
+    .bind(now)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|_| storage_error("复核 Public 会话失败"))?
+    .ok_or(SessionError::Unauthenticated)?;
+    Ok(PublicSessionIdentity {
+        user_id: row
+            .try_get("user_id")
+            .map_err(|_| storage_error("读取 Public 会话用户标识失败"))?,
+        username: row
+            .try_get("username")
+            .map_err(|_| storage_error("读取 Public 会话用户名失败"))?,
+        expires_at: row
+            .try_get("expires_at")
+            .map_err(|_| storage_error("读取 Public 会话过期时间失败"))?,
+        absolute_expires_at: row
+            .try_get("absolute_expires_at")
+            .map_err(|_| storage_error("读取 Public 会话绝对过期时间失败"))?,
+    })
+}
+
 #[cfg(feature = "postgres")]
 pub(super) async fn touch_postgres(
     store: &PostgresStore,
@@ -227,6 +266,46 @@ pub(super) async fn create_sqlite(
         expires_at: record.expires_at,
         absolute_expires_at: record.absolute_expires_at,
     })
+}
+
+/// Lite 只读复核不取得写锁；时间解析兼容 RFC3339 和既有 UTC 空格格式。
+#[cfg(feature = "sqlite")]
+pub(super) async fn inspect_sqlite(
+    store: &SqliteStore,
+    token_hash: [u8; 32],
+    now: DateTime<Utc>,
+) -> Result<PublicSessionIdentity, ApplicationError> {
+    let row = sqlx::query(
+        "SELECT session.user_id, account.username,
+                session.expires_at, session.absolute_expires_at
+         FROM public_sessions AS session
+         JOIN users AS account ON account.id = session.user_id
+         WHERE session.token_hash = ?
+           AND session.revoked_at IS NULL
+           AND account.status = 'active' AND account.key_status = 'active'",
+    )
+    .bind(token_hash.to_vec())
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|_| storage_error("复核 Lite Public 会话失败"))?
+    .ok_or(SessionError::Unauthenticated)?;
+    let identity = PublicSessionIdentity {
+        user_id: uuid_from_blob(
+            row.try_get("user_id").map_err(|_| storage_error("读取 Lite 会话用户标识失败"))?,
+        )?,
+        username: row.try_get("username").map_err(|_| storage_error("读取 Lite 会话用户名失败"))?,
+        expires_at: parse_timestamp(
+            row.try_get("expires_at").map_err(|_| storage_error("读取 Lite 会话过期时间失败"))?,
+        )?,
+        absolute_expires_at: parse_timestamp(
+            row.try_get("absolute_expires_at")
+                .map_err(|_| storage_error("读取 Lite 会话绝对过期时间失败"))?,
+        )?,
+    };
+    if identity.expires_at <= now || identity.absolute_expires_at <= now {
+        return Err(SessionError::Unauthenticated.into());
+    }
+    Ok(identity)
 }
 
 #[cfg(feature = "sqlite")]

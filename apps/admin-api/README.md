@@ -102,6 +102,11 @@ MoogleMail 业务快照。因此业务区块更新要求重启受影响的 Admin
 敏感配置的单 Cookie 入口；凭据变更与其他启动快照一样需要重启 Admin。固定 HTTPS origin、禁用重定向和精确 world
 路径校验始终保留。
 
+同一 PostgreSQL `credential_data_key` 另外装配 A44 手动只读校验服务；每次请求读取指定 ID 的
+当前数据库信封，不复用启动时的 active Cookie 快照，也不回退敏感配置来源。论坛/游戏 GET
+探测通过窄应用端口返回三态与时间，缺少密钥或 Lite 档保持 501；不改 Worker 所有权、状态或
+重启要求。新页面生效仍需重新构建内嵌 Admin 资源并按部署手册替换程序，本轮不自动部署。
+
 ## 生命周期与监听
 
 Admin 已通过 `auction-process` 统一监听 SIGINT/SIGTERM；首次信号触发 TCP/Unix Axum graceful
@@ -146,7 +151,7 @@ REST 契约并留下审计记录；凭据与密钥材料只在服务端处理，
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-admin-api

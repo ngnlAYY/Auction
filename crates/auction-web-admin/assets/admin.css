@@ -742,6 +742,11 @@
   margin-block: 0;
 }
 
+/* 拒收摘要保留完整代码；未知长代码也不得撑宽页面。 */
+.admin-mail-rejection-summary {
+  overflow-wrap: anywhere;
+}
+
 .admin-mail-detail__grid {
   display: grid;
   grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);

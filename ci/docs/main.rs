@@ -1,7 +1,6 @@
-//! 仓库文档静态门禁：链接、导航覆盖与决策笔记结构，不执行产品行为。
+//! 仓库文档静态门禁：链接、锚点、导航覆盖与包 README，不执行产品行为。
 
 mod links;
-mod notes;
 mod scan;
 
 use std::{
@@ -25,9 +24,6 @@ fn check() -> Result<(), String> {
         let content =
             fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
         documents.insert(path.clone(), scan::parse(path, &content)?);
-        if path.starts_with(root.join(".agents/notes")) {
-            notes::check(&root, path, &content)?;
-        }
     }
     let mut graph = BTreeMap::<PathBuf, BTreeSet<PathBuf>>::new();
     for (path, document) in &documents {
@@ -56,9 +52,6 @@ fn check() -> Result<(), String> {
         ));
     }
     scan::package_readmes(&root)?;
-    println!(
-        "文档检查通过：{} 份文档；本地链接、锚点、导航覆盖、包 README 和笔记结构有效。",
-        paths.len()
-    );
+    println!("文档检查通过：{} 份文档；本地链接、锚点、导航覆盖和包 README 有效。", paths.len());
     Ok(())
 }

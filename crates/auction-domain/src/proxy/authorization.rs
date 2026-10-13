@@ -48,7 +48,7 @@ impl ProxyAuthorization {
     pub fn creation_transition(&self) -> Result<ProxyTransition, DomainError> {
         self.validate()?;
 
-        Ok(ProxyTransition {
+        let transition = ProxyTransition {
             authorization_id: self.id,
             command_id: self.creation_command_id,
             kind: ProxyTransitionKind::Created,
@@ -60,7 +60,9 @@ impl ProxyAuthorization {
             new_status: self.status,
             state_version: self.state_version,
             reason: None,
-        })
+        };
+        transition.validate()?;
+        Ok(transition)
     }
 
     /// 校验代理授权当前快照的身份、金额和版本不变量。
@@ -99,21 +101,17 @@ impl ProxyAuthorization {
             return Err(DomainError::InvalidProxyMaximum);
         }
 
-        let old_maximum = self.maximum_amount;
-        let status = self.status;
-        self.maximum_amount = new_maximum;
-        let state_version = self.bump_version()?;
-        Ok(ProxyTransition {
+        self.apply_transition(ProxyTransition {
             authorization_id: self.id,
             command_id,
             kind: ProxyTransitionKind::Lowered,
-            old_maximum: Some(old_maximum),
+            old_maximum: Some(self.maximum_amount),
             new_maximum,
             old_mode: Some(self.mode),
             new_mode: self.mode,
-            old_status: Some(status),
-            new_status: status,
-            state_version,
+            old_status: Some(self.status),
+            new_status: self.status,
+            state_version: self.next_state_version()?,
             reason: None,
         })
     }
@@ -133,25 +131,17 @@ impl ProxyAuthorization {
             });
         }
 
-        let state_version =
-            self.state_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
-        let old_mode = self.mode;
-        let old_status = self.status;
-        self.mode = ProxyMode::Fast;
-        self.status = ProxyStatus::FinalFast;
-        self.state_version = state_version;
-
-        Ok(ProxyTransition {
+        self.apply_transition(ProxyTransition {
             authorization_id: self.id,
             command_id,
             kind: ProxyTransitionKind::FinalFast,
             old_maximum: Some(self.maximum_amount),
             new_maximum: self.maximum_amount,
-            old_mode: Some(old_mode),
-            new_mode: self.mode,
-            old_status: Some(old_status),
-            new_status: self.status,
-            state_version,
+            old_mode: Some(self.mode),
+            new_mode: ProxyMode::Fast,
+            old_status: Some(self.status),
+            new_status: ProxyStatus::FinalFast,
+            state_version: self.next_state_version()?,
             reason: None,
         })
     }
@@ -200,10 +190,7 @@ impl ProxyAuthorization {
             return Err(DomainError::InvalidProxyTransition { from: self.status, to: next_status });
         }
 
-        let old_status = self.status;
-        self.status = next_status;
-        let state_version = self.bump_version()?;
-        Ok(ProxyTransition {
+        self.apply_transition(ProxyTransition {
             authorization_id: self.id,
             command_id,
             kind,
@@ -211,16 +198,29 @@ impl ProxyAuthorization {
             new_maximum: self.maximum_amount,
             old_mode: Some(self.mode),
             new_mode: self.mode,
-            old_status: Some(old_status),
+            old_status: Some(self.status),
             new_status: next_status,
-            state_version,
+            state_version: self.next_state_version()?,
             reason,
         })
     }
 
-    fn bump_version(&mut self) -> Result<u64, DomainError> {
-        self.state_version =
-            self.state_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;
-        Ok(self.state_version)
+    fn next_state_version(&self) -> Result<u64, DomainError> {
+        self.state_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)
+    }
+
+    fn apply_transition(
+        &mut self,
+        transition: ProxyTransition,
+    ) -> Result<ProxyTransition, DomainError> {
+        // 先完成所有可能失败的检查，再一次性发布状态；溢出、非法原因或损坏快照
+        // 不得让调用方在收到错误后观察到半个降额或终止结果。
+        self.validate()?;
+        transition.validate()?;
+        self.maximum_amount = transition.new_maximum;
+        self.mode = transition.new_mode;
+        self.status = transition.new_status;
+        self.state_version = transition.state_version;
+        Ok(transition)
     }
 }

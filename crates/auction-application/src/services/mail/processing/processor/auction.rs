@@ -164,7 +164,9 @@ where
                     );
                 }
             };
-            let validation_issue = snapshot.mail_validation_issue(now);
+            // 读取可能跨越多个时钟刻度，必须用读取完成后的应用时钟校验来源采集时间。
+            // 不截断或钳制来源时间；真实未来时间仍失败关闭，命令原有业务时间与幂等字段不变。
+            let validation_issue = snapshot.mail_validation_issue(self.clock.now());
             let identity_mismatch = snapshot.external_equipment_id != external_equipment_id;
             if identity_mismatch || validation_issue.is_some() {
                 snapshot.clear_secret();

@@ -16,9 +16,10 @@ use tokio::{
     time::{Duration, Instant, MissedTickBehavior, interval_at, sleep, timeout},
 };
 
-use super::super::realtime_hub::RealtimeSubscription;
+use super::super::realtime_hub::{RealtimeSubscription, RealtimeSubscriptionError};
 use super::super::{PublicApiState, api_error, not_found_error, parse_query};
 use super::mapping::map_event;
+use super::session::{RealtimeSession, SessionCheckError};
 use super::target::{RealtimeTarget, parse_websocket_target};
 
 const MAX_MESSAGE_BYTES: usize = 4 << 10;
@@ -36,6 +37,8 @@ const REASON_SHUTDOWN: &str = "服务正在关闭";
 const REASON_PROTOCOL_ERROR: &str = "实时事件合同错误";
 const REASON_CLIENT_DATA: &str = "实时连接只允许服务端推送";
 const REASON_SLOW_CONSUMER: &str = "连接消费速度过慢";
+const REASON_SESSION_EXPIRED: &str = "会话已失效";
+const REASON_SESSION_UNAVAILABLE: &str = "会话校验暂不可用";
 
 /// 建立只读 WebSocket；连接范围必须明确为单一拍卖流或公开发现流。
 pub(crate) async fn websocket(
@@ -63,9 +66,15 @@ pub(crate) async fn websocket(
                 .into_response();
         }
     };
-    if let Err(response) = super::super::authenticated_public_identity(&state, &headers).await {
-        return *response;
-    }
+    let identity = match super::super::authenticated_public_identity(&state, &headers).await {
+        Ok(identity) => identity,
+        Err(response) => return *response,
+    };
+    let (Some(session_service), Some(raw_token)) =
+        (state.session_handle(), super::super::read_public_session_cookie(&headers))
+    else {
+        return super::super::session_unavailable();
+    };
 
     if let RealtimeTarget::Auction(auction_id) = target {
         let Some(reader) = state.auctions() else {
@@ -113,9 +122,13 @@ pub(crate) async fn websocket(
         )
         .into_response();
     };
-    let subscription = match hub.subscribe(target.stream_key()) {
+    let subscription = match hub.subscribe(target.stream_key(), identity.user_id) {
         Ok(subscription) => subscription,
-        Err(_) => {
+        Err(RealtimeSubscriptionError::Capacity) => {
+            return api_error(StatusCode::TOO_MANY_REQUESTS, "realtime_busy", "实时连接数已达上限")
+                .into_response();
+        }
+        Err(RealtimeSubscriptionError::Unavailable) => {
             return api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "realtime_unavailable",
@@ -125,12 +138,20 @@ pub(crate) async fn websocket(
         }
     };
     let realtime_shutdown = state.realtime_shutdown();
+    let session = RealtimeSession::new(session_service, raw_token, identity);
 
     upgrade
         .max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
         .on_upgrade(move |socket| {
-            stream_events(socket, target, subscription, discovery_permit, realtime_shutdown)
+            stream_events(
+                socket,
+                target,
+                subscription,
+                session,
+                discovery_permit,
+                realtime_shutdown,
+            )
         })
         .into_response()
 }
@@ -139,6 +160,7 @@ async fn stream_events(
     mut socket: WebSocket,
     target: RealtimeTarget,
     mut subscription: RealtimeSubscription,
+    mut session: RealtimeSession,
     _discovery_permit: Option<OwnedSemaphorePermit>,
     mut realtime_shutdown: watch::Receiver<bool>,
 ) {
@@ -152,16 +174,35 @@ async fn stream_events(
         close_connection(&mut socket, CLOSE_GOING_AWAY, REASON_SHUTDOWN).await;
         return;
     }
+    // 升级等待期间可能已注销；必须先完成复核，不能依赖零时长计时器抢在首帧之前。
+    if !recheck_session(&mut socket, &mut session).await {
+        return;
+    }
+    let session_deadline = sleep(session.next_check_delay());
+    tokio::pin!(session_deadline);
 
     loop {
         tokio::select! {
+            // 安全/存活期限优先于持续可读的消息，防止高流量饿死撤销检查或 Ping。
+            biased;
             changed = realtime_shutdown.changed() => {
                 if changed.is_err() || *realtime_shutdown.borrow_and_update() {
                     close_connection(&mut socket, CLOSE_GOING_AWAY, REASON_SHUTDOWN).await;
                     return;
                 }
             }
+            _ = &mut session_deadline => {
+                if !recheck_session(&mut socket, &mut session).await {
+                    return;
+                }
+                session_deadline.as_mut().reset(Instant::now() + session.next_check_delay());
+            }
             _ = &mut pong_deadline => return,
+            _ = ticker.tick() => {
+                if !send_message(&mut socket, Message::Ping(Vec::new().into())).await {
+                    return;
+                }
+            }
             message = socket.recv() => {
                 match message {
                     Some(Ok(Message::Close(_))) | None => return,
@@ -221,13 +262,18 @@ async fn stream_events(
                     return;
                 }
             }
-            _ = ticker.tick() => {
-                if !send_message(&mut socket, Message::Ping(Vec::new().into())).await {
-                    return;
-                }
-            }
         }
     }
+}
+
+async fn recheck_session(socket: &mut WebSocket, session: &mut RealtimeSession) -> bool {
+    let (code, reason) = match session.recheck().await {
+        Ok(()) => return true,
+        Err(SessionCheckError::Expired) => (CLOSE_POLICY_VIOLATION, REASON_SESSION_EXPIRED),
+        Err(SessionCheckError::Unavailable) => (CLOSE_TRY_AGAIN_LATER, REASON_SESSION_UNAVAILABLE),
+    };
+    close_connection(socket, code, reason).await;
+    false
 }
 
 async fn send_message(socket: &mut WebSocket, message: Message) -> bool {

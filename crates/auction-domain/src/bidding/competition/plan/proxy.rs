@@ -2,9 +2,12 @@
 
 use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
-use super::state::{BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan};
+use super::state::{
+    BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan,
+    proxy_response_amount,
+};
 use crate::{
-    AuctionRules, AuctionStatus, BidAmount, BidMechanism, DomainError, LotBidState, MAX_BID_AMOUNT,
+    AuctionRules, AuctionStatus, BidAmount, BidMechanism, DomainError, LotBidState,
     ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus, ProxyTerminalReason, UserId,
 };
 
@@ -266,13 +269,7 @@ pub(super) fn plan_slow_due(
         return Err(DomainError::InvalidBidState("慢速代理调度已经过期"));
     }
     let current = state.current_price.ok_or(DomainError::InvalidBidState("慢速代理缺少当前价"))?;
-    let amount = rules
-        .next_minimum_bid(Some(state.start_price), Some(current), state.material, false)?
-        .min(active.maximum_amount)
-        .bid_ceiling();
-    if amount < current || (amount == current && current.value() != MAX_BID_AMOUNT) {
-        return Err(DomainError::InvalidBidState("慢速代理无法产生更高出价"));
-    }
+    let amount = proxy_response_amount(rules, state, current, active.maximum_amount)?;
     if bid_ids.len() != 1 {
         return Err(DomainError::InvalidBidState("慢速代理事实数量不正确"));
     }
@@ -320,18 +317,7 @@ pub(super) fn plan_final_proxy(
         let current = final_state
             .current_price
             .ok_or(DomainError::InvalidBidState("最终阶段代理缺少当前价"))?;
-        let amount = rules
-            .next_minimum_bid(
-                Some(final_state.start_price),
-                Some(current),
-                final_state.material,
-                false,
-            )?
-            .min(active.maximum_amount)
-            .bid_ceiling();
-        if amount < current || (amount == current && current.value() != MAX_BID_AMOUNT) {
-            return Err(DomainError::InvalidBidState("最终阶段代理无法产生更高出价"));
-        }
+        let amount = proxy_response_amount(rules, final_state, current, active.maximum_amount)?;
         if bid_ids.len() != 1 {
             return Err(DomainError::InvalidBidState("最终阶段代理事实数量不正确"));
         }

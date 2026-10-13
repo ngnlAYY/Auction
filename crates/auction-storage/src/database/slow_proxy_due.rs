@@ -1,7 +1,8 @@
 //! 慢速代理持久化到期扫描适配器。
 //!
 //! 扫描只读取 lot 上的 due generation，并使用数据库时钟筛选；它不领取内存任务，也不提前持有
-//! 业务锁。真正执行必须回到竞价 Serializable/`BEGIN IMMEDIATE` 事务重新核对全部 fence。
+//! 业务锁。已过竞价截止的候选在 LIMIT 前排除，避免 Final 推进失败时反复占满批次。
+//! 真正执行必须回到竞价 Serializable/`BEGIN IMMEDIATE` 事务重新核对全部 fence。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, RepositoryError, SlowProxyDue, SlowProxyDueReader,
@@ -50,7 +51,8 @@ async fn list_postgres(
           AND proxy.mode = 'slow'
          WHERE lot.status = 'live'
            AND auction.status = 'live'
-           AND lot.slow_due_at <= clock_timestamp()
+           AND lot.slow_due_at <= statement_timestamp()
+           AND lot.effective_end_at > statement_timestamp()
          ORDER BY lot.slow_due_at, lot.id
          LIMIT $1",
     )
@@ -101,6 +103,7 @@ async fn list_sqlite(
          WHERE lot.status = 'live'
            AND auction.status = 'live'
            AND julianday(lot.slow_due_at) <= julianday('now')
+           AND julianday(lot.effective_end_at) > julianday('now')
          ORDER BY lot.slow_due_at, lot.id
          LIMIT ?",
     )

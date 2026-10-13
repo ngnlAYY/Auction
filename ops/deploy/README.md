@@ -98,6 +98,10 @@ just package
 源码指纹都会保留 dirty 事实，不得作为正式上线批准。解包后仍需按下文把示例复制到 `/etc/auction`、
 注入真实敏感文件并完成目标主机权限/readiness 演练。
 
+仅针对已登记两台 AMD KVM 的编译候选见 [ops/build](../build/README.md)。该目录拥有显式
+Cargo 参数、目标特性白名单与本机测量说明，不属于默认归档；目标 CPU/ABI、内嵌资源、
+制品身份和目标机运行证据仍需核对。不能把候选配置或 `cargo check` 当作正式发布批准。
+
 ## 首次部署配置
 
 内嵌 PostgreSQL 制品支持 `auction-admin-api setup --output-dir <绝对路径>`；也可在没有默认配置

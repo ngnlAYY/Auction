@@ -198,6 +198,12 @@ pub use ports::{
     format_public_time_wire, forum_catalog_marker, forum_system_log_marker, forum_world_name,
     is_stale_slow_proxy_error, mail_auction_aggregate_id, request_hash,
 };
+pub use ports::{
+    AdminCredentialCheckObservation, AdminCredentialCheckPort, AdminCredentialCheckRecord,
+    AdminCredentialCheckResult, AdminCredentialCheckStatus, AdminCredentialCheckStore,
+    AdminCredentialVerifier, credential_check_worlds,
+};
+pub use services::AdminCredentialCheckService;
 pub use services::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminCredentialService,
     AdminIntakeService, AdminLotUpdateService, AdminMailService, AdminRulesService,

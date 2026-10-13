@@ -147,7 +147,6 @@ page-login-title = ログイン
 page-account-title = マイ入札
 page-rules-title = ルール
 page-blacklist-title = ブラックリスト
-page-blacklist-note = 現在入札を禁止されているユーザーです。オークション DB の ID ではなく、現在の MoogleMail プレイヤー名を表示します。
 page-compensation-pool-title = 補償プール
 page-compensation-pool-note = 両ワールドのオークションで Persistent の Credits 補償プールを共有します。各回を展開すると収入と補償先を確認できます。
 compensation-balance = 現在残高

@@ -11,7 +11,7 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 | 任务 | 文档 |
 | --- | --- |
 | 浏览全部项目文档 | [文档导航](docs/README.md) |
-| 阅读系统设计总览 | [DESIGN.md](DESIGN.md) |
+| 阅读系统与界面设计 | [系统总览](./DESIGN.md)、[Public 设计](crates/auction-web-public/DESIGN.md)、[Admin 设计](crates/auction-web-admin/DESIGN.md) |
 | 理解进程、模块和数据库档位 | [架构](docs/architecture.md) |
 | 准备工具链、编译与静态检查 | [开发指南](docs/development.md) |
 | 选择配置与部署方式 | [配置说明](ops/config/README.md)、[部署手册](ops/deploy/README.md) |
@@ -70,7 +70,7 @@ just release-check --single-binary
 
 ## 当前交付边界
 
-源码已登记 Public 21 条、Admin 43 条 feature API，以及 Public 15 条、Admin 21 条浏览器路由。
+源码已登记 Public 21 条、Admin 44 条 feature API，以及 Public 15 条、Admin 21 条浏览器路由。
 PostgreSQL 完整档与 SQLite Lite 的具体差异见[能力矩阵](docs/architecture.md#部署档位与能力)。
 这些数量描述注册范围，不证明运行验收。
 

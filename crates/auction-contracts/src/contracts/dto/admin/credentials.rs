@@ -38,6 +38,31 @@ pub struct AdminCredentialMutationRequest {
     pub status: Option<String>,
 }
 
+/// 已保存凭据的只读校验请求；不接受 Cookie、URL 或状态修改。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialCheckRequest {
+    pub expected_state_version: i64,
+}
+
+/// 一个范围的认证观测：status 仅为 valid/invalid/inconclusive。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialCheckScopeResponse {
+    pub world: String,
+    pub status: String,
+}
+
+/// 瞬时检查结果；不持久化、不改变凭据 active/disabled/invalid 状态。
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminCredentialCheckResponse {
+    pub credential_id: String,
+    pub state_version: i64,
+    pub checked_at: String,
+    pub checks: Vec<AdminCredentialCheckScopeResponse>,
+}
+
 /// Admin 凭据删除请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

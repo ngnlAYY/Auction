@@ -61,7 +61,6 @@ fn BlacklistTable(page: BlacklistPage, on_page_change: EventHandler<i64>) -> Ele
     rsx! {
         section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
             h1 { id: "blacklist-title", {t!("page-blacklist-title")} }
-            p { {t!("page-blacklist-note")} }
             if page.users.is_empty() {
                 p { class: "public-blacklist-empty", {t!("blacklist-empty")} }
             } else {

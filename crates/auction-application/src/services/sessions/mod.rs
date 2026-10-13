@@ -1,4 +1,4 @@
-//! Public 与 Admin session 用例：登录、滑动刷新和撤销。
+//! Public 与 Admin session 用例：登录、滑动刷新、只读复核和撤销。
 
 use std::sync::Arc;
 
@@ -40,6 +40,17 @@ impl PublicSessionService {
 }
 
 impl PublicSessionPort for PublicSessionService {
+    fn inspect(
+        &self,
+        raw_token: String,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+        Box::pin(async move {
+            let token_hash = hash_token(&raw_token)?;
+            self.store.inspect_public(token_hash, now).await
+        })
+    }
+
     fn login(&self, key: Vec<u8>, now: DateTime<Utc>) -> ApplicationFuture<'_, PublicLoginResult> {
         Box::pin(async move {
             validate_login_key(&key)?;

@@ -24,9 +24,9 @@
 计入。当前冻结统计是：
 
 - Public：21 个唯一路径；
-- Admin：43 个唯一路径。
+- Admin：44 个唯一路径。
 
-A38-A43 是独立登记的 Admin 产品能力，已经包含在 43 条统计中。路径数量只证明路由注册闭集，不
+A38-A44 是独立登记的 Admin 产品能力，已经包含在 44 条统计中。路径数量只证明路由注册闭集，不
 代表对应应用端口、存储能力或运行证据已经完成。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不属于 Public/Admin feature API 计数；
@@ -173,7 +173,9 @@ Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍�
 
 ### Public 分页、世界与金额
 
-Public 分页必须保留已发布的 page/page_size 与 cursor 语义。业务世界关闭后，Public 当前目录、
+Public 分页必须保留已发布的 page/page_size 与 cursor 语义。P07 拍卖编号页的 `total` 表示完整
+筛选集总数，与当前页来自同一读取快照；越界空页不改为 0。cursor 页不执行或返回总数统计。
+业务世界关闭后，Public 当前目录、
 preview/live/final/settling 投影、写入入口和 discovery 增量都必须隐藏该世界；只允许已经
 `settled` 的拍卖、lot、竞价/账户历史、价格历史与补偿事实继续通过历史读取边界访问，不能把
 `cancelled` 或禁用世界中的活动拍卖顺带公开。P09 的 lot 投影允许读取仍属于公开
@@ -184,6 +186,10 @@ P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000
 的成功重放不被重新解释。P09/P11 的 `next_bid` 保留数学最低价和严格抬价关系；超过 1B 时表示
 没有可提交的新出价，浏览器显示“已达上限”，不能把值压低到 1B 后提交。普通输入继续使用整数 K；
 代理输入扩展为 K/M/B，其中 M/B 最多三/六位小数，均须精确落在 1K 网格且不超过 1B。
+
+P16/P17 的活动代理能力投影不把“上限不足完整下一口”当作损坏：合法慢速等待仍返回
+`waiting=true`，上限不高于降额绑定下限时返回 `can_lower=false`。例如默认 5% 加价、当前价
+99,000、慢速上限 100,000 时允许等待并反超，不因下一口 104,000 返回 503；P19 的降额约束不放宽。
 
 
 ### 标的编号、来源与历史读取
@@ -216,8 +222,13 @@ P04 查询只能含一个 `auction_id` 或 `scope=auctions`，每帧发送一个
 frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008、1013、1002、1001 及 reason
 分别表示客户端写入、慢消费者、事件合同错误和服务 drain；`MessageTooLong` 读超限尝试发送空 reason 的
 1009 close，其余 Pong 超时及底层读写失败直接断开。
-只有 discovery 使用每进程 128 槽和 429 `discovery_busy`；单拍卖新连接拒绝 settled，但既有连接可接收
-`auction.settled`。断线补发只走 P03，refetch 保留恢复游标和现有 socket。
+全部范围共用每进程 1024 条、每用户 8 条连接上限，超限返回 429 `realtime_busy`；discovery
+额外使用独立 128 槽和 429 `discovery_busy`，单拍卖不占该专属槽。升级后首次推送前只读复核会话，
+之后按不超过 30 秒的间隔或会话到期安排检查，每次读取最多 5 秒；不因心跳刷新会话。
+失效使用 1008/`会话已失效`，依赖错误/复核超时使用 1013/`会话校验暂不可用`；
+撤销不是同步踢线，具体检查与关闭预算见[事件契约](events.md#websocket)。
+单拍卖新连接拒绝 settled，但既有连接可接收 `auction.settled`。
+断线补发只走 P03，refetch 保留恢复游标和现有 socket。
 
 
 ### Public 时间词法
@@ -226,6 +237,8 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 裁掉尾随零，整秒不附加 `.000000`。P18-P20 从历史命令账本重放时还必须
 保留账本字符串原有的 offset 与纳秒精度，同时以解析后的 UTC instant 做一致性校验。该规则不
 改变 PostgreSQL 关系字段的微秒精度，也不改变 Admin 既有的固定六位微秒投影。
+SQLite 的当前拍卖、实时预检、lot 列表和详情按时间值而非文本词法比较开拍计划，兼容空格格式和
+RFC3339。该比较只决定 `preview`/`opening` 展示，不赋予竞价权限，不改变生命周期写入。
 
 ## Admin
 
@@ -279,6 +292,7 @@ frame/message 上限均为 4 KiB，Ping/Pong/写入期限为 50/60/5 秒；1008�
 | A41 | PATCH | /api/v1/admin/worlds/{world_id} | 200 | 400, 401, 403, 404, 409, 413/415, 429, 501, 503/504 |
 | A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 |
 | A43 | GET | /api/v1/admin/realtime/events | 200 | 400, 401, 500, 501, 503/504 |
+| A44 | POST | /api/v1/admin/credentials/{credential_id}/check | 200；只读认证观测 | 400, 401, 403, 404, 409, 413/415, 429, 500, 501, 503/504 |
 
 ## 首次部署初始化
 
@@ -640,6 +654,26 @@ PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥�
 `501 feature_not_supported`。Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作为兼容
 回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用同类第二条
 时返回 `409 credential_conflict`，调用方必须先通过同一路由停用旧记录并重启 Worker 完成交接。
+
+A44 `POST /api/v1/admin/credentials/{credential_id}/check` 只校验已保存凭据，不接受原始 Cookie 或远端 URL。
+请求是严格 JSON `{ "expected_state_version": 1 }`，最多 4 KiB，无查询参数。保留 Admin session、
+Origin、CSRF 与 mutation 限流；尽管使用 POST 防止跨站/预取触发，操作只读，不使用 `command_id`
+或持久化命令账本。active、disabled、invalid 均可检查，不改变启停、Worker 所有权、版本、审计或重启要求。
+
+响应使用标准 `ApiResponse`；`data` 的必填闭集为 `credential_id`、`state_version`、
+`checked_at`（UTC RFC3339）和 `checks`。每项仅含 `world` 与 `status`：
+`status` 为 `valid`、`invalid`、`inconclusive`。论坛固定一项 `shared`，只证明登录态，不证明发帖权限；
+游戏按凭据范围检查 `main` 或 `isekai`，shared 固定按 main、isekai 顺序各返回一项。
+网络、超时、限流、战斗页、403/Cloudflare、未知页面或格式无法确认返回 `inconclusive`；
+只有明确登录失效证据才返回 `invalid`，两者仍为 HTTP 200，不触发 Admin 退出登录。
+
+探测固定 HTTPS 论坛用户控制台与游戏 Item Shop 余额页；不跟随重定向、不自动重试、
+不打开邮件或执行发帖、compose、send、take、return。每个 Admin 进程最多一个校验在飞，
+各站点请求起始间隔至少 2 秒，每个范围连同等待最多 5 秒、响应最多 2 MiB。
+并发检查返回 `429 rate_limited`（`Retry-After: 2`）。探测前后复核数据库版本；
+变化返回 `409 stale_credential_state`，删除返回 404。密钥/校验适配器失败返回 503，
+SQLite 或未装配端口返回 `501 feature_not_supported`。
+结果为当次观测、响应 `no-store`，不落库、不回显 Cookie/账号/余额/HTML，不保证后续请求可用。
 
 ## 契约变更规则
 

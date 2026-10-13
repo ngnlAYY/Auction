@@ -10,6 +10,10 @@ use crate::app::surface::admin_api_error_message;
 
 use super::super::format_admin_time;
 use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
+use super::messages::{
+    equipment_category_message, equipment_detail_message, equipment_guidance,
+    evidence_error_message, processing_code_message,
+};
 
 #[component]
 pub(super) fn MailIntakeDetailPanel(
@@ -72,11 +76,31 @@ pub(super) fn MailIntakeDetailPanel(
     };
     let original = detail.message_display;
     let equipment_diagnostic = detail.equipment_diagnostic;
+    let decision_message = processing_code_message(&detail.decision_code);
+    let reason_message = processing_code_message(&metadata.reason_code);
+    // 优先使用已持久化的具体诊断；列表总码或 HTTP 200 都不能推导登录态、品质或退回结果。
+    let rejection_summary = (detail.decision_code == "auction_equipment_rejected").then(|| {
+        if let Some(diagnostic) = &equipment_diagnostic {
+            diagnostic.detail_code.as_deref().map_or_else(
+                || equipment_category_message(&diagnostic.category),
+                equipment_detail_message,
+            )
+        } else if !metadata.reason_code.is_empty() && metadata.reason_code != detail.decision_code {
+            processing_code_message(&metadata.reason_code)
+        } else {
+            t!("admin-mail-rejection-cause-unavailable")
+        }
+    });
+    let rejection_guidance = equipment_diagnostic.as_ref().map_or_else(
+        || t!("admin-mail-guidance-investigate"),
+        |diagnostic| equipment_guidance(&diagnostic.category, diagnostic.detail_code.as_deref()),
+    );
     let sender = detail.sender.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
     let subject = detail.subject.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
     let diagnostic_detail = equipment_diagnostic
         .as_ref()
-        .and_then(|diagnostic| diagnostic.detail_code.clone())
+        .and_then(|diagnostic| diagnostic.detail_code.as_deref())
+        .map(equipment_detail_message)
         .unwrap_or_else(|| t!("value-empty"));
     let diagnostic_http_status = equipment_diagnostic
         .as_ref()
@@ -92,7 +116,8 @@ pub(super) fn MailIntakeDetailPanel(
         .unwrap_or_else(|| t!("value-empty"));
     let diagnostic_retention_error = equipment_diagnostic
         .as_ref()
-        .and_then(|diagnostic| diagnostic.retention_error.clone())
+        .and_then(|diagnostic| diagnostic.retention_error.as_deref())
+        .map(evidence_error_message)
         .unwrap_or_else(|| t!("value-empty"));
     let diagnostic_stage = equipment_diagnostic
         .as_ref()
@@ -108,6 +133,14 @@ pub(super) fn MailIntakeDetailPanel(
             header { class: "admin-mail-detail__header",
                 h2 { id: "admin-mail-detail-title", {t!("admin-mail-detail-title")} }
                 button { r#type: "button", onclick: move |_| on_close.call(()), {t!("admin-mail-close-detail")} }
+            }
+            if let Some(summary) = rejection_summary {
+                section { class: "admin-mail-rejection-summary", aria_labelledby: "admin-mail-rejection-summary-title",
+                    h3 { id: "admin-mail-rejection-summary-title", {t!("admin-mail-rejection-summary-title")} }
+                    p { "{summary}" }
+                    p { class: "admin-panel__note", "{rejection_guidance}" }
+                    p { class: "admin-panel__note", {t!("admin-mail-rejection-delivery-boundary")} }
+                }
             }
             dl { class: "admin-mail-detail__grid",
                 dt { {t!("admin-mail-intake-id")} }
@@ -131,7 +164,7 @@ pub(super) fn MailIntakeDetailPanel(
                     }
                 }
                 dt { {t!("admin-mail-intake-decision")} }
-                dd { "{detail.decision_code}" }
+                dd { "{decision_message}" }
                 dt { {t!("admin-mail-intake-received")} }
                 dd { "{format_admin_time(&detail.received_at)}" }
                 dt { {t!("admin-mail-processed")} }
@@ -153,7 +186,7 @@ pub(super) fn MailIntakeDetailPanel(
                 dt { {t!("admin-mail-owner-result")} }
                 dd { "{metadata.owner_result_code}" }
                 dt { {t!("admin-mail-reason-code")} }
-                dd { "{metadata.reason_code}" }
+                dd { "{reason_message}" }
                 dt { {t!("admin-mail-warnings")} }
                 dd { "{warnings}" }
                 dt { {t!("admin-mail-delivery-ids")} }
@@ -205,7 +238,7 @@ pub(super) fn MailIntakeDetailPanel(
                         dt { {t!("admin-mail-diagnostic-stage")} }
                         dd { "{diagnostic_stage}" }
                         dt { {t!("admin-mail-diagnostic-category")} }
-                        dd { "{diagnostic.category}" }
+                        dd { {equipment_category_message(&diagnostic.category)} }
                         dt { {t!("admin-mail-diagnostic-detail")} }
                         dd { "{diagnostic_detail}" }
                         dt { {t!("admin-mail-diagnostic-http-status")} }
@@ -219,6 +252,7 @@ pub(super) fn MailIntakeDetailPanel(
                         dt { {t!("admin-mail-diagnostic-retention-error")} }
                         dd { "{diagnostic_retention_error}" }
                     }
+                    p { class: "admin-panel__note", {t!("admin-mail-evidence-boundary")} }
                 } else {
                     p { class: "admin-mail-equipment-diagnostic__missing", {t!("admin-mail-equipment-diagnostic-not-retained")} }
                 }

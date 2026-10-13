@@ -45,11 +45,13 @@ Public 与 Admin 的 HTTP 表面适配器。
   lot 列表/详情拆分 Public 只读处理器，`reads/mod.rs` 只负责装配与稳定出口；
   `routes/mapping/` 按查询、Public、Admin 和目录投影拆分契约映射。[src/http/mod.rs](src/http/mod.rs) 只负责
   surface 导出边界。[src/http/public/realtime/](src/http/public/realtime/) 再按列表读取、WebSocket 生命周期、目标解析和事件校验/映射
-  拆分为 `{mod,list,websocket,target,mapping}.rs`：单拍卖回放保留旧版必填 `auction_id` 和响应信封，
+  拆分为 `{mod,list,websocket,session,target,mapping}.rs`：单拍卖回放保留旧版必填 `auction_id` 和响应信封，
   发现回放使用显式 `scope=auctions` 扩展，WebSocket 逐帧发送旧版单事件，并拥有 4 KiB 读取、
-  50/60 秒 Ping/Pong、5 秒写入、稳定 close reason、settled 预检和 discovery 专属容量边界。
+  50/60 秒 Ping/Pong、5 秒写入、稳定 close reason、settled 预检；`session.rs` 负责只读会话复核，
+  首次推送前检查，之后按 30 秒与到期剩余时间的较小值检查，每次读取最多 5 秒。
 - [src/http/public/](src/http/public/)、[src/http/admin/](src/http/admin/)：分别持有两个 surface 的 handler；跨 surface 状态和
-  realtime Hub 只放在 [src/http/shared/](src/http/shared/)。
+  realtime Hub 只放在 [src/http/shared/](src/http/shared/)；`realtime_hub/connections.rs` 独占进程/用户
+  连接配额，RAII 许可跟随订阅，升级失败或连接结束自动归还，不累积历史用户。
 - [src/http/shared/state/](src/http/shared/state/)：`public.rs` 与 `admin.rs` 分别持有两个 surface 的端口状态容器，
   `mod.rs` 只保留 `PublicApiState`/`AdminApiState` 稳定导出；状态容器不跨 surface 共用业务端口。
 - [src/http/shared/boundary.rs](src/http/shared/boundary.rs)：请求 ID、trace context、可信代理、安全头、超时、panic 隔离和
@@ -80,7 +82,7 @@ Public 与 Admin 的 HTTP 表面适配器。
   `command_id` 时稳定派生，新版显式 ID 仍直接进入核心幂等账本。
 - [src/http/admin/credentials/](src/http/admin/credentials/)：凭据分页读取、导入/改名/启停/删除命令、无 secret DTO 映射和共享
   CSRF/分页/错误边界分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只
-  负责稳定处理器出口；凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
+  负责稳定处理器出口；`check.rs` 映射 A44 的手动只读认证观测。凭据密封、版本 fence、幂等和 PostgreSQL/Lite 能力边界保持不变。
 - [src/http/admin/delivery/](src/http/admin/delivery/)：交付列表、release/retry/reconcile 命令、快照映射和共享能力/错误边界
   分别由 `list.rs`、`commands.rs`、`mapping.rs` 与 `common.rs` 持有，`mod.rs` 只负责稳定处理器出口；
   动作闭集、CSRF、fencing、request hash 和外部结果未知对账边界保持不变。
@@ -130,7 +132,10 @@ runtime capability 保护，只在 PostgreSQL 完整档要求理由并把到期�
 写结算结果。Public `/api/v1/events` 已接入两套数据库的持久化
 Catch-up，`/api/v1/ws` 通过 HTTP/1.1 GET Upgrade 或 HTTP/2 扩展 CONNECT 提供带 Public session 的只读服务端推送；
 两种握手共用认证和范围门禁，其他方法返回 405；连接尝试与 mutation 独立限流，
-只有 discovery 使用每进程 128 槽，单拍卖连接通过权威公开状态预检拒绝 settled。已认证会话的
+所有范围共享每进程 1024 条、每用户 8 条连接配额，满额返回 429 `realtime_busy`；discovery
+另有独立 128 槽和 `discovery_busy`。会话失效以 1008/`会话已失效` 关闭，复核超时或依赖失败以
+1013/`会话校验暂不可用` 关闭；周期复核不延长会话，也不是命令提交时同步踢线。
+单拍卖连接通过权威公开状态预检拒绝 settled。已认证会话的
 发现流由 Public 外壳订阅，拍卖页面订阅对应单拍卖流；`/status` 仅显示静态说明，不建立额外订阅。
 跳号或 `refetch_required` 会触发回放/权威快照恢复，后者保留恢复高水位与现有 socket。Admin 结算报告已接入 PostgreSQL 完整档的一致只读
 快照，并把 lot 挂牌价、持有 PPM 与带符号调整 PPM 映射为稳定安全字段；Admin recovery 报告也已接入同一 PostgreSQL 完整档读取边界；SQLite Lite 对这两项能力
@@ -154,6 +159,9 @@ Admin A32 `/api/v1/admin/credentials` 已接入 session、origin/CSRF、`command
 secret 只在应用/加密适配器边界短暂存在，响应、命令账本、审计和管理端页面均不回显明文；该
 能力要求 PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥时明确返回
 `501 feature_not_supported`。
+Admin A44 `POST /api/v1/admin/credentials/{credential_id}/check` 仅接受预期版本，保留 session、
+Origin、CSRF、限流、4 KiB 严格 JSON 与 `no-store`。返回当次分范围认证观测，不回写状态，
+不使用 mutable 命令账本；Cookie 解密和固定 GET 由集成适配器拥有，不进入 HTTP 处理器。
 Admin `/api/v1/admin/dashboard` 已接入 Admin session、两套数据库的 service heartbeat 安全投影
 和 runtime 指定的 Worker control Unix socket 状态，返回 health/process/worker 安全字段；mail、
 realtime、credential aggregation、delivery、fulfillment、recovery 和 alerting section 由对应
@@ -272,7 +280,7 @@ forum/sync-status、会话/身份化/变更接口和全部 Admin 业务接口统
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-http

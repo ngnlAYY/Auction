@@ -148,7 +148,6 @@ page-login-title = Log in
 page-account-title = My bids
 page-rules-title = Rules
 page-blacklist-title = Blacklist
-page-blacklist-note = Users currently barred from bidding. The displayed name is the current MoogleMail player name, never an auction database ID.
 page-compensation-pool-title = Compensation pool
 page-compensation-pool-note = One shared Persistent-world Credits pool for auctions from both worlds. Expand a round to see exactly where Credits entered and were distributed.
 compensation-balance = Current balance

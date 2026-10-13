@@ -22,6 +22,7 @@ impl ProxyTransition {
                     || self.old_mode.is_some()
                     || self.old_status.is_some()
                     || self.new_status != ProxyStatus::Active
+                    || self.reason.is_some()
                 {
                     return Err(DomainError::InvalidProxyTransition {
                         from: ProxyStatus::Active,
@@ -94,6 +95,8 @@ impl ProxyTransition {
                         self.old_status,
                         Some(ProxyStatus::Active | ProxyStatus::FinalFast)
                     )
+                    || (self.old_status == Some(ProxyStatus::FinalFast)
+                        && self.old_mode != Some(ProxyMode::Fast))
                     || self.old_maximum != Some(self.new_maximum)
                     || !valid_terminal
                 {

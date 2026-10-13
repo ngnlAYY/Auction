@@ -11,6 +11,22 @@ use std::{
 
 use auction_application::{PublicRealtimeEvent, RealtimeEventSink, RealtimeSinkError};
 use tokio::sync::mpsc::{self, Receiver, Sender, error::TrySendError};
+use uuid::Uuid;
+
+mod connections;
+
+use connections::{ConnectionLimits, ConnectionPermit};
+
+/// 订阅拒绝分类；HTTP 将容量不足映射为 429，其余依赖问题映射为 503。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RealtimeSubscriptionError {
+    /// 进程或用户的活跃连接额度已用尽。
+    #[error("实时连接数已达上限")]
+    Capacity,
+    /// stream、身份或 Hub 状态无法安全使用。
+    #[error("实时订阅不可用")]
+    Unavailable,
+}
 
 /// Hub 运行水位；不包含 stream 名、事件内容或用户身份。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -29,6 +45,7 @@ struct HubState {
 /// 单个 Public 进程拥有的 stream 广播器。
 pub struct RealtimeHub {
     client_buffer: usize,
+    connections: Arc<ConnectionLimits>,
     state: Mutex<HubState>,
 }
 
@@ -40,22 +57,32 @@ impl RealtimeHub {
         }
         Ok(Self {
             client_buffer,
+            connections: Arc::new(ConnectionLimits::default()),
             state: Mutex::new(HubState { next_id: 0, streams: BTreeMap::new() }),
         })
     }
 
-    /// 为一个明确 stream 建立独占订阅。
+    /// 为已认证用户的明确 stream 建立独占订阅；分配缓冲区前先取得双重连接配额。
     pub fn subscribe(
         self: &Arc<Self>,
         stream_key: String,
-    ) -> Result<RealtimeSubscription, &'static str> {
-        validate_stream_key(&stream_key)?;
+        user_id: Uuid,
+    ) -> Result<RealtimeSubscription, RealtimeSubscriptionError> {
+        validate_stream_key(&stream_key).map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        let connection_permit = self.connections.acquire(user_id)?;
         let (sender, receiver) = mpsc::channel(self.client_buffer);
-        let mut state = self.state.lock().map_err(|_| "实时 Hub 锁状态损坏")?;
-        state.next_id = state.next_id.checked_add(1).ok_or("实时 Hub 订阅标识溢出")?;
+        let mut state = self.state.lock().map_err(|_| RealtimeSubscriptionError::Unavailable)?;
+        state.next_id =
+            state.next_id.checked_add(1).ok_or(RealtimeSubscriptionError::Unavailable)?;
         let id = state.next_id;
         state.streams.entry(stream_key.clone()).or_default().insert(id, sender);
-        Ok(RealtimeSubscription { hub: Arc::clone(self), stream_key, id, receiver })
+        Ok(RealtimeSubscription {
+            hub: Arc::clone(self),
+            stream_key,
+            id,
+            receiver,
+            _connection_permit: connection_permit,
+        })
     }
 
     /// 非阻塞广播到同一 stream；队列已满或连接已关闭的订阅会被淘汰。
@@ -109,6 +136,8 @@ pub struct RealtimeSubscription {
     stream_key: String,
     id: u64,
     receiver: Receiver<PublicRealtimeEvent>,
+    // Hub 淘汰发送端时不能提前归还槽位；消费者真正结束前仍占用连接资源。
+    _connection_permit: ConnectionPermit,
 }
 
 impl RealtimeSubscription {

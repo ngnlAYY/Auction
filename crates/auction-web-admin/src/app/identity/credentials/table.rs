@@ -13,7 +13,8 @@ use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 use crate::app::surface::{AdminActionFeedback, run_admin_feedback_action, stable_command_id};
 
 use super::{
-    credential_kind_label, credential_status_class, credential_status_label, credential_world_label,
+    CredentialCheckAction, credential_kind_label, credential_status_class, credential_status_label,
+    credential_world_label,
 };
 
 #[component]
@@ -32,9 +33,10 @@ pub fn CredentialTable(
     let mut credentials = page.credentials.clone();
     sort_credentials(&mut credentials, &sort, direction);
     rsx! {
+        p { class: "admin-credentials__feedback", {t!("admin-credentials-check-hint")} }
         div { class: "admin-credentials-table-wrap",
             table { class: "admin-credentials-table",
-                // 列序：名称、世界、类型、状态、检查时间、使用时间、导入者、操作；为四个操作按钮预留同排空间。
+                // 列序：名称、世界、类型、状态、轮换时间、使用时间、导入者、操作；五个操作按钮允许换行。
                 auction_web_shared::TableColumns { layout: "admin-credentials", widths: vec![14, 6, 10, 6, 14, 14, 6, 30] }
                 thead {
                     tr {
@@ -68,7 +70,8 @@ pub fn CredentialTable(
                         }
                         SortableTh {
                             column: "checked",
-                            label: t!("admin-credentials-last-checked"),
+                            // 保留旧 URL 排序键 checked，但 rotated_at 不能冒充真实检查时间。
+                            label: t!("admin-credentials-rotated-at"),
                             active: sort.clone(),
                             direction,
                             on_sort: on_sort_change,
@@ -134,7 +137,7 @@ pub fn CredentialRow(
                     {credential_status_label(&credential.status)}
                 }
             }
-            td { "data-label": t!("admin-credentials-last-checked"),
+            td { "data-label": t!("admin-credentials-rotated-at"),
                 if let Some(rotated_at) = credential.rotated_at.clone() {
                     Time { value: rotated_at }
                 } else {
@@ -235,6 +238,7 @@ pub fn CredentialRow(
                     onclick: move |_| on_delete.call(credential_for_delete.clone()),
                     {t!("admin-credentials-action-delete")}
                 }
+                CredentialCheckAction { credential: credential.clone(), busy }
                 if let Some(feedback) = feedback() {
                     span {
                         id: feedback_id.clone(),
@@ -361,7 +365,7 @@ pub fn CredentialPager(page: AdminCredentialPage, on_page_change: EventHandler<i
 }
 
 /// 对当前页凭据行排序；`column` 为空或不在允许集合时保持服务端原始顺序。
-/// 上次检查时间缺省（None）在升序时排在最前。
+/// 轮换时间缺省（None）在升序时排在最前；checked 保留为旧 URL 排序键。
 fn sort_credentials(credentials: &mut [AdminCredential], column: &str, direction: SortDirection) {
     if column.is_empty() {
         return;

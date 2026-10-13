@@ -167,7 +167,10 @@ pub(crate) fn parse_public_uuid(value: &str) -> Result<Uuid, ()> {
 }
 
 pub use boundary::HttpBoundary;
-pub use realtime_hub::{RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription};
+pub use realtime_hub::{
+    RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
+    RealtimeSubscriptionError,
+};
 pub use security::{
     AdminHttpSecurity, HttpSecurityOptions, PublicHttpSecurity, apply_browser_security_headers,
 };

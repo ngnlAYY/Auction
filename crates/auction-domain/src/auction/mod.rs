@@ -91,10 +91,11 @@ impl Auction {
             return Err(DomainError::InvalidSchedule("名义结束时间只能设置一次"));
         }
 
+        self.bump_version()?;
         self.scheduled_end_at = Some(scheduled_end_at);
         self.effective_end_at = Some(scheduled_end_at);
         self.updated_at = now;
-        self.bump_version()
+        Ok(())
     }
 
     /// 记录领域层已经计算出的软截止延长结果。
@@ -112,9 +113,10 @@ impl Auction {
             return Err(DomainError::InvalidSchedule("有效结束时间只能向后延长"));
         }
 
+        self.bump_version()?;
         self.effective_end_at = Some(effective_end_at);
         self.updated_at = now;
-        self.bump_version()
+        Ok(())
     }
 
     /// 按规则检查取消截止点，不在聚合外复制边界判断。
@@ -179,9 +181,10 @@ impl Auction {
             return Err(DomainError::InvalidSchedule("结束时间必须晚于开拍时间"));
         }
 
+        self.transition(AuctionStatus::Live, now)?;
         self.scheduled_end_at = Some(scheduled_end_at);
         self.effective_end_at = Some(scheduled_end_at);
-        self.transition(AuctionStatus::Live, now)
+        Ok(())
     }
 
     pub fn enter_final(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
@@ -196,8 +199,9 @@ impl Auction {
         match self.status {
             AuctionStatus::Live => self.transition(AuctionStatus::Final, now),
             AuctionStatus::Final => {
+                self.bump_version()?;
                 self.updated_at = now;
-                self.bump_version()
+                Ok(())
             }
             status => {
                 Err(DomainError::InvalidTransition { from: status, to: AuctionStatus::Final })
@@ -266,11 +270,13 @@ impl Auction {
             return Err(DomainError::InvalidTransition { from: self.status, to: next });
         }
 
+        self.bump_version()?;
         self.status = next;
         self.updated_at = now;
-        self.bump_version()
+        Ok(())
     }
 
+    /// 业务校验通过后、其他字段写入前推进版本；溢出时必须保持整个聚合不变。
     fn bump_version(&mut self) -> Result<(), DomainError> {
         self.state_version =
             self.state_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?;

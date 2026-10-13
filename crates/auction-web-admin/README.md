@@ -1,6 +1,6 @@
 # 管理端浏览器界面
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+[文档导航](../../docs/README.md) · [Admin 设计](./DESIGN.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 纯 CSR Admin SPA，拥有管理认证、查询、命令和配置编辑。
 首次设置根据 verify 的 `initialize_and_start` 区分分体保存与合并初始化：合并模式必须勾选
@@ -75,7 +75,8 @@ IANA 时区。关闭时仍保留并校验候选，不创建拍卖；修改排期
   `identity/credentials/` 内拆分页面编排、安全录入、凭据表格、确认对话框和安全标签辅助，Dashboard 在
   `operations/dashboard/` 内拆分单快照页面编排、指标内容和邮件控制；lot 页在 `auction/lots/` 内拆分
   页面加载、表格编排、单行更新、代理历史和展示辅助；邮件入站页在 `fulfillment/mail/` 内拆分页面筛选、
-  轮询动作、入站表格、详情投影和状态标签；`shared/` 只保存本 surface
+  轮询动作、入站表格、详情投影和状态标签；`fulfillment/mail/messages.rs` 只拥有安全处理码、
+  装备诊断码与留证错误的五语言说明，不持有业务判断或重试策略；`shared/` 只保存本 surface
   内真正通用的基础组件。`surface/mod.rs` 只保留 surface 装配和资源初始化，`surface/router.rs` 持有
   路由与页面入口包装器，`surface/auth/` 按会话状态编排、return 路径、重试/刷新、登录表单和认证后外壳拆分，
   分别由 `auth/{mod,redirect,session,login,shell}.rs` 持有，`surface/shared.rs` 持有跨页面状态面板、
@@ -245,7 +246,14 @@ TCP listener 不使用的 runtime 目录字段按服务端契约接受空值或�
 和安全元数据详情；列表显示 sender/subject scalar 与是否存在原始信息投影的 `has_message_display`，
 详情显示 sender/subject、脱敏正文、附件外部 ID、Credits/COD；装备 key、认证邮件正文、Cookie、轮询游标
 和外部凭据不进入页面；被拒绝装备邮件详情还显示 equipment ID、1-based 附件位置、stage/category、可选
-detail_code、真实 HTTP status、耗时、evidence UUID 与 retention status/error。A20 触发按钮已由
+detail_code、真实 HTTP status、耗时、evidence UUID 与 retention status/error。
+列表与详情把已有处理码显示为本地化说明并保留原始代码；装备拒收的具体原因和处理建议提前到详情顶部，
+优先消费持久化 `equipment_diagnostic`，没有诊断时才使用业务 `reason_code`，都没有则明确显示原因未留存。
+`collected_at_future` 说明采集时间晚于校验时间，并提示检查处理时序与 Worker 时钟，不归咎于 Cookie 或品质。
+规则拒收只描述处理当时的决定，不用当前配置重新解释历史；证据认证/保存错误与游戏登录、业务结果分开说明。
+拒收、任务排队与退回成功彼此独立，重试前仍须核对关联任务及 MM。未知代码保留原值；九列比例与表格截断交互不变，
+详情中的长代码允许换行。消息改进不修复时间校验逻辑、不重放旧邮件、不改变 HTTP/DTO 或通知邮件模板。
+A20 触发按钮已由
 HTTP/Worker 链路接入，使用单个 command ID 唤醒全部已装配 poller，返回的是接受状态，不代表业务邮件处理完成。管理总览会展示全部 mailbox
 的轮询状态，并提供逐邮箱暂停/恢复与全局立即轮询操作。管理命令统一显示忙碌、禁用重复提交并以
 成功/失败语义反馈；全部 Admin API 会先解析稳定错误 code，再通过五语言 Fluent 映射 stale version、
@@ -271,9 +279,13 @@ secret 只通过当前表单请求提交，不会进入响应、持久化状态�
 `credential_data_key` 时可用，修改成功后提示 Worker 重启并重新加载唯一 active Cookie。
 `mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用第二条时返回冲突，
 需要先停用旧记录并重启 Worker 完成所有权交接。
-凭据表还恢复旧页面实际合成的 last checked、last used、imported by 三列：分别使用现有
-`rotated_at`、明确空值和当前 Admin session actor；它没有虚构后端使用记录，也没有扩展 secret DTO，
-state version 只参与写命令 fence，不扩张已发布的八列表格。
+凭据表保持八列：`rotated_at` 正确标为轮换时间，不再冒充检查时间；使用时间仍为空，导入者继续
+沿用旧页当前 Admin session actor 展示，不将其视为历史导入证据。
+`identity/credentials/check.rs` 提供 A44 手动只读校验按钮、忙态与结果，论坛与游戏页共用；
+active/disabled/invalid 均可检查。结果显示登录有效、失效或暂无法确认及真实检查时间，
+shared 游戏 Cookie 分别显示主世界/异世界；只保留当前页，同 ID 不同版本隐藏旧结果。
+检查不改变启停、不触发 Worker 重启、不自动重试；五种语言说明认证结果不保证写权限。
+八列比例不变，五个操作按钮允许换行；旧 URL 排序键 checked 仍映射 rotated_at。
 凭据行按稳定 credential ID 绑定组件身份，当前页排序不会转移对话框、草稿、忙碌状态或反馈；
 启停和改名重试的命令签名同时绑定 credential ID、版本与动作负载。
 Delivery 解码同时接受告警在激活前确定终止的窄失败形状：特定 origin/reason/error code、零
@@ -322,7 +334,7 @@ Dashboard section 解码、表单与交互等浏览器展示状态。
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown

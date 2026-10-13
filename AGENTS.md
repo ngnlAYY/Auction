@@ -22,7 +22,7 @@
 - [默认验证与测试范围](#默认验证与测试范围)
 - [运行进程](#运行进程)
 - [变更与 Git 纪律](#变更与-git-纪律)
-- [文档与决策维护](#文档与决策维护)
+- [文档维护](#文档维护)
 - [交付工作流](#交付工作流)
 
 ## 项目概览
@@ -493,12 +493,13 @@ AUCTION_CONFIG_FILE=ops/config/examples/public.toml \
 - 提交标题可使用 `type(scope): summary` 的简洁格式，例如
   `feat(domain): add auction state transition` 或 `docs(architecture): define worker ownership`。
 
-## 文档与决策维护
+## 文档维护
 
 全部正式文档从[文档导航](docs/README.md)进入，职责划分见[文档维护](docs/documentation.md)。
-重要改动必须同步已有决策笔记或新增一篇 `.agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md`；
-机械修改不新建笔记，决定理由翻转不得覆盖旧理由。笔记使用中文正文并保留技能规定的头块与章节。
-活跃笔记纳入版本控制，链接、状态和导航由 `just docs-check` 检查；归档前另行建立不可变封印门禁。
+重要改动直接同步对应设计、架构、契约、模块 README 或运维说明；理由、取舍与限制写在所属正式文档中，
+不新增独立笔记文件、专属记录目录或技能格式模板。Public 与 Admin 的界面设计继续分开维护。
+实现与验证结果登记在 `docs/status.md`，区分当前事实与历史证据；已有提交历史由 Git 保留，不改写历史验证结论。
+`just docs-check` 检查正式文档的链接、锚点、导航覆盖与 Cargo 包 README。
 维护文档不能暗中修改 wire、迁移、安全策略或默认测试范围。
 
 ## 交付工作流

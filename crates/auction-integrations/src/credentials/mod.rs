@@ -19,6 +19,9 @@ use uuid::Uuid;
 
 use crate::DataKey;
 
+mod check;
+pub use check::CredentialVerifier;
+
 const NONCE_LENGTH: usize = 12;
 const MAIL_AAD_PREFIX: &str = "auction/credential/mail/v1/";
 const FORUM_AAD_PREFIX: &str = "auction/credential/forum/v1/";

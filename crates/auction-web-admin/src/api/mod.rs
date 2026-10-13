@@ -1,6 +1,6 @@
 //! Admin 浏览器端的同源 HTTP 数据访问。
 //!
-//! 浏览器只接收后端安全投影。人工动作携带由页面按输入复用的 `command_id` 和对应版本 fence；
+//! 浏览器只接收后端安全投影。改变状态的人工动作携带按输入复用的 `command_id` 和对应版本 fence；
 //! 服务端仍负责最终的状态校验、幂等和审计。所有 wire DTO 统一由 `auction-contracts` 拥有，
 //! 本 crate 只保留浏览器表单、筛选和交互状态。
 
@@ -53,8 +53,9 @@ pub(crate) use auctions::{
 };
 pub(crate) use audit::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 pub(crate) use credentials::{
-    AdminCredential, AdminCredentialPage, create_admin_credential, delete_admin_credential,
-    fetch_admin_credentials, mutate_admin_credential,
+    AdminCredential, AdminCredentialCheck, AdminCredentialPage, check_admin_credential,
+    create_admin_credential, delete_admin_credential, fetch_admin_credentials,
+    mutate_admin_credential,
 };
 pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
 pub(crate) use intake::{AdminIntakeResult, add_admin_intake};

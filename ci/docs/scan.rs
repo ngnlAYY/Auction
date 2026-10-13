@@ -25,7 +25,7 @@ pub(super) fn documents(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
         }
         paths.insert(path);
     }
-    for directory in ["docs", "apps", "crates", "ops", "migrations", "ci", ".agents/notes"] {
+    for directory in ["docs", "apps", "crates", "ops", "migrations", "ci"] {
         collect(&root.join(directory), &mut paths)?;
     }
     Ok(paths)

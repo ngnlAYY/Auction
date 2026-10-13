@@ -31,7 +31,8 @@
 ## 模型与不变量
 
 - [src/auction/mod.rs](src/auction/mod.rs)：`Auction` 聚合与 `AuctionStatus` 生命周期状态机，包含状态版本、结束时间
-  和取消/软截止边界。
+  和取消/软截止边界。排期、开拍、延长、状态迁移及提前结算先通过业务与版本校验，再修改字段；
+  版本溢出时整个内存聚合保持原值，不能依赖调用方丢弃对象。
 - [src/bidding/amount.rs](src/bidding/amount.rs)：正竞价金额值对象；外部命令构造保持信用网格，持久化防腐入口保留
   旧版任意正起拍价、当前价和自动代理事实。新普通出价、新建/降低代理上限及新自动竞价事实
   最高为 `MAX_BID_AMOUNT = 1_000_000_000`（1B）；外部超额输入直接拒绝，历史读取、幂等重放和
@@ -41,10 +42,15 @@
 - [src/bidding/competition/](src/bidding/competition/)：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan/` 按
   `mod.rs` 规划入口、`validation.rs` 结果/输入校验、`ordinary.rs` 普通竞价、`proxy.rs`
   代理生命周期和 `state.rs` 软截止/状态收口拆分职责，`competition/mod.rs` 只负责稳定导出。
+  Fast、SlowDue 与 Final 共用反超金额计算，保持整数增量、历史余数及 1B 同价优先边界。
+  `CompetitionPlan::validate` 同时核对公开事实的单调金额、最终价格/领先者/机制，以及代理转换的
+  连续版本、前后字段和最终快照；允许历史重放省略未变更授权，不把新输入上限应用于已接受事实。
 - [src/proxy/](src/proxy/)：`model.rs` 定义 Fast/Slow 代理授权和转换事实，`authorization.rs` 负责授权
   创建/状态变更，`transition.rs` 负责追加式转换事实校验；`mod.rs` 只保留稳定导出。
   降额允许 `Active → Active` 和 `FinalFast → FinalFast`；后者保持 Fast 模式，所有降额都保持
-  状态与模式不变、上限严格下降、版本推进及空终止原因。
+  状态与模式不变、上限严格下降、版本推进及空终止原因。降额、FinalFast 和终止先完成版本、
+  快照及转换闭集校验，再修改授权；任何错误都保持原内存快照不变。Created 不允许终止原因，
+  FinalFast 终止前必须仍为 Fast 模式。
 - [src/identity/mod.rs](src/identity/mod.rs)：带类型的 UUID 包装，避免不同标识符互相混用。
 - [src/errors/mod.rs](src/errors/mod.rs)：领域错误分类。
 - [src/settlement/](src/settlement/)：结算领域 owner；`policy.rs` 维护策略/恢复参数，`amount.rs` 维护非负金额
@@ -74,7 +80,7 @@
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-domain

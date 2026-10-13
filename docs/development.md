@@ -41,7 +41,7 @@ just wasm-check
 just verify
 ```
 
-`cargo check --all-targets` 编译已有目标，不运行测试。`docs-check` 检查文档链接、导航覆盖和笔记结构，
+`cargo check --all-targets` 编译已有目标，不运行测试。`docs-check` 检查文档链接、锚点、导航覆盖和包 README，
 不证明业务描述正确。静态命令的实现和 CI/MSRV 差异见 [ci/README.md](../ci/README.md)。
 单元、集成、功能、端到端、浏览器测试与手工冒烟默认暂缓；已有测试不删除。
 
@@ -53,7 +53,7 @@ just dependency-audit
 ```
 
 CI 的独立 `security-audit` job 执行相同检查；漏洞、撤回版本与 unsound 提示阻断，停维维护提示保留输出。
-已登记的 `fxhash` 提示及复查期限见[审计修复决定](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)。
+已登记的 `fxhash` 提示及复查期限见[依赖维护边界](tech-stack.md#版本与升级)。
 
 ## 选择制品 feature
 
@@ -130,6 +130,10 @@ Web 构建使用 `wasm-release` profile，清理对应 surface 中间输出后�
 dx 可下载 esbuild 作为构建工具；项目不增加 Node 运行时、npm 依赖或第二套前端构建链。
 正式归档要求干净工作树，源码身份在构建前冻结并在各阶段重查。
 `--allow-dirty` 只用于显式本地取证，不能据此发布正式制品；细节见[发布与部署](../ops/deploy/README.md)。
+
+指定 AMD KVM 的本地定向候选通过 [ops/build](../ops/build/README.md) 显式选择 Cargo 配置，
+不修改默认 release/WASM 或正式发行范围。先独立构建 Web，再按目标白名单构建原生后端；
+本机微基准不能替代部署机、PostgreSQL 并发或 PGO 的代表性负载验证。
 
 ## 常见边界
 

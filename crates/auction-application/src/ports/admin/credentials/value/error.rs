@@ -17,6 +17,10 @@ pub enum AdminCredentialError {
     VersionConflict { current_version: i64 },
     #[error("Admin 凭据 owner 返回结果损坏")]
     StoredResultCorrupt,
+    #[error("凭据校验繁忙，请稍后重试")]
+    CheckBusy,
+    #[error("凭据校验能力暂不可用")]
+    CheckUnavailable,
     #[error("Admin 凭据加密能力不可用")]
     CryptoUnavailable,
 }

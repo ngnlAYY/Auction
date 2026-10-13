@@ -147,7 +147,6 @@ page-login-title = 로그인
 page-account-title = 내 입찰
 page-rules-title = 규칙
 page-blacklist-title = 블랙리스트
-page-blacklist-note = 현재 입찰이 금지된 사용자입니다. 경매 DB ID가 아닌 현재 MoogleMail 플레이어 이름을 표시합니다.
 page-compensation-pool-title = 보상 풀
 page-compensation-pool-note = 두 월드의 경매가 Persistent Credits 보상 풀 하나를 공유합니다. 회차를 펼치면 수입과 보상 지급처를 확인할 수 있습니다.
 compensation-balance = 현재 잔액

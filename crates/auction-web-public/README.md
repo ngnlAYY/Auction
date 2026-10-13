@@ -1,6 +1,6 @@
 # 公开端浏览器界面
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
+[文档导航](../../docs/README.md) · [Public 设计](./DESIGN.md) · [架构](../../docs/architecture.md) · [契约](../../docs/contracts/README.md)
 
 纯 CSR Public SPA，拥有公开端交互、读取、命令与实时恢复。
 
@@ -71,6 +71,9 @@ Fluent 消息 ID 不允许包含点号，使用 `nav-home` 而不是 `nav.home`�
 `public-rules-page` 拥有容器，并通过无外层主题的安全 Markdown 块保持冻结宽度和默认排版。
   设计变量来自 `auction-web-shared`。
 
+黑名单页保留标题、玩家名单、空态和分页，移除额外说明段及五语言 `page-blacklist-note` 译文。
+玩家名称展示、隐私边界和禁拍规则不变；这不是删除黑名单能力。
+
 ## 构建与资源边界
 
 构建：
@@ -126,7 +129,10 @@ PublicShell 保存 `visibilitychange` 和 `popstate` 回调句柄，并在外壳
 schema、连续游标，并在断档或服务端要求时回到权威快照。公开发现范围使用持久化
 `auction:discovery` 派生流，可跨进程恢复；禁用 world 的活动事件会在持久化读取边界被过滤并推进
 原始高水位，已 settled 的单拍卖历史仍可 catch-up。浏览器发现游标由 Public 外壳持有，权威快照刷新导致实时 owner 重建时不会从 0 重放历史事件或形成重复连接；lot 详情、竞价历史、代理加载、规则和目录加载失败时均提供可见的原位重试；Public 进程使用持久化 relay 和有界进程内 Hub 向
-WebSocket 推送，慢连接会被淘汰，客户端仍以游标 catch-up 为权威恢复路径；Public 登录页会清理一次性 key、保留 1024 字符输入边界，
+WebSocket 推送，慢连接会被淘汰，客户端仍以游标 catch-up 为权威恢复路径。握手最多等待 10 秒，
+已建立的连接不再因 90 秒没有业务消息而重连：浏览器 API 看不到协议 Ping/Pong，静默拍卖不能
+据此判死；服务端负责心跳与会话只读复核，关闭或读取失败才触发恢复，既有周期权威读取仍保留。
+Public 登录页会清理一次性 key、保留 1024 字符输入边界，
 按错误码和安全公开原因显示本地化反馈；需要认证的 lot/账户 CTA 会保存当前 pathname + search，
 登录成功后以 replace 返回，直接打开登录页默认回到 `/`，且只接受单斜杠开头的同源路径；页头已补齐匿名登录/我的竞价入口、认证用户名和退出菜单，登录/退出会刷新账户与实时会话状态，
 `/me` 承载竞价账户页，匿名时显示登录 CTA，普通竞价与代理授权使用独立分页并保留 `bid_page`/`proxy_page` URL 状态；账户 GET 固定按
@@ -189,7 +195,7 @@ panic 才显示运行异常横幅，失败标记不会被后续就绪 effect 覆
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-web-public --target wasm32-unknown-unknown

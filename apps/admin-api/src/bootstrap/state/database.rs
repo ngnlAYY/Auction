@@ -5,22 +5,23 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::Context;
 use auction_application::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
-    AdminCredentialHealthReader, AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort,
-    AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialService,
-    AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
-    AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
-    AdminRuntimeConfigError, AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig,
-    AdminSessionPort, AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService,
-    AdminWorldPort, ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy,
-    DeliveryAdminPort, OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort,
-    RecoveryCommandPort, RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader,
-    SettlementReportReader,
+    AdminCredentialCheckPort, AdminCredentialCheckService, AdminCredentialHealthReader,
+    AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort, AdminCredentialRuntimeReader,
+    AdminCredentialRuntimeWriter, AdminCredentialService, AdminCredentialWorld,
+    AdminForumPreviewPort, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
+    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigError,
+    AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort,
+    AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService, AdminWorldPort,
+    ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
+    OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
+    RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
 };
 use auction_config::{AppConfig, TomlRuntimeFileStore};
 use auction_http::AdminApiState;
 use auction_integrations::{
-    CredentialSealer, DataKey, EquipmentKeySealer, EquipmentSourceAdapter, ForumPreviewAdapter,
-    MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader, build_equipment_http_client,
+    CredentialSealer, CredentialVerifier, DataKey, EquipmentKeySealer, EquipmentSourceAdapter,
+    ForumPreviewAdapter, MoogleMailLoginKeyIssuer, MoogleMailLoginKeyReader,
+    build_equipment_http_client,
     mooglemail::{MoogleMailCookie, MoogleMailCredentialSet, MoogleMailWorld},
 };
 use auction_observability::{
@@ -274,6 +275,7 @@ pub(super) async fn configure_state(
             }
             None => None,
         };
+    let mut credential_check: Option<Arc<dyn AdminCredentialCheckPort>> = None;
     let admin_credentials: Option<Arc<dyn AdminCredentialPort>> =
         if store.backend() == DatabaseBackend::Postgres {
             match config.credential_data_key_id().zip(config.credential_data_key()) {
@@ -283,6 +285,16 @@ pub(super) async fn configure_state(
                             .map_err(|error| anyhow::Error::msg(error.to_string()))?,
                     );
                     let sealer = Arc::new(CredentialSealer::new(data_key));
+                    let opener: Arc<dyn AdminCredentialOpener> = sealer.clone();
+                    let verifier = Arc::new(
+                        CredentialVerifier::production(opener)
+                            .context("initialize credential check clients")?,
+                    );
+                    credential_check = Some(Arc::new(AdminCredentialCheckService::new(
+                        Arc::clone(&store),
+                        verifier,
+                        Arc::new(SystemClock),
+                    )));
                     Some(Arc::new(AdminCredentialService::new(Arc::clone(&store), sealer)))
                 }
                 None => None,
@@ -403,6 +415,7 @@ pub(super) async fn configure_state(
         worker_control,
         security,
     )
+    .with_credential_check(credential_check)
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)
     .with_settlement_catalog(settlement_catalog)

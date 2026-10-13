@@ -79,6 +79,8 @@ Public relay 的 `database/realtime_consumer/owned.rs` 将 stream 读取、游�
 SQLite 的竞价、身份、调度及实时写事务均由 SQLx 守卫跟踪 `BEGIN IMMEDIATE`，异常或取消后回滚再归池。
 Final 截止比较和公开最大截止投影按实际时刻计算，兼容存量 RFC3339 与空格格式；新写入统一 UTC 表示。
 普通竞价和生命周期在取得锁后读取数据库时间，同一计划的领先时间、截止、审计及接受事实使用同一时刻。
+竞价计划中的代理授权创建/更新时间、转换历史和命令结果也绑定该 `occurred_at`，不再分别使用 PostgreSQL
+事务开始时间或 SQLite 整秒 `CURRENT_TIMESTAMP`；不自动重写历史时间或损坏账本。
 Final 状态与轮次完成 fence 同事务写入，后续完成确认只重放对应命令。
 
 源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；数据库装配、迁移和后端适配入口位于
@@ -132,9 +134,13 @@ Worker 的 `scheduled_rounds` due claim、租约和失败状态由
 复用已有安全投影。Worker 配置变更先读取冻结事实；`bootstrap.rs` 的首次创建、请求摘要和既有
 身份一致性检查保持严格，不把新模板当作旧命令的兼容负载，也不改写既有拍卖策略。
 慢速代理使用 lot 自身的 `slow_authorization_id`、`slow_generation` 和 `slow_due_at` 作为持久化
-generation；[src/database/slow_proxy_due.rs](src/database/slow_proxy_due.rs) 按数据库时钟无锁有界扫描，随后由两后端竞价事务
-重新锁定 lot/活动代理/用户、核对截止时间并原子写入命令账本、计划、事件和
+generation；[src/database/slow_proxy_due.rs](src/database/slow_proxy_due.rs) 按数据库时钟无锁有界扫描，
+在 LIMIT 前排除已到竞价截止的 lot，避免 Final 推进失败时旧候选反复占满批次。PostgreSQL 使用
+同一语句时刻，SQLite 使用 `julianday` 比较兼容时间格式；这不替代执行时的锁后截止复核。
+随后由两后端竞价事务重新锁定 lot/活动代理/用户、核对截止时间并原子写入命令账本、计划、事件和
 `lot.slow_proxy_tick` 审计。它使用冻结的确定性身份，不另建租约表或内存游标。
+两后端共用的账户能力投影区分“合法等待”与“可继续降额”：慢速代理上限可低于完整下一口，
+此时返回 `can_lower=false`，不把合法授权当作损坏；真正低于当前价的上限仍失败关闭。
 ## 报表与恢复
 
 Admin 结算报告读取由 [src/database/settlement_report/mod.rs](src/database/settlement_report/mod.rs) 持有，只在 PostgreSQL
@@ -205,7 +211,10 @@ Public 拍卖目录读取由 [src/database/auctions/](src/database/auctions/) �
 lot、bid log、账户历史和单拍卖 realtime 使用同一 `world.enabled OR auction.status='settled'`
 边界；discovery 还按事件 payload 归属过滤禁用世界的活动拍卖并推进原始游标，不能泄漏旧增量或
 卡住恢复。WebSocket 预检不读取事件历史，也不把 draft/cancelled 伪装成可订阅 projection。
-cursor、总数和 Lite/完整档字段差异仍由对应适配器明确表达。
+编号页先独立统计完整过滤集，再读取条目：PostgreSQL 使用 `REPEATABLE READ READ ONLY`，SQLite
+使用延迟读取事务，确保同一快照的越界空页仍有正确总数；cursor 页不统计总数。
+SQLite 当前拍卖、实时预检和 lot 列表/详情以 `julianday` 比较计划开拍时刻，兼容历史空格格式与
+RFC3339；该修复只涉及展示，不替代锁内生命周期时间校验。Lite/完整档字段差异仍显式保留。
 Public 成交价格历史由 [src/database/price_history/](src/database/price_history/) 持有：`mod.rs` 只做端口分派，
 `postgres.rs` 从 `auction_settlements` 与 `lot_settlements` 的已提交事实链查询并负责行映射，
 `postgres/numbered.rs` 在一个 Serializable 快照内物化一次筛选后的窄行，供编号页和完整统计
@@ -214,7 +223,9 @@ keyset 查询，不执行全量统计或物化筛选集。
 `mapping.rs` 负责混合游标、名称筛选、统计结果及公共字段校验。SQLite Lite 没有结算事实 owner，
 对应端口固定返回 `CapabilityUnavailable`；不得把可手工写入的 `settled`/`sold` 状态行伪装成完整成交历史。
 会话持久化由 [src/database/sessions/](src/database/sessions/) 持有：`mod.rs` 只做 Admin/Public 端口装配，
-`admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`common.rs` 负责
+`admin.rs` 与 `public.rs` 分别负责对应会话的 PostgreSQL/SQLite 写入与刷新，`public.rs` 另提供
+不写 `last_activity_at`/`expires_at` 的只读复核，检查撤销、active 账号/凭据及双重过期；SQLite
+复核解析历史时间后比较，不取得写锁。`common.rs` 负责
 共享错误和 Lite 时间/UUID 映射；会话真值不进入 Redis。
 Public Key 撤销或重签与旧会话永久撤销同事务提交，覆盖 Admin 和邮件重签；会话创建在用户锁内
 复核认证版本。原命令重放不再次撤销后来建立的会话，Key 恢复不复活旧 token。
@@ -365,6 +376,9 @@ credential kind 取得 advisory lock，同类 Cookie 已由另一 Worker 占用�
 `main`/`isekai` 各自的 active/invalid 水位；`shared` 邮件凭据会继承到两个 world，更新时间取有效
 scope 的最新值，任一有效 scope 存在 invalid 行都会使对应 world 降级；SQLite Lite 明确返回能力不支持，不把凭据导入、
 解密或外部 Cookie 能力伪装成 Lite 功能。
+[src/database/credentials/check.rs](src/database/credentials/check.rs) 按精确 ID 读取 A44 所需的安全元数据与密文信封，
+包含 disabled/invalid；无写入、advisory lock 或跨网络事务，应用层在探测前后独立复核版本。
+只支持 PostgreSQL，不增加持久化检查记录或新迁移。
 Admin 邮件 A16-A19 由 [src/database/admin_mail/mod.rs](src/database/admin_mail/mod.rs) 与
 [src/database/commands/admin/mail.rs](src/database/commands/admin/mail.rs) 持有：PostgreSQL 读取 `mail_poll_state`、
 `inbound_mail` 的安全投影，并在 Serializable 事务内用 `mail_poll_state` 的版本 fence、
@@ -621,7 +635,7 @@ pending，cooldown 只在 delivery 入队确认事务中生效。退信水位只
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-storage --no-default-features --features postgres

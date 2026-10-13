@@ -1,15 +1,15 @@
 //! 普通竞价规划。
 
 use crate::{
-    AuctionRules, BidMechanism, DomainError, LotBidState, MAX_BID_AMOUNT, ProxyAuthorization,
-    ProxyMode, ProxyTerminalReason,
+    AuctionRules, BidMechanism, DomainError, LotBidState, ProxyAuthorization, ProxyMode,
+    ProxyTerminalReason,
 };
 
 use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
 use super::state::{
     BidDraft, ProxyPlanOutput, clear_slow_schedule, exhaust_proxy, finalize_plan,
-    schedule_slow_proxy,
+    proxy_response_amount, schedule_slow_proxy,
 };
 
 pub(super) fn plan_ordinary_bid(
@@ -73,17 +73,8 @@ pub(super) fn plan_ordinary_bid(
                 mechanism: BidMechanism::Proxy,
             });
         } else if active.mode == ProxyMode::Fast {
-            let response = rules.next_minimum_bid(
-                Some(final_state.start_price),
-                Some(amount),
-                final_state.material,
-                false,
-            )?;
-            let response = response.min(active.maximum_amount).bid_ceiling();
-            // 历史授权可能高于现行上限；到达 1B 后按旧代理的同价优先级收口，不能继续抬价。
-            if response < amount || (response == amount && amount.value() != MAX_BID_AMOUNT) {
-                return Err(DomainError::InvalidBidState("快速代理无法产生更高出价"));
-            }
+            let response =
+                proxy_response_amount(rules, final_state, amount, active.maximum_amount)?;
             let bid_id = *bid_ids
                 .get(1)
                 .ok_or(DomainError::InvalidBidState("快速代理缺少第二条事实标识"))?;

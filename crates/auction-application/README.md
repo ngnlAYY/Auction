@@ -76,7 +76,11 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   不重复占用 Admin 审计记录。命令端口返回独立的 typed outcome：领域计划与代理成功响应所需的
   授权、quota、完整转换历史和终态原因在同一事务内冻结，HTTP 不需要在提交后读取账户投影；历史
   `accepted` 行只在同一只读事务按授权版本截取转换历史并读取冻结策略 quota，不重新执行命令，也不以
-  当前生命周期或时钟 gate 否定既有成功事实。
+  当前生命周期或时钟 gate 否定既有成功事实。普通竞价的 `accepted` 重放同样核对请求金额、
+  竞价者、首条 Ordinary 事实及确定性 ID；所有 Public 局部计划都核对命令与 lot 绑定。
+  [src/services/auction/competition/slow_replay.rs](src/services/auction/competition/slow_replay.rs) 单独拥有
+  slow due 重放校验：绑定命令、lot、授权和清除调度后的 generation，只接受一次 Proxy 反超或
+  资格丧失冻结；不读取当前状态重新竞价。
 
 ## 结算与恢复端口
 
@@ -125,7 +129,7 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 - [src/ports/admin/credentials/](src/ports/admin/credentials/)：敏感命令/写入载荷位于 `commands.rs`，查询、加密、Worker runtime 和
   dashboard 端口位于 `ports.rs`；`value/{model,secret,runtime,health,error,common}.rs` 分别负责闭集模型、
   明文/密文安全值、运行记录、dashboard 聚合、业务错误和共用边界；`credentials.rs` 只负责稳定公共类型出口，
-  明文和密文的安全边界保持不变。
+  明文和密文的安全边界保持不变。`check.rs` 另定义 A44 的只读信封读取、外部探测和瞬时结果端口。
 - [src/ports/admin/users/](src/ports/admin/users/)：安全用户投影、列表请求和分页位于 `model.rs`，用户/恢复命令、写入
   载荷和安全结果位于 `commands.rs`，密钥、Users 存储和 recovery 黑名单窄端口位于 `ports.rs`，
   共享字段校验位于 `common.rs`；`users/mod.rs` 只负责稳定公共类型出口。
@@ -134,7 +138,8 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   服务状态、构造函数和 `AdminUserPort` 适配。
 - [src/services/admin/credentials/](src/services/admin/credentials/)：`query.rs` 负责有界凭据安全投影，`commands.rs` 负责导入/改名/启停/删除
   事务编排与安全结果重放，`digest.rs` 负责不包含明文 secret 的幂等请求摘要，`validation.rs` 负责命令字段校验；
-  `mod.rs` 只保留服务状态、构造函数和 `AdminCredentialPort` 适配。
+  `check.rs` 负责手动探测前后的凭据版本复核，不修改状态或命令账本；
+  `mod.rs` 只保留服务状态、构造函数和稳定导出。
 
 ## Public 读模型与装备入口
 
@@ -203,6 +208,9 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
   ID/key 和重复定价；统一定价和旧跨行三元组形式继续兼容，原始 body 不因解析而被改写。
   `processing/processor/{routing,auction,delivery}.rs` 分别持有主题路由/用户命令、装备入站和无密文
   delivery outbox 编排，`processor.rs` 只保留配置、处理器状态和 `MailProcessor` 公共出口。
+  邮件装备时间校验在每件异步读取完成后重新读取已注入的应用时钟，不能使用邮件开始时间；
+  校验不改写来源采集时间、不加宽限，真实未来快照仍失败关闭。命令原有业务时间、摘要、写入时间
+  语义与历史接受/拒收事实保持不变，旧退回和通知任务不因该修复自动重放。
 - [src/ports/mail/display.rs](src/ports/mail/display.rs)：从完整 `MailMessage` 生成 Admin 审查用脱敏快照；正文、附件 ID、Credits/COD
   受固定大小限制，装备 key 与认证邮件正文隐藏。该快照是敏感展示投影，不是业务权威或幂等输入。
 - [src/ports/mail/equipment_diagnostics.rs](src/ports/mail/equipment_diagnostics.rs)：持有装备读取失败的首个非权威诊断投影、stage/category/detail_code
@@ -225,7 +233,9 @@ MoogleMail 注册/找回在签发登录 key 前先读取目标用户 UUID，信�
 ## 读取、实时与会话
 
 Public 认证端口返回登录时用户版本，会话创建端口在存储锁内再次核对；Key 撤销/重签永久废止旧会话。
-浏览器与 HTTP DTO 不接收这个内部版本门禁字段。
+浏览器与 HTTP DTO 不接收这个内部版本门禁字段。`PublicSessionPort::inspect` 通过
+`PublicSessionStore::inspect_public` 只读复核原会话、用户/凭据状态和双重过期边界；不调用滑动
+刷新，不更新活动时间，供 HTTP 长连接周期复核。PostgreSQL 与 SQLite 都实现该窄端口。
 
 Admin 服务通过异步构造在接受请求前调用持久化撤销端口，永久废止全部旧 Admin 会话；撤销失败
 阻断启动，重启后需重新登录。HMAC-SHA256 将随机 token 摘要绑定当前 actor/secret，`current`
@@ -289,7 +299,7 @@ Admin 拍卖创建会在 PostgreSQL Serializable 事务中把已校验的策略�
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-application

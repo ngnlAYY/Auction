@@ -3,18 +3,28 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    DomainError, LotBidState, ProxyAuthorization, ProxyAuthorizationId, ProxyMode, ProxyStatus,
-    ProxyTransitionKind,
+    BidMechanism, CommandId, DomainError, LotBidState, ProxyAuthorization, ProxyAuthorizationId,
+    ProxyMode, ProxyStatus, ProxyTransition, ProxyTransitionKind,
 };
 
 use super::super::trigger::CompetitionTrigger;
 use super::CompetitionPlan;
 
 impl CompetitionPlan {
-    /// 校验规划结果的事实顺序、版本推进和代理转换链。
+    /// 校验事实顺序、版本、代理转换链及其与最终快照的一致性。
+    ///
+    /// 历史重放只携带局部快照；不要求未变更授权出现，也不对已接受金额重套新输入上限。
     pub fn validate(&self) -> Result<(), DomainError> {
         self.final_lot.validate()?;
+        let command_id = self.validate_public_bids()?;
+        self.validate_proxy_changes(command_id)?;
+        if self.soft_close_applied && self.public_bids.is_empty() {
+            return Err(DomainError::InvalidBidState("无竞价事实不能触发软截止"));
+        }
+        Ok(())
+    }
 
+    fn validate_public_bids(&self) -> Result<Option<CommandId>, DomainError> {
         let mut previous_version = self
             .final_lot
             .state_version
@@ -38,6 +48,15 @@ impl CompetitionPlan {
             {
                 return Err(DomainError::InvalidBidState("公开竞价事实顺序或版本无效"));
             }
+            // 不重新计算历史竞价，只验证事实链自身不倒退；代理同价事实保留旧版优先级。
+            if bid.amount < self.final_lot.start_price
+                || index > 0
+                    && (bid.amount < self.public_bids[index - 1].amount
+                        || (bid.amount == self.public_bids[index - 1].amount
+                            && bid.mechanism != BidMechanism::Proxy))
+            {
+                return Err(DomainError::InvalidBidState("公开竞价事实金额发生倒退或非法同价"));
+            }
             if let Some(expected) = command_id {
                 if expected != bid.command_id {
                     return Err(DomainError::InvalidBidState("同一规划结果包含多个命令"));
@@ -48,15 +67,26 @@ impl CompetitionPlan {
             previous_version = bid.state_version;
         }
 
+        if let Some(last) = self.public_bids.last()
+            && (self.final_lot.current_price != Some(last.amount)
+                || self.final_lot.leader_id != Some(last.bidder_id)
+                || self.final_lot.leader_proxy_last != (last.mechanism == BidMechanism::Proxy))
+        {
+            return Err(DomainError::InvalidBidState("最终 lot 快照与最后竞价事实不一致"));
+        }
+        Ok(command_id)
+    }
+
+    fn validate_proxy_changes(&self, mut command_id: Option<CommandId>) -> Result<(), DomainError> {
         let mut states = HashMap::with_capacity(self.proxy_states.len());
         for state in &self.proxy_states {
             state.validate()?;
-            if state.lot_id != self.final_lot.lot_id || states.insert(state.id, *state).is_some() {
+            if state.lot_id != self.final_lot.lot_id || states.insert(state.id, state).is_some() {
                 return Err(DomainError::InvalidBidState("代理快照重复或 lot 不一致"));
             }
         }
 
-        let mut transition_versions: HashMap<ProxyAuthorizationId, u64> = HashMap::new();
+        let mut last_transitions: HashMap<ProxyAuthorizationId, &ProxyTransition> = HashMap::new();
         for transition in &self.proxy_transitions {
             transition.validate()?;
             if let Some(expected) = command_id {
@@ -67,39 +97,48 @@ impl CompetitionPlan {
                 command_id = Some(transition.command_id);
             }
 
-            let expected_version = match transition.kind {
-                ProxyTransitionKind::Created => 1,
-                _ => {
-                    let previous_version = transition_versions
-                        .get(&transition.authorization_id)
-                        .copied()
-                        .or_else(|| transition.state_version.checked_sub(1))
-                        .ok_or(DomainError::StateVersionOverflow)?;
-                    previous_version.checked_add(1).ok_or(DomainError::StateVersionOverflow)?
+            if let Some(previous) = last_transitions.insert(transition.authorization_id, transition)
+            {
+                let expected_version = previous
+                    .state_version
+                    .checked_add(1)
+                    .ok_or(DomainError::StateVersionOverflow)?;
+                if transition.state_version != expected_version
+                    || transition.old_maximum != Some(previous.new_maximum)
+                    || transition.old_mode != Some(previous.new_mode)
+                    || transition.old_status != Some(previous.new_status)
+                {
+                    return Err(DomainError::InvalidBidState("代理转换版本或前后状态不连续"));
                 }
-            };
-            if transition.state_version != expected_version {
-                return Err(DomainError::InvalidBidState("代理转换版本没有连续推进"));
             }
-            transition_versions.insert(transition.authorization_id, transition.state_version);
+            // Created 只能是该授权的首条转换；上方连续性校验也会拒绝重复创建。
+            if transition.kind == ProxyTransitionKind::Created
+                && states
+                    .get(&transition.authorization_id)
+                    .is_some_and(|state| state.creation_command_id != transition.command_id)
+            {
+                return Err(DomainError::InvalidBidState("代理创建命令与最终快照不一致"));
+            }
         }
 
         for (authorization_id, state) in &states {
-            if let Some(version) = transition_versions.get(authorization_id)
-                && *version != state.state_version
+            if let Some(last) = last_transitions.get(authorization_id)
+                && (last.state_version != state.state_version
+                    || last.new_maximum != state.maximum_amount
+                    || last.new_mode != state.mode
+                    || last.new_status != state.status)
             {
-                return Err(DomainError::InvalidBidState("代理快照与转换链版本不一致"));
+                return Err(DomainError::InvalidBidState("代理快照与转换链最终状态不一致"));
+            }
+            if is_active_proxy_status(state.status) != (self.active_proxy_id == Some(state.id)) {
+                return Err(DomainError::InvalidBidState("活动代理标识与最终快照不一致"));
             }
         }
-        if transition_versions.keys().any(|authorization_id| !states.contains_key(authorization_id))
-        {
+        if last_transitions.keys().any(|authorization_id| !states.contains_key(authorization_id)) {
             return Err(DomainError::InvalidBidState("代理转换缺少对应的最终快照"));
         }
-
-        if let Some(active_id) = self.active_proxy_id
-            && states.get(&active_id).is_some_and(|state| !is_active_proxy_status(state.status))
-        {
-            return Err(DomainError::InvalidBidState("活动代理标识指向终态快照"));
+        if self.active_proxy_id.is_some_and(ProxyAuthorizationId::is_nil) {
+            return Err(DomainError::InvalidBidState("活动代理标识不能是 nil UUID"));
         }
         if let Some(slow_id) = self.final_lot.slow_authorization_id
             && self.active_proxy_id != Some(slow_id)

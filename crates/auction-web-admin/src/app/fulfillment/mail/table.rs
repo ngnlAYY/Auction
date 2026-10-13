@@ -10,6 +10,8 @@ use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText}
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
 
 use super::super::sort::{SortDirection, SortableTh, directed};
+use super::helpers::{mail_kind_label, mail_status_class, mail_status_label};
+use super::messages::processing_code_message;
 
 #[component]
 pub(super) fn MailIntakeTable(
@@ -110,10 +112,8 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
     let detail_label = format!("{}: {external_mail_id}", t!("admin-mail-open-detail"));
     let decision = if intake.status == "accepted" {
         String::new()
-    } else if intake.decision_code.is_empty() {
-        t!("value-empty")
     } else {
-        intake.decision_code.clone()
+        processing_code_message(&intake.decision_code)
     };
     let sender = intake.sender.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
     let subject = intake.subject.clone().unwrap_or_else(|| t!("admin-mail-original-not-retained"));
@@ -137,9 +137,11 @@ fn MailIntakeRow(intake: AdminMailIntake, on_select: EventHandler<String>) -> El
             td { "data-label": t!("admin-mail-intake-world"), TruncatedText { value: intake.world_id, size: "compact" } }
             td { "data-label": t!("admin-mail-intake-from"), TruncatedText { value: sender, size: "compact" } }
             td { "data-label": t!("admin-mail-intake-subject"), TruncatedText { value: subject, size: "wide" } }
-            td { "data-label": t!("admin-mail-intake-kind"), TruncatedText { value: intake.kind } }
+            td { "data-label": t!("admin-mail-intake-kind"), TruncatedText { value: mail_kind_label(&intake.kind) } }
             td { "data-label": t!("admin-mail-intake-status"),
-                span { class: "admin-mail-badge", TruncatedText { value: intake.status, size: "compact" } }
+                span { class: mail_status_class(&intake.status),
+                    TruncatedText { value: mail_status_label(&intake.status), size: "compact" }
+                }
             }
             td { "data-label": t!("admin-mail-intake-error"),
                 TruncatedText { value: decision, size: "wide" }

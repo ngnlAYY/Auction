@@ -118,6 +118,17 @@ Admin A18 详情可展示装备 ID、1-based 附件位置、`stage`（`request`�
 retention status/error。`snapshot_invalid` 与 `filter_rejected` 才允许对应闭集 `detail_code`；其它 category 不带
 细节原文。网络、超时、截断或超大响应只标记 `body_unavailable`，不伪称取得完整响应。
 
+管理列表和详情将已知代码译为说明，同时保留原始代码便于关联日志；装备拒收的摘要位于详情顶部，
+优先显示留存的具体诊断，没有 sidecar 时使用已有业务 `reason_code`，都缺失时不猜测原因。
+`auction_equipment_rejected` 只是拒收总码；`snapshot_invalid / collected_at_future` 表示采集时间晚于
+用于该次校验的时间，须检查取时顺序及 Worker 时钟，不能据此认定 Cookie 失效或品质不符，更不能关闭时间校验绕过。
+`filter_rejected` 说明处理当时的规则未通过；`start_price_*` 指向定价指令。网络/HTTP 异常与登录失效分开说明，
+证据 `authentication` 也不等于游戏登录失败。未知代码仍保留原值，旧记录缺少诊断时不能通过刷新补齐。
+收件拒绝不代表装备已退回，须核对关联 Return/Send 任务和 MM；修改配置或升级说明文案不会自动重放旧收件。
+上述消息说明属于 Admin 展示层。后续独立的[取时修复](../../crates/auction-application/src/services/mail/processing/processor/auction.rs)
+让邮件处理器在每件装备读取完成后重新取应用时钟，原未来时间门禁与命令业务时间保持不变。
+该修复未自动部署或处理旧任务，范围见[状态说明](../status.md#源码核对发现的实现缺口)。
+
 安全日志始终包含 world/mailbox/external mail ID/equipment ID/附件位置等关联字段，即使留证 disabled、
 prepare_failed、save_failed 或 completion_unconfirmed。状态需区分 `disabled`、`prepare_failed`、`save_failed`、
 `completion_unconfirmed`、`retained` 和 `body_unavailable`；evidence UUID 不保证文件永久存在，可能因保留期或
@@ -139,7 +150,7 @@ session expired 在凭据耗尽或失效写回失败时保留最后已取得的�
 
 ## 历史资产处置核对
 
-2026-09-22 的[审计修复](../../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md)区分可恢复的本地接受决定和
+2026-09-22 的[审计修复](../status.md#2026-09-22-历史记录)区分可恢复的本地接受决定和
 无法自动确认的远端资产。升级按既有停机/迁移流程执行；不要通过修改旧 payload、命令 ID 或账本解除阻断。
 
 - `legacy_return_requires_review`：旧流拍 Return 已冻结或有过执行，保持隔离。核对原投稿、逐件装备库存和
