@@ -2,25 +2,16 @@
 
 [系统设计](../../DESIGN.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Admin 设计](../auction-web-admin/DESIGN.md)
 
-> 核对日期：2026-10-13。本文只描述公开端；依据当前源码、样式和已登记契约整理，不提出新的视觉改版。
-> 源码、内嵌产物与线上页面可能处于不同版本，运行证据以 [状态说明](../../docs/status.md) 为准。
+本页描述现有 Public 界面。源码、内嵌产物与线上页面可能版本不同，验收边界见[状态页](../../docs/status.md)。
 
 ## 1. 定位与隔离
 
 公开端服务浏览者、竞买人及查看寄售结果的卖家。首要任务是找到装备、理解价格与截止时间、明确确认出价，
 并在网络恢复后重新取得权威状态。它不是管理控制台，不展示凭据管理、Worker 操作、审计编辑或运行配置入口。
 
-| 边界 | owner |
-| --- | --- |
-| 页面、路由、业务交互 | [src/app/](src/app/) |
-| 同源 Public API、DTO 解码与实时恢复 | [src/api/](src/api/) |
-| 公开端专属样式 | [assets/public.css](assets/public.css) |
-| 五语言界面文案 | [i18n/](i18n/) |
-| 浏览器构建入口 | [Dioxus.toml](Dioxus.toml) |
-| 默认内嵌宿主 | [auction-public-api](../../apps/public-api/README.md) |
-
-不导入 `auction-web-admin`，不把 Admin 的导航、权限、表单或资源打入 Public 制品。
-`auction-web-shared` 只提供通用机制；拍卖字段、列宽、竞价状态与 Public 文案由本 crate 持有。
+页面与交互由 [src/app/](src/app/) 拥有，API/实时恢复由 [src/api/](src/api/) 拥有；
+专属样式为 [public.css](assets/public.css)，文案为 [i18n/](i18n/)。构建与嵌入入口见[模块说明](README.md)。
+Public 不导入 Admin 页面/资源；共享层只提供通用机制，业务字段、列宽、竞价状态和文案留在本端。
 
 ## 2. 信息架构
 
@@ -59,36 +50,20 @@
 - 正文占用可用容器宽度。筛选和操作控件可换行，不能靠压缩到不可操作的尺寸维持单行。
 - 规则正文使用自己的 `public-rules-page` 容器及安全 Markdown 块，不套入管理端卡片或编辑器布局。
 - 黑名单页保留标题、名单或空态、分页；不显示额外的数据库 ID 说明段。表格仍显示 MoogleMail 玩家名称，
-  不把姓名回退为内部数据库 ID；这项文案移除不改变黑名单资格校验。
+  不把姓名回退为内部数据库 ID；显示名不改变黑名单资格校验。
 
 ## 4. 视觉基底
 
-公开端采用现有深色、紧凑、以数据为主的视觉语言，不增加外部字体或第二套主题框架。
-下表是 [共享 base.css](../auction-web-shared/style/base.css) 的核对快照；变量 owner 仍是共享层。
-
-| 用途 | 变量与当前值 | 公开端用法 |
-| --- | --- | --- |
-| 页面背景 | `--color-bg: #0e1116` | 外壳与页面底色 |
-| 容器层级 | `--color-surface: #161b22`、`--color-surface-raised: #1d242e` | 页头、面板与控件层级 |
-| 主次文字 | `--color-text: #e6ebf2`、`--color-text-muted: #93a0b4` | 数据与辅助说明分层 |
-| 品牌强调 | `--color-accent: #d9a441` | 品牌、选中提示与关键强调 |
-| 链接与主要操作 | `--color-link: #6ea8fe`、`--color-action-primary` | 链接、焦点与主要动作 |
-| 语义状态 | `--color-success`、`--color-warning`、`--color-danger` | 配合明确文字，不仅靠颜色区分 |
-| 排版 | `--font-body`、`--font-mono` | 系统字体；正文与代码/精确值按语义选择 |
-
-基础正文字号为 `--text-base: 0.9375rem`，行高为 `--line-height-body: 1.5`；间距、圆角与控件目标尺寸
-复用共享变量。`public-*` 的布局与状态样式留在 `public.css`，不使用 `admin-*` 选择器。
-CSS 断点沿用 `48rem`、`64rem`、`75rem`；不为单个页面新增第四档。
+沿用深色、紧凑、以数据为主的界面，不增加外部字体或主题框架。背景/容器层级、主次文字、金色品牌强调、
+蓝色链接、语义状态及系统字体均使用[共享 base.css](../auction-web-shared/style/base.css)变量；具体值由样式维护。
+状态颜色须配明确文字。`public-*` 布局和交互状态留在 `public.css`，不引入 `admin-*` 选择器；
+间距、控件尺寸和断点复用共享体系，不为单页增加新的断点档位。
 
 ## 5. 表格与信息密度
 
-- 所有业务表和规则 Markdown 表为 100% 容器宽度；每张业务表独立定义总和为 100 的百分比列宽。
-- 列宽按装备名、玩家名、金额、时间格式及动作数量分配，具体值以 [表格布局契约](../../docs/table-layouts.md) 为准。
-- 窄屏继续保留表头、行和列，不变成卡片，不设置撑开页面的固定最小宽度，不提供横向滚动代替布局。
-- 金额按业务列对齐，并提供完整 Credits 提示；不能通过不精确缩写改变用户理解的价格。
-- 长文本单行截断；普通单元格提供完整文本提示，复杂文本通过共享浮层支持键盘、触控、选择与滚动。
-- 表头、caption、列语义与可访问名称按表格职责提供，不能用 CSS 伪文本替代真实字段关系。
-- 装备完整链接仅消费允许返回的安全 DTO；Lite 返回空链接时不生成虚假的可点击入口。
+表格遵守[布局契约](../../docs/table-layouts.md)：100% 容器宽、独立百分比列宽、窄屏保留表头/行列，
+不改卡片或横向滚动。长文本提供完整值查看，复杂文本支持键盘/触控。金额对齐并提示完整 Credits，
+表头/caption/可访问名称保留真实字段关系，不用 CSS 伪文本替代。装备链接只消费安全 DTO，Lite 空链接不伪造入口。
 
 ## 6. 竞价与代理交互
 
@@ -139,16 +114,7 @@ Markdown 原始 HTML 只作转义文本展示，链接遵守协议白名单。�
 
 ## 9. 构建与维护
 
-```bash
-just i18n-check
-cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
-just web-build-public
-```
-
-前两项为静态检查，第三项生成 Public 页面产物。稳定产物目录为
-`target/dx/build/auction-web-public/web/public/`；上线还需重新编译并部署启用 `web-embed` 的 Public 宿主，
-不能把改动源码或生成 WASM 等同于线上生效。
-
-不新增 React、TypeScript、Node 运行时或独立前端构建链。页面变更同步本设计、模块 README、五语言文案及受影响的
-表格/路由契约；涉及共享组件时同时核对另一 surface，但不顺手改写其业务页面。
-默认不新增或运行单元、集成、功能、端到端、浏览器测试或手工冒烟，相关运行验收需用户明确授权。
+静态检查用 `just i18n-check` 和 `cargo check --locked -p auction-web-public --target wasm32-unknown-unknown`；
+`just web-build-public` 生成页面产物，上线还需重编并部署启用 `web-embed` 的 Public 宿主，见[开发指南](../../docs/development.md)。
+页面变化同步本设计、模块说明、五语言及受影响表格/路由；共享组件变化核对两端，但不合并业务外壳。
+技术栈和默认测试限制见[协作规范](../../AGENTS.md#web-规则)，本次文档维护不意味着浏览器验收。

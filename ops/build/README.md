@@ -1,33 +1,28 @@
 # AMD KVM 定向编译候选
 
-[文档导航](../../docs/README.md) · [开发指南](../../docs/development.md) · [部署手册](../deploy/README.md)
+[文档导航](../../docs/README.md) · [开发指南](../../docs/development.md) · [部署手册](../deploy/README.md) · [验证状态](../../docs/status.md)
 
-这些文件由 `cargo --config` 显式选择，仅用于用户指定的两台 Debian 13 / glibc 2.41 KVM 机器。
-默认工作区、正式发布脚本和 WASM profile 不变。它们是待部署机测量的性能候选，不是“最优性能”
-或通用 Linux x86_64 兼容性的保证。
+两份 Cargo 配置仅供用户指定的 Debian 13/glibc 2.41 KVM，通过 --config 显式选择。
+默认 release/WASM 和正式发布链不变；候选参数不保证通用 x86_64 兼容性或最优性能。
 
 ## 两份目标配置
 
-| 配置 | 用户提供的目标 | 原生指令集策略 |
+| 配置 | 已登记目标 | 指令集策略 |
 | --- | --- | --- |
-| [ryzen-7950x.toml](ryzen-7950x.toml) | Ryzen 9 7950X；2 vCPU、约 2 GiB RAM | x86-64-v4 加快照中已有的扩展，包含 RDSEED |
-| [epyc-9645.toml](epyc-9645.toml) | EPYC 9645；4 vCPU、约 8 GiB RAM | x86-64-v4 加已有扩展，增加 AVX-VNNI/VP2INTERSECT，不启用 RDSEED |
+| [ryzen-7950x.toml](ryzen-7950x.toml) | Ryzen 9 7950X，2 vCPU、约 2 GiB RAM | x86-64-v4 加快照扩展，含 RDSEED |
+| [epyc-9645.toml](epyc-9645.toml) | EPYC 9645，4 vCPU、约 8 GiB RAM | v4 加快照扩展、AVX-VNNI/VP2INTERSECT，不启用 RDSEED |
 
-CPU 型号不能替代虚拟机 CPUID。特别是第二台未列出 `rdseed`，所以不直接使用完整
-`znver5`；两份配置均不用 `native`、不稳定的 `-Z tune-cpu` 或型号隐含的 LLVM-only 特性。
-它们以 v4 为基础建立显式扩展白名单，不宣称获得了 Zen 专用调度优化。
-宿主机迁移、VM CPU 模式改变或换机器后必须重新核对指令集；不匹配可能发生非法指令退出。
+以 VM CPUID 而非型号决定兼容性；EPYC 快照无 rdseed，不能直接启用完整 znver5。
+不用 native、不稳定 tune-cpu 或型号隐含 LLVM 特性，也不声称获得 Zen 专用调度优化。
+迁移宿主机/改变 VM CPU 模式后须重新核对；不匹配可能非法指令退出。
 
-两份配置使用 `opt-level=3`、Fat LTO、一个 codegen unit、非增量发布构建。
-`panic=unwind` 保留后端任务失败语义；不以整个进程退出换体积。构建并发 2 只限制本机编译内存，
-不改变部署的 Tokio/Worker 并发、连接池或运行配置。第一台仅约 2 GiB RAM，不建议在其上执行完整 LTO
-构建；编译优化也不能替代部署后的内存与数据库资源规划。
+两份配置均 opt-level=3、Fat LTO、单 CGU、非增量，保留 panic=unwind 后端任务语义。
+构建并发 2 只控制编译内存，不改变运行线程/池；约 2 GiB 的 Ryzen VM 不宜承担完整 LTO 构建。
 
 ## 在构建机生成候选
 
-从仓库根目录执行。Web 先按既有脚本独立构建，不能把后端 CPU 配置传给浏览器目标。
-不要设置额外的 `CARGO_PROFILE_RELEASE_*`、`CFLAGS`、`CXXFLAGS` 或全局 Cargo CPU 优化覆盖；
-尤其不能夹带 `-march=native`。配置文件本身不会写入用户全局 Cargo 配置。
+从仓库根执行，Web 先独立构建，后端 CPU 参数不得传给 WASM。
+不要另加 CARGO_PROFILE_RELEASE_*、CFLAGS/CXXFLAGS 或全局 CPU 覆盖，尤其 -march=native。
 
 ```bash
 just web-build
@@ -35,7 +30,7 @@ just web-build
 for machine in ryzen-7950x epyc-9645; do
   build_dir="target/amd-build/$machine"
 
-  # Web 更新后强制重新展开 RustEmbed；保留其余依赖缓存。
+  # Web 更新后重新展开 RustEmbed，保留其他依赖缓存。
   if [ -f "$build_dir/CACHEDIR.TAG" ]; then
     cargo clean --target x86_64-unknown-linux-gnu \
       --target-dir "$build_dir" \
@@ -52,124 +47,68 @@ for machine in ryzen-7950x epyc-9645; do
 done
 ```
 
-输出分别位于 `target/amd-build/<machine>/x86_64-unknown-linux-gnu/release/`。
-保留两台机器的制品目录与校验和，不能用型号标签替代实际特性核对，也不能混入通用发行包。
-这些命令不安装、启动或替换服务，不迁移数据库；正式切换仍遵循部署手册的停机与配置门禁。
-现有 `ci/release.sh` 不负责这两份本地定向候选，不能直接把它们当成通过正式归档门禁的发布包。
-
-构建机与两台目标当前均为 glibc 2.41；相同 ABI 只是已知前提，真实加载的 GLIBC 符号版本、
-动态库及目标指令集仍需核对。构建机只有 AVX2，不能执行这两份 AVX-512 候选。
+输出 `target/amd-build/<machine>/x86_64-unknown-linux-gnu/release/`，分别保管制品和校验和。
+这些命令不安装、启动、迁移或替换服务；ci/release.sh 不负责本地候选，不能混入通用发行包。
+已登记构建机和目标 glibc 均为 2.41，仍需逐制品核对符号/动态库；构建机仅 AVX2，不能执行 AVX-512 候选。
 
 ## 已有测量和待补证据
 
-2026-10-12 在本机 Intel KVM 上对真实 `auction-domain` 规划器作授权微基准：
-9 类规划与计划 JSON 解码/校验，共 10 组；每组 32 份固定输入、每轮 200,000 次，
-6 个编译候选交错执行 9 轮，绑核 CPU 2，规划预热在计时外，使用 `black_box` 保留计算。
-所有规划输入预检成功；未连接数据库或执行 HTTP/外部请求。
+以下是 2026-10-12 已登记记录，本次文档维护未重跑。授权微基准在 Intel KVM 上覆盖真实 domain 规划器
+9 类规划及计划 JSON 解码/校验：10 组各 32 份输入，每轮 200,000 次，6 候选交错 9 轮，绑 CPU 2，
+预热在计时外并使用 black_box。未连接数据库或外部服务。
 
-| 本机候选 | 10 组等权几何平均吞吐，相对默认基线 |
+| 本机候选 | 10 组等权几何平均相对吞吐 |
 | --- | --- |
-| x86-64，默认 Release / 16 CGU | 1.000× |
-| x86-64，Thin LTO / 16 CGU | 1.057× |
-| x86-64，Fat LTO / 1 CGU | 1.106× |
-| v3，Thin LTO / 16 CGU | 1.097× |
-| v3，Thin LTO / 1 CGU | 1.132× |
-| v3，Fat LTO / 1 CGU | 1.158× |
+| x86-64 默认 Release / 16 CGU | 1.000× |
+| x86-64 Thin LTO / 16 CGU | 1.057× |
+| x86-64 Fat LTO / 1 CGU | 1.106× |
+| v3 Thin LTO / 16 CGU | 1.097× |
+| v3 Thin LTO / 1 CGU | 1.132× |
+| v3 Fat LTO / 1 CGU | 1.158× |
 
-统计先取各组 9 轮批量平均耗时的中位数，再对速度比取等权几何平均；这不是业务流量配比、
-请求 p99 或 PostgreSQL 吞吐量。宿主机调度和代码布局也可能影响结果，不能外推成 AMD
-服务器收益或“全系统提升 15.8%”。这里只据此保留 Fat/1 作为后续候选，没有穷举参数空间。
+每组取 9 轮批量平均耗时中位数，再对速度比作等权几何平均；不是业务流量权重、p99 或 PostgreSQL 吞吐。
+只能据此保留 Fat/1 候选，不能外推 AMD 系统提升。原始输入、样本、日志和临时程序在忽略的
+`target/compiler-performance/`；其中两种 AMD bin 是微基准，不是服务，已编译但未在本机执行。
+其机器码哈希相同也不证明目标特性无用或已提升性能。
 
-临时源码、锁图、原始样本、构建日志和专用测量程序保存在
-`target/compiler-performance/`；该目录是被忽略的本地取证产物，不加入默认 CI。
-其中 `bin/ryzen-7950x`、`bin/epyc-9645` 仅是纯领域测量程序，**不是服务程序**；
-两者已编译，未在本机执行。Cargo 指纹确认采用不同的扩展参数，但该微基准的两份机器码哈希相同，
-说明仅增加目标特性不保证这类负载能生成不同代码或获得额外收益。
-对应目标机可与 `bin/baseline`、`bin/v3-fat1` 交错重复测量，
-不能仅比较一次运行，也不能把该微基准当成完整业务验收。
-
-两份配置已经通过 PostgreSQL + Redis + 对应 Web feature 的四程序 Release 模式
-`cargo check --locked`。同日用户继续要求重编 Ryzen 7950X，已完成该档四程序的 Release 链接，
-并独立重建 Public/Admin 页面；EPYC 仍只有静态编译检查与微基准程序，没有专用服务制品。
-交付后用户单独授权远端运维，Ryzen 目标已完成空库迁移、三角色启动和 readiness 核对，见下节记录；
-EPYC 目标未执行运行验证，不能把 Ryzen 的启动证据当作两种 CPU 的性能测量。
-PostgreSQL 端到端、并发/p99、PGO 训练尚未执行；继续测量只使用隔离数据库，不触碰业务库。
-PGO 需要代表性负载和与 rustc LLVM 匹配的工具，不能把纯领域微基准训练结果直接用于整套服务。
-默认测试禁令不变，本轮性能测量仅来自用户的明确授权。
+两档完成 PostgreSQL/Redis/Web feature 的 Release cargo check；Ryzen 另完成服务链接和获授权的目标机运维，
+EPYC 没有专用服务制品/运行验证。两档均未完成 PostgreSQL 端到端、并发/p99 或 PGO 训练；
+继续测量仅使用明确授权的隔离负载，纯领域训练不能代表全服务。默认测试禁令不变。
 
 ### 2026-10-12 Ryzen 7950X 重编记录
 
-独立构建目录为 `target/amd-build/ryzen-7950x/`；可复制的四程序、构建日志和证据位于
-`target/amd-artifacts/auction-ryzen-7950x-20261012T044747Z-dirty/`，同级 `.tar.gz`
-为 28,406,531 字节，附 `.tar.gz.sha256`。包内 `SHA256SUMS` 绑定四个程序及交付证据，
-不含真实配置、凭据或自动安装脚本。该目录被忽略，是本次工作树的本地候选，不是正式归档门禁产物。
-
-源码身份在 Web/native 构建前冻结、阶段边界复核；资源清单与构建后的内嵌标记匹配，
-Public/Admin 对端资源均缺失，Worker/auctionctl 不含页面。Cargo 指纹与实际编译命令确认
-四个程序均启用 PostgreSQL、Redis 及指定 CPU 参数、Fat LTO、单 CGU；未启用 SQLite。
-ELF 静态检查显示三个角色程序最高引用 GLIBC 2.34，auctionctl 最高引用 2.39，未超过目标的 2.41。
-依赖为 `libgcc_s.so.1`、`libm.so.6`、`libc.so.6`，不把 ABI 静态核对当作目标机启动验证。
-
-详细日志保留第三方依赖的 cfg、弃用和生命周期等警告；本轮没有修改依赖或关闭项目 lint。
-重编交付阶段没有运行 AVX-512 制品、启动/替换服务、连接数据库或执行行为测试；未覆盖既有部署目录。
-本节及状态说明更新发生在产物封存后，不把事后文档改动伪装成构建前的源码身份。
+初次四程序/双端页面候选封存于
+`target/amd-artifacts/auction-ryzen-7950x-20261012T044747Z-dirty/`，附 archive、SHA256SUMS、构建日志和证据。
+源码身份在构建前冻结、阶段复核，内嵌标记/资源隔离、PostgreSQL/Redis 与 CPU/Fat LTO/单 CGU 指纹均核对。
+三个角色最高引用 GLIBC 2.34，auctionctl 2.39；动态依赖为 libgcc_s.so.1、libm.so.6、libc.so.6。
+保留第三方警告，未放松 lint。该脏树候选不是正式归档门禁产物；封存后文档变更不计入构建前身份。
 
 ### 2026-10-12 Ryzen 目标初始化与启动
 
-用户另行明确授权 SSH 排查、修正配置，随后授权使用管理员权限初始化并启动指定目标。
-首次失败来自沿用构建机目录的 systemd/TOML 路径，以及已能连接但完全没有业务表和迁移账本的目标库，
-不是已确认的 CPU 非法指令问题。配置修改先备份，只修正 Worker/Admin control 路径和权限，未改凭据。
+后续独立授权 SSH/管理员维护后，备份并修正了沿用构建机的 systemd/TOML 路径和 control 权限，未改凭据。
+确认三角色 inactive/MainPID=0、PostgreSQL 18.6 专用目标为空且可写，保存普通 pg_dump 空库快照后，
+以服务账号受停机门禁执行 39 条迁移（最大版本 39、失败 0、64 张 public 表），无 DROP/重建。
+Worker → Admin → Public readiness 通过，自动重启 0、adopted 回执匹配，磁盘及运行制品哈希一致。
 
-在三角色均 `inactive`、`MainPID=0` 后，再次确认 PostgreSQL 18.6 目标为空、主库可写且具备建表权限，
-保存并校验普通 `pg_dump` 空库快照。以服务账号执行带实际 unit 名与私有状态目录的 `auctionctl migrate`，
-39 条迁移全部成功、最大版本 39、失败数 0，建立 64 张 public 表；不执行 DROP/重建，也不改历史迁移文件。
-
-随后按 Worker → Admin → Public 启动并逐一通过 readiness；三个进程保持同一 InvocationID、自动重启为 0。
-采集的本次 invocation 最近 160 条日志窗口未见 WARN/ERROR。`auctionctl deployment start` 在全部已运行分支
-复核就绪与启动顺序、发布 adopted 回执；后续 status 三角色均为 `receipt=matched`。
-磁盘四程序与三个运行中 `/proc/<pid>/exe` 的 SHA-256 均匹配本次候选。
-
-脱敏元数据副本位于被忽略的 `target/operations-evidence/ryzen-7950x-initialization-20261012/`，
-原始空库快照留在目标机私有证据目录，不把它伪装为正式恢复 manifest。目标地址、凭据和机器专属绝对路径
-不写入版本化文档。本次只证明指定制品在该机器的初始化、启动与就绪，不覆盖网页首次设置、浏览器操作、
-竞价正确性、数据库并发、邮件/论坛业务、备份恢复演练、负载性能或完整生产验收；默认测试政策不变。
+脱敏证据在 `target/operations-evidence/ryzen-7950x-initialization-20261012/`，原空库快照在目标私有目录，
+不作为正式恢复 manifest。只证明指定制品的初始化/启动/就绪，不涵盖首次网页、业务、并发、恢复演练或性能。
 
 #### 后续 Admin 登录来源修正
 
-同日公网登录返回 `403 origin_forbidden`：Admin runtime 的来源白名单仍只有 loopback，
-请求在凭据校验前被拒绝。用户在获知明文风险后明确选择临时公网 HTTP，不选择 SSH 隧道或 HTTPS。
-备份 runtime 配置并通过严格预检后，仅补入指定管理入口的精确 Origin；不使用通配符、不禁用
-Origin/CSRF/认证、不修改凭据、Public 白名单或可信代理配置。临时明文配置不属于生产安全基线；
-切换 HTTPS 后须移除该 HTTP 来源并启用 Secure Cookie。
-
-操作前预计只重启 Admin，但实际 unit 的 Public `Requires=Admin` 依赖联动重启了 Public；
-Worker InvocationID 未变。已明确记录这项计划偏差，后续单角色操作须先检查 systemd 依赖传播，
-不能将命令只点名一个 unit 当作只影响该角色。两端重新 ready，三角色 adopted 回执重新匹配。
-不含凭据的请求确认指定来源进入 `401 invalid_credentials`、未授权来源保持 `403 origin_forbidden`；
-外部探测同样到达凭据校验。这不证明真实密码或浏览器登录流程已经验证。
-原配置备份和前后状态保留在目标机私有 `admin-origin-fix-*` 目录，未将凭据写入取证输出。
+同日 origin_forbidden 源于 runtime 仅允许 loopback。用户明确选择临时公网 HTTP 后，备份配置、严格预检并
+仅添加指定精确 Origin，未放松 CSRF/认证或修改凭据。该例外不属于生产安全基线，切换 HTTPS 后须移除 HTTP 来源并启用 Secure Cookie。
+Admin 重启经 Requires 联动 Public，Worker invocation 未变；已记录这项超出原单角色计划的影响。
+两端重新 ready、回执匹配；无凭据探测仅证明允许来源到达 401、其他来源仍 403，不证明真实登录完成。
+原始证据/备份留在目标私有 admin-origin-fix-* 目录。
 
 ### 后续 Cookie 校验候选更新
 
-同日用户另行授权重编并推送。沿用 Ryzen CPU 白名单、Fat LTO、单 CGU 与 PostgreSQL/Redis
-feature，重建四程序及两端页面，包含论坛/游戏 Cookie 手动只读校验。新候选为
-`target/amd-artifacts/auction-ryzen-7950x-20261012T130030Z-dirty/`；同级 `.tar.gz`
-为 28,702,541 字节，SHA-256 为
-`a3599e89c19cc9f45e5c8eac853d5f38c93f4062d610d2f10c196c2f1cbf3ee1`。
-参数、ELF ABI、内嵌资源隔离和构建阶段源码身份均核对通过；仍是脏工作树候选，不属于正式归档门禁。
+同日另行授权构建并推送新四程序/双端页面，沿用目标优化和 PostgreSQL/Redis feature，包含 Cookie 手动只读校验。
+候选 `target/amd-artifacts/auction-ryzen-7950x-20261012T130030Z-dirty/` 的 archive SHA-256 为
+`a3599e89c19cc9f45e5c8eac853d5f38c93f4062d610d2f10c196c2f1cbf3ee1`，参数/ABI/资源/源码身份核对通过。
+上传超时在停机前续传并验整包/逐文件哈希；持部署锁停三角色，保留旧程序，用新 auctionctl 备份并离线校验 schema 39 恢复点。
 
-上传超时发生在停机前；核对部分文件前缀后续传，再验证整包及逐文件哈希，未安装额外系统工具。
-新程序严格配置预检通过后，持有既有部署控制锁，按 Public → Admin → Worker 停止并确认
-全部 `inactive`、`MainPID=0`。旧四程序保留并核对哈希；使用新 `auctionctl` 创建及离线校验
-PostgreSQL custom-format 备份，manifest 的 schema 版本为 39。本次没有迁移、恢复或配置修改。
-
-随后原子替换四程序，按 Worker → Admin → Public 启动并分别等待 readiness。三个运行中制品
-与新候选哈希一致，自动重启为 0，adopted 回执全部匹配。两端各 6 个实际 HTTP 静态资源
-逐项匹配构建清单，外部两端 readiness 均为 200；后续同一 invocation 的 26 条日志未见 WARN/ERROR。
-角色、公共、runtime 和敏感 TOML 的内容及权限指纹未变；Admin 启动仍按既有契约撤销旧会话。
-
-旧程序、数据库备份及原始运维证据留在目标私有 `update-20261012T130030Z/`，脱敏结果副本位于
-`target/operations-evidence/ryzen-7950x-cookie-update-20261012T130030Z/`。
-本次仅确认制品切换、资源身份与就绪，不使用真实 Cookie 校验远端页面，也不执行业务流程、
-浏览器测试或恢复演练。临时 HTTP 入口未改为 HTTPS；生产安全及完整验收边界不变。
-本节为候选封存后的运维记录，不纳入包内构建前源码身份。
+原子替换后按顺序 ready，运行哈希、回执、两端各 6 项 HTTP 静态资源与清单匹配，自动重启 0；
+配置内容/权限指纹不变，无迁移/恢复或真实 Cookie/业务验证。原备份和旧程序留在目标私有
+update-20261012T130030Z/，脱敏副本在 `target/operations-evidence/ryzen-7950x-cookie-update-20261012T130030Z/`。
+此记录发生在候选封存后，仅证明切换、资源身份与就绪；临时 HTTP 和完整生产验收缺口保持不变。

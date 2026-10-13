@@ -1,40 +1,22 @@
 # systemd 服务与顺序控制
 
-[文档导航](../../../docs/README.md) · [总控 unit](auction-stack.service.example) · [Public unit](auction-public-api.service.example) · [Admin unit](auction-admin-api.service.example) · [Worker unit](auction-worker.service.example) · [控制 owner](../../../apps/auctionctl/src/bootstrap/deployment_control)
+[文档导航](../../../docs/README.md) · [部署](../README.md) · [总控 unit](auction-stack.service.example) · [Public](auction-public-api.service.example) · [Admin](auction-admin-api.service.example) · [Worker](auction-worker.service.example)
 
-模板需替换账号、路径和权限；默认分体的单进程生命周期属于 systemd，跨角色顺序属于 auctionctl。
-可选合并包使用 [auction-server.service.example](auction-server.service.example)，只启用这个 unit，
-不要同时启用下述分体 unit。先用相同账号手动完成首次向导，正常启动命令为
-`auction-server --config-dir /var/lib/auction/config`；升级前停止 unit，使用同账号
-`auctionctl migrate-managed --config-dir /var/lib/auction/config`，然后重新启动。
-合并 supervisor 反序关闭最多 135 秒，强制回收最多每角色 5 秒，模板设 `KillMode=mixed` 和
-`TimeoutStopSec=155s`，由 systemd 在超时后杀死整个 cgroup；不得套用分体的 45 秒预算。
-
-## 本页导航
-
-- [安装前提](#安装前提)
-- [安装示例](#安装示例)
-- [启动和停止顺序](#启动和停止顺序)
-- [配置绑定与探针](#配置绑定与探针)
-- [关闭预算](#关闭预算)
-- [权限与回执](#权限与回执)
-- [SQLite 文件权限](#sqlite-文件权限)
-- [状态与重启](#状态与重启)
-- [可写目录](#可写目录)
-- [独立迁移门禁](#独立迁移门禁)
+分体部署由 systemd 管理单角色 PID、信号、重启和日志，由 auctionctl 管理跨角色顺序、readiness、锁与回执。
+合并部署只启用 [auction-server.service](auction-server.service.example)，不得同时启用分体 unit/总控；
+首次向导与 migrate-managed 见[server 手册](../../../apps/server/README.md)。
 
 ## 安装前提
 
-这些 unit 是当前三进程边界的审阅模板，文件名带 `.example`，不会被自动安装。安装前必须
-由部署者把 `User`、`Group`、二进制路径、配置路径和目录权限替换为实际值，并确认运行账号
-能读取对应敏感 TOML。`auction-stack.service` 是可选的宿主机总控 unit；它调用 Rust
-`auctionctl deployment`，单个进程的 PID、信号、停止超时和日志仍由 systemd 拥有。
-
+所有 `.example` 都是待审阅模板，不自动安装。先替换 User/Group、程序和配置路径，准备运行目录与用户组，
+核对敏感 TOML 可读性、Worker control allowlist、Public/Admin listener 和代理上游。
+首次配置和数据库前置条件见[部署手册](../README.md#首次部署配置)。
 
 ## 安装示例
 
+审阅并完成上述准备后安装四份分体 unit：
+
 ```bash
-# 复制并审阅四个示例后再安装
 sudo cp ops/deploy/systemd/auction-public-api.service.example \
   /etc/systemd/system/auction-public-api.service
 sudo cp ops/deploy/systemd/auction-admin-api.service.example \
@@ -47,85 +29,73 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now auction-stack.service
 ```
 
-
 ## 启动和停止顺序
 
-不要同时 enable 三个角色 unit；否则系统启动会绕过总控的应用 readiness 顺序。总控会先严格
-检查三个角色 TOML 对同一公共 TOML 的引用、各文件权限、unit 的 `AUCTION_CONFIG_FILE` 绑定和端口占用，再执行 forward-only
-migration，并按 Worker → Admin → Public 启动。每个角色通过应用 readiness 后才继续；失败只反序
-停止本次启动的 unit，已提交 migration 不会自动 down/restore。停止顺序固定为
-Public → Admin → Worker。
+只 enable 总控，避免开机绕过应用就绪门禁。总控严格预检同一公共配置、权限、unit 环境和监听占用；
+三角色全部明确停止后才前向迁移，再按 Worker → Admin → Public 逐个 readiness。
+停止反序执行；失败只停止本次启动的 unit，已提交迁移不自动回滚。
 
+模板的 Public Requires Admin/Worker，Admin Requires Worker；单角色停止/重启可能影响依赖该角色的其他 unit。
+操作前核对实际 unit 依赖，不能把命令只点名一个 unit 当作只影响一个进程。
 
 ## 配置绑定与探针
 
-角色 unit 的配置绑定只支持 `Environment` 中无空白、无转义的简单赋值；可整体包裹双引号。
-总控会拒绝非空 `EnvironmentFiles`、`UnsetEnvironment`、`PassEnvironment` 和 `PAMName`，
-避免间接覆盖或删除 `AUCTION_CONFIG_FILE`，也不会把环境原值写进诊断。`systemctl show` 会省略
-空的 `EnvironmentFiles` 复合数组，因此仅该属性允许缺行表示空；其余身份和环境属性仍必须返回。
-readiness 的 TCP/Unix
-连接均为非阻塞异步操作，连接和 HTTP 写入/读取共用单次 1 秒上限，并受角色启动剩余预算约束。
+AUCTION_CONFIG_FILE 只支持 Environment 中无空白/转义的简单赋值，可整体包裹双引号。
+非空 EnvironmentFiles、UnsetEnvironment、PassEnvironment、PAMName 均拒绝，错误不回显环境值。
+仅 EnvironmentFiles 允许 systemctl show 省略空属性，其他身份/环境字段必须返回。
 
+Worker control 必须启用并允许实际 Admin/运维 UID 或 GID；探针使用其 Unix `/v1/health/ready`，
+两端 HTTP 使用各自有效 TCP/Unix `/health/ready`，Admin 不回退到被 runtime 覆盖的旧地址。
+每次异步连接、写入和状态行读取共用最多 1 秒，并受角色剩余启动预算约束；默认每角色 30 秒。
 
 ## 关闭预算
 
-三个角色 unit 都以 SIGTERM 进入同一关闭路径：先进行最多 10 秒的 HTTP/Worker drain，再按配置
-刷新 tracing exporter（最大 30 秒）。示例固定 `TimeoutStopSec=45s`，覆盖两段上限和 5 秒回收
-余量；排空期间第二次 SIGINT/SIGTERM 会强制结束业务 drain。若部署方修改 tracing 上限或进程
-关闭阶段，必须同步重新核算 unit 超时，避免 systemd 在 exporter 有界关闭前发送 SIGKILL。
+| 边界 | 当前预算 | 安装时核对 |
+| --- | --- | --- |
+| 单角色 | drain 10 秒 + exporter 最多 30 秒；unit 45 秒 | 二次信号强制结束 drain，exporter 仍受自身超时保护 |
+| 分体总控 | TimeoutStartSec=180、TimeoutStopSec=120 秒 | 启动须覆盖迁移和三个 readiness；若经总控 unit 停止且三角色各用满 45 秒，合计 135 秒超过外层预算，安装时须重算 |
+| 合并 supervisor | drain 135 秒，强杀后每角色回收最多 5 秒；unit 155 秒 | KillMode=mixed，超时回收整个 cgroup；不得套用分体 45 秒 |
 
+这里只核对模板和源码预算，不代表最长关闭路径已经运行验证。改变任何阶段上限时须同步重算外层超时。
 
 ## 权限与回执
 
-`auction-stack.service` 通过 `StateDirectory=auction/deployment` 建立私有控制目录，并保存互斥锁与
-`startup-order.v1.json`。回执只包含 unit、systemd `InvocationID`、PID、单调启动时间和观察时间，
-不包含配置正文或凭据。Worker TOML 必须启用 `[worker.control]`，并把实际 Admin/运维 UID 或 GID
-写入 allowlist，否则总控无法证明 Worker readiness。示例 unit 假定已建立
-`auction-worker-control` 组，并把 Worker 与 Admin 都加入该 supplementary group；部署者若使用
-不同账号或组名，必须同步修改 unit 和 TOML，不能照抄主机相关数字 ID。
-严格预检还要求 Admin 与 Worker 的 control socket 及三组数据密钥完全一致；Admin runtime 若
-选择 Unix listener，总控会直接通过该 socket 检查 `/health/ready`，不会退回主配置 TCP 地址。
-接管 runtime 的任一 `operations` 组时，Admin/Worker 还必须引用同一份 runtime 文件，且两者的
-有效拍卖默认模板与周排期必须一致。经济模板/排期更新后重启这两个角色，其余运行参数组重启
-Worker；unit 不会把 runtime 文件保存操作解释为热加载。
+总控通过 StateDirectory=auction/deployment 创建私有状态目录，使用非阻塞锁并原子发布
+startup-order.v1.json。手工运行时须预建规范绝对路径、归有效用户所有、权限至多 0700。
+回执只含 unit、InvocationID、PID、单调启动时间与观察时间，不含配置或凭据。
+全部角色已运行时 start 复核 readiness/顺序后发布 adopted 回执；部分运行或转换中拒绝。
 
+模板假定 auction-worker-control 组存在，Worker/Admin 加入相应 supplementary group；
+TOML 的 group、allowlist 和实际 UID/GID 须同步，不能照抄主机数字 ID。
+Admin/Worker 的 control 路径、三组数据密钥、有效拍卖/结算/排期须一致；接管 operations 时共用 runtime。
+保存不会热加载，重启范围见[配置说明](../../config/README.md#runtime-共享与重启)。
 
 ## SQLite 文件权限
 
-该总控模板以 system manager 权限运行，默认面向 PostgreSQL 生产档。SQLite Lite 若使用同一模板，
-必须先由部署者保证数据库文件及父目录归 `auction` 运行账号所有；不要让首次 root migration 创建
-只有 root 可访问的 SQLite 文件。也可以把总控改为经授权的同一运行账号，但必须同时审阅其
-systemd/Polkit 控制权限。
-
+总控模板按 system manager 权限运行，默认面向 PostgreSQL。Lite 数据库及父目录必须归服务账号，
+避免 root 首次迁移生成不可访问文件；各角色还需相应目录的写权限。
+改为运行账号控制时，同时审阅 systemd/Polkit 权限，保留单主机/单实例/并发 1 限制。
 
 ## 状态与重启
-
-启动后仍应从反向代理或本机读取 `/health/live` 和 `/health/ready`。systemd 的进程存活状态不能
-替代 readiness；数据库连接失败或迁移未完成时，`/health/ready` 必须保持 503。可用以下命令查看
-总控证据或显式重启：
 
 ```bash
 sudo /opt/auction/bin/auctionctl deployment status
 sudo /opt/auction/bin/auctionctl deployment restart --config-dir /etc/auction
 ```
 
+进程存活不能代替 readiness；数据库不可用或 schema 未就绪时 ready 保持 503。
+重启 Admin 会撤销旧管理会话，操作者须重新登录。
 
 ## 可写目录
 
-Admin runtime 更新需要写入 `/etc/auction/runtime/`，Public/Admin Unix listener 需要写入
-`/run/hv-auction`，因此对应 unit 必须显式开放这些目录，并保证运行账号属于配置的 socket group；其余
-公共 TOML 和敏感 TOML 仍保持只读。Worker unit 预建 `/run/hv-auction/worker`，Worker 会校验目录 owner、
-不可被 other 写入及 group-write 一致性，再以实例锁和 inode 身份保护 control socket；unit 只在
-SQLite Lite 部署时开放 `/var/lib/auction` 数据目录。
-
-单个角色 unit 不执行 migration；只有操作员显式调用 `auctionctl deployment start/restart` 或启动
-已审阅的总控 unit 时才会前向迁移。不要把 `DROP DATABASE`、备份恢复或 retention 删除动作放进
-任何 unit。备份、恢复和保留策略仍需独立的人工确认与证据契约。
-
+Admin 模板开放 `/etc/auction/runtime` 和 `/run/hv-auction`；Public 开放后者。
+Worker 用 RuntimeDirectory 预建 `/run/hv-auction/worker`，并始终开放 `/run/hv-auction`、`/var/lib/auction`，
+并非仅 Lite 才开放后者。按实际 socket、数据库和诊断目录收窄或补齐 ReadWritePaths，公共/敏感 TOML 保持只读。
+目录 owner/group、实例锁、inode 和 peer allowlist 仍由应用检查，systemd 可写声明不能替代这些门禁。
 
 ## 独立迁移门禁
 
-独立执行 `auctionctl migrate` 时必须使用同一组 `--systemctl`、`--state-dir` 和三角色 unit 参数。
-命令会持有总控锁并检查 Worker、Admin、Public；任一 unit 运行或处于启动/停止转换中，或状态读取
-失败，都会在连接数据库前失败关闭。总控 `deployment start/restart` 的内部迁移不受该独立 guard
-阻断，因为它已经在同一受控锁和配置预检边界内编排迁移。
+`auctionctl migrate` 使用与总控相同的 systemctl、state-dir 和三个 unit 参数；持锁核验全部角色
+inactive/failed 且 MainPID=0，运行、转换状态、读取失败或锁冲突都阻断迁移。
+总控 start/restart 已在同一锁/预检边界内编排迁移。单角色 unit 不迁移；任何 unit 都不执行
+DROP/CREATE、备份恢复或 retention 删除。

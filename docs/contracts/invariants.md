@@ -2,10 +2,8 @@
 
 [文档导航](../README.md) · [领域规则](../../crates/auction-domain/src) · [用例](../../crates/auction-application/src/services) · [事务适配](../../crates/auction-storage/src/database)
 
-按 I 编号维护命令、锁、状态、外部副作用及审计约束；编号不随文档整理改变。
-
-本文档定义 Auction Rust 必须满足的领域正确性约束和验收边界。这里描述的是实现契约，不是测试
-用例清单；在用户明确授权前，验证范围仅为静态检查、源码审计和文档一致性。
+本页按稳定 I 编号登记正确性约束；它是实现契约，运行证据另见[验证状态](../status.md)。
+默认只做静态检查、源码审计和文档核对，不执行行为测试。
 
 ## 本页导航
 
@@ -21,15 +19,9 @@
 
 ### I-01 命令账本是权威幂等边界
 
-每个可变命令都必须携带稳定的 command_id。数据库命令账本至少保存：
-
-- command_id：UUID 主键；
-- command_kind：非空命令类型；
-- aggregate_id：受影响的聚合；
-- request_hash：固定 32 字节请求摘要；
-- result_code：稳定结果分类；
-- result_payload：JSON 对象形式的结果；
-- created_at：事务时间戳。
+每个可变命令必须有稳定 `command_id`。通用 `auction_commands` 账本保存 UUID 主键
+`command_id`、非空 `command_kind`、聚合 `aggregate_id`、32 字节 `request_hash`、稳定
+`result_code`、JSON object `result_payload` 和事务时间 `created_at`；专用账本按各自契约绑定同等幂等身份。
 
 相同 command_id 和相同请求摘要必须重放原结果；相同 command_id 搭配不同摘要必须
 返回冲突。重复请求不能再次写入竞价事实、审计记录、结算义务或外部命令。
@@ -66,15 +58,11 @@ PostgreSQL 与 SQLite 的开拍事务允许保留同场 `withdrawn` 拍品，但
 PostgreSQL 结算领取、锁内截止复核和完成数量校验同样排除撤回拍品，禁止空集合结算；
 活动代理检查仍覆盖全部拍品，不能借撤回状态绕过未清理代理的阻断。
 
-规则文档发布同样必须在一个 PostgreSQL Serializable 事务内完成：按 locale 做 revision
-CAS，写入文档、`rules_admin_commands` 幂等结果和追加审计；同一 `command_id` 重放原文档，
-摘要或 locale 不同则返回冲突。SQLite Lite 只提供规则读取，不把发布能力降级为无审计写入。
-
-Admin 关闭业务世界同样是关键管理写入：必须先锁定 `worlds` 权威行，再检查该世界是否仍有任何
-非 `settled`/`cancelled` 拍卖或仍可领取的活动未完成调度轮次，以 `policy_revision` 做 CAS，最后将
-`worlds.enabled`、通用 `auction_commands` 结果和追加式 Admin 审计在同一 PostgreSQL
-Serializable 事务中提交。任一 blocker、版本冲突或审计失败都必须整体回滚。SQLite Lite 可以读取
-业务世界状态，但不得伪装提供这项完整档 mutation。
+规则发布在 PostgreSQL Serializable 事务中按 locale 做 revision CAS，原子写文档、
+`rules_admin_commands` 和审计；同命令重放原文档，摘要/locale 不同冲突。世界启停先锁 `worlds`
+并校验 `policy_revision`；仅从启用变为关闭时检查非 `settled`/`cancelled` 拍卖与活动未完成轮次
+blocker。状态变更通过 CAS 与 `auction_commands`、审计同事务提交。两项能力在 Lite 均只读，
+不能省略审计提供写入。
 
 ### I-04 PostgreSQL 与 SQLite 使用不同的并发机制
 
@@ -263,20 +251,12 @@ Final 状态与对应调度完成 fence 必须原子提交；带冻结来源的�
 重读已取件邮件时先核验持久化完成证明，不能用已变化的远端资产重新解释已完成业务。既有
 事实和账本仍严格保留原摘要；缺失或损坏证明不能跳过，游标只越过已获证明或本轮成功提交的前缀。
 
-装备来源适配器必须为每个完整响应先加密 prepare，只有读取、解析、身份、snapshot 或 filter 失败才在有界
-2 秒窗口内 retain；成功读取必须丢弃密文。每封装备邮件只保留首个失败的诊断 sidecar，且 sidecar 是非权威
-投影，不得进入 `decision_metadata`、command digest、completion proof 或 cursor。阶段只能是
-`request`/`response`/`parse`/`validate`，category 必须来自闭集；detail_code 只允许 snapshot/filter 对应的
-闭集值。HTTP status 只记录真实取得的 100—599 状态，耗时最多 300000 毫秒；网络、超时、截断或超大响应只能
-标记 `body_unavailable`，不能伪称完整响应。日志必须保留安全关联，即使留证 disabled、prepare/save 失败或
-completion 未确认；证据 UUID 不保证文件永久存在，旧邮件没有底层失败 trace 时不得补因或重放。
-诊断留证不得触发业务定时器：application 只返回原始 Result 与 `PendingMailEquipmentDiagnostic` 句柄，
-`process_with_retry` 只收集结束尝试的句柄；`process_claim_inner` 的 `timeout(process_remaining, process_with_retry)`
-结束后，才在 `item_timeout` 与 batch `process_remaining` 之外以 2 秒上限 resolve。只有 terminal `OkRejected` 挂接
-sidecar，中间 `Err` 留证/日志后保留原 retryability；实际 retention elapsed 必须延长后续 batch deadline。Worker 注入
-同步日志 callback，integration 不新增 tracing 依赖；raw recorder 按开关同实例注入。HTTP body timeout 只保留
-`body_unavailable` 与最后实际观测 status，不伪称 partial body；session expired 在凭据耗尽或失效写回失败时保留
-最后已取得的 body/status/elapsed。
+诊断是非权威投影：完整装备响应先加密 prepare，失败才在 2 秒预算内 retain，成功即丢弃。
+每封邮件最多挂接首个失败 sidecar，不能进入 `decision_metadata`、command digest、completion proof
+或 cursor；没有历史 trace 不补因、不重放。留证必须在 item/batch 业务定时器之外执行，实际耗时
+顺延后续 batch deadline；中间失败保留原 retryability，只有 terminal `OkRejected` 挂接 sidecar。
+留证关闭、失败或完成未知时仍输出安全关联日志，不伪称取得完整 body 或保证文件永久存在。
+阶段、字段闭集、HTTP 状态与计时范围、回执和调用顺序统一见[装备诊断契约](../operations/mail-diagnostics.md#装备读取失败诊断)。
 
 ### I-09a Operations alert 的通知冷却不能早于入队证明
 
@@ -336,22 +316,16 @@ payload；但业务拒绝、业务失败、处理超时以及 HTTP/解析异常�
 [`docs/operations/mail-diagnostics.md`](../operations/mail-diagnostics.md) 写入独立的加密异常证据，
 证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
-所有主动 ComposeSend（通知、注册/重绑 key、运维告警以及结算/返还的金钱或装备）必须在任意 POST 前完成
-统一 Sent baseline，读取所有 MID；POST 后必须独立执行有界 Sent scan。只有新增且唯一、同 world、recipient、
-subject、canonical body digest、Credits、COD 和装备 ID 精确匹配的真实 MID 才能成功；0 资产通知也必须有 0
-资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、扫描未完成或超时一律进入结果未知的 `manual_reconcile`，
-禁止自动重寄，也不能凭成功页、空 compose 或本地 UUID 判定成功。Return/Take 使用独立 action proof，不属于
-主动 ComposeSend。
+所有主动 ComposeSend（通知、注册/重绑 key、告警、结算/返还）在任意 POST 前完成覆盖所有 MID 的
+Sent baseline，POST 后独立有界扫描。只有新增且唯一的真实 MID 与 world、recipient、subject、canonical
+body digest、Credits、COD、装备 ID 精确匹配才可成功；零资产邮件同样需要证明。资产不符、秒领取、
+无匹配、多匹配、扫描不完整或超时均进入 `manual_reconcile`，不自动重寄。成功页、空 compose、
+本地 UUID 或 Admin 提交的裸 `external_reference` 均不能替代证明。
 
-主动 ComposeSend 的 delivery timeout 默认 180 秒，sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须
-大于两倍 fetch budget，并复用 `maximum_pages`/`fetch_timeout`，不增加新配置字段。成功 metadata 必须包含
-`sent_verified=true`、`external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用必须是
-`mooglemail:world:send:mid`；Sent proof 通过 defense gate 后才能写回成功。
-
-Admin 人工 reconcile 不能绕过上述 defense gate：`payload.operation=send` 搭配裸
-`external_reference` 的 `succeeded` 请求必须失败关闭，不能伪造主动寄送成功。管理端隐藏该成功选项；
-`retry` 与 `failed` 仍只能通过显式管理员命令、版本 fence 和审计推进。Return/Take 的独立 action proof
-和人工核对路径继续保留，不得把它们改写成主动 ComposeSend 的 Sent proof。
+成功 metadata、默认 180 秒 delivery timeout/300 秒 sending grace 及预算约束见
+[Sent 证明](../operations/mail-diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对
+Worker 和 Admin 同样生效；Admin `retry`/`failed` 仍需显式命令、版本 fence 和审计。
+Return/Take 使用独立 action proof 和人工核对路径，不套用 ComposeSend 证明。
 
 Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shared 凭据。当前无凭据时
 只能用完整 lease token 和 fencing 从 `claimed` 释放回 `pending`，不能写成终态失败；非法 payload
@@ -437,29 +411,21 @@ Admin 撤销/重签和 MoogleMail 重签必须在凭据变更事务内永久撤�
 
 ### I-12a Public WebSocket 不能成为无界资源或第二个命令入口
 
-Public WebSocket 只允许服务端推送已提交的公开事件。每条连接必须有 4 KiB frame/message 上限、
-60 秒 Pong 存活期限和 5 秒逐次写入期限；客户端 Text/Binary 必须以稳定 1008 reason 关闭，不能
-被解释为竞价或管理命令。Hub 慢消费者、事件合同错误和进程 drain 分别使用稳定的 1013、1002、
-1001 reason；底层读写或超时失败直接结束，不能伪造业务原因。
+Public WebSocket 只推送已提交公开事件；客户端 Text/Binary 不能成为业务命令。必须限制帧大小、
+存活/写入时间、进程/用户连接及 discovery 槽，具体数值和关闭 code/reason 由[事件契约](events.md#websocket)统一登记。
+配额先于缓冲区分配、随订阅归还，淘汰慢消费者不能提前释放；资源计数不参与竞价正确性。
+连接尝试限流与 mutation 分账，公开预检读取权威状态；settled 拍卖只允许既有连接接收终态事件。
 
-所有范围共用进程 1024 条、每用户 8 条活跃连接上限；discovery 的独立 128 槽只约束发现流，
-不能复用于普通单拍卖连接。配额先于订阅缓冲区分配并随订阅自动归还，不能因慢消费者从 Hub
-发送表移除而提前释放。上述资源计数不属于持久化业务真值，也不得进入竞价正确性。
-连接尝试限流必须与 mutation 配额分账；公开状态预检由权威拍卖读取端口决定，不能从事件历史
-猜测。settled 拍卖不接受新连接，但已建立连接可消费其终态事件。
-
-长连接须在首次推送前及后续有界周期内复核原会话的撤销、账号/凭据状态和过期时间；
-只读复核不得延长会话，Pong 不能绕过闲置或绝对有效期。失效关闭为 1008/`会话已失效`，
-依赖错误或复核超时关闭为 1013/`会话校验暂不可用`，不在无法认证时继续推送。
-具体复核延迟和写入预算见[事件契约](events.md#websocket)，不把周期复核表述为跨实例同步踢线。
-浏览器不得把业务消息空闲等同于失去 Ping/Pong；不新增未登记的应用层心跳帧。
+首次推送前及后续有界周期只读复核原会话、账号/凭据状态及过期时间，不延长会话；Pong 不续命。
+失效、依赖错误或复核超时均失败关闭，不承诺跨实例同步踢线。浏览器不能把业务空闲当作断线，
+也不能引入未登记的应用心跳帧。
 
 ## 能力档位和模块 owner
 
 PostgreSQL 是完整生产档；SQLite 是本地、演示和明确单主机低并发的 Lite 档。
 标为“两者”的能力必须在两个后端保持声明的领域正确性；标为“完整”的能力可以
 只由 PostgreSQL 提供，但 HTTP/API 必须能清楚报告 Lite 不支持，而不是返回伪成功。
-具体对象档位见 docs/contracts/schema.md。
+具体对象档位见[数据库契约](schema.md)。
 
 写入责任按以下边界分配：
 

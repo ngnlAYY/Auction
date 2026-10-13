@@ -2,14 +2,14 @@
 
 [文档导航](../README.md) · [架构](../architecture.md) · [验证状态](../status.md)
 
-本目录拥有版本化行为的登记，不是外部实现的镜像。源码、迁移和本目录必须同步；
-路由数量、表存在或 DTO 编译成功不能证明对应业务流程已验收。
+本目录登记版本化行为、数据所有权和正确性约束，与源码、迁移同步维护。
+实现与运行证据分别见[验证状态](../status.md)，路由或表存在不代表业务已经验收。
 
 ## 契约入口
 
 | 文档 | 冻结内容 | 源码 owner |
 | --- | --- | --- |
-| [HTTP](routes.md) | P01–P21、A01–A43、健康、认证、缓存、方法、状态与输入边界 | [auction-http](../../crates/auction-http/README.md)、[auction-contracts](../../crates/auction-contracts/README.md) |
+| [HTTP](routes.md) | P01–P21、A01–A44、初始化、健康、认证、缓存、方法与输入输出边界 | [auction-http](../../crates/auction-http/README.md)、[auction-contracts](../../crates/auction-contracts/README.md) |
 | [实时事件](events.md) | kind/schema、Public v1、sequence、Catch-up 与快照恢复 | contracts、application realtime、HTTP 和 Public decoder |
 | [数据库对象](schema.md) | 每个对象的逻辑 owner、SQL owner 和完整档/Lite 范围 | [auction-storage](../../crates/auction-storage/README.md)、[迁移](../../migrations/README.md) |
 | [领域不变量](invariants.md) | I 编号、幂等、锁、金额、生命周期、审计与外部副作用 | [domain](../../crates/auction-domain/README.md)、[application](../../crates/auction-application/README.md) |

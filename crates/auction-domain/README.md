@@ -17,73 +17,44 @@
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/auction](src/auction) | 聚合与生命周期 |
-| [src/bidding](src/bidding) | 金额、竞价政策和锁内纯计划 |
-| [src/proxy](src/proxy) | 代理授权及追加转换事实 |
-| [src/settlement](src/settlement) | 策略、金额守恒、结算计划与义务 |
+| [src/auction](src/auction) | 拍卖聚合、生命周期与状态版本 |
+| [src/bidding](src/bidding) | 金额、冻结政策与纯竞价计划 |
+| [src/proxy](src/proxy) | Fast/Slow 授权与追加转换事实 |
+| [src/settlement](src/settlement) | 结算策略、金额守恒与履约义务 |
 | [src/equipment](src/equipment) | 装备标识与分类 |
-| [src/identity](src/identity) | 带类型的身份 |
+| [src/identity](src/identity)、[src/errors](src/errors) | 类型化 UUID 与领域错误 |
 
 ## 职责与实现边界
 
-领域层：实体、值对象、状态机和不变量。这是依赖方向的最内层。
+本 crate 计算和校验领域结果；应用层编排用例，存储层持锁并原子写入结果。
+`lib.rs` 只声明模块和稳定导出，不拥有 I/O 或进程生命周期。
 
 ## 模型与不变量
 
-- [src/auction/mod.rs](src/auction/mod.rs)：`Auction` 聚合与 `AuctionStatus` 生命周期状态机，包含状态版本、结束时间
-  和取消/软截止边界。排期、开拍、延长、状态迁移及提前结算先通过业务与版本校验，再修改字段；
-  版本溢出时整个内存聚合保持原值，不能依赖调用方丢弃对象。
-- [src/bidding/amount.rs](src/bidding/amount.rs)：正竞价金额值对象；外部命令构造保持信用网格，持久化防腐入口保留
-  旧版任意正起拍价、当前价和自动代理事实。新普通出价、新建/降低代理上限及新自动竞价事实
-  最高为 `MAX_BID_AMOUNT = 1_000_000_000`（1B）；外部超额输入直接拒绝，历史读取、幂等重放和
-  结算总额不截断。历史代理后续自动争价的有效上限取原授权与 1B 的较小值。
-- [src/bidding/policy.rs](src/bidding/policy.rs)：旧论坛兼容的分段加价、代理反超、软截止和取消截止规则。
-- [src/bidding/bid.rs](src/bidding/bid.rs)：不可变的公开竞价事实和产生机制。
-- [src/bidding/competition/](src/bidding/competition/)：锁内纯竞价 owner；`trigger.rs` 维护触发器模型，`plan/` 按
-  `mod.rs` 规划入口、`validation.rs` 结果/输入校验、`ordinary.rs` 普通竞价、`proxy.rs`
-  代理生命周期和 `state.rs` 软截止/状态收口拆分职责，`competition/mod.rs` 只负责稳定导出。
-  Fast、SlowDue 与 Final 共用反超金额计算，保持整数增量、历史余数及 1B 同价优先边界。
-  `CompetitionPlan::validate` 同时核对公开事实的单调金额、最终价格/领先者/机制，以及代理转换的
-  连续版本、前后字段和最终快照；允许历史重放省略未变更授权，不把新输入上限应用于已接受事实。
-- [src/proxy/](src/proxy/)：`model.rs` 定义 Fast/Slow 代理授权和转换事实，`authorization.rs` 负责授权
-  创建/状态变更，`transition.rs` 负责追加式转换事实校验；`mod.rs` 只保留稳定导出。
-  降额允许 `Active → Active` 和 `FinalFast → FinalFast`；后者保持 Fast 模式，所有降额都保持
-  状态与模式不变、上限严格下降、版本推进及空终止原因。降额、FinalFast 和终止先完成版本、
-  快照及转换闭集校验，再修改授权；任何错误都保持原内存快照不变。Created 不允许终止原因，
-  FinalFast 终止前必须仍为 Fast 模式。
-- [src/identity/mod.rs](src/identity/mod.rs)：带类型的 UUID 包装，避免不同标识符互相混用。
-- [src/errors/mod.rs](src/errors/mod.rs)：领域错误分类。
-- [src/settlement/](src/settlement/)：结算领域 owner；`policy.rs` 维护策略/恢复参数，`amount.rs` 维护非负金额
-  值对象，`facts.rs` 维护 lot 事实与结算明细，`obligations.rs` 维护后续业务义务，`plan.rs`
-  维护结算曲线计算与最终计划；其中 `WinnerPaymentCarrierCod` 的义务路由固定为 `main`；
-  `SettlementLine` 在存储/重放边界同时校验金额守恒、税与补偿互斥、税时卖方金额等于成交价，
-  以及补偿时卖方金额严格低于成交价；`mod.rs` 只负责稳定导出。
+- `Auction` 与代理授权先完成状态、版本和快照校验，再修改内存；失败不得留下部分变更。
+- `bidding/competition/plan/` 统一普通竞价、Fast、SlowDue 和 Final 计划，并校验接受事实、最终领先者及代理转换链。
+- 新出价、新代理上限和新自动竞价事实最高为 `MAX_BID_AMOUNT = 1_000_000_000`；历史金额读取、已接受命令重放及结算总额不截断。历史代理后续争价的有效上限仍受 1B 约束。
+- 代理降额只能降低上限并推进版本，保持原模式和状态；`FinalFast → FinalFast` 不得退回普通活动状态。
+- 结算明细校验金额守恒与税/补偿互斥；`WinnerPaymentCarrierCod` 的派发世界固定为 `main`。
+
+完整状态、金额、历史兼容和原子写入要求见[领域不变量](../../docs/contracts/invariants.md)。
 
 ## 依赖约束
 
-
-允许依赖：serde、UUID、时间类型、`thiserror`。
-
-**不得导入** Axum、Dioxus、SQLx、reqwest、环境变量读取或日志初始化。领域层不应知道自己
-通过什么协议交付或持久化。
-
-修改竞价写入、状态迁移或结算逻辑时，必须在代码或变更说明中写明保护了哪些不变量，
-清单见根 AGENTS.md 和 docs/contracts/invariants.md。
+依赖限于领域安全的值类型、序列化、哈希和错误库，实际清单见 [Cargo.toml](Cargo.toml)。
+不得导入 Axum、Dioxus、SQLx、reqwest、环境读取或日志初始化。修改状态机或计算规则时明确说明所保护的不变量。
 
 ## 新模板与历史策略
 
-
-新拍卖模板通过 `SettlementPolicy::validate_for_new_auction` 要求折扣严格小于 50%
-（最小 `adjustment_ppm` 为 -499999），保证足额补偿后 COD 付款仍为正。历史策略仍使用
-原结构校验，已结算金额和重放不因模板限制改变；已有冻结曲线若产生非正付款，仍由原公式与义务校验失败关闭，
-不得静默调整经济快照。
+`SettlementPolicy::validate_for_new_auction` 要求新拍卖折扣严格小于 50%
+（`adjustment_ppm >= -499999`），保证足额补偿后的 COD 付款仍为正；后继草稿同样适用。
+历史读取继续按冻结策略校验，不能静默修正旧曲线或重算已结算金额；非法结果失败关闭。
 
 ## 维护与验证
-
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-domain
 ```
 
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+仅静态编译；默认检查与禁止默认运行的测试范围见[开发指南](../../docs/development.md)，
+运行证据见[验证状态](../../docs/status.md)。修改公共行为时同步对应契约。

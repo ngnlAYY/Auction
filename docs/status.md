@@ -2,22 +2,8 @@
 
 [文档导航](README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
 
-本页统一说明能力与证据的区别。2026-10-12 新增两份 [AMD KVM 定向编译候选](../ops/build/README.md)，
-并按用户授权完成本机领域微基准初筛；同日按后续指令生成 Ryzen 7950X 四程序定向候选，
-随后按独立运维授权在 Ryzen 目标完成空库迁移、三角色启动与就绪核对；仅为限定范围运行证据，
-不构成 PostgreSQL 吞吐、完整业务或生产验收结论。
-2026-10-11 在既有工作树上收紧竞价计划一致性与代理失败原子性，
-并合并 Fast/Slow/Final 反超计算；同日复审的账户能力、代理时间、慢速扫描、重放绑定及拍卖聚合
-失败原子性 5 项问题也已完成源码修复，见[领域与应用边界](architecture.md#命令事务与事实)。
-这些变更不引入外部引擎依赖、不改变合法竞价规则；该轮未取得新的运行或性能证据。
-2026-10-09 在 `4a04214` 基线上修复全仓静态审计的 5 项问题，
-范围与取舍见[本页缺口登记](#源码核对发现的实现缺口)。
-2026-10-03 的 7 项修复保留于[本页历史记录](#2026-10-03-历史记录)。
-本轮不新增或改写迁移，不对应已发布制品，也不构成运行验收。此前 2026-09-22 的 29 项报告问题、
-论坛 DTO 附项及三份追加迁移见[本页历史记录](#2026-09-22-历史记录)及[邮件资产核对](operations/mail-diagnostics.md#历史资产处置核对)。
-
-核对范围覆盖根目录、docs、apps、crates、ops、migrations、ci 的正式文档。
-本页保留各日期的原始验证结论，不因当前文档修订而把历史失败改写为当时通过，也不把历史声明当作当前运行证据。
+本页统一登记源码能力、既有验证结果与待补运行证据。当前有部分隔离验证声明、定向构建及限定部署证据，
+尚不足以宣称完整业务或生产验收。文档修订不重跑历史流程，也不把当时失败改写为当时通过。
 
 ## 本页导航
 
@@ -59,198 +45,98 @@
 
 ## 本轮静态检查
 
+本次仅更新 48 份正式文档。使用 Rust `1.98.0` 执行 `just docs-check`（48 份文档）、
+`just fmt repository-policy-check layout-check config-example-check i18n-check` 和 `git diff --check`，均通过。
+另静态比对全部 27 组表格列宽与源码调用，比例一致且各组总和为 100。
+未改实现、配置或迁移，未重编产品、运行行为测试或操作服务；没有重跑完整 `just verify`。
+以下日期是仓库既有记录，保留原范围和结果，不表示本次重跑。
+
 ### 2026-10-13
 
-按用户要求移除独立笔记目录、强制写作模板、导航与专用格式校验，理由和限制直接归入正式文档；
-同步协作规范及模块 README，Public/Admin 的设计文档继续分开维护。通用链接、锚点、导航覆盖与
-Cargo 包 README 检查保留，本次 `just docs-check` 通过，覆盖 48 份正式文档。
-`cargo fmt --all -- --check`、仓库策略、布局、配置示例、i18n 与 `git diff --check` 通过；
-文档工具经 rustfmt 和 `rustc --edition=2024 -D warnings` 编译，30 个改动路径主动 LSP 检查无诊断。
-本次仅调整文档与静态工具，未运行行为测试、构建部署制品、连接数据库或操作线上服务。
-提交前另执行完整 `just verify`，退出码为 0，覆盖格式、48 份正式文档、仓库/布局/配置/i18n、
-工作区全部目标、独立 PostgreSQL/SQLite/Redis feature、全特性 Clippy（`-D warnings`）及双 WASM 编译。
-本次只编译既有测试目标，不执行行为测试。以下各阶段保留原有范围和执行结果；历史文档门禁失败不改写为当时通过。
+| 既有工作 | 当时结果与限制 |
+| --- | --- |
+| 文档维护机制调整 | 移除独立笔记目录和模板，保留通用文档门禁。`just docs-check` 覆盖 48 份文档；格式、策略、布局、配置、i18n、差异检查通过；文档工具以 `rustc --edition=2024 -D warnings` 编译，30 个路径 LSP 无诊断。提交前完整 `just verify` 通过，仅编译既有测试目标 |
+| 邮件装备取时修复 | application 全部目标 check/Clippy、Worker `postgres,cache-redis` check、Worker 全特性 Clippy、格式/差异/策略/布局/i18n 通过；改动源码和六份文档 LSP 无诊断。Worker 单 PostgreSQL Clippy 被未改动 `admin_mail/backfill.rs:37` 的 `infallible_destructuring_match` 阻塞；当时 docs-check 因历史链接失效失败 |
+| 线上规则只读排查 | Public 规则 GET 的 `zh-CN/en` 均为 `503 / rules_unavailable`，所选及默认英文正文尚未发布；只读日志和 GET，未登录、发布、改配置或操作数据库 |
 
-按独立授权修复邮件装备读取后的校验取时：每件读取成功后用已注入的 `Clock::now` 校验来源时间，
-不改来源时间、不放宽未来时间门禁，也不修改命令原有业务时间、摘要或旧收件/退回事实。
-实现及限制见[源码缺口登记](#源码核对发现的实现缺口)。
-`cargo check --locked -p auction-application --all-targets`、同范围 Clippy（`-D warnings`）、
-`cargo check --locked -p auction-worker --all-targets --features postgres,cache-redis`、Worker 全特性 Clippy
-（`--all-targets --all-features -- -D warnings`）、格式/差异及仓库策略/布局/i18n 检查通过。
-Worker 单 PostgreSQL 特性的 Clippy 被未改动的 `auction-storage/src/database/admin_mail/backfill.rs:37`
-既有 `infallible_destructuring_match` 阻塞；没有用关闭 lint 或修改无关回填代码规避。
-当时 `just docs-check` 因 `ci/README.md` 的历史说明链接失效而未通过。主动 LSP 确认改动的 Rust 文件和六份文档无诊断。
-未新增或运行行为测试，未重建部署制品、未推送重启服务或重放旧邮件。
-
-同轮针对用户报告的线上规则加载失败，仅查看 Public/Admin 日志及对 Public 的规则接口执行只读 GET：
-`lang=zh-CN` 与 `lang=en` 均返回 `503 / rules_unavailable`，对应请求语言与默认英文规则尚未发布；
-不是凭据探测或业务冒烟。没有登录管理端、发布规则、修改配置或直接操作数据库，正式规则正文仍需操作者确认并发布。
+取时修复用每件装备读取后的注入时钟校验 `collected_at`，不放宽未来时间门禁，不改命令时间/摘要或旧邮件事实。
+当时未重建部署、重启服务或重放邮件；规则正文仍需操作者确认后发布。该日期的文档/源码修改均未执行行为测试。
 
 ### 2026-10-12
 
-后续完善 Admin 邮件拒收说明：列表/详情保留原始码并显示五语言解释，装备拒收摘要优先使用已留存诊断，
-区分时间/数据异常、规则拒收、定价问题、登录/网络故障和留证失败；不修改业务决定、通知模板或任务门禁。
-说明与证据边界见[邮件诊断](operations/mail-diagnostics.md#装备读取失败诊断)。
-Rust/Cargo `1.98.0` 下，Admin 原生全部目标与 WASM 的 `cargo check --locked`、两目标 Clippy
-（`-D warnings`）、全仓格式/差异和 i18n/布局/仓库策略门禁通过。主动 LSP 确认 4 个改动 Rust 文件干净；
-CSS 报告 9 项既有 `!important` 警告，本次仅增加拒收摘要的长代码换行规则，不改这些旧选择器。
-当时 `just docs-check` 因 `ci/README.md` 的历史说明链接失效而未通过，未恢复用户删除。
-本轮未新增或运行行为测试、浏览器流程、服务或数据库操作，未重建部署制品、未推送远端。
-**该消息说明阶段没有修复装备采集/校验取时缺陷；后续 2026-10-13 源码修复单独登记，尚未部署或取得接收运行证据。**
+以下源码静态记录使用 Rust/Cargo `1.98.0`。三轮的 docs-check 当时均因历史链接失效失败，未恢复用户删除。
 
-新增 A44 与论坛/游戏 Cookie 管理页的手动只读校验，按凭据版本返回登录有效、失效或无法确认。
-共享游戏凭据分别观测两个世界；不持久化检查结果、不改启停或 Worker 所有权，也不新增迁移。
-认证证明与只读边界见[外部凭据契约](contracts/routes.md#外部凭据)。
-功能实现阶段未使用真实 Cookie 联网验证、未运行行为测试、未重新发布或替换远端制品。
-Cookie 校验轮次的工作区全部目标编译、Admin PostgreSQL + `web-embed`、独立 PostgreSQL/SQLite
-storage 全部目标、Public/Admin WASM、全特性 Clippy（`-D warnings`）、格式/差异和仓库/布局/配置/i18n
-门禁均通过。主动 LSP 检查 29 个 Rust 文件未报告诊断，18 个确认干净、11 个未确认；不以静默响应
-代替 Cargo 结果。当时 `just docs-check` 因 `ci/README.md` 的历史说明链接失效而未通过，未恢复用户删除。
+| 既有工作 | 当时静态结果与限制 |
+| --- | --- |
+| Admin 拒收说明 | 五语言显示持久诊断与原始码；Admin 原生/WASM check 与 Clippy、格式/差异/i18n/布局/策略通过，4 个 Rust 文件 LSP 干净；CSS 保留 9 项既有 `!important` 警告。仅改善说明，取时缺陷到 10-13 才修复 |
+| A44 Cookie 只读校验 | 工作区全部目标、Admin PostgreSQL + Web、独立两后端 storage、双 WASM、全特性 Clippy 和格式/差异/策略/布局/配置/i18n 通过。29 个 Rust 文件 LSP 未报诊断，其中 18 个确认干净、11 个未确认；未用真实 Cookie 调用接口 |
+| 两份 AMD Cargo 候选 | CPU 白名单经 `rustc --print cfg` 核对，EPYC 不含 `rdseed`；两配置分别通过四程序的 `--locked --release` check，显式 PostgreSQL/Redis/Web。TOML LSP、格式/差异/策略/布局/配置/i18n 通过；这一阶段尚未链接服务程序 |
 
-同日用户另行授权重编和部署，Ryzen 7950X 新四程序及双 Web 候选已替换指定目标服务。
-上传和内嵌资源校验通过，严格停机后保存旧程序及已校验的 PostgreSQL custom-format 备份；
-schema 版本保持 39，未执行迁移、恢复或修改配置。三角色就绪、运行制品哈希、启动回执及
-双端各 6 个 HTTP 静态资源全部匹配，自动重启为 0，外部两端 readiness 为 200。
-详见[候选更新记录](../ops/build/README.md#后续-cookie-校验候选更新)；仍未使用真实 Cookie
-调用校验接口，未执行业务流程、浏览器测试或恢复演练，不据此宣称生产验收完成。
+独立授权的后续构建、测量和部署证据：
 
-使用 Rust/Cargo `1.98.0`，新增两份显式 Cargo 配置，保持默认发布和 WASM 参数不变：
+| 范围 | 限定结论 | 证据入口 |
+| --- | --- | --- |
+| Intel KVM 领域微基准 | 6 组参数 × 10 类操作 × 9 轮；v3/Fat LTO/1 CGU 等权几何平均吞吐为基线 1.158 倍。AMD 微基准仅编译，不能外推目标收益 | [测量记录](../ops/build/README.md#已有测量和待补证据) |
+| Ryzen 7950X 四程序与双 Web | Release 链接、CPU/LTO/CGU、内嵌隔离、ELF、源码/页面身份及压缩包 SHA-256 静态核对通过；是 dirty 工作树候选，非正式归档。该构建阶段未运行服务或部署，未生成 EPYC 服务制品 | [重编记录](../ops/build/README.md#2026-10-12-ryzen-7950x-重编记录) |
+| Ryzen 目标空库初始化与启动 | 路径/权限修正，严格停机、快照校验与预检后在 PostgreSQL 18.6 应用 39 条迁移，最大版本 39、失败 0、64 张 public 表。三角色 ready、重启 0，最近 160 条本次日志无 WARN/ERROR，receipt 和程序哈希匹配 | [目标初始化](../ops/build/README.md#2026-10-12-ryzen-目标初始化与启动) |
+| 后续 Cookie 候选替换 | 保存旧程序与已校验 custom-format 备份后替换；schema 保持 39，无迁移/恢复/配置修改。三角色就绪、哈希/回执和两端各 6 个静态资源匹配，重启 0，外部 readiness 200 | [候选更新](../ops/build/README.md#后续-cookie-校验候选更新) |
 
-- 两个 CPU 特性白名单均经 `rustc --print cfg` 核对；EPYC 候选不包含 `rdseed`。
-- 两份配置各自通过 Public/Admin/Worker/`auctionctl` 的 `cargo check --locked --release`，
-  显式选择 PostgreSQL、Redis 和对应 Web feature；不是服务二进制的链接或运行验收。
-- 主动 TOML LSP 检查无诊断；`cargo fmt --all -- --check`、仓库/布局/配置/i18n 门禁及
-  `git diff --check` 退出码均为 0。
-- 当时 `just docs-check` 因 `ci/README.md` 的历史说明链接失效而未通过；未恢复用户删除。
-
-用户明确授权性能测量后，在当前 Intel KVM 上完成 6 组参数 × 10 类领域操作 × 9 轮交错采样。
-这只说明本机纯领域负载中 v3/Fat LTO/1 CGU 的等权几何平均吞吐为默认基线的 1.158 倍；
-完整定义、原始证据位置与限制见 [ops/build](../ops/build/README.md#已有测量和待补证据)。
-两份 AMD 专用微基准程序已经编译但未在本机运行，不能将本机初筛结果外推为目标机器的收益。
-
-初筛阶段没有链接专用服务发布制品；同日后续按用户指令完成 Ryzen 7950X 的四程序 Release
-链接和 Public/Admin Web 重建，配置为 PostgreSQL + Redis + 指定 Web feature。实际 CPU/LTO/CGU
-参数、页面内嵌隔离、ELF 依赖、构建前后源码与页面身份、压缩包内容及 SHA-256 均静态核对通过。
-压缩包位于 `target/amd-artifacts/auction-ryzen-7950x-20261012T044747Z-dirty.tar.gz`，
-仅为未提交工作树候选，不属于正式发布归档；原始日志和完整边界见
-[重编记录](../ops/build/README.md#2026-10-12-ryzen-7950x-重编记录)。
-
-后续重编未执行服务程序、行为测试、数据库、迁移或部署替换，也未生成 EPYC 服务制品。
-PostgreSQL 并发/p99、AMD 现场性能和代表性 PGO 尚未执行；默认行为测试禁令不变。
-
-同日用户另行授权远端排查与配置修复，再明确授权初始化和启动。限定范围结果：
-
-- 修正旧部署路径与权限，严格配置预检通过；无凭据内容变更。
-- 三角色严格停机后确认空库，保存普通 pg_dump 快照并校验，使用服务账号和实际 unit 名通过迁移门禁。
-- PostgreSQL 18.6：39 条迁移成功、最大版本 39、失败数 0、public 表 64 张。
-- Worker → Admin → Public 均 ready，自动重启为 0；本次 invocation 最近 160 条日志窗口无 WARN/ERROR。
-- adopted 启动回执已发布，三个角色 receipt 匹配；磁盘四程序和三个运行中制品均匹配候选 SHA-256。
-
-这不是网页首次设置、竞价/并发、外部邮件/论坛、恢复演练或性能验收。脱敏证据位置及完整限制见
-[目标初始化与启动](../ops/build/README.md#2026-10-12-ryzen-目标初始化与启动)。
+这些部署记录不证明网页设置、竞价/并发、外部论坛/邮件、完整浏览器或恢复演练已通过；
+Cookie 校验接口仍未用真实凭据验证。PostgreSQL p99/吞吐、AMD 现场性能和代表性 PGO 尚无证据。
 
 ### 2026-10-11
 
+两轮使用 Rust/Cargo `1.98.0`。格式/差异、策略/布局/配置/i18n、工作区全部目标、独立 PG/SQLite/Redis、
+全特性 Clippy（`-D warnings`）及双 WASM 均通过；docs-check 当时失败，未恢复被删除文档或改门禁。
+
 #### 复审修复
 
-使用 Rust/Cargo `1.98.0`，以下静态检查退出码均为 0：
-
-- `cargo fmt --all -- --check`、`git diff --check`。
-- `just repository-policy-check layout-check config-example-check i18n-check`。
-- `just check feature-check lint wasm-check`：工作区全部目标、独立 PostgreSQL/SQLite storage 与
-  Redis cache、全特性 Clippy（`-D warnings`）及 Public/Admin 双 WASM。
-- `cargo check --locked --workspace --all-targets --all-features`。
-- 修改/新增的 10 个 Rust 文件主动 LSP 检查，无诊断。
-- 三个 SQL 修改文件中的 8 条查询/绑定链静态核对，参数数量匹配；未执行 SQL，不能替代 schema
-  或事务语义的数据库验证。
-
-当时 `just docs-check` 退出 1，首个失败为 `ci/README.md` 的历史说明链接失效；
-没有恢复已删除文件或修改门禁来改变该轮结果。
-
-本次修改领域、应用和两后端存储边界及文档，不新增依赖、修改锁图或迁移；未新增/运行行为测试，
-未启动服务、连接数据库或部署，也未重编发布包。已有错误历史时间或损坏账本不会自动修复；
-静态检查通过不表示运行验收完成。
+另通过工作区 `--all-targets --all-features` check，10 个 Rust 文件 LSP 无诊断；
+三个 SQL 文件的 8 条查询/绑定链数量静态匹配，未执行 SQL。docs-check 首个错误为 `ci/README.md` 历史链接失效。
+修改领域、应用和两后端存储，不新增依赖、锁图或迁移；旧错误时间和损坏账本不自动修复。
 
 #### 首轮领域优化
 
-使用仓库 Rust/Cargo `1.98.0`，以下检查退出码均为 0：
-
-- `cargo fmt --all -- --check`、`git diff --check`。
-- `just repository-policy-check layout-check config-example-check i18n-check`。
-- `cargo check --locked --workspace --all-targets`。
-- 独立 PostgreSQL/SQLite storage 与 Redis cache 特性的 `--locked --all-targets` 编译。
-- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`。
-- `just wasm-check`：Public/Admin 双 WASM 编译。
-- 本轮六个修改的 Rust 文件经主动 LSP 检查，无诊断。
-
-当时 `just docs-check` 因历史文档目录缺失及残留失效链接未通过。
-保留工作树原有删除与无关改动，没有恢复已删除文件或修改门禁；该轮完整 `just verify` 未通过。
-
-本轮仅修改领域实现与对应文档；未新增依赖、修改锁图或迁移，未新增/运行行为测试、性能基准、
-服务、数据库或部署流程，未重编发布包。较强校验与静态编译不构成历史数据兼容性或生产验收的运行证明。
+六个 Rust 文件 LSP 无诊断；docs-check 因历史目录缺失及残留链接失败，完整 `just verify` 未通过。
+仅修改领域及文档，不新增依赖、锁图或迁移。两轮均未运行行为测试、服务、数据库、部署或发布重编；
+首轮亦未做性能测量，静态结果不证明历史兼容性。
 
 ### 2026-10-09
 
-使用仓库 Rust/Cargo `1.98.0`，以下代码静态检查退出码均为 0：
+在 `4a04214` 基线修复 5 项问题。Rust/Cargo `1.98.0` 的格式/差异、策略/布局/配置/i18n、
+工作区和独立 feature、Clippy、双 WASM、`--all-targets --all-features` check，以及 MSRV `1.94.1`
+同范围 check 均通过；18 个 Rust 文件 LSP 无诊断。
 
-- `cargo fmt --all -- --check`、`git diff --check`。
-- `just repository-policy-check layout-check config-example-check i18n-check`。
-- `just check feature-check lint wasm-check`：工作区全部目标、独立 PG/SQLite/Redis 特性、
-  all-features Clippy（`-D warnings`）与 Public/Admin 双 WASM 编译。
-- `cargo check --locked --workspace --all-targets --all-features`。
-- `cargo +1.94.1 check --locked --workspace --all-targets --all-features`。
-- 修改/新增的 18 个 Rust 文件经主动 LSP 检查，无诊断；最终 WebSocket 调整后已重新检查。
-
-当时 `just verify` 退出码为 1，停在 `docs-check`：`ci/README.md` 的历史说明链接失效。
-工作期间原有 7 份已跟踪历史说明被外部删除，用户确认保留删除；未恢复或改写这些文件。
-因此完整文档门禁未通过，其他静态门禁已独立执行通过，不能把本轮报告为完整 `just verify` 通过。
-
-本轮未执行依赖公告审计；`Cargo.lock` 仅增加 auction-http 到既有 thiserror 2.0.20 的直接依赖边，
-没有升级任何依赖版本，历史 SQL 无变更。未新增、改写或运行行为测试，
-未启动产品、连接数据库、执行迁移或浏览器流程；代码静态结果不构成生产验收。
+完整 `just verify` 退出 1，停在 `ci/README.md` 历史链接失效。用户确认保留 7 份历史说明的删除，
+其他门禁独立通过不能改写为完整 verify 通过。未执行依赖公告审计；锁图仅增加 HTTP 到既有
+thiserror 2.0.20 的依赖边，未升级版本或改历史 SQL。未运行行为测试、产品、数据库、迁移或浏览器流程。
 
 ### 2026-10-03 历史记录
 
-使用仓库 Rust/Cargo `1.98.0`，以下命令退出码均为 0：
+Rust/Cargo `1.98.0` 下完整 `just verify`（当时 52 份文档）、工作区全部目标/特性 check、MSRV
+`1.94.1` 同范围 check 及差异检查通过。依赖审计 cargo-audit `0.22.2` 使用 `--deny yanked --deny unsound`，
+检查 543 个条目，无漏洞/撤回/unsound 命中，保留 `fxhash` 停维提示；公告库提交
+`f8dee89e1b2f2f1eaf548312df7655fe5202a302`。另发现的 chacha20 0.10.1 撤回版本升至 0.10.2。
 
-- `just verify`：格式、52 份文档、仓库/布局/配置/i18n、工作区和独立 PG/SQLite/Redis feature、
-  all-features Clippy（`-D warnings`）与双 WASM 编译。
-- `cargo check --locked --workspace --all-targets --all-features`。
-- `cargo +1.94.1 check --locked --workspace --all-targets --all-features`。
-- `just dependency-audit`：cargo-audit `0.22.2` 使用 `--deny yanked --deny unsound`，检查 543 个
-  crate 条目，未命中漏洞、撤回或 unsound，保留一项 `fxhash` 停维提示；公告库提交为
-  `f8dee89e1b2f2f1eaf548312df7655fe5202a302`。额外发现的撤回版本 chacha20 0.10.1 已升至 0.10.2。
-- `git diff --check`；历史 SQL 文件无修改。
-
-辅助 SQL 静态扫描覆盖 39 份 PostgreSQL 迁移与 737 个 Rust SQL 候选；两份受限兼容执行视图
-解析通过，686 条可识别直接绑定链未见参数数量不匹配。历史原文保留保留字错误，由兼容视图执行；
-HTTP/Redis 文字和动态拼接片段的误报已人工区分。8 份 PL/pgSQL 的解析器 JSON 输出存在工具限制，
-不据此声称全部函数体、schema、事务或运行行为已验证。
-LSP 未完成：固定工具链缺少 `rust-analyzer`，返回
-`Unknown binary 'rust-analyzer' in official toolchain '1.98.0-x86_64-unknown-linux-gnu'.`；
-可安装对应组件或修正 `pi-lsp.json` 的 server command，本轮不改全局工具链。
-编译及 Clippy 结果独立有效，不冒充 LSP 通过。
-
-未新增或运行行为测试、发布构建、浏览器流程、产品服务、数据库或迁移；上述结果不构成生产验收。
+SQL 静态扫描覆盖 39 份迁移、737 个 Rust SQL 候选；两份受限执行视图解析通过，686 条可识别直接绑定链
+未见数量不匹配。历史 SQL 未改，保留字问题由兼容视图处理；8 份 PL/pgSQL 的解析器输出存在限制，
+不能视为全部函数体/schema/事务验证。LSP 因工具链缺少 `rust-analyzer` 未完成，不以 Cargo 结果替代。
+未执行行为测试、发布构建、浏览器、服务、数据库或迁移。
 
 ### 2026-09-22 历史记录
 
-2026-09-22 使用仓库 Rust/Cargo `1.98.0` 和 just `1.58.0` 执行完整 `just verify` 及
-`git diff --check`，退出码均为 0。完整门禁包括：
-
-- `just fmt`、`git diff --check`；
-- `just docs-check`：覆盖 51 份文档，本地链接、锚点、导航、包 README 及当时的其他文档门禁通过；
-- `just repository-policy-check`、`just layout-check`、`just config-example-check`、`just i18n-check`；
-- 工作区 `--locked --all-targets` 编译、独立 PostgreSQL/SQLite storage 与 Redis cache 特性编译；
-- 工作区 `--locked --all-targets --all-features` Clippy，`-D warnings`；
-- Public/Admin 的 `wasm32-unknown-unknown` 编译。
-
-本轮同时完成各修复范围的独立源码复核；完整门禁中发现的借用、错误映射及特性编译问题已修正后重跑。
-未运行行为测试、发布构建、浏览器流程、服务、数据库或迁移。上述结果不能替代制品或生产验收。
-历史流拍 Return、入站资产冲突、已错误归档的 Credits 与缺少排期来源的旧数据保留证据边界，
-不会通过静默重写或自动重发宣称修复远端资产；见[邮件核对](operations/mail-diagnostics.md#历史资产处置核对)。
+Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify` 与差异检查退出 0：格式、当时 51 份文档、
+策略/布局/配置/i18n、工作区全部目标、独立 PG/SQLite/Redis、全特性 Clippy 及双 WASM 通过。
+修复门禁发现的借用、错误映射和 feature 编译问题后重跑，未执行行为测试、发布、浏览器、服务、数据库或迁移。
+29 项报告问题、论坛 DTO 附项及三份追加迁移属于该轮；历史流拍 Return、资产冲突、错误归档 Credits 和
+旧排期来源仍须独立核对，见[邮件资产核对](operations/mail-diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
+
+本次文档核对发现，[分体总控 unit](../ops/deploy/systemd/auction-stack.service.example)的
+`TimeoutStopSec=120` 小于三角色依次各用满 45 秒的合计 135 秒。若通过该 unit 执行完整顺序停止，
+外层可能先超时；部署前应按内层预算及控制命令开销重新核算，见[systemd 手册](../ops/deploy/systemd/README.md)。
+本次只登记这一配置预算缺口，未修改模板或取得停止流程的运行证据。
 
 2026-10-12 的装备拒收排查发现，邮件开始时固定的 `now` 早于读取后生成的 `collected_at`，
 使正常快照被记为 `snapshot_invalid / collected_at_future`。2026-10-13 的

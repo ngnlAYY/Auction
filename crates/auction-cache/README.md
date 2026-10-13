@@ -15,63 +15,37 @@
 
 ## 源码入口
 
-| 入口 | 职责 |
-| --- | --- |
-| [src/cache](src/cache) | disabled/Redis 实现、预算和错误脱敏 |
+[src/cache/mod.rs](src/cache/mod.rs) 拥有 disabled/Redis 实现、操作预算、并发限制和脱敏错误；`lib.rs` 只负责导出。
 
 ## 职责与实现边界
 
-可选缓存边界。默认**完全关闭**，不编译任何缓存客户端。
+实现应用层 `ReadModelCache` 端口，只保存可重建且带有限 TTL 的读取结果。默认不编译 Redis 客户端。
 
 ## 启用条件
 
-源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；缓存实现集中在 [src/cache/mod.rs](src/cache/mod.rs)。
-
-启用 Redis 需要两件事同时成立：
-
-1. 目标进程以 `cache-redis` feature 构建；
-2. 主配置中 `cache.backend = "redis"`，且敏感 TOML 提供 `redis_url`。
-
-只填写 `redis_url` 不会把 Redis 依赖带入默认制品；只开 feature 不改配置也不会建立连接。
-配置要求 Redis 但未编译该 feature 时返回明确错误，不静默降级。
+目标进程以 `cache-redis` feature 构建（本 crate 对应 `redis`），公共 TOML 选择 `cache.backend = "redis"`，
+敏感 TOML 提供 `redis_url`，三者缺一不可。只填 URL 或只开 feature 不会自动启用；配置要求 Redis 但未编译驱动时明确报错。
+字段及模板见[配置手册](../../ops/config/README.md#缓存与拍卖模板)。
 
 ## 正确性约束
 
-缓存**不是**权威状态。只能保存带有限 TTL、可从数据库或外部权威服务重建的查询结果。
-
-竞价事务、资格判断、命令幂等账本、锁、会话真值和审计证据必须由数据库决定。缓存 miss、
-Redis 不可用或失效失败都必须回退到权威数据源，不得改变命令结果。
-
-由此，未编译 Redis feature、运行时选择 `disabled` 或 Redis 临时故障都只影响性能，不改变
-可用功能的正确性。
+竞价、资格、幂等账本、锁、会话和审计以数据库为权威。miss、损坏、过期、Redis 故障或失效失败均须回源，
+不能改变命令结果或撤销已提交的规则发布。缓存故障仅影响命中率和延迟。
 
 ## 实现说明
 
-直接复用 Redis 客户端的异步连接管理（`ConnectionManager` 可廉价克隆并复用同一多路复用
-连接），不额外引入通用连接池，也不引入进程内缓存库。
+Redis 使用可克隆的 `ConnectionManager`，不另建通用池或进程内缓存。每次 get/set/invalidate 总预算为 750 毫秒，
+最多 32 个在途操作，满额立即返回不可用；响应/连接内部超时分别为 500 毫秒/1 秒，总预算先到即结束调用。
+错误与 `Debug` 不包含 URL 或凭据。
 
-Redis `get`、`set` 和 `invalidate` 各自受 750 毫秒总预算约束，覆盖 lazy 连接等待、重试和
-命令执行；每个共享适配器最多允许 32 个在途操作，满额立即报告不可用并走原有回源路径。
-Redis 内部响应超时为 500 毫秒，单次连接超时为 1 秒；外层总预算先到时立即结束当前调用。
-计时与并发控制复用工作区已有 Tokio，仅随 `redis` feature 编译。规则发布后的失效也使用
-同一预算，不因缓存故障持续阻塞已经提交的发布结果。
-
-错误文本和 `Debug` 输出都不包含 Redis URL 或凭据。
-
-Public 规则读模型是当前首个消费者：按 `auction:read-model:public-rules:v1:<locale>` 读取和写入
-通过校验的 JSON 快照，TTL 由 `cache.public_rules_ttl_seconds` 限制。Admin 规则发布成功后失效
-对应语言；失效失败不会影响已提交事务，Public 仍会在 TTL 到期后回源数据库。
-
-缓存装饰器不缓存空结果，命中快照解析失败会尽力删除并回源。禁用缓存、Redis 故障、序列化
-失败或失效失败都只影响命中率，不改变规则、竞价、会话、幂等和审计的权威结果。
-一次规则读取已经确认缓存不可用时，回源成功后跳过回填，避免再次等待同一故障后端。
+当前消费者是 Public 规则快照，键为 `auction:read-model:public-rules:v1:<locale>`。
+只缓存有效非空文档，Admin 发布后按语言失效；已确认缓存不可用的请求回源后跳过回填，避免重复等待。
 
 ## 维护与验证
-
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-cache --no-default-features --features redis
 ```
 
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+仅静态编译；默认检查与禁止默认运行的测试范围见[开发指南](../../docs/development.md)，
+运行证据见[验证状态](../../docs/status.md)。修改公共行为时同步对应契约。

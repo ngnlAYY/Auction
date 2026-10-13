@@ -19,87 +19,60 @@
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/health](src/health) | 心跳端口、发布器与 dashboard |
-| [src/metrics](src/metrics) | 进程、连接池、业务和 Worker 指标 |
-| [src/telemetry](src/telemetry) | tracing 初始化、队列、exporter 与健康 |
+| [src/health](src/health) | 心跳模型、发布端口与 dashboard 安全投影 |
+| [src/metrics](src/metrics) | 进程、连接池、业务、Worker 与 tracing 指标 |
+| [src/telemetry](src/telemetry) | tracing 配置、有界批处理、exporter 与健康 |
 
 ## 职责与实现边界
 
-tracing 初始化、指标约定、健康检查语义和关联 ID。
+提供可观测性原语和约定，不拥有业务状态、数据库 SQL 或停止顺序。
+装配根传入角色身份及已校验配置，存储适配器实现心跳和连接池窄端口。
 
 ## 实现布局与 tracing
 
-源码布局：[src/lib.rs](src/lib.rs) 只保留模块声明和公共导出；指标入口 [src/metrics/mod.rs](src/metrics/mod.rs) 只负责
-分组与稳定 re-export，进程、业务、连接池、Worker、tracing collector 分别位于其子文件；
-tracing 入口 [src/telemetry/mod.rs](src/telemetry/mod.rs) 只负责稳定导出，配置、健康状态、批处理器和进程运行时分别
-位于 `src/telemetry/{config,health,processor,runtime}.rs`，心跳与 dashboard 安全投影实现在
-`src/health/{model,publisher,dashboard}.rs`，`health/mod.rs` 只负责模块装配和稳定导出。
-
-`init(service, configured_filter)` 安装 JSON 格式的 `tracing-subscriber`。未配置
-`log_filter` 时默认 `info,{service}=debug`。Public、Admin 和 Worker 都可以通过
-`init_with_config` 挂载默认关闭、异步有界队列的 OTLP/HTTP exporter；Public/Worker 的端点、
-批次、采样和关闭等待时间来自主配置 `[tracing]`，Admin 的有效值来自 runtime `[tracing]`。
-每个角色的 OTLP headers 只从敏感 TOML 读取，启动时解析后交给 exporter，既不进入普通配置、
-日志、指标，也不写入 runtime 文件。导出队列有界；装配根退出服务路径后会在限定时间内刷新并
-关闭。三进程装配根已经统一处理 SIGINT/SIGTERM 和有界 drain，并在业务资源收口后进入该刷新
-边界；exporter 本身仍只拥有配置限定的关闭等待，不拥有操作系统信号或业务停止顺序。
+`init(service, configured_filter)` 安装 JSON tracing，缺省过滤器为 `info,{service}=debug`。
+`init_with_config` 可增加默认关闭的 OTLP/HTTP exporter，使用异步有界队列和有界退出刷新。
+Public/Worker 参数来自角色配置，Admin 可由 runtime 覆盖；各角色 OTLP headers 只来自敏感 TOML。
+exporter 不监听操作系统信号；装配根收口业务资源后调用刷新和关闭。
 
 ## 结构化日志约定
 
-使用结构化字段，不要把值拼进消息文本：
+使用稳定事件名和具名字段，不拼接业务值：
 
 ```rust
 info!(auction_id = %id, command_id = %command_id, "bid accepted");
 ```
 
-事件名可以保留稳定的英文，字段名必须清楚。
+逐笔业务证据以数据库事实与追加审计为准，指标和日志不能替代。
 
 ## 禁止记录的内容
 
-会话凭据、论坛 Cookie、邮件 Cookie、密码、数据库连接串和其他密钥材料**不得**出现在日志、
-DTO、快照或提交的配置中。配置解析错误也不得回显 TOML 原文。
+Cookie、密码、会话 token、数据库连接串、数据密钥和未脱敏原始响应不得进入日志或指标。
+配置解析失败不回显 TOML 原文；邮件原始证据走[独立加密诊断](../../docs/operations/mail-diagnostics.md)。
 
 ## 健康 dashboard
 
-`HeartbeatStore` 定义服务心跳的发布/读取窄端口，`HealthService` 只生成不含 details 原文的
-process/health 快照。Admin `/api/v1/admin/dashboard` 已接入该安全投影；Admin runtime 启用
-OTLP 时，心跳还会携带安全的 exporter 成功/失败计数和闭集错误码。mail、realtime、credential
-aggregation、delivery、fulfillment、recovery 和 operations-alert owner 已分别接入安全汇总；
-缺少对应端口、数据库能力或当前数据源失败时仍返回 `unknown`/`source_unavailable`，不会用示例
-数据掩盖缺失。Public/Admin/Worker 装配根已有启动、就绪、周期和 SIGINT/SIGTERM 停止心跳路径；
-周期发布每轮通过 `HeartbeatHealthReader` 重新读取数据库/schema readiness 和进程内审计写入
-失败饱和计数，并通过各进程自己的 `TracingHealthReader` 携带安全 tracing 投影。依赖或审计异常
-令 readiness 与 status 降级；tracing degraded 令 status 降级但不会单独改变应用 readiness。
-启动和停止状态也携带当时的审计/tracing 投影。Worker control 还通过 peer-authenticated Unix
-socket 提供 live/ready/status 和同一指标 registry。
+`HeartbeatStore` 提供心跳读写，`HealthService` 输出有界安全状态，不返回 details 原文。
+装配根发布启动、就绪、周期和停止心跳；周期重新检查数据库/schema readiness、审计失败计数和 tracing 健康。
+依赖或审计异常降级 readiness；tracing degraded 只降级状态，不单独改变应用 readiness。
 
-`HeartbeatPublisher::with_details` 允许装配根冻结有界、非敏感 JSON 对象，随启动、周期和停止心跳
-一同发布；默认仍为空对象。Worker 仅写入论坛同步开关布尔值，Public 通过专属只读端口取得该布尔
-投影；dashboard 不返回 details 原文，发布器也不读取配置或决定论坛业务行为。
+各业务 owner 提供 dashboard 汇总，未装配、缺能力或读取失败均显式 unknown/source_unavailable。
+`with_details` 只接受冻结的非敏感对象；Worker 的论坛开关通过专用端口读取，不把整个 details 暴露给浏览器。
+HTTP 响应语义见[Dashboard 契约](../../docs/contracts/routes.md#dashboard-与-readiness)。
 
 ## 指标与剩余验收证据
 
-Public/Admin 已提供默认关闭的进程本地 Prometheus `/metrics`，暴露旧版同等的进程资源快照
-（CPU、内存、文件描述符、线程数和启动时间）以及进程身份和启用状态。
-Worker 在启用 control 时通过同一 peer-authenticated Unix socket 暴露 `/metrics`，并注册旧版
-固定的 9 类 loop 指标：循环结果/耗时、批次项目/容量/饱和、重试模式/次数和调度延迟。
-OTLP exporter 已使用自有有界批处理器，队列满时会增加丢弃计数，并通过 tracing health 与
-Prometheus 同步；数据库适配器也会登记 PostgreSQL/SQLite 的当前借出、空闲、总数和最大连接
-数快照。`auction-storage` 现在在 SQLx 池的普通 `Executor`、事务和显式 acquisition 边界
-维护旧版 pgx 对应的获取累计次数、获取等待时长、空池等待和取消次数，并以同名固定指标
-暴露；未接入该存储边界的外部池仍只能提供默认累计值。现在还暴露固定低基数的
-`auction_business_events_total` 与 `auction_business_event_duration_seconds`：Public 的竞价/代理
-命令、Worker 的邮件/拍卖生命周期/履约/recovery/告警循环都会记录成功、拒绝或错误结果及耗时。
-业务指标不携带用户、拍品、命令 ID、邮箱或外部错误文本；需要逐笔证据时仍以数据库审计和事实
-记录为准。真实部署切换仍需对照；外部广播 sink 是超出旧版的可选扩展，只有冻结新协议后才新增
-对应状态指标。
+Public/Admin 的 `/metrics` 默认关闭；Worker 使用经 peer 认证的 control Unix socket 与同一 registry。
+进程资源、连接池快照/实际 acquisition 累计、固定 Worker loop 标签和业务结果/耗时均保持低基数，
+不以用户、拍品、命令、邮箱或原始错误作为 label。存储边界之外的原生 SQLx 池不计入 acquisition 累计。
+
+队列满会计入 exporter 丢弃数；静态编译和已有指标注册不证明真实部署采集成功，运行证据集中在状态文档。
 
 ## 维护与验证
-
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-observability
 ```
 
-该命令只做静态编译；完整门禁见[开发指南](../../docs/development.md)，运行证据边界见[验证状态](../../docs/status.md)。
+仅静态编译；默认检查与测试范围见[开发指南](../../docs/development.md)，运行证据见[验证状态](../../docs/status.md)。
+字段、路由或部署行为变化时同步对应契约和配置模板。

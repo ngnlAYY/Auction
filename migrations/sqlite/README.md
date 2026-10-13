@@ -2,7 +2,7 @@
 
 [文档导航](../../docs/README.md) · [能力矩阵](../../docs/architecture.md#部署档位与能力) · [串行写适配](../../crates/auction-storage/src/database/sqlite) · [完整档边界](../postgres/README.md)
 
-只维护已声明 Lite 子集，使用本地文件与显式串行写入；不承担结算、外部邮件或论坛能力。
+只维护 Lite 声明支持的 schema；本地文件、单主机与显式串行写入是部署前提。
 
 ## 本页导航
 
@@ -31,35 +31,23 @@
 
 ## 范围与约束
 
-SQLite 迁移必须保持只追加。本目录只维护 Lite 档明确支持能力所需的 schema 子集，允许
-使用 SQLite 专属的 SQL 和事务初始化方式，不要求与 [`../postgres/`](../postgres/) 的
-完整生产 schema 或迁移序号一一对应。两边共有的领域对象必须保持同名同义。
+已发布迁移禁止修改，修正只追加。两后端共有对象必须同名同义，不要求与 [PostgreSQL](../postgres/README.md) 的文件、序号或完整能力一一对应。
+Lite 只缩减系统能力，已实现竞价仍遵守幂等、事务、追加审计与凭据安全。
 
-SQLite 的串行写入、锁等待、本地文件系统、备份和单节点假设必须在涉及竞价写入的迁移与
-架构文档中明确说明。Lite 可以减少系统能力，但已支持的竞价写入仍必须保持事务、幂等和
-追加式审计不变量。已经发布的迁移文件禁止修改；结构修正应通过新的追加迁移完成。
-
+竞价及相关写入经 SQLx 跟踪的 `BEGIN IMMEDIATE`；文件库使用 WAL、外键、锁等待和单写者约束，
+每角色最多一个实例，Worker 并发一，不使用网络共享文件系统。连接与消费 owner 边界见[存储实现](../../crates/auction-storage/README.md#sqlite-连接选项)。
 
 ## 迁移序列
 
-当前 `000001_lite_core.up.sql` 已提交共有身份、拍卖、竞价、代理、审计、realtime、会话和
-调度对象，`000002_worker_scheduler.up.sql` 追加调度租约、尝试次数和失败状态，
-`000003_user_admin.up.sql` 追加用户管理命令账本和可选的登录密钥信封，`000004_auction_cancellation.up.sql`
-追加拍卖取消时间、原因、操作者及形状触发器，`000005_lifecycle_metadata.up.sql` 补齐预览、开放、
-Final phase 和前后轮关系，`000006_scheduled_final_phase.up.sql` 持久化 Final phase 完成 fence，
-`000007_leader_since_backfill.up.sql` 从追加式 bid 事实修正可证明的当前连续领先时间，
-`000008_lot_effective_end_invariant.up.sql` 以触发器和失败关闭预检恢复 live/sold lot 的有效结束
-时间 shape，`000009_lot_category_numbering.up.sql` 固化分类内 lot 编号，
-`000010_user_forum_account_identity.up.sql` 保存论坛账号身份，
-`000011_realtime_event_admin_index.up.sql` 为 Admin 最近事件的跨流新到旧读取追加索引；结算、恢复、交付、
-以及外部论坛/邮件对象仍属于 PostgreSQL 完整档，Lite 不建表。
-因此 Lite 不声明 Public 成交价格历史能力；`settled`/`sold` 状态列用于共有模型兼容，不构成可供
-历史查询采信的结算事实链，对应 HTTP 路由固定返回 `501 feature_not_supported`。
-SQLite 竞价事务必须使用 `BEGIN IMMEDIATE` 的串行写入口，不能因为 migration 已存在就绕过
-该适配器边界。
+`000001`–`000013` 提供共有身份、拍卖、竞价/代理、会话、审计、realtime、调度及其修正，具体文件见上表。
+结算、恢复、交付和外部论坛/邮件对象属于完整档，Lite 不建表；保留 settled/sold 状态用于模型兼容不代表具有结算事实链，
+Public 成交价格历史因此明确返回能力不支持。
 
+`000013` 与 PostgreSQL `000039` 同义：新增可空本地排期来源，历史轮次保留 NULL 与 UTC 周期；
+仅补齐可唯一证明成功 Final 的完成标记。业务与历史事实边界见[对象契约](../../docs/contracts/schema.md#追加迁移与历史事实)。
+执行门禁及验证限制见[迁移导航](../README.md)。
 
 ## 连续领先时间修复
 
-`000012_live_leader_since_repair.up.sql` 从追加式接受事实修正未结算 live lot 的连续领先
-起点，与 PostgreSQL `000037` 同义；不改变 Lite 的结算能力边界或已保留的终态记录。
+`000012` 与 PostgreSQL `000037` 同义，只从追加式接受事实修正未结算 live lot 的连续领先起点；
+不扩大 Lite 结算能力，不重写已保留的终态记录、金额或审计。

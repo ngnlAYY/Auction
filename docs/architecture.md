@@ -4,14 +4,8 @@
 
 ## 本页导航
 
-- [系统边界](#系统边界)
-- [Crate 所有权](#crate-所有权)
-- [部署档位与能力](#部署档位与能力)
-- [命令、事务与事实](#命令事务与事实)
-- [Worker 与外部副作用](#worker-与外部副作用)
-- [配置与数据保护](#配置与数据保护)
-- [浏览器、实时与制品](#浏览器实时与制品)
-- [生命周期与运维](#生命周期与运维)
+[owner](#crate-所有权) · [能力矩阵](#部署档位与能力) · [事务](#命令事务与事实) ·
+[Worker](#worker-与外部副作用) · [数据保护](#配置与数据保护) · [制品](#浏览器实时与制品) · [运维](#生命周期与运维)
 
 ## 系统边界
 
@@ -93,107 +87,78 @@ SQLite 文件只能位于受支持的本地文件系统，不能以共享网络�
 
 ## 命令、事务与事实
 
-竞价请求携带稳定 `command_id`，在所选后端同一事务内完成账本重放检查、world/auction/lot 与资格保护、
-领域计划、竞价事实、状态版本、追加审计和 realtime/outbox。同 ID 不同负载冲突；已接受结果的重放不受当前配置重解释。
-公开新出价和代理上限遵守 1B 与金额网格，历史读取及已结算金额不截断。
+竞价在一个后端事务内完成 `command_id`/摘要重放检查、world/auction/lot 与资格保护、领域计划、
+事实、版本、追加审计及实时事件/outbox。同 ID 不同负载冲突；已接受结果不受当前配置重解释。
 
-领域 `CompetitionPlan` 只计算计划；竞价事实、代理转换链与最终快照的一致性校验、拍卖/代理变更的
-失败原子性及 Fast/Slow/Final 共用反超计算均由 `auction-domain` 拥有，适用于完整档与 Lite。
-历史重放保留局部快照语义，不引入外部拍卖引擎或第二套状态机。`auction-application` 的
-`services/auction/competition/legacy_ledger.rs` 与 `slow_replay.rs` 分别拥有 Public 与慢速命令的
-结果绑定校验，不把内部自洽当作请求来源证明。两后端存储 owner 统一绑定锁后 `occurred_at` 写入
-授权/转换与命令结果，慢速扫描在 LIMIT 前排除已截止 lot；不改写历史证据或新增持久化对象。
-PostgreSQL 的共享门禁锁与 lot 排他锁、SQLite 串行写入分别由存储 owner 执行。
-用户黑名单、会话撤销与代理冻结保持锁内资格一致性；慢速代理用持久化 generation/due 校验阻止陈旧执行。
-Public 会话随 Key 撤销/重签原子失效，登录创建复核用户版本；SQLite 写入由 SQLx 事务守卫保证取消回滚。
-`leader_since` 依据本次所有接受事实判断连续领先，不能只比较事务前后的最终领先者。
+| owner | 关键职责 |
+| --- | --- |
+| domain | `CompetitionPlan`、竞价事实/代理转换/快照一致性、失败原子性、Fast/Slow/Final 共用反超计算 |
+| application | 锁内用例顺序；`legacy_ledger` 与 `slow_replay` 校验历史结果与请求的绑定 |
+| storage | 后端锁模型、锁后 `occurred_at`、资格/会话一致性、generation/due fence；扫描在 LIMIT 前排除已截止 lot |
 
-生命周期、结算与恢复共享应用入口；预览要求非空待拍标的，Draft/Preview 接收本期录入，Open 才移动 intake target。
-拍卖创建冻结经济/结算策略，后续配置不回写快照。人工提前开放/结算默认关闭，能力与锁内校验使用相同启动配置。
-结算、补偿和履约遵守金额守恒及证据 fence，所有更正追加新事实。详细规则见[领域不变量](contracts/invariants.md)。
+拍卖创建冻结经济/结算策略；后续配置不改历史快照。生命周期、结算和恢复共用应用入口，
+人工提前开放/结算默认关闭；金额守恒、连续领先时间、录入目标及追加更正见[不变量契约](contracts/invariants.md)。
+已有错误事实不会因源码修复自动回填，运行边界见[状态页](status.md)。
 
 ## Worker 与外部副作用
 
-Worker 的 due、游标、尝试、租约和 fencing 由数据库持有。领取可使用队列专属隔离与显式锁，业务命令仍走原事务边界。
-配置改变只影响后续调度参数，不修改已冻结轮次和命令身份。关闭业务世界阻止新场次，不取消既有履约与恢复工作。
-Final 与调度完成 fence 同事务提交；两后端 `scheduled_rounds.schedule_snapshot` 保存自动排期的本地时间来源，
-后继保持原时区的周历时间。历史及无时区输入的手工轮次保持 UTC 周期；drain 后各任务 owner 停止领取。
+Worker 只负责持久调度、重试与执行时机。due、游标、attempt、lease、fencing 及命令结果由数据库持有；
+队列领取和业务事务各守自己的隔离边界。Final 与调度完成 fence 同事务提交。两后端的
+`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源；历史及无时区手工轮次保留 UTC 周期。
+关闭世界阻止新场次，不取消已有履约/恢复；drain 后各 owner 停止领取。
 
-邮件/论坛写入必须发生在本地提交之后。MoogleMail 处理在批次预算内按连续前缀提交完成证明和 cursor，
-随后才能触发取件、退回和通知。主动 ComposeSend 成功要求唯一新增 Sent MID 与精确 payload proof；
-拍卖收件的已接受决定可跨 Take 入队失败恢复；流拍与撤拍返还均逐件发送原装备，禁止复用已取件原邮件的 Return。
-未知结果停靠人工对账，不能凭成功页或本地 UUID 重发。论坛未知创建结果先只读对账，重试写入需显式授权。
-完整时序见 [Worker](../apps/worker/README.md)、[任务编排](../crates/auction-jobs/README.md)和
-[外部适配](../crates/auction-integrations/README.md)。
+邮件和论坛副作用在本地提交后执行。入站处理按连续前缀提交完成证明及 cursor；未知外部写入先人工对账，
+不能凭本地 UUID 或成功页面重发。流拍/撤拍逐件发送原装备，不能 Return 已取件原邮件。
+发送证明、论坛对账、各循环及任务边界分别见[不变量](contracts/invariants.md)、
+[Worker](../apps/worker/README.md)、[任务编排](../crates/auction-jobs/README.md)与[外部适配](../crates/auction-integrations/README.md)。
 
 ## 配置与数据保护
 
-三个角色引用同一公共 TOML，各自引用敏感 TOML；Admin/Worker 可共享非敏感 runtime。
-runtime 的六组 `operations.*.managed` 默认关闭，保存通过文件锁、fingerprint fence、durable 命令账本和原子替换完成。
-文件替换后遇到账本确认失败，保留新文件并向前恢复；生效边界为对应进程重启。
-数据库 `worlds.enabled` 与只控制邮件入站的 runtime world 开关是不同事实。
+三角色共享非敏感公共 TOML，分别引用敏感文件；Admin/Worker 可共享 runtime。
+配置文件由 `auction-config` 拥有，runtime 保存使用文件锁、fingerprint、持久命令账本与原子替换；
+替换后账本确认失败须向前恢复，生效须重启。数据库 `worlds.enabled` 与仅控制邮件入站的 runtime world 开关分离。
+字段、接管组及恢复流程见[配置说明](../ops/config/README.md)。
 
-Cookie、会话/数据密钥及 URL 凭据仅由敏感配置和专用加密边界持有。普通日志、事件与审计不得包含密钥。
-Public P09/P11 的完整装备 URL 是受限例外：HTTP 核对 equipment owner 后短暂解密，响应 `no-store`；
-不进入日志或缓存。邮件审查只返回脱敏展示投影，异常原始证据独立加密保留。
-详见[配置](../ops/config/README.md)和[邮件诊断](operations/mail-diagnostics.md)。
-Admin A44 外部 Cookie 手动校验仅属 PostgreSQL 完整档：application 的 credentials/check 定义
-只读端口与探测前后版本复核；storage 同名模块按 ID 返回信封；integrations 解密并通过固定 HTTPS
-受限 GET 取得正向认证证据；HTTP 映射安全 DTO，Web 显示当次结果。它不持久化结果、不取得
-Worker 写入所有权、不回写 invalid、不改变唯一 active 约束，也不执行任何远端业务写入。
-SQLite 不提供该能力；无新表、迁移或配置字段。
-Admin 会话属于两后端共有能力：应用服务启动时永久撤销旧管理会话，并以当前 actor/secret 对随机
-session token 摘要作 HMAC 绑定；数据库仍为权威，只保存摘要与撤销状态，无新增表或凭据校验值。
-重启后重新登录，Public 不受 Admin 启动撤销影响；跨实例停机轮换约束见[HTTP 契约](contracts/routes.md#管理拍卖与报表)。
-Public 长连接的只读会话复核属于两后端共有能力：application 定义 `inspect`/`inspect_public`
-窄端口，storage sessions 查询撤销、账号/凭据及双重有效期，不写活动时间；HTTP realtime 的
-`session.rs` 只负责周期、读取预算和关闭分类。会话权威仍在数据库，不进入 Hub 或缓存。
+| 能力 | owner 与保护边界 |
+| --- | --- |
+| 凭据与装备链接 | 敏感配置/专属加密适配；日志、事件及审计不记录 secret。P09/P11 核对归属后短暂解密装备 URL，响应 `no-store`，不缓存 |
+| 邮件审查 | 只返回安全投影，原始异常证据独立加密，见[诊断说明](operations/mail-diagnostics.md) |
+| A44 Cookie 校验（仅 PostgreSQL） | application 前后复核版本，storage 返回信封，integrations 执行受限 HTTPS GET；不持久化结果、不取得 Worker 写入所有权、不改 active/invalid |
+| Admin 会话（两后端） | 启动永久撤销旧会话，token 摘要绑定 actor/secret；数据库保存摘要与撤销状态，重启需重新登录，Public 不受影响 |
+| Public 长连接会话（两后端） | 应用只读 inspect 端口与 storage 权威查询，HTTP 决定复核周期/预算；不续期，不把真值放 Hub 或缓存 |
+| 缓存 | 默认关闭，仅加速 Public 规则；有限 TTL/超时/并发，miss、损坏、不可用及失效失败回源 |
 
-缓存默认禁用，目前只加速 Public 规则读取。有限 TTL、总超时和并发上限控制成本；miss、损坏、不可用及失效失败回源。
-缓存不能持有资格、锁、会话真值、命令账本或审计。具体预算见[缓存适配器](../crates/auction-cache/README.md)。
+精确鉴权与状态码见[HTTP 契约](contracts/routes.md)，缓存预算见[适配器说明](../crates/auction-cache/README.md)。
 
 ## 浏览器、实时与制品
 
-Public/Admin 为分离的 Dioxus CSR SPA，独立路由、译文和产物；共享层只拥有基础能力。
-首次部署页由 Admin 的 `operations/setup.rs` 编排，`operations/setup/` 拆分短生命周期草稿、字段
-校验、控件与配置提交；不使用普通 Admin 会话，不持久化凭据。数据库与完整配置校验仍由
-`auction-setup`/`auction-config` 拥有，浏览器的密码确认和字段提示不扩展配置 DTO。
-首次表单的正式 Public/Admin 端口通过独立 setup DTO 传给配置 owner，只生成回环 listener，Admin
-角色与 runtime 同步；不改变设置入口或代理信任范围，其他安全配置继续由正式配置 owner 管理。
-首次周排期由独立 setup DTO 映射到 `AuctionScheduleConfig`，复用配置规则且关闭时也校验候选；
-公共文件拥有生成计划，runtime 不接管。Web 只给出本地时间/顺序提示，不执行调度或改变已有拍卖。
-REST DTO 与 WebSocket v1 由 contracts 定义。事件是重读提示，跳号或重连通过 HTTP Catch-up/权威快照恢复；
-当前没有 SSE 路由或外部广播 sink。HTTP `shared/realtime_hub/connections.rs` 拥有进程/用户连接
-配额（1024/8），订阅持有 RAII 许可；discovery 128 槽仍独立。浏览器只限制握手等待，不以业务
-消息空闲推断协议心跳失效；静态编译不替代连接容量与撤销延迟的运行证据。
-实时 sequence、版本、帧限制与关闭原因见[事件契约](contracts/events.md)。
+Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTTP 资源类型；共享层仅提供基础能力。
+页面设计分别见 [Public](../crates/auction-web-public/DESIGN.md) 和 [Admin](../crates/auction-web-admin/DESIGN.md)。
+五语言与 `hv.lang` 保持稳定；表格列宽、截断和窄屏结构见[表格契约](table-layouts.md)。
 
-五语言固定为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，默认 Public `en`、Admin `zh-CN`，偏好键固定 `hv.lang`。
-表格使用完整百分比列宽，窄屏保持表结构并提供截断文本查看，见[表格契约](table-layouts.md)。
+首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据。
+浏览器拥有草稿、字段提示与确认；数据库和配置校验仍由 setup/config 执行。端口和周排期通过独立 setup DTO
+生成回环 listener 与公共计划，runtime 不接管，不改变已有拍卖或代理信任范围。
 
-各 HTTP 装配根拥有自己的 `RustEmbed` 类型，显式 `web-embed` 决定资源集合；API-only 使用固定空集合。
-`allow_missing` 让缺失产物可编译并返回 503，不能由机器残留文件决定制品内容。
-发布脚本核验两端隔离、payload 哈希、依赖边界与构建源码身份，再生成确定性归档。
+REST/WebSocket DTO 由 contracts 拥有。通知只提示重读，跳号/重连走 HTTP Catch-up/权威快照；
+当前无 SSE 或外部广播 sink。连接配额与会话撤销属于 HTTP，握手等待与恢复属于浏览器；
+精确预算、sequence/version 与关闭原因见[事件契约](contracts/events.md)。
+
+显式 `web-embed` 选择各自资源，API-only 固定空集合；`allow_missing` 保证无产物可编译并返回 503。
+发布脚本验证两端隔离、payload 哈希、依赖与源码身份后生成确定性归档，步骤见[部署手册](../ops/deploy/README.md)。
 
 ## 生命周期与运维
 
-进程通过 `auction-process` 接收 SIGINT/SIGTERM：首次信号停止接收/领取，业务 drain 默认最多 10 秒；
-第二次信号或超时强制收口。装配根停止周期心跳后发布 stopping，再按配置限时刷新 tracing。
-systemd 示例 `TimeoutStopSec=45` 覆盖业务 drain、最长 30 秒 exporter 刷新与退出余量。
+`auction-process` 提供信号和有界 drain，装配根决定停止顺序：首次 SIGINT/SIGTERM 停止接收/领取，
+默认最多 10 秒业务 drain；第二次信号或超时强制收口，再完成心跳和有界 tracing 刷新。
 
-分体部署由 systemd 拥有单进程 PID、信号和重启；`auctionctl deployment start/restart` 在三角色
-严格停机检查后迁移，再按 Worker → Admin → Public 启动，关闭则反向执行。
-三角色已经运行时 start 只重新检查 readiness 并更新回执；这与单角色普通启动不迁移的边界不同。只读盘点、备份、重建、恢复和 v28 接管是独立命令，
-不得进入自动启动路径。具体前提、确认、回执和失败处理见[部署](../ops/deploy/README.md)、
-[灾备](../ops/deploy/RECOVERY.md)及[v28 接管](../ops/deploy/LEGACY_V28_ADOPTION.md)。
+| 部署 | 进程与迁移所有权 |
+| --- | --- |
+| 分体 | systemd 管单角色 PID/重启；`auctionctl deployment start/restart` 严格停机后迁移，按 Worker → Admin → Public 启动，反向停止。已全部运行时 start 只复核 readiness/回执 |
+| 合并 | server bootstrap 管进程树、预检及次序，config 管运行目录；首次明确确认后 storage 在迁移锁内检查专用空库和零其他客户端并初始化。普通启动只验 schema，升级显式 `migrate-managed` |
 
-合并入口由 `apps/server/src/bootstrap` 拥有进程树、角色预检和启动次序，`auction-config::managed_runtime_directory`
-拥有确定性运行目录布局，`auction-storage::initialize_empty_postgres` 在迁移锁下检查空库与零其他客户端。
-初始化完成后的普通启动只验证 schema readiness；显式升级使用 `auctionctl migrate-managed`，复用
-supervisor 及继承锁的子进程所有权门禁。合并 unit 使用 155 秒停止预算，不复用分体 systemd 总控。
-这些文件锁仅保护同机支持的部署流程，不能作为跨主机隔离证明；合并和分体不得混合运行同一数据库。
-首次初始化复用历史迁移兼容执行视图并保留迁移锁/checksum；设置响应共用 HTTP 安全头，
-设置 owner 独立拥有请求预算及有界退出，终止或终态不明时禁止自动初始化。
-当前源码修复与待补运行证据见[状态登记](status.md#源码核对发现的实现缺口)，不以静态通过推导运行成功。
-
-workspace、`crates/*` 和工程目录组织借鉴 Honk；拍卖行为与验收由本仓库独立拥有。
+分体 unit 停止预算 45 秒，合并 unit 为 155 秒；合并不使用分体总控，两种模式不得混用同一数据库。
+本机文件锁不证明跨主机隔离。备份、恢复、重建、v28 接管均为独立受控命令，不进入自动启动。
+初始化保留迁移兼容视图、锁和 checksum；终止或保存结果未知时不得自动初始化，失败保留现场。
+详细门禁见[部署](../ops/deploy/README.md)、[灾备](../ops/deploy/RECOVERY.md)、
+[v28 接管](../ops/deploy/LEGACY_V28_ADOPTION.md)及[合并服务](../apps/server/README.md)。

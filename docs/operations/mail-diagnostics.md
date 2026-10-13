@@ -2,9 +2,9 @@
 
 [文档导航](../README.md) · [加密证据](../../crates/auction-integrations/src/clients/mooglemail/diagnostics) · [离线导出和显式回填](../../apps/auctionctl/src/bootstrap/runtime/mail_diagnostics) · [审查与诊断端口](../../crates/auction-application/src/ports/mail)
 
-区分加密原始证据、脱敏审查投影和业务完成证明；普通成功邮件不归档原始正文。
-
-MoogleMail 的业务拒绝、解析异常、HTTP 异常和处理超时需要同时保留可检索的安全日志，以及在确有异常时保留原始数据，便于确认邮件正文到底被怎样解析。普通成功邮件不留证；业务结果、数据库、DTO 和普通日志仍只保存安全字段，不能写入正文、Cookie、请求表单、token 或装备 key 明文。
+本页区分加密原始证据、脱敏审查投影与业务完成证明。PostgreSQL 完整档 Worker 可为业务拒绝/失败、
+解析或 HTTP 异常、处理超时留证；普通成功邮件不归档原文。原始正文、Cookie、请求表单、token 和装备 key
+不得进入普通日志、命令结果或普通数据库/DTO；Admin 只能读取下文限定的脱敏展示投影。
 
 ## 本页导航
 
@@ -18,24 +18,37 @@ MoogleMail 的业务拒绝、解析异常、HTTP 异常和处理超时需要同�
 
 ## 普通日志
 
-Worker 日志按 `world_id`、`mailbox_key`、`external_mail_id`、阶段、操作和结果分类关联一封邮件。业务定价拒绝继续使用原有 `reason_code`；定价诊断只增加有界的 `pricing_diagnostic.detail_code`、`body_bytes`、`token_count`、`field_index` 和 `attachment_count`。这些字段用于判断解析分支，属于确定性的业务诊断字段，会随决定进入 `decision_metadata`；随机 `evidence_id` 和诊断留证回执不能进入幂等比较字段。
+按 `world_id`、`mailbox_key`、`external_mail_id`、stage、operation 和结果关联日志；装备失败再带
+equipment ID/附件位置。定价拒绝保留 `reason_code`，有界 `pricing_diagnostic` 包含 `detail_code`、
+`body_bytes`、`token_count`、`field_index`、`attachment_count`；这些确定性字段可进入 `decision_metadata`。
+随机 `evidence_id`（UUID）和留证回执不得参与幂等比较。
 
-异常日志会给出 `evidence_id`（UUID）、`evidence_status`（`retained`、`body_unavailable` 或 `save_failed`）和静态错误分类。`body_unavailable` 只表示留证当时没有取得响应正文或没有取得完整响应，例如 HTTP 超时；磁盘容量淘汰不会改写当时的状态。淘汰后的 UUID 导出返回 `not_found`。留证失败只产生 warning，不改变邮件退回、投递、重试、游标或幂等结果。
+| `evidence_status` | 含义 |
+| --- | --- |
+| `retained` | 本次完整正文已加密保存 |
+| `body_unavailable` | 未取得正文或完整响应；不能以 partial body 伪称完整 |
+| `disabled` | 留证开关关闭，安全日志仍输出 |
+| `prepare_failed` / `save_failed` | 加密准备/保存失败，只输出安全分类与 warning |
+| `completion_unconfirmed` | 租约取消或外层超时中断等待；本地写入可能仍在完成，既不证明已保存也不证明无文件 |
 
-配置关闭或加密准备失败时分别记录 `disabled`、`prepare_failed`。租约取消或外层超时中断留证等待时记录 `completion_unconfirmed`；已经开始的本地写入可能仍在完成，不能把该状态当作“已保存”或“确定没有文件”。
+留证不改变退回、投递、重试、游标或幂等结果。UUID 不保证文件永久存在：保留期/容量淘汰后导出为
+`not_found`，不会改写当时的日志状态。
 
 ## 保存内容与边界
 
 留证分为两类：
 
-- HTTP 异常保存实际取得的原始响应字节；若远端返回了 HTTP status 则一并保存，否则状态为 unknown，响应正文上限为 8 MiB。解析异常只在已成功读取的正文上运行，解析层不再持有 HTTP status，因此不会伪造 `200`；其证据状态为 unknown。
+- HTTP 异常保存实际取得的响应字节（最多 8 MiB）及真实 status；未取得 status 为 unknown。解析层只持有已读取正文，HTTP status 为 unknown，不能伪造 `200`。
 - 业务拒绝、业务失败和处理超时保存实际提取的 JSON：`body`、`subject`、`sender`、附件外部 ID/key、`credits`、`cod`、`returnable`、`claimable`、`received_at` 和 `content_digest`。`body` 保留 Unicode 空白，以便复核类似 `<equipment-url> start 50k` 的输入。
 
-请求 Cookie、请求表单 payload 和未实际取得的响应不进入证据。响应 HTML 中的 token 整体加密；原始数据只存在独立证据文件，不跨批次保存 HTML，也不保存正常邮件。当前邮件若在新功能启用前已处理，系统没有历史原文，不能由新功能恢复。
+请求 Cookie、请求表单和未取得的响应不留证。响应 HTML 中的 token 随整体加密；原文只存在独立文件，
+不跨批次保存 HTML，不恢复启用前未留存的历史原文。
 
-证据由父数据密钥通过固定独立 HMAC 域派生诊断子密钥后使用 AES-256-GCM 加密；认证安全 public header 包含 `key_source`、`key_id`、`outcome` 和 `context`，正文保持加密，并通过完整 AAD 认证元数据。优先使用 `credential_data_key`，缺少时使用 `equipment_data_key`；这只是诊断留证的明确派生例外，不直接复用凭据 AES 密钥。证据目录为 `0700`，文件为 `0600`，保留 1—365 天，最多 1024 个文件，并在写入时按总字节上限和保留期清理旧文件；不宣称存在独立定时清理，也不涉及自动重放。
-
-该能力属于 PostgreSQL 完整档的 Worker 运维能力，不新增数据库表或迁移；SQLite Lite 不新增该能力。诊断文件是本地运维证据，不属于业务事实、入站幂等账本或持久化游标。
+父数据密钥经固定独立 HMAC 域派生诊断子密钥，以 AES-256-GCM 加密；`key_source`、`key_id`、
+`outcome`、`context` 组成安全 public header，完整 AAD 认证元数据。优先 `credential_data_key`，缺失时
+用 `equipment_data_key`，不直接复用凭据 AES 密钥。目录 `0700`、文件 `0600`，保留 1–365 天、最多
+1024 文件；只在写入时按容量/保留期清理，没有独立定时清理或自动重放。证据文件不新增 schema，
+不替代业务事实、账本或游标；SQLite Lite 不提供留证能力。
 
 ## 配置与离线导出
 
@@ -65,8 +78,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 ## Admin 审查展示投影
 
-完整 `MailMessage` 首次写入 `inbound_mail` 时同步生成敏感审查投影。列表只返回可空的 `sender`、`subject`
-scalar 和 `has_message_display`；详情才返回 `message_display`。snapshot 固定 schema/redaction version，
+完整 `MailMessage` 首次写入 `inbound_mail` 时生成脱敏审查投影。列表增加可空 `sender`/`subject`
+及 `has_message_display`，详情才返回 `message_display`。snapshot 固定 schema/redaction version，
 正文最多 64 KiB、JSON 最多 128 KiB、附件外部 ID 最多 1000 条；Credits/COD 保留为非负数。装备 key、URL key
 片段、认证邮件正文和认证相关敏感内容均隐藏。该投影属于 PostgreSQL 完整档的非权威展示数据，不参与入站幂等
 或 cursor，普通 replay 不会补写历史 NULL；SQLite Lite 不新增列或能力。
@@ -125,14 +138,10 @@ retention status/error。`snapshot_invalid` 与 `filter_rejected` 才允许对�
 `filter_rejected` 说明处理当时的规则未通过；`start_price_*` 指向定价指令。网络/HTTP 异常与登录失效分开说明，
 证据 `authentication` 也不等于游戏登录失败。未知代码仍保留原值，旧记录缺少诊断时不能通过刷新补齐。
 收件拒绝不代表装备已退回，须核对关联 Return/Send 任务和 MM；修改配置或升级说明文案不会自动重放旧收件。
-上述消息说明属于 Admin 展示层。后续独立的[取时修复](../../crates/auction-application/src/services/mail/processing/processor/auction.rs)
-让邮件处理器在每件装备读取完成后重新取应用时钟，原未来时间门禁与命令业务时间保持不变。
-该修复未自动部署或处理旧任务，范围见[状态说明](../status.md#源码核对发现的实现缺口)。
+当前[邮件处理器](../../crates/auction-application/src/services/mail/processing/processor/auction.rs)在每件装备读取
+完成后重新取应用时钟校验，保留未来时间门禁及命令业务时间；不会因此处理旧任务，部署和运行证据见[状态说明](../status.md)。
 
-安全日志始终包含 world/mailbox/external mail ID/equipment ID/附件位置等关联字段，即使留证 disabled、
-prepare_failed、save_failed 或 completion_unconfirmed。状态需区分 `disabled`、`prepare_failed`、`save_failed`、
-`completion_unconfirmed`、`retained` 和 `body_unavailable`；evidence UUID 不保证文件永久存在，可能因保留期或
-容量清理后导出为 `not_found`。旧邮件若没有底层失败 trace，不补写失败原因，也不重放旧邮件。
+安全日志与留证状态遵守[普通日志](#普通日志)，没有底层失败 trace 的旧邮件不补因、不重放。
 装备诊断上下文的 `external_equipment_id` 与 `attachment_position` 在通用邮件诊断中保持 optional；缺省时省略，
 以保持既有 v2 AAD 字节逐字兼容，不升级证据格式。
 装备证据复用现有 MoogleMail diagnostics 的父密钥、保留期、容量上限和 `mail-evidence export` CLI，不新增配置字段。
@@ -150,8 +159,8 @@ session expired 在凭据耗尽或失效写回失败时保留最后已取得的�
 
 ## 历史资产处置核对
 
-2026-09-22 的[审计修复](../status.md#2026-09-22-历史记录)区分可恢复的本地接受决定和
-无法自动确认的远端资产。升级按既有停机/迁移流程执行；不要通过修改旧 payload、命令 ID 或账本解除阻断。
+升级按[停机/迁移流程](../../ops/deploy/README.md)执行。可恢复的本地接受决定与未知远端资产须分开核对，
+不能修改旧 payload、命令 ID 或账本解除阻断。
 
 - `legacy_return_requires_review`：旧流拍 Return 已冻结或有过执行，保持隔离。核对原投稿、逐件装备库存和
   Sent/原邮件动作证据，不能直接将它改为 Send。迁移 `000038` 只自动转换从未开始且无关联 delivery 的记录。
@@ -161,4 +170,4 @@ session expired 在凭据耗尽或失效写回失败时保留最后已取得的�
 - 修复前已归档的未知标题 Credits 邮件：新逻辑不会重写既有完成事实或自动越过原游标重放。
   应按 world、邮箱、外部 MID 对照原入站记录及当前远端资产盘点；没有证据时不能推定款项已领取或退回。
 
-以上是升级后需要核对的边界。本轮只完成静态修复，没有执行迁移、盘点真实资产或开展外部写入。
+这些核对项不代表已经迁移、盘点资产或完成外部写入；具体证据见[验证状态](../status.md)。

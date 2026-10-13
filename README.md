@@ -29,8 +29,7 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 | [auctionctl](apps/auctionctl/README.md) | 配置诊断、迁移、systemd 总控与受控灾备 | 无监听 |
 | [auction-server](apps/server/README.md) | 可选单文件 supervisor，自管上述三角色子进程 | 沿用 Public/Admin 两个入口 |
 
-三个服务独立装配，领域和用例通过窄端口共享。浏览器只消费稳定 DTO，数据库记录不直接进入页面。
-完整目录与 owner 见[架构](docs/architecture.md)。
+三个服务独立装配，通过应用端口共享用例；完整 owner 与数据库能力见[架构](docs/architecture.md)。
 
 ## 构建与检查
 
@@ -38,9 +37,7 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 从仓库根目录执行：
 
 ```bash
-# 列出任务；以下验证不执行行为测试。
-just
-just docs-check
+# 完整静态验证，不执行行为测试；仅改文档可先运行 just docs-check。
 just verify
 
 # PostgreSQL 完整档的 API-only 制品。
@@ -58,24 +55,15 @@ just release-check --single-binary
 `postgres` 或 `sqlite`；需要页面时还要先构建前端并启用 `web-embed`。不能把无驱动编译成功当成
 可连接数据库的部署制品。
 
-运行配置分为公共、角色和敏感 TOML；分体进程的 `AUCTION_CONFIG_FILE` 只选择角色文件。
-合并 `auction-server` 使用 `--config-dir`，若检测到该环境变量则拒绝启动。
-内嵌 PostgreSQL 制品可通过 `auction-admin-api setup --output-dir <绝对路径>` 打开本机首次设置页，
-分别填写数据库主机、端口、账号、密码、库名，以及管理员和部署参数并生成配置；完成后按[部署手册](ops/deploy/README.md)执行严格预检、显式迁移和启动。
-提交的示例包含占位值，使用前按[配置说明](ops/config/README.md)准备权限受限的真实敏感文件。
-首次迁移、启动与停机要求见[部署手册](ops/deploy/README.md)，不在普通静态验证中自动执行。
-可选 `auction-server --config-dir <配置目录>` 在目录不存在时进入同一网页向导，经明确确认后
-初始化专用空 PostgreSQL 库并启动三角色；普通启动不迁移。显式远程 HTTPS 设置和合并部署维护
-见 [auction-server](apps/server/README.md)，默认分体发布不变。
+运行前按[配置说明](ops/config/README.md)准备公共、角色和权限受限的敏感 TOML，替换示例占位值。
+分体进程用 `AUCTION_CONFIG_FILE` 选择角色文件；合并服务用 `--config-dir`，拒绝该环境变量。
+首次设置、严格停机预检、迁移及启动步骤见[部署手册](ops/deploy/README.md)；合并服务的确认后
+空库初始化见 [auction-server](apps/server/README.md)。普通角色或合并服务启动不隐式迁移。
 
 ## 当前交付边界
 
-源码已登记 Public 21 条、Admin 44 条 feature API，以及 Public 15 条、Admin 21 条浏览器路由。
-PostgreSQL 完整档与 SQLite Lite 的具体差异见[能力矩阵](docs/architecture.md#部署档位与能力)。
-这些数量描述注册范围，不证明运行验收。
-
-项目处于功能与运行证据收口阶段。既有文档报告过部分隔离环境验证；真实外部服务、非空生产数据、
-目标主机切换和完整浏览器流程仍需要可追溯证据。不能宣称生产验收完成。
-当前文档核对范围、首次设置与迁移入口的实现缺口及证据口径见[实现与验证状态](docs/status.md)。
+项目处于功能与运行证据收口阶段。路由注册、源码和静态编译不构成生产验收；真实外部服务、
+非空生产数据、完整浏览器流程及恢复仍需证据。[实现与验证状态](docs/status.md)统一登记
+当前能力、历史检查结果、有限部署证据及未闭合事项。
 
 除非用户明确要求，不新增或执行单元、集成、功能、端到端、浏览器测试及手工功能冒烟；已有测试保留。
