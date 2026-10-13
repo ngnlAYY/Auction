@@ -4,11 +4,12 @@
 //! 列表和命令响应都不包含凭据内容。
 
 use auction_contracts::{
-    AdminCredentialCreateRequest, AdminCredentialDeleteRequest, AdminCredentialDeleteResponse,
-    AdminCredentialListResponse, AdminCredentialMutationRequest, AdminCredentialMutationResponse,
-    AdminCredentialPaginationResponse,
+    AdminCredentialCheckRequest, AdminCredentialCreateRequest, AdminCredentialDeleteRequest,
+    AdminCredentialDeleteResponse, AdminCredentialListResponse, AdminCredentialMutationRequest,
+    AdminCredentialMutationResponse, AdminCredentialPaginationResponse,
 };
 pub(crate) use auction_contracts::{
+    AdminCredentialCheckResponse as AdminCredentialCheck,
     AdminCredentialDeleteResponse as AdminCredentialDeleteResult,
     AdminCredentialResponse as AdminCredential,
 };
@@ -46,6 +47,49 @@ impl From<AdminCredentialListResponse> for AdminCredentialPage {
             restart_required: data.restart_required,
         }
     }
+}
+
+/// 只读检查指定版本；响应的世界、状态与时间必须通过闭集校验。
+pub(crate) async fn check_admin_credential(
+    credential: &AdminCredential,
+) -> Result<AdminCredentialCheck, String> {
+    decode_credential(credential.clone()).map_err(invalid_request_error)?;
+    let credential_id = Uuid::parse_str(&credential.id).map_err(invalid_request_error)?;
+    let csrf_token = fetch_csrf_token().await?;
+    let request = AdminCredentialCheckRequest { expected_state_version: credential.state_version };
+    let response = send_request(|abort_signal| {
+        Request::post(&format!("/api/v1/admin/credentials/{credential_id}/check"))
+            .abort_signal(abort_signal)
+            .header("x-csrf-token", &csrf_token)
+            .json(&request)
+            .map_err(invalid_request_error)
+    })
+    .await?;
+    if !response.ok() {
+        return Err(response_error(response).await);
+    }
+    let payload: ApiResponse<AdminCredentialCheck> =
+        response.json().await.map_err(invalid_response_error)?;
+    let result = payload.data;
+    let worlds: &[&str] = match (credential.kind.as_str(), credential.world.as_str()) {
+        ("forum_cookie", _) => &["shared"],
+        ("mail_cookie", "main") => &["main"],
+        ("mail_cookie", "isekai") => &["isekai"],
+        ("mail_cookie", "shared") => &["main", "isekai"],
+        _ => return Err("invalid_request".to_owned()),
+    };
+    if result.credential_id != credential.id
+        || result.state_version != credential.state_version
+        || !valid_admin_time(&result.checked_at)
+        || result.checks.len() != worlds.len()
+        || result.checks.iter().zip(worlds).any(|(check, world)| {
+            check.world != *world
+                || !matches!(check.status.as_str(), "valid" | "invalid" | "inconclusive")
+        })
+    {
+        return Err("invalid_response".to_owned());
+    }
+    Ok(result)
 }
 
 /// 获取带筛选和页码的 Admin 凭据安全列表。

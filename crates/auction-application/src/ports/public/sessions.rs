@@ -53,7 +53,7 @@ pub struct PublicLoginIdentity {
     pub public_reason: Option<String>,
 }
 
-/// 成功认证并刷新后的公开会话投影。
+/// 公开会话的安全投影；只读复核不延长其中的过期时间。
 #[derive(Debug, Clone)]
 pub struct PublicSessionIdentity {
     pub user_id: Uuid,
@@ -121,6 +121,13 @@ pub trait PublicSessionStore: Send + Sync {
         max_public_sessions: u32,
     ) -> ApplicationFuture<'_, PublicSessionIdentity>;
 
+    /// 只读复核撤销、账号/凭据状态和双重过期边界，不刷新活动时间。
+    fn inspect_public(
+        &self,
+        token_hash: [u8; 32],
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionIdentity>;
+
     fn touch_public(
         &self,
         token_hash: [u8; 32],
@@ -154,6 +161,13 @@ pub trait AdminSessionStore: Send + Sync {
 
 /// Public session 用例端口，供 HTTP 或其他交付表面使用。
 pub trait PublicSessionPort: Send + Sync {
+    /// 长连接的只读认证复核；心跳不能替代用户活动或延长会话。
+    fn inspect(
+        &self,
+        raw_token: String,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionIdentity>;
+
     fn login(&self, key: Vec<u8>, now: DateTime<Utc>) -> ApplicationFuture<'_, PublicLoginResult>;
 
     fn current(

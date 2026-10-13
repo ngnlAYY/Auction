@@ -2,6 +2,7 @@
 //!
 //! 历史截止时间混用 UTC RFC3339 与空格格式；先按时刻排序，毫秒并列时仅对已知 UTC
 //! 写入格式规范化并补齐小数精度，再返回原文。未知偏移量不进入 UTC 字符串次序。
+//! 开拍展示判定同样按时间值比较，不能让 RFC3339 的 T 与历史空格词法决定状态。
 
 use auction_application::{
     ApplicationError, CurrentAuctionSnapshot, PublicAuctionCursor, PublicAuctionListRequest,
@@ -30,6 +31,29 @@ pub(super) async fn list(
         request.limit.checked_add(1).ok_or_else(|| storage_error("Lite 公开拍卖分页上限溢出"))?
     } else {
         request.limit
+    };
+    // 使用延迟只读事务共享同一快照；不为列表占用 BEGIN IMMEDIATE 写锁。
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开始 Lite 公开拍卖列表快照失败"))?;
+    let total = if use_cursor {
+        None
+    } else {
+        Some(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*)
+                 FROM auctions AS a
+                 JOIN worlds AS w ON w.id = a.world_id
+                 WHERE a.status = ?
+                   AND (w.enabled = 1 OR a.status = 'settled')
+                   AND (? IS NULL OR a.world_id = ?)",
+            )
+            .bind(&request.status)
+            .bind(request.world_id.as_deref())
+            .bind(request.world_id.as_deref())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|_| storage_error("读取 Lite 公开拍卖列表总数失败"))?,
+        )
     };
     let rows = sqlx::query(
         "SELECT
@@ -61,8 +85,7 @@ pub(super) async fn list(
             COUNT(CASE WHEN l.status = 'unsold' THEN l.id END) AS unsold_count,
             COALESCE(SUM(CASE WHEN l.status = 'sold' THEN COALESCE(l.current_price, 0) ELSE 0 END), 0)
                 AS sold_amount,
-            a.state_version,
-            COUNT(*) OVER () AS total_count
+            a.state_version
          FROM auctions AS a
          INNER JOIN worlds AS w ON w.id = a.world_id
          LEFT JOIN lots AS l ON l.auction_id = a.id
@@ -87,16 +110,10 @@ pub(super) async fn list(
     .bind(cursor_id.as_bytes().to_vec())
     .bind(query_limit)
     .bind(if use_cursor { 0 } else { request.offset })
-    .fetch_all(store.pool())
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 Lite 公开拍卖列表失败"))?;
-
-    let total = rows
-        .first()
-        .map(|row| row.try_get("total_count"))
-        .transpose()
-        .map_err(|_| storage_error("读取 Lite 公开拍卖列表总数失败"))?
-        .unwrap_or(0);
+    transaction.commit().await.map_err(|_| storage_error("结束 Lite 公开拍卖列表快照失败"))?;
     let mut entries = rows.into_iter().map(map_sqlite_summary).collect::<Result<Vec<_>, _>>()?;
     let entry_count =
         i64::try_from(entries.len()).map_err(|_| storage_error("Lite 公开拍卖页大小溢出"))?;
@@ -115,7 +132,7 @@ pub(super) async fn list(
 
     Ok(PublicAuctionPage {
         entries,
-        total: (!use_cursor).then_some(total),
+        total,
         limit: request.limit,
         offset: if use_cursor { 0 } else { request.offset },
         next_cursor,
@@ -151,7 +168,7 @@ pub(super) async fn current(
                 AS scheduled_ends_at,
             a.preview_revision,
             CASE
-                WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
+                WHEN a.status = 'preview' AND julianday('now') < julianday(a.scheduled_open_at) THEN 'preview'
                 WHEN a.status = 'preview' THEN 'opening'
                 ELSE 'live'
             END AS presentation_mode,
@@ -202,7 +219,7 @@ pub(super) async fn realtime_status(
                  AS scheduled_ends_at,
              a.preview_revision,
              CASE
-                 WHEN a.status = 'preview' AND CURRENT_TIMESTAMP < a.scheduled_open_at THEN 'preview'
+                 WHEN a.status = 'preview' AND julianday('now') < julianday(a.scheduled_open_at) THEN 'preview'
                  WHEN a.status = 'preview' THEN 'opening'
                  ELSE 'live'
              END AS presentation_mode,

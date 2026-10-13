@@ -2,7 +2,7 @@
 
 [项目首页](../README.md)
 
-新读者先看架构和开发指南；实现修改从模块 README 进入契约；部署从配置、发布与恢复手册进入。
+新读者先看系统设计、架构和开发指南；界面修改分别进入 Public 或 Admin 设计，再从模块 README 进入契约；部署从配置、发布与恢复手册进入。
 本页列出全部正式文档，不包含生成产物、本地工具状态或私有运行证据。新增、移动或删除文档时同步导航。
 
 ## 项目与开发
@@ -16,7 +16,7 @@
 | [技术栈与取舍](tech-stack.md) | `docs/tech-stack.md` |
 | [开发与静态验证](development.md) | `docs/development.md` |
 | [实现与验证状态](status.md) | `docs/status.md` |
-| [文档维护与决策记录](documentation.md) | `docs/documentation.md` |
+| [文档维护](documentation.md) | `docs/documentation.md` |
 | [静态验证、文档门禁与发布脚本](../ci/README.md) | `ci/README.md` |
 
 ## 契约与界面
@@ -28,6 +28,8 @@
 | [实时事件与客户端恢复契约](contracts/events.md) | `docs/contracts/events.md` |
 | [数据库对象与所有权契约](contracts/schema.md) | `docs/contracts/schema.md` |
 | [领域不变量与写入语义](contracts/invariants.md) | `docs/contracts/invariants.md` |
+| [Public 公开端设计](../crates/auction-web-public/DESIGN.md) | `crates/auction-web-public/DESIGN.md` |
+| [Admin 管理端设计](../crates/auction-web-admin/DESIGN.md) | `crates/auction-web-admin/DESIGN.md` |
 | [表格布局与列宽契约](table-layouts.md) | `docs/table-layouts.md` |
 
 ## 应用进程
@@ -66,6 +68,7 @@
 | --- | --- |
 | [运行配置与敏感文件](../ops/config/README.md) | `ops/config/README.md` |
 | [部署与发布手册](../ops/deploy/README.md) | `ops/deploy/README.md` |
+| [AMD KVM 定向编译候选](../ops/build/README.md) | `ops/build/README.md` |
 | [systemd 服务与顺序控制](../ops/deploy/systemd/README.md) | `ops/deploy/systemd/README.md` |
 | [PostgreSQL 备份与恢复手册](../ops/deploy/RECOVERY.md) | `ops/deploy/RECOVERY.md` |
 | [canonical PostgreSQL v28 接管手册](../ops/deploy/LEGACY_V28_ADOPTION.md) | `ops/deploy/LEGACY_V28_ADOPTION.md` |
@@ -78,17 +81,3 @@
 | [数据库迁移导航](../migrations/README.md) | `migrations/README.md` |
 | [PostgreSQL 完整档迁移](../migrations/postgres/README.md) | `migrations/postgres/README.md` |
 | [SQLite Lite 迁移](../migrations/sqlite/README.md) | `migrations/sqlite/README.md` |
-
-## 决策记录
-
-既有笔记记录当时的决定与证据；当前实现缺口及核对快照见[状态说明](status.md)。
-
-| 文档 | 仓库位置 |
-| --- | --- |
-| [Agent Note: 管理会话撤销与首次设置安全收口](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md) | `.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md` |
-| [Agent Note: 源码审计问题修复与恢复边界](../.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md) | `.agents/notes/implemented/bug-fix/2026-09-22-source-audit-remediation.md` |
-| [Agent Note: 可选单文件服务与首次配置后启动](../.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md) | `.agents/notes/implemented/architecture/2026-09-20-unified-server-supervisor.md` |
-| [Agent Note: 全库文档重建与静态维护边界](../.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md) | `.agents/notes/implemented/process/2026-09-16-documentation-rebuild.md` |
-| [Agent Note: 发布包收敛到正式程序与通用配置](../.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md) | `.agents/notes/implemented/simplification/2026-09-18-release-artifact-scope.md` |
-| [Agent Note: 无配置首次启动与管理页初始化](../.agents/notes/implemented/feature/2026-09-17-first-run-setup.md) | `.agents/notes/implemented/feature/2026-09-17-first-run-setup.md` |
-| [Agent Note: PostgreSQL 连接参数独立填写](../.agents/notes/implemented/feature/2026-09-18-database-connection-fields.md) | `.agents/notes/implemented/feature/2026-09-18-database-connection-fields.md` |

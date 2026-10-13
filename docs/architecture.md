@@ -53,7 +53,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](../crates/auction-jobs/README.md) |
 | auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定与泛型静态响应 | [README](../crates/auction-http/README.md) |
 | auction-web-public | Public 页面、路由、API 消费、实时恢复与译文 | [README](../crates/auction-web-public/README.md) |
-| auction-web-admin | 管理页面、命令交互、API 消费与译文 | [README](../crates/auction-web-admin/README.md) |
+| auction-web-admin | 管理页面、命令交互、API 消费、入站诊断代码的展示说明与译文 | [README](../crates/auction-web-admin/README.md) |
 | auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](../crates/auction-web-shared/README.md) |
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](../crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](../crates/auction-observability/README.md) |
@@ -97,7 +97,13 @@ SQLite 文件只能位于受支持的本地文件系统，不能以共享网络�
 领域计划、竞价事实、状态版本、追加审计和 realtime/outbox。同 ID 不同负载冲突；已接受结果的重放不受当前配置重解释。
 公开新出价和代理上限遵守 1B 与金额网格，历史读取及已结算金额不截断。
 
-领域 `CompetitionPlan` 只计算计划。PostgreSQL 的共享门禁锁与 lot 排他锁、SQLite 串行写入分别由存储 owner 执行。
+领域 `CompetitionPlan` 只计算计划；竞价事实、代理转换链与最终快照的一致性校验、拍卖/代理变更的
+失败原子性及 Fast/Slow/Final 共用反超计算均由 `auction-domain` 拥有，适用于完整档与 Lite。
+历史重放保留局部快照语义，不引入外部拍卖引擎或第二套状态机。`auction-application` 的
+`services/auction/competition/legacy_ledger.rs` 与 `slow_replay.rs` 分别拥有 Public 与慢速命令的
+结果绑定校验，不把内部自洽当作请求来源证明。两后端存储 owner 统一绑定锁后 `occurred_at` 写入
+授权/转换与命令结果，慢速扫描在 LIMIT 前排除已截止 lot；不改写历史证据或新增持久化对象。
+PostgreSQL 的共享门禁锁与 lot 排他锁、SQLite 串行写入分别由存储 owner 执行。
 用户黑名单、会话撤销与代理冻结保持锁内资格一致性；慢速代理用持久化 generation/due 校验阻止陈旧执行。
 Public 会话随 Key 撤销/重签原子失效，登录创建复核用户版本；SQLite 写入由 SQLx 事务守卫保证取消回滚。
 `leader_since` 依据本次所有接受事实判断连续领先，不能只比较事务前后的最终领先者。
@@ -131,9 +137,17 @@ Cookie、会话/数据密钥及 URL 凭据仅由敏感配置和专用加密边�
 Public P09/P11 的完整装备 URL 是受限例外：HTTP 核对 equipment owner 后短暂解密，响应 `no-store`；
 不进入日志或缓存。邮件审查只返回脱敏展示投影，异常原始证据独立加密保留。
 详见[配置](../ops/config/README.md)和[邮件诊断](operations/mail-diagnostics.md)。
+Admin A44 外部 Cookie 手动校验仅属 PostgreSQL 完整档：application 的 credentials/check 定义
+只读端口与探测前后版本复核；storage 同名模块按 ID 返回信封；integrations 解密并通过固定 HTTPS
+受限 GET 取得正向认证证据；HTTP 映射安全 DTO，Web 显示当次结果。它不持久化结果、不取得
+Worker 写入所有权、不回写 invalid、不改变唯一 active 约束，也不执行任何远端业务写入。
+SQLite 不提供该能力；无新表、迁移或配置字段。
 Admin 会话属于两后端共有能力：应用服务启动时永久撤销旧管理会话，并以当前 actor/secret 对随机
 session token 摘要作 HMAC 绑定；数据库仍为权威，只保存摘要与撤销状态，无新增表或凭据校验值。
-重启后重新登录，Public 会话不变；跨实例停机轮换约束见[HTTP 契约](contracts/routes.md#管理拍卖与报表)。
+重启后重新登录，Public 不受 Admin 启动撤销影响；跨实例停机轮换约束见[HTTP 契约](contracts/routes.md#管理拍卖与报表)。
+Public 长连接的只读会话复核属于两后端共有能力：application 定义 `inspect`/`inspect_public`
+窄端口，storage sessions 查询撤销、账号/凭据及双重有效期，不写活动时间；HTTP realtime 的
+`session.rs` 只负责周期、读取预算和关闭分类。会话权威仍在数据库，不进入 Hub 或缓存。
 
 缓存默认禁用，目前只加速 Public 规则读取。有限 TTL、总超时和并发上限控制成本；miss、损坏、不可用及失效失败回源。
 缓存不能持有资格、锁、会话真值、命令账本或审计。具体预算见[缓存适配器](../crates/auction-cache/README.md)。
@@ -149,7 +163,10 @@ Public/Admin 为分离的 Dioxus CSR SPA，独立路由、译文和产物；共�
 首次周排期由独立 setup DTO 映射到 `AuctionScheduleConfig`，复用配置规则且关闭时也校验候选；
 公共文件拥有生成计划，runtime 不接管。Web 只给出本地时间/顺序提示，不执行调度或改变已有拍卖。
 REST DTO 与 WebSocket v1 由 contracts 定义。事件是重读提示，跳号或重连通过 HTTP Catch-up/权威快照恢复；
-当前没有 SSE 路由或外部广播 sink。实时 sequence、版本、帧限制与关闭原因见[事件契约](contracts/events.md)。
+当前没有 SSE 路由或外部广播 sink。HTTP `shared/realtime_hub/connections.rs` 拥有进程/用户连接
+配额（1024/8），订阅持有 RAII 许可；discovery 128 槽仍独立。浏览器只限制握手等待，不以业务
+消息空闲推断协议心跳失效；静态编译不替代连接容量与撤销延迟的运行证据。
+实时 sequence、版本、帧限制与关闭原因见[事件契约](contracts/events.md)。
 
 五语言固定为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，默认 Public `en`、Admin `zh-CN`，偏好键固定 `hv.lang`。
 表格使用完整百分比列宽，窄屏保持表结构并提供截断文本查看，见[表格契约](table-layouts.md)。

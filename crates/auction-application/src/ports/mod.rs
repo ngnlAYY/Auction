@@ -138,7 +138,9 @@ pub use admin_audit::{
     AdminAuditRecord, MAX_ADMIN_AUDIT_OFFSET, MAX_ADMIN_AUDIT_PAGE_SIZE,
 };
 pub use admin_credentials::{
-    AdminCredential, AdminCredentialCommandKind, AdminCredentialCommandResult,
+    AdminCredential, AdminCredentialCheckObservation, AdminCredentialCheckPort,
+    AdminCredentialCheckRecord, AdminCredentialCheckResult, AdminCredentialCheckStatus,
+    AdminCredentialCheckStore, AdminCredentialCommandKind, AdminCredentialCommandResult,
     AdminCredentialDeleteCommand, AdminCredentialDeleteResult, AdminCredentialDeleteWrite,
     AdminCredentialEnvelope, AdminCredentialError, AdminCredentialHealthReader,
     AdminCredentialHealthScope, AdminCredentialHealthSnapshot, AdminCredentialImportCommand,
@@ -147,9 +149,9 @@ pub use admin_credentials::{
     AdminCredentialRenameCommand, AdminCredentialRuntimeOwnership, AdminCredentialRuntimeReader,
     AdminCredentialRuntimeRecord, AdminCredentialRuntimeWriter, AdminCredentialSealer,
     AdminCredentialSecret, AdminCredentialStatus, AdminCredentialStatusCommand,
-    AdminCredentialStore, AdminCredentialWorld, MAX_ADMIN_CREDENTIAL_OFFSET,
-    MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES, credential_scope,
-    credential_secret_hash,
+    AdminCredentialStore, AdminCredentialVerifier, AdminCredentialWorld,
+    MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
+    credential_check_worlds, credential_scope, credential_secret_hash,
 };
 pub use admin_forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,

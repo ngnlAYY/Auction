@@ -127,7 +127,7 @@ SQLx `1..=5`、`7` 写入当前 checksum；其余迁移仍按本目录顺序向�
 | users | auction-application：users | 两者 | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；历史 game_player_id 仅作兼容镜像 |
 | user_blacklist | auction-application：users | 两者 | 公开资格与封禁原因 |
 | user_renames | auction-application：users | 两者 | 用户名变更追加历史 |
-| public_sessions | auction-application：sessions | 两者 | Public 会话权威状态；滑动闲置有效期受绝对有效期限制，SQLite 使用可取消回滚的串行写事务 |
+| public_sessions | auction-application：sessions | 两者 | Public 会话权威状态；滑动闲置有效期受绝对有效期限制，SQLite 写入使用可取消回滚的串行事务；长连接只读复核撤销、active 账号/凭据与双重过期，不刷新活动时间或取得 Lite 写锁 |
 | admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态；token_hash 为绑定 actor/secret 的 HMAC-SHA256 摘要，Admin 启动永久撤销所有未撤销行；保留滑动有效期、绝对上限与原撤销时间，不新增凭据校验值或列 |
 | rules_documents | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
 | audit_records | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
@@ -181,6 +181,10 @@ A32 复用现有身份/外部命令迁移创建的 `credential_keys` 与
 保存创建拍卖时冻结的 schema v4 结算/恢复及竞价策略。它与 `default_start_price`、软截止、
 取消截止和 slow 间隔等遗留规则列在同一创建事务中写入；配置更新不会回溯改变已创建拍卖。
 竞价和取消事务在锁内读取该快照，恢复 PPM、代理开关/默认模式/次数上限和 final phase 参数。
+
+两后端应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与
+`bid_proxy_authorization_transitions.created_at` 的新写入显式绑定计划统一的锁后数据库时间，
+与命令结果内的转换时间一致；不依赖列默认值另行取时。既有表、迁移及历史记录保持不变。
 
 A40/A41 不新增表或修改迁移：业务世界读取复用 `worlds`；启停命令按 world-first 锁序读取
 `worlds`，以 `auctions` 与 `scheduled_rounds` 判定关闭 blocker，并把结果写入既有

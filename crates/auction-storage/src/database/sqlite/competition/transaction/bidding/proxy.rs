@@ -8,7 +8,10 @@ use super::super::*;
 pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
     transaction: &mut SqliteCompetitionTransaction,
     plan: &CompetitionPlan,
+    occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
+    // 保留命令结果的锁后时刻与精度，不能另取 CURRENT_TIMESTAMP 的整秒时间。
+    let occurred_at = sqlite_timestamp(occurred_at);
     let created_ids: HashSet<ProxyAuthorizationId> = plan
         .proxy_transitions
         .iter()
@@ -31,7 +34,7 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
         let result = sqlx::query(
             "UPDATE bid_proxy_authorizations
              SET maximum_amount = ?, mode = ?, status = ?, terminal_reason = ?,
-                 state_version = ?, updated_at = CURRENT_TIMESTAMP
+                 state_version = ?, updated_at = ?
              WHERE authorization_id = ? AND state_version = ?",
         )
         .bind(state.maximum_amount.value())
@@ -39,6 +42,7 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
         .bind(proxy_status(state.status))
         .bind(reason.map(proxy_terminal_reason))
         .bind(i64_version(state.state_version, "代理状态版本")?)
+        .bind(&occurred_at)
         .bind(uuid_blob(state.id.as_uuid()))
         .bind(i64_version(previous_version, "代理前一版本")?)
         .execute(&mut *connection)
@@ -62,7 +66,7 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
                 (authorization_id, lot_id, user_id, authorization_sequence, usage_number,
                  maximum_amount, mode, status, terminal_reason, state_version,
                  creation_command_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(uuid_blob(state.id.as_uuid()))
         .bind(uuid_blob(state.lot_id.as_uuid()))
@@ -75,6 +79,8 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
         .bind(reason.map(proxy_terminal_reason))
         .bind(i64_version(state.state_version, "代理状态版本")?)
         .bind(uuid_blob(state.creation_command_id.as_uuid()))
+        .bind(&occurred_at)
+        .bind(&occurred_at)
         .execute(&mut *connection)
         .await
         .map_err(map_sql_error)?;
@@ -87,7 +93,7 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
                 (authorization_id, transition_number, transition_kind, origin_command_id,
                  old_maximum_amount, new_maximum_amount, old_mode, new_mode, old_status,
                  new_status, reason, resulting_state_version, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(uuid_blob(transition.authorization_id.as_uuid()))
         .bind(i64_version(transition.state_version, "代理转换序号")?)
@@ -101,6 +107,7 @@ pub(in crate::database::sqlite::competition) async fn apply_proxy_changes(
         .bind(proxy_status(transition.new_status))
         .bind(transition.reason.map(proxy_terminal_reason))
         .bind(i64_version(transition.state_version, "代理转换版本")?)
+        .bind(&occurred_at)
         .execute(&mut *connection)
         .await
         .map_err(map_sql_error)?;

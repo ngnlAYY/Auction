@@ -28,6 +28,32 @@ pub(super) async fn list(
     } else {
         request.limit
     };
+    // 数字页总数与条目共享 MVCC 快照；越界空页仍返回完整筛选集的总数。
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开始公开拍卖列表快照失败"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| storage_error("设置公开拍卖列表快照失败"))?;
+    let total = if use_cursor {
+        None
+    } else {
+        Some(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*)
+                 FROM public.auctions AS a
+                 JOIN public.worlds AS w ON w.id = a.world_id
+                 WHERE a.status = $1
+                   AND (w.enabled OR a.status = 'settled')
+                   AND ($2::text IS NULL OR a.world_id = $2)",
+            )
+            .bind(&request.status)
+            .bind(request.world_id.as_deref())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(|_| storage_error("读取公开拍卖列表总数失败"))?,
+        )
+    };
     let rows = sqlx::query(
         "SELECT
             a.id,
@@ -47,8 +73,7 @@ pub(super) async fn list(
                 SUM(CASE WHEN l.status = 'sold' THEN COALESCE(ls.buyer_amount, l.current_price, 0) ELSE 0 END),
                 0
             )::bigint AS sold_amount,
-            a.state_version,
-            COUNT(*) OVER ()::bigint AS total_count
+            a.state_version
          FROM public.auctions AS a
          INNER JOIN public.worlds AS w ON w.id = a.world_id
          LEFT JOIN public.lots AS l ON l.auction_id = a.id
@@ -72,16 +97,10 @@ pub(super) async fn list(
     .bind(cursor_id)
     .bind(query_limit)
     .bind(if use_cursor { 0 } else { request.offset })
-    .fetch_all(store.pool())
+    .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取公开拍卖列表失败"))?;
-
-    let total = rows
-        .first()
-        .map(|row| row.try_get("total_count"))
-        .transpose()
-        .map_err(|_| storage_error("读取公开拍卖列表总数失败"))?
-        .unwrap_or(0);
+    transaction.commit().await.map_err(|_| storage_error("结束公开拍卖列表快照失败"))?;
     let mut entries = rows.into_iter().map(map_postgres_summary).collect::<Result<Vec<_>, _>>()?;
     let entry_count =
         i64::try_from(entries.len()).map_err(|_| storage_error("公开拍卖页大小溢出"))?;
@@ -100,7 +119,7 @@ pub(super) async fn list(
 
     Ok(PublicAuctionPage {
         entries,
-        total: (!use_cursor).then_some(total),
+        total,
         limit: request.limit,
         offset: if use_cursor { 0 } else { request.offset },
         next_cursor,

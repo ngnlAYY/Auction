@@ -2,7 +2,6 @@
 .trellis/
 .gitnexus/
 .agents/*
-!.agents/notes/
 .claude/
 .codex/
 .grok/

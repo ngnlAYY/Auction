@@ -147,7 +147,6 @@ page-login-title = 登入
 page-account-title = 我的出價
 page-rules-title = 規則
 page-blacklist-title = 黑名單列表
-page-blacklist-note = 目前被禁止競價的使用者。這裡顯示目前的 MoogleMail 玩家名稱，絕不會顯示拍賣系統資料庫 ID。
 page-compensation-pool-title = 補償池
 page-compensation-pool-note = 兩個世界的拍賣共用主世界 Credits 補償池。展開輪次可查看每筆收入與補償流向。
 compensation-balance = 目前餘額

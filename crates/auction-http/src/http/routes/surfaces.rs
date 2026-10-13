@@ -275,6 +275,12 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 ))
                 .strict_methods("DELETE, GET, PATCH, POST"),
         )
+        .route(
+            "/api/v1/admin/credentials/{credential_id}/check",
+            post(admin_credentials::check).layer(DefaultBodyLimit::max(4 << 10)).layer(
+                middleware::from_fn_with_state(strict_json::post(4 << 10), strict_json::enforce),
+            ),
+        )
         .route("/api/v1/admin/audit", get(admin_audit::list))
         .route("/api/v1/admin/deliveries", get(delivery_admin::list))
         .route(

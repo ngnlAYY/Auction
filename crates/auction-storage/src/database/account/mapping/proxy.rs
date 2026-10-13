@@ -291,6 +291,11 @@ pub(in crate::database::account) fn derive_capabilities(
         .map_err(|_| storage_error("账户代理当前金额不是正数"))?;
     let start = BidAmount::from_persisted_positive(base.start_price)
         .map_err(|_| storage_error("账户代理起始金额不是正数"))?;
+    if base.maximum_amount < current.value() {
+        return Err(storage_error("账户代理上限低于当前合法绑定金额"));
+    }
+    // 等待中的代理可以用剩余上限反超，不必覆盖完整下一口；降额仍受完整下一口约束。
+    // “不能继续降额”不等于原授权损坏，账户读取不能因此拒绝合法慢速代理。
     let binding = if waiting {
         let rules = AuctionRules {
             bid_increment_ppm: base.policy_bid_increment_ppm,
@@ -304,9 +309,6 @@ pub(in crate::database::account) fn derive_capabilities(
     } else {
         current
     };
-    if base.maximum_amount < binding.value() {
-        return Err(storage_error("账户代理上限低于当前合法绑定金额"));
-    }
     Ok(PublicProxyCapabilities {
         can_lower: base.maximum_amount > binding.value(),
         waiting,

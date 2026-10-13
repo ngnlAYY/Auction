@@ -64,6 +64,8 @@
   供 Admin 报表选择器使用，不复用包含生命周期命令字段的通用拍卖列表。
 - `AdminWorldListResponse`、`AdminWorldSetEnabledRequest` 与 `AdminWorldSetEnabledResponse`：数据库
   权威业务世界的安全状态、`policy_revision` fence 和幂等启停命令；不表达 runtime 邮箱开关。
+- `AdminCredentialCheckRequest` 与 `AdminCredentialCheckResponse`：A44 只读校验的预期版本与
+  带时间/范围的 `valid`、`invalid`、`inconclusive` 安全观测，不含 Cookie、账号、余额或原始页面。
 - `AdminRealtimeEventListResponse`：Admin 最近事件的分页元数据投影；只返回事件 ID、流、序号、
   类型、schema 与写入时间，不返回公开 payload、命令/竞价来源或数据库内部字段。
 - Public lot/装备响应可选返回固定顺序的 `primary_attribute_initials`；竞价日志仅在真实论坛楼层与
@@ -82,7 +84,7 @@
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-contracts

@@ -1,8 +1,13 @@
 # Auction Rust 系统设计
 
-[项目首页](README.md) · [架构](docs/architecture.md) · [契约](docs/contracts/README.md) · [实现与验证状态](docs/status.md)
+[项目首页](README.md) · [文档导航](docs/README.md) · [Public 设计](crates/auction-web-public/DESIGN.md) · [Admin 设计](crates/auction-web-admin/DESIGN.md)
 
-> 本文是 Auction Rust 当前实现的设计总览，基线日期为 2026 年 9 月 21 日，源码基线为当前分支提交 `84e797f`。它用于说明模块关系、数据流和运行边界；路由、事件、数据库对象和不变量仍以 `docs/contracts/` 及源码 owner 为准。
+> 核对日期：2026-10-13。本文描述当前工作区的系统设计，不代表对应源码已经部署或完成运行验收。
+> 路由、事件、数据库对象和不变量以 [契约](docs/contracts/README.md) 为准；模块 owner 以
+> [架构](docs/architecture.md) 为准；实现与证据分别登记在 [状态说明](docs/status.md)。
+
+本文负责系统边界、核心数据流与设计约束。Public 与 Admin 的页面、布局、交互和样式分别由两份独立
+`DESIGN.md` 维护，不在总览中合并成同一个应用外壳，也不重新定义既有业务或视觉契约。
 
 ## 1. 设计目标
 
@@ -33,10 +38,10 @@ flowchart TD
     HTTP --> App[auction-application]
     Jobs --> App
     App --> Domain[auction-domain]
-    App --> Contracts[auction-contracts]
-    App --> Storage[auction-storage]
-    App --> Integrations[auction-integrations]
-    App --> Cache[auction-cache]
+    HTTP --> Contracts[auction-contracts]
+    Storage[auction-storage] -.->|实现应用端口| App
+    Integrations[auction-integrations] -.->|实现应用端口| App
+    Cache[auction-cache] -.->|实现应用端口| App
     Storage --> PostgreSQL[(PostgreSQL 完整档)]
     Storage --> SQLite[(SQLite Lite)]
     Cache --> Redis[(可选 Redis)]
@@ -49,7 +54,8 @@ flowchart TD
     Server --> Worker
 ```
 
-依赖方向向内：装配根实例化适配器，应用层通过窄端口调用，领域层不读取配置、不执行 SQL、不访问网络。
+浏览器到进程的箭头表示请求，适配器到应用层的虚线表示实现应用端口，不表示由应用层导入具体适配器。
+编译依赖方向向内：装配根实例化并注入适配器，应用层通过窄端口调用，领域层不读取配置、不执行 SQL、不访问网络。
 
 ## 3. 进程边界
 
@@ -123,15 +129,15 @@ Draft → Preview → Live → Final → Settling → Settled
 
 ## 6. 写入与事务设计
 
-所有可变命令遵循同一模式：
+数据库业务写命令遵循以下模式；runtime 文件更新另有文件与账本的向前恢复边界，见第 9 节：
 
 1. 接收稳定 `command_id` 和请求摘要；
-2. 在账本中查找重放或负载冲突；
-3. 按固定顺序锁定 world → auction → lot → 资格/代理等权威对象；
+2. 在事务内查找账本，判定原结果重放或负载冲突；
+3. 按对应存储 owner 的锁顺序保护权威对象；竞价涉及 world、auction、lot、资格与代理；
 4. 在领域层校验状态、资格、版本、金额和策略；
-5. 在同一事务写入事实、状态版本、审计、实时事件和 outbox；
-6. 提交后才允许 Worker 执行论坛、邮件或其他外部副作用；
-7. 以安全结果写入命令账本并返回。
+5. 在同一事务写入业务事实、状态版本、安全结果账本、追加审计及该命令要求的实时事件/outbox；
+6. 提交成功后返回结果；不能先返回成功，再补写命令账本或审计；
+7. Worker 只在本地提交之后领取持久任务，执行论坛、邮件等外部副作用。
 
 相同 `command_id` 与相同摘要必须重放原结果；相同 ID 搭配不同负载必须冲突。未知提交结果不能自动重放可能已成功的外部写入。
 
@@ -192,7 +198,8 @@ Return/Take 使用独立动作证明。凭据按 Cookie 类型取得进程级 ow
 
 ### HTTP
 
-Public 当前登记 21 条 feature API，Admin 当前登记 43 条 feature API。业务响应使用：
+Public 与 Admin 分别注册自己的 feature API；完整路径、方法与数量以 [HTTP 契约](docs/contracts/routes.md) 为准。
+业务响应使用：
 
 ```json
 {"code":"...","message":"...","data":...}
@@ -212,15 +219,46 @@ Public 使用 WebSocket v1 + `GET /api/v1/events` Catch-up：
 
 当前未注册 SSE 或外部广播 sink。
 
-### Web
+### Public：公开竞价界面
 
-Public/Admin 是两个独立的 Dioxus CSR SPA：
+面向浏览者、竞买人和卖家，以拍卖目录、装备详情、明确的竞价确认及可恢复的实时读取为核心。
+顶部导航、世界选择、连接状态和 Public 会话由公开端外壳持有；不挂载管理导航、管理命令或凭据组件。
+详细信息架构、视觉基底、页面与交互见 [Public DESIGN.md](crates/auction-web-public/DESIGN.md)。
 
-- Public 15 条浏览器入口，Admin 21 条正式入口，`/setup` 属于独立首次设置表面；
-- 支持 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，所有用户文案来自 Fluent；
-- 浏览器只消费稳定 DTO，不接触 SQL 行、密钥或外部凭据；
-- `web-embed` 显式选择资源，API-only 制品缺少资源时返回 503，不依赖构建机残留文件；
-- 业务表使用 100% 容器宽度和完整百分比列宽，窄屏不改为卡片或横向滚动。
+### Admin：管理与运维界面
+
+面向操作员，以安全查询、版本化管理命令、诊断、配置及人工对账为核心。管理会话先于业务页面加载；
+桌面侧栏与窄屏折叠菜单属于独立 Admin 外壳，不复用公开端竞价布局。
+首次部署 `/setup` 是独立设置表面，不挂载到正式 Admin HTTP 服务。
+详细信息架构、视觉基底、表单与操作反馈见 [Admin DESIGN.md](crates/auction-web-admin/DESIGN.md)。
+
+### 共享基础与隔离规则
+
+| 边界 | Public | Admin |
+| --- | --- | --- |
+| 页面与交互 owner | `auction-web-public/src/app/` | `auction-web-admin/src/app/` |
+| API 消费 owner | `auction-web-public/src/api/` | `auction-web-admin/src/api/` |
+| 专属样式 | `auction-web-public/assets/public.css` | `auction-web-admin/assets/admin.css` |
+| 译文与默认语言 | 独立 `i18n/*.ftl`，默认 `en` | 独立 `i18n/*.ftl`，默认 `zh-CN` |
+| 会话 | Public 登录 Key 与 Public session | Admin 登录交换、Admin session 与 CSRF |
+| 默认内嵌宿主 | `auction-public-api` | `auction-admin-api` |
+
+两端均为独立 Dioxus CSR SPA，不互相依赖。相同的 `/rules` 等路径也属于不同 HTTP surface，不能据此
+共用页面、权限或资源。可选 `auction-server` 虽同时携带两套产物，仍由不同角色和 router 隔离提供。
+
+共享层只拥有无业务偏向的设计变量、分页、弹窗、时间/金额格式化、安全 Markdown、传输及语言选择；
+业务字段、列宽、文案、命令负载、权限判断与表单状态留在各自 surface。共享语义和当前变量值见
+[共享 Web README](crates/auction-web-shared/README.md) 与
+[base.css](crates/auction-web-shared/style/base.css)，不能把后台专属控件样式上移后影响公开端。
+
+共同约束：
+
+- 五语言固定为 `en`、`zh-CN`、`zh-TW`、`ja`、`ko`，偏好键固定为 `hv.lang`，译文分别内嵌；
+- 浏览器只消费稳定 DTO；已保存的 Cookie、密钥和数据库记录不作为普通页面数据返回；
+- Admin 凭据录入只在当前表单请求中提交明文，不回显已保存 secret，不进入浏览器持久化存储；
+- `web-embed` 显式选择资源，`allow_missing` 保证缺失产物可编译并明确返回 503；
+- 业务表使用 100% 容器宽度和完整百分比列宽，窄屏不改为卡片或横向滚动，详见 [表格契约](docs/table-layouts.md)；
+- 静态检查、页面产物构建和线上部署是不同步骤，不能以源码修改声称浏览器已经更新。
 
 ## 9. 配置、安全和缓存
 
@@ -273,7 +311,9 @@ SIGINT/SIGTERM 首次信号停止领取新任务并开始有界 drain，第二�
 
 ## 12. 当前状态与未闭合验证
 
-当前分支已完成论坛展示优化，并已将 `withdrawn` 拍品从论坛拍卖快照中排除；论坛固定帖、回帖导入、MoogleMail 通知、实时恢复、管理配置和履约边界仍遵循上述持久化设计。
+源码能力、历史隔离验证和待补运行证据分别维护在 [实现与验证状态](docs/status.md)。
+本文不替代该登记，不把某次规则导入、静态编译或单个接口成功扩大为整个系统的生产验收。
+两份界面设计同样描述实现边界，不代表所有页面、语言和异常分支都已完成浏览器验证。
 
 默认验证范围：
 
@@ -310,7 +350,7 @@ just wasm-check
 3. 在 `auction-application` 增加用例与窄端口；
 4. 在 `auction-storage` 或 `auction-integrations` 实现权威适配器；
 5. 接入 HTTP、Web、Worker 表面；
-6. 同步契约、模块 README、迁移和必要决策笔记；
+6. 同步契约、模块 README、设计与运维说明和迁移；
 7. 运行静态门禁；行为验证另行授权并保存证据。
 
 关键参考：

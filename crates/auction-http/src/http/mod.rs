@@ -8,7 +8,8 @@ mod routes;
 pub use routes::{
     AdminApiState, AdminHttpSecurity, HttpBoundary, HttpSecurityOptions, PublicApiState,
     PublicHttpSecurity, RealtimeHub, RealtimeHubHealth, RealtimeHubSink, RealtimeSubscription,
-    admin_router, apply_browser_security_headers, public_router, serve_http,
+    RealtimeSubscriptionError, admin_router, apply_browser_security_headers, public_router,
+    serve_http,
 };
 
 #[cfg(target_os = "linux")]

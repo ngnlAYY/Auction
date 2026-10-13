@@ -34,6 +34,7 @@ use sqlx::{Row, postgres::PgRow, types::Json};
 
 use super::DatabaseStore;
 
+mod check;
 mod common;
 #[cfg(feature = "postgres")]
 mod mapping;

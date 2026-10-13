@@ -16,6 +16,8 @@ use crate::{
 
 #[path = "competition/legacy_ledger.rs"]
 mod legacy_ledger;
+#[path = "competition/slow_replay.rs"]
+mod slow_replay;
 
 /// 旧版竞价命令账本使用的稳定命令种类。
 pub const PLACE_BID_COMMAND_KIND: &str = "place_bid";
@@ -368,7 +370,7 @@ where
                         }
                         let replayed: CompetitionPlan =
                             serde_json::from_slice(&stored.result_payload)?;
-                        replayed.validate()?;
+                        slow_replay::validate(&command, &replayed)?;
                         return Ok(replayed);
                     }
 
@@ -468,17 +470,9 @@ where
                             "accepted" => {
                                 let replayed: CompetitionPlan =
                                     serde_json::from_slice(&stored.result_payload)?;
-                                replayed.validate()?;
                                 match &command {
                                     CompetitionCommand::PlaceBid(_) => {
-                                        let effective_end_at = CompetitionWireTimestamp::from_utc(
-                                            replayed.final_lot.effective_end_at,
-                                        );
-                                        Ok(CompetitionCommandOutcome {
-                                            plan: replayed,
-                                            proxy: None,
-                                            effective_end_at,
-                                        })
+                                        legacy_ledger::replay_accepted(&command, replayed, &[], 0)
                                     }
                                     CompetitionCommand::CreateProxy(create) => {
                                         let authorization_id = ProxyAuthorizationId::from_uuid(

@@ -17,6 +17,7 @@ use super::*;
 
 mod pagination;
 mod request;
+mod session;
 mod topic;
 
 /// E-Hentai HTTP 客户端配置。

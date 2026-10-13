@@ -91,7 +91,7 @@ pub(crate) struct RealtimeError {
 enum RealtimeErrorKind {
     /// 重连无法自愈：游标或拍卖 ID 无效、认证/权限被拒绝、目标拍卖不存在。
     Permanent,
-    /// 网络抖动、服务端瞬时故障、毒帧超限或活性看门狗等可重试失败。
+    /// 网络抖动、服务端瞬时故障、毒帧超限或握手超时等可重试失败。
     #[cfg(target_arch = "wasm32")]
     Transient,
 }
@@ -115,10 +115,9 @@ impl RealtimeError {
     }
 }
 
-/// 活性看门狗：浏览器对半开 TCP 的感知延迟可达数分钟；90 秒无任何帧就主动断开，
-/// 交给外层按退避策略重连。
+/// 只限制连接建立阶段；业务消息空闲不能证明断线，协议 Ping/Pong 不暴露给浏览器 API。
 #[cfg(target_arch = "wasm32")]
-const REALTIME_WATCHDOG_MILLIS: u32 = 90_000;
+const REALTIME_CONNECT_TIMEOUT_MILLIS: u32 = 10_000;
 /// 连续毒帧上限：单帧解码失败只计数降级，连续 5 帧失败才断开整条订阅。
 #[cfg(target_arch = "wasm32")]
 const MAX_CONSECUTIVE_BAD_FRAMES: u32 = 5;
@@ -457,9 +456,20 @@ where
     let url = websocket_url(auction_id).map_err(RealtimeError::permanent)?;
     let mut socket =
         WebSocket::open(&url).map_err(|error| RealtimeError::transient(error.to_string()))?;
-    poll_fn(|context| Sink::<Message>::poll_ready(Pin::new(&mut socket), context))
-        .await
-        .map_err(|error| RealtimeError::transient(error.to_string()))?;
+    {
+        let connected =
+            poll_fn(|context| Sink::<Message>::poll_ready(Pin::new(&mut socket), context));
+        let deadline = TimeoutFuture::new(REALTIME_CONNECT_TIMEOUT_MILLIS);
+        pin_mut!(connected, deadline);
+        match select(connected, deadline).await {
+            Either::Left((result, _)) => {
+                result.map_err(|error| RealtimeError::transient(error.to_string()))?;
+            }
+            Either::Right(((), _)) => {
+                return Err(RealtimeError::transient("实时 WebSocket 握手超时"));
+            }
+        }
+    }
     if !matches!(socket.state(), WebSocketState::Open) {
         return Err(RealtimeError::transient("实时 WebSocket 建立失败"));
     }
@@ -467,18 +477,8 @@ where
     let mut expected_after = after;
     catch_up_realtime(auction_id, &mut expected_after, &mut on_page).await?;
     let mut consecutive_bad_frames = 0_u32;
-    loop {
-        // 活性看门狗：限定时间内没有任何帧（含毒帧）就主动断开，让外层按退避策略重连。
-        let next_frame = read.next();
-        let watchdog = TimeoutFuture::new(REALTIME_WATCHDOG_MILLIS);
-        pin_mut!(next_frame, watchdog);
-        let message = match select(next_frame, watchdog).await {
-            Either::Left((message, _)) => message,
-            Either::Right(((), _)) => {
-                return Err(RealtimeError::transient("实时通道活性看门狗超时，主动断开重连"));
-            }
-        };
-        let Some(message) = message else { break };
+    // 存活检查由服务端 Ping/Pong 拥有；静默拍卖保持连接，关闭/错误才触发恢复。
+    while let Some(message) = read.next().await {
         let message = match message {
             Ok(message) => message,
             Err(error) => {

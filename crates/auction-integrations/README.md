@@ -21,7 +21,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
 | --- | --- |
 | [src/clients](src/clients) | 受限 HTTP、论坛与邮件传输/解析 |
 | [src/equipment](src/equipment) | 装备来源策略、读取与解析 |
-| [src/credentials](src/credentials) | 外部 Cookie 加密 |
+| [src/credentials](src/credentials) | 外部 Cookie 加密与 Admin 只读认证探测 |
 | [src/cryptobox](src/cryptobox) | 数据密钥与装备 key 信封 |
 | [src/forum](src/forum) | 本地论坛解析与 BBCode 渲染 |
 | [src/login_key](src/login_key) | 用户登录 key 签发/读取 |
@@ -177,6 +177,14 @@ post ID 为楼层号生成 E-Hentai findpost 链接；它还显示本轮能够�
 Cookie，而应保留凭据并以协议/访问失败收口。论坛回复只执行普通出价；代理创建/降低是 Public Web
 专属能力，解析器会在账本前静默丢弃论坛代理行，且不会把它们写入固定 #2。
 
+Admin A44 由 [src/credentials/check.rs](src/credentials/check.rs) 装配独立只读探测器，只接受数据库信封，
+不加载敏感 TOML 或 `.keyenv` 作为替代候选。论坛的 [client/session.rs](src/clients/ehentai/client/session.rs)
+读取固定 UserCP，以系统导航个人资料/退出链接证明登录；游戏读取 Item Shop 并复用余额双源一致性解析，
+不回传余额。shared 游戏 Cookie 分别检查两个世界。401/明确登录失效才归为 invalid；
+403/挑战、战斗页、限流、超时、格式或协议变化均为 inconclusive，不回写状态或影响 Worker 写入 guard。
+每个 Admin 进程单并发、各站点 2 秒最小间隔、每范围含等待 5 秒预算、2 MiB 正文上限；
+无重试、重定向、远端写入或原始响应留证，成功只证明当次登录态，不证明写权限。
+
 ## 装备来源与密钥适配
 
 - [src/equipment/](src/equipment/)：`config.rs` 冻结固定 HTTPS origin 外的 host/path allowlist、响应上限、共享
@@ -229,7 +237,7 @@ client 克隆及 sender、分页上下文继续共享同一 owner。每次物理
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-integrations

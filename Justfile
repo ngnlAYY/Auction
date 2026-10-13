@@ -9,7 +9,7 @@ fmt:
 fmt-fix:
     cargo fmt --all
 
-# 文档链接、导航覆盖和决策笔记的静态门禁，不运行产品或行为测试。
+# 文档链接、锚点、导航覆盖和包 README 的静态门禁，不运行产品或行为测试。
 docs-check:
     @bash ci/check-docs.sh
 

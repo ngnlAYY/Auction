@@ -103,6 +103,24 @@ pub(super) fn finalize_plan(
     })
 }
 
+/// Fast、SlowDue 和 Final 共用反超计算，保留历史金额余数与 1B 同价收口规则。
+pub(super) fn proxy_response_amount(
+    rules: AuctionRules,
+    state: LotBidState,
+    current: BidAmount,
+    maximum: BidAmount,
+) -> Result<BidAmount, DomainError> {
+    let response = rules
+        .next_minimum_bid(Some(state.start_price), Some(current), state.material, false)?
+        .min(maximum)
+        .bid_ceiling();
+    // 历史授权可高于现行上限；不能继续抬价，也不能让代理在上限以下无故同价反超。
+    if response < current || (response == current && current.value() != MAX_BID_AMOUNT) {
+        return Err(DomainError::InvalidBidState("代理无法产生更高出价"));
+    }
+    Ok(response)
+}
+
 pub(super) fn schedule_slow_proxy(
     rules: AuctionRules,
     mut state: LotBidState,

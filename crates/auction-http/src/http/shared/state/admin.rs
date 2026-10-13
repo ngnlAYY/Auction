@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use auction_application::{
     AdminAuctionCreatePort, AdminAuctionReader, AdminAuctionSchedulePort, AdminAuditPort,
-    AdminCredentialHealthReader, AdminCredentialPort, AdminCredentialWorld, AdminForumPreviewPort,
-    AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader,
-    AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort,
-    AdminWorldPort, AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
+    AdminCredentialCheckPort, AdminCredentialHealthReader, AdminCredentialPort,
+    AdminCredentialWorld, AdminForumPreviewPort, AdminIntakePort, AdminLotReader,
+    AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
+    AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort, AdminWorldPort,
+    AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
     OperationsAlertStore, ProcessReadinessPort, ReadModelCache, RealtimeAdminPort,
     RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
     WorkerControlPort, public_rules_cache_key,
@@ -34,6 +35,7 @@ pub struct AdminApiState {
     admin_rules: Option<Arc<dyn AdminRulesPort>>,
     admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>>,
     admin_credentials: Option<Arc<dyn AdminCredentialPort>>,
+    credential_check: Option<Arc<dyn AdminCredentialCheckPort>>,
     admin_renames: Option<Arc<dyn AdminRenameReader>>,
     admin_users: Option<Arc<dyn AdminUserPort>>,
     admin_worlds: Option<Arc<dyn AdminWorldPort>>,
@@ -104,6 +106,7 @@ impl AdminApiState {
             admin_rules,
             admin_runtime,
             admin_credentials,
+            credential_check: None,
             admin_renames,
             admin_users,
             admin_worlds: None,
@@ -140,6 +143,19 @@ impl AdminApiState {
     pub fn with_readiness(mut self, readiness: Arc<dyn ProcessReadinessPort>) -> Self {
         self.readiness = Some(readiness);
         self
+    }
+
+    /// 注入完整档凭据只读校验；缺少密钥或后端能力时不伪造可用状态。
+    pub fn with_credential_check(
+        mut self,
+        check: Option<Arc<dyn AdminCredentialCheckPort>>,
+    ) -> Self {
+        self.credential_check = check;
+        self
+    }
+
+    pub(crate) fn credential_check(&self) -> Option<&dyn AdminCredentialCheckPort> {
+        self.credential_check.as_deref()
     }
 
     /// 注入正式开拍前的计划结束时间修改端口。

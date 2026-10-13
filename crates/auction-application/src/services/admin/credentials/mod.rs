@@ -17,7 +17,10 @@ use validation::{
     next_version, validate_delete, validate_import, validate_rename, validate_status,
 };
 
+mod check;
 mod commands;
+
+pub use check::AdminCredentialCheckService;
 mod digest;
 mod query;
 mod validation;

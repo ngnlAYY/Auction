@@ -11,7 +11,7 @@ impl PostgresCompetitionTransaction {
         occurred_at: DateTime<Utc>,
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
-        super::apply_proxy_changes(self, &plan).await?;
+        super::apply_proxy_changes(self, &plan, occurred_at).await?;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
             super::insert_realtime_event(self, bid).await?;
@@ -32,7 +32,7 @@ impl PostgresCompetitionTransaction {
     ) -> Result<(), CompetitionTransactionError> {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         let command_id = plan_command_id(&plan)?;
-        super::apply_proxy_changes(self, &plan).await?;
+        super::apply_proxy_changes(self, &plan, occurred_at).await?;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
             super::insert_audit_for_bid(self, bid, request_id.as_deref()).await?;
@@ -52,7 +52,7 @@ impl PostgresCompetitionTransaction {
         plan.validate().map_err(|error| invalid_state(error.to_string().as_str()))?;
         context.validate()?;
         let occurred_at = context.executed_at;
-        super::apply_proxy_changes(self, &plan).await?;
+        super::apply_proxy_changes(self, &plan, occurred_at).await?;
         for bid in &plan.public_bids {
             super::insert_bid(self, bid, occurred_at).await?;
             super::insert_realtime_event(self, bid).await?;

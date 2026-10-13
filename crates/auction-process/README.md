@@ -36,7 +36,7 @@ systemd 默认停止信号进入同一条路径；drain 期间第二次信号会
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-process

@@ -147,7 +147,20 @@ pub(super) fn replay_accepted(
     quota_limit: u32,
 ) -> Result<CompetitionCommandOutcome, ApplicationError> {
     plan.validate().map_err(|_| legacy_payload_error())?;
-    if matches!(command, CompetitionCommand::PlaceBid(_)) {
+    // 内部自洽不等于属于当前请求；局部计划仍须绑定命令、lot 与请求金额/身份。
+    if plan.final_lot.lot_id != command.lot_id()
+        || plan.public_bids.iter().any(|bid| bid.command_id != command.command_id())
+        || plan
+            .proxy_transitions
+            .iter()
+            .any(|transition| transition.command_id != command.command_id())
+    {
+        return Err(legacy_payload_error());
+    }
+    if let CompetitionCommand::PlaceBid(place) = command {
+        if !LegacyBidResult::from_plan(&plan)?.validate_place_bid(place) {
+            return Err(legacy_payload_error());
+        }
         let effective_end_at = CompetitionWireTimestamp::from_utc(plan.final_lot.effective_end_at);
         return Ok(CompetitionCommandOutcome { plan, proxy: None, effective_end_at });
     }

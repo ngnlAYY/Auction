@@ -77,6 +77,25 @@ impl AdminSessionStore for DatabaseStore {
 }
 
 impl PublicSessionStore for DatabaseStore {
+    fn inspect_public(
+        &self,
+        token_hash: [u8; 32],
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, PublicSessionIdentity> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    public::inspect_postgres(store, token_hash, now).await
+                }
+                #[cfg(feature = "sqlite")]
+                DatabaseStore::Sqlite(store) => {
+                    public::inspect_sqlite(store, token_hash, now).await
+                }
+            }
+        })
+    }
+
     fn create_public(
         &self,
         record: PublicSessionRecord,

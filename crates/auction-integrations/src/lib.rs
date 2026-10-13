@@ -8,7 +8,7 @@ mod forum;
 mod login_key;
 
 pub use clients::{build_http_client, ehentai, mooglemail};
-pub use credentials::CredentialSealer;
+pub use credentials::{CredentialSealer, CredentialVerifier};
 pub use cryptobox::{
     DataKey, EquipmentKeyOpener, EquipmentKeyOpenerError, EquipmentKeySealer,
     EquipmentKeySealerError,

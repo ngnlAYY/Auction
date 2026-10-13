@@ -91,7 +91,7 @@ pub trait AdminCredentialHealthReader: Send + Sync {
     fn health(&self) -> ApplicationFuture<'_, AdminCredentialHealthSnapshot>;
 }
 
-/// Worker 凭据解密端口；明文只在 integrations 与远端客户端之间短暂存在。
+/// 外部凭据解密端口；Worker 与 Admin 只读校验的明文只在集成适配器中短暂存在。
 pub trait AdminCredentialOpener: Send + Sync {
     fn open(
         &self,

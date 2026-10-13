@@ -8,6 +8,8 @@ mod deliveries;
 mod detail;
 #[path = "mail/helpers.rs"]
 mod helpers;
+#[path = "mail/messages.rs"]
+mod messages;
 #[path = "mail/page.rs"]
 mod page;
 #[path = "mail/table.rs"]

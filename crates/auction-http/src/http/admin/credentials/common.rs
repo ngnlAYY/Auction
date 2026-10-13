@@ -60,6 +60,23 @@ pub(crate) fn map_error(error: ApplicationError) -> Response {
             )
             .into_response()
         }
+        ApplicationError::AdminCredential(AdminCredentialError::CheckBusy) => (
+            [(axum::http::header::RETRY_AFTER, "2")],
+            super::api_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "Cookie 校验繁忙，请稍后重试",
+            ),
+        )
+            .into_response(),
+        ApplicationError::AdminCredential(AdminCredentialError::CheckUnavailable) => {
+            super::api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credential_check_unavailable",
+                "Cookie 校验暂不可用",
+            )
+            .into_response()
+        }
         ApplicationError::CapabilityUnavailable(_) => feature_unavailable(),
         ApplicationError::AdminCredential(AdminCredentialError::CryptoUnavailable) => {
             super::api_error(

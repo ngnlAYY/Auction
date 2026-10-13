@@ -96,7 +96,7 @@ Prometheus 同步；数据库适配器也会登记 PostgreSQL/SQLite 的当前�
 
 ## 维护与验证
 
-修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[决策记录规则](../../docs/documentation.md)维护。
+修改本模块时同步对应[契约](../../docs/contracts/README.md)与源码入口；跨模块理由按[文档维护规则](../../docs/documentation.md)维护。
 
 ```bash
 cargo check --locked -p auction-observability

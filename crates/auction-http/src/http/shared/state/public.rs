@@ -201,6 +201,11 @@ impl PublicApiState {
         self.session.as_deref()
     }
 
+    /// 将同一会话服务交给长连接；连接只读复核，不持有整个 HTTP state。
+    pub(crate) fn session_handle(&self) -> Option<Arc<dyn PublicSessionPort>> {
+        self.session.clone()
+    }
+
     pub(crate) fn commands(&self) -> Option<&dyn CompetitionCommandPort> {
         self.commands.as_deref()
     }

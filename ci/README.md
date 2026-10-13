@@ -7,7 +7,7 @@
 | 范围 | 本地入口 | 实现或工作流 |
 | --- | --- | --- |
 | 全部默认静态验证 | `just verify` | [Justfile](../Justfile) |
-| 文档、导航与笔记 | `just docs-check` | [check-docs.sh](check-docs.sh)、[Documentation 工作流](../.github/workflows/docs.yml) |
+| 文档链接、锚点与导航 | `just docs-check` | [check-docs.sh](check-docs.sh)、[Documentation 工作流](../.github/workflows/docs.yml) |
 | 项目规范、布局、配置、i18n | 四项 `*-check` 配方 | [check-policy.sh](check-policy.sh) |
 | 格式、工作区、后端/缓存 feature、Clippy、WASM | `just fmt/check/feature-check/lint/wasm-check` 分别调用 | [Rust 工作流](../.github/workflows/ci.yml) |
 | 锁定依赖安全公告 | `just dependency-audit` | Rust 工作流独立 `security-audit` job，固定 `cargo-audit 0.22.2` |
@@ -22,23 +22,22 @@ Rust 工作流使用仓库固定工具链；MSRV 编译不等于功能或长期�
 依赖审计需要联网获取 RustSec 数据库，读取 `Cargo.lock`，不运行产品或改写依赖；本地 `verify`
 不新增网络要求。`cargo audit --deny yanked --deny unsound` 阻断漏洞、撤回版本与 unsound 提示，
 停维提示仍显示，未设置公告忽略列表。
-当前 `fxhash` 停维提示属于[有期限维护债](../.agents/notes/implemented/bug-fix/2026-10-03-session-setup-audit-remediation.md)，不能把退出码 0 描述为没有任何警告。
+当前 `fxhash` 停维提示属于[有期限维护债](../docs/tech-stack.md#版本与升级)，不能把退出码 0 描述为没有任何警告。
 
 ## 文档检查器
 
-[ci/docs/main.rs](docs/main.rs)装配三个静态 owner：
+[ci/docs/main.rs](docs/main.rs)装配两个静态 owner：
 
 - [scan.rs](docs/scan.rs)：发现正式 Markdown、检查 Cargo 包 README、扫描代码围栏外的 ATX 标题和行内链接。
 - [links.rs](docs/links.rs)：核对本地目标和 Markdown 标题锚点，构建从根 README 可达的文档图。
-- [notes.rs](docs/notes.rs)：检查活跃笔记路径、日期形状、状态、必备章节、Git 忽略规则及 implemented 禁用计划标题。
 
 `check-docs.sh` 先对工具执行 rustfmt 检查，再用 `rustc --edition=2024 -D warnings` 编译到被忽略的 target 目录。
 工具只依赖 Rust 标准库，不使用 Node、npm、Python 库或网络，也不启动任何服务。
 
-正式范围是根 README/AGENTS，以及 docs、apps、crates、ops、migrations、ci 和 `.agents/notes` 下的 Markdown。
+正式范围是根 README/AGENTS/DESIGN，以及 docs、apps、crates、ops、migrations、ci 下的 Markdown，
+包括 Public/Admin 各自的 DESIGN。独立笔记机制已移除，不再要求相关目录、模板、状态或归档格式。
 本地工具目录、构建产物及机器日志不属于项目文档。所有正式文档必须能从根 README 通过本地链接到达。
 当前支持行内相对链接、目录 README 和普通 ATX 标题；引用式链接需先扩展解析器，外链不联网检查。
-笔记正文为中文，格式章节使用技能的英文固定名称；当前没有归档笔记，首次归档前须增加 manifest 哈希与只增不改验证。
 
 检查器不证明源码描述、数据库事务或运维命令的业务正确性。文档重建时仍需人工核对源码、模板、CLI 和证据口径。
 

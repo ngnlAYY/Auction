@@ -5,6 +5,7 @@ use super::*;
 /// 论坛操作名称，用于安全错误分类和日志字段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EhentaiOperation {
+    CheckSession,
     CreateTopic,
     ReconcileTopic,
     FetchTopic,
@@ -17,6 +18,7 @@ impl EhentaiOperation {
     /// 返回持久化和观测使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::CheckSession => "check_session",
             Self::CreateTopic => "create_topic",
             Self::ReconcileTopic => "reconcile_topic",
             Self::FetchTopic => "fetch_topic",
