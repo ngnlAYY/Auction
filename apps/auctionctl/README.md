@@ -25,7 +25,8 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 
 `src/main.rs` 为薄入口，`bootstrap/runtime.rs` 保留装配出口。
 `runtime/postgres/commands/` 按数据库引导、凭据、规则、论坛、结算、预检和备份分工；
-`runtime/postgres/artifacts/` 负责 PostgreSQL 环境、文件、manifest/hash、子进程和 stdin 输入。
+`runtime/postgres/artifacts/` 负责 PostgreSQL 环境、文件、manifest/hash、子进程和 stdin 输入；
+其 `filesystem/parents.rs` 验证灾备文件完整目录链与属主，拒绝非可信账号可替换的路径。
 `runtime/managed.rs` 拥有合并部署迁移锁，`runtime/mail_diagnostics/` 拥有邮件证据命令。
 其他专用 owner 见上表，不在分派层重复实现其安全门禁。
 
@@ -215,6 +216,7 @@ bridge 或接管已提交后失败不能再次 adoption，须保持停机、复�
 `postgres-restore` 只向匹配 manifest 身份的同名空库恢复，要求零外部连接、可写主节点和无用户对象。
 `--dry-run` 只读且不得提供 receipt；实际执行使用单事务 `pg_restore`，schema 后验通过后发布 receipt。
 提交后校验或回执失败不等于数据库未变化，保持停机按[恢复手册](../../ops/deploy/RECOVERY.md)处理。
+旧版恢复也核对完整 SQLx 历史前缀、每条成功状态及 checksum；缺行、未知版本或伪造 checksum 不能发布 clean 回执。
 
 `postgres-rebuild` 默认只读；执行必须同时有精确目标、`--execute`、`REBUILD <数据库名>`、新 receipt，
 以及 verified backup。只有明确可丢弃的一次性数据库可改用 `--allow-unrecoverable-ephemeral` 与

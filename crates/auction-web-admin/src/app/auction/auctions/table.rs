@@ -30,6 +30,7 @@ pub(super) fn AdminAuctionTable(
     // 秒级时钟订阅已下沉到行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
     // 整表（筛选、表头、分页）不再随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
     let notice = use_signal(|| None::<AdminAuctionNotice>);
+    let intake_busy = use_signal(|| false);
     // 翻页保留当前世界筛选与排序；该闭包在分支内move走一份克隆。
     let pager_world = world.clone();
     let pager_sort = sort.clone();
@@ -58,7 +59,9 @@ pub(super) fn AdminAuctionTable(
             rsx! {
                 if capabilities.manual_intake && matches!(world.as_str(), "main" | "isekai") {
                     AdminIntakeForm {
+                        key: "{world}",
                         world_id: world.clone(),
+                        busy: intake_busy,
                         reload_generation,
                     }
                 }
@@ -165,8 +168,10 @@ pub(super) fn AdminAuctionTable(
                         select {
                             class: "admin-auction-world",
                             id: "auction-world",
+                            disabled: intake_busy(),
                             value: world,
                             onchange: move |event| {
+                                if intake_busy() { return; }
                                 // 切换世界筛选回到第一页并保留排序，由页面 push 到地址栏。
                                 on_query_change
                                     .call(AuctionsQuery {

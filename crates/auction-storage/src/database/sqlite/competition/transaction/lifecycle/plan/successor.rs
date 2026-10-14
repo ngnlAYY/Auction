@@ -13,6 +13,9 @@ pub(super) async fn insert_successor_sqlite(
     if !matches!(current_status, "live" | "cancelled") {
         return Err(invalid_state("Lite 下一期草稿的前驱状态无效"));
     }
+    // 与 PostgreSQL 相同：只给新聚合冻结有效模板，不更改前驱快照。
+    let rules =
+        successor.policy.auction_rules().map_err(|_| invalid_state("Lite 后继拍卖策略无效"))?;
     let now = sqlite_timestamp(auction.updated_at);
     let (world_id, successor_version) = {
         let connection = transaction.connection_mut()?;
@@ -23,10 +26,7 @@ pub(super) async fn insert_successor_sqlite(
                  cancel_cutoff_seconds, proxy_slow_interval_seconds, policy_snapshot,
                  preview_scheduled_at, scheduled_open_at, predecessor_auction_id,
                  state_version, created_at, updated_at)
-             SELECT ?, current.world_id, ?, ?, 'draft', current.default_start_price,
-                    current.soft_close_window_seconds, current.soft_close_extension_seconds,
-                    current.cancel_cutoff_seconds, current.proxy_slow_interval_seconds,
-                    json_set(current.policy_snapshot, '$.scheduled_end_at', ?),
+             SELECT ?, current.world_id, ?, ?, 'draft', ?, ?, ?, ?, ?, ?,
                     ?, ?, current.id, 1, ?, ?
              FROM auctions AS current
              WHERE current.id = ? AND current.status = ?
@@ -35,7 +35,12 @@ pub(super) async fn insert_successor_sqlite(
         .bind(uuid_blob(successor.auction_id.as_uuid()))
         .bind(successor.sequence)
         .bind(&successor.title)
-        .bind(successor.scheduled_end_at.to_rfc3339())
+        .bind(rules.default_start_price.value())
+        .bind(rules.soft_close_window.num_seconds())
+        .bind(rules.soft_close_extension.num_seconds())
+        .bind(rules.cancel_cutoff.num_seconds())
+        .bind(rules.proxy_slow_interval.num_seconds())
+        .bind(successor.policy.snapshot(successor.scheduled_end_at).to_string())
         .bind(sqlite_timestamp(successor.preview_due_at))
         .bind(sqlite_timestamp(successor.open_due_at))
         .bind(&now)

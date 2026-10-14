@@ -40,6 +40,9 @@ pub enum RecoveryPreflightError {
     #[error("Auction schema identity is present but invalid")]
     SchemaIdentityInvalid,
 
+    #[error("Auction migration history is not a complete, successful, checksum-verified prefix")]
+    MigrationHistoryInvalid,
+
     #[error("failed to query PostgreSQL recovery preflight at {stage}")]
     Query {
         stage: &'static str,

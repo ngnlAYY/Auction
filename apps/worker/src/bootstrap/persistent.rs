@@ -53,6 +53,7 @@ pub(super) async fn run_worker(
             lifecycle_store,
             Arc::new(SystemClock),
             AuctionLifecyclePolicy::default(),
+            config.auction.policy()?,
         ));
     let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =

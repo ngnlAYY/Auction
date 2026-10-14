@@ -77,13 +77,14 @@ pub(super) async fn apply_open_plan_sqlite(
             "UPDATE auctions
              SET status = 'live', preview_opened_at = COALESCE(preview_opened_at, ?),
                  preview_scheduled_at = CASE
-                     WHEN ? AND preview_scheduled_at > ? THEN ? ELSE preview_scheduled_at END,
+                     WHEN ? AND julianday(preview_scheduled_at) > julianday(?)
+                     THEN ? ELSE preview_scheduled_at END,
                  scheduled_open_at = CASE WHEN ? THEN ? ELSE scheduled_open_at END,
                  opened_at = ?, scheduled_end_at = ?, effective_end_at = ?,
                  state_version = ?, updated_at = ?
              WHERE id = ? AND status = 'preview' AND state_version = ?
-               AND (preview_scheduled_at <= ? OR ?)
-               AND (scheduled_open_at <= ? OR ?)",
+               AND (julianday(preview_scheduled_at) <= julianday(?) OR ?)
+               AND (julianday(scheduled_open_at) <= julianday(?) OR ?)",
         )
         .bind(&now)
         .bind(manual_override)

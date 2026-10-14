@@ -93,6 +93,16 @@ async fn execute_transaction(
         || command.action == DeliveryAdminAction::ReconcileRetry
     {
         reset_settlement_fulfillment(&mut transaction, command.delivery_id).await?;
+        // Recovery owner 在同一命令事务中恢复投影；失败则连 delivery 重试一并回滚。
+        if !crate::database::recovery_commands::reset_after_delivery_retry(
+            transaction.transaction_mut()?,
+            command.delivery_id,
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?
+        {
+            return Err(DeliveryAdminError::Stale.into());
+        }
     } else if command.action == DeliveryAdminAction::ReconcileSucceeded {
         let external_reference =
             command.external_reference.as_deref().ok_or(DeliveryAdminError::Invalid)?;

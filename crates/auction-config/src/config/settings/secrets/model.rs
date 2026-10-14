@@ -154,9 +154,17 @@ pub(crate) struct AppSecrets {
 
 impl AppSecrets {
     pub(crate) fn from_file(secret: SecretFileConfig) -> Result<Self, ConfigError> {
-        // 提前拒绝 Basic Auth 不能表达的账号，避免配置检查通过后启动一个无法登录的管理端。
-        if secret.admin_actor.as_ref().is_some_and(|actor| actor.contains(':')) {
-            return Err(ConfigError::InvalidAdminActor);
+        // 与正式会话共用校验，拒绝启动前无法表达或含控制字符的凭据；不回显原值。
+        if let Some(actor) = &secret.admin_actor {
+            auction_application::validate_admin_actor(actor)
+                .map_err(|_| ConfigError::InvalidAdminActor)?;
+        }
+        if let Some(password) = &secret.admin_secret {
+            auction_application::validate_admin_secret(password.as_bytes()).map_err(|_| {
+                ConfigError::InvalidSessionConfig(
+                    "admin_secret 必须为 16 至 4096 字节且不含 ASCII 控制字符",
+                )
+            })?;
         }
         Ok(Self {
             database_url: resolve_database_url(secret.database, secret.database_url)?,

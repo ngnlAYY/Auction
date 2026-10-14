@@ -328,8 +328,14 @@ fn validate_runtime_file(metadata: &fs::Metadata) -> Result<(), RuntimeFileStore
         return Err(RuntimeFileStoreError::Io("runtime 配置必须是 regular 文件".to_owned()));
     }
     #[cfg(unix)]
-    if metadata.mode() & 0o777 != 0o640 {
-        return Err(RuntimeFileStoreError::Io("runtime 配置必须使用 0640 权限".to_owned()));
+    {
+        // SAFETY: geteuid 不接收指针，仅返回当前进程有效 UID。
+        let effective_uid = unsafe { libc::geteuid() };
+        if metadata.mode() & 0o777 != 0o640 || metadata.uid() != effective_uid {
+            return Err(RuntimeFileStoreError::Io(
+                "runtime 配置必须由运行账号拥有且使用 0640 权限".to_owned(),
+            ));
+        }
     }
     Ok(())
 }

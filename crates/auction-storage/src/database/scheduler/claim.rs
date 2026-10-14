@@ -187,13 +187,13 @@ async fn sqlite_inner(
          INNER JOIN auctions AS auction ON auction.id = round.auction_id
          WHERE round.status = 'active'
            AND round.final_completed_at IS NULL
-           AND (round.lease_until IS NULL OR round.lease_until <= ?)
+           AND (round.lease_until IS NULL OR julianday(round.lease_until) <= julianday(?))
            AND (
-               (round.preview_completed_at IS NULL AND round.preview_due_at <= ?)
+               (round.preview_completed_at IS NULL AND julianday(round.preview_due_at) <= julianday(?))
                OR (
                    round.preview_completed_at IS NOT NULL
                    AND round.open_completed_at IS NULL
-                   AND round.open_due_at <= ?
+                   AND julianday(round.open_due_at) <= julianday(?)
                )
                OR (
                    round.open_completed_at IS NOT NULL

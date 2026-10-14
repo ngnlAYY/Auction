@@ -30,6 +30,7 @@ pub(super) fn AdminLotTable(
 ) -> Element {
     let selected_lot = use_signal(|| None::<(String, String)>);
     let notice = use_signal(|| None::<LotUpdateNotice>);
+    let intake_busy = use_signal(|| false);
     let allow_lot_update = page.auction.status == "draft";
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut lots = page.lots.clone();
@@ -56,7 +57,9 @@ pub(super) fn AdminLotTable(
                     && page.capabilities.manual_intake
                 {
                     AdminIntakeForm {
+                        key: "{page.auction.world_id}",
                         world_id: page.auction.world_id.clone(),
+                        busy: intake_busy,
                         reload_generation,
                     }
                 }

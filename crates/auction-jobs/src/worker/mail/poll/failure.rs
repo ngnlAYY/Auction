@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use auction_application::{Clock, MailPollClaim, MailPollStore, RecurringSchedule};
+use auction_application::{Clock, MailPollBatch, MailPollClaim, MailPollStore, RecurringSchedule};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerRetryKind};
 use chrono::Duration as ChronoDuration;
 
@@ -15,6 +15,21 @@ pub(super) async fn record_failure<C>(
     failure_code: String,
     safe_detail: String,
     context: MailPollFailureContext,
+) where
+    C: Clock + 'static,
+{
+    record_failure_with_prefix(store, clock, claim, failure_code, safe_detail, context, None).await;
+}
+
+/// 失败后缀不能抹掉已完成前缀；同一 fenced 事务持久化前缀与退避。
+pub(super) async fn record_failure_with_prefix<C>(
+    store: Arc<dyn MailPollStore>,
+    clock: Arc<C>,
+    claim: MailPollClaim,
+    failure_code: String,
+    safe_detail: String,
+    context: MailPollFailureContext,
+    prefix: Option<MailPollBatch>,
 ) where
     C: Clock + 'static,
 {
@@ -39,7 +54,13 @@ pub(super) async fn record_failure<C>(
         retry_at = %retry_at,
         "MoogleMail mailbox processing failed"
     );
-    if let Err(error) = store.fail(claim, retry_at, failure_code, safe_detail).await {
+    let result = match prefix {
+        Some(batch) => {
+            store.fail_after_prefix(claim, batch, retry_at, failure_code, safe_detail).await
+        }
+        None => store.fail(claim, retry_at, failure_code, safe_detail).await,
+    };
+    if let Err(error) = result {
         tracing::error!(error = %error, "MoogleMail Worker 保存失败退避状态失败");
     }
 }

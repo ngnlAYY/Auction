@@ -105,43 +105,27 @@ pub(super) fn auction_schedule_issue(
 
 /// 校验计划修改输入：Draft 三项都在未来；Preview 保留既有预览时间并要求开拍仍在未来。
 pub(super) fn valid_schedule_update(status: &str, preview: &str, open: &str, end: &str) -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let (Some(preview), Some(open), Some(end)) = (
-            local_datetime_millis(preview),
-            local_datetime_millis(open),
-            local_datetime_millis(end),
-        ) else {
-            return false;
-        };
-        let now = js_sys::Date::new_0().get_time();
-        preview < open
-            && open < end
-            && match status {
-                "draft" => preview > now,
-                "preview" => open > now,
-                _ => false,
-            }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (Ok(preview), Ok(open), Ok(end)) = (
-            chrono::NaiveDateTime::parse_from_str(preview, "%Y-%m-%dT%H:%M"),
-            chrono::NaiveDateTime::parse_from_str(open, "%Y-%m-%dT%H:%M"),
-            chrono::NaiveDateTime::parse_from_str(end, "%Y-%m-%dT%H:%M"),
-        ) else {
-            return false;
-        };
-        let now = chrono::Utc::now().naive_utc();
-        preview < open
-            && open < end
-            && match status {
-                "draft" => preview > now,
-                "preview" => open > now,
-                _ => false,
-            }
-    }
+    // RFC3339 保留秒与小数秒；只有编辑过的本地值需要按浏览器时区规范化。
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(&crate::api::normalize_datetime(value))
+            .ok()
+            .map(|value| value.with_timezone(&chrono::Utc))
+    };
+    let (Some(preview), Some(open), Some(end), Some(now)) = (
+        parse(preview),
+        parse(open),
+        parse(end),
+        chrono::DateTime::from_timestamp_millis(current_time_millis()),
+    ) else {
+        return false;
+    };
+    preview < open
+        && open < end
+        && match status {
+            "draft" => preview > now,
+            "preview" => open > now,
+            _ => false,
+        }
 }
 
 /// 将 API 的 RFC3339 时间转换为浏览器 `datetime-local` 当前值。

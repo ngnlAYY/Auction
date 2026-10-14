@@ -25,6 +25,13 @@ pub(super) async fn process_topic(
     let mut system_entries = warning_entries(&preview, &post_numbers);
     let targets = runtime.store.lot_targets(topic.auction_id).await?;
     let target_by_code = target_map(targets)?;
+    // 先读持久 pending 边界，不能等较晚竞价已提交后才压低展示水位。
+    let pending = runtime.store.command_outcomes(topic.auction_id, topic.thread_id.clone()).await?;
+    let mut pending_boundary = pending
+        .iter()
+        .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
+        .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(2))
+        .min();
     let mut command_error = None;
     let mut processed_through_post_number = 2_usize;
 
@@ -34,6 +41,13 @@ pub(super) async fn process_topic(
         };
         if post.post.id == topic.system_log_post_id {
             continue;
+        }
+        // 已删除的 pending 帖把边界设为 #2；编辑后无命令的原帖也必须阻挡后续楼层。
+        if pending_boundary.is_some_and(|boundary| {
+            post_number > boundary || post_number == boundary && !requires_bidder_identity(post)
+        }) {
+            command_error = Some(repository_error("论坛持久 pending 帖尚未解决，停止后续楼层"));
+            break 'posts;
         }
         if !requires_bidder_identity(post) {
             processed_through_post_number = post_number;
@@ -171,6 +185,19 @@ pub(super) async fn process_topic(
                     command_error = Some(error);
                     break 'posts;
                 }
+            }
+        }
+        if pending_boundary == Some(post_number) {
+            let pending =
+                runtime.store.command_outcomes(topic.auction_id, topic.thread_id.clone()).await?;
+            pending_boundary = pending
+                .iter()
+                .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
+                .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(2))
+                .min();
+            if pending_boundary.is_some_and(|boundary| boundary <= post_number) {
+                command_error = Some(repository_error("论坛原命令未收口，停止后续楼层"));
+                break 'posts;
             }
         }
         processed_through_post_number = post_number;

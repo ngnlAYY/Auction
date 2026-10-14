@@ -64,7 +64,9 @@ pub use public_rules_cache::{CachedPublicRulesReader, public_rules_cache_key};
 pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig};
 pub use recovery::RecoveryCommandService;
 pub use recovery_health::RecoveryHealthService;
-pub use sessions::{AdminSessionService, PublicSessionService};
+pub use sessions::{
+    AdminSessionService, PublicSessionService, validate_admin_actor, validate_admin_secret,
+};
 pub use settlement::{
     SettleAuctionCommand, SettlementCommandPort, SettlementService, verify_legacy_settlement_replay,
 };

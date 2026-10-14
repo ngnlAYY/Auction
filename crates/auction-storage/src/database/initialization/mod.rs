@@ -28,21 +28,6 @@ async fn initialize(connection: &mut PgConnection) -> Result<(), FirstDatabaseIn
     connection.lock().await.map_err(|_| FirstDatabaseInitializationError)?;
     let occupied: bool = sqlx::query_scalar(
         "SELECT EXISTS (
-            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-              AND n.nspname NOT LIKE 'pg_toast%'
-         ) OR EXISTS (
-            SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-         ) OR EXISTS (
-            SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
-            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-              AND n.nspname NOT LIKE 'pg_toast%'
-         ) OR EXISTS (
-            SELECT 1 FROM pg_namespace
-            WHERE nspname NOT IN ('pg_catalog', 'information_schema', 'public')
-              AND nspname NOT LIKE 'pg_toast%'
-         ) OR EXISTS (
             SELECT 1 FROM pg_stat_activity
             WHERE datname = current_database() AND pid <> pg_backend_pid()
               AND backend_type = 'client backend'
@@ -51,7 +36,13 @@ async fn initialize(connection: &mut PgConnection) -> Result<(), FirstDatabaseIn
     .fetch_one(&mut *connection)
     .await
     .map_err(|_| FirstDatabaseInitializationError)?;
-    if occupied {
+    // 复用完整目录盘点，不能让默认 ACL、事件触发器或复制对象随迁移生效。
+    let user_object_count: i64 =
+        sqlx::query_scalar(super::recovery_preflight::USER_OBJECT_COUNT_SQL)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(|_| FirstDatabaseInitializationError)?;
+    if occupied || user_object_count != 0 {
         return Err(FirstDatabaseInitializationError);
     }
     // 复用普通迁移的保留字兼容执行视图，保留历史 checksum；本连接已经持有迁移锁。

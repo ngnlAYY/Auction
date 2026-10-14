@@ -37,8 +37,8 @@ pub(crate) async fn add_admin_intake(
     let csrf_token = super::fetch_csrf_token().await?;
     let command = AdminIntakeRequest {
         command_id: command_id.to_string(),
+        equipment_url: (source_kind == "url" && !equipment_url.is_empty()).then_some(equipment_url),
         source_kind: Some(source_kind),
-        equipment_url: (!equipment_url.is_empty()).then_some(equipment_url),
         equipment,
         start_price,
         player_id,

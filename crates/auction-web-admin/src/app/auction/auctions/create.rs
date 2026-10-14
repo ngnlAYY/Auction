@@ -4,7 +4,7 @@ use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::api::create_admin_auction;
+use crate::api::{create_admin_auction, normalize_datetime};
 use crate::app::surface::validation::{FieldError, focus_field};
 use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
@@ -43,6 +43,18 @@ pub(super) fn AdminAuctionCreateForm(
             }
         }
     }
+}
+
+/// 首次提交时冻结标识与规范时间；未知结果重试不重新取时间或生成身份。
+#[derive(Clone)]
+struct CreateRequest {
+    command_id: Uuid,
+    auction_id: Uuid,
+    world_id: String,
+    sequence: i64,
+    preview_scheduled_at: String,
+    scheduled_open_at: String,
+    scheduled_end_at: String,
 }
 
 /// 创建表单各字段的校验结果；None 表示该字段当前无错误。
@@ -120,8 +132,7 @@ fn AdminAuctionCreateFields(
     let mut preview_scheduled_at = use_signal(String::new);
     let mut scheduled_open_at = use_signal(String::new);
     let mut scheduled_end_at = use_signal(String::new);
-    let mut command_id_state = use_signal(|| None::<Uuid>);
-    let mut auction_id_state = use_signal(|| None::<Uuid>);
+    let mut request_state = use_signal(|| None::<CreateRequest>);
     let mut feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut field_errors = use_signal(CreateFieldErrors::default);
 
@@ -157,7 +168,8 @@ fn AdminAuctionCreateFields(
                     if scheduled_end_at_value.trim().is_empty() {
                         errors.end = Some(CreateFieldIssue::Required);
                     }
-                    if errors.preview.is_none() && errors.open.is_none() && errors.end.is_none() {
+                    // 原样重试由服务端先查账本，不能用当前时钟否定已提交的请求。
+                    if request_state().is_none() && errors.preview.is_none() && errors.open.is_none() && errors.end.is_none() {
                         match auction_schedule_issue(
                             &preview_scheduled_at_value,
                             &scheduled_open_at_value,
@@ -192,15 +204,18 @@ fn AdminAuctionCreateFields(
                     };
                     field_errors.set(CreateFieldErrors::default());
                     feedback.set(None);
-                    let command_id = command_id_state().unwrap_or_else(|| {
-                        let value = Uuid::new_v4();
-                        command_id_state.set(Some(value));
-                        value
-                    });
-                    let auction_id = auction_id_state().unwrap_or_else(|| {
-                        let value = Uuid::new_v4();
-                        auction_id_state.set(Some(value));
-                        value
+                    let request = request_state().unwrap_or_else(|| {
+                        let request = CreateRequest {
+                            command_id: Uuid::new_v4(),
+                            auction_id: Uuid::new_v4(),
+                            world_id: world_id_value,
+                            sequence: sequence_value,
+                            preview_scheduled_at: normalize_datetime(&preview_scheduled_at_value),
+                            scheduled_open_at: normalize_datetime(&scheduled_open_at_value),
+                            scheduled_end_at: normalize_datetime(&scheduled_end_at_value),
+                        };
+                        request_state.set(Some(request.clone()));
+                        request
                     });
                     let mut feedback = feedback;
                     let mut field_errors = field_errors;
@@ -211,13 +226,13 @@ fn AdminAuctionCreateFields(
                         busy,
                         async move {
                             create_admin_auction(
-                                command_id,
-                                auction_id,
-                                world_id_value,
-                                sequence_value,
-                                preview_scheduled_at_value,
-                                scheduled_open_at_value,
-                                scheduled_end_at_value,
+                                request.command_id,
+                                request.auction_id,
+                                request.world_id,
+                                request.sequence,
+                                request.preview_scheduled_at,
+                                request.scheduled_open_at,
+                                request.scheduled_end_at,
                             )
                             .await
                         },
@@ -254,8 +269,7 @@ fn AdminAuctionCreateFields(
                     value: world_id(),
                     onchange: move |event| {
                         world_id.set(event.value());
-                        command_id_state.set(None);
-                        auction_id_state.set(None);
+                        request_state.set(None);
                         field_errors.write().world = None;
                         feedback.set(None);
                     },
@@ -282,8 +296,7 @@ fn AdminAuctionCreateFields(
                     value: sequence(),
                     oninput: move |event| {
                         sequence.set(event.value());
-                        command_id_state.set(None);
-                        auction_id_state.set(None);
+                        request_state.set(None);
                         field_errors.write().sequence = None;
                         feedback.set(None);
                     },
@@ -306,8 +319,7 @@ fn AdminAuctionCreateFields(
                     value: preview_scheduled_at(),
                     oninput: move |event| {
                         preview_scheduled_at.set(event.value());
-                        command_id_state.set(None);
-                        auction_id_state.set(None);
+                        request_state.set(None);
                         field_errors.write().preview = None;
                         feedback.set(None);
                     },
@@ -330,8 +342,7 @@ fn AdminAuctionCreateFields(
                     value: scheduled_open_at(),
                     oninput: move |event| {
                         scheduled_open_at.set(event.value());
-                        command_id_state.set(None);
-                        auction_id_state.set(None);
+                        request_state.set(None);
                         field_errors.write().open = None;
                         feedback.set(None);
                     },
@@ -354,8 +365,7 @@ fn AdminAuctionCreateFields(
                     value: scheduled_end_at(),
                     oninput: move |event| {
                         scheduled_end_at.set(event.value());
-                        command_id_state.set(None);
-                        auction_id_state.set(None);
+                        request_state.set(None);
                         field_errors.write().end = None;
                         feedback.set(None);
                     },

@@ -16,6 +16,8 @@ pub(super) async fn insert_successor_postgres(
     if !matches!(current_status, "live" | "cancelled") {
         return Err(invalid_state("下一期草稿的前驱状态无效"));
     }
+    // SQL 列与 JSON 必须来自同一新模板，不能从前驱复制旧经济规则。
+    let rules = successor.policy.auction_rules().map_err(|_| invalid_state("后继拍卖策略无效"))?;
     let successor_row = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(
@@ -26,14 +28,9 @@ pub(super) async fn insert_successor_postgres(
                  proxy_slow_interval_seconds, policy_snapshot, predecessor_auction_id,
                  created_at, updated_at)
              SELECT $1, current.world_id, $2, $3, 'draft', $4, $5,
-                    current.default_start_price, current.soft_close_window_seconds,
-                    current.soft_close_extension_seconds, current.cancel_cutoff_seconds,
-                    current.proxy_slow_interval_seconds,
-                    jsonb_set(current.policy_snapshot, '{scheduled_end_at}',
-                              to_jsonb($6::timestamptz), true),
-                    current.id, $7, $7
+                    $6, $7, $8, $9, $10, $11, current.id, $12, $12
              FROM public.auctions AS current
-             WHERE current.id = $8 AND current.status = $9
+             WHERE current.id = $13 AND current.status = $14
              RETURNING world_id, state_version"#,
         )
         .bind(successor.auction_id.as_uuid())
@@ -41,7 +38,12 @@ pub(super) async fn insert_successor_postgres(
         .bind(&successor.title)
         .bind(successor.preview_due_at)
         .bind(successor.open_due_at)
-        .bind(successor.scheduled_end_at)
+        .bind(rules.default_start_price.value())
+        .bind(rules.soft_close_window.num_seconds())
+        .bind(rules.soft_close_extension.num_seconds())
+        .bind(rules.cancel_cutoff.num_seconds())
+        .bind(rules.proxy_slow_interval.num_seconds())
+        .bind(successor.policy.snapshot(successor.scheduled_end_at))
         .bind(auction.updated_at)
         .bind(auction.id.as_uuid())
         .bind(current_status)

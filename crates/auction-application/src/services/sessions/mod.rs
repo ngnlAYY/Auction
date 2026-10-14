@@ -260,7 +260,8 @@ fn validate_login_key(key: &[u8]) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn validate_admin_actor(actor: &str) -> Result<(), ApplicationError> {
+/// 校验配置与正式登录共同使用的 Admin 账号边界；错误不包含账号内容。
+pub fn validate_admin_actor(actor: &str) -> Result<(), ApplicationError> {
     // Basic Auth 以首个冒号分隔账号与口令；带冒号的账号无法由 HTTP 登录入口表达。
     if actor.is_empty()
         || actor.contains(':')
@@ -273,7 +274,8 @@ fn validate_admin_actor(actor: &str) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn validate_admin_secret(secret: &[u8]) -> Result<(), ApplicationError> {
+/// 校验配置与正式会话共同使用的 Admin 口令边界；错误不包含口令内容。
+pub fn validate_admin_secret(secret: &[u8]) -> Result<(), ApplicationError> {
     if !is_valid_admin_secret(secret) {
         return Err(SessionError::InvalidConfiguration.into());
     }

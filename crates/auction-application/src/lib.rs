@@ -214,5 +214,6 @@ pub use services::{
     MailUserService, PLACE_BID_COMMAND_KIND, PlaceBidCommand, PublicSessionService, RealtimeRelay,
     RealtimeRelayBatch, RealtimeRelayConfig, RecoveryCommandService, RecoveryHealthService,
     SettleAuctionCommand, SettlementCommandPort, SettlementFulfillmentService, SettlementService,
-    public_rules_cache_key, verify_legacy_settlement_replay,
+    public_rules_cache_key, validate_admin_actor, validate_admin_secret,
+    verify_legacy_settlement_replay,
 };

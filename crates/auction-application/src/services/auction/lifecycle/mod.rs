@@ -17,9 +17,9 @@ use crate::{
     ApplicationError, ApplicationFuture, AuctionFinalProxyPlan, AuctionLifecycleCommand,
     AuctionLifecycleCommandPort, AuctionLifecycleContext, AuctionLifecycleEffect,
     AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleSnapshot,
-    AuctionLifecycleTransaction, AuctionPreviewSuccessorPlan, CommandLedgerError,
-    CompetitionTransaction, CompetitionTransactionError, RequestHash, StoredCommand,
-    TransactionPolicy, TransactionRunner,
+    AuctionLifecycleTransaction, AuctionPolicyTemplate, AuctionPreviewSuccessorPlan,
+    CommandLedgerError, CompetitionTransaction, CompetitionTransactionError, RequestHash,
+    StoredCommand, TransactionPolicy, TransactionRunner,
 };
 
 mod plan;
@@ -34,6 +34,7 @@ pub struct AuctionLifecycleService<R, C> {
     // 保留既有装配签名；命令时刻由锁后的事务端口提供。
     _clock: Arc<C>,
     policy: AuctionLifecyclePolicy,
+    successor_policy: AuctionPolicyTemplate,
 }
 
 impl<R, C> AuctionLifecycleService<R, C>
@@ -43,8 +44,13 @@ where
     C: crate::Clock,
 {
     /// 建立只依赖事务 runner、时钟端口和启动期冻结策略的生命周期服务。
-    pub fn new(repository: Arc<R>, clock: Arc<C>, policy: AuctionLifecyclePolicy) -> Self {
-        Self { repository, _clock: clock, policy }
+    pub fn new(
+        repository: Arc<R>,
+        clock: Arc<C>,
+        policy: AuctionLifecyclePolicy,
+        successor_policy: AuctionPolicyTemplate,
+    ) -> Self {
+        Self { repository, _clock: clock, policy, successor_policy }
     }
 
     /// 在 Serializable 事务中查重、锁定聚合、应用领域迁移并追加账本记录。
@@ -64,6 +70,7 @@ where
         self.repository
             .run(TransactionPolicy::serializable(), |transaction| {
                 let command = command.clone();
+                let successor_policy = self.successor_policy.clone();
                 Box::pin(async move {
                     let command_kind = command.action.command_kind();
                     if let Some(stored) = transaction.find_command(command.command_id).await? {
@@ -126,7 +133,9 @@ where
                     {
                         return Err(CompetitionTransactionError::StaleState.into());
                     }
-                    let plan = lifecycle_plan(transaction, &command, &context, policy).await?;
+                    let plan =
+                        lifecycle_plan(transaction, &command, &context, policy, &successor_policy)
+                            .await?;
                     let result = lifecycle_result(&command, &context, &plan)?;
                     let stored = StoredCommand {
                         command_id: command.command_id,

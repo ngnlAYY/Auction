@@ -14,8 +14,8 @@ use chrono::Duration as ChronoDuration;
 
 use super::cycle::MailPollProcessContext;
 use super::failure::{
-    MailPollFailureContext, MailPollMetricContext, record_failure, retry_delay, safe_failure_code,
-    safe_failure_detail,
+    MailPollFailureContext, MailPollMetricContext, record_failure, record_failure_with_prefix,
+    retry_delay, safe_failure_code, safe_failure_detail,
 };
 use super::mapping::{intake_from_message, pending_decision, valid_page};
 use super::{
@@ -198,6 +198,7 @@ where
     };
     let mut items = Vec::with_capacity(page.messages.len());
     let mut budget_exhausted = false;
+    let mut suffix_failure = None;
     let mut last_completed_external_mail_id = None;
     for mut message in page.messages {
         let Some(lookup_remaining) =
@@ -228,17 +229,12 @@ where
             }
             Ok(Ok(MailPollCompletion::Missing)) => {}
             Ok(Err(error)) => {
-                record_failure(
-                    Arc::clone(&store),
-                    Arc::clone(&clock),
-                    claim,
-                    "completion_lookup_failed".to_owned(),
-                    "MoogleMail 已完成事实核验失败，游标保持不变".to_owned(),
-                    failure_context,
-                )
-                .await;
                 tracing::error!(error = %error, "MoogleMail 已完成事实核验失败");
-                return WorkerResult::Error;
+                suffix_failure = Some((
+                    "completion_lookup_failed".to_owned(),
+                    "MoogleMail 已完成事实核验失败，未越过失败邮件".to_owned(),
+                ));
+                break;
             }
         }
         let Some(process_remaining) =
@@ -291,16 +287,9 @@ where
                     Ok(Ok(decision)) => decision,
                     Ok(Err(failure)) => {
                         diagnostic.retain_failure(failure.failure_code).await;
-                        record_failure(
-                            Arc::clone(&store),
-                            Arc::clone(&clock),
-                            claim,
-                            failure.failure_code.to_owned(),
-                            failure.safe_detail.to_owned(),
-                            failure_context.clone(),
-                        )
-                        .await;
-                        return WorkerResult::Error;
+                        suffix_failure =
+                            Some((failure.failure_code.to_owned(), failure.safe_detail.to_owned()));
+                        break;
                     }
                     Err(_) => {
                         diagnostic.retain_failure("batch_processing_timeout").await;
@@ -310,36 +299,40 @@ where
                 };
                 if decision.validate().is_err() {
                     diagnostic.retain_failure("invalid_business_decision").await;
-                    record_failure(
-                        Arc::clone(&store),
-                        Arc::clone(&clock),
-                        claim,
+                    suffix_failure = Some((
                         "invalid_business_decision".to_owned(),
                         "MoogleMail 业务处理器返回了无效决定".to_owned(),
-                        failure_context.clone(),
-                    )
-                    .await;
-                    return WorkerResult::Error;
+                    ));
+                    break;
                 }
                 diagnostic.retain_decision(decision).await
             }
             (Some(_), None) => {
-                record_failure(
-                    Arc::clone(&store),
-                    Arc::clone(&clock),
-                    claim,
+                suffix_failure = Some((
                     "business_payload_missing".to_owned(),
-                    "MoogleMail 网关未提供业务 envelope，入站游标保持不变".to_owned(),
-                    failure_context.clone(),
-                )
-                .await;
-                return WorkerResult::Error;
+                    "MoogleMail 网关未提供业务 envelope，未越过失败邮件".to_owned(),
+                ));
+                break;
             }
             (None, Some(_)) | (None, None) => pending_decision(&message),
         };
         let external_mail_id = message.external_mail_id.clone();
         items.push(intake_from_message(&claim.mailbox_key, message, decision, polled_at));
         last_completed_external_mail_id = Some(external_mail_id);
+    }
+    if let Some((code, detail)) = suffix_failure {
+        // 只允许明确完成的连续前缀推进游标；失败时绝不使用整页 next_cursor。
+        let prefix = last_completed_external_mail_id.map(|cursor| MailPollBatch {
+            mailbox_key: claim.mailbox_key.clone(),
+            claim_token: claim.claim_token,
+            next_cursor: Some(cursor),
+            polled_at,
+            next_poll_at,
+            items,
+        });
+        record_failure_with_prefix(store, clock, claim, code, detail, failure_context, prefix)
+            .await;
+        return WorkerResult::Error;
     }
     if budget_exhausted && last_completed_external_mail_id.is_none() {
         record_failure(

@@ -9,10 +9,10 @@ use auction_application::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialPort, AdminCredentialRuntimeReader,
     AdminCredentialRuntimeWriter, AdminCredentialService, AdminCredentialWorld,
     AdminForumPreviewPort, AdminIntakePort, AdminLotReader, AdminLotUpdatePort, AdminMailPort,
-    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigError,
-    AdminRuntimeConfigPort, AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort,
-    AdminSessionService, AdminSessionStore, AdminUserPort, AdminUserService, AdminWorldPort,
-    ApplicationError, AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
+    AdminProxyEventReader, AdminRenameReader, AdminRulesPort, AdminRuntimeConfigPort,
+    AdminRuntimeConfigService, AdminSessionConfig, AdminSessionPort, AdminSessionService,
+    AdminSessionStore, AdminUserPort, AdminUserService, AdminWorldPort,
+    AuctionLifecycleCommandPort, AuctionLifecyclePolicy, DeliveryAdminPort,
     OperationsAlertSourceReader, OperationsAlertStore, RealtimeAdminPort, RecoveryCommandPort,
     RecoveryCommandService, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
 };
@@ -196,31 +196,20 @@ pub(super) async fn configure_state(
             let commands = Arc::new(DatabaseAdminRuntimeCommands::new(Arc::clone(&store)));
             let service =
                 Arc::new(AdminRuntimeConfigService::new(commands, files, Arc::new(SystemClock)));
-            if let Err(error) = service.recover().await {
-                match &error {
-                    ApplicationError::AdminRuntime(
-                        AdminRuntimeConfigError::OutcomeUnknown
-                        | AdminRuntimeConfigError::ReconciliationRequired,
-                    ) => {
-                        tracing::error!(
-                            error = %error,
-                            "admin runtime 配置恢复结果需要人工核对，继续启动"
-                        );
-                    }
-                    _ => return Err(anyhow::Error::msg(error.to_string())),
-                }
-            } else {
-                // 恢复可能补写候选；不能把旧启动快照装配为新 runtime 已生效的 Admin。
-                let restored = service.current().await.context("读取恢复后的 runtime 配置")?;
-                if config
-                    .admin_runtime
-                    .as_ref()
-                    .is_none_or(|loaded| loaded.fingerprint() != restored.fingerprint)
-                {
-                    anyhow::bail!(
-                        "runtime 文件与已加载的启动配置不一致；请重新执行部署重启，加载最新的 Admin/Worker 配置"
-                    );
-                }
+            // 恢复失败可能发生在候选文件已经替换之后；结果未知时不得带旧安全配置监听。
+            service
+                .recover()
+                .await
+                .context("恢复 runtime 配置失败；停止启动，请按恢复手册核对文件与命令账本")?;
+            let restored = service.current().await.context("读取恢复后的 runtime 配置")?;
+            if config
+                .admin_runtime
+                .as_ref()
+                .is_none_or(|loaded| loaded.fingerprint() != restored.fingerprint)
+            {
+                anyhow::bail!(
+                    "runtime 文件与已加载的启动配置不一致；请重新执行部署重启，加载最新的 Admin/Worker 配置"
+                );
             }
             Some(service)
         } else {
@@ -369,6 +358,7 @@ pub(super) async fn configure_state(
             lifecycle_store,
             Arc::new(SystemClock),
             lifecycle_policy,
+            config.auction.policy()?,
         ));
     let auction_create: Arc<dyn AdminAuctionCreatePort> =
         Arc::new(DatabaseAdminAuctionCommands::new(

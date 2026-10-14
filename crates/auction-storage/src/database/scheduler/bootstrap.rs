@@ -163,8 +163,8 @@ async fn ensure_postgres_once(
                 (id, world_id, sequence, title, status, default_start_price,
                  soft_close_window_seconds, soft_close_extension_seconds,
                  cancel_cutoff_seconds, proxy_slow_interval_seconds, policy_snapshot,
-                 preview_scheduled_at, scheduled_open_at, scheduled_end_at, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)",
+                 preview_scheduled_at, scheduled_open_at, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)",
         )
         .bind(request.auction_id.as_uuid())
         .bind(&request.world_id)
@@ -178,7 +178,7 @@ async fn ensure_postgres_once(
         .bind(policy_snapshot)
         .bind(request.preview_due_at)
         .bind(request.open_due_at)
-        .bind(request.scheduled_end_at)
+        // Draft 的结束计划只保存在策略与轮次中，开拍事务才物化运行期结束时间。
         .bind(db_now)
         .execute(&mut *transaction)
         .await
@@ -388,8 +388,8 @@ async fn ensure_sqlite_inner(
                 (id, world_id, sequence, title, status, default_start_price,
                  soft_close_window_seconds, soft_close_extension_seconds, cancel_cutoff_seconds,
                  proxy_slow_interval_seconds, policy_snapshot, preview_scheduled_at,
-                 scheduled_open_at, scheduled_end_at, state_version, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                 scheduled_open_at, state_version, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
         )
         .bind(uuid_blob(request.auction_id.as_uuid()))
         .bind(&request.world_id)
@@ -403,7 +403,7 @@ async fn ensure_sqlite_inner(
         .bind(policy_snapshot)
         .bind(sqlite_timestamp(request.preview_due_at))
         .bind(sqlite_timestamp(request.open_due_at))
-        .bind(sqlite_timestamp(request.scheduled_end_at))
+        // Lite 同样保留尚未开拍的不变量，不提前写 scheduled_end_at。
         .bind(sqlite_timestamp(db_now))
         .bind(sqlite_timestamp(db_now))
         .execute(&mut *connection)
