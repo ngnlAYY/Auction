@@ -99,6 +99,8 @@ SQLite 文件只能位于受支持的本地文件系统，不能以共享网络�
 拍卖创建冻结经济/结算策略；后续配置不改历史快照。生命周期、结算和恢复共用应用入口，
 人工提前开放/结算默认关闭；金额守恒、连续领先时间、录入目标及追加更正见[不变量契约](contracts/invariants.md)。
 已有错误事实不会因源码修复自动回填，运行边界见[状态页](status.md)。
+Admin/Worker 注入当前新拍卖模板，application 后继计划冻结，storage 保证规则列与快照一致。
+Recovery 人工重试投影由 storage 的 recovery_commands owner 维护；Delivery Admin 在同一命令事务调用，不另建状态机。
 
 ## Worker 与外部副作用
 
@@ -116,7 +118,8 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 
 三角色共享非敏感公共 TOML，分别引用敏感文件；Admin/Worker 可共享 runtime。
 配置文件由 `auction-config` 拥有，runtime 保存使用文件锁、fingerprint、持久命令账本与原子替换；
-替换后账本确认失败须向前恢复，生效须重启。数据库 `worlds.enabled` 与仅控制邮件入站的 runtime world 开关分离。
+替换后账本确认失败须向前恢复，生效须重启；Admin 恢复结果未知或需人工核对时停止启动，不带旧安全快照监听。
+数据库 `worlds.enabled` 与仅控制邮件入站的 runtime world 开关分离。
 字段、接管组及恢复流程见[配置说明](../ops/config/README.md)。
 
 | 能力 | owner 与保护边界 |

@@ -103,6 +103,7 @@ pub(crate) async fn commit(
     pool: &TrackedPool<Postgres>,
     claim: &MailPollClaim,
     batch: &MailPollBatch,
+    failure: Option<(&str, &str)>,
 ) -> Result<AdminMailPollState, ApplicationError> {
     let mut transaction =
         pool.begin().await.map_err(|_| storage_error("开启 MoogleMail 提交事务失败"))?;
@@ -152,9 +153,10 @@ pub(crate) async fn commit(
          SET cursor_value = $2,
              last_poll_at = GREATEST(last_poll_at, $3),
              next_poll_at = GREATEST(GREATEST(last_poll_at, $3), $4),
-             consecutive_failures = 0,
+             consecutive_failures = CASE WHEN $8::text IS NULL THEN 0 ELSE consecutive_failures + 1 END,
              claim_token = NULL, claim_owner = NULL, claim_expires_at = NULL,
-             last_failure_code = NULL, last_failure_detail = NULL, last_failure_at = NULL,
+             last_failure_code = $8, last_failure_detail = $9,
+             last_failure_at = CASE WHEN $8::text IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
              state_version = state_version + 1, updated_at = $3
          WHERE mailbox_key = $1 AND claim_token = $5 AND claim_owner = $6
                AND state_version = $7 AND claim_expires_at > CURRENT_TIMESTAMP
@@ -168,6 +170,8 @@ pub(crate) async fn commit(
     .bind(claim.claim_token)
     .bind(&claim.worker_id)
     .bind(claim.state_version)
+    .bind(failure.map(|(code, _)| code))
+    .bind(failure.map(|(_, detail)| detail))
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|_| storage_error("提交 MoogleMail cursor 失败"))?;

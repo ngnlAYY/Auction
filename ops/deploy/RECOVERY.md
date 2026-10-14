@@ -37,7 +37,8 @@
 - restore 不执行 `DROP DATABASE`、`CREATE DATABASE`、schema 清理或连接终止，也不会覆盖非空库。
 - Public、Admin、Worker 和其他数据库客户端必须由部署 owner 在维护窗口外部停止，并阻止自动重连。
 - archive、manifest、preflight 和 receipt 使用规范化绝对路径；父目录必须已存在且不得允许
-  group/other 写入，文件不得允许 group/other 读取。
+  group/other 写入，文件不得允许 group/other 读取。文件属主必须为命令有效 UID；完整目录链仅接受该 UID/root，
+拒绝符号链接和可由其他账号替换的祖先。root 所有的 sticky 祖先可例外，但直接父目录仍不可 group/other 写入。
 - 文件内容和父目录均完成同步后，archive、manifest 和 receipt 才能报告发布成功；跨目录发布同步
   源、目标两个目录。恢复、重建及 v28 接管在数据库 mutation 前也同步用户提供的既有恢复证据。
   不支持目录同步的平台或文件系统失败关闭；仅成功读取或匹配 SHA-256 不足以证明断电后的可恢复性。
@@ -112,7 +113,8 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 pg_default 省略显式 TABLESPACE，其他 tablespace 保留。`empty-for-restore` 强制 backup manifest，
 不接受 ephemeral 豁免。不要先迁移：恢复目标必须没有 Auction
 migration 表，也不能存在用户 schema、类型、关系、函数、扩展、publication、subscription、
-large object 或 default ACL。
+large object 或 default ACL。对象盘点与首次空库初始化共用；subscription 按 `subdbid` 限定当前库，
+同集群其他库的 subscription 不得导致重建完成后才报告目标非空。
 
 独立的 `--mode fresh-schema` 则在空库上执行当前迁移，仍要求上述停机、目标确认和回执。
 只有明确可丢弃的一次性数据库可用 `--allow-unrecoverable-ephemeral` 加
@@ -180,7 +182,9 @@ schema 校验或 receipt 发布失败，数据库不再是空库；保持全部�
 
 ## 5. 前向迁移与重新放量
 
-旧 archive 可低于但不能高于当前内嵌迁移版本。恢复成功后保持停机，按部署方式前向迁移。
+旧 archive 可低于但不能高于当前内嵌迁移版本；恢复后须匹配该版本完整 SQLx 历史前缀、成功状态及每条 checksum，
+不能只比较最大版本。校验保留既有兼容 checksum；缺行、未知行或 checksum 不一致必须失败，不能发布 clean 回执。
+恢复成功后保持停机，按部署方式前向迁移。
 分体部署使用同一 systemd unit 和状态目录参数：
 
 ```bash

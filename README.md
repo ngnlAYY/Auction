@@ -10,6 +10,7 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 
 | 任务 | 文档 |
 | --- | --- |
+| 玩家参与拍卖、寄售和结算 | [中文玩家使用指南](docs/player-guide.md) |
 | 浏览全部项目文档 | [文档导航](docs/README.md) |
 | 阅读系统与界面设计 | [系统总览](./DESIGN.md)、[Public 设计](crates/auction-web-public/DESIGN.md)、[Admin 设计](crates/auction-web-admin/DESIGN.md) |
 | 理解进程、模块和数据库档位 | [架构](docs/architecture.md) |
@@ -65,5 +66,6 @@ just release-check --single-binary
 项目处于功能与运行证据收口阶段。路由注册、源码和静态编译不构成生产验收；真实外部服务、
 非空生产数据、完整浏览器流程及恢复仍需证据。[实现与验证状态](docs/status.md)统一登记
 当前能力、历史检查结果、有限部署证据及未闭合事项。
+生命周期、恢复、Worker 连续处理与灾备门禁的审计修复仍属源码交付；不自动修复既有异常数据，也不替代行为验收。
 
 除非用户明确要求，不新增或执行单元、集成、功能、端到端、浏览器测试及手工功能冒烟；已有测试保留。

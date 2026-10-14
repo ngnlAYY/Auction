@@ -54,6 +54,8 @@ MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 k
 
 自动周排期来源由 [ports/scheduling/source.rs](src/ports/scheduling/source.rs) 冻结；后继按本地周及既有 DST 规则计算，
 无来源的历史轮次保持 UTC 周期。人工提前开放/结算受默认关闭策略控制。
+Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplate`；新后继冻结该模板，不能复制前驱经济策略。
+排期来源仍按既有轮次延续，旧快照和已接受命令不重写。
 
 ## 结算与恢复端口
 
@@ -93,6 +95,7 @@ Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；
 让背压发生在领取和进入 `sending` 之前。
 [ports/mail](src/ports/mail) 与 [services/mail](src/services/mail) 拥有轮询、用户命令、装备入站及 delivery outbox 编排。
 处理前检查持久化完成证明，原接受决定可恢复，不能因取件后资产变化改判退件。
+`MailPollStore::fail_after_prefix` 要求同一 fenced 事务提交连续成功前缀、游标和失败退避；不支持的适配器明确拒绝。
 
 仅 `Retryable` 错误与超时进入有界重试；业务拒绝与确定性错误直接收口。
 原始邮件/响应只进入独立加密诊断；Admin 脱敏展示与装备失败 sidecar 均不参与命令摘要、完成证明或 cursor，
@@ -108,7 +111,8 @@ Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；
 
 [services/sessions](src/services/sessions) 将 Public 认证版本与会话创建锁内复核衔接；key 撤销/重签永久废止旧会话。
 长连接通过只读 `inspect` 检查用户、凭据与双重过期边界，不滑动刷新。
-Admin 服务启动前撤销旧 Admin 会话，失败阻断启动；token 摘要绑定当前 actor/secret，拒绝 Basic Auth 无法表达的含冒号 actor。
+Admin 服务启动前撤销旧 Admin 会话，失败阻断启动；token 摘要绑定当前 actor/secret。
+账号/口令校验由会话 owner 导出，首次设置与敏感配置复用相同边界，拒绝不可登录的配置。
 
 [ports/realtime](src/ports/realtime) 定义事件、连续游标、消费所有权和重放边界；事件用于通知与恢复，
 不能代替权威快照。细节见[实时契约](../../docs/contracts/events.md)。

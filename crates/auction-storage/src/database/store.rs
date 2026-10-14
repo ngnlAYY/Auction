@@ -264,23 +264,9 @@ async fn check_postgres_readiness(store: &PostgresStore) -> Result<(), ()> {
             .fetch_all(store.raw_pool())
             .await
             .map_err(|_| ())?;
-    let expected =
-        migrations::postgres_migrator().map_err(|_| ())?.iter().cloned().collect::<Vec<_>>();
-    if rows.len() != expected.len() {
-        return Err(());
-    }
-    for (row, expected_migration) in rows.iter().zip(expected) {
-        let version = row.try_get::<i64, _>("version").map_err(|_| ())?;
-        let success = row.try_get::<bool, _>("success").map_err(|_| ())?;
-        let checksum = row.try_get::<Vec<u8>, _>("checksum").map_err(|_| ())?;
-        if !success
-            || version != expected_migration.version
-            || !migrations::postgres_checksum_matches(&expected_migration, &checksum)
-        {
-            return Err(());
-        }
-    }
-    Ok(())
+    migrations::postgres_history_matches(&rows, super::postgres_expected_migration_version())
+        .then_some(())
+        .ok_or(())
 }
 
 #[cfg(feature = "sqlite")]

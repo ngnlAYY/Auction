@@ -206,6 +206,7 @@ pub struct DatabaseAuctionLifecycleCommands<C> {
     store: Arc<DatabaseStore>,
     clock: Arc<C>,
     policy: AuctionLifecyclePolicy,
+    successor_policy: AuctionPolicyTemplate,
 }
 
 impl<C> DatabaseAuctionLifecycleCommands<C>
@@ -213,8 +214,13 @@ where
     C: Clock + 'static,
 {
     /// 建立不向 HTTP 暴露具体数据库类型、并冻结运行期授权策略的生命周期命令端口。
-    pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>, policy: AuctionLifecyclePolicy) -> Self {
-        Self { store, clock, policy }
+    pub fn new(
+        store: Arc<DatabaseStore>,
+        clock: Arc<C>,
+        policy: AuctionLifecyclePolicy,
+        successor_policy: AuctionPolicyTemplate,
+    ) -> Self {
+        Self { store, clock, policy, successor_policy }
     }
 }
 
@@ -237,18 +243,27 @@ where
         let store = Arc::clone(&self.store);
         let clock = Arc::clone(&self.clock);
         let policy = self.policy;
+        let successor_policy = self.successor_policy.clone();
         Box::pin(async move {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service =
-                        AuctionLifecycleService::new(Arc::new(store.clone()), clock, policy);
+                    let service = AuctionLifecycleService::new(
+                        Arc::new(store.clone()),
+                        clock,
+                        policy,
+                        successor_policy,
+                    );
                     service.execute(command).await
                 }
                 #[cfg(feature = "sqlite")]
                 DatabaseStore::Sqlite(store) => {
-                    let service =
-                        AuctionLifecycleService::new(Arc::new(store.clone()), clock, policy);
+                    let service = AuctionLifecycleService::new(
+                        Arc::new(store.clone()),
+                        clock,
+                        policy,
+                        successor_policy,
+                    );
                     service.execute(command).await
                 }
             }

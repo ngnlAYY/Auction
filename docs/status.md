@@ -45,6 +45,22 @@
 
 ## 本轮静态检查
 
+### 2026-10-14 审计修复
+
+基线为 `c9a2d1e` 工作树，按静态审计修复 A01–A18，并仅将 `quinn-proto` 从 0.11.17 更新至 0.11.18。
+保留已有玩家指南与文档改动；未修改历史迁移、业务表结构、HTTP/事件字段或运行配置字段。
+
+Rust `1.98.0` 下完整 `just verify` 通过：49 份文档、格式、仓库/布局/配置/i18n 门禁、工作区全部目标、
+独立 PostgreSQL/SQLite/Redis、全特性 Clippy（`-D warnings`）和两端 WASM。另通过工作区全部目标/特性 check、
+MSRV `1.94.1` 同范围 check 及 `git diff --check`。
+`cargo audit --deny yanked --deny unsound`（cargo-audit 0.22.2）扫描 543 项依赖、1310 条公告，退出 0；
+无漏洞/撤回/unsound 命中，保留 `fxhash` 停维警告，不隐藏维护债。
+
+上述仅为源码与静态证据。未新增或运行行为测试，未访问业务数据库/真实外部服务，未运行迁移、恢复、启动或部署。
+已有异常 Draft、旧配置、失败 recovery 和邮件事实不自动回填；上线前仍须经授权核对现场与回归边界。
+
+### 文档整理记录（本轮修复前）
+
 本次仅更新 48 份正式文档。使用 Rust `1.98.0` 执行 `just docs-check`（48 份文档）、
 `just fmt repository-policy-check layout-check config-example-check i18n-check` 和 `git diff --check`，均通过。
 另静态比对全部 27 组表格列宽与源码调用，比例一致且各组总和为 100。
@@ -132,6 +148,32 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify` 与差异检查退�
 旧排期来源仍须独立核对，见[邮件资产核对](operations/mail-diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
+
+2026-10-14 全仓审计的 18 项（11 项 P1、7 项 P2）已在源码范围修复；不将静态检查等同于行为验收：
+
+| 审计项 | 修复 owner 与范围 |
+| --- | --- |
+| A01/A02 · 自动 Draft 与后继经济模板 | [生命周期与存储](../crates/auction-storage/README.md#持久调度与慢速代理)：两后端不提前写运行期结束时间，新后继冻结有效模板 |
+| A03/A04 · 退款确认与 Recovery 人工重试 | [Recovery 契约](contracts/routes.md#recovery-与实时运维)：对齐 ready 义务，匹配的父子投影与 delivery 重试原子恢复 |
+| A05/A09/A10 · runtime 与首次凭据 | [配置](../ops/config/README.md#runtime-共享与重启)：恢复错误阻断启动，复用会话校验，Unix runtime 校验有效 UID |
+| A06/A07 · 论坛越序与邮件成功前缀 | [Worker 编排](../crates/auction-jobs/README.md#生命周期慢速代理与结算)：持久 pending 先挡后续楼层，失败后缀不丢完成前缀 |
+| A08 · Lite 时间文本比较 | [存储](../crates/auction-storage/README.md)：领取/开拍使用时间值，兼容存量 RFC3339 与空格格式 |
+| A11/A14 · 未知结果重试与时间精度 | [Admin 交互](../crates/auction-web-admin/DESIGN.md#拍卖录入与结算)：冻结完整请求，先恢复精度再预检 |
+| A12/A13 · 录入世界与隐藏来源字段 | [Admin 命令](../crates/auction-web-admin/README.md#管理数据与命令)：world 隔离表单，JSON 来源不携带旧 URL |
+| A15 · 灾备文件替换 | [灾备安全边界](../ops/deploy/RECOVERY.md#安全边界)：校验属主与完整受信目录链 |
+| A16/A17/A18 · 空库与恢复后验 | [存储迁移](../crates/auction-storage/README.md#迁移)：共用完整对象盘点，subscription 限当前库，旧迁移也核对完整前缀与 checksum |
+
+旧版本提前物化的 Draft、缺失的邮件完成证明、未闭合 recovery 和不一致 runtime 仍须独立确认；
+本轮未清理、重放或改写这些历史现场。此前玩家提示与 systemd 停止预算缺口继续保留如下。
+
+[中文玩家指南](player-guide.md)的源码核对还发现两项玩家提示偏差：
+[Public 中文登录占位文案](../crates/auction-web-public/i18n/zh-CN.ftl)仍称“32 位 Key”，而
+[邮件 Key 协议](../crates/auction-application/src/ports/mail/user/security.rs)实际签发和换绑使用 43 字符的 canonical Base64URL；
+登录输入没有按 32 字符截断，指南要求完整复制回信 Key。
+[论坛主题正文](../crates/auction-integrations/src/forum/render.rs)把 notify 描述为反超提醒，但
+[当前通知 owner](../crates/auction-jobs/src/worker/forum/reply/notification.rs)仅入队单次普通 MoogleMail 通知，
+[默认正文](../crates/auction-integrations/src/clients/mooglemail/transport/outcomes.rs)也不是出价结果或持续订阅；论坛 PM 仍未接入。
+本次只在玩家指南说明并登记这些偏差，未修改译文、渲染或通知逻辑，未取得真实邮件或浏览器行为证据。
 
 本次文档核对发现，[分体总控 unit](../ops/deploy/systemd/auction-stack.service.example)的
 `TimeoutStopSec=120` 小于三角色依次各用满 45 秒的合计 135 秒。若通过该 unit 执行完整顺序停止，

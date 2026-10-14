@@ -78,6 +78,16 @@ pub(super) async fn read_migration_inventory(
     let all_success: bool = summary
         .try_get("all_success")
         .map_err(|source| query_error("migration_summary", source))?;
+    let rows = sqlx::query(
+        "SELECT version, success, checksum FROM public._sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|source| query_error("migration_identity", source))?;
+    // preflight 同时用于备份与恢复后验；缺项、额外版本或未知 checksum 必须阻断成功回执。
+    if !super::super::migrations::postgres_history_matches(&rows, latest_version) {
+        return Err(RecoveryPreflightError::MigrationHistoryInvalid);
+    }
     let expected_version = super::super::postgres_expected_migration_version();
     Ok(PostgresMigrationInventory {
         migration_count,

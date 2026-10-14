@@ -75,6 +75,7 @@ PostgreSQL 管理写入另归 `competition/postgres/admin/`，命令装配归 [d
 
 [database/scheduler](src/database/scheduler) 保存 due、租约、尝试次数和失败状态；完成/失败必须匹配 owner、精确租约及版本。
 Admin 改期清除旧租约并推进版本，陈旧任务不能收口。已存在轮次按冻结事实读取，配置变更不改写旧命令或时间。
+自动 Draft 不提前物化运行期结束时间；后继 SQL 规则列与快照同取当前新模板，不复制或改写前驱经济策略。
 
 [slow_proxy_due.rs](src/database/slow_proxy_due.rs) 只做有界候选扫描，在 LIMIT 前排除已到截止的 lot；
 执行仍由竞价事务复核 generation、due、授权与资格。慢速代理使用 lot 上的持久化调度字段和确定性命令，
@@ -102,6 +103,8 @@ Admin 读取不能为补全投影临时写入；邮件展示与诊断 sidecar �
 Delivery 从 claimed 进入 sending 前须证明所属命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。
 主动 Send 成功要求新增、唯一且完整匹配的 Sent 证明；流拍/撤拍逐件 Send 原装备，历史冻结 Return 不自动改写。
 论坛未知 POST 先精确只读对账，再按持久人工授权重试；真实处理楼层独立于内容版本和 post ID。
+Delivery Admin 人工重试调用 `recovery_commands/commands/delivery_retry.rs`，在原 Serializable 命令事务恢复匹配的
+Recovery 父子失败投影并推进 fencing；不生成成功证明、不清除其他动作阻断。
 详细写入与证明要求见[领域不变量](../../docs/contracts/invariants.md)及[邮件诊断](../../docs/operations/mail-diagnostics.md)。
 
 ## 连接池可观测性
@@ -155,6 +158,8 @@ SQLite 文件必须位于本地受信文件系统，不能通过网络共享扩�
 
 `initialization/` 只供明确授权的合并首次空 PostgreSQL 库初始化：同一专用连接持 SQLx 迁移锁，拒绝已有用户对象与其他客户端，
 不建库、不删对象、不升级已有库。与普通迁移共用 `000005`/`000015` 的受限历史别名执行视图，不重复加锁或改写原文件/checksum。
+`recovery_preflight/catalog.rs` 拥有空库对象盘点，首次初始化复用；subscription 仅计当前库，default ACL 等残留仍阻断。
+`migrations/history.rs` 统一核对完整 SQLx 历史前缀及 checksum；旧 archive 恢复不能只比较最大版本。
 canonical v28 必须走[专用接管](../../ops/deploy/LEGACY_V28_ADOPTION.md)，不能冒充普通追加迁移。
 
 ## 连续领先时间

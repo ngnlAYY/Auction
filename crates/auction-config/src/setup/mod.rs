@@ -71,6 +71,9 @@ impl FirstRunConfig {
     pub fn validate(&self) -> Result<(), FirstRunError> {
         self.database.connection_url().map_err(|_| FirstRunError::InvalidInput)?;
         self.schedule.validate().map_err(|_| FirstRunError::InvalidInput)?;
+        auction_application::validate_admin_actor(&self.admin_actor)
+            .and_then(|()| auction_application::validate_admin_secret(self.admin_secret.as_bytes()))
+            .map_err(|_| FirstRunError::InvalidInput)?;
         // 首次表单只接受规范的分钟精度时间；不改写正式 loader 既有的文本兼容范围。
         if self.schedule.timezone.len() > 128
             || [
@@ -88,9 +91,7 @@ impl FirstRunConfig {
         }
         if self.admin_actor.is_empty()
             || self.admin_actor.len() > 128
-            || self.admin_actor.contains([':', '\r', '\n', '\0'])
             || !(16..=512).contains(&self.admin_secret.len())
-            || self.admin_secret.contains(['\r', '\n', '\0'])
             || self.public_origin == self.admin_origin
             || !valid_origin(&self.public_origin)
             || !valid_origin(&self.admin_origin)

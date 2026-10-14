@@ -27,6 +27,11 @@ use uuid::Uuid;
 
 #[path = "commands/confirm.rs"]
 mod confirm;
+#[cfg(feature = "postgres")]
+#[path = "commands/delivery_retry.rs"]
+mod delivery_retry;
+#[cfg(feature = "postgres")]
+pub(crate) use delivery_retry::reset_after_delivery_retry;
 #[path = "commands/mapping.rs"]
 mod mapping;
 #[path = "commands/relist.rs"]

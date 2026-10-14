@@ -62,6 +62,7 @@ SQLite Lite 必须本地文件、每角色一个实例、有效主并发 1。Pos
 默认值与租约约束见[Worker 循环预算](../../ops/config/README.md#worker-循环预算)。
 自动周排期默认关闭；新轮次 world 取配置 allowlist、runtime 启用集合与数据库 `worlds.enabled` 的交集。
 数据库 world 关闭阻止新轮次，但不阻止已持久化结算/交付/恢复安全排空。
+与 Admin 一样，Worker 向生命周期命令注入有效经济模板，仅在建立后继时冻结；旧场次与已接受命令不重算。
 
 ## 邮件调度
 

@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::{normalize_datetime, update_admin_auction_schedule};
-use crate::app::surface::{admin_api_error_message, stable_command_id};
+use crate::app::surface::admin_api_error_message;
 
 use super::super::helpers::{datetime_local_value, valid_schedule_update};
 use super::model::AdminAuctionNotice;
@@ -28,7 +28,7 @@ pub(super) fn AdminAuctionScheduleAction(
     let mut open_value = use_signal(String::new);
     let mut end_value = use_signal(String::new);
     let mut feedback = use_signal(|| None::<String>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let mut command_state = use_signal(|| None::<(ScheduleRequest, Uuid)>);
     let original_preview_scheduled_at = preview_scheduled_at.clone();
     let original_scheduled_open_at = scheduled_open_at.clone();
     let original_scheduled_end_at = scheduled_end_at.clone().unwrap_or_default();
@@ -106,11 +106,35 @@ fn AdminAuctionScheduleDialog(
     open_value: Signal<String>,
     end_value: Signal<String>,
     feedback: Signal<Option<String>>,
-    command_state: Signal<Option<(String, Uuid)>>,
+    command_state: Signal<Option<(ScheduleRequest, Uuid)>>,
 ) -> Element {
     let preview_locked = status == "preview";
-    let can_submit =
-        !busy() && valid_schedule_update(&status, &preview_value(), &open_value(), &end_value());
+    // 先恢复未编辑字段的精度，再校验最终候选；重试直接使用第一次提交的完整请求。
+    let request = command_state().map(|(request, _)| request).unwrap_or_else(|| ScheduleRequest {
+        auction_id: auction_id.clone(),
+        expected_state_version,
+        preview_scheduled_at: normalize_datetime(&if preview_locked {
+            original_preview_scheduled_at.clone()
+        } else {
+            preserve_unchanged_datetime(preview_value(), &original_preview_scheduled_at)
+        }),
+        scheduled_open_at: normalize_datetime(&preserve_unchanged_datetime(
+            open_value(),
+            &original_scheduled_open_at,
+        )),
+        scheduled_end_at: normalize_datetime(&preserve_unchanged_datetime(
+            end_value(),
+            &original_scheduled_end_at,
+        )),
+    });
+    let can_submit = !busy()
+        && (command_state().is_some()
+            || valid_schedule_update(
+                &status,
+                &request.preview_scheduled_at,
+                &request.scheduled_open_at,
+                &request.scheduled_end_at,
+            ));
     let preview_input_id = format!("schedule-preview-{auction_id}");
     let open_input_id = format!("schedule-open-{auction_id}");
     let end_input_id = format!("schedule-end-{auction_id}");
@@ -137,31 +161,7 @@ fn AdminAuctionScheduleDialog(
                     onsubmit: move |event| {
                         event.prevent_default();
                         if can_submit {
-                            run_schedule_action(
-                                ScheduleRequest {
-                                    auction_id: auction_id.clone(),
-                                    expected_state_version,
-                                    // 未编辑的字段保留服务端原始 RFC3339 精度，不能把
-                                    // datetime-local 的分钟显示值回写成另一个时刻。
-                                    preview_scheduled_at: if preview_locked {
-                                        original_preview_scheduled_at.clone()
-                                    } else {
-                                        preserve_unchanged_datetime(
-                                            preview_value(),
-                                            &original_preview_scheduled_at,
-                                        )
-                                    },
-                                    scheduled_open_at: preserve_unchanged_datetime(
-                                        open_value(),
-                                        &original_scheduled_open_at,
-                                    ),
-                                    scheduled_end_at: preserve_unchanged_datetime(
-                                        end_value(),
-                                        &original_scheduled_end_at,
-                                    ),
-                                },
-                                signals,
-                            );
+                            run_schedule_action(request.clone(), signals);
                         }
                     },
                     p { class: "admin-panel__note", {t!("admin-auctions-schedule-note")} }
@@ -244,9 +244,10 @@ struct ScheduleSignals {
     open_value: Signal<String>,
     end_value: Signal<String>,
     feedback: Signal<Option<String>>,
-    command_state: Signal<Option<(String, Uuid)>>,
+    command_state: Signal<Option<(ScheduleRequest, Uuid)>>,
 }
 
+#[derive(Clone, PartialEq)]
 struct ScheduleRequest {
     auction_id: String,
     expected_state_version: i64,
@@ -275,6 +276,11 @@ fn preserve_unchanged_datetime(display_value: String, original_rfc3339: &str) ->
 
 /// 提交计划修改；命令 ID 在相同版本和三项规范 UTC 时间的重试期间保持稳定。
 fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
+    let (request, command_id) = (signals.command_state)().unwrap_or_else(|| {
+        let command_id = Uuid::new_v4();
+        signals.command_state.set(Some((request.clone(), command_id)));
+        (request, command_id)
+    });
     let ScheduleRequest {
         auction_id,
         expected_state_version,
@@ -282,13 +288,6 @@ fn run_schedule_action(request: ScheduleRequest, mut signals: ScheduleSignals) {
         scheduled_open_at,
         scheduled_end_at,
     } = request;
-    let preview_scheduled_at = normalize_datetime(&preview_scheduled_at);
-    let scheduled_open_at = normalize_datetime(&scheduled_open_at);
-    let scheduled_end_at = normalize_datetime(&scheduled_end_at);
-    let signature = format!(
-        "{expected_state_version}:{preview_scheduled_at}:{scheduled_open_at}:{scheduled_end_at}"
-    );
-    let command_id = stable_command_id(signals.command_state, signature);
     signals.busy.set(true);
     spawn(async move {
         match update_admin_auction_schedule(

@@ -141,7 +141,7 @@ impl MailPollStore for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                Self::Postgres(store) => poll::commit(store.pool(), &claim, &batch).await,
+                Self::Postgres(store) => poll::commit(store.pool(), &claim, &batch, None).await,
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(capability_error()),
             }
@@ -165,6 +165,35 @@ impl MailPollStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => state::renew(store.pool(), claim, now, lease_until).await,
+                #[cfg(feature = "sqlite")]
+                Self::Sqlite(_) => Err(capability_error()),
+            }
+        })
+    }
+
+    fn fail_after_prefix(
+        &self,
+        claim: MailPollClaim,
+        mut batch: MailPollBatch,
+        retry_at: DateTime<Utc>,
+        failure_code: String,
+        safe_detail: String,
+    ) -> ApplicationFuture<'_, AdminMailPollState> {
+        Box::pin(async move {
+            batch.next_poll_at = retry_at;
+            if !claim.validate()
+                || !batch.validate(&claim)
+                || !valid_text(&failure_code, MAX_MAIL_POLL_FAILURE_CODE_BYTES)
+                || !valid_text(&safe_detail, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES)
+            {
+                return Err(storage_error("MoogleMail 失败前缀提交参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    poll::commit(store.pool(), &claim, &batch, Some((&failure_code, &safe_detail)))
+                        .await
+                }
                 #[cfg(feature = "sqlite")]
                 Self::Sqlite(_) => Err(capability_error()),
             }

@@ -3,6 +3,8 @@
 use super::super::*;
 use std::marker::PhantomData;
 
+mod parents;
+
 pub(crate) fn require_dump_extension(path: &Path) -> anyhow::Result<()> {
     if path.extension().and_then(|extension| extension.to_str()) != Some("dump") {
         anyhow::bail!("PostgreSQL backup output must use the .dump extension");
@@ -27,6 +29,7 @@ pub(crate) fn require_absent_artifact(path: &Path, label: &str) -> anyhow::Resul
 }
 
 pub(crate) fn create_private_temp_path(target: &Path, label: &str) -> anyhow::Result<PathBuf> {
+    validate_private_evidence_path(target)?;
     let parent =
         target.parent().ok_or_else(|| anyhow::anyhow!("private artifact parent is missing"))?;
     for _ in 0..8 {
@@ -67,14 +70,24 @@ pub(crate) fn remove_owned_temp(path: &Path) {
 }
 
 pub(crate) fn verify_private_regular_file(path: &Path, label: &str) -> anyhow::Result<()> {
+    validate_private_evidence_path(path)?;
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("read {label} metadata: {}", path.display()))?;
     if !metadata.file_type().is_file() {
         anyhow::bail!("{label} is not a regular non-symlink file: {}", path.display());
     }
     #[cfg(unix)]
-    if metadata.permissions().mode() & 0o077 != 0 {
-        anyhow::bail!("{label} allows group/other access: {}", path.display());
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        // 文件由当前有效 UID 拥有；目录链同时排除其他 UID 替换目录项的能力。
+        if metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o077 != 0
+        {
+            anyhow::bail!(
+                "{label} must be owner-owned and deny group/other access: {}",
+                path.display()
+            );
+        }
     }
     if metadata.len() == 0 {
         anyhow::bail!("{label} is empty: {}", path.display());
@@ -95,6 +108,7 @@ pub(crate) fn validate_private_evidence_path(path: &Path) -> anyhow::Result<()> 
     if canonical_parent != parent {
         anyhow::bail!("private evidence output parent must be a canonical non-symlink path");
     }
+    parents::verify_parent_chain(parent)?;
     if path.file_name().is_none() {
         anyhow::bail!("private evidence output filename is missing");
     }

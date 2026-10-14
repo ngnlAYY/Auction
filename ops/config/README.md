@@ -84,9 +84,11 @@ chmod 600 ops/config/auction.secret.toml
 ## Runtime 共享与重启
 
 Admin/Worker 示例共用 [runtime 模板](examples/runtime/admin.toml)。生产文件放在受信目录，父目录不得
-被 group/other 写入，文件按 0640 管理。A26/A27 的更新、fingerprint fence、命令账本和原子替换仅支持
+被 group/other 写入，文件须由加载/更新进程的有效 UID 拥有并按 0640 管理；Admin/Worker 共享时使用同一运行账号。
+A26/A27 的更新、fingerprint fence、命令账本和原子替换仅支持
 PostgreSQL；SQLite 可在启动时读取文件，HTTP 更新返回 `501 feature_not_supported`。
-页面提交完整候选，保存成功是 TOML 落盘，不是热加载。Admin 启动恢复若改变已加载指纹，必须重新部署重启。
+页面提交完整候选，保存成功是 TOML 落盘，不是热加载。Admin 启动恢复任何失败（含结果未知/需人工核对）均停止启动，
+不能沿用旧安全配置；恢复若改变已加载指纹，必须重新部署重启。
 
 | 配置组 | 责任与生效范围 | 重启范围 |
 | --- | --- | --- |
@@ -124,7 +126,7 @@ cron 候选校验与 Worker 共用解析器，保存不立即轮询。
 | `session_signing_key` | 会话签名 |
 | `ehentai_cookie`、`mooglemail_cookie` | 外部服务单 Cookie 入口 |
 | `public_otlp_headers`、`admin_otlp_headers`、`worker_otlp_headers` | 角色专属 OTLP 头 |
-| `admin_actor`、`admin_secret` | 成对配置；actor 禁冒号，secret 至少 16 字节 |
+| `admin_actor`、`admin_secret` | 成对配置；actor 1–256 字节，禁冒号、首尾空白及控制字符；secret 16–4096 字节且禁 ASCII 控制字符；首次表单另限 actor 128、secret 512 字节 |
 | `equipment_data_key_id` / `equipment_data_key` | 装备信封密钥对 |
 | `user_login_data_key_id` / `user_login_data_key` | 登录 key 信封密钥对 |
 | `credential_data_key_id` / `credential_data_key` | 外部 Cookie 信封密钥对 |
@@ -147,6 +149,7 @@ cron 候选校验与 Worker 共用解析器，保存不立即轮询。
 
 `[auction]` 的 schedule/economics/settlement/recovery 默认值见[公共模板](examples/common.toml)。
 新拍卖创建时冻结 `policy_snapshot`，后续出价/取消使用快照；模板改动不回写旧场次。
+自动后继也是新聚合，冻结 Admin/Worker 启动时有效模板，而非复制前驱经济规则。
 周排期默认关闭，内置 UTC 周四 22:00 预览、周五 00:00 开拍、周六 12:00 结束，可显式覆盖。
 邮件默认起拍价独立，见[Worker 定价说明](../../apps/worker/README.md#拍卖邮件起拍价)。
 

@@ -2,8 +2,10 @@ use super::*;
 
 pub(super) fn successor_plan(
     context: &AuctionLifecycleContext,
+    policy: &AuctionPolicyTemplate,
 ) -> Result<AuctionPreviewSuccessorPlan, ApplicationError> {
-    context.policy_settlement.validate_for_new_auction()?;
+    // 后继是新聚合：使用当前有效模板，旧聚合与已接受命令仍按冻结事实重放。
+    policy.validate()?;
     let current_week = context.scheduled_round_local_week.unwrap_or_else(|| {
         context.preview_scheduled_at.date_naive()
             - Duration::days(i64::from(
@@ -42,6 +44,7 @@ pub(super) fn successor_plan(
         preview_due_at: chrono::DateTime<chrono::Utc>,
         open_due_at: chrono::DateTime<chrono::Utc>,
         scheduled_end_at: chrono::DateTime<chrono::Utc>,
+        policy: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         schedule_source: &'a Option<crate::AuctionScheduleSource>,
     }
@@ -55,11 +58,13 @@ pub(super) fn successor_plan(
             preview_due_at,
             open_due_at,
             scheduled_end_at,
+            policy: policy.snapshot(scheduled_end_at),
             schedule_source: &schedule_source,
         },
     )?;
 
     Ok(AuctionPreviewSuccessorPlan {
+        policy: policy.clone(),
         schedule_source,
         round_id,
         auction_id,

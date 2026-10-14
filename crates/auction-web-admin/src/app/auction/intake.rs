@@ -65,13 +65,18 @@ fn intake_field_issue_message(issue: IntakeFieldIssue) -> String {
 
 /// 展示手工装备录入表单，并在成功后触发所属页面重新加载。
 #[component]
-pub(super) fn AdminIntakeForm(world_id: String, reload_generation: Signal<u64>) -> Element {
+pub(super) fn AdminIntakeForm(
+    world_id: String,
+    reload_generation: Signal<u64>,
+    mut busy: Signal<bool>,
+) -> Element {
+    // 世界 key 销毁旧表单时同时释放父级守卫；旧作用域任务不会回写新世界表单。
+    use_drop(move || busy.set(false));
     let mut source_kind = use_signal(|| "url".to_owned());
     let mut equipment_url = use_signal(String::new);
     let mut equipment_json = use_signal(String::new);
     let mut start_price = use_signal(String::new);
     let mut player_id = use_signal(String::new);
-    let busy = use_signal(|| false);
     let mut result = use_signal(|| None::<AdminIntakeResult>);
     // 服务端返回的错误码；输入层校验错误由各字段信号承担，不再走整页提示。
     let mut failure = use_signal(|| None::<String>);

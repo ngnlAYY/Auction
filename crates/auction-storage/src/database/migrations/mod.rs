@@ -10,6 +10,9 @@ use sqlx::{
 
 use super::{DatabaseBackend, StorageError};
 
+mod history;
+pub(super) use history::postgres_history_matches;
+
 static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("../../migrations/postgres");
 
 const MIGRATION_FIVE_DESCRIPTION: &str = "recovery observability forum";

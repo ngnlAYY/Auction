@@ -183,6 +183,21 @@ pub trait MailPollStore: Send + Sync {
         batch: MailPollBatch,
     ) -> ApplicationFuture<'_, AdminMailPollState>;
 
+    /// 原子提交失败项之前的连续完成前缀，并保存失败退避、释放同一租约。
+    /// 不支持此能力的适配器必须拒绝，不能退化为跨事务 commit 后 fail。
+    fn fail_after_prefix(
+        &self,
+        _claim: MailPollClaim,
+        _batch: MailPollBatch,
+        _retry_at: DateTime<Utc>,
+        _failure_code: String,
+        _safe_detail: String,
+    ) -> ApplicationFuture<'_, AdminMailPollState> {
+        Box::pin(async {
+            Err(crate::ApplicationError::CapabilityUnavailable("邮件完成前缀与失败退避需原子提交"))
+        })
+    }
+
     /// 在租约 token 仍有效时保存失败原因、退避时间并释放租约。
     fn fail(
         &self,

@@ -10,6 +10,7 @@
 | 根 DESIGN | 系统设计总览、核心数据流与边界；链接权威 owner，不另建契约清单 | 系统协作或设计边界变化 |
 | 两个 Web crate 的 DESIGN | 分别拥有 Public/Admin 的信息架构、视觉与交互说明；不合并业务外壳 | 对应 surface 的页面、布局或交互变化 |
 | docs/README | 全部正式文档的导航 | 新建、移动或删除文档 |
+| docs/player-guide | 面向玩家的跨入口操作流程和能力限制；不替代已发布规则或所属 owner 契约 | 玩家入口、指令、金额、交互或履约方式变化 |
 | architecture / tech-stack | owner、依赖方向、能力档位与技术取舍 | 跨模块或依赖策略变化 |
 | contracts | 路由、事件、schema 与不变量 | 对外契约或持久化语义变化 |
 | apps/*、crates/* README | 本模块职责、源码入口、关键限制与排错入口 | 本模块目录或实现变化 |

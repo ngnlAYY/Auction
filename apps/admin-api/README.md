@@ -45,7 +45,8 @@ mail、realtime、credential、delivery、fulfillment、recovery 与 alerting �
 ## Runtime 恢复与启动快照
 
 PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命令账本，保留 fingerprint fence 与
-`restart_required`。就绪前恢复 pending/unknown 命令：未知结果或需人工核对时保留错误告警，其他恢复错误阻断启动。
+`restart_required`。就绪前恢复 pending/unknown 命令：任何恢复错误（包括未知结果和需人工核对）都阻断启动，
+不得带旧安全快照监听；保持停机核对文件与账本后再显式重启。
 恢复后文件指纹若不同于已加载配置，必须重新部署重启，不能用旧监听/策略快照报告新配置生效。
 SQLite Lite 的 HTTP 更新返回 501；文件保存不会热改当前进程。
 

@@ -164,7 +164,8 @@ pub(in crate::database::recovery_commands) async fn validate_obligations(
                 || payment.kind != "winner_payment_carrier_cod"
                 || payment_state.as_deref() != Some("satisfied")
                 || equipment.kind != "winner_equipment_handoff"
-                || equipment.state != "blocked"
+                // 已付款会把 handoff 义务激活为 ready；外部交付仍须未满足且有精确取回证明。
+                || equipment.state != "ready"
                 || equipment_state.as_deref() == Some("satisfied")
             {
                 return Err(RecoveryCommandError::NotConfirmable);

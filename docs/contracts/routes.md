@@ -444,6 +444,8 @@ attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间
 
 A14 为 PostgreSQL 完整档的版本 fence、证据复核、账本、退款激活、guarded relist、审计及预览目录事件事务。
 结算为获胜 lot 同事务建立 recovery case，Worker 按 `case → return → action → relist → refund` 持久化处理。
+已付款退货的退款确认要求 handoff 义务为 `ready` 且未满足，仍须完整取回证据；不能以付款前 `blocked` 状态替代。
+Delivery 人工 retry/reconcile-retry 在原命令事务恢复匹配的 Recovery action 与父任务阻断，不改变外部成功证明门禁。
 Lite 返回 501；真实 MoogleMail 回执与部署运行证据见[验证状态](../status.md)，静态接入不等于外部流程验收。
 
 A21–A24、A43 在两后端提供事件元数据、lag/failure 与 replay 安全边界，未装配端口返回 501。
@@ -524,6 +526,7 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 同目录临时文件、权限校验、fsync、rename 和目录同步完成原子替换。文件替换成功后若账本应用
 出现错误，保留新文件并返回 `503 reconciliation_required`，表示结果仍需核对；同一命令重试或
 启动恢复按数据库实际 pending/applied 状态向前收口，不能把提交确认丢失误当成可回滚旧文件。
+启动恢复任何失败（包括结果未知或需人工核对）都阻断 Admin 监听；仅恢复成功且文件指纹匹配启动快照才继续装配。
 成功更新明确返回 `restart_required`，不伪造热加载。Admin
 运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含兼容
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为

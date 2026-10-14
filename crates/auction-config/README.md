@@ -93,6 +93,7 @@ Delivery 有效并发取配置与 transport 上限的较小值；MoogleMail tran
 
 Admin runtime 更新/恢复使用非阻塞 `File::try_lock()`，从恢复检查持续持有至文件与账本收口。
 竞争返回不可用，guard 取消后由 RAII 释放；锁文件不逐次删除，流程内复用已持锁接口，避免锁域分裂或递归取锁。
+Unix runtime 文件须由有效 UID 拥有且为 0640；首次设置与敏感配置复用 application 会话凭据校验，拒绝生成不可登录的配置。
 
 ## 告警与 HTTP 安全
 

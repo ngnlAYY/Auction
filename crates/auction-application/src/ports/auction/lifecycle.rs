@@ -152,7 +152,7 @@ pub struct AuctionLifecycleContext {
     pub preview_opened_at: Option<DateTime<Utc>>,
     pub policy_scheduled_end_at: DateTime<Utc>,
     pub policy_final_phase_lead: chrono::Duration,
-    /// 后继草稿继承的冻结结算策略；仅新建后继时应用新模板门禁。
+    /// 当前拍卖的冻结结算策略；后继草稿不得继承它来替代有效的新拍卖模板。
     pub policy_settlement: auction_domain::SettlementPolicy,
     pub preview_manual_open: bool,
     pub preview_revision: i64,
@@ -167,6 +167,8 @@ pub struct AuctionLifecycleContext {
 /// 当前拍卖结束接收装备时建立的下一期草稿与持久化周轮次。
 #[derive(Debug, Clone)]
 pub struct AuctionPreviewSuccessorPlan {
+    /// 仅应用于本次新建后继的启动期有效模板；不改写前序拍卖。
+    pub policy: super::AuctionPolicyTemplate,
     pub schedule_source: Option<super::AuctionScheduleSource>,
     pub round_id: uuid::Uuid,
     pub auction_id: AuctionId,
