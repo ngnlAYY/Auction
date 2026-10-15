@@ -4,6 +4,9 @@
 
 本页按本地 [Cargo.toml](../Cargo.toml)、[Cargo.lock](../Cargo.lock)和[工具链](../rust-toolchain.toml)说明项目选择，
 不将仓库锁定版本描述为上游最新或当前安全性保证。
+工作区成员由 `apps/*`、`crates/*` 收集；直接依赖集中在根清单，锁文件保留完整解析图。
+MSRV 声明在 `workspace.package.rust-version`，各包继承，Clippy 读取包元数据，不另设 clippy.toml。
+WASM profile 继承 release 的 LTO/代码生成单元，只覆盖体积优化和 panic 策略。
 
 ## 版本与升级
 

@@ -99,7 +99,7 @@ Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；
 
 仅 `Retryable` 错误与超时进入有界重试；业务拒绝与确定性错误直接收口。
 原始邮件/响应只进入独立加密诊断；Admin 脱敏展示与装备失败 sidecar 均不参与命令摘要、完成证明或 cursor，
-具体见[邮件诊断](../../docs/operations/mail-diagnostics.md)。装备来源时间在每次异步读取完成后重新校验，不加宽限。
+具体见[邮件诊断](../../ops/mail-diagnostics.md)。装备来源时间在每次异步读取完成后重新校验，不加宽限。
 
 ## 调度、告警与错误
 

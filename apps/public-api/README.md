@@ -1,6 +1,6 @@
 # auction-public-api
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/deploy/README.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/README.md)
 
 公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配根。
 `src/lib.rs` 导出 `run`、`run_from_path`；独立 `main.rs` 和[合并服务](../server/README.md)的 Public 子进程复用同一入口。

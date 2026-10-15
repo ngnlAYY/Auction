@@ -1,28 +1,8 @@
 [workspace]
 # 必填：按各包 MSRV 优先解析兼容版本；最终仍由 --locked 与独立 MSRV 门禁约束。
 resolver = "3"
-members = [
-    "apps/admin-api",
-    "apps/auctionctl",
-    "apps/public-api",
-    "apps/server",
-    "apps/worker",
-    "crates/auction-application",
-    "crates/auction-cache",
-    "crates/auction-config",
-    "crates/auction-contracts",
-    "crates/auction-domain",
-    "crates/auction-http",
-    "crates/auction-integrations",
-    "crates/auction-jobs",
-    "crates/auction-observability",
-    "crates/auction-process",
-    "crates/auction-setup",
-    "crates/auction-storage",
-    "crates/auction-web-admin",
-    "crates/auction-web-public",
-    "crates/auction-web-shared",
-]
+# 必填：两个目录只放工作区包，新增包自动纳入；不再维护第二份成员清单。
+members = ["apps/*", "crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -185,9 +165,6 @@ incremental = false
 inherits = "release"
 # 可选：以下载、解析体积优先，不宣称浏览器计算吞吐最优。
 opt-level = "z"
-# 可选：保留完整跨 crate 优化。
-lto = "fat"
-# 可选：单代码生成单元。
-codegen-units = 1
+# LTO、代码生成单元与增量策略继承 release，不重复声明。
 # 可选：CSR WASM 不依赖后端 panic 展开语义。
 panic = "abort"

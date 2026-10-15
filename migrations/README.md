@@ -13,5 +13,5 @@
 - 普通启动不隐式迁移；网页明确确认后的首次空库初始化不用于旧库接管。
 - 普通迁移与首次初始化复用[历史 checksum 兼容](postgres/README.md#历史-checksum-兼容)，在原迁移锁内执行。失败保留现场，不改历史身份。
 
-权限、备份、精确确认及恢复步骤见[部署手册](../ops/deploy/README.md)和[CLI 手册](../apps/auctionctl/README.md)。
+权限、备份、精确确认及恢复步骤见[部署手册](../ops/README.md)和[CLI 手册](../apps/auctionctl/README.md)。
 默认仅静态检查，不执行迁移或行为测试；运行证据另记[验证状态](../docs/status.md)。

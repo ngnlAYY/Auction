@@ -56,7 +56,7 @@ info!(auction_id = %id, command_id = %command_id, "bid accepted");
 ## 禁止记录的内容
 
 Cookie、密码、会话 token、数据库连接串、数据密钥和未脱敏原始响应不得进入日志或指标。
-配置解析失败不回显 TOML 原文；邮件原始证据走[独立加密诊断](../../docs/operations/mail-diagnostics.md)。
+配置解析失败不回显 TOML 原文；邮件原始证据走[独立加密诊断](../../ops/mail-diagnostics.md)。
 
 ## 健康 dashboard
 

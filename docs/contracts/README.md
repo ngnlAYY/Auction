@@ -15,7 +15,7 @@
 | [领域不变量](invariants.md) | I 编号、幂等、锁、金额、生命周期、审计与外部副作用 | [domain](../../crates/auction-domain/README.md)、[application](../../crates/auction-application/README.md) |
 
 配置字段由[配置手册和逐字段 TOML 示例](../../ops/config/README.md)登记；
-页面列宽见[表格契约](../table-layouts.md)；敏感邮件证据见[诊断契约](../operations/mail-diagnostics.md)。
+页面列宽见[表格契约](../table-layouts.md)；敏感邮件证据见[诊断契约](../../ops/mail-diagnostics.md)。
 
 ## 修改顺序
 

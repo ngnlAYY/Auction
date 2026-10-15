@@ -253,7 +253,7 @@ Final 状态与对应调度完成 fence 必须原子提交；带冻结来源的�
 或 cursor；没有历史 trace 不补因、不重放。留证必须在 item/batch 业务定时器之外执行，实际耗时
 顺延后续 batch deadline；中间失败保留原 retryability，只有 terminal `OkRejected` 挂接 sidecar。
 留证关闭、失败或完成未知时仍输出安全关联日志，不伪称取得完整 body 或保证文件永久存在。
-阶段、字段闭集、HTTP 状态与计时范围、回执和调用顺序统一见[装备诊断契约](../operations/mail-diagnostics.md#装备读取失败诊断)。
+阶段、字段闭集、HTTP 状态与计时范围、回执和调用顺序统一见[装备诊断契约](../../ops/mail-diagnostics.md#装备读取失败诊断)。
 
 ### I-09a Operations alert 的通知冷却不能早于入队证明
 
@@ -310,7 +310,7 @@ Worker 收到明确 `recipient_not_found` 后，必须只在当前领取轮次�
 transport 元数据只能是有界的安全 object；storage owner 必须覆盖而不是信任其
 `safe_detail` / `outcome_unknown`。普通日志、数据库和 DTO 不得保存原始响应、Cookie 或请求
 payload；但业务拒绝、业务失败、处理超时以及 HTTP/解析异常可以按
-[`docs/operations/mail-diagnostics.md`](../operations/mail-diagnostics.md) 写入独立的加密异常证据，
+[`ops/mail-diagnostics.md`](../../ops/mail-diagnostics.md) 写入独立的加密异常证据，
 证据保存失败不得改变原有退回、投递、重试、游标或幂等结果。
 
 所有主动 ComposeSend（通知、注册/重绑 key、告警、结算/返还）在任意 POST 前完成覆盖所有 MID 的
@@ -320,7 +320,7 @@ body digest、Credits、COD、装备 ID 精确匹配才可成功；零资产邮�
 本地 UUID 或 Admin 提交的裸 `external_reference` 均不能替代证明。
 
 成功 metadata、默认 180 秒 delivery timeout/300 秒 sending grace 及预算约束见
-[Sent 证明](../operations/mail-diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对
+[Sent 证明](../../ops/mail-diagnostics.md#主动-composesend-的-sent-证明)。storage defense gate 对
 Worker 和 Admin 同样生效；Admin `retry`/`failed` 仍需显式命令、版本 fence 和审计。
 Return/Take 使用独立 action proof 和人工核对路径，不套用 ComposeSend 证明。
 

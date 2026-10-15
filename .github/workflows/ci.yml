@@ -8,6 +8,18 @@ permissions:
   contents: read
 
 jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.99.0
+          components: rustfmt
+      - run: bash ci/check.sh docs
+
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -21,29 +33,8 @@ jobs:
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.2；固定提交，避免标签漂移。
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - run: |
-          for check in repository layout config i18n; do
-            bash ci/check.sh "$check"
-          done
-      - run: cargo fmt --all -- --check
-      - run: cargo check --locked --workspace --all-targets
-      - run: >-
-          cargo check --locked -p auction-storage --all-targets
-          --no-default-features --features postgres
-      - run: >-
-          cargo check --locked -p auction-cache --all-targets
-          --no-default-features --features redis
-      - run: >-
-          cargo clippy --locked --workspace --all-targets --all-features
-          -- -D warnings
-      # 浏览器目标只做编译校验。不安装 dx CLI：auction-http 以 allow_missing 内嵌前端
-      # 产物，缺少产物时仍可编译，因此 CI 不需要 npm 下载 esbuild。
-      - run: >-
-          cargo check --locked -p auction-web-public
-          --target wasm32-unknown-unknown
-      - run: >-
-          cargo check --locked -p auction-web-admin
-          --target wasm32-unknown-unknown
+      # docs 独立报告；其余策略和 Rust 检查复用本地命令，不安装 dx 或运行测试。
+      - run: bash ci/check.sh repository layout config i18n rust
 
   security-audit:
     runs-on: ubuntu-latest
@@ -61,9 +52,9 @@ jobs:
           key: cargo-audit-0.22.2-machete-0.9.2
       # 只审计依赖，不运行产品或行为测试；漏洞和全部警告均失败，不忽略公告。
       - run: cargo install cargo-audit --locked --version 0.22.2
-      - run: cargo audit --deny warnings
+      - run: bash ci/check.sh dependency-audit
       - run: cargo install cargo-machete --locked --version 0.9.2
-      - run: cargo machete
+      - run: bash ci/check.sh dependency-unused
 
   msrv:
     runs-on: ubuntu-latest

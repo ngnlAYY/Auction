@@ -1,6 +1,6 @@
 # 邮件诊断与审查证据
 
-[文档导航](../README.md) · [加密证据](../../crates/auction-integrations/src/clients/mooglemail/diagnostics) · [离线导出和显式回填](../../apps/auctionctl/src/bootstrap/runtime/mail_diagnostics) · [审查与诊断端口](../../crates/auction-application/src/ports/mail)
+[文档导航](../docs/README.md) · [加密证据](../crates/auction-integrations/src/clients/mooglemail/diagnostics) · [离线导出和显式回填](../apps/auctionctl/src/bootstrap/runtime/mail_diagnostics) · [审查与诊断端口](../crates/auction-application/src/ports/mail)
 
 本页区分加密原始证据、脱敏审查投影与业务完成证明。PostgreSQL 完整档 Worker 可为业务拒绝/失败、
 解析或 HTTP 异常、处理超时留证；普通成功邮件不归档原文。原始正文、Cookie、请求表单、token 和装备 key
@@ -105,8 +105,8 @@ COD 和装备 ID；0 资产通知也要求 0 资产 Sent 证明。资产不符�
 sending grace 默认 300 秒；启用 MoogleMail 时 timeout 必须大于两倍 fetch budget，读取复用既有
 `maximum_pages` 和 `fetch_timeout`，不新增配置字段。成功 metadata 为 `sent_verified=true`、
 `external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。
-[sender/proof.rs](../../crates/auction-integrations/src/clients/mooglemail/sender/proof.rs) 编排 baseline 与新增 Sent 核验，
-内容解析由 [parser/reads/sent/detail.rs](../../crates/auction-integrations/src/clients/mooglemail/parser/reads/sent/detail.rs) 的
+[sender/proof.rs](../crates/auction-integrations/src/clients/mooglemail/sender/proof.rs) 编排 baseline 与新增 Sent 核验，
+内容解析由 [parser/reads/sent/detail.rs](../crates/auction-integrations/src/clients/mooglemail/parser/reads/sent/detail.rs) 的
 `MoogleMailParser::parse_sent_content_proof` 负责；storage 成功写回前执行 defense gate。
 Return/Take 使用独立 action proof，不属于主动 ComposeSend。
 
@@ -138,8 +138,8 @@ retention status/error。`snapshot_invalid` 与 `filter_rejected` 才允许对�
 `filter_rejected` 说明处理当时的规则未通过；`start_price_*` 指向定价指令。网络/HTTP 异常与登录失效分开说明，
 证据 `authentication` 也不等于游戏登录失败。未知代码仍保留原值，旧记录缺少诊断时不能通过刷新补齐。
 收件拒绝不代表装备已退回，须核对关联 Return/Send 任务和 MM；修改配置或升级说明文案不会自动重放旧收件。
-当前[邮件处理器](../../crates/auction-application/src/services/mail/processing/processor/auction.rs)在每件装备读取
-完成后重新取应用时钟校验，保留未来时间门禁及命令业务时间；不会因此处理旧任务，部署和运行证据见[状态说明](../status.md)。
+当前[邮件处理器](../crates/auction-application/src/services/mail/processing/processor/auction.rs)在每件装备读取
+完成后重新取应用时钟校验，保留未来时间门禁及命令业务时间；不会因此处理旧任务，部署和运行证据见[状态说明](../docs/status.md)。
 
 安全日志与留证状态遵守[普通日志](#普通日志)，没有底层失败 trace 的旧邮件不补因、不重放。
 装备诊断上下文的 `external_equipment_id` 与 `attachment_position` 在通用邮件诊断中保持 optional；缺省时省略，
@@ -159,7 +159,7 @@ session expired 在凭据耗尽或失效写回失败时保留最后已取得的�
 
 ## 历史资产处置核对
 
-升级按[停机/迁移流程](../../ops/deploy/README.md)执行。可恢复的本地接受决定与未知远端资产须分开核对，
+升级按[停机/迁移流程](README.md)执行。可恢复的本地接受决定与未知远端资产须分开核对，
 不能修改旧 payload、命令 ID 或账本解除阻断。
 
 - `legacy_return_requires_review`：旧流拍 Return 已冻结或有过执行，保持隔离。核对原投稿、逐件装备库存和
@@ -170,4 +170,4 @@ session expired 在凭据耗尽或失效写回失败时保留最后已取得的�
 - 修复前已归档的未知标题 Credits 邮件：新逻辑不会重写既有完成事实或自动越过原游标重放。
   应按 world、邮箱、外部 MID 对照原入站记录及当前远端资产盘点；没有证据时不能推定款项已领取或退回。
 
-这些核对项不代表已经迁移、盘点资产或完成外部写入；具体证据见[验证状态](../status.md)。
+这些核对项不代表已经迁移、盘点资产或完成外部写入；具体证据见[验证状态](../docs/status.md)。

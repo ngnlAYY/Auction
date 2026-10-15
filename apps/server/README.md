@@ -1,6 +1,6 @@
 # auction-server
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [部署手册](../../ops/deploy/README.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [部署手册](../../ops/README.md)
 
 Linux x86_64/PostgreSQL 单主机的可选单文件服务：supervisor 用同一可执行文件派生 Worker、Admin、Public，
 复用各 app 的库装配，保留独立进程、路由和权限边界。`auctionctl` 仍独立，默认分体发布不变。
@@ -32,7 +32,7 @@ just release-check --single-binary
 网页验证后填写数据库、管理员、精确站点 origin 等参数，明确确认专用空库初始化，再保存并启动。
 配置先原子发布，再初始化数据库，最后顺序启动角色；保存响应只证明落盘，以各角色 readiness 判断启动结果。
 Public/Admin 端口默认 8090/8091，可选 1–65535 且不同，固定 loopback；须自行同步代理并核对端口/权限。
-设置页流程与未知结果处置见[部署手册](../../ops/deploy/README.md#首次部署配置)。
+设置页流程与未知结果处置见[部署手册](../../ops/README.md#首次部署配置)。
 
 已有、残缺、权限异常或符号链接目录均不开放向导，也不覆盖文件。首次初始化最多 300 秒，
 只接受无用户对象、无其他客户端的专用空库，使用与普通迁移相同的历史 checksum 兼容层。

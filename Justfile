@@ -3,8 +3,9 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
     @just --list
 
+# 检查命令统一由 ci/check.sh 定义；本页保留稳定、可发现的用户入口。
 fmt:
-    cargo fmt --all -- --check
+    @bash ci/check.sh fmt
 
 fmt-fix:
     cargo fmt --all
@@ -27,25 +28,23 @@ i18n-check:
 
 # 联网审计锁定依赖公告；需 cargo-audit 0.22.2，独立于默认本地 verify。
 dependency-audit:
-    cargo audit --deny warnings
+    @bash ci/check.sh dependency-audit
 
 # 静态扫描未使用的直接依赖；需 cargo-machete 0.9.2，不运行产品或测试。
 dependency-unused:
-    cargo machete
+    @bash ci/check.sh dependency-unused
 
 check:
-    cargo check --locked --workspace --all-targets
+    @bash ci/check.sh check
 
 feature-check:
-    cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
-    cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
+    @bash ci/check.sh feature
 
 lint:
-    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    @bash ci/check.sh lint
 
 wasm-check:
-    cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
-    cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
+    @bash ci/check.sh wasm
 
 verify: fmt docs-check repository-policy-check layout-check config-example-check i18n-check check feature-check lint wasm-check
 
@@ -92,10 +91,7 @@ check-config role="public":
 db-migrate:
     cargo run -p auctionctl --features postgres -- migrate
 
-# 前端产物构建需要 dx CLI（cargo install dioxus-cli --locked）。
-# dx 会按需从 npm 注册表下载 esbuild 作为构建期工具；它不是运行时依赖，也不引入
-# Node 运行时或第二套前端构建链。发布构建使用专用 WASM 优化 profile，清理该 surface
-# 的 Dioxus 中间输出后复制到稳定嵌入目录，并生成绑定 payload 的制品标记。
+# 需要配套 dx CLI；WASM profile、payload 和工具边界见 ci/README.md。
 web-build: web-build-public web-build-admin
 
 web-build-public:

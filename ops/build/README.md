@@ -1,6 +1,6 @@
 # AMD KVM 定向编译候选
 
-[文档导航](../../docs/README.md) · [开发指南](../../docs/development.md) · [部署手册](../deploy/README.md) · [验证状态](../../docs/status.md)
+[文档导航](../../docs/README.md) · [开发指南](../../docs/development.md) · [部署手册](../README.md) · [验证状态](../../docs/status.md)
 
 两份 Cargo 配置仅供指定的 Linux x86_64 Debian 13/glibc 2.41 KVM，以 --config 显式叠加目标、CPU 参数和构建并发；不改变 WASM/正式发布流程，不保证通用兼容性或最优性能。
 

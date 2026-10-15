@@ -56,7 +56,7 @@ Worker 决定何时调用应用命令、如何按持久化状态重试；领域/
 
 Delivery 有效并发取配置与 transport 的较小值，MoogleMail 当前上限为 1。
 发送前无凭据只安全释放 claim 并在本轮排除该世界；进入 sending 后依赖失败或超时按未知结果处理，不盲目重寄。
-Send、Return、Take 的证明由各 owner 校验，成功不取决于 HTTP 成功页，见[邮件诊断](../../docs/operations/mail-diagnostics.md)。
+Send、Return、Take 的证明由各 owner 校验，成功不取决于 HTTP 成功页，见[邮件诊断](../../ops/mail-diagnostics.md)。
 
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。
 批次预算独立于 lease；耗尽只提交已完成连续前缀及 cursor，一封未完成则失败退避。

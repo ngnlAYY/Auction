@@ -51,7 +51,7 @@ HTML 解析使用 scraper 0.27 / selectors 0.38，移除旧 fxhash 停维依赖�
 Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资产不符、无匹配、多匹配或预算耗尽进入 `manual_reconcile`，
 不自动重寄。发送前 compose 必须为空，避免覆盖未知写入遗留资产；收件人不存在的退信在资产取回前也保留人工对账。
 流拍/撤拍按原世界、原卖家逐件零 Credits/COD Send 原装备，历史冻结 Return 在远端写入前隔离。
-完整回执、诊断和人工核对要求见[邮件诊断](../../docs/operations/mail-diagnostics.md)与[领域不变量](../../docs/contracts/invariants.md)。
+完整回执、诊断和人工核对要求见[邮件诊断](../../ops/mail-diagnostics.md)与[领域不变量](../../docs/contracts/invariants.md)。
 
 ## 凭据装配与外部请求
 

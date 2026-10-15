@@ -634,12 +634,24 @@ package_release() {
 			"$package_root"
 	done
 
-	install_release_file ops/deploy/README.md docs/DEPLOYMENT.md 644 "$package_root"
+	install_release_file ops/README.md docs/DEPLOYMENT.md 644 "$package_root"
+	# 手册从 ops 根移动到包内 docs，内附模板与恢复文件链接须指向归档布局。
+	sed -i \
+		-e 's|](deploy/systemd/|](../systemd/|g' \
+		-e 's|](deploy/caddy/|](../caddy/|g' \
+		-e 's|](config/|](../config/|g' \
+		-e 's|](deploy/RECOVERY.md)|](RECOVERY.md)|g' \
+		-e 's|](deploy/LEGACY_V28_ADOPTION.md)|](LEGACY_V28_ADOPTION.md)|g' \
+		-e 's|](deploy/retention-policy.v1.json)|](../retention-policy.v1.json)|g' \
+		"$package_root/docs/DEPLOYMENT.md"
 	install_release_file ops/deploy/RECOVERY.md docs/RECOVERY.md 644 "$package_root"
 	install_release_file ops/deploy/LEGACY_V28_ADOPTION.md docs/LEGACY_V28_ADOPTION.md 644 "$package_root"
 	install_release_file ops/deploy/retention-policy.v1.json retention-policy.v1.json 644 "$package_root"
 	install_release_file ops/deploy/caddy/Caddyfile caddy/Caddyfile 644 "$package_root"
-	install_release_file ops/deploy/systemd/README.md systemd/README.md 644 "$package_root"
+	# 仓库合并安装说明，但保持归档内既有文档路径、权限及白名单。
+	printf '# systemd 服务与顺序控制\n\n见[部署手册](../docs/DEPLOYMENT.md#systemd-服务与顺序控制)。\n' \
+		>"$temporary_root/SYSTEMD.md"
+	install_release_file "$temporary_root/SYSTEMD.md" systemd/README.md 644 "$package_root"
 	if [[ "$single_binary" == true ]]; then
 		install_release_file ops/deploy/systemd/auction-server.service.example systemd/auction-server.service.example 644 "$package_root"
 		install_release_file apps/server/README.md docs/SINGLE-SERVER.md 644 "$package_root"
