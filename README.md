@@ -1,75 +1,69 @@
 # Auction Rust
 
-Auction Rust 是面向论坛生态的全 Rust 拍卖系统，包含公开竞价页面、管理后台，以及处理拍卖生命周期、
-论坛同步和 MoogleMail 的 Worker。业务规则、接口、持久化格式与部署流程由本仓库独立定义。
-
-浏览器使用 Dioxus 客户端渲染；Public、Admin 的 WASM 产物分别内嵌到各自后端。
-数据库仅支持 PostgreSQL，Redis 缓存默认关闭。
-原生程序当前仅支持 **Linux x86_64**（正式发布 GNU/glibc），编译期拒绝其他 OS/架构；浏览器 WASM 保留。
+面向论坛生态的全 Rust 拍卖系统：公开竞价、管理后台，以及处理生命周期、论坛和 MoogleMail 的 Worker。
+浏览器为 Dioxus CSR，Public/Admin WASM 分别内嵌；数据库仅 PostgreSQL，Redis 默认关闭。
+原生程序仅支持 **Linux x86_64**，正式发布 GNU/glibc；浏览器 WASM 保留。
+业务、接口、数据及部署语义由本仓库独立定义。
 
 ## 从哪里开始
 
-| 任务 | 文档 |
+| 任务 | 入口 |
 | --- | --- |
-| 玩家参与拍卖、寄售和结算 | [中文玩家使用指南](docs/player-guide.md) |
-| 浏览全部项目文档 | [文档导航](docs/README.md) |
-| 阅读系统与界面设计 | [系统总览](./DESIGN.md)、[Public 设计](crates/auction-web-public/DESIGN.md)、[Admin 设计](crates/auction-web-admin/DESIGN.md) |
-| 理解进程、模块和数据库档位 | [架构](docs/architecture.md) |
-| 准备工具链、编译与静态检查 | [开发指南](docs/development.md) |
-| 选择配置与部署方式 | [配置说明](ops/config/README.md)、[部署手册](ops/deploy/README.md) |
-| 对接或修改接口 | [契约导航](docs/contracts/README.md) |
-| 判断当前交付与验收边界 | [实现与验证状态](docs/status.md) |
-| 参与修改和维护文档 | [协作规范](AGENTS.md)、[文档维护](docs/documentation.md) |
+| 玩家参与拍卖、寄售、结算 | [中文玩家指南](docs/player-guide.md) |
+| 理解系统、接口或页面设计 | [文档导航](docs/README.md)、[设计与架构](docs/architecture.md)、[契约](docs/contracts/README.md) |
+| 开发、编译、静态检查 | [开发指南](docs/development.md)、[CI 说明](ci/README.md) |
+| 配置、部署、备份恢复、排错 | [运维入口](ops/README.md) |
+| 判断实现与验收边界 | [状态页](docs/status.md) |
+| 参与修改与文档维护 | [AGENTS.md](AGENTS.md)、[文档维护](docs/development.md#文档维护) |
+
+## 目录和根文件有什么用
+
+| 位置 | 用途 |
+| --- | --- |
+| `apps/` / `crates/` | 程序装配 / 按 owner 划分的实现，见[架构](docs/architecture.md#crate-所有权) |
+| [docs/](docs/README.md) | 玩家指南、设计、开发、契约与验证状态 |
+| [ops/](ops/README.md) | 配置示例、部署模板、恢复及诊断操作 |
+| [ci/](ci/README.md) / [.github/workflows/ci.yml](.github/workflows/ci.yml) | 检查和发布实现 / 唯一 CI 工作流 |
+| [migrations/](migrations/README.md) | 追加式数据库迁移；历史文件不能清理 |
+| [Cargo.toml](Cargo.toml) / [Cargo.lock](Cargo.lock) | 工作区成员、直接依赖、MSRV、构建 profile / 精确依赖解析；锁文件不能手工瘦身 |
+| [rust-toolchain.toml](rust-toolchain.toml) | 固定开发工具链、组件及 WASM 目标，与 MSRV 含义不同 |
+| [rustfmt.toml](rustfmt.toml) / [.editorconfig](.editorconfig) | Rust 格式 / 跨编辑器格式；Clippy 的 MSRV 读取 Cargo 包元数据 |
+| [Justfile](Justfile) | 开发命令入口，`just` 列出全部任务；检查参数统一在 ci/check.sh |
+| [.gitignore](.gitignore) / [AGENTS.md](AGENTS.md) | 排除产物与私密文件 / 协作和交付约束 |
+
+依赖版本、升级理由和历史审计集中在[技术栈](docs/tech-stack.md)，不再单设 clippy.toml 或根 DESIGN.md。
 
 ## 运行边界
 
 | 程序 | 职责 | 默认监听 |
 | --- | --- | --- |
 | [auction-public-api](apps/public-api/README.md) | Public API、会话、实时通知和公开页面 | `127.0.0.1:8090` |
-| [auction-admin-api](apps/admin-api/README.md) | 管理 API、管理会话和后台页面 | `127.0.0.1:8091` |
-| [auction-worker](apps/worker/README.md) | 持久化调度、生命周期、论坛、邮件和履约 | 无业务 TCP HTTP；可选 Unix control |
-| [auctionctl](apps/auctionctl/README.md) | 配置诊断、迁移、systemd 总控与受控灾备 | 无监听 |
-| [auction-server](apps/server/README.md) | 可选单文件 supervisor，自管上述三角色子进程 | 沿用 Public/Admin 两个入口 |
+| [auction-admin-api](apps/admin-api/README.md) | 管理 API、会话、后台及独立设置入口 | `127.0.0.1:8091` |
+| [auction-worker](apps/worker/README.md) | 生命周期、论坛、邮件与履约 | 无业务 TCP HTTP；可选 Unix control |
+| [auctionctl](apps/auctionctl/README.md) | 配置、迁移、systemd 总控与受控灾备 | 无监听 |
+| [auction-server](apps/server/README.md) | 可选单文件 supervisor，自管三角色子进程 | 沿用 Public/Admin 两个入口 |
 
-三个服务独立装配，通过应用端口共享用例；完整 owner 与数据库能力见[架构](docs/architecture.md)。
+默认分体发布；合并模式仅用于 Linux/PostgreSQL 单主机，auctionctl 仍独立。
+角色文件用 AUCTION_CONFIG_FILE 选择；合并服务用 --config-dir，拒绝该环境变量。
+配置分层、权限、首次设置及停机迁移统一见[运维手册](ops/README.md)。普通启动不隐式迁移。
 
 ## 构建与检查
 
-仓库工具链固定在 [rust-toolchain.toml](rust-toolchain.toml)，依赖解析固定在 [Cargo.lock](Cargo.lock)。
-后端 release 默认 opt-level=3、Fat LTO、单 CGU，保留 panic 展开和通用 CPU 基线；WASM 保持体积优化，
-不把编译参数视为最佳性能证明。
-完整[依赖审计与取舍](docs/tech-stack.md#2026-10-15-全依赖审计)包含剩余风险和验证范围。
-从仓库根目录执行：
+从仓库根目录执行，工具准备见[开发指南](docs/development.md)：
 
 ```bash
-# 完整静态验证，不执行行为测试；仅改文档可先运行 just docs-check。
-just verify
-
-# PostgreSQL 完整档的 API-only 制品。
-just build-api
-
-# 包含 Public/Admin 页面；需要 dx CLI，详见开发指南。
-just build-release
-just verify-artifacts
-
-# 可选单文件发布：auction-server + 独立 auctionctl；正式归档要求干净工作树。
-just release-check --single-binary
+just verify                       # 完整静态检查，不运行行为测试
+just build-api                    # PostgreSQL API-only 制品
+just build-release                # 包含两端页面，需要配套 dx CLI
+just verify-artifacts             # 资源、依赖和隔离门禁
+just release-check --single-binary # 可选合并归档，要求干净工作树
 ```
 
-`apps/*` 的默认 Cargo feature 不包含数据库驱动或 Web 资源。自行运行 `cargo` 时必须明确选择
-`postgres`；需要页面时还要先构建前端并启用 `web-embed`。不能把无驱动编译成功当成
-可连接数据库的部署制品。
-
-运行前按[配置说明](ops/config/README.md)准备公共、角色和权限受限的敏感 TOML，替换示例占位值。
-分体进程用 `AUCTION_CONFIG_FILE` 选择角色文件；合并服务用 `--config-dir`，拒绝该环境变量。
-首次设置、严格停机预检、迁移及启动步骤见[部署手册](ops/deploy/README.md)；合并服务的确认后
-空库初始化见 [auction-server](apps/server/README.md)。普通角色或合并服务启动不隐式迁移。
+apps 默认不含数据库驱动或 Web；自行调用 cargo 时须显式选 postgres，需要页面还须先构建并选 web-embed。
+后端 release 保留 Fat LTO、单 CGU、panic 展开与通用 CPU 基线，WASM 优先体积；参数不是性能验收。
 
 ## 当前交付边界
 
-项目处于功能与运行证据收口阶段。路由注册、源码和静态编译不构成生产验收；真实外部服务、
-非空生产数据、完整浏览器流程及恢复仍需证据。[实现与验证状态](docs/status.md)统一登记
-当前能力、历史检查结果、有限部署证据及未闭合事项。
-生命周期、恢复、Worker 连续处理与灾备门禁的审计修复仍属源码交付；不自动修复既有异常数据，也不替代行为验收。
-
-除非用户明确要求，不新增或执行单元、集成、功能、端到端、浏览器测试及手工功能冒烟；已有测试保留。
+路由、源码和静态编译不构成生产验收；真实外部服务、非空生产数据、完整浏览器流程及恢复仍需证据。
+[状态页](docs/status.md)登记源码能力、历史结果和缺口；修复不会自动更正既有异常数据。
+除非用户明确要求，不新增或执行单元、集成、功能、端到端、浏览器测试及手工冒烟；已有测试保留。

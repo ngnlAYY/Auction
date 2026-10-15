@@ -193,7 +193,7 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml \
 ```
 
 合并部署改由同一服务账号执行 `auctionctl migrate-managed --config-dir <绝对配置目录>`，
-不得用分体命令绕过 supervisor 锁。随后按[部署手册](README.md#启动顺序)启动并检查 Worker control
+不得用分体命令绕过 supervisor 锁。随后按[部署手册](../README.md#启动顺序)启动并检查 Worker control
 与两端 HTTP readiness。保留 archive、manifest、preflight、restore receipt、迁移输出、操作员、维护窗口和
 最终 readiness 结果。任何切换连接、回收恢复点或 retention mutation 都需要独立授权；
 `postgres-rebuild` 的授权只覆盖命令中精确确认的同名数据库和该次不可覆盖回执。

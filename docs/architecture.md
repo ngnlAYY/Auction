@@ -1,4 +1,4 @@
-# 系统架构与模块所有权
+# 系统设计、架构与模块所有权
 
 [文档导航](README.md) · [技术栈](tech-stack.md) · [契约](contracts/README.md) · [验证状态](status.md)
 
@@ -8,6 +8,9 @@
 [Worker](#worker-与外部副作用) · [数据保护](#配置与数据保护) · [制品](#浏览器实时与制品) · [运维](#生命周期与运维)
 
 ## 系统边界
+
+本页统一系统设计与模块边界：领域独立于传输和存储，业务事实原子提交，命令幂等重放，
+外部结果须有证据，Worker 从持久状态恢复。能力缺失明确返回，不能以空数据或示例伪装成功。
 
 Auction Rust 在一个 Cargo workspace 内实现领域、用例、数据库适配、HTTP、浏览器及后台任务。
 原生平台仅 Linux x86_64，限制由五个 `apps/*` 装配根的编译期守卫拥有；正式发布 GNU/glibc，
@@ -77,6 +80,29 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
 新增持久化能力先登记范围与 owner，再更新[对象契约](contracts/schema.md)、迁移和端口。
 
+## 核心模型与数据流
+
+- 世界控制业务启停；用户有稳定论坛数字 `showuser` ID、可变显示名/MoogleMail 收件人、状态和版本。
+  论坛首次竞价可建立 `forum_only` 主体，但不自动发放登录能力；会话真值保存在数据库。
+- 拍卖沿 `Draft → Preview → Live → Final → Settling → Settled` 前进，只有 Draft/Preview 可取消。
+  创建时冻结经济、截止、代理和结算策略，后续配置不回写快照。
+- `lot_id` 是稳定身份，`lot_number` 是场内顺序，`category_key/category_number` 是公开分类编号；
+  撤回/重挂不复用编号。`withdrawn` 保留事实及返还义务，论坛只渲染 `live/sold/unsold`。
+- 普通出价、代理上限和慢速代理共用领域计划；新输入遵守 1000 Credits 网格和 1B 上限，历史金额不截断。
+  授权、降低、冻结和反超形成追加事实；慢速代理由持久 generation/due 驱动，锁内复核资格、状态和金额。
+  精确规则由[不变量契约](contracts/invariants.md)拥有。
+
+```text
+command_id + 摘要 → 账本重放/冲突 → 锁定权威对象 → 领域计划
+                                                    ↓
+                  同事务提交事实、版本、结果、审计及所需事件/outbox
+                                                    ↓
+                              返回结果 / Worker 执行外部副作用
+```
+
+Public/Admin 浏览器经各自 HTTP 入口消费 contracts DTO，Worker 经 jobs 调用同一应用用例；
+缓存只加速可重建读取，不能替代事实、锁或命令账本。
+
 ## 命令、事务与事实
 
 竞价在一个后端事务内完成 `command_id`/摘要重放检查、world/auction/lot 与资格保护、领域计划、
@@ -106,6 +132,11 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 发送证明、论坛对账、各循环及任务边界分别见[不变量](contracts/invariants.md)、
 [Worker](../apps/worker/README.md)、[任务编排](../crates/auction-jobs/README.md)与[外部适配](../crates/auction-integrations/README.md)。
 
+论坛固定 #1 目录、#2 系统日志的真实 post ID 保存后才处理 #3+；回帖只导入普通 bid。
+读取须证明分页、作者和连续楼层，未知 POST 先按精确标题只读对账，重发须显式授权。
+MoogleMail ComposeSend 先验证空 compose 与完整 Sent baseline，再寻找唯一新增且精确匹配 payload 的 MID；
+Take/Return 各有独立动作证明。每种 Cookie 只有一个运行 owner，明确登录失效才标 invalid，不自动换备用 Cookie。
+
 ## 配置与数据保护
 
 三角色共享非敏感公共 TOML，分别引用敏感文件；Admin/Worker 可共享 runtime。
@@ -117,7 +148,7 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 | 能力 | owner 与保护边界 |
 | --- | --- |
 | 凭据与装备链接 | 敏感配置/专属加密适配；日志、事件及审计不记录 secret。P09/P11 核对归属后短暂解密装备 URL，响应 `no-store`，不缓存 |
-| 邮件审查 | 只返回安全投影，原始异常证据独立加密，见[诊断说明](operations/mail-diagnostics.md) |
+| 邮件审查 | 只返回安全投影，原始异常证据独立加密，见[诊断说明](../ops/mail-diagnostics.md) |
 | A44 Cookie 校验 | application 前后复核版本，storage 返回信封，integrations 执行受限 HTTPS GET；不持久化结果、不取得 Worker 写入所有权、不改 active/invalid |
 | Admin 会话 | 启动永久撤销旧会话，token 摘要绑定 actor/secret；数据库保存摘要与撤销状态，重启需重新登录，Public 不受影响 |
 | Public 长连接会话 | 应用只读 inspect 端口与 storage 权威查询，HTTP 决定复核周期/预算；不续期，不把真值放 Hub 或缓存 |
@@ -140,7 +171,7 @@ REST/WebSocket DTO 由 contracts 拥有。通知只提示重读，跳号/重连�
 精确预算、sequence/version 与关闭原因见[事件契约](contracts/events.md)。
 
 显式 `web-embed` 选择各自资源，API-only 固定空集合；`allow_missing` 保证无产物可编译并返回 503。
-发布脚本验证两端隔离、payload 哈希、依赖与源码身份后生成确定性归档，步骤见[部署手册](../ops/deploy/README.md)。
+发布脚本验证两端隔离、payload 哈希、依赖与源码身份后生成确定性归档，步骤见[部署手册](../ops/README.md)。
 
 ## 生命周期与运维
 
@@ -154,6 +185,7 @@ REST/WebSocket DTO 由 contracts 拥有。通知只提示重读，跳号/重连�
 
 分体 unit 停止预算 45 秒，合并 unit 为 155 秒；合并不使用分体总控，两种模式不得混用同一数据库。
 本机文件锁不证明跨主机隔离。备份、恢复、重建、v28 接管均为独立受控命令，不进入自动启动。
-初始化保留迁移兼容视图、锁和 checksum；终止或保存结果未知时不得自动初始化，失败保留现场。
-详细门禁见[部署](../ops/deploy/README.md)、[灾备](../ops/deploy/RECOVERY.md)、
+一次性部署码保护独立设置页；检查数据库不建库或迁移，保存只表示配置落盘。只有合并模式的额外确认
+才授权专用空库初始化与启动。初始化保留迁移兼容视图、锁和 checksum；终止或保存结果未知时不得自动初始化，失败保留现场。
+详细门禁见[部署](../ops/README.md)、[灾备](../ops/deploy/RECOVERY.md)、
 [v28 接管](../ops/deploy/LEGACY_V28_ADOPTION.md)及[合并服务](../apps/server/README.md)。

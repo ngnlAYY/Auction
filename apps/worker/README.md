@@ -51,7 +51,7 @@ transport、凭据、mailbox identity 和全局启用仍由 Worker 部署配置�
 
 PostgreSQL 撤拍事务创建 `withdrawn_return` 与履约记录，Worker 在原 world 把原装备单独 Send 给冻结卖家，
 Credits/COD 为零。同封其他 lot 不受影响，已 Take 的邮件不能整体 Return。
-旧未知发送结果不自动重寄，旧冻结 Return 不能直接改为 Send；核对方法见[历史资产处置](../../docs/operations/mail-diagnostics.md#历史资产处置核对)。
+旧未知发送结果不自动重寄，旧冻结 Return 不能直接改为 Send；核对方法见[历史资产处置](../../ops/mail-diagnostics.md#历史资产处置核对)。
 
 ## Cargo feature
 
@@ -82,7 +82,7 @@ claim token/owner/版本或续租 fence 失效后取消陈旧处理，只能从�
 所有主动 ComposeSend 都以完整有界 Sent baseline 和发送后独立 scan 证明新增唯一 MID，
 同时精确匹配 world、recipient、subject/body digest、Credits/COD 和装备；零资产通知也需要证明。
 Return/Take 使用独立 action proof。证明、加密异常留证、历史展示回填和资产核对统一见
-[邮件诊断手册](../../docs/operations/mail-diagnostics.md)。诊断证据不参与命令摘要、completion 或 cursor。
+[邮件诊断手册](../../ops/mail-diagnostics.md)。诊断证据不参与命令摘要、completion 或 cursor。
 
 凭据由 PostgreSQL 的独立数据密钥解密，论坛和邮件每种 Cookie 全局最多一条 active，
 生命周期 advisory lock 保证单 Worker owner。失效后不切换 Cookie，导入或轮换后须重启交接。
@@ -112,7 +112,7 @@ guarded relist 与退款完成由各 owner 的稳定命令、资产摘要和证�
 数据库 Worker 发布启动、就绪、周期及停止心跳，含 runtime 投影后的 `details.forum_sync_enabled`；
 Public 据此显示实际启用状态，不从历史帖子推断。开关变更须重启 Worker。
 `[worker.control]` 提供受信目录、实例锁、固定 group/0660 和 UID/GID peer allowlist 保护的 live/ready/status，
-部署要求见[systemd 手册](../../ops/deploy/systemd/README.md)。
+部署要求见[systemd 手册](../../ops/README.md#systemd-服务与顺序控制)。
 
 ## 维护与验证
 

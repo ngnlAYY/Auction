@@ -80,7 +80,7 @@ readiness 检查数据库、内嵌迁移及审计写入失败计数，异常失�
 [recovery_preflight](src/database/recovery_preflight) 只核对恢复目标，不运行 pg_restore 或覆盖对象。
 [bootstrap](src/database/bootstrap) 在维护库身份、权限和集群锁下创建缺失库，不提供 DROP 或 migration；
 [rebuild](src/database/rebuild) 是独立破坏性边界，要求精确目标、受限目录，并保留受支持的数据库属性。
-备份、人工确认、停止进程、外部工具与 receipt 归 `auctionctl`；步骤见[数据库恢复与保留](../../ops/deploy/README.md#数据库恢复与保留)。
+备份、人工确认、停止进程、外部工具与 receipt 归 `auctionctl`；步骤见[数据库恢复与保留](../../ops/README.md#数据库恢复与保留)。
 
 ## 后端选择
 

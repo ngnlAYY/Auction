@@ -1,6 +1,6 @@
 # Admin 管理端设计
 
-[系统设计](../../DESIGN.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Public 设计](../auction-web-public/DESIGN.md)
+[系统设计](../../docs/architecture.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Public 设计](../auction-web-public/DESIGN.md)
 
 本页描述现有 Admin 界面；操作授权与运行证据另行确认，源码和线上制品边界见[状态页](../../docs/status.md)。
 
@@ -102,7 +102,7 @@ Admin 不导入 Public。其 `/rules` 别名转到独立的校验/发布页；�
 
 提示按“具体原因、处理建议、原始安全代码”组织。拒收、退回任务排队和退回成功是不同事实。
 登录失败、采集时间异常、业务规则拒收和证据保存失败分别说明；未知外部写入结果先人工对账，不盲目重发。
-原始 Cookie、装备 key、认证正文和敏感游标不进入诊断页面，边界见 [邮件诊断](../../docs/operations/mail-diagnostics.md)。
+原始 Cookie、装备 key、认证正文和敏感游标不进入诊断页面，边界见 [邮件诊断](../../ops/mail-diagnostics.md)。
 
 ### Cookie 管理
 

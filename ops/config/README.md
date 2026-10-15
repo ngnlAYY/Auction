@@ -1,6 +1,6 @@
 # 运行配置与敏感文件
 
-[文档导航](../../docs/README.md) · [loader 与校验](../../crates/auction-config/README.md) · [部署](../deploy/README.md)
+[文档导航](../../docs/README.md) · [loader 与校验](../../crates/auction-config/README.md) · [部署](../README.md)
 
 运行配置统一使用 TOML。字段、默认值和启用条件以受版本控制的示例及 loader 为准；本页说明文件关系、
 生效时机和安全边界。配置保存不改变数据库权威事实。
@@ -41,7 +41,7 @@ loader 先固定角色文件的绝对位置，再以其目录解析相对引用�
 
 内嵌 PostgreSQL Admin 的 `setup --output-dir <绝对路径>` 提供 loopback 一次性设置；
 无默认配置且未设置 `AUCTION_CONFIG_FILE` 时可自动进入，目标目录必须不存在。
-分体保存后退出，正式 Admin 不开放初始化 API；安装与迁移见[首次部署](../deploy/README.md#首次部署配置)。
+分体保存后退出，正式 Admin 不开放初始化 API；安装与迁移见[首次部署](../README.md#首次部署配置)。
 
 生成器在私有临时目录复用模板，固定敏感文件 0600、非敏感文件 0640（不依赖 umask），经三角色 loader 校验后原子发布。
 生成配置信任本机代理，启用 Worker control 并绑定服务 UID；不含 `.keyenv`、部署码、首次确认值或临时代理策略。

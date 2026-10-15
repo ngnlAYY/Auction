@@ -436,7 +436,7 @@ attempt/fencing 为零、claimed/sending/lease/外部引用为空且完成时间
 浏览器据此保留同一门禁；不暴露原始 metadata。
 主动 ComposeSend 的成功 metadata 固定包含 `sent_verified=true`、`external_reference_proven=true`、
 `proof=sent_exact_payload_v1` 与真实引用 `mooglemail:world:send:mid`；Return/Take 使用独立 action proof。
-完整 baseline/scan、精确匹配和结果未知边界见[Sent 证明](../operations/mail-diagnostics.md#主动-composesend-的-sent-证明)，不新增 HTTP 路由。
+完整 baseline/scan、精确匹配和结果未知边界见[Sent 证明](../../ops/mail-diagnostics.md#主动-composesend-的-sent-证明)，不新增 HTTP 路由。
 
 ### Recovery 与实时运维
 

@@ -1,6 +1,6 @@
 # 开发与静态验证
 
-[文档导航](README.md) · [协作规范](../AGENTS.md) · [部署](../ops/deploy/README.md) · [CI](../ci/README.md)
+[文档导航](README.md) · [协作规范](../AGENTS.md) · [部署](../ops/README.md) · [CI](../ci/README.md)
 
 ## 工具与依赖来源
 
@@ -53,7 +53,7 @@ Public/Admin 的运行配方另启用 `web-embed`。发布配方固定 PostgreSQ
 AUCTION_CONFIG_FILE=ops/config/examples/public.toml cargo run --locked -p auctionctl -- check-config public
 ```
 
-建库、停机迁移及分体/合并启动按[部署手册](../ops/deploy/README.md)操作，本页不授予启动、迁移或功能验证授权。
+建库、停机迁移及分体/合并启动按[部署手册](../ops/README.md)操作，本页不授予启动、迁移或功能验证授权。
 普通启动不隐式迁移；例外仅限网页确认后的专用空库初始化、严格停机门禁后的部署迁移。
 
 ## 浏览器与发布构建
@@ -71,7 +71,7 @@ just release-check --single-binary
 ```
 
 Web 使用 `wasm-release`，脚本生成稳定内嵌目录与 payload 清单；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。
-资源隔离、干净树及 `--allow-dirty` 限制见[发布手册](../ops/deploy/README.md#发布制品)。
+资源隔离、干净树及 `--allow-dirty` 限制见[发布手册](../ops/README.md#发布制品)。
 [AMD KVM 候选](../ops/build/README.md)仅叠加目标白名单/并发，先独立构建 Web；
 本机微基准不能替代目标机、PostgreSQL 并发或代表性 PGO 负载。
 
@@ -83,3 +83,29 @@ Web 使用 `wasm-release`，脚本生成稳定内嵌目录与 payload 清单；d
 | API 可用、页面 503 | 对应 payload 与 web-embed |
 | runtime 保存但未生效 | restart_required 与受影响角色重启 |
 | 配置示例被拒绝 | 占位凭据、权限、相对路径；不得放松 loader |
+
+## 文档维护
+
+文档按唯一 owner 维护，不为同一事实另建说明页、笔记目录或技能模板：
+
+| 位置 | 职责与更新时机 |
+| --- | --- |
+| 根 README / docs/README | 产品与文件用途 / 按任务导航；新增、移动、删除时更新入口 |
+| architecture / tech-stack | 系统设计、模块及能力边界 / 依赖版本、取舍与升级 |
+| contracts / table-layouts | HTTP、事件、schema、不变量 / 业务表格列宽；随契约同步 |
+| player-guide / 两端 DESIGN | 玩家操作流程 / 各自界面设计；不替代后端契约或合并 Public/Admin 外壳 |
+| apps、crates README | 本模块职责、源码入口、限制与排错；不复制完整路由或配置表 |
+| ops、migrations、ci | 配置部署、迁移、静态门禁的前提、命令、结果和失败边界 |
+| status | 源码能力、历史验证及未闭合事项；不得将静态通过写成运行验收 |
+
+实现事实核对源码、Cargo.lock、迁移和脚本；用户与 AGENTS.md 的规范不得因实现缺口被静默放宽。
+系统/技术取舍、配置部署与安全限制写入对应 owner，其他文档链接，不复制平行清单。
+版本描述仓库固定值，不写成永久有效的“最新 stable”；命令的 feature、配置、权限与破坏性确认须匹配真实入口。
+
+先明确 owner、能力档位及不变量，再修改领域/端口/DTO、适配器与 HTTP/Web/Worker；同步所属契约和模块说明。
+不兼容 wire 变更新增版本，迁移只追加。敏感运行证据留在受控目录，Git 保存变更历史；
+历史日期、失败/成功结果和证据边界不得改写，局部排版无需新增记录。
+
+`just docs-check` 仅检查本地 Markdown 链接、标题锚点、从根 README 可达的正式文档及 Cargo 包 README，
+不访问网络、不启动产品、不执行行为测试。人工仍须核对 CLI、字段 owner、能力范围和历史证据；
+解析范围见[CI 说明](../ci/README.md#文档检查器)。

@@ -271,7 +271,7 @@ SQL 静态扫描覆盖 39 份迁移、737 个 Rust SQL 候选；两份受限执�
 Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify`（当时 51 份文档）与差异检查退出 0。
 修复门禁发现的借用、错误映射和 feature 编译问题后重跑，未执行行为测试、发布、浏览器、服务、数据库或迁移。
 29 项报告问题、论坛 DTO 附项及三份追加迁移属于该轮；历史流拍 Return、资产冲突、错误归档 Credits 和
-旧排期来源仍须独立核对，见[邮件资产核对](operations/mail-diagnostics.md#历史资产处置核对)。
+旧排期来源仍须独立核对，见[邮件资产核对](../ops/mail-diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
 
@@ -304,7 +304,7 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify`（当时 51 份文�
 
 本次文档核对发现，[分体总控 unit](../ops/deploy/systemd/auction-stack.service.example)的
 `TimeoutStopSec=120` 小于三角色依次各用满 45 秒的合计 135 秒。若通过该 unit 执行完整顺序停止，
-外层可能先超时；部署前应按内层预算及控制命令开销重新核算，见[systemd 手册](../ops/deploy/systemd/README.md)。
+外层可能先超时；部署前应按内层预算及控制命令开销重新核算，见[systemd 手册](../ops/README.md#systemd-服务与顺序控制)。
 本次只登记这一配置预算缺口，未修改模板或取得停止流程的运行证据。
 
 2026-10-12 的装备拒收排查发现，邮件开始时固定的 `now` 早于读取后生成的 `collected_at`，

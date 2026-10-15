@@ -1,6 +1,6 @@
 # auctionctl
 
-[文档导航](../../docs/README.md) · [部署](../../ops/deploy/README.md) · [备份与恢复](../../ops/deploy/RECOVERY.md) · [v28 接管](../../ops/deploy/LEGACY_V28_ADOPTION.md)
+[文档导航](../../docs/README.md) · [部署](../../ops/README.md) · [备份与恢复](../../ops/deploy/RECOVERY.md) · [v28 接管](../../ops/deploy/LEGACY_V28_ADOPTION.md)
 
 配置诊断、迁移、systemd 总控、备份、恢复及显式维护命令。参数以
 [CLI 定义](src/bootstrap/runtime/cli.rs)和 `auctionctl <command> --help` 为准；命令示例须替换为实际路径、目标和稳定 UUID。
@@ -40,7 +40,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 | 配置诊断、部署检查 | `check-config`、`deployment-check` | 本页 |
 | 分体启停、迁移、首次建库 | `deployment`、`migrate`、`postgres-bootstrap` | 本页及部署手册 |
 | 合并部署迁移 | `migrate-managed` | [server 手册](../server/README.md#生命周期与维护) |
-| 邮件证据 | `mail-evidence export/inspect-sent/backfill-display` | [诊断手册](../../docs/operations/mail-diagnostics.md) |
+| 邮件证据 | `mail-evidence export/inspect-sent/backfill-display` | [诊断手册](../../ops/mail-diagnostics.md) |
 | 凭据和规则导入 | `bootstrap-mail-credentials`、`import-rules-directory` | 本页 |
 | 论坛与结算核验 | `forum-write-recovery-list`、`authorize-forum-write-retry`、`verify-legacy-settlement` | 本页 |
 | 保留盘点与恢复预检 | `retention-inventory`、`recovery-preflight` | 本页及恢复手册 |
@@ -69,7 +69,7 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl check-c
 父密钥来源省略时优先 credential、缺失才用 equipment；历史导出须保留对应旧密钥备份。
 Sent 查询要求唯一精确匹配并标记 `time_unverified`，`collected` 不是充分的已送达证明；
 它是联网只读诊断，不是离线校验或自动 reconcile。回填仅接受 `parsed_message`，不覆盖已有展示，
-不将诊断内容用作业务事实。完整示例见[邮件诊断](../../docs/operations/mail-diagnostics.md)。
+不将诊断内容用作业务事实。完整示例见[邮件诊断](../../ops/mail-diagnostics.md)。
 
 ## 稳定退出码
 
@@ -107,7 +107,7 @@ restart 先预检，再按 Public → Admin → Worker 停止并复核停机后�
 总控默认使用 `/usr/bin/systemctl`、`/var/lib/auction/deployment` 和三个 `auction-*.service` unit；
 参数由 `--systemctl`、`--state-dir`、`--worker-unit`、`--admin-unit`、`--public-unit` 覆盖。
 start/restart 默认配置目录 `/etc/auction`，每角色 readiness 预算 30 秒，可设为 1–300 秒。
-锁、unit 环境绑定、1 秒单次探针及回执规则统一见[systemd 手册](../../ops/deploy/systemd/README.md)。
+锁、unit 环境绑定、1 秒单次探针及回执规则统一见[systemd 手册](../../ops/README.md#systemd-服务与顺序控制)。
 
 ## 停机迁移与初始建库
 
@@ -199,7 +199,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 
 `recovery-preflight` 使用同形参数，只核验目标身份、可写主节点、其他连接和空库/迁移条件。
 `restore_preflight_passed` 不代表 archive 已验证；命令不会停止连接、创建或清理库。
-两者均创建不可覆盖 0600 证据；完整示例见[部署](../../ops/deploy/README.md#数据库恢复与保留)与[恢复手册](../../ops/deploy/RECOVERY.md)。
+两者均创建不可覆盖 0600 证据；完整示例见[部署](../../ops/README.md#数据库恢复与保留)与[恢复手册](../../ops/deploy/RECOVERY.md)。
 
 ## 备份与历史接管
 

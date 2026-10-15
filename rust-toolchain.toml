@@ -1,6 +1,9 @@
 [toolchain]
 # 必填：固定已可下载的 stable；MSRV 在工作区与 CI 独立维护。
 channel = "1.99.0"
+# 必填：默认静态门禁使用的组件。
 components = ["clippy", "rustfmt"]
+# 可选：最小安装，额外组件由上项声明。
 profile = "minimal"
+# 必填：两个浏览器包的编译目标。
 targets = ["wasm32-unknown-unknown"]

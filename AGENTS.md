@@ -2,7 +2,7 @@
 
 本文件是项目级协作规范。业务、HTTP/事件、数据及部署语义由本仓库独立定义；实现、构建和验收不得依赖外部源码仓库。
 
-[文档导航](docs/README.md) · [架构](docs/architecture.md) · [默认验证](docs/development.md) · [文档维护](docs/documentation.md)
+[文档导航](docs/README.md) · [架构](docs/architecture.md) · [默认验证](docs/development.md) · [文档维护](docs/development.md#文档维护)
 
 ## 本页导航
 
@@ -17,7 +17,7 @@
 - Public、Admin、Worker 独立部署；`auctionctl` 负责配置、迁移和运维。可选 `auction-server`
   自管三角色子进程，仅支持 Linux/PostgreSQL 单主机；`auctionctl` 仍独立，默认分体发布不变。
 - 角色及合并服务普通启动不隐式迁移。例外是网页明确确认后的专用空库初始化，以及分体
-  `auctionctl deployment start/restart` 通过严格停机门禁后的迁移，详见[部署手册](ops/deploy/README.md)。
+  `auctionctl deployment start/restart` 通过严格停机门禁后的迁移，详见[部署手册](ops/README.md)。
 - 仓库代码及直接程序库使用 Rust；浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL、
   Redis、反向代理及系统服务等外部组件不受语言约束。
 - PostgreSQL 是唯一数据库后端。
@@ -30,7 +30,7 @@
 | 位置 | 职责 |
 | --- | --- |
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | 工作区、锁定依赖、固定工具链与 WASM 目标 |
-| `rustfmt.toml` / `clippy.toml` / `.editorconfig` | 格式、静态分析及编辑规范 |
+| `rustfmt.toml` / `.editorconfig` | 格式与编辑规范；Clippy 的 MSRV 继承 Cargo 包元数据 |
 | `Justfile` / `ci/` / `.github/workflows/` | 开发任务、静态门禁与发布脚本 |
 | `apps/{public-api,admin-api,worker,server,auctionctl}` | 薄装配根和可部署程序 |
 | `crates/` | 按 owner 拆分的领域、应用、契约与适配器，见[架构](docs/architecture.md#crate-所有权) |
@@ -202,7 +202,7 @@ just verify
 
 `apps/*` 默认 feature 不含数据库驱动；运行时明确选 `postgres`，需页面时先构建 Web
 并选 `web-embed`。Public/Admin 默认监听 `127.0.0.1:8090/8091`，不可共用入口。
-真实敏感配置、迁移、首次设置和启动命令见[开发指南](docs/development.md)及[部署手册](ops/deploy/README.md)。
+真实敏感配置、迁移、首次设置和启动命令见[开发指南](docs/development.md)及[部署手册](ops/README.md)。
 启动服务、访问健康接口或功能流程属于行为验证，不是默认静态门禁。
 
 ## 变更与 Git 纪律

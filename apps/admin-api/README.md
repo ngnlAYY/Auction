@@ -1,6 +1,6 @@
 # auction-admin-api
 
-[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/deploy/README.md)
+[文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [HTTP 契约](../../docs/contracts/routes.md) · [部署](../../ops/README.md)
 
 管理 HTTP、会话和 runtime 服务的进程装配根。`src/lib.rs` 导出 `run`、`run_from_path` 与 Admin 资源类型；
 独立 `main.rs` 和[合并服务](../server/README.md)的 Admin 子进程复用装配。
@@ -27,7 +27,7 @@
 `first_run.rs` 在正式 loader 前选择模式：内嵌 PostgreSQL Web 制品只有在无默认配置且未显式设置
 `AUCTION_CONFIG_FILE` 时自动开放 loopback 设置页；也可显式执行 `setup --output-dir <绝对路径>`。
 损坏、缺失的显式配置、已有残缺目录或符号链接都不会降级为设置页。分体设置保存后退出，
-不自动迁移或启动其他角色；完整操作见[首次部署](../../ops/deploy/README.md#首次部署配置)。
+不自动迁移或启动其他角色；完整操作见[首次部署](../../ops/README.md#首次部署配置)。
 
 Admin 凭据只从敏感 TOML 读取。每次启动在 session 服务就绪前永久撤销旧 Admin 会话，失败阻断启动；
 token 摘要绑定当前 actor/secret，Public 会话不受影响。多实例轮换前须停止全部旧凭据实例。

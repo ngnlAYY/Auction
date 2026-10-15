@@ -1,6 +1,6 @@
 # Public 公开端设计
 
-[系统设计](../../DESIGN.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Admin 设计](../auction-web-admin/DESIGN.md)
+[系统设计](../../docs/architecture.md) · [模块说明](README.md) · [文档导航](../../docs/README.md) · [独立的 Admin 设计](../auction-web-admin/DESIGN.md)
 
 本页描述现有 Public 界面。源码、内嵌产物与线上页面可能版本不同，验收边界见[状态页](../../docs/status.md)。
 

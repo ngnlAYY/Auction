@@ -5,9 +5,9 @@ cd "$(dirname "$0")/.."
 
 check_docs() {
 	# 仅编译并运行静态文档检查器；输出留在被忽略的 target 目录。
-	rustfmt --edition 2024 --check ci/docs/main.rs
+	rustfmt --edition 2024 --check ci/docs.rs
 	mkdir -p target/docs-check
-	rustc --edition=2024 -D warnings ci/docs/main.rs -o target/docs-check/verify-docs
+	rustc --edition=2024 -D warnings ci/docs.rs -o target/docs-check/verify-docs
 	target/docs-check/verify-docs
 }
 
@@ -211,31 +211,39 @@ check_i18n() {
 	fi
 }
 
-case "${1:-all}" in
-docs)
-	check_docs
-	;;
-layout)
-	check_layout
-	;;
-config)
-	check_config_examples
-	;;
-i18n)
-	check_i18n
-	;;
-repository)
-	check_repository_contracts
-	;;
-all)
-	check_docs
-	check_repository_contracts
-	check_layout
-	check_config_examples
-	check_i18n
-	;;
-*)
-	printf '未知静态策略检查：%s\n' "$1" >&2
-	exit 2
-	;;
-esac
+# 本地 Justfile 与 CI 共用命令定义，避免编译参数在两处漂移。
+run_checks() {
+	local check
+	for check in "$@"; do
+		case "$check" in
+		docs) check_docs ;;
+		layout) check_layout ;;
+		config) check_config_examples ;;
+		i18n) check_i18n ;;
+		repository) check_repository_contracts ;;
+		fmt) cargo fmt --all -- --check ;;
+		check) cargo check --locked --workspace --all-targets ;;
+		feature)
+			cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
+			cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
+			;;
+		lint) cargo clippy --locked --workspace --all-targets --all-features -- -D warnings ;;
+		wasm)
+			cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
+			cargo check --locked -p auction-web-admin --target wasm32-unknown-unknown
+			;;
+		dependency-audit) cargo audit --deny warnings ;;
+		dependency-unused) cargo machete ;;
+		all) run_checks docs repository layout config i18n ;;
+		rust) run_checks fmt check feature lint wasm ;;
+		*)
+			printf '未知静态检查：%s\n' "$check" >&2
+			return 2
+			;;
+		esac
+	done
+}
+
+# 无参数仍只执行原有五项策略门禁；允许 CI 一次选择多项，不隐式运行测试。
+if [[ $# -eq 0 ]]; then set -- all; fi
+run_checks "$@"
