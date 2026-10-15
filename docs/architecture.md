@@ -174,6 +174,8 @@ REST/WebSocket DTO 由 contracts 拥有。通知只提示重读，跳号/重连�
 
 显式 `web-embed` 选择各自资源，API-only 固定空集合；`allow_missing` 保证无产物可编译并返回 503。
 发布脚本验证两端隔离、payload 哈希、依赖与源码身份后生成确定性归档，步骤见[部署手册](../ops/README.md)。
+GitHub Actions 只拥有调度、缓存及受控下载：默认分支推送或手动运行通过静态检查后调用既有发布脚本，
+不复制制品规则、不启动程序或自动部署；下载与保留边界见[CI 说明](../ci/README.md#下载-actions-制品)。
 
 ## 生命周期与运维
 

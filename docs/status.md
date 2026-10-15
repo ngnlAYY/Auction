@@ -22,7 +22,7 @@
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | SQLite 历史资产 | 运行支持已移除，保留已发布迁移与已有测试 | 保留文件或锁图可选依赖意味着当前支持 SQLite |
 | 迁移 | PostgreSQL 39 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
-| 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁 | 本次文档修改已经构建或部署了新制品 |
+| 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
 | 灾备 | 独立 backup/verify/rebuild/restore 与 canonical v28 接管流程 | 备份可用于未经验证的生产恢复或任意历史 schema |
@@ -52,6 +52,19 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
+
+### 2026-10-15 Actions 门禁修复与下载制品
+
+只读核对首次 [Actions 运行](https://github.com/ngnlAYY/Auction/actions/runs/38757211415)：
+`fc28700` 的 docs、security-audit、msrv 通过，verify 因 runner 缺少 `rg` 在布局检查阶段退出 127，尚未进入 Rust 编译。
+工作流现显式准备门禁工具，先跑廉价检查，再并行编译、审计和 MSRV；同提交 PR/push 去重及旧任务取消不降低门禁。
+增加隔离编译缓存、审计工具复用和固定哈希的官方 dx 工具缓存；默认分支推送或手动运行通过全部检查后，
+调用原发布脚本构建并上传通用四程序包。Owner 为 `.github/workflows/ci.yml` 与 `ci/`，
+未修改业务 HTTP/事件、运行配置、数据库或发布包内容白名单；调度和下载契约见[CI 说明](../ci/README.md)。
+
+本地完整 `just verify`（45 份文档）、actionlint、ShellCheck、Bash 语法和差异检查通过，变更文件主动 LSP 无诊断。
+已静态核对官方 dx 下载归档的 SHA-256、单文件布局和 ELF 依赖；未运行产品、行为测试或部署。
+本节登记时尚无新版 Actions 全流程、缓存命中、完整 Release 重编及下载证据，不能将配置完成表述为制品已可下载。
 
 ### 2026-10-15 论坛拒绝原因安全展示
 

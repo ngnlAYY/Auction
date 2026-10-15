@@ -69,7 +69,9 @@ runtime 共享、operations 接管、恢复指纹变化后的重新部署重启�
 
 ## 发布制品
 
-生产使用干净工作树的 `just release-check` 归档，或逐步执行：
+生产使用干净工作树的 `just release-check` 归档；Actions 在默认分支推送或手动运行通过全部检查后复用同一入口，
+提供通用 Linux x86_64 四程序包，下载、14 天保留期及 ABI 边界见[CI 制品说明](../ci/README.md#下载-actions-制品)。
+下载后仍须核验清单与部署兼容性，不会自动更新服务器。也可在本地逐步执行：
 
 ```bash
 just build-api
