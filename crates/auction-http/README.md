@@ -48,6 +48,8 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
 
 Public 竞价按限流 → Origin → 认证执行，Admin mutation 按限流 → Origin → CSRF → 会话执行，
 之后才读取并校验 query/path/body。严格 JSON 保留各路由大小上限、媒体类型与字段闭集，业务 GET 不隐式开放 HEAD。
+Axum 显式保留 HTTP/JSON、路由上下文、日志和 WebSocket feature，不启用未用的宏及 Form/Query 提取器；
+query 仍由本层按闭集解析并拒绝重复键，Hyper 的 HTTP/2 与连接排空配置不变。
 完整错误优先级、405/Allow 和缓存要求见[请求契约](../../docs/contracts/routes.md#通用响应与错误)。
 
 ## 命令结果与能力边界

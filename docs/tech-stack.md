@@ -1,6 +1,6 @@
 # 技术栈与取舍
 
-[文档导航](README.md) · [架构](architecture.md) · [开发指南](development.md)
+[文档导航](./README.md) · [架构](architecture.md) · [开发指南](development.md)
 
 本页按本地 [Cargo.toml](../Cargo.toml)、[Cargo.lock](../Cargo.lock)和[工具链](../rust-toolchain.toml)说明项目选择，
 不将仓库锁定版本描述为上游最新或当前安全性保证。
@@ -10,15 +10,15 @@
 | 边界 | 仓库选择 | 约束 |
 | --- | --- | --- |
 | Rust | 1.98.0，edition 2024；MSRV 1.94.1 | 固定工具链，独立 MSRV 编译 |
-| Tokio | 声明 ~1.51.4，锁定 1.51.4 | 沿项目约定 1.51.x 支持分支升级 |
+| Tokio | 声明 ~1.53.3，锁定 1.53.3 | 官方 1.53.x LTS，后续只接收该分支补丁 |
 | HTTP | Axum 0.8.9、Hyper、hyper-util、Tower | 共用连接栈，Public/Admin 路由分离 |
 | 浏览器 | Dioxus 0.7.10 | 纯 CSR，禁 fullstack/server |
 | 国际化 | dioxus-i18n 0.5.1、unic-langid 0.9.6 | Fluent 编译期内嵌，五语言键一致 |
 | 数据库 | SQLx 0.9.0 | 驱动 feature、SQL/锁和迁移树显式分开 |
 | 缓存 | redis 1.6.0 | 默认关闭，只缓存可重建值 |
-| 外部 HTTP | 直接 reqwest 0.13.4、rustls 0.23.45/ring | 限定来源、预算、凭据与结果证明 |
+| 外部 HTTP | 直接 reqwest 0.13.5、rustls 0.23.45/ring | 限定来源、预算、凭据与结果证明 |
 | 数据/配置 | serde、serde_json、TOML、UUID、chrono | DTO/领域/SQL 行分离，UTC 时间与独立敏感配置 |
-| 运维 | clap 4.6.6、tracing、Prometheus、OpenTelemetry | 安全错误、低基数指标、有界 exporter |
+| 运维 | clap 4.6.7、tracing、Prometheus、OpenTelemetry | 安全错误、低基数指标、有界 exporter |
 
 PostgreSQL 以 major 18 为部署边界，patch 更新和 major 迁移分开评审。
 SQLite 使用 SQLx/libsqlite3-sys 锁图的捆绑引擎，系统动态库版本不能替代制品版本。
@@ -27,7 +27,8 @@ SQLite 使用 SQLx/libsqlite3-sys 锁图的捆绑引擎，系统动态库版本�
 
 2026-10-03 历史审计记录将 rustls/h2/chacha20 锁定到 0.23.45/0.4.19/0.10.2，
 对应修复和公告记录见[状态页](status.md#2026-10-03-历史记录)。同日登记的 fxhash 0.2.1 /
-RUSTSEC-2025-0057 为停维维护债，暂保留间接依赖，2026-11-03 前复查兼容迁移，CI 不隐藏提示。
+RUSTSEC-2025-0057 停维维护债于 2026-10-14 通过 scraper 0.27.0 / selectors 0.38.0 改用 rustc-hash
+并移出锁图，提前完成原定 2026-11-03 前的兼容迁移复查；历史审计警告保留，不改写旧结论。
 独立 dependency-audit 门禁联网核查公告；退出码 0 不表示没有警告，命中版本范围也不证明生产可利用性。
 2026-10-14 将锁图中的 `quinn-proto 0.11.17` 定向更新为 `0.11.18`，修复三条公告范围；未开启 HTTP/3，
 当时默认及全 feature/全 target 活跃依赖树均未包含该组件，不把锁图命中描述为已证实运行时漏洞。
@@ -51,6 +52,11 @@ dx 的 esbuild 仅作构建工具；不引入 Node/npm 运行链。显式 web-sy
 Fluent 文案各 surface 独立，五语言必须同步；共享层只管理语言集合、hv.lang 与 html lang。
 静态与视觉边界见[架构](architecture.md)及各 Web 文档。
 
+直接浏览器传输使用 gloo-net 0.7.0、gloo-timers 0.4.0，间接 gloo-utils 为 0.3.0。
+共享 GET 仍直接构造浏览器请求，保留精确 URL、同一头/正文超时预算和取消语义。
+锁图保留 Dioxus 可选 fullstack 路径上的 gloo-net 0.6.0 / gloo-utils 0.2.0；当前两端 CSR
+及全工作区 all-features/all-target-platforms 活跃依赖树未启用该路径，不为清空锁图开启 fullstack。
+
 ## SQL、事务与 Lite
 
 SQLx 保留可审阅的显式 SQL、事务和后端锁，不用 ORM/AnyPool 抹平差异。
@@ -73,8 +79,47 @@ Admin 启动撤销旧会话，并用 HMAC-SHA256 绑定 actor/secret 与随机 t
 integrations 拥有 rustls 传输、限流、解析和凭据；各 owner 按可证明结果决定重试。
 未知论坛写入/邮件发送进入对账或人工边界，不能自动重发或抹掉本地已接受事实。
 
+## 指标与追踪
+
+指标由 [auction-observability](../crates/auction-observability/README.md) 集中适配。Prometheus 0.14.0
+关闭默认 `protobuf`，显式保留 `process`；内部使用上游 `plain_model`，仍经同一个 `TextEncoder` 输出
+Prometheus 0.0.4 文本，不更换 registry、进程/池/tracing collector 或业务 recorder 窄接口。
+指标名、label、bucket 和 `/metrics` 的媒体类型契约不变；静态编译不等于实际 scrape 或逐字节兼容验证。
+这只移除指标库的二进制编码依赖，不关闭 OTLP/HTTP-proto tracing，也不移除其独立的 prost 编码栈。
+
+2026-10-14 经单独兼容评审，Tokio 切换至 1.53.x；[上游 LTS 政策](https://github.com/tokio-rs/tokio/)
+将该分支支持期列至 2027 年 9 月。OpenTelemetry API/SDK/OTLP 配套锁定 0.33.1，
+tracing-opentelemetry 为 0.34.0；不启用新的实验能力或更换自有有界批处理器。
+OTLP 显式关闭 0.33 新增的默认重试，保留一次导出、失败计数和原预算；上游请求体保护及已知配置边界
+见 [observability owner](../crates/auction-observability/README.md#实现布局与-tracing)。
+
+框架评审优先选择已有框架维护升级与 feature 精简，不为追新重写 Axum、SQLx、Dioxus 或持久 Worker。
+prometheus-client 需要另审 OpenMetrics 与进程指标兼容，Leptos CSR 需要另审组件/路由/i18n 和唯一构建链；
+在缺少明确能力需求或性能证据时，不引入替代框架。
+
 ## 依赖与交付纪律
 
 领域只依赖领域安全库，应用只依赖内层/端口，后端不依赖 Web crate。库错误用 thiserror，
 anyhow 限装配根；只为实际能力引入依赖。驱动/Redis 用窄 feature，发布图和静态 all-features 图分别审阅。
 默认[静态验证](development.md)不执行行为测试；运行证据及未验收范围统一见[状态页](status.md)。
+
+### 2026-10-14 精简审计候选
+
+审计覆盖 20 个工作区包的清单、实际调用和独立/合并 feature 图。scraper/Gloo 升级之后，
+五项低风险精简已获授权并实施；SQLite 项仍待评审。未测量体积或构建耗时收益，声明少一条不等于包少一个。
+
+| 状态 / owner | 范围与源码依据 | 收益与边界 |
+| --- | --- | --- |
+| 已实施 · integrations | 根 scraper 关闭默认 `main`，显式保留 `errors`；[论坛解析](../crates/auction-integrations/src/forum/parser/html.rs)只用库 API | `getopts`、`unicode-width` 已退出活跃图和锁图 |
+| 已实施 · HTTP / 装配根 | Axum 关闭 `macros/form/query`，显式保留其余现有默认 feature 和 `ws`；[查询映射](../crates/auction-http/src/http/routes/mapping/query.rs)自有严格解析，无 Axum 宏或 Form/Query 提取器调用 | `axum-macros`、`serde_urlencoded` 已退出活跃图；后者仍在未启用 fullstack 等路径的锁图中；JSON、MatchedPath、日志、HTTP/2/WS 边界保留 |
+| 已实施 · observability | 删除[清单](../crates/auction-observability/Cargo.toml)中无源码调用的直接 `serde`；健康详情只用 `serde_json::Value` | 仅删冗余声明，工作区 serde 仍被其他包和传递依赖使用 |
+| 已实施 · Admin Web | [可见性轮询](../crates/auction-web-admin/src/app/poll.rs)改用 `std::future::poll_fn`，删除 Admin 直接 futures-util 声明 | 只减耦合，不移除 Public/Shared/Dioxus 的 futures-util，不改唤醒或轮询生命周期 |
+| 已实施 · 三个 Web owner | 根 gloo-net 仅留 `http`；Public 增 `json/websocket`，Admin 增 `json`，Shared 只继承 | 独立 Admin/Shared 编译面已收窄；三个 WASM 包分别 check 通过，不靠 feature 统一掩盖缺项 |
+| 需存储评审 · SQLite Lite | [storage 清单](../crates/auction-storage/Cargo.toml)的 `sqlx/sqlite` 可评估换成 `sqlite-bundled` + `sqlite-unlock-notify` | 收窄未使用的 deserialize/load-extension Rust 能力，不减包；保留捆绑引擎和锁等待，不宣称原生扩展能力全部禁用，须核对有效编译选项 |
+
+本次全工作区/all-features/all-target-platforms 活跃图去重后 491 → 487 个包节点；
+锁图 539 → 536 个包（外部包 519 → 516），只移除三个记录，未新增或升级任何包。
+锁图保留 `serde_urlencoded` 不能推导为当前制品启用了它，也不能将节点减少等同于 WASM 体积下降。
+各 owner/目标独立 check、完整静态门禁与公告审计的实际范围见[状态页](status.md#2026-10-14-低风险依赖精简)。
+不为纸面包数重写 HTML/CSS、Fluent、URL、TLS、密码学、RESP、WebSocket 或迁移装载器；
+不删除 `sqlx::migrate!` 所需 macros/migrate，也不改变系统 CA、双后端隔离或纯 CSR 契约。

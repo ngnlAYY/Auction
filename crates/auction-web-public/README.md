@@ -30,7 +30,7 @@ Dioxus 纯客户端渲染的公开端 SPA，拥有公开读取、竞价交互、
 
 只消费稳定 HTTP/实时契约和共享浏览器能力，不依赖 Admin UI、存储模型、配置或服务端密钥。
 15 条浏览器路径由 Route、[后端入口清单](../auction-http/src/assets/routes.rs)和[路由契约](../../docs/contracts/routes.md)共同维护。
-页面结构、视觉与交互详见 [Public 设计](DESIGN.md)，本页只说明实现边界。
+页面结构、视觉与交互详见 [Public 设计](./DESIGN.md)，本页只说明实现边界。
 
 ## 页面与源码布局
 
@@ -86,6 +86,7 @@ visibilitychange、popstate、socket 和回调随所属外壳卸载清理，游�
 ## 依赖与首屏边界
 
 HTTP/stream wire DTO 直接复用 `auction-contracts`；本地只持有查询、展示和交互状态。
+Gloo 在本 surface 显式启用 JSON/WebSocket，HTTP 基础能力继承工作区；不能依赖 Admin 或合并构建补齐 feature。
 会话读取失败保留错误与重试入口，不能伪装匿名；登录 return 只接受单斜杠开头的站内路径。
 首屏 15 秒未就绪只提示慢加载，真实 panic 才显示失败，后续就绪回调不能覆盖该状态。
 

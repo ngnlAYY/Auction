@@ -1,6 +1,6 @@
 # 实现与验证状态
 
-[文档导航](README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
+[文档导航](./README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
 
 本页统一登记源码能力、既有验证结果与待补运行证据。当前有部分隔离验证声明、定向构建及限定部署证据，
 尚不足以宣称完整业务或生产验收。文档修订不重跑历史流程，也不把当时失败改写为当时通过。
@@ -44,6 +44,96 @@
 因此这里保留为历史验证声明，不把它升级为本轮确认的运行结论。“R1”不能替代具体执行记录。
 
 ## 本轮静态检查
+
+### 2026-10-14 Tokio LTS 与 OTel 配套升级
+
+在 `3511a41` 的既有工作树改动上，Tokio 1.51.6 → 1.53.3，声明改为 `~1.53.3`，后续仅接收该 LTS
+分支内补丁；上游公布支持期至 2027 年 9 月。OpenTelemetry API/SDK/HTTP/OTLP/proto 配套锁到 0.33.1，
+tracing-opentelemetry 锁到 0.34.0。根依赖由装配/技术栈边界拥有，源码适配归 `auction-observability`。
+定向锁图只升级七个包，未改变其余同版本包的依赖边；全工作区/all-features/all-target-platforms 活跃图
+仍为 486 个节点，锁图仍为 535 个条目（外部包 515），不宣称体积或性能收益。
+
+核对上游 changelog、exporter/processor trait、HTTP builder、retry policy 和现有装配后，唯一源码适配为
+显式 `RetryPolicy::disabled()`：不接受 0.33 新增的默认三次重试，保持每批一次导出、失败计数和原配置预算。
+自有有界队列、flush/shutdown、远端 context 边界、安全错误分类及 Prometheus 输出路径不变；未新增 TOML
+字段、HTTP/事件字段、数据库迁移或运行时环境覆盖入口，未切换其他框架。上游新增的 64 MiB 请求体保护
+保留，超限按导出失败处理；具体兼容边界见 [observability owner](../crates/auction-observability/README.md#实现布局与-tracing)。
+
+Rust `1.98.0` 下 observability 独立 `--locked --all-targets` check 与 Clippy（`-D warnings`）通过；
+完整 `just verify` 通过，覆盖 49 份文档、格式/策略/布局/配置/i18n、工作区全部目标、独立
+PostgreSQL/SQLite/Redis、全部目标/特性 Clippy 与两端 WASM。MSRV `1.94.1` 的工作区
+`--locked --all-targets --all-features` check 通过；修改路径主动 LSP 检查无诊断。
+`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 535 个条目 / 1310 条公告，
+退出 0、公告漏洞 0、警告 0；公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，无新增忽略项。
+
+本次同时记录 SDK 隐式 headers 环境覆盖的既有问题，见上述 owner 文档；此次升级没有修复该配置边界，
+不能宣称 TOML-only 已通过运行验收。未检查进程实际环境或凭据，未新增或执行行为测试、真实 OTLP 导出、
+scrape、故障/退出验证、数据库/外部业务操作或部署；未重建发布 payload。编译与公告扫描不证明生产验收。
+
+### 2026-10-14 框架补丁与指标依赖精简
+
+在 `3511a41` 的既有工作树改动上，定向升级 Tokio 1.51.4 → 1.51.6、直接 reqwest 0.13.4 → 0.13.5、
+Clap 4.6.6 → 4.6.7；clap_builder/clap_derive 随之锁到 4.6.7。保留原 HTTP/TLS、运行时及 CLI feature，
+未切换 Tokio 支持分支，也未升级 OTel 或引入新框架。Cargo 重选的无关 syn/Windows 依赖边恢复为既有锁定关系，
+最终锁图通过 `cargo metadata --locked --all-features` 校验。此步骤仅改依赖清单、锁图和相关文档，保留此前源码改动。
+
+observability 的 Prometheus 0.14.0 关闭默认 `protobuf`，保留 `process`，使用上游 plain_model。
+源码核对仍使用原 TextEncoder、进程/池/tracing collector 与业务 recorder，保留 Prometheus 0.0.4 文本、
+指标名、label、bucket 和媒体类型契约；不关闭独立的 OTLP/HTTP-proto 追踪编码。
+`protobuf 3.7.2`、`protobuf-support 3.7.2` 移出活跃图及锁图；reqwest 新增间接 `base64 0.23.1`，
+现有直接 `base64 0.22.1` 不变。全工作区/all-features/all-target-platforms 活跃图 487 → 486 个节点，
+锁图 536 → 535 个条目（外部包 516 → 515），净减一个而非两个包；未测量制品体积或性能收益。
+
+Rust `1.98.0` 下 observability 独立 `--locked --all-targets` check 与 Clippy（`-D warnings`）通过；
+最终锁图下完整 `just verify` 通过，覆盖 49 份文档、格式/策略/布局/配置/i18n、工作区全部目标、
+独立 PostgreSQL/SQLite/Redis、全部目标/特性 Clippy 和两端 WASM。
+MSRV `1.94.1` 的工作区 `--locked --all-targets --all-features` check 通过。
+`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 535 个条目 / 1310 条公告，
+退出 0、漏洞 0、警告 0；公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，未添加忽略项。
+
+当前选择与后续评审边界见[技术栈](tech-stack.md#指标与追踪)。未新增或执行行为测试，未做实际 scrape/逐字节
+输出比较，未访问业务数据库或真实外部服务、未重建发布 payload、未部署；静态结果不证明运行兼容或生产验收。
+
+### 2026-10-14 低风险依赖精简
+
+承接下节版本升级，在 `3511a41` 的既有工作树改动上实施五项低风险精简：scraper 仅留库解析及错误支持、
+Axum 移除未用宏/Form/Query、observability 删除直接 serde、Admin 以标准库 poll_fn 取代直接 futures-util、
+Gloo feature 下沉到 Public/Admin。各 owner 的当前边界见[技术栈](tech-stack.md#2026-10-14-精简审计候选)。
+SQLite feature、HTTP/事件字段、配置、迁移、轮询唤醒与卸载逻辑均未改变。
+
+受控刷新锁图未新增或升级包。全工作区/all-features/all-target-platforms 活跃图去重后 491 → 487 个节点，
+退出 `getopts`、`unicode-width`、`axum-macros`、`serde_urlencoded`；前三者也移出锁图，
+锁图总数 539 → 536（外部包 519 → 516）。`serde_urlencoded` 仍被未启用的 Dioxus fullstack 等路径锁定，
+不能通过手删锁记录消除；serde 和 futures-util 也仍有其他实际调用者。不以节点数宣称制品体积或性能提升。
+
+Rust `1.98.0` 下 observability/integrations/http 各自 `--locked --all-targets` check 通过；
+Shared/Admin/Public 各自独立 `--locked --target wasm32-unknown-unknown` check 通过。
+反向 feature 图确认 Shared 只有 Gloo HTTP、Admin 增 JSON、Public 增 JSON/WebSocket，没有依赖合并构建补项。
+完整 `just verify` 通过（49 份文档、独立 PostgreSQL/SQLite/Redis、全特性 Clippy、两端 WASM）；
+MSRV `1.94.1` 的工作区 `--locked --all-targets --all-features` check 通过。
+`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 536 个锁图条目 / 1310 条公告，
+退出 0、漏洞 0、警告 0；公告库提交仍为 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，未添加忽略项。
+
+未新增或执行行为测试、未重建发布 payload、未访问业务数据库或真实外部服务、未部署。
+
+### 2026-10-14 依赖升级与精简审计
+
+基线 `3511a41`。scraper 0.24.0 → 0.27.0（selectors 0.38.0 改用 rustc-hash）、
+gloo-net 0.6.0 → 0.7.0、gloo-timers 0.3.0 → 0.4.0。未改 HTTP/事件字段、配置、迁移或业务规则；
+共享 GET 保留精确 URL、10 秒头/正文预算及取消守卫，只更新对应说明。
+锁图从 543 个包降至 539 个（外部包 523 → 519），fxhash 已移除；非默认 Dioxus fullstack
+路径仍锁定旧 Gloo 版本，但未进入当前两端 CSR 或全工作区活跃依赖树。
+
+Rust `1.98.0` 下完整 `just verify` 通过（49 份文档、独立 PostgreSQL/SQLite/Redis、全特性 Clippy、
+两端 WASM）；工作区全部目标/特性 check 与 MSRV `1.94.1` 同范围 check 通过，7 个改动路径 LSP 无诊断。
+本轮额外执行 `cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2），
+539 个锁图条目 / 1310 条公告，退出 0、漏洞 0、警告 0、无忽略列表；公告库提交
+`6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`。本地/CI 既有 dependency-audit 阻断策略未变。
+
+依赖精简另完成两条并行只读审计及主代理后端补审，六项候选见[技术栈](tech-stack.md#2026-10-14-精简审计候选)，
+未把审计建议直接当作删除授权，也未宣称已减少候选对应的包或体积。
+未新增或执行行为测试、未调用真实业务服务/数据库、未重建发布 payload、未部署；
+真实论坛/邮件/装备解析及浏览器兼容性仍无本轮运行证据，不能以静态通过替代验收。
 
 ### 2026-10-14 审计修复
 
@@ -221,8 +311,8 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify` 与差异检查退�
 | F4 · 设置慢请求与无界退出 | [access](../crates/auction-setup/src/server/access.rs) 限正文/异步处理 10 秒，令牌先于正文；[lifecycle](../crates/auction-setup/src/server/lifecycle.rs) 复用 5 秒请求头与 10 秒排空；终止不继续初始化 | 未执行慢请求、断连、信号或阻塞文件系统运行验证 |
 | F5/F7 · 设置防嵌入及拒绝响应安全头 | 正式表面与设置复用 [headers](../crates/auction-http/src/http/security/headers.rs)，包括拒绝、框架错误及超时应用响应 | 未执行浏览器/代理验证 |
 
-`fxhash 0.2.1` 的 RUSTSEC-2025-0057 是停维提示而非已确认漏洞，暂保留解析依赖，
-2026-11-03 前复查上游兼容迁移；CI 不隐藏该提示，维护边界见[技术栈](tech-stack.md#版本与升级)。
+`fxhash 0.2.1` 的 RUSTSEC-2025-0057 停维维护债已通过本轮 scraper 升级移除；
+历史命中不是已确认生产漏洞，CI 不隐藏公告，维护边界见[技术栈](tech-stack.md#版本与升级)。
 
 初始化失败应保留配置和数据库现场，停止进程后按[合并部署维护](../apps/server/README.md#生命周期与维护)
 显式处理，不通过删除配置、修改历史迁移或自动重试来绕过问题。

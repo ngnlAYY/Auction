@@ -11,7 +11,7 @@ use opentelemetry::{
     propagation::TextMapPropagator,
     trace::{TraceContextExt, TracerProvider as _},
 };
-use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_otlp::{RetryPolicy, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::{
     Resource,
     propagation::TraceContextPropagator,
@@ -268,6 +268,8 @@ fn build_provider(
         .with_http()
         .with_endpoint(config.endpoint.clone())
         .with_timeout(config.export_timeout)
+        // OTel 0.33 默认启用重试；显式保留每批一次导出的预算与失败计数语义。
+        .with_retry_policy(RetryPolicy::disabled())
         .with_headers(headers)
         .build()
         .map_err(|_| InitError { message: "failed to build OTLP HTTP exporter".to_owned() })?;

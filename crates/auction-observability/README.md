@@ -32,8 +32,18 @@
 
 `init(service, configured_filter)` 安装 JSON tracing，缺省过滤器为 `info,{service}=debug`。
 `init_with_config` 可增加默认关闭的 OTLP/HTTP exporter，使用异步有界队列和有界退出刷新。
-Public/Worker 参数来自角色配置，Admin 可由 runtime 覆盖；各角色 OTLP headers 只来自敏感 TOML。
+Public/Worker 参数来自角色配置，Admin 可由 runtime 覆盖；应用装配只传入敏感 TOML 中的 OTLP headers。
 exporter 不监听操作系统信号；装配根收口业务资源后调用刷新和关闭。
+
+追踪使用 OpenTelemetry API/SDK/OTLP 0.33.1 与 tracing-opentelemetry 0.34.0，继续保留自有有界队列、
+丢弃/失败计数、安全错误分类及关闭预算。OTLP builder 显式使用 `RetryPolicy::disabled()`，不接受 0.33
+默认新增的三次重试，避免静默增加请求次数或占用导出/关闭预算。保留上游默认 64 MiB 请求体上限
+（编码及压缩后的限制）；超限计入导出失败，不影响业务命令或触发业务重试。未启用 gRPC 或 OTel 内部日志。
+
+**待整改配置边界**：TOML-only 仍是项目契约，但上游 0.32/0.33 的 HTTP builder 都会另外读取
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS` 或 `OTEL_EXPORTER_OTLP_HEADERS`，合并并覆盖程序传入的同名 header。
+这不是新增的受支持配置入口；本次升级未修复此既有问题，也未读取运行环境或真实凭据来证明部署不受影响。
+后续须在配置/传输边界隔离隐式覆盖，不能以并发进程内修改全局环境变量代替门禁。
 
 ## 结构化日志约定
 
@@ -58,6 +68,7 @@ Cookie、密码、会话 token、数据库连接串、数据密钥和未脱敏�
 
 各业务 owner 提供 dashboard 汇总，未装配、缺能力或读取失败均显式 unknown/source_unavailable。
 `with_details` 只接受冻结的非敏感对象；Worker 的论坛开关通过专用端口读取，不把整个 details 暴露给浏览器。
+内部详情直接使用 `serde_json::Value`，本 crate 不额外声明未使用的直接 serde 依赖。
 HTTP 响应语义见[Dashboard 契约](../../docs/contracts/routes.md#dashboard-与-readiness)。
 
 ## 指标与剩余验收证据
@@ -66,7 +77,12 @@ Public/Admin 的 `/metrics` 默认关闭；Worker 使用经 peer 认证的 contr
 进程资源、连接池快照/实际 acquisition 累计、固定 Worker loop 标签和业务结果/耗时均保持低基数，
 不以用户、拍品、命令、邮箱或原始错误作为 label。存储边界之外的原生 SQLx 池不计入 acquisition 累计。
 
-队列满会计入 exporter 丢弃数；静态编译和已有指标注册不证明真实部署采集成功，运行证据集中在状态文档。
+Prometheus 只启用 `process`，关闭默认 `protobuf` 并使用上游 `plain_model`；进程、池和 tracing collector
+继续经 `TextEncoder` 输出 Prometheus 0.0.4 文本。指标名、label、bucket 和媒体类型契约不变，
+不因此关闭 OTLP/HTTP-proto 的独立追踪编码栈，也不切换 OpenMetrics 或替换业务 recorder 端口。
+
+队列满会计入 exporter 丢弃数；静态编译和已有指标注册不证明真实部署采集成功或输出逐字节等价，
+运行证据集中在状态文档。
 
 ## 维护与验证
 

@@ -55,7 +55,9 @@ Public 与 Admin 共用、无业务偏向的浏览器基础能力。
 
 ## 传输与错误
 
-`send_get`/`send_request` 用统一 10 秒预算读取响应头与正文；超时或取消通过 AbortController 终止 fetch。
+`send_get`/`send_request` 使用 gloo-net 0.7、gloo-timers 0.4，以统一 10 秒预算读取响应头与正文；
+超时或取消通过 AbortController 终止 fetch。升级保留直接构造 GET 的精确 URL 边界，不移除取消守卫。
+本 crate 只声明 Gloo HTTP feature，JSON/WebSocket 由实际调用的 surface 增补；独立 WASM 检查不能依赖合并 feature。
 响应保留状态/头，DTO 解码归 surface；observed 入口在响应头到达时通知 Public 校时，避免正文传输延迟污染样本。
 CSRF/Basic Auth 由 Admin 构造请求，不能在共享层变成业务耦合。
 

@@ -96,7 +96,7 @@ impl PageVisibility {
         if !self.hidden.get() {
             return;
         }
-        futures_util::future::poll_fn(|context| {
+        std::future::poll_fn(|context| {
             if self.hidden.get() {
                 self.wakers.borrow_mut().push(context.waker().clone());
                 Poll::Pending
