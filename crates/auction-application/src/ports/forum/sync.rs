@@ -295,7 +295,7 @@ pub trait ForumCredentialAvailability: Send + Sync {
     fn has_available_forum_credential(&self) -> bool;
 }
 
-/// 论坛未知写入的运维恢复端口；SQLite Lite 明确不提供该能力。
+/// 论坛未知写入的运维恢复端口。
 pub trait ForumSyncRecoveryPort: Send + Sync {
     fn list_write_recovery(&self, limit: u16) -> ApplicationFuture<'_, Vec<ForumSyncRecoveryItem>>;
 

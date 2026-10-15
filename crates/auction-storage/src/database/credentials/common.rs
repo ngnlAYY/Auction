@@ -21,11 +21,6 @@ pub(super) fn admin_error(error: AdminCredentialError) -> ApplicationError {
     ApplicationError::AdminCredential(error)
 }
 
-#[cfg(feature = "sqlite")]
-pub(super) fn capability_unavailable() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("Admin 凭据管理只支持 PostgreSQL 完整档")
-}
-
 #[cfg(feature = "postgres")]
 pub(super) fn storage_error(message: &str) -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))

@@ -207,7 +207,7 @@ pub enum RecoveryCommandError {
 /// recovery 确认的窄存储端口。
 ///
 /// 实现必须把命令查重、事实锁定、状态更新、审计和需要的 realtime/outbox 事实放在同一
-/// Serializable 事务中；SQLite Lite 实现明确返回能力缺失。
+/// Serializable 事务中。
 pub trait RecoveryCommandRepository: Send + Sync {
     fn confirm_recovery(
         &self,

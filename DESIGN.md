@@ -28,8 +28,7 @@ flowchart TD
     Storage[auction-storage] -.->|实现应用端口| App
     Integrations[auction-integrations] -.->|实现应用端口| App
     Cache[auction-cache] -.->|实现应用端口| App
-    Storage --> PostgreSQL[(PostgreSQL 完整档)]
-    Storage --> SQLite[(SQLite Lite)]
+    Storage --> PostgreSQL[(PostgreSQL)]
     Cache --> Redis[(可选 Redis)]
     Integrations --> Remote[E-Hentai / MoogleMail]
     Ctl[auctionctl] --> Storage
@@ -98,11 +97,6 @@ command_id + 摘要 → 账本重放/冲突 → 锁定权威对象 → 领域计
 竞价和关键生命周期使用 Serializable、明确行锁，冲突最多尝试 3 次（含首次）。队列领取可用
 Read Committed 加锁/条件更新；具体锁序、账本和事实要求见[事务不变量](docs/contracts/invariants.md)。
 
-### SQLite Lite
-
-使用 `BEGIN IMMEDIATE`、WAL、busy timeout 和本地文件；每角色至多一个实例、Worker 并发 1。
-已支持能力仍需完整幂等及原子性；不模拟 PostgreSQL 行锁或完整档系统能力。
-
 ## 7. Worker 与外部副作用
 
 Worker 拥有执行时机与恢复编排，数据库拥有 due、cursor、attempt、lease、fencing 和结果。
@@ -156,7 +150,7 @@ relay 游标与失败持久化，Hub 有界；当前无 SSE 或外部广播 sink
 公共、角色、敏感 TOML 分离，Admin/Worker 可共享 runtime；`AUCTION_CONFIG_FILE` 只选择角色文件。
 runtime 用 fingerprint、文件锁、持久账本和原子替换保存；替换后确认失败向前恢复，保存后重启才生效。
 秘密不进入普通投影，详见[配置](ops/config/README.md)。
-P09/P11 经归属复核短暂解密装备 URL，仅以 `no-store` 返回，Lite 链接为空。
+P09/P11 经归属复核短暂解密装备 URL，仅以 `no-store` 返回。
 缓存默认关闭，只缓存可重建规则读取，失败回源；资格、锁、账本、会话与审计始终由权威存储决定。
 
 ## 10. 部署与生命周期
@@ -179,8 +173,7 @@ Admin 启动永久撤销旧管理会话并将 token 摘要绑定当前 actor/sec
 
 ## 11. 能力档位
 
-PostgreSQL 提供完整事实链；Lite 仅支持声明子集，并保持这些写入的正确性。
-精确差异统一维护在[能力矩阵](docs/architecture.md#部署档位与能力)，不从路由存在推导后端支持。
+PostgreSQL 是唯一数据库后端，已实现功能与限制见[能力矩阵](docs/architecture.md#部署档位与能力)，不从路由存在推导后端支持。
 
 ## 12. 当前状态与未闭合验证
 

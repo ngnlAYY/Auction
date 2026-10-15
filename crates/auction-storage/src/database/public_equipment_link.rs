@@ -17,8 +17,6 @@ impl PublicEquipmentLinkSecretReader for DatabaseStore {
         equipment_ids: Vec<EquipmentId>,
     ) -> ApplicationFuture<'_, Vec<PublicEquipmentLinkSecret>> {
         Box::pin(async move {
-            #[cfg(all(feature = "sqlite", not(feature = "postgres")))]
-            let _ = equipment_ids;
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
@@ -40,10 +38,6 @@ impl PublicEquipmentLinkSecretReader for DatabaseStore {
                         })
                         .collect()
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "完整游戏装备 URL 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

@@ -8,8 +8,6 @@ use auction_application::{
     ApplicationError, ApplicationFuture, PublicRealtimeEvent, PublicRealtimePage,
     PublicRealtimeReader, PublicRealtimeRequest, RepositoryError,
 };
-#[cfg(feature = "sqlite")]
-use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use serde_json::Value;
 use sqlx::Row;
@@ -27,8 +25,6 @@ impl PublicRealtimeReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => list_sqlite(store, request).await,
             }
         })
     }
@@ -155,129 +151,6 @@ async fn list_postgres(
     Ok(Some(page(previous_sequence, events, refetch_required, has_more)))
 }
 
-#[cfg(feature = "sqlite")]
-async fn list_sqlite(
-    store: &super::SqliteStore,
-    request: PublicRealtimeRequest,
-) -> Result<Option<PublicRealtimePage>, ApplicationError> {
-    let stream_key = stream_key(request.auction_id);
-    let limit =
-        request.page_size.checked_add(1).ok_or_else(|| storage_error("实时事件页大小溢出"))?;
-    let mut connection =
-        store.pool().acquire().await.map_err(|_| storage_error("打开 Lite 实时事件快照失败"))?;
-
-    if let Some(auction_id) = request.auction_id {
-        let visible = sqlx::query(
-            "SELECT 1
-             FROM auctions AS auction
-             JOIN worlds AS world ON world.id = auction.world_id
-             WHERE auction.id = ?
-               AND (world.enabled = 1 OR auction.status = 'settled')",
-        )
-        .bind(uuid_blob(auction_id))
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(|_| storage_error("校验 Lite 实时事件拍卖边界失败"))?
-        .is_some();
-        if !visible {
-            return Ok(None);
-        }
-    }
-
-    let rows = sqlx::query(
-        "SELECT event.event_id, event.stream_key, event.stream_sequence, event.kind,
-                event.schema_version, event.public_payload, event.created_at,
-                CASE
-                    WHEN event.stream_key <> 'auction:discovery' THEN 1
-                    WHEN json_valid(event.public_payload) = 0 THEN 0
-                    ELSE EXISTS (
-                        SELECT 1
-                        FROM auctions AS auction
-                        JOIN worlds AS world ON world.id = auction.world_id
-                        WHERE lower(hex(auction.id)) = replace(
-                            lower(CAST(json_extract(event.public_payload, '$.auction_id') AS TEXT)),
-                            '-',
-                            ''
-                        )
-                          AND auction.world_id = CAST(
-                              json_extract(event.public_payload, '$.world_id') AS TEXT
-                          )
-                          AND (world.enabled = 1 OR auction.status = 'settled')
-                    )
-                END AS public_visible
-         FROM realtime_events AS event
-         WHERE event.stream_key = ? AND event.stream_sequence > ?
-         ORDER BY event.stream_sequence ASC
-         LIMIT ?",
-    )
-    .bind(&stream_key)
-    .bind(request.after)
-    .bind(limit)
-    .fetch_all(&mut *connection)
-    .await
-    .map_err(|_| storage_error("读取 Lite 实时事件失败"))?;
-
-    let has_more = rows_len_is_more(request.page_size, &rows);
-    let mut events = Vec::with_capacity(request.page_size as usize);
-    let mut refetch_required = false;
-    let mut previous_sequence = request.after;
-    for (index, row) in rows.into_iter().enumerate() {
-        if index >= request.page_size as usize {
-            break;
-        }
-        let public_visible = row
-            .try_get::<i64, _>("public_visible")
-            .map_err(|_| storage_error("读取 Lite 实时事件公开边界失败"))?
-            != 0;
-        let event = PublicRealtimeEvent {
-            event_id: uuid_from_blob(
-                row.try_get("event_id").map_err(|_| storage_error("读取 Lite 实时事件标识失败"))?,
-                "Lite 实时事件标识",
-            )?,
-            stream_key: row
-                .try_get("stream_key")
-                .map_err(|_| storage_error("读取 Lite 实时事件流名失败"))?,
-            stream_sequence: row
-                .try_get("stream_sequence")
-                .map_err(|_| storage_error("读取 Lite 实时事件序号失败"))?,
-            kind: row.try_get("kind").map_err(|_| storage_error("读取 Lite 实时事件类型失败"))?,
-            schema_version: row
-                .try_get("schema_version")
-                .map_err(|_| storage_error("读取 Lite 实时事件版本失败"))?,
-            payload: serde_json::from_str(
-                &row.try_get::<String, _>("public_payload")
-                    .map_err(|_| storage_error("读取 Lite 实时事件负载失败"))?,
-            )
-            .map_err(|_| storage_error("Lite 实时事件负载不是有效 JSON"))?,
-            created_at: parse_timestamp(
-                row.try_get("created_at")
-                    .map_err(|_| storage_error("读取 Lite 实时事件时间失败"))?,
-            )?,
-        };
-        // Lite 保持同一旧版恢复语义：顺序倒退属于存储损坏，缺口或坏投影则标记 refetch，
-        // 继续推进原始 cursor，避免永久重放同一不可公开事件。
-        if event.stream_key != stream_key || event.stream_sequence <= previous_sequence {
-            return Err(storage_error("Lite 实时事件顺序无效"));
-        }
-        if previous_sequence.checked_add(1) != Some(event.stream_sequence) {
-            refetch_required = true;
-        }
-        previous_sequence = event.stream_sequence;
-        if !public_visible {
-            // Lite 与 PostgreSQL 保持同一共享发现流语义：过滤时推进游标并请求快照刷新。
-            refetch_required = true;
-            continue;
-        }
-        if event.validate().is_err() {
-            refetch_required = true;
-            continue;
-        }
-        events.push(event);
-    }
-
-    Ok(Some(page(previous_sequence, events, refetch_required, has_more)))
-}
-
 fn page(
     next_after: i64,
     events: Vec<PublicRealtimeEvent>,
@@ -297,27 +170,4 @@ fn storage_error(message: &str) -> ApplicationError {
 
 fn rows_len_is_more<T>(page_size: i64, rows: &[T]) -> bool {
     rows.len() > page_size as usize
-}
-
-#[cfg(feature = "sqlite")]
-fn uuid_blob(value: Uuid) -> Vec<u8> {
-    value.as_bytes().to_vec()
-}
-
-#[cfg(feature = "sqlite")]
-fn uuid_from_blob(bytes: Vec<u8>, label: &str) -> Result<Uuid, ApplicationError> {
-    Uuid::from_slice(&bytes).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-fn parse_timestamp(value: String) -> Result<DateTime<Utc>, ApplicationError> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(&value) {
-        return Ok(value.with_timezone(&Utc));
-    }
-    for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
-        if let Ok(value) = chrono::NaiveDateTime::parse_from_str(&value, format) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc));
-        }
-    }
-    Err(storage_error("Lite 实时事件时间格式无效"))
 }

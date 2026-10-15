@@ -3,7 +3,7 @@
 use super::control::{join_worker_control_task, worker_control_server_config};
 use super::*;
 
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+#[cfg(not(feature = "postgres"))]
 pub(super) async fn run_worker(
     config: &AppConfig,
     _tracing_health: Arc<dyn TracingHealthReader>,
@@ -11,7 +11,7 @@ pub(super) async fn run_worker(
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     if config.database_url().is_some() {
-        anyhow::bail!("worker 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
+        anyhow::bail!("worker 配置了数据库，但当前制品未编译 postgres feature");
     }
     run_worker_skeleton(config, metrics, shutdown).await?;
     Ok(())

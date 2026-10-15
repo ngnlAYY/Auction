@@ -150,9 +150,6 @@ pub enum ConfigError {
     #[error("invalid metrics configuration: {0}")]
     InvalidMetricsConfig(&'static str),
 
-    #[error("SQLite Lite requires worker concurrency = 1, got {concurrency}")]
-    LiteWorkerConcurrency { concurrency: u16 },
-
     #[error("invalid HTTP security configuration: {0}")]
     InvalidHttpSecurity(&'static str),
 

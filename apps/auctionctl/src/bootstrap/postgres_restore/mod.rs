@@ -73,11 +73,7 @@ pub(super) async fn execute(
     let store = DatabaseStore::connect(database_url)
         .await
         .context("connect database for PostgreSQL restore preflight")?;
-    let postgres = match store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => anyhow::bail!("postgres-restore 只支持 PostgreSQL 完整档"),
-    };
+    let DatabaseStore::Postgres(postgres) = store;
     let preflight = postgres
         .collect_recovery_preflight(confirmed_database_name)
         .await
@@ -116,13 +112,7 @@ pub(super) async fn execute(
     let restored_store = DatabaseStore::connect(database_url)
         .await
         .context("restore committed but reconnecting for schema verification failed")?;
-    let restored_postgres = match restored_store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => {
-            anyhow::bail!("restore committed but target backend no longer resolves to PostgreSQL")
-        }
-    };
+    let DatabaseStore::Postgres(restored_postgres) = restored_store;
     let restored = restored_postgres
         .collect_recovery_preflight(confirmed_database_name)
         .await

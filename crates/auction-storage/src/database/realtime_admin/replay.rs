@@ -1,7 +1,4 @@
-//! Realtime Admin replay 的模块装配与结果账本映射。
-//!
-//! PostgreSQL 与 SQLite 的事务实现分别位于子模块；本文件只保留两种后端共享的命令
-//! 账本结果映射，避免后端 SQL 和公共结果契约相互混杂。
+//! Admin realtime 重放命令校验与 PostgreSQL 事务适配。
 
 use auction_application::{ApplicationError, RealtimeReplayResult};
 use chrono::{DateTime, Utc};
@@ -12,14 +9,9 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 #[path = "replay/postgres.rs"]
 mod postgres;
-#[cfg(feature = "sqlite")]
-#[path = "replay/sqlite.rs"]
-mod sqlite;
 
 #[cfg(feature = "postgres")]
 pub(super) use postgres::replay_postgres;
-#[cfg(feature = "sqlite")]
-pub(super) use sqlite::replay_sqlite;
 
 const REPLAY_COMMAND_KIND: &str = "replay_realtime_failure";
 

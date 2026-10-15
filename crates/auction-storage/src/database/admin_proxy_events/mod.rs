@@ -1,8 +1,4 @@
-//! Admin 代理历史读取适配器。
-//!
-//! PostgreSQL 完整档把命令账本与追加式代理转换事实关联，兼容旧短命令名与 Auction-BF
-//! authorization 命令名，同时避免直接暴露两代不同的账本 payload。SQLite Lite 不声明这项
-//! 完整管理查询能力，因此不会通过猜测字段或拼装空数据伪造成功结果。
+//! 代理授权事件的安全投影；兼容历史 authorization 命令名，不直接暴露账本 payload。
 
 use super::DatabaseStore;
 #[cfg(feature = "postgres")]
@@ -26,10 +22,6 @@ impl AdminProxyEventReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Admin 代理历史仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

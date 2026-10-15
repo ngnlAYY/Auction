@@ -18,10 +18,6 @@ impl SettlementFulfillmentSentLookupReader for DatabaseStore {
                 Self::Postgres(store) => {
                     read_postgres(store, _obligation_uuid).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算 Sent 核对仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

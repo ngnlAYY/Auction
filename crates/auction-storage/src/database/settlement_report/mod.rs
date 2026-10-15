@@ -1,7 +1,4 @@
-//! PostgreSQL Admin 结算报告读取适配器。
-//!
-//! 报告只读取已经提交的拍卖结算事实、lot 结算金额和补偿账本；它不重新计算结算计划，
-//! 也不把 SQLite Lite 的空结果伪装成完整档能力。
+//! 从 PostgreSQL 结算事实链读取报告；摘要与 lot 明细保持同一快照，不重算历史结果。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, SettlementReport, SettlementReportReader,
@@ -28,10 +25,6 @@ impl SettlementReportReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres_report(store, auction_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算报告仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }

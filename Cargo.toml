@@ -1,5 +1,6 @@
 [workspace]
-resolver = "2"
+# 必填：按各包 MSRV 优先解析兼容版本；最终仍由 --locked 与独立 MSRV 门禁约束。
+resolver = "3"
 members = [
     "apps/admin-api",
     "apps/auctionctl",
@@ -72,16 +73,16 @@ dioxus = { version = "0.7.10", default-features = false, features = [
     "web",
 ] }
 # 原生 i18n：Project Fluent 后端，locale 资源在编译期内嵌。
-dioxus-i18n = "0.5.1"
+dioxus-i18n = "0.6.0"
 unic-langid = { version = "0.9.6", features = ["macros"] }
 # 共享层只用 HTTP；JSON 和 WebSocket 由实际调用的 surface 显式启用。
 gloo-net = { version = "0.7.0", default-features = false, features = ["http"] }
 gloo-timers = { version = "0.4.0", features = ["futures"] }
-js-sys = "0.3.104"
+js-sys = "0.3.106"
 futures-util = "0.3.34"
 async-stream = "0.3.6"
-hyper = { version = "1.11.0", features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1.20", features = [
+hyper = { version = "1.12.0", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1.21", features = [
     "server-auto",
     "server-graceful",
     "service",
@@ -89,20 +90,20 @@ hyper-util = { version = "0.1.20", features = [
 ] }
 httpdate = "1.0.3"
 http-body-util = "0.1.5"
-ipnet = "2.12.0"
+ipnet = "2.12.2"
 mime = "0.3.17"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
 # 只使用 HTML/CSS 库 API 与解析错误，不引入默认 CLI 的 getopts 依赖。
 scraper = { version = "0.27.0", default-features = false, features = ["errors"] }
-rust-embed = { version = "8.12.0", features = ["mime-guess"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rust-embed = { version = "8.13.0", features = ["mime-guess"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5.8"
 # 上游缺陷补齐：dioxus-web 0.7.10 的 src/history.rs 无条件调用 `Window::location()`，
 # 但它的 web-sys 依赖没有声明 `Location` feature，只能靠依赖图中其他 crate 顺带启用。
 # 这里显式启用该 feature；升级 Dioxus 时应复查上游是否已修，届时可移除对应项。
 # AbortController/AbortSignal 供 Public 浏览器请求恢复旧版 10 秒取消边界；Request/RequestInit
 # 允许共用 GET 边界绕过 gloo-net 0.6.0 给已有 query 追加空参数的缺陷。
-web-sys = { version = "0.3.104", features = [
+web-sys = { version = "0.3.106", features = [
     "AbortController",
     "AbortSignal",
     "History",
@@ -110,7 +111,7 @@ web-sys = { version = "0.3.104", features = [
     "Request",
     "RequestInit",
 ] }
-wasm-bindgen = "0.2.127"
+wasm-bindgen = "0.2.129"
 
 # 持久化基础能力。具体数据库驱动由 auction-storage 的窄发布 feature 引入。
 sqlx = { version = "0.9.0", default-features = false, features = [
@@ -123,26 +124,29 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 ] }
 
 # Redis 只由 cache-redis feature 引入；关闭默认 feature，避免附带脚本、流和大数支持。
-redis = { version = "1.6.0", default-features = false }
+redis = { version = "1.7.1", default-features = false }
 
 # 数据与错误
 anyhow = "1.0.104"
-base64 = "0.22.1"
-libc = "0.2.189"
+# 只使用现有 GeneralPurpose 引擎；不为未调用的 SIMD 引擎开启默认 simd-unsafe。
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+libc = "0.2.190"
 # `now` 提供 `Utc::now()`；`clock` 还用于恢复旧版标准 cron 的进程本地时区语义。
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "now", "serde", "std"] }
 chrono-tz = "0.10.4"
-croner = { version = "3.0.1", default-features = false }
+# 调度边界先规范化旧版五字段语法，仅启用现有 chrono 后端，不引入 jiff。
+croner = { version = "4.0.1", default-features = false, features = ["chrono"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-# HMAC 0.12 与现有 SHA-256 0.10 共用 digest 类型，不为会话修复升级整个哈希依赖图。
-hmac = "0.12.1"
-sha2 = "0.10.9"
+serde_json = "1.0.154"
+# HMAC/SHA-256 配套使用 digest 0.11；不改变摘要算法、输入编码或会话域分隔符。
+hmac = "0.13.0"
+sha2 = "0.11.1"
 ring = "0.17.14"
 subtle = "2.6.1"
-thiserror = "2.0.20"
-toml = "1.1.4"
-uuid = { version = "1.24.1", features = ["js", "serde", "v4", "v5"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+# v5 仅由实际生成确定性标识的 owner 启用，Public/Shared 不承担 SHA-1 生成依赖。
+uuid = { version = "1.28.0", features = ["js", "serde", "v4"] }
 
 # CLI 与可观测性
 clap = { version = "4.6.7", features = ["derive"] }
@@ -164,9 +168,26 @@ tower = { version = "0.5.3", features = ["util"] }
 # 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。
 prometheus = { version = "0.14.0", default-features = false, features = ["process"] }
 
-[profile.wasm-release]
-inherits = "release"
-opt-level = "z"
-lto = true
+[profile.release]
+# 可选：后端运行性能优先，保持通用目标指令集；不隐式采用构建机 native CPU。
+opt-level = 3
+# 可选：跨 crate 完整优化，增加链接时间和峰值内存；收益须由代表性负载测量。
+lto = "fat"
+# 可选：单代码生成单元扩大优化范围，牺牲编译并行度。
 codegen-units = 1
+# 可选：保留 Tokio 任务 panic 隔离和 Drop/drain 语义，不为体积改成进程 abort。
+panic = "unwind"
+# 可选：发布禁用增量编译，固定优化条件。
+incremental = false
+
+[profile.wasm-release]
+# 必填：浏览器保持独立体积优化档，不继承后端 CPU 定向参数。
+inherits = "release"
+# 可选：以下载、解析体积优先，不宣称浏览器计算吞吐最优。
+opt-level = "z"
+# 可选：保留完整跨 crate 优化。
+lto = "fat"
+# 可选：单代码生成单元。
+codegen-units = 1
+# 可选：CSR WASM 不依赖后端 panic 展开语义。
 panic = "abort"

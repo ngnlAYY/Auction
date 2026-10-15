@@ -2,7 +2,7 @@
 
 use super::super::*;
 
-/// 读取 PostgreSQL 完整档的结算报告；Lite 档由应用端口明确返回能力缺失。
+/// 读取 PostgreSQL 权威结算报告。
 pub(crate) async fn admin_settlement_report(
     State(state): State<AdminApiState>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,

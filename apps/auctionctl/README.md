@@ -5,6 +5,9 @@
 配置诊断、迁移、systemd 总控、备份、恢复及显式维护命令。参数以
 [CLI 定义](src/bootstrap/runtime/cli.rs)和 `auctionctl <command> --help` 为准；命令示例须替换为实际路径、目标和稳定 UUID。
 
+仅支持 Linux x86_64 原生目标；装配入口在编译期拒绝其他 OS/架构。浏览器 WASM 不受此限制，
+默认发布 ABI 与构建边界见[开发指南](../../docs/development.md#工具与依赖来源)。
+
 ## 源码入口
 
 | 入口 | 职责 |
@@ -91,7 +94,6 @@ TCP/Unix listener 冲突、Admin/Worker control socket、三组数据密钥和�
 目标比较复用 SQLx 解析，允许不同数据库账号；PostgreSQL 显式提供 host、非零 port 和库名，
 允许受支持的 host/hostaddr/port/dbname 覆盖及 Unix socket，拒绝未知参数和 `options`。
 DNS 别名不解析，应统一规范主机名；IPv6 URI 方括号在实际 TCP/libpq host 中去除。
-SQLite 必须绝对本地磁盘路径，按实际文件或实际父目录比较，拒绝相对路径、内存库和自定义 VFS。
 具体文件规则见[配置手册](../../ops/config/README.md)。
 
 ## Systemd 总控
@@ -139,9 +141,8 @@ AUCTION_CONFIG_FILE=/etc/auction/public.toml /opt/auction/bin/auctionctl migrate
 
 ## Cargo feature
 
-默认不带驱动。`postgres` / `sqlite` 启用对应迁移树；配置了数据库但未编译驱动时，迁移/启动在
+默认不带驱动。`postgres` 启用数据库驱动与迁移；配置了数据库但未编译驱动时，迁移/启动在
 启动 unit 前明确失败。`cache-redis` 只在规则导入需要 Redis 失效时使用。
-SQLite 只执行 Lite/共有迁移，完整档维护命令不能在 Lite 上使用。
 
 ## 凭据与规则导入
 

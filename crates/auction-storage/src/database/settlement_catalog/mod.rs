@@ -21,10 +21,6 @@ impl SettlementCatalogReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, &request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Admin 结算报表目录仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

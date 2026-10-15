@@ -34,15 +34,7 @@ impl DatabaseStore {
         &self,
         input: MailDisplayBackfillInput,
     ) -> Result<MailDisplayBackfillResult, ApplicationError> {
-        let store = match self {
-            DatabaseStore::Postgres(store) => store,
-            #[cfg(feature = "sqlite")]
-            DatabaseStore::Sqlite(_) => {
-                return Err(ApplicationError::CapabilityUnavailable(
-                    "MoogleMail 展示回填仅支持 PostgreSQL 完整档",
-                ));
-            }
-        };
+        let DatabaseStore::Postgres(store) = self;
         if input.evidence_id.is_nil()
             || input.content_digest == [0; 32]
             || !valid_header_text(&input.mailbox_key, 256)

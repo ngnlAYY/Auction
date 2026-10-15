@@ -28,15 +28,12 @@ pub const METRICS_ROUTE: &str = "/metrics";
 pub enum PoolMetricsBackend {
     /// PostgreSQL 完整档连接池。
     Postgres,
-    /// SQLite Lite 档连接池。
-    Sqlite,
 }
 
 impl PoolMetricsBackend {
     pub(super) const fn metric_prefix(self) -> &'static str {
         match self {
             Self::Postgres => "postgres",
-            Self::Sqlite => "sqlite",
         }
     }
 }

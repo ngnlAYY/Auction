@@ -5,7 +5,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
-use std::{fs, sync::Arc};
+use std::{fmt::Write as _, fs, sync::Arc};
 
 #[cfg(feature = "postgres")]
 use anyhow::Context;
@@ -232,7 +232,11 @@ fn load_rules_source(directory: &Path, locale: &str) -> anyhow::Result<RulesSour
         AdminRulesCandidate { locale: locale.to_owned(), title: title.clone(), markdown }
             .normalize();
     candidate.validate().with_context(|| format!("validate rules file {locale}.md"))?;
-    let sha256 = format!("{:x}", Sha256::digest(candidate.markdown.as_bytes()));
+    let mut sha256 = String::with_capacity(64);
+    // 保持导入回执原有的 64 位小写摘要；只适配 digest 0.11 的输出数组类型。
+    for byte in Sha256::digest(candidate.markdown.as_bytes()) {
+        let _ = write!(sha256, "{byte:02x}");
+    }
     Ok(RulesSource {
         locale: candidate.locale,
         title: candidate.title,

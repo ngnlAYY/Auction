@@ -15,17 +15,15 @@ serde_json.workspace = true
 serde.workspace = true
 sha2.workspace = true
 futures-util.workspace = true
-libc.workspace = true
 sqlx.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v5"] }
 url.workspace = true
 
 [features]
 default = []
 postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
-sqlite = ["sqlx/sqlite"]
 
 [dev-dependencies]
 tokio.workspace = true

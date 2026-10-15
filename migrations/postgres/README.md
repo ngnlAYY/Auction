@@ -87,7 +87,7 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 canonical PostgreSQL v28 使用[专用接管手册](../../ops/deploy/LEGACY_V28_ADOPTION.md)与 `legacy_v28` bridge：
 精确预检、可验证备份、零外部连接及显式确认后建立等价 SQLx 基线，再应用后续迁移，不能伪装为普通追加文件。
 
-允许 PostgreSQL 专用 SQL、索引与锁；[SQLite Lite](../sqlite/README.md) 只需维护声明的子集，共有对象同名同义，不要求树形/序号对等。
+SQL、索引与锁均按 PostgreSQL 契约维护。
 
 ## 连续领先时间修复
 

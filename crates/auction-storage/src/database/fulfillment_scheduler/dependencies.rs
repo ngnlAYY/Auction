@@ -1,7 +1,4 @@
-//! 结算履约执行前的当前 owner 依赖读取。
-//!
-//! PostgreSQL 读取只返回应用端口规定的最小快照；任何缺行、数据库错误或损坏字段都必须
-//! 以不可用/不匹配错误失败关闭。SQLite Lite 没有这些完整履约依赖，明确返回能力缺失。
+//! 履约调度的权威依赖读取；依赖不可用或不匹配时失败关闭。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, SettlementFulfillmentEquipmentSecret,
@@ -27,10 +24,6 @@ impl SettlementFulfillmentRecipientReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => read_recipient_postgres(store.pool(), _user_id).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算履约收件人读取仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -47,10 +40,6 @@ impl SettlementFulfillmentEquipmentSecretReader for DatabaseStore {
                 Self::Postgres(store) => {
                     read_equipment_secret_postgres(store.pool(), _equipment_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算履约装备密钥读取仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

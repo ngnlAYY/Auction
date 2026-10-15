@@ -4,8 +4,7 @@ use super::*;
 
 /// 持久化 Worker 的端口与运行参数。
 ///
-/// PostgreSQL 完整档可以同时提供结算与履约端口；SQLite Lite 将这些完整档端口保持为 `None`，
-/// 由装配根显式表达能力差异。
+/// 装配根显式注入结算与履约端口，未配置的任务不可作为成功执行。
 pub struct PersistentWorker<C> {
     pub schedule: Arc<dyn ScheduledRoundStore>,
     /// 周计划每轮 bootstrap 前读取的数据库业务世界权威状态。

@@ -30,7 +30,6 @@
 ## 职责与实现边界
 
 Worker 决定何时调用应用命令、如何按持久化状态重试；领域/应用层拥有业务决定，存储层拥有 SQL 与锁。
-PostgreSQL 提供完整任务链，SQLite 仅运行已登记 Lite 能力且并发固定为 1。
 
 ## 源码布局
 
@@ -42,7 +41,7 @@ PostgreSQL 提供完整任务链，SQLite 仅运行已登记 Lite 能力且并�
 
 | 循环 | 编排要求 |
 | --- | --- |
-| Auction | 生命周期、slow due、结算依次执行，各阶段失败不跳过后续阶段；Lite 不启用结算 |
+| Auction | 生命周期、slow due、结算依次执行，各阶段失败不跳过后续阶段 |
 | Fulfillment | 按可用并发槽领取，持久化 prepared/enqueued 与 delivery 关联，不提前占满租约 |
 | Recovery | 保持 case → return → action → relist → refund 顺序，各阶段独立收口 |
 | Delivery | claim 后先查 transport 可用性，再进入 sending；续租、最终写回和未知结果均受 fencing 保护 |

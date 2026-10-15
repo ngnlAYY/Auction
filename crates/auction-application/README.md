@@ -68,7 +68,7 @@ Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplat
 
 [ports/admin](src/ports/admin) 与 [services/admin](src/services/admin) 按拍卖、lot、规则、Users、凭据、runtime 等 owner 分工。
 命令携带幂等身份与版本/指纹门禁；数据库业务世界开关与 runtime 邮箱开关分开建模。
-各项 PostgreSQL/Lite 能力见[能力矩阵](../../docs/architecture.md#部署档位与能力)。
+已实现能力见[能力矩阵](../../docs/architecture.md#部署档位与能力)。
 
 Runtime 文件更新和恢复从开始到收口持有 `WorkflowGuard`；文件发布后只能向前恢复账本，
 结果未知不得恢复旧文件。候选纯校验交给文件适配器，cron 语法仍由配置层拥有。

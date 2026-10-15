@@ -10,32 +10,14 @@ use crate::database::TrackedPool;
 
 use super::mapping::{map_storage_error, repository_error_owned};
 
-#[cfg(feature = "sqlite")]
-use super::mapping::{sqlite_timestamp, uuid_blob};
-
 #[cfg(feature = "postgres")]
 use sqlx::Postgres;
-#[cfg(feature = "sqlite")]
-use sqlx::{Sqlite, SqliteConnection};
 
 #[cfg(feature = "postgres")]
 pub(super) async fn database_now_postgres(
     pool: &TrackedPool<Postgres>,
 ) -> Result<DateTime<Utc>, auction_application::RepositoryError> {
     sqlx::query_scalar("SELECT CURRENT_TIMESTAMP").fetch_one(pool).await.map_err(map_storage_error)
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) async fn database_now_sqlite(
-    pool: &TrackedPool<Sqlite>,
-) -> Result<DateTime<Utc>, auction_application::RepositoryError> {
-    let value: String = sqlx::query_scalar("SELECT CURRENT_TIMESTAMP")
-        .fetch_one(pool)
-        .await
-        .map_err(map_storage_error)?;
-    DateTime::parse_from_str(&format!("{value} UTC"), "%Y-%m-%d %H:%M:%S %Z")
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| repository_error_owned("SQLite 数据库时间格式无效"))
 }
 
 #[cfg(feature = "postgres")]
@@ -288,203 +270,6 @@ async fn append_audit_postgres(
     Ok(())
 }
 
-#[cfg(feature = "sqlite")]
-pub(super) async fn ensure_sqlite(
-    pool: &TrackedPool<Sqlite>,
-    request: ScheduledRoundBootstrap,
-) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
-    validate_request(&request)?;
-    let connection = pool.acquire().await.map_err(map_storage_error)?;
-    // 调度超时取消也必须释放写锁；不能用未受 SQLx 跟踪的原始 BEGIN。
-    let mut transaction =
-        sqlx::Transaction::begin(connection, Some(sqlx::SqlStr::from_static("BEGIN IMMEDIATE")))
-            .await
-            .map_err(map_storage_error)?;
-    let result = ensure_sqlite_inner(&mut transaction, request).await;
-    match result {
-        Ok(result) => {
-            transaction.commit().await.map_err(map_storage_error)?;
-            Ok(result)
-        }
-        Err(error) => {
-            let _ = transaction.rollback().await;
-            Err(error)
-        }
-    }
-}
-
-#[cfg(feature = "sqlite")]
-async fn ensure_sqlite_inner(
-    connection: &mut SqliteConnection,
-    request: ScheduledRoundBootstrap,
-) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
-    let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM worlds WHERE id = ?")
-        .bind(&request.world_id)
-        .fetch_optional(&mut *connection)
-        .await
-        .map_err(map_storage_error)?;
-    if enabled != Some(1) {
-        return Err(repository_error_owned(if enabled.is_none() {
-            "周计划 world 不存在"
-        } else {
-            "周计划 world 已禁用"
-        }));
-    }
-    if let Some(row) = sqlx::query(
-        "SELECT id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-                scheduled_end_at, create_command_id, preview_completed_at, open_completed_at,
-                schedule_snapshot
-         FROM scheduled_rounds WHERE world_id = ? AND local_week = ?",
-    )
-    .bind(&request.world_id)
-    .bind(request.local_week.format("%Y-%m-%d").to_string())
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(map_storage_error)?
-    {
-        let result = snapshot_sqlite(&row)?;
-        verify_existing(&result, &request)?;
-        if let Some(source) =
-            row.try_get::<Option<String>, _>("schedule_snapshot").map_err(map_storage_error)?
-        {
-            let source: auction_application::AuctionScheduleSource = serde_json::from_str(&source)
-                .map_err(|_| repository_error_owned("周计划来源快照无效"))?;
-            if source != request.schedule_source {
-                return Err(repository_error_owned("周计划来源快照冲突"));
-            }
-        }
-        if result.active {
-            let policy_snapshot: String =
-                sqlx::query_scalar("SELECT policy_snapshot FROM auctions WHERE id = ?")
-                    .bind(uuid_blob(request.auction_id.as_uuid()))
-                    .fetch_one(&mut *connection)
-                    .await
-                    .map_err(map_storage_error)?;
-            let policy_snapshot: serde_json::Value = serde_json::from_str(&policy_snapshot)
-                .map_err(|_| repository_error_owned("SQLite 周计划策略快照无效"))?;
-            if policy_snapshot != request.policy.snapshot(request.scheduled_end_at) {
-                return Err(repository_error_owned("周计划策略快照冲突"));
-            }
-        }
-        return Ok(result);
-    }
-    let db_now = sqlite_now(connection).await?;
-    let missed = request.scheduled_end_at <= db_now;
-    let sequence: i64 = if missed {
-        0
-    } else {
-        sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) + 1 FROM auctions WHERE world_id = ?")
-            .bind(&request.world_id)
-            .fetch_one(&mut *connection)
-            .await
-            .map_err(map_storage_error)?
-    };
-    let policy_snapshot = request.policy.snapshot(request.scheduled_end_at).to_string();
-    let rules =
-        request.policy.auction_rules().map_err(|_| repository_error_owned("周计划策略无效"))?;
-    if !missed {
-        sqlx::query(
-            "INSERT INTO auctions
-                (id, world_id, sequence, title, status, default_start_price,
-                 soft_close_window_seconds, soft_close_extension_seconds, cancel_cutoff_seconds,
-                 proxy_slow_interval_seconds, policy_snapshot, preview_scheduled_at,
-                 scheduled_open_at, state_version, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
-        )
-        .bind(uuid_blob(request.auction_id.as_uuid()))
-        .bind(&request.world_id)
-        .bind(sequence)
-        .bind(format!("{} #{}", request.world_id, sequence))
-        .bind(rules.default_start_price.value())
-        .bind(rules.soft_close_window.num_seconds())
-        .bind(rules.soft_close_extension.num_seconds())
-        .bind(rules.cancel_cutoff.num_seconds())
-        .bind(rules.proxy_slow_interval.num_seconds())
-        .bind(policy_snapshot)
-        .bind(sqlite_timestamp(request.preview_due_at))
-        .bind(sqlite_timestamp(request.open_due_at))
-        // Lite 同样保留尚未开拍的不变量，不提前写 scheduled_end_at。
-        .bind(sqlite_timestamp(db_now))
-        .bind(sqlite_timestamp(db_now))
-        .execute(&mut *connection)
-        .await
-        .map_err(map_storage_error)?;
-    }
-    sqlx::query(
-        "INSERT INTO auction_commands
-            (command_id, command_kind, aggregate_id, request_hash, result_code, result_payload, created_at)
-         VALUES (?, 'scheduled_round_create', ?, ?, 'accepted', ?, ?)",
-    )
-    .bind(uuid_blob(request.create_command_id.as_uuid()))
-    .bind(uuid_blob(request.round_id))
-    .bind(request.request_hash.as_bytes().to_vec())
-    .bind(json!({"round_id": request.round_id, "missed": missed}).to_string())
-    .bind(sqlite_timestamp(db_now))
-    .execute(&mut *connection)
-    .await
-    .map_err(map_storage_error)?;
-    sqlx::query(
-        "INSERT INTO scheduled_rounds
-            (id, world_id, local_week, auction_id, status, preview_due_at, open_due_at,
-             scheduled_end_at, create_command_id, state_version, created_at, updated_at, schedule_snapshot)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
-    )
-    .bind(uuid_blob(request.round_id))
-    .bind(&request.world_id)
-    .bind(request.local_week.format("%Y-%m-%d").to_string())
-    .bind((!missed).then(|| uuid_blob(request.auction_id.as_uuid())))
-    .bind(if missed { "missed" } else { "active" })
-    .bind(sqlite_timestamp(request.preview_due_at))
-    .bind(sqlite_timestamp(request.open_due_at))
-    .bind(sqlite_timestamp(request.scheduled_end_at))
-    .bind(uuid_blob(request.create_command_id.as_uuid()))
-    .bind(sqlite_timestamp(db_now))
-    .bind(sqlite_timestamp(db_now))
-    .bind(serde_json::to_string(&request.schedule_source).map_err(|_| repository_error_owned("周计划来源无法编码"))?)
-    .execute(&mut *connection)
-    .await
-    .map_err(map_storage_error)?;
-    sqlx::query(
-        "INSERT INTO audit_records
-            (id, occurred_at, actor_type, actor_id, action, entity_type, entity_id, result, source, metadata)
-         VALUES (?, ?, 'worker', 'auction-worker', 'auction.schedule_round',
-                 'scheduled_round', ?, 'success', 'worker', ?)",
-    )
-    .bind(uuid_blob(Uuid::new_v4()))
-    .bind(sqlite_timestamp(db_now))
-    .bind(request.round_id.to_string())
-    .bind(json!({"world_id": request.world_id, "local_week": request.local_week, "missed": missed}).to_string())
-    .execute(&mut *connection)
-    .await
-    .map_err(map_storage_error)?;
-    Ok(ScheduledRoundSnapshot {
-        round_id: request.round_id,
-        auction_id: (!missed).then_some(request.auction_id),
-        active: !missed,
-        world_id: request.world_id,
-        local_week: request.local_week,
-        preview_due_at: request.preview_due_at,
-        open_due_at: request.open_due_at,
-        scheduled_end_at: request.scheduled_end_at,
-        create_command_id: request.create_command_id.as_uuid().to_owned(),
-        preview_completed_at: None,
-        open_completed_at: None,
-    })
-}
-
-#[cfg(feature = "sqlite")]
-async fn sqlite_now(
-    connection: &mut SqliteConnection,
-) -> Result<DateTime<Utc>, auction_application::RepositoryError> {
-    let value: String = sqlx::query_scalar("SELECT CURRENT_TIMESTAMP")
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(map_storage_error)?;
-    DateTime::parse_from_str(&format!("{value} UTC"), "%Y-%m-%d %H:%M:%S %Z")
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| repository_error_owned("SQLite 数据库时间格式无效"))
-}
-
 fn validate_request(
     request: &ScheduledRoundBootstrap,
 ) -> Result<(), auction_application::RepositoryError> {
@@ -554,76 +339,10 @@ pub(super) fn snapshot_postgres(
     })
 }
 
-#[cfg(feature = "sqlite")]
-pub(super) fn snapshot_sqlite(
-    row: &sqlx::sqlite::SqliteRow,
-) -> Result<ScheduledRoundSnapshot, auction_application::RepositoryError> {
-    let round_id = Uuid::from_slice(&row.try_get::<Vec<u8>, _>("id").map_err(map_storage_error)?)
-        .map_err(|_| repository_error_owned("周计划 round UUID 无效"))?;
-    let local_week = chrono::NaiveDate::parse_from_str(
-        &row.try_get::<String, _>("local_week").map_err(map_storage_error)?,
-        "%Y-%m-%d",
-    )
-    .map_err(|_| repository_error_owned("周计划 local_week 无效"))?;
-    let auction_id = row
-        .try_get::<Option<Vec<u8>>, _>("auction_id")
-        .map_err(map_storage_error)?
-        .map(|value| {
-            Uuid::from_slice(&value)
-                .map(auction_domain::AuctionId::from_uuid)
-                .map_err(|_| repository_error_owned("周计划 auction UUID 无效"))
-        })
-        .transpose()?;
-    let active = scheduled_round_active(row.try_get("status").map_err(map_storage_error)?)?;
-    Ok(ScheduledRoundSnapshot {
-        round_id,
-        auction_id,
-        active,
-        world_id: row.try_get("world_id").map_err(map_storage_error)?,
-        local_week,
-        preview_due_at: parse_required_sqlite_timestamp(
-            &row.try_get::<String, _>("preview_due_at").map_err(map_storage_error)?,
-        )?,
-        open_due_at: parse_required_sqlite_timestamp(
-            &row.try_get::<String, _>("open_due_at").map_err(map_storage_error)?,
-        )?,
-        scheduled_end_at: parse_required_sqlite_timestamp(
-            &row.try_get::<String, _>("scheduled_end_at").map_err(map_storage_error)?,
-        )?,
-        create_command_id: Uuid::from_slice(
-            &row.try_get::<Vec<u8>, _>("create_command_id").map_err(map_storage_error)?,
-        )
-        .map_err(|_| repository_error_owned("周计划 create command UUID 无效"))?,
-        preview_completed_at: row
-            .try_get::<Option<String>, _>("preview_completed_at")
-            .map_err(map_storage_error)?
-            .and_then(|value| parse_sqlite_timestamp(&value)),
-        open_completed_at: row
-            .try_get::<Option<String>, _>("open_completed_at")
-            .map_err(map_storage_error)?
-            .and_then(|value| parse_sqlite_timestamp(&value)),
-    })
-}
-
 fn scheduled_round_active(status: String) -> Result<bool, auction_application::RepositoryError> {
     match status.as_str() {
         "active" => Ok(true),
         "missed" => Ok(false),
         _ => Err(repository_error_owned("周计划轮次状态无效")),
     }
-}
-
-#[cfg(feature = "sqlite")]
-fn parse_sqlite_timestamp(value: &str) -> Option<DateTime<Utc>> {
-    ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"]
-        .iter()
-        .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
-        .map(|value| value.and_utc())
-}
-
-#[cfg(feature = "sqlite")]
-fn parse_required_sqlite_timestamp(
-    value: &str,
-) -> Result<DateTime<Utc>, auction_application::RepositoryError> {
-    parse_sqlite_timestamp(value).ok_or_else(|| repository_error_owned("SQLite 周计划时间格式无效"))
 }

@@ -22,10 +22,6 @@ impl ScheduledRoundStore for DatabaseStore {
                 Self::Postgres(store) => bootstrap::database_now_postgres(store.pool())
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => bootstrap::database_now_sqlite(store.pool())
-                    .await
-                    .map_err(ApplicationError::from),
             }
         })
     }
@@ -44,10 +40,6 @@ impl ScheduledRoundStore for DatabaseStore {
                 Self::Postgres(store) => lookup::postgres(store.pool(), &world_id, local_week)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => lookup::sqlite(store.pool(), &world_id, local_week)
-                    .await
-                    .map_err(ApplicationError::from),
             }
         })
     }
@@ -61,10 +53,6 @@ impl ScheduledRoundStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => bootstrap::ensure_postgres(store.pool(), request)
-                    .await
-                    .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => bootstrap::ensure_sqlite(store.pool(), request)
                     .await
                     .map_err(ApplicationError::from),
             }
@@ -89,12 +77,6 @@ impl ScheduledRoundStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => {
-                    claim::sqlite(store.pool(), &worker_id, now, lease_until, limit)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
             }
         })
     }
@@ -109,12 +91,6 @@ impl ScheduledRoundStore for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => {
                     resolution::complete_postgres(store.pool(), &claim, completed_at)
-                        .await
-                        .map_err(ApplicationError::from)
-                }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => {
-                    resolution::complete_sqlite(store.pool(), &claim, completed_at)
                         .await
                         .map_err(ApplicationError::from)
                 }
@@ -138,16 +114,6 @@ impl ScheduledRoundStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => resolution::fail_postgres(
-                    store.pool(),
-                    &claim,
-                    retry_at,
-                    &failure_code,
-                    &safe_detail,
-                )
-                .await
-                .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => resolution::fail_sqlite(
                     store.pool(),
                     &claim,
                     retry_at,

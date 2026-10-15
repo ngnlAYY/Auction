@@ -146,6 +146,8 @@ fn calendar_kind(
         }
         canonical.push_str(&parse_field(field, field_bounds)?.canonical(field_bounds));
     }
+    // croner 4 默认拒绝单值步长；这里仅传入既有解析器展开后的数字列表或 *，
+    // 保留旧版 5/5、星期/月份别名及 wildcard 的接受边界，不放宽底层解析器。
     let cron =
         canonical.parse::<Cron>().map_err(|_| StandardCronScheduleError::InvalidExpression)?;
     Ok(StandardCronKind::Calendar { cron: Box::new(cron), timezone })

@@ -13,8 +13,6 @@ impl WorldReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => list_sqlite(store).await,
             }
         })
     }
@@ -38,29 +36,6 @@ async fn list_postgres(
             Ok(WorldSnapshot {
                 id: row.try_get("id").map_err(|_| storage_error())?,
                 enabled: row.try_get("enabled").map_err(|_| storage_error())?,
-                availability: row.try_get("availability").map_err(|_| storage_error())?,
-                policy_revision: row.try_get("policy_revision").map_err(|_| storage_error())?,
-            })
-        })
-        .collect()
-}
-
-#[cfg(feature = "sqlite")]
-async fn list_sqlite(store: &super::SqliteStore) -> Result<Vec<WorldSnapshot>, ApplicationError> {
-    let rows = sqlx::query(
-        "SELECT id, enabled, availability, policy_revision
-         FROM worlds
-         ORDER BY id",
-    )
-    .fetch_all(store.pool())
-    .await
-    .map_err(|_| storage_error())?;
-
-    rows.into_iter()
-        .map(|row| {
-            Ok(WorldSnapshot {
-                id: row.try_get("id").map_err(|_| storage_error())?,
-                enabled: row.try_get::<i64, _>("enabled").map_err(|_| storage_error())? != 0,
                 availability: row.try_get("availability").map_err(|_| storage_error())?,
                 policy_revision: row.try_get("policy_revision").map_err(|_| storage_error())?,
             })

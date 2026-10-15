@@ -53,10 +53,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => {
                     record_return_postgres(store.pool(), now).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery 退回邮件 Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -74,10 +70,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => {
                     advance_postgres(store.pool(), now).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -103,10 +95,6 @@ impl RecoveryWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -143,10 +131,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -183,10 +167,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -228,10 +208,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -257,10 +233,6 @@ impl RecoveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => observe_action_postgres(store.pool(), &claim, observed_at)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -287,10 +259,6 @@ impl RecoveryWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -315,10 +283,6 @@ impl RecoveryWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery action Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

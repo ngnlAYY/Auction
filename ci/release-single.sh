@@ -52,7 +52,6 @@ release_check() {
 	build_variant api-only "${api_build_root:?}" "${api_artifact_root:?}" postgres
 	build_variant embedded "${embedded_build_root:?}" "${embedded_artifact_root:?}" \
 		'postgres,auction-public-api/web-embed,auction-admin-api/web-embed'
-	verify_artifacts
 	if [[ "$single" == true ]]; then build_single; fi
 	package_release "$@"
 }

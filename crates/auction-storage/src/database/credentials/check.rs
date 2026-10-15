@@ -45,8 +45,6 @@ impl AdminCredentialCheckStore for DatabaseStore {
                         .map_err(admin_error)?,
                     })
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(super::capability_unavailable()),
             }
         })
     }

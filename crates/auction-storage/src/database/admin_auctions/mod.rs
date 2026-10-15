@@ -1,7 +1,4 @@
-//! Admin 拍卖列表读取适配器。
-//!
-//! A03 的 GET 读取 PostgreSQL 完整档生命周期快照和 lot 数量。创建拍卖 POST 由独立命令
-//! owner 负责；SQLite Lite 因缺少完整 Admin 生命周期投影明确返回能力缺失。
+//! Admin 拍卖列表与生命周期只读投影；查询和行映射由 PostgreSQL owner 负责。
 
 #[cfg(feature = "postgres")]
 use auction_application::AdminAuctionSummary;
@@ -24,10 +21,6 @@ impl AdminAuctionReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, &request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Admin 拍卖列表仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

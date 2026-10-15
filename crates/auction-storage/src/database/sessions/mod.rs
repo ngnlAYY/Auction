@@ -1,7 +1,4 @@
-//! sessions owner 的会话持久化适配器装配。
-//!
-//! Admin 与 Public 会话分别由子模块持有；共享的 Lite 时间/UUID 映射和存储错误位于
-//! `common.rs`，Redis 不参与会话真值。
+//! Admin 与 Public 会话分别由子模块持有；common 只提供存储错误映射。
 
 use auction_application::{
     AdminSessionIdentity, AdminSessionRecord, AdminSessionStore, ApplicationFuture,
@@ -21,8 +18,6 @@ impl AdminSessionStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => admin::revoke_all_postgres(store, now).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => admin::revoke_all_sqlite(store, now).await,
             }
         })
     }
@@ -35,8 +30,6 @@ impl AdminSessionStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => admin::create_postgres(store, record).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => admin::create_sqlite(store, record).await,
             }
         })
     }
@@ -54,10 +47,6 @@ impl AdminSessionStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     admin::touch_postgres(store, token_hash, csrf_hash, now, next_expires_at).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    admin::touch_sqlite(store, token_hash, csrf_hash, now, next_expires_at).await
-                }
             }
         })
     }
@@ -69,8 +58,6 @@ impl AdminSessionStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     admin::revoke_postgres(store, token_hash, now).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => admin::revoke_sqlite(store, token_hash, now).await,
             }
         })
     }
@@ -88,10 +75,6 @@ impl PublicSessionStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     public::inspect_postgres(store, token_hash, now).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    public::inspect_sqlite(store, token_hash, now).await
-                }
             }
         })
     }
@@ -106,10 +89,6 @@ impl PublicSessionStore for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     public::create_postgres(store, record, max_public_sessions).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    public::create_sqlite(store, record, max_public_sessions).await
                 }
             }
         })
@@ -127,10 +106,6 @@ impl PublicSessionStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     public::touch_postgres(store, token_hash, now, next_expires_at).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    public::touch_sqlite(store, token_hash, now, next_expires_at).await
-                }
             }
         })
     }
@@ -142,8 +117,6 @@ impl PublicSessionStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     public::revoke_postgres(store, token_hash, now).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => public::revoke_sqlite(store, token_hash, now).await,
             }
         })
     }

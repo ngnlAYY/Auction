@@ -1,9 +1,9 @@
 //! E-Hentai 论坛同步与回帖运行时装配。
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::*;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) async fn configure_forum(
     config: &AppConfig,
     store: Arc<DatabaseStore>,

@@ -35,7 +35,7 @@ mod dependencies;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reconcile;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod sent_lookup;
 
 #[cfg(feature = "postgres")]
@@ -74,10 +74,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -98,10 +94,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                     prepare_postgres(store.pool(), &claim, &preparation, _prepared_at)
                         .await
                         .map_err(ApplicationError::from)
-                }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
                 }
             }
         })
@@ -129,10 +121,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -148,10 +136,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                 Self::Postgres(store) => satisfy_postgres(store.pool(), &_claim, &_proof)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -173,10 +157,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -196,10 +176,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                 Self::Postgres(store) => mark_failed_postgres(store.pool(), &_claim, &failure_code)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -223,10 +199,6 @@ impl SettlementFulfillmentStore for DatabaseStore {
                     fail_postgres(store.pool(), &_claim, _retry_delay, &failure_code, &safe_detail)
                         .await
                         .map_err(ApplicationError::from)
-                }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算履约仅支持 PostgreSQL 完整档"))
                 }
             }
         })

@@ -44,8 +44,6 @@ impl OperationsAlertSourceReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => snapshot_postgres(store, now).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -63,10 +61,6 @@ impl OperationsAlertStore for DatabaseStore {
                 Self::Postgres(store) => {
                     publish_runtime_status_postgres(store.pool(), status).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) if !status.enabled => Ok(()),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -77,8 +71,6 @@ impl OperationsAlertStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => observe_postgres(store.pool(), &command).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -92,8 +84,6 @@ impl OperationsAlertStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => claim_postgres(store.pool(), &request).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -115,8 +105,6 @@ impl OperationsAlertStore for DatabaseStore {
                 Self::Postgres(store) => {
                     mark_enqueued_postgres(store.pool(), &claim, cooldown).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -128,8 +116,6 @@ impl OperationsAlertStore for DatabaseStore {
         retry_delay: Duration,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            #[cfg(not(feature = "postgres"))]
-            let _ = error_code;
             claim
                 .validate(auction_application::MAX_OPERATIONS_ALERT_BODY_BYTES)
                 .map_err(ApplicationError::from)?;
@@ -142,8 +128,6 @@ impl OperationsAlertStore for DatabaseStore {
                 Self::Postgres(store) => {
                     mark_claim_failed_postgres(store.pool(), &claim, error_code, retry_delay).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -159,8 +143,6 @@ impl OperationsAlertStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => list_enqueued_postgres(store.pool(), limit).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -172,8 +154,6 @@ impl OperationsAlertStore for DatabaseStore {
         completed_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
-            #[cfg(not(feature = "postgres"))]
-            let _ = status;
             if batch.batch_id.is_nil()
                 || batch.delivery_id.is_nil()
                 || completed_at.timestamp_nanos_opt().is_none()
@@ -185,8 +165,6 @@ impl OperationsAlertStore for DatabaseStore {
                 Self::Postgres(store) => {
                     mark_terminal_postgres(store.pool(), &batch, status, completed_at).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -196,8 +174,6 @@ impl OperationsAlertStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => health_postgres(store.pool()).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Ok(OperationsAlertHealth::disabled()),
             }
         })
     }

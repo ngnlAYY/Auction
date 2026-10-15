@@ -48,8 +48,6 @@ impl MailPollStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -85,8 +83,6 @@ impl MailPollStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -124,8 +120,6 @@ impl MailPollStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -142,8 +136,6 @@ impl MailPollStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => poll::commit(store.pool(), &claim, &batch, None).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -165,8 +157,6 @@ impl MailPollStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => state::renew(store.pool(), claim, now, lease_until).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -194,8 +184,6 @@ impl MailPollStore for DatabaseStore {
                     poll::commit(store.pool(), &claim, &batch, Some((&failure_code, &safe_detail)))
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -220,8 +208,6 @@ impl MailPollStore for DatabaseStore {
                 Self::Postgres(store) => {
                     poll::fail(store.pool(), &claim, retry_at, &failure_code, &safe_detail).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -236,11 +222,4 @@ fn valid_text(value: &str, maximum: usize) -> bool {
 
 fn storage_error(message: &str) -> auction_application::ApplicationError {
     auction_application::RepositoryError::Failed(message.to_owned()).into()
-}
-
-#[cfg(feature = "sqlite")]
-fn capability_error() -> auction_application::ApplicationError {
-    auction_application::ApplicationError::CapabilityUnavailable(
-        "MoogleMail Worker 轮询仅支持 PostgreSQL 完整档",
-    )
 }

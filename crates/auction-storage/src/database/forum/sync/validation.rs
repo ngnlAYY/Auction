@@ -122,8 +122,3 @@ pub(super) fn lot_code(category: &str, lot_number: i32) -> Result<String, Applic
 pub(super) fn storage_error(message: &str) -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }
-
-#[cfg(feature = "sqlite")]
-pub(super) fn capability_error() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("论坛同步仅支持 PostgreSQL 完整档")
-}

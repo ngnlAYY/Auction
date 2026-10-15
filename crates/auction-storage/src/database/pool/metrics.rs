@@ -4,11 +4,9 @@ use super::TrackedPool;
 use auction_observability::{PoolMetricsBackend, PoolMetricsSnapshot, PoolMetricsSource};
 #[cfg(feature = "postgres")]
 use sqlx::Postgres;
-#[cfg(feature = "sqlite")]
-use sqlx::Sqlite;
 
 /// 把 SQLx 池公开的连接数转换为 Prometheus scrape 快照。
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 fn sqlx_pool_snapshot<DB>(pool: &TrackedPool<DB>) -> PoolMetricsSnapshot
 where
     DB: sqlx::Database,
@@ -45,30 +43,6 @@ impl PostgresPoolMetricsSource {
 impl PoolMetricsSource for PostgresPoolMetricsSource {
     fn backend(&self) -> PoolMetricsBackend {
         PoolMetricsBackend::Postgres
-    }
-
-    fn snapshot(&self) -> PoolMetricsSnapshot {
-        sqlx_pool_snapshot(&self.pool)
-    }
-}
-
-#[cfg(feature = "sqlite")]
-#[derive(Clone)]
-pub struct SqlitePoolMetricsSource {
-    pub(super) pool: TrackedPool<Sqlite>,
-}
-
-#[cfg(feature = "sqlite")]
-impl SqlitePoolMetricsSource {
-    pub(crate) fn new(pool: TrackedPool<Sqlite>) -> Self {
-        Self { pool }
-    }
-}
-
-#[cfg(feature = "sqlite")]
-impl PoolMetricsSource for SqlitePoolMetricsSource {
-    fn backend(&self) -> PoolMetricsBackend {
-        PoolMetricsBackend::Sqlite
     }
 
     fn snapshot(&self) -> PoolMetricsSnapshot {

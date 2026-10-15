@@ -1,7 +1,4 @@
-//! PostgreSQL 论坛主题同步存储的模块装配。
-//!
-//! `auction_forum_sync` 是远程主题投影的唯一 owner。领取、快照读取、发布确认和失败退避都
-//! 使用持久化 token/owner/fencing；SQLite Lite 不提供该外部投影能力，明确返回能力缺失。
+//! 论坛发布任务的 PostgreSQL 适配；持久化 token、owner 与 fencing，外部调用留给 Worker。
 
 use auction_application::{
     ApplicationFuture, ForumAuctionSnapshot, ForumPublishedLayout, ForumRenderedPost,
@@ -29,8 +26,6 @@ use claims::claim_due_postgres;
 use publishing::{fail_postgres, publish_postgres};
 #[cfg(feature = "postgres")]
 use snapshot::load_snapshot_postgres;
-#[cfg(feature = "sqlite")]
-use validation::capability_error;
 use validation::{
     MAX_CLAIM_BATCH_SIZE, MAX_FAILURE_CODE_BYTES, MAX_FAILURE_DETAIL_BYTES, MAX_WORKER_ID_BYTES,
     storage_error, valid_claim, valid_rendered, valid_rendered_post, valid_text,
@@ -98,8 +93,6 @@ impl ForumSyncStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -112,8 +105,6 @@ impl ForumSyncStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => load_snapshot_postgres(store, &claim).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -148,8 +139,6 @@ impl ForumSyncStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -174,8 +163,6 @@ impl ForumSyncStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     fail_postgres(store, &claim, retry_at, &failure_code, &safe_detail).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -190,8 +177,6 @@ impl ForumSyncRecoveryPort for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => authorization::list(store, limit).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -211,8 +196,6 @@ impl ForumSyncRecoveryPort for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => authorization::authorize(store, &command).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }

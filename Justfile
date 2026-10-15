@@ -11,30 +11,33 @@ fmt-fix:
 
 # 文档链接、锚点、导航覆盖和包 README 的静态门禁，不运行产品或行为测试。
 docs-check:
-    @bash ci/check-docs.sh
+    @bash ci/check.sh docs
 
 repository-policy-check:
-    @bash ci/check-policy.sh repository
+    @bash ci/check.sh repository
 
 layout-check:
-    @bash ci/check-policy.sh layout
+    @bash ci/check.sh layout
 
 config-example-check:
-    @bash ci/check-policy.sh config
+    @bash ci/check.sh config
 
 i18n-check:
-    @bash ci/check-policy.sh i18n
+    @bash ci/check.sh i18n
 
 # 联网审计锁定依赖公告；需 cargo-audit 0.22.2，独立于默认本地 verify。
 dependency-audit:
-    cargo audit --deny yanked --deny unsound
+    cargo audit --deny warnings
+
+# 静态扫描未使用的直接依赖；需 cargo-machete 0.9.2，不运行产品或测试。
+dependency-unused:
+    cargo machete
 
 check:
     cargo check --locked --workspace --all-targets
 
 feature-check:
     cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres
-    cargo check --locked -p auction-storage --all-targets --no-default-features --features sqlite
     cargo check --locked -p auction-cache --all-targets --no-default-features --features redis
 
 lint:
@@ -67,7 +70,7 @@ verify-artifacts:
     @bash ci/release.sh verify-artifacts
 
 # 只装配并核验已构建的发布制品；正式发布要求干净工作树。
-package *args: verify-artifacts
+package *args:
     @bash ci/release.sh package {{args}}
 
 # 完整执行两类构建、制品门禁和发布装配；不会运行测试。
@@ -75,19 +78,19 @@ release-check *args:
     @bash ci/release.sh release-check {{args}}
 
 run-public:
-    cargo run -p auction-public-api --features web-embed
+    cargo run -p auction-public-api --features postgres,web-embed
 
 run-admin:
-    cargo run -p auction-admin-api --features web-embed
+    cargo run -p auction-admin-api --features postgres,web-embed
 
 run-worker:
-    cargo run -p auction-worker
+    cargo run -p auction-worker --features postgres
 
 check-config role="public":
     cargo run -p auctionctl -- check-config {{role}}
 
 db-migrate:
-    cargo run -p auctionctl -- migrate
+    cargo run -p auctionctl --features postgres -- migrate
 
 # 前端产物构建需要 dx CLI（cargo install dioxus-cli --locked）。
 # dx 会按需从 npm 注册表下载 esbuild 作为构建期工具；它不是运行时依赖，也不引入

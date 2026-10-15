@@ -29,4 +29,3 @@ url.workspace = true
 default = []
 cache-redis = ["auction-cache/redis"]
 postgres = ["auction-storage/postgres"]
-sqlite = ["auction-storage/sqlite"]

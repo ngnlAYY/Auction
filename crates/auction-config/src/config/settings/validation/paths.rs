@@ -29,7 +29,3 @@ pub(crate) fn resolve_worker_paths(
         resolve_config_path(config_path, worker.mooglemail.diagnostics.directory);
     worker
 }
-
-pub(crate) fn database_url_is_sqlite(value: &str) -> bool {
-    value.split_once(':').is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("sqlite"))
-}

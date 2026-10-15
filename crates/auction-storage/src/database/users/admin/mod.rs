@@ -1,12 +1,7 @@
-//! Users owner 的 Admin 用户管理入口与共享校验。
-//!
-//! 事务和 SQL 分别按 PostgreSQL/SQLite backend 拆到子文件；本模块只拥有应用端口分派、
-//! 安全投影校验、命令 payload 解析和跨后端共享规则。
+//! Admin 用户命令与查询的端口装配；事务和 SQL 位于 PostgreSQL 子模块。
 
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 use auction_application::{
     AdminRenameRevertWrite, AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind,
@@ -18,7 +13,7 @@ use auction_application::{
 };
 #[cfg(feature = "postgres")]
 use auction_application::{RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -28,8 +23,6 @@ use uuid::Uuid;
 
 use crate::database::audit_health::AuditWriteResult as _;
 
-#[cfg(feature = "sqlite")]
-use sqlx::{SqliteConnection, sqlite::SqliteRow};
 #[cfg(feature = "postgres")]
 use sqlx::{postgres::PgRow, types::Json};
 
@@ -44,8 +37,6 @@ impl AdminUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => sqlite::list_sqlite(store, request).await,
             }
         })
     }
@@ -65,10 +56,6 @@ impl AdminUserStore for DatabaseStore {
                 Self::Postgres(store) => {
                     postgres::find_command_postgres(store, command_id, kind, request_hash).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => {
-                    sqlite::find_command_sqlite(store, command_id, kind, request_hash).await
-                }
             }
         })
     }
@@ -78,8 +65,6 @@ impl AdminUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::create_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => sqlite::create_sqlite(store, write).await,
             }
         })
     }
@@ -92,8 +77,6 @@ impl AdminUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::mutate_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => sqlite::mutate_sqlite(store, write).await,
             }
         })
     }
@@ -106,8 +89,6 @@ impl AdminUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::revert_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => sqlite::revert_sqlite(store, write).await,
             }
         })
     }
@@ -127,10 +108,6 @@ impl RecoveryBuyerBlacklister for DatabaseStore {
                 Self::Postgres(store) => {
                     postgres::ensure_recovery_blacklist_postgres(store, command).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery 买家黑名单仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

@@ -121,7 +121,5 @@ pub(super) fn build_processor_and_delivery(
             );
             Ok((processor, delivery_transport, custody))
         }
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => anyhow::bail!("MoogleMail 业务处理仅支持 PostgreSQL 完整档"),
     }
 }

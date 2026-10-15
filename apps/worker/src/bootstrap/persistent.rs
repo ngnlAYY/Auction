@@ -1,29 +1,29 @@
-//! PostgreSQL/SQLite 持久化 Worker 的装配与退出收口。
+//! PostgreSQL 持久化 Worker 的装配与退出收口。
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::control::{
     abort_worker_task, join_worker_task, spawn_heartbeat, worker_heartbeat_health,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::control::{join_worker_control_task, worker_control_server_config};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::forum::configure_forum;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::fulfillment::{
     UnavailableFulfillmentCustodyReader, UnavailableFulfillmentEvidenceReader,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::mail::configure_mail_poll;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::operations_alert::configure_operations_alert;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::skeleton::run_worker_skeleton;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::*;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use chrono::Timelike;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
@@ -80,34 +80,30 @@ pub(super) async fn run_worker(
         delivery_store,
         delivery_transport,
         evidence_reader_for_health,
-    ): SettlementPorts = match store.backend() {
-        DatabaseBackend::Postgres => {
-            let fulfillment_store: Arc<dyn SettlementFulfillmentStore> = store.clone();
-            let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
-                mail_evidence_reader
-                    .unwrap_or_else(|| Arc::new(UnavailableFulfillmentEvidenceReader));
-            let recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader> = store.clone();
-            let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> = mail_custody_reader
-                .unwrap_or_else(|| Arc::new(UnavailableFulfillmentCustodyReader));
-            let fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort> =
-                Arc::new(SettlementFulfillmentService::new(
-                    Arc::clone(&fulfillment_store),
-                    recipient_reader,
-                    custody_reader,
-                    Arc::clone(&evidence_reader),
-                    Arc::new(SystemClock),
-                ));
-            (
-                Some(store.clone()),
-                Some(Arc::new(DatabaseSettlementCommands::new(Arc::clone(&store)))),
-                Some(fulfillment_store),
-                Some(fulfillment_commands),
-                Some(store.clone()),
-                mail_delivery_transport,
-                Some(evidence_reader),
-            )
-        }
-        DatabaseBackend::Sqlite => (None, None, None, None, None, None, None),
+    ): SettlementPorts = {
+        let fulfillment_store: Arc<dyn SettlementFulfillmentStore> = store.clone();
+        let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
+            mail_evidence_reader.unwrap_or_else(|| Arc::new(UnavailableFulfillmentEvidenceReader));
+        let recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader> = store.clone();
+        let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> =
+            mail_custody_reader.unwrap_or_else(|| Arc::new(UnavailableFulfillmentCustodyReader));
+        let fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort> =
+            Arc::new(SettlementFulfillmentService::new(
+                Arc::clone(&fulfillment_store),
+                recipient_reader,
+                custody_reader,
+                Arc::clone(&evidence_reader),
+                Arc::new(SystemClock),
+            ));
+        (
+            Some(store.clone()),
+            Some(Arc::new(DatabaseSettlementCommands::new(Arc::clone(&store)))),
+            Some(fulfillment_store),
+            Some(fulfillment_commands),
+            Some(store.clone()),
+            mail_delivery_transport,
+            Some(evidence_reader),
+        )
     };
     let control = WorkerControlHandle::new(env!("CARGO_PKG_VERSION"), mail_polls.len());
     let heartbeat_store: Arc<dyn HeartbeatStore> = store.clone();
@@ -149,23 +145,11 @@ pub(super) async fn run_worker(
     } else {
         None
     };
-    let recovery_store: Option<Arc<dyn RecoveryWorkStore>> = match store.backend() {
-        DatabaseBackend::Postgres => Some(store.clone()),
-        DatabaseBackend::Sqlite => None,
-    };
-    let recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>> = match store.backend() {
-        DatabaseBackend::Postgres => Some(store.clone()),
-        DatabaseBackend::Sqlite => None,
-    };
+    let recovery_store: Option<Arc<dyn RecoveryWorkStore>> = Some(store.clone());
+    let recovery_resolution: Option<Arc<dyn RecoveryResolutionStore>> = Some(store.clone());
     let recovery_delivery: Option<Arc<dyn MailDeliveryEnqueuer>> =
-        match (store.backend(), recovery_delivery_enabled) {
-            (DatabaseBackend::Postgres, true) => Some(store.clone()),
-            _ => None,
-        };
-    let recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>> = match store.backend() {
-        DatabaseBackend::Postgres => Some(store.clone()),
-        DatabaseBackend::Sqlite => None,
-    };
+        if recovery_delivery_enabled { Some(store.clone()) } else { None };
+    let recovery_blacklister: Option<Arc<dyn RecoveryBuyerBlacklister>> = Some(store.clone());
     let recovery_worlds = if config.worker.mooglemail.enabled {
         config
             .worker
@@ -181,8 +165,8 @@ pub(super) async fn run_worker(
     } else {
         vec![SettlementWorld::Main, SettlementWorld::Isekai]
     };
-    let recovery_health = match (store.backend(), evidence_reader_for_health) {
-        (DatabaseBackend::Postgres, Some(balance_reader)) => {
+    let recovery_health = match evidence_reader_for_health {
+        Some(balance_reader) => {
             let health_service = RecoveryHealthService::new(
                 RecoveryHealthConfig {
                     worlds: recovery_worlds,
@@ -205,11 +189,9 @@ pub(super) async fn run_worker(
                 .map_err(|error| anyhow::Error::msg(error.to_owned()))?,
             )
         }
-        (DatabaseBackend::Postgres, None) => {
+        None => {
             anyhow::bail!("PostgreSQL recovery health 缺少 Balance 读取端口")
         }
-        (DatabaseBackend::Sqlite, None) => None,
-        (DatabaseBackend::Sqlite, Some(_)) => None,
     };
     if let Err(error) = heartbeat.publish_current().await {
         tracing::warn!(error = %error, "worker heartbeat ready publish failed");
@@ -345,7 +327,7 @@ pub(super) async fn run_worker(
     Ok(())
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 fn configure_schedule_runtime(
     config: &AppConfig,
     mail: Option<Arc<dyn AdminMailPort>>,

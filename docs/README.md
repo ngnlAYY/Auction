@@ -85,6 +85,5 @@
 
 | 文档 | 用途 |
 | --- | --- |
-| [数据库迁移导航](../migrations/README.md) | 两后端迁移入口和兼容执行边界 |
-| [PostgreSQL 完整档迁移](../migrations/postgres/README.md) | 完整档追加迁移与历史兼容 |
-| [SQLite Lite 迁移](../migrations/sqlite/README.md) | Lite 迁移范围与本地写入限制 |
+| [数据库迁移导航](../migrations/README.md) | PostgreSQL 迁移入口与历史文件保留边界 |
+| [PostgreSQL 完整档迁移](../migrations/postgres/README.md) | 追加迁移与历史兼容 |

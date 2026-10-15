@@ -20,13 +20,11 @@ use auction_observability::PoolMetricsSnapshot;
 use futures_util::{TryStreamExt, future::BoxFuture, stream::BoxStream};
 use sqlx::{Database, Either, Execute, Executor, Pool, SqlStr, Transaction, pool::PoolConnection};
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod metrics;
 
 #[cfg(feature = "postgres")]
 pub(crate) use metrics::PostgresPoolMetricsSource;
-#[cfg(feature = "sqlite")]
-pub(crate) use metrics::SqlitePoolMetricsSource;
 
 /// 一个 SQLx 池的真实 acquisition 累计状态。
 #[derive(Debug, Default)]

@@ -1,8 +1,8 @@
 # 数据库对象与所有权契约
 
-[文档导航](../README.md) · [完整档 SQL](../../migrations/postgres) · [Lite SQL](../../migrations/sqlite) · [查询、事务与映射](../../crates/auction-storage/src/database)
+[文档导航](../README.md) · [PostgreSQL SQL](../../migrations/postgres) · [查询、事务与映射](../../crates/auction-storage/src/database)
 
-按逻辑 owner 登记持久化对象和能力档位；表存在不等于对应产品流程已验收。
+按逻辑 owner 登记持久化对象与历史迁移范围；表存在不等于对应产品流程已验收。
 
 ## 本页导航
 
@@ -16,13 +16,10 @@
 
 ## 基线与 owner 规则
 
-权威 SQL 来自 `migrations/postgres/`、`migrations/sqlite/` 和 `auction-storage` 的查询/映射。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-“两者”表示 PostgreSQL 与 SQLite Lite 共有对象；“完整档”只承诺 PostgreSQL。表存在不授予
-完整写能力，例如 Lite 的 `auction_submissions` 仅支持来源及生命周期读取。
-
-当前迁移范围为 PostgreSQL `000001`—`000039`、SQLite `000001`—`000013`。
-Lite 仍受单主机、串行写、锁等待、备份和单 Worker 约束；实现与运行证据见[状态说明](../status.md)。
+PostgreSQL 迁移为 `000001`—`000039`；已发布文件不修改或删除。
+历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
 
@@ -30,10 +27,10 @@ Lite 仍受单主机、串行写、锁等待、备份和单 Worker 约束；实�
 
 | 对象/迁移 | 可自动修复的范围 | 必须保留的历史边界 |
 | --- | --- | --- |
-| 连续领先时间：PostgreSQL `000013`/`000037`，SQLite `000007`/`000012` | 由追加式 bid 事实证明的 `leader_since`；后者覆盖未结算 live lot 同命令被快速代理反超 | 不猜测无证据时间，不改结算金额、bid 或审计 |
+| 连续领先时间：PostgreSQL `000013`/`000037` | 由追加式 bid 事实证明的 `leader_since`；后者覆盖未结算 live lot 同命令被快速代理反超 | 不猜测无证据时间，不改结算金额、bid 或审计 |
 | 流拍寄回：PostgreSQL `000038` | ready 义务下从未领取、未冻结、无 delivery 的初始 pending execution 从 Return 转 Send，并追加审计 | 已尝试、冻结、未知或完成记录保持原身份；旧 Return 进入人工核对，禁止自动重寄 |
-| Final 完成：PostgreSQL `000012`/`000039`，SQLite `000006`/`000013` | 持久化 Final fence；后者仅补齐唯一匹配成功命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次 | 缺失或歧义证据不补写，不重放生命周期或外部动作 |
-| 排期来源：PostgreSQL `000039`，SQLite `000013` | nullable `scheduled_rounds.schedule_snapshot`，分别为 JSONB/TEXT，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
+| Final 完成：PostgreSQL `000012`/`000039` | 持久化 Final fence；后者仅补齐唯一匹配成功命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次 | 缺失或歧义证据不补写，不重放生命周期或外部动作 |
+| 排期来源：PostgreSQL `000039` | nullable `scheduled_rounds.schedule_snapshot`，类型为 JSONB，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
 
 ### 迁移语义与兼容边界
 
@@ -42,12 +39,12 @@ Lite 仍受单主机、串行写、锁等待、备份和单 Worker 约束；实�
 - 拍卖身份、前序顺序及唯一 Draft/Preview 录入目标由完整档延迟约束保护（`000014`/`000032`）。
   Preview 继续接收并物化装备，Open 或取消 Preview 才建立后继 Draft 并移动目标；升级时同世界
   Preview 与后继 Draft 并存会被拒绝，不自动选择保留哪一期。
-- `bid_proxies` 在两后端都是只读兼容视图；代理写入只进入 `bid_proxy_authorizations` 和历史表。
+- `bid_proxies` 是只读兼容视图；代理写入只进入 `bid_proxy_authorizations` 和历史表。
   `final_fast` 降额保持 Fast 模式、原状态及空终止原因，只能严格降额（PostgreSQL `000034`）。
 - live/sold lot 必须有有效结束时间。PostgreSQL `000019` 仅为已先更新同 lot 投影、逐字段可证明的
   v28 INSERT 补齐 bid 截止事实，不干预当前显式写入。Isekai carrier 的派发 world 由 `000017` 冻结。
 - 分类编号覆盖 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy；每类从 1 递增。
-  内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`、SQLite `000009`）。
+  内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`）。
 - 论坛 `showuser` 数字 ID 为规范十进制，同步到 `users.forum_account_id` 与
   `forum_bidder_identities.external_account_id`。一个 Users 主体跨 world/provider 只能沿用同一账号键；
   延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，
@@ -65,66 +62,66 @@ canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预�
 
 ## 基础身份、配置与审计
 
-| 表 | 逻辑 owner | 档位 | 关键职责 |
-| --- | --- | --- | --- |
-| worlds | auction-application：world | 两者 | 世界边界、数据库权威启用状态与 `policy_revision` CAS |
-| users | auction-application：users | 两者 | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；历史 game_player_id 仅作兼容镜像 |
-| user_blacklist | auction-application：users | 两者 | 公开资格与封禁原因 |
-| user_renames | auction-application：users | 两者 | 用户名变更追加历史 |
-| public_sessions | auction-application：sessions | 两者 | Public 会话权威状态；滑动闲置有效期受绝对有效期限制，SQLite 写入使用可取消回滚的串行事务；长连接只读复核撤销、active 账号/凭据与双重过期，不刷新活动时间或取得 Lite 写锁 |
-| admin_sessions | auction-application：sessions | 两者 | Admin 会话与 CSRF 关联状态；token_hash 为绑定 actor/secret 的 HMAC-SHA256 摘要，Admin 启动永久撤销所有未撤销行；保留滑动有效期、绝对上限与原撤销时间，不新增凭据校验值或列 |
-| rules_documents | auction-application：rules | 两者 | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
-| audit_records | auction-application：audit | 两者 | 追加式审计事实，不允许编辑历史 |
-| service_heartbeats | auction-observability | 两者 | 进程/服务心跳与过期判断 |
-| credential_keys | auction-application：credentials | 完整档 | 加密后的外部凭据索引；邮件与论坛 Cookie 各自全局最多一条 active 记录 |
-| user_login_key_envelopes | auction-application：users | 两者 | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
-| user_mail_commands | auction-application：users | 完整档 | MoogleMail 注册/重绑命令幂等账本与结果 |
-| user_game_identity_history | auction-application：users | 完整档 | MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
-| forum_identity_history | auction-storage：forum reply + audit | 完整档 | 论坛稳定数字账号或可变名称变更的追加式新旧快照，不覆盖历史证据 |
-| user_blacklist_history | auction-application：users | 两者 | 封禁变更追加历史 |
-| user_admin_commands | auction-application：users | 两者 | Admin 用户命令幂等账本与安全投影重放 |
-| credential_admin_commands | auction-application：credentials | 完整档 | 凭据管理命令幂等账本 |
-| runtime_config_admin_commands | auction-application：runtime-config | 完整档 | runtime 配置更新、指纹和 pending/applied/unknown 结果 |
-| rules_admin_commands | auction-application：rules | 完整档 | 规则文档管理命令幂等账本 |
+| 表 | 逻辑 owner | 关键职责 |
+| --- | --- | --- |
+| worlds | auction-application：world | 世界边界、数据库权威启用状态与 `policy_revision` CAS |
+| users | auction-application：users | 可变 MM/显示名称、稳定唯一论坛账号 ID、活动状态和版本；历史 game_player_id 仅作兼容镜像 |
+| user_blacklist | auction-application：users | 公开资格与封禁原因 |
+| user_renames | auction-application：users | 用户名变更追加历史 |
+| public_sessions | auction-application：sessions | Public 会话权威状态；滑动闲置有效期受绝对有效期限制；长连接只读复核撤销、active 账号/凭据与双重过期，不刷新活动时间 |
+| admin_sessions | auction-application：sessions | Admin 会话与 CSRF 关联状态；token_hash 为绑定 actor/secret 的 HMAC-SHA256 摘要，Admin 启动永久撤销所有未撤销行；保留滑动有效期、绝对上限与原撤销时间，不新增凭据校验值或列 |
+| rules_documents | auction-application：rules | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
+| audit_records | auction-application：audit | 追加式审计事实，不允许编辑历史 |
+| service_heartbeats | auction-observability | 进程/服务心跳与过期判断 |
+| credential_keys | auction-application：credentials | 加密后的外部凭据索引；邮件与论坛 Cookie 各自全局最多一条 active 记录 |
+| user_login_key_envelopes | auction-application：users | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
+| user_mail_commands | auction-application：users | MoogleMail 注册/重绑命令幂等账本与结果 |
+| user_game_identity_history | auction-application：users | MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
+| forum_identity_history | auction-storage：forum reply + audit | 论坛稳定数字账号或可变名称变更的追加式新旧快照，不覆盖历史证据 |
+| user_blacklist_history | auction-application：users | 封禁变更追加历史 |
+| user_admin_commands | auction-application：users | Admin 用户命令幂等账本与安全投影重放 |
+| credential_admin_commands | auction-application：credentials | 凭据管理命令幂等账本 |
+| runtime_config_admin_commands | auction-application：runtime-config | runtime 配置更新、指纹和 pending/applied/unknown 结果 |
+| rules_admin_commands | auction-application：rules | 规则文档管理命令幂等账本 |
 
 Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`，值来自本进程启动时的
 `[worker.forum].enabled`；observability/storage health owner 继续独占心跳写入。PostgreSQL 完整档
 的 Public forum 读取 owner 仅聚合该字段：忽略过期和停止实例，任一 true 表示启用，全部明确 false
 才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，
-也不将心跳 details 原文公开给浏览器；SQLite Lite 不提供 Public 论坛能力。
+也不将心跳 details 原文公开给浏览器。
 
 A32 使用 `credential_keys` 与 `credential_admin_commands`；后者到凭据行的引用为
 `ON DELETE SET NULL`（`000009_credential_admin_compat`）。`AdminCredentialEnvelope` 校验 nonce、
 key id 和指纹，账本只保存安全投影/删除结果。Worker 用独立数据密钥读取唯一 active Cookie，
-Cookie 明文不进入账本，SQLite 不提供该完整档能力。
+Cookie 明文不进入账本。
 
 ## 拍卖与竞价核心
 
-| 表 | 逻辑 owner | 档位 | 关键职责 |
-| --- | --- | --- | --- |
-| auctions | auction-domain + auction-application：auction | 两者 | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份、前序顺序与 Draft/Preview 唯一当前录入场次 |
-| equipment | auction-domain + auction-application：auction | 两者 | 标的事实与规范化装备属性 |
-| auction_preview_items | auction-application：auction | 两者 | 预览阶段的累积物化展示项；Preview 期间新录入装备按新 revision 追加 |
-| lots | auction-domain + auction-application：auction | 两者 | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
-| auction_commands | auction-application：command-ledger | 两者 | 拍卖、竞价、世界启停与 realtime replay 等共用命令账本；其他 owner 使用下列专用账本 |
-| bids | auction-domain + auction-application：auction | 两者 | 追加式竞价事实 |
-| bid_proxies | auction-storage：兼容视图 | 两者 | 历史代理字段的只读兼容投影，非权威状态 |
-| bid_proxy_authorizations | auction-domain + auction-application：auction | 两者 | Fast/Slow 代理授权状态机 |
-| bid_proxy_authorization_transitions | auction-domain + auction-application：auction | 两者 | 代理授权追加式迁移记录 |
-| bid_proxy_outbid_uses | auction-domain + auction-application：auction | 两者 | 代理出价次数和上限 |
-| bid_proxy_attempts | auction-domain + auction-application：auction | 两者 | 代理尝试历史与失败分类 |
-| scheduled_rounds | auction-application + auction-jobs：auction-lifecycle | 两者 | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态；Open 时为后继 Draft 建立下一轮 |
-| auction_intake_targets | auction-application：auction-intake | 完整档 | 世界级拍品录入目标，并与该世界唯一 Draft 或 Preview 当前录入场次保持延迟一致性 |
-| auction_submissions | auction-application：auction-intake | 两者 | `mail/admin` 来源闭集及拍品来源关联；Lite 保留来源表与生命周期读取，不因此提供完整 Admin/MM 录入命令；Admin URL/JSON 适配器种类只进入来源引用和命令摘要 |
-| equipment_secrets | auction-application：keymanagement | 完整档 | 标的敏感来源密文 |
-| auction_schema_identity | auction-storage：migration | 两者 | 迁移/schema 身份和兼容检查 |
+| 表 | 逻辑 owner | 关键职责 |
+| --- | --- | --- |
+| auctions | auction-domain + auction-application：auction | 拍卖生命周期、版本、时间点、前后轮关系和取消原因/操作者；完整档额外保护聚合身份、前序顺序与 Draft/Preview 唯一当前录入场次 |
+| equipment | auction-domain + auction-application：auction | 标的事实与规范化装备属性 |
+| auction_preview_items | auction-application：auction | 预览阶段的累积物化展示项；Preview 期间新录入装备按新 revision 追加 |
+| lots | auction-domain + auction-application：auction | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
+| auction_commands | auction-application：command-ledger | 拍卖、竞价、世界启停与 realtime replay 等共用命令账本；其他 owner 使用下列专用账本 |
+| bids | auction-domain + auction-application：auction | 追加式竞价事实 |
+| bid_proxies | auction-storage：兼容视图 | 历史代理字段的只读兼容投影，非权威状态 |
+| bid_proxy_authorizations | auction-domain + auction-application：auction | Fast/Slow 代理授权状态机 |
+| bid_proxy_authorization_transitions | auction-domain + auction-application：auction | 代理授权追加式迁移记录 |
+| bid_proxy_outbid_uses | auction-domain + auction-application：auction | 代理出价次数和上限 |
+| bid_proxy_attempts | auction-domain + auction-application：auction | 代理尝试历史与失败分类 |
+| scheduled_rounds | auction-application + auction-jobs：auction-lifecycle | 持久化预览/开拍/Final phase 调度游标、租约、完成 fence、尝试次数和失败状态；Open 时为后继 Draft 建立下一轮 |
+| auction_intake_targets | auction-application：auction-intake | 世界级拍品录入目标，并与该世界唯一 Draft 或 Preview 当前录入场次保持延迟一致性 |
+| auction_submissions | auction-application：auction-intake | `mail/admin` 来源闭集及拍品来源关联；Admin URL/JSON 适配器种类只进入来源引用和命令摘要 |
+| equipment_secrets | auction-application：keymanagement | 标的敏感来源密文 |
+| auction_schema_identity | auction-storage：migration | 迁移/schema 身份和兼容检查 |
 
 `auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
 `default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。
 竞价和取消在锁内读取快照中的 PPM、代理开关/默认模式/次数上限及 final phase 参数；
 `lots` 的 `leader_proxy_last`、慢速调度和状态版本同样是数据库权威状态。
 
-两后端应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与
+应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与
 `bid_proxy_authorization_transitions.created_at` 的新写入显式绑定计划统一的锁后数据库时间，
 与命令结果内的转换时间一致；不依赖列默认值另行取时。既有表、迁移及历史记录保持不变。
 
@@ -132,40 +129,40 @@ Cookie 明文不进入账本，SQLite 不提供该完整档能力。
 
 | 命令 | 完整档事务写入边界 |
 | --- | --- |
-| A40/A41 世界目录/启停 | `worlds` 先锁，仅从启用变为关闭时检查 `auctions`/`scheduled_rounds` blocker，状态、`auction_commands`、`audit_records` 同事务提交；Lite 只读 |
-| A38 提前结算 | `auction_early_settlement` 写通用账本，理由写审计，更新 `auctions`/`lots` 截止并追加 realtime；提交后由 settlement scheduler 建 workflow/义务，Lite 不提供 |
+| A40/A41 世界目录/启停 | `worlds` 先锁，仅从启用变为关闭时检查 `auctions`/`scheduled_rounds` blocker，状态、`auction_commands`、`audit_records` 同事务提交 |
+| A38 提前结算 | `auction_early_settlement` 写通用账本，理由写审计，更新 `auctions`/`lots` 截止并追加 realtime；提交后由 settlement scheduler 建 workflow/义务 |
 | A13 draft lot 修改 | 复用 `auctions`、`lots`、通用账本、审计与 realtime；撤回另写 `settlement_obligations`/`settlement_obligation_fulfillments` |
 
 ## 结算、恢复与交付
 
-| 表 | 逻辑 owner | 档位 | 关键职责 |
-| --- | --- | --- | --- |
-| auction_settlements | auction-domain + auction-application：settlement | 完整档 | 拍卖结算汇总 |
-| lot_settlements | auction-domain + auction-application：settlement | 完整档 | 拍品级买卖双方结算 |
-| compensation_ledger | auction-domain + auction-application：settlement | 完整档 | 补偿池追加账本 |
-| settlement_pools | auction-domain + auction-application：settlement | 完整档 | 结算池和策略快照 |
-| settlement_obligations | auction-domain + auction-application：settlement | 完整档 | 买家/卖家履约义务 |
-| settlement_obligation_fulfillments | auction-application：settlement | 完整档 | 履约交付证明与状态 |
-| settlement_recoveries | auction-application：settlement-recovery | 完整档 | 付款/交付异常恢复聚合 |
-| settlement_recovery_actions | auction-application：settlement-recovery | 完整档 | 恢复动作及 durable claim |
-| settlement_recovery_commands | auction-application：settlement-recovery | 完整档 | 恢复确认命令幂等账本 |
-| settlement_recovery_health | auction-application + auction-storage + auction-jobs | 完整档 | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用以 `busy` 投影并保留最后成功余额 |
-| deliveries | auction-application + auction-jobs：delivery | 完整档 | 外部投递 outbox、claim 和重试 |
-| delivery_admin_commands | auction-application：delivery | 完整档 | Admin 交付命令幂等账本 |
+| 表 | 逻辑 owner | 关键职责 |
+| --- | --- | --- |
+| auction_settlements | auction-domain + auction-application：settlement | 拍卖结算汇总 |
+| lot_settlements | auction-domain + auction-application：settlement | 拍品级买卖双方结算 |
+| compensation_ledger | auction-domain + auction-application：settlement | 补偿池追加账本 |
+| settlement_pools | auction-domain + auction-application：settlement | 结算池和策略快照 |
+| settlement_obligations | auction-domain + auction-application：settlement | 买家/卖家履约义务 |
+| settlement_obligation_fulfillments | auction-application：settlement | 履约交付证明与状态 |
+| settlement_recoveries | auction-application：settlement-recovery | 付款/交付异常恢复聚合 |
+| settlement_recovery_actions | auction-application：settlement-recovery | 恢复动作及 durable claim |
+| settlement_recovery_commands | auction-application：settlement-recovery | 恢复确认命令幂等账本 |
+| settlement_recovery_health | auction-application + auction-storage + auction-jobs | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用以 `busy` 投影并保留最后成功余额 |
+| deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |
+| delivery_admin_commands | auction-application：delivery | Admin 交付命令幂等账本 |
 
 ## 邮件、论坛与外部集成
 
-| 表 | 逻辑 owner | 档位 | 关键职责 |
-| --- | --- | --- | --- |
-| inbound_mail | auction-storage：mail projection | 完整档 | 入站邮件事实索引及 Admin 审查安全投影；`sender`/`subject` 为可空标量，`message_display` 为受限脱敏快照 |
-| mail_commands | auction-application + auction-jobs：mail intake | 完整档 | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
-| mail_poll_state | auction-storage：mail state | 完整档 | MoogleMail 轮询游标、租约、失败退避和状态 |
-| mail_admin_commands | auction-storage：mail admin command ledger | 完整档 | Admin 邮件控制命令幂等账本 |
-| auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 完整档 | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
-| forum_sync_admin_commands | auction-application + auction-storage + auctionctl：forum recovery | 完整档 | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
-| forum_bidder_identities | auction-storage：forum reply + Users owner | 完整档 | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
-| auction_forum_reply_cursors | auction-storage：forum reply（历史兼容） | 完整档 | 保留的历史世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
-| auction_forum_bid_commands | auction-storage：forum reply；auction-jobs：forum reply | 完整档 | 论坛竞价导入命令账本、可证明的真实楼层号与重试事实 |
+| 表 | 逻辑 owner | 关键职责 |
+| --- | --- | --- |
+| inbound_mail | auction-storage：mail projection | 入站邮件事实索引及 Admin 审查安全投影；`sender`/`subject` 为可空标量，`message_display` 为受限脱敏快照 |
+| mail_commands | auction-application + auction-jobs：mail intake | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
+| mail_poll_state | auction-storage：mail state | MoogleMail 轮询游标、租约、失败退避和状态 |
+| mail_admin_commands | auction-storage：mail admin command ledger | Admin 邮件控制命令幂等账本 |
+| auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
+| forum_sync_admin_commands | auction-application + auction-storage + auctionctl：forum recovery | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
+| forum_bidder_identities | auction-storage：forum reply + Users owner | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
+| auction_forum_reply_cursors | auction-storage：forum reply（历史兼容） | 保留的历史世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
+| auction_forum_bid_commands | auction-storage：forum reply；auction-jobs：forum reply | 论坛竞价导入命令账本、可证明的真实楼层号与重试事实 |
 
 用户注册/重绑的 `user_mail_commands` 归上文 Users owner，SQL 位于 `database/users/mail/postgres/`；
 它不是由邮件传输维护的第二份发送账本，故不在本分组重复登记。
@@ -180,18 +177,17 @@ PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛�
 只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。固定 #1/#2 的
 post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以
 独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
-`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼；
-SQLite Lite 不复制这些完整档表。
+`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。
 
-MoogleMail 异常原始数据不进入数据库 schema：PostgreSQL 完整档 Worker 按独立运维契约写入本地加密证据文件，
-SQLite Lite 不新增该能力。证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通
-数据库投影仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
+MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件。
+证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通数据库投影
+仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
 
 `migrations/postgres/000035_mail_intake_display_snapshot` 仅属于 PostgreSQL 完整档：向 `inbound_mail` 追加
 nullable `sender`、`subject` 和 `message_display`。sender/subject 必须成对出现并受 256/512 字节边界约束；
 展示快照固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件 ID 最多 1000 条，且只含
 正文脱敏结果、附件外部 ID、Credits 和 COD。装备 key 与认证邮件正文不会进入快照。它是非权威展示投影，不能
-参与入站幂等或 cursor；普通 replay 不会为历史 NULL 自动补写。SQLite Lite 不新增对应列或能力。
+参与入站幂等或 cursor；普通 replay 不会为历史 NULL 自动补写。
 
 主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；
 `sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全
@@ -199,21 +195,20 @@ nullable `sender`、`subject` 和 `message_display`。sender/subject 必须成�
 
 `migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加
 nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入
-`decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。SQLite Lite
-不增加该列或能力。
+`decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。
 
 ## 实时事件与运维告警
 
-| 表 | 逻辑 owner | 档位 | 关键职责 |
-| --- | --- | --- | --- |
-| realtime_streams | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 持久化 stream 目录；PostgreSQL 完整档包含 `auction:discovery` 派生流 |
-| realtime_events | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 两者 | 追加式事件、stream sequence、replay 关系、PostgreSQL `auction.created` 发现别名，以及两后端 Admin 时间倒序读取索引 |
-| realtime_consumer_offsets | auction-application：Public relay；auction-jobs：外部 consumer | 两者 | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key；PostgreSQL 以会话级 advisory lock 保证同 key 单 owner；SQLite 文件库在实际数据库同目录持有 0600 非阻塞 sidecar，并以 Linux statx mount 身份拒绝单文件挂载别名，无法证明时失败关闭；内存库按同进程有效内存身份互斥 |
-| realtime_failures | auction-application：Public relay；auction-jobs + auction-observability：外部 realtime | 两者 | 事件消费隔离、失败事实和显式 replay 边界 |
-| operations_alert_runtime_state | auction-application + auction-storage：alert health；auction-jobs：运行状态与扫描水位 | 完整档 | Worker 配置启用状态的非敏感单例投影，以及与 signal 观察事务同提交的成功扫描水位；两类时间独立单调，不互相覆盖 |
-| operations_alert_signals | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 完整档 | 告警信号、稳定 identity、版本、通知时间、cooldown 与已证明退信的独立提醒 |
-| operations_alert_batches | auction-storage：alert batch；auction-jobs：claim/dispatch | 完整档 | 告警批次、租约/fencing、三次 Create 重试、稳定终态和 delivery 对账 |
-| operations_alert_batch_items | auction-storage：alert batch | 完整档 | 告警批次成员、版本、冻结摘要和 signal 反查索引 |
+| 表 | 逻辑 owner | 关键职责 |
+| --- | --- | --- |
+| realtime_streams | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 持久化 stream 目录；PostgreSQL 完整档包含 `auction:discovery` 派生流 |
+| realtime_events | auction-storage：realtime；auction-application：Public relay；auction-jobs：consumer | 追加式事件、stream sequence、replay 关系、`auction.created` 发现别名及 Admin 时间倒序读取索引 |
+| realtime_consumer_offsets | auction-application：Public relay；auction-jobs：外部 consumer | 按 consumer/stream 保存的连续 durable cursor；Public relay 与外部 consumer 使用不同 consumer key；以会话级 advisory lock 保证同 key 单 owner |
+| realtime_failures | auction-application：Public relay；auction-jobs + auction-observability：外部 realtime | 事件消费隔离、失败事实和显式 replay 边界 |
+| operations_alert_runtime_state | auction-application + auction-storage：alert health；auction-jobs：运行状态与扫描水位 | Worker 配置启用状态的非敏感单例投影，以及与 signal 观察事务同提交的成功扫描水位；两类时间独立单调，不互相覆盖 |
+| operations_alert_signals | auction-application + auction-storage：alert signal；auction-jobs：扫描 | 告警信号、稳定 identity、版本、通知时间、cooldown 与已证明退信的独立提醒 |
+| operations_alert_batches | auction-storage：alert batch；auction-jobs：claim/dispatch | 告警批次、租约/fencing、三次 Create 重试、稳定终态和 delivery 对账 |
+| operations_alert_batch_items | auction-storage：alert batch | 告警批次成员、版本、冻结摘要和 signal 反查索引 |
 
 告警目标变更时，旧待重试批次在领取事务内以 `dependency_mismatch` 终止，然后允许为新目标建批。
 确定从未激活的关联 delivery 以 `failed` 收口，保留零 attempt/fencing 和空 claimed/sending 时间；
@@ -223,8 +218,8 @@ nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首�
 
 ## 共有约束
 
-1. `migrations/postgres/` 与 `migrations/sqlite/` 是当前 schema 的唯一迁移来源；新增 migration 必须
-   重新评审列、约束、索引、owner 和 Lite 能力，不能从仓库外复制表定义。
+1. `migrations/postgres/` 是当前运行 schema 的迁移来源；新增 migration 必须评审列、约束、索引及 owner，
+   不能从仓库外复制表定义。已发布 SQL 不得修改或删除。
 2. auction_commands.command_id 是 UUID 主键；command_kind、aggregate_id、request_hash、
    result_code、result_payload、created_at 都是账本事实。request_hash 固定 32 字节，
    result_payload 必须是 JSON object。
@@ -232,10 +227,8 @@ nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首�
    删除的弱引用。历史事实和幂等账本的删除顺序必须失败关闭。
 4. realtime_events 只追加；修复事件通过 replay_of_event_id 引用历史事件，禁止编辑原事件。
    PostgreSQL 的 origin bid fact 唯一性只约束原始事件，不能阻止同一事实的运维 replay。
-5. 任何标记为两者的对象都必须同时满足 PostgreSQL 并发语义和 SQLite Lite 的串行写事务、
-   WAL/本地文件系统、锁等待及单 Worker 实例约束。
+5. 当前写入必须满足 PostgreSQL 隔离与锁契约；历史迁移范围标记不能代替当前能力或并发保证。
 6. `lots.lot_number` 是正数、场次内唯一且不可变的内部顺序；`category_key/category_number`
    组合为不可变的对外编号：`category_number` 为正数且在场次与分类内唯一，分类键必须与 equipment category 一致，
    撤回或重挂不会复用已经分配的编号。
-7. 迁移提交前必须为每张表补充 Rust 查询 owner、共有查询的 SQLx 离线元数据策略，以及
-   PostgreSQL/SQLite 是否真的需要该对象的证据。
+7. 迁移提交前必须为每张表补充 Rust 查询 owner、适用的 SQLx 离线元数据策略及持久化必要性依据。

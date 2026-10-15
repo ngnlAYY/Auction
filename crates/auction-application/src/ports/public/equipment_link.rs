@@ -117,7 +117,7 @@ impl PublicEquipmentLinkTarget {
     }
 }
 
-/// 从权威存储批量读取装备密文信封；SQLite Lite 明确不实现该能力。
+/// 从权威存储批量读取装备密文信封。
 pub trait PublicEquipmentLinkSecretReader: Send + Sync {
     fn read_public_equipment_link_secrets(
         &self,

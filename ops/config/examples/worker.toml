@@ -1,13 +1,10 @@
-# Worker 配置示例。
-#
-# common_file 与 secrets_file 必填；其余字段和区块均可省略并使用解析器默认值。
-# SQLite Lite 档会强制 Worker 并发为 1。
+# Worker 配置示例；可选字段和区块省略时使用解析器默认值。
 
 # 必填：公共非敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 common_file = "common.toml"
 # 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
-# 可选：Admin 管理的非敏感 runtime TOML；Worker 重启时只读取 world、发件人、装备过滤和邮件模板。
+# 可选：Admin/Worker 共享的非敏感 runtime TOML；邮件业务策略及已接管的 operations 参数重启后生效。
 runtime_config_file = "runtime/admin.toml"
 
 # 可选区块：Worker OTLP/HTTP tracing；省略整个区块等同于关闭导出。
@@ -29,11 +26,10 @@ queue_capacity = 256
 # 可选：采样比例百万分率；启用时范围 1-1000000，关闭时默认为 0。
 sample_ratio_ppm = 0
 
-# 可选区块：Auction 主循环调度策略；省略时 PostgreSQL 并发为 8、SQLite Lite 为 1，其余沿用旧版默认值。
+# 可选区块：Auction 主循环调度策略；省略时使用默认值。
 [worker]
-# 本仓库示例引用 SQLite secrets.toml，因此这里显式使用 1；PostgreSQL 部署可改为 8 或直接省略。
-# 可选：Auction 主循环并发数，范围 1-batch_limit；PostgreSQL 默认 8，SQLite Lite 默认且只允许 1。
-concurrency = 1
+# 可选：Auction 主循环并发数，范围 1-batch_limit，默认 8。
+concurrency = 8
 # 可选：Auction 主循环及兼容 owner 的轮询间隔秒数，范围 1-86400，默认 60。
 poll_interval_seconds = 60
 # 可选：生命周期和结算各自的单轮批次上限，范围 1-1000，默认 100。
@@ -120,7 +116,7 @@ runtime_directory = "/run/hv-auction/worker"
 # 可选：规范化绝对 Unix socket 路径；默认 /run/hv-auction/worker/control.sock。
 socket_path = "/run/hv-auction/worker/control.sock"
 
-# 可选区块：E-Hentai 论坛主题同步；默认关闭。启用后只在 PostgreSQL 完整档进行远程读写。
+# 可选区块：E-Hentai 论坛主题同步；默认关闭，启用后进行远程读写。
 [worker.forum]
 # 可选：是否启用主题创建/幂等查找；默认 false。
 enabled = false
@@ -151,7 +147,7 @@ item_timeout_seconds = 240
 # 可选：单个论坛发布 claim 的租约秒数；必须大于 item_timeout_seconds，默认 300。
 lease_duration_seconds = 300
 
-# 可选区块：MoogleMail 入站轮询；默认关闭。启用后只在 PostgreSQL 完整档发送远程 GET。
+# 可选区块：MoogleMail 入站轮询；默认关闭，启用后发送远程 GET。
 [worker.mooglemail]
 # 可选：是否启用 MoogleMail Worker；默认 false，避免配置不完整时触发外部请求。
 enabled = false
@@ -202,7 +198,7 @@ sender_allowlist = []
 # 可选：明确设为 true 才读取所有发件人详情；生产环境应保持 false。
 sender_allowlist_disabled = false
 
-# 可选区块：MoogleMail 异常原始数据诊断归档；默认启用，仅完整档 Worker 使用。
+# 可选区块：MoogleMail 异常原始数据诊断归档；默认启用。
 [worker.mooglemail.diagnostics]
 # 可选：是否保存远端拒绝/异常响应的原始诊断数据；默认 true。
 enabled = true
@@ -276,7 +272,7 @@ operations_alert = "Operations alert: {summary}"
 # 可选：明确设为 true 才允许读取该额外世界的所有发件人详情。
 # sender_allowlist_disabled = false
 
-# 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭，只在 PostgreSQL 完整档运行。
+# 可选区块：运维告警扫描与 MoogleMail 通知；默认关闭。
 [worker.operations_alert]
 # 可选：是否启用 operations alert；默认 false。启用时必须配置 recipient。
 enabled = false

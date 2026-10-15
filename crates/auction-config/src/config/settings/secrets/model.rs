@@ -13,7 +13,7 @@ use super::database::{PostgresConnectionConfig, resolve_database_url};
 pub(crate) struct SecretFileConfig {
     /// PostgreSQL 独立连接字段；不能与兼容的 `database_url` 同时提供。
     pub(crate) database: Option<PostgresConnectionConfig>,
-    /// SQLite 或旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
+    /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
     /// Redis 连接串；仅启用 Redis 缓存时需要。
     pub(crate) redis_url: Option<String>,

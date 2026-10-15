@@ -1,7 +1,4 @@
-//! Admin lot 列表读取适配器。
-//!
-//! PostgreSQL 完整档在同一 Serializable 快照中读取拍卖生命周期、lot、装备和投稿来源。
-//! SQLite Lite 当前没有完整的 Admin 生命周期投影，因此明确返回能力缺失，不拼装默认字段。
+//! Admin lot 列表、详情及生命周期只读投影；不拼装默认字段冒充权威状态。
 
 use auction_application::{
     AdminLotListRequest, AdminLotPage, AdminLotReader, ApplicationError, ApplicationFuture,
@@ -25,10 +22,6 @@ impl AdminLotReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Admin lot 列表仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

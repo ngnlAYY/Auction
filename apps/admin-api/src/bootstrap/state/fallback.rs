@@ -18,7 +18,7 @@ pub(super) async fn configure_state(
     let security = config::configure_security(config)?;
     let worker_control = config::configure_worker_control(config);
     if config.database_url().is_some() {
-        anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
+        anyhow::bail!("admin-api 配置了数据库，但当前制品未编译 postgres feature");
     }
     Ok((
         AdminApiState::new(

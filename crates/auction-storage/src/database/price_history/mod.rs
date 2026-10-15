@@ -1,7 +1,4 @@
-//! Public 成交价格历史只读适配器装配。
-//!
-//! PostgreSQL 完整档从结算事实链读取成交历史；SQLite Lite 没有 settlement owner，因此显式
-//! 报告能力缺失，不能只凭可手工写入的 `settled`/`sold` 状态拼装看似完整的成交记录。
+//! 从 PostgreSQL 结算事实链读取成交价格历史，不以当前状态重算已结算结果。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicPriceHistoryListRequest, PublicPriceHistoryPage,
@@ -29,10 +26,6 @@ impl PublicPriceHistoryReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "公开价格历史仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

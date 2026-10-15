@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod database;
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+#[cfg(not(feature = "postgres"))]
 mod fallback;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod heartbeat;
 
 use auction_config::AppConfig;
@@ -19,17 +19,17 @@ pub(super) async fn configure_state(
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
 ) -> anyhow::Result<(AdminApiState, Option<Arc<auction_observability::HeartbeatPublisher>>)> {
-    #[cfg(any(feature = "postgres", feature = "sqlite"))]
+    #[cfg(feature = "postgres")]
     {
         database::configure_state(config, tracing_health, metrics).await
     }
-    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+    #[cfg(not(feature = "postgres"))]
     {
         fallback::configure_state(config, tracing_health, metrics).await
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 /// 启动 Admin API 的周期 heartbeat。
 pub(super) fn spawn_heartbeat(
     publisher: Arc<auction_observability::HeartbeatPublisher>,

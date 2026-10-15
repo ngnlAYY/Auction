@@ -1,7 +1,4 @@
-//! Admin 审计读取适配器的装配与稳定端口。
-//!
-//! 两个后端都只读追加式 `audit_records`，不向管理端暴露数据库内部行；具体查询和 SQLite
-//! 类型转换分别位于后端子模块。
+//! Admin 审计端口装配；只读 PostgreSQL 的追加式 audit_records，不暴露数据库行。
 
 use auction_application::{
     AdminAuditListRequest, AdminAuditPage, AdminAuditPort, ApplicationError, ApplicationFuture,
@@ -9,12 +6,8 @@ use auction_application::{
 
 use super::DatabaseStore;
 
-#[cfg(feature = "sqlite")]
-mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 impl AdminAuditPort for DatabaseStore {
     fn list(&self, request: AdminAuditListRequest) -> ApplicationFuture<'_, AdminAuditPage> {
@@ -27,8 +20,6 @@ impl AdminAuditPort for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => sqlite::list_sqlite(store, request).await,
             }
         })
     }

@@ -65,16 +65,16 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     )
     .await
     .context("configure public-api state")?;
-    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+    #[cfg(not(feature = "postgres"))]
     let _ = realtime_relay;
     let state = state.with_metrics(metrics);
     let realtime_shutdown_state = state.clone();
-    #[cfg(any(feature = "postgres", feature = "sqlite"))]
+    #[cfg(feature = "postgres")]
     let mut heartbeat_task =
         heartbeat.as_ref().map(Arc::clone).map(state::spawn_heartbeat).map(TaskGuard::new);
-    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+    #[cfg(not(feature = "postgres"))]
     let mut heartbeat_task: Option<TaskGuard<()>> = None;
-    #[cfg(any(feature = "postgres", feature = "sqlite"))]
+    #[cfg(feature = "postgres")]
     let mut realtime_relay_task = realtime_relay
         .map(|relay| {
             state::spawn_realtime_relay(
@@ -83,7 +83,7 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
             )
         })
         .map(TaskGuard::new);
-    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+    #[cfg(not(feature = "postgres"))]
     let mut realtime_relay_task: Option<TaskGuard<()>> = None;
     // 传入本二进制的版本，健康检查才能报告运行进程的版本而非契约 crate 的版本。
     let boundary = state.http_boundary();

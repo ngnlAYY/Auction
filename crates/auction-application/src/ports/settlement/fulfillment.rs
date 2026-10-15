@@ -327,8 +327,7 @@ pub enum SettlementFulfillmentPhaseResult<T> {
 
 /// 结算履约调度的窄存储端口。
 ///
-/// PostgreSQL 完整档负责领取、租约 fencing、prepared delivery 的幂等落表和失败退避。SQLite
-/// Lite 没有这组完整履约表时必须显式返回能力缺失，不能退化成内存队列。
+/// PostgreSQL 负责领取、租约 fencing、prepared delivery 幂等落表和失败退避，不退化成内存队列。
 pub trait SettlementFulfillmentStore: Send + Sync {
     fn claim_due(
         &self,

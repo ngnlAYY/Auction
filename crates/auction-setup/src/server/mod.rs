@@ -256,9 +256,7 @@ async fn check_database(
     {
         Ok(Ok(store)) => {
             // 首次空库迁移要求无其他客户端；主动关闭连通性检查池，不遗留后台关闭窗口。
-            if let Some(pool) = store.postgres_pool() {
-                pool.close().await;
-            }
+            store.postgres_pool().close().await;
             Ok(())
         }
         _ => Err(error(StatusCode::SERVICE_UNAVAILABLE, "database_unavailable")),

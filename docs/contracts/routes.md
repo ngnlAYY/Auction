@@ -19,7 +19,8 @@
 
 `auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。当前 feature API 为
 Public **21** 个、Admin **44** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
-清单描述注册与契约，实际档位和运行证据见[验证状态](../status.md)。
+当前仅支持 PostgreSQL。保留已发布路径、字段、错误码和未装配能力的错误处理。
+源码能力和运行证据见[验证状态](../status.md)。
 
 首次部署另有独立进程的 `/setup`、部署码验证接口和两个配置接口，不属于 Public/Admin feature API 计数；
 正式 Admin 进程不注册它们，`/setup` 在正式静态入口中返回 404。
@@ -125,7 +126,7 @@ P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代�
 | --- | --- | --- | --- | --- | --- |
 | P01 | GET | /api/v1/worlds | 公开 | 200 | 400, 503/504 |
 | P02 | GET | /api/v1/rules | 公开；`lang` 可选 | 200 | 400, 503 |
-| P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；PostgreSQL/SQLite 从持久化事件表回放 | 200 | 400, 404, 503/504 |
+| P03 | GET | /api/v1/events | 公开读取；由 auction boundary 校验；从持久化事件表回放 | 200 | 400, 404, 503/504 |
 | P04 | GET/CONNECT | /api/v1/ws | Public session；只读服务端推送；连接范围必须明确 | HTTP/1.1 101；HTTP/2 200 | 400, 401, 403, 404, 429, 503/504 |
 | P05 | GET | /api/v1/blacklist | 公开；页码分页 | 200 | 400, 503/504 |
 | P06 | POST/GET/DELETE | /api/v1/session | POST 登录；GET/DELETE 会话边界 | 200 | 400, 401, 403, 409, 429, 503/504 |
@@ -152,7 +153,7 @@ P21 使用 `PublicForumSyncStatusResponse`，成功响应固定为 `code=ok`、`
 不依赖当前世界或当前拍卖是否存在。布尔值来自 Worker 按 `[worker.forum].enabled` 发布的非敏感心跳
 字段，仅采纳数据库时钟下未过期且非 `stopping` 的 Worker：任一明确 true 表示启用，所有有效实例
 均明确 false 才表示关闭。没有实例、旧版心跳缺字段或无法证明开关值时返回 `503 forum_sync_unavailable`；
-未装配存储或查询失败返回 `503 storage_unavailable`，SQLite Lite 返回 `501 feature_not_supported`。
+未装配存储或查询失败返回 `503 storage_unavailable`。
 启用状态不表示主题已经发布或扫描成功；真实楼层仍由 P15 的 `processed_through_post_number` 提供。
 Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍状态，且关闭时不挂载 P15 轮询；
 未知和请求失败显示不可用并允许重试，不解释为关闭。升级须同时更新 Worker、Public API 与公开端产物。
@@ -196,9 +197,8 @@ thread/post ID，则增加规范 `source_post_url`。链接身份不得由楼层
 历史论坛事实楼层未知时只标记论坛来源，不从 post ID 猜测。
 P09/P11 的 preview/live 装备投影可选返回按 `Strength, Dexterity, Agility, Endurance,
 Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺少对应属性时省略而不是伪造。
-P12 在 PostgreSQL 完整档保留 `name`、`world`、
-日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；SQLite Lite
-因为没有 settlement 事实链固定返回 `501 feature_not_supported`，不能把状态列或空集合当作成交证明。
+P12 保留 `name`、`world`、日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计。
+成交读取必须基于 settlement 事实链，不能把状态列或空集合当作成交证明。
 
 P03/P04 的查询、事件 JSON、`after` 游标、缺口高水位、会话复核、配额与关闭 code/reason 统一由
 [事件契约](events.md)登记。P03 是持久化 Catch-up，P04 是服务端单事件推送；发现流必须显式指定
@@ -211,8 +211,6 @@ P03/P04 的查询、事件 JSON、`after` 游标、缺口高水位、会话复�
 裁掉尾随零，整秒不附加 `.000000`。P18-P20 从历史命令账本重放时还必须
 保留账本字符串原有的 offset 与纳秒精度，同时以解析后的 UTC instant 做一致性校验。该规则不
 改变 PostgreSQL 关系字段的微秒精度，也不改变 Admin 既有的固定六位微秒投影。
-SQLite 的当前拍卖、实时预检、lot 列表和详情按时间值而非文本词法比较开拍计划，兼容空格格式和
-RFC3339。该比较只决定 `preview`/`opening` 展示，不赋予竞价权限，不改变生命周期写入。
 
 ## Admin
 
@@ -248,8 +246,8 @@ RFC3339。该比较只决定 `preview`/`opening` 展示，不赋予竞价权限�
 | A23 | GET | /api/v1/admin/realtime/failures/{failure_id} | 200 | 400, 401, 404, 501, 503/504 |
 | A24 | POST | /api/v1/admin/realtime/failures/{failure_id}/replay | 200 | 400, 401, 403, 404, 409, 413, 415, 500, 501, 503/504 |
 | A25 | GET/POST/PUT | /api/v1/admin/rules | GET 可带可选 `lang`；GET/POST/PUT 200；创建时 201 | 400, 401, 403, 404, 409, 413/415, 501, 503/504 |
-| A26 | GET/PUT | /api/v1/admin/config | GET/PUT 200；Lite 501 | 400, 401, 403, 409, 413/415, 501, 503/504 |
-| A27 | POST | /api/v1/admin/config:validate | 200；Lite 501 | 400, 401, 403, 413/415, 501, 503/504 |
+| A26 | GET/PUT | /api/v1/admin/config | GET/PUT 200 | 400, 401, 403, 409, 413/415, 501, 503/504 |
+| A27 | POST | /api/v1/admin/config:validate | 200 | 400, 401, 403, 413/415, 501, 503/504 |
 | A28 | GET/POST/PATCH | /api/v1/admin/users | GET 200；POST 201；PATCH 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
 | A29 | GET | /api/v1/admin/renames | 200 | 400, 401, 503/504 |
 | A30 | POST | /api/v1/admin/renames/{rename_id}/revert | 200 | 400, 401, 403, 404, 409, 413/415, 503/504 |
@@ -361,17 +359,17 @@ SQLx 错误或 TOML 正文。数据库检查只确认连接，不建库、不迁
 P02 接受可选 `lang`，缺失语言回退英文；P05 为安全黑名单页码投影。P07 的数字/keyset 分页、
 P10 world/lot 筛选及 P12 成交统计遵守上文分页契约。P09 保留 v1 preview/live 互斥数组、分类统计、
 页码及拍卖上下文；P11 只返回当前允许公开的 lot。P13/P14 返回补偿池批次、余额守恒摘要、opaque
-keyset cursor 与单场账本页，PostgreSQL 从同一 Serializable 快照读取，Lite 返回 501。
+keyset cursor 与单场账本页，从同一 Serializable 快照读取。
 
 P09/P11 在 PostgreSQL 按 lot/equipment/world 校验密文后短暂解密，直接在既有 `game_equipment_url`
 返回固定 HentaVerse origin 的完整 URL；10 位 key 可供用户主动导航，但不得写日志、审计、事件或持久化缓存，
-响应 `no-store`、全局 `no-referrer`。Lite 保留 200 投影并留空 URL，不伪造 keyless 链接。
+响应 `no-store`、全局 `no-referrer`，不伪造 keyless 链接。
 
-P15 读取本地论坛镜像的源/内容版本、真实连续楼层、同步/最近成功时间及有界安全错误，Lite 返回 501。
+P15 读取本地论坛镜像的源/内容版本、真实连续楼层、同步/最近成功时间及有界安全错误。
 `/forum` 仅在 P21 明确启用后轮询 P15：`pending`/`publishing` 每次完成后等 2 秒，`published` 等 30 秒，
 发布后显示“当前同步到 #xx”；失败暂停并提供人工重试。首页不轮询，不把本地镜像当作远端成功证明。
 
-P06 会话、P16/P17 账户/代理读取和 P18–P20 竞价命令均有两后端适配。账户投影包含普通竞价、quota、
+P06 会话、P16/P17 账户/代理读取和 P18–P20 竞价命令使用 PostgreSQL 适配。账户投影包含普通竞价、quota、
 转换历史、最近 proxy bid 与 owner capability。P20 使用稳定 `command_id`/`request_hash`；P18/P19
 返回完整 `{ authorization: ... }`，quota、转换历史和终止原因与命令结果同事务冻结，不在提交后另读账户，
 也不暴露账本 payload。未知结果必须重放原命令，详见[幂等不变量](invariants.md#i-01-命令账本是权威幂等边界)。
@@ -380,11 +378,11 @@ P06 会话、P16/P17 账户/代理读取和 P18–P20 竞价命令均有两后�
 
 A01 使用 Basic Auth、CSRF 和持久化会话。Admin 每次装配数据库会话服务先永久撤销全部旧会话，失败则
 阻止启动；重启须重新登录。随机 token 摘要用 HMAC-SHA256 绑定当前 actor/secret，读取再核对 actor，
-不额外存凭据摘要。换凭据或恢复旧配置都不能复活撤销 token，两后端复用原表/撤销标记，Public 不受影响。
+不额外存凭据摘要。换凭据或恢复旧配置都不能复活撤销 token，复用原表/撤销标记，Public 不受影响。
 同库多 Admin 必须使用相同凭据；任一实例启动会撤销既有会话，轮换须先停全部旧凭据实例。
 浏览器每次成功确认后重新安排检查，即使绝对到期使 `expires_at` 不变；业务 401 触发确认，网络错误不当作退出。
 
-除下文另述外，下列拍卖管理/报表为 PostgreSQL 完整档，Lite 返回 `501 feature_not_supported`：
+拍卖管理与报表契约如下：
 
 | 接口 | 读取或写入契约 |
 | --- | --- |
@@ -413,14 +411,14 @@ A39 只允许 `draft`/`preview`，请求含 `command_id`、`expected_state_versi
 Preview 原样保留已发生的预览时间，其余在未来。完整档 Serializable 事务按 world、scheduled round、auction
 加锁，同步计划列、结束策略快照、调度记录、账本、审计与 `auction.schedule_updated`。未过期且有 owner 的
 租约拒绝修改；实际变更时清除过期租约或无 owner 的失败退避并递增 round 版本，阻断陈旧 Worker 写回。
-事件 v1 字段不变，只唤醒权威快照重读；其他状态及 Lite 不提供修改。
+事件 v1 字段不变，只唤醒权威快照重读；其他状态不提供修改。
 
 A34–A37 为完整档 delivery 安全列表、状态筛选、数字页及 release/retry/reconcile，携带 fencing version 和
 独立账本。reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败码；实际允许的动作受下节证明门禁约束。
 列表从 send payload 投影 COD，从 outcome metadata 投影 `reason_code`、`take_required`、`returned_mail_id`，
 不返回原文。`take_required=false` 省略，客户端缺失按 false，显式 null/非布尔仍无效。命令只推进本地状态，
 不伪造远端回执；基础通知、结算 Send、入站 Return/Take 与 Sent/Balance 核对由 Worker 执行，缺 exact remote ID
-进入人工复核。Lite 返回 501，未装配 owner 明确报告能力缺失。
+进入人工复核。未装配 owner 明确报告能力缺失。
 
 ### 投递对账与远端证明
 
@@ -446,12 +444,12 @@ A14 为 PostgreSQL 完整档的版本 fence、证据复核、账本、退款激�
 结算为获胜 lot 同事务建立 recovery case，Worker 按 `case → return → action → relist → refund` 持久化处理。
 已付款退货的退款确认要求 handoff 义务为 `ready` 且未满足，仍须完整取回证据；不能以付款前 `blocked` 状态替代。
 Delivery 人工 retry/reconcile-retry 在原命令事务恢复匹配的 Recovery action 与父任务阻断，不改变外部成功证明门禁。
-Lite 返回 501；真实 MoogleMail 回执与部署运行证据见[验证状态](../status.md)，静态接入不等于外部流程验收。
+真实 MoogleMail 回执与部署运行证据见[验证状态](../status.md)，静态接入不等于外部流程验收。
 
-A21–A24、A43 在两后端提供事件元数据、lag/failure 与 replay 安全边界，未装配端口返回 501。
+A21–A24、A43 提供事件元数据、lag/failure 与 replay 安全边界，未装配端口返回 501。
 A24 命令重放、兼容 ID 派生与追加事件/审计见[事件契约](events.md#worker-消费游标与重放边界)，不代表外部广播成功。
 A25 的 GET、POST 候选校验和 PUT 发布由规则 owner 拥有；PUT 以 `command_id`、`expected_revision`、
-请求摘要在 Serializable 事务做 revision CAS、账本与审计。Lite 只提供 GET，发布返回 501。
+请求摘要在 Serializable 事务做 revision CAS、账本与审计。
 
 ### 论坛预览与审计读取
 
@@ -463,8 +461,7 @@ catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页�
 历史 schema，不是当前写入 owner。这些能力不属于该预览接口的职责。
 A33 `/api/v1/admin/audit` 已接入 Admin session 和只读安全投影，保留 actor/action/entity/source/result
 等精确筛选、occurred 时间范围、keyset opaque cursor 与 `page` 数字分页；数字页在同一数据库
-读取事务内取得 total 与记录，keyset 页不伪造 total。metadata 仅允许 JSON object，SQLite Lite
-也从同名追加式审计表读取。
+读取事务内取得 total 与记录，keyset 页不伪造 total。metadata 仅允许 JSON object，数据来自追加式审计表。
 
 ### 拍品管理与撤拍义务
 
@@ -475,11 +472,11 @@ A13 `PATCH /api/v1/admin/lots/{lot_id}` 已接入 Admin session、CSRF、空查�
 还会创建 `withdrawn_return` 义务及 pending/send fulfillment，由 Worker 在事务提交后将该 lot
 的原装备在原世界单独寄给原卖家，Credits/COD 均为零。成功响应只确认撤拍和寄回义务入队，
 不表示远端已经寄达；投递与领取证明继续由履约流程确认。成功响应为 `200` 的
-`{ lot: ... }` 安全投影，SQLite Lite 明确返回 `501 feature_not_supported`。
+`{ lot: ... }` 安全投影。
 
 ### Dashboard 与 readiness
 
-A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和两套数据库的
+A02 `/api/v1/admin/dashboard` 已接入 Admin session、严格空查询校验和 PostgreSQL 的
 `service_heartbeats` 安全读取，health/process section 返回真实心跳聚合；Worker control 通过
 配置的 Unix socket 读取 live/ready/status，并将 unavailable/timeout/incompatible/rejected
 映射为有限 condition，不暴露 transport 错误正文。mail、realtime、delivery section 已分别
@@ -500,7 +497,7 @@ section 也已接入安全投影。所有已登记 dashboard section 都有 owne
 A16-A19 Admin 邮件首片已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、
 严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、
 `command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、
-`mail_admin_commands` 与追加审计。SQLite Lite 对这组能力明确返回 `501 feature_not_supported`。
+`mail_admin_commands` 与追加审计。
 列表 A17 的展示字段仅增加可空 `sender`/`subject` 与 `has_message_display`，不返回正文；A18
 详情返回同样的 `sender`、`subject`，并且 `message_display` 只返回 schema/redaction version、已脱敏正文、附件外部 ID、Credits 和 COD；
 被拒绝装备邮件还可返回非权威 `equipment_diagnostic`，包含装备 ID、1-based 附件位置、stage/category、可选 detail_code、
@@ -514,8 +511,7 @@ A20 远程轮询触发在至少一个邮箱已装配时返回 `202 accepted`：�
 与单个 `command_id` 校验后，经 Worker control 全局唤醒已装配 poller，并返回 `command_id` 与
 `pollers`。空快照时返回 `409 poll_rejected`；手动触发会让已暂停邮箱执行一次领取，但不会修改
 `paused` 状态，也不会隐式恢复自动轮询。该响应只表示当前 Worker 接受了本轮调度唤醒，不表示外部读取已经完成；Worker
-后续仍以持久化 lease 执行实际 MoogleMail GET。SQLite Lite 明确返回
-`501 feature_not_supported`。
+后续仍以持久化 lease 执行实际 MoogleMail GET。
 
 
 ### Runtime 配置与文件事务
@@ -531,10 +527,9 @@ A26/A27 Admin runtime 配置已接入 PostgreSQL 完整档：GET 返回非敏感
 运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还包含兼容
 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为
 启动快照。MoogleMail transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置
-拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。SQLite Lite 不拥有这项完整命令账本/原子更新能力，相关接口返回
-`501 feature_not_supported`。Admin 重启后，`allow_manual_early_open` 与
+拥有；敏感 TOML、Cookie、密钥和数据库连接串不进入该文档。Admin 重启后，`allow_manual_early_open` 与
 `allow_manual_early_settlement` 会分别决定人工提前开放、人工提前结算 capability 和对应的锁内校验；
-两个开关都默认关闭，计划时间已到的正常开放仍然允许，SQLite Lite 不声明人工提前结算 capability。
+两个开关都默认关闭，计划时间已到的正常开放仍然允许。
 `[equipment_source]` 会冻结为
 装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时，以及 Admin 手工录入的
 可交易装备开关；后者默认关闭且不放宽来源安全或邮件过滤。固定 HTTPS origin、无重定向、精确 world
@@ -575,7 +570,7 @@ A40/A41 将数据库 `worlds.enabled` 与 Admin runtime 中只控制 Worker/Moog
 `expected_policy_revision`，在 PostgreSQL Serializable 事务中先锁 world，再拒绝任何
 `draft`/`preview`/`live`/`final`/`settling` 拍卖或仍可领取的活动 `scheduled_rounds`，随后以
 revision CAS 更新状态，并把通用命令账本和追加审计与状态同事务提交。相同状态是可重放的有审计
-no-op，不递增 revision；SQLite Lite 只提供目录读取，启停明确返回 `501 feature_not_supported`。
+no-op，不递增 revision。
 
 
 ### 用户、改名与黑名单
@@ -586,7 +581,7 @@ Admin A28 `/api/v1/admin/users` 已接入 Admin session、CSRF、列表筛选分
 `showuser` 账号 ID。A30 `/api/v1/admin/renames/{rename_id}/revert` 已接入改名记录校验、
 state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PUT/DELETE 已接入黑名单当前状态、
 追加历史、版本 fence 和审计。三组命令的 key 明文不会进入命令账本、审计或错误响应。A29
-`GET /api/v1/admin/renames` 继续提供 PostgreSQL/SQLite 的改名历史安全投影，并额外返回当前
+`GET /api/v1/admin/renames` 继续提供改名历史安全投影，并额外返回当前
 用户版本供 A30 建立 fence；管理端 `/users` 页面已提供列表、创建、改名、论坛账号 ID 修改、key
 撤销/重签、黑名单和改名回滚操作。
 回滚首次按精确 `user_id` 读取版本并冻结包含理由、版本与 `command_id` 的完整请求；
@@ -599,7 +594,7 @@ state-version fence、命令账本和名称占用冲突处理；A31 黑名单 PU
 A32 `/api/v1/admin/credentials` 已接入 Admin session、origin/CSRF、`command_id` 和
 `expected_state_version`，支持 `mail_cookie`/`forum_cookie` 的安全投影列表、导入、改名、启停
 和删除。secret 只在应用加密边界短暂存在，不进入响应、审计、命令结果或页面；该路由要求
-PostgreSQL 完整档与独立 `credential_data_key`，SQLite 或未配置密钥时返回
+PostgreSQL 与独立 `credential_data_key`，未配置密钥时返回
 `501 feature_not_supported`。Worker 的 active 凭据读取不属于浏览器 DTO，`.keyenv` 只作为兼容
 回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用同类第二条
 时返回 `409 credential_conflict`，调用方必须先通过同一路由停用旧记录并重启 Worker 完成交接。
@@ -621,7 +616,7 @@ Origin、CSRF 与 mutation 限流；尽管使用 POST 防止跨站/预取触发�
 各站点请求起始间隔至少 2 秒，每个范围连同等待最多 5 秒、响应最多 2 MiB。
 并发检查返回 `429 rate_limited`（`Retry-After: 2`）。探测前后复核数据库版本；
 变化返回 `409 stale_credential_state`，删除返回 404。密钥/校验适配器失败返回 503，
-SQLite 或未装配端口返回 `501 feature_not_supported`。
+未装配端口返回 `501 feature_not_supported`。
 结果为当次观测、响应 `no-store`，不落库、不回显 Cookie/账号/余额/HTML，不保证后续请求可用。
 
 ## 契约变更规则

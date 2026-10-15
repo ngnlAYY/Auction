@@ -1,6 +1,6 @@
 //! MoogleMail 结算履约 evidence reader 与不可用降级端口。
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::*;
 #[cfg(feature = "postgres")]
 use serde::Serialize;
@@ -240,13 +240,13 @@ impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) struct UnavailableFulfillmentEvidenceReader;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) struct UnavailableFulfillmentCustodyReader;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl SettlementFulfillmentCustodyReader for UnavailableFulfillmentCustodyReader {
     fn read_custody(
         &self,
@@ -258,7 +258,7 @@ impl SettlementFulfillmentCustodyReader for UnavailableFulfillmentCustodyReader 
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl SettlementFulfillmentEvidenceReader for UnavailableFulfillmentEvidenceReader {
     fn read_sent(
         &self,

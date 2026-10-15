@@ -10,11 +10,13 @@
 ## 系统边界
 
 Auction Rust 在一个 Cargo workspace 内实现领域、用例、数据库适配、HTTP、浏览器及后台任务。
+原生平台仅 Linux x86_64，限制由五个 `apps/*` 装配根的编译期守卫拥有；正式发布 GNU/glibc，
+不承诺其他 OS/架构或 musl 发布档。浏览器仍以 `wasm32-unknown-unknown` 构建，不把原生限制放入共享领域/契约。
 Public、Admin、Worker 保留独立进程；`auctionctl` 承担配置、迁移和运维。可选
 [auction-server](../apps/server/README.md) 复用三个 app 的 lib 入口，以同一个二进制自管三个子进程；
 仅该合并制品允许同时包含两端资源，Public/Admin HTTP router 仍按类型隔离资源。默认分体发布不变。
 实现与验收不依赖外部源码仓库。
-PostgreSQL、SQLite、Redis、反向代理和系统服务作为外部组件，不受仓库全 Rust 语言约束。
+PostgreSQL、Redis、反向代理和系统服务作为外部组件，不受仓库全 Rust 语言约束。
 
 ```mermaid
 flowchart TD
@@ -25,8 +27,7 @@ flowchart TD
     Storage[auction-storage] --> App
     Integrations[auction-integrations] --> App
     Cache[auction-cache] --> App
-    Storage --> PG[(PostgreSQL 完整档)]
-    Storage --> Lite[(SQLite Lite)]
+    Storage --> PG[(PostgreSQL)]
     Integrations --> Remote[E-Hentai / MoogleMail]
     Cache --> Redis[(可选 Redis)]
 ```
@@ -41,7 +42,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态与结算守恒 | [README](../crates/auction-domain/README.md) |
 | auction-application | 用例、事务编排、命令幂等与窄端口 | [README](../crates/auction-application/README.md) |
 | auction-contracts | REST/实时 DTO、错误、分页与版本 | [README](../crates/auction-contracts/README.md) |
-| auction-storage | SQL、连接池、锁、账本、追加迁移和后端差异 | [README](../crates/auction-storage/README.md) |
+| auction-storage | PostgreSQL SQL、连接池、锁、账本与追加迁移 | [README](../crates/auction-storage/README.md) |
 | auction-cache | 可重建数据的 disabled/Redis 适配器 | [README](../crates/auction-cache/README.md) |
 | auction-integrations | 论坛、邮件、装备来源、凭据加密与外部证明 | [README](../crates/auction-integrations/README.md) |
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](../crates/auction-jobs/README.md) |
@@ -61,29 +62,20 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 
 ## 部署档位与能力
 
-敏感 TOML 的 `[database]` 五项连接参数选择 PostgreSQL 完整档，由 `auction-config` 的
-`settings/secrets/database.rs` 校验并生成内部 URL；兼容的 `database_url` 按 scheme 选择档位，
-两种输入不能混用。对应驱动必须显式编译，不使用 `sqlx::Any` 隐藏差异。
+当前只支持 PostgreSQL。敏感 TOML 的 `[database]` 或兼容 `database_url` 由 `auction-config`
+校验，两种输入不能混用；字段与 scheme 见[配置说明](../ops/config/README.md)。驱动仍须显式启用 `postgres`。
 
-| 能力 | PostgreSQL 完整档 | SQLite Lite |
-| --- | --- | --- |
-| 拓扑 | 独立进程，具备并发及多进程存储边界；具体扩展需验证 | 单主机，每角色至多一个实例，Worker 并发 1 |
-| 关键竞价/生命周期写入 | Serializable、显式行锁、最多三次序列化冲突尝试 | `BEGIN IMMEDIATE` 串行写事务 |
-| 竞价、代理、会话与共有审计 | 支持 | 支持已声明子集，正确性不降级 |
-| Public 目录、lot、bid-log、账户 | 权威读投影 | 共有投影；装备真实 URL 留空 |
-| 成交价格历史、补偿、结算、履约、recovery | 完整事实链 | 不支持；状态列不能充当结算证明 |
-| Admin 用户、改名、黑名单、审计 | 支持 | 已实现共有能力 |
-| Admin realtime 元数据、lag/failure/replay | 支持 | 已实现共有能力 |
-| Admin 规则 | 读取、候选校验与发布 | 只读 |
-| runtime 管理命令、world 启停、完整 Admin 录入/报表 | 支持 | 不提供完整档命令；world 目录可读 |
-| 外部凭据、论坛、邮件和告警 | 完整档 owner | 不提供对应外部业务链 |
-| 持久化生命周期与慢速代理 | 支持；另有结算 workflow | 支持 Lite 阶段，不启用结算 workflow |
-| 灾备与 canonical v28 接管 CLI | 显式完整档流程 | 不使用 PostgreSQL 维护流程 |
-| 单文件 supervisor / 首次确认后初始化 | Linux 单主机；专用空库迁移与三角色进程编排，无新增业务表 | 不支持该变体 |
+| 能力 | 实现边界 |
+| --- | --- |
+| 分体拓扑 | Public、Admin、Worker 独立进程；具备并发及多进程存储边界，具体扩展需验证 |
+| 竞价与生命周期 | Serializable、显式行锁、最多三次序列化冲突尝试；持久调度、慢速代理与结算 workflow |
+| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影 |
+| Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
+| 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner |
+| 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化 |
 
-各路由的具体成功和缺失状态以[HTTP 契约](contracts/routes.md)为准。表中“支持”描述代码能力，不代表运行验收。
-新增持久化能力必须先在本表登记完整档、Lite 或两者，再决定迁移与端口范围。
-SQLite 文件只能位于受支持的本地文件系统，不能以共享网络文件系统实现扩展。
+本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
+新增持久化能力先登记范围与 owner，再更新[对象契约](contracts/schema.md)、迁移和端口。
 
 ## 命令、事务与事实
 
@@ -105,7 +97,7 @@ Recovery 人工重试投影由 storage 的 recovery_commands owner 维护；Deli
 ## Worker 与外部副作用
 
 Worker 只负责持久调度、重试与执行时机。due、游标、attempt、lease、fencing 及命令结果由数据库持有；
-队列领取和业务事务各守自己的隔离边界。Final 与调度完成 fence 同事务提交。两后端的
+队列领取和业务事务各守自己的隔离边界。Final 与调度完成 fence 同事务提交。
 `scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源；历史及无时区手工轮次保留 UTC 周期。
 关闭世界阻止新场次，不取消已有履约/恢复；drain 后各 owner 停止领取。
 
@@ -126,9 +118,9 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 | --- | --- |
 | 凭据与装备链接 | 敏感配置/专属加密适配；日志、事件及审计不记录 secret。P09/P11 核对归属后短暂解密装备 URL，响应 `no-store`，不缓存 |
 | 邮件审查 | 只返回安全投影，原始异常证据独立加密，见[诊断说明](operations/mail-diagnostics.md) |
-| A44 Cookie 校验（仅 PostgreSQL） | application 前后复核版本，storage 返回信封，integrations 执行受限 HTTPS GET；不持久化结果、不取得 Worker 写入所有权、不改 active/invalid |
-| Admin 会话（两后端） | 启动永久撤销旧会话，token 摘要绑定 actor/secret；数据库保存摘要与撤销状态，重启需重新登录，Public 不受影响 |
-| Public 长连接会话（两后端） | 应用只读 inspect 端口与 storage 权威查询，HTTP 决定复核周期/预算；不续期，不把真值放 Hub 或缓存 |
+| A44 Cookie 校验 | application 前后复核版本，storage 返回信封，integrations 执行受限 HTTPS GET；不持久化结果、不取得 Worker 写入所有权、不改 active/invalid |
+| Admin 会话 | 启动永久撤销旧会话，token 摘要绑定 actor/secret；数据库保存摘要与撤销状态，重启需重新登录，Public 不受影响 |
+| Public 长连接会话 | 应用只读 inspect 端口与 storage 权威查询，HTTP 决定复核周期/预算；不续期，不把真值放 Hub 或缓存 |
 | 缓存 | 默认关闭，仅加速 Public 规则；有限 TTL/超时/并发，miss、损坏、不可用及失效失败回源 |
 
 精确鉴权与状态码见[HTTP 契约](contracts/routes.md)，缓存预算见[适配器说明](../crates/auction-cache/README.md)。

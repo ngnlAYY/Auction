@@ -6,13 +6,9 @@
 use auction_application::ApplicationError;
 #[cfg(feature = "postgres")]
 use sqlx::Connection;
-#[cfg(feature = "sqlite")]
-use sqlx::SqliteConnection;
 use uuid::Uuid;
 
 use super::common::storage_error;
-#[cfg(feature = "sqlite")]
-use super::common::{SqliteRealtimeTransaction, uuid_blob, uuid_from_blob};
 #[cfg(feature = "postgres")]
 pub(super) async fn acknowledge_postgres(
     connection: &mut sqlx::PgConnection,
@@ -106,99 +102,5 @@ async fn acknowledge_postgres_inner(
     .execute(&mut **transaction)
     .await
     .map_err(|_| storage_error("解决 PostgreSQL 实时消费失败记录失败"))?;
-    Ok(())
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) async fn acknowledge_sqlite(
-    store: &super::super::SqliteStore,
-    consumer_key: &str,
-    stream_key: &str,
-    event_id: Uuid,
-    stream_sequence: i64,
-) -> Result<(), ApplicationError> {
-    let connection =
-        store.pool().acquire().await.map_err(|_| storage_error("打开 Lite 实时游标事务失败"))?;
-    let mut transaction = SqliteRealtimeTransaction::begin(connection).await?;
-    let result = acknowledge_sqlite_inner(
-        transaction.connection_mut()?,
-        consumer_key,
-        stream_key,
-        event_id,
-        stream_sequence,
-    )
-    .await;
-    match result {
-        Ok(()) => transaction.commit().await,
-        Err(error) => {
-            let _ = transaction.rollback().await;
-            Err(error)
-        }
-    }
-}
-
-#[cfg(feature = "sqlite")]
-async fn acknowledge_sqlite_inner(
-    connection: &mut SqliteConnection,
-    consumer_key: &str,
-    stream_key: &str,
-    event_id: Uuid,
-    stream_sequence: i64,
-) -> Result<(), ApplicationError> {
-    let current = sqlx::query_scalar::<_, i64>(
-        "SELECT last_sequence
-         FROM realtime_consumer_offsets
-         WHERE consumer_key = ? AND stream_key = ?",
-    )
-    .bind(consumer_key)
-    .bind(stream_key)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|_| storage_error("读取 Lite 实时消费游标失败"))?
-    .unwrap_or(0);
-    let stored_event_id = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT event_id FROM realtime_events
-         WHERE stream_key = ? AND stream_sequence = ?",
-    )
-    .bind(stream_key)
-    .bind(stream_sequence)
-    .fetch_optional(&mut *connection)
-    .await
-    .map_err(|_| storage_error("校验 Lite 实时事件序号失败"))?
-    .map(|value| uuid_from_blob(value, "Lite 实时事件标识"))
-    .transpose()?;
-    if stored_event_id != Some(event_id) {
-        return Err(storage_error("Lite 实时事件不存在或 stream 不匹配"));
-    }
-    if stream_sequence > current {
-        let expected =
-            current.checked_add(1).ok_or_else(|| storage_error("Lite 实时消费游标溢出"))?;
-        if stream_sequence != expected {
-            return Err(storage_error("Lite 实时消费游标不能跳过事件"));
-        }
-        sqlx::query(
-            "INSERT INTO realtime_consumer_offsets
-                (consumer_key, stream_key, last_sequence, updated_at)
-             VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-             ON CONFLICT(consumer_key, stream_key) DO UPDATE
-             SET last_sequence = excluded.last_sequence, updated_at = CURRENT_TIMESTAMP",
-        )
-        .bind(consumer_key)
-        .bind(stream_key)
-        .bind(stream_sequence)
-        .execute(&mut *connection)
-        .await
-        .map_err(|_| storage_error("写入 Lite 实时消费游标失败"))?;
-    }
-    sqlx::query(
-        "UPDATE realtime_failures
-         SET resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)
-         WHERE consumer_key = ? AND event_id = ? AND replay_event_id IS NULL",
-    )
-    .bind(consumer_key)
-    .bind(uuid_blob(event_id))
-    .execute(&mut *connection)
-    .await
-    .map_err(|_| storage_error("解决 Lite 实时消费失败记录失败"))?;
     Ok(())
 }

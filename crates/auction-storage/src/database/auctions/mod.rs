@@ -1,7 +1,4 @@
-//! Public 拍卖只读查询的跨后端端口装配。
-//!
-//! PostgreSQL/SQLite 查询、行映射和请求边界分别由子模块拥有；这里把两套列表示差异收敛到
-//! `AuctionReader` 的稳定实现，HTTP 层不直接接触 SQL 行或后端类型。
+//! Public 拍卖查询的端口装配；PostgreSQL 查询、行映射和请求边界由子模块拥有。
 
 use super::DatabaseStore;
 use auction_application::{
@@ -13,8 +10,6 @@ use uuid::Uuid;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 impl AuctionReader for DatabaseStore {
     fn list_public_auctions(
@@ -25,8 +20,6 @@ impl AuctionReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::list(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => sqlite::list(store, request).await,
             }
         })
     }
@@ -39,8 +32,6 @@ impl AuctionReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::current(store, &world_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => sqlite::current(store, &world_id).await,
             }
         })
     }
@@ -55,8 +46,6 @@ impl AuctionReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     postgres::realtime_status(store, auction_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => sqlite::realtime_status(store, auction_id).await,
             }
         })
     }

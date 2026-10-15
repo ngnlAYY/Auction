@@ -1,8 +1,4 @@
-//! PostgreSQL 论坛回帖导入存储的模块装配。
-//!
-//! 论坛命令先落入本地账本，再由 Worker 调用现有竞价端口。主题/身份查询、命令账本、扫描
-//! 游标和输入校验分别由子模块负责；本 owner 不直接改变竞价状态，SQLite Lite 明确不提供
-//! 这条完整档能力。
+//! 论坛回帖的持久化游标、输入校验与应用端口分派；不直接改变竞价状态。
 
 use auction_application::{
     ApplicationFuture, ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord,
@@ -37,8 +33,6 @@ use queries::{
     active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
     lot_targets_postgres,
 };
-#[cfg(feature = "sqlite")]
-use validation::capability_error;
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
     MAX_FORUM_ACCOUNT_ID_BYTES, MAX_PLAYER_NAME_BYTES, MAX_REPLY_BATCH_SIZE, MAX_THREAD_ID_BYTES,
@@ -69,8 +63,6 @@ impl ForumReplyStore for DatabaseStore {
                     claim_published_topics_postgres(store, &worker_id, now, lease_until, limit)
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -83,8 +75,6 @@ impl ForumReplyStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => lot_targets_postgres(store, auction_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -96,8 +86,6 @@ impl ForumReplyStore for DatabaseStore {
         player_name: String,
     ) -> ApplicationFuture<'_, ForumBidderIdentity> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = world;
             if !valid_decimal_id(&external_account_id, MAX_FORUM_ACCOUNT_ID_BYTES)
                 || !valid_text(&player_name, MAX_PLAYER_NAME_BYTES)
             {
@@ -110,8 +98,6 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     resolve_bidder_postgres(store, world, &external_account_id, &player_name).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -130,8 +116,6 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     active_proxy_postgres(store, lot_id, user_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -147,8 +131,6 @@ impl ForumReplyStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => begin_command_postgres(store, record).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -174,8 +156,6 @@ impl ForumReplyStore for DatabaseStore {
                     finish_command_postgres(store, command_id, &status, &error_code, &safe_detail)
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -194,8 +174,6 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     command_outcomes_postgres(store, auction_id, &thread_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -213,8 +191,6 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     super::sync::load_current_snapshot_postgres(store, auction_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -262,8 +238,6 @@ impl ForumReplyStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -307,8 +281,6 @@ impl ForumReplyStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -351,8 +323,6 @@ impl ForumReplyStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -384,8 +354,6 @@ impl ForumReplyStore for DatabaseStore {
                     fail_topic_scan_postgres(store, &topic, failed_at, retry_at, &failure_code)
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }

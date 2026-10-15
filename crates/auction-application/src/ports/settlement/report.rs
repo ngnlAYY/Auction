@@ -82,8 +82,7 @@ pub struct SettlementReport {
 
 /// Admin 结算报告读取端口。
 ///
-/// PostgreSQL 完整档实现同一数据库快照读取结算摘要与 lot 明细；SQLite Lite 明确不提供
-/// 结算表和外部履约语义，调用方必须把能力缺失报告为 501，而不是返回空报告。
+/// 在同一数据库快照读取结算摘要与 lot 明细，不以空报告掩盖读取失败。
 pub trait SettlementReportReader: Send + Sync {
     fn settlement_report(
         &self,

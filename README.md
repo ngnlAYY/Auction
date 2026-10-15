@@ -4,7 +4,8 @@ Auction Rust 是面向论坛生态的全 Rust 拍卖系统，包含公开竞价�
 论坛同步和 MoogleMail 的 Worker。业务规则、接口、持久化格式与部署流程由本仓库独立定义。
 
 浏览器使用 Dioxus 客户端渲染；Public、Admin 的 WASM 产物分别内嵌到各自后端。
-PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Redis 缓存默认关闭。
+数据库仅支持 PostgreSQL，Redis 缓存默认关闭。
+原生程序当前仅支持 **Linux x86_64**（正式发布 GNU/glibc），编译期拒绝其他 OS/架构；浏览器 WASM 保留。
 
 ## 从哪里开始
 
@@ -35,6 +36,9 @@ PostgreSQL 提供完整档，SQLite 提供单主机、低并发 Lite 子集，Re
 ## 构建与检查
 
 仓库工具链固定在 [rust-toolchain.toml](rust-toolchain.toml)，依赖解析固定在 [Cargo.lock](Cargo.lock)。
+后端 release 默认 opt-level=3、Fat LTO、单 CGU，保留 panic 展开和通用 CPU 基线；WASM 保持体积优化，
+不把编译参数视为最佳性能证明。
+完整[依赖审计与取舍](docs/tech-stack.md#2026-10-15-全依赖审计)包含剩余风险和验证范围。
 从仓库根目录执行：
 
 ```bash
@@ -53,7 +57,7 @@ just release-check --single-binary
 ```
 
 `apps/*` 的默认 Cargo feature 不包含数据库驱动或 Web 资源。自行运行 `cargo` 时必须明确选择
-`postgres` 或 `sqlite`；需要页面时还要先构建前端并启用 `web-embed`。不能把无驱动编译成功当成
+`postgres`；需要页面时还要先构建前端并启用 `web-embed`。不能把无驱动编译成功当成
 可连接数据库的部署制品。
 
 运行前按[配置说明](ops/config/README.md)准备公共、角色和权限受限的敏感 TOML，替换示例占位值。

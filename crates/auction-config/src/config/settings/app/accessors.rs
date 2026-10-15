@@ -9,11 +9,9 @@ impl AppConfig {
         self.secrets.database_url.as_ref().map(SecretString::expose_secret)
     }
 
-    /// 返回当前数据库档位下的有效 Worker 并发；SQLite Lite 的省略值固定为 1。
+    /// 返回有效 Worker 并发；省略时使用 8。
     pub fn worker_concurrency(&self) -> u16 {
-        self.worker.concurrency.unwrap_or_else(|| {
-            if self.database_url().is_some_and(database_url_is_sqlite) { 1 } else { 8 }
-        })
+        self.worker.concurrency.unwrap_or(8)
     }
 
     /// 返回有效的 Worker 轮询间隔秒数；省略时沿用旧版 60 秒。

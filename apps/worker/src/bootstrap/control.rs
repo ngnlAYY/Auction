@@ -2,13 +2,13 @@
 
 use super::*;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 struct WorkerHeartbeatHealth {
     database: Arc<dyn HeartbeatHealthReader>,
     control: WorkerControlHandle,
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl HeartbeatHealthReader for WorkerHeartbeatHealth {
     fn readiness(&self) -> auction_observability::HeartbeatReadinessFuture<'_> {
         Box::pin(async move { self.database.readiness().await && self.control.is_ready() })
@@ -19,7 +19,7 @@ impl HeartbeatHealthReader for WorkerHeartbeatHealth {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn worker_heartbeat_health(
     database: Arc<dyn HeartbeatHealthReader>,
     control: WorkerControlHandle,
@@ -42,14 +42,14 @@ pub(super) fn worker_control_server_config(
     .map_err(|error| anyhow::Error::msg(error.to_string()))
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn abort_worker_task(task: &Option<TaskGuard<()>>) {
     if let Some(task) = task {
         task.abort();
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) async fn join_worker_task(task: &mut Option<TaskGuard<()>>, name: &'static str) {
     let Some(task) = task else {
         return;
@@ -81,7 +81,7 @@ where
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));

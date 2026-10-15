@@ -1,8 +1,4 @@
-//! PostgreSQL recovery 确认事务适配器。
-//!
-//! A14 只允许在锁定 recovery、原拍卖、lot/equipment、相关 obligation 和 action 后执行。命令
-//! 账本、退款激活、guarded relist、状态版本、审计以及预览目录事件都在同一 Serializable
-//! 事务内完成；SQLite Lite 明确返回能力缺失。
+//! 恢复命令的 PostgreSQL 装配；应用规则、幂等、追加事实与审计在同一事务内完成。
 
 #[cfg(feature = "postgres")]
 use std::collections::BTreeMap;
@@ -75,10 +71,6 @@ impl RecoveryResolutionStore for DatabaseStore {
                 Self::Postgres(store) => advance_relist_postgres(store.pool(), now, retry_after)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery relist Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -100,10 +92,6 @@ impl RecoveryResolutionStore for DatabaseStore {
                 Self::Postgres(store) => complete_refund_postgres(store.pool(), now)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery refund Worker 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -124,10 +112,6 @@ impl RecoveryCommandRepository for DatabaseStore {
                 Self::Postgres(store) => {
                     confirm_postgres(store.pool(), command).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery 确认仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

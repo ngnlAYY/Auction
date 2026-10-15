@@ -83,7 +83,18 @@ pub(super) fn resolve_database_url(
         (Some(database), None) => Some(database.connection_url()?),
         (None, database_url) => database_url,
     };
-    value.map(|value| SecretString::new("database_url", value)).transpose()
+    value
+        .map(|value| {
+            // 仅接受 PostgreSQL 协议；拒绝未知协议且不回显连接串，不静默切换数据库。
+            let postgres = value.split_once(':').is_some_and(|(scheme, _)| {
+                scheme.eq_ignore_ascii_case("postgres") || scheme.eq_ignore_ascii_case("postgresql")
+            });
+            if !postgres {
+                return Err(ConfigError::InvalidDatabaseConfig("database_url"));
+            }
+            SecretString::new("database_url", value)
+        })
+        .transpose()
 }
 
 fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(), ConfigError> {
