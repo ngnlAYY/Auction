@@ -120,12 +120,14 @@ socket_path = "/run/hv-auction/worker/control.sock"
 [worker.forum]
 # 可选：是否启用主题创建/幂等查找；默认 false。
 enabled = false
+# 可选：是否额外逐字校验固定帖原始 BBCode；默认 false，帖子身份和写入回执始终校验。
+verify_post_body = false
 # 可选：active ForumCookie 凭据 scope，可填 main、isekai 或 shared；默认 shared。
 credential_world = "shared"
 # 可选：固定论坛 endpoint；省略时使用生产 endpoint。测试时可使用回环 HTTP。
 # endpoint = "https://forums.e-hentai.org"
-# 可选：公开端 origin；配置后论坛主题会附带拍卖页面绝对链接，例如 https://auction.example.invalid。
-# public_base_url = "https://auction.example.invalid"
+# 可选：公开端 HTTPS origin；默认省略且不显示 Auction address，配置后以可点击 BBCode 展示当期拍卖 URL。
+public_base_url = "https://auction.ngnl.host"
 # 可选：是否使用旧版测试板块 4；生产环境必须为 false。
 test_board_mode = false
 # 可选：单轮同步上限，范围 1-100，默认 100。

@@ -1,7 +1,12 @@
-//! Admin 论坛拍卖预览 HTTP 适配器。
+//! Admin 论坛预览与本地同步状态 HTTP 适配器。
 //!
 //! 处理器只负责 Admin session/CSRF、请求体边界、稳定 DTO 映射和错误状态；论坛语法解析由
 //! `auction-integrations::ForumPreviewAdapter` 完成，预览成功不代表已经发布远程论坛。
+
+#[path = "forum/status.rs"]
+mod status;
+
+pub(crate) use status::{get, sync_status};
 
 use std::net::SocketAddr;
 

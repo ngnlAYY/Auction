@@ -1,5 +1,30 @@
 # Admin English copy.
 
+admin-forum-title = Forum sync status
+admin-forum-readonly-note = Refresh reads local status only. It does not retry publication or authorize forum writes.
+admin-forum-auction = Auction on this page
+admin-forum-refresh = Refresh forum status
+admin-forum-loading = Loading forum status…
+admin-forum-disabled = Forum sync is disabled.
+admin-forum-missing = No forum projection is available for this auction.
+admin-forum-pending = Pending
+admin-forum-publishing = Publishing
+admin-forum-published = Published
+admin-forum-failed = Failed — refresh does not retry publication
+admin-forum-status = Status: { $status }
+admin-forum-progress = Processed through post
+admin-forum-updated-at = Status updated
+admin-forum-content-error = Fixed-post refresh error: { $code }
+admin-forum-link = Open forum topic
+admin-forum-content-title = Forum body details
+admin-forum-source-revision = Source revision
+admin-forum-content-revision = Fixed-post revision
+admin-forum-content-synced-at = Fixed posts synchronized
+admin-forum-last-success-at = Last complete scan
+admin-forum-error-at = Last content error
+admin-forum-body-summary = View local target body (BBCode)
+admin-forum-body-note = This is the locally saved target body. It may differ from the text saved by the forum.
+
 setup-listener = Service listening ports
 setup-listener-help = Both services bind only to 127.0.0.1. These ports do not change the current setup endpoint or automatically update the site origins above. Update reverse proxy upstreams or SSH tunnels accordingly. Checking does not probe port availability or binding permissions.
 setup-public-listener-port = Public listening port

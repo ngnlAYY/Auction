@@ -31,6 +31,13 @@ pub fn forum_system_log_marker(auction_id: AuctionId) -> String {
     format!("auction-system-log-v1:{}", auction_id.as_uuid())
 }
 
+/// 比较固定楼层的原始 BBCode，仅兼容论坛保存时去掉正文末尾 CR/LF 的行为。
+///
+/// 正文内部的换行、空格及 BBCode 仍须逐字相等，不能用宽泛的空白折叠掩盖内容差异。
+pub fn forum_post_bodies_match(observed_body: &str, expected_body: &str) -> bool {
+    observed_body.trim_end_matches(['\r', '\n']) == expected_body.trim_end_matches(['\r', '\n'])
+}
+
 /// 论坛远程操作的安全失败分类。
 ///
 /// 只保存稳定错误码和重试栅栏，不保存远端 URL、Cookie、响应正文或提交正文。
@@ -73,10 +80,10 @@ impl ForumRemoteError {
     }
 }
 
-/// 单次论坛内容扫描的远端写入进度；仅记录是否存在尚未回读确认的 POST。
+/// 单次论坛内容扫描的远端写入进度；仅记录是否存在尚未确认的 POST。
 ///
-/// 传输适配器必须在预读、限速和凭据校验全部完成、即将发送 POST 时标记；调用方只有在
-/// 原始正文回读与冻结目标完全相等后才能确认。该对象不替代持久化的未知结果门禁。
+/// 传输适配器在预读、限速和凭据校验全部完成、即将发送 POST 时标记。调用方必须取得精确帖子回执；
+/// 启用正文校验时还须经 [`forum_post_bodies_match`] 确认原始正文。该对象不替代持久化的未知结果门禁。
 #[derive(Debug, Clone, Default)]
 pub struct ForumWriteProgress {
     unconfirmed: Arc<AtomicBool>,
@@ -88,12 +95,12 @@ impl ForumWriteProgress {
         self.unconfirmed.store(true, Ordering::Release);
     }
 
-    /// 原始正文已回读证明与目标一致，解除本轮这一笔写入的未知标记。
+    /// 已取得精确帖子回执及配置要求的正文证明，解除本轮这一笔写入的未知标记。
     pub fn confirm_write(&self) {
         self.unconfirmed.store(false, Ordering::Release);
     }
 
-    /// 返回本轮是否已经发送过尚未通过权威回读确认的 POST。
+    /// 返回本轮是否已经发送过尚未通过所选确认策略的 POST。
     pub fn has_unconfirmed_write(&self) -> bool {
         self.unconfirmed.load(Ordering::Acquire)
     }
@@ -206,6 +213,15 @@ pub struct ForumPublishedThread {
     pub thread_url: String,
 }
 
+/// 创建请求的结果来源；找到同标题旧主题不等于已发送本轮目录正文。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForumTopicPublication {
+    /// 实际 POST 创建成功且远端主题回执匹配。
+    Created(ForumPublishedThread),
+    /// 只读精确标题命中；固定帖内容仍需证明或人工授权更新。
+    Existing(ForumPublishedThread),
+}
+
 /// 编辑论坛主题元数据；`None` 字段保持服务器现值。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumTopicMetadata {
@@ -260,13 +276,14 @@ pub struct ForumWriteRetryAuthorizationResult {
 
 /// 论坛同步存储端口。
 pub trait ForumSyncStore: Send + Sync {
-    /// 领取 due 任务；恢复水位只放行当前 Worker 首轮之前的凭据失败，`None` 表示内存池不可用。
+    /// 领取 due 任务；启动恢复水位只放行首轮前的凭据失败及未知写入只读对账，`None` 表示凭据不可用。
+    /// 恢复必须将原失败码传入 claim，不授予 POST 权限；待人工写入授权的任务仍不领取。
     fn claim_due(
         &self,
         worker_id: String,
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
-        credential_recovery_before: Option<DateTime<Utc>>,
+        startup_recovery_before: Option<DateTime<Utc>>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumSyncClaim>>;
 
@@ -314,11 +331,12 @@ pub trait ForumPublisher: Send + Sync {
         title: String,
     ) -> ApplicationFuture<'_, Option<ForumPublishedThread>>;
 
+    /// 创建或找到既有主题，必须明确本轮是否实际完成创建 POST。
     fn create_topic(
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
-    ) -> ApplicationFuture<'_, ForumPublishedThread>;
+    ) -> ApplicationFuture<'_, ForumTopicPublication>;
 }
 
 /// 固定论坛楼层写入端口；实现必须校验 exact thread/post 身份并保持 POST 后未知结果栅栏。
@@ -353,6 +371,7 @@ pub trait ForumPostWriter: Send + Sync {
     ) -> ApplicationFuture<'_, ForumPublishedPost>;
 
     /// 从已校验的编辑表单读取服务端保存的原始 BBCode；只读操作允许轮换失效凭据。
+    /// 启用正文校验时统一通过 [`forum_post_bodies_match`] 比较，不得用布局标记或本地版本替代。
     fn read_post_body(
         &self,
         world: SettlementWorld,

@@ -106,7 +106,8 @@ pub(super) async fn process_command(
         }
         Err(error) => {
             let detail = bounded_detail(error.to_string());
-            finish(runtime, command_id, "rejected", "command_rejected", &detail).await?;
+            let code = super::rejection::rejection_code(&error);
+            finish(runtime, command_id, "rejected", code, &detail).await?;
         }
     }
     if succeeded && command.notify.as_deref().is_some_and(|mode| !mode.is_empty()) {

@@ -65,6 +65,10 @@ Admin 读取不为补全投影临时写入。邮件展示和诊断 sidecar 均�
 Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。
 主动 Send 要求新增、唯一且完整匹配的 Sent 证明；流拍/撤拍逐件 Send 原装备，历史冻结 Return 不改写。
 论坛未知 POST 先精确只读对账，再按持久人工授权重试；真实处理楼层独立于内容版本和 post ID。
+`forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填或改写历史拒绝。
+新拒绝分类由 jobs owner 提供，仍经原 pending → rejected 条件更新收口；无需新增列或迁移。
+论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，原失败码进入 claim；不领取 `write_authorization_required`，
+不伪造远端证明，updated_at 超过水位后只能走正常 due/lease 门禁。
 Delivery Admin 重试由 `recovery_commands/commands/delivery_retry.rs` 在原 Serializable 命令事务恢复匹配的 Recovery
 父子失败投影并推进 fencing；不生成成功证明、不清除其他动作阻断。证明规则见[不变量](../../docs/contracts/invariants.md)。
 

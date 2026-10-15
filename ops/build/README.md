@@ -111,3 +111,53 @@ Admin 重启经 Requires 联动 Public，Worker invocation 未变；已记录这
 配置内容/权限指纹不变，无迁移/恢复或真实 Cookie/业务验证。原备份和旧程序留在目标私有
 update-20261012T130030Z/，脱敏副本在 `target/operations-evidence/ryzen-7950x-cookie-update-20261012T130030Z/`。
 此记录发生在候选封存后，仅证明切换、资源身份与就绪；临时 HTTP 和完整生产验收缺口保持不变。
+
+### 2026-10-15 Ryzen 完整分体重编
+
+按本页命令独立构建双端 wasm-release，再用 `ryzen-7950x.toml` 链接 Public、Admin、Worker、auctionctl，
+启用 PostgreSQL/Redis，仅 Public/Admin 各自启用 web-embed；不含可选合并 server。包含本轮论坛修复，边界见
+[论坛验证记录](../../docs/status.md#2026-10-15-论坛正文回读与限定恢复)。Rust 1.99.0、dx 0.7.10、glibc 2.41，未增加 CPU/环境覆盖。
+
+最终候选为 `target/amd-artifacts/auction-ryzen-7950x-20261015T090012Z-dirty-verified/`，同名 `.tar.gz` 为 28,453,472 字节，
+SHA-256：`d05a570bc432552bd9eab094ade1ecc31d5011a9d8ce53b6dee9bcb10f036c42`。
+包内有四程序、配置示例、CPU 配置、源码/锁图身份、构建日志、资源清单及静态核验；不含实际凭据。
+首次候选封装时发现 `bin` 被改名为 `bin1`，原目录保留，不作为交付证据；最终 verified 包从已核验构建输出重新封装。
+
+编译前冻结提交与脏树指纹，Web/后端阶段均复核。四程序 Cargo 指纹的 rustflags 与所选配置逐项一致；
+双端各 6 个 payload 文件的哈希、单组 WASM/JS、内嵌标记及对端资源缺失核验通过，Worker 依赖不含 Web crate。
+readelf 静态核对四程序为 x86-64 GNU ELF，三个角色最高引用 GLIBC 2.34、auctionctl 2.39；
+动态库仅 libgcc_s.so.1、libm.so.6、libc.so.6。包内 34 项文件哈希与归档内容一致，两次独立归档逐字节相同。
+
+本记录在候选封存后追加，不回写构建前源码指纹。此为未提交工作树的定向候选，不是正式干净树通用发布。
+未执行 AVX-512 候选、自动化行为测试、目标机部署或服务重启；不证明论坛恢复、真实业务或性能验收。
+
+### 2026-10-15 论坛开关与管理端刷新候选
+
+后续完整重编为 `target/amd-artifacts/auction-ryzen-7950x-20261015T103022Z-forum-fix-dirty/`，同名 `.tar.gz` 为
+28,479,665 字节，SHA-256 `ae2c69216e9fad0bcc0f68fc0d8b519da0f7ba012537cfb00862b940cbefdf16`，旁附 `.sha256`。
+包含四程序、双端 wasm-release 页面、配置示例及静态证据，正文开关默认关闭和管理端只读刷新见
+[本轮状态](../../docs/status.md#2026-10-15-论坛校验开关与管理端状态刷新)。
+
+`just verify` 通过；构建前指纹 `254bdf38860758337e07a0e99863b3994004d641d8afea815cfa4620d6901697`
+在 Web/原生阶段保持一致。CPU/feature、内嵌资源隔离、Worker 依赖、ELF/ABI 核对通过；glibc 下限仍为整包 2.39。
+包内 33 项文件哈希、归档成员和两次归档逐字节一致性通过。Worker SHA-256 为
+`98135fdcc182a67b4853c4b8bf40c20f06a0f322b88157cdf77efaf93a63f30c`。
+
+本记录在封存后追加，不回写构建前指纹。未执行候选、行为测试、部署或再次恢复授权；已有人工门禁不会由更新自动清除。
+
+### 2026-10-15 论坛摘要与正文展示分离候选
+
+按相同 CPU/feature 配置完整重编，候选为
+`target/amd-artifacts/auction-ryzen-7950x-20261015T114009Z-forum-ui-dirty/`，同名 `.tar.gz` 为
+28,480,976 字节，SHA-256 `3cd6244b6c01ddc4acbf5f5cd8f81800a8fd5a1dd7c64a059b496d215d30adb3`，旁附 `.sha256`。
+Public 内嵌页改为同步摘要与状态行右侧主题链接；正文及诊断移入 Admin 拍卖区，详见[本轮记录](../../docs/status.md#2026-10-15-论坛摘要与正文展示分离)。
+
+`just verify`、双端 wasm-release、四程序 Release 构建通过；源码指纹
+`5ce65ebcc9192b6fcd4ebc8adf29171b9aed4583852b40d5aae3a9088a936d7c` 在构建阶段保持一致。
+CPU/feature、ELF/ABI、资源隔离、Worker 依赖和新版页面样式归属静态核验通过；整包 glibc 下限仍为 2.39。
+包内 34 项文件哈希与归档成员一致，两次独立归档逐字节相同。
+Public SHA-256 为 `cc4e7dc0915449d42bbf89e9076f566bf443f552ce6df68ab738e9da6e2a78e6`；
+Admin 为 `e33a56a0bbca93498b97d2453824522af84aeb9ec8981de6a3067a9ea09ada9f`。
+Worker/auctionctl 与上一论坛修复包哈希相同，本次界面变化不要求再次论坛恢复授权。
+
+本记录在封存后追加，不回写构建前指纹。未运行候选、行为测试、浏览器或执行云端部署/重启；不是浏览器布局验收。

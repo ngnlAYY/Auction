@@ -289,9 +289,10 @@ pub use forum_sync::{
     ForumPostWriter, ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread,
     ForumPublisher, ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread,
     ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
-    ForumSystemLogEntry, ForumTopicMetadata, ForumWriteProgress,
+    ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumWriteProgress,
     ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
-    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_system_log_marker, forum_world_name,
+    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_post_bodies_match,
+    forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,

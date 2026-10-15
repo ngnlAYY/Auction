@@ -6,6 +6,8 @@ use serde::Deserialize;
 pub struct ForumSyncWorkerConfig {
     /// 是否启用论坛主题创建/幂等查找；默认关闭，避免配置不完整时触发远程 POST。
     pub enabled: bool,
+    /// 是否额外回读并逐字校验固定帖原始 BBCode；默认关闭，不影响帖子身份及写入回执校验。
+    pub verify_post_body: bool,
     /// active ForumCookie 凭据所属的 world scope；允许 main、isekai 或 shared。
     pub credential_world: String,
     /// 可选固定论坛 endpoint；省略时使用 `https://forums.e-hentai.org`。
@@ -38,6 +40,7 @@ impl Default for ForumSyncWorkerConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            verify_post_body: false,
             credential_world: "shared".to_owned(),
             endpoint: None,
             public_base_url: None,

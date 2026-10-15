@@ -33,6 +33,9 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
 
 ## 路由与源码布局
 
+[admin/forum/status.rs](src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，复用应用只读端口和 contracts 安全 DTO。
+两条状态路由均严格空查询、`no-store`，不访问远端论坛、不执行恢复授权；Public 既有读取路由保持不变。
+
 `http/mod.rs` 与各 `mod.rs` 保持装配/导出职责，业务目录按查询、命令、映射及安全边界拆分。
 `shared/state/{public,admin}.rs` 分别持有两个表面的窄端口，不能互用管理与公开业务状态。
 

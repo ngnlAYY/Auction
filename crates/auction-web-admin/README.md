@@ -73,6 +73,13 @@ just web-build-admin
 
 ## 管理数据与命令
 
+拍卖页 `/auctions` 的论坛状态区可选择本页拍卖并手动刷新，只读取 Admin 认证 API 的本地安全投影。
+[src/app/auction/auctions/forum.rs](src/app/auction/auctions/forum.rs) 拥有选择与展示，
+[src/api/auction/forum.rs](src/api/auction/forum.rs) 拥有 GET 和 DTO 校验；切换拍卖隔离旧请求结果。
+刷新不重试发布、不推进 Worker 状态，也不能解除人工写入门禁；公开页不再提供此按钮。
+该区承接论坛标题、正文、源/内容版本、同步/扫描及错误时间和错误码。正文默认折叠，以转义 BBCode 纯文本显示，
+明确标为本地目标镜像而非远端逐字一致证明；沿用既有 DTO，不改变 Public API 字段。
+
 所有页面读取安全 DTO，动作按服务端 capability、版本/fencing、CSRF 与稳定 `command_id` 提交。
 相同负载失败重试复用原命令，成功后重读权威数据；浏览器不复制状态机、计算结算金额或推断外部回执。
 状态冲突、能力缺失、未知结果与普通依赖错误分别展示，不用假数据填充。

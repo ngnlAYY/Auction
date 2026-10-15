@@ -25,7 +25,7 @@ impl EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
-    ) -> Result<auction_application::ForumPublishedThread, EhentaiError> {
+    ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
         let mut session = self.credentials.begin()?;
         for _ in 0..MAXIMUM_CREDENTIAL_CANDIDATES {
             match self.client.create_topic(world, session.cookie(), rendered.clone()).await {
@@ -209,7 +209,7 @@ impl ForumPublisher for EhentaiGateway {
         &self,
         world: SettlementWorld,
         rendered: ForumRenderedThread,
-    ) -> ApplicationFuture<'_, ForumPublishedThread> {
+    ) -> ApplicationFuture<'_, auction_application::ForumTopicPublication> {
         Box::pin(async move {
             EhentaiGateway::create_topic(self, world, rendered)
                 .await

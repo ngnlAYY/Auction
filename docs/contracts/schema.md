@@ -178,6 +178,9 @@ PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛�
 post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以
 独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
 `processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。
+`auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
+应用读模型同时投影二者，Worker 按[安全英文展示规则](invariants.md#i-08-外部写入发生在本地提交之后)解释。
+旧通用拒绝不回填、不重新执行；复用既有列，无迁移，也不改变自然键、尝试次数或终态。
 
 MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件。
 证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通数据库投影

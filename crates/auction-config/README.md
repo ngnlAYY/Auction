@@ -110,6 +110,7 @@ Operations alert 仅在 PostgreSQL 完整档通过安全水位生成持久化批
 预算耗尽只能提交已完成连续前缀，未完成邮件不能被 cursor 跳过；单次 fetch 也可返回已验证的最旧详情前缀。
 
 论坛、邮件、发件人 allowlist、装备过滤及诊断归档的完整配置见[论坛与邮件](../../ops/config/README.md#论坛与邮件)。
+`worker.forum.verify_post_body` 是默认关闭的部署侧正文校验开关，不属于 runtime 的 `operations.forum` 接管范围。
 诊断目录/保留预算属于部署配置，runtime 不接管；原始数据只能按[邮件诊断规则](../../ops/mail-diagnostics.md)加密保存。
 
 ## Runtime 生效范围

@@ -14,6 +14,7 @@ use super::super::query::AuctionsQuery;
 use super::super::sort::{SortDirection, SortableTh, directed};
 use super::actions::{AdminAuctionNotice, AdminAuctionRow, auction_notice_label};
 use super::create::AdminAuctionCreateForm;
+use super::forum::AdminAuctionForumStatus;
 
 #[component]
 pub(super) fn AdminAuctionTable(
@@ -64,6 +65,9 @@ pub(super) fn AdminAuctionTable(
                         busy: intake_busy,
                         reload_generation,
                     }
+                }
+                if !is_empty {
+                    AdminAuctionForumStatus { auctions: page.auctions }
                 }
                 div { class: "admin-auction-table-wrap",
                     table { class: "admin-auction-table",

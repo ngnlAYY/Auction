@@ -121,38 +121,44 @@ pub(super) async fn configure_forum(
             equipment_secrets,
             EquipmentKeyOpener::new(equipment_data_key),
         ));
-    let sync = Some(auction_jobs::ForumSyncRuntime::new(
-        auction_jobs::ForumSyncPorts {
-            store: store_port,
-            credential_availability,
-            publisher,
-            reader: reader.clone(),
-            post_writer: post_writer.clone(),
-            renderer: renderer.clone(),
-            equipment_links: equipment_links.clone(),
-        },
-        forum_config.batch_size,
-        std::time::Duration::from_secs(forum_config.item_timeout_seconds),
-        forum_config.public_base_url.clone(),
-    )?);
+    let sync = Some(
+        auction_jobs::ForumSyncRuntime::new(
+            auction_jobs::ForumSyncPorts {
+                store: store_port,
+                credential_availability,
+                publisher,
+                reader: reader.clone(),
+                post_writer: post_writer.clone(),
+                renderer: renderer.clone(),
+                equipment_links: equipment_links.clone(),
+            },
+            forum_config.batch_size,
+            std::time::Duration::from_secs(forum_config.item_timeout_seconds),
+            forum_config.public_base_url.clone(),
+        )?
+        .with_post_body_verification(forum_config.verify_post_body),
+    );
     let reply_store: Arc<dyn ForumReplyStore> = store.clone();
     let commands: Arc<dyn CompetitionCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
     let notifier: Option<Arc<dyn MailDeliveryEnqueuer>> =
         if delivery_enabled { Some(store.clone()) } else { None };
-    let reply = Some(auction_jobs::ForumReplyRuntime::new(
-        auction_jobs::ForumReplyPorts {
-            store: reply_store,
-            reader,
-            writer: post_writer,
-            renderer,
-            equipment_links,
-            commands,
-            notifier,
-        },
-        forum_config.batch_size,
-        std::time::Duration::from_secs(forum_config.item_timeout_seconds),
-        forum_config.public_base_url.clone(),
-    )?);
+    let reply = Some(
+        auction_jobs::ForumReplyRuntime::new(
+            auction_jobs::ForumReplyPorts {
+                store: reply_store,
+                reader,
+                writer: post_writer,
+                renderer,
+                equipment_links,
+                commands,
+                notifier,
+            },
+            forum_config.batch_size,
+            std::time::Duration::from_secs(forum_config.item_timeout_seconds),
+            forum_config.public_base_url.clone(),
+        )?
+        .with_post_body_verification(forum_config.verify_post_body),
+    );
     Ok((sync, reply))
 }

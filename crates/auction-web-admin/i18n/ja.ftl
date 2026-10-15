@@ -1,4 +1,29 @@
 # 管理画面の日本語テキスト。
+admin-forum-title = フォーラム同期状況
+admin-forum-readonly-note = 更新はローカルの状態を読み取るだけです。投稿の再試行や書き込みの許可は行いません。
+admin-forum-auction = このページのオークション
+admin-forum-refresh = フォーラム状況を再取得
+admin-forum-loading = フォーラム状況を読み込み中…
+admin-forum-disabled = フォーラム同期は無効です。
+admin-forum-missing = このオークションのフォーラム同期情報はまだありません。
+admin-forum-pending = 待機中
+admin-forum-publishing = 投稿中
+admin-forum-published = 投稿済み
+admin-forum-failed = 失敗：状況の更新では投稿を再試行しません
+admin-forum-status = 状態：{ $status }
+admin-forum-progress = 処理済みの投稿番号
+admin-forum-updated-at = 状態の更新日時
+admin-forum-content-error = 固定投稿の更新エラー：{ $code }
+admin-forum-link = フォーラムのトピックを開く
+admin-forum-content-title = フォーラム本文の詳細
+admin-forum-source-revision = ソースリビジョン
+admin-forum-content-revision = 固定投稿リビジョン
+admin-forum-content-synced-at = 固定投稿の同期日時
+admin-forum-last-success-at = 最終完全スキャン
+admin-forum-error-at = 直近の本文エラー日時
+admin-forum-body-summary = ローカルの送信対象本文を表示（BBCode）
+admin-forum-body-note = これはローカルに保存された送信対象の本文です。フォーラムに保存された本文と完全に一致するとは限りません。
+
 setup-listener = 正式サービスの待受ポート
 setup-listener-help = 両サービスは 127.0.0.1 のみで待ち受けます。現在のセットアップ接続先は変わらず、上のサイト Origin も自動変更されません。リバースプロキシや SSH トンネルの転送先ポートも更新してください。確認ではポートの使用状況やバインド権限は検査しません。
 setup-public-listener-port = Public 待受ポート

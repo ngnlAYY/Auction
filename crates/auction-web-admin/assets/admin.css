@@ -2943,6 +2943,94 @@
   padding: var(--admin-space-compact) var(--space-2);
 }
 
+/* 状态刷新独立于拍卖表格，不挤占业务列或改变窄屏行结构。 */
+.admin-forum-status {
+  display: grid;
+  min-inline-size: 0;
+  gap: var(--space-2);
+  margin-block-end: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.admin-forum-status > h2,
+.admin-forum-status > p,
+.admin-forum-status dl {
+  margin: 0;
+}
+
+.admin-forum-status > h2 {
+  font-size: var(--text-lg);
+}
+
+.admin-forum-status > select {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.admin-forum-status > button {
+  justify-self: start;
+}
+
+.admin-forum-status dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-forum-status dd {
+  min-inline-size: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 诊断与正文留在管理端；原生折叠默认关闭，长 BBCode 换行且支持键盘滚动。 */
+.admin-forum-content {
+  display: grid;
+  min-inline-size: 0;
+  gap: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.admin-forum-content > h3,
+.admin-forum-content > h4,
+.admin-forum-content > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-forum-content__note {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.admin-forum-content__error {
+  color: var(--color-warning);
+}
+
+.admin-forum-content__body summary {
+  min-block-size: var(--size-target);
+  padding-block: var(--space-3);
+  color: var(--color-link);
+  cursor: pointer;
+}
+
+.admin-forum-content__body pre {
+  max-block-size: 28rem;
+  margin: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .admin-auction-world {
   inline-size: 4.625rem;
 }

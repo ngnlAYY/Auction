@@ -103,6 +103,8 @@ guarded relist 与退款完成由各 owner 的稳定命令、资产摘要和证�
 [`authorize-forum-write-retry`](../auctionctl/README.md#论坛与结算核验)显式授权。
 
 固定 #1/#2 的 exact post ID 和内容 lease 持久化后才处理 #3+；既有 #2 非系统标记时不覆盖。
+部署字段 `worker.forum.verify_post_body` 默认关闭，统一注入主题同步和回帖刷新；开启才额外逐字回读固定帖正文。
+两种模式都保留身份、回执及未知写入只读恢复规则；关闭不保证远端正文与目标镜像一致，详见[配置说明](../../ops/config/README.md#论坛与邮件)。
 论坛数字账号 ID 是稳定身份，用户名用于显示和 MM 收件；新作者可建立 revoked-key 的 `forum_only` 主体，
 不自动获 active Key。只导入普通 `bid`，`proxy`/`proxy lower` 静默忽略，`start/cancel` 和 PM-only `notify`
 仅作 warning；论坛读取、身份与渲染协议见[外部适配器](../../crates/auction-integrations/README.md)。

@@ -2,7 +2,7 @@
 
 use auction_application::{
     ForumCommandStatus, ForumRenderedPost, ForumSystemLogEntry, ForumTopicMetadata,
-    forum_catalog_marker, forum_system_log_marker,
+    forum_catalog_marker, forum_post_bodies_match, forum_system_log_marker,
 };
 
 use super::*;
@@ -220,14 +220,12 @@ pub(super) async fn process_topic(
             command_error.get_or_insert_with(|| repository_error("论坛命令账本仍有待重试记录"));
         }
         let Some(post_number) = post_number else { continue };
+        // 原始诊断只留本地；错误码及可识别的旧拒绝详情只能映射为白名单英文，不重放命令。
         let (code, detail) = match outcome.status {
-            ForumCommandStatus::Pending => (
-                "command_pending",
-                outcome.safe_detail.as_deref().unwrap_or("processing will retry"),
-            ),
-            ForumCommandStatus::Rejected => (
-                "command_rejected",
-                outcome.safe_detail.as_deref().unwrap_or("command was rejected"),
+            ForumCommandStatus::Pending => ("command_pending", "processing will retry"),
+            ForumCommandStatus::Rejected => super::rejection::rejection_message(
+                outcome.error_code.as_deref(),
+                outcome.safe_detail.as_deref(),
             ),
             ForumCommandStatus::Applied => unreachable!("已在上方排除 applied 状态"),
         };
@@ -343,13 +341,14 @@ async fn refresh_fixed_posts(
         .renderer
         .render_system_log(topic.auction_id, processed_through_post_number, system_entries)
         .map_err(|error| repository_error(&error.to_string()))?;
-    let catalog_changed = catalog.title != topic.title || catalog.body != topic.catalog_body;
-    let system_log_changed = system_log.body != topic.system_log_body;
+    let catalog_changed = catalog.title != topic.title
+        || !forum_post_bodies_match(&catalog.body, &topic.catalog_body);
+    let system_log_changed = !forum_post_bodies_match(&system_log.body, &topic.system_log_body);
     let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
     let reconciliation_only = topic.content_last_error_code.as_deref() == Some("write_unknown");
     if reconciliation_only {
-        // 本地旧正文不证明远端状态；即使重新渲染后已无变化，也必须回读两个固定楼层，
-        // 才能走会清除历史 unknown 的完成路径。该状态下正文不等只失败，绝不发新 POST。
+        // 未知结果不能仅凭本轮固定帖身份收敛，否则会把期间尚未发送的新出价镜像吞掉。
+        // 启用校验时须逐字回读；关闭时保留未知门禁，两种模式下都绝不重发未知 POST。
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
@@ -452,14 +451,16 @@ async fn reconcile_or_edit_fixed_post(
     expected: ForumRenderedPost,
     write_progress: &ForumWriteProgress,
 ) -> Result<(), ApplicationError> {
-    let current = runtime
-        .writer
-        .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
-        .await?;
-    if current.body == expected.body {
-        return Ok(());
+    if runtime.verify_post_body {
+        let current = runtime
+            .writer
+            .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+            .await?;
+        if forum_post_bodies_match(&current.body, &expected.body) {
+            return Ok(());
+        }
     }
-    // 上一轮 POST 结果未知时禁止盲目重发；只有远端正文已经等于目标值才可在上方收敛本地证明。
+    // 关闭正文校验不等于证明历史 POST 已完成；保留未知门禁，不重发，也不吞掉新的待发布镜像。
     if topic.content_last_error_code.as_deref() == Some("write_unknown") {
         return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
     }
@@ -477,12 +478,16 @@ async fn reconcile_or_edit_fixed_post(
     if proof.thread_id != topic.thread_id || proof.post_id != post_id {
         return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
     }
-    let observed = runtime
-        .writer
-        .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
-        .await?;
-    if observed.body != expected.body {
-        return Err(auction_application::ForumRemoteError::new("write_unknown", false, true).into());
+    if runtime.verify_post_body {
+        let observed = runtime
+            .writer
+            .read_post_body(topic.world, topic.thread_id.clone(), post_id.to_owned())
+            .await?;
+        if !forum_post_bodies_match(&observed.body, &expected.body) {
+            return Err(
+                auction_application::ForumRemoteError::new("write_unknown", false, true).into()
+            );
+        }
     }
     write_progress.confirm_write();
     Ok(())

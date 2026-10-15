@@ -32,7 +32,7 @@ pub struct ForumReplyTopic {
     pub content_claim_owner: String,
     pub content_claim_fencing: i64,
     pub content_lease_until: DateTime<Utc>,
-    /// 上一轮未恢复的安全错误码；`write_unknown` 要求先读远端正文再决定是否允许写入。
+    /// 上一轮未恢复的安全错误码；`write_unknown` 只能先只读对账，正文是否逐字核对由运行策略决定。
     pub content_last_error_code: Option<String>,
 }
 
@@ -69,6 +69,9 @@ pub struct ForumCommandOutcome {
     pub lot_code: String,
     pub command_kind: String,
     pub status: ForumCommandStatus,
+    /// 持久化拒绝分类；Worker 仅对白名单错误码生成论坛英文提示。
+    pub error_code: Option<String>,
+    /// 本地有界诊断；不得原样发送到论坛，仅允许已知历史格式的只读映射。
     pub safe_detail: Option<String>,
 }
 

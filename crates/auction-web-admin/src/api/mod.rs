@@ -12,6 +12,8 @@ mod audit;
 mod credentials;
 #[path = "operations/dashboard.rs"]
 mod dashboard;
+#[path = "auction/forum.rs"]
+mod forum;
 #[path = "auction/intake.rs"]
 mod intake;
 #[path = "auction/lifecycle.rs"]
@@ -58,6 +60,7 @@ pub(crate) use credentials::{
     mutate_admin_credential,
 };
 pub(crate) use dashboard::{AdminDashboardSnapshot, fetch_dashboard};
+pub(crate) use forum::{AdminForumStatus, fetch_admin_forum_status};
 pub(crate) use intake::{AdminIntakeResult, add_admin_intake};
 pub(crate) use lifecycle::{AdminAuctionLifecycleAction, execute_admin_auction_lifecycle};
 pub(crate) use lots::{

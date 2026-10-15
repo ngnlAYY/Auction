@@ -8,8 +8,9 @@ use std::sync::{Arc, OnceLock};
 use auction_application::{
     ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedLayout,
     ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
-    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicMetadata, ForumTopicReader,
-    PublicEquipmentLinkResolver, RepositoryError, forum_catalog_marker, forum_system_log_marker,
+    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicMetadata, ForumTopicPublication,
+    ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError, forum_catalog_marker,
+    forum_post_bodies_match, forum_system_log_marker,
 };
 use chrono::Duration;
 use url::Url;
@@ -43,7 +44,8 @@ pub struct ForumSyncRuntime {
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
-    pub(crate) credential_recovery_before: OnceLock<chrono::DateTime<chrono::Utc>>,
+    pub(crate) verify_post_body: bool,
+    pub(crate) startup_recovery_before: OnceLock<chrono::DateTime<chrono::Utc>>,
 }
 
 impl ForumSyncRuntime {
@@ -81,8 +83,15 @@ impl ForumSyncRuntime {
             batch_size,
             item_timeout,
             public_base_url,
-            credential_recovery_before: OnceLock::new(),
+            verify_post_body: false,
+            startup_recovery_before: OnceLock::new(),
         })
+    }
+
+    /// 配置固定帖原始正文校验；默认关闭，主题身份、回执及未知写入禁止重发的门禁始终保留。
+    pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
+        self.verify_post_body = enabled;
+        self
     }
 }
 
@@ -100,8 +109,8 @@ where
     let mut first_error = None;
     while processed < runtime.batch_size && !worker.control.is_draining() {
         let now = worker.clock.now();
-        let recovery_before = *runtime.credential_recovery_before.get_or_init(|| now);
-        let credential_recovery_before = runtime
+        let recovery_before = *runtime.startup_recovery_before.get_or_init(|| now);
+        let startup_recovery_before = runtime
             .credential_availability
             .has_available_forum_credential()
             .then_some(recovery_before);
@@ -111,7 +120,7 @@ where
         // 旧版按主题顺序逐条领取和发布；只领取即将执行的一条，避免排队任务提前耗尽租约。
         let mut claims = runtime
             .store
-            .claim_due(worker.worker_id.clone(), now, lease_until, credential_recovery_before, 1)
+            .claim_due(worker.worker_id.clone(), now, lease_until, startup_recovery_before, 1)
             .await?;
         let Some(claim) = claims.pop() else {
             break;
@@ -275,7 +284,7 @@ where
     };
     let published = if reconciliation_only {
         match find_reconciliation_topic(publisher.as_ref(), world, &rendered).await {
-            Ok(Some(published)) => published,
+            Ok(Some(published)) => ForumTopicPublication::Existing(published),
             Ok(None) if retry_authorized => {
                 match publisher.create_topic(world, rendered.clone()).await {
                     Ok(published) => published,
@@ -333,7 +342,12 @@ where
             }
         }
     };
-    let allow_missing_system_log = !reconciliation_only || retry_authorized;
+    let (published, newly_created) = match published {
+        ForumTopicPublication::Created(published) => (published, true),
+        ForumTopicPublication::Existing(published) => (published, false),
+    };
+    // create_topic 也可能只找到旧主题；只有本轮真实创建或人工授权才允许补写固定楼层。
+    let allow_layout_writes = newly_created || retry_authorized;
     let legacy_thread_id = claim.existing_thread_id.clone();
     let layout = match ensure_fixed_layout(
         Arc::clone(&reader),
@@ -344,8 +358,10 @@ where
             published,
             catalog: rendered.clone(),
             system_log: system_log.clone(),
-            allow_missing_system_log,
+            allow_layout_writes,
             allow_content_update: retry_authorized,
+            catalog_written: newly_created,
+            verify_post_body: runtime.verify_post_body,
             legacy_thread_id,
         },
     )
@@ -397,8 +413,10 @@ struct FixedLayoutRequest {
     published: ForumPublishedThread,
     catalog: ForumRenderedThread,
     system_log: ForumRenderedPost,
-    allow_missing_system_log: bool,
+    allow_layout_writes: bool,
     allow_content_update: bool,
+    catalog_written: bool,
+    verify_post_body: bool,
     legacy_thread_id: Option<String>,
 }
 
@@ -413,8 +431,10 @@ async fn ensure_fixed_layout(
         published,
         catalog,
         system_log,
-        allow_missing_system_log,
+        allow_layout_writes,
         allow_content_update,
+        mut catalog_written,
+        verify_post_body,
         legacy_thread_id,
     } = request;
     let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
@@ -426,6 +446,10 @@ async fn ensure_fixed_layout(
             legacy_thread_id.as_deref() == Some(published.thread_id.as_str());
         if belongs_to_other_auction || !legacy_proof_matches {
             return Err(fixed_layout_error("fixed_layout_conflict", false));
+        }
+        // 未知写入恢复只能读取；历史布局升级也不能借此绕过人工授权再次 POST。
+        if !allow_layout_writes {
+            return Err(fixed_layout_error("write_authorization_required", false));
         }
         let proof = writer
             .edit_post(
@@ -443,18 +467,25 @@ async fn ensure_fixed_layout(
             return Err(fixed_layout_error("write_unknown", true));
         }
         preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
-        if !preview.catalog_post_text.contains(&catalog_marker) {
+        if preview.catalog_post_id != proof.post_id
+            || !preview.catalog_post_text.contains(&catalog_marker)
+        {
             return Err(fixed_layout_error("write_unknown", true));
         }
+        catalog_written = true;
     }
     let catalog_post_id = preview.catalog_post_id.clone();
-    let system_log_post_id = if let Some(second) = preview.posts.first() {
+    let (system_log_post_id, system_log_written) = if let Some(second) = preview.posts.first() {
         if !second.post.text.contains(&system_log_marker) {
             return Err(fixed_layout_error("fixed_layout_conflict", false));
         }
-        second.post.id.clone()
+        // 即使目录是本轮新建，现存 #2 也不是本轮回复回执；不能把旧日志记成本轮目标。
+        if !verify_post_body && !allow_content_update {
+            return Err(fixed_layout_error("write_authorization_required", false));
+        }
+        (second.post.id.clone(), false)
     } else {
-        if !allow_missing_system_log {
+        if !allow_layout_writes {
             return Err(fixed_layout_error("write_authorization_required", false));
         }
         let proof =
@@ -472,12 +503,22 @@ async fn ensure_fixed_layout(
         {
             return Err(fixed_layout_error("fixed_layout_conflict", false));
         }
-        proof.post_id
+        (proof.post_id, true)
     };
 
-    // 标记只证明固定楼层的身份，不证明本轮重新渲染的正文已经发布。正常创建和未知
-    // 写入恢复都须读取原始 BBCode；否则本地新正文会令后续刷新误判为无需更新。
-    prove_fixed_post_body(
+    if !verify_post_body && !allow_layout_writes {
+        // 现存帖子 ID 不能证明未知 POST 已写入哪一版；关闭正文校验后等待人工授权，
+        // 不能把恢复期间新生成、尚未发送的镜像当作已同步正文持久化。
+        return Err(fixed_layout_error("write_authorization_required", false));
+    }
+    // 关闭正文校验时，新发布/授权编辑以精确回执和布局确认身份，不声明正文逐字一致。
+    // 未知结果不能借关闭校验伪造完成；只有显式授权才允许更新已经找到的固定帖。
+    let policy = FixedPostPolicy {
+        verify_body: verify_post_body,
+        allow_update: allow_content_update,
+        write_confirmed: catalog_written,
+    };
+    reconcile_or_update_fixed_post(
         writer.as_ref(),
         world,
         &published.thread_id,
@@ -487,37 +528,55 @@ async fn ensure_fixed_layout(
             description: Some(catalog.description.clone()),
         }),
         ForumRenderedPost { body: catalog.body },
-        allow_content_update,
+        policy,
     )
     .await?;
-    prove_fixed_post_body(
+    reconcile_or_update_fixed_post(
         writer.as_ref(),
         world,
         &published.thread_id,
         &system_log_post_id,
         None,
         system_log,
-        allow_content_update,
+        FixedPostPolicy { write_confirmed: system_log_written, ..policy },
     )
     .await?;
     Ok(ForumPublishedLayout { thread: published, catalog_post_id, system_log_post_id })
 }
 
-/// 只有原始正文相等才返回发布证明；更改既有正文必须具有本轮人工重试授权。
-async fn prove_fixed_post_body(
+#[derive(Clone, Copy)]
+struct FixedPostPolicy {
+    verify_body: bool,
+    allow_update: bool,
+    /// 仅指本轮目标正文的创建/编辑/回复回执，不是历史帖子身份。
+    write_confirmed: bool,
+}
+
+/// 已有远端布局证明后，按配置核对正文；任何内容更新仍须本轮人工授权。
+async fn reconcile_or_update_fixed_post(
     writer: &dyn ForumPostWriter,
     world: auction_domain::SettlementWorld,
     thread_id: &str,
     post_id: &str,
     metadata: Option<ForumTopicMetadata>,
     expected: ForumRenderedPost,
-    allow_update: bool,
+    policy: FixedPostPolicy,
 ) -> Result<(), ApplicationError> {
-    let observed = writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-    if observed.body == expected.body {
+    if policy.verify_body {
+        let observed =
+            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
+        if forum_post_bodies_match(&observed.body, &expected.body) {
+            return Ok(());
+        }
+        if policy.write_confirmed {
+            // 本轮已经写过，正文证明失败不能借尚在作用域内的授权再次 POST。
+            return Err(fixed_layout_error("write_unknown", true));
+        }
+    } else if policy.write_confirmed {
+        // 本轮目标已有回执，不重复编辑刚创建、升级或补齐的固定帖。
         return Ok(());
     }
-    if !allow_update {
+    if !policy.allow_update {
         return Err(fixed_layout_error("write_authorization_required", false));
     }
     let proof = writer
@@ -526,9 +585,12 @@ async fn prove_fixed_post_body(
     if proof.thread_id != thread_id || proof.post_id != post_id {
         return Err(fixed_layout_error("write_unknown", true));
     }
-    let confirmed = writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-    if confirmed.body != expected.body {
-        return Err(fixed_layout_error("write_unknown", true));
+    if policy.verify_body {
+        let confirmed =
+            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
+        if !forum_post_bodies_match(&confirmed.body, &expected.body) {
+            return Err(fixed_layout_error("write_unknown", true));
+        }
     }
     Ok(())
 }
@@ -548,8 +610,9 @@ where
     C: Clock + 'static,
 {
     let now = clock.now();
-    let delay = if matches!(failure_code.as_str(), "write_unknown" | "publish_proof_failed") {
-        // 下一次动作只会执行精确标题 GET，因此可以短退避，不会重复 POST。
+    let unscoped_code = failure_code.strip_prefix("reconcile_").unwrap_or(&failure_code);
+    let delay = if matches!(unscoped_code, "write_unknown" | "publish_proof_failed") {
+        // 带 reconcile_ 的未知结果同样只能 GET 对账，不能误用一年退避使已成功的编辑永久搁置。
         RETRY_DELAY
     } else if is_manual_failure(&error, &failure_code) {
         MANUAL_RECONCILIATION_DELAY
