@@ -26,8 +26,7 @@ pub struct SettlementWorkClaim {
 
 /// 持久化结算调度端口。
 ///
-/// 领取、租约、失败退避和完成标记必须由数据库字段决定。SQLite Lite 没有结算完整档的
-/// workflow 列，适配器应明确返回能力缺失；不能把结算计划改写成内存任务。
+/// 领取、租约、失败退避和完成标记由数据库字段决定，不以易失内存任务替代。
 pub trait SettlementWorkStore: Send + Sync {
     fn claim_due(
         &self,

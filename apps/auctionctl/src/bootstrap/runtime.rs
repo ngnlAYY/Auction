@@ -14,7 +14,7 @@ use auction_config::{AppConfig, HttpListenMode, Role};
 #[cfg(feature = "postgres")]
 use auction_integrations::{CredentialSealer, DataKey};
 use auction_storage::DatabaseBackend;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_storage::DatabaseStore;
 #[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};

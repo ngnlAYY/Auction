@@ -32,4 +32,4 @@ tower.workspace = true
 tracing.workspace = true
 tungstenite.workspace = true
 url.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["v5"] }

@@ -1,7 +1,4 @@
-//! Public 补偿池读取适配器的后端分派。
-//!
-//! PostgreSQL 完整档在一个 Serializable 快照中读取结算批次、补偿账本和最新池余额；
-//! SQLite Lite 没有结算表，因此显式报告能力缺失，避免把空集合误当成真实补偿池。
+//! 从 PostgreSQL 结算事实读取补偿池；不能以空集合掩盖读取失败。
 
 #[cfg(feature = "postgres")]
 mod postgres;
@@ -25,10 +22,6 @@ impl PublicCompensationReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::list(store, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "公开补偿池仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -48,10 +41,6 @@ impl PublicCompensationReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     postgres::movements(store, auction_id, request).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "公开补偿账本仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

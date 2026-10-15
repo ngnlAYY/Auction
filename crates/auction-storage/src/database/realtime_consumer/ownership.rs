@@ -1,15 +1,12 @@
 //! Public realtime consumer key 的进程生命周期互斥。
 
-#[cfg(feature = "sqlite")]
-use super::super::sqlite_ownership::SqliteConsumerLock;
 use thiserror::Error;
 
 use super::super::DatabaseStore;
 
 /// 将 consumer key 的互斥与全部 relay 数据访问绑定到同一生命周期。
 ///
-/// PostgreSQL 消费事务只使用持锁连接，连接失效后不会从池重新领取连接继续确认游标；
-/// SQLite 在所有消费操作完成前持续持有同主机文件锁。
+/// 消费事务只使用 PostgreSQL 持锁连接，连接失效后不得重新取连接继续确认游标。
 pub struct RealtimeConsumerOwnership {
     pub(super) consumer_key: String,
     pub(super) backend: OwnedRealtimeBackend,
@@ -18,8 +15,6 @@ pub struct RealtimeConsumerOwnership {
 pub(super) enum OwnedRealtimeBackend {
     #[cfg(feature = "postgres")]
     Postgres(futures_util::lock::Mutex<sqlx::pool::PoolConnection<sqlx::Postgres>>),
-    #[cfg(feature = "sqlite")]
-    Sqlite { store: super::super::SqliteStore, _lock: SqliteConsumerLock },
 }
 
 /// realtime consumer key 互斥获取失败。
@@ -34,7 +29,7 @@ pub enum RealtimeConsumerOwnershipError {
 }
 
 impl DatabaseStore {
-    /// PostgreSQL 用专用 session advisory lock，SQLite 用同主机非阻塞文件锁强制唯一 owner。
+    /// 以 PostgreSQL 专用 session advisory lock 强制唯一 owner。
     pub async fn acquire_realtime_consumer_ownership(
         &self,
         consumer_key: &str,
@@ -74,20 +69,6 @@ impl DatabaseStore {
                     )),
                 })
             }
-            #[cfg(feature = "sqlite")]
-            DatabaseStore::Sqlite(store) => acquire_sqlite_ownership(store, consumer_key),
         }
     }
-}
-
-#[cfg(feature = "sqlite")]
-fn acquire_sqlite_ownership(
-    store: &super::super::SqliteStore,
-    consumer_key: &str,
-) -> Result<RealtimeConsumerOwnership, RealtimeConsumerOwnershipError> {
-    let lock = store.ownership().acquire(consumer_key)?;
-    Ok(RealtimeConsumerOwnership {
-        consumer_key: consumer_key.to_owned(),
-        backend: OwnedRealtimeBackend::Sqlite { store: store.clone(), _lock: lock },
-    })
 }

@@ -84,10 +84,11 @@ Worker 只使用 key1；key2 仅供显式隔离验证，不能作为候选或自
 ## Worker 控制与参数校验
 
 配置层校验 control 路径、正数范围、lease/续租/单项 timeout 关系及后端能力。
-Auction 默认并发按 PostgreSQL=8、SQLite Lite=1 计算，显式 Lite 并发也只能为 1。
+Auction 默认并发为 8。
 Delivery 有效并发取配置与 transport 上限的较小值；MoogleMail transport 当前为 1。
 启用 MoogleMail 时发送总预算必须大于两倍读取预算，sending grace 必须大于发送预算。
 定时器只唤醒持久化任务，不能代替 due、租约或游标；具体值见[Worker 预算](../../ops/config/README.md#worker-循环预算)。
+croner 4.0.1 前仍先做严格六字段语法检查；不开放上游新增昵称/宽松输入，不改秒字段和时区契约。
 
 ## Runtime 文件锁
 
@@ -128,6 +129,7 @@ Runtime world 开关只控制 Worker 候选，与数据库权威 `worlds.enabled
 ## 环境变量边界
 
 `AUCTION_CONFIG_FILE` 仅选择角色配置文件，不覆盖任何单个字段；业务模块不得自行读取环境变量。
+启用 tracing 时拒绝上游 SDK 的环境导出头，边界与处理见[配置手册](../../ops/config/README.md#文件职责)。
 
 ## 凭据保护
 

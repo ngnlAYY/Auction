@@ -92,8 +92,6 @@ async fn resolve_equipment_urls(
         Ok(links) if links.len() == targets.len() => {
             Ok(links.into_iter().map(|link| link.into_url()).collect())
         }
-        // SQLite Lite 没有装备 key 密文读取能力；保留 lot 投影，但不暴露伪装成真实链接的 keyless URL。
-        Err(ApplicationError::CapabilityUnavailable(_)) => Ok(vec![String::new(); targets.len()]),
         Ok(_) | Err(_) => Err(lot_dependency_unavailable()),
     }
 }

@@ -4,7 +4,7 @@ use std::{pin::Pin, sync::Arc};
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_application::{
     AdminCredentialKind, AdminCredentialOpener, AdminCredentialRuntimeOwnership,
     AdminCredentialRuntimeReader, AdminCredentialRuntimeWriter, AdminCredentialWorld,
@@ -31,9 +31,9 @@ use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend, Role};
 #[cfg(feature = "postgres")]
 use auction_config::{StandardCronSchedule, load_mooglemail_keyenv};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_domain::SettlementWorld;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_integrations::ehentai::{
     EhentaiClient, EhentaiClientConfig, EhentaiCookie, EhentaiCredentialSet, EhentaiGateway,
 };
@@ -44,7 +44,7 @@ use auction_integrations::mooglemail::{
     MoogleMailGatewayConfig, MoogleMailMessage, MoogleMailNotificationTemplates, MoogleMailWorld,
     into_application_message,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_integrations::{
     CredentialSealer, DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener, ForumThreadRenderer,
 };
@@ -58,11 +58,11 @@ use auction_jobs::{
     MailPollFetchRequest, MailPollFetchedMessage, MailPollGateway, MailPollGatewayError,
     MailPollPage, MailPollRuntimeConfig,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_jobs::{MailPollRuntime, RecoveryHealthRuntime};
-#[cfg(any(feature = "postgres", feature = "sqlite", unix))]
+#[cfg(any(feature = "postgres", unix))]
 use auction_jobs::{WorkerControlHandle, WorkerControlServer, WorkerControlServerConfig};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatStore,
     ProcessRole, ServiceName,
@@ -71,32 +71,32 @@ use auction_observability::{ProcessMetrics, TracingConfig, TracingHealthReader, 
 use auction_process::{
     DEFAULT_DRAIN_TIMEOUT, DrainOutcome, TaskGuard, TerminationSignals, wait_for_drain,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_storage::{
     DatabaseAdminMailCommands, DatabaseAuctionLifecycleCommands, DatabaseBackend,
     DatabaseCompetitionCommands, DatabaseSettlementCommands, DatabaseStore,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use url::Url;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 type ShutdownFuture = Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 type SettlementPorts = (
     Option<Arc<dyn SettlementWorkStore>>,
     Option<Arc<dyn SettlementCommandPort>>,
@@ -223,7 +223,7 @@ mod operations_alert;
 mod persistent;
 mod skeleton;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
@@ -233,7 +233,7 @@ async fn run_worker(
     persistent::run_worker(config, tracing_health, metrics, shutdown).await
 }
 
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+#[cfg(not(feature = "postgres"))]
 async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,

@@ -1,8 +1,4 @@
-//! PostgreSQL delivery Admin 适配器装配。
-//!
-//! 列表读取、人工命令编排、安全投影映射和 Serializable 边界分别位于 `reads.rs`、
-//! `commands.rs`、`mapping.rs` 和 `transaction.rs`；本文件只负责端口校验、后端能力分派和
-//! 共享错误分类。SQLite Lite 明确不提供该能力。
+//! Admin 履约查询与命令适配；复用应用状态机、持久命令账本和统一错误分类。
 
 use auction_application::{
     ApplicationError, DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError,
@@ -34,10 +30,6 @@ impl DeliveryAdminPort for DatabaseStore {
                 Self::Postgres(store) => {
                     reads::list(store.pool(), &request).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery Admin 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -53,10 +45,6 @@ impl DeliveryAdminPort for DatabaseStore {
                 Self::Postgres(store) => {
                     commands::execute(store.pool(), &command).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery Admin 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

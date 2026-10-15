@@ -25,7 +25,7 @@ pub(super) struct FileConfig {
     /// MoogleMail world、发件人、装备过滤和通知模板。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
-    /// 可选 Worker 区块；省略时 PostgreSQL 并发为 8、SQLite 并发为 1，轮询为 60 秒。
+    /// 可选 Worker 区块；省略时并发为 8，轮询为 60 秒。
     #[serde(default)]
     pub(super) worker: WorkerConfig,
     /// 可选 HTTP 安全区块；省略时按进程角色使用内置默认值。

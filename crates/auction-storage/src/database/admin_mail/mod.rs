@@ -1,7 +1,4 @@
-//! Admin 邮件轮询状态与入站审查的 PostgreSQL 适配器。
-//!
-//! `inbound_mail` 不保存原始密文；详情只从批准字段和经过脱敏、限界校验的展示投影生成。
-//! SQLite Lite 没有这些完整档邮件表，因此所有对应能力显式返回 501。
+//! Admin 邮件查询与命令的 PostgreSQL 端口装配。
 
 use auction_application::{
     AdminMailDashboardSnapshot, AdminMailError, AdminMailIntakeDetail, AdminMailIntakeFilter,
@@ -52,8 +49,6 @@ impl AdminMailReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => reads::dashboard_snapshot_postgres(store).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -69,8 +64,6 @@ impl AdminMailReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     reads::get_poll_state_postgres(store, request).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -86,8 +79,6 @@ impl AdminMailReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     reads::list_intakes_postgres(store, request).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
@@ -105,14 +96,7 @@ impl AdminMailReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     reads::get_intake_postgres(store, intake_id).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(capability_error()),
             }
         })
     }
-}
-
-#[cfg(feature = "sqlite")]
-fn capability_error() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("Admin 邮件状态与入站审查仅支持 PostgreSQL 完整档")
 }

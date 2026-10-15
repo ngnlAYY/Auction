@@ -7,13 +7,9 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 #[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
-#[cfg(feature = "sqlite")]
-use sqlx::sqlite::SqliteRow;
 use uuid::Uuid;
 
 use super::common::storage_error;
-#[cfg(feature = "sqlite")]
-use super::common::{parse_timestamp, uuid_from_blob};
 
 #[cfg(feature = "postgres")]
 pub(super) async fn list_events_postgres(
@@ -64,55 +60,6 @@ pub(super) async fn list_events_postgres(
     Ok(RealtimeEventPage { entries, total, limit: request.limit, offset: request.offset })
 }
 
-#[cfg(feature = "sqlite")]
-pub(super) async fn list_events_sqlite(
-    store: &super::super::SqliteStore,
-    request: RealtimeEventListRequest,
-) -> Result<RealtimeEventPage, ApplicationError> {
-    // Lite 与完整档共享同一安全字段闭集，但保留自己的 UUID 与时间解码边界。
-    let rows = sqlx::query(
-        "WITH filtered AS (
-             SELECT event_id, stream_key, stream_sequence, kind, schema_version, created_at
-             FROM realtime_events
-             WHERE stream_key = COALESCE(?, stream_key)
-               AND kind = COALESCE(?, kind)
-         ), page AS (
-             SELECT event_id, stream_key, stream_sequence, kind, schema_version, created_at
-             FROM filtered
-             ORDER BY created_at DESC, event_id DESC
-             LIMIT ? OFFSET ?
-         ), summary AS (
-             SELECT COUNT(*) AS total FROM filtered
-         )
-         SELECT page.event_id, page.stream_key, page.stream_sequence, page.kind,
-                page.schema_version, page.created_at, summary.total
-         FROM summary
-         LEFT JOIN page ON TRUE
-         ORDER BY page.created_at DESC, page.event_id DESC",
-    )
-    .bind(request.stream_key.as_deref())
-    .bind(request.kind.as_deref())
-    .bind(request.limit)
-    .bind(request.offset)
-    .fetch_all(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite realtime 事件元数据失败"))?;
-    let total = rows
-        .first()
-        .ok_or_else(|| storage_error("Lite realtime 事件摘要缺失"))?
-        .try_get("total")
-        .map_err(|_| storage_error("读取 Lite realtime 事件总数失败"))?;
-    let entries = rows
-        .into_iter()
-        .map(event_from_sqlite_page_row)
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    validate_event_page(&entries, total, &request)?;
-    Ok(RealtimeEventPage { entries, total, limit: request.limit, offset: request.offset })
-}
-
 #[cfg(feature = "postgres")]
 fn event_from_postgres_page_row(
     row: PgRow,
@@ -152,45 +99,6 @@ fn event_from_postgres_page_row(
             created_at,
         })),
         _ => Err(storage_error("PostgreSQL realtime 事件分页行不完整")),
-    }
-}
-
-#[cfg(feature = "sqlite")]
-fn event_from_sqlite_page_row(
-    row: SqliteRow,
-) -> Result<Option<RealtimeEventSnapshot>, ApplicationError> {
-    let event_id: Option<Vec<u8>> =
-        row.try_get("event_id").map_err(|_| storage_error("读取 Lite realtime 事件 ID 失败"))?;
-    let stream_key: Option<String> =
-        row.try_get("stream_key").map_err(|_| storage_error("读取 Lite realtime 事件流失败"))?;
-    let stream_sequence: Option<i64> = row
-        .try_get("stream_sequence")
-        .map_err(|_| storage_error("读取 Lite realtime 事件序号失败"))?;
-    let kind: Option<String> =
-        row.try_get("kind").map_err(|_| storage_error("读取 Lite realtime 事件类型失败"))?;
-    let schema_version: Option<i32> = row
-        .try_get("schema_version")
-        .map_err(|_| storage_error("读取 Lite realtime schema 版本失败"))?;
-    let created_at: Option<String> =
-        row.try_get("created_at").map_err(|_| storage_error("读取 Lite realtime 事件时间失败"))?;
-    match (event_id, stream_key, stream_sequence, kind, schema_version, created_at) {
-        (None, None, None, None, None, None) => Ok(None),
-        (
-            Some(event_id),
-            Some(stream_key),
-            Some(stream_sequence),
-            Some(kind),
-            Some(schema_version),
-            Some(created_at),
-        ) => Ok(Some(RealtimeEventSnapshot {
-            event_id: uuid_from_blob(event_id, "Lite realtime 事件 ID")?,
-            stream_key,
-            stream_sequence,
-            kind,
-            schema_version,
-            created_at: parse_timestamp(created_at)?,
-        })),
-        _ => Err(storage_error("Lite realtime 事件分页行不完整")),
     }
 }
 

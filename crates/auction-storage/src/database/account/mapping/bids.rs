@@ -33,43 +33,6 @@ pub(in crate::database::account) fn map_postgres_bid(
     validate_my_bid(bid)
 }
 
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn map_sqlite_bid(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<PublicMyBid, ApplicationError> {
-    let bid = PublicMyBid {
-        id: get_sqlite_uuid(&row, "id", "读取 SQLite 用户竞价标识失败")?,
-        auction_id: get_sqlite_uuid(&row, "auction_id", "读取 SQLite 用户竞价拍卖标识失败")?,
-        lot_id: get_sqlite_uuid(&row, "lot_id", "读取 SQLite 用户竞价 lot 标识失败")?,
-        lot_number: get_sqlite(&row, "lot_number", "读取 SQLite 用户竞价序号失败")?,
-        amount: get_sqlite(&row, "amount", "读取 SQLite 用户竞价金额失败")?,
-        accepted_state_version: get_sqlite(
-            &row,
-            "accepted_state_version",
-            "读取 SQLite 用户竞价状态版本失败",
-        )?,
-        fact_index: i32::try_from(get_sqlite::<i64>(
-            &row,
-            "fact_index",
-            "读取 SQLite 用户竞价事实序号失败",
-        )?)
-        .map_err(|_| storage_error("SQLite 用户竞价事实序号超出范围"))?,
-        mechanism: get_sqlite(&row, "mechanism", "读取 SQLite 用户竞价机制失败")?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 用户竞价时间失败")?,
-            "SQLite 用户竞价时间格式无效",
-        )?,
-        equipment_name: get_sqlite(&row, "equipment_name", "读取 SQLite 用户竞价装备名称失败")?,
-        equipment_category: get_sqlite(
-            &row,
-            "equipment_category",
-            "读取 SQLite 用户竞价装备分类失败",
-        )?,
-        leading: get_sqlite::<i64>(&row, "leading", "读取 SQLite 用户竞价领先状态失败")? != 0,
-    };
-    validate_my_bid(bid)
-}
-
 #[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_proxy_bid(
     row: sqlx::postgres::PgRow,
@@ -93,37 +56,6 @@ pub(in crate::database::account) fn map_postgres_proxy_bid(
         mechanism: get_pg(&row, "mechanism", "读取 PostgreSQL 代理竞价机制失败")?,
         created_at: get_pg(&row, "created_at", "读取 PostgreSQL 代理竞价时间失败")?,
         leading: get_pg(&row, "leading", "读取 PostgreSQL 代理竞价领先状态失败")?,
-    };
-    validate_proxy_bid(bid)
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn map_sqlite_proxy_bid(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<PublicProxyBid, ApplicationError> {
-    let bid = PublicProxyBid {
-        id: get_sqlite_uuid(&row, "id", "读取 SQLite 代理竞价标识失败")?,
-        auction_id: get_sqlite_uuid(&row, "auction_id", "读取 SQLite 代理竞价拍卖标识失败")?,
-        lot_id: get_sqlite_uuid(&row, "lot_id", "读取 SQLite 代理竞价 lot 标识失败")?,
-        lot_number: get_sqlite(&row, "lot_number", "读取 SQLite 代理竞价序号失败")?,
-        amount: get_sqlite(&row, "amount", "读取 SQLite 代理竞价金额失败")?,
-        accepted_state_version: get_sqlite(
-            &row,
-            "accepted_state_version",
-            "读取 SQLite 代理竞价状态版本失败",
-        )?,
-        fact_index: i32::try_from(get_sqlite::<i64>(
-            &row,
-            "fact_index",
-            "读取 SQLite 代理竞价事实序号失败",
-        )?)
-        .map_err(|_| storage_error("SQLite 代理竞价事实序号超出范围"))?,
-        mechanism: get_sqlite(&row, "mechanism", "读取 SQLite 代理竞价机制失败")?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 代理竞价时间失败")?,
-            "SQLite 代理竞价时间格式无效",
-        )?,
-        leading: get_sqlite::<i64>(&row, "leading", "读取 SQLite 代理竞价领先状态失败")? != 0,
     };
     validate_proxy_bid(bid)
 }

@@ -2,8 +2,8 @@
 
 [文档导航](./README.md) · [架构](architecture.md) · [默认验证范围](development.md#默认检查)
 
-本页统一登记源码能力、既有验证结果与待补运行证据。当前有部分隔离验证声明、定向构建及限定部署证据，
-尚不足以宣称完整业务或生产验收。文档修订不重跑历史流程，也不把当时失败改写为当时通过。
+本页登记源码能力、历史验证与待补证据。现有隔离验证声明、定向构建及限定部署不足以证明完整业务或生产验收；
+文档修订不改变历史结果。
 
 ## 本页导航
 
@@ -20,8 +20,8 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public 21、Admin 44 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| SQLite Lite | 共有竞价、会话、部分管理、持久调度和实时读取 | PostgreSQL 系统能力、行锁或并发语义对等 |
-| 迁移 | PostgreSQL 39、SQLite 13 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| SQLite 历史资产 | 运行支持已移除，保留已发布迁移与已有测试 | 保留文件或锁图可选依赖意味着当前支持 SQLite |
+| 迁移 | PostgreSQL 39 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁 | 本次文档修改已经构建或部署了新制品 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -39,36 +39,83 @@
 | 隔离环境验证 | 明确环境、输入、目标版本、执行结果及保留的原始证据 |
 | 生产验收完成 | 指定制品、真实配置/服务、生产数据边界、部署切换及恢复证据 |
 
-既有文档使用过“局部 R1”描述 HTTP、竞价、结算、浏览器和 canonical PostgreSQL v28 接管/灾备的
-部分隔离验证。本仓库正式文档没有提供足够完整的原始证据索引，本次也没有重跑这些流程。
-因此这里保留为历史验证声明，不把它升级为本轮确认的运行结论。“R1”不能替代具体执行记录。
+HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾登记“局部 R1”。
+原始证据索引不足，保留为历史隔离验证声明，不能替代具体执行记录或视为当前运行确认。
 
 ## 本轮静态检查
 
+各记录仅覆盖注明的工作树与验证范围，不代表运行验收。
+SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注明）、策略/布局/配置/i18n、工作区全部目标、
+独立 PostgreSQL/SQLite/Redis、全部目标/特性 Clippy（`-D warnings`）和两端 WASM；SQLite 仅属当时范围。
+当前检查入口见[开发指南](development.md#默认检查)。
+
+2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、
+`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
+`6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
+
+### 2026-10-15 PostgreSQL 收口与项目精简
+
+storage 删除 SQLite 驱动、事务/查询适配、文件锁及不可达分支；config 仅接受 PostgreSQL 连接，
+apps/CLI/Worker 按单后端装配。既有 PostgreSQL 事务、锁、幂等、审计与 outbox 规则保留，HTTP/JSON/事件契约不变。
+启用 tracing 时拒绝 SDK 的两个环境导出头（含空值、非 Unicode 值），不修改环境或回显值。
+CI 静态入口合并为 `ci/check.sh`，敏感模板统一为 `ops/config/examples/secrets.toml`；Justfile 运行/迁移配方显式选择 postgres。
+精简重复文档、注释和默认值说明；删除 48 个失效/重复文件，未删改已发布 SQL 或删除已有测试。
+
+Rust 1.99.0 的 `just verify` 通过：48 份文档、格式/策略/布局/配置/i18n、工作区全部目标、
+独立 PostgreSQL/Redis、全部目标/特性 Clippy（`-D warnings`）及两端 WASM。MSRV 1.94.1 的
+`--locked --workspace --all-targets --all-features` check、CI 脚本 Bash 语法和 ShellCheck 均通过。
+`cargo audit --deny warnings` 扫描 536 条锁记录/1329 条公告，无漏洞或警告；cargo-machete 无未用直接依赖。
+全工作区/全 feature/全 target 活动图无 `sqlx-sqlite`、`libsqlite3-sys`；锁图可选项不等于活动驱动。
+`just web-build` 完成 Public/Admin 的 wasm-release payload；五程序以 `--locked --release -j 1`
+及 `postgres,cache-redis` 完成 API-only 构建，readelf 确认为 x86-64 ELF64/GNU glibc；Fat LTO/单 CGU/unwind 生效。
+构建后完整 `just verify` 再次通过；日志位于 `target/dependency-review-20261015/cleanup-*.log`。
+未新增或运行行为/性能测试、服务、迁移或部署，未执行正式 `release-check`，不宣称最优性能或生产验收。
+
+### 2026-10-15 依赖审计与编译优化
+
+覆盖全部 20 个工作区包、50 项直接依赖及完整锁图，决策和公告链接见[技术栈](tech-stack.md#2026-10-15-全依赖审计)。
+提高 19 项直接版本声明、更新 83 个锁定版本记录；全 feature/全 target 活跃节点 486 → 485，
+锁图 535 → 536（外部包 515 → 516），不把依赖条目变化等同于体积或性能收益。
+工作区统一版本/profile/CI，摘要 API、严格 cron、CSR 及当时 SQLite 编译面的调整见上述决策表。
+五个 apps 增加 Linux x86_64 编译期守卫，正式发布 GNU/glibc，WASM 保留；未批量删除条件平台代码或锁记录。
+后端 release 与当时两份 AMD 配置统一采用[生产 profile](tech-stack.md#编译优化边界)，WASM 不混入后端 CPU 参数。
+HTTP/JSON/事件、迁移、运行 TOML、会话算法、摘要字节及事务/幂等不变量不变。
+
+Rust 1.99.0 工作区 `--locked --all-targets --all-features` check 和 MSRV 1.94.1 同范围 check 通过。
+平台守卫落地后完整 `just verify`（49 份文档）再次通过；MSRV 同范围重查通过。
+首次 Clippy 命中的两处原子 API 弃用仅作最小 MSRV 兼容例外，新名在 1.94.1 的静态编译明确未稳定。
+SQLite check 输出定位两个实际 C archive，以 nm/strings 核对 FTS 符号及编译项、扩展加载符号均不存在，
+OMIT_LOAD_EXTENSION 存在；没有运行 SQLite 查询或不可信输入。Web 发布构建与 release 链接证据待收口后登记。
+cargo-machete 0.9.2 未报告未用直接依赖。RustSec 基线命中 rustls 四条公告，升级至 0.23.46 后为零漏洞、零警告，
+无忽略项；`just dependency-audit dependency-unused` 通过，门禁为全部警告失败。cargo-audit 0.22.2
+扫描 536 条锁记录 / 1329 条公告，公告库提交 `edb58f5974b83eb8302332821cb6d389777aa351`。
+原始锁图/metadata/活跃树、公告 JSON 与日志保留于忽略的
+`target/dependency-review-20261015/`，不提交机器日志或临时工具。
+
+当时 SQLite 仍捆绑 3.51.3，SQLx 的 sys 版本上限阻止直接升至 FTS5 修复引擎；禁编 FTS/原生扩展仅是风险缓解，
+不能据此称引擎已修复或无未知漏洞。该结论属于移除 SQLite 运行支持前的构建记录。
+没有新增或执行行为测试、性能测试、服务启动、迁移、数据库/外部服务操作或部署；不宣称最优性能或生产验收。
+
 ### 2026-10-14 Tokio LTS 与 OTel 配套升级
 
-在 `3511a41` 的既有工作树改动上，Tokio 1.51.6 → 1.53.3，声明改为 `~1.53.3`，后续仅接收该 LTS
-分支内补丁；上游公布支持期至 2027 年 9 月。OpenTelemetry API/SDK/HTTP/OTLP/proto 配套锁到 0.33.1，
-tracing-opentelemetry 锁到 0.34.0。根依赖由装配/技术栈边界拥有，源码适配归 `auction-observability`。
-定向锁图只升级七个包，未改变其余同版本包的依赖边；全工作区/all-features/all-target-platforms 活跃图
-仍为 486 个节点，锁图仍为 535 个条目（外部包 515），不宣称体积或性能收益。
+基于 `3511a41` 既有工作树，Tokio 1.51.6 → 1.53.3，声明 `~1.53.3`，仅接收 LTS 分支补丁，
+上游支持期至 2027 年 9 月；OpenTelemetry API/SDK/HTTP/OTLP/proto 锁到 0.33.1，tracing-opentelemetry 到 0.34.0。
+只升级七个包，其余同版本包依赖边不变；全工作区/all-features/all-target-platforms 活跃节点仍为 486，
+锁图仍为 535（外部包 515），未证明体积或性能收益。
 
-核对上游 changelog、exporter/processor trait、HTTP builder、retry policy 和现有装配后，唯一源码适配为
-显式 `RetryPolicy::disabled()`：不接受 0.33 新增的默认三次重试，保持每批一次导出、失败计数和原配置预算。
-自有有界队列、flush/shutdown、远端 context 边界、安全错误分类及 Prometheus 输出路径不变；未新增 TOML
-字段、HTTP/事件字段、数据库迁移或运行时环境覆盖入口，未切换其他框架。上游新增的 64 MiB 请求体保护
-保留，超限按导出失败处理；具体兼容边界见 [observability owner](../crates/auction-observability/README.md#实现布局与-tracing)。
+核对 changelog、exporter/processor trait、HTTP builder、retry policy 与装配后，observability 唯一适配为
+`RetryPolicy::disabled()`：拒绝新增的默认三次重试，保留每批一次导出、失败计数与原预算。
+有界队列、flush/shutdown、远端 context、安全错误分类及 Prometheus 路径不变；未新增 TOML/HTTP/事件字段、
+迁移或环境覆盖入口，未换框架。保留 64 MiB 请求体保护，超限记导出失败；详见
+[兼容边界](../crates/auction-observability/README.md#实现布局与-tracing)。
 
 Rust `1.98.0` 下 observability 独立 `--locked --all-targets` check 与 Clippy（`-D warnings`）通过；
-完整 `just verify` 通过，覆盖 49 份文档、格式/策略/布局/配置/i18n、工作区全部目标、独立
-PostgreSQL/SQLite/Redis、全部目标/特性 Clippy 与两端 WASM。MSRV `1.94.1` 的工作区
-`--locked --all-targets --all-features` check 通过；修改路径主动 LSP 检查无诊断。
-`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 535 个条目 / 1310 条公告，
-退出 0、公告漏洞 0、警告 0；公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，无新增忽略项。
+完整 `just verify`（49 份文档）与 MSRV `1.94.1` 工作区 `--locked --all-targets --all-features` check 通过；
+修改路径主动 LSP 检查无诊断。按本节开头的 10-14 审计口径扫描 535 条锁记录，退出 0、漏洞 0、警告 0，无新增忽略项。
 
-本次同时记录 SDK 隐式 headers 环境覆盖的既有问题，见上述 owner 文档；此次升级没有修复该配置边界，
-不能宣称 TOML-only 已通过运行验收。未检查进程实际环境或凭据，未新增或执行行为测试、真实 OTLP 导出、
-scrape、故障/退出验证、数据库/外部业务操作或部署；未重建发布 payload。编译与公告扫描不证明生产验收。
+此次升级未修复 SDK 隐式 headers 环境覆盖，不能据此确认 TOML-only 运行边界。
+未检查实际环境/凭据，未新增或执行行为测试、真实 OTLP 导出、scrape、故障/退出验证、数据库/外部业务操作、
+部署或 payload 重建；编译和公告扫描不证明生产验收。
 
 ### 2026-10-14 框架补丁与指标依赖精简
 
@@ -77,29 +124,24 @@ Clap 4.6.6 → 4.6.7；clap_builder/clap_derive 随之锁到 4.6.7。保留原 H
 未切换 Tokio 支持分支，也未升级 OTel 或引入新框架。Cargo 重选的无关 syn/Windows 依赖边恢复为既有锁定关系，
 最终锁图通过 `cargo metadata --locked --all-features` 校验。此步骤仅改依赖清单、锁图和相关文档，保留此前源码改动。
 
-observability 的 Prometheus 0.14.0 关闭默认 `protobuf`，保留 `process`，使用上游 plain_model。
-源码核对仍使用原 TextEncoder、进程/池/tracing collector 与业务 recorder，保留 Prometheus 0.0.4 文本、
-指标名、label、bucket 和媒体类型契约；不关闭独立的 OTLP/HTTP-proto 追踪编码。
-`protobuf 3.7.2`、`protobuf-support 3.7.2` 移出活跃图及锁图；reqwest 新增间接 `base64 0.23.1`，
-现有直接 `base64 0.22.1` 不变。全工作区/all-features/all-target-platforms 活跃图 487 → 486 个节点，
-锁图 536 → 535 个条目（外部包 516 → 515），净减一个而非两个包；未测量制品体积或性能收益。
+Prometheus 0.14.0 关闭默认 `protobuf`、保留 `process`，改用 plain_model；源码核对确认
+[指标与追踪边界](tech-stack.md#指标与追踪)不变，包括 TextEncoder、collector/recorder、0.0.4 文本及独立 OTLP 编码。
+`protobuf 3.7.2`、`protobuf-support 3.7.2` 退出活跃图和锁图；reqwest 新增间接 `base64 0.23.1`，直接 0.22.1 不变。
+全工作区/all-features/all-target-platforms 活跃节点 487 → 486，锁图 536 → 535（外部包 516 → 515），
+净减一个包，未测量体积或性能收益。
 
 Rust `1.98.0` 下 observability 独立 `--locked --all-targets` check 与 Clippy（`-D warnings`）通过；
-最终锁图下完整 `just verify` 通过，覆盖 49 份文档、格式/策略/布局/配置/i18n、工作区全部目标、
-独立 PostgreSQL/SQLite/Redis、全部目标/特性 Clippy 和两端 WASM。
-MSRV `1.94.1` 的工作区 `--locked --all-targets --all-features` check 通过。
-`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 535 个条目 / 1310 条公告，
-退出 0、漏洞 0、警告 0；公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，未添加忽略项。
+最终锁图下完整 `just verify`（49 份文档）与 MSRV `1.94.1` 工作区 `--locked --all-targets --all-features` check 通过。
+按本节开头的 10-14 审计口径扫描 535 条锁记录，退出 0、漏洞 0、警告 0，未添加忽略项。
 
 当前选择与后续评审边界见[技术栈](tech-stack.md#指标与追踪)。未新增或执行行为测试，未做实际 scrape/逐字节
 输出比较，未访问业务数据库或真实外部服务、未重建发布 payload、未部署；静态结果不证明运行兼容或生产验收。
 
 ### 2026-10-14 低风险依赖精简
 
-承接下节版本升级，在 `3511a41` 的既有工作树改动上实施五项低风险精简：scraper 仅留库解析及错误支持、
-Axum 移除未用宏/Form/Query、observability 删除直接 serde、Admin 以标准库 poll_fn 取代直接 futures-util、
-Gloo feature 下沉到 Public/Admin。各 owner 的当前边界见[技术栈](tech-stack.md#2026-10-14-精简审计候选)。
-SQLite feature、HTTP/事件字段、配置、迁移、轮询唤醒与卸载逻辑均未改变。
+承接下节版本升级，在 `3511a41` 既有工作树实施[五项精简](tech-stack.md#2026-10-14-精简审计候选)：
+scraper、Axum、observability 直接 serde、Admin futures-util 与 Gloo feature。
+SQLite feature、HTTP/事件字段、配置、迁移、轮询唤醒及卸载逻辑不变。
 
 受控刷新锁图未新增或升级包。全工作区/all-features/all-target-platforms 活跃图去重后 491 → 487 个节点，
 退出 `getopts`、`unicode-width`、`axum-macros`、`serde_urlencoded`；前三者也移出锁图，
@@ -109,10 +151,8 @@ SQLite feature、HTTP/事件字段、配置、迁移、轮询唤醒与卸载逻�
 Rust `1.98.0` 下 observability/integrations/http 各自 `--locked --all-targets` check 通过；
 Shared/Admin/Public 各自独立 `--locked --target wasm32-unknown-unknown` check 通过。
 反向 feature 图确认 Shared 只有 Gloo HTTP、Admin 增 JSON、Public 增 JSON/WebSocket，没有依赖合并构建补项。
-完整 `just verify` 通过（49 份文档、独立 PostgreSQL/SQLite/Redis、全特性 Clippy、两端 WASM）；
-MSRV `1.94.1` 的工作区 `--locked --all-targets --all-features` check 通过。
-`cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2）扫描 536 个锁图条目 / 1310 条公告，
-退出 0、漏洞 0、警告 0；公告库提交仍为 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`，未添加忽略项。
+完整 `just verify`（49 份文档）与 MSRV `1.94.1` 工作区 `--locked --all-targets --all-features` check 通过。
+按本节开头的 10-14 审计口径扫描 536 条锁记录，退出 0、漏洞 0、警告 0，未添加忽略项。
 
 未新增或执行行为测试、未重建发布 payload、未访问业务数据库或真实外部服务、未部署。
 
@@ -124,14 +164,12 @@ gloo-net 0.6.0 → 0.7.0、gloo-timers 0.3.0 → 0.4.0。未改 HTTP/事件字�
 锁图从 543 个包降至 539 个（外部包 523 → 519），fxhash 已移除；非默认 Dioxus fullstack
 路径仍锁定旧 Gloo 版本，但未进入当前两端 CSR 或全工作区活跃依赖树。
 
-Rust `1.98.0` 下完整 `just verify` 通过（49 份文档、独立 PostgreSQL/SQLite/Redis、全特性 Clippy、
-两端 WASM）；工作区全部目标/特性 check 与 MSRV `1.94.1` 同范围 check 通过，7 个改动路径 LSP 无诊断。
-本轮额外执行 `cargo audit --deny yanked --deny unsound --deny unmaintained`（cargo-audit 0.22.2），
-539 个锁图条目 / 1310 条公告，退出 0、漏洞 0、警告 0、无忽略列表；公告库提交
-`6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`。本地/CI 既有 dependency-audit 阻断策略未变。
+Rust `1.98.0` 下完整 `just verify`（49 份文档）、工作区全部目标/特性 check 与 MSRV `1.94.1` 同范围 check 通过；
+7 个改动路径 LSP 无诊断。额外按本节开头的 10-14 审计口径扫描 539 条锁记录，退出 0、漏洞 0、警告 0、无忽略列表；
+本地/CI 既有 dependency-audit 阻断策略未变。
 
-依赖精简另完成两条并行只读审计及主代理后端补审，六项候选见[技术栈](tech-stack.md#2026-10-14-精简审计候选)，
-未把审计建议直接当作删除授权，也未宣称已减少候选对应的包或体积。
+另完成两项只读审计与后端补审，形成[六项候选](tech-stack.md#2026-10-14-精简审计候选)；
+当时仅记录候选，未将建议当作删除授权，也未计入包数或体积收益。
 未新增或执行行为测试、未调用真实业务服务/数据库、未重建发布 payload、未部署；
 真实论坛/邮件/装备解析及浏览器兼容性仍无本轮运行证据，不能以静态通过替代验收。
 
@@ -140,9 +178,8 @@ Rust `1.98.0` 下完整 `just verify` 通过（49 份文档、独立 PostgreSQL/
 基线为 `c9a2d1e` 工作树，按静态审计修复 A01–A18，并仅将 `quinn-proto` 从 0.11.17 更新至 0.11.18。
 保留已有玩家指南与文档改动；未修改历史迁移、业务表结构、HTTP/事件字段或运行配置字段。
 
-Rust `1.98.0` 下完整 `just verify` 通过：49 份文档、格式、仓库/布局/配置/i18n 门禁、工作区全部目标、
-独立 PostgreSQL/SQLite/Redis、全特性 Clippy（`-D warnings`）和两端 WASM。另通过工作区全部目标/特性 check、
-MSRV `1.94.1` 同范围 check 及 `git diff --check`。
+Rust `1.98.0` 下完整 `just verify`（49 份文档）、工作区全部目标/特性 check、
+MSRV `1.94.1` 同范围 check 及 `git diff --check` 通过。
 `cargo audit --deny yanked --deny unsound`（cargo-audit 0.22.2）扫描 543 项依赖、1310 条公告，退出 0；
 无漏洞/撤回/unsound 命中，保留 `fxhash` 停维警告，不隐藏维护债。
 
@@ -231,15 +268,15 @@ SQL 静态扫描覆盖 39 份迁移、737 个 Rust SQL 候选；两份受限执�
 
 ### 2026-09-22 历史记录
 
-Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify` 与差异检查退出 0：格式、当时 51 份文档、
-策略/布局/配置/i18n、工作区全部目标、独立 PG/SQLite/Redis、全特性 Clippy 及双 WASM 通过。
+Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify`（当时 51 份文档）与差异检查退出 0。
 修复门禁发现的借用、错误映射和 feature 编译问题后重跑，未执行行为测试、发布、浏览器、服务、数据库或迁移。
 29 项报告问题、论坛 DTO 附项及三份追加迁移属于该轮；历史流拍 Return、资产冲突、错误归档 Credits 和
 旧排期来源仍须独立核对，见[邮件资产核对](operations/mail-diagnostics.md#历史资产处置核对)。
 
 ## 源码核对发现的实现缺口
 
-2026-10-14 全仓审计的 18 项（11 项 P1、7 项 P2）已在源码范围修复；不将静态检查等同于行为验收：
+以下为历史源码修复及未验收边界，SQLite 仅指当时实现。2026-10-14 全仓审计的 18 项
+（11 项 P1、7 项 P2）已在源码范围修复，不等于行为验收：
 
 | 审计项 | 修复 owner 与范围 |
 | --- | --- |
@@ -320,10 +357,9 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify` 与差异检查退�
 ## 仍需运行证据的事项
 
 - PostgreSQL 并发竞价、资格变化、序列化冲突、故障重启、损坏事实与恢复边界。
-- SQLite 单主机串行写入、文件锁、维护窗口和备份恢复；不能替代 PostgreSQL 验证。
 - 真实 MoogleMail/E-Hentai 的认证、未知写入结果、Sent/Balance 证明与人工恢复。
 - Public/Admin 完整页面、五语言、认证组合、Admin 重启/凭据轮换及旧配置恢复、严格 decoder、实时帧和断线恢复。
-- Public 连接总量/用户配额、槽位释放、会话只读复核与撤销延迟、静默连接；分页快照及 Lite 兼容时间边界。
+- Public 连接总量/用户配额、槽位释放、会话只读复核与撤销延迟、静默连接及分页快照。
 - 非空生产数据、目标主机权限与服务编排、制品切换、备份恢复和回执保管。
 - 首次设置的本机/HTTPS 代理门禁、未知保存结果与空库初始化；合并部署的 readiness、信号、父进程强杀、迁移失败和升级。
 

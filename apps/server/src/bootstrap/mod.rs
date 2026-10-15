@@ -77,9 +77,7 @@ async fn prepare(
     let ready = async {
         let store = auction_storage::DatabaseStore::connect(url).await?;
         let result = store.check().await;
-        if let Some(pool) = store.postgres_pool() {
-            pool.close().await;
-        }
+        store.postgres_pool().close().await;
         result.map_err(anyhow::Error::from)
     };
     tokio::time::timeout(std::time::Duration::from_secs(30), ready).await

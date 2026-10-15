@@ -1,18 +1,18 @@
 //! Public API 的数据库、端口、heartbeat 和 realtime 状态装配。
 
 use std::sync::Arc;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use std::sync::{
     RwLock,
     atomic::{AtomicBool, Ordering},
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use std::time::Duration;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use anyhow::Context;
 use auction_application::ReadModelCache;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_application::{
     ApplicationError, ApplicationFuture, AuctionReader, CachedPublicRulesReader, Clock,
     CompetitionCommandPort, ProcessReadinessPort, PublicAccountReader, PublicBidLogReader,
@@ -25,37 +25,37 @@ use auction_application::{
 };
 use auction_config::AppConfig;
 use auction_http::PublicApiState;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_http::{RealtimeHub, RealtimeHubSink};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_integrations::{DataKey, EquipmentGameLinkResolver, EquipmentKeyOpener};
 use auction_observability::ProcessMetrics;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_observability::{
     HeartbeatHealthReader, HeartbeatPublisher, HeartbeatPublisherConfig, HeartbeatReadinessFuture,
     HeartbeatStore, ProcessRole, ServiceName,
 };
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
-use auction_storage::{DatabaseBackend, DatabaseCompetitionCommands, DatabaseStore};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
+use auction_storage::{DatabaseCompetitionCommands, DatabaseStore};
+#[cfg(feature = "postgres")]
 use chrono::{DateTime, Utc};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use uuid::Uuid;
 
 use super::config;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 #[derive(Clone, Copy)]
 struct SystemClock;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 struct PublicRealtimeRelayHealth {
     healthy: AtomicBool,
     last_success: RwLock<Option<std::time::Instant>>,
     stale_after: Duration,
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl PublicRealtimeRelayHealth {
     fn new(poll_interval: Duration) -> Self {
         let stale_after = poll_interval.checked_mul(4).unwrap_or(Duration::from_secs(30));
@@ -90,13 +90,13 @@ impl PublicRealtimeRelayHealth {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 struct PublicProcessHealth {
     database: Arc<DatabaseStore>,
     relay: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl ProcessReadinessPort for PublicProcessHealth {
     fn check(&self) -> ApplicationFuture<'_, ()> {
         Box::pin(async move {
@@ -111,7 +111,7 @@ impl ProcessReadinessPort for PublicProcessHealth {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl HeartbeatHealthReader for PublicProcessHealth {
     fn readiness(&self) -> HeartbeatReadinessFuture<'_> {
         Box::pin(async move { self.database.readiness().await && self.relay.is_healthy() })
@@ -122,18 +122,18 @@ impl HeartbeatHealthReader for PublicProcessHealth {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) struct ConfiguredRealtimeRelay {
     relay: Arc<RealtimeRelay>,
     health: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 struct RealtimeRelayTaskHealthGuard {
     health: Arc<PublicRealtimeRelayHealth>,
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl Drop for RealtimeRelayTaskHealthGuard {
     fn drop(&mut self) {
         // panic、意外返回或 shutdown abort 都立即撤销任务健康证明，不等待新鲜度窗口自然过期。
@@ -141,21 +141,18 @@ impl Drop for RealtimeRelayTaskHealthGuard {
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 fn configure_equipment_links(
     config: &AppConfig,
     store: &Arc<DatabaseStore>,
 ) -> anyhow::Result<Option<Arc<dyn PublicEquipmentLinkResolver>>> {
-    if store.backend() == DatabaseBackend::Sqlite {
-        return Ok(Some(Arc::new(EquipmentGameLinkResolver::unsupported())));
-    }
     let (key_id, encoded_key) = match (config.equipment_data_key_id(), config.equipment_data_key())
     {
         (Some(key_id), Some(encoded_key)) => (key_id, encoded_key),
@@ -168,7 +165,7 @@ fn configure_equipment_links(
     Ok(Some(Arc::new(EquipmentGameLinkResolver::new(secrets, EquipmentKeyOpener::new(data_key)))))
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) async fn configure_state(
     config: &AppConfig,
     tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
@@ -302,7 +299,7 @@ pub(super) async fn configure_state(
     Ok((state, Some(heartbeat), Some(realtime_relay)))
 }
 
-#[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+#[cfg(not(feature = "postgres"))]
 pub(super) async fn configure_state(
     config: &AppConfig,
     _tracing_health: Arc<dyn auction_observability::TracingHealthReader>,
@@ -315,7 +312,7 @@ pub(super) async fn configure_state(
 )> {
     let security = config::configure_security(config)?;
     if config.database_url().is_some() {
-        anyhow::bail!("public-api 配置了数据库，但当前制品未编译 postgres 或 sqlite feature");
+        anyhow::bail!("public-api 配置了数据库，但当前制品未编译 postgres feature");
     }
     Ok((
         PublicApiState::new(
@@ -327,7 +324,7 @@ pub(super) async fn configure_state(
     ))
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn spawn_realtime_relay(
     configured: Arc<ConfiguredRealtimeRelay>,
     poll_interval: std::time::Duration,
@@ -363,7 +360,7 @@ pub(super) fn spawn_realtime_relay(
     })
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn spawn_heartbeat(publisher: Arc<HeartbeatPublisher>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(10));

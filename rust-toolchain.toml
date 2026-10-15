@@ -1,5 +1,6 @@
 [toolchain]
-channel = "1.98.0"
+# 必填：固定已可下载的 stable；MSRV 在工作区与 CI 独立维护。
+channel = "1.99.0"
 components = ["clippy", "rustfmt"]
 profile = "minimal"
 targets = ["wasm32-unknown-unknown"]

@@ -1,7 +1,4 @@
-//! Admin lot 修改命令的数据库组合器。
-//!
-//! PostgreSQL 完整档由 `AdminLotUpdateService` 承载 Serializable 事务；SQLite Lite 不具备
-//! 当前完整 Admin 生命周期投影，因此必须显式返回能力缺失。
+//! Admin lot 更新的端口装配；由 AdminLotUpdateService 承载 Serializable 事务。
 
 use std::sync::Arc;
 
@@ -42,12 +39,6 @@ where
                 DatabaseStore::Postgres(store) => {
                     let service = AdminLotUpdateService::new(Arc::new(store.clone()), _clock);
                     service.update(_command).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin lot 修改仅支持 PostgreSQL 完整档",
-                    ))
                 }
             }
         })

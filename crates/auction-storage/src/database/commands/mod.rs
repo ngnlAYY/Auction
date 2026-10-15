@@ -73,12 +73,6 @@ impl AdminWorldPort for DatabaseAdminWorldCommands {
                     let service = AdminWorldService::new(Arc::new(store.clone()));
                     service.set_enabled(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 业务世界启停仅支持 PostgreSQL 完整档",
-                    ))
-                }
             }
         })
     }
@@ -118,11 +112,6 @@ where
                     let service = CompetitionService::new(Arc::new(store.clone()), clock);
                     service.place_bid(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
-                    service.place_bid(command).await
-                }
             }
         })
     }
@@ -142,11 +131,6 @@ where
                     let service = CompetitionService::new(Arc::new(store.clone()), clock);
                     service.create_proxy(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
-                    service.create_proxy(command).await
-                }
             }
         })
     }
@@ -161,11 +145,6 @@ where
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
-                    service.lower_proxy(command).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
                     let service = CompetitionService::new(Arc::new(store.clone()), clock);
                     service.lower_proxy(command).await
                 }
@@ -188,11 +167,6 @@ where
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
-                    let service = CompetitionService::new(Arc::new(store.clone()), clock);
-                    service.execute_slow_proxy(command).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
                     let service = CompetitionService::new(Arc::new(store.clone()), clock);
                     service.execute_slow_proxy(command).await
                 }
@@ -256,16 +230,6 @@ where
                     );
                     service.execute(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    let service = AuctionLifecycleService::new(
-                        Arc::new(store.clone()),
-                        clock,
-                        policy,
-                        successor_policy,
-                    );
-                    service.execute(command).await
-                }
             }
         })
     }
@@ -273,8 +237,7 @@ where
 
 /// 绑定运行时数据库和时钟的 Admin 创建拍卖命令端口。
 ///
-/// 创建拍卖依赖 PostgreSQL 完整档的 intake target、策略快照、审计和 realtime 事务；SQLite
-/// Lite 保持显式能力缺失，不把 draft 写入伪装成完整迁移。
+/// 创建拍卖将 intake target、策略快照、审计和 realtime 事件在同一事务提交。
 pub struct DatabaseAdminAuctionCommands<C> {
     store: Arc<DatabaseStore>,
     clock: Arc<C>,
@@ -283,8 +246,7 @@ pub struct DatabaseAdminAuctionCommands<C> {
 
 /// 绑定运行时数据库和时钟的 Admin 规则读取/发布端口。
 ///
-/// 规则读取在 PostgreSQL 与 SQLite Lite 均可用；版本发布依赖 PostgreSQL 完整档的规则命令
-/// 账本、Serializable CAS、审计和重放语义，Lite 明确返回能力缺失。
+/// 版本发布使用规则命令账本、Serializable CAS、追加审计和持久重放。
 pub struct DatabaseAdminRulesCommands<C> {
     store: Arc<DatabaseStore>,
     clock: Arc<C>,
@@ -324,12 +286,6 @@ where
                     let service = AdminRulesService::new(Arc::new(store.clone()), clock);
                     service.publish(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 规则发布仅支持 PostgreSQL 完整档",
-                    ))
-                }
             }
         })
     }
@@ -367,12 +323,6 @@ where
                         AdminAuctionCreateService::new(Arc::new(store.clone()), clock, policy);
                     service.create(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 创建拍卖仅支持 PostgreSQL 完整档",
-                    ))
-                }
             }
         })
     }
@@ -395,12 +345,6 @@ where
                 DatabaseStore::Postgres(store) => {
                     let service = AdminAuctionScheduleService::new(Arc::new(store.clone()));
                     service.update_schedule(command).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 拍卖计划修改仅支持 PostgreSQL 完整档",
-                    ))
                 }
             }
         })

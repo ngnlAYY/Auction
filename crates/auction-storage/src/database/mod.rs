@@ -1,23 +1,21 @@
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use std::sync::Arc;
-#[cfg(feature = "sqlite")]
-use std::time::Duration;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_application::{ApplicationError, ProcessReadinessPort, RepositoryError};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_observability::{HeartbeatHealthReader, HeartbeatReadinessFuture, PoolMetricsSource};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use sqlx::Row;
 #[cfg(feature = "postgres")]
 use sqlx::{PgPool, Postgres, postgres::PgPoolOptions};
 #[cfg(feature = "postgres")]
 mod admin_intake;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_mail;
 #[cfg(feature = "postgres")]
 pub use admin_mail::{MailDisplayBackfillInput, MailDisplayBackfillResult};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod audit_health;
 #[cfg(feature = "postgres")]
 mod bootstrap;
@@ -28,17 +26,17 @@ pub use initialization::{FirstDatabaseInitializationError, initialize_empty_post
 #[cfg(feature = "postgres")]
 #[path = "competition/postgres.rs"]
 mod competition;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod competition_audit;
 #[cfg(feature = "postgres")]
 mod legacy_v28;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod lifecycle_audit;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod mail_delivery;
 #[cfg(feature = "postgres")]
 mod mail_intake;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod mail_poll;
 #[cfg(feature = "postgres")]
 mod migrations;
@@ -48,11 +46,11 @@ mod rebuild;
 mod recovery_preflight;
 #[cfg(feature = "postgres")]
 mod settlement;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod settlement_policy;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod settlement_report;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod slow_proxy_due;
 #[cfg(feature = "postgres")]
 pub use bootstrap::{
@@ -82,17 +80,13 @@ pub use retention_inventory::{
     PostgresRetentionInventory, PostgresRetentionTableInventory, PostgresSchemaIdentity,
     RETENTION_INVENTORY_FORMAT, RetentionInventoryError, RetentionPolicy, RetentionPolicyFamily,
 };
-#[cfg(feature = "sqlite")]
-mod sqlite;
-#[cfg(feature = "sqlite")]
-pub use sqlite::SqliteCompetitionTransaction;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod commands;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod compensation;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod credentials;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub use commands::{
     DatabaseAdminAuctionCommands, DatabaseAdminIntakeCommands, DatabaseAdminLotCommands,
     DatabaseAdminMailCommands, DatabaseAdminRulesCommands, DatabaseAdminRuntimeCommands,
@@ -100,115 +94,102 @@ pub use commands::{
 };
 #[cfg(feature = "postgres")]
 pub use credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod account;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_auctions;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_audit;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_lots;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_proxy_events;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod admin_renames;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod auctions;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod bid_log;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod blacklist;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod delivery_admin;
 #[cfg(feature = "postgres")]
 mod delivery_audit;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod delivery_scheduler;
 #[cfg(feature = "postgres")]
 mod equipment_secrets;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod forum;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod fulfillment_scheduler;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod health;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod lots;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod operations_alert;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod price_history;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod public_equipment_link;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod realtime;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod realtime_admin;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod realtime_consumer;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub use realtime_consumer::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 #[path = "recovery_commands/commands.rs"]
 mod recovery_commands;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod recovery_health;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod recovery_report;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 #[path = "recovery_scheduler/scheduler.rs"]
 mod recovery_scheduler;
 #[cfg(feature = "postgres")]
 mod retention_inventory;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod rules;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod scheduler;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod sessions;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod settlement_catalog;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod settlement_commands;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod settlement_scheduler;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub use settlement_commands::DatabaseSettlementCommands;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod users;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod worlds;
-#[cfg(feature = "sqlite")]
-use sqlx::{
-    Sqlite, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
-};
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod pool;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(crate) use pool::TrackedPool;
 
 mod backend;
 #[cfg(feature = "postgres")]
 mod postgres_store;
-#[cfg(feature = "sqlite")]
-mod sqlite_ownership;
-#[cfg(feature = "sqlite")]
-mod sqlite_store;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 mod store;
 
 pub use backend::{DatabaseBackend, StorageError};
 #[cfg(feature = "postgres")]
 pub(crate) use pool::PostgresPoolMetricsSource;
-#[cfg(feature = "sqlite")]
-pub(crate) use pool::SqlitePoolMetricsSource;
 #[cfg(feature = "postgres")]
 pub use postgres_store::{PostgresStore, postgres_expected_migration_version};
-#[cfg(feature = "sqlite")]
-pub use sqlite_store::SqliteStore;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub use store::DatabaseStore;
 
 #[cfg(test)]
@@ -222,7 +203,7 @@ mod tests {
             DatabaseBackend::from_url("postgresql://db").unwrap(),
             DatabaseBackend::Postgres
         );
-        assert_eq!(DatabaseBackend::from_url("sqlite::memory:").unwrap(), DatabaseBackend::Sqlite);
+        assert!(DatabaseBackend::from_url("sqlite::memory:").is_err());
     }
 
     #[test]
@@ -233,7 +214,8 @@ mod tests {
         assert!(!error.to_string().contains("secret"));
     }
 
-    #[cfg(feature = "sqlite")]
+    // SQLite 连接测试仅保留历史源码；已移除驱动，不再注册为当前测试目标。
+    #[cfg(any())]
     #[tokio::test]
     async fn connects_to_sqlite_memory_database() {
         let store = DatabaseStore::connect("sqlite::memory:")

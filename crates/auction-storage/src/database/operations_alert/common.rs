@@ -21,8 +21,3 @@ pub(super) fn chrono_duration(value: Duration) -> Result<chrono::Duration, Appli
 pub(super) fn storage_error(message: &str) -> ApplicationError {
     auction_application::RepositoryError::Failed(message.to_owned()).into()
 }
-
-#[cfg(feature = "sqlite")]
-pub(super) fn capability_error() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("operations alert 仅支持 PostgreSQL 完整档")
-}

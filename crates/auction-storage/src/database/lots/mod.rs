@@ -13,8 +13,6 @@ use auction_application::{
     PublicPreviewLotSummary, RepositoryError,
 };
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
-#[cfg(feature = "sqlite")]
-use chrono::NaiveDateTime;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
@@ -24,8 +22,6 @@ use uuid::Uuid;
 use super::DatabaseStore;
 #[cfg(feature = "postgres")]
 use super::PostgresStore;
-#[cfg(feature = "sqlite")]
-use super::SqliteStore;
 
 const CATEGORY_KEYS: [&str; 8] = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
 
@@ -40,8 +36,6 @@ impl PublicLotReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, auction_id, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => list_sqlite(store, auction_id, request).await,
             }
         })
     }
@@ -54,8 +48,6 @@ impl PublicLotReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => detail_postgres(store, lot_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => detail_sqlite(store, lot_id).await,
             }
         })
     }
@@ -76,11 +68,7 @@ pub(super) fn map_forum_equipment(
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 use mapping::*;
 #[cfg(feature = "postgres")]
 use postgres::{detail_postgres, list_postgres};
-#[cfg(feature = "sqlite")]
-use sqlite::{detail_sqlite, list_sqlite};

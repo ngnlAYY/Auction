@@ -42,26 +42,3 @@ pub(super) async fn list_streams_postgres(
     .await
     .map_err(|_| storage_error("读取 PostgreSQL 实时 stream 目录失败"))
 }
-
-#[cfg(feature = "sqlite")]
-pub(super) async fn list_streams_sqlite(
-    store: &super::super::SqliteStore,
-    prefix: &str,
-    after: &str,
-    limit: u16,
-) -> Result<Vec<String>, ApplicationError> {
-    let pattern = format!("{prefix}%");
-    sqlx::query_scalar(
-        "SELECT stream_key
-         FROM realtime_streams
-         WHERE stream_key LIKE ? AND stream_key > ?
-         ORDER BY stream_key ASC
-         LIMIT ?",
-    )
-    .bind(pattern)
-    .bind(after)
-    .bind(i64::from(limit))
-    .fetch_all(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite 实时 stream 目录失败"))
-}

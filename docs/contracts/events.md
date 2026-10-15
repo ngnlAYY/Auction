@@ -104,7 +104,7 @@ Public 提供 GET /api/v1/events 作为权威事件回放入口。冻结的查�
 | has_more | 是否仍有可读取事件 |
 | refetch_required | 事件保留窗口不足或无法安全续读时要求读取权威快照 |
 
-P03 在两后端读取 `realtime_events`，先校验拍卖公开边界；发现回放必须显式用 `scope=auctions`。
+P03 读取 PostgreSQL `realtime_events`，先校验拍卖公开边界；发现回放必须显式用 `scope=auctions`。
 未知 kind/schema 或非法 payload 行不公开，置 `refetch_required=true` 后继续扫描本次有界原始页。
 所有原始序号（包括坏投影）都推进高水位，后续合法事件仍可返回，`next_after` 指向扫描终点；
 流名错误或原始序号不严格递增直接报存储错误，不伪装成 refetch。
@@ -193,9 +193,7 @@ Worker 使用 `(consumer_key, stream_key)` 读取 `realtime_consumer_offsets`。
 失败时允许按同一 `event_id` 重复投递，因此外部 sink 必须提供幂等键。
 
 PostgreSQL consumer 启动时还会按命名空间化的 `consumer_key` 持有会话级 advisory owner lock；
-同 key 的第二个实例必须启动失败，不能共享游标并竞态确认。SQLite Lite 文件库按实际 main
-路径在数据库同目录取得同 key 的 0600 sidecar 锁，不能按 URL 或临时目录命名；内存库只在
-同进程的同一有效内存身份内互斥。Lite 继续遵守每个角色一个实例和串行写入约束。
+同 key 的第二个实例必须启动失败，不能共享游标并竞态确认。
 Public relay 的目录、消费快照、游标确认及失败记录全部使用该持锁物理连接；连接失效时
 失败关闭并撤销 relay readiness，不从普通连接池自动重连继续确认。锁查询前即设置关闭时
 丢弃连接，确保取消或退出不会把 session lock 遗留到池内；恢复消费需重新启动并取得 owner。
@@ -205,7 +203,7 @@ schema 不可识别、序号出现缺口或外部 sink 失败都会写入 `realt
 能写入引用原事件的 `replay_event_id` 并越过原事件序号；原事件不被修改，替代事件仍按自己的
 新序号进入后续消费。这保证重放不会静默重排历史事件。
 
-两后端均提供游标、失败记录和 replay 适配器，Worker 可注入消费 runner。Public 的独立持久化 relay
+PostgreSQL 提供游标、失败记录和 replay 适配器，Worker 可注入消费 runner。Public 的独立持久化 relay
 追赶 `auction:` 目录（含 `auction:discovery`），交给本地有界 Hub 接收后才推进游标，队列满则淘汰
 慢连接。这只证明本实例已接收；外部广播 sink 仍需另行冻结协议，不能把本地派生流当作远端送达证明。
 

@@ -337,7 +337,7 @@ pub(super) async fn migrate_config(config: &AppConfig) -> anyhow::Result<()> {
     let _managed_guard = managed::guard(config)?;
     let database_url = config.database_url().context("database_url is required for migration")?;
 
-    #[cfg(any(feature = "postgres", feature = "sqlite"))]
+    #[cfg(feature = "postgres")]
     {
         let store =
             DatabaseStore::connect(database_url).await.context("connect database for migration")?;
@@ -346,9 +346,9 @@ pub(super) async fn migrate_config(config: &AppConfig) -> anyhow::Result<()> {
         Ok(())
     }
 
-    #[cfg(not(any(feature = "postgres", feature = "sqlite")))]
+    #[cfg(not(feature = "postgres"))]
     {
         let _ = database_url;
-        anyhow::bail!("auctionctl was built without a database feature; enable postgres or sqlite")
+        anyhow::bail!("auctionctl was built without a database feature; enable postgres")
     }
 }

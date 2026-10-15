@@ -37,13 +37,7 @@ pub(in crate::bootstrap) async fn backup(
     let store = DatabaseStore::connect(database_url)
         .await
         .context("connect database for legacy v28 backup")?;
-    let postgres = match store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => {
-            anyhow::bail!("postgres-legacy-v28-backup 只支持 PostgreSQL 完整档")
-        }
-    };
+    let DatabaseStore::Postgres(postgres) = store;
 
     let before = postgres
         .collect_legacy_v28_preflight(confirmed_database_name)

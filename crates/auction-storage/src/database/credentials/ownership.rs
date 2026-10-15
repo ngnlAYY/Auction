@@ -140,8 +140,6 @@ impl DatabaseStore {
                     valid: AtomicBool::new(true),
                 })
             }
-            #[cfg(feature = "sqlite")]
-            DatabaseStore::Sqlite(_) => Err(CredentialRuntimeOwnershipError::Unavailable),
         }
     }
 }

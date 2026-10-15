@@ -25,21 +25,13 @@ pub use ownership::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 
 #[cfg(feature = "postgres")]
 use acknowledgement::acknowledge_postgres;
-#[cfg(feature = "sqlite")]
-use acknowledgement::acknowledge_sqlite;
 use common::{storage_error, validate_cursor_keys, validate_event_position, validate_failure_text};
 #[cfg(feature = "postgres")]
 use failure::{record_failure_postgres, resolve_failure_postgres};
-#[cfg(feature = "sqlite")]
-use failure::{record_failure_sqlite, resolve_failure_sqlite};
 #[cfg(feature = "postgres")]
 use read::read_postgres;
-#[cfg(feature = "sqlite")]
-use read::read_sqlite;
 #[cfg(feature = "postgres")]
 use stream::list_streams_postgres;
-#[cfg(feature = "sqlite")]
-use stream::list_streams_sqlite;
 
 impl RealtimeStreamStore for DatabaseStore {
     fn list_stream_keys(
@@ -59,10 +51,6 @@ impl RealtimeStreamStore for DatabaseStore {
                         .await
                         .map_err(|_| storage_error("打开 PostgreSQL 实时 stream 连接失败"))?;
                     list_streams_postgres(&mut connection, &prefix, &after, limit).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    list_streams_sqlite(store, &prefix, &after, limit).await
                 }
             }
         })
@@ -86,8 +74,6 @@ impl RealtimeConsumerStore for DatabaseStore {
                         .map_err(|_| storage_error("打开 PostgreSQL 实时消费连接失败"))?;
                     read_postgres(&mut connection, request).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => read_sqlite(store, request).await,
             }
         })
     }
@@ -119,11 +105,6 @@ impl RealtimeConsumerStore for DatabaseStore {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    acknowledge_sqlite(store, &consumer_key, &stream_key, event_id, stream_sequence)
-                        .await
-                }
             }
         })
     }
@@ -151,19 +132,6 @@ impl RealtimeConsumerStore for DatabaseStore {
                         .map_err(|_| storage_error("打开 PostgreSQL 实时失败记录连接失败"))?;
                     record_failure_postgres(
                         &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        &failure_code,
-                        &safe_detail,
-                        failed_at,
-                    )
-                    .await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    record_failure_sqlite(
-                        store,
                         &consumer_key,
                         &stream_key,
                         event_id,
@@ -202,18 +170,6 @@ impl RealtimeConsumerStore for DatabaseStore {
                         .map_err(|_| storage_error("打开 PostgreSQL 实时重放连接失败"))?;
                     resolve_failure_postgres(
                         &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        replay_event_id,
-                        resolved_at,
-                    )
-                    .await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    resolve_failure_sqlite(
-                        store,
                         &consumer_key,
                         &stream_key,
                         event_id,

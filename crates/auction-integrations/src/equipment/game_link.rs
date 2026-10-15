@@ -17,8 +17,8 @@ use crate::cryptobox::EquipmentKeyOpener;
 /// 完整 URL 只进入 P09/P11 lot DTO；解析器在读取公开投影后才打开 key，并立即把经校验的 URL
 /// 移交给 HTTP 映射边界。
 pub struct EquipmentGameLinkResolver {
-    secrets: Option<Arc<dyn PublicEquipmentLinkSecretReader>>,
-    opener: Option<EquipmentKeyOpener>,
+    secrets: Arc<dyn PublicEquipmentLinkSecretReader>,
+    opener: EquipmentKeyOpener,
 }
 
 impl EquipmentGameLinkResolver {
@@ -27,12 +27,7 @@ impl EquipmentGameLinkResolver {
         secrets: Arc<dyn PublicEquipmentLinkSecretReader>,
         opener: EquipmentKeyOpener,
     ) -> Self {
-        Self { secrets: Some(secrets), opener: Some(opener) }
-    }
-
-    /// 建立 Lite 档的显式能力缺失解析器，使 lot 投影保留但隐藏不可用链接。
-    pub fn unsupported() -> Self {
-        Self { secrets: None, opener: None }
+        Self { secrets, opener }
     }
 }
 
@@ -45,12 +40,8 @@ impl PublicEquipmentLinkResolver for EquipmentGameLinkResolver {
             if targets.is_empty() {
                 return Ok(Vec::new());
             }
-            let (Some(secrets), Some(opener)) = (self.secrets.as_deref(), self.opener.as_ref())
-            else {
-                return Err(ApplicationError::CapabilityUnavailable(
-                    "完整游戏装备 URL 仅支持 PostgreSQL 完整档",
-                ));
-            };
+            let secrets = &self.secrets;
+            let opener = &self.opener;
 
             let mut equipment_ids = BTreeSet::new();
             for target in targets {

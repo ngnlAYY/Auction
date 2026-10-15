@@ -38,10 +38,6 @@ impl RealtimeStreamStore for RealtimeConsumerOwnership {
                     let mut connection = connection.lock().await;
                     super::list_streams_postgres(&mut connection, &prefix, &after, limit).await
                 }
-                #[cfg(feature = "sqlite")]
-                OwnedRealtimeBackend::Sqlite { store, .. } => {
-                    super::list_streams_sqlite(store, &prefix, &after, limit).await
-                }
             }
         })
     }
@@ -60,10 +56,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
                 OwnedRealtimeBackend::Postgres(connection) => {
                     let mut connection = connection.lock().await;
                     super::read_postgres(&mut connection, request).await
-                }
-                #[cfg(feature = "sqlite")]
-                OwnedRealtimeBackend::Sqlite { store, .. } => {
-                    super::read_sqlite(store, request).await
                 }
             }
         })
@@ -87,17 +79,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
                     let mut connection = connection.lock().await;
                     super::acknowledge_postgres(
                         &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        stream_sequence,
-                    )
-                    .await
-                }
-                #[cfg(feature = "sqlite")]
-                OwnedRealtimeBackend::Sqlite { store, .. } => {
-                    super::acknowledge_sqlite(
-                        store,
                         &consumer_key,
                         &stream_key,
                         event_id,
@@ -138,19 +119,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
                     )
                     .await
                 }
-                #[cfg(feature = "sqlite")]
-                OwnedRealtimeBackend::Sqlite { store, .. } => {
-                    super::record_failure_sqlite(
-                        store,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        &failure_code,
-                        &safe_detail,
-                        failed_at,
-                    )
-                    .await
-                }
             }
         })
     }
@@ -177,18 +145,6 @@ impl RealtimeConsumerStore for RealtimeConsumerOwnership {
                     let mut connection = connection.lock().await;
                     super::resolve_failure_postgres(
                         &mut connection,
-                        &consumer_key,
-                        &stream_key,
-                        event_id,
-                        replay_event_id,
-                        resolved_at,
-                    )
-                    .await
-                }
-                #[cfg(feature = "sqlite")]
-                OwnedRealtimeBackend::Sqlite { store, .. } => {
-                    super::resolve_failure_sqlite(
-                        store,
                         &consumer_key,
                         &stream_key,
                         event_id,

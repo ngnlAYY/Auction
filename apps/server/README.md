@@ -2,8 +2,10 @@
 
 [文档导航](../../docs/README.md) · [架构](../../docs/architecture.md) · [部署手册](../../ops/deploy/README.md)
 
-Linux/PostgreSQL 单主机的可选单文件服务：supervisor 用同一可执行文件派生 Worker、Admin、Public，
+Linux x86_64/PostgreSQL 单主机的可选单文件服务：supervisor 用同一可执行文件派生 Worker、Admin、Public，
 复用各 app 的库装配，保留独立进程、路由和权限边界。`auctionctl` 仍独立，默认分体发布不变。
+
+装配入口在编译期拒绝其他 OS/架构；浏览器 WASM 保留，默认发布 ABI 见[开发指南](../../docs/development.md#工具与依赖来源)。
 
 ## 构建与文件
 

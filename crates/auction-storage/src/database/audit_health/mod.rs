@@ -15,6 +15,8 @@ pub(crate) trait AuditWriteResult<T> {
 impl<T, E> AuditWriteResult<T> for Result<T, E> {
     fn record_audit_failure(self) -> Self {
         if self.is_err() {
+            // Rust 1.99 的新名 try_update 在 MSRV 1.94.1 尚未稳定，例外仅限这一调用。
+            #[allow(deprecated)]
             let _ =
                 AUDIT_FAILURE_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                     Some(value.saturating_add(1))

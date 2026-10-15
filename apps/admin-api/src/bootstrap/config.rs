@@ -3,13 +3,13 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_application::AdminIntakePolicy;
 use auction_application::{AdminCredentialWorld, WorkerControlPort};
 use auction_cache::CacheStore;
 use auction_config::{AppConfig, CacheBackend};
 use auction_http::{AdminHttpSecurity, HttpSecurityOptions};
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use auction_integrations::EquipmentSourcePolicy;
 use auction_jobs::WorkerControlClient;
 
@@ -60,7 +60,7 @@ pub(super) fn configured_dashboard_mailboxes(config: &AppConfig) -> Vec<(String,
         .collect()
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<EquipmentSourcePolicy> {
     let source = config
         .admin_runtime
@@ -78,7 +78,7 @@ pub(super) fn equipment_source_policy(config: &AppConfig) -> anyhow::Result<Equi
     })
 }
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 pub(super) fn admin_intake_policy(config: &AppConfig) -> AdminIntakePolicy {
     let require_tradeable = config
         .admin_runtime

@@ -1,4 +1,4 @@
-//! PostgreSQL 与 SQLite 共用的 Auction-BF 竞价命令审计映射。
+//! Auction-BF 竞价命令审计映射；只追加接受命令产生的事实。
 
 use auction_application::{
     CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionTransactionError,

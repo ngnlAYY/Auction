@@ -8,8 +8,6 @@ use auction_application::{
 };
 use sha2::{Digest, Sha256};
 use sqlx::Row;
-#[cfg(feature = "sqlite")]
-use uuid::Uuid;
 
 use super::DatabaseStore;
 
@@ -22,8 +20,6 @@ impl PublicLoginAuthenticator for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => authenticate_postgres(store, &key).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => authenticate_sqlite(store, &key).await,
             }
         })
     }
@@ -72,57 +68,6 @@ async fn authenticate_postgres(
         public_reason: row
             .try_get("public_reason")
             .map_err(|_| storage_error("读取公开封禁原因失败"))?,
-    })
-}
-
-#[cfg(feature = "sqlite")]
-async fn authenticate_sqlite(
-    store: &super::SqliteStore,
-    key: &[u8],
-) -> Result<PublicLoginIdentity, ApplicationError> {
-    let key_hash = Sha256::digest(key);
-    let row = sqlx::query(
-        "SELECT account.id, account.state_version, account.username, account.status, account.key_status,
-                blacklist.public_reason
-         FROM users AS account
-         LEFT JOIN user_blacklist AS blacklist
-           ON blacklist.user_id = account.id AND blacklist.revoked_at IS NULL
-         WHERE account.public_key_hash = ?",
-    )
-    .bind(key_hash.to_vec())
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite Public 登录身份失败"))?;
-
-    let Some(row) = row else {
-        return Err(SessionError::InvalidCredentials.into());
-    };
-    let key_status: String =
-        row.try_get("key_status").map_err(|_| storage_error("读取 Lite 登录密钥状态失败"))?;
-    if key_status != "active" {
-        return Err(SessionError::InvalidCredentials.into());
-    }
-    let status: String =
-        row.try_get("status").map_err(|_| storage_error("读取 Lite 用户状态失败"))?;
-    let active = match status.as_str() {
-        "active" => true,
-        "blacklisted" => false,
-        _ => return Err(storage_error("Lite 用户状态不在允许集合内")),
-    };
-    let id = Uuid::from_slice(
-        &row.try_get::<Vec<u8>, _>("id").map_err(|_| storage_error("读取 Lite 用户标识失败"))?,
-    )
-    .map_err(|_| storage_error("Lite 用户标识格式无效"))?;
-    Ok(PublicLoginIdentity {
-        user_id: id,
-        user_state_version: row
-            .try_get("state_version")
-            .map_err(|_| storage_error("读取 Lite 用户认证版本失败"))?,
-        username: row.try_get("username").map_err(|_| storage_error("读取 Lite 用户名失败"))?,
-        active,
-        public_reason: row
-            .try_get("public_reason")
-            .map_err(|_| storage_error("读取 Lite 公开封禁原因失败"))?,
     })
 }
 

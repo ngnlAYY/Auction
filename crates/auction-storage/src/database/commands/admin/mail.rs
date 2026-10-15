@@ -91,13 +91,6 @@ where
                     let service = AdminMailService::new(Arc::new(store.clone()), clock);
                     service.set_polling_paused(command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = command;
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 邮件状态修改仅支持 PostgreSQL 完整档",
-                    ))
-                }
             }
         })
     }
@@ -115,13 +108,6 @@ where
                 DatabaseStore::Postgres(store) => {
                     let service = AdminMailService::new(Arc::new(store.clone()), clock);
                     service.trigger_poll(command).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = command;
-                    Err(auction_application::ApplicationError::CapabilityUnavailable(
-                        "Admin 邮件轮询触发仅支持 PostgreSQL 完整档",
-                    ))
                 }
             }
         })

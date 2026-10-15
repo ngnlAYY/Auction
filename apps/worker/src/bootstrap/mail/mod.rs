@@ -5,7 +5,7 @@
 
 #[cfg(feature = "postgres")]
 use super::fulfillment::MoogleMailFulfillmentEvidenceReader;
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 use super::*;
 
 #[cfg(feature = "postgres")]
@@ -19,7 +19,7 @@ mod processor;
 #[cfg(feature = "postgres")]
 mod runtime;
 
-#[cfg(any(feature = "postgres", feature = "sqlite"))]
+#[cfg(feature = "postgres")]
 /// 根据 Worker 配置装配 MoogleMail 轮询、业务处理、delivery 和履约证据读取端口。
 pub(super) async fn configure_mail_poll(
     config: &AppConfig,

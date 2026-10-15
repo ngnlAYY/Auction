@@ -10,8 +10,6 @@ use auction_application::{
     PublicProxyTransition, RepositoryError,
 };
 use auction_domain::{AuctionRules, BidAmount};
-#[cfg(feature = "sqlite")]
-use chrono::NaiveDateTime;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
@@ -29,8 +27,6 @@ impl PublicAccountReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_postgres(store, user_id, request).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => list_sqlite(store, user_id, request).await,
             }
         })
     }
@@ -49,8 +45,6 @@ impl PublicAccountReader for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     proxy_postgres(store, lot_id, user_id, None).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => proxy_sqlite(store, lot_id, user_id, None).await,
             }
         })
     }
@@ -69,10 +63,6 @@ impl PublicAccountReader for DatabaseStore {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     proxy_postgres(store, lot_id, user_id, Some(authorization_id)).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(store) => {
-                    proxy_sqlite(store, lot_id, user_id, Some(authorization_id)).await
                 }
             }
         })
@@ -110,17 +100,11 @@ struct ProxyBase {
 
 #[cfg(feature = "postgres")]
 use super::PostgresStore;
-#[cfg(feature = "sqlite")]
-use super::SqliteStore;
 
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
 
 use mapping::*;
 #[cfg(feature = "postgres")]
 use postgres::{list_postgres, proxy_postgres};
-#[cfg(feature = "sqlite")]
-use sqlite::{list_sqlite, proxy_sqlite};

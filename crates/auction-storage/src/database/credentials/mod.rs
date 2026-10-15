@@ -1,8 +1,4 @@
-//! Admin 凭据 storage owner。
-//!
-//! 凭据只在 PostgreSQL 完整档落库。每个写命令使用 Serializable 事务和命令 advisory lock，
-//! 将凭据行、命令账本、审计记录原子提交；SQLite Lite 显式报告能力不可用，不创建第二套
-//! 不完整的凭据语义。
+//! 外部凭据命令的 PostgreSQL 装配；凭据行、命令账本和追加审计原子提交。
 
 #[cfg(feature = "postgres")]
 use auction_application::AdminCredentialEnvelope;
@@ -71,8 +67,6 @@ impl AdminCredentialStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => list_postgres(store, request).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -84,8 +78,6 @@ impl AdminCredentialStore for DatabaseStore {
         request_hash: RequestHash,
     ) -> ApplicationFuture<'_, Option<AdminCredentialCommandResult>> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = &kind;
             if command_id.is_nil() || request_hash.as_bytes() == [0; 32] {
                 return Err(admin_error(AdminCredentialError::InvalidRequest));
             }
@@ -94,8 +86,6 @@ impl AdminCredentialStore for DatabaseStore {
                 Self::Postgres(store) => {
                     find_command_postgres(store, command_id, kind, request_hash).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -105,13 +95,9 @@ impl AdminCredentialStore for DatabaseStore {
         write: AdminCredentialImportWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = &write;
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => import_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -121,13 +107,9 @@ impl AdminCredentialStore for DatabaseStore {
         write: AdminCredentialMutationWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = &write;
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => mutate_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -137,13 +119,9 @@ impl AdminCredentialStore for DatabaseStore {
         write: AdminCredentialDeleteWrite,
     ) -> ApplicationFuture<'_, AdminCredentialCommandResult> {
         Box::pin(async move {
-            #[cfg(feature = "sqlite")]
-            let _ = &write;
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => delete_postgres(store, write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -156,13 +134,9 @@ impl AdminCredentialRuntimeReader for DatabaseStore {
         world: AdminCredentialWorld,
     ) -> ApplicationFuture<'_, Vec<AdminCredentialRuntimeRecord>> {
         Box::pin(async move {
-            #[cfg(not(feature = "postgres"))]
-            let _ = (kind, world);
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => list_active_postgres(store, kind, world).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -181,8 +155,6 @@ impl AdminCredentialRuntimeWriter for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => mark_invalid_postgres(store, credential_id, now).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }
@@ -194,8 +166,6 @@ impl AdminCredentialHealthReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => health_postgres(store).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(capability_unavailable()),
             }
         })
     }

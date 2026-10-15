@@ -57,8 +57,3 @@ pub(super) fn parse_world(value: &str) -> Result<SettlementWorld, ApplicationErr
 pub(super) fn storage_error(message: &str) -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }
-
-#[cfg(feature = "sqlite")]
-pub(super) fn capability_error() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("论坛回帖导入仅支持 PostgreSQL 完整档")
-}

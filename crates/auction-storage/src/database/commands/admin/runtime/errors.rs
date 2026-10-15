@@ -1,4 +1,4 @@
-//! Admin runtime 命令账本的错误分类和 SQLite Lite 能力边界。
+//! Admin runtime 命令账本的 PostgreSQL 错误分类。
 
 use auction_application::ApplicationError;
 
@@ -25,9 +25,4 @@ pub(super) fn map_command_sql_error(error: sqlx::Error) -> ApplicationError {
         }
         _ => command_failed("PostgreSQL runtime 配置命令操作失败"),
     }
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) fn lite_unavailable() -> ApplicationError {
-    ApplicationError::CapabilityUnavailable("Admin runtime 配置更新仅支持 PostgreSQL 完整档")
 }

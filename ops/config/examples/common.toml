@@ -71,8 +71,7 @@ mode = "hold_curve_v1"
 compensation_pool_enabled = true
 # 可选：isekai carrier credit 数量；当前领域策略要求为 1。
 isekai_carrier_credit = 1
-# 可选：持有比例与调整比例的 PPM 锚点数组；省略时使用内置曲线。
-# 每个数组元素一旦提供，hold_ppm 与 adjustment_ppm 均为必填字段。
+# 可选：PPM 锚点数组，省略时使用内置曲线；每个元素的 hold_ppm 与 adjustment_ppm 均必填。
 anchors = [
   { hold_ppm = 0, adjustment_ppm = 80000 },
   { hold_ppm = 50000, adjustment_ppm = 64000 },

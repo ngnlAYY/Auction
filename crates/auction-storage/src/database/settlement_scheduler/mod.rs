@@ -1,7 +1,4 @@
-//! PostgreSQL 结算 workflow 的持久化领取适配器装配。
-//!
-//! 领取和租约 fence 位于 `claim.rs`，完成/失败收口位于 `resolution.rs`；本文件只负责端口
-//! 校验、后端能力分派和共享错误映射。SQLite Lite 明确不承载结算 workflow。
+//! 结算 workflow 的持久调度端口；领取、租约和完成状态由 PostgreSQL 拥有。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, SettlementWorkClaim, SettlementWorkStore,
@@ -37,10 +34,6 @@ impl SettlementWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算 workflow 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -58,10 +51,6 @@ impl SettlementWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算 workflow 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -86,10 +75,6 @@ impl SettlementWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "结算 workflow 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

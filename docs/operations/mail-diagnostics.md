@@ -48,7 +48,7 @@ equipment ID/附件位置。定价拒绝保留 `reason_code`，有界 `pricing_d
 `outcome`、`context` 组成安全 public header，完整 AAD 认证元数据。优先 `credential_data_key`，缺失时
 用 `equipment_data_key`，不直接复用凭据 AES 密钥。目录 `0700`、文件 `0600`，保留 1–365 天、最多
 1024 文件；只在写入时按容量/保留期清理，没有独立定时清理或自动重放。证据文件不新增 schema，
-不替代业务事实、账本或游标；SQLite Lite 不提供留证能力。
+不替代业务事实、账本或游标。
 
 ## 配置与离线导出
 
@@ -82,7 +82,7 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 及 `has_message_display`，详情才返回 `message_display`。snapshot 固定 schema/redaction version，
 正文最多 64 KiB、JSON 最多 128 KiB、附件外部 ID 最多 1000 条；Credits/COD 保留为非负数。装备 key、URL key
 片段、认证邮件正文和认证相关敏感内容均隐藏。该投影属于 PostgreSQL 完整档的非权威展示数据，不参与入站幂等
-或 cursor，普通 replay 不会补写历史 NULL；SQLite Lite 不新增列或能力。
+或 cursor，普通 replay 不会补写历史 NULL。
 
 历史回填只接受认证的 `parsed_message` 诊断证据，并要求 world、mailbox、external mail ID 和 content digest
 精确匹配，再以 CAS 和追加审计写入。相同幂等身份但内容不同必须冲突；没有匹配证据的历史邮件显示未留存。证据

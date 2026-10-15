@@ -5,6 +5,9 @@
 公开 HTTP、会话、实时 relay 与 Public 静态页面的进程装配根。
 `src/lib.rs` 导出 `run`、`run_from_path`；独立 `main.rs` 和[合并服务](../server/README.md)的 Public 子进程复用同一入口。
 
+仅支持 Linux x86_64 原生目标；装配入口在编译期拒绝其他 OS/架构。浏览器 WASM 不受此限制，
+默认发布 ABI 与构建边界见[开发指南](../../docs/development.md#工具与依赖来源)。
+
 ## 源码入口
 
 | 入口 | 职责 |
@@ -23,15 +26,13 @@
 `config.rs` 映射安全/缓存策略，`listener.rs` 绑定 TCP 或 Linux Unix socket。
 
 PostgreSQL 的真实装备 URL 需要成对有效的 `equipment_data_key_id`/`equipment_data_key`；缺失时 P09/P11 返回 503，
-无效时启动失败。URL 只在最终 `no-store` DTO 映射时生成；SQLite Lite 保留 lot 投影但链接为空。
+无效时启动失败。URL 只在最终 `no-store` DTO 映射时生成。
 OTLP headers 只从敏感 TOML 读取。周期心跳报告数据库/schema、审计写入失败计数和 tracing 安全状态。
 
 ## 持锁 relay 与故障边界
 
 relay 的目录读取和消费确认共用持锁连接。PostgreSQL owner 连接失效后停止推进游标并撤销 readiness；
 数据库恢复后须重启该实例重新取得 owner，不能换池连接继续消费。
-SQLite 文件库在数据库同目录保留 0600 sidecar 锁；运行账号须能创建它，数据库不能使用硬链接别名。
-文件库 owner 要求 Linux `statx` mount 身份，拒绝单文件 bind mount，可挂载整个数据库目录。
 consumer 标识与缓冲配置见[配置说明](../../ops/config/README.md#public-实时-relay)。
 
 ## 监听与运行配置
@@ -49,7 +50,7 @@ API-only 使用固定空资源集合；即使构建机残留 `target/dx`，也�
 
 ## Cargo feature
 
-默认 feature 为空；`postgres` / `sqlite` 选择数据库适配器，`cache-redis` 编译可选 Redis，
+默认 feature 为空；`postgres` 启用数据库适配器，`cache-redis` 编译可选 Redis，
 `web-embed` 只包含 Public payload。数据库配置必须匹配已编译驱动，详见[制品选择](../../docs/development.md#选择制品-feature)。
 
 ## 边界约束

@@ -31,22 +31,21 @@ sudo systemctl enable --now auction-stack.service
 
 ## 启动和停止顺序
 
-只 enable 总控，避免开机绕过应用就绪门禁。总控严格预检同一公共配置、权限、unit 环境和监听占用；
-三角色全部明确停止后才前向迁移，再按 Worker → Admin → Public 逐个 readiness。
-停止反序执行；失败只停止本次启动的 unit，已提交迁移不自动回滚。
+只 enable 总控：严格预检同一公共配置、权限、unit 环境及监听占用，三角色明确停止后才迁移，
+再按 Worker → Admin → Public 逐个 readiness；停止反序，失败仅停止本次启动的 unit，不回滚已提交迁移。
+完整 start/restart 分支见[CLI 总控](../../../apps/auctionctl/README.md#systemd-总控)。
 
-模板的 Public Requires Admin/Worker，Admin Requires Worker；单角色停止/重启可能影响依赖该角色的其他 unit。
-操作前核对实际 unit 依赖，不能把命令只点名一个 unit 当作只影响一个进程。
+Public Requires Admin/Worker，Admin Requires Worker；单角色停止/重启可能联动依赖者，操作前须核对实际 unit，不能按命令点名范围推断影响。
 
 ## 配置绑定与探针
 
-AUCTION_CONFIG_FILE 只支持 Environment 中无空白/转义的简单赋值，可整体包裹双引号。
-非空 EnvironmentFiles、UnsetEnvironment、PassEnvironment、PAMName 均拒绝，错误不回显环境值。
-仅 EnvironmentFiles 允许 systemctl show 省略空属性，其他身份/环境字段必须返回。
+AUCTION_CONFIG_FILE 仅接受 Environment 中无空白/转义的简单赋值，可整体加双引号。
+拒绝非空 EnvironmentFiles、UnsetEnvironment、PassEnvironment、PAMName，不回显环境值。
+systemctl show 仅可省略空 EnvironmentFiles，其他身份/环境字段必须返回。
 
-Worker control 必须启用并允许实际 Admin/运维 UID 或 GID；探针使用其 Unix `/v1/health/ready`，
-两端 HTTP 使用各自有效 TCP/Unix `/health/ready`，Admin 不回退到被 runtime 覆盖的旧地址。
-每次异步连接、写入和状态行读取共用最多 1 秒，并受角色剩余启动预算约束；默认每角色 30 秒。
+Worker control 须启用并允许实际 Admin/运维 UID 或 GID，探针走 Unix `/v1/health/ready`；
+Public/Admin 走有效 TCP/Unix `/health/ready`，Admin 不回退 runtime 覆盖前地址。
+每次异步连接、写入、状态行读取共用最多 1 秒且受剩余启动预算约束；每角色默认 30 秒。
 
 ## 关闭预算
 
@@ -60,21 +59,14 @@ Worker control 必须启用并允许实际 Admin/运维 UID 或 GID；探针使�
 
 ## 权限与回执
 
-总控通过 StateDirectory=auction/deployment 创建私有状态目录，使用非阻塞锁并原子发布
-startup-order.v1.json。手工运行时须预建规范绝对路径、归有效用户所有、权限至多 0700。
-回执只含 unit、InvocationID、PID、单调启动时间与观察时间，不含配置或凭据。
-全部角色已运行时 start 复核 readiness/顺序后发布 adopted 回执；部分运行或转换中拒绝。
+StateDirectory=auction/deployment 创建私有状态目录；总控持非阻塞锁、原子发布 startup-order.v1.json。
+手工运行须预建规范绝对路径，归有效用户所有、权限至多 0700。
+回执仅含 unit、InvocationID、PID、单调启动时间及观察时间，不含配置/凭据。
+全部已运行时 start 复核 readiness/顺序并发布 adopted 回执；部分运行或转换中拒绝。
 
-模板假定 auction-worker-control 组存在，Worker/Admin 加入相应 supplementary group；
-TOML 的 group、allowlist 和实际 UID/GID 须同步，不能照抄主机数字 ID。
-Admin/Worker 的 control 路径、三组数据密钥、有效拍卖/结算/排期须一致；接管 operations 时共用 runtime。
-保存不会热加载，重启范围见[配置说明](../../config/README.md#runtime-共享与重启)。
-
-## SQLite 文件权限
-
-总控模板按 system manager 权限运行，默认面向 PostgreSQL。Lite 数据库及父目录必须归服务账号，
-避免 root 首次迁移生成不可访问文件；各角色还需相应目录的写权限。
-改为运行账号控制时，同时审阅 systemd/Polkit 权限，保留单主机/单实例/并发 1 限制。
+须预建 auction-worker-control 组，并纳入 Worker/Admin supplementary group；TOML group、allowlist 须匹配实际 UID/GID，禁止照抄数字 ID。
+Admin/Worker 须匹配 control 路径、三组数据密钥及有效拍卖/结算/排期；operations 接管须共用 runtime。
+保存不热加载，重启范围见[配置说明](../../config/README.md#runtime-共享与重启)。
 
 ## 状态与重启
 
@@ -89,13 +81,12 @@ sudo /opt/auction/bin/auctionctl deployment restart --config-dir /etc/auction
 ## 可写目录
 
 Admin 模板开放 `/etc/auction/runtime` 和 `/run/hv-auction`；Public 开放后者。
-Worker 用 RuntimeDirectory 预建 `/run/hv-auction/worker`，并始终开放 `/run/hv-auction`、`/var/lib/auction`，
-并非仅 Lite 才开放后者。按实际 socket、数据库和诊断目录收窄或补齐 ReadWritePaths，公共/敏感 TOML 保持只读。
+Worker 用 RuntimeDirectory 预建 `/run/hv-auction/worker`，开放 `/run/hv-auction`、`/var/lib/auction`。
+按实际 socket 和诊断目录收窄或补齐 ReadWritePaths，公共/敏感 TOML 保持只读。
 目录 owner/group、实例锁、inode 和 peer allowlist 仍由应用检查，systemd 可写声明不能替代这些门禁。
 
 ## 独立迁移门禁
 
-`auctionctl migrate` 使用与总控相同的 systemctl、state-dir 和三个 unit 参数；持锁核验全部角色
-inactive/failed 且 MainPID=0，运行、转换状态、读取失败或锁冲突都阻断迁移。
-总控 start/restart 已在同一锁/预检边界内编排迁移。单角色 unit 不迁移；任何 unit 都不执行
-DROP/CREATE、备份恢复或 retention 删除。
+`auctionctl migrate` 沿用总控的 systemctl、state-dir 和三个 unit 参数，持锁要求全部角色 inactive/failed 且 MainPID=0；
+运行、转换中、状态读取失败或锁冲突均阻断迁移。总控 start/restart 在同一锁/预检边界迁移，单角色 unit 不迁移。
+参数及建库边界见[CLI](../../../apps/auctionctl/README.md#停机迁移与初始建库)；任何 unit 均不执行 DROP/CREATE、备份恢复或 retention 删除。

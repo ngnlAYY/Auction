@@ -93,12 +93,7 @@ impl AppConfig {
             return Err(ConfigError::MissingRedisUrl);
         }
         validate_cache(&cache)?;
-        let database_is_sqlite = secrets
-            .database_url
-            .as_ref()
-            .is_some_and(|url| database_url_is_sqlite(url.expose_secret()));
-        let worker_concurrency =
-            worker.concurrency.unwrap_or(if database_is_sqlite { 1 } else { 8 });
+        let worker_concurrency = worker.concurrency.unwrap_or(8);
         let worker_poll_interval_seconds = worker.poll_interval_seconds.unwrap_or(60);
         if worker.recovery_retry_delay_seconds == 0 || worker.recovery_retry_delay_seconds > 86_400
         {
@@ -153,9 +148,6 @@ impl AppConfig {
         resolve_http_security_origins(&mut http_security, main_listen_addr)?;
         validate_http_security(&http_security)?;
         validate_session(&session)?;
-        if role == Role::Worker && database_is_sqlite && worker_concurrency != 1 {
-            return Err(ConfigError::LiteWorkerConcurrency { concurrency: worker_concurrency });
-        }
 
         let listener = if role == Role::Admin {
             runtime_document

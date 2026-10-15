@@ -40,10 +40,6 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 Self::Postgres(store) => {
                     enqueue_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "MoogleMail delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -65,10 +61,6 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 Self::Postgres(store) => {
                     prepare_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "MoogleMail recovery delivery 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -95,10 +87,6 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 Self::Postgres(store) => activate_postgres(store.pool(), &activation)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "MoogleMail recovery delivery 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

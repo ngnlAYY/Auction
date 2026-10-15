@@ -173,10 +173,6 @@ impl DeliveryWorkStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -192,10 +188,6 @@ impl DeliveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => start_sending_postgres(store.pool(), &_claim, _started_at)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -211,10 +203,6 @@ impl DeliveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => release_postgres(store.pool(), &_claim, _released_at)
                     .await
                     .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -236,10 +224,6 @@ impl DeliveryWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -264,10 +248,6 @@ impl DeliveryWorkStore for DatabaseStore {
                         .await
                         .map_err(ApplicationError::from)
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -319,10 +299,6 @@ impl DeliveryWorkStore for DatabaseStore {
                 )
                 .await
                 .map_err(ApplicationError::from),
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "delivery outbox 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

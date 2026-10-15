@@ -28,10 +28,6 @@ impl RecoveryReportReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres_report(store, auction_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery 报告仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

@@ -53,69 +53,6 @@ pub(in crate::database::account) fn map_postgres_proxy_base(
     })
 }
 
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn map_sqlite_proxy_base(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<ProxyBase, ApplicationError> {
-    Ok(ProxyBase {
-        authorization_id: get_sqlite_uuid(
-            &row,
-            "authorization_id",
-            "读取 SQLite 代理授权标识失败",
-        )?,
-        auction_id: get_sqlite_uuid(&row, "auction_id", "读取 SQLite 代理拍卖标识失败")?,
-        lot_id: get_sqlite_uuid(&row, "lot_id", "读取 SQLite 代理 lot 标识失败")?,
-        user_id: get_sqlite_uuid(&row, "user_id", "读取 SQLite 代理用户标识失败")?,
-        lot_number: get_sqlite(&row, "lot_number", "读取 SQLite 代理 lot 序号失败")?,
-        authorization_sequence: get_sqlite(
-            &row,
-            "authorization_sequence",
-            "读取 SQLite 代理授权序号失败",
-        )?,
-        usage_number: get_sqlite(&row, "usage_number", "读取 SQLite 代理使用序号失败")?,
-        quota_used: get_sqlite(&row, "quota_used", "读取 SQLite 代理 quota 使用量失败")?,
-        quota_limit: get_sqlite(&row, "quota_limit", "读取 SQLite 代理 quota 上限失败")?,
-        policy_bid_increment_ppm: get_sqlite(
-            &row,
-            "policy_bid_increment_ppm",
-            "读取 SQLite 代理竞价增量比例失败",
-        )?,
-        policy_minimum_increment: get_sqlite(
-            &row,
-            "policy_minimum_increment",
-            "读取 SQLite 代理最低增量失败",
-        )?,
-        mode: get_sqlite(&row, "mode", "读取 SQLite 代理模式失败")?,
-        maximum_amount: get_sqlite(&row, "maximum_amount", "读取 SQLite 代理金额失败")?,
-        status: get_sqlite(&row, "proxy_status", "读取 SQLite 代理状态失败")?,
-        terminal_reason: get_sqlite(&row, "terminal_reason", "读取 SQLite 代理终止原因失败")?,
-        state_version: get_sqlite(&row, "state_version", "读取 SQLite 代理状态版本失败")?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 代理创建时间失败")?,
-            "SQLite 代理创建时间格式无效",
-        )?,
-        updated_at: parse_timestamp(
-            get_sqlite(&row, "updated_at", "读取 SQLite 代理更新时间失败")?,
-            "SQLite 代理更新时间格式无效",
-        )?,
-        equipment_name: get_sqlite(&row, "equipment_name", "读取 SQLite 代理装备名称失败")?,
-        equipment_category: get_sqlite(&row, "equipment_category", "读取 SQLite 代理装备分类失败")?,
-        start_price: get_sqlite(&row, "start_price", "读取 SQLite 代理起始价失败")?,
-        current_price: get_sqlite(&row, "current_price", "读取 SQLite 代理当前价失败")?,
-        material: get_sqlite::<i64>(&row, "material", "读取 SQLite 代理 material 标志失败")? != 0,
-        leader_user_id: get_sqlite_optional_uuid(
-            &row,
-            "leader_user_id",
-            "读取 SQLite 代理领先用户失败",
-        )?,
-        slow_authorization_id: get_sqlite_optional_uuid(
-            &row,
-            "slow_authorization_id",
-            "读取 SQLite 代理等待授权失败",
-        )?,
-    })
-}
-
 #[cfg(feature = "postgres")]
 pub(in crate::database::account) fn map_postgres_transition(
     row: sqlx::postgres::PgRow,
@@ -136,33 +73,6 @@ pub(in crate::database::account) fn map_postgres_transition(
             "读取 PostgreSQL 代理转换状态版本失败",
         )?,
         created_at: get_pg(&row, "created_at", "读取 PostgreSQL 代理转换时间失败")?,
-    };
-    normalize_transition(transition)
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn map_sqlite_transition(
-    row: sqlx::sqlite::SqliteRow,
-) -> Result<PublicProxyTransition, ApplicationError> {
-    let transition = PublicProxyTransition {
-        transition_number: get_sqlite(&row, "transition_number", "读取 SQLite 代理转换序号失败")?,
-        kind: get_sqlite(&row, "kind", "读取 SQLite 代理转换类型失败")?,
-        old_maximum_amount: get_sqlite(&row, "old_maximum_amount", "读取 SQLite 代理旧上限失败")?,
-        new_maximum_amount: get_sqlite(&row, "new_maximum_amount", "读取 SQLite 代理新上限失败")?,
-        old_mode: get_sqlite(&row, "old_mode", "读取 SQLite 代理旧模式失败")?,
-        new_mode: get_sqlite(&row, "new_mode", "读取 SQLite 代理新模式失败")?,
-        old_status: get_sqlite(&row, "old_status", "读取 SQLite 代理旧状态失败")?,
-        new_status: get_sqlite(&row, "new_status", "读取 SQLite 代理新状态失败")?,
-        reason: get_sqlite(&row, "reason", "读取 SQLite 代理转换原因失败")?,
-        resulting_state_version: get_sqlite(
-            &row,
-            "resulting_state_version",
-            "读取 SQLite 代理转换状态版本失败",
-        )?,
-        created_at: parse_timestamp(
-            get_sqlite(&row, "created_at", "读取 SQLite 代理转换时间失败")?,
-            "SQLite 代理转换时间格式无效",
-        )?,
     };
     normalize_transition(transition)
 }

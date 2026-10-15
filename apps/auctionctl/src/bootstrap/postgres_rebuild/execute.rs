@@ -47,11 +47,7 @@ pub async fn execute(options: Options<'_>) -> anyhow::Result<()> {
     let source_store = DatabaseStore::connect(database_url)
         .await
         .context("connect target database for rebuild source preflight")?;
-    let source_postgres = match source_store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => anyhow::bail!("postgres-rebuild 只支持 PostgreSQL 完整档"),
-    };
+    let DatabaseStore::Postgres(source_postgres) = source_store;
     let source_preflight = source_postgres
         .collect_recovery_preflight(options.confirmed_database_name)
         .await

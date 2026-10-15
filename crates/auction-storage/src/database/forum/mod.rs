@@ -19,10 +19,6 @@ impl PublicForumReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => forum_sync_enabled_postgres(store).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "公开论坛同步状态仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -38,10 +34,6 @@ impl PublicForumReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => forum_postgres(store, auction_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "公开论坛镜像仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

@@ -7,13 +7,9 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 #[cfg(feature = "postgres")]
 use sqlx::postgres::PgRow;
-#[cfg(feature = "sqlite")]
-use sqlx::sqlite::SqliteRow;
 use uuid::Uuid;
 
 use super::common::storage_error;
-#[cfg(feature = "sqlite")]
-use super::common::{parse_timestamp, uuid_blob, uuid_from_blob};
 #[cfg(feature = "postgres")]
 pub(super) async fn list_failures_postgres(
     store: &super::super::PostgresStore,
@@ -62,54 +58,6 @@ pub(super) async fn list_failures_postgres(
     Ok(RealtimeFailurePage { entries, total, limit: request.limit, offset: request.offset })
 }
 
-#[cfg(feature = "sqlite")]
-pub(super) async fn list_failures_sqlite(
-    store: &super::super::SqliteStore,
-    request: RealtimeFailureListRequest,
-) -> Result<RealtimeFailurePage, ApplicationError> {
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*)
-         FROM realtime_failures AS failure
-         JOIN realtime_events AS event ON event.event_id = failure.event_id
-         WHERE event.stream_key = COALESCE(?, event.stream_key)
-           AND failure.consumer_key = COALESCE(?, failure.consumer_key)
-           AND failure.failure_code = COALESCE(?, failure.failure_code)
-           AND COALESCE(?, (failure.resolved_at IS NOT NULL)) = (failure.resolved_at IS NOT NULL)",
-    )
-    .bind(request.stream_key.as_deref())
-    .bind(request.consumer_key.as_deref())
-    .bind(request.code.as_deref())
-    .bind(request.resolved)
-    .fetch_one(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite realtime failure 总数失败"))?;
-    let rows = sqlx::query(
-        "SELECT failure.id, failure.event_id, event.stream_key, failure.consumer_key,
-                failure.failure_code, failure.safe_detail, failure.failed_at,
-                failure.resolved_at
-         FROM realtime_failures AS failure
-         JOIN realtime_events AS event ON event.event_id = failure.event_id
-         WHERE event.stream_key = COALESCE(?, event.stream_key)
-           AND failure.consumer_key = COALESCE(?, failure.consumer_key)
-           AND failure.failure_code = COALESCE(?, failure.failure_code)
-           AND COALESCE(?, (failure.resolved_at IS NOT NULL)) = (failure.resolved_at IS NOT NULL)
-         ORDER BY failure.failed_at DESC, failure.id DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(request.stream_key.as_deref())
-    .bind(request.consumer_key.as_deref())
-    .bind(request.code.as_deref())
-    .bind(request.resolved)
-    .bind(request.limit)
-    .bind(request.offset)
-    .fetch_all(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite realtime failures 失败"))?;
-    let entries = rows.into_iter().map(failure_from_sqlite_row).collect::<Result<Vec<_>, _>>()?;
-    validate_failure_page(&entries, total, &request)?;
-    Ok(RealtimeFailurePage { entries, total, limit: request.limit, offset: request.offset })
-}
-
 #[cfg(feature = "postgres")]
 fn failure_from_postgres_row(row: PgRow) -> Result<RealtimeFailureSnapshot, ApplicationError> {
     Ok(RealtimeFailureSnapshot {
@@ -135,41 +83,6 @@ fn failure_from_postgres_row(row: PgRow) -> Result<RealtimeFailureSnapshot, Appl
         resolved_at: row
             .try_get("resolved_at")
             .map_err(|_| storage_error("读取 PostgreSQL failure resolved time 失败"))?,
-    })
-}
-
-#[cfg(feature = "sqlite")]
-fn failure_from_sqlite_row(row: SqliteRow) -> Result<RealtimeFailureSnapshot, ApplicationError> {
-    Ok(RealtimeFailureSnapshot {
-        id: uuid_from_blob(
-            row.try_get("id").map_err(|_| storage_error("读取 Lite failure ID 失败"))?,
-            "Lite failure ID",
-        )?,
-        event_id: uuid_from_blob(
-            row.try_get("event_id")
-                .map_err(|_| storage_error("读取 Lite failure event ID 失败"))?,
-            "Lite failure event ID",
-        )?,
-        stream_key: row
-            .try_get("stream_key")
-            .map_err(|_| storage_error("读取 Lite failure stream 失败"))?,
-        consumer_key: row
-            .try_get("consumer_key")
-            .map_err(|_| storage_error("读取 Lite failure consumer 失败"))?,
-        code: row
-            .try_get("failure_code")
-            .map_err(|_| storage_error("读取 Lite failure code 失败"))?,
-        safe_detail: row
-            .try_get("safe_detail")
-            .map_err(|_| storage_error("读取 Lite failure detail 失败"))?,
-        failed_at: parse_timestamp(
-            row.try_get("failed_at").map_err(|_| storage_error("读取 Lite failure time 失败"))?,
-        )?,
-        resolved_at: row
-            .try_get::<Option<String>, _>("resolved_at")
-            .map_err(|_| storage_error("读取 Lite failure resolved time 失败"))?
-            .map(parse_timestamp)
-            .transpose()?,
     })
 }
 
@@ -222,24 +135,4 @@ pub(super) async fn get_failure_postgres(
     .await
     .map_err(|_| storage_error("读取 PostgreSQL realtime failure 详情失败"))?;
     row.map(failure_from_postgres_row).transpose()
-}
-
-#[cfg(feature = "sqlite")]
-pub(super) async fn get_failure_sqlite(
-    store: &super::super::SqliteStore,
-    failure_id: Uuid,
-) -> Result<Option<RealtimeFailureSnapshot>, ApplicationError> {
-    let row = sqlx::query(
-        "SELECT failure.id, failure.event_id, event.stream_key, failure.consumer_key,
-                failure.failure_code, failure.safe_detail, failure.failed_at,
-                failure.resolved_at
-         FROM realtime_failures AS failure
-         JOIN realtime_events AS event ON event.event_id = failure.event_id
-         WHERE failure.id = ?",
-    )
-    .bind(uuid_blob(failure_id))
-    .fetch_optional(store.pool())
-    .await
-    .map_err(|_| storage_error("读取 Lite realtime failure 详情失败"))?;
-    row.map(failure_from_sqlite_row).transpose()
 }

@@ -1,12 +1,7 @@
-//! 结算命令的数据库装配边界。
-//!
-//! PostgreSQL 完整档复用应用层 `SettlementService`，确保 Worker 与其他入口共享同一套锁、
-//! 幂等账本、结算事实和 outbox 事务；SQLite Lite 明确报告能力缺失。
+//! 结算命令装配；幂等账本、结算事实和 outbox 在同一 PostgreSQL 事务提交。
 
 use std::sync::Arc;
 
-#[cfg(feature = "sqlite")]
-use auction_application::ApplicationError;
 #[cfg(feature = "postgres")]
 use auction_application::SettlementService;
 use auction_application::{ApplicationFuture, SettleAuctionCommand, SettlementCommandPort};
@@ -38,10 +33,6 @@ impl SettlementCommandPort for DatabaseSettlementCommands {
                 DatabaseStore::Postgres(store) => {
                     SettlementService::new(Arc::new(store.clone())).settle(_command).await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    Err(ApplicationError::CapabilityUnavailable("结算执行仅支持 PostgreSQL 完整档"))
-                }
             }
         })
     }
@@ -56,10 +47,6 @@ impl auction_application::LegacySettlementVerificationPort for DatabaseSettlemen
             match self.store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => legacy::verify_postgres(store, _auction_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "旧版结算账本核验仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

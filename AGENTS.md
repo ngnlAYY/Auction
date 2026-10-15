@@ -12,13 +12,15 @@
 ## 项目概览
 
 - Auction Rust 面向论坛生态，包含 Public 竞价、Admin 管理，以及生命周期、论坛和通知 Worker。
+- 当前原生程序仅支持 Linux x86_64，五个装配根在编译期拒绝其他 OS/架构；正式发布使用 GNU/glibc。
+  浏览器 `wasm32-unknown-unknown` 保留；通用制品不得默认使用构建机 `target-cpu=native`。
 - Public、Admin、Worker 独立部署；`auctionctl` 负责配置、迁移和运维。可选 `auction-server`
   自管三角色子进程，仅支持 Linux/PostgreSQL 单主机；`auctionctl` 仍独立，默认分体发布不变。
 - 角色及合并服务普通启动不隐式迁移。例外是网页明确确认后的专用空库初始化，以及分体
   `auctionctl deployment start/restart` 通过严格停机门禁后的迁移，详见[部署手册](ops/deploy/README.md)。
-- 仓库代码及直接程序库使用 Rust；浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL、SQLite、
+- 仓库代码及直接程序库使用 Rust；浏览器是 Dioxus CSR，WASM 由后端内嵌。PostgreSQL、
   Redis、反向代理及系统服务等外部组件不受语言约束。
-- PostgreSQL 是完整档；SQLite 是本地、演示和单机低并发 Lite 子集，不要求能力或迁移对等。
+- PostgreSQL 是唯一数据库后端。
 - [实现与验证状态](docs/status.md)区分源码能力、历史验证和待补证据；页面完成、路由存在或静态编译
   不能证明生产验收。除非用户明确要求，不新增或运行行为测试，已有测试保留。
 - 根 README、架构、技术栈、契约和各目录 README 均为项目契约；相关变化必须同步。
@@ -32,7 +34,7 @@
 | `Justfile` / `ci/` / `.github/workflows/` | 开发任务、静态门禁与发布脚本 |
 | `apps/{public-api,admin-api,worker,server,auctionctl}` | 薄装配根和可部署程序 |
 | `crates/` | 按 owner 拆分的领域、应用、契约与适配器，见[架构](docs/architecture.md#crate-所有权) |
-| `migrations/{postgres,sqlite}` | 完整档与 Lite 的追加式迁移 |
+| `migrations/postgres` | PostgreSQL 追加式迁移 |
 | `docs/` / `ops/` | 设计与契约、配置示例及运维手册 |
 
 工作区与目录组织借鉴 `daeuniverse/honk`，不复制其代理或 eBPF 业务。
@@ -90,12 +92,11 @@
 
 修改写入、状态迁移、结算或后台任务时，在代码或变更说明中明确保护的不变量。
 [拍卖状态机](crates/auction-domain/src/auction/mod.rs)只是领域的一部分；详细语义见[不变量契约](docs/contracts/invariants.md)。
-以下同样约束 Lite 已支持的能力：
 
 1. 可变命令使用稳定 `command_id`；同 ID/同负载返回原结果，同 ID/不同负载冲突。
 2. 在同一后端事务内锁定拍卖、标的和有效授权，校验资格/状态并计算结果。PostgreSQL 竞价及关键
    生命周期使用 Serializable、明确行锁；序列化冲突最多尝试 3 次（含首次）。队列领取等路径才可用 Read Committed
-   加显式锁。SQLite 使用明确串行写事务，禁止跨事务先读价后写入。
+   加显式锁；禁止跨事务先读价后写入。
 3. 成功竞价的事实、版本、追加审计和持久事件/outbox 必须同事务写入。
 4. 论坛、邮件、通知等外部写入只在本地提交后执行；外部失败不能抹掉已接受竞价。
 5. Worker 游标和命令账本必须持久化，不能只靠内存定时器或游标支持恢复。
@@ -111,14 +112,14 @@
 - 业务标识带上下文，如 `auction_id`、`lot_id`、`command_id`，避免含混的 `id/data/item`。
 - Dioxus props 用 `#[component]` 参数；事件和状态命名表达用户动作。
 - 新 URL 用小写连字符，JSON/TOML/SQL 名用 `snake_case`；已发布路径、事件名和字段按契约保留，
-  历史命名通过 serde 映射。两后端共有数据库对象同名同义。
+  历史命名通过 serde 映射。
 - CSS 使用小写连字符和 BEM，例如 `public-auction-catalog__name`、`public-auction-catalog--compact`。
 
 ## 中文注释与文档要求
 
 模块职责、公共 API、领域不变量、事务/锁/幂等策略、历史契约映射、外部服务限制，以及不明显的安全或性能取舍都需要注释。
 新增/修改注释默认中文：模块用 `//!`，公共类型、函数和端口用 `///`；复杂分支用 `//` 解释原因、
-不变量、锁/幂等、兼容、安全或性能取舍，不逐行复述代码。触及的英文注释翻译为中文，不作无关批量改写。
+不变量、锁/幂等、兼容、安全或性能取舍，删除逐行复述、重复或过期说明，保留必要契约和取舍。触及的英文注释翻译为中文，不作无关批量改写。
 协议、API、SQL 关键字及必须匹配的字符串保留原文。新增/修改的 README、架构及运维正文使用中文。
 
 ## 代码风格
@@ -146,7 +147,7 @@
 - `[database]`、`database_url`、`redis_url`、Cookie、`session_signing_key`、`admin_actor/admin_secret` 只进敏感 TOML。
   Admin 凭据成对配置，secret 至少 16 字节。敏感文件不提交，只允许运行账号读取；错误不得回显 TOML 原文或敏感值。
 - PostgreSQL 优先用 `[database]` 必填 `host/port/username/password/name`；端口非零，账号、密码和库名按原文生成 URL。
-  旧 `database_url` 接受 `postgres://`、`postgresql://`、`sqlite:`，不能与 `[database]` 同时提供；Lite 使用该兼容入口。
+  旧 `database_url` 仅接受 `postgres://`、`postgresql://`，不能与 `[database]` 同时提供。
 - MoogleMail 本地联调仅允许 `auction-config::load_mooglemail_keyenv` 严格读取 `.keyenv` 的 `hv-ck-key1/2`。
   Worker 只用 `hv-ck-key1`；`hv-ck-key2` 仅供显式隔离验证，不作候选或自动切换。论坛与游戏邮件每种 Cookie 全局最多一条 active。
 - 旧的单文件敏感配置必须明确失败，不暗中兼容或引入通用环境覆盖。
@@ -154,14 +155,12 @@
 
 ## 数据库与迁移
 
-- 新持久化能力先在[架构能力矩阵](docs/architecture.md#部署档位与能力)登记完整档、Lite 或两者，
-  对照[schema owner](docs/contracts/schema.md)审查；只有 Lite/两者要求 SQLite 实现。
-- PostgreSQL 固定 major 18 并跟进修复版，major 升级单独评审迁移/回滚。SQLite 版本由锁图决定，升级核对实际捆绑版本与编译选项。
-- PostgreSQL/SQLite 使用独立驱动 feature，不使用 `AnyPool` 隐藏池、事务、锁、迁移和缺失能力差异。
-- Lite 每角色最多一个实例、Worker 并发 1；明确串行写、锁等待、备份和本地文件系统假设，禁止把数据库放网络共享文件系统来扩展。
-- 两迁移树只追加，已发布文件禁止修改；不要求序号或对象对等，共有对象同名同义。
+- 新持久化能力先登记[架构矩阵](docs/architecture.md#部署档位与能力)并对照[schema owner](docs/contracts/schema.md)审查。
+- PostgreSQL 固定 major 18 并跟进修复版，major 升级单独评审迁移/回滚。
+- 驱动由显式 `postgres` feature 启用，不使用 `AnyPool` 隐藏池、事务和锁语义。
+- 迁移只追加，已发布文件禁止修改或删除。
 - 每张表、迁移、查询、事件和路由只有一个 owner；兼容历史结构使用防腐层，不复制未经审查的旧表。
-- SQLx 宏具备后端可复现 schema/check 路径；离线校验只更新受影响树和元数据，共有查询才要求两个后端。
+- SQLx 宏具备可复现 PostgreSQL schema/check 路径；离线校验只更新受影响元数据。
 - 破坏性操作须有手册、精确目标确认与可验证备份，开发脚本不得随意加入 `DROP DATABASE`。
 
 ## Web 规则
@@ -197,11 +196,11 @@ just verify
 
 `cargo check --locked --workspace --all-targets` 只编译已有目标，不运行测试。除非用户明确要求，
 不得新增或执行单元、集成、功能、端到端、浏览器测试、功能测试脚本及手工冒烟；已有测试不删除、不扩展。
-恢复行为验证前说明范围、成本与后端差异，Lite 不能替代 PostgreSQL 完整契约、隔离及行锁验证。
+恢复行为验证前说明范围与成本，必须覆盖 PostgreSQL 契约、隔离及行锁语义。
 
 ## 运行进程
 
-`apps/*` 默认 feature 不含数据库驱动；运行时明确选 `postgres` 或 `sqlite`，需页面时先构建 Web
+`apps/*` 默认 feature 不含数据库驱动；运行时明确选 `postgres`，需页面时先构建 Web
 并选 `web-embed`。Public/Admin 默认监听 `127.0.0.1:8090/8091`，不可共用入口。
 真实敏感配置、迁移、首次设置和启动命令见[开发指南](docs/development.md)及[部署手册](ops/deploy/README.md)。
 启动服务、访问健康接口或功能流程属于行为验证，不是默认静态门禁。
@@ -224,7 +223,7 @@ just verify
 ## 交付工作流
 
 1. 先明确路由、JSON、事件、配置、数据库、部署及能力档位契约。
-2. 在领域定义规则，在应用建立用例/端口；优先建立 PostgreSQL 锁、幂等、审计和 outbox，再按 Lite 清单实现子集。
+2. 在领域定义规则，在应用建立用例/端口；建立 PostgreSQL 锁、幂等、审计和 outbox。
 3. 接入存储/外部适配、HTTP、Dioxus 与持久化 Worker；不复制状态机或绕过 owner。
 4. 同步契约、模块说明、设计与运维文档，执行适用静态门禁。
 5. 用户明确要求后才开展隔离环境、真实外部服务或切换前行为验证，登记可追溯证据及限制。

@@ -29,5 +29,4 @@ libc.workspace = true
 default = []
 cache-redis = ["auction-cache/redis"]
 postgres = ["auction-storage/postgres", "auction-setup/postgres"]
-sqlite = ["auction-storage/sqlite"]
 web-embed = []

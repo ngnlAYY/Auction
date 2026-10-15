@@ -10,8 +10,6 @@ use auction_domain::CommandId;
 use chrono::{DateTime, Utc};
 
 use super::super::DatabaseStore;
-#[cfg(feature = "sqlite")]
-use super::errors::lite_unavailable;
 #[cfg(feature = "postgres")]
 use super::{
     mutations::{apply_postgres, insert_pending_postgres, mark_unknown_postgres, reopen_postgres},
@@ -40,11 +38,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => find_postgres(store, command_id).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = command_id;
-                    Err(lite_unavailable())
-                }
             }
         })
     }
@@ -55,8 +48,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => list_unresolved_postgres(store).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => Err(lite_unavailable()),
             }
         })
     }
@@ -70,11 +61,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
             match store.as_ref() {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => insert_pending_postgres(store, command).await,
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = command;
-                    Err(lite_unavailable())
-                }
             }
         })
     }
@@ -92,11 +78,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     apply_postgres(store, command_id, request_hash, audit, applied_at).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = (command_id, request_hash, audit, applied_at);
-                    Err(lite_unavailable())
                 }
             }
         })
@@ -117,11 +98,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
                     mark_unknown_postgres(store, command_id, request_hash, category, updated_at)
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = (command_id, request_hash, category, updated_at);
-                    Err(lite_unavailable())
-                }
             }
         })
     }
@@ -138,11 +114,6 @@ impl AdminRuntimeCommandStore for DatabaseAdminRuntimeCommands {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => {
                     reopen_postgres(store, command_id, request_hash, updated_at).await
-                }
-                #[cfg(feature = "sqlite")]
-                DatabaseStore::Sqlite(_) => {
-                    let _ = (command_id, request_hash, updated_at);
-                    Err(lite_unavailable())
                 }
             }
         })

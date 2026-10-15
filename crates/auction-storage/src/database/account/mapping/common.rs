@@ -43,59 +43,6 @@ where
     row.try_get(column).map_err(|_| storage_error(label))
 }
 
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn get_sqlite<T>(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<T, ApplicationError>
-where
-    for<'r> T: sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
-{
-    row.try_get(column).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn get_sqlite_uuid(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<Uuid, ApplicationError> {
-    Uuid::from_slice(&get_sqlite::<Vec<u8>>(row, column, label)?).map_err(|_| storage_error(label))
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn get_sqlite_optional_uuid(
-    row: &sqlx::sqlite::SqliteRow,
-    column: &str,
-    label: &str,
-) -> Result<Option<Uuid>, ApplicationError> {
-    get_sqlite::<Option<Vec<u8>>>(row, column, label)?
-        .map(|bytes| Uuid::from_slice(&bytes).map_err(|_| storage_error(label)))
-        .transpose()
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn uuid_blob(id: Uuid) -> Vec<u8> {
-    id.as_bytes().to_vec()
-}
-
-#[cfg(feature = "sqlite")]
-pub(in crate::database::account) fn parse_timestamp(
-    value: String,
-    label: &str,
-) -> Result<DateTime<Utc>, ApplicationError> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(&value) {
-        return Ok(value.with_timezone(&Utc));
-    }
-    for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
-        if let Ok(value) = NaiveDateTime::parse_from_str(&value, format) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(value, Utc));
-        }
-    }
-    Err(storage_error(label))
-}
-
 pub(in crate::database::account) fn storage_error(message: &str) -> ApplicationError {
     ApplicationError::Repository(RepositoryError::Failed(message.to_owned()))
 }

@@ -1,7 +1,5 @@
 //! 数据库连接选项规范化及部署目标身份；复用实际驱动解析，不连接数据库或暴露凭据。
 
-#[cfg(feature = "sqlite")]
-use std::path::Path;
 use std::path::PathBuf;
 
 mod strict;
@@ -46,8 +44,6 @@ pub(crate) fn postgres_connect_options(
 }
 
 /// 解析部署目标；调用方须先拒绝 PostgreSQL 的隐式目标和未知参数。
-///
-/// SQLite 必须是绝对磁盘路径，避免 CLI 与 systemd WorkingDirectory 不同而误判同库。
 pub fn deployment_database_identity(
     database_url: &str,
 ) -> Result<DeploymentDatabaseIdentity, DeploymentDatabaseIdentityError> {
@@ -84,54 +80,6 @@ pub fn deployment_database_identity(
             database: database.to_owned(),
         });
     }
-    #[cfg(feature = "sqlite")]
-    if database_url.starts_with("sqlite:") {
-        use sqlx::ConnectOptions;
-        let options = database_url
-            .parse::<sqlx::sqlite::SqliteConnectOptions>()
-            .map_err(|_| DeploymentDatabaseIdentityError("SQLite 部署连接参数无效"))?;
-        if options
-            .to_url_lossy()
-            .query_pairs()
-            .any(|(key, value)| (key == "mode" && value == "memory") || key == "vfs")
-        {
-            return Err(DeploymentDatabaseIdentityError(
-                "SQLite 部署不能使用内存数据库或自定义 VFS",
-            ));
-        }
-        return Ok(DeploymentDatabaseIdentity {
-            endpoint: canonical_database_path(options.get_filename())?,
-            port: 0,
-            database: String::new(),
-        });
-    }
     let _ = database_url;
     Err(DeploymentDatabaseIdentityError("当前构建不支持部署配置的数据库后端"))
-}
-
-#[cfg(feature = "sqlite")]
-fn canonical_database_path(path: &Path) -> Result<PathBuf, DeploymentDatabaseIdentityError> {
-    if !path.is_absolute() {
-        return Err(DeploymentDatabaseIdentityError(
-            "部署数据库文件或 Unix socket 目录必须使用绝对路径，不能依赖进程工作目录",
-        ));
-    }
-    match std::fs::canonicalize(path) {
-        Ok(path) => Ok(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            // 新建 SQLite 文件允许不存在，但父目录必须能证明实际身份。
-            if std::fs::symlink_metadata(path).is_ok() {
-                return Err(DeploymentDatabaseIdentityError("部署数据库路径不能是悬空符号链接"));
-            }
-            let parent =
-                path.parent().ok_or(DeploymentDatabaseIdentityError("部署数据库路径无效"))?;
-            let filename =
-                path.file_name().ok_or(DeploymentDatabaseIdentityError("部署数据库路径无效"))?;
-            let parent = std::fs::canonicalize(parent).map_err(|_| {
-                DeploymentDatabaseIdentityError("无法确认部署数据库父目录的实际身份")
-            })?;
-            Ok(parent.join(filename))
-        }
-        Err(_) => Err(DeploymentDatabaseIdentityError("无法确认部署数据库路径的实际身份")),
-    }
 }

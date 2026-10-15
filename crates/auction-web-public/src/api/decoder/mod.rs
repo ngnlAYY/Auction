@@ -304,7 +304,7 @@ fn canonical_forum_id(value: &str) -> bool {
         && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// PostgreSQL 必须交付真实 ID/key URL；空字符串只表示 SQLite Lite 明确没有该能力。
+/// 服务端必须交付真实 ID/key URL；仅为历史投影兼容保留空字符串解码。
 fn game_url(value: Option<&Value>) -> bool {
     let Some(value) = string(value) else { return false };
     if value.is_empty() {

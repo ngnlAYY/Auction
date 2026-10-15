@@ -7,14 +7,12 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseBackend {
     Postgres,
-    Sqlite,
 }
 
 impl DatabaseBackend {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Postgres => "postgres",
-            Self::Sqlite => "sqlite",
         }
     }
 
@@ -23,7 +21,6 @@ impl DatabaseBackend {
 
         match scheme.as_str() {
             "postgres" | "postgresql" => Ok(Self::Postgres),
-            "sqlite" => Ok(Self::Sqlite),
             _ => Err(StorageError::UnsupportedScheme(scheme)),
         }
     }
@@ -37,9 +34,7 @@ impl fmt::Display for DatabaseBackend {
 
 #[derive(Debug, Error)]
 pub enum StorageError {
-    #[error(
-        "unsupported database URL scheme {0:?}; expected postgres://, postgresql://, or sqlite:"
-    )]
+    #[error("unsupported database URL scheme {0:?}; expected postgres:// or postgresql://")]
     UnsupportedScheme(String),
 
     #[error("failed to connect to {backend} database")]
@@ -48,9 +43,6 @@ pub enum StorageError {
         #[source]
         source: sqlx::Error,
     },
-
-    #[error("{backend} storage support is not compiled; enable its Cargo feature")]
-    BackendNotCompiled { backend: DatabaseBackend },
 
     #[error("failed to migrate {backend} database")]
     Migration {
@@ -71,7 +63,4 @@ pub enum StorageError {
 
     #[error("refusing to migrate an unknown non-empty {backend} database")]
     UnknownDatabase { backend: DatabaseBackend },
-
-    #[error("migrations are not available for the {backend} backend yet")]
-    MigrationsUnavailable { backend: DatabaseBackend },
 }

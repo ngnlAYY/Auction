@@ -130,6 +130,8 @@ impl HeartbeatPublisher {
         audit_failure_count: i64,
         tracing: TracingHealth,
     ) -> Result<(), HealthError> {
+        // Rust 1.99 将此 API 更名为 try_update；MSRV 1.94.1 尚未稳定新名，保留原子语义。
+        #[allow(deprecated)]
         let previous = self
             .observation_sequence
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| value.checked_add(1))

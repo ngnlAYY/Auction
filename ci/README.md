@@ -7,26 +7,30 @@
 | 范围 | 本地入口 | 实现/工作流 |
 | --- | --- | --- |
 | 全部默认静态验证 | `just verify` | [Justfile](../Justfile) |
-| 文档链接、锚点和导航 | `just docs-check` | [check-docs.sh](check-docs.sh)、[docs.yml](../.github/workflows/docs.yml) |
-| 仓库、布局、配置、i18n | 对应四项 `*-check` | [check-policy.sh](check-policy.sh) |
+| 文档链接、锚点和导航 | `just docs-check` | [check.sh](check.sh) 的 `docs` 子命令 |
+| 仓库、布局、配置、i18n | 对应四项 `*-check` | [check.sh](check.sh) 的 `repository/layout/config/i18n` 子命令 |
 | 格式、编译、feature、Clippy、WASM | `just fmt`、`check`、`feature-check`、`lint`、`wasm-check` | [ci.yml](../.github/workflows/ci.yml) |
 | 依赖安全公告 | `just dependency-audit` | 独立 security-audit job，cargo-audit 0.22.2 |
+| 未用直接依赖 | `just dependency-unused` | 同一 job，cargo-machete 0.9.2 |
 | MSRV | `cargo +1.94.1 check --locked --workspace --all-targets --all-features` | 独立 msrv job |
 | Web payload | `just web-build` | [web-bundle.sh](web-bundle.sh) |
 | 分体构建与归档 | `just release-check` | [release.sh](release.sh) |
 | 可选合并服务 | `just build-single`、`just release-check --single-binary` | [release-single.sh](release-single.sh) |
 
-Cargo 检查使用 --locked；默认图、独立 PostgreSQL/SQLite/Redis 图和 all-features Clippy 分开核验。
+check.sh 默认执行全部五项门禁；CI 保留独立 docs 检查名，Rust workflow 只调用其余四项，避免重复。
+Cargo 检查使用 --locked；默认图、独立 PostgreSQL/Redis 图和 all-features Clippy 分开核验。
 Rust job 使用固定工具链，MSRV 编译不表示功能验收或长期支持承诺。
 依赖审计独立联网读取 RustSec 和 Cargo.lock，不改锁图、不运行产品；本地 verify 不含它。
-`cargo audit --deny yanked --deny unsound` 阻断漏洞、撤回和 unsound，停维提示保留且无公告忽略列表。
-历史 fxhash 维护债见[技术栈](../docs/tech-stack.md#版本与升级)。
+`cargo audit --deny warnings` 阻断漏洞和全部警告（含停维、撤回、unsound），无公告忽略列表。
+cargo-machete 只做依赖静态分析；feature/锁图可达性及原生库仍需单独审查。
+Actions 的 checkout 7.0.1/rust-cache 2.9.2 使用固定完整 SHA；工作流保持只读权限且 checkout 不持久化凭据。
+完整审计与剩余风险见[技术栈](../docs/tech-stack.md#2026-10-15-全依赖审计)。
 
 ## 文档检查器
 
 [docs/main.rs](docs/main.rs)装配 [scan.rs](docs/scan.rs) 的 Markdown/包 README 扫描与
 [links.rs](docs/links.rs) 的本地目标、锚点和可达图核验。
-check-docs.sh 先检查 rustfmt，再以 rustc edition 2024、-D warnings 编译至忽略的 target；仅使用标准库，无网络/服务。
+check.sh docs 先检查 rustfmt，再以 rustc edition 2024、-D warnings 编译至忽略的 target；仅使用标准库，无网络/服务。
 
 正式范围为根 README/AGENTS/DESIGN 及 docs、apps、crates、ops、migrations、ci 下 Markdown，
 所有正式文档须从根 README 可达。本地工具、构建产物和机器日志不属于文档契约。
@@ -35,7 +39,7 @@ check-docs.sh 先检查 rustfmt，再以 rustc edition 2024、-D warnings 编译
 
 ## 仓库策略
 
-check-policy.sh 检查契约文件 Git 规则、src 根入口/职责目录、命名与同前缀聚集；
+check.sh 的策略子命令检查契约文件 Git 规则、src 根入口/职责目录、命名与同前缀聚集；
 TOML 示例每个赋值字段须紧邻中文可选/必填注释，Fluent 五语言须文件/键集齐全、无重复或点号并覆盖字面量引用。
 
 ## 发布边界
@@ -54,4 +58,4 @@ build-single 仅构建/核验，可在开发工作树执行。目录、安装、
 ## 验证限制
 
 默认只进行静态检查；all-targets 只编译已有测试，不新增或执行单元、集成、功能、端到端、浏览器测试或手工冒烟。
-获明确授权后才能恢复行为验证，Lite 不能替代 PostgreSQL 行锁、隔离和并发证据；当前缺口见[状态页](../docs/status.md)。
+获明确授权后才能恢复行为验证；PostgreSQL 行锁、隔离和并发仍需独立证据，当前缺口见[状态页](../docs/status.md)。

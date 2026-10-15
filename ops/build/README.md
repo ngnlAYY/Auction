@@ -2,8 +2,7 @@
 
 [文档导航](../../docs/README.md) · [开发指南](../../docs/development.md) · [部署手册](../deploy/README.md) · [验证状态](../../docs/status.md)
 
-两份 Cargo 配置仅供用户指定的 Debian 13/glibc 2.41 KVM，通过 --config 显式选择。
-默认 release/WASM 和正式发布链不变；候选参数不保证通用 x86_64 兼容性或最优性能。
+两份 Cargo 配置仅供指定的 Linux x86_64 Debian 13/glibc 2.41 KVM，以 --config 显式叠加目标、CPU 参数和构建并发；不改变 WASM/正式发布流程，不保证通用兼容性或最优性能。
 
 ## 两份目标配置
 
@@ -12,12 +11,12 @@
 | [ryzen-7950x.toml](ryzen-7950x.toml) | Ryzen 9 7950X，2 vCPU、约 2 GiB RAM | x86-64-v4 加快照扩展，含 RDSEED |
 | [epyc-9645.toml](epyc-9645.toml) | EPYC 9645，4 vCPU、约 8 GiB RAM | v4 加快照扩展、AVX-VNNI/VP2INTERSECT，不启用 RDSEED |
 
-以 VM CPUID 而非型号决定兼容性；EPYC 快照无 rdseed，不能直接启用完整 znver5。
-不用 native、不稳定 tune-cpu 或型号隐含 LLVM 特性，也不声称获得 Zen 专用调度优化。
-迁移宿主机/改变 VM CPU 模式后须重新核对；不匹配可能非法指令退出。
+兼容性取决于 VM CPUID，不是型号；EPYC 快照无 rdseed，不能启用完整 znver5。
+禁用 native、不稳定 tune-cpu 和型号隐含 LLVM 特性，不声称 Zen 专用调度优化。
+迁移宿主机/改变 CPU 模式须重新核对，否则可能非法指令退出。
 
-两份配置均 opt-level=3、Fat LTO、单 CGU、非增量，保留 panic=unwind 后端任务语义。
-构建并发 2 只控制编译内存，不改变运行线程/池；约 2 GiB 的 Ryzen VM 不宜承担完整 LTO 构建。
+两份配置继承[根 profile](../../Cargo.toml)：opt-level=3、Fat LTO、单 CGU、非增量、panic=unwind，保留后端任务展开语义，不重复定义。
+构建并发 2 仅限制编译内存，不改变运行线程/池；约 2 GiB Ryzen VM 不宜承担完整 LTO 构建。
 
 ## 在构建机生成候选
 
@@ -47,9 +46,9 @@ for machine in ryzen-7950x epyc-9645; do
 done
 ```
 
-输出 `target/amd-build/<machine>/x86_64-unknown-linux-gnu/release/`，分别保管制品和校验和。
-这些命令不安装、启动、迁移或替换服务；ci/release.sh 不负责本地候选，不能混入通用发行包。
-已登记构建机和目标 glibc 均为 2.41，仍需逐制品核对符号/动态库；构建机仅 AVX2，不能执行 AVX-512 候选。
+输出 `target/amd-build/<machine>/x86_64-unknown-linux-gnu/release/`，分档保管制品/校验和。
+命令不安装、启动、迁移或替换服务；本地候选不归 ci/release.sh 管理，禁混入通用包。
+已登记构建机与目标 glibc 均为 2.41，仍须逐制品核对符号/动态库；构建机仅 AVX2，不能执行 AVX-512 候选。
 
 ## 已有测量和待补证据
 

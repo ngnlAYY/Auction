@@ -5,6 +5,9 @@
 管理 HTTP、会话和 runtime 服务的进程装配根。`src/lib.rs` 导出 `run`、`run_from_path` 与 Admin 资源类型；
 独立 `main.rs` 和[合并服务](../server/README.md)的 Admin 子进程复用装配。
 
+仅支持 Linux x86_64 原生目标；装配入口在编译期拒绝其他 OS/架构。浏览器 WASM 不受此限制，
+默认发布 ABI 与构建边界见[开发指南](../../docs/development.md#工具与依赖来源)。
+
 ## 源码入口
 
 | 入口 | 职责 |
@@ -33,7 +36,6 @@ token 摘要绑定当前 actor/secret，Public 会话不受影响。多实例轮
 
 装配生命周期、业务 world、规则、审计、凭据、结算/恢复报告等窄端口；精确路由与错误码见 HTTP 契约。
 论坛预览只在本地解析不超过 2 MiB 的输入，不远程发布或写库。业务 world 状态来自数据库。
-PostgreSQL 提供完整写入与报告；SQLite Lite 对未支持的 world 写入、settlement/recovery 等能力返回 501。
 生命周期和 recovery 确认沿用应用/存储 owner 的锁、幂等、追加审计与持久化事件边界。
 
 ## Dashboard 与可观测性
@@ -48,7 +50,7 @@ PostgreSQL runtime 服务组合应用端口、TOML 原子替换和 durable 命�
 `restart_required`。就绪前恢复 pending/unknown 命令：任何恢复错误（包括未知结果和需人工核对）都阻断启动，
 不得带旧安全快照监听；保持停机核对文件与账本后再显式重启。
 恢复后文件指纹若不同于已加载配置，必须重新部署重启，不能用旧监听/策略快照报告新配置生效。
-SQLite Lite 的 HTTP 更新返回 501；文件保存不会热改当前进程。
+文件保存不会热改当前进程。
 
 共享业务区块、六组 `operations`、重启范围及默认值统一见[配置说明](../../ops/config/README.md#runtime-共享与重启)。
 新经济模板只影响后续拍卖，人工提前开放/结算由启动快照和事务内策略共同约束。
@@ -56,7 +58,7 @@ Admin 装备来源的 `require_tradeable` 默认关闭，仅影响手工录入�
 
 装备来源适配器使用启动时的唯一 active `mail_cookie`，无数据库记录时才兼容敏感文件单 Cookie；
 远端明确登录失效后标记失效，不自动切换。A44 手动只读校验则每次读取指定凭据 ID 的当前信封，
-不复用该快照或回退配置；缺密钥和 Lite 档保持 501，不改变 Worker owner 或重启要求。
+不复用该快照或回退配置；缺密钥返回 501，不改变 Worker owner 或重启要求。
 
 ## 生命周期与监听
 
@@ -72,7 +74,7 @@ SIGINT/SIGTERM 停止接收 HTTP、停止 heartbeat 并发布停止状态，drai
 
 ## Cargo feature
 
-默认 feature 为空；`postgres` / `sqlite` 选择存储，`cache-redis` 选择可选 Redis，
+默认 feature 为空；`postgres` 启用存储，`cache-redis` 选择可选 Redis，
 `web-embed` 只包含 Admin payload。首次设置需要 `postgres,web-embed`。
 配置和显式运行见[开发指南](../../docs/development.md)。
 

@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | [HTTP](routes.md) | P01–P21、A01–A44、初始化、健康、认证、缓存、方法与输入输出边界 | [auction-http](../../crates/auction-http/README.md)、[auction-contracts](../../crates/auction-contracts/README.md) |
 | [实时事件](events.md) | kind/schema、Public v1、sequence、Catch-up 与快照恢复 | contracts、application realtime、HTTP 和 Public decoder |
-| [数据库对象](schema.md) | 每个对象的逻辑 owner、SQL owner 和完整档/Lite 范围 | [auction-storage](../../crates/auction-storage/README.md)、[迁移](../../migrations/README.md) |
+| [数据库对象](schema.md) | PostgreSQL 对象的逻辑 owner、SQL owner 与历史迁移范围 | [auction-storage](../../crates/auction-storage/README.md)、[迁移](../../migrations/README.md) |
 | [领域不变量](invariants.md) | I 编号、幂等、锁、金额、生命周期、审计与外部副作用 | [domain](../../crates/auction-domain/README.md)、[application](../../crates/auction-application/README.md) |
 
 配置字段由[配置手册和逐字段 TOML 示例](../../ops/config/README.md)登记；
@@ -25,4 +25,4 @@
 4. 运行静态门禁；需要运行态结论时另行取得授权、执行相应环境验证并保存证据。
 
 不把数据库行直接作为 DTO，不把 `command_id` 当请求关联 ID，不把 stream sequence 当状态版本，
-也不把 SQLite 缺失能力用空成功响应掩盖。外部未知结果与本地已提交事实必须分开表达。
+也不用空成功响应掩盖能力缺失。外部未知结果与本地已提交事实必须分开表达。

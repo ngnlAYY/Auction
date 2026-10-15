@@ -19,8 +19,6 @@ pub(crate) async fn retention_inventory(
             .collect_retention_inventory(confirmed_database_name)
             .await
             .context("collect PostgreSQL retention inventory")?,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => anyhow::bail!("retention-inventory 只支持 PostgreSQL 完整档"),
     };
     let evidence =
         serde_json::to_vec_pretty(&inventory).context("encode retention inventory evidence")?;
@@ -54,8 +52,6 @@ pub(crate) async fn recovery_preflight(
             .collect_recovery_preflight(confirmed_database_name)
             .await
             .context("collect PostgreSQL recovery preflight")?,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => anyhow::bail!("recovery-preflight 只支持 PostgreSQL 完整档"),
     };
     let evidence =
         serde_json::to_vec_pretty(&preflight).context("encode recovery preflight evidence")?;

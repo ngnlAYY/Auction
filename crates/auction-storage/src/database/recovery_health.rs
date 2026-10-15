@@ -18,10 +18,6 @@ impl RecoveryHealthStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => refresh_postgres(store.pool(), &update).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "recovery health 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }

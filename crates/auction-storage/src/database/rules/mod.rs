@@ -16,8 +16,6 @@ use auction_application::{
     AdminRulesTransactionError, AdminRulesTransactionFailure, AdminRulesTransactionRunner,
     RequestHash, TransactionFuture, TransactionIsolation, TransactionPolicy,
 };
-#[cfg(feature = "sqlite")]
-use chrono::NaiveDateTime;
 use chrono::{DateTime, Utc};
 #[cfg(feature = "postgres")]
 use serde_json::{Value, json};
@@ -34,8 +32,6 @@ use super::DatabaseStore;
 
 #[cfg(feature = "postgres")]
 use super::PostgresStore;
-#[cfg(feature = "sqlite")]
-use super::SqliteStore;
 
 mod reads;
 #[cfg(feature = "postgres")]

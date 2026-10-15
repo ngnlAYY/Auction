@@ -12,7 +12,7 @@ use super::{
 pub struct WorkerConfig {
     /// Worker control Unix socket 配置；默认关闭，避免无权限环境启动失败。
     pub control: WorkerControlConfig,
-    /// Auction 主循环并发数；省略时 PostgreSQL 为 8、SQLite Lite 为 1。
+    /// Auction 主循环并发数；省略时为 8。
     pub concurrency: Option<u16>,
     /// Auction 主循环及兼容 owner 的轮询间隔秒数；省略时为 60 秒。
     pub poll_interval_seconds: Option<u64>,

@@ -1,7 +1,4 @@
-//! Users owner 的 MoogleMail 注册、换绑和登录 key 密文读取。
-//!
-//! 跨后端端口分派只保留在本文件；PostgreSQL 完整档的注册/换绑命令和幂等账本、SQLite Lite
-//! 的信封读取分别由子模块拥有。注册与换绑仍只在 PostgreSQL 完整档提供。
+//! 游戏邮件注册、换绑的 PostgreSQL 端口分派；命令与幂等账本由子模块拥有。
 
 #[cfg(feature = "postgres")]
 use auction_application::MailUserResultCode;
@@ -25,9 +22,6 @@ use uuid::Uuid;
 #[cfg(feature = "postgres")]
 #[path = "mail/postgres.rs"]
 mod postgres;
-#[cfg(feature = "sqlite")]
-#[path = "mail/sqlite.rs"]
-mod sqlite;
 
 use super::DatabaseStore;
 
@@ -42,10 +36,6 @@ impl MailUserStore for DatabaseStore {
                 Self::Postgres(store) => {
                     postgres::find_registration_user_id(store, &_username).await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Users MoogleMail 注册 owner 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -63,10 +53,6 @@ impl MailUserStore for DatabaseStore {
                     postgres::find_mail_command_postgres(store, _command_id, _kind, _request_hash)
                         .await
                 }
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Users MoogleMail 命令 owner 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -79,10 +65,6 @@ impl MailUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::register_postgres(store, _write).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Users MoogleMail 注册 owner 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -95,10 +77,6 @@ impl MailUserStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::rebind_postgres(store, _command).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(_) => Err(ApplicationError::CapabilityUnavailable(
-                    "Users MoogleMail 换绑 owner 仅支持 PostgreSQL 完整档",
-                )),
             }
         })
     }
@@ -116,8 +94,6 @@ impl MailLoginKeyEnvelopeReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => postgres::load_envelope_postgres(store, user_id).await,
-                #[cfg(feature = "sqlite")]
-                Self::Sqlite(store) => sqlite::load_envelope_sqlite(store, user_id).await,
             }
         })
     }

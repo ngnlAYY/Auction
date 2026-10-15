@@ -86,7 +86,7 @@ pub(crate) fn BidHistoryParticipant(
     }
 }
 
-/// 装备名称保持单行截断；完整档直接导航真实装备 URL，Lite 档保留纯文本。
+/// 装备名称保持单行截断；直接导航真实装备 URL，历史无链接投影保留纯文本。
 #[component]
 pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {
     rsx! {

@@ -95,8 +95,7 @@ where
 
 /// 使用持久化轮次表和结算 workflow 运行 Worker。
 ///
-/// 结算参数只在 PostgreSQL 完整档注入；SQLite Lite 继续只运行已经声明支持的生命周期
-/// 轮次。结算执行仍通过 `SettlementCommandPort` 进入应用层，Worker 不复制结算计算。
+/// 结算通过 `SettlementCommandPort` 进入应用层，Worker 不复制结算计算。
 pub async fn run_persistent_with_settlement_until_shutdown<C, S>(
     worker: PersistentWorker<C>,
     shutdown: S,

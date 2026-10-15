@@ -28,13 +28,7 @@ pub(super) async fn verify_empty_target(
     let store = DatabaseStore::connect(database_url)
         .await
         .context("connect recreated PostgreSQL database for empty-target verification")?;
-    let postgres = match store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => {
-            anyhow::bail!("recreated target no longer resolves to PostgreSQL")
-        }
-    };
+    let DatabaseStore::Postgres(postgres) = store;
     let preflight = postgres
         .collect_recovery_preflight(database_name)
         .await
@@ -55,26 +49,14 @@ pub(super) async fn migrate_and_verify(
         .await
         .context("connect rebuilt PostgreSQL database for migration")?;
     migration_store.migrate().await.context("run rebuilt PostgreSQL database migrations")?;
-    let migration_postgres = match migration_store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => {
-            anyhow::bail!("rebuilt target no longer resolves to PostgreSQL")
-        }
-    };
+    let DatabaseStore::Postgres(migration_postgres) = migration_store;
     migration_postgres.close().await;
     println!("database migrations applied for postgres");
 
     let store = DatabaseStore::connect(database_url)
         .await
         .context("connect rebuilt PostgreSQL database for migration verification")?;
-    let postgres = match store {
-        DatabaseStore::Postgres(postgres) => postgres,
-        #[cfg(feature = "sqlite")]
-        DatabaseStore::Sqlite(_) => {
-            anyhow::bail!("rebuilt target no longer resolves to PostgreSQL")
-        }
-    };
+    let DatabaseStore::Postgres(postgres) = store;
     let preflight = postgres
         .collect_recovery_preflight(database_name)
         .await

@@ -5,6 +5,9 @@
 持久化生命周期、论坛、邮件、投递和恢复循环的装配根。
 `src/lib.rs` 导出 `run`、`run_from_path`，独立 `main.rs` 与[合并服务](../server/README.md)的 Worker 子进程复用装配。
 
+仅支持 Linux x86_64 原生目标；装配入口在编译期拒绝其他 OS/架构。浏览器 WASM 不受此限制，
+默认发布 ABI 与构建边界见[开发指南](../../docs/development.md#工具与依赖来源)。
+
 ## 源码入口
 
 | 入口 | 职责 |
@@ -52,12 +55,11 @@ Credits/COD 为零。同封其他 lot 不受影响，已 Take 的邮件不能整
 
 ## Cargo feature
 
-默认 feature 为空；`postgres` 启用完整存储/任务，`sqlite` 启用 Lite 存储/任务，`cache-redis` 编译可选缓存。
-SQLite 不装配论坛、邮件、结算、delivery、fulfillment、recovery 和告警完整档循环。
+默认 feature 为空；`postgres` 启用持久存储/任务，`cache-redis` 编译可选缓存。
 
 ## 部署约束
 
-SQLite Lite 必须本地文件、每角色一个实例、有效主并发 1。PostgreSQL 的生命周期、慢速代理、结算，
+生命周期、慢速代理、结算，
 以及 fulfillment/recovery 等 owner 各有预算，不因单个积压阻塞其他循环。
 默认值与租约约束见[Worker 循环预算](../../ops/config/README.md#worker-循环预算)。
 自动周排期默认关闭；新轮次 world 取配置 allowlist、runtime 启用集合与数据库 `worlds.enabled` 的交集。

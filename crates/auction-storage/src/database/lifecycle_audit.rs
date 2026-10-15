@@ -1,4 +1,4 @@
-//! PostgreSQL 与 SQLite 共用的 Auction-BF 生命周期审计映射。
+//! Auction-BF 生命周期审计映射；事实与状态迁移在同一 PostgreSQL 事务提交。
 
 use auction_application::{
     AuctionFinalProxyPlan, AuctionLifecycleAction, AuctionLifecycleActorType,
