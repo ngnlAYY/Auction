@@ -61,6 +61,8 @@ just release-check --single-binary # 可选合并归档，要求干净工作树
 
 apps 默认不含数据库驱动或 Web；自行调用 cargo 时须显式选 postgres，需要页面还须先构建并选 web-embed。
 后端 release 保留 Fat LTO、单 CGU、panic 展开与通用 CPU 基线，WASM 优先体积；参数不是性能验收。
+默认分支推送或手动运行通过 CI 后，可从 Actions 下载含双端页面的通用 Linux x86_64 四程序包；
+触发条件、缓存和下载位置见[CI 制品说明](ci/README.md#下载-actions-制品)，不自动部署。
 
 ## 当前交付边界
 

@@ -4,8 +4,9 @@
 
 ## 工具与依赖来源
 
-准备 Linux x86_64 GNU/glibc 主机、just、Bash、rustfmt、Clippy 与 `wasm32-unknown-unknown` target；
-页面另需配套 dx CLI。版本、MSRV 和 profile 见[技术栈](tech-stack.md)。
+准备 Linux x86_64 GNU/glibc 主机、just、Bash、ripgrep（`rg`）、Perl、rustfmt、Clippy 与
+`wasm32-unknown-unknown` target；布局、配置及五语言检查需要 `rg`/Perl，CI 的 docs 前置门禁会显式安装。
+页面另需配套 dx CLI。版本、MSRV 和 profile 见[技术栈](tech-stack.md)，缓存边界见[CI 说明](../ci/README.md#runner-依赖与缓存)。
 检查/发布使用 `--locked`，不手工清理条件平台或未启用可选依赖的锁记录。
 不设全局 `build.target`，保留 `target/release` 路径；浏览器显式选 WASM target，通用制品禁用 `target-cpu=native`。
 

@@ -3,25 +3,83 @@ name: Rust
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# 自动运行、PR 和手动运行分别排队；同一分支/PR 的新提交取消旧任务。
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{
+    github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # 仅此 job 读取 PR 元数据，用于取消同仓库同提交的重复 push 检查。
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run-checks: ${{ steps.scope.outputs.run-checks }}
     steps:
+      - name: Select checks without duplicate PR runs
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == push && "$REF_TYPE" == branch &&
+            "$REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            heads=$(gh api --method GET --paginate "repos/$GH_REPO/pulls" \
+              -f state=open -f "head=$REPOSITORY_OWNER:$REF_NAME" \
+              --jq '.[] | [.head.repo.full_name, .head.sha] | @tsv')
+            if grep -Fxq -- "$GH_REPO"$'\t'"$SOURCE_SHA" <<<"$heads"; then
+              printf 'run-checks=false\n' >> "$GITHUB_OUTPUT"
+              printf '%s\n' '同提交已有 PR 检查；跳过重复 push。' \
+                >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+          printf 'run-checks=true\n' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.scope.outputs.run-checks == 'true'
         with:
           persist-credentials: false
+      # 布局、配置和五语言门禁依赖 rg/Perl，不依赖 runner 镜像预装。
+      - name: Install check dependencies
+        if: steps.scope.outputs.run-checks == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep perl
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        if: steps.scope.outputs.run-checks == 'true'
         with:
           toolchain: 1.99.0
           components: rustfmt
-      - run: bash ci/check.sh docs
+      # 廉价静态门禁先行，失败时不启动编译或安装审计工具。
+      - name: Check docs, repository policy and formatting
+        if: steps.scope.outputs.run-checks == 'true'
+        run: bash ci/check.sh all fmt
 
   verify:
-    runs-on: ubuntu-latest
+    needs: docs
+    if: needs.docs.outputs.run-checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,13 +89,21 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
-      # rust-cache v2.9.2；固定提交，避免标签漂移。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      # docs 独立报告；其余策略和 Rust 检查复用本地命令，不安装 dx 或运行测试。
-      - run: bash ci/check.sh repository layout config i18n rust
+      # rust-cache v2.9.2；自动键隔离 job、平台、工具链和依赖图。
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: v1-auction-build
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
+          cache-bin: "false"
+      # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
+      - run: bash ci/check.sh check feature lint wasm
 
   security-audit:
-    runs-on: ubuntu-latest
+    needs: docs
+    if: needs.docs.outputs.run-checks == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,18 +112,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           toolchain: 1.99.0
-      # rust-cache v2.9.2。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      # rust-cache v2.9.2；审计失败也保留工具二进制及安装元数据。
+      - name: Restore audit tools cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: cargo-audit-0.22.2-machete-0.9.2
-      # 只审计依赖，不运行产品或行为测试；漏洞和全部警告均失败，不忽略公告。
-      - run: cargo install cargo-audit --locked --version 0.22.2
+          cache-bin: "true"
+          cache-on-failure: "true"
+      # 逐个核对工具版本，不能把部分缓存命中视为所有工具已安装。
+      - name: Install cargo-audit when needed
+        run: |
+          if ! version=$(cargo audit --version 2>/dev/null) ||
+            [[ "$version" != "cargo-audit 0.22.2" ]]; then
+            cargo install cargo-audit --locked --version 0.22.2 --force
+          fi
+      - name: Install cargo-machete when needed
+        run: |
+          if ! version=$(cargo machete --version 2>/dev/null) ||
+            [[ "$version" != "cargo-machete 0.9.2" ]]; then
+            cargo install cargo-machete --locked --version 0.9.2 --force
+          fi
+      # 缓存命中也联网审计，漏洞和全部警告均失败，不忽略公告。
       - run: bash ci/check.sh dependency-audit
-      - run: cargo install cargo-machete --locked --version 0.9.2
       - run: bash ci/check.sh dependency-unused
 
   msrv:
-    runs-on: ubuntu-latest
+    needs: docs
+    if: needs.docs.outputs.run-checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,9 +148,100 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           toolchain: 1.94.1
-      # rust-cache v2.9.2。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      # rust-cache v2.9.2；与 verify 隔离，不跨 Rust 工具链复用产物。
+      - name: Restore MSRV build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
+          prefix-key: v1-auction-build
           key: msrv
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
+          cache-bin: "false"
       - run: >-
           cargo +1.94.1 check --locked --workspace --all-targets --all-features
+
+  artifacts:
+    needs: [docs, verify, security-audit, msrv]
+    # PR 和普通分支不做昂贵的完整发布构建；手动触发仍须通过全部检查。
+    if: >-
+      needs.docs.outputs.run-checks == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' &&
+        github.ref == format('refs/heads/{0}',
+                             github.event.repository.default_branch)))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      # 私有库 runner 的内存有限，限制并发；不放宽 Fat LTO 或 CPU 基线。
+      CARGO_BUILD_JOBS: "2"
+      DX_ARCHIVE_SHA256: >-
+        4363e4ed2a3f1eb7f4d38d2d59aed59ce43271c44c16b425e92c89a64761fbe7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.99.0
+          targets: wasm32-unknown-unknown
+      # rust-cache v2.9.2；递归清理 target，仅保留编译缓存，不复用发布结论。
+      - name: Restore release build cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          prefix-key: v1-auction-build
+          key: ubuntu-24.04-release
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
+          cache-bin: "false"
+      # cache v6.1.0；只缓存固定版本的官方 dx 压缩包，命中后仍校验哈希。
+      - name: Restore Dioxus CLI archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/auction-ci/dioxus-0.7.10
+          key: dx-linux-x86_64-0.7.10-${{ env.DX_ARCHIVE_SHA256 }}
+      - name: Install verified Dioxus CLI
+        run: |
+          filename=dx-x86_64-unknown-linux-gnu.tar.gz
+          archive="$HOME/.cache/auction-ci/dioxus-0.7.10/$filename"
+          tool_dir="$RUNNER_TEMP/auction-dx"
+          mkdir -p "$(dirname "$archive")" "$tool_dir"
+          if [[ ! -f "$archive" ]]; then
+            base_url=https://github.com/DioxusLabs/dioxus/releases/download
+            curl --fail --silent --show-error --location --retry 3 \
+              --connect-timeout 10 --max-time 180 \
+              "$base_url/v0.7.10/$filename" --output "$archive"
+          fi
+          printf '%s  %s\n' "$DX_ARCHIVE_SHA256" "$archive" |
+            sha256sum --check --
+          tar --extract --gzip --file "$archive" --directory "$tool_dir" \
+            --no-same-owner dx
+          "$tool_dir/dx" --version
+          printf '%s\n' "$tool_dir" >> "$GITHUB_PATH"
+      # 复用唯一发布入口：API-only 对照、双端 Web、四程序、隔离和归档门禁。
+      - name: Build and verify complete release package
+        run: bash ci/release.sh release-check
+      # upload-artifact v7.0.2；tar 保留 bin 执行权限，外层不重复压缩。
+      - name: Upload Linux binaries and checksums
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: auction-linux-x86_64-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            target/release-package/*.tar.gz
+            target/release-package/SHA256SUMS
+            target/release-package/DEPENDENCIES.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Add artifact download summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          {
+            printf '## Linux x86_64 完整制品\n\n'
+            printf '[下载四程序及校验清单](%s)\n\n' "$ARTIFACT_URL"
+            printf '%s\n' '解开外层下载包后，用 SHA256SUMS 校验 tar.gz。'
+            printf '%s\n' 'tar 包的 bin/ 含 Public、Admin、Worker、auctionctl。'
+            printf '%s\n' 'Public/Admin 已内嵌页面；不是 Ryzen 专用包。'
+            printf '%s\n' '制品保留 14 天；仅完成静态门禁，不代表运行验收。'
+          } >> "$GITHUB_STEP_SUMMARY"
