@@ -1,4 +1,29 @@
 # 管理端简体中文文案（管理端默认语言）。
+admin-forum-title = 论坛同步状态
+admin-forum-readonly-note = 刷新只读取本地状态，不重试发布，也不授权论坛写入。
+admin-forum-auction = 本页拍卖
+admin-forum-refresh = 刷新论坛状态
+admin-forum-loading = 正在读取论坛状态…
+admin-forum-disabled = 论坛同步已关闭。
+admin-forum-missing = 该拍卖尚无论坛同步投影。
+admin-forum-pending = 待同步
+admin-forum-publishing = 发布中
+admin-forum-published = 已发布
+admin-forum-failed = 失败；刷新不会重试发布
+admin-forum-status = 状态：{ $status }
+admin-forum-progress = 已处理至楼层
+admin-forum-updated-at = 状态更新时间
+admin-forum-content-error = 固定帖刷新错误：{ $code }
+admin-forum-link = 打开论坛主题
+admin-forum-content-title = 论坛正文详情
+admin-forum-source-revision = 源版本
+admin-forum-content-revision = 固定楼层版本
+admin-forum-content-synced-at = 固定楼层同步时间
+admin-forum-last-success-at = 最近完整扫描
+admin-forum-error-at = 最近正文错误时间
+admin-forum-body-summary = 查看本地目标正文（BBCode）
+admin-forum-body-note = 以下为本地保存的目标正文，不保证与论坛实际保存的正文逐字一致。
+
 setup-listener = 正式服务监听端口
 setup-listener-help = 两个服务均固定监听 127.0.0.1。这些端口不改变当前设置入口，也不自动修改上方的站点 Origin；使用反向代理或 SSH 隧道时，请同步调整其上游端口。检查不探测端口占用或绑定权限。
 setup-public-listener-port = Public 监听端口

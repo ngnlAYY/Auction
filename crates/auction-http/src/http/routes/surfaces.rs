@@ -143,6 +143,8 @@ fn admin_feature_routes(router: Router<AdminApiState>) -> Router<AdminApiState> 
                 middleware::from_fn_with_state(strict_json::post(2 << 20), strict_json::enforce),
             ),
         )
+        .route("/api/v1/admin/forum/sync-status", get(admin_forum::sync_status))
+        .route("/api/v1/admin/auctions/{auction_id}/forum", get(admin_forum::get))
         .route("/api/v1/admin/auctions/{auction_id}/lots", get(admin_lots::list))
         .route(
             "/api/v1/admin/auctions/{auction_id}/settlement-report",

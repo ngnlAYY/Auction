@@ -1,6 +1,6 @@
 //! 论坛回帖导入 Worker 的模块装配。
 //!
-//! 主题处理、竞价命令、MoogleMail 通知和共享幂等辅助分别由子模块负责；本文件保留
+//! 主题处理、竞价命令、MoogleMail 通知、拒绝提示和共享幂等辅助分别由子模块负责；本文件保留
 //! runtime 配置与 `run_cycle` 入口，不改变游标推进和 warning-only 边界。
 
 use std::{
@@ -28,6 +28,8 @@ mod command;
 mod common;
 #[path = "reply/notification.rs"]
 mod notification;
+#[path = "reply/rejection.rs"]
+mod rejection;
 #[path = "reply/topic.rs"]
 mod topic;
 
@@ -72,6 +74,7 @@ pub struct ForumReplyRuntime {
     pub(crate) batch_size: u16,
     pub(crate) item_timeout: std::time::Duration,
     pub(crate) public_base_url: Option<String>,
+    pub(crate) verify_post_body: bool,
 }
 
 impl ForumReplyRuntime {
@@ -111,7 +114,14 @@ impl ForumReplyRuntime {
             batch_size,
             item_timeout,
             public_base_url,
+            verify_post_body: false,
         })
+    }
+
+    /// 配置固定帖刷新时的原始正文校验；默认关闭，远端身份及写入回执仍须精确匹配。
+    pub fn with_post_body_verification(mut self, enabled: bool) -> Self {
+        self.verify_post_body = enabled;
+        self
     }
 }
 

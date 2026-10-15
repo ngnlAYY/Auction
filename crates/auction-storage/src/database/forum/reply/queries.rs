@@ -165,7 +165,8 @@ pub(super) async fn command_outcomes_postgres(
     use sqlx::Row;
 
     let rows = sqlx::query(
-        "SELECT post_id, post_number, line_number, lot_code, command_kind, status, last_error_detail
+        "SELECT post_id, post_number, line_number, lot_code, command_kind, status,
+                last_error_code, last_error_detail
          FROM public.auction_forum_bid_commands
          WHERE auction_id = $1 AND thread_id = $2
          ORDER BY post_id, line_number, lot_code, command_kind",
@@ -205,6 +206,9 @@ pub(super) async fn command_outcomes_postgres(
                 .try_get("command_kind")
                 .map_err(|_| storage_error("读取论坛命令类型失败"))?,
             status,
+            error_code: row
+                .try_get("last_error_code")
+                .map_err(|_| storage_error("读取论坛命令错误码失败"))?,
             safe_detail: row
                 .try_get("last_error_detail")
                 .map_err(|_| storage_error("读取论坛命令安全详情失败"))?,

@@ -18,7 +18,7 @@
 ## 基线与统计口径
 
 `auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。当前 feature API 为
-Public **21** 个、Admin **44** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
+Public **21** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
 当前仅支持 PostgreSQL。保留已发布路径、字段、错误码和未装配能力的错误处理。
 源码能力和运行证据见[验证状态](../status.md)。
 
@@ -156,7 +156,8 @@ P21 使用 `PublicForumSyncStatusResponse`，成功响应固定为 `code=ok`、`
 未装配存储或查询失败返回 `503 storage_unavailable`。
 启用状态不表示主题已经发布或扫描成功；真实楼层仍由 P15 的 `processed_through_post_number` 提供。
 Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍状态，且关闭时不挂载 P15 轮询；
-未知和请求失败显示不可用并允许重试，不解释为关闭。升级须同时更新 Worker、Public API 与公开端产物。
+未知和请求失败显示不可用，不解释为关闭；公开页无手动重试按钮，P21 仍按原周期重读。
+手动刷新入口位于 Admin `/auctions`，升级须同时更新 Worker、两端 API 与内嵌页面。
 
 
 ### Public 分页、世界与金额
@@ -265,6 +266,8 @@ P03/P04 的查询、事件 JSON、`after` 游标、缺口高水位、会话复�
 | A42 | GET | /api/v1/admin/settlement-catalog | 200 | 400, 401, 501, 503/504 |
 | A43 | GET | /api/v1/admin/realtime/events | 200 | 400, 401, 500, 501, 503/504 |
 | A44 | POST | /api/v1/admin/credentials/{credential_id}/check | 200；只读认证观测 | 400, 401, 403, 404, 409, 413/415, 429, 500, 501, 503/504 |
+| A45 | GET | /api/v1/admin/forum/sync-status | 200；只读本地状态 | 400, 401, 501, 503/504 |
+| A46 | GET | /api/v1/admin/auctions/{auction_id}/forum | 200；只读本地投影 | 400, 401, 404, 501, 503/504 |
 
 ## 首次部署初始化
 
@@ -367,7 +370,10 @@ P09/P11 在 PostgreSQL 按 lot/equipment/world 校验密文后短暂解密，直
 
 P15 读取本地论坛镜像的源/内容版本、真实连续楼层、同步/最近成功时间及有界安全错误。
 `/forum` 仅在 P21 明确启用后轮询 P15：`pending`/`publishing` 每次完成后等 2 秒，`published` 等 30 秒，
-发布后显示“当前同步到 #xx”；失败暂停并提供人工重试。首页不轮询，不把本地镜像当作远端成功证明。
+发布后显示“当前同步到 #xx”；失败暂停帖子轮询，重新进入或加载页面后重读，不提供公开页手动重试按钮。
+公开页仅展示同步摘要、真实处理楼层、更新时间与简短延迟提醒；已同步提示行右侧提供主题链接，不展示正文或诊断详情。
+Admin `/auctions` 承接只读刷新及标题、正文、版本、同步/扫描时间和错误详情；正文默认折叠，以转义纯文本显示本地目标镜像。
+这是展示职责迁移，P15/A46 的既有 DTO 字段不变，不新增读取或写入权限。首页不轮询，不把本地镜像当作远端成功证明。
 
 P06 会话、P16/P17 账户/代理读取和 P18–P20 竞价命令使用 PostgreSQL 适配。账户投影包含普通竞价、quota、
 转换历史、最近 proxy bid 与 owner capability。P20 使用稳定 `command_id`/`request_hash`；P18/P19
@@ -452,6 +458,12 @@ A25 的 GET、POST 候选校验和 PUT 发布由规则 owner 拥有；PUT 以 `c
 请求摘要在 Serializable 事务做 revision CAS、账本与审计。
 
 ### 论坛预览与审计读取
+
+A45/A46 需要 Admin 会话、拒绝非空查询，始终 `no-store`；只读取本地 `PublicForumReader` 安全投影，不调用论坛、
+不创建恢复命令、不推进 Worker 状态。分别复用 P21/P15 的 DTO 形状，时间沿用 Admin 固定六位微秒格式。
+A45 无有效 Worker 观测返回 `503 forum_sync_unavailable`；未装配存储、读取失败或无效投影返回 `503 storage_unavailable`，
+后端明确能力缺失返回 `501 feature_not_supported`。A46 接受规范非零 UUID，否则 `400 invalid_auction_id`；
+没有可读镜像为 `404 not_found`，不是发布失败。管理页可选择本页拍卖手动刷新，不能用刷新解除人工写入门禁。
 
 A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 边界和 2 MiB
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回

@@ -13,6 +13,8 @@ use super::query::{AuctionsQuery, use_auctions_query_state};
 mod actions;
 #[path = "auctions/create.rs"]
 mod create;
+#[path = "auctions/forum.rs"]
+mod forum;
 #[path = "auctions/helpers.rs"]
 mod helpers;
 #[path = "auctions/table.rs"]

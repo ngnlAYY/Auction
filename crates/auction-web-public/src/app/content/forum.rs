@@ -1,4 +1,4 @@
-//! Public 论坛同步独立页面。
+//! Public 论坛同步摘要；正文和诊断细节由 Admin 展示。
 
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -26,23 +26,10 @@ pub(super) fn page() -> Element {
         }
     });
     let content = match sync_enabled.read().clone() {
-        None => forum_page_state(t!("forum-loading"), false, None),
-        Some(Ok(false)) => forum_page_state(t!("forum-sync-disabled"), false, None),
+        None => forum_page_state(t!("forum-loading"), false),
+        Some(Ok(false)) => forum_page_state(t!("forum-sync-disabled"), false),
         Some(Ok(true)) => rsx! { ForumCurrentAuction {} },
-        Some(Err(_)) => forum_page_state(
-            t!("forum-unavailable"),
-            true,
-            Some(rsx! {
-                button {
-                    class: "public-state-retry",
-                    r#type: "button",
-                    onclick: move |_| {
-                        status_generation.set(status_generation().saturating_add(1));
-                    },
-                    {t!("forum-retry")}
-                }
-            }),
-        ),
+        Some(Err(_)) => forum_page_state(t!("forum-unavailable"), true),
     };
 
     rsx! {
@@ -59,7 +46,6 @@ pub(super) fn page() -> Element {
 #[component]
 fn ForumCurrentAuction() -> Element {
     let selected_world = use_context::<Signal<String>>();
-    let mut refresh_generation = use_context::<Signal<u64>>();
     let current_auction = use_context::<CurrentAuctionResource>();
     let selected_world_value = selected_world();
     let current = match current_auction.read().clone() {
@@ -68,21 +54,8 @@ fn ForumCurrentAuction() -> Element {
     };
 
     match current {
-        None => forum_page_state(t!("forum-loading"), false, None),
-        Some(Err(_)) => forum_page_state(
-            t!("forum-unavailable-note"),
-            true,
-            Some(rsx! {
-                button {
-                    class: "public-state-retry",
-                    r#type: "button",
-                    onclick: move |_| {
-                        refresh_generation.set(refresh_generation().saturating_add(1));
-                    },
-                    {t!("forum-retry")}
-                }
-            }),
-        ),
+        None => forum_page_state(t!("forum-loading"), false),
+        Some(Err(_)) => forum_page_state(t!("forum-unavailable-note"), true),
         Some(Ok(None)) => rsx! {
             section {
                 class: "public-forum-state",
@@ -115,33 +88,30 @@ fn ForumCurrentAuction() -> Element {
     }
 }
 
-fn forum_page_state(message: String, alert: bool, action: Option<Element>) -> Element {
+fn forum_page_state(message: String, alert: bool) -> Element {
     rsx! {
         section {
             class: "public-forum-state",
             role: if alert { "alert" } else { "status" },
             aria_live: "polite",
             p { "{message}" }
-            {action}
         }
     }
 }
 
 #[component]
 fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
-    let retry_generation = use_signal(|| 0_u64);
     let poll_generation = use_signal(|| 0_u64);
     let thread = use_resource({
         let auction_id = auction.id.clone();
         move || {
-            let _ = retry_generation();
             let _ = poll_generation();
             let auction_id = auction_id.clone();
             async move { fetch_forum_thread(auction_id).await }
         }
     });
     // 每次读取完成后才开始轮询间隔，不能用两秒节拍取消尚未完成的慢请求。
-    // 发布前两秒、发布后三十秒；明确失败时暂停，手动重读成功后恢复。
+    // 发布前两秒、发布后三十秒；明确失败时暂停，重新进入页面后重读。手动刷新入口只在 Admin。
     let _poll = use_resource({
         let mut poll_generation = poll_generation;
         move || {
@@ -168,25 +138,9 @@ fn ForumAuctionPanel(auction: CurrentAuction) -> Element {
     });
     let thread_state = thread.read().clone();
     let content = match thread_state {
-        None => forum_page_state(t!("forum-loading"), false, None),
-        Some(Err(_)) => {
-            let mut retry_generation = retry_generation;
-            forum_page_state(
-                t!("forum-unavailable-note"),
-                true,
-                Some(rsx! {
-                    button {
-                        class: "public-state-retry",
-                        r#type: "button",
-                        onclick: move |_| {
-                            retry_generation.set(retry_generation().saturating_add(1));
-                        },
-                        {t!("forum-retry")}
-                    }
-                }),
-            )
-        }
-        Some(Ok(thread)) => forum_thread_details(thread, retry_generation),
+        None => forum_page_state(t!("forum-loading"), false),
+        Some(Err(_)) => forum_page_state(t!("forum-unavailable-note"), true),
+        Some(Ok(thread)) => forum_thread_details(thread),
     };
 
     rsx! {
@@ -213,73 +167,12 @@ fn ForumAuctionHeading(auction: CurrentAuction) -> Element {
     }
 }
 
-fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) -> Element {
+fn forum_thread_details(thread: ForumThread) -> Element {
     let status_label = forum_status_label(&thread.status);
     let status_message = forum_status_message(&thread.status);
     let status_class = forum_status_class(&thread.status);
     let updated_at = format_auction_time(&thread.updated_at);
     let status_accessible_label = format!("{}: {status_label}", t!("forum-status"));
-    let content_synced_at = thread.content_synced_at.as_deref().map(format_auction_time);
-    let content_last_success_at =
-        thread.content_last_success_at.as_deref().map(format_auction_time);
-    let content_error = thread
-        .content_last_error_at
-        .as_deref()
-        .zip(thread.content_last_error_code.as_deref())
-        .map(|(at, code)| (at.to_owned(), format_auction_time(at), code.to_owned()));
-    let retry_action = (thread.status == "failed").then(|| {
-        rsx! {
-            button {
-                class: "public-state-retry",
-                r#type: "button",
-                onclick: move |_| {
-                    retry_generation.set(retry_generation().saturating_add(1));
-                },
-                {t!("forum-retry")}
-            }
-        }
-    });
-    let published_content = match (
-        thread.thread_url.clone(),
-        thread.title.clone(),
-        thread.body.clone(),
-    ) {
-        (Some(thread_url), Some(title), Some(body)) if thread.status == "published" => rsx! {
-            section { class: "public-forum-thread", aria_labelledby: "public-forum-thread-title",
-                div { class: "public-forum-thread__heading",
-                    h3 { id: "public-forum-thread-title", "{title}" }
-                    a {
-                        class: "public-forum-thread__link",
-                        href: thread_url,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        {t!("forum-link")}
-                    }
-                }
-                article { class: "public-forum-post",
-                    header { class: "public-forum-post__meta",
-                        time { datetime: thread.updated_at.clone(), "{updated_at}" }
-                        span { class: "public-forum-post__number", "#1" }
-                    }
-                    div { class: "public-forum-post__grid",
-                        aside { class: "public-forum-post__author",
-                            strong { {t!("app-title")} }
-                            span { {t!("forum-state-published")} }
-                        }
-                        div { class: "public-forum-post__content",
-                            details {
-                                class: "public-forum-thread__body",
-                                open: true,
-                                summary { {t!("forum-thread-body-summary")} }
-                                pre { "{body}" }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        _ => rsx! {},
-    };
 
     rsx! {
         div { class: "public-forum-card__content",
@@ -290,49 +183,33 @@ fn forum_thread_details(thread: ForumThread, mut retry_generation: Signal<u64>) 
                     "{status_label}"
                 }
                 p { role: "status", aria_live: "polite", "{status_message}" }
-                {retry_action}
+                if thread.status == "published" {
+                    if let Some(thread_url) = thread.thread_url {
+                        a {
+                            class: "public-forum-card__link",
+                            href: thread_url,
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            {t!("forum-link")}
+                        }
+                    }
+                }
             }
-            if let Some((error_at, formatted_error_at, error_code)) = content_error {
+            if thread.content_last_error_code.is_some() {
                 p { class: "public-forum-delay", role: "alert",
-                    {t!("forum-sync-delayed", code: error_code, time: formatted_error_at)}
-                    time { class: "public-visually-hidden", datetime: error_at }
+                    {t!("forum-sync-delayed")}
                 }
             }
             dl { class: "public-forum-metadata",
-                div {
-                    dt { {t!("forum-source-revision")} }
-                    dd { "{thread.source_revision}" }
-                }
-                div {
-                    dt { {t!("forum-content-revision")} }
-                    dd { "{thread.content_revision}" }
-                }
-                if let (Some(raw), Some(formatted)) =
-                    (thread.content_synced_at.as_ref(), content_synced_at)
-                {
-                    div {
-                        dt { {t!("forum-content-synced-at")} }
-                        dd { time { datetime: raw.clone(), "{formatted}" } }
-                    }
-                }
-                if let (Some(raw), Some(formatted)) =
-                    (thread.content_last_success_at.as_ref(), content_last_success_at)
-                {
-                    div {
-                        dt { {t!("forum-last-success-at")} }
-                        dd { time { datetime: raw.clone(), "{formatted}" } }
-                    }
-                }
                 div {
                     dt { {t!("forum-progress")} }
                     dd { {t!("forum-updated-through", post_number: thread.processed_through_post_number)} }
                 }
                 div {
                     dt { {t!("forum-updated-at")} }
-                    dd { time { datetime: thread.updated_at.clone(), "{updated_at}" } }
+                    dd { time { datetime: thread.updated_at, "{updated_at}" } }
                 }
             }
-            {published_content}
         }
     }
 }

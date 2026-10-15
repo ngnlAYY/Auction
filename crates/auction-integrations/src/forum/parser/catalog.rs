@@ -161,17 +161,19 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
 
 /// 固定 #1 的来源标记只属于展示，不得污染回读后的玩家名称。
 fn strip_bid_source_suffix(value: &str) -> &str {
-    let Some(without_close) = value.strip_suffix('）') else {
-        return value;
-    };
-    let Some((bidder, annotation)) = without_close.rsplit_once('（') else {
+    // 新版使用英文半角来源标记；旧帖的全角中文标记仍只读兼容，不得混入玩家名称。
+    let suffix = value
+        .strip_suffix(')')
+        .and_then(|value| value.rsplit_once(" ("))
+        .or_else(|| value.strip_suffix('）').and_then(|value| value.rsplit_once('（')));
+    let Some((bidder, annotation)) = suffix else {
         return value;
     };
     let forum_floor = annotation
         .strip_prefix('#')
         .and_then(|floor| floor.parse::<i32>().ok())
         .is_some_and(|floor| floor >= 3);
-    if annotation == "代理" || forum_floor { bidder.trim_end() } else { value }
+    if matches!(annotation, "proxy" | "代理") || forum_floor { bidder.trim_end() } else { value }
 }
 
 fn is_material(description: &str) -> bool {

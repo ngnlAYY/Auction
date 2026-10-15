@@ -405,6 +405,7 @@ pub(super) async fn configure_state(
         worker_control,
         security,
     )
+    .with_forum_reader(store.clone())
     .with_credential_check(credential_check)
     .with_auction_schedule(auction_schedule)
     .with_admin_worlds(admin_worlds)

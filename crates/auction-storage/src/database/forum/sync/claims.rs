@@ -13,7 +13,7 @@ pub(super) async fn claim_due_postgres(
     worker_id: &str,
     now: DateTime<Utc>,
     lease_until: DateTime<Utc>,
-    credential_recovery_before: Option<DateTime<Utc>>,
+    startup_recovery_before: Option<DateTime<Utc>>,
     limit: u16,
 ) -> Result<Vec<ForumSyncClaim>, ApplicationError> {
     use sqlx::Row;
@@ -32,6 +32,8 @@ pub(super) async fn claim_due_postgres(
     .await
     .map_err(|_| storage_error("初始化论坛同步投影失败"))?;
 
+    // 启动水位仅重新领取历史凭据失败或未知写入；原失败码随 claim 传给 Worker，后者只能只读对账。
+    // updated_at 越过首轮水位后不再走此分支，避免同一进程热循环；人工授权门禁不在白名单内。
     let rows = sqlx::query(
         "SELECT sync.auction_id, auction.state_version, sync.thread_id AS existing_thread_id,
                 CASE WHEN sync.status = 'publishing' THEN 'write_unknown'
@@ -49,7 +51,10 @@ pub(super) async fn claim_due_postgres(
                 AND sync.next_attempt_at <= $1)
                OR ($3::timestamptz IS NOT NULL
                    AND sync.status = 'failed'
-                   AND sync.last_error_code = 'credential_unavailable'
+                   AND sync.last_error_code IN (
+                       'credential_unavailable', 'write_unknown', 'publish_proof_failed',
+                       'reconcile_write_unknown', 'reconcile_publish_proof_failed'
+                   )
                    AND sync.updated_at < $3)
                OR (sync.status = 'publishing'
                    AND (sync.lease_expires_at IS NULL OR sync.lease_expires_at <= $1))
@@ -62,7 +67,7 @@ pub(super) async fn claim_due_postgres(
     )
     .bind(now)
     .bind(i64::from(limit))
-    .bind(credential_recovery_before)
+    .bind(startup_recovery_before)
     .fetch_all(&mut *transaction)
     .await
     .map_err(|_| storage_error("读取 due 论坛同步任务失败"))?;

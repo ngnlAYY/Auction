@@ -46,7 +46,7 @@ HTML 解析使用 scraper 0.27 / selectors 0.38，移除旧 fxhash 停维依赖�
 | ComposeSend | 首次 POST 前取得 Sent baseline，之后独立扫描；只接受新增、唯一且 world、收件人、正文摘要、Credits/COD、装备精确匹配的 MID |
 | Return / Take | 写前核对 sender 与预期资产；Return 证明精确 MID 消失，Take 证明身份不变、资产归零及唯一回执 |
 | 论坛读取 | 同 thread、规范分页、真实帖子/作者身份与完整页数；不能把部分主题作为完整命令源 |
-| 论坛写入 | 同源表单与精确 board/thread/post；固定帖需真实远端身份和正文回读证明 |
+| 论坛写入 | 同源表单与精确 board/thread/post；回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制 |
 
 Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资产不符、无匹配、多匹配或预算耗尽进入 `manual_reconcile`，
 不自动重寄。发送前 compose 必须为空，避免覆盖未知写入遗留资产；收件人不存在的退信在资产取回前也保留人工对账。
@@ -63,7 +63,13 @@ MoogleMail gateway 的列表、限速、正文与失效处理共用绝对 deadli
 尚未定位 cursor/末尾时不得推进。发送动作全程持有凭据级 guard，transport 并发上限为 1，读取不占用写 guard。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限；作者身份只采信系统作者链接。
+创建端口明确返回本轮 `Created` 或只读命中的 `Existing`；同标题旧主题不是本轮新正文的成功回执。
 论坛仅导入普通出价，代理行在账本前忽略；固定 #1 展示目录，#2 展示可证明处理记录与连续楼层，不能猜测身份或进度。
+固定 #1 顶部保留 World、Intake opens、Opened、Bidding deadline；`Auction address` 使用原生 `[url=地址][b]地址[/b][/url]`
+展示完整当期拍卖链接。内层粗体防止论坛将长网址文字截短后写回 BBCode，不能靠忽略省略号通过正文校验。
+origin 由[Worker 部署配置](../../ops/config/README.md#论坛与邮件)提供，拍卖 UUID/world 路径不丢失。
+`About system` 链接固定指向论坛说明主题 `301946`。列表边界直接生成论坛保存后的稳定换行形状，不靠放宽正文比较消除差异。
+目录固定文案使用英文；当前领先来源显示 ` (proxy)` 或 ` (#N)`，解析器仍兼容历史中文/全角标记，用户名称保持原文。
 
 Admin A44 在 [credentials/check.rs](src/credentials/check.rs) 使用独立只读探测器，仅接受数据库信封。
 401/明确登录失效为 invalid，挑战、战斗页、限流、超时或协议变化为 inconclusive；无写入、重试、留证或状态回写。

@@ -172,7 +172,16 @@ metrics 仅允许有效 loopback TCP 或 Unix listener，禁止经代理公开�
 
 完整字段见[Worker 模板](examples/worker.toml)。Forum 独立循环“发布 → 回帖导入”，阶段失败不跳过后续阶段。
 默认周期 300 秒、抖动最多 5 秒；分页默认 10、硬上限 20，超限失败，不截断出价。
-item timeout 须覆盖分页/写入/间隔且小于 lease；`public_base_url` 仅允许无凭据/路径/查询的 HTTPS origin，回环 HTTP 仅供本地联调。
+`worker.forum.verify_post_body` 默认 `false`（省略也关闭），同步发布及回帖刷新都不额外回读/逐字校验原始 BBCode；
+设为 `true` 才启用写前、写后及未知结果恢复的严格正文确认，比较规则见[外部写入契约](../../docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
+关闭时保留真实固定帖身份、POST 回执、幂等及人工写入门禁，但本地目标镜像不保证远端正文一致。
+历史未知结果不能仅凭现存帖子 ID 自动完成；关闭时同步转人工授权、回帖刷新保留未知门禁，避免吞掉尚未发布的新变化。
+该开关不受 `operations.forum` 接管，修改须重启 Worker；已有人工授权门禁不自动清空。显式填写新字段前须更新会读取
+Worker 配置的程序（包括 auctionctl）；旧程序严格拒绝未知字段。
+item timeout 须覆盖分页/写入/间隔且小于 lease；`worker.forum.public_base_url` 仅允许无凭据/路径/查询的 HTTPS origin，回环 HTTP 仅供本地联调。
+该字段默认省略，不显示 Web 地址；配置后固定 #1 的 `Auction address` 以 `[url=地址][b]地址[/b][/url]` 显示完整当期拍卖 URL，
+内层粗体阻止论坛截短链接文字并改写回读 BBCode；保留 `?auction=<UUID>` 和异世界参数，不退化为网站首页。`About system` 固定链接到论坛说明主题 `301946`；修改配置需重启 Worker。
+它归部署配置所有，不受 `operations.forum` 接管；已有人工门禁任务仍须按[论坛恢复命令](../../apps/auctionctl/README.md#论坛与结算核验)核对后授权，重启不清空失败状态。
 
 MoogleMail 按 world 独立调度/唤醒。cron 默认 `*/5 * * * *`，兼容描述符、`@every`、`TZ=`/`CRON_TZ=`；
 时区省略时取 Worker 本地值，部署宜显式指定。共享客户端默认间隔 1 秒、请求超时 15 秒；

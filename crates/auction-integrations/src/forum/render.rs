@@ -91,7 +91,8 @@ pub fn render_auction_thread(
         snapshot.sequence
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
+    // 论坛回读会删除开列表前、外层闭列表后的换行；直接生成其稳定形状，避免放宽正文比较。
+    body.push_str(FORUM_SEPARATOR);
     body.push_str("[list]\n[*][b]World:[/b] ");
     body.push_str(forum_world_name(snapshot.world));
     body.push('\n');
@@ -110,18 +111,23 @@ pub fn render_auction_thread(
             .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
     if let Some(public_url) = snapshot.public_url.as_deref() {
+        // 论坛会截短纯 URL 链接文字并把省略号写回 BBCode；内层粗体保留完整地址及回读证明。
         writeln!(
             &mut body,
-            "[*][b]Public auction:[/b] [url={public_url}][b]Open live auction[/b][/url]"
+            "[*][b]Auction address:[/b] [url={public_url}][b]{}[/b][/url]",
+            bbcode_text(public_url)
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
     }
+    let system_url = format!("{PRODUCTION_ENDPOINT}/index.php?showtopic=301946");
+    writeln!(&mut body, "[*][b]About system:[/b] [url={system_url}]{system_url}[/url]")
+        .map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "[/list]\n\
-         [size=3][b]Auction Rules and Bidding[/b][/size]\n\
+        "[/list]\
+         [size=3][b]Auction Rules and Bidding[/b][/size]\
          [list]\n\
          [*]The public auction page is authoritative for prices, leaders and deadlines.\n\
-         [*][b]Bidding commands:[/b]\n\
+         [*][b]Bidding commands:[/b]\
          [list]\n\
          [*]Post one command per line.\n\
          [*]Example: [code]One01 200k[/code]\n\
@@ -130,7 +136,7 @@ pub fn render_auction_thread(
          [code]One01 notify mm[/code]\n\
          [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
          [/list]\n\
-         [/list]\n",
+         [/list]",
     );
     writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
 
@@ -189,11 +195,11 @@ pub fn render_auction_thread(
                     Some(ForumCurrentBidSource::Forum { post_number, thread_id, post_id }) => {
                         write!(
                             &mut body,
-                            "（[url={PRODUCTION_ENDPOINT}/index.php?showtopic={thread_id}&p={post_id}#entry{post_id}]#{post_number}[/url]）"
+                            " ([url={PRODUCTION_ENDPOINT}/index.php?showtopic={thread_id}&p={post_id}#entry{post_id}]#{post_number}[/url])"
                         )
                         .map_err(|_| ForumRenderError::BodyTooLarge)?;
                     }
-                    Some(ForumCurrentBidSource::Proxy) => body.push_str("（代理）"),
+                    Some(ForumCurrentBidSource::Proxy) => body.push_str(" (proxy)"),
                     None => {}
                 }
             }

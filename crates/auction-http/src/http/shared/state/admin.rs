@@ -9,9 +9,9 @@ use auction_application::{
     AdminLotUpdatePort, AdminMailPort, AdminProxyEventReader, AdminRenameReader, AdminRulesPort,
     AdminRuntimeConfigPort, AdminSessionPort, AdminUserPort, AdminWorldPort,
     AuctionLifecycleCommandPort, DeliveryAdminPort, OperationsAlertSourceReader,
-    OperationsAlertStore, ProcessReadinessPort, ReadModelCache, RealtimeAdminPort,
-    RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader, SettlementReportReader,
-    WorkerControlPort, public_rules_cache_key,
+    OperationsAlertStore, ProcessReadinessPort, PublicForumReader, ReadModelCache,
+    RealtimeAdminPort, RecoveryCommandPort, RecoveryReportReader, SettlementCatalogReader,
+    SettlementReportReader, WorkerControlPort, public_rules_cache_key,
 };
 use auction_observability::{HealthReader, ProcessMetrics};
 
@@ -31,6 +31,7 @@ pub struct AdminApiState {
     health: Option<Arc<dyn HealthReader>>,
     admin_intake: Option<Arc<dyn AdminIntakePort>>,
     admin_forum_preview: Option<Arc<dyn AdminForumPreviewPort>>,
+    forum_reader: Option<Arc<dyn PublicForumReader>>,
     admin_mail: Option<Arc<dyn AdminMailPort>>,
     admin_rules: Option<Arc<dyn AdminRulesPort>>,
     admin_runtime: Option<Arc<dyn AdminRuntimeConfigPort>>,
@@ -102,6 +103,7 @@ impl AdminApiState {
             health,
             admin_intake,
             admin_forum_preview,
+            forum_reader: None,
             admin_mail,
             admin_rules,
             admin_runtime,
@@ -156,6 +158,16 @@ impl AdminApiState {
 
     pub(crate) fn credential_check(&self) -> Option<&dyn AdminCredentialCheckPort> {
         self.credential_check.as_deref()
+    }
+
+    /// 注入论坛本地安全投影；Admin 刷新只读状态，不授权或触发远端重写。
+    pub fn with_forum_reader(mut self, reader: Arc<dyn PublicForumReader>) -> Self {
+        self.forum_reader = Some(reader);
+        self
+    }
+
+    pub(crate) fn forum_reader(&self) -> Option<&dyn PublicForumReader> {
+        self.forum_reader.as_deref()
     }
 
     /// 注入正式开拍前的计划结束时间修改端口。

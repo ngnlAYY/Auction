@@ -1,4 +1,29 @@
 # 관리 화면 한국어 문안.
+admin-forum-title = 포럼 동기화 상태
+admin-forum-readonly-note = 새로고침은 로컬 상태만 읽습니다. 게시를 재시도하거나 포럼 쓰기를 승인하지 않습니다.
+admin-forum-auction = 현재 페이지의 경매
+admin-forum-refresh = 포럼 상태 새로고침
+admin-forum-loading = 포럼 상태 불러오는 중…
+admin-forum-disabled = 포럼 동기화가 꺼져 있습니다.
+admin-forum-missing = 이 경매의 포럼 동기화 정보가 아직 없습니다.
+admin-forum-pending = 대기 중
+admin-forum-publishing = 게시 중
+admin-forum-published = 게시됨
+admin-forum-failed = 실패: 새로고침은 게시를 재시도하지 않습니다
+admin-forum-status = 상태: { $status }
+admin-forum-progress = 처리한 게시물 번호
+admin-forum-updated-at = 상태 갱신 시각
+admin-forum-content-error = 고정 게시물 갱신 오류: { $code }
+admin-forum-link = 포럼 주제 열기
+admin-forum-content-title = 포럼 본문 상세
+admin-forum-source-revision = 소스 리비전
+admin-forum-content-revision = 고정 게시물 리비전
+admin-forum-content-synced-at = 고정 게시물 동기화 시각
+admin-forum-last-success-at = 마지막 전체 스캔
+admin-forum-error-at = 최근 본문 오류 시각
+admin-forum-body-summary = 로컬 전송 대상 본문 보기(BBCode)
+admin-forum-body-note = 로컬에 저장된 전송 대상 본문입니다. 포럼에 실제 저장된 본문과 정확히 일치하지 않을 수 있습니다.
+
 setup-listener = 정식 서비스 수신 포트
 setup-listener-help = 두 서비스 모두 127.0.0.1에서만 수신합니다. 이 포트는 현재 설정 접속 주소를 바꾸거나 위의 사이트 Origin을 자동 변경하지 않습니다. 리버스 프록시나 SSH 터널의 대상 포트도 조정하세요. 검사는 포트 사용 여부나 바인딩 권한을 확인하지 않습니다.
 setup-public-listener-port = Public 수신 포트

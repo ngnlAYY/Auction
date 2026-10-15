@@ -51,7 +51,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](../crates/auction-jobs/README.md) |
 | auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定与泛型静态响应 | [README](../crates/auction-http/README.md) |
 | auction-web-public | Public 页面、路由、API 消费、实时恢复与译文 | [README](../crates/auction-web-public/README.md) |
-| auction-web-admin | 管理页面、命令交互、API 消费、入站诊断代码的展示说明与译文 | [README](../crates/auction-web-admin/README.md) |
+| auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、入站诊断代码的展示说明与译文 | [README](../crates/auction-web-admin/README.md) |
 | auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](../crates/auction-web-shared/README.md) |
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](../crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](../crates/auction-observability/README.md) |
@@ -134,6 +134,8 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 
 论坛固定 #1 目录、#2 系统日志的真实 post ID 保存后才处理 #3+；回帖只导入普通 bid。
 读取须证明分页、作者和连续楼层，未知 POST 先按精确标题只读对账，重发须显式授权。
+拒绝提示由 jobs 的 `worker/forum/reply/rejection.rs` 拥有；application 定义错误码/本地诊断投影，storage 读取既有账本。
+新拒绝按类型分类，旧诊断仅做白名单展示映射；不改竞价规则、拒绝终态或重试门禁，见[外部副作用契约](contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
 MoogleMail ComposeSend 先验证空 compose 与完整 Sent baseline，再寻找唯一新增且精确匹配 payload 的 MID；
 Take/Return 各有独立动作证明。每种 Cookie 只有一个运行 owner，明确登录失效才标 invalid，不自动换备用 Cookie。
 

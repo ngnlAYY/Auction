@@ -34,6 +34,9 @@ HTTP 与两端浏览器复用这些 DTO；数据库行、应用读模型和领�
 
 ## 稳定投影
 
+论坛同步开关和镜像 DTO 由 `dto/public/catalog/forum.rs` 唯一拥有；Admin 认证状态 GET 复用同一安全字段形状，
+不复制 DTO，也不包含凭据或 Worker claim。浏览器两个 surface 仍独立实现读取和展示。
+
 - `HealthResponse` 的服务名和版本由装配根传入，不能用本 crate 的版本代替运行进程版本。
 - `ApiErrorResponse` 统一安全错误信封；Admin 列表与 dashboard 只暴露声明的安全字段，不透传内部 payload。
 - `SetupRequest`/`SetupResponse` 属于独立设置服务；`completed` 只表示配置保存，`initialize_and_start` 说明后续动作，不表示 readiness。

@@ -85,7 +85,10 @@ Admin 装备录入将来源读取、key 加密和持锁写入分成窄端口；�
 ## 论坛、审计与运维投影
 
 [ports/forum](src/ports/forum) 区分公开镜像、外部同步与回帖命令；真实处理楼层不能由 post ID 或内容版本推算。
-未知论坛写入只能先只读对账，再按持久人工授权重试。
+`ForumTopicPublication` 区分真实创建回执和找到既有主题；Admin 状态读取复用公开安全投影端口，不获得写入能力。
+`ForumCommandOutcome` 分开携带持久错误码及本地有界诊断；Worker 只能生成白名单英文提示，不能把诊断原文发往论坛。
+未知论坛写入只能先只读对账，再按持久人工授权重试；固定帖正文比较统一由同步端口定义，
+兼容范围与确认门禁见[外部写入不变量](../../docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
 Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；最近事件元数据不含 payload。
 路由、分页及字段闭集见[HTTP 契约](../../docs/contracts/routes.md)。
 

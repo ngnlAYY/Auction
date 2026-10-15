@@ -194,7 +194,7 @@ impl EhentaiClient {
         world: SettlementWorld,
         cookie: &EhentaiCookie,
         rendered: ForumRenderedThread,
-    ) -> Result<auction_application::ForumPublishedThread, EhentaiError> {
+    ) -> Result<auction_application::ForumTopicPublication, EhentaiError> {
         let operation = EhentaiOperation::CreateTopic;
         if !self.valid_for() || !valid_cookie(cookie) || !valid_rendered_thread(&rendered) {
             return Err(EhentaiError::configuration(operation));
@@ -203,7 +203,7 @@ impl EhentaiClient {
             .find_topic_by_title_with_operation(world, cookie, &rendered.title, operation)
             .await?;
         if let Some(published) = existing {
-            return Ok(published);
+            return Ok(auction_application::ForumTopicPublication::Existing(published));
         }
         if let Some(legacy_title) =
             rendered.legacy_title.as_deref().filter(|legacy_title| *legacy_title != rendered.title)
@@ -212,12 +212,14 @@ impl EhentaiClient {
                 .find_topic_by_title_with_operation(world, cookie, legacy_title, operation)
                 .await?;
             if let Some(published) = legacy_existing {
-                return Ok(published);
+                return Ok(auction_application::ForumTopicPublication::Existing(published));
             }
         }
 
         let form = self.load_topic_form(board_id, &board_url, cookie).await?;
-        self.submit_topic(form, board_id, rendered, cookie).await
+        self.submit_topic(form, board_id, rendered, cookie)
+            .await
+            .map(auction_application::ForumTopicPublication::Created)
     }
 
     /// 只读按精确标题查找主题；该入口永远不会加载发帖表单或发送 POST。

@@ -187,6 +187,15 @@ AUCTION_CONFIG_FILE=/etc/auction/worker.toml \
 这些命令仅支持 PostgreSQL。论坛 list 只读数据库；Worker 先按精确标题 GET 对账，未命中停在
 `write_authorization_required` 后，retry 命令才可用非零 UUID、规范 actor、逐字确认、幂等账本和审计授权下一次 POST。
 相同 command ID 不同摘要冲突，不能绕过对账盲目重发。
+若主题已存在，但固定帖正文校验曾触发 `write_authorization_required`，应先核对该拍卖的 #1/#2 标记和真实帖子身份，
+更新程序/部署配置后再使用同一授权入口；Worker 会先查找现有主题，核对或补写固定帖，而不是直接重开主题。
+程序更新和重启不会自动清空 `write_authorization_required` 人工门禁，禁止直接修改状态或重试时间伪造发布成功。
+主题同步历史 `write_unknown`/`publish_proof_failed`（含 `reconcile_` 前缀）可在新 Worker 首轮水位下重新只读对账一次；
+固定帖子身份始终核对；启用 `worker.forum.verify_post_body` 时，原始正文匹配才可自动收敛未知结果。
+关闭时历史未知结果转人工授权，不能仅凭帖子存在把未发送的新镜像记为完成；授权后的成功回执不保证正文逐字一致。
+对账不会发送 POST，不能把关闭校验或重启当作重新写入授权。
+上述 CLI 仅处理主题发布失败，不处理已发布主题的 `content_last_error_code=write_unknown`；后者关闭正文校验时保留内容门禁，
+须另行核对，不得用主题发布授权或直接改表清除。
 
 结算核验在 `SERIALIZABLE READ ONLY DEFERRABLE` 快照内重建旧 `settlement_complete/OK` 摘要与
 当前权威事实，缺失、身份漂移或损坏即失败。它不补 completion fence、不重新结算、不追加任何事实。

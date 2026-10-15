@@ -1,4 +1,29 @@
 # 管理端繁體中文文案。
+admin-forum-title = 論壇同步狀態
+admin-forum-readonly-note = 重新整理僅讀取本機狀態，不重試發佈，也不授權論壇寫入。
+admin-forum-auction = 本頁拍賣
+admin-forum-refresh = 重新整理論壇狀態
+admin-forum-loading = 正在讀取論壇狀態…
+admin-forum-disabled = 論壇同步已關閉。
+admin-forum-missing = 此拍賣尚無論壇同步投影。
+admin-forum-pending = 待同步
+admin-forum-publishing = 發佈中
+admin-forum-published = 已發佈
+admin-forum-failed = 失敗；重新整理不會重試發佈
+admin-forum-status = 狀態：{ $status }
+admin-forum-progress = 已處理至樓層
+admin-forum-updated-at = 狀態更新時間
+admin-forum-content-error = 固定帖更新錯誤：{ $code }
+admin-forum-link = 開啟論壇主題
+admin-forum-content-title = 論壇正文詳情
+admin-forum-source-revision = 來源版本
+admin-forum-content-revision = 固定樓層版本
+admin-forum-content-synced-at = 固定樓層同步時間
+admin-forum-last-success-at = 最近完整掃描
+admin-forum-error-at = 最近正文錯誤時間
+admin-forum-body-summary = 查看本機目標正文（BBCode）
+admin-forum-body-note = 以下為本機儲存的目標正文，不保證與論壇實際儲存的正文逐字一致。
+
 setup-listener = 正式服務監聽連接埠
 setup-listener-help = 兩個服務均固定監聽 127.0.0.1。這些連接埠不會改變目前的設定入口，也不會自動修改上方的站點 Origin；使用反向代理或 SSH 通道時，請同步調整其上游連接埠。檢查不會探測連接埠占用或綁定位址的權限。
 setup-public-listener-port = Public 監聽連接埠
