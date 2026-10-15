@@ -57,8 +57,8 @@ impl std::error::Error for TransportError {}
 
 /// 发送一次 GET 并保留调用方给出的精确 URL。
 ///
-/// gloo-net 0.6.0 会把已有 query 与空 QueryParams 拼成 `...?a=b&`；旧客户端使用精确
-/// fetch URL，因此在共用 GET 边界直接建立浏览器请求，避免所有分页/筛选 URL 被改写。
+/// gloo-net 0.6.0 曾把已有 query 与空 QueryParams 拼成 `...?a=b&`。0.7.0 已修复该问题，
+/// 本层仍直接建立浏览器请求，保留精确 URL 契约，不因依赖升级改变分页/筛选请求的构造。
 pub async fn send_get(url: &str) -> Result<Response, TransportError> {
     send_get_observed(url, |_| {}).await
 }

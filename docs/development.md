@@ -34,7 +34,7 @@ just dependency-audit
 ```
 
 CI security-audit 执行同一检查；漏洞、撤回版本、unsound 阻断，停维提示保留。
-[fxhash 维护债](tech-stack.md#版本与升级)和审计退出码不能混同于无风险证明。
+[依赖升级记录](tech-stack.md#版本与升级)登记 fxhash 停维债的移除；审计退出码不能混同于无风险证明。
 
 ## 选择制品 feature
 

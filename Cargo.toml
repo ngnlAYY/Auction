@@ -47,11 +47,21 @@ auction-web-admin = { path = "crates/auction-web-admin" }
 auction-web-public = { path = "crates/auction-web-public" }
 auction-web-shared = { path = "crates/auction-web-shared" }
 
-# 异步运行时：Tokio 1.51.x 是官方 LTS 分支，只接受该分支内的补丁升级。
-tokio = { version = "~1.51.4", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+# 异步运行时：Tokio 1.53.x 是官方 LTS 分支，后续只接受该分支内的补丁升级。
+tokio = { version = "~1.53.3", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 # HTTP 与 Web
-axum = { version = "0.8.9", features = ["macros", "ws"] }
+# 查询参数由 HTTP owner 严格解析；不启用未使用的宏、Form/Query 提取器。
+axum = { version = "0.8.9", default-features = false, features = [
+    "http1",
+    "json",
+    "matched-path",
+    "original-uri",
+    "tokio",
+    "tower-log",
+    "tracing",
+    "ws",
+] }
 # 直接识别 Axum WebSocket 的类型化容量错误，才能恢复旧 v1 的 1009 close 契约。
 tungstenite = { version = "0.29.0", default-features = false }
 # 浏览器端使用 Dioxus CSR：产物为静态 WASM/JS/HTML，由 auction-http 内嵌后提供。
@@ -64,8 +74,9 @@ dioxus = { version = "0.7.10", default-features = false, features = [
 # 原生 i18n：Project Fluent 后端，locale 资源在编译期内嵌。
 dioxus-i18n = "0.5.1"
 unic-langid = { version = "0.9.6", features = ["macros"] }
-gloo-net = { version = "0.6.0", default-features = false, features = ["http", "json", "websocket"] }
-gloo-timers = { version = "0.3.0", features = ["futures"] }
+# 共享层只用 HTTP；JSON 和 WebSocket 由实际调用的 surface 显式启用。
+gloo-net = { version = "0.7.0", default-features = false, features = ["http"] }
+gloo-timers = { version = "0.4.0", features = ["futures"] }
 js-sys = "0.3.104"
 futures-util = "0.3.34"
 async-stream = "0.3.6"
@@ -80,8 +91,9 @@ httpdate = "1.0.3"
 http-body-util = "0.1.5"
 ipnet = "2.12.0"
 mime = "0.3.17"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider"] }
-scraper = "0.24.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+# 只使用 HTML/CSS 库 API 与解析错误，不引入默认 CLI 的 getopts 依赖。
+scraper = { version = "0.27.0", default-features = false, features = ["errors"] }
 rust-embed = { version = "8.12.0", features = ["mime-guess"] }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 url = "2.5.8"
@@ -133,23 +145,24 @@ toml = "1.1.4"
 uuid = { version = "1.24.1", features = ["js", "serde", "v4", "v5"] }
 
 # CLI 与可观测性
-clap = { version = "4.6.6", features = ["derive"] }
-opentelemetry = { version = "0.32.0", default-features = false, features = ["trace"] }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = [
+clap = { version = "4.6.7", features = ["derive"] }
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = [
     "http-proto",
     "reqwest-client",
     "trace",
 ] }
-opentelemetry_sdk = { version = "0.32.1", default-features = false, features = [
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = [
     "experimental_trace_batch_span_processor_with_async_runtime",
     "rt-tokio",
     "trace",
 ] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
-tracing-opentelemetry = "0.33.0"
+tracing-opentelemetry = "0.34.0"
 tower = { version = "0.5.3", features = ["util"] }
-prometheus = { version = "0.14.0", features = ["process"] }
+# 指标只导出 Prometheus 文本；保留进程 collector，使用 plain_model，避免二进制 protobuf 编码依赖。
+prometheus = { version = "0.14.0", default-features = false, features = ["process"] }
 
 [profile.wasm-release]
 inherits = "release"
