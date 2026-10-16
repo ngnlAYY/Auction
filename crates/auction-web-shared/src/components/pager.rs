@@ -54,9 +54,9 @@ pub fn Pager(
     page_size_options: Vec<i64>,
     #[props(default)] page_size_label: String,
     #[props(default)] page_size_option_label: Option<Callback<i64, String>>,
-    /// 显式提供上限才启用正整数自定义输入；校验与提示不影响默认布局。
+    /// 显式启用正整数自定义输入；不设业务数量上限，也不改变默认布局。
     #[props(default)]
-    max_page_size: Option<i64>,
+    allow_custom_page_size: bool,
     #[props(default)] page_size_custom_label: String,
     #[props(default)] page_size_apply_label: String,
     #[props(default)] page_size_invalid_label: String,
@@ -67,7 +67,7 @@ pub fn Pager(
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
-        .map(|total| if total <= 0 { 1 } else { total.saturating_add(page_size - 1) / page_size })
+        .map(|total| if total <= 0 { 1 } else { 1 + (total - 1) / page_size })
         .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
         .max(1)
         .min(max_page.unwrap_or(i64::MAX).max(1));
@@ -106,7 +106,7 @@ pub fn Pager(
                     options: page_size_options,
                     label: page_size_label,
                     option_label: page_size_option_label,
-                    maximum: max_page_size,
+                    allow_custom: allow_custom_page_size,
                     custom_label: page_size_custom_label,
                     apply_label: page_size_apply_label,
                     invalid_label: page_size_invalid_label,

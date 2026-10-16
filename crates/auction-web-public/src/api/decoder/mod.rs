@@ -185,6 +185,12 @@ fn positive(value: Option<&Value>) -> bool {
     int(value).is_some_and(|value| value > 0)
 }
 
+/// 分页数量单独接受完整正 i64；JSON 整数直接解码，金额及版本仍守旧安全整数边界。
+/// 旧响应中的安全范围整数浮点写法继续兼容，不接受已丢失精度的大浮点数。
+fn positive_page_size(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_i64).or_else(|| int(value)).is_some_and(|value| value > 0)
+}
+
 fn nonnegative(value: Option<&Value>) -> bool {
     int(value).is_some_and(|value| value >= 0)
 }

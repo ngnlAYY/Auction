@@ -236,6 +236,20 @@ Cloudflare Cache Rules 按以下互斥范围设置，替换两个主机为真实
   Cloudflare 更高优先级规则可覆盖源站头，代码无法防御错误控制面配置。切换前清理历史缓存。
 - 不对本站启用 Rocket Loader、HTML/JS 重写或影响 Dioxus 启动的转换；保持资源内容与同源 CSP。
 
+### 论坛倒计时上线
+
+首帖图片由 Public 的 [P22 动态 SVG](../docs/contracts/routes.md#p22-自托管论坛倒计时) 提供，无第三方域名、JS 或新增配置字段。
+先更新 Public API，再更新 Worker；合并部署更新 `auction-server`。沿用 Worker 的 `public_base_url` 作为公开 origin，
+正式论坛须使用浏览器可达的 HTTPS 地址，不能使用 loopback、Unix socket 或仅局域网可达地址。
+未配置 origin 时仅输出文字；升级不需要新增迁移，也不会绕过论坛未知写入门禁强行重发首帖。
+旧帖在正常、成功的固定帖刷新后才改用本站图片，不以服务重启或本地编译证明远端已更新。
+
+图片路径仍在 `/api/v1/` 下，虽然以 `.svg` 结尾也必须 Bypass cache；浏览器和两种 CDN 头均 `no-store`。
+不得给这些图片注入登录、交互挑战、SVG 转换或跨站图片阻断；不需要开放 CORS 凭据或放宽其他 API 防护。
+未知计时器、隐藏场次、依赖故障分别按接口契约失败，不返回伪造日期或默认计时。
+图片动画受网络、浏览器暂停和第三方论坛图片代理影响，打开后不自动获知改期；UTC 文字和官网权威状态必须保留。
+先在获准的本地环境验证，再单独申请真实论坛发帖/回读；静态编译不构成论坛兼容验收。
+
 ### WebSocket 与验收边界
 
 Cloudflare Network 开启 WebSockets；`wss://<Public主机>/api/v1/ws` 继续传递 Cookie 和精确 HTTPS Origin。

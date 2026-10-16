@@ -28,8 +28,8 @@ pub(super) async fn list_postgres(
         matches!(request.cursor.as_ref(), Some(PublicPriceHistoryCursor::Boundary { .. }));
     let (boundary_closed_at, boundary_sequence, boundary_lot_number, boundary_lot_id) =
         cursor_values(&request);
-    let query_limit =
-        request.limit.checked_add(1).ok_or_else(|| storage_error("公开价格历史分页上限溢出"))?;
+    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
+    let query_limit = request.limit.saturating_add(1);
 
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启公开价格历史读取事务失败"))?;

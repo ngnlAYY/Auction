@@ -136,8 +136,10 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 历史已开始发布/未知写入主题冻结单页并继续导入；新主题启用分页，不能把旧回帖位置重新解释为目录。
 全部固定帖的真实 post ID 保存后才导入命令。application 定义分页端口，integrations 负责渲染/合并目录解析，
 jobs 负责顺序发布与对账，storage 的 `forum/catalog.rs` 持久化续页身份和正文；回帖只导入普通 bid。
-首帖外部 SVG 倒计时的 URL/文字降级由 integrations `forum/render/countdown.rs` 拥有，只作公开时间投影，
-不承担状态迁移或 soft-close 判断，见[集成边界](../crates/auction-integrations/README.md#凭据装配与外部请求)。
+首帖自托管 SVG 倒计时的 URL/文字降级由 integrations `forum/render/countdown.rs` 拥有；
+application `ports/auction/queries/countdown.rs` 定义窄时间快照，storage `auctions/countdown.rs` 单次读取公开边界及数据库时钟，
+HTTP `public/countdown/` 生成有界 SVG/CSS 动画及图片专用安全头，不依赖 Dioxus 资源、JavaScript 或第三方服务。
+只读既有时间，不新增表或迁移，不承担状态迁移或 soft-close 判断，见[图片契约](contracts/routes.md#p22-自托管论坛倒计时)。
 读取须证明分页、作者和连续楼层，未知 POST 先按精确标题只读对账，重发须显式授权。
 拒绝提示由 jobs 的 `worker/forum/reply/rejection.rs` 拥有；application 定义错误码/本地诊断投影，storage 读取既有账本。
 新拒绝按类型分类，旧诊断仅做白名单展示映射；不改竞价规则、拒绝终态或重试门禁，见[外部副作用契约](contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
@@ -174,7 +176,7 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 页面设计分别见 [Public](../crates/auction-web-public/DESIGN.md) 和 [Admin](../crates/auction-web-admin/DESIGN.md)。
 五语言与 `hv.lang` 保持稳定；表格列宽、截断和窄屏结构见[表格契约](table-layouts.md)。
 Public `surface/pagination/` 拥有统一列表数量、译文、URL 更新与 `preferences.rs` 本地数量偏好；shared `Pager`
-及 `components/pager/size.rs` 只提供可选数字分页、有界正整数输入与可访问页码限制，
+及 `components/pager/size.rs` 只提供可选数字分页、严格正整数输入与可访问页码限制，
 Admin 默认布局不变。页面范围与展开流水的独立查询键见 [Public 设计](../crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 
 首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据。

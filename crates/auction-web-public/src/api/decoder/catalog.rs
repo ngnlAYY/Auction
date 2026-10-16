@@ -413,6 +413,6 @@ fn valid_compensation_movement(value: &Value) -> bool {
 
 fn valid_numbered_page(value: &Map<String, Value>) -> bool {
     positive(value.get("page"))
-        && positive(value.get("page_size"))
+        && positive_page_size(value.get("page_size"))
         && nonnegative(value.get("total"))
 }

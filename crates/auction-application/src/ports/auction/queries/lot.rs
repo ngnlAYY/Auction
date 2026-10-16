@@ -9,9 +9,6 @@ use uuid::Uuid;
 
 use crate::ApplicationFuture;
 
-/// 公开 lot 读取允许的最大页大小。
-pub const MAX_PUBLIC_LOT_PAGE_SIZE: i64 = 200;
-
 /// 公开 lot 读取允许的最大 legacy offset，防止深分页拖垮数据库。
 pub const MAX_PUBLIC_LOT_OFFSET: i64 = 10_000;
 
@@ -28,9 +25,9 @@ pub struct PublicLotListRequest {
 }
 
 impl PublicLotListRequest {
-    /// 在应用端口边界拒绝未定义分类、无界页大小和深 offset。
+    /// 在应用端口边界拒绝未定义分类、非正页大小和深 offset；数量不设业务上限。
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.limit < 1 || self.limit > MAX_PUBLIC_LOT_PAGE_SIZE || self.offset < 0 {
+        if self.limit < 1 || self.offset < 0 {
             return Err("公开 lot 分页参数无效");
         }
         if self.offset > MAX_PUBLIC_LOT_OFFSET {
@@ -415,7 +412,6 @@ impl PublicLotPage {
             || self.projection.validate().is_err()
             || self.projection.auction_id != auction_id
             || self.limit < 1
-            || self.limit > MAX_PUBLIC_LOT_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_LOT_OFFSET
             || self.total < 0

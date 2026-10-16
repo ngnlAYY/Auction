@@ -41,6 +41,8 @@ mod blacklist;
 mod boundary;
 #[path = "../public/compensation.rs"]
 mod compensation;
+#[path = "../public/countdown/mod.rs"]
+mod countdown;
 #[path = "../admin/delivery/mod.rs"]
 mod delivery_admin;
 #[path = "../public/forum.rs"]
@@ -95,9 +97,8 @@ use auction_application::{
     CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome, CompetitionTransactionError,
     CompetitionWireTimestamp, CreateProxyCommand, CurrentAuctionSnapshot,
     DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, LowerProxyCommand, MAX_PUBLIC_ACCOUNT_OFFSET,
-    MAX_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_BID_LOG_PAGE_SIZE,
-    MAX_PUBLIC_HISTORY_NAME_TERMS, MAX_PUBLIC_LOT_OFFSET, MAX_PUBLIC_LOT_PAGE_SIZE,
-    MAX_PUBLIC_PRICE_HISTORY_OFFSET, MAX_PUBLIC_PRICE_HISTORY_PAGE_SIZE, PublicAccountPageRequest,
+    MAX_PUBLIC_ACCOUNT_PAGE_SIZE, MAX_PUBLIC_BID_LOG_OFFSET, MAX_PUBLIC_HISTORY_NAME_TERMS,
+    MAX_PUBLIC_LOT_OFFSET, MAX_PUBLIC_PRICE_HISTORY_OFFSET, PublicAccountPageRequest,
     PublicAuctionCursor, PublicAuctionListRequest, PublicAuctionPage, PublicAuctionProjection,
     PublicAuctionSummary, PublicBidLogCursor, PublicBidLogEntry, PublicBidLogListRequest,
     PublicBidLogPage, PublicEquipment, PublicEquipmentLinkTarget, PublicFinalRestriction,

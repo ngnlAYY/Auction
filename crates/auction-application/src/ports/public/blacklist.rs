@@ -4,9 +4,6 @@ use chrono::{DateTime, Utc};
 
 use crate::ApplicationFuture;
 
-/// Public 黑名单允许的最大页大小。
-pub const MAX_PUBLIC_BLACKLIST_PAGE_SIZE: i64 = 200;
-
 /// Public 黑名单编号页允许的最大偏移。
 pub const MAX_PUBLIC_BLACKLIST_OFFSET: i64 = 2_147_483_647;
 
@@ -18,13 +15,9 @@ pub struct PublicBlacklistRequest {
 }
 
 impl PublicBlacklistRequest {
-    /// 校验编号页边界，保持旧接口的有限查询成本。
+    /// 数量仅要求正整数；保留编号页的既有 offset 防护。
     pub fn validate(self) -> Result<(), &'static str> {
-        if self.limit < 1
-            || self.limit > MAX_PUBLIC_BLACKLIST_PAGE_SIZE
-            || self.offset < 0
-            || self.offset > MAX_PUBLIC_BLACKLIST_OFFSET
-        {
+        if self.limit < 1 || self.offset < 0 || self.offset > MAX_PUBLIC_BLACKLIST_OFFSET {
             return Err("公开黑名单分页参数无效");
         }
         Ok(())
@@ -54,7 +47,6 @@ impl PublicBlacklistPage {
         let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开黑名单页大小溢出")?;
         if self.total < 0
             || self.limit < 1
-            || self.limit > MAX_PUBLIC_BLACKLIST_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_BLACKLIST_OFFSET
             || entry_count > self.limit

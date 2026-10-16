@@ -1,51 +1,56 @@
-//! 论坛首帖的外部 SVG 倒计时链接；仅公开时间，不读取时钟或请求第三方服务。
+//! 论坛首帖的本站倒计时图片链接；没有公开 origin 时由首帖时间列表兜底，不回退第三方。
 
 use std::fmt::Write;
 
 use auction_application::ForumRenderError;
-use chrono::{DateTime, SecondsFormat, Utc};
+use auction_domain::AuctionId;
+use chrono::{DateTime, Utc};
 use url::Url;
 
-use super::format_forum_time;
-
-/// 两个计时器只装饰首帖；缺少计划截止时明确显示未排期，不能用开拍时间推算。
+/// 两个计时器只装饰首帖；缺少计划截止时不生成第二张图片，不能用开拍时间推算。
 pub(super) fn write_countdowns(
     body: &mut String,
+    auction_id: AuctionId,
+    public_url: Option<&str>,
     intake_closes_at: DateTime<Utc>,
     scheduled_end_at: Option<DateTime<Utc>>,
 ) -> Result<(), ForumRenderError> {
-    let list_timer = countdown_url("List Timer", "Closed", intake_closes_at)?;
-    write!(body, "[img]{list_timer}[/img]").map_err(|_| ForumRenderError::BodyTooLarge)?;
-    if let Some(deadline) = scheduled_end_at {
-        let auction_timer = countdown_url("Auction Timer", "Ended", deadline)?;
-        write!(body, " [img]{auction_timer}[/img]").map_err(|_| ForumRenderError::BodyTooLarge)?;
+    if intake_closes_at.timestamp_nanos_opt().is_none()
+        || scheduled_end_at.is_some_and(|time| time.timestamp_nanos_opt().is_none())
+    {
+        return Err(ForumRenderError::InvalidSnapshot);
     }
-    // 部分论坛访客关闭图片，服务也可能不可用；始终保留带时区的文字与权威截止说明。
-    writeln!(
-        body,
-        "\n[size=1]List Timer: current-round intake closes at bidding open ({}). Auction Timer: {}. Individual lot deadlines may extend; the public auction page remains authoritative.[/size]",
-        format_forum_time(intake_closes_at),
-        scheduled_end_at.map(format_forum_time).unwrap_or_else(|| "Not scheduled".to_owned()),
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)
+    if let Some(public_url) = public_url {
+        let list_timer = countdown_url(public_url, auction_id, "list.svg")?;
+        write!(body, "[img]{list_timer}[/img]").map_err(|_| ForumRenderError::BodyTooLarge)?;
+        if scheduled_end_at.is_some() {
+            let auction_timer = countdown_url(public_url, auction_id, "auction.svg")?;
+            write!(body, " [img]{auction_timer}[/img]")
+                .map_err(|_| ForumRenderError::BodyTooLarge)?;
+        }
+        body.push('\n');
+    }
+    // 图片下不重复附加说明；绝对时间、公开链接及权威状态提示由首帖信息列表和规则保留。
+    Ok(())
 }
 
 fn countdown_url(
-    title: &str,
-    finish: &str,
-    deadline: DateTime<Utc>,
+    public_url: &str,
+    auction_id: AuctionId,
+    timer: &str,
 ) -> Result<Url, ForumRenderError> {
-    if deadline.timestamp_nanos_opt().is_none() {
+    let mut url = Url::parse(public_url).map_err(|_| ForumRenderError::InvalidSnapshot)?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return Err(ForumRenderError::InvalidSnapshot);
     }
-    // 固定 HTTPS origin，不接受任意外部地址；URL 仅含标题、终态标签和公开 UTC 时间。
-    let mut url = Url::parse("https://pure-svg-countdown.skk.moe/timer")
-        .map_err(|_| ForumRenderError::InvalidSnapshot)?;
-    url.query_pairs_mut()
-        .append_pair("title", title)
-        .append_pair("finish", finish)
-        .append_pair("time", &deadline.to_rfc3339_opts(SecondsFormat::Millis, true));
-    // 论坛沿用图片扩展名检查；fragment 不会发送给倒计时服务。
+    // 只复用已由部署配置解析的公开 origin，不把网站 query、用户信息或时间参数带进图片。
+    url.set_path(&format!("/api/v1/auctions/{auction_id}/countdown/{timer}"));
+    url.set_query(None);
+    // 兼容论坛图片后缀检查；真实格式和 Content-Type 仍为 SVG，fragment 不发送给本站。
     url.set_fragment(Some(".png"));
     Ok(url)
 }

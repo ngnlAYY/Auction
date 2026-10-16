@@ -8,9 +8,6 @@ use crate::ApplicationFuture;
 /// 公开价格历史允许的最大名称词条数。
 pub const MAX_PUBLIC_HISTORY_NAME_TERMS: usize = 8;
 
-/// 公开价格历史允许的最大页大小。
-pub const MAX_PUBLIC_PRICE_HISTORY_PAGE_SIZE: i64 = 200;
-
 /// 公开价格历史兼容页允许的最大 offset。
 pub const MAX_PUBLIC_PRICE_HISTORY_OFFSET: i64 = 10_000;
 
@@ -54,7 +51,6 @@ impl PublicPriceHistoryListRequest {
                 .zip(self.maximum_price)
                 .is_some_and(|(minimum, maximum)| minimum > maximum)
             || self.limit < 1
-            || self.limit > MAX_PUBLIC_PRICE_HISTORY_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_PRICE_HISTORY_OFFSET
             || self.cursor.is_some() && self.offset != 0

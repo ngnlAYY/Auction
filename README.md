@@ -47,7 +47,8 @@
 角色文件用 AUCTION_CONFIG_FILE 选择；合并服务用 --config-dir，拒绝该环境变量。
 配置分层、权限、首次设置及停机迁移统一见[运维手册](ops/README.md)。普通启动不隐式迁移。
 新论坛主题目录每帖最多 150 件并连续分页，系统更新楼位于目录之后；历史主题保持原楼层。
-楼层和错误提示见[玩家指南](docs/player-guide.md#论坛出价与处理结果)。
+首帖倒计时图片由本站 Rust Public 服务生成，不依赖第三方计时服务；只展示计划时间，不裁决单件软截止。
+楼层、时间和错误提示见[玩家指南](docs/player-guide.md#论坛出价与处理结果)。
 支持 Cloudflare 橙云 → Caddy HTTPS → Public/Admin Unix socket；仅静态资源允许 CDN 缓存，
 API、私有数据与 HTML 禁止缓存。证书、可信代理及缓存规则见[部署约束](ops/README.md#cloudflare-整站代理)。
 

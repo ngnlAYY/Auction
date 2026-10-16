@@ -2,11 +2,13 @@
 
 use super::DatabaseStore;
 use auction_application::{
-    ApplicationFuture, AuctionReader, CurrentAuctionSnapshot, PublicAuctionListRequest,
-    PublicAuctionPage, PublicRealtimeAuctionStatus,
+    ApplicationFuture, AuctionReader, CurrentAuctionSnapshot, PublicAuctionCountdown,
+    PublicAuctionListRequest, PublicAuctionPage, PublicRealtimeAuctionStatus,
 };
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+mod countdown;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod postgres;
@@ -32,6 +34,18 @@ impl AuctionReader for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 DatabaseStore::Postgres(store) => postgres::current(store, &world_id).await,
+            }
+        })
+    }
+
+    fn public_auction_countdown(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<PublicAuctionCountdown>> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => countdown::read(store, auction_id).await,
             }
         })
     }

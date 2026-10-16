@@ -60,6 +60,9 @@ slow proxy 扫描在 LIMIT 前排除已到截止的 lot；执行由竞价事务�
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
 编号页 total 与当前页来自一致快照。禁用 world 的活动投影不能公开；已 settled 历史按契约读取。
+[auctions/countdown.rs](src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库时钟；
+不加载装备、凭据或论坛正文，不公开草稿、取消场次、被活动场次遮蔽的预览或预览计划截止；无需新增表和迁移。
+Public 拍卖、竞价日志、成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法；不截断请求数量，保留既有快照和 has_more 语义。大页读取成本见[分页契约](../../docs/contracts/routes.md#public-分页世界与金额)。
 Admin 读取不为补全投影临时写入。邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
 
 Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。

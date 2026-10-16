@@ -12,7 +12,7 @@ pub(crate) async fn list_lots(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page_size = parse_positive_i64(query.get("page_size"), 20, Some(MAX_PUBLIC_LOT_PAGE_SIZE))
+    let page_size = parse_positive_i64(query.get("page_size"), 20, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let offset = page
         .checked_sub(1)

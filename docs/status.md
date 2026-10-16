@@ -53,6 +53,55 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
 
+### 2026-10-16 论坛首帖计时说明精简
+
+按用户要求，`auction-integrations/forum/render/countdown.rs` 不再在双图片下重复附加整段计时说明。
+图片内 UTC 日期、首帖开拍/截止列表、规则及页尾的官网权威提示保留；图片时间来源、P22 HTTP、分页和写入门禁不变。
+完整 `just verify`、该 Rust 文件主动 LSP 与差异检查通过。本地独立 18092 预览及 BBCode 下载同步移除该段，
+只读 HTTP 核对确认两图和 UTC 时间仍在；记录保存在示例目录的 `removed-timer-note-checks.json`。
+另用独立临时 profile 的 headless Chromium 渲染新截图 `forum-preview-without-timer-note.png`，不使用用户浏览器状态。
+本次未替换三角色 release 制品，未发帖、运行迁移或部署云端。
+
+### 2026-10-16 论坛自托管动态 SVG
+
+首帖计时器不再依赖第三方域名。application 新增公开时间窄投影，storage 单条 SQL 读取公开边界、实际开拍/计划截止及数据库时钟，
+HTTP P22 生成本站 SVG/CSS 数字转盘，integrations 只生成本站链接与 UTC 文字；无新配置、依赖、数据库对象或迁移。
+仅展示计划时间，不改变竞价或 soft-close。缺 origin 降级文字，缺截止显示未排期；浏览器/CDN 禁止缓存，图片专用 CSP 禁止脚本和外部资源。
+
+完整 `just verify`、变更 Rust/CSS 主动 LSP、差异检查及原生 release 构建通过。
+独立复审发现 HEAD 被旧严格方法 builder 覆盖、亚毫秒被截断两项问题；已新增仅供图片的 GET/HEAD builder、正差向上取毫秒，
+复跑静态门禁并通过定向复审。其他 JSON 方法闭集、论坛逐字证明与未知写入门禁未放宽。
+
+用户另行批准本地行为核对：临时进程注入明确标注的内存时间样例，使用真实 Public router，不访问业务库或外部服务。
+15 项 HTTP 核对覆盖 SVG 类型、32 KiB 上界、CSP/CORP、双 CDN/浏览器 no-store、HEAD、405/Allow、无效参数、缺场次、
+未排期、过期及亚毫秒/最大日期跨度。Chrome 已确认 `<img>` 加载和两次截图图像数据变化，
+并用动画时间轴核对分/时/日进位、归零隐藏/终态和 reduced-motion 的绝对日期降级。
+跨源图片首次被样例父页自身 CSP 阻止；仅为临时样例 HTML 允许两个回环 origin 后验证成功，生产页面 CSP 未放宽。
+临时进程已停止；源码样例、JSON 与截图保留在隔离环境 `state/countdown-preview/`，不是仓库测试或权威拍卖数据。
+
+新 `auction-server`/`auctionctl` 已替换现有隔离实例，复用未改动的两端 Web payload，仍监听 `0.0.0.0:18090/18091`，
+PostgreSQL 保持回环。两端经回环及本机局域网地址就绪均为 200；真实空库新图片 GET/HEAD 返回预期 404 且 no-store，
+记录在 `state/readiness-self-hosted-countdown.json`。未插入业务样例、运行迁移、发帖、寄信或部署云端。
+真实非空库时间投影、论坛图片过滤/代理、远端正文回读、Cloudflare 控制面及其他浏览器仍待单独验收。
+
+### 2026-10-16 Public 自定义数量解除上限
+
+按用户要求取消指定 Public 列表的 200 条数量上限：共享输入、Public URL/偏好、HTTP、应用请求及结果页校验贯通正 `i64`；
+Admin、账户与实时事件上限不变，offset、超时及 cursor 互斥继续生效。四处存储游标只对额外探测行使用饱和加法，
+请求数量不截断；共享页数计算改用无加法溢出的上取整。无写入规则、数据库迁移或 DTO 字段变化。
+五语言错误提示移除最大值文案，并在自定义控件下方显式左对齐。
+
+独立审查发现旧响应解码仍限制 JS 安全整数；已仅为 `page_size` 放宽到完整正 `i64`，其余金额、版本等校验不变。
+原 JSON 整数不经过浮点转换，数量标签使用字符串插值以免 Fluent 舍入；定向复审无剩余问题。
+完整 `just verify`、变更 Rust 主动 LSP 和差异检查通过；两端 Web 与原生程序已重编，Public 解码修复后再次重建并替换隔离实例。
+两端仍监听 `0.0.0.0:18090/18091`，数据库保持回环；Public/Admin 经回环与本机局域网地址就绪检查均为 200。
+
+授权的本地只读核对覆盖空列表：四个无需拍卖 ID 的列表接受 201、1000、超 JS 安全整数及 `i64::MAX`，
+三条 cursor 路径接受最大值；无效数量返回 400，共 24 次 API 检查。浏览器确认 1000 可提交保存，
+最大值通过 URL 加载及跨列表偏好恢复且不丢精度，0/整数溢出不提交；错误位于表单下方并左对齐。
+证据在隔离环境 `state/http-unbounded-page-size.json`、`browser-unbounded-page-size.json`、`readiness-unbounded-page-size.json` 与构建日志。
+未造业务数据、出价、发帖或寄信；无真实大数据容量验证，较大数量可能增加响应内存及渲染成本。云端未更新。
+
 ### 2026-10-16 Public 数量偏好、论坛计时器与本地隔离启动
 
 Public 指定列表使用统一数字分页，保留 10/20/50/100 预设并支持 1–200 正整数；`surface/pagination/`

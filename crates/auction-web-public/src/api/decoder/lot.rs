@@ -85,7 +85,7 @@ fn valid_lot_list(value: &Value, auction_id: &str, category: Option<&str>) -> bo
         &["final_restriction"],
     ) || !valid_projection(value, auction_id)
         || !positive(value.get("page"))
-        || !positive(value.get("page_size"))
+        || !positive_page_size(value.get("page_size"))
         || !nonnegative(value.get("total"))
         || !valid_category_counts(value.get("category_counts"))
     {

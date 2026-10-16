@@ -467,6 +467,9 @@ button:disabled {
 .ui-pager__error {
   flex-basis: 100%;
   color: var(--color-danger);
+  /* 分页也会置于居中的空态面板内，字段错误不能继承面板的居中对齐。 */
+  text-align: start;
+  overflow-wrap: anywhere;
 }
 
 .ui-pager__select {

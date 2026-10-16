@@ -5,9 +5,6 @@ use uuid::Uuid;
 
 use crate::ApplicationFuture;
 
-/// 公开竞价日志允许的最大页大小。
-pub const MAX_PUBLIC_BID_LOG_PAGE_SIZE: i64 = 200;
-
 /// 公开竞价日志兼容页允许的最大 offset。
 pub const MAX_PUBLIC_BID_LOG_OFFSET: i64 = 10_000;
 
@@ -41,7 +38,6 @@ impl PublicBidLogListRequest {
                     || !lot_code.bytes().all(|byte| byte.is_ascii_alphanumeric())
             })
             || self.limit < 1
-            || self.limit > MAX_PUBLIC_BID_LOG_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_BID_LOG_OFFSET
             || self.cursor.is_some() && self.offset != 0

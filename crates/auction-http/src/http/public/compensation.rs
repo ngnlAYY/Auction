@@ -6,9 +6,9 @@
 use auction_application::{
     ApplicationError, DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
     DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, MAX_PUBLIC_COMPENSATION_OFFSET,
-    MAX_PUBLIC_COMPENSATION_PAGE_SIZE, PublicCompensationCursor, PublicCompensationListRequest,
-    PublicCompensationMovement, PublicCompensationMovementPage, PublicCompensationMovementRequest,
-    PublicCompensationPage, PublicCompensationRound,
+    PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationMovement,
+    PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
+    PublicCompensationRound,
 };
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicCompensationMovementPageResponse,
@@ -40,12 +40,9 @@ pub(crate) async fn pool(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
-    let page_size = parse_positive_i64(
-        query.get("page_size"),
-        DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
-        Some(MAX_PUBLIC_COMPENSATION_PAGE_SIZE),
-    )
-    .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
+    let page_size =
+        parse_positive_i64(query.get("page_size"), DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, None)
+            .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
 
     let raw_cursor = query.get("cursor").cloned();
     if raw_cursor.is_some() && page != 1 {
@@ -118,7 +115,7 @@ pub(crate) async fn movements(
     let page_size = parse_positive_i64(
         query.get("page_size"),
         DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
-        Some(MAX_PUBLIC_COMPENSATION_PAGE_SIZE),
+        None,
     )
     .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "分页参数无效"))?;
     let offset = page

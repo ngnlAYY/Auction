@@ -74,11 +74,13 @@ Worker 的 HTML 路径要求相同数字作者 ID；只读纯文本预览仅比�
 系统更新楼紧接最后一页，用户回帖从再下一楼开始，不能猜测身份或进度。
 `forum/render/log.rs` 分类显示 pending、警告、忽略记录及总数，优先 pending、再取最近记录，最多展示 100 条且受最终正文预算约束；
 超出时明确显示已展示/总条数，不因报错累积阻断价格同步，也不把省略当作解决。
-`forum/render/countdown.rs` 仅在首帖顶部生成 `List Timer` 与 `Auction Timer` 的 `[img]` 链接，使用固定
-`https://pure-svg-countdown.skk.moe/timer`；只公开标题/终态标签/UTC 时间，不请求服务、不含凭据或装备 key。
+`forum/render/countdown.rs` 仅在首帖顶部生成 `List Timer` 与 `Auction Timer` 的 `[img]` 链接，使用已配置 Public origin
+下的[自托管动态 SVG](../../docs/contracts/routes.md#p22-自托管论坛倒计时)，不请求或引用第三方服务。
+图片链接只含拍卖 UUID 和固定计时器类型，不含凭据、任意时间参数或装备 key；未配置公开 origin 时只保留 UTC 文字。
 List Timer 对应本场收件随正式开拍截止，已有 `opened_at` 时使用事实时间，否则使用 `scheduled_open_at`；
-Auction Timer 使用计划截止 `scheduled_end_at`，不代替单件软截止。缺计划截止只显示未排期，不推算日期。
-图片被禁用或第三方不可用时仍有 UTC 文字及权威截止提示；不改变正文精确证明、分页长度或未知写入门禁。
+Auction Timer 使用计划截止 `scheduled_end_at`，不代替单件软截止。缺计划截止不生成第二张图片，主题备注保留 `Not scheduled`，不推算日期。
+图片下不再重复输出计时器说明段；UTC 日期保留在图片内及首帖开拍/截止信息列表，规则与页尾保留官网权威状态提示。
+已打开图片须刷新才能取得改期，不改变正文精确证明、分页长度或未知写入门禁。
 固定 #1 顶部保留 World、Bidding opens、Opened、Bidding deadline；`Auction address` 使用原生 `[url=地址][b]地址[/b][/url]`
 展示完整当期拍卖链接。内层粗体防止论坛将长网址文字截短后写回 BBCode，不能靠忽略省略号通过正文校验。
 origin 由[Worker 部署配置](../../ops/config/README.md#论坛与邮件)提供，拍卖 UUID/world 路径不丢失。

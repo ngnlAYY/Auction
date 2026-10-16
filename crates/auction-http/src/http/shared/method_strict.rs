@@ -39,6 +39,16 @@ where
     axum::routing::get(handler).strict_methods("GET")
 }
 
+/// 动态图片显式允许 GET/HEAD，只补 JSON 405；不套用旧 JSON GET 的 HEAD 拒绝器。
+pub(crate) fn get_head<H, T, S>(handler: H) -> MethodRouter<S, Infallible>
+where
+    H: Handler<T, S>,
+    T: 'static,
+    S: Clone + Send + Sync + 'static,
+{
+    axum::routing::get(handler).fallback(|| async { method_not_allowed("GET, HEAD") })
+}
+
 pub(crate) fn post<H, T, S>(handler: H) -> MethodRouter<S, Infallible>
 where
     H: Handler<T, S>,
