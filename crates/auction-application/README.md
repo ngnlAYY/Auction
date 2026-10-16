@@ -78,6 +78,9 @@ Runtime 文件更新和恢复从开始到收口持有 `WorkflowGuard`；文件�
 
 [ports/auction/queries](src/ports/auction/queries) 定义拍卖、lot、竞价/价格历史及账户安全投影；
 [ports/public](src/ports/public) 定义规则、黑名单、补偿与装备链接等读取端口。
+[queries/countdown.rs](src/ports/auction/queries/countdown.rs) 定义论坛图片所需的公开时间快照；`AuctionReader` 读取时绑定公开可见性及数据库时钟，
+不带装备或凭据，不把装饰性倒计时作为生命周期决定。
+Public 指定列表的请求及结果页统一接受正 `i64` 数量、保留 offset 防护；不影响账户、Admin 和事件分页，范围见[分页契约](../../docs/contracts/routes.md#public-分页世界与金额)。
 规则缓存只接收有效可重建快照，miss、损坏、过期或后端失败均回源。
 完整装备 URL 仅能移交已授权的 HTTP DTO 或论坛渲染边界，不能进入日志、审计或缓存。
 Admin 装备录入将来源读取、key 加密和持锁写入分成窄端口；来源/策略拒绝发生在写事务前。

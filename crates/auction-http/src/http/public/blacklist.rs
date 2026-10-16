@@ -1,8 +1,6 @@
 //! Public 黑名单 HTTP 适配器。
 
-use auction_application::{
-    MAX_PUBLIC_BLACKLIST_OFFSET, MAX_PUBLIC_BLACKLIST_PAGE_SIZE, PublicBlacklistEntry,
-};
+use auction_application::{MAX_PUBLIC_BLACKLIST_OFFSET, PublicBlacklistEntry};
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicBlacklistEntryResponse, PublicBlacklistResponse,
 };
@@ -26,11 +24,8 @@ pub(crate) async fn list(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
-    let page_size =
-        parse_positive_i64(query.get("page_size"), 50, Some(MAX_PUBLIC_BLACKLIST_PAGE_SIZE))
-            .map_err(|_| {
-                api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效")
-            })?;
+    let page_size = parse_positive_i64(query.get("page_size"), 50, None)
+        .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_pagination", "分页参数无效"))?;
     let offset = page
         .checked_sub(1)
         .and_then(|page| page.checked_mul(page_size))

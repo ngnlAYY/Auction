@@ -38,10 +38,13 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
 
 `http/mod.rs` 与各 `mod.rs` 保持装配/导出职责，业务目录按查询、命令、映射及安全边界拆分。
 `shared/state/{public,admin}.rs` 分别持有两个表面的窄端口，不能互用管理与公开业务状态。
+[public/countdown](src/http/public/countdown) 拥有论坛动态 SVG 的 HTTP、固定英文视图及有界 CSS 动画，复用公开时间窄端口。
+此图片不是静态 payload，无 JS、外链资源或会话依赖；GET/HEAD、可见性、降级和专用 CSP 见[图片契约](../../docs/contracts/routes.md#p22-自托管论坛倒计时)。
 
 [HTTP 契约](../../docs/contracts/routes.md)是路由、状态码、DTO、分页和能力清单；
 [assets/routes.rs](src/assets/routes.rs) 与 Dioxus Route 共同限定 15 条 Public、21 条正式 Admin 浏览器路径。
 修改任一方必须同步其余两处；首次 `/setup` 只归独立设置服务。
+Public 指定列表的 `page_size` 不设 200 条上限，仍严格检查正整数、offset 溢出及 cursor 互斥；适用路径和容量代价见[分页契约](../../docs/contracts/routes.md#public-分页世界与金额)。
 
 ## 职责边界
 

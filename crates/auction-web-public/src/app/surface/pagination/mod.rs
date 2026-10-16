@@ -11,13 +11,12 @@ mod preferences;
 pub(crate) use preferences::parse_public_page_size;
 pub(crate) use preferences::stored_public_page_size;
 
-pub(crate) const MAX_PUBLIC_PAGE_SIZE: i64 = 200;
 pub(crate) const DEFAULT_PAGE_SIZE: i64 = 10;
 pub(crate) const PUBLIC_PAGE_SIZES: [i64; 4] = [10, 20, 50, 100];
 
-/// 自定义数量遵守所有已接入 Public API 的共同上限，不能形成无界请求。
+/// 只接受可表示的正整数；非法数量回退默认值，不静默截断合法的大数量。
 pub(crate) fn normalize_public_page_size(size: i64) -> i64 {
-    if (1..=MAX_PUBLIC_PAGE_SIZE).contains(&size) { size } else { DEFAULT_PAGE_SIZE }
+    if size > 0 { size } else { DEFAULT_PAGE_SIZE }
 }
 
 /// 切换数量与回到首页作为一次 URL 更新，保留世界、场次和筛选条件。
@@ -43,7 +42,7 @@ pub(crate) fn public_page_matches(
         && page_size.into().is_none_or(|size| size == requested_size)
 }
 
-/// 注入 Public 五语言文案、有界数量与本地偏好，分页计算及键盘交互由共享组件负责。
+/// 注入 Public 五语言文案、正整数数量与本地偏好，分页计算及键盘交互由共享组件负责。
 #[component]
 pub(crate) fn PublicPager(
     page: i64,
@@ -76,14 +75,15 @@ pub(crate) fn PublicPager(
             total_summary: total.map(|count| t!("pagination-total", count: count)).unwrap_or_default(),
             page_size_options: PUBLIC_PAGE_SIZES.to_vec(),
             page_size_label: t!("pagination-size"),
-            page_size_option_label: Callback::new(move |count| t!("pagination-size-option", count: count)),
-            max_page_size: MAX_PUBLIC_PAGE_SIZE,
+            // 数量用字符串插值，避免 Fluent 浮点格式化舍入较大的合法 i64。
+            page_size_option_label: Callback::new(move |count: i64| t!("pagination-size-option", count: count.to_string())),
+            allow_custom_page_size: true,
             page_size_custom_label: t!("pagination-custom"),
             page_size_apply_label: t!("pagination-apply"),
-            page_size_invalid_label: t!("pagination-positive-integer", max: MAX_PUBLIC_PAGE_SIZE),
+            page_size_invalid_label: t!("pagination-positive-integer"),
             on_page_change,
             on_page_size_change: move |size| {
-                if !(1..=MAX_PUBLIC_PAGE_SIZE).contains(&size) {
+                if size <= 0 {
                     return;
                 }
                 // 先冻结离开条目的数量（含 10），再更新 URL 和偏好；返回时不读到新偏好。

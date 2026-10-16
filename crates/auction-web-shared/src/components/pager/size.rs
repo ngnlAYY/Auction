@@ -1,15 +1,15 @@
-//! 分页数量预设与有界正整数输入；只提交合法整数，不截断或静默修正用户输入。
+//! 分页数量预设与正整数输入；只提交可表示的合法整数，不截断或静默修正用户输入。
 
 use dioxus::prelude::*;
 
-/// 数量策略与文案由 surface 注入；只有显式 maximum 才显示自定义输入。
+/// 数量文案由 surface 注入；显式启用才显示自定义输入，不设业务数量上限。
 #[component]
 pub(super) fn PageSizePicker(
     page_size: i64,
     options: Vec<i64>,
     label: String,
     option_label: Option<Callback<i64, String>>,
-    maximum: Option<i64>,
+    allow_custom: bool,
     custom_label: String,
     apply_label: String,
     invalid_label: String,
@@ -28,7 +28,7 @@ pub(super) fn PageSizePicker(
     let target = (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
         .then(|| value.parse::<i64>().ok())
         .flatten()
-        .filter(|size| *size > 0 && maximum.is_some_and(|limit| *size <= limit));
+        .filter(|size| *size > 0);
     let invalid = touched() && target.is_none();
     let custom_selected = !options.contains(&page_size);
     let allowed_sizes = options.clone();
@@ -62,7 +62,7 @@ pub(super) fn PageSizePicker(
                 }
             }
         }
-        if maximum.is_some() {
+        if allow_custom {
             form {
                 class: "ui-pager__custom",
                 novalidate: true,

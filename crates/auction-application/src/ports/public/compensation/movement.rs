@@ -114,11 +114,7 @@ pub struct PublicCompensationMovementRequest {
 impl PublicCompensationMovementRequest {
     /// 校验单场账本的编号分页。
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.limit < 1
-            || self.limit > MAX_PUBLIC_COMPENSATION_PAGE_SIZE
-            || self.offset < 0
-            || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET
-        {
+        if self.limit < 1 || self.offset < 0 || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET {
             return Err("公开补偿账本分页参数无效");
         }
         Ok(())

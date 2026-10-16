@@ -357,5 +357,6 @@ fn finish_response(mut response: Response, request_id: &str) -> Response {
             headers.insert(header::DATE, value);
         }
     }
+    super::countdown::apply_security_headers(&mut response);
     response
 }

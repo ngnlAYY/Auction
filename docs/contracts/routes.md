@@ -18,7 +18,7 @@
 ## 基线与统计口径
 
 `auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。当前 feature API 为
-Public **21** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
+Public **22** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
 当前仅支持 PostgreSQL。保留已发布路径、字段、错误码和未装配能力的错误处理。
 源码能力和运行证据见[验证状态](../status.md)。
 
@@ -56,7 +56,7 @@ relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 
 
 `/health` 与 `/api/v1/health` 是兼容的进程信息入口，返回 status/service/version，不能替代 readiness。
 
-所有业务 API 使用统一响应外壳：
+除 P22 成功返回动态 SVG 图片外，业务 API 使用统一响应外壳（P22 错误也使用此 JSON 外壳）：
 
     {"code": "...", "message": "...", "data": ...}
 
@@ -90,7 +90,7 @@ body 受每条路由自己的上限约束，解码只接受一个 JSON 值，且
 
 Feature API 的方法是严格闭集。GET 路由不会因为 Axum 默认行为额外接受 HEAD；未显式注册的方法
 返回 JSON `405 method_not_allowed`，`Allow` 只列出该路径真实注册的方法并使用冻结排序。健康探针、
-metrics 和静态文件是否接受 HEAD 由各自契约单独决定，不从业务路由推导。
+metrics、P22 动态图片和静态文件是否接受 HEAD 由各自契约单独决定，不从普通业务路由推导。
 
 
 ### 请求边界
@@ -154,6 +154,31 @@ Cache Everything/强制 Edge TTL 等覆盖，具体静态白名单和上线限�
 | P19 | POST | /api/v1/lots/{lot_id}/proxy-authorizations/{authorization_id}/lower | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P21 | GET | /api/v1/forum/sync-status | 公开；不接受 query；响应 `no-store` | 200 | 400, 501, 503/504 |
+| P22 | GET/HEAD | /api/v1/auctions/{auction_id}/countdown/{timer} | 公开拍卖边界；`timer` 仅 `list.svg` / `auction.svg`；禁止 query 和缓存 | 200 SVG | 400, 404, 503/504 |
+
+
+### P22 自托管论坛倒计时
+
+`auction-http/public/countdown/` 拥有动态 SVG 和样式，`AuctionReader::public_auction_countdown` 提供窄时间快照；
+`auction-storage/database/auctions/countdown.rs` 用单次 PostgreSQL 读取绑定公开可见性、拍卖时间及数据库时钟。
+草稿、取消场次和关闭世界中的活动场次返回 404；settled 历史保留。存在活动场次时，不公开后继预览。
+预览态不提前公开计划结束时间；缺少计划结束时间的 Auction Timer 显示 `Not scheduled`，不推算。
+
+`list.svg` 对应 List Timer：实际 `opened_at` 优先，否则为 `scheduled_open_at`；`auction.svg` 对应 Auction Timer：
+使用本场 `scheduled_end_at`，不合并单件 soft-close。图片固定英文标题、日/时/分/秒、UTC 日期及 `Closed`/`Ended` 终态。
+请求不接受标题、时间、任意 SVG、外链字体或其他自由文本。成功类型为 `image/svg+xml; charset=utf-8`，不包 JSON；
+HEAD 无响应体，其他方法为 JSON 405；非法 UUID/query 为 400，未知计时器、缺场次或隐藏场次为 404，未装配/失败为 503。
+
+剩余时间在加载时由数据库时钟计算，CSS 离散动画每秒换字，到期隐藏数字并显示终态；不运行 JavaScript、不维持连接或轮询。
+数字节点数不随剩余秒数增长，天数最多六位，输出至多 32 KiB。减少动态效果或不支持动画时只显示绝对日期兜底，
+不展示停止更新的剩余秒数。网络传输、浏览器暂停或第三方图片代理可能产生误差；已打开图片不会得知后续改期或状态变化，
+须刷新重新读取；此展示不能决定竞价资格、结算或单件截止。
+
+浏览器 `Cache-Control` 和两种 CDN 头均为 `no-store`，不使用 ETag/Last-Modified/304。只有成功图片的私有响应标记
+启用 `Cross-Origin-Resource-Policy: cross-origin` 并将 CSP 收紧到禁止脚本/外部资源、仅允许内联样式；
+不允许 iframe、不放宽其他 API 或站点 CSP，也不依赖 Origin/Referer/Cookie 才能展示。
+论坛首帖从已配置公开 origin 生成同源图片链接并保留 `#.png` 兼容后缀，实际格式仍为 SVG。
+图片下不重复附加说明段；UTC 日期保留在图片内与首帖时间列表。未配置公开 origin 时由该列表兜底，不回退第三方服务。上线顺序与 CDN 要求见[部署手册](../../ops/README.md#cloudflare-整站代理)。
 
 
 ### P21 论坛同步开关
@@ -172,13 +197,16 @@ Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍�
 ### Public 分页、世界与金额
 
 Public 浏览器目录、往期拍卖、出价记录（含装备详情）、成交价、黑名单及补偿池使用 URL `page`/`page_size`，
-默认 10 条，保留 10/20/50/100 预设，允许自定义 1–200 正整数；输入非法不提交，URL 非法数量回退 10。
+默认 10 条，保留 10/20/50/100 预设，允许自定义正 `i64` 数量，不设 200 条或其他业务数量上限；输入非法不提交，URL 非法数量回退 10。
 URL 明确值优先于本地偏好，缺失时恢复 `hv.public.page-size`；仅用户确认数量才保存，存储不可用不阻断页面。
 切换数量回首页并保留其他筛选；写回及离开历史条目明确保留数量（包括 10），不让新偏好改写已有分页语义。
 数字页码和跳页遵守现有 offset 上限，不削减权威 total。
 补偿池展开项用 `auction` 标识，流水用独立 `movement_page`/`movement_page_size` 与 `hv.public.movement-page-size` 偏好；API 请求仍映射成已有
 P14 的 `page`/`page_size`，不新增后端参数。刷新和前进/后退恢复选择，缺 total 的投影不得显示伪造总数。
-本项只新增/规范浏览器查询状态，不改变 HTTP 参数上限、DTO、事件或数据库。
+P05、P07、P09、P10、P12–P14 的 HTTP `page_size` 同步取消 200 条上限，接受 `1..=i64::MAX`；默认值、offset 上限、cursor 与筛选边界不变。
+游标查询仅对额外探测一行的内部 limit 使用饱和加法，请求及响应数量不截断。Admin、账户与实时事件分页仍保留各自原上限。
+大页可能读取全部匹配记录，增加数据库、API 内存及浏览器渲染成本；offset 上限不约束第一页体积，原有请求超时仍生效。
+不新增或改变 DTO 字段、事件或数据库结构。
 
 Public 分页必须保留已发布的 page/page_size 与 cursor 语义。P07 拍卖编号页的 `total` 表示完整
 筛选集总数，与当前页来自同一读取快照；越界空页不改为 0。cursor 页不执行或返回总数统计。

@@ -23,11 +23,8 @@ pub(super) async fn list(
         Some(PublicAuctionCursor::Boundary { sequence, id }) => (true, *sequence, *id),
         Some(PublicAuctionCursor::Start) | None => (false, 0, Uuid::nil()),
     };
-    let query_limit = if use_cursor {
-        request.limit.checked_add(1).ok_or_else(|| storage_error("公开拍卖分页上限溢出"))?
-    } else {
-        request.limit
-    };
+    // 仅额外探测行采用饱和加法；i64::MAX 已覆盖可表示行数，不改变请求及响应数量。
+    let query_limit = if use_cursor { request.limit.saturating_add(1) } else { request.limit };
     // 数字页总数与条目共享 MVCC 快照；越界空页仍返回完整筛选集的总数。
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开始公开拍卖列表快照失败"))?;

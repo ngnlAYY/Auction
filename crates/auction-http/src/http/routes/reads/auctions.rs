@@ -22,7 +22,7 @@ pub(crate) async fn list_auctions(
 
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    let page_size = parse_positive_i64(query.get("page_size"), 20, Some(200))
+    let page_size = parse_positive_i64(query.get("page_size"), 20, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let cursor = query
         .get("cursor")

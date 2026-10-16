@@ -1,0 +1,65 @@
+/* 独立论坛图片不能引用站点样式或外部字体；固定浅色高对比，避免论坛主题影响数字。 */
+svg {
+  color: #382d23;
+  font-family: system-ui, sans-serif;
+  text-anchor: middle;
+}
+text {
+  fill: currentColor;
+}
+.countdown-surface {
+  fill: #f5f1e8;
+  stroke: #b9ac99;
+}
+.countdown-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.countdown-reel {
+  font-family: monospace;
+  font-size: 24px;
+  font-weight: 700;
+}
+.countdown-status,
+.countdown-finished {
+  font-size: 24px;
+  font-weight: 700;
+}
+.countdown-fallback {
+  font-size: 18px;
+}
+.countdown-unit {
+  font-size: 9px;
+}
+.countdown-deadline {
+  font-size: 12px;
+}
+@keyframes countdown-roll {
+  from { transform: translateY(0); }
+  to { transform: translateY(var(--distance)); }
+}
+@keyframes countdown-expire {
+  from { visibility: visible; }
+  to { visibility: hidden; }
+}
+@keyframes countdown-complete {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+/* 逐秒离散换字，不做滑动或闪烁；减少动态效果时保留绝对时间兜底。 */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation: countdown-roll 1s steps(2, end) infinite) {
+    .countdown-running {
+      display: inline;
+      animation: countdown-expire var(--remaining) step-end forwards;
+    }
+    .countdown-finished {
+      display: inline;
+      visibility: hidden;
+      animation: countdown-complete var(--remaining) step-end forwards;
+    }
+    .countdown-fallback {
+      display: none;
+    }
+  }
+}

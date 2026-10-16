@@ -93,6 +93,8 @@ pub fn render_auction_thread(
     // 本场收件在正式开拍时切换至后继草稿；已有实际开拍时间时优先展示事实时间。
     countdown::write_countdowns(
         &mut body,
+        snapshot.auction_id,
+        snapshot.public_url.as_deref(),
         snapshot.opened_at.unwrap_or(snapshot.scheduled_open_at),
         snapshot.scheduled_end_at,
     )?;

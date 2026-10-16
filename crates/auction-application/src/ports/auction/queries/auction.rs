@@ -142,6 +142,12 @@ pub trait AuctionReader: Send + Sync {
         world_id: String,
     ) -> ApplicationFuture<'_, Option<CurrentAuctionSnapshot>>;
 
+    /// 隐藏草稿、取消场次和关闭世界的活动场次；预览遵循当前公开 projection 边界。
+    fn public_auction_countdown(
+        &self,
+        auction_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<super::PublicAuctionCountdown>>;
+
     fn public_realtime_auction_status(
         &self,
         auction_id: Uuid,

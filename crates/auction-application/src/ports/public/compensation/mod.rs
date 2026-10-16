@@ -21,9 +21,6 @@ pub const DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE: i64 = 25;
 /// Public 补偿账本页的默认大小。
 pub const DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE: i64 = 50;
 
-/// Public 补偿池允许的最大页大小。
-pub const MAX_PUBLIC_COMPENSATION_PAGE_SIZE: i64 = 200;
-
 /// Public 补偿池允许的最大 legacy offset。
 pub const MAX_PUBLIC_COMPENSATION_OFFSET: i64 = 10_000;
 
@@ -45,10 +42,9 @@ pub struct PublicCompensationListRequest {
 }
 
 impl PublicCompensationListRequest {
-    /// 在应用端口边界拒绝无界分页和不完整游标。
+    /// 校验正整数数量、既有 offset 上限和完整游标，不设数量业务上限。
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.limit < 1
-            || self.limit > MAX_PUBLIC_COMPENSATION_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET
             || self.cursor.is_some() && self.offset != 0
@@ -128,7 +124,6 @@ impl PublicCompensationPage {
     pub fn validate(&self) -> Result<(), &'static str> {
         let entry_count = i64::try_from(self.entries.len()).map_err(|_| "公开补偿池页大小溢出")?;
         if self.limit < 1
-            || self.limit > MAX_PUBLIC_COMPENSATION_PAGE_SIZE
             || self.offset < 0
             || self.offset > MAX_PUBLIC_COMPENSATION_OFFSET
             || self.balance < 0
