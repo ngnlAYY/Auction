@@ -74,7 +74,8 @@ impl AdminRuntimeForumConfig {
                 && self.item_timeout_seconds < self.lease_duration_seconds,
             "forum.lease_duration_seconds",
         )?;
-        // 与 Forum 适配器相同：四路分页读取，再为固定 #1/#2 各预留 GET + POST，最后留一秒收口。
+        // 单目录页的最低预算：四路主题分页读取，再为目录/日志各预留 GET + POST，最后留一秒收口。
+        // 多目录页及正文校验会增加请求；部署须相应提高 item/lease，总时限仍保护未知写入边界。
         // 上方先限制各输入，以下整数运算不会溢出。
         let pages = u64::from(self.maximum_topic_pages);
         let waves = pages.div_ceil(4) + 4;

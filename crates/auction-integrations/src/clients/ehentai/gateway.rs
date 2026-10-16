@@ -91,7 +91,7 @@ impl EhentaiGateway {
         Err(EhentaiError::credential(EhentaiOperation::FetchTopic))
     }
 
-    /// 建立固定 #2；仅在 POST 尚未开始且明确 session 过期时轮换凭据。
+    /// 建立目录续页或系统日志；仅在 POST 尚未开始且明确 session 过期时轮换凭据。
     pub async fn reply_topic(
         &self,
         world: SettlementWorld,
@@ -117,7 +117,7 @@ impl EhentaiGateway {
         Err(EhentaiError::credential(EhentaiOperation::ReplyTopic))
     }
 
-    /// 编辑固定 #1/#2；POST 开始后绝不切换 Cookie 重发。
+    /// 编辑固定目录页或系统日志；POST 开始后绝不切换 Cookie 重发。
     pub async fn edit_post(
         &self,
         world: SettlementWorld,

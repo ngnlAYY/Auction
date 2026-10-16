@@ -2,7 +2,12 @@
 
 use std::collections::HashSet;
 
-use auction_application::{AdminForumCatalog, AdminForumPreviewResult};
+use auction_application::{
+    AdminForumCatalog, AdminForumPreviewResult, FORUM_CATALOG_PAGE_SIZE, MAX_FORUM_CATALOG_PAGES,
+    forum_catalog_page_marker,
+};
+use auction_domain::AuctionId;
+use uuid::Uuid;
 
 #[path = "catalog.rs"]
 mod catalog;
@@ -69,12 +74,65 @@ fn decimal_id_precedes(left: &str, right: &str) -> bool {
 }
 
 pub(super) fn parse_thread(posts: Vec<ParsedPost>) -> Result<AdminForumPreviewResult, ()> {
+    parse_thread_with_identity(posts, true)
+}
+
+/// 纯文本预览没有数字作者证明，只比较可选作者标签；该入口不得用于 Worker 远端导入。
+fn parse_thread_with_identity(
+    posts: Vec<ParsedPost>,
+    require_author_id: bool,
+) -> Result<AdminForumPreviewResult, ()> {
     let Some(catalog_post) = posts.first() else {
         return Err(());
     };
     let catalog_post_id = catalog_post.id.clone();
     let catalog_post_text = catalog_post.text.clone();
-    let (catalog, catalog_warnings) = catalog::parse_catalog(&catalog_post.text)?;
+    let (mut catalog, mut catalog_warnings) = catalog::parse_catalog(&catalog_post.text)?;
+    let auction_id = catalog_post.text.split_whitespace().find_map(|token| {
+        token
+            .strip_prefix("auction-catalog-v1:")
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .filter(|value| !value.is_nil())
+            .map(AuctionId::from_uuid)
+    });
+    if let Some(auction_id) = auction_id {
+        let mut codes = catalog.1.iter().map(|lot| lot.code.clone()).collect::<HashSet<_>>();
+        for (index, post) in posts.iter().enumerate().skip(1) {
+            let marker = forum_catalog_page_marker(auction_id, index + 1);
+            if !post.text.split_whitespace().any(|token| token == marker) {
+                break;
+            }
+            // 只合并紧邻首帖、同作者且有匹配拍卖/楼层标记的目录；不按正文跳过用户命令。
+            // Worker 导入前还必须核对持久化 post ID，预览解析本身不构成写入授权。
+            if index >= MAX_FORUM_CATALOG_PAGES
+                || (require_author_id
+                    && (catalog_post.author_id.is_none()
+                        || post.author_id != catalog_post.author_id))
+                || (!require_author_id && post.author != catalog_post.author)
+            {
+                return Err(());
+            }
+            let (page, mut warnings) = catalog::parse_catalog(&post.text)?;
+            if page.1.len() > FORUM_CATALOG_PAGE_SIZE {
+                return Err(());
+            }
+            for category in page.0 {
+                if !catalog.0.contains(&category) {
+                    catalog.0.push(category);
+                }
+            }
+            for lot in page.1 {
+                if !codes.insert(lot.code.clone()) {
+                    return Err(());
+                }
+                catalog.1.push(lot);
+            }
+            for warning in &mut warnings {
+                warning.post_id = Some(post.id.clone());
+            }
+            catalog_warnings.extend(warnings);
+        }
+    }
     let mut result = AdminForumPreviewResult {
         catalog_post_id,
         catalog_post_text,

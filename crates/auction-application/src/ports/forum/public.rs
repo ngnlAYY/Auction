@@ -20,7 +20,7 @@ pub struct PublicForumThread {
     pub thread_url: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,
-    /// 固定 #1/#2 的本地 CAS 版本；不暴露 Worker claim 或下次调度时间。
+    /// 全部目录页及系统日志的本地 CAS 版本；不暴露 Worker claim 或下次调度时间。
     pub content_revision: i64,
     /// 最近一次由完整主题读取证明已处理到的真实论坛楼层。
     pub processed_through_post_number: i32,

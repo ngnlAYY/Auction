@@ -1,9 +1,16 @@
+//! 论坛目录分页与 BBCode 渲染；价格及资格仍由权威拍卖快照决定。
+
 use std::fmt::Write;
 
+#[path = "render/countdown.rs"]
+mod countdown;
+#[path = "render/log.rs"]
+mod log;
+
 use auction_application::{
-    ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError,
-    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSystemLogEntry,
-    PublicEquipmentGameLink, forum_catalog_marker, forum_system_log_marker, forum_world_name,
+    FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
+    ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSystemLogEntry,
+    MAX_FORUM_CATALOG_LOTS, PublicEquipmentGameLink, forum_catalog_page_marker, forum_world_name,
 };
 use auction_domain::{AuctionId, SettlementWorld};
 use sha2::{Digest, Sha256};
@@ -11,7 +18,6 @@ use url::Url;
 
 use crate::clients::ehentai::PRODUCTION_ENDPOINT;
 
-const MAX_LOTS: usize = 10_000;
 const MAX_TITLE_BYTES: usize = 512;
 const MAX_BODY_BYTES: usize = 65_531;
 const FORUM_SEPARATOR: &str =
@@ -27,7 +33,7 @@ pub fn render_auction_thread(
         || snapshot.state_version <= 0
         || snapshot.scheduled_open_at.timestamp_nanos_opt().is_none()
         || snapshot.lots.is_empty()
-        || snapshot.lots.len() > MAX_LOTS
+        || snapshot.lots.len() > MAX_FORUM_CATALOG_LOTS
         || snapshot.lots.len() != equipment_links.len()
         || snapshot.public_url.as_deref().is_some_and(|value| !valid_public_url(value))
     {
@@ -84,6 +90,12 @@ pub fn render_auction_thread(
     }
 
     let mut body = String::new();
+    // 本场收件在正式开拍时切换至后继草稿；已有实际开拍时间时优先展示事实时间。
+    countdown::write_countdowns(
+        &mut body,
+        snapshot.opened_at.unwrap_or(snapshot.scheduled_open_at),
+        snapshot.scheduled_end_at,
+    )?;
     // 采用参考主题的左对齐标题、分隔线、嵌套列表和代码块；拍品行仍保持纯文本形状，供目录回读解析。
     writeln!(
         &mut body,
@@ -98,7 +110,7 @@ pub fn render_auction_thread(
     body.push('\n');
     writeln!(
         &mut body,
-        "[*][b]Intake opens:[/b] {}",
+        "[*][b]Bidding opens:[/b] {}",
         format_forum_time(snapshot.scheduled_open_at)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
@@ -140,9 +152,28 @@ pub fn render_auction_thread(
     );
     writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
 
+    let page_size = snapshot.catalog_layout.page_size();
+    let page_count = lots.len().div_ceil(page_size);
+    if page_count > 1 {
+        write_catalog_navigation(&mut body, page_count)?;
+    }
+    let mut pages = Vec::with_capacity(page_count);
     let nominal_end = snapshot.scheduled_end_at;
     let mut last_category = None::<String>;
-    for (lot, equipment_link) in lots {
+    for (index, (lot, equipment_link)) in lots.into_iter().enumerate() {
+        if index > 0 && index % page_size == 0 {
+            finish_catalog_page(&mut body, snapshot.auction_id, pages.len() + 1)?;
+            pages.push(ForumRenderedPost { body: std::mem::take(&mut body) });
+            writeln!(
+                &mut body,
+                "[size=3][b]{world_title} Equipment Auction - Session {:03} - Catalog {}/{}[/b][/size]",
+                snapshot.sequence, pages.len() + 1, page_count
+            )
+            .map_err(|_| ForumRenderError::BodyTooLarge)?;
+            write_catalog_navigation(&mut body, page_count)?;
+            // 跨帖重复分类标题；不改变分类编号，也不把续页当成上一页的裸文本尾部。
+            last_category = None;
+        }
         if last_category.as_deref() != Some(lot.category.as_str()) {
             if last_category.is_some() {
                 // 分类之间保留两行空白，避免长目录中标题和上一类最后一件装备粘连。
@@ -219,20 +250,17 @@ pub fn render_auction_thread(
             return Err(ForumRenderError::BodyTooLarge);
         }
     }
-    writeln!(&mut body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
-    body.push_str(
-        "[size=1][color=#666666][i]The public auction page remains authoritative for live auction state.[/i][/color][/size]\n",
-    );
-    writeln!(
-        &mut body,
-        "[size=1][color=transparent]{}[/color][/size]",
-        forum_catalog_marker(snapshot.auction_id)
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    if body.len() > MAX_BODY_BYTES {
-        return Err(ForumRenderError::BodyTooLarge);
-    }
-    Ok(ForumRenderedThread { title, description, legacy_title: Some(legacy_title), body })
+    finish_catalog_page(&mut body, snapshot.auction_id, pages.len() + 1)?;
+    pages.push(ForumRenderedPost { body });
+    let mut pages = pages.into_iter();
+    let first = pages.next().ok_or(ForumRenderError::InvalidSnapshot)?;
+    Ok(ForumRenderedThread {
+        title,
+        description,
+        legacy_title: Some(legacy_title),
+        body: first.body,
+        catalog_continuation: pages.collect(),
+    })
 }
 
 /// 无状态的论坛主题渲染器，供 Worker 通过窄端口调用。
@@ -251,103 +279,48 @@ impl ForumRenderer for ForumThreadRenderer {
     fn render_system_log(
         &self,
         auction_id: AuctionId,
+        catalog_page_count: usize,
         processed_through_post_number: usize,
         entries: Vec<ForumSystemLogEntry>,
     ) -> Result<ForumRenderedPost, ForumRenderError> {
-        render_system_log(auction_id, processed_through_post_number, entries)
+        log::render_system_log(
+            auction_id,
+            catalog_page_count,
+            processed_through_post_number,
+            entries,
+        )
     }
 }
 
-/// 稳定渲染固定 #2；相同的命令事实始终得到相同正文，避免无意义远端编辑。
-pub fn render_system_log(
+/// 首帖与续页使用同一页尾和独立字节上限，任何一页超限都在远端写入前失败。
+fn finish_catalog_page(
+    body: &mut String,
     auction_id: AuctionId,
-    processed_through_post_number: usize,
-    mut entries: Vec<ForumSystemLogEntry>,
-) -> Result<ForumRenderedPost, ForumRenderError> {
-    if auction_id.is_nil() || processed_through_post_number < 2 || entries.len() > 20_000 {
-        return Err(ForumRenderError::InvalidSnapshot);
-    }
-    entries.sort_by(|left, right| {
-        left.post_number
-            .cmp(&right.post_number)
-            .then_with(|| left.post_id.cmp(&right.post_id))
-            .then_with(|| left.line_number.cmp(&right.line_number))
-            .then_with(|| left.code.cmp(&right.code))
-            .then_with(|| left.message.cmp(&right.message))
-            .then_with(|| left.ignored.cmp(&right.ignored))
-    });
-    entries.dedup();
-    if entries.iter().any(|entry| !valid_system_log_entry(entry)) {
-        return Err(ForumRenderError::InvalidSnapshot);
-    }
-
-    let warning_count = entries.iter().filter(|entry| !entry.ignored).count();
-    let ignored_count = entries.iter().filter(|entry| entry.ignored).count();
-    let warning_label = if warning_count == 1 { "warning" } else { "warnings" };
-    let ignored_label = if ignored_count == 1 { "post" } else { "posts" };
-
-    let mut body = String::new();
-    writeln!(
-        &mut body,
-        "Updated through [b][size=5]#{processed_through_post_number}[/size][/b] — \
-         [b]{warning_count}[/b] {warning_label}, [b]{ignored_count}[/b] manually ignored {ignored_label}."
-    )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
+    post_number: usize,
+) -> Result<(), ForumRenderError> {
+    writeln!(body, "{FORUM_SEPARATOR}").map_err(|_| ForumRenderError::BodyTooLarge)?;
     body.push_str(
-        "[size=1][color=#666666]Accepted bids and current prices appear in post #1. This fixed post records only edited or invalid commands; bids begin at post #3.[/color][/size]\n\n\
-         [center][b][color=#B00020][size=3]Warning Log[/size][/color][/b][/center]\n\n",
-    );
-    for entry in entries.iter().filter(|entry| !entry.ignored) {
-        write_system_log_entry(&mut body, entry)?;
-    }
-    if warning_count == 0 {
-        body.push_str("[color=#666666]No warnings.[/color]\n");
-    }
-    if ignored_count > 0 {
-        body.push_str("\n[center][b][size=3]Ignored Posts[/size][/b][/center]\n\n");
-        for entry in entries.iter().filter(|entry| entry.ignored) {
-            write_system_log_entry(&mut body, entry)?;
-        }
-    }
-    body.push_str(
-        "\n[size=1][color=#666666][i]Maintained by the auction worker. Do not place bids in this post.[/i][/color][/size]\n",
+        "[size=1][color=#666666][i]The public auction page remains authoritative for live auction state.[/i][/color][/size]\n",
     );
     writeln!(
-        &mut body,
+        body,
         "[size=1][color=transparent]{}[/color][/size]",
-        forum_system_log_marker(auction_id)
+        forum_catalog_page_marker(auction_id, post_number)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)?;
     if body.len() > MAX_BODY_BYTES {
         return Err(ForumRenderError::BodyTooLarge);
     }
-    Ok(ForumRenderedPost { body })
+    Ok(())
 }
 
-fn write_system_log_entry(
-    body: &mut String,
-    entry: &ForumSystemLogEntry,
-) -> Result<(), ForumRenderError> {
-    write!(
+fn write_catalog_navigation(body: &mut String, page_count: usize) -> Result<(), ForumRenderError> {
+    writeln!(
         body,
-        "[url={PRODUCTION_ENDPOINT}/index.php?act=findpost&pid={}][b]#{}[/b][/url] \
-         [color=#777777]",
-        entry.post_id, entry.post_number
+        "[size=1]Equipment: posts #1-#{page_count} (at most {FORUM_CATALOG_PAGE_SIZE} per post). Updates: #{}. Bids: #{} onward.[/size]\n",
+        page_count + 1, page_count + 2
     )
-    .map_err(|_| ForumRenderError::BodyTooLarge)?;
-    if let Some(line_number) = entry.line_number {
-        write!(body, "line {line_number} · ").map_err(|_| ForumRenderError::BodyTooLarge)?;
-    }
-    writeln!(body, "{}[/color] — {}", bbcode_text(&entry.code), bbcode_text(&entry.message))
-        .map_err(|_| ForumRenderError::BodyTooLarge)
-}
-
-fn valid_system_log_entry(entry: &ForumSystemLogEntry) -> bool {
-    (entry.post_number == 1 || entry.post_number >= 3)
-        && valid_forum_post_id(&entry.post_id)
-        && entry.line_number.is_none_or(|line| line > 0)
-        && valid_text(&entry.code, 128)
-        && valid_text(&entry.message, 512)
+    .map_err(|_| ForumRenderError::BodyTooLarge)
 }
 
 fn valid_forum_post_id(value: &str) -> bool {

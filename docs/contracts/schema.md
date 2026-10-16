@@ -18,7 +18,7 @@
 
 当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000039`；已发布文件不修改或删除。
+PostgreSQL 迁移为 `000001`—`000040`；已发布文件不修改或删除。
 历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
@@ -50,8 +50,11 @@ PostgreSQL 迁移为 `000001`—`000039`；已发布文件不修改或删除。
   延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，
   `game_player_id` 只是名称兼容镜像。首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册
   按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
-- 固定 #1/#2 的远端 post ID 必须真实对账；历史 published 行没有身份时保留空值。
-  `auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从 #2 安全起步，只由完整主题扫描推进，
+- 所有固定目录页及系统日志的远端 post ID 必须真实对账；历史 published 行没有身份时保留空值。
+  `000040` 增加冻结的 `catalog_layout`、`catalog_page_count`（历史默认 1）及 `auction_forum_catalog_pages` 续页镜像。
+  历史已尝试/发布/未知写入使用 `legacy_single`，保留楼层并继续导入；仅从未尝试且无远端身份的队列项及新主题用 `paged_v1`，每页最多 150 件。
+  发布/刷新与主记录 claim/revision CAS 同事务写入，领取复核页数、连续楼层和互异身份。历史主题不自动改楼。
+  `auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从系统日志楼层（目录页数加一）起步，只由完整主题扫描推进，
   不由 thread/post ID 或内容版本推算。账号与名称变化追加到 `forum_identity_history`（PostgreSQL `000025`—`000031`）。
 - `mail_cookie`/`forum_cookie` 各自全局最多一条 active；`000030` 遇重复行拒绝迁移，必须先通过 Admin
   幂等停用并保留审计，不静默删除或选择凭据。告警状态与重试形状见[实时事件与运维告警](#实时事件与运维告警)。
@@ -158,7 +161,8 @@ Cookie 明文不进入账本。
 | mail_commands | auction-application + auction-jobs：mail intake | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
 | mail_poll_state | auction-storage：mail state | MoogleMail 轮询游标、租约、失败退避和状态 |
 | mail_admin_commands | auction-storage：mail admin command ledger | Admin 邮件控制命令幂等账本 |
-| auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 论坛主题发布状态、租约、fencing、冻结 lot 编号，以及固定 #1/#2 的远端身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
+| auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 论坛主题发布状态、租约、fencing、冻结 lot 编号/分页方案、目录页数，以及首帖/系统日志身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
+| auction_forum_catalog_pages | auction-storage：forum/catalog；auction-integrations + auction-jobs：forum | 目录续页的连续楼层、真实 post ID 与正文证明；与主记录同事务发布及 CAS 更新，不是竞价权威事实 |
 | forum_sync_admin_commands | auction-application + auction-storage + auctionctl：forum recovery | 论坛未知写入重新授权的幂等命令账本、目标确认结果和追加审计关联 |
 | forum_bidder_identities | auction-storage：forum reply + Users owner | world/provider 参与映射、单用户账号归属、名称快照及 forum-only/MM-bound 生命周期；稳定账号权威值同步到 users.forum_account_id |
 | auction_forum_reply_cursors | auction-storage：forum reply（历史兼容） | 保留的历史世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
@@ -174,13 +178,14 @@ Worker control 唤醒不写入额外触发表；
 `auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox
 transport；结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入
 PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛主题写入未知时先按精确标题
-只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。固定 #1/#2 的
-post ID 未持久化时，#3 及后续回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以
+只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。所有固定目录页与系统日志的
+post ID 未持久化时，用户回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以
 独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
 `processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。
 `auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
 应用读模型同时投影二者，Worker 按[安全英文展示规则](invariants.md#i-08-外部写入发生在本地提交之后)解释。
-旧通用拒绝不回填、不重新执行；复用既有列，无迁移，也不改变自然键、尝试次数或终态。
+旧通用拒绝不回填、不重新执行；错误展示复用既有列，不改变自然键、尝试次数或终态。
+目录分页的 `000040` 只增加非权威镜像，不改竞价/审计事实；查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
 
 MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件。
 证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通数据库投影

@@ -426,6 +426,89 @@ button:disabled {
   }
 }
 
+/* 数字分页按调用方显式启用；未接入页面继续使用原布局。 */
+.ui-pager--numbered {
+  align-items: center;
+  justify-content: flex-end;
+  font-size: var(--text-sm);
+}
+
+.ui-pager--numbered .ui-pager__controls,
+.ui-pager--numbered .ui-pager__jump {
+  flex-wrap: wrap;
+  inline-size: auto;
+  max-inline-size: 100%;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.ui-pager__total,
+.ui-pager__ellipsis {
+  color: var(--color-text-muted);
+}
+
+.ui-pager__size {
+  display: inline-flex;
+  max-inline-size: 100%;
+}
+
+.ui-pager__custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-inline-size: 100%;
+}
+
+.ui-pager__custom .ui-pager__input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.ui-pager__error {
+  flex-basis: 100%;
+  color: var(--color-danger);
+}
+
+.ui-pager__select {
+  min-block-size: var(--size-target);
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+}
+
+.ui-pager--numbered .ui-pager__controls button {
+  min-inline-size: var(--size-target);
+  padding-inline: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-pager--numbered .ui-pager__page[aria-current="page"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-weight: var(--font-weight-strong);
+}
+
+.ui-pager__sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 48rem) {
+  .ui-pager--numbered {
+    justify-content: flex-start;
+  }
+}
+
 /* ===== 异步状态面板（AsyncState 组件 / 旧 EmptyState 兼容类） ===== */
 /* 提取自 public.css 的 .ui-empty-state 块；.ui-empty-state* 作为兼容别名与
    .ui-async-state* 共享同一组规则，两端现有视觉不变。 */

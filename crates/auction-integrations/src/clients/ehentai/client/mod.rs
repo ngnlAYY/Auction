@@ -313,7 +313,7 @@ impl EhentaiClient {
         parser.parse_html_pages(parsed_pages).map_err(|_| EhentaiError::protocol(operation, false))
     }
 
-    /// 建立固定 #2 回复；POST 后必须返回 exact thread/post proof。
+    /// 建立目录续页或系统日志回复；POST 后必须返回 exact thread/post proof。
     pub async fn reply_topic(
         &self,
         world: SettlementWorld,
@@ -334,7 +334,7 @@ impl EhentaiClient {
         self.submit_fixed_post(form, board_id, thread_id, None, body, cookie).await
     }
 
-    /// 编辑已持久化的固定 #1/#2；目标 post ID 必须由调用方提供，不能从正文猜测。
+    /// 编辑已持久化的固定目录页或系统日志；目标 post ID 必须由调用方提供，不能从正文猜测。
     pub async fn edit_post(
         &self,
         world: SettlementWorld,

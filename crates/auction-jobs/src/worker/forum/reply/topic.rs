@@ -22,7 +22,8 @@ pub(super) async fn process_topic(
         .enumerate()
         .map(|(index, post)| (post.post.id.clone(), index + 2))
         .collect::<HashMap<_, _>>();
-    let mut system_entries = warning_entries(&preview, &post_numbers);
+    let fixed_floor = topic.system_log_post_number();
+    let mut system_entries = warning_entries(&topic, &preview, &post_numbers);
     let targets = runtime.store.lot_targets(topic.auction_id).await?;
     let target_by_code = target_map(targets)?;
     // 先读持久 pending 边界，不能等较晚竞价已提交后才压低展示水位。
@@ -30,19 +31,21 @@ pub(super) async fn process_topic(
     let mut pending_boundary = pending
         .iter()
         .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
-        .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(2))
+        .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(fixed_floor))
         .min();
     let mut command_error = None;
-    let mut processed_through_post_number = 2_usize;
+    let mut processed_through_post_number = fixed_floor;
 
     'posts: for post in &preview.posts {
         let Some(post_number) = post_numbers.get(&post.post.id).copied() else {
             return Err(repository_error("论坛帖子缺少真实楼层映射"));
         };
-        if post.post.id == topic.system_log_post_id {
+        if post.post.id == topic.system_log_post_id
+            || topic.catalog_continuation.iter().any(|page| page.post_id == post.post.id)
+        {
             continue;
         }
-        // 已删除的 pending 帖把边界设为 #2；编辑后无命令的原帖也必须阻挡后续楼层。
+        // 已删除的 pending 帖把边界设为系统日志楼层；编辑后无命令的原帖也必须阻挡后续楼层。
         if pending_boundary.is_some_and(|boundary| {
             post_number > boundary || post_number == boundary && !requires_bidder_identity(post)
         }) {
@@ -59,13 +62,11 @@ pub(super) async fn process_topic(
                 post_id = %post.post.id,
                 "论坛帖子缺少可解析的论坛账号数字键，跳过命令"
             );
-            system_entries.push(system_entry(
+            system_entries.push(runtime_warning(
                 post_number,
                 &post.post.id,
                 None,
                 "identity_missing",
-                "post author forum account ID could not be resolved",
-                false,
             ));
             processed_through_post_number = post_number;
             continue;
@@ -82,13 +83,11 @@ pub(super) async fn process_topic(
                         error = %error,
                         "论坛帖子玩家名称无法解析为可竞价用户"
                     );
-                    system_entries.push(system_entry(
+                    system_entries.push(runtime_warning(
                         post_number,
                         &post.post.id,
                         None,
                         "identity_unavailable",
-                        "forum/MM player ID name could not be linked to an active auction user",
-                        false,
                     ));
                     processed_through_post_number = post_number;
                     continue;
@@ -101,13 +100,11 @@ pub(super) async fn process_topic(
                         error = %error,
                         "论坛身份解析暂时失败，停止后续楼层并等待重试"
                     );
-                    system_entries.push(system_entry(
+                    system_entries.push(runtime_warning(
                         post_number,
                         &post.post.id,
                         None,
                         "identity_processing_pending",
-                        "identity processing stopped here and will retry",
-                        false,
                     ));
                     command_error = Some(error);
                     break 'posts;
@@ -115,35 +112,29 @@ pub(super) async fn process_topic(
             };
         for command in &post.commands {
             if matches!(command.kind.as_str(), "start" | "cancel") {
-                system_entries.push(system_entry(
+                system_entries.push(runtime_warning(
                     post_number,
                     &post.post.id,
                     Some(command.line),
                     "admin_command_not_supported",
-                    "start and cancel are Admin-only operations and were not applied",
-                    false,
                 ));
                 continue;
             }
             let notify_mode = command.notify.as_deref();
             if matches!(notify_mode, Some("pm" | "both")) {
-                system_entries.push(system_entry(
+                system_entries.push(runtime_warning(
                     post_number,
                     &post.post.id,
                     Some(command.line),
                     "forum_pm_unavailable",
-                    "forum PM notifications are not available; MM processing is independent",
-                    false,
                 ));
             }
             if runtime.notifier.is_none() && matches!(notify_mode, Some("mm" | "both")) {
-                system_entries.push(system_entry(
+                system_entries.push(runtime_warning(
                     post_number,
                     &post.post.id,
                     Some(command.line),
                     "mm_notification_unavailable",
-                    "MoogleMail notification delivery is not configured",
-                    false,
                 ));
             }
             for lot_code in &command.lot_codes {
@@ -153,13 +144,11 @@ pub(super) async fn process_topic(
                         lot_code = %lot_code,
                         "论坛命令 lot 编码未找到本地映射"
                     );
-                    system_entries.push(system_entry(
+                    system_entries.push(runtime_warning(
                         post_number,
                         &post.post.id,
                         Some(command.line),
                         "lot_mapping_missing",
-                        "lot code no longer maps to an active auction lot",
-                        false,
                     ));
                     continue;
                 };
@@ -173,14 +162,12 @@ pub(super) async fn process_topic(
                     lot_id,
                 };
                 if let Err(error) = process_command(runtime, &context).await {
-                    // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍先把待重试状态投影到 #2。
-                    system_entries.push(system_entry(
+                    // 保留帖子顺序：前一条暂时失败时不执行后续命令，但仍把待重试状态投影到系统日志。
+                    system_entries.push(runtime_warning(
                         post_number,
                         &post.post.id,
                         Some(command.line),
                         "command_processing_pending",
-                        "command processing stopped here and will retry",
-                        false,
                     ));
                     command_error = Some(error);
                     break 'posts;
@@ -193,7 +180,7 @@ pub(super) async fn process_topic(
             pending_boundary = pending
                 .iter()
                 .filter(|outcome| outcome.status == ForumCommandStatus::Pending)
-                .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(2))
+                .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(fixed_floor))
                 .min();
             if pending_boundary.is_some_and(|boundary| boundary <= post_number) {
                 command_error = Some(repository_error("论坛原命令未收口，停止后续楼层"));
@@ -214,15 +201,16 @@ pub(super) async fn process_topic(
         let current_post_number = post_numbers.get(&outcome.post_id).copied();
         let post_number = persisted_post_number.or(current_post_number);
         if outcome.status == ForumCommandStatus::Pending {
-            // pending 是未完成事实，即使帖子后来被编辑或删除，也不能把 #2 水位推进到它之后。
-            let completed_floor = post_number.map_or(2, |value| value.saturating_sub(1).max(2));
+            // pending 是未完成事实，即使帖子后来被编辑或删除，也不能把更新水位推进到它之后。
+            let completed_floor =
+                post_number.map_or(fixed_floor, |value| value.saturating_sub(1).max(fixed_floor));
             processed_through_post_number = processed_through_post_number.min(completed_floor);
             command_error.get_or_insert_with(|| repository_error("论坛命令账本仍有待重试记录"));
         }
         let Some(post_number) = post_number else { continue };
         // 原始诊断只留本地；错误码及可识别的旧拒绝详情只能映射为白名单英文，不重放命令。
         let (code, detail) = match outcome.status {
-            ForumCommandStatus::Pending => ("command_pending", "processing will retry"),
+            ForumCommandStatus::Pending => super::rejection::warning_message("command_pending"),
             ForumCommandStatus::Rejected => super::rejection::rejection_message(
                 outcome.error_code.as_deref(),
                 outcome.safe_detail.as_deref(),
@@ -265,20 +253,36 @@ fn validate_fixed_layout(
 ) -> Result<(), ApplicationError> {
     let catalog_marker = forum_catalog_marker(topic.auction_id);
     let system_marker = forum_system_log_marker(topic.auction_id);
-    let Some(second) = preview.posts.first() else {
-        return Err(repository_error("论坛固定 #2 已丢失"));
+    let system_index = topic.catalog_continuation.len();
+    let Some(system) = preview.posts.get(system_index) else {
+        return Err(repository_error("论坛系统更新楼已丢失"));
     };
     if preview.catalog_post_id != topic.catalog_post_id
         || !preview.catalog_post_text.contains(&catalog_marker)
-        || second.post.id != topic.system_log_post_id
-        || !second.post.text.contains(&system_marker)
+        || system.post.id != topic.system_log_post_id
+        || !system.post.text.contains(&system_marker)
+        || preview.catalog.lots.len().div_ceil(topic.catalog_layout.page_size()) != system_index + 1
     {
-        return Err(repository_error("论坛固定 #1/#2 身份与持久化证明不一致"));
+        return Err(repository_error("论坛固定楼层或目录页数与持久化证明不一致"));
+    }
+    for (index, page) in topic.catalog_continuation.iter().enumerate() {
+        let Some(post) = preview.posts.get(index) else {
+            return Err(repository_error("论坛目录续页已丢失"));
+        };
+        if post.post.id != page.post_id
+            || !post.post.text.contains(&auction_application::forum_catalog_page_marker(
+                topic.auction_id,
+                index + 2,
+            ))
+        {
+            return Err(repository_error("论坛目录续页身份与持久化证明不一致"));
+        }
     }
     Ok(())
 }
 
 fn warning_entries(
+    topic: &auction_application::ForumReplyTopic,
     preview: &auction_application::AdminForumPreviewResult,
     post_numbers: &HashMap<String, usize>,
 ) -> Vec<ForumSystemLogEntry> {
@@ -290,13 +294,16 @@ fn warning_entries(
                 Some(post_id) => (post_numbers.get(post_id).copied()?, post_id.as_str()),
                 None => (1, preview.catalog_post_id.as_str()),
             };
-            (post_number == 1 || post_number >= 3).then(|| {
+            let catalog_warning = post_number < topic.system_log_post_number()
+                && matches!(warning.code.as_str(), "invalid_catalog_row" | "invalid_start_price");
+            (catalog_warning || post_number > topic.system_log_post_number()).then(|| {
+                let (code, message) = super::rejection::warning_message(&warning.code);
                 system_entry(
                     post_number,
                     post_id,
                     (warning.line > 0).then_some(warning.line),
-                    &warning.code,
-                    &clean_system_message(&warning.message),
+                    code,
+                    message,
                     warning.code == "edited_post_ignored",
                 )
             })
@@ -337,12 +344,25 @@ async fn refresh_fixed_posts(
         .renderer
         .render(snapshot, equipment_links)
         .map_err(|error| repository_error(&error.to_string()))?;
+    if catalog.catalog_continuation.len() != topic.catalog_continuation.len() {
+        return Err(repository_error("论坛已发布目录页数不能在刷新时改变"));
+    }
     let system_log = runtime
         .renderer
-        .render_system_log(topic.auction_id, processed_through_post_number, system_entries)
+        .render_system_log(
+            topic.auction_id,
+            topic.catalog_continuation.len() + 1,
+            processed_through_post_number,
+            system_entries,
+        )
         .map_err(|error| repository_error(&error.to_string()))?;
     let catalog_changed = catalog.title != topic.title
         || !forum_post_bodies_match(&catalog.body, &topic.catalog_body);
+    let continuation_changed = catalog
+        .catalog_continuation
+        .iter()
+        .zip(&topic.catalog_continuation)
+        .any(|(page, previous)| !forum_post_bodies_match(&page.body, &previous.body));
     let system_log_changed = !forum_post_bodies_match(&system_log.body, &topic.system_log_body);
     let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
     let reconciliation_only = topic.content_last_error_code.as_deref() == Some("write_unknown");
@@ -368,7 +388,21 @@ async fn refresh_fixed_posts(
         )
         .await?;
     }
-    if !catalog_changed && !system_log_changed {
+    // 续页同样受逐帖证明与未知写入栅栏保护；全部页面证明齐备后才推进本地版本/水位。
+    for (page, previous) in catalog.catalog_continuation.iter().zip(&topic.catalog_continuation) {
+        if reconciliation_only || !forum_post_bodies_match(&page.body, &previous.body) {
+            reconcile_or_edit_fixed_post(
+                runtime,
+                &topic,
+                &previous.post_id,
+                None,
+                page.clone(),
+                write_progress,
+            )
+            .await?;
+        }
+    }
+    if !catalog_changed && !continuation_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
                 return Ok(());
@@ -509,6 +543,16 @@ fn next_scan_at(
     completed_at
         .checked_add_signed(poll_interval)
         .ok_or_else(|| repository_error("论坛下一次扫描时间超出可表示范围"))
+}
+
+fn runtime_warning(
+    post_number: usize,
+    post_id: &str,
+    line_number: Option<usize>,
+    code: &str,
+) -> ForumSystemLogEntry {
+    let (code, message) = super::rejection::warning_message(code);
+    system_entry(post_number, post_id, line_number, code, message, false)
 }
 
 fn system_entry(

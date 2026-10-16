@@ -22,6 +22,9 @@ pub struct ForumReplyTopic {
     pub world: SettlementWorld,
     pub thread_id: String,
     pub catalog_post_id: String,
+    pub catalog_layout: super::ForumCatalogLayout,
+    /// 按连续楼层排序的目录续页；发布后不得插楼或挪动已有用户回帖。
+    pub catalog_continuation: Vec<ForumCatalogPage>,
     pub system_log_post_id: String,
     pub title: String,
     pub catalog_body: String,
@@ -44,6 +47,8 @@ impl fmt::Debug for ForumReplyTopic {
             .field("world", &self.world)
             .field("thread_id", &self.thread_id)
             .field("catalog_post_id", &self.catalog_post_id)
+            .field("catalog_layout", &self.catalog_layout)
+            .field("catalog_continuation", &self.catalog_continuation)
             .field("system_log_post_id", &self.system_log_post_id)
             .field("title", &self.title)
             .field("catalog_body", &"[REDACTED]")
@@ -59,7 +64,31 @@ impl fmt::Debug for ForumReplyTopic {
     }
 }
 
-/// 已持久化论坛命令的安全结果，用于固定 #2 的处理摘要。
+/// 已取得远端证明的目录续页；正文可能包含公开装备 URL，调试输出必须脱敏。
+#[derive(Clone, PartialEq, Eq)]
+pub struct ForumCatalogPage {
+    pub post_id: String,
+    pub body: String,
+}
+
+impl fmt::Debug for ForumCatalogPage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ForumCatalogPage")
+            .field("post_id", &self.post_id)
+            .field("body", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl ForumReplyTopic {
+    /// 目录页之后的系统日志楼层，也是尚未处理用户回帖时的安全水位。
+    pub fn system_log_post_number(&self) -> usize {
+        self.catalog_continuation.len() + 2
+    }
+}
+
+/// 已持久化论坛命令的安全结果，用于系统日志的处理摘要。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumCommandOutcome {
     pub post_id: String,
@@ -182,13 +211,13 @@ pub trait ForumReplyStore: Send + Sync {
         thread_id: String,
     ) -> ApplicationFuture<'_, Vec<ForumCommandOutcome>>;
 
-    /// 读取当前权威拍卖快照，用于竞价命令提交后刷新固定 #1。
+    /// 读取当前权威拍卖快照，用于竞价命令提交后刷新所有目录页。
     fn load_current_snapshot(
         &self,
         auction_id: AuctionId,
     ) -> ApplicationFuture<'_, ForumAuctionSnapshot>;
 
-    /// 在两个远端固定楼层均已得到 exact post proof 后，以 revision CAS 更新本地正文证明并推进下次扫描 due。
+    /// 在所有远端固定楼层均已得到 exact post proof 后，以 revision CAS 更新本地正文证明并推进下次扫描 due。
     fn record_fixed_posts_update(
         &self,
         topic: ForumReplyTopic,

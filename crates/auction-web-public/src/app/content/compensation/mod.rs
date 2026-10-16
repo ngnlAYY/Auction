@@ -9,8 +9,9 @@ use crate::api::{
 };
 
 use super::{
-    AsyncState, AsyncStateKind, Pager, QueryWriteMode, Route, Time, format_amount,
-    format_auction_time, update_public_query_state, use_public_query_state, world_label,
+    AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Route, Time, format_amount,
+    format_auction_time, normalize_public_page_size, public_page_matches,
+    update_public_query_state, use_public_query_state, world_label,
 };
 
 mod movements;
@@ -19,21 +20,22 @@ mod table;
 use movements::CompensationMovementDetails;
 use table::CompensationPoolTable;
 
-/// 读取公开补偿池批次，并按旧版公开页面展示流水详情。
+/// 批次与展开流水使用各自的页码/数量；世界、批次与流水身份均通过 URL 恢复。
 pub(super) fn pool_page() -> Element {
     let mut refresh_generation = use_context::<Signal<u64>>();
-    // 池页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复；流水详情选中态
-    // 与流水页码仍是页面本地状态（旧版不入 URL）。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let page_number = use_memo(move || query_state_signal().page.max(1));
-    let mut selected_auction_id = use_signal(String::new);
-    let mut movement_page = use_signal(|| 1_i64);
+    let page_size = use_memo(move || query_state_signal().page_size);
+    let selected_auction_id =
+        use_memo(move || query_state_signal().auction_id.clone().unwrap_or_default());
+    let movement_page = use_memo(move || query_state_signal().movement_page);
+    let movement_page_size = use_memo(move || query_state_signal().movement_page_size);
     let pool = use_resource({
         let refresh_generation = refresh_generation;
         move || {
             let _ = refresh_generation();
-            fetch_compensation_pool(page_number())
+            fetch_compensation_pool(page_number(), page_size())
         }
     });
     let movements = use_resource({
@@ -42,19 +44,22 @@ pub(super) fn pool_page() -> Element {
             let _ = refresh_generation();
             let auction_id = selected_auction_id();
             let page = movement_page();
+            let page_size = movement_page_size();
             async move {
                 let result = if auction_id.is_empty() {
                     Ok(None)
                 } else {
-                    fetch_compensation_movements(auction_id.clone(), page).await.and_then(|page| {
-                        if page.round.auction_id == auction_id {
-                            Ok(Some(page))
-                        } else {
-                            Err("invalid_response".to_owned())
-                        }
-                    })
+                    fetch_compensation_movements(auction_id.clone(), page, page_size)
+                        .await
+                        .and_then(|page| {
+                            if page.round.auction_id == auction_id {
+                                Ok(Some(page))
+                            } else {
+                                Err("invalid_response".to_owned())
+                            }
+                        })
                 };
-                (auction_id, result)
+                (auction_id, page, page_size, result)
             }
         }
     });
@@ -78,11 +83,21 @@ pub(super) fn pool_page() -> Element {
                 },
             }
         },
+        Some(Ok(page))
+            if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
+        {
+            rsx! {
+                p { role: "status", {t!("data-loading")} }
+            }
+        }
         Some(Ok(page)) => {
-            // 同轮次刷新保留快照；切换轮次不能把旧流水与新轮次余额、世界拼在一起。
+            // 只保留同一轮次及同一分页请求的快照，避免旧数据触发新页码纠偏。
             let movement_state =
-                movements.read_unchecked().as_ref().and_then(|(auction_id, result)| {
-                    (auction_id == &selected_auction_id()).then(|| result.clone())
+                movements.read_unchecked().as_ref().and_then(|(auction_id, page, size, result)| {
+                    (auction_id == &selected_auction_id()
+                        && *page == movement_page()
+                        && *size == movement_page_size())
+                    .then(|| result.clone())
                 });
             rsx! {
                 CompensationPoolTable {
@@ -90,25 +105,55 @@ pub(super) fn pool_page() -> Element {
                     selected_auction_id: selected_auction_id(),
                     movements: movement_state,
                     on_page_change: move |next_page: i64| {
-                        let next_page = next_page.max(1);
-                        selected_auction_id.set(String::new());
-                        movement_page.set(1);
                         update_public_query_state(
                             query_state_signal,
-                            |query| query.page = next_page,
+                            |query| {
+                                query.page = next_page.max(1);
+                                query.auction_id = None;
+                                query.movement_page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
+                    },
+                    on_page_size_change: move |size| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.page_size = normalize_public_page_size(size);
+                                query.page = 1;
+                                query.auction_id = None;
+                                query.movement_page = 1;
+                            },
                             QueryWriteMode::Push,
                         );
                     },
                     on_select_round: move |auction_id: String| {
-                        if selected_auction_id() == auction_id {
-                            selected_auction_id.set(String::new());
-                        } else {
-                            selected_auction_id.set(auction_id);
-                        }
-                        movement_page.set(1);
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.auction_id = (query.auction_id.as_deref() != Some(&auction_id))
+                                    .then_some(auction_id);
+                                query.movement_page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
                     },
                     on_movement_page_change: move |next_page: i64| {
-                        movement_page.set(next_page.max(1));
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.movement_page = next_page.max(1),
+                            QueryWriteMode::Push,
+                        );
+                    },
+                    on_movement_page_size_change: move |size| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.movement_page_size = normalize_public_page_size(size);
+                                query.movement_page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
                     },
                     on_retry_movements: move |_| {
                         refresh_generation.set(refresh_generation().saturating_add(1));

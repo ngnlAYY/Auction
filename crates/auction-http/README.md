@@ -48,6 +48,8 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
 请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时。
 普通请求默认处理预算 15 秒，WebSocket 豁免；连接层 HTTP/1 请求头预算固定 5 秒。
 默认忽略 `X-Forwarded-For`，仅显式信任的 TCP/Unix 代理可提供客户端地址。
+Unix listener 不伪造 TCP peer，Unix 信任不放宽 TCP；Cloudflare 地址头由受信 Caddy 清洗为 XFF，
+应用不根据转发协议头推导 Origin 或 Secure Cookie，见[橙云部署](../../ops/README.md#cloudflare-整站代理)。
 
 Public 竞价按限流 → Origin → 认证执行，Admin mutation 按限流 → Origin → CSRF → 会话执行，
 之后才读取并校验 query/path/body。严格 JSON 保留各路由大小上限、媒体类型与字段闭集，业务 GET 不隐式开放 HEAD。
@@ -91,7 +93,9 @@ target/dx/build/auction-web-admin/web/public
 默认分体制品不包含另一端资源；合并二进制虽然链接两端，子进程仍只提供所属表面。
 
 分派顺序为业务路由、精确静态文件、显式浏览器路由、404；未登记 `/api`/`/health` 不回退 SPA。
-静态文件只接受 GET/HEAD，浏览器入口 `no-store`，稳定文件名 `no-cache`，仅内容指纹资源使用一年 `immutable`。
+静态文件只接受 GET/HEAD，浏览器入口与直接 HTML `no-store`，稳定文件名（含 favicon 别名）`no-cache`，
+仅非 HTML 内容指纹资源使用一年 `immutable`。正式边界默认给全部响应发送双 CDN `no-store` 头，
+只有静态 handler 的私有标记可启用资源 CDN 策略；API 浏览器策略保持兼容，设置资源禁止 CDN 保存。
 具体条件读取和各类 API 缓存见[静态契约](../../docs/contracts/routes.md#静态入口与缓存)。
 
 ## 维护与验证

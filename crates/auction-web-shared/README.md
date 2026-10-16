@@ -38,7 +38,8 @@ Public 与 Admin 共用、无业务偏向的浏览器基础能力。
 表格一律 100% 容器宽度、固定布局与完整百分比列宽，不采用最小宽度、横向滚动或窄屏卡片化。
 `TableColumns` 归一化调用方权重；业务组件拥有比例，Markdown 按表头和典型内容估算，见[列宽登记](../../docs/table-layouts.md)。
 
-`Pager` 钳制页码并同步跳页输入，缺 total 时使用 has_more 语义；`AsyncState` 区分加载、空态和错误的可访问播报。
+`Pager` 钳制页码并同步跳页输入，缺 total 时使用 has_more 语义；调用方显式提供数量选项才启用数字页码/省略号与原生 select。
+`components/pager/size.rs` 提供可选、有界正整数输入；数量上限、可访问末页与所有文案由 surface 注入，本地偏好不由共享层持有，默认布局不变。`AsyncState` 区分加载、空态和错误的可访问播报。
 `Dialog` 只拥有外壳与关闭语义，busy 时关闭入口禁用；焦点与滚动锁由外壳 hook 统一处理。
 普通文本提供完整提示，`TruncatedText` 支持悬停、键盘/触控固定及选择，不复制输入或弹窗正文到 title。
 原生事件回调必须恢复 Dioxus Runtime/Scope，延迟任务和监听随组件卸载清理。

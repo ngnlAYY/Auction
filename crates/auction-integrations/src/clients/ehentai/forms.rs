@@ -194,6 +194,8 @@ pub(super) fn valid_rendered_thread(rendered: &ForumRenderedThread) -> bool {
     valid_topic_title(&rendered.title)
         && valid_topic_description(&rendered.description)
         && rendered.legacy_title.as_deref().is_none_or(valid_topic_title)
+        && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
+        && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !body.is_empty()
         && rendered.body.len() <= MAXIMUM_FORUM_BODY_BYTES
         && rendered

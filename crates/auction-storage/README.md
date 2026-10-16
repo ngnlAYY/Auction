@@ -65,6 +65,10 @@ Admin 读取不为补全投影临时写入。邮件展示和诊断 sidecar 均�
 Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。
 主动 Send 要求新增、唯一且完整匹配的 Sent 证明；流拍/撤拍逐件 Send 原装备，历史冻结 Return 不改写。
 论坛未知 POST 先精确只读对账，再按持久人工授权重试；真实处理楼层独立于内容版本和 post ID。
+`forum/catalog.rs` 拥有 `auction_forum_catalog_pages` 续页身份/正文；迁移 `000040` 增加主记录目录页数。
+发布和刷新在主记录 claim/revision CAS 的同一 PostgreSQL 事务内更新所有续页，领取检查页数、连续楼层及互异身份。
+`catalog_layout` 冻结历史单页/新分页方案；旧主题保持原楼层并继续处理出价，仍受原正文长度上限约束。
+仅从未尝试、无远端身份的队列项及新主题启用分页，已尝试或未知写入不得借升级更换布局。页数冻结后不在扫描时移动系统日志。
 `forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填或改写历史拒绝。
 新拒绝分类由 jobs owner 提供，仍经原 pending → rejected 条件更新收口；无需新增列或迁移。
 论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，原失败码进入 claim；不领取 `write_authorization_required`，

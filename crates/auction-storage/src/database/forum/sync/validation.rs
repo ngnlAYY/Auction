@@ -46,6 +46,8 @@ pub(super) fn valid_rendered(rendered: &ForumRenderedThread) -> bool {
             .legacy_title
             .as_deref()
             .is_none_or(|value| valid_text(value, MAX_RENDERED_TITLE_BYTES))
+        && rendered.catalog_continuation.len() < auction_application::MAX_FORUM_CATALOG_PAGES
+        && rendered.catalog_continuation.iter().all(valid_rendered_post)
         && !rendered.body.trim().is_empty()
         && rendered.body.len() <= MAX_RENDERED_BODY_BYTES
         && !rendered
@@ -74,7 +76,11 @@ pub(super) fn valid_layout(published: &ForumPublishedLayout) -> bool {
     valid_published(&published.thread)
         && valid_decimal_id(&published.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
         && valid_decimal_id(&published.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-        && published.catalog_post_id != published.system_log_post_id
+        && super::super::catalog::valid_page_ids(
+            &published.catalog_post_id,
+            &published.system_log_post_id,
+            published.catalog_continuation_post_ids.iter().map(String::as_str),
+        )
 }
 
 pub(super) fn valid_text(value: &str, maximum: usize) -> bool {

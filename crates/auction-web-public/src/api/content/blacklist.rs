@@ -6,9 +6,9 @@ pub(crate) use auction_contracts::{
 
 use super::{decoder, send_get};
 
-pub(crate) async fn fetch_blacklist(page: i64) -> Result<BlacklistPage, String> {
+pub(crate) async fn fetch_blacklist(page: i64, page_size: i64) -> Result<BlacklistPage, String> {
     let page = page.max(1);
-    let response = send_get(&format!("/api/v1/blacklist?page={page}&page_size=10"))
+    let response = send_get(&format!("/api/v1/blacklist?page={page}&page_size={page_size}"))
         .await
         .map_err(|error| error.code().to_owned())?;
     if !response.ok() {

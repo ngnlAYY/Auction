@@ -5,9 +5,14 @@
 //! 范围限制到当前已知的下一页。
 //!
 //! 文案一律由调用方通过 props 传入（含「第 X 页 / 共 Y 页」状态模板回调），本 crate
-//! 不持有任何 i18n key；DOM class 保持 `ui-pager*` 契约不变。
+//! 不持有任何 i18n key；DOM class 保持 `ui-pager*` 契约不变。调用方显式提供每页数量
+//! 选项时启用数字页码布局；未提供时保留原布局，避免改变 Admin 与其他未接入页面。
 
 use dioxus::prelude::*;
+
+mod size;
+
+use size::PageSizePicker;
 
 /// 展示长列表分页，并把目标页交给调用页面更新 URL 或查询状态。
 ///
@@ -28,6 +33,9 @@ pub fn Pager(
     /// 游标语义下是否还有下一页；仅在 `total` 为 `None` 时参与计算。
     #[props(default)]
     has_more: bool,
+    /// 可访问页码上限；不改变权威 total，只限制后端 offset 边界内的导航。
+    #[props(default)]
+    max_page: Option<i64>,
     /// `nav` 的 `aria-label`。
     label: String,
     /// 上一页按钮文案。
@@ -41,12 +49,28 @@ pub fn Pager(
     /// 跳页提交按钮文案。
     jump_button_label: String,
     on_page_change: EventHandler<i64>,
+    /// 非空时启用数字分页与原生数量选择器；选项和文案归调用方。
+    #[props(default)]
+    page_size_options: Vec<i64>,
+    #[props(default)] page_size_label: String,
+    #[props(default)] page_size_option_label: Option<Callback<i64, String>>,
+    /// 显式提供上限才启用正整数自定义输入；校验与提示不影响默认布局。
+    #[props(default)]
+    max_page_size: Option<i64>,
+    #[props(default)] page_size_custom_label: String,
+    #[props(default)] page_size_apply_label: String,
+    #[props(default)] page_size_invalid_label: String,
+    /// 仅有权威 total 时由调用方提供总数文案，不把当前页长度当总数。
+    #[props(default)]
+    total_summary: String,
+    #[props(default)] on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page_size.max(1);
     let total_pages = total
         .map(|total| if total <= 0 { 1 } else { total.saturating_add(page_size - 1) / page_size })
         .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
-        .max(1);
+        .max(1)
+        .min(max_page.unwrap_or(i64::MAX).max(1));
     // 先把页码钳制到当前已知合法范围，再渲染与派生交互；输入同步与纠偏显式订阅 props。
     let valid_page = page.clamp(1, total_pages);
     let mut jump_page = use_signal(|| valid_page.to_string());
@@ -67,24 +91,76 @@ pub fn Pager(
         .flatten()
         .filter(|target| (1..=total_pages).contains(target));
     let can_jump = jump_target.is_some();
+    let numbered = !page_size_options.is_empty();
 
     rsx! {
-        nav { class: "ui-pager", aria_label: label,
+        nav {
+            class: if numbered { "ui-pager ui-pager--numbered" } else { "ui-pager" },
+            aria_label: label,
+            if numbered {
+                if total.is_some() && !total_summary.is_empty() {
+                    span { class: "ui-pager__total", "{total_summary}" }
+                }
+                PageSizePicker {
+                    page_size,
+                    options: page_size_options,
+                    label: page_size_label,
+                    option_label: page_size_option_label,
+                    maximum: max_page_size,
+                    custom_label: page_size_custom_label,
+                    apply_label: page_size_apply_label,
+                    invalid_label: page_size_invalid_label,
+                    on_change: on_page_size_change,
+                }
+            }
             div { class: "ui-pager__controls",
                 button {
                     r#type: "button",
                     disabled: valid_page <= 1,
                     onclick: move |_| on_page_change.call(valid_page - 1),
-                    "{previous_label}"
+                    aria_label: previous_label.clone(),
+                    if numbered {
+                        span { aria_hidden: "true", "‹" }
+                    } else {
+                        "{previous_label}"
+                    }
                 }
-                span { class: "ui-pager__status", aria_live: "polite",
+                if numbered {
+                    for target in numbered_pages(valid_page, total_pages) {
+                        if let Some(target) = target {
+                            button {
+                                key: "page-{target}",
+                                r#type: "button",
+                                class: "ui-pager__page",
+                                aria_label: status.call((target, total_pages)),
+                                aria_current: if target == valid_page { "page" } else { "false" },
+                                onclick: move |_| {
+                                    if target != valid_page {
+                                        on_page_change.call(target);
+                                    }
+                                },
+                                "{target}"
+                            }
+                        } else {
+                            span { class: "ui-pager__ellipsis", aria_hidden: "true", "…" }
+                        }
+                    }
+                }
+                span {
+                    class: if numbered { "ui-pager__sr-only" } else { "ui-pager__status" },
+                    aria_live: "polite",
                     {status.call((valid_page, total_pages))}
                 }
                 button {
                     r#type: "button",
                     disabled: valid_page >= total_pages,
-                    onclick: move |_| on_page_change.call(valid_page + 1),
-                    "{next_label}"
+                    onclick: move |_| on_page_change.call(valid_page.saturating_add(1)),
+                    aria_label: next_label.clone(),
+                    if numbered {
+                        span { aria_hidden: "true", "›" }
+                    } else {
+                        "{next_label}"
+                    }
                 }
             }
             form {
@@ -101,6 +177,7 @@ pub fn Pager(
                     input {
                         class: "ui-pager__input",
                         r#type: "number",
+                        name: "page",
                         min: "1",
                         max: total_pages.to_string(),
                         step: "1",
@@ -113,4 +190,21 @@ pub fn Pager(
             }
         }
     }
+}
+
+/// 最多生成七个页码/省略项；不按总页数分配内存，也不把省略号变成不可预期的跳页动作。
+fn numbered_pages(page: i64, total_pages: i64) -> Vec<Option<i64>> {
+    if total_pages <= 7 {
+        return (1..=total_pages).map(Some).collect();
+    }
+    if page <= 4 {
+        return (1..=5).map(Some).chain([None, Some(total_pages)]).collect();
+    }
+    if page >= total_pages - 3 {
+        return [Some(1), None]
+            .into_iter()
+            .chain((total_pages - 4..=total_pages).map(Some))
+            .collect();
+    }
+    vec![Some(1), None, Some(page - 1), Some(page), Some(page + 1), None, Some(total_pages)]
 }

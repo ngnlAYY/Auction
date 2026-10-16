@@ -209,15 +209,20 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
                 || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || topic.catalog_post_id == topic.system_log_post_id
+                || !super::catalog::valid_pages(
+                    &topic.catalog_post_id,
+                    &topic.system_log_post_id,
+                    &topic.catalog_continuation,
+                )
                 || topic.content_revision <= 0
-                || processed_through_post_number < 2
+                || processed_through_post_number < topic.system_log_post_number() as i32
                 || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
                 || topic.content_lease_until <= updated_at
                 || !super::sync::valid_fixed_post_update(&catalog, &system_log)
+                || catalog.catalog_continuation.len() != topic.catalog_continuation.len()
                 || updated_at.timestamp_nanos_opt().is_none()
                 || next_scan_at.timestamp_nanos_opt().is_none()
                 || next_scan_at <= updated_at
@@ -255,15 +260,20 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
                 || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || topic.catalog_post_id == topic.system_log_post_id
+                || !super::catalog::valid_pages(
+                    &topic.catalog_post_id,
+                    &topic.system_log_post_id,
+                    &topic.catalog_continuation,
+                )
                 || topic.content_revision <= 0
-                || processed_through_post_number < 2
+                || processed_through_post_number < topic.system_log_post_number() as i32
                 || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)
                 || topic.content_claim_fencing <= 0
                 || topic.content_lease_until <= updated_at
                 || !super::sync::valid_fixed_post_update(&catalog, &system_log)
+                || catalog.catalog_continuation.len() != topic.catalog_continuation.len()
                 || updated_at.timestamp_nanos_opt().is_none()
             {
                 return Err(storage_error("论坛固定楼层进度参数无效"));
@@ -297,9 +307,13 @@ impl ForumReplyStore for DatabaseStore {
                 || !valid_decimal_id(&topic.thread_id, MAX_THREAD_ID_BYTES)
                 || !valid_decimal_id(&topic.catalog_post_id, MAX_FIXED_POST_ID_BYTES)
                 || !valid_decimal_id(&topic.system_log_post_id, MAX_FIXED_POST_ID_BYTES)
-                || topic.catalog_post_id == topic.system_log_post_id
+                || !super::catalog::valid_pages(
+                    &topic.catalog_post_id,
+                    &topic.system_log_post_id,
+                    &topic.catalog_continuation,
+                )
                 || topic.content_revision <= 0
-                || processed_through_post_number < 2
+                || processed_through_post_number < topic.system_log_post_number() as i32
                 || processed_through_post_number < topic.processed_through_post_number
                 || topic.content_claim_token.is_nil()
                 || !valid_text(&topic.content_claim_owner, 256)

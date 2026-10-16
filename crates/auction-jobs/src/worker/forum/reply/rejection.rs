@@ -1,7 +1,7 @@
-//! 论坛拒绝结果的安全英文投影；不改变竞价决定、幂等状态或重试分类。
+//! 论坛拒绝与警告的安全英文投影；不改变竞价决定、幂等状态或重试分类。
 //!
 //! 新拒绝按类型持久化错误码，旧通用拒绝只接受已知完整诊断格式。未知码和任意详情均回退，
-//! 不能把本地错误、SQL、凭据、代理上限或用户输入拼进固定 #2。
+//! 不能把本地错误、SQL、凭据、代理上限或用户输入拼进系统日志帖。
 
 use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
 use auction_domain::DomainError;
@@ -53,41 +53,45 @@ pub(super) fn rejection_message(
         Some(code) => code,
     };
     match code {
-        "already_leading" => {
-            ("already_leading", "Already leading this lot; another ordinary bid is not allowed.")
-        }
+        "already_leading" => (
+            "already_leading",
+            "Bidder was already leading this lot when processed; this additional ordinary bid was not accepted. Check the latest leader before bidding again.",
+        ),
         "bid_too_low" => (
             "bid_too_low",
-            "Bid is below the required minimum; check the current price and minimum increment.",
+            "Bid was below the required minimum when processed. Check the latest price and minimum increment, then submit a new reply with a valid bid; editing this reply will not retry it.",
         ),
         "invalid_amount" => (
             "invalid_amount",
-            "Invalid bid amount; check the amount format, credit grid and allowed range.",
+            "Invalid bid amount. Use a positive multiple of 1,000 credits within the auction limits, then submit a new reply; editing this reply will not retry it.",
         ),
-        "auction_closed" => {
-            ("auction_closed", "Bidding deadline has passed; this bid was not accepted.")
-        }
-        "lot_not_found" => {
-            ("lot_not_found", "Lot could not be found; check the auction and lot code.")
-        }
+        "auction_closed" => (
+            "auction_closed",
+            "The effective bidding deadline had passed when processed; this bid was not accepted. Check the final auction status; reposting cannot reopen bidding.",
+        ),
+        "lot_not_found" => (
+            "lot_not_found",
+            "Auction lot could not be found. Check the latest catalog and auction status before submitting a new reply with the correct lot code.",
+        ),
         "bidder_ineligible" => (
             "bidder_ineligible",
-            "Bidder is not eligible to bid; contact the auction administrator.",
+            "Bidder was not eligible when processed; this command was not accepted. Contact the auction administrator before bidding again.",
         ),
         "state_changed" => (
             "state_changed",
-            "Auction or lot state has changed; check the latest status before placing a new bid.",
+            "Auction or lot state changed; this command was not accepted. Check the latest status before submitting a new reply.",
         ),
-        "invalid_state" => {
-            ("invalid_state", "Current auction or lot state does not allow this command.")
-        }
+        "invalid_state" => (
+            "invalid_state",
+            "This command could not be applied in the current auction or lot state. Check the latest status; contact the auction administrator if bidding should be available.",
+        ),
         "command_conflict" => (
             "command_conflict",
-            "Command conflicts with an existing request; contact the auction administrator.",
+            "This command conflicts with an earlier request. Check the recorded result and contact the auction administrator with the post and line number; do not repost blindly.",
         ),
         "capability_unavailable" => (
             "capability_unavailable",
-            "This operation is not available; contact the auction administrator.",
+            "This operation is unavailable. Contact the auction administrator with the post and line number before trying again.",
         ),
         "active_proxy_exists" => (
             "active_proxy_exists",
@@ -103,36 +107,129 @@ pub(super) fn rejection_message(
         ),
         "proxy_maximum_not_lower" => (
             "proxy_maximum_not_lower",
-            "New proxy maximum must be lower than the existing maximum.",
+            "New proxy maximum must be lower than the existing maximum; manage proxy settings on the auction website.",
         ),
         "proxy_maximum_below_binding" => (
             "proxy_maximum_below_binding",
-            "New proxy maximum cannot be below the amount already committed.",
+            "New proxy maximum cannot be below the amount already committed; review proxy settings on the auction website.",
         ),
         "proxy_reentry_maximum_not_higher" => (
             "proxy_reentry_maximum_not_higher",
-            "Proxy re-entry requires a higher maximum than the previous authorization.",
+            "Proxy re-entry requires a higher maximum than the previous authorization; review proxy settings on the auction website.",
         ),
-        "proxy_disabled" => ("proxy_disabled", "Proxy bidding is disabled for this auction."),
-        "proxy_outbid_limit" => ("proxy_outbid_limit", "Proxy re-entry limit has been reached."),
-        "proxy_slow_final" => {
-            ("proxy_slow_final", "A slow proxy cannot be started during the final phase.")
-        }
+        "proxy_disabled" => (
+            "proxy_disabled",
+            "Proxy bidding is disabled for this auction; check the auction rules on the website.",
+        ),
+        "proxy_outbid_limit" => (
+            "proxy_outbid_limit",
+            "Proxy re-entry limit has been reached; check your proxy status on the auction website.",
+        ),
+        "proxy_slow_final" => (
+            "proxy_slow_final",
+            "A slow proxy cannot be started during the final phase; check the auction status on the website.",
+        ),
         "request_hash_failed" => (
             "request_hash_failed",
-            "Notification request could not be prepared; contact the auction administrator.",
+            "Notification request could not be prepared. Check the bid result separately; contact the auction administrator with the post and line number. Do not repeat a bid to request a notification.",
         ),
         "owner_result_invalid" => (
             "owner_result_invalid",
-            "Notification service returned an invalid result; check the bid result separately.",
+            "Notification result could not be confirmed. Check the bid result separately; contact the auction administrator with the post and line number. Do not repeat a bid to request a notification.",
         ),
         "notification_rejected" => (
             "notification_rejected",
-            "Notification request was rejected; check the bid result separately.",
+            "Notification request was rejected. Check the bid result separately; contact the auction administrator with the post and line number. Do not repeat a bid to request a notification.",
         ),
-        _ => {
-            ("command_rejected", "Command rejected; contact the auction administrator for details.")
-        }
+        _ => (
+            "command_rejected",
+            "Command rejected. Check the recorded auction result and contact the auction administrator with the post and line number before trying again.",
+        ),
+    }
+}
+
+/// 返回解析器与主题处理警告的闭集英文投影；未知码和原始详情均不得回显。
+///
+/// pending 只表示处理未完成，不证明出价已接受或未接受；通知重试前可能已有成功出价。
+/// 代理行仍由解析器静默忽略，本函数不产生新警告，也不改变命令或重试策略。
+pub(super) fn warning_message(code: &str) -> (&'static str, &'static str) {
+    match code {
+        "edited_post_ignored" => (
+            "edited_post_ignored",
+            "Edited post ignored; edits cannot create or correct commands and do not undo earlier accepted bids. Submit corrections in a new reply; check any earlier result first to avoid duplicates.",
+        ),
+        "invalid_command" => (
+            "invalid_command",
+            "Line not applied: start with a catalog lot code followed by a bid amount, for example One01 100k. Use the actual lot code and a valid bid in a new reply; editing this reply will not retry it.",
+        ),
+        "missing_action" => (
+            "missing_action",
+            "Line not applied: lot code needs a bid amount or notify command. Submit the complete line in a new reply; editing this reply will not retry it.",
+        ),
+        "unknown_lot" => (
+            "unknown_lot",
+            "Line not applied: at least one lot code is absent from the catalog. Check every code on this line against the latest catalog, then correct it in a new reply; editing this reply will not retry it.",
+        ),
+        "invalid_action" => (
+            "invalid_action",
+            "Line not applied: unrecognized action or invalid amount. For a bid, use a positive multiple of 1,000 credits, such as 100k or 1m, within auction limits. Submit corrections in a new reply; editing this reply will not retry it.",
+        ),
+        "extra_words" => (
+            "extra_words",
+            "Line not applied: unexpected text after the command. Use lot codes followed by a bid amount and optional notify, notify pm or notify mm, without commentary. Submit corrections in a new reply; editing this reply will not retry it.",
+        ),
+        "invalid_notify" => (
+            "invalid_notify",
+            "Entire line not applied, including any bid: notify allows only no suffix, pm or mm. Remove other text and submit the corrected line in a new reply; editing this reply will not retry it. Forum PM delivery is unavailable.",
+        ),
+        "invalid_catalog_row" => (
+            "invalid_catalog_row",
+            "Catalog row ignored because its lot code is invalid. Ask the auction administrator to check the catalog; do not bid on this row until corrected.",
+        ),
+        "invalid_start_price" => (
+            "invalid_start_price",
+            "Catalog custom start price could not be parsed; the parser used its default. Ask the auction administrator to confirm the authoritative start price before bidding.",
+        ),
+        "identity_missing" => (
+            "identity_missing",
+            "Commands in this post were skipped because the author's forum account could not be identified. Contact the auction administrator with the post number before submitting another bid.",
+        ),
+        "identity_unavailable" => (
+            "identity_unavailable",
+            "Commands in this post were skipped because the forum/MM player name could not be linked to an eligible auction user. Contact the auction administrator to resolve the account link before bidding again.",
+        ),
+        "identity_processing_pending" => (
+            "identity_processing_pending",
+            "Identity processing is pending, not confirmation of bid acceptance. Processing stopped here and will retry; later commands are waiting. Do not edit or repost while waiting, to avoid duplicate requests.",
+        ),
+        "admin_command_not_supported" => (
+            "admin_command_not_supported",
+            "start and cancel were not applied: these are Admin-only operations, not forum commands. Contact the auction administrator; a forum cancel cannot undo an accepted bid.",
+        ),
+        "forum_pm_unavailable" => (
+            "forum_pm_unavailable",
+            "Forum PM notifications are unavailable. MM notification processing is separate; check the bid result independently. Do not repeat a bid to request a notification.",
+        ),
+        "mm_notification_unavailable" => (
+            "mm_notification_unavailable",
+            "MoogleMail notifications are unavailable. Check the bid result separately and contact the auction administrator about notifications; do not repeat a bid to request one.",
+        ),
+        "lot_mapping_missing" => (
+            "lot_mapping_missing",
+            "Command for this lot was skipped because the catalog code could not be matched to an auction lot. Ask the auction administrator to check the catalog; other lots on this line may have separate results.",
+        ),
+        "command_processing_pending" => (
+            "command_processing_pending",
+            "Command processing is pending, not confirmation of bid acceptance. Processing stopped here and will retry; later commands are waiting. A bid may already have succeeded before notification processing stopped. Check results; do not edit or repost while waiting.",
+        ),
+        "command_pending" => (
+            "command_pending",
+            "Pending is not confirmation of acceptance; processing will retry. Check the bid result separately if this is a notification request. Do not edit or repost while waiting, to avoid duplicate requests.",
+        ),
+        _ => (
+            "forum_warning",
+            "This post needs review. Check the recorded auction result and contact the auction administrator with the post and line number before trying again.",
+        ),
     }
 }
 

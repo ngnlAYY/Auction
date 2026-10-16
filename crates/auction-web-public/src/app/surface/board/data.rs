@@ -19,6 +19,7 @@ pub(crate) fn AuctionData(
     let active_category =
         use_memo(move || query_state_signal().category.clone().unwrap_or_else(|| "all".to_owned()));
     let page_number = use_memo(move || query_state_signal().page.max(1));
+    let requested_page_size = use_memo(move || query_state_signal().page_size);
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
     let mut refresh_generation = use_context::<Signal<u64>>();
     let should_refresh_at_open = !historical && auction.presentation_mode != "live";
@@ -74,7 +75,8 @@ pub(crate) fn AuctionData(
         let category = active_category();
         let page = page_number();
         let category = (category != "all").then_some(category);
-        async move { fetch_current_lots(auction_id, category, page).await }
+        let page_size = requested_page_size();
+        async move { fetch_current_lots(auction_id, category, page, page_size).await }
     });
     use_bid_refresh(lots, true);
     // 目录行是 lots 快照的纯派生：用 memo 收敛为仅在资源结果变化时重建，
@@ -147,11 +149,21 @@ pub(crate) fn AuctionData(
                 }
             }
         }
-        Some(Ok(_)) if !aligned => rsx! {
-            p { class: "public-page-status", role: "status", {t!("common-loading")} }
-        },
+        Some(Ok(page))
+            if !aligned
+                || !public_page_matches(
+                    page.page,
+                    page.page_size,
+                    page_number(),
+                    requested_page_size(),
+                ) =>
+        {
+            rsx! {
+                p { class: "public-page-status", role: "status", {t!("common-loading")} }
+            }
+        }
         Some(Ok(page)) => {
-            let page_size = page.page_size.filter(|size| *size > 0).unwrap_or(20);
+            let page_size = page.page_size.unwrap_or(requested_page_size());
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
             let has_more = page.total.is_none()
@@ -180,6 +192,7 @@ pub(crate) fn AuctionData(
                             QueryWriteMode::Push,
                         );
                     },
+                    on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                     page_total: page.total,
                     page_size,
                     has_more,

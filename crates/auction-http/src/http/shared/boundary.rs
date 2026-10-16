@@ -281,8 +281,10 @@ fn resolve_client_address(
 ) -> IpAddr {
     let fallback =
         peer.map(|value| canonical_ip(value.ip())).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let peer_is_trusted = boundary.trusted_unix_proxy
-        || boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&fallback));
+    let peer_is_trusted = match peer {
+        None => boundary.trusted_unix_proxy,
+        Some(_) => boundary.trusted_proxy_cidrs.iter().any(|network| network.contains(&fallback)),
+    };
     if !peer_is_trusted {
         return fallback;
     }
@@ -337,7 +339,14 @@ fn error_response(
 }
 
 fn finish_response(mut response: Response, request_id: &str) -> Response {
+    let cdn_policy = crate::assets::cdn_cache_policy(&response);
     let headers = response.headers_mut();
+    // CDN 策略独立于浏览器 no-cache 契约；默认拒绝缓存，只有静态 handler 的私有标记可放行。
+    headers.insert("cdn-cache-control", cdn_policy.clone());
+    headers.insert("cloudflare-cdn-cache-control", cdn_policy);
+    if !headers.contains_key(header::CACHE_CONTROL) {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     if let Ok(value) = HeaderValue::from_str(request_id) {
         headers.insert(REQUEST_ID_HEADER, value);
     }

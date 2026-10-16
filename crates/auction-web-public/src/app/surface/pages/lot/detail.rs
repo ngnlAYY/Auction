@@ -62,13 +62,14 @@ pub(crate) fn LiveLotDetailView(
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let bid_page = use_memo(move || query_state_signal().page.max(1));
+    let page_size = use_memo(move || query_state_signal().page_size);
     let bid_log = use_resource({
         let auction_id = auction_id.clone();
         let lot_id = lot.id.clone();
         move || {
             let _ = refresh_generation();
             let page = bid_page();
-            fetch_lot_bid_log(auction_id.clone(), lot_id.clone(), page)
+            fetch_lot_bid_log(auction_id.clone(), lot_id.clone(), page, page_size())
         }
     });
     use_bid_refresh(bid_log, true);
@@ -174,24 +175,22 @@ pub(crate) fn LiveLotDetailView(
                             }
                         }
                     },
+                    Some(Ok(page)) if !public_page_matches(page.page, page.page_size, bid_page(), page_size()) => rsx! {
+                        p { role: "status", {t!("data-loading")} }
+                    },
                     Some(Ok(page)) => rsx! {
                         if page.bids.is_empty() {
                             p { class: "public-auction-lot__none", {t!("lot-no-bids")} }
                         } else {
                             BidHistoryTable { page: page.clone() }
                         }
-                        Pager {
+                        PublicPager {
                             page: bid_page(),
                             page_size: page.page_size,
                             total: page.total,
                             has_more: page.has_more.unwrap_or(false),
                             label: t!("lot-bid-history"),
-                            previous_label: t!("catalog-previous"),
-                            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                            next_label: t!("catalog-next"),
-                            jump_label: t!("catalog-page-input"),
-                            jump_button_label: t!("catalog-page-go"),
-                            on_page_change: move |next_page| {
+                            on_page_size_change: move |size| update_public_page_size(query_state_signal, size),                            on_page_change: move |next_page| {
                                 update_public_query_state(
                                     query_state_signal,
                                     |query| query.page = next_page,

@@ -101,7 +101,9 @@ Public 竞价/代理、Admin 生命周期和管理 mutation 的追加式审计�
 提取 W3C trace context，记录请求级访问日志，隔离 panic，设置安全响应头，执行默认 15 秒处理
 超时和固定 5 秒 HTTP/1 请求头读取超时。`/api/v1/ws` 不受处理超时限制。客户端地址只在 TCP peer
 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链
-整体丢弃。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
+整体丢弃。Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer；地址链从右向左跳过受信代理。
+`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；
+Cloudflare 经 Caddy 清洗为可信 XFF 后再交给应用，见[部署约束](../../ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译；内联样式例外用于 Dioxus 首屏防闪样式和组件 style
 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
 
@@ -116,9 +118,16 @@ Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
 
 缓存策略适配 Dioxus 稳定 WASM 文件名：Public 普通公开读取（含 P15 forum）为 `no-cache`；
 P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；
-浏览器路由入口为 `no-store`，直接静态文件中只有 `assets/` 指纹资源使用一年 `immutable`，
-`index.html`、`wasm/*.js`、`*.wasm` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与
-`If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
+浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML
+指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用
+`no-cache`、`Last-Modified` 与 `If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
+
+正式 Public/Admin 边界另统一发送 `CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`：默认 `no-store`，
+包括所有 API（即使浏览器策略为 `no-cache`）、登录、管理/私有数据、探针、错误和 WebSocket 握手。
+仅精确静态 handler 的私有响应标记允许 CDN 沿用该资源的缓存策略；不能凭路径后缀或 API 的 `public`
+缓存头放行。未自行声明浏览器缓存策略的边界错误等响应补 `Cache-Control: no-store`。
+首次设置静态入口也固定 CDN `no-store`，不纳入正式站点 CDN 白名单。边缘必须尊重源站头，不能配置
+Cache Everything/强制 Edge TTL 等覆盖，具体静态白名单和上线限制见[运维契约](../../ops/README.md#cloudflare-整站代理)。
 
 ## Public
 
@@ -161,6 +170,15 @@ Public `/forum` 每 30 秒重读 P21，关闭提示优先于无拍卖/未开拍�
 
 
 ### Public 分页、世界与金额
+
+Public 浏览器目录、往期拍卖、出价记录（含装备详情）、成交价、黑名单及补偿池使用 URL `page`/`page_size`，
+默认 10 条，保留 10/20/50/100 预设，允许自定义 1–200 正整数；输入非法不提交，URL 非法数量回退 10。
+URL 明确值优先于本地偏好，缺失时恢复 `hv.public.page-size`；仅用户确认数量才保存，存储不可用不阻断页面。
+切换数量回首页并保留其他筛选；写回及离开历史条目明确保留数量（包括 10），不让新偏好改写已有分页语义。
+数字页码和跳页遵守现有 offset 上限，不削减权威 total。
+补偿池展开项用 `auction` 标识，流水用独立 `movement_page`/`movement_page_size` 与 `hv.public.movement-page-size` 偏好；API 请求仍映射成已有
+P14 的 `page`/`page_size`，不新增后端参数。刷新和前进/后退恢复选择，缺 total 的投影不得显示伪造总数。
+本项只新增/规范浏览器查询状态，不改变 HTTP 参数上限、DTO、事件或数据库。
 
 Public 分页必须保留已发布的 page/page_size 与 cursor 语义。P07 拍卖编号页的 `total` 表示完整
 筛选集总数，与当前页来自同一读取快照；越界空页不改为 0。cursor 页不执行或返回总数统计。
@@ -464,10 +482,13 @@ A45/A46 需要 Admin 会话、拒绝非空查询，始终 `no-store`；只读取
 A45 无有效 Worker 观测返回 `503 forum_sync_unavailable`；未装配存储、读取失败或无效投影返回 `503 storage_unavailable`，
 后端明确能力缺失返回 `501 feature_not_supported`。A46 接受规范非零 UUID，否则 `400 invalid_auction_id`；
 没有可读镜像为 `404 not_found`，不是发布失败。管理页可选择本页拍卖手动刷新，不能用刷新解除人工写入门禁。
+分页论坛主题的 `body` 仍是首帖正文，不拼接目录续页；完整目录/更新楼从主题链接查看，HTTP 字段不变。
 
 A05 `/api/v1/admin/auction-forum/preview` 已接入 Admin session、origin/CSRF 边界和 2 MiB
 请求体上限；请求必须在 `html` 与 `text` 中恰好选择一个非空输入，由本地论坛解析器返回
-catalog、posts 和 warnings。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
+catalog、posts 和 warnings。catalog 合并紧邻首帖、同作者且拍卖/页码标记匹配的续页，posts 保留全部回帖及真实顺序，
+HTML 路径要求同一数字作者 ID；纯文本预览只比较可选作者标签，不能进入 Worker 远端导入路径。
+不根据正文标记授予写入权限或跳过用户命令。该接口只做内存预览，不抓取远程页面、不发布回帖、不写数据库；
 输入无效或解析失败返回 400。远程主题发布/读取、回帖竞价导入和通知由 Worker 的独立论坛 owner
 负责，已经接入逐主题持久化调度/健康、命令账本和不确定结果停靠；历史世界级回帖 cursor 只保留
 历史 schema，不是当前写入 owner。这些能力不属于该预览接口的职责。

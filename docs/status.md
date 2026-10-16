@@ -21,7 +21,7 @@
 | HTTP 与页面 | Public 21、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | SQLite 历史资产 | 运行支持已移除，保留已发布迁移与已有测试 | 保留文件或锁图可选依赖意味着当前支持 SQLite |
-| 迁移 | PostgreSQL 39 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 40 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -52,6 +52,77 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
+
+### 2026-10-16 Public 数量偏好、论坛计时器与本地隔离启动
+
+Public 指定列表使用统一数字分页，保留 10/20/50/100 预设并支持 1–200 正整数；`surface/pagination/`
+拥有 URL 优先级和本地偏好，共享 `components/pager/size.rs` 只拥有输入、校验与可访问交互，Admin 分页不变。
+批次和流水偏好独立；非法输入不请求、不保存，浏览器历史明确保留默认数量，首页入口在导航时读取最新偏好。
+独立静态审查发现并修复出价筛选失焦与末页超出 API offset 上限；定向复审无剩余问题。
+论坛 `render/countdown.rs` 仅为首帖添加 List/Auction Timer，读取本场时间并保留 UTC 文字兜底；无后端请求或网站首页计时器。
+数量、偏好与浏览器状态契约见 [Public 设计](../crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
+
+完整 `just verify`（45 份文档）、本次修改 Rust 文件主动 LSP、差异检查、两端 `just web-build` 通过。
+`auction-server` 与 `auctionctl` 以 `--locked --release --features postgres,web-embed` 编译；
+首页链接修复后重建 Public payload，并清理对应装配根的 release 缓存后重编内嵌 server，未复用旧页面制品。
+
+经用户明确要求，在仓库外 `Auction-Test/local-test/` 建立 PostgreSQL 18.6 专用新库与三角色合并服务：
+仅监听回环 55432/18090/18091，缓存、论坛、邮件扫描/发送、告警、自动排期与 OTLP 关闭，装备远程读取失败关闭。
+未读取、复用或修改上级云端敏感配置，不连接原有数据库或云端服务，不安装系统服务或 Caddy。
+角色配置及严格部署预检通过；真实 server 在空库 schema 门禁处退出并建立 owner 锁，确认无角色进程、
+零用户关系及零其他客户端后显式执行 `migrate-managed`。本地迁移账本为 40 项成功、最新版本 40，
+随后 Public/Admin readiness 均为 200；这不代表云端已迁移，旧库兼容迁移仍未获本次运行证据。
+
+按用户允许的浏览器调试范围，仅核对隔离空列表：0、负数、小数、科学计数法、加号、空白、空值、字母及 201 均禁用提交，
+1/200 可提交；37 保存后重新进入及往期拍卖恢复，明确 URL=10 优先且不覆盖偏好，返回旧条目恢复 10。
+首页旧链接冻结数量的问题在本次浏览器核对中发现并修复，重编后链接只含世界参数；中文正整数提示正常。
+Admin 登录页可渲染；未登录、出价、造装备数据、真实发帖或寄信，未新增或运行自动行为测试套件。
+同次空页快照仍出现首屏“加载较慢”提示，虽页面已渲染且服务就绪，其提示生命周期不在本任务修复范围内。
+原始证据保留于本地环境的 `logs/` 与 `state/`，包括构建/预检/迁移日志、制品 SHA-256、readiness 和浏览器检查记录。
+论坛第三方图片的真实展示及 BBCode 回读、带业务数据的全列表翻页与外部流程仍未验证。
+
+随后按用户要求，将本地 Public/Admin 监听改为 `0.0.0.0:18090/18091`，精确 Origin 增加本机局域网地址，
+数据库仍仅回环、Worker control 仍为私有 Unix socket；未开放任意 Origin、修改防火墙或启用外部集成。
+仅改仓库外部署配置并重启该隔离实例，无 Rust/HTTP DTO/数据库迁移变化。角色检查及严格部署预检通过，
+本机经回环与局域网地址请求两端 readiness 和局域网页面均为 200；未从其他设备验证路由/防火墙可达性。
+仍为无 TLS 的 HTTP 测试环境，只能在受信网络访问，不应映射公网；证据为本地 `state/readiness-all-interfaces.json`。
+
+### 2026-10-16 Cloudflare 与 Caddy Unix 上游
+
+`auction-http` 为正式 Public/Admin 响应默认发送两种 CDN 禁止缓存头，仅静态 handler 的私有标记可放行；
+API 浏览器缓存契约保持，HTML/入口禁止缓存，稳定 favicon 每次再验证。Unix listener 不再伪造 TCP peer，
+Unix 信任开关不放宽真实 TCP 连接。无新增依赖、配置字段或 HTTP/实时 DTO，TLS/地址清洗由 Caddy 拥有，
+精确 Origin、Secure Cookie 与 CDN 响应策略仍归 HTTP；完整部署约束见[运维手册](../ops/README.md#cloudflare-整站代理)。
+
+集成后完整 `just verify`（45 份文档）通过，4 个 HTTP Rust 文件主动 LSP 无诊断。
+仓库 Caddy 示例与本地部署配置副本均通过 `caddy adapt`，仅解析配置，不启动或 provision 服务。
+部署副本只修改 Public/Admin listener/security、Caddy 和两个 unit，另增 socket 目录定义、Caddy 组权限及说明；
+已核对非目标 TOML 区块未变，原件备份目录 0700、文件 0600，不读改敏感配置。
+
+后续按用户要求移除仓库模板及本地 Caddy 的 Cloudflare 来源 IP 拦截；CIDR 只用于代理地址头信任，直连使用真实连接 IP。
+该配置调整通过两份 `caddy adapt`、JSON 静态核对、文档与差异检查；未改 Rust 或 CDN 缓存范围，未重新运行整套编译门禁。
+
+后续按用户要求将部署副本的应用/HTTP socket 统一为 `ngnl:ngnl`，移除额外 socket 组，Caddy 保持原用户并附加 `ngnl` 组。
+五份非敏感 TOML、三份 unit、Caddy drop-in 与 tmpfiles 定义完成静态核对，Caddy 适配和文档检查通过；未改业务策略。
+副本权限审计发现三个敏感 TOML 为 0644、部署 state 目录为 0755：前者不满足严格部署预检，后者若用作总控状态目录也会被拒绝。
+既有权限只报告、未自动修改；本轮新建部署模板已设为 0644。未读取敏感正文，数据库目标/数据密钥一致性未验证。
+Worker control 的 UID 1000 只与本机账号核对，仍须验证云端 UID；Redis 制品 feature、目录安装和 Cloudflare 控制面也未获运行证据。
+
+本节不代表已安装或上线：未创建用户组、安装 unit/目录定义、重启服务、签发证书、修改 Cloudflare 控制面或运行行为测试。
+云端权限、证书续期、真实客户端 IP、缓存命中/排除、WAF、登录及 WebSocket 恢复仍缺运行证据；代码不能抵御错误 CDN 规则强制缓存。
+
+### 2026-10-16 论坛目录分页与更新楼诊断
+
+新主题目录每帖最多 150 件，从 #1 连续分页；系统更新楼位于最后一页之后，用户出价再从下一楼开始。
+application 定义冻结布局与续页端口，integrations 负责分页/完整目录解析及限长日志，jobs 负责逐帖对账和命令导入，
+storage 的 `forum/catalog.rs` 与追加迁移 `000040` 持久化续页身份/正文，全部证明与主记录同事务、同一 revision CAS 收口。
+旧已尝试、已发布及未知写入主题保持单页并继续处理，不挪动已有出价；仅未尝试且无远端身份的队列项及新主题启用分页。
+更新楼错误提示改为安全白名单和操作建议，区分待重试、警告、忽略，最多展示 100 条且受字节预算限制；省略不代表解决。
+HTML 目录合并保留数字作者门禁；纯文本预览单独处理非权威作者标签。HTTP DTO 不增加字段，正文投影仍为首帖。
+
+论坛变更已通过完整 `just verify`（45 份文档）、29 个 Rust 文件主动 LSP 及差异检查。
+独立静态审查发现旧帖兼容和纯文本预览问题，修复后定向复审无剩余问题。
+未新增/扩展或执行行为测试，未执行迁移、发帖、启动服务或部署；尚无真实论坛多楼发布/抢楼/未知写入及 PostgreSQL 运行证据。
 
 ### 2026-10-15 Actions 门禁修复与下载制品
 

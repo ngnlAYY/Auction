@@ -21,12 +21,30 @@ use super::{ApplicationFuture, PublicEquipmentGameLink, PublicEquipmentLinkTarge
 /// 运维侧单次最多列出的论坛未知写入恢复项数。
 pub const MAX_FORUM_SYNC_RECOVERY_ITEMS: u16 = 100;
 
+/// 每个目录帖子最多展示的装备件数。
+pub const FORUM_CATALOG_PAGE_SIZE: usize = 150;
+
+/// 论坛快照的拍品总数边界；分页不能绕过总量限制。
+pub const MAX_FORUM_CATALOG_LOTS: usize = 10_000;
+
+/// 有界目录页数；与总量及每帖件数保持一致。
+pub const MAX_FORUM_CATALOG_PAGES: usize = MAX_FORUM_CATALOG_LOTS.div_ceil(FORUM_CATALOG_PAGE_SIZE);
+
 /// 返回固定 #1 的公开布局标记；用于确认首帖属于当前拍卖，而不是只依赖楼层位置。
 pub fn forum_catalog_marker(auction_id: AuctionId) -> String {
     format!("auction-catalog-v1:{}", auction_id.as_uuid())
 }
 
-/// 返回固定 #2 的公开布局标记；Worker 必须同时核对持久化 post ID，通用解析器不能按正文跳过帖子。
+/// 返回目录页的公开标记；首帖沿用历史标记，续页绑定拍卖与真实楼层。
+pub fn forum_catalog_page_marker(auction_id: AuctionId, post_number: usize) -> String {
+    if post_number == 1 {
+        forum_catalog_marker(auction_id)
+    } else {
+        format!("auction-catalog-page-v1:{}:{post_number}", auction_id.as_uuid())
+    }
+}
+
+/// 返回系统日志的公开布局标记；Worker 必须同时核对持久化 post ID，通用解析器不能按正文跳过帖子。
 pub fn forum_system_log_marker(auction_id: AuctionId) -> String {
     format!("auction-system-log-v1:{}", auction_id.as_uuid())
 }
@@ -116,13 +134,13 @@ pub struct ForumSyncClaim {
     pub claimed_at: DateTime<Utc>,
     pub lease_until: DateTime<Utc>,
     pub source_revision: i64,
-    /// 历史 published 主题的已持久化身份；仅用于首次补齐固定 #1/#2，不允许由标题猜测替代。
+    /// 历史 published 主题的已持久化身份；仅用于首次补齐固定楼层，不允许由标题猜测替代。
     pub existing_thread_id: Option<String>,
     /// 领取前的稳定失败码；过期 `publishing` 租约由存储适配器合成为 `write_unknown`。
     pub previous_failure_code: Option<String>,
 }
 
-/// 论坛固定 #1 中当前领先事实的可证明来源。
+/// 论坛目录中当前领先事实的可证明来源。
 ///
 /// 论坛来源只携带真实主题、帖子和楼层身份；代理只保留统一标记，不暴露 fast/slow 模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,10 +171,30 @@ pub struct ForumLotSnapshot {
     pub equipment_link_target: PublicEquipmentLinkTarget,
 }
 
+/// 首次发布前冻结的论坛目录布局；旧主题不因升级挪动日志或既有用户楼层。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForumCatalogLayout {
+    /// 已开始发布的历史主题保持单页，仍执行原正文长度上限。
+    LegacySingle,
+    /// 新主题从 #1 起每帖最多 150 件，更新楼在最后一页之后。
+    PagedV1,
+}
+
+impl ForumCatalogLayout {
+    /// 返回冻结布局的分帖边界；不能从当前装备数量猜测旧帖布局。
+    pub const fn page_size(self) -> usize {
+        match self {
+            Self::LegacySingle => MAX_FORUM_CATALOG_LOTS,
+            Self::PagedV1 => FORUM_CATALOG_PAGE_SIZE,
+        }
+    }
+}
+
 /// 论坛主题渲染所需的同源拍卖快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumAuctionSnapshot {
     pub auction_id: AuctionId,
+    pub catalog_layout: ForumCatalogLayout,
     pub world: SettlementWorld,
     pub sequence: i64,
     pub state_version: i64,
@@ -179,6 +217,8 @@ pub struct ForumRenderedThread {
     /// 旧版标题兼容值；仅用于标题迁移期间的精确只读对账。
     pub legacy_title: Option<String>,
     pub body: String,
+    /// 从 #2 起依次发布的目录续页；系统日志必须位于这些页面之后。
+    pub catalog_continuation: Vec<ForumRenderedPost>,
 }
 
 /// 固定论坛楼层的 BBCode 正文；内容可能包含公开装备 URL，`Debug` 始终脱敏。
@@ -201,6 +241,7 @@ impl fmt::Debug for ForumRenderedThread {
             .field("description", &self.description)
             .field("legacy_title", &self.legacy_title)
             .field("body", &"[REDACTED]")
+            .field("catalog_continuation", &self.catalog_continuation)
             .finish()
     }
 }
@@ -236,11 +277,13 @@ pub struct ForumPublishedPost {
     pub post_id: String,
 }
 
-/// 一场拍卖固定的论坛楼层布局：#1 目录，#2 系统编辑/错误记录。
+/// 一场拍卖固定的论坛楼层布局：连续目录页之后紧接系统编辑/错误记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumPublishedLayout {
     pub thread: ForumPublishedThread,
     pub catalog_post_id: String,
+    /// 按真实楼层顺序保存 #2 起的目录续页身份，不由 post ID 推算楼层。
+    pub catalog_continuation_post_ids: Vec<String>,
     pub system_log_post_id: String,
 }
 
@@ -341,7 +384,7 @@ pub trait ForumPublisher: Send + Sync {
 
 /// 固定论坛楼层写入端口；实现必须校验 exact thread/post 身份并保持 POST 后未知结果栅栏。
 pub trait ForumPostWriter: Send + Sync {
-    /// 在指定主题追加一条回复；仅用于建立固定 #2。
+    /// 在指定主题追加一条回复；仅用于按顺序建立目录续页与系统日志。
     fn reply_topic(
         &self,
         world: SettlementWorld,
@@ -388,16 +431,17 @@ pub trait ForumRenderer: Send + Sync {
         equipment_links: Vec<PublicEquipmentGameLink>,
     ) -> Result<ForumRenderedThread, ForumRenderError>;
 
-    /// 渲染固定 #2；水位只表示本轮已经完整处理到的连续楼层。
+    /// 渲染最后一个目录页之后的系统日志；水位只表示已经完整处理到的连续楼层。
     fn render_system_log(
         &self,
         auction_id: AuctionId,
+        catalog_page_count: usize,
         processed_through_post_number: usize,
         entries: Vec<ForumSystemLogEntry>,
     ) -> Result<ForumRenderedPost, ForumRenderError>;
 }
 
-/// 固定 #2 中展示的有界处理结果；正文只包含论坛公开帖子与安全错误摘要。
+/// 系统日志中展示的有界处理结果；正文只包含论坛公开帖子与安全错误摘要。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumSystemLogEntry {
     pub post_number: usize,

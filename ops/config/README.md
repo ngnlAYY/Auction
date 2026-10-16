@@ -17,6 +17,7 @@
 - [后端和拓扑](#后端和拓扑)
 - [缓存与拍卖模板](#缓存与拍卖模板)
 - [HTTP listener 与安全](#http-listener-与安全)
+- [Cloudflare 与 Unix 上游](#cloudflare-与-unix-上游)
 - [Public 实时 relay](#public-实时-relay)
 - [论坛与邮件](#论坛与邮件)
 - [Worker 循环预算](#worker-循环预算)
@@ -161,6 +162,75 @@ metrics 仅允许有效 loopback TCP 或 Unix listener，禁止经代理公开�
 `trusted_proxy_cidrs` 最多 64 个规范、不重复 CIDR，默认空时忽略 X-Forwarded-For；
 `trusted_unix_proxy` 仅用于有效 Unix listener，不放宽 TCP peer。同源 allowlist 默认启用。
 会话默认空闲/绝对期限：Public 30 分钟/7 天，Admin runtime 15 分钟/8 小时。
+
+## Cloudflare 与 Unix 上游
+
+[Cloudflare 部署](../README.md#cloudflare-整站代理)不新增配置字段；Caddy 终止源站 TLS 并清洗地址头，
+Rust 只信任有权限连接 Unix socket 的上游，不直接解释 `CF-Connecting-IP`、`Forwarded` 或 `X-Forwarded-Proto`。
+现有示例默认仍用于本地 TCP 开发，不可把关闭 Secure Cookie 或回环 origin 原样带入橙云 HTTPS 部署。
+
+以下部署示例统一使用 `ngnl:ngnl` 运行应用和拥有 socket；账号名称不是程序限制。
+Public `public.toml` 合并以下区块，其他公共/敏感引用保持不变：
+
+```toml
+# 可选区块：Cloudflare 经本机 Caddy 访问时选用 Unix listener。
+[listener]
+# 可选：启用 Unix 上游；默认 tcp。
+mode = "unix"
+# 可选：Unix 模式不使用 TCP address，保持空值。
+address = ""
+# 必填（Unix）：部署前建立为 ngnl:ngnl、0750 的受信目录。
+runtime_directory = "/run/hv-auction"
+# 必填（Unix）：直属 runtime 目录，不能与 Admin 或 Worker control 复用。
+socket_path = "/run/hv-auction/public.sock"
+# 必填（Unix）：复用 ngnl 组；Caddy 需具备该组权限，socket 固定 0660。
+group = "ngnl"
+
+# 可选区块：覆盖生产 HTTPS 安全参数，其余限流和超时沿用默认值。
+[http_security]
+# 可选：默认启用；橙云部署不得关闭精确 Origin 校验。
+allowed_origins_enabled = true
+# 必填（启用校验）：仅填写 Public 的精确 HTTPS origin，无路径。
+allowed_origins = ["https://auction.example.com"]
+# 可选：默认 false；生产 HTTPS 必须开启，不依赖转发头推导。
+cookie_secure = true
+# 可选：Unix 拓扑没有可信 TCP peer，保持默认空列表。
+trusted_proxy_cidrs = []
+# 可选：默认 false；只有受保护 Unix listener 才开启。
+trusted_unix_proxy = true
+```
+
+Admin 配置了 `runtime_config_file` 时，实际配置 owner 是该 runtime 的 `[listener]` 和 **`[security]`**，
+不是角色文件中的 `[http_security]`。在 runtime 合并同样的 listener（socket_path 改为
+`/run/hv-auction/admin.sock`），安全参数用：
+
+```toml
+# 可选区块：Admin runtime 的实际安全配置，不与 Public 共用 origin。
+[security]
+# 可选：默认启用；不得为代理部署关闭。
+allowed_origins_enabled = true
+# 必填（启用校验）：仅填写 Admin 的精确 HTTPS origin。
+allowed_origins = ["https://admin.auction.example.com"]
+# 可选：默认 false；生产 HTTPS 必须开启。
+cookie_secure = true
+# 可选：Unix 拓扑保持默认空列表。
+trusted_proxy_cidrs = []
+# 可选：默认 false；受保护 Unix listener 启用。
+trusted_unix_proxy = true
+```
+
+无 runtime 的 Admin 则改角色文件 `[listener]`/`[http_security]`，不要创建无效的 `[security]`。
+公共/敏感文件职责、Admin 会话与 CSRF 不变。Unix 目录/祖先权限和 systemd 限制仍须满足上一节，
+Public/Admin unit 使用 `User=ngnl`、`Group=ngnl`，不再需要额外 socket 组。目录由以下 tmpfiles 定义建立：
+
+```text
+d /run/hv-auction 0750 ngnl ngnl -
+```
+
+Caddy 保持原运行用户，在它的 systemd drop-in 设置 `SupplementaryGroups=ngnl`，不应改成以应用用户运行。
+共享组可以遍历目录、连接 socket，但不能写 runtime 目录；它也能访问其他 `ngnl` 组可读文件。
+因此敏感 TOML 保持 0600、敏感目录 0700，并严格控制该组成员；`trusted_unix_proxy` 信任所有能连接 socket 的进程，
+并非按 Caddy 进程名认证。更改后须安装目录定义、重载 unit 并受控重启才生效；文档修改不会操作主机。
 
 ## Public 实时 relay
 

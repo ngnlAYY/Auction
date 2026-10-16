@@ -280,19 +280,20 @@ pub use equipment_link::{
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
 pub use forum_reply::{
-    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCommandOutcome,
-    ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyStore, ForumReplyTopic,
-    ForumTopicReader,
+    ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,
+    ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyStore,
+    ForumReplyTopic, ForumTopicReader,
 };
 pub use forum_sync::{
-    ForumAuctionSnapshot, ForumCredentialAvailability, ForumCurrentBidSource, ForumLotSnapshot,
-    ForumPostWriter, ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread,
-    ForumPublisher, ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread,
-    ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
-    ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumWriteProgress,
-    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
-    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_post_bodies_match,
-    forum_system_log_marker, forum_world_name,
+    FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,
+    ForumCurrentBidSource, ForumLotSnapshot, ForumPostWriter, ForumPublishedLayout,
+    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError,
+    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
+    ForumSyncRecoveryPort, ForumSyncStore, ForumSystemLogEntry, ForumTopicMetadata,
+    ForumTopicPublication, ForumWriteProgress, ForumWriteRetryAuthorizationCommand,
+    ForumWriteRetryAuthorizationResult, MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES,
+    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_catalog_page_marker,
+    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,

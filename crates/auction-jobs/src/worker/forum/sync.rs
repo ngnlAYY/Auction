@@ -6,16 +6,18 @@
 use std::sync::{Arc, OnceLock};
 
 use auction_application::{
-    ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedLayout,
-    ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderedPost, ForumRenderedThread,
-    ForumRenderer, ForumSyncClaim, ForumSyncStore, ForumTopicMetadata, ForumTopicPublication,
-    ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError, forum_catalog_marker,
-    forum_post_bodies_match, forum_system_log_marker,
+    ApplicationError, Clock, ForumCredentialAvailability, ForumPostWriter, ForumPublishedThread,
+    ForumPublisher, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncStore,
+    ForumTopicPublication, ForumTopicReader, PublicEquipmentLinkResolver, RepositoryError,
 };
 use chrono::Duration;
 use url::Url;
 
 use super::{PersistentWorker, WorkerError};
+
+#[path = "sync/layout.rs"]
+mod layout;
+use layout::{FixedLayoutRequest, ensure_fixed_layout};
 
 const MAX_BATCH_SIZE: u16 = 100;
 const RETRY_DELAY: Duration = Duration::minutes(1);
@@ -260,7 +262,13 @@ where
             return Err(WorkerError::ForumTopicProcessingFailed);
         }
     };
-    let system_log = match renderer.render_system_log(auction_id, 2, Vec::new()) {
+    let catalog_page_count = rendered.catalog_continuation.len() + 1;
+    let system_log = match renderer.render_system_log(
+        auction_id,
+        catalog_page_count,
+        catalog_page_count + 1,
+        Vec::new(),
+    ) {
         Ok(rendered) => rendered,
         Err(error) => {
             record_failure(
@@ -405,198 +413,6 @@ async fn find_reconciliation_topic(
         return Ok(None);
     }
     publisher.find_topic_by_title(world, legacy_title.to_owned()).await
-}
-
-struct FixedLayoutRequest {
-    world: auction_domain::SettlementWorld,
-    auction_id: auction_domain::AuctionId,
-    published: ForumPublishedThread,
-    catalog: ForumRenderedThread,
-    system_log: ForumRenderedPost,
-    allow_layout_writes: bool,
-    allow_content_update: bool,
-    catalog_written: bool,
-    verify_post_body: bool,
-    legacy_thread_id: Option<String>,
-}
-
-async fn ensure_fixed_layout(
-    reader: Arc<dyn ForumTopicReader>,
-    writer: Arc<dyn ForumPostWriter>,
-    request: FixedLayoutRequest,
-) -> Result<ForumPublishedLayout, ApplicationError> {
-    let FixedLayoutRequest {
-        world,
-        auction_id,
-        published,
-        catalog,
-        system_log,
-        allow_layout_writes,
-        allow_content_update,
-        mut catalog_written,
-        verify_post_body,
-        legacy_thread_id,
-    } = request;
-    let mut preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
-    let catalog_marker = forum_catalog_marker(auction_id);
-    let system_log_marker = forum_system_log_marker(auction_id);
-    if !preview.catalog_post_text.contains(&catalog_marker) {
-        let belongs_to_other_auction = preview.catalog_post_text.contains("auction-catalog-v1:");
-        let legacy_proof_matches =
-            legacy_thread_id.as_deref() == Some(published.thread_id.as_str());
-        if belongs_to_other_auction || !legacy_proof_matches {
-            return Err(fixed_layout_error("fixed_layout_conflict", false));
-        }
-        // 未知写入恢复只能读取；历史布局升级也不能借此绕过人工授权再次 POST。
-        if !allow_layout_writes {
-            return Err(fixed_layout_error("write_authorization_required", false));
-        }
-        let proof = writer
-            .edit_post(
-                world,
-                published.thread_id.clone(),
-                preview.catalog_post_id.clone(),
-                Some(ForumTopicMetadata {
-                    title: Some(catalog.title.clone()),
-                    description: Some(catalog.description.clone()),
-                }),
-                ForumRenderedPost { body: catalog.body.clone() },
-            )
-            .await?;
-        if proof.thread_id != published.thread_id || proof.post_id != preview.catalog_post_id {
-            return Err(fixed_layout_error("write_unknown", true));
-        }
-        preview = reader.fetch_topic(world, published.thread_id.clone()).await?;
-        if preview.catalog_post_id != proof.post_id
-            || !preview.catalog_post_text.contains(&catalog_marker)
-        {
-            return Err(fixed_layout_error("write_unknown", true));
-        }
-        catalog_written = true;
-    }
-    let catalog_post_id = preview.catalog_post_id.clone();
-    let (system_log_post_id, system_log_written) = if let Some(second) = preview.posts.first() {
-        if !second.post.text.contains(&system_log_marker) {
-            return Err(fixed_layout_error("fixed_layout_conflict", false));
-        }
-        // 即使目录是本轮新建，现存 #2 也不是本轮回复回执；不能把旧日志记成本轮目标。
-        if !verify_post_body && !allow_content_update {
-            return Err(fixed_layout_error("write_authorization_required", false));
-        }
-        (second.post.id.clone(), false)
-    } else {
-        if !allow_layout_writes {
-            return Err(fixed_layout_error("write_authorization_required", false));
-        }
-        let proof =
-            writer.reply_topic(world, published.thread_id.clone(), system_log.clone()).await?;
-        if proof.thread_id != published.thread_id {
-            return Err(fixed_layout_error("write_unknown", true));
-        }
-        let confirmed = reader.fetch_topic(world, published.thread_id.clone()).await?;
-        let Some(second) = confirmed.posts.first() else {
-            return Err(fixed_layout_error("write_unknown", true));
-        };
-        if confirmed.catalog_post_id != catalog_post_id
-            || second.post.id != proof.post_id
-            || !second.post.text.contains(&system_log_marker)
-        {
-            return Err(fixed_layout_error("fixed_layout_conflict", false));
-        }
-        (proof.post_id, true)
-    };
-
-    if !verify_post_body && !allow_layout_writes {
-        // 现存帖子 ID 不能证明未知 POST 已写入哪一版；关闭正文校验后等待人工授权，
-        // 不能把恢复期间新生成、尚未发送的镜像当作已同步正文持久化。
-        return Err(fixed_layout_error("write_authorization_required", false));
-    }
-    // 关闭正文校验时，新发布/授权编辑以精确回执和布局确认身份，不声明正文逐字一致。
-    // 未知结果不能借关闭校验伪造完成；只有显式授权才允许更新已经找到的固定帖。
-    let policy = FixedPostPolicy {
-        verify_body: verify_post_body,
-        allow_update: allow_content_update,
-        write_confirmed: catalog_written,
-    };
-    reconcile_or_update_fixed_post(
-        writer.as_ref(),
-        world,
-        &published.thread_id,
-        &catalog_post_id,
-        Some(ForumTopicMetadata {
-            title: Some(catalog.title.clone()),
-            description: Some(catalog.description.clone()),
-        }),
-        ForumRenderedPost { body: catalog.body },
-        policy,
-    )
-    .await?;
-    reconcile_or_update_fixed_post(
-        writer.as_ref(),
-        world,
-        &published.thread_id,
-        &system_log_post_id,
-        None,
-        system_log,
-        FixedPostPolicy { write_confirmed: system_log_written, ..policy },
-    )
-    .await?;
-    Ok(ForumPublishedLayout { thread: published, catalog_post_id, system_log_post_id })
-}
-
-#[derive(Clone, Copy)]
-struct FixedPostPolicy {
-    verify_body: bool,
-    allow_update: bool,
-    /// 仅指本轮目标正文的创建/编辑/回复回执，不是历史帖子身份。
-    write_confirmed: bool,
-}
-
-/// 已有远端布局证明后，按配置核对正文；任何内容更新仍须本轮人工授权。
-async fn reconcile_or_update_fixed_post(
-    writer: &dyn ForumPostWriter,
-    world: auction_domain::SettlementWorld,
-    thread_id: &str,
-    post_id: &str,
-    metadata: Option<ForumTopicMetadata>,
-    expected: ForumRenderedPost,
-    policy: FixedPostPolicy,
-) -> Result<(), ApplicationError> {
-    if policy.verify_body {
-        let observed =
-            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-        if forum_post_bodies_match(&observed.body, &expected.body) {
-            return Ok(());
-        }
-        if policy.write_confirmed {
-            // 本轮已经写过，正文证明失败不能借尚在作用域内的授权再次 POST。
-            return Err(fixed_layout_error("write_unknown", true));
-        }
-    } else if policy.write_confirmed {
-        // 本轮目标已有回执，不重复编辑刚创建、升级或补齐的固定帖。
-        return Ok(());
-    }
-    if !policy.allow_update {
-        return Err(fixed_layout_error("write_authorization_required", false));
-    }
-    let proof = writer
-        .edit_post(world, thread_id.to_owned(), post_id.to_owned(), metadata, expected.clone())
-        .await?;
-    if proof.thread_id != thread_id || proof.post_id != post_id {
-        return Err(fixed_layout_error("write_unknown", true));
-    }
-    if policy.verify_body {
-        let confirmed =
-            writer.read_post_body(world, thread_id.to_owned(), post_id.to_owned()).await?;
-        if !forum_post_bodies_match(&confirmed.body, &expected.body) {
-            return Err(fixed_layout_error("write_unknown", true));
-        }
-    }
-    Ok(())
-}
-
-fn fixed_layout_error(code: &'static str, write_started: bool) -> ApplicationError {
-    ApplicationError::ForumRemote(ForumRemoteError::new(code, false, write_started))
 }
 
 async fn record_failure<C>(
