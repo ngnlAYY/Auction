@@ -83,10 +83,12 @@ async fn read_snapshot(
     use sqlx::Row;
 
     let auction_row = sqlx::query(
-        "SELECT id, world_id, sequence, state_version,
-                scheduled_open_at, opened_at, scheduled_end_at
-         FROM public.auctions
-         WHERE id = $1",
+        "SELECT auction.id, auction.world_id, auction.sequence, auction.state_version,
+                auction.scheduled_open_at, auction.opened_at, auction.scheduled_end_at,
+                sync.catalog_layout
+         FROM public.auctions AS auction
+         JOIN public.auction_forum_sync AS sync ON sync.auction_id = auction.id
+         WHERE auction.id = $1",
     )
     .bind(requested_auction_id.as_uuid())
     .fetch_optional(&mut **transaction)
@@ -245,7 +247,11 @@ async fn read_snapshot(
             },
         });
     }
+    let layout: String = auction_row
+        .try_get("catalog_layout")
+        .map_err(|_| storage_error("读取论坛冻结目录布局失败"))?;
     let snapshot = ForumAuctionSnapshot {
+        catalog_layout: super::super::catalog::parse_layout(&layout)?,
         auction_id: AuctionId::from_uuid(auction_id),
         world,
         sequence,

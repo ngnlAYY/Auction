@@ -112,6 +112,10 @@ pub(crate) struct PublicBoardQuery {
     pub(crate) history_seller: Option<String>,
     pub(crate) bid_log_lot: Option<String>,
     pub(crate) page: i64,
+    pub(crate) page_size: i64,
+    /// 补偿池展开流水的独立分页；批次分页与流水分页不能互相覆盖。
+    pub(crate) movement_page: i64,
+    pub(crate) movement_page_size: i64,
     /// 是否从迁移期间写出的 `bidlog_page` 别名恢复了竞价日志页码。
     pub(crate) bid_log_page_alias: bool,
     pub(crate) bid_page: i64,
@@ -143,6 +147,9 @@ impl Default for PublicBoardQuery {
             history_seller: None,
             bid_log_lot: None,
             page: 1,
+            page_size: stored_public_page_size(false),
+            movement_page: 1,
+            movement_page_size: stored_public_page_size(true),
             bid_log_page_alias: false,
             bid_page: 1,
             proxy_page: 1,
@@ -208,6 +215,20 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
                 {
                     canonical_page = Some(page);
                 }
+            }
+            "page_size" => {
+                query.page_size = parse_public_page_size(&value).unwrap_or(DEFAULT_PAGE_SIZE);
+            }
+            "movement_page" => {
+                if let Ok(page) = value.parse::<i64>()
+                    && page > 0
+                {
+                    query.movement_page = page;
+                }
+            }
+            "movement_page_size" => {
+                query.movement_page_size =
+                    parse_public_page_size(&value).unwrap_or(DEFAULT_PAGE_SIZE);
             }
             "bidlog_page" => {
                 if let Ok(page) = value.parse::<i64>()
@@ -280,7 +301,7 @@ pub(crate) fn public_query_string(query: &PublicBoardQuery) -> String {
     format!("?{}", serializer.finish())
 }
 
-/// 把公开端查询状态序列化为地址栏键值对；等于默认值的键省略，保持地址栏干净。
+/// 序列化公开端查询状态；数量即使为 10 也显式保留，防止本地偏好改变分享及历史语义。
 pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     if let Some(world) = query.world.as_deref() {
@@ -312,6 +333,11 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if query.page > 1 {
         pairs.push(("page".to_owned(), query.page.to_string()));
     }
+    pairs.push(("page_size".to_owned(), query.page_size.to_string()));
+    if query.movement_page > 1 {
+        pairs.push(("movement_page".to_owned(), query.movement_page.to_string()));
+    }
+    pairs.push(("movement_page_size".to_owned(), query.movement_page_size.to_string()));
     if query.bid_page > 1 {
         pairs.push(("bid_page".to_owned(), query.bid_page.to_string()));
     }
@@ -340,6 +366,9 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
     "seller",
     "lot",
     "page",
+    "page_size",
+    "movement_page",
+    "movement_page_size",
     "bidlog_page",
     "bid_page",
     "proxy_page",
@@ -445,14 +474,14 @@ pub(crate) fn public_href(path: &str, query: &PublicBoardQuery) -> String {
     format!("{path}{}", public_query_string(query))
 }
 
-/// 生成当前世界的拍卖首页链接，并清除历史轮次、筛选和分页状态。
+/// 首页入口不冻结数量：导航时读取最新本地偏好，避免外壳旧链接覆盖刚保存的选择。
 pub(crate) fn public_auction_home_href(world: &str) -> String {
-    public_href("/", &public_auction_home_query(world))
+    if world == "isekai" { "/?world=isekai" } else { "/" }.to_owned()
 }
 
 /// 生成当前世界的拍卖首页查询；同路由导航可直接用它替换历史视图状态。
 pub(crate) fn public_auction_home_query(world: &str) -> PublicBoardQuery {
-    // Main 沿用无参数首页；Isekai 只保留世界参数，避免从其他页面带回不属于首页的查询状态。
+    // 只保留目标世界与本地数量偏好，避免从其他页面带回不属于首页的筛选和页码。
     PublicBoardQuery {
         world: (world == "isekai").then(|| "isekai".to_owned()),
         ..PublicBoardQuery::default()

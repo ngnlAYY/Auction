@@ -14,6 +14,7 @@ pub(crate) fn history() -> Element {
     // 筛选与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
+    let page_size = use_memo(move || query_state_signal().page_size);
     // 已应用查询沿用旧版内存 normalize（非法日期/价格/区间被丢弃，但不改写地址栏）。
     let applied_query = use_memo(move || {
         let query = normalize_history_query(query_state_signal());
@@ -76,7 +77,7 @@ pub(crate) fn history() -> Element {
 
     let history = use_resource(move || {
         let _ = refresh_generation();
-        fetch_price_history(applied_query())
+        fetch_price_history(applied_query(), page_size())
     });
     let history_unsupported =
         matches!(&*history.read_unchecked(), Some(Err(PriceHistoryFetchError::Unsupported)));
@@ -102,10 +103,23 @@ pub(crate) fn history() -> Element {
                 },
             }
         },
+        Some(Ok(page))
+            if !public_page_matches(
+                page.page,
+                page.page_size,
+                applied_query().page,
+                page_size(),
+            ) =>
+        {
+            rsx! {
+                p { role: "status", {t!("data-loading")} }
+            }
+        }
         Some(Ok(page)) => rsx! {
             PriceHistoryTable {
                 page: page.clone(),
                 current_page: applied_query().page,
+                on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                 on_page_change: move |next_page: i64| {
                     let next_page = next_page.max(1);
                     update_public_query_state(

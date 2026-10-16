@@ -21,9 +21,6 @@ use std::{
 
 use axum::serve::Listener;
 
-const UNIX_LISTENER_ADDRESS: SocketAddr =
-    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
-
 /// Unix HTTP listener 的绑定参数。
 ///
 /// `lock_file_name` 由装配根使用固定常量提供，不能来自运行时请求或用户输入；Public 与 Admin
@@ -84,12 +81,12 @@ impl UnixHttpListener {
 
 impl Listener for UnixHttpListener {
     type Io = tokio::net::UnixStream;
-    type Addr = SocketAddr;
+    type Addr = Option<SocketAddr>;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             match self.listener.accept().await {
-                Ok((stream, _address)) => return (stream, UNIX_LISTENER_ADDRESS),
+                Ok((stream, _address)) => return (stream, None),
                 Err(error) => {
                     tracing::error!(error = %error, "Unix HTTP listener accept 失败");
                     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -99,7 +96,7 @@ impl Listener for UnixHttpListener {
     }
 
     fn local_addr(&self) -> io::Result<Self::Addr> {
-        Ok(UNIX_LISTENER_ADDRESS)
+        Ok(None)
     }
 }
 

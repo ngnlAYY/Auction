@@ -1,4 +1,4 @@
-//! 固定 #1/#2 的本地正文证明更新。
+//! 所有目录页及系统更新楼的同事务正文证明更新。
 
 use auction_application::{
     ApplicationError, ForumRenderedPost, ForumRenderedThread, ForumReplyTopic,
@@ -17,6 +17,8 @@ pub(super) async fn record_fixed_posts_update_postgres(
     updated_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页正文证明事务失败"))?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET title = $2,
@@ -39,6 +41,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
            AND catalog_post_id = $8
            AND system_log_post_id = $9
            AND content_revision = $10
+           AND catalog_page_count = $15
            AND content_claim_token = $11
            AND content_claim_owner = $12
            AND content_claim_fencing = $13
@@ -58,12 +61,15 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
-    .execute(store.pool())
+    .bind((topic.catalog_continuation.len() + 1) as i32)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入论坛固定楼层正文证明失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层正文版本已变化"));
     }
+    super::super::catalog::update_pages(&mut transaction, topic, catalog).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交论坛分页正文证明失败"))?;
     Ok(())
 }
 
@@ -75,6 +81,8 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     processed_through_post_number: i32,
     updated_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页进度事务失败"))?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET title = $2,
@@ -90,6 +98,7 @@ pub(super) async fn record_fixed_posts_progress_postgres(
            AND catalog_post_id = $7
            AND system_log_post_id = $8
            AND content_revision = $9
+           AND catalog_page_count = $14
            AND content_claim_token = $10
            AND content_claim_owner = $11
            AND content_claim_fencing = $12
@@ -108,12 +117,15 @@ pub(super) async fn record_fixed_posts_progress_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
-    .execute(store.pool())
+    .bind((topic.catalog_continuation.len() + 1) as i32)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入论坛固定楼层暂存进度失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层暂存进度 claim 已失效"));
     }
+    super::super::catalog::update_pages(&mut transaction, topic, catalog).await?;
+    transaction.commit().await.map_err(|_| storage_error("提交论坛分页进度失败"))?;
     Ok(())
 }
 
@@ -140,6 +152,7 @@ pub(super) async fn finish_topic_scan_postgres(
            AND catalog_post_id = $5
            AND system_log_post_id = $6
            AND content_revision = $7
+           AND catalog_page_count = $12
            AND content_claim_token = $8
            AND content_claim_owner = $9
            AND content_claim_fencing = $10
@@ -156,6 +169,7 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(&topic.content_claim_owner)
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
+    .bind((topic.catalog_continuation.len() + 1) as i32)
     .execute(store.pool())
     .await
     .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;

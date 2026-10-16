@@ -49,7 +49,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | auction-cache | 可重建数据的 disabled/Redis 适配器 | [README](../crates/auction-cache/README.md) |
 | auction-integrations | 论坛、邮件、装备来源、凭据加密与外部证明 | [README](../crates/auction-integrations/README.md) |
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](../crates/auction-jobs/README.md) |
-| auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定与泛型静态响应 | [README](../crates/auction-http/README.md) |
+| auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定、静态响应与 CDN 缓存门禁 | [README](../crates/auction-http/README.md) |
 | auction-web-public | Public 页面、路由、API 消费、实时恢复与译文 | [README](../crates/auction-web-public/README.md) |
 | auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、入站诊断代码的展示说明与译文 | [README](../crates/auction-web-admin/README.md) |
 | auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](../crates/auction-web-shared/README.md) |
@@ -74,7 +74,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | 竞价与生命周期 | Serializable、显式行锁、最多三次序列化冲突尝试；持久调度、慢速代理与结算 workflow |
 | Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影 |
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
-| 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner |
+| 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化 |
 | 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化 |
 
 本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
@@ -132,7 +132,12 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 发送证明、论坛对账、各循环及任务边界分别见[不变量](contracts/invariants.md)、
 [Worker](../apps/worker/README.md)、[任务编排](../crates/auction-jobs/README.md)与[外部适配](../crates/auction-integrations/README.md)。
 
-论坛固定 #1 目录、#2 系统日志的真实 post ID 保存后才处理 #3+；回帖只导入普通 bid。
+论坛目录按分类及编号稳定排序，每帖最多 150 件，从 #1 连续分页；系统日志位于最后一页之后，用户竞价再从下一楼开始。
+历史已开始发布/未知写入主题冻结单页并继续导入；新主题启用分页，不能把旧回帖位置重新解释为目录。
+全部固定帖的真实 post ID 保存后才导入命令。application 定义分页端口，integrations 负责渲染/合并目录解析，
+jobs 负责顺序发布与对账，storage 的 `forum/catalog.rs` 持久化续页身份和正文；回帖只导入普通 bid。
+首帖外部 SVG 倒计时的 URL/文字降级由 integrations `forum/render/countdown.rs` 拥有，只作公开时间投影，
+不承担状态迁移或 soft-close 判断，见[集成边界](../crates/auction-integrations/README.md#凭据装配与外部请求)。
 读取须证明分页、作者和连续楼层，未知 POST 先按精确标题只读对账，重发须显式授权。
 拒绝提示由 jobs 的 `worker/forum/reply/rejection.rs` 拥有；application 定义错误码/本地诊断投影，storage 读取既有账本。
 新拒绝按类型分类，旧诊断仅做白名单展示映射；不改竞价规则、拒绝终态或重试门禁，见[外部副作用契约](contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
@@ -158,11 +163,19 @@ Take/Return 各有独立动作证明。每种 Cookie 只有一个运行 owner，
 
 精确鉴权与状态码见[HTTP 契约](contracts/routes.md)，缓存预算见[适配器说明](../crates/auction-cache/README.md)。
 
+Cloudflare → Caddy HTTPS → Unix socket 的可信链由部署配置拥有；Caddy 清洗访客地址头，HTTP 边界只接受
+显式受信连接提供的 XFF，不伪造 Unix TCP peer、不从转发头推导 Origin 或 Secure Cookie。
+`auction-http` 默认禁止 CDN 保存全部响应，仅精确静态 handler 可放行；这与后端可丢弃缓存无关。
+API、会话、管理数据、HTML 与 WebSocket 不缓存，部署规则不得覆盖源站禁止缓存头；见[橙云部署](../ops/README.md#cloudflare-整站代理)。
+
 ## 浏览器、实时与制品
 
 Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTTP 资源类型；共享层仅提供基础能力。
 页面设计分别见 [Public](../crates/auction-web-public/DESIGN.md) 和 [Admin](../crates/auction-web-admin/DESIGN.md)。
 五语言与 `hv.lang` 保持稳定；表格列宽、截断和窄屏结构见[表格契约](table-layouts.md)。
+Public `surface/pagination/` 拥有统一列表数量、译文、URL 更新与 `preferences.rs` 本地数量偏好；shared `Pager`
+及 `components/pager/size.rs` 只提供可选数字分页、有界正整数输入与可访问页码限制，
+Admin 默认布局不变。页面范围与展开流水的独立查询键见 [Public 设计](../crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 
 首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据。
 浏览器拥有草稿、字段提示与确认；数据库和配置校验仍由 setup/config 执行。端口和周排期通过独立 setup DTO

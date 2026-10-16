@@ -1,0 +1,54 @@
+# Cloudflare 橙云 → Caddy HTTPS → Public/Admin Unix socket；替换域名、路径并审阅权限后使用。
+# 必填：部署环境变量 AUCTION_CLOUDFLARE_CIDRS 为官方当前 IPv4/IPv6 CIDR 的空格分隔列表。
+# 此列表只决定是否采信代理地址头，不限制客户端访问；不得用任意网段代替。
+# 此模板不读取 Rust TOML；环境变量仅供 Caddy 模板展开，不是应用配置覆盖。
+{
+	servers {
+		trusted_proxies static {$AUCTION_CLOUDFLARE_CIDRS}
+		trusted_proxies_strict
+		client_ip_headers CF-Connecting-IP
+	}
+}
+
+(cloudflare-origin) {
+	# 允许直接访问源站；非受信 peer 的客户端地址使用真实连接 IP，不采信其 CF 头。
+
+	# 探针和指标只能从私有 listener 抓取；setup 不经正式业务站点开放。
+	@private_path path /metrics /health /health/* /api/v1/health /setup /api/setup/*
+	respond @private_path 404
+
+	@static {
+		method GET HEAD
+		path /assets/* /favicon.ico
+	}
+	encode @static zstd gzip
+}
+
+{$AUCTION_CADDY_PUBLIC_SITE:auction.example.com} {
+	import cloudflare-origin
+	reverse_proxy {$AUCTION_CADDY_PUBLIC_UPSTREAM:unix//run/hv-auction/public.sock} {
+		header_up Host {hostport}
+		# Caddy 只从上面的显式受信 peer 恢复客户端 IP，再覆盖整条用户可控 XFF 链。
+		header_up X-Forwarded-For {client_ip}
+		header_up X-Forwarded-Proto https
+		header_up -Forwarded
+		header_up -CF-Connecting-IP
+		header_up -CF-Connecting-IPv6
+		header_up -True-Client-IP
+		header_up -X-Real-IP
+	}
+}
+
+{$AUCTION_CADDY_ADMIN_SITE:admin.auction.example.com} {
+	import cloudflare-origin
+	reverse_proxy {$AUCTION_CADDY_ADMIN_UPSTREAM:unix//run/hv-auction/admin.sock} {
+		header_up Host {hostport}
+		header_up X-Forwarded-For {client_ip}
+		header_up X-Forwarded-Proto https
+		header_up -Forwarded
+		header_up -CF-Connecting-IP
+		header_up -CF-Connecting-IPv6
+		header_up -True-Client-IP
+		header_up -X-Real-IP
+	}
+}

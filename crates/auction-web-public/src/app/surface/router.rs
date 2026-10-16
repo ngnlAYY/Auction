@@ -246,7 +246,6 @@ pub(crate) fn PublicShell() -> Element {
     // Routable 不包含 query；位于 AuctionIndex 时，只有查询不同才需要绕过 Router 的同路由优化。
     let auction_home_needs_query_reset = matches!(&current_route, Route::AuctionIndex {})
         && current_public_query != auction_home_query;
-    let logo_home_query = auction_home_query.clone();
     let realtime_target_candidate = match session_snapshot {
         None => PublicRealtimeTarget::Checking,
         Some(Err(_)) => PublicRealtimeTarget::SessionError,
@@ -323,7 +322,8 @@ pub(crate) fn PublicShell() -> Element {
                     onclick: move |_| {
                         if auction_home_needs_query_reset {
                             // 同一路由时直接写入首页查询，否则 Router 可能保留当前历史拍卖 URL。
-                            set_public_query(&logo_home_query, false);
+                            let query = public_auction_home_query(&selected_world.peek());
+                            set_public_query(&query, false);
                         }
                         location_generation
                             .set(location_generation().saturating_add(1));
@@ -353,7 +353,8 @@ pub(crate) fn PublicShell() -> Element {
                         onclick: move |_| {
                             if auction_home_needs_query_reset {
                                 // 清除 auction、筛选和分页查询，再重建共享 AuctionIndex 的内容。
-                                set_public_query(&auction_home_query, false);
+                                let query = public_auction_home_query(&selected_world.peek());
+                                set_public_query(&query, false);
                             }
                             location_generation
                                 .set(location_generation().saturating_add(1));

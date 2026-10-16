@@ -28,6 +28,7 @@
 - [启动顺序](#启动顺序)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
+- [Cloudflare 整站代理](#cloudflare-整站代理)
 - [systemd 安装、探针与权限](#systemd-服务与顺序控制)
 
 ## 可选单文件部署
@@ -174,6 +175,88 @@ SHA-256，含 schema/迁移/关系大小、估算行数、表覆盖及数据族�
 [HTTP 契约](../docs/contracts/routes.md)。metrics 默认对公网返回 404。
 
 [systemd 模板](#systemd-服务与顺序控制)安装前须替换账号/路径并核对权限；迁移仅由总控 start/restart 或受停机门禁保护的显式 migrate 执行，见[独立迁移门禁](#独立迁移门禁)。任何 unit 均不自动备份、恢复、DROP/CREATE 或执行 retention 删除。
+
+## Cloudflare 整站代理
+
+推荐拓扑为浏览器 HTTPS/WSS → Cloudflare 橙云 → Caddy HTTPS → Public/Admin 独立 Unix socket。
+Rust 原生 HTTP 边界负责精确 Origin、Cookie、客户端 IP 与 CDN 缓存响应头，不需要 Cloudflare SDK、
+API token、新 TOML 开关或前端资源域名；API 和 WebSocket 仍走所属站点同源路径。
+[专用 Caddy 模板](deploy/caddy/cloudflare.Caddyfile.example)与原直连模板二选一，不自动改变部署。
+
+### TLS 与可信链
+
+1. Public/Admin 使用不同 DNS 主机并开启橙云；Cloudflare SSL/TLS 必须为 **Full (strict)**，禁止 Flexible。
+   Caddy 负责源站 HTTPS 和有效证书，证书名称匹配两个主机；可使用其自动 HTTPS，或经审阅配置 Cloudflare
+   Origin CA 证书/私钥；若需浏览器直连，使用受浏览器信任的公信证书，不能只依赖 Origin CA。私钥不进仓库。
+   证书签发/续期必须有可达的验证路径；确认 ACME HTTP challenge 经橙云可达，不依赖被 Cloudflare 终止的 TLS-ALPN challenge。
+2. Cloudflare 开启 HTTP→HTTPS 重定向；源站仅开放所需 TLS/证书验证入口，Rust 不监听公网 TCP。
+   Caddy 不再按 Cloudflare 来源 IP 拦截，允许直接访问源站；部署要求不再限定业务源站只能由 Cloudflare 网段访问。
+   已有云端防火墙或 mTLS 限制不会被本地配置自动解除，变更须单独授权。直连流量绕过 Cloudflare 的 WAF、限流与 CDN，
+   源站仍须保留应用认证、限流、精确 Origin 和 TLS 保护。
+3. 将[官方 IP 列表](https://www.cloudflare.com/ips/)的当前完整 CIDR 集合注入 Caddy
+   `AUCTION_CLOUDFLARE_CIDRS`，随官方变化审阅更新。该列表仅限定地址头信任，不限制访问；禁止信任所有网段或仅凭头名识别 Cloudflare。
+   非受信 peer 的直连使用真实连接 IP，忽略其 CF/XFF 身份声明；受信 peer 才从 `CF-Connecting-IP` 恢复地址，再以 `{client_ip}` **覆盖**发往 Rust 的
+   `X-Forwarded-For`，删除其他客户端地址头。不要改成透传访客 XFF，或让任意 peer 提供 CF 头。
+   此拓扑不含修改 IP 头的 Workers/多 CDN 链；Cloudflare Pseudo IPv4 选 Off 或 Add Header，
+   不用 Overwrite Headers，且不启用移除访客 IP 的 Managed Transform。
+4. Rust Public 的 `[http_security]`、Admin runtime 的 `[security]` 分别填写各自精确 HTTPS origin，
+   `allowed_origins_enabled=true`、`cookie_secure=true`。Unix listener 设置 `trusted_unix_proxy=true`、
+   `trusted_proxy_cidrs=[]`，所有有权连接 socket 的进程都被视为可信代理；socket 0660，目录允许代理组遍历但不可写。
+   示例采用 `ngnl:ngnl`，Caddy 保持原用户并附加 `ngnl` 组；须控制组成员及其他组可读文件，敏感 TOML 保持 0600。
+   Unix peer 不伪装成 loopback TCP；TCP peer 不会因 Unix 信任开关而被信任。若选择 TCP 上游，必须关闭
+   Unix 信任并只列实际本机代理 `/32`、`/128`，不能把客户端或 Cloudflare 网段无差别塞入 Rust 配置。
+   `Forwarded`、`X-Forwarded-Proto`、`CF-Connecting-IP` 不用于 Rust 推导 Origin 或 Secure Cookie。
+
+Public/Admin Unix 配置片段及 runtime 覆盖规则见[配置手册](config/README.md#cloudflare-与-unix-上游)。
+Worker control 本来就是独立 Unix socket；HTTP 与 control socket 不复用。Unix 化指本机应用代理/control 通道，
+不要求 PostgreSQL、Redis、OTLP 或外部 HTTPS 改协议。Caddy 不能获得应用敏感 TOML 的读取权限。
+
+### 只缓存静态资源
+
+Rust 默认发送 `CDN-Cache-Control: no-store` 与 `Cloudflare-CDN-Cache-Control: no-store`；
+只有精确静态 handler 签发的响应才允许独立 CDN 策略。Public 公开 API 的浏览器 `Cache-Control: no-cache`
+保持兼容，但**不允许 CDN 保存**；登录、私有数据、全部 Admin API、错误、探针、WebSocket、HTML/SPA 入口均不缓存。
+Admin 的内容指纹 CSS/WASM 等编译资源不是管理数据，可按静态白名单缓存；不允许缓存管理页面或投影。
+`/assets/` 非 HTML 资源沿用一年 immutable；稳定名 JS/WASM 与 `/favicon.ico` 每次再验证，HTML 一律 no-store。
+
+Cloudflare Cache Rules 按以下互斥范围设置，替换两个主机为真实域名：
+
+```text
+(http.host in {"auction.example.com" "admin.auction.example.com"}
+ and http.request.method in {"GET" "HEAD"}
+ and starts_with(http.request.uri.path, "/assets/"))
+```
+
+- 仅以上范围设置 Eligible for cache；Edge TTL 选择使用源站 Cache-Control、缺失时 bypass，不指定覆盖 TTL，
+  Browser TTL 尊重源站。源站 404/405/503、HTML 即使路径形似资源也必须保留 no-store。
+- 两个站点内其余所有请求显式 Bypass cache，包括 `/api/*`、登录、账户、管理页面、`/index.html`、
+  `/setup`、`/health*`、`/metrics`、稳定文件名及 WebSocket。不要只按文件后缀做白名单，避免 API 路径伪装静态。
+- 删除冲突的 Cache Everything、Page Rules、Edge TTL 覆盖、Cache Response Rules、Workers Cache API 或
+  自定义缓存键策略；不得忽略源站 no-store、移除 Set-Cookie、忽略身份 Cookie 后缓存业务响应。
+  Cloudflare 更高优先级规则可覆盖源站头，代码无法防御错误控制面配置。切换前清理历史缓存。
+- 不对本站启用 Rocket Loader、HTML/JS 重写或影响 Dioxus 启动的转换；保持资源内容与同源 CSP。
+
+### WebSocket 与验收边界
+
+Cloudflare Network 开启 WebSockets；`wss://<Public主机>/api/v1/ws` 继续传递 Cookie 和精确 HTTPS Origin。
+Caddy `reverse_proxy` 原生保留 Upgrade，无需改业务路径、认证、CSRF、HTTP/2 CONNECT 或普通请求超时。
+不得对 API/握手应用缓存、交互式挑战或内容转换；WAF/限流例外须限定具体路径和风险，不整站关闭防护。
+Cloudflare 发布可能断开长连接，客户端继续按 sequence/version 经 HTTP Catch-up 和权威快照恢复，
+不能用增加 CDN 缓存掩盖断流。代理空闲时限须适配现有心跳；代码未修改心跳或恢复语义。
+
+本节是配置与源码契约，不代表已部署验收。格式、静态编译不证明证书续期、边缘缓存命中、真实客户端 IP、
+WAF 或长连接行为；生产验证必须另获授权，在隔离范围核对这些证据，本变更不启动服务或进行行为测试。
+
+### 官方依据
+
+- [Cloudflare CDN-Cache-Control 与优先级](https://developers.cloudflare.com/cache/concepts/cdn-cache-control/)：
+  Cloudflare 专用头优先于通用 CDN/浏览器头，Cloudflare 专用头不转发给浏览器；Edge TTL 等规则仍可覆盖源站。
+- [Cache Rules 设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)：缓存资格、bypass 和尊重源站 TTL。
+- [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)：源站证书有效性和主机匹配。
+- [Cloudflare 请求头](https://developers.cloudflare.com/fundamentals/reference/http-request-headers/)：CF-Connecting-IP、
+  XFF 追加、Workers 与 Pseudo IPv4 限制。
+- [Cloudflare WebSockets](https://developers.cloudflare.com/network/websockets/)：Upgrade、启用方式与边缘重启断连。
+- [Caddy 全局选项](https://caddyserver.com/docs/caddyfile/options)：trusted_proxies、trusted_proxies_strict、client_ip_headers。
 
 ## systemd 服务与顺序控制
 

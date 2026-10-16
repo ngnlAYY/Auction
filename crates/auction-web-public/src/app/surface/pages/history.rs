@@ -16,6 +16,7 @@ pub(crate) fn AuctionList() -> Element {
             .unwrap_or_else(|| "settled".to_owned())
     });
     let page_number = use_memo(move || query_state_signal().page.max(1));
+    let page_size = use_memo(move || query_state_signal().page_size);
     let mut refresh_generation = use_signal(|| 0_u64);
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
@@ -28,7 +29,7 @@ pub(crate) fn AuctionList() -> Element {
         let status = status_filter();
         let page = page_number();
         let world = (world != "all").then_some(world);
-        fetch_auction_page(world, status, page, 10)
+        fetch_auction_page(world, status, page, page_size())
     });
     match &*auctions.read_unchecked() {
         None => rsx! {
@@ -49,12 +50,20 @@ pub(crate) fn AuctionList() -> Element {
                 },
             }
         },
+        Some(Ok(page))
+            if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
+        {
+            rsx! {
+                p { role: "status", {t!("data-loading")} }
+            }
+        }
         Some(Ok(page)) => rsx! {
             AuctionHistoryPage {
                 page: page.clone(),
                 world_filter: world_filter(),
                 page_number: page_number(),
                 world_options,
+                on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                 on_world_change: move |world: String| {
                     update_public_query_state(
                         query_state_signal,
@@ -87,6 +96,7 @@ pub(crate) fn AuctionHistoryPage(
     world_options: Vec<String>,
     on_world_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page.page_size.max(1);
     rsx! {
@@ -114,18 +124,14 @@ pub(crate) fn AuctionHistoryPage(
             } else {
                 AuctionHistoryTable { rows: page.auctions.clone() }
             }
-            Pager {
+            PublicPager {
                 page: page_number,
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-auctions-title"),
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
+                on_page_size_change,
             }
         }
     }

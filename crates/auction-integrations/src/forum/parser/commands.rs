@@ -43,7 +43,7 @@ pub(super) fn parse_bid_post(
         }
         match parse_command_line(trimmed, line_index + 1, lots, actor.as_deref()) {
             Ok(Some(command)) => commands.push(command),
-            // 论坛只接受普通出价；代理命令属于 Web 专属能力，且按产品约定不写入固定 #2。
+            // 论坛只接受普通出价；代理命令属于 Web 专属能力，且按产品约定不写入系统更新楼。
             Ok(None) => {}
             Err((code, message)) => warnings.push(super::helpers::warning(
                 line_index + 1,

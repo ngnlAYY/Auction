@@ -56,10 +56,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000037_live_leader_since_repair.up.sql](000037_live_leader_since_repair.up.sql) | 未结算 live lot 连续领先时间修复 |
 | [000038_unsold_return_send.up.sql](000038_unsold_return_send.up.sql) | 未领取且未冻结的流拍返还改为逐件 Send |
 | [000039_schedule_source_and_final_completion.up.sql](000039_schedule_source_and_final_completion.up.sql) | 冻结本地排期来源并补齐可证明的 Final 完成标记 |
+| [000040_forum_catalog_pages.up.sql](000040_forum_catalog_pages.up.sql) | 每帖 150 件的论坛目录续页身份、正文和目录页数 |
 
 ## 原则与基线
 
-当前 `000001`–`000039` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
+当前 `000001`–`000040` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
 `bid_proxies` 是只读兼容视图，权威写入进入授权与转换历史表。
 执行门禁见[迁移导航](../README.md)，对象归属见[数据库契约](../../docs/contracts/schema.md)。
 
@@ -71,6 +72,8 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 `000035`/`000036` 的邮件展示与装备诊断为非权威投影，不参与幂等、完成证明或 cursor。
 `000038` 仅转换从未领取、未冻结、未关联 delivery 的初始流拍返还，已开始或未知 Return 保留身份并人工核对。
 `000039` 冻结后续轮次的本地排期来源，只补有唯一成功 Final 证明的完成标记，不能用当前时区猜测历史。
+`000040` 增加目录续页镜像及冻结布局；历史已尝试主题保持一页并继续导入，只有从未尝试/无远端身份的队列项及新主题启用分页。
+不回填或猜测远端 post ID，不移动已有日志/用户回帖，未知 POST 保持原布局对账。
 
 ## 历史 checksum 兼容
 

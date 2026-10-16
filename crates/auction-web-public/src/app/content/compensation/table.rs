@@ -8,8 +8,10 @@ pub(super) fn CompensationPoolTable(
     selected_auction_id: String,
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
     on_select_round: EventHandler<String>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
     let page_size = page.page_size.max(1);
@@ -61,6 +63,7 @@ pub(super) fn CompensationPoolTable(
                                     movements: movements.clone(),
                                     on_select_round,
                                     on_movement_page_change,
+                                    on_movement_page_size_change,
                                     on_retry_movements,
                                 }
                             }
@@ -68,18 +71,14 @@ pub(super) fn CompensationPoolTable(
                     }
                 }
             }
-            Pager {
+            PublicPager {
                 page: page.page.unwrap_or(1),
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-compensation-pool-title"),
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
+                on_page_size_change,
             }
         }
     }
@@ -92,6 +91,7 @@ fn CompensationRoundRow(
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_select_round: EventHandler<String>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
     let details_id = format!("compensation-details-{}", round.auction_id);
@@ -131,6 +131,7 @@ fn CompensationRoundRow(
                         round: round.clone(),
                         movements,
                         on_movement_page_change,
+                        on_movement_page_size_change,
                         on_retry_movements,
                     }
                 }

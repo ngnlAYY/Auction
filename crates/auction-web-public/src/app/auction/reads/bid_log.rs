@@ -20,6 +20,7 @@ pub(crate) fn bid_log() -> Element {
     let selected_auction_id =
         use_memo(move || query_state_signal().auction_id.clone().unwrap_or_default());
     let page_number = use_memo(move || query_state_signal().page);
+    let page_size = use_memo(move || query_state_signal().page_size);
     let lot_filter = use_memo(move || query_state_signal().bid_log_lot.clone().unwrap_or_default());
     let mut lot_write_generation = use_signal(|| 0_u64);
     // 迁移期间曾写出 `bidlog_page`；读取后立即无历史记录地收敛回旧版 `page`。
@@ -74,13 +75,15 @@ pub(crate) fn bid_log() -> Element {
             let _ = refresh_generation();
             let auction_id = selected_auction_id();
             let page = page_number();
+            let page_size = page_size();
+            let world = world_filter();
             let lot_id = lot_filter().trim().to_owned();
             let lot_id = (!lot_id.is_empty()).then_some(lot_id);
             async move {
                 if auction_id.is_empty() {
                     Ok(None)
                 } else {
-                    fetch_bid_log_page(auction_id, page, world_filter(), lot_id).await.map(Some)
+                    fetch_bid_log_page(auction_id, page, world, lot_id, page_size).await.map(Some)
                 }
             }
         }
@@ -94,6 +97,24 @@ pub(crate) fn bid_log() -> Element {
         auction_options.iter().find(|auction| auction.id == selected_auction_id()).cloned();
     let current_page = page_number();
     let current_lot_filter = lot_filter();
+    let on_lot_filter_change = use_callback(move |value: String| {
+        // 输入立即更新状态，地址栏防抖写回；工具条不随请求结果卸载，以保留焦点。
+        let mut next = query_state_signal.peek().clone();
+        next.bid_log_lot = (!value.trim().is_empty()).then_some(value);
+        next.page = 1;
+        query_state_signal.set(next);
+        let generation = lot_write_generation.peek().saturating_add(1);
+        lot_write_generation.set(generation);
+        spawn(async move {
+            TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS).await;
+            // 迟到任务不能改写已经离开的页面或更新的输入。
+            if *lot_write_generation.peek() == generation && current_public_pathname() == "/bidlog"
+            {
+                let next = query_state_signal.peek().clone();
+                write_public_query(&next, QueryWriteMode::Replace);
+            }
+        });
+    });
     let body = match &*bid_log.read_unchecked() {
         None => rsx! {
             p { class: "public-auction-bid-log-empty", role: "status", {t!("data-loading")} }
@@ -114,38 +135,31 @@ pub(crate) fn bid_log() -> Element {
                 p { class: "public-auction-empty__title", {t!("bidlog-no-rounds")} }
             }
         },
+        Some(Ok(Some(page)))
+            if !public_page_matches(page.page, page.page_size, current_page, page_size()) =>
+        {
+            rsx! {
+                p { role: "status", {t!("data-loading")} }
+            }
+        }
         Some(Ok(Some(page))) => rsx! {
             BidLogTable {
                 page: page.clone(),
                 current_page,
                 lot_filter: current_lot_filter.clone(),
-                on_lot_filter_change: move |value: String| {
-                    // 输入立即更新状态（沿用旧版每击键刷新列表），但地址栏写回合并为
-                    // replace + 防抖，不再每击键 push 一条历史。
-                    let mut next = query_state_signal.peek().clone();
-                    next.bid_log_lot = (!value.trim().is_empty()).then_some(value);
-                    next.page = 1;
-                    query_state_signal.set(next);
-                    let generation = lot_write_generation.peek().saturating_add(1);
-                    lot_write_generation.set(generation);
-                    spawn(async move {
-                        TimeoutFuture::new(LOT_FILTER_WRITE_DEBOUNCE_MILLIS).await;
-                        // 只在新一轮输入停顿后且仍停留在竞价日志页时写回，避免卸载后的
-                        // 迟到任务改写其他页面地址。
-                        if *lot_write_generation.peek() == generation
-                            && current_public_pathname() == "/bidlog"
-                        {
-                            let next = query_state_signal.peek().clone();
-                            write_public_query(&next, QueryWriteMode::Replace);
-                        }
-                    });
-                },
                 on_page_change: move |next_page: i64| {
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.page = next_page,
-                        QueryWriteMode::Push,
-                    );
+                    // lot 输入可能仍在等待防抖写回；从当前状态提交，不能用旧 URL 丢掉筛选。
+                    let mut next = query_state_signal.peek().clone();
+                    next.page = next_page;
+                    write_public_query(&next, QueryWriteMode::Push);
+                    query_state_signal.set(next);
+                },
+                on_page_size_change: move |size| {
+                    let mut next = query_state_signal.peek().clone();
+                    next.page_size = super::super::normalize_public_page_size(size);
+                    next.page = 1;
+                    write_public_query(&next, QueryWriteMode::Push);
+                    query_state_signal.set(next);
                 },
             }
         },
@@ -221,6 +235,22 @@ pub(crate) fn bid_log() -> Element {
                     }
                 }
             }
+            div { class: "public-auction-bid-log-toolbar",
+                label { r#for: "public-auction-bid-log-filter", {t!("bidlog-filter-label")} }
+                input {
+                    id: "public-auction-bid-log-filter",
+                    value: current_lot_filter.clone(),
+                    placeholder: t!("bidlog-filter-placeholder"),
+                    oninput: move |event| on_lot_filter_change.call(event.value()),
+                }
+                if !current_lot_filter.is_empty() {
+                    button {
+                        r#type: "button",
+                        onclick: move |_| on_lot_filter_change.call(String::new()),
+                        {t!("bidlog-filter-clear")}
+                    }
+                }
+            }
             {body}
         }
     }
@@ -231,29 +261,13 @@ pub(crate) fn BidLogTable(
     page: BidLogPage,
     current_page: i64,
     lot_filter: String,
-    on_lot_filter_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let has_more = page.has_more.unwrap_or(false);
     let bids = page.bids.clone();
     rsx! {
         div {
-            div { class: "public-auction-bid-log-toolbar",
-                label { r#for: "public-auction-bid-log-filter", {t!("bidlog-filter-label")} }
-                input {
-                    id: "public-auction-bid-log-filter",
-                    value: lot_filter.clone(),
-                    placeholder: t!("bidlog-filter-placeholder"),
-                    oninput: move |event| on_lot_filter_change.call(event.value()),
-                }
-                if !lot_filter.is_empty() {
-                    button {
-                        r#type: "button",
-                        onclick: move |_| on_lot_filter_change.call(String::new()),
-                        {t!("bidlog-filter-clear")}
-                    }
-                }
-            }
             if bids.is_empty() {
                 p { class: "public-auction-bid-log-empty",
                     if lot_filter.is_empty() {
@@ -285,18 +299,14 @@ pub(crate) fn BidLogTable(
                 }
             }
             }
-            Pager {
+            PublicPager {
                 page: current_page,
                 page_size: page.page_size,
                 total: page.total,
                 has_more,
                 label: t!("page-bidlog-title"),
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
+                on_page_size_change,
             }
         }
     }

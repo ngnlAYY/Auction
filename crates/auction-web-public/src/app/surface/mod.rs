@@ -32,12 +32,14 @@ mod session;
 mod board;
 mod catalog;
 mod pages;
+mod pagination;
 mod query;
 mod router;
 
 pub(crate) use board::*;
 pub(crate) use catalog::*;
 pub(crate) use pages::*;
+pub(crate) use pagination::*;
 pub(crate) use query::*;
 pub(crate) use router::Route;
 pub use router::run;

@@ -16,6 +16,9 @@ pub(super) async fn publish_postgres(
     published: &ForumPublishedLayout,
     published_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛分页发布证明事务失败"))?;
+    let page_count = (rendered.catalog_continuation.len() + 1) as i32;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET status = 'published',
@@ -29,7 +32,8 @@ pub(super) async fn publish_postgres(
              catalog_post_id = $6,
              system_log_post_id = $7,
              system_log_body = $8,
-             processed_through_post_number = 2,
+             catalog_page_count = $14,
+             processed_through_post_number = $14 + 1,
              content_revision = CASE WHEN content_revision < 1 THEN 1 ELSE content_revision + 1 END,
              content_synced_at = $9,
              content_last_success_at = $9,
@@ -44,6 +48,8 @@ pub(super) async fn publish_postgres(
            AND claim_owner = $11
            AND claim_fencing = $12
            AND source_revision = $13
+           AND catalog_page_count IN (1, $14)
+           AND (catalog_post_id IS NULL OR (catalog_post_id = $6 AND system_log_post_id = $7))
            AND lease_expires_at > $9",
     )
     .bind(claim.auction_id.as_uuid())
@@ -59,12 +65,21 @@ pub(super) async fn publish_postgres(
     .bind(&claim.worker_id)
     .bind(claim.claim_fencing)
     .bind(claim.source_revision)
-    .execute(store.pool())
+    .bind(page_count)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入论坛同步发布证明失败"))?;
     if result.rows_affected() != 1 {
-        return Err(storage_error("论坛同步发布 claim 已失效"));
+        return Err(storage_error("论坛同步发布 claim 或固定楼层身份已失效"));
     }
+    super::super::catalog::publish_pages(
+        &mut transaction,
+        claim.auction_id.as_uuid(),
+        rendered,
+        published,
+    )
+    .await?;
+    transaction.commit().await.map_err(|_| storage_error("提交论坛分页发布证明失败"))?;
     Ok(())
 }
 

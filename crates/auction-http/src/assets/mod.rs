@@ -48,7 +48,14 @@ pub(crate) async fn serve_admin_asset<A: rust_embed::RustEmbed>(request: Request
 
 /// 只向一次性初始化进程提供 Admin 的 `/setup` 页面和必要静态资源。
 pub async fn serve_admin_setup_asset<A: rust_embed::RustEmbed>(request: Request) -> Response {
-    serve::<A>(Surface::Admin, request, true)
+    let mut response = serve::<A>(Surface::Admin, request, true);
+    // 首次设置不属于正式 CDN 表面，连静态资源也不允许边缘保存。
+    response.extensions_mut().remove::<StaticCachePolicy>();
+    response.headers_mut().insert("cdn-cache-control", HeaderValue::from_static("no-store"));
+    response
+        .headers_mut()
+        .insert("cloudflare-cdn-cache-control", HeaderValue::from_static("no-store"));
+    response
 }
 
 /// 按“保留路径 → 精确静态文件 → 批准浏览器路由 → 404”顺序封闭分派请求。
@@ -75,7 +82,7 @@ fn serve<A: rust_embed::RustEmbed>(
             return method_not_allowed(request_headers);
         }
         return match favicon_file::<A>() {
-            Some(file) => asset_response(file, method, request_headers, CachePolicy::Immutable),
+            Some(file) => asset_response(file, method, request_headers, CachePolicy::NoCache),
             None => not_found(surface, method, request_headers),
         };
     }
@@ -130,7 +137,23 @@ impl CachePolicy {
     }
 }
 
+// 只有本模块的精确静态响应可以签发此标记；API 的 Cache-Control 不能启用 CDN 缓存。
+#[derive(Clone, Copy)]
+struct StaticCachePolicy(CachePolicy);
+
+/// 返回静态 handler 明确批准的 CDN 策略，其余响应一律禁止边缘保存。
+pub(crate) fn cdn_cache_policy(response: &Response) -> HeaderValue {
+    let policy = response
+        .extensions()
+        .get::<StaticCachePolicy>()
+        .map_or(CachePolicy::NoStore, |policy| policy.0);
+    HeaderValue::from_static(policy.value())
+}
+
 fn exact_asset_cache(relative_path: &str) -> CachePolicy {
+    if relative_path == INDEX_HTML {
+        return CachePolicy::NoStore;
+    }
     // Dioxus 只给 assets/ 下的 CSS 等资源加内容指纹；顶层 wasm/*.js 与 *.wasm 文件名稳定，
     // 必须每次再验证，不能沿用旧实现中“所有非 index 文件 immutable”的过宽策略。
     if relative_path.starts_with("assets/") { CachePolicy::Immutable } else { CachePolicy::NoCache }
@@ -150,6 +173,12 @@ fn asset_response(
     request_headers: &HeaderMap,
     cache_policy: CachePolicy,
 ) -> Response {
+    // HTML 不是可共享的静态缓存候选，即使构建产物把它放在 assets/ 下。
+    let cache_policy = if file.metadata.mimetype().eq_ignore_ascii_case("text/html") {
+        CachePolicy::NoStore
+    } else {
+        cache_policy
+    };
     let content_length = file.data.len();
     let content_type = HeaderValue::from_str(file.metadata.mimetype())
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
@@ -171,7 +200,9 @@ fn asset_response(
         );
         if not_modified(request_headers, last_modified) {
             headers.remove(header::CONTENT_LENGTH);
-            return (StatusCode::NOT_MODIFIED, headers).into_response();
+            let mut response = (StatusCode::NOT_MODIFIED, headers).into_response();
+            response.extensions_mut().insert(StaticCachePolicy(cache_policy));
+            return response;
         }
     }
 
@@ -184,7 +215,9 @@ fn asset_response(
             Cow::Owned(bytes) => Body::from(bytes),
         }
     };
-    (StatusCode::OK, headers, body).into_response()
+    let mut response = (StatusCode::OK, headers, body).into_response();
+    response.extensions_mut().insert(StaticCachePolicy(cache_policy));
+    response
 }
 
 fn not_modified(headers: &HeaderMap, last_modified: SystemTime) -> bool {

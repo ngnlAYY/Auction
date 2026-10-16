@@ -71,7 +71,7 @@ pub(crate) async fn fetch_current_auction(
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {
-    let envelope = fetch_current_lots(auction_id, None, 1).await?;
+    let envelope = fetch_current_lots(auction_id, None, 1, 10).await?;
     let status = envelope.auction_status.clone();
     if !matches!(status.as_str(), "live" | "final" | "settled") {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
@@ -134,9 +134,12 @@ pub(crate) async fn fetch_bid_log_page(
     page: i64,
     world_id: String,
     lot_id: Option<String>,
+    page_size: i64,
 ) -> Result<BidLogPage, String> {
     let mut query = form_urlencoded::Serializer::new(String::new());
-    query.append_pair("page", &page.max(1).to_string()).append_pair("page_size", "10");
+    query
+        .append_pair("page", &page.max(1).to_string())
+        .append_pair("page_size", &page_size.to_string());
     if !world_id.is_empty() {
         query.append_pair("world", &world_id);
     }
@@ -193,11 +196,12 @@ pub(crate) async fn fetch_lot_bid_log(
     auction_id: String,
     lot_id: String,
     page: i64,
+    page_size: i64,
 ) -> Result<BidLogPage, String> {
     let query = form_urlencoded::Serializer::new(String::new())
         .append_pair("lot", &lot_id)
         .append_pair("page", &page.max(1).to_string())
-        .append_pair("page_size", "10")
+        .append_pair("page_size", &page_size.to_string())
         .finish();
     let url = format!("/api/v1/auctions/{auction_id}/bid-log?{query}");
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
@@ -236,6 +240,7 @@ pub(crate) async fn fetch_auction_list() -> Result<Vec<super::HistoricalAuction>
 
 pub(crate) async fn fetch_price_history(
     query: PriceHistoryQuery,
+    page_size: i64,
 ) -> Result<PriceHistoryPage, PriceHistoryFetchError> {
     let mut params = form_urlencoded::Serializer::new(String::new());
     for (key, value) in [
@@ -252,7 +257,9 @@ pub(crate) async fn fetch_price_history(
             params.append_pair(key, value);
         }
     }
-    params.append_pair("page", &query.page.max(1).to_string()).append_pair("page_size", "10");
+    params
+        .append_pair("page", &query.page.max(1).to_string())
+        .append_pair("page_size", &page_size.to_string());
     let url = format!("/api/v1/price-history?{}", params.finish());
     let response = send_get(&url).await.map_err(|_| PriceHistoryFetchError::Unavailable)?;
     if !response.ok() {
@@ -274,19 +281,23 @@ pub(crate) async fn fetch_current_lots(
     auction_id: String,
     category: Option<String>,
     page: i64,
+    page_size: i64,
 ) -> Result<LotEnvelope, String> {
-    if let Ok(lots) = fetch_current_lots_once(&auction_id, category.as_deref(), page).await {
+    if let Ok(lots) =
+        fetch_current_lots_once(&auction_id, category.as_deref(), page, page_size).await
+    {
         return Ok(lots);
     }
     // 旧 Public QueryClient 对目录读取固定再尝试一次；错误壳只在第二次失败后出现。
     TimeoutFuture::new(PUBLIC_QUERY_RETRY_DELAY_MILLIS).await;
-    fetch_current_lots_once(&auction_id, category.as_deref(), page).await
+    fetch_current_lots_once(&auction_id, category.as_deref(), page, page_size).await
 }
 
 async fn fetch_current_lots_once(
     auction_id: &str,
     category: Option<&str>,
     page: i64,
+    page_size: i64,
 ) -> Result<LotEnvelope, String> {
     let category_query = category
         .map(|value| {
@@ -296,8 +307,9 @@ async fn fetch_current_lots_once(
             format!("&{encoded}")
         })
         .unwrap_or_default();
-    let url =
-        format!("/api/v1/auctions/{auction_id}/lots?page={page}&page_size=10{category_query}");
+    let url = format!(
+        "/api/v1/auctions/{auction_id}/lots?page={page}&page_size={page_size}{category_query}"
+    );
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);

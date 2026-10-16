@@ -8,8 +8,8 @@ use auction_web_shared::TruncatedText;
 use crate::api::{BlacklistEntry, BlacklistPage, fetch_blacklist};
 
 use super::{
-    AsyncState, AsyncStateKind, Pager, QueryWriteMode, Time, update_public_query_state,
-    use_public_query_state,
+    AsyncState, AsyncStateKind, PublicPager, QueryWriteMode, Time, public_page_matches,
+    update_public_page_size, update_public_query_state, use_public_query_state,
 };
 
 pub(super) fn page() -> Element {
@@ -18,9 +18,10 @@ pub(super) fn page() -> Element {
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let page_number = use_memo(move || query_state_signal().page.max(1));
+    let page_size = use_memo(move || query_state_signal().page_size);
     let blacklist = use_resource(move || {
         let _ = refresh_generation();
-        fetch_blacklist(page_number())
+        fetch_blacklist(page_number(), page_size())
     });
     match &*blacklist.read_unchecked() {
         None => rsx! {
@@ -41,9 +42,17 @@ pub(super) fn page() -> Element {
                 },
             }
         },
+        Some(Ok(page))
+            if !public_page_matches(page.page, page.page_size, page_number(), page_size()) =>
+        {
+            rsx! {
+                p { role: "status", {t!("data-loading")} }
+            }
+        }
         Some(Ok(page)) => rsx! {
             BlacklistTable {
                 page: page.clone(),
+                on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                 on_page_change: move |next_page| {
                     update_public_query_state(
                         query_state_signal,
@@ -57,7 +66,11 @@ pub(super) fn page() -> Element {
 }
 
 #[component]
-fn BlacklistTable(page: BlacklistPage, on_page_change: EventHandler<i64>) -> Element {
+fn BlacklistTable(
+    page: BlacklistPage,
+    on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
+) -> Element {
     rsx! {
         section { class: "public-blacklist-page", aria_labelledby: "blacklist-title",
             h1 { id: "blacklist-title", {t!("page-blacklist-title")} }
@@ -83,18 +96,15 @@ fn BlacklistTable(page: BlacklistPage, on_page_change: EventHandler<i64>) -> Ele
                     }
                 }
             }
-            Pager {
+            PublicPager {
                 page: page.page,
                 page_size: page.page_size,
                 total: Some(page.total),
                 has_more: false,
                 label: t!("page-blacklist-title"),
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
+                max_offset: i64::from(i32::MAX),
                 on_page_change,
+                on_page_size_change,
             }
         }
     }

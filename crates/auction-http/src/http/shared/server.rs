@@ -19,11 +19,12 @@ const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 运行一个已绑定的 TCP 或 Unix listener，并在停止接收后等待现有 Hyper 连接排空。
 ///
-/// listener 必须把每条连接映射成 `SocketAddr`；Unix listener 使用受保护的 loopback 占位
-/// 地址，可信 Unix 代理策略再由 HTTP 边界决定是否接纳 `X-Forwarded-For`。
+/// TCP listener 保留真实 `SocketAddr`；Unix listener 返回 `None`，不伪造 TCP peer。
+/// 可信 Unix 代理策略再由 HTTP 边界决定是否接纳 `X-Forwarded-For`。
 pub async fn serve_http<L, F>(mut listener: L, app: Router, shutdown: F) -> io::Result<()>
 where
-    L: Listener<Addr = SocketAddr>,
+    L: Listener,
+    L::Addr: Into<Option<SocketAddr>>,
     F: Future<Output = ()> + Send + 'static,
 {
     let graceful = GracefulShutdown::new();
@@ -35,10 +36,13 @@ where
             _ = &mut shutdown => break,
             (stream, address) = listener.accept() => {
                 let watcher = graceful.watcher();
-                let app = app.clone();
+                let address = address.into();
+                let mut app = app.clone();
+                if let Some(address) = address {
+                    app = app.layer(Extension(ConnectInfo(address)));
+                }
                 connections.spawn(async move {
                     let service = app
-                        .layer(Extension(ConnectInfo(address)))
                         .map_request(|request: hyper::Request<Incoming>| request.map(Body::new));
                     let service = TowerToHyperService::new(service);
                     let mut builder = Builder::new(TokioExecutor::new());
@@ -52,7 +56,7 @@ where
                         .serve_connection_with_upgrades(TokioIo::new(stream), service)
                         .into_owned();
                     if let Err(error) = watcher.watch(connection).await {
-                        tracing::debug!(%address, error = %error, "HTTP connection closed with error");
+                        tracing::debug!(?address, error = %error, "HTTP connection closed with error");
                     }
                 });
             }

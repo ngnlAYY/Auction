@@ -33,7 +33,7 @@ pub(super) async fn claim_published_topics_postgres(
         "SELECT sync.auction_id, auction.world_id, sync.thread_id,
                 sync.catalog_post_id, sync.system_log_post_id,
                 sync.title, sync.body, sync.system_log_body, sync.content_revision,
-                sync.processed_through_post_number, sync.content_last_error_code
+                sync.processed_through_post_number, sync.content_last_error_code, sync.catalog_page_count, sync.catalog_layout
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE sync.status = 'published'
@@ -91,6 +91,14 @@ pub(super) async fn claim_published_topics_postgres(
         let content_last_error_code: Option<String> = row
             .try_get("content_last_error_code")
             .map_err(|_| storage_error("读取论坛固定楼层错误码失败"))?;
+        let layout: String =
+            row.try_get("catalog_layout").map_err(|_| storage_error("读取论坛冻结目录布局失败"))?;
+        let catalog_layout = super::super::catalog::parse_layout(&layout)?;
+        let catalog_page_count: i32 =
+            row.try_get("catalog_page_count").map_err(|_| storage_error("读取论坛目录页数失败"))?;
+        let catalog_continuation =
+            super::super::catalog::read_pages(&mut transaction, auction_id, catalog_page_count)
+                .await?;
         let content_claim_token = Uuid::new_v4();
         let claimed = sqlx::query(
             "UPDATE public.auction_forum_sync
@@ -130,7 +138,12 @@ pub(super) async fn claim_published_topics_postgres(
             || system_log_body.is_empty()
             || system_log_body.len() > 65_531
             || content_revision <= 0
-            || processed_through_post_number < 2
+            || processed_through_post_number <= catalog_page_count
+            || !super::super::catalog::valid_pages(
+                &catalog_post_id,
+                &system_log_post_id,
+                &catalog_continuation,
+            )
         {
             return Err(storage_error("论坛回帖主题投影无效"));
         }
@@ -139,6 +152,8 @@ pub(super) async fn claim_published_topics_postgres(
             world,
             thread_id,
             catalog_post_id,
+            catalog_layout,
+            catalog_continuation,
             system_log_post_id,
             title,
             catalog_body,

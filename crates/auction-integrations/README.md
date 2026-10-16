@@ -63,9 +63,23 @@ MoogleMail gateway 的列表、限速、正文与失效处理共用绝对 deadli
 尚未定位 cursor/末尾时不得推进。发送动作全程持有凭据级 guard，transport 并发上限为 1，读取不占用写 guard。
 
 论坛完整主题额外最多四路分页读取，共享请求间隔与 32 MiB 聚合上限；作者身份只采信系统作者链接。
+目录续页增加顺序 POST、布局回读及可选正文校验的成本；配置中的预算校验只是单目录页下界。
+大场次需提高既有 `item_timeout_seconds`/`lease_duration_seconds`，保持 lease 大于 item；超时仍走未知写入门禁，不绕过限速。
 创建端口明确返回本轮 `Created` 或只读命中的 `Existing`；同标题旧主题不是本轮新正文的成功回执。
-论坛仅导入普通出价，代理行在账本前忽略；固定 #1 展示目录，#2 展示可证明处理记录与连续楼层，不能猜测身份或进度。
-固定 #1 顶部保留 World、Intake opens、Opened、Bidding deadline；`Auction address` 使用原生 `[url=地址][b]地址[/b][/url]`
+论坛仅导入普通出价，代理行在账本前忽略。`forum/render.rs` 按分类/编号排序，每帖最多 150 件，从 #1 连续分页；
+每页独立校验 65,531 字节上限，过长失败而不是截断装备。续页重复分类标题，保持编号及当前价来源不变。
+旧主题按持久化 `legacy_single` 保持一页，不能从当前件数猜测或更换旧布局。
+解析器只合并紧邻首帖、同作者且拍卖/页码标记匹配的目录续页，随后按完整目录解析用户命令；不按正文跳过帖子。
+Worker 的 HTML 路径要求相同数字作者 ID；只读纯文本预览仅比较可选作者标签，不得用于远端命令导入。
+系统更新楼紧接最后一页，用户回帖从再下一楼开始，不能猜测身份或进度。
+`forum/render/log.rs` 分类显示 pending、警告、忽略记录及总数，优先 pending、再取最近记录，最多展示 100 条且受最终正文预算约束；
+超出时明确显示已展示/总条数，不因报错累积阻断价格同步，也不把省略当作解决。
+`forum/render/countdown.rs` 仅在首帖顶部生成 `List Timer` 与 `Auction Timer` 的 `[img]` 链接，使用固定
+`https://pure-svg-countdown.skk.moe/timer`；只公开标题/终态标签/UTC 时间，不请求服务、不含凭据或装备 key。
+List Timer 对应本场收件随正式开拍截止，已有 `opened_at` 时使用事实时间，否则使用 `scheduled_open_at`；
+Auction Timer 使用计划截止 `scheduled_end_at`，不代替单件软截止。缺计划截止只显示未排期，不推算日期。
+图片被禁用或第三方不可用时仍有 UTC 文字及权威截止提示；不改变正文精确证明、分页长度或未知写入门禁。
+固定 #1 顶部保留 World、Bidding opens、Opened、Bidding deadline；`Auction address` 使用原生 `[url=地址][b]地址[/b][/url]`
 展示完整当期拍卖链接。内层粗体防止论坛将长网址文字截短后写回 BBCode，不能靠忽略省略号通过正文校验。
 origin 由[Worker 部署配置](../../ops/config/README.md#论坛与邮件)提供，拍卖 UUID/world 路径不丢失。
 `About system` 链接固定指向论坛说明主题 `301946`。列表边界直接生成论坛保存后的稳定换行形状，不靠放宽正文比较消除差异。

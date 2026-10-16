@@ -13,6 +13,7 @@ pub(crate) fn CatalogTable(
     page_number: i64,
     on_category_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
     page_total: Option<i64>,
     page_size: i64,
     has_more: bool,
@@ -81,18 +82,14 @@ pub(crate) fn CatalogTable(
                 }
             }
         }
-        Pager {
+        PublicPager {
             page: page_number,
             page_size,
             total: page_total,
             has_more,
             label: t!("auction-pager-label"),
-            previous_label: t!("catalog-previous"),
-            status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-            next_label: t!("catalog-next"),
-            jump_label: t!("catalog-page-input"),
-            jump_button_label: t!("catalog-page-go"),
             on_page_change,
+            on_page_size_change,
         }
     }
 }
@@ -106,7 +103,7 @@ pub(crate) fn LiveCatalogTable(
     authenticated: bool,
     viewer_player_id: Option<String>,
 ) -> Element {
-    // 桌面端由语义化 colgroup 分配百分比宽度；移动端仍由 CSS 切换为字段卡片。
+    // 语义化 colgroup 分配完整百分比宽度；窄屏仍保留表头与行列，不切换为卡片。
     rsx! {
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",

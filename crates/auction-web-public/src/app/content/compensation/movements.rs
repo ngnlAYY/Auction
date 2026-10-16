@@ -8,6 +8,7 @@ pub(super) fn CompensationMovementDetails(
     round: CompensationRound,
     movements: Option<Result<Option<CompensationMovementPage>, String>>,
     on_movement_page_change: EventHandler<i64>,
+    on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
     rsx! {
@@ -62,18 +63,15 @@ pub(super) fn CompensationMovementDetails(
                             }
                         }
                     }
-                    Pager {
+                    PublicPager {
                         page: page.page,
                         page_size: page.page_size,
                         total: Some(page.total),
                         has_more: false,
                         label: t!("compensation-movements"),
-                        previous_label: t!("catalog-previous"),
-                        status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                        next_label: t!("catalog-next"),
-                        jump_label: t!("catalog-page-input"),
-                        jump_button_label: t!("catalog-page-go"),
+                        movement: true,
                         on_page_change: on_movement_page_change,
+                        on_page_size_change: on_movement_page_size_change,
                     }
                 },
             }

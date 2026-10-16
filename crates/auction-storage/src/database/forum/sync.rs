@@ -122,6 +122,8 @@ impl ForumSyncStore for DatabaseStore {
                 || !valid_rendered(&rendered)
                 || !valid_rendered_post(&system_log)
                 || !validation::valid_layout(&published)
+                || rendered.catalog_continuation.len()
+                    != published.catalog_continuation_post_ids.len()
                 || published_at.timestamp_nanos_opt().is_none()
             {
                 return Err(storage_error("论坛同步发布确认参数无效"));

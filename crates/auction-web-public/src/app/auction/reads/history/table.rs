@@ -6,6 +6,7 @@ pub(crate) fn PriceHistoryTable(
     page: PriceHistoryPage,
     current_page: i64,
     on_page_change: EventHandler<i64>,
+    on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page.page_size.max(1);
     let rows = page.rows.clone();
@@ -48,18 +49,14 @@ pub(crate) fn PriceHistoryTable(
                     }
                 }
             }
-            Pager {
+            PublicPager {
                 page: current_page,
                 page_size,
                 total: page.total,
                 has_more: page.has_more.unwrap_or(false),
                 label: t!("page-history-title"),
-                previous_label: t!("catalog-previous"),
-                status: move |(page, pages)| t!("catalog-page", page: page, pages: pages),
-                next_label: t!("catalog-next"),
-                jump_label: t!("catalog-page-input"),
-                jump_button_label: t!("catalog-page-go"),
                 on_page_change,
+                on_page_size_change,
             }
         }
     }

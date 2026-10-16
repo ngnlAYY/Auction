@@ -30,7 +30,8 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
     if config.item_timeout_seconds == 0 || config.item_timeout_seconds > 3_600 {
         return Err(ConfigError::InvalidForumConfig("item_timeout_seconds 必须位于 1 至 3600"));
     }
-    // 集成适配器最多四路并发读取主题；固定 #1/#2 各自最多再执行一次 GET + POST。
+    // 单目录页的最低预算：四路主题读取，目录/日志各一次 GET + POST。
+    // 多目录页及正文校验会增加请求，部署须提高 item/lease；不能用最低预算宣称覆盖任意页数。
     let topic_pages = u64::from(config.maximum_topic_pages);
     let Some(topic_read_waves) = topic_pages.checked_add(3).map(|value| value / 4) else {
         return Err(ConfigError::InvalidForumConfig("论坛分页波次数超出可表示范围"));
