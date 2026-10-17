@@ -53,6 +53,27 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
 
+### 2026-10-17 云端升级的用户时间迁移阻断（执行兼容静态检查通过）
+
+获准维护窗口内，核验 GitHub `482e0e8` 四程序身份、schema39 数据库及配置的私有备份和异机副本，
+三角色停机后由正式总控顺序提交 `000040`—`000043`。`000044` 更新两条有证明的异常用户快照时，
+延迟的 `user_forum_identity_account_id_check` 尚待执行，随后 ALTER 被 PostgreSQL 18 以
+`cannot ALTER TABLE "users" because it has pending trigger events` 拒绝，44 事务回滚。
+只读复核仍为43、时间倒退仍为2；88条历史未知投递的状态/尝试计数/fencing 快照未变，三角色保持停止。
+配置集中、Unix listener/代理及 systemd 静态检查已完成；此时尚未启动业务角色或切换代理。
+
+用户另行批准最小执行器修复、静态检查、提交和重编译后续部署。
+`auction-storage::migrations` 复用描述/原片段/出现次数受限的执行视图，只在44的 ALTER 前执行该延迟身份约束；
+检查失败仍使用户更正、版本和审计随原事务回滚，不改变候选或迁移边界。
+已发布 SQL 文件和原 checksum 不变，不新增44的替代 checksum，不手工改用户或登记迁移。
+本次 changed-path 主动 LSP 无诊断，完整 `just verify` 通过：45份文档、格式/策略、全部目标、
+PostgreSQL/Redis、全特性 Clippy `-D warnings` 与双端 WASM。所有已发布迁移字节保持不变；
+尚待制品重建和获准的迁移重试，不新增或运行独立行为测试。
+
+用户另行要求云端数据作为本地测试数据；已用核验过的升级前 schema39 备份，通过正式 restore 命令
+导入仅回环的独立本地库，核对44用户、2拍卖、101投递（含88未知）。原本地库保留，未复制生产配置/密钥，
+本地论坛、邮件、告警及自动排期继续关闭；此时尚未把恢复库接入页面，不代表竞价或投递行为验收。
+
 ### 2026-10-17 论坛无装备通知分类遗漏（本地修复与定向复审完成）
 
 前轮定向复审中，funding 三项及 evidence 期限均为 `Merge verdict: OK`；execution 为 `BLOCK`：
