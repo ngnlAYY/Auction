@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{AdminRuntimeConfigError, require};
 
-/// 论坛同步的非敏感运行参数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeForumConfig {
@@ -14,19 +13,13 @@ pub struct AdminRuntimeForumConfig {
     pub enabled: bool,
     /// 每轮论坛任务批量上限。
     pub batch_size: u16,
-    /// 论坛轮询间隔秒数。
     pub poll_interval_seconds: u64,
-    /// 论坛轮询随机抖动秒数。
     pub jitter_seconds: u64,
-    /// 单次响应最大字节数。
     pub maximum_response_bytes: usize,
     /// 单次主题扫描最多页数。
     pub maximum_topic_pages: u16,
-    /// 连续论坛请求的最小间隔毫秒数。
     pub minimum_request_interval_millis: u64,
-    /// 单次 HTTP 请求超时秒数。
     pub request_timeout_seconds: u64,
-    /// 单个主题任务的完整超时秒数。
     pub item_timeout_seconds: u64,
     /// 单个主题任务 claim 租约秒数。
     pub lease_duration_seconds: u64,

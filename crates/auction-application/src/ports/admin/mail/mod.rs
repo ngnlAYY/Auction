@@ -1,7 +1,4 @@
 //! Admin 邮件轮询状态与入站审查端口装配。
-//!
-//! 状态/入站投影、命令、错误和事务/查询端口分别由子模块拥有；这里保留原有
-//! `auction_application::ports::*` 公共导出路径。
 
 mod commands;
 mod common;

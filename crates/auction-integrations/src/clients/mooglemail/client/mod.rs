@@ -34,9 +34,7 @@ pub struct MoogleMailClientConfig {
     pub endpoint: Url,
     /// 单次响应最大字节数，不能超过 8 MiB。
     pub maximum_response_bytes: usize,
-    /// 连续请求之间的最小间隔。
     pub minimum_request_interval: Duration,
-    /// 单次 HTTP 请求超时时间。
     pub request_timeout: Duration,
 }
 
@@ -167,7 +165,6 @@ impl MoogleMailClient {
         })
     }
 
-    /// 构造收件箱页目标。
     pub fn inbox_page(
         &self,
         world: MoogleMailWorld,
@@ -176,7 +173,6 @@ impl MoogleMailClient {
         self.builder.inbox_page(world, page)
     }
 
-    /// 构造单封收件箱详情目标。
     pub fn detail(
         &self,
         world: MoogleMailWorld,
@@ -194,7 +190,6 @@ impl MoogleMailClient {
         self.builder.sent_page(world, page)
     }
 
-    /// 构造已发送邮件详情目标。
     pub fn sent_detail(
         &self,
         world: MoogleMailWorld,
@@ -203,12 +198,10 @@ impl MoogleMailClient {
         self.builder.sent_detail(world, external_id)
     }
 
-    /// 构造新邮件 compose 目标。
     pub fn compose(&self, world: MoogleMailWorld) -> Result<MoogleMailTarget, MoogleMailError> {
         self.builder.compose(world)
     }
 
-    /// 构造 Item Shop 余额目标。
     pub fn balance(&self, world: MoogleMailWorld) -> Result<MoogleMailTarget, MoogleMailError> {
         self.builder.balance(world)
     }
@@ -227,7 +220,6 @@ impl MoogleMailClient {
         self.builder.inventory(world, category)
     }
 
-    /// 构造装备详情目标。
     pub fn equipment(
         &self,
         world: MoogleMailWorld,

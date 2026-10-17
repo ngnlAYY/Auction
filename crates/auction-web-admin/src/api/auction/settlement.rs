@@ -1,5 +1,4 @@
 //! Admin 结算报告 HTTP 客户端。
-//!
 //! 结算报告只读取后端的安全投影；浏览器不接触数据库结算记录，也不在客户端重新计算
 //! 买卖双方金额。金额和资金池摘要必须以同一份服务端快照为准。
 
@@ -18,7 +17,6 @@ use super::{
 };
 
 /// 旧结算 decoder 只对内嵌 auction 使用字段闭集；report、summary 与 lot 允许兼容扩展字段。
-///
 /// 保留镜像的理由：contracts 的 `AdminSettlementReportResponse`/`AdminSettlementSummaryResponse`/
 /// `AdminSettlementLotResponse`/`AdminSettlementAdjustmentResponse` 对应同一 wire，但旧契约允许
 /// 服务端增加扩展字段，不能加 `deny_unknown_fields`，因此这里保留开放式镜像继续要求旧字段

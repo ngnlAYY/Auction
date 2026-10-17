@@ -10,7 +10,6 @@ use super::{
     ApplicationFuture, RequestHash, TransactionFuture, TransactionPolicy, TransactionPolicyError,
 };
 
-/// Admin 规则文档读取请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminRulesRequest {
     pub locale: String,
@@ -23,7 +22,6 @@ impl AdminRulesRequest {
     }
 }
 
-/// 尚未发布的规则文档候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminRulesCandidate {
     pub locale: String,
@@ -166,7 +164,6 @@ impl AdminRulesStoredCommand {
     }
 }
 
-/// Admin 规则读取与发布端口。
 pub trait AdminRulesReader: Send + Sync {
     fn get_admin_rules(
         &self,
@@ -174,7 +171,6 @@ pub trait AdminRulesReader: Send + Sync {
     ) -> ApplicationFuture<'_, Option<AdminRulesDocument>>;
 }
 
-/// Admin 规则读取与发布端口。
 pub trait AdminRulesPort: Send + Sync {
     fn get(&self, request: AdminRulesRequest) -> ApplicationFuture<'_, Option<AdminRulesDocument>>;
 

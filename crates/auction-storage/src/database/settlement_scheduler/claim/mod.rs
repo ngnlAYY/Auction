@@ -26,9 +26,8 @@ const CLAIM_TRANSACTION_ATTEMPTS: usize = 8;
 const CLAIM_RETRY_BASE_DELAY: Duration = Duration::from_millis(10);
 
 /// 保留数据库原始错误，直到确认是否属于可安全重放的 SQLSTATE。
-///
-/// 只有 `40001`（serialization_failure）和 `40P01`（deadlock_detected）允许重跑整笔
-/// 领取事务；业务失败和无法证明提交结果的错误都不能通过字符串内容猜测后重试。
+/// 只有 `40001`（serialization_failure）和 `40P01`（deadlock_detected）允许重跑整笔领取事务；
+/// 业务失败和无法证明提交结果的错误都不能靠字符串内容猜测后重试。
 enum ClaimError {
     Sqlx(sqlx::Error),
     Repository(auction_application::RepositoryError),

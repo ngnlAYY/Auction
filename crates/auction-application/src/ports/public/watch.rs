@@ -71,7 +71,6 @@ impl TransactionFailure for LotWatchError {
     }
 }
 
-/// 标记异步端口结果。
 pub type LotWatchFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, LotWatchError>> + Send + 'a>>;
 

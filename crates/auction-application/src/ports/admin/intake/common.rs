@@ -45,7 +45,6 @@ impl From<EquipmentKeyEnvelopeError> for AdminIntakeError {
     }
 }
 
-/// 生成 world-scoped 命令账本聚合标识。
 pub fn aggregate_id(world_id: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("auction/admin-intake/{world_id}").as_bytes())
 }

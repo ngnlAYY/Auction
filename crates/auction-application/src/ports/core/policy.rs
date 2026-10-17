@@ -8,7 +8,6 @@ pub enum TransactionIsolation {
 }
 
 /// 应用层传给存储适配器的事务策略。
-///
 /// 竞价和关键生命周期写入使用 Serializable，最多尝试三次；队列领取等已经由显式行锁
 /// 保护的路径才使用 Read Committed。这个类型不允许适配器把两种语义悄悄合并。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

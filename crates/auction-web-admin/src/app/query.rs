@@ -1,13 +1,10 @@
 //! Admin 列表页筛选/分页的 URL query 状态定义。
-//!
 //! 每个页面声明自己管理的 query 键、解析（非法值回退默认值）与序列化（等于默认值的键
 //! 省略，保持地址栏干净）规则；状态同步统一交给 `auction_web_shared::use_query_state`：
 //! 挂载时从地址栏读初值，用户变更经 `push`/`replace` 写回，浏览器前进/后退（popstate）
 //! 由 hook 自动恢复状态信号。
-//!
 //! 入 URL 的只有筛选、分页与排序这类「视图状态」；输入草稿、对话框开合、操作反馈等瞬态仍由
 //! 各页面的 signal 持有，不写地址栏。
-//!
 //! 排序键为 `sort`（列标识）+ `dir`（仅降序时写入 `desc`）：服务端列表端点不支持排序参数，
 //! 排序由浏览器对当前页执行，列标识只在本地消费，不转发给 API（见 `sort.rs`）。
 
@@ -100,8 +97,6 @@ fn push_sort(pairs: &mut Vec<(String, String)>, sort: &str, direction: SortDirec
     }
 }
 
-// —— 拍卖列表（/auctions）：世界筛选 + 分页 + 当前页排序 ——
-
 const AUCTIONS_KEYS: &[&str] = &["world", "page", "sort", "dir"];
 
 /// 拍卖列表可排序列：场次号、状态、开拍时间、结拍时间。
@@ -143,8 +138,6 @@ pub(super) fn use_auctions_query_state() -> QueryState<AuctionsQuery> {
     )
 }
 
-// —— 仅分页 + 当前页排序的页面（/credentials）——
-
 const PAGE_ONLY_KEYS: &[&str] = &["page", "sort", "dir"];
 
 /// 凭据列表可排序列：标签、世界、类型、状态、上次检查时间。
@@ -155,7 +148,6 @@ pub(super) struct PageQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `CREDENTIALS_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -182,8 +174,6 @@ pub(super) fn use_page_query_state() -> QueryState<PageQuery> {
     )
 }
 
-// —— lot 列表（/auctions/:id/lots）：分页 + 当前页排序 ——
-
 const LOTS_KEYS: &[&str] = &["page", "sort", "dir"];
 
 /// lot 列表可排序列：序号、状态、起拍价、当前价。
@@ -194,7 +184,6 @@ pub(super) struct LotsQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `LOTS_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -221,7 +210,6 @@ pub(super) fn use_lots_query_state() -> QueryState<LotsQuery> {
     )
 }
 
-// —— 邮件入站（/mails）：世界/类型/状态筛选 + 分页 ——
 // 邮箱轮询输入、详情面板开合是瞬态，不入 URL。
 
 const MAIL_KEYS: &[&str] = &["world", "kind", "status", "page", "sort", "dir"];
@@ -235,7 +223,6 @@ const MAIL_SORT_COLUMNS: &[&str] = &["received", "kind", "status", "world"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MailQuery {
-    /// 空串表示全部世界；合法值为 `main` / `isekai`。
     pub world: String,
     /// 空串表示全部类型；合法值见 `MAIL_KIND_VALUES`。
     pub kind: String,
@@ -244,7 +231,6 @@ pub(super) struct MailQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `MAIL_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -299,7 +285,6 @@ pub(super) fn use_mail_query_state() -> QueryState<MailQuery> {
     )
 }
 
-// —— 审计历史（/audit）：已应用的筛选 + 分页 ——
 // 表单草稿只在提交时写入 URL；文本上限与输入框 maxlength 对齐。
 
 const AUDIT_KEYS: &[&str] = &[
@@ -330,7 +315,6 @@ pub(super) struct AuditQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序（发生时间倒序）。合法值见 `AUDIT_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -382,8 +366,6 @@ pub(super) fn use_audit_query_state() -> QueryState<AuditQuery> {
     )
 }
 
-// —— Delivery 列表（/deliveries）：状态筛选 + 分页 + 当前页排序 ——
-
 const DELIVERIES_KEYS: &[&str] = &["status", "page", "sort", "dir"];
 
 /// Delivery 列表可排序列：投递 ID、到付金额、状态、尝试次数。
@@ -396,7 +378,6 @@ pub(super) struct DeliveriesQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `DELIVERIES_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -425,7 +406,6 @@ pub(super) fn use_deliveries_query_state() -> QueryState<DeliveriesQuery> {
     )
 }
 
-// —— Realtime 运维（/outbox）：事件/failure 的已应用筛选 + 三个分区的分页 ——
 // 筛选输入框是提交前草稿，不入 URL；replay 对话框与负载输入是瞬态，不入 URL。
 
 const REALTIME_KEYS: &[&str] = &[
@@ -510,14 +490,12 @@ pub(super) fn use_realtime_query_state() -> QueryState<RealtimeQuery> {
     )
 }
 
-// —— 管理总览（/dashboard）：自动轮询开关 ——
 // 快照本身是资源瞬态，只有轮询开关入 URL。
 
 const DASHBOARD_KEYS: &[&str] = &["poll"];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct DashboardQuery {
-    /// 自动轮询间隔秒数；0 表示关闭（默认）。合法值见 `POLL_INTERVAL_VALUES`。
     pub poll_seconds: u64,
 }
 
@@ -533,8 +511,6 @@ pub(super) fn use_dashboard_query_state() -> QueryState<DashboardQuery> {
     )
 }
 
-// —— 改名历史（/renames）：名称即时筛选 + 分页 + 当前页排序 ——
-
 const RENAMES_KEYS: &[&str] = &["name", "page", "sort", "dir"];
 
 /// 改名历史可排序列：改名时间、原用户名、新用户名、操作者。
@@ -546,7 +522,6 @@ pub(super) struct RenamesQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `RENAMES_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 
@@ -575,7 +550,6 @@ pub(super) fn use_renames_query_state() -> QueryState<RenamesQuery> {
     )
 }
 
-// —— 用户管理（/users）：已应用的名称筛选 + 状态筛选 + 分页 + 当前页排序 ——
 // 名称输入框是提交前草稿，不入 URL。
 
 const USERS_KEYS: &[&str] = &["name", "status", "page", "sort", "dir"];
@@ -590,7 +564,6 @@ pub(super) struct UsersQuery {
     pub page: i64,
     /// 排序列标识；空串表示保持服务端原始顺序。合法值见 `USERS_SORT_COLUMNS`。
     pub sort: String,
-    /// 排序方向；仅 `sort` 非空时有意义。
     pub direction: SortDirection,
 }
 

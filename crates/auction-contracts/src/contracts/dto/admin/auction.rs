@@ -2,8 +2,6 @@
 
 use super::*;
 
-/// Admin 拍卖生命周期命令的旧版兼容成功响应。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；wire 冻结后只收紧
 /// 反序列化，序列化输出不变。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -12,8 +10,6 @@ pub struct AdminAuctionLifecycleResponse {
     pub auction: AdminAuctionCommandResponse,
 }
 
-/// Admin 创建/生命周期命令提交时冻结的完整拍卖投影。
-///
 /// 旧版生命周期响应不会附带列表专属的 `scheduled_ends_at` 或 `lot_count`，因此这里不复用
 /// `AdminAuctionResponse`，避免把列表扩展字段泄漏进同一 v1 命令 wire。nullable 生命周期字段
 /// 在旧 decoder 中必须显式出现（可为 `null`），未知字段一律拒绝。
@@ -56,7 +52,6 @@ where
     Option::<T>::deserialize(deserializer)
 }
 
-/// Admin 创建 draft 拍卖请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminCreateAuctionRequest {
@@ -78,13 +73,11 @@ pub struct AdminCreateAuctionRequest {
     pub expected_state_version: i64,
 }
 
-/// Admin 创建拍卖成功响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminAuctionCreateResponse {
     pub auction: AdminAuctionCommandResponse,
 }
 
-/// Admin 正式开拍前修改预览、开拍与计划结束时间的请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUpdateAuctionScheduleRequest {
@@ -106,8 +99,6 @@ pub struct AdminUpdateAuctionScheduleResponse {
     pub auction: AdminAuctionResponse,
 }
 
-/// Admin 装备录入请求。
-///
 /// `source_kind` 缺省时沿用旧契约的 URL 来源；URL 与 canonical JSON 必须二选一。装备 key
 /// 只在 HTTPS 请求和应用适配器的短生命周期内使用，绝不进入成功响应。
 #[derive(Clone, Deserialize, Serialize)]
@@ -128,7 +119,6 @@ pub struct AdminIntakeRequest {
 }
 
 /// Admin canonical 装备输入 DTO。
-///
 /// 旧版使用 pointer-heavy wire 区分“字段缺失/`null`”和合法零值；因此除 `level` 外的必填字段
 /// 在 DTO 中保留 `Option`，由 HTTP 防腐层统一映射为 `invalid_auction_command`。严格字段闭集仍由
 /// `deny_unknown_fields` 保证。

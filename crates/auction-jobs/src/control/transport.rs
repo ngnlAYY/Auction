@@ -1,8 +1,7 @@
-//! Worker control 的 Unix socket 协议、服务端和 Admin client。
-//!
-//! 该模块只暴露存活、就绪、状态和 MoogleMail 唤醒四个窄操作。socket 使用安全 runtime 目录、
-//! 单实例锁、inode 清理、固定 group/权限和显式 UID/GID peer allowlist；响应不包含配置、Cookie、
-//! 游标或错误 cause。唤醒命令只触发下一轮调度，邮件事实仍必须经过数据库命令账本和入站事务。
+//! Worker control 的 Unix socket 协议、服务端和 Admin client；socket 使用安全 runtime
+//! 目录、单实例锁、inode 清理、固定 group/权限和显式 UID/GID peer allowlist，
+//! 响应不含配置、Cookie、游标或错误 cause。
+//! 唤醒命令只触发下一轮调度，邮件事实仍必须经过数据库命令账本和入站事务。
 
 use std::{
     collections::VecDeque,
@@ -55,11 +54,8 @@ pub use server::WorkerControlServer;
 
 /// 当前 Worker control HTTP/JSON 协议版本。
 pub const WORKER_CONTROL_PROTOCOL_VERSION: &str = "v1";
-/// Worker control liveness 路径。
 pub const WORKER_CONTROL_LIVE_PATH: &str = "/v1/health/live";
-/// Worker control readiness 路径。
 pub const WORKER_CONTROL_READY_PATH: &str = "/v1/health/ready";
-/// Worker control 状态路径。
 pub const WORKER_CONTROL_STATUS_PATH: &str = "/v1/status";
 /// Worker control MoogleMail 唤醒路径。
 pub const WORKER_CONTROL_TRIGGER_POLL_PATH: &str = "/v1/mail/polls:trigger";
@@ -119,13 +115,9 @@ pub struct WorkerControlServerConfig {
     pub socket_path: PathBuf,
     /// 必须预先存在且由当前进程用户拥有的运行目录。
     pub runtime_directory: PathBuf,
-    /// socket 文件应归属的 Unix group 名称。
     pub group: String,
-    /// 允许访问控制面的内核认证 UID。
     pub allowed_peer_uids: Vec<u32>,
-    /// 允许访问控制面的内核认证 GID。
     pub allowed_peer_gids: Vec<u32>,
-    /// 单个请求的最长处理时间。
     pub request_timeout: Duration,
     /// JSON 请求体上限；不能超过协议的保守边界。
     pub body_limit: usize,
@@ -181,7 +173,6 @@ impl WorkerControlServerConfig {
 }
 
 /// Worker 进程控制状态的内存 owner。
-///
 /// 该状态只描述当前进程，不是数据库权威状态；`mail_pollers` 只用于判断唤醒是否被接受。
 #[derive(Clone)]
 pub struct WorkerControlHandle {
@@ -234,7 +225,6 @@ struct TriggerHistory {
 }
 
 impl WorkerControlHandle {
-    /// 建立启动中的 Worker control 状态。
     pub fn new(version: impl Into<String>, mail_pollers: usize) -> Self {
         Self {
             inner: Arc::new(WorkerControlInner {
@@ -262,7 +252,6 @@ impl WorkerControlHandle {
         self.refresh_operational_state();
     }
 
-    /// 标记 Worker 存活但当前无法接受新工作。
     pub fn mark_degraded(&self) {
         self.inner.degraded_causes.fetch_or(1, std::sync::atomic::Ordering::AcqRel);
         self.refresh_operational_state();
@@ -310,7 +299,6 @@ impl WorkerControlHandle {
         );
     }
 
-    /// 返回下一轮 MoogleMail 轮询使用的唤醒器。
     pub fn poll_wakeup(&self) -> Arc<Notify> {
         Arc::clone(&self.inner.poll_wakeup)
     }

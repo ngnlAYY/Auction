@@ -15,13 +15,10 @@ pub(crate) struct SecretFileConfig {
     pub(crate) database: Option<PostgresConnectionConfig>,
     /// 兼容旧 PostgreSQL 连接串；数据库进程按需读取，不能写入主配置。
     pub(crate) database_url: Option<String>,
-    /// Redis 连接串；仅启用 Redis 缓存时需要。
     pub(crate) redis_url: Option<String>,
     /// 会话签名密钥；启用会话写入能力的角色需要。
     pub(crate) session_signing_key: Option<String>,
-    /// E-Hentai Cookie；启用对应外部集成时需要。
     pub(crate) ehentai_cookie: Option<String>,
-    /// MoogleMail Cookie；启用对应外部集成时需要。
     pub(crate) mooglemail_cookie: Option<String>,
     /// Public OTLP headers；只允许放在敏感 TOML，关闭 tracing 时不得提供。
     pub(crate) public_otlp_headers: Option<String>,
@@ -82,7 +79,6 @@ pub(crate) struct PostgresMaintenanceSecretFile {
 }
 
 /// 独立 PostgreSQL 维护敏感 TOML 的脱敏结果。
-///
 /// 该类型只允许 `auctionctl postgres-rebuild` 在维护窗口短暂使用，不能并入 Public/Admin/Worker
 /// 常驻配置，也不会实现序列化或暴露在 `Debug` 输出中。
 #[derive(Clone)]
@@ -104,7 +100,6 @@ impl fmt::Debug for PostgresMaintenanceSecrets {
 }
 
 /// `.keyenv` 中仅允许出现的两个 MoogleMail Cookie 身份。
-///
 /// `hv-ck-key1` 固定解释为 Worker 运行账号，`hv-ck-key2` 只供显式隔离验证。该类型不实现
 /// 序列化；生产装配不得把二者组成候选池，也不得自动切换到测试号。
 #[derive(Clone)]

@@ -1,5 +1,4 @@
 //! Admin 审计查询 HTTP 适配。
-//!
 //! 页面只使用后端的安全审计投影；metadata 作为有界 JSON 展示，不在浏览器端推导状态或编辑
 //! 历史事实。数字页语义与旧版保持一致，筛选变化会立即重新加载当前第一页。
 
@@ -16,7 +15,6 @@ use super::{
 };
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
-///
 /// 保留镜像的理由：wire 允许兼容扩展，contracts 的 `AdminAuditResponse`/
 /// `AdminAuditRecordResponse`/`AdminAuditCursorResponse` 不能加 `deny_unknown_fields`；
 /// 镜像继续要求旧字段显式存在（`next_cursor`/`request_id` 为必填 nullable）。同步义务：

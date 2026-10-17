@@ -75,10 +75,10 @@ pub async fn lock_funding_account(
     .transpose()
 }
 
-/// 按持久出站分配定位原账户，供无当前远端UID的结果回写、过期claim及人工门禁使用。
-/// 调用方先完成所需generation/world锁，随后才锁delivery并复核；本函数不锁业务行。
-/// 所有allocation状态及返还后保留的关联均有效，账户冻结或未ready不影响定位。
-/// 只有确无分配关联才返回None，且scope锁保留到事务结束；不得以metadata替代本查询。
+/// 按持久出站分配定位原账户，供无当前远端UID的结果回写、过期claim及人工门禁使用；本函数不锁业务行。
+/// 调用方先完成generation/world锁，随后才锁delivery并复核；所有allocation状态及返还关联均有效，
+/// 账户冻结或未ready不影响定位；只有确无分配关联才返回None，scope锁保留到事务结束，
+/// 不得以metadata替代本查询。
 pub async fn lock_funded_delivery_account(
     tx: &mut Transaction<'_, Postgres>,
     delivery_id: Uuid,

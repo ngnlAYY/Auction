@@ -8,8 +8,6 @@ use super::{
     RequestHash,
 };
 
-/// Admin 创建 draft 拍卖命令。
-///
 /// 该命令对应旧系统 A03 POST 契约。策略快照由应用服务在事务前按当前已冻结的默认策略
 /// 构造并写入，HTTP 请求本身不能注入未审计的数据库字段或外部协议数据。
 #[derive(Debug, Clone)]
@@ -50,7 +48,6 @@ impl AdminCreateAuctionCommand {
     }
 }
 
-/// Admin 创建拍卖的窄应用端口。
 pub trait AdminAuctionCreatePort: Send + Sync {
     fn create(
         &self,

@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// world-scoped 的 Admin 装备录入命令。
 #[derive(Clone)]
 pub struct AdminIntakeCommand {
     pub command_id: CommandId,
@@ -73,7 +72,6 @@ impl AdminIntakeCommand {
     }
 
     /// 计算不包含明文 key 的稳定请求摘要。
-    ///
     /// `request_id` 只属于观测与审计；每次 HTTP 重试都会变化，不能参与业务幂等判等。
     pub fn request_hash(&self, aggregate_id: Uuid) -> Result<RequestHash, serde_json::Error> {
         #[derive(Serialize)]

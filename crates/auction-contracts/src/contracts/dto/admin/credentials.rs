@@ -76,7 +76,6 @@ pub struct AdminCredentialDeleteRequest {
 }
 
 /// Admin 凭据安全响应，不包含 secret、密文、密钥标识或指纹。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；nullable 的 `rotated_at`
 /// 在旧 decoder 中必须显式出现（可为 `null`）。wire 冻结后只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

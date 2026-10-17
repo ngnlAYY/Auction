@@ -33,7 +33,6 @@ pub struct AdminRecoveryConfirmationResultResponse {
     pub relisted_lot_id: Option<String>,
 }
 
-/// Admin recovery 确认成功响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRecoveryConfirmationResponse {
@@ -93,7 +92,6 @@ pub struct AdminRecoveryResponse {
     pub updated_at: String,
 }
 
-/// Admin recovery 报告响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRecoveryReportResponse {

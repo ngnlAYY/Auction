@@ -3,7 +3,6 @@
 use serde::Serialize;
 
 /// 按 Go `encoding/json.Marshal` 的默认 HTML 安全规则编码稳定 JSON。
-///
 /// serde 与 Go 对结构字段顺序、整数和有效 UTF-8 字符串的编码一致，但 Go 还会默认转义
 /// `<`、`>`、`&`、U+2028 与 U+2029。履约摘要绑定的是原始字节，因此这些差异不能只在
 /// 语义 JSON 层比较。

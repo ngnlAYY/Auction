@@ -18,7 +18,6 @@ pub enum MoogleMailWorld {
 }
 
 impl MoogleMailWorld {
-    /// 返回外部协议中的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Main => "main",
@@ -26,7 +25,6 @@ impl MoogleMailWorld {
         }
     }
 
-    /// 解析外部协议中的世界名称。
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "main" => Some(Self::Main),
@@ -52,38 +50,24 @@ impl fmt::Display for MoogleMailWorld {
 /// MoogleMail 读取和写入协议的操作闭集。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoogleMailOperation {
-    /// 收件箱分页。
     Inbox,
-    /// 单封收件箱详情。
     Detail,
-    /// 已发送邮件分页。
     Sent,
-    /// 单封已发送邮件详情。
     SentDetail,
-    /// Item Shop 余额页面。
     Balance,
-    /// 装备详情页面。
     Equipment,
-    /// Character Equipment 认证 UID 页面。
     Identity,
     /// Armory organize 正向库存页面，只读不提交表单。
     Inventory,
-    /// 新邮件页面。
     Compose,
-    /// compose 页面附加 Credits。
     AttachAdd,
-    /// compose 页面设置 CoD。
     AttachCod,
-    /// compose 页面最终发送。
     Send,
-    /// 详情页面退回整封邮件。
     ReturnMessage,
-    /// 详情页面领取全部附件。
     Take,
 }
 
 impl MoogleMailOperation {
-    /// 返回稳定的操作名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Inbox => "inbox",
@@ -197,7 +181,6 @@ impl MoogleMailEquipmentKey {
         std::str::from_utf8(&self.0).unwrap_or_default()
     }
 
-    /// 尽力清除当前内存中的 key。
     pub fn clear(&mut self) {
         self.0.fill(0);
     }
@@ -230,7 +213,6 @@ impl MoogleMailTarget {
         self.operation
     }
 
-    /// 返回目标世界。
     pub const fn world(&self) -> MoogleMailWorld {
         self.world
     }

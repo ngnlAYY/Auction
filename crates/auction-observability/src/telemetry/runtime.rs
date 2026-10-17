@@ -27,7 +27,6 @@ use super::{
 };
 
 /// 把经过 HTTP 边界筛选的 W3C trace context 设为当前 server span 的远端父级。
-///
 /// 无效或超长字段会被忽略；函数不记录 header 原文，避免把不受信任的传播数据带入日志。
 pub fn attach_remote_trace_context(
     span: &tracing::Span,
@@ -49,7 +48,6 @@ pub fn attach_remote_trace_context(
 }
 
 /// 进程级 tracing 运行时句柄。
-///
 /// 句柄持有本进程的 provider，不注册 OpenTelemetry 全局 provider。这样 Admin、Public 和
 /// Worker 的装配生命周期仍由各自二进制拥有，关闭时可以明确等待有界的批次 flush。
 pub struct TracingRuntime {
@@ -70,7 +68,6 @@ impl TracingRuntime {
     }
 
     /// 在进程退出前关闭 exporter，并等待不超过配置的时长。
-    ///
     /// 该方法会阻塞当前调用线程；异步装配根应通过 `spawn_blocking` 调用，避免阻塞 Tokio
     /// worker。重复关闭由 OpenTelemetry SDK 自身安全处理。
     pub fn shutdown(self) -> Result<(), ShutdownError> {

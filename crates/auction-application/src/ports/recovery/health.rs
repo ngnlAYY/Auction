@@ -53,7 +53,6 @@ impl RecoveryEvidenceStatus {
 }
 
 /// 单个 world 的 recovery health 持久化更新。
-///
 /// 余额和最后成功证据允许为空；为空表示本轮外部来源没有提供新事实，存储 owner 必须保留
 /// 数据库中的最后成功值，不能把失败读取伪装成零余额。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,13 +126,11 @@ pub trait RecoveryHealthStore: Send + Sync {
     fn refresh_world_health(&self, update: RecoveryHealthUpdate) -> ApplicationFuture<'_, ()>;
 }
 
-/// Worker 触发 recovery health 刷新的应用端口。
 pub trait RecoveryHealthRefreshPort: Send + Sync {
     /// 按配置的 world 集合读取外部余额并刷新持久化安全投影。
     fn refresh(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
 }
 
-/// recovery health 刷新所需的有界配置。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryHealthConfig {
     pub worlds: Vec<SettlementWorld>,

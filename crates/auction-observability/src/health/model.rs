@@ -7,10 +7,8 @@ use thiserror::Error;
 /// 心跳 details 的最大序列化大小，避免健康记录成为任意 JSON 存储通道。
 pub const MAX_HEARTBEAT_DETAILS_BYTES: usize = 64 << 10;
 
-/// 允许的心跳 TTL 上限。
 pub const MAX_HEARTBEAT_TTL: Duration = Duration::hours(24);
 
-/// 可观测性端口的异步返回值。
 pub type HealthFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, HealthError>> + Send + 'a>>;
 
 /// 心跳运行状态读取器的异步 readiness 返回值；失败依赖直接投影为 false，不泄漏错误细节。
@@ -41,7 +39,6 @@ pub enum ServiceName {
 }
 
 impl ServiceName {
-    /// 返回稳定的外部名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Public => "auction-public",
@@ -50,7 +47,6 @@ impl ServiceName {
         }
     }
 
-    /// 解析数据库或协议中的服务名称。
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "auction-public" => Some(Self::Public),
@@ -71,7 +67,6 @@ impl ServiceName {
     pub(super) const ALL: [Self; 3] = [Self::Public, Self::Admin, Self::Worker];
 }
 
-/// 进程职责名称。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProcessRole {
     Public,
@@ -89,7 +84,6 @@ impl ProcessRole {
         }
     }
 
-    /// 解析数据库或协议中的职责名称。
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "public" => Some(Self::Public),
@@ -110,7 +104,6 @@ pub enum HeartbeatStatus {
 }
 
 impl HeartbeatStatus {
-    /// 返回稳定的外部名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Starting => "starting",
@@ -120,7 +113,6 @@ impl HeartbeatStatus {
         }
     }
 
-    /// 解析数据库或协议中的状态名称。
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "starting" => Some(Self::Starting),
@@ -132,7 +124,6 @@ impl HeartbeatStatus {
     }
 }
 
-/// tracing 健康状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracingStatus {
     Disabled,
@@ -141,7 +132,6 @@ pub enum TracingStatus {
 }
 
 impl TracingStatus {
-    /// 返回稳定的外部名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
@@ -150,7 +140,6 @@ impl TracingStatus {
         }
     }
 
-    /// 解析数据库或协议中的 tracing 状态。
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "disabled" => Some(Self::Disabled),

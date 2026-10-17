@@ -1,5 +1,4 @@
 //! Public API 的服务端时间校准与同源请求边界。
-//!
 //! 发送、超时取消与错误分类统一由 `auction-web-shared` 的传输层承担（10 秒取消上限、
 //! 精确 URL、结构化 [`TransportError`]）；本模块只保留 Public 特有的服务端时钟采样，
 //! 字符串形式的 "请求超时" 比较已彻底移除。
@@ -82,7 +81,6 @@ pub(crate) fn estimated_now() -> DateTime<Utc> {
 }
 
 /// 发送 GET 并在读取 DTO 前采集服务端时钟；所有 Public 读取共用该边界。
-///
 /// 传输实现复用 `auction-web-shared` 的唯一边界；结构化错误直接向调用方传播，由调用方
 /// 用 [`TransportError::code`] 折回页面消费的稳定 transport code。
 pub(crate) async fn send_get(url: &str) -> Result<Response, TransportError> {

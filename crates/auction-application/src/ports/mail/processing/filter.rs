@@ -14,7 +14,6 @@ pub const EQUIPMENT_ATTRIBUTES_INVALID: &str = "attributes_invalid";
 pub const EQUIPMENT_TRADEABLE_REQUIRED: &str = "tradeable_required";
 
 /// MoogleMail 入站装备过滤策略。
-///
 /// 空的 allowlist 表示不限制对应维度；等级上下限分别用 0 表示不限制。
 /// 启用策略时至少要配置一个维度或等级范围。
 /// 策略只消费已由装备来源适配器生成的安全快照，不接触外部页面正文或装备 key。

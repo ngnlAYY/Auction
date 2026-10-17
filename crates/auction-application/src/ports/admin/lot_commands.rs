@@ -1,5 +1,4 @@
 //! Admin lot 修改命令端口。
-//!
 //! 该模块只声明 draft lot 的窄修改集合和事务能力。具体锁顺序、SQL、预览修订、审计、实时
 //! 事件及 withdrawn-return 义务由完整档存储适配器实现；HTTP 不得直接修改 lot 字段。
 
@@ -101,7 +100,6 @@ impl AdminLotUpdateSnapshot {
     }
 }
 
-/// Admin lot 修改端口。
 pub trait AdminLotUpdatePort: Send + Sync {
     fn update(&self, command: AdminLotUpdateCommand) -> ApplicationFuture<'_, AdminLotSummary>;
 }

@@ -1,20 +1,11 @@
 //! 统一模态弹窗外壳。
-//!
-//! 合并自 Public 的 `.public-auction-dialog`（竞价/代理两处）与 Admin 的
-//! `.admin-shell__dialog-backdrop` + `.admin-shell__dialog` 等 12 处弹窗：三端语义一致——
-//! 遮罩 + 居中面板 + 标题栏 + 关闭按钮。组件只负责 markup 与关闭语义，键盘焦点循环、
-//! 初始聚焦、关闭后触发器焦点恢复与背景滚动锁仍由外壳层的
+//! 只负责 markup 与关闭语义：焦点循环、初始聚焦、关闭后焦点恢复与背景滚动锁由外壳层的
 //! [`use_dialog_focus_trap`](crate::use_dialog_focus_trap) 全局处理（它自动识别
-//! `[role="dialog"][aria-modal="true"]`）。两端迁移时统一以 `true` 调用该 hook 锁定背景
-//! 滚动（原 public=true / admin=false 不一致，统一为 true，弹窗打开期间背景不应滚动）。
-//!
-//! 遮罩点击始终不关闭弹窗，避免误触丢失草稿；正常关闭使用 Escape、关闭或内容区取消按钮。
-//! `busy=true` 时 Escape 与关闭按钮禁用，内容区取消按钮由调用方同步保护，提交不丢失回调。
-//!
-//! 移动形态：组件不感知断点；`base.css` 中 `.ui-dialog` 在 ≤48rem（bp-sm）媒体查询下
-//! 自动切换为贴底抽屉（上口圆角、最大高度约束），无需额外 props。
-//!
-//! 文案一律由调用方通过 props 传入，本 crate 不持有任何 i18n key。
+//! `[role="dialog"][aria-modal="true"]`）。
+//! 遮罩点击始终不关闭弹窗，避免误触丢失草稿；正常关闭用 Escape、关闭或内容区取消按钮。
+//! `busy=true` 时 Escape 与关闭按钮禁用，内容区取消按钮由调用方同步保护。
+//! 移动形态不靠额外 props：`base.css` 中 `.ui-dialog` 在 ≤48rem（bp-sm）下自动切为贴底抽屉。
+//! 文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key。
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -25,9 +16,7 @@ use dioxus::prelude::*;
 static NEXT_DIALOG_ID: AtomicUsize = AtomicUsize::new(1);
 
 /// 模态弹窗外壳：遮罩、居中/贴底面板、标题栏与受 busy 守卫的 Escape/关闭按钮。
-///
-/// `children` 是内容槽，表单与动作按钮等具体交互由调用方提供；`on_close` 只在
-/// `busy=false` 时经任一关闭路径触发。需要嵌套弹窗时直接嵌套渲染即可，焦点陷阱始终
+/// `children` 是内容槽；`on_close` 只在 `busy=false` 时经任一关闭路径触发。焦点陷阱始终
 /// 把 DOM 中最内层弹窗视为当前焦点范围。
 #[component]
 pub fn Dialog(
@@ -51,8 +40,8 @@ pub fn Dialog(
             role: "presentation",
             // 背景点击只阻止冒泡，既不丢失表单，也不触发外层页面或嵌套弹窗的点击动作。
             onclick: move |event| event.stop_propagation(),
-            // Escape 关闭挂在遮罩根上，弹窗内任意焦点的按键都会冒泡到这里；
-            // stop_propagation 避免嵌套弹窗时一次 Escape 连关两层。
+            // Escape 关闭挂在遮罩根上，弹窗内按键会冒泡到这里；stop_propagation 避免嵌套
+            // 弹窗时一次 Escape 连关两层。
             onkeydown: move |event| {
                 if event.key() == Key::Escape && !busy {
                     event.prevent_default();

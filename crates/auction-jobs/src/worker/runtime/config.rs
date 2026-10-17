@@ -1,7 +1,5 @@
-//! Worker 各业务循环的运行时边界配置。
-//!
-//! 配置层负责 TOML 字段和跨字段校验，这里的二次校验保护装配根与运行时之间的窄接口，避免
-//! 手动构造无效租约、并发或轮询参数。
+//! Worker 各业务循环的运行时边界配置；二次校验保护装配根与运行时之间的窄接口，
+//! 拒绝无效租约、并发或轮询参数。
 
 use std::sync::Arc;
 
@@ -44,7 +42,6 @@ impl AuctionScheduleRuntimeConfig {
     }
 }
 
-/// Delivery loop 已经由配置层校验的独立运行边界。
 #[derive(Debug, Clone, Copy)]
 pub struct DeliveryWorkerRuntimeConfig {
     pub batch_limit: u16,
@@ -202,7 +199,6 @@ impl FulfillmentWorkerRuntimeConfig {
     }
 }
 
-/// Recovery loop 已经由配置层校验的独立运行边界。
 #[derive(Debug, Clone, Copy)]
 pub struct RecoveryWorkerRuntimeConfig {
     pub batch_limit: u16,

@@ -104,7 +104,6 @@ impl PublicCompensationMovement {
     }
 }
 
-/// 单场补偿账本分页请求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicCompensationMovementRequest {
     pub limit: i64,

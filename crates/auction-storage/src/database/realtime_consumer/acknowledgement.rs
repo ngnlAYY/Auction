@@ -1,7 +1,5 @@
-//! Realtime consumer 游标确认事务。
-//!
-//! 只有确认的 event_id 与 stream/sequence 完全匹配且序号连续时才推进游标；失败记录的
-//! 正常确认会在同一事务中收口，但 replay 事件仍由显式恢复流程处理。
+//! Realtime consumer 游标确认事务；只有 event_id 与 stream/sequence 完全匹配且序号连续才推进游标，
+//! 失败记录的正常确认同事务收口，replay 事件仍由显式恢复流程处理。
 
 use auction_application::ApplicationError;
 #[cfg(feature = "postgres")]

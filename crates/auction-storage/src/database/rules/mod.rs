@@ -1,7 +1,4 @@
-//! Public 规则文档查询与 Admin 发布适配器的稳定出口。
-//!
-//! PostgreSQL 规则事务和跨后端读模型分别归档到子模块；本模块只保留共享依赖、模块装配
-//! 与 `DatabaseStore` 的存储端口边界。
+//! Public 规则文档查询与 Admin 发布适配器的稳定出口；规则事务和读模型位于子模块。
 
 #[cfg(feature = "postgres")]
 use std::future::Future;

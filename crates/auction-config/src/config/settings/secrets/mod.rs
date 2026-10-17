@@ -1,7 +1,5 @@
-//! 敏感配置子模块的稳定出口。
-//!
-//! 模型、运维维护文件、`.keyenv` 解析和 Admin runtime 投影分别归属相邻 owner；本文件只
-//! 负责内部装配与公开安全 API，避免普通配置模块直接依赖敏感文件实现细节。
+//! 敏感配置子模块的稳定出口；模型、运维维护文件、`.keyenv` 解析和 Admin runtime
+//! 投影由相邻 owner 持有。
 
 mod database;
 mod keyenv;

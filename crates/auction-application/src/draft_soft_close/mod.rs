@@ -1,5 +1,4 @@
 //! 未发布草稿软截止修正：显式命令、资格规则和事务窄端口。
-//!
 //! 只允许 60/60 秒旧快照改为 900/900 秒；不重算价格、排期、投稿或资金。
 //! 存储必须先检查命令账本，再在同一 Serializable 事务中读取证据、调用规则并追加审计。
 
@@ -176,7 +175,6 @@ pub enum DraftSoftCloseError {
     RetryExhausted,
 }
 
-/// 草稿修正异步结果。
 pub type DraftSoftCloseFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, DraftSoftCloseError>> + Send + 'a>>;
 

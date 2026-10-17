@@ -1,5 +1,4 @@
 //! Admin 登录外壳 readiness HTTP 客户端。
-//!
 //! 静态 Status 路由不发请求；登录外壳继续读取 `/health/ready`。其 503 是合法的未就绪结果，
 //! 不能当成网络解析错误。
 

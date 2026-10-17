@@ -1,7 +1,5 @@
-//! 装备 key 的加密信封适配器。
-//!
-//! 该模块是唯一接触数据密钥材料的当前实现。应用层只得到密文信封，存储层只保存信封
-//! 字段；明文装备 key 在同步回调中使用，随后由领域值对象清零。
+//! 装备 key 的加密信封适配器；唯一接触数据密钥材料的实现，应用层只得到密文信封，明文
+//! key 用后由领域值对象清零。
 
 use std::fmt;
 
@@ -20,7 +18,6 @@ const DATA_KEY_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/data-key/v1";
 const SECRET_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/equipment-key\0";
 const AAD_PREFIX: &str = "auction/equipment-key/v1/";
 
-/// 装备 key 加密器错误。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentKeySealerError {
     #[error("装备数据密钥标识无效")]
@@ -79,7 +76,6 @@ impl DataKey {
         Ok(Self { id: id.to_owned(), fingerprint, material })
     }
 
-    /// 返回非秘密的数据密钥标识。
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -204,13 +200,11 @@ pub struct EquipmentKeyOpener {
 }
 
 impl EquipmentKeyOpener {
-    /// 建立使用给定数据密钥的装备 key 解密器。
     pub fn new(data_key: DataKey) -> Self {
         Self { data_key }
     }
 
     /// 校验并解密绑定到指定装备 ID 的信封。
-    ///
     /// 解密过程同时验证信封结构、数据密钥轮换标识、AES-GCM 认证标签和明文指纹。
     /// 无论成功或失败，解密缓冲区都会在返回前尽力清零。
     pub fn open(

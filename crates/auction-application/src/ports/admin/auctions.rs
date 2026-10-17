@@ -1,7 +1,4 @@
 //! Admin 拍卖列表读取端口。
-//!
-//! 创建拍卖属于独立的命令端口，由 `admin_auction_create` 账本和 PostgreSQL 完整事务拥有；
-//! 本文件只保留列表读取投影。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,7 +15,6 @@ pub const MAX_ADMIN_AUCTION_OFFSET: i64 = 100_000;
 pub const ADMIN_AUCTION_STATUSES: [&str; 7] =
     ["draft", "preview", "live", "final", "settling", "settled", "cancelled"];
 
-/// Admin 拍卖列表查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminAuctionListRequest {
     pub world_id: Option<String>,
@@ -83,7 +79,6 @@ impl AdminAuctionSummary {
     }
 }
 
-/// Admin 拍卖列表结果。
 #[derive(Debug, Clone)]
 pub struct AdminAuctionPage {
     pub entries: Vec<AdminAuctionSummary>,
@@ -104,7 +99,6 @@ impl AdminAuctionPage {
     }
 }
 
-/// Admin 拍卖列表窄端口。
 pub trait AdminAuctionReader: Send + Sync {
     fn list_admin_auctions(
         &self,

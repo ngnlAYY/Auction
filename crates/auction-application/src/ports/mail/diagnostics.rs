@@ -87,7 +87,6 @@ impl PreparedMailEvidence {
     pub fn ciphertext(&self) -> &[u8] {
         &self.ciphertext
     }
-    /// 返回原始载荷字节数。
     pub fn plaintext_bytes(&self) -> usize {
         self.plaintext_bytes
     }

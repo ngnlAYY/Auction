@@ -58,7 +58,6 @@ pub(crate) fn map_realtime_error(error: ApplicationError) -> Response {
 }
 
 /// 把内部 typed replay 错误投影回旧 v1 的稳定 HTTP 外壳。
-///
 /// 存储层继续区分 resolved、mismatch、命令冲突和 capability；这里只收窄公开 code/status，
 /// 不回退命令账本、事务 fence 或错误正文隔离。
 pub(crate) fn map_replay_error(error: ApplicationError) -> Response {

@@ -7,9 +7,9 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-auction-public-api = { path = "../public-api", default-features = false }
-auction-admin-api = { path = "../admin-api", default-features = false }
-auction-worker = { path = "../worker", default-features = false }
+auction-public-api = { path = "../auction-public-api", default-features = false }
+auction-admin-api = { path = "../auction-admin-api", default-features = false }
+auction-worker = { path = "../auction-worker", default-features = false }
 auction-config.workspace = true
 auction-application.workspace = true
 auction-process.workspace = true

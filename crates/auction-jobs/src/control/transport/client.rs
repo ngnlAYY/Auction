@@ -1,6 +1,4 @@
 //! Worker control Admin client 与应用端口映射。
-//!
-//! 该文件只承载 Worker control 的单一职责，协议边界和安全约束保持由 transport 父模块统一装配。
 
 use super::*;
 

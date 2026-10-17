@@ -1,5 +1,4 @@
 //! 仅用于本机首次部署的初始化请求与稳定结果码。
-//!
 //! 初始化接口不属于常规 Admin API；正式进程不挂载这些路由。
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,6 @@ pub struct SetupDatabaseRequest {
 pub struct SetupScheduleRequest {
     /// IANA 时区名称；不按浏览器时区解释下方本地时间。
     pub timezone: String,
-    /// 预览的英文完整星期名称。
     pub preview_day: String,
     /// 预览本地时间，必须为精确 HH:MM。
     pub preview_time: String,

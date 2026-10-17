@@ -1,5 +1,4 @@
 //! Public 外壳 readiness HTTP 客户端。
-//!
 //! 外壳按有界周期读取 `/health/ready`；HTTP 未就绪和网络/解码失败均映射为 `unavailable`，
 //! 这里不泄露后端错误正文，轮询生命周期仍由页面 owner 管理。
 

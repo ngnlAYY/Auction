@@ -25,7 +25,6 @@ impl SettlementAmount {
         Self(0)
     }
 
-    /// 返回底层整数。
     pub const fn value(self) -> i64 {
         self.0
     }

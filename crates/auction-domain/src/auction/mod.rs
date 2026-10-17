@@ -160,7 +160,6 @@ impl Auction {
     }
 
     /// 原子冻结结束时间并从预览进入开拍状态，只推进一次聚合版本。
-    ///
     /// 旧系统把 lot 激活、结束时间冻结和拍卖开拍视为一个事务事实；该方法避免先调用
     /// `schedule_end` 再迁移状态而产生两个无法对应单条命令的版本。
     pub fn open(
@@ -192,7 +191,6 @@ impl Auction {
     }
 
     /// 记录人工提前结算请求；Live 会先进入 Final，Final 则只推进同一聚合版本。
-    ///
     /// 该方法只关闭新的竞价入口，不直接伪造 Settling/Settled；权威结算仍由持久化 Worker
     /// claim 推进。
     pub fn request_early_settlement(&mut self, now: DateTime<Utc>) -> Result<(), DomainError> {
@@ -222,7 +220,6 @@ impl Auction {
     }
 
     /// 取消尚未开拍的 draft/preview，并记录不可缺失的管理事实。
-    ///
     /// 取消发生在结束时间物化之前，因此不能依赖 live 阶段的取消截止窗口；已开拍状态会
     /// 失败关闭，防止用取消命令绕过竞价收口和结算。
     pub fn cancel_before_open_with_metadata(

@@ -129,10 +129,8 @@ impl PostgresCompetitionTransaction {
         self.snapshot_from_row(lot_id, row, effective_end_at, auction_status).await
     }
 
-    /// 结算已经先锁定 auction、pool 和全部 lot；这里只读取竞价规则并锁定活动代理。
-    ///
-    /// 该入口只接受 `settling`，不能复用公开竞价的 `live`/`final` 时间窗查询，否则会把
-    /// 结算状态错误地开放给浏览器竞价，或再次阻断正常结算。
+    /// 结算已经先锁定 auction、pool 和全部 lot；这里只读取竞价规则并锁定活动代理。该入口只接受
+    /// `settling`，复用公开竞价的 `live`/`final` 时间窗会把结算状态开放给浏览器竞价或阻断正常结算。
     pub(crate) async fn load_for_settlement_inner(
         &mut self,
         lot_id: LotId,

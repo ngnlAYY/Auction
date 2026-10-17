@@ -1,6 +1,4 @@
-//! Operations alert 三类周期循环的运行时编排。
-//!
-//! 扫描、分发和对账彼此隔离，单轮失败只影响自身下一次调度，不阻塞其他 Worker owner。
+//! Operations alert 三类周期循环的运行时编排；扫描、分发和对账彼此隔离，单轮失败不阻塞其他 owner。
 
 use super::*;
 

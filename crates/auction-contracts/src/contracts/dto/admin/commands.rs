@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// Admin 拍卖生命周期命令请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminAuctionLifecycleRequest {
@@ -33,7 +32,6 @@ pub struct AdminLotUpdateRequest {
     pub start_price: Option<i64>,
 }
 
-/// Admin 邮箱暂停/恢复轮询请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminMailPollingRequest {
@@ -43,7 +41,6 @@ pub struct AdminMailPollingRequest {
     pub expected_state_version: i64,
 }
 
-/// Admin 立即触发一次邮箱轮询的请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminMailPollTriggerRequest {

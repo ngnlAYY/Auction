@@ -1,7 +1,5 @@
-//! Recovery 退回履约记录与下一步 action 建立。
-//!
-//! 子模块分别承载事务编排、证据模型、校验、action 幂等写入和数据库行映射；
-//! record_return_postgres 仍是唯一的事务入口，外部副作用由后续 delivery owner 负责。
+//! Recovery 退回履约记录与下一步 action 建立；子模块承载编排、证据、校验、幂等写入和行映射，
+//! record_return_postgres 仍是唯一事务入口，外部副作用由后续 delivery owner 负责。
 
 #[cfg(feature = "postgres")]
 use super::*;

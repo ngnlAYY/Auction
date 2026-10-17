@@ -5,7 +5,6 @@ use auction_domain::{AuctionId, LotId, SettlementId};
 use super::ApplicationFuture;
 
 /// Admin recovery action 的安全投影。
-///
 /// 不包含 claim token、lease、request digest、邮件正文或外部 payload；这些字段只能留在
 /// Worker/适配器边界，不能通过管理报告泄露或被浏览器回放。
 #[derive(Debug, Clone)]
@@ -54,7 +53,6 @@ pub struct RecoveryReport {
     pub recoveries: Vec<RecoveryReportEntry>,
 }
 
-/// Admin recovery 报告读取端口。
 pub trait RecoveryReportReader: Send + Sync {
     fn recovery_report(
         &self,
@@ -63,7 +61,6 @@ pub trait RecoveryReportReader: Send + Sync {
 }
 
 /// 从已持久化、已满足的 action 事实派生允许的确认动作。
-///
 /// 这段闭集规则只决定 Admin 可以看到哪些确认按钮，不会改变 recovery 状态；真正确认时
 /// 仍需由 A14 的 Serializable 事务重新锁定并验证全部事实。
 pub fn allowed_recovery_commands(entry: &RecoveryReportEntry) -> Vec<String> {

@@ -82,7 +82,7 @@ impl LotWatchTransaction for PostgresCompetitionTransaction {
             WHERE lot.id = $1 FOR UPDATE OF lot")
             .bind(lot_id).fetch_optional(&mut **self.transaction_mut()?).await.map_err(sql_error)?
             .ok_or(LotWatchError::NotFound)?;
-        // 先在同一锁序下重放账本；拍卖后来隐藏不能让已接受命令失去原响应。
+        // 先在同一锁序下重放账本，拍卖后来隐藏不能让已接受命令失去原响应。
         // 新命令的公开可见性由 write_watch 在这些锁仍持有时复核。
         Ok(row.try_get("auction_id").map_err(sql_error)?)
     }

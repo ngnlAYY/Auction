@@ -1,5 +1,4 @@
 //! Admin 装备来源录入用例。
-//!
 //! 该服务明确把外部读取放在数据库事务之前，并在写事务中再次检查命令账本；来源失败不会
 //! 产生半成品 lot，重复命令则直接重放已持久化的安全结果。
 
@@ -16,7 +15,6 @@ use crate::{
     admin_intake_aggregate_id,
 };
 
-/// Admin 装备录入应用服务。
 pub struct AdminIntakeService<R, S, K, C> {
     repository: Arc<R>,
     source: Arc<S>,

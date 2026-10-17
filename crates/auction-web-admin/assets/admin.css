@@ -1974,8 +1974,6 @@
   font-size: var(--admin-text-note);
 }
 
-/* 旧版 .admin-delivery__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 /* 总览保留现有数据投影，但使用旧版的扁平标题、指标卡和分组。 */
 .admin-dashboard {
   display: block;
@@ -2663,8 +2661,6 @@
   margin: 0;
 }
 
-/* 旧版 .admin-users__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 .admin-users-secret {
   display: grid;
   gap: var(--space-2);
@@ -2879,8 +2875,6 @@
   color: var(--color-danger);
 }
 
-/* 旧版 .admin-credentials__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 .admin-credentials__dialog-row,
 .admin-credentials__dialog-row > td,
 .admin-credentials-dialog-row,
@@ -2889,9 +2883,6 @@
   padding: 0;
   border: 0;
 }
-
-/* 失效的 .admin-credentials__dialog-actions / .admin-users-dialog 后代规则（无 markup
-   引用）已删除；弹窗 label 排版由上方 .ui-dialog__panel label 统一提供。 */
 
 .admin-auction-page {
   display: block;
@@ -3256,8 +3247,6 @@
   gap: var(--space-1);
 }
 
-/* 旧版 .admin-settlement__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 .admin-lots__back {
   margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
@@ -3294,8 +3283,6 @@
   vertical-align: top;
 }
 
-/* 旧版 .admin-lots__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 .admin-lots__dialog-row,
 .admin-lots__dialog-row > td,
 .admin-auction-dialog-row,
@@ -3307,17 +3294,10 @@
   border: 0;
 }
 
-/* 旧版 .admin-auctions__dialog* 外壳（遮罩/面板，无 markup 引用）已删除，由 .ui-dialog 接管。 */
-
 .admin-auction-open {
   display: grid;
   gap: var(--space-2);
 }
-
-/* 失效的 .admin-auctions__dialog 后代规则（无 markup 引用）已删除。 */
-
-/* 旧版 .admin-auctions__dialog-actions 与 .admin-renames__dialog* 外壳（遮罩/面板，无
-   markup 引用）已删除，由 .ui-dialog 接管。 */
 
 .admin-runtime-config__form,
 .admin-rules-form {

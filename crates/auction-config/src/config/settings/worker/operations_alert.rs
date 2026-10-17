@@ -3,7 +3,6 @@ use serde::Deserialize;
 use auction_application::{OperationsAlertPolicy, OperationsAlertTarget};
 
 /// Worker 使用的 operations alert 扫描、阈值和通知批次配置。
-///
 /// 所有字段都有默认值，因此 TOML 可以只覆盖需要调整的字段；启用告警时必须显式提供
 /// 合法的 `recipient`。通知正文只由应用层从健康摘要生成，不接受配置注入。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -1,6 +1,5 @@
-//! Admin 手动 Cookie 检查：固定 HTTPS 只读端点、单并发与有界时限。
-//!
-//! 不借用 Worker 写入会话、不创建候选池、不自动切换或作废凭据；不记录远端正文。
+//! Admin 手动 Cookie 检查：固定 HTTPS 只读端点、单并发与有界时限；不借用 Worker
+//! 写入会话、不建候选池、不记录远端正文。
 
 use std::{sync::Arc, time::Duration};
 

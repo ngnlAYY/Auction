@@ -1,5 +1,4 @@
 //! Admin 服务状态说明页。
-//!
 //! 旧版此路由是静态产品说明，不读取 live/ready；运行诊断继续由 Dashboard 和运维端点拥有。
 
 use auction_web_shared::legacy_t as t;

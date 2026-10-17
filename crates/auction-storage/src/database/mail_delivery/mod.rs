@@ -1,8 +1,5 @@
-//! PostgreSQL MoogleMail delivery outbox 适配器的模块装配。
-//!
-//! 该 owner 只保存稳定操作、收件人和不含密钥的版本化 payload。普通入队、recovery 激活、
-//! 命令校验和跨后端分派各自位于子模块；真正的远端 POST 仍由 Worker 的 DeliveryTransport
-//! 负责，入队成功不等于外部发送成功。
+//! PostgreSQL MoogleMail delivery outbox 适配器的模块装配；本 owner 只保存稳定操作、收件人和
+//! 不含密钥的版本化 payload。远端 POST 仍由 Worker transport 执行，入队成功不等于外部发送成功。
 
 use auction_application::{
     ApplicationError, MailDeliveryActivation, MailDeliveryCommand, MailDeliveryEnqueuer,

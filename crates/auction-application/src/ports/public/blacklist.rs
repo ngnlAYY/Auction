@@ -7,7 +7,6 @@ use crate::ApplicationFuture;
 /// Public 黑名单编号页允许的最大偏移。
 pub const MAX_PUBLIC_BLACKLIST_OFFSET: i64 = 2_147_483_647;
 
-/// Public 黑名单分页请求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublicBlacklistRequest {
     pub limit: i64,
@@ -32,7 +31,6 @@ pub struct PublicBlacklistEntry {
     pub blacklisted_at: DateTime<Utc>,
 }
 
-/// Public 黑名单分页结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBlacklistPage {
     pub entries: Vec<PublicBlacklistEntry>,
@@ -65,7 +63,6 @@ impl PublicBlacklistPage {
     }
 }
 
-/// Public 黑名单读取端口。
 pub trait PublicBlacklistReader: Send + Sync {
     fn list_public_blacklist(
         &self,

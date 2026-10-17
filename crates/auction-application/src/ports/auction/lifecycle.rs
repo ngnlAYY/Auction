@@ -49,7 +49,6 @@ impl AuctionLifecycleActorType {
 }
 
 /// 进程启动时冻结的生命周期授权策略。
-///
 /// Worker 到期开放不依赖该开关；只有 Admin 提前开拍或提前结算需要显式授权。策略随 Admin
 /// runtime 文件在重启时生效，不能由单次 HTTP 请求覆盖。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -98,7 +97,6 @@ pub struct AuctionLifecycleCommand {
 }
 
 /// 生命周期命令提交时冻结的 Admin 拍卖快照。
-///
 /// 该快照对应旧版生命周期成功响应的 `data.auction`；它必须与命令结果一起持久化，不能在重放时
 /// 另行读取已经继续推进的拍卖投影。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,7 +135,6 @@ pub struct AuctionLifecycleResult {
 }
 
 /// 生命周期事务在锁内读取的拍卖、计划时间和冻结策略上下文。
-///
 /// `policy_scheduled_end_at` 来自不可变策略快照，不从可空的运行期列猜测。轮次周仅用于生成
 /// 下一期稳定标识；没有轮次的首期拍卖由应用层根据预览日期推导所在周。
 #[derive(Debug, Clone)]
@@ -229,7 +226,6 @@ pub struct AuctionLifecyclePlan {
 }
 
 /// 生命周期适配器在原子写入后返回给审计映射的稳定统计。
-///
 /// 该统计只描述本次计划实际写入的旧版业务事实，不暴露 SQL 行或后端细节。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuctionLifecycleWriteSummary {

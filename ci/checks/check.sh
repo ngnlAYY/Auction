@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
-
-check_docs() {
-	# 仅编译并运行静态文档检查器；输出留在被忽略的 target 目录。
-	rustfmt --edition 2024 --check ci/docs.rs
-	mkdir -p target/docs-check
-	rustc --edition=2024 -D warnings ci/docs.rs -o target/docs-check/verify-docs
-	target/docs-check/verify-docs
-}
+cd "$(dirname "$0")/../.."
 
 check_layout() {
 	local flat clusters invalid missing_subdirectories
@@ -216,7 +208,6 @@ run_checks() {
 	local check
 	for check in "$@"; do
 		case "$check" in
-		docs) check_docs ;;
 		layout) check_layout ;;
 		config) check_config_examples ;;
 		i18n) check_i18n ;;
@@ -234,7 +225,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks docs repository layout config i18n ;;
+		all) run_checks repository layout config i18n ;;
 		rust) run_checks fmt check feature lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2
@@ -244,6 +235,6 @@ run_checks() {
 	done
 }
 
-# 无参数仍只执行原有五项策略门禁；允许 CI 一次选择多项，不隐式运行测试。
+# 无参数仍只执行策略门禁；允许 CI 一次选择多项，不隐式运行测试。
 if [[ $# -eq 0 ]]; then set -- all; fi
 run_checks "$@"

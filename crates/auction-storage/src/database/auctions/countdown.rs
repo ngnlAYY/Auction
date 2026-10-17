@@ -10,8 +10,8 @@ pub(super) async fn read(
     store: &PostgresStore,
     auction_id: Uuid,
 ) -> Result<Option<PublicAuctionCountdown>, ApplicationError> {
-    // 与公开目录相同：隐藏草稿/取消场次，禁用世界只保留 settled 历史。
-    // 不读取 lot、论坛正文或装备 key；后继预览不能借图片绕过当前活动场次的门禁。
+    // 与公开目录一致：隐藏草稿/取消场次，禁用世界只留 settled 历史，不读 lot、正文或装备 key。
+    // 后继预览不能借图片绕过当前活动场次的门禁。
     let row = sqlx::query(
         "SELECT a.id,
                 COALESCE(a.opened_at, a.scheduled_open_at) AS intake_closes_at,

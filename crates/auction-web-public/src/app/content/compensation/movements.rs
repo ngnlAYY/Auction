@@ -44,7 +44,6 @@ pub(super) fn CompensationMovementDetails(
                     } else {
                         div { class: "public-compensation-movement-wrap ui-table--fit",
                             table { class: "public-compensation-movement-table",
-                                // 列序：拍品、装备、世界、类型、金额；按字段预期内容分配比例。
                                 auction_web_shared::TableColumns { layout: "public-compensation-movements", widths: vec![8, 48, 10, 16, 18] }
                                 thead {
                                     tr {

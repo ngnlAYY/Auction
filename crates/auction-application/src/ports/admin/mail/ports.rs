@@ -38,7 +38,6 @@ pub trait AdminMailReader: Send + Sync {
     ) -> ApplicationFuture<'_, Option<AdminMailIntakeDetail>>;
 }
 
-/// Admin 邮件状态命令端口。
 pub trait AdminMailCommandPort: Send + Sync {
     fn set_polling_paused(
         &self,

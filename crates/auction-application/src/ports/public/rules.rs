@@ -58,7 +58,6 @@ impl PublicRulesDocument {
     }
 }
 
-/// Public 规则文档读取端口。
 pub trait PublicRulesReader: Send + Sync {
     fn get_public_rules(
         &self,

@@ -27,8 +27,6 @@ impl<T> ApiResponse<T> {
     }
 }
 
-/// 健康检查响应。
-///
 /// `service` 与 `version` 都由调用方传入：`env!("CARGO_PKG_VERSION")` 在本 crate 内展开只会
 /// 得到 `auction-contracts` 自己的版本，而运维需要的是运行进程的版本。当前工作区版本统一，
 /// 两者取值恰好相同，但语义不同——独立发布版本后差异就会显现。
@@ -67,7 +65,6 @@ pub struct HealthReadyData {
 }
 
 /// Public 持久化实时事件的安全信封。
-///
 /// 负载已经由应用层事件注册表校验；这里不暴露数据库内部状态版本列或 origin 字段。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeEventResponse {
@@ -79,7 +76,6 @@ pub struct PublicRealtimeEventResponse {
     pub created_at: String,
 }
 
-/// Public 事件回放响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRealtimeResponse {
     pub auction_id: String,
@@ -89,8 +85,6 @@ pub struct PublicRealtimeResponse {
     pub refetch_required: bool,
 }
 
-/// Public 拍卖发现流回放响应。
-///
 /// 旧版每拍卖回放合同只接受 `auction_id`；新版需要的发现读取以显式 `scope=auctions`
 /// 扩展提供，避免把省略 `auction_id` 偷换成另一个 v1 语义。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

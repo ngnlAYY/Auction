@@ -2,10 +2,8 @@
 
 use super::super::*;
 
-/// 在当前拍卖已经停止接收装备后建立下一期草稿。
-///
-/// 调用方必须在同一事务中先把当前 Preview 推进为 Live 或 Cancelled，再调用本函数；这样
-/// `auctions_one_intake_world_idx` 在任意 SQL 语句结束时都不会同时看到 Preview 与 Draft。
+/// 在当前拍卖停止接收装备后建立下一期草稿；调用方须同事务先把 Preview 推进为 Live 或 Cancelled，
+/// 这样 `auctions_one_intake_world_idx` 在任意语句结束时都不会同时看到 Preview 与 Draft。
 pub(super) async fn insert_successor_postgres(
     transaction: &mut PostgresCompetitionTransaction,
     auction: &Auction,

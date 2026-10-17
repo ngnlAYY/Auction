@@ -216,7 +216,6 @@ pub fn CredentialRow(
         if rename_dialog() {
             tr { class: "admin-credentials-dialog-row",
                 td { colspan: "8",
-                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
                     Dialog {
                         title: t!("admin-credentials-rename-title"),
                         close_label: t!("admin-credentials-cancel"),

@@ -1,8 +1,5 @@
-//! E-Hentai 论坛固定 origin 网关。
-//!
-//! 该适配器实现主题查找/创建/读取，以及目录续页/系统日志回复和固定 post 编辑。
-//! 所有响应都有硬字节上限；任何写入在 POST 发出后只接受可证明的远端身份，否则返回
-//! `write_unknown`，上层必须先对账，不能盲目重发。
+//! E-Hentai 论坛固定 origin 网关；所有响应有硬字节上限，POST
+//! 发出后只接受可证明的远端身份，否则返回 `write_unknown`，上层必须先对账。
 
 use std::{
     collections::HashSet,
@@ -46,13 +43,9 @@ const MAXIMUM_CONCURRENT_TOPIC_READS: usize = 4;
 const FORUM_POSTS_PER_PAGE: u64 = 20;
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 
-/// 旧论坛生产入口。
 pub const PRODUCTION_ENDPOINT: &str = "https://forums.e-hentai.org";
-/// 旧版测试论坛板块。
 pub const TEST_BOARD_ID: i32 = 4;
-/// 旧版主世界拍卖板块。
 pub const MAIN_BOARD_ID: i32 = 77;
-/// 旧版异世界拍卖板块。
 pub const ISEKAI_BOARD_ID: i32 = 90;
 
 mod client;

@@ -204,8 +204,7 @@ pub(in crate::database::account) fn derive_capabilities(
     if base.maximum_amount < current.value() {
         return Err(storage_error("账户代理上限低于当前合法绑定金额"));
     }
-    // 等待中的代理可以用剩余上限反超，不必覆盖完整下一口；降额仍受完整下一口约束。
-    // “不能继续降额”不等于原授权损坏，账户读取不能因此拒绝合法慢速代理。
+    // 等待中的代理可用剩余上限反超（降额仍受完整下一口约束）；不能继续降额不是授权损坏，不得拒绝。
     let binding = if waiting {
         let rules = AuctionRules {
             bid_increment_ppm: base.policy_bid_increment_ppm,

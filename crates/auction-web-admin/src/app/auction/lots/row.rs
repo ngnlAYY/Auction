@@ -148,7 +148,6 @@ pub(super) fn AdminLotRow(
         if let Some(current_dialog) = dialog() {
             tr { class: "admin-auction-dialog-row",
                 td { colspan: "8",
-                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
                     Dialog {
                         title: if current_dialog == LotDialog::Reprice {
                             t!("admin-lots-reprice-title", code: lot_code.clone())

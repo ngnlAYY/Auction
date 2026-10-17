@@ -49,7 +49,6 @@ impl PublicMyBidsRequest {
     }
 }
 
-/// 当前用户自己的竞价事实，并附带最小装备公开投影。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicMyBid {
     pub id: Uuid,
@@ -141,7 +140,6 @@ pub struct PublicMyBidsPage {
     pub proxy_total: i64,
 }
 
-/// Public 当前用户账户读取端口。
 pub trait PublicAccountReader: Send + Sync {
     fn list_public_user_bids(
         &self,

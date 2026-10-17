@@ -1,5 +1,4 @@
 //! Admin 审计历史页面。
-//!
 //! 审计事实只读且追加式；筛选和分页请求通过 HTTP 安全 DTO 完成，浏览器不修改记录、不接触
 //! 数据库模型，也不把 metadata 当作可执行内容。
 
@@ -266,7 +265,6 @@ fn AuditTable(
         div { class: "admin-shell__table-wrap admin-audit-table-wrap",
             table { class: "admin-shell__table admin-audit-table ui-table--responsive",
                 caption { class: "admin-visually-hidden", {t!("page-audit-title")} }
-                // 列序：时间、操作者、动作、实体、来源、结果、请求 ID、元数据；按字段预期内容分配比例。
                 auction_web_shared::TableColumns { layout: "admin-audit", widths: vec![17, 12, 18, 15, 6, 6, 10, 16] }
                 thead {
                     tr {

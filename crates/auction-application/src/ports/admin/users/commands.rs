@@ -17,7 +17,6 @@ use super::model::{
 };
 
 /// recovery 请求 Users owner 确保买家进入黑名单的幂等命令。
-///
 /// `command_id` 和 `request_hash` 由 Worker 按 recovery action 稳定派生；Users owner 负责在
 /// 自己的命令账本中重放结果，避免 Worker 重启或外部重试重复写入黑名单历史。
 #[derive(Debug, Clone)]
@@ -75,7 +74,6 @@ impl RecoveryBuyerBlacklistResult {
     }
 
     /// 按旧版 recovery buyer blacklist result 的 schema-v1 字段顺序生成证明摘要。
-    ///
     /// Users owner 返回的完整结果才是证明事实；不能只按 action 与 command reference 生成替代摘要，
     /// 否则滚动升级接管时同一已完成黑名单会得到不同 proof。
     pub fn legacy_proof_digest(&self) -> Result<[u8; 32], serde_json::Error> {

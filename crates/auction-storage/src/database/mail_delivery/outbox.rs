@@ -36,9 +36,8 @@ async fn insert_postgres(
     if command.origin == MailDeliveryOrigin::MailIntake
         && command.operation != MailDeliveryOperation::Send
     {
-        // 入站录入在 Serializable 快照内读取相反意图；处置事务也必须参与 SSI，单独
-        // SELECT FOR UPDATE 的世界行锁不能刷新等待方已建立的快照。40001 由现有邮件
-        // 业务有界重试重新执行整次事务，不能按旧快照继续提交。
+        // 入站录入在 Serializable 快照内读取相反意图，处置事务也必须参与 SSI：
+        // 单独 SELECT FOR UPDATE 无法刷新等待方已建快照。40001 由邮件有界重试重跑整次事务。
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             .execute(&mut *transaction)
             .await

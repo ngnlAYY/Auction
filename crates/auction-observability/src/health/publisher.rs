@@ -12,10 +12,8 @@ use super::model::{
 };
 
 /// 提供当前进程 tracing 安全状态的窄读取端口。
-///
 /// 心跳只读取计数、状态、时间和闭集错误码，不读取 exporter 配置、端点或 span 内容。
 pub trait TracingHealthReader: Send + Sync {
-    /// 返回当前 tracing 的安全快照。
     fn snapshot(&self) -> TracingHealth;
 }
 
@@ -73,7 +71,6 @@ pub struct HeartbeatPublisherConfig {
 }
 
 /// 进程装配根使用的心跳发布器。
-///
 /// 发布器只负责生成有界的安全命令并分配本进程内的递增 observation sequence；周期调度、
 /// 运行时和优雅关闭仍由各自的装配根负责，避免让可观测性 crate 反向拥有 Tokio 生命周期。
 pub struct HeartbeatPublisher {
@@ -155,7 +152,6 @@ impl HeartbeatPublisher {
             .await
     }
 
-    /// 发布启动中状态。
     pub async fn publish_starting(&self) -> Result<(), HealthError> {
         self.publish(
             HeartbeatStatus::Starting,
@@ -229,7 +225,6 @@ impl Heartbeat {
     }
 }
 
-/// 心跳持久化窄端口。
 pub trait HeartbeatStore: Send + Sync {
     /// 按 observation sequence 条件 upsert 心跳；旧序列必须失败关闭。
     fn publish(&self, command: HeartbeatCommand) -> HealthFuture<'_, ()>;

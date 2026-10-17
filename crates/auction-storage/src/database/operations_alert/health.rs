@@ -1,6 +1,4 @@
-//! Operations alert 健康安全投影读取。
-//!
-//! 只返回固定计数、时间和错误码，不暴露 signal 正文或数据库内部字段。
+//! Operations alert 健康安全投影读取；只返回固定计数、时间和错误码，不暴露 signal 正文。
 
 use super::*;
 

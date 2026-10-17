@@ -1,5 +1,4 @@
 //! Admin 规则文档 API 客户端。
-//!
 //! 浏览器只持有规则安全快照；发布命令的版本 fence 与 command_id 由服务端最终校验。
 
 use auction_contracts::{AdminRulesCandidateRequest, AdminRulesPublishRequest};

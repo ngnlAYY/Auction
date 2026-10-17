@@ -6,7 +6,6 @@ use auction_domain::{AuctionId, CommandId};
 use super::ApplicationFuture;
 
 /// Worker 领取的一次持久化结算执行任务。
-///
 /// `settlement_command_id` 按 workflow 稳定派生；Worker 重启或租约过期后必须继续使用同一个
 /// 命令，而不是为同一拍卖创建新的结算事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +24,6 @@ pub struct SettlementWorkClaim {
 }
 
 /// 持久化结算调度端口。
-///
 /// 领取、租约、失败退避和完成标记由数据库字段决定，不以易失内存任务替代。
 pub trait SettlementWorkStore: Send + Sync {
     fn claim_due(

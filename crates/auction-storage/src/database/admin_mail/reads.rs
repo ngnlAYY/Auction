@@ -32,8 +32,7 @@ pub(super) async fn get_poll_state_postgres(
 pub(super) async fn dashboard_snapshot_postgres(
     store: &crate::database::PostgresStore,
 ) -> Result<AdminMailDashboardSnapshot, ApplicationError> {
-    // 轮询器数量是部署配置的一小组固定状态；LIMIT + 1 让损坏或异常膨胀的表不会无限进入
-    // Admin 响应，同时仍能明确报告超出安全投影上限的情况。
+    // 轮询器数量是固定的部署状态集合；LIMIT + 1 既防膨胀表无限进入响应，又能报告超出安全投影上限。
     let rows = sqlx::query(
         "SELECT mailbox_key, last_poll_at, next_poll_at, consecutive_failures,
                 paused, state_version, updated_at

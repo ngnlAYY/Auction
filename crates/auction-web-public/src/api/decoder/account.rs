@@ -1,5 +1,4 @@
 //! 账户路由（`/api/v1/me/*` 与代理授权投影）的 data 校验。
-//!
 //! `valid_quota` / `valid_transitions` 同时服务 lot 路由的命令授权投影，以 `pub(super)`
 //! 共享，避免同一代理生命周期谓词出现两份实现。
 

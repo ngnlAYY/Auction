@@ -1,5 +1,4 @@
 //! Admin 拍卖列表页面。
-//!
 //! 当前页面展示 PostgreSQL 完整档的生命周期快照，并通过独立的版本化 API 提供写命令入口。
 
 use dioxus::prelude::*;

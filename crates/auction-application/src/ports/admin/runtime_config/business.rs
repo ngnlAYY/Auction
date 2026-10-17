@@ -48,7 +48,6 @@ pub struct AdminRuntimeEquipmentFilterConfig {
 }
 
 /// Admin 可编辑、Worker 启动时冻结的 MoogleMail 通知模板。
-///
 /// 字段闭集和默认正文逐项保持 Auction-BF runtime 文档契约；模板正文仍在应用边界严格
 /// 校验占位符，不能通过自由键值表引入未审计的消费者。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

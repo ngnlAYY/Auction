@@ -15,8 +15,8 @@ pub(super) async fn apply_early_settlement_plan_postgres(
     proxy_plans: Vec<auction_application::AuctionFinalProxyPlan>,
     effective_end_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
-    // 不放宽 auctions 的结束时间 shape；原始计划仍由 policy_snapshot 保存，当前列表示
-    // 人工决定后的权威截止时间。
+    // 不放宽 auctions 的结束时间 shape：原始计划留在 policy_snapshot，
+    // 当前列表示人工决定后的权威截止时间。
     let updated = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(

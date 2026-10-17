@@ -140,7 +140,6 @@ impl SettlementPolicy {
     }
 
     /// 校验新拍卖模板；保留历史结构校验范围，避免改变已结算记录的读取与重放。
-    ///
     /// 补偿最多再抵扣一份折扣，50% 折扣在足额资金池下会产生零付款，违反 COD 义务
     /// 必须为正的不变量；更高折扣会产生负数。因此新曲线每个锚点都必须严格高于 -50%。
     pub fn validate_for_new_auction(&self) -> Result<(), DomainError> {

@@ -1,8 +1,6 @@
-//! PostgreSQL 完整档 operations alert 观察、批次和租约适配器。
-//!
-//! 告警只读取各 owner 已提交的安全水位，不参与竞价、结算或 delivery 的正确性决策。
-//! signal、批次和 delivery 在同一 PostgreSQL 事务中建立；Worker 之后仍通过正常的
-//! `MailDeliveryEnqueuer` 做幂等确认，数据库状态才是唯一权威。
+//! PostgreSQL 完整档 operations alert 观察、批次和租约适配器；告警只读各 owner 已提交的安全水位，
+//! 不参与竞价、结算或 delivery 的正确性决策。signal、批次和 delivery 同事务建立，Worker 之后经
+//! `MailDeliveryEnqueuer` 幂等确认，数据库状态才是唯一权威。
 
 use std::time::Duration;
 

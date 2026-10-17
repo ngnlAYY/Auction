@@ -3,7 +3,6 @@
 use super::*;
 
 /// Admin lot 的安全投影；不包含装备密钥、代理上限或原始外部正文。
-///
 /// 反序列化按旧浏览器 decoder 的闭集语义收紧：nullable 字段必须显式出现（可为 `null`），
 /// 未知字段一律拒绝；wire 冻结后服务端字段集不变，序列化输出不受影响。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -65,7 +64,6 @@ pub struct AdminLotUpdateResponse {
     pub lot: AdminLotResponse,
 }
 
-/// Admin lot 列表分页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminLotPaginationResponse {

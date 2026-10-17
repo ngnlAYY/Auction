@@ -1,7 +1,5 @@
-//! Public 论坛镜像读取适配器。
-//!
-//! 这里只读取 `auction_forum_sync` 的本地投影及 Worker 心跳中的非敏感启用状态；论坛发布
-//! Worker 和远程网关仍由独立 owner 管理，读取路径不会把待发布或未知状态伪造成成功或关闭。
+//! Public 论坛镜像读取适配器；只读 `auction_forum_sync` 本地投影与心跳中的非敏感启用状态。
+//! 远端发布和网关由独立 owner 管理，读取路径不得把待发布或未知状态伪造成成功或关闭。
 
 mod catalog;
 mod reply;

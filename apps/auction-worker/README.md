@@ -1,136 +1,104 @@
 # auction-worker
 
-[文档导航](../../docs/README.md) · [任务编排](../../crates/auction-jobs/README.md) · [外部适配器](../../crates/auction-integrations/README.md) · [配置](../../ops/config/README.md)
+[文档导航](docs/README.md) · [任务编排](crates/auction-jobs/README.md) · [外部适配器](crates/auction-integrations/README.md) · [配置](ops/config/README.md)
 
-持久化生命周期、论坛、邮件、投递和恢复循环的装配根。
-`src/lib.rs` 导出 `run`、`run_from_path`，独立 `main.rs` 与[合并服务](../server/README.md)的 Worker 子进程复用装配。
-
-仅支持 Linux x86_64 原生目标；装配入口在编译期拒绝其他 OS/架构。浏览器 WASM 不受此限制，
-默认发布 ABI 与构建边界见[开发指南](../../docs/development.md#工具与依赖来源)。
+持久化生命周期、论坛、邮件、投递和恢复循环的装配根。`src/lib.rs` 导出 `run`、`run_from_path`，
+独立 `main.rs` 与[合并服务](apps/auction-server/README.md)的 Worker 子进程复用装配。仅支持 Linux x86_64 原生目标，
+装配入口在编译期拒绝其他 OS/架构；浏览器 WASM 不受此限，默认发布 ABI 见[开发指南](docs/guide/development.md#工具与依赖来源)。
 
 ## 源码入口
 
 | 入口 | 职责 |
 | --- | --- |
-| [src/bootstrap](src/bootstrap) | 配置、持久化任务、论坛、告警、履约与 control 装配 |
-| [src/bootstrap/mail](src/bootstrap/mail) | 邮件凭据、业务处理器、transport、轮询与安全映射 |
+| [src/bootstrap](apps/auction-worker/src/bootstrap) | 配置、持久化任务、论坛、告警、履约与 control 装配 |
+| [src/bootstrap/mail](apps/auction-worker/src/bootstrap/mail) | 邮件凭据、业务处理器、transport、轮询与安全映射 |
 
 ## 职责与实现边界
 
 Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用规则由 application/domain 拥有，
 租约、游标和事实由 storage 持久化，循环/重试由 jobs 编排，远端传输由 integrations 实现。
+默认 feature 为空；`postgres` 启用持久存储/任务，`cache-redis` 编译可选缓存。
 
 ## 装配与生命周期
 
-`bootstrap/mod.rs` 选择配置/缓存/运行模式，`persistent.rs` 装配持久化 Worker；
-`forum.rs`、`operations_alert.rs`、`fulfillment.rs`、`control.rs` 各有独立职责。
-无数据库时 `skeleton.rs` 只报告进程状态，不执行任务或伪造数据库就绪。
-`forum.rs` 从同一 EhentaiGateway 注入 PM sender 和只读目标资料 reader，复用唯一 ForumCookie ownership 和 HTTP 限速，不以 MM enabled 为条件。
-只有 forum.enabled 才装配该 reader；关闭时联合证据明确不可用。mail/runtime 的既有 gateway 共享同一 client/凭据集合/owner，
-选择同一个 gateway 同时注入 `with_internal_fulfillment` 和 `with_cash_evidence_gateway`，不嵌套获取操作 guard。
-`persistent.rs` 以独立 TaskGuard 运行 LotWatchPmRuntime；shutdown 立即发 drain，主循环排空结束后 abort 余留任务，
-不增加关闭长预算。持久 claimed 可重领，任何 sending 只读对账，不以取消推断远端未发送。
-PM 每 delivery cadence 最多一封新发送及一项只读核对，forum 总预算小于 lease；来源/冻结渠道/缺 UID 规则见[不变量](../../docs/contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
-
-SIGINT/SIGTERM 将 control 标记为 draining，停止新 claim，在途任务沿原租约和结果证明路径收口；
-10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
-显式启动及数据库 feature 选择见[开发指南](../../docs/development.md)。
+`bootstrap/mod.rs` 选择配置/缓存/运行模式，`persistent.rs` 装配持久化 Worker；`forum.rs`、`operations_alert.rs`、
+`fulfillment.rs`、`control.rs` 各有独立职责，无数据库时 `skeleton.rs` 只报告进程状态、不伪造数据库就绪。`forum.rs`
+与既有 mail/runtime gateway 共享唯一凭据集合、client 和 owner，同一 gateway 同时注入 `with_internal_fulfillment` 与
+`with_cash_evidence_gateway`，PM sender 与只读资料 reader 仅 `forum.enabled` 时装配
+（见[外部适配器](crates/auction-integrations/README.md)）。SIGINT/SIGTERM 将 control 标记为 draining、停止新 claim，
+在途任务沿原租约和结果证明路径收口；10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
 
 ## 部署配置与 runtime
 
-Worker 没有业务 `listen_address`。Admin/Worker 可共用 `runtime_config_file`；Worker 只消费
-world、发件人、装备过滤、14 个邮件模板以及接管后的 `operations`，不继承 Admin listener/security/session。
-transport、凭据、mailbox identity 和全局启用仍由 Worker 部署配置拥有。保存后须重启对应进程，
-不改既有拍卖快照、due、游标、账本或租约；分组责任见[配置说明](../../ops/config/README.md#runtime-共享与重启)。
+Worker 没有业务 `listen_address`。Admin/Worker 可共用 `runtime_config_file`；Worker 只消费 world、发件人、
+装备过滤、14 个邮件模板及接管后的 `operations`，不继承 Admin listener/security/session；transport、凭据、
+mailbox identity 和全局启用仍由 Worker 部署配置拥有。保存后须重启对应进程，不改既有拍卖快照、due、游标或租约
+（分组责任见[配置说明](ops/config/README.md#runtime-共享与重启)）。
 
 ## 拍卖邮件起拍价
 
 未写 `start` 的装备默认 50,000 Credits，可由 `[worker.mooglemail].start_price` 覆盖，独立于公共经济模板。
-一条 `start amount` 应用于全部装备，逐件形式为同一行的 `<equipment-url> start amount`，旧跨行三元组仍兼容。
-普通说明、空行、Attachment 块、URL 包裹/句末标点和空白后的 `#` 注释不改变未指定附件的默认价。
-
-金额支持正整数、规范千分位及精确整数 Credits 的 `k`/`m` 小数（如 `1.5k`）。
-缺金额、误写 `start=10k`/`start:10k`/`start10k`、零负值、溢出、重复定价、未知 ID 或 key 不匹配均拒绝，
-不能静默退回默认价；`starting`、`starter`、`start with...` 等普通说明不是定价指令。
+一条 `start amount` 应用于全部装备，逐件形式为同一行的 `<equipment-url> start amount`，旧跨行三元组仍兼容；
+普通说明、空行、Attachment 块、URL 包裹/句末标点和空白后的 `#` 注释不改变默认价。金额支持正整数、
+规范千分位及精确整数 Credits 的 `k`/`m` 小数（如 `1.5k`）；缺金额、误写 `start=10k`/`start:10k`/`start10k`、
+零负值、溢出、重复定价、未知 ID 或 key 不匹配均拒绝，`starting`/`starter` 等普通说明不是定价指令，不能退回默认价。
 
 ## 撤拍装备寄回
 
 PostgreSQL 撤拍事务创建 `withdrawn_return` 与履约记录，Worker 在原 world 把原装备单独 Send 给冻结卖家，
-Credits/COD 为零。同封其他 lot 不受影响，已 Take 的邮件不能整体 Return。
-旧未知发送结果不自动重寄，旧冻结 Return 不能直接改为 Send；核对方法见[历史资产处置](../../ops/mail-diagnostics.md#历史资产处置核对)。
-
-## Cargo feature
-
-默认 feature 为空；`postgres` 启用持久存储/任务，`cache-redis` 编译可选缓存。
+Credits/COD 为零；同封其他 lot 不受影响，已 Take 的邮件不能整体 Return。旧未知发送结果不自动重寄，
+旧冻结 Return 不能直接改为 Send（核对见[历史资产处置](ops/mail/diagnostics.md#历史资产处置核对)）。
 
 ## 部署约束
 
-生命周期、慢速代理、结算，
-以及 fulfillment/recovery 等 owner 各有预算，不因单个积压阻塞其他循环。
-默认值与租约约束见[Worker 循环预算](../../ops/config/README.md#worker-循环预算)。
-自动周排期默认关闭；新轮次 world 取配置 allowlist、runtime 启用集合与数据库 `worlds.enabled` 的交集。
-数据库 world 关闭阻止新轮次，但不阻止已持久化结算/交付/恢复安全排空。
-与 Admin 一样，Worker 向生命周期命令注入有效经济模板，仅在建立后继时冻结；旧场次与已接受命令不重算。
+生命周期、慢速代理、结算及 fulfillment/recovery 等 owner 各有预算，不因单个积压阻塞其他循环，默认值与租约见
+[Worker 循环预算](ops/config/README.md#worker-循环预算)。自动周排期默认关闭，新轮次取配置 allowlist、runtime 启用集合与
+数据库 `worlds.enabled` 的交集；数据库 world 关闭阻止新轮次，但不阻止已持久化工作安全排空。经济模板仅在建立后继时
+冻结，旧场次与已接受命令不重算。
 
 ## 邮件调度
 
-每个 world 有独立 cron、抖动和手动唤醒器；批量读取、业务处理、重试及续租均受预算约束。
-重启只把过晚的 due 向当前调度收敛，不恢复暂停邮箱、越过活动 claim 或压缩失败退避。
-批次只提交完成前缀；确定性错误立即收口，只有 Retryable/超时进入有界重试。
-参数、时区和默认值见[论坛与邮件配置](../../ops/config/README.md#论坛与邮件)。
+每个 world 有独立 cron、抖动和手动唤醒器，读取、处理、重试及续租均受预算约束；重启只把过晚的 due 向当前
+调度收敛，不恢复暂停邮箱、越过活动 claim 或压缩失败退避。批次只提交完成前缀，确定性错误立即收口，只有
+Retryable/超时进入有界重试（参数见[论坛与邮件配置](ops/config/README.md#论坛与邮件)，编排见 [auction-jobs](crates/auction-jobs/README.md)）。
 
 ## 持久化与外部结果证明
 
-任务 due、租约、尝试次数、完成 fence、命令账本和游标均持久化；内存计时器只负责唤醒。
-claim token/owner/版本或续租 fence 失效后取消陈旧处理，只能从权威 cursor 重放。
-外部写入在本地事务提交后执行，未知结果进入对账，不能抹掉已接受事实或自动重发。
+任务 due、租约、尝试次数、完成 fence、命令账本和游标均持久化，内存计时器只负责唤醒；claim token/owner/版本或续租
+fence 失效后取消陈旧处理，只能从权威 cursor 重放。外部写入只在本地提交后执行，未知结果进入对账，不能抹掉已接受事实
+或自动重发（见[外部写入不变量](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)）。
+MoogleMail delivery 在 sending fence 前做只读 compose preflight，prepared future 持有同一凭据独占 guard，
+不安全时释放并在本轮跳过该 world 的 Send（Take/Return 独立）；`prepare_next` 的内部完成结果直接结束 claim，
+不伪造 delivery/Sent，Send 与 Return/Take 各有独立证明。证明与资产核对见[邮件诊断手册](ops/mail/diagnostics.md)，
+业务原子边界见[履约端口](crates/auction-application/README.md#结算与恢复端口)，启动前须
+[停机同版升级与显式资金核对](ops/README.md#bot-内部履约与资金保护升级)。
 
-MoogleMail delivery 在 sending fence 前执行只读 compose preflight，消耗式 prepared future 持有同一凭据独占 guard；
-不安全时释放并在本轮跳过该 world 的 Send（Take/Return 独立），旧 unknown 留待人工核对，不清理草稿或重排旧任务。
-`bootstrap/fulfillment.rs` 提供 bot identity 只读窄端口适配，复用原 gateway/credential set/ownership。
-内部结清使用独立组合证据与原义务事务；装备详情读取成功的旧 custody 投影不用于证明 bot 持有。
-`prepare_next` 的内部完成结果直接结束 claim，不 activate、不伪造 delivery/Sent；现金外发仍经原租约与首次 poll 门禁。
-业务与原子边界见[履约端口](../../crates/auction-application/README.md#结算与恢复端口)，
-启动前须[停机同版升级与显式资金核对](../../ops/README.md#bot-内部履约与资金保护升级)。
-
-所有主动 ComposeSend 都以完整有界 Sent baseline 和发送后独立 scan 证明新增唯一 MID，
-同时精确匹配 world、recipient、subject/body digest、Credits/COD 和装备；零资产通知也需要证明。
-Return/Take 使用独立 action proof。证明、加密异常留证、历史展示回填和资产核对统一见
-[邮件诊断手册](../../ops/mail-diagnostics.md)。诊断证据不参与命令摘要、completion 或 cursor。
-
-凭据由 PostgreSQL 的独立数据密钥解密，论坛和邮件每种 Cookie 全局最多一条 active，
-生命周期 advisory lock 保证单 Worker owner。失效后不切换 Cookie，导入或轮换后须重启交接。
-未配置凭据数据密钥时保留受限 `.keyenv`/敏感文件兼容入口；`.keyenv` 仅 `hv-ck-key1` 供 Worker 使用。
-`hv-ck-key2` 只供显式隔离验证。告警通过同一幂等 outbox 发送，自身 delivery 排除于告警统计，避免循环。
+凭据由 PostgreSQL 独立数据密钥解密，论坛和邮件每种 Cookie 全局最多一条 active，生命周期 advisory lock 保证单 Worker
+owner；失效后不切换 Cookie，导入或轮换后须重启交接。未配置凭据数据密钥时保留受限 `.keyenv`/敏感文件兼容入口
+（`.keyenv` 仅 `hv-ck-key1` 供 Worker 使用，`hv-ck-key2` 只供显式隔离验证）；告警经同一幂等 outbox 发送。
 
 ## Recovery 推进
 
-PostgreSQL recovery due 推进独立于邮件 transport；付款阶段、超时、提醒、退件 Take、买家黑名单、
-guarded relist 与退款完成由各 owner 的稳定命令、资产摘要和证明推进。只有启用邮件 transport 后
-相关 action 才关联 delivery outbox；未知结果保持人工复核。状态迁移与审计使用 Serializable 事务。
-详细编排见[auction-jobs](../../crates/auction-jobs/README.md)。
+PostgreSQL recovery due 推进独立于邮件 transport；付款、超时、提醒、退件 Take、黑名单、guarded relist 与退款完成
+由各 owner 的稳定命令、资产摘要和证明推进，只有启用邮件 transport 后才关联 delivery outbox，未知结果保持人工复核。
 
 ## 论坛同步
 
-仅 PostgreSQL 且启用论坛时装配主题发布和回帖导入。每轮按“发布 → 导入”执行，一阶段失败不跳过另一阶段。
+仅 PostgreSQL 且启用论坛时装配主题发布和回帖导入，每轮按“发布 → 导入”执行，一阶段失败不跳过另一阶段。
 只为实际 `live` 拍卖创建主题；未知 POST 先精确标题 GET 对账，未命中须通过
-[`authorize-forum-write-retry`](../auctionctl/README.md#论坛与结算核验)显式授权。
-
-固定 #1/#2 的 exact post ID 和内容 lease 持久化后才处理 #3+；既有 #2 非系统标记时不覆盖。
-部署字段 `worker.forum.verify_post_body` 默认关闭，统一注入主题同步和回帖刷新；开启才额外逐字回读固定帖正文。
-两种模式都保留身份、回执及未知写入只读恢复规则；关闭不保证远端正文与目标镜像一致，详见[配置说明](../../ops/config/README.md#论坛与邮件)。
-论坛数字账号 ID 是稳定身份，用户名用于显示和 MM 收件；新作者可建立 revoked-key 的 `forum_only` 主体，
-不自动获 active Key。只导入普通 `bid`，`proxy`/`proxy lower` 静默忽略，`start/cancel` 和 PM-only `notify`
-仅作 warning；论坛读取、身份与渲染协议见[外部适配器](../../crates/auction-integrations/README.md)。
+[`authorize-forum-write-retry`](apps/auctionctl/README.md#论坛与结算核验)显式授权；固定 #1/#2 的 exact post ID
+和内容 lease 持久化后才处理 #3+。部署字段 `worker.forum.verify_post_body` 默认关闭，关闭时不保证远端正文与
+目标镜像一致（见[配置说明](ops/config/README.md#论坛与邮件)）。论坛数字账号 ID 是稳定身份，用户名只用于显示和
+MM 收件；新作者可建立 revoked-key 的 `forum_only` 主体，不自动获 active Key。只导入普通 `bid`，
+`proxy`/`proxy lower` 静默忽略，`start/cancel` 与 PM-only `notify` 仅作 warning。
 
 ## 心跳与论坛启用状态
 
-数据库 Worker 发布启动、就绪、周期及停止心跳，含 runtime 投影后的 `details.forum_sync_enabled`；
-Public 据此显示实际启用状态，不从历史帖子推断。开关变更须重启 Worker。
-`[worker.control]` 提供受信目录、实例锁、固定 group/0660 和 UID/GID peer allowlist 保护的 live/ready/status，
-部署要求见[systemd 手册](../../ops/README.md#systemd-服务与顺序控制)。
+数据库 Worker 发布启动、就绪、周期及停止心跳，含 runtime 投影后的 `details.forum_sync_enabled`；Public 据此显示
+实际启用状态，不从历史帖子推断，开关变更须重启 Worker。`[worker.control]` 提供受信目录、实例锁、固定 group/0660
+和 UID/GID peer allowlist 保护的 live/ready/status，部署见[systemd 手册](ops/README.md#systemd-服务与顺序控制)。
 
 ## 维护与验证
 
-`cargo check --locked -p auction-worker` 只做默认 feature 静态编译；完整门禁见[开发指南](../../docs/development.md)。
-历史运行结果与剩余缺口见[验证状态](../../docs/status.md)，本 README 不授予测试或远端写入授权。
+`cargo check --locked -p auction-worker` 只做默认 feature 静态编译；完整门禁见[开发指南](docs/guide/development.md)，
+历史运行结果与剩余缺口见[验证状态](docs/status.md)，本 README 不授予测试或远端写入授权。

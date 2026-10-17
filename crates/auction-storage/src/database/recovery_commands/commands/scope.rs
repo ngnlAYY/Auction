@@ -1,7 +1,4 @@
-//! Recovery 锁定范围、状态校验与履约证据的模块装配。
-//!
-//! PostgreSQL recovery command 的锁定、回放和证据验证仍在同一事务内执行；本文件只负责
-//! 保留父命令模块使用的稳定内部出口。
+//! Recovery 锁定范围、状态校验与履约证据的模块装配；锁定、回放和证据验证仍在同一事务内执行。
 
 #[cfg(feature = "postgres")]
 use super::*;

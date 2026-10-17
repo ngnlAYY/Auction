@@ -1,5 +1,4 @@
 //! Admin 装备来源与拍品录入 HTTP 适配器。
-//!
 //! 这里保持旧版的 URL/canonical JSON 请求和响应形状；来源读取、装备 key 处理、锁和幂等
 //! 都交给应用端口与 PostgreSQL owner，处理器不直接拼接 SQL 或修改拍卖状态。
 

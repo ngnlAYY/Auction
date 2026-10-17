@@ -1,8 +1,6 @@
 //! Admin 浏览器端的同源 HTTP 数据访问。
-//!
-//! 浏览器只接收后端安全投影。改变状态的人工动作携带按输入复用的 `command_id` 和对应版本 fence；
-//! 服务端仍负责最终的状态校验、幂等和审计。所有 wire DTO 统一由 `auction-contracts` 拥有，
-//! 本 crate 只保留浏览器表单、筛选和交互状态。
+//! 浏览器只接收后端安全投影；改变状态的人工动作携带按输入复用的 `command_id` 与版本
+//! fence，最终校验、幂等与审计归服务端。wire DTO 统一由 `auction-contracts` 拥有。
 
 #[path = "auction/auctions.rs"]
 mod auctions;
@@ -128,9 +126,8 @@ use uuid::Uuid;
 pub(crate) const TABLE_PAGE_SIZE: i64 = 10;
 
 /// Admin 浏览器请求的稳定失败投影。
-///
-/// 服务端正文中的自然语言不能直接进入界面；页面只消费稳定 `code`，再通过 Fluent 映射为
-/// 当前语言。HTTP 状态仍单独保留，供 404、409 等需要改变交互流程的页面判断。
+/// 服务端正文的自然语言不进入界面；页面只消费稳定 `code`，再经 Fluent 映射。HTTP 状态
+/// 单独保留，供 404、409 等需改变交互流程的页面判断。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AdminApiFailure {
     pub status: Option<u16>,
@@ -138,10 +135,8 @@ pub(crate) struct AdminApiFailure {
 }
 
 /// Admin 错误 envelope 的浏览器侧兼容模型。
-///
-/// 旧版要求 `code`、`message`、`data` 三个字段存在，但允许服务端增加扩展字段，也允许任意
-/// 字符串错误码。错误数据不进入页面，仍以不透明 JSON 保留，仅为兼容既有 envelope 形状；
-/// 成功响应继续使用各自严格的路由专用 decoder。
+/// 旧版要求 `code`、`message`、`data` 三字段存在但允许扩展字段与任意错误码；错误数据不进入
+/// 页面，仍以不透明 JSON 保留，仅为兼容既有 envelope 形状。
 #[derive(Debug, Deserialize)]
 struct AdminApiErrorResponse {
     code: String,
@@ -198,20 +193,14 @@ fn transport_error_code(error: TransportError) -> String {
     error.code().to_owned()
 }
 
-/// 发送不改写 URL 的 Admin GET 请求。
-///
-/// 传输边界复用 `auction-web-shared` 的唯一实现（10 秒取消上限、精确 URL、结构化
-/// [`TransportError`] 分类），本层只负责把结构化错误折回页面消费的稳定 code 字符串。
+/// 发送不改写 URL 的 Admin GET 请求；传输边界复用共享实现，本层只把结构化错误折回稳定 code。
 pub(crate) async fn send_get(url: &str) -> Result<Response, String> {
     auction_web_shared::send_get(url).await.map_err(transport_error_code)
 }
 
 /// 在共享传输层的统一超时上限内发送一次 Admin 请求。
-///
-/// Admin 特有的 `x-csrf-token` 与 Basic Auth header 仍由调用方在 `build` 闭包中叠加
-/// （surface 职责，共享层不感知凭据）。`build` 失败携带的是稳定业务 code（如请求体
-/// 序列化失败的 `invalid_request`），[`TransportError`] 无法承载，先暂存再原样返回；
-/// 传输层自身的超时/网络失败则按 [`TransportError::code`] 折回稳定字符串。
+/// `x-csrf-token` 与 Basic Auth header 由调用方在 `build` 闭包叠加（共享层不感知凭据）。
+/// `build` 失败携带稳定业务 code，[`TransportError`] 无法承载，先暂存再原样返回。
 pub(crate) async fn send_request(
     build: impl FnOnce(Option<&web_sys::AbortSignal>) -> Result<Request, String>,
 ) -> Result<Response, String> {
@@ -309,11 +298,9 @@ pub(crate) fn valid_safe_text(value: &str, maximum_bytes: usize) -> bool {
 }
 
 /// Delivery 路由专用的成功响应外壳；不能用宽松的共享 DTO 接受未知字段。
-///
-/// 保留理由：共享的 `auction_contracts::ApiResponse` 同时服务 Public surface，刻意保持开放；
-/// delivery 路由要求信封闭集，因此本地保留该泛型外壳。同步义务：`ApiResponse` 的
-/// code/message/data 形状变化时必须同步此处。data 内部的 DTO 已由 contracts 侧
-/// `deny_unknown_fields` 承担闭集，不再保留本地镜像。
+/// 共享 `auction_contracts::ApiResponse` 同时服务 Public surface，刻意保持开放；delivery
+/// 路由要求信封闭集，因此本地保留该泛型外壳。同步义务：`ApiResponse` 的 code/message/data
+/// 形状变化时必须同步此处。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StrictDeliveryEnvelope<T> {
@@ -656,7 +643,6 @@ fn valid_state_fields(
 }
 
 /// 将浏览器 `datetime-local` 按本地时区转换为 API 使用的 UTC 文本。
-///
 /// Admin 的创建和筛选必须共享这一转换，否则非 UTC 管理员提交的时间范围会产生偏移。
 pub(crate) fn normalize_datetime(value: &str) -> String {
     if value.is_empty()

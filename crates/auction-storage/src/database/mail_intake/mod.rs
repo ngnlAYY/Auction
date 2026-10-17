@@ -1,8 +1,5 @@
-//! PostgreSQL MoogleMail 拍卖入站 owner 事务。
-//!
-//! 应用层只把已验证的公开装备事实和密钥信封交给这里。父模块保留事务端口实现；
-//! 入站写入和审计/realtime 记录分别归档到子模块，但命令账本、投稿、装备、密钥信封、
-//! pending lots、预览版本、审计和 realtime 事件仍必须在同一事务中完成。
+//! PostgreSQL MoogleMail 拍卖入站 owner 事务；应用层只交已验证的公开装备事实和密钥信封。
+//! 命令账本、投稿、装备、密钥信封、pending lots、预览版本、审计和 realtime 事件必须同事务完成。
 
 use std::future::Future;
 

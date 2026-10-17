@@ -1,7 +1,5 @@
-//! 持久化 Worker 调度适配器装配。
-//!
-//! due claim 与租约领取位于 `claim.rs`，完成/失败收口位于 `resolution.rs`；共享阶段命令、
-//! UUID、时间和错误映射位于 `mapping.rs`。interval 只负责唤醒 Worker，不能成为状态权威。
+//! 持久化 Worker 调度适配器装配；claim/租约在 `claim.rs`，完成/失败收口在 `resolution.rs`，
+//! 共享阶段命令、UUID、时间和错误映射在 `mapping.rs`。interval 只唤醒 Worker，不是状态权威。
 
 use auction_application::{ApplicationError, ScheduledRoundClaim, ScheduledRoundStore};
 use chrono::{DateTime, Utc};

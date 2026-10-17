@@ -41,7 +41,6 @@ pub struct PostgresRebuildPreflight {
     pub rebuild_permitted: bool,
 }
 
-/// 已完成一次删库并重建空库后的结构化结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct PostgresRebuildResult {
     pub database_name: String,

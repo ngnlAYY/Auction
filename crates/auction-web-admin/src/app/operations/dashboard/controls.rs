@@ -1,5 +1,4 @@
 //! Admin Dashboard 邮件轮询控制。
-//!
 //! 控件保持旧版扁平动作区和独立命令 ID owner；暂停冲突会刷新唯一 Dashboard 快照，但不会把
 //! stale 结果伪装成成功。
 

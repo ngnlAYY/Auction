@@ -149,7 +149,6 @@ pub(super) fn visible_confirmation_text(
 }
 
 /// 当前 HentaiVerse 也会用单一 CSS sprite 表示“邮件已发送”。
-///
 /// 该证明只在调用方已经确认唯一 `#mmail_fin` 且页面不存在 compose form 后使用；这里再要求
 /// 完整的直接子结构，避免任意 `c5y` class 充当成功证据。
 pub(super) fn is_css_send_confirmation(element: ElementRef<'_>) -> bool {

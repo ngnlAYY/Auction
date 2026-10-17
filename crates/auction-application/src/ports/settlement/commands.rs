@@ -15,7 +15,6 @@ use super::{
 };
 
 /// 旧版已完成结算账本与当前权威事实只读核验后的安全摘要。
-///
 /// 该结果不包含用户、装备、义务正文或命令 payload；运维表面只能据此确认旧账本已被严格
 /// 对账，不能把它当作新的结算命令结果再次持久化。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +32,6 @@ pub struct LegacySettlementVerification {
 }
 
 /// 旧版已完成结算账本的只读核验入口。
-///
 /// 实现必须要求已有 `settlement_complete/OK` 账本并在同一只读快照中对账，缺失账本时不得
 /// 退化为通用 `settle`，也不得清空 completion fence 或追加任何事实。
 pub trait LegacySettlementVerificationPort: Send + Sync {
@@ -51,7 +49,6 @@ pub struct PersistedSettlementObligationCount {
 }
 
 /// 已结算拍卖的权威持久化事实，用于兼容接管旧版命令账本的只读重放。
-///
 /// 该投影只包含结算摘要、不可变 lot 金额和义务种类数量；履约阶段会改变的义务状态不属于
 /// 结算命令原始结果，不能拿当前履约状态覆盖历史重放。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +75,6 @@ pub struct PersistedSettlement {
 }
 
 /// 结算事务锁内读取的拍卖事实。
-///
 /// `facts` 必须来自同一事务锁定的拍卖和 lot；应用层不接受由 HTTP 或 Worker 自行拼接的
 /// 部分快照，否则结算明细与状态版本可能来自不同时间点。
 #[derive(Debug, Clone)]

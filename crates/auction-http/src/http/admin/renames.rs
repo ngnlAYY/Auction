@@ -1,5 +1,4 @@
 //! Admin 改名历史 HTTP 适配器。
-//!
 //! 该模块只负责旧契约的查询参数、分页和安全 DTO 映射；回滚命令由 Users owner 的
 //! `admin_users` handler 持有，列表同时返回当前用户版本供页面建立 state-version fence。
 

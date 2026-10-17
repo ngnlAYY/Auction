@@ -16,7 +16,6 @@ pub const MAX_PUBLIC_LOT_OFFSET: i64 = 10_000;
 pub const PUBLIC_LOT_CATEGORIES: [&str; 8] =
     ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
 
-/// 公开 lot 列表的分类与页参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLotListRequest {
     pub category: Option<String>,
@@ -44,7 +43,6 @@ impl PublicLotListRequest {
     }
 }
 
-/// Public lot 列表与详情共用的公开拍卖投影。
 #[derive(Debug, Clone)]
 pub struct PublicAuctionProjection {
     pub auction_id: Uuid,
@@ -393,7 +391,6 @@ impl PublicLotDetail {
     }
 }
 
-/// 当前公开 projection 下的 lot 分页。
 #[derive(Debug, Clone)]
 pub struct PublicLotPage {
     pub projection: PublicAuctionProjection,

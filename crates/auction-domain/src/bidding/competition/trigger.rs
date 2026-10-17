@@ -20,7 +20,6 @@ pub enum CompetitionTriggerKind {
 }
 
 /// 竞价规划器的输入命令。
-///
 /// 每个变体只携带自己需要的字段，避免用一组可互相矛盾的可选字段表达命令。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompetitionTrigger {

@@ -7,7 +7,6 @@ use super::*;
 
 impl MoogleMailClient {
     /// 对 typed target 执行一次受限 GET。
-    ///
     /// 正文不进入错误对象或普通日志；异常响应只允许交给独立加密证据记录器。
     /// Cookie 仅在建立请求时短暂复制到 HTTP header，不参与响应留证。
     pub async fn get(
@@ -132,7 +131,6 @@ impl MoogleMailClient {
     }
 
     /// 对 compose/detail typed target 执行恰好一次表单 POST。
-    ///
     /// 请求开始后，无论是网络错误、响应结构错误还是远端明确拒绝，都不能证明远端没有
     /// 发生变化，因此统一返回 write_unknown，由上层进入人工对账或基于页面证明继续。
     pub async fn post(

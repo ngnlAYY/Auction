@@ -1,5 +1,4 @@
 //! Admin draft lot 修改 HTTP 适配器。
-//!
 //! 这里只解析旧 HTTP 请求、会话和 CSRF，并把动作映射到应用命令；版本 fence、幂等、锁、
 //! 预览修订和 withdrawn-return 义务全部由应用/存储层负责。
 

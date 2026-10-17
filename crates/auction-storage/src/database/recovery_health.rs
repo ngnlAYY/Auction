@@ -1,7 +1,5 @@
-//! PostgreSQL recovery health 持久化 owner。
-//!
-//! health 行不是外部余额的权威来源，而是带时间戳的安全投影。每次刷新同时重算 recovery
-//! backlog，避免运维页面把旧计数与新余额状态拼接成不一致快照。
+//! PostgreSQL recovery health 持久化 owner；health 行是带时间戳的安全投影，不是外部余额权威。
+//! 每次刷新同时重算 recovery backlog，避免页面把旧计数与新余额状态拼接成不一致快照。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, RecoveryHealthStore, RecoveryHealthUpdate, RepositoryError,

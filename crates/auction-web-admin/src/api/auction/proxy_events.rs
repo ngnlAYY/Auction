@@ -1,5 +1,4 @@
 //! Admin 代理历史 API 客户端。
-//!
 //! 浏览器只解码后端的安全代理事件投影；游标、命令账本结果和代理状态机仍由服务端拥有。
 
 pub(crate) use auction_contracts::{

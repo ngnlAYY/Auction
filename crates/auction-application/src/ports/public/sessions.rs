@@ -25,7 +25,6 @@ impl PublicSessionConfig {
     }
 }
 
-/// Admin 会话的滑动过期和绝对过期配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdminSessionConfig {
     pub idle_ttl: Duration,
@@ -81,7 +80,6 @@ pub struct PublicLoginResult {
     pub identity: PublicSessionIdentity,
 }
 
-/// 成功认证并刷新后的 Admin 会话投影。
 #[derive(Debug, Clone)]
 pub struct AdminSessionIdentity {
     pub actor: String,

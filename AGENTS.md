@@ -2,7 +2,7 @@
 
 本文件是项目级协作规范。业务、HTTP/事件、数据及部署语义由本仓库独立定义；实现、构建和验收不得依赖外部源码仓库。
 
-[文档导航](docs/README.md) · [架构](docs/architecture.md) · [默认验证](docs/development.md) · [文档维护](docs/development.md#文档维护)
+[文档导航](docs/README.md) · [架构](docs/design/architecture.md) · [默认验证](docs/guide/development.md) · [文档维护](docs/guide/development.md#文档维护)
 
 ## 本页导航
 
@@ -32,8 +32,8 @@
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | 工作区、锁定依赖、固定工具链与 WASM 目标 |
 | `rustfmt.toml` / `.editorconfig` | 格式与编辑规范；Clippy 的 MSRV 继承 Cargo 包元数据 |
 | `Justfile` / `ci/` / `.github/workflows/` | 开发任务、静态门禁与发布脚本 |
-| `apps/{public-api,admin-api,worker,server,auctionctl}` | 薄装配根和可部署程序 |
-| `crates/` | 按 owner 拆分的领域、应用、契约与适配器，见[架构](docs/architecture.md#crate-所有权) |
+| `apps/{auction-public-api,auction-admin-api,auction-worker,auction-server,auctionctl}` | 薄装配根和可部署程序 |
+| `crates/` | 按 owner 拆分的领域、应用、契约与适配器，见[架构](docs/design/architecture.md#crate-所有权) |
 | `migrations/postgres` | PostgreSQL 追加式迁移 |
 | `docs/` / `ops/` | 设计与契约、配置示例及运维手册 |
 
@@ -50,7 +50,7 @@
 
 ## 技术栈
 
-工具链、MSRV、依赖版本与理由集中在[技术栈](docs/tech-stack.md)；精确解析以 `Cargo.lock` 为准。
+工具链、MSRV、依赖版本与理由集中在[技术栈](docs/design/tech-stack.md)；精确解析以 `Cargo.lock` 为准。
 使用 Rust edition 2024、Tokio、Axum、SQLx、Dioxus CSR、Fluent、reqwest/rustls 和 TOML 配置。
 
 构建工具链跟随 stable 并由仓库固定，CI 独立校验 MSRV；只有上游正式声明的版本才能称为 LTS，
@@ -59,7 +59,7 @@
 
 ## 依赖方向与模块所有权
 
-装配根注入适配器，应用层依赖窄端口及领域，依赖方向向内。完整 owner 表见[架构](docs/architecture.md)。
+装配根注入适配器，应用层依赖窄端口及领域，依赖方向向内。完整 owner 表见[架构](docs/design/architecture.md)。
 
 | owner | 必须守住的边界 |
 | --- | --- |
@@ -155,7 +155,7 @@
 
 ## 数据库与迁移
 
-- 新持久化能力先登记[架构矩阵](docs/architecture.md#部署档位与能力)并对照[schema owner](docs/contracts/schema.md)审查。
+- 新持久化能力先登记[架构矩阵](docs/design/architecture.md#部署档位与能力)并对照[schema owner](docs/contracts/schema.md)审查。
 - PostgreSQL 固定 major 18 并跟进修复版，major 升级单独评审迁移/回滚。
 - 驱动由显式 `postgres` feature 启用，不使用 `AnyPool` 隐藏池、事务和锁语义。
 - 迁移只追加，已发布文件禁止修改或删除。
@@ -179,19 +179,18 @@
 - 所有界面文案经本 surface 的 `dioxus-i18n` / `i18n/*.ftl`，不得组件硬编码。支持 `en/zh-CN/zh-TW/ja/ko`，
   Public 默认 `en`，Admin 默认 `zh-CN`；新增消息同步五份，缺键会 panic。Fluent ID 用连字符，不能含点号。
 - 偏好键固定 `hv.lang`，非法值退回对应默认语言；共享层只持有语言集合、持久化和 `<html lang>` 同步。
-- 业务表占容器 100%，组件按内容/时间/动作独立定义完整百分比列宽；Markdown 按内容权重计算，见[表格契约](docs/table-layouts.md)。
+- 业务表占容器 100%，组件按内容/时间/动作独立定义完整百分比列宽；Markdown 按内容权重计算，见[表格契约](docs/design/table-layouts.md)。
   窄屏保持表头和行结构，不用固定最小宽度、横向滚动或卡片化。长文本截断并提供全文提示，复杂文本支持键盘/触控查看。
 - 保持既有 CSS、结构与视觉契约；样式或静态产物完成不等于业务验收。
 
 ## 默认验证与测试范围
 
-默认只做格式、编译与静态分析，命令以 [Justfile](Justfile) 和[开发指南](docs/development.md)为准：
+默认只做格式、编译与静态分析，命令以 [Justfile](Justfile) 和[开发指南](docs/guide/development.md)为准：
 
 ```bash
-just fmt docs-check repository-policy-check layout-check config-example-check i18n-check
-just check feature-check lint wasm-check
-# 上述完整入口
 just verify
+# 单项：fmt / check / feature-check / lint / wasm-check
+# 策略门禁：bash ci/checks/check.sh repository layout config i18n
 ```
 
 `cargo check --locked --workspace --all-targets` 只编译已有目标，不运行测试。除非用户明确要求，
@@ -202,7 +201,7 @@ just verify
 
 `apps/*` 默认 feature 不含数据库驱动；运行时明确选 `postgres`，需页面时先构建 Web
 并选 `web-embed`。Public/Admin 默认监听 `127.0.0.1:8090/8091`，不可共用入口。
-真实敏感配置、迁移、首次设置和启动命令见[开发指南](docs/development.md)及[部署手册](ops/README.md)。
+真实敏感配置、迁移、首次设置和启动命令见[开发指南](docs/guide/development.md)及[部署手册](ops/README.md)。
 启动服务、访问健康接口或功能流程属于行为验证，不是默认静态门禁。
 
 ## 变更与 Git 纪律
@@ -218,7 +217,7 @@ just verify
 从[文档导航](docs/README.md)进入全部正式文档。每项事实在所属 owner 文档维护，其他页面用摘要和链接；
 设计理由与限制直接归入正式文档，不新增独立笔记目录或技能格式模板。Public/Admin 设计分开维护。
 [状态页](docs/status.md)区分当前事实和历史证据，Git 保留变更历史；不得改写过去的验证结论。
-`just docs-check` 检查本地链接、锚点、导航覆盖和包 README。文档维护不得暗改 wire、迁移、安全策略或测试范围。
+文档没有自动门禁：链接一律写成以仓库根为起点的相对路径（如 `docs/contracts/schema.md`），移动或重命名文件时人工核对全部引用与锚点。文档维护不得暗改 wire、迁移、安全策略或测试范围。
 
 ## 交付工作流
 

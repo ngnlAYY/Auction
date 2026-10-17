@@ -1,7 +1,4 @@
-//! Worker 配置校验的模块装配。
-//!
-//! 不同 Worker owner 的边界校验分别放在子目录中；本文件只向 `settings` 父模块重新导出
-//! 原有的 `pub(super)` 函数，保持配置加载与错误契约不变。
+//! Worker 配置校验的模块装配；边界校验在子目录按 owner 持有，此处只重新导出 `pub(super)` 函数。
 
 use super::*;
 

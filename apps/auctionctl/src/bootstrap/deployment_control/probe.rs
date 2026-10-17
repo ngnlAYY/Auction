@@ -1,7 +1,5 @@
-//! 部署启动使用的应用 readiness 探针。
-//!
-//! TCP 与 Unix HTTP socket 访问 Public/Admin 的 `/health/ready`；Worker control 使用独立的
-//! `/v1/health/ready`。响应正文不参与判断，HTTP 200 是应用 owner 对 readiness 的唯一权威信号。
+//! 部署启动使用的应用 readiness 探针；HTTP 200 是应用 owner 对 readiness
+//! 的唯一权威信号，响应正文不参与判断。
 
 use std::{
     fs,

@@ -66,7 +66,6 @@ pub trait AdminCredentialRuntimeReader: Send + Sync {
 }
 
 /// Worker 凭据失效回写端口。
-///
 /// 远端明确返回登录失效时，Worker 只能把当前凭据标记为 invalid；该操作必须是幂等的，
 /// 不能把远端写入结果重试成第二次写入，也不能通过 Admin 命令账本伪造一个用户命令。
 pub trait AdminCredentialRuntimeWriter: Send + Sync {
@@ -74,7 +73,6 @@ pub trait AdminCredentialRuntimeWriter: Send + Sync {
 }
 
 /// Worker 持有数据库凭据运行时所有权的不透明 guard。
-///
 /// 具体互斥机制属于存储适配器；集成层在后续外部请求前检查所有权，不能读取数据库连接、
 /// 凭据身份或任何敏感内容。检查失败或取消后永久失效，不自动重新获取所有权。
 pub trait AdminCredentialRuntimeOwnership: Send + Sync {

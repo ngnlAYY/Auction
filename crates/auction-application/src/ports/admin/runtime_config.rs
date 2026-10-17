@@ -1,7 +1,4 @@
 //! Admin runtime 配置端口的模块装配。
-//!
-//! 文档模型、命令账本、适配器端口和本地校验分别由子模块持有；本文件只保留稳定的
-//! 公共类型出口，避免把不同职责重新堆回一个巨型模块。
 
 #[path = "runtime_config/business.rs"]
 mod business;

@@ -1,5 +1,4 @@
 //! Public 实时事件回放端口。
-//!
 //! 这里定义事件信封、游标和页面边界，不暴露数据库行、SQL 类型或连接细节。事件注册表
 //! 也在应用边界校验，存储适配器遇到未知 schema 时必须要求客户端回读权威快照。
 
@@ -54,7 +53,6 @@ pub struct PublicRealtimeEvent {
 
 impl PublicRealtimeEvent {
     /// 校验公开事件的标识、流名和注册表字段集合。
-    ///
     /// 事件负载必须是精确字段集合。这样旧事件、数据库误写字段或未完成迁移的内部事件
     /// 不会被 HTTP 层当作可安全消费的公共消息直接转发。
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -104,7 +102,6 @@ impl PublicRealtimeEvent {
     }
 }
 
-/// Public 事件回放页。
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublicRealtimePage {
     pub events: Vec<PublicRealtimeEvent>,
@@ -113,7 +110,6 @@ pub struct PublicRealtimePage {
     pub refetch_required: bool,
 }
 
-/// Public 持久化实时事件读取端口。
 pub trait PublicRealtimeReader: Send + Sync {
     fn list_public_events(
         &self,

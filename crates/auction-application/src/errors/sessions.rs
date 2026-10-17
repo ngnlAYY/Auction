@@ -1,7 +1,6 @@
 use thiserror::Error;
 
 /// Public 会话用例的稳定错误分类。
-///
 /// HTTP 层只把这些分类映射为旧契约的状态码；数据库错误仍保留在应用错误的依赖失败分支，
 /// 不把具体 SQL 或凭据内容泄漏给浏览器。
 #[derive(Debug, Error)]

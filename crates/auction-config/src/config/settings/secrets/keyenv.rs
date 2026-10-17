@@ -9,7 +9,6 @@ use super::super::ConfigError;
 use super::model::{MoogleMailKeyEnv, SecretString};
 
 /// 读取本地 `.keyenv` 的两个 MoogleMail Cookie。
-///
 /// 这是用户明确提供的本地开发/联调凭据通道，不是通用环境变量覆盖机制。解析器只接受
 /// `hv-ck-key1` 和 `hv-ck-key2`，拒绝未知键、重复键、空值和不安全文件权限；错误不会回显
 /// 任何值。

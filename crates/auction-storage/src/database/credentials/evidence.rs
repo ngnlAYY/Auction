@@ -8,8 +8,8 @@ use sqlx::{PgConnection, Row};
 
 use super::common::storage_error;
 
-/// 仅存储适配器内传播的类型化错误；外层重试器先匹配 Sqlx/SQLSTATE，再脱敏出边界。
-/// Debug/Display 均不输出 PostgreSQL 原文或参数，不能靠错误文本判断重试。
+/// 仅存储适配器内传播的类型化错误；外层重试器先匹配 Sqlx/SQLSTATE 再脱敏出边界，
+/// Debug/Display 不输出 PostgreSQL 原文或参数，不能靠错误文本判断重试。
 pub enum MailEvidenceTransactionError {
     Sqlx(sqlx::Error),
     Rejected(&'static str),
@@ -55,7 +55,7 @@ impl std::fmt::Display for MailEvidenceTransactionError {
 
 impl std::error::Error for MailEvidenceTransactionError {}
 
-/// 必须在业务事务的第一把行锁位置调用，保持行锁直到确定提交/回滚。
+/// 必须在业务事务的第一把行锁位置调用并持锁到确定提交/回滚；
 /// 旧 generation 永远失败，不因当前凭据或 UID 相同而复活。
 pub async fn lock_mail_runtime_generation(
     connection: &mut PgConnection,

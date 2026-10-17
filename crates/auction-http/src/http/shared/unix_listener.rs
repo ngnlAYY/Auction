@@ -1,5 +1,4 @@
 //! Public/Admin 共用的 Linux Unix HTTP listener。
-//!
 //! Unix socket 不是“把 TCP 地址换成路径”这么简单：绑定前必须确认 runtime 目录、单实例锁、
 //! stale socket、owner/group、权限和最终 socket 身份，退出时也只能删除本进程实际创建的 socket。
 //! 这组约束由 HTTP 适配器统一实现，Public 与 Admin 只提供各自的运行目录、socket 和锁文件名。
@@ -22,7 +21,6 @@ use std::{
 use axum::serve::Listener;
 
 /// Unix HTTP listener 的绑定参数。
-///
 /// `lock_file_name` 由装配根使用固定常量提供，不能来自运行时请求或用户输入；Public 与 Admin
 /// 即使共享 runtime 目录，也必须使用不同的锁文件名。
 #[derive(Debug)]

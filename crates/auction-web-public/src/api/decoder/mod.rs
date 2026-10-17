@@ -1,9 +1,7 @@
 //! Public 成功响应的 route-specific decoder。
-//!
 //! 旧版 Public 浏览器在共享 envelope 之后，仍对每条 route 的 `data` 使用 `only(...)` 和
 //! 跨字段谓词校验。本模块保留该边界：先验证 envelope 和原始 JSON，再反序列化为 contracts
 //! DTO，避免 `serde` 的默认宽松行为把缺字段、未知字段或自相矛盾的投影送进组件。
-//!
 //! 按路由分组的 decoder 位于子模块：`realtime`（实时事件流）、`catalog`（公开目录）、
 //! `lot`（lot 目录/详情与竞价命令）、`account`（我的竞价与代理授权）；本文件只保留共享
 //! envelope 解码与基础谓词原语。

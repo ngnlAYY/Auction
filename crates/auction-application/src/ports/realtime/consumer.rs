@@ -1,5 +1,4 @@
 //! Worker 实时事件消费端口。
-//!
 //! 消费端口只表达持久化游标、失败记录和显式重放边界。外部广播协议不属于这里；具体
 //! sink 必须在本地事实提交后由适配器注入，不能让 Worker 直接依赖 HTTP 或数据库实现。
 
@@ -13,14 +12,12 @@ use super::{ApplicationFuture, PublicRealtimeEvent};
 /// 单次实时消费允许读取的最大事件数。
 pub const MAX_REALTIME_CONSUMER_BATCH_SIZE: u16 = 200;
 
-/// 实时消费的一次批量读取请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeConsumerRequest {
     pub consumer_key: String,
     pub stream_key: String,
     pub batch_size: u16,
     /// 是否允许消费 Public 进程使用的持久化 discovery 派生流。
-    ///
     /// 外部广播 consumer 必须保持为 `false`，避免把拍卖创建事件从原始流和派生流重复
     /// 转发；Public 本地 relay 才能显式打开该开关。
     pub allow_discovery_stream: bool,
@@ -63,7 +60,6 @@ pub struct RealtimeConsumerBatch {
     pub sequence_gap: bool,
 }
 
-/// 实时消费持久化端口。
 pub trait RealtimeConsumerStore: Send + Sync {
     /// 读取当前游标之后的事件；没有对应的持久化 stream 时返回 `None`。
     fn read_batch(
@@ -92,7 +88,6 @@ pub trait RealtimeConsumerStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 
     /// 在确认替代事件已经追加到同一 stream 后，显式越过原失败事件。
-    ///
     /// 原事件仍保留；游标只越过原事件的序号，随后仍按 stream 顺序消费替代事件及其间的
     /// 其他事件，避免通过重放偷偷重排历史序列。
     fn resolve_failure_after_replay(
@@ -123,8 +118,6 @@ pub struct RealtimeSinkError {
     pub safe_detail: String,
 }
 
-/// 已提交实时事件的外部 sink 端口。
-///
 /// 实现必须以 `event_id` 做幂等键。Worker 可能在 sink 已收到事件但游标提交失败后再次
 /// 投递同一事件；这种重复是 at-least-once 语义下的必要保护，而不是可忽略的异常。
 pub trait RealtimeEventSink: Send + Sync {

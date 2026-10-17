@@ -1,6 +1,4 @@
-//! Settlement recovery 五阶段持久化循环的稳定装配。
-//!
-//! 调度、阶段实现和结果合并分别归属相邻 owner；本文件只保留循环 cadence 与阶段顺序。
+//! Settlement recovery 五阶段持久化循环的稳定装配；循环 cadence 与阶段顺序在此。
 
 use std::sync::Arc;
 

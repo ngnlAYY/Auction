@@ -1,5 +1,4 @@
 //! Admin 装备录入 API 客户端。
-//!
 //! 浏览器只把用户当前填写的来源提交给后端；成功响应不返回装备 key 或来源正文。
 
 pub(crate) use auction_contracts::AdminIntakeResponse as AdminIntakeResult;
@@ -17,7 +16,6 @@ use super::{
 //（接受 RFC 4122 全版本，不再限制 v1-v5 小写形式），其余值域谓词保留在下方校验函数。
 
 /// 提交 URL 或 canonical JSON 装备来源，并返回新建 lot 的安全投影。
-///
 /// `command_id` 由表单按同一输入保持不变，网络失败后的重试不会创建第二条 intake。
 pub(crate) async fn add_admin_intake(
     command_id: Uuid,

@@ -14,7 +14,6 @@ macro_rules! typed_id {
         pub struct $name(Uuid);
 
         impl $name {
-            /// 生成新的随机标识。
             pub fn new() -> Self {
                 Self(Uuid::new_v4())
             }
@@ -29,7 +28,6 @@ macro_rules! typed_id {
                 self.0
             }
 
-            /// 判断标识是否为 nil UUID。
             pub fn is_nil(self) -> bool {
                 self.0.is_nil()
             }
@@ -62,7 +60,6 @@ macro_rules! typed_id {
 }
 
 /// 为可重放命令派生稳定 UUID。
-///
 /// namespace、命令 ID、业务标签和版本共同组成输入；标签或算法版本变化时必须显式升级
 /// 版本，避免同一命令在不同业务事实之间复用 ID。该函数只负责确定性派生，不承担业务
 /// 资格校验，调用方仍需在应用事务中保存对应命令账本。
@@ -72,7 +69,6 @@ pub fn deterministic_uuid(command_id: CommandId, label: &str, version: u32) -> U
 }
 
 /// 按 Auction-BF 的长度前缀自然键算法派生稳定 UUID。
-///
 /// 该算法属于旧结算义务和 recovery 主键的持久兼容合同：namespace 与每个二进制部分都先写入
 /// 八字节大端长度，再截取 SHA-256 前 16 字节并设置 UUID v5/variant 位。调用方必须继续使用
 /// 已冻结的 namespace 和自然键顺序，不能改用可重试命令 ID 替代业务事实身份。

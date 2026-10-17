@@ -19,7 +19,6 @@ use serde_json::Error as JsonError;
 pub use sessions::SessionError;
 
 /// MoogleMail 业务处理错误是否适合在同一轮内联重试。
-///
 /// 旧版只跳过明确标记为永久失败的错误；无法识别的依赖错误仍保守重试，避免短暂存储故障
 /// 被误判为坏邮件并永久阻塞游标。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -28,9 +28,7 @@ impl DatabaseStore {
         }
     }
 
-    /// 运行当前后端已提交的追加式迁移。
-    ///
-    /// 仅运行 PostgreSQL 迁移；未知非空数据库仍拒绝初始化。
+    /// 运行当前后端已提交的追加式迁移；仅运行 PostgreSQL 迁移，未知非空数据库仍拒绝初始化。
     pub async fn migrate(&self) -> Result<(), StorageError> {
         match self {
             #[cfg(feature = "postgres")]

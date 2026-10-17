@@ -9,7 +9,6 @@ pub struct PublicForumSyncStatusResponse {
     pub enabled: bool,
 }
 
-/// Public 论坛镜像同步状态响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicForumResponse {

@@ -4,7 +4,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{AdminRuntimeConfigError, require};
 
-/// 管理页可接管的 MoogleMail 调度、吞吐和重试参数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeMailConfig {

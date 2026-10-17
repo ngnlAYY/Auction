@@ -1,5 +1,4 @@
 //! Worker control 的应用端口与安全状态投影。
-//!
 //! Unix socket、HTTP/JSON 和进程凭据校验属于外层适配器；应用层只接收有界的运行状态，避免
 //! Admin dashboard 直接依赖 Worker 的网络实现。手动轮询是唤醒提示，不替代邮件命令账本、
 //! 游标或入站事务。

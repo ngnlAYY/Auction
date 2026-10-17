@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{AdminRuntimeConfigError, invalid, require};
 
-/// 可接管公共 TOML 的自动排期候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeScheduleConfig {
@@ -13,17 +12,13 @@ pub struct AdminRuntimeScheduleConfig {
     pub managed: bool,
     /// 是否允许 Worker 自动创建后续周轮次。
     pub enabled: bool,
-    /// IANA 时区名称。
     pub timezone: String,
-    /// 预览的英文星期名称。
     pub preview_day: String,
     /// 预览的本地时间，格式 HH:MM。
     pub preview_time: String,
-    /// 开拍的英文星期名称。
     pub open_day: String,
     /// 开拍的本地时间，格式 HH:MM。
     pub open_time: String,
-    /// 计划结束的英文星期名称。
     pub nominal_end_day: String,
     /// 计划结束的本地时间，格式 HH:MM。
     pub nominal_end_time: String,

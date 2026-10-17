@@ -35,7 +35,6 @@ pub struct ProcessState {
     pub expires_at: DateTime<Utc>,
 }
 
-/// 进程 dashboard 安全快照。
 #[derive(Debug, Clone)]
 pub struct ProcessSnapshot {
     pub processes: Vec<ProcessState>,
@@ -53,7 +52,6 @@ pub enum DashboardStatus {
 }
 
 impl DashboardStatus {
-    /// 返回稳定的 section 状态名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ok => "ok",
@@ -73,7 +71,6 @@ pub struct DashboardSection<T> {
 }
 
 /// 可观测性 owner 提供的 Admin dashboard 基础快照。
-///
 /// HTTP 层会在此基础上组合 mail、realtime、credentials、delivery、fulfillment、recovery
 /// 和 alerting 等其他 owner 的安全投影；本结构只拥有健康与进程 section。
 #[derive(Debug, Clone)]
@@ -87,13 +84,11 @@ pub trait HealthReader: Send + Sync {
     fn snapshot(&self) -> HealthFuture<'_, AdminDashboardSnapshot>;
 }
 
-/// 可观测性健康服务。
 pub struct HealthService {
     store: Arc<dyn HeartbeatStore>,
 }
 
 impl HealthService {
-    /// 创建使用显式心跳存储的服务。
     pub fn new(store: Arc<dyn HeartbeatStore>) -> Self {
         Self { store }
     }

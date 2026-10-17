@@ -47,7 +47,6 @@ impl MailAuctionItem {
     }
 }
 
-/// MoogleMail 拍卖入站命令。
 pub struct MailAuctionIntakeCommand {
     pub command_id: CommandId,
     pub aggregate_id: Uuid,
@@ -153,7 +152,6 @@ pub trait MailAuctionIntakeTransaction: Send {
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 
-/// MoogleMail 拍卖入站用例端口。
 pub trait MailAuctionIntakePort: Send + Sync {
     /// 在重新执行外部读取、过滤或退回前恢复已有接受决定。
     fn find_accepted(

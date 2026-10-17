@@ -1,6 +1,5 @@
 //! Admin 运维页面的可选自动轮询：开关与间隔状态由页面持有（入 URL query），本模块提供
 //! 页面可见性感知、分片睡眠、轮询调度 hook 与开关控件。
-//!
 //! 每个页面拥有独立的可见性监听，卸载时释放回调；开关和轮询代数不改变其它页面的状态。
 
 use std::cell::{Cell, RefCell};
@@ -18,7 +17,6 @@ use wasm_bindgen::{JsCast, closure::Closure};
 pub(crate) const POLL_INTERVAL_VALUES: &[u64] = &[10, 30, 60];
 
 /// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的轮询等待者。
-///
 /// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供页面内多个轮询循环共用。
 #[derive(Clone)]
 pub(crate) struct PageVisibility {
@@ -115,7 +113,6 @@ struct PageVisibilityListener {
 }
 
 /// 分片睡眠：隐藏时挂起剩余时长（不重置计时），恢复可见后继续走完剩余分片。
-///
 /// 浏览器会大幅节流隐藏页面的定时器，事件驱动的可见性等待比单纯拉长 setTimeout 更可靠。
 pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_millis: u32) {
     /// 睡眠分片粒度：足够细以便在隐藏时尽快转入事件驱动挂起，又不会引入明显唤醒开销。
@@ -131,7 +128,6 @@ pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_milli
 
 /// 可选自动轮询 hook：间隔为 0 时关闭；开启后每隔 `interval_seconds` 秒执行一次
 /// `on_poll`。页面隐藏期间计时挂起而非继续打请求，恢复可见后走完剩余分片继续轮询。
-///
 /// 间隔变化（含关闭）时旧循环在下个分片结束（≤1 秒）经代数检查后自行退出，
 /// 不会与新一轮循环叠加计时器，也不会补发一次过期轮询。
 pub(crate) fn use_auto_poll(interval_seconds: Memo<u64>, on_poll: impl FnMut() + Clone + 'static) {

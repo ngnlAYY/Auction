@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::ApplicationFuture;
 
-/// 公开拍卖列表的查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicAuctionListRequest {
     pub world_id: Option<String>,
@@ -41,7 +40,6 @@ pub struct PublicAuctionSummary {
     pub state_version: i64,
 }
 
-/// 公开拍卖列表的有界结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicAuctionPage {
     pub entries: Vec<PublicAuctionSummary>,
@@ -68,7 +66,6 @@ pub struct CurrentAuctionSnapshot {
 
 impl CurrentAuctionSnapshot {
     /// 校验公开快照的基础字段以及状态、展示模式和竞价能力之间的合同。
-    ///
     /// 该校验只覆盖所有 Public 读取都能表达的核心不变量；终阶段的
     /// `FinalRestriction` 和 ForumSync 结果不属于当前快照，因此不在这里推断。
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -114,7 +111,6 @@ impl CurrentAuctionSnapshot {
 }
 
 /// 单拍卖 Public WebSocket 预检可观察的公开状态闭集。
-///
 /// 存储端只为启用世界中的公开 projection 返回这些状态；HTTP 连接边界据此拒绝新的
 /// `Settled` 连接，但不会据事件历史猜测拍卖是否仍可订阅。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,7 +4,6 @@ use super::*;
 use std::task::{Poll, Waker};
 
 /// 页面可见性；`visibilitychange` 监听器更新内部状态并唤醒挂起的轮询/退避等待者。
-///
 /// 内部是 `Rc` 共享状态，克隆体与原体看到同一份可见性，供 router 轮询与实时 owner 共用。
 #[derive(Clone)]
 pub(crate) struct PageVisibility {
@@ -104,7 +103,6 @@ impl Default for PageVisibility {
 }
 
 /// 分片睡眠：隐藏时挂起剩余时长（不重置计时），恢复可见后继续走完剩余分片。
-///
 /// 浏览器会大幅节流隐藏页面的定时器，事件驱动的可见性等待比单纯拉长 setTimeout 更可靠。
 pub(crate) async fn sleep_while_visible(visibility: &PageVisibility, delay_millis: u32) {
     /// 睡眠分片粒度：足够细以便在隐藏时尽快转入事件驱动挂起，又不会引入明显唤醒开销。

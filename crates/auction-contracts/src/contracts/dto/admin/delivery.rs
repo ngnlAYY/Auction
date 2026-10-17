@@ -35,7 +35,6 @@ pub struct AdminDeliveryResponse {
     pub updated_at: String,
 }
 
-/// Admin delivery 列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryListResponse {
@@ -52,7 +51,6 @@ pub struct AdminDeliveryPaginationResponse {
     pub total: i64,
 }
 
-/// Admin delivery 状态命令请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryCommandRequest {
@@ -66,7 +64,6 @@ pub struct AdminDeliveryCommandRequest {
     pub failure_code: Option<String>,
 }
 
-/// Admin delivery 状态命令响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminDeliveryCommandResponse {

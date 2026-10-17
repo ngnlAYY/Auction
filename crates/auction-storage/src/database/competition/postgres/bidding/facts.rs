@@ -42,9 +42,8 @@ pub(in crate::database::competition) async fn update_lot(
         .state_version
         .checked_sub(plan.public_bids.len() as u64)
         .ok_or_else(|| invalid_state("lot 状态版本回退失败"))?;
-    // 事实创建时间与领先起点共同使用锁后数据库时间，不能回退到事务开始时间。
-    // 同一命令可先接受其他用户出价，再由原领先者的代理反超；即使最终领先者不变，
-    // 连续领先区间也必须从本次事实重新开始，与追加式 bid 重建规则一致。
+    // 事实创建时间与领先起点共用锁后数据库时间，不回退到事务开始时间；同一命令可先接受他人出价，
+    // 再由原领先者的代理反超，最终领先不变也要从本次事实重开连续区间，与追加式 bid 重建一致。
     let leadership_interrupted =
         plan.public_bids.iter().any(|bid| Some(bid.bidder_id) != plan.final_lot.leader_id);
     let transaction = transaction.transaction_mut()?;

@@ -12,7 +12,6 @@ use super::commands::{
 };
 use super::model::{AdminUserListRequest, AdminUserPage};
 
-/// Admin 用户 key 生成/封装端口。
 pub trait AdminLoginKeyIssuer: Send + Sync {
     fn generate(&self, user_id: Uuid) -> ApplicationFuture<'_, AdminUserKeyIssue>;
     fn seal(&self, user_id: Uuid, key: MailLoginKey) -> ApplicationFuture<'_, AdminUserKeyIssue>;
@@ -64,8 +63,6 @@ pub trait AdminUserPort: Send + Sync {
     ) -> ApplicationFuture<'_, AdminUserMutationResult>;
 }
 
-/// Users owner 的 recovery 买家黑名单窄端口。
-///
 /// 该端口不把 recovery 状态写入 Users 表；它只负责用户黑名单、黑名单历史、用户命令账本和
 /// 审计事实，完成后由 recovery owner 以独立 proof 推进 action。
 pub trait RecoveryBuyerBlacklister: Send + Sync {

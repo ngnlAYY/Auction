@@ -15,7 +15,6 @@ pub enum EhentaiOperation {
 }
 
 impl EhentaiOperation {
-    /// 返回持久化和观测使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::CheckSession => "check_session",
@@ -65,7 +64,6 @@ impl EhentaiErrorCategory {
 }
 
 /// E-Hentai 适配器错误。
-///
 /// 该错误故意不保存 URL、Cookie、标题、帖子正文或远端响应，避免错误被日志、任务状态或
 /// 命令结果意外带出敏感数据。`write_started` 是创建主题的重试栅栏：一旦为真，当前
 /// Cookie 不能通过错误自动重试，且任务必须先做远端对账。
@@ -78,12 +76,10 @@ pub struct EhentaiError {
 }
 
 impl EhentaiError {
-    /// 返回操作类别。
     pub const fn operation(self) -> EhentaiOperation {
         self.operation
     }
 
-    /// 返回稳定错误分类。
     pub const fn category(self) -> EhentaiErrorCategory {
         self.category
     }

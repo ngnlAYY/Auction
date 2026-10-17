@@ -1,8 +1,5 @@
-//! Public 持久化实时事件读取适配器。
-//!
-//! 事件回放只读取已经提交的 `realtime_events`，不从内存广播器补造消息。按拍卖读取时先
-//! 校验公开拍卖边界；遇到历史事件的 kind、schema 或负载字段不符合注册表时停止续读并
-//! 返回 `refetch_required`，避免把序号空洞误当成可恢复的增量。
+//! Public 持久化实时事件读取适配器；回放只读已提交的 `realtime_events`，不从内存广播器补造消息。
+//! 读取先校验公开边界；历史事件 kind/schema/负载不符注册表时停止续读并返回 `refetch_required`。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicRealtimeEvent, PublicRealtimePage,

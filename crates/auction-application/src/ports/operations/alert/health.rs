@@ -10,7 +10,6 @@ use super::signals::OperationsAlertError;
 use super::*;
 
 /// Worker 向共享存储发布的 operations alert 非敏感运行状态。
-///
 /// 该投影只表达功能是否启用和配置生效时间，不包含收件人、Cookie 或其它私有配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertRuntimeStatus {
@@ -45,7 +44,6 @@ pub struct OperationsAlertHealth {
 }
 
 impl OperationsAlertHealth {
-    /// 构造告警关闭时的中性投影。
     pub const fn disabled() -> Self {
         Self {
             enabled: false,

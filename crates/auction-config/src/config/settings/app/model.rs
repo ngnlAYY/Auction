@@ -44,7 +44,6 @@ pub(super) struct CommonFileConfig {
     pub(super) log_filter: Option<String>,
     /// 进程本地 Prometheus 指标公共默认值；Admin runtime 仍可在重启时覆盖。
     pub(super) metrics: MetricsConfig,
-    /// 可丢弃缓存的公共策略。
     pub(super) cache: CacheConfig,
     /// 创建拍卖时冻结的计划、经济、结算和恢复策略。
     pub(super) auction: AuctionConfig,
@@ -70,16 +69,13 @@ pub(super) struct BuildInput {
 
 #[derive(Clone)]
 pub struct AppConfig {
-    /// 当前进程角色。
     pub role: Role,
     /// 解析后的可选监听地址；Worker 通常为 None。
     pub listen_addr: Option<SocketAddr>,
     /// Public/Admin 当前生效的 listener；Worker 始终为 None。Admin runtime 存在时，字段已
     /// 按 runtime 文档覆盖，主配置只在 runtime 缺失时作为 fallback。
     pub listener: Option<HttpListenerConfig>,
-    /// 可选日志过滤器。
     pub log_filter: Option<String>,
-    /// 进程本地 Prometheus 指标导出策略。
     pub metrics: MetricsConfig,
     /// 当前角色的 OTLP/HTTP tracing 非敏感参数；Admin runtime 存在时已应用 runtime 覆盖。
     pub tracing: TracingSettings,
@@ -89,11 +85,8 @@ pub struct AppConfig {
     pub cache: CacheConfig,
     /// 创建拍卖时冻结的经济、结算和恢复策略模板。
     pub auction: AuctionConfig,
-    /// Worker 调度策略。
     pub worker: WorkerConfig,
-    /// HTTP 安全策略。
     pub http_security: HttpSecurityConfig,
-    /// 会话策略。
     pub session: SessionConfig,
     /// 主配置文件路径；程序化默认配置时为 None。
     pub config_path: Option<PathBuf>,

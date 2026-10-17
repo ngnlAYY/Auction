@@ -1,7 +1,5 @@
-//! PostgreSQL 装备 key 密文信封的统一只读 owner。
-//!
-//! Admin/MoogleMail intake 仍在各自权威事务中写入信封；所有运行时读取通过这里共享同一列集合、
-//! 结构校验和缺行语义，避免 Public 真实 URL 与 Worker 履约各自复制 secret SQL。
+//! PostgreSQL 装备 key 密文信封的统一只读 owner；写入仍在 Admin/MoogleMail intake 权威事务内。
+//! 运行时读取共享同一列集合、结构校验和缺行语义，避免 Public 与 Worker 各自复制 secret SQL。
 
 use auction_domain::{EquipmentId, EquipmentKeyEnvelope};
 use sqlx::{Row, postgres::PgRow};

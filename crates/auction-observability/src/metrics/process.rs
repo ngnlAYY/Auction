@@ -43,7 +43,6 @@ impl ProcessMetrics {
     }
 
     /// 创建带 tracing 安全状态读取器的进程指标注册表。
-    ///
     /// tracing 指标只读取固定状态字段，不把 exporter endpoint、headers 或 span 内容暴露给
     /// Prometheus；Public/Worker 没有 exporter 时传入的关闭读取器仍会产生稳定的零值族。
     pub fn new_with_tracing_health(
@@ -116,7 +115,6 @@ impl ProcessMetrics {
         }
     }
 
-    /// 返回指标是否启用。
     pub const fn enabled(&self) -> bool {
         self.enabled
     }
@@ -142,13 +140,11 @@ impl ProcessMetrics {
         Arc::clone(&self.worker)
     }
 
-    /// 返回当前进程的业务指标端口。
     pub fn business(&self) -> Arc<dyn BusinessRecorder> {
         Arc::clone(&self.business)
     }
 
     /// 注册数据库连接池状态 collector。
-    ///
     /// 数据库通常在 HTTP/Worker 装配中晚于进程指标对象建立，因此允许在连接成功后注册一次。
     /// collector 只读取池的内存快照，不执行 SQL，也不把连接串或数据库身份带入指标。
     pub fn register_pool_metrics(

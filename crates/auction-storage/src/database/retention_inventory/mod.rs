@@ -1,8 +1,5 @@
-//! PostgreSQL 只读保留盘点。
-//!
-//! 该模块只读取同一 `REPEATABLE READ`、只读事务中的数据库身份、迁移状态、schema 身份和
-//! 关系大小/行数估计。它不判断任何记录是否可以归档或删除，也不提供写入、归档、恢复或
-//! retention mutation 能力；盘点结果只能作为后续人工政策评审的输入。
+//! PostgreSQL 只读保留盘点；只在同一 `REPEATABLE READ` 只读事务中读取数据库身份、迁移/schema
+//! 状态与关系规模，不判断归档或删除资格，不提供任何 mutation 能力，结果仅供人工政策评审。
 
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -43,11 +40,9 @@ use policy::*;
 use realtime::*;
 
 impl PostgresStore {
-    /// 在只读、可重复读事务中收集有限的 PostgreSQL retention 盘点。
-    ///
-    /// `confirmed_database_name` 是人为确认的目标数据库名，必须与连接实际返回的
-    /// `current_database()` 完全一致。该方法不会执行迁移、锁定业务行、写入证据或改变任何
-    /// 数据；调用方负责把返回值以不可覆盖的私有文件保存。
+    /// 在只读、可重复读事务中收集有限的 PostgreSQL retention 盘点。`confirmed_database_name` 必须与
+    /// 连接实际返回的 `current_database()` 完全一致；该方法不迁移、不锁业务行、不写证据、不改数据，
+    /// 返回值由调用方以不可覆盖的私有文件保存。
     pub async fn collect_retention_inventory(
         &self,
         confirmed_database_name: &str,

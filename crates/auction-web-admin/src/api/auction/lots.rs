@@ -1,5 +1,4 @@
 //! Admin lot 列表 API 客户端。
-//!
 //! 只解码后端安全投影；浏览器不接触数据库内部模型或装备密钥。
 
 pub(crate) use auction_contracts::AdminLotResponse as AdminLot;

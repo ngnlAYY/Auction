@@ -17,7 +17,6 @@ pub(crate) enum PriceHistoryFetchError {
 }
 
 /// lot 详情读取失败的浏览器安全投影。
-///
 /// 旧页面按 HTTP status 与稳定 code 选择本地化文案；这里不保存服务端 message、响应正文或
 /// 底层网络错误，避免把不受信任内容直接带进组件。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +66,6 @@ pub(crate) async fn fetch_current_auction(
 }
 
 /// 读取指定历史拍卖的公开投影。
-///
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {

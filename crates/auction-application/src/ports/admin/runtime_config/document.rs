@@ -34,7 +34,6 @@ pub enum AdminRuntimeListenMode {
     Unix,
 }
 
-/// Admin runtime 监听器配置。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeListenerConfig {
@@ -237,7 +236,6 @@ pub struct AdminRuntimeDocument {
     /// 是否允许 Admin 提前结束竞价并把拍卖交给既有结算 Worker；省略时关闭。
     pub allow_manual_early_settlement: bool,
     /// Auction-BF 管理端可编辑的 MoogleMail world；三个业务区块必须同时存在或同时省略。
-    ///
     /// `Option` 只用于保持升级前 runtime 文档和 durable 指纹可重放；Admin HTTP 投影会补齐
     /// 旧版默认值，新写入的文档始终包含这三个区块。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,7 +252,6 @@ pub struct AdminRuntimeDocument {
     pub listener: AdminRuntimeListenerConfig,
     /// Admin dashboard 用于检查 MoogleMail poller/凭据范围的非敏感邮箱清单；省略时不强制范围。
     pub dashboard_mailboxes: Vec<AdminRuntimeDashboardMailbox>,
-    /// metrics 公共开关。
     pub metrics: AdminRuntimeMetricsConfig,
     /// HTTP origin、速率限制和 Cookie 属性。
     pub security: AdminRuntimeSecurityConfig,
@@ -333,7 +330,6 @@ impl AdminRuntimeDocument {
     }
 
     /// 为浏览器和新 runtime 文件补齐业务默认值与未接管的运行参数候选。
-    ///
     /// 升级前文件在内存中继续保留 `None`，因此其既有 fingerprint 与 durable command 摘要
     /// 不会变化；只有 API 投影或用户保存的新候选会显式携带这些字段。
     pub fn materialize_business_defaults(&mut self) {

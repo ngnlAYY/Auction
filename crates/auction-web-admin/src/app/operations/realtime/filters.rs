@@ -1,5 +1,4 @@
 //! Realtime 运维页面的筛选器组件。
-//!
 //! 筛选草稿是各筛选组件的本地信号：键击只重渲染本表单，不再把草稿信号挂在页面顶层
 //! 导致每次输入触发整页重渲染；提交时才把 trim 后的已应用值回传给页面写回 URL。
 
@@ -51,7 +50,6 @@ pub(super) fn RealtimeEventFilters(
 /// 申请 realtime failure 查询筛选条件。
 #[component]
 pub(super) fn RealtimeFailureFilters(
-    /// 草稿初值（地址栏恢复的已应用筛选）；仅在挂载时取一次，之后的编辑不落 URL。
     initial_stream: String,
     initial_consumer: String,
     initial_code: String,

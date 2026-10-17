@@ -8,9 +8,7 @@ pub struct WorkerControlConfig {
     pub enabled: bool,
     /// Unix socket 所属组名；省略时使用旧版默认组 `auction-worker-control`。
     pub group: String,
-    /// 允许访问控制面的内核认证 GID 白名单；省略时为空。
     pub allowed_peer_gids: Vec<u32>,
-    /// 允许访问控制面的内核认证 UID 白名单；省略时为空。
     pub allowed_peer_uids: Vec<u32>,
     /// 预先建立的规范化绝对运行目录；省略时使用 `/run/hv-auction/worker`。
     pub runtime_directory: String,

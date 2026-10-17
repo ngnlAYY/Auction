@@ -8,7 +8,6 @@ use crate::{OperationsAlertPolicy, OperationsAlertTarget};
 
 use super::{AdminRuntimeConfigError, invalid, require};
 
-/// 运维告警的非敏感运行参数。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeAlertsConfig {
@@ -16,15 +15,11 @@ pub struct AdminRuntimeAlertsConfig {
     pub managed: bool,
     /// 是否启用告警扫描和通知。
     pub enabled: bool,
-    /// 各告警循环的扫描间隔秒数。
     pub scan_interval_seconds: u64,
     /// 不大于扫描间隔的随机抖动秒数。
     pub jitter_seconds: u64,
-    /// 健康来源读取超时秒数。
     pub source_timeout_seconds: u64,
-    /// 同轮告警合并窗口秒数。
     pub batch_window_seconds: u64,
-    /// 同类告警通知冷却秒数。
     pub cooldown_seconds: u64,
     /// 告警批次租约秒数，必须覆盖四倍来源读取超时。
     pub claim_lease_seconds: u64,
@@ -34,21 +29,13 @@ pub struct AdminRuntimeAlertsConfig {
     pub max_signals_per_scan: usize,
     /// 单个通知批次最多信号数。
     pub max_batch_items: usize,
-    /// 单条告警正文的最大字节数。
     pub max_body_bytes: usize,
-    /// 待投递数量阈值。
     pub delivery_pending_count_threshold: i64,
-    /// 待投递最老记录年龄阈值秒数。
     pub delivery_pending_age_seconds: u64,
-    /// 投递人工对账数量阈值。
     pub delivery_manual_reconcile_count_threshold: i64,
-    /// 履约积压数量阈值。
     pub fulfillment_backlog_count_threshold: i64,
-    /// 履约积压年龄阈值秒数。
     pub fulfillment_backlog_age_seconds: u64,
-    /// 恢复付款逾期数量阈值。
     pub recovery_overdue_count_threshold: i64,
-    /// 恢复付款逾期年龄阈值秒数。
     pub recovery_overdue_age_seconds: u64,
     /// 通知使用的游戏世界，只允许 main 或 isekai。
     pub world_id: String,

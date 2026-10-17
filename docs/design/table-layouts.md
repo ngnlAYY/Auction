@@ -1,13 +1,11 @@
 # 表格布局与列宽契约
 
-[文档导航](README.md) · [列权重](../crates/auction-web-shared/src/components/table_columns.rs) · [普通文本提示](../crates/auction-web-shared/src/components/table_hints.rs) · [复杂文本查看](../crates/auction-web-shared/src/components/truncated_text.rs)
+[文档导航](docs/README.md) · [列权重](crates/auction-web-shared/src/components/table_columns.rs) · [普通文本提示](crates/auction-web-shared/src/components/table_hints.rs) · [复杂文本查看](crates/auction-web-shared/src/components/truncated_text.rs)
 
-本页登记 27 张业务表的列顺序与百分比，每行合计 100。比例由业务组件的 `TableColumns` 调用拥有；
-共享组件仅归一化并输出 `colgroup`，不提供业务列模板。新增列或改变展示时同步调用与本登记。
-
-所有表格占满所在容器，保持表头、行结构和列顺序。长装备名、玩家名、ID、错误和极端金额
-允许单行省略，并通过完整文本提示查看；操作按钮在自己的列内换行。窄屏继续按比例收缩，
-不增加横向滚动、固定表格最小宽度或卡片视图。
+本页登记 27 张业务表的列顺序与百分比，每行合计 100。比例由业务组件的 `TableColumns` 调用拥有，共享组件仅
+归一化并输出 `colgroup`，不提供业务列模板；新增列或改变展示时同步调用与本登记。
+所有表格占满所在容器，保持表头、行结构和列顺序；长装备名、玩家名、ID、错误和极端金额允许单行省略并通过
+完整文本提示查看，操作按钮在自己的列内换行。窄屏继续按比例收缩，不增加横向滚动、固定表格最小宽度或卡片视图。
 
 ## Public
 
@@ -48,11 +46,9 @@
 
 ## Markdown 与调试边界
 
-Markdown 表格没有固定业务字段。[渲染器](../crates/auction-web-shared/src/components/markdown/render.rs)
-取表头长度与前 32 行内容第 75 百分位长度的较大值估算权重，
-ASCII 字符记 1，其他字符记 2，每格最多读取 96 字符，每列权重限制在 8–48 后归一化。
-这样既照顾较长说明，也避免单条超长 URL 占据整张表。内容或语言变化时重新计算。
-
-获得浏览器验证授权后，比例调整使用 Chromium 的实际表格像素宽度与截图核对，按表格容器宽度计算而非页面宽度。
-真实数据缺失的预览、账户等分支需区分结构核对与有数据页面验证；空表不能证明长内容显示效果。
+Markdown 表格没有固定业务字段。[渲染器](crates/auction-web-shared/src/components/markdown/render.rs)取表头长度
+与前 32 行内容第 75 百分位长度的较大值估算权重，ASCII 字符记 1、其他字符记 2，每格最多读取 96 字符，每列权重
+限制在 8–48 后归一化，兼顾较长说明并避免单条超长 URL 占据整张表；内容或语言变化时重新计算。
+获得浏览器验证授权后，比例调整使用 Chromium 的实际表格像素宽度与截图核对，按表格容器宽度而非页面宽度计算；
+真实数据缺失的预览、账户等分支需区分结构核对与有数据页面验证，空表不能证明长内容显示效果。
 该布局契约不改变 HTTP、竞价、结算或后台命令契约。

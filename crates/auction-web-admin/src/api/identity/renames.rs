@@ -1,5 +1,4 @@
 //! Admin 改名历史 API 客户端。
-//!
 //! 页面只接收改名事实的安全投影；首次回滚按稳定用户 ID 读取当前版本，再冻结完整命令。
 //! 浏览器不自行推导用户状态；结果不确定时必须重放同一个命令 ID 与版本，不能重新读取后改写负载。
 
@@ -20,7 +19,6 @@ use super::{
 
 /// 旧 rename decoder 允许对象增加字段；普通展示仍允许省略 `user_state_version`，准备回滚时
 /// 则必须从按稳定用户 ID 重新读取的当前投影取得非零版本，不能把兼容零值当作 fence。
-///
 /// 保留镜像的理由：wire 允许扩展字段且允许省略 `user_state_version`，而 contracts 的
 /// `AdminRenameResponse` 将该字段作为必填标量、不能加 `deny_unknown_fields`；镜像继续按
 /// 旧语义逐项校验。同步义务：`AdminRenameResponse`/`AdminRenameListResponse`/

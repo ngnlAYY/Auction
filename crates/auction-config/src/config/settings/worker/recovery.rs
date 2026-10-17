@@ -1,7 +1,6 @@
 use serde::Deserialize;
 
 /// Recovery Worker 的独立调度和批次边界。
-///
 /// 旧版 recovery loop 使用独立的 `batch_limit` 和 `concurrency`，不能复用拍卖主循环的
 /// 全局并发，否则一个高峰期会同时放大退回、action、重列和退款处理量。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

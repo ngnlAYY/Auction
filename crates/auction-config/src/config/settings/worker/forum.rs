@@ -26,7 +26,6 @@ pub struct ForumSyncWorkerConfig {
     pub maximum_response_bytes: usize,
     /// 单次主题扫描允许读取的最大页数，范围 1-20。
     pub maximum_topic_pages: u16,
-    /// 连续论坛请求之间的最小间隔毫秒数。
     pub minimum_request_interval_millis: u64,
     /// 单次论坛 HTTP 请求超时秒数，范围 1-300。
     pub request_timeout_seconds: u64,

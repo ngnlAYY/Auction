@@ -1,5 +1,4 @@
 //! Auction-BF 竞价命令结果 wire 的防腐层。
-//!
 //! 旧实例会严格读取 `OK + BidResult/ProxyResult`，并校验 UUID byte-array、确定性事实 ID、
 //! 事实顺序和完整代理转换历史。这里集中完成旧 wire 与内部 `CompetitionPlan` 的双向映射，
 //! 避免旧 DTO 扩散到领域层、HTTP 契约或存储适配器。

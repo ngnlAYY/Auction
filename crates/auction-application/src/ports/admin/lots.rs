@@ -1,5 +1,4 @@
 //! Admin 拍卖 lot 读取端口。
-//!
 //! 这里定义管理端需要的安全 lot 快照。装备密钥、代理上限和原始外部正文不属于该投影；
 //! SQL、后端时间表示与一致性事务留在 `auction-storage`。
 
@@ -17,7 +16,6 @@ pub const MAX_ADMIN_LOT_PAGE_SIZE: i64 = 100;
 /// Admin lot 列表允许的最大 offset，避免通过管理接口执行无界深分页扫描。
 pub const MAX_ADMIN_LOT_OFFSET: i64 = 100_000;
 
-/// Admin lot 列表查询条件。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdminLotListRequest {
     pub auction_id: AuctionId,
@@ -164,7 +162,6 @@ impl AdminLotPage {
     }
 }
 
-/// Admin lot 读取窄端口。
 pub trait AdminLotReader: Send + Sync {
     fn list_admin_lots(
         &self,

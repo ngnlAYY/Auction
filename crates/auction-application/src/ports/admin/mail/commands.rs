@@ -6,7 +6,6 @@ use super::super::RequestHash;
 use super::common::{MAX_ADMIN_MAILBOX_KEY_BYTES, valid_optional_text, valid_text};
 use super::errors::AdminMailError;
 
-/// Admin 邮件暂停/恢复轮询命令。
 #[derive(Debug, Clone)]
 pub struct AdminMailPollingCommand {
     pub command_id: CommandId,
@@ -35,7 +34,6 @@ impl AdminMailPollingCommand {
     }
 }
 
-/// Admin 立即唤醒一次邮箱轮询的命令。
 #[derive(Debug, Clone)]
 pub struct AdminMailPollTriggerCommand {
     pub command_id: CommandId,

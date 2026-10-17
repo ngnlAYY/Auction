@@ -1,8 +1,6 @@
-//! 持久化实时事件消费编排。
-//!
-//! 这个 runner 只负责“读取 → 外部 sink → 连续确认”这一条 at-least-once 管线；它不改变拍卖
-//! 状态，也不把内存广播器当作事件事实。没有注入冻结协议对应的 sink 时，Worker 不启动这条
-//! 消费管线，避免把本地读取误报成外部转发成功。
+//! 持久化实时事件消费编排；只做读取 → 外部 sink → 连续确认的 at-least-once 管线，
+//! 不改变拍卖状态，未注入 sink 时不启动。
+//! 内存广播器不是事件事实。
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -16,7 +14,6 @@ use uuid::Uuid;
 
 use super::{PersistentWorker, poll_delay};
 
-/// 实时消费 runner 的配置错误。
 #[derive(Debug, Error)]
 pub enum RealtimeConsumerConfigError {
     #[error("{0}")]

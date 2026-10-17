@@ -1,5 +1,4 @@
 //! Admin 邮件轮询与入站审查 HTTP 客户端。
-//!
 //! 浏览器只读取轮询状态和入站安全摘要；暂停动作携带服务端快照中的 state version，
 //! A20 触发动作使用单个 command ID 唤醒全部 Worker poller，浏览器不推导邮件处理状态。
 
@@ -26,7 +25,6 @@ use super::{
 };
 
 /// 旧 Mail decoder 允许非破坏性扩展字段；所有旧字段及新详情的固定 metadata 仍逐项校验。
-///
 /// 保留镜像的理由：contracts 的 `AdminMailStateResponse`/`AdminMailIntakeSummaryResponse`/
 /// `AdminMailIntakeListResponse`/`AdminMailPollTriggerResponse` 对应同一 wire，但旧契约允许
 /// 服务端增加扩展字段，这些 DTO 不能加 `deny_unknown_fields`；镜像继续要求旧字段显式存在。

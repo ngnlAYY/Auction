@@ -12,8 +12,8 @@ pub(super) async fn apply_final_plan_postgres(
     proxy_plans: Vec<auction_application::AuctionFinalProxyPlan>,
     effective_end_at: Option<DateTime<Utc>>,
 ) -> Result<(), CompetitionTransactionError> {
-    // 拍卖层名义截止与有效截止必须同步收紧，既保留数据库的 effective >= scheduled
-    // 不变量，也把原始计划时间留在不可变 policy_snapshot 中供审计追溯。
+    // 名义与有效截止必须同步收紧：保留 effective >= scheduled 不变量，原始计划留在不可变
+    // policy_snapshot 中供审计追溯。
     let updated = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(

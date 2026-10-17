@@ -12,9 +12,8 @@ use super::{
 pub(crate) const DATABASE_ADVISORY_LOCK_PREFIX: &str = "auction-postgres-database:";
 
 /// 持有集群级 advisory lock 的破坏性重建会话。
-///
-/// guard 存活期间，同一数据库的其他 Auction 重建命令不能越过预检；外部数据库管理员仍需遵守
-/// 同一维护窗口，advisory lock 不能替代部署停机和权限隔离。
+/// guard 存活期间同一数据库的其他 Auction 重建命令不能越过预检；外部管理员仍须遵守同一维护窗口，
+/// advisory lock 不能替代部署停机和权限隔离。
 pub struct PostgresDatabaseRebuildGuard {
     connection: PgConnection,
     preflight: PostgresRebuildPreflight,
@@ -64,9 +63,8 @@ impl PostgresDatabaseRebuildGuard {
     }
 
     /// 删除已确认目标并以相同 owner、编码、locale provider、tablespace 和连接上限创建空库。
-    ///
-    /// DROP DATABASE 和 CREATE DATABASE 都不能放入事务；调用方必须检查错误中的
-    /// database_dropped/database_recreated，并保持全部应用角色停止直到完成后置验证。
+    /// DROP/CREATE DATABASE 都不能放入事务；调用方必须检查错误中的 database_dropped/
+    /// database_recreated，并保持全部应用角色停止直到完成后置验证。
     pub async fn recreate_empty(&mut self) -> Result<PostgresRebuildResult, PostgresRebuildError> {
         let current =
             collect_state(&mut self.connection, &self.preflight.target_database_name, true).await?;

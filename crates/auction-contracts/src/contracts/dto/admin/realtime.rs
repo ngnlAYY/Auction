@@ -13,7 +13,6 @@ pub struct AdminRealtimeEventResponse {
     pub created_at: String,
 }
 
-/// Admin realtime 事件元数据列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeEventListResponse {
     pub events: Vec<AdminRealtimeEventResponse>,
@@ -30,7 +29,6 @@ pub struct AdminRealtimeLagResponse {
     pub lag: i64,
 }
 
-/// Admin realtime lag 列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeLagListResponse {
     pub lags: Vec<AdminRealtimeLagResponse>,
@@ -59,7 +57,6 @@ pub struct AdminRealtimeFailureResponse {
     pub resolved: bool,
 }
 
-/// Admin realtime failure 列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureListResponse {
     pub failures: Vec<AdminRealtimeFailureResponse>,
@@ -75,14 +72,11 @@ pub struct AdminRealtimeFailurePaginationResponse {
     pub total: i64,
 }
 
-/// Admin realtime failure 详情响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeFailureDetailResponse {
     pub failure: AdminRealtimeFailureResponse,
 }
 
-/// Admin realtime failure replay 请求。
-///
 /// 新客户端应在重试中复用 `command_id`；旧版请求没有该字段，HTTP 防腐层会按 failure 与
 /// 修正负载稳定派生。payload 只允许应用事件注册表接受的公开对象。
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -106,7 +100,6 @@ pub struct AdminRealtimeReplayEventResponse {
     pub created_at: String,
 }
 
-/// Admin realtime replay 响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminRealtimeReplayResponse {
     pub replay: AdminRealtimeReplayEventResponse,

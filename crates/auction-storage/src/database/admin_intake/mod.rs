@@ -1,7 +1,5 @@
-//! PostgreSQL Admin 装备录入 owner 的事务入口。
-//!
-//! 录入事实写入和审计/realtime 记录由子模块分别维护，但仍通过同一个
-//! `PostgresCompetitionTransaction` 由应用层在一个事务内按顺序调用。
+//! PostgreSQL Admin 装备录入 owner 的事务入口；事实、审计与 realtime 记录同属一个
+//! `PostgresCompetitionTransaction`，由应用层在一个事务内按顺序调用。
 
 use std::future::Future;
 

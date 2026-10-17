@@ -30,7 +30,6 @@ pub struct ProxyUsageContext {
 }
 
 /// 锁内读取的一条代理转换历史，用于生成 Auction-BF 可重放的完整 `ProxyResult`。
-///
 /// 该结构保留数据库 wire 值，由应用层旧账本防腐层完成闭集和连续性校验；它不进入领域
 /// 状态机，也不直接暴露给 HTTP。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +49,6 @@ pub struct CompetitionProxyTransitionRecord {
 
 impl ProxyUsageContext {
     /// 从同一 lot、同一 owner 的完整授权历史建立下一次重入上下文。
-    ///
     /// 旧版要求 usage 从 1 连续递增；只看最后一行会让损坏的 `1,3` 历史继续生成 4，并使
     /// quota 计数与账户投影分叉，因此这里统一失败关闭。
     pub fn from_owner_history(
@@ -88,7 +86,6 @@ impl ProxyUsageContext {
 }
 
 /// 外部 Public 竞价命令在同一事务中追加旧版命令级审计所需的安全上下文。
-///
 /// Auction-BF 对普通出价、代理创建和代理降低各写一条审计，而不是按公开 bid 或代理转换逐条写。
 /// 旧审计的 `request_id` 固定为空，因此这里刻意不携带 HTTP 关联 ID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,7 +189,6 @@ pub trait CompetitionTransaction: Send {
     ) -> impl Future<Output = Result<CompetitionSnapshot, CompetitionTransactionError>> + Send;
 
     /// 在 lot 与活动代理之后锁定参与用户，并核对用户状态和当前黑名单事实。
-    ///
     /// 调用方必须按 `UserId` 稳定排序后逐个调用，保持普通竞价、代理竞争和生命周期任务使用
     /// 同一套 lot → proxy → user 锁顺序。
     fn participant_is_eligible_for_update(
@@ -216,7 +212,6 @@ pub trait CompetitionTransaction: Send {
     > + Send;
 
     /// 读取历史 `accepted + CompetitionPlan` 账本重放所需的冻结代理配额。
-    ///
     /// 该兼容读取不能复用带当前时间窗 gate 的竞价快照，否则拍卖结束后合法旧命令会无法重放。
     fn proxy_quota_limit(
         &mut self,

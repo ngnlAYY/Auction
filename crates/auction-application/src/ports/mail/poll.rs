@@ -1,5 +1,4 @@
 //! MoogleMail 轮询 Worker 的持久化端口。
-//!
 //! 该端口只表达已通过外部适配器解析的安全入站事实、数据库游标和租约。原始 HTML、Cookie、
 //! mmtoken、装备 key 和邮件正文不进入持久化对象；业务分类或外部发送必须在更窄的应用端口中
 //! 另行完成。
@@ -34,7 +33,6 @@ pub struct MailPollClaim {
 
 impl MailPollClaim {
     /// 校验存储适配器返回的租约边界，防止错误状态进入远程请求路径。
-    ///
     /// `paused` 只表示领取时的自动调度状态；管理员手动触发可以在不改变该状态的情况下
     /// 执行一次轮询，因此这里不能把暂停本身视为租约无效。
     pub fn validate(&self) -> bool {
@@ -49,7 +47,6 @@ impl MailPollClaim {
 }
 
 /// 一封已经完成远端协议解析的安全入站事实。
-///
 /// `decision_metadata` 只能保存不含正文、Cookie、token 和装备 key 的 JSON 对象。Worker 会在
 /// 业务处理 owner 返回安全决定后再写入该事实；`accepted`、`rejected` 和 `failed` 只表示应用
 /// 决定，不代表后续外部 return/take/send 已经完成。
@@ -131,8 +128,6 @@ impl MailPollBatch {
     }
 }
 
-/// MoogleMail 轮询的持久化端口。
-///
 /// `claim_due`、`renew`、`commit` 和 `fail` 必须由同一数据库 owner 实现租约 fence。远程 GET
 /// 只发生在 `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
 /// 后才能推进，避免远端成功而本地丢游标或重复执行不受控。
@@ -147,7 +142,6 @@ pub trait MailPollStore: Send + Sync {
     ) -> ApplicationFuture<'_, MailPollCompletion>;
 
     /// 确保一个启用的邮箱拥有初始轮询状态，并收敛配置缩短后遗留的过晚调度水位。
-    ///
     /// 已暂停邮箱、活动租约和最近失败的最大退避不得被启动过程越过；没有变化时不能递增版本。
     fn ensure_state(
         &self,

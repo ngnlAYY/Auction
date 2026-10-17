@@ -1,7 +1,5 @@
-//! MoogleMail gateway 的稳定出口。
-//!
-//! 单 Cookie 会话、扫描模型和收件/已发送/余额读取分别由子模块拥有；根文件只保留边界装配、
-//! 安全错误辅助和既有公共导出，Cookie 不会被提升到应用层。
+//! MoogleMail gateway 的稳定出口；单 Cookie 会话、扫描模型和读取由子模块持有，Cookie
+//! 不提升到应用层。
 
 use super::*;
 

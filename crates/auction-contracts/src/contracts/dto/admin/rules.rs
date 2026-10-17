@@ -11,7 +11,6 @@ pub struct AdminRulesCandidateRequest {
     pub markdown: String,
 }
 
-/// Admin 规则发布请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminRulesPublishRequest {

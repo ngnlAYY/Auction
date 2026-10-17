@@ -19,7 +19,6 @@ use super::super::HttpBoundary;
 use super::super::security::AdminHttpSecurity;
 
 /// Admin surface 可使用的应用端口集合。
-///
 /// 管理命令、查询和会话以后按 owner 逐项加入；缺失端口时只报告依赖不可用，不构造假数据。
 #[derive(Clone, Default)]
 pub struct AdminApiState {

@@ -6,7 +6,6 @@ use auction_domain::AuctionId;
 use super::ApplicationFuture;
 
 /// Admin 结算报告中的拍卖生命周期快照。
-///
 /// 这是稳定报告所需的只读投影，不复用领域 `Auction` 聚合，避免把数据库的管理字段或
 /// 兼容字段反向塞入状态机。字段必须来自同一数据库快照。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +50,6 @@ pub struct SettlementSummary {
     pub settled_at: DateTime<Utc>,
 }
 
-/// Admin 结算报告中的单个 lot 金额投影。
 #[derive(Debug, Clone)]
 pub struct SettlementLotReport {
     pub id: auction_domain::LotId,
@@ -81,7 +79,6 @@ pub struct SettlementReport {
 }
 
 /// Admin 结算报告读取端口。
-///
 /// 在同一数据库快照读取结算摘要与 lot 明细，不以空报告掩盖读取失败。
 pub trait SettlementReportReader: Send + Sync {
     fn settlement_report(

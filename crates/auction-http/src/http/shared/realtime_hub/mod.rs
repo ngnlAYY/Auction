@@ -1,5 +1,4 @@
 //! Public 进程内 realtime Hub。
-//!
 //! Hub 只承担当前 Public 实例的有界连接分发；持久化 stream、消费游标和失败记录仍由
 //! `auction-application`/`auction-storage` 负责。慢连接在发送队列满时立即淘汰，避免阻塞
 //! relay 和其他连接。

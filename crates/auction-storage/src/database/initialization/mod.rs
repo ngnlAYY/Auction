@@ -8,9 +8,8 @@ use sqlx::{Connection, PgConnection, migrate::Migrate};
 pub struct FirstDatabaseInitializationError;
 
 /// 在 SQLx 迁移锁下确认空库与零其他客户端，再应用仓库迁移；绝不清空已有对象。
-///
-/// 调用者必须先取得本机 supervisor 所有权，且尚未派生任何角色。迁移部分完成时保留现场，
-/// 后续普通启动不会再次调用此入口；恢复或升级需要显式运维授权。
+/// 调用者必须先取得本机 supervisor 所有权，且尚未派生任何角色。迁移部分完成时保留现场，后续
+/// 普通启动不会再次调用此入口；恢复或升级需要显式运维授权。
 pub async fn initialize_empty_postgres(
     database_url: &str,
 ) -> Result<(), FirstDatabaseInitializationError> {

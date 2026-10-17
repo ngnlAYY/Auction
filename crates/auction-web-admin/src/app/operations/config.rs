@@ -1,5 +1,4 @@
 //! Admin runtime 配置页面。
-//!
 //! 页面用类型化表单编辑服务端下发的完整非敏感投影；候选必须先经过服务端规范化校验，
 //! 更新再以 fingerprint 和可重试的 command ID 作为版本与幂等边界。成功更新会由服务端
 //! 原子写入 runtime TOML，角色启动配置、公共配置、密钥和命令账本永远不进入浏览器。
@@ -390,7 +389,6 @@ pub(super) fn page() -> Element {
                     // 写入确认对话框放在表单外，避免 dialog 语义嵌进 <form>。
                     if update_confirm_open() {
                             if let Some(pending_command) = command() {
-                                // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
                                 Dialog {
                                     title: t!("admin-runtime-update-confirm-title"),
                                     close_label: t!("admin-users-action-cancel"),

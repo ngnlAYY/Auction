@@ -4,7 +4,6 @@ use auction_application::{ApplicationError, RecoveryHealthRefreshPort, Repositor
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
 /// 按独立周期触发 recovery health 刷新的 Worker 运行时。
-///
 /// Worker 主轮询可以比 health 周期更频繁；`next_refresh_at` 在开始远端读取前推进，避免
 /// 外部服务慢或失败时并发堆积多个 health 刷新。
 pub struct RecoveryHealthRuntime {

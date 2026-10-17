@@ -1,7 +1,5 @@
-//! Recovery action 的生命周期模块装配。
-//!
-//! 领取、投递状态推进和终态收口分别位于子模块；所有实现仍由 recovery scheduler
-//! 统一通过 `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
+//! Recovery action 的生命周期模块装配；领取、投递推进和终态收口位于子模块，统一经
+//! `RecoveryWorkStore` 暴露，避免把外部副作用带入存储层。
 
 #[cfg(feature = "postgres")]
 use super::*;
@@ -52,9 +50,8 @@ impl RecoveryActionTransactionError {
 }
 
 /// 按旧版 `RunSerializable(..., 3)` 语义执行 recovery action owner 事务。
-///
-/// 仅重试 PostgreSQL 序列化冲突与死锁；claim fence、业务身份冲突和其他数据库错误立即失败。
-/// 调用方必须在重试轮次外生成 command、claim 或 audit 身份，确保一次逻辑提交身份稳定。
+/// 仅重试 PostgreSQL 序列化冲突与死锁；claim fence、业务身份冲突和其他数据库错误立即失败。调用方
+/// 必须在重试轮次外生成 command、claim 或 audit 身份，确保一次逻辑提交身份稳定。
 #[cfg(feature = "postgres")]
 pub(super) async fn run_serializable_action_transaction<T, F>(
     pool: &crate::database::TrackedPool<Postgres>,

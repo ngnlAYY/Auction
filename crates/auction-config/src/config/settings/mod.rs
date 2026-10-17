@@ -1,7 +1,5 @@
-//! 进程 TOML 配置与敏感配置加载。
-//!
-//! 普通配置负责监听地址、缓存模式等非敏感设置；主配置可通过 `secrets_file` 引用独立的
-//! 敏感 TOML。任何凭据都必须通过显式 getter 使用，不能依赖 `Debug` 输出或环境变量覆盖。
+//! 进程 TOML 配置与敏感配置加载；凭据必须经显式 getter 读取，不能依赖 `Debug` 输出或环境变量覆盖。
+//! 主配置通过 `secrets_file` 引用独立的敏感 TOML。
 
 use std::{
     collections::BTreeSet,

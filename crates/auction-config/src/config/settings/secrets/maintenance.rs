@@ -10,7 +10,6 @@ use super::database::resolve_database_url;
 use super::model::{PostgresMaintenanceSecretFile, PostgresMaintenanceSecrets};
 
 /// 加载破坏性 PostgreSQL 运维专用的独立敏感 TOML。
-///
 /// 路径必须是规范化绝对路径，文件不得是 symlink，Unix 权限不得向 group/other 开放。解析错误
 /// 固定脱敏，确保连接串不会进入诊断。
 pub fn load_postgres_maintenance_secrets(

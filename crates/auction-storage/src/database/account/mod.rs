@@ -1,8 +1,5 @@
-//! Public 账户竞价与代理历史的只读适配器。
-//!
-//! 账户 projection 只在同一数据库读取快照内拼装：普通竞价、代理授权历史、quota 和最近
-//! 一条代理事实必须属于当前用户，并且只能来自公开可见的拍卖/lot。代理的 owner capability
-//! 在这里按权威 lot 状态派生，HTTP 层不接触数据库行或内部代理状态机。
+//! Public 账户竞价与代理历史的只读适配器；projection 只在同一快照内拼装当前用户的公开拍卖/lot。
+//! 代理 capability 按权威 lot 状态派生，HTTP 层不接触数据库行或内部代理状态机。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, PublicAccountReader, PublicMyBid, PublicMyBidsPage,

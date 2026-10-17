@@ -1,7 +1,5 @@
-//! auctionctl 装配入口的兼容层。
-//!
-//! CLI 类型、分派、部署检查和 PostgreSQL 运维实现按职责位于 `runtime/` 子目录；本文件
-//! 保留原有 `bootstrap::run` 与错误类型的外部边界。
+//! auctionctl 装配入口的兼容层；CLI 类型、分派、部署检查和 PostgreSQL 运维实现位于
+//! `runtime/` 子目录。
 
 use anyhow::Context;
 #[cfg(feature = "postgres")]

@@ -1,5 +1,4 @@
 //! Public 进程的持久化 realtime relay 编排。
-//!
 //! relay 只负责按 stream 读取已提交事件、交给进程内 Hub sink 并连续确认游标。它不改变
 //! 拍卖状态，也不把进程内广播误报成外部广播系统已经完成；外部 sink 仍由独立适配器注入。
 
@@ -12,7 +11,6 @@ use crate::{
     RealtimeStreamStore, RepositoryError,
 };
 
-/// Public relay 的有界运行参数。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeRelayConfig {
     /// durable consumer 的稳定标识；同一 Public 实例重启必须保持不变。

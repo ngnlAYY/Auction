@@ -15,13 +15,11 @@ pub struct AdminMailPollingResponse {
     pub updated_at: String,
 }
 
-/// Admin 邮箱轮询状态响应 envelope。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailStateResponse {
     pub polling: AdminMailPollingResponse,
 }
 
-/// Admin 全局邮件轮询唤醒的接受结果。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailPollTriggerResponse {
     pub command_id: String,
@@ -45,7 +43,6 @@ pub struct AdminMailIntakeSummaryResponse {
     pub has_message_display: bool,
 }
 
-/// Admin 入站邮件数字分页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailPaginationResponse {
     pub page: i64,
@@ -53,7 +50,6 @@ pub struct AdminMailPaginationResponse {
     pub total: i64,
 }
 
-/// Admin 入站邮件列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminMailIntakeListResponse {
     pub intakes: Vec<AdminMailIntakeSummaryResponse>,
@@ -61,7 +57,6 @@ pub struct AdminMailIntakeListResponse {
 }
 
 /// Admin 入站邮件详情的固定元数据。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端详情 decoder 的闭集语义对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -97,7 +92,6 @@ pub struct AdminMailIntakeDeliveryResponse {
 }
 
 /// Admin 入站邮件详情响应。
-///
 /// 详情 wire 是闭集（与列表摘要的兼容扩展语义不同），未知字段一律拒绝。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

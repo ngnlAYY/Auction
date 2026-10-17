@@ -1,7 +1,5 @@
-//! PostgreSQL 恢复前只读预检。
-//!
-//! 本模块只负责同一只读事务中的预检编排；结果模型、错误分类和数据库证据查询分别位于
-//! 子模块，预检不会执行恢复、创建/删除数据库或改变任何数据。
+//! PostgreSQL 恢复前只读预检；只做同一只读事务中的编排，证据查询和结果模型位于子模块，
+//! 预检不执行恢复、不建删数据库、不改变任何数据。
 
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -19,10 +17,8 @@ use query::{query_error, validate_database_name};
 use query::{read_migration_inventory, read_schema_identity, set_read_only_limits};
 
 impl PostgresStore {
-    /// 在只读、可重复读事务中收集恢复前预检证据。
-    ///
-    /// 预检通过只表示目标数据库满足“空、无其他连接、主节点可写”的基础条件，不能证明
-    /// backup archive、manifest、schema 兼容性或恢复后的业务数据正确，也不会执行恢复。
+    /// 在只读、可重复读事务中收集恢复前预检证据；通过只表示目标库“空、无其他连接、主节点可写”。
+    /// 它不能证明 backup archive、manifest、schema 兼容性或恢复后的业务数据正确，也不会执行恢复。
     pub async fn collect_recovery_preflight(
         &self,
         confirmed_database_name: &str,

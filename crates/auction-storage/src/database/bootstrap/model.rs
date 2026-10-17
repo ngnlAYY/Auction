@@ -11,9 +11,8 @@ pub enum PostgresBootstrapResult {
     AlreadyExists { database_name: String, owner: String },
 }
 
-/// PostgreSQL bootstrap 的确定性失败分类。
-///
-/// 故意不携带 SQLx 原始错误文本，避免驱动诊断意外包含连接 URL、用户名或其他敏感材料。
+/// PostgreSQL bootstrap 的确定性失败分类；故意不携带 SQLx 原始错误文本，
+/// 避免驱动诊断意外包含连接 URL、用户名或其他敏感材料。
 #[derive(Debug, Error)]
 pub enum PostgresDatabaseBootstrapError {
     #[error("PostgreSQL bootstrap 的数据库名无效")]

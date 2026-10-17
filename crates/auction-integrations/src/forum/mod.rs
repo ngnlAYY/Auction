@@ -1,7 +1,5 @@
-//! 论坛拍卖预览解析适配器。
-//!
-//! 该模块只消费 Admin 提交的 HTML/文本快照并返回内存中的安全预览，不连接论坛、不写本地
-//! 状态，也不把解析成功误报为远程发布成功。语法和金额边界沿用 Auction-BF 论坛契约。
+//! 论坛拍卖预览解析适配器；只消费 Admin 提交的 HTML/文本快照，不连接论坛、
+//! 不写本地状态，也不把解析成功误报为远程发布成功。
 
 mod parser;
 mod render;
@@ -16,7 +14,6 @@ use auction_application::{
 pub(crate) use parser::ParsedHtmlPage;
 use parser::{parse_html, parse_html_documents, parse_thread_text};
 
-/// 无状态的论坛预览解析器。
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ForumPreviewAdapter;
 
@@ -27,7 +24,6 @@ impl ForumPreviewAdapter {
     }
 
     /// 解析已读取的论坛主题 HTML，并复用 Admin 预览的契约校验。
-    ///
     /// 外部网关只负责受限读取和认证；帖子语义仍由本适配器统一解释，避免远程读取路径
     /// 与本地预览路径产生两套命令语法或安全边界。
     pub fn parse_html_document(
@@ -40,7 +36,6 @@ impl ForumPreviewAdapter {
     }
 
     /// 按论坛页码顺序合并一个主题的全部 HTML 页面，再统一解析目录和出价命令。
-    ///
     /// 每个远端 post ID 在一个主题中必须唯一；重复 ID 代表分页协议漂移，不能静默去重后继续
     /// 应用出价，否则同一命令可能失去稳定楼层身份。
     pub fn parse_html_documents(

@@ -1,6 +1,4 @@
-//! retention 盘点对外模型与失败分类。
-//!
-//! 这些类型只描述安全投影，不代表归档、删除或资格授权。
+//! retention 盘点对外模型与失败分类；只描述安全投影，不代表归档、删除或资格授权。
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,7 +17,6 @@ pub struct RetentionPolicy {
     pub required_operator_decisions: Vec<String>,
 }
 
-/// 保留政策中的数据族定义。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RetentionPolicyFamily {
     pub dataset_family: String,
@@ -126,7 +123,6 @@ pub struct PostgresRealtimeStreamInventory {
     pub eligibility_authorized: bool,
 }
 
-/// realtime 盘点的输出覆盖信息。
 #[derive(Debug, Serialize)]
 pub struct PostgresRealtimeCoverage {
     pub configured_stream_count: i64,
@@ -138,7 +134,6 @@ pub struct PostgresRealtimeCoverage {
     pub eligibility_authorized: bool,
 }
 
-/// realtime 盘点结果。
 #[derive(Debug, Serialize)]
 pub struct PostgresRealtimeInventory {
     pub streams: Vec<PostgresRealtimeStreamInventory>,
@@ -157,7 +152,6 @@ pub struct PostgresForeignKeyInventory {
     pub eligibility_authorized: bool,
 }
 
-/// public-schema 外键证据及其覆盖信息。
 #[derive(Debug, Serialize)]
 pub struct PostgresForeignKeyCoverage {
     pub foreign_key_count: i64,
@@ -167,14 +161,12 @@ pub struct PostgresForeignKeyCoverage {
     pub eligibility_authorized: bool,
 }
 
-/// 外键依赖盘点结果。
 #[derive(Debug, Serialize)]
 pub struct PostgresForeignKeyInventoryReport {
     pub relations: Vec<PostgresForeignKeyInventory>,
     pub coverage: PostgresForeignKeyCoverage,
 }
 
-/// 一次只读保留盘点结果。
 #[derive(Debug, Serialize)]
 pub struct PostgresRetentionInventory {
     pub format: &'static str,

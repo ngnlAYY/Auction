@@ -1,7 +1,6 @@
 //! 浏览器端共用的金额展示格式。
 
 /// 使用精确的 K/M/B 单位展示 credit 金额，不对出价金额取近似值。
-///
 /// 该函数只负责本地展示，不参与金额解析、校验或任何服务端业务判断。
 pub fn format_credit_amount(amount: i64) -> String {
     let sign = if amount < 0 { "-" } else { "" };

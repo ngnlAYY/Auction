@@ -35,8 +35,6 @@ impl RecoveryConfirmationAction {
     }
 }
 
-/// Admin recovery 确认命令。
-///
 /// `expected_state_version` 是版本 fence；存储适配器必须在锁定 recovery 后重新校验它，
 /// 不能把报告中的允许按钮当作写入授权。`request_hash` 由 HTTP/Worker 入口按同一规则计算，
 /// 用于 recovery 专用命令账本的冲突检测。
@@ -204,8 +202,6 @@ pub enum RecoveryCommandError {
     Failed(String),
 }
 
-/// recovery 确认的窄存储端口。
-///
 /// 实现必须把命令查重、事实锁定、状态更新、审计和需要的 realtime/outbox 事实放在同一
 /// Serializable 事务中。
 pub trait RecoveryCommandRepository: Send + Sync {
@@ -215,7 +211,6 @@ pub trait RecoveryCommandRepository: Send + Sync {
     ) -> ApplicationFuture<'_, RecoveryConfirmationResult>;
 }
 
-/// Admin/Worker 共用的 recovery 确认用例端口。
 pub trait RecoveryCommandPort: Send + Sync {
     fn confirm_recovery(
         &self,
@@ -232,7 +227,6 @@ impl<R> RecoveryCommandService<R>
 where
     R: RecoveryCommandRepository + 'static,
 {
-    /// 建立 recovery 确认服务。
     pub fn new(repository: std::sync::Arc<R>) -> Self {
         Self { repository }
     }

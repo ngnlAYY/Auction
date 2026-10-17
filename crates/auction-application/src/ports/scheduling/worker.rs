@@ -42,7 +42,6 @@ pub struct ScheduledRoundClaim {
 }
 
 /// 当前本地周应存在的持久化轮次及其冻结策略。
-///
 /// `round_id`、`auction_id` 和 `create_command_id` 必须由 world/local_week 的旧版稳定算法
 /// 派生；数据库适配器负责在一个事务内幂等建立拍卖、intake target、命令账本和轮次事实。
 #[derive(Debug, Clone)]
@@ -77,8 +76,6 @@ pub struct ScheduledRoundSnapshot {
     pub open_completed_at: Option<DateTime<Utc>>,
 }
 
-/// Worker 调度器使用的窄存储端口。
-///
 /// `claim_due` 的返回值必须来自数据库条件更新/锁定；内存中的 interval 只能唤醒 Worker，
 /// 不能成为 due、租约、完成或失败状态的权威来源。
 pub trait ScheduledRoundStore: Send + Sync {

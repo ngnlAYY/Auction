@@ -29,7 +29,6 @@ impl std::fmt::Debug for AdminUserCreateRequest {
     }
 }
 
-/// Admin 用户属性/key 状态修改请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserMutationRequest {
@@ -45,7 +44,6 @@ pub struct AdminUserMutationRequest {
     pub forum_account_id: Option<String>,
 }
 
-/// Admin 用户黑名单请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserBlacklistRequest {
@@ -57,7 +55,6 @@ pub struct AdminUserBlacklistRequest {
     pub public_reason: String,
 }
 
-/// Admin 用户解封请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminUserUnblacklistRequest {
@@ -99,7 +96,6 @@ pub struct AdminUserResponse {
     pub updated_at: String,
 }
 
-/// Admin 用户列表分页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserPaginationResponse {
     pub page: i64,
@@ -123,7 +119,6 @@ pub struct AdminUserListItemResponse {
     pub blacklist_history: Vec<AdminUserBlacklistHistoryResponse>,
 }
 
-/// Admin 用户列表响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminUserListResponse {
     pub users: Vec<AdminUserListItemResponse>,

@@ -1,12 +1,7 @@
 //! Public 与 Admin 长列表共用分页器。
-//!
-//! 合并自两端原先近逐字重复的 `PublicPager` / `AdminPager`。组件同时提供上一页、下一页和
-//! 直接跳页：支持后端返回总数的稳定分页，也能在只有 `has_more` 的游标兼容投影上把跳转
-//! 范围限制到当前已知的下一页。
-//!
-//! 文案一律由调用方通过 props 传入（含「第 X 页 / 共 Y 页」状态模板回调），本 crate
-//! 不持有任何 i18n key；DOM class 保持 `ui-pager*` 契约不变。调用方显式提供每页数量
-//! 选项时启用数字页码布局；未提供时保留原布局，避免改变 Admin 与其他未接入页面。
+//! 支持后端返回总数的稳定分页，也支持只有 `has_more` 的游标兼容投影（跳转范围限制到当前
+//! 已知的下一页）。文案一律由调用方经 props 传入，本 crate 不持有任何 i18n key；DOM class
+//! 保持 `ui-pager*` 契约不变。调用方显式提供每页数量选项时才启用数字页码布局。
 
 use dioxus::prelude::*;
 
@@ -15,14 +10,10 @@ mod size;
 use size::PageSizePicker;
 
 /// 展示长列表分页，并把目标页交给调用页面更新 URL 或查询状态。
-///
-/// 分页语义：
 /// - `total: Some(total)`：后端返回总数的稳定分页；
-/// - `total: None` + `has_more`：只有游标语义的兼容投影，可跳转范围限制到当前已知的下一页。
-///
-/// 钳制契约（两端迁移时必须保留的行为）：渲染期先把 `page` 钳制到当前已知合法范围
-/// 得到 `valid_page`，上一页/下一页/跳页等交互全部从钳制后的页码出发；挂载或页码、总量
-/// 变化后，纠偏 effect 通知父级把状态与 URL 收敛到合法页。
+/// - `total: None` + `has_more`：游标语义的兼容投影，可跳转范围限制到当前已知下一页。
+/// 钳制契约（不得改）：渲染期先把 `page` 钳制到合法范围得到 `valid_page`，所有交互从
+/// 钳制后页码出发；页码或总量变化后由纠偏 effect 通知父级把状态与 URL 收敛到合法页。
 #[component]
 pub fn Pager(
     page: i64,
@@ -38,15 +29,11 @@ pub fn Pager(
     max_page: Option<i64>,
     /// `nav` 的 `aria-label`。
     label: String,
-    /// 上一页按钮文案。
     previous_label: String,
     /// 页码状态模板回调：`(当前页, 总页数) -> 已翻译文案`。
     status: Callback<(i64, i64), String>,
-    /// 下一页按钮文案。
     next_label: String,
-    /// 跳页输入框的标签文案。
     jump_label: String,
-    /// 跳页提交按钮文案。
     jump_button_label: String,
     on_page_change: EventHandler<i64>,
     /// 非空时启用数字分页与原生数量选择器；选项和文案归调用方。
@@ -74,7 +61,7 @@ pub fn Pager(
         .unwrap_or_else(|| if has_more { page.saturating_add(1) } else { page })
         .max(1)
         .min(max_page.unwrap_or(i64::MAX).max(1));
-    // 先把页码钳制到当前已知合法范围，再渲染与派生交互；输入同步与纠偏显式订阅 props。
+    // 先把页码钳制到合法范围再渲染与派生交互；输入同步与纠偏显式订阅 props。
     let valid_page = page.clamp(1, total_pages);
     let mut jump_page = use_signal(|| valid_page.to_string());
 

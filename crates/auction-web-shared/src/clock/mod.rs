@@ -1,9 +1,6 @@
 //! 秒级共享时钟。
-//!
-//! 两端原先各自在组件里起 `TimeoutFuture` 一秒循环驱动倒计时/相对时间刷新，同屏多个
-//! 消费方会叠加多个定时器。本模块把秒级节拍收敛为外壳提供的单一 interval：消费方通过
-//! [`use_second_tick`] 订阅同一个计数信号，只在自己重算「当前时间」语义时使用，本 crate
-//! 不引入任何服务端时钟校准业务。
+//! 外壳创建单一 interval 并经 context 下发，消费方订阅同一计数信号，避免同屏多个
+//! `TimeoutFuture` 一秒循环叠加；本 crate 不引入服务端时钟校准业务。
 
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
@@ -44,9 +41,7 @@ impl Drop for IntervalGuard {
 }
 
 /// 在外壳根组件调用一次：创建秒级时钟并通过 context 提供给整棵子树。
-///
-/// 时钟生命周期由外壳决定：外壳存活期间 clock 存在，但其内部 interval 是惰性的——
-/// 没有任何订阅者时不空转，首个订阅者挂载时启动，最后一个订阅者卸载后停止。
+/// interval 惰性：首个订阅者挂载时启动，最后一个订阅者卸载后停止。
 pub fn use_second_ticker() -> SecondTicker {
     let ticker = use_hook(|| SecondTicker {
         tick: Signal::new(0),
@@ -58,10 +53,8 @@ pub fn use_second_ticker() -> SecondTicker {
 }
 
 /// 订阅外壳提供的秒级时钟，返回每秒递增一次的修订计数信号。
-///
-/// 返回值是不透明的修订号，不代表具体时间戳；消费方在派生计算里读取它即可每秒重跑，
-/// 「当前时间」仍由消费方用各自的时钟来源（本地或服务端校准）求值。必须在
-/// [`use_second_ticker`] 提供的 context 之下调用。
+/// 返回值是不透明修订号，不代表具体时间戳；消费方在派生计算里读取它即可每秒重跑，
+/// 「当前时间」仍由消费方各自的时钟来源求值。必须在 [`use_second_ticker`] 的 context 下调用。
 pub fn use_second_tick() -> Signal<u64> {
     let ticker = use_context::<SecondTicker>();
 

@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// 外部 URL/canonical JSON 读取器端口。
 pub trait AdminIntakeSourceReader: Send + Sync {
     fn read_url(
         &self,
@@ -17,7 +16,6 @@ pub trait AdminIntakeSourceReader: Send + Sync {
     ) -> ApplicationFuture<'_, AdminIntakeSourceSnapshot>;
 }
 
-/// 装备 key 信封加密端口。
 pub trait EquipmentKeySealerPort: Send + Sync {
     fn seal(
         &self,
@@ -39,7 +37,6 @@ pub trait AdminIntakeTransaction: Send {
     ) -> impl Future<Output = Result<(), CompetitionTransactionError>> + Send;
 }
 
-/// Admin 装备录入用例端口。
 pub trait AdminIntakePort: Send + Sync {
     fn add_item(&self, command: AdminIntakeCommand) -> ApplicationFuture<'_, AdminIntakeResult>;
 }

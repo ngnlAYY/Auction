@@ -1,20 +1,11 @@
 //! 语言选择基础设施。
-//!
-//! 语言集合、持久化键和 `<html lang>` 同步行为沿用旧版 Auction-BF 的
-//! `src/shared/i18n/createI18n.ts` 契约，保证用户在新旧系统间切换时语言偏好不丢失：
-//!
-//! - `localStorage` 键固定为 `hv.lang`；
-//! - 存储值必须在受支持集合内，否则回退到该 surface 的默认语言；
-//! - 语言变化时同步 `document.documentElement.lang`。
-//!
-//! 各 surface 自己拥有译文资源与默认语言：公开端默认英文，管理端默认简体中文。
-//! 本模块只提供与业务无关的语言选择能力，不含任何 surface 文案。
+//! 语言集合、持久化键和 `<html lang>` 同步沿用旧版契约，保证用户在新旧系统间切换时
+//! 语言偏好不丢失：`localStorage` 键固定为 `hv.lang`，存储值非法时回退到该 surface 的
+//! 默认语言。各 surface 自己拥有译文资源与默认语言（Public 英文、Admin 简体中文）。
 
-/// 按旧版 i18next 的输出约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外壳。
-///
-/// `dioxus-i18n 0.5.1` 没有公开 `FluentBundle::set_use_isolating` 配置入口；其默认行为会在
-/// 每个动态变量外插入 U+2068/U+2069。旧版浏览器界面直接拼接变量，因此 Public 与 Admin
-/// 都通过这个共享宏移除 Fluent 添加的最外层隔离对。变量自身包含的嵌套隔离对仍会保留。
+/// 按旧版 i18next 约定翻译消息，不保留 Fluent 自动添加的双向文本隔离外框。
+/// `dioxus-i18n 0.5.1` 无公开 `set_use_isolating` 入口，默认会在每个动态变量外插入
+/// U+2068/U+2069；这里移除最外层隔离对，变量内部的嵌套对仍保留。
 #[macro_export]
 macro_rules! legacy_t {
     ($id:expr, $( $name:ident : $value:expr ),* ) => {{
@@ -62,9 +53,8 @@ pub fn without_fluent_isolation(value: String) -> String {
 }
 
 /// 按旧版 `formatTime` 约定把 RFC3339 时间显示为当前语言的 Asia/Shanghai 时间。
-///
-/// 浏览器端使用 `Intl.DateTimeFormat`，因此月份、数字和标点会随 `<html lang>` 改变；
-/// 非 WASM 构建只服务于静态检查，使用相同目标时区的稳定兜底格式。
+/// 浏览器端用 `Intl.DateTimeFormat`，月份/数字/标点随 `<html lang>` 变化；非 WASM
+/// 构建使用相同目标时区的兜底格式。
 pub fn format_localized_time(value: &str) -> String {
     if value.is_empty() {
         return "—".to_owned();
@@ -136,9 +126,7 @@ pub struct SupportedLocale {
     pub label: &'static str,
 }
 
-/// 受支持语言集合，顺序与旧系统语言切换器一致。
-///
-/// 中文按脚本区分简繁，两者不能互相回退。
+/// 受支持语言集合，顺序与旧系统语言切换器一致。中文按脚本区分简繁，不能互相回退。
 pub const SUPPORTED_LOCALES: &[SupportedLocale] = &[
     SupportedLocale { code: "en", label: "English" },
     SupportedLocale { code: "zh-CN", label: "简体中文" },
@@ -147,9 +135,7 @@ pub const SUPPORTED_LOCALES: &[SupportedLocale] = &[
     SupportedLocale { code: "ko", label: "한국어" },
 ];
 
-/// 解析语言标记。
-///
-/// 只接受 `SUPPORTED_LOCALES` 中的取值；未知或损坏的输入返回 `None`，由调用方决定回退。
+/// 解析语言标记；只接受 `SUPPORTED_LOCALES` 中的取值，否则返回 `None` 由调用方回退。
 pub fn parse_supported(code: &str) -> Option<LanguageIdentifier> {
     if !SUPPORTED_LOCALES.iter().any(|locale| locale.code == code) {
         return None;
@@ -158,9 +144,7 @@ pub fn parse_supported(code: &str) -> Option<LanguageIdentifier> {
     code.parse().ok()
 }
 
-/// 读取浏览器中已保存的语言偏好。
-///
-/// 存储不可用（隐私模式、被策略禁用）时返回 `None` 而不是让界面崩溃。
+/// 读取浏览器已保存的语言偏好；存储不可用时返回 `None` 而不是让界面崩溃。
 pub fn stored_language() -> Option<LanguageIdentifier> {
     let stored = local_storage()?.get_item(LANGUAGE_STORAGE_KEY).ok()??;
 
@@ -172,10 +156,8 @@ pub fn initial_language(default_locale: LanguageIdentifier) -> LanguageIdentifie
     stored_language().unwrap_or(default_locale)
 }
 
-/// 切换当前语言，并持久化到 `localStorage`。
-///
-/// 非法语言码按旧版语义回退并持久化当前 surface 的默认语言。
-/// 写入失败只影响下次启动时的偏好恢复，不影响本次会话内的切换结果，因此忽略错误。
+/// 切换当前语言并持久化到 `localStorage`。非法语言码回退并持久化 surface 默认语言；
+/// 写入失败只影响下次启动的偏好恢复，不影响本次会话内切换，因此忽略错误。
 pub fn set_language(i18n: &mut I18n, code: &str, default_locale: &'static str) {
     let resolved = if parse_supported(code).is_some() { code } else { default_locale };
     let Some(language) = parse_supported(resolved) else {
@@ -190,8 +172,7 @@ pub fn set_language(i18n: &mut I18n, code: &str, default_locale: &'static str) {
 }
 
 /// 把当前语言同步到 `<html lang>`。
-///
-/// 该属性影响屏幕阅读器发音、浏览器翻译提示和 CSS 的 `:lang()` 选择器，必须随语言变化更新。
+/// 该属性影响屏幕阅读器发音、浏览器翻译提示与 CSS `:lang()`，必须随语言变化更新。
 pub fn sync_document_language(language: &LanguageIdentifier) {
     if let Some(document) = web_sys::window().and_then(|window| window.document())
         && let Some(element) = document.document_element()
@@ -200,19 +181,14 @@ pub fn sync_document_language(language: &LanguageIdentifier) {
     }
 }
 
-/// 在语言变化时同步 `<html lang>`。
-///
-/// 各 surface 的根组件在 `use_init_i18n` 之后调用一次即可。
+/// 在语言变化时同步 `<html lang>`；各 surface 根组件在 `use_init_i18n` 之后调用一次。
 pub fn use_locale_effects(i18n: I18n) {
     use_effect(move || {
         sync_document_language(&i18n.language());
     });
 }
 
-/// 语言切换器。
-///
-/// 使用原生 `<select>`：它自带键盘操作、屏幕阅读器语义和移动端原生选择面板，
-/// 不需要额外的可访问性实现。
+/// 语言切换器。用原生 `<select>` 自带键盘操作、屏幕阅读器语义和移动端选择面板。
 #[component]
 pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
     let mut i18n = i18n();
@@ -231,7 +207,7 @@ pub fn LanguagePicker(label: String, default_locale: &'static str) -> Element {
                 },
                 for locale in SUPPORTED_LOCALES {
                     // Dioxus 首轮挂载动态 option 时不会可靠地把 select.value 投影为原生
-                    // selected 状态；逐项声明可确保刷新后下拉值与 hv.lang、<html lang> 一致。
+                    // selected；逐项声明可确保刷新后下拉值与 hv.lang、<html lang> 一致。
                     option {
                         value: locale.code,
                         selected: current == locale.code,

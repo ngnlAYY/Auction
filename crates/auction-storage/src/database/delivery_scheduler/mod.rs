@@ -1,7 +1,5 @@
-//! PostgreSQL delivery outbox 的 claim、发送中 fencing 和终态写入适配器。
-//!
-//! 传输结果只在 claim 的 token/fencing 仍有效时写回。租约过期后的响应不能覆盖新 Worker 的
-//! 结果；如果远端结果已经无法确定，调用方必须把记录置为 `manual_reconcile`。
+//! PostgreSQL delivery outbox 的 claim、发送中 fencing 和终态写入适配器；传输结果只在
+//! claim 的 token/fencing 仍有效时写回，远端结果无法确定时必须置为 `manual_reconcile`。
 
 use auction_application::{
     ApplicationError, DeliveryClaimExclusions, DeliverySendResult, DeliveryTransportError,
@@ -47,10 +45,10 @@ macro_rules! delivery_mail_disposition_gate {
     };
 }
 
-/// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权
-/// 当前 delivery。论坛通知沿用 MailIntake origin，但通过论坛命令账本证明其真实 owner。
-/// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该额外门禁覆盖升级前已经
-/// pending/claimed 的冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
+/// 普通 MailIntake delivery 必须等待入站邮件及其命令账本完成，并由决定元数据明确授权当前
+/// delivery；论坛通知沿用 MailIntake origin，但通过论坛命令账本证明真实 owner。
+/// 已录入拍卖的邮件不能退回，相反资产意图也不能同时发送；该门禁覆盖升级前已 pending/claimed 的
+/// 冲突记录，保留原账本供人工核对，不能靠重放命令重新获得发送授权。
 #[cfg(feature = "postgres")]
 macro_rules! delivery_completion_gate {
     () => {

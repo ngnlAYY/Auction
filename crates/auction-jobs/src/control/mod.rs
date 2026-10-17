@@ -1,8 +1,5 @@
-//! Worker control 传输层的模块边界。
-//!
-//! Worker 调度器只持有 `WorkerControlHandle` 这一窄状态端口；Unix socket、HTTP/JSON 协议、
-//! peer allowlist 和 Admin client 均由本目录的 transport owner 负责，避免调度循环反向拥有
-//! 进程间传输细节。
+//! Worker control 传输层的模块边界；调度器只持有 `WorkerControlHandle`，Unix socket、
+//! HTTP/JSON 协议、peer allowlist 与 Admin client 由本目录 owner 负责。
 
 mod transport;
 

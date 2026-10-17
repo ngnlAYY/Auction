@@ -177,7 +177,6 @@ pub(crate) fn format_auction_time(value: &str) -> String {
 }
 
 /// 解析 credit 缩写；无后缀或 K 使用整数千，M/B 最多支持三/六位小数，精确到信用网格。
-///
 /// 浏览器只用该结果做即时提示，服务端仍会再次校验金额、拍卖状态和竞价资格。
 pub(crate) fn parse_credit_amount(input: &str) -> Option<i64> {
     let input = input.trim();

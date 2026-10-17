@@ -104,7 +104,6 @@ pub(super) fn is_session_expired(
 }
 
 /// HV 会在角色处于战斗时用战斗页替代 Item Shop/MoogleMail 页面。
-///
 /// 该状态不表示 Cookie 失效或页面协议漂移；调用方应保留当前凭据并在战斗结束后重试。
 pub(super) fn is_hentaiverse_battle_response(body: &[u8]) -> bool {
     let body = String::from_utf8_lossy(body).to_ascii_lowercase();

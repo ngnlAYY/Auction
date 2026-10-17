@@ -1,5 +1,4 @@
 //! 应用命令端口。
-//!
 //! HTTP、Worker 和其他入口只依赖这些窄端口，不直接持有具体数据库事务或网络客户端。
 
 use std::{cmp::Ordering, future::Future, pin::Pin};
@@ -18,7 +17,6 @@ pub type ApplicationFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, ApplicationError>> + Send + 'a>>;
 
 /// 按旧版 Go `time.Time` 的 `RFC3339Nano` 规则编码 Public 时间。
-///
 /// 领域与存储仍使用 `DateTime<Utc>`；只有对外 wire 去掉无意义的小数尾零，整秒不伪造
 /// `.000000`，并继续用 `Z` 表示 UTC。
 pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
@@ -30,7 +28,6 @@ pub fn format_public_time_wire(value: DateTime<Utc>) -> String {
 }
 
 /// 一次竞价命令冻结的时间 instant 与 Public wire 字符串。
-///
 /// `instant` 用于领域一致性、相等和顺序校验；`wire` 只用于重放旧 Go 命令账本时保留其
 /// offset 与纳秒字符串。构造入口不向 crate 外开放，避免两者被独立拼装。
 #[derive(Debug, Clone)]
@@ -99,7 +96,6 @@ impl<'de> Deserialize<'de> for CompetitionWireTimestamp {
 }
 
 /// 一次 Public 竞价命令在事务内冻结的完整结果。
-///
 /// `plan` 继续承载领域事实；代理专属投影直接来自同一命令账本结果，避免 HTTP 在事务提交后
 /// 再读取账户投影并把已经成功的命令误报为失败。
 #[derive(Debug, Clone)]
@@ -121,7 +117,6 @@ pub struct CompetitionProxyCommandOutcome {
 }
 
 /// 代理成功响应中的一条强类型转换事实。
-///
 /// 存储适配器可以使用数据库 wire 字符串，但应用命令端口只暴露已经严格校验的领域值，防止
 /// 未知 mode/status/reason 穿透到 HTTP 成功响应。
 #[derive(Debug, Clone)]
@@ -139,7 +134,6 @@ pub struct CompetitionProxyTransitionOutcome {
     pub created_at: CompetitionWireTimestamp,
 }
 
-/// Public 竞价命令端口。
 pub trait CompetitionCommandPort: Send + Sync {
     /// 执行普通竞价；幂等、锁和领域计划由应用服务与存储事务共同保证。
     fn place_bid(

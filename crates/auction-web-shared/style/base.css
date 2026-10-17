@@ -137,7 +137,6 @@ button:disabled {
   color: var(--color-danger);
 }
 
-/* --notice 变体原定义于 public.css，去重后上移到 base 统一维护。 */
 .action-feedback--notice {
   color: var(--color-text-muted);
   border-color: var(--color-accent);
@@ -332,8 +331,6 @@ button:disabled {
   transform: translateY(-100%);
 }
 
-/* 死代码清理：原 .auction-shell 整块及其 60rem/48rem 两条响应式规则已删除（全仓零引用）。 */
-
 @media (max-width: 48rem) {
   body,
   input,
@@ -355,7 +352,6 @@ button:disabled {
 }
 
 /* ===== 通用分页器（Pager 组件） ===== */
-/* 提取自 public.css 与 admin.css 中逐字相同的 .ui-pager 块，两端视觉不变。 */
 
 .ui-pager {
   display: flex;
@@ -514,8 +510,7 @@ button:disabled {
 }
 
 /* ===== 异步状态面板（AsyncState 组件 / 旧 EmptyState 兼容类） ===== */
-/* 提取自 public.css 的 .ui-empty-state 块；.ui-empty-state* 作为兼容别名与
-   .ui-async-state* 共享同一组规则，两端现有视觉不变。 */
+/* .ui-empty-state* 作为兼容别名与 .ui-async-state* 共享同一组规则。 */
 
 .ui-async-state,
 .ui-empty-state {
@@ -615,11 +610,9 @@ table {
 }
 
 /* ===== 模态弹窗外壳（Dialog 组件） ===== */
-/* 统一自 public.css 的 .public-auction-dialog* 与 admin.css 的 .admin-shell__dialog* 等
-   12 处弹窗：遮罩 + 居中面板 + 标题栏 + 关闭按钮。视觉取两端交集（surface-raised 面板、
-   radius-lg、shadow-2），z-index 走 token 阶梯的 --z-dialog（原 public 硬编码 20）。
-   键盘焦点循环、初始聚焦与背景滚动锁由外壳层 use_dialog_focus_trap 全局处理，
-   与 CSS 无关。 */
+/* 遮罩 + 居中面板 + 标题栏 + 关闭按钮；视觉取两端交集（surface-raised 面板、radius-lg、
+   shadow-2），z-index 走 token 阶梯的 --z-dialog。键盘焦点循环、初始聚焦与背景滚动锁由
+   外壳层 use_dialog_focus_trap 全局处理，与 CSS 无关。 */
 
 .ui-dialog {
   position: fixed;

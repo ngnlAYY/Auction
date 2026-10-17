@@ -109,7 +109,6 @@ pub struct MailDeliveryResult {
 }
 
 /// recovery delivery 激活时使用的稳定身份。
-///
 /// prepare 属于 delivery 行本身的幂等身份；activate 属于 recovery action 的第二个本地事务
 /// 边界。两者分开保存，才能在 delivery 已经进入 pending 而 action 尚未写回时安全重放。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

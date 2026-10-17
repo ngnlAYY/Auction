@@ -118,9 +118,8 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
 }
 
 /// 在 Users 拉黑事务内冻结有效代理、清理慢速调度并撤销公开会话。
-///
-/// 锁顺序固定为 lot -> proxy，调用方随后才锁 user；该顺序与竞价事务一致。每个代理转换
-/// 都写入独立的确定性拍卖子命令，使追加式转换记录的 `origin_command_id` 始终有账本证据。
+/// 锁顺序固定为 lot -> proxy，调用方随后才锁 user，与竞价事务一致；每个代理转换都写入独立的
+/// 确定性拍卖子命令，使追加式转换记录的 `origin_command_id` 始终有账本证据。
 pub(super) async fn apply_blacklist_effects_postgres(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     source_command_id: Uuid,

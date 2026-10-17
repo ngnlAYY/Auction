@@ -10,17 +10,12 @@ use super::{AdminRuntimeConfigError, require};
 pub struct AdminRuntimeWorkerConfig {
     /// 是否由管理页覆盖全部四类 Worker 循环参数，默认关闭。
     pub managed: bool,
-    /// 并发数。
     pub concurrency: u16,
-    /// 轮询间隔秒数。
     pub poll_interval_seconds: u64,
     /// 每轮批量上限。
     pub batch_limit: u16,
-    /// 轮询随机抖动秒数。
     pub jitter_seconds: u64,
-    /// 单项处理超时秒数。
     pub item_timeout_seconds: u64,
-    /// 恢复任务持久化重试间隔秒数。
     pub recovery_retry_delay_seconds: u64,
     /// 投递循环候选。
     pub delivery: AdminRuntimeDeliveryConfig,
@@ -47,7 +42,6 @@ impl Default for AdminRuntimeWorkerConfig {
     }
 }
 
-/// 投递循环的有界候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeDeliveryConfig {
@@ -55,19 +49,15 @@ pub struct AdminRuntimeDeliveryConfig {
     pub batch_limit: u16,
     /// 投递并发上限，实际值仍受 transport 约束。
     pub concurrency: u16,
-    /// 投递轮询间隔秒数。
     pub poll_interval_seconds: u64,
-    /// 投递轮询抖动秒数。
     pub jitter_seconds: u64,
     /// 投递 claim 租约秒数。
     pub lease_duration_seconds: u64,
-    /// 发送期间续租间隔秒数。
     pub renew_interval_seconds: u64,
     /// 发送结果写回宽限秒数；省略时为 300。
     pub sending_grace_seconds: u64,
     /// 完整投递请求超时秒数；省略时为 180。
     pub request_timeout_seconds: u64,
-    /// 投递终态写回超时秒数。
     pub finalize_timeout_seconds: u64,
 }
 
@@ -87,7 +77,6 @@ impl Default for AdminRuntimeDeliveryConfig {
     }
 }
 
-/// 履约循环的有界候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeFulfillmentConfig {
@@ -95,15 +84,11 @@ pub struct AdminRuntimeFulfillmentConfig {
     pub batch_limit: u16,
     /// 履约并发上限。
     pub concurrency: u16,
-    /// 履约轮询间隔秒数。
     pub poll_interval_seconds: u64,
-    /// 履约轮询抖动秒数。
     pub jitter_seconds: u64,
     /// 履约 claim 租约秒数。
     pub lease_duration_seconds: u64,
-    /// 单项履约超时秒数。
     pub item_timeout_seconds: u64,
-    /// 履约持久化重试间隔秒数。
     pub retry_delay_seconds: u64,
 }
 
@@ -121,7 +106,6 @@ impl Default for AdminRuntimeFulfillmentConfig {
     }
 }
 
-/// 恢复循环的有界候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeRecoveryConfig {
@@ -129,17 +113,13 @@ pub struct AdminRuntimeRecoveryConfig {
     pub batch_limit: u16,
     /// 恢复 action 并发上限。
     pub concurrency: u16,
-    /// 恢复轮询间隔秒数。
     pub poll_interval_seconds: u64,
-    /// 恢复轮询抖动秒数。
     pub jitter_seconds: u64,
     /// 恢复 action 租约秒数。
     pub lease_duration_seconds: u64,
-    /// 单项恢复超时秒数。
     pub item_timeout_seconds: u64,
     /// 余额低水位阈值，单位 Credits。
     pub low_balance_threshold: i64,
-    /// 余额健康信息刷新间隔秒数。
     pub health_refresh_interval_seconds: u64,
     /// 余额证据陈旧阈值秒数。
     pub evidence_stale_after_seconds: u64,

@@ -1,5 +1,4 @@
 //! Public 会话 HTTP DTO 与同源请求。
-//!
 //! 原始登录 key 只存在于浏览器表单和一次 HTTPS 请求中；成功后由服务端设置 HttpOnly Cookie，
 //! 组件只持有安全身份投影。
 

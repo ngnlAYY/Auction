@@ -1,5 +1,4 @@
 //! 慢速代理到期扫描与幂等执行端口。
-//!
 //! Worker 只负责发现持久化 due generation 并触发命令；竞价锁、资格检查、领域计划、命令账本
 //! 和审计仍由应用服务与存储事务共同拥有。
 
@@ -94,7 +93,6 @@ impl ExecuteSlowProxyCommand {
 }
 
 /// 无锁读取到期慢速代理候选的窄端口。
-///
 /// 到期判断必须来自数据库时钟；扫描不取得业务行锁，执行端会在 Serializable/串行写事务中重读
 /// lot、代理、用户资格和同一 generation。
 pub trait SlowProxyDueReader: Send + Sync {

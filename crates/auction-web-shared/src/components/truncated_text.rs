@@ -88,10 +88,9 @@ impl Drop for ResizeObserverHandle {
 }
 
 /// 展示可能很长的标识或 metadata，并在确实发生截断时提供可聚焦 tooltip。
-///
-/// `display` 用于旧版已经提供缩写文本的场景；只要展示值与完整值不同，也视为截断。浏览器端
-/// 通过 `ResizeObserver` 重新测量宽度，因此响应式布局变化后仍只把真正需要提示的文本加入
-/// Tab 顺序。默认模式保留 `title` 降级；legacy DOM 模式省略该扩展，只输出旧版显式 tooltip。
+/// `display` 用于调用方已提供缩写文本的场景，展示值与完整值不同也视为截断。浏览器端用
+/// `ResizeObserver` 重测宽度，响应式变化后仍只把真正需要提示的文本加入 Tab 顺序；legacy
+/// DOM 模式省略 `title` 降级，只输出旧版显式 tooltip。
 #[component]
 pub fn TruncatedText(
     value: String,

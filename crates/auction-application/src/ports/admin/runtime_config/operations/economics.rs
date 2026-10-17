@@ -18,21 +18,16 @@ pub struct AdminRuntimeEconomicsConfig {
     pub start_price: i64,
     /// 加价百万分比；零值继续使用既有固定最低增量。
     pub bid_increment_ppm: i64,
-    /// 软截止触发窗口秒数。
     pub soft_close_window_seconds: i64,
-    /// 每次软截止延长秒数。
     pub soft_close_extension_seconds: i64,
-    /// 取消截止窗口秒数。
     pub cancel_cutoff_seconds: i64,
     /// 是否允许代理竞价。
     pub proxy_enabled: bool,
     /// 默认代理模式，只允许 fast 或 slow。
     pub proxy_default_mode: String,
-    /// 慢速代理间隔秒数。
     pub proxy_slow_interval_seconds: i64,
     /// 被超价使用次数上限；零表示不限制。
     pub proxy_max_outbid_uses: u32,
-    /// 最终阶段提前量秒数。
     pub final_phase_lead_seconds: i64,
 }
 
