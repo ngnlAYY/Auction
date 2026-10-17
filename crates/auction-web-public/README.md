@@ -35,6 +35,7 @@ Dioxus 纯客户端渲染的公开端 SPA，拥有公开读取、竞价交互、
 ## 页面与源码布局
 
 `main.rs` 为薄启动入口，`app/` 与 `api/` 按 auction、content、identity 分组。
+`auction/watches/` 拥有整场装备标记读取、原生命令按钮及账号隔离缓存；`api/auction/watches.rs` 拥有对应同源传输与严格 DTO 校验。
 `surface/board/refresh.rs` 拥有资源失效与合并读取；`auction/commands/` 按普通出价、代理创建/降额、确认及未知结果重试拆分。
 
 论坛页先读取独立同步开关，明确关闭不挂载帖子轮询，未知状态不能当关闭；启用后只展示同步摘要、真实处理楼层和更新时间。
@@ -72,6 +73,14 @@ just web-build-public
 普通出价使用整数 K 输入，代理支持约定的精确缩写；新命令最高 1B，服务端仍是金额、资格和状态的最终权威。
 提交前确认，失败保留冻结输入与命令 ID；结果未知只能重试原请求，不能用新价格门禁阻断幂等重放。
 命令宿主按 lot/用户 UUID 隔离，切换目标或身份销毁旧状态，成功结果不被后台快照刷新覆盖。
+
+目录 preview/live 与装备详情的标记沿用动作列，不新增表格列。整场通过
+`GET /api/v1/me/lot-watches?auction_id=<uuid>` 读取完整集合（上限 10000 条，超限失败而非截断），
+`PUT /api/v1/lots/{lot_id}/watch` 使用冻结的 `PublicSetLotWatchRequest`，当前仅使用 `mm`。
+按稳定 user UUID + auction UUID 隔离 `localStorage` 非敏感缓存；无登录不做本地匿名标记。
+缓存仅作带未同步说明的展示，加载中或失败时不能用旧版本修改；存储受限不阻止服务器保存。
+取消的 false 墓碑原样保存，普通/代理命令成功后随既有刷新代数重读服务器集合，不从代理 GET 推导标记。
+未知结果保留完整原命令供重试，409 必须由用户刷新、检查状态再修改；详见[标记设计](DESIGN.md#61-装备标记与超价提醒)。
 
 当前世界选择只展示 enabled world，历史筛选仍可访问已关闭世界的 settled 事实。
 倒计时通过 HTTP Date 估算服务端时钟，仅用于展示；终态、缺失时间与依赖错误按契约明确表达。

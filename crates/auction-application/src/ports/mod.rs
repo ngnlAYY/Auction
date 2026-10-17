@@ -434,3 +434,7 @@ pub use worker_control::{
 };
 
 pub use schedule_source::{AuctionScheduleSource, AuctionScheduleTimes};
+
+#[path = "public/watch.rs"]
+mod lot_watch;
+pub use lot_watch::*;

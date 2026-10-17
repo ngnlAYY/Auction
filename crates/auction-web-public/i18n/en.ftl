@@ -446,3 +446,19 @@ command-not-found = The requested content does not exist.
 command-conflict = This command conflicts with an earlier request.
 command-session-expired = Your session expired. Sign in again and retry.
 command-retry-unchanged = The previous result could not be confirmed. Retry sends the same command and amount; cancel to start a new action.
+
+# 装备标记与整场同步
+watch-help = Mark equipment to receive MoogleMail once each time you lose the lead. Price changes while you are not leading do not send mail. A new proxy authorization marks equipment automatically; ordinary bids do not. Mail failure does not undo an accepted bid. Mail already being sent cannot be recalled.
+watch-toggle = Mark equipment { $code }
+watch-on = Marked
+watch-off = Mark
+watch-login = Log in to mark
+watch-loading = Loading server marks… Changes are disabled until synchronized.
+watch-unsynced = Cached marks are not synchronized. They cannot be used to save changes.
+watch-load-error = Could not load server marks. Refresh before making changes.
+watch-refresh = Refresh marks
+watch-saving = Saving…
+watch-unknown = Save result unknown. Retry the exact same command to resolve it; do not submit a replacement.
+watch-conflict = Marks changed or command conflicted. Refresh, review the server state, then retry your change.
+watch-save-error = Mark could not be saved. Refresh server marks before trying again.
+watch-retry-command = Retry original save

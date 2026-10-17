@@ -37,6 +37,7 @@ pub struct PublicApiState {
     account: Option<Arc<dyn PublicAccountReader>>,
     session: Option<Arc<dyn PublicSessionPort>>,
     security: PublicHttpSecurity,
+    watches: Option<Arc<dyn auction_application::LotWatchPort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     metrics: Option<Arc<ProcessMetrics>>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
@@ -62,6 +63,7 @@ impl Default for PublicApiState {
             account: None,
             session: None,
             security: PublicHttpSecurity::default(),
+            watches: None,
             commands: None,
             metrics: None,
             readiness: None,
@@ -110,6 +112,7 @@ impl PublicApiState {
             account,
             session,
             security,
+            watches: None,
             commands,
             metrics: None,
             readiness: None,
@@ -119,6 +122,16 @@ impl PublicApiState {
             realtime_hub: None,
             realtime_shutdown: watch::channel(false).0,
         }
+    }
+
+    /// 注入当前用户的权威装备标记端口；缺失时明确返回 503。
+    pub fn with_lot_watches(mut self, watches: Arc<dyn auction_application::LotWatchPort>) -> Self {
+        self.watches = Some(watches);
+        self
+    }
+
+    pub(crate) fn watches(&self) -> Option<&dyn auction_application::LotWatchPort> {
+        self.watches.as_deref()
     }
 
     /// 注入进程本地 Prometheus 指标注册表；指标不属于任何业务端口。

@@ -67,6 +67,9 @@ impl MoogleMailDeliveryTransport {
                     .render("operations_alert", &[("summary", summary)])
                     .ok_or_else(invalid_payload)?,
             )
+        } else if template == "lot_watch" && result_code == "outbid" {
+            // watch owner 已冻结安全正文；不新增部署模板键，也不读取代理秘密上限。
+            ("Auction outbid notice".to_owned(), payload.body.clone().ok_or_else(invalid_payload)?)
         } else {
             render_notification(
                 &self.templates,

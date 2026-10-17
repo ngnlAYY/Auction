@@ -17,6 +17,7 @@ pub(super) async fn claim_postgres(
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
+    super::watch::retire_invalidated(&mut transaction, now).await?;
     let expired_rows = sqlx::query(
         r#"WITH expired_sending AS (
                SELECT id

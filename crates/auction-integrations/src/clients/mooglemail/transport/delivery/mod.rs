@@ -132,7 +132,7 @@ impl MoogleMailDeliveryTransport {
                     _ => Err(invalid_payload()),
                 }
             }
-            "operations_alert" => {
+            "operations_alert" | "lot_watch" => {
                 let (payload, world) = decode_payload(&claim)?;
                 if payload.operation != "send" {
                     return Err(invalid_payload());
@@ -157,7 +157,7 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
                 Ok((payload, _)) if payload.operation == "return" => return true,
                 result => result.map(|(_, world)| world),
             },
-            "mail_intake" | "settlement_recovery_action" | "operations_alert" => {
+            "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch" => {
                 decode_payload(claim).map(|(_, world)| world)
             }
             // 非法 owner/payload 必须进入正式发送路径并确定失败，不能被 availability gate

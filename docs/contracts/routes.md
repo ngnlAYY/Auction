@@ -18,7 +18,7 @@
 ## 基线与统计口径
 
 `auction-http` 拥有路径注册，`auction-contracts` 拥有稳定 DTO。当前 feature API 为
-Public **22** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
+Public **24** 个、Admin **46** 个唯一路径；多方法共用路径只计一次，不计健康、静态资源或代理路径。
 当前仅支持 PostgreSQL。保留已发布路径、字段、错误码和未装配能力的错误处理。
 源码能力和运行证据见[验证状态](../status.md)。
 
@@ -74,6 +74,7 @@ relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 
 | 404 | 资源不存在或公开边界不允许暴露 |
 | 409 | 状态版本、命令幂等或业务条件冲突 |
 | 413/415 | 请求体过大或 Content-Type 不支持 |
+| 422 | P24 标记请求的业务输入无效或通知渠道不可用 |
 | 429 | 限流或有界连接资源耗尽 |
 | 500 | 服务器内部无法安全完成请求 |
 | 501 | 当前部署档位或端口不提供该能力 |
@@ -117,7 +118,7 @@ Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与
 构建产物时返回 503。
 
 缓存策略适配 Dioxus 稳定 WASM 文件名：Public 普通公开读取（含 P15 forum）为 `no-cache`；
-P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；
+P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；
 浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML
 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用
 `no-cache`、`Last-Modified` 与 `If-Modified-Since`。未知 404/静态 405/产物缺失 503 均为 `no-store`。
@@ -155,6 +156,38 @@ Cache Everything/强制 Edge TTL 等覆盖，具体静态白名单和上线限�
 | P20 | POST | /api/v1/lots/{lot_id}/bids | Public session、origin、限流 | 200 | 400, 401, 403, 409, 413/415, 429, 503/504 |
 | P21 | GET | /api/v1/forum/sync-status | 公开；不接受 query；响应 `no-store` | 200 | 400, 501, 503/504 |
 | P22 | GET/HEAD | /api/v1/auctions/{auction_id}/countdown/{timer} | 公开拍卖边界；`timer` 仅 `list.svg` / `auction.svg`；禁止 query 和缓存 | 200 SVG | 400, 404, 503/504 |
+| P23 | GET | /api/v1/me/lot-watches | Public session；必填 `auction_id`；本人整场标记集合；`no-store` | 200 | 400, 401, 404, 503/504 |
+| P24 | PUT | /api/v1/lots/{lot_id}/watch | Public session、origin、限流；版本 CAS；`no-store` | 200 | 400, 401, 403, 404, 409, 413/415, 422, 429, 503/504 |
+
+
+### P23/P24 装备标记与超价提醒
+
+P23 只接受指定公开拍卖的 `auction_id`，用户身份来自会话，不接受 `user_id` 或客户端身份覆盖。
+`PublicLotWatchesResponse` 返回 `{user_id, auction_id, watches}`；集合包含取消标记的版本墓碑，
+至多 10000 条，超限显式失败，不能截断后将缺项解释为未标记。`watches` 每项为
+`PublicLotWatchResponse {lot_id, watched, channel, version}`，持久化版本为正 `i64`；
+没有持久记录才由缺项表示 `watched=false`、`version=0`。UUID 使用字符串，不暴露其他用户标记。
+非法 UUID、缺失/重复/未知查询参数返回 400；被活动场次遮蔽的 preview 不可读取或新写入。
+浏览器直接解析 JSON 整数为 i64，不把标记版本限制为 JS 安全整数或经浮点转换。
+
+P24 的 `PublicSetLotWatchRequest` 必填 `command_id`、`watched`、`channel`、`expected_version`，
+拒绝未知字段；`expected_version` 为非负整数，当前渠道只接受 `mm`，预留 `pm` 不可发送或伪装成功。
+成功返回 `PublicSetLotWatchResponse {user_id, auction_id, watch}`，不改变竞价/代理响应或公开实时事件。
+同命令同负载返回原响应，不同负载或版本冲突为 409；业务输入/不可用渠道为 422，未装配存储为 503。
+P24 路径/command UUID、查询词法、JSON 词法及未知字段错误为 400；负 expected_version 与未启用渠道等业务输入为 422。
+身份、Origin、限流、请求体及方法闭集沿用通用边界。
+取消保留版本；不同新命令即使设置相同值也须阻止更早的未知写入晚到覆盖新意图。
+
+服务器为标记权威。Public 只在同 user UUID、auction UUID 下缓存非敏感标记，GET 成功前禁止修改；
+退出或切换账号/场次不得沿用旧响应。成功标记或竞价/代理命令后重读完整集合，GET 不产生自动标记。
+未知 PUT 在同账号/场次页面宿主存活期间保留原 `command_id` 和完整请求以供原样重试，翻页/分类不丢失；
+退出、换号、换场、离开宿主或整页重载后不自动重放，重新进入先读服务器，待定命令不写入 localStorage。
+409 显式提示并刷新权威状态，不能静默改版本或用新 ID 重试未知结果。
+
+普通竞价不自动标记，新建代理成功时同事务默认标记；降额、自动追价、刷新与旧命令重放不恢复手动取消。
+通知按真实“领先 → 被超越”周期去重，不是每次价格变化通知，也不是论坛 `notify mm` 单次请求。
+MM 通过既有邮件投递链执行，无需浏览器在线；取消或重新领先使未开始发送的旧提醒失效，已发送/发送中的不可撤回。
+具体事务、迁移及未知发送约束见[不变量](invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
 
 
 ### P22 自托管论坛倒计时
@@ -464,6 +497,11 @@ Preview 原样保留已发生的预览时间，其余在未来。完整档 Seria
 加锁，同步计划列、结束策略快照、调度记录、账本、审计与 `auction.schedule_updated`。未过期且有 owner 的
 租约拒绝修改；实际变更时清除过期租约或无 owner 的失败退避并递增 round 版本，阻断陈旧 Worker 写回。
 事件 v1 字段不变，只唤醒权威快照重读；其他状态不提供修改。
+
+既有 delivery 投影接受独立 `lot_watch` 来源，不新增 Admin 路径或动作。
+只有原因/失败码均为 `lot_watch_invalidated`、状态 failed、无 sending/lease/外部引用、零 COD 的 watch 行使用发送前失败时间链；
+创建/领取/完成时间仍须有序，不伪造 sending 或 Sent 证明，此类行不展示重试入口。
+Admin release/retry/reconcile-retry 在 lot → delivery 锁内复用 watch proof；失效或缺来源不能重新排队，未知发送仍走原人工核对。
 
 A34–A37 为完整档 delivery 安全列表、状态筛选、数字页及 release/retry/reconcile，携带 fencing version 和
 独立账本。reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败码；实际允许的动作受下节证明门禁约束。

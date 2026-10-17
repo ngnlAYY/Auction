@@ -28,6 +28,7 @@ pub(in crate::database::competition) async fn insert_bid(
     .execute(&mut **transaction)
     .await
     .map_err(map_sql_error)?;
+    crate::database::lot_watch::apply_bid(transaction, bid, occurred_at).await?;
     Ok(())
 }
 

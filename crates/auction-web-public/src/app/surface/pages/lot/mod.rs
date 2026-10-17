@@ -65,14 +65,20 @@ fn ValidLotDetail(lot_id: String) -> Element {
         },
         Some(Ok(page)) => match page.lot.as_ref() {
             Some(LotDetailItem::Preview(lot)) => rsx! {
-                PreviewLotDetailView { lot: lot.clone() }
+                LotWatchScope {
+                    auction_id: page.auction_id.clone(),
+                    PreviewLotDetailView { lot: lot.clone() }
+                }
             },
             Some(LotDetailItem::Live(lot)) => rsx! {
-                LiveLotDetailView {
+                LotWatchScope {
                     auction_id: page.auction_id.clone(),
-                    auction_status: page.auction_status.clone(),
-                    bidding_open: page.bidding_open,
-                    lot: lot.clone(),
+                    LiveLotDetailView {
+                        auction_id: page.auction_id.clone(),
+                        auction_status: page.auction_status.clone(),
+                        bidding_open: page.bidding_open,
+                        lot: lot.clone(),
+                    }
                 }
             },
             None => rsx! {

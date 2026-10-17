@@ -82,6 +82,7 @@ pub(in crate::database::competition) async fn apply_proxy_changes(
         .execute(&mut **transaction)
         .await
         .map_err(map_sql_error)?;
+        crate::database::lot_watch::auto_watch_proxy(transaction, state).await?;
     }
 
     for transition in &plan.proxy_transitions {

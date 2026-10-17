@@ -314,6 +314,7 @@ pub(crate) fn LiveCatalogRow(
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
             td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
+                LotWatchButton { lot_id: row.lot_id.clone(), lot_code: row.code.clone() }
                 LiveCatalogActions {
                     lot_id: row.lot_id.clone(),
                     lot_code: row.code.clone(),

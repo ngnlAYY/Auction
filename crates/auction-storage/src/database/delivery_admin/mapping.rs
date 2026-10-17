@@ -23,6 +23,7 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
         || !result_metadata.is_object()
         || !valid_terminal_alert_metadata(&result_metadata)
         || !valid_quarantined_mail_metadata(&result_metadata, &status)
+        || !valid_invalidated_watch_metadata(&result_metadata)
     {
         return Err(DeliveryAdminError::StoredResultCorrupt);
     }
@@ -190,6 +191,7 @@ impl LegacyDeliveryPayload {
             || !self.result_metadata.is_object()
             || !valid_terminal_alert_metadata(&self.result_metadata)
             || !valid_quarantined_mail_metadata(&self.result_metadata, &self.status)
+            || !valid_invalidated_watch_metadata(&self.result_metadata)
             || !valid_activation_snapshot(self)
         {
             return Err(DeliveryAdminError::StoredResultCorrupt);
@@ -311,6 +313,31 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
             });
     }
 
+    // 仅 watch 明确失效且从未发送允许没有 sending 时间；未知发送不能进入此例外。
+    if snapshot.reason_code.as_deref() == Some("lot_watch_invalidated") {
+        return snapshot.origin_kind == "lot_watch"
+            && snapshot.status == "failed"
+            && snapshot.failure_code.as_deref() == Some("lot_watch_invalidated")
+            && snapshot.cod == Some(0)
+            && snapshot.lease_expires_at.is_none()
+            && snapshot.sending_at.is_none()
+            && snapshot.external_reference.is_none()
+            && !snapshot.take_required
+            && snapshot.returned_mail_id.is_none()
+            && snapshot.fencing_version > 0
+            && snapshot.claimed_at.is_none_or(|claimed| {
+                !is_zero_time(claimed)
+                    && claimed >= snapshot.created_at
+                    && snapshot.attempt_count > 0
+            })
+            && snapshot.completed_at.is_some_and(|completed| {
+                !is_zero_time(completed)
+                    && completed >= snapshot.created_at
+                    && snapshot.claimed_at.is_none_or(|claimed| completed >= claimed)
+                    && completed <= snapshot.updated_at
+            });
+    }
+
     // 告警在激活前确定终止没有 claimed/sending 事实，不能套用已发送投递的时间链。
     if snapshot.status == "failed"
         && snapshot.origin_kind == "operations_alert"
@@ -401,6 +428,12 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     }
 }
 
+fn valid_invalidated_watch_metadata(metadata: &Value) -> bool {
+    metadata.get("reason_code").and_then(Value::as_str) != Some("lot_watch_invalidated")
+        || (metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
+            && metadata.get("preflight_blocked").and_then(Value::as_bool) == Some(true))
+}
+
 fn valid_terminal_alert_metadata(metadata: &Value) -> bool {
     metadata.get("reason_code").and_then(Value::as_str) != Some("operations_alert_batch_terminal")
         || metadata.get("outcome_unknown").and_then(Value::as_bool) == Some(false)
@@ -446,6 +479,7 @@ fn valid_origin_kind(value: &str) -> bool {
             | "manual"
             | "mail_intake"
             | "operations_alert"
+            | "lot_watch"
     )
 }
 

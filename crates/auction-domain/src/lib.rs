@@ -7,6 +7,9 @@ mod errors;
 mod identity;
 mod proxy;
 mod settlement;
+mod watch;
+
+pub use watch::{LotLeadership, LotWatchChannel};
 
 pub use auction::{Auction, AuctionStatus};
 pub use bidding::{

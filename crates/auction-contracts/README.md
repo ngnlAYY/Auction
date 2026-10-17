@@ -32,6 +32,9 @@
 `lib.rs` 与 `contracts/mod.rs` 只负责导出，`contracts/dto/` 按通用、Public、Admin 和业务职责拆分。
 HTTP 与两端浏览器复用这些 DTO；数据库行、应用读模型和领域聚合仍保持独立，在边界转换。
 
+[dto/public/watch.rs](src/contracts/dto/public/watch.rs) 定义装备标记的完整集合、CAS 请求和可重放响应。
+持久 version 为正 i64，缺项才表示 false/version 0；取消保留正版本 tombstone，请求禁止未知字段。
+
 ## 稳定投影
 
 论坛同步开关和镜像 DTO 由 `dto/public/catalog/forum.rs` 唯一拥有；Admin 认证状态 GET 复用同一安全字段形状，

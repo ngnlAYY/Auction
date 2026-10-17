@@ -569,6 +569,7 @@ delivery-id = ID
 delivery-type = 종류
 delivery-type-settlement-recovery = 정산 복구
 delivery-type-operations-alert = 운영 알림
+delivery-type-lot-watch = 상위 입찰 알림
 delivery-to = 받는 사람
 delivery-cod = COD
 delivery-status = 상태

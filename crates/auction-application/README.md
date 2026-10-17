@@ -57,6 +57,10 @@ MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 k
 Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplate`；新后继冻结该模板，不能复制前驱经济策略。
 排期来源仍按既有轮次延续，旧快照和已接受命令不重写。
 
+装备标记由 [ports/public/watch.rs](src/ports/public/watch.rs) 与 [services/public/watch.rs](src/services/public/watch.rs)
+拥有：稳定命令摘要包含会话用户，Serializable 锁内重放/CAS；同值新命令仍推进 fence，原命令重放保持原结果。
+超价通知身份按 lot/用户/领先周期确定，冻结正文只含公开标识和已接受价格，外部发送不在竞价事务内执行。
+
 ## 结算与恢复端口
 
 [services/settlement](src/services/settlement) 拥有结算与履约用例；重放必须用冻结策略、资金池、lot 事实和义务验证原结果。

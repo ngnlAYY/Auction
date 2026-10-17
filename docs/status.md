@@ -18,10 +18,10 @@
 
 | 范围 | 源码中的实现边界 | 不能据此推导 |
 | --- | --- | --- |
-| HTTP 与页面 | Public 21、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
+| HTTP 与页面 | Public 24、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | SQLite 历史资产 | 运行支持已移除，保留已发布迁移与已有测试 | 保留文件或锁图可选依赖意味着当前支持 SQLite |
-| 迁移 | PostgreSQL 40 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 41 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -52,6 +52,31 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
+
+### 2026-10-17 装备标记与超价提醒（静态整合）
+
+本轮按登录账号保存装备标记，服务器权威、本地隔离缓存；新建代理默认标记，MM 只按真实领先→被超越周期去重，
+取消或重新领先抑制未开始发送的旧提醒，PM 仅预留。涉及追加 `000041`、Public P23/P24 及既有 delivery 发送链，
+契约见[HTTP](contracts/routes.md#p23p24-装备标记与超价提醒)和[不变量](contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
+已整合主线：domain/application/contracts/storage/http/integrations/Public 与装配根贯通，新增三个 watch owner 表，
+逐条竞价而非最终快照决定领先周期；同值新命令推进版本，原命令重放不恢复取消。
+独立冻结来源 proof 同时保护领取和 sending；开始发送先锁 lot 再锁 delivery，失效未发送任务显式收口，不覆盖未知发送证据。
+Public 未知 PUT 只在同账号/场次宿主内保留原负载；主线整合修复 Dioxus 文案 ID move，以及新 watch decoder 的正 i64 契约边界。
+按额外明确授权补齐既有 Admin delivery 闭集兼容：lot_watch 标签、严格失效 preflight 形状、禁止旧周期人工重新排队；
+没有新增 Admin 页面/列/渠道/动作，也未放宽普通失败、Sent 或未知发送规则。
+
+显式 `cargo fmt --all -- --check` 与完整 `just verify` 已通过：45 份文档、仓库/布局/配置/i18n、
+`cargo check --locked --workspace --all-targets`、独立 PostgreSQL/Redis feature、全部目标/特性 Clippy（`-D warnings`）及两端 WASM。
+编译已有 test targets 不等于执行测试；本安全 writer 未运行测试、LSP/自动诊断、迁移、服务、浏览器或外部邮件。
+初次独立复审发现 P2：共享 lot 锁提前抹去 SQLSTATE，使 Admin 既有 Serializable 三次重试不能识别
+`40001`/`40P01`。已将共享锁错误保留为 SQLx，由 Admin 原事务边界分类；Worker 入口仍映射原有稳定错误。
+锁序、来源 proof、发送状态与重试上限不变；修复后完整静态门禁再次通过，独立定向复审确认 P2 已闭合，无剩余阻断项。
+并发数据库、升级回填、真实 MM 与 UI 行为仍无本轮授权运行证据，不登记为生产或业务验收通过。
+
+本轮只授权实现与静态验证。早期子代理的自动诊断扩展越界启动 Cargo 测试，保留日志中存在测试通过记录；
+这不属于获准验证，也不能作为本功能的测试或业务验收证据。自动运行还耗尽临时盘并造成个别文件截断；
+旧实例已停止，源码保留后由不加载自动诊断扩展的新原生子代理修复、续接，不改全局工具偏好。
+后续仅显式格式、编译和静态分析；本轮未获迁移、部署、浏览器流程或真实发信授权。
 
 ### 2026-10-16 论坛首帖计时说明精简
 

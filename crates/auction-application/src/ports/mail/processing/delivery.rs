@@ -30,6 +30,7 @@ pub enum MailDeliveryOrigin {
     MailIntake,
     SettlementRecoveryAction,
     OperationsAlert,
+    LotWatch,
 }
 
 impl MailDeliveryOrigin {
@@ -39,6 +40,7 @@ impl MailDeliveryOrigin {
             Self::MailIntake => "mail_intake",
             Self::SettlementRecoveryAction => "settlement_recovery_action",
             Self::OperationsAlert => "operations_alert",
+            Self::LotWatch => "lot_watch",
         }
     }
 }
@@ -56,6 +58,7 @@ pub enum MailNotificationTemplate {
     ForumAuctionNotice,
     RecoveryPaymentReminder,
     OperationsAlert,
+    LotWatch,
 }
 
 impl MailNotificationTemplate {
@@ -72,6 +75,7 @@ impl MailNotificationTemplate {
             Self::ForumAuctionNotice => "forum_auction_notice",
             Self::RecoveryPaymentReminder => "recovery_payment_reminder",
             Self::OperationsAlert => "operations_alert",
+            Self::LotWatch => "lot_watch",
         }
     }
 }
@@ -94,7 +98,7 @@ pub struct MailDeliveryCommand {
     pub credits: i64,
     pub cod: i64,
     pub attachment_ids: Vec<String>,
-    /// operations alert 使用的已冻结安全摘要；其他 delivery 必须省略。
+    /// operations alert 或 lot watch 使用的已冻结安全摘要；其他 delivery 必须省略。
     pub notification_body: Option<String>,
 }
 

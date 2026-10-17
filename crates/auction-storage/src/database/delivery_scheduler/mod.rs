@@ -92,7 +92,9 @@ macro_rules! delivery_completion_gate {
 ) )
 )"#,
             " AND ",
-            delivery_mail_disposition_gate!()
+            delivery_mail_disposition_gate!(),
+            " AND ",
+            crate::database::lot_watch::delivery_watch_gate!()
         )
     };
 }
@@ -106,6 +108,8 @@ mod outcome;
 mod quarantine;
 #[cfg(feature = "postgres")]
 mod state;
+#[cfg(feature = "postgres")]
+mod watch;
 
 #[cfg(feature = "postgres")]
 use super::delivery_audit::{

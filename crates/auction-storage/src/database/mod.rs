@@ -127,6 +127,8 @@ mod fulfillment_scheduler;
 #[cfg(feature = "postgres")]
 mod health;
 #[cfg(feature = "postgres")]
+mod lot_watch;
+#[cfg(feature = "postgres")]
 mod lots;
 #[cfg(feature = "postgres")]
 mod operations_alert;

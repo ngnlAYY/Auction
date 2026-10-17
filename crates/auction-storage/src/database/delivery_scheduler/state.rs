@@ -10,6 +10,9 @@ pub(super) async fn start_sending_postgres(
     started_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    crate::database::lot_watch::lock_delivery_lot(&mut transaction, claim.delivery_id)
+        .await
+        .map_err(|_| repository_error_owned("装备提醒发送锁暂不可用"))?;
     let result = sqlx::query(concat!(
         r#"UPDATE public.deliveries AS deliveries
            SET status = 'sending', sending_at = $2, updated_at = CURRENT_TIMESTAMP

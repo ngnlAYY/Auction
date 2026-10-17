@@ -9,3 +9,6 @@ mod commands;
 pub use account::*;
 pub use catalog::*;
 pub use commands::*;
+
+mod watch;
+pub use watch::*;

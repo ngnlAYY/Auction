@@ -523,6 +523,7 @@ delivery-id = ID
 delivery-type = Type
 delivery-type-settlement-recovery = Settlement recovery
 delivery-type-operations-alert = Operations alert
+delivery-type-lot-watch = Outbid notice
 delivery-to = Recipient
 delivery-cod = COD
 delivery-status = Status

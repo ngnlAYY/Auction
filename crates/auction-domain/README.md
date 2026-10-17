@@ -20,6 +20,7 @@
 | [src/auction](src/auction) | 拍卖聚合、生命周期与状态版本 |
 | [src/bidding](src/bidding) | 金额、冻结政策与纯竞价计划 |
 | [src/proxy](src/proxy) | Fast/Slow 授权与追加转换事实 |
+| [src/watch](src/watch) | 逐条竞价的连续领先周期；MM 可用、PM 仅预留 |
 | [src/settlement](src/settlement) | 结算策略、金额守恒与履约义务 |
 | [src/equipment](src/equipment) | 装备标识与分类 |
 | [src/identity](src/identity)、[src/errors](src/errors) | 类型化 UUID 与领域错误 |

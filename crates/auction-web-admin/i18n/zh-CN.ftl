@@ -523,6 +523,7 @@ delivery-id = ID
 delivery-type = 类型
 delivery-type-settlement-recovery = 结算恢复
 delivery-type-operations-alert = 运维告警
+delivery-type-lot-watch = 超价提醒
 delivery-to = 收件人
 delivery-cod = COD
 delivery-status = 状态
