@@ -74,6 +74,16 @@ build_env_fingerprint() {
 	printf '%s' "$summary" | sha256sum | awk '{print $1}'
 }
 
+# 影响可执行产物的构建输入：装配根、全部 crate、内嵌迁移与模板、清单与发布脚本。
+# 文档与运维正文不进入，避免只改说明就重跑 WASM 与 Fat LTO 链接。
+build_inputs_fingerprint() {
+	path_fingerprint \
+		apps crates migrations \
+		ops/config/examples \
+		ops/deploy/retention-policy.v1.json \
+		Cargo.toml Cargo.lock rust-toolchain.toml ci/release
+}
+
 write_build_info() {
 	local destination=$1 variant=$2 features=$3
 	local commit state fingerprint lock_sha
@@ -89,6 +99,7 @@ write_build_info() {
 		"source_fingerprint=$fingerprint" \
 		"cargo_lock_sha256=$lock_sha" \
 		"features=$features" \
+		"build_inputs_sha256=$(build_inputs_fingerprint)" \
 		"build_env_sha256=$(build_env_fingerprint)" \
 		>"$destination"
 	chmod 0644 "$destination"
@@ -110,9 +121,9 @@ replace_generated_directory() {
 	rm -rf "$backup"
 }
 
-# 复用判定：源码身份、锁图、feature 和制品完整性全部一致才返回成功。
-# 复用不重建 Web payload；web-bundle 以固定 mtime 和 SOURCE_DATE_EPOCH 生成相同输入，
-# 源码身份一致即 payload 一致，因此已嵌入的二进制仍可作为同一来源的产物。
+# 复用判定：构建输入、锁图、feature 和制品完整性全部一致才返回成功。
+# 复用不重建 Web payload；payload 由 web-bundle 按自身输入指纹复用，构建输入一致即
+# 二进制与嵌入资源一致，因此可直接作为同一来源的产物。
 artifacts_reusable() {
 	local variant=$1 artifact_directory=$2 features=$3
 	local selected_binaries=("${@:4}")
@@ -129,6 +140,11 @@ artifacts_reusable() {
 	# 链接器、rustc 包装器与 profile 覆盖都影响产物；不一致时不得复用旧构建结果。
 	if [[ $(read_build_info "$info" build_env_sha256) != "$(build_env_fingerprint)" ]]; then
 		printf '%s 已记构建环境与当前不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+		return 1
+	fi
+	# 构建输入（代码、迁移、内嵌模板）未变时复用；纯文档修改不应重跑 WASM 与 Fat LTO。
+	if [[ $(read_build_info "$info" build_inputs_sha256) != "$(build_inputs_fingerprint)" ]]; then
+		printf '%s 已记构建输入与当前不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
 		return 1
 	fi
 
@@ -166,9 +182,9 @@ build_variant() {
 			"$api_only_public_root" "$api_only_admin_root" >&2
 		exit 1
 	fi
-	# 源码身份、锁图与 feature 全部一致时复用既有制品，避免重复 WASM 构建和 Fat LTO 链接。
+	# 构建输入、锁图与 feature 全部一致时复用既有制品，避免重复 WASM 构建和 Fat LTO 链接。
 	if artifacts_reusable "$variant" "$artifact_directory" "$features" "${selected_binaries[@]}"; then
-		printf '%s 制品源码身份未变，复用：%s\n' "$variant" "$artifact_directory"
+		printf '%s 构建输入未变，复用：%s\n' "$variant" "$artifact_directory"
 		return 0
 	fi
 	mkdir -p "$artifact_root"
@@ -340,16 +356,15 @@ verify_build_info() {
 		printf '缺少发布构建信息：%s\n' "$info" >&2
 		return 1
 	fi
-	local current_commit current_fingerprint current_lock
-	current_commit=$(git rev-parse --verify 'HEAD^{commit}')
-	current_fingerprint=$(source_fingerprint)
+	local current_lock
 	current_lock=$(sha256_file Cargo.lock)
+	# source_commit/source_fingerprint 只记录构建当时的来源；复用判定以构建输入为准，
+	# 因此“旧提交构建、文档已更新”的制品仍可发布，但代码或迁移变动必然触发重建。
 	if [[ $(read_build_info "$info" schema) != auction-release-build/1 ||
 	$(read_build_info "$info" variant) != "$expected_variant" ||
-	$(read_build_info "$info" source_commit) != "$current_commit" ||
-	$(read_build_info "$info" source_fingerprint) != "$current_fingerprint" ||
+	$(read_build_info "$info" build_inputs_sha256) != "$(build_inputs_fingerprint)" ||
 	$(read_build_info "$info" cargo_lock_sha256) != "$current_lock" ]]; then
-		printf '发布构建信息与当前源码不一致，请重新构建：%s\n' "$root" >&2
+		printf '发布构建信息与当前构建输入不一致，请重新构建：%s\n' "$root" >&2
 		return 1
 	fi
 }
@@ -667,8 +682,8 @@ package_release() {
 		suffix=-dirty
 	fi
 	package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}"
-	mkdir -p "$repository_root/target/dist"
-	temporary_root=$(mktemp -d "$repository_root/target/dist/auction-release.XXXXXX")
+	mkdir -p "$repository_root/target/dist/tmp"
+	temporary_root=$(mktemp -d "$repository_root/target/dist/tmp/auction-release.XXXXXX")
 	package_root="$temporary_root/$package_name"
 	mkdir -p "$package_root"
 
@@ -772,7 +787,7 @@ package_release() {
 	fi
 	verify_archive "$archive" "$package_name" "$epoch" "$temporary_root/extracted"
 
-	local publish_next="$repository_root/target/dist/.package.next.$$"
+	local publish_next="$repository_root/target/dist/tmp/.package.next.$$"
 	rm -rf "$publish_next"
 	mkdir -p "$publish_next"
 	install -m 0644 "$archive" "$publish_next/$package_name.tar.gz"

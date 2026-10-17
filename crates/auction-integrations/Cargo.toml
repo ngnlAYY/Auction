@@ -22,3 +22,7 @@ tokio.workspace = true
 uuid.workspace = true
 rustls.workspace = true
 url.workspace = true
+
+[lints]
+# 可选：继承工作区统一 lint 策略，不在单包放宽。
+workspace = true

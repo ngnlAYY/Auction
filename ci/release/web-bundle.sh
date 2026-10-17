@@ -21,7 +21,7 @@ case "$surface" in
     ;;
 esac
 
-# 源码身份与 BUILD-INFO 字段解析与 release.sh 共用同一实现，避免两处解释不一致。
+# 源码身份与路径指纹与 release.sh 共用同一实现，避免两处解释不一致。
 # 两个脚本都已 cd 到仓库根，静态相对路径便于 shellcheck 直接解析。
 source ci/release/build-identity.sh
 
@@ -47,7 +47,10 @@ if [[ -z "$dx_version" || -z "$rustc_version" ]]; then
   printf '无法读取 dx/rustc 版本，Web 构建不能建立复用标记\n' >&2
   exit 1
 fi
-source_identity=$(source_fingerprint)
+# payload 只依赖本 surface、共享层、清单与构建工具；native 代码或文档改动不触发 WASM 重建。
+source_identity=$(path_fingerprint \
+  "Cargo.toml" "Cargo.lock" "rust-toolchain.toml" \
+  "crates/$package" "crates/auction-web-shared" "ci/release/web-bundle.sh")
 
 # payload 结构门禁：入口、标题与文件类型；复用与新构建都必须通过。
 verify_payload_files() {

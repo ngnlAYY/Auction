@@ -10,7 +10,7 @@
 | [web-bundle.sh](ci/release/web-bundle.sh) | 按 Public/Admin 构建 WASM，生成固定权限、mtime 和 payload 哈希；输入未变时复用既有 payload |
 | [release.sh](ci/release/release.sh) | API-only / 内嵌档构建、资源隔离、身份校验和确定性归档 |
 | [release-single.sh](ci/release/release-single.sh) | 由 release.sh 加载的合并服务变体，复用分体门禁；不是独立执行入口 |
-| [build-identity.sh](ci/release/build-identity.sh) | 被 release.sh 与 web-bundle.sh 加载的源码身份指纹和 `BUILD-INFO` 字段读取；只有一份实现 |
+| [build-identity.sh](ci/release/build-identity.sh) | 被 release.sh 与 web-bundle.sh 加载的源码身份、路径输入指纹和 `BUILD-INFO` 字段读取；只有一份实现 |
 
 ## 本地与 CI 入口
 
@@ -65,7 +65,9 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
   凭据只存在于 action 上下文，由 `actions/github-script` 输出到 step outputs 并仅赋给构建步骤的
   `ACTIONS_RESULTS_URL`、`ACTIONS_RUNTIME_TOKEN`；`RUSTC_WRAPPER` 会写入 `BUILD-INFO`，与未启用包装器的产物不会互用。
 - artifacts 另按源码身份指纹缓存 `target/dist/artifacts` 与 `target/dx`（rust-cache 保存时会清掉非 Cargo 目录），
-  键来自 `bash ci/release/release.sh source-fingerprint`，命中即 `BUILD-INFO` 一致；未命中不恢复旧目录。
+  并以 `release-artifacts-` 前缀回退：只改文档的提交也能拿到上次产物与 dx 增量目录，
+  键来自 `bash ci/release/release.sh source-fingerprint`；命中即 `BUILD-INFO` 一致，前缀命中的旧目录仍由
+  `release.sh` 按构建输入复核，不满足就重建，不会把过期二进制当结果。
 - security-audit 沿用含工具版本的键，缓存 Cargo 工具二进制及安装元数据，缺失、执行失败或版本不符才
   `cargo install --locked --version ... --force` 重装。细粒度 `actions/cache` 只缓存官方 dx 0.7.10 与 sccache 0.18.0
   压缩包，下载与恢复后均核对固定 SHA-256，不缓存运行配置、凭据或下载制品。
@@ -83,7 +85,7 @@ Actions 固定完整 SHA，工具版本与取舍见[技术栈](docs/design/tech-
 API-only 对照制品仍只启用 PostgreSQL。本机可选 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache` 或
 `RUSTFLAGS="-C link-arg=-fuse-ld=lld"` 前缀复用同一脚本，两者都会写入 `BUILD-INFO`，条件不同不会混用；
 CI 只对 artifacts 启用 sccache，不启用 lld。PR、非默认分支和标签的自动运行只检查、
-不发布制品。在 GitHub 的 **Actions → Rust → 对应运行 → Artifacts** 下载
+不发布制品。在 GitHub 的 **Actions → auction-build → 对应运行 → Artifacts** 下载
 `auction-linux-x86_64-<commit>-<attempt>`（私有库需相应仓库权限），包内含 `.tar.gz`、外层 `SHA256SUMS` 和
 `DEPENDENCIES.md`，先校验清单再解包；tar 内的 `auction-rust-<version>-<commit>/bin/` 包含且仅包含：
 
@@ -105,12 +107,31 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 文档没有自动检查器：本地链接、标题锚点、从根 README 的可达入口与 Cargo 包 README 均靠评审核对；移动或重命名
 页面时必须同步全部引用，静态结构正确也不证明源码语义、CLI 或历史证据准确。
 
+## 产物目录
+
+`target/` 由 cargo、dx 与发布脚本共同拥有，`target/dist/` 只放本仓库自己的产物；`just clean`（`cargo clean`）整体清理。
+
+| 路径 | 内容与 owner |
+| --- | --- |
+| `target/debug`、`target/wasm32-unknown-unknown`、`target/wasm-release` | cargo 编译缓存，由 cargo 管理，不手工写入 |
+| `target/dx/` | dx 的 WASM 中间目录与稳定 payload（`target/dx/build/<package>/web`），由 dx 与 web-bundle.sh 管理 |
+| `target/dist/artifacts/{api,embedded,single}/` | 可复用发布二进制、`BUILD-INFO`、Web 清单；`release.sh` 唯一写入者 |
+| `target/dist/build/{api,embedded,single}/` | 各变体独立 target-dir，避免 feature 组合互相冲刷 |
+| `target/dist/package/`、`target/dist/package-single/` | 归档输出（`*.tar.gz`、`SHA256SUMS`、`DEPENDENCIES.md`） |
+| `target/dist/api-only-assets/{public,admin}/` | API-only 的固定空资源目录，必须始终不存在实体内容 |
+| `target/dist/tmp/` | 装包临时目录，成功与失败路径都会清理 |
+| `target/sccache/` | 可选本地 sccache 缓存，经 `SCCACHE_DIR=target/sccache` 启用 |
+
+缓存判定读 `BUILD-INFO`，不读目录名或时间戳；删除 `target/dist/` 只损失复用，不影响正确性。
+
 ## 发布边界
 
 检查 job 不安装 dx、不构建页面，只有满足上述条件的 artifacts job 安装 dx 并构建完整包。`allow_missing` 只保证
 无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，dx 按需下载 esbuild 仅供构建。
-payload 复用只在本脚本内生效：源码身份、dx/rustc 版本与已存清单全部一致才跳过 dx，否则整目录重建。
-release.sh 在构建前冻结源码身份并在各阶段复查，核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
+payload 复用只在本脚本内生效：本 surface 及其共享层、清单、工具链版本与已存清单全部一致才跳过 dx，
+因此只改 native 代码或文档不会重跑 WASM；任何一项不同即整目录重建。
+release.sh 在构建前冻结构建输入（代码、迁移、内嵌模板、清单与发布脚本）并在各阶段复查，纯文档修改不触发重建；
+核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
 统一时间、两次相同 archive、内外哈希和依赖摘要；正式 package 要求干净工作树。分体包为 Public、Admin、Worker、
 auctionctl，仅两端内嵌各自页面；`--single-binary` 先通过分体门禁，再核对 server 双 payload 和独立无 Web 的
 auctionctl，归档只含这两个程序及合并 unit。目录和配置模板路径/权限保持不变，包内 `systemd/README.md` 改为导航，安装

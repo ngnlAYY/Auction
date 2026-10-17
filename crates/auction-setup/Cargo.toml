@@ -21,3 +21,7 @@ uuid.workspace = true
 [features]
 default = []
 postgres = ["dep:auction-storage", "auction-storage/postgres"]
+
+[lints]
+# 可选：继承工作区统一 lint 策略，不在单包放宽。
+workspace = true

@@ -22,3 +22,7 @@ uuid.workspace = true
 # 漏声明的 Location feature，详见根 Cargo.toml 说明。
 web-sys = { workspace = true, features = ["console", "CssStyleDeclaration", "Document", "DomRect", "Element", "EventTarget", "FocusEvent", "HtmlElement", "KeyboardEvent", "MediaQueryList", "MediaQueryListEvent", "MutationObserver", "MutationObserverInit", "NodeList", "ResizeObserver", "Storage", "Window"] }
 wasm-bindgen.workspace = true
+
+[lints]
+# 可选：继承工作区统一 lint 策略，不在单包放宽。
+workspace = true
