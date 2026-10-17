@@ -62,6 +62,9 @@ mod delivery_admin;
 mod equipment_link;
 #[path = "forum/public.rs"]
 mod forum;
+#[path = "forum/pm.rs"]
+mod forum_pm;
+pub use forum_pm::*;
 #[path = "forum/reply.rs"]
 mod forum_reply;
 #[path = "forum/sync.rs"]
@@ -286,14 +289,15 @@ pub use forum_reply::{
 };
 pub use forum_sync::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCatalogLayout, ForumCredentialAvailability,
-    ForumCurrentBidSource, ForumLotSnapshot, ForumPostWriter, ForumPublishedLayout,
-    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError,
-    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSyncClaim, ForumSyncRecoveryItem,
-    ForumSyncRecoveryPort, ForumSyncStore, ForumSystemLogEntry, ForumTopicMetadata,
-    ForumTopicPublication, ForumWriteProgress, ForumWriteRetryAuthorizationCommand,
-    ForumWriteRetryAuthorizationResult, MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES,
-    MAX_FORUM_SYNC_RECOVERY_ITEMS, forum_catalog_marker, forum_catalog_page_marker,
-    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
+    ForumCurrentBidSource, ForumLotSettlement, ForumLotSnapshot, ForumPostWriter,
+    ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread, ForumPublisher,
+    ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
+    ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
+    ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumWriteProgress,
+    ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
+    MAX_FORUM_CATALOG_LOTS, MAX_FORUM_CATALOG_PAGES, MAX_FORUM_SYNC_RECOVERY_ITEMS,
+    forum_catalog_marker, forum_catalog_page_marker, forum_post_bodies_match,
+    forum_system_log_marker, forum_world_name,
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
@@ -438,3 +442,8 @@ pub use schedule_source::{AuctionScheduleSource, AuctionScheduleTimes};
 #[path = "public/watch.rs"]
 mod lot_watch;
 pub use lot_watch::*;
+#[path = "public/watch_preference.rs"]
+mod watch_preference;
+pub use watch_preference::*;
+mod lot_watch_pm;
+pub use lot_watch_pm::*;

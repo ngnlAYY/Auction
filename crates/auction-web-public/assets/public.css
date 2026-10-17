@@ -1239,6 +1239,80 @@
 
 /* ===== 账户区（登录引导 / 账户表格） ===== */
 
+.public-outbid-preference {
+  margin-block-end: var(--space-6);
+}
+
+.public-outbid-preference fieldset {
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-outbid-preference legend {
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-strong);
+}
+
+.public-outbid-preference p {
+  margin-block: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.public-outbid-preference__choices,
+.public-outbid-preference__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-block-start: var(--space-3);
+}
+
+.public-outbid-preference__choices > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.public-outbid-preference label {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--size-target);
+  cursor: pointer;
+}
+
+.public-outbid-preference input {
+  accent-color: var(--color-accent);
+}
+
+.public-outbid-preference button {
+  min-block-size: var(--size-target);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font: inherit;
+  cursor: pointer;
+}
+
+.public-outbid-preference button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.public-outbid-preference input:focus-visible,
+.public-outbid-preference button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.public-outbid-preference__error {
+  color: var(--color-danger);
+}
+
 .public-account-section {
   margin-block-end: var(--space-6);
 }

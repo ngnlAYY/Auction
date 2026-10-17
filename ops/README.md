@@ -150,15 +150,40 @@ SIGTERM：drain 最多 10 秒、exporter 最多 30 秒，分体 unit 45 秒；�
 
 ### 装备标记与超价提醒升级
 
-装备标记需要追加 `000041` 迁移，并同时更新 Public 页面、三角色程序和内嵌迁移的 `auctionctl`；
+装备标记基础为 `000041`，账号 MM/PM 竞价警告必须再追加 `000042`，同时更新 Public 页面、三角色程序和内嵌迁移的 `auctionctl`；
 合并部署更新 `auction-server` 与 `auctionctl`。按受控停机门禁执行升级，不能把普通进程重启或替换 Worker 当作迁移完成，
 也不能混用缺少标记通知事实的新旧竞价 writer。分体 start/restart 与合并 `migrate-managed` 继续遵守各自锁和停机要求。
 升级前另行完成目标确认与可验证备份，失败不自动回退迁移，不修改既有迁移 checksum。
 
+论坛结拍尾注还需追加 `000043`：使用内嵌 `000041`/`000042`/`000043` 的最新 auctionctl，在全部旧 writer 停止后迁移，普通重启不隐式升级。
+升级前 settled 主题明确豁免、完成版本保持空，不批量改写历史帖子；升级时未结算及新场次才进入终态刷新。
+终态只编辑原有冻结目录页及日志，必须全页证明和版本 CAS 成功后才停止轮询；pending、超限、租约丢失或 write_unknown 仍阻断。
+不得手工填成功版本绕过阻断，不重放终态新竞价；缺权威结算或旧未知写入应保留现场另行处理。
+该能力不新增配置；大场次全固定页确认仍消耗既有 item/lease/限速预算。本轮未执行这些迁移或实际发帖。
+
 迁移只给已有有效代理补建默认标记，不补发过去的超价提醒，也不重放历史竞价。
 标记保存不新增 TOML 开关；实际 MM 发送仍要求既有邮件服务启用、有效凭据、mailbox identity 和发送预算。
-PM 只有预留渠道，不能通过改配置启用。通知与普通论坛 `notify mm` 来源分离，发送失败不撤销竞价；
-结果未知仍进入既有人工核对流程，禁止为追求到信盲目重寄。取消或重新领先抑制未开始发送的提醒，已进入发送的不可撤回。
+PM 使用独立持久队列，不借 MM 开关、delivery 或 Sent proof；必须启用 forum 并复用同一网关和唯一 ForumCookie owner。
+无新增配置字段：PM 每轮最多 1 新发送+1 只读核对，串行执行，复用 `worker.delivery.poll_interval_seconds/jitter_seconds`，
+总工作预算和租约用 `worker.forum.item_timeout_seconds/lease_duration_seconds`，共享 forum HTTP 限速。
+轮询代码默认 60 秒不是实际部署配置，也不是到信时间或论坛官方限流承诺。forum.enabled=false 不外呼。
+通知与普通论坛 `notify mm` 来源分离；未知 sending 永不重排，只允许原 sender 只读核对，禁止人工重寄。
+取消或重新领先抑制未开始发送的提醒，已进入发送的不可撤回；账号渠道切换不改已冻结队列。
+
+`000042` 迁移前停止全部旧 writer/Worker，核对目标并备份；禁止新旧竞价 writer 混跑或以普通启动代替迁移。
+不改写旧 MM payload/digest/命令身份；新账号默认 MM/1。缺论坛收件人留下 suppressed/recipient_missing，
+后续补绑定不补发。回滚应用不能退回不识别 PM 的旧 Worker；数据库迁移 forward-only，失败保留现场。
+
+最小运维（需另行获准真实环境操作，本轮未执行）：
+
+```text
+auctionctl lot-watch-pm list --status manual_reconcile --limit 50 --offset 0
+auctionctl lot-watch-pm reconcile --notification-id <uuid> --command-id <uuid> --expected-fencing-version <positive-i64> --actor <operator>
+```
+
+list 只输出安全状态/fence/时间/sender，不输出正文或租约 token。reconcile 仅持久接受只读核对请求，
+原 command_id/负载重试返回原结果，不代表已发送；由持有原 sender 凭据 owner 的 Worker 核对。
+换号、无副本、解析不确定保持 manual_reconcile；CLI 不建第二个客户端，不提供强制成功、abandoned 或重发动作。
 
 本节是升级契约，不表示本轮已迁移、部署或寄信。获准行为验证后，需单独核对旧代理补标记、领先周期去重、
 并发取消/重新领先、Worker 重启、未知发送以及跨账号/设备同步；静态编译和页面可见不能替代这些证据。

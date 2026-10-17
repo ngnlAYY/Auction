@@ -19,6 +19,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
 ) -> Result<(), ApplicationError> {
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛分页正文证明事务失败"))?;
+    lock_terminal_version(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET title = $2,
@@ -28,6 +29,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
              content_revision = content_revision + 1,
              content_synced_at = $5,
              content_next_scan_at = $6,
+             terminal_synced_version = COALESCE($16, terminal_synced_version),
              content_lease_expires_at = NULL,
              content_claim_token = NULL,
              content_claim_owner = NULL,
@@ -45,7 +47,9 @@ pub(super) async fn record_fixed_posts_update_postgres(
            AND content_claim_token = $11
            AND content_claim_owner = $12
            AND content_claim_fencing = $13
-           AND content_lease_expires_at > $5",
+           AND content_lease_expires_at > $5
+           AND ($16::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL
+                AND content_lease_expires_at > clock_timestamp()))",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(&catalog.title)
@@ -62,6 +66,7 @@ pub(super) async fn record_fixed_posts_update_postgres(
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
     .bind((topic.catalog_continuation.len() + 1) as i32)
+    .bind(topic.confirmed_settled_version)
     .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("写入论坛固定楼层正文证明失败"))?;
@@ -136,10 +141,14 @@ pub(super) async fn finish_topic_scan_postgres(
     scanned_at: DateTime<Utc>,
     next_scan_at: DateTime<Utc>,
 ) -> Result<(), ApplicationError> {
+    let mut transaction =
+        store.pool().begin().await.map_err(|_| storage_error("开启论坛扫描完成事务失败"))?;
+    lock_terminal_version(&mut transaction, topic).await?;
     let result = sqlx::query(
         "UPDATE public.auction_forum_sync
          SET processed_through_post_number = $11,
              content_next_scan_at = $3,
+             terminal_synced_version = COALESCE($13, terminal_synced_version),
              content_lease_expires_at = NULL,
              content_claim_token = NULL,
              content_claim_owner = NULL,
@@ -156,7 +165,9 @@ pub(super) async fn finish_topic_scan_postgres(
            AND content_claim_token = $8
            AND content_claim_owner = $9
            AND content_claim_fencing = $10
-           AND content_lease_expires_at > $2",
+           AND content_lease_expires_at > $2
+           AND ($13::bigint IS NULL OR (terminal_refresh_enabled AND terminal_synced_version IS NULL
+                AND content_lease_expires_at > clock_timestamp()))",
     )
     .bind(topic.auction_id.as_uuid())
     .bind(scanned_at)
@@ -170,11 +181,48 @@ pub(super) async fn finish_topic_scan_postgres(
     .bind(topic.content_claim_fencing)
     .bind(processed_through_post_number)
     .bind((topic.catalog_continuation.len() + 1) as i32)
-    .execute(store.pool())
+    .bind(topic.confirmed_settled_version)
+    .execute(&mut *transaction)
     .await
     .map_err(|_| storage_error("完成论坛固定楼层扫描失败"))?;
     if result.rows_affected() != 1 {
         return Err(storage_error("论坛固定楼层扫描 claim 已失效"));
+    }
+    transaction.commit().await.map_err(|_| storage_error("提交论坛扫描完成事务失败"))?;
+    Ok(())
+}
+
+/// 只认 Worker 实际渲染并证明的版本，不从当前状态反推成功；锁序为 auction → sync。
+async fn lock_terminal_version(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    topic: &ForumReplyTopic,
+) -> Result<(), ApplicationError> {
+    let Some(version) = topic.confirmed_settled_version else { return Ok(()) };
+    if version <= 0 {
+        return Err(storage_error("论坛终态证明版本无效"));
+    }
+    let matched = sqlx::query_scalar::<_, bool>(
+        "SELECT status = 'settled' AND state_version = $2
+         FROM public.auctions WHERE id = $1 FOR SHARE",
+    )
+    .bind(topic.auction_id.as_uuid())
+    .bind(version)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("锁定论坛终态版本失败"))?;
+    if !matched {
+        return Err(storage_error("论坛终态快照版本已变化"));
+    }
+    let pending = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM public.auction_forum_bid_commands
+         WHERE auction_id = $1 AND status = 'pending')",
+    )
+    .bind(topic.auction_id.as_uuid())
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(|_| storage_error("核对论坛终态 pending 边界失败"))?;
+    if pending {
+        return Err(storage_error("论坛终态仍有 pending 命令，不能完成"));
     }
     Ok(())
 }

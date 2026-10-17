@@ -129,6 +129,8 @@ mod health;
 #[cfg(feature = "postgres")]
 mod lot_watch;
 #[cfg(feature = "postgres")]
+mod lot_watch_pm;
+#[cfg(feature = "postgres")]
 mod lots;
 #[cfg(feature = "postgres")]
 mod operations_alert;

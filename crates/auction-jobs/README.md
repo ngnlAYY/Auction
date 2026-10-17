@@ -24,6 +24,7 @@
 | [src/worker/recovery](src/worker/recovery) | 恢复阶段与证据收口 |
 | [src/worker/mail](src/worker/mail) | 轮询、续租、重试与完成前缀 |
 | [src/worker/forum](src/worker/forum) | 主题/固定帖同步与命令导入 |
+| [src/worker/forum/pm](src/worker/forum/pm) | 装备 PM 独立有界循环、只读准备、持久 sending fence 后一次发送和原 sender 核对 |
 | [src/worker/realtime](src/worker/realtime)、[operations](src/worker/operations) | 实时消费与运维告警 |
 | [src/control](src/control) | Unix control 协议、peer 认证与客户端 |
 
@@ -49,6 +50,7 @@ Worker 决定何时调用应用命令、如何按持久化状态重试；领域/
 | Delivery | claim 后先查 transport 可用性，再进入 sending；续租、最终写回和未知结果均受 fencing 保护 |
 | Mail | main/isekai 独立 mailbox、cron、唤醒器、游标与租约；按旧到新处理 |
 | Forum | 独立顺序循环，先发布再读回帖，发布失败不跳过导入；逐主题领取内容租约 |
+| Lot-watch PM | 独立 runtime，每轮至多 1 新发送+1 只读核对；delivery cadence、forum 总预算/lease，串行共享网关 |
 | Operations alert | scan、dispatch、reconcile 各自 cadence、预算与失败边界 |
 
 `run_persistent_until_shutdown` 消费持久化轮次；领取后冻结 owner、精确租约与 state_version。
@@ -83,8 +85,19 @@ Forum 目录每帖最多 150 件，从 #1 连续分页；系统日志在最后�
 历史同步未知结果可在有可用凭据的进程首轮水位下重新读取一次，不自动补写、升级旧布局或解除人工授权门禁。
 已发布主题的回帖刷新按持久 post ID 对账；关闭正文校验时保留内容未知门禁，现有 CLI 的主题发布授权不适用。代理行不进入论坛命令账本。
 
+论坛终态刷新仅纳入升级时未结算及新场次；已 settled 不再导入新竞价，已有 pending 继续展示并阻止完成，不删除或伪报成功。
+每个用户帖前复核接收状态，命令开始由存储锁内再查；扫描期间进入 settled 时，刷新仍从同一权威快照渲染最终结果。
+终态必须逐一确认全部冻结目录页及日志，即使本地镜像相同；关闭正文校验时用本轮精确 POST 回执，开启时按原始正文证明规则回读。
+全页确认后的快照版本经存储锁/CAS 持久化，之后停止该主题轮询；部分进度、租约丢失及 write_unknown 不提前完成。
+无新楼层、无历史结拍回填、无新配置；大场次仍受单主题预算和租约约束。
+
 实时 runner 持久化连续 offsets/failures；当前广播边界是 Public 本地 Hub，未冻结外部 sink 不得伪装为已发送。
 各循环默认值、预算及有效并发见[配置手册](../../ops/config/README.md#worker-循环预算)。
+
+PM 的 prepare 只能 GET，持久 sending fence 明确提交才消费 prepared.send；任何 sending 不能安全延期。
+单项总预算覆盖 claim/prepare/fence/send/finish，严格小于 lease，超时取消留给持久恢复；drain 停止新领取，
+主进程已有 drain 结束后 abort 剩余任务，不追加论坛长等待。原 sender Sent 无证据保持 manual_reconcile，绝不重寄。
+论坛 enabled=false 不装配，MM disabled 不影响此 runtime；无行为验收证据。
 
 ## Worker control
 

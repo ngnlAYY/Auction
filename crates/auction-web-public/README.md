@@ -36,6 +36,7 @@ Dioxus 纯客户端渲染的公开端 SPA，拥有公开读取、竞价交互、
 
 `main.rs` 为薄启动入口，`app/` 与 `api/` 按 auction、content、identity 分组。
 `auction/watches/` 拥有整场装备标记读取、原生命令按钮及账号隔离缓存；`api/auction/watches.rs` 拥有对应同源传输与严格 DTO 校验。
+`app/identity/watch_preference.rs` 拥有账号竞价警告渠道表单与内存命令，`api/identity/watch_preference.rs` 拥有偏好 API 严格解码；账户页以用户 UUID 隔离该宿主，不受竞价分页重读影响。
 `surface/board/refresh.rs` 拥有资源失效与合并读取；`auction/commands/` 按普通出价、代理创建/降额、确认及未知结果重试拆分。
 
 论坛页先读取独立同步开关，明确关闭不挂载帖子轮询，未知状态不能当关闭；启用后只展示同步摘要、真实处理楼层和更新时间。
@@ -76,11 +77,22 @@ just web-build-public
 
 目录 preview/live 与装备详情的标记沿用动作列，不新增表格列。整场通过
 `GET /api/v1/me/lot-watches?auction_id=<uuid>` 读取完整集合（上限 10000 条，超限失败而非截断），
-`PUT /api/v1/lots/{lot_id}/watch` 使用冻结的 `PublicSetLotWatchRequest`，当前仅使用 `mm`。
+`PUT /api/v1/lots/{lot_id}/watch` 使用冻结的 `PublicSetLotWatchRequest`，`channel=mm` 保留为兼容占位，不表示生效通知渠道。
 按稳定 user UUID + auction UUID 隔离 `localStorage` 非敏感缓存；无登录不做本地匿名标记。
 缓存仅作带未同步说明的展示，加载中或失败时不能用旧版本修改；存储受限不阻止服务器保存。
 取消的 false 墓碑原样保存，普通/代理命令成功后随既有刷新代数重读服务器集合，不从代理 GET 推导标记。
 未知结果保留完整原命令供重试，409 必须由用户刷新、检查状态再修改；详见[标记设计](DESIGN.md#61-装备标记与超价提醒)。
+
+`/me#outbid-notifications` 顶部提供账号统一的 MM/论坛 PM 单选及显式保存，不是每件装备设置。
+`GET/PUT /api/v1/me/lot-watch-preference` 消费 `PublicLotWatchPreferenceResponse` 与
+`PublicSetLotWatchPreferenceRequest`，沿用 envelope，拒绝未知/缺失 data 字段、身份不符及非正 i64 版本；整数不经 JS 浮点转换。
+权威 GET 前禁保存，不用本地默认值冒充服务器结果。PUT 冻结完整 payload、command_id 与 CAS 版本；
+未知结果只原样重试，409 显式刷新再修改。成功或幂等重放后 GET 当前状态，不把历史响应当最新偏好。
+身份变化/登出销毁旧命令，提交前后核对会话；离开/重载先 GET，不自动重放，也不把待定命令写入 localStorage。
+只影响已标记装备的后续反超警告，每领先周期一次，不影响结算/COD；已排队通知保留原渠道。
+保存成功只确认偏好，不保证可送达。论坛 PM 需要已绑定的论坛账号，不可投递不会自动改发 MM；
+通知异步处理可能延迟，当前状态以网站为准。前端不收集 PM 地址、不使用游戏名作为收件人，也不新增绑定流程；
+收件身份由后端稳定论坛账号标识决定，偏好响应仍只有 user_id/channel/version 三字段。
 
 当前世界选择只展示 enabled world，历史筛选仍可访问已关闭世界的 settled 事实。
 倒计时通过 HTTP Date 估算服务端时钟，仅用于展示；终态、缺失时间与依赖错误按契约明确表达。
@@ -113,3 +125,5 @@ cargo check --locked -p auction-web-public --target wasm32-unknown-unknown
 
 仅静态编译；默认门禁与行为测试范围见[开发指南](../../docs/development.md)，运行证据见[验证状态](../../docs/status.md)。
 路由、交互或字段变化须同步所属设计与契约，编译通过不等于浏览器验收。
+本次账号渠道组件实现仅做源码审查、定向 rustfmt 与 git diff --check；完整编译/静态门禁由整合阶段执行。
+未新增或运行行为测试，未做浏览器、真实通知或生产验收。

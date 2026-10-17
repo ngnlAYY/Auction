@@ -60,6 +60,11 @@ Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplat
 装备标记由 [ports/public/watch.rs](src/ports/public/watch.rs) 与 [services/public/watch.rs](src/services/public/watch.rs)
 拥有：稳定命令摘要包含会话用户，Serializable 锁内重放/CAS；同值新命令仍推进 fence，原命令重放保持原结果。
 超价通知身份按 lot/用户/领先周期确定，冻结正文只含公开标识和已接受价格，外部发送不在竞价事务内执行。
+账号渠道由 [ports/public/watch_preference.rs](src/ports/public/watch_preference.rs) 与
+[services/public/preferences](src/services/public/preferences) 拥有，只锁 user，账本先于 CAS，旧 watch.channel=mm 不变。
+[services/public/watch_notification.rs](src/services/public/watch_notification.rs) 生成 PM 冻结内容/缺收件人事实；
+[ports/lot_watch_pm](src/ports/lot_watch_pm) 定义持久任务与运维端口；
+[ports/forum/pm.rs](src/ports/forum/pm.rs) 定义只读 prepare、一次性 prepared.send 与原 sender Sent 对账，不能重寄未知写入。
 
 ## 结算与恢复端口
 
@@ -95,6 +100,9 @@ Admin 装备录入将来源读取、key 加密和持锁写入分成窄端口；�
 `ForumTopicPublication` 区分真实创建回执和找到既有主题；Admin 状态读取复用公开安全投影端口，不获得写入能力。
 同步端口定义冻结的历史单页/新分页布局与新主题每帖 150 件的目录页大小、续页正文/身份与动态系统日志楼层；`ForumCatalogPage` 的调试正文始终脱敏。
 `ForumReplyTopic` 持有有序续页证明，全部固定帖确认后才以同一版本推进处理水位。
+`ForumAuctionSnapshot.settled` 只代表权威结算状态及齐备明细；`ForumLotSettlement` 携带连续领先起点与持久 adjustment_ppm。
+终态完成版本由 Worker 在全固定帖证明后填入 claim 的 `confirmed_settled_version`，storage 必须锁内复核；部分进度不作完成。
+回帖状态只读端口帮助 Worker 停止终态消费，命令开始仍须锁内复核；不改领域状态机。
 `ForumCommandOutcome` 分开携带持久错误码及本地有界诊断；Worker 只能生成白名单英文提示，不能把诊断原文发往论坛。
 未知论坛写入只能先只读对账，再按持久人工授权重试；固定帖正文比较统一由同步端口定义，
 兼容范围与确认门禁见[外部写入不变量](../../docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)。

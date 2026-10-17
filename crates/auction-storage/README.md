@@ -42,10 +42,17 @@ Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提�
 [lot_watch](src/database/lot_watch) 独占标记 CAS、领先周期、通知来源和发送资格证明。
 普通/论坛/快慢代理的每条已接受竞价事实都推进周期；新代理 Created 在同事务默认标记，读取、降额与重放不恢复标记。
 同值的新命令也推进版本 fence，取消保留 tombstone。迁移只补已有有效代理标记，不补发过去提醒。
-通知按 lot/用户/领先周期唯一，复用 mail_delivery owner 入队；冻结 payload、收件人和摘要提供独立 proof。
+通知跨渠道按 lot/用户/领先周期唯一，MM 复用 mail_delivery owner 入队；冻结 payload、收件人和摘要提供独立 proof。
 领取只读 proof，sending 先锁 lot 再锁 delivery 并复核；取消/重新领先使旧资格永久失效，未开始发送的旧任务收口为 failed 并追加审计。
 已 sending 的未知结果仍进入 manual_reconcile；已接受标记命令在拍卖后来隐藏后仍能重放原响应，新命令遵守当前公开可见性。
-MM 正文不包含代理上限；PM 仅预留，不装配。完整列表超过 10000 条明确失败。
+正文不包含代理上限。完整标记列表超过 10000 条明确失败。
+`lot_watch/preference.rs` 只锁 user 做独立偏好 CAS；竞价普通快照读取渠道，不晚加旧 leader user 锁。
+[lot_watch_pm](src/database/lot_watch_pm) 独占 PM claim、lot→任务 sending fence、原 sender 对账和 CLI 安全投影。
+`000042` 保留旧 MM payload/digest；PM 缺 UID 明确 suppressed，不吞 SQL 错误、不回退 MM。
+sending 永不回 pending，sender/sending_at 由数据库触发器保护；过期 sending 只转 manual_reconcile。
+领取按 `COALESCE(claimed_at,created_at),created_at,notification_id` 持久轮转；准备失败释放时保留领取时间，
+防止不存在或持续拒绝的收件人独占每轮新发送名额，不增加并发、配置或 sending 后重寄。
+CLI 请求重放/CAS/审计同事务，仅申请 Worker 只读对账。迁移和发送行为未在本轮执行。
 `delivery_admin` 仅为明确失效的 watch preflight 保留无 sending 时间的严格投影，普通失败和未知发送边界不变；
 人工 release/retry 也在 lot → delivery 锁内复核 watch proof，不恢复旧周期。
 
@@ -84,6 +91,12 @@ Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 m
 发布和刷新在主记录 claim/revision CAS 的同一 PostgreSQL 事务内更新所有续页，领取检查页数、连续楼层及互异身份。
 `catalog_layout` 冻结历史单页/新分页方案；旧主题保持原楼层并继续处理出价，仍受原正文长度上限约束。
 仅从未尝试、无远端身份的队列项及新主题启用分页，已尝试或未知写入不得借升级更换布局。页数冻结后不在扫描时移动系统日志。
+`000043` 为 forum owner 增加明确纳入标记和 nullable 终态确认版本；历史 settled 仅豁免，不伪造成功，发布恢复和回帖领取都排除它们。
+`forum/sync/snapshot.rs` 在同一 Repeatable Read 中读取结算汇总、lot 明细和最终领先事实；
+`forum/sync/settlement.rs` 核对持久落锤价、赢家和来源，不重算曲线或补偿。
+`forum/reply/fixed_posts.rs` 仅在全部固定帖确认后，以 auction 共享锁核对 settled 版本和无 pending，再按 sync lease/fencing/revision CAS 收口。
+普通扫描期间结算也不能以未发布快照完成；部分进度不写终态版本，未知写入保留原门禁。
+`forum/reply/commands.rs` 在 auction 共享锁下拒绝非 live/final 新命令或重试，不删除已有 pending。
 `forum/reply/queries.rs` 从既有命令账本投影 `last_error_code` 与有界详情，不回填或改写历史拒绝。
 新拒绝分类由 jobs owner 提供，仍经原 pending → rejected 条件更新收口；无需新增列或迁移。
 论坛领取可按 Worker 首轮水位重新领取旧凭据失败和未知写入，原失败码进入 claim；不领取 `write_authorization_required`，

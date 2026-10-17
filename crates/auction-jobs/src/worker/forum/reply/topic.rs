@@ -24,8 +24,15 @@ pub(super) async fn process_topic(
         .collect::<HashMap<_, _>>();
     let fixed_floor = topic.system_log_post_number();
     let mut system_entries = warning_entries(&topic, &preview, &post_numbers);
-    let targets = runtime.store.lot_targets(topic.auction_id).await?;
-    let target_by_code = target_map(targets)?;
+    let commands_open = runtime.store.reply_commands_open(topic.auction_id).await?;
+    let target_by_code = if commands_open {
+        target_map(runtime.store.lot_targets(topic.auction_id).await?)?
+    } else {
+        // 流拍场也能刷新；终态不需要可竞价 lot 映射，更不能解析身份或重放回帖。
+        system_entries
+            .retain(|entry| entry.post_number <= topic.processed_through_post_number as usize);
+        HashMap::new()
+    };
     // 先读持久 pending 边界，不能等较晚竞价已提交后才压低展示水位。
     let pending = runtime.store.command_outcomes(topic.auction_id, topic.thread_id.clone()).await?;
     let mut pending_boundary = pending
@@ -34,9 +41,13 @@ pub(super) async fn process_topic(
         .map(|outcome| post_numbers.get(&outcome.post_id).copied().unwrap_or(fixed_floor))
         .min();
     let mut command_error = None;
-    let mut processed_through_post_number = fixed_floor;
+    let mut processed_through_post_number =
+        if commands_open { fixed_floor } else { topic.processed_through_post_number as usize };
 
     'posts: for post in &preview.posts {
+        if !commands_open {
+            break;
+        }
         let Some(post_number) = post_numbers.get(&post.post.id).copied() else {
             return Err(repository_error("论坛帖子缺少真实楼层映射"));
         };
@@ -44,6 +55,13 @@ pub(super) async fn process_topic(
             || topic.catalog_continuation.iter().any(|page| page.post_id == post.post.id)
         {
             continue;
+        }
+        // 领取时 live 不保证扫描时仍 live；停止新回帖消费，最终快照仍须走全页证明。
+        // begin_command 在拍卖锁内再次复核，覆盖此只读检查之后的状态竞争。
+        if !runtime.store.reply_commands_open(topic.auction_id).await? {
+            processed_through_post_number =
+                processed_through_post_number.max(topic.processed_through_post_number as usize);
+            break 'posts;
         }
         // 已删除的 pending 帖把边界设为系统日志楼层；编辑后无命令的原帖也必须阻挡后续楼层。
         if pending_boundary.is_some_and(|boundary| {
@@ -319,7 +337,7 @@ struct TopicScanProgress {
 
 async fn refresh_fixed_posts(
     runtime: &ForumReplyRuntime,
-    topic: auction_application::ForumReplyTopic,
+    mut topic: auction_application::ForumReplyTopic,
     scan: TopicScanProgress,
     clock: &dyn auction_application::Clock,
     poll_interval: chrono::Duration,
@@ -332,6 +350,9 @@ async fn refresh_fixed_posts(
         return Err(repository_error("论坛已处理楼层不能倒退"));
     }
     let mut snapshot = runtime.store.load_current_snapshot(topic.auction_id).await?;
+    // pending 阻断扫描完成时只更新变化页，不能反复 POST 未变化的终态正文。
+    let confirmed_settled_version =
+        (snapshot.settled && scan_completed).then_some(snapshot.state_version);
     snapshot.public_url = super::super::forum_sync::resolve_public_url(
         runtime.public_base_url.as_deref(),
         snapshot.public_url.as_deref(),
@@ -366,14 +387,18 @@ async fn refresh_fixed_posts(
     let system_log_changed = !forum_post_bodies_match(&system_log.body, &topic.system_log_body);
     let floor_changed = processed_through_post_number_i32 != topic.processed_through_post_number;
     let reconciliation_only = topic.content_last_error_code.as_deref() == Some("write_unknown");
-    if reconciliation_only {
+    if reconciliation_only || confirmed_settled_version.is_some() {
+        // 准备完成终态刷新时，即使本地正文相同也须确认全部固定帖，不能用 live 镜像伪造完成。
         // 未知结果不能仅凭本轮固定帖身份收敛，否则会把期间尚未发送的新出价镜像吞掉。
         // 启用校验时须逐字回读；关闭时保留未知门禁，两种模式下都绝不重发未知 POST。
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
             &topic.catalog_post_id,
-            None,
+            (!reconciliation_only).then(|| ForumTopicMetadata {
+                title: Some(catalog.title.clone()),
+                description: Some(catalog.description.clone()),
+            }),
             ForumRenderedPost { body: catalog.body.clone() },
             write_progress,
         )
@@ -390,7 +415,10 @@ async fn refresh_fixed_posts(
     }
     // 续页同样受逐帖证明与未知写入栅栏保护；全部页面证明齐备后才推进本地版本/水位。
     for (page, previous) in catalog.catalog_continuation.iter().zip(&topic.catalog_continuation) {
-        if reconciliation_only || !forum_post_bodies_match(&page.body, &previous.body) {
+        if reconciliation_only
+            || confirmed_settled_version.is_some()
+            || !forum_post_bodies_match(&page.body, &previous.body)
+        {
             reconcile_or_edit_fixed_post(
                 runtime,
                 &topic,
@@ -402,6 +430,9 @@ async fn refresh_fixed_posts(
             .await?;
         }
     }
+    // 仅在全部固定帖证明之后携带终态版本；存储完成入口再锁定拍卖复核。
+    // scan 未完成时仅保存部分进度，绝不写终态完成版本。
+    topic.confirmed_settled_version = confirmed_settled_version;
     if !catalog_changed && !continuation_changed && !system_log_changed {
         if !scan_completed {
             if !floor_changed {
@@ -425,7 +456,7 @@ async fn refresh_fixed_posts(
             .finish_topic_scan(topic, processed_through_post_number_i32, updated_at, next_scan_at)
             .await;
     }
-    if catalog_changed && !reconciliation_only {
+    if catalog_changed && !reconciliation_only && confirmed_settled_version.is_none() {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,
@@ -439,7 +470,7 @@ async fn refresh_fixed_posts(
         )
         .await?;
     }
-    if system_log_changed && !reconciliation_only {
+    if system_log_changed && !reconciliation_only && confirmed_settled_version.is_none() {
         reconcile_or_edit_fixed_post(
             runtime,
             &topic,

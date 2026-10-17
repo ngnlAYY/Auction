@@ -8,6 +8,8 @@ mod bootstrap;
 mod database_bootstrap;
 mod delegation;
 mod forum;
+mod lot_watch_pm;
+pub(crate) use lot_watch_pm::*;
 mod preflight;
 mod rules;
 mod settlement;

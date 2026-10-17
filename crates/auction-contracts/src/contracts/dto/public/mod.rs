@@ -12,3 +12,5 @@ pub use commands::*;
 
 mod watch;
 pub use watch::*;
+mod watch_preference;
+pub use watch_preference::*;

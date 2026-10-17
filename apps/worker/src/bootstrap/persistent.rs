@@ -70,7 +70,7 @@ pub(super) async fn run_worker(
         configure_operations_alert(config, Arc::clone(&store), mail_delivery_transport.is_some())
             .await?;
     let recovery_delivery_enabled = mail_delivery_transport.is_some();
-    let (forum_sync, forum_reply) =
+    let (forum_sync, forum_reply, forum_pm) =
         configure_forum(config, Arc::clone(&store), mail_delivery_transport.is_some()).await?;
     let (
         settlement_store,
@@ -204,6 +204,16 @@ pub(super) async fn run_worker(
         .max(30);
     let auction_poll_interval = std::time::Duration::from_secs(poll_interval_seconds);
     let auction_lease_duration = std::time::Duration::from_secs(lease_duration_seconds);
+    let (pm_drain, pm_receiver) = tokio::sync::watch::channel(false);
+    let mut pm_task = forum_pm.map(|runtime| {
+        let worker_id = worker_id.clone();
+        TaskGuard::new(tokio::spawn(runtime.run(worker_id, pm_receiver)))
+    });
+    // 主 shutdown 一经触发即停止 PM 新领取，不等其他循环排空完成。
+    let shutdown = async {
+        shutdown.await;
+        pm_drain.send_replace(true);
+    };
     let result = auction_jobs::run_persistent_with_settlement_until_shutdown(
         auction_jobs::PersistentWorker {
             schedule,
@@ -312,6 +322,11 @@ pub(super) async fn run_worker(
     )
     .await;
     control.mark_draining();
+    pm_drain.send_replace(true);
+    // 主循环已有有界 drain；不再追加论坛长预算。剩余 PM 中止后仅按持久租约恢复，
+    // claimed 可重领，任何 sending 只读对账，绝不因关闭把未知写入回 pending。
+    abort_worker_task(&pm_task);
+    join_worker_task(&mut pm_task, "lot watch PM").await;
     abort_worker_task(&heartbeat_task);
     join_worker_task(&mut heartbeat_task, "worker heartbeat").await;
     if let Err(error) = heartbeat.publish_stopping().await {

@@ -11,6 +11,12 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// 装备 PM 安全列表或请求 Worker 只读核对，绝不重发。
+    #[command(name = "lot-watch-pm")]
+    LotWatchPm {
+        #[command(subcommand)]
+        action: LotWatchPmAction,
+    },
     CheckConfig {
         #[arg(value_enum, default_value = "public")]
         role: RoleArg,
@@ -238,6 +244,30 @@ pub(super) enum Command {
         /// 实际发生破坏性 mutation 后发布的不可覆盖私有 JSON 回执。
         #[arg(long)]
         receipt: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum LotWatchPmAction {
+    /// 只读安全投影，不输出正文或租约。
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        #[arg(long, default_value_t = 0)]
+        offset: i64,
+    },
+    /// 请求原 sender 的只读 Sent 核对，不授权再次发送。
+    Reconcile {
+        #[arg(long)]
+        notification_id: Uuid,
+        #[arg(long)]
+        command_id: Uuid,
+        #[arg(long)]
+        expected_fencing_version: i64,
+        #[arg(long)]
+        actor: String,
     },
 }
 

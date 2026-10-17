@@ -31,7 +31,7 @@ use identity::resolve_bidder_postgres;
 #[cfg(feature = "postgres")]
 use queries::{
     active_proxy_postgres, claim_published_topics_postgres, command_outcomes_postgres,
-    lot_targets_postgres,
+    lot_targets_postgres, reply_commands_open_postgres,
 };
 use validation::{
     MAX_ERROR_CODE_BYTES, MAX_ERROR_DETAIL_BYTES, MAX_FIXED_POST_ID_BYTES,
@@ -62,6 +62,20 @@ impl ForumReplyStore for DatabaseStore {
                 DatabaseStore::Postgres(store) => {
                     claim_published_topics_postgres(store, &worker_id, now, lease_until, limit)
                         .await
+                }
+            }
+        })
+    }
+
+    fn reply_commands_open(&self, auction_id: AuctionId) -> ApplicationFuture<'_, bool> {
+        Box::pin(async move {
+            if auction_id.is_nil() {
+                return Err(storage_error("论坛回帖拍卖标识无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                DatabaseStore::Postgres(store) => {
+                    reply_commands_open_postgres(store, auction_id).await
                 }
             }
         })

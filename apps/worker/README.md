@@ -25,6 +25,10 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `bootstrap/mod.rs` 选择配置/缓存/运行模式，`persistent.rs` 装配持久化 Worker；
 `forum.rs`、`operations_alert.rs`、`fulfillment.rs`、`control.rs` 各有独立职责。
 无数据库时 `skeleton.rs` 只报告进程状态，不执行任务或伪造数据库就绪。
+`forum.rs` 从同一 EhentaiGateway 注入 PM sender，复用唯一 ForumCookie ownership 和 HTTP 限速，不以 MM enabled 为条件。
+`persistent.rs` 以独立 TaskGuard 运行 LotWatchPmRuntime；shutdown 立即发 drain，主循环排空结束后 abort 余留任务，
+不增加关闭长预算。持久 claimed 可重领，任何 sending 只读对账，不以取消推断远端未发送。
+PM 每 delivery cadence 最多一封新发送及一项只读核对，forum 总预算小于 lease；来源/冻结渠道/缺 UID 规则见[不变量](../../docs/contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
 
 SIGINT/SIGTERM 将 control 标记为 draining，停止新 claim，在途任务沿原租约和结果证明路径收口；
 10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。

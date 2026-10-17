@@ -5,7 +5,10 @@
 //! `settlement/` 和 `operations/` 子目录。Worker control 不在这里声明，统一由 crate 根的
 //! `control/` 传输边界拥有。
 
+#[path = "forum/pm/mod.rs"]
+mod lot_watch_pm;
 mod runtime;
+pub use lot_watch_pm::LotWatchPmRuntime;
 
 pub use runtime::{
     AuctionScheduleRuntimeConfig, AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig,

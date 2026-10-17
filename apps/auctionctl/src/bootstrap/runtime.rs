@@ -69,7 +69,7 @@ mod managed;
 mod postgres;
 
 use cli::{
-    Cli, Command, DeploymentAction, MailEvidenceAction, PostgresRebuildModeArg,
+    Cli, Command, DeploymentAction, LotWatchPmAction, MailEvidenceAction, PostgresRebuildModeArg,
     SystemdControllerArgs,
 };
 use deployment::{

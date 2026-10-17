@@ -16,6 +16,7 @@ use super::forms::{
 use super::*;
 
 mod pagination;
+mod pm;
 mod request;
 mod session;
 mod topic;
@@ -82,6 +83,8 @@ impl EhentaiClientConfig {
 #[derive(Clone)]
 pub struct EhentaiClient {
     client: Client,
+    // PM 不信任兼容构造器传入的 redirect 策略；克隆共享此安全连接池及原 gate/owner。
+    pm_client: Option<Client>,
     base_url: Url,
     origin: String,
     gate: Arc<Mutex<Instant>>,
@@ -103,6 +106,7 @@ impl EhentaiClient {
         let origin = origin_of(&base_url).unwrap_or_default();
         Self {
             client,
+            pm_client: build_forum_http_client().ok(),
             base_url,
             origin,
             gate: Arc::new(Mutex::new(Instant::now())),
@@ -132,8 +136,11 @@ impl EhentaiClient {
         config.validate(EhentaiOperation::CreateTopic)?;
         let origin = origin_of(&config.endpoint)
             .ok_or(EhentaiError::configuration(EhentaiOperation::CreateTopic))?;
+        let pm_client = build_forum_http_client()
+            .map_err(|_| EhentaiError::configuration(EhentaiOperation::CheckSession))?;
         Ok(Self {
             client,
+            pm_client: Some(pm_client),
             base_url: config.endpoint,
             origin,
             gate: Arc::new(Mutex::new(Instant::now())),

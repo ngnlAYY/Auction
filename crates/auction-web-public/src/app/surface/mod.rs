@@ -28,6 +28,8 @@ mod realtime;
 mod rules;
 #[path = "../identity/session.rs"]
 mod session;
+#[path = "../identity/watch_preference.rs"]
+mod watch_preference;
 #[path = "../auction/watches/mod.rs"]
 mod watches;
 

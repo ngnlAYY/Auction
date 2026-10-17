@@ -447,7 +447,22 @@ command-session-expired = 登入工作階段已過期，請重新登入後再試
 command-retry-unchanged = 上次操作結果尚未確認。重試會傳送相同命令與金額；如需變更，請取消後重新操作。
 
 # 装备标记与整场同步
-watch-help = 標記裝備後，每次從領先變為被超越時僅傳送一次 MoogleMail；未領先時的價格變動不寄信。新建代理授權自動標記，一般競價不會自動標記。郵件失敗不撤銷已接受的競價；已開始傳送的郵件無法收回。
+watch-help = 標記裝備後，透過帳號所選管道接收超價警告，每個領先週期僅一次；未領先時的價格變動不通知。新建代理授權自動標記，一般競價不會自動標記。通知失敗不撤銷已接受的競價；已開始傳送的通知無法收回。
+watch-preference-link = 設定帳號警告管道
+outbid-title = 競價警告
+outbid-help = 為整個帳號選擇一種管道：MoogleMail（預設）或論壇 PM。僅影響已標記裝備的後續超價警告，每個領先週期一次，不影響結算或 COD。已排入佇列的通知仍按原管道處理。儲存的選擇跨裝置同步。儲存成功僅表示偏好已儲存，不保證可送達。論壇 PM 需要已綁定的論壇帳號；無法投遞時不會自動改發 MM。通知採非同步處理，可能延遲；目前狀態以網站為準。
+outbid-mm = MoogleMail（MM）
+outbid-pm = 論壇私訊（PM）
+outbid-save = 儲存管道
+outbid-loading = 正在讀取目前警告偏好…
+outbid-saving = 正在儲存警告偏好…
+outbid-load-error = 無法讀取目前偏好，請重新整理後再儲存。
+outbid-save-error = 未能儲存偏好，請先重新整理目前狀態再操作。
+outbid-conflict = 偏好或命令已發生衝突，請主動重新整理、確認目前選擇後再儲存。
+outbid-unknown = 儲存結果未知。已保留完整原請求，請原樣重試以確認結果。
+outbid-retry-command = 重試原請求
+outbid-refresh = 重新整理目前偏好
+outbid-confirmed = 請求已確認，已重新讀取伺服器目前偏好。
 watch-toggle = 標記裝備 { $code }
 watch-on = 已標記
 watch-off = 標記

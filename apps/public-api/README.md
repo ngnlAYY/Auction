@@ -30,7 +30,8 @@ PostgreSQL 的真实装备 URL 需要成对有效的 `equipment_data_key_id`/`eq
 OTLP headers 只从敏感 TOML 读取。周期心跳报告数据库/schema、审计写入失败计数和 tracing 安全状态。
 
 装备标记通过 `PublicApiState::with_lot_watches` 注入同一 PostgreSQL store；独立与合并入口共用。
-未编译/未装配数据库时 P23/P24 明确 503；不增加进程、配置或外部依赖。
+账号竞价警告通过 `with_lot_watch_preference` 注入同一 store，对应 P25/P26 GET/PUT；旧标记 mm 占位不变。
+未编译/未装配数据库时这些接口明确 503；不增加进程、配置或外部依赖。
 
 ## 持锁 relay 与故障边界
 
