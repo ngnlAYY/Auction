@@ -11,6 +11,12 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// 默认数据库只读责任预览；显式execute才核验真实身份/现金并对账。
+    #[command(name = "bot-funds")]
+    BotFunds {
+        #[command(flatten)]
+        args: super::bot_funds::BotFundsArgs,
+    },
     /// 只读检查旧草稿；只有显式 execute 和完整确认才修正软截止为900/900秒。
     #[command(name = "repair-draft-soft-close")]
     RepairDraftSoftClose {

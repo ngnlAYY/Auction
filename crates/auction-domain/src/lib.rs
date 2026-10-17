@@ -33,8 +33,9 @@ pub use proxy::{
     ProxyTransitionKind,
 };
 pub use settlement::{
-    AdjustmentAnchor, RecoveryMode, RecoveryPolicy, SETTLEMENT_PPM, SettlementAmount,
-    SettlementFact, SettlementLine, SettlementMode, SettlementObligation, SettlementObligationKind,
-    SettlementObligationState, SettlementPlan, SettlementPolicy, SettlementWorld, floor_ppm,
+    AdjustmentAnchor, FundingAccountKey, FundingSplit, InternalSettlementAction, RecoveryMode,
+    RecoveryPolicy, SETTLEMENT_PPM, SettlementAmount, SettlementFact, SettlementLine,
+    SettlementMode, SettlementObligation, SettlementObligationKind, SettlementObligationState,
+    SettlementPlan, SettlementPolicy, SettlementWorld, floor_ppm, funding_reconciliation_capacity,
     proportional_floor,
 };

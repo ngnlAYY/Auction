@@ -62,10 +62,13 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000043_forum_terminal_refresh.up.sql](000043_forum_terminal_refresh.up.sql) | forum 终态纳入与真实全页完成版本；升级前 settled 明确豁免，不伪造成功 |
 | [000044_user_timestamp_order.up.sql](000044_user_timestamp_order.up.sql) | Users 时间顺序约束；仅修复有 MM 注册/论坛同步双重证据的快照倒退并追加审计 |
 | [000045_mail_player_identity.up.sql](000045_mail_player_identity.up.sql) | 邮件凭据 nullable 预期完整玩家名称；不代表远端核验，不回填旧记录 |
+| [000046_mail_runtime_generation.up.sql](000046_mail_runtime_generation.up.sql) | 全局 mail_cookie 持久 generation；owner 启用前推进，内部事务锁验至提交 |
+| [000047_settlement_funding.up.sql](000047_settlement_funding.up.sql) | UID/Main/Credits 账户、真实唯一来源、用途分配与在飞/未知占用、追加账本 |
+| [000048_internal_fulfillment.up.sql](000048_internal_fulfillment.up.sql) | 内部履约/真实 collected/原退款用途的稳定命令与非敏感证明，原义务链不变 |
 
 ## 原则与基线
 
-当前 `000001`–`000045` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
+当前 `000001`–`000048` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
 `bid_proxies` 是只读兼容视图，权威写入进入授权与转换历史表。
 执行门禁见[迁移导航](../README.md)，对象归属见[数据库契约](../../docs/contracts/schema.md)。
 
@@ -91,6 +94,11 @@ PM sending_at/sender 由触发器保护不可清空或替换，sending 后不回
 
 `000045` 仅由 credentials owner 增加 mail-only 的预期名称和边界约束，无 verified 状态或内部结清表。
 旧凭据保持 NULL/原身份/密文，禁止默认删除重导入补绑；手动升级见[截止与邮件隔离](../../ops/README.md#截止规则与邮件发送隔离升级)。
+
+`000046` 不预填已启用 generation；配置 Cookie owner 也须遵守换主 fence。
+`000047` 只初始化资金 scope，未对账账户不开放自有额度；`000048` 不把旧 prepared/enqueued/unknown 改成内部成功。
+迁移前可验证备份并停止全部旧 writer，相关程序必须同版；见[Bot 升级门禁](../../ops/README.md#bot-内部履约与资金保护升级)。
+本轮没有执行这三份 SQL 或数据库并发验证。
 
 ## 历史 checksum 兼容
 

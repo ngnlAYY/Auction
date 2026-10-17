@@ -11,6 +11,7 @@ const SERIALIZABLE_RETRY_ATTEMPTS: usize = 3;
 enum ReconcileTransactionError {
     Storage(sqlx::Error),
     Repository(auction_application::RepositoryError),
+    Funding(auction_application::FundingError),
 }
 
 #[cfg(feature = "postgres")]
@@ -66,6 +67,13 @@ macro_rules! run_reconcile_transaction {
                             }
                             return Err(map_storage_error(error));
                         }
+                    }
+                    Err(ReconcileTransactionError::Funding(error)) => {
+                        if matches!(error, auction_application::FundingError::SerializationConflict)
+                            && attempt + 1 < SERIALIZABLE_RETRY_ATTEMPTS {
+                            continue;
+                        }
+                        return Err(repository_error_owned("履约资金保护门不可用"));
                     }
                     Err(ReconcileTransactionError::Repository(error)) => return Err(error),
                     Err(ReconcileTransactionError::Storage(error)) => {
@@ -129,6 +137,20 @@ pub(super) async fn satisfy_postgres(
     // 审计 ID 在重试轮次外生成，保证一次逻辑提交只对应一个审计身份。
     let audit_id = Uuid::new_v4();
     run_reconcile_transaction!(pool, transaction, {
+        let protected = super::internal::lock_legacy(&mut transaction, claim)
+            .await
+            .map_err(ReconcileTransactionError::Funding)?;
+        if protected
+            && matches!(
+                claim.kind,
+                SettlementObligationKind::WinnerEquipmentCod
+                    | SettlementObligationKind::WinnerPaymentCarrierCod
+            )
+        {
+            return Err(ReconcileTransactionError::Funding(
+                auction_application::FundingError::Unproven,
+            ));
+        }
         let updated = sqlx::query(
             r#"UPDATE public.settlement_obligation_fulfillments
                    SET execution_state = 'satisfied',

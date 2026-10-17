@@ -62,6 +62,12 @@ mod delivery_admin;
 mod equipment_link;
 #[path = "forum/public.rs"]
 mod forum;
+#[path = "forum/profile.rs"]
+mod forum_profile;
+pub use forum_profile::*;
+#[path = "settlement/evidence/mod.rs"]
+mod settlement_evidence;
+pub use settlement_evidence::*;
 #[path = "forum/pm.rs"]
 mod forum_pm;
 pub use forum_pm::*;
@@ -69,8 +75,14 @@ pub use forum_pm::*;
 mod forum_reply;
 #[path = "forum/sync.rs"]
 mod forum_sync;
+#[path = "settlement/funding.rs"]
+mod funding;
+pub use funding::*;
 #[path = "settlement/fulfillment.rs"]
 mod fulfillment;
+#[path = "settlement/internal/mod.rs"]
+mod internal_fulfillment;
+pub use internal_fulfillment::*;
 #[path = "auction/lifecycle.rs"]
 mod lifecycle;
 #[path = "mail/diagnostics.rs"]
@@ -270,7 +282,8 @@ pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredComm
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use core_repository::{AuctionRepository, RepositoryError};
 pub use delivery::{
-    DeliveryClaimExclusions, DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion,
+    AuthorizedDeliveryPreparation, AuthorizedDeliverySend, DeliveryClaimExclusions,
+    DeliveryFenceOutcome, DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion,
     DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
     DeliveryWorkStore,
 };

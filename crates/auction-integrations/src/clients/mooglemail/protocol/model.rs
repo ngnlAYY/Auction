@@ -64,6 +64,10 @@ pub enum MoogleMailOperation {
     Balance,
     /// 装备详情页面。
     Equipment,
+    /// Character Equipment 认证 UID 页面。
+    Identity,
+    /// Armory organize 正向库存页面，只读不提交表单。
+    Inventory,
     /// 新邮件页面。
     Compose,
     /// compose 页面附加 Credits。
@@ -88,6 +92,8 @@ impl MoogleMailOperation {
             Self::SentDetail => "sent_detail",
             Self::Balance => "balance",
             Self::Equipment => "equipment",
+            Self::Identity => "identity",
+            Self::Inventory => "inventory",
             Self::Compose => "compose",
             Self::AttachAdd => "attach_add",
             Self::AttachCod => "attach_cod",

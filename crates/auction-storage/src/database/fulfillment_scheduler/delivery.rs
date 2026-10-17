@@ -15,6 +15,7 @@ type DeliveryTransactionFuture<'a, T> =
 enum DeliveryTransactionError {
     Sqlx(sqlx::Error),
     Repository(auction_application::RepositoryError),
+    Funding(auction_application::FundingError),
 }
 
 #[cfg(feature = "postgres")]
@@ -34,17 +35,19 @@ impl From<auction_application::RepositoryError> for DeliveryTransactionError {
 #[cfg(feature = "postgres")]
 impl DeliveryTransactionError {
     fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Sqlx(sqlx::Error::Database(error))
-                if matches!(error.code().as_deref(), Some("40001" | "40P01"))
-        )
+        matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict))
+            || matches!(
+                self,
+                Self::Sqlx(sqlx::Error::Database(error))
+                    if matches!(error.code().as_deref(), Some("40001" | "40P01"))
+            )
     }
 
     fn into_repository_error(self) -> auction_application::RepositoryError {
         match self {
             Self::Sqlx(error) => map_storage_error(error),
             Self::Repository(error) => error,
+            Self::Funding(_) => repository_error_owned("履约业务锁或资金保护门不可用"),
         }
     }
 }
@@ -149,6 +152,9 @@ pub(super) async fn prepare_postgres(
         let preparation = preparation_snapshot.clone();
         let request_id = request_id_snapshot.clone();
         Box::pin(async move {
+            super::internal::lock_legacy(transaction, &claim)
+                .await
+                .map_err(DeliveryTransactionError::Funding)?;
             let inserted = sqlx::query(
                 r#"INSERT INTO public.deliveries (
                        id, command_id, request_digest, origin_kind, origin_id,
@@ -385,6 +391,9 @@ pub(super) async fn activate_postgres(
         let claim = claim_snapshot.clone();
         let request_id = request_id_snapshot.clone();
         Box::pin(async move {
+            super::internal::lock_legacy(transaction, &claim)
+                .await
+                .map_err(DeliveryTransactionError::Funding)?;
             let delivery = sqlx::query(
                 r#"SELECT status, activation_command_id, activation_request_digest
                    FROM public.deliveries

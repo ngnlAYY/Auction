@@ -18,7 +18,7 @@
 
 当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000045`；已发布文件不修改或删除。
+PostgreSQL 迁移为 `000001`—`000048`；已发布文件不修改或删除。
 历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
@@ -33,6 +33,27 @@ PostgreSQL 迁移为 `000001`—`000045`；已发布文件不修改或删除。
 | 排期来源：PostgreSQL `000039` | nullable `scheduled_rounds.schedule_snapshot`，类型为 JSONB，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
 | 用户时间：PostgreSQL `000044` | MM 注册账本时间等于创建时间、论坛身份历史时间等于倒退更新时间的用户；提升更新时间、推进版本并追加更正审计 | 不猜远端时区、不改创建时间/凭据/命令账本；剩余未知来源异常由新约束阻断迁移 |
 | 邮件预期名称：PostgreSQL `000045` | credential_keys 增加 nullable player_name，仅 mail_cookie 可设置，受长度/空白/控制字符约束 | 旧记录保持 NULL，无 verified 列、不回填或授权内部履约；保留旧凭据与未知发送证据 |
+
+### Bot 内部履约对象
+
+新增持久化能力由追加的 `000046`—`000048` 定义；本轮只做源码及静态验证，未执行迁移。
+以下是实际对象及 owner，不修改 `000045` 或历史证据。
+
+| 对象 | 唯一逻辑 / SQL owner | 职责 |
+| --- | --- | --- |
+| mail_runtime_generation | application credentials / storage credentials | 对齐全局 mail_cookie advisory lock 的单调 generation；取得 owner 后、任何远端操作前推进，内部事务锁验到提交 |
+| settlement_funding_accounts | application settlement funding / storage settlement_funding | 按认证 UID、Main、Credits 固定账户身份及对账状态；凭据轮换不重置资金，初始自有可用为 0 |
+| settlement_funding_entries / settlement_funding_sources / settlement_funding_commands | application settlement funding / storage settlement_funding | 真实资产及责任对账、资金来源唯一性、稳定命令重放及追加分录；不把理论结算池当实收，不修改历史来源 |
+| settlement_funding_allocations | application settlement funding / storage settlement_funding | 资金用途与外发占用；unknown 不按 TTL 或人工 failed 自动释放，全部现金发送复用同一门禁 |
+| settlement_funding_scope | application settlement funding / storage settlement_funding | 固定 mail_cookie 资金 scope，串行化账户启用与无证据 legacy 发送门 |
+| settlement_funding_receipts / settlement_funding_lots | application settlement funding / storage settlement_funding | 精确收款和 payment/delivery/UID+MID 唯一绑定、lot 来源与互斥用途，不回填旧 collected |
+| settlement_funding_returns | application settlement funding / storage settlement_funding | 每 delivery 唯一精确返还证据；本轮未开放人工返还入口 |
+| settlement_internal_commands | application settlement fulfillment / storage fulfillment_scheduler | 独立非敏感完整证明与稳定命令账本；obligation/action 唯一，原义务满足、资金、审计和直接依赖解除同事务 |
+
+内部证明不伪造 Sent、delivery ID 或远端收款；存量资金与旧未知投递不自动回填/结清。
+资金运维预览严格只读数据库责任、版本及摘要，不推进 generation，也不把未观测余额展示为可用额度。
+仅显式执行阶段取得真实身份/余额，并复核完整责任、稳定命令、版本与精确确认。历史账户归属缺证据时
+仅作保守隔离，不伪造当前账号实收；编译期现金门能力不代替所有相关程序同版升级的运维前提。
 
 ### 迁移语义与兼容边界
 
@@ -157,7 +178,9 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 不建立 compose 历史错误永久阻断表。既有 renew 同时支持 claimed/sending，不新增列或状态；
 delivery_scheduler 先锁行再检查数据库实时有效期、token/fencing 与新截止，禁止复活过期租约或缩短截止。
 release 仍仅接受有效 claimed；已 sending、未知 fence 提交及历史 unknown 不释放为 pending。
-内部履约当前无证明表、内部 satisfied 写入口或 `000046` 迁移。
+内部履约使用 `000048` 的独立命令/证明表和 `bot_internal_v1` satisfied 写入口，不伪造外部 delivery。
+`000046` generation 行不预填成功值；每次取得 mail owner 后推进并提交。`000047` 仅初始化资金 scope，
+账户缺失视为未对账、自有可用0；不由迁移回填旧现金、UID、来源或义务成功。
 
 `auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
 `default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。

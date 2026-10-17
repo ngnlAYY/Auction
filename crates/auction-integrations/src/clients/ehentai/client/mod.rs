@@ -17,6 +17,7 @@ use super::*;
 
 mod pagination;
 mod pm;
+mod profile;
 mod request;
 mod session;
 mod topic;

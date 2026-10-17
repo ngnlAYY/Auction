@@ -34,11 +34,15 @@ use super::validation::{repository_error, valid_external_mail_id, validate_claim
 /// 服务只把可执行的 `pending` 义务制作为 prepared delivery outbox，不读取密钥、不发 HTTP，
 /// 也不把 `prepared` 误报为外部发送成功；delivery Worker 负责后续激活、发送和证据回写。
 pub struct SettlementFulfillmentService {
-    store: Arc<dyn SettlementFulfillmentStore>,
-    recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader>,
+    pub(super) store: Arc<dyn SettlementFulfillmentStore>,
+    pub(super) recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader>,
     custody_reader: Arc<dyn SettlementFulfillmentCustodyReader>,
     evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
-    clock: Arc<dyn Clock>,
+    pub(super) clock: Arc<dyn Clock>,
+    pub(super) internal: Option<(
+        Arc<dyn crate::SettlementInternalFulfillmentStore>,
+        Arc<dyn crate::SettlementInternalEvidenceReader>,
+    )>,
 }
 
 impl SettlementFulfillmentService {
@@ -50,10 +54,10 @@ impl SettlementFulfillmentService {
         evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { store, recipient_reader, custody_reader, evidence_reader, clock }
+        Self { store, recipient_reader, custody_reader, evidence_reader, clock, internal: None }
     }
 
-    async fn prepare_now(
+    pub(super) async fn prepare_external(
         &self,
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
@@ -64,6 +68,7 @@ impl SettlementFulfillmentService {
         if claim.state != SettlementFulfillmentState::Pending {
             return Err(repository_error("当前履约阶段不允许生成 prepared delivery"));
         }
+        let classified_recipient = claim.recipient.clone();
         let (claim, intent) = match authorize_pending_or_prepared(
             self.store.as_ref(),
             self.recipient_reader.as_ref(),
@@ -89,6 +94,22 @@ impl SettlementFulfillmentService {
                 });
             }
         };
+        if claim.recipient != classified_recipient {
+            // 身份分支之后发生改名不能把已证明非bot的旧目标换成新目标直接派发。
+            let obligation_id = claim.obligation_id;
+            self.store
+                .fail(
+                    claim,
+                    retry_delay,
+                    "recipient_unavailable".to_owned(),
+                    "身份分支后的收件人已变化".to_owned(),
+                )
+                .await?;
+            return Ok(SettlementFulfillmentPhaseResult::Deferred {
+                obligation_id,
+                failure_code: "recipient_unavailable",
+            });
+        }
         let canonical = build_canonical_delivery(&intent)?;
         let preparation = SettlementDeliveryPreparation {
             delivery_id: stable_delivery_id(claim.obligation_id),
@@ -186,6 +207,21 @@ impl SettlementFulfillmentService {
         let Some(delivery_id) = claim.delivery_id else {
             return Err(repository_error("发送回执缺少 delivery identity"));
         };
+        if matches!(
+            claim.kind,
+            auction_domain::SettlementObligationKind::WinnerEquipmentCod
+                | auction_domain::SettlementObligationKind::WinnerPaymentCarrierCod
+        ) && let Some((store, _)) = &self.internal
+        {
+            let command = crate::SettlementInternalCommand::new(claim.clone(), None, true)?;
+            if store.replay_internal(command).await? {
+                return Ok(SettlementFulfillmentReconcileResult {
+                    obligation_id: claim.obligation_id,
+                    delivery_id,
+                    status: SettlementFulfillmentReconcileStatus::Satisfied,
+                });
+            }
+        }
         if claim.operation == SettlementFulfillmentOperation::Return {
             return self
                 .manual_reconcile_now(claim, delivery_id, "legacy_return_requires_review")
@@ -338,6 +374,13 @@ impl SettlementFulfillmentService {
             digest: proof_digest(&claim, delivery_id, &sent, None)?,
             observed_at: sent.observed_at,
         };
+        if matches!(
+            claim.kind,
+            auction_domain::SettlementObligationKind::WinnerEquipmentCod
+                | auction_domain::SettlementObligationKind::WinnerPaymentCarrierCod
+        ) {
+            return self.reconcile_collected(claim, proof, retry_delay).await;
+        }
         self.store.satisfy(claim, proof).await
     }
 
@@ -392,13 +435,32 @@ impl SettlementFulfillmentService {
 }
 
 impl SettlementFulfillmentCommandPort for SettlementFulfillmentService {
+    fn prepare_next(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        prepared_at: DateTime<Utc>,
+        retry_delay: Duration,
+    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome> {
+        Box::pin(async move { self.prepare_classified(claim, prepared_at, retry_delay).await })
+    }
+
     fn prepare(
         &self,
         claim: SettlementFulfillmentClaim,
         prepared_at: DateTime<Utc>,
         retry_delay: Duration,
     ) -> ApplicationFuture<'_, SettlementFulfillmentPhaseResult<SettlementFulfillmentResult>> {
-        Box::pin(async move { self.prepare_now(claim, prepared_at, retry_delay).await })
+        Box::pin(async move {
+            match self.prepare_classified(claim, prepared_at, retry_delay).await? {
+                crate::SettlementFulfillmentPreparationOutcome::External(result) => Ok(*result),
+                crate::SettlementFulfillmentPreparationOutcome::InternallySatisfied { .. } => {
+                    // 旧调用者没有无 delivery 成功类型，明确拒绝伪造身份；新版 Worker 使用 prepare_next。
+                    Err(repository_error(
+                        "义务已内部满足，请使用 prepare_next 读取无 delivery 结果",
+                    ))
+                }
+            }
+        })
     }
 
     fn activate(

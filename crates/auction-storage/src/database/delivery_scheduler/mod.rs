@@ -99,8 +99,13 @@ macro_rules! delivery_completion_gate {
     };
 }
 
+mod capability;
+#[cfg(feature = "postgres")]
+mod cash;
 #[cfg(feature = "postgres")]
 mod claims;
+#[cfg(feature = "postgres")]
+mod expired;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod outcome;
@@ -197,6 +202,46 @@ impl DeliveryWorkStore for DatabaseStore {
                 Self::Postgres(store) => start_sending_postgres(store.pool(), &_claim, _started_at)
                     .await
                     .map_err(ApplicationError::from),
+            }
+        })
+    }
+
+    fn start_sending_authorized<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: Option<&'a auction_application::SettlementInternalEvidenceSnapshot>,
+    ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
+        Box::pin(async move {
+            // 旧入口没有原单调截止，不能将有证据的现金授权降级为无期限提交。
+            if _evidence.is_some() {
+                return Err(ApplicationError::CapabilityUnavailable(
+                    "deadline-bound delivery cash authorization",
+                ));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    cash::run(store.pool(), &_claim, _started_at, None, None).await
+                }
+            }
+        })
+    }
+
+    fn start_sending_authorized_until<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: &'a auction_application::SettlementInternalEvidenceSnapshot,
+        _deadline: std::time::Instant,
+    ) -> auction_application::ApplicationFuture<'a, auction_application::DeliveryFenceOutcome> {
+        Box::pin(async move {
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    cash::run(store.pool(), &_claim, _started_at, Some(_evidence), Some(_deadline))
+                        .await
+                }
             }
         })
     }

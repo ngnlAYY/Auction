@@ -382,9 +382,8 @@ fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 cl
 不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立。下轮重新检查实际草稿，禁止永久历史错误 SQL gate。
 发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
 
-预期 `player_name`、Cookie 可用或 Item Shop 余额均非自身身份证明；配置有绑定但来源未证明时明确 `identity_unproven`。
-当前不生成 Verified proof，不启用 bot 内部免寄/付款。未来内部留存必须证明当前身份、真实库存/必要资金，
-并在同事务核对 active credential/world/version、租约 fencing、义务及依赖，不伪造 Sent/collected 或重新计算金额；
+预期 `player_name`、Cookie 可用或 Item Shop 余额均非自身身份证明；来源未证明时明确 `identity_unproven`。
+数据库旧预期名为 None 也必须远端联合核验，非空预期值精确匹配；内部履约与现金门见 I-09h。
 业务规则及原子写门禁见[应用履约](../../crates/auction-application/README.md#结算与恢复端口)。
 
 可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token
@@ -464,6 +463,50 @@ CLI reconcile 只以稳定命令和审计申请 Worker 只读核对；未证明�
 PM runtime 共享唯一论坛网关/凭据 owner/HTTP 限速，不依赖 MM enabled；forum.enabled=false 不外呼。
 每轮最多 1 新发送+1 只读核对，串行；使用 delivery cadence/jitter 和 forum 单项总超时/lease，总预算严格小于租约。
 未知 fence 提交不发送；预算到期停止工作，由持久租约恢复，而非将未知写入安全延期。
+
+### I-09h Bot 内部履约与现金保护
+
+- 身份来自同一 MM Cookie 认证 HV UID 与该 UID 的论坛目标资料名；论坛 Cookie 只提供读取权限，不取页头登录者。
+  forum.enabled 关闭或证据缺失明确延期，不暗中启用论坛，不把 MM Cookie 发往论坛。
+- 当前持有只接受批准七类 Armory organize 的精确 world/form/完整计数、非 disabled canonical eqids[] 及同 EID 行 handler，
+  同 session compose 必须干净，且同 EID/world 历史出站、恢复及其他义务占用无冲突。详情可读不是库存证明。
+  Isekai 独立读取且与 Main 同 UID，未知形状仅阻断相应分支，不复制 Main 库存。
+  资产冲突依据真实 origin/payload 闭集 schema：已验证无装备通知不构成 EID 占用，attachment_ids 按外部 EID/world，
+  secret 引用按实际装备 EID/world 核对。缺失/畸形/未知 schema、真实同资产占用仍失败关闭；
+  不凭 succeeded 放行，不解除旧 unknown，保留精确 recovered_handoff 例外与来源关联检查。
+- 内部提交要求数据库 active credential ID/version、全局 mail_cookie generation 与最长30秒的新鲜证据。
+  原 operation guard 持有到事务确定结束；开始可能提交后取消或结果未知同步撤销 owner，先查原稳定命令，不转外发。
+  所有取得 mail owner 的新版程序（含配置 Cookie）先推进 generation 并提交；配置/keyenv 不伪造持久凭据身份。
+- 数据库统一锁序为 generation → 排序 worlds → 资金 scope/account → auction → recovery → lot/equipment →
+  credentials → users → 排序 obligations → recovery actions → 排序 deliveries → 排序 fulfillments → allocation/proof/ledger/audit。
+  可省无关锁，不反锁；远端读取在业务事务外。SQLSTATE 40001/40P01 保留类型、最多三次整事务尝试，每次复核实时租约与证据。
+- 仅从未 prepare/activate/delivery 的新 pending 可内部满足。原稳定命令重放、资金动作、独立证明、satisfied、清 claim/版本、
+  审计与直接 blocked 依赖解除同事务；prepared/enqueued/unknown 不转换，contingent 退款不自动激活。
+  保持 B+C=S+T、原义务 ID 和 payment→handoff→seller；内部 carrier 不派发、不虚构1C；无伪 delivery 或 Sent。
+  bot 流拍留装备、买家分配真实 B/C、卖方 S 转 retained；WithdrawnReturn bot 收件明确不支持自动留存。
+- 资金账户固定认证 UID/Main/Credits，Cookie 换代不清余额或占用。普通 Balance/理论 pool 不是自有额度；
+  preview 数据库零写、不取 owner、不计算已证明可用额度。apply 经真实现金及完整责任核对、版本/摘要和精确确认才开额度。
+  旧无 UID 责任只保守隔离；新外部 COD 须同 session 精确 Sent-collected、原 exact-payload/冻结金额及唯一来源，
+  且发送晚于 opening 边界、发行后占用不超过新鲜现金。历史/跨边界来源继续等待，不释放 quarantine。
+  未资金化 Main 装备 COD/跨世界现金 carrier 已外发而收款事实未闭合，或关联 delivery 缺失，均阻断 preview/apply opening；
+  不从本地未 satisfied 推断未收款，确定尚未外发的 pending/prepared 付款不误判为已收责任。
+  补偿及隔离新增需求有零下界，既有 allocation 全计占用。collected 在满足/发行/解依赖之前，以已锁账户和
+  同一有效 Main cash 检查既有占用；缺口确定提交冻结并返回 FundingDeferred，不满足义务、不发行、不解除依赖。
+- retained、税与受限补偿不自动再投资；退款仅原恢复授权、同 UID 支付来源及装备恢复/卖方互斥责任闭合后转移原资金。
+  原 internal 才恢复原 proprietary；外部 collected 内部退款转受限留存，不新增经济权利或内部取消退款。
+- 全部受保护现金 Send（含 carrier、generic、旧入口）按精确原义务/payload 预留；reserved→in_flight 与 sending fence 同事务，
+  fence 成功及续租确认后才首次 poll。现金 fence 从 prepared 继承原单调绝对截止，等待/确认/存储预算取
+  原证据、有效租约及 finalize 截止最小值；同一 commit guard 覆盖重试，不从交接重建30秒。
+  数据库每次只用原剩余整毫秒与 UTC 证据窗口的交集设置 PostgreSQL 18 transaction_timeout，覆盖锁/审计/COMMIT；
+  零预算拒绝，不以0禁用超时。旧有证据入口缺精确单调期限拒绝；过晚/错误/取消或提交未知撤销 owner，不 poll 发送。
+  保留准备续租与慢续租公平性。无映射延期；余额缺口提交冻结且不发送。
+  Sent 记 spent，失败/未知保留 unknown 占用；TTL、重启、人工 failed 不释放。无证据 legacy 只在同事务 scope 锁下排除
+  所有保护账户和持久 allocation 后才可发送；缺 UID 不是其他账号证明。
+- 有 allocation 的新 Release/RetryFailed/ReconcileRetry/ReconcileSucceeded/ReconcileFailed 均 Invalid，原成功命令先重放。
+  无 allocation 的旧 retry 按 recovery scope→中间业务锁→actions→delivery→fulfillment/reset 预锁，不增加人工权限。
+  本轮无资金未知重发或人工返还入口，旧32条未知投递与草稿仍须另行核对。
+
+正式升级及专用账号约束见[运维手册](../../ops/README.md#bot-内部履约与资金保护升级)。
 
 ### I-10 缓存不是权威数据源
 

@@ -4,10 +4,11 @@ use auction_domain::SettlementWorld;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// 身份证明的固定语义来源；当前尚无受支持的认证自身页面解析器。
+/// 身份证明的固定语义来源；联合来源由 HV 认证 UID 与论坛目标资料绑定。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MailPlayerIdentityProofSource {
     AuthenticatedPlayerPage,
+    AuthenticatedHvUidForumTargetProfile,
 }
 
 impl MailPlayerIdentityProofSource {
@@ -15,6 +16,9 @@ impl MailPlayerIdentityProofSource {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AuthenticatedPlayerPage => "authenticated_player_page",
+            Self::AuthenticatedHvUidForumTargetProfile => {
+                "authenticated_hv_uid_forum_target_profile_v1"
+            }
         }
     }
 }

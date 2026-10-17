@@ -21,7 +21,7 @@
 | HTTP 与页面 | Public 26、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
 | SQLite 历史资产 | 运行支持已移除，保留已发布迁移与已有测试 | 保留文件或锁图可选依赖意味着当前支持 SQLite |
-| 迁移 | PostgreSQL 45 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 48 个追加迁移文件；SQLite 13 个历史文件保留 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -52,6 +52,75 @@ SQLite 退役前的完整 `just verify` 包括格式、文档（份数逐节注�
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、
 `cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交
 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；各节保留锁图条目数与结果。“审计修复”的不同策略单列。
+
+### 2026-10-17 论坛无装备通知分类遗漏（本地修复与定向复审完成）
+
+前轮定向复审中，funding 三项及 evidence 期限均为 `Merge verdict: OK`；execution 为 `BLOCK`：
+真实 producer 的 `forum_auction_notice` 复用 mail_intake 与 `forum:…` origin，但分类器遗漏其 origin/模板，
+使合法零资产通知仍阻断两世界内部履约。该历史阻断保留，本次不修改或重审已通过的资金/证据源码。
+
+以冻结 tree `25cb78b517c79dd2a008cf525ec254d878708fbb` 为输入，仅修改 storage conflicts 分类器及直接 README/本节：
+按同 command_id、同 world、command_kind=notify、零命令金额的既有论坛命令账本，重建 producer 完整
+`forum:<auction_uuid>:<thread_id>:<post_id>:<line>:<lot_code>` origin；再核对 origin_id=external_mail_id、
+精确模板/结果码、零 Credits/COD、空附件及无 key/正文。关联在原事务快照只读，不反向加论坛业务行锁。
+只将已证明无装备的通知排除，不凭前缀或 succeeded 泛化放行；错误 owner/world/载荷和未知 schema 仍阻断，
+真实资产、旧 unknown、精确 recovered_handoff 例外及原统一锁序保持。
+
+本次定向 rustfmt/格式检查、`cargo check --locked -p auction-storage --all-targets --no-default-features --features postgres`
+及一次完整 `just verify` 均通过，覆盖45份文档、格式/策略、工作区全部目标、PostgreSQL/Redis、全特性 Clippy `-D warnings` 与双端 WASM。
+工具链 rustc/cargo 1.99.0，主线 target、离线依赖和本任务私有 TMPDIR/日志。
+最终 execution 定向复审已在冻结 tree `f79459b1ffeacda6ca7c437edbbf65eb72b34790` 完成，结论为 `Merge verdict: OK`：
+原论坛通知遗漏 P1 闭合，本次修复影响区未发现新增 P0/P1/P2。此前资金三项和证据期限的定向复审均已通过，相关源码未再改动；
+至此五项初次复审发现全部闭合。父核验冻结源码、补丁、清单及实际静态日志一致；复审后只收尾本节，代码与迁移保持冻结，复核格式和文档门禁。
+以下记录保留各阶段原有的待复审状态及阻断事实，不代表当前仍有这些代码复审阻断。
+未新增/改写/运行行为测试，未运行 LSP、SQL、迁移、服务、真实配置/秘密读取、外呼、浏览器或发信，
+未操作旧32条未知投递及草稿，未 commit/push。真实数据库/协议及大库扫描运行证据仍待另行授权。
+
+### 2026-10-17 Bot 内部履约五项复审发现（本地修复，待定向复审）
+
+初次三路独立复审已完成，父采纳资金三项、装备冲突一项及现金 fence 期限一项；本节不改写此前静态通过记录或初次阻断结论。
+三组件以冻结输入 tree `19e03eb65eaf56d93327420134e059532cbcb0c5` 分别输出2/1/5文件增量，核验后由主线唯一 writer 一次整合：
+
+- funding：preview/apply 共用 snapshot 阻断未闭合外发 COD opening（Main 装备及跨世界现金 carrier）；
+  补偿/隔离新增需求明确零下界而保留既有占用；collected 在满足/发行/解依赖前检查同一现金，缺口确定提交冻结并延期。
+  跨 opening 来源拒绝与来源唯一性保留。
+- execution：按真实 origin/payload schema 排除已验证无装备通知，附件与 secret 引用按真实 EID/world 判断；
+  未知/畸形载荷和真实同资产占用仍阻断，旧 unknown、精确 recovered_handoff 例外和统一锁序不变。
+- evidence：prepared 原单调 deadline 经兼容窄端口 `start_sending_authorized_until` 传至现金 fence，
+  Worker 收紧为原证据/有效租约/finalize 最小截止；同一 guard 覆盖重试，PostgreSQL 18 transaction_timeout 覆盖整事务与 COMMIT。
+  截止后回执、错误/取消或提交未知撤销 owner，不 poll 发送；旧 Some 入口缺精确期限明确拒绝，None 保留受保护 legacy 门。
+
+本次显式 `cargo check --locked --workspace --all-targets --all-features` 与完整 `just verify` 均一次通过：
+45份文档、格式、仓库/布局/配置/i18n、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy `-D warnings` 与双端 WASM。
+工具链 rustc/cargo 1.99.0，主线 target，离线依赖及任务私有 TMPDIR/日志；8个源码文件逐字节等于组件冻结输出，未需额外机械编译接缝。
+正式 owner README、资金 CLI、不变量及升级说明同步。下一门禁为父核验冻结制品后，由原三位 reviewer 定向复审五项及影响区。
+未新增/修改/运行行为测试，未运行 LSP、迁移、服务、资金 CLI、外呼或访问秘密，未 commit/push；
+旧32条未知投递及草稿未动。PostgreSQL 时序/并发、真实 Main/Isekai 协议、运行对账和大库扫描仍待另行授权运行证据。
+
+### 2026-10-17 Bot 内部履约与现金保护（静态整合，待独立复审）
+
+在 `ad33eb7` 基线上一次整合证据/资金 foundation、内部履约及现金发送门三个冻结补丁，保留此前修复。
+credentials/integrations 拥有 HV认证UID+论坛目标资料名、严格正向 Armory 库存与全局 mail generation；
+funding 拥有真实对账/来源/用途/未知占用，fulfillment 拥有原义务内部证明和原子依赖推进，delivery 拥有全部现金发送门。
+Worker 的内部履约和现金 transport 注入同一 gateway/client/凭据集合/owner，资料 reader 仅在 forum.enabled 下装配。
+旧 None 预期名可联合核验，配置/keyenv 无持久内部身份；forum关闭或缺证据时明确延期。Admin Cookie check 仍只证明登录可用性。
+
+内部结果不伪造 delivery/Sent，不改变 B+C=S+T 或原 payment→handoff→seller；Isekai 单独证据，退款仍需原恢复授权。
+retained/税不自动再投资；有 allocation 的五种新 Admin delivery 动作拒绝，原成功命令先重放。
+旧无 allocation 重试已按 recovery→所需业务锁→actions→delivery→fulfillment/reset 接入两阶段预锁。
+新增迁移 `000046`—`000048`；[bot-funds](../apps/auctionctl/README.md#bot资金对账) preview 零写、不取 owner、不算可用额度，
+apply 才获取真实证据并复核全责任/版本/摘要和精确确认。[手动升级](../ops/README.md#bot-内部履约与资金保护升级)要求可验证备份、
+全 writer 停机和同版程序，禁止滚动混用旧 Worker；旧000039顺序升级至000048，普通启动不隐式迁移。
+
+显式 `cargo check --locked --workspace --all-targets --all-features` 与完整 `just verify` 已通过，工具链 rustc/cargo 1.99.0，
+主线 target、任务私有 TMPDIR/日志；覆盖45份文档、格式、仓库/布局/配置/i18n、全部目标、PostgreSQL/Redis、
+全特性 Clippy `-D warnings` 和双端 WASM。初次检查发现 A 根22项导出缺失、C path模块路径及新结果大enum、
+B SQL字面量helper生命周期等纯编译接缝；以真实导出、路径、Box结果、自动解引用等最小修正收口，未改旧测试或关闭lint。
+原 delivery lease.rs、慢续租公平性与未知提交撤销owner保留；独立复审仍为下一门禁。
+
+本轮未新增/修改/运行行为测试、LSP、真实配置秘密、资金CLI执行、迁移、服务、外呼、浏览器或发信，未commit/push。
+旧32条未知投递及草稿保持原状。真实 Main/Isekai 协议、资金对账、PostgreSQL迁移/并发仍待授权运行证据；
+按UUID锁全部deliveries的冲突扫描及ready义务预锁的规模/事务时限须独立审查。以下旧阶段结论按原时间保留。
 
 ### 2026-10-17 截止、发送与 Admin 修复阶段交付
 
@@ -749,6 +818,7 @@ Rust/Cargo `1.98.0`、just `1.58.0` 下完整 `just verify`（当时 51 份文�
 
 - PostgreSQL 并发竞价、资格变化、序列化冲突、故障重启、损坏事实与恢复边界。
 - 真实 MoogleMail/E-Hentai 的认证、未知写入结果、Sent/Balance 证明与人工恢复。
+- Bot 联合身份/正向库存（含 Isekai）、真实资金对账、generation换主/提交未知、全现金保护与大库冲突锁成本。
 - Public/Admin 完整页面、五语言、认证组合、Admin 重启/凭据轮换及旧配置恢复、严格 decoder、实时帧和断线恢复。
 - Public 连接总量/用户配额、槽位释放、会话只读复核与撤销延迟、静默连接及分页快照。
 - 非空生产数据、目标主机权限与服务编排、制品切换、备份恢复和回执保管。

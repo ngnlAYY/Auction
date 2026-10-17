@@ -237,6 +237,11 @@ impl MoogleMailCredentialSet {
         Ok(Self { candidates: Arc::new(Mutex::new(candidates)), invalidator, ownership })
     }
 
+    /// 同 session 复用入口只能使用原集合，防止把另一 owner 的 HTTP client 配到此 Cookie。
+    pub(crate) fn owns_session(&self, session: &MoogleMailCredentialSession) -> bool {
+        Arc::ptr_eq(&self.candidates, &session.set.candidates)
+    }
+
     /// 将同一 owner 传给每物理请求的 HTTP 边界，不重新获取连接或凭据。
     pub(crate) fn ownership(&self) -> Option<Arc<dyn AdminCredentialRuntimeOwnership>> {
         self.ownership.clone()
@@ -361,9 +366,65 @@ pub(crate) struct MoogleMailCredentialSession {
 }
 
 impl MoogleMailCredentialSession {
-    /// 当前凭据是否配置预期完整名称；不把声明提升为远端证明。
-    pub(crate) fn has_expected_player_name(&self) -> bool {
-        self.current.player_name.is_some()
+    /// 本次取得独占 guard 时的派发世界；跨世界读取仍另验 scope。
+    pub(crate) fn internal_world(&self) -> MoogleMailWorld {
+        self.world
+    }
+
+    /// 返回当前 active 数据库身份和持久 fence；配置 Cookie 无稳定 ID，明确不支持。
+    pub(crate) fn internal_credential_binding(
+        &self,
+        world: MoogleMailWorld,
+    ) -> Result<
+        (Uuid, i64, auction_application::MailRuntimeBinding, Option<&str>),
+        auction_application::InternalEvidenceError,
+    > {
+        use auction_application::InternalEvidenceError as Error;
+        if self.operation_guard.is_none() {
+            return Err(Error::Unsupported);
+        }
+        if !self
+            .set
+            .candidate_is_active(self.current.key, world, self.operation)
+            .map_err(|_| Error::Unavailable)?
+        {
+            return Err(Error::Revoked);
+        }
+        let id = self.current.persistent_id.ok_or(Error::Unsupported)?;
+        let version =
+            self.current.state_version.filter(|value| *value > 0).ok_or(Error::Unsupported)?;
+        let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
+        let binding = owner
+            .mail_runtime_binding()
+            .filter(|value| value.generation > 0)
+            .ok_or(Error::Unsupported)?;
+        Ok((id, version, binding, self.current.player_name.as_deref()))
+    }
+
+    /// 同一绝对 deadline 覆盖 owner 探测；失效后不重建 session 或换 Cookie。
+    pub(crate) async fn check_internal_current(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<(), auction_application::InternalEvidenceError> {
+        use auction_application::InternalEvidenceError as Error;
+        self.internal_credential_binding(self.world)?;
+        let owner = self.set.ownership.as_ref().ok_or(Error::Unsupported)?;
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), owner.check())
+            .await
+            .map_err(|_| Error::Expired)?
+            .map_err(|_| Error::Revoked)?;
+        self.internal_credential_binding(self.world)?;
+        Ok(())
+    }
+
+    /// 未知内部提交结果同步撤销全部后续邮件操作；不影响论坛 owner。
+    pub(crate) fn revoke_internal_owner(&self) {
+        if let Some(owner) = &self.set.ownership {
+            owner.revoke_internal_use();
+        }
+        if let Ok(mut candidates) = self.set.candidates.lock() {
+            candidates.clear();
+        }
     }
 
     /// 返回当前 Cookie；调用方只把它交给同一逻辑操作的受限 HTTP 方法。
@@ -371,8 +432,18 @@ impl MoogleMailCredentialSession {
         &self.current.cookie
     }
 
+    /// 内部只读流程已经得到明确 MM 登录失效；仅回写当前 MM 凭据，不触及论坛凭据。
+    pub(crate) async fn invalidate_internal_current(&self) -> Result<(), MoogleMailError> {
+        self.revoke_internal_owner();
+        self.invalidate_selected().await
+    }
+
     /// 远端确认登录失效后回写状态并从当前进程池移除当前候选。
     pub(crate) async fn invalidate_current(&mut self) -> Result<(), MoogleMailError> {
+        self.invalidate_selected().await
+    }
+
+    async fn invalidate_selected(&self) -> Result<(), MoogleMailError> {
         let current = self.current.clone();
         {
             let mut candidates = self.set.candidates.lock().map_err(|_| {

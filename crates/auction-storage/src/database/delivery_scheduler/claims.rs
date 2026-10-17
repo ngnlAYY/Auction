@@ -15,67 +15,11 @@ pub(super) async fn claim_postgres(
 ) -> Result<Vec<DeliveryWorkClaim>, auction_application::RepositoryError> {
     let sending_grace_micros = i64::try_from(sending_grace.as_micros())
         .map_err(|_| repository_error_owned("delivery sending grace 超出数据库范围"))?;
+    // 过期结果单独短事务：资金scope/account必须在delivery前，不能批量先锁delivery。
+    super::expired::reconcile(pool, now, sending_grace_micros).await?;
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     super::quarantine::quarantine_mail_dispositions(&mut transaction, now).await?;
     super::watch::retire_invalidated(&mut transaction, now).await?;
-    let expired_rows = sqlx::query(
-        r#"WITH expired_sending AS (
-               SELECT id
-               FROM public.deliveries
-               WHERE status = 'sending'
-                 AND lease_expires_at + ($2::bigint * interval '1 microsecond') <= $1
-               ORDER BY lease_expires_at, id
-               LIMIT $3
-               FOR UPDATE SKIP LOCKED
-           )
-           UPDATE public.deliveries AS delivery
-           SET status = 'manual_reconcile',
-               lease_token = NULL,
-               lease_expires_at = NULL,
-               completed_at = $1,
-               external_reference = NULL,
-               failure_code = 'lease_expired_outcome_unknown',
-               result_metadata = '{"outcome_unknown":true,"reason":"sending_lease_expired"}'::jsonb,
-               fencing_version = delivery.fencing_version + 1,
-               updated_at = CURRENT_TIMESTAMP
-           FROM expired_sending
-           WHERE delivery.id = expired_sending.id
-           RETURNING delivery.id, delivery.command_id, delivery.fencing_version,
-                     delivery.attempt_count"#,
-    )
-    .bind(now)
-    .bind(sending_grace_micros)
-    .bind(EXPIRED_SENDING_RECONCILE_LIMIT)
-    .fetch_all(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    for row in expired_rows {
-        let delivery_id: Uuid = row.try_get("id").map_err(map_storage_error)?;
-        let command_id: Uuid = row.try_get("command_id").map_err(map_storage_error)?;
-        let fencing_version: i64 = row.try_get("fencing_version").map_err(map_storage_error)?;
-        let attempt_count: i32 = row.try_get("attempt_count").map_err(map_storage_error)?;
-        let request_id = command_id.to_string();
-        append_delivery_audit(
-            &mut transaction,
-            DeliveryAudit {
-                occurred_at: now,
-                actor_type: "worker",
-                actor_id: "delivery-worker",
-                action: RECONCILE_EXPIRED_SENDING,
-                delivery_id,
-                request_id: Some(&request_id),
-                source: "worker",
-                metadata: serde_json::json!({
-                    "status": "manual_reconcile",
-                    "failure_code": "lease_expired_outcome_unknown",
-                    "fencing_version": fencing_version,
-                    "attempt_count": attempt_count,
-                }),
-            },
-        )
-        .await
-        .map_err(map_storage_error)?;
-    }
     let excluded_worlds =
         exclusions.recipients.iter().map(|excluded| excluded.world.as_str()).collect::<Vec<_>>();
     let excluded_names = exclusions

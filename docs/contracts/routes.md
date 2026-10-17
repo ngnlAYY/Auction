@@ -524,6 +524,9 @@ Admin release/retry/reconcile-retry 在 lot → delivery 锁内复用 watch proo
 
 A34–A37 为完整档 delivery 安全列表、状态筛选、数字页及 release/retry/reconcile，携带 fencing version 和
 独立账本。reconcile 请求明确 `retry`/`succeeded`/`failed` 与对应外部引用/失败码；实际允许的动作受下节证明门禁约束。
+已有持久资金 allocation 的新 release、retry、reconcile 三类请求（共五种动作）统一返回 `400 invalid_delivery_command`（Invalid），
+不改状态或释放资金；原 command_id 已提交成功结果先重放。无绑定旧 retry 在同事务按 recovery scope→
+所需业务锁→actions→delivery→fulfillment/reset 预锁，原权限与 CAS 不变；本轮不新增资金人工恢复 API。
 列表从 send payload 投影 COD，从 outcome metadata 投影 `reason_code`、`take_required`、`returned_mail_id`，
 不返回原文。`take_required=false` 省略，客户端缺失按 false，显式 null/非布尔仍无效。命令只推进本地状态，
 不伪造远端回执；基础通知、结算 Send、入站 Return/Take 与 Sent/Balance 核对由 Worker 执行，缺 exact remote ID
@@ -721,7 +724,8 @@ A32 导入与安全投影支持可省略/nullable 的 `player_name`，仅 `mail_
 Some 必须不含控制字符、无首尾空白且最多256 UTF-8字节；不 trim、不折叠大小写或猜别名，forum 设置即拒绝。
 None 不改变旧导入命令摘要，旧账本/DTO 缺字段按 None 解码；改名及启停不修改绑定。
 这是预期声明，不是 verified 状态；现有凭据保持原记录与密文，本轮没有补绑定写入口，不以删除重导入代替安全补绑。
-当前 gateway 无绑定返回 None，有绑定无法证明自身名称返回内部稳定码 `identity_unproven`；不新增身份核验 HTTP 路由。
+当前 gateway 即使预期名 None 也读取同 MM 认证 UID 与论坛目标资料名；有值精确匹配，缺证据返回内部稳定码 `identity_unproven`。
+内部提交要求数据库 active ID/version、generation 和组合证明，不新增身份核验 HTTP 路由。
 A44 的 Valid 仅为可用性观测，Item Shop 余额也不是自身名称证明，不能授权内部免寄。
 
 A44 `POST /api/v1/admin/credentials/{credential_id}/check` 只校验已保存凭据，不接受原始 Cookie 或远端 URL。

@@ -9,32 +9,35 @@ struct MoogleMailWorkerGateway {
 
 pub(super) async fn build_poll_runtimes(
     mail_config: &auction_config::MoogleMailWorkerConfig,
-    world_configs: Vec<auction_config::MoogleMailWorldConfig>,
     client: Arc<MoogleMailClient>,
     credentials: MoogleMailCredentialSet,
+    profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
     processor: Arc<dyn MailProcessor>,
     store: Arc<DatabaseStore>,
     schedule: Arc<dyn RecurringSchedule>,
 ) -> anyhow::Result<(Vec<MailPollRuntime>, HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>)> {
+    let world_configs = mail_config.configured_worlds();
     let store_port: Arc<dyn MailPollStore> = store.clone();
     let mut gateways = HashMap::with_capacity(world_configs.len());
     let mut runtimes = Vec::with_capacity(world_configs.len());
     for world_config in world_configs {
         let world = MoogleMailWorld::parse(&world_config.world_id)
             .context("MoogleMail world_id must be main or isekai")?;
-        let gateway = Arc::new(
-            MoogleMailGateway::new(
-                Arc::clone(&client),
-                credentials.clone(),
-                MoogleMailGatewayConfig {
-                    maximum_pages: mail_config.maximum_pages,
-                    sender_allowlist: world_config.sender_allowlist,
-                    sender_allowlist_disabled: world_config.sender_allowlist_disabled,
-                    fetch_budget: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
-                },
-            )
-            .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-        );
+        let mut gateway = MoogleMailGateway::new(
+            Arc::clone(&client),
+            credentials.clone(),
+            MoogleMailGatewayConfig {
+                maximum_pages: mail_config.maximum_pages,
+                sender_allowlist: world_config.sender_allowlist,
+                sender_allowlist_disabled: world_config.sender_allowlist_disabled,
+                fetch_budget: std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
+            },
+        )
+        .map_err(|error| anyhow::Error::msg(error.to_string()))?;
+        if let Some(reader) = &profile_reader {
+            gateway = gateway.with_forum_profile_reader(reader.clone());
+        }
+        let gateway = Arc::new(gateway);
         let now = Utc::now();
         let scheduled_next_at =
             schedule.next_after(now).context("calculate next MoogleMail poll schedule")?;

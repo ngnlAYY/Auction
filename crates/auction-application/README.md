@@ -34,10 +34,16 @@
 MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 key 信封；Users 写事务必须重新锁定并复核身份。
 身份变化交给有界重试，新换绑必须由 active key 授权，已完成命令按账本重放。
 注册/换绑命令使用本地处理时钟，不以偏快的邮件接收时间抬高用户创建时间；装备投稿的既有接收时间门禁不变。
-`AdminCredentialRuntimeOwnership` 只暴露有界所有权检查，失效或取消后不恢复所有权，也不暴露数据库连接或凭据。
-[credentials/identity.rs](src/ports/admin/credentials/identity.rs) 拥有预期完整玩家名称边界与 `VerifiedMailPlayerIdentity` 证据类型。
-结构校验不代表远端验证；当前 gateway 不产生该证明，有绑定但无法证明时明确失败。旧 None 摘要与结果兼容，
-名称不授权内部结清；未来写入必须同事务复核当前 credential/world/version 与真实新鲜证明。
+`AdminCredentialRuntimeOwnership` 暴露有界所有权检查、可选全局 `mail_cookie` generation 与永久撤销，
+失效或取消后不恢复所有权，也不暴露数据库连接或凭据；旧实现默认没有内部提交能力。
+[credentials/identity.rs](src/ports/admin/credentials/identity.rs) 保留预期完整名称与旧 `VerifiedMailPlayerIdentity` 的兼容形状。
+[forum/profile.rs](src/ports/forum/profile.rs) 只按 HV UID 读取论坛目标资料，不取页头登录者；预期名称为 None 仍自动远端核验。
+[settlement/evidence](src/ports/settlement/evidence) 拥有完整 UID/凭据版本/generation/world 绑定、精确 EID 正向存在及 Main cash observation。
+opaque prepared 保留同 session/独占 guard；提交作用域未确定结束就取消或销毁会 sticky 撤销 owner。
+请求 purpose 区分结算 claim、投递 claim、资金运维命令；同一绝对预算最多 30 秒，证据不授权资金或义务状态变化。
+事务按统一锁序核验 generation、active 凭据、实时有效期以及业务 claim；现金观察不等于可用资金。
+`prepare_internal_evidence_with_sent` 在同一上下文追加精确 Sent 领取观察，纳入完整摘要及时间门禁；
+原 COD 金额与资金来源由成功 delivery/冻结义务锁验，不从零剩余资产猜测。
 
 ## 源码分组
 
@@ -81,15 +87,31 @@ Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplat
 履约 intent、payload、稳定身份及摘要不得包含装备 secret；派发世界与装备来源世界分别建模。
 
 `SettlementFulfillmentBotIdentityReader` 只读当前 active Cookie/world 的 `VerifiedMailPlayerIdentity`；
-无预期绑定返回 None，有绑定却无远端证明必须失败。该端口尚不接入内部结清写路径，不能从配置名称、
-Cookie 可用性、余额或装备详情可访问推导 bot 身份与托管。
+真实适配器无预期绑定也远端核验并返回 Some，无法证明时返回错误；保留 Option 签名兼容旧实现。
+内部提交使用独立 opaque evidence 上下文，不能从配置名称、Cookie 可用性、余额或装备详情可访问推导 bot 身份与持有。
 
-内部履约的待落地规则（当前未启用）：只处理未准备、无 delivery/未知结果的新 pending 义务。
-bot 自有装备流拍应内部留存；bot 中标不自寄 COD，按已有结算金额向真实卖家执行唯一原 seller payout，
-bot 卖家款内部留存仍等待原收款及直接依赖，双方均 bot 也不自寄。退款和 isekai carrier/交付保持原依赖，
-不另算净额、税或补偿，不伪造 Sent/collected、收款或库存归属。
-身份、当前库存及必要资金证据闭合后，`bot_internal_retained` 才能作为独立证明进入
-[存储原子事务设计](../auction-storage/README.md#内部履约原子事务设计)。
+[ports/settlement/internal](src/ports/settlement/internal) 与履约服务的 `internal.rs`、`collected.rs`、`refund.rs`
+拥有新 pending 的真实身份分支、内部满足、外部COD资金化及原合法退款用途授权。
+`with_internal_fulfillment` 注入数据库新窄端口和同一 opaque evidence reader；缺装配/证据/资金明确持久延期。
+`prepare_next` 返回独立 `InternallySatisfied`，没有 delivery ID；原 prepare/activate/reconcile 和旧claim字段保留。
+只处理未准备且无旧资产冲突的新 pending，已 prepared/enqueued 不转内部；WithdrawnReturn bot 收件等待人工核对。
+原稳定命令先重放，guard跨完整事务及有界重试；未知提交撤销owner，不换ID、不转外发。
+
+bot流拍保留真实装备，买家从已证明B/实际C分配原S/T，卖家将已资金化S转retained；双方bot仍走原链。
+Isekai付款前及handoff各自重核同UID真实库存；现金仍在Main，内部carrier不派发、不虚构1C。
+退款仅原equipment_recovered门激活的新pending；资金恢复用途由原内部/外部来源决定，不能自动再投资。
+外部COD使用同session with_sent完整快照，在原外部满足后、直接依赖解锁前调用资金owner；未启用账户保持原外部语义。
+[存储原子事务](../auction-storage/README.md#内部履约原子事务设计)独立保存 `bot_internal_v1` 证明，不伪造Sent。
+
+### 资金对账与用途端口
+
+[ports/settlement/funding.rs](src/ports/settlement/funding.rs) 与
+[services/settlement/funding](src/services/settlement/funding) 拥有独立资金端口及对账用例。
+preview 只读数据库，不读取远端身份/余额、不输出自由额度；apply 要求稳定命令、actor、预览摘要/CAS、
+明确的自有与补偿用途额度及逐字确认，再取得真实同session证据。提交guard保持到确定提交/回滚；
+未知结果撤销owner，按原命令核对。`FundingCashGateProvider` 默认无能力，只有完整现金发送门接线后才能apply。
+补偿仅资金化已冻结需求；旧无UID责任只能隔离扣占。新COD另需当前同session精确收款与UID绑定，
+不得从旧collected或总余额生成第二份现金来源。
 
 ## 管理端口与服务
 
@@ -132,6 +154,12 @@ Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；
 [ports/delivery](src/ports/delivery) 定义 claim、发送与结果端口；transport 可收紧进程内并发上限，
 让背压发生在领取和进入 `sending` 之前。`DeliveryTransport::prepare` 仅作只读前置，返回
 持有同一凭据独占上下文的消耗式 `DeliveryPreparedSend`；持久 fence 成功并确认续租后才 poll 写入。
+`prepare_authorized` 返回 `AuthorizedDeliverySend`，现金证据绑定真实 delivery request_hash/token/fencing，
+不为原 claim 伪造 state_version。现金 fence 经 `start_sending_authorized_until` 借用同 session 快照，
+携带 prepared 原单调绝对截止并收紧至有效租约/提交预算；默认实现明确 `CapabilityUnavailable`。
+数据库旧 `start_sending_authorized(Some)` 缺精确期限时拒绝，`None` 仍经过受保护 legacy 门。
+仅期限前确定 `Sending` 才允许发送，`Deferred` 是确定未写入/回滚或已提交冻结；Err/超时/取消撤销原 owner。
+无证据只代表 legacy 候选，存储仍须锁内排除所有资金保护和既有 allocation；旧端口不授予现金旁路。
 `DeliveryWorkStore::renew` 同时服务有效 claimed 的只读准备与 sending，严格匹配 token/fencing 和数据库实时租约，过期不得复活。
 准备保留总预算，fence 前后确认续租，等待不得超过已知租约；前置失败/超时尽力释放 claim，不写发送失败或未知结果。
 release 只接受有效 claimed，fence 提交未知保留持久隔离；历史 unknown 不因当前 compose 干净而自动恢复。

@@ -59,6 +59,12 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资
 直到后续写入结束或句柄被丢弃，中间不释放再重获、不换 Cookie。fence 后仍复核 compose 和原 Sent baseline，
 最终写入只执行一次；再次无法证明、写后拒绝或超时仍保留原未知结果边界。
 不自动清草稿；当前 compose 干净仅允许新任务继续，不能恢复旧 unknown。
+[transport/delivery/authorization.rs](src/clients/mooglemail/transport/delivery/authorization.rs)
+通过 `with_cash_evidence_gateway` 注入共享原 client/credential set/owner 的联合证据 gateway，
+在同一 session 复用身份与 Main cash 读取；只读 Arc 租约不取得第二个 operation guard。
+准备绝对期限覆盖排队与全部读取，fence 未确定结束就取消同步撤销 owner；消费证据后取回原 session 才发送。
+旧 `prepare/send` 拒绝非零 Credits Send，新授权入口缺 gateway 时仅返回 legacy 候选，不能自行授予发送许可。
+数据库资金门覆盖 seller/refund/carrier/generic，未映射用途明确延期；无第二客户端、凭据集合或清草稿路径。
 收件人不存在的退信在资产取回前也保留人工对账；自寄拒绝若已暂存资产同样保持 outcome_unknown。
 流拍/撤拍按原世界、原卖家逐件零 Credits/COD Send 原装备，历史冻结 Return 在远端写入前隔离。
 完整回执、诊断和人工核对要求见[邮件诊断](../../ops/mail-diagnostics.md)与[领域不变量](../../docs/contracts/invariants.md)。
@@ -153,6 +159,18 @@ HTTP/解析异常及失败邮件只能通过独立加密诊断留证；装备成
 Worker 凭据 owner 随集合传给 gateway、克隆客户端、发送器和分页上下文；装备来源也共用 MoogleMail owner。
 每个物理请求在限速后、发送前以有界检查核验原持锁 session；失锁永久停用，GET 返回不可用，POST 保守归为未知。
 该边界不能撤回已发请求，也不能把本地检查与远端写入原子化；无 owner 的显式本地构造保持原行为。
+
+[联合证据 gateway](src/clients/mooglemail/gateway/internal.rs) 从同一独占 session 读取 Character Equipment 的唯一 `let uid`、
+[论坛目标资料](src/clients/ehentai/client/profile.rs) 的完整名称和精确目标 MID；两站 Cookie 互不传递。
+论坛只读能力复用安全池、gate 与 owner，不启动发帖/PM任务。预期名称有值精确比较，为 None 也读取；失败不当作“不是 bot”。
+Armory 仅接纳七类 organize 的完整计数、同 world/MAIN_URL/action、正常非 disabled 且 id/value/行 handler 同一 EID 的正向行，
+还须同 session 干净 compose；不推断仓库、已装备或可交易性，未知结构失败关闭。
+Main cash observation 与 Isekai 装备可共享一个 guard，但分别读世界身份且 UID 必须一致；无 Isekai 正向结构就不产生该分支证明。
+准备、限速、所有 GET/body 和提交共享不超过 30 秒的绝对预算，并保留一秒提交余量。
+内部提交只接受数据库 active ID/version 与持久 generation；配置 Cookie 或旧 owner 明确 Unsupported。
+opaque 上下文保留 operation_guard 到事务结束，取消/提交未知同步 sticky 撤销 mail owner；同 EID 持久冲突和资金授权由调用事务核验。
+[Sent 组合读取](src/clients/mooglemail/gateway/sent_evidence.rs) 复用同 session 的既有列表/详情解析，精确匹配 MID/world/收件人/主题及可选可信 sent_at；
+缺持久预期时间使用 None，仍保存远端实际时间，不用 sending_at/当前时钟冒充。领取观察绑定当前 UID，原金额和成功 payload 关联由资金/履约 owner 核验。
 
 ## 维护与验证
 

@@ -58,8 +58,15 @@ pub(super) async fn run_worker(
     let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
-    let (mail_polls, mail_delivery_transport, mail_evidence_reader, mail_custody_reader) =
-        configure_mail_poll(config, Arc::clone(&store)).await?;
+    let (forum_sync, forum_reply, forum_pm, forum_profile_reader) =
+        configure_forum(config, Arc::clone(&store), config.worker.mooglemail.enabled).await?;
+    let (
+        mail_polls,
+        mail_delivery_transport,
+        mail_evidence_reader,
+        mail_custody_reader,
+        internal_evidence_reader,
+    ) = configure_mail_poll(config, Arc::clone(&store), forum_profile_reader).await?;
     let mail_owner: Option<Arc<dyn AdminMailPort>> = if config.worker.mooglemail.enabled {
         Some(Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock))))
     } else {
@@ -70,8 +77,6 @@ pub(super) async fn run_worker(
         configure_operations_alert(config, Arc::clone(&store), mail_delivery_transport.is_some())
             .await?;
     let recovery_delivery_enabled = mail_delivery_transport.is_some();
-    let (forum_sync, forum_reply, forum_pm) =
-        configure_forum(config, Arc::clone(&store), mail_delivery_transport.is_some()).await?;
     let (
         settlement_store,
         settlement_commands,
@@ -87,14 +92,19 @@ pub(super) async fn run_worker(
         let recipient_reader: Arc<dyn SettlementFulfillmentRecipientReader> = store.clone();
         let custody_reader: Arc<dyn SettlementFulfillmentCustodyReader> =
             mail_custody_reader.unwrap_or_else(|| Arc::new(UnavailableFulfillmentCustodyReader));
+        let mut fulfillment_service = SettlementFulfillmentService::new(
+            Arc::clone(&fulfillment_store),
+            recipient_reader,
+            custody_reader,
+            Arc::clone(&evidence_reader),
+            Arc::new(SystemClock),
+        );
+        if let Some(internal_evidence_reader) = internal_evidence_reader {
+            fulfillment_service = fulfillment_service
+                .with_internal_fulfillment(store.clone(), internal_evidence_reader);
+        }
         let fulfillment_commands: Arc<dyn SettlementFulfillmentCommandPort> =
-            Arc::new(SettlementFulfillmentService::new(
-                Arc::clone(&fulfillment_store),
-                recipient_reader,
-                custody_reader,
-                Arc::clone(&evidence_reader),
-                Arc::new(SystemClock),
-            ));
+            Arc::new(fulfillment_service);
         (
             Some(store.clone()),
             Some(Arc::new(DatabaseSettlementCommands::new(Arc::clone(&store)))),

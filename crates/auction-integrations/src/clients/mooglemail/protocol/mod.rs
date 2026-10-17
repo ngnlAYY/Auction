@@ -1,6 +1,8 @@
 //! MoogleMail 协议模型、URL 构造和输入校验的稳定出口。
 
 mod builder;
+mod inventory;
+pub use inventory::MoogleMailInventoryCategory;
 mod model;
 mod validation;
 

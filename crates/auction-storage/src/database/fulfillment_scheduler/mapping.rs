@@ -299,6 +299,16 @@ pub(super) fn valid_failure_code(value: &str) -> bool {
             | "evidence_unavailable"
             | "evidence_mismatch"
             | "fulfillment_outcome_unknown"
+            | "internal_unsupported"
+            | "internal_history_conflict"
+            | "internal_evidence_wait"
+            | "internal_return_unsupported"
+            | "internal_funds_wait"
+            | "internal_proof_or_funds_wait"
+            | "collected_funding_evidence_wait"
+            | "collected_funding_wait"
+            | "refund_funding_evidence_wait"
+            | "refund_funding_wait"
     )
 }
 

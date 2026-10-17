@@ -213,6 +213,20 @@ impl MoogleMailClient {
         self.builder.balance(world)
     }
 
+    /// 构造认证自身 UID 的只读固定目标。
+    pub fn identity(&self, world: MoogleMailWorld) -> MoogleMailTarget {
+        self.builder.identity(world)
+    }
+
+    /// 构造闭集分类的 Armory organize 只读目标。
+    pub fn inventory(
+        &self,
+        world: MoogleMailWorld,
+        category: super::protocol::MoogleMailInventoryCategory,
+    ) -> MoogleMailTarget {
+        self.builder.inventory(world, category)
+    }
+
     /// 构造装备详情目标。
     pub fn equipment(
         &self,

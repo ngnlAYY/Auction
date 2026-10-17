@@ -9,6 +9,7 @@ use auction_application::{
     AdminCredentialKind, AdminCredentialRuntimeOwnership, ApplicationFuture,
 };
 use futures_util::lock::Mutex;
+use sqlx::Connection;
 use thiserror::Error;
 
 use super::super::DatabaseStore;
@@ -22,6 +23,7 @@ type OwnershipConnection = Mutex<Option<sqlx::pool::PoolConnection<sqlx::Postgre
 pub struct CredentialRuntimeOwnership {
     connection: OwnershipConnection,
     valid: AtomicBool,
+    mail_binding: Option<auction_application::MailRuntimeBinding>,
 }
 
 impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
@@ -61,6 +63,18 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
 
     fn is_valid(&self) -> bool {
         self.valid.load(Ordering::Acquire)
+    }
+
+    fn mail_runtime_binding(&self) -> Option<auction_application::MailRuntimeBinding> {
+        self.is_valid().then_some(self.mail_binding).flatten()
+    }
+
+    fn revoke_internal_use(&self) {
+        self.valid.store(false, Ordering::Release);
+        // 连接已 close_on_drop；在飞 check 持有连接时也会观察 sticky 位并关闭。
+        if let Some(mut slot) = self.connection.try_lock() {
+            let _ = slot.take();
+        }
     }
 }
 
@@ -135,9 +149,37 @@ impl DatabaseStore {
                 if !acquired {
                     return Err(CredentialRuntimeOwnershipError::AlreadyOwned);
                 }
+                // 显式提交确认后才返回 owner；任何不确定错误都关闭原持锁 session。
+                // 内部业务事务锁相同行直到 commit，新进程必须等待此推进完成才允许外呼。
+                // 配置/keyenv Cookie 同样取得 mail owner，不能绕过此 fence。
+                let mail_binding = if kind == AdminCredentialKind::MailCookie {
+                    let mut transaction = connection
+                        .begin()
+                        .await
+                        .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                    let generation = sqlx::query_scalar::<_, i64>(
+                        "INSERT INTO public.mail_runtime_generation (scope, generation, activated_at)
+                         VALUES ('mail_cookie', 1, clock_timestamp())
+                         ON CONFLICT (scope) DO UPDATE
+                         SET generation = public.mail_runtime_generation.generation + 1,
+                             activated_at = clock_timestamp()
+                         RETURNING generation",
+                    )
+                    .fetch_one(&mut *transaction)
+                    .await
+                    .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(|_| CredentialRuntimeOwnershipError::Unavailable)?;
+                    Some(auction_application::MailRuntimeBinding { generation })
+                } else {
+                    None
+                };
                 Ok(CredentialRuntimeOwnership {
                     connection: Mutex::new(Some(connection)),
                     valid: AtomicBool::new(true),
+                    mail_binding,
                 })
             }
         }

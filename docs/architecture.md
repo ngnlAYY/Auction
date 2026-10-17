@@ -67,7 +67,17 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
 `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
 credentials owner 拥有预期 `player_name`、校验及版本传递；integrations gateway 复用既有凭据 ownership，
-无绑定返回 None、有绑定却无法证明自身身份返回 `identity_unproven`，不建立第二 Cookie 客户端。
+无预期名称也核验 HV 认证 UID 与论坛目标资料名，缺证据返回 `identity_unproven`，不建立第二 Cookie 客户端。
+
+Bot 内部履约源码已接线：credentials owner 增加全局 mail owner 的持久 generation，
+integrations 复用 HV 与论坛客户端联合核验身份、读取精确库存；application 编排内部义务与资金用途，
+storage 的 `settlement_funding` 独占资金来源、分配和追加账本，fulfillment 独占内部满足事实，
+delivery 通过资金窄端口保护全部现金外发。无预期名称的数据库 Cookie 经远端证明识别，
+但不把预期名、普通余额或装备详情可读当作证明；旧未知任务不自动转换。
+Worker 为履约与现金 transport 注入同一 MoogleMailGateway/client/凭据集合/owner；
+论坛资料 reader 复用已启用论坛的 gateway，关闭时明确证据不可用。auctionctl 仅显式 apply 装配远端。
+数据库锁前缀与 guard 生命周期见[内部履约不变量](contracts/invariants.md#i-09h-bot-内部履约与现金保护)；
+启用须先完成[停机同版升级与资金核对](../ops/README.md#bot-内部履约与资金保护升级)。
 
 ## 部署档位与能力
 
@@ -82,9 +92,11 @@ credentials owner 拥有预期 `player_name`、校验及版本传递；integrati
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
 | 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化；forum owner 持有终态刷新纳入标记及全固定页确认版本，结算结果仍归 settlement |
 | 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化；单目标未发布草稿软截止修正（默认只读） |
-| 邮件身份基础 | PostgreSQL `000045` 保存可选预期完整玩家名称及既有凭据版本；不生成远端身份证明，bot 内部履约尚未实现 |
+| 邮件身份基础 | PostgreSQL `000045` 保存可选预期完整玩家名称及既有凭据版本；预期值不是身份证明 |
+| Bot 可信证据 | `000046` 全局 mail generation；数据库 active 凭据、联合远端身份、精确正向库存及持有至提交的操作 guard；配置 Cookie 不伪造持久身份 |
+| Bot 现金与内部履约 | `000047` 真实资产及全部责任对账、来源唯一资金账本/预留、统一现金发送门；`000048` 独立内部证明与原义务依赖原子推进；初始自有资金为 0，未对账及未知资金不开放 |
 
-本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
+以上描述源码能力，运行与独立复审状态见[状态页](status.md)；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
 新增持久化能力先登记范围与 owner，再更新[对象契约](contracts/schema.md)、迁移和端口。
 
 ## 核心模型与数据流
@@ -172,7 +184,7 @@ MoogleMail Send 的 `DeliveryTransport::prepare` 在持久 sending fence 前只�
 application 既有 renew 端口覆盖有效 claimed/sending，storage `delivery_scheduler/state.rs` 在取得行锁后复核实时租约。
 prepare 保留总预算并周期续租，fence 前后确认续租，首次 poll 前再次检查截止；失效或不明不继续外部写入。
 脏草稿只使本轮对应 world 的 Send 延后，Take/Return 与其他 world 可继续；下轮重新观测，
-不按历史错误建立永久 SQL 阻断。旧 sending/unknown 不转换，内部留存仍待可信身份及真实库存证明。
+不按历史错误建立永久 SQL 阻断。旧 sending/unknown 不转换，内部留存仅接受新鲜联合身份、严格正向库存及无持久冲突证明。
 
 Admin 凭据导入的累计 unknown 由常驻原表单拥有，锁定原 UUID 与原字段，只能原样重试；Cookie 不进入 pending 集合。
 `auction-web-admin::app::surface::pending` 提供可选同步页级 gate，仅 Users 启用：首次提交和重试在 spawn 前共同占用，

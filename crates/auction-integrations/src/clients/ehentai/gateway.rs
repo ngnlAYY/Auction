@@ -176,6 +176,29 @@ impl EhentaiGateway {
     }
 }
 
+impl auction_application::ForumTargetProfileReader for EhentaiGateway {
+    fn read_target_profile(
+        &self,
+        target_uid: String,
+        deadline: std::time::Instant,
+    ) -> auction_application::InternalEvidenceFuture<
+        '_,
+        auction_application::ForumTargetProfileEvidence,
+    > {
+        Box::pin(async move {
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+                let session = self
+                    .credentials
+                    .begin()
+                    .map_err(|_| auction_application::InternalEvidenceError::Unavailable)?;
+                self.client.read_target_profile(&target_uid, session.cookie()).await
+            })
+            .await
+            .map_err(|_| auction_application::InternalEvidenceError::Expired)?
+        })
+    }
+}
+
 impl auction_application::ForumPmSender for EhentaiGateway {
     fn prepare<'a>(
         &'a self,

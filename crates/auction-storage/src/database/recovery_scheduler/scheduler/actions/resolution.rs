@@ -172,6 +172,12 @@ pub(super) async fn complete_action_in_transaction(
     terminal: &RecoveryTerminalState,
     audit_id: Uuid,
 ) -> Result<(), RecoveryActionTransactionError> {
+    // 父case必须在action之前锁定，与内部履约的 recovery→actions 前缀一致。
+    sqlx::query("SELECT id FROM public.settlement_recoveries WHERE id=$1 FOR UPDATE")
+        .bind(claim.recovery_id.as_uuid())
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(RecoveryActionTransactionError::from)?;
     let (proof_kind, proof_reference, proof_digest, proof_observed_at) = terminal.proof().map_or(
         (None, None, None, None),
         |(kind, reference, digest, observed_at)| {

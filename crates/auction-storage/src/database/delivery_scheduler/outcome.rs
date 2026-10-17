@@ -1,8 +1,8 @@
-//! delivery 成功、失败和人工复核终态写回。
+//! delivery终态与资金结果同事务；Sent支出，失败/未知均不释放资金。
 
 use super::mapping::*;
-
 use super::*;
+use crate::database::settlement_funding as funding;
 
 pub(super) async fn succeed_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -10,88 +10,183 @@ pub(super) async fn succeed_postgres(
     result: &DeliverySendResult,
     completed_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
-    // 所有主动寄送共享同一成功门，通知、告警与结算不能绕过真实 Sent 证明。
     if claim.payload.get("operation").and_then(serde_json::Value::as_str) == Some("send")
         && !verified_sent_result(claim, result)
     {
-        return Err(repository_error_owned("MoogleMail send 成功结果缺少完整 Sent 核验"));
+        return Err(repository_error_owned("MoogleMail send成功结果缺少完整Sent核验"));
     }
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    let updated = sqlx::query(
-        r#"UPDATE public.deliveries
-           SET status = 'succeeded',
-               lease_token = NULL,
-               lease_expires_at = NULL,
-               completed_at = $2,
-               external_reference = $3,
-               failure_code = NULL,
-               result_metadata = $4,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-             AND status = 'sending'
-             AND lease_token = $5
-             AND fencing_version = $6
-             AND lease_expires_at > $2"#,
-    )
-    .bind(claim.delivery_id)
-    .bind(completed_at)
-    .bind(&result.external_reference)
-    .bind(&result.result_metadata)
-    .bind(claim.lease_token)
-    .bind(claim.fencing_version)
-    .execute(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    if updated.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 成功写回时 lease 已失效"));
-    }
-    if claim.origin_kind == "settlement" {
-        let operation = result
-            .result_metadata
-            .get("operation")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| repository_error_owned("结算 delivery 成功结果缺少 operation"))?;
-        match operation {
-            "return" => {
-                if result
-                    .result_metadata
-                    .get("external_mail_id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_none()
-                    || result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
-                        != Some("action_removed_or_success_page")
-                {
-                    return Err(repository_error_owned("结算 return 成功结果缺少动作完成证明"));
-                }
-            }
-            // Sent 证明寄送成立；后续领取/COD 支付仍由 fulfillment owner 独立对账。
-            "send" if verified_sent_result(claim, result) => {}
-            _ => return Err(repository_error_owned("结算 delivery operation 无效")),
+    if claim.origin_kind == "settlement"
+        && result.result_metadata.get("operation").and_then(serde_json::Value::as_str)
+            != Some("send")
+    {
+        // 旧return保留原确定动作证明门，不凭人工引用生成Sent。
+        if result.result_metadata.get("operation").and_then(serde_json::Value::as_str)
+            != Some("return")
+            || result
+                .result_metadata
+                .get("external_mail_id")
+                .and_then(serde_json::Value::as_str)
+                .is_none()
+            || result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
+                != Some("action_removed_or_success_page")
+        {
+            return Err(repository_error_owned("结算delivery成功结果缺少动作证明"));
         }
+    }
+    persist(
+        pool,
+        claim,
+        completed_at,
+        Terminal {
+            status: "succeeded",
+            reference: Some(&result.external_reference),
+            failure: None,
+            metadata: &result.result_metadata,
+            audit: SUCCEED,
+            funding: auction_application::FundingDeliveryOutcome::Sent,
+        },
+    )
+    .await
+}
+
+pub(super) async fn fail_postgres(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    failure_code: &str,
+    outcome_unknown: bool,
+    external_reference: Option<&str>,
+    result_metadata: &serde_json::Value,
+    completed_at: DateTime<Utc>,
+) -> Result<(), auction_application::RepositoryError> {
+    persist(
+        pool,
+        claim,
+        completed_at,
+        Terminal {
+            status: if outcome_unknown { "manual_reconcile" } else { "failed" },
+            reference: external_reference,
+            failure: Some(failure_code),
+            metadata: result_metadata,
+            audit: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
+            funding: auction_application::FundingDeliveryOutcome::Unknown,
+        },
+    )
+    .await
+}
+
+struct Terminal<'a> {
+    status: &'static str,
+    reference: Option<&'a str>,
+    failure: Option<&'a str>,
+    metadata: &'a serde_json::Value,
+    audit: &'static str,
+    funding: auction_application::FundingDeliveryOutcome,
+}
+
+async fn persist(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    completed_at: DateTime<Utc>,
+    terminal: Terminal<'_>,
+) -> Result<(), auction_application::RepositoryError> {
+    for attempt in 0..3 {
+        match persist_once(pool, claim, completed_at, &terminal).await {
+            Ok(()) => return Ok(()),
+            Err(error) if error.retryable() && attempt < 2 => continue,
+            Err(_) => {
+                return Err(repository_error_owned(
+                    "delivery终态未确定写入，保留资金占用并核对原记录",
+                ));
+            }
+        }
+    }
+    Err(repository_error_owned("delivery终态重试已耗尽"))
+}
+
+async fn persist_once(
+    pool: &crate::database::TrackedPool<Postgres>,
+    claim: &DeliveryWorkClaim,
+    completed_at: DateTime<Utc>,
+    terminal: &Terminal<'_>,
+) -> Result<(), OutcomeError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE").execute(&mut *tx).await?;
+    // 无远端身份也只能使用持久关联，frozen/spent/returned均不能丢失绑定。
+    let account = funding::lock_funded_delivery_account(&mut tx, claim.delivery_id).await?;
+    sqlx::query("SELECT id FROM public.deliveries WHERE id=$1 FOR UPDATE")
+        .bind(claim.delivery_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let updated=sqlx::query(
+        "UPDATE public.deliveries SET status=$2,lease_token=NULL,lease_expires_at=NULL,
+         completed_at=$3,external_reference=$4,failure_code=$5,result_metadata=$6,updated_at=clock_timestamp()
+         WHERE id=$1 AND status='sending' AND lease_token=$7 AND fencing_version=$8
+         AND lease_expires_at>$3 AND lease_expires_at>clock_timestamp()
+         AND command_id=$9 AND request_digest=$10 AND origin_kind=$11 AND origin_id=$12
+         AND recipient=$13 AND payload=$14",
+    ).bind(claim.delivery_id).bind(terminal.status).bind(completed_at).bind(terminal.reference)
+        .bind(terminal.failure).bind(terminal.metadata).bind(claim.lease_token).bind(claim.fencing_version)
+        .bind(claim.command_id).bind(claim.request_hash.as_bytes().to_vec())
+        .bind(&claim.origin_kind).bind(&claim.origin_id).bind(&claim.recipient).bind(&claim.payload)
+        .execute(&mut *tx).await?;
+    if updated.rows_affected() != 1 {
+        return Err(OutcomeError::Rejected);
+    }
+    if let Some(account) = account {
+        funding::finish_funded_delivery(&mut tx, &account, claim.delivery_id, terminal.funding)
+            .await?;
     }
     let request_id = claim.command_id.to_string();
     append_delivery_audit(
-        &mut transaction,
+        &mut tx,
         DeliveryAudit {
             occurred_at: completed_at,
             actor_type: "worker",
             actor_id: "delivery-worker",
-            action: SUCCEED,
+            action: terminal.audit,
             delivery_id: claim.delivery_id,
             request_id: Some(&request_id),
             source: "worker",
             metadata: worker_state_metadata(
-                "succeeded",
+                terminal.status,
                 claim.fencing_version,
                 claim.attempt_count,
-                None,
+                terminal.failure,
             ),
         },
     )
-    .await
-    .map_err(map_storage_error)?;
-    transaction.commit().await.map_err(map_storage_error)?;
+    .await?;
+    tx.commit().await?;
     Ok(())
+}
+
+/// 各资金终态runner保留SQLSTATE/B分类直到最外层，不匹配错误字符串。
+pub(super) enum OutcomeError {
+    Sqlx(sqlx::Error),
+    Funding(auction_application::FundingError),
+    Rejected,
+}
+impl From<sqlx::Error> for OutcomeError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Sqlx(error)
+    }
+}
+impl From<auction_application::FundingError> for OutcomeError {
+    fn from(error: auction_application::FundingError) -> Self {
+        Self::Funding(error)
+    }
+}
+impl OutcomeError {
+    pub(super) fn retryable(&self) -> bool {
+        match self {
+            Self::Sqlx(error) => error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .is_some_and(|code| matches!(code.as_ref(), "40001" | "40P01")),
+            Self::Funding(auction_application::FundingError::SerializationConflict) => true,
+            _ => false,
+        }
+    }
 }
 
 fn verified_sent_result(claim: &DeliveryWorkClaim, result: &DeliverySendResult) -> bool {
@@ -119,73 +214,4 @@ fn verified_sent_result(claim: &DeliveryWorkClaim, result: &DeliverySendResult) 
             == Some(true)
         && result.result_metadata.get("proof").and_then(serde_json::Value::as_str)
             == Some("sent_exact_payload_v1")
-}
-
-#[cfg(feature = "postgres")]
-pub(super) async fn fail_postgres(
-    pool: &crate::database::TrackedPool<Postgres>,
-    claim: &DeliveryWorkClaim,
-    failure_code: &str,
-    outcome_unknown: bool,
-    external_reference: Option<&str>,
-    result_metadata: &serde_json::Value,
-    completed_at: DateTime<Utc>,
-) -> Result<(), auction_application::RepositoryError> {
-    let status = if outcome_unknown { "manual_reconcile" } else { "failed" };
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    let updated = sqlx::query(
-        r#"UPDATE public.deliveries
-           SET status = $2,
-               lease_token = NULL,
-               lease_expires_at = NULL,
-               completed_at = $3,
-               external_reference = $5,
-               failure_code = $4,
-               result_metadata = $6,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-             AND status = 'sending'
-             AND lease_token = $7
-             AND fencing_version = $8
-             AND lease_expires_at > $3"#,
-    )
-    .bind(claim.delivery_id)
-    .bind(status)
-    .bind(completed_at)
-    .bind(failure_code)
-    .bind(external_reference)
-    .bind(result_metadata)
-    .bind(claim.lease_token)
-    .bind(claim.fencing_version)
-    .execute(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    if updated.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 失败写回时 lease 已失效"));
-    }
-    // delivery 只提交自己的传输终态。fulfillment owner 会在后续领取中读取该状态，
-    // 以自身 claim/fencing 原子写入 failed/manual/satisfied 和唯一 owner audit。
-    let request_id = claim.command_id.to_string();
-    append_delivery_audit(
-        &mut transaction,
-        DeliveryAudit {
-            occurred_at: completed_at,
-            actor_type: "worker",
-            actor_id: "delivery-worker",
-            action: if outcome_unknown { OUTCOME_UNKNOWN } else { FAIL },
-            delivery_id: claim.delivery_id,
-            request_id: Some(&request_id),
-            source: "worker",
-            metadata: worker_state_metadata(
-                status,
-                claim.fencing_version,
-                claim.attempt_count,
-                Some(failure_code),
-            ),
-        },
-    )
-    .await
-    .map_err(map_storage_error)?;
-    transaction.commit().await.map_err(map_storage_error)?;
-    Ok(())
 }

@@ -54,7 +54,8 @@ impl Command {
             | Self::PostgresAdoptLegacyV28 { .. }
             | Self::PostgresRestore { .. }
             | Self::PostgresRebuild { .. } => EXIT_DEPENDENCY,
-            Self::BootstrapMailCredentials { .. }
+            Self::BotFunds { .. }
+            | Self::BootstrapMailCredentials { .. }
             | Self::ImportRulesDirectory { .. }
             | Self::ForumWriteRecoveryList { .. }
             | Self::AuthorizeForumWriteRetry { .. }
@@ -78,6 +79,7 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
+        Command::BotFunds { args } => bot_funds::run(args).await?,
         Command::RepairDraftSoftClose {
             auction_id,
             execute,

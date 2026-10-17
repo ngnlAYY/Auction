@@ -3,7 +3,12 @@
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-/// 调用方须已锁定 delivery、通过版本与人工重试授权，并在同一 Serializable 事务写入命令和审计。
+#[path = "delivery_retry/locks.rs"]
+mod locks;
+pub(crate) use locks::{lock_recovery_delivery_retry_actions, lock_recovery_delivery_retry_scope};
+
+/// 调用方须先按统一序调用scope→中间业务锁→actions，再锁delivery、复核版本与人工授权。
+/// 两阶段前缀和本函数必须在同一Serializable事务；这里只更新已预锁行并追加原命令/审计。
 /// 这里只恢复失败投影，不生成成功证明、不重新准备资产动作，也不清除其它 action 的阻断。
 pub(crate) async fn reset_after_delivery_retry(
     transaction: &mut Transaction<'_, Postgres>,
@@ -16,8 +21,7 @@ pub(crate) async fn reset_after_delivery_retry(
          FROM public.settlement_recovery_actions AS action
          INNER JOIN public.settlement_recoveries AS recovery ON recovery.id = action.recovery_id
          WHERE action.delivery_id = $1
-         ORDER BY action.id
-         FOR UPDATE OF action, recovery",
+         ORDER BY action.id",
     )
     .bind(delivery_id)
     .fetch_all(&mut **transaction)

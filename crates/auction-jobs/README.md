@@ -59,6 +59,11 @@ control 协议、handler、Unix server 和 Admin client
 配置变更不以旧命令 ID 重发新负载。结算使用持久化 claim 的 due_at，不以实际领取延迟改变业务时间。
 慢速代理扫描候选后交竞价事务重新校验，过期 generation 安全跳过。
 
+Fulfillment pending通过 `prepare_next` 区分原External与 `InternallySatisfied`；内部成功立即结束claim，
+不activate、不生成delivery ID或外部成功记录。pending身份准备与enqueued收款核对采用不超过有效lease/30秒的
+单一超时，覆盖guard排队、全部只读请求及数据库提交，不detach future；提交阶段取消由opaque guard撤销owner。
+普通证据/资金等待由应用持久延期，不写外部unknown；未知提交保留原稳定命令待重放。
+
 Delivery 有效并发取配置与 transport 的较小值，MoogleMail 当前上限为 1。
 发送前无凭据只释放 claim 并在本轮排除该世界；compose prepare 失败/超时仅在本轮排除该世界的 Send，
 下轮重新读取真实 compose。Take/Return 仍独立运行，preflight 延后不占发送批次，batch_limit=1 也能继续取其他合格任务。
@@ -70,6 +75,13 @@ prepared future 仅在交接确认后 poll；准备首次续租独立于 select 
 续租耗时4秒而间隔3秒时，回执后的 renew_at 虽已到期，操作仍能在有效截止内先被 poll，不连续被续租饿死。
 下一次续租仍按请求开始时刻计算，不把回执时刻加完整间隔误当剩余 TTL；瞬时回执维持原节奏，截止已到则禁止 poll。
 失败先丢弃句柄，release 仅接受 claimed，fence 提交未知保持隔离。
+Delivery 使用新增 `prepare_authorized`；现金准备证据与未poll的future持同一原session，
+同一 commit guard 覆盖完整授权 fence future 及存储有界重试，不 detach。
+现金交接使用 prepared 原单调绝对截止、有效租约截止与 finalize 截止的最小值；前置续租也不越过原证据期限。
+通过 `start_sending_authorized_until` 把同一收紧截止传至存储，不从交接时刻重建30秒预算；
+只有截止前收到确定回执才确认 guard/fence，过晚回执、提交未知或取消撤销同一 mail owner，不 poll 发送。
+确定 Deferred（未写入/回滚/已提交冻结）只延后，legacy 候选也保留撤销钩子。
+只有Sending与后续续租均确认才消费证据并首次poll；原双截止、慢续租后操作优先poll的公平性保持不变。
 上述未开始写入的延后仍只排除本轮目标 world Send；进入发送后沿用单次发送及未知结果隔离，不盲目重寄。
 Send、Return、Take 的证明由各 owner 校验，成功不取决于 HTTP 成功页，见[邮件诊断](../../ops/mail-diagnostics.md)。
 

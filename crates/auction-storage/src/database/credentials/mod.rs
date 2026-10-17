@@ -33,6 +33,13 @@ use super::DatabaseStore;
 mod check;
 mod common;
 #[cfg(feature = "postgres")]
+mod evidence;
+#[cfg(feature = "postgres")]
+pub use evidence::{
+    MailEvidenceTransactionError, lock_mail_evidence_credentials, lock_mail_runtime_generation,
+    validate_mail_evidence_time,
+};
+#[cfg(feature = "postgres")]
 mod mapping;
 #[cfg(feature = "postgres")]
 mod ownership;

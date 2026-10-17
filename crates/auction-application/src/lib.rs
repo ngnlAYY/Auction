@@ -69,22 +69,23 @@ pub use ports::{
     AuctionLifecyclePlan, AuctionLifecyclePolicy, AuctionLifecycleResult, AuctionLifecycleSnapshot,
     AuctionLifecycleTransaction, AuctionLifecycleWriteSummary, AuctionPolicyTemplate,
     AuctionPreviewSuccessorPlan, AuctionReader, AuctionRepository, AuctionScheduleSource,
-    AuctionScheduleTimes, CanonicalEquipment, CanonicalEquipmentStat, Clock, CommandLedger,
-    CommandLedgerError, CompetitionCommandAuditContext, CompetitionCommandAuditKind,
-    CompetitionCommandOutcome, CompetitionCommandPort, CompetitionProxyCommandOutcome,
-    CompetitionProxyTransitionOutcome, CompetitionProxyTransitionRecord, CompetitionSnapshot,
-    CompetitionTransaction, CompetitionTransactionError, CompetitionWireTimestamp,
-    CurrentAuctionSnapshot, DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE,
-    DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE,
-    DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
-    DeliveryAdminPage, DeliveryAdminPort, DeliveryAdminResult, DeliveryAdminSnapshot,
-    DeliveryClaimExclusions, DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion,
-    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
-    DeliveryWorkStore, EquipmentKeySealerPort, ExecuteSlowProxyCommand, FORUM_CATALOG_PAGE_SIZE,
-    ForumActiveProxy, ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity,
-    ForumCatalogLayout, ForumCatalogPage, ForumCommandOutcome, ForumCommandStart,
-    ForumCommandStatus, ForumCredentialAvailability, ForumCurrentBidSource, ForumLotSettlement,
-    ForumLotSnapshot, ForumLotTarget, ForumPostWriter, ForumPublishedLayout, ForumPublishedPost,
+    AuctionScheduleTimes, AuthorizedDeliveryPreparation, AuthorizedDeliverySend,
+    CanonicalEquipment, CanonicalEquipmentStat, Clock, CommandLedger, CommandLedgerError,
+    CompetitionCommandAuditContext, CompetitionCommandAuditKind, CompetitionCommandOutcome,
+    CompetitionCommandPort, CompetitionProxyCommandOutcome, CompetitionProxyTransitionOutcome,
+    CompetitionProxyTransitionRecord, CompetitionSnapshot, CompetitionTransaction,
+    CompetitionTransactionError, CompetitionWireTimestamp, CurrentAuctionSnapshot,
+    DEFAULT_PUBLIC_ACCOUNT_PAGE_SIZE, DEFAULT_PUBLIC_COMPENSATION_MOVEMENT_PAGE_SIZE,
+    DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, DeliveryAdminAction, DeliveryAdminCommand,
+    DeliveryAdminError, DeliveryAdminListRequest, DeliveryAdminPage, DeliveryAdminPort,
+    DeliveryAdminResult, DeliveryAdminSnapshot, DeliveryClaimExclusions, DeliveryFenceOutcome,
+    DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion, DeliverySendResult,
+    DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
+    EquipmentKeySealerPort, ExecuteSlowProxyCommand, FORUM_CATALOG_PAGE_SIZE, ForumActiveProxy,
+    ForumAuctionSnapshot, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogLayout,
+    ForumCatalogPage, ForumCommandOutcome, ForumCommandStart, ForumCommandStatus,
+    ForumCredentialAvailability, ForumCurrentBidSource, ForumLotSettlement, ForumLotSnapshot,
+    ForumLotTarget, ForumPostWriter, ForumPublishedLayout, ForumPublishedPost,
     ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError, ForumRenderedPost,
     ForumRenderedThread, ForumRenderer, ForumReplyStore, ForumReplyTopic, ForumSyncClaim,
     ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore, ForumSystemLogEntry,
@@ -208,10 +209,31 @@ pub use ports::{
     AdminCredentialVerifier, credential_check_worlds,
 };
 pub use ports::{
+    ForumTargetProfileEvidence, ForumTargetProfileReader, INTERNAL_EVIDENCE_PROTOCOL,
+    InternalEquipmentTarget, InternalEvidenceCommitGuard, InternalEvidenceError,
+    InternalEvidenceFuture, InternalEvidenceLease, InternalEvidencePurpose,
+    InternalEvidenceRequest, InternalSentCollectionTarget, MAIL_RUNTIME_SCOPE,
+    MailAccountEvidenceBinding, MailRuntimeBinding, PreparedSettlementInternalEvidence,
+    SettlementInternalEvidenceReader, SettlementInternalEvidenceSnapshot,
+    VerifiedMailEquipmentPresence, VerifiedMailSentCollectionObservation,
+    VerifiedMainCashObservation, internal_evidence_deadline, valid_external_positive_id,
+};
+pub use ports::{
+    FundingCashGate, FundingCashGateProvider, FundingCollectedReceipt, FundingCommitOutcome,
+    FundingDeliveryOutcome, FundingError, FundingFuture, FundingMutation, FundingPreview,
+    FundingReconciliationCommand, FundingReconciliationReader, FundingReconciliationResult,
+    FundingReconciliationWriter, FundingReturnKind, FundingReturnProof,
+};
+pub use ports::{
     MailPlayerIdentityProofSource, VerifiedMailPlayerIdentity, valid_credential_player_name,
     valid_mail_player_name,
 };
+pub use ports::{
+    SettlementFulfillmentPreparationOutcome, SettlementInternalCommand,
+    SettlementInternalCommitOutcome, SettlementInternalFulfillmentStore,
+};
 pub use services::AdminCredentialCheckService;
+pub use services::FundingReconciliationService;
 pub use services::{
     AdminAuctionCreateService, AdminAuctionScheduleService, AdminCredentialService,
     AdminIntakeService, AdminLotUpdateService, AdminMailService, AdminRulesService,

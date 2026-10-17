@@ -180,7 +180,7 @@ fn fulfillment_gateway(
 }
 
 /// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
-/// 当前只读适配不连接内部 satisfy：可信身份页面与真实库存证明闭合后才可启用写路径。
+/// 此兼容端口只返回身份；内部 satisfy 由同一 gateway 的独立组合证据端口授权。
 #[cfg(feature = "postgres")]
 impl auction_application::SettlementFulfillmentBotIdentityReader
     for MoogleMailFulfillmentEvidenceReader

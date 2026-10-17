@@ -32,6 +32,7 @@ mod claims;
 #[cfg(feature = "postgres")]
 mod delivery;
 mod dependencies;
+mod internal;
 mod mapping;
 #[cfg(feature = "postgres")]
 mod reconcile;

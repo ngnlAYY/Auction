@@ -5,7 +5,7 @@ use super::super::*;
 
 type MailProcessorPorts = (
     Arc<dyn MailProcessor>,
-    Arc<dyn DeliveryTransport>,
+    MoogleMailDeliveryTransport,
     Arc<dyn SettlementFulfillmentCustodyReader>,
 );
 
@@ -81,20 +81,18 @@ pub(super) fn build_processor_and_delivery(
             let notification_templates =
                 MoogleMailNotificationTemplates::from_values(mail_config.mail_templates.values())
                     .map_err(|error| anyhow::Error::msg(error.to_string()))?;
-            let delivery_transport: Arc<dyn DeliveryTransport> = Arc::new(
-                MoogleMailDeliveryTransport::with_templates(
-                    client.clone(),
-                    credentials.clone(),
-                    login_keys,
-                    notification_templates,
-                )
-                .with_send_verification(
-                    mail_config.maximum_pages,
-                    std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
-                )
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?
-                .with_settlement_equipment_secrets(equipment_secrets, delivery_opener),
-            );
+            let delivery_transport = MoogleMailDeliveryTransport::with_templates(
+                client.clone(),
+                credentials.clone(),
+                login_keys,
+                notification_templates,
+            )
+            .with_send_verification(
+                mail_config.maximum_pages,
+                std::time::Duration::from_secs(mail_config.fetch_timeout_seconds),
+            )
+            .map_err(|error| anyhow::Error::msg(error.to_string()))?
+            .with_settlement_equipment_secrets(equipment_secrets, delivery_opener);
             let processor: Arc<dyn MailProcessor> = Arc::new(
                 auction_application::MailProcessorService::new_for_worlds(
                     world_configs.iter().map(|world| world.world_id.clone()).collect(),

@@ -240,7 +240,8 @@ pub struct SettlementFulfillmentBalanceEvidence {
 
 /// 履约读取当前 bot 游戏身份的窄端口；只接受同一 active Cookie/world 的远端证明。
 ///
-/// None 仅表示未配置预期绑定；已配置但不能证明时必须返回错误，不能降级为配置名称。
+/// 保留 Option 签名兼容已有适配器；真实读取成功返回 Some，失败必须返回错误。
+/// 未配置预期名称仍需远端联合核验，不能以 None 跳过识别或降级为配置名称。
 /// 此端口不授权满足义务：内部留存还须独立验证真实托管、资金、依赖和事务凭据版本。
 pub trait SettlementFulfillmentBotIdentityReader: Send + Sync {
     fn read_verified_player_identity(
@@ -392,6 +393,21 @@ pub trait SettlementFulfillmentStore: Send + Sync {
 
 /// 结算履约用例端口；Worker 只负责调度，不自己拼接或写入 delivery payload。
 pub trait SettlementFulfillmentCommandPort: Send + Sync {
+    /// 新版 Worker 使用此入口；旧实现仍明确执行原外部准备，不改变已有测试/适配器签名。
+    fn prepare_next(
+        &self,
+        claim: SettlementFulfillmentClaim,
+        prepared_at: DateTime<Utc>,
+        retry_delay: Duration,
+    ) -> ApplicationFuture<'_, crate::SettlementFulfillmentPreparationOutcome> {
+        Box::pin(async move {
+            self.prepare(claim, prepared_at, retry_delay)
+                .await
+                .map(Box::new)
+                .map(crate::SettlementFulfillmentPreparationOutcome::External)
+        })
+    }
+
     fn prepare(
         &self,
         claim: SettlementFulfillmentClaim,

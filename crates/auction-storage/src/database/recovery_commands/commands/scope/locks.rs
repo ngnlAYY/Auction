@@ -218,7 +218,7 @@ pub(in crate::database::recovery_commands) async fn lock_actions(
                   proof_reference, proof_digest, proof_observed_at
            FROM public.settlement_recovery_actions
            WHERE recovery_id = $1
-           ORDER BY kind, id
+           ORDER BY id
            FOR UPDATE"#,
     )
     .bind(recovery_id)
