@@ -69,6 +69,8 @@ pub enum MoogleMailSendOutcome {
     PreflightUnproven,
     /// 远端可见文字明确报告收件人不存在。
     RecipientNotFound { returned_mail_id: Option<String> },
+    /// 远端明确拒绝自寄；已经暂存的资产仍须人工核对，不能当作交付成功。
+    RecipientIsSender { assets_staged: bool },
     /// 远端明确拒绝发送；附件已经分步放入 compose 时不能自动重试。
     Rejected { assets_staged: bool },
 }
@@ -110,6 +112,22 @@ impl MoogleMailSender {
         self.verification_pages = maximum_pages;
         self.verification_budget = budget;
         Ok(self)
+    }
+
+    /// 在持久 sending fence 前只读检查 compose；调用方须持有直到 send 完成的同一凭据 guard。
+    /// 不清空草稿，也不把历史任务的未知结果改为未发送。
+    pub(crate) async fn preflight(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+    ) -> Result<bool, MoogleMailError> {
+        let compose = self.client.compose(world)?;
+        let document = self.client.get(&compose, cookie).await?;
+        let state = self
+            .client
+            .diagnose_parse(&compose, &document, self.parser.parse_compose_state(&document, world))
+            .await?;
+        Ok(state.is_clean())
     }
 
     /// 执行 compose、附件/COD 分步写入并证明最终发送结果。
@@ -255,6 +273,9 @@ impl MoogleMailSender {
             return Ok(match failure {
                 MoogleMailSendResponseFailure::RecipientNotFound { returned_mail_id } => {
                     MoogleMailSendOutcome::RecipientNotFound { returned_mail_id }
+                }
+                MoogleMailSendResponseFailure::RecipientIsSender => {
+                    MoogleMailSendOutcome::RecipientIsSender { assets_staged }
                 }
                 MoogleMailSendResponseFailure::Rejected => {
                     MoogleMailSendOutcome::Rejected { assets_staged }

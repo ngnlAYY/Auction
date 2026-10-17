@@ -25,6 +25,9 @@ pub enum MoogleMailErrorCategory {
     ProtocolDrift,
     /// 摘要、详情或装备身份之间不一致。
     IdentityMismatch,
+    /// 配置了预期玩家名称，但当前没有受支持的可信自身身份来源。
+    /// 这不是名称不一致、Cookie 无效或可重试网络故障。
+    IdentityUnproven,
     /// 在完整页窗口中没有观察到要求的 exact remote ID。
     NotObserved,
     /// POST 已经发出但远端结果无法确定，禁止自动重试。
@@ -44,6 +47,7 @@ impl MoogleMailErrorCategory {
             Self::ResponseTooLarge => "response_too_large",
             Self::ProtocolDrift => "protocol_drift",
             Self::IdentityMismatch => "identity_mismatch",
+            Self::IdentityUnproven => "identity_unproven",
             Self::NotObserved => "not_observed",
             Self::WriteUnknown => "write_unknown",
         }

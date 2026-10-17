@@ -52,6 +52,7 @@ pub(super) fn map_postgres_credential(row: &PgRow) -> Result<AdminCredential, Ap
         kind,
         world,
         label: row.try_get("label").map_err(map_storage_error)?,
+        player_name: row.try_get("player_name").map_err(map_storage_error)?,
         status,
         state_version: row.try_get("state_version").map_err(map_storage_error)?,
         created_at: row.try_get("created_at").map_err(map_storage_error)?,
@@ -201,6 +202,10 @@ pub(super) fn validate_import_write(
         || write.credential_id.is_nil()
         || write.request_hash.as_bytes() == [0; 32]
         || !valid_text(&write.label, 256)
+        || !auction_application::valid_credential_player_name(
+            write.kind,
+            write.player_name.as_deref(),
+        )
         || !valid_text(&write.actor_id, 256)
         || write.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
         || write.now.timestamp_nanos_opt().is_none()

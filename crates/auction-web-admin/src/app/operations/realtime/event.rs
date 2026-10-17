@@ -3,7 +3,8 @@
 use auction_web_shared::{TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time};
 
 use crate::api::RealtimeEventPage;
 
@@ -70,10 +71,12 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
 #[component]
 pub(super) fn RealtimeEventPager(
     page: RealtimeEventPage,
+    pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
+            pagination,
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: Some(page.pagination.total),

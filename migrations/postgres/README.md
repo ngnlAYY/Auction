@@ -60,10 +60,12 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000041_lot_watches.up.sql](000041_lot_watches.up.sql) | 标记版本、连续领先周期及独立 MM 通知来源；只补有效代理标记 |
 | [000042_lot_watch_pm.up.sql](000042_lot_watch_pm.up.sql) | 账号渠道独立 CAS、跨渠道统一来源、PM 租约/sender/不可重寄 fence；不改历史 MM payload |
 | [000043_forum_terminal_refresh.up.sql](000043_forum_terminal_refresh.up.sql) | forum 终态纳入与真实全页完成版本；升级前 settled 明确豁免，不伪造成功 |
+| [000044_user_timestamp_order.up.sql](000044_user_timestamp_order.up.sql) | Users 时间顺序约束；仅修复有 MM 注册/论坛同步双重证据的快照倒退并追加审计 |
+| [000045_mail_player_identity.up.sql](000045_mail_player_identity.up.sql) | 邮件凭据 nullable 预期完整玩家名称；不代表远端核验，不回填旧记录 |
 
 ## 原则与基线
 
-当前 `000001`–`000043` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
+当前 `000001`–`000045` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
 `bid_proxies` 是只读兼容视图，权威写入进入授权与转换历史表。
 执行门禁见[迁移导航](../README.md)，对象归属见[数据库契约](../../docs/contracts/schema.md)。
 
@@ -84,6 +86,11 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 PM sending_at/sender 由触发器保护不可清空或替换，sending 后不回 pending；缺收件人 suppressed，不补发。
 `000043` 不改经济事实、旧迁移或历史帖子；升级前 settled 的终态纳入标记为 false、完成版本仍为 NULL，其余及新记录默认纳入。
 执行前受控停止全部旧 writer，详见[升级门禁](../../ops/README.md#装备标记与超价提醒升级)，此轮无迁移验收。
+`000044` 保留用户创建时间与原始证据，仅提升有证明的异常更新时间并推进版本；每条更正形成追加审计。
+其余倒退行使时间顺序约束校验失败并回滚迁移，不批量猜测历史时区；执行前见[用户时间升级门禁](../../ops/README.md#用户快照时间修复升级)。
+
+`000045` 仅由 credentials owner 增加 mail-only 的预期名称和边界约束，无 verified 状态或内部结清表。
+旧凭据保持 NULL/原身份/密文，禁止默认删除重导入补绑；手动升级见[截止与邮件隔离](../../ops/README.md#截止规则与邮件发送隔离升级)。
 
 ## 历史 checksum 兼容
 

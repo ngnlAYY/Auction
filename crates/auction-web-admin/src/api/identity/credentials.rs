@@ -17,7 +17,7 @@ use gloo_net::http::Request;
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, fetch_csrf_token, invalid_request_error,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, fetch_csrf_token, invalid_request_error,
     invalid_response_error, response_error, send_get, send_request, valid_admin_time,
     valid_trimmed_text, valid_uuid,
 };
@@ -98,11 +98,13 @@ pub(crate) async fn fetch_admin_credentials(
     world: String,
     status: String,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminCredentialPage, String> {
+    super::pagination::validate(page, page_size, 200, i64::from(i32::MAX))?;
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.max(1).to_string())
-        .append_pair("page_size", &TABLE_PAGE_SIZE.to_string());
+        .append_pair("page_size", &page_size.to_string());
     if !kind.is_empty() {
         query.append_pair("kind", kind.trim());
     }
@@ -119,7 +121,7 @@ pub(crate) async fn fetch_admin_credentials(
     }
     let payload: ApiResponse<AdminCredentialListResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_credential_list(payload.data, kind.trim(), world.trim(), status.trim(), page.max(1))
+    decode_credential_list(payload.data, kind.trim(), world.trim(), status.trim(), page, page_size)
         .map(AdminCredentialPage::from)
         .map_err(invalid_response_error)
 }
@@ -130,10 +132,12 @@ pub(crate) async fn create_admin_credential(
     kind: String,
     world: String,
     label: String,
+    player_name: Option<String>,
     secret: String,
 ) -> Result<AdminCredential, String> {
     let csrf_token = fetch_csrf_token().await?;
-    let command = AdminCredentialCreateRequest { command_id, kind, world, label, secret };
+    let command =
+        AdminCredentialCreateRequest { command_id, kind, world, label, player_name, secret };
     let response = send_request(|abort_signal| {
         Request::post("/api/v1/admin/credentials")
             .abort_signal(abort_signal)
@@ -151,6 +155,7 @@ pub(crate) async fn create_admin_credential(
     if data.credential.kind != command.kind
         || data.credential.world != command.world
         || data.credential.label != command.label
+        || data.credential.player_name != command.player_name
     {
         return Err("invalid_response".to_owned());
     }
@@ -195,6 +200,7 @@ pub(crate) async fn mutate_admin_credential(
         || Some(updated.state_version) != command.expected_state_version.checked_add(1)
         || updated.kind != credential.kind
         || updated.world != credential.world
+        || updated.player_name != credential.player_name
         || match command.action.as_str() {
             "rename" => {
                 command.label.as_deref() != Some(updated.label.as_str())
@@ -254,13 +260,14 @@ fn decode_credential_list(
     world_filter: &str,
     status_filter: &str,
     requested_page: i64,
+    requested_size: i64,
 ) -> Result<AdminCredentialListResponse, &'static str> {
     if !data.restart_required {
         return Err("credential_restart");
     }
     decode_credential_pagination(&data.pagination)?;
     if data.pagination.page != requested_page
-        || data.pagination.page_size != TABLE_PAGE_SIZE
+        || data.pagination.page_size != requested_size
         || i64::try_from(data.credentials.len()).map_or(true, |count| {
             count > data.pagination.page_size || count > data.pagination.total
         })
@@ -322,6 +329,9 @@ fn decode_credential(value: AdminCredential) -> Result<AdminCredential, &'static
         || !matches!(value.world.as_str(), "main" | "isekai" | "shared")
         || !valid_trimmed_text(&value.label)
         || value.label.len() > 256
+        || value.player_name.as_deref().is_some_and(|name| {
+            value.kind != "mail_cookie" || !valid_trimmed_text(name) || name.len() > 256
+        })
         || !matches!(value.status.as_str(), "active" | "disabled" | "invalid")
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&value.state_version)
         || !valid_admin_time(&value.created_at)

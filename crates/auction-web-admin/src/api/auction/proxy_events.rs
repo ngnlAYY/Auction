@@ -7,8 +7,8 @@ pub(crate) use auction_contracts::{
 };
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_response_error, response_error,
-    send_get, valid_admin_time, valid_trimmed_text, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_response_error, response_error, send_get,
+    valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
 // 本地 Strict 镜像已删除：contracts 的 `AdminProxyEventListResponse`（含 event 与混合分页）
@@ -18,22 +18,24 @@ use super::{
 pub(crate) async fn fetch_admin_proxy_events(
     lot_id: String,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminProxyEventPage, String> {
-    let url =
-        format!("/api/v1/admin/lots/{lot_id}/proxy-events?page={page}&page_size={TABLE_PAGE_SIZE}");
+    super::pagination::validate(page, page_size, 100, 100_000)?;
+    let url = format!("/api/v1/admin/lots/{lot_id}/proxy-events?page={page}&page_size={page_size}");
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
     }
     let payload: ApiResponse<AdminProxyEventPage> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_proxy_event_page(payload.data, &lot_id, page).map_err(invalid_response_error)
+    decode_proxy_event_page(payload.data, &lot_id, page, page_size).map_err(invalid_response_error)
 }
 
 fn decode_proxy_event_page(
     data: AdminProxyEventPage,
     requested_lot_id: &str,
     requested_page: i64,
+    requested_size: i64,
 ) -> Result<AdminProxyEventPage, &'static str> {
     let pagination = data.pagination;
     // 页码模式下游标字段必须为空，页码与总数必须显式回显。
@@ -43,7 +45,7 @@ fn decode_proxy_event_page(
         || pagination.has_more.is_some()
         || !pagination.page.is_some_and(|page| (1..=MAX_JSON_SAFE_INTEGER).contains(&page))
         || pagination.page != Some(requested_page)
-        || pagination.page_size != TABLE_PAGE_SIZE
+        || pagination.page_size != requested_size
         || !pagination.total.is_some_and(|total| (0..=MAX_JSON_SAFE_INTEGER).contains(&total))
         || i64::try_from(data.proxy_events.len())
             .map_or(true, |count| count > pagination.page_size || Some(count) > pagination.total)

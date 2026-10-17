@@ -4,13 +4,14 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, Pager, Time, TruncatedText, format_credit_amount as format_amount,
+    AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
 };
 
 use crate::api::{
     AdminRecoveryReport, AdminSettlementLot, AdminSettlementReport, AdminSettlementSummary,
 };
 use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination, use_admin_pagination};
 
 use super::RecoveryConfirmationDraft;
 use super::helpers::{format_ppm, page_count, page_slice, price_adjustment_label};
@@ -27,12 +28,17 @@ pub(super) fn AdminSettlementReportView(
     reason: Signal<String>,
     action_feedback: Signal<Option<AdminActionFeedback>>,
 ) -> Element {
-    let lot_total_pages = page_count(report.lots.len());
-    let current_lot_page = lot_page().clamp(1, lot_total_pages as i64);
-    let lot_rows = page_slice(&report.lots, current_lot_page);
-    let recovery_total_pages =
-        recovery.as_ref().map_or(1, |value| page_count(value.recoveries.len()));
-    let current_recovery_page = recovery_page().clamp(1, recovery_total_pages as i64);
+    let lot_pagination =
+        use_admin_pagination("settlement-lots", &["lot_page_size"], None, i64::MAX);
+    let recovery_pagination =
+        use_admin_pagination("settlement-recovery", &["recovery_page_size"], None, i64::MAX);
+    let lot_total_pages = page_count(report.lots.len(), lot_pagination.size());
+    let current_lot_page = lot_page().clamp(1, lot_total_pages);
+    let lot_rows = page_slice(&report.lots, current_lot_page, lot_pagination.size());
+    let recovery_total_pages = recovery
+        .as_ref()
+        .map_or(1, |value| page_count(value.recoveries.len(), recovery_pagination.size()));
+    let current_recovery_page = recovery_page().clamp(1, recovery_total_pages);
 
     rsx! {
         div { class: "admin-settlement__table-wrap",
@@ -71,8 +77,9 @@ pub(super) fn AdminSettlementReportView(
             }
         }
         AdminSettlementPager {
-            current_page: current_lot_page,
-            total_pages: lot_total_pages,
+            current_page: lot_page(),
+            total_rows: report.lots.len(),
+            pagination: lot_pagination,
             page: lot_page,
             label: t!("admin-settlement-lots-pagination"),
         }
@@ -80,7 +87,7 @@ pub(super) fn AdminSettlementReportView(
         AdminRecoveryTable {
             report: recovery,
             current_page: current_recovery_page,
-            total_pages: recovery_total_pages,
+            pagination: recovery_pagination,
             page: recovery_page,
             action_busy,
             confirmation,
@@ -155,15 +162,18 @@ fn SettlementMetric(label: String, value: i64) -> Element {
 #[component]
 pub(super) fn AdminSettlementPager(
     current_page: i64,
-    total_pages: usize,
+    total_rows: usize,
+    pagination: AdminPagination,
     mut page: Signal<i64>,
     label: String,
 ) -> Element {
     rsx! {
         Pager {
             page: current_page,
-            page_size: 1,
-            total: Some(i64::try_from(total_pages).unwrap_or(i64::MAX)),
+            page_size: pagination.size(),
+            pagination,
+            local: true,
+            total: Some(i64::try_from(total_rows).unwrap_or(i64::MAX)),
             label,
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {

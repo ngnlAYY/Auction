@@ -8,23 +8,27 @@ impl MoogleMailDeliveryTransport {
         claim: &DeliveryWorkClaim,
         payload: &SettlementDeliveryPayload,
         world: MoogleMailWorld,
+        session: &mut MoogleMailCredentialSession,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let (subject, body) =
             render_settlement(payload, &self.templates).ok_or_else(invalid_payload)?;
         let equipment_ids =
             self.resolve_settlement_equipment(&payload.equipment_secret_refs).await?;
         let outcome = self
-            .send_with_credentials(MoogleMailSendRequest {
-                world,
-                message: MoogleMailMessageFields {
-                    recipient: claim.recipient.clone(),
-                    subject,
-                    body,
+            .send_with_credentials(
+                session,
+                MoogleMailSendRequest {
+                    world,
+                    message: MoogleMailMessageFields {
+                        recipient: claim.recipient.clone(),
+                        subject,
+                        body,
+                    },
+                    credits: payload.credits,
+                    cod: payload.cod,
+                    equipment_ids,
                 },
-                credits: payload.credits,
-                cod: payload.cod,
-                equipment_ids,
-            })
+            )
             .await
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;
@@ -51,6 +55,7 @@ impl MoogleMailDeliveryTransport {
         claim: &DeliveryWorkClaim,
         payload: &MailDeliveryPayload,
         world: MoogleMailWorld,
+        session: &mut MoogleMailCredentialSession,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         let template = payload.template.as_deref().ok_or_else(invalid_payload)?;
         let result_code = payload.result_code.as_deref().ok_or_else(invalid_payload)?;
@@ -86,13 +91,16 @@ impl MoogleMailDeliveryTransport {
         }
         let message = MoogleMailMessageFields { recipient: claim.recipient.clone(), subject, body };
         let outcome = self
-            .send_with_credentials(MoogleMailSendRequest {
-                world,
-                message,
-                credits: 0,
-                cod: 0,
-                equipment_ids: Vec::new(),
-            })
+            .send_with_credentials(
+                session,
+                MoogleMailSendRequest {
+                    world,
+                    message,
+                    credits: 0,
+                    cod: 0,
+                    equipment_ids: Vec::new(),
+                },
+            )
             .await
             .map_err(|error| transport_error(error, false))?;
         let receipt = send_receipt(outcome)?;

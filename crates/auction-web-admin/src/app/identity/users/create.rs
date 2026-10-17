@@ -1,10 +1,13 @@
 //! Admin 用户创建表单和生成 key 展示。
 
+use std::rc::Rc;
+
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::create_admin_user;
+use crate::app::surface::pending::PendingCommandGate;
 use crate::app::surface::validation::{FieldError, focus_field};
 use crate::app::surface::{AdminActionFeedback, run_admin_action};
 
@@ -71,6 +74,7 @@ pub(super) struct AdminUserCreated {
 #[component]
 pub(super) fn AdminUserCreateForm(
     reload_generation: Signal<u64>,
+    command_gate: PendingCommandGate,
     on_created: EventHandler<AdminUserCreated>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -95,7 +99,7 @@ pub(super) fn AdminUserCreateForm(
                     class: "admin-users-create",
                     onsubmit: move |event| {
                         event.prevent_default();
-                        if busy() {
+                        if busy() || command_gate.blocked() {
                             return;
                         }
                         let username = username().trim().to_owned();
@@ -126,6 +130,14 @@ pub(super) fn AdminUserCreateForm(
                             }
                             return;
                         }
+                        // 与补发首次提交及面板重试共用同步门禁；检查通过后、spawn 前占用。
+                        let Some(guard) = command_gate.try_acquire() else {
+                            return;
+                        };
+                        // 两个完成回调共享守卫，使成功 Key 交付页面后才释放运行占用；
+                        // 表单任务被取消时也会释放，不留下卡死的页级门禁。
+                        let success_guard = Rc::new(guard);
+                        let failure_guard = success_guard.clone();
                         field_errors.set(UserFieldErrors::default());
                         let signature = create_signature(
                             &username,
@@ -171,6 +183,7 @@ pub(super) fn AdminUserCreateForm(
                                 .await
                             },
                             move |result| {
+                                let _guard = success_guard;
                                 let username = result.user.username;
                                 let generated_key =
                                     result.generated_key.map(|key| AdminUserGeneratedKey { key });
@@ -179,6 +192,7 @@ pub(super) fn AdminUserCreateForm(
                                 reload_generation.set(reload_generation().saturating_add(1));
                             },
                             move |code| {
+                                let _guard = failure_guard;
                                 // 用户冲突可归属用户名字段，其余错误保持页面级反馈。
                                 if code == "user_conflict" {
                                     field_errors.write().username =
@@ -266,7 +280,7 @@ pub(super) fn AdminUserCreateForm(
                     button {
                         r#type: "submit",
                         class: "admin-btn-primary",
-                        disabled: busy(),
+                        disabled: busy() || command_gate.blocked(),
                         {t!("admin-users-create-submit")}
                     }
                 }

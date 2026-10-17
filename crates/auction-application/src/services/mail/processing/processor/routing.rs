@@ -28,12 +28,17 @@ where
         if let Some(decision) = self.resume_accepted_auction(&message).await? {
             return Ok(decision);
         }
-        let now = self.clock.now().max(message.received_at);
+        // Users 的创建/更新时刻只来自本地处理时钟；远端邮件时间可能偏快，不能污染账号元数据。
+        // 装备投稿仍保留既有接收时间门禁，不在本修复中改变其排期语义。
+        let now = self.clock.now();
         // 旧版使用 Unicode CaseFold 路由，但刻意不裁剪标题首尾空白；保持这一边界可以
         // 兼容合法的大小写变体，同时不把带隐藏空白的未知标题误认成业务命令。
         let routing_subject = message.subject.to_ascii_lowercase();
         match routing_subject.as_str() {
-            "auction" => self.process_auction(message, now, pending_equipment_diagnostic).await,
+            "auction" => {
+                let intake_now = now.max(message.received_at);
+                self.process_auction(message, intake_now, pending_equipment_diagnostic).await
+            }
             "register" => self.process_register(message, now).await,
             "rebind" => self.process_rebind(message, now).await,
             subject if settlement_return_subject(subject) => {

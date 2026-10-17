@@ -5,7 +5,8 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::api::AdminUserStatusFilter;
-use crate::app::surface::{AdminActionFeedback, run_admin_owned_action};
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 use super::create::AdminUserGeneratedKey;
 
@@ -35,6 +36,7 @@ impl AdminUserDialogKind {
 #[component]
 pub(super) fn AdminUserDialogActions(
     busy: Signal<bool>,
+    blocked: bool,
     on_cancel: EventHandler<MouseEvent>,
     confirm_label: String,
     confirm_class: String,
@@ -50,43 +52,45 @@ pub(super) fn AdminUserDialogActions(
             button {
                 r#type: "submit",
                 class: confirm_class,
-                disabled: busy(),
+                disabled: busy() || blocked,
                 if busy() { {t!("admin-action-working")} } else { {confirm_label} }
             }
         }
     }
 }
 
+/// 一次性 Key 直接交付 users 页面持有的回调，不缓存到未决集合或行 Scope。
 pub(super) fn run_user_action<F>(
-    busy: Signal<bool>,
-    mut feedback: Signal<Option<AdminActionFeedback>>,
-    mut reload_generation: Signal<u64>,
-    mut command_state: Signal<Option<(String, Uuid)>>,
+    owner: PendingCommands,
+    entity: String,
+    action: String,
+    feedback: Signal<Option<AdminActionFeedback>>,
+    reload_generation: Signal<u64>,
     on_generated_key: EventHandler<AdminUserGeneratedKey>,
-    operation: F,
-) where
+    operation: impl Fn(Uuid) -> F + 'static,
+) -> bool
+where
     F: std::future::Future<Output = Result<Option<String>, String>> + 'static,
 {
-    run_admin_owned_action(
-        busy,
-        async move {
-            let result = operation.await;
-            // 旧版无论成败都刷新一次列表投影。
-            reload_generation.set(reload_generation().saturating_add(1));
-            result
-        },
+    owner.submit(
+        entity,
+        action,
+        operation,
         move |key| {
             if let Some(key) = key {
                 on_generated_key.call(AdminUserGeneratedKey { key });
             }
-            feedback.set(Some(AdminActionFeedback::Success));
-            // 用户行可能已因筛选/分页卸载；页面结果仍需交付，旧行命令状态仅在存活时清理。
-            if let Ok(mut command_state) = command_state.try_write() {
-                *command_state = None;
+            set_if_alive(feedback, Some(AdminActionFeedback::Success));
+        },
+        move |code| {
+            set_if_alive(feedback, Some(AdminActionFeedback::Error(code)));
+            // 成功由 owner 刷新；拒绝或未知也保留原用户页的重读行为。
+            let mut reload = reload_generation;
+            if let Ok(mut generation) = reload.try_write() {
+                *generation = generation.saturating_add(1);
             }
         },
-        move |code| feedback.set(Some(AdminActionFeedback::Error(code))),
-    );
+    )
 }
 
 pub(super) fn status_filter_value(value: AdminUserStatusFilter) -> &'static str {

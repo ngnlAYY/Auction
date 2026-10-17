@@ -24,7 +24,7 @@ impl AdminCredentialCheckStore for DatabaseStore {
                     };
                     use sqlx::Row;
                     let row = sqlx::query(
-                        "SELECT id, credential_kind, scope, label, status, state_version,
+                        "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                                 created_at, rotated_at, updated_at, ciphertext, nonce,
                                 encryption_key_id, fingerprint
                          FROM public.credential_keys WHERE id = $1",

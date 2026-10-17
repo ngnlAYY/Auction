@@ -16,9 +16,9 @@ use gloo_net::http::{Request, Response};
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_request_error,
-    invalid_response_error, parse_admin_time, response_error, send_get, send_request,
-    valid_admin_time, valid_trimmed_text, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    parse_admin_time, response_error, send_get, send_request, valid_admin_time, valid_trimmed_text,
+    valid_uuid,
 };
 
 // 旧 Admin 列表和生命周期命令共用同一拍卖 decoder；contracts 侧的 `AdminAuctionResponse`
@@ -29,8 +29,9 @@ pub(crate) async fn fetch_admin_auctions(
     world_id: String,
     status: String,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminAuctionPage, String> {
-    fetch_admin_auctions_with_size(world_id, status, page, TABLE_PAGE_SIZE).await
+    fetch_admin_auctions_with_size(world_id, status, page, page_size).await
 }
 
 async fn fetch_admin_auctions_with_size(
@@ -39,6 +40,7 @@ async fn fetch_admin_auctions_with_size(
     page: i64,
     page_size: i64,
 ) -> Result<AdminAuctionPage, String> {
+    super::pagination::validate(page, page_size, 100, 100_000)?;
     let mut url = format!("/api/v1/admin/auctions?page={page}&page_size={page_size}");
     if !world_id.is_empty() && world_id != "all" {
         url.push_str("&world_id=");
@@ -54,7 +56,15 @@ async fn fetch_admin_auctions_with_size(
     }
     let payload: ApiResponse<AdminAuctionPage> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_auction_list(payload.data).map_err(invalid_response_error)
+    let result = decode_auction_list(payload.data).map_err(invalid_response_error)?;
+    if result.pagination.page != page
+        || result.pagination.page_size != page_size
+        || i64::try_from(result.auctions.len())
+            .map_or(true, |count| count > page_size || count > result.pagination.total)
+    {
+        return Err(invalid_response_error("auction_pagination"));
+    }
+    Ok(result)
 }
 
 /// 提交 Admin draft 创建命令；调用组件负责在同一输入重试时复用两个稳定标识。

@@ -18,7 +18,6 @@ pub(crate) fn AdminAuctionRow(
     auction: AdminAuction,
     capabilities: AdminAuctionCapabilities,
     notice: Signal<Option<AdminAuctionNotice>>,
-    reload_generation: Signal<u64>,
 ) -> Element {
     let auction_id = auction.id.clone();
     let lifecycle_status = auction.status.clone();
@@ -61,7 +60,6 @@ pub(crate) fn AdminAuctionRow(
                     scheduled_open_at: auction.scheduled_open_at.clone(),
                     scheduled_end_at: auction.scheduled_ends_at.clone(),
                     notice,
-                    reload_generation,
                 }
             }
         }

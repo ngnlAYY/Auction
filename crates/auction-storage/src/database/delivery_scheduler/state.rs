@@ -13,6 +13,7 @@ pub(super) async fn start_sending_postgres(
     crate::database::lot_watch::lock_delivery_lot(&mut transaction, claim.delivery_id)
         .await
         .map_err(|_| repository_error_owned("装备提醒发送锁暂不可用"))?;
+    lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
     let result = sqlx::query(concat!(
         r#"UPDATE public.deliveries AS deliveries
            SET status = 'sending', sending_at = $2, updated_at = CURRENT_TIMESTAMP
@@ -21,6 +22,7 @@ pub(super) async fn start_sending_postgres(
              AND lease_token = $3
              AND fencing_version = $4
              AND lease_expires_at > $2
+             AND lease_expires_at > clock_timestamp()
              AND "#,
         delivery_completion_gate!()
     ))
@@ -66,9 +68,11 @@ pub(super) async fn release_postgres(
     released_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
     let result = sqlx::query(
         r#"UPDATE public.deliveries
            SET status = 'pending',
+               attempt_count = GREATEST(attempt_count - 1, 0),
                lease_token = NULL,
                lease_expires_at = NULL,
                claimed_at = NULL,
@@ -77,7 +81,8 @@ pub(super) async fn release_postgres(
              AND status = 'claimed'
              AND lease_token = $3
              AND fencing_version = $4
-             AND lease_expires_at > $2"#,
+             AND lease_expires_at > $2
+             AND lease_expires_at > clock_timestamp()"#,
     )
     .bind(claim.delivery_id)
     .bind(released_at)
@@ -103,7 +108,7 @@ pub(super) async fn release_postgres(
             metadata: worker_state_metadata(
                 "pending",
                 claim.fencing_version,
-                claim.attempt_count,
+                claim.attempt_count.saturating_sub(1),
                 None,
             ),
         },
@@ -121,26 +126,47 @@ pub(super) async fn renew_postgres(
     renewed_at: DateTime<Utc>,
     lease_until: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
+    // 准备和发送共享同一 token/fencing；数据库排队后也必须仍有效，不能用旧调用时间复活过期租约。
+    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
     let result = sqlx::query(
         r#"UPDATE public.deliveries
-           SET lease_expires_at = $3,
+           SET lease_expires_at = GREATEST(lease_expires_at, $3),
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $1
-             AND status = 'sending'
+             AND status IN ('claimed', 'sending')
              AND lease_token = $4
              AND fencing_version = $5
-             AND lease_expires_at > $2"#,
+             AND lease_expires_at > $2
+             AND lease_expires_at > clock_timestamp()
+             AND $3 > $2
+             AND $3 > clock_timestamp()"#,
     )
     .bind(claim.delivery_id)
     .bind(renewed_at)
     .bind(lease_until)
     .bind(claim.lease_token)
     .bind(claim.fencing_version)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await
     .map_err(map_storage_error)?;
     if result.rows_affected() != 1 {
         return Err(repository_error_owned("delivery 续租时 lease 已失效"));
     }
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(())
+}
+
+/// 先取得行锁，再由后续 UPDATE 检查实时有效期，避免锁等待前求值的时间条件放过过期租约。
+/// sending 调用方保持 lot → delivery 锁序；续租/释放不再取 lot 锁。
+async fn lock_delivery_lease(
+    transaction: &mut sqlx::Transaction<'_, Postgres>,
+    delivery_id: Uuid,
+) -> Result<(), auction_application::RepositoryError> {
+    sqlx::query("SELECT id FROM public.deliveries WHERE id = $1 FOR UPDATE")
+        .bind(delivery_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
     Ok(())
 }

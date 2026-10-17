@@ -44,6 +44,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 | 邮件证据 | `mail-evidence export/inspect-sent/backfill-display` | [诊断手册](../../ops/mail-diagnostics.md) |
 | 凭据和规则导入 | `bootstrap-mail-credentials`、`import-rules-directory` | 本页 |
 | 论坛与结算核验 | `forum-write-recovery-list`、`authorize-forum-write-retry`、`verify-legacy-settlement` | 本页 |
+| 旧草稿软截止修正 | `repair-draft-soft-close` | [默认只读、显式确认写入](#草稿软截止显式修正) |
 | 装备 PM 运维 | `lot-watch-pm list/reconcile` | [仅请求只读对账](#装备-pm-只读对账) |
 | 保留盘点与恢复预检 | `retention-inventory`、`recovery-preflight` | 本页及恢复手册 |
 | 当前格式备份/恢复/重建 | `postgres-backup`、`postgres-backup-verify`、`postgres-restore`、`postgres-rebuild` | [恢复手册](../../ops/deploy/RECOVERY.md) |
@@ -81,7 +82,7 @@ Sent 查询要求唯一精确匹配并标记 `time_unverified`，`collected` 不
 | `2` | 参数解析，或 check-config/deployment-check 失败 |
 | `3` | 迁移、初始建库、盘点、备份/恢复/重建/v28 接管命令失败 |
 | `4` | deployment 命令失败 |
-| `5` | 凭据/规则导入、论坛/结算核验、邮件证据命令失败 |
+| `5` | 凭据/规则导入、论坛/结算核验、邮件证据、草稿软截止修正命令失败 |
 
 退出码按命令类别分配，不按底层错误类型重新分类；调用方不应解析脱敏错误文本。
 
@@ -168,6 +169,44 @@ PostgreSQL。Cookie 只经 stdin，来源文件须 owner-only，不进入参数�
 各语言 UUID 由批次 ID 稳定派生，部分完成后使用同一批次重试。输出 `sha256` 针对去 BOM 后正文，
 有 BOM 时与原文件哈希不同。Redis 配置要求 `postgres,cache-redis`；缓存失效失败列入
 `cache_invalidation_failures`，不回滚已提交规则。
+
+## 草稿软截止显式修正
+
+`repair-draft-soft-close` 加载 Admin 配置，需要 `postgres` feature。默认以 Serializable READ ONLY
+事务检查唯一目标，输出 `eligible`、`blockers`、当前版本和两项秒数；检查成功但不合格时仍返回 JSON，
+操作者必须阅读 `eligible`。只读检查不生成命令账本，也不锁定后续执行资格。
+
+```bash
+AUCTION_CONFIG_FILE=/etc/auction/admin.toml /opt/auction/bin/auctionctl repair-draft-soft-close \
+  --auction-id <目标UUID>
+```
+
+先按[有效模板升级步骤](../../ops/config/README.md#缓存与拍卖模板)更新后续新场配置并受控重启。
+人工核对检查结果后，保留一次生成的 command UUID 及完整原参数，再显式执行：
+
+```bash
+AUCTION_CONFIG_FILE=/etc/auction/admin.toml /opt/auction/bin/auctionctl repair-draft-soft-close \
+  --auction-id <目标UUID> --execute --expected-version <检查版本> \
+  --command-id <稳定命令UUID> --actor <操作者> \
+  --confirm-write 'REPAIR DRAFT SOFT CLOSE <目标UUID>'
+```
+
+以上占位符须替换为实际值，确认文本中的 UUID 必须为规范小写连字符形式。命令只允许当前 draft、
+从未预览/开拍、无竞价或代理授权、无结算、无论坛任务及外部写入/未知发布证据的目标；缺少排期记录
+或仍有排期租约同样阻断。允许保留未公开投稿和 pending/withdrawn 装备，不要求空草稿。
+行与策略快照必须一致，且窗口/延长均为60秒；命令固定改成900/900，保留其他经济参数、装备、资金和排期。
+任一证据异常都应另行人工调查，不删证据、不强制跳过门禁。
+
+执行使用 world → scheduled round → auction 行锁、版本 CAS 和 Serializable；40001/40P01 最多三次。
+两项列值、对应 JSON 字段、版本及更新时间与原始结果账本、追加审计同事务提交。复用
+`auction_commands`，不新增 schema 或自动迁移；审计动作是 `auction.repair_draft_soft_close`。
+同 ID/同参数先重放原结果，不会因为成功后已变成900或进入后续状态而拒绝；异参数冲突。
+超时/断线时保留原命令重试，不能换 command ID 猜测是否成功。该命令不启动服务、发帖、发信或重开旧场次。
+
+源码分别由 [CLI 装配](src/bootstrap/runtime/postgres/commands/draft_soft_close.rs)、
+[应用规则/窄端口](../../crates/auction-application/src/draft_soft_close)和
+[存储事务](../../crates/auction-storage/src/database/draft_soft_close)拥有。
+本轮仅交付源码及静态验证，未执行上述运维命令。
 
 ## 装备 PM 只读对账
 

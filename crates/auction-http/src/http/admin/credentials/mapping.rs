@@ -9,6 +9,7 @@ pub(crate) fn map_credential(
         kind: credential.kind.as_str().to_owned(),
         world: credential.world.as_str().to_owned(),
         label: credential.label,
+        player_name: credential.player_name,
         status: credential.status.as_str().to_owned(),
         state_version: credential.state_version,
         created_at: super::timestamp(credential.created_at),

@@ -1,10 +1,8 @@
 //! 同一邮件的领取、退回与拍卖接受事实之间的持久化互斥。
 
-use auction_application::{
-    MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin, RepositoryError,
-};
+use auction_application::{MailDeliveryCommand, MailDeliveryOperation, MailDeliveryOrigin};
 
-use super::common::{map_storage_error, repository_error};
+use super::common::{MailDeliveryTransactionError, repository_error};
 
 /// 调用者先持有 world 行锁；已安排的退回不能被后来的拍卖录入或领取覆盖。
 pub(in crate::database) async fn has_return_intent(
@@ -18,7 +16,7 @@ pub(in crate::database) async fn has_return_intent(
 pub(super) async fn guard_disposition(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
-) -> Result<(), RepositoryError> {
+) -> Result<(), MailDeliveryTransactionError> {
     if command.origin != MailDeliveryOrigin::MailIntake
         || command.operation == MailDeliveryOperation::Send
     {
@@ -30,21 +28,17 @@ pub(super) async fn guard_disposition(
         sqlx::query_scalar::<_, String>("SELECT id FROM public.worlds WHERE id = $1 FOR UPDATE")
             .bind(&command.world_id)
             .fetch_optional(&mut **transaction)
-            .await
-            .map_err(map_storage_error)?;
+            .await?;
     if world.is_none() {
-        return Err(repository_error("MoogleMail 资产处置世界不存在"));
+        return Err(repository_error("MoogleMail 资产处置世界不存在").into());
     }
     let opposite = match command.operation {
         MailDeliveryOperation::Return => "take",
         MailDeliveryOperation::Take => "return",
         MailDeliveryOperation::Send => return Ok(()),
     };
-    if has_operation(transaction, &command.world_id, &command.external_mail_id, opposite)
-        .await
-        .map_err(map_storage_error)?
-    {
-        return Err(repository_error("MoogleMail 已存在相反的资产处置意图，需人工核对"));
+    if has_operation(transaction, &command.world_id, &command.external_mail_id, opposite).await? {
+        return Err(repository_error("MoogleMail 已存在相反的资产处置意图，需人工核对").into());
     }
     let accepted = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (
@@ -57,12 +51,11 @@ pub(super) async fn guard_disposition(
     .bind(&command.world_id)
     .bind(&command.external_mail_id)
     .fetch_one(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?;
+    .await?;
     if (command.operation == MailDeliveryOperation::Return && accepted)
         || (command.operation == MailDeliveryOperation::Take && !accepted)
     {
-        return Err(repository_error("MoogleMail 资产处置与已提交拍卖接受事实冲突"));
+        return Err(repository_error("MoogleMail 资产处置与已提交拍卖接受事实冲突").into());
     }
     Ok(())
 }

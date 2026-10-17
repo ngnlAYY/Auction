@@ -3,9 +3,9 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    ApplicationError, DeliverySendResult, DeliveryTransport, DeliveryTransportError,
-    DeliveryWorkClaim, MailLoginKey, MailLoginKeyReader, MailProcessingError,
-    SettlementFulfillmentEquipmentSecretReader,
+    ApplicationError, DeliveryPreparation, DeliveryPreparedSend, DeliverySendResult,
+    DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim, MailLoginKey, MailLoginKeyReader,
+    MailProcessingError, SettlementFulfillmentEquipmentSecretReader,
 };
 use auction_domain::EquipmentId;
 use serde::Deserialize;
@@ -20,6 +20,7 @@ use super::{
     MoogleMailParser, MoogleMailSendOutcome, MoogleMailSendReceipt, MoogleMailSendRequest,
     MoogleMailSender, MoogleMailWorld,
     forms::valid_body,
+    gateway::MoogleMailCredentialSession,
     protocol::{valid_decimal_id, valid_line, valid_opaque_id},
 };
 

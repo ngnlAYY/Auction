@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use auction_web_shared::{Dialog, Time, TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{AdminUser, blacklist_admin_user, mutate_admin_user, unblacklist_admin_user};
-use crate::app::surface::{AdminActionFeedback, stable_command_id};
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::PendingCommands;
 
 use super::create::AdminUserGeneratedKey;
 use super::dialogs::{AdminUserDialogActions, AdminUserDialogKind, run_user_action};
@@ -35,7 +35,8 @@ pub(super) fn AdminUserRow(
         use_signal(|| user.forum_account_id.clone().unwrap_or_default());
     let mut dialog = use_signal(|| None::<AdminUserDialogKind>);
     let mut dialog_reason = use_signal(String::new);
-    let command_state = use_signal(|| None::<(String, Uuid)>);
+    let owner = use_context::<PendingCommands>();
+    let blocked = owner.contains(&format!("user:{}", user.id));
     let user_for_forum_dialog = user.clone();
     let user_for_revoke = user.clone();
     let user_for_reissue = user.clone();
@@ -82,7 +83,7 @@ pub(super) fn AdminUserRow(
                 div { class: "admin-users-actions",
                     button {
                         r#type: "button",
-                        disabled: busy(),
+                        disabled: busy() || blocked,
                         onclick: move |_| {
                             forum_account_id_value
                                 .set(user.forum_account_id.clone().unwrap_or_default());
@@ -92,13 +93,13 @@ pub(super) fn AdminUserRow(
                     }
                     button {
                         r#type: "button",
-                        disabled: busy(),
+                        disabled: busy() || blocked,
                         onclick: move |_| dialog.set(Some(AdminUserDialogKind::ReissueKey)),
                         {t!("admin-users-action-reissue-key")}
                     }
                     button {
                         r#type: "button",
-                        disabled: busy() || user.key_status == "revoked",
+                        disabled: busy() || blocked || user.key_status == "revoked",
                         onclick: move |_| dialog.set(Some(AdminUserDialogKind::RevokeKey)),
                         {t!("admin-users-action-revoke-key")}
                     }
@@ -106,7 +107,7 @@ pub(super) fn AdminUserRow(
                         button {
                             class: "admin-btn-secondary",
                             r#type: "button",
-                            disabled: busy(),
+                            disabled: busy() || blocked,
                             onclick: move |_| dialog.set(Some(AdminUserDialogKind::Unblacklist)),
                             {t!("admin-users-action-unblacklist")}
                         }
@@ -114,7 +115,7 @@ pub(super) fn AdminUserRow(
                         button {
                             class: "admin-btn-danger",
                             r#type: "button",
-                            disabled: busy(),
+                            disabled: busy() || blocked,
                             onclick: move |_| {
                                 dialog_reason.set(String::new());
                                 dialog.set(Some(AdminUserDialogKind::Blacklist));
@@ -143,34 +144,15 @@ pub(super) fn AdminUserRow(
                                         }
                                         let user = user_for_forum_dialog.clone();
                                         let value = forum_account_id_value();
-                                        let command_id = stable_command_id(
-                                            command_state,
-                                            format!("set_forum_account_id:{}:{value}", user.state_version),
-                                        );
-                                        let mut dialog = dialog;
-                                        run_user_action(
-                                            busy,
-                                            feedback,
-                                            reload_generation,
-                                            command_state,
-                                            on_generated_key,
-                                            async move {
-                                                let result = mutate_admin_user(
-                                                    command_id,
-                                                    &user,
-                                                    "set_forum_account_id",
-                                                    None,
-                                                    Some(value),
-                                                )
-                                                .await;
-                                                if result.is_ok()
-                                                    && let Ok(mut dialog) = dialog.try_write()
-                                                {
-                                                    *dialog = None;
-                                                }
-                                                result.map(|_| None)
+                                        if run_user_action(
+                                            owner, format!("user:{}", user.id), t!("admin-users-action-set-forum-account-id"),
+                                            feedback, reload_generation, on_generated_key,
+                                            move |command_id| {
+                                                let user = user.clone();
+                                                let value = value.clone();
+                                                async move { mutate_admin_user(command_id, &user, "set_forum_account_id", None, Some(value)).await.map(|_| None) }
                                             },
-                                        );
+                                        ) { dialog.set(None); }
                                     },
                                     label {
                                         r#for: format!("forum-account-{}", user.id),
@@ -189,6 +171,7 @@ pub(super) fn AdminUserRow(
                                     }
                                     AdminUserDialogActions {
                                         busy,
+                                        blocked,
                                         on_cancel: move |_| dialog.set(None),
                                         confirm_label: t!("admin-users-save-forum-account-id"),
                                         confirm_class: "admin-btn-primary".to_owned(),
@@ -203,32 +186,15 @@ pub(super) fn AdminUserRow(
                                         }
                                         let user = user_for_blacklist.clone();
                                         let reason = dialog_reason();
-                                        let command_id = stable_command_id(
-                                            command_state,
-                                            format!("blacklist:{}:{reason}", user.state_version),
-                                        );
-                                        let mut dialog = dialog;
-                                        run_user_action(
-                                            busy,
-                                            feedback,
-                                            reload_generation,
-                                            command_state,
-                                            on_generated_key,
-                                            async move {
-                                                let result = blacklist_admin_user(
-                                                    command_id,
-                                                    &user,
-                                                    reason,
-                                                )
-                                                .await;
-                                                if result.is_ok()
-                                                    && let Ok(mut dialog) = dialog.try_write()
-                                                {
-                                                    *dialog = None;
-                                                }
-                                                result.map(|_| None)
+                                        if run_user_action(
+                                            owner, format!("user:{}", user.id), t!("admin-users-action-blacklist"),
+                                            feedback, reload_generation, on_generated_key,
+                                            move |command_id| {
+                                                let user = user.clone();
+                                                let reason = reason.clone();
+                                                async move { blacklist_admin_user(command_id, &user, reason).await.map(|_| None) }
                                             },
-                                        );
+                                        ) { dialog.set(None); }
                                     },
                                     p { {t!("admin-users-blacklist-warning")} }
                                     label {
@@ -246,6 +212,7 @@ pub(super) fn AdminUserRow(
                                     }
                                     AdminUserDialogActions {
                                         busy,
+                                        blocked,
                                         on_cancel: move |_| dialog.set(None),
                                         confirm_label: t!("admin-users-action-blacklist"),
                                         confirm_class: "admin-btn-danger".to_owned(),
@@ -272,8 +239,9 @@ pub(super) fn AdminUserRow(
                                         } else {
                                             "admin-btn-primary"
                                         },
-                                        disabled: busy(),
+                                        disabled: busy() || blocked,
                                         onclick: move |_| {
+                                            if busy() { return; }
                                             let user = match kind {
                                                 AdminUserDialogKind::RevokeKey => user_for_revoke.clone(),
                                                 AdminUserDialogKind::ReissueKey => user_for_reissue.clone(),
@@ -286,52 +254,20 @@ pub(super) fn AdminUserRow(
                                                 AdminUserDialogKind::Unblacklist => "unblacklist",
                                                 _ => return,
                                             };
-                                            let command_id = stable_command_id(
-                                                command_state,
-                                                format!("{action}:{}", user.state_version),
-                                            );
-                                            let mut dialog = dialog;
-                                            run_user_action(
-                                                busy,
-                                                feedback,
-                                                reload_generation,
-                                                command_state,
-                                                on_generated_key,
-                                                async move {
-                                                    let result = match kind {
-                                                        AdminUserDialogKind::RevokeKey => mutate_admin_user(
-                                                            command_id,
-                                                            &user,
-                                                            "revoke_key",
-                                                            None,
-                                                            None,
-                                                        )
-                                                        .await
-                                                        .map(|result| result.generated_key),
-                                                        AdminUserDialogKind::ReissueKey => mutate_admin_user(
-                                                            command_id,
-                                                            &user,
-                                                            "reissue_key",
-                                                            None,
-                                                            None,
-                                                        )
-                                                        .await
-                                                        .map(|result| result.generated_key),
-                                                        AdminUserDialogKind::Unblacklist => {
-                                                            unblacklist_admin_user(command_id, &user)
-                                                                .await
-                                                                .map(|_| None)
+                                            if run_user_action(
+                                                owner, format!("user:{}", user.id), kind.title(&user.username),
+                                                feedback, reload_generation, on_generated_key,
+                                                move |command_id| {
+                                                    let user = user.clone();
+                                                    async move {
+                                                        if kind == AdminUserDialogKind::Unblacklist {
+                                                            unblacklist_admin_user(command_id, &user).await.map(|_| None)
+                                                        } else {
+                                                            mutate_admin_user(command_id, &user, action, None, None).await.map(|result| result.generated_key)
                                                         }
-                                                        _ => Ok(None),
-                                                    };
-                                                    if result.is_ok()
-                                                        && let Ok(mut dialog) = dialog.try_write()
-                                                    {
-                                                        *dialog = None;
                                                     }
-                                                    result
                                                 },
-                                            );
+                                            ) { dialog.set(None); }
                                         },
                                         if busy() {
                                             {t!("admin-action-working")}

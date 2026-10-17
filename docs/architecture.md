@@ -63,6 +63,12 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 数据库对象、事件和路由的唯一 owner 分别登记在 [schema](contracts/schema.md)、[events](contracts/events.md)和
 [routes](contracts/routes.md)。
 
+`auction-application::draft_soft_close` 拥有未发布草稿的显式修正规则和窄端口；
+`auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
+`auctionctl` 只装配命令，不在迁移中批量更正旧场次。
+credentials owner 拥有预期 `player_name`、校验及版本传递；integrations gateway 复用既有凭据 ownership，
+无绑定返回 None、有绑定却无法证明自身身份返回 `identity_unproven`，不建立第二 Cookie 客户端。
+
 ## 部署档位与能力
 
 当前只支持 PostgreSQL。敏感 TOML 的 `[database]` 或兼容 `database_url` 由 `auction-config`
@@ -75,7 +81,8 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；登录用户装备标记与账号级 MM/PM 渠道偏好，统一来源按领先周期去重 |
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
 | 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化；forum owner 持有终态刷新纳入标记及全固定页确认版本，结算结果仍归 settlement |
-| 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化 |
+| 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化；单目标未发布草稿软截止修正（默认只读） |
+| 邮件身份基础 | PostgreSQL `000045` 保存可选预期完整玩家名称及既有凭据版本；不生成远端身份证明，bot 内部履约尚未实现 |
 
 本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
 新增持久化能力先登记范围与 owner，再更新[对象契约](contracts/schema.md)、迁移和端口。
@@ -119,6 +126,9 @@ Public/Admin 浏览器经各自 HTTP 入口消费 contracts DTO，Worker 经 job
 已有错误事实不会因源码修复自动回填，运行边界见[状态页](status.md)。
 Admin/Worker 注入当前新拍卖模板，application 后继计划冻结，storage 保证规则列与快照一致。
 Recovery 人工重试投影由 storage 的 recovery_commands owner 维护；Delivery Admin 在同一命令事务调用，不另建状态机。
+Users 的注册/换绑由 application 使用本地处理时钟，storage 的 users/forum 写路径保证账号快照更新时间不倒退。
+`000044` 由 storage/Users owner 追加时间顺序约束与有证据的审计更正，不引入新能力档位、外部调用或改写历史命令；
+迁移证据与保留边界见[数据库契约](contracts/schema.md#追加迁移与历史事实)。
 
 装备标记由 application 的 lot-watch owner 定义用例与窄端口，domain 拥有领先周期及提醒规则，
 storage 拥有标记、版本、通知事实与 delivery 绑定。标记变更与竞价采用同一 lot 锁序；成功新建代理
@@ -155,6 +165,19 @@ HTTP `public/countdown/` 生成有界 SVG/CSS 动画及图片专用安全头，�
 新拒绝按类型分类，旧诊断仅做白名单展示映射；不改竞价规则、拒绝终态或重试门禁，见[外部副作用契约](contracts/invariants.md#i-08-外部写入发生在本地提交之后)。
 MoogleMail ComposeSend 先验证空 compose 与完整 Sent baseline，再寻找唯一新增且精确匹配 payload 的 MID；
 Take/Return 各有独立动作证明。每种 Cookie 只有一个运行 owner，明确登录失效才标 invalid，不自动换备用 Cookie。
+
+MoogleMail Send 的 `DeliveryTransport::prepare` 在持久 sending fence 前只读检查真实 compose，
+消耗式 prepared future 连续持有同一 credential guard，fence 明确成功且租约安全后才执行写入。
+`auction-jobs::worker::runtime::delivery::lease`（`delivery/lease.rs`）拥有准备、交接及发送的保守单调截止与有界续租；
+application 既有 renew 端口覆盖有效 claimed/sending，storage `delivery_scheduler/state.rs` 在取得行锁后复核实时租约。
+prepare 保留总预算并周期续租，fence 前后确认续租，首次 poll 前再次检查截止；失效或不明不继续外部写入。
+脏草稿只使本轮对应 world 的 Send 延后，Take/Return 与其他 world 可继续；下轮重新观测，
+不按历史错误建立永久 SQL 阻断。旧 sending/unknown 不转换，内部留存仍待可信身份及真实库存证明。
+
+Admin 凭据导入的累计 unknown 由常驻原表单拥有，锁定原 UUID 与原字段，只能原样重试；Cookie 不进入 pending 集合。
+`auction-web-admin::app::surface::pending` 提供可选同步页级 gate，仅 Users 启用：首次提交和重试在 spawn 前共同占用，
+一次性 Key 由页面接收后保持待确认，用户关闭展示才释放；其他页面并发策略保持不变。
+交互及生命周期细节见 [Admin 设计](../crates/auction-web-admin/DESIGN.md)。
 
 ## 配置与数据保护
 

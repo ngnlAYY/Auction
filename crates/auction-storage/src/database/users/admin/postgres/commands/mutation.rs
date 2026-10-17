@@ -1,4 +1,6 @@
 //! PostgreSQL Admin Users 状态/身份变更命令。
+//!
+//! 快照更新时间以已存创建/更新时间为下界；旧时间高水位不能导致新管理命令产出非法投影。
 
 use super::super::mapping::*;
 use super::super::reads::{load_command_postgres_tx, load_user_postgres_tx};
@@ -108,7 +110,7 @@ async fn apply_mutation_postgres(
             sqlx::query(
                 "UPDATE public.users
                  SET username = $1, game_player_id = $1,
-                     state_version = state_version + 1, updated_at = $2
+                     state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
                  WHERE id = $3",
             )
             .bind(username)
@@ -128,7 +130,7 @@ async fn apply_mutation_postgres(
             // 否则下一轮回帖会把 Users 与映射表的分叉当作身份劫持并永久拒绝。
             sqlx::query(
                 "UPDATE public.forum_bidder_identities
-                 SET external_account_id = $1, updated_at = $2
+                 SET external_account_id = $1, updated_at = GREATEST(created_at, updated_at, $2)
                  WHERE user_id = $3 AND external_account_id IS DISTINCT FROM $1",
             )
             .bind(forum_account_id)
@@ -139,7 +141,7 @@ async fn apply_mutation_postgres(
             .map_err(map_admin_write_error)?;
             sqlx::query(
                 "UPDATE public.users
-                 SET forum_account_id = $1, state_version = state_version + 1, updated_at = $2
+                 SET forum_account_id = $1, state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
                  WHERE id = $3",
             )
             .bind(forum_account_id)
@@ -152,7 +154,7 @@ async fn apply_mutation_postgres(
         AdminUserMutationAction::RevokeKey => {
             sqlx::query(
                 "UPDATE public.users
-                 SET key_status = 'revoked', state_version = state_version + 1, updated_at = $1
+                 SET key_status = 'revoked', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
                  WHERE id = $2",
             )
             .bind(now)
@@ -166,7 +168,7 @@ async fn apply_mutation_postgres(
             sqlx::query(
                 "UPDATE public.users
                  SET public_key_hash = $1, key_status = 'active',
-                     state_version = state_version + 1, updated_at = $2
+                     state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $2)
                  WHERE id = $3",
             )
             .bind(key.public_key_hash.to_vec())
@@ -184,7 +186,7 @@ async fn apply_mutation_postgres(
             let reason = write.public_reason.as_deref().ok_or(AdminUserError::InvalidRequest)?;
             sqlx::query(
                 "UPDATE public.users
-                 SET status = 'blacklisted', state_version = state_version + 1, updated_at = $1
+                 SET status = 'blacklisted', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
                  WHERE id = $2",
             )
             .bind(now)
@@ -227,7 +229,7 @@ async fn apply_mutation_postgres(
             }
             sqlx::query(
                 "UPDATE public.users
-                 SET status = 'active', state_version = state_version + 1, updated_at = $1
+                 SET status = 'active', state_version = state_version + 1, updated_at = GREATEST(created_at, updated_at, $1)
                  WHERE id = $2",
             )
             .bind(now)

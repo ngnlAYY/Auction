@@ -47,6 +47,26 @@ impl MoogleMailGateway {
         Ok(Self { client, credentials, config, parser: MoogleMailParser })
     }
 
+    /// 读取同一运行时凭据的远端自身身份；None 仅表示没有配置预期绑定。
+    ///
+    /// 当前尚未取得可信认证自身页面协议，配置存在时明确返回 identity_unproven。
+    /// 不读取 persona、草稿收件人或历史 Sent 代替证明，也不以余额检查标记 verified。
+    /// 后续受支持解析器必须复用此会话、client、ownership 和 fetch_budget。
+    pub async fn read_verified_player_identity(
+        &self,
+        world: MoogleMailWorld,
+    ) -> Result<Option<auction_application::VerifiedMailPlayerIdentity>, MoogleMailError> {
+        let session = self.credentials.begin(world)?;
+        if !session.has_expected_player_name() {
+            return Ok(None);
+        }
+        Err(operation_error(
+            MoogleMailOperation::Inbox,
+            world,
+            MoogleMailErrorCategory::IdentityUnproven,
+        ))
+    }
+
     /// 读取一个 world 的未完成邮件窗口；cursor 是最后一封已完成邮件的 external_mail_id。
     pub async fn fetch(
         &self,

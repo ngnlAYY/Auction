@@ -154,7 +154,8 @@ pub use admin_credentials::{
     AdminCredentialSecret, AdminCredentialStatus, AdminCredentialStatusCommand,
     AdminCredentialStore, AdminCredentialVerifier, AdminCredentialWorld,
     MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
-    credential_check_worlds, credential_scope, credential_secret_hash,
+    MailPlayerIdentityProofSource, VerifiedMailPlayerIdentity, credential_check_worlds,
+    credential_scope, credential_secret_hash, valid_credential_player_name, valid_mail_player_name,
 };
 pub use admin_forum::{
     AdminForumBidPost, AdminForumCatalog, AdminForumCommand, AdminForumLot, AdminForumPost,
@@ -269,8 +270,9 @@ pub use core_ledger::{CommandLedger, CommandLedgerError, RequestHash, StoredComm
 pub use core_policy::{TransactionIsolation, TransactionPolicy, TransactionPolicyError};
 pub use core_repository::{AuctionRepository, RepositoryError};
 pub use delivery::{
-    DeliveryClaimExclusions, DeliveryRecipientExclusion, DeliverySendResult, DeliveryTransport,
-    DeliveryTransportError, DeliveryWorkClaim, DeliveryWorkStore,
+    DeliveryClaimExclusions, DeliveryPreparation, DeliveryPreparedSend, DeliveryRecipientExclusion,
+    DeliverySendResult, DeliveryTransport, DeliveryTransportError, DeliveryWorkClaim,
+    DeliveryWorkStore,
 };
 pub use delivery_admin::{
     DeliveryAdminAction, DeliveryAdminCommand, DeliveryAdminError, DeliveryAdminListRequest,
@@ -301,12 +303,13 @@ pub use forum_sync::{
 };
 pub use fulfillment::{
     SettlementDeliveryPreparation, SettlementFulfillmentActivationResult,
-    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentClaim,
-    SettlementFulfillmentCommandPort, SettlementFulfillmentCustodyReader,
-    SettlementFulfillmentCustodySnapshot, SettlementFulfillmentDeliverySnapshot,
-    SettlementFulfillmentDeliveryStatus, SettlementFulfillmentEquipmentSecret,
-    SettlementFulfillmentEquipmentSecretReader, SettlementFulfillmentEvidenceReader,
-    SettlementFulfillmentOperation, SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
+    SettlementFulfillmentBalanceEvidence, SettlementFulfillmentBotIdentityReader,
+    SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
+    SettlementFulfillmentCustodyReader, SettlementFulfillmentCustodySnapshot,
+    SettlementFulfillmentDeliverySnapshot, SettlementFulfillmentDeliveryStatus,
+    SettlementFulfillmentEquipmentSecret, SettlementFulfillmentEquipmentSecretReader,
+    SettlementFulfillmentEvidenceReader, SettlementFulfillmentOperation,
+    SettlementFulfillmentPhaseResult, SettlementFulfillmentProof,
     SettlementFulfillmentRecipientReader, SettlementFulfillmentRecipientSnapshot,
     SettlementFulfillmentReconcileResult, SettlementFulfillmentReconcileStatus,
     SettlementFulfillmentResult, SettlementFulfillmentSentEvidence,

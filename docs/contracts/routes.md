@@ -717,6 +717,13 @@ PostgreSQL 与独立 `credential_data_key`，未配置密钥时返回
 回退入口。`mail_cookie` 与 `forum_cookie` 各自全局最多一条 active 记录；导入或重新启用同类第二条
 时返回 `409 credential_conflict`，调用方必须先通过同一路由停用旧记录并重启 Worker 完成交接。
 
+A32 导入与安全投影支持可省略/nullable 的 `player_name`，仅 `mail_cookie` 接受非空完整游戏玩家名称（非数字 UID）。
+Some 必须不含控制字符、无首尾空白且最多256 UTF-8字节；不 trim、不折叠大小写或猜别名，forum 设置即拒绝。
+None 不改变旧导入命令摘要，旧账本/DTO 缺字段按 None 解码；改名及启停不修改绑定。
+这是预期声明，不是 verified 状态；现有凭据保持原记录与密文，本轮没有补绑定写入口，不以删除重导入代替安全补绑。
+当前 gateway 无绑定返回 None，有绑定无法证明自身名称返回内部稳定码 `identity_unproven`；不新增身份核验 HTTP 路由。
+A44 的 Valid 仅为可用性观测，Item Shop 余额也不是自身名称证明，不能授权内部免寄。
+
 A44 `POST /api/v1/admin/credentials/{credential_id}/check` 只校验已保存凭据，不接受原始 Cookie 或远端 URL。
 请求是严格 JSON `{ "expected_state_version": 1 }`，最多 4 KiB，无查询参数。保留 Admin session、
 Origin、CSRF 与 mutation 限流；尽管使用 POST 防止跨站/预取触发，操作只读，不使用 `command_id`

@@ -3,9 +3,7 @@
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
-use auction_web_shared::{
-    AsyncState, AsyncStateKind, Dialog, Pager, Time, TruncatedText, legacy_t as t,
-};
+use auction_web_shared::{AsyncState, AsyncStateKind, Dialog, Time, TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
@@ -17,6 +15,7 @@ use crate::api::{
 };
 use crate::app::surface::sort::{SortDirection, SortableTh, directed};
 
+use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
 use super::query::use_renames_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
 
@@ -30,12 +29,17 @@ pub(super) fn page() -> Element {
     // 按改名事实保留完整请求；关闭确认框或切换目标不能丢弃结果尚未确认的命令。
     let mut commands = use_signal(HashMap::<String, AdminRenameRevertCommand>::new);
     let mut selected = use_signal(|| None::<AdminRename>);
-    let renames = use_resource(move || {
-        let _ = refresh();
-        let current = query_state();
-        // 旧页面只按名称筛选，输入变化立即成为查询键。
-        fetch_admin_renames("all".to_owned(), current.name.clone(), current.page)
-    });
+    let pagination =
+        use_admin_pagination("renames", &["page_size"], Some(200), i64::from(i32::MAX));
+    let renames = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = refresh();
+            let current = query_state();
+            (current.name, current.page)
+        },
+        |(name, page), size| fetch_admin_renames("all".to_owned(), name, page, size),
+    );
     // 名称即时筛选持一份 hook 克隆。
     let mut name_query = query.clone();
 
@@ -141,6 +145,7 @@ pub(super) fn page() -> Element {
                 }
             }
             Pager {
+                pagination,
                 page: page.page,
                 page_size: page.page_size,
                 total: Some(page.total),

@@ -11,6 +11,7 @@
 | --- | --- |
 | [database/store.rs](src/database/store.rs)、[pool](src/database/pool) | 连接、readiness 与连接池观测 |
 | [competition](src/database/competition)、[commands](src/database/commands) | 竞价、生命周期、管理事务与命令装配 |
+| [draft_soft_close](src/database/draft_soft_close) | 未发布草稿只读检查及显式 Serializable/CAS 修正、账本重放和追加审计 |
 | [settlement](src/database/settlement)、[settlement_policy](src/database/settlement_policy) | 结算事实与冻结策略解码 |
 | [scheduler](src/database/scheduler)、[slow_proxy_due.rs](src/database/slow_proxy_due.rs) | 持久轮次、领取与慢速代理候选 |
 | [realtime_consumer](src/database/realtime_consumer) | 独占消费、连续游标与失败恢复 |
@@ -23,9 +24,14 @@
 [users](src/database/users) 在写锁内复核注册信封绑定的 UUID。论坛数字账号是稳定身份；`username` 是可变显示名和
 MM 收件人，不能互换。[sessions](src/database/sessions) 保存会话摘要：Admin 启动撤销旧 Admin 会话，Public key
 撤销/重签与旧会话永久撤销同事务提交；只读 inspect 不刷新过期时间。
+用户、论坛身份及登录 key 信封的快照更新时间以已存创建/更新时间为下界，不因时钟差异倒退；审计/命令时间不据此改写。
+`000044` 只修复 MM 注册账本与论坛身份历史共同证明的用户时间倒退，推进版本并追加更正审计，保留创建时间与所有凭据。
+未知来源异常由新增时间顺序约束阻断整次迁移，Admin 投影校验不放宽；部署边界见[运维手册](../../ops/README.md#用户快照时间修复升级)。
 
 凭据与 realtime 消费 owner 持有专用物理 session；操作复用原持锁连接，失效后不能从池补连接继续。
 guard 退出关闭物理连接，不带锁归池。凭据网络调用不跨越数据库事务；部署身份不包含连接原文、账号或密码。
+`credentials` 通过 `000045` 持久化可选预期 `player_name` 并传递当前 state_version，旧记录保持 NULL。
+该字段不是 verified 标记；当前没有内部履约调用方，因此不保留无调用的私有身份锁实现，未来事务门禁见下文。
 
 ## 竞价事务和后端入口
 
@@ -43,6 +49,8 @@ Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提�
 普通/论坛/快慢代理的每条已接受竞价事实都推进周期；新代理 Created 在同事务默认标记，读取、降额与重放不恢复标记。
 同值的新命令也推进版本 fence，取消保留 tombstone。迁移只补已有有效代理标记，不补发过去提醒。
 通知跨渠道按 lot/用户/领先周期唯一，MM 复用 mail_delivery owner 入队；冻结 payload、收件人和摘要提供独立 proof。
+内部入队接口保留类型化 SQLx 错误，`40001`/`40P01` 交回竞价 runner，沿用最多三次整事务尝试；
+不局部重排入队，独立邮件仓储端口仍在边界脱敏，不暴露 SQL 错误或改变发送重试规则。
 领取只读 proof，sending 先锁 lot 再锁 delivery 并复核；取消/重新领先使旧资格永久失效，未开始发送的旧任务收口为 failed 并追加审计。
 已 sending 的未知结果仍进入 manual_reconcile；已接受标记命令在拍卖后来隐藏后仍能重放原响应，新命令遵守当前公开可见性。
 正文不包含代理上限。完整标记列表超过 10000 条明确失败。
@@ -85,6 +93,12 @@ Public 拍卖、竞价日志、成交历史与补偿批次的游标查询仅对�
 Admin 读取不为补全投影临时写入。邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
 
 Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。
+compose 安全改由 transport 在 sending fence 前实际只读检查，不再按历史失败永久阻断整个 world。
+未开始写入的有效 claim 释放回 pending 时撤销本次领取 attempt_count，并在同事务追加 release 审计；
+租约 token/fencing 和调用时刻、数据库实时有效期仍须一致，历史 sending/manual_reconcile 不进入该释放路径。
+续租仅允许当前有效 claimed/sending；先取得 delivery 行锁，再复核 token/fencing 及数据库 clock_timestamp()，避免锁等待跨越有效期。
+新截止必须仍在未来且不缩短已有租约；sending fence 保持 lot → delivery 锁序，释放同样在行锁后检查实时有效期；
+准备期间可续租，过期租约、旧 owner 和 manual_reconcile 均不能复活。Worker 在 fence 前后确认续租后才开始外部写入。
 主动 Send 要求新增、唯一且完整匹配的 Sent 证明；流拍/撤拍逐件 Send 原装备，历史冻结 Return 不改写。
 论坛未知 POST 先精确只读对账，再按持久人工授权重试；真实处理楼层独立于内容版本和 post ID。
 `forum/catalog.rs` 拥有 `auction_forum_catalog_pages` 续页身份/正文；迁移 `000040` 增加主记录目录页数。
@@ -103,6 +117,22 @@ Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 m
 不伪造远端证明，updated_at 超过水位后只能走正常 due/lease 门禁。
 Delivery Admin 重试由 `recovery_commands/commands/delivery_retry.rs` 在原 Serializable 命令事务恢复匹配的 Recovery
 父子失败投影并推进 fencing；不生成成功证明、不清除其他动作阻断。证明规则见[不变量](../../docs/contracts/invariants.md)。
+
+## 内部履约原子事务设计
+
+当前尚无内部结清写入口或 `000046` 迁移；身份页面和 bot 真实库存持有证明闭合前不得启用。
+后续由 `fulfillment_scheduler` 拥有独立 `bot_internal_retained` 证明和事务，禁止复用强制外部 Sent/collected 的 satisfy：
+
+- 使用稳定 command_id/摘要，先检查幂等账本；同负载重放、异负载冲突。Serializable、显式行锁，40001/40P01 至多三次。
+- 同事务锁拍卖、lot、义务与 fulfillment，并由 credentials owner 提供事务内锁接口，锁定并复核
+  active mail credential、scope、完整名称 UTF-8 字节及版本；证明须携带实际远端来源、摘要及有界观测时间。
+  该私有锁接口待真实调用方闭合后一起实现，不以历史 proof 或永久 verified 标记代替。
+- 仅精确匹配有效 claim token/fencing/state_version/lease、pending 且从未准备和无 delivery 的新义务；
+  查询 owner 来源关联排除孤立 delivery、历史外部写与未知结果，不批量转换旧事故队列。
+- 由应用先证明义务种类、身份、当前真实库存持有及资金条件；事务内复核持久收款事实和所有直接依赖。
+  装备详情存在或库存中未找到均非已内部收到。退款、isekai carrier 和装备交付不得绕过收款门禁。
+- 不变金额/原 seller payout 身份；内部证明插入、义务 satisfied、追加审计和解除直接依赖一次提交，
+  没有外部 mail id 或伪造 delivery success。未知提交只读重放，不重新支付。
 
 ## 连接池可观测性
 

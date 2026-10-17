@@ -16,8 +16,10 @@ pub const REGULAR_BID_INCREMENT: i64 = 50_000;
 pub const LARGE_BID_THRESHOLD: i64 = 2_000_000;
 pub const SMALL_BID_THRESHOLD: i64 = 200_000;
 pub const PROXY_LAST_INCREMENT: i64 = 1_000;
-pub const DEFAULT_SOFT_CLOSE_WINDOW: Duration = Duration::minutes(1);
-pub const DEFAULT_SOFT_CLOSE_EXTENSION: Duration = Duration::minutes(1);
+/// 新场次固定最后15分钟触发；既有场次仍使用自己的冻结快照。
+pub const DEFAULT_SOFT_CLOSE_WINDOW: Duration = Duration::minutes(15);
+/// 候选截止为接受时刻加15分钟，只有晚于当前截止时才延长。
+pub const DEFAULT_SOFT_CLOSE_EXTENSION: Duration = Duration::minutes(15);
 pub const DEFAULT_CANCEL_CUTOFF: Duration = Duration::hours(24);
 pub const DEFAULT_PROXY_SLOW_INTERVAL: Duration = Duration::minutes(10);
 

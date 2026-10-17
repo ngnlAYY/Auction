@@ -7,6 +7,8 @@ mod backup;
 mod bootstrap;
 mod database_bootstrap;
 mod delegation;
+mod draft_soft_close;
+pub(crate) use draft_soft_close::*;
 mod forum;
 mod lot_watch_pm;
 pub(crate) use lot_watch_pm::*;

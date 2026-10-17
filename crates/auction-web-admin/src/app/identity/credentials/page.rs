@@ -13,10 +13,13 @@ use super::super::{
     AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
 };
 use super::{CredentialCreateForm, CredentialDeleteDialog, CredentialPager, CredentialTable};
+use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 加载并展示 Admin 凭据管理页面。
 pub fn page() -> Element {
     let mut reload_generation = use_signal(|| 0_u64);
+    let pending_commands = use_pending_commands(reload_generation);
     // 分页跟地址栏双向同步（?page=）；创建表单与删除确认对话框是瞬态，不入 URL。
     let query = use_page_query_state();
     let query_state = query.state;
@@ -24,20 +27,27 @@ pub fn page() -> Element {
     let delete_busy = use_signal(|| false);
     let mut delete_feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut delete_command_state = use_signal(|| None::<(String, Uuid)>);
-    let credentials = use_resource(move || {
-        let _ = reload_generation();
-        // 旧版凭据页没有列表筛选器，只按固定分页读取完整安全投影。
-        fetch_admin_credentials(String::new(), String::new(), String::new(), query_state().page)
-    });
+    let pagination =
+        use_admin_pagination("credentials", &["page_size"], Some(200), i64::from(i32::MAX));
+    let credentials = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = reload_generation();
+            query_state().page
+        },
+        |page, size| {
+            fetch_admin_credentials(String::new(), String::new(), String::new(), page, size)
+        },
+    );
 
     let open_delete = move |credential: AdminCredential| {
-        if !delete_busy() {
+        if !delete_busy() && !pending_commands.contains(&format!("credential:{}", credential.id)) {
             delete_feedback.set(None);
             pending_delete.set(Some(credential));
         }
     };
     let confirm_delete = move |credential: AdminCredential| {
-        if delete_busy() {
+        if delete_busy() || pending_commands.contains(&format!("credential:{}", credential.id)) {
             return;
         }
         let signature = format!("delete:{}:{}", credential.id, credential.state_version);
@@ -87,11 +97,11 @@ pub fn page() -> Element {
                             next.direction = direction;
                             on_sort_change.push(next);
                         },
-                        reload_generation,
                         on_delete: open_delete,
                     }
                     CredentialPager {
                         page: page.clone(),
+                        pagination,
                         on_page_change: move |next_page| {
                             let mut next = query_state();
                             next.page = next_page;
@@ -109,6 +119,7 @@ pub fn page() -> Element {
             aria_labelledby: "credentials-title",
             h1 { id: "credentials-title", {t!("page-credentials-title")} }
             CredentialCreateForm { reload_generation }
+            PendingCommandPanel { owner: pending_commands }
             {list_content}
             if let Some(feedback) = delete_feedback() {
                 p {

@@ -104,11 +104,15 @@ pub(super) fn recovery_command_label(action: &str) -> String {
     }
 }
 
-pub(super) fn page_count(length: usize) -> usize {
-    length.div_ceil(super::PAGE_SIZE).max(1)
+/// 只对完整权威报告切片；先做有界整数转换，不按用户数量分配内存。
+pub(super) fn page_count(length: usize, size: i64) -> i64 {
+    let length = i64::try_from(length).unwrap_or(i64::MAX);
+    if length == 0 { 1 } else { 1 + (length - 1) / size.max(1) }
 }
 
-pub(super) fn page_slice<T: Clone>(items: &[T], page: i64) -> Vec<T> {
-    let page = page.max(1) as usize;
-    items.iter().skip((page - 1) * super::PAGE_SIZE).take(super::PAGE_SIZE).cloned().collect()
+pub(super) fn page_slice<T: Clone>(items: &[T], page: i64, size: i64) -> Vec<T> {
+    let offset = page.max(1).saturating_sub(1).saturating_mul(size.max(1));
+    let offset = usize::try_from(offset).unwrap_or(usize::MAX);
+    let size = usize::try_from(size.max(1)).unwrap_or(usize::MAX);
+    items.iter().skip(offset).take(size).cloned().collect()
 }

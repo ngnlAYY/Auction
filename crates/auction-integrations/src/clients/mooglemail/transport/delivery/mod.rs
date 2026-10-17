@@ -68,12 +68,21 @@ impl MoogleMailDeliveryTransport {
     async fn send_claim(
         &self,
         claim: DeliveryWorkClaim,
+        mut session: Option<MoogleMailCredentialSession>,
     ) -> Result<DeliverySendResult, DeliveryTransportError> {
         match claim.origin_kind.as_str() {
             "mail_intake" => {
                 let (payload, world) = decode_payload(&claim)?;
                 match payload.operation.as_str() {
-                    "send" => self.send_notification(&claim, &payload, world).await,
+                    "send" => {
+                        self.send_notification(
+                            &claim,
+                            &payload,
+                            world,
+                            session.as_mut().ok_or_else(invalid_payload)?,
+                        )
+                        .await
+                    }
                     "return" => {
                         self.send_action(
                             &claim,
@@ -104,7 +113,15 @@ impl MoogleMailDeliveryTransport {
             "settlement" => {
                 let (payload, world) = decode_settlement_payload(&claim)?;
                 match payload.operation.as_str() {
-                    "send" => self.send_settlement(&claim, &payload, world).await,
+                    "send" => {
+                        self.send_settlement(
+                            &claim,
+                            &payload,
+                            world,
+                            session.as_mut().ok_or_else(invalid_payload)?,
+                        )
+                        .await
+                    }
                     // 旧 payload 只允许读取并隔离；原邮件的 Return 不能证明已入库装备返还。
                     // 历史执行结果无法在此证明，保留人工态，且不执行任何远端写入。
                     "return" => Err(legacy_settlement_return()),
@@ -114,7 +131,15 @@ impl MoogleMailDeliveryTransport {
             "settlement_recovery_action" => {
                 let (payload, world) = decode_payload(&claim)?;
                 match payload.operation.as_str() {
-                    "send" => self.send_notification(&claim, &payload, world).await,
+                    "send" => {
+                        self.send_notification(
+                            &claim,
+                            &payload,
+                            world,
+                            session.as_mut().ok_or_else(invalid_payload)?,
+                        )
+                        .await
+                    }
                     "take" => {
                         self.send_action(
                             &claim,
@@ -137,7 +162,13 @@ impl MoogleMailDeliveryTransport {
                 if payload.operation != "send" {
                     return Err(invalid_payload());
                 }
-                self.send_notification(&claim, &payload, world).await
+                self.send_notification(
+                    &claim,
+                    &payload,
+                    world,
+                    session.as_mut().ok_or_else(invalid_payload)?,
+                )
+                .await
             }
             _ => Err(invalid_payload()),
         }
@@ -167,12 +198,38 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
         world.map_or(true, |world| self.credentials.available(world))
     }
 
+    fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
+        Box::pin(async move {
+            let world = match claim.origin_kind.as_str() {
+                "settlement" => decode_settlement_payload(&claim)
+                    .ok()
+                    .filter(|(payload, _)| payload.operation == "send")
+                    .map(|(_, world)| world),
+                "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch" => {
+                    decode_payload(&claim)
+                        .ok()
+                        .filter(|(payload, _)| payload.operation == "send")
+                        .map(|(_, world)| world)
+                }
+                _ => None,
+            };
+            let session = match world {
+                Some(world) => Some(self.prepare_credentials(world).await?),
+                None => None,
+            };
+            // 独占 session 被移入尚未 poll 的 future；数据库 fence 失败或超时丢弃句柄即释放。
+            let prepared: DeliveryPreparedSend<'_> =
+                Box::pin(async move { self.send_claim(claim, session).await });
+            Ok(prepared)
+        })
+    }
+
     fn send(
         &self,
         claim: DeliveryWorkClaim,
     ) -> Pin<Box<dyn Future<Output = Result<DeliverySendResult, DeliveryTransportError>> + Send + '_>>
     {
-        Box::pin(async move { self.send_claim(claim).await })
+        Box::pin(async move { self.prepare(claim).await?.await })
     }
 }
 

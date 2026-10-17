@@ -17,6 +17,7 @@ use super::event::{RealtimeEventPager, RealtimeEventTable};
 use super::failure::{RealtimeFailurePager, RealtimeFailureTable};
 use super::filters::{RealtimeEventFilters, RealtimeFailureFilters};
 use super::lag::{RealtimeLagPager, RealtimeLagTable};
+use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
 use crate::app::surface::{
     AdminActionFeedback, admin_api_error_message, run_admin_feedback_action, stable_command_id,
 };
@@ -52,34 +53,50 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
         lag_refresh.set(lag_refresh().saturating_add(1));
         failure_refresh.set(failure_refresh().saturating_add(1));
     });
-    let events = use_resource(move || {
-        let _ = event_refresh();
-        let current = query_state();
-        fetch_realtime_event_page(
-            current.event_page,
-            current.event_stream.clone(),
-            current.event_kind.clone(),
-        )
-    });
+    let event_pagination =
+        use_admin_pagination("realtime-events", &["event_page_size"], Some(200), 1_000_000);
+    let failure_pagination =
+        use_admin_pagination("realtime-failures", &["failure_page_size"], Some(200), 1_000_000);
+    let lag_pagination =
+        use_admin_pagination("realtime-lag", &["lag_page_size"], Some(200), 1_000_000);
+    let events = use_admin_page(
+        event_pagination.clone(),
+        move || {
+            let _ = event_refresh();
+            let current = query_state();
+            (current.event_page, current.event_stream, current.event_kind)
+        },
+        |(page, stream, kind), size| fetch_realtime_event_page(page, stream, kind, size),
+    );
     let event_overview = use_resource(move || {
         let _ = event_refresh();
         fetch_realtime_event_total()
     });
-    let lag = use_resource(move || {
-        let _ = lag_refresh();
-        fetch_realtime_lag_page(query_state().lag_page, String::new(), String::new())
-    });
-    let failures = use_resource(move || {
-        let _ = failure_refresh();
-        let current = query_state();
-        fetch_realtime_failure_page(
-            current.failure_page,
-            current.failure_stream.clone(),
-            current.failure_consumer.clone(),
-            current.failure_code.clone(),
-            current.failure_state.clone(),
-        )
-    });
+    let lag = use_admin_page(
+        lag_pagination.clone(),
+        move || {
+            let _ = lag_refresh();
+            query_state().lag_page
+        },
+        |page, size| fetch_realtime_lag_page(page, String::new(), String::new(), size),
+    );
+    let failures = use_admin_page(
+        failure_pagination.clone(),
+        move || {
+            let _ = failure_refresh();
+            let current = query_state();
+            (
+                current.failure_page,
+                current.failure_stream,
+                current.failure_consumer,
+                current.failure_code,
+                current.failure_state,
+            )
+        },
+        |(page, stream, consumer, code, state), size| {
+            fetch_realtime_failure_page(page, stream, consumer, code, state, size)
+        },
+    );
     let unresolved_failures = use_resource(move || {
         let _ = failure_refresh();
         fetch_realtime_failure_page(
@@ -88,6 +105,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             String::new(),
             String::new(),
             "dead_letter".to_owned(),
+            10,
         )
     });
 
@@ -169,6 +187,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             let mut on_page_change = query.clone();
             rsx! {
                 RealtimeEventPager {
+                    pagination: event_pagination,
                     page: event_page.clone(),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
@@ -217,6 +236,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             let mut on_page_change = query.clone();
             rsx! {
                 RealtimeFailurePager {
+                    pagination: failure_pagination,
                     page: failure_page.clone(),
                     on_page_change: move |next_page| {
                         let mut next = query_state();
@@ -251,6 +271,7 @@ fn page_with_copy(page_title: String, page_note: String) -> Element {
             rsx! {
                 RealtimeLagTable { page: lag_page.clone() }
                 RealtimeLagPager {
+                    pagination: lag_pagination,
                     page: lag_page.clone(),
                     on_page_change: move |next_page| {
                         let mut next = query_state();

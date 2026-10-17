@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use crate::api::{AdminSettlementCatalogEntry, AdminSettlementCatalogPage};
 use crate::app::surface::{AdminActionFeedback, format_admin_time};
 
-use auction_web_shared::Pager;
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
 
 use super::RecoveryConfirmationDraft;
 use super::query::{SettlementQuery, push_settlement_query};
@@ -114,6 +114,7 @@ pub(super) fn AdminSettlementPicker(
 #[component]
 pub(super) fn AdminSettlementCatalogPager(
     page: AdminSettlementCatalogPage,
+    pagination: AdminPagination,
     world_filter: Signal<String>,
     mut requested_sequence: Signal<Option<i64>>,
     mut selected_auction_id: Signal<String>,
@@ -127,6 +128,7 @@ pub(super) fn AdminSettlementCatalogPager(
 ) -> Element {
     rsx! {
         Pager {
+            pagination,
             page: page.page.max(1),
             page_size: page.page_size.max(1),
             total: Some(page.total),
@@ -138,6 +140,16 @@ pub(super) fn AdminSettlementCatalogPager(
             next_label: t!("admin-pagination-next"),
             jump_label: t!("admin-pagination-input"),
             jump_button_label: t!("admin-pagination-go"),
+            on_size_reset: move |_| {
+                // 数量只重置目录页；保持选定场次、两个报告分页及未结束的命令上下文。
+                catalog_page.set(1);
+                push_settlement_query(&SettlementQuery {
+                    world_id: world_filter(),
+                    auction_id: selected_auction_id(),
+                    sequence: requested_sequence(),
+                    page: 1,
+                });
+            },
             on_page_change: move |next_page| {
                 catalog_page.set(next_page);
                 requested_sequence.set(None);

@@ -36,7 +36,7 @@ pub(super) async fn list_postgres(
     .await
     .map_err(|_| storage_error("统计 Admin 凭据失败"))?;
     let rows = sqlx::query(
-        "SELECT id, credential_kind, scope, label, status, state_version,
+        "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                 created_at, rotated_at, updated_at
          FROM public.credential_keys
          WHERE ($1::text IS NULL OR credential_kind = $1)

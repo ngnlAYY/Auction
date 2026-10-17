@@ -20,7 +20,7 @@ use url::form_urlencoded;
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, TABLE_PAGE_SIZE, invalid_request_error,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, OptionalField, invalid_request_error,
     invalid_response_error, response_error, send_get, valid_admin_time, valid_safe_text,
     valid_trimmed_text, valid_uuid,
 };
@@ -119,8 +119,9 @@ pub(crate) async fn fetch_realtime_event_page(
     page: i64,
     stream_key: String,
     kind: String,
+    page_size: i64,
 ) -> Result<RealtimeEventPage, String> {
-    fetch_realtime_event_page_with_size(page, TABLE_PAGE_SIZE, stream_key, kind).await
+    fetch_realtime_event_page_with_size(page, page_size, stream_key, kind).await
 }
 
 /// 只取全局事件总数，避免概览卡片被列表筛选条件改写。
@@ -135,7 +136,8 @@ async fn fetch_realtime_event_page_with_size(
     stream_key: String,
     kind: String,
 ) -> Result<RealtimeEventPage, String> {
-    let requested_page = page.max(1);
+    super::pagination::validate(page, page_size, 200, 1_000_000)?;
+    let requested_page = page;
     let requested_page_size = page_size.max(1);
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &requested_page.to_string());
@@ -162,8 +164,9 @@ pub(crate) async fn fetch_realtime_lag_page(
     page: i64,
     stream_prefix: String,
     consumer_key: String,
+    page_size: i64,
 ) -> Result<RealtimeLagPage, String> {
-    fetch_realtime_lag_page_with_size(page, TABLE_PAGE_SIZE, stream_prefix, consumer_key).await
+    fetch_realtime_lag_page_with_size(page, page_size, stream_prefix, consumer_key).await
 }
 
 async fn fetch_realtime_lag_page_with_size(
@@ -172,6 +175,7 @@ async fn fetch_realtime_lag_page_with_size(
     stream_prefix: String,
     consumer_key: String,
 ) -> Result<RealtimeLagPage, String> {
+    super::pagination::validate(page, page_size, 200, 1_000_000)?;
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &page.max(1).to_string());
     query.append_pair("page_size", &page_size.max(1).to_string());
@@ -199,16 +203,10 @@ pub(crate) async fn fetch_realtime_failure_page(
     consumer_key: String,
     code: String,
     state: String,
+    page_size: i64,
 ) -> Result<RealtimeFailurePage, String> {
-    fetch_realtime_failure_page_with_size(
-        page,
-        TABLE_PAGE_SIZE,
-        stream_key,
-        consumer_key,
-        code,
-        state,
-    )
-    .await
+    fetch_realtime_failure_page_with_size(page, page_size, stream_key, consumer_key, code, state)
+        .await
 }
 
 async fn fetch_realtime_failure_page_with_size(
@@ -219,6 +217,7 @@ async fn fetch_realtime_failure_page_with_size(
     code: String,
     state: String,
 ) -> Result<RealtimeFailurePage, String> {
+    super::pagination::validate(page, page_size, 200, 1_000_000)?;
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &page.max(1).to_string());
     query.append_pair("page_size", &page_size.max(1).to_string());

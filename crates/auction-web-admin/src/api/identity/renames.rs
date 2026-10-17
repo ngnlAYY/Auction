@@ -76,9 +76,11 @@ pub(crate) async fn fetch_admin_renames(
     user_id: String,
     name: String,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminRenamePage, String> {
+    super::pagination::validate(page, page_size, 200, i64::from(i32::MAX))?;
     let mut query =
-        url::form_urlencoded::Serializer::new(format!("page={page}&page_size={TABLE_PAGE_SIZE}"));
+        url::form_urlencoded::Serializer::new(format!("page={page}&page_size={page_size}"));
     if user_id != "all" {
         query.append_pair("user_id", &user_id);
     }
@@ -92,7 +94,7 @@ pub(crate) async fn fetch_admin_renames(
     }
     let payload: ApiResponse<StrictRenameList> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_rename_list(payload.data, &user_id, page)
+    decode_rename_list(payload.data, &user_id, page, page_size)
         .map(AdminRenamePage::from)
         .map_err(invalid_response_error)
 }
@@ -115,7 +117,8 @@ pub(crate) async fn prepare_admin_rename_revert(
     if command_id.is_nil() || rename_id.is_nil() || user_id.is_nil() {
         return Err("invalid_request".to_owned());
     }
-    let history = fetch_admin_renames(user_id.to_string(), String::new(), 1).await?;
+    let history =
+        fetch_admin_renames(user_id.to_string(), String::new(), 1, TABLE_PAGE_SIZE).await?;
     // 每行的版本来自同一次事务中 JOIN 的当前用户；任一改名行都能提供该用户的版本。
     let expected_state_version = history
         .renames
@@ -166,10 +169,11 @@ fn decode_rename_list(
     data: StrictRenameList,
     user_filter: &str,
     requested_page: i64,
+    requested_size: i64,
 ) -> Result<AdminRenameListResponse, &'static str> {
     let pagination = decode_rename_pagination(data.pagination)?;
     if pagination.page != requested_page
-        || pagination.page_size != TABLE_PAGE_SIZE
+        || pagination.page_size != requested_size
         || i64::try_from(data.renames.len())
             .map_or(true, |count| count > pagination.page_size || count > pagination.total)
     {

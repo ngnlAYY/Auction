@@ -11,7 +11,11 @@ use crate::{
 
 /// 当前凭据版本的手动校验入口与安全结果。
 #[component]
-pub fn CredentialCheckAction(credential: AdminCredential, busy: Signal<bool>) -> Element {
+pub fn CredentialCheckAction(
+    credential: AdminCredential,
+    busy: Signal<bool>,
+    blocked: bool,
+) -> Element {
     let mut checked = use_signal(|| None::<AdminCredentialCheck>);
     let mut checking = use_signal(|| false);
     let feedback = use_signal(|| None::<AdminActionFeedback>);
@@ -25,11 +29,11 @@ pub fn CredentialCheckAction(credential: AdminCredential, busy: Signal<bool>) ->
     rsx! {
         button {
             r#type: "button",
-            disabled: busy(),
+            disabled: busy() || blocked,
             aria_busy: checking(),
             aria_describedby: described_by,
             onclick: move |_| {
-                if busy() { return; }
+                if busy() || blocked { return; }
                 checked.set(None);
                 checking.set(true);
                 let credential = credential.clone();

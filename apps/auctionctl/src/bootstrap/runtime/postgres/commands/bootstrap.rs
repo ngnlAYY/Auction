@@ -53,6 +53,7 @@ pub(crate) async fn bootstrap_mail_credentials(world: &str, label: &str) -> anyh
             kind: AdminCredentialKind::MailCookie,
             world: credential_world,
             label: label.to_owned(),
+            player_name: None,
             secret,
             actor_id: "auctionctl/bootstrap-mail-credentials".to_owned(),
             request_id: None,

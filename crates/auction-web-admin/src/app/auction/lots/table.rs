@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminLot, AdminLotPage};
 
@@ -20,6 +21,7 @@ use super::state::LotUpdateNotice;
 #[component]
 pub(super) fn AdminLotTable(
     page: AdminLotPage,
+    pagination: AdminPagination,
     /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
     sort: String,
     direction: SortDirection,
@@ -30,7 +32,6 @@ pub(super) fn AdminLotTable(
 ) -> Element {
     let selected_lot = use_signal(|| None::<(String, String)>);
     let notice = use_signal(|| None::<LotUpdateNotice>);
-    let intake_busy = use_signal(|| false);
     let allow_lot_update = page.auction.status == "draft";
     // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
     let mut lots = page.lots.clone();
@@ -59,8 +60,6 @@ pub(super) fn AdminLotTable(
                     AdminIntakeForm {
                         key: "{page.auction.world_id}",
                         world_id: page.auction.world_id.clone(),
-                        busy: intake_busy,
-                        reload_generation,
                     }
                 }
                 div { class: "admin-auction-table-wrap admin-auction-lot-table-wrap",
@@ -113,7 +112,7 @@ pub(super) fn AdminLotTable(
                         tbody {
                             for lot in lots {
                                 // 按业务 ID 固定 key，避免刷新/重排后行内本地状态错位绑定到另一行。
-                                AdminLotRow { key: "{lot.id}", lot, selected_lot, notice, reload_generation, allow_lot_update }
+                                AdminLotRow { key: "{lot.id}", lot, selected_lot, notice, allow_lot_update }
                             }
                         }
                     }
@@ -126,6 +125,7 @@ pub(super) fn AdminLotTable(
                     }
                 }
                 Pager {
+                    pagination,
                     page: page.pagination.page,
                     page_size: page.pagination.page_size,
                     total: Some(page.pagination.total),
@@ -141,7 +141,7 @@ pub(super) fn AdminLotTable(
                 }
             }
             if let Some((lot_id, lot_code)) = selected_lot() {
-                AdminProxyHistory { lot_id, lot_code, selected_lot, reload_generation }
+                AdminProxyHistory { key: "{lot_id}", lot_id, lot_code, selected_lot, reload_generation }
             }
         }
     }

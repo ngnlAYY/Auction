@@ -83,6 +83,12 @@ Credits/COD 为零。同封其他 lot 不受影响，已 Take 的邮件不能整
 claim token/owner/版本或续租 fence 失效后取消陈旧处理，只能从权威 cursor 重放。
 外部写入在本地事务提交后执行，未知结果进入对账，不能抹掉已接受事实或自动重发。
 
+MoogleMail delivery 在 sending fence 前执行只读 compose preflight，消耗式 prepared future 持有同一凭据独占 guard；
+不安全时释放并在本轮跳过该 world 的 Send（Take/Return 独立），旧 unknown 留待人工核对，不清理草稿或重排旧任务。
+`bootstrap/fulfillment.rs` 提供 bot identity 只读窄端口适配，复用原 gateway/credential set/ownership。
+当前未接入内部结清：可信身份页面与真实库存证明尚未闭合；装备详情读取成功的 custody 投影不能用于证明 bot 持有。
+后续规则及原子存储边界见[履约端口](../../crates/auction-application/README.md#结算与恢复端口)。
+
 所有主动 ComposeSend 都以完整有界 Sent baseline 和发送后独立 scan 证明新增唯一 MID，
 同时精确匹配 world、recipient、subject/body digest、Credits/COD 和装备；零资产通知也需要证明。
 Return/Take 使用独立 action proof。证明、加密异常留证、历史展示回填和资产核对统一见

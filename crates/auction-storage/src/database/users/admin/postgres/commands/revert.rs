@@ -55,7 +55,7 @@ pub(crate) async fn revert_postgres(
          SET username = $1,
              game_player_id = $1,
              state_version = state_version + 1,
-             updated_at = $2
+             updated_at = GREATEST(created_at, updated_at, $2)
          WHERE id = $3",
     )
     .bind(&previous_username)

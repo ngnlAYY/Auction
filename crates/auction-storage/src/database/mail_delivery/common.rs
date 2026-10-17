@@ -3,6 +3,27 @@
 #[cfg(feature = "postgres")]
 use auction_application::RepositoryError;
 
+/// 内部入队事务保留 SQLx 错误，交由调用方按自己的事务策略识别 SQLSTATE。
+/// 对外仓储端口仍须通过 `into_repository` 脱敏，不能输出底层数据库错误。
+#[cfg(feature = "postgres")]
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum MailDeliveryTransactionError {
+    #[error("MoogleMail delivery 数据库操作失败")]
+    Sqlx(#[from] sqlx::Error),
+    #[error(transparent)]
+    Rejected(#[from] RepositoryError),
+}
+
+#[cfg(feature = "postgres")]
+impl MailDeliveryTransactionError {
+    pub(super) fn into_repository(self) -> RepositoryError {
+        match self {
+            Self::Sqlx(error) => map_storage_error(error),
+            Self::Rejected(error) => error,
+        }
+    }
+}
+
 #[cfg(feature = "postgres")]
 pub(super) fn map_storage_error(error: sqlx::Error) -> RepositoryError {
     RepositoryError::Failed(match error {

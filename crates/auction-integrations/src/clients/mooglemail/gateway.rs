@@ -15,7 +15,8 @@ mod model;
 #[path = "gateway/reader.rs"]
 mod reader;
 
-pub use credentials::MoogleMailCredentialSet;
+pub(crate) use credentials::MoogleMailCredentialSession;
+pub use credentials::{MoogleMailCredentialSet, MoogleMailRuntimeCredential};
 pub use model::{
     MoogleMailGatewayConfig, MoogleMailPage, MoogleMailSentLookupReport,
     MoogleMailSentLookupRequest, MoogleMailSentLookupStatus,

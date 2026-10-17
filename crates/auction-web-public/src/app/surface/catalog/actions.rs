@@ -243,7 +243,7 @@ fn ScopedCatalogActions(
             }
         }
         if action_name == Some("bid".to_owned()) {
-            // 弹窗外壳统一走 shared Dialog：busy 期间 Escape/遮罩/关闭按钮全部禁用，
+            // 弹窗外壳统一走 shared Dialog：遮罩不关闭，busy 期间 Escape/关闭按钮禁用，
             // 焦点循环与背景滚动锁由 PublicShell 的 use_dialog_focus_trap(true) 处理。
             Dialog {
                 title: bid_dialog_title,

@@ -2,12 +2,12 @@
 
 use auction_web_shared::{Dialog, legacy_t as t, use_second_tick};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::{
     AdminAuctionCapabilities, AdminAuctionLifecycleAction, execute_admin_auction_lifecycle,
 };
-use crate::app::surface::{admin_api_error_message, stable_command_id};
+use crate::app::surface::admin_api_error_message;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 use super::super::helpers::current_time_millis;
 
@@ -29,7 +29,6 @@ pub(super) fn AdminAuctionActions(
     scheduled_open_at: String,
     scheduled_end_at: Option<String>,
     notice: Signal<Option<AdminAuctionNotice>>,
-    reload_generation: Signal<u64>,
 ) -> Element {
     // 秒级节拍订阅下沉到本动作单元格：到时自动出现的「开拍」入口每秒只在本叶子组件
     // 内重算，整行与整表不随秒针重渲染。
@@ -40,7 +39,8 @@ pub(super) fn AdminAuctionActions(
     let feedback = use_signal(|| None::<String>);
     let pending_action = use_signal(|| None::<AdminAuctionLifecycleAction>);
     let action_reason = use_signal(String::new);
-    let command_state = use_signal(|| None::<(String, Uuid)>);
+    let owner = use_context::<PendingCommands>();
+    let blocked = owner.contains(&format!("auction:{auction_id}"));
     let actions =
         lifecycle_actions(&status, &capabilities, &scheduled_open_at, current_time_millis);
 
@@ -55,6 +55,7 @@ pub(super) fn AdminAuctionActions(
                 AdminAuctionActionButton {
                     action,
                     busy,
+                    blocked,
                     notice,
                     pending_action,
                 }
@@ -70,7 +71,6 @@ pub(super) fn AdminAuctionActions(
                     scheduled_end_at,
                     busy,
                     notice,
-                    reload_generation,
                 }
             }
         }
@@ -83,10 +83,8 @@ pub(super) fn AdminAuctionActions(
                 busy,
                 feedback,
                 notice,
-                reload_generation,
                 pending_action,
                 action_reason,
-                command_state,
             }
         }
         if let Some(code) = feedback() {
@@ -103,6 +101,7 @@ pub(super) fn AdminAuctionActions(
 fn AdminAuctionActionButton(
     action: AdminAuctionLifecycleAction,
     busy: Signal<bool>,
+    blocked: bool,
     mut notice: Signal<Option<AdminAuctionNotice>>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
 ) -> Element {
@@ -110,9 +109,9 @@ fn AdminAuctionActionButton(
         button {
             class: lifecycle_action_button_class(action),
             r#type: "button",
-            disabled: busy(),
+            disabled: busy() || blocked,
             onclick: move |_| {
-                if busy() {
+                if busy() || blocked {
                     return;
                 }
                 notice.set(None);
@@ -132,11 +131,10 @@ fn AdminAuctionActionDialog(
     busy: Signal<bool>,
     mut feedback: Signal<Option<String>>,
     mut notice: Signal<Option<AdminAuctionNotice>>,
-    reload_generation: Signal<u64>,
     mut pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
     mut action_reason: Signal<String>,
-    mut command_state: Signal<Option<(String, Uuid)>>,
 ) -> Element {
+    let owner = use_context::<PendingCommands>();
     let is_cancel = action == AdminAuctionLifecycleAction::Cancel;
     let is_final = action == AdminAuctionLifecycleAction::FinalPhase;
     let is_early_settlement = action == AdminAuctionLifecycleAction::EarlySettlement;
@@ -147,17 +145,12 @@ fn AdminAuctionActionDialog(
             | AdminAuctionLifecycleAction::FinalPhase
             | AdminAuctionLifecycleAction::EarlySettlement
     );
-    let can_submit = !busy() && (!requires_reason || !action_reason().trim().is_empty());
+    let can_submit = !busy()
+        && !owner.contains(&format!("auction:{auction_id}"))
+        && (!requires_reason || !action_reason().trim().is_empty());
     let action_reason_id = format!("action-reason-{auction_id}");
-    let action_signals = LifecycleActionSignals {
-        busy,
-        feedback,
-        notice,
-        reload_generation,
-        pending_action,
-        action_reason,
-        command_state,
-    };
+    let action_signals =
+        LifecycleActionSignals { owner, feedback, notice, pending_action, action_reason };
     // 外壳（遮罩/标题栏/三条关闭路径）由共享 Dialog 接管；Escape 与关闭按钮统一走
     // close_lifecycle_dialog，清理语义与旧的 Escape 处理器一致。
     rsx! {
@@ -179,7 +172,7 @@ fn AdminAuctionActionDialog(
                     button {
                         class: "admin-btn-danger",
                         r#type: "button",
-                        disabled: busy(),
+                        disabled: !can_submit,
                         onclick: move |_| run_lifecycle_action(
                             LifecycleActionRequest {
                                 auction_id: auction_id.clone(),
@@ -264,15 +257,14 @@ fn AdminAuctionActionDialog(
 
 #[derive(Clone, Copy)]
 struct LifecycleActionSignals {
-    busy: Signal<bool>,
+    owner: PendingCommands,
     feedback: Signal<Option<String>>,
     notice: Signal<Option<AdminAuctionNotice>>,
-    reload_generation: Signal<u64>,
     pending_action: Signal<Option<AdminAuctionLifecycleAction>>,
     action_reason: Signal<String>,
-    command_state: Signal<Option<(String, Uuid)>>,
 }
 
+#[derive(Clone)]
 struct LifecycleActionRequest {
     auction_id: String,
     expected_state_version: i64,
@@ -285,36 +277,33 @@ fn close_lifecycle_dialog(mut signals: LifecycleActionSignals) {
     signals.pending_action.set(None);
     signals.action_reason.set(String::new());
     signals.feedback.set(None);
-    signals.command_state.set(None);
 }
 
-/// 提交已确认的生命周期动作；命令 ID 在同一输入重试期间保持稳定。
-fn run_lifecycle_action(request: LifecycleActionRequest, mut signals: LifecycleActionSignals) {
-    let LifecycleActionRequest { auction_id, expected_state_version, action, reason } = request;
-    let signature =
-        format!("{action:?}:{expected_state_version}:{}", reason.as_deref().unwrap_or_default());
-    let command_id = stable_command_id(signals.command_state, signature);
-    signals.busy.set(true);
-    spawn(async move {
-        match execute_admin_auction_lifecycle(
-            command_id,
-            auction_id,
-            action,
-            expected_state_version,
-            reason,
-        )
-        .await
-        {
-            Ok(_) => {
-                signals.feedback.set(None);
-                signals.notice.set(Some(AdminAuctionNotice::Lifecycle(action)));
-                signals.pending_action.set(None);
-                signals.action_reason.set(String::new());
-                signals.command_state.set(None);
-                signals.reload_generation.set((signals.reload_generation)().saturating_add(1));
+/// 页宿主拥有首次请求与任务；重试只从常驻未决区发起，不重新读取当前行版本。
+fn run_lifecycle_action(request: LifecycleActionRequest, signals: LifecycleActionSignals) {
+    let action = request.action;
+    if signals.owner.submit(
+        format!("auction:{}", request.auction_id),
+        lifecycle_action_label(action),
+        move |command_id| {
+            let request = request.clone();
+            async move {
+                execute_admin_auction_lifecycle(
+                    command_id,
+                    request.auction_id,
+                    request.action,
+                    request.expected_state_version,
+                    request.reason,
+                )
+                .await
             }
-            Err(code) => signals.feedback.set(Some(code)),
-        }
-        signals.busy.set(false);
-    });
+        },
+        move |_| {
+            set_if_alive(signals.feedback, None);
+            set_if_alive(signals.notice, Some(AdminAuctionNotice::Lifecycle(action)));
+        },
+        move |code| set_if_alive(signals.feedback, Some(code)),
+    ) {
+        close_lifecycle_dialog(signals);
+    }
 }

@@ -9,6 +9,8 @@ use crate::api::fetch_admin_lots;
 
 use super::super::query::use_lots_query_state;
 use super::super::{Route, admin_api_error_message};
+use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
+use crate::app::surface::pending::{PendingCommandPanel, use_pending_commands};
 
 /// 加载并展示一个拍卖的 Admin lot 安全投影。
 pub fn page(auction_id: String) -> Element {
@@ -22,15 +24,18 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
     let query = use_lots_query_state();
     let query_state = query.state;
     let reload_generation = use_signal(|| 0_u64);
-    let lots = use_resource({
-        let auction_id = auction_id.clone();
+    let pending = use_pending_commands(reload_generation);
+    let pagination = use_admin_pagination("lots", &["page_size"], Some(100), 100_000);
+    let lots = use_admin_page(
+        pagination.clone(),
         move || {
             let _ = reload_generation();
-            fetch_admin_lots(auction_id.clone(), query_state().page)
-        }
-    });
+            (auction_id.clone(), query_state().page)
+        },
+        |(auction_id, page), size| fetch_admin_lots(auction_id, page, size),
+    );
 
-    match &*lots.read_unchecked() {
+    let content = match &*lots.read_unchecked() {
         None => rsx! {
             AdminLotLoading {}
         },
@@ -46,6 +51,7 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
             rsx! {
                 super::table::AdminLotTable {
                     page: page.clone(),
+                    pagination,
                     sort: query_state().sort.clone(),
                     direction: query_state().direction,
                     on_page_change: move |next_page| {
@@ -64,6 +70,10 @@ fn AdminAuctionLotsPage(auction_id: String) -> Element {
                 }
             }
         }
+    };
+    rsx! {
+        PendingCommandPanel { owner: pending }
+        {content}
     }
 }
 

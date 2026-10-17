@@ -9,6 +9,8 @@ use super::*;
 pub enum MoogleMailSendResponseFailure {
     /// 收件人不存在；远端可能同时生成一封需要回收附件的退信。
     RecipientNotFound { returned_mail_id: Option<String> },
+    /// 远端明确拒绝向发件账号自身寄信；不表示草稿中的资产已经回收。
+    RecipientIsSender,
     /// 远端明确拒绝发送，当前冻结协议只识别邮资不足。
     Rejected,
 }

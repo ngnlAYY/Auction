@@ -60,7 +60,8 @@ impl Command {
             | Self::AuthorizeForumWriteRetry { .. }
             | Self::VerifyLegacySettlement { .. }
             | Self::MailEvidence { .. }
-            | Self::LotWatchPm { .. } => EXIT_OPERATION,
+            | Self::LotWatchPm { .. }
+            | Self::RepairDraftSoftClose { .. } => EXIT_OPERATION,
         }
     }
 }
@@ -77,6 +78,24 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
+        Command::RepairDraftSoftClose {
+            auction_id,
+            execute,
+            expected_version,
+            command_id,
+            actor,
+            confirm_write,
+        } => {
+            repair_draft_soft_close(
+                auction_id,
+                execute,
+                expected_version,
+                command_id,
+                actor,
+                confirm_write,
+            )
+            .await?;
+        }
         Command::LotWatchPm { action } => match action {
             LotWatchPmAction::List { status, limit, offset } => {
                 lot_watch_pm_list(status, limit, offset).await?

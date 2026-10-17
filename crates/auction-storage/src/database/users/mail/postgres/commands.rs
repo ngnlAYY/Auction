@@ -1,4 +1,6 @@
 //! PostgreSQL Users/MoogleMail 注册、找回和换绑命令。
+//!
+//! 用户与身份快照的更新时间只向前推进；兼容旧外部时间高水位，但不改写命令账本时间。
 
 use super::mapping::*;
 use super::reads::load_mail_command_tx;
@@ -95,7 +97,7 @@ pub(crate) async fn register_postgres(
                                  public_key_hash = CASE WHEN $2 THEN $3 ELSE public_key_hash END,
                                  key_status = CASE WHEN $2 THEN 'active' ELSE key_status END,
                                  state_version = state_version + 1,
-                                 updated_at = $4
+                                 updated_at = GREATEST(created_at, updated_at, $4)
                              WHERE id = $5",
                         )
                         .bind(&write.command.username)
@@ -130,7 +132,8 @@ pub(crate) async fn register_postgres(
                     if forum_only_identity(&mut transaction, user.id).await? {
                         sqlx::query(
                             "UPDATE public.forum_bidder_identities
-                             SET registration_state = 'mm_bound', updated_at = $2
+                             SET registration_state = 'mm_bound',
+                                 updated_at = GREATEST(created_at, updated_at, $2)
                              WHERE user_id = $1 AND registration_state = 'forum_only'",
                         )
                         .bind(user.id)
@@ -241,7 +244,7 @@ pub(crate) async fn rebind_postgres(
                              SET username = $1,
                                  game_player_id = $1,
                                  state_version = state_version + 1,
-                                 updated_at = $2
+                                 updated_at = GREATEST(created_at, updated_at, $2)
                              WHERE id = $3",
                         )
                         .bind(&command.next_username)

@@ -27,12 +27,17 @@
 | [src/ports](src/ports) | 命令、读模型、事务和外部能力端口 |
 | [src/services](src/services) | 竞价、管理、会话、结算、恢复与邮件用例 |
 | [src/errors](src/errors) | 错误分类与重试边界 |
+| [src/draft_soft_close](src/draft_soft_close) | 显式未发布草稿软截止修正规则、检查结果和窄端口 |
 
 ## 身份与凭据约束
 
 MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 key 信封；Users 写事务必须重新锁定并复核身份。
 身份变化交给有界重试，新换绑必须由 active key 授权，已完成命令按账本重放。
+注册/换绑命令使用本地处理时钟，不以偏快的邮件接收时间抬高用户创建时间；装备投稿的既有接收时间门禁不变。
 `AdminCredentialRuntimeOwnership` 只暴露有界所有权检查，失效或取消后不恢复所有权，也不暴露数据库连接或凭据。
+[credentials/identity.rs](src/ports/admin/credentials/identity.rs) 拥有预期完整玩家名称边界与 `VerifiedMailPlayerIdentity` 证据类型。
+结构校验不代表远端验证；当前 gateway 不产生该证明，有绑定但无法证明时明确失败。旧 None 摘要与结果兼容，
+名称不授权内部结清；未来写入必须同事务复核当前 credential/world/version 与真实新鲜证明。
 
 ## 源码分组
 
@@ -56,6 +61,8 @@ MoogleMail 注册/找回先读取用户 UUID 再签发绑定该身份的登录 k
 无来源的历史轮次保持 UTC 周期。人工提前开放/结算受默认关闭策略控制。
 Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplate`；新后继冻结该模板，不能复制前驱经济策略。
 排期来源仍按既有轮次延续，旧快照和已接受命令不重写。
+`draft_soft_close` 只对显式指定、从未发布的合格草稿修正60/60为900/900；默认检查只读，
+执行需稳定命令、版本及精确确认，原命令先重放；门禁与手动操作见[CLI](../../apps/auctionctl/README.md#草稿软截止显式修正)。
 
 装备标记由 [ports/public/watch.rs](src/ports/public/watch.rs) 与 [services/public/watch.rs](src/services/public/watch.rs)
 拥有：稳定命令摘要包含会话用户，Serializable 锁内重放/CAS；同值新命令仍推进 fence，原命令重放保持原结果。
@@ -72,6 +79,17 @@ Admin/Worker 向生命周期服务注入启动时有效的 `AuctionPolicyTemplat
 历史账本通过独立防腐入口重建只读结果，缺失证据不回退到写入。
 [services/recovery](src/services/recovery) 统一 Admin/Worker 确认与版本门禁。
 履约 intent、payload、稳定身份及摘要不得包含装备 secret；派发世界与装备来源世界分别建模。
+
+`SettlementFulfillmentBotIdentityReader` 只读当前 active Cookie/world 的 `VerifiedMailPlayerIdentity`；
+无预期绑定返回 None，有绑定却无远端证明必须失败。该端口尚不接入内部结清写路径，不能从配置名称、
+Cookie 可用性、余额或装备详情可访问推导 bot 身份与托管。
+
+内部履约的待落地规则（当前未启用）：只处理未准备、无 delivery/未知结果的新 pending 义务。
+bot 自有装备流拍应内部留存；bot 中标不自寄 COD，按已有结算金额向真实卖家执行唯一原 seller payout，
+bot 卖家款内部留存仍等待原收款及直接依赖，双方均 bot 也不自寄。退款和 isekai carrier/交付保持原依赖，
+不另算净额、税或补偿，不伪造 Sent/collected、收款或库存归属。
+身份、当前库存及必要资金证据闭合后，`bot_internal_retained` 才能作为独立证明进入
+[存储原子事务设计](../auction-storage/README.md#内部履约原子事务设计)。
 
 ## 管理端口与服务
 
@@ -112,7 +130,11 @@ Admin 审计、邮件、实时和 dashboard 端口只返回有界安全投影；
 ## 投递与邮件处理
 
 [ports/delivery](src/ports/delivery) 定义 claim、发送与结果端口；transport 可收紧进程内并发上限，
-让背压发生在领取和进入 `sending` 之前。
+让背压发生在领取和进入 `sending` 之前。`DeliveryTransport::prepare` 仅作只读前置，返回
+持有同一凭据独占上下文的消耗式 `DeliveryPreparedSend`；持久 fence 成功并确认续租后才 poll 写入。
+`DeliveryWorkStore::renew` 同时服务有效 claimed 的只读准备与 sending，严格匹配 token/fencing 和数据库实时租约，过期不得复活。
+准备保留总预算，fence 前后确认续租，等待不得超过已知租约；前置失败/超时尽力释放 claim，不写发送失败或未知结果。
+release 只接受有效 claimed，fence 提交未知保留持久隔离；历史 unknown 不因当前 compose 干净而自动恢复。
 [ports/mail](src/ports/mail) 与 [services/mail](src/services/mail) 拥有轮询、用户命令、装备入站及 delivery outbox 编排。
 处理前检查持久化完成证明，原接受决定可恢复，不能因取件后资产变化改判退件。
 `MailPollStore::fail_after_prefix` 要求同一 fenced 事务提交连续成功前缀、游标和失败退避；不支持的适配器明确拒绝。

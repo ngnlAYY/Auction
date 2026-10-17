@@ -9,6 +9,7 @@ use crate::api::{fetch_mail_intake_detail, fetch_mail_intakes, fetch_mail_state}
 
 use super::super::query::{MailQuery, use_mail_query_state};
 use super::super::{AdminActionFeedback, admin_api_error_message};
+use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
 
 /// 加载并展示指定邮箱的轮询状态和入站邮件摘要。
 pub fn page() -> Element {
@@ -32,11 +33,16 @@ pub fn page() -> Element {
             if mailbox.is_empty() { Ok(None) } else { fetch_mail_state(mailbox).await.map(Some) }
         }
     });
-    let intakes = use_resource(move || {
-        let _ = refresh();
-        let current = query_state();
-        fetch_mail_intakes(current.to_intake_query(), current.page)
-    });
+    let pagination = use_admin_pagination("mail", &["page_size"], Some(100), i64::from(i32::MAX));
+    let intakes = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = refresh();
+            let current = query_state();
+            (current.to_intake_query(), current.page)
+        },
+        |(query, page), size| fetch_mail_intakes(query, page, size),
+    );
     let detail = use_resource(move || {
         let _ = refresh();
         let intake_id = selected_intake();
@@ -96,6 +102,7 @@ pub fn page() -> Element {
             rsx! {
                 super::table::MailIntakeTable {
                     page: intakes.clone(),
+                    pagination,
                     sort: query_state().sort.clone(),
                     direction: query_state().direction,
                     on_page_change: move |next_page| {

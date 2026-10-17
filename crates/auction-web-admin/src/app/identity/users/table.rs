@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminUser, AdminUserStatusFilter};
 use crate::app::surface::AdminActionFeedback;
@@ -18,6 +19,7 @@ use super::row::AdminUserRow;
 #[component]
 pub(super) fn AdminUserTable(
     page: crate::api::AdminUserPage,
+    pagination: AdminPagination,
     mut name_draft: Signal<String>,
     /// 当前状态筛选（地址栏恢复后的值）；变更经回调由页面写回 URL。
     status: AdminUserStatusFilter,
@@ -145,6 +147,7 @@ pub(super) fn AdminUserTable(
             p { class: "admin-shell__inline-ok", role: "status", {notice} }
         }
         Pager {
+            pagination,
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: Some(page.pagination.total),

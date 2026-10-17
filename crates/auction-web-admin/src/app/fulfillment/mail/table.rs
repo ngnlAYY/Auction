@@ -5,7 +5,8 @@ use std::cmp::Ordering;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminMailIntake, AdminMailIntakePage};
 
@@ -16,6 +17,7 @@ use super::messages::processing_code_message;
 #[component]
 pub(super) fn MailIntakeTable(
     page: AdminMailIntakePage,
+    pagination: AdminPagination,
     /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
     sort: String,
     direction: SortDirection,
@@ -89,6 +91,7 @@ pub(super) fn MailIntakeTable(
             }
         }
         Pager {
+            pagination,
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: Some(page.pagination.total),

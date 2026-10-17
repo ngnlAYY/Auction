@@ -238,6 +238,17 @@ pub struct SettlementFulfillmentBalanceEvidence {
     pub observed_at: DateTime<Utc>,
 }
 
+/// 履约读取当前 bot 游戏身份的窄端口；只接受同一 active Cookie/world 的远端证明。
+///
+/// None 仅表示未配置预期绑定；已配置但不能证明时必须返回错误，不能降级为配置名称。
+/// 此端口不授权满足义务：内部留存还须独立验证真实托管、资金、依赖和事务凭据版本。
+pub trait SettlementFulfillmentBotIdentityReader: Send + Sync {
+    fn read_verified_player_identity(
+        &self,
+        world: SettlementWorld,
+    ) -> ApplicationFuture<'_, Option<crate::VerifiedMailPlayerIdentity>>;
+}
+
 /// Worker 与 MoogleMail owner 之间的外部证明读取窄端口。
 pub trait SettlementFulfillmentEvidenceReader: Send + Sync {
     fn read_sent(

@@ -12,9 +12,8 @@ use uuid::Uuid;
 
 use super::auctions::decode_auction;
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_request_error,
-    invalid_response_error, response_error, send_get, send_request, valid_admin_time,
-    valid_trimmed_text, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    response_error, send_get, send_request, valid_admin_time, valid_trimmed_text, valid_uuid,
 };
 
 // 本地 Strict 镜像已删除：contracts 的 `AdminLotResponse`/`AdminLotListResponse`/
@@ -38,11 +37,10 @@ pub(crate) struct AdminLotCapabilities {
 pub(crate) async fn fetch_admin_lots(
     auction_id: String,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminLotPage, String> {
-    let url = format!(
-        "/api/v1/admin/auctions/{auction_id}/lots?page={}&page_size={TABLE_PAGE_SIZE}",
-        page.max(1)
-    );
+    super::pagination::validate(page, page_size, 100, 100_000)?;
+    let url = format!("/api/v1/admin/auctions/{auction_id}/lots?page={page}&page_size={page_size}");
     let response = send_get(&url).await?;
     if !response.ok() {
         return Err(response_error(response).await);
@@ -64,6 +62,13 @@ pub(crate) async fn fetch_admin_lots(
     }
     let pagination = payload.data.pagination;
     decode_pagination(&pagination).map_err(invalid_response_error)?;
+    if pagination.page != page
+        || pagination.page_size != page_size
+        || i64::try_from(lots.len())
+            .map_or(true, |count| count > page_size || count > pagination.total)
+    {
+        return Err(invalid_response_error("lot_pagination"));
+    }
     Ok(AdminLotPage {
         auction,
         lots,

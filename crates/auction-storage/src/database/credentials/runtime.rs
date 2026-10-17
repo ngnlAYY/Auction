@@ -12,7 +12,7 @@ pub(super) async fn list_active_postgres(
     let scope = world.scope(kind);
     let shared_scope = AdminCredentialWorld::Shared.scope(kind);
     let rows = sqlx::query(
-        "SELECT id, scope, ciphertext, nonce, encryption_key_id, fingerprint, created_at
+        "SELECT id, scope, state_version, player_name, ciphertext, nonce, encryption_key_id, fingerprint, created_at
          FROM public.credential_keys
          WHERE credential_kind = $1
            AND status = 'active'
@@ -38,6 +38,8 @@ pub(super) async fn list_active_postgres(
                 id: row.try_get("id").map_err(map_storage_error)?,
                 kind,
                 scope: row.try_get("scope").map_err(map_storage_error)?,
+                state_version: row.try_get("state_version").map_err(map_storage_error)?,
+                player_name: row.try_get("player_name").map_err(map_storage_error)?,
                 envelope,
                 created_at: row.try_get("created_at").map_err(map_storage_error)?,
             };

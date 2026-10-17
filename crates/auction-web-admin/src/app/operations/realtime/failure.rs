@@ -5,7 +5,8 @@ use dioxus::prelude::*;
 
 use auction_web_shared::TruncatedText;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time};
 
 use crate::api::{RealtimeFailure, RealtimeFailurePage};
 
@@ -119,10 +120,12 @@ fn compact_realtime_id(value: &str) -> String {
 #[component]
 pub(super) fn RealtimeFailurePager(
     page: RealtimeFailurePage,
+    pagination: AdminPagination,
     on_page_change: EventHandler<i64>,
 ) -> Element {
     rsx! {
         Pager {
+            pagination,
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: Some(page.pagination.total),

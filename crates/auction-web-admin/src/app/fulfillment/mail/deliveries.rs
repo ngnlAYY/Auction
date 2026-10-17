@@ -1,10 +1,11 @@
 //! 收件关联投递的安全展示与手动重排；原邮件处理结果和外部完成证明仍由后端拥有。
 
-use auction_web_shared::{Dialog, Pager, TableColumns, TruncatedText, legacy_t as t};
+use crate::app::surface::pagination::{AdminPager as Pager, use_admin_pagination};
+use auction_web_shared::{Dialog, TableColumns, TruncatedText, legacy_t as t};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::api::{AdminMailIntakeDelivery, DeliveryAction, TABLE_PAGE_SIZE, execute_delivery};
+use crate::api::{AdminMailIntakeDelivery, DeliveryAction, execute_delivery};
 use crate::app::surface::{AdminActionFeedback, run_admin_action, stable_command_id};
 
 use super::super::deliveries::helpers::delivery_status_label;
@@ -17,6 +18,9 @@ pub(super) fn MailDeliveriesPanel(
     mut refresh: Signal<u64>,
 ) -> Element {
     let mut page = use_signal(|| 1_i64);
+    let pagination =
+        use_admin_pagination("mail-deliveries", &["mail_delivery_page_size"], None, i64::MAX);
+    let page_size = pagination.size();
     let busy = use_signal(|| false);
     let mut pending = use_signal(|| None::<AdminMailIntakeDelivery>);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
@@ -71,9 +75,11 @@ pub(super) fn MailDeliveriesPanel(
         );
     };
     let total = i64::try_from(deliveries.len()).unwrap_or(i64::MAX);
-    let current_page = page().clamp(1, ((total + TABLE_PAGE_SIZE - 1) / TABLE_PAGE_SIZE).max(1));
-    let offset = usize::try_from((current_page - 1) * TABLE_PAGE_SIZE).unwrap_or(usize::MAX);
-    let visible = deliveries.into_iter().skip(offset).take(TABLE_PAGE_SIZE as usize);
+    let current_page = page().clamp(1, if total == 0 { 1 } else { 1 + (total - 1) / page_size });
+    let offset =
+        usize::try_from((current_page - 1).saturating_mul(page_size)).unwrap_or(usize::MAX);
+    let visible =
+        deliveries.into_iter().skip(offset).take(usize::try_from(page_size).unwrap_or(usize::MAX));
     let dialog_error = notice().and_then(|(source, feedback)| {
         (source == intake_id && !feedback.is_success()).then_some(feedback)
     });
@@ -118,10 +124,11 @@ pub(super) fn MailDeliveriesPanel(
             if total == 0 {
                 p { class: "admin-panel__note", {t!("admin-mail-deliveries-empty")} }
             }
-            if total > TABLE_PAGE_SIZE {
-                Pager {
-                    page: current_page,
-                    page_size: TABLE_PAGE_SIZE,
+            Pager {
+                    pagination,
+                    local: true,
+                    page: page(),
+                    page_size,
                     total: Some(total),
                     label: t!("admin-mail-deliveries-title"),
                     previous_label: t!("admin-pagination-previous"),
@@ -132,7 +139,6 @@ pub(super) fn MailDeliveriesPanel(
                     jump_label: t!("admin-pagination-input"),
                     jump_button_label: t!("admin-pagination-go"),
                     on_page_change: move |next| page.set(next),
-                }
             }
             if let Some(delivery) = pending() {
                 Dialog {

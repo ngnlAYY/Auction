@@ -1813,7 +1813,8 @@
   justify-self: start;
 }
 
-.public-auction-catalog__actions button {
+/* 仅操作栏直属按钮拥有此样式；行内挂载的弹窗按钮由各自表单控制。 */
+.public-auction-catalog__actions-list > button {
   display: inline-flex;
   align-items: center;
   min-block-size: var(--size-target);
@@ -1824,19 +1825,19 @@
   background: var(--color-surface-raised);
 }
 
-.public-auction-catalog__actions button:not(:disabled):focus-visible {
+.public-auction-catalog__actions-list > button:not(:disabled):focus-visible {
   color: var(--color-accent);
   border-color: var(--color-accent);
 }
 
 @media (hover: hover) {
-  .public-auction-catalog__actions button:not(:disabled):hover {
+  .public-auction-catalog__actions-list > button:not(:disabled):hover {
     color: var(--color-accent);
     border-color: var(--color-accent);
   }
 }
 
-.public-auction-catalog__actions button:disabled {
+.public-auction-catalog__actions-list > button:disabled {
   color: var(--color-text-muted);
   opacity: 0.7;
 }
@@ -2835,7 +2836,7 @@
     max-inline-size: 12rem;
   }
 
-  .public-auction-catalog__actions button {
+  .public-auction-catalog__actions-list > button {
     min-block-size: 2rem;
     padding: 0 var(--space-2);
     font-size: var(--text-sm);

@@ -120,6 +120,9 @@ pub struct AdminCredential {
     pub kind: AdminCredentialKind,
     pub world: AdminCredentialWorld,
     pub label: String,
+    /// 可选预期名称，不表示已远端核验；历史命令结果缺字段按 None 读取。
+    #[serde(default)]
+    pub player_name: Option<String>,
     pub status: AdminCredentialStatus,
     pub state_version: i64,
     pub created_at: DateTime<Utc>,
@@ -132,6 +135,7 @@ impl AdminCredential {
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
             && valid_text(&self.label, 256)
+            && crate::valid_credential_player_name(self.kind, self.player_name.as_deref())
             && self.state_version > 0
             && valid_time(self.created_at)
             && self.rotated_at.is_none_or(valid_time)

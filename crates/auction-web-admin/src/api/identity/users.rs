@@ -13,9 +13,9 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_request_error,
-    invalid_response_error, parse_admin_time, response_error, send_get, send_request,
-    valid_admin_time, valid_safe_text, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_request_error, invalid_response_error,
+    parse_admin_time, response_error, send_get, send_request, valid_admin_time, valid_safe_text,
+    valid_uuid,
 };
 
 // 保留镜像的理由：contracts 的 `AdminUserResponse` 被 `AdminUserListItemResponse` 以
@@ -154,8 +154,10 @@ pub(crate) async fn fetch_admin_users(
     name: String,
     status: AdminUserStatusFilter,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminUserPage, String> {
-    let mut url = format!("/api/v1/admin/users?page={page}&page_size={TABLE_PAGE_SIZE}");
+    super::pagination::validate(page, page_size, 200, i64::from(i32::MAX))?;
+    let mut url = format!("/api/v1/admin/users?page={page}&page_size={page_size}");
     if !name.is_empty() {
         append_query(&mut url, "name", &name);
     }
@@ -168,7 +170,15 @@ pub(crate) async fn fetch_admin_users(
     }
     let payload: ApiResponse<StrictUserList> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_user_list(payload.data).map_err(invalid_response_error)
+    let result = decode_user_list(payload.data).map_err(invalid_response_error)?;
+    if result.pagination.page != page
+        || result.pagination.page_size != page_size
+        || i64::try_from(result.users.len())
+            .map_or(true, |count| count > page_size || count > result.pagination.total)
+    {
+        return Err(invalid_response_error("user_pagination"));
+    }
+    Ok(result)
 }
 
 /// 创建用户；`key_mode = generated` 时返回一次性 key。

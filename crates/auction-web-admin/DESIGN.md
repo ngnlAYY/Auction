@@ -66,6 +66,25 @@ Admin 不导入 Public。其 `/rules` 别名转到独立的校验/发布页；�
 表格遵守[布局契约](../../docs/table-layouts.md)：100% 容器宽、独立百分比列宽、窄屏保留行列，
 长值截断后可查看全文，操作按钮可换行。配置差异、诊断和 JSON 在自己的查看区域换行，不隐藏审查信息。
 
+分页使用共享数字页码/省略号、权威总条数、预设及自定义数量。数量仅接受 ASCII 正整数 i64，
+拒绝空白、符号、小数、指数、溢出与超过服务器上限的提交；不截断数量、不下载全量替代服务端分页。
+超 offset 边界显示错误且不发送请求；导航的可访问页上限不修改权威总数。
+
+| 列表 / 独立偏好 scope | 数量 URL 键 | 单页上限 / offset 上限 |
+| --- | --- | --- |
+| auctions、lots、settlement-catalog | `page_size` | 100 / 100000 |
+| users、renames、credentials、audit | `page_size` | 200 / 2147483647 |
+| mail | `page_size` | 100 / 2147483647 |
+| deliveries | `page_size` | 100 / i64 安全乘法边界 |
+| realtime-events、realtime-failures、realtime-lag | `event_page_size`、`failure_page_size`、`lag_page_size` | 200 / 1000000 |
+| proxy-events | `proxy_page_size` | 100 / 100000 |
+| settlement-lots、settlement-recovery | `lot_page_size`、`recovery_page_size` | 完整报告本地切片，无服务端数量上限 |
+| mail-deliveries | `mail_delivery_page_size` | 完整关联投递本地切片，无服务端数量上限 |
+
+每表偏好键为 `hv.admin.page-size:<scope>`，仅存展示数量。数量变更回该表首页，其他列表不复位。
+结算目录仍使用既有 world/auction/sequence/page 多信号同步；改变目录数量保留所选场次及两个报告的分页。
+代理弹窗按 lot ID、结算报告按 auction ID、邮件关联投递按 intake ID 隔离挂载。
+
 命令交互遵循：
 
 ```text
@@ -82,6 +101,31 @@ Admin 不导入 Public。其 `/rules` 别名转到独立的校验/发布页；�
 - 冲突后先重读权威状态，再由操作员决定新的命令；不自动覆盖并发修改。
 - 危险动作确认说明对象、原因及后果。关闭对话框是否保留未确认命令由具体 owner 决定，不能全局一律清空。
 - HTTP 接受或任务重新排队不是外部发送、取件、退回、收款或交付成功。
+
+分页会卸载旧行，已提交命令因此由 `surface/pending` 的当前路由稀疏集合持有，任务通过既有
+`run_admin_owned_action` 登记到页面创建的 busy Signal 宿主，不属于行或重试按钮组件。
+首次提交冻结完整参数和 UUID；行内确认框提交后关闭，常驻未决区展示实体、动作、命令 ID、忙碌与未知状态。
+未知状态累计：超时、断连、无效响应及未识别错误均保留，后续认证/限流拒绝不能解除先前未知；
+只有成功重放移除，或从未未知的明确拒绝由操作员显式关闭。没有自动重放。
+
+| 调用点 | 冻结内容 / 完成回调 |
+| --- | --- |
+| 拍卖生命周期 | auction ID、action、version、reason；存活行通知使用 try_write |
+| 拍卖计划修改 | auction ID、version、原精度三项时间；重试不再用当前时钟校验候选 |
+| lot 改价/撤回 | lot ID、action、version、price；行通知使用 try_write |
+| 凭据启停/改名 | 安全凭据投影、action、status/label；不含 Cookie/secret |
+| 用户论坛绑定、补发/撤销 Key、拉黑/解除 | 安全用户投影、action、forum ID/reason；返回 Key 直接进入稳定页面回调，不进未决集合 |
+| 内嵌装备录入 | world、已选择来源的 URL/JSON、price、player；未选择来源草稿不保留，表单卸载不复位任务 busy |
+
+同一实体的未决状态同时封锁不同动作的新意图；成功移除工厂和参数，明确拒绝关闭也释放参数。
+行级结果只通过 try_write 回写；集合不存成功结果、所有访问过的行、未提交表单或认证材料。
+离开整个路由/登出仍由 Dioxus 取消页面任务并清理内存，界面明确提示这不等于服务端取消；
+页面级创建/删除、delivery、recovery 等既有稳定状态不迁移到此集合。
+
+Users 的创建表单与行命令（含未决区原样重试）共用可选页级同步门禁。执行边界先检查并占用再 spawn，
+不依赖 effect 或按钮 disabled 的刷新时机；运行中禁止另一条，成功返回 Key 后保持待确认，关闭展示才释放。
+门禁只保存运行/待确认状态，Key 仍只交页面展示；请求失败或取消释放运行占用，未知命令仍保留原 ID 和负载。
+其他页面未启用此门禁，原有并发策略不变。
 
 ## 6. 关键业务工作区
 
@@ -114,6 +158,16 @@ Admin 不导入 Public。其 `/rules` 别名转到独立的校验/发布页；�
 
 `/cookies` 是统一入口，列表只显示安全元数据；不能读取并回显已保存 Cookie。
 新 secret 只在当前输入与提交请求中使用，不能写入 URL、日志、浏览器持久化存储或普通结果 DTO。
+邮件导入的可选预期完整玩家名称使用带可见 label/for/id 和 aria-describedby 帮助的 text 输入，
+关闭自动纠正、自动大小写及拼写检查，按原文传递；服务端独立拒绝空串、首尾空白、控制字符及超过 256 UTF-8 字节。
+只在导入声明预期值，标签改名不修改绑定。表格沿用原列宽并在标签单元格显示预期名称。
+预期值、Cookie 可用性与远端自身身份证明分开：可信页面解析器尚未支持，界面明确提示未启用内部免寄。
+旧凭据保留原记录，不把删除重导入作为补绑定操作。
+
+导入表单独立累计未知结果，不复制 Cookie 到未决集合。首次未知后，全部原值
+（kind/world/label/player_name/secret）与原 UUID 锁定，输入事件处理器也拒绝变更，仅能原样重试。
+后续 401、429、前置校验或 `credential_conflict` 等拒绝不能证明先前未提交，任意 409 均不解除锁定；
+只有明确成功后清空表单并释放原命令。帮助状态持续解释锁定与重试，离开路由/登出清理内存但不取消服务端操作。
 
 手动校验显示当次登录有效、失效或暂无法确认及检查时间；shared 游戏 Cookie 分别列出主世界、异世界结果。
 同一凭据版本改变后隐藏旧检查结果。校验是只读操作，不自动启停、不自动重试，也不证明发帖或发信权限。

@@ -17,6 +17,7 @@ use super::model::{
     DeliveryActionRequest, DeliveryDialogKind, DeliveryDialogState, DeliveryReconcileDraft,
 };
 use super::table::{DeliveryPager, DeliveryTable};
+use crate::app::surface::pagination::{use_admin_page, use_admin_pagination};
 
 /// 加载 delivery 安全投影并编排带 fencing 的操作员动作。
 pub fn page() -> Element {
@@ -30,11 +31,16 @@ pub fn page() -> Element {
     let mut pending_dialog = use_signal(|| None::<DeliveryDialogState>);
     let mut reconcile_draft = use_signal(|| None::<DeliveryReconcileDraft>);
     let mut command_state = use_signal(|| None::<(String, Uuid)>);
-    let deliveries = use_resource(move || {
-        let _ = refresh();
-        let current = query_state();
-        fetch_deliveries(current.status.clone(), current.page)
-    });
+    let pagination = use_admin_pagination("deliveries", &["page_size"], Some(100), i64::MAX);
+    let deliveries = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = refresh();
+            let current = query_state();
+            (current.status, current.page)
+        },
+        |(status, page), size| fetch_deliveries(status, page, size),
+    );
 
     let open_dialog = move |(delivery, kind): (Delivery, DeliveryDialogKind)| {
         if busy_delivery().is_none() {
@@ -211,6 +217,7 @@ pub fn page() -> Element {
             if let Some(page) = page {
                 DeliveryPager {
                     page,
+                    pagination,
                     on_page_change: move |next_page| {
                         let mut next = query_state();
                         next.page = next_page;

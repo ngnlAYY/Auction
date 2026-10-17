@@ -30,8 +30,8 @@ pub(super) async fn import_postgres(
     sqlx::query(
         "INSERT INTO public.credential_keys
             (id, credential_kind, scope, label, ciphertext, nonce, encryption_key_id,
-             fingerprint, status, state_version, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', 1, $9, $9)",
+             fingerprint, status, state_version, created_at, updated_at, player_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', 1, $9, $9, $10)",
     )
     .bind(write.credential_id)
     .bind(write.kind.as_str())
@@ -42,6 +42,7 @@ pub(super) async fn import_postgres(
     .bind(write.envelope.encryption_key_id())
     .bind(write.envelope.fingerprint())
     .bind(write.now)
+    .bind(&write.player_name)
     .execute(&mut *transaction)
     .await
     .map_err(map_write_error)?;
@@ -50,6 +51,7 @@ pub(super) async fn import_postgres(
         kind: write.kind,
         world: write.world,
         label: write.label.clone(),
+        player_name: write.player_name.clone(),
         status: AdminCredentialStatus::Active,
         state_version: 1,
         created_at: write.now,
@@ -124,7 +126,7 @@ pub(super) async fn mutate_postgres(
          SET label = $2, status = $3, state_version = $4, updated_at = $5,
              rotated_at = CASE WHEN $3 = 'active' THEN rotated_at ELSE COALESCE(rotated_at, $5) END
          WHERE id = $1 AND state_version = $6
-         RETURNING id, credential_kind, scope, label, status, state_version,
+         RETURNING id, credential_kind, scope, label, player_name, status, state_version,
                    created_at, rotated_at, updated_at",
     )
     .bind(write.credential_id)
@@ -253,7 +255,7 @@ pub(super) async fn load_credential_for_update(
     credential_id: Uuid,
 ) -> Result<AdminCredential, ApplicationError> {
     let row = sqlx::query(
-        "SELECT id, credential_kind, scope, label, status, state_version,
+        "SELECT id, credential_kind, scope, label, player_name, status, state_version,
                 created_at, rotated_at, updated_at
          FROM public.credential_keys
          WHERE id = $1

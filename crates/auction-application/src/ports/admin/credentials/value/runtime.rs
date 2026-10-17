@@ -12,6 +12,8 @@ pub struct AdminCredentialRuntimeRecord {
     pub id: Uuid,
     pub kind: AdminCredentialKind,
     pub scope: String,
+    pub state_version: i64,
+    pub player_name: Option<String>,
     pub envelope: AdminCredentialEnvelope,
     pub created_at: DateTime<Utc>,
 }
@@ -33,6 +35,8 @@ impl AdminCredentialRuntimeRecord {
     /// 校验 Worker 读取的内部 scope、密文信封和稳定排序字段。
     pub fn validate(&self) -> bool {
         !self.id.is_nil()
+            && self.state_version > 0
+            && crate::valid_credential_player_name(self.kind, self.player_name.as_deref())
             && self.scope == self.scope.trim()
             && !self.scope.is_empty()
             && self.scope.starts_with(self.kind.scope_prefix())

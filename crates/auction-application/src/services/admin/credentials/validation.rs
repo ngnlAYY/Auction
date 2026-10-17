@@ -14,6 +14,7 @@ pub(super) fn validate_import(
         || command.request_id.as_deref().is_some_and(|value| !valid_text(value, 256))
         || command.now.timestamp_nanos_opt().is_none()
         || command.secret.as_bytes().is_empty()
+        || !crate::valid_credential_player_name(command.kind, command.player_name.as_deref())
     {
         return Err(AdminCredentialError::InvalidRequest.into());
     }
