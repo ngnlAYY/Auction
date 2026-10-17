@@ -25,6 +25,12 @@ mod rules;
 #[path = "identity/session.rs"]
 mod session;
 mod status;
+#[path = "auction/watches.rs"]
+mod watches;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) use watches::valid_watch_collection;
+pub(crate) use watches::{fetch_lot_watches, set_lot_watch};
 
 pub(crate) use account::{MyBidsPage, OwnedBid, OwnedProxy, fetch_my_bids, fetch_my_proxy};
 pub(crate) use blacklist::{BlacklistEntry, BlacklistPage, fetch_blacklist};

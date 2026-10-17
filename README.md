@@ -49,6 +49,8 @@
 新论坛主题目录每帖最多 150 件并连续分页，系统更新楼位于目录之后；历史主题保持原楼层。
 首帖倒计时图片由本站 Rust Public 服务生成，不依赖第三方计时服务；只展示计划时间，不裁决单件软截止。
 楼层、时间和错误提示见[玩家指南](docs/player-guide.md#论坛出价与处理结果)。
+登录用户可在 Public 标记装备，服务器保存并按账号隔离本地缓存；新代理默认标记，超价 MM 按领先周期去重。
+PM 仅预留，通知不保证到信时间；使用方法见[通知说明](docs/player-guide.md#通知的使用与限制)，升级需要追加迁移。
 支持 Cloudflare 橙云 → Caddy HTTPS → Public/Admin Unix socket；仅静态资源允许 CDN 缓存，
 API、私有数据与 HTML 禁止缓存。证书、可信代理及缓存规则见[部署约束](ops/README.md#cloudflare-整站代理)。
 

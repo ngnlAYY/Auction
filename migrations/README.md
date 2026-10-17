@@ -2,7 +2,7 @@
 
 [文档导航](../docs/README.md) · [PostgreSQL 文件索引](postgres/README.md) · [执行 owner](../crates/auction-storage/src/database/migrations)
 
-当前只执行 PostgreSQL `000001`–`000040`。迁移只追加，已发布 SQL 和 checksum 不可修改或删除；
+当前只执行 PostgreSQL `000001`–`000041`。迁移只追加，已发布 SQL 和 checksum 不可修改或删除；
 退役后端原件仅作历史保留，不注册、不嵌入、不执行。
 表与写入归属见[对象契约](../docs/contracts/schema.md)，业务及历史修正见其[迁移章节](../docs/contracts/schema.md#追加迁移与历史事实)。
 

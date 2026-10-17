@@ -291,6 +291,7 @@ pub(super) async fn configure_state(
         Some(session),
         security,
     )
+    .with_lot_watches(store.clone())
     .with_realtime_hub(hub)
     .with_readiness(readiness);
     if let Err(error) = heartbeat.publish_current().await {

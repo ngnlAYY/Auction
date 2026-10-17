@@ -91,3 +91,5 @@ impl MailDeliveryEnqueuer for DatabaseStore {
         })
     }
 }
+
+pub(crate) use outbox::{enqueue_in_transaction, payload};

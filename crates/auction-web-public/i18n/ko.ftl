@@ -445,3 +445,19 @@ command-not-found = 요청한 콘텐츠가 존재하지 않아요.
 command-conflict = 이 명령은 이전 요청과 충돌합니다.
 command-session-expired = 세션이 만료되었습니다. 다시 로그인한 후 재시도하세요.
 command-retry-unchanged = 이전 작업 결과를 확인하지 못했습니다. 재시도하면 동일한 명령과 금액을 전송합니다. 변경하려면 취소한 후 새로 진행하세요.
+
+# 装备标记与整场同步
+watch-help = 장비를 표시하면 선두에서 다른 입찰자에게 추월당할 때마다 MoogleMail을 한 번 보냅니다. 선두가 아닐 때의 가격 변동은 메일을 보내지 않습니다. 새 대리 입찰 승인 시 자동으로 표시되지만 일반 입찰은 자동 표시되지 않습니다. 메일 실패는 승인된 입찰을 취소하지 않습니다. 이미 전송을 시작한 메일은 회수할 수 없습니다.
+watch-toggle = 장비 { $code } 표시
+watch-on = 표시됨
+watch-off = 표시
+watch-login = 로그인하여 표시
+watch-loading = 서버 표시를 불러오는 중… 동기화 전에는 변경할 수 없습니다.
+watch-unsynced = 현재 캐시는 동기화되지 않았으며 변경 저장에 사용할 수 없습니다.
+watch-load-error = 서버 표시를 불러오지 못했습니다. 새로 고친 후 변경하세요.
+watch-refresh = 표시 새로 고침
+watch-saving = 저장 중…
+watch-unknown = 저장 결과를 알 수 없습니다. 원래 명령 그대로 재시도하여 확인하세요. 새 명령으로 덮어쓰지 마세요.
+watch-conflict = 표시가 변경되었거나 명령이 충돌했습니다. 새로 고쳐 서버 상태를 확인한 후 변경을 재시도하세요.
+watch-save-error = 표시를 저장하지 못했습니다. 서버 표시를 새로 고친 후 재시도하세요.
+watch-retry-command = 원래 저장 재시도

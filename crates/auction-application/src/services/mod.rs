@@ -71,3 +71,7 @@ pub use settlement::{
     SettleAuctionCommand, SettlementCommandPort, SettlementService, verify_legacy_settlement_replay,
 };
 pub use user_mail::MailUserService;
+
+#[path = "public/watch.rs"]
+mod lot_watch;
+pub use lot_watch::{lot_watch_notification, set_lot_watch};

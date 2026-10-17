@@ -32,13 +32,6 @@ async fn insert_postgres(
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
 ) -> Result<MailDeliveryResult, RepositoryError> {
-    let payload = payload(command);
-    let status = prepared_status.unwrap_or("pending");
-    let occurred_at = Utc::now();
-    let delivery_id = Uuid::new_v5(
-        &Uuid::NAMESPACE_URL,
-        format!("auction/mail-delivery-v1/{}", command.command_id).as_bytes(),
-    );
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
     if command.origin == MailDeliveryOrigin::MailIntake
         && command.operation != MailDeliveryOperation::Send
@@ -51,7 +44,27 @@ async fn insert_postgres(
             .await
             .map_err(map_storage_error)?;
     }
-    super::disposition::guard_disposition(&mut transaction, command).await?;
+    let result = enqueue_in_transaction(&mut transaction, command, prepared_status).await?;
+    transaction.commit().await.map_err(map_storage_error)?;
+    Ok(result)
+}
+
+/// 由调用方持有权威业务事务；delivery SQL 与审计仍只有本 owner 写入。
+pub(crate) async fn enqueue_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command: &MailDeliveryCommand,
+    prepared_status: Option<&str>,
+) -> Result<MailDeliveryResult, RepositoryError> {
+    super::validation::validate_command(command)
+        .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
+    let payload = payload(command);
+    let status = prepared_status.unwrap_or("pending");
+    let occurred_at = Utc::now();
+    let delivery_id = Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("auction/mail-delivery-v1/{}", command.command_id).as_bytes(),
+    );
+    super::disposition::guard_disposition(transaction, command).await?;
     let inserted = sqlx::query(
         r#"INSERT INTO public.deliveries
             (id, command_id, request_digest, origin_kind, origin_id, recipient,
@@ -68,7 +81,7 @@ async fn insert_postgres(
     .bind(&payload)
     .bind(status)
     .bind(occurred_at)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await
     .map_err(map_storage_error)?;
 
@@ -78,7 +91,7 @@ async fn insert_postgres(
          WHERE command_id = $1 FOR UPDATE",
     )
     .bind(command.command_id.as_uuid())
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(map_storage_error)?
     .ok_or_else(|| repository_error("MoogleMail delivery 入队结果缺失"))?;
@@ -106,7 +119,7 @@ async fn insert_postgres(
     if inserted.rows_affected() == 1 {
         let request_id = command.command_id.to_string();
         append_delivery_audit(
-            &mut transaction,
+            transaction,
             DeliveryAudit {
                 occurred_at,
                 actor_type: "system",
@@ -124,11 +137,10 @@ async fn insert_postgres(
         .await
         .map_err(map_storage_error)?;
     }
-    transaction.commit().await.map_err(map_storage_error)?;
     Ok(MailDeliveryResult { delivery_id: stored_id })
 }
 
-fn payload(command: &MailDeliveryCommand) -> Value {
+pub(crate) fn payload(command: &MailDeliveryCommand) -> Value {
     json!({
         "schema_version": 1,
         "operation": command.operation.as_str(),

@@ -127,7 +127,12 @@ pub(super) fn DeliveryRow(
 ) -> Element {
     let kind = match delivery.status.as_str() {
         "claimed" => Some(DeliveryDialogKind::Release),
-        "failed" if !is_mail_disposition_conflict(&delivery) => Some(DeliveryDialogKind::Retry),
+        "failed"
+            if !is_mail_disposition_conflict(&delivery)
+                && delivery.reason_code.as_deref() != Some("lot_watch_invalidated") =>
+        {
+            Some(DeliveryDialogKind::Retry)
+        }
         "manual_reconcile" => Some(DeliveryDialogKind::Reconcile),
         _ => None,
     };

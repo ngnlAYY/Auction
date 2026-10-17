@@ -53,7 +53,7 @@ where
 /// 路由只负责绑定各自的 HTTP owner；未装配的窄端口仍由 handler 明确返回能力不可用，
 /// 不用伪造的成功 payload 掩盖部署缺口。
 fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiState> {
-    use method_strict::{MethodRouterExt as _, get, post};
+    use method_strict::{MethodRouterExt as _, get, post, put};
 
     let no_cache_routes = Router::<PublicApiState>::new()
         .route("/api/v1/worlds", get(list_worlds))
@@ -88,6 +88,11 @@ fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiStat
                 .strict_methods("DELETE, GET, POST"),
         )
         .route("/api/v1/me/bids", get(list_my_bids))
+        .route("/api/v1/me/lot-watches", get(list_lot_watches))
+        .route(
+            "/api/v1/lots/{lot_id}/watch",
+            put(set_lot_watch).layer(DefaultBodyLimit::max(4 << 10)),
+        )
         // P09/P11 lot 投影含完整装备 key，必须禁止浏览器和共享缓存持久化响应。
         .route("/api/v1/auctions/{auction_id}/lots", get(list_lots))
         .route("/api/v1/lots/{lot_id}", get(lot_detail))

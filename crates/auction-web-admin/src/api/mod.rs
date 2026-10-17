@@ -395,7 +395,9 @@ fn decode_delivery(value: AdminDeliveryResponse) -> Result<Delivery, ()> {
         && value.origin_kind == "operations_alert"
         && value.reason_code.as_deref() == Some("operations_alert_batch_terminal");
     let disposition_conflict = value.reason_code.as_deref() == Some("mail_disposition_conflict");
-    let timeline_valid = if disposition_conflict {
+    let watch_invalidated = value.origin_kind == "lot_watch"
+        && value.reason_code.as_deref() == Some("lot_watch_invalidated");
+    let timeline_valid = if disposition_conflict || watch_invalidated {
         sending_at.is_none()
             && claimed_at.is_none_or(|claimed| {
                 !is_zero_delivery_time(claimed) && claimed >= created_at && value.attempt_count > 0
@@ -493,6 +495,7 @@ fn valid_origin_kind(value: &str) -> bool {
             | "manual"
             | "mail_intake"
             | "operations_alert"
+            | "lot_watch"
     )
 }
 
@@ -549,6 +552,20 @@ fn valid_state_fields(
     sending_at: Option<DateTime<Utc>>,
     completed_at: Option<DateTime<Utc>>,
 ) -> bool {
+    // watch 失效只能作为未发送的明确失败；不能放宽普通失败或未知发送的时间链。
+    if value.reason_code.as_deref() == Some("lot_watch_invalidated") {
+        return value.origin_kind == "lot_watch"
+            && value.status == "failed"
+            && value.failure_code.as_deref() == Some("lot_watch_invalidated")
+            && value.cod == Some(0)
+            && lease_expires_at.is_none()
+            && sending_at.is_none()
+            && completed_at.is_some()
+            && value.external_reference.is_none()
+            && !value.take_required
+            && value.returned_mail_id.is_none()
+            && value.fencing_version > 0;
+    }
     // 资产处置冲突只能在发送前隔离；人工失败后仍保留原因，不能混入普通可重试失败。
     if value.reason_code.as_deref() == Some("mail_disposition_conflict") {
         return value.origin_kind == "mail_intake"

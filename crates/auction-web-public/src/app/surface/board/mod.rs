@@ -102,10 +102,13 @@ pub(crate) fn AuctionBoard() -> Element {
             }
         },
         Some(Ok(Some(auction))) => rsx! {
-            AuctionData {
-                auction: auction.clone(),
-                historical,
-                boot_prerequisites_ready,
+            LotWatchScope {
+                auction_id: auction.id.clone(),
+                AuctionData {
+                    auction: auction.clone(),
+                    historical,
+                    boot_prerequisites_ready,
+                }
             }
         },
     }

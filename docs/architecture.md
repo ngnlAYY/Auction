@@ -72,7 +72,7 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | --- | --- |
 | 分体拓扑 | Public、Admin、Worker 独立进程；具备并发及多进程存储边界，具体扩展需验证 |
 | 竞价与生命周期 | Serializable、显式行锁、最多三次序列化冲突尝试；持久调度、慢速代理与结算 workflow |
-| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影 |
+| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；登录用户装备标记与按领先周期去重的 MM 超价提醒 |
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
 | 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化 |
 | 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化 |
@@ -119,6 +119,11 @@ Public/Admin 浏览器经各自 HTTP 入口消费 contracts DTO，Worker 经 job
 已有错误事实不会因源码修复自动回填，运行边界见[状态页](status.md)。
 Admin/Worker 注入当前新拍卖模板，application 后继计划冻结，storage 保证规则列与快照一致。
 Recovery 人工重试投影由 storage 的 recovery_commands owner 维护；Delivery Admin 在同一命令事务调用，不另建状态机。
+
+装备标记由 application 的 lot-watch owner 定义用例与窄端口，domain 拥有领先周期及提醒规则，
+storage 拥有标记、版本、通知事实与 delivery 绑定。标记变更与竞价采用同一 lot 锁序；成功新建代理
+同事务默认标记，查询和自动追价不得恢复手动取消。MM 经既有 delivery owner 在提交后发送，PM 仅预留渠道，
+不得借普通论坛通知的来源证明发送。持久化与一次性语义见[超价提醒不变量](contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
 
 ## Worker 与外部副作用
 
@@ -178,6 +183,9 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 Public `surface/pagination/` 拥有统一列表数量、译文、URL 更新与 `preferences.rs` 本地数量偏好；shared `Pager`
 及 `components/pager/size.rs` 只提供可选数字分页、严格正整数输入与可访问页码限制，
 Admin 默认布局不变。页面范围与展开流水的独立查询键见 [Public 设计](../crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
+装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存；服务器为唯一权威，
+缓存缺失、不可靠或旧账号响应不能覆盖服务端。目录和装备详情复用标记组件，不增加业务表列，也不把装备链接、
+代理上限或凭据写入标记缓存。
 
 首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据。
 浏览器拥有草稿、字段提示与确认；数据库和配置校验仍由 setup/config 执行。端口和周排期通过独立 setup DTO

@@ -52,6 +52,13 @@ async fn execute_transaction(
         return Ok(result);
     }
 
+    // watch 重试不能倒取 lot 锁，更不能通过人工 release 恢复已经取消的领先周期。
+    crate::database::lot_watch::lock_delivery_lot(
+        transaction.transaction_mut()?,
+        command.delivery_id,
+    )
+    .await
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
     let row = sqlx::query(
         r#"SELECT id, command_id, request_digest, activation_command_id,
                   activation_request_digest, origin_kind, origin_id, recipient, payload,
@@ -88,6 +95,20 @@ async fn execute_transaction(
         }
     }
 
+    if matches!(
+        command.action,
+        DeliveryAdminAction::Release
+            | DeliveryAdminAction::RetryFailed
+            | DeliveryAdminAction::ReconcileRetry
+    ) && !crate::database::lot_watch::delivery_eligible(
+        transaction.transaction_mut()?,
+        command.delivery_id,
+    )
+    .await
+    .map_err(DeliveryAdminTransactionError::Sqlx)?
+    {
+        return Err(DeliveryAdminError::Stale.into());
+    }
     let next_status = apply_delivery_action(&mut transaction, command, &current).await?;
     if command.action == DeliveryAdminAction::RetryFailed
         || command.action == DeliveryAdminAction::ReconcileRetry

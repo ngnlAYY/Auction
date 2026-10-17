@@ -36,6 +36,7 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
         MailDeliveryOrigin::MailIntake
             | MailDeliveryOrigin::SettlementRecoveryAction
             | MailDeliveryOrigin::OperationsAlert
+            | MailDeliveryOrigin::LotWatch
     ) {
         return Err(RepositoryError::Failed("MoogleMail delivery owner 无效".to_owned()).into());
     }
@@ -50,6 +51,11 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
             RepositoryError::Failed("MoogleMail recovery delivery 来源无效".to_owned()).into()
         );
     }
+    if command.origin == MailDeliveryOrigin::LotWatch
+        && command.template != Some(auction_application::MailNotificationTemplate::LotWatch)
+    {
+        return Err(RepositoryError::Failed("装备标记通知模板无效".to_owned()).into());
+    }
     if command.origin == MailDeliveryOrigin::OperationsAlert
         && (command
             .origin_id
@@ -60,7 +66,8 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
     {
         return Err(RepositoryError::Failed("operations alert delivery 来源无效".to_owned()).into());
     }
-    if command.origin != MailDeliveryOrigin::OperationsAlert && command.notification_body.is_some()
+    if !matches!(command.origin, MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch)
+        && command.notification_body.is_some()
     {
         return Err(RepositoryError::Failed(
             "普通 MoogleMail delivery 不得携带通知正文".to_owned(),
@@ -146,6 +153,20 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                         .into());
                     }
                 }
+                Some(auction_application::MailNotificationTemplate::LotWatch) => {
+                    if command.origin != MailDeliveryOrigin::LotWatch
+                        || command.operation != MailDeliveryOperation::Send
+                        || command.user_key_user_id.is_some()
+                        || command.result_code.as_deref() != Some("outbid")
+                        || command.origin_id != format!("lot_watch:{}", command.command_id)
+                        || command.external_mail_id != command.command_id.to_string()
+                        || !valid_notification_body(command.notification_body.as_deref())
+                    {
+                        return Err(
+                            RepositoryError::Failed("装备标记通知来源无效".to_owned()).into()
+                        );
+                    }
+                }
                 Some(auction_application::MailNotificationTemplate::OperationsAlert) => {
                     if command.origin != MailDeliveryOrigin::OperationsAlert
                         || command.user_key_user_id.is_some()
@@ -181,7 +202,10 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
                 || command.credits != 0
                 || command.cod != 0
                 || command.user_key_user_id.is_some()
-                || command.origin == MailDeliveryOrigin::OperationsAlert
+                || matches!(
+                    command.origin,
+                    MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch
+                )
             {
                 return Err(
                     RepositoryError::Failed("MoogleMail 退回/领取载荷越界".to_owned()).into()
@@ -192,7 +216,10 @@ pub(super) fn validate_command(command: &MailDeliveryCommand) -> Result<(), Appl
             if command.template.is_some()
                 || command.result_code.is_some()
                 || command.user_key_user_id.is_some()
-                || command.origin == MailDeliveryOrigin::OperationsAlert
+                || matches!(
+                    command.origin,
+                    MailDeliveryOrigin::OperationsAlert | MailDeliveryOrigin::LotWatch
+                )
             {
                 return Err(RepositoryError::Failed("MoogleMail 领取载荷越界".to_owned()).into());
             }

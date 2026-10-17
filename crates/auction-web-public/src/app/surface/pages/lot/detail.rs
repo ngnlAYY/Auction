@@ -27,6 +27,10 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                         dd { class: "public-auction-lot__price", "{format_amount(lot.summary.start_price)}" }
                     }
                     p { class: "public-auction-page__status", {t!("lot-not-live")} }
+                    LotWatchButton {
+                        lot_id: lot.summary.id.clone(),
+                        lot_code: lot.summary.code.clone(),
+                    }
                 }
             }
         }
@@ -140,6 +144,10 @@ pub(crate) fn LiveLotDetailView(
                     }
                     if session_error {
                         p { role: "alert", {t!("session-error")} }
+                    }
+                    LotWatchButton {
+                        lot_id: lot.id.clone(),
+                        lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
                     }
                     LiveCatalogActions {
                         lot_id: lot.id.clone(),

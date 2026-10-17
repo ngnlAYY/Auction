@@ -46,6 +46,11 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。
 修改任一方必须同步其余两处；首次 `/setup` 只归独立设置服务。
 Public 指定列表的 `page_size` 不设 200 条上限，仍严格检查正整数、offset 溢出及 cursor 互斥；适用路径和容量代价见[分页契约](../../docs/contracts/routes.md#public-分页世界与金额)。
 
+[routes/public/watch.rs](src/http/routes/public/watch.rs) 拥有 P23/P24 当前会话装备标记列表和 CAS 写入。
+复用会话、来源/CSRF、限流、strict JSON、JSON 405 与 no-store；不接收客户端 user_id。
+只接受 mm；查询/UUID/JSON 词法错误 400，P24 负版本或渠道业务错误 422，命令/版本冲突 409，依赖缺失或完整集合超限 503。
+不增加竞价 DTO 或实时事件；GET 沿既有账户读取边界，PUT 使用变更限流与来源门禁。
+
 ## 职责边界
 
 请求边界统一处理合法 `X-Request-ID`、trace context、安全头、访问日志、panic 与超时。

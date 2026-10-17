@@ -7,7 +7,7 @@ pub(crate) fn decode_payload(
 ) -> Result<(MailDeliveryPayload, MoogleMailWorld), DeliveryTransportError> {
     if !matches!(
         claim.origin_kind.as_str(),
-        "mail_intake" | "settlement_recovery_action" | "operations_alert"
+        "mail_intake" | "settlement_recovery_action" | "operations_alert" | "lot_watch"
     ) || claim.delivery_id.is_nil()
         || !valid_line(&claim.recipient, 256, false)
         || !valid_line(&claim.origin_id, 512, false)
@@ -47,7 +47,20 @@ pub(crate) fn decode_payload(
     {
         return Err(invalid_payload());
     }
-    if claim.origin_kind != "operations_alert" && payload.body.is_some() {
+    if claim.origin_kind == "lot_watch"
+        && (claim.origin_id != format!("lot_watch:{}", claim.command_id)
+            || payload.external_mail_id != claim.command_id.to_string()
+            || payload.operation != "send"
+            || payload.template.as_deref() != Some("lot_watch")
+            || payload.result_code.as_deref() != Some("outbid")
+            || payload.user_key_user_id.is_some()
+            || !valid_notification_body(payload.body.as_deref()))
+    {
+        return Err(invalid_payload());
+    }
+    if !matches!(claim.origin_kind.as_str(), "operations_alert" | "lot_watch")
+        && payload.body.is_some()
+    {
         return Err(invalid_payload());
     }
     if claim.origin_kind == "settlement_recovery_action" {
@@ -126,6 +139,11 @@ pub(crate) fn decode_payload(
                         || payload.result_code.as_deref() != Some("payment_overdue")
                         || payload.user_key_user_id.is_some()
                     {
+                        return Err(invalid_payload());
+                    }
+                }
+                Some("lot_watch") => {
+                    if claim.origin_kind != "lot_watch" {
                         return Err(invalid_payload());
                     }
                 }

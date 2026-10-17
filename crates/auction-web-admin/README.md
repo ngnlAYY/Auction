@@ -99,6 +99,10 @@ just web-build-admin
 凭据更改提示 Worker 重启；A44 只保留当前页的分范围认证观测，不能证明写权限或改变凭据状态。
 接口和能力细节见[Admin 契约](../../docs/contracts/routes.md#admin)。
 
+既有 delivery 列表兼容独立 `lot_watch` 来源并使用五语言类型标签，不新增页面、列、渠道或动作。
+只为 `lot_watch_invalidated` 的明确 failed/无 sending/无租约/无外部引用/零 COD 投影接受 preflight 时间链；
+此类行不提供重试入口。普通失败与 manual_reconcile 仍保持原严格时间链与 Sent 证明规则，服务器独立复核来源资格。
+
 ## 规则及运行配置
 
 规则按 locale 读取与编辑，校验/发布期间禁止语言切换，迟到结果复核目标语言及草稿。

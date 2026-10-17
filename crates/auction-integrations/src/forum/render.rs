@@ -146,7 +146,8 @@ pub fn render_auction_thread(
          [*]Post one command per line.\n\
          [*]Example: [code]One01 200k[/code]\n\
          [*]Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
-         [*]Enable MoogleMail outbid notices by posting this command:\n\
+         [*]Watch equipment on the public auction page for MoogleMail outbid notices. New proxy authorizations watch automatically.\n\
+         [*]This forum command requests a one-time auction notice, not an outbid subscription:\n\
          [code]One01 notify mm[/code]\n\
          [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
          [/list]\n\

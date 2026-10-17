@@ -445,3 +445,19 @@ command-not-found = 要求的內容不存在。
 command-conflict = 此命令與先前的請求衝突。
 command-session-expired = 登入工作階段已過期，請重新登入後再試。
 command-retry-unchanged = 上次操作結果尚未確認。重試會傳送相同命令與金額；如需變更，請取消後重新操作。
+
+# 装备标记与整场同步
+watch-help = 標記裝備後，每次從領先變為被超越時僅傳送一次 MoogleMail；未領先時的價格變動不寄信。新建代理授權自動標記，一般競價不會自動標記。郵件失敗不撤銷已接受的競價；已開始傳送的郵件無法收回。
+watch-toggle = 標記裝備 { $code }
+watch-on = 已標記
+watch-off = 標記
+watch-login = 登入後標記
+watch-loading = 正在讀取伺服器標記… 同步完成前不可修改。
+watch-unsynced = 目前為未同步的本機快取，不可用於儲存修改。
+watch-load-error = 無法讀取伺服器標記，請重新整理後再修改。
+watch-refresh = 重新整理標記
+watch-saving = 正在儲存…
+watch-unknown = 儲存結果未知。請重試完整原命令確認結果，不要另建命令覆蓋。
+watch-conflict = 標記已變更或命令衝突。請重新整理、確認伺服器狀態，再重試修改。
+watch-save-error = 標記儲存失敗，請先重新整理伺服器標記再重試。
+watch-retry-command = 重試原儲存命令

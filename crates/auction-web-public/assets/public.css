@@ -2930,3 +2930,65 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* 装备标记留在既有动作列；长错误换行，不改变表格列宽或引入横向滚动。 */
+.public-lot-watch {
+  display: inline-flex;
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  vertical-align: middle;
+}
+
+.public-lot-watch button,
+.public-lot-watch__login,
+.public-lot-watches__sync button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: var(--size-target);
+  max-inline-size: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-surface);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-lot-watch button:focus-visible,
+.public-lot-watch__login:focus-visible,
+.public-lot-watches__sync button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.public-lot-watch__toggle[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  font-weight: var(--font-weight-strong);
+}
+
+.public-lot-watch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.public-lot-watch__error,
+.public-lot-watches__sync[role="alert"] {
+  color: var(--color-danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-lot-watch__error {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+}
+
+.public-lot-watches__help,
+.public-lot-watches__sync {
+  margin-block: var(--space-2);
+  font-size: var(--text-sm);
+}

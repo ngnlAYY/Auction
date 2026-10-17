@@ -569,6 +569,7 @@ delivery-id = ID
 delivery-type = 種別
 delivery-type-settlement-recovery = 精算リカバリー
 delivery-type-operations-alert = 運用アラート
+delivery-type-lot-watch = 高値更新通知
 delivery-to = 宛先
 delivery-cod = COD
 delivery-status = ステータス

@@ -37,6 +37,18 @@ guard 退出关闭物理连接，不带锁归池。凭据网络调用不跨越�
 不重新执行当前状态门禁。竞价及关键生命周期使用 Serializable、明确行锁，最多三次尝试（含首次）；队列领取才使用
 Read Committed 加锁。只重试已分类的序列化冲突/死锁，未知提交结果不能盲目重放，详见[不变量](../../docs/contracts/invariants.md)。
 
+## 装备标记与超价提醒
+
+[lot_watch](src/database/lot_watch) 独占标记 CAS、领先周期、通知来源和发送资格证明。
+普通/论坛/快慢代理的每条已接受竞价事实都推进周期；新代理 Created 在同事务默认标记，读取、降额与重放不恢复标记。
+同值的新命令也推进版本 fence，取消保留 tombstone。迁移只补已有有效代理标记，不补发过去提醒。
+通知按 lot/用户/领先周期唯一，复用 mail_delivery owner 入队；冻结 payload、收件人和摘要提供独立 proof。
+领取只读 proof，sending 先锁 lot 再锁 delivery 并复核；取消/重新领先使旧资格永久失效，未开始发送的旧任务收口为 failed 并追加审计。
+已 sending 的未知结果仍进入 manual_reconcile；已接受标记命令在拍卖后来隐藏后仍能重放原响应，新命令遵守当前公开可见性。
+MM 正文不包含代理上限；PM 仅预留，不装配。完整列表超过 10000 条明确失败。
+`delivery_admin` 仅为明确失效的 watch preflight 保留无 sending 时间的严格投影，普通失败和未知发送边界不变；
+人工 release/retry 也在 lot → delivery 锁内复核 watch proof，不恢复旧周期。
+
 ## 持久调度与慢速代理
 
 scheduler 保存 due、租约、尝试次数和失败状态；完成/失败须匹配 owner、精确租约及版本。Admin 改期清除旧租约并推进版本，

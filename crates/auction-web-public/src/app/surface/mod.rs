@@ -28,6 +28,10 @@ mod realtime;
 mod rules;
 #[path = "../identity/session.rs"]
 mod session;
+#[path = "../auction/watches/mod.rs"]
+mod watches;
+
+use watches::{LotWatchButton, LotWatchScope};
 
 mod board;
 mod catalog;

@@ -12,6 +12,9 @@ mod account;
 mod competition;
 #[path = "session.rs"]
 mod session;
+mod watch;
+
+pub(crate) use watch::{list_lot_watches, set_lot_watch};
 
 pub(crate) use account::{get_my_proxy_authorization, list_my_bids};
 pub(crate) use competition::{create_proxy_authorization, lower_proxy_authorization, place_bid};

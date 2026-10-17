@@ -218,3 +218,9 @@ pub use services::{
     public_rules_cache_key, validate_admin_actor, validate_admin_secret,
     verify_legacy_settlement_replay,
 };
+
+pub use ports::{
+    LotWatch, LotWatchError, LotWatchFuture, LotWatchPort, LotWatchTransaction, MAX_LOT_WATCHES,
+    SetLotWatchCommand, SetLotWatchResult,
+};
+pub use services::{lot_watch_notification, set_lot_watch};

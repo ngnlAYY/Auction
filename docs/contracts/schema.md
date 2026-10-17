@@ -18,7 +18,7 @@
 
 当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000040`；已发布文件不修改或删除。
+PostgreSQL 迁移为 `000001`—`000041`；已发布文件不修改或删除。
 历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
@@ -108,6 +108,9 @@ Cookie 明文不进入账本。
 | lots | auction-domain + auction-application：auction | 拍品状态、金额、领先者、锁定版本、live/sold 有效结束时间 shape，以及内部全局顺序与分类内对外编号 |
 | auction_commands | auction-application：command-ledger | 拍卖、竞价、世界启停与 realtime replay 等共用命令账本；其他 owner 使用下列专用账本 |
 | bids | auction-domain + auction-application：auction | 追加式竞价事实 |
+| lot_watches | auction-domain + auction-application：lot-watch；auction-storage：lot_watch | 按用户/lot 保存 watched、mm 渠道及正 i64 版本，取消保留墓碑；同值新命令仍推进 fence |
+| lot_watch_leadership | auction-domain + auction-application：lot-watch；auction-storage：lot_watch | 逐条接受事实推进连续领先周期，同人加价不重开周期 |
+| lot_watch_notifications | auction-application：lot-watch；auction-storage：lot_watch | 用户/lot/周期唯一的独立通知来源，绑定被超价 bid、watch 版本、delivery、摘要、收件人及完整冻结 payload；取消/重新领先永久失效 |
 | bid_proxies | auction-storage：兼容视图 | 历史代理字段的只读兼容投影，非权威状态 |
 | bid_proxy_authorizations | auction-domain + auction-application：auction | Fast/Slow 代理授权状态机 |
 | bid_proxy_authorization_transitions | auction-domain + auction-application：auction | 代理授权追加式迁移记录 |
@@ -118,6 +121,14 @@ Cookie 明文不进入账本。
 | auction_submissions | auction-application：auction-intake | `mail/admin` 来源闭集及拍品来源关联；Admin URL/JSON 适配器种类只进入来源引用和命令摘要 |
 | equipment_secrets | auction-application：keymanagement | 标的敏感来源密文 |
 | auction_schema_identity | auction-storage：migration | 迁移/schema 身份和兼容检查 |
+
+新增装备标记及超价通知对象由 application 的 lot-watch 逻辑 owner 定义，SQL 由 auction-storage 独占；
+与 `lots`、`users` 和既有 `deliveries` 精确绑定。标记取消保留版本墓碑，通知按用户/lot/领先周期去重，
+不能以浏览器缓存、论坛 notify 账本或任意模板替代来源授权。`000041` 仅补 active/final_fast 代理的标记及审计，
+并以现有领先者/版本初始化周期，不补发历史提醒；新标记命令复用 `auction_commands`。
+不修改 `000001`—`000040` 或既有竞价事实。delivery SQL 仍由 `mail_delivery`/`delivery_scheduler` 独占：
+领取共用 watch proof，sending 在 lot → delivery 锁序下复核；失效且未开始发送的任务转为明确 failed 并追加审计，
+不覆盖 sending、Sent 证明或 manual_reconcile。
 
 `auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
 `default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。
