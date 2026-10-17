@@ -33,3 +33,7 @@ tracing.workspace = true
 tungstenite.workspace = true
 url.workspace = true
 uuid = { workspace = true, features = ["v5"] }
+
+[lints]
+# 可选：继承工作区统一 lint 策略，不在单包放宽。
+workspace = true

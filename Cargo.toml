@@ -168,3 +168,15 @@ opt-level = "z"
 # LTO、代码生成单元与增量策略继承 release，不重复声明。
 # 可选：CSR WASM 不依赖后端 panic 展开语义。
 panic = "abort"
+
+[workspace.lints.rust]
+# 可选：把编译器默认 warn 的 must_use 忽略提升为错误，避免悄悄丢弃 Result/Guard。
+unused_must_use = "deny"
+# 可选：unsafe fn 内的操作仍须显式 unsafe 块，保持审计边界可见。
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# 可选：调试残留与未完成标记一律阻断，不靠评审记忆。
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

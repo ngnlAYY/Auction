@@ -18,3 +18,7 @@ tracing.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
+
+[lints]
+# 可选：继承工作区统一 lint 策略，不在单包放宽。
+workspace = true

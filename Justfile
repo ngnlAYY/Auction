@@ -28,6 +28,10 @@ lint:
 wasm-check:
     @bash ci/checks/check.sh wasm
 
+# 删除全部编译产物与本地缓存；target/ 由 cargo 与发布脚本共同拥有。
+clean:
+    cargo clean
+
 # 构建双端页面并生成固定 payload；输入未变时复用已有产物。
 web-build:
     # Public 页面与其 payload 清单。

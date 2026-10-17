@@ -28,3 +28,31 @@ read_build_info() {
 	local file=$1 key=$2
 	awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$file"
 }
+
+# 指定路径的输入指纹：只覆盖影响该产物的文件，用于跳过与产物无关的改动。
+# 路径为仓库根相对；缺失路径按内容为空记录，仍参与身份。
+path_fingerprint() {
+	local path
+	{
+		for path in "$@"; do
+			printf 'scope\0%s\0' "$path"
+		done
+		while IFS= read -r -d '' file; do
+			printf 'path\0%s\0' "$file"
+			if [[ -L "$file" ]]; then
+				printf 'symlink\0%s\0' "$(readlink "$file")"
+			elif [[ -f "$file" ]]; then
+				printf 'file\0%s\0' "$(stat -c '%a:%s' "$file")"
+				sha256sum "$file"
+			fi
+		done < <(
+			for path in "$@"; do
+				if [[ -d "$path" ]]; then
+					find "$path" -type f -print0
+				elif [[ -e "$path" ]]; then
+					printf '%s\0' "$path"
+				fi
+			done | LC_ALL=C sort -z
+		)
+	} | sha256sum | awk '{print $1}'
+}

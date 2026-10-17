@@ -72,7 +72,8 @@ just release-check --single-binary
 ```
 
 Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。`build-*` 变体按 `BUILD-INFO` 判定复用，
-源码身份、`Cargo.lock`、feature 与构建环境完全一致且制品完整时直接复用，任一不同即重建。本机可选用
+构建输入（代码、迁移、内嵌模板、发布脚本）、`Cargo.lock`、feature 与构建环境完全一致且制品完整时直接复用，
+只改文档不重跑 WASM 或 Fat LTO；Web payload 另按 surface、共享层与工具链版本单独复用。本机可选用
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）与
 `RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀，两者只在本地生效，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；
