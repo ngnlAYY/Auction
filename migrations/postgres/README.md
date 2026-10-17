@@ -107,6 +107,11 @@ PM sending_at/sender 由触发器保护不可清空或替换，sending 后不回
 新库继续记录原始 checksum；早期别名修正版数据库只在既有值精确匹配固定替换 SQL 的 SHA-384 时沿用该值，不改写历史。
 其他 SQL/checksum 漂移均失败关闭。
 
+`000044` 执行视图仅在唯一的 `ALTER TABLE public.users` 前插入
+`SET CONSTRAINTS public.user_forum_identity_account_id_check IMMEDIATE`，在原事务内执行用户更正触发的延迟身份检查。
+检查失败仍回滚整个迁移；修复候选、版本和审计保持原 SQL 语义。文件字节及 checksum 不变，
+不新增可接受的替代 checksum，已应用原迁移的数据库不会重新执行。
+
 该兼容由存储迁移入口提供，不保证原始 SQL 可交给任意执行器直接运行。
 普通迁移和合并首次初始化共用原 SQLx 迁移锁，不重复加锁；源码兼容不替代[空库运行证据](../../docs/status.md)。
 

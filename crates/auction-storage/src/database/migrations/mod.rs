@@ -1,4 +1,4 @@
-//! PostgreSQL 历史迁移的不可变 checksum 与当前解析器兼容层。
+//! PostgreSQL 历史迁移的不可变 checksum 与受限执行兼容层。
 
 use std::borrow::Cow;
 
@@ -17,12 +17,14 @@ static POSTGRES_MIGRATOR: Migrator = sqlx::migrate!("../../migrations/postgres")
 
 const MIGRATION_FIVE_DESCRIPTION: &str = "recovery observability forum";
 const MIGRATION_FIFTEEN_DESCRIPTION: &str = "operations alert state invariants";
+const MIGRATION_FORTY_FOUR_DESCRIPTION: &str = "user timestamp order";
 
-/// 返回 PostgreSQL 执行视图：保留历史文件 checksum，只替换 PostgreSQL 保留字别名。
+/// 返回 PostgreSQL 执行视图：保留历史文件 checksum，仅应用固定版本的执行兼容。
 ///
-/// `000005` 和 `000015` 已经进入 SQLx 历史，文件字节不能改变；但其中两个未加引号的别名
-/// 会被当前 PostgreSQL 当作保留字拒绝。这里仅对编译期内嵌的固定 SQL 做逐字、计数受限替换，
-/// `Migration::checksum` 默认保持原文件值，使未应用迁移的数据库继续写入不可变身份。
+/// `000005`/`000015` 修正未加引号的保留字别名；`000044` 在修改 users 表结构前执行已排队的
+/// 延迟身份约束，避免同事务修复用户后 ALTER TABLE 被待处理事件拒绝。约束失败仍回滚整个迁移，
+/// 不改变修复候选、版本推进或追加审计。所有替换均限定描述、原片段及出现次数，
+/// `Migration::checksum` 默认保持原文件值，已发布 SQL 文件及迁移事务边界不变。
 pub(super) fn postgres_migrator() -> Result<Migrator, StorageError> {
     postgres_migrator_with_applied_checksums(&[])
 }
@@ -37,6 +39,7 @@ pub(super) fn postgres_migrator_with_applied_checksums(
     let mut migrations = POSTGRES_MIGRATOR.iter().cloned().collect::<Vec<_>>();
     let mut patched_five = false;
     let mut patched_fifteen = false;
+    let mut patched_forty_four = false;
 
     for migration in &mut migrations {
         match migration.version {
@@ -62,11 +65,23 @@ pub(super) fn postgres_migrator_with_applied_checksums(
                 )?;
                 patched_fifteen = true;
             }
+            44 => {
+                patch_migration(
+                    migration,
+                    MIGRATION_FORTY_FOUR_DESCRIPTION,
+                    &[(
+                        "ALTER TABLE public.users\n",
+                        "SET CONSTRAINTS public.user_forum_identity_account_id_check IMMEDIATE;\n\nALTER TABLE public.users\n",
+                        1,
+                    )],
+                )?;
+                patched_forty_four = true;
+            }
             _ => {}
         }
     }
 
-    if !patched_five || !patched_fifteen {
+    if !patched_five || !patched_fifteen || !patched_forty_four {
         return Err(source_invariant("required PostgreSQL compatibility migration is missing"));
     }
 
@@ -100,6 +115,7 @@ pub(super) fn postgres_checksum_matches(migration: &Migration, applied_checksum:
 }
 
 fn alternate_checksum_matches(migration: &Migration, applied_checksum: &[u8]) -> bool {
+    // 仅兼容曾登记的两个别名修正版；000044 始终只接受原文件 checksum。
     matches!(migration.version, 5 | 15)
         && Sha384::digest(migration.sql.as_str().as_bytes()).as_slice() == applied_checksum
 }

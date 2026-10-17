@@ -49,8 +49,10 @@
 
 ## 1. 停止流量并创建备份
 
-先由服务管理器停止 Public、Admin、Worker 和所有其他客户端。备份目录与证据目录应由部署账号
-独占，例如：
+先由服务管理器停止 Public、Admin、Worker 和所有其他客户端。`postgres-backup` 要求源库迁移历史与
+备份工具内嵌的当前版本一致且完整；升级前应使用已核验、匹配源 schema 的原版本工具生成恢复点，
+再由新版 `postgres-backup-verify` 离线核验归档。不得先迁移再补升级前备份。
+备份目录与证据目录应由部署账号独占，例如：
 
 ```bash
 install -d -m 0700 /secure/auction-backups /secure/auction-evidence

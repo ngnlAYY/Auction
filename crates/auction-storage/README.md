@@ -213,7 +213,9 @@ readiness 检查数据库、内嵌迁移及审计写入失败计数，异常失�
 
 [PostgreSQL 迁移](../../migrations/postgres/README.md)只追加；普通启动不隐式迁移，执行门禁见[迁移导航](../../migrations/README.md)。
 `initialization/` 只供确认后的合并首次空库初始化：同一专用连接持 SQLx 迁移锁，拒绝已有用户对象与其他客户端；
-不建库、不删对象、不升级已有库。普通迁移与初始化共用 `000005`/`000015` 受限历史别名执行视图，不重复加锁或修改文件/checksum。
+不建库、不删对象、不升级已有库。普通迁移与初始化共用受限执行视图：`000005`/`000015` 修正历史别名，
+`000044` 在 ALTER 前执行已排队的 `user_forum_identity_account_id_check` 延迟约束，避免用户时间修复产生待处理事件。
+约束失败仍回滚用户更正、版本及审计；不重复加锁，不修改已发布文件、checksum 或原迁移事务边界。
 
 `recovery_preflight/catalog.rs` 拥有空库对象盘点；subscription 仅计当前库，default ACL 等残留仍阻断。
 `migrations/history.rs` 核对完整 SQLx 历史前缀及 checksum，旧 archive 恢复不能只比较最大版本。
