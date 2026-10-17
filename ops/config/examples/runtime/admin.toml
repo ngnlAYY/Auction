@@ -209,10 +209,10 @@ managed = false
 start_price = 1000
 # 可选：加价幅度（PPM），范围 0-1000000；省略时为 50000。
 bid_increment_ppm = 50000
-# 可选：软截止窗口（秒），范围 0-604800；省略时为 60。
-soft_close_window_seconds = 60
-# 可选：软截止延长（秒），范围 1-604800；省略时为 60。
-soft_close_extension_seconds = 60
+# 可选：软截止窗口（秒），范围 0-604800；省略时为 900（固定15分钟）。
+soft_close_window_seconds = 900
+# 可选：候选截止相对出价接受时刻的延长（秒），范围 1-604800；省略时为 900。
+soft_close_extension_seconds = 900
 # 可选：取消截止窗口（秒），范围 0-604800；省略时为 86400。
 cancel_cutoff_seconds = 86400
 # 可选：允许代理竞价；省略时为 true。

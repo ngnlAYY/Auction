@@ -16,6 +16,8 @@ use std::{collections::BTreeMap, rc::Rc};
 struct WatchCommand {
     payload: PublicSetLotWatchRequest,
     busy: bool,
+    // 同一命令的未知结果累计保留；后续前置拒绝不能证明早先请求未提交。
+    uncertain: bool,
     error: Option<CommandError>,
 }
 
@@ -190,9 +192,25 @@ impl WatchContext {
             return;
         }
         let Some(user_id) = self.user_id.clone() else { return };
+        let (payload, uncertain) = {
+            let commands = self.commands.peek();
+            match commands.get(&lot_id) {
+                Some(pending) => {
+                    if pending.busy
+                        || !pending.uncertain
+                        || pending.payload.command_id != payload.command_id
+                    {
+                        return;
+                    }
+                    // 重试只使用宿主冻结的完整负载，不接受调用方替换版本或新意图。
+                    (pending.payload.clone(), pending.uncertain)
+                }
+                None => (payload, false),
+            }
+        };
         self.commands.write().insert(
             lot_id.clone(),
-            WatchCommand { payload: payload.clone(), busy: true, error: None },
+            WatchCommand { payload: payload.clone(), busy: true, uncertain, error: None },
         );
         let mut context = self.clone();
         spawn(async move {
@@ -210,10 +228,12 @@ impl WatchContext {
                     context.invalidate();
                 }
                 Err(error) => {
-                    context
-                        .commands
-                        .write()
-                        .insert(lot_id, WatchCommand { payload, busy: false, error: Some(error) });
+                    // 只有成功或明确 409 可解除未知状态；429 等拒绝只描述本次重试。
+                    let uncertain = error.status != 409 && (uncertain || error.outcome_uncertain());
+                    context.commands.write().insert(
+                        lot_id,
+                        WatchCommand { payload, busy: false, uncertain, error: Some(error) },
+                    );
                 }
             }
         });

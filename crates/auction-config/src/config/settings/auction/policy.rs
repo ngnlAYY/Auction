@@ -124,9 +124,9 @@ pub struct AuctionEconomicsConfig {
     pub start_price: i64,
     /// 经济策略的百万分比增量，范围 0-1000000；省略时为旧版共享配置的 50000。
     pub bid_increment_ppm: i64,
-    /// 软截止窗口秒数，不能为负；省略时为 60 秒。
+    /// 软截止窗口秒数，不能为负；省略时为 900 秒。
     pub soft_close_window_seconds: i64,
-    /// 软截止延长秒数，必须大于 0；省略时为 60 秒。
+    /// 软截止延长秒数，必须大于 0；省略时为 900 秒。
     pub soft_close_extension_seconds: i64,
     /// 取消截止窗口秒数，不能为负；省略时为 86400 秒。
     pub cancel_cutoff_seconds: i64,
@@ -147,8 +147,8 @@ impl Default for AuctionEconomicsConfig {
         Self {
             start_price: 1_000,
             bid_increment_ppm: 50_000,
-            soft_close_window_seconds: 60,
-            soft_close_extension_seconds: 60,
+            soft_close_window_seconds: 900,
+            soft_close_extension_seconds: 900,
             cancel_cutoff_seconds: 86_400,
             proxy_enabled: true,
             proxy_default_mode: "fast".to_owned(),

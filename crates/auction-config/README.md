@@ -42,6 +42,8 @@
 `config/settings/` 按 `auction`、`worker`、`secrets`、`app`、`validation` 和 `operations` 分工。
 角色文件先定位为绝对路径，相对公共/敏感/runtime 引用均以其目录解析；该步骤不解除 symlink 安全检查。
 `AuctionConfig::policy()` 返回 `Result`，不可表示的时间范围应返回配置错误，不 panic 或截断。
+新场次 soft-close 窗口/延长默认均为 900 秒；common、runtime 候选和首次设置所内嵌模板同步。
+升级不覆盖文件中显式的 60；须核对 managed 的有效来源并手动更新，步骤见[配置手册](../../ops/config/README.md#缓存与拍卖模板)。
 
 `FirstRunConfig::write_to` 只向明确不存在的目标发布。私有临时目录中生成文件、固定非敏感 `0640`/敏感 `0600`，
 复用三角色 loader 与正式 runtime 校验后同步目录，以 Linux `RENAME_NOREPLACE` 发布并同步父目录。

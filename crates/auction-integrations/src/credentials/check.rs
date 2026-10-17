@@ -76,6 +76,7 @@ impl CredentialVerifier {
                 let Ok(cookie) = MoogleMailCookie::new(secret) else { return Inconclusive };
                 let Ok(target) = self.game.balance(world) else { return Inconclusive };
                 // Item Shop 只读余额页不触发邮件打开、取附件、compose、send 或战斗操作。
+                // Valid 只表示当次 Cookie 可用；余额不是自身名称证据，不能生成 VerifiedMailPlayerIdentity。
                 match self.game.get(&target, &cookie).await {
                     Ok(body) => match MoogleMailParser.parse_balance(&body, world, Utc::now()) {
                         Ok(_) => Valid,

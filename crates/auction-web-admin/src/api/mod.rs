@@ -22,6 +22,7 @@ mod lifecycle;
 mod lots;
 #[path = "fulfillment/mail.rs"]
 mod mail;
+mod pagination;
 #[path = "auction/proxy_events.rs"]
 mod proxy_events;
 #[path = "operations/realtime.rs"]
@@ -123,7 +124,7 @@ use gloo_net::http::{Request, Response};
 use serde::Deserialize;
 use uuid::Uuid;
 
-/// 旧版 Admin 所有表格列表请求共用的页大小。
+/// 改名命令准备阶段读取历史的固定数量；可见列表数量由页面显式传入。
 pub(crate) const TABLE_PAGE_SIZE: i64 = 10;
 
 /// Admin 浏览器请求的稳定失败投影。
@@ -707,8 +708,12 @@ impl DeliveryAction {
 }
 
 /// 读取指定状态和页码的 delivery 安全投影；状态筛选改变时回到第一页。
-pub(crate) async fn fetch_deliveries(status: String, page: i64) -> Result<DeliveryPage, String> {
-    fetch_deliveries_with_size(status, page, TABLE_PAGE_SIZE).await
+pub(crate) async fn fetch_deliveries(
+    status: String,
+    page: i64,
+    page_size: i64,
+) -> Result<DeliveryPage, String> {
+    fetch_deliveries_with_size(status, page, page_size).await
 }
 
 async fn fetch_deliveries_with_size(
@@ -716,6 +721,7 @@ async fn fetch_deliveries_with_size(
     page: i64,
     page_size: i64,
 ) -> Result<DeliveryPage, String> {
+    pagination::validate(page, page_size, 100, i64::MAX)?;
     let mut query = url::form_urlencoded::Serializer::new(String::new());
     query
         .append_pair("page", &page.max(1).to_string())
@@ -730,7 +736,12 @@ async fn fetch_deliveries_with_size(
     }
     let payload: StrictDeliveryEnvelope<AdminDeliveryListResponse> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_delivery_list(payload).map_err(|_| invalid_response_error("delivery_list"))
+    let result =
+        decode_delivery_list(payload).map_err(|_| invalid_response_error("delivery_list"))?;
+    if result.pagination.page != page || result.pagination.page_size != page_size {
+        return Err(invalid_response_error("delivery_pagination"));
+    }
+    Ok(result)
 }
 
 pub(crate) async fn execute_delivery(

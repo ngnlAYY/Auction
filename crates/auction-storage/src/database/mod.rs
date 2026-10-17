@@ -119,6 +119,8 @@ mod delivery_audit;
 #[cfg(feature = "postgres")]
 mod delivery_scheduler;
 #[cfg(feature = "postgres")]
+mod draft_soft_close;
+#[cfg(feature = "postgres")]
 mod equipment_secrets;
 #[cfg(feature = "postgres")]
 mod forum;

@@ -54,7 +54,10 @@ pub fn Pager(
     page_size_options: Vec<i64>,
     #[props(default)] page_size_label: String,
     #[props(default)] page_size_option_label: Option<Callback<i64, String>>,
-    /// 显式启用正整数自定义输入；不设业务数量上限，也不改变默认布局。
+    /// 可选业务数量上限；默认无限制，保持 Public 既有语义。
+    #[props(default)]
+    max_page_size: Option<i64>,
+    /// 显式启用正整数自定义输入，不改变默认布局。
     #[props(default)]
     allow_custom_page_size: bool,
     #[props(default)] page_size_custom_label: String,
@@ -107,6 +110,7 @@ pub fn Pager(
                     label: page_size_label,
                     option_label: page_size_option_label,
                     allow_custom: allow_custom_page_size,
+                    max_page_size,
                     custom_label: page_size_custom_label,
                     apply_label: page_size_apply_label,
                     invalid_label: page_size_invalid_label,

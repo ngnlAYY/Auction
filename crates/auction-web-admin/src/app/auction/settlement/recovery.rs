@@ -7,6 +7,7 @@ use uuid::Uuid;
 use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminRecovery, AdminRecoveryReport, confirm_admin_recovery};
+use crate::app::surface::pagination::AdminPagination;
 use crate::app::surface::{AdminActionFeedback, stable_scoped_command_id};
 
 use super::RecoveryConfirmationDraft;
@@ -17,7 +18,7 @@ use super::report::AdminSettlementPager;
 pub(super) fn AdminRecoveryTable(
     report: Option<AdminRecoveryReport>,
     current_page: i64,
-    total_pages: usize,
+    pagination: AdminPagination,
     mut page: Signal<i64>,
     action_busy: Signal<bool>,
     mut confirmation: Signal<Option<RecoveryConfirmationDraft>>,
@@ -26,7 +27,9 @@ pub(super) fn AdminRecoveryTable(
 ) -> Element {
     let rows = report
         .as_ref()
-        .map(|report| super::helpers::page_slice(&report.recoveries, current_page))
+        .map(|report| {
+            super::helpers::page_slice(&report.recoveries, current_page, pagination.size())
+        })
         .unwrap_or_default();
     rsx! {
         section { class: "admin-auction-report admin-auction-recovery", aria_labelledby: "settlement-recovery-title",
@@ -70,8 +73,9 @@ pub(super) fn AdminRecoveryTable(
                     }
                 }
                 AdminSettlementPager {
-                    current_page,
-                    total_pages,
+                    current_page: page(),
+                    total_rows: report.recoveries.len(),
+                    pagination,
                     page,
                     label: t!("admin-recovery-pagination"),
                 }

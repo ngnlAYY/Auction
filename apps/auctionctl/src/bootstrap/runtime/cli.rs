@@ -11,6 +11,28 @@ pub(super) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// 只读检查旧草稿；只有显式 execute 和完整确认才修正软截止为900/900秒。
+    #[command(name = "repair-draft-soft-close")]
+    RepairDraftSoftClose {
+        /// 唯一目标拍卖，不提供全库遍历模式。
+        #[arg(long)]
+        auction_id: Uuid,
+        /// 实际执行；省略时由数据库强制只读。
+        #[arg(long)]
+        execute: bool,
+        /// 只读检查得到的版本，执行时必填。
+        #[arg(long, requires = "execute")]
+        expected_version: Option<i64>,
+        /// 稳定非零命令UUID，执行及重试时使用同一值。
+        #[arg(long, requires = "execute")]
+        command_id: Option<Uuid>,
+        /// 审计操作者，执行时必填。
+        #[arg(long, requires = "execute")]
+        actor: Option<String>,
+        /// 必须逐字等于 `REPAIR DRAFT SOFT CLOSE <拍卖UUID>`。
+        #[arg(long, requires = "execute")]
+        confirm_write: Option<String>,
+    },
     /// 装备 PM 安全列表或请求 Worker 只读核对，绝不重发。
     #[command(name = "lot-watch-pm")]
     LotWatchPm {

@@ -16,9 +16,21 @@ use super::*;
 struct MoogleMailCredentialCandidate {
     key: Uuid,
     persistent_id: Option<Uuid>,
+    state_version: Option<i64>,
+    player_name: Option<String>,
     world: Option<MoogleMailWorld>,
     cookie: MoogleMailCookie,
     operation_lock: Arc<AsyncMutex<()>>,
+}
+
+/// 数据库凭据的运行时身份元数据；名称仅为预期值，Cookie 的 Debug 已脱敏。
+#[derive(Debug)]
+pub struct MoogleMailRuntimeCredential {
+    pub credential_id: Uuid,
+    pub state_version: i64,
+    pub world: Option<MoogleMailWorld>,
+    pub player_name: Option<String>,
+    pub cookie: MoogleMailCookie,
 }
 
 /// 单个运行时 MoogleMail Cookie 的受控集合。
@@ -47,6 +59,8 @@ impl MoogleMailCredentialSet {
             vec![MoogleMailCredentialCandidate {
                 key: Uuid::new_v4(),
                 persistent_id: None,
+                state_version: None,
+                player_name: None,
                 world: None,
                 cookie,
                 operation_lock: Arc::new(AsyncMutex::new(())),
@@ -65,6 +79,8 @@ impl MoogleMailCredentialSet {
                 .map(|cookie| MoogleMailCredentialCandidate {
                     key: Uuid::new_v4(),
                     persistent_id: None,
+                    state_version: None,
+                    player_name: None,
                     world: None,
                     cookie,
                     operation_lock: Arc::new(AsyncMutex::new(())),
@@ -87,6 +103,8 @@ impl MoogleMailCredentialSet {
                 .map(|(persistent_id, cookie)| MoogleMailCredentialCandidate {
                     key: Uuid::new_v4(),
                     persistent_id: Some(persistent_id),
+                    state_version: None,
+                    player_name: None,
                     world: None,
                     cookie,
                     operation_lock: Arc::new(AsyncMutex::new(())),
@@ -109,6 +127,8 @@ impl MoogleMailCredentialSet {
                 .map(|(persistent_id, world, cookie)| MoogleMailCredentialCandidate {
                     key: Uuid::new_v4(),
                     persistent_id: Some(persistent_id),
+                    state_version: None,
+                    player_name: None,
                     world,
                     cookie,
                     operation_lock: Arc::new(AsyncMutex::new(())),
@@ -132,6 +152,8 @@ impl MoogleMailCredentialSet {
                 .map(|(persistent_id, world, cookie)| MoogleMailCredentialCandidate {
                     key: Uuid::new_v4(),
                     persistent_id: Some(persistent_id),
+                    state_version: None,
+                    player_name: None,
                     world,
                     cookie,
                     operation_lock: Arc::new(AsyncMutex::new(())),
@@ -143,6 +165,32 @@ impl MoogleMailCredentialSet {
         )
     }
 
+    /// 从当前凭据版本及预期名称建立集合；不据此创建任何远端身份证明。
+    pub fn from_runtime_credentials(
+        credentials: Vec<MoogleMailRuntimeCredential>,
+        invalidator: Arc<dyn AdminCredentialRuntimeWriter>,
+        ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
+    ) -> Result<Self, MoogleMailError> {
+        let allow_empty = ownership.is_none();
+        Self::from_candidates(
+            credentials
+                .into_iter()
+                .map(|credential| MoogleMailCredentialCandidate {
+                    key: Uuid::new_v4(),
+                    persistent_id: Some(credential.credential_id),
+                    state_version: Some(credential.state_version),
+                    player_name: credential.player_name,
+                    world: credential.world,
+                    cookie: credential.cookie,
+                    operation_lock: Arc::new(AsyncMutex::new(())),
+                })
+                .collect(),
+            Some(invalidator),
+            ownership,
+            allow_empty,
+        )
+    }
+
     fn from_candidates(
         candidates: Vec<MoogleMailCredentialCandidate>,
         invalidator: Option<Arc<dyn AdminCredentialRuntimeWriter>>,
@@ -151,9 +199,15 @@ impl MoogleMailCredentialSet {
     ) -> Result<Self, MoogleMailError> {
         if (!allow_empty && candidates.is_empty())
             || candidates.len() > 1
-            || candidates
-                .iter()
-                .any(|candidate| candidate.persistent_id.is_some_and(|id| id.is_nil()))
+            || candidates.iter().any(|candidate| {
+                candidate.persistent_id.is_some_and(|id| id.is_nil())
+                    || candidate.state_version.is_some_and(|version| version <= 0)
+                    || candidate.player_name.as_deref().is_some_and(|name| {
+                        !auction_application::valid_mail_player_name(name)
+                            || candidate.persistent_id.is_none()
+                            || candidate.state_version.is_none()
+                    })
+            })
         {
             return Err(MoogleMailError::new(
                 MoogleMailOperation::Inbox,
@@ -307,6 +361,11 @@ pub(crate) struct MoogleMailCredentialSession {
 }
 
 impl MoogleMailCredentialSession {
+    /// 当前凭据是否配置预期完整名称；不把声明提升为远端证明。
+    pub(crate) fn has_expected_player_name(&self) -> bool {
+        self.current.player_name.is_some()
+    }
+
     /// 返回当前 Cookie；调用方只把它交给同一逻辑操作的受限 HTTP 方法。
     pub(crate) fn cookie(&self) -> &MoogleMailCookie {
         &self.current.cookie

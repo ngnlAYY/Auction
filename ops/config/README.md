@@ -146,6 +146,15 @@ cron 与 Worker 共用解析器，保存不立即轮询；可选 `dashboard_mail
 `[auction]` 的 schedule/economics/settlement/recovery 默认值见[公共模板](examples/common.toml)。
 新拍卖创建时冻结 `policy_snapshot`，后续出价/取消使用快照；模板改动不回写旧场次。
 自动后继也是新聚合，冻结 Admin/Worker 启动时有效模板，而非复制前驱经济规则。
+
+新场次软截止窗口 `soft_close_window_seconds` 与延长 `soft_close_extension_seconds` 默认均为
+900 秒（固定15分钟）。有效出价的候选截止是接受时刻加900秒，不是旧截止加900秒，且不得回退。
+升级程序不会覆盖部署文件中的显式60，也不会修改既有草稿。操作者须先核对 effective economics：
+`operations.economics.managed = true` 时更新共享 runtime 的 `[operations.economics]`；否则更新
+公共文件 `[auction.economics]`。把有效来源的两个值都手动改为900，核对 Admin/Worker 使用相同模板，
+然后受控重启相关程序使新模板生效。首次设置生成的新文件已使用900。
+现有从未发布草稿另行使用[显式修正命令](../../apps/auctionctl/README.md#草稿软截止显式修正)，
+逐个指定目标并确认；进行中、已发布或已结算场次不追溯、不自动重开，不批量改库。
 周排期默认关闭，内置 UTC 周四 22:00 预览、周五 00:00 开拍、周六 12:00 结束，可显式覆盖。
 邮件默认起拍价独立，见[Worker 定价说明](../../apps/worker/README.md#拍卖邮件起拍价)。
 

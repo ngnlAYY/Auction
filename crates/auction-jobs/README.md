@@ -35,7 +35,8 @@ Worker 决定何时调用应用命令、如何按持久化状态重试；领域/
 ## 源码布局
 
 `lib.rs` 只负责导出，`worker/` 按业务 owner 拆分；`runtime/model.rs` 持有端口/参数，
-`runtime/runner.rs` 组合循环、drain 与任务退出。control 协议、handler、Unix server 和 Admin client
+`runtime/runner.rs` 组合循环、drain 与任务退出；`runtime/delivery/lease.rs` 统一准备、交接与发送的有界续租。
+control 协议、handler、Unix server 和 Admin client
 独立放在 `control/transport/`，调度器通过 `WorkerControlHandle` 接入状态与唤醒。
 `worker/forum/reply/rejection.rs` 独占拒绝/警告的分类及英文展示白名单，不复制竞价规则或重试决定。
 `worker/forum/sync/layout.rs` 按顺序建立全部目录页及系统日志，并对账精确楼层、拍卖标记和 post ID。
@@ -47,7 +48,7 @@ Worker 决定何时调用应用命令、如何按持久化状态重试；领域/
 | Auction | 生命周期、slow due、结算依次执行，各阶段失败不跳过后续阶段 |
 | Fulfillment | 按可用并发槽领取，持久化 prepared/enqueued 与 delivery 关联，不提前占满租约 |
 | Recovery | 保持 case → return → action → relist → refund 顺序，各阶段独立收口 |
-| Delivery | claim 后先查 transport 可用性，再进入 sending；续租、最终写回和未知结果均受 fencing 保护 |
+| Delivery | claim 后先查可用性并只读 prepare，持有 prepared guard 后才进入 sending；续租、最终写回和未知结果受 fencing 保护 |
 | Mail | main/isekai 独立 mailbox、cron、唤醒器、游标与租约；按旧到新处理 |
 | Forum | 独立顺序循环，先发布再读回帖，发布失败不跳过导入；逐主题领取内容租约 |
 | Lot-watch PM | 独立 runtime，每轮至多 1 新发送+1 只读核对；delivery cadence、forum 总预算/lease，串行共享网关 |
@@ -59,7 +60,17 @@ Worker 决定何时调用应用命令、如何按持久化状态重试；领域/
 慢速代理扫描候选后交竞价事务重新校验，过期 generation 安全跳过。
 
 Delivery 有效并发取配置与 transport 的较小值，MoogleMail 当前上限为 1。
-发送前无凭据只安全释放 claim 并在本轮排除该世界；进入 sending 后依赖失败或超时按未知结果处理，不盲目重寄。
+发送前无凭据只释放 claim 并在本轮排除该世界；compose prepare 失败/超时仅在本轮排除该世界的 Send，
+下轮重新读取真实 compose。Take/Return 仍独立运行，preflight 延后不占发送批次，batch_limit=1 也能继续取其他合格任务。
+释放撤销本次领取计数，保留 pending；不把所有排队任务逐个耗成 unknown，也不持久封禁整个 world。
+claimed 准备阶段在原 request_timeout 总预算内续租，数据库等待不延长该预算；续租失败/超时丢弃只读准备并尽力释放。
+prepare 完成后先续租再提交 fence，fence 明确成功后再次确认续租；等待均受已知租约单调截止和 finalize_timeout 限制。
+prepared future 仅在交接确认后 poll；准备首次续租独立于 select 排序，不能被操作分支绕过。
+准备/发送均保持 biased 的请求超时、租约过期优先，再给操作一次直接检查双截止的 poll，Pending 后才检查续租。
+续租耗时4秒而间隔3秒时，回执后的 renew_at 虽已到期，操作仍能在有效截止内先被 poll，不连续被续租饿死。
+下一次续租仍按请求开始时刻计算，不把回执时刻加完整间隔误当剩余 TTL；瞬时回执维持原节奏，截止已到则禁止 poll。
+失败先丢弃句柄，release 仅接受 claimed，fence 提交未知保持隔离。
+上述未开始写入的延后仍只排除本轮目标 world Send；进入发送后沿用单次发送及未知结果隔离，不盲目重寄。
 Send、Return、Take 的证明由各 owner 校验，成功不取决于 HTTP 成功页，见[邮件诊断](../../ops/mail-diagnostics.md)。
 
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。

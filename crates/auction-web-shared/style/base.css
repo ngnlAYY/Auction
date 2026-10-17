@@ -487,7 +487,8 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-.ui-pager--numbered .ui-pager__page[aria-current="page"] {
+/* 当前页的成对前景/背景色优先于分页器及 Admin 面板的通用悬浮、聚焦样式。 */
+.ui-pager.ui-pager--numbered .ui-pager__page[aria-current="page"] {
   border-color: var(--color-accent);
   color: var(--color-accent-contrast);
   background: var(--color-accent);

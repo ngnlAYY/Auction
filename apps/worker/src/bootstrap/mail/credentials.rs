@@ -57,9 +57,11 @@ pub(super) async fn load_credentials(
                     anyhow::bail!("MoogleMail 凭据不是有效 UTF-8");
                 }
             };
-            cookies.push((
-                record.id,
-                if record.scope
+            cookies.push(auction_integrations::mooglemail::MoogleMailRuntimeCredential {
+                credential_id: record.id,
+                state_version: record.state_version,
+                player_name: record.player_name,
+                world: if record.scope
                     == AdminCredentialWorld::Shared.scope(AdminCredentialKind::MailCookie)
                 {
                     None
@@ -72,20 +74,12 @@ pub(super) async fn load_credentials(
                         }
                     })
                 },
-                MoogleMailCookie::new(value)
+                cookie: MoogleMailCookie::new(value)
                     .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ));
+            });
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();
-        if let Some(ownership) = ownership {
-            MoogleMailCredentialSet::from_owned_runtime_cookies_with_scopes(
-                cookies,
-                invalidator,
-                ownership,
-            )
-        } else {
-            MoogleMailCredentialSet::from_runtime_cookies_with_scopes(cookies, invalidator)
-        }
+        MoogleMailCredentialSet::from_runtime_credentials(cookies, invalidator, ownership)
     } else if let Some(path) = &mail_config.keyenv_file {
         let keyenv = load_mooglemail_keyenv(path).context("load MoogleMail keyenv")?;
         let ownership = Arc::new(

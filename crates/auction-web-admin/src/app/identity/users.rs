@@ -10,6 +10,10 @@ use crate::api::{AdminUserStatusFilter, fetch_admin_users};
 
 use auction_web_shared::{AsyncState, AsyncStateKind};
 
+use super::pagination::{use_admin_page, use_admin_pagination};
+use super::pending::{
+    PendingCommandPanel, use_pending_command_gate, use_pending_commands_with_gate,
+};
 use super::query::use_users_query_state;
 use super::{AdminActionFeedback, admin_api_error_message};
 
@@ -37,14 +41,23 @@ pub(super) fn page() -> Element {
     let mut reload_generation = use_signal(|| 0_u64);
     let mut create_open = use_signal(|| false);
     let mut generated_key = use_signal(|| None::<AdminUserGeneratedKey>);
-    let action_busy = use_signal(|| false);
+    let mut action_busy = use_signal(|| false);
+    let command_gate = use_pending_command_gate();
+    let pending = use_pending_commands_with_gate(reload_generation, Some(command_gate));
+    // effect 仅用于既有控件的忙态展示；首次提交/重试在执行边界同步占用同一门禁。
+    use_effect(move || action_busy.set(pending.any_busy() || command_gate.blocked()));
     let mut action_feedback = use_signal(|| None::<AdminActionFeedback>);
     let mut create_notice = use_signal(|| None::<String>);
-    let users = use_resource(move || {
-        let _ = reload_generation();
-        let current = query_state();
-        fetch_admin_users(current.name.clone(), current.status, current.page)
-    });
+    let pagination = use_admin_pagination("users", &["page_size"], Some(200), i64::from(i32::MAX));
+    let users = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = reload_generation();
+            let current = query_state();
+            (current.name, current.status, current.page)
+        },
+        |(name, status, page), size| fetch_admin_users(name, status, page, size),
+    );
 
     let state = users.read_unchecked().clone();
     let content = match state {
@@ -73,6 +86,7 @@ pub(super) fn page() -> Element {
             rsx! {
             AdminUserTable {
                 page,
+                pagination,
                 name_draft,
                 status: query_state().status,
                 sort: query_state().sort.clone(),
@@ -105,7 +119,10 @@ pub(super) fn page() -> Element {
                 action_busy,
                 action_feedback,
                 create_notice,
-                on_generated_key: move |key| generated_key.set(Some(key)),
+                on_generated_key: move |key| {
+                    command_gate.hold_result();
+                    generated_key.set(Some(key));
+                },
             }
             }
         }
@@ -118,7 +135,9 @@ pub(super) fn page() -> Element {
                 button {
                     class: "admin-btn-primary",
                     r#type: "button",
+                    disabled: command_gate.blocked(),
                     onclick: move |_| {
+                        if command_gate.blocked() { return; }
                         action_feedback.set(None);
                         create_notice.set(None);
                         create_open.set(true);
@@ -126,26 +145,37 @@ pub(super) fn page() -> Element {
                     {t!("admin-users-create-open")}
                 }
             }
+            if command_gate.blocked() {
+                p { role: "status", {t!("admin-users-key-gate-help")} }
+            }
             if create_open() {
                 AdminUserCreateForm {
                     reload_generation,
+                    command_gate,
                     on_created: move |created: AdminUserCreated| {
                         create_notice.set(Some(t!(
                             "admin-users-created",
                             username: created.username
                         )));
-                        generated_key.set(created.generated_key);
+                        if let Some(key) = created.generated_key {
+                            command_gate.hold_result();
+                            generated_key.set(Some(key));
+                        }
                         create_open.set(false);
                     },
                     on_close: move |_| create_open.set(false),
                 }
             }
+            PendingCommandPanel { owner: pending }
             {content}
         }
         if let Some(key) = generated_key() {
             AdminUserGeneratedKeyDialog {
                 generated: key,
-                on_close: move |_| generated_key.set(None),
+                on_close: move |_| {
+                    generated_key.set(None);
+                    command_gate.acknowledge();
+                },
             }
         }
     }

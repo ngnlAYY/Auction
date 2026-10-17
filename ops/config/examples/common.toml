@@ -45,10 +45,10 @@ worlds = ["main", "isekai"]
 start_price = 1000
 # 可选：经济策略百万分比增量，范围 0-1000000，默认 50000。
 bid_increment_ppm = 50000
-# 可选：软截止窗口秒数，默认 60。
-soft_close_window_seconds = 60
-# 可选：命中软截止窗口后的延长秒数，默认 60。
-soft_close_extension_seconds = 60
+# 可选：软截止窗口秒数，默认 900（固定15分钟）。
+soft_close_window_seconds = 900
+# 可选：候选截止为出价接受时刻加本秒数，默认 900，仅允许向后延长。
+soft_close_extension_seconds = 900
 # 可选：取消截止窗口秒数，默认 86400。
 cancel_cutoff_seconds = 86400
 # 可选：是否启用代理竞价，默认 true。

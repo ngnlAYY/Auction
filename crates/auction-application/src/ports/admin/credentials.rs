@@ -8,6 +8,8 @@
 mod check;
 #[path = "credentials/commands.rs"]
 mod commands;
+#[path = "credentials/identity.rs"]
+mod identity;
 #[path = "credentials/ports.rs"]
 mod ports;
 #[path = "credentials/value/mod.rs"]
@@ -15,5 +17,6 @@ mod value;
 
 pub use check::*;
 pub use commands::*;
+pub use identity::*;
 pub use ports::*;
 pub use value::*;

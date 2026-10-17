@@ -8,7 +8,8 @@ use std::cmp::Ordering;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
+use super::pagination::{AdminPager as Pager, use_admin_page, use_admin_pagination};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminAuditFilter, AdminAuditPage, AdminAuditRecord, fetch_admin_audit};
 
@@ -23,11 +24,16 @@ pub(super) fn page() -> Element {
     // 草稿初值取自地址栏恢复的已应用筛选，刷新后表单与列表保持一致；之后的编辑不落 URL。
     let filter = use_signal(move || query_state.peek().filter.clone());
     let mut refresh = use_signal(|| 0_u64);
-    let audit = use_resource(move || {
-        let _ = refresh();
-        let current = query_state();
-        fetch_admin_audit(current.page, current.filter.clone())
-    });
+    let pagination = use_admin_pagination("audit", &["page_size"], Some(200), i64::from(i32::MAX));
+    let audit = use_admin_page(
+        pagination.clone(),
+        move || {
+            let _ = refresh();
+            let current = query_state();
+            (current.page, current.filter)
+        },
+        |(page, filter), size| fetch_admin_audit(page, filter, size),
+    );
 
     let mut apply_query = query.clone();
     let apply_filter = move |next_filter: AdminAuditFilter| {
@@ -68,9 +74,11 @@ pub(super) fn page() -> Element {
                 },
             }
             Pager {
+                pagination,
                 page: page.page.unwrap_or(query_state().page).max(1),
                 page_size: page.page_size,
-                total: Some(audit_total(page, query_state().page)),
+                total: page.total,
+                has_more: page.has_more,
                 label: t!("page-audit-title"),
                 previous_label: t!("admin-pagination-previous"),
                 status: move |(page, pages): (i64, i64)| {
@@ -418,15 +426,6 @@ fn audit_advanced_filter_active(filter: &AdminAuditFilter) -> bool {
 
 fn metadata_text(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "{}".to_owned())
-}
-
-fn audit_total(page: &AdminAuditPage, requested_page: i64) -> i64 {
-    let page_size = page.page_size.max(1);
-    let current_page = page.page.unwrap_or(requested_page).max(1);
-    page.total.unwrap_or_else(|| {
-        let loaded = current_page.saturating_mul(page_size);
-        if page.has_more { loaded.saturating_add(1) } else { loaded }
-    })
 }
 
 fn audit_actor_type_label(value: &str) -> String {

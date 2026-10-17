@@ -55,7 +55,8 @@ pub(super) async fn insert_envelope_postgres(
          ON CONFLICT (user_id) DO UPDATE
          SET ciphertext = EXCLUDED.ciphertext, nonce = EXCLUDED.nonce,
              encryption_key_id = EXCLUDED.encryption_key_id,
-             fingerprint = EXCLUDED.fingerprint, updated_at = EXCLUDED.updated_at",
+             fingerprint = EXCLUDED.fingerprint, updated_at = GREATEST(user_login_key_envelopes.created_at,
+                                   user_login_key_envelopes.updated_at, EXCLUDED.updated_at)",
     )
     .bind(user_id)
     .bind(envelope.ciphertext())

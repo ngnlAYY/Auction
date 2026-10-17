@@ -23,6 +23,8 @@ mod validation;
 #[cfg(feature = "postgres")]
 use activation::activate_postgres;
 #[cfg(feature = "postgres")]
+pub(crate) use common::MailDeliveryTransactionError;
+#[cfg(feature = "postgres")]
 pub(super) use disposition::has_return_intent;
 #[cfg(feature = "postgres")]
 use outbox::{enqueue_postgres, prepare_postgres};

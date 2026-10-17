@@ -41,7 +41,7 @@ impl MoogleMailParser {
         Err(compose_error(world, MoogleMailErrorCategory::WriteUnknown))
     }
 
-    /// 只从可见文字识别旧版冻结的明确发送失败。
+    /// 只从可见协议文字识别明确发送失败；自寄拒绝须来自唯一系统提示区。
     ///
     /// script/style/noscript/textarea 中的诱饵短语不参与分类；已有 `#mmail_fin` 的页面交给
     /// 成功证明处理，不会被误分类为失败。
@@ -61,6 +61,16 @@ impl MoogleMailParser {
         let bodies = parsed.select(&body_selector).collect::<Vec<_>>();
         if bodies.len() != 1 || parsed.select(&confirmation_selector).next().is_some() {
             return Ok(None);
+        }
+        // 自寄提示只采信实际系统消息，不把装备名称或其他可控可见文字当作拒绝证明。
+        let message_selector = selector("#messagebox_inner", world)?;
+        let messages = parsed.select(&message_selector).collect::<Vec<_>>();
+        if messages.len() == 1
+            && visible_body_text(messages[0]).eq_ignore_ascii_case(
+                "Messaging yourself must be the ultimate form of social withdrawal, kupo! Seek help, kupo!",
+            )
+        {
+            return Ok(Some(MoogleMailSendResponseFailure::RecipientIsSender));
         }
         let visible = visible_body_text(bodies[0]).to_ascii_lowercase();
         const RECIPIENT_NOT_FOUND_PHRASES: &[&str] = &[

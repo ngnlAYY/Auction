@@ -4,11 +4,14 @@ use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
 
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, Pager, Time, TruncatedText, format_credit_amount as format_amount,
+    AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
 };
 
 use crate::api::{AdminProxyEvent, AdminProxyEventPage, fetch_admin_proxy_events};
 use crate::app::surface::admin_api_error_message;
+use crate::app::surface::pagination::{
+    AdminPager as Pager, AdminPagination, use_admin_page, use_admin_pagination,
+};
 
 use super::helpers::{proxy_mode_label, proxy_status_label};
 
@@ -20,13 +23,15 @@ pub(super) fn AdminProxyHistory(
     mut reload_generation: Signal<u64>,
 ) -> Element {
     let page_number = use_signal(|| 1_i64);
-    let events = use_resource({
-        let lot_id = lot_id.clone();
+    let pagination = use_admin_pagination("proxy-events", &["proxy_page_size"], Some(100), 100_000);
+    let events = use_admin_page(
+        pagination.clone(),
         move || {
             let _ = reload_generation();
-            fetch_admin_proxy_events(lot_id.clone(), page_number())
-        }
-    });
+            (lot_id.clone(), page_number())
+        },
+        |(lot_id, page), size| fetch_admin_proxy_events(lot_id, page, size),
+    );
 
     let content = match &*events.read_unchecked() {
         None => rsx! {
@@ -46,7 +51,7 @@ pub(super) fn AdminProxyHistory(
             }
         },
         Some(Ok(page)) => rsx! {
-            AdminProxyHistoryTable { page: page.clone(), page_number }
+            AdminProxyHistoryTable { page: page.clone(), page_number, pagination }
         },
     };
 
@@ -73,10 +78,16 @@ pub(super) fn AdminProxyHistory(
 }
 
 #[component]
-fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -> Element {
+fn AdminProxyHistoryTable(
+    page: AdminProxyEventPage,
+    page_number: Signal<i64>,
+    pagination: AdminPagination,
+) -> Element {
     let current_page = page.pagination.page.unwrap_or(page_number()).max(1);
     let page_size = page.pagination.page_size.max(1);
-    let total = proxy_event_total(&page, current_page);
+    let total = page.pagination.total;
+    let has_more =
+        page.pagination.has_more.unwrap_or_else(|| page.pagination.next_cursor.is_some());
 
     rsx! {
         if page.proxy_events.is_empty() {
@@ -110,9 +121,12 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
             }
         }
         Pager {
+            pagination,
+            local: true,
             page: current_page,
             page_size,
-            total: Some(total),
+            total,
+            has_more,
             label: t!("admin-lots-proxy-pagination"),
             previous_label: t!("admin-pagination-previous"),
             status: move |(page, pages): (i64, i64)| {
@@ -123,25 +137,6 @@ fn AdminProxyHistoryTable(page: AdminProxyEventPage, page_number: Signal<i64>) -
             jump_button_label: t!("admin-pagination-go"),
             on_page_change: move |next_page| page_number.set(next_page),
         }
-    }
-}
-
-fn proxy_event_total(page: &AdminProxyEventPage, current_page: i64) -> i64 {
-    let page_size = page.pagination.page_size.max(1);
-    if let Some(total) = page.pagination.total {
-        return total;
-    }
-
-    let has_more =
-        page.pagination.has_more.unwrap_or_else(|| page.pagination.next_cursor.is_some());
-    let loaded = current_page.saturating_mul(page_size);
-    if has_more {
-        loaded.saturating_add(1)
-    } else {
-        current_page
-            .saturating_sub(1)
-            .saturating_mul(page_size)
-            .saturating_add(page.proxy_events.len().try_into().unwrap_or(i64::MAX))
     }
 }
 

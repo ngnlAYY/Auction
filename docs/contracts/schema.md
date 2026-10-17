@@ -18,7 +18,7 @@
 
 当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000043`；已发布文件不修改或删除。
+PostgreSQL 迁移为 `000001`—`000045`；已发布文件不修改或删除。
 历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
@@ -31,6 +31,8 @@ PostgreSQL 迁移为 `000001`—`000043`；已发布文件不修改或删除。
 | 流拍寄回：PostgreSQL `000038` | ready 义务下从未领取、未冻结、无 delivery 的初始 pending execution 从 Return 转 Send，并追加审计 | 已尝试、冻结、未知或完成记录保持原身份；旧 Return 进入人工核对，禁止自动重寄 |
 | Final 完成：PostgreSQL `000012`/`000039` | 持久化 Final fence；后者仅补齐唯一匹配成功命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次 | 缺失或歧义证据不补写，不重放生命周期或外部动作 |
 | 排期来源：PostgreSQL `000039` | nullable `scheduled_rounds.schedule_snapshot`，类型为 JSONB，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |
+| 用户时间：PostgreSQL `000044` | MM 注册账本时间等于创建时间、论坛身份历史时间等于倒退更新时间的用户；提升更新时间、推进版本并追加更正审计 | 不猜远端时区、不改创建时间/凭据/命令账本；剩余未知来源异常由新约束阻断迁移 |
+| 邮件预期名称：PostgreSQL `000045` | credential_keys 增加 nullable player_name，仅 mail_cookie 可设置，受长度/空白/控制字符约束 | 旧记录保持 NULL，无 verified 列、不回填或授权内部履约；保留旧凭据与未知发送证据 |
 
 ### 迁移语义与兼容边界
 
@@ -50,6 +52,8 @@ PostgreSQL 迁移为 `000001`—`000043`；已发布文件不修改或删除。
   延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，
   `game_player_id` 只是名称兼容镜像。首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册
   按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
+  `users_timestamp_order`（`000044`）保证 `updated_at >= created_at`；所有身份写入显式保证快照更新时间不倒退，
+  旧创建时间的高水位保留，不将其解释为准确的远端时区；只对上述双重证据成立的倒退行追加审计更正。
 - 所有固定目录页及系统日志的远端 post ID 必须真实对账；历史 published 行没有身份时保留空值。
   `000040` 增加冻结的 `catalog_layout`、`catalog_page_count`（历史默认 1）及 `auction_forum_catalog_pages` 续页镜像。
   历史已尝试/发布/未知写入使用 `legacy_single`，保留楼层并继续导入；仅从未尝试且无远端身份的队列项及新主题用 `paged_v1`，每页最多 150 件。
@@ -76,7 +80,7 @@ canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预�
 | rules_documents | auction-application：rules | 版本化规则文档；PostgreSQL 首次接管可由 auctionctl 经同一应用端口导入受控目录 |
 | audit_records | auction-application：audit | 追加式审计事实，不允许编辑历史 |
 | service_heartbeats | auction-observability | 进程/服务心跳与过期判断 |
-| credential_keys | auction-application：credentials | 加密后的外部凭据索引；邮件与论坛 Cookie 各自全局最多一条 active 记录 |
+| credential_keys | auction-application：credentials | 加密后的外部凭据索引；邮件与论坛 Cookie 各自全局最多一条 active 记录；nullable player_name 仅是预期完整游戏名 |
 | user_login_key_envelopes | auction-application：users | 用户登录 key 密文信封；只保存密文、nonce、key id 和指纹 |
 | user_mail_commands | auction-application：users | MoogleMail 注册/重绑命令幂等账本与结果 |
 | user_game_identity_history | auction-application：users | MoogleMail 玩家名称换绑追加历史；game_player 字段仅作兼容镜像 |
@@ -144,6 +148,16 @@ recipient 为空或符合 users 的 1–32 位规范十进制 ID。缺 UID 来�
 不修改 `000001`—`000040` 或既有竞价事实。delivery SQL 仍由 `mail_delivery`/`delivery_scheduler` 独占：
 领取共用 watch proof，sending 在 lot → delivery 锁序下复核；失效且未开始发送的任务转为明确 failed 并追加审计，
 不覆盖 sending、Sent 证明或 manual_reconcile。
+
+`database/draft_soft_close` 复用 `auction_commands` 与 `audit_records`，无新表或 `000047` 迁移。
+显式命令种类 `repair_draft_soft_close`、结果码 `repaired`、审计动作 `auction.repair_draft_soft_close`；
+只允许符合[不变量](invariants.md)的单个未发布草稿，把行与策略中的60/60改为900/900并推进版本。
+默认只读不写账本，写入账本先于当前状态门禁重放。其他经济字段、装备、投稿、资金、排期及历史事实保留。
+MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效 claimed 本次领取计数并追加 release 审计；
+不建立 compose 历史错误永久阻断表。既有 renew 同时支持 claimed/sending，不新增列或状态；
+delivery_scheduler 先锁行再检查数据库实时有效期、token/fencing 与新截止，禁止复活过期租约或缩短截止。
+release 仍仅接受有效 claimed；已 sending、未知 fence 提交及历史 unknown 不释放为 pending。
+内部履约当前无证明表、内部 satisfied 写入口或 `000046` 迁移。
 
 `auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
 `default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。

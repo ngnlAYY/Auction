@@ -6,7 +6,7 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 use auction_web_shared::{
-    AsyncState, AsyncStateKind, Pager, TruncatedText, format_credit_amount as format_amount,
+    AsyncState, AsyncStateKind, TruncatedText, format_credit_amount as format_amount,
 };
 
 use crate::api::{Delivery, DeliveryPage};
@@ -235,9 +235,14 @@ pub(super) fn DeliveryRow(
 
 /// 控制 delivery 列表分页。
 #[component]
-pub(super) fn DeliveryPager(page: DeliveryPage, on_page_change: EventHandler<i64>) -> Element {
+pub(super) fn DeliveryPager(
+    page: DeliveryPage,
+    pagination: crate::app::surface::pagination::AdminPagination,
+    on_page_change: EventHandler<i64>,
+) -> Element {
     rsx! {
-        Pager {
+        crate::app::surface::pagination::AdminPager {
+            pagination,
             page: page.pagination.page,
             page_size: page.pagination.page_size,
             total: Some(page.pagination.total),

@@ -10,6 +10,9 @@ pub struct AdminCredentialCreateRequest {
     pub kind: String,
     pub world: String,
     pub label: String,
+    /// 可选预期完整玩家名称，仅 mail_cookie 接受；不是身份证明。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_name: Option<String>,
     pub secret: String,
 }
 
@@ -83,6 +86,8 @@ pub struct AdminCredentialResponse {
     pub kind: String,
     pub world: String,
     pub label: String,
+    #[serde(default)]
+    pub player_name: Option<String>,
     pub status: String,
     pub state_version: i64,
     pub created_at: String,

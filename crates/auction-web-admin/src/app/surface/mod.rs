@@ -31,6 +31,8 @@ mod intake;
 mod lots;
 #[path = "../fulfillment/mail.rs"]
 mod mail;
+mod pagination;
+mod pending;
 #[path = "../poll.rs"]
 mod poll;
 #[path = "../query.rs"]

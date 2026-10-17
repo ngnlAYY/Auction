@@ -59,6 +59,21 @@ pub(crate) fn send_receipt(
                 result_metadata,
             })
         }
+        MoogleMailSendOutcome::RecipientIsSender { assets_staged } => Err(DeliveryTransportError {
+            failure_code: "recipient_is_sender".to_owned(),
+            safe_detail: "MoogleMail 不允许向发件账号自身寄信；暂存资产须人工核对".to_owned(),
+            // 已证明拒绝不等于资产已退回库存，更不等于原履约义务已经完成。
+            outcome_unknown: assets_staged,
+            external_reference: None,
+            result_metadata: json!({
+                "stage": "send",
+                "operation": MoogleMailOperation::Send.as_str(),
+                "category": "write_rejected",
+                "reason_code": "recipient_is_sender",
+                "assets_staged": assets_staged,
+                "retryable": false,
+            }),
+        }),
         MoogleMailSendOutcome::Rejected { assets_staged } => Err(DeliveryTransportError {
             failure_code: if assets_staged { "send_rejected_after_stage" } else { "send_rejected" }
                 .to_owned(),

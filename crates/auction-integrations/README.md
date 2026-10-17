@@ -54,7 +54,12 @@ HTML 解析使用 scraper 0.27 / selectors 0.38，移除旧 fxhash 停维依赖�
 | 论坛 PM | 新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent 后核验收件人 UID、完整正文、sender 与 Sent MSID |
 
 Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资产不符、无匹配、多匹配或预算耗尽进入 `manual_reconcile`，
-不自动重寄。发送前 compose 必须为空，避免覆盖未知写入遗留资产；收件人不存在的退信在资产取回前也保留人工对账。
+不自动重寄。MoogleMail transport 在持久 sending fence 前 GET compose 并验证干净状态；
+失败或超时只延后新任务。`prepare` 返回的消耗式 future 持有同一 credential session 独占 guard，
+直到后续写入结束或句柄被丢弃，中间不释放再重获、不换 Cookie。fence 后仍复核 compose 和原 Sent baseline，
+最终写入只执行一次；再次无法证明、写后拒绝或超时仍保留原未知结果边界。
+不自动清草稿；当前 compose 干净仅允许新任务继续，不能恢复旧 unknown。
+收件人不存在的退信在资产取回前也保留人工对账；自寄拒绝若已暂存资产同样保持 outcome_unknown。
 流拍/撤拍按原世界、原卖家逐件零 Credits/COD Send 原装备，历史冻结 Return 在远端写入前隔离。
 完整回执、诊断和人工核对要求见[邮件诊断](../../ops/mail-diagnostics.md)与[领域不变量](../../docs/contracts/invariants.md)。
 

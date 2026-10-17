@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use auction_contracts::AdminSettlementCatalogResponse;
 
 use super::{
-    ApiResponse, MAX_JSON_SAFE_INTEGER, TABLE_PAGE_SIZE, invalid_response_error, parse_admin_time,
-    response_error, send_get, valid_uuid,
+    ApiResponse, MAX_JSON_SAFE_INTEGER, invalid_response_error, parse_admin_time, response_error,
+    send_get, valid_uuid,
 };
 
 // 本地 Strict 镜像已删除：contracts 的 `AdminSettlementCatalogResponse`（含 entry 与
@@ -34,12 +34,11 @@ pub(crate) async fn fetch_admin_settlement_catalog(
     world_id: String,
     sequence: Option<i64>,
     page: i64,
+    page_size: i64,
 ) -> Result<AdminSettlementCatalogPage, String> {
-    let page = page.max(1);
+    super::pagination::validate(page, page_size, 100, 100_000)?;
     let mut query = url::form_urlencoded::Serializer::new(String::new());
-    query
-        .append_pair("page", &page.to_string())
-        .append_pair("page_size", &TABLE_PAGE_SIZE.to_string());
+    query.append_pair("page", &page.to_string()).append_pair("page_size", &page_size.to_string());
     if world_id != "all" {
         query.append_pair("world_id", &world_id);
     }
@@ -56,7 +55,8 @@ pub(crate) async fn fetch_admin_settlement_catalog(
     if payload.code != "ok" || payload.message.trim().is_empty() {
         return Err(invalid_response_error("settlement_catalog_envelope"));
     }
-    decode_catalog(payload.data, &world_id, sequence, page).map_err(invalid_response_error)
+    decode_catalog(payload.data, &world_id, sequence, page, page_size)
+        .map_err(invalid_response_error)
 }
 
 fn decode_catalog(
@@ -64,10 +64,11 @@ fn decode_catalog(
     world_id: &str,
     sequence: Option<i64>,
     requested_page: i64,
+    requested_size: i64,
 ) -> Result<AdminSettlementCatalogPage, &'static str> {
     let pagination = data.pagination;
     if pagination.page != requested_page
-        || pagination.page_size != TABLE_PAGE_SIZE
+        || pagination.page_size != requested_size
         || !(1..=MAX_JSON_SAFE_INTEGER).contains(&pagination.page)
         || !(1..=100).contains(&pagination.page_size)
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&pagination.total)

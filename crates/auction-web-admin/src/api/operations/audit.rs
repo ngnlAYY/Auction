@@ -11,8 +11,8 @@ use serde::Deserialize;
 use url::form_urlencoded;
 
 use super::{
-    MAX_JSON_SAFE_INTEGER, RequiredOption, TABLE_PAGE_SIZE, invalid_response_error, response_error,
-    send_get, valid_admin_time, valid_uuid,
+    MAX_JSON_SAFE_INTEGER, RequiredOption, invalid_response_error, response_error, send_get,
+    valid_admin_time, valid_uuid,
 };
 
 /// 旧 audit decoder 允许响应增加字段，但所有旧必需字段仍必须显式存在并满足业务语义。
@@ -71,10 +71,12 @@ pub(crate) struct AdminAuditFilter {
 pub(crate) async fn fetch_admin_audit(
     page: i64,
     filter: AdminAuditFilter,
+    page_size: i64,
 ) -> Result<AdminAuditPage, String> {
+    super::pagination::validate(page, page_size, 200, i64::from(i32::MAX))?;
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("page", &page.max(1).to_string());
-    query.append_pair("page_size", &TABLE_PAGE_SIZE.to_string());
+    query.append_pair("page_size", &page_size.to_string());
     append_filter(&mut query, "actor", &filter.actor);
     append_filter(&mut query, "actor_type", &filter.actor_type);
     append_filter(&mut query, "action", &filter.action);
@@ -92,16 +94,17 @@ pub(crate) async fn fetch_admin_audit(
     }
     let payload: ApiResponse<StrictAuditPage> =
         response.json().await.map_err(invalid_response_error)?;
-    decode_audit_page(payload.data, page.max(1)).map_err(invalid_response_error)
+    decode_audit_page(payload.data, page, page_size).map_err(invalid_response_error)
 }
 
 fn decode_audit_page(
     data: StrictAuditPage,
     requested_page: i64,
+    requested_size: i64,
 ) -> Result<AdminAuditPage, &'static str> {
     if !(1..=MAX_JSON_SAFE_INTEGER).contains(&data.page)
         || data.page != requested_page
-        || data.page_size != TABLE_PAGE_SIZE
+        || data.page_size != requested_size
         || !(0..=MAX_JSON_SAFE_INTEGER).contains(&data.total)
         || i64::try_from(data.records.len())
             .map_or(true, |count| count > data.page_size || count > data.total)

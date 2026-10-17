@@ -128,6 +128,12 @@ pub(super) async fn claim_postgres(
                  FROM unnest($5::text[]) AS excluded(world)
                  WHERE lower(deliveries.payload ->> 'world') = excluded.world
              )
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM unnest($6::text[]) AS excluded(world)
+                 WHERE deliveries.payload ->> 'operation' = 'send'
+                   AND lower(deliveries.payload ->> 'world') = excluded.world
+             )
            ORDER BY created_at, id
            LIMIT $2
            FOR UPDATE SKIP LOCKED"#
@@ -137,6 +143,7 @@ pub(super) async fn claim_postgres(
     .bind(excluded_worlds)
     .bind(excluded_names)
     .bind(&exclusions.unavailable_worlds)
+    .bind(&exclusions.unavailable_send_worlds)
     .fetch_all(&mut *transaction)
     .await
     .map_err(map_storage_error)?;

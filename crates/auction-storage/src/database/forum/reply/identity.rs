@@ -317,6 +317,7 @@ async fn update_user_identity(
     .await
     .record_audit_failure()
     .map_err(|_| storage_error("追加论坛身份审计记录失败"))?;
+    // 用户快照时间不倒退；旧 MM 记录可能带有偏快的外部时间，不能让后续论坛绑定破坏投影。
     sqlx::query(
         "UPDATE public.users
          SET username = $1,
@@ -329,7 +330,7 @@ async fn update_user_identity(
              END,
              updated_at = CASE
                  WHEN username IS DISTINCT FROM $1 OR forum_account_id IS DISTINCT FROM $2
-                 THEN transaction_timestamp()
+                 THEN GREATEST(created_at, updated_at, transaction_timestamp())
                  ELSE updated_at
              END
          WHERE id = $3",

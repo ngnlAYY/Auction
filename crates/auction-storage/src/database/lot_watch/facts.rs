@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 
 use super::*;
+use crate::database::mail_delivery::MailDeliveryTransactionError;
 
 pub(crate) async fn auto_watch_proxy(
     transaction: &mut Transaction<'_, Postgres>,
@@ -134,7 +135,11 @@ async fn notify(
     let delivery =
         crate::database::mail_delivery::enqueue_in_transaction(transaction, &command, None)
             .await
-            .map_err(|_| corrupt())?;
+            .map_err(|error| match error {
+            // 40001/40P01 必须返回竞价 runner，按原预算重试整个事务而非局部入队。
+            MailDeliveryTransactionError::Sqlx(error) => sql_error(error),
+            MailDeliveryTransactionError::Rejected(_) => corrupt(),
+        })?;
     sqlx::query(
         "INSERT INTO public.lot_watch_notifications
         (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version, delivery_id,

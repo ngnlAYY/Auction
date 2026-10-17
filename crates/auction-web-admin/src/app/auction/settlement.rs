@@ -16,6 +16,7 @@ use crate::api::{
     fetch_admin_settlement, fetch_admin_settlement_catalog,
 };
 
+use super::pagination::use_admin_pagination;
 use super::{AdminActionFeedback, admin_api_error_message};
 
 #[path = "settlement/helpers.rs"]
@@ -37,8 +38,6 @@ use query::{
 use recovery::AdminRecoveryDialog;
 use report::AdminSettlementReportView;
 
-const PAGE_SIZE: usize = 10;
-
 #[derive(Debug, Clone, PartialEq)]
 struct RecoveryConfirmationDraft {
     auction_id: String,
@@ -53,6 +52,7 @@ struct RecoveryConfirmationDraft {
 struct CatalogLoad {
     world_id: String,
     page: i64,
+    page_size: i64,
     result: Result<AdminSettlementCatalogPage, String>,
 }
 
@@ -80,6 +80,9 @@ pub(super) fn page() -> Element {
     let mut selected_auction_id = use_signal(|| initial_auction);
     let mut requested_sequence = use_signal(|| initial_sequence);
     let mut catalog_page = use_signal(|| initial_page);
+    let catalog_pagination =
+        use_admin_pagination("settlement-catalog", &["page_size"], Some(100), 100_000);
+    let catalog_page_size = catalog_pagination.size_signal();
     let lot_page = use_signal(|| 1_i64);
     let recovery_page = use_signal(|| 1_i64);
     let reload_generation = use_signal(|| 0_u64);
@@ -122,9 +125,11 @@ pub(super) fn page() -> Element {
         let _ = reload_generation();
         let world_id = world_filter();
         let page = catalog_page();
+        let page_size = catalog_page_size();
         async move {
-            let result = fetch_admin_settlement_catalog(world_id.clone(), None, page).await;
-            CatalogLoad { world_id, page, result }
+            let result =
+                fetch_admin_settlement_catalog(world_id.clone(), None, page, page_size).await;
+            CatalogLoad { world_id, page, page_size, result }
         }
     });
     // URL 中的期号可能不在当前目录页；单独使用服务端筛选解析它，同时保留完整分页目录供切换。
@@ -134,7 +139,7 @@ pub(super) fn page() -> Element {
         async move {
             let result = match sequence {
                 Some(sequence) => {
-                    fetch_admin_settlement_catalog(world_id.clone(), Some(sequence), 1)
+                    fetch_admin_settlement_catalog(world_id.clone(), Some(sequence), 1, 10)
                         .await
                         .map(Some)
                 }
@@ -176,14 +181,18 @@ pub(super) fn page() -> Element {
         };
         let current_world = world_filter();
         let current_page = catalog_page();
-        if load.world_id != current_world || load.page != current_page {
+        if load.world_id != current_world
+            || load.page != current_page
+            || load.page_size != catalog_page_size()
+        {
             return;
         }
         let Ok(page) = load.result else {
             return;
         };
         if page.auctions.is_empty() && page.total > 0 && current_page > 1 {
-            let last_page = ((page.total - 1) / page.page_size + 1).max(1);
+            let last_page =
+                ((page.total - 1) / page.page_size + 1).max(1).min(100_000 / page.page_size + 1);
             catalog_page.set(last_page);
             selected_auction_id.set(String::new());
             requested_sequence.set(None);
@@ -281,9 +290,11 @@ pub(super) fn page() -> Element {
     let catalog_lookup_state = catalog_lookup.read_unchecked().clone();
     let settlement_state = settlement.read_unchecked().clone();
     let recovery_state = recovery.read_unchecked().clone();
-    let current_catalog = catalog_state
-        .as_ref()
-        .filter(|load| load.world_id == current_world && load.page == current_catalog_page);
+    let current_catalog = catalog_state.as_ref().filter(|load| {
+        load.world_id == current_world
+            && load.page == current_catalog_page
+            && load.page_size == catalog_page_size()
+    });
     let catalog_data = current_catalog.and_then(|load| load.result.as_ref().ok()).cloned();
     let selected_on_page = catalog_data
         .as_ref()
@@ -403,6 +414,7 @@ pub(super) fn page() -> Element {
                     if let Some(page) = catalog_data {
                         AdminSettlementCatalogPager {
                             page,
+                            pagination: catalog_pagination,
                             world_filter,
                             requested_sequence,
                             selected_auction_id,
@@ -439,6 +451,7 @@ pub(super) fn page() -> Element {
                         }
                         if let Some(report) = report {
                             AdminSettlementReportView {
+                                key: "{selected}",
                                 report,
                                 recovery: recovery_report,
                                 lot_page,

@@ -57,6 +57,12 @@ pub(crate) async fn create(
         Some(world) => world,
         None => return invalid_request("invalid_credential_world", "凭据 world 无效"),
     };
+    if !auction_application::valid_credential_player_name(kind, input.player_name.as_deref()) {
+        return invalid_request(
+            "invalid_credential_player_name",
+            "预期玩家名称无效或凭据类型不支持",
+        );
+    }
     let secret = match AdminCredentialSecret::new(input.secret) {
         Ok(secret) => secret,
         Err(_) => return invalid_request("invalid_credential_secret", "凭据内容无效"),
@@ -70,6 +76,7 @@ pub(crate) async fn create(
             kind,
             world,
             label: input.label,
+            player_name: input.player_name,
             secret,
             actor_id: identity.actor,
             request_id: request_id(&headers),

@@ -179,6 +179,27 @@ fn fulfillment_gateway(
     Ok((world, gateway))
 }
 
+/// 复用既有 gateway/credential set/ownership，不构造第二 Cookie 客户端。
+/// 当前只读适配不连接内部 satisfy：可信身份页面与真实库存证明闭合后才可启用写路径。
+#[cfg(feature = "postgres")]
+impl auction_application::SettlementFulfillmentBotIdentityReader
+    for MoogleMailFulfillmentEvidenceReader
+{
+    fn read_verified_player_identity(
+        &self,
+        world: SettlementWorld,
+    ) -> ApplicationFuture<'_, Option<auction_application::VerifiedMailPlayerIdentity>> {
+        Box::pin(async move {
+            let (world, gateway) = fulfillment_gateway(
+                &self.gateways,
+                world,
+                "MoogleMail player identity world unavailable",
+            )?;
+            gateway.read_verified_player_identity(world).await.map_err(mooglemail_evidence_error)
+        })
+    }
+}
+
 #[cfg(feature = "postgres")]
 impl SettlementFulfillmentEvidenceReader for MoogleMailFulfillmentEvidenceReader {
     fn read_sent(

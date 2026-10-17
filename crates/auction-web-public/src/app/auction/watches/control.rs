@@ -35,7 +35,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
     let pending = context.commands.read().get(&lot_id).cloned();
     let busy = pending.as_ref().is_some_and(|pending| pending.busy);
     let error = pending.as_ref().and_then(|pending| pending.error.as_ref());
-    let uncertain = error.is_some_and(|error| error.status != 409 && error.outcome_uncertain());
+    let uncertain = pending.as_ref().is_some_and(|pending| pending.uncertain);
     let conflict = error.is_some_and(|error| error.status == 409);
     let error_message = if uncertain {
         t!("watch-unknown")
@@ -90,7 +90,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                             let pending = retry_context.commands.read().get(&retry_lot).cloned();
                             if let Some(pending) = pending
                                 && !pending.busy
-                                && pending.error.as_ref().is_some_and(|error| error.status != 409 && error.outcome_uncertain())
+                                && pending.uncertain
                             {
                                 submit.0.call((retry_lot.clone(), pending.payload));
                             }
@@ -102,7 +102,14 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                         r#type: "button",
                         onclick: move |_| {
                             if !refresh_context.identity_matches() { return; }
-                            refresh_context.commands.write().remove(&lot_id);
+                            {
+                                let mut commands = refresh_context.commands.write();
+                                // 即使旧刷新事件延迟到达，也不能清除正在提交或结果未知的命令。
+                                if commands.get(&lot_id).is_some_and(|pending| pending.busy || pending.uncertain) {
+                                    return;
+                                }
+                                commands.remove(&lot_id);
+                            }
                             refresh_context.invalidate();
                         },
                         {t!("watch-refresh")}

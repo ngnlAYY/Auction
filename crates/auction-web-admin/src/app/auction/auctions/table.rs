@@ -5,7 +5,9 @@ use std::cmp::Ordering;
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use crate::app::surface::pending::PendingCommands;
+use auction_web_shared::{AsyncState, AsyncStateKind};
 
 use crate::api::{AdminAuction, AdminAuctionPage};
 
@@ -19,6 +21,7 @@ use super::forum::AdminAuctionForumStatus;
 #[component]
 pub(super) fn AdminAuctionTable(
     state: Option<Result<AdminAuctionPage, String>>,
+    pagination: AdminPagination,
     /// 当前世界筛选（地址栏恢复后的值）；变更经 `on_query_change` 由页面写回 URL。
     world: String,
     /// 当前排序列（空串 = 服务端原始顺序）与方向；变更经 `on_sort_change` 由页面写回 URL。
@@ -31,7 +34,8 @@ pub(super) fn AdminAuctionTable(
     // 秒级时钟订阅已下沉到行内的就绪单元格与动作单元格（见 row.rs/dialog.rs）：
     // 整表（筛选、表头、分页）不再随秒针重渲染，只有真正依赖当前时间的叶子组件每秒重算。
     let notice = use_signal(|| None::<AdminAuctionNotice>);
-    let intake_busy = use_signal(|| false);
+    let owner = use_context::<PendingCommands>();
+    let intake_busy = owner.is_busy(&format!("intake:{world}"));
     // 翻页保留当前世界筛选与排序；该闭包在分支内move走一份克隆。
     let pager_world = world.clone();
     let pager_sort = sort.clone();
@@ -53,7 +57,7 @@ pub(super) fn AdminAuctionTable(
         Some(Ok(page)) => {
             let is_empty = page.auctions.is_empty();
             let capabilities = page.capabilities;
-            let pagination = page.pagination;
+            let page_info = page.pagination;
             // 服务端不支持排序参数，浏览器只对当前页排序；未选择排序列时保持原始顺序。
             let mut auctions = page.auctions.clone();
             sort_auctions(&mut auctions, &sort, direction);
@@ -62,8 +66,6 @@ pub(super) fn AdminAuctionTable(
                     AdminIntakeForm {
                         key: "{world}",
                         world_id: world.clone(),
-                        busy: intake_busy,
-                        reload_generation,
                     }
                 }
                 if !is_empty {
@@ -121,7 +123,6 @@ pub(super) fn AdminAuctionTable(
                                     auction,
                                     capabilities: capabilities.clone(),
                                     notice,
-                                    reload_generation,
                                 }
                             }
                         }
@@ -135,9 +136,10 @@ pub(super) fn AdminAuctionTable(
                     }
                 }
                 Pager {
-                    page: pagination.page,
-                    page_size: pagination.page_size,
-                    total: Some(pagination.total),
+                    pagination,
+                    page: page_info.page,
+                    page_size: page_info.page_size,
+                    total: Some(page_info.total),
                     label: t!("admin-auctions-pagination"),
                     previous_label: t!("admin-pagination-previous"),
                     status: move |(page, pages): (i64, i64)| {
@@ -172,10 +174,10 @@ pub(super) fn AdminAuctionTable(
                         select {
                             class: "admin-auction-world",
                             id: "auction-world",
-                            disabled: intake_busy(),
+                            disabled: intake_busy,
                             value: world,
                             onchange: move |event| {
-                                if intake_busy() { return; }
+                                if intake_busy { return; }
                                 // 切换世界筛选回到第一页并保留排序，由页面 push 到地址栏。
                                 on_query_change
                                     .call(AuctionsQuery {

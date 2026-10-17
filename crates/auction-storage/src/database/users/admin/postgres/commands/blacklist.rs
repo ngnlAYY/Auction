@@ -46,7 +46,8 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
     if before.status == AdminUserStatus::Active {
         sqlx::query(
             "UPDATE public.users
-             SET status = 'blacklisted', state_version = state_version + 1, updated_at = $1
+             SET status = 'blacklisted', state_version = state_version + 1,
+                 updated_at = GREATEST(created_at, updated_at, $1)
              WHERE id = $2",
         )
         .bind(command.occurred_at)

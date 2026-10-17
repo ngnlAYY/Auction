@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 
-/// 数量文案由 surface 注入；显式启用才显示自定义输入，不设业务数量上限。
+/// 数量文案与可选上限由 surface 注入；显式启用才显示自定义输入。
 #[component]
 pub(super) fn PageSizePicker(
     page_size: i64,
@@ -10,6 +10,7 @@ pub(super) fn PageSizePicker(
     label: String,
     option_label: Option<Callback<i64, String>>,
     allow_custom: bool,
+    max_page_size: Option<i64>,
     custom_label: String,
     apply_label: String,
     invalid_label: String,
@@ -28,7 +29,7 @@ pub(super) fn PageSizePicker(
     let target = (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
         .then(|| value.parse::<i64>().ok())
         .flatten()
-        .filter(|size| *size > 0);
+        .filter(|size| *size > 0 && max_page_size.is_none_or(|maximum| *size <= maximum));
     let invalid = touched() && target.is_none();
     let custom_selected = !options.contains(&page_size);
     let allowed_sizes = options.clone();
@@ -41,7 +42,11 @@ pub(super) fn PageSizePicker(
                 name: "page_size",
                 value: page_size.to_string(),
                 onchange: move |event| {
-                    if let Ok(size) = event.value().parse::<i64>()
+                    let value = event.value();
+                    if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+                        && let Ok(size) = value.parse::<i64>()
+                        && size > 0
+                        && max_page_size.is_none_or(|maximum| size <= maximum)
                         && allowed_sizes.contains(&size)
                     {
                         on_change.call(size);
@@ -52,6 +57,7 @@ pub(super) fn PageSizePicker(
                         key: "{size}",
                         value: size.to_string(),
                         selected: size == page_size,
+                        disabled: size <= 0 || max_page_size.is_some_and(|maximum| size > maximum),
                         {option_label.map_or_else(|| size.to_string(), |label| label.call(size))}
                     }
                 }

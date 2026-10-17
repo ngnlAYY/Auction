@@ -6,11 +6,11 @@
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::api::{AdminIntakeResult, add_admin_intake};
+use crate::app::surface::admin_api_error_message;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 use crate::app::surface::validation::{FieldError, focus_field};
-use crate::app::surface::{admin_api_error_message, run_admin_action};
 
 /// 录入表单各字段的校验结果；None 表示该字段当前无错误。
 /// 来源字段（URL 或 JSON）共用一个错误位，随来源类型切换到对应控件。
@@ -65,13 +65,12 @@ fn intake_field_issue_message(issue: IntakeFieldIssue) -> String {
 
 /// 展示手工装备录入表单，并在成功后触发所属页面重新加载。
 #[component]
-pub(super) fn AdminIntakeForm(
-    world_id: String,
-    reload_generation: Signal<u64>,
-    mut busy: Signal<bool>,
-) -> Element {
-    // 世界 key 销毁旧表单时同时释放父级守卫；旧作用域任务不会回写新世界表单。
-    use_drop(move || busy.set(false));
+pub(super) fn AdminIntakeForm(world_id: String) -> Element {
+    let owner = use_context::<PendingCommands>();
+    let entity = format!("intake:{world_id}");
+    let sending = owner.is_busy(&entity);
+    // 控件锁来自页级未决集合；表单卸载不得释放任务，未知状态也不能编辑为新意图。
+    let busy = use_memo(move || owner.contains(&entity));
     let mut source_kind = use_signal(|| "url".to_owned());
     let mut equipment_url = use_signal(String::new);
     let mut equipment_json = use_signal(String::new);
@@ -81,14 +80,13 @@ pub(super) fn AdminIntakeForm(
     // 服务端返回的错误码；输入层校验错误由各字段信号承担，不再走整页提示。
     let mut failure = use_signal(|| None::<String>);
     let mut field_errors = use_signal(IntakeFieldErrors::default);
-    let mut command_id_state = use_signal(|| None::<Uuid>);
     let empty_value = t!("value-empty");
 
     rsx! {
         section {
             class: "admin-auction-intake",
             aria_labelledby: "auction-lot-intake-title",
-            aria_busy: busy().to_string(),
+            aria_busy: sending.to_string(),
             h2 { id: "auction-lot-intake-title", {t!("admin-intake-title", world: world_id.clone())} }
             p { {t!("admin-intake-description")} }
             form {
@@ -133,56 +131,29 @@ pub(super) fn AdminIntakeForm(
                     field_errors.set(IntakeFieldErrors::default());
                     failure.set(None);
                     let world_id = world_id.clone();
-                    let command_id = command_id_state().unwrap_or_else(|| {
-                        let value = Uuid::new_v4();
-                        command_id_state.set(Some(value));
-                        value
-                    });
-                    let mut result = result;
-                    let mut failure = failure;
-                    let mut field_errors = field_errors;
-                    let mut reload_generation = reload_generation;
-                    run_admin_action(
-                        busy,
-                        async move {
-                            add_admin_intake(
-                                command_id,
-                                world_id,
-                                source_kind_value,
-                                equipment_url_value,
-                                equipment_json_value,
-                                start_price,
-                                player_id_value,
-                            )
-                            .await
-                        },
+                    // 只冻结已选择来源的参数，另一来源的未提交草稿不进入页宿主。
+                    let equipment_url_value = if source_kind_value == "url" { equipment_url_value } else { String::new() };
+                    let equipment_json_value = if source_kind_value == "json" { equipment_json_value } else { String::new() };
+                    owner.submit(
+                        format!("intake:{world_id}"), t!("admin-intake-title", world: world_id.clone()),
+                        move |command_id| add_admin_intake(command_id, world_id.clone(),
+                            source_kind_value.clone(), equipment_url_value.clone(), equipment_json_value.clone(),
+                            start_price, player_id_value.clone()),
                         move |value| {
-                            result.set(Some(value));
-                            failure.set(None);
-                            field_errors.set(IntakeFieldErrors::default());
-                            command_id_state.set(None);
-                            reload_generation.set(reload_generation().saturating_add(1));
+                            set_if_alive(result, Some(value));
+                            set_if_alive(failure, None);
+                            set_if_alive(field_errors, IntakeFieldErrors::default());
                         },
                         move |code| {
-                            result.set(None);
-                            // 可归属字段的服务端错误落到字段旁，其余保持页面级反馈。
+                            set_if_alive(result, None);
+                            let mut errors = IntakeFieldErrors::default();
                             match code.as_str() {
-                                "seller_blacklisted" | "auction_intake_player_blacklisted" => {
-                                    field_errors.write().player =
-                                        Some(IntakeFieldIssue::PlayerBlacklisted);
-                                    focus_field("auction-intake-player");
-                                }
-                                "equipment_conflict" => {
-                                    field_errors.write().source =
-                                        Some(IntakeFieldIssue::EquipmentConflict);
-                                    if let Some(field_id) =
-                                        field_errors().first_invalid_id(&source_kind())
-                                    {
-                                        focus_field(field_id);
-                                    }
-                                }
-                                _ => failure.set(Some(code)),
+                                "seller_blacklisted" | "auction_intake_player_blacklisted" => errors.player = Some(IntakeFieldIssue::PlayerBlacklisted),
+                                "equipment_conflict" => errors.source = Some(IntakeFieldIssue::EquipmentConflict),
+                                _ => {},
                             }
+                            set_if_alive(field_errors, errors);
+                            set_if_alive(failure, Some(code));
                         },
                     );
                 },
@@ -195,7 +166,6 @@ pub(super) fn AdminIntakeForm(
                         value: source_kind(),
                         onchange: move |event| {
                             source_kind.set(event.value());
-                            command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
                             field_errors.write().source = None;
@@ -220,7 +190,6 @@ pub(super) fn AdminIntakeForm(
                             value: equipment_url(),
                             oninput: move |event| {
                                 equipment_url.set(event.value());
-                                command_id_state.set(None);
                                 result.set(None);
                                 failure.set(None);
                                 field_errors.write().source = None;
@@ -253,7 +222,6 @@ pub(super) fn AdminIntakeForm(
                             value: equipment_json(),
                             oninput: move |event| {
                                 equipment_json.set(event.value());
-                                command_id_state.set(None);
                                 result.set(None);
                                 failure.set(None);
                                 field_errors.write().source = None;
@@ -281,7 +249,6 @@ pub(super) fn AdminIntakeForm(
                         value: start_price(),
                         oninput: move |event| {
                             start_price.set(event.value());
-                            command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
                             field_errors.write().price = None;
@@ -307,7 +274,6 @@ pub(super) fn AdminIntakeForm(
                         value: player_id(),
                         oninput: move |event| {
                             player_id.set(event.value());
-                            command_id_state.set(None);
                             result.set(None);
                             failure.set(None);
                             field_errors.write().player = None;
@@ -321,7 +287,7 @@ pub(super) fn AdminIntakeForm(
                 button {
                     r#type: "submit",
                     disabled: busy(),
-                    if busy() { {t!("admin-action-working")} } else { {t!("admin-intake-submit")} }
+                    if sending { {t!("admin-action-working")} } else { {t!("admin-intake-submit")} }
                 }
             }
             if let Some(code) = failure() {

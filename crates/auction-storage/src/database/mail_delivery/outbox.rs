@@ -11,7 +11,7 @@ use uuid::Uuid;
 use super::super::delivery_audit::{
     CREATE, DeliveryAudit, PREPARE, append as append_delivery_audit,
 };
-use super::common::{map_storage_error, repository_error};
+use super::common::{MailDeliveryTransactionError, map_storage_error, repository_error};
 
 pub(super) async fn enqueue_postgres(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
@@ -44,17 +44,20 @@ async fn insert_postgres(
             .await
             .map_err(map_storage_error)?;
     }
-    let result = enqueue_in_transaction(&mut transaction, command, prepared_status).await?;
+    let result = enqueue_in_transaction(&mut transaction, command, prepared_status)
+        .await
+        .map_err(MailDeliveryTransactionError::into_repository)?;
     transaction.commit().await.map_err(map_storage_error)?;
     Ok(result)
 }
 
 /// 由调用方持有权威业务事务；delivery SQL 与审计仍只有本 owner 写入。
+/// SQLx 错误保留到调用方的事务边界，避免提前脱敏吞掉序列化冲突或死锁分类。
 pub(crate) async fn enqueue_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     command: &MailDeliveryCommand,
     prepared_status: Option<&str>,
-) -> Result<MailDeliveryResult, RepositoryError> {
+) -> Result<MailDeliveryResult, MailDeliveryTransactionError> {
     super::validation::validate_command(command)
         .map_err(|_| repository_error("MoogleMail delivery 命令无效"))?;
     let payload = payload(command);
@@ -82,8 +85,7 @@ pub(crate) async fn enqueue_in_transaction(
     .bind(status)
     .bind(occurred_at)
     .execute(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?;
+    .await?;
 
     let row = sqlx::query(
         "SELECT id, request_digest, origin_kind, origin_id, recipient, payload, status
@@ -92,19 +94,14 @@ pub(crate) async fn enqueue_in_transaction(
     )
     .bind(command.command_id.as_uuid())
     .fetch_optional(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?
+    .await?
     .ok_or_else(|| repository_error("MoogleMail delivery 入队结果缺失"))?;
-    let stored_digest: Vec<u8> =
-        sqlx::Row::try_get(&row, "request_digest").map_err(map_storage_error)?;
-    let stored_origin_kind: String =
-        sqlx::Row::try_get(&row, "origin_kind").map_err(map_storage_error)?;
-    let stored_origin_id: String =
-        sqlx::Row::try_get(&row, "origin_id").map_err(map_storage_error)?;
-    let stored_recipient: String =
-        sqlx::Row::try_get(&row, "recipient").map_err(map_storage_error)?;
-    let stored_payload: Value = sqlx::Row::try_get(&row, "payload").map_err(map_storage_error)?;
-    let stored_status: String = sqlx::Row::try_get(&row, "status").map_err(map_storage_error)?;
+    let stored_digest: Vec<u8> = sqlx::Row::try_get(&row, "request_digest")?;
+    let stored_origin_kind: String = sqlx::Row::try_get(&row, "origin_kind")?;
+    let stored_origin_id: String = sqlx::Row::try_get(&row, "origin_id")?;
+    let stored_recipient: String = sqlx::Row::try_get(&row, "recipient")?;
+    let stored_payload: Value = sqlx::Row::try_get(&row, "payload")?;
+    let stored_status: String = sqlx::Row::try_get(&row, "status")?;
     if stored_digest != command.request_hash.as_bytes()
         || stored_origin_kind != command.origin.as_str()
         || !matching_origin_id(&stored_origin_id, command)
@@ -113,9 +110,9 @@ pub(crate) async fn enqueue_in_transaction(
         || prepared_status
             .is_some_and(|_| !matches!(stored_status.as_str(), "prepared" | "pending"))
     {
-        return Err(repository_error("MoogleMail delivery 命令摘要冲突"));
+        return Err(repository_error("MoogleMail delivery 命令摘要冲突").into());
     }
-    let stored_id: Uuid = sqlx::Row::try_get(&row, "id").map_err(map_storage_error)?;
+    let stored_id: Uuid = sqlx::Row::try_get(&row, "id")?;
     if inserted.rows_affected() == 1 {
         let request_id = command.command_id.to_string();
         append_delivery_audit(
@@ -134,8 +131,7 @@ pub(crate) async fn enqueue_in_transaction(
                 }),
             },
         )
-        .await
-        .map_err(map_storage_error)?;
+        .await?;
     }
     Ok(MailDeliveryResult { delivery_id: stored_id })
 }

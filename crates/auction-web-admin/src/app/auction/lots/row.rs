@@ -2,12 +2,12 @@
 
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use auction_web_shared::{TruncatedText, format_credit_amount as format_amount};
 
 use crate::api::{AdminLot, AdminLotUpdateAction, update_admin_lot};
-use crate::app::surface::{admin_api_error_message, stable_command_id};
+use crate::app::surface::admin_api_error_message;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 
 use super::super::format_admin_time;
 use super::helpers::{admin_lot_code_for, equipment_details, lot_status_label};
@@ -16,12 +16,10 @@ use super::state::{LotDialog, LotUpdateNotice};
 /// 同一拍品更新流程共享的浏览器状态；集中传递以免 dialog 分支形成易错的长参数列表。
 #[derive(Clone, Copy)]
 struct LotUpdateSignals {
-    command_state: Signal<Option<(String, Uuid)>>,
-    busy: Signal<bool>,
+    owner: PendingCommands,
     failure_code: Signal<Option<String>>,
     dialog: Signal<Option<LotDialog>>,
     notice: Signal<Option<LotUpdateNotice>>,
-    reload_generation: Signal<u64>,
 }
 
 #[component]
@@ -29,19 +27,18 @@ pub(super) fn AdminLotRow(
     lot: AdminLot,
     selected_lot: Signal<Option<(String, String)>>,
     mut notice: Signal<Option<LotUpdateNotice>>,
-    reload_generation: Signal<u64>,
     allow_lot_update: bool,
 ) -> Element {
     let lot_id = lot.id.clone();
     let can_update = allow_lot_update && lot.status == "pending";
     let mut start_price = use_signal(|| lot.start_price.to_string());
     let mut dialog = use_signal(|| None::<LotDialog>);
-    let busy = use_signal(|| false);
+    let owner = use_context::<PendingCommands>();
+    let entity = format!("lot:{}", lot.id);
+    let busy = use_memo(move || owner.contains(&entity));
     let mut failure_code = use_signal(|| None::<String>);
     let mut invalid_price = use_signal(|| false);
-    let command_state = use_signal(|| None::<(String, Uuid)>);
-    let update_signals =
-        LotUpdateSignals { command_state, busy, failure_code, dialog, notice, reload_generation };
+    let update_signals = LotUpdateSignals { owner, failure_code, dialog, notice };
     let lot_id_for_price = lot.id.clone();
     let lot_id_for_withdraw = lot.id.clone();
     let lot_code = admin_lot_code_for(&lot.equipment_category, lot.lot_number);
@@ -286,35 +283,30 @@ pub(super) fn AdminLotRow(
 
 /// 提交 lot 修改命令并保留相同输入的 command_id，确保失败重试仍符合幂等合同。
 fn submit_lot_update(
-    mut signals: LotUpdateSignals,
+    signals: LotUpdateSignals,
     expected_state_version: i64,
     lot_id: String,
     action: AdminLotUpdateAction,
     price: Option<i64>,
     success_notice: LotUpdateNotice,
 ) {
-    let action_key = match action {
-        AdminLotUpdateAction::SetStartPrice => "set_start_price",
-        AdminLotUpdateAction::Withdraw => "withdraw",
+    let label = match action {
+        AdminLotUpdateAction::SetStartPrice => t!("admin-lots-reprice"),
+        AdminLotUpdateAction::Withdraw => t!("admin-lots-withdraw"),
     };
-    let signature = format!(
-        "{action_key}:{expected_state_version}:{}",
-        price.map_or_else(String::new, |value| value.to_string())
-    );
-    let command_id = stable_command_id(signals.command_state, signature);
-    signals.notice.set(None);
-    signals.busy.set(true);
-    spawn(async move {
-        match update_admin_lot(command_id, lot_id, expected_state_version, action, price).await {
-            Ok(_) => {
-                signals.failure_code.set(None);
-                signals.dialog.set(None);
-                signals.command_state.set(None);
-                signals.notice.set(Some(success_notice));
-                signals.reload_generation.set((signals.reload_generation)().saturating_add(1));
-            }
-            Err(code) => signals.failure_code.set(Some(code)),
-        }
-        signals.busy.set(false);
-    });
+    if signals.owner.submit(
+        format!("lot:{lot_id}"),
+        label,
+        move |command_id| {
+            update_admin_lot(command_id, lot_id.clone(), expected_state_version, action, price)
+        },
+        move |_| {
+            set_if_alive(signals.failure_code, None);
+            set_if_alive(signals.notice, Some(success_notice));
+        },
+        move |code| set_if_alive(signals.failure_code, Some(code)),
+    ) {
+        set_if_alive(signals.dialog, None);
+        set_if_alive(signals.notice, None);
+    }
 }

@@ -4,13 +4,14 @@ use std::cmp::Ordering;
 
 use auction_web_shared::{Dialog, legacy_t as t};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
-use auction_web_shared::{AsyncState, AsyncStateKind, Pager, Time, TruncatedText};
+use crate::app::surface::pagination::{AdminPager as Pager, AdminPagination};
+use auction_web_shared::{AsyncState, AsyncStateKind, Time, TruncatedText};
 
 use crate::api::{AdminCredential, AdminCredentialPage, AdminSession, mutate_admin_credential};
+use crate::app::surface::AdminActionFeedback;
+use crate::app::surface::pending::{PendingCommands, set_if_alive};
 use crate::app::surface::sort::{SortDirection, SortableTh, directed};
-use crate::app::surface::{AdminActionFeedback, run_admin_feedback_action, stable_command_id};
 
 use super::{
     CredentialCheckAction, credential_kind_label, credential_status_class, credential_status_label,
@@ -24,7 +25,6 @@ pub fn CredentialTable(
     sort: String,
     direction: SortDirection,
     on_sort_change: EventHandler<(String, SortDirection)>,
-    reload_generation: Signal<u64>,
     on_delete: EventHandler<AdminCredential>,
 ) -> Element {
     let session = use_context::<AdminSession>();
@@ -87,7 +87,6 @@ pub fn CredentialTable(
                             key: "{credential.id}",
                             credential,
                             imported_by: session.actor.clone(),
-                            reload_generation,
                             on_delete,
                         }
                     }
@@ -108,14 +107,14 @@ pub fn CredentialTable(
 pub fn CredentialRow(
     credential: AdminCredential,
     imported_by: String,
-    reload_generation: Signal<u64>,
     on_delete: EventHandler<AdminCredential>,
 ) -> Element {
     let mut rename_value = use_signal(|| credential.label.clone());
     let mut rename_dialog = use_signal(|| false);
     let busy = use_signal(|| false);
     let feedback = use_signal(|| None::<AdminActionFeedback>);
-    let mut command_state = use_signal(|| None::<(String, Uuid)>);
+    let owner = use_context::<PendingCommands>();
+    let blocked = owner.contains(&format!("credential:{}", credential.id));
     let credential_for_rename = credential.clone();
     let credential_for_rename_submit = credential.clone();
     let credential_for_enable = credential.clone();
@@ -128,6 +127,12 @@ pub fn CredentialRow(
             td { "data-label": t!("admin-credentials-label"),
                 h3 { class: "admin-visually-hidden", {credential.label.clone()} }
                 TruncatedText { value: credential.label.clone() }
+                if let Some(player_name) = credential.player_name.clone() {
+                    span { title: t!("admin-credentials-player-name-help"),
+                        {t!("admin-credentials-player-name")}
+                        TruncatedText { value: player_name, size: "compact" }
+                    }
+                }
             }
             td { "data-label": t!("admin-credentials-world"), TruncatedText { value: credential_world_label(&credential.world), size: "compact" } }
             td { "data-label": t!("admin-credentials-kind"), {credential_kind_label(&credential.kind)} }
@@ -154,77 +159,27 @@ pub fn CredentialRow(
                 aria_describedby: feedback().is_some().then_some(feedback_id.clone()),
                 button {
                     r#type: "button",
-                    disabled: busy() || credential.status == "active",
+                    disabled: busy() || blocked || credential.status == "active",
                     onclick: move |_| {
                         let credential = credential_for_enable.clone();
-                        let status = "active";
-                        let command_id = stable_command_id(
-                            command_state,
-                            format!(
-                                "{}:set_status:{}:{status}",
-                                credential.id, credential.state_version
-                            ),
-                        );
-                        run_admin_feedback_action(
-                            busy,
-                            feedback,
-                            async move {
-                                mutate_admin_credential(
-                                    command_id,
-                                    &credential,
-                                    "set_status",
-                                    None,
-                                    Some(status.to_owned()),
-                                )
-                                .await
-                                .map(|_| ())
-                            },
-                            move |()| {
-                                command_state.set(None);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            },
-                        );
+                        if busy() { return; }
+                        submit_credential(owner, credential, "set_status", None, Some("active".to_owned()), feedback);
                     },
                     {t!("admin-credentials-action-enable")}
                 }
                 button {
                     r#type: "button",
-                    disabled: busy() || credential.status == "disabled",
+                    disabled: busy() || blocked || credential.status == "disabled",
                     onclick: move |_| {
                         let credential = credential_for_disable.clone();
-                        let status = "disabled";
-                        let command_id = stable_command_id(
-                            command_state,
-                            format!(
-                                "{}:set_status:{}:{status}",
-                                credential.id, credential.state_version
-                            ),
-                        );
-                        run_admin_feedback_action(
-                            busy,
-                            feedback,
-                            async move {
-                                mutate_admin_credential(
-                                    command_id,
-                                    &credential,
-                                    "set_status",
-                                    None,
-                                    Some(status.to_owned()),
-                                )
-                                .await
-                                .map(|_| ())
-                            },
-                            move |()| {
-                                command_state.set(None);
-                                reload_generation.set(reload_generation().saturating_add(1));
-                            },
-                        );
+                        if busy() { return; }
+                        submit_credential(owner, credential, "set_status", None, Some("disabled".to_owned()), feedback);
                     },
                     {t!("admin-credentials-action-disable")}
                 }
                 button {
                     r#type: "button",
-                    disabled: busy(),
+                    disabled: busy() || blocked,
                     onclick: move |_| {
                         rename_value.set(credential_for_rename.label.clone());
                         rename_dialog.set(true);
@@ -234,11 +189,11 @@ pub fn CredentialRow(
                 button {
                     r#type: "button",
                     class: "admin-btn-danger",
-                    disabled: busy(),
+                    disabled: busy() || blocked,
                     onclick: move |_| on_delete.call(credential_for_delete.clone()),
                     {t!("admin-credentials-action-delete")}
                 }
-                CredentialCheckAction { credential: credential.clone(), busy }
+                CredentialCheckAction { credential: credential.clone(), busy, blocked }
                 if let Some(feedback) = feedback() {
                     span {
                         id: feedback_id.clone(),
@@ -275,38 +230,9 @@ pub fn CredentialRow(
                                     }
                                     let credential = credential_for_rename_submit.clone();
                                     let label = rename_value();
-                                    let command_id = stable_command_id(
-                                        command_state,
-                                        format!(
-                                            "{}:rename:{}:{label}",
-                                            credential.id, credential.state_version
-                                        ),
-                                    );
-                                    let mut rename_dialog = rename_dialog;
-                                    run_admin_feedback_action(
-                                        busy,
-                                        feedback,
-                                        async move {
-                                            let result = mutate_admin_credential(
-                                                command_id,
-                                                &credential,
-                                                "rename",
-                                                Some(label),
-                                                None,
-                                            )
-                                            .await
-                                            .map(|_| ());
-                                            if result.is_ok() {
-                                                rename_dialog.set(false);
-                                            }
-                                            result
-                                        },
-                                        move |()| {
-                                            command_state.set(None);
-                                            reload_generation
-                                                .set(reload_generation().saturating_add(1));
-                                        },
-                                    );
+                                    if submit_credential(owner, credential, "rename", Some(label), None, feedback) {
+                                        rename_dialog.set(false);
+                                    }
                                 },
                                 label {
                                     r#for: rename_input_id.clone(),
@@ -344,10 +270,52 @@ pub fn CredentialRow(
     }
 }
 
+/// 只把当前已提交的安全凭据投影与候选值交给页宿主，不持有 Cookie 或结果。
+fn submit_credential(
+    owner: PendingCommands,
+    credential: AdminCredential,
+    action: &'static str,
+    label: Option<String>,
+    status: Option<String>,
+    feedback: Signal<Option<AdminActionFeedback>>,
+) -> bool {
+    let action_label = if action == "rename" {
+        t!("admin-credentials-action-rename-open")
+    } else if status.as_deref() == Some("active") {
+        t!("admin-credentials-action-enable")
+    } else {
+        t!("admin-credentials-action-disable")
+    };
+    let accepted =
+        owner.submit(
+            format!("credential:{}", credential.id),
+            action_label,
+            move |command_id| {
+                let credential = credential.clone();
+                let label = label.clone();
+                let status = status.clone();
+                async move {
+                    mutate_admin_credential(command_id, &credential, action, label, status).await
+                }
+            },
+            move |_| set_if_alive(feedback, Some(AdminActionFeedback::Success)),
+            move |code| set_if_alive(feedback, Some(AdminActionFeedback::Error(code))),
+        );
+    if accepted {
+        set_if_alive(feedback, None);
+    }
+    accepted
+}
+
 #[component]
-pub fn CredentialPager(page: AdminCredentialPage, on_page_change: EventHandler<i64>) -> Element {
+pub fn CredentialPager(
+    page: AdminCredentialPage,
+    pagination: AdminPagination,
+    on_page_change: EventHandler<i64>,
+) -> Element {
     rsx! {
         Pager {
+            pagination,
             page: page.page,
             page_size: page.page_size,
             total: Some(page.total),

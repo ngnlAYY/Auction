@@ -181,14 +181,22 @@ fulfillment、delivery 与 recovery 义务仍按持久队列排空，不能因�
 - 默认使用 50,000 PPM 的经济增量，按信用网格向上取整且最低增加 1,000；
 - PPM 明确设为 0 时使用冻结的最低增量（默认 30,000）；
 - 代理竞价的反超增量为 1000；
-- 软截止窗口和延长时长均为 1 分钟；
+- 新场次默认软截止窗口和延长时长均为 15 分钟（900 秒）；
 - 取消截止边界为开始前 24 小时。
 
 实际实现必须以 `auction-domain` 的领域常量、金额类型和边界条件为权威。所有金额都必须
 为正且不溢出；外部普通出价、代理上限、论坛命令和规则默认值额外校验信用网格。存量
 lot 起拍价/当前价与自动代理事实不得被静默取整：固定增量直接保留原网格余数，PPM 分支
 先把当前价向上折算为信用网格单位，再把向上取整的整千增量加回原始当前价，同样保留余数。
-软截止只允许把结束时间向后延长，不得缩短已经确定的有效结束时间。
+软截止按接受时刻加延长时长，与当前截止取较晚值；不是旧截止累加 900 秒，不采用 15/5/1 分段。
+只允许把结束时间向后延长，不得缩短已经确定的有效结束时间。程序默认值不覆盖显式模板或旧冻结快照。
+
+未发布草稿只通过显式 `repair-draft-soft-close` 单目标修正：默认只读；execute 必须具有目标、版本、
+稳定 command_id、actor 与精确确认短语。应用规则及 storage 锁内门禁要求从未发布/开始、无竞价/授权/结算、
+无论坛或未知发布证据、无排期租约且行/快照一致为60/60；失败关闭，不删除证据绕过。
+Serializable 按 world → scheduled round → auction 锁序，40001/40P01 最多三次；先重放原账本再校验当前状态，
+CAS 只修改两时间字段及对应快照、版本和更新时间，与原结果/追加审计同事务提交。
+不追溯进行中或已结算场次，不自动重开或批量修改。
 
 ### I-07a 结算策略与命令重放必须可从权威事实重建
 
@@ -365,6 +373,19 @@ Delivery claim 必须在进入 `sending` 前按 payload world 检查 scoped/shar
 仍必须越过 availability gate 进入确定失败路径，避免永久滞留。进入 `sending` 后发生的凭据竞态、
 网络、响应边界或协议依赖失败不得收口为普通失败。
 本轮必须跳过已确认无凭据的 world 并继续领取其他 world；不可用队头不得阻塞有凭据的投递。
+MoogleMail Send 额外在 sending fence 前实际 GET compose，持有同一 Cookie 独占 guard 进入消耗式 prepared future；
+fence 未明确成功不得 poll 写入。prepare 在原请求总预算内为 claimed 周期续租，首次准备前及 fence 前后均确认续租；
+数据库等待受 finalize_timeout 和已知单调租约截止双重限制，回执已耗尽新 TTL 不得继续。
+首次外部 poll 前直接复核单调截止，超时/租约/续租处理优先；未 poll 的失败先 drop prepared，再尽力释放，
+不调用外部 unknown 结果落库。已 sending 或 fence 提交未知不能退回 pending，仍沿持久隔离恢复边界处理。
+只读准备失败/超时释放有效 claimed，事务内撤销本次 attempt_count 并追加 release 审计，
+不写 unknown；仅暂排该 world 的 Send，不占发送批次，Take/Return 仍独立。下轮重新检查实际草稿，禁止永久历史错误 SQL gate。
+发送 fence 后仍严格单次，旧 sending/manual_reconcile/outcome_unknown 不因新草稿干净而重发或结清。
+
+预期 `player_name`、Cookie 可用或 Item Shop 余额均非自身身份证明；配置有绑定但来源未证明时明确 `identity_unproven`。
+当前不生成 Verified proof，不启用 bot 内部免寄/付款。未来内部留存必须证明当前身份、真实库存/必要资金，
+并在同事务核对 active credential/world/version、租约 fencing、义务及依赖，不伪造 Sent/collected 或重新计算金额；
+业务规则及原子写门禁见[应用履约](../../crates/auction-application/README.md#结算与恢复端口)。
 
 可能超过初始 lease 的多步外部写必须周期续租，并在每次续租和最终写回中携带同一 lease token
 与 fencing version。Worker 只能在有空闲执行槽时领取下一条，不能让批次内排队时间消耗新 claim
@@ -382,6 +403,9 @@ Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失�
 Admin 人工动作必须在同一 PostgreSQL 事务追加安全审计；审计失败时状态变化必须回滚。两阶段
 激活必须同时持久化独立的 activation command ID、请求摘要和激活时间，所有后续状态上的幂等
 重放都必须匹配该身份；幂等重放本身不得重复追加审计。续租不改变业务状态，不逐次生成审计噪声。
+续租只接受同 token/fencing 的有效 claimed/sending，先取得 delivery 行锁，再以数据库 clock_timestamp 及调用时刻
+核对旧截止仍有效、新截止仍在未来，且不得缩短原租约；过期、旧 unknown 或更换 owner 的 claim 不得复活。
+start_sending 保持 lot → delivery 锁序，续租/释放不倒取 lot 锁。
 
 ### I-09e Fulfillment 与 Recovery 不得共享易失调度边界
 
@@ -480,6 +504,9 @@ Users/MoogleMail 登录 key 信封的 AAD 必须绑定最终持久化用户 UUID
 重新签发。撤销 key 不能授权新的 MM 换绑，但不改写此前完成命令的幂等账本结果。
 Admin 撤销/重签和 MoogleMail 重签必须在凭据变更事务内永久撤销旧 Public 会话；恢复 Key
 不能复活旧 token。登录创建会话时须在数据库锁内复核认证时的用户版本，阻止换钥竞态。
+MM 注册/换绑的 Users 时间取本地处理时钟，不能以远端接收时间抬高；用户、论坛身份和 key 信封快照的
+更新时间不早于其创建时间及已存更新时间。历史偏快创建时间不猜时区重写，更新以旧值为下界；命令/审计事实时间保持原义。
+`000044` 仅对 MM 注册与论坛同步双重证据匹配的倒退用户追加更正审计并推进版本，无法证明的异常阻断迁移，读取不静默修正。
 
 ### I-12a Public WebSocket 不能成为无界资源或第二个命令入口
 

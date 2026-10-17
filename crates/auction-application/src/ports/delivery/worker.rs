@@ -40,6 +40,8 @@ pub struct DeliveryRecipientExclusion {
 pub struct DeliveryClaimExclusions {
     /// 当前没有可用传输凭据的世界；下一轮重新检查可用性。
     pub unavailable_worlds: Vec<String>,
+    /// 本轮只读准备或发送前交接失败的世界；只暂缓 Send，不阻断独立 Take/Return。
+    pub unavailable_send_worlds: Vec<String>,
     /// 本轮已被远端明确报告不存在的收件人。
     pub recipients: Vec<DeliveryRecipientExclusion>,
 }
@@ -66,6 +68,27 @@ pub struct DeliveryTransportError {
     pub result_metadata: Value,
 }
 
+/// 已完成只读前置、但尚未开始外部写入的消耗式发送句柄。
+///
+/// 句柄持有适配器的凭据独占上下文；仅在持久 sending fence 成功且续租确认后 poll 一次。
+/// 丢弃句柄只释放上下文，不执行远端写入。
+pub type DeliveryPreparedSend<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<DeliverySendResult, DeliveryTransportError>>
+            + Send
+            + 'a,
+    >,
+>;
+
+/// 只读准备结果；Err 一律表示尚未外部写入，应释放 claim 而非记 outcome_unknown。
+pub type DeliveryPreparation<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<DeliveryPreparedSend<'a>, DeliveryTransportError>>
+            + Send
+            + 'a,
+    >,
+>;
+
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
     /// 返回 transport 在单个 Worker 进程内允许同时进入 `sending` 的上限。
@@ -82,6 +105,12 @@ pub trait DeliveryTransport: Send + Sync {
     /// 能力暂不可用，Worker 应释放 claim 而不是消耗交付。
     fn available(&self, claim: &DeliveryWorkClaim) -> bool;
 
+    /// 在 sending fence 前执行只读前置，成功句柄必须保留与后续写入相同的互斥上下文。
+    /// 无远端可变 compose 状态的适配器沿用直接发送；非法负载在句柄执行时确定失败。
+    fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
+        Box::pin(async move { Ok(self.send(claim)) })
+    }
+
     fn send(
         &self,
         claim: DeliveryWorkClaim,
@@ -96,6 +125,8 @@ pub trait DeliveryTransport: Send + Sync {
 
 /// delivery outbox 的窄存储端口。
 pub trait DeliveryWorkStore: Send + Sync {
+    /// 领取可发送任务；compose 安全由 transport 在 sending fence 前实时只读检查。
+    /// 历史未知结果保留人工核对，但不能按历史错误永久阻断同 world 新任务。
     fn claim_due(
         &self,
         worker_id: String,
@@ -112,14 +143,18 @@ pub trait DeliveryWorkStore: Send + Sync {
         started_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
-    /// 在尚未开始外部写入时把有效 claim 释放回 pending。
+    /// 在尚未开始外部写入时把有效 claim 释放回 pending，并撤销本次领取的尝试计数。
     fn release(
         &self,
         claim: DeliveryWorkClaim,
         released_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
 
-    /// 外部发送尚未完成时续租当前 sending claimant。
+    /// 为只读准备中的 claimed 或尚未完成的 sending 续租，不改变状态。
+    ///
+    /// 必须匹配当前 token/fencing，且旧租约在调用时刻及数据库实际执行时均有效；
+    /// 过期、已更换 owner 或终态记录不得复活。新截止必须仍在未来且不得缩短现有租约。
+    /// 调用方在准备总预算内续租，并在 sending fence 前后确认有效租期后才 poll 外部写入。
     fn renew(
         &self,
         claim: DeliveryWorkClaim,

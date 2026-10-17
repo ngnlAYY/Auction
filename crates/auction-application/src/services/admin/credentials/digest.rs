@@ -15,6 +15,9 @@ struct ImportDigest<'a> {
     world: &'static str,
     label: &'a str,
     secret_hash: [u8; 32],
+    // 无绑定保持旧摘要的精确序列化形状，避免破坏历史重放。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    player_name: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -48,6 +51,7 @@ pub(super) fn import_hash(
             world: command.world.as_str(),
             label: &command.label,
             secret_hash: credential_secret_hash(command.secret.as_bytes()),
+            player_name: command.player_name.as_deref(),
         },
     )
     .map_err(ApplicationError::from)

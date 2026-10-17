@@ -6,6 +6,9 @@ use super::*;
 
 use std::collections::HashSet;
 
+mod lease;
+use lease::DeliveryLease;
+
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
 ///
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。
@@ -33,16 +36,25 @@ where
     let mut tasks = JoinSet::new();
     let mut skipped_recipients = HashSet::new();
     let mut unavailable_worlds = HashSet::new();
+    let mut unavailable_send_worlds = HashSet::new();
 
-    while delivery_count < usize::from(worker.delivery.batch_limit) && !worker.control.is_draining()
-    {
-        if tasks.len() >= effective_concurrency
+    while !worker.control.is_draining() {
+        if (tasks.len() >= effective_concurrency
+            || delivery_count >= usize::from(worker.delivery.batch_limit))
             && let Some(result) = tasks.join_next().await
         {
-            merge_delivery_task_result(&mut delivery_result, &mut skipped_recipients, result);
+            merge_delivery_task_result(
+                &mut delivery_result,
+                &mut skipped_recipients,
+                &mut unavailable_send_worlds,
+                &mut delivery_count,
+                result,
+            );
         }
 
-        if worker.control.is_draining() {
+        if worker.control.is_draining()
+            || delivery_count >= usize::from(worker.delivery.batch_limit)
+        {
             break;
         }
 
@@ -62,6 +74,7 @@ where
                 worker.delivery.sending_grace,
                 DeliveryClaimExclusions {
                     unavailable_worlds: unavailable_worlds.iter().cloned().collect(),
+                    unavailable_send_worlds: unavailable_send_worlds.iter().cloned().collect(),
                     recipients: skipped_recipients
                         .iter()
                         .map(|(world, recipient)| DeliveryRecipientExclusion {
@@ -128,7 +141,13 @@ where
     }
 
     while let Some(result) = tasks.join_next().await {
-        merge_delivery_task_result(&mut delivery_result, &mut skipped_recipients, result);
+        merge_delivery_task_result(
+            &mut delivery_result,
+            &mut skipped_recipients,
+            &mut unavailable_send_worlds,
+            &mut delivery_count,
+            result,
+        );
     }
     if claim_error.is_none() && delivery_result == WorkerResult::Success {
         worker.metrics.observe_batch(
@@ -154,10 +173,17 @@ where
 fn merge_delivery_task_result(
     delivery_result: &mut WorkerResult,
     skipped_recipients: &mut HashSet<(String, String)>,
+    unavailable_send_worlds: &mut HashSet<String>,
+    delivery_count: &mut usize,
     result: Result<DeliveryTaskResult, tokio::task::JoinError>,
 ) {
     match result {
         Ok(result) => {
+            if let Some(world) = result.deferred_world {
+                unavailable_send_worlds.insert(world);
+                // 只读延后不占发送批次；batch_limit=1 也继续处理 Take/Return 或另一 world。
+                *delivery_count = delivery_count.saturating_sub(1);
+            }
             if let Some(recipient) = result.skipped_recipient {
                 skipped_recipients.insert(recipient);
             }
@@ -177,16 +203,18 @@ fn merge_delivery_task_result(
 struct DeliveryTaskResult {
     worker_result: WorkerResult,
     skipped_recipient: Option<(String, String)>,
+    deferred_world: Option<String>,
 }
 
 impl DeliveryTaskResult {
     fn completed(worker_result: WorkerResult) -> Self {
-        Self { worker_result, skipped_recipient: None }
+        Self { worker_result, skipped_recipient: None, deferred_world: None }
     }
 
     fn recipient_not_found(worker_result: WorkerResult, world: &str, recipient: &str) -> Self {
         Self {
             worker_result,
+            deferred_world: None,
             skipped_recipient: Some((
                 world.trim().to_ascii_lowercase(),
                 recipient.trim().to_ascii_lowercase(),
@@ -205,83 +233,130 @@ async fn process_delivery_claim<C>(
 where
     C: Clock + 'static,
 {
-    if let Err(error) = delivery_store.start_sending(claim.clone(), clock.now()).await {
-        tracing::error!(error = %error, delivery_id = %claim.delivery_id, "delivery worker failed to start sending");
-        // 外部写尚未开始，尽力释放 claim；失败时仍由 lease 到期后的安全领取兜底。
-        match tokio::time::timeout(
-            config.finalize_timeout,
-            delivery_store.release(claim.clone(), clock.now()),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(release_error)) => {
-                tracing::error!(error = %release_error, delivery_id = %claim.delivery_id, "delivery worker failed to release claim after start failure");
-            }
-            Err(_) => {
-                tracing::error!(delivery_id = %claim.delivery_id, "delivery worker timed out while releasing claim after start failure");
-            }
+    let mut lease = match DeliveryLease::new(&claim, clock.as_ref(), config) {
+        Ok(lease) => lease,
+        Err(failure_code) => {
+            tracing::warn!(delivery_id = %claim.delivery_id, %failure_code, "delivery claim has no usable lease");
+            return release_unstarted_delivery(
+                delivery_store.as_ref(),
+                clock.as_ref(),
+                config,
+                &claim,
+                WorkerResult::Error,
+            )
+            .await;
         }
-        return DeliveryTaskResult::completed(WorkerResult::Error);
-    }
-    let Ok(lease_span) = ChronoDuration::from_std(config.lease_duration) else {
-        tracing::error!(delivery_id = %claim.delivery_id, "delivery worker configured lease span is invalid");
-        return DeliveryTaskResult::completed(WorkerResult::Error);
     };
-    let mut renew_tick = tokio::time::interval(config.renew_interval);
-    renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    // tokio interval 的首个 tick 立即完成，先消费它，避免刚进入 sending 就做无意义续租。
-    renew_tick.tick().await;
+    // prepare 总预算包含续租等待；其返回句柄持有同 Cookie guard，在交接完成前绝不 poll。
+    let preparation_deadline = tokio::time::Instant::now() + config.request_timeout;
+    let mut send = match tokio::time::timeout_at(
+        preparation_deadline,
+        prepare_delivery(
+            delivery_store.as_ref(),
+            delivery_transport.as_ref(),
+            clock.as_ref(),
+            config,
+            &claim,
+            &mut lease,
+            preparation_deadline,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(prepared)) => prepared,
+        preparation => {
+            let failure_code = match preparation {
+                Ok(Err(failure_code)) => failure_code,
+                _ => "preflight_timeout".to_owned(),
+            };
+            tracing::warn!(delivery_id = %claim.delivery_id, %failure_code, "delivery preflight deferred before sending fence");
+            return release_unstarted_delivery(
+                delivery_store.as_ref(),
+                clock.as_ref(),
+                config,
+                &claim,
+                WorkerResult::Success,
+            )
+            .await;
+        }
+    };
+    // prepare 可能恰在续租前完成；先补足 TTL，再有界提交 fence，最后确认 sending 租约。
+    // 任一步骤不明确成功都丢弃未 poll 的句柄。fence 提交未知不能释放成 pending。
+    if !confirm_delivery_handoff(
+        delivery_store.as_ref(),
+        clock.as_ref(),
+        config,
+        &claim,
+        &mut lease,
+    )
+    .await
+    {
+        drop(send);
+        return release_unstarted_delivery(
+            delivery_store.as_ref(),
+            clock.as_ref(),
+            config,
+            &claim,
+            WorkerResult::Error,
+        )
+        .await;
+    }
     let request_timeout = tokio::time::sleep(config.request_timeout);
+    let request_deadline = request_timeout.deadline();
     tokio::pin!(request_timeout);
-    let mut send = delivery_transport.send(claim.clone());
     let mut lease_failed = false;
+    let mut send_polled = false;
     let result = loop {
         tokio::select! {
-            result = &mut send => break result,
+            biased;
             _ = &mut request_timeout => {
                 break Err(delivery_gateway_outcome_unknown(
                     "request_timeout",
                     "delivery 外部请求超时，远端结果未知",
                 ));
             }
-            _ = renew_tick.tick() => {
-                let renewed_at = clock.now();
-                let Some(lease_until) = renewed_at.checked_add_signed(lease_span) else {
-                    tracing::error!(delivery_id = %claim.delivery_id, "delivery worker renewal deadline overflowed");
-                    lease_failed = true;
-                    break Err(delivery_gateway_outcome_unknown(
-                        "lease_renewal",
-                        "delivery 发送期间 lease 续租截止时间溢出",
-                    ));
-                };
-                match tokio::time::timeout(
-                    config.finalize_timeout,
-                    delivery_store.renew(claim.clone(), renewed_at, lease_until),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => {
-                        tracing::error!(error = %error, delivery_id = %claim.delivery_id, "delivery worker lost lease while sending");
-                        lease_failed = true;
-                        break Err(delivery_gateway_outcome_unknown(
-                            "lease_renewal",
-                            "delivery 发送期间 lease 续租失败",
-                        ));
-                    }
-                    Err(_) => {
-                        tracing::error!(delivery_id = %claim.delivery_id, "delivery worker lease renewal timed out");
-                        lease_failed = true;
-                        break Err(delivery_gateway_outcome_unknown(
-                            "lease_renewal_timeout",
-                            "delivery 发送期间 lease 续租超时",
-                        ));
-                    }
+            _ = tokio::time::sleep_until(lease.deadline) => {
+                lease_failed = true;
+                break Err(delivery_gateway_outcome_unknown("lease_expired", "delivery 发送期间 lease 已过期"));
+            }
+            result = std::future::poll_fn(|context| {
+                // 截止优先；在有效租约内先给操作一次 poll，再处理已到期的续租。
+                // 慢续租回执可能晚于 renew_at，不能让续租分支持续独占循环。
+                let now = tokio::time::Instant::now();
+                if now >= lease.deadline || now >= request_deadline {
+                    return std::task::Poll::Pending;
                 }
+                send_polled = true;
+                send.as_mut().poll(context)
+            }) => break result,
+            _ = tokio::time::sleep_until(lease.renew_at) => {
+                // 续租等待也纳入发送总预算，不能因数据库缓慢无限延长外部请求。
+                let renewal = tokio::time::timeout_at(
+                    request_deadline,
+                    lease.renew(delivery_store.as_ref(), &claim, clock.as_ref(), config),
+                ).await;
+                let stage = match renewal {
+                    Ok(Ok(())) => continue,
+                    Ok(Err(stage)) => stage,
+                    Err(_) => "request_timeout",
+                };
+                lease_failed = true;
+                break Err(delivery_gateway_outcome_unknown(stage, "delivery 发送期间 lease 续租失败或超时"));
             }
         }
     };
+    drop(send);
+    if !send_polled {
+        // fence 后尚未 poll 也可能失去租约；不伪造外部 unknown，sending 本身仍保守隔离。
+        return release_unstarted_delivery(
+            delivery_store.as_ref(),
+            clock.as_ref(),
+            config,
+            &claim,
+            WorkerResult::Error,
+        )
+        .await;
+    }
     let delivery_id = claim.delivery_id;
     let recipient = claim.recipient.clone();
     let recipient_world =
@@ -334,6 +409,98 @@ where
                 DeliveryTaskResult::completed(worker_result)
             }
         }
+    }
+}
+
+/// 只读准备期间维持 claimed 租约，任何失败都不经过发送失败/unknown 落库。
+async fn prepare_delivery<'a, C: Clock>(
+    store: &dyn DeliveryWorkStore,
+    transport: &'a dyn DeliveryTransport,
+    clock: &C,
+    config: DeliveryWorkerRuntimeConfig,
+    claim: &DeliveryWorkClaim,
+    lease: &mut DeliveryLease,
+    request_deadline: tokio::time::Instant,
+) -> Result<auction_application::DeliveryPreparedSend<'a>, String> {
+    // 首次确认独立于 select 排序，不能为了操作公平性绕过准备前的续租门禁。
+    // 调用方 timeout_at 覆盖本次确认及后续全部续租，预算不随回执重置。
+    lease.renew(store, claim, clock, config).await.map_err(str::to_owned)?;
+    let mut preparation = transport.prepare(claim.clone());
+    loop {
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(request_deadline) => return Err("preflight_timeout".to_owned()),
+            _ = tokio::time::sleep_until(lease.deadline) => return Err("lease_expired".to_owned()),
+            result = std::future::poll_fn(|context| {
+                // 与发送相同：直接核对两个截止，确保成功续租后操作先获得一次 poll。
+                let now = tokio::time::Instant::now();
+                if now >= lease.deadline || now >= request_deadline {
+                    return std::task::Poll::Pending;
+                }
+                preparation.as_mut().poll(context)
+            }) => return result.map_err(|error| error.failure_code),
+            _ = tokio::time::sleep_until(lease.renew_at) => {
+                lease.renew(store, claim, clock, config).await.map_err(str::to_owned)?;
+            }
+        }
+    }
+}
+
+/// fence 前后均续租，避免 prepare 尾部或 fence 提交等待吃掉首次发送的 TTL。
+async fn confirm_delivery_handoff<C: Clock>(
+    store: &dyn DeliveryWorkStore,
+    clock: &C,
+    config: DeliveryWorkerRuntimeConfig,
+    claim: &DeliveryWorkClaim,
+    lease: &mut DeliveryLease,
+) -> bool {
+    if lease.renew(store, claim, clock, config).await.is_err() {
+        return false;
+    }
+    let started = tokio::time::timeout_at(
+        lease.operation_deadline(config.finalize_timeout),
+        store.start_sending(claim.clone(), clock.now()),
+    )
+    .await;
+    if !matches!(started, Ok(Ok(()))) {
+        tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
+        return false;
+    }
+    lease.renew(store, claim, clock, config).await.is_ok()
+}
+
+/// 尚未 poll 外部写入时尽力释放；SQL 仅允许有效 claimed，sending 提交未知仍保守隔离。
+async fn release_unstarted_delivery<C: Clock>(
+    store: &dyn DeliveryWorkStore,
+    clock: &C,
+    config: DeliveryWorkerRuntimeConfig,
+    claim: &DeliveryWorkClaim,
+    worker_result: WorkerResult,
+) -> DeliveryTaskResult {
+    let released =
+        tokio::time::timeout(config.finalize_timeout, store.release(claim.clone(), clock.now()))
+            .await;
+    let worker_result = match released {
+        Ok(Ok(())) => worker_result,
+        _ => {
+            tracing::warn!(delivery_id = %claim.delivery_id, "delivery worker could not confirm unstarted claim release");
+            WorkerResult::Error
+        }
+    };
+    DeliveryTaskResult {
+        worker_result,
+        skipped_recipient: None,
+        // 包括续租/fence 失败；本轮不紧密重领，但不让 batch=1 挡住其他 world 或 Take/Return。
+        deferred_world: claim
+            .payload
+            .get("world")
+            .and_then(serde_json::Value::as_str)
+            .filter(|world| {
+                matches!(*world, "main" | "isekai")
+                    && claim.payload.get("operation").and_then(serde_json::Value::as_str)
+                        == Some("send")
+            })
+            .map(str::to_owned),
     }
 }
 
