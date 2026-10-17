@@ -9,56 +9,7 @@ pub(super) async fn start_sending_postgres(
     claim: &DeliveryWorkClaim,
     started_at: DateTime<Utc>,
 ) -> Result<(), auction_application::RepositoryError> {
-    let mut transaction = pool.begin().await.map_err(map_storage_error)?;
-    crate::database::lot_watch::lock_delivery_lot(&mut transaction, claim.delivery_id)
-        .await
-        .map_err(|_| repository_error_owned("装备提醒发送锁暂不可用"))?;
-    lock_delivery_lease(&mut transaction, claim.delivery_id).await?;
-    let result = sqlx::query(concat!(
-        r#"UPDATE public.deliveries AS deliveries
-           SET status = 'sending', sending_at = $2, updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-             AND status = 'claimed'
-             AND lease_token = $3
-             AND fencing_version = $4
-             AND lease_expires_at > $2
-             AND lease_expires_at > clock_timestamp()
-             AND "#,
-        delivery_completion_gate!()
-    ))
-    .bind(claim.delivery_id)
-    .bind(started_at)
-    .bind(claim.lease_token)
-    .bind(claim.fencing_version)
-    .execute(&mut *transaction)
-    .await
-    .map_err(map_storage_error)?;
-    if result.rows_affected() != 1 {
-        return Err(repository_error_owned("delivery 开始发送时 lease 已失效"));
-    }
-    let request_id = claim.command_id.to_string();
-    append_delivery_audit(
-        &mut transaction,
-        DeliveryAudit {
-            occurred_at: started_at,
-            actor_type: "worker",
-            actor_id: "delivery-worker",
-            action: START_SENDING,
-            delivery_id: claim.delivery_id,
-            request_id: Some(&request_id),
-            source: "worker",
-            metadata: worker_state_metadata(
-                "sending",
-                claim.fencing_version,
-                claim.attempt_count,
-                None,
-            ),
-        },
-    )
-    .await
-    .map_err(map_storage_error)?;
-    transaction.commit().await.map_err(map_storage_error)?;
-    Ok(())
+    super::cash::run_legacy(pool, claim, started_at).await
 }
 
 #[cfg(feature = "postgres")]

@@ -46,6 +46,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 | 论坛与结算核验 | `forum-write-recovery-list`、`authorize-forum-write-retry`、`verify-legacy-settlement` | 本页 |
 | 旧草稿软截止修正 | `repair-draft-soft-close` | [默认只读、显式确认写入](#草稿软截止显式修正) |
 | 装备 PM 运维 | `lot-watch-pm list/reconcile` | [仅请求只读对账](#装备-pm-只读对账) |
+| Bot 资金 | `bot-funds` | [默认零写预览、显式真实对账](#bot资金对账) |
 | 保留盘点与恢复预检 | `retention-inventory`、`recovery-preflight` | 本页及恢复手册 |
 | 当前格式备份/恢复/重建 | `postgres-backup`、`postgres-backup-verify`、`postgres-restore`、`postgres-rebuild` | [恢复手册](../../ops/deploy/RECOVERY.md) |
 | 历史 v28 | `postgres-legacy-v28-backup`、`postgres-legacy-v28-backup-verify`、`postgres-adopt-legacy-v28` | [接管手册](../../ops/deploy/LEGACY_V28_ADOPTION.md) |
@@ -74,6 +75,27 @@ Sent 查询要求唯一精确匹配并标记 `time_unverified`，`collected` 不
 它是联网只读诊断，不是离线校验或自动 reconcile。回填仅接受 `parsed_message`，不覆盖已有展示，
 不将诊断内容用作业务事实。完整示例见[邮件诊断](../../ops/mail-diagnostics.md)。
 
+## Bot资金对账
+
+[runtime/bot_funds](src/bootstrap/runtime/bot_funds) 的 `bot-funds --expected-uid <UID>` 默认仅数据库只读责任预览，
+输出版本、完整安全责任投影、blockers和SHA-256摘要；不取得owner、不观察远端、不声称可用额度。
+`--execute` 才装配既有MM/论坛网关，要求数据库active凭据及真实联合身份、Main现金、clean compose和generation。
+UID参数仅断言目标。必须提供 `--command-id`、`--actor`、`--expected-version`、`--preview-digest`、
+`--proprietary-credits`、`--compensation-credits`、`--dedicated-account-no-external-liabilities`，及逐字
+`--confirm-write 'RECONCILE BOT FUNDS <UID> <VERSION> <PROPRIETARY> <COMPENSATION> <DIGEST>'`。
+不默认分配总余额。原命令先重放；版本/责任变化拒绝；未知提交按原ID核对，不更换ID。
+
+操作前须停止旧Worker、所有相关程序同版升级、专用账号无并发人工/其他程序资金写入且无未登记外部负债。
+旧unknown或无法完整界定责任阻断；账实缺口会冻结新增支出并以退出码5报告。
+PostgreSQL 构建从 delivery owner 唯一查询 V1 能力，CLI 和服务均不自行构造能力或提供绕过开关。
+apply 要求已启用论坛读取和数据库 active Main/shared 邮件、论坛凭据；先停止持有 mail owner 的 Worker，
+同版 CLI 取得原 advisory owner 后推进 generation，复用单一 MM session 完成真实读取；preview 不走此装配。
+无能力时 apply 明确不支持。retained/税不自动再投资，旧无 UID/未知责任及跨 opening 收款继续隔离。
+未资金化 COD 已外发但收款事实未闭合，或付款关联 delivery 缺失时，preview/apply 都以
+`lot:<lot_id>:payment_collection_unclosed` 阻断 opening；覆盖 Main 装备 COD 和跨世界现金 carrier，
+不能用本地尚未 satisfied 推断未收款，也不能重建 opening 或改旧队列绕过。补偿/隔离新增需求最低为零，既有占用不释放。
+精确[升级门禁](../../ops/README.md#bot-内部履约与资金保护升级)包含顺序迁移至000048和全 writer 停机；本轮未执行此命令。
+
 ## 稳定退出码
 
 | 退出码 | 含义 |
@@ -82,7 +104,7 @@ Sent 查询要求唯一精确匹配并标记 `time_unverified`，`collected` 不
 | `2` | 参数解析，或 check-config/deployment-check 失败 |
 | `3` | 迁移、初始建库、盘点、备份/恢复/重建/v28 接管命令失败 |
 | `4` | deployment 命令失败 |
-| `5` | 凭据/规则导入、论坛/结算核验、邮件证据、草稿软截止修正命令失败 |
+| `5` | 凭据/规则导入、论坛/结算核验、邮件证据、草稿软截止修正、Bot资金对账命令失败或已提交冻结 |
 
 退出码按命令类别分配，不按底层错误类型重新分类；调用方不应解析脱敏错误文本。
 

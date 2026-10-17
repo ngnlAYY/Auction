@@ -27,6 +27,7 @@
 - [首次部署配置](#首次部署配置)
 - [启动顺序](#启动顺序)
 - [截止规则与邮件发送隔离升级](#截止规则与邮件发送隔离升级)
+- [Bot 内部履约与资金保护升级](#bot-内部履约与资金保护升级)
 - [数据库恢复与保留](#数据库恢复与保留)
 - [反向代理与 systemd](#反向代理与-systemd)
 - [Cloudflare 整站代理](#cloudflare-整站代理)
@@ -95,12 +96,46 @@ API-only 无 Web 资源；内嵌档 Public/Admin 仅含各自 payload，Worker/a
 WASM 以体积为先；LTO 增加构建时间和内存，不证明性能收益。
 [AMD KVM 定向候选](build/README.md)不进入通用归档，须核对资源身份、CPUID/ABI 和运行证据；型号或 cargo check 不证明兼容性/性能。
 
+## Bot 内部履约与资金保护升级
+
+本轮仅源码和静态验证。以下操作必须由用户另行批准维护窗口后执行；没有自动对账、迁移或旧任务修复。
+
+1. 核对精确制品/数据库目标并取得可验证备份，停止全部相关 writer、旧 Worker 和可能持有 mail owner 的 CLI。
+   分体/合并遵循现有停机迁移门禁；所有相关程序必须同版。禁止滚动混用旧 Worker 绕过资金门；普通启动不隐式迁移。
+2. 用同版 auctionctl 显式迁移。旧 `000039` 环境顺序处理 `000040`—`000048`；不跳号、不改历史 checksum。
+   `000046` 为全局 mail generation，`000047` 为资金账本，`000048` 为内部命令/证明。迁移不回填资金或成功事实。
+3. 联合身份要求已启用论坛读取能力、数据库 active mail 凭据 ID/version 与当前认证 HV UID。
+   旧预期名 None 可真实核验后识别，有值精确匹配；不用删除重导入旧 Cookie。配置/keyenv 不具备内部提交身份。
+   论坛关闭时新内部准备和现金证据延期，不暗中启动论坛；Isekai 独立证据不足时保持等待。
+4. 使用[bot-funds](../apps/auctionctl/README.md#bot资金对账)先只读预览责任、版本、blockers 和摘要。
+   preview 不取 owner、不推进 generation、不观测远端，输出不代表已证明可用额度。
+   apply 才取得独占 mail owner/generation 和同 session 联合身份、Main现金、clean compose；因此先停止持有 owner 的 Worker。
+   必须提供稳定命令、版本/摘要、精确确认及分别指定的自有/补偿用途额度；未知提交仅按原命令和原负载核对。
+5. 对账前确认专用账号无并发人工/其他程序资金写入、无未登记外部负债，完整核对既有应付、退款替代责任、税/补偿、出站和未知。
+   旧无 UID 责任仅保守隔离，跨 opening 历史收款不成为新可消费来源；未知或无法界定责任阻断开额度。
+   Main 装备 COD 或跨世界现金 carrier 已外发而收款事实未闭合时，preview/apply 以
+   `payment_collection_unclosed` 阻断 opening；付款关联缺失同样阻断，不重建 opening 或改旧队列绕过。
+   补偿与隔离的新增需求最低为零，既有 allocation 仍完整扣占，不因新增需求为零而释放。
+   余额不是自由现金，retained/税不自动再投资；发现账实缺口冻结新增支出。collected 核对在满足/发行/解依赖前
+   检查同一现金证据，缺口确定提交冻结并延期，不把冻结随业务错误回滚。构建 V1 不替代线上版本核验。
+6. 用户确认升级、对账与外部前提后才启动同版程序。内部满足只处理合格新 pending，保留原 B+C=S+T、payment→handoff→seller，
+   退款仍需原恢复授权，未新增内部取消退款。有资金绑定的新五类 Admin delivery 动作拒绝，原成功命令仍先重放；
+   本轮没有人工返还或 unknown 重发入口，不能用 failed/TTL 释放资金。
+
+装备占用按已识别的 origin/payload schema 与真实 EID/world 判定；已验证无装备通知不占用目标装备，
+未知/畸形 schema 及真实装备冲突仍阻断，历史 succeeded 不独立授予放行，旧 unknown 与恢复授权规则不变。
+现金 sending fence 沿 prepared 原单调绝对截止，并取有效租约/finalize 截止的最小值；数据库用 PostgreSQL 18
+`transaction_timeout` 覆盖锁、审计及 COMMIT，重试不重置预算。过晚/错误/取消或提交未知撤销 owner，不发送。
+旧32条未知投递及残留草稿仍须另行逐条人工证据核对；禁止自动清草稿、领取、重寄、强制结清或改写旧任务。
+当前按 UUID 锁全部 deliveries 的内部冲突扫描和 ready 义务预锁须独立审查规模/事务时限。
+真实 Main/Isekai 协议、数据库迁移/并发及资金对账运行证据见[状态页](../docs/status.md)，本轮不执行这些操作。
+
 ## 截止规则与邮件发送隔离升级
 
 本轮仅交付源码和静态检查，以下由用户在另行批准的维护窗口手动执行；不自动操作现有实例。
 
 1. 核对制品、数据库目标及可验证备份，按现有分体停机门禁或合并 `migrate-managed` 流程停止全部旧 writer，
-   使用配套 auctionctl 追加迁移到 `000045`，保留 `000044` 时间修复及既有迁移 checksum。普通重启不迁移，不混跑旧程序。
+   使用配套 auctionctl 追加迁移；当前已扩展到 `000048`，须同时遵守下节 Bot 升级门禁，保留 `000044` 时间修复及既有 checksum。普通重启不迁移，不混跑旧程序。
 2. 核对 [managed 的有效 economics 来源](config/README.md#缓存与拍卖模板)：未接管时修改公共模板，
    接管时修改有效 runtime economics，使 `soft_close_window_seconds` 与 `soft_close_extension_seconds` 均为900。
    程序新默认不会覆盖用户文件里的显式60；按[共享配置重启](config/README.md#runtime-共享与重启)使 Admin/Worker 生效。
@@ -112,7 +147,7 @@ WASM 以体积为先；LTO 增加构建时间和内存，不证明性能收益�
 5. 新 Worker 在 sending 前读取真实 compose，脏草稿使对应 world 的 Send 本轮延后并释放有效 claim，
    不消耗一次发送、不把每个新任务推进 unknown；Take/Return 独立，下轮重新观测。它不会自动清理远端草稿或修复旧任务。
 
-**bot 自动免自寄与内部付款尚未实现。** 管理员声明、Cookie 检查成功或装备详情可访问不能证明当前 bot 身份及库存。
+bot 内部履约已接独立联合身份、库存及资金证据，启用遵守下节；管理员声明、Cookie 检查成功或装备详情可访问不能替代证明。
 自寄拒绝后已暂存的资产仍按未知结果保守处理；事故旧32条 sending/manual_reconcile/outcome_unknown 及草稿装备
 保持人工核对，禁止自动清草稿、重寄、领取附件或强制结清。状态干净不能证明历史未知邮件未发。
 业务门禁见[不变量](../docs/contracts/invariants.md)，证据与运行缺口见[状态页](../docs/status.md)。

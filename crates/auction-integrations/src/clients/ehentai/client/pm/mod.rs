@@ -95,7 +95,7 @@ impl EhentaiClient {
         result
     }
 
-    fn validate_pm_client(&self) -> Result<(), ForumPmError> {
+    pub(super) fn validate_pm_client(&self) -> Result<(), ForumPmError> {
         let production = Url::parse(PRODUCTION_ENDPOINT).map_err(|_| ForumPmError::Protocol)?;
         let allowed = same_origin(&self.base_url, &production)
             || (self.base_url.scheme() == "http" && is_loopback_host(&self.base_url));
@@ -119,7 +119,12 @@ impl EhentaiClient {
         self.index_url(pairs, EhentaiOperation::CheckSession).map_err(map_error)
     }
 
-    async fn pm_get(&self, target: Url, cookie: &EhentaiCookie) -> Result<String, ForumPmError> {
+    // 目标资料只读路径复用安全 GET 连接池与 gate/owner，不创建 PM 操作。
+    pub(super) async fn pm_get(
+        &self,
+        target: Url,
+        cookie: &EhentaiCookie,
+    ) -> Result<String, ForumPmError> {
         self.wait_rate(EhentaiOperation::CheckSession).await.map_err(map_error)?;
         self.check_ownership().await.map_err(|_| ForumPmError::Unavailable)?;
         let response = self

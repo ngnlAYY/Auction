@@ -34,6 +34,7 @@ pub use parser::{
     MoogleMailMessage, MoogleMailParser, MoogleMailSentPage, MoogleMailSentSnapshot,
     MoogleMailSentSummary, MoogleMailSummary,
 };
+pub use protocol::MoogleMailInventoryCategory;
 pub use protocol::{
     MoogleMailCookie, MoogleMailEquipmentKey, MoogleMailOperation, MoogleMailTarget,
     MoogleMailToken, MoogleMailWorld,

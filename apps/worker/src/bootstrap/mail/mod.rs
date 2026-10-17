@@ -24,15 +24,17 @@ mod runtime;
 pub(super) async fn configure_mail_poll(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
+    profile_reader: Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
 ) -> anyhow::Result<(
     Vec<MailPollRuntime>,
     Option<Arc<dyn DeliveryTransport>>,
     Option<Arc<dyn SettlementFulfillmentEvidenceReader>>,
     Option<Arc<dyn SettlementFulfillmentCustodyReader>>,
+    Option<Arc<dyn auction_application::SettlementInternalEvidenceReader>>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
-        return Ok((Vec::new(), None, None, None));
+        return Ok((Vec::new(), None, None, None, None));
     }
 
     #[cfg(not(feature = "postgres"))]
@@ -79,16 +81,31 @@ pub(super) async fn configure_mail_poll(
             )?;
         let (runtimes, gateways) = runtime::build_poll_runtimes(
             mail_config,
-            world_configs,
             Arc::clone(&client),
             credentials,
+            profile_reader,
             processor,
             Arc::clone(&store),
             schedule,
         )
         .await?;
+        // gateway 本身接受显式 world；C/D 复用同一个实例、凭据集合与 owner。
+        // 论坛关闭时不注入 reader，联合证据明确不可用，不隐式开启论坛能力。
+        let gateway = gateways
+            .get(&MoogleMailWorld::Main)
+            .or_else(|| gateways.get(&MoogleMailWorld::Isekai))
+            .cloned()
+            .context("MoogleMail enabled but no world gateway is configured")?;
+        let delivery_transport: Arc<dyn DeliveryTransport> =
+            Arc::new(delivery_transport.with_cash_evidence_gateway(gateway.clone()));
         let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
             Arc::new(MoogleMailFulfillmentEvidenceReader { gateways });
-        Ok((runtimes, Some(delivery_transport), Some(evidence_reader), Some(custody_reader)))
+        Ok((
+            runtimes,
+            Some(delivery_transport),
+            Some(evidence_reader),
+            Some(custody_reader),
+            Some(gateway),
+        ))
     }
 }

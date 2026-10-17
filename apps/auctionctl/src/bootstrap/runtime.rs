@@ -52,6 +52,8 @@ mod postgres_rebuild;
 #[cfg(feature = "postgres")]
 mod postgres_restore;
 
+#[path = "runtime/bot_funds/mod.rs"]
+mod bot_funds;
 #[path = "runtime/cli.rs"]
 mod cli;
 #[path = "runtime/deployment.rs"]

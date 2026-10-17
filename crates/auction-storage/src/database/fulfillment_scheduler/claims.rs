@@ -13,6 +13,9 @@ pub(super) async fn claim_postgres(
     limit: u16,
 ) -> Result<Vec<SettlementFulfillmentClaim>, auction_application::RepositoryError> {
     let mut transaction = pool.begin().await.map_err(map_storage_error)?;
+    // 领取保持短事务；先按UUID锁义务，再锁execution，避免与满足事务的反向行锁。
+    sqlx::query("SELECT id FROM public.settlement_obligations WHERE business_state='ready' ORDER BY id FOR UPDATE SKIP LOCKED")
+        .fetch_all(&mut *transaction).await.map_err(map_storage_error)?;
     // ready obligation 可能尚未有 execution 行；只为缺失行补齐当前派发语义，
     // 不回写已有 delivery 的冻结操作。候选由锁保护，避免两个 Worker 同时补写同一行。
     sqlx::query(
@@ -122,7 +125,7 @@ pub(super) async fn claim_postgres(
              )
            ORDER BY o.created_at, o.auction_id, o.lot_id, o.obligation_kind, o.id
            LIMIT $2
-           FOR UPDATE OF f, o SKIP LOCKED"#,
+           FOR UPDATE OF f SKIP LOCKED"#,
     )
     .bind(now)
     .bind(i64::from(limit))

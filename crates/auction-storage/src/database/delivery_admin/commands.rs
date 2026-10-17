@@ -52,6 +52,31 @@ async fn execute_transaction(
         return Ok(result);
     }
 
+    // 已提交的原命令先重放；新的人工命令不能改写已有资金绑定的出站责任。
+    // 本轮五种动作均拒绝，避免delivery→fulfillment/recovery反锁及凭声明释放/重发。
+    let funded = crate::database::settlement_funding::lock_funded_delivery_account(
+        transaction.transaction_mut()?,
+        command.delivery_id,
+    )
+    .await
+    .map_err(DeliveryAdminTransactionError::Funding)?;
+    if funded.is_some() {
+        return Err(DeliveryAdminError::Invalid.into());
+    }
+
+    let retries_delivery = matches!(
+        command.action,
+        DeliveryAdminAction::RetryFailed | DeliveryAdminAction::ReconcileRetry
+    );
+    if retries_delivery {
+        crate::database::recovery_commands::lock_recovery_delivery_retry_scope(
+            transaction.transaction_mut()?,
+            command.delivery_id,
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    }
+
     // watch 重试不能倒取 lot 锁，更不能通过人工 release 恢复已经取消的领先周期。
     crate::database::lot_watch::lock_delivery_lot(
         transaction.transaction_mut()?,
@@ -59,6 +84,14 @@ async fn execute_transaction(
     )
     .await
     .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    if retries_delivery {
+        crate::database::recovery_commands::lock_recovery_delivery_retry_actions(
+            transaction.transaction_mut()?,
+            command.delivery_id,
+        )
+        .await
+        .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    }
     let row = sqlx::query(
         r#"SELECT id, command_id, request_digest, activation_command_id,
                   activation_request_digest, origin_kind, origin_id, recipient, payload,

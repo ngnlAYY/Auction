@@ -25,7 +25,9 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `bootstrap/mod.rs` 选择配置/缓存/运行模式，`persistent.rs` 装配持久化 Worker；
 `forum.rs`、`operations_alert.rs`、`fulfillment.rs`、`control.rs` 各有独立职责。
 无数据库时 `skeleton.rs` 只报告进程状态，不执行任务或伪造数据库就绪。
-`forum.rs` 从同一 EhentaiGateway 注入 PM sender，复用唯一 ForumCookie ownership 和 HTTP 限速，不以 MM enabled 为条件。
+`forum.rs` 从同一 EhentaiGateway 注入 PM sender 和只读目标资料 reader，复用唯一 ForumCookie ownership 和 HTTP 限速，不以 MM enabled 为条件。
+只有 forum.enabled 才装配该 reader；关闭时联合证据明确不可用。mail/runtime 的既有 gateway 共享同一 client/凭据集合/owner，
+选择同一个 gateway 同时注入 `with_internal_fulfillment` 和 `with_cash_evidence_gateway`，不嵌套获取操作 guard。
 `persistent.rs` 以独立 TaskGuard 运行 LotWatchPmRuntime；shutdown 立即发 drain，主循环排空结束后 abort 余留任务，
 不增加关闭长预算。持久 claimed 可重领，任何 sending 只读对账，不以取消推断远端未发送。
 PM 每 delivery cadence 最多一封新发送及一项只读核对，forum 总预算小于 lease；来源/冻结渠道/缺 UID 规则见[不变量](../../docs/contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
@@ -86,8 +88,10 @@ claim token/owner/版本或续租 fence 失效后取消陈旧处理，只能从�
 MoogleMail delivery 在 sending fence 前执行只读 compose preflight，消耗式 prepared future 持有同一凭据独占 guard；
 不安全时释放并在本轮跳过该 world 的 Send（Take/Return 独立），旧 unknown 留待人工核对，不清理草稿或重排旧任务。
 `bootstrap/fulfillment.rs` 提供 bot identity 只读窄端口适配，复用原 gateway/credential set/ownership。
-当前未接入内部结清：可信身份页面与真实库存证明尚未闭合；装备详情读取成功的 custody 投影不能用于证明 bot 持有。
-后续规则及原子存储边界见[履约端口](../../crates/auction-application/README.md#结算与恢复端口)。
+内部结清使用独立组合证据与原义务事务；装备详情读取成功的旧 custody 投影不用于证明 bot 持有。
+`prepare_next` 的内部完成结果直接结束 claim，不 activate、不伪造 delivery/Sent；现金外发仍经原租约与首次 poll 门禁。
+业务与原子边界见[履约端口](../../crates/auction-application/README.md#结算与恢复端口)，
+启动前须[停机同版升级与显式资金核对](../../ops/README.md#bot-内部履约与资金保护升级)。
 
 所有主动 ComposeSend 都以完整有界 Sent baseline 和发送后独立 scan 证明新增唯一 MID，
 同时精确匹配 world、recipient、subject/body digest、Credits/COD 和装备；零资产通知也需要证明。

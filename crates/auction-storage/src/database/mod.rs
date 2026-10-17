@@ -47,6 +47,8 @@ mod recovery_preflight;
 #[cfg(feature = "postgres")]
 mod settlement;
 #[cfg(feature = "postgres")]
+pub mod settlement_funding;
+#[cfg(feature = "postgres")]
 mod settlement_policy;
 #[cfg(feature = "postgres")]
 mod settlement_report;
@@ -94,6 +96,11 @@ pub use commands::{
 };
 #[cfg(feature = "postgres")]
 pub use credentials::{CredentialRuntimeOwnership, CredentialRuntimeOwnershipError};
+#[cfg(feature = "postgres")]
+pub use credentials::{
+    MailEvidenceTransactionError, lock_mail_evidence_credentials, lock_mail_runtime_generation,
+    validate_mail_evidence_time,
+};
 #[cfg(feature = "postgres")]
 mod account;
 #[cfg(feature = "postgres")]

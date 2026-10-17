@@ -13,6 +13,8 @@ pub(super) enum DeliveryAdminTransactionError {
     Sqlx(sqlx::Error),
     /// 已经确定的业务结果，不得因为事务重放而改变分类。
     Business(DeliveryAdminError),
+    /// 保留资金owner的类型化冲突，直到同一外层runner决定是否重试。
+    Funding(auction_application::FundingError),
 }
 
 impl From<DeliveryAdminError> for DeliveryAdminTransactionError {
@@ -24,6 +26,9 @@ impl From<DeliveryAdminError> for DeliveryAdminTransactionError {
 impl DeliveryAdminTransactionError {
     /// 判断 SQLSTATE 是否属于旧版 `RunSerializable` 的重试闭集。
     pub(super) fn is_retryable(&self) -> bool {
+        if matches!(self, Self::Funding(auction_application::FundingError::SerializationConflict)) {
+            return true;
+        }
         let Self::Sqlx(error) = self else {
             return false;
         };
@@ -36,7 +41,7 @@ impl DeliveryAdminTransactionError {
     /// 在离开存储层时只暴露稳定的 Delivery Admin 错误分类。
     pub(super) fn into_delivery_error(self) -> DeliveryAdminError {
         match self {
-            Self::Sqlx(_) => DeliveryAdminError::Unavailable,
+            Self::Sqlx(_) | Self::Funding(_) => DeliveryAdminError::Unavailable,
             Self::Business(error) => error,
         }
     }

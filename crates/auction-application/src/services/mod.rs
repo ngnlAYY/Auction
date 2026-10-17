@@ -22,6 +22,9 @@ mod admin_worlds;
 mod auction;
 #[path = "auction/competition.rs"]
 mod competition;
+#[path = "settlement/funding/mod.rs"]
+mod funding;
+pub use funding::FundingReconciliationService;
 #[path = "settlement/fulfillment/mod.rs"]
 mod fulfillment;
 #[path = "auction/lifecycle/mod.rs"]

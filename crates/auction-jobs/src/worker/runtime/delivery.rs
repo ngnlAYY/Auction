@@ -249,7 +249,7 @@ where
     };
     // prepare 总预算包含续租等待；其返回句柄持有同 Cookie guard，在交接完成前绝不 poll。
     let preparation_deadline = tokio::time::Instant::now() + config.request_timeout;
-    let mut send = match tokio::time::timeout_at(
+    let mut prepared = match tokio::time::timeout_at(
         preparation_deadline,
         prepare_delivery(
             delivery_store.as_ref(),
@@ -288,10 +288,11 @@ where
         config,
         &claim,
         &mut lease,
+        &mut prepared,
     )
     .await
     {
-        drop(send);
+        drop(prepared);
         return release_unstarted_delivery(
             delivery_store.as_ref(),
             clock.as_ref(),
@@ -301,6 +302,7 @@ where
         )
         .await;
     }
+    let mut send = prepared.into_send();
     let request_timeout = tokio::time::sleep(config.request_timeout);
     let request_deadline = request_timeout.deadline();
     tokio::pin!(request_timeout);
@@ -421,11 +423,12 @@ async fn prepare_delivery<'a, C: Clock>(
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
     request_deadline: tokio::time::Instant,
-) -> Result<auction_application::DeliveryPreparedSend<'a>, String> {
+) -> Result<auction_application::AuthorizedDeliverySend<'a>, String> {
     // 首次确认独立于 select 排序，不能为了操作公平性绕过准备前的续租门禁。
     // 调用方 timeout_at 覆盖本次确认及后续全部续租，预算不随回执重置。
     lease.renew(store, claim, clock, config).await.map_err(str::to_owned)?;
-    let mut preparation = transport.prepare(claim.clone());
+    let mut preparation = transport
+        .prepare_authorized(claim.clone(), request_deadline.min(lease.deadline).into_std());
     loop {
         tokio::select! {
             biased;
@@ -453,16 +456,83 @@ async fn confirm_delivery_handoff<C: Clock>(
     config: DeliveryWorkerRuntimeConfig,
     claim: &DeliveryWorkClaim,
     lease: &mut DeliveryLease,
+    prepared: &mut auction_application::AuthorizedDeliverySend<'_>,
 ) -> bool {
-    if lease.renew(store, claim, clock, config).await.is_err() {
+    let renewed = if let Some(evidence) = prepared.evidence_mut() {
+        let deadline = lease
+            .operation_deadline(config.finalize_timeout)
+            .min(tokio::time::Instant::from_std(evidence.deadline()));
+        matches!(
+            tokio::time::timeout_at(deadline, lease.renew(store, claim, clock, config)).await,
+            Ok(Ok(()))
+        ) && tokio::time::Instant::now() < deadline
+    } else {
+        // 无现金证据的 legacy 沿用原续租预算。
+        lease.renew(store, claim, clock, config).await.is_ok()
+    };
+    if !renewed {
         return false;
     }
-    let started = tokio::time::timeout_at(
-        lease.operation_deadline(config.finalize_timeout),
-        store.start_sending(claim.clone(), clock.now()),
-    )
-    .await;
-    if !matches!(started, Ok(Ok(()))) {
+    let deadline = lease.operation_deadline(config.finalize_timeout);
+    // 只读准备的原单调截止覆盖检查、全部事务重试及 COMMIT，不在交接时重建寿命。
+    let deadline = prepared.evidence_mut().map_or(deadline, |evidence| {
+        deadline.min(tokio::time::Instant::from_std(evidence.deadline()))
+    });
+    if let Some(evidence) = prepared.evidence_mut()
+        && (!matches!(
+            tokio::time::timeout_at(deadline, evidence.check_current()).await,
+            Ok(Ok(()))
+        ) || tokio::time::Instant::now() >= deadline)
+    {
+        return false;
+    }
+    prepared.begin_fence();
+    let confirmed = if let Some(evidence) = prepared.evidence_mut() {
+        match evidence.begin_commit() {
+            Ok(guard) => {
+                // future借用guard，取消或提交未知同步撤销原owner；不detach、不重建session。
+                match tokio::time::timeout_at(
+                    deadline,
+                    store.start_sending_authorized_until(
+                        claim.clone(),
+                        clock.now(),
+                        guard.snapshot(),
+                        deadline.into_std(),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(outcome)) if tokio::time::Instant::now() < deadline => {
+                        // 两种结果均在截止前确定结束；Deferred只允许确定回滚或已提交冻结。
+                        guard.confirm_committed();
+                        Some(matches!(outcome, auction_application::DeliveryFenceOutcome::Sending))
+                    }
+                    _ => None,
+                }
+            }
+            Err(_) => Some(false),
+        }
+    } else {
+        match tokio::time::timeout_at(
+            deadline,
+            store.start_sending_authorized(claim.clone(), clock.now(), None),
+        )
+        .await
+        {
+            Ok(Ok(outcome)) => {
+                Some(matches!(outcome, auction_application::DeliveryFenceOutcome::Sending))
+            }
+            _ => None,
+        }
+    };
+    // timeout_at 的内部 future 可能一次 poll 越过截止；回执过晚仍保留撤销状态。
+    if tokio::time::Instant::now() >= deadline {
+        return false;
+    }
+    if confirmed.is_some() {
+        prepared.confirm_fence();
+    }
+    if confirmed != Some(true) {
         tracing::error!(delivery_id = %claim.delivery_id, "delivery worker did not confirm sending fence");
         return false;
     }

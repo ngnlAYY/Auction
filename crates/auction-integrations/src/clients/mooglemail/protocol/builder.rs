@@ -97,6 +97,38 @@ impl MoogleMailUrlBuilder {
         })
     }
 
+    pub(crate) fn identity(&self, world: MoogleMailWorld) -> MoogleMailTarget {
+        let mut url = self.endpoint.clone();
+        url.set_path(world.path());
+        url.query_pairs_mut().append_pair("s", "Character").append_pair("ss", "eq");
+        MoogleMailTarget {
+            operation: MoogleMailOperation::Identity,
+            world,
+            url,
+            origin: self.origin.clone(),
+        }
+    }
+
+    pub(crate) fn inventory(
+        &self,
+        world: MoogleMailWorld,
+        category: super::MoogleMailInventoryCategory,
+    ) -> MoogleMailTarget {
+        let mut url = self.endpoint.clone();
+        url.set_path(world.path());
+        url.query_pairs_mut()
+            .append_pair("s", "Bazaar")
+            .append_pair("ss", "am")
+            .append_pair("screen", "organize")
+            .append_pair("filter", category.as_str());
+        MoogleMailTarget {
+            operation: MoogleMailOperation::Inventory,
+            world,
+            url,
+            origin: self.origin.clone(),
+        }
+    }
+
     pub(crate) fn equipment(
         &self,
         world: MoogleMailWorld,

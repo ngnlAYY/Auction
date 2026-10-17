@@ -84,6 +84,15 @@ pub trait AdminCredentialRuntimeOwnership: Send + Sync {
 
     /// 同步读取已知失效状态；正常检查进行中仍有效，不能把它当作实时数据库探测。
     fn is_valid(&self) -> bool;
+
+    /// 兼容旧 owner：没有持久 generation 和 sticky 撤销能力就不支持内部提交。
+    fn mail_runtime_binding(&self) -> Option<crate::MailRuntimeBinding> {
+        None
+    }
+
+    /// 永久撤销该 owner 的全部后续操作；只有实现此能力才允许返回 mail binding。
+    /// 默认 owner 不提供 binding，因此不会进入内部提交作用域。
+    fn revoke_internal_use(&self) {}
 }
 
 /// Admin dashboard 的凭据聚合读取端口。

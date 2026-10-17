@@ -20,8 +20,14 @@ where
         let retry_claim = claim.clone();
         match claim.state {
             auction_application::SettlementFulfillmentState::Pending => {
-                match fulfillment_commands.prepare(claim, clock.now(), retry_delay).await {
-                    Ok(auction_application::SettlementFulfillmentPhaseResult::Advanced(result)) => {
+                let deadline = fulfillment_budget(&claim, clock.now());
+                match bounded_fulfillment(deadline, fulfillment_commands.prepare_next(claim, clock.now(), retry_delay)).await {
+                    Ok(auction_application::SettlementFulfillmentPreparationOutcome::InternallySatisfied { obligation_id }) => {
+                        tracing::info!(obligation_id = %obligation_id, "settlement obligation internally satisfied");
+                        return WorkerResult::Success;
+                    }
+                    Ok(auction_application::SettlementFulfillmentPreparationOutcome::External(result)) => match *result {
+                        auction_application::SettlementFulfillmentPhaseResult::Advanced(result) => {
                         tracing::info!(
                             obligation_id = %result.obligation_id,
                             delivery_id = %result.delivery_id,
@@ -30,10 +36,10 @@ where
                         );
                         claim = result.next_claim;
                     }
-                    Ok(auction_application::SettlementFulfillmentPhaseResult::Deferred {
+                        auction_application::SettlementFulfillmentPhaseResult::Deferred {
                         obligation_id,
                         failure_code,
-                    }) => {
+                    } => {
                         observe_fulfillment_retry(metrics.as_ref(), &retry_claim);
                         tracing::info!(
                             obligation_id = %obligation_id,
@@ -42,12 +48,10 @@ where
                         );
                         return WorkerResult::Success;
                     }
-                    Ok(
                         auction_application::SettlementFulfillmentPhaseResult::ManualReconcile {
                             obligation_id,
                             failure_code,
-                        },
-                    ) => {
+                        } => {
                         tracing::warn!(
                             obligation_id = %obligation_id,
                             failure_code,
@@ -55,6 +59,7 @@ where
                         );
                         return WorkerResult::Success;
                     }
+                    },
                     Err(_error) => {
                         // 应用服务返回的错误尚未完成 fulfillment 状态迁移；旧版让 claim
                         // 保持原 lease/fence，交给下一轮重新领取，不能在这里猜测并覆盖
@@ -122,7 +127,13 @@ where
                     );
                     return WorkerResult::Error;
                 };
-                match fulfillment_commands.reconcile(claim, observed_at, retry_at).await {
+                let deadline = fulfillment_budget(&claim, observed_at);
+                match bounded_fulfillment(
+                    deadline,
+                    fulfillment_commands.reconcile(claim, observed_at, retry_at),
+                )
+                .await
+                {
                     Ok(result) => {
                         match result.status {
                             auction_application::SettlementFulfillmentReconcileStatus::Deferred => {
@@ -190,6 +201,23 @@ where
         }
     }
 }
+/// 单一预算覆盖guard排队、全部远端读取、数据库等待与提交；超时直接销毁原future，绝不detach。
+fn fulfillment_budget(
+    claim: &SettlementFulfillmentClaim,
+    now: DateTime<Utc>,
+) -> std::time::Duration {
+    (claim.lease_until - now).to_std().unwrap_or_default().min(std::time::Duration::from_secs(30))
+}
+
+async fn bounded_fulfillment<T>(
+    budget: std::time::Duration,
+    operation: impl std::future::Future<Output = Result<T, auction_application::ApplicationError>>,
+) -> Result<T, auction_application::ApplicationError> {
+    tokio::time::timeout(budget, operation)
+        .await
+        .map_err(|_| auction_application::ApplicationError::FulfillmentDependencyUnavailable)?
+}
+
 fn observe_fulfillment_retry(metrics: &dyn WorkerRecorder, claim: &SettlementFulfillmentClaim) {
     // 领取本身不增加 retry_count；只有本次 Deferred 已经把此前至少一次 release
     // 再次释放，才与旧版 ReleaseFulfillment 后的 retry 指标一致。

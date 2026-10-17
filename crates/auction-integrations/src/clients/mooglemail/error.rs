@@ -25,8 +25,8 @@ pub enum MoogleMailErrorCategory {
     ProtocolDrift,
     /// 摘要、详情或装备身份之间不一致。
     IdentityMismatch,
-    /// 配置了预期玩家名称，但当前没有受支持的可信自身身份来源。
-    /// 这不是名称不一致、Cookie 无效或可重试网络故障。
+    /// 认证 HV UID、论坛目标资料或运行时绑定未获联合证明，不能当作“不是 bot”。
+    /// 预期名称缺省也必须真实读取；错误不包含远端原文或配置名称。
     IdentityUnproven,
     /// 在完整页窗口中没有观察到要求的 exact remote ID。
     NotObserved,

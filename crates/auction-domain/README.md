@@ -40,6 +40,18 @@
 
 完整状态、金额、历史兼容和原子写入要求见[领域不变量](../../docs/contracts/invariants.md)。
 
+### 真实现金用途规则
+
+[src/settlement/funding](src/settlement/funding) 校验稳定认证 UID/Main/Credits 账户键、冻结 `B+C=S+T`，
+以及真实现金扣除已有分配、旧责任隔离和明确用途授权后的容量。它不把经济补偿池或一次 Balance 当自有金额，
+不改变结算计算器或履约状态机。
+
+### 内部履约动作
+
+[src/settlement/internal](src/settlement/internal) 只从原义务选择留存、付款、交接、卖方留存或合法退款动作。
+不改冻结 `B+C=S+T`、原义务 ID 或 payment→handoff→seller 顺序；Isekai 内部 carrier 不产生 1C 收支。
+WithdrawnReturn 没有内部授权；当前库存、同账号来源和现金用途由外层完整证明及事务门禁决定。
+
 ## 依赖约束
 
 依赖限于领域安全的值类型、序列化、哈希和错误库，实际清单见 [Cargo.toml](Cargo.toml)。

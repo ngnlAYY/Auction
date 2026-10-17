@@ -27,7 +27,10 @@ mod confirm;
 #[path = "commands/delivery_retry.rs"]
 mod delivery_retry;
 #[cfg(feature = "postgres")]
-pub(crate) use delivery_retry::reset_after_delivery_retry;
+pub(crate) use delivery_retry::{
+    lock_recovery_delivery_retry_actions, lock_recovery_delivery_retry_scope,
+    reset_after_delivery_retry,
+};
 #[path = "commands/mapping.rs"]
 mod mapping;
 #[path = "commands/relist.rs"]

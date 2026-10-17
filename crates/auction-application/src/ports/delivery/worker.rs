@@ -89,6 +89,80 @@ pub type DeliveryPreparation<'a> = std::pin::Pin<
     >,
 >;
 
+/// 授权准备保留同一独占会话；证据只借用，发送 future 在 fence 前不能 poll。
+pub struct AuthorizedDeliverySend<'a> {
+    send: DeliveryPreparedSend<'a>,
+    evidence: Option<crate::PreparedSettlementInternalEvidence>,
+    cancellation: DeliveryFenceCancellation,
+}
+
+/// 即使legacy没有内部证据，可能提交的fence取消也须撤销同一mail owner。
+#[derive(Default)]
+struct DeliveryFenceCancellation {
+    lease: Option<Box<dyn crate::InternalEvidenceLease>>,
+    armed: bool,
+}
+
+impl Drop for DeliveryFenceCancellation {
+    fn drop(&mut self) {
+        if self.armed
+            && let Some(lease) = &self.lease
+        {
+            lease.revoke();
+        }
+    }
+}
+
+impl<'a> AuthorizedDeliverySend<'a> {
+    /// 可信适配器组装；None 只表示 legacy 候选，数据库仍须核验全部资金保护。
+    pub fn new(
+        send: DeliveryPreparedSend<'a>,
+        evidence: Option<crate::PreparedSettlementInternalEvidence>,
+    ) -> Self {
+        Self { send, evidence, cancellation: DeliveryFenceCancellation::default() }
+    }
+
+    /// 使用原session的撤销能力；不取得第二个operation guard。
+    pub fn with_fence_lease(mut self, lease: Box<dyn crate::InternalEvidenceLease>) -> Self {
+        self.cancellation.lease = Some(lease);
+        self
+    }
+
+    /// 只读准备已结束，即将进入可能提交的数据库fence。
+    pub fn begin_fence(&mut self) {
+        self.cancellation.armed = true;
+    }
+
+    /// 只用于已确定提交/回滚；提交未知保留armed直到drop同步撤销。
+    pub fn confirm_fence(&mut self) {
+        self.cancellation.armed = false;
+    }
+
+    pub fn evidence_mut(&mut self) -> Option<&mut crate::PreparedSettlementInternalEvidence> {
+        self.evidence.as_mut()
+    }
+
+    /// 仅在持久 fence 及续租确认后消费；丢弃证据引用，原 session 仍由发送 future 持有。
+    pub fn into_send(self) -> DeliveryPreparedSend<'a> {
+        self.send
+    }
+}
+
+/// 新准备端口保留旧 alias，以免旧适配器和已存在测试被迫改变签名。
+pub type AuthorizedDeliveryPreparation<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<AuthorizedDeliverySend<'a>, DeliveryTransportError>>
+            + Send
+            + 'a,
+    >,
+>;
+
+/// 只有 Sending 允许 poll；Deferred 已确定提交冻结或确定回滚，不是发送成功。
+pub enum DeliveryFenceOutcome {
+    Sending,
+    Deferred,
+}
+
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
     /// 返回 transport 在单个 Worker 进程内允许同时进入 `sending` 的上限。
@@ -109,6 +183,17 @@ pub trait DeliveryTransport: Send + Sync {
     /// 无远端可变 compose 状态的适配器沿用直接发送；非法负载在句柄执行时确定失败。
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
         Box::pin(async move { Ok(self.send(claim)) })
+    }
+
+    /// deadline 包含独占 guard 排队与全部只读请求，不逐步重置。
+    fn prepare_authorized(
+        &self,
+        claim: DeliveryWorkClaim,
+        _deadline: std::time::Instant,
+    ) -> AuthorizedDeliveryPreparation<'_> {
+        Box::pin(async move {
+            self.prepare(claim).await.map(|send| AuthorizedDeliverySend::new(send, None))
+        })
     }
 
     fn send(
@@ -142,6 +227,43 @@ pub trait DeliveryWorkStore: Send + Sync {
         claim: DeliveryWorkClaim,
         started_at: DateTime<Utc>,
     ) -> ApplicationFuture<'_, ()>;
+
+    /// 证据借自原prepared/commit guard。Err表示未确定提交状态，调用方必须撤销owner。
+    /// 确定拒绝或冻结用Deferred；None仍须经过数据库legacy保护门。
+    /// 旧适配器仅保留无证据旧语义，不能消费Some并伪报现金授权。
+    fn start_sending_authorized<'a>(
+        &'a self,
+        claim: DeliveryWorkClaim,
+        started_at: DateTime<Utc>,
+        evidence: Option<&'a crate::SettlementInternalEvidenceSnapshot>,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
+        Box::pin(async move {
+            if evidence.is_some() {
+                return Err(crate::ApplicationError::CapabilityUnavailable(
+                    "delivery cash authorization",
+                ));
+            }
+            self.start_sending(claim, started_at).await?;
+            Ok(DeliveryFenceOutcome::Sending)
+        })
+    }
+
+    /// 现金 fence 沿用原 prepared 单调截止，并收紧至本次租约/提交预算。
+    /// 仅期限前确定 Sending 才允许外发；Err/超时须撤销 owner，Deferred 表示确定结束。
+    /// 默认明确不支持，旧实现不因编译兼容而获得忽略提交期限的授权能力。
+    fn start_sending_authorized_until<'a>(
+        &'a self,
+        _claim: DeliveryWorkClaim,
+        _started_at: DateTime<Utc>,
+        _evidence: &'a crate::SettlementInternalEvidenceSnapshot,
+        _deadline: std::time::Instant,
+    ) -> ApplicationFuture<'a, DeliveryFenceOutcome> {
+        Box::pin(async move {
+            Err(crate::ApplicationError::CapabilityUnavailable(
+                "deadline-bound delivery cash authorization",
+            ))
+        })
+    }
 
     /// 在尚未开始外部写入时把有效 claim 释放回 pending，并撤销本次领取的尝试计数。
     fn release(

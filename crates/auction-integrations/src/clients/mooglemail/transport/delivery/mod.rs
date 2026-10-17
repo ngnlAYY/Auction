@@ -3,6 +3,7 @@
 use super::*;
 
 mod actions;
+mod authorization;
 mod credentials;
 mod messages;
 mod settlement_secrets;
@@ -51,6 +52,7 @@ impl MoogleMailDeliveryTransport {
             settlement_equipment_secrets: None,
             settlement_equipment_opener: None,
             templates,
+            cash_evidence_gateway: None,
         }
     }
 
@@ -200,6 +202,9 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
 
     fn prepare(&self, claim: DeliveryWorkClaim) -> DeliveryPreparation<'_> {
         Box::pin(async move {
+            if authorization::requires_cash_gate(&claim) {
+                return Err(authorization::cash_unproven());
+            }
             let world = match claim.origin_kind.as_str() {
                 "settlement" => decode_settlement_payload(&claim)
                     .ok()
@@ -222,6 +227,14 @@ impl DeliveryTransport for MoogleMailDeliveryTransport {
                 Box::pin(async move { self.send_claim(claim, session).await });
             Ok(prepared)
         })
+    }
+
+    fn prepare_authorized(
+        &self,
+        claim: DeliveryWorkClaim,
+        deadline: std::time::Instant,
+    ) -> auction_application::AuthorizedDeliveryPreparation<'_> {
+        Box::pin(self.prepare_cash_authorized(claim, deadline))
     }
 
     fn send(

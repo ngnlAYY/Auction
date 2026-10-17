@@ -31,7 +31,15 @@ MM 收件人，不能互换。[sessions](src/database/sessions) 保存会话摘�
 凭据与 realtime 消费 owner 持有专用物理 session；操作复用原持锁连接，失效后不能从池补连接继续。
 guard 退出关闭物理连接，不带锁归池。凭据网络调用不跨越数据库事务；部署身份不包含连接原文、账号或密码。
 `credentials` 通过 `000045` 持久化可选预期 `player_name` 并传递当前 state_version，旧记录保持 NULL。
-该字段不是 verified 标记；当前没有内部履约调用方，因此不保留无调用的私有身份锁实现，未来事务门禁见下文。
+该字段不是 verified 标记；NULL 不阻断真实联合身份，非空值必须精确匹配。
+`000046` 的 `mail_runtime_generation` 只含全局 `mail_cookie` 行；取得原 session advisory lock 后，
+包括配置 Cookie 的每个 mail owner 都先原子推进 generation 并确认提交，再允许任何远端操作。
+[credentials/evidence.rs](src/database/credentials/evidence.rs) 提供 generation 首锁、active 凭据版本/世界/名称锁验，
+以及最终写入前 `clock_timestamp()` 的 30 秒证据时效门禁；不反向取得 world、资金、拍卖或 claim 锁。
+内部事务持 generation 行锁到确定结束，新 owner 必须等待推进；未知提交取消由上层 opaque guard 永久撤销旧 owner。
+配置 Cookie 没有数据库 ID/version，虽参与换主 fence，仍不具备内部提交能力。
+三个证据事务 helper 返回 `MailEvidenceTransactionError::{Sqlx, Rejected}`；外层先按 SQLSTATE 40001/40P01 分类整事务重试，
+再转换脱敏应用错误，不通过错误文本或提前擦除 SQLx 类型来决定重试；Sent 观察也进入 scope/同账号/时效锁验。
 
 ## 竞价事务和后端入口
 
@@ -93,6 +101,17 @@ Public 拍卖、竞价日志、成交历史与补偿批次的游标查询仅对�
 Admin 读取不为补全投影临时写入。邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
 
 Delivery 进入 sending 前须证明命令已提交；未知发送结果进入 manual_reconcile，不自动重寄。
+[delivery_scheduler/cash](src/database/delivery_scheduler/cash) 统一新旧 sending 入口：
+有证据时 generation→排序 worlds→资金scope/account→必要业务/凭据→义务→delivery→fulfillment→allocation；
+无证据时早锁scope及持久allocation关联，任何受保护账户或已有绑定均不能绕过。
+完整payload、recipient、command/hash及token/fencing/实时lease锁内精确匹配；reserved→in_flight与sending同事务。
+现金不足只提交冻结并返回Deferred，其余拒绝整事务回滚；SQLSTATE/A/B类型保留至最多三次重试边界。
+现金 until 入口沿用 prepared 原单调截止与 UTC 证据窗口的交集，每次重试只用原剩余整毫秒，零预算拒绝；
+PostgreSQL 18 `transaction_timeout` 在业务锁/审计前设置并覆盖 COMMIT，截止后回执不授权发送。
+旧 authorized(Some) 缺精确单调期限明确拒绝，None 保留原受保护 legacy 门；未知提交由 guard 撤销 owner。
+Sent结果同事务记spent，failed/unknown记unknown；过期sending逐条先定位原资金账户再锁delivery，不从metadata猜UID。
+已有allocation的五种新Admin动作全部返回Invalid且不写状态；原稳定命令先重放，无绑定legacy保留原语义。
+本轮不提供资金返还或未知重发授权，任何占用不会因TTL或人工失败释放。
 compose 安全改由 transport 在 sending fence 前实际只读检查，不再按历史失败永久阻断整个 world。
 未开始写入的有效 claim 释放回 pending 时撤销本次领取 attempt_count，并在同事务追加 release 审计；
 租约 token/fencing 和调用时刻、数据库实时有效期仍须一致，历史 sending/manual_reconcile 不进入该释放路径。
@@ -120,19 +139,56 @@ Delivery Admin 重试由 `recovery_commands/commands/delivery_retry.rs` 在原 S
 
 ## 内部履约原子事务设计
 
-当前尚无内部结清写入口或 `000046` 迁移；身份页面和 bot 真实库存持有证明闭合前不得启用。
-后续由 `fulfillment_scheduler` 拥有独立 `bot_internal_retained` 证明和事务，禁止复用强制外部 Sent/collected 的 satisfy：
+[fulfillment_scheduler/internal](src/database/fulfillment_scheduler/internal) 实现独立 `bot_internal_v1` 满足事务；
+迁移 `000048_internal_fulfillment` 只新增稳定命令与非敏感完整证明表，不回填旧记录清白或改写冻结金额。
 
-- 使用稳定 command_id/摘要，先检查幂等账本；同负载重放、异负载冲突。Serializable、显式行锁，40001/40P01 至多三次。
-- 同事务锁拍卖、lot、义务与 fulfillment，并由 credentials owner 提供事务内锁接口，锁定并复核
-  active mail credential、scope、完整名称 UTF-8 字节及版本；证明须携带实际远端来源、摘要及有界观测时间。
-  该私有锁接口待真实调用方闭合后一起实现，不以历史 proof 或永久 verified 标记代替。
-- 仅精确匹配有效 claim token/fencing/state_version/lease、pending 且从未准备和无 delivery 的新义务；
-  查询 owner 来源关联排除孤立 delivery、历史外部写与未知结果，不批量转换旧事故队列。
-- 由应用先证明义务种类、身份、当前真实库存持有及资金条件；事务内复核持久收款事实和所有直接依赖。
-  装备详情存在或库存中未找到均非已内部收到。退款、isekai carrier 和装备交付不得绕过收款门禁。
-- 不变金额/原 seller payout 身份；内部证明插入、义务 satisfied、追加审计和解除直接依赖一次提交，
-  没有外部 mail id 或伪造 delivery success。未知提交只读重放，不重新支付。
+- 原命令先重放；同负载原结果、异负载冲突。Serializable整事务最多三次，只按类型化40001/40P01重试。
+  确认ROLLBACK才返回RolledBack；未知提交/取消由应用opaque guard撤销原owner。
+- 锁序为generation→排序worlds→资金scope/account→auction→recovery→lot/equipment→credentials→users→
+  排序obligations→actions→deliveries→fulfillments→proof/ledger/audit；旧prepare/activate/satisfy同步此业务前缀。
+  同EID可能关联多个本地equipment UUID，均核对；当前实现为完整孤儿排查按UUID锁全部deliveries，成本须在集成评审关注。
+- 复核当前用户版本、有效claim token/fencing/state_version及数据库实时时效；新pending必须从未准备、激活或关联delivery。
+  同EID/world其它义务、恢复动作、出站及孤儿记录无法排除冲突时等待，旧unknown不解除。
+  `conflicts.rs` 按真实 origin/payload 闭集 schema 排除已验证无装备通知；普通 attachment_ids 按外部 EID/world，
+  settlement secret 引用按实际 equipment EID/world 核对。论坛 `forum_auction_notice` 仍属 mail_intake，
+  仅同 command/world 的 `auction_forum_bid_commands` notify 账本、零命令金额及完整 producer origin 重建一致，
+  且 origin_id=external_mail_id、模板/结果码相符、零 Credits/COD、空附件、无 key/正文时，才识别为无装备通知；
+  关联只读，不新增反向业务行锁。缺失/畸形/未知 schema 仍阻断，不凭前缀或 succeeded 放行；
+  原精确 recovered_handoff 例外、来源关联检查和统一锁序保持。
+- 库存只消费A完整正向Armory快照；所有资金SQL由settlement_funding拥有。缺真实C、自有用途或来源不内部满足。
+  原合法退款仅在equipment_recovered及原外部handoff成功/精确取回证明闭合后转移原S/T，未新增内部取消退款。
+- 满足、清claim/版本、独立proof、资金动作、直接blocked依赖和追加审计同事务；contingent退款不通用解锁。
+  外部 COD 在任何满足/资金化/解依赖前，以已锁账户和同一有效 Main cash 检查既有占用；
+  缺口确定提交冻结并返回 FundingDeferred，不满足原付款、不发行、不解依赖。通过后才保存原 Sent collected 满足、
+  资金化并做发行后覆盖校验，最后释放原依赖；无账户且无保护账户仍为原外部语义，不产生 allocation。
+  外部退款用途预留只授权原退款allocation，不满足义务或伪造外发结果。
+
+Recovery action终态先锁父case再锁action，确认路径按UUID预锁全部fulfillment。
+Admin旧重试由recovery owner提供 `lock_recovery_delivery_retry_scope` / `lock_recovery_delivery_retry_actions` 两阶段锁；
+delivery_admin 已在资金之后先锁recovery，完成所需 watch lot 锁后锁actions，再锁delivery并调用原reset；
+只用于无allocation的 RetryFailed/ReconcileRetry，SQLSTATE原样交runner，原授权/CAS不变。
+源码静态结果见[状态页](../../docs/status.md)；迁移、SQL执行、并发与大库锁成本仍需独立运行证据。
+
+## 真实现金账户与事务helper
+
+[settlement_funding](src/database/settlement_funding) 独占迁移 `000047` 的资金scope、稳定UID账户、
+唯一source/receipt、用途allocation、追加entry及命令结果。初始0/unreconciled，不迁移回填历史现金。
+helper在generation/world之后、业务锁之前取得scope/account，令牌绑定当前事务；业务owner随后锁原冻结事实。
+内部B及实际C转原seller S/受限T，seller retained不自动再投资；合法退款撤销互斥S/T后按原用途还原。
+所有Credits Send须经reserved→in_flight→spent/unknown，失败/人工failed不释放，精确返还另追加事实。
+`lock_funded_delivery_account`在delivery锁之前按持久allocation关联早锁原账户，供结果回写、过期claim和人工门禁使用；
+spent、返还后的关联及冻结账户仍返回原令牌，孤儿/歧义失败关闭。只有确无关联才返回None，scope仍持锁；
+delivery owner 不从metadata推断账号或把非ready账户降级为legacy。
+
+完整责任preview使用Serializable READ ONLY；旧无UID责任只计保守隔离，不改归属。apply锁完整责任集合、
+核对预览摘要/版本和真实现金，只有真实余量可建立本次reconciliation来源；既有allocation全部扣占，
+同余额不能反复开额度，差额冻结账户。未资金化付款已外发但收款事实未闭合（或关联 delivery 缺失）时，
+preview/apply 共用 snapshot 增加 `payment_collection_unclosed` blocker，Main 装备 COD 与跨世界现金 carrier 均覆盖；
+正常尚未外发的 pending/prepared 付款不因此阻断。补偿与隔离新增需求明确不低于零，既有占用仍全部计入 allocated，不能释放。
+新COD要求精确MID/当前账号实收绑定、全局payment/source唯一，
+且发送晚于最近opening边界；跨边界历史款继续核对。仅完整发送门装配后可启用；
+`delivery_scheduler/capability.rs` 是当前构建唯一V1提供者，非postgres档位返回None。
+启用仍要求相关程序同版、停止旧Worker、专用账号无外部资金写入及mail owner独占；构建能力不替代运行验收。
 
 ## 连接池可观测性
 
