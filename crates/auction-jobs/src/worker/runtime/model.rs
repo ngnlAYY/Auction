@@ -3,7 +3,6 @@
 use super::*;
 
 /// 持久化 Worker 的端口与运行参数。
-///
 /// 装配根显式注入结算与履约端口，未配置的任务不可作为成功执行。
 pub struct PersistentWorker<C> {
     pub schedule: Arc<dyn ScheduledRoundStore>,

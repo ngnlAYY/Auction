@@ -1,5 +1,4 @@
 //! Admin 结算报表筛选的 URL 状态与浏览器历史同步。
-//!
 //! 为什么不迁到统一的 `use_query_state`：本页的 URL 状态被拆成四个独立 signal
 //! （world/auction/sequence/page），popstate 恢复不是「回写单个状态信号」而是经
 //! `use_settlement_location_revision` 的 revision 驱动页面 effect 一次性恢复四个 signal，

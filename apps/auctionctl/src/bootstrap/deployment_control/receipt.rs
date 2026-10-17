@@ -1,6 +1,5 @@
-//! systemd 启动顺序回执的私有文件边界。
-//!
-//! 回执不保存 TOML、环境变量或命令输出，只绑定三个受控 unit 的 systemd 进程身份和观察时间。
+//! systemd 启动顺序回执的私有文件边界；只绑定受控 unit 的进程身份和观察时间，不保存
+//! TOML、环境变量或命令输出。
 
 use std::{
     fs::{self, File, OpenOptions},

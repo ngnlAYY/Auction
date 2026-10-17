@@ -1,7 +1,5 @@
-//! PostgreSQL Delivery owner 的同事务追加式审计写入。
-//!
-//! 这里只接受调用方已经校验过的低基数状态元数据；delivery payload、远端原文、Cookie 和密钥
-//! 永远不能进入审计记录。任何审计写入失败都会使调用方事务回滚，避免状态事实与审计证据分叉。
+//! PostgreSQL Delivery owner 的同事务追加式审计写入；只接受已校验的低基数状态元数据，
+//! payload、远端原文、Cookie 和密钥永不入审计，写入失败必须回滚调用方事务。
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;

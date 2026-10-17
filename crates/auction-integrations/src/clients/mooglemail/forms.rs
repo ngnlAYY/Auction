@@ -15,11 +15,8 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 /// 每次 compose POST 都需要重放的消息字段。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailMessageFields {
-    /// 远端收件人角色名。
     pub recipient: String,
-    /// 邮件标题。
     pub subject: String,
-    /// 邮件正文。
     pub body: String,
 }
 
@@ -52,7 +49,6 @@ impl Drop for MoogleMailMessageFields {
 }
 
 /// 只可由 typed constructor 生成的 MoogleMail 表单。
-///
 /// token、消息正文和附件参数不会通过 Debug/Display 输出；表单被丢弃时会尽力清除其字符串
 /// 缓冲区。真正发起请求前还必须由 MoogleMailClient::post 校验目标页面类型。
 pub struct MoogleMailForm {
@@ -61,7 +57,6 @@ pub struct MoogleMailForm {
 }
 
 impl MoogleMailForm {
-    /// 构造附加 Credits 的 compose 动作。
     pub fn attach_credits(
         token: &MoogleMailToken,
         message: &MoogleMailMessageFields,
@@ -78,7 +73,6 @@ impl MoogleMailForm {
         Ok(form)
     }
 
-    /// 构造附加一件装备的 compose 动作。
     pub fn attach_equipment(
         token: &MoogleMailToken,
         message: &MoogleMailMessageFields,
@@ -110,7 +104,6 @@ impl MoogleMailForm {
         Ok(form)
     }
 
-    /// 构造最终发送动作。
     pub fn send(
         token: &MoogleMailToken,
         message: &MoogleMailMessageFields,
@@ -120,12 +113,10 @@ impl MoogleMailForm {
         Ok(form)
     }
 
-    /// 构造退回整封邮件动作。
     pub fn return_message(token: &MoogleMailToken) -> Result<Self, MoogleMailError> {
         Self::mail_action(MoogleMailOperation::ReturnMessage, token)
     }
 
-    /// 构造领取全部附件动作。
     pub fn take(token: &MoogleMailToken) -> Result<Self, MoogleMailError> {
         Self::mail_action(MoogleMailOperation::Take, token)
     }

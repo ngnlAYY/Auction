@@ -1,8 +1,5 @@
-//! Admin HTTP 监听器装配。
-//!
-//! TCP 与 Unix socket 共用同一 Axum 路由。Unix socket 的目录、单实例锁、stale socket、
-//! owner/group、权限和身份校验由 `auction-http` 的共享绑定器统一负责；本模块只选择 Admin
-//! runtime 的有效模式并把非敏感参数传入。
+//! Admin HTTP 监听器装配；socket 目录、锁、owner/group 与身份校验由 `auction-http`
+//! 共享绑定器负责，本模块只选择 Admin 有效模式并传参。
 
 use std::{future::Future, io};
 

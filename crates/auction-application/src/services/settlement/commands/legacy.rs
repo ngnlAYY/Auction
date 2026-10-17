@@ -26,7 +26,6 @@ pub(super) enum StoredSettlementReplay {
 }
 
 /// 旧版 `SettlementCompleteCommand` 的 Go `encoding/json` 字段顺序与表示。
-///
 /// 旧版 ID 是 `[16]byte`，因此 JSON 必须是十六个数字组成的数组；不能使用 UUID 字符串。
 #[derive(Serialize)]
 struct LegacySettlementCompleteHash<'a> {
@@ -102,7 +101,6 @@ pub(super) fn classify_stored_settlement(
 }
 
 /// 把旧版摘要与已迁移的结算表逐项对账，并从权威 lot 事实重建当前领域计划。
-///
 /// 这里只允许重放已经 settled 的结果；绝不能拿旧摘要再次执行结算写入。
 pub(super) fn replay_legacy_settlement(
     command: SettleAuctionCommand,

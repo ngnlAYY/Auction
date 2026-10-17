@@ -48,10 +48,9 @@ pub(super) async fn exclude_asset_conflicts(
     if conflict {
         return Err(FundingError::Unproven);
     }
-    // 普通通知和入站处置使用attachment_ids，而非settlement的装备secret引用。
-    // 只排除已验证schema且不涉及目标EID/world的普通载荷；来源关联仍在后续SQL独立核对。
-    // 论坛通知复用mail_intake，但owner是同command/world的notify账本；按producer字段重建完整origin。
-    // 此处仅在原事务快照读取关联，不反向取得论坛业务行锁，也不以投递成功状态授权排除。
+    // 普通通知与入站处置用attachment_ids，而非settlement的装备secret引用；只排除已验证schema
+    // 且不涉及目标EID/world的普通载荷，来源关联仍由后续SQL独立核对。论坛通知复用mail_intake，
+    // 但owner是同command/world的notify账本，按producer重建origin；此处只读快照，不反取论坛锁。
     let mut unrelated_attachments = Vec::new();
     let deliveries = sqlx::query(
         "SELECT d.id, d.command_id, d.origin_kind, d.origin_id, d.payload,

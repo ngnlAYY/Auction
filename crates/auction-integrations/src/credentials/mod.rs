@@ -1,8 +1,5 @@
-//! 外部凭据密封适配器。
-//!
-//! mail_cookie 与 forum_cookie 使用不同的 AAD 和指纹域，即使误用同一份数据密钥也不能
-//! 跨用途解密或通过指纹校验。该模块不负责读取配置或数据库，只接收装配根提供的
-//! DataKey，并把明文转换为应用层的不透明密文信封。
+//! 外部凭据密封适配器；mail_cookie 与 forum_cookie 使用不同 AAD 和指纹域，
+//! 本模块不读配置或数据库，只把明文转换为不透明密文信封。
 
 use std::{fmt, sync::Arc};
 
@@ -28,7 +25,6 @@ const FORUM_AAD_PREFIX: &str = "auction/credential/forum/v1/";
 const MAIL_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/mooglemail-cookie\0";
 const FORUM_FINGERPRINT_DOMAIN: &[u8] = b"auction/cryptobox/secret/v1/ehentai-cookie\0";
 
-/// Admin 外部凭据密封器。
 pub struct CredentialSealer {
     data_key: Arc<DataKey>,
     random: SystemRandom,

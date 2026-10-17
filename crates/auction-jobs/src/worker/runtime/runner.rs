@@ -3,7 +3,6 @@
 use super::*;
 
 /// 无数据库时仅用于保持进程存活的启动骨架。
-///
 /// 真实 Worker 必须使用下面的 `run_persistent_until_shutdown`；该函数不执行任何任务，避免
 /// 在没有持久化端口时误把内存等待器当成生产调度器。
 pub async fn run_until_shutdown(
@@ -23,7 +22,6 @@ pub async fn run_until_shutdown(
 }
 
 /// 使用持久化轮次表运行 Worker。
-///
 /// interval 只是唤醒信号；每一轮都会重新从数据库领取 due 且租约可用的记录。生命周期
 /// 状态迁移统一调用 `auction-application`，本 crate 不复制领域状态机。
 pub async fn run_persistent_until_shutdown<C, S>(
@@ -94,7 +92,6 @@ where
 }
 
 /// 使用持久化轮次表和结算 workflow 运行 Worker。
-///
 /// 结算通过 `SettlementCommandPort` 进入应用层，Worker 不复制结算计算。
 pub async fn run_persistent_with_settlement_until_shutdown<C, S>(
     worker: PersistentWorker<C>,

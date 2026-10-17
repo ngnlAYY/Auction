@@ -1,12 +1,9 @@
 //! 管理端浏览器界面（Dioxus CSR）。
-//!
 //! 路由集合按旧版 Auction-BF 的 `manifests/admin.routes.json` 冻结。管理端与公开端是
 //! 不同 surface：本 crate 独立拥有自己的组件树和路由树，不复用公开端组件，公开端也不
 //! 得依赖本 crate。
-//!
 //! 界面文案取自 `i18n/*.ftl`，默认简体中文——沿用旧 `manifests/admin.locales.json` 的
 //! `default_locale`。受支持语言与公开端一致，但译文资源彼此隔离。
-//!
 //! 本 crate 不得导入存储、配置或凭据访问路径。
 
 #[path = "../auction/auctions.rs"]

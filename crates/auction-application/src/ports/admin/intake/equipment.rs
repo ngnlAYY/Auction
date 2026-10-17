@@ -38,7 +38,6 @@ impl fmt::Debug for CanonicalEquipmentStat {
 }
 
 /// Admin canonical 装备输入。
-///
 /// `key` 只用于来源适配器即时生成密文信封，禁止进入持久化命令、日志或 HTTP 响应。
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CanonicalEquipment {

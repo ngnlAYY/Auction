@@ -172,7 +172,6 @@ pub enum PublicLotDetailItemResponse {
 }
 
 /// Public lot 列表与详情共用的响应外壳。
-///
 /// 旧 v1 客户端对顶层字段使用严格闭集校验；世界、场次号和计划结束时间只属于
 /// `/api/v1/auctions/current`，不能作为扩展字段混入 lot 响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

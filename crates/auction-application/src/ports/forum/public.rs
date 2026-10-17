@@ -1,5 +1,4 @@
 //! Public 论坛镜像读取端口。
-//!
 //! 该端口只读取本地已经持久化的论坛同步投影，不直接调用论坛网关，也不把远程发布成功
 //! 推断为本地状态。未接入的后端必须显式报告能力缺失。
 
@@ -24,9 +23,7 @@ pub struct PublicForumThread {
     pub content_revision: i64,
     /// 最近一次由完整主题读取证明已处理到的真实论坛楼层。
     pub processed_through_post_number: i32,
-    /// 最近一次取得远端固定楼层正文证明的时间。
     pub content_synced_at: Option<DateTime<Utc>>,
-    /// 最近一次完整扫描成功的时间。
     pub content_last_success_at: Option<DateTime<Utc>>,
     /// 当前未恢复扫描错误的发生时间。
     pub content_last_error_at: Option<DateTime<Utc>>,
@@ -95,7 +92,6 @@ fn valid_optional_multiline_text(value: Option<&str>, maximum: usize) -> bool {
     })
 }
 
-/// Public 论坛镜像读取端口。
 pub trait PublicForumReader: Send + Sync {
     /// 读取仍在运行的 Worker 公布的启用状态；没有可靠观测时返回 None，不能猜测为关闭。
     fn public_forum_sync_enabled(&self) -> ApplicationFuture<'_, Option<bool>>;

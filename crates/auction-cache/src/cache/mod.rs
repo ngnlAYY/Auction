@@ -1,7 +1,5 @@
-//! 可选缓存传输适配器。
-//!
-//! 缓存不是拍卖事实来源。应用层只能把本模块用于可回源的读取投影；竞价事务、幂等账本、
-//! 审计、outbox 和 Worker 游标必须继续由数据库持久化。
+//! 可选缓存传输适配器；缓存不是拍卖事实来源，只用于可回源的读取投影，竞价事务、
+//! 幂等账本、审计、outbox 与 Worker 游标仍由数据库持久化。
 
 use std::{fmt, time::Duration};
 
@@ -37,13 +35,11 @@ pub enum CacheStore {
 }
 
 impl CacheStore {
-    /// 创建完全关闭的缓存实现。
     pub const fn disabled() -> Self {
         Self::Disabled
     }
 
     /// 创建 Redis 缓存。
-    ///
     /// 未编译 `redis` feature 时返回明确错误，避免配置要求 Redis 却静默降级。
     pub fn redis(redis_url: &str) -> Result<Self, CacheError> {
         #[cfg(feature = "redis")]

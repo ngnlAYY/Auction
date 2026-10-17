@@ -13,7 +13,6 @@ const ADMIN_MANUAL_LOGIN_KEY_MIN_BYTES: usize = 32;
 const ADMIN_MANUAL_LOGIN_KEY_MAX_BYTES: usize = 256;
 
 /// 仅在可信边界内短暂存在的用户登录 key。
-///
 /// MoogleMail 签发和换绑只接受 canonical Base64URL；Admin 手工创建还要兼容旧版允许的
 /// 32–256 字节 UTF-8 非控制字符。两个构造器保持各自闭集，避免放宽邮件命令解析。
 pub struct MailLoginKey {
@@ -122,7 +121,6 @@ impl MailLoginKeyEnvelope {
         &self.ciphertext
     }
 
-    /// 返回 GCM nonce。
     pub fn nonce(&self) -> &[u8] {
         &self.nonce
     }

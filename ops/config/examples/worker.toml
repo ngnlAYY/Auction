@@ -11,7 +11,7 @@ runtime_config_file = "runtime/admin.toml"
 [tracing]
 # 可选：是否启用 OTLP/HTTP span 导出；启用时必须同时提供 endpoint 和非零采样比例。
 enabled = false
-# 可选：collector 地址，例如 https://otel-collector.example.invalid/v1/traces。
+# 可选：collector 地址；启用时必须提供。
 # endpoint = "https://otel-collector.example.invalid/v1/traces"
 # 可选：批次等待秒数，范围 1-30，默认 2。
 batch_timeout_seconds = 2
@@ -106,8 +106,7 @@ evidence_stale_after_seconds = 300
 enabled = false
 # 可选：socket 所属 Unix group 名称；默认 auction-worker-control，启用前必须由部署者建立并授予 Worker 进程成员资格。
 group = "auction-worker-control"
-# 不要把示例数字直接用于生产，应以部署主机上的 Admin/运维进程身份为准。
-# 可选：允许访问 control 的内核认证 GID 列表；默认空，启用时与 UID 列表至少填写一项。
+# 可选：允许访问 control 的内核认证 GID 列表；默认空，启用时与 UID 列表至少填写一项；示例值不得直接用于生产，应以部署主机上的 Admin/运维进程身份为准。
 allowed_peer_gids = []
 # 可选：允许访问 control 的内核认证 UID 列表；默认空，启用时与 GID 列表至少填写一项。
 allowed_peer_uids = []
@@ -124,7 +123,7 @@ enabled = false
 verify_post_body = false
 # 可选：active ForumCookie 凭据 scope，可填 main、isekai 或 shared；默认 shared。
 credential_world = "shared"
-# 可选：固定论坛 endpoint；省略时使用生产 endpoint。测试时可使用回环 HTTP。
+# 可选：固定论坛 endpoint；省略时使用生产 endpoint，测试时可使用回环 HTTP。
 # endpoint = "https://forums.e-hentai.org"
 # 可选：公开端 HTTPS origin；默认省略且不显示 Auction address，配置后以可点击 BBCode 展示当期拍卖 URL。
 public_base_url = "https://auction.ngnl.host"
@@ -230,8 +229,7 @@ level_min = 0
 # 可选：最高装备等级；0 表示不启用等级上限，最大 1000。
 level_max = 0
 
-# 可选区块：MoogleMail 业务通知模板；省略字段使用旧版默认英文文本。
-# 模板只能使用各字段注释列出的占位符，Worker 启动时会拒绝未知键或非法正文。
+# 可选区块：MoogleMail 业务通知模板；省略字段使用旧版默认英文文本，模板只能使用下方注释列出的占位符，未知键或非法正文会在 Worker 启动时被拒绝。
 [worker.mooglemail.mail_templates]
 # 可选：拍卖邮件包含资产时的拒绝正文。
 auction_assets_rejected = "Auction assets rejected"
@@ -262,8 +260,7 @@ settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
 # 可选：运维告警通知；支持 {summary}。
 operations_alert = "Operations alert: {summary}"
 
-# 可选：额外启用的世界。每个条目都会建立独立的邮箱游标、claim 和 allowlist；
-# 顶层 world_id 代表第一个世界，不能在这里重复配置同一 world_id 或 mailbox_key。
+# 可选：额外启用的世界；每个条目建立独立的邮箱游标、claim 与 allowlist，顶层 world_id 代表第一个世界，不能在这里重复配置同一 world_id 或 mailbox_key。
 # [[worker.mooglemail.additional_worlds]]
 # 可选：额外邮箱的游戏世界，只能是 main 或 isekai。
 # world_id = "isekai"

@@ -13,7 +13,6 @@ use auction_application::{
 use crate::cryptobox::EquipmentKeyOpener;
 
 /// 把当前公开 lot、密文 owner 与装备数据密钥组合成一次完整游戏 URL 投影。
-///
 /// 完整 URL 只进入 P09/P11 lot DTO；解析器在读取公开投影后才打开 key，并立即把经校验的 URL
 /// 移交给 HTTP 映射边界。
 pub struct EquipmentGameLinkResolver {

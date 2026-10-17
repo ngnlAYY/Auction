@@ -1,5 +1,4 @@
 //! Admin 邮件轮询暂停命令用例。
-//!
 //! 读取路径由邮件 owner 直接提供安全投影；暂停/恢复属于可变命令，必须在 PostgreSQL
 //! Serializable 事务中完成状态版本 CAS、命令账本、审计和可重放结果。
 
@@ -14,7 +13,6 @@ use crate::{
 const COMMAND_KIND: &str = "set_polling_paused";
 const TRIGGER_COMMAND_KIND: &str = "trigger_poll";
 
-/// Admin 邮件轮询命令服务。
 pub struct AdminMailService<R, C> {
     repository: Arc<R>,
     clock: Arc<C>,

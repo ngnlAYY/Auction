@@ -69,9 +69,8 @@ pub(super) fn MarkdownBlockView(block: MarkdownBlock) -> Element {
     }
 }
 
-/// 文档表格没有固定业务字段，按表头与前 32 行的典型可见长度估算列权重。
-///
-/// 使用第 75 百分位并限制极端长文，避免单条长 URL/说明挤占整张表；CJK 字符按双宽计。
+/// 文档表格没有固定业务字段：按表头与前 32 行的典型可见长度（第 75 百分位、CJK 双宽）
+/// 估算列权重，避免单条长 URL/说明挤占整张表。
 fn table_column_weights(headers: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) -> Vec<u16> {
     headers
         .iter()
@@ -109,10 +108,8 @@ fn render_heading(level: u8, nodes: Vec<Inline>) -> Element {
     }
 }
 
-/// 从标题行内节点提取纯文本并 slug 化为锚点 id。
-///
-/// 仅保留字母数字字符（含 CJK 表意文字），其余字符折叠为单个连字符并去除首尾连字符；
-/// 标题文本为空或全是标点时返回 `None`，不生成空 id。
+/// 从标题行内节点提取纯文本并 slug 化为锚点 id；仅保留字母数字（含 CJK），其余折叠为
+/// 单个连字符。文本为空或全是标点时返回 `None`，不生成空 id。
 fn heading_anchor(nodes: &[Inline]) -> Option<String> {
     let mut text = String::new();
     collect_text(nodes, &mut text);
@@ -143,9 +140,7 @@ fn collect_text(nodes: &[Inline], output: &mut String) {
 }
 
 /// 站内链接（`/`、`./`、`../`、`#`、`?` 开头）留在当前页跳转；其余视为外链。
-///
-/// 与 inline.rs 的 `safe_link_target` 白名单保持同一口径：`//` 开头的协议相对 URL
-/// 会跳到外部域，按外链处理。
+/// 与 inline.rs 的 `safe_link_target` 同一口径：开头的协议相对 URL 也按外链处理。
 fn is_internal_target(target: &str) -> bool {
     (target.starts_with('/') && !target[1..].starts_with('/'))
         || target.starts_with("./")

@@ -3,7 +3,6 @@
 use super::*;
 
 /// Public 普通竞价成功后的稳定结果。
-///
 /// 结果来自竞价事务提交后的 lot 投影；重放同一 `command_id` 时返回同一份投影，不把数据库
 /// 计划或内部竞价事实直接暴露给浏览器。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -21,7 +20,6 @@ pub struct PlaceBidResultResponse {
     pub leading: bool,
 }
 
-/// 当前用户竞价事实的账户投影。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicOwnedBidResponse {
     pub id: String,
@@ -102,8 +100,6 @@ pub struct PublicOwnedProxyResponse {
     pub capabilities: PublicOwnedProxyCapabilitiesResponse,
 }
 
-/// Public 代理命令刚刚产生的竞价结果。
-///
 /// 该 DTO 对齐旧系统命令响应的最小公开字段；它不携带账户页专属的拍卖、装备、时间和
 /// capability 字段，也不把命令账本的原始结果暴露给浏览器。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -134,7 +130,6 @@ pub struct PublicProxyCommandAuthorizationResponse {
     pub bid: Option<PublicProxyCommandBidResponse>,
 }
 
-/// Public 代理创建/降低命令响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicProxyCommandResponse {
     pub authorization: PublicProxyCommandAuthorizationResponse,
@@ -153,7 +148,6 @@ pub struct PublicMyBidsResponse {
     pub page_size: i64,
 }
 
-/// 当前用户在一个 lot 上的代理查询响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicMyProxyResponse {
     pub authorization: Option<PublicOwnedProxyResponse>,
@@ -166,7 +160,6 @@ pub struct PublicLoginRequest {
     pub key: String,
 }
 
-/// Public 登录成功响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicLoginResponse {
     pub user_id: String,
@@ -176,7 +169,6 @@ pub struct PublicLoginResponse {
     pub absolute_expires_at: String,
 }
 
-/// Public 当前会话响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicSessionCurrentResponse {
     pub authenticated: bool,
@@ -186,8 +178,6 @@ pub struct PublicSessionCurrentResponse {
     pub absolute_expires_at: String,
 }
 
-/// Admin 登录或当前会话响应。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；服务端两条路径都只
 /// 序列化本 DTO，收紧只影响反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -218,7 +208,6 @@ pub struct WorldsResponse {
     pub worlds: BTreeMap<String, WorldStatusResponse>,
 }
 
-/// Public 规则文档响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicRulesResponse {
     pub locale: String,
@@ -229,7 +218,6 @@ pub struct PublicRulesResponse {
 }
 
 /// Admin 规则文档安全响应；包含发布者，但不包含数据库内部模型。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -252,7 +240,6 @@ pub struct AdminRulesCandidateResponse {
 }
 
 /// Admin runtime 配置安全响应；更新成功仍明确要求重启才能让进程读取新文档。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐；只收紧反序列化。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

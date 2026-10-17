@@ -1,7 +1,5 @@
-//! 论坛拒绝与警告的安全英文投影；不改变竞价决定、幂等状态或重试分类。
-//!
-//! 新拒绝按类型持久化错误码，旧通用拒绝只接受已知完整诊断格式。未知码和任意详情均回退，
-//! 不能把本地错误、SQL、凭据、代理上限或用户输入拼进系统日志帖。
+//! 论坛拒绝与警告的安全英文投影；不改变竞价决定、幂等状态或重试分类，
+//! 未知码与任意详情均回退，不拼入本地错误、SQL、凭据或用户输入。
 
 use auction_application::{ApplicationError, CommandLedgerError, CompetitionTransactionError};
 use auction_domain::DomainError;
@@ -149,7 +147,6 @@ pub(super) fn rejection_message(
 }
 
 /// 返回解析器与主题处理警告的闭集英文投影；未知码和原始详情均不得回显。
-///
 /// pending 只表示处理未完成，不证明出价已接受或未接受；通知重试前可能已有成功出价。
 /// 代理行仍由解析器静默忽略，本函数不产生新警告，也不改变命令或重试策略。
 pub(super) fn warning_message(code: &str) -> (&'static str, &'static str) {

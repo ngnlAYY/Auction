@@ -1,22 +1,16 @@
 .codegraph/
-.trellis/
-.gitnexus/
-.agents/*
+.agents/
 .claude/
 .codex/
 .grok/
-.omx/
 .pi/
 
-.keyenv
+target/
+.env
+.env.*
+.tmp/
 
-/target/
-/.env
-/.env.*
-!/ops/config/examples/
 /ops/config/**/*.local.toml
 /ops/config/**/*.secret.toml
-/.tmp/
-/migrations/.sqlx/
 
 CLAUDE.md

@@ -53,10 +53,8 @@ impl DeliveryTransactionError {
 }
 
 /// 按旧版 `RunSerializable(..., 3)` 语义执行履约 owner 事务。
-///
-/// 只有 PostgreSQL 明确报告的序列化冲突（40001）或死锁（40P01）才会重试；业务身份冲突、
-/// claim 失效和其他数据库错误直接返回。每次重试都会从头开启事务，调用方传入的 delivery
-/// 与 audit 身份则保持不变。
+/// 只有 PostgreSQL 明确报告的序列化冲突（40001）或死锁（40P01）才重试；业务身份冲突、claim 失效
+/// 和其他数据库错误直接返回。每次重试从头开启事务，但调用方传入的 delivery 与 audit 身份不变。
 #[cfg(feature = "postgres")]
 async fn run_serializable_delivery_transaction<T, F>(
     pool: &crate::database::TrackedPool<Postgres>,

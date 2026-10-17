@@ -35,7 +35,6 @@ impl MailProcessingDecision {
     }
 }
 
-/// MoogleMail 业务处理器端口。
 pub trait MailProcessor: Send + Sync {
     fn process(&self, message: MailMessage) -> MailProcessingFuture<'_>;
 }

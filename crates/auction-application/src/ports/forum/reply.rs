@@ -1,5 +1,4 @@
 //! 论坛回帖扫描与竞价命令导入端口。
-//!
 //! 论坛帖子只是外部输入。Worker 必须先通过身份和 lot 投影解析，再使用现有竞价命令端口；
 //! 本模块不允许论坛适配器直接写拍卖状态。
 
@@ -155,8 +154,6 @@ pub enum ForumCommandStatus {
     Rejected,
 }
 
-/// 论坛命令账本开始结果。
-///
 /// Worker 需要区分“已完成的原命令”和“本次可以继续执行的 pending 命令”，否则竞价已成功
 /// 但通知入队失败时，下一轮只看到 `should_run = false`，会永久跳过通知重试。旧版账本使用
 /// 不同的稳定 ID 算法，因此还必须返回实际命中的命令 ID，让后续竞价、通知和完成写入继续
@@ -168,7 +165,6 @@ pub struct ForumCommandStart {
     pub should_run: bool,
 }
 
-/// 论坛回帖持久化端口。
 pub trait ForumReplyStore: Send + Sync {
     /// 领取固定楼层刷新目标；内容 lease 必须覆盖单主题总时限，避免多 Worker 交叉编辑远端帖子。
     fn claim_published_topics(

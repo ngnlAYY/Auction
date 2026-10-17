@@ -10,7 +10,6 @@ pub fn run() {
 }
 
 /// 公开端路由表。
-///
 /// 路径逐条登记旧系统已冻结的公开端 route 与经评审的 Public 扩展，新增前必须确认外部契约。
 #[derive(Clone, Debug, PartialEq, Routable)]
 #[rustfmt::skip]

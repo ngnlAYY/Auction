@@ -39,10 +39,8 @@ pub(crate) use mapping::*;
 
 type PgTransaction = Transaction<'static, Postgres>;
 
-/// PostgreSQL 竞价事务的唯一实现。
-///
-/// 事务对象拥有 SQLx 从连接池取得的连接，因此应用回调结束后 runner 仍能提交或回滚；
-/// 回调不能拿到独立连接，也不能把命令账本和竞价写入拆成两个事务。
+/// PostgreSQL 竞价事务的唯一实现；事务对象拥有 SQLx 连接，回调结束后 runner 仍能提交或回滚。
+/// 回调不能自取独立连接，也不能把命令账本和竞价写入拆成两个事务。
 pub struct PostgresCompetitionTransaction {
     transaction: Option<PgTransaction>,
 }

@@ -51,8 +51,8 @@ pub(super) async fn apply_open_plan_postgres(
         .await
         .map_err(map_sql_error)?
     };
-    // 已撤回的拍品是保留的历史事实，不再参与开拍；仍锁住并检查全部记录，避免把其他
-    // 非法状态当作可忽略历史。只有具备收件来源的 pending 拍品才能进入本次激活集合。
+    // 已撤回拍品是保留的历史事实；仍锁住并检查全部记录，避免把其他非法状态当成可忽略历史，
+    // 只有具备收件来源的 pending 拍品才能进入本次激活集合。
     let mut pending_count = 0_usize;
     for row in &lot_rows {
         let status: String = row.try_get("status").map_err(map_sql_error)?;

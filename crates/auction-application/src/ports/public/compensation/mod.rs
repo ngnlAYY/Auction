@@ -1,5 +1,4 @@
 //! Public 补偿池与结算账本读取端口。
-//!
 //! 补偿池只公开已经提交的结算事实。游标、余额守恒和 movement 的 lot 投影在应用边界
 //! 校验，存储适配器不得把内部结算计划或未提交的中间状态直接暴露给 HTTP。
 
@@ -33,7 +32,6 @@ pub enum PublicCompensationCursor {
     Boundary { sequence: i64, id: Uuid },
 }
 
-/// Public 补偿池批次列表请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicCompensationListRequest {
     pub limit: i64,
@@ -106,7 +104,6 @@ impl PublicCompensationRound {
     }
 }
 
-/// Public 补偿池批次列表页。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicCompensationPage {
     pub entries: Vec<PublicCompensationRound>,
@@ -146,7 +143,6 @@ impl PublicCompensationPage {
     }
 }
 
-/// Public 补偿池读取端口。
 pub trait PublicCompensationReader: Send + Sync {
     fn list_public_compensation(
         &self,

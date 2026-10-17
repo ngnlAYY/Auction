@@ -1,5 +1,4 @@
 //! Public 代理授权的安全展示组件。
-//!
 //! 本模块只格式化服务端已经过滤的代理投影，不在浏览器端推导授权状态机或竞价结果。
 
 use auction_web_shared::legacy_t as t;

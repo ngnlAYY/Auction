@@ -38,7 +38,6 @@ impl AdminCredentialEnvelope {
         &self.ciphertext
     }
 
-    /// 返回 12 字节随机 nonce。
     pub fn nonce(&self) -> &[u8] {
         &self.nonce
     }

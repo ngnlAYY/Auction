@@ -1,5 +1,4 @@
 //! Admin realtime 运维端口。
-//!
 //! 这里仅暴露事件元数据、lag、failure 的安全投影和带幂等命令的显式 replay。原始事件
 //! payload、数据库行和驱动错误留在存储 owner；replay 必须在同一事务中追加新事件并解决
 //! 原 failure。
@@ -17,7 +16,6 @@ pub const MAX_REALTIME_ADMIN_PAGE_SIZE: i64 = 200;
 /// Admin realtime 数字分页允许的最大偏移量，避免深分页把数据库退化为无界扫描。
 pub const MAX_REALTIME_ADMIN_OFFSET: i64 = 1_000_000;
 
-/// realtime 事件元数据查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeEventListRequest {
     pub stream_key: Option<String>,
@@ -48,7 +46,6 @@ pub struct RealtimeEventSnapshot {
     pub created_at: DateTime<Utc>,
 }
 
-/// realtime 事件元数据分页结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeEventPage {
     pub entries: Vec<RealtimeEventSnapshot>,
@@ -72,7 +69,6 @@ pub enum RealtimeAdminError {
     CommandConflict,
 }
 
-/// realtime lag 查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeLagListRequest {
     pub stream_prefix: Option<String>,
@@ -103,7 +99,6 @@ pub struct RealtimeLagSnapshot {
     pub last_advanced_at: Option<DateTime<Utc>>,
 }
 
-/// realtime lag 分页结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeLagPage {
     pub entries: Vec<RealtimeLagSnapshot>,
@@ -137,7 +132,6 @@ impl RealtimeFailureWater {
 }
 
 /// realtime dashboard 的全量安全摘要。
-///
 /// lag 只保留旧版 dashboard 的有界第一页；failure 只保留未解决水位，不包含正文和事件
 /// payload。详细运维列表仍由 realtime Admin 专用端点提供。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,7 +172,6 @@ impl RealtimeDashboardSnapshot {
     }
 }
 
-/// realtime failure 查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeFailureListRequest {
     pub stream_key: Option<String>,
@@ -221,7 +214,6 @@ impl RealtimeFailureSnapshot {
     }
 }
 
-/// realtime failure 分页结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeFailurePage {
     pub entries: Vec<RealtimeFailureSnapshot>,
@@ -230,7 +222,6 @@ pub struct RealtimeFailurePage {
     pub offset: i64,
 }
 
-/// Admin replay 命令。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RealtimeReplayCommand {
     pub command_id: Uuid,
@@ -269,7 +260,6 @@ pub struct RealtimeReplayResult {
     pub created_at: DateTime<Utc>,
 }
 
-/// Admin realtime 查询和 replay 端口。
 pub trait RealtimeAdminPort: Send + Sync {
     /// 读取旧版 Admin dashboard 所需的 lag/failure 安全摘要。
     fn dashboard_snapshot(&self) -> ApplicationFuture<'_, RealtimeDashboardSnapshot>;

@@ -1,17 +1,13 @@
 //! Worker control 的 DTO、响应编码与请求头校验。
-//!
-//! 该文件只承载 Worker control 的单一职责，协议边界和安全约束保持由 transport 父模块统一装配。
 
 use super::*;
 
-/// Worker liveness 响应数据。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveResult {
     pub state: String,
 }
 
-/// Worker readiness 响应数据。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReadyResult {
@@ -28,14 +24,12 @@ pub struct StatusResult {
     pub version: String,
 }
 
-/// Worker 手动轮询请求。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TriggerPollCommand {
     pub command_id: String,
 }
 
-/// Worker 手动轮询响应。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TriggerPollResult {

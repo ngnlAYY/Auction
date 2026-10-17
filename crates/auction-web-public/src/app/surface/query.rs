@@ -375,7 +375,6 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
 ];
 
 /// 挂载与地址栏双向同步的公开端查询状态。
-///
 /// 初值与浏览器前进/后退（popstate）恢复共用 `read_public_query` 的既有解析（含 Router
 /// 规范化前保存的首次 query 恢复）；写回只替换本 crate 管理的键，未声明的外部入口参数
 /// 原样保留。每个页面挂载自己的实例，同时订阅外壳程序化导航的位置版本；外壳另有独立
@@ -489,7 +488,6 @@ pub(crate) fn public_auction_home_query(world: &str) -> PublicBoardQuery {
 }
 
 /// 把旧版公开端别名无历史记录地收敛到 canonical URL，并保留筛选/分页查询参数。
-///
 /// 别名本身仍然注册在路由表中，旧链接可以继续打开；跳转使用 `replace`，避免用户按返回
 /// 键时再次落回别名页面。查询字符串由浏览器当前地址读取，不把 URL 状态复制到组件状态。
 pub(crate) fn redirect_public_alias(path: &'static str) -> Element {

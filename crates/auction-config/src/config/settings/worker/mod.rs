@@ -1,7 +1,5 @@
-//! Worker、论坛和 MoogleMail 配置模型的模块装配。
-//!
-//! 每个 Worker owner 在独立文件中维护自己的配置字段和默认值；这里仅负责稳定导出，
-//! 不改变 `[worker]` 的 TOML 结构或 `auction-config` 的公共类型路径。
+//! Worker、论坛和 MoogleMail 配置模型的模块装配；每个 owner
+//! 在独立文件维护字段与默认值，`[worker]` TOML 结构不变。
 
 mod auction;
 mod control;

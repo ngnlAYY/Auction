@@ -1,7 +1,5 @@
-//! 装备来源适配器的启动期读取策略。
-//!
-//! 这里冻结 endpoint 之外的 host/path allowlist、响应大小、请求间隔和完整请求超时；读取器
-//! 只能消费已经通过校验的策略，避免在请求路径上临时放宽外部访问边界。
+//! 装备来源适配器的启动期读取策略；冻结 host/path allowlist、响应大小、
+//! 请求间隔与完整请求超时，请求路径不再放宽边界。
 
 use std::time::Duration;
 
@@ -44,9 +42,7 @@ pub struct EquipmentSourcePolicy {
     pub allowed_path_prefixes: Vec<String>,
     /// 是否在固定 endpoint 与装备路径校验之外再启用业务 allowlist。
     pub allowlist_enabled: bool,
-    /// 单个响应解码前允许读取的最大字节数。
     pub maximum_response_bytes: usize,
-    /// 同一适配器两次远程请求起点之间的最小间隔。
     pub minimum_request_interval: Duration,
     /// 从发送请求到完整流式读取结束的总超时。
     pub request_timeout: Duration,

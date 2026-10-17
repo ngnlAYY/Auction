@@ -8,10 +8,8 @@ use super::{
 };
 use crate::database::rebuild::DATABASE_ADVISORY_LOCK_PREFIX;
 
-/// 持有集群级 advisory lock 的 PostgreSQL 初始数据库 bootstrap 会话。
-///
-/// 维护连接从构造到 Drop 始终指向 `postgres` 数据库，因此锁生命周期覆盖 catalog 检查、
-/// 可能的 CREATE DATABASE 以及应用连接的后置验证。该类型没有迁移和 DROP 入口。
+/// 持有集群级 advisory lock 的 bootstrap 会话；维护连接从构造到 Drop 始终指向 `postgres` 数据库，
+/// 锁覆盖 catalog 检查、可能的 CREATE DATABASE 和应用连接后置验证，且该类型没有迁移和 DROP 入口。
 pub struct PostgresDatabaseBootstrap {
     maintenance_connection: PgConnection,
     database_name: String,

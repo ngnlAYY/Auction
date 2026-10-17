@@ -1,7 +1,5 @@
-//! Public HTTP 监听器装配。
-//!
-//! Public 与 Admin 的 TCP/Unix 绑定使用同一个共享安全实现；Public 只负责读取主配置中的
-//! listener 选择，并将 Unix socket 的固定锁文件名与运行参数传入。
+//! Public HTTP 监听器装配；TCP/Unix 绑定复用共享安全实现，本模块只传入 listener
+//! 选择与固定锁文件名。
 
 use std::{future::Future, io};
 

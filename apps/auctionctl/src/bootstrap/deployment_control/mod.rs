@@ -1,8 +1,5 @@
-//! systemd 三进程部署控制器。
-//!
-//! systemd 继续拥有单个进程的 PID、信号、停止超时和 journald 日志；这里恢复旧版控制器的
-//! 跨角色契约：严格预检、Worker → Admin → Public 启动顺序、应用 readiness、失败回滚、
-//! Public → Admin → Worker 停止顺序、互斥控制以及不包含敏感配置的启动回执。
+//! systemd 三进程部署控制器；保持严格预检、Worker → Admin → Public 启动、应用
+//! readiness 与失败回滚，以及 Public → Admin → Worker 停止顺序。
 
 use std::{path::PathBuf, time::Duration};
 

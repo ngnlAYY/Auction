@@ -9,7 +9,6 @@ use super::{AdminAuctionSummary, ApplicationFuture, CompetitionTransactionError,
 /// Admin 拍卖计划修改在命令账本与请求哈希中的稳定种类。
 pub const ADMIN_AUCTION_SCHEDULE_COMMAND_KIND: &str = "admin_auction_schedule_update";
 
-/// Admin 在正式开拍前修改预览、开拍与计划结束时间的命令。
 #[derive(Debug, Clone)]
 pub struct AdminUpdateAuctionScheduleCommand {
     pub command_id: CommandId,
@@ -86,7 +85,6 @@ impl AdminAuctionScheduleSnapshot {
     }
 }
 
-/// Admin 拍卖计划修改的窄应用端口。
 pub trait AdminAuctionSchedulePort: Send + Sync {
     fn update_schedule(
         &self,

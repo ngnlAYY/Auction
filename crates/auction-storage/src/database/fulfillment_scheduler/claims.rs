@@ -56,9 +56,8 @@ pub(super) async fn claim_postgres(
     .await
     .map_err(map_storage_error)?;
 
-    // 上下文关系故意使用 LEFT JOIN 以暴露损坏事实；只有非空的 obligation/fulfillment owner
-    // 参与锁定，nullable 关系留给后续校验并可在同一批次中隔离。这样既避免 outer-join 锁错误，
-    // 又保持旧版按 obligation 顺序领取时的父子锁保护。
+    // 上下文关系故意用 LEFT JOIN 暴露损坏事实；只有非空的 obligation/fulfillment owner 参与锁定，
+    // nullable 关系留给后续校验并在同批次隔离。既避免 outer-join 锁错误，又保持父子锁保护。
     let rows = sqlx::query(
         r#"SELECT f.obligation_id, f.execution_state, f.state_version,
                   f.claim_fencing, f.retry_count, f.dispatch_world,

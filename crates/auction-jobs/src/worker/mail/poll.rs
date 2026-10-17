@@ -1,8 +1,5 @@
-//! MoogleMail Worker 的远程读取编排。
-//!
-//! 每个已配置 world 都拥有独立调度器、唤醒器和持久化邮箱状态。本模块只负责
-//! claim → 续租 → 远程读取 → 安全事实映射 → commit/fail；HTTP、SQL 和 MoogleMail HTML
-//! 解析分别由应用端口、存储适配器和 integrations owner 提供。
+//! MoogleMail Worker 的远程读取编排；每个 world 拥有独立调度器、
+//! 唤醒器与持久化邮箱状态，本模块负责 claim → 续租 → 远程读取 → 提交/失败。
 
 #[path = "../mail/poll/cycle.rs"]
 pub(super) mod cycle;

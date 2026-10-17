@@ -1,5 +1,4 @@
 //! Public/Admin 共用的 Hyper 连接服务。
-//!
 //! Axum 的便捷 `serve` 不暴露请求头读取超时。本模块保持 Axum Router 所有权不变，只在
 //! 连接层固定 5 秒 HTTP/1 header timeout，并统一跟踪连接级优雅关闭。
 
@@ -18,7 +17,6 @@ use tower::ServiceExt;
 const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 运行一个已绑定的 TCP 或 Unix listener，并在停止接收后等待现有 Hyper 连接排空。
-///
 /// TCP listener 保留真实 `SocketAddr`；Unix listener 返回 `None`，不伪造 TCP peer。
 /// 可信 Unix 代理策略再由 HTTP 边界决定是否接纳 `X-Forwarded-For`。
 pub async fn serve_http<L, F>(mut listener: L, app: Router, shutdown: F) -> io::Result<()>

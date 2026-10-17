@@ -20,7 +20,6 @@ impl<C> DatabaseAdminLotCommands<C>
 where
     C: Clock + 'static,
 {
-    /// 建立不向 HTTP 暴露具体数据库类型的 lot 修改端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
         Self { store, clock }
     }

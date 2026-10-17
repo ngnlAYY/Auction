@@ -1,5 +1,4 @@
 //! Admin 会话 HTTP 适配。
-//!
 //! 浏览器只持有服务端返回的 actor、CSRF token 和过期时间；Admin secret 只用于一次 Basic
 //! Auth 请求，不进入组件之外的状态，也不写入日志或 DTO。
 

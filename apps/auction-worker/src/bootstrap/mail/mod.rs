@@ -1,7 +1,5 @@
-//! MoogleMail Worker 的配置、业务装配和轮询运行时入口。
-//!
-//! 凭据恢复、业务 processor/delivery、poll runtime/gateway 和消息 envelope 映射由子模块
-//! 分别拥有；本模块只负责把这些 owner 组合成 Worker 所需的端口集合。
+//! MoogleMail Worker 的配置、业务装配和轮询运行时入口；各 owner 由子模块持有，
+//! 本模块只组合所需端口集合。
 
 #[cfg(feature = "postgres")]
 use super::fulfillment::MoogleMailFulfillmentEvidenceReader;

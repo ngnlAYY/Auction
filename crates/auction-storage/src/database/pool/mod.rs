@@ -1,8 +1,6 @@
-//! SQLx 连接池的 acquisition 追踪边界；Prometheus 后端适配位于同目录的 `metrics.rs`。
-//!
-//! SQLx 的 `Executor for &Pool` 会在查询内部隐式获取连接，单独包裹调用方显式的
-//! `acquire()` 不能覆盖普通查询。这里同时包裹池的 `Executor`、事务和显式获取入口，
-//! 让连接池累计指标只来自真实的 acquisition 生命周期，而不是由 scrape 时的快照推测。
+//! SQLx 连接池的 acquisition 追踪边界；Prometheus 适配位于同目录 `metrics.rs`。
+//! `Executor for &Pool` 会在查询内部隐式取连接，只包裹 `acquire()` 覆盖不到普通查询，故此处同时
+//! 包裹 `Executor`、事务和显式获取入口，让累计指标只来自真实 acquisition 生命周期。
 
 use std::{
     fmt,

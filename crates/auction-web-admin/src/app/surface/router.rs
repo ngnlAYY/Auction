@@ -1,5 +1,4 @@
 //! 管理端路由表、页面入口组件和旧版别名跳转。
-//!
 //! 路由路径与页面组件在同一 owner 内维护，避免 surface 装配文件再次聚合所有页面入口。
 
 use super::auth::AdminShell;
@@ -11,7 +10,6 @@ use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
 
 /// 管理端路由表。
-///
 /// 路径逐条对应旧系统已冻结的管理端 route。管理命令的实现必须走版本化 REST 契约，
 /// 不在浏览器端重建状态机。
 #[derive(Clone, Debug, PartialEq, Routable)]
@@ -202,7 +200,6 @@ fn Status() -> Element {
 }
 
 /// 把旧版管理端别名无历史记录地收敛到 canonical URL，并保留查询字符串和片段。
-///
 /// Admin 旧链接仍保留在路由表中以兼容书签；`replace` 确保返回键不会在别名与正式地址间
 /// 形成额外的导航环。片段由旧版路由行为保留，便于外部链接定位页面内锚点。
 fn redirect_admin_alias(path: &'static str) -> Element {

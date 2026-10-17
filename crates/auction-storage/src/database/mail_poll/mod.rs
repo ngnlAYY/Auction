@@ -1,8 +1,6 @@
-//! MoogleMail Worker 持久化适配器装配。
-//!
-//! 状态与租约位于 `state.rs`，轮询 claim/commit/fail 位于 `poll.rs`，入站事实和邮件命令
-//! 幂等写入位于 `inbound.rs`。外部 GET 不在数据库事务内执行；Worker 只有拿到 claim 后才
-//! 调用 gateway，并在 commit 中原子写入事实与 cursor。
+//! MoogleMail Worker 持久化适配器装配；状态与租约在 `state.rs`，轮询 claim/commit/fail 在
+//! `poll.rs`，入站事实与命令幂等写入在 `inbound.rs`。外部 GET 不在事务内执行，Worker 拿到
+//! claim 后才调 gateway，并在 commit 中原子写入事实与 cursor。
 
 use auction_application::{
     AdminMailPollState, ApplicationFuture, MAX_MAIL_POLL_BATCH_SIZE,

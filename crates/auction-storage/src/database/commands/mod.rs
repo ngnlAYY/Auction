@@ -1,7 +1,5 @@
-//! 由数据库后端承载的应用命令组合器。
-//!
-//! 该层只负责把运行时选择的后端接到应用窄端口；竞价规则和事务步骤仍由应用层与各后端
-//! 事务适配器拥有。
+//! 由数据库后端承载的应用命令组合器；本层只把运行时选择的后端接到应用窄端口，
+//! 竞价规则和事务步骤仍由应用层与各后端事务适配器拥有。
 
 use std::sync::Arc;
 
@@ -88,7 +86,6 @@ impl<C> DatabaseCompetitionCommands<C>
 where
     C: Clock + 'static,
 {
-    /// 建立不向 HTTP 暴露具体数据库类型的命令端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
         Self { store, clock }
     }
@@ -236,7 +233,6 @@ where
 }
 
 /// 绑定运行时数据库和时钟的 Admin 创建拍卖命令端口。
-///
 /// 创建拍卖将 intake target、策略快照、审计和 realtime 事件在同一事务提交。
 pub struct DatabaseAdminAuctionCommands<C> {
     store: Arc<DatabaseStore>,
@@ -245,7 +241,6 @@ pub struct DatabaseAdminAuctionCommands<C> {
 }
 
 /// 绑定运行时数据库和时钟的 Admin 规则读取/发布端口。
-///
 /// 版本发布使用规则命令账本、Serializable CAS、追加审计和持久重放。
 pub struct DatabaseAdminRulesCommands<C> {
     store: Arc<DatabaseStore>,
@@ -256,7 +251,6 @@ impl<C> DatabaseAdminRulesCommands<C>
 where
     C: Clock + 'static,
 {
-    /// 建立不向 HTTP 暴露具体数据库类型的规则端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>) -> Self {
         Self { store, clock }
     }
@@ -295,7 +289,6 @@ impl<C> DatabaseAdminAuctionCommands<C>
 where
     C: Clock + 'static,
 {
-    /// 建立不向 HTTP 暴露具体数据库类型的创建命令端口。
     pub fn new(store: Arc<DatabaseStore>, clock: Arc<C>, policy: AuctionPolicyTemplate) -> Self {
         Self { store, clock, policy }
     }

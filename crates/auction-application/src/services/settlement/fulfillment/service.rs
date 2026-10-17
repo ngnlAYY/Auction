@@ -30,7 +30,6 @@ use super::proof::proof_digest;
 use super::validation::{repository_error, valid_external_mail_id, validate_claim};
 
 /// 结算履约应用服务。
-///
 /// 服务只把可执行的 `pending` 义务制作为 prepared delivery outbox，不读取密钥、不发 HTTP，
 /// 也不把 `prepared` 误报为外部发送成功；delivery Worker 负责后续激活、发送和证据回写。
 pub struct SettlementFulfillmentService {

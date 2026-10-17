@@ -3,7 +3,6 @@
 use super::commands::{replay_result, validate_command};
 use super::*;
 
-/// MoogleMail 拍卖入站应用服务。
 pub struct MailAuctionIntakeService<R, K, C> {
     repository: Arc<R>,
     sealer: Arc<K>,
@@ -17,7 +16,6 @@ where
     K: EquipmentKeySealerPort,
     C: Clock,
 {
-    /// 建立 MoogleMail 拍卖入站用例。
     pub fn new(repository: Arc<R>, sealer: Arc<K>, clock: Arc<C>) -> Self {
         Self { repository, sealer, clock }
     }

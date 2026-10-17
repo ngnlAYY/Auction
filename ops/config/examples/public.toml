@@ -1,6 +1,4 @@
-# Public API 配置示例。
-#
-# common_file 与 secrets_file 必填；其余字段和区块均可省略并使用解析器默认值。
+# Public API 配置示例：common_file 与 secrets_file 必填，其余字段和区块均可省略并使用解析器默认值。
 # 本文件只保存非敏感设置，真实数据库 URL、Redis URL、Cookie 和密钥必须放在敏感 TOML。
 
 # 必填：公共非敏感 TOML 路径；相对路径相对于本文件所在目录解析。
@@ -25,7 +23,7 @@ socket_path = ""
 [tracing]
 # 可选：是否启用 OTLP/HTTP span 导出；启用时必须同时提供 endpoint 和非零采样比例。
 enabled = false
-# 可选：collector 地址，例如 https://otel-collector.example.invalid/v1/traces。
+# 可选：collector 地址；启用时必须提供。
 # endpoint = "https://otel-collector.example.invalid/v1/traces"
 # 可选：批次等待秒数，范围 1-30，默认 2。
 batch_timeout_seconds = 2

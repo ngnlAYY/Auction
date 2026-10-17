@@ -22,7 +22,6 @@ impl WorldSnapshot {
     }
 }
 
-/// Public 世界目录读取端口。
 pub trait WorldReader: Send + Sync {
     /// 返回当前可公开展示的世界，排序和可见性由持久化 owner 保证。
     fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>>;

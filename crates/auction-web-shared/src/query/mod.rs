@@ -1,16 +1,7 @@
 //! URL query 参数与组件状态的双向同步。
-//!
-//! 统一入口，收敛 Admin settlement 页成熟的直写 history 模式与 Public 外壳的
-//! popstate 恢复逻辑：读初值（挂载时解析地址栏）、写回（[`QueryWriteMode::Push`] 或
-//! [`QueryWriteMode::Replace`] 可选）、订阅 popstate 在浏览器前进/后退时恢复状态。
-//!
-//! 与 Dioxus Router 共存：本模块不接管路由，只读写当前地址的 query 段。写回直接调用
-//! `History` API（与 settlement 现状一致），Router 的路径匹配不受影响；popstate 时
-//! 重新解析 query 并回写状态信号。多键共存通过「声明各自管理的键」实现：一个页面可以
-//! 挂载多个 hook（筛选、分页、展开状态各一），写回时只替换自己声明的键，其余键
-//! （其他 hook 或路由持有的参数）原样保留。
-//!
-//! 状态形状与解析/序列化规则全部由调用方注入，本模块不含任何业务键名。
+//! 只读写当前地址的 query 段，不接管路由。多键共存靠「声明各自管理的键」：写回只替换本
+//! hook 声明的键，其余键（其他 hook 或路由持有）原样保留。状态形状与解析/序列化规则由
+//! 调用方注入，本模块不含业务键名。
 
 use std::rc::Rc;
 
@@ -50,10 +41,8 @@ pub fn read_query_pairs() -> Vec<(String, String)> {
 }
 
 /// 把 `pairs` 合并写回当前地址的 query 段。
-///
-/// `keys` 声明本次写回管理的键：地址栏中这些键的旧值整体替换为 `pairs`，其余键
-/// 原样保留，因此同页多个 [`use_query_state`] 实例互不覆盖。`pairs` 为空表示清空
-/// 所管理的键。非 WASM 构建为空操作。
+/// `keys` 声明本次写回管理的键：这些键的旧值整体替换为 `pairs`，其余键原样保留。
+/// 非 WASM 构建为空操作。
 pub fn write_query_pairs(keys: &[&str], pairs: &[(String, String)], mode: QueryWriteMode) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -135,25 +124,11 @@ impl<T: 'static> QueryState<T> {
     }
 }
 
-/// 挂载一个与 URL query 双向同步的状态。
+/// 挂载与 URL query 双向同步的状态。
 ///
-/// - `keys`：本 hook 管理的 query 键集合，写回时只替换这些键；
-/// - `parse`：从全部 query 键值对解析状态（挂载初值与 popstate 恢复共用同一路径，
-///   解析失败的键应回退默认值）；
-/// - `serialize`：把状态编码为写回的键值对，省略等于默认值的键以保持地址栏干净。
-///
-/// 非 WASM 构建不触碰浏览器地址：初值为 `parse(&[])`，写回只更新状态信号。
-///
-/// 用法示意（下游迁移时参照）：
-///
-/// ```ignore
-/// let mut filters = use_query_state(
-///     &["world", "page"],
-///     |pairs| Filters::from_pairs(pairs),   // 解析失败回退默认
-///     |filters| filters.to_pairs(),          // 默认值键省略
-/// );
-/// // 用户切换筛选：filters.push(next)；popstate 时 filters.state 自动恢复。
-/// ```
+/// `keys` 是本 hook 管理的 query 键，写回只替换这些键；`parse` 与 popstate 恢复走同一解析路径，
+/// 失败回退默认值；`serialize` 输出键值对并省略等于默认值的键。非 WASM 构建不触碰浏览器地址，
+/// 初值为 `parse(&[])`，写回只更新状态信号。
 pub fn use_query_state<T: Clone + PartialEq + 'static>(
     keys: &'static [&'static str],
     parse: impl Fn(&[(String, String)]) -> T + 'static,

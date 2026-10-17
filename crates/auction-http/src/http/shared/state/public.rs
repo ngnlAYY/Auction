@@ -18,7 +18,6 @@ use super::super::security::PublicHttpSecurity;
 const MAX_PUBLIC_DISCOVERY_CONNECTIONS: usize = 128;
 
 /// Public surface 可使用的应用端口集合。
-///
 /// 端口缺失时 handler 返回明确的依赖不可用，而不是构造示例数据或 panic；这样无数据库的
 /// 编译/启动骨架仍可运行健康检查，配置了数据库时才暴露真实查询。
 #[derive(Clone)]

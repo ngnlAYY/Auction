@@ -8,8 +8,8 @@ pub(super) async fn update_admin_lot_inner(
     now: DateTime<Utc>,
 ) -> Result<AdminLotSummary, CompetitionTransactionError> {
     let start_price = command.start_price;
-    // 邮件来源时间或时钟回拨可能令既有更新时间领先本机；修改必须保持时间单调，
-    // 否则撤拍后的安全投影会因 updated_at < created_at 被拒绝并回滚整笔事务。
+    // 邮件来源时间或时钟回拨可能令既有更新时间领先本机；修改必须保持时间单调，否则撤拍后的安全
+    // 投影会因 updated_at < created_at 被拒绝并回滚整笔事务。
     let updated = {
         let transaction = transaction.transaction_mut()?;
         sqlx::query(

@@ -23,7 +23,6 @@ pub(crate) enum PendingProxyCommand {
 
 /// 普通竞价的两阶段确认命令 hook。由弹窗宿主持有（整体 Copy），表单经 prop 共享，
 /// 宿主据此接线 Dialog 的 busy 关闭守卫。
-///
 /// 包一层新类型只为实现 `PartialEq`（`#[component]` props 要求）：逐字段比较 Signal
 /// 身份（Signal 的 PartialEq 是指针比较，不读值、不触发订阅），同一 hook 实例相等。
 /// `Deref`/`DerefMut` 透传内部 hook，调用点与直接使用 `ConfirmCommand` 一致。

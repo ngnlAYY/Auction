@@ -4,7 +4,7 @@
 build_single() {
 	verify_artifacts
 	build_variant single "${single_build_root:?}" "${single_artifact_root:?}" \
-		'postgres,auction-server/web-embed' auction-server auctionctl
+		"${single_features:?}" auction-server auctionctl
 }
 
 verify_single_artifacts() {
@@ -49,9 +49,9 @@ release_check() {
 			;;
 		esac
 	done
-	build_variant api-only "${api_build_root:?}" "${api_artifact_root:?}" postgres
+	build_variant api-only "${api_build_root:?}" "${api_artifact_root:?}" "${api_only_features:?}"
 	build_variant embedded "${embedded_build_root:?}" "${embedded_artifact_root:?}" \
-		'postgres,auction-public-api/web-embed,auction-admin-api/web-embed'
+		"${embedded_features:?}"
 	if [[ "$single" == true ]]; then build_single; fi
 	package_release "$@"
 }

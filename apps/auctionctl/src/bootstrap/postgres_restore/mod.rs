@@ -1,7 +1,4 @@
-//! PostgreSQL 单事务恢复命令。
-//!
-//! 本模块只恢复到已确认的空数据库，不拥有 DROP/CREATE DATABASE 或会话终止。
-//! 恢复编排、备份/模式证明、外部 pg_restore 进程和不可覆盖 receipt 分别归档到子模块。
+//! PostgreSQL 单事务恢复命令；只恢复到已确认的空数据库，不拥有 DROP/CREATE DATABASE 或会话终止。
 
 use std::path::{Path, PathBuf};
 

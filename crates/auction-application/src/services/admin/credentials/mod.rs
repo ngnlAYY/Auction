@@ -1,7 +1,4 @@
 //! Admin 凭据管理用例服务的稳定出口。
-//!
-//! 查询、命令、摘要和校验分别归属相邻 owner；本文件只负责服务状态、构造函数和
-//! `AdminCredentialPort` 适配。
 
 use std::sync::Arc;
 

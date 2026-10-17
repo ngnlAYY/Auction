@@ -9,7 +9,6 @@ use super::security::{MailLoginKey, MailLoginKeyEnvelope, MailLoginKeyIssue};
 /// Users owner 的注册、换绑和幂等读取端口。
 pub trait MailUserStore: Send + Sync {
     /// 按注册命令相同的名称规则读取候选 UUID，供签发绑定正确 AAD 的信封。
-    ///
     /// 这不是写入授权；注册事务必须重新锁定并核对该 UUID，身份变化时不得保存候选信封。
     fn find_registration_user_id(&self, username: String) -> ApplicationFuture<'_, Option<Uuid>>;
 

@@ -1,7 +1,4 @@
-//! 装备来源归一化模型与稳定指纹。
-//!
-//! 解析器和读取器只通过这里的事实模型交接，模型不携带原始 HTML，也不把装备 key 写入
-//! fingerprint 或属性 JSON。
+//! 装备来源归一化模型与稳定指纹；模型不携带原始 HTML，装备 key 不写入 fingerprint 或属性 JSON。
 
 use std::collections::BTreeMap;
 

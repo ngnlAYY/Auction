@@ -7,7 +7,6 @@ pub(crate) fn BidHistoryTable(page: crate::api::BidLogPage) -> Element {
     rsx! {
         div { class: "public-auction-lot__table",
             table { class: "ui-table--responsive",
-                // 列序：竞价者、金额、时间；按字段预期内容分配比例。
                 auction_web_shared::TableColumns { layout: "public-lot-bid-history", widths: vec![38, 22, 40] }
                 thead {
                     tr {

@@ -5,19 +5,28 @@ set -euo pipefail
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
-artifact_root="$repository_root/target/release-artifacts"
+artifact_root="$repository_root/target/dist/artifacts"
 api_artifact_root="$artifact_root/api"
 embedded_artifact_root="$artifact_root/embedded"
-api_build_root="$repository_root/target/release-build/api"
-embedded_build_root="$repository_root/target/release-build/embedded"
+api_build_root="$repository_root/target/dist/build/api"
+embedded_build_root="$repository_root/target/dist/build/embedded"
 single_artifact_root="$artifact_root/single"
-single_build_root="$repository_root/target/release-build/single"
 # 合并变体只声明函数，底层构建及归档门禁仍由本脚本拥有。
-source "$repository_root/ci/release-single.sh"
-package_output_root="$repository_root/target/release-package"
-api_only_public_root="$repository_root/target/auction-api-only-assets/public"
-api_only_admin_root="$repository_root/target/auction-api-only-assets/admin"
+# 以下两项只由被 source 的 release-single.sh 消费，导出以消除静态未使用告警。
+single_build_root="$repository_root/target/dist/build/single"
+export single_build_root
+source ci/release/release-single.sh
+# 源码身份与 BUILD-INFO 字段解析由共享实现拥有；web-bundle.sh 复用同一份指纹。
+source ci/release/build-identity.sh
+package_output_root="$repository_root/target/dist/package"
+api_only_public_root="$repository_root/target/dist/api-only-assets/public"
+api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
 assets_missing_message="web assets are not included in this binary; run \`just build-release\`"
+# 发布 feature 的唯一来源：可部署制品含 Redis；API-only 对照只留 PostgreSQL。
+api_only_features='postgres'
+embedded_features='postgres,cache-redis,auction-public-api/web-embed,auction-admin-api/web-embed'
+single_features='postgres,cache-redis,auction-server/web-embed'
+export single_features
 
 binaries=(
 	auction-public-api
@@ -50,30 +59,19 @@ worktree_state() {
 	fi
 }
 
-# 指纹覆盖全部已跟踪及未忽略的未跟踪文件，同时记录删除和 mode 变化；target 与敏感忽略文件不进入。
-source_fingerprint() {
-	{
-		printf 'head\0%s\0' "$(git rev-parse --verify 'HEAD^{commit}')"
-		git status --porcelain=v1 -z --untracked-files=all --ignore-submodules=none
-		while IFS= read -r -d '' path; do
-			printf 'path\0%s\0' "$path"
-			if [[ -L "$path" ]]; then
-				printf 'symlink\0%s\0' "$(readlink "$path")"
-			elif [[ -f "$path" ]]; then
-				printf 'file\0%s\0' "$(stat -c '%a:%s' "$path")"
-				sha256sum "$path"
-			elif [[ ! -e "$path" ]]; then
-				printf 'missing\0'
-			else
-				printf 'special\0%s\0' "$(stat -c '%F:%a' "$path")"
-			fi
-		done < <(git ls-files -z --cached --others --exclude-standard | LC_ALL=C sort -z)
-	} | sha256sum | awk '{print $1}'
-}
-
-read_build_info() {
-	local file=$1 key=$2
-	awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$file"
+# 影响构建产物的环境变量摘要；复用判定要求逐项一致。
+# 只记录名称与值，不包含凭据；CARGO_PROFILE_* 覆盖会改变优化档，必须参与判定。
+build_env_fingerprint() {
+	local name value summary=''
+	while IFS= read -r name; do
+		case "$name" in
+		CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | RUSTDOCFLAGS | RUSTFLAGS | RUSTC_WRAPPER)
+			value=${!name-}
+			summary+="$name=$value;"
+			;;
+		esac
+	done < <(compgen -e | LC_ALL=C sort)
+	printf '%s' "$summary" | sha256sum | awk '{print $1}'
 }
 
 write_build_info() {
@@ -91,6 +89,7 @@ write_build_info() {
 		"source_fingerprint=$fingerprint" \
 		"cargo_lock_sha256=$lock_sha" \
 		"features=$features" \
+		"build_env_sha256=$(build_env_fingerprint)" \
 		>"$destination"
 	chmod 0644 "$destination"
 }
@@ -111,6 +110,51 @@ replace_generated_directory() {
 	rm -rf "$backup"
 }
 
+# 复用判定：源码身份、锁图、feature 和制品完整性全部一致才返回成功。
+# 复用不重建 Web payload；web-bundle 以固定 mtime 和 SOURCE_DATE_EPOCH 生成相同输入，
+# 源码身份一致即 payload 一致，因此已嵌入的二进制仍可作为同一来源的产物。
+artifacts_reusable() {
+	local variant=$1 artifact_directory=$2 features=$3
+	local selected_binaries=("${@:4}")
+	local info="$artifact_directory/BUILD-INFO"
+
+	if [[ ! -d "$artifact_directory" || -L "$artifact_directory" || ! -f "$info" || -L "$info" ]]; then
+		return 1
+	fi
+	verify_build_info "$artifact_directory" "$variant" >/dev/null || return 1
+	if [[ $(read_build_info "$info" features) != "$features" ]]; then
+		printf '%s 已记 feature 与当前配方不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+		return 1
+	fi
+	# 链接器、rustc 包装器与 profile 覆盖都影响产物；不一致时不得复用旧构建结果。
+	if [[ $(read_build_info "$info" build_env_sha256) != "$(build_env_fingerprint)" ]]; then
+		printf '%s 已记构建环境与当前不同，重新构建：%s\n' "$variant" "$artifact_directory" >&2
+		return 1
+	fi
+
+	local binary path
+	for binary in "${selected_binaries[@]}"; do
+		path="$artifact_directory/bin/$binary"
+		if [[ ! -f "$path" || -L "$path" || ! -s "$path" || ! -x "$path" ]]; then
+			printf '%s 制品二进制不完整，重新构建：%s\n' "$variant" "$path" >&2
+			return 1
+		fi
+	done
+
+	# 内嵌或合并变体另需可解析的 payload 标记，避免把删过资源的目录当作可复用制品。
+	local marker payload_sha
+	if [[ "$variant" == embedded || "$variant" == single ]]; then
+		for marker in "$artifact_directory/WEB-PUBLIC-MANIFEST.v1" "$artifact_directory/WEB-ADMIN-MANIFEST.v1"; do
+			payload_sha=$(read_build_info "$marker" payload_sha256)
+			if [[ ! "$payload_sha" =~ ^[0-9a-f]{64}$ ]]; then
+				printf '%s Web 标记缺失或无效，重新构建：%s\n' "$variant" "$marker" >&2
+				return 1
+			fi
+		done
+	fi
+	return 0
+}
+
 build_variant() {
 	local variant=$1 build_root=$2 artifact_directory=$3 features=$4
 	local selected_binaries=("${@:5}")
@@ -122,6 +166,11 @@ build_variant() {
 			"$api_only_public_root" "$api_only_admin_root" >&2
 		exit 1
 	fi
+	# 源码身份、锁图与 feature 全部一致时复用既有制品，避免重复 WASM 构建和 Fat LTO 链接。
+	if artifacts_reusable "$variant" "$artifact_directory" "$features" "${selected_binaries[@]}"; then
+		printf '%s 制品源码身份未变，复用：%s\n' "$variant" "$artifact_directory"
+		return 0
+	fi
 	mkdir -p "$artifact_root"
 	rm -rf "$next"
 	mkdir -p "$next/bin"
@@ -129,9 +178,9 @@ build_variant() {
 	# 在任何 Web/native 构建前冻结源码身份；构建期间的修改不得被事后标记成产物来源。
 	write_build_info "$next/BUILD-INFO" "$variant" "$features"
 	if [[ "$variant" == embedded ]]; then
-		bash ci/web-bundle.sh public
+		bash ci/release/web-bundle.sh public
 		verify_build_info "$next" "$variant"
-		bash ci/web-bundle.sh admin
+		bash ci/release/web-bundle.sh admin
 		verify_web_root public >/dev/null
 		verify_web_root admin >/dev/null
 	fi
@@ -583,7 +632,7 @@ package_release() {
 		--allow-dirty) allow_dirty=true ;;
 		--single-binary) single_binary=true ;;
 		*)
-			printf '用法：ci/release.sh package [--single-binary] [--allow-dirty]\n' >&2
+			printf '用法：ci/release/release.sh package [--single-binary] [--allow-dirty]\n' >&2
 			return 2
 			;;
 		esac
@@ -594,7 +643,7 @@ package_release() {
 		verify_single_artifacts
 		selected_root="$single_artifact_root"
 		selected_binaries=(auction-server auctionctl)
-		package_output_root="$repository_root/target/release-package-single"
+		package_output_root="$repository_root/target/dist/package-single"
 		variant_suffix=-single
 	else
 		verify_artifacts
@@ -618,8 +667,8 @@ package_release() {
 		suffix=-dirty
 	fi
 	package_name="auction-rust-${version}-${commit:0:12}${variant_suffix}${suffix}"
-	mkdir -p "$repository_root/target"
-	temporary_root=$(mktemp -d "$repository_root/target/auction-release.XXXXXX")
+	mkdir -p "$repository_root/target/dist"
+	temporary_root=$(mktemp -d "$repository_root/target/dist/auction-release.XXXXXX")
 	package_root="$temporary_root/$package_name"
 	mkdir -p "$package_root"
 
@@ -654,7 +703,7 @@ package_release() {
 	install_release_file "$temporary_root/SYSTEMD.md" systemd/README.md 644 "$package_root"
 	if [[ "$single_binary" == true ]]; then
 		install_release_file ops/deploy/systemd/auction-server.service.example systemd/auction-server.service.example 644 "$package_root"
-		install_release_file apps/server/README.md docs/SINGLE-SERVER.md 644 "$package_root"
+		install_release_file apps/auction-server/README.md docs/SINGLE-SERVER.md 644 "$package_root"
 		install_release_file ops/deploy/caddy/setup.Caddyfile.example caddy/setup.Caddyfile.example 644 "$package_root"
 	else
 		install_release_file ops/deploy/systemd/auction-public-api.service.example systemd/auction-public-api.service.example 644 "$package_root"
@@ -723,7 +772,7 @@ package_release() {
 	fi
 	verify_archive "$archive" "$package_name" "$epoch" "$temporary_root/extracted"
 
-	local publish_next="$repository_root/target/.release-package.next.$$"
+	local publish_next="$repository_root/target/dist/.package.next.$$"
 	rm -rf "$publish_next"
 	mkdir -p "$publish_next"
 	install -m 0644 "$archive" "$publish_next/$package_name.tar.gz"
@@ -770,7 +819,7 @@ build-api)
 		printf 'build-api 不接受额外参数\n' >&2
 		exit 2
 	fi
-	build_variant api-only "$api_build_root" "$api_artifact_root" postgres
+	build_variant api-only "$api_build_root" "$api_artifact_root" "$api_only_features"
 	;;
 build-embedded)
 	if [[ $# -ne 1 ]]; then
@@ -782,7 +831,7 @@ build-embedded)
 		embedded \
 		"$embedded_build_root" \
 		"$embedded_artifact_root" \
-		'postgres,auction-public-api/web-embed,auction-admin-api/web-embed'
+		"$embedded_features"
 	;;
 verify-artifacts)
 	if [[ $# -ne 1 ]]; then
@@ -791,18 +840,27 @@ verify-artifacts)
 	fi
 	verify_artifacts
 	;;
+# 只输出源码身份指纹，供 CI 用作制品缓存键或人工核对复用判定；不读写产物目录。
+source-fingerprint)
+	if [[ $# -ne 1 ]]; then
+		printf 'source-fingerprint 不接受额外参数\n' >&2
+		exit 2
+	fi
+	source_fingerprint
+	;;
 package)
 	shift
 	package_release "$@"
 	;;
 *)
 	printf '%s\n' \
-		'用法：ci/release.sh release-check [--single-binary] [--allow-dirty]' \
-		'      ci/release.sh build-single | verify-single' \
-		'      ci/release.sh build-api' \
-		'      ci/release.sh build-embedded' \
-		'      ci/release.sh verify-artifacts' \
-		'      ci/release.sh package [--allow-dirty]' >&2
+		'用法：ci/release/release.sh release-check [--single-binary] [--allow-dirty]' \
+		'      ci/release/release.sh build-single | verify-single' \
+		'      ci/release/release.sh build-api' \
+		'      ci/release/release.sh build-embedded' \
+		'      ci/release/release.sh verify-artifacts' \
+		'      ci/release/release.sh source-fingerprint' \
+		'      ci/release/release.sh package [--allow-dirty]' >&2
 	exit 2
 	;;
 esac

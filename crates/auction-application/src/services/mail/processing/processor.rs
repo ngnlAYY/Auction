@@ -1,7 +1,4 @@
 //! MoogleMail 处理器的配置、装配和稳定公共出口。
-//!
-//! 路由、装备入站和 delivery outbox 编排分别位于子模块；这里保留处理器状态与构造入口，
-//! 使 Worker 仍通过原有 `MailProcessorService`/`MailProcessorConfig` 路径接入。
 
 use std::sync::Arc;
 
@@ -19,7 +16,6 @@ mod delivery;
 #[path = "processor/routing.rs"]
 mod routing;
 
-/// MoogleMail 业务处理器配置。
 #[derive(Debug, Clone)]
 pub struct MailProcessorConfig {
     pub start_price: i64,
@@ -27,7 +23,6 @@ pub struct MailProcessorConfig {
 }
 
 /// MoogleMail 业务处理器。
-///
 /// 拍卖、注册和换绑命令都先交给对应 owner，再通过无密文 delivery outbox 安排外部动作；
 /// 结算退回邮件只记录可审计证据，由 Recovery/Settlement owner 后续消费。
 pub struct MailProcessorService<E, A, D, U, C> {

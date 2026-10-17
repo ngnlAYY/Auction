@@ -1,7 +1,4 @@
-//! PostgreSQL Users/Admin 存储实现。
-//!
-//! 具体职责按 PostgreSQL 事务边界拆分到命令写入、查询读取和共享映射子模块；本文件只负责
-//! 子模块装配与稳定端口导出。
+//! PostgreSQL Users/Admin 存储实现；职责按事务边界拆分到命令写入、查询读取和共享映射子模块。
 
 use super::*;
 

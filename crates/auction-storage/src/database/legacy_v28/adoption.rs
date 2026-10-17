@@ -11,11 +11,9 @@ use super::preflight::collect_configured_preflight;
 use super::*;
 
 impl PostgresStore {
-    /// 接管精确的 Auction-BF v28，并继续运行 Rust 尚未覆盖的前向迁移。
-    ///
-    /// 调用方必须先创建并离线验证旧库备份。该函数再次持有 SQLx migration advisory lock，
-    /// 在 bridge 事务提交前不会暴露半套列或半套 migration history；bridge 之后的普通前向迁移
-    /// 若失败，可以安全重跑 `auctionctl migrate`，不得回滚已经提交的数据语义转换。
+    /// 接管精确的 Auction-BF v28，并继续运行 Rust 尚未覆盖的前向迁移；调用方必须先创建并离线
+    /// 验证旧库备份。函数再次持有 SQLx migration advisory lock，bridge 提交前不暴露半套列或
+    /// migration history；之后普通前向迁移失败可重跑 `auctionctl migrate`，不回滚已提交语义。
     pub async fn adopt_legacy_v28(
         &self,
         confirmed_database_name: &str,

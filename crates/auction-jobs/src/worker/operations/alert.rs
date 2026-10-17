@@ -1,7 +1,6 @@
-//! Worker operations alert 扫描、通知入队和终态对账。
-//!
-//! 这里不复制告警阈值或 delivery 状态机；阈值由 `auction-application` 计算，批次和 lease
-//! 由 `OperationsAlertStore` 持久化。外部 MoogleMail 发送仍由普通 delivery Worker 负责。
+//! Worker operations alert 扫描、通知入队和终态对账；阈值由 `auction-application`
+//! 计算，批次与 lease 由 `OperationsAlertStore` 持久化，发送仍由普通 delivery Worker
+//! 负责。
 
 use std::{sync::Arc, time::Duration};
 
@@ -107,7 +106,6 @@ impl OperationsAlertRuntime {
         }
     }
 
-    /// 执行一轮持久化通知批次分发。
     pub async fn dispatch(&self, now: DateTime<Utc>) -> Result<(), ApplicationError> {
         let lease_until = checked_add(now, self.policy.claim_lease)?;
         let request = auction_application::OperationsAlertClaimRequest {

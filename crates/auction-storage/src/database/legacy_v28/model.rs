@@ -1,6 +1,4 @@
-//! Auction-BF v28 接管的公开安全投影与错误分类。
-//!
-//! 这些类型只描述预检和接管结果，不包含备份文件或外部运维 receipt。
+//! Auction-BF v28 接管的公开安全投影与错误分类；不含备份文件或外部运维 receipt。
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

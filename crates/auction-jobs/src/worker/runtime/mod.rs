@@ -1,7 +1,5 @@
-//! Worker 持久化运行时的装配与生命周期编排。
-//!
-//! 主循环只负责配置校验、任务启动、优雅排空和 Worker control 状态；具体业务处理按
-//! delivery、recovery、生命周期和结算 owner 拆到相邻模块，避免在调度器中复制领域规则。
+//! Worker 持久化运行时的装配与生命周期编排；主循环负责配置校验、任务启动、优雅排空和
+//! Worker control 状态，业务处理按 owner 分开。
 
 use std::sync::Arc;
 

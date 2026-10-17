@@ -1,5 +1,4 @@
 //! Admin runtime 配置 HTTP 客户端。
-//!
 //! 浏览器只编辑非敏感 JSON 文档，并把服务端返回的 fingerprint 原样作为更新 fence；TOML
 //! 文件、密钥和命令账本永远不进入浏览器。
 

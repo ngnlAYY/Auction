@@ -28,7 +28,6 @@ impl TracingHealthReader for DisabledTracingHealth {
 }
 
 /// 旧版 tracing collector 的低基数 Rust 实现。
-///
 /// counter 在读取时只向前同步到心跳安全快照，避免把不可信的负数或回退值写入 Prometheus。
 pub(super) struct TracingCollector {
     reader: Arc<dyn TracingHealthReader>,

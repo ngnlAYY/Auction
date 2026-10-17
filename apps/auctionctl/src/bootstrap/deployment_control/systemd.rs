@@ -1,7 +1,5 @@
-//! systemd unit 身份、状态读取和单角色 mutation 边界。
-//!
-//! 所有参数都直接传给已规范化的 `systemctl` 可执行文件，不经过 shell；unit 名称先限制为安全的
-//! `.service` 标识。这里不读取 TOML，也不决定跨角色启动顺序。
+//! systemd unit 身份、状态读取和单角色 mutation 边界；参数直接传给已规范化的
+//! `systemctl`，不经过 shell，也不决定跨角色启动顺序。
 
 use std::{
     collections::BTreeMap,
@@ -78,7 +76,6 @@ impl UnitSnapshot {
     }
 
     /// 独立迁移只接受 systemd 明确收敛后的停止状态。
-    ///
     /// `deactivating`、`maintenance` 和未来新增的未知状态即使暂时没有 MainPID，也不能放行
     /// schema 变更；否则会在 ExecStopPost 或其他 unit 状态转换尚未结束时绕过部署锁语义。
     pub(super) fn safely_stopped_for_migration(&self) -> bool {

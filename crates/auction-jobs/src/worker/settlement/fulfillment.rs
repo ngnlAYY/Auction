@@ -10,7 +10,6 @@ use tokio::task::JoinSet;
 use super::{PersistentWorker, merge_worker_result, poll_delay, process_fulfillment_claim};
 
 /// 立即处理一个批次，随后按旧版 polling+jitter cadence 重试。
-///
 /// 批次或单项失败只影响 fulfillment owner；只有循环任务 panic 或意外退出才由装配根
 /// 将整个 Worker 标记为 degraded 并失败关闭。
 pub(super) async fn run_loop<C>(

@@ -153,7 +153,6 @@ pub(crate) fn direct_element_children(element: ElementRef<'_>) -> Vec<ElementRef
 }
 
 /// 解码 HentaiVerse 固定标签使用的受限 CSS 字形结构。
-///
 /// 字形只允许作为指定 wrapper 的直接空 `div` 子元素出现；`c3x` 表示单个小写字母，
 /// 详情标签额外要求一个结尾 `c2m` 冒号。调用方仍须把结果与自己的固定闭集逐字核对。
 pub(crate) fn decode_css_glyph_label(

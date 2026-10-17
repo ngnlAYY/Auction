@@ -1,7 +1,5 @@
-//! 论坛回帖导入 Worker 的模块装配。
-//!
-//! 主题处理、竞价命令、MoogleMail 通知、拒绝提示和共享幂等辅助分别由子模块负责；本文件保留
-//! runtime 配置与 `run_cycle` 入口，不改变游标推进和 warning-only 边界。
+//! 论坛回帖导入 Worker 的模块装配；runtime 配置与 `run_cycle` 入口在此，游标推进和
+//! warning-only 边界不变。
 
 use std::{
     collections::{HashMap, HashSet},
@@ -62,7 +60,6 @@ pub struct ForumReplyPorts {
     pub notifier: Option<Arc<dyn MailDeliveryEnqueuer>>,
 }
 
-/// 论坛回帖导入运行时依赖。
 pub struct ForumReplyRuntime {
     pub(crate) store: Arc<dyn ForumReplyStore>,
     pub(crate) reader: Arc<dyn ForumTopicReader>,

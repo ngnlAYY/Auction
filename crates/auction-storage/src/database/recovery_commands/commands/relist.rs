@@ -1,6 +1,4 @@
-//! Recovery relist、预览事件、状态更新与命令记录。
-//!
-//! 该文件只承载 PostgreSQL recovery command 的单一职责，事务装配仍由父模块统一负责。
+//! Recovery relist、预览事件、状态更新与命令记录；事务装配由父模块统一负责。
 
 #[cfg(feature = "postgres")]
 use super::*;

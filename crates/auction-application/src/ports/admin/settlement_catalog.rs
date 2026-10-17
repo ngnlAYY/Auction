@@ -9,7 +9,6 @@ use super::ApplicationFuture;
 pub const MAX_SETTLEMENT_CATALOG_PAGE_SIZE: i64 = 100;
 pub const MAX_SETTLEMENT_CATALOG_OFFSET: i64 = 100_000;
 
-/// 已结算拍卖目录的筛选和有界分页条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettlementCatalogRequest {
     pub world_id: Option<String>,
@@ -29,7 +28,6 @@ impl SettlementCatalogRequest {
     }
 }
 
-/// 结算报表选择器所需的最小拍卖投影。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettlementCatalogEntry {
     pub auction_id: AuctionId,

@@ -1,5 +1,4 @@
 //! Admin 改名历史页面。
-//!
 //! 页面沿用旧版的名称即时筛选、列表和页级确认对话框；回滚仍通过新版命令 API、当前用户
 //! 版本和 CSRF 边界完成，浏览器不自行推导身份状态迁移。
 
@@ -191,7 +190,6 @@ pub(super) fn page() -> Element {
             }
             {content}
             if let Some(rename) = selected() {
-                // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
                 Dialog {
                     title: t!("admin-renames-revert-confirm-title"),
                     close_label: t!("admin-renames-cancel"),
@@ -241,7 +239,6 @@ fn RenameTable(
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table", aria_busy: busy_rename().is_some().to_string(),
-                // 列序：旧名、新名、方式、时间、回滚时间、操作；按字段预期内容分配比例。
                 auction_web_shared::TableColumns { layout: "admin-renames", widths: vec![21, 21, 9, 20, 20, 9] }
                 thead {
                     tr {

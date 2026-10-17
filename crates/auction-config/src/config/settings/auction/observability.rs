@@ -11,7 +11,6 @@ pub struct MetricsConfig {
 }
 
 /// Public/Worker 进程的 OTLP/HTTP tracing 非敏感运行参数。
-///
 /// Admin 进程在提供 runtime 文档时以其中的 `tracing` 为最终生效值；Public 和 Worker 使用
 /// 主配置中的这一组字段。OTLP headers 属于敏感材料，必须放在 `secrets_file` 的对应字段中。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

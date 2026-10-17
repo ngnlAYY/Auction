@@ -71,9 +71,9 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt
       # 廉价静态门禁先行，失败时不启动编译或安装审计工具。
-      - name: Check docs, repository policy and formatting
+      - name: Check repository policy and formatting
         if: steps.scope.outputs.run-checks == 'true'
-        run: bash ci/check.sh all fmt
+        run: bash ci/checks/check.sh all fmt
 
   verify:
     needs: docs
@@ -90,6 +90,7 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       # rust-cache v2.9.2；自动键隔离 job、平台、工具链和依赖图。
+      # 只有默认分支 push 与手动运行写缓存：PR 缓存作用域与合并结果不同，全写会挤占同一仓库额度。
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
@@ -97,8 +98,9 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+          save-if: github.event_name != 'pull_request'
       # docs 已完成格式和策略门禁；此处不重复执行，不运行测试。
-      - run: bash ci/check.sh check feature lint wasm
+      - run: bash ci/checks/check.sh check feature lint wasm
 
   security-audit:
     needs: docs
@@ -133,8 +135,8 @@ jobs:
             cargo install cargo-machete --locked --version 0.9.2 --force
           fi
       # 缓存命中也联网审计，漏洞和全部警告均失败，不忽略公告。
-      - run: bash ci/check.sh dependency-audit
-      - run: bash ci/check.sh dependency-unused
+      - run: bash ci/checks/check.sh dependency-audit
+      - run: bash ci/checks/check.sh dependency-unused
 
   msrv:
     needs: docs
@@ -157,6 +159,7 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+          save-if: github.event_name != 'pull_request'
       - run: >-
           cargo +1.94.1 check --locked --workspace --all-targets --all-features
 
@@ -176,6 +179,14 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       DX_ARCHIVE_SHA256: >-
         4363e4ed2a3f1eb7f4d38d2d59aed59ce43271c44c16b425e92c89a64761fbe7
+      # sccache 0.18.0 官方 musl 静态归档；与 dx 一样固定 SHA-256，命中缓存仍复校。
+      SCCACHE_ARCHIVE_SHA256: >-
+        45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89
+      # sccache 只在完整发布档启用：Fat LTO 与多 feature 变体最贵，检查 job 由 rust-cache 覆盖。
+      # GHA 后端按 sccache 版本前缀写缓存，升级即整体失效，不会混用旧编译对象。
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_CACHE_SIZE: 3G
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -193,6 +204,44 @@ jobs:
           cache-workspace-crates: "true"
           cache-on-failure: "true"
           cache-bin: "false"
+          save-if: github.event_name != 'pull_request'
+      # cache v6.1.0；只缓存官方 sccache 归档，不缓存编译对象（那些写入 Actions 缓存服务）。
+      - name: Restore sccache archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/auction-ci/sccache-0.18.0
+          key: sccache-linux-x86_64-0.18.0-${{ env.SCCACHE_ARCHIVE_SHA256 }}
+      - name: Install verified sccache
+        run: |
+          filename=sccache-v0.18.0-x86_64-unknown-linux-musl.tar.gz
+          root="$HOME/.cache/auction-ci/sccache-0.18.0"
+          archive="$root/$filename"
+          tool_dir="$RUNNER_TEMP/auction-sccache"
+          mkdir -p "$root" "$tool_dir"
+          if [[ ! -f "$archive" ]]; then
+            base_url=https://github.com/mozilla/sccache/releases/download
+            curl --fail --silent --show-error --location --retry 3 \
+              --connect-timeout 10 --max-time 180 \
+              "$base_url/v0.18.0/$filename" --output "$archive"
+          fi
+          printf '%s  %s\n' "$SCCACHE_ARCHIVE_SHA256" "$archive" |
+            sha256sum --check --
+          tar --extract --gzip --file "$archive" --directory "$tool_dir" \
+            --no-same-owner --strip-components=1 \
+            sccache-v0.18.0-x86_64-unknown-linux-musl/sccache
+          "$tool_dir/sccache" --version
+          printf '%s\n' "$tool_dir" >> "$GITHUB_PATH"
+      # 缓存服务凭据只注入能读 Actions cache 的 action 上下文，run: 步骤默认没有。
+      # 这里只输出 step outputs，再由构建步骤显式赋值，避免 token 在整个 job 里长期驻留。
+      - name: Read Actions cache credentials
+        id: cache-credentials
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            core.setOutput('url',
+              process.env.ACTIONS_RESULTS_URL || '');
+            core.setOutput('token',
+              process.env.ACTIONS_RUNTIME_TOKEN || '');
       # cache v6.1.0；只缓存固定版本的官方 dx 压缩包，命中后仍校验哈希。
       - name: Restore Dioxus CLI archive
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
@@ -217,9 +266,28 @@ jobs:
             --no-same-owner dx
           "$tool_dir/dx" --version
           printf '%s\n' "$tool_dir" >> "$GITHUB_PATH"
+      # rust-cache 保存时会清掉 target 下的非 Cargo 目录，制品与 dx 产物必须单独按源码身份缓存。
+      # 键就是 release.sh 的源码身份指纹：命中即 BUILD-INFO 一致，可直接跳过 WASM 与 Fat LTO。
+      - name: Compute release source fingerprint
+        id: source
+        run: |
+          fingerprint=$(bash ci/release/release.sh source-fingerprint)
+          printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
+      - name: Restore release artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            target/dist/artifacts
+            target/dx
+          key: release-artifacts-${{ steps.source.outputs.fingerprint }}
+          fail-on-cache-miss: false
       # 复用唯一发布入口：API-only 对照、双端 Web、四程序、隔离和归档门禁。
+      # sccache 只用本步骤注入的缓存凭据；缺失时回退本地编译，不抹掉构建结果。
       - name: Build and verify complete release package
-        run: bash ci/release.sh release-check
+        env:
+          ACTIONS_RESULTS_URL: ${{ steps.cache-credentials.outputs.url }}
+          ACTIONS_RUNTIME_TOKEN: ${{ steps.cache-credentials.outputs.token }}
+        run: bash ci/release/release.sh release-check
       # upload-artifact v7.0.2；tar 保留 bin 执行权限，外层不重复压缩。
       - name: Upload Linux binaries and checksums
         id: upload
@@ -227,9 +295,9 @@ jobs:
         with:
           name: auction-linux-x86_64-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            target/release-package/*.tar.gz
-            target/release-package/SHA256SUMS
-            target/release-package/DEPENDENCIES.md
+            target/dist/package/*.tar.gz
+            target/dist/package/SHA256SUMS
+            target/dist/package/DEPENDENCIES.md
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

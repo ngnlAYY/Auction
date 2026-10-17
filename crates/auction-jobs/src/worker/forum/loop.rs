@@ -1,8 +1,5 @@
-//! 论坛发布与回帖导入的独立 Worker 循环。
-//!
-//! 旧版把 forum sync 和 reply scan 放在同一 owner 内，但与 Auction、MoogleMail 等 owner 使用
-//! 不同任务。这里保持同一顺序，同时隔离两阶段错误，避免主题发布失败跳过回帖导入，或反向
-//! 阻塞其它 Worker 能力。
+//! 论坛发布与回帖导入的独立 Worker 循环；两阶段错误相互隔离，
+//! 主题发布失败不跳过回帖导入，也不阻塞其它 Worker 能力。
 
 use std::sync::Arc;
 

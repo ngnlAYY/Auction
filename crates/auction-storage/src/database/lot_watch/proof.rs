@@ -62,9 +62,8 @@ pub(crate) async fn delivery_eligible(
     .await
 }
 
-/// sending 必须先取得 lot 锁，再取得 delivery 锁；取消/重新领先与开始发送有明确线性化点。
-/// 领取阶段只做只读证明，不倒取 lot；最终开始发送再次在锁内复核证明。
-/// 保留 SQLSTATE，由调用方的事务重试边界分类，再映射为不含驱动细节的公开错误。
+/// sending 必须先取 lot 锁再取 delivery 锁；取消/重新领先与开始发送有明确线性化点。领取阶段只做
+/// 只读证明、不倒取 lot，最终开始发送再次在锁内复核。SQLSTATE 保留给调用方重试边界分类。
 pub(crate) async fn lock_delivery_lot(
     transaction: &mut Transaction<'_, Postgres>,
     delivery_id: Uuid,

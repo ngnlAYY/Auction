@@ -6,7 +6,6 @@ use uuid::Uuid;
 use super::super::RequestHash;
 use super::security::MailLoginKeyEnvelope;
 
-/// 注册或找回命令。
 #[derive(Debug, Clone)]
 pub struct MailUserRegisterCommand {
     pub command_id: auction_domain::CommandId,

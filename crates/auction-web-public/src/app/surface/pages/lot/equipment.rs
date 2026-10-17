@@ -131,7 +131,6 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Elem
                 div { class: "public-auction-equipment__stats-wrap",
                     table { class: "public-auction-equipment__stats ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("equipment-stats")} }
-                        // 列序：属性、数值、基础值、Roll；按字段预期内容分配比例。
                         auction_web_shared::TableColumns { layout: "public-equipment-stats", widths: vec![42, 24, 17, 17] }
                         thead {
                             tr {

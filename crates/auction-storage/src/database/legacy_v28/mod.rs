@@ -1,8 +1,6 @@
-//! Auction-BF PostgreSQL v28 的显式接管边界。
-//!
-//! 旧版使用 golang-migrate 的 `schema_migrations`，Rust 版使用压缩后的 SQLx 迁移树；两个
-//! 版本号没有可直接比较的含义。本模块只接受精确、干净且停止外部连接的旧 v28，先验证
-//! 关键事实可无损回填，再在同一事务内补齐 Rust v5 结构并写入受审计的 SQLx 基线。
+//! Auction-BF PostgreSQL v28 的显式接管边界；旧版 golang-migrate 版本号与 SQLx 迁移树无对应含义。
+//! 本模块只接受精确、干净且已停外部连接的旧 v28，先验证关键事实可无损回填，再在同一事务内补齐
+//! Rust v5 结构并写入受审计的 SQLx 基线。
 
 use crate::database::audit_health::AuditWriteResult as _;
 
@@ -22,9 +20,8 @@ pub const LEGACY_V28_MIGRATION_VERSION: i64 = 28;
 pub const POSTGRES_LEGACY_V28_PREFLIGHT_FORMAT: &str = "auction-postgres-legacy-v28-preflight.v1";
 
 /// 旧 v28 已经等价覆盖的 Rust SQLx 迁移。
-///
-/// 1..=5 是压缩后的旧版最终 schema；v7 的 replay 唯一性在旧版 v25 已以另一索引名实现，
-/// bridge 会补建当前索引，不能再执行 v7 中针对 fresh schema 临时约束的 DROP。
+/// 1..=5 是压缩后的旧版最终 schema；v7 的 replay 唯一性在旧版 v25 已用另一索引名实现，bridge 会
+/// 补建当前索引，不能再执行 v7 中针对 fresh schema 临时约束的 DROP。
 const BASELINED_SQLX_VERSIONS: &[i64] = &[1, 2, 3, 4, 5, 7];
 
 const EXPECTED_LEGACY_TABLES: &[&str] = &[

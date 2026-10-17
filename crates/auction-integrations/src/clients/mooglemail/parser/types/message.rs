@@ -7,11 +7,8 @@ use super::*;
 pub struct MoogleMailSummary {
     /// 远端 `mid`。
     pub external_mail_id: String,
-    /// 邮件所在世界。
     pub world: MoogleMailWorld,
-    /// 发件人显示名。
     pub sender: String,
-    /// 收件箱标题。
     pub subject: String,
     /// 远端 HVT-8 时间转换后的 UTC 时间。
     pub received_at: DateTime<Utc>,
@@ -31,7 +28,6 @@ impl fmt::Debug for MoogleMailSummary {
 }
 
 impl MoogleMailSummary {
-    /// 校验摘要可以进入详情读取队列。
     pub fn validate(&self) -> bool {
         valid_opaque_id(&self.external_mail_id)
             && valid_line(&self.sender, 256, false)
@@ -43,44 +39,30 @@ impl MoogleMailSummary {
 /// 一件 MoogleMail 装备附件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailAttachment {
-    /// 远端装备 ID。
     pub equipment_id: String,
     /// 读取装备页所需的短生命周期 key；默认脱敏。
     pub key: MoogleMailEquipmentKey,
 }
 
 /// 通过摘要与详情双重校验后的 typed 邮件 envelope。
-///
 /// 该类型不保存 HTML、mmtoken 或 Cookie，但正文和装备 key 仍属于敏感的短生命周期数据，
 /// 只能在应用处理完成后尽快丢弃或调用 `clear_secrets`。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailMessage {
-    /// 远端邮件 ID。
     pub external_mail_id: String,
-    /// 邮件世界。
     pub world: MoogleMailWorld,
-    /// 收件时间。
     pub received_at: DateTime<Utc>,
-    /// 认证详情页中的发件人。
     pub sender: String,
-    /// 认证详情页中的标题。
     pub subject: String,
-    /// 认证详情页 textarea 正文。
     pub body: String,
-    /// 附带的 Credits 数量。
     pub credits: i64,
-    /// 附带的 COD 数量。
     pub cod: i64,
-    /// 附带装备。
     pub attachments: Vec<MoogleMailAttachment>,
-    /// 详情页是否提供整封退回动作证明。
     pub returnable: bool,
-    /// 详情页是否提供领取附件动作证明。
     pub claimable: bool,
 }
 
 /// 详情页动作编排所需的短生命周期状态。
-///
 /// 该状态为动作前后身份与资产证明保留 token、邮件身份、正文和附件清单，
 /// 但不保存装备 key 或原始 HTML。`Debug` 对身份与正文字段脱敏。
 pub struct MoogleMailActionState {
@@ -93,9 +75,7 @@ pub struct MoogleMailActionState {
     pub(crate) credits: i64,
     pub(crate) cod: i64,
     pub(crate) attachment_count: usize,
-    /// 详情页是否声明可以退回整封邮件。
     pub returnable: bool,
-    /// 详情页是否声明可以领取全部附件。
     pub claimable: bool,
 }
 
@@ -232,7 +212,6 @@ impl MoogleMailMessage {
     }
 }
 
-/// 单页收件箱解析结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailInboxPage {
     /// 按远端 newest-first 顺序排列的摘要。

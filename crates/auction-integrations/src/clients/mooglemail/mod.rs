@@ -1,8 +1,6 @@
-//! HentaiVerse MoogleMail 的受限读取与写入适配器。
-//!
-//! 该模块只负责固定远端协议、HTTP 传输、HTML 解析、写入证明和凭据边界。解析成功后返回
-//! 不含原始 HTML 的 typed envelope；页面 token 只能在短生命周期表单构造期间使用，Cookie
-//! 不进入返回值。应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
+//! HentaiVerse MoogleMail 的受限读取与写入适配器；解析后只返回不含原始 HTML 的 typed
+//! envelope，页面 token 与 Cookie 不进入返回值。
+//! 应用层仍需自行完成邮件分类、幂等入库和业务命令编排。
 
 mod client;
 mod diagnostics;
@@ -46,7 +44,6 @@ pub use transport::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates
 pub use writer::{MoogleMailComposeState, MoogleMailSendResponseFailure};
 
 /// 将已完成协议校验的 MoogleMail envelope 转换为应用业务 envelope。
-///
 /// 转换发生在 integrations crate 内部，因此装备 key 只在这里从 MoogleMail 不透明类型
 /// 复制到领域 `EquipmentKey`；转换失败时不会把原始 key 或正文放入错误。
 pub fn into_application_message(

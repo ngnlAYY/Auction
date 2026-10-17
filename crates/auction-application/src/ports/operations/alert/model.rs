@@ -13,7 +13,6 @@ pub struct OperationsAlertSourceObservation {
 }
 
 impl OperationsAlertSourceObservation {
-    /// 构造可用来源观察。
     pub fn available(
         source: OperationsAlertSource,
         signals: Vec<OperationsAlertSignal>,

@@ -1,7 +1,5 @@
-//! Admin runtime TOML 文件适配器。
-//!
-//! 该适配器只拥有非敏感 runtime 文档文件：读取要求 owner-owned regular 0640 文件，写入
-//! 使用同目录临时文件、同步、rename 和目录同步，并通过独立锁文件阻止多进程 writer 交错。
+//! Admin runtime TOML 文件适配器；只拥有非敏感文档，读取要求 owner-owned regular 0640
+//! 文件，写入使用临时文件、rename 与目录同步，并由独立锁文件阻止多 writer 交错。
 //! 数据库命令账本和恢复状态仍由 `auction-storage` 持有。
 
 use std::{

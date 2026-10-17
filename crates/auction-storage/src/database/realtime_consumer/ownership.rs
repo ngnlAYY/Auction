@@ -4,9 +4,8 @@ use thiserror::Error;
 
 use super::super::DatabaseStore;
 
-/// 将 consumer key 的互斥与全部 relay 数据访问绑定到同一生命周期。
-///
-/// 消费事务只使用 PostgreSQL 持锁连接，连接失效后不得重新取连接继续确认游标。
+/// 将 consumer key 的互斥与全部 relay 数据访问绑定到同一生命周期：消费事务只使用 PostgreSQL
+/// 持锁连接，连接失效后不得重新取连接继续确认游标。
 pub struct RealtimeConsumerOwnership {
     pub(super) consumer_key: String,
     pub(super) backend: OwnedRealtimeBackend,

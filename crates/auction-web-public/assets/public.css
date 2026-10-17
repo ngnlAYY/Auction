@@ -2048,7 +2048,7 @@
   color: var(--color-text-muted);
 }
 
-/* .action-feedback 基础规则与 --success/--error/--notice 变体与 base.css 重复，已去重上移；此处仅保留 public 特有覆盖。 */
+/* 基础 .action-feedback 规则由 base.css 提供；此处仅保留 public 特有覆盖。 */
 .public-auction-bid-form p.action-feedback--success {
   color: var(--color-live);
   font-weight: 600;
@@ -2385,7 +2385,7 @@
 }
 
 /* ===== 空状态（拍卖空状态） ===== */
-/* .ui-empty-state* 与 .ui-async-state* 已由 auction-web-shared base.css 提供。 */
+/* .ui-empty-state* 与 .ui-async-state* 由 auction-web-shared base.css 提供。 */
 
 .public-auction-empty {
   position: relative;

@@ -143,7 +143,6 @@ impl AdminUserListItem {
     }
 }
 
-/// Admin 用户列表请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminUserListRequest {
     pub name: Option<String>,
@@ -163,7 +162,6 @@ impl AdminUserListRequest {
     }
 }
 
-/// Admin 用户列表页。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminUserPage {
     pub users: Vec<AdminUserListItem>,

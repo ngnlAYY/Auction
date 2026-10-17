@@ -100,7 +100,6 @@ fn AdminProxyHistoryTable(
             div { class: "admin-auction-table-wrap",
                 table { class: "admin-auction-table admin-auction-proxy__table ui-table--responsive",
                     caption { class: "admin-visually-hidden", {t!("admin-lots-proxy-pagination")} }
-                    // 列序：用户、上限、模式、状态、次数、时间；按字段预期内容分配比例。
                     auction_web_shared::TableColumns { layout: "admin-proxy-history", widths: vec![22, 18, 10, 12, 10, 28] }
                     thead {
                         tr {

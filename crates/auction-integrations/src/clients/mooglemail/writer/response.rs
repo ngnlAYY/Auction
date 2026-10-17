@@ -12,7 +12,6 @@ use super::*;
 
 impl MoogleMailParser {
     /// 证明最终发送响应成功，并尽可能提取远端邮件 ID。
-    ///
     /// 返回 None 只表示明确成功页没有暴露唯一 mid；没有明确成功页时必须进入 write_unknown。
     pub fn prove_send_completed(
         &self,
@@ -42,7 +41,6 @@ impl MoogleMailParser {
     }
 
     /// 只从可见协议文字识别明确发送失败；自寄拒绝须来自唯一系统提示区。
-    ///
     /// script/style/noscript/textarea 中的诱饵短语不参与分类；已有 `#mmail_fin` 的页面交给
     /// 成功证明处理，不会被误分类为失败。
     pub fn classify_send_response_failure(

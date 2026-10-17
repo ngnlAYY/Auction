@@ -1,6 +1,4 @@
-//! 结算义务、recovery、审计与实时事件写入。
-//!
-//! 该文件只承载 PostgreSQL 结算事务的单一职责，事务边界仍由父模块统一装配。
+//! 结算义务、recovery、审计与实时事件写入；事务边界由父模块统一装配。
 
 use std::collections::BTreeMap;
 
@@ -67,9 +65,8 @@ pub(super) async fn insert_obligations(
 }
 
 /// 为每个有获胜者的 lot 建立 recovery case。
-///
-/// recovery 与结算义务必须处于同一个 Serializable 事务；如果只写了 payment obligation
-/// 而没有写 recovery case，付款超时后 Worker 将无法形成可审计的提醒、退回和人工确认链。
+/// recovery 与结算义务必须处于同一个 Serializable 事务；只写 payment obligation 而不写
+/// recovery case，付款超时后 Worker 将无法形成可审计的提醒、退回和人工确认链。
 pub(super) async fn insert_recoveries(
     transaction: &mut PostgresCompetitionTransaction,
     auction_id: AuctionId,

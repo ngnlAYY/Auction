@@ -1,7 +1,5 @@
-//! Recovery action 投递状态推进与结果观察的模块装配。
-//!
-//! pending → prepared → enqueued 的身份推进与终态证明分别由子模块负责；
-//! 本模块只保留稳定出口，避免把不同阶段的 fence 逻辑重新混在一个文件中。
+//! Recovery action 投递状态推进与结果观察的模块装配；pending → prepared → enqueued 的身份推进和
+//! 终态证明由子模块负责，本模块只保留稳定出口。
 
 #[cfg(feature = "postgres")]
 use super::*;

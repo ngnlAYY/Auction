@@ -26,7 +26,6 @@ impl DeploymentListener {
 }
 
 /// 执行不连接数据库、不启动进程的三进程部署预检。
-///
 /// 旧版启动脚本同时承担配置检查、进程装配和数据库操作；该只读命令保持独立，也由
 /// `deployment start/restart` 在任何 unit mutation 前复用，避免预检触发外部 MoogleMail/论坛请求。
 pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> anyhow::Result<()> {

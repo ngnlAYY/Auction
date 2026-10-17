@@ -15,7 +15,6 @@ pub struct PostgresConnectionConfig {
     pub host: String,
     /// 显式 TCP 端口，范围 1-65535。
     pub port: u16,
-    /// PostgreSQL 登录账号。
     pub username: String,
     /// PostgreSQL 登录密码；不得输出到日志或诊断。
     pub password: String,

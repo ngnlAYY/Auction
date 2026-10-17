@@ -1,7 +1,5 @@
-//! 论坛主题同步 Worker。
-//!
-//! 该循环只编排“领取数据库快照 → 渲染 → 远端创建/查找 → 写入发布证明”，不包含拍卖状态机。
-//! 远端 POST 无法证明成功时，失败码会进入人工对账状态，避免 Worker 盲目重复发帖。
+//! 论坛主题同步 Worker；只编排领取数据库快照 → 渲染 → 远端创建/查找 → 写入发布证明，
+//! 远端 POST 无法证明成功时进入人工对账而不重复发帖。
 
 use std::sync::{Arc, OnceLock};
 
@@ -34,7 +32,6 @@ pub struct ForumSyncPorts {
     pub equipment_links: Arc<dyn PublicEquipmentLinkResolver>,
 }
 
-/// 论坛主题同步运行时依赖。
 pub struct ForumSyncRuntime {
     pub(crate) store: Arc<dyn ForumSyncStore>,
     pub(crate) credential_availability: Arc<dyn ForumCredentialAvailability>,

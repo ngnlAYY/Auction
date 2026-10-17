@@ -85,7 +85,6 @@ impl ProxyAuthorization {
     }
 
     /// 将仍具竞价效力的授权上限降低，并返回待追加的转换事实。
-    ///
     /// `FinalFast` 是新版用于持久化 Final 转换 owner 的内部状态；旧 v1 在同一时刻仍把授权
     /// 视为 `active` 且允许降低。因此降低时保留内部状态，再由 Public 防腐层投影为旧状态。
     pub fn lower(

@@ -1,5 +1,4 @@
 //! Admin runtime 配置应用服务。
-//!
 //! 服务负责文档校验、指纹 fence、命令重放和 pending/unknown 恢复；文件和数据库的具体
 //! 持久化仍分别由外层适配器实现。文件替换完成后即视为 durable intent 已向前推进；账本
 //! 应用失败时保留新文档，后续恢复根据账本实际状态重试或收口，避免提交结果未知时回退旧文档。
@@ -15,7 +14,6 @@ use crate::{
     ApplicationFuture, Clock,
 };
 
-/// Admin runtime 配置应用服务。
 pub struct AdminRuntimeConfigService<R, F, C> {
     commands: Arc<R>,
     files: Arc<F>,
@@ -56,7 +54,6 @@ where
     }
 
     /// 在 Admin surface 对外就绪前恢复尚未收口的 runtime 命令。
-    ///
     /// 启动装配层负责决定哪些结果可以带着告警继续运行；服务层只负责执行与更新流程
     /// 相同的恢复逻辑，避免启动恢复和用户重试各自维护一套状态判断。
     pub async fn recover(&self) -> Result<(), ApplicationError> {

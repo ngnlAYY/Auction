@@ -1,7 +1,5 @@
-//! E-Hentai HTTP 客户端与论坛协议事务。
-//!
-//! 本模块只负责固定 origin、请求限流、响应大小边界、主题创建/读取以及 POST 后的
-//! write-unknown 栅栏；表单字段和响应判定辅助函数集中在 forms.rs。
+//! E-Hentai HTTP 客户端与论坛协议事务；固定 origin、限流、响应大小边界、
+//! 主题创建/读取和 POST 后的 write-unknown 栅栏集中在此，表单与判定辅助在 forms.rs。
 
 use std::collections::VecDeque;
 
@@ -22,7 +20,6 @@ mod request;
 mod session;
 mod topic;
 
-/// E-Hentai HTTP 客户端配置。
 #[derive(Debug, Clone)]
 pub struct EhentaiClientConfig {
     /// 固定论坛 origin；生产环境必须使用 HTTPS。
@@ -31,9 +28,7 @@ pub struct EhentaiClientConfig {
     pub maximum_response_bytes: usize,
     /// 单次主题读取允许抓取的最大页数，不能超过硬上限 20。
     pub maximum_topic_pages: usize,
-    /// 连续请求之间的最小间隔。
     pub minimum_request_interval: Duration,
-    /// 单次 HTTP 请求超时时间。
     pub request_timeout: Duration,
     /// 是否把所有世界映射到旧版测试板块 4。
     pub test_board_mode: bool,
@@ -80,7 +75,6 @@ impl EhentaiClientConfig {
     }
 }
 
-/// 受限的 E-Hentai HTTP 客户端。
 #[derive(Clone)]
 pub struct EhentaiClient {
     client: Client,
@@ -100,7 +94,6 @@ pub struct EhentaiClient {
 
 impl EhentaiClient {
     /// 使用已有 HTTP client 建立兼容构造器。
-    ///
     /// 生产装配应使用 [`Self::with_config`]，它会强制关闭自动重定向；该方法保留给已有
     /// 装配代码和受控本地协议适配器使用。
     pub fn new(base_url: Url, client: Client) -> Self {
@@ -191,7 +184,6 @@ impl EhentaiClient {
         &self.client
     }
 
-    /// 返回固定论坛 origin。
     pub fn base_url(&self) -> &Url {
         &self.base_url
     }

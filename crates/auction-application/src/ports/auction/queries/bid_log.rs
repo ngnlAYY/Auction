@@ -8,7 +8,6 @@ use crate::ApplicationFuture;
 /// 公开竞价日志兼容页允许的最大 offset。
 pub const MAX_PUBLIC_BID_LOG_OFFSET: i64 = 10_000;
 
-/// 单场公开竞价日志的筛选与分页条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicBidLogListRequest {
     pub auction_id: Uuid,

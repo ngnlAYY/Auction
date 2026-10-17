@@ -6,7 +6,6 @@ use uuid::Uuid;
 use super::{ApplicationFuture, RequestHash};
 
 /// Worker 推进 recovery case 后返回的安全摘要。
-///
 /// 该摘要不包含 claim token、外部邮件正文或 delivery payload；它只用于记录本轮推进结果，
 /// 真正的 recovery action 仍由 recovery owner 的后续端口领取和执行。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +19,6 @@ pub struct RecoveryCaseAdvance {
 }
 
 /// Worker 推进 recovery relist/refund resolution 后返回的安全摘要。
-///
 /// 重挂本身和退款闭合都必须由 recovery owner 在数据库事务内完成；Worker 只记录结果，不能
 /// 根据这份摘要自行修改 recovery、lot 或 obligation。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +34,6 @@ pub struct RecoveryResolutionAdvance {
 }
 
 /// Worker 记录一封结算退回邮件后返回的安全摘要。
-///
 /// recovery 只会把已由 mail processor 解析并持久化的证据与 obligation 重新比对；摘要不携带
 /// 邮件正文、装备 key 或外部凭据。证据不匹配时仍会记录退回邮件，但不会创建可执行 action。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +48,6 @@ pub struct RecoveryReturnAdvance {
 }
 
 /// Worker 领取的一条 recovery action。
-///
 /// `recipient` 可能为空，表示 Users owner 没有可用的 MM 收件人名称；这种确定性事实必须进入
 /// manual reconcile，而不能由 Worker 猜测收件人或静默丢弃 action。`recipient_eligible` 是
 /// Users owner 在同一读取投影中给出的 active 状态；prepare/activation 前必须为 true，已经
@@ -88,7 +84,6 @@ pub struct RecoveryActionClaim {
     pub created_at: DateTime<Utc>,
 }
 
-/// recovery delivery 观察后的持久化结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryActionOutcome {
     /// delivery 尚未完成，action 已被释放并等待下一次观察。
@@ -101,8 +96,6 @@ pub enum RecoveryActionOutcome {
     ManualReconcile { failure_code: String },
 }
 
-/// recovery case 的持久化推进端口。
-///
 /// PostgreSQL 完整档在同一 Serializable 事务中锁定 due case、检查结算履约事实、推进阶段并
 /// 创建 payment reminder action，不以内存定时器替代持久事实。
 pub trait RecoveryWorkStore: Send + Sync {
@@ -178,8 +171,6 @@ pub trait RecoveryWorkStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 }
 
-/// recovery resolution 的持久化调度端口。
-///
 /// `relist_pending` 的目标拍卖可能暂时不存在，因此重挂事务必须支持持久化退避；`refunding`
 /// 只能依据 buyer refund fulfillment 的已提交完成事实闭合。两项操作都不能由内存计时器代替。
 pub trait RecoveryResolutionStore: Send + Sync {

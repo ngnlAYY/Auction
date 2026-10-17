@@ -151,7 +151,6 @@ impl AdminRuntimeStoredCommand {
         Ok(())
     }
 
-    /// 判断已有命令是否与新的请求完全相同。
     pub fn matches_request(&self, request_hash: RequestHash) -> bool {
         self.digest_version == ADMIN_RUNTIME_DIGEST_VERSION && self.request_hash == request_hash
     }

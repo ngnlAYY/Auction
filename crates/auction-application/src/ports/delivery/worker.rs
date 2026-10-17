@@ -4,8 +4,6 @@ use uuid::Uuid;
 
 use super::{ApplicationFuture, RequestHash};
 
-/// Worker 领取的一条 delivery outbox 记录。
-///
 /// payload 是已经由业务 owner 持久化的无密文 JSON；传输适配器不得从 claim 外寻找凭据，也
 /// 不得把 Cookie、密钥或完整响应写入日志。
 #[derive(Debug, Clone, PartialEq)]
@@ -26,7 +24,6 @@ pub struct DeliveryWorkClaim {
 }
 
 /// 当前 delivery 领取轮次中暂不再领取的 MoogleMail 收件人。
-///
 /// 玩家名称只在对应 world 内比较，避免主世界的失败误跳过 Isekai 同名玩家。该值不进入
 /// 持久状态；下一轮 Worker 仍会重新判断尚未处理的 delivery。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +56,6 @@ pub struct DeliveryTransportError {
     pub failure_code: String,
     pub safe_detail: String,
     /// true 表示不能安全自动重发或终结，必须进入人工 reconcile。
-    ///
     /// 除远端结果未知外，也包括收件人不存在但退信资产尚未取回等已证明拒绝场景。
     pub outcome_unknown: bool,
     /// 远端明确失败时仍可能返回的安全引用，例如退信 `mid`。
@@ -69,7 +65,6 @@ pub struct DeliveryTransportError {
 }
 
 /// 已完成只读前置、但尚未开始外部写入的消耗式发送句柄。
-///
 /// 句柄持有适配器的凭据独占上下文；仅在持久 sending fence 成功且续租确认后 poll 一次。
 /// 丢弃句柄只释放上下文，不执行远端写入。
 pub type DeliveryPreparedSend<'a> = std::pin::Pin<
@@ -166,7 +161,6 @@ pub enum DeliveryFenceOutcome {
 /// 持久化 delivery outbox 的传输端口。
 pub trait DeliveryTransport: Send + Sync {
     /// 返回 transport 在单个 Worker 进程内允许同时进入 `sending` 的上限。
-    ///
     /// 配置并发仍是全局上限；拥有单一远端可变会话的 transport 可以进一步收紧，避免任务先进入
     /// `sending` 再在适配器内部排队并消耗请求超时。实现必须返回大于零的值。
     fn maximum_concurrency(&self) -> u16 {
@@ -174,7 +168,6 @@ pub trait DeliveryTransport: Send + Sync {
     }
 
     /// 在 delivery 进入 `sending` 前判断目标 world 当前是否有可用凭据。
-    ///
     /// 无效 payload 必须返回 true，让正式发送路径把它收口为确定失败；false 只表示当前外部
     /// 能力暂不可用，Worker 应释放 claim 而不是消耗交付。
     fn available(&self, claim: &DeliveryWorkClaim) -> bool;
@@ -273,7 +266,6 @@ pub trait DeliveryWorkStore: Send + Sync {
     ) -> ApplicationFuture<'_, ()>;
 
     /// 为只读准备中的 claimed 或尚未完成的 sending 续租，不改变状态。
-    ///
     /// 必须匹配当前 token/fencing，且旧租约在调用时刻及数据库实际执行时均有效；
     /// 过期、已更换 owner 或终态记录不得复活。新截止必须仍在未来且不得缩短现有租约。
     /// 调用方在准备总预算内续租，并在 sending fence 前后确认有效租期后才 poll 外部写入。

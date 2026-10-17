@@ -1,6 +1,6 @@
 # 数据库对象与所有权契约
 
-[文档导航](../README.md) · [PostgreSQL SQL](../../migrations/postgres) · [查询、事务与映射](../../crates/auction-storage/src/database)
+[文档导航](docs/README.md) · [PostgreSQL SQL](migrations/postgres) · [查询、事务与映射](crates/auction-storage/src/database)
 
 按逻辑 owner 登记持久化对象与历史迁移范围；表存在不等于对应产品流程已验收。
 
@@ -16,10 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
-SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000048`；已发布文件不修改或删除。
-历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000048`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -36,8 +33,7 @@ PostgreSQL 迁移为 `000001`—`000048`；已发布文件不修改或删除。
 
 ### Bot 内部履约对象
 
-新增持久化能力由追加的 `000046`—`000048` 定义；本轮只做源码及静态验证，未执行迁移。
-以下是实际对象及 owner，不修改 `000045` 或历史证据。
+新增持久化能力由追加的 `000046`—`000048` 定义；本轮只做源码及静态验证，未执行迁移。以下是实际对象及 owner，不修改 `000045` 或历史证据。
 
 | 对象 | 唯一逻辑 / SQL owner | 职责 |
 | --- | --- | --- |
@@ -50,43 +46,22 @@ PostgreSQL 迁移为 `000001`—`000048`；已发布文件不修改或删除。
 | settlement_funding_returns | application settlement funding / storage settlement_funding | 每 delivery 唯一精确返还证据；本轮未开放人工返还入口 |
 | settlement_internal_commands | application settlement fulfillment / storage fulfillment_scheduler | 独立非敏感完整证明与稳定命令账本；obligation/action 唯一，原义务满足、资金、审计和直接依赖解除同事务 |
 
-内部证明不伪造 Sent、delivery ID 或远端收款；存量资金与旧未知投递不自动回填/结清。
-资金运维预览严格只读数据库责任、版本及摘要，不推进 generation，也不把未观测余额展示为可用额度。
-仅显式执行阶段取得真实身份/余额，并复核完整责任、稳定命令、版本与精确确认。历史账户归属缺证据时
-仅作保守隔离，不伪造当前账号实收；编译期现金门能力不代替所有相关程序同版升级的运维前提。
+内部证明不伪造 Sent、delivery ID 或远端收款；存量资金与旧未知投递不自动回填/结清。资金运维预览严格只读数据库责任、版本及摘要，不推进 generation，也不把未观测余额展示为可用额度；仅显式执行阶段取得真实身份/余额，并复核完整责任、稳定命令、版本与精确确认。历史账户归属缺证据时仅作保守隔离，不伪造当前账号实收；编译期现金门能力不代替所有相关程序同版升级的运维前提。
 
 ### 迁移语义与兼容边界
 
 当前结构按下列语义解释，迁移编号用于定位 SQL，不代表另一套业务版本：
 
-- 拍卖身份、前序顺序及唯一 Draft/Preview 录入目标由完整档延迟约束保护（`000014`/`000032`）。
-  Preview 继续接收并物化装备，Open 或取消 Preview 才建立后继 Draft 并移动目标；升级时同世界
-  Preview 与后继 Draft 并存会被拒绝，不自动选择保留哪一期。
-- `bid_proxies` 是只读兼容视图；代理写入只进入 `bid_proxy_authorizations` 和历史表。
-  `final_fast` 降额保持 Fast 模式、原状态及空终止原因，只能严格降额（PostgreSQL `000034`）。
-- live/sold lot 必须有有效结束时间。PostgreSQL `000019` 仅为已先更新同 lot 投影、逐字段可证明的
-  v28 INSERT 补齐 bid 截止事实，不干预当前显式写入。Isekai carrier 的派发 world 由 `000017` 冻结。
-- 分类编号覆盖 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy；每类从 1 递增。
-  内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`）。
-- 论坛 `showuser` 数字 ID 为规范十进制，同步到 `users.forum_account_id` 与
-  `forum_bidder_identities.external_account_id`。一个 Users 主体跨 world/provider 只能沿用同一账号键；
-  延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，
-  `game_player_id` 只是名称兼容镜像。首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册
-  按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
-  `users_timestamp_order`（`000044`）保证 `updated_at >= created_at`；所有身份写入显式保证快照更新时间不倒退，
-  旧创建时间的高水位保留，不将其解释为准确的远端时区；只对上述双重证据成立的倒退行追加审计更正。
-- 所有固定目录页及系统日志的远端 post ID 必须真实对账；历史 published 行没有身份时保留空值。
-  `000040` 增加冻结的 `catalog_layout`、`catalog_page_count`（历史默认 1）及 `auction_forum_catalog_pages` 续页镜像。
-  历史已尝试/发布/未知写入使用 `legacy_single`，保留楼层并继续导入；仅从未尝试且无远端身份的队列项及新主题用 `paged_v1`，每页最多 150 件。
-  发布/刷新与主记录 claim/revision CAS 同事务写入，领取复核页数、连续楼层和互异身份。历史主题不自动改楼。
-  `auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从系统日志楼层（目录页数加一）起步，只由完整主题扫描推进，
-  不由 thread/post ID 或内容版本推算。账号与名称变化追加到 `forum_identity_history`（PostgreSQL `000025`—`000031`）。
-- `mail_cookie`/`forum_cookie` 各自全局最多一条 active；`000030` 遇重复行拒绝迁移，必须先通过 Admin
-  幂等停用并保留审计，不静默删除或选择凭据。告警状态与重试形状见[实时事件与运维告警](#实时事件与运维告警)。
+- 拍卖身份、前序顺序及唯一 Draft/Preview 录入目标由完整档延迟约束保护（`000014`/`000032`）：Preview 继续接收并物化装备，Open 或取消 Preview 才建立后继 Draft 并移动目标；升级时同世界 Preview 与后继 Draft 并存会被拒绝，不自动选择保留哪一期。
+- `bid_proxies` 是只读兼容视图，代理写入只进入 `bid_proxy_authorizations` 和历史表；`final_fast` 降额保持 Fast 模式、原状态及空终止原因，只能严格降额（PostgreSQL `000034`）。
+- live/sold lot 必须有有效结束时间；PostgreSQL `000019` 仅为已先更新同 lot 投影、逐字段可证明的 v28 INSERT 补齐 bid 截止事实，不干预当前显式写入；Isekai carrier 的派发 world 由 `000017` 冻结。
+- 分类编号覆盖 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy，每类从 1 递增；内部 `lot_number` 保持全局顺序，已开始发布的旧论坛主题冻结原全局编号方案（PostgreSQL `000024`）。
+- 论坛 `showuser` 数字 ID 为规范十进制，同步到 `users.forum_account_id` 与 `forum_bidder_identities.external_account_id`；一个 Users 主体跨 world/provider 只能沿用同一账号键，延迟约束保证提交时一致。`users.username` 是 MM 收件人/显示名称的唯一权威，`display_name` 只是论坛快照，`game_player_id` 只是名称兼容镜像；首次论坛竞价可建立 revoked-key `forum_only` 主体，后续 MM 注册按当前名称激活为 `mm_bound`，不创建影子名称或提前签发 active Key。
+- `users_timestamp_order`（`000044`）保证 `updated_at >= created_at`；所有身份写入显式保证快照更新时间不倒退，旧创建时间的高水位保留，不将其解释为准确的远端时区；只对上述双重证据成立的倒退行追加审计更正。
+- 所有固定目录页及系统日志的远端 post ID 必须真实对账，历史 published 行没有身份时保留空值。`000040` 增加冻结的 `catalog_layout`、`catalog_page_count`（历史默认 1）及 `auction_forum_catalog_pages` 续页镜像：历史已尝试/发布/未知写入使用 `legacy_single`，保留楼层并继续导入，仅从未尝试且无远端身份的队列项及新主题用 `paged_v1`，每页最多 150 件；发布/刷新与主记录 claim/revision CAS 同事务写入，领取复核页数、连续楼层和互异身份，历史主题不自动改楼。`auction_forum_bid_commands` 的未知楼层保持 NULL，连续处理水位从系统日志楼层（目录页数加一）起步，只由完整主题扫描推进，不由 thread/post ID 或内容版本推算；账号与名称变化追加到 `forum_identity_history`（PostgreSQL `000025`—`000031`）。
+- `mail_cookie`/`forum_cookie` 各自全局最多一条 active；`000030` 遇重复行拒绝迁移，必须先通过 Admin 幂等停用并保留审计，不静默删除或选择凭据。告警状态与重试形状见[实时事件与运维告警](#实时事件与运维告警)。
 
-canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预检和外部备份证据通过后，
-补齐生命周期、领先投影、逐 bid 截止、代理兼容表/视图与索引，为等价覆盖的 SQLx `1..=5`、`7`
-写入当前 checksum，再执行其余追加迁移；不修改来源 migration 或把来源版本号当作 SQLx 版本。
+canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预检和外部备份证据通过后，补齐生命周期、领先投影、逐 bid 截止、代理兼容表/视图与索引，为等价覆盖的 SQLx `1..=5`、`7` 写入当前 checksum，再执行其余追加迁移；不修改来源 migration 或把来源版本号当作 SQLx 版本。
 
 ## 基础身份、配置与审计
 
@@ -112,16 +87,9 @@ canonical PostgreSQL v28 转换由 `legacy_v28` bridge 持有：精确格式预�
 | runtime_config_admin_commands | auction-application：runtime-config | runtime 配置更新、指纹和 pending/applied/unknown 结果 |
 | rules_admin_commands | auction-application：rules | 规则文档管理命令幂等账本 |
 
-Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`，值来自本进程启动时的
-`[worker.forum].enabled`；observability/storage health owner 继续独占心跳写入。PostgreSQL 完整档
-的 Public forum 读取 owner 仅聚合该字段：忽略过期和停止实例，任一 true 表示启用，全部明确 false
-才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，
-也不将心跳 details 原文公开给浏览器。
+Worker 心跳在既有 `details` JSON 对象内发布布尔 `forum_sync_enabled`，值来自本进程启动时的 `[worker.forum].enabled`；observability/storage health owner 继续独占心跳写入。PostgreSQL 完整档的 Public forum 读取 owner 仅聚合该字段：忽略过期和停止实例，任一 true 表示启用，全部明确 false 才表示关闭，缺失、非布尔或无有效实例保留未知。该展示投影不控制论坛任务或竞价，不改变表结构，也不将心跳 details 原文公开给浏览器。
 
-A32 使用 `credential_keys` 与 `credential_admin_commands`；后者到凭据行的引用为
-`ON DELETE SET NULL`（`000009_credential_admin_compat`）。`AdminCredentialEnvelope` 校验 nonce、
-key id 和指纹，账本只保存安全投影/删除结果。Worker 用独立数据密钥读取唯一 active Cookie，
-Cookie 明文不进入账本。
+A32 使用 `credential_keys` 与 `credential_admin_commands`，后者到凭据行的引用为 `ON DELETE SET NULL`（`000009_credential_admin_compat`）；`AdminCredentialEnvelope` 校验 nonce、key id 和指纹，账本只保存安全投影/删除结果；Worker 用独立数据密钥读取唯一 active Cookie，Cookie 明文不进入账本。
 
 ## 拍卖与竞价核心
 
@@ -148,50 +116,21 @@ Cookie 明文不进入账本。
 | equipment_secrets | auction-application：keymanagement | 标的敏感来源密文 |
 | auction_schema_identity | auction-storage：migration | 迁移/schema 身份和兼容检查 |
 
-`000042` 的 `users.lot_watch_channel/lot_watch_channel_version` 由 application lot-watch 偏好 owner 定义，
-SQL 仍由 auction-storage 独占，默认 mm/1，不改变身份版本。偏好命令复用 auction_commands，
-只锁 user、先重放后 CAS，同渠道新命令也推进版本。新通知冻结偏好；历史 MM payload/digest 不重写。
-PM 来源允许 recipient NULL 但只生成 recipient_missing 的 suppressed 队列事实，不伪造 UID、不回退 MM。
-PM 任务 sending_at 与 sender 一旦绑定不可清空/替换；sending 后不可回 pending/claimed/suppressed，
-由 `guard_lot_watch_pm_sending` 触发器保护。队列状态闭集为 pending/claimed/sending/succeeded/suppressed/manual_reconcile；
-notification_id 主键及 `(notification_id,channel)` FK 保证一来源一 PM 任务，channel 固定 pm。
-lease_token/lease_expires_at/lease_kind/worker_id 同空同非空；lease_kind 区分 send/reconcile，所有更新带 fence/token/状态/有效租约谓词。
-succeeded 必须有原 sender、sending_at、数字 Sent external_reference 和完成时间；无原始 HTML/令牌/密钥字段。
-attempt_count/reconcile_attempt_count 非负，fencing_version 正 i64；due/expiry/reconcile 索引支持每次至多一项领取。
-来源的 MM 分支严格要求 delivery_id/recipient；PM 分支严格禁止 MM delivery_id、要求正 preference_version，
-recipient 为空或符合 users 的 1–32 位规范十进制 ID。缺 UID 来源 payload 的 recipient_forum_account_id 为 JSON null，
-不反序列化为可发送 ForumPmMessage；队列仅 suppressed/recipient_missing。已发送来源失效不抹除发送结果。
+`000042` 的 `users.lot_watch_channel/lot_watch_channel_version` 由 application lot-watch 偏好 owner 定义，SQL 仍由 auction-storage 独占，默认 mm/1，不改变身份版本；偏好命令复用 auction_commands，只锁 user、先重放后 CAS，同渠道新命令也推进版本；新通知冻结偏好，历史 MM payload/digest 不重写。PM 来源允许 recipient NULL 但只生成 recipient_missing 的 suppressed 队列事实，不伪造 UID、不回退 MM。
 
-新增装备标记及超价通知对象由 application 的 lot-watch 逻辑 owner 定义，SQL 由 auction-storage 独占；
-与 `lots`、`users` 和既有 `deliveries` 精确绑定。标记取消保留版本墓碑，通知按用户/lot/领先周期去重，
-不能以浏览器缓存、论坛 notify 账本或任意模板替代来源授权。`000041` 仅补 active/final_fast 代理的标记及审计，
-并以现有领先者/版本初始化周期，不补发历史提醒；新标记命令复用 `auction_commands`。
-不修改 `000001`—`000040` 或既有竞价事实。delivery SQL 仍由 `mail_delivery`/`delivery_scheduler` 独占：
-领取共用 watch proof，sending 在 lot → delivery 锁序下复核；失效且未开始发送的任务转为明确 failed 并追加审计，
-不覆盖 sending、Sent 证明或 manual_reconcile。
+PM 任务 sending_at 与 sender 一旦绑定不可清空/替换，sending 后不可回 pending/claimed/suppressed，由 `guard_lot_watch_pm_sending` 触发器保护；队列状态闭集为 pending/claimed/sending/succeeded/suppressed/manual_reconcile，notification_id 主键及 `(notification_id,channel)` FK 保证一来源一 PM 任务，channel 固定 pm。lease_token/lease_expires_at/lease_kind/worker_id 同空同非空，lease_kind 区分 send/reconcile，所有更新带 fence/token/状态/有效租约谓词。
+succeeded 必须有原 sender、sending_at、数字 Sent external_reference 和完成时间，无原始 HTML/令牌/密钥字段；attempt_count/reconcile_attempt_count 非负，fencing_version 正 i64，due/expiry/reconcile 索引支持每次至多一项领取。来源的 MM 分支严格要求 delivery_id/recipient，PM 分支严格禁止 MM delivery_id、要求正 preference_version，recipient 为空或符合 users 的 1–32 位规范十进制 ID；
+缺 UID 来源 payload 的 recipient_forum_account_id 为 JSON null，不反序列化为可发送 ForumPmMessage，队列仅 suppressed/recipient_missing；已发送来源失效不抹除发送结果。
 
-`database/draft_soft_close` 复用 `auction_commands` 与 `audit_records`，无新表或 `000047` 迁移。
-显式命令种类 `repair_draft_soft_close`、结果码 `repaired`、审计动作 `auction.repair_draft_soft_close`；
-只允许符合[不变量](invariants.md)的单个未发布草稿，把行与策略中的60/60改为900/900并推进版本。
-默认只读不写账本，写入账本先于当前状态门禁重放。其他经济字段、装备、投稿、资金、排期及历史事实保留。
-MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效 claimed 本次领取计数并追加 release 审计；
-不建立 compose 历史错误永久阻断表。既有 renew 同时支持 claimed/sending，不新增列或状态；
-delivery_scheduler 先锁行再检查数据库实时有效期、token/fencing 与新截止，禁止复活过期租约或缩短截止。
-release 仍仅接受有效 claimed；已 sending、未知 fence 提交及历史 unknown 不释放为 pending。
-内部履约使用 `000048` 的独立命令/证明表和 `bot_internal_v1` satisfied 写入口，不伪造外部 delivery。
-`000046` generation 行不预填成功值；每次取得 mail owner 后推进并提交。`000047` 仅初始化资金 scope，
-账户缺失视为未对账、自有可用0；不由迁移回填旧现金、UID、来源或义务成功。
+新增装备标记及超价通知对象由 application 的 lot-watch 逻辑 owner 定义，SQL 由 auction-storage 独占，与 `lots`、`users` 和既有 `deliveries` 精确绑定；标记取消保留版本墓碑，通知按用户/lot/领先周期去重，不能以浏览器缓存、论坛 notify 账本或任意模板替代来源授权。`000041` 仅补 active/final_fast 代理的标记及审计，并以现有领先者/版本初始化周期，不补发历史提醒；新标记命令复用 `auction_commands`，不修改 `000001`—`000040` 或既有竞价事实。delivery SQL 仍由 `mail_delivery`/`delivery_scheduler` 独占：领取共用 watch proof，sending 在 lot → delivery 锁序下复核；失效且未开始发送的任务转为明确 failed 并追加审计，不覆盖 sending、Sent 证明或 manual_reconcile。
 
-`auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与
-`default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改。
-竞价和取消在锁内读取快照中的 PPM、代理开关/默认模式/次数上限及 final phase 参数；
-`lots` 的 `leader_proxy_last`、慢速调度和状态版本同样是数据库权威状态。
+`database/draft_soft_close` 复用 `auction_commands` 与 `audit_records`，无新表或 `000047` 迁移；显式命令种类 `repair_draft_soft_close`、结果码 `repaired`、审计动作 `auction.repair_draft_soft_close`，只允许符合[不变量](docs/contracts/invariants.md)的单个未发布草稿，把行与策略中的 60/60 改为 900/900 并推进版本；默认只读不写账本，写入账本先于当前状态门禁重放，其他经济字段、装备、投稿、资金、排期及历史事实保留。
 
-应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与
-`bid_proxy_authorization_transitions.created_at` 的新写入显式绑定计划统一的锁后数据库时间，
-与命令结果内的转换时间一致；不依赖列默认值另行取时。既有表、迁移及历史记录保持不变。
+MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效 claimed 本次领取计数并追加 release 审计，不建立 compose 历史错误永久阻断表；既有 renew 同时支持 claimed/sending，不新增列或状态，delivery_scheduler 先锁行再检查数据库实时有效期、token/fencing 与新截止，禁止复活过期租约或缩短截止；release 仍仅接受有效 claimed，已 sending、未知 fence 提交及历史 unknown 不释放为 pending。内部履约使用 `000048` 的独立命令/证明表和 `bot_internal_v1` satisfied 写入口，不伪造外部 delivery；`000046` generation 行不预填成功值，每次取得 mail owner 后推进并提交；`000047` 仅初始化资金 scope，账户缺失视为未对账、自有可用 0，不由迁移回填旧现金、UID、来源或义务成功。
 
-管理命令复用既有对象，不另建状态表：
+`auctions.policy_snapshot` 保存创建时冻结的 schema v4 结算/恢复及竞价策略，与 `default_start_price`、软截止、取消截止、slow 间隔等规则列同事务写入，配置不回溯修改；竞价和取消在锁内读取快照中的 PPM、代理开关/默认模式/次数上限及 final phase 参数，`lots` 的 `leader_proxy_last`、慢速调度和状态版本同样是数据库权威状态。
+
+应用竞价计划时，`bid_proxy_authorizations.created_at/updated_at` 与 `bid_proxy_authorization_transitions.created_at` 的新写入显式绑定计划统一的锁后数据库时间，与命令结果内的转换时间一致，不依赖列默认值另行取时；既有表、迁移及历史记录保持不变。管理命令复用既有对象，不另建状态表：
 
 | 命令 | 完整档事务写入边界 |
 | --- | --- |
@@ -231,49 +170,21 @@ release 仍仅接受有效 claimed；已 sending、未知 fence 提交及历史 
 | auction_forum_reply_cursors | auction-storage：forum reply（历史兼容） | 保留的历史世界级回帖游标；当前无新写入者，逐主题调度由 `auction_forum_sync.content_next_scan_at` 拥有 |
 | auction_forum_bid_commands | auction-storage：forum reply；auction-jobs：forum reply | 论坛竞价导入命令账本、可证明的真实楼层号与重试事实 |
 
-用户注册/重绑的 `user_mail_commands` 归上文 Users owner，SQL 位于 `database/users/mail/postgres/`；
-它不是由邮件传输维护的第二份发送账本，故不在本分组重复登记。
+用户注册/重绑的 `user_mail_commands` 归上文 Users owner，SQL 位于 `database/users/mail/postgres/`；它不是由邮件传输维护的第二份发送账本，故不在本分组重复登记。
 
-A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局
-Worker control 唤醒不写入额外触发表；
-`000008_mooglemail_polling` 追加 `mail_poll_state` 的 lease/fencing 与失败字段，Worker 在同一
-事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，
-`auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox
-transport；结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入
-PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。论坛主题写入未知时先按精确标题
-只读对账；未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。所有固定目录页与系统日志的
-post ID 未持久化时，用户回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以
-独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；
-`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。
-`auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
-应用读模型同时投影二者，Worker 按[安全英文展示规则](invariants.md#i-08-外部写入发生在本地提交之后)解释。
-旧通用拒绝不回填、不重新执行；错误展示复用既有列，不改变自然键、尝试次数或终态。
-`000043` 为 forum owner 的 `auction_forum_sync` 追加 `terminal_refresh_enabled`（默认 true）与
-`terminal_synced_version`（nullable 正版本）。升级时已 settled 的既有主题仅设 enabled=false，完成版本仍为 NULL；
-其余主题及新主题纳入，不回填历史正文或伪造成功。终态领取仅限 enabled=true 且完成版本为空的 settled 主题。
-最终完成先共享锁定 auctions，核对已渲染的 settled state_version，再以原内容租约/fencing/revision CAS 同事务确认所有页；
-版本变化、pending、部分进度或 write_unknown 不得写终态完成版本。普通 live 扫描即使期间结算，也必须重新渲染并证明全部固定页。
-结算明细只从同一 Repeatable Read 快照的 auction_settlements/lot_settlements 与 lots 读取，不新增经济事实。
+A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局 Worker control 唤醒不写入额外触发表；`000008_mooglemail_polling` 追加 `mail_poll_state` 的 lease/fencing 与失败字段，Worker 在同一事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，`auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox transport，结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入 PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。
+论坛主题写入未知时先按精确标题只读对账，未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。所有固定目录页与系统日志的 post ID 未持久化时，用户回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。`auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
+应用读模型同时投影二者，Worker 按[安全英文展示规则](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)解释；旧通用拒绝不回填、不重新执行，错误展示复用既有列，不改变自然键、尝试次数或终态。
 
-目录分页的 `000040` 只增加非权威镜像，不改竞价/审计事实；查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
+`000043` 为 forum owner 的 `auction_forum_sync` 追加 `terminal_refresh_enabled`（默认 true）与 `terminal_synced_version`（nullable 正版本）；升级时已 settled 的既有主题仅设 enabled=false，完成版本仍为 NULL，其余主题及新主题纳入，不回填历史正文或伪造成功；终态领取仅限 enabled=true 且完成版本为空的 settled 主题。最终完成先共享锁定 auctions，核对已渲染的 settled state_version，再以原内容租约/fencing/revision CAS 同事务确认所有页；版本变化、pending、部分进度或 write_unknown 不得写终态完成版本；普通 live 扫描即使期间结算，也必须重新渲染并证明全部固定页。结算明细只从同一 Repeatable Read 快照的 auction_settlements/lot_settlements 与 lots 读取，不新增经济事实；目录分页的 `000040` 只增加非权威镜像，不改竞价/审计事实，查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
 
-MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件。
-证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration；普通数据库投影
-仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
+MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件；证据文件不是入站事实、命令账本、幂等结果或游标的替代物，也不需要 migration，普通数据库投影仍不得保存正文、Cookie、请求 payload、token 或装备 key 明文。
 
-`migrations/postgres/000035_mail_intake_display_snapshot` 仅属于 PostgreSQL 完整档：向 `inbound_mail` 追加
-nullable `sender`、`subject` 和 `message_display`。sender/subject 必须成对出现并受 256/512 字节边界约束；
-展示快照固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件 ID 最多 1000 条，且只含
-正文脱敏结果、附件外部 ID、Credits 和 COD。装备 key 与认证邮件正文不会进入快照。它是非权威展示投影，不能
-参与入站幂等或 cursor；普通 replay 不会为历史 NULL 自动补写。
+`migrations/postgres/000035_mail_intake_display_snapshot` 仅属于 PostgreSQL 完整档：向 `inbound_mail` 追加 nullable `sender`、`subject` 和 `message_display`；sender/subject 必须成对出现并受 256/512 字节边界约束，展示快照固定 schema/redaction version，正文最多 64 KiB、JSON 最多 128 KiB、附件 ID 最多 1000 条，且只含正文脱敏结果、附件外部 ID、Credits 和 COD；装备 key 与认证邮件正文不会进入快照。它是非权威展示投影，不能参与入站幂等或 cursor，普通 replay 不会为历史 NULL 自动补写。
 
-主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；
-`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全
-结果投影。Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
+主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全结果投影，Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
 
-`migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加
-nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入
-`decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。
+`migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加 nullable `equipment_diagnostic` sidecar；它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入 `decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。
 
 ## 实时事件与运维告警
 
@@ -288,25 +199,14 @@ nullable `equipment_diagnostic` sidecar。它只在装备邮件被拒绝且首�
 | operations_alert_batches | auction-storage：alert batch；auction-jobs：claim/dispatch | 告警批次、租约/fencing、三次 Create 重试、稳定终态和 delivery 对账 |
 | operations_alert_batch_items | auction-storage：alert batch | 告警批次成员、版本、冻结摘要和 signal 反查索引 |
 
-告警目标变更时，旧待重试批次在领取事务内以 `dependency_mismatch` 终止，然后允许为新目标建批。
-确定从未激活的关联 delivery 以 `failed` 收口，保留零 attempt/fencing 和空 claimed/sending 时间；
-`reason_code=operations_alert_batch_terminal` 且 `outcome_unknown=false` 明确记录未发生外部发送。
-错误码仅为 `dependency_mismatch` 或 `retry_exhausted`，收口与 `delivery.fail` 审计同事务提交。
-每轮最多收口 100 个耗尽租约批次和 100 个符合相同未激活形状的历史孤儿，不改写发送过的 delivery。
+告警目标变更时，旧待重试批次在领取事务内以 `dependency_mismatch` 终止，然后允许为新目标建批；确定从未激活的关联 delivery 以 `failed` 收口，保留零 attempt/fencing 和空 claimed/sending 时间；`reason_code=operations_alert_batch_terminal` 且 `outcome_unknown=false` 明确记录未发生外部发送；错误码仅为 `dependency_mismatch` 或 `retry_exhausted`，收口与 `delivery.fail` 审计同事务提交。每轮最多收口 100 个耗尽租约批次和 100 个符合相同未激活形状的历史孤儿，不改写发送过的 delivery。
 
 ## 共有约束
 
-1. `migrations/postgres/` 是当前运行 schema 的迁移来源；新增 migration 必须评审列、约束、索引及 owner，
-   不能从仓库外复制表定义。已发布 SQL 不得修改或删除。
-2. auction_commands.command_id 是 UUID 主键；command_kind、aggregate_id、request_hash、
-   result_code、result_payload、created_at 都是账本事实。request_hash 固定 32 字节，
-   result_payload 必须是 JSON object。
-3. bids.command_id、bid_proxy_authorizations.creation_command_id 及其他 command 外键不得改成可随意
-   删除的弱引用。历史事实和幂等账本的删除顺序必须失败关闭。
-4. realtime_events 只追加；修复事件通过 replay_of_event_id 引用历史事件，禁止编辑原事件。
-   PostgreSQL 的 origin bid fact 唯一性只约束原始事件，不能阻止同一事实的运维 replay。
+1. `migrations/postgres/` 是当前运行 schema 的迁移来源；新增 migration 必须评审列、约束、索引及 owner，不能从仓库外复制表定义；已发布 SQL 不得修改或删除。
+2. auction_commands.command_id 是 UUID 主键；command_kind、aggregate_id、request_hash、result_code、result_payload、created_at 都是账本事实，request_hash 固定 32 字节，result_payload 必须是 JSON object。
+3. bids.command_id、bid_proxy_authorizations.creation_command_id 及其他 command 外键不得改成可随意删除的弱引用；历史事实和幂等账本的删除顺序必须失败关闭。
+4. realtime_events 只追加；修复事件通过 replay_of_event_id 引用历史事件，禁止编辑原事件；PostgreSQL 的 origin bid fact 唯一性只约束原始事件，不能阻止同一事实的运维 replay。
 5. 当前写入必须满足 PostgreSQL 隔离与锁契约；历史迁移范围标记不能代替当前能力或并发保证。
-6. `lots.lot_number` 是正数、场次内唯一且不可变的内部顺序；`category_key/category_number`
-   组合为不可变的对外编号：`category_number` 为正数且在场次与分类内唯一，分类键必须与 equipment category 一致，
-   撤回或重挂不会复用已经分配的编号。
+6. `lots.lot_number` 是正数、场次内唯一且不可变的内部顺序；`category_key/category_number` 组合为不可变的对外编号，`category_number` 为正数且在场次与分类内唯一，分类键必须与 equipment category 一致，撤回或重挂不会复用已经分配的编号。
 7. 迁移提交前必须为每张表补充 Rust 查询 owner、适用的 SQLx 离线元数据策略及持久化必要性依据。

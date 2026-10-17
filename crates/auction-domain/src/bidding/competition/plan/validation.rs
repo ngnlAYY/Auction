@@ -12,7 +12,6 @@ use super::CompetitionPlan;
 
 impl CompetitionPlan {
     /// 校验事实顺序、版本、代理转换链及其与最终快照的一致性。
-    ///
     /// 历史重放只携带局部快照；不要求未变更授权出现，也不对已接受金额重套新输入上限。
     pub fn validate(&self) -> Result<(), DomainError> {
         self.final_lot.validate()?;

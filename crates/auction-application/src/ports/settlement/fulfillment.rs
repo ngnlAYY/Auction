@@ -37,7 +37,6 @@ impl SettlementFulfillmentOperation {
 }
 
 /// fulfillment owner 允许观察的 delivery 持久状态闭集。
-///
 /// delivery 只拥有传输状态；fulfillment 必须读取这份安全快照后，才能决定延期、失败、
 /// 人工复核或写入外部证明，不能由 delivery 事务跨 owner 直接改写义务状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +70,6 @@ pub struct SettlementFulfillmentDeliverySnapshot {
 }
 
 /// 返回旧版 MoogleMail fulfillment 发送与 Sent 证据共同使用的 canonical 主题。
-///
 /// reference 固定为稳定 obligation ID；流拍与撤拍均逐件发送原装备。
 pub fn canonical_settlement_fulfillment_subject(
     kind: SettlementObligationKind,
@@ -90,7 +88,6 @@ pub fn canonical_settlement_fulfillment_subject(
 }
 
 /// Worker 从数据库领取的一条结算履约执行事实。
-///
 /// 这里携带的是不含 secret 的义务快照。领取时的当前玩家/MM 名称只用于构造初始上下文；
 /// pending/prepared/enqueued 仍按各自旧阶段规则通过 users owner 复核当前身份。不能在领取阶段
 /// 把密钥或 Cookie 复制到任务对象。
@@ -149,7 +146,6 @@ pub struct SettlementFulfillmentRecipientSnapshot {
 }
 
 /// 当前装备 key 的加密信封及其 owner 身份。
-///
 /// 该结构只在 Worker 组合根交给 custody 适配器，不进入 claim、日志或外部 DTO。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettlementFulfillmentEquipmentSecret {
@@ -239,7 +235,6 @@ pub struct SettlementFulfillmentBalanceEvidence {
 }
 
 /// 履约读取当前 bot 游戏身份的窄端口；只接受同一 active Cookie/world 的远端证明。
-///
 /// 保留 Option 签名兼容已有适配器；真实读取成功返回 Some，失败必须返回错误。
 /// 未配置预期名称仍需远端联合核验，不能以 None 跳过识别或降级为配置名称。
 /// 此端口不授权满足义务：内部留存还须独立验证真实托管、资金、依赖和事务凭据版本。
@@ -326,8 +321,6 @@ pub struct SettlementFulfillmentActivationResult {
     pub next_claim: SettlementFulfillmentClaim,
 }
 
-/// pending/prepared 阶段一次推进的结果。
-///
 /// dependency 暂不可用或事实冲突属于已经持久化的业务分支，不应再由 Worker 当作普通错误
 /// 以另一个错误码重复释放同一 claim。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,7 +331,6 @@ pub enum SettlementFulfillmentPhaseResult<T> {
 }
 
 /// 结算履约调度的窄存储端口。
-///
 /// PostgreSQL 负责领取、租约 fencing、prepared delivery 幂等落表和失败退避，不退化成内存队列。
 pub trait SettlementFulfillmentStore: Send + Sync {
     fn claim_due(

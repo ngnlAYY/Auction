@@ -56,7 +56,6 @@ pub struct AdminForumPostResponse {
     pub edited: bool,
 }
 
-/// Admin 论坛预览命令。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminForumCommandResponse {
     pub line: usize,

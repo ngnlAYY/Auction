@@ -1,5 +1,4 @@
 //! 拍卖创建时冻结的策略模板。
-//!
 //! 该类型是配置适配器与拍卖创建用例之间的窄边界。它不读取 TOML，也不包含数据库字段；
 //! 应用层只负责校验策略并把同一份不可变模板交给 PostgreSQL 事务，避免配置快照和竞价
 //! 所依赖的遗留规则列出现分叉。
@@ -17,7 +16,6 @@ use serde_json::{Value, json};
 pub const POLICY_MINIMUM_INCREMENT: i64 = 30_000;
 
 /// 拍卖创建时复制进 `policy_snapshot` 的策略模板。
-///
 /// 所有经济、代理和 final phase 字段都会随拍卖冻结；竞价事务从同一快照恢复规则，配置变更
 /// 不会悄悄改变既有拍卖。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,11 +32,9 @@ pub struct AuctionPolicyTemplate {
     pub proxy_enabled: bool,
     /// 新代理授权的默认模式，只允许 `fast` 或 `slow`。
     pub proxy_default_mode: String,
-    /// 代理 slow 模式的轮询间隔。
     pub proxy_slow_interval: Duration,
     /// 单个代理授权允许的 outbid 使用次数。
     pub proxy_max_outbid_uses: u32,
-    /// 进入 final phase 前的领先时间。
     pub final_phase_lead: Duration,
     /// 取消截止窗口；当前仍由遗留 auctions 列提供给生命周期规则。
     pub cancel_cutoff: Duration,
@@ -113,7 +109,6 @@ impl AuctionPolicyTemplate {
     }
 
     /// 生成旧版 schema v4 兼容的 JSON 快照。
-    ///
     /// `cancel_cutoff` 不写入当前快照 JSON，因为现有 schema 仍由 auctions 遗留列承载；创建
     /// 事务会用同一模板同时写入该列，保证生命周期读取和快照来源一致。
     pub fn snapshot(&self, scheduled_end_at: DateTime<Utc>) -> Value {

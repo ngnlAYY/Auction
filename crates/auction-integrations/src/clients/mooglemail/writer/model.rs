@@ -16,7 +16,6 @@ pub enum MoogleMailSendResponseFailure {
 }
 
 /// 经过结构校验的 compose 页面状态。
-///
 /// token 只通过引用提供给下一步 typed form 构造；正文、收件人和附件 key 不进入 Debug 输出。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailComposeState {
@@ -31,7 +30,6 @@ pub struct MoogleMailComposeState {
 }
 
 impl MoogleMailComposeState {
-    /// 返回当前页面 token 的受控引用。
     pub fn token(&self) -> &MoogleMailToken {
         &self.token
     }
@@ -50,7 +48,6 @@ impl MoogleMailComposeState {
         &self.equipment_ids
     }
 
-    /// 返回已证明的 Credits 附件金额。
     pub const fn credits(&self) -> i64 {
         self.credits
     }
@@ -60,7 +57,6 @@ impl MoogleMailComposeState {
         self.cod
     }
 
-    /// 返回页面报告的附件条目数。
     pub const fn attachment_count(&self) -> usize {
         self.attachment_count
     }

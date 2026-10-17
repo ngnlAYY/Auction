@@ -1,8 +1,5 @@
-//! PostgreSQL recovery case 到期推进适配器。
-//!
-//! 该 owner 只负责锁定 recovery case、观察已经持久化的结算履约事实并创建下一条可审计
-//! action。它不读取外部凭据，也不直接发送 MoogleMail；外部动作必须在后续 delivery owner
-//! 提交后执行。
+//! PostgreSQL recovery case 到期推进适配器；只锁定 case、观察已持久化的结算履约事实并创建下一条
+//! 可审计 action，不读外部凭据、不直接发 Mail，外部动作须在 delivery owner 提交后执行。
 
 use auction_application::{
     ApplicationError, ApplicationFuture, RecoveryActionClaim, RecoveryActionOutcome,

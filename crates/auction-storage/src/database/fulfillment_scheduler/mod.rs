@@ -1,8 +1,5 @@
-//! PostgreSQL 结算履约领取与 prepared delivery outbox 适配器。
-//!
-//! 这一层只负责持久化 claim/fence 和 owner 间的 canonical payload。它不读取 secret、不发起
-//! 外部 HTTP；delivery owner 必须在本地事务提交后再消费 `deliveries`，并把结果通过后续
-//! fulfillment 观察流程回写。
+//! PostgreSQL 结算履约领取与 prepared delivery outbox 适配器；只持久化 claim/fence 与 owner 间
+//! canonical payload。它不读 secret、不发外部 HTTP，delivery 消费须在本地提交后由观察流程回写。
 
 use auction_application::{
     ApplicationError, SettlementDeliveryPreparation, SettlementFulfillmentClaim,

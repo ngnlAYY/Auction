@@ -1,5 +1,4 @@
 //! Public 持久化实时事件 API 客户端。
-//!
 //! 浏览器只解码经过服务端事件注册表校验的安全信封。WebSocket 沿用旧版逐事件 wire；
 //! 浏览器先建立连接再执行 HTTP catch-up，并在序列跳号时重新补齐，不在本地猜测权威状态。
 
@@ -133,7 +132,6 @@ struct LastBidFact {
 }
 
 /// 旧版单拍卖浏览器维护的有界实时防重与版本栅栏。
-///
 /// `after` 是 stream cursor；event ID 与 bid fact identity 是两套独立防重键。发生事实冲突、
 /// state/fact 回退或 sequence 缺口时清空局部事实缓存，但保留已确认的最大 cursor。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,7 +410,6 @@ async fn fetch_realtime_page(
 }
 
 /// 订阅 Public 持久化实时流，并把服务端事件页交给页面替换当前安全快照。
-///
 /// 浏览器 WebSocket 自动携带同源 HttpOnly session Cookie；匿名客户端由服务端拒绝。
 /// 连接建立后先走 HTTP catch-up，期间到达的单事件帧由 WebSocket 缓冲，避免补发与订阅间隙。
 #[cfg(target_arch = "wasm32")]

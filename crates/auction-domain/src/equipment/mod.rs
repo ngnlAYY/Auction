@@ -1,5 +1,4 @@
 //! 装备来源的纯领域值对象。
-//!
 //! 这里只定义装备 key 和持久化密文信封的形状，不负责网络读取、加密或数据库写入。
 //! 明文 key 只能在可信适配器的同步回调中短暂使用；对外格式化和序列化一律返回脱敏值。
 
@@ -20,7 +19,6 @@ pub enum EquipmentKeyError {
 }
 
 /// 只在可信调用链中短暂存在的装备 key。
-///
 /// 该类型不实现 `Clone`，并在销毁时尽力清零内部字节。任何日志、调试输出和 JSON
 /// 序列化都只能得到 `[REDACTED]`。
 pub struct EquipmentKey {
@@ -51,7 +49,6 @@ impl EquipmentKey {
     }
 
     /// 为同一条有界、幂等命令建立一次短生命周期副本。
-    ///
     /// 该入口只供调用方在明确的进程内重试边界中使用；类型仍不实现 `Clone`，避免装备 key
     /// 被容器、DTO 或日志辅助结构无意复制。原值和副本销毁时都会独立清零各自缓冲区。
     pub fn duplicate_for_retry(&self) -> Self {
@@ -87,7 +84,6 @@ impl serde::Serialize for EquipmentKey {
 }
 
 /// 装备 key 的持久化密文信封。
-///
 /// 信封只由加密适配器构造；数据库 owner 只校验结构并保存字段，不接触明文 key。
 #[derive(Clone, PartialEq, Eq)]
 pub struct EquipmentKeyEnvelope {
@@ -127,7 +123,6 @@ impl EquipmentKeyEnvelope {
         self.ciphertext.clone()
     }
 
-    /// 返回 nonce 副本供持久化适配器使用。
     pub fn nonce(&self) -> Vec<u8> {
         self.nonce.clone()
     }

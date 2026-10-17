@@ -1,8 +1,5 @@
-//! Worker 实时事件消费的持久化适配器。
-//!
-//! 本模块只负责应用端口校验和后端分派；stream 目录、事件读取、游标确认及 failure
-//! 生命周期分别由同目录的具名模块持有。游标只按 stream 的下一个连续序号推进，失败
-//! 记录不改变游标，避免把运维恢复路径混入普通消费入口。
+//! Worker 实时事件消费的持久化适配器；本模块只做应用端口校验和后端分派，stream、事件读取、
+//! 游标确认与 failure 生命周期由具名子模块持有。游标只按 stream 连续序号推进，失败记录不改它。
 
 use auction_application::{
     ApplicationFuture, RealtimeConsumerBatch, RealtimeConsumerRequest, RealtimeConsumerStore,

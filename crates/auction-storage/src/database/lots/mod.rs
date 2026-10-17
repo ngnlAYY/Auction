@@ -1,8 +1,5 @@
-//! Public lot 只读查询适配器。
-//!
-//! lot 列表和详情必须与当前公开 projection 使用同一数据库快照，并且只返回当前公开
-//! 状态允许展示的 preview/live 事实。数据库行、内部策略和装备原始字段在这里映射为
-//! 应用层安全投影，HTTP 层不直接接触 SQL 类型。
+//! Public lot 只读查询适配器；列表与详情必须使用同一数据库快照，只返回当前公开状态允许展示的
+//! preview/live 事实；数据库行、内部策略和装备字段在这里映射为安全投影，HTTP 层不接触 SQL 类型。
 
 use std::collections::BTreeMap;
 

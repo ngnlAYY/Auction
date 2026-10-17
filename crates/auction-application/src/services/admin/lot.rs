@@ -1,5 +1,4 @@
 //! Admin draft lot 修改用例。
-//!
 //! 该服务在 Serializable 事务中完成命令重放、world/auction/lot 锁内校验、lot 版本更新、
 //! 预览修订、withdrawn-return 义务、命令账本、审计和实时事件，避免 HTTP 层复制状态规则。
 
@@ -12,7 +11,6 @@ use crate::{
     TransactionRunner,
 };
 
-/// Admin draft lot 修改服务。
 pub struct AdminLotUpdateService<R, C> {
     repository: Arc<R>,
     clock: Arc<C>,

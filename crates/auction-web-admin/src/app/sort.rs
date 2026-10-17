@@ -1,5 +1,4 @@
 //! Admin 列表表格的表头排序共享实现。
-//!
 //! 服务端 admin 列表端点不接受排序参数（`api/` 各列表请求与 `auction-contracts` DTO 均无
 //! sort/order 字段，服务端按固定顺序返回当前页），因此排序只在浏览器内对当前页数据执行；
 //! 表头 tooltip 明确「仅当前页」局限。排序状态经 `query.rs` 与筛选/分页一起入 URL，
@@ -82,7 +81,6 @@ pub(super) fn directed(ordering: Ordering, direction: SortDirection) -> Ordering
 }
 
 /// 可排序表头单元格。
-///
 /// `aria-sort` 始终给出当前状态（未排序列为 `none`），点击按钮切换排序；
 /// 按钮 title 提示排序仅对当前页生效。排序只改变当前页的展示顺序，
 /// 不改变请求参数，也不跨页重排。
@@ -90,7 +88,6 @@ pub(super) fn directed(ordering: Ordering, direction: SortDirection) -> Ordering
 pub(super) fn SortableTh(
     /// 本列的稳定列标识（与 query.rs 中该页允许集合一致）。
     column: &'static str,
-    /// 列名文案。
     label: String,
     /// 当前排序列；空串表示保持服务端原始顺序。
     active: String,

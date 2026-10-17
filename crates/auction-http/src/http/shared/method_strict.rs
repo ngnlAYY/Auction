@@ -1,5 +1,4 @@
 //! 旧版业务路由的方法严格性边界。
-//!
 //! Axum 的 `get` 会隐式接受 `HEAD`，默认 405 也没有旧版 JSON 外壳。业务路由通过本模块的
 //! method builder 或 `MethodRouterExt` 显式注册 HEAD/fallback，健康检查、指标和静态资源继续由
 //! 各自 owner 决定方法语义。

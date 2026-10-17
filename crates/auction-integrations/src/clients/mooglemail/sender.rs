@@ -15,20 +15,15 @@ const MAX_SEND_ATTACHMENTS: usize = 1000;
 /// 一封待发送 MoogleMail 的业务无关输入。
 #[derive(Clone, PartialEq, Eq)]
 pub struct MoogleMailSendRequest {
-    /// 发送所在世界。
     pub world: MoogleMailWorld,
-    /// 收件人、标题和正文。
     pub message: MoogleMailMessageFields,
-    /// 要附加的 Credits 数量。
     pub credits: i64,
     /// 要设置的 CoD 数量；零表示不设置 CoD。
     pub cod: i64,
-    /// 要附加的远端装备 ID。
     pub equipment_ids: Vec<String>,
 }
 
 impl MoogleMailSendRequest {
-    /// 校验请求可以进入 compose 写入流程。
     pub fn validate(&self) -> bool {
         self.message.validate()
             && self.credits >= 0
@@ -131,7 +126,6 @@ impl MoogleMailSender {
     }
 
     /// 执行 compose、附件/COD 分步写入并证明最终发送结果。
-    ///
     /// 任何一次 POST 成功但后续页面无法证明的情况都会返回 write_unknown；调用方不得把
     /// 该结果自动重试为第二次远程写入。
     pub async fn send(

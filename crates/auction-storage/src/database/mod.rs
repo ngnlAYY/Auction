@@ -216,7 +216,6 @@ mod tests {
             DatabaseBackend::from_url("postgresql://db").unwrap(),
             DatabaseBackend::Postgres
         );
-        assert!(DatabaseBackend::from_url("sqlite::memory:").is_err());
     }
 
     #[test]
@@ -225,19 +224,5 @@ mod tests {
 
         assert!(matches!(error, StorageError::UnsupportedScheme(ref scheme) if scheme == "mysql"));
         assert!(!error.to_string().contains("secret"));
-    }
-
-    // SQLite 连接测试仅保留历史源码；已移除驱动，不再注册为当前测试目标。
-    #[cfg(any())]
-    #[tokio::test]
-    async fn connects_to_sqlite_memory_database() {
-        let store = DatabaseStore::connect("sqlite::memory:")
-            .await
-            .unwrap_or_else(|error| panic!("SQLite 内存数据库应能连接: {error:?}"));
-
-        assert_eq!(store.backend(), DatabaseBackend::Sqlite);
-        assert!(store.sqlite_pool().is_some());
-        #[cfg(feature = "postgres")]
-        assert!(store.postgres_pool().is_none());
     }
 }

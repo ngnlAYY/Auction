@@ -15,7 +15,6 @@ mod state;
 mod validation;
 
 /// 一个命令在锁内计算出的完整竞价结果。
-///
 /// 应用层必须把这里的公开事实、代理转换、快照和最终 lot 投影放进同一个本地事务；
 /// 规划器本身不修改输入，也不执行数据库或网络 I/O。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,7 +1,5 @@
-//! Worker control Unix socket 服务端装配。
-//!
-//! 服务生命周期、peer 凭据过滤和 socket 文件安全分别由子模块拥有；本模块只负责把它们
-//! 组合成一个不会启动第二个监听器的 control server。
+//! Worker control Unix socket 服务端装配；服务生命周期、peer 凭据过滤和 socket
+//! 文件安全由子模块拥有，不会启动第二个监听器。
 
 use super::*;
 
@@ -40,7 +38,6 @@ impl WorkerControlServer {
     }
 
     /// 绑定 socket 并可选挂载进程本地 Prometheus registry。
-    ///
     /// 指标路由复用同一个 peer-checked Unix listener；未注入或关闭指标时仍 fail closed 为
     /// 404，不会启动第二个 HTTP 监听器。
     pub async fn bind_with_metrics(

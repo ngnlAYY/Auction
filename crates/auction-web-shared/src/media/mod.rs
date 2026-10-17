@@ -1,17 +1,14 @@
 //! 浏览器 `matchMedia` 响应式查询。
-//!
-//! 供需要根据断点或媒体特征切换组件结构的场景使用（纯样式切换仍应优先用 CSS
-//! `@media`，不经由本 hook 往返 WASM）。
+//! 供需要按断点切换组件结构的场景使用；纯样式切换仍应优先用 CSS `@media`，不经 WASM 往返。
 
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 
-/// 订阅一条 CSS media query，返回随匹配结果实时更新的信号。
-///
-/// 首次渲染同步给出当前匹配结果，之后通过 `change` 监听更新；组件卸载时自动移除
-/// 监听。非 WASM 构建（仅服务于静态检查）返回恒为 `false` 的信号。
+/// 订阅一条 CSS media query，返回随匹配结果更新的信号。
+/// 首次渲染同步给出当前结果，之后经 `change` 监听更新，组件卸载时自动移除监听；非 WASM
+/// 构建（仅静态检查）恒为 `false`。
 pub fn use_media_query(_query: String) -> Signal<bool> {
     let matches = use_signal(|| false);
 
@@ -51,7 +48,7 @@ pub fn use_media_query(_query: String) -> Signal<bool> {
     matches
 }
 
-/// `change` 监听的生命周期守卫：随 effect 重跑或组件卸载移除监听并释放闭包。
+/// `change` 监听的生命周期守卫：effect 重跑或组件卸载时移除监听并释放闭包。
 #[cfg(target_arch = "wasm32")]
 struct MediaQueryListener {
     list: web_sys::MediaQueryList,

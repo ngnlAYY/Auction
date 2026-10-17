@@ -1,5 +1,4 @@
 //! Admin 拍卖列表 API 客户端。
-//!
 //! 页面只接收后端的生命周期安全投影；创建命令携带新的 `command_id`，状态与幂等仍由服务端负责。
 
 pub(crate) use auction_contracts::{

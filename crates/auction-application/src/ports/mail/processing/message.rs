@@ -10,7 +10,6 @@ use super::{
 };
 
 /// MoogleMail 业务 envelope 中单件装备附件。
-///
 /// key 只用于读取可信装备页和生成密钥信封，禁止实现任何会输出 key 的格式化或序列化。
 pub struct MailEquipmentAttachment {
     pub external_equipment_id: String,
@@ -43,7 +42,6 @@ impl MailEquipmentAttachment {
 }
 
 /// 已由外部协议适配器校验的 MoogleMail 业务 envelope。
-///
 /// 该类型不允许进入数据库或持久化命令。Drop 会尽力清除正文、发件人、标题和附件 key。
 pub struct MailMessage {
     pub mailbox_key: String,
@@ -134,7 +132,6 @@ impl MailMessage {
     }
 
     /// 为同一稳定命令 ID 的有界进程内重试建立显式副本。
-    ///
     /// 该类型刻意不实现 Clone；只有 Worker 的有限次数重试可以调用此入口，并且任意时刻最多
     /// 保留原 envelope 与一个执行副本。所有副本仍通过 Drop 清除正文、身份和装备 key。
     pub fn duplicate_for_retry(&self) -> Self {

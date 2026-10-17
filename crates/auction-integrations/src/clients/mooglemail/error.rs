@@ -9,21 +9,17 @@ use super::protocol::{MoogleMailOperation, MoogleMailWorld};
 pub enum MoogleMailErrorCategory {
     /// 调用参数、固定 endpoint 或本地适配器配置无效。
     Configuration,
-    /// 当前没有可以安全使用的 Cookie。
     CredentialUnavailable,
     /// 远端返回登录页或登录跳转，当前 Cookie 已失效。
     SessionExpired,
     /// 当前账号处于战斗页，Item Shop 暂时无法读取；Cookie 仍然有效。
     AccountBusy,
-    /// 远端明确要求降低请求频率。
     RateLimited,
     /// 网络、超时或远端 5xx 等可重试失败。
     RemoteTemporary,
-    /// 响应超过适配器的硬边界。
     ResponseTooLarge,
     /// 页面结构、字段或内容类型不再符合冻结协议。
     ProtocolDrift,
-    /// 摘要、详情或装备身份之间不一致。
     IdentityMismatch,
     /// 认证 HV UID、论坛目标资料或运行时绑定未获联合证明，不能当作“不是 bot”。
     /// 预期名称缺省也必须真实读取；错误不包含远端原文或配置名称。
@@ -35,7 +31,6 @@ pub enum MoogleMailErrorCategory {
 }
 
 impl MoogleMailErrorCategory {
-    /// 返回持久化和日志中使用的稳定名称。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Configuration => "configuration",
@@ -61,7 +56,6 @@ impl fmt::Display for MoogleMailErrorCategory {
 }
 
 /// MoogleMail 外部错误。
-///
 /// 错误只保留操作、世界、分类、是否可重试和加密证据引用，不保存 URL、Cookie、token、原始 HTML 或底层
 /// HTTP 错误，避免错误被日志或 Admin DTO 间接回显敏感数据。`write_started` 用于区分“读侧
 /// 登录失效可安全轮换”和“写请求已发出只能标记失效、不能盲目重试”。
@@ -70,11 +64,8 @@ impl fmt::Display for MoogleMailErrorCategory {
     "MoogleMail 请求失败: operation={operation} world={world} category={category} temporary={temporary} write_started={write_started} evidence_status={evidence_status} evidence_id={evidence_id:?}"
 )]
 pub struct MoogleMailError {
-    /// 发生错误的远端操作。
     pub operation: MoogleMailOperation,
-    /// 发生错误的游戏世界。
     pub world: MoogleMailWorld,
-    /// 稳定错误分类。
     pub category: MoogleMailErrorCategory,
     /// 是否允许由 Worker 在边界内重试。
     pub temporary: bool,
@@ -121,12 +112,10 @@ impl MoogleMailError {
         Self { write_started: true, ..Self::new(operation, world, category, false) }
     }
 
-    /// 返回是否可以由外层有限退避重试。
     pub const fn is_temporary(self) -> bool {
         self.temporary
     }
 
-    /// 返回请求是否已经开始远端写入。
     pub const fn write_started(self) -> bool {
         self.write_started
     }

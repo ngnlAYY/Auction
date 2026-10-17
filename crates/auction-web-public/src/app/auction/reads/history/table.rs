@@ -25,7 +25,6 @@ pub(crate) fn PriceHistoryTable(
                     table {
                         class: "public-history-table ui-table--responsive",
                         caption { class: "public-visually-hidden", {t!("page-history-title")} }
-                        // 列序：装备、类别、等级、世界、场次、价格、买家、卖家、时间；按字段预期内容分配比例。
                         auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![27, 9, 5, 7, 6, 11, 9, 9, 17] }
                         thead {
                             tr {

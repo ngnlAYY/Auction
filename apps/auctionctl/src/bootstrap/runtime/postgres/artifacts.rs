@@ -1,8 +1,5 @@
-//! PostgreSQL 运维 artifact 辅助模块装配。
-//!
-//! 外部命令环境、备份 manifest、文件系统安全、命令执行和证据输入分别由子模块拥有；本文件
-//! 只保留原有 `runtime::postgres` 的稳定导出，避免 restore、rebuild 与 legacy v28 形成跨层
-//! 依赖。
+//! PostgreSQL 运维 artifact 辅助模块装配；外部命令环境、备份 manifest
+//! 与文件系统安全由子模块拥有，此处只保留稳定导出。
 
 #[cfg(feature = "postgres")]
 mod environment;

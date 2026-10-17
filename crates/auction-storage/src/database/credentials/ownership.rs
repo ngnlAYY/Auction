@@ -17,9 +17,8 @@ use super::common::storage_error;
 
 type OwnershipConnection = Mutex<Option<sqlx::pool::PoolConnection<sqlx::Postgres>>>;
 
-/// 持有一种外部 Cookie 运行时所有权的 PostgreSQL session。
-///
-/// guard 销毁时必须关闭物理连接，不能把仍持有 session advisory lock 的连接放回池中。
+/// 持有一种外部 Cookie 运行时所有权的 PostgreSQL session；guard 销毁必须关闭物理连接，
+/// 不能把仍持有 session advisory lock 的连接放回池中。
 pub struct CredentialRuntimeOwnership {
     connection: OwnershipConnection,
     valid: AtomicBool,
@@ -121,10 +120,9 @@ pub enum CredentialRuntimeOwnershipError {
 }
 
 impl DatabaseStore {
-    /// 使用一个专用 PostgreSQL session 为本 Worker 预留一种外部 Cookie。
-    ///
-    /// 锁名只包含稳定的凭据类型，不包含 Cookie、密文或指纹。由于每种外部 Cookie 全局最多
-    /// 一个 active 行，同类集成的第二个 Worker 必须启动失败，避免远端会话并发写入。
+    /// 使用专用 PostgreSQL session 为本 Worker 预留一种外部 Cookie；
+    /// 锁名只含稳定的凭据类型，不含 Cookie、密文或指纹。每种 Cookie 全局最多一条 active 行，
+    /// 第二个同类 Worker 必须启动失败，避免远端会话并发写入。
     pub async fn acquire_credential_runtime_ownership(
         &self,
         kind: AdminCredentialKind,
@@ -149,9 +147,8 @@ impl DatabaseStore {
                 if !acquired {
                     return Err(CredentialRuntimeOwnershipError::AlreadyOwned);
                 }
-                // 显式提交确认后才返回 owner；任何不确定错误都关闭原持锁 session。
-                // 内部业务事务锁相同行直到 commit，新进程必须等待此推进完成才允许外呼。
-                // 配置/keyenv Cookie 同样取得 mail owner，不能绕过此 fence。
+                // 显式提交确认后才返回 owner；不确定错误都关闭原持锁 session。内部业务事务锁相同行
+                // 直到 commit，新进程须等其完成才可外呼，配置/keyenv Cookie 同样不能绕过此 fence。
                 let mail_binding = if kind == AdminCredentialKind::MailCookie {
                     let mut transaction = connection
                         .begin()

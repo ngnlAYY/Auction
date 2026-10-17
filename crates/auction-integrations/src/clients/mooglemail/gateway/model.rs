@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 /// MoogleMail 收件箱 gateway 的有界扫描配置。
 #[derive(Debug, Clone)]
 pub struct MoogleMailGatewayConfig {
-    /// 单次逻辑拉取最多读取的页数。
     pub maximum_pages: usize,
     /// 发件人 allowlist；默认只解析 allowlist 内邮件的详情。
     pub sender_allowlist: Vec<String>,

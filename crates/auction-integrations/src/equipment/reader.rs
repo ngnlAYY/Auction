@@ -1,7 +1,5 @@
-//! 装备来源读取器与应用端口适配。
-//!
-//! 这里负责请求节流、无重定向读取、响应边界、world 路径选择和短生命周期 key 交接；页面
-//! 事实解析与 canonical JSON 校验分别由 `parser`/`model` 拥有。
+//! 装备来源读取器与应用端口适配；负责请求节流、无重定向读取、响应边界、world
+//! 路径选择和短生命周期 key 交接，页面解析归档在 `parser`/`model`。
 
 use std::{
     sync::{
@@ -68,7 +66,6 @@ enum EquipmentFetchError {
 
 impl EquipmentSourceAdapter {
     /// 建立固定 endpoint 的来源适配器。
-    ///
     /// 传入的 client 应由装配根使用 `build_equipment_http_client` 创建，从而关闭自动重定向
     /// 和环境代理；适配器仍会再次检查最终响应 URL。
     pub fn new(
@@ -98,7 +95,6 @@ impl EquipmentSourceAdapter {
         })
     }
 
-    /// 使用旧版生产 endpoint 创建适配器。
     pub fn production(
         client: Client,
         policy: EquipmentSourcePolicy,
@@ -109,7 +105,6 @@ impl EquipmentSourceAdapter {
     }
 
     /// 注入与 MoogleMail 共用的 world-aware 单 Cookie 集合。
-    ///
     /// HentaiVerse 装备页要求登录；复用同一 Cookie 可以在远端明确返回登录页时通过窄端口
     /// 把数据库凭据标为失效。单 Cookie 失效后不自动切换，且 Cookie 不进入 URL、错误或日志。
     pub fn with_mooglemail_credentials(mut self, credentials: MoogleMailCredentialSet) -> Self {

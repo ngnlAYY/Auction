@@ -1,6 +1,4 @@
-//! Recovery 适配器的共享校验、摘要和 SQL 行映射。
-//!
-//! 这里集中处理存储边界的安全校验，避免不同 action 流程各自解释同一字段。
+//! Recovery 适配器的共享校验、摘要和 SQL 行映射；安全校验集中在此，避免各 action 各自解释字段。
 
 #[cfg(feature = "postgres")]
 use super::advance::DueRecoveryRow;

@@ -12,7 +12,6 @@ use tokio::sync::Notify;
 
 use super::super::WorkerError;
 
-/// 一次远程 MoogleMail 读取请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailPollFetchRequest {
     pub mailbox_key: String,
@@ -20,12 +19,10 @@ pub struct MailPollFetchRequest {
     /// 已完成邮件的 external_mail_id；gateway 必须只返回该 ID 之前的未完成窗口。
     pub cursor_value: Option<String>,
     pub limit: u16,
-    /// 当前尝试的绝对截止时刻。
     pub deadline: Option<std::time::Instant>,
 }
 
 /// 已由 integrations 解析完成、等待业务处理器消费的 MoogleMail 邮件。
-///
 /// 摘要字段用于入站幂等和安全日志；`business` 只在 Worker 进程内短暂携带正文和装备 key，
 /// 绝不进入 `MailPollBatch` 或数据库。
 pub struct MailPollFetchedMessage {
@@ -65,7 +62,6 @@ impl std::fmt::Debug for MailPollFetchedMessage {
     }
 }
 
-/// 一次远程 MoogleMail 读取结果。
 #[derive(Debug)]
 pub struct MailPollPage {
     pub mailbox_key: String,

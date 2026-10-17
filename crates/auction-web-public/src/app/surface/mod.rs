@@ -1,10 +1,8 @@
 //! 公开端浏览器界面（Dioxus CSR）。
-//!
 //! 路由集合保留旧版 Auction-BF 的 `manifests/public.routes.json` 路径，并显式登记经评审的 Public
 //! 扩展页面，保持 URL 契约可审计。
 //! 界面文案全部经由 `dioxus-i18n` 取自 `i18n/*.ftl`，默认英文；受支持语言与持久化行为
 //! 由 `auction-web-shared` 统一提供。
-//!
 //! 本 crate 不得导入存储、配置或凭据访问路径。HTTP/流 DTO 由 `auction-contracts` 拥有，
 //! 本 crate 只保留浏览器展示模型、查询状态和交互编排。
 
@@ -94,7 +92,6 @@ pub(crate) type PublicReadinessResource = Resource<Result<bool, String>>;
 pub(crate) type CurrentAuctionResource = Resource<(String, Result<Option<CurrentAuction>, String>)>;
 
 /// 会话资源快照的统一展示投影。
-///
 /// 看板、lot 详情和外壳头部原先各自重复同一段四元解构；认证、就绪、错误与查看者身份
 /// 按同一规则派生，匿名/未就绪/错误一律失败关闭。
 #[derive(Clone)]

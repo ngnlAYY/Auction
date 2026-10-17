@@ -5,7 +5,6 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// auction owner 在生成通用 MoogleMail schema-v1 payload 前校验的 typed intent。
-///
 /// 保留旧版 `FulfillmentDeliveryIntent` 的 Send 语义。拍卖、标的、投稿等授权上下文只留在
 /// fulfillment claim，不得混入 delivery owner 的稳定载荷或请求摘要。
 #[derive(Debug)]

@@ -1,6 +1,4 @@
-//! Recovery case 到期推进。
-//!
-//! 该文件只承载 recovery Worker 的单一职责，事务入口和外部副作用仍由父模块统一约束。
+//! Recovery case 到期推进；事务入口和外部副作用由父模块统一约束。
 
 #[cfg(feature = "postgres")]
 use super::*;

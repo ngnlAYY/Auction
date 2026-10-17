@@ -51,7 +51,6 @@ where
     }
 
     /// 将结算退回邮件转换为严格的 recovery 证据。
-    ///
     /// 退回邮件本身不再创建第二个 delivery 动作；它只把 obligation、资产和金额事实写入
     /// `inbound_mail`。后续 recovery Worker 会在 Serializable 事务中重新比对这份证据，并决定
     /// 是否创建领取/取消 action，避免在邮件解析器里直接改变 recovery 状态。

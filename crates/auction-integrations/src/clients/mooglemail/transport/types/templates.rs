@@ -20,7 +20,6 @@ const MOOGLEMAIL_TEMPLATE_KEYS: &[&str] = &[
 ];
 
 /// Worker 启动时冻结的 MoogleMail 通知模板快照。
-///
 /// 快照只保存经过闭集键名和占位符校验的正文；发送过程中不再读取可变配置，避免同一
 /// 批次出现部分旧模板、部分新模板的结果。
 #[derive(Debug, Clone)]

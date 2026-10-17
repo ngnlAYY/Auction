@@ -1,5 +1,4 @@
 //! Admin dashboard 聚合投影客户端。
-//!
 //! 页面只读取各 owner 提供的安全摘要；数据库行、delivery payload、Cookie 和外部错误正文
 //! 不会进入浏览器。DTO 与后端 dashboard 响应保持字段闭集，便于旧版运维信息逐项迁移。
 

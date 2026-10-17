@@ -26,7 +26,6 @@ pub struct AdminAuditCursorResponse {
 }
 
 /// Admin 审计查询响应；数字页与 keyset 页保留旧契约的互斥字段形状。
-///
 /// `page`/`total` 只在数字页出现；`next_cursor` 和 `next_cursor_token` 在两种页形状中
 /// 都必须出现，即使当前页没有下一页。这样可以保留旧版客户端依赖的固定键集合，同时不
 /// 影响应用层继续使用 opaque cursor。
@@ -65,7 +64,6 @@ pub struct AdminDashboardWorkerResponse {
 }
 
 /// Admin dashboard section 的稳定外壳。
-///
 /// `data` 只允许由 owner 适配器构造安全 JSON；当 owner 未装配或读取失败时只返回
 /// `status` 与有界 `error_code`，不返回数据库行或错误正文。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -80,7 +78,6 @@ pub struct AdminDashboardSectionResponse {
     pub data: Option<Value>,
 }
 
-/// Admin dashboard 响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminDashboardResponse {

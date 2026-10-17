@@ -1,5 +1,4 @@
 //! 凭据页面的安全标签映射辅助。
-//!
 //! 幂等 command_id 复用与动作执行骨架已收敛到 `app::surface`（`stable_command_id` /
 //! `run_admin_feedback_action`），本模块只保留凭据专属的展示映射。
 

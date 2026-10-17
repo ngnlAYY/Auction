@@ -1,5 +1,4 @@
 //! 旧 v1 写接口共用的严格 JSON 请求边界。
-//!
 //! 该边界在进入 handler 前统一验证媒体类型、路由级 body 上限、JSON 语法、未知字段之外的
 //! 单值约束；具体 DTO 的 `deny_unknown_fields` 仍由 handler 的类型化反序列化负责。读取后会把
 //! 原始字节放回请求，避免 HTTP 层出现第二套 DTO owner。
@@ -103,7 +102,6 @@ pub(crate) const fn post_patch_delete(limit: usize) -> Policy {
 }
 
 /// 在认证和 route-specific path/query 校验之后读取严格 JSON，恢复旧 mutation 的可观察顺序。
-///
 /// 调用方必须移除该 route 的前置 body extractor 与 `DefaultBodyLimit`；大小、媒体类型、单值和
 /// DTO 未知字段均在这里一次完成，未认证请求不会提前暴露请求体分类。
 pub(crate) async fn decode_after_guard<T>(

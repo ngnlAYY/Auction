@@ -1,5 +1,4 @@
 //! Users owner 的 MoogleMail 注册与换绑用例。
-//!
 //! 该服务负责命令校验、幂等重放、登录 key 材料签发和 Users owner 调用。用户行、密文信封、
 //! 命令账本与身份历史必须由 storage 在同一个事务中提交；服务本身不读取 SQL，也不把明文
 //! key 放入返回结果或 delivery 命令。
@@ -25,7 +24,6 @@ where
     S: MailUserStore,
     I: MailLoginKeyIssuer,
 {
-    /// 建立注册/换绑用例服务。
     pub fn new(store: Arc<S>, issuer: Arc<I>) -> Self {
         Self { store, issuer }
     }

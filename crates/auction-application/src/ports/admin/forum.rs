@@ -1,5 +1,4 @@
 //! Admin 论坛拍卖预览端口。
-//!
 //! 预览只解析管理员提交的 HTML 或文本快照，不写数据库、不调用论坛网关，也不把预览结果
 //! 当作已经发布的论坛事实。解析器由 `auction-integrations` 提供，HTTP 只负责契约映射。
 
@@ -74,7 +73,6 @@ pub struct AdminForumPost {
     pub edited: bool,
 }
 
-/// 解析后的论坛命令。
 #[derive(Debug, Clone)]
 pub struct AdminForumCommand {
     pub line: usize,
@@ -107,7 +105,6 @@ pub struct AdminForumWarning {
     pub post_id: Option<String>,
 }
 
-/// 完整论坛预览结果。
 #[derive(Debug, Clone)]
 pub struct AdminForumPreviewResult {
     /// 目录首帖的远端稳定 post ID；Admin HTTP 契约无需暴露该内部写入证明。
@@ -162,7 +159,6 @@ pub enum AdminForumPreviewError {
     ParseFailed,
 }
 
-/// Admin 论坛预览端口。
 pub trait AdminForumPreviewPort: Send + Sync {
     fn preview(
         &self,

@@ -2,7 +2,6 @@
 
 use super::*;
 
-/// Admin 结算报告中的拍卖生命周期投影。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementAuctionResponse {
     pub id: String,
@@ -26,10 +25,8 @@ pub struct AdminSettlementAuctionResponse {
 }
 
 /// Admin 拍卖列表的能力声明。
-///
 /// 能力只表示对应命令路由已经存在；未声明的扩展命令仍保持明确的未迁移响应，不会由能力
 /// 字段推断出额外的业务 owner。
-///
 /// `deny_unknown_fields` 与 Admin 浏览器端的 fail-closed 解码对齐：wire 冻结后服务端字段集
 /// 不变，收紧只影响反序列化，不影响序列化输出。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -44,7 +41,6 @@ pub struct AdminAuctionCapabilitiesResponse {
 }
 
 /// Admin 拍卖列表中的生命周期安全投影。
-///
 /// 反序列化按旧浏览器 decoder 的闭集语义收紧：nullable 生命周期字段必须显式出现（可为
 /// `null`），`lot_count` 允许省略但出现时不得为 `null`；未知字段一律拒绝。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -103,7 +99,6 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
-/// Admin 拍卖列表分页。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AdminAuctionPaginationResponse {
@@ -121,7 +116,6 @@ pub struct AdminAuctionListResponse {
     pub pagination: AdminAuctionPaginationResponse,
 }
 
-/// Admin 结算摘要响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct AdminSettlementSummaryResponse {
     pub opening_balance: i64,

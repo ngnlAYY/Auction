@@ -24,7 +24,6 @@ impl MailPlayerIdentityProofSource {
 }
 
 /// 同一 active Cookie、world 与 ownership 下实时读取的身份事实。
-///
 /// 仅供可信集成边界生成，不支持反序列化或由管理员输入构造。结构校验不是远端证明；
 /// 消费方必须在事务内重锁凭据版本，不能持久缓存后重新用于内部结清。
 #[derive(Debug, Clone, PartialEq, Eq)]

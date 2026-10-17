@@ -18,7 +18,6 @@ use crate::{
 };
 
 /// Public session 应用服务。
-///
 /// 原始 token 只在 `login` 的返回值中出现；存储端只接收 SHA-256 摘要。会话真值和并发上限
 /// 由 sessions owner 持久化，缓存不能替代该端口。
 pub struct PublicSessionService {
@@ -110,7 +109,6 @@ impl PublicSessionPort for PublicSessionService {
 }
 
 /// Admin session 应用服务。
-///
 /// 管理凭据只在装配时输入并立即转换为摘要；HTTP 只提交 Basic Auth 字段，持久化层只接收
 /// session/CSRF 摘要。session 摘要绑定当前 actor 和 secret；Admin 不复用 Public 会话或缓存。
 pub struct AdminSessionService {
@@ -123,7 +121,6 @@ pub struct AdminSessionService {
 
 impl AdminSessionService {
     /// 创建服务前永久撤销既有 Admin 会话；失败阻断启动，重启后必须重新登录。
-    ///
     /// 不能只依赖确定性凭据摘要：配置从 A 改为 B 再改回 A 时，旧 token 也不能复活。
     /// 原始 secret 和可独立校验口令的摘要均不进入持久化层。
     pub async fn new(

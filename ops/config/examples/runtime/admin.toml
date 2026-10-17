@@ -1,8 +1,5 @@
-# Admin runtime 非敏感配置示例。
-#
-# runtime 文件的字段都支持省略；旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
-# 本文件不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥。
-# 生产部署请将文件置于受信任目录并设置为 0640，修改后需要重启受影响的 Admin/Worker 才会生效。
+# Admin runtime 非敏感配置示例：字段都支持省略，旧字段使用应用模型默认值，operations 各组默认沿用部署配置。
+# 不能放 [database]、database_url、redis_url、Cookie、密码、签名密钥或装备数据密钥；生产置于受信目录并设 0640，修改后重启 Admin/Worker 生效。
 
 # 可选：是否允许人工提前开放拍卖；省略时为 false。
 allow_manual_early_open = false
@@ -80,8 +77,7 @@ settlement_buyer_refund = "Auction buyer refund {amount}; reference {reference}"
 # 可选：运维告警通知；要求 {summary}。
 operations_alert = "Operations alert: {summary}"
 
-# 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围；省略时不强制检查范围。
-# 该清单应与 Worker 配置中的 world_id/mailbox_key 一致，只包含非敏感标识。
+# 可选：Admin dashboard 需要核对的 MoogleMail world/mailbox 范围，须与 Worker 配置的 world_id/mailbox_key 一致且只含非敏感标识；省略时不强制检查。
 [[dashboard_mailboxes]]
 # 可选：需要核对的游戏世界，只能是 main 或 isekai。
 world_id = "main"
@@ -104,11 +100,11 @@ allowed_path_prefixes = ["/equip/", "/isekai/equip/"]
 allowlist_enabled = true
 # 可选：是否只允许可交易装备；省略时关闭，关闭后 Soulbound 装备也可由 Admin 手工录入。
 require_tradeable = false
-# 可选：单次响应最大字节数，范围为 64 KiB 至 8 MiB；默认 2 MiB。
+# 可选：单次响应最大字节数，范围 64 KiB 至 8 MiB；默认 2 MiB。
 maximum_response_bytes = 2097152
-# 可选：两次请求之间的最小间隔毫秒数，范围为 1 至 60000；默认沿用旧版的 250。
+# 可选：两次请求之间的最小间隔毫秒数，范围 1-60000；默认沿用旧版的 250。
 minimum_request_interval_millis = 250
-# 可选：外部请求超时秒数，范围为 1 至 30；默认 10。
+# 可选：外部请求超时秒数，范围 1-30；默认 10。
 request_timeout_seconds = 10
 
 # 可选区块：Admin 监听器；省略整个区块时使用 TCP 127.0.0.1:8091。
@@ -136,8 +132,7 @@ socket_path = ""
 # runtime_directory = "/run/hv-auction"
 # 可选：直接位于 runtime_directory 下的 Unix socket 路径。
 # socket_path = "/run/hv-auction/admin.sock"
-# runtime_directory 必须预先存在，由运行账号拥有且禁止 group/other 写入。
-# 全部祖先须由 root 或运行账号拥有、禁止 group/other 写入且无符号链接；root-owned sticky 祖先允许例外。
+# runtime_directory 及全部祖先须由 root 或运行账号拥有、禁止 group/other 写入且无符号链接；root-owned sticky 祖先允许例外。
 
 # 可选区块：metrics 设置；省略整个区块时关闭导出。
 [metrics]
@@ -176,21 +171,21 @@ max_public_sessions = 5
 
 # 可选区块：tracing 导出参数；省略整个区块时关闭导出。
 [tracing]
-# 可选：导出批次等待秒数，范围为 1 至 30；默认 1。
+# 可选：导出批次等待秒数，范围 1-30，默认 1。
 batch_timeout_seconds = 1
 # 可选：是否启用 tracing 导出；省略时关闭。
 enabled = false
 # 可选：导出端点；关闭 tracing 时可留空，启用时必须是 HTTP(S) URL。
 endpoint = ""
-# 可选：单次导出超时秒数，范围为 1 至 30；默认 5。
+# 可选：单次导出超时秒数，范围 1-30，默认 5。
 export_timeout_seconds = 5
-# 可选：单次导出的最大 span 数，范围为 1 至 512；默认 128。
+# 可选：单次导出的最大 span 数，范围 1-512，默认 128。
 max_export_batch_size = 128
-# 可选：导出队列容量，范围为 1 至 4096；默认 256。
+# 可选：导出队列容量，范围 1-4096，默认 256。
 queue_capacity = 256
-# 可选：采样比例，单位为百万分率，范围为 0 至 1000000；默认 0。
+# 可选：采样比例，单位为百万分率，范围 0-1000000，默认 0。
 sample_ratio_ppm = 0
-# 可选：进程关闭时等待导出完成的最大秒数，范围为 1 至 30；默认 5。
+# 可选：进程关闭时等待导出完成的最大秒数，范围 1-30，默认 5。
 shutdown_timeout_seconds = 5
 
 # 可选区块：Worker 控制面；省略整个区块时使用默认 socket 路径。
@@ -198,7 +193,7 @@ shutdown_timeout_seconds = 5
 # 可选：Worker 控制面 Unix socket 绝对路径；默认 /run/hv-auction/worker/control.sock。
 socket_path = "/run/hv-auction/worker/control.sock"
 
-# 可选区块：各组 managed 默认 false，沿用公共/角色 TOML；本示例的候选值不接管已有部署。
+# 可选区块：各组 managed 默认 false，沿用公共/角色 TOML，本示例的候选值不接管已有部署。
 # economics/schedule 接管后需重启 Admin 与 Worker，其余组需重启 Worker；不改写既有拍卖和任务事实。
 
 # 可选区块：后续新拍卖经济模板；managed 为 true 时才覆盖本组部署参数。

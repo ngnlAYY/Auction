@@ -10,15 +10,12 @@ use auction_domain::{
 };
 
 /// 拍卖创建时冻结的非敏感策略配置。
-///
 /// 该区块对应旧版共享配置中的 `auction.economics` 与 `auction.settlement`。所有字段都可
 /// 省略；应用层会在创建事务中把已校验模板同时写入 JSON 快照和遗留规则列。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuctionConfig {
-    /// 竞价经济和生命周期参数。
     pub economics: AuctionEconomicsConfig,
-    /// 结算曲线和恢复策略参数。
     pub settlement: AuctionSettlementConfig,
     /// 每周轮次生成、preview/open 和 MoogleMail gate 的稳定计划。
     pub schedule: AuctionScheduleConfig,
@@ -30,19 +27,14 @@ pub struct AuctionConfig {
 pub struct AuctionScheduleConfig {
     /// 是否启用 Worker 周计划；省略时关闭，避免开发数据库自动建轮次。
     pub enabled: bool,
-    /// 计划使用的 IANA 时区。
     pub timezone: String,
     /// preview 的星期名称，例如 Friday。
     pub preview_day: String,
     /// preview 的本地时间，格式 HH:MM。
     pub preview_time: String,
-    /// open 的星期名称，例如 Friday。
     pub open_day: String,
-    /// open 的本地时间，格式 HH:MM。
     pub open_time: String,
-    /// 名义结束的星期名称，例如 Saturday。
     pub nominal_end_day: String,
-    /// 名义结束的本地时间，格式 HH:MM。
     pub nominal_end_time: String,
     /// 参与周计划的 world；省略时使用 main 和 isekai。
     pub worlds: Vec<String>,
@@ -173,7 +165,6 @@ pub struct AuctionSettlementConfig {
     pub isekai_carrier_credit: u32,
     /// 持有时长与调整比例的 PPM 锚点；省略时使用内置 hold curve。
     pub anchors: Vec<AuctionAdjustmentAnchorConfig>,
-    /// 结算后的付款恢复策略。
     pub recovery: AuctionRecoveryPolicyConfig,
 }
 

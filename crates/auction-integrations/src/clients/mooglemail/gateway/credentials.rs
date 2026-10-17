@@ -34,7 +34,6 @@ pub struct MoogleMailRuntimeCredential {
 }
 
 /// 单个运行时 MoogleMail Cookie 的受控集合。
-///
 /// 集合只保存脱敏 Cookie 值对象，不实现 `Serialize`，也不提供把值写入日志或 DTO 的接口。
 /// 数据库来源附带持久 ID，远端确认登录失效后会通过窄端口回写 `invalid`，并从当前进程移除。
 #[derive(Clone)]

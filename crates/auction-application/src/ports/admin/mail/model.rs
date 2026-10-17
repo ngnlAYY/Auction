@@ -40,7 +40,6 @@ impl AdminMailPollState {
 }
 
 /// Admin 邮件 dashboard 展示的单个轮询器安全摘要。
-///
 /// 这里刻意不包含 cursor_value；游标属于同步实现细节，不能进入浏览器或管理概览响应。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminMailPollerSnapshot {
@@ -94,7 +93,6 @@ impl AdminMailDashboardSnapshot {
     }
 }
 
-/// 读取单个邮箱轮询状态的请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminMailPollStateRequest {
     pub mailbox_key: String,
@@ -270,7 +268,6 @@ pub struct AdminMailIntakeDetail {
     pub equipment_diagnostic: Option<crate::MailEquipmentDiagnosticSnapshot>,
 }
 
-/// 入站邮件数字分页结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdminMailIntakePage {
     pub items: Vec<AdminMailIntakeSummary>,

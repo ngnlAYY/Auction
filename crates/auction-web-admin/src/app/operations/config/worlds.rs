@@ -166,7 +166,6 @@ fn BusinessWorldCard(
             }
         }
         if confirm_open() {
-            // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
             Dialog {
                 title: if world.enabled {
                     t!("admin-business-world-disable-confirm-title")

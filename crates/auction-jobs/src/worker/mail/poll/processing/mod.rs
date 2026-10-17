@@ -1,7 +1,5 @@
-//! MoogleMail Worker 的 claim/续租、批次处理和提交编排。
-//!
-//! 远程读取 retry 与单封业务 retry 由子模块拥有；本模块保留 lease fencing 和
-//! cursor/事实批次提交的顺序。
+//! MoogleMail Worker 的 claim/续租、批次处理和提交编排；lease fencing 与
+//! cursor/事实批次提交顺序由本模块保持。
 
 use std::sync::Arc;
 

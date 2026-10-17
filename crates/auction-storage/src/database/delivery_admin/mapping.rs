@@ -57,9 +57,8 @@ pub(crate) fn snapshot(row: &PgRow) -> Result<DeliveryAdminSnapshot, DeliveryAdm
 }
 
 /// 从完整 delivery 行生成旧 Go 实例可读取的命令结果，并同时返回安全应用投影。
-///
-/// `result_payload` 属于滚动升级协议：旧版写入并读取完整 `delivery.Delivery`，因此新版不能
-/// 把精简 HTTP 投影直接持久化。完整正文只在本模块短暂存在，不得跨 storage 边界返回。
+/// `result_payload` 属于滚动升级协议：旧版写入并读取完整 `delivery.Delivery`，新版不能把精简 HTTP
+/// 投影直接持久化。完整正文只在本模块短暂存在，不得跨 storage 边界返回。
 pub(crate) fn legacy_result_payload(
     row: &PgRow,
 ) -> Result<(Value, DeliveryAdminSnapshot), DeliveryAdminError> {
@@ -94,9 +93,8 @@ pub(crate) fn decode_result_payload(
 }
 
 /// Auction-BF `delivery.Delivery` 的账本防腐映射。
-///
-/// 旧 Go 类型没有 JSON tag；字段名中的 `ID` 必须保持大写缩写，不能交给通用 PascalCase
-/// 规则变成 `Id`。固定数组保留 Go 默认的数字数组编码，不能改成 UUID 字符串或 hex digest。
+/// 旧 Go 类型没有 JSON tag，字段名中的 `ID` 必须保持大写缩写，不能交给通用 PascalCase 变成 `Id`；
+/// 固定数组保留 Go 默认的数字数组编码，不能改成 UUID 字符串或 hex digest。
 #[derive(Deserialize, Serialize)]
 struct LegacyDeliveryPayload {
     #[serde(rename = "ID")]
@@ -374,8 +372,8 @@ pub(crate) fn valid_snapshot(snapshot: &DeliveryAdminSnapshot) -> bool {
     }
 
     match snapshot.status.as_str() {
-        // 与旧版 ValidStateSnapshot 保持一致：prepared/pending 可以保留非负的
-        // fencing/attempt 计数，但不能携带执行中或已完成状态的字段。
+        // 与旧版 ValidStateSnapshot 一致：prepared/pending 可保留非负 fencing/attempt 计数，
+        // 但不携带执行中或已完成状态的字段。
         "prepared" | "pending" => {
             snapshot.lease_expires_at.is_none()
                 && snapshot.claimed_at.is_none()

@@ -1,5 +1,4 @@
 //! Admin 表单的字段级校验辅助。
-//!
 //! 字段错误跟随控件即时展示：控件带 `aria-invalid`，错误文本经 `aria-describedby` 关联到
 //! 控件旁的错误节点；提交失败时焦点移到第一个错误字段。这里只处理输入层校验，
 //! 服务端业务错误仍走页面级反馈，但可明确归属字段的 400 类错误尽量落到对应字段。
@@ -24,7 +23,6 @@ pub(super) fn FieldError(
 }
 
 /// 提交失败后把焦点移到指定字段（调用方传入表单序上第一个错误字段的控件 id）。
-///
 /// Dioxus 在事件回调返回后才会把错误节点写进 DOM，因此让出一个宏任务再取元素。
 pub(super) fn focus_field(field_id: &'static str) {
     #[cfg(target_arch = "wasm32")]

@@ -4,9 +4,7 @@ use super::health;
 use super::*;
 
 /// 公开端路由。
-///
 /// 健康检查路径沿用已冻结的旧契约；其余路径交给内嵌的公开端 SPA 产物处理。
-///
 /// `version` 由装配根传入自身的 `CARGO_PKG_VERSION`：契约 crate 内展开该宏只会得到契约
 /// 自己的版本，而健康检查要报告的是运行进程的版本。
 pub fn public_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<PublicApiState>
@@ -28,7 +26,6 @@ where
 }
 
 /// 管理端路由。
-///
 /// 管理端与公开端由各自装配根传入不同资源类型，避免任一二进制引用另一端产物。
 pub fn admin_router<A>(version: &'static str, boundary: HttpBoundary) -> Router<AdminApiState>
 where
@@ -49,7 +46,6 @@ where
 }
 
 /// 注册已冻结的 Public 路径。
-///
 /// 路由只负责绑定各自的 HTTP owner；未装配的窄端口仍由 handler 明确返回能力不可用，
 /// 不用伪造的成功 payload 掩盖部署缺口。
 fn public_feature_routes(router: Router<PublicApiState>) -> Router<PublicApiState> {

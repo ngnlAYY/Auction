@@ -1,6 +1,4 @@
-//! PostgreSQL Users/MoogleMail 适配器装配。
-//!
-//! 命令写入、幂等读取和安全行映射分别由子模块拥有；本文件只导出稳定的 Users Mail 端口。
+//! PostgreSQL Users/MoogleMail 适配器装配；命令写入、幂等读取和安全行映射由子模块拥有。
 
 use super::*;
 

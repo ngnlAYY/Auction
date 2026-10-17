@@ -30,7 +30,6 @@ pub struct HttpSecurityOptions<'a> {
     /// 状态变更请求在固定窗口内的最大次数；Public realtime 连接尝试复用该数值，
     /// 但使用独立账本，不能消耗 mutation 配额。
     pub mutation_limit: u32,
-    /// 速率限制固定窗口。
     pub rate_limit_window: Duration,
     /// 普通 HTTP 请求的最长处理时间。
     pub request_timeout: Duration,
@@ -122,7 +121,6 @@ impl PublicHttpSecurity {
 }
 
 /// Admin surface 的 HTTP 安全策略。
-///
 /// Admin 与 Public 使用相同的基础 origin/速率限制实现，但保持独立类型，避免管理路由误用
 /// Public session 或把两个 surface 的策略状态混在同一个 state 中。
 #[derive(Clone, Default)]

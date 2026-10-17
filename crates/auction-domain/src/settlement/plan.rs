@@ -8,7 +8,6 @@ use super::{
     SettlementObligation, SettlementPolicy,
 };
 
-/// 结算规划器最终要原子保存的结构化结果。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettlementPlan {
     pub policy_version: u32,
@@ -25,7 +24,6 @@ pub struct SettlementPlan {
 
 impl SettlementPlan {
     /// 根据已锁定的 lot 事实计算结算明细和补偿池变化。
-    ///
     /// 该计算只产生可重建的金额结果，不生成外部投递或履约状态；义务的 stable ID 和
     /// 后续 delivery 关系由应用层在同一结算事务中补齐。
     pub fn calculate(

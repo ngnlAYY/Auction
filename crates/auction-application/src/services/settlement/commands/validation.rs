@@ -52,7 +52,6 @@ pub(super) fn validate_replayed_settlement_plan(
 }
 
 /// 校验新计划和命令账本重放的完整 lot、金额与义务矩阵。
-///
 /// 只校验每个元素本身不足以防止重复 lot、缺失义务或被篡改的统计总额；这里使用锁内事实
 /// 重建义务集合，并要求自然键、顺序、金额和前置关系逐项相同，任何损坏结果都失败关闭。
 pub(super) fn validate_settlement_plan(

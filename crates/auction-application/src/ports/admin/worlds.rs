@@ -13,7 +13,6 @@ use super::{ApplicationFuture, CompetitionTransactionError, RequestHash, WorldSn
 /// 业务世界启停在共享命令账本中的稳定命令种类。
 pub const ADMIN_WORLD_SET_ENABLED_COMMAND_KIND: &str = "admin_world_set_enabled";
 
-/// Admin 修改业务世界可用状态的命令。
 #[derive(Debug, Clone)]
 pub struct AdminWorldSetEnabledCommand {
     pub command_id: CommandId,
@@ -61,7 +60,6 @@ impl AdminWorldSetEnabledCommand {
     }
 }
 
-/// Admin 业务世界读取与启停用例端口。
 pub trait AdminWorldPort: Send + Sync {
     fn list_worlds(&self) -> ApplicationFuture<'_, Vec<WorldSnapshot>>;
 

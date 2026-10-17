@@ -39,7 +39,6 @@ impl OperationsAlertObserveCommand {
     }
 }
 
-/// 领取 due 告警批次的请求。
 #[derive(Debug, Clone)]
 pub struct OperationsAlertClaimRequest {
     pub target: OperationsAlertTarget,
@@ -132,7 +131,6 @@ impl OperationsAlertBatchClaim {
     }
 }
 
-/// 已入队批次的最小对账投影。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationsAlertEnqueuedBatch {
     pub batch_id: Uuid,
@@ -149,7 +147,6 @@ pub enum OperationsAlertDeliveryStatus {
 }
 
 impl OperationsAlertDeliveryStatus {
-    /// 返回数据库状态名。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Succeeded => "succeeded",
@@ -160,7 +157,6 @@ impl OperationsAlertDeliveryStatus {
 }
 
 /// delivery 创建阶段允许持久化的稳定失败类别。
-///
 /// 普通失败只用于决定是否退避重试，不会写入 pending 批次；只有依赖 identity 不一致或
 /// 重试耗尽后，存储适配器才把稳定终态错误码写入批次。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

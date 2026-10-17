@@ -15,7 +15,6 @@ pub(super) fn RealtimeEventTable(page: RealtimeEventPage) -> Element {
     rsx! {
         div { class: "admin-shell__table-wrap",
             table { class: "admin-shell__table admin-realtime-table admin-realtime-event-table",
-                // 列序：时间、类型、流、序号、Schema、事件 ID；按字段预期内容分配比例。
                 auction_web_shared::TableColumns { layout: "admin-realtime-events", widths: vec![18, 22, 26, 6, 7, 21] }
                 thead {
                     tr {

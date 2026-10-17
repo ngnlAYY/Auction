@@ -24,7 +24,6 @@ impl RequestHash {
     }
 
     /// 对已经按具体命令契约冻结的字节序列计算 SHA-256 摘要。
-    ///
     /// 旧系统已发布的幂等摘要可能不使用通用 envelope；这类兼容编码仍由各命令 owner 构造，
     /// 但最终摘要统一由该值对象建立，避免散落固定长度复制逻辑。
     pub fn from_canonical_bytes(payload: &[u8]) -> Self {
@@ -35,7 +34,6 @@ impl RequestHash {
     }
 
     /// 按 Go `encoding/json.Marshal` 的默认 HTML 安全规则编码并计算旧版 SHA-256 摘要。
-    ///
     /// 旧版命令和证明摘要绑定原始 JSON 字节；serde 默认不会转义 `<`、`>`、`&`、U+2028
     /// 与 U+2029，因此兼容 owner 必须统一经过此入口。
     pub fn from_legacy_go_json<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
@@ -67,7 +65,6 @@ impl RequestHash {
     }
 
     /// 按稳定的命令种类、聚合标识和请求 DTO 计算 SHA-256 摘要。
-    ///
     /// 摘要算法属于应用幂等边界而不是 HTTP 层；这样重试、队列和其他入口不会各自定义
     /// 一套容易漂移的 hash 规则。
     pub fn from_request<T: Serialize>(
@@ -118,7 +115,6 @@ impl StoredCommand {
         Ok(())
     }
 
-    /// 判断传入命令是否与已保存请求完全相同。
     pub fn matches_request(
         &self,
         command_kind: &str,

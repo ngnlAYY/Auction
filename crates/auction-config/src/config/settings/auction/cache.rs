@@ -2,7 +2,6 @@
 
 use serde::Deserialize;
 
-/// 可由普通配置选择的缓存后端。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheBackend {

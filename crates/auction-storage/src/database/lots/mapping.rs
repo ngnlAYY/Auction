@@ -4,8 +4,7 @@
 
 use super::*;
 
-// 这里把两个后端的列名映射集中收口；参数分别对应公开契约字段，拆成多个临时结构反而会
-// 让后端行映射跨越适配器边界。
+// 两个后端的列名映射在此集中收口；参数分别对应公开契约字段，拆成临时结构会让行映射跨越适配器边界。
 #[allow(clippy::too_many_arguments)]
 pub(super) fn map_projection(
     auction_id: Uuid,
@@ -110,9 +109,9 @@ pub(super) fn map_live_fields(
     if start_price <= 0 {
         return Err(storage_error("公开 lot 起始价不是正数"));
     }
-    // 新存储以 NULL 表示无人领先，Auction-BF v28 则以起拍价作哨兵；两者对外都必须
-    // 投影为旧契约的 current_price=start_price。只兼容这两个可证明等价的形状，避免
-    // 把“有领先者却缺价格”或“无领先者但价格已变化”的损坏事实伪装成正常 lot。
+    // 新存储以 NULL 表示无人领先，v28 以起拍价作哨兵；两者对外都投影为 current_price=start_price。
+    // 只兼容这两个可证明等价的形状，避免把“有领先者却缺价格”或“无领先者但价格已变化”
+    // 伪装成正常 lot。
     let current_value = match (current_price, has_leader) {
         (None, false) => start_price,
         (Some(current_price), false) if current_price == start_price => current_price,
@@ -128,8 +127,8 @@ pub(super) fn map_live_fields(
         ..AuctionRules::default()
     };
     rules.validate().map_err(|_| storage_error("公开 lot 拍卖策略无效"))?;
-    // 旧版允许任意正整数作为 lot 起始价；无人领先时展示层必须原样返回该价格，不能把
-    // 真实竞价命令使用的整千网格校验反向施加到既有拍品投影。
+    // 旧版允许任意正整数起始价；无人领先时展示层必须原样返回该价格，
+    // 不能把竞价命令使用的整千网格校验反向施加到既有拍品投影。
     let next_bid = if has_leader {
         let current = BidAmount::from_persisted_positive(current_value)
             .map_err(|_| storage_error("公开 lot 领先价不是正数"))?;

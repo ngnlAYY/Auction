@@ -18,7 +18,6 @@ use opentelemetry_sdk::{
 use super::super::{config::InitError, health::TracingHealthState};
 
 /// 有界 OTLP 批处理器的控制消息。
-///
 /// Span 使用独立的有界 channel，控制消息使用无界 channel，确保 flush/shutdown 不会因为
 /// span 队列已满而永远无法送达。
 enum ProcessorControl {
@@ -28,7 +27,6 @@ enum ProcessorControl {
 }
 
 /// 能准确记录队列满导致丢弃数量的异步 span processor。
-///
 /// OpenTelemetry SDK 的内置 processor 不公开丢弃计数；这里保留相同的有界批处理语义，但在
 /// `try_send` 失败的同步路径直接增加进程安全计数，避免用 exporter 失败数冒充队列丢弃数。
 pub(crate) struct DropAwareBatchSpanProcessor<E> {

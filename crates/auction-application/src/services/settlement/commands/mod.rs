@@ -24,7 +24,6 @@ use validation::{
 };
 
 /// 在已经取得一致只读快照后，严格核验旧版 complete 账本并返回脱敏摘要。
-///
 /// 调用方必须从同一数据库事务提供账本与结算快照。本函数没有“账本缺失则结算”的分支，
 /// 因而不能被误用来补写 completion fence 或生成新的结算事实。
 pub fn verify_legacy_settlement_replay(

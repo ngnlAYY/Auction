@@ -1,5 +1,4 @@
 //! E-Hentai 论坛同步的应用端口与安全快照。
-//!
 //! 论坛是外部投影，不是拍卖事实来源。Worker 只能领取已持久化的同步任务，读取同一数据库
 //! 快照后提交远端证明；远端发帖、回帖解析和竞价命令导入均不得直接修改拍卖状态。
 
@@ -50,14 +49,12 @@ pub fn forum_system_log_marker(auction_id: AuctionId) -> String {
 }
 
 /// 比较固定楼层的原始 BBCode，仅兼容论坛保存时去掉正文末尾 CR/LF 的行为。
-///
 /// 正文内部的换行、空格及 BBCode 仍须逐字相等，不能用宽泛的空白折叠掩盖内容差异。
 pub fn forum_post_bodies_match(observed_body: &str, expected_body: &str) -> bool {
     observed_body.trim_end_matches(['\r', '\n']) == expected_body.trim_end_matches(['\r', '\n'])
 }
 
 /// 论坛远程操作的安全失败分类。
-///
 /// 只保存稳定错误码和重试栅栏，不保存远端 URL、Cookie、响应正文或提交正文。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error("论坛远程操作失败: code={code} retryable={retryable} write_started={write_started}")]
@@ -92,14 +89,12 @@ impl ForumRemoteError {
         self.retryable
     }
 
-    /// 返回是否已经进入远端写入阶段。
     pub const fn write_started(self) -> bool {
         self.write_started
     }
 }
 
 /// 单次论坛内容扫描的远端写入进度；仅记录是否存在尚未确认的 POST。
-///
 /// 传输适配器在预读、限速和凭据校验全部完成、即将发送 POST 时标记。调用方必须取得精确帖子回执；
 /// 启用正文校验时还须经 [`forum_post_bodies_match`] 确认原始正文。该对象不替代持久化的未知结果门禁。
 #[derive(Debug, Clone, Default)]
@@ -141,7 +136,6 @@ pub struct ForumSyncClaim {
 }
 
 /// 论坛目录中当前领先事实的可证明来源。
-///
 /// 论坛来源只携带真实主题、帖子和楼层身份；代理只保留统一标记，不暴露 fast/slow 模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForumCurrentBidSource {
@@ -216,7 +210,6 @@ pub struct ForumAuctionSnapshot {
 }
 
 /// 论坛主题的 BBCode 防腐层；不携带 Cookie、数据库行或外部表单字段。
-///
 /// 正文可能包含公开装备 URL 的 10 位 key，因此 `Debug` 必须始终脱敏。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ForumRenderedThread {
@@ -327,7 +320,6 @@ pub struct ForumWriteRetryAuthorizationResult {
     pub authorized_at: DateTime<Utc>,
 }
 
-/// 论坛同步存储端口。
 pub trait ForumSyncStore: Send + Sync {
     /// 领取 due 任务；启动恢复水位只放行首轮前的凭据失败及未知写入只读对账，`None` 表示凭据不可用。
     /// 恢复必须将原失败码传入 claim，不授予 POST 权限；待人工写入授权的任务仍不领取。
@@ -365,7 +357,6 @@ pub trait ForumCredentialAvailability: Send + Sync {
     fn has_available_forum_credential(&self) -> bool;
 }
 
-/// 论坛未知写入的运维恢复端口。
 pub trait ForumSyncRecoveryPort: Send + Sync {
     fn list_write_recovery(&self, limit: u16) -> ApplicationFuture<'_, Vec<ForumSyncRecoveryItem>>;
 

@@ -141,7 +141,6 @@ impl EhentaiCredentialSet {
         Ok(Self { candidates: Arc::new(StdMutex::new(candidates)), invalidator, ownership })
     }
 
-    /// 从本地单个密钥明文建立凭据集合。
     pub fn from_secret(secret: &[u8]) -> Result<Self, EhentaiError> {
         Self::from_cookies(vec![EhentaiCookie::from_bytes(secret)?])
     }

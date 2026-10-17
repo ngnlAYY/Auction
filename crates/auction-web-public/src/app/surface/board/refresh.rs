@@ -18,7 +18,6 @@ impl PublicBidRefresh {
 }
 
 /// 仅刷新已挂载且启用的竞价资源；进行中的读取先完成，再补读尚未消费的通知。
-///
 /// 竞价修订号不能直接成为 `use_resource` 的依赖，否则持续竞价会反复取消慢请求。
 /// 延后任务由消费组件拥有：卸载会取消任务，新挂载的资源自行读取最新权威快照。
 pub(crate) fn use_bid_refresh<T: 'static>(mut resource: Resource<T>, enabled: bool) {

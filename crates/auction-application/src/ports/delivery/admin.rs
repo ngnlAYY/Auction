@@ -11,7 +11,6 @@ pub const MAX_DELIVERY_ADMIN_PAGE_SIZE: i64 = 100;
 pub const MAX_DELIVERY_COD: i64 = 9_007_199_254_740_991;
 
 /// Delivery Admin 查询与命令使用的稳定业务错误。
-///
 /// 该类型只携带闭集分类，不跨应用边界暴露数据库驱动或持久化正文。
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAdminError {
@@ -29,7 +28,6 @@ pub enum DeliveryAdminError {
     Unavailable,
 }
 
-/// Admin 交付列表查询条件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryAdminListRequest {
     pub status: Option<String>,
@@ -68,7 +66,6 @@ impl DeliveryAdminAction {
     }
 
     /// 按旧版已发布的字段顺序和 Go `encoding/json` 规则计算 Admin 命令摘要。
-    ///
     /// `request_id` 有意不进入摘要。release/retry 只包含 delivery、fence 和 actor；reconcile
     /// 还包含动作及两个互斥结果字段，并把缺失值编码为空字符串。该字节合同必须保持稳定，
     /// 否则新旧实例滚动并存时会把同一命令误判为冲突。
@@ -112,7 +109,6 @@ impl DeliveryAdminAction {
 }
 
 /// delivery outbox 的安全 Admin 投影。
-///
 /// 不包含 payload、命令摘要、lease token 或原始 result metadata；仅保留旧版契约允许的
 /// `reason_code`、`take_required` 和 `returned_mail_id` 安全派生字段，避免把外部协议或敏感
 /// 路由细节扩散到 UI。
@@ -140,7 +136,6 @@ pub struct DeliveryAdminSnapshot {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Admin 交付列表结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryAdminPage {
     pub entries: Vec<DeliveryAdminSnapshot>,
@@ -149,7 +144,6 @@ pub struct DeliveryAdminPage {
     pub offset: i64,
 }
 
-/// Admin 交付状态命令。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeliveryAdminCommand {
     pub command_id: Uuid,
@@ -163,14 +157,12 @@ pub struct DeliveryAdminCommand {
     pub request_hash: RequestHash,
 }
 
-/// Admin 交付命令结果。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliveryAdminResult {
     pub command_id: Uuid,
     pub snapshot: DeliveryAdminSnapshot,
 }
 
-/// 交付 Admin 查询与人工状态命令端口。
 pub trait DeliveryAdminPort: Send + Sync {
     fn list(&self, request: DeliveryAdminListRequest) -> ApplicationFuture<'_, DeliveryAdminPage>;
 

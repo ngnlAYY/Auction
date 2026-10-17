@@ -11,7 +11,6 @@ use super::canonical::to_go_json_bytes;
 use super::intent::settlement_world_name;
 
 /// 旧版 `fulfillmentProofDigest` 的 evidence 载荷。
-///
 /// 字段顺序和 `omitempty` 语义必须保持与 Go 的 `encoding/json` 一致；因此这里不复用
 /// 新版的 proof DTO，也不把应用层的 command envelope 混入外部证据摘要。
 #[derive(Serialize)]

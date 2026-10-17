@@ -7,18 +7,14 @@ use super::*;
 pub struct MoogleMailSentSummary {
     /// 远端 `mid`。
     pub external_mail_id: String,
-    /// 邮件所在世界。
     pub world: MoogleMailWorld,
-    /// 收件人显示名。
     pub recipient: String,
-    /// 已发送邮件标题。
     pub subject: String,
     /// 远端 HVT-8 时间转换后的 UTC 时间。
     pub sent_at: DateTime<Utc>,
 }
 
 impl MoogleMailSentSummary {
-    /// 校验摘要可以进入 Sent 详情读取队列。
     pub fn validate(&self) -> bool {
         valid_opaque_id(&self.external_mail_id)
             && valid_line(&self.recipient, 256, false)
@@ -67,7 +63,6 @@ impl MoogleMailSentContentProof {
     }
 }
 
-/// 单页已发送邮件解析结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailSentPage {
     /// 按远端 newest-first 顺序排列的摘要。
@@ -79,25 +74,17 @@ pub struct MoogleMailSentPage {
 /// 精确 remote ID 的已发送邮件与当前待领取资产快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailSentSnapshot {
-    /// 远端邮件 ID。
     pub external_mail_id: String,
-    /// 邮件所在世界。
     pub world: MoogleMailWorld,
-    /// 收件人。
     pub recipient: String,
-    /// 标题。
     pub subject: String,
-    /// 发送时间。
     pub sent_at: DateTime<Utc>,
-    /// 当前仍附在邮件中的 Credits。
     pub remaining_credits: i64,
-    /// 当前仍待支付的 COD。
     pub cod_pending: i64,
     /// 当前仍附在邮件中的装备 ID，必须按字典序排列且无重复。
     pub remaining_equipment_ids: Vec<String>,
     /// 页面是否明确证明邮件已领取完毕。
     pub collected: bool,
-    /// 本次读取的观察时间。
     pub observed_at: DateTime<Utc>,
 }
 

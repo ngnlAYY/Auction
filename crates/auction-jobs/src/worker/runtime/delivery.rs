@@ -1,6 +1,5 @@
-//! Delivery outbox 的领取、外部发送、租约续期和终态落库。
-//!
-//! 外部结果未知时保留安全失败语义并进入持久化对账路径，不能凭本地超时推断远端未写入。
+//! Delivery outbox 的领取、外部发送、租约续期和终态落库；
+//! 外部结果未知时保留安全失败语义并进入持久化对账，不能凭本地超时推断远端未写入。
 
 use super::*;
 
@@ -10,7 +9,6 @@ mod lease;
 use lease::DeliveryLease;
 
 /// 以独立 cadence 和 bounded concurrency 处理 delivery outbox。
-///
 /// 只有获得空闲并发槽后才领取下一条记录，避免已经领取但尚未执行的任务在队列中耗尽 lease。
 /// 凭据暂不可用时释放 claim 并在本轮排除对应世界，避免重复领取或阻塞其他世界。
 pub(super) async fn run_delivery_cycle<C>(worker: &PersistentWorker<C>) -> Result<(), WorkerError>

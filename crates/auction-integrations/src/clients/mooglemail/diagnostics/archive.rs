@@ -68,7 +68,6 @@ impl MoogleMailDiagnosticArchive {
     }
 
     /// 读取并认证 parsed_message 证据，直接恢复为短生命周期 MailMessage。
-    ///
     /// 该入口只信任归档文件中的 AEAD 认证头和 payload digest，不读取或信任外部导出的 JSON。
     pub fn read_parsed_message(
         &self,

@@ -129,7 +129,6 @@ pub(super) fn AdminUserRow(
         if let Some(kind) = dialog() {
             tr { class: "admin-users-dialog-row",
                 td { colspan: "7",
-                    // 外壳（遮罩/标题栏/关闭守卫）由共享 Dialog 接管。
                     Dialog {
                         title: dialog_title.clone().unwrap_or_default(),
                         close_label: t!("admin-users-action-cancel"),

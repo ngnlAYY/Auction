@@ -1,15 +1,10 @@
 //! Admin 幂等命令与动作执行骨架的统一 helper。
-//!
-//! 原先同一套逻辑分散在各页面（`stable_command_id` 同函数体 5 份以上、内联 3 份以上，
-//! spawn+busy+feedback+command_state 骨架十余处），本模块收敛为唯一实现：
-//!
 //! - [`stable_command_id`]：单命令形态。同一输入签名复用已冻结的 `command_id`（支撑服务端
-//!   幂等重试），签名变更即重新生成；成功/取消后由调用方把状态置回 `None`。
-//! - [`stable_scoped_command_id`]：多目标并行形态（结算 recovery、world 启停、Dashboard
-//!   多 mailbox 暂停等一页多条命令的场景），按签名分别冻结 `command_id`，互不覆盖。
+//!   幂等重试），签名变更即重新生成。
+//! - [`stable_scoped_command_id`]：多目标并行形态，按签名分别冻结 `command_id`，互不覆盖。
 //! - [`run_admin_action`] / [`run_admin_feedback_action`]：动作执行骨架，统一 busy
-//!   置位/复位与 spawn 边界；取消任务同样清理 busy，结果处理由调用方回调完成。
-//! - [`run_admin_owned_action`]：把动作登记到 busy 信号的宿主；分页移除行组件不会取消页面命令。
+//!   置位/复位与 spawn 边界。
+//! - [`run_admin_owned_action`]：把动作登记到 busy 信号的宿主；分页移除行组件不取消页面命令。
 
 use std::collections::HashMap;
 
@@ -49,10 +44,8 @@ pub fn stable_scoped_command_id(
 }
 
 /// 管理动作统一执行骨架：`busy` 置位 → spawn 执行 → 按结果回调 → `busy` 复位。
-///
-/// 只负责 busy 边界与 spawn；正常结束或取消均复位 busy，反馈、命令状态清理、权威数据刷新交给
-/// `on_success` / `on_failure`，错误类型由调用方决定（稳定 code 字符串或
-/// `AdminApiFailure`）。busy 守卫（`if busy() { return; }`）与前置状态清理仍留在调用方。
+/// 只负责 busy 边界与 spawn，正常结束或取消均复位 busy；反馈、命令状态清理、权威数据
+/// 刷新交给 `on_success` / `on_failure`。
 pub fn run_admin_action<T, E, F>(
     mut busy: Signal<bool>,
     action: F,
@@ -76,7 +69,7 @@ pub fn run_admin_action<T, E, F>(
 }
 
 /// 在 busy 的稳定宿主中运行命令，宿主卸载时仍由 Dioxus 取消，不跨页面或身份分离运行。
-/// 回调若保留子组件信号，必须用 try_write 等存活检查，不能无条件访问已经卸载的行状态。
+/// 回调若保留子组件信号，必须用 try_write 等存活检查，不能无条件访问已卸载的行状态。
 pub fn run_admin_owned_action<T, E, F>(
     busy: Signal<bool>,
     action: F,

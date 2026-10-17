@@ -1,6 +1,4 @@
-//! PostgreSQL Public account 读取与代理历史查询。
-//!
-//! 该模块只负责 PostgreSQL 快照查询，结果映射和公共不变量校验由 mapping 模块集中维护。
+//! PostgreSQL Public account 读取与代理历史查询；结果映射和公共不变量校验由 mapping 维护。
 
 use super::*;
 

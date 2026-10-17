@@ -1,5 +1,4 @@
 //! Admin dashboard section 映射的稳定出口。
-//!
 //! 邮件、realtime、运营水位、凭据聚合、告警和 unknown 降级分别归属相邻 owner；本文件只
 //! 负责装配与稳定导出。
 

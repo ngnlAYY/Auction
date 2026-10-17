@@ -1,5 +1,4 @@
 //! Admin runtime 配置 HTTP 适配器。
-//!
 //! HTTP 只负责 session/CSRF、稳定 JSON DTO 和错误状态映射；非敏感配置文档的严格校验、
 //! fingerprint fence、文件原子替换和命令账本重放由应用端口及其外层适配器负责。
 

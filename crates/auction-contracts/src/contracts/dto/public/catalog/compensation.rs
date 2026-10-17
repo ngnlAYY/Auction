@@ -54,7 +54,6 @@ pub struct PublicCompensationResponse {
     pub has_more: Option<bool>,
 }
 
-/// Public 单场补偿账本响应。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicCompensationMovementPageResponse {
     pub round: PublicCompensationRoundResponse,

@@ -1,6 +1,4 @@
-//! Recovery command 的动作映射与 SQL 错误转换。
-//!
-//! 该文件只承载 PostgreSQL recovery command 的单一职责，事务装配仍由父模块统一负责。
+//! Recovery command 的动作映射与 SQL 错误转换；事务装配由父模块统一负责。
 
 #[cfg(feature = "postgres")]
 use super::*;

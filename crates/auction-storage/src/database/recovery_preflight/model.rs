@@ -7,7 +7,6 @@ use thiserror::Error;
 /// 恢复前预检证据的机器可读格式标识。
 pub const RECOVERY_PREFLIGHT_FORMAT: &str = "auction-postgres-recovery-preflight.v1";
 
-/// PostgreSQL 恢复前预检结果。
 #[derive(Debug, Serialize)]
 pub struct PostgresRecoveryPreflight {
     pub format: &'static str,

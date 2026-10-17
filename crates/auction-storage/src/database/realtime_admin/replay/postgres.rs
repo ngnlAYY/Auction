@@ -1,7 +1,5 @@
-//! PostgreSQL realtime failure replay 事务。
-//!
-//! replay 在同一事务中锁定 failure 与 stream，追加替代事件，收口 failure，并写入审计与
-//! 命令账本；所有状态变更在提交前失败都会整体回滚。
+//! PostgreSQL realtime failure replay 事务；同事务内锁定 failure 与 stream、追加替代事件、收口
+//! failure 并写入审计与命令账本，提交前失败整体回滚。
 
 use auction_application::{
     ApplicationError, PublicRealtimeEvent, RealtimeAdminError, RealtimeReplayCommand,
