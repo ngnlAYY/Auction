@@ -2,7 +2,7 @@
 
 use crate::UserId;
 
-/// 提醒渠道闭集；PM 仅预留，不代表已装配传输。
+/// 账号提醒渠道闭集；旧单件标记接口仍只接受 MM 兼容占位。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LotWatchChannel {
     Mm,
@@ -10,7 +10,16 @@ pub enum LotWatchChannel {
 }
 
 impl LotWatchChannel {
-    /// 当前唯一可用渠道；未知值与未装配 PM 均失败关闭。
+    /// 账号偏好允许 MM 或 PM，不允许同一事件双发。
+    pub fn preference(value: &str) -> Option<Self> {
+        match value {
+            "mm" => Some(Self::Mm),
+            "pm" => Some(Self::Pm),
+            _ => None,
+        }
+    }
+
+    /// 旧单件标记兼容边界；不能据此解释账号实际通知方式。
     pub fn available(value: &str) -> Option<Self> {
         match value {
             "mm" => Some(Self::Mm),

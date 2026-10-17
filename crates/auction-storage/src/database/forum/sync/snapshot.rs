@@ -11,6 +11,9 @@ use uuid::Uuid;
 use super::super::super::{PostgresStore, lots::map_forum_equipment};
 use super::validation::{lot_code, parse_world, storage_error};
 
+#[path = "settlement.rs"]
+mod settlement;
+
 pub(super) async fn load_snapshot_postgres(
     store: &PostgresStore,
     claim: &ForumSyncClaim,
@@ -85,9 +88,11 @@ async fn read_snapshot(
     let auction_row = sqlx::query(
         "SELECT auction.id, auction.world_id, auction.sequence, auction.state_version,
                 auction.scheduled_open_at, auction.opened_at, auction.scheduled_end_at,
-                sync.catalog_layout
+                sync.catalog_layout, auction.status AS auction_status,
+                settlement.auction_id AS settled_auction_id
          FROM public.auctions AS auction
          JOIN public.auction_forum_sync AS sync ON sync.auction_id = auction.id
+         LEFT JOIN public.auction_settlements AS settlement ON settlement.auction_id = auction.id
          WHERE auction.id = $1",
     )
     .bind(requested_auction_id.as_uuid())
@@ -117,6 +122,16 @@ async fn read_snapshot(
         .try_get("scheduled_end_at")
         .map_err(|_| storage_error("读取论坛快照结束时间失败"))?;
 
+    let auction_status: String =
+        auction_row.try_get("auction_status").map_err(|_| storage_error("读取论坛拍卖状态失败"))?;
+    let settled = auction_status == "settled";
+    let settled_auction_id: Option<Uuid> = auction_row
+        .try_get("settled_auction_id")
+        .map_err(|_| storage_error("读取论坛结算汇总证明失败"))?;
+    if settled && settled_auction_id != Some(auction_id) {
+        return Err(storage_error("已结算论坛快照缺少权威结算汇总"));
+    }
+
     let rows = sqlx::query(
         "SELECT l.id AS lot_id, e.id AS equipment_id, e.external_equipment_id,
                 CASE sync.numbering_scheme
@@ -124,6 +139,8 @@ async fn read_snapshot(
                     WHEN 'category_v1' THEN l.category_number
                 END AS lot_number,
                 l.status, l.start_price, l.current_price,
+                l.leader_user_id, l.leader_since,
+                settlement.end_price AS settlement_end_price, settlement.adjustment_ppm,
                 l.effective_end_at, e.name AS equipment_name, e.category AS equipment_category,
                 e.attributes AS equipment_attributes,
                 submission.seller AS seller_name, leader.username AS leader_name,
@@ -136,6 +153,7 @@ async fn read_snapshot(
          JOIN public.equipment AS e ON e.id = l.equipment_id
          LEFT JOIN public.auction_submissions AS submission ON submission.id = l.submission_id
          LEFT JOIN public.users AS leader ON leader.id = l.leader_user_id
+         LEFT JOIN public.lot_settlements AS settlement ON settlement.lot_id = l.id
          LEFT JOIN LATERAL (
              SELECT bid.command_id, bid.mechanism
              FROM public.bids AS bid
@@ -222,6 +240,7 @@ async fn read_snapshot(
         }
         let equipment =
             map_forum_equipment(&world_id, &external_equipment_id, &name, &category, attributes.0)?;
+        let settlement = settlement::project(&row, settled)?;
         lots.push(ForumLotSnapshot {
             code,
             category,
@@ -236,6 +255,7 @@ async fn read_snapshot(
             current_bidder: leader_name,
             current_bid_source,
             effective_end_at,
+            settlement,
             equipment_link_target: PublicEquipmentLinkTarget {
                 lot_id,
                 equipment_id: EquipmentId::from_uuid(equipment_id),
@@ -256,6 +276,7 @@ async fn read_snapshot(
         world,
         sequence,
         state_version,
+        settled,
         scheduled_open_at,
         opened_at,
         scheduled_end_at,

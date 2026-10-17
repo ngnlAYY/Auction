@@ -44,7 +44,9 @@ pub(super) async fn claim_published_topics_postgres(
            AND sync.body IS NOT NULL
            AND sync.system_log_body IS NOT NULL
            AND sync.content_revision > 0
-           AND auction.status IN ('live', 'final')
+           AND (auction.status IN ('live', 'final')
+                OR (auction.status = 'settled' AND sync.terminal_refresh_enabled
+                    AND sync.terminal_synced_version IS NULL))
            AND sync.content_next_scan_at <= $1
            AND (
                sync.content_claim_token IS NULL
@@ -159,6 +161,7 @@ pub(super) async fn claim_published_topics_postgres(
             catalog_body,
             system_log_body,
             content_revision,
+            confirmed_settled_version: None,
             processed_through_post_number,
             content_claim_token,
             content_claim_owner: worker_id.to_owned(),
@@ -169,6 +172,20 @@ pub(super) async fn claim_published_topics_postgres(
     }
     transaction.commit().await.map_err(|_| storage_error("提交论坛回帖领取事务失败"))?;
     Ok(topics)
+}
+
+#[cfg(feature = "postgres")]
+pub(super) async fn reply_commands_open_postgres(
+    store: &PostgresStore,
+    auction_id: AuctionId,
+) -> Result<bool, ApplicationError> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT status IN ('live', 'final') FROM public.auctions WHERE id = $1",
+    )
+    .bind(auction_id.as_uuid())
+    .fetch_one(store.pool())
+    .await
+    .map_err(|_| storage_error("读取论坛回帖接收状态失败"))
 }
 
 #[cfg(feature = "postgres")]

@@ -90,7 +90,8 @@ async fn notify(
     occurred_at: DateTime<Utc>,
 ) -> Result<(), CompetitionTransactionError> {
     let lot_id = bid.lot_id.as_uuid();
-    let row = sqlx::query("SELECT watch.version, u.username, a.world_id
+    let row = sqlx::query("SELECT watch.version, u.username, a.world_id,
+        u.lot_watch_channel, u.lot_watch_channel_version, u.forum_account_id
         FROM public.lot_watches watch JOIN public.users u ON u.id = watch.user_id
         JOIN public.lots lot ON lot.id = watch.lot_id JOIN public.auctions a ON a.id = lot.auction_id
         WHERE watch.user_id = $1 AND watch.lot_id = $2 AND watch.watched AND watch.channel = 'mm'")
@@ -99,6 +100,27 @@ async fn notify(
         return Ok(());
     };
     let version: i64 = row.try_get("version").map_err(sql_error)?;
+    let channel: String = row.try_get("lot_watch_channel").map_err(sql_error)?;
+    let preference_version: i64 = row.try_get("lot_watch_channel_version").map_err(sql_error)?;
+    // 只读取既有 Serializable 快照；不得在此无序追加旧 leader 的 user 锁。
+    if channel == "pm" {
+        return super::pm_fact::notify_pm(
+            transaction,
+            bid,
+            super::pm_fact::PmFact {
+                user_id,
+                cycle,
+                watch_version: version,
+                preference_version,
+                recipient: row.try_get("forum_account_id").map_err(sql_error)?,
+                occurred_at,
+            },
+        )
+        .await;
+    }
+    if channel != "mm" || preference_version <= 0 {
+        return Err(corrupt());
+    }
     let command = auction_application::lot_watch_notification(
         lot_id,
         user_id,
@@ -116,8 +138,8 @@ async fn notify(
     sqlx::query(
         "INSERT INTO public.lot_watch_notifications
         (id, user_id, lot_id, leadership_cycle, displaced_bid_id, watch_version, delivery_id,
-         command_id, request_digest, recipient, payload, created_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$1,$8,$9,$10,$11)",
+         command_id, request_digest, recipient, payload, created_at, preference_version)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$1,$8,$9,$10,$11,$12)",
     )
     .bind(command.command_id.as_uuid())
     .bind(user_id)
@@ -130,6 +152,7 @@ async fn notify(
     .bind(&command.recipient)
     .bind(crate::database::mail_delivery::payload(&command))
     .bind(occurred_at)
+    .bind(preference_version)
     .execute(&mut **transaction)
     .await
     .map_err(sql_error)?;

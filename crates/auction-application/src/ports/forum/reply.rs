@@ -30,6 +30,9 @@ pub struct ForumReplyTopic {
     pub catalog_body: String,
     pub system_log_body: String,
     pub content_revision: i64,
+    /// 领取时为空；Worker 仅在本轮所有固定帖确认后填入所渲染的 settled 版本。
+    /// 存储完成入口必须在拍卖锁内复核；部分进度入口不得使用它声明完成。
+    pub confirmed_settled_version: Option<i64>,
     pub processed_through_post_number: i32,
     pub content_claim_token: Uuid,
     pub content_claim_owner: String,
@@ -175,6 +178,9 @@ pub trait ForumReplyStore: Send + Sync {
         lease_until: DateTime<Utc>,
         limit: u16,
     ) -> ApplicationFuture<'_, Vec<ForumReplyTopic>>;
+
+    /// 读取权威 live/final 状态以停止终态新回帖消费；命令开始仍须在锁内再次复核。
+    fn reply_commands_open(&self, auction_id: AuctionId) -> ApplicationFuture<'_, bool>;
 
     fn lot_targets(&self, auction_id: AuctionId) -> ApplicationFuture<'_, Vec<ForumLotTarget>>;
 

@@ -72,9 +72,9 @@ HTTP 负责输入和 DTO 映射，Worker 负责调度，二者都不建立第二
 | --- | --- |
 | 分体拓扑 | Public、Admin、Worker 独立进程；具备并发及多进程存储边界，具体扩展需验证 |
 | 竞价与生命周期 | Serializable、显式行锁、最多三次序列化冲突尝试；持久调度、慢速代理与结算 workflow |
-| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；登录用户装备标记与按领先周期去重的 MM 超价提醒 |
+| Public | 目录、lot、bid-log、账户及成交价格、补偿事实的权威投影；登录用户装备标记与账号级 MM/PM 渠道偏好，统一来源按领先周期去重 |
 | Admin | 用户、改名、黑名单、审计、规则、runtime、world、录入/报表及 realtime 运维 |
-| 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化 |
+| 结算与外部系统 | 结算、履约、recovery、凭据、论坛、邮件与告警的独立 owner；论坛目录每帖最多 150 件，续页身份与正文由 storage 持久化；forum owner 持有终态刷新纳入标记及全固定页确认版本，结算结果仍归 settlement |
 | 运维 | 显式灾备、canonical v28 接管；可选 Linux 单主机 supervisor 与确认后的专用空库初始化 |
 
 本表描述源码能力，不代表运行验收；具体输入、成功与缺失状态由[HTTP 契约](contracts/routes.md)拥有。
@@ -122,8 +122,10 @@ Recovery 人工重试投影由 storage 的 recovery_commands owner 维护；Deli
 
 装备标记由 application 的 lot-watch owner 定义用例与窄端口，domain 拥有领先周期及提醒规则，
 storage 拥有标记、版本、通知事实与 delivery 绑定。标记变更与竞价采用同一 lot 锁序；成功新建代理
-同事务默认标记，查询和自动追价不得恢复手动取消。MM 经既有 delivery owner 在提交后发送，PM 仅预留渠道，
-不得借普通论坛通知的来源证明发送。持久化与一次性语义见[超价提醒不变量](contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
+同事务默认标记，查询和自动追价不得恢复手动取消。MM 经既有 delivery owner 在提交后发送；PM 由独立
+lot-watch-pm 队列拥有发送 fence 与只读对账，复用唯一论坛网关及凭据 owner，不借普通论坛通知来源。
+`000042` 的账号偏好字段和统一跨渠道通知来源由 application lot-watch 定义，SQL 由 storage 独占；
+偏好只锁 user，竞价以既有 Serializable 快照冻结渠道，旧 watch.channel 恒为 mm 兼容占位。持久化与一次性语义见[超价提醒不变量](contracts/invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
 
 ## Worker 与外部副作用
 
@@ -141,6 +143,9 @@ Worker 只负责持久调度、重试与执行时机。due、游标、attempt、
 历史已开始发布/未知写入主题冻结单页并继续导入；新主题启用分页，不能把旧回帖位置重新解释为目录。
 全部固定帖的真实 post ID 保存后才导入命令。application 定义分页端口，integrations 负责渲染/合并目录解析，
 jobs 负责顺序发布与对账，storage 的 `forum/catalog.rs` 持久化续页身份和正文；回帖只导入普通 bid。
+`000043` 由 storage `forum` owner 为升级时未结算及之后创建的拍卖登记终态刷新；历史已结算明确豁免，不能伪造完成版本。
+application 定义已保存结算的安全投影，storage 在同一快照读取结算金额/调整及连续领先时间；integrations 仅格式化小时和精确百分比。
+jobs 在终态停止导入新竞价，所有冻结目录页和日志通过既有证明后才由 storage 在拍卖版本锁及内容 CAS 下持久完成；pending、部分进度及未知写入不提前完成。
 首帖自托管 SVG 倒计时的 URL/文字降级由 integrations `forum/render/countdown.rs` 拥有；
 application `ports/auction/queries/countdown.rs` 定义窄时间快照，storage `auctions/countdown.rs` 单次读取公开边界及数据库时钟，
 HTTP `public/countdown/` 生成有界 SVG/CSS 动画及图片专用安全头，不依赖 Dioxus 资源、JavaScript 或第三方服务。

@@ -149,6 +149,13 @@ pub enum ForumCurrentBidSource {
     Proxy,
 }
 
+/// 已结算成交拍品的只读展示事实；调整来自持久结算，不含补偿池额外抵扣。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForumLotSettlement {
+    pub leader_since: DateTime<Utc>,
+    pub adjustment_ppm: i64,
+}
+
 /// 论坛主题中展示的单个 lot 快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumLotSnapshot {
@@ -167,6 +174,7 @@ pub struct ForumLotSnapshot {
     pub current_bidder: Option<String>,
     pub current_bid_source: Option<ForumCurrentBidSource>,
     pub effective_end_at: Option<DateTime<Utc>>,
+    pub settlement: Option<ForumLotSettlement>,
     /// 不含装备 key 的权威链接目标；完整 URL 只在 Worker 渲染前短暂解析。
     pub equipment_link_target: PublicEquipmentLinkTarget,
 }
@@ -198,6 +206,8 @@ pub struct ForumAuctionSnapshot {
     pub world: SettlementWorld,
     pub sequence: i64,
     pub state_version: i64,
+    /// 仅权威 settled 状态且全部结算明细齐备时为 true，不由墙钟推断。
+    pub settled: bool,
     pub scheduled_open_at: DateTime<Utc>,
     pub opened_at: Option<DateTime<Utc>>,
     pub scheduled_end_at: Option<DateTime<Utc>>,

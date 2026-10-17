@@ -8,11 +8,14 @@ pub(super) async fn configure_forum(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
     delivery_enabled: bool,
-) -> anyhow::Result<(Option<auction_jobs::ForumSyncRuntime>, Option<auction_jobs::ForumReplyRuntime>)>
-{
+) -> anyhow::Result<(
+    Option<auction_jobs::ForumSyncRuntime>,
+    Option<auction_jobs::ForumReplyRuntime>,
+    Option<auction_jobs::LotWatchPmRuntime>,
+)> {
     let forum_config = &config.worker.forum;
     if !forum_config.enabled {
-        return Ok((None, None));
+        return Ok((None, None, None));
     }
     if store.backend() != DatabaseBackend::Postgres {
         anyhow::bail!("E-Hentai 论坛同步仅支持 PostgreSQL 完整档");
@@ -160,5 +163,15 @@ pub(super) async fn configure_forum(
         )?
         .with_post_body_verification(forum_config.verify_post_body),
     );
-    Ok((sync, reply))
+    // PM 复用同一网关、限速及凭据 ownership，与 MM enabled 无关。
+    let pm = auction_jobs::LotWatchPmRuntime::new(
+        store,
+        gateway,
+        std::time::Duration::from_secs(config.worker.delivery.poll_interval_seconds),
+        std::time::Duration::from_secs(config.worker.delivery.jitter_seconds),
+        std::time::Duration::from_secs(forum_config.item_timeout_seconds),
+        std::time::Duration::from_secs(forum_config.lease_duration_seconds),
+    )
+    .map_err(anyhow::Error::msg)?;
+    Ok((sync, reply, Some(pm)))
 }

@@ -11,6 +11,7 @@ pub use control::{
     WorkerControlServerConfig, WorkerControlServerError,
 };
 
+pub use worker::LotWatchPmRuntime;
 pub use worker::{
     AuctionScheduleRuntimeConfig, AuctionWorkerRuntimeConfig, DeliveryWorkerRuntimeConfig,
     ForumReplyPorts, ForumReplyRuntime, ForumSyncPorts, ForumSyncRuntime, ForumWorkerRuntimeConfig,

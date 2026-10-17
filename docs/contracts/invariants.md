@@ -230,6 +230,13 @@ pending 仍表示将重试且阻止完成水位；正常镜像更新仍受活动
 通知处理可能晚于竞价成功，不能把通知 pending 或失败解释为竞价未接受。日志最多展示 100 条且受正文预算限制，
 优先 pending、再展示最近警告；省略数量必须明确，不能以省略诊断推进真实处理水位。
 
+结算终态只消费已保存的结算汇总/明细和最终领先事实，不按墙钟或舍入时长推断状态、金额或百分比。
+`000043` 将升级前 settled 显式排除，而非伪造成功版本；新纳入主题终态停止新竞价导入，既有 pending 保留诊断并阻止完成。
+所有固定目录页和日志确认后才能持久化所渲染的 settled 版本，存储在 auction 锁和 sync lease/fencing/revision CAS 下复核；
+live 扫描期间进入 settled 也不能跳过最终全页确认。扫描未完成时只更新实际变化页，不因终态反复 POST 未变化正文；
+只有扫描完成且全部固定帖已确认才携带终态完成版本。未知写入仍须逐页只读对账，不因正文未变化绕过门禁。
+部分进度和未知写入不得提前停止轮询，冻结分页/正文上限不变。
+
 所有固定楼层的发布、编辑和未知写入对账始终核对真实 thread/post 身份、固定楼层及当前拍卖/页码标记，
 新 POST 仍须精确帖子回执。`worker.forum.verify_post_body` 属部署配置，默认 `false`，统一控制同步及回帖刷新：
 关闭时不额外回读/逐字比较原始 BBCode；正常成功 POST 后的本地正文仅为目标镜像，
@@ -407,8 +414,12 @@ Auction 生命周期和结算 owner 必须立即执行首轮，再使用自己�
 通知只由已标记用户在本 lot 的真实“领先 → 被他人超越”事实触发，同一领先周期至多形成一个确定性通知身份。
 标记时已经落后、仅浏览收藏以及其他人继续加价不触发通知；重新领先后才开启下一周期。普通、论坛、
 快/慢代理共享该边界，必须处理一个事务内多条事实，不能只轮询最终领先者而漏记反超。通知事实及投递绑定与
-对应竞价同事务提交；通知系统不可用或外部发送失败不得撤销已接受竞价。MM 为默认且唯一已装配渠道，PM
-仅预留，不把未实现的 PM 或任意模板映射为成功。
+对应竞价同事务提交；外部发送不可用不得撤销已接受竞价，SQL 错误仍整体回滚，不吞持久失败。
+账号统一偏好默认 MM，可选择 PM，不同时双发；同 lot/user/cycle 的唯一身份不含渠道。
+偏好 PUT 只锁 user，Serializable 先重放账本再 CAS，同渠道新 ID 也推进独立正 i64 版本，最多三次尝试，
+保留 40001/40P01。竞价按既有 Serializable 快照冻结偏好，不在 facts 末尾追加旧 leader 的无序 user 锁。
+旧 watch.channel 永远 mm 兼容占位；切换偏好不改变旧 MM 或 PM 的来源证明，不重路由已排队通知。
+PM 收件人只来自稳定 forum_account_id；缺失/非法形成 recipient NULL 的 suppressed/recipient_missing 事实，不阻断竞价，不回退 MM。
 
 取消标记或重新领先会使尚未开始发送的旧提醒失效；已经进入发送的邮件无法撤回。领取与发送前复核独立的
 标记/通知 owner 证明，不复用论坛 notify 的来源授权。稳定身份、唯一约束、持久状态和既有 delivery 租约
@@ -418,6 +429,17 @@ Auction 生命周期和结算 owner 必须立即执行首轮，再使用自己�
 追加审计并保留来源证据；不触碰 sending 或 manual_reconcile。运维投影只对该 watch 专属原因接受无 sending 的 preflight 形状，
 并要求无租约/外部引用、零 COD、有序时间及明确 `outcome_unknown=false`/`preflight_blocked=true` 元数据。
 Admin release、retry 和人工 reconcile-retry 也先锁 lot，再锁 delivery 并复核同一独立 proof；不得恢复取消或旧领先周期的任务。
+
+PM 不进入 MM deliveries/Sent/COD 链，独立队列只有 pending/claimed/sending/succeeded/suppressed/manual_reconcile。
+prepare 仅 GET；开始 sending 必须先锁 lot 再锁任务，复核冻结 payload/digest/recipient/channel、watch/version、
+永久失效标记、未重新领先、lease/fence 及准备得到的 sender，明确提交成功后才消费 prepared.send 一次。
+只有从未 sending 的领取可安全延期；任何 sending 永不回 pending/claimed/suppressed，sender 与 sending_at 不可改变。
+超时、drain 取消、进程崩溃、过期 sending 都只核对原 sender 的 Sent 副本；找不到不是未发送证明，无自动/人工重寄。
+精确 receipt 必须绑定完整 message、recipient、sender、Sent MSID。取消不覆盖已发送/未知结果。
+CLI reconcile 只以稳定命令和审计申请 Worker 只读核对；未证明保持 manual_reconcile，不初始化第二个凭据客户端。
+PM runtime 共享唯一论坛网关/凭据 owner/HTTP 限速，不依赖 MM enabled；forum.enabled=false 不外呼。
+每轮最多 1 新发送+1 只读核对，串行；使用 delivery cadence/jitter 和 forum 单项总超时/lease，总预算严格小于租约。
+未知 fence 提交不发送；预算到期停止工作，由持久租约恢复，而非将未知写入安全延期。
 
 ### I-10 缓存不是权威数据源
 

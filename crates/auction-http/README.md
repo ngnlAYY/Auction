@@ -48,7 +48,9 @@ Public 指定列表的 `page_size` 不设 200 条上限，仍严格检查正整�
 
 [routes/public/watch.rs](src/http/routes/public/watch.rs) 拥有 P23/P24 当前会话装备标记列表和 CAS 写入。
 复用会话、来源/CSRF、限流、strict JSON、JSON 405 与 no-store；不接收客户端 user_id。
-只接受 mm；查询/UUID/JSON 词法错误 400，P24 负版本或渠道业务错误 422，命令/版本冲突 409，依赖缺失或完整集合超限 503。
+旧标记 channel 只接受 mm 兼容占位；查询/UUID/JSON 词法错误 400，P24 负版本或渠道业务错误 422，命令/版本冲突 409，依赖缺失或完整集合超限 503。
+[routes/public/watch_preference.rs](src/http/routes/public/watch_preference.rs) 拥有 P25/P26 账号警告渠道 GET/PUT；
+无 query，4 KiB strict JSON，默认 mm/1，PUT 只接受 mm/pm 和正版本，独立 command/version 409；同样复用会话/CSRF/no-store。
 不增加竞价 DTO 或实时事件；GET 沿既有账户读取边界，PUT 使用变更限流与来源门禁。
 
 ## 职责边界

@@ -262,6 +262,12 @@ batch_timeout 默认 600 秒、范围 1–86400，至少覆盖一次 fetch_timeo
 到期仅提交完成前缀及末封 ID，无完成项则持久化失败退避；批次续租，token/fence 失效即取消陈旧处理。
 runtime 的 worlds/equipment_filter/mail_templates 须完整同时存在或全部缺失，仅全缺失时沿用主配置兼容值。
 
+装备 PM 不新增 TOML 字段或独立凭据 owner。forum.enabled 控制是否装配，与 mooglemail.enabled 无关；
+独立 PM runtime 复用 delivery.poll_interval_seconds/jitter_seconds，forum.item_timeout_seconds/lease_duration_seconds，
+共享 forum HTTP 限速。每轮至多 1 新发送+1 只读核对、串行，单项总预算小于租约；代码默认轮询 60 秒不代表实际配置或到信承诺。
+forum.verify_post_body 不控制 PM：PM 成功始终要求完整冻结内容、recipient/sender 与 Sent MSID 精确证明。
+受控升级/未知结果运维见[装备标记升级](../README.md#装备标记与超价提醒升级)。
+
 ## Worker 循环预算
 
 顶层生命周期、慢速代理和结算默认 60 秒周期、5 秒抖动、各阶段批次 100、单项 30 秒。

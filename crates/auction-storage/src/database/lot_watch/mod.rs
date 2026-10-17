@@ -4,6 +4,8 @@
 mod commands;
 mod facts;
 mod persistence;
+mod pm_fact;
+mod preference;
 mod proof;
 
 pub(crate) use facts::{apply_bid, auto_watch_proxy};

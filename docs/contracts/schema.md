@@ -18,7 +18,7 @@
 
 当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL。
 SQL owner 统一为 `auction-storage`；下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。
-PostgreSQL 迁移为 `000001`—`000041`；已发布文件不修改或删除。
+PostgreSQL 迁移为 `000001`—`000043`；已发布文件不修改或删除。
 历史 SQL 的编号、对象和修复边界仍可追溯；实现与运行证据见[状态说明](../status.md)。
 
 ### 追加迁移与历史事实
@@ -110,7 +110,8 @@ Cookie 明文不进入账本。
 | bids | auction-domain + auction-application：auction | 追加式竞价事实 |
 | lot_watches | auction-domain + auction-application：lot-watch；auction-storage：lot_watch | 按用户/lot 保存 watched、mm 渠道及正 i64 版本，取消保留墓碑；同值新命令仍推进 fence |
 | lot_watch_leadership | auction-domain + auction-application：lot-watch；auction-storage：lot_watch | 逐条接受事实推进连续领先周期，同人加价不重开周期 |
-| lot_watch_notifications | auction-application：lot-watch；auction-storage：lot_watch | 用户/lot/周期唯一的独立通知来源，绑定被超价 bid、watch 版本、delivery、摘要、收件人及完整冻结 payload；取消/重新领先永久失效 |
+| lot_watch_notifications | auction-application：lot-watch；auction-storage：lot_watch | 跨渠道用户/lot/周期唯一来源；冻结 channel、账号 preference_version、收件人及 payload/digest；MM 独占 delivery_id，PM 无 MM delivery；取消/重新领先永久失效 |
+| lot_watch_pm_deliveries | auction-application：lot-watch-pm；auction-storage：lot_watch_pm | 独立 PM 租约/fence 队列，来源唯一；sending 后只允许原 sender 只读对账，缺论坛收件人 suppressed，不授权重发 |
 | bid_proxies | auction-storage：兼容视图 | 历史代理字段的只读兼容投影，非权威状态 |
 | bid_proxy_authorizations | auction-domain + auction-application：auction | Fast/Slow 代理授权状态机 |
 | bid_proxy_authorization_transitions | auction-domain + auction-application：auction | 代理授权追加式迁移记录 |
@@ -121,6 +122,20 @@ Cookie 明文不进入账本。
 | auction_submissions | auction-application：auction-intake | `mail/admin` 来源闭集及拍品来源关联；Admin URL/JSON 适配器种类只进入来源引用和命令摘要 |
 | equipment_secrets | auction-application：keymanagement | 标的敏感来源密文 |
 | auction_schema_identity | auction-storage：migration | 迁移/schema 身份和兼容检查 |
+
+`000042` 的 `users.lot_watch_channel/lot_watch_channel_version` 由 application lot-watch 偏好 owner 定义，
+SQL 仍由 auction-storage 独占，默认 mm/1，不改变身份版本。偏好命令复用 auction_commands，
+只锁 user、先重放后 CAS，同渠道新命令也推进版本。新通知冻结偏好；历史 MM payload/digest 不重写。
+PM 来源允许 recipient NULL 但只生成 recipient_missing 的 suppressed 队列事实，不伪造 UID、不回退 MM。
+PM 任务 sending_at 与 sender 一旦绑定不可清空/替换；sending 后不可回 pending/claimed/suppressed，
+由 `guard_lot_watch_pm_sending` 触发器保护。队列状态闭集为 pending/claimed/sending/succeeded/suppressed/manual_reconcile；
+notification_id 主键及 `(notification_id,channel)` FK 保证一来源一 PM 任务，channel 固定 pm。
+lease_token/lease_expires_at/lease_kind/worker_id 同空同非空；lease_kind 区分 send/reconcile，所有更新带 fence/token/状态/有效租约谓词。
+succeeded 必须有原 sender、sending_at、数字 Sent external_reference 和完成时间；无原始 HTML/令牌/密钥字段。
+attempt_count/reconcile_attempt_count 非负，fencing_version 正 i64；due/expiry/reconcile 索引支持每次至多一项领取。
+来源的 MM 分支严格要求 delivery_id/recipient；PM 分支严格禁止 MM delivery_id、要求正 preference_version，
+recipient 为空或符合 users 的 1–32 位规范十进制 ID。缺 UID 来源 payload 的 recipient_forum_account_id 为 JSON null，
+不反序列化为可发送 ForumPmMessage；队列仅 suppressed/recipient_missing。已发送来源失效不抹除发送结果。
 
 新增装备标记及超价通知对象由 application 的 lot-watch 逻辑 owner 定义，SQL 由 auction-storage 独占；
 与 `lots`、`users` 和既有 `deliveries` 精确绑定。标记取消保留版本墓碑，通知按用户/lot/领先周期去重，
@@ -196,6 +211,13 @@ post ID 未持久化时，用户回帖不得导入；固定楼层更新以前一
 `auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
 应用读模型同时投影二者，Worker 按[安全英文展示规则](invariants.md#i-08-外部写入发生在本地提交之后)解释。
 旧通用拒绝不回填、不重新执行；错误展示复用既有列，不改变自然键、尝试次数或终态。
+`000043` 为 forum owner 的 `auction_forum_sync` 追加 `terminal_refresh_enabled`（默认 true）与
+`terminal_synced_version`（nullable 正版本）。升级时已 settled 的既有主题仅设 enabled=false，完成版本仍为 NULL；
+其余主题及新主题纳入，不回填历史正文或伪造成功。终态领取仅限 enabled=true 且完成版本为空的 settled 主题。
+最终完成先共享锁定 auctions，核对已渲染的 settled state_version，再以原内容租约/fencing/revision CAS 同事务确认所有页；
+版本变化、pending、部分进度或 write_unknown 不得写终态完成版本。普通 live 扫描即使期间结算，也必须重新渲染并证明全部固定页。
+结算明细只从同一 Repeatable Read 快照的 auction_settlements/lot_settlements 与 lots 读取，不新增经济事实。
+
 目录分页的 `000040` 只增加非权威镜像，不改竞价/审计事实；查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
 
 MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维契约写入本地加密证据文件。

@@ -23,6 +23,18 @@ pub(super) async fn begin_command_postgres(
 
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启论坛命令账本事务失败"))?;
+    // 与生命周期锁串行：扫描中并发进入 Settling/Settled 后不创建或重试论坛命令。
+    // 竞价应用事务仍独立复核状态；这里不建立第二套状态机。
+    let open = sqlx::query_scalar::<_, bool>(
+        "SELECT status IN ('live', 'final') FROM public.auctions WHERE id = $1 FOR SHARE",
+    )
+    .bind(record.auction_id.as_uuid())
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|_| storage_error("锁定论坛命令接收状态失败"))?;
+    if !open {
+        return Err(storage_error("拍卖已停止接收论坛命令"));
+    }
     let inserted = sqlx::query(
         "INSERT INTO public.auction_forum_bid_commands
             (command_id, auction_id, world_id, thread_id, post_id, post_number, line_number,

@@ -25,8 +25,12 @@ mod rules;
 #[path = "identity/session.rs"]
 mod session;
 mod status;
+#[path = "identity/watch_preference.rs"]
+mod watch_preference;
 #[path = "auction/watches.rs"]
 mod watches;
+
+pub(crate) use watch_preference::{fetch_lot_watch_preference, set_lot_watch_preference};
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) use watches::valid_watch_collection;

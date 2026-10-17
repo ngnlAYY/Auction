@@ -21,6 +21,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
 | --- | --- |
 | [src/clients/http.rs](src/clients/http.rs) | 统一 reqwest/rustls 客户端 |
 | [src/clients/ehentai](src/clients/ehentai) | 论坛认证、受限请求、主题/固定帖协议 |
+| [src/clients/ehentai/client/pm](src/clients/ehentai/client/pm) | PM 新鲜表单准备、单次发送与同账号 Sent 精确证明 |
 | [src/clients/mooglemail](src/clients/mooglemail) | 邮件读取、动作/发送证明与加密诊断 |
 | [src/equipment](src/equipment) | 装备来源策略、页面解析与安全链接解析 |
 | [src/credentials](src/credentials) | Cookie 信封与 Admin 只读认证探测 |
@@ -33,7 +34,7 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。
 外部响应必须经过应用命令或持久化 Worker 操作，不能直接修改拍卖状态；本地提交后的外部失败不能撤销已接受竞价。
 
 装备标记 delivery 使用独立 `lot_watch` 来源和冻结安全正文，沿用原 ComposeSend/Sent 精确证明及未知结果 manual_reconcile，
-不新增部署模板键或配置开关；PM 不装配、不降级假成功。论坛 `notify mm` 是一次性通知，不再宣称订阅超价提醒。
+不新增部署模板键或配置开关。账号警告渠道由应用冻结；PM 使用独立 `ForumPmSender` 端口，不伪造 MoogleMail delivery/proof，不失败降级双发。论坛 `notify mm` 是一次性通知，不再宣称订阅超价提醒。
 
 ## HTTP 与协议解析
 
@@ -50,6 +51,7 @@ HTML 解析使用 scraper 0.27 / selectors 0.38，移除旧 fxhash 停维依赖�
 | Return / Take | 写前核对 sender 与预期资产；Return 证明精确 MID 消失，Take 证明身份不变、资产归零及唯一回执 |
 | 论坛读取 | 同 thread、规范分页、真实帖子/作者身份与完整页数；不能把部分主题作为完整命令源 |
 | 论坛写入 | 同源表单与精确 board/thread/post；回执始终核对，原始正文额外确认由 Worker 的 `verify_post_body` 开关控制 |
+| 论坛 PM | 新鲜 MID 表单绑定当前姓名与 sender，单次 POST 保存 Sent、不 tracking；完整有界遍历自己的同标题 Sent 后核验收件人 UID、完整正文、sender 与 Sent MSID |
 
 Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资产不符、无匹配、多匹配或预算耗尽进入 `manual_reconcile`，
 不自动重寄。发送前 compose 必须为空，避免覆盖未知写入遗留资产；收件人不存在的退信在资产取回前也保留人工对账。
@@ -88,11 +90,42 @@ Auction Timer 使用计划截止 `scheduled_end_at`，不代替单件软截止�
 展示完整当期拍卖链接。内层粗体防止论坛将长网址文字截短后写回 BBCode，不能靠忽略省略号通过正文校验。
 origin 由[Worker 部署配置](../../ops/config/README.md#论坛与邮件)提供，拍卖 UUID/world 路径不丢失。
 `About system` 链接固定指向论坛说明主题 `301946`。列表边界直接生成论坛保存后的稳定换行形状，不靠放宽正文比较消除差异。
+`forum/render/settlement.rs` 在成交行追加 `; winning for Xh / Yh; adjustment%`，仅消费已保存的结算投影；
+X 为最终连续领先到有效截止，Y 为计划开拍至计划截止，小时整数舍入一位小数；adjustment_ppm 每 10,000 为 1%，最多四位小数、去尾零、正税负折扣、零为 0%。
+不以展示时长重算曲线、不含补偿池额外抵扣；流拍无尾注。目录解析仅剥离该结构化尾注，再解析真实来源，不放宽用户竞价语法。
+所有页使用同一渲染路径、冻结页数及原正文上限，缺失权威明细失败关闭。完整语义见[玩家指南](../../docs/player-guide.md#成交价为什么不一定等于应付金额)。
 目录固定文案使用英文；当前领先来源显示 ` (proxy)` 或 ` (#N)`，解析器仍兼容历史中文/全角标记，用户名称保持原文。
 
 Admin A44 在 [credentials/check.rs](src/credentials/check.rs) 使用独立只读探测器，仅接受数据库信封。
 401/明确登录失效为 invalid，挑战、战斗页、限流、超时或协议变化为 inconclusive；无写入、重试、留证或状态回写。
 每进程单并发、站点间隔 2 秒、每范围含等待预算 5 秒、正文上限 2 MiB；成功只证明当次登录态。
+
+### PM 准备与已发送副本
+
+`EhentaiGateway` 实现冻结的 `ForumPmSender`，复用唯一 active ForumCookie、原 credential session、持久 owner 和共享 HTTP gate。
+安全 PM HTTP client 在构造时建立、随客户端克隆共享连接池，独立强制禁止重定向，不信任兼容构造器传入的 redirect 策略；
+不改变既有主题/编辑客户端。目标仅允许固定生产 HTTPS origin，或显式配置的 HTTP loopback 隔离端点；不暗改配置为生产地址。
+`forum.enabled`、持久 sending fence、任务 lease 与 item timeout 由 Worker 装配/调度拥有；此适配器不自行启动或读取配置。
+
+`prepare` 只 GET `/index.php?act=Msg&CODE=04&MID=...`，从唯一 `REPLIER` 表单读取当前 `entered_name`、令牌与系统导航 sender。
+不使用数据库旧 username；令牌、Cookie 和表单只留内存，不实现 Debug/序列化，不进入错误或普通 DTO。
+表单仅允许已知控件与固定动作，强制 `add_sent=yes`、不发送 `add_tracking`，不 preview/save。
+编辑器 `ffont/fsize` 仅接受默认首项为 0 的单选控件，识别但不复制到 POST；无名 `type=button` 辅助按钮亦不发送。
+未知隐藏字段、提交动作或异常编辑器默认选择仍失败关闭。
+只有调用方持久化 sender 并通过 sending fence 后才消费 prepared；一次消费只有一次 POST，不换 Cookie、不重试写入。
+POST 200 仅触发回读，不是成功凭证；跳转、超时、读回不完整或无法证明唯一副本均为 `OutcomeUnknown`。
+
+标题精确为 `Outbid <notification UUID 的32位simple形式>`（39 ASCII 字节）；正文上限 2048 字节、单行 ASCII，包含完整带连字符 notification UUID，
+拒绝 BBCode/HTML 括号。正文不得携带代理上限、凭据等敏感数据。Sent 列表的同标题行证明 recipient 数字 UID，
+只请求该行的同源 `CODE=03&VID=sent&MSID=...` 详情，并核验系统导航 sender、标题和 `.postcolor` 完整纯文本（仅文本/br及ASCII空白规范化）。
+不读取收件人 Inbox、不扫描其他标题的详情。每次核对最多 8 个列表页（同时受既有更小页数配置限制）、8 个同标题候选、8 MiB 聚合响应，
+单响应仍遵守已有配置；分页只跟随实际校验链接、不猜 `st` 步长，去除 `s` 会话参数。
+发现首个副本不提前成功，其他已发现候选或分页未闭合时失败关闭；重复精确副本、未知 HTML/操作/链接格式不得产生回执。
+`reconcile` 仅使用当前凭据读取同 sender 的 Sent；换账号拒绝、未找到返回 `None`，绝不授权重寄。
+
+远端实际按姓名投递，MID 预读与回读 UID 证明不能提供原子改名保证：准备后改名可能误投且只能在事后发现，不能承诺消除此协议竞态。
+历史浏览器的一封授权样本仅说明当时网页协议，不等于本 Rust 适配器/Worker 验收；本轮没有实发、读取真实 Cookie 或行为测试。
+长度、限流、满箱、拒收及异常页面仍未行为验证，未知格式允许安全阻断或保留人工对账。
 
 ## 装备来源与密钥适配
 

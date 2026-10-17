@@ -58,10 +58,12 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000039_schedule_source_and_final_completion.up.sql](000039_schedule_source_and_final_completion.up.sql) | 冻结本地排期来源并补齐可证明的 Final 完成标记 |
 | [000040_forum_catalog_pages.up.sql](000040_forum_catalog_pages.up.sql) | 每帖 150 件的论坛目录续页身份、正文和目录页数 |
 | [000041_lot_watches.up.sql](000041_lot_watches.up.sql) | 标记版本、连续领先周期及独立 MM 通知来源；只补有效代理标记 |
+| [000042_lot_watch_pm.up.sql](000042_lot_watch_pm.up.sql) | 账号渠道独立 CAS、跨渠道统一来源、PM 租约/sender/不可重寄 fence；不改历史 MM payload |
+| [000043_forum_terminal_refresh.up.sql](000043_forum_terminal_refresh.up.sql) | forum 终态纳入与真实全页完成版本；升级前 settled 明确豁免，不伪造成功 |
 
 ## 原则与基线
 
-当前 `000001`–`000041` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
+当前 `000001`–`000043` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。
 `bid_proxies` 是只读兼容视图，权威写入进入授权与转换历史表。
 执行门禁见[迁移导航](../README.md)，对象归属见[数据库契约](../../docs/contracts/schema.md)。
 
@@ -78,6 +80,10 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 
 `000041` 为已有 active/final_fast 代理补标记并追加审计，只初始化当前领先周期，不创建过去超价提醒。
 取消保留 tombstone；通知有独立来源及每领先周期唯一约束，领取/发送依赖 watch owner proof。
+`000042` 保持旧 watch.channel=mm 占位与旧 MM 内容，账号偏好默认 mm/1，独立 PM 来源与队列不冒充 MM delivery。
+PM sending_at/sender 由触发器保护不可清空或替换，sending 后不回 pending；缺收件人 suppressed，不补发。
+`000043` 不改经济事实、旧迁移或历史帖子；升级前 settled 的终态纳入标记为 false、完成版本仍为 NULL，其余及新记录默认纳入。
+执行前受控停止全部旧 writer，详见[升级门禁](../../ops/README.md#装备标记与超价提醒升级)，此轮无迁移验收。
 
 ## 历史 checksum 兼容
 

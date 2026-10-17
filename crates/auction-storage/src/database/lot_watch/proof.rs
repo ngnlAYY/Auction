@@ -20,6 +20,7 @@ macro_rules! delivery_watch_gate {
                 AND watch.lot_id = notification.lot_id
             JOIN public.lot_watch_leadership leadership ON leadership.lot_id = notification.lot_id
             WHERE notification.delivery_id = deliveries.id
+              AND notification.channel = 'mm'
               AND notification.command_id = deliveries.command_id
               AND notification.request_digest = deliveries.request_digest
               AND notification.recipient = deliveries.recipient

@@ -176,6 +176,35 @@ impl EhentaiGateway {
     }
 }
 
+impl auction_application::ForumPmSender for EhentaiGateway {
+    fn prepare<'a>(
+        &'a self,
+        message: &'a auction_application::ForumPmMessage,
+    ) -> auction_application::ForumPmFuture<'a, Box<dyn auction_application::PreparedForumPm>> {
+        Box::pin(async move {
+            let session = self
+                .credentials
+                .begin()
+                .map_err(|_| auction_application::ForumPmError::Unavailable)?;
+            self.client.prepare_pm(message, session).await
+        })
+    }
+
+    fn reconcile<'a>(
+        &'a self,
+        message: &'a auction_application::ForumPmMessage,
+        sender_forum_account_id: &'a str,
+    ) -> auction_application::ForumPmFuture<'a, Option<auction_application::ForumPmReceipt>> {
+        Box::pin(async move {
+            let session = self
+                .credentials
+                .begin()
+                .map_err(|_| auction_application::ForumPmError::Unavailable)?;
+            self.client.reconcile_pm(message, sender_forum_account_id, session).await
+        })
+    }
+}
+
 impl ForumCredentialAvailability for EhentaiGateway {
     fn has_available_forum_credential(&self) -> bool {
         !self.credentials.is_empty()

@@ -59,7 +59,8 @@ impl Command {
             | Self::ForumWriteRecoveryList { .. }
             | Self::AuthorizeForumWriteRetry { .. }
             | Self::VerifyLegacySettlement { .. }
-            | Self::MailEvidence { .. } => EXIT_OPERATION,
+            | Self::MailEvidence { .. }
+            | Self::LotWatchPm { .. } => EXIT_OPERATION,
         }
     }
 }
@@ -76,6 +77,20 @@ pub async fn run() -> Result<(), AuctionCtlError> {
 
 async fn run_command(command: Command) -> anyhow::Result<()> {
     match command {
+        Command::LotWatchPm { action } => match action {
+            LotWatchPmAction::List { status, limit, offset } => {
+                lot_watch_pm_list(status, limit, offset).await?
+            }
+            LotWatchPmAction::Reconcile {
+                notification_id,
+                command_id,
+                expected_fencing_version,
+                actor,
+            } => {
+                lot_watch_pm_reconcile(notification_id, command_id, expected_fencing_version, actor)
+                    .await?
+            }
+        },
         Command::CheckConfig { role } => check_config(role.into())?,
         Command::MigrateManaged { config_dir } => {
             #[cfg(unix)]

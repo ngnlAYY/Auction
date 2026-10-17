@@ -28,6 +28,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 
 `src/main.rs` 为薄入口，`bootstrap/runtime.rs` 保留装配出口。
 `runtime/postgres/commands/` 按数据库引导、凭据、规则、论坛、结算、预检和备份分工；
+其中 `lot_watch_pm.rs` 只装配安全列表/持久只读核对请求，不初始化外部客户端；
 `runtime/postgres/artifacts/` 负责 PostgreSQL 环境、文件、manifest/hash、子进程和 stdin 输入；
 其 `filesystem/parents.rs` 验证灾备文件完整目录链与属主，拒绝非可信账号可替换的路径。
 `runtime/managed.rs` 拥有合并部署迁移锁，`runtime/mail_diagnostics/` 拥有邮件证据命令。
@@ -43,6 +44,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具；不能绕过领
 | 邮件证据 | `mail-evidence export/inspect-sent/backfill-display` | [诊断手册](../../ops/mail-diagnostics.md) |
 | 凭据和规则导入 | `bootstrap-mail-credentials`、`import-rules-directory` | 本页 |
 | 论坛与结算核验 | `forum-write-recovery-list`、`authorize-forum-write-retry`、`verify-legacy-settlement` | 本页 |
+| 装备 PM 运维 | `lot-watch-pm list/reconcile` | [仅请求只读对账](#装备-pm-只读对账) |
 | 保留盘点与恢复预检 | `retention-inventory`、`recovery-preflight` | 本页及恢复手册 |
 | 当前格式备份/恢复/重建 | `postgres-backup`、`postgres-backup-verify`、`postgres-restore`、`postgres-rebuild` | [恢复手册](../../ops/deploy/RECOVERY.md) |
 | 历史 v28 | `postgres-legacy-v28-backup`、`postgres-legacy-v28-backup-verify`、`postgres-adopt-legacy-v28` | [接管手册](../../ops/deploy/LEGACY_V28_ADOPTION.md) |
@@ -166,6 +168,16 @@ PostgreSQL。Cookie 只经 stdin，来源文件须 owner-only，不进入参数�
 各语言 UUID 由批次 ID 稳定派生，部分完成后使用同一批次重试。输出 `sha256` 针对去 BOM 后正文，
 有 BOM 时与原文件哈希不同。Redis 配置要求 `postgres,cache-redis`；缓存失效失败列入
 `cache_invalidation_failures`，不回滚已提交规则。
+
+## 装备 PM 只读对账
+
+`lot-watch-pm list --status manual_reconcile --limit 50 --offset 0` 只查询安全状态、fence、时间及原 sender；
+不暴露正文、收件人、租约 token 或原始响应。limit 1–100，offset 0–10000。
+`lot-watch-pm reconcile --notification-id <uuid> --command-id <uuid> --expected-fencing-version <positive-i64> --actor <operator>`
+以稳定命令、版本 CAS、追加审计请求 Worker 只读核对。成功返回原接受快照，不表示已寄出；未知请求原负载重试。
+只允许无有效核对租约的 manual_reconcile，不新增重发、abandoned、强制成功或 raw external-reference 动作。
+CLI 只装配数据库应用端口，不加载第二个论坛客户端；原 sender 不可用或无精确 Sent 副本仍保持 manual_reconcile。
+需要 `postgres` feature；运行门禁和 `000042` 受控升级见[部署手册](../../ops/README.md#装备标记与超价提醒升级)。本轮未执行这些命令。
 
 ## 论坛与结算核验
 

@@ -82,15 +82,16 @@ pub use ports::{
     ExecuteSlowProxyCommand, FORUM_CATALOG_PAGE_SIZE, ForumActiveProxy, ForumAuctionSnapshot,
     ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogLayout, ForumCatalogPage,
     ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumCredentialAvailability,
-    ForumCurrentBidSource, ForumLotSnapshot, ForumLotTarget, ForumPostWriter, ForumPublishedLayout,
-    ForumPublishedPost, ForumPublishedThread, ForumPublisher, ForumRemoteError, ForumRenderError,
-    ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumReplyStore, ForumReplyTopic,
-    ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort, ForumSyncStore,
-    ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication, ForumTopicReader,
-    ForumWriteProgress, ForumWriteRetryAuthorizationCommand, ForumWriteRetryAuthorizationResult,
-    LegacySettlementVerification, LegacySettlementVerificationPort, MAX_ADMIN_AUCTION_OFFSET,
-    MAX_ADMIN_AUCTION_PAGE_SIZE, MAX_ADMIN_AUDIT_OFFSET, MAX_ADMIN_AUDIT_PAGE_SIZE,
-    MAX_ADMIN_CREDENTIAL_OFFSET, MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
+    ForumCurrentBidSource, ForumLotSettlement, ForumLotSnapshot, ForumLotTarget, ForumPostWriter,
+    ForumPublishedLayout, ForumPublishedPost, ForumPublishedThread, ForumPublisher,
+    ForumRemoteError, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
+    ForumReplyStore, ForumReplyTopic, ForumSyncClaim, ForumSyncRecoveryItem, ForumSyncRecoveryPort,
+    ForumSyncStore, ForumSystemLogEntry, ForumTopicMetadata, ForumTopicPublication,
+    ForumTopicReader, ForumWriteProgress, ForumWriteRetryAuthorizationCommand,
+    ForumWriteRetryAuthorizationResult, LegacySettlementVerification,
+    LegacySettlementVerificationPort, MAX_ADMIN_AUCTION_OFFSET, MAX_ADMIN_AUCTION_PAGE_SIZE,
+    MAX_ADMIN_AUDIT_OFFSET, MAX_ADMIN_AUDIT_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_OFFSET,
+    MAX_ADMIN_CREDENTIAL_PAGE_SIZE, MAX_ADMIN_CREDENTIAL_SECRET_BYTES,
     MAX_ADMIN_FORUM_PREVIEW_BYTES, MAX_ADMIN_LOT_OFFSET, MAX_ADMIN_LOT_PAGE_SIZE,
     MAX_ADMIN_MAIL_DECISION_BYTES, MAX_ADMIN_MAIL_OFFSET, MAX_ADMIN_MAIL_PAGE_SIZE,
     MAX_ADMIN_MAIL_POLLER_COUNT, MAX_ADMIN_MAILBOX_KEY_BYTES, MAX_ADMIN_PROXY_EVENT_OFFSET,
@@ -220,7 +221,21 @@ pub use services::{
 };
 
 pub use ports::{
+    ForumPmError, ForumPmFuture, ForumPmMessage, ForumPmReceipt, ForumPmSender, PreparedForumPm,
+};
+pub use ports::{
     LotWatch, LotWatchError, LotWatchFuture, LotWatchPort, LotWatchTransaction, MAX_LOT_WATCHES,
     SetLotWatchCommand, SetLotWatchResult,
 };
-pub use services::{lot_watch_notification, set_lot_watch};
+pub use ports::{
+    LotWatchPmClaim, LotWatchPmClaimRequest, LotWatchPmOperations, LotWatchPmSnapshot,
+    LotWatchPmWorkStore, RequestLotWatchPmReconcile, forum_pm_digest, valid_forum_pm_id,
+};
+pub use ports::{
+    LotWatchPreference, LotWatchPreferencePort, LotWatchPreferenceTransaction,
+    SetLotWatchPreferenceCommand,
+};
+pub use services::{
+    LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,
+    set_lot_watch_preference,
+};

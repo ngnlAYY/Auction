@@ -74,7 +74,7 @@ relay 新鲜度；数据库未配置、迁移不完整或 relay 停滞时返回 
 | 404 | 资源不存在或公开边界不允许暴露 |
 | 409 | 状态版本、命令幂等或业务条件冲突 |
 | 413/415 | 请求体过大或 Content-Type 不支持 |
-| 422 | P24 标记请求的业务输入无效或通知渠道不可用 |
+| 422 | P24 标记或 P26 账号警告偏好的业务输入无效 |
 | 429 | 限流或有界连接资源耗尽 |
 | 500 | 服务器内部无法安全完成请求 |
 | 501 | 当前部署档位或端口不提供该能力 |
@@ -158,6 +158,8 @@ Cache Everything/强制 Edge TTL 等覆盖，具体静态白名单和上线限�
 | P22 | GET/HEAD | /api/v1/auctions/{auction_id}/countdown/{timer} | 公开拍卖边界；`timer` 仅 `list.svg` / `auction.svg`；禁止 query 和缓存 | 200 SVG | 400, 404, 503/504 |
 | P23 | GET | /api/v1/me/lot-watches | Public session；必填 `auction_id`；本人整场标记集合；`no-store` | 200 | 400, 401, 404, 503/504 |
 | P24 | PUT | /api/v1/lots/{lot_id}/watch | Public session、origin、限流；版本 CAS；`no-store` | 200 | 400, 401, 403, 404, 409, 413/415, 422, 429, 503/504 |
+| P25 | GET | /api/v1/me/lot-watch-preference | Public session；无 query；账号警告渠道；`no-store` | 200 | 400, 401, 503/504 |
+| P26 | PUT | /api/v1/me/lot-watch-preference | Public session、origin/CSRF、限流；无 query；独立版本 CAS；`no-store` | 200 | 400, 401, 403, 409, 413/415, 422, 429, 503/504 |
 
 
 ### P23/P24 装备标记与超价提醒
@@ -171,7 +173,8 @@ P23 只接受指定公开拍卖的 `auction_id`，用户身份来自会话，不
 浏览器直接解析 JSON 整数为 i64，不把标记版本限制为 JS 安全整数或经浮点转换。
 
 P24 的 `PublicSetLotWatchRequest` 必填 `command_id`、`watched`、`channel`、`expected_version`，
-拒绝未知字段；`expected_version` 为非负整数，当前渠道只接受 `mm`，预留 `pm` 不可发送或伪装成功。
+拒绝未知字段；`expected_version` 为非负整数，`channel` 严格只接受 `mm` 历史兼容占位，
+不表示实际通知方式，也不覆盖账号偏好。旧账本/请求摘要/响应形状不变。
 成功返回 `PublicSetLotWatchResponse {user_id, auction_id, watch}`，不改变竞价/代理响应或公开实时事件。
 同命令同负载返回原响应，不同负载或版本冲突为 409；业务输入/不可用渠道为 422，未装配存储为 503。
 P24 路径/command UUID、查询词法、JSON 词法及未知字段错误为 400；负 expected_version 与未启用渠道等业务输入为 422。
@@ -189,6 +192,22 @@ P24 路径/command UUID、查询词法、JSON 词法及未知字段错误为 400
 MM 通过既有邮件投递链执行，无需浏览器在线；取消或重新领先使未开始发送的旧提醒失效，已发送/发送中的不可撤回。
 具体事务、迁移及未知发送约束见[不变量](invariants.md#i-09g-装备标记与超价提醒按领先周期去重)。
 
+
+### P25/P26 账号竞价警告渠道
+
+SQL 与用例 owner 为 lot-watch preference，不是每 lot 设置。沿用 code/message/data envelope；
+GET/PUT 成功 data 均为 `PublicLotWatchPreferenceResponse {user_id, channel, version}`，UUID 字符串，
+channel 严格 `mm|pm`，version 正 i64。新账号默认 MM/1，无 GET 写入。
+PUT `PublicSetLotWatchPreferenceRequest {command_id, channel, expected_version}` 拒绝未知字段，4 KiB 上限；
+身份只来自会话。无查询参数，未知/重复查询、JSON/UUID 词法错误 400；未登录 401；非法渠道或非正版本
+422 `invalid_watch_preference`；命令/版本冲突 409 `watch_preference_conflict`；缺依赖 503 `storage_unavailable`。
+同 ID 同负载重放原结果，不同负载冲突；不同新 ID 即使同渠道也推进版本。未知请求仅原 payload/ID 重试，
+409 后须显式 GET 再表达新意图；重放成功后 GET 当前权威状态，不能用当前渠道猜测原命令是否完成。
+
+偏好只影响之后的已标记装备反超事件，不影响结算/COD；已排队通知冻结原渠道，不撤回、不补发、不双发。
+没有稳定论坛账号 ID 仍可保存 PM，但事件形成 `suppressed/recipient_missing`，不是可送达承诺。
+Public 我的账户顶部 `outbid-notifications` 区独立挂载，账号 keyed scope，未知意图不写 localStorage；
+离开/重载先 GET，不自动重放。实际迁移和运行证据见[状态](../status.md)。
 
 ### P22 自托管论坛倒计时
 

@@ -41,6 +41,7 @@ pub(super) async fn claim_due_postgres(
          FROM public.auction_forum_sync AS sync
          JOIN public.auctions AS auction ON auction.id = sync.auction_id
          WHERE auction.opened_at IS NOT NULL
+           AND (auction.status <> 'settled' OR sync.terminal_refresh_enabled)
            AND (
                (sync.status IN ('pending', 'failed')
                 AND (sync.last_error_code IS NULL OR sync.last_error_code NOT IN (

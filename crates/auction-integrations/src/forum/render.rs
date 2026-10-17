@@ -6,6 +6,8 @@ use std::fmt::Write;
 mod countdown;
 #[path = "render/log.rs"]
 mod log;
+#[path = "render/settlement.rs"]
+mod settlement;
 
 use auction_application::{
     FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
@@ -40,7 +42,7 @@ pub fn render_auction_thread(
         return Err(ForumRenderError::InvalidSnapshot);
     }
 
-    if snapshot.lots.iter().any(|lot| !valid_lot(lot)) {
+    if snapshot.lots.iter().any(|lot| !valid_lot(lot)) || !settlement::valid_snapshot(&snapshot) {
         return Err(ForumRenderError::InvalidSnapshot);
     }
     let mut lots = snapshot.lots.into_iter().zip(equipment_links).collect::<Vec<_>>();
@@ -146,8 +148,8 @@ pub fn render_auction_thread(
          [*]Post one command per line.\n\
          [*]Example: [code]One01 200k[/code]\n\
          [*]Proxy bidding is available only on the public auction page; forum proxy lines are ignored.\n\
-         [*]Watch equipment on the public auction page for MoogleMail outbid notices. New proxy authorizations watch automatically.\n\
-         [*]This forum command requests a one-time auction notice, not an outbid subscription:\n\
+         [*]Watch equipment on the public auction page for outbid notices. Choose MoogleMail (default) or forum PM in My Account / Outbid notifications. Forum PM is only for outbid notices, not settlement or COD. New proxy authorizations watch automatically.\n\
+         [*]This forum command requests a one-time auction notice, not an outbid subscription. The notify pm forum command remains unavailable:\n\
          [code]One01 notify mm[/code]\n\
          [*]Amounts are Credits and must use the 1k grid. Extra words make a command invalid.\n\
          [/list]\n\
@@ -238,6 +240,12 @@ pub fn render_auction_thread(
                 }
             }
         }
+        settlement::write_annotation(
+            &mut body,
+            &lot,
+            snapshot.scheduled_open_at,
+            snapshot.scheduled_end_at,
+        )?;
         if let Some(effective_end_at) = lot.effective_end_at
             && Some(effective_end_at) != nominal_end
         {

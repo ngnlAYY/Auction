@@ -448,7 +448,22 @@ command-session-expired = Your session expired. Sign in again and retry.
 command-retry-unchanged = The previous result could not be confirmed. Retry sends the same command and amount; cancel to start a new action.
 
 # 装备标记与整场同步
-watch-help = Mark equipment to receive MoogleMail once each time you lose the lead. Price changes while you are not leading do not send mail. A new proxy authorization marks equipment automatically; ordinary bids do not. Mail failure does not undo an accepted bid. Mail already being sent cannot be recalled.
+watch-help = Mark equipment to receive an outbid warning through your account's chosen channel, once per leading cycle. Price changes while you are not leading do not notify you. A new proxy authorization marks equipment automatically; ordinary bids do not. Notification failure does not undo an accepted bid. Notifications already being sent cannot be recalled.
+watch-preference-link = Choose your warning channel
+outbid-title = Outbid notifications
+outbid-help = Choose one account-wide channel: MoogleMail (default) or forum PM. This only affects future outbid warnings for marked equipment, once per leading cycle. It does not affect settlement or COD. Queued notifications keep their original channel. Your saved choice syncs across devices. Saving only confirms your preference, not delivery availability. Forum PM requires a linked forum account; undeliverable PMs do not automatically fall back to MM. Notifications are asynchronous and may be delayed; check the website for the current status.
+outbid-mm = MoogleMail (MM)
+outbid-pm = Forum private message (PM)
+outbid-save = Save channel
+outbid-loading = Loading current notification preference…
+outbid-saving = Saving notification preference…
+outbid-load-error = Could not load your current preference. Refresh before saving.
+outbid-save-error = The preference could not be saved. Refresh the current state before trying again.
+outbid-conflict = The preference or command has changed. Explicitly refresh, review the current choice, then save again.
+outbid-unknown = The save result is unknown. Your original request is retained; retry that exact request to confirm the result.
+outbid-retry-command = Retry original request
+outbid-refresh = Refresh current preference
+outbid-confirmed = Request confirmed. The current server preference has been reloaded.
 watch-toggle = Mark equipment { $code }
 watch-on = Marked
 watch-off = Mark

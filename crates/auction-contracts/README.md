@@ -34,6 +34,9 @@ HTTP 与两端浏览器复用这些 DTO；数据库行、应用读模型和领�
 
 [dto/public/watch.rs](src/contracts/dto/public/watch.rs) 定义装备标记的完整集合、CAS 请求和可重放响应。
 持久 version 为正 i64，缺项才表示 false/version 0；取消保留正版本 tombstone，请求禁止未知字段。
+旧 channel 恒为 mm 兼容占位。[dto/public/watch_preference.rs](src/contracts/dto/public/watch_preference.rs)
+定义账号渠道 GET/PUT：响应 user_id/channel/version，请求 command_id/channel/expected_version；
+MM/PM 闭集与正 i64 版本，未知字段拒绝；不把数据库任务行或凭据发给浏览器。
 
 ## 稳定投影
 

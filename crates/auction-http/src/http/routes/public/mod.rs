@@ -13,6 +13,8 @@ mod competition;
 #[path = "session.rs"]
 mod session;
 mod watch;
+mod watch_preference;
+pub(crate) use watch_preference::{get_watch_preference, set_watch_preference};
 
 pub(crate) use watch::{list_lot_watches, set_lot_watch};
 

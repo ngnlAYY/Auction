@@ -38,6 +38,7 @@ pub struct PublicApiState {
     session: Option<Arc<dyn PublicSessionPort>>,
     security: PublicHttpSecurity,
     watches: Option<Arc<dyn auction_application::LotWatchPort>>,
+    watch_preference: Option<Arc<dyn auction_application::LotWatchPreferencePort>>,
     commands: Option<Arc<dyn CompetitionCommandPort>>,
     metrics: Option<Arc<ProcessMetrics>>,
     readiness: Option<Arc<dyn ProcessReadinessPort>>,
@@ -64,6 +65,7 @@ impl Default for PublicApiState {
             session: None,
             security: PublicHttpSecurity::default(),
             watches: None,
+            watch_preference: None,
             commands: None,
             metrics: None,
             readiness: None,
@@ -113,6 +115,7 @@ impl PublicApiState {
             session,
             security,
             watches: None,
+            watch_preference: None,
             commands,
             metrics: None,
             readiness: None,
@@ -128,6 +131,21 @@ impl PublicApiState {
     pub fn with_lot_watches(mut self, watches: Arc<dyn auction_application::LotWatchPort>) -> Self {
         self.watches = Some(watches);
         self
+    }
+
+    /// 注入账号级警告渠道；不影响旧标记兼容字段。
+    pub fn with_lot_watch_preference(
+        mut self,
+        port: Arc<dyn auction_application::LotWatchPreferencePort>,
+    ) -> Self {
+        self.watch_preference = Some(port);
+        self
+    }
+
+    pub(crate) fn watch_preference(
+        &self,
+    ) -> Option<&dyn auction_application::LotWatchPreferencePort> {
+        self.watch_preference.as_deref()
     }
 
     pub(crate) fn watches(&self) -> Option<&dyn auction_application::LotWatchPort> {

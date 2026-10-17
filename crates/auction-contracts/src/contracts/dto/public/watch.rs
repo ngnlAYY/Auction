@@ -7,6 +7,7 @@ use super::*;
 pub struct PublicLotWatchResponse {
     pub lot_id: String,
     pub watched: bool,
+    /// 历史兼容占位，恒为 mm；实际渠道由账号警告偏好决定。
     pub channel: String,
     pub version: i64,
 }
@@ -25,6 +26,7 @@ pub struct PublicLotWatchesResponse {
 pub struct PublicSetLotWatchRequest {
     pub command_id: String,
     pub watched: bool,
+    /// 仅允许 mm 兼容占位，不修改账号渠道。
     pub channel: String,
     pub expected_version: i64,
 }

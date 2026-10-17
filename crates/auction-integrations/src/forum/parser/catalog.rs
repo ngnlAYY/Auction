@@ -136,7 +136,7 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
                     .split_once(" | ")
                     .map_or(&current[start + " by ".len()..], |(bidder, _)| bidder)
                     .trim();
-                strip_bid_source_suffix(bidder).to_owned()
+                strip_bid_source_suffix(strip_settlement_suffix(bidder)).to_owned()
             })
             .filter(|value| !value.is_empty());
         return ((!seller.is_empty()).then_some(seller), bidder, amount);
@@ -159,7 +159,44 @@ fn seller_and_bid(description: &str) -> (Option<String>, Option<String>, Option<
     ((!seller.is_empty()).then_some(seller), bidder, price)
 }
 
-/// 固定 #1 的来源标记只属于展示，不得污染回读后的玩家名称。
+/// 仅识别目录渲染器的终态尾注；不放宽用户竞价命令或金额解析。
+fn strip_settlement_suffix(value: &str) -> &str {
+    let Some((bidder, annotation)) = value.rsplit_once("; winning for ") else {
+        return value;
+    };
+    let Some((hours, adjustment)) = annotation.split_once("; ") else { return value };
+    let Some((held, planned)) = hours.split_once("h / ") else { return value };
+    let Some(planned) = planned.strip_suffix('h') else { return value };
+    let valid_hours = |value: &str| {
+        value.split_once('.').is_some_and(|(whole, fraction)| {
+            !whole.is_empty()
+                && whole.bytes().all(|byte| byte.is_ascii_digit())
+                && fraction.len() == 1
+                && fraction.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    };
+    let valid_adjustment = adjustment.strip_suffix('%').is_some_and(|value| {
+        if value == "0" {
+            return true;
+        }
+        let Some(value) = value.strip_prefix('+').or_else(|| value.strip_prefix('-')) else {
+            return false;
+        };
+        let (whole, fraction) = value
+            .split_once('.')
+            .map_or((value, None), |(whole, fraction)| (whole, Some(fraction)));
+        !whole.is_empty()
+            && whole.bytes().all(|byte| byte.is_ascii_digit())
+            && fraction.is_none_or(|fraction| {
+                !fraction.is_empty()
+                    && fraction.len() <= 4
+                    && fraction.bytes().all(|byte| byte.is_ascii_digit())
+            })
+    });
+    if valid_hours(held) && valid_hours(planned) && valid_adjustment { bidder } else { value }
+}
+
+/// 固定目录的来源标记只属于展示，不得污染回读后的玩家名称。
 fn strip_bid_source_suffix(value: &str) -> &str {
     // 新版使用英文半角来源标记；旧帖的全角中文标记仍只读兼容，不得混入玩家名称。
     let suffix = value

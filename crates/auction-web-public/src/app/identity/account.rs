@@ -12,6 +12,7 @@ use crate::app::surface::use_bid_refresh;
 use super::proxy::{
     proxy_mode_label, proxy_quota_label, proxy_status_label, proxy_transition_summary,
 };
+use super::watch_preference::OutbidNotifications;
 use super::{
     Pager, PublicSessionResource, QueryWriteMode, Route, Time, format_amount,
     login_href_for_current_location, update_public_query_state, use_public_query_state,
@@ -59,7 +60,14 @@ pub(super) fn page() -> Element {
                 }
             }
         }
-        Some(Ok(Some(_))) => rsx! { AuthenticatedAccountData {} },
+        Some(Ok(Some(identity))) => rsx! {
+            section { class: "public-account-bids-page", aria_labelledby: "account-title",
+                h1 { id: "account-title", {t!("page-account-title")} }
+                // 偏好宿主位于分页异步分支外；身份变化销毁旧意图，不因列表重读卸载。
+                OutbidNotifications { key: "preference-{identity.user_id}", user_id: identity.user_id.clone() }
+                AuthenticatedAccountData { key: "bids-{identity.user_id}" }
+            }
+        },
     }
 }
 
@@ -82,14 +90,12 @@ fn AuthenticatedAccountData() -> Element {
 
     match &*account.read_unchecked() {
         None => rsx! {
-            section { class: "public-account-bids-page", aria_labelledby: "account-loading-title",
-                h1 { id: "account-loading-title", {t!("page-account-title")} }
+            div {
                 p { class: "public-page-status", role: "status", {t!("data-loading")} }
             }
         },
         Some(Err(_)) => rsx! {
-            section { class: "public-account-bids-page", aria_labelledby: "account-error-title",
-                h1 { id: "account-error-title", {t!("page-account-title")} }
+            div {
                 div { class: "public-auction-empty", role: "alert",
                     p { class: "public-auction-empty__title", {t!("data-error")} }
                     button {
@@ -138,8 +144,7 @@ fn AccountPage(
 ) -> Element {
     let page_size = if page.page_size > 0 { page.page_size } else { DEFAULT_ACCOUNT_PAGE_SIZE };
     rsx! {
-        section { class: "public-account-bids-page", aria_labelledby: "account-bids-title",
-            h1 { id: "account-bids-title", {t!("page-account-title")} }
+        div {
             BidSection {
                 bids: page.bids.clone(),
                 page: bid_page,
