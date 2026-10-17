@@ -220,7 +220,8 @@ async fn record_result(
     result: &FundingReconciliationResult,
     authorization: serde_json::Value,
 ) -> Result<(), FundingError> {
-    sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,authorization) VALUES($1,$2,'reconcile',$1,$3,$4,$5)")
+    // 历史 schema 保留 authorization 列名，引用时必须明确加引号。
+    sqlx::query("INSERT INTO public.settlement_funding_commands(command_id,uid,action,target_id,request_digest,result,\"authorization\") VALUES($1,$2,'reconcile',$1,$3,$4,$5)")
         .bind(command.command_id).bind(&command.expected_uid).bind(command_digest(command)?.as_slice())
         .bind(serde_json::to_value(result).map_err(invalid)?).bind(authorization).execute(&mut **tx).await.map_err(storage)?;
     Ok(())
