@@ -321,7 +321,6 @@ account-no-bids = 아직 입찰한 적이 없어요.
 account-no-proxies = 활성화된 자동 입찰이 없어요.
 account-bids-title = 입찰 내역
 account-proxies-title = 활성 자동 입찰
-account-proxies-note = 상한은 비공개예요 — 나만 볼 수 있어요.
 account-lot = 출품
 account-amount = 금액
 account-leading = 선두
@@ -447,10 +446,7 @@ command-session-expired = 세션이 만료되었습니다. 다시 로그인한 �
 command-retry-unchanged = 이전 작업 결과를 확인하지 못했습니다. 재시도하면 동일한 명령과 금액을 전송합니다. 변경하려면 취소한 후 새로 진행하세요.
 
 # 装备标记与整场同步
-watch-help = 표시한 장비에서 선두를 빼앗기면 계정에서 선택한 채널로 선두 주기마다 한 번 경고합니다. 선두가 아닐 때의 가격 변동은 알리지 않습니다. 새 대리 입찰 승인 시 자동으로 표시되지만 일반 입찰은 자동 표시되지 않습니다. 알림 실패는 승인된 입찰을 취소하지 않습니다. 이미 전송을 시작한 알림은 회수할 수 없습니다.
-watch-preference-link = 계정 경고 채널 설정
 outbid-title = 입찰 추월 경고
-outbid-help = 계정 전체에 사용할 채널을 MoogleMail(기본값) 또는 포럼 PM 중 하나로 선택하세요. 표시한 장비의 향후 추월 경고에만 적용되며 선두 주기마다 한 번 알립니다. 정산이나 COD에는 영향을 주지 않습니다. 대기 중인 알림은 원래 채널로 처리됩니다. 저장한 설정은 기기 간에 동기화됩니다. 저장 성공은 설정이 저장되었다는 뜻일 뿐, 전달 가능 여부를 보장하지 않습니다. 포럼 PM을 받으려면 연결된 포럼 계정이 필요하며, 전달할 수 없어도 MM으로 자동 전환되지 않습니다. 알림은 비동기로 처리되어 지연될 수 있습니다. 현재 상태는 웹사이트를 기준으로 확인하세요.
 outbid-mm = MoogleMail(MM)
 outbid-pm = 포럼 쪽지(PM)
 outbid-save = 채널 저장

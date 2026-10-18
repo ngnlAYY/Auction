@@ -321,7 +321,6 @@ account-no-bids = 您還沒有出過價。
 account-no-proxies = 沒有生效中的代理出價。
 account-bids-title = 出價歷史
 account-proxies-title = 生效中的代理出價
-account-proxies-note = 您的上限嚴格保密——只有您自己看得到。
 account-lot = 拍品
 account-amount = 金額
 account-leading = 領先
@@ -447,10 +446,7 @@ command-session-expired = 登入工作階段已過期，請重新登入後再試
 command-retry-unchanged = 上次操作結果尚未確認。重試會傳送相同命令與金額；如需變更，請取消後重新操作。
 
 # 装备标记与整场同步
-watch-help = 標記裝備後，透過帳號所選管道接收超價警告，每個領先週期僅一次；未領先時的價格變動不通知。新建代理授權自動標記，一般競價不會自動標記。通知失敗不撤銷已接受的競價；已開始傳送的通知無法收回。
-watch-preference-link = 設定帳號警告管道
 outbid-title = 競價警告
-outbid-help = 為整個帳號選擇一種管道：MoogleMail（預設）或論壇 PM。僅影響已標記裝備的後續超價警告，每個領先週期一次，不影響結算或 COD。已排入佇列的通知仍按原管道處理。儲存的選擇跨裝置同步。儲存成功僅表示偏好已儲存，不保證可送達。論壇 PM 需要已綁定的論壇帳號；無法投遞時不會自動改發 MM。通知採非同步處理，可能延遲；目前狀態以網站為準。
 outbid-mm = MoogleMail（MM）
 outbid-pm = 論壇私訊（PM）
 outbid-save = 儲存管道

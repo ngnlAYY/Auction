@@ -322,7 +322,6 @@ account-no-bids = You have not placed any bids yet.
 account-no-proxies = No active proxy bids.
 account-bids-title = Bid history
 account-proxies-title = Active proxies
-account-proxies-note = Your maximums are secret — only you can see them.
 account-lot = Lot
 account-amount = Amount
 account-leading = Leading
@@ -448,10 +447,7 @@ command-session-expired = Your session expired. Sign in again and retry.
 command-retry-unchanged = The previous result could not be confirmed. Retry sends the same command and amount; cancel to start a new action.
 
 # 装备标记与整场同步
-watch-help = Mark equipment to receive an outbid warning through your account's chosen channel, once per leading cycle. Price changes while you are not leading do not notify you. A new proxy authorization marks equipment automatically; ordinary bids do not. Notification failure does not undo an accepted bid. Notifications already being sent cannot be recalled.
-watch-preference-link = Choose your warning channel
 outbid-title = Outbid notifications
-outbid-help = Choose one account-wide channel: MoogleMail (default) or forum PM. This only affects future outbid warnings for marked equipment, once per leading cycle. It does not affect settlement or COD. Queued notifications keep their original channel. Your saved choice syncs across devices. Saving only confirms your preference, not delivery availability. Forum PM requires a linked forum account; undeliverable PMs do not automatically fall back to MM. Notifications are asynchronous and may be delayed; check the website for the current status.
 outbid-mm = MoogleMail (MM)
 outbid-pm = Forum private message (PM)
 outbid-save = Save channel

@@ -112,11 +112,6 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
 
     rsx! {
         div { class: "public-lot-watches",
-            p { class: "public-lot-watches__help",
-                {t!("watch-help")}
-                " "
-                Link { to: "/me#outbid-notifications", {t!("watch-preference-link")} }
-            }
             if authenticated && !ready {
                 div {
                     class: "public-lot-watches__sync",

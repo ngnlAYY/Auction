@@ -27,9 +27,11 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                         dd { class: "public-auction-lot__price", "{format_amount(lot.summary.start_price)}" }
                     }
                     p { class: "public-auction-page__status", {t!("lot-not-live")} }
-                    LotWatchButton {
-                        lot_id: lot.summary.id.clone(),
-                        lot_code: lot.summary.code.clone(),
+                    if matches!(lot.summary.status.as_str(), "pending" | "live") {
+                        LotWatchButton {
+                            lot_id: lot.summary.id.clone(),
+                            lot_code: lot.summary.code.clone(),
+                        }
                     }
                 }
             }
@@ -145,24 +147,27 @@ pub(crate) fn LiveLotDetailView(
                     if session_error {
                         p { role: "alert", {t!("session-error")} }
                     }
-                    LotWatchButton {
-                        lot_id: lot.id.clone(),
-                        lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
-                    }
-                    LiveCatalogActions {
-                        lot_id: lot.id.clone(),
-                        lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
-                        can_bid: bidding_open && lot.status == "live",
-                        current_price: lot.current_price,
-                        next_bid: lot.next_bid,
-                        lot_status: lot.status.clone(),
-                        allow_slow: auction_status == "live",
-                        session_ready,
-                        block_ordinary_for_active_proxy: true,
-                        authenticated,
-                        leading: is_leading,
-                        show_view: false,
-                        show_proxy_summary: true,
+                    // 拍卖或拍品结束后不再展示标记、出价、代理，只保留结果与历史。
+                    if auction_status == "live" && lot.status == "live" {
+                        LotWatchButton {
+                            lot_id: lot.id.clone(),
+                            lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
+                        }
+                        LiveCatalogActions {
+                            lot_id: lot.id.clone(),
+                            lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
+                            can_bid: bidding_open && lot.status == "live",
+                            current_price: lot.current_price,
+                            next_bid: lot.next_bid,
+                            lot_status: lot.status.clone(),
+                            allow_slow: auction_status == "live",
+                            session_ready,
+                            block_ordinary_for_active_proxy: true,
+                            authenticated,
+                            leading: is_leading,
+                            show_view: false,
+                            show_proxy_summary: true,
+                        }
                     }
                 }
             }
