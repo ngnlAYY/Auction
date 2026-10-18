@@ -24,7 +24,7 @@
 
 | 对象/迁移 | 可自动修复的范围 | 必须保留的历史边界 |
 | --- | --- | --- |
-| 连续领先时间：PostgreSQL `000013`/`000037` | 由追加式 bid 事实证明的 `leader_since`；后者覆盖未结算 live lot 同命令被快速代理反超 | 不猜测无证据时间，不改结算金额、bid 或审计 |
+| 连续领先时间：PostgreSQL `000013`/`000037` | 由追加式 bid 事实证明的 `leader_since`；后者覆盖未结算 live lot 同命令被快速代理反超；结算按同一 bid 事实重建赢家累计领先区间，论坛尾注同源 | 不猜测无证据时间，不改结算金额、bid 或审计 |
 | 流拍寄回：PostgreSQL `000038` | ready 义务下从未领取、未冻结、无 delivery 的初始 pending execution 从 Return 转 Send，并追加审计 | 已尝试、冻结、未知或完成记录保持原身份；旧 Return 进入人工核对，禁止自动重寄 |
 | Final 完成：PostgreSQL `000012`/`000039` | 持久化 Final fence；后者仅补齐唯一匹配成功命令、拍卖身份/状态/版本及权威 Final 时间的旧轮次 | 缺失或歧义证据不补写，不重放生命周期或外部动作 |
 | 排期来源：PostgreSQL `000039` | nullable `scheduled_rounds.schedule_snapshot`，类型为 JSONB，冻结 IANA 时区和三个本地时间 | 有来源按下一本地周转换 UTC；历史/无时区手工轮次保持 NULL 与原 UTC 周期，不从当前配置反推 |

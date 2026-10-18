@@ -160,17 +160,20 @@ where
     }
     match maintenance.sweep(&runtime.world_id).await {
         Ok(report) => {
-            if report.discarded || !report.compose_clean || report.sent_observed > 0 {
-                tracing::info!(
-                    world_id = %runtime.world_id,
-                    compose_clean = report.compose_clean,
-                    compose_matches = report.compose_matches,
-                    discarded = report.discarded,
-                    matched_delivery = ?report.matched_delivery,
-                    sent_observed = report.sent_observed,
-                    "MoogleMail 三页维护完成"
-                );
-            }
+            tracing::info!(
+                world_id = %runtime.world_id,
+                compose_clean = report.compose_clean,
+                compose_matches = report.compose_matches,
+                discarded = report.discarded,
+                matched_delivery = ?report.matched_delivery,
+                sent_candidates = report.sent_candidates,
+                sent_matched = report.sent_matched,
+                sent_state_failed = report.sent_state_failed,
+                sent_state_error = ?report.sent_state_error,
+                sent_observed = report.sent_observed,
+                sent_recovered = report.sent_recovered,
+                "MoogleMail 三页维护完成"
+            );
         }
         Err(error) => {
             // 维护失败不阻断收件轮询，也不把读到的部分观察当作成功。

@@ -47,6 +47,8 @@ pub struct MoogleMailboxSentEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailboxSentState {
     pub external_mail_id: String,
+    /// 详情页完整标题；列表标题可能被截断。
+    pub subject: String,
     pub collected: bool,
     pub cod_pending: i64,
     pub remaining_credits: i64,

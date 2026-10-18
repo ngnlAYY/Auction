@@ -59,7 +59,7 @@ impl MoogleMailSender {
                 !baseline.contains(&summary.external_mail_id)
                     && summary.world == world
                     && summary.recipient.eq_ignore_ascii_case(&request.message.recipient)
-                    && summary.subject == request.message.subject
+                    && subject_is_list_projection(&summary.subject, &request.message.subject)
             }) {
                 let detail_target = self.client.sent_detail(world, &summary.external_mail_id)?;
                 let detail = timeout_at(deadline, self.client.get(&detail_target, cookie))
@@ -95,6 +95,13 @@ impl MoogleMailSender {
         }
         Err(verification_unavailable(world))
     }
+}
+
+/// Sent 列表会把标题截断；列表标题必须是完整标题的前缀，完整校验交给详情。
+fn subject_is_list_projection(list_subject: &str, expected: &str) -> bool {
+    !list_subject.is_empty()
+        && list_subject.len() <= expected.len()
+        && expected.starts_with(list_subject)
 }
 
 fn check_deadline(deadline: Instant, world: MoogleMailWorld) -> Result<(), MoogleMailError> {

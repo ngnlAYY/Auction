@@ -99,9 +99,9 @@ async fn unproven_sends(
     // 只暴露可供比对的最小安全字段：收件人、COD 与业务 reference；正文与密文不出库。
     let rows: Vec<(Uuid, String, i64, String, String)> = sqlx::query_as(
         "SELECT id,
-                COALESCE(payload->>'recipient', ''),
+                recipient,
                 COALESCE((payload->>'cod')::bigint, 0),
-                COALESCE(payload->>'reference', ''),
+                COALESCE(payload->'variables'->>'reference', ''),
                 COALESCE(payload->>'template', '')
          FROM public.deliveries
          WHERE status = 'manual_reconcile'

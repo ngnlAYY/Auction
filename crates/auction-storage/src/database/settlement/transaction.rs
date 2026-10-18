@@ -147,6 +147,19 @@ impl PostgresCompetitionTransaction {
                        l.current_price,
                        l.leader_user_id,
                        l.leader_since,
+                       (SELECT COALESCE(SUM(GREATEST(0, LEAST(
+          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
+          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
+        )))::bigint, 0)
+        FROM (
+            SELECT bid.bidder_user_id, bid.created_at,
+                   LEAD(bid.created_at) OVER (
+                       ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
+                   ) AS next_at
+            FROM public.bids AS bid
+            WHERE bid.lot_id = l.id
+        ) AS b
+        WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
                        l.effective_end_at,
                        l.equipment_id,
                        l.submission_id,
@@ -168,6 +181,19 @@ impl PostgresCompetitionTransaction {
                        l.current_price,
                        l.leader_user_id,
                        l.leader_since,
+                       (SELECT COALESCE(SUM(GREATEST(0, LEAST(
+          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
+          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
+        )))::bigint, 0)
+        FROM (
+            SELECT bid.bidder_user_id, bid.created_at,
+                   LEAD(bid.created_at) OVER (
+                       ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
+                   ) AS next_at
+            FROM public.bids AS bid
+            WHERE bid.lot_id = l.id
+        ) AS b
+        WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
                        l.effective_end_at,
                        l.equipment_id,
                        l.submission_id,
@@ -212,12 +238,30 @@ impl PostgresCompetitionTransaction {
                 .map_err(map_sql_error)?
                 .ok_or_else(|| invalid("结算 lot 缺少卖方身份"))?;
             let fact_end_at: DateTime<Utc> = row.try_get("fact_end_at").map_err(map_sql_error)?;
+            // 新结算按追加式 bid 事实累计领先；旧场次只读核验沿用冻结时的最终连续区间，
+            // 避免用新语义重算历史 hold_ppm 让既有结算证明失配。
+            let leader_held_nanos = match leader_id {
+                Some(_) if mode == SettlementSnapshotMode::ReadOnlySettled => {
+                    let leader_since: Option<DateTime<Utc>> =
+                        row.try_get("leader_since").map_err(map_sql_error)?;
+                    leader_since
+                        .and_then(|since| fact_end_at.signed_duration_since(since).num_nanoseconds())
+                        .filter(|held| *held >= 0)
+                }
+                Some(_) => Some(
+                    row.try_get::<Option<i64>, _>("leader_held_nanos")
+                        .map_err(map_sql_error)?
+                        .ok_or_else(|| invalid("累计领先时长无效"))?,
+                ),
+                None => None,
+            };
             let fact = SettlementFact {
                 lot_id,
                 world,
                 end_price: leader_id.and(end_price),
                 leader_id,
                 leader_since: row.try_get("leader_since").map_err(map_sql_error)?,
+                leader_held_nanos,
                 effective_end_at: fact_end_at,
                 seller_identity,
                 equipment_id: row
