@@ -44,6 +44,8 @@ pub struct SettlementFulfillmentService {
     )>,
     /// Admin runtime 配置的 bot 显示名；命中时不做外部寄信，直接走内部履约。
     pub(super) bot_players: Vec<String>,
+    /// 等待买家支付 COD 或卖家领取货款的共享 MM 追踪窗口；默认五分钟。
+    pub(super) evidence_poll_delay: Duration,
 }
 
 impl SettlementFulfillmentService {
@@ -63,7 +65,37 @@ impl SettlementFulfillmentService {
             clock,
             internal: None,
             bot_players: Vec::new(),
+            evidence_poll_delay: Duration::seconds(300),
         }
+    }
+
+    /// 覆盖等待买家/卖家在 MM 领取资产的共享追踪窗口。
+    pub fn with_evidence_poll_delay(mut self, delay: Duration) -> Self {
+        self.evidence_poll_delay = delay;
+        self
+    }
+
+    /// COD 付款与卖家收款共用同一个五分钟窗口；新邮件也等到下一个窗口再读取。
+    fn collection_next_poll(
+        &self,
+        claim: &SettlementFulfillmentClaim,
+        now: DateTime<Utc>,
+    ) -> Option<DateTime<Utc>> {
+        if !matches!(
+            claim.kind,
+            auction_domain::SettlementObligationKind::WinnerEquipmentCod
+                | auction_domain::SettlementObligationKind::WinnerPaymentCarrierCod
+                | auction_domain::SettlementObligationKind::SellerPayout
+        ) {
+            return None;
+        }
+        let window = self.evidence_poll_delay.num_seconds();
+        if window <= 0 {
+            return None;
+        }
+        let seconds = now.timestamp();
+        let next = (seconds / window).checked_add(1)?.checked_mul(window)?;
+        now.checked_add_signed(Duration::seconds(next.checked_sub(seconds)?))
     }
 
     /// 绑定 Admin runtime 的 bot 显示名列表；比较时大小写不敏感。
@@ -196,6 +228,8 @@ impl SettlementFulfillmentService {
         let activation_command_id = stable_activate_command_id(claim.obligation_id);
         let activation_request_hash =
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
+        // COD/货款从激活起直接对齐到下一个共享窗口，避免每封邮件各自计时。
+        let next_attempt_at = self.collection_next_poll(&claim, activated_at);
         Ok(SettlementFulfillmentPhaseResult::Advanced(
             self.store
                 .activate_delivery(
@@ -203,6 +237,7 @@ impl SettlementFulfillmentService {
                     activation_command_id,
                     activation_request_hash,
                     activated_at,
+                    next_attempt_at,
                 )
                 .await?,
         ))
@@ -377,11 +412,16 @@ impl SettlementFulfillmentService {
             return self.manual_reconcile_now(claim, delivery_id, "evidence_mismatch").await;
         }
         if !sent.collected {
+            // 买家支付 COD、卖家领取货款都只能等对方在游戏内操作；统一对到下一个窗口。
+            let poll_delay = self
+                .collection_next_poll(&claim, observed_at)
+                .map(|next| next - observed_at)
+                .unwrap_or(retry_delay);
             return self
                 .defer_now(
                     claim,
                     delivery_id,
-                    retry_delay,
+                    poll_delay,
                     "evidence_not_observed",
                     "MoogleMail Sent 邮件仍有待领取资产",
                 )

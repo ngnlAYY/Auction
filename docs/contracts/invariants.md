@@ -168,7 +168,7 @@ Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失�
 
 ### I-09e Fulfillment 与 Recovery 不得共享易失调度边界
 
-PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环、批次、并发、lease、单项总时限、重试和 `poll + [0, jitter]` cadence；一个 owner 的领取、依赖或持久化失败只能影响自身下一轮，不能阻塞其它 owner 或终止整个 Worker，循环任务 panic 或意外退出仍必须失败关闭。Fulfillment 只能按并发波次领取，避免尚未开始的工作提前耗尽 lease；Recovery 必须按 `case → return → action → relist → refund` 依次尝试全部 phase，单个 phase 失败不能跳过后续 phase，action 仍由 fencing 和持久化重试保护。默认 60 秒轮询、5 秒抖动、100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限属于当前运行契约。
+PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环、批次、并发、lease、单项总时限、重试和 `poll + [0, jitter]` cadence；一个 owner 的领取、依赖或持久化失败只能影响自身下一轮，不能阻塞其它 owner 或终止整个 Worker，循环任务 panic 或意外退出仍必须失败关闭。Fulfillment 只能按并发波次领取，避免尚未开始的工作提前耗尽 lease；Recovery 必须按 `case → return → action → relist → refund` 依次尝试全部 phase，单个 phase 失败不能跳过后续 phase，action 仍由 fencing 和持久化重试保护。默认 60 秒轮询、5 秒抖动、100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限属于当前运行契约；等待买家支付 COD 或卖家领取货款时使用按绝对时间对齐的共享窗口（`worker.fulfillment.evidence_poll_seconds`，默认 300 秒）：同一窗口内到期的所有 COD/货款履约一起领取读取，窗口内新增的履约会等到下一个窗口，不各自建立五分钟计时；普通失败重试节奏不变。
 
 ### I-09f Auction 生命周期与结算必须独立于集成轮询
 

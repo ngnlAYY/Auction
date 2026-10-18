@@ -268,7 +268,9 @@ PM：PM 成功始终要求完整冻结内容、recipient/sender 与 Sent MSID �
 ## Worker 循环预算
 
 顶层生命周期、慢速代理和结算默认 60 秒周期、5 秒抖动、各阶段批次 100、单项 30 秒；主循环默认并发 8，示例使用同值，阶段
-失败不跳过后续阶段。fulfillment/recovery 独立循环默认立即执行后等待 60 秒加抖动，批次 100、并发 8、lease 60 秒、单项 30 秒。
+失败不跳过后续阶段。fulfillment/recovery 独立循环默认立即执行后等待 60 秒加抖动，批次 100、并发 8、lease 60 秒、单项 30 秒；
+其中等待买家支付 COD、卖家领取货款的 MM 证据读取共享一个默认 300 秒的绝对时间窗口，由
+`worker.fulfillment.evidence_poll_seconds` 配置；窗口内新出现的待追踪邮件不会单独计时，而是在下一个窗口与其他邮件一起读取。
 
 PostgreSQL delivery 独立控制领取、续租、发送与终态确认；续租间隔小于 lease，sending grace 大于完整请求超时，默认
 timeout/grace 为 180/300 秒，启用 MM 时 timeout 大于两倍 fetch budget。实际并发取配置与 transport 上限较小者，MM compose
