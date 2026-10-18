@@ -91,6 +91,8 @@ pub(super) async fn build(
         ),
         request_timeout: Duration::from_secs(forum_config.request_timeout_seconds),
         test_board_mode: forum_config.test_board_mode,
+        main_board_id: forum_config.main_board_id,
+        isekai_board_id: forum_config.isekai_board_id,
     })?);
     let forum = Arc::new(EhentaiGateway::new(forum_client, forum_credentials)?);
     let mail_config = &config.worker.mooglemail;

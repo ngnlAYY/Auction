@@ -31,6 +31,7 @@ const TEXT_FIELDS: &[&str] = &[
 ];
 
 const LIST_FIELDS: &[&str] = &[
+    "bot_players",
     "worlds.main.sender_allowlist",
     "worlds.isekai.sender_allowlist",
     "equipment_filter.qualities",
@@ -92,9 +93,19 @@ impl RuntimeConfigForm {
             inputs.insert((*path).to_owned(), value.to_owned());
         }
         for path in LIST_FIELDS.iter().chain(operational_fields::LIST_FIELDS) {
-            let values = nested_value(document, path).and_then(Value::as_array).ok_or(())?;
-            let text =
-                values.iter().map(Value::as_str).collect::<Option<Vec<_>>>().ok_or(())?.join("\n");
+            // bot_players 对旧文档缺省时按空列表展示，其余列表仍必须是显式数组。
+            let text = match nested_value(document, path) {
+                Some(values) => values
+                    .as_array()
+                    .ok_or(())?
+                    .iter()
+                    .map(Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or(())?
+                    .join("\n"),
+                None if *path == "bot_players" => String::new(),
+                None => return Err(()),
+            };
             inputs.insert((*path).to_owned(), text);
         }
         for path in UNSIGNED_NUMBER_FIELDS.iter().chain(operational_fields::NUMBER_FIELDS) {

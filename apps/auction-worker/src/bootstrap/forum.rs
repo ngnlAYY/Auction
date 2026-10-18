@@ -100,6 +100,8 @@ pub(super) async fn configure_forum(
             ),
             request_timeout: std::time::Duration::from_secs(forum_config.request_timeout_seconds),
             test_board_mode: forum_config.test_board_mode,
+            main_board_id: forum_config.main_board_id,
+            isekai_board_id: forum_config.isekai_board_id,
         })
         .map_err(|error| anyhow::Error::msg(error.to_string()))?,
     );

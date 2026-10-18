@@ -98,6 +98,13 @@ pub(super) async fn run_worker(
             custody_reader,
             Arc::clone(&evidence_reader),
             Arc::new(SystemClock),
+        )
+        .with_bot_players(
+            config
+                .admin_runtime
+                .as_ref()
+                .map(|runtime| runtime.bot_players.clone())
+                .unwrap_or_default(),
         );
         if let Some(internal_evidence_reader) = internal_evidence_reader {
             fulfillment_service = fulfillment_service

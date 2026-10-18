@@ -120,6 +120,7 @@ pub(super) fn post_allowed(
             MoogleMailOperation::AttachAdd
                 | MoogleMailOperation::AttachCod
                 | MoogleMailOperation::Send
+                | MoogleMailOperation::Discard
         ),
         MoogleMailOperation::Detail => {
             matches!(form_operation, MoogleMailOperation::ReturnMessage | MoogleMailOperation::Take)

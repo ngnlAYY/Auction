@@ -29,6 +29,8 @@ pub use funding::FundingReconciliationService;
 mod fulfillment;
 #[path = "auction/lifecycle/mod.rs"]
 mod lifecycle;
+#[path = "mail/maintenance.rs"]
+mod mail_maintenance;
 #[path = "mail/processing.rs"]
 mod mail_processing;
 #[path = "public/rules_cache.rs"]
@@ -62,6 +64,7 @@ pub use competition::{
 };
 pub use fulfillment::SettlementFulfillmentService;
 pub use lifecycle::AuctionLifecycleService;
+pub use mail_maintenance::{MailboxMaintenanceReport, MailboxMaintenanceService};
 pub use mail_processing::{MailAuctionIntakeService, MailProcessorConfig, MailProcessorService};
 pub use public_rules_cache::{CachedPublicRulesReader, public_rules_cache_key};
 pub use realtime_relay::{RealtimeRelay, RealtimeRelayBatch, RealtimeRelayConfig};

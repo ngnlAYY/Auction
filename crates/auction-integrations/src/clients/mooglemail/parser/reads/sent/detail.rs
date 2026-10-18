@@ -90,9 +90,13 @@ impl MoogleMailParser {
         let count = required_script_value(&executable, "attach_count");
         let cod = required_script_value(&executable, "attach_cod");
         let state = required_script_value(&executable, "mail_state");
+        // Sent 详情与 Inbox 共用状态位：1 表示仍有待领取资产，2 表示已领取完毕。
+        // 旧实现只接受 2，导致带 COD 的已发送邮件永远无法证明。
+        let collected_state = state == Some(2);
         if count.is_none()
             || cod.is_none()
-            || state != Some(2)
+            || !matches!(state, Some(1 | 2))
+            || (collected_state && (count != Some(0) || cod != Some(0)))
             || count.is_some_and(|value| !(0..=MAX_ATTACHMENT_ENTRIES as i64).contains(&value))
             || cod.is_some_and(|value| value < 0)
         {

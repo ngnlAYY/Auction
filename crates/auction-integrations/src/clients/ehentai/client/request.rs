@@ -129,8 +129,8 @@ impl EhentaiClient {
             return Ok(TEST_BOARD_ID);
         }
         Ok(match world {
-            SettlementWorld::Main => MAIN_BOARD_ID,
-            SettlementWorld::Isekai => ISEKAI_BOARD_ID,
+            SettlementWorld::Main => self.main_board_id,
+            SettlementWorld::Isekai => self.isekai_board_id,
         })
     }
 

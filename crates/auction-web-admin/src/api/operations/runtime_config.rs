@@ -100,11 +100,12 @@ fn decode_runtime_config(
 }
 
 fn valid_runtime_document(value: &Value) -> bool {
-    let Some(document) = exact_object(
+    let Some(document) = optional_keys_object(
         value,
         &[
             "allow_manual_early_open",
             "allow_manual_early_settlement",
+            "bot_players",
             "dashboard_mailboxes",
             "equipment_filter",
             "equipment_source",
@@ -123,6 +124,7 @@ fn valid_runtime_document(value: &Value) -> bool {
     };
     bool_field(document, "allow_manual_early_open").is_some()
         && bool_field(document, "allow_manual_early_settlement").is_some()
+        && document.get("bot_players").is_none_or(|value| valid_string_list(value, 16, 64, true))
         && valid_worlds(&document["worlds"])
         && valid_equipment_filter(&document["equipment_filter"])
         && valid_mail_templates(&document["mail_templates"])
@@ -469,6 +471,12 @@ fn exact_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Map<String, V
     let object = value.as_object()?;
     (object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key)))
         .then_some(object)
+}
+
+/// `bot_players` 等兼容字段可以缺省，但出现时仍必须是闭集内已知键。
+fn optional_keys_object<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Map<String, Value>> {
+    let object = value.as_object()?;
+    object.keys().all(|key| keys.contains(&key.as_str())).then_some(object)
 }
 
 fn bool_field(object: &Map<String, Value>, key: &str) -> Option<bool> {

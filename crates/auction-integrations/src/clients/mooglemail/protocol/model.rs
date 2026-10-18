@@ -65,6 +65,8 @@ pub enum MoogleMailOperation {
     Send,
     ReturnMessage,
     Take,
+    /// 丢弃 compose 页当前草稿；只允许由受控维护流程在精确匹配已知投递时使用。
+    Discard,
 }
 
 impl MoogleMailOperation {
@@ -84,6 +86,7 @@ impl MoogleMailOperation {
             Self::Send => "send",
             Self::ReturnMessage => "return_message",
             Self::Take => "attach_remove",
+            Self::Discard => "discard",
         }
     }
 }
@@ -101,7 +104,8 @@ pub struct MoogleMailCookie(Box<str>);
 impl MoogleMailCookie {
     /// 校验 Cookie 行并建立脱敏值对象。
     pub fn new(value: impl Into<String>) -> Result<Self, MoogleMailError> {
-        let value = value.into();
+        // Cookie 头首尾空白不参与语义；导入时粘贴的空格/制表符在此收口，内部空行仍失败关闭。
+        let value = value.into().trim().to_owned();
         if !valid_secret(&value, MAX_COOKIE_BYTES) {
             let mut bytes = value.into_bytes();
             bytes.fill(0);

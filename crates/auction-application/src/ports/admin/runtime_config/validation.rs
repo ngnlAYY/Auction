@@ -505,3 +505,31 @@ fn valid_http_url(value: &str) -> bool {
             .any(|character| matches!(character, ' ' | '\n' | '\r' | '\0' | '?' | '#' | '@'))
         && value.split_once("://").is_some_and(|(_, host)| !host.is_empty())
 }
+
+/// bot 显示名必须是非空单行文本，最多 16 个且大小写不重复。
+pub(super) fn validate_bot_players(players: &[String]) -> Result<(), AdminRuntimeConfigError> {
+    if players.len() > 16 {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "bot_players 最多允许 16 个显示名".to_owned(),
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for player in players {
+        let trimmed = player.trim();
+        if trimmed.is_empty()
+            || trimmed.len() > 64
+            || trimmed != player
+            || player.chars().any(char::is_control)
+        {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "bot_players 显示名必须是 1-64 字节的单行文本且不含首尾空白".to_owned(),
+            ));
+        }
+        if !seen.insert(trimmed.to_ascii_lowercase()) {
+            return Err(AdminRuntimeConfigError::InvalidDocument(
+                "bot_players 显示名不能大小写重复".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}

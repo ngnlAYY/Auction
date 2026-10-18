@@ -38,7 +38,9 @@ pub use protocol::{
     MoogleMailToken, MoogleMailWorld,
 };
 pub use sender::{
-    MoogleMailSendOutcome, MoogleMailSendReceipt, MoogleMailSendRequest, MoogleMailSender,
+    MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSendOutcome,
+    MoogleMailSendReceipt, MoogleMailSendRequest, MoogleMailSender, MoogleMailSentListEntry,
+    MoogleMailSentObservation,
 };
 pub use transport::{MoogleMailDeliveryTransport, MoogleMailNotificationTemplates};
 pub use writer::{MoogleMailComposeState, MoogleMailSendResponseFailure};

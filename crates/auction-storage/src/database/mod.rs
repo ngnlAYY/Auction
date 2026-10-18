@@ -39,6 +39,8 @@ mod mail_intake;
 #[cfg(feature = "postgres")]
 mod mail_poll;
 #[cfg(feature = "postgres")]
+mod mailbox_sweep;
+#[cfg(feature = "postgres")]
 mod migrations;
 #[cfg(feature = "postgres")]
 mod rebuild;

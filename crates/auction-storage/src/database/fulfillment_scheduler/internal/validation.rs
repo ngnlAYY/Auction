@@ -166,7 +166,7 @@ pub(super) async fn validate(
                    AND r.custody_proof_digest IS NOT NULL AND r.blocking_code IS NULL
                    AND a.execution_state='satisfied' AND a.proof_digest=r.custody_proof_digest
                    AND h.execution_state='enqueued' AND hd.status='succeeded'
-                   AND hd.result_metadata->>'proof'='sent_exact_payload_v1'
+                   AND hd.result_metadata->>'proof' IN ('sent_exact_payload_v1','sent_recovered_reference_v1')
                    AND hd.result_metadata->>'external_reference_proven'='true'
                    AND p.execution_state='satisfied' AND p.proof_digest IS NOT NULL)"
             ).bind(c.obligation_id.as_uuid()).fetch_one(&mut **tx).await.map_err(sql_error)?;

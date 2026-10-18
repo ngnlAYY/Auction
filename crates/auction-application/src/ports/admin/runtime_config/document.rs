@@ -13,9 +13,9 @@ use super::{
     errors::AdminRuntimeConfigError,
     operations::AdminRuntimeOperationsConfig,
     validation::{
-        valid_fingerprint, validate_business_config, validate_dashboard_mailboxes,
-        validate_equipment_source, validate_listener, validate_security, validate_session,
-        validate_tracing, validate_unix_path,
+        valid_fingerprint, validate_bot_players, validate_business_config,
+        validate_dashboard_mailboxes, validate_equipment_source, validate_listener,
+        validate_security, validate_session, validate_tracing, validate_unix_path,
     },
 };
 
@@ -261,6 +261,10 @@ pub struct AdminRuntimeDocument {
     pub tracing: AdminRuntimeTracingConfig,
     /// Worker 控制面 socket 路径。
     pub worker_control: AdminRuntimeWorkerControlConfig,
+    /// 收件人即 bot 的游戏显示名列表；命中时不发 COD 邮件，直接走内部履约。
+    /// 空列表不参与序列化，保持升级前 runtime 文件和命令指纹不变。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bot_players: Vec<String>,
     /// 新增的分组运行参数；省略时保持旧文件和命令指纹，各组默认不接管部署配置。
     #[serde(
         default,
@@ -305,6 +309,7 @@ impl AdminRuntimeDocument {
                 "security.trusted_unix_proxy 只能在 Unix listener 模式启用".to_owned(),
             ));
         }
+        validate_bot_players(&self.bot_players)?;
         validate_session(&self.session)?;
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;

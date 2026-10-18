@@ -27,6 +27,7 @@ pub(super) fn RuntimeConfigFields(
                 div { class: "admin-runtime-field-grid",
                     SwitchField { form, disabled, path: "allow_manual_early_open", label: t!("admin-runtime-manual-open"), on_dirty: on_dirty }
                     SwitchField { form, disabled, path: "allow_manual_early_settlement", label: t!("admin-runtime-manual-settlement"), on_dirty: on_dirty }
+                    ListField { form, disabled, path: "bot_players", label: t!("admin-runtime-bot-players"), on_dirty: on_dirty }
                 }
             }
 

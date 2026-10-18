@@ -32,6 +32,10 @@ pub struct EhentaiClientConfig {
     pub request_timeout: Duration,
     /// 是否把所有世界映射到旧版测试板块 4。
     pub test_board_mode: bool,
+    /// 主世界拍卖帖默认板块；生产默认 77。
+    pub main_board_id: i32,
+    /// 异世界拍卖帖默认板块；生产默认 90。
+    pub isekai_board_id: i32,
 }
 
 impl EhentaiClientConfig {
@@ -46,6 +50,8 @@ impl EhentaiClientConfig {
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             test_board_mode: false,
+            main_board_id: MAIN_BOARD_ID,
+            isekai_board_id: ISEKAI_BOARD_ID,
         })
     }
 
@@ -88,6 +94,8 @@ pub struct EhentaiClient {
     request_timeout: Duration,
     minimum_request_interval: Duration,
     test_board_mode: bool,
+    main_board_id: i32,
+    isekai_board_id: i32,
     ownership: Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
     write_progress: Option<auction_application::ForumWriteProgress>,
 }
@@ -109,6 +117,8 @@ impl EhentaiClient {
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             minimum_request_interval: DEFAULT_MINIMUM_REQUEST_INTERVAL,
             test_board_mode: false,
+            main_board_id: MAIN_BOARD_ID,
+            isekai_board_id: ISEKAI_BOARD_ID,
             ownership: None,
             write_progress: None,
         }
@@ -143,6 +153,8 @@ impl EhentaiClient {
             request_timeout: config.request_timeout,
             minimum_request_interval: config.minimum_request_interval,
             test_board_mode: config.test_board_mode,
+            main_board_id: config.main_board_id,
+            isekai_board_id: config.isekai_board_id,
             ownership: None,
             write_progress: None,
         })
@@ -465,6 +477,8 @@ impl fmt::Debug for EhentaiClient {
             .field("request_timeout", &self.request_timeout)
             .field("minimum_request_interval", &self.minimum_request_interval)
             .field("test_board_mode", &self.test_board_mode)
+            .field("main_board_id", &self.main_board_id)
+            .field("isekai_board_id", &self.isekai_board_id)
             .finish()
     }
 }
