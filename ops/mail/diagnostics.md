@@ -127,13 +127,22 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
 
 - Sent 命中本地仍为 `manual_reconcile` 且无 `external_reference` 的投递时，把 MID、collected、COD 与剩余资产数写入
   `deliveries.result_metadata.mailbox_sweep`，不自动判成功。
-- Sent 列表会把标题截断到固定长度；匹配只使用可证明的 UUID 前缀，完整标题和 reference 必须由详情页再次确认。
+- Sent/Inbox 列表把标题截断到 **35 字节**且不追加省略号；多字节截断点会被页面替换成 `U+FFFD`。匹配使用“去除
+  `U+FFFD`/省略号后的前缀”，完整标题和 reference 仍必须由详情页再次确认。
 - Sent 摘要中 reference 与收件人唯一匹配、且详情金额/资产矩阵一致时，把历史 `write_unknown` 投递绑定回该 MID：
   `external_reference=mooglemail:main:send:<mid>`、`proof=sent_recovered_reference_v1`，并把履约从
   `manual_reconcile` 重新排队为 `enqueued`，让收取证据（`CoD Paid`）继续推进。恢复证明只用于升级前的未知投递，
   不改变实时发送仍必须使用 `sent_exact_payload_v1` 的规则；绑定不会重发邮件。
+- 通知类（`origin_kind=mail_intake`）投递用部署模板与登录 key 重渲染主题和正文摘要，只在 Sent 列表收件人一致、
+  详情主题逐字相等且正文摘要、金额与附件矩阵都一致时绑定 `proof=sent_recovered_notice_v1`。通知没有履约事实可重新排队，
+  因此只收口投递本身；`operations_alert`、`lot_watch` 的正文来自冻结载荷，维护流程不重建也不绑定。
+- 通知类在 Sent 中完全没有对应邮件时，说明当时未真正发出：投递退回收发队列重发，`result_metadata.sweep_retries`
+  每轮加一，达到 2 次仍失败就保留人工核对，避免无限重试。
+- `take` 动作直接按 MID 读取详情（Inbox 列表只含未读邮件，不能作为“邮件不存在”的证据）：远端明确返回
+  “Mail does not exist” 或详情已无目标装备/credits/COD 时按 `action_recovered_inbox_v1` 收口成功；仍有资产则退回收发队列
+  重试（上限 2 次）。登录页、解析漂移等无法证明缺失的情况只报错等待下一轮。
 - compose 非空时，只有收件人、业务 reference 和 COD 同时精确匹配唯一一条未证明投递才执行 discard；匹配不到或匹配到多条
-  只记录日志，绝不丢弃来源不明的草稿。
+  只记录日志，绝不丢弃来源不明的草稿。通知类没有业务 reference，不参与 compose 匹配。
 - discard 成功后再读 compose 证明为空，并把结果写入 `result_metadata.compose_discard`。
 
 ## 装备读取失败诊断

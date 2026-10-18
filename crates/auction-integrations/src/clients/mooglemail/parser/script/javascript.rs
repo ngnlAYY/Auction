@@ -3,41 +3,66 @@
 use super::*;
 
 pub(crate) fn required_script_value(source: &str, name: &str) -> Option<i64> {
-    let needle = format!("var {name}");
-    let mut matches = source.match_indices(&needle);
-    let first = matches.find(|(index, _)| {
-        *index == 0
-            || source[..*index]
-                .chars()
-                .next_back()
-                .is_some_and(|character| character.is_whitespace() || character == ';')
-    })?;
-    if matches.next().is_some() {
-        return None;
+    // 页面既可能逐行 `var x = 0;`，也可能使用 let/const、逗号声明或有符号整数。
+    // 只接受“标识符边界 + = + 整数 + 语句分隔”的赋值形态，出现多处不同写法即失败。
+    let mut found = None;
+    for (index, _) in source.match_indices(name) {
+        let before = source[..index].chars().next_back();
+        if before
+            .is_some_and(|character| character.is_alphanumeric() || matches!(character, '_' | '$'))
+        {
+            continue;
+        }
+        let mut cursor = index + name.len();
+        let after = source[cursor..].chars().next();
+        if after
+            .is_some_and(|character| character.is_alphanumeric() || matches!(character, '_' | '$'))
+        {
+            continue;
+        }
+        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            cursor += 1;
+        }
+        if source.as_bytes().get(cursor) != Some(&b'=') {
+            continue;
+        }
+        cursor += 1;
+        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            cursor += 1;
+        }
+        let negative = matches!(source.as_bytes().get(cursor), Some(b'-' | b'+'));
+        if negative {
+            let sign = source.as_bytes()[cursor];
+            cursor += 1;
+            if sign == b'+' {
+                // 正号没有信息量，但仍允许。
+            }
+        }
+        let start = cursor;
+        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_digit()) {
+            cursor += 1;
+        }
+        if start == cursor {
+            continue;
+        }
+        let value = source[start..cursor].parse::<i64>().ok()?;
+        let value = if negative && source.as_bytes().get(start - 1) == Some(&b'-') {
+            value.checked_neg()?
+        } else {
+            value
+        };
+        while source.as_bytes().get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            cursor += 1;
+        }
+        let terminator = source.as_bytes().get(cursor).copied();
+        if !matches!(terminator, None | Some(b';' | b',' | b'}')) {
+            continue;
+        }
+        if found.replace(value).is_some() {
+            return None;
+        }
     }
-    let mut index = first.0 + needle.len();
-    while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_whitespace()) {
-        index += 1;
-    }
-    if source.as_bytes().get(index) != Some(&b'=') {
-        return None;
-    }
-    index += 1;
-    while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_whitespace()) {
-        index += 1;
-    }
-    let start = index;
-    while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_digit()) {
-        index += 1;
-    }
-    if start == index {
-        return None;
-    }
-    let value = source[start..index].parse::<i64>().ok()?;
-    while source.as_bytes().get(index).is_some_and(|byte| byte.is_ascii_whitespace()) {
-        index += 1;
-    }
-    (source.as_bytes().get(index) == Some(&b';')).then_some(value)
+    found
 }
 
 pub(crate) fn script_text(

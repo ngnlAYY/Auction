@@ -56,8 +56,10 @@ impl MoogleMailParser {
                 .ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
             let external_mail_id =
                 extract_mid(onclick).ok_or_else(|| protocol(MoogleMailOperation::Sent, world))?;
+            // 翻页期间新邮件到达会让整页下移并重复同一 MID；重复只跳过该行，
+            // 不能因此中止整轮读取。真正缺行由调用方的数量/分页校验发现。
             if !seen.insert(external_mail_id.clone()) {
-                return Err(protocol(MoogleMailOperation::Sent, world));
+                continue;
             }
             let recipient = normalize_text(cells[0].text().collect::<String>());
             let subject = normalize_text(cells[1].text().collect::<String>());

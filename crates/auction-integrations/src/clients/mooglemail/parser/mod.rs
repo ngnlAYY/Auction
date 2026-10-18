@@ -5,7 +5,7 @@ use std::{
     fmt, str,
 };
 
-use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use scraper::{ElementRef, Html, Selector};
 use serde::{
     Deserializer,
