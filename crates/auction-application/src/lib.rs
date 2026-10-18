@@ -263,7 +263,13 @@ pub use ports::{
     LotWatchPreference, LotWatchPreferencePort, LotWatchPreferenceTransaction,
     SetLotWatchPreferenceCommand,
 };
+pub use ports::{
+    MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
+    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxUnprovenSend,
+};
 pub use services::{
     LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,
     set_lot_watch_preference,
 };
+pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};

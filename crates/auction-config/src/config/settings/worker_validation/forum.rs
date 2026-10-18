@@ -6,6 +6,13 @@ pub(crate) fn validate_forum_worker(config: &ForumSyncWorkerConfig) -> Result<()
             "credential_world 只能是 main、isekai 或 shared",
         ));
     }
+    if !(1..=10_000_000).contains(&config.main_board_id)
+        || !(1..=10_000_000).contains(&config.isekai_board_id)
+    {
+        return Err(ConfigError::InvalidForumConfig(
+            "main_board_id/isekai_board_id 必须是 1 至 10000000 的板块 ID",
+        ));
+    }
     if config.batch_size == 0 || config.batch_size > 100 {
         return Err(ConfigError::InvalidForumConfig("batch_size 必须位于 1 至 100"));
     }

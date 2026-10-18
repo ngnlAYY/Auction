@@ -92,6 +92,8 @@ mod mail_equipment_diagnostics;
 pub use mail_equipment_diagnostics::*;
 #[path = "mail/display.rs"]
 mod mail_display;
+#[path = "mail/maintenance.rs"]
+mod mail_maintenance;
 #[path = "mail/poll.rs"]
 mod mail_poll;
 #[path = "mail/processing.rs"]
@@ -342,6 +344,11 @@ pub use mail_diagnostics::{
     MailDiagnosticReceipt, MailDiagnosticRecorder, MailDiagnosticStage, PreparedMailEvidence,
 };
 pub use mail_display::MailDisplaySnapshot;
+pub use mail_maintenance::{
+    MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
+    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState,
+    MoogleMailboxUnprovenSend,
+};
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
     MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollCompletion,

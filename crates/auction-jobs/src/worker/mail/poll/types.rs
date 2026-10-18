@@ -4,7 +4,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
     MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollStore, MailProcessor,
-    RecurringSchedule,
+    MailboxMaintenanceService, RecurringSchedule,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -153,6 +153,7 @@ pub struct MailPollRuntime {
     pub gateway: Arc<dyn MailPollGateway>,
     pub processor: Option<Arc<dyn MailProcessor>>,
     pub(super) diagnostics: Option<Arc<dyn MailDiagnosticRecorder>>,
+    pub(super) maintenance: Option<Arc<MailboxMaintenanceService>>,
     pub world_id: String,
     pub mailbox_key: String,
     pub config: MailPollRuntimeConfig,
@@ -176,6 +177,7 @@ impl MailPollRuntime {
             gateway,
             processor,
             diagnostics: None,
+            maintenance: None,
             world_id,
             mailbox_key,
             config,
@@ -191,6 +193,12 @@ impl MailPollRuntime {
     /// 为异常邮件注入独立证据记录器；不参与命令、游标或租约的正确性判断。
     pub fn with_diagnostics(mut self, diagnostics: Arc<dyn MailDiagnosticRecorder>) -> Self {
         self.diagnostics = Some(diagnostics);
+        self
+    }
+
+    /// 注入三页定期维护；只在主世界运行，失败只记录日志，不影响收件轮询。
+    pub fn with_maintenance(mut self, maintenance: Arc<MailboxMaintenanceService>) -> Self {
+        self.maintenance = Some(maintenance);
         self
     }
 

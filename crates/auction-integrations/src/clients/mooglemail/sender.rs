@@ -2,7 +2,13 @@
 
 use std::{collections::HashSet, fmt, time::Duration};
 
+mod maintenance;
 mod proof;
+
+pub use maintenance::{
+    MoogleMailComposeSnapshot, MoogleMailDiscardOutcome, MoogleMailSentListEntry,
+    MoogleMailSentObservation,
+};
 
 use super::{
     MoogleMailClient, MoogleMailCookie, MoogleMailError, MoogleMailErrorCategory, MoogleMailForm,
@@ -289,7 +295,21 @@ impl MoogleMailSender {
         match self.verify_new_sent(&request, cookie, &baseline, confirmation_hint.as_deref()).await
         {
             Ok(external_mail_id) => {
-                Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
+                // Sent 证明后必须再证明 compose 回到空表单；残留草稿意味着资产状态仍未收口。
+                match self.inspect_compose(cookie, request.world).await {
+                    Ok(state) if state.is_clean() => {
+                        Ok(MoogleMailSendOutcome::Sent(MoogleMailSendReceipt { external_mail_id }))
+                    }
+                    _ => {
+                        self.client
+                            .diagnose_parse(
+                                &compose,
+                                &response,
+                                Err(write_unknown(request.world, MoogleMailOperation::Send)),
+                            )
+                            .await
+                    }
+                }
             }
             Err(_) => {
                 // 即使 POST 有成功提示，缺少 Sent 证明也要留存这次响应，不能记成功或重寄。

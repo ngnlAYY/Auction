@@ -40,6 +40,15 @@ pub fn admin_api_error_message(code: &str) -> String {
         }
         "world_has_active_auction" => return t!("admin-error-world-has-active-auction"),
         "world_not_found" => return t!("admin-error-world-not-found"),
+        "invalid_delivery_id" => return t!("admin-error-invalid-delivery-id"),
+        "invalid_delivery_command" => return t!("admin-error-invalid-delivery-command"),
+        "stale_delivery_state" => return t!("admin-error-stale-delivery-state"),
+        "delivery_failed" => return t!("admin-error-delivery-failed"),
+        "delivery_backlog" => return t!("admin-error-delivery-backlog"),
+        "compose_not_clean" => return t!("admin-error-compose-not-clean"),
+        "preflight_unproven" => return t!("admin-error-preflight-unproven"),
+        "recipient_is_sender" => return t!("admin-error-recipient-is-sender"),
+        "write_unknown" => return t!("admin-error-write-unknown"),
         "reconciliation_required" | "outcome_unknown" => {
             return t!("admin-error-reconciliation-required");
         }

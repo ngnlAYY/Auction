@@ -121,6 +121,16 @@ impl MoogleMailForm {
         Self::mail_action(MoogleMailOperation::Take, token)
     }
 
+    /// 构造丢弃当前草稿的表单；调用方必须在 POST 前证明草稿精确属于已知投递。
+    pub fn discard(
+        token: &MoogleMailToken,
+        message: &MoogleMailMessageFields,
+    ) -> Result<Self, MoogleMailError> {
+        let mut form = Self::base(MoogleMailOperation::Discard, token, message)?;
+        form.set("action", MoogleMailOperation::Discard.as_str());
+        Ok(form)
+    }
+
     /// 返回表单对应的外部动作，不暴露任何字段值。
     pub const fn operation(&self) -> MoogleMailOperation {
         self.operation

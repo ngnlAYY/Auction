@@ -76,7 +76,10 @@ impl SettlementFulfillmentService {
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
-        if identity.snapshot().identity.player_name != claim.recipient {
+        // Admin 明确配置的 bot 名称与页面身份等值处理；其余情况仍要求远端身份精确匹配。
+        if identity.snapshot().identity.player_name != claim.recipient
+            && !self.is_configured_bot(&claim.recipient)
+        {
             if identity.check_current().await.is_err() {
                 drop(identity);
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;

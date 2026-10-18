@@ -77,6 +77,12 @@ pub(super) async fn configure_mail_poll(
                 client.as_ref(),
                 &credentials,
             )?;
+        let maintenance = Arc::new(auction_application::MailboxMaintenanceService::new(
+            Arc::new(delivery_transport.maintenance_adapter())
+                as Arc<dyn auction_application::MoogleMailboxMaintenance>,
+            Arc::clone(&store) as Arc<dyn auction_application::MoogleMailboxEvidenceStore>,
+            Arc::new(SystemClock),
+        ));
         let (runtimes, gateways) = runtime::build_poll_runtimes(
             mail_config,
             Arc::clone(&client),
@@ -87,6 +93,13 @@ pub(super) async fn configure_mail_poll(
             schedule,
         )
         .await?;
+        let mut runtimes = runtimes;
+        if let Some(runtime) =
+            runtimes.iter_mut().find(|runtime| runtime.world_id == MoogleMailWorld::Main.as_str())
+        {
+            // 维护只读取主世界三页；失败不影响同轮收件处理。
+            *runtime = std::mem::replace(runtime, runtime.clone()).with_maintenance(maintenance);
+        }
         // gateway 本身接受显式 world；C/D 复用同一个实例、凭据集合与 owner。
         // 论坛关闭时不注入 reader，联合证据明确不可用，不隐式开启论坛能力。
         let gateway = gateways

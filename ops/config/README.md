@@ -81,6 +81,8 @@ owner-only。未提供时从应用 URL 仅替换库名派生维护连接，应�
 
 ## Runtime 共享与重启
 
+`bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感）：买家命中时结算不发 COD 邮件、直接走内部履约，流拍/撤拍返还命中时直接留存并完成义务；只影响新结算，已有 `manual_reconcile` 投递仍需人工收口。
+
 Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
 有效 UID、权限 0640，父目录受信且禁止 group/other 写入。A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换
 落盘，不热加载。Admin 启动恢复失败（含结果未知/需人工核对）即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署
@@ -99,7 +101,7 @@ Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；�
 
 六组 `operations` 默认 `managed=false`，接管后才覆盖公共/角色参数，表单候选不代表运行配置。预检始终要求 Admin/Worker 有效
 拍卖、结算模板和排期一致，接管任一组还须共用 runtime。配置不回写已有拍卖快照、due、游标、账本或租约；论坛 endpoint/
-scope/公开链接/测试板块及 MoogleMail transport/凭据/mailbox identity/全局启用仍归部署配置。省略 `operations` 或
+scope/公开链接/测试板块/世界板块 ID（`main_board_id` 默认 77、`isekai_board_id` 默认 90）及 MoogleMail transport/凭据/mailbox identity/全局启用仍归部署配置。省略 `operations` 或
 `operations.mail` 保持旧指纹，显式 null 拒绝；邮件 `batch_timeout_seconds` 默认 600 秒，默认值不序列化，新增字段不单独改变
 旧指纹。cron 与 Worker 共用解析器，保存不立即轮询；可选 `dashboard_mailboxes` 仅投影非敏感范围，须匹配 Worker 实际
 mailbox/world。

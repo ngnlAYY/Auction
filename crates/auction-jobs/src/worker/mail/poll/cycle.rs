@@ -107,6 +107,7 @@ where
     if worker.control.is_draining() {
         return Ok(WorkerResult::Success);
     }
+    run_maintenance(worker, runtime).await;
     let now = worker.clock.now();
     let lease_duration = ChronoDuration::from_std(runtime.config.lease_duration)
         .map_err(|_| WorkerError::InvalidMailPollConfiguration)?;
@@ -147,6 +148,39 @@ where
         super::super::merge_worker_result(&mut iteration_result, item_result);
     }
     Ok(iteration_result)
+}
+
+async fn run_maintenance<C>(_worker: &PersistentWorker<C>, runtime: &MailPollRuntime)
+where
+    C: Clock + 'static,
+{
+    let Some(maintenance) = &runtime.maintenance else { return };
+    if runtime.world_id != "main" {
+        return;
+    }
+    match maintenance.sweep(&runtime.world_id).await {
+        Ok(report) => {
+            if report.discarded || !report.compose_clean || report.sent_observed > 0 {
+                tracing::info!(
+                    world_id = %runtime.world_id,
+                    compose_clean = report.compose_clean,
+                    compose_matches = report.compose_matches,
+                    discarded = report.discarded,
+                    matched_delivery = ?report.matched_delivery,
+                    sent_observed = report.sent_observed,
+                    "MoogleMail 三页维护完成"
+                );
+            }
+        }
+        Err(error) => {
+            // 维护失败不阻断收件轮询，也不把读到的部分观察当作成功。
+            tracing::warn!(
+                error = %error,
+                world_id = %runtime.world_id,
+                "MoogleMail 三页维护失败；下一轮重新读取"
+            );
+        }
+    }
 }
 
 pub(super) struct MailPollProcessContext<C> {

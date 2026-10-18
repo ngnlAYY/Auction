@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+tracing.workspace = true
 auction-application.workspace = true
 auction-domain.workspace = true
 base64.workspace = true

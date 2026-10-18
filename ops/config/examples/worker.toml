@@ -129,6 +129,10 @@ credential_world = "shared"
 public_base_url = "https://auction.ngnl.host"
 # 可选：是否使用旧版测试板块 4；生产环境必须为 false。
 test_board_mode = false
+# 可选：主世界拍卖帖板块 ID；默认 77（WTS）。
+main_board_id = 77
+# 可选：异世界拍卖帖板块 ID；默认 90。
+isekai_board_id = 90
 # 可选：单轮同步上限，范围 1-100，默认 100。
 batch_size = 100
 # 可选：论坛发布与回帖导入轮询间隔秒数；默认 300，独立于拍卖生命周期轮询。
@@ -158,8 +162,6 @@ mailbox_key = "mooglemail:main"
 world_id = "main"
 # 可选：拍卖邮件未填写 start 时的起拍价（Credits）；省略时使用邮件专属默认值 50000。
 # start_price = 50000
-# 可选：`.keyenv` 路径；相对本文件解析。Worker 只使用 hv-ck-key1，且与敏感 mooglemail_cookie 二选一。
-keyenv_file = "../../../.keyenv"
 # 可选：固定生产 origin 或回环联调 origin；默认 https://hentaiverse.org。
 endpoint = "https://hentaiverse.org"
 # 可选：单次响应最大字节数，范围 1-8388608，默认 8388608。

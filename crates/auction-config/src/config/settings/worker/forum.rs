@@ -16,6 +16,10 @@ pub struct ForumSyncWorkerConfig {
     pub public_base_url: Option<String>,
     /// 是否把 main/isekai 都映射到旧版测试板块 4；生产环境必须保持 false。
     pub test_board_mode: bool,
+    /// 主世界拍卖帖板块 ID；默认 77（WTS）。
+    pub main_board_id: i32,
+    /// 异世界拍卖帖板块 ID；默认 90。
+    pub isekai_board_id: i32,
     /// 单轮最多领取的主题同步任务数，范围 1-100。
     pub batch_size: u16,
     /// 论坛发布与回帖导入轮询间隔秒数；默认五分钟，独立于拍卖生命周期轮询。
@@ -44,6 +48,8 @@ impl Default for ForumSyncWorkerConfig {
             endpoint: None,
             public_base_url: None,
             test_board_mode: false,
+            main_board_id: 77,
+            isekai_board_id: 90,
             batch_size: 100,
             poll_interval_seconds: 300,
             jitter_seconds: 5,

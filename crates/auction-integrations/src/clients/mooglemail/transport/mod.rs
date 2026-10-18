@@ -25,6 +25,7 @@ use super::{
 };
 
 mod delivery;
+mod maintenance;
 mod outcomes;
 #[path = "payload/mod.rs"]
 mod payload;

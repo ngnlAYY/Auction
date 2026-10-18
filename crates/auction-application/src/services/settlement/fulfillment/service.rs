@@ -42,6 +42,8 @@ pub struct SettlementFulfillmentService {
         Arc<dyn crate::SettlementInternalFulfillmentStore>,
         Arc<dyn crate::SettlementInternalEvidenceReader>,
     )>,
+    /// Admin runtime 配置的 bot 显示名；命中时不做外部寄信，直接走内部履约。
+    pub(super) bot_players: Vec<String>,
 }
 
 impl SettlementFulfillmentService {
@@ -53,7 +55,25 @@ impl SettlementFulfillmentService {
         evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { store, recipient_reader, custody_reader, evidence_reader, clock, internal: None }
+        Self {
+            store,
+            recipient_reader,
+            custody_reader,
+            evidence_reader,
+            clock,
+            internal: None,
+            bot_players: Vec::new(),
+        }
+    }
+
+    /// 绑定 Admin runtime 的 bot 显示名列表；比较时大小写不敏感。
+    pub fn with_bot_players(mut self, bot_players: Vec<String>) -> Self {
+        self.bot_players = bot_players;
+        self
+    }
+
+    pub(super) fn is_configured_bot(&self, player_name: &str) -> bool {
+        self.bot_players.iter().any(|bot| bot.eq_ignore_ascii_case(player_name))
     }
 
     pub(super) async fn prepare_external(

@@ -13,6 +13,7 @@
 - [配置与离线导出](#配置与离线导出)
 - [Admin 审查展示投影](#admin-审查展示投影)
 - [主动 ComposeSend 的 Sent 证明](#主动-composesend-的-sent-证明)
+- [定期三页维护](#定期三页维护)
 - [装备读取失败诊断](#装备读取失败诊断)
 - [历史资产处置核对](#历史资产处置核对)
 
@@ -95,7 +96,9 @@ recipient、canonical subject 和装备 ID，并把结果标记为 `time_unverif
 
 ## 主动 ComposeSend 的 Sent 证明
 
-所有主动 ComposeSend 都必须先对 Sent 做覆盖所有 MID 的完整有界 baseline，再发送，随后执行独立有界 Sent scan。成功条件是
+主动 ComposeSend 固定四步验证：①发送前读取 compose 并证明为空表单；②对 Sent 做覆盖所有 MID 的完整有界
+baseline；③发送后执行独立有界 Sent scan 并要求收到新 MID 且字段精确匹配；④再次读取 compose 并证明回到空表单。
+任一步失败或页面 `mail_state` 与待领取资产矩阵不一致都标记结果未知。成功条件是
 新增且唯一的真实 MID，并同时精确匹配 world、recipient、subject、canonical body digest、Credits、COD 和装备 ID；0 资产
 通知也要求 0 资产 Sent 证明。资产不符、秒领取、无匹配、多匹配、未扫完或超时均标记结果未知并进入 `manual_reconcile`，
 不自动重寄；成功页、空 compose、本地 UUID 都不能替代证明。该规则覆盖静态通知、注册/重绑 key、运维告警及所有结算/返还
@@ -106,7 +109,8 @@ recipient、canonical subject 和装备 ID，并把结果标记为 `time_unverif
 `external_reference_proven=true`、`proof=sent_exact_payload_v1`，真实引用为 `mooglemail:world:send:mid`。
 [sender/proof.rs](crates/auction-integrations/src/clients/mooglemail/sender/proof.rs) 编排 baseline 与新增 Sent 核验，内容解析由
 [parser/reads/sent/detail.rs](crates/auction-integrations/src/clients/mooglemail/parser/reads/sent/detail.rs) 的
-`MoogleMailParser::parse_sent_content_proof` 负责；storage 成功写回前执行 defense gate。Return/Take 使用独立 action proof，
+`MoogleMailParser::parse_sent_content_proof` 负责，Sent 详情接受 `mail_state=1`（仍有待领取）与 `mail_state=2`
+（已领取完毕，且必须零 Credits/零 COD/零附件）；storage 成功写回前执行 defense gate。Return/Take 使用独立 action proof，
 不属于主动 ComposeSend。
 
 Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_reference` 填成 `succeeded`，后端会按既有 invalid 条件
@@ -115,6 +119,21 @@ Admin 人工 reconcile 不能把 `payload.operation=send` 与裸 `external_refer
 “重新退回”“重新领取”；只有 `failed` 或 `manual_reconcile` 可操作，`pending`、`claimed`、`sending`、`succeeded`、`prepared`
 均不可重试。确认后复用既有 delivery retry/reconcile（`action=retry`），携带稳定 `command_id`、CSRF 和
 `expected_fencing_version`；成功文案只表示“重新排队”，结果未知时提示先核对 MM。
+
+## 定期三页维护
+
+MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮询前额外读取三页：Sent 全量摘要、按需读取匹配 MID 的
+详情，以及 compose。该维护只追加证据，不改变投递状态：
+
+- Sent 命中本地仍为 `manual_reconcile` 且无 `external_reference` 的投递时，把 MID、collected、COD 与剩余资产数写入
+  `deliveries.result_metadata.mailbox_sweep`，不自动判成功。
+- Sent 摘要中 reference 与收件人唯一匹配、且详情金额/资产矩阵一致时，把历史 `write_unknown` 投递绑定回该 MID：
+  `external_reference=mooglemail:main:send:<mid>`、`proof=sent_recovered_reference_v1`，并把履约从
+  `manual_reconcile` 重新排队为 `enqueued`，让收取证据（`CoD Paid`）继续推进。恢复证明只用于升级前的未知投递，
+  不改变实时发送仍必须使用 `sent_exact_payload_v1` 的规则；绑定不会重发邮件。
+- compose 非空时，只有收件人、业务 reference 和 COD 同时精确匹配唯一一条未证明投递才执行 discard；匹配不到或匹配到多条
+  只记录日志，绝不丢弃来源不明的草稿。
+- discard 成功后再读 compose 证明为空，并把结果写入 `result_metadata.compose_discard`。
 
 ## 装备读取失败诊断
 
