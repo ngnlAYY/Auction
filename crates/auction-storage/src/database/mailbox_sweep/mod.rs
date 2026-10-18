@@ -207,6 +207,9 @@ async fn bind_recovered_send(
              claim_expires_at = NULL,
              next_attempt_at = clock_timestamp(),
              last_error_code = NULL,
+             -- 重新排队属于回到活动态：manual_reconcile 写入的完成时间必须清空，
+             -- 否则违反“活动态 completed_at 必须为 NULL”的检查约束。
+             completed_at = NULL,
              updated_at = clock_timestamp()
          WHERE obligation_id = $1
            AND execution_state = 'manual_reconcile'

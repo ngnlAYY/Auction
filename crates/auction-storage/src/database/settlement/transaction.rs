@@ -245,7 +245,9 @@ impl PostgresCompetitionTransaction {
                     let leader_since: Option<DateTime<Utc>> =
                         row.try_get("leader_since").map_err(map_sql_error)?;
                     leader_since
-                        .and_then(|since| fact_end_at.signed_duration_since(since).num_nanoseconds())
+                        .and_then(|since| {
+                            fact_end_at.signed_duration_since(since).num_nanoseconds()
+                        })
                         .filter(|held| *held >= 0)
                 }
                 Some(_) => Some(
