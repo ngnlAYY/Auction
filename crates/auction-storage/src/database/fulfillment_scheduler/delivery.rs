@@ -352,6 +352,7 @@ pub(super) async fn activate_postgres(
     activate_command_id: CommandId,
     activate_request_hash: auction_application::RequestHash,
     activated_at: DateTime<Utc>,
+    next_attempt_at: Option<DateTime<Utc>>,
 ) -> Result<
     auction_application::SettlementFulfillmentActivationResult,
     auction_application::RepositoryError,
@@ -463,7 +464,7 @@ pub(super) async fn activate_postgres(
                            activate_command_id = $2,
                            activate_request_digest = $3,
                            state_version = state_version + 1,
-                           next_attempt_at = NULL,
+                           next_attempt_at = $10,
                            last_error_code = NULL,
                            updated_at = CURRENT_TIMESTAMP
                    WHERE obligation_id = $1
@@ -485,6 +486,7 @@ pub(super) async fn activate_postgres(
             .bind(delivery_id)
             .bind(prepare_command_id.as_uuid())
             .bind(prepare_request_hash.as_bytes().to_vec())
+            .bind(next_attempt_at)
             .execute(&mut **transaction)
             .await
             .map_err(DeliveryTransactionError::from)?;

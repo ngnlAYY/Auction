@@ -105,7 +105,10 @@ pub(super) async fn run_worker(
                 .as_ref()
                 .map(|runtime| runtime.bot_players.clone())
                 .unwrap_or_default(),
-        );
+        )
+        .with_evidence_poll_delay(chrono::Duration::seconds(
+            i64::try_from(config.worker.fulfillment.evidence_poll_seconds).unwrap_or(300),
+        ));
         if let Some(internal_evidence_reader) = internal_evidence_reader {
             fulfillment_service = fulfillment_service
                 .with_internal_fulfillment(store.clone(), internal_evidence_reader);

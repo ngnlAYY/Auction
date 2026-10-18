@@ -38,5 +38,10 @@ pub(crate) fn validate_fulfillment_worker(
             "retry_delay_seconds 必须位于 1 至 86400",
         ));
     }
+    if config.evidence_poll_seconds == 0 || config.evidence_poll_seconds > 86_400 {
+        return Err(ConfigError::InvalidFulfillmentWorkerConfig(
+            "evidence_poll_seconds 必须位于 1 至 86400",
+        ));
+    }
     Ok(())
 }

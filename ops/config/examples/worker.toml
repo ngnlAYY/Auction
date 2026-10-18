@@ -78,6 +78,9 @@ lease_duration_seconds = 60
 item_timeout_seconds = 30
 # 可选：依赖暂不可用后的持久化重试间隔秒数，范围 1-86400，默认 60。
 retry_delay_seconds = 60
+# 可选：等待买家/卖家在 MoogleMail 领取 COD 或货款的共享追踪窗口秒数，范围 1-86400，默认 300。
+# 窗口按绝对时间对齐；窗口内新增的待追踪邮件会在下一个窗口与其他邮件一起读取。
+evidence_poll_seconds = 300
 
 # 可选区块：Recovery 五阶段的独立调度、批次、lease、超时与 health 刷新边界；省略时沿用旧版默认值。
 [worker.recovery]

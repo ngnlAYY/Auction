@@ -103,6 +103,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
         _activate_command_id: CommandId,
         _activate_request_hash: auction_application::RequestHash,
         _activated_at: DateTime<Utc>,
+        _next_attempt_at: Option<DateTime<Utc>>,
     ) -> auction_application::ApplicationFuture<
         '_,
         auction_application::SettlementFulfillmentActivationResult,
@@ -116,6 +117,7 @@ impl SettlementFulfillmentStore for DatabaseStore {
                     _activate_command_id,
                     _activate_request_hash,
                     _activated_at,
+                    _next_attempt_at,
                 )
                 .await
                 .map_err(ApplicationError::from),

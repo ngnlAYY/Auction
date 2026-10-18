@@ -18,6 +18,8 @@ pub struct FulfillmentWorkerConfig {
     pub item_timeout_seconds: u64,
     /// 依赖暂不可用后的持久化重试间隔秒数；范围 1-86400，默认 60。
     pub retry_delay_seconds: u64,
+    /// 等待买家/卖家在 MM 领取资产的共享追踪窗口秒数；范围 1-86400，默认 300。
+    pub evidence_poll_seconds: u64,
 }
 
 impl Default for FulfillmentWorkerConfig {
@@ -30,6 +32,7 @@ impl Default for FulfillmentWorkerConfig {
             lease_duration_seconds: 60,
             item_timeout_seconds: 30,
             retry_delay_seconds: 60,
+            evidence_poll_seconds: 300,
         }
     }
 }

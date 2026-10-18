@@ -354,6 +354,8 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
         activated_at: DateTime<Utc>,
+        // COD/货款在激活时就对齐到下一个 MM 追踪窗口；其它义务为空。
+        next_attempt_at: Option<DateTime<Utc>>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentActivationResult>;
 
     fn satisfy(
