@@ -66,8 +66,8 @@ pub struct MoogleMailSendReceipt {
 pub enum MoogleMailSendOutcome {
     /// 新增 Sent 邮件已通过完整内容核验。
     Sent(MoogleMailSendReceipt),
-    /// compose 初始页无法证明为干净状态，可能残留上一次结果未知的资产。
-    PreflightUnproven,
+    /// compose 初始页无法证明为干净状态；`dirty` 表示页面可解析但仍有草稿资产。
+    PreflightUnproven { dirty: bool },
     /// 远端可见文字明确报告收件人不存在。
     RecipientNotFound { returned_mail_id: Option<String> },
     /// 远端明确拒绝自寄；已经暂存的资产仍须人工核对，不能当作交付成功。
@@ -121,20 +121,56 @@ impl MoogleMailSender {
         &self,
         cookie: &MoogleMailCookie,
         world: MoogleMailWorld,
-    ) -> Result<bool, MoogleMailError> {
-        let compose = self.client.compose(world)?;
-        let document = self.client.get(&compose, cookie).await?;
-        let state = self
-            .client
-            .diagnose_parse(&compose, &document, self.parser.parse_compose_state(&document, world))
-            .await?;
-        Ok(state.is_clean())
+    ) -> Result<MoogleMailComposeSnapshot, MoogleMailError> {
+        self.inspect_compose(cookie, world).await
+    }
+
+    /// 发送失败后按只读方式回读 compose，区分“邮件内容/草稿问题”和其他远端问题。
+    /// 只记录页面是否干净与资产计数，不把主题、正文或收件人写入日志。
+    async fn diagnose_after_failure(
+        &self,
+        cookie: &MoogleMailCookie,
+        world: MoogleMailWorld,
+        expected: &MoogleMailSendRequest,
+    ) {
+        match self.inspect_compose(cookie, world).await {
+            Ok(snapshot) => tracing::warn!(
+                clean = snapshot.clean,
+                expected_message_staged = snapshot.recipient == expected.message.recipient
+                    && snapshot.subject == expected.message.subject
+                    && snapshot.body == expected.message.body,
+                credits = snapshot.credits,
+                cod = snapshot.cod,
+                attachment_count = snapshot.attachment_count,
+                "MoogleMail send failed; compose page rechecked"
+            ),
+            Err(error) => tracing::warn!(
+                error = %error,
+                "MoogleMail send failed; compose page unreadable"
+            ),
+        }
+    }
+
+    /// 执行一次发送并在失败后回读 compose；不自动重试远程写入。
+    pub async fn send(
+        &self,
+        cookie: &MoogleMailCookie,
+        request: MoogleMailSendRequest,
+    ) -> Result<MoogleMailSendOutcome, MoogleMailError> {
+        let world = request.world;
+        let expected = request.clone();
+        let outcome = self.send_verified(cookie, request).await;
+        let failed = !matches!(outcome, Ok(MoogleMailSendOutcome::Sent(_)));
+        if failed {
+            self.diagnose_after_failure(cookie, world, &expected).await;
+        }
+        outcome
     }
 
     /// 执行 compose、附件/COD 分步写入并证明最终发送结果。
     /// 任何一次 POST 成功但后续页面无法证明的情况都会返回 write_unknown；调用方不得把
     /// 该结果自动重试为第二次远程写入。
-    pub async fn send(
+    async fn send_verified(
         &self,
         cookie: &MoogleMailCookie,
         request: MoogleMailSendRequest,
@@ -157,7 +193,9 @@ impl MoogleMailSender {
         let baseline = self.scan_sent_baseline(request.world, cookie, baseline_deadline).await?;
         let compose = self.client.compose(request.world)?;
         let initial = self.client.get(&compose, cookie).await?;
-        let initial_parse = match self.parser.parse_compose_state(&initial, request.world) {
+        let parsed_initial = self.parser.parse_compose_state(&initial, request.world);
+        let dirty = matches!(&parsed_initial, Ok(state) if !state.is_clean());
+        let initial_parse = match parsed_initial {
             Ok(state) if state.is_clean() => Ok(state),
             Ok(_) => {
                 Err(MoogleMailError::protocol_drift(MoogleMailOperation::Compose, request.world))
@@ -166,7 +204,7 @@ impl MoogleMailSender {
         };
         let mut state = match self.client.diagnose_parse(&compose, &initial, initial_parse).await {
             Ok(state) => state,
-            Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven),
+            Err(_) => return Ok(MoogleMailSendOutcome::PreflightUnproven { dirty }),
         };
 
         let mut equipment_ids = Vec::with_capacity(request.equipment_ids.len());

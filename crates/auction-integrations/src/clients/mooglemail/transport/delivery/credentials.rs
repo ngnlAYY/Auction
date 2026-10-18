@@ -14,13 +14,20 @@ impl MoogleMailDeliveryTransport {
             .await
             .map_err(|error| transport_error(error, false))?;
         match self.sender.preflight(session.cookie(), world).await {
-            Ok(true) => Ok(session),
-            Ok(false) => Err(DeliveryTransportError {
+            Ok(snapshot) if snapshot.clean => Ok(session),
+            Ok(snapshot) => Err(DeliveryTransportError {
                 failure_code: "compose_not_clean".to_owned(),
                 safe_detail: "compose 尚有草稿资产，延后新任务且保留旧任务核对责任".to_owned(),
                 outcome_unknown: false,
                 external_reference: None,
-                result_metadata: json!({"stage": "preflight", "write_started": false}),
+                // 只保留计数，不收件主题/正文，避免把草稿内容写进诊断。
+                result_metadata: json!({
+                    "stage": "preflight",
+                    "write_started": false,
+                    "credits": snapshot.credits,
+                    "cod": snapshot.cod,
+                    "attachment_count": snapshot.attachment_count,
+                }),
             }),
             Err(error) => {
                 if error.is_session_expired() {
