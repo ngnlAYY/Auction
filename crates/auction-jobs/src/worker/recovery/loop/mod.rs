@@ -18,7 +18,7 @@ use actions::process_actions;
 use cases::advance_cases;
 use common::observe_phase;
 use health::refresh_health;
-use resolutions::{advance_relists, complete_refunds};
+use resolutions::{advance_cod_returns, advance_relists, complete_refunds};
 use returns::record_returns;
 
 /// 立即依次推进 health、case、return、action、relist 与 refund，随后按旧版 cadence 重试。
@@ -62,6 +62,7 @@ where
     advance_cases(worker, &mut batch_result).await;
     record_returns(worker, &mut batch_result).await;
     process_actions(worker, &mut batch_result).await;
+    advance_cod_returns(worker, &mut batch_result).await;
     advance_relists(worker, &mut batch_result).await;
     complete_refunds(worker, &mut batch_result).await;
     batch_result

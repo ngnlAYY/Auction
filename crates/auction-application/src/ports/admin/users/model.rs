@@ -10,8 +10,34 @@ use super::common::{valid_optional_text, valid_text, valid_time};
 pub const MAX_ADMIN_USER_PAGE_SIZE: i64 = 200;
 /// Admin 用户列表允许的最大偏移。
 pub const MAX_ADMIN_USER_OFFSET: i64 = 2_147_483_647;
-/// recovery 因 COD 超时触发买家黑名单时使用的固定公开原因。
-pub const RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON: &str = "拍卖 COD 超时未收取";
+/// 旧版 recovery COD 退回拉黑原因；只为历史命令重放保留。
+pub const RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON: &str = "反复退回COD导致拉黑";
+/// 默认三次退回时的买家黑名单公开原因。
+pub const RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON: &str = "连续三次退回COD邮件";
+
+/// 按 recovery 冻结的 COD 退回上限生成可展示的拉黑原因。
+pub fn recovery_buyer_blacklist_reason(return_count: u32) -> String {
+    let numeral = match return_count {
+        1 => "一",
+        2 => "二",
+        3 => "三",
+        4 => "四",
+        5 => "五",
+        6 => "六",
+        7 => "七",
+        8 => "八",
+        9 => "九",
+        10 => "十",
+        _ => return format!("连续{return_count}次退回COD邮件"),
+    };
+    format!("连续{numeral}次退回COD邮件")
+}
+
+/// 只接受 recovery 生成的中文次数理由或旧版固定原因。
+pub fn is_recovery_buyer_blacklist_reason(value: &str) -> bool {
+    value == RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON
+        || (1..=10).any(|count| value == recovery_buyer_blacklist_reason(count))
+}
 /// recovery 代 Users owner 写入黑名单时使用的固定 actor。
 pub const RECOVERY_BUYER_BLACKLIST_ACTOR: &str = "auction-recovery";
 /// 写入 settlement recovery action 的黑名单完成证明类型。

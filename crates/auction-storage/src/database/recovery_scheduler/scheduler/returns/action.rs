@@ -11,26 +11,63 @@ pub(super) async fn insert_recovery_action(
         &format!("recovery-action:{}", spec.kind),
         1,
     );
-    sqlx::query(
+    // 重复退回时同一个 reclaim action 会被重新使用：重置回 pending、清空旧投递与证明，
+    // 并提升 fencing，避免上一轮的 claim 或终态继续生效。
+    let query = if spec.reset_existing {
         r#"INSERT INTO public.settlement_recovery_actions
                (id, recovery_id, kind, ordinal, execution_state, state_version,
                 source_mail_id, expected_credits, expected_cod, expected_attachment_ids,
-                created_at, updated_at)
-           VALUES ($1, $2, $3, $4, 'pending', 1, $5, $6, $7, $8, $9, $9)
-           ON CONFLICT (recovery_id, kind) DO NOTHING"#,
-    )
-    .bind(action_id)
-    .bind(spec.recovery_id)
-    .bind(spec.kind)
-    .bind(spec.ordinal)
-    .bind(spec.source_mail_id)
-    .bind(spec.expected_credits)
-    .bind(spec.expected_cod)
-    .bind(spec.expected_attachment_ids)
-    .bind(spec.now)
-    .execute(&mut **transaction)
-    .await
-    .map_err(map_storage_error)?;
+                reason, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, 'pending', 1, $5, $6, $7, $8, $9, $10, $10)
+           ON CONFLICT (recovery_id, kind) DO UPDATE SET
+               ordinal = EXCLUDED.ordinal,
+               execution_state = 'pending',
+               state_version = settlement_recovery_actions.state_version + 1,
+               claim_token = NULL,
+               claimed_at = NULL,
+               claim_expires_at = NULL,
+               claim_fencing = settlement_recovery_actions.claim_fencing + 1,
+               retry_count = 0,
+               next_attempt_at = NULL,
+               source_mail_id = EXCLUDED.source_mail_id,
+               expected_credits = EXCLUDED.expected_credits,
+               expected_cod = EXCLUDED.expected_cod,
+               expected_attachment_ids = EXCLUDED.expected_attachment_ids,
+               reason = EXCLUDED.reason,
+               delivery_id = NULL,
+               prepare_command_id = NULL,
+               prepare_request_digest = NULL,
+               activate_command_id = NULL,
+               activate_request_digest = NULL,
+               proof_kind = NULL,
+               proof_reference = NULL,
+               proof_digest = NULL,
+               proof_observed_at = NULL,
+               last_error_code = NULL,
+               completed_at = NULL,
+               updated_at = EXCLUDED.updated_at"#
+    } else {
+        r#"INSERT INTO public.settlement_recovery_actions
+               (id, recovery_id, kind, ordinal, execution_state, state_version,
+                source_mail_id, expected_credits, expected_cod, expected_attachment_ids,
+                reason, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, 'pending', 1, $5, $6, $7, $8, $9, $10, $10)
+           ON CONFLICT (recovery_id, kind) DO NOTHING"#
+    };
+    sqlx::query(query)
+        .bind(action_id)
+        .bind(spec.recovery_id)
+        .bind(spec.kind)
+        .bind(spec.ordinal)
+        .bind(spec.source_mail_id)
+        .bind(spec.expected_credits)
+        .bind(spec.expected_cod)
+        .bind(spec.expected_attachment_ids)
+        .bind(spec.reason)
+        .bind(spec.now)
+        .execute(&mut **transaction)
+        .await
+        .map_err(map_storage_error)?;
 
     let row = sqlx::query(
         r#"SELECT id, ordinal, source_mail_id, expected_credits, expected_cod,

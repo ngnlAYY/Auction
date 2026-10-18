@@ -66,10 +66,12 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000046_mail_runtime_generation.up.sql](migrations/postgres/000046_mail_runtime_generation.up.sql) | 全局 mail_cookie 持久 generation；owner 启用前推进，内部事务锁验至提交 |
 | [000047_settlement_funding.up.sql](migrations/postgres/000047_settlement_funding.up.sql) | UID/Main/Credits 账户、真实唯一来源、用途分配与在飞/未知占用、追加账本 |
 | [000048_internal_fulfillment.up.sql](migrations/postgres/000048_internal_fulfillment.up.sql) | 内部履约/真实 collected/原退款用途的稳定命令与非敏感证明，原义务链不变 |
+| [000049_cod_return_retry.up.sql](migrations/postgres/000049_cod_return_retry.up.sql) | COD 退回计数；前两次重发、第三次退回卖家并记录理由 |
+| [000050_cod_return_policy.up.sql](migrations/postgres/000050_cod_return_policy.up.sql) | 每个 recovery 冻结可配置退回上限（默认 3）；buyer_blacklist action 保存冻结理由 |
 
 ## 原则与基线
 
-当前 `000001`–`000048` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000050` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -117,8 +119,10 @@ canonical PostgreSQL v28 使用[专用接管手册](ops/deploy/LEGACY_V28_ADOPTI
 
 ## 执行边界
 
-当前执行器注册 `000001`–`000048`；`000041`–`000048` 必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
-旧 `000039` 环境按序处理 `000040`–`000048`，所有相关 writer 同版，禁止滚动混跑，前提见
+当前执行器注册 `000001`–`000050`；`000041`–`000050` 必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
+`000050` 为每个 recovery 冻结 `cod_return_limit`（默认 3，范围 1–10），并把退回上限从固定三次改为该列，同时给
+`buyer_blacklist` action 增加冻结的公开理由。
+旧 `000039` 环境按序处理 `000040`–`000050`，所有相关 writer 同版，禁止滚动混跑，前提见
 [Bot 升级门禁](ops/README.md#bot-内部履约与资金保护升级)。这八份只追加事实：不回填旧 MM payload/digest、用户创建时间、
 旧凭据、旧资金、身份或内部成功，不允许新旧通知 writer 混跑，升级前 settled 主题明确豁免且完成版本保持 NULL。
 草稿软截止修正走[显式单目标命令](apps/auctionctl/README.md#草稿软截止显式修正)，不放入自动迁移。

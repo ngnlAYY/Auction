@@ -16,7 +16,7 @@ use auction_application::{
     ScheduledRoundClaim, ScheduledRoundPhase, ScheduledRoundStore, SettleAuctionCommand,
     SettlementCommandPort, SettlementFulfillmentClaim, SettlementFulfillmentCommandPort,
     SettlementFulfillmentStore, SettlementWorkClaim, SettlementWorkStore, SlowProxyCommandPort,
-    SlowProxyDueReader, WorldReader,
+    SlowProxyDueReader, WorldReader, is_recovery_buyer_blacklist_reason,
 };
 use auction_domain::{CommandId, deterministic_uuid};
 use auction_observability::{WorkerLoop, WorkerRecorder, WorkerResult, WorkerRetryKind};

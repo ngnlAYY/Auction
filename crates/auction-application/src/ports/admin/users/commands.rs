@@ -12,8 +12,7 @@ use auction_domain::SettlementId;
 use super::super::RequestHash;
 use super::super::user_mail::{MailLoginKey, MailLoginKeyEnvelope};
 use super::model::{
-    AdminUser, AdminUserStatus, RECOVERY_BUYER_BLACKLIST_ACTOR,
-    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
+    AdminUser, AdminUserStatus, RECOVERY_BUYER_BLACKLIST_ACTOR, is_recovery_buyer_blacklist_reason,
 };
 
 /// recovery 请求 Users owner 确保买家进入黑名单的幂等命令。
@@ -39,7 +38,7 @@ impl RecoveryBuyerBlacklistCommand {
             && !self.recovery_id.is_nil()
             && !self.action_id.is_nil()
             && !self.buyer_user_id.is_nil()
-            && self.public_reason == RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON
+            && is_recovery_buyer_blacklist_reason(&self.public_reason)
             && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
             && super::common::valid_time(self.occurred_at)
     }
@@ -67,7 +66,7 @@ impl RecoveryBuyerBlacklistResult {
             && !self.buyer_user_id.is_nil()
             && self.user.id == self.buyer_user_id
             && self.user.status == AdminUserStatus::Blacklisted
-            && self.public_reason == RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON
+            && is_recovery_buyer_blacklist_reason(&self.public_reason)
             && self.actor_id == RECOVERY_BUYER_BLACKLIST_ACTOR
             && super::common::valid_time(self.occurred_at)
             && self.user.validate()

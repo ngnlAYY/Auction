@@ -45,6 +45,35 @@ flowchart TD
   F --> G[seller_payout 解锁, 发 credits 给卖家]
 ```
 
+## 买家退回未付款 COD
+
+买家可以不等付款直接在游戏内把 COD 邮件退回 Bot。退回不算退款，按次数分流：
+
+```mermaid
+flowchart TD
+  A[买家退回 COD 邮件] --> B[收件箱收到<br/>Subject: Auction equipment delivery [obligation]]
+  B --> C[inbound_mail<br/>decision=settlement_recovery_returned]
+  C --> D[recovery: stage=reclaiming<br/>cod_return_count += 1]
+  D --> E[Worker 从退回邮件领取装备<br/>custody proof 落库]
+  E --> F{退回次数}
+  F -- 未达上限 --> G[原 COD 投递重置为 pending<br/>履约重新排队, 金额与装备不变]
+  G --> H[recovery 回到 awaiting_payment<br/>付款期限重新计算]
+  F -- 达到上限 (默认第 3 次) --> I[拉黑买家: 连续N次退回COD邮件]
+  I --> J[新建 withdrawn_return 义务<br/>装备寄回卖家]
+  J --> K[原 COD 履约 failed / cod_returned_three_times<br/>seller_payout 履约 failed / equipment_returned_to_seller]
+  K --> L[recovery completed<br/>resolution=returned_after_three_cod_returns]
+```
+
+- 退回识别依赖标题仍为 `Auction equipment delivery [<obligation uuid>]`（或 `Auction payment request`）；标题被改动则不进入 recovery。
+- `reclaim_equipment_take` 在每次退回都会重新排队并重新取证；证据不匹配会留在 `reclaiming` 并带 `blocking_code`。
+- 退回上限由 `[auction.settlement.recovery] cod_return_limit` 配置（默认 3，范围 1–10），创建 recovery 时冻结。
+- 未达上限的退回只重置发送状态，不新增义务、不改金额；卖家收款义务保持 blocked，等买家最终付款。
+- 达到上限时原成交作废：COD 与卖家收款义务按失败收口，理由分别为 `cod_returned_three_times` 与
+  `equipment_returned_to_seller`；装备以 `withdrawn_return` 寄回卖家，recovery 以
+  `returned_after_three_cod_returns` 完成（代码名保留历史含义，实际触发点为配置上限）。
+- 买家黑名单只在达到上限时写入，理由是“连续三次退回COD邮件”（配置几次就使用对应中文次数）。
+- 发送后只在共享的绝对时间窗口（`worker.fulfillment.evidence_poll_seconds`，默认 300 秒）读取 Sent：同一窗口内所有 COD/货款邮件一起处理，窗口中新增的目标顺延到下一个窗口，不各自计时；全部义务完成后停止。
+
 ## 三段验证
 
 | 要验证什么 | 权威证据 | 查询方式 |

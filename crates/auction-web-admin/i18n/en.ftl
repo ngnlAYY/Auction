@@ -325,6 +325,7 @@ admin-recovery-state-manual = Manual reconciliation
 admin-recovery-command-reclaimed = Confirm reclaimed
 admin-recovery-command-cancelled = Confirm cancelled
 admin-recovery-command-equipment-recovered = Confirm equipment recovered
+admin-recovery-command-returned-after-three-cod-returns = Returned to seller after the COD return limit was reached
 admin-recovery-confirm-description = Submit a confirmation for lot { $lot } ({ $equipment }).
 admin-recovery-reason = Confirmation reason
 admin-recovery-cancel = Cancel

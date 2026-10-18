@@ -100,6 +100,9 @@ pub(super) fn recovery_command_label(action: &str) -> String {
         "reclaimed" => t!("admin-recovery-command-reclaimed"),
         "cancelled" => t!("admin-recovery-command-cancelled"),
         "equipment_recovered" => t!("admin-recovery-command-equipment-recovered"),
+        "returned_after_three_cod_returns" => {
+            t!("admin-recovery-command-returned-after-three-cod-returns")
+        }
         _ => action.to_owned(),
     }
 }

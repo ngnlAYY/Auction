@@ -223,7 +223,10 @@ fn valid_recovery_stage(value: &str) -> bool {
 }
 
 fn valid_recovery_command(value: &str) -> bool {
-    matches!(value, "reclaimed" | "cancelled" | "equipment_recovered")
+    matches!(
+        value,
+        "reclaimed" | "cancelled" | "equipment_recovered" | "returned_after_three_cod_returns"
+    )
 }
 
 fn valid_recovery_action_kind(value: &str) -> bool {

@@ -375,6 +375,7 @@ admin-recovery-state-manual = 수동 대조
 admin-recovery-command-reclaimed = 회수 완료 확인
 admin-recovery-command-cancelled = 취소 완료 확인
 admin-recovery-command-equipment-recovered = 장비 복구 확인
+admin-recovery-command-returned-after-three-cod-returns = COD 반송 한도에 도달해 판매자에게 반환
 admin-recovery-confirm-description = 품목 { $lot }({ $equipment })에 대한 확인을 제출합니다.
 admin-recovery-reason = 확인 사유
 admin-recovery-cancel = 취소

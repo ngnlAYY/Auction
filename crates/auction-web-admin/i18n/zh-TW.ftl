@@ -375,6 +375,7 @@ admin-recovery-state-manual = 人工對帳
 admin-recovery-command-reclaimed = 確認已回收
 admin-recovery-command-cancelled = 確認已取消
 admin-recovery-command-equipment-recovered = 確認裝備已恢復
+admin-recovery-command-returned-after-three-cod-returns = COD 退回達到上限，已退回賣家
 admin-recovery-confirm-description = 將為拍品 { $lot }（{ $equipment }）提交確認。
 admin-recovery-reason = 確認原因
 admin-recovery-cancel = 取消

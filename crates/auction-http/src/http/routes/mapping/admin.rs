@@ -480,7 +480,13 @@ pub(crate) fn valid_recovery_report(report: &RecoveryReport, auction_id: Uuid) -
                     | "completed"
             )
             || recovery.resolution.as_ref().is_some_and(|resolution| {
-                !matches!(resolution.as_str(), "reclaimed" | "cancelled" | "equipment_recovered")
+                !matches!(
+                    resolution.as_str(),
+                    "reclaimed"
+                        | "cancelled"
+                        | "equipment_recovered"
+                        | "returned_after_three_cod_returns"
+                )
             })
             || recovery.state_version <= 0
             || recovery.payment_deadline_at.timestamp() <= 0

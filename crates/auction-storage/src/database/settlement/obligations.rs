@@ -79,6 +79,10 @@ pub(super) async fn insert_recoveries(
         .ok_or_else(|| invalid("恢复付款截止时间溢出"))?;
     let reminder_limit = i32::try_from(recovery_policy.reminder_limit)
         .map_err(|_| invalid("恢复提醒上限超出数据库范围"))?;
+    let cod_return_limit = i32::try_from(recovery_policy.cod_return_limit)
+        .ok()
+        .filter(|limit| (1..=10).contains(limit))
+        .ok_or_else(|| invalid("恢复 COD 退回上限超出数据库范围"))?;
     let auction_uuid = auction_id.as_uuid();
 
     for payment in plan.obligations.iter().filter(|obligation| {
@@ -131,9 +135,9 @@ pub(super) async fn insert_recoveries(
                    (id, auction_id, lot_id, world_id, equipment_id, winner_user_id,
                     payment_obligation_id, equipment_obligation_id, seller_payout_obligation_id,
                     buyer_refund_obligation_id, policy_version, payment_deadline_at,
-                    reminder_limit, stage, state_version, created_at, updated_at)
+                    reminder_limit, cod_return_limit, stage, state_version, created_at, updated_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                       $13, 'awaiting_payment', 1, $14, $14)"#,
+                       $13, $14, 'awaiting_payment', 1, $15, $15)"#,
         )
         .bind(recovery_id.as_uuid())
         .bind(auction_id.as_uuid())
@@ -148,6 +152,7 @@ pub(super) async fn insert_recoveries(
         .bind(i32_version(recovery_policy.version, "恢复策略版本")?)
         .bind(payment_deadline_at)
         .bind(reminder_limit)
+        .bind(cod_return_limit)
         .bind(occurred_at)
         .execute(&mut **transaction)
         .await

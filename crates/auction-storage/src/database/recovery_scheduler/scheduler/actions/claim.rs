@@ -52,6 +52,7 @@ async fn claim_action_in_transaction(
                   action.expected_credits,
                   action.expected_cod,
                   action.expected_attachment_ids,
+                  action.reason,
                   action.created_at,
                   recovery.world_id,
                   recovery.winner_user_id AS buyer_user_id,
@@ -129,6 +130,7 @@ async fn claim_action_in_transaction(
     let expected_cod: i64 = row.try_get("expected_cod").map_err(map_storage_error)?;
     let expected_attachment_ids: Vec<String> =
         row.try_get("expected_attachment_ids").map_err(map_storage_error)?;
+    let reason: Option<String> = row.try_get("reason").map_err(map_storage_error)?;
     let created_at: DateTime<Utc> = row.try_get("created_at").map_err(map_storage_error)?;
     if action_id.is_nil()
         || recovery_id.is_nil()
@@ -185,6 +187,9 @@ async fn claim_action_in_transaction(
                 || expected_credits != 0
                 || expected_cod != 0
                 || !expected_attachment_ids.is_empty()))
+        || (reason
+            .as_deref()
+            .is_some_and(|value| kind != "buyer_blacklist" || !valid_recovery_text(value, 256)))
     {
         return Err(repository_error("recovery action 持久化事实无效").into());
     }
@@ -290,6 +295,7 @@ async fn claim_action_in_transaction(
         expected_credits,
         expected_cod,
         expected_attachment_ids,
+        reason,
         execution_state,
         delivery_id,
         prepare_command_id: prepare_command_id.map(CommandId::from_uuid),

@@ -68,6 +68,8 @@ pub struct RecoveryActionClaim {
     pub expected_credits: i64,
     pub expected_cod: i64,
     pub expected_attachment_ids: Vec<String>,
+    /// buyer_blacklist 创建时冻结的公开理由；历史 action 为空。
+    pub reason: Option<String>,
     pub execution_state: String,
     pub delivery_id: Option<Uuid>,
     pub prepare_command_id: Option<CommandId>,
@@ -183,6 +185,12 @@ pub trait RecoveryResolutionStore: Send + Sync {
 
     /// 在 buyer refund fulfillment 已满足后闭合一个 refunding case。
     fn complete_due_refund(
+        &self,
+        now: DateTime<Utc>,
+    ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;
+
+    /// 推进已取回装备的 COD 退回：前两次重发 COD，第三次把装备退回卖家并收口原成交。
+    fn advance_due_cod_return(
         &self,
         now: DateTime<Utc>,
     ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>>;

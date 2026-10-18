@@ -145,12 +145,16 @@ async fn fulfillment_snapshot(
         "SELECT
             COUNT(*) FILTER (WHERE fulfillment.execution_state IN
                 ('pending', 'prepared', 'enqueued')) AS pending,
-            COUNT(*) FILTER (WHERE obligation.business_state = 'blocked') AS blocked,
+            -- 买家退回未付款 COD 后卖家收款义务按失败收口；失败的 blocked 不再计入积压。
+            COUNT(*) FILTER (WHERE obligation.business_state = 'blocked'
+                AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
+                AS blocked,
             COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed') AS failed,
             COUNT(*) FILTER (WHERE fulfillment.execution_state = 'manual_reconcile')
                 AS manual_reconcile,
             MIN(CASE WHEN fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
-                     OR obligation.business_state = 'blocked'
+                     OR (obligation.business_state = 'blocked'
+                         AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
                 THEN COALESCE(fulfillment.created_at, obligation.created_at) END) AS oldest_backlog
          FROM public.settlement_obligations AS obligation
          LEFT JOIN public.settlement_obligation_fulfillments AS fulfillment

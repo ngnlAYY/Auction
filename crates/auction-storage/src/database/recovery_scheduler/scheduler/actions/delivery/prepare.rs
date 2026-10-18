@@ -120,6 +120,7 @@ pub(crate) async fn link_action_postgres(
         expected_credits: claim.expected_credits,
         expected_cod: claim.expected_cod,
         expected_attachment_ids: claim.expected_attachment_ids.clone(),
+        reason: claim.reason.clone(),
         execution_state: "prepared".to_owned(),
         delivery_id: Some(delivery_id),
         prepare_command_id: Some(command_id),
