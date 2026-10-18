@@ -71,6 +71,8 @@ pub use settlement_evidence::*;
 #[path = "forum/pm.rs"]
 mod forum_pm;
 pub use forum_pm::*;
+#[path = "forum/colors.rs"]
+mod forum_colors;
 #[path = "forum/reply.rs"]
 mod forum_reply;
 #[path = "forum/sync.rs"]
@@ -300,6 +302,9 @@ pub use equipment_link::{
     PublicEquipmentLinkSecretReader, PublicEquipmentLinkTarget,
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
+pub use forum_colors::{
+    EquipmentColorMatch, EquipmentColorRule, PEERLESS_COLORS, validate_equipment_color_rules,
+};
 pub use forum_reply::{
     ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,
     ForumCommandOutcome, ForumCommandStart, ForumCommandStatus, ForumLotTarget, ForumReplyStore,
@@ -363,7 +368,7 @@ pub use mail_processing::{
     MailDeliveryOrigin, MailDeliveryResult, MailEquipmentAttachment, MailEquipmentFilter,
     MailEquipmentReader, MailMessage, MailNotificationTemplate, MailProcessingAttempt,
     MailProcessingDecision, MailProcessingError, MailProcessingFuture, MailProcessor,
-    mail_auction_aggregate_id,
+    default_accepted_qualities, mail_auction_aggregate_id,
 };
 pub use operations_alert::{
     MAX_OPERATIONS_ALERT_BATCH_ITEMS, MAX_OPERATIONS_ALERT_BODY_BYTES,

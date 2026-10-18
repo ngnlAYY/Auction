@@ -108,11 +108,30 @@ pub(crate) async fn movements(
             ledger.balance_after,
             ledger.created_at,
             lot.category_number AS lot_number,
+            equipment.id AS equipment_id,
             equipment.name AS equipment_name,
-            equipment.category AS equipment_category
+            equipment.category AS equipment_category,
+            equipment.world_id AS equipment_world_id,
+            equipment.external_equipment_id,
+            settlement.hold_ppm,
+            settlement.adjustment_ppm,
+            COALESCE((SELECT SUM(GREATEST(0, LEAST(
+                  EXTRACT(EPOCH FROM (COALESCE(b.next_at, lot.effective_end_at) - b.created_at)) * 1000000000,
+                  EXTRACT(EPOCH FROM (lot.effective_end_at - b.created_at)) * 1000000000
+              )))::bigint, 0)
+              FROM (
+                  SELECT bid.bidder_user_id, bid.created_at,
+                         LEAD(bid.created_at) OVER (
+                             ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
+                         ) AS next_at
+                  FROM public.bids AS bid
+                  WHERE bid.lot_id = lot.id
+              ) AS b
+              WHERE b.bidder_user_id = lot.leader_user_id) AS leader_held_nanos
          FROM public.compensation_ledger AS ledger
          LEFT JOIN public.lots AS lot ON lot.id = ledger.lot_id
          LEFT JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
+         LEFT JOIN public.lot_settlements AS settlement ON settlement.lot_id = lot.id
          WHERE ledger.auction_id = $1
          ORDER BY ledger.entry_sequence
          LIMIT $2 OFFSET $3",
@@ -152,6 +171,44 @@ pub(crate) async fn movements(
                 equipment_category: row
                     .try_get("equipment_category")
                     .map_err(|_| storage_error("读取补偿账本装备分类失败"))?,
+                equipment_id: row
+                    .try_get::<Option<Uuid>, _>("equipment_id")
+                    .map_err(|_| storage_error("读取补偿账本装备标识失败"))?
+                    .map(auction_domain::EquipmentId::from_uuid),
+                projected_game_equipment_url: {
+                    let world: Option<String> = row
+                        .try_get("equipment_world_id")
+                        .map_err(|_| storage_error("读取补偿账本装备世界失败"))?;
+                    let external_id: Option<String> = row
+                        .try_get("external_equipment_id")
+                        .map_err(|_| storage_error("读取补偿账本装备外部标识失败"))?;
+                    match (world.as_deref(), external_id.as_deref()) {
+                        (Some("main"), Some(id)) => {
+                            Some(format!("https://hentaiverse.org/equip/{id}"))
+                        }
+                        (Some("isekai"), Some(id)) => {
+                            Some(format!("https://hentaiverse.org/isekai/equip/{id}"))
+                        }
+                        _ => None,
+                    }
+                },
+                hold_ppm: row
+                    .try_get::<Option<i64>, _>("hold_ppm")
+                    .map_err(|_| storage_error("读取补偿账本持有比例失败"))?
+                    .map(|value| {
+                        i32::try_from(value).map_err(|_| storage_error("补偿账本持有比例超出范围"))
+                    })
+                    .transpose()?,
+                adjustment_ppm: row
+                    .try_get::<Option<i64>, _>("adjustment_ppm")
+                    .map_err(|_| storage_error("读取补偿账本调整比例失败"))?
+                    .map(|value| {
+                        i32::try_from(value).map_err(|_| storage_error("补偿账本调整比例超出范围"))
+                    })
+                    .transpose()?,
+                leader_held_nanos: row
+                    .try_get::<Option<i64>, _>("leader_held_nanos")
+                    .map_err(|_| storage_error("读取补偿账本累计领先时长失败"))?,
                 kind,
                 amount: row.try_get("amount").map_err(|_| storage_error("读取补偿账本金额失败"))?,
                 balance_after: row

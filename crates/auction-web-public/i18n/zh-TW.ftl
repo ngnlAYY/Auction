@@ -172,6 +172,9 @@ compensation-amount = 金額
 compensation-details = 輪次明細
 compensation-round-label = 拍賣
 compensation-world = 裝備世界
+compensation-hold = 持有比例
+compensation-adjustment = 調整比例
+compensation-held-time = 總時間
 compensation-discount = 折扣需求
 compensation-equipment = 裝備
 compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }

@@ -398,6 +398,17 @@ fn valid_compensation_round(value: &Value) -> bool {
         && time(value.get("settled_at"))
 }
 
+fn valid_equipment_url(value: &str) -> bool {
+    ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]
+        .iter()
+        .find_map(|prefix| value.strip_prefix(prefix))
+        .is_some_and(|external_id| {
+            !external_id.is_empty()
+                && external_id.len() <= 32
+                && external_id.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 fn valid_compensation_movement(value: &Value) -> bool {
     let Some(value) = object(value) else { return false };
     positive(value.get("sequence"))
@@ -405,6 +416,16 @@ fn valid_compensation_movement(value: &Value) -> bool {
         && optional_positive(value, "lot_number")
         && optional_account_nonempty(value, "equipment_name")
         && optional_account_nonempty(value, "equipment_category")
+        && value
+            .get("game_equipment_url")
+            .is_none_or(|url| string(Some(url)).is_some_and(valid_equipment_url))
+        && value.get("hold_ppm").is_none_or(|amount| {
+            int(Some(amount)).is_some_and(|value| (0..=1_000_000).contains(&value))
+        })
+        && value.get("adjustment_ppm").is_none_or(|amount| {
+            int(Some(amount)).is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
+        })
+        && optional_nonnegative(value, "leader_held_nanos")
         && matches!(string(value.get("kind")), Some("opening" | "tax" | "compensation" | "closing"))
         && int(value.get("amount")).is_some()
         && nonnegative(value.get("balance_after"))

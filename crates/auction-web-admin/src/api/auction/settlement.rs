@@ -48,10 +48,12 @@ struct StrictSettlementLot {
     compensation_amount: i64,
     equipment_category: String,
     equipment_name: String,
+    game_equipment_url: String,
     final_price: i64,
     listed_price: i64,
     hold_ppm: i32,
     adjustment_ppm: i32,
+    leader_held_nanos: i64,
     id: String,
     lot_number: i32,
     seller: RequiredOption<String>,
@@ -118,12 +120,24 @@ fn decode_settlement(
     })
 }
 
+fn valid_equipment_url(value: &str) -> bool {
+    ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]
+        .iter()
+        .find_map(|prefix| value.strip_prefix(prefix))
+        .is_some_and(|external_id| {
+            !external_id.is_empty()
+                && external_id.len() <= 32
+                && external_id.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot, &'static str> {
     if !super::valid_uuid(&lot.id)
         || lot.lot_number <= 0
         || !valid_trimmed_text(&lot.status)
         || !valid_trimmed_text(&lot.equipment_name)
         || !valid_trimmed_text(&lot.equipment_category)
+        || !valid_equipment_url(&lot.game_equipment_url)
         || !valid_optional_text(lot.seller.0.as_deref())
         || !valid_optional_text(lot.winner.0.as_deref())
         || !valid_count(lot.final_price)
@@ -134,6 +148,7 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         || !valid_count(lot.compensation_amount)
         || !(0..=1_000_000).contains(&lot.hold_ppm)
         || !(-1_000_000..=1_000_000).contains(&lot.adjustment_ppm)
+        || lot.leader_held_nanos < 0
         || !valid_optional_text(lot.adjustment.policy.0.as_deref())
     {
         return Err("settlement_lot");
@@ -144,6 +159,7 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         status: lot.status,
         equipment_name: lot.equipment_name,
         equipment_category: lot.equipment_category,
+        game_equipment_url: lot.game_equipment_url,
         seller: lot.seller.0,
         winner: lot.winner.0,
         final_price: lot.final_price,
@@ -154,6 +170,7 @@ fn decode_settlement_lot(lot: StrictSettlementLot) -> Result<AdminSettlementLot,
         compensation_amount: lot.compensation_amount,
         hold_ppm: lot.hold_ppm,
         adjustment_ppm: lot.adjustment_ppm,
+        leader_held_nanos: lot.leader_held_nanos,
         adjustment: AdminSettlementAdjustmentResponse { policy: lot.adjustment.policy.0 },
     })
 }

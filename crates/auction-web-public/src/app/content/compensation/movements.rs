@@ -1,7 +1,7 @@
 //! Public 补偿流水详情及其金额/类型展示。
 
 use super::*;
-use auction_web_shared::TruncatedText;
+use auction_web_shared::{TruncatedText, format_held_duration};
 
 #[component]
 pub(super) fn CompensationMovementDetails(
@@ -15,15 +15,6 @@ pub(super) fn CompensationMovementDetails(
         section { class: "public-compensation-movements", aria_labelledby: "compensation-movements-title",
             h2 { id: "compensation-movements-title", class: "public-visually-hidden",
                 {t!("compensation-movements")}
-            }
-            p { class: "public-compensation-equation",
-                {t!(
-                    "compensation-equation",
-                    opening: format_amount(round.opening_balance),
-                    income: format_amount(round.tax_income),
-                    outflow: format_amount(round.compensation_out),
-                    closing: format_amount(round.closing_balance)
-                )}
             }
             match movements {
                 None => rsx! { p { class: "public-auction-page__status", role: "status", {t!("data-loading")} } },
@@ -44,12 +35,15 @@ pub(super) fn CompensationMovementDetails(
                     } else {
                         div { class: "public-compensation-movement-wrap ui-table--fit",
                             table { class: "public-compensation-movement-table",
-                                auction_web_shared::TableColumns { layout: "public-compensation-movements", widths: vec![8, 48, 10, 16, 18] }
+                                auction_web_shared::TableColumns { layout: "public-compensation-movements", widths: vec![8, 28, 8, 10, 10, 12, 10, 14] }
                                 thead {
                                     tr {
                                         th { {t!("compensation-lot")} }
                                         th { {t!("compensation-equipment")} }
                                         th { {t!("compensation-world")} }
+                                        th { class: "public-compensation-number", {t!("compensation-hold")} }
+                                        th { class: "public-compensation-number", {t!("compensation-adjustment")} }
+                                        th { class: "public-compensation-number", {t!("compensation-held-time")} }
                                         th { {t!("compensation-kind")} }
                                         th { class: "public-compensation-number", {t!("compensation-amount")} }
                                     }
@@ -73,6 +67,15 @@ pub(super) fn CompensationMovementDetails(
                         on_page_size_change: on_movement_page_size_change,
                     }
                 },
+            }
+            p { class: "public-compensation-equation",
+                {t!(
+                    "compensation-equation",
+                    opening: format_amount(round.opening_balance),
+                    income: format_amount(round.tax_income),
+                    outflow: format_amount(round.compensation_out),
+                    closing: format_amount(round.closing_balance)
+                )}
             }
         }
     }
@@ -124,9 +127,31 @@ fn CompensationMovementRow(
                 }
             }
             td {
-                TruncatedText { value: equipment, size: "wide", portal: true }
+                if let Some(url) = movement.game_equipment_url.as_deref() {
+                    a {
+                        class: "public-compensation-equipment-link",
+                        href: url,
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        TruncatedText { value: equipment, size: "wide", portal: true }
+                    }
+                } else {
+                    TruncatedText { value: equipment, size: "wide", portal: true }
+                }
             }
             td { "{world_label(&world_id)}" }
+            td { class: "public-compensation-number",
+                {movement.hold_ppm.map(|value| format_ppm(value, false)).unwrap_or_else(|| "—".to_owned())}
+            }
+            td { class: "public-compensation-number",
+                {movement.adjustment_ppm.map(|value| format_ppm(value, true)).unwrap_or_else(|| "—".to_owned())}
+            }
+            td { class: "public-compensation-number",
+                {movement
+                    .leader_held_nanos
+                    .map(format_held_duration)
+                    .unwrap_or_else(|| "—".to_owned())}
+            }
             td { span { class: kind_class, "{compensation_kind_label(&movement.kind)}" } }
             td { class: "public-compensation-number", "{amount}" }
         }
@@ -141,4 +166,24 @@ fn compensation_kind_label(kind: &str) -> String {
         "closing" => t!("compensation-kind-closing"),
         _ => kind.to_owned(),
     }
+}
+
+fn format_ppm(value: i32, show_positive_sign: bool) -> String {
+    let absolute = i64::from(value).abs();
+    let whole = absolute / 10_000;
+    let fraction = absolute % 10_000;
+    let number = if fraction == 0 {
+        whole.to_string()
+    } else {
+        let fraction = format!("{fraction:04}").trim_end_matches('0').to_owned();
+        format!("{whole}.{fraction}")
+    };
+    let sign = if value < 0 {
+        "−"
+    } else if value > 0 && show_positive_sign {
+        "+"
+    } else {
+        ""
+    };
+    format!("{sign}{number}%")
 }

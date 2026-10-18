@@ -199,8 +199,8 @@ pub use ports::{
     WorkerControlStatus, WorkerControlTrigger, WorldReader, WorldSnapshot,
     admin_intake_aggregate_id, admin_mail_aggregate_id, admin_world_aggregate_id,
     allowed_recovery_commands, body_digest, canonical_settlement_fulfillment_subject,
-    canonical_summary, credential_scope, credential_secret_hash, evaluate_snapshot,
-    format_public_time_wire, forum_catalog_marker, forum_catalog_page_marker,
+    canonical_summary, credential_scope, credential_secret_hash, default_accepted_qualities,
+    evaluate_snapshot, format_public_time_wire, forum_catalog_marker, forum_catalog_page_marker,
     forum_post_bodies_match, forum_system_log_marker, forum_world_name,
     is_recovery_buyer_blacklist_reason, is_stale_slow_proxy_error, mail_auction_aggregate_id,
     recovery_buyer_blacklist_reason, request_hash,
@@ -275,3 +275,7 @@ pub use services::{
     set_lot_watch_preference,
 };
 pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};
+
+pub use ports::{
+    EquipmentColorMatch, EquipmentColorRule, PEERLESS_COLORS, validate_equipment_color_rules,
+};

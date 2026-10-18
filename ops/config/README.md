@@ -81,6 +81,8 @@ owner-only。未提供时从应用 URL 仅替换库名派生维护连接，应�
 
 ## Runtime 共享与重启
 
+`equipment_filter.qualities` 是硬性接收品质门槛，默认 `["Legendary", "Peerless"]`；低于该列表的拍卖装备邮件直接退回，`equipment_filter.enabled` 只控制前后缀、分类、类型和等级等附加过滤。空列表回退默认 L/P。
+`equipment_colors.rules` 控制论坛拍卖帖中的装备名称标色：可按装备类型（如 `One-Handed`）和装备种类（如 `Rapier`）过滤，按顺序首个命中；前缀/后缀分别标色，二者同时命中时整件装备使用 combined 颜色；Peerless 品质词固定彩虹色。该配置只影响论坛帖子，不改变 Public/Admin 装备展示。
 `bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感）：买家命中时结算不发 COD 邮件、直接走内部履约，流拍/撤拍返还命中时直接留存并完成义务；只影响新结算，已有 `manual_reconcile` 投递仍需人工收口。
 
 Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
@@ -91,7 +93,7 @@ Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；�
 | 配置组 | 责任与生效范围 | 重启范围 |
 | --- | --- | --- |
 | Admin listener/security/session、人工提前操作、equipment_source | Admin 启动快照 | Admin |
-| `worlds`、发件人 allowlist、`equipment_filter`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务快照 | 受影响的 Admin/Worker |
+| `worlds`、发件人 allowlist、`equipment_filter`、`equipment_colors`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务/论坛标色快照 | 受影响的 Admin/Worker |
 | `operations.economics` | 后续新拍卖的冻结经济模板 | Admin、Worker |
 | `operations.schedule` | 后续周排期的时区/星期/时间/world | Admin、Worker |
 | `operations.forum` | 论坛开关、批量、分页和请求/任务预算 | Worker |

@@ -199,6 +199,7 @@ async fn postgres_report_once(
                    l.status,
                    equipment.name AS equipment_name,
                    equipment.category AS equipment_category,
+                   equipment.external_equipment_id AS external_equipment_id,
                    submission.seller,
                    winner.username AS winner,
                    settlement.lot_id AS settlement_lot_id,
@@ -210,6 +211,19 @@ async fn postgres_report_once(
                    settlement.compensation_amount AS compensation_amount,
                    settlement.hold_ppm AS hold_ppm,
                    settlement.adjustment_ppm AS adjustment_ppm,
+                   COALESCE((SELECT SUM(GREATEST(0, LEAST(
+                         EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
+                         EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
+                     )))::bigint, 0)
+                     FROM (
+                         SELECT bid.bidder_user_id, bid.created_at,
+                                LEAD(bid.created_at) OVER (
+                                    ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
+                                ) AS next_at
+                         FROM public.bids AS bid
+                         WHERE bid.lot_id = l.id
+                     ) AS b
+                     WHERE b.bidder_user_id = l.leader_user_id) AS leader_held_nanos,
                    settlement.adjustment_metadata AS adjustment_metadata
                FROM public.lots AS l
                INNER JOIN public.equipment AS equipment ON equipment.id = l.equipment_id
@@ -278,6 +292,12 @@ async fn postgres_report_once(
                     .map_err(|_| storage_error("结算报告持有比例超出支持范围"))?;
                 let adjustment_ppm = i32::try_from(adjustment_ppm)
                     .map_err(|_| storage_error("结算报告调整比例超出支持范围"))?;
+                let leader_held_nanos: i64 = row
+                    .try_get("leader_held_nanos")
+                    .map_err(|_| storage_error("读取结算报告累计领先时长失败"))?;
+                if leader_held_nanos < 0 {
+                    return Err(storage_error("结算报告累计领先时长无效"));
+                }
                 let final_price: i64 = row
                     .try_get("final_price")
                     .map_err(|_| storage_error("读取结算成交金额失败"))?;
@@ -298,6 +318,9 @@ async fn postgres_report_once(
                     equipment_category: row
                         .try_get("equipment_category")
                         .map_err(|_| storage_error("读取结算装备分类失败"))?,
+                    external_equipment_id: row
+                        .try_get("external_equipment_id")
+                        .map_err(|_| storage_error("读取结算装备外部标识失败"))?,
                     seller: row.try_get("seller").map_err(|_| storage_error("读取结算卖方失败"))?,
                     winner: row.try_get("winner").map_err(|_| storage_error("读取结算买方失败"))?,
                     final_price,
@@ -308,6 +331,7 @@ async fn postgres_report_once(
                     compensation_amount,
                     hold_ppm,
                     adjustment_ppm,
+                    leader_held_nanos,
                     adjustment: decode_settlement_adjustment(adjustment_metadata)?,
                 })
             })

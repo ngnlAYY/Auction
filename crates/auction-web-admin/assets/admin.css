@@ -1157,6 +1157,39 @@
   opacity: 0.58;
 }
 
+.admin-runtime-color-rules {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.admin-runtime-color-rule {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.admin-runtime-color-rule__head,
+.admin-runtime-color-rule__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.admin-runtime-color-rule__head {
+  justify-content: space-between;
+}
+
+.admin-runtime-color-rule__actions {
+  flex-wrap: wrap;
+}
+
+.admin-runtime-color-rule input[type="color"] {
+  min-block-size: 2.45rem;
+  padding: 0.15rem;
+}
+
 .admin-runtime-mailboxes {
   display: grid;
   gap: var(--space-3);

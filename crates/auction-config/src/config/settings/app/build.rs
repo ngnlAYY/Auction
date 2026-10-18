@@ -42,6 +42,7 @@ impl AppConfig {
             && let Some(runtime) = &runtime_document
         {
             apply_runtime_document(&mut worker.mooglemail, runtime);
+            apply_equipment_colors(&mut worker.forum, runtime);
         }
         // 先保留主配置 listener，校验其 fallback 安全策略；runtime 覆盖必须在该阶段之后生效。
         let main_listener = resolve_http_listener(role, listener, listen_address)?;

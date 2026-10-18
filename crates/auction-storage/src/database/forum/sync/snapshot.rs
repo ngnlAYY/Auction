@@ -253,11 +253,24 @@ async fn read_snapshot(
         }
         let equipment =
             map_forum_equipment(&world_id, &external_equipment_id, &name, &category, attributes.0)?;
+        let identity = &equipment.attributes;
+        let equipment_quality =
+            identity.get("quality").and_then(serde_json::Value::as_str).unwrap_or_default();
+        let equipment_type =
+            identity.get("type").and_then(serde_json::Value::as_str).unwrap_or_default();
+        let equipment_prefix =
+            identity.get("prefix").and_then(serde_json::Value::as_str).unwrap_or_default();
+        let equipment_suffix =
+            identity.get("suffix").and_then(serde_json::Value::as_str).unwrap_or_default();
         let settlement = settlement::project(&row, settled)?;
         lots.push(ForumLotSnapshot {
             code,
             category,
             name,
+            equipment_quality: equipment_quality.to_owned(),
+            equipment_type: equipment_type.to_owned(),
+            equipment_prefix: equipment_prefix.to_owned(),
+            equipment_suffix: equipment_suffix.to_owned(),
             equipment_level: equipment.level.filter(|level| *level > 0),
             primary_attribute_initials: equipment.primary_attribute_initials(),
             avg_roll_tenths: average_roll_tenths(&equipment),

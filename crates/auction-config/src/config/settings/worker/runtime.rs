@@ -1,5 +1,7 @@
 use auction_application::AdminRuntimeDocument;
 
+use super::forum::ForumSyncWorkerConfig;
+
 use super::mooglemail::{
     MoogleMailEquipmentFilterConfig, MoogleMailNotificationTemplatesConfig, MoogleMailWorkerConfig,
     MoogleMailWorldConfig,
@@ -53,7 +55,11 @@ pub(in crate::config::settings) fn apply_runtime_document(
     config.additional_worlds = enabled_worlds.into_iter().skip(1).collect();
     config.equipment_filter = MoogleMailEquipmentFilterConfig {
         enabled: equipment_filter.enabled,
-        qualities: equipment_filter.qualities.clone(),
+        qualities: if equipment_filter.qualities.is_empty() {
+            auction_application::default_accepted_qualities()
+        } else {
+            equipment_filter.qualities.clone()
+        },
         prefixes: equipment_filter.prefixes.clone(),
         suffixes: equipment_filter.suffixes.clone(),
         categories: equipment_filter.categories.clone(),
@@ -77,4 +83,13 @@ pub(in crate::config::settings) fn apply_runtime_document(
         settlement_buyer_refund: mail_templates.settlement_buyer_refund.clone(),
         operations_alert: mail_templates.operations_alert.clone(),
     };
+}
+
+/// 将 Admin runtime 的论坛装备标色规则投影到 Worker 论坛启动快照。
+pub(in crate::config::settings) fn apply_equipment_colors(
+    config: &mut ForumSyncWorkerConfig,
+    document: &AdminRuntimeDocument,
+) {
+    config.equipment_colors =
+        document.equipment_colors.as_ref().map(|colors| colors.to_rules()).unwrap_or_default();
 }

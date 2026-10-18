@@ -1,6 +1,6 @@
-/* 独立论坛图片不能引用站点样式或外部字体；固定浅色高对比，避免论坛主题影响数字。 */
+/* 独立论坛图片不能引用站点样式或外部字体；采用论坛默认皮肤的浅灰表面与深蓝灰文字，避免色块突兀。 */
 svg {
-  color: #382d23;
+  color: #26353F;
   font-family: system-ui, sans-serif;
   text-anchor: middle;
 }
@@ -8,10 +8,11 @@ text {
   fill: currentColor;
 }
 .countdown-surface {
-  fill: #f5f1e8;
-  stroke: #b9ac99;
+  fill: #FDFDFD;
+  stroke: #C7CED3;
 }
 .countdown-title {
+  fill: #4F5459;
   font-size: 16px;
   font-weight: 700;
 }
@@ -32,6 +33,7 @@ text {
   font-size: 9px;
 }
 .countdown-deadline {
+  fill: #4F5459;
   font-size: 12px;
 }
 @keyframes countdown-roll {

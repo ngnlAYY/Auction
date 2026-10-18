@@ -173,6 +173,9 @@ compensation-amount = Amount
 compensation-details = Round details
 compensation-round-label = Auction
 compensation-world = Equipment world
+compensation-hold = Hold share
+compensation-adjustment = Adjustment rate
+compensation-held-time = Total held time
 compensation-discount = Discount demand
 compensation-equipment = Equipment
 compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }

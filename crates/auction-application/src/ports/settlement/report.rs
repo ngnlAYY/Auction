@@ -57,6 +57,8 @@ pub struct SettlementLotReport {
     pub status: String,
     pub equipment_name: String,
     pub equipment_category: String,
+    /// 只用于 Admin 生成游戏装备链接；不进入 Public DTO。
+    pub external_equipment_id: String,
     pub seller: Option<String>,
     pub winner: Option<String>,
     pub final_price: i64,
@@ -67,6 +69,8 @@ pub struct SettlementLotReport {
     pub compensation_amount: i64,
     pub hold_ppm: i32,
     pub adjustment_ppm: i32,
+    /// 赢家在拍卖期间的累计领先纳秒数；流拍为 0。
+    pub leader_held_nanos: i64,
     pub adjustment: SettlementAdjustment,
 }
 

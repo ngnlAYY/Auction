@@ -107,6 +107,7 @@ fn valid_runtime_document(value: &Value) -> bool {
             "allow_manual_early_settlement",
             "bot_players",
             "dashboard_mailboxes",
+            "equipment_colors",
             "equipment_filter",
             "equipment_source",
             "listener",
@@ -125,6 +126,7 @@ fn valid_runtime_document(value: &Value) -> bool {
     bool_field(document, "allow_manual_early_open").is_some()
         && bool_field(document, "allow_manual_early_settlement").is_some()
         && document.get("bot_players").is_none_or(|value| valid_string_list(value, 16, 64, true))
+        && document.get("equipment_colors").is_none_or(valid_equipment_colors)
         && valid_worlds(&document["worlds"])
         && valid_equipment_filter(&document["equipment_filter"])
         && valid_mail_templates(&document["mail_templates"])
@@ -157,6 +159,74 @@ fn valid_runtime_world(value: &Value) -> Option<bool> {
     let enabled = bool_field(world, "enabled")?;
     bool_field(world, "sender_allowlist_disabled")?;
     valid_string_list(&world["sender_allowlist"], 1000, 128, true).then_some(enabled)
+}
+
+fn valid_equipment_colors(value: &Value) -> bool {
+    let Some(colors) = exact_object(value, &["rules"]) else {
+        return false;
+    };
+    let Some(rules) = colors["rules"].as_array() else {
+        return false;
+    };
+    rules.len() <= 200 && rules.iter().all(valid_equipment_color_rule)
+}
+
+fn valid_equipment_color_rule(value: &Value) -> bool {
+    let Some(rule) = exact_object(
+        value,
+        &[
+            "category",
+            "combined_color",
+            "equipment_type",
+            "level",
+            "prefix_color",
+            "prefixes",
+            "quality",
+            "suffix_color",
+            "suffixes",
+        ],
+    ) else {
+        return false;
+    };
+    let Some(category) = string_field(rule, "category") else {
+        return false;
+    };
+    let Some(equipment_type) = string_field(rule, "equipment_type") else {
+        return false;
+    };
+    let Some(quality) = string_field(rule, "quality") else {
+        return false;
+    };
+    let Some(level) = exact_object(&rule["level"], &["max", "min"]) else {
+        return false;
+    };
+    let Some(minimum) = level["min"].as_i64() else {
+        return false;
+    };
+    let Some(maximum) = level["max"].as_i64() else {
+        return false;
+    };
+    let prefixes_valid = valid_string_list(&rule["prefixes"], 256, 128, true);
+    let suffixes_valid = valid_string_list(&rule["suffixes"], 256, 128, true);
+    let has_prefix_or_suffix = rule["prefixes"].as_array().is_some_and(|values| !values.is_empty())
+        || rule["suffixes"].as_array().is_some_and(|values| !values.is_empty());
+    valid_text(category, 64, true)
+        && valid_text(equipment_type, 64, true)
+        && valid_text(quality, 64, true)
+        && (0..=1000).contains(&minimum)
+        && (0..=1000).contains(&maximum)
+        && (maximum == 0 || maximum >= minimum)
+        && prefixes_valid
+        && suffixes_valid
+        && has_prefix_or_suffix
+        && ["prefix_color", "suffix_color", "combined_color"]
+            .iter()
+            .all(|key| rule[*key].as_str().is_some_and(valid_hex_color))
+}
+
+fn valid_hex_color(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
 }
 
 fn valid_equipment_filter(value: &Value) -> bool {

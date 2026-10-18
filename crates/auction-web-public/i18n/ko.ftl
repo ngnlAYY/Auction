@@ -172,6 +172,9 @@ compensation-amount = 금액
 compensation-details = 회차 상세
 compensation-round-label = 경매
 compensation-world = 장비 월드
+compensation-hold = 보유 비율
+compensation-adjustment = 조정 비율
+compensation-held-time = 총 보유 시간
 compensation-discount = 할인 수요
 compensation-equipment = 장비
 compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }

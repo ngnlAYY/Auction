@@ -77,6 +77,7 @@ flowchart TD
 ```
 
 - `auction`：只接受零 credits、零 COD、至少一件附件且可领取的邮件；起始价从正文解析，附件逐件读装备页核对。
+- 品质是硬性门槛：`equipment_filter.qualities` 默认只允许 `Legendary` 与 `Peerless`，为空也回退这两个值；低于门槛的装备按 `quality_not_allowed` 直接退回并发送拒绝通知，`equipment_filter.enabled` 不能关闭该门槛。
 - `register`：登录 key 通知由 `register_key` 模板发出；黑名单/身份冲突回 `register_result`。
 - 退回标题只在保留 obligation UUID 时命中；标题被改写的邮件不会进入 recovery。
 - 未知标题若带资产，按 `unknown_assets_rejected` 处理，不静默吞掉。

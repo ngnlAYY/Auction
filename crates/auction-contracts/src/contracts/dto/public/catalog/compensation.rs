@@ -29,6 +29,14 @@ pub struct PublicCompensationMovementResponse {
     pub equipment_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipment_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_equipment_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hold_ppm: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adjustment_ppm: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leader_held_nanos: Option<i64>,
     pub kind: String,
     pub amount: i64,
     pub balance_after: i64,
