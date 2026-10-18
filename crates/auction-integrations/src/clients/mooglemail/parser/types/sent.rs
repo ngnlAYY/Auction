@@ -10,7 +10,7 @@ pub struct MoogleMailSentSummary {
     pub world: MoogleMailWorld,
     pub recipient: String,
     pub subject: String,
-    /// 远端 HVT-8 时间转换后的 UTC 时间。
+    /// 远端页面按 UTC 展示的时间。
     pub sent_at: DateTime<Utc>,
 }
 

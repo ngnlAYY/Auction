@@ -172,6 +172,7 @@ where
                 sent_state_error = ?report.sent_state_error,
                 sent_observed = report.sent_observed,
                 sent_recovered = report.sent_recovered,
+                sweep_requeued = report.sweep_requeued,
                 "MoogleMail 三页维护完成"
             );
         }

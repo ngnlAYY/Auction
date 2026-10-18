@@ -259,10 +259,16 @@ pub(crate) fn parse_canonical_credits(value: &str) -> Option<i64> {
 }
 
 pub(crate) fn parse_current_cod(value: &str) -> Option<i64> {
-    let value = value
-        .strip_prefix("Current CoD:")
-        .or_else(|| value.strip_prefix("CoD:"))
-        .or_else(|| value.strip_prefix("Requested Payment on Delivery:"))?
+    const PREFIXES: [&str; 4] =
+        ["Current CoD:", "CoD:", "Requested Payment on Delivery:", "Requested CoD:"];
+    let value = PREFIXES
+        .iter()
+        .find_map(|prefix| {
+            value
+                .get(..prefix.len())
+                .filter(|head| head.eq_ignore_ascii_case(prefix))
+                .map(|_| &value[prefix.len()..])
+        })?
         .trim();
     // 页面可能用 `Credits` 或 `credits` 收尾，大小写不能影响金额证明。
     let value = value

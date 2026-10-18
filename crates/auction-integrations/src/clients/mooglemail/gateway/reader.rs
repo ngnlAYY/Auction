@@ -184,7 +184,7 @@ impl MoogleMailGateway {
             }
             for summary in page.summaries.iter().filter(|summary| {
                 summary.recipient.eq_ignore_ascii_case(&request.recipient)
-                    && summary.subject == request.subject
+                    && subject_is_list_projection(&summary.subject, &request.subject)
             }) {
                 let detail_target =
                     self.client.sent_detail(request.world, &summary.external_mail_id)?;

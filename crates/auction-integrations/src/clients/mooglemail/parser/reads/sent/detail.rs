@@ -54,7 +54,7 @@ impl MoogleMailParser {
         let fields = parse_detail_fields_for(forms[0], summary.world, operation)?;
         // 列表页标题会被服务端截断；详情必须保留完整标题，列表标题只能作为前缀匹配。
         if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
-            || !(fields.subject == summary.subject || fields.subject.starts_with(&summary.subject))
+            || !subject_is_list_projection(&summary.subject, &fields.subject)
         {
             return Err(detail_error_for(
                 operation,
@@ -185,9 +185,8 @@ impl MoogleMailParser {
         summary: &MoogleMailSentSummary,
         observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
-        // 列表时间由 HVT-8 文本反推，与本地观测只能做弱一致；当天邮件常因时区/夏令时
-        // 显示为“未来几分钟到几小时”。发送先后由 claim.claimed_at 与 observed_at 把关，
-        // 这里只保留证据，不再把时间偏差当成配置错误拒绝整封邮件。
+        // 列表时间按页面 UTC 文本解析，只剩分钟级取整误差；发送先后仍由
+        // claim.claimed_at 与 observed_at 把关，出现偏差异常时保留证据但不拒绝整封邮件。
         if observed_at < summary.sent_at {
             tracing::warn!(
                 external_mail_id = %summary.external_mail_id,

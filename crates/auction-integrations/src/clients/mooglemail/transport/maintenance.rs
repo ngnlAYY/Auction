@@ -5,12 +5,15 @@
 
 use auction_application::{
     ApplicationError, MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard,
-    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState, RepositoryError,
+    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend, RepositoryError,
 };
 use chrono::{DateTime, Utc};
 
 use super::{
-    super::{MoogleMailDiscardOutcome, MoogleMailSentListEntry},
+    super::{
+        MoogleMailDiscardOutcome, MoogleMailSentListEntry, parser::canonical_mail_body_digest,
+    },
     *,
 };
 
@@ -18,6 +21,8 @@ use super::{
 pub struct MoogleMailMaintenanceAdapter {
     credentials: MoogleMailCredentialSet,
     sender: MoogleMailSender,
+    templates: MoogleMailNotificationTemplates,
+    login_keys: std::sync::Arc<dyn MailLoginKeyReader>,
 }
 
 impl MoogleMailDeliveryTransport {
@@ -26,6 +31,8 @@ impl MoogleMailDeliveryTransport {
         MoogleMailMaintenanceAdapter {
             credentials: self.credentials.clone(),
             sender: self.sender.clone(),
+            templates: self.templates.clone(),
+            login_keys: std::sync::Arc::clone(&self.login_keys),
         }
     }
 }
@@ -113,6 +120,42 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
         })
     }
 
+    fn notice_expectation<'a>(
+        &'a self,
+        candidate: &'a MoogleMailboxUnprovenSend,
+    ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
+        self.notice_expectation_inner(candidate)
+    }
+
+    fn inbox_assets<'a>(
+        &'a self,
+        world_id: &'a str,
+        external_mail_id: &'a str,
+    ) -> MailboxFuture<'a, Option<MoogleMailboxInboxAssets>> {
+        Box::pin(async move {
+            let world = maintenance_world(world_id)?;
+            let mut session = self.session(world).await?;
+            match self
+                .sender
+                .inspect_inbox_attachments(session.cookie(), world, external_mail_id)
+                .await
+            {
+                Ok(Some(assets)) => Ok(Some(MoogleMailboxInboxAssets {
+                    equipment_ids: assets.equipment_ids,
+                    credits: assets.credits,
+                    cod: assets.cod,
+                })),
+                Ok(None) => Ok(None),
+                Err(error) => {
+                    if error.is_session_expired() {
+                        let _ = session.invalidate_current().await;
+                    }
+                    Err(maintenance_remote_error(error, "收件箱详情读取失败"))
+                }
+            }
+        })
+    }
+
     fn sent_state<'a>(
         &'a self,
         world_id: &'a str,
@@ -136,6 +179,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     cod_pending: state.cod_pending,
                     remaining_credits: state.remaining_credits,
                     remaining_equipment_ids: state.remaining_equipment_ids,
+                    body_digest: state.body_digest,
                 }),
                 Err(error) => {
                     if error.is_session_expired() {
@@ -144,6 +188,50 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     Err(maintenance_remote_error(error, "Sent 详情读取失败"))
                 }
             }
+        })
+    }
+}
+
+impl MoogleMailMaintenanceAdapter {
+    /// 用部署模板与登录 key 重建通知主题与正文摘要；未知模板返回 None，保留原投递。
+    fn notice_expectation_inner<'a>(
+        &'a self,
+        candidate: &'a MoogleMailboxUnprovenSend,
+    ) -> MailboxFuture<'a, Option<MoogleMailboxNoticeExpectation>> {
+        Box::pin(async move {
+            let Some(result_code) = candidate.result_code.as_deref() else { return Ok(None) };
+            // operations_alert 与 lot_watch 的正文来自冻结载荷而非模板键，维护流程不重建。
+            if matches!(candidate.template.as_str(), "operations_alert" | "lot_watch") {
+                return Ok(None);
+            }
+            let login_key = match candidate.user_key_user_id {
+                Some(user_id) => {
+                    let key = self
+                        .login_keys
+                        .read(user_id)
+                        .await
+                        .map_err(|_| maintenance_error("MoogleMail 通知登录 key 不可用"))?;
+                    Some(key)
+                }
+                None => None,
+            };
+            let Some((subject, body)) = render_notification(
+                &self.templates,
+                &candidate.template,
+                result_code,
+                login_key.as_ref(),
+                &candidate.recipient,
+                &candidate.inbound_mail_id,
+            ) else {
+                return Ok(None);
+            };
+            if subject.is_empty() || subject.len() > 512 || body.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some(MoogleMailboxNoticeExpectation {
+                subject,
+                body_digest: canonical_mail_body_digest(&body),
+            }))
         })
     }
 }

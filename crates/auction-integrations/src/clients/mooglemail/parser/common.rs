@@ -1,10 +1,22 @@
 use super::*;
 
-/// Sent 列表把标题截断为前缀；详情标题必须等于或以该列表标题开头。
+/// Sent/Inbox 列表按 35 字节截断标题；多字节截断点会被页面替换成 U+FFFD，
+/// 也可能追加省略号。详情标题只需以“可证明的前缀”开头。
 pub(crate) fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> bool {
-    !list_subject.is_empty()
-        && list_subject.len() <= detail_subject.len()
-        && detail_subject.starts_with(list_subject)
+    if list_subject.is_empty() || detail_subject.is_empty() {
+        return false;
+    }
+    if detail_subject.starts_with(list_subject) {
+        return true;
+    }
+    let without_replacement = list_subject.trim_end_matches('\u{FFFD}');
+    if !without_replacement.is_empty() && detail_subject.starts_with(without_replacement) {
+        return true;
+    }
+    let without_ellipsis = without_replacement
+        .strip_suffix("\u{2026}")
+        .or_else(|| without_replacement.strip_suffix("..."));
+    without_ellipsis.is_some_and(|prefix| !prefix.is_empty() && detail_subject.starts_with(prefix))
 }
 
 pub(crate) fn parse_detail_actions(
@@ -12,30 +24,46 @@ pub(crate) fn parse_detail_actions(
     world: MoogleMailWorld,
 ) -> Result<(bool, bool), MoogleMailError> {
     let selector = selector("[onclick]", MoogleMailOperation::Detail, world)?;
-    let mut returns = 0;
-    let mut claims = 0;
+    let mut returns = 0_usize;
+    let mut claims = std::collections::BTreeSet::<String>::new();
     for action in envelope.select(&selector) {
         let value = action.value().attr("onclick").unwrap_or_default();
+        // 页面可能带 `javascript:`、`; return false` 或不同空白；只按函数调用 token 识别。
         let normalized =
             value.chars().filter(|character| !character.is_whitespace()).collect::<String>();
-        if matches!(normalized.as_str(), "mooglemail.return_mail()" | "mooglemail.return_mail();") {
+        if let Some(index) = normalized.find("return_mail(") {
+            let tail = &normalized[index + "return_mail(".len()..];
+            let Some(close) = tail.find(')') else {
+                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            };
+            // 允许空参数或事件参数；其它形态保持严格失败。
+            let argument = &tail[..close];
+            if !argument.is_empty() && !argument.chars().all(|value| value.is_ascii_alphabetic()) {
+                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            }
             returns += 1;
         } else if normalized.contains("return_mail") {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
-        if matches!(
-            normalized.as_str(),
-            "mooglemail.remove_attachment(0)" | "mooglemail.remove_attachment(0);"
-        ) {
-            claims += 1;
+        if let Some(index) = normalized.find("remove_attachment(") {
+            let tail = &normalized[index + "remove_attachment(".len()..];
+            let Some(close) = tail.find(')') else {
+                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            };
+            let argument = &tail[..close];
+            if argument.is_empty() || !argument.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
+            }
+            // 多附件时服务端会给出不同下标；只统计按钮，不推断具体资产。
+            claims.insert(argument.to_owned());
         } else if normalized.contains("remove_attachment") {
             return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
         }
     }
-    if returns > 1 || claims > 1 {
+    if returns > 1 || claims.len() > 1 {
         return Err(detail_error(world, MoogleMailErrorCategory::ProtocolDrift));
     }
-    Ok((returns == 1, claims == 1))
+    Ok((returns == 1, !claims.is_empty()))
 }
 
 pub(crate) fn attribute_references_mail_id(value: &str, external_mail_id: &str) -> bool {
@@ -126,14 +154,11 @@ pub(crate) fn parse_page_time(
     operation: MoogleMailOperation,
     world: MoogleMailWorld,
 ) -> Result<DateTime<Utc>, MoogleMailError> {
+    // 游戏页面按 UTC 直接展示邮件时间（2026-10-18 实测：本地 05:14Z 发出的邮件显示 05:14）。
+    // 旧实现按 HVT-8 换算，把当天邮件整体推到 +8 小时，已停用。
     let naive = NaiveDateTime::parse_from_str(value, INBOX_TIME_FORMAT)
         .map_err(|_| protocol(operation, world))?;
-    let offset = FixedOffset::west_opt(8 * 60 * 60).ok_or_else(|| protocol(operation, world))?;
-    offset
-        .from_local_datetime(&naive)
-        .single()
-        .map(|value| value.with_timezone(&Utc))
-        .ok_or_else(|| protocol(operation, world))
+    Ok(naive.and_utc())
 }
 
 pub(crate) fn valid_message_body(value: &str) -> bool {
