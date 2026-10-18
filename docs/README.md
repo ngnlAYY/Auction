@@ -9,6 +9,7 @@
 - 系统数据流、模块归属与能力：[设计与架构](docs/design/architecture.md)；依赖、MSRV 与编译取舍：[技术栈](docs/design/tech-stack.md)。
 - 工具准备、编译、静态检查与 CI 发布：[开发指南](docs/guide/development.md)、[CI 说明](ci/README.md)。
 - 配置、部署、备份恢复或排错：[运维入口](ops/README.md)；追加式迁移：[PostgreSQL](migrations/postgres/README.md)。
+- 邮件进出、解析分流、投递与维护全景：[MoogleMail 全流程](docs/guide/mooglemail-flow.md)。
 - 结算 COD、买家收货与卖家收款核对：[COD 结算流程](docs/guide/cod-settlement-flow.md)。
 - 已实现、历史验证与未验收边界：[状态页](docs/status.md)；修改项目或维护文档：[协作规范](AGENTS.md)、[文档维护](docs/guide/development.md#文档维护)。
 

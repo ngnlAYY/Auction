@@ -25,15 +25,20 @@ pub(crate) fn send_receipt(
 ) -> Result<MoogleMailSendReceipt, DeliveryTransportError> {
     match outcome {
         MoogleMailSendOutcome::Sent(receipt) => Ok(receipt),
-        MoogleMailSendOutcome::PreflightUnproven => Err(DeliveryTransportError {
+        MoogleMailSendOutcome::PreflightUnproven { dirty } => Err(DeliveryTransportError {
             failure_code: "preflight_unproven".to_owned(),
-            safe_detail: "MoogleMail compose 初始状态无法证明为干净状态".to_owned(),
+            safe_detail: if dirty {
+                "MoogleMail compose 初始页仍有草稿资产，未执行发送"
+            } else {
+                "MoogleMail compose 初始状态无法证明为干净状态"
+            }
+            .to_owned(),
             outcome_unknown: true,
             external_reference: None,
             result_metadata: json!({
                 "stage": "preflight",
                 "operation": MoogleMailOperation::Compose.as_str(),
-                "category": "protocol_drift",
+                "category": if dirty { "compose_dirty" } else { "protocol_drift" },
             }),
         }),
         MoogleMailSendOutcome::RecipientNotFound { returned_mail_id } => {
