@@ -185,19 +185,16 @@ impl MoogleMailParser {
         summary: &MoogleMailSentSummary,
         observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
+        // 列表时间由 HVT-8 文本反推，与本地观测只能做弱一致；当天邮件常因时区/夏令时
+        // 显示为“未来几分钟到几小时”。发送先后由 claim.claimed_at 与 observed_at 把关，
+        // 这里只保留证据，不再把时间偏差当成配置错误拒绝整封邮件。
         if observed_at < summary.sent_at {
-            // Sentinel 时间来自列表页 HVT 文本；出现超前时保留原始字段以便判断时区或时钟偏差。
             tracing::warn!(
                 external_mail_id = %summary.external_mail_id,
                 sent_at = %summary.sent_at,
                 observed_at = %observed_at,
-                "MoogleMail Sent 详情时间晚于本地观测"
+                "MoogleMail Sent 详情时间晚于本地观测；按弱时间语义继续解析"
             );
-            return Err(detail_error_for(
-                MoogleMailOperation::SentDetail,
-                summary.world,
-                MoogleMailErrorCategory::Configuration,
-            ));
         }
         let proof = self.parse_sent_content_proof(document, summary)?;
         let snapshot = MoogleMailSentSnapshot {

@@ -96,7 +96,6 @@ impl MoogleMailSentSnapshot {
             && valid_line(&self.subject, MAX_SUMMARY_SUBJECT_BYTES, false)
             && self.sent_at.timestamp_nanos_opt().is_some()
             && self.observed_at.timestamp_nanos_opt().is_some()
-            && !self.observed_at.lt(&self.sent_at)
             && self.remaining_credits >= 0
             && self.cod_pending >= 0
             && canonical_equipment_ids(&self.remaining_equipment_ids)
