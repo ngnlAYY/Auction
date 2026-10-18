@@ -21,6 +21,9 @@ use sqlx::{Postgres, Row, Transaction};
 #[cfg(feature = "postgres")]
 use uuid::Uuid;
 
+#[cfg(feature = "postgres")]
+#[path = "commands/cod_return.rs"]
+mod cod_return;
 #[path = "commands/confirm.rs"]
 mod confirm;
 #[cfg(feature = "postgres")]
@@ -38,6 +41,8 @@ mod relist;
 #[path = "commands/scope.rs"]
 mod scope;
 
+#[cfg(feature = "postgres")]
+use cod_return::*;
 #[cfg(feature = "postgres")]
 use confirm::*;
 #[cfg(feature = "postgres")]
@@ -72,6 +77,27 @@ impl RecoveryResolutionStore for DatabaseStore {
             match self {
                 #[cfg(feature = "postgres")]
                 Self::Postgres(store) => advance_relist_postgres(store.pool(), now, retry_after)
+                    .await
+                    .map_err(ApplicationError::from),
+            }
+        })
+    }
+
+    fn advance_due_cod_return(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> ApplicationFuture<'_, Option<RecoveryResolutionAdvance>> {
+        Box::pin(async move {
+            if now.timestamp_nanos_opt().is_none() {
+                return Err(ApplicationError::Repository(
+                    auction_application::RepositoryError::Failed(
+                        "recovery COD 退回调度时间无效".to_owned(),
+                    ),
+                ));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => advance_cod_return_postgres(store.pool(), now)
                     .await
                     .map_err(ApplicationError::from),
             }

@@ -148,8 +148,8 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | settlement_pools | auction-domain + auction-application：settlement | 结算池和策略快照 |
 | settlement_obligations | auction-domain + auction-application：settlement | 买家/卖家履约义务 |
 | settlement_obligation_fulfillments | auction-application：settlement | 履约交付证明与状态 |
-| settlement_recoveries | auction-application：settlement-recovery | 付款/交付异常恢复聚合 |
-| settlement_recovery_actions | auction-application：settlement-recovery | 恢复动作及 durable claim |
+| settlement_recoveries | auction-application：settlement-recovery | 付款/交付异常恢复聚合；冻结 `cod_return_limit`（默认 3） |
+| settlement_recovery_actions | auction-application：settlement-recovery | 恢复动作及 durable claim；`buyer_blacklist` 冻结公开理由 |
 | settlement_recovery_commands | auction-application：settlement-recovery | 恢复确认命令幂等账本 |
 | settlement_recovery_health | auction-application + auction-storage + auction-jobs | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用以 `busy` 投影并保留最后成功余额 |
 | deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |

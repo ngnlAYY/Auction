@@ -24,6 +24,8 @@ pub(crate) async fn record_return_postgres(
                   obligation.carrier_credit AS returned_carrier_credit,
                   equipment.external_equipment_id,
                   recovery.world_id AS recovery_world_id,
+                  recovery.cod_return_count,
+                  recovery.cod_return_limit,
                   recovery.payment_obligation_id,
                   recovery.equipment_obligation_id,
                   recovery.state_version,
@@ -92,17 +94,33 @@ pub(crate) async fn record_return_postgres(
     });
     let blocking_code = (!matches).then(|| "evidence_mismatch".to_owned());
 
+    if !(1..=10).contains(&row.cod_return_limit) {
+        return Err(repository_error("recovery COD 退回上限无效"));
+    }
+    let next_return_count = row
+        .cod_return_count
+        .checked_add(1)
+        .filter(|count| *count <= row.cod_return_limit)
+        .ok_or_else(|| repository_error("recovery COD 退回次数超出上限"))?;
     let updated = sqlx::query(
         r#"UPDATE public.settlement_recoveries
            SET return_mail_id = $1,
                return_external_mail_id = $2,
                stage = 'reclaiming',
                blocking_code = $3,
+               cod_return_count = $4,
+               resolution = NULL,
+               relisted_auction_id = NULL,
+               relisted_lot_id = NULL,
+               custody_proof_kind = NULL,
+               custody_proof_reference = NULL,
+               custody_proof_digest = NULL,
+               custody_proof_observed_at = NULL,
                next_attempt_at = NULL,
                state_version = state_version + 1,
-               updated_at = $4
-           WHERE id = $5
-             AND state_version = $6
+               updated_at = $5
+           WHERE id = $6
+             AND state_version = $7
              AND return_mail_id IS NULL
              AND stage <> 'completed'
            RETURNING id, stage, state_version"#,
@@ -110,6 +128,7 @@ pub(crate) async fn record_return_postgres(
     .bind(row.return_mail_id)
     .bind(&row.return_external_mail_id)
     .bind(&blocking_code)
+    .bind(next_return_count)
     .bind(now)
     .bind(row.recovery_id)
     .bind(row.state_version)
@@ -130,13 +149,22 @@ pub(crate) async fn record_return_postgres(
                 expected_credits: expected.expected_credits,
                 expected_cod: expected.expected_cod,
                 expected_attachment_ids: &expected.expected_attachment_ids,
+                reason: None,
                 now,
+                reset_existing: true,
             },
         )
         .await?;
         action_kinds.push(expected.kind.to_owned());
 
-        if matches!(expected.kind, "reclaim_equipment_take" | "cancel_carrier_take") {
+        // 达到该 recovery 冻结的退回上限时拉黑买家，并把实际次数写入公开理由。
+        if next_return_count >= row.cod_return_limit
+            && matches!(expected.kind, "reclaim_equipment_take" | "cancel_carrier_take")
+        {
+            let reason = auction_application::recovery_buyer_blacklist_reason(
+                u32::try_from(next_return_count)
+                    .map_err(|_| repository_error("recovery COD 退回次数无效"))?,
+            );
             insert_recovery_action(
                 &mut transaction,
                 RecoveryActionInsert {
@@ -147,7 +175,9 @@ pub(crate) async fn record_return_postgres(
                     expected_credits: 0,
                     expected_cod: 0,
                     expected_attachment_ids: &[],
+                    reason: Some(&reason),
                     now,
+                    reset_existing: false,
                 },
             )
             .await?;

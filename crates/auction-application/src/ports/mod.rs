@@ -244,9 +244,10 @@ pub use admin_users::{
     AdminUserListRequest, AdminUserMutationAction, AdminUserMutationCommand,
     AdminUserMutationResult, AdminUserMutationWrite, AdminUserPage, AdminUserPort, AdminUserStatus,
     AdminUserStore, MAX_ADMIN_USER_OFFSET, MAX_ADMIN_USER_PAGE_SIZE,
-    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
-    RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, RecoveryBuyerBlacklistCommand,
-    RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
+    RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON,
+    RECOVERY_BUYER_BLACKLIST_PROOF_KIND, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
+    RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult, RecoveryBuyerBlacklister,
+    is_recovery_buyer_blacklist_reason, recovery_buyer_blacklist_reason,
 };
 pub use admin_worlds::{
     ADMIN_WORLD_SET_ENABLED_COMMAND_KIND, AdminWorldError, AdminWorldPort,
@@ -346,8 +347,8 @@ pub use mail_diagnostics::{
 pub use mail_display::MailDisplaySnapshot;
 pub use mail_maintenance::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxUnprovenSend,
+    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
 };
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,

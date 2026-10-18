@@ -66,7 +66,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
                  revoked_at = NULL",
         )
         .bind(command.buyer_user_id)
-        .bind(RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON)
+        .bind(&command.public_reason)
         .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
         .bind(command.occurred_at)
         .execute(&mut *transaction)
@@ -79,7 +79,7 @@ pub(crate) async fn ensure_recovery_blacklist_postgres(
         )
         .bind(command.command_id)
         .bind(command.buyer_user_id)
-        .bind(RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON)
+        .bind(&command.public_reason)
         .bind(RECOVERY_BUYER_BLACKLIST_ACTOR)
         .bind(command.occurred_at)
         .execute(&mut *transaction)

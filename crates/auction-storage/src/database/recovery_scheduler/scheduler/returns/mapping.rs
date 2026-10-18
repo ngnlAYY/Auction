@@ -23,6 +23,8 @@ pub(super) fn map_recovery_return_row(
             .map_err(map_storage_error)?,
         external_equipment_id: row.try_get("external_equipment_id").map_err(map_storage_error)?,
         recovery_world_id: row.try_get("recovery_world_id").map_err(map_storage_error)?,
+        cod_return_count: row.try_get("cod_return_count").map_err(map_storage_error)?,
+        cod_return_limit: row.try_get("cod_return_limit").map_err(map_storage_error)?,
         payment_obligation_id: row.try_get("payment_obligation_id").map_err(map_storage_error)?,
         equipment_obligation_id: row
             .try_get("equipment_obligation_id")

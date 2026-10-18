@@ -25,11 +25,30 @@ where
         "recovery-buyer-blacklist-command",
         1,
     ));
+    // 理由由退回记录在创建 action 时冻结；历史 action 没有理由时回退默认三次文案。
+    let public_reason =
+        claim.reason.clone().unwrap_or_else(|| RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON.to_owned());
+    if !is_recovery_buyer_blacklist_reason(&public_reason) {
+        tracing::error!(action_id = %action_id, "recovery buyer blacklist reason is invalid");
+        return match store
+            .mark_action_manual_reconcile(claim, "recovery_request_hash_failed".to_owned())
+            .await
+        {
+            Ok(()) => WorkerResult::Success,
+            Err(fence_error) => {
+                tracing::error!(
+                    error = %fence_error,
+                    "recovery buyer blacklist manual fence failed"
+                );
+                WorkerResult::Error
+            }
+        };
+    }
     let request = RecoveryBuyerBlacklistRequest {
         recovery_id: claim.recovery_id.as_uuid(),
         action_id,
         buyer_user_id: claim.buyer_user_id,
-        public_reason: RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON,
+        public_reason: &public_reason,
         actor_id: RECOVERY_BUYER_BLACKLIST_ACTOR,
         occurred_at: claim.created_at,
     };
@@ -59,7 +78,7 @@ where
         recovery_id: claim.recovery_id,
         action_id: claim.action_id,
         buyer_user_id: claim.buyer_user_id,
-        public_reason: RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON.to_owned(),
+        public_reason: public_reason.clone(),
         actor_id: RECOVERY_BUYER_BLACKLIST_ACTOR.to_owned(),
         occurred_at: claim.created_at,
     };
@@ -142,11 +161,11 @@ where
 }
 
 #[derive(Debug, Serialize)]
-struct RecoveryBuyerBlacklistRequest {
+struct RecoveryBuyerBlacklistRequest<'a> {
     recovery_id: uuid::Uuid,
     action_id: uuid::Uuid,
     buyer_user_id: uuid::Uuid,
-    public_reason: &'static str,
+    public_reason: &'a str,
     actor_id: &'static str,
     occurred_at: chrono::DateTime<chrono::Utc>,
 }

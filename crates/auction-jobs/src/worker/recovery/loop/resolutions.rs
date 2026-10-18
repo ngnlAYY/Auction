@@ -110,3 +110,51 @@ pub(super) async fn complete_refunds<C>(
     }
     observe_phase(worker, batch_result, phase_result, count);
 }
+
+pub(super) async fn advance_cod_returns<C>(
+    worker: &PersistentWorker<C>,
+    batch_result: &mut WorkerResult,
+) where
+    C: Clock + 'static,
+{
+    let Some(store) = &worker.recovery_resolution else {
+        return;
+    };
+    let mut count = 0_usize;
+    let mut phase_result = WorkerResult::Success;
+    for _ in 0..worker.recovery.batch_limit {
+        if worker.control.is_draining() {
+            break;
+        }
+        match tokio::time::timeout(
+            worker.recovery.item_timeout,
+            store.advance_due_cod_return(worker.clock.now()),
+        )
+        .await
+        {
+            Ok(Ok(Some(advance))) => {
+                count = count.saturating_add(1);
+                tracing::info!(
+                    recovery_id = %advance.recovery_id,
+                    stage = %advance.stage,
+                    resolution = ?advance.resolution,
+                    state_version = advance.state_version,
+                    completed = advance.completed,
+                    "recovery COD return resolution advanced"
+                );
+            }
+            Ok(Ok(None)) => break,
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "recovery COD return phase failed");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+            Err(_) => {
+                tracing::warn!("recovery COD return item timed out");
+                phase_result = WorkerResult::Error;
+                break;
+            }
+        }
+    }
+    observe_phase(worker, batch_result, phase_result, count);
+}

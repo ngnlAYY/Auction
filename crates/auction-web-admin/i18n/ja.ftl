@@ -375,6 +375,7 @@ admin-recovery-state-manual = 手動照合
 admin-recovery-command-reclaimed = 回収済みとして確認
 admin-recovery-command-cancelled = 取消済みとして確認
 admin-recovery-command-equipment-recovered = 装備復旧として確認
+admin-recovery-command-returned-after-three-cod-returns = COD 返送上限に達したため出品者へ返却
 admin-recovery-confirm-description = 出品 { $lot }（{ $equipment }）の確認を送信します。
 admin-recovery-reason = 確認理由
 admin-recovery-cancel = キャンセル

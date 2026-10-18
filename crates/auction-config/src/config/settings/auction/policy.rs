@@ -6,7 +6,8 @@ use serde::Deserialize;
 use super::super::ConfigError;
 use auction_application::AuctionPolicyTemplate;
 use auction_domain::{
-    AdjustmentAnchor, RecoveryMode, RecoveryPolicy, SettlementMode, SettlementPolicy,
+    AdjustmentAnchor, DEFAULT_COD_RETURN_LIMIT, RecoveryMode, RecoveryPolicy, SettlementMode,
+    SettlementPolicy,
 };
 
 /// 拍卖创建时冻结的非敏感策略配置。
@@ -103,6 +104,7 @@ impl AuctionConfig {
                 mode: recovery_mode,
                 payment_timeout: duration(self.settlement.recovery.payment_timeout_seconds)?,
                 reminder_limit: self.settlement.recovery.reminder_limit,
+                cod_return_limit: self.settlement.recovery.cod_return_limit,
             },
         })
     }
@@ -211,6 +213,8 @@ pub struct AuctionRecoveryPolicyConfig {
     pub payment_timeout_seconds: i64,
     /// 提醒次数；当前默认一次。
     pub reminder_limit: u32,
+    /// 同一 recovery 允许的 COD 退回次数；范围 1-10，默认 3。
+    pub cod_return_limit: u32,
 }
 
 impl Default for AuctionRecoveryPolicyConfig {
@@ -220,6 +224,7 @@ impl Default for AuctionRecoveryPolicyConfig {
             mode: "remind_v1".to_owned(),
             payment_timeout_seconds: 7 * 24 * 60 * 60,
             reminder_limit: 1,
+            cod_return_limit: DEFAULT_COD_RETURN_LIMIT,
         }
     }
 }

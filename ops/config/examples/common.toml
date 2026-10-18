@@ -91,3 +91,5 @@ mode = "remind_v1"
 payment_timeout_seconds = 604800
 # 可选：付款超时提醒次数，当前默认且只支持 1。
 reminder_limit = 1
+# 可选：同一笔 COD 允许的退回次数，范围 1-10，默认 3；达到上限后装备退回卖家并拉黑买家。
+cod_return_limit = 3

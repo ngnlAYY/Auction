@@ -157,7 +157,8 @@ pub use ports::{
     PublicRealtimeAuctionStatus, PublicRealtimeEvent, PublicRealtimePage, PublicRealtimeReader,
     PublicRealtimeRequest, PublicRulesDocument, PublicRulesReader, PublicRulesRequest,
     PublicSessionConfig, PublicSessionIdentity, PublicSessionPort, PublicSessionRecord,
-    PublicSessionStore, RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
+    PublicSessionStore, RECOVERY_BUYER_BLACKLIST_ACTOR,
+    RECOVERY_BUYER_BLACKLIST_LEGACY_PUBLIC_REASON, RECOVERY_BUYER_BLACKLIST_PROOF_KIND,
     RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON, ReadModelCache, ReadModelCacheError,
     ReadModelCacheFuture, RealtimeAdminError, RealtimeAdminPort, RealtimeConsumerBatch,
     RealtimeConsumerRequest, RealtimeConsumerStore, RealtimeDashboardSnapshot,
@@ -200,8 +201,9 @@ pub use ports::{
     allowed_recovery_commands, body_digest, canonical_settlement_fulfillment_subject,
     canonical_summary, credential_scope, credential_secret_hash, evaluate_snapshot,
     format_public_time_wire, forum_catalog_marker, forum_catalog_page_marker,
-    forum_post_bodies_match, forum_system_log_marker, forum_world_name, is_stale_slow_proxy_error,
-    mail_auction_aggregate_id, request_hash,
+    forum_post_bodies_match, forum_system_log_marker, forum_world_name,
+    is_recovery_buyer_blacklist_reason, is_stale_slow_proxy_error, mail_auction_aggregate_id,
+    recovery_buyer_blacklist_reason, request_hash,
 };
 pub use ports::{
     AdminCredentialCheckObservation, AdminCredentialCheckPort, AdminCredentialCheckRecord,
@@ -265,8 +267,8 @@ pub use ports::{
 };
 pub use ports::{
     MailboxFuture, MoogleMailboxComposeState, MoogleMailboxDiscard, MoogleMailboxEvidenceStore,
-    MoogleMailboxMaintenance, MoogleMailboxSentEntry, MoogleMailboxSentState,
-    MoogleMailboxUnprovenSend,
+    MoogleMailboxInboxAssets, MoogleMailboxMaintenance, MoogleMailboxNoticeExpectation,
+    MoogleMailboxSentEntry, MoogleMailboxSentState, MoogleMailboxUnprovenSend,
 };
 pub use services::{
     LotWatchPmNotification, lot_watch_notification, lot_watch_pm_notification, set_lot_watch,

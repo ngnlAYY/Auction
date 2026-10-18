@@ -22,6 +22,11 @@ pub(super) fn parse_settlement_policy(
             "恢复付款超时",
         )?),
         reminder_limit: json_u32(recovery.get("reminder_limit"), "恢复提醒上限")?,
+        // 旧快照没有该字段时按默认三次处理，保持已冻结策略可重放。
+        cod_return_limit: match recovery.get("cod_return_limit") {
+            Some(value) => json_u32(Some(value), "恢复 COD 退回上限")?,
+            None => auction_domain::DEFAULT_COD_RETURN_LIMIT,
+        },
     };
     recovery_policy.validate().map_err(|_| invalid("恢复策略快照校验失败"))?;
 

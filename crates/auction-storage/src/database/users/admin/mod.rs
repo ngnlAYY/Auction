@@ -3,6 +3,8 @@
 #[cfg(feature = "postgres")]
 mod postgres;
 
+#[cfg(feature = "postgres")]
+use auction_application::RECOVERY_BUYER_BLACKLIST_ACTOR;
 use auction_application::{
     AdminRenameRevertWrite, AdminUser, AdminUserBlacklistHistoryEntry, AdminUserCommandKind,
     AdminUserCommandResult, AdminUserCreateWrite, AdminUserError, AdminUserKeyWrite,
@@ -11,8 +13,6 @@ use auction_application::{
     MailLoginKeyEnvelope, RecoveryBuyerBlacklistCommand, RecoveryBuyerBlacklistResult,
     RecoveryBuyerBlacklister, RepositoryError, RequestHash,
 };
-#[cfg(feature = "postgres")]
-use auction_application::{RECOVERY_BUYER_BLACKLIST_ACTOR, RECOVERY_BUYER_BLACKLIST_PUBLIC_REASON};
 #[cfg(feature = "postgres")]
 use auction_domain::{CommandId, deterministic_uuid};
 use chrono::{DateTime, Utc};

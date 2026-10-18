@@ -145,6 +145,7 @@ pub(crate) async fn mark_action_enqueued_postgres(
         expected_credits: claim.expected_credits,
         expected_cod: claim.expected_cod,
         expected_attachment_ids: claim.expected_attachment_ids.clone(),
+        reason: claim.reason.clone(),
         execution_state: "enqueued".to_owned(),
         delivery_id: Some(delivery_id),
         prepare_command_id: Some(prepare_command_id),

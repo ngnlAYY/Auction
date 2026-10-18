@@ -19,6 +19,15 @@ pub enum RecoveryMode {
     RemindV1,
 }
 
+/// COD 退回次数的默认上限。
+pub const DEFAULT_COD_RETURN_LIMIT: u32 = 3;
+/// COD 退回次数的最大可配置上限。
+pub const MAX_COD_RETURN_LIMIT: u32 = 10;
+
+fn default_cod_return_limit() -> u32 {
+    DEFAULT_COD_RETURN_LIMIT
+}
+
 /// 随拍卖策略一起冻结的恢复参数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryPolicy {
@@ -26,6 +35,9 @@ pub struct RecoveryPolicy {
     pub mode: RecoveryMode,
     pub payment_timeout: Duration,
     pub reminder_limit: u32,
+    /// 同一 recovery 允许的 COD 退回次数上限；旧快照缺少该字段时按三次处理。
+    #[serde(default = "default_cod_return_limit")]
+    pub cod_return_limit: u32,
 }
 
 impl Default for RecoveryPolicy {
@@ -35,14 +47,20 @@ impl Default for RecoveryPolicy {
             mode: RecoveryMode::RemindV1,
             payment_timeout: Duration::days(7),
             reminder_limit: 1,
+            cod_return_limit: DEFAULT_COD_RETURN_LIMIT,
         }
     }
 }
 
 impl RecoveryPolicy {
-    /// 严格校验当前唯一支持的七天、单次提醒策略。
+    /// 严格校验七天、单次提醒与可配置的 COD 退回上限。
     pub fn validate(self) -> Result<(), DomainError> {
-        if self != Self::default() {
+        if self.version != 1
+            || self.mode != RecoveryMode::RemindV1
+            || self.payment_timeout != Duration::days(7)
+            || self.reminder_limit != 1
+            || !(1..=MAX_COD_RETURN_LIMIT).contains(&self.cod_return_limit)
+        {
             return Err(DomainError::InvalidSettlementPolicy("恢复策略版本或参数未知"));
         }
         Ok(())

@@ -25,6 +25,8 @@ pub(super) struct RecoveryReturnRow {
     pub(super) returned_carrier_credit: i64,
     pub(super) external_equipment_id: String,
     pub(super) recovery_world_id: String,
+    pub(super) cod_return_count: i32,
+    pub(super) cod_return_limit: i32,
     pub(super) payment_obligation_id: Uuid,
     pub(super) equipment_obligation_id: Option<Uuid>,
     pub(super) state_version: i64,
@@ -50,4 +52,8 @@ pub(super) struct RecoveryActionInsert<'a> {
     pub(super) expected_cod: i64,
     pub(super) expected_attachment_ids: &'a [String],
     pub(super) now: DateTime<Utc>,
+    /// buyer_blacklist 冻结的公开理由；其它 action 必须为空。
+    pub(super) reason: Option<&'a str>,
+    /// 同一 recovery/kind 已存在时是否重置回 pending；只用于可反复发生的 reclaim 动作。
+    pub(super) reset_existing: bool,
 }
