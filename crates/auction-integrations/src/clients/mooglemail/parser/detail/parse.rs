@@ -264,7 +264,12 @@ pub(crate) fn parse_current_cod(value: &str) -> Option<i64> {
         .or_else(|| value.strip_prefix("CoD:"))
         .or_else(|| value.strip_prefix("Requested Payment on Delivery:"))?
         .trim();
-    let value = value.strip_suffix(" Credits").unwrap_or(value).trim();
+    // 页面可能用 `Credits` 或 `credits` 收尾，大小写不能影响金额证明。
+    let value = value
+        .strip_suffix(" Credits")
+        .or_else(|| value.strip_suffix(" credits"))
+        .unwrap_or(value)
+        .trim();
     parse_canonical_credits(value)
 }
 

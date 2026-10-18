@@ -1,7 +1,7 @@
 //! 完整 Sent 基线与新增邮件的只读身份、正文和资产证明。
 
 use super::*;
-use crate::clients::mooglemail::parser::canonical_mail_body_digest;
+use crate::clients::mooglemail::parser::{canonical_mail_body_digest, subject_is_list_projection};
 use tokio::time::{Instant, timeout_at};
 
 impl MoogleMailSender {
@@ -95,13 +95,6 @@ impl MoogleMailSender {
         }
         Err(verification_unavailable(world))
     }
-}
-
-/// Sent 列表会把标题截断；列表标题必须是完整标题的前缀，完整校验交给详情。
-fn subject_is_list_projection(list_subject: &str, expected: &str) -> bool {
-    !list_subject.is_empty()
-        && list_subject.len() <= expected.len()
-        && expected.starts_with(list_subject)
 }
 
 fn check_deadline(deadline: Instant, world: MoogleMailWorld) -> Result<(), MoogleMailError> {
