@@ -1,5 +1,12 @@
 use super::*;
 
+/// Sent 列表把标题截断为前缀；详情标题必须等于或以该列表标题开头。
+pub(crate) fn subject_is_list_projection(list_subject: &str, detail_subject: &str) -> bool {
+    !list_subject.is_empty()
+        && list_subject.len() <= detail_subject.len()
+        && detail_subject.starts_with(list_subject)
+}
+
 pub(crate) fn parse_detail_actions(
     envelope: ElementRef<'_>,
     world: MoogleMailWorld,

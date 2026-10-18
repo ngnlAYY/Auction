@@ -13,6 +13,7 @@ use super::{
     internal::{mail_world, map_read_error},
     *,
 };
+use crate::clients::mooglemail::parser::subject_is_list_projection;
 
 impl MoogleMailGateway {
     pub(super) async fn prepare_with_sent(
@@ -112,7 +113,7 @@ impl MoogleMailGateway {
                 || observed.external_mail_id != target.external_mail_id
                 || observed.world != world
                 || observed.recipient != target.recipient
-                || observed.subject != target.subject
+                || !subject_is_list_projection(&target.subject, &observed.subject)
                 || target.expected_sent_at.is_some_and(|expected| expected != observed.sent_at)
                 || !observed.collected
             {

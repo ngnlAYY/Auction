@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 
 use super::super::protocol::valid_opaque_id;
 use super::*;
+use crate::clients::mooglemail::parser::subject_is_list_projection;
 
 /// MoogleMail 收件箱读取 gateway。
 pub struct MoogleMailGateway {
@@ -328,7 +329,7 @@ impl MoogleMailGateway {
                 if snapshot.external_mail_id != external_mail_id
                     || snapshot.world != world
                     || !snapshot.recipient.eq_ignore_ascii_case(&summary.recipient)
-                    || snapshot.subject != summary.subject
+                    || !subject_is_list_projection(&summary.subject, &snapshot.subject)
                     || snapshot.sent_at != summary.sent_at
                 {
                     return self
