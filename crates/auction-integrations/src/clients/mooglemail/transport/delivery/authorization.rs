@@ -54,14 +54,30 @@ impl MoogleMailDeliveryTransport {
                 let snapshot = gateway
                     .read_internal_evidence_in_session(&session, &request)
                     .await
-                    .map_err(|_| cash_unproven())?;
+                    .map_err(|error| {
+                        // 预检失败必须留下去敏原因，否则运维无法区分会话/页面/证据过期。
+                        tracing::warn!(
+                            delivery_id = %claim.delivery_id,
+                            world = ?request.world,
+                            error = ?error,
+                            "MoogleMail 现金预检证据读取失败"
+                        );
+                        cash_unproven()
+                    })?;
                 Some(
                     PreparedSettlementInternalEvidence::new(
                         snapshot,
                         Box::new(SharedSession(Arc::clone(&session))),
                         deadline,
                     )
-                    .map_err(|_| cash_unproven())?,
+                    .map_err(|error| {
+                        tracing::warn!(
+                            delivery_id = %claim.delivery_id,
+                            error = ?error,
+                            "MoogleMail 现金预检证据未能绑定会话租约"
+                        );
+                        cash_unproven()
+                    })?,
                 )
             } else {
                 // 这不是授权。DB必须在同事务scope锁下证明无账户保护且无持久关联。
