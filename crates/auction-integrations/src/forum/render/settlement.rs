@@ -16,7 +16,7 @@ pub(super) fn valid_snapshot(snapshot: &ForumAuctionSnapshot) -> bool {
     snapshot.lots.iter().all(|lot| match (&lot.settlement, lot.status.as_str()) {
         (Some(settlement), "sold") => {
             lot.current_bidder.is_some()
-                && lot.effective_end_at.is_some_and(|end| end >= settlement.leader_since)
+                && settlement.leader_held_nanos >= 0
                 && (-1_000_000..=1_000_000).contains(&settlement.adjustment_ppm)
         }
         (None, "unsold") => lot.current_bidder.is_none(),
@@ -31,9 +31,8 @@ pub(super) fn write_annotation(
     scheduled_end_at: Option<DateTime<Utc>>,
 ) -> Result<(), ForumRenderError> {
     let Some(settlement) = &lot.settlement else { return Ok(()) };
-    let end = lot.effective_end_at.ok_or(ForumRenderError::InvalidSnapshot)?;
     let planned_end = scheduled_end_at.ok_or(ForumRenderError::InvalidSnapshot)?;
-    let held = format_hours(settlement.leader_since, end)?;
+    let held = format_held_hours(settlement.leader_held_nanos)?;
     let planned = format_hours(scheduled_open_at, planned_end)?;
     write!(
         body,
@@ -41,6 +40,15 @@ pub(super) fn write_annotation(
         format_adjustment(settlement.adjustment_ppm)
     )
     .map_err(|_| ForumRenderError::BodyTooLarge)
+}
+
+fn format_held_hours(duration: i64) -> Result<String, ForumRenderError> {
+    let duration = i128::from(duration);
+    if duration < 0 {
+        return Err(ForumRenderError::InvalidSnapshot);
+    }
+    let tenths = (duration + 180_000_000_000) / 360_000_000_000;
+    Ok(format!("{}.{:01}", tenths / 10, tenths % 10))
 }
 
 fn format_hours(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<String, ForumRenderError> {

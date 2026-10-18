@@ -61,7 +61,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
                     }
-                    Err(maintenance_remote_error("compose 读取失败"))
+                    Err(maintenance_remote_error(error, "compose 读取失败"))
                 }
             }
         })
@@ -80,7 +80,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
                     }
-                    Err(maintenance_remote_error("compose 草稿丢弃失败"))
+                    Err(maintenance_remote_error(error, "compose 草稿丢弃失败"))
                 }
             }
         })
@@ -107,7 +107,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
                     }
-                    Err(maintenance_remote_error("Sent 列表读取失败"))
+                    Err(maintenance_remote_error(error, "Sent 列表读取失败"))
                 }
             }
         })
@@ -131,6 +131,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
             match self.sender.inspect_sent(session.cookie(), world, &summary, observed_at).await {
                 Ok(state) => Ok(MoogleMailboxSentState {
                     external_mail_id: state.external_mail_id,
+                    subject: state.subject,
                     collected: state.collected,
                     cod_pending: state.cod_pending,
                     remaining_credits: state.remaining_credits,
@@ -140,7 +141,7 @@ impl MoogleMailboxMaintenance for MoogleMailMaintenanceAdapter {
                     if error.is_session_expired() {
                         let _ = session.invalidate_current().await;
                     }
-                    Err(maintenance_remote_error("Sent 详情读取失败"))
+                    Err(maintenance_remote_error(error, "Sent 详情读取失败"))
                 }
             }
         })
@@ -151,8 +152,12 @@ fn maintenance_world(world_id: &str) -> Result<MoogleMailWorld, ApplicationError
     MoogleMailWorld::parse(world_id).ok_or_else(|| maintenance_error("MoogleMail 维护世界无效"))
 }
 
-fn maintenance_remote_error(detail: &str) -> ApplicationError {
-    maintenance_error(detail)
+fn maintenance_remote_error(error: MoogleMailError, detail: &str) -> ApplicationError {
+    maintenance_error(&format!(
+        "{detail}: operation={} category={}",
+        error.operation.as_str(),
+        error.category.as_str()
+    ))
 }
 
 fn maintenance_error(message: &str) -> ApplicationError {

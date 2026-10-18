@@ -259,7 +259,11 @@ pub(crate) fn parse_canonical_credits(value: &str) -> Option<i64> {
 }
 
 pub(crate) fn parse_current_cod(value: &str) -> Option<i64> {
-    let value = value.strip_prefix("Current CoD:").or_else(|| value.strip_prefix("CoD:"))?.trim();
+    let value = value
+        .strip_prefix("Current CoD:")
+        .or_else(|| value.strip_prefix("CoD:"))
+        .or_else(|| value.strip_prefix("Requested Payment on Delivery:"))?
+        .trim();
     let value = value.strip_suffix(" Credits").unwrap_or(value).trim();
     parse_canonical_credits(value)
 }

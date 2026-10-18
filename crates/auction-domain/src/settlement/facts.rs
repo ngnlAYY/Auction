@@ -20,6 +20,9 @@ pub struct SettlementFact {
     pub end_price: Option<SettlementAmount>,
     pub leader_id: Option<UserId>,
     pub leader_since: Option<DateTime<Utc>>,
+    /// 最终赢家在拍卖期间的累计领先纳秒数；由追加式 bid 事实重建，缺失时结算失败关闭。
+    #[serde(default)]
+    pub leader_held_nanos: Option<i64>,
     pub effective_end_at: DateTime<Utc>,
     pub seller_identity: String,
     pub equipment_id: EquipmentId,
@@ -45,7 +48,8 @@ impl SettlementFact {
                 if price.value() > 0
                     && !leader_id.is_nil()
                     && leader_since.timestamp_nanos_opt().is_some()
-                    && leader_since <= self.effective_end_at => {}
+                    && leader_since <= self.effective_end_at
+                    && self.leader_held_nanos.is_some_and(|held| held >= 0) => {}
             (None, None, None) => {}
             _ => {
                 return Err(DomainError::InvalidSettlementFacts(

@@ -1,7 +1,6 @@
 //! 同一论坛快照内核对持久结算与最终 lot 事实；不计算曲线或净支付。
 
 use auction_application::{ApplicationError, ForumLotSettlement};
-use chrono::{DateTime, Utc};
 use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
@@ -43,15 +42,10 @@ pub(super) fn project(
     {
         return Err(storage_error("终态落锤价、赢家或来源与持久结算不一致"));
     }
-    let leader_since: Option<DateTime<Utc>> =
-        row.try_get("leader_since").map_err(|_| storage_error("读取最终连续领先时间失败"))?;
-    let effective_end_at: Option<DateTime<Utc>> =
-        row.try_get("effective_end_at").map_err(|_| storage_error("读取最终有效截止失败"))?;
-    let (Some(leader_since), Some(effective_end_at)) = (leader_since, effective_end_at) else {
-        return Err(storage_error("终态快照缺少权威连续领先时间"));
+    let leader_held_nanos: Option<i64> =
+        row.try_get("leader_held_nanos").map_err(|_| storage_error("读取累计领先时长失败"))?;
+    let Some(leader_held_nanos) = leader_held_nanos.filter(|value| *value >= 0) else {
+        return Err(storage_error("终态快照缺少有效累计领先时长"));
     };
-    if leader_since > effective_end_at {
-        return Err(storage_error("终态连续领先时间无效"));
-    }
-    Ok(Some(ForumLotSettlement { leader_since, adjustment_ppm }))
+    Ok(Some(ForumLotSettlement { leader_held_nanos, adjustment_ppm }))
 }

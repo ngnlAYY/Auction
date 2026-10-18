@@ -24,6 +24,11 @@ pub struct MailboxMaintenanceReport {
     pub compose_matches: usize,
     pub sent_observed: usize,
     pub sent_recovered: usize,
+    pub sent_candidates: usize,
+    pub sent_matched: usize,
+    pub sent_state_failed: usize,
+    /// 最近一次详情读取失败的安全分类，便于定位协议漂移。
+    pub sent_state_error: Option<String>,
 }
 
 /// 维护服务；由 Worker 在固定周期调用，不存在自动重试队列。
@@ -51,7 +56,9 @@ impl MailboxMaintenanceService {
             return Err(repository_error("维护流程只支持主世界"));
         }
         let candidates = self.store.unproven_sends(world_id, 200).await?;
-        let (sent_observed, sent_recovered) = self.recover_sent(world_id, &candidates).await?;
+        let sent = self.recover_sent(world_id, &candidates).await?;
+        let sent_observed = sent.0;
+        let sent_recovered = sent.1;
         let compose = self.maintenance.compose(world_id).await?;
         if compose.clean {
             return Ok(MailboxMaintenanceReport {
@@ -61,6 +68,10 @@ impl MailboxMaintenanceService {
                 compose_matches: 0,
                 sent_observed,
                 sent_recovered,
+                sent_candidates: sent.2,
+                sent_matched: sent.3,
+                sent_state_failed: sent.4,
+                sent_state_error: sent.5.clone(),
             });
         }
         let matched = candidates
@@ -75,6 +86,10 @@ impl MailboxMaintenanceService {
                 compose_matches: matched.len(),
                 sent_observed,
                 sent_recovered,
+                sent_candidates: sent.2,
+                sent_matched: sent.3,
+                sent_state_failed: sent.4,
+                sent_state_error: sent.5.clone(),
             });
         }
         let delivery_id = matched[0].delivery_id;
@@ -101,6 +116,10 @@ impl MailboxMaintenanceService {
             compose_matches: 1,
             sent_observed,
             sent_recovered,
+            sent_candidates: sent.2,
+            sent_matched: sent.3,
+            sent_state_failed: sent.4,
+            sent_state_error: sent.5.clone(),
         })
     }
 
@@ -108,26 +127,40 @@ impl MailboxMaintenanceService {
         &self,
         world_id: &str,
         candidates: &[MoogleMailboxUnprovenSend],
-    ) -> Result<(usize, usize), ApplicationError> {
+    ) -> Result<(usize, usize, usize, usize, usize, Option<String>), ApplicationError> {
         if candidates.is_empty() {
             // 没有未证明投递时仍完整读取一次 Sent，保持三页周期读取。
             self.maintenance.sent_entries(world_id).await?;
-            return Ok((0, 0));
+            return Ok((0, 0, 0, 0, 0, None));
         }
         let entries = self.maintenance.sent_entries(world_id).await?;
         let mut observed = 0;
         let mut recovered = 0;
+        let mut matched_count = 0;
+        let mut state_failed = 0;
+        let mut subject_mismatch = 0;
+        let mut state_error = None;
         for candidate in candidates {
-            let matched =
+            let hits =
                 entries.iter().filter(|entry| sent_matches(candidate, entry)).collect::<Vec<_>>();
-            if matched.len() != 1 {
+            if hits.len() != 1 {
                 continue;
             }
-            let entry = matched[0];
-            let Ok(state) = self.maintenance.sent_state(world_id, entry, self.clock.now()).await
-            else {
-                continue;
+            matched_count += 1;
+            let entry = hits[0];
+            let state = match self.maintenance.sent_state(world_id, entry, self.clock.now()).await {
+                Ok(state) => state,
+                Err(error) => {
+                    state_failed += 1;
+                    state_error = Some(error.to_string());
+                    continue;
+                }
             };
+            // 列表标题被截断，详情完整标题必须再次包含完整 reference。
+            if !state.subject.contains(&candidate.reference) {
+                subject_mismatch += 1;
+                continue;
+            }
             let observation = json!({
                 "observed_at": self.clock.now(),
                 "mid": state.external_mail_id,
@@ -159,7 +192,14 @@ impl MailboxMaintenanceService {
                 .await?;
             recovered += 1;
         }
-        Ok((observed, recovered))
+        Ok((
+            observed,
+            recovered,
+            candidates.len(),
+            matched_count,
+            state_failed + subject_mismatch,
+            state_error,
+        ))
     }
 }
 
@@ -182,8 +222,16 @@ fn recovered_state_matches(
 }
 
 fn sent_matches(candidate: &MoogleMailboxUnprovenSend, entry: &MoogleMailboxSentEntry) -> bool {
+    // Sent 列表标题会被服务端截断到固定长度；只比较可证明的 UUID 前缀，完整标题由详情确认。
     candidate.recipient.eq_ignore_ascii_case(&entry.recipient)
-        && entry.subject.contains(&candidate.reference)
+        && reference_is_subject_projection(&entry.subject, &candidate.reference)
+}
+
+fn reference_is_subject_projection(subject: &str, reference: &str) -> bool {
+    let Some(start) = subject.find('[') else { return false };
+    let tail = &subject[start + 1..];
+    let prefix = tail.split(']').next().unwrap_or(tail).trim();
+    prefix.len() >= 6 && reference.starts_with(prefix)
 }
 
 fn compose_matches(

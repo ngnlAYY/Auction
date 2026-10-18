@@ -146,7 +146,8 @@ pub enum ForumCurrentBidSource {
 /// 已结算成交拍品的只读展示事实；调整来自持久结算，不含补偿池额外抵扣。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForumLotSettlement {
-    pub leader_since: DateTime<Utc>,
+    /// 最终赢家在拍卖期间的累计领先纳秒数。
+    pub leader_held_nanos: i64,
     pub adjustment_ppm: i64,
 }
 

@@ -127,6 +127,7 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
 
 - Sent 命中本地仍为 `manual_reconcile` 且无 `external_reference` 的投递时，把 MID、collected、COD 与剩余资产数写入
   `deliveries.result_metadata.mailbox_sweep`，不自动判成功。
+- Sent 列表会把标题截断到固定长度；匹配只使用可证明的 UUID 前缀，完整标题和 reference 必须由详情页再次确认。
 - Sent 摘要中 reference 与收件人唯一匹配、且详情金额/资产矩阵一致时，把历史 `write_unknown` 投递绑定回该 MID：
   `external_reference=mooglemail:main:send:<mid>`、`proof=sent_recovered_reference_v1`，并把履约从
   `manual_reconcile` 重新排队为 `enqueued`，让收取证据（`CoD Paid`）继续推进。恢复证明只用于升级前的未知投递，

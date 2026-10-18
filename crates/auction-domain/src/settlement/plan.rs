@@ -68,9 +68,8 @@ impl SettlementPlan {
                 calculate_hold_ppm(
                     scheduled_open_at,
                     scheduled_end_at,
-                    fact.leader_since
-                        .ok_or(DomainError::InvalidSettlementFacts("获胜事实缺少领先起点"))?,
-                    fact.effective_end_at,
+                    fact.leader_held_nanos
+                        .ok_or(DomainError::InvalidSettlementFacts("获胜事实缺少累计领先时长"))?,
                 )?
             } else {
                 0
@@ -211,25 +210,23 @@ pub fn proportional_floor(
 fn calculate_hold_ppm(
     scheduled_open_at: DateTime<Utc>,
     scheduled_end_at: DateTime<Utc>,
-    leader_since: DateTime<Utc>,
-    effective_end_at: DateTime<Utc>,
+    leader_held_nanos: i64,
 ) -> Result<i64, DomainError> {
     if scheduled_end_at <= scheduled_open_at
-        || leader_since > effective_end_at
-        || leader_since.timestamp_nanos_opt().is_none()
-        || effective_end_at.timestamp_nanos_opt().is_none()
+        || leader_held_nanos < 0
+        || scheduled_end_at.timestamp_nanos_opt().is_none()
+        || scheduled_open_at.timestamp_nanos_opt().is_none()
     {
-        return Err(DomainError::InvalidSettlementFacts("持有时长事实无效"));
+        return Err(DomainError::InvalidSettlementFacts("累计持有时长事实无效"));
     }
     let planned = timestamp_nanos(scheduled_end_at) - timestamp_nanos(scheduled_open_at);
-    let held = timestamp_nanos(effective_end_at) - timestamp_nanos(leader_since);
-    if planned <= 0 || held < 0 {
+    if planned <= 0 {
         return Err(DomainError::InvalidSettlementFacts("持有时长比例无效"));
     }
-    if held >= planned {
+    if i128::from(leader_held_nanos) >= planned {
         return Ok(SETTLEMENT_PPM);
     }
-    let value = held * i128::from(SETTLEMENT_PPM) / planned;
+    let value = i128::from(leader_held_nanos) * i128::from(SETTLEMENT_PPM) / planned;
     i64::try_from(value).map_err(|_| DomainError::SettlementAmountOverflow)
 }
 

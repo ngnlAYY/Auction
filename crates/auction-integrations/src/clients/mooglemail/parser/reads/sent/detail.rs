@@ -52,8 +52,9 @@ impl MoogleMailParser {
             ));
         }
         let fields = parse_detail_fields_for(forms[0], summary.world, operation)?;
+        // 列表页标题会被服务端截断；详情必须保留完整标题，列表标题只能作为前缀匹配。
         if !fields.recipient.eq_ignore_ascii_case(&summary.recipient)
-            || fields.subject != summary.subject
+            || !(fields.subject == summary.subject || fields.subject.starts_with(&summary.subject))
         {
             return Err(detail_error_for(
                 operation,
@@ -161,7 +162,7 @@ impl MoogleMailParser {
             external_mail_id: summary.external_mail_id.clone(),
             world: summary.world,
             recipient: summary.recipient.clone(),
-            subject: summary.subject.clone(),
+            subject: fields.subject.clone(),
             body_digest,
             remaining_credits,
             cod_pending: cod,

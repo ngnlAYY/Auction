@@ -44,6 +44,7 @@ pub struct MoogleMailSentListEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoogleMailSentObservation {
     pub external_mail_id: String,
+    pub subject: String,
     pub remaining_credits: i64,
     pub cod_pending: i64,
     pub remaining_equipment_ids: Vec<String>,
@@ -167,6 +168,7 @@ impl MoogleMailSender {
             .await?;
         Ok(MoogleMailSentObservation {
             external_mail_id: snapshot.external_mail_id,
+            subject: snapshot.subject,
             remaining_credits: snapshot.remaining_credits,
             cod_pending: snapshot.cod_pending,
             remaining_equipment_ids: snapshot.remaining_equipment_ids,
