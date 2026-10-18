@@ -162,15 +162,14 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
         section { id: "outbid-notifications", class: "public-outbid-preference",
             aria_busy: busy.to_string(),
             fieldset {
-                aria_describedby: "outbid-help outbid-feedback",
+                aria_describedby: "outbid-feedback",
                 legend { {t!("outbid-title")} }
-                p { id: "outbid-help", {t!("outbid-help")} }
                 div { class: "public-outbid-preference__choices",
                     div {
                         input {
                             id: "outbid-channel-mm", r#type: "radio", name: "outbid-channel",
                             value: "mm", checked: mm, disabled: !ready || busy || pending,
-                            aria_describedby: "outbid-help outbid-feedback",
+                            aria_describedby: "outbid-feedback",
                             onchange: move |_| {
                                 if select_mm.identity_matches() && !state.peek().busy && state.peek().pending.is_none() {
                                     let mut state = state.write();
@@ -185,7 +184,7 @@ pub(super) fn OutbidNotifications(user_id: String) -> Element {
                         input {
                             id: "outbid-channel-pm", r#type: "radio", name: "outbid-channel",
                             value: "pm", checked: pm, disabled: !ready || busy || pending,
-                            aria_describedby: "outbid-help outbid-feedback",
+                            aria_describedby: "outbid-feedback",
                             onchange: move |_| {
                                 if select_pm.identity_matches() && !state.peek().busy && state.peek().pending.is_none() {
                                     let mut state = state.write();

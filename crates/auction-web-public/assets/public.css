@@ -1775,7 +1775,7 @@
   display: inline-flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .public-auction-catalog__leading-reason {
@@ -1816,13 +1816,16 @@
 /* 仅操作栏直属按钮拥有此样式；行内挂载的弹窗按钮由各自表单控制。 */
 .public-auction-catalog__actions-list > button {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  min-block-size: var(--size-target);
-  padding: var(--space-1) var(--space-3);
+  min-block-size: 2rem;
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .public-auction-catalog__actions-list > button:not(:disabled):focus-visible {
@@ -2825,10 +2828,9 @@
   .public-auction-catalog .public-auction-catalog__actions-list > a,
   .public-auction-catalog .public-auction-catalog__actions-list > button {
     display: inline-flex;
-    flex: 1 1 0;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    min-inline-size: 0;
     text-align: center;
   }
 
@@ -2838,7 +2840,7 @@
 
   .public-auction-catalog__actions-list > button {
     min-block-size: 2rem;
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-1);
     font-size: var(--text-sm);
   }
 
@@ -3021,15 +3023,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-block-size: var(--size-target);
+  min-block-size: 2rem;
   max-inline-size: 100%;
-  padding: var(--space-1) var(--space-2);
+  padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   background: var(--color-surface);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .public-lot-watch button:focus-visible,
@@ -3062,7 +3064,6 @@
   font-size: var(--text-xs);
 }
 
-.public-lot-watches__help,
 .public-lot-watches__sync {
   margin-block: var(--space-2);
   font-size: var(--text-sm);

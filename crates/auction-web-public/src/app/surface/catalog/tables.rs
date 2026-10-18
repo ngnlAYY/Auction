@@ -108,7 +108,7 @@ pub(crate) fn LiveCatalogTable(
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--live ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-lots")} }
-                auction_web_shared::TableColumns { layout: "public-catalog-live", widths: vec![6, 23, 6, 4, 4, 7, 9, 9, 6, 8, 6, 12] }
+                auction_web_shared::TableColumns { layout: "public-catalog-live", widths: vec![6, 20, 6, 4, 4, 7, 9, 9, 6, 8, 6, 15] }
                 thead {
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
@@ -314,21 +314,24 @@ pub(crate) fn LiveCatalogRow(
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
             td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
-                LotWatchButton { lot_id: row.lot_id.clone(), lot_code: row.code.clone() }
-                LiveCatalogActions {
-                    lot_id: row.lot_id.clone(),
-                    lot_code: row.code.clone(),
-                    can_bid: can_bid && row.status == "live",
-                    current_price: row.current_price,
-                    next_bid: row.next_bid,
-                    lot_status: row.status.clone(),
-                    allow_slow,
-                    session_ready,
-                    block_ordinary_for_active_proxy: false,
-                    authenticated,
-                    leading: is_leading,
-                    show_view: false,
-                    show_proxy_summary: false,
+                // 已结束的拍品只保留状态；标记、出价、代理全部隐藏，避免空操作占宽。
+                if row.status == "live" {
+                    LotWatchButton { lot_id: row.lot_id.clone(), lot_code: row.code.clone() }
+                    LiveCatalogActions {
+                        lot_id: row.lot_id.clone(),
+                        lot_code: row.code.clone(),
+                        can_bid,
+                        current_price: row.current_price,
+                        next_bid: row.next_bid,
+                        lot_status: row.status.clone(),
+                        allow_slow,
+                        session_ready,
+                        block_ordinary_for_active_proxy: false,
+                        authenticated,
+                        leading: is_leading,
+                        show_view: false,
+                        show_proxy_summary: false,
+                    }
                 }
             }
         }

@@ -269,7 +269,6 @@ fn ProxySection(
     rsx! {
         section { class: "public-account-section",
             h2 { {t!("account-proxies-title")} }
-            p { class: "public-account-hint", {t!("account-proxies-note")} }
             if proxies.is_empty() {
                 p { class: "public-account-empty", {t!("account-no-proxies")} }
             } else {
