@@ -157,6 +157,11 @@ pub struct ForumLotSnapshot {
     pub code: String,
     pub category: String,
     pub name: String,
+    /// 装备身份字段；用于 Worker 论坛标色，不改变帖子文本解析。
+    pub equipment_quality: String,
+    pub equipment_type: String,
+    pub equipment_prefix: String,
+    pub equipment_suffix: String,
     pub equipment_level: Option<i64>,
     /// 按 HentaVerse Primary Attributes 固定顺序生成的大写首字母缩写。
     pub primary_attribute_initials: Option<String>,

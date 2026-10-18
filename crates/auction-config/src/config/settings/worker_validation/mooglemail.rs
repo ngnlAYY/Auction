@@ -194,14 +194,12 @@ pub(crate) fn validate_mooglemail_equipment_filter(
         &config.categories,
         &config.equipment_types,
     ];
-    let mut filter_count = 0;
     for list in lists {
         if list.len() > 256 {
             return Err(ConfigError::InvalidMoogleMailConfig(
                 "equipment_filter 每个 token 列表最多 256 项",
             ));
         }
-        filter_count += list.len();
         for (index, value) in list.iter().enumerate() {
             if !valid_config_text(value, 128)
                 || list[..index].iter().any(|previous| previous == value)
@@ -212,11 +210,7 @@ pub(crate) fn validate_mooglemail_equipment_filter(
             }
         }
     }
-    if config.enabled && filter_count == 0 && config.level_min == 0 && config.level_max == 0 {
-        return Err(ConfigError::InvalidMoogleMailConfig(
-            "启用 equipment_filter 时至少需要一个过滤条件",
-        ));
-    }
+    // 品质门槛始终存在（空列表也回退默认 L/P），因此不再要求其它过滤维度。
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use auction_application::EquipmentColorRule;
 use serde::Deserialize;
 
 /// Worker 使用的 E-Hentai 论坛主题同步策略。
@@ -37,6 +38,9 @@ pub struct ForumSyncWorkerConfig {
     pub item_timeout_seconds: u64,
     /// 单个论坛发布 claim 的租约秒数；每个主题在实际领取时单独计算。
     pub lease_duration_seconds: u64,
+    /// Admin runtime 投影的装备名称标色规则；不由 worker.toml 直接配置。
+    #[serde(skip)]
+    pub equipment_colors: Vec<EquipmentColorRule>,
 }
 
 impl Default for ForumSyncWorkerConfig {
@@ -59,6 +63,7 @@ impl Default for ForumSyncWorkerConfig {
             request_timeout_seconds: 30,
             item_timeout_seconds: 240,
             lease_duration_seconds: 300,
+            equipment_colors: Vec::new(),
         }
     }
 }

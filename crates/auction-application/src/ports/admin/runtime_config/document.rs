@@ -7,8 +7,8 @@ use crate::ports::RequestHash;
 
 use super::{
     business::{
-        AdminRuntimeEquipmentFilterConfig, AdminRuntimeMailTemplatesConfig,
-        AdminRuntimeWorldsConfig,
+        AdminRuntimeEquipmentColorsConfig, AdminRuntimeEquipmentFilterConfig,
+        AdminRuntimeMailTemplatesConfig, AdminRuntimeWorldsConfig,
     },
     errors::AdminRuntimeConfigError,
     operations::AdminRuntimeOperationsConfig,
@@ -243,6 +243,9 @@ pub struct AdminRuntimeDocument {
     /// Auction-BF 管理端可编辑的装备过滤策略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipment_filter: Option<AdminRuntimeEquipmentFilterConfig>,
+    /// 论坛装备名称标色规则；省略时不标色，保持旧 runtime 文件指纹。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_colors: Option<AdminRuntimeEquipmentColorsConfig>,
     /// Auction-BF 管理端可编辑的通知模板。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mail_templates: Option<AdminRuntimeMailTemplatesConfig>,
@@ -310,6 +313,10 @@ impl AdminRuntimeDocument {
             ));
         }
         validate_bot_players(&self.bot_players)?;
+        if let Some(colors) = &self.equipment_colors {
+            crate::validate_equipment_color_rules(&colors.to_rules())
+                .map_err(AdminRuntimeConfigError::InvalidDocument)?;
+        }
         validate_session(&self.session)?;
         validate_tracing(&self.tracing)?;
         validate_unix_path(&self.worker_control.socket_path, "worker_control.socket_path")?;
@@ -344,6 +351,12 @@ impl AdminRuntimeDocument {
             self.equipment_filter = Some(AdminRuntimeEquipmentFilterConfig::default());
             self.mail_templates = Some(AdminRuntimeMailTemplatesConfig::default());
         }
+        if let Some(equipment_filter) = &mut self.equipment_filter
+            && equipment_filter.qualities.is_empty()
+        {
+            equipment_filter.qualities = crate::default_accepted_qualities();
+        }
+        self.equipment_colors.get_or_insert_with(Default::default);
         if self.operations.is_none() {
             self.operations = Some(AdminRuntimeOperationsConfig::default());
         }

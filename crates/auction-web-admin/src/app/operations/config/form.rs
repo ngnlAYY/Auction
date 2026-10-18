@@ -1,5 +1,7 @@
 //! 运行时配置的分组表单控件。
 
+#[path = "form/equipment_colors.rs"]
+mod equipment_colors;
 #[path = "form/operations/mod.rs"]
 mod operations;
 
@@ -50,6 +52,7 @@ pub(super) fn RuntimeConfigFields(
 
             RuntimeSection { title: t!("admin-runtime-section-equipment"), open: true,
                 RuntimeGroup { title: t!("admin-runtime-equipment-filter-title"),
+                    p { class: "admin-runtime-section-note", {t!("admin-runtime-quality-gate-note")} }
                     div { class: "admin-runtime-field-grid",
                         SwitchField { form, disabled, path: "equipment_filter.enabled", label: t!("admin-runtime-filter-enabled"), on_dirty: on_dirty }
                         NumberField { form, disabled, path: "equipment_filter.level.min", label: t!("admin-runtime-level-min"), minimum: "0", maximum: "1000", on_dirty: on_dirty }
@@ -62,6 +65,9 @@ pub(super) fn RuntimeConfigFields(
                         ListField { form, disabled, path: "equipment_filter.categories", label: t!("admin-runtime-filter-categories"), on_dirty: on_dirty }
                         ListField { form, disabled, path: "equipment_filter.equipment_types", label: t!("admin-runtime-filter-types"), on_dirty: on_dirty }
                     }
+                }
+                RuntimeGroup { title: t!("admin-runtime-equipment-colors-title"),
+                    equipment_colors::EquipmentColorRulesField { form, disabled, on_dirty }
                 }
                 RuntimeGroup { title: t!("admin-runtime-equipment-source-title"),
                     div { class: "admin-runtime-field-grid",

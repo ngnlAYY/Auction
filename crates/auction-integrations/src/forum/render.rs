@@ -10,9 +10,10 @@ mod log;
 mod settlement;
 
 use auction_application::{
-    FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCurrentBidSource, ForumLotSnapshot,
-    ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer, ForumSystemLogEntry,
-    MAX_FORUM_CATALOG_LOTS, PublicEquipmentGameLink, forum_catalog_page_marker, forum_world_name,
+    EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCurrentBidSource,
+    ForumLotSnapshot, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
+    ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS, PEERLESS_COLORS, PublicEquipmentGameLink,
+    forum_catalog_page_marker, forum_world_name,
 };
 use auction_domain::{AuctionId, SettlementWorld};
 use sha2::{Digest, Sha256};
@@ -29,6 +30,14 @@ const FORUM_SEPARATOR: &str =
 pub fn render_auction_thread(
     snapshot: ForumAuctionSnapshot,
     equipment_links: Vec<PublicEquipmentGameLink>,
+) -> Result<ForumRenderedThread, ForumRenderError> {
+    render_auction_thread_with_colors(snapshot, equipment_links, &[])
+}
+
+fn render_auction_thread_with_colors(
+    snapshot: ForumAuctionSnapshot,
+    equipment_links: Vec<PublicEquipmentGameLink>,
+    colors: &[EquipmentColorRule],
 ) -> Result<ForumRenderedThread, ForumRenderError> {
     if snapshot.auction_id.is_nil()
         || snapshot.sequence <= 0
@@ -195,7 +204,7 @@ pub fn render_auction_thread(
             "[b][{}][/b] [url={}][b]{}[/b][/url]",
             lot.code,
             equipment_url,
-            bbcode_text(&lot.name)
+            colored_equipment_name(&lot, colors)
         )
         .map_err(|_| ForumRenderError::BodyTooLarge)?;
         let mut equipment_facts = Vec::with_capacity(3);
@@ -274,9 +283,18 @@ pub fn render_auction_thread(
     })
 }
 
-/// 无状态的论坛主题渲染器，供 Worker 通过窄端口调用。
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ForumThreadRenderer;
+/// 论坛主题渲染器；颜色规则来自 Admin runtime，渲染器本身无状态。
+#[derive(Debug, Clone, Default)]
+pub struct ForumThreadRenderer {
+    colors: Vec<EquipmentColorRule>,
+}
+
+impl ForumThreadRenderer {
+    /// 使用已校验的装备标色规则构造渲染器。
+    pub fn with_colors(colors: Vec<EquipmentColorRule>) -> Self {
+        Self { colors }
+    }
+}
 
 impl ForumRenderer for ForumThreadRenderer {
     fn render(
@@ -284,7 +302,7 @@ impl ForumRenderer for ForumThreadRenderer {
         snapshot: ForumAuctionSnapshot,
         equipment_links: Vec<PublicEquipmentGameLink>,
     ) -> Result<ForumRenderedThread, ForumRenderError> {
-        render_auction_thread(snapshot, equipment_links)
+        render_auction_thread_with_colors(snapshot, equipment_links, &self.colors)
     }
 
     fn render_system_log(
@@ -301,6 +319,74 @@ impl ForumRenderer for ForumThreadRenderer {
             entries,
         )
     }
+}
+
+/// 按规则给装备名加 BBCode 颜色；Peerless 品质词固定彩虹，规则只作用于其余部分。
+fn colored_equipment_name(lot: &ForumLotSnapshot, colors: &[EquipmentColorRule]) -> String {
+    let peerless = lot.equipment_quality.eq_ignore_ascii_case("Peerless")
+        && lot.name.get(..8).is_some_and(|value| value.eq_ignore_ascii_case("Peerless"));
+    let rest = if peerless {
+        lot.name.get(8..).unwrap_or_default().trim_start()
+    } else {
+        lot.name.as_str()
+    };
+    let mut out = String::new();
+    if peerless {
+        for (index, character) in "Peerless".chars().enumerate() {
+            let _ = write!(
+                out,
+                "[color={}]{}[/color]",
+                PEERLESS_COLORS[index.min(PEERLESS_COLORS.len() - 1)],
+                bbcode_text(&character.to_string())
+            );
+        }
+        out.push(' ');
+    }
+    let matched = colors.iter().find_map(|rule| {
+        rule.matches(
+            &lot.category,
+            &lot.equipment_type,
+            &lot.equipment_quality,
+            lot.equipment_level,
+            &lot.equipment_prefix,
+            &lot.equipment_suffix,
+        )
+        .map(|matched| (rule, matched))
+    });
+    match matched {
+        Some((rule, matched)) if matched.prefix && matched.suffix => {
+            let _ = write!(out, "[color={}]{}[/color]", rule.combined_color, bbcode_segment(rest));
+        }
+        Some((rule, matched)) if matched.prefix => {
+            write_colored_segment(&mut out, rest, &lot.equipment_prefix, &rule.prefix_color, false);
+        }
+        Some((rule, matched)) if matched.suffix => {
+            write_colored_segment(&mut out, rest, &lot.equipment_suffix, &rule.suffix_color, true);
+        }
+        _ => out.push_str(&bbcode_text(rest)),
+    }
+    out
+}
+
+fn write_colored_segment(out: &mut String, text: &str, needle: &str, color: &str, last: bool) {
+    if needle.is_empty() {
+        out.push_str(&bbcode_text(text));
+        return;
+    }
+    let lower = text.to_ascii_lowercase();
+    let needle = needle.to_ascii_lowercase();
+    let start = if last { lower.rfind(&needle) } else { lower.find(&needle) };
+    let Some(mut start) = start else {
+        out.push_str(&bbcode_text(text));
+        return;
+    };
+    let end = start + needle.len();
+    if last && start >= 3 && lower.get(start - 3..start) == Some("of ") {
+        start -= 3;
+    }
+    out.push_str(&bbcode_segment(&text[..start]));
+    let _ = write!(out, "[color={color}]{}[/color]", bbcode_segment(&text[start..end]));
+    out.push_str(&bbcode_segment(&text[end..]));
 }
 
 /// 首帖与续页使用同一页尾和独立字节上限，任何一页超限都在远端写入前失败。
@@ -346,6 +432,10 @@ fn valid_lot(lot: &ForumLotSnapshot) -> bool {
     valid_code(&lot.code)
         && valid_text(&lot.category, 128)
         && valid_text(&lot.name, 1024)
+        && valid_optional_text(&lot.equipment_quality, 64)
+        && valid_optional_text(&lot.equipment_type, 64)
+        && valid_optional_text(&lot.equipment_prefix, 128)
+        && valid_optional_text(&lot.equipment_suffix, 128)
         && lot.equipment_level.is_none_or(|level| (1..=100_000).contains(&level))
         && lot.primary_attribute_initials.as_deref().is_none_or(valid_primary_attribute_initials)
         && lot.avg_roll_tenths.is_none_or(|value| (0..=1_000).contains(&value))
@@ -378,6 +468,10 @@ fn valid_code(value: &str) -> bool {
 
 fn valid_primary_attribute_initials(value: &str) -> bool {
     !value.is_empty() && value.len() <= 6 && value.bytes().all(|byte| byte.is_ascii_uppercase())
+}
+
+fn valid_optional_text(value: &str, maximum: usize) -> bool {
+    value.is_empty() || valid_text(value, maximum)
 }
 
 fn valid_text(value: &str, maximum: usize) -> bool {
@@ -427,6 +521,11 @@ fn category_label(value: &str) -> String {
 
 fn bbcode_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ").replace('[', "［").replace(']', "］")
+}
+
+/// 保留原始空格的分段转义，避免颜色标签把相邻单词粘在一起。
+fn bbcode_segment(value: &str) -> String {
+    value.replace('[', "［").replace(']', "］")
 }
 
 fn format_forum_time(value: chrono::DateTime<chrono::Utc>) -> String {

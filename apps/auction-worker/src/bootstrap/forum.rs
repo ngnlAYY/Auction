@@ -114,7 +114,8 @@ pub(super) async fn configure_forum(
     let publisher: Arc<dyn ForumPublisher> = gateway.clone();
     let reader: Arc<dyn ForumTopicReader> = gateway.clone();
     let post_writer: Arc<dyn ForumPostWriter> = gateway.clone();
-    let renderer: Arc<dyn ForumRenderer> = Arc::new(ForumThreadRenderer);
+    let renderer: Arc<dyn ForumRenderer> =
+        Arc::new(ForumThreadRenderer::with_colors(forum_config.equipment_colors.clone()));
     let (equipment_key_id, equipment_key_material) = config
         .equipment_data_key_id()
         .zip(config.equipment_data_key())

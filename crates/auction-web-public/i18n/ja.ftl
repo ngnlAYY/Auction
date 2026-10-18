@@ -172,6 +172,9 @@ compensation-amount = 金額
 compensation-details = 回次明細
 compensation-round-label = オークション
 compensation-world = 装備ワールド
+compensation-hold = 保有率
+compensation-adjustment = 調整率
+compensation-held-time = 合計保有時間
 compensation-discount = 割引需要
 compensation-equipment = 装備
 compensation-equation = { $opening } + { $income } = { $outflow } + { $closing }

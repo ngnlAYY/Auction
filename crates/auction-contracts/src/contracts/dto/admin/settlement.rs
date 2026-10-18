@@ -142,6 +142,8 @@ pub struct AdminSettlementLotResponse {
     pub status: String,
     pub equipment_name: String,
     pub equipment_category: String,
+    /// 游戏装备详情链接；由 Admin 后端按世界和外部装备标识生成。
+    pub game_equipment_url: String,
     pub seller: Option<String>,
     pub winner: Option<String>,
     pub final_price: i64,
@@ -152,6 +154,8 @@ pub struct AdminSettlementLotResponse {
     pub compensation_amount: i64,
     pub hold_ppm: i32,
     pub adjustment_ppm: i32,
+    /// 赢家累计领先纳秒数；流拍为 0。
+    pub leader_held_nanos: i64,
     pub adjustment: AdminSettlementAdjustmentResponse,
 }
 

@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 
 use auction_web_shared::{
     AsyncState, AsyncStateKind, Time, TruncatedText, format_credit_amount as format_amount,
+    format_held_duration,
 };
 
 use crate::api::{
@@ -44,7 +45,7 @@ pub(super) fn AdminSettlementReportView(
         div { class: "admin-settlement__table-wrap",
             table { class: "admin-shell__table admin-auction-table",
                     caption { class: "admin-visually-hidden", {t!("page-settlement-title")} }
-                    auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![6, 18, 7, 5, 9, 8, 8, 9, 9, 5, 9, 7] }
+                    auction_web_shared::TableColumns { layout: "admin-settlement", widths: vec![5, 16, 6, 5, 8, 7, 7, 7, 7, 8, 7, 8, 9] }
                     thead {
                         tr {
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-lot-id")} }
@@ -54,6 +55,7 @@ pub(super) fn AdminSettlementReportView(
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-final-price")} }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-hold")} }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-adjustment")} }
+                            th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-held-time")} }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-discount-penalty")} }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-listed-price")} }
                             th { class: "admin-auction-num", scope: "col", {t!("admin-settlement-compensation")} }
@@ -100,20 +102,30 @@ pub(super) fn AdminSettlementReportView(
 fn AdminSettlementLotRow(lot: AdminSettlementLot) -> Element {
     let hold_share = format_ppm(lot.hold_ppm, false);
     let adjustment_rate = format_ppm(lot.adjustment_ppm, true);
+    let held_time = format_held_duration(lot.leader_held_nanos);
     let price_adjustment = price_adjustment_label(&lot);
     let equipment_name = lot.equipment_name.clone();
+    let equipment_url = lot.game_equipment_url.clone();
     let lot_code = super::super::lots::admin_lot_code_for(&lot.equipment_category, lot.lot_number);
     let seller = lot.seller.unwrap_or_else(|| t!("value-empty"));
     let winner = lot.winner.unwrap_or_else(|| t!("value-empty"));
     rsx! {
         tr {
             td { class: "admin-auction-num", "{lot_code}" }
-            td { TruncatedText { value: equipment_name } }
+            td {
+                a {
+                    href: equipment_url,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    TruncatedText { value: equipment_name }
+                }
+            }
             td { TruncatedText { value: seller } }
             td { TruncatedText { value: winner } }
             td { class: "admin-auction-num", {format_amount(lot.final_price)} }
             td { class: "admin-auction-num", "{hold_share}" }
             td { class: "admin-auction-num", "{adjustment_rate}" }
+            td { class: "admin-auction-num", "{held_time}" }
             td { class: "admin-auction-num", "{price_adjustment}" }
             td { class: "admin-auction-num", {format_amount(lot.listed_price)} }
             td { class: "admin-auction-num", {format_amount(lot.compensation_amount)} }

@@ -43,6 +43,13 @@ pub struct PublicCompensationMovement {
     pub lot_number: Option<i32>,
     pub equipment_name: Option<String>,
     pub equipment_category: Option<String>,
+    /// 仅用于解析游戏装备链接，不进入 Public DTO。
+    pub equipment_id: Option<auction_domain::EquipmentId>,
+    /// main/isekai 的权威装备 URL 前缀投影；不进入 Public DTO。
+    pub projected_game_equipment_url: Option<String>,
+    pub hold_ppm: Option<i32>,
+    pub adjustment_ppm: Option<i32>,
+    pub leader_held_nanos: Option<i64>,
     pub kind: PublicCompensationMovementKind,
     pub amount: i64,
     pub balance_after: i64,
@@ -62,7 +69,12 @@ impl PublicCompensationMovement {
         let has_lot = self.lot_id.is_some()
             || self.lot_number.is_some()
             || self.equipment_name.is_some()
-            || self.equipment_category.is_some();
+            || self.equipment_category.is_some()
+            || self.equipment_id.is_some()
+            || self.projected_game_equipment_url.is_some()
+            || self.hold_ppm.is_some()
+            || self.adjustment_ppm.is_some()
+            || self.leader_held_nanos.is_some();
         let valid_lot = self.lot_id.is_some_and(|value| !value.is_nil())
             && self.lot_number.is_some_and(|value| value > 0)
             && self.equipment_name.as_deref().is_some_and(|value| {
@@ -76,7 +88,21 @@ impl PublicCompensationMovement {
                     && value.len() <= 64
                     && value == value.trim()
                     && !value.chars().any(char::is_control)
-            });
+            })
+            && self.equipment_id.is_some_and(|value| !value.is_nil())
+            && self.projected_game_equipment_url.as_deref().is_some_and(|value| {
+                ["https://hentaiverse.org/equip/", "https://hentaiverse.org/isekai/equip/"]
+                    .iter()
+                    .find_map(|prefix| value.strip_prefix(prefix))
+                    .is_some_and(|external_id| {
+                        !external_id.is_empty()
+                            && external_id.len() <= 32
+                            && external_id.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+            })
+            && self.hold_ppm.is_some_and(|value| (0..=1_000_000).contains(&value))
+            && self.adjustment_ppm.is_some_and(|value| (-1_000_000..=1_000_000).contains(&value))
+            && self.leader_held_nanos.is_some_and(|value| value >= 0);
 
         match self.kind {
             PublicCompensationMovementKind::Opening => {

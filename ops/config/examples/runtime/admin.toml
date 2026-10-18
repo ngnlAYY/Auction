@@ -28,10 +28,10 @@ sender_allowlist_disabled = false
 
 # 可选区块：拍卖邮件装备过滤；默认关闭，来源仍必须标记为可交易。
 [equipment_filter]
-# 可选：是否启用品质、前后缀、分类、类型和等级过滤；默认 false。
+# 可选：是否启用前后缀、分类、类型和等级过滤；品质门槛始终启用，默认 false。
 enabled = false
-# 可选：允许的品质 token；空数组表示不限制。
-qualities = []
+# 可选：硬性接收品质；空数组回退默认 Legendary/Peerless，低于列表直接退回。
+qualities = ["Legendary", "Peerless"]
 # 可选：允许的前缀 token；空数组表示不限制。
 prefixes = []
 # 可选：允许的后缀 token；空数组表示不限制。
@@ -47,6 +47,32 @@ equipment_types = []
 min = 0
 # 可选：最高装备等级，范围 0-1000；默认 0 表示不限制，非零时必须不小于 min。
 max = 0
+
+# 可选区块：论坛装备名称标色；省略时不标色，规则按顺序首个命中生效。
+# [equipment_colors]
+# # 可选：规则数组，最多 200 条；至少填写一个前缀或后缀。
+# rules = []
+# # [[equipment_colors.rules]]
+# # 可选：装备类型，例如 One-Handed、Two-Handed、Staff、Shield、Cloth、Light、Heavy；留空表示所有类型。
+# # category = "One-Handed"
+# # 可选：装备种类，例如 Rapier、Shortsword；留空表示该装备类型下所有种类。
+# # equipment_type = "Rapier"
+# # 可选：精确品质；留空表示所有品质。
+# # quality = "Legendary"
+# # 可选：适用的等级范围；0 表示不限制。
+# # [equipment_colors.rules.level]
+# # min = 0
+# # max = 0
+# # 可选：命中后标色的前缀列表；可为空但前后缀不能同时为空。
+# # prefixes = ["Shocking"]
+# # 可选：命中后标色的后缀列表；可为空但前后缀不能同时为空。
+# # suffixes = ["Slaughter"]
+# # 可选：前缀颜色，格式 #rrggbb。
+# # prefix_color = "#ff0000"
+# # 可选：后缀颜色，格式 #rrggbb。
+# # suffix_color = "#00aa00"
+# # 可选：前后缀同时命中时整件装备的颜色，格式 #rrggbb。
+# # combined_color = "#aa00aa"
 
 # 可选区块：MoogleMail 业务通知模板；字段闭集和默认正文由本模板冻结。
 [mail_templates]

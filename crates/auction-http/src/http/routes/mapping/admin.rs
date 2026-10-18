@@ -7,6 +7,10 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 
 pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlementReportResponse {
+    let equipment_prefix = match report.auction.world_id.as_str() {
+        "isekai" => "https://hentaiverse.org/isekai/equip/",
+        _ => "https://hentaiverse.org/equip/",
+    };
     let auction = report.auction;
     AdminSettlementReportResponse {
         auction: AdminSettlementAuctionResponse {
@@ -47,6 +51,7 @@ pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlement
                 status: lot.status,
                 equipment_name: lot.equipment_name,
                 equipment_category: lot.equipment_category,
+                game_equipment_url: format!("{equipment_prefix}{}", lot.external_equipment_id),
                 seller: lot.seller,
                 winner: lot.winner,
                 final_price: lot.final_price,
@@ -57,6 +62,7 @@ pub(crate) fn map_settlement_report(report: SettlementReport) -> AdminSettlement
                 compensation_amount: lot.compensation_amount,
                 hold_ppm: lot.hold_ppm,
                 adjustment_ppm: lot.adjustment_ppm,
+                leader_held_nanos: lot.leader_held_nanos,
                 adjustment: AdminSettlementAdjustmentResponse { policy: lot.adjustment.policy },
             })
             .collect(),
@@ -186,6 +192,9 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
         || lot.lot_number <= 0
         || !valid_report_text(&lot.equipment_name, 512)
         || !valid_report_text(&lot.equipment_category, 128)
+        || lot.external_equipment_id.is_empty()
+        || lot.external_equipment_id.len() > 32
+        || !lot.external_equipment_id.bytes().all(|byte| byte.is_ascii_digit())
         || !valid_report_optional_text(lot.seller.as_deref(), 512)
         || !valid_report_optional_text(lot.winner.as_deref(), 512)
         || lot.final_price < 0
@@ -196,6 +205,7 @@ fn valid_settlement_lot(lot: &SettlementLotReport) -> bool {
         || lot.compensation_amount < 0
         || !(0..=1_000_000).contains(&lot.hold_ppm)
         || !(-1_000_000..=1_000_000).contains(&lot.adjustment_ppm)
+        || lot.leader_held_nanos < 0
         || !valid_report_optional_text(lot.adjustment.policy.as_deref(), 64)
     {
         return false;

@@ -45,3 +45,20 @@ fn format_thousands(value: u64) -> String {
     }
     formatted
 }
+
+/// 将累计纳秒格式化为紧凑的持有总时间；只用于展示，不参与结算。
+pub fn format_held_duration(nanos: i64) -> String {
+    let seconds = (nanos.max(0) as u64) / 1_000_000_000;
+    let days = seconds / 86_400;
+    let hours = seconds % 86_400 / 3_600;
+    let minutes = seconds % 3_600 / 60;
+    if days > 0 {
+        format!("{days}d {hours:02}h {minutes:02}m")
+    } else if hours > 0 {
+        format!("{hours}h {minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{seconds}s")
+    }
+}

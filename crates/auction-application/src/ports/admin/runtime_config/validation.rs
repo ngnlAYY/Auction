@@ -81,14 +81,12 @@ fn validate_runtime_equipment_filter(
         &config.categories,
         &config.equipment_types,
     ];
-    let mut filter_count = 0;
     for list in lists {
         if list.len() > 256 {
             return Err(AdminRuntimeConfigError::InvalidDocument(
                 "equipment_filter 每个 token 列表最多 256 项".to_owned(),
             ));
         }
-        filter_count += list.len();
         for (index, value) in list.iter().enumerate() {
             if !valid_runtime_token(value) || list[..index].iter().any(|previous| previous == value)
             {
@@ -98,11 +96,7 @@ fn validate_runtime_equipment_filter(
             }
         }
     }
-    if config.enabled && filter_count == 0 && config.level.min == 0 && config.level.max == 0 {
-        return Err(AdminRuntimeConfigError::InvalidDocument(
-            "启用 equipment_filter 时至少需要一个过滤条件".to_owned(),
-        ));
-    }
+    // 品质门槛始终存在（空列表也回退默认 L/P），因此不再要求其它过滤维度。
     Ok(())
 }
 

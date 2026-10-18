@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
+use auction_application::default_accepted_qualities;
 use serde::Deserialize;
 
 /// Worker 使用的 MoogleMail 入站轮询策略。
@@ -16,7 +17,7 @@ pub struct MoogleMailWorkerConfig {
     pub world_id: String,
     /// MoogleMail 未填写 `start` 时的起拍价覆盖值；省略时使用邮件专属默认值 50,000 Credits。
     pub start_price: Option<i64>,
-    /// MoogleMail 拍卖装备过滤策略；省略时关闭过滤但仍要求来源标记为可交易。
+    /// MoogleMail 拍卖装备过滤策略；品质硬性门槛始终生效，省略时使用默认 L/P。
     pub equipment_filter: MoogleMailEquipmentFilterConfig,
     /// MoogleMail 业务通知模板；省略时使用旧版默认英文模板。
     pub mail_templates: MoogleMailNotificationTemplatesConfig,
@@ -172,12 +173,12 @@ impl MoogleMailNotificationTemplatesConfig {
 }
 
 /// MoogleMail 拍卖装备过滤策略。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MoogleMailEquipmentFilterConfig {
-    /// 是否启用品质、前后缀、分类、类型和等级过滤；默认关闭。
+    /// 是否启用前后缀、分类、类型和等级过滤；品质门槛始终启用。
     pub enabled: bool,
-    /// 允许的品质 token；空数组表示不限制。
+    /// 硬性允许品质；空数组回退默认 Legendary/Peerless。
     pub qualities: Vec<String>,
     pub prefixes: Vec<String>,
     pub suffixes: Vec<String>,
@@ -187,6 +188,21 @@ pub struct MoogleMailEquipmentFilterConfig {
     pub level_min: i32,
     /// 最高装备等级；0 表示不启用等级上限，最大允许 1000。
     pub level_max: i32,
+}
+
+impl Default for MoogleMailEquipmentFilterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            qualities: default_accepted_qualities(),
+            prefixes: Vec::new(),
+            suffixes: Vec::new(),
+            categories: Vec::new(),
+            equipment_types: Vec::new(),
+            level_min: 0,
+            level_max: 0,
+        }
+    }
 }
 
 /// 单个 MoogleMail 世界的入站轮询配置。

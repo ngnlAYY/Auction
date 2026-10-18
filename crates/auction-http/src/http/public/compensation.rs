@@ -7,7 +7,7 @@ use auction_application::{
     DEFAULT_PUBLIC_COMPENSATION_PAGE_SIZE, MAX_PUBLIC_COMPENSATION_OFFSET,
     PublicCompensationCursor, PublicCompensationListRequest, PublicCompensationMovement,
     PublicCompensationMovementPage, PublicCompensationMovementRequest, PublicCompensationPage,
-    PublicCompensationRound,
+    PublicCompensationRound, PublicEquipmentLinkTarget,
 };
 use auction_contracts::{
     ApiErrorResponse, ApiResponse, PublicCompensationMovementPageResponse,
@@ -152,9 +152,13 @@ pub(crate) async fn movements(
         ));
     }
 
+    let equipment_urls = resolve_movement_equipment_urls(&state, &result).await?;
     let mut headers = HeaderMap::new();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    Ok((headers, Json(ApiResponse::ok("补偿池流水已加载", map_movement_page(result, page)))))
+    Ok((
+        headers,
+        Json(ApiResponse::ok("补偿池流水已加载", map_movement_page(result, page, &equipment_urls))),
+    ))
 }
 
 fn valid_pool_page(
@@ -193,13 +197,71 @@ fn map_pool_page(
     }
 }
 
+async fn resolve_movement_equipment_urls(
+    state: &PublicApiState,
+    page: &PublicCompensationMovementPage,
+) -> Result<std::collections::HashMap<Uuid, String>, (StatusCode, Json<ApiErrorResponse>)> {
+    let targets = page
+        .entries
+        .iter()
+        .filter_map(|movement| {
+            Some(PublicEquipmentLinkTarget {
+                lot_id: movement.lot_id?,
+                equipment_id: movement.equipment_id?,
+                world_id: page.round.world_id.clone(),
+                projected_game_equipment_url: movement.projected_game_equipment_url.clone()?,
+            })
+        })
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    if targets.iter().any(|target| target.validate().is_err()) {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "补偿账本返回数据无效",
+        ));
+    }
+    let Some(resolver) = state.equipment_links() else {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "temporarily_unavailable",
+            "服务暂时不可用",
+        ));
+    };
+    let links = resolver.resolve_public_equipment_links(&targets).await.map_err(|_| {
+        api_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable", "服务暂时不可用")
+    })?;
+    if links.len() != targets.len() {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "storage_unavailable",
+            "补偿账本返回数据无效",
+        ));
+    }
+    Ok(targets
+        .into_iter()
+        .zip(links)
+        .map(|(target, link)| (target.lot_id, link.into_url()))
+        .collect())
+}
+
 fn map_movement_page(
     page: PublicCompensationMovementPage,
     page_number: i64,
+    equipment_urls: &std::collections::HashMap<Uuid, String>,
 ) -> PublicCompensationMovementPageResponse {
     PublicCompensationMovementPageResponse {
         round: map_round(page.round),
-        movements: page.entries.into_iter().map(map_movement).collect(),
+        movements: page
+            .entries
+            .into_iter()
+            .map(|movement| {
+                let url = movement.lot_id.and_then(|lot_id| equipment_urls.get(&lot_id).cloned());
+                map_movement(movement, url)
+            })
+            .collect(),
         total: page.total,
         page: page_number,
         page_size: page.limit,
@@ -221,13 +283,20 @@ fn map_round(round: PublicCompensationRound) -> PublicCompensationRoundResponse 
     }
 }
 
-fn map_movement(movement: PublicCompensationMovement) -> PublicCompensationMovementResponse {
+fn map_movement(
+    movement: PublicCompensationMovement,
+    game_equipment_url: Option<String>,
+) -> PublicCompensationMovementResponse {
     PublicCompensationMovementResponse {
         sequence: movement.sequence,
         lot_id: movement.lot_id.map(|value| value.to_string()),
         lot_number: movement.lot_number,
         equipment_name: movement.equipment_name,
         equipment_category: movement.equipment_category,
+        game_equipment_url,
+        hold_ppm: movement.hold_ppm,
+        adjustment_ppm: movement.adjustment_ppm,
+        leader_held_nanos: movement.leader_held_nanos,
         kind: movement.kind.as_str().to_owned(),
         amount: movement.amount,
         balance_after: movement.balance_after,

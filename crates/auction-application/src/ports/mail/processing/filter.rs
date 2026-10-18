@@ -13,13 +13,23 @@ pub const EQUIPMENT_LEVEL_NOT_ALLOWED: &str = "level_not_allowed";
 pub const EQUIPMENT_ATTRIBUTES_INVALID: &str = "attributes_invalid";
 pub const EQUIPMENT_TRADEABLE_REQUIRED: &str = "tradeable_required";
 
+/// 未配置品质允许列表时的硬性默认值：只接收 Legendary 与 Peerless。
+pub const DEFAULT_ACCEPTED_QUALITIES: [&str; 2] = ["Legendary", "Peerless"];
+
+/// 生成拥有独立所有权的默认品质列表，供配置快照使用。
+pub fn default_accepted_qualities() -> Vec<String> {
+    DEFAULT_ACCEPTED_QUALITIES.iter().map(|quality| (*quality).to_owned()).collect()
+}
+
 /// MoogleMail 入站装备过滤策略。
-/// 空的 allowlist 表示不限制对应维度；等级上下限分别用 0 表示不限制。
-/// 启用策略时至少要配置一个维度或等级范围。
+/// 品质允许列表是始终生效的硬性门槛，空列表回退 Legendary/Peerless；其余空 allowlist
+/// 表示不限制对应维度，等级上下限分别用 0 表示不限制。
+/// `enabled` 只控制附加维度；品质门槛不受其影响。
 /// 策略只消费已由装备来源适配器生成的安全快照，不接触外部页面正文或装备 key。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailEquipmentFilter {
     pub enabled: bool,
+    /// 硬性允许品质；空列表回退默认 Legendary/Peerless。
     pub qualities: Vec<String>,
     pub prefixes: Vec<String>,
     pub suffixes: Vec<String>,
@@ -27,6 +37,21 @@ pub struct MailEquipmentFilter {
     pub equipment_types: Vec<String>,
     pub level_min: i32,
     pub level_max: i32,
+}
+
+impl Default for MailEquipmentFilter {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            qualities: default_accepted_qualities(),
+            prefixes: Vec::new(),
+            suffixes: Vec::new(),
+            categories: Vec::new(),
+            equipment_types: Vec::new(),
+            level_min: 0,
+            level_max: 0,
+        }
+    }
 }
 
 impl MailEquipmentFilter {
@@ -45,12 +70,10 @@ impl MailEquipmentFilter {
             &self.categories,
             &self.equipment_types,
         ];
-        let mut filter_count = 0;
         for list in values {
             if list.len() > 256 {
                 return Err(MailProcessingError::InvalidConfiguration);
             }
-            filter_count += list.len();
             for (index, value) in list.iter().enumerate() {
                 if value.is_empty()
                     || value.len() > 128
@@ -62,9 +85,8 @@ impl MailEquipmentFilter {
                 }
             }
         }
-        if self.enabled && filter_count == 0 && self.level_min == 0 && self.level_max == 0 {
-            return Err(MailProcessingError::InvalidConfiguration);
-        }
+        // 品质门槛始终存在（空列表也回退默认 L/P），因此不再需要“至少一个过滤条件”
+        // 的空策略检查；保留上面的循环只为校验其它 token 列表。
         Ok(())
     }
 
@@ -110,11 +132,12 @@ impl MailEquipmentFilter {
             }
             Some(_) => return EQUIPMENT_ATTRIBUTES_INVALID,
         };
+        // 品质是硬性接收门槛，不随 enabled 开关关闭；低于门槛的邮件由调用方直接退回。
+        if !quality_allowed(&self.qualities, quality) {
+            return EQUIPMENT_QUALITY_NOT_ALLOWED;
+        }
         if !self.enabled {
             return "";
-        }
-        if !allowed_value(&self.qualities, quality) {
-            return EQUIPMENT_QUALITY_NOT_ALLOWED;
         }
         if !allowed_value(&self.prefixes, prefix) {
             return EQUIPMENT_PREFIX_NOT_ALLOWED;
@@ -141,4 +164,13 @@ impl MailEquipmentFilter {
 
 fn allowed_value(allowed: &[String], value: &str) -> bool {
     allowed.is_empty() || allowed.iter().any(|candidate| candidate == value)
+}
+
+fn quality_allowed(allowed: &[String], value: &str) -> bool {
+    if allowed.is_empty() {
+        return DEFAULT_ACCEPTED_QUALITIES
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(value));
+    }
+    allowed.iter().any(|candidate| candidate.eq_ignore_ascii_case(value))
 }

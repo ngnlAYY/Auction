@@ -216,10 +216,10 @@ maximum_total_bytes = 268435456
 
 # 可选区块：拍卖邮件装备过滤；默认关闭。来源仍必须标记为可交易。
 [worker.mooglemail.equipment_filter]
-# 可选：是否启用品质、前后缀、分类、类型和等级过滤；默认 false。
+# 可选：是否启用前后缀、分类、类型和等级过滤；品质门槛始终启用，默认 false。
 enabled = false
-# 可选：允许的品质 token；空数组表示不限制。
-qualities = []
+# 可选：硬性接收品质；空数组回退默认 Legendary/Peerless，低于列表直接退回。
+qualities = ["Legendary", "Peerless"]
 # 可选：允许的前缀 token；空数组表示不限制。
 prefixes = []
 # 可选：允许的后缀 token；空数组表示不限制。
