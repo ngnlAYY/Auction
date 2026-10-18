@@ -186,6 +186,13 @@ impl MoogleMailParser {
         observed_at: DateTime<Utc>,
     ) -> Result<MoogleMailSentSnapshot, MoogleMailError> {
         if observed_at < summary.sent_at {
+            // Sentinel 时间来自列表页 HVT 文本；出现超前时保留原始字段以便判断时区或时钟偏差。
+            tracing::warn!(
+                external_mail_id = %summary.external_mail_id,
+                sent_at = %summary.sent_at,
+                observed_at = %observed_at,
+                "MoogleMail Sent 详情时间晚于本地观测"
+            );
             return Err(detail_error_for(
                 MoogleMailOperation::SentDetail,
                 summary.world,
