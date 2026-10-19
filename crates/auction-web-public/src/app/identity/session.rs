@@ -19,7 +19,7 @@ enum LoginState {
 #[derive(Clone)]
 enum SessionMenuState {
     Anonymous,
-    Authenticated(String),
+    Authenticated { user_id: String, username: String },
 }
 
 #[derive(Clone)]
@@ -186,9 +186,10 @@ pub(super) fn SessionMenu() -> Element {
     let mut logout_busy = use_signal(|| false);
 
     let session_state = match &*session.read() {
-        Some(Ok(Some(identity))) if identity.authenticated => {
-            SessionMenuState::Authenticated(identity.username.clone())
-        }
+        Some(Ok(Some(identity))) if identity.authenticated => SessionMenuState::Authenticated {
+            user_id: identity.user_id.clone(),
+            username: identity.username.clone(),
+        },
         None | Some(Err(_)) | Some(Ok(None)) | Some(Ok(Some(_))) => SessionMenuState::Anonymous,
     };
 
@@ -207,7 +208,7 @@ pub(super) fn SessionMenu() -> Element {
                         {t!("session-login")}
                     }
                 },
-                SessionMenuState::Authenticated(username) => rsx! {
+                SessionMenuState::Authenticated { user_id, username } => rsx! {
                     Link {
                         class: "public-account-session-name",
                         to: Route::Me {},
@@ -223,8 +224,9 @@ pub(super) fn SessionMenu() -> Element {
                             }
                             logout_error.set(false);
                             logout_busy.set(true);
+                            let user_id = user_id.clone();
                             spawn(async move {
-                                if logout_public().await.is_ok() {
+                                if logout_public(user_id).await.is_ok() {
                                     session.set(Some(Ok(None)));
                                 } else {
                                     logout_error.set(true);
@@ -277,4 +279,62 @@ fn login_blacklisted_reason(error: &PublicSessionApiError) -> Option<&str> {
     (error.status == Some(403) && error.code.as_deref() == Some("account_blacklisted"))
         .then_some(error.public_reason.as_deref())
         .flatten()
+}
+
+/// 同源认证广播与窗口聚焦只触发权威重读；账号真正改变后才销毁旧确认宿主。
+pub(crate) fn use_public_session_sync(check_session: EventHandler<bool>) {
+    #[cfg(target_arch = "wasm32")]
+    let _guard = use_hook(move || {
+        // Hook 保存 guard 到外壳卸载；最后一个引用释放时移除所有 DOM listener。
+        std::rc::Rc::new(PublicSessionSync::install(check_session))
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = check_session;
+}
+
+#[cfg(target_arch = "wasm32")]
+struct PublicSessionSync {
+    window: web_sys::Window,
+    storage: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::StorageEvent)>,
+    focus: wasm_bindgen::closure::Closure<dyn FnMut()>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl PublicSessionSync {
+    fn install(check_session: EventHandler<bool>) -> Option<Self> {
+        use wasm_bindgen::{JsCast, closure::Closure};
+
+        let window = web_sys::window()?;
+        let storage = Closure::new(move |event: web_sys::StorageEvent| {
+            if event.key().as_deref() == Some(crate::api::PUBLIC_SESSION_CHANGE_STORAGE_KEY) {
+                // 随机修订只表示认证操作发生，同账号重登仍须保留原未知命令及 ID。
+                check_session.call(false);
+            }
+        });
+        let focus = Closure::new(move || check_session.call(false));
+        let guard = Self { window, storage, focus };
+        guard
+            .window
+            .add_event_listener_with_callback("storage", guard.storage.as_ref().unchecked_ref())
+            .ok()?;
+        guard
+            .window
+            .add_event_listener_with_callback("focus", guard.focus.as_ref().unchecked_ref())
+            .ok()?;
+        Some(guard)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for PublicSessionSync {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("storage", self.storage.as_ref().unchecked_ref());
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("focus", self.focus.as_ref().unchecked_ref());
+    }
 }

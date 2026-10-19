@@ -38,6 +38,7 @@ impl CommandError {
 }
 
 pub(crate) async fn place_bid(
+    user_id: Uuid,
     lot_id: String,
     amount: i64,
     command_id: Uuid,
@@ -47,6 +48,7 @@ pub(crate) async fn place_bid(
     let response = send_request(|abort_signal| {
         Request::post(&url)
             .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &user_id.to_string())
             .json(&command)
             .map_err(|_| TransportError::Network(None))
     })
@@ -61,6 +63,7 @@ pub(crate) async fn place_bid(
 
 /// 创建代理授权并解码旧契约要求的完整命令投影。
 pub(crate) async fn create_proxy_authorization(
+    user_id: Uuid,
     lot_id: String,
     maximum_amount: i64,
     mode: String,
@@ -75,6 +78,7 @@ pub(crate) async fn create_proxy_authorization(
     let response = send_request(|abort_signal| {
         Request::post(&url)
             .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &user_id.to_string())
             .json(&command)
             .map_err(|_| TransportError::Network(None))
     })
@@ -91,6 +95,7 @@ pub(crate) async fn create_proxy_authorization(
 
 /// 降低代理授权上限并解码旧契约要求的完整命令投影。
 pub(crate) async fn lower_proxy_authorization(
+    user_id: Uuid,
     lot_id: String,
     authorization_id: String,
     maximum_amount: i64,
@@ -102,6 +107,7 @@ pub(crate) async fn lower_proxy_authorization(
     let response = send_request(|abort_signal| {
         Request::post(&url)
             .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &user_id.to_string())
             .json(&command)
             .map_err(|_| TransportError::Network(None))
     })
@@ -118,7 +124,7 @@ pub(crate) async fn lower_proxy_authorization(
 
 async fn read_command_error(response: gloo_net::http::Response) -> CommandError {
     let status = response.status();
-    response
+    let error = response
         .json::<ApiErrorResponse>()
         .await
         .ok()
@@ -131,5 +137,7 @@ async fn read_command_error(response: gloo_net::http::Response) -> CommandError 
                 })
         })
         .map(|error| CommandError { code: error.code, status })
-        .unwrap_or_else(|| CommandError::invalid_response(status))
+        .unwrap_or_else(|| CommandError::invalid_response(status));
+    super::session::observe_public_session_failure(status, &error.code);
+    error
 }

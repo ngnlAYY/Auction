@@ -4,11 +4,42 @@
 
 pub(crate) use auction_contracts::PublicSessionCurrentResponse as PublicSession;
 use auction_contracts::{PublicLoginRequest, PublicLoginResponse};
+use dioxus::{core::Runtime, prelude::*};
 use gloo_net::http::{Request, Response};
 use serde_json::Value;
 use uuid::{Uuid, Variant};
 
 use super::{TransportError, decoder, send_get, send_request};
+
+/// 外壳会话重读入口；参数为 true 时先失效旧身份，阻止继续使用旧确认宿主。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicSessionCheckTrigger(pub(crate) EventHandler<bool>);
+
+/// 标签页间只广播随机修订，不保存用户身份或凭据。
+#[cfg(target_arch = "wasm32")]
+pub(crate) const PUBLIC_SESSION_CHANGE_STORAGE_KEY: &str = "hv.public.session-revision";
+
+/// 认证失败或身份前置条件冲突时，重新读取当前 Cookie 对应的权威身份。
+pub(super) fn observe_public_session_failure(status: u16, code: &str) {
+    if status == 401 || code == "session_changed" {
+        notify_public_session_change(true);
+    }
+}
+
+fn notify_public_session_change(invalidate: bool) {
+    let trigger = Runtime::try_current()
+        .filter(|runtime| runtime.try_current_scope_id().is_some())
+        .and_then(|_| try_consume_context::<PublicSessionCheckTrigger>());
+    if let Some(trigger) = trigger {
+        trigger.0.call(invalidate);
+    }
+    #[cfg(target_arch = "wasm32")]
+    if let Some(storage) =
+        web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.set_item(PUBLIC_SESSION_CHANGE_STORAGE_KEY, &Uuid::new_v4().to_string());
+    }
+}
 
 /// Public 登录失败的稳定投影；界面只根据错误码和安全公开原因选择本地化文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +89,8 @@ pub(crate) async fn login_public(key: String) -> Result<PublicSession, PublicSes
     if !response.ok() {
         return Err(parse_api_error(response).await);
     }
+    // Cookie 已由响应写入；即使正文解码失败也重读。重登同账号不能清除原未决命令。
+    notify_public_session_change(false);
     let payload: PublicLoginResponse = decoder::decode_success(response, valid_login_session_value)
         .await
         .map_err(|_| PublicSessionApiError::local("invalid_response"))?;
@@ -99,18 +132,23 @@ async fn parse_api_error(response: Response) -> PublicSessionApiError {
     PublicSessionApiError { status, code: Some(code), public_reason }
 }
 
-pub(crate) async fn logout_public() -> Result<(), String> {
+pub(crate) async fn logout_public(user_id: String) -> Result<(), String> {
     let response = send_request(|abort_signal| {
         Request::delete("/api/v1/session")
             .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, &user_id)
             .build()
             .map_err(|_| TransportError::Network(None))
     })
     .await
     .map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
+        let status = response.status();
+        let code = decoder::decode_error_code(response).await;
+        observe_public_session_failure(status, &code);
+        return Err(code);
     }
+    notify_public_session_change(true);
     decoder::decode_success::<Value, _>(response, Value::is_null).await.map(|_| ())
 }
 

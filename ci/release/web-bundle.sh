@@ -47,10 +47,11 @@ if [[ -z "$dx_version" || -z "$rustc_version" ]]; then
   printf '无法读取 dx/rustc 版本，Web 构建不能建立复用标记\n' >&2
   exit 1
 fi
-# payload 只依赖本 surface、共享层、清单与构建工具；native 代码或文档改动不触发 WASM 重建。
+# payload 指纹覆盖本 surface、共享层与契约源码；DTO 变化必须重建两个浏览器，避免内嵌旧协议。
 source_identity=$(path_fingerprint \
   "Cargo.toml" "Cargo.lock" "rust-toolchain.toml" \
-  "crates/$package" "crates/auction-web-shared" "ci/release/web-bundle.sh")
+  "crates/$package" "crates/auction-web-shared" "crates/auction-contracts" \
+  "ci/release/web-bundle.sh")
 
 # payload 结构门禁：入口、标题与文件类型；复用与新构建都必须通过。
 verify_payload_files() {

@@ -56,7 +56,7 @@ pub(crate) async fn set_lot_watch(
     if let Some(response) = session_guard(&state, &parts.headers, address, true, false) {
         return response;
     }
-    let identity = match authenticated_public_identity(&state, &parts.headers).await {
+    let identity = match authenticated_public_mutation_identity(&state, &parts.headers).await {
         Ok(identity) => identity,
         Err(response) => return *response,
     };

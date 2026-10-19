@@ -130,7 +130,16 @@ pub(crate) fn PublicShell() -> Element {
         let _ = readiness_generation();
         fetch_public_readiness()
     });
-    let session = use_resource(fetch_public_session);
+    let mut session = use_resource(fetch_public_session);
+    let check_session = use_callback(move |invalidate: bool| {
+        if invalidate {
+            // 已知认证变化先卸载旧用户命令；普通 focus 重读保留原快照，避免打断同身份提交。
+            session.set(None);
+        }
+        session.restart();
+    });
+    use_context_provider(|| crate::api::PublicSessionCheckTrigger(check_session));
+    super::session::use_public_session_sync(check_session);
     let current_auction = use_resource(move || {
         let _ = refresh_generation();
         let world = selected_world();
@@ -170,6 +179,7 @@ pub(crate) fn PublicShell() -> Element {
             page_visibility.install(move || {
                 readiness_generation.set(readiness_generation().saturating_add(1));
                 refresh_generation.set(refresh_generation().saturating_add(1));
+                check_session.call(false);
             });
         }
     });

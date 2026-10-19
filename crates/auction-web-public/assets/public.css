@@ -836,6 +836,25 @@
 
 /* ===== 历史筛选（主筛选 / 设置面板 / 筛选网格） ===== */
 
+.public-shell__content:has(> .public-history-page--search) {
+  display: grid;
+  place-items: center;
+}
+
+.public-history-page--search {
+  inline-size: min(100%, 64rem);
+  min-inline-size: 0;
+}
+
+.public-history-page--search > h1,
+.public-history-page--search > .public-history-intro {
+  text-align: center;
+}
+
+.public-history-page--search > .public-history-intro {
+  margin-block-end: var(--space-6);
+}
+
 .public-history-filters {
   margin-block-end: var(--space-4);
 }
@@ -2366,8 +2385,13 @@
 }
 
 .public-compensation-equation {
-  margin-top: 0;
+  background: var(--color-surface-raised);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.public-compensation-equation .shared-truncated-text {
+  --truncated-text-max-inline-size: 100%;
 }
 
 .public-compensation-income {

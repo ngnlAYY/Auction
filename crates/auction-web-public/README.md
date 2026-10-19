@@ -50,9 +50,14 @@ bash ci/release/web-bundle.sh public
 ## 权威数据与命令交互
 
 目录、lot、规则、账户、价格历史等均读取同源 API，不使用会被误认成权威数据的示例行；服务端 capability 决定动作，
-空装备链接不生成伪造 URL，完整游戏链接只消费受限 DTO。普通出价使用整数 K 输入，代理支持约定的精确缩写，
+空装备链接不生成伪造 URL，完整游戏链接只消费受限 DTO。补偿流水复用目录的完整 ID/key 链接校验，
+不能把带 10 位 key 的合法链接当作无效响应；字段可省略，提供时不接受空串或 keyless URL，见
+[读取契约](docs/contracts/routes.md#公开读取与命令结果)。普通出价使用整数 K 输入，代理支持约定的精确缩写，
 新命令最高 1B，服务端仍是金额、资格和状态的最终权威；提交前确认，失败保留冻结输入与命令 ID，结果未知只能重试
 原请求。命令宿主按 lot/用户 UUID 隔离，切换目标或身份销毁旧状态，成功结果不被后台快照刷新覆盖。
+
+补偿流水隐藏期初/期末占位条目，整期权威结算等式固定在每页表格跨全列的末行。历史成交价默认只显示居中搜索区，
+提交筛选后才读取和展示成交列表，带筛选 URL 可直接恢复结果；布局与分页规则见[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 
 装备标记：整场通过 `GET /api/v1/me/lot-watches?auction_id=<uuid>` 读取完整集合（上限 10000 条，超限失败而非截断），
 `PUT /api/v1/lots/{lot_id}/watch` 使用冻结的 `PublicSetLotWatchRequest`，`channel=mm` 保留为兼容占位。按稳定 user UUID +
@@ -81,6 +86,10 @@ visibilitychange、popstate、socket 和回调随所属外壳卸载清理，游�
 
 HTTP/stream wire DTO 直接复用 `auction-contracts`，本地只持有查询、展示和交互状态；Gloo 在本 surface 显式启用
 JSON/WebSocket，不能依赖 Admin 或合并构建补齐 feature。会话读取失败保留错误与重试入口，不能伪装匿名；
+登录、注销及认证失效通过 `hv.public.session-revision` 仅广播随机修订，其他标签页据此重读会话；窗口聚焦及恢复可见时也重读。
+随机修订与本地登录不预先清除身份，权威响应确认换号后才销毁旧宿主，同账号重登保留原未知命令及 ID。
+竞价/代理确认与重试冻结原用户 UUID，标记、警告渠道及注销同样携带可选 `x-auction-expected-user-id`，由 HTTP 与本次 Cookie
+身份核对，避免预检与提交之间换账号。401、`session_changed` 或本地显式注销先失效旧身份并卸载旧确认宿主。
 登录 return 只接受单斜杠开头的站内路径。首屏 15 秒未就绪只提示慢加载，真实 panic 才显示失败。
 
 ## 维护与验证

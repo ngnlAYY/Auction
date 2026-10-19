@@ -39,7 +39,11 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 可提供客户端地址；Unix listener 不伪造 TCP peer，应用不根据转发协议头推导 Origin 或 Secure Cookie
 （见[橙云部署](ops/README.md#cloudflare-整站代理)）。Public 竞价按限流 → Origin → 认证执行，Admin mutation 按
 限流 → Origin → CSRF → 会话执行，之后才读取校验 query/path/body；严格 JSON 保留各路由大小上限与字段闭集。
+Public 竞价、代理、标记、警告渠道和注销在 Cookie 认证后核对可选 `x-auction-expected-user-id`；规范非零 UUID
+与当前身份不符返回 409 `session_changed`，无效或重复头返回 400 `invalid_expected_user_id`。省略该头保留旧 v1，读取路由行为不变。
 错误优先级、405/Allow 和缓存要求见[通用响应与错误](docs/contracts/routes.md#通用响应与错误)。
+Admin 结算报告读取或不变量校验失败时记录 `admin_settlement_report_failed`，字段限定为 `auction_id` 与
+闭集 `failure_code`，通过请求 span 关联请求 ID；底层错误文本、SQL 和敏感值不进入该诊断事件。
 
 - 写命令使用稳定 `command_id`、摘要与版本门禁；成功竞价/代理响应直接使用事务内冻结结果，不在提交后重读权限。
 - 按已登记能力返回安全结果或明确不支持，不以空列表和默认值伪造成功。

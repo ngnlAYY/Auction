@@ -11,15 +11,20 @@ use super::super::{format_amount, parse_credit_amount};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingBidCommand {
+    pub(super) user_id: Uuid,
     pub(super) amount: i64,
     pub(super) command_id: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingProxyCommand {
-    Create { amount: i64, mode: String, command_id: Uuid },
-    Lower { amount: i64, authorization_id: String, command_id: Uuid },
+    Create { user_id: Uuid, amount: i64, mode: String, command_id: Uuid },
+    Lower { user_id: Uuid, amount: i64, authorization_id: String, command_id: Uuid },
 }
+
+/// 确认宿主的固定身份；不能在发送或重试时替换成新会话的用户。
+#[derive(Clone, Copy)]
+pub(crate) struct PublicCommandIdentity(pub(crate) Uuid);
 
 /// 普通竞价的两阶段确认命令 hook。由弹窗宿主持有（整体 Copy），表单经 prop 共享，
 /// 宿主据此接线 Dialog 的 busy 关闭守卫。

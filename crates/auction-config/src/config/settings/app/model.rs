@@ -22,7 +22,7 @@ pub(super) struct FileConfig {
     /// 必填的敏感 TOML 相对或绝对路径。
     pub(super) secrets_file: PathBuf,
     /// 可选的 Admin 管理 runtime 非敏感 TOML 路径；Admin 读取完整文档，Worker 只投影
-    /// MoogleMail world、发件人、装备过滤和通知模板。
+    /// MoogleMail world、发件人、装备过滤、通知模板及 bot 内部履约名单。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
     /// 可选 Worker 区块；省略时并发为 8，轮询为 60 秒。
@@ -98,6 +98,8 @@ pub struct AppConfig {
     pub runtime_config_path: Option<PathBuf>,
     /// 已校验并应用到 Admin 进程的 runtime 文档；Worker 只保留投影后的启动配置，因此为 None。
     pub admin_runtime: Option<AdminRuntimeDocument>,
+    /// 仅供 Worker 内部履约使用的 runtime bot 显示名投影；其他角色或未配置时为空。
+    pub worker_bot_players: Vec<String>,
     pub(super) secrets: AppSecrets,
 }
 

@@ -8,8 +8,8 @@ use crate::api::{ProxyCommandAuthorization, create_proxy_authorization};
 
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, amount_hint, initial_proxy_amount,
-    proxy_error_message,
+    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint,
+    initial_proxy_amount, proxy_error_message,
 };
 
 #[component]
@@ -29,6 +29,7 @@ pub(super) fn ProxyCreateForm(
     peer_submitting: Signal<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
+    let user_id = use_context::<PublicCommandIdentity>().0;
     let maximum_id = format!("public-proxy-maximum-{lot_id}");
     let mode_name = format!("public-proxy-mode-{lot_id}");
     let fast_mode_id = format!("{mode_name}-fast");
@@ -138,6 +139,7 @@ pub(super) fn ProxyCreateForm(
                         command.begin(
                             format!("{value}:{selected_mode}"),
                             |command_id| PendingProxyCommand::Create {
+                                user_id,
                                 amount: value,
                                 mode: selected_mode,
                                 command_id,
@@ -148,7 +150,7 @@ pub(super) fn ProxyCreateForm(
                     };
                     validation.set(None);
                     // 上面的确认守卫已保证此处必为 Create。
-                    let PendingProxyCommand::Create { amount, mode, command_id } =
+                    let PendingProxyCommand::Create { user_id, amount, mode, command_id } =
                         pending.clone()
                     else {
                         return;
@@ -159,7 +161,8 @@ pub(super) fn ProxyCreateForm(
                         move |_| {
                             let lot_id = lot_id.clone();
                             async move {
-                                create_proxy_authorization(lot_id, amount, mode, command_id).await
+                                create_proxy_authorization(user_id, lot_id, amount, mode, command_id)
+                                    .await
                             }
                         },
                         crate::api::CommandError::outcome_uncertain,

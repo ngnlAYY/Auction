@@ -158,19 +158,43 @@ async fn run_service(config: &AppConfig, telemetry: &TracingRuntime) -> anyhow::
     );
 
     let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
+    let (mail_owner_lost_sender, mail_owner_lost_receiver) = tokio::sync::oneshot::channel::<()>();
     let worker = run_worker(
         config,
         telemetry.health_reader(),
         Arc::clone(&metrics),
+        mail_owner_lost_sender,
         Box::pin(async move {
             let _ = shutdown_receiver.await;
         }),
     );
     tokio::pin!(worker);
+    let mail_owner_lost = async {
+        if mail_owner_lost_receiver.await.is_err() {
+            // 未启用邮件、无 active 凭据或启动提前失败时不触发重建。
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::pin!(mail_owner_lost);
     let result = tokio::select! {
         result = &mut worker => {
             drop(shutdown_sender);
             result
+        }
+        () = &mut mail_owner_lost => {
+            tracing::error!(reason = "mail_owner_invalid", "worker drain started");
+            let _ = shutdown_sender.send(());
+            let drained = match wait_for_drain(&mut signals, DEFAULT_DRAIN_TIMEOUT, &mut worker).await {
+                Ok(DrainOutcome::Completed(result)) => result,
+                Ok(DrainOutcome::TimedOut) => Err(anyhow::anyhow!("worker drain exceeded 10 seconds")),
+                Ok(DrainOutcome::Interrupted(signal)) => {
+                    Err(anyhow::anyhow!("worker drain interrupted by {signal}"))
+                }
+                Err(error) => Err(error).context("wait for worker drain"),
+            };
+            drained.context("drain worker after MoogleMail runtime ownership loss")?;
+            // 即使所有在途任务正常结束也须非零退出，由进程管理器获取新 owner/generation。
+            Err(anyhow::anyhow!("MoogleMail runtime ownership revoked; worker restart required"))
         }
         signal = signals.recv() => {
             let signal = signal.context("receive worker shutdown signal")?;
@@ -228,9 +252,10 @@ async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    mail_owner_lost: tokio::sync::oneshot::Sender<()>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
-    persistent::run_worker(config, tracing_health, metrics, shutdown).await
+    persistent::run_worker(config, tracing_health, metrics, mail_owner_lost, shutdown).await
 }
 
 #[cfg(not(feature = "postgres"))]
@@ -238,6 +263,7 @@ async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
+    _mail_owner_lost: tokio::sync::oneshot::Sender<()>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     skeleton::run_worker(config, tracing_health, metrics, shutdown).await

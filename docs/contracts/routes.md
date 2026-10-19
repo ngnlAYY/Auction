@@ -74,11 +74,17 @@ Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_
 
 客户端地址只在 TCP peer 命中配置的规范 CIDR，或 Public/Admin Unix listener 显式启用可信上游时解析 `X-Forwarded-For`；非法链整体丢弃，Unix 连接不伪造 TCP peer，Unix 信任开关不放宽真实 TCP peer，地址链从右向左跳过受信代理。`CF-Connecting-IP`、`Forwarded`、`X-Forwarded-Proto` 不用于推导客户端地址、Origin 或 Secure Cookie；Cloudflare 经 Caddy 清洗为可信 XFF 后交给应用，见[部署约束](ops/README.md#cloudflare-整站代理)。CSP 只允许同源脚本及 WASM 编译，内联样式例外仅用于 Dioxus 首屏防闪样式和组件 style 属性。登录/变更限流器按该地址工作，最多保留 4096 项并确定性淘汰最久未访问项。
 
+Public 浏览器的已认证写请求（P06 DELETE、P18–P20、P24、P26）携带可选 `X-Auction-Expected-User-Id`，
+值为确认操作所属用户的规范非零 UUID。HTTP 仍只从当前 Cookie 获取权威身份；认证成功后、执行写命令前核对该前置条件，
+不匹配返回 `409 session_changed`，非法或重复头返回 `400 invalid_expected_user_id`，均不执行写入。
+未提供该头的既有 v1 客户端保持原语义，JSON DTO 与命令摘要不变。浏览器登录/退出只广播随机通知值，
+其他标签页收到通知或页面恢复可见时重新读取会话；业务 401 或 `session_changed` 也触发重读，换号后销毁旧用户的确认状态与命令宿主。
+
 ### 静态入口与缓存
 
 未注册的 `/api`、`/health` 保留路径固定返回 `404 not_found` JSON；其他未知请求在 `Accept` 明确允许 HTML 时返回最小页面 404，否则返回同一 JSON 404。静态文件和批准的浏览器路径只接受 GET/HEAD，其他方法返回带 `Allow: GET, HEAD` 的 JSON 405。Public 15 条（含独立 `/forum` 页面）、Admin 21 条浏览器路由由两个 Dioxus `Route` 枚举与 `auction-http/src/assets/routes.rs` 同步维护，只有这些路径可读 `index.html`；批准路径缺构建产物时返回 503。
 
-缓存：Public 普通公开读取（含 P15 forum）为 `no-cache`；P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
+缓存：Public 普通公开读取（含 P15 forum）为 `no-cache`；P14 补偿流水、P21 `/forum/sync-status`、events/session/lot 列表与详情/账户/竞价/代理/标记及全部 Admin 业务接口为 `no-store`，错误响应沿用相同策略；浏览器路由入口、直接 `index.html` 和 HTML 资源为 `no-store`；直接静态文件中只有 `assets/` 非 HTML 指纹资源使用一年 `immutable`，`wasm/*.js`、`*.wasm`、稳定别名 `/favicon.ico` 和其他稳定文件名使用 `no-cache`、`Last-Modified` 与 `If-Modified-Since`；未知 404/静态 405/产物缺失 503 均为 `no-store`。
 
 正式 Public/Admin 边界另统一发送 `CDN-Cache-Control` 与 `Cloudflare-CDN-Cache-Control`：默认 `no-store`，包括所有 API（即使浏览器策略为 `no-cache`）、登录、管理/私有数据、探针、错误和 WebSocket 握手；仅精确静态 handler 的私有响应标记允许 CDN 沿用该资源的缓存策略，不能凭路径后缀或 API 的 `public` 头放行。未自行声明浏览器缓存策略的边界错误等响应补 `Cache-Control: no-store`。首次设置静态入口也固定 CDN `no-store`，不纳入正式站点 CDN 白名单；边缘必须尊重源站头，不能配置 Cache Everything/强制 Edge TTL，静态白名单与上线限制见[运维契约](ops/README.md#cloudflare-整站代理)。
 
@@ -99,7 +105,7 @@ Public/Admin 统一 boundary 只接受 1 至 64 字节的 ASCII 字母数字/`-_
 | P11 | GET | /api/v1/lots/{lot_id} | 公开；PostgreSQL 直接返回完整装备 URL；响应 `no-store` | 200 | 400, 404, 503/504 |
 | P12 | GET | /api/v1/price-history | 公开；成交事实仅由 PostgreSQL 完整档提供 | 200 | 400, 501, 503/504 |
 | P13 | GET | /api/v1/compensation-pool | 公开 | 200 | 400, 501, 503/504 |
-| P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开 | 200 | 400, 404, 501, 503/504 |
+| P14 | GET | /api/v1/compensation-pool/{auction_id}/movements | 公开；完整装备 URL；响应 `no-store` | 200 | 400, 404, 501, 503/504 |
 | P15 | GET | /api/v1/auctions/{auction_id}/forum | 公开 | 200 | 400, 404, 501, 503/504 |
 | P16 | GET | /api/v1/me/bids | Public session | 200 | 400, 401, 503/504 |
 | P17 | GET | /api/v1/lots/{lot_id}/proxy-authorizations/mine | Public session | 200 | 400, 401, 404, 503/504 |
@@ -256,7 +262,8 @@ PostgreSQL + `web-embed` 的 `auction-admin-api`/`auction-server` 初始化模�
 
 P02 接受可选 `lang`，缺失回退英文；P05 为安全黑名单页码投影。P07 的数字/keyset 分页、P10 world/lot 筛选及 P12 成交统计遵守上文分页契约。P09 保留 v1 preview/live 互斥数组、分类统计、页码及拍卖上下文；P11 只返回当前允许公开的 lot；P13/P14 返回补偿池批次、余额守恒摘要、opaque keyset cursor 与单场账本页，从同一 Serializable 快照读取。
 
-P09/P11 在 PostgreSQL 按 lot/equipment/world 校验密文后短暂解密，直接在既有 `game_equipment_url` 返回固定 HentaVerse origin 的完整 URL；10 位 key 可供用户主动导航，但不得写日志、审计、事件或持久化缓存，响应 `no-store`、全局 `no-referrer`，不伪造 keyless 链接。
+P09/P11/P14 在 PostgreSQL 按 lot/equipment/world 校验密文后短暂解密，直接在既有 `game_equipment_url` 返回固定 HentaVerse origin 的完整 URL；10 位 key 可供用户主动导航，但不得写日志、审计、事件或持久化缓存，响应 `no-store`、全局 `no-referrer`，不伪造 keyless 链接。
+P14 浏览器解码与目录复用同一完整链接校验：只接受 `https://hentaiverse.org/equip/{id}/{key}` 或 `/isekai/equip/{id}/{key}`，ID 为 1–32 位 ASCII 数字，key 为 10 位十六进制，拒绝额外路径、query、fragment 及凭据。`opening`/`closing` 省略装备、比例与时长字段；提供链接时不得为空串或仅含 ID。分页字段及金额、余额链语义不变。
 
 P15 读取本地论坛镜像的源/内容版本、真实连续楼层、同步/最近成功时间及有界安全错误。`/forum` 仅在 P21 明确启用后轮询 P15：`pending`/`publishing` 每次完成后等 2 秒，`published` 等 30 秒，发布后显示“当前同步到 #xx”；失败暂停帖子轮询，重新进入或加载页面后重读，不提供公开页手动重试按钮。公开页仅展示同步摘要、真实处理楼层、更新时间与简短延迟提醒，已同步提示行右侧提供主题链接，不展示正文或诊断详情。Admin `/auctions` 承接只读刷新及标题、正文、版本、同步/扫描时间和错误详情，正文默认折叠为转义纯文本；P15/A46 的既有 DTO 字段不变，不新增读写权限，首页不轮询。
 
@@ -276,7 +283,7 @@ A01 使用 Basic Auth、CSRF 和持久化会话。Admin 每次装配数据库会
 | 报告（A07/A08） | 一致结算/恢复安全报告，lot 带 `equipment_category`；A07 拍卖字段闭集不含 `scheduled_end_at`/`effective_end_at`，lot 提供权威 `listed_price`、`hold_ppm`、带符号 `adjustment_ppm` |
 | 结算目录（A42） | 仅列 `settled` 且有 `settled_at` 的拍卖；可选 `world_id`/`sequence` 与有界 `page/page_size`，count 与页同 Serializable 快照 |
 
-A04 的 `equipment_source.require_tradeable` 默认关闭，允许手工 Soulbound；开启后在事务前限制可交易装备，不改变 MoogleMail 过滤，也不回传来源 URL/canonical 正文/key。A07 的 `adjustment_ppm` 正为税费/惩罚、负为折扣，页面不从税额反推持有比例；报告序列化冲突/死锁最多尝试 3 次（含首次）。A42 指定世界按期号降序，否则按结算时间、世界、期号、UUID 稳定排序；结算页用第一页首项作为默认最新一期，再按 UUID 读报告。
+A04 的 `equipment_source.require_tradeable` 默认关闭，允许手工 Soulbound；开启后在事务前限制可交易装备，不改变 MoogleMail 过滤，也不回传来源 URL/canonical 正文/key。A07 的 `adjustment_ppm` 正为税费/惩罚、负为折扣，页面不从税额反推持有比例；报告序列化冲突/死锁最多尝试 3 次（含首次）。已结算报告排除未参与结算的 `withdrawn` 标的，其余标的缺少结算明细仍明确失败；累计领先时长从同一快照中的追加竞价事实计算。A42 指定世界按期号降序，否则按结算时间、世界、期号、UUID 稳定排序；结算页用第一页首项作为默认最新一期，再按 UUID 读报告。
 
 A09–A12、A38 携带 `command_id`、`expected_state_version`；取消/提前结算另需非空理由，原因最多 1024 字节且不含控制字符，其他动作不得携带 reason；状态、账本、动作 metadata、审计与事件同事务写入。人工 Final 将晚于事务时间加冻结 `final_phase_lead_seconds` 的 live lot 截止收紧至该窗口（默认 900 秒），不延长更早截止，之后仍允许软截止延长。A38 仅在完整档且 `allow_manual_early_settlement=true` 时提供（默认关闭），接受 `live`/`final`，将未到期 live lot 截止收紧到事务时间；成交、义务与履约仍由提交后的 settlement Worker 写入；未开启或缺能力返回 `403 manual_early_settlement_disabled`，不套用一般能力缺失的 501。
 

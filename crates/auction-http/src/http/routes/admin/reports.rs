@@ -49,6 +49,12 @@ pub(crate) async fn admin_settlement_report(
                 .into_response();
             }
             Err(_) => {
+                // 底层错误可能携带 SQL 或连接信息；日志只记录业务标识与闭集失败分类。
+                tracing::warn!(
+                    auction_id = %auction_uuid,
+                    failure_code = "report_read_failed",
+                    "admin_settlement_report_failed"
+                );
                 return api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "storage_unavailable",
@@ -58,6 +64,11 @@ pub(crate) async fn admin_settlement_report(
             }
         };
     if !valid_settlement_report(&report, auction_uuid) {
+        tracing::warn!(
+            auction_id = %auction_uuid,
+            failure_code = "report_validation_failed",
+            "admin_settlement_report_failed"
+        );
         return internal_error();
     }
     (

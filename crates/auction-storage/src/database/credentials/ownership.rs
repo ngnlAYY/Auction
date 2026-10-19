@@ -22,13 +22,32 @@ type OwnershipConnection = Mutex<Option<sqlx::pool::PoolConnection<sqlx::Postgre
 pub struct CredentialRuntimeOwnership {
     connection: OwnershipConnection,
     valid: AtomicBool,
+    credential_kind: AdminCredentialKind,
     mail_binding: Option<auction_application::MailRuntimeBinding>,
+}
+
+impl CredentialRuntimeOwnership {
+    /// 只记录首次撤销的闭集原因；失效状态不能通过后续成功探测恢复。
+    fn invalidate(&self, reason: &'static str) {
+        if self.valid.swap(false, Ordering::AcqRel) {
+            tracing::error!(
+                credential_kind = self.credential_kind.as_str(),
+                reason,
+                "credential runtime ownership permanently revoked"
+            );
+        }
+        // 连接已 close_on_drop；在飞检查持有连接时会观察 sticky 位并关闭。
+        if let Some(mut slot) = self.connection.try_lock() {
+            let _ = slot.take();
+        }
+    }
 }
 
 impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
     fn check(&self) -> ApplicationFuture<'_, ()> {
         // guard 由返回的 future 持有，连首次 poll 前取消也按检查失败处理。
-        let guard = OwnershipCheckGuard { ownership: self, completed: false };
+        let guard =
+            OwnershipCheckGuard { ownership: self, completed: false, reason: "check_cancelled" };
         Box::pin(async move {
             let mut guard = guard;
             if !self.is_valid() {
@@ -39,12 +58,16 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
                 return Err(storage_error("外部 Cookie 运行时所有权已失效"));
             }
             // 原连接由本 future 独占；调用方超时取消会关闭它，不把半途检查的连接放回 slot。
-            let mut connection =
-                slot.take().ok_or_else(|| storage_error("外部 Cookie 所有权会话不可用"))?;
-            sqlx::query_scalar::<_, i32>("SELECT 1")
-                .fetch_one(&mut *connection)
-                .await
-                .map_err(|_| storage_error("外部 Cookie 所有权会话检查失败"))?;
+            let mut connection = slot.take().ok_or_else(|| {
+                guard.reason = "session_unavailable";
+                storage_error("外部 Cookie 所有权会话不可用")
+            })?;
+            sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&mut *connection).await.map_err(
+                |_| {
+                    guard.reason = "probe_failed";
+                    storage_error("外部 Cookie 所有权会话检查失败")
+                },
+            )?;
             // 并发等待检查可能已经取消或超时；不能由此次成功探测恢复 sticky 失效状态。
             if !self.is_valid() {
                 return Err(storage_error("外部 Cookie 运行时所有权已失效"));
@@ -69,11 +92,7 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
     }
 
     fn revoke_internal_use(&self) {
-        self.valid.store(false, Ordering::Release);
-        // 连接已 close_on_drop；在飞 check 持有连接时也会观察 sticky 位并关闭。
-        if let Some(mut slot) = self.connection.try_lock() {
-            let _ = slot.take();
-        }
+        self.invalidate("internal_use_revoked");
     }
 }
 
@@ -81,16 +100,13 @@ impl AdminCredentialRuntimeOwnership for CredentialRuntimeOwnership {
 struct OwnershipCheckGuard<'a> {
     ownership: &'a CredentialRuntimeOwnership,
     completed: bool,
+    reason: &'static str,
 }
 
 impl Drop for OwnershipCheckGuard<'_> {
     fn drop(&mut self) {
         if !self.completed {
-            self.ownership.valid.store(false, Ordering::Release);
-            // 取消等待者时连接可能在闲置 slot，也可能已被在飞检查 take；不阻塞析构。
-            if let Some(mut slot) = self.ownership.connection.try_lock() {
-                let _ = slot.take();
-            }
+            self.ownership.invalidate(self.reason);
         }
     }
 }
@@ -176,6 +192,7 @@ impl DatabaseStore {
                 Ok(CredentialRuntimeOwnership {
                     connection: Mutex::new(Some(connection)),
                     valid: AtomicBool::new(true),
+                    credential_kind: kind,
                     mail_binding,
                 })
             }

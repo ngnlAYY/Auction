@@ -33,6 +33,12 @@ impl AppConfig {
         };
         let admin_runtime =
             (role == Role::Admin).then(|| runtime_document.as_ref().cloned()).flatten();
+        // Worker 只保留履约所需的名单，不能依赖只由 Admin 持有的完整 runtime 文档。
+        let worker_bot_players = if role == Role::Worker {
+            runtime_document.as_ref().map(|runtime| runtime.bot_players.clone()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut auction = auction;
         let mut worker = worker;
         if let Some(runtime) = &runtime_document {
@@ -209,6 +215,7 @@ impl AppConfig {
             secrets_path,
             runtime_config_path,
             admin_runtime,
+            worker_bot_players,
             secrets,
         })
     }

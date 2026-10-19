@@ -7,7 +7,9 @@ use dioxus::prelude::*;
 use crate::api::place_bid;
 
 use super::super::format_amount;
-use super::common::{BidConfirmCommand, PendingBidCommand, bid_error_message};
+use super::common::{
+    BidConfirmCommand, PendingBidCommand, PublicCommandIdentity, bid_error_message,
+};
 
 const CREDIT_K: i64 = 1_000;
 
@@ -129,6 +131,7 @@ fn bid_form(input: BidFormInput) -> Element {
         on_close,
     } = input;
     let amount_id = format!("public-bid-amount-{lot_id}");
+    let user_id = use_context::<PublicCommandIdentity>().0;
     let mut amount = use_signal(|| default_bid_units(next_bid));
     let mut validation = use_signal(|| None::<String>);
     // 两阶段确认状态（command/confirmation/submitting/failure）由宿主注入的 hook 持有。
@@ -187,6 +190,7 @@ fn bid_form(input: BidFormInput) -> Element {
                         return;
                     }
                     command.begin(value.to_string(), |command_id| PendingBidCommand {
+                        user_id,
                         amount: value,
                         command_id,
                     });
@@ -199,7 +203,10 @@ fn bid_form(input: BidFormInput) -> Element {
                     pending,
                     move |pending| {
                         let lot_id = lot_id.clone();
-                        async move { place_bid(lot_id, pending.amount, pending.command_id).await }
+                        async move {
+                            place_bid(pending.user_id, lot_id, pending.amount, pending.command_id)
+                                .await
+                        }
                     },
                     crate::api::CommandError::outcome_uncertain,
                     move |result| {

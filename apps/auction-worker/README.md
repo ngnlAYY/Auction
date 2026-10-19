@@ -27,13 +27,20 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `with_cash_evidence_gateway`，PM sender 与只读资料 reader 仅 `forum.enabled` 时装配
 （见[外部适配器](crates/auction-integrations/README.md)）。SIGINT/SIGTERM 将 control 标记为 draining、停止新 claim，
 在途任务沿原租约和结果证明路径收口；10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
+邮件 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
+重建 Worker。监督只读取 owner 已知失效状态；无 active 邮件凭据时不启动该监督，不增加数据库探测。失效后的新外呼继续
+失败关闭，在途发送保留原 sending/未知结果对账语义；新进程取得 advisory lock、提交新 generation 后才恢复邮件操作。
 
 ## 部署配置与 runtime
 
 Worker 没有业务 `listen_address`。Admin/Worker 可共用 `runtime_config_file`；Worker 只消费 world、发件人、
-装备过滤、14 个邮件模板及接管后的 `operations`，不继承 Admin listener/security/session；transport、凭据、
-mailbox identity 和全局启用仍由 Worker 部署配置拥有。保存后须重启对应进程，不改既有拍卖快照、due、游标或租约
+装备过滤、14 个邮件模板、bot 内部履约名单及接管后的 `operations`，不继承 Admin listener/security/session；
+transport、凭据、mailbox identity 和全局启用仍由 Worker 部署配置拥有。保存后须重启对应进程，
+不改既有拍卖快照、due、游标或租约
 （分组责任见[配置说明](ops/config/README.md#runtime-共享与重启)）。
+
+`bot_players` 经独立窄投影注入履约服务；收件人命中名单但当前远端身份不匹配时保留内部证据等待，不进入外发。
+只有真实身份及相应资产/资金证明齐备后才能内部满足义务。
 
 ## 拍卖邮件起拍价
 

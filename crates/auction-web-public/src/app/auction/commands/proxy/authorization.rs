@@ -9,8 +9,8 @@ use crate::api::{OwnedProxy, ProxyCommandAuthorization, lower_proxy_authorizatio
 use super::super::super::proxy::proxy_status_label;
 use super::super::super::{format_amount, parse_credit_amount};
 use super::super::common::{
-    PendingProxyCommand, ProxyConfirmCommand, amount_hint, initial_proxy_amount,
-    proxy_error_message,
+    PendingProxyCommand, ProxyConfirmCommand, PublicCommandIdentity, amount_hint,
+    initial_proxy_amount, proxy_error_message,
 };
 
 #[component]
@@ -27,6 +27,7 @@ pub(super) fn ProxyAuthorizationForm(
     peer_submitting: Signal<bool>,
     on_close: EventHandler<()>,
 ) -> Element {
+    let user_id = use_context::<PublicCommandIdentity>().0;
     let maximum_id = format!("public-proxy-lower-maximum-{lot_id}");
     let lower_bound = if proxy.capabilities.waiting { next_bid } else { current_price };
     let mut maximum_amount = use_signal(|| initial_proxy_amount(lower_bound));
@@ -138,6 +139,7 @@ pub(super) fn ProxyAuthorizationForm(
                             command.begin(
                                 format!("{value}:{authorization_id}"),
                                 |command_id| PendingProxyCommand::Lower {
+                                    user_id,
                                     amount: value,
                                     authorization_id,
                                     command_id,
@@ -148,7 +150,7 @@ pub(super) fn ProxyAuthorizationForm(
                         };
                         validation.set(None);
                         // 上面的确认守卫已保证此处必为 Lower。
-                        let PendingProxyCommand::Lower { amount, authorization_id, command_id } =
+                        let PendingProxyCommand::Lower { user_id, amount, authorization_id, command_id } =
                             pending.clone()
                         else {
                             return;
@@ -160,6 +162,7 @@ pub(super) fn ProxyAuthorizationForm(
                                 let lot_id = lot_id.clone();
                                 async move {
                                     lower_proxy_authorization(
+                                        user_id,
                                         lot_id,
                                         authorization_id,
                                         amount,

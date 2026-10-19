@@ -50,6 +50,8 @@ Public/Admin 的 `/metrics` 默认关闭，Worker 使用经 peer 认证的 contr
 Prometheus 只启用 `process`，关闭默认 `protobuf` 并使用上游 `plain_model`；进程、池和 tracing collector 继续经
 `TextEncoder` 输出 Prometheus 0.0.4 文本，指标名、label、bucket 和媒体类型契约不变，也不切换 OpenMetrics。
 队列满计入 exporter 丢弃数；静态编译和已注册指标不证明真实部署采集成功，运行证据集中在状态文档。
+tracing 丢弃与导出失败 counter 以原子水位领取快照增量，并行 scrape 不会重复累计同一次失败；
+指标名称和 counter 类型保持不变。
 
 ## 维护与验证
 

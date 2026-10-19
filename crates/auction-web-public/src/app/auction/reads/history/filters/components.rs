@@ -13,14 +13,14 @@ use dioxus::prelude::*;
 pub(crate) fn PriceHistoryFilters(
     mut world: Signal<String>,
     mut name: Signal<String>,
-    mut from_month: Signal<String>,
-    mut from_year: Signal<String>,
-    mut to_month: Signal<String>,
-    mut to_year: Signal<String>,
-    mut minimum_price: Signal<String>,
-    mut minimum_price_unit: Signal<HistoryPriceUnit>,
-    mut maximum_price: Signal<String>,
-    mut maximum_price_unit: Signal<HistoryPriceUnit>,
+    from_month: Signal<String>,
+    from_year: Signal<String>,
+    to_month: Signal<String>,
+    to_year: Signal<String>,
+    minimum_price: Signal<String>,
+    minimum_price_unit: Signal<HistoryPriceUnit>,
+    maximum_price: Signal<String>,
+    maximum_price_unit: Signal<HistoryPriceUnit>,
     mut buyer: Signal<String>,
     mut seller: Signal<String>,
     world_options: Vec<String>,
@@ -177,21 +177,8 @@ pub(crate) fn PriceHistoryFilters(
                             button {
                                 r#type: "button",
                                 class: "public-history-filter-actions__clear",
-                                onclick: move |_| {
-                                    world.set("all".to_owned());
-                                    name.set(String::new());
-                                    from_month.set(String::new());
-                                    from_year.set(String::new());
-                                    to_month.set(String::new());
-                                    to_year.set(String::new());
-                                    minimum_price.set(String::new());
-                                    minimum_price_unit.set(HistoryPriceUnit::K);
-                                    maximum_price.set(String::new());
-                                    maximum_price_unit.set(HistoryPriceUnit::K);
-                                    buyer.set(String::new());
-                                    seller.set(String::new());
-                                    filter_error.set(None);
-                                },
+                                // 同步清除已应用的 URL 条件，回到居中搜索态并移除旧结果。
+                                onclick: move |_| on_reset.call(()),
                                 {t!("history-filter-clear")}
                             }
                         }
