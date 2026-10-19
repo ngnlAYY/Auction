@@ -153,6 +153,16 @@ pub(crate) async fn authenticated_public_identity(
     }
 }
 
+/// Public 账号写操作在当前 Cookie 认证后核对确认宿主，读取路由保持旧行为。
+pub(crate) async fn authenticated_public_mutation_identity(
+    state: &PublicApiState,
+    headers: &HeaderMap,
+) -> Result<PublicSessionIdentity, Box<Response>> {
+    let identity = authenticated_public_identity(state, headers).await?;
+    check_public_expected_user(headers, identity.user_id)?;
+    Ok(identity)
+}
+
 /// Public 竞价命令认证守卫；认证失败仍是 401，依赖失败使用旧 v1 的通用 503 外壳。
 pub(crate) async fn authenticated_public_competition_identity(
     state: &PublicApiState,
@@ -165,8 +175,37 @@ pub(crate) async fn authenticated_public_competition_identity(
         return Err(Box::new(authentication_error()));
     };
     match session.current(raw_token, Utc::now()).await {
-        Ok(identity) => Ok(identity),
+        Ok(identity) => {
+            check_public_expected_user(headers, identity.user_id)?;
+            Ok(identity)
+        }
         Err(error) if is_unauthenticated(&error) => Err(Box::new(authentication_error())),
         Err(_) => Err(Box::new(competition_unavailable())),
     }
+}
+
+/// 可选身份前置条件与本次 Cookie 在同一请求内核对，阻止旧标签页把命令提交给新账号。
+/// 未提供请求头的旧客户端维持原 v1 语义；此条件不取代会话、Origin 或命令资格校验。
+pub(crate) fn check_public_expected_user(
+    headers: &HeaderMap,
+    user_id: Uuid,
+) -> Result<(), Box<Response>> {
+    let mut values = headers.get_all(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER).iter();
+    let Some(value) = values.next() else {
+        return Ok(());
+    };
+    let expected = value.to_str().ok().and_then(|value| parse_public_uuid(value).ok());
+    if values.next().is_some() || expected.is_none() {
+        return Err(Box::new(
+            api_error(StatusCode::BAD_REQUEST, "invalid_expected_user_id", "预期会话身份无效")
+                .into_response(),
+        ));
+    }
+    if expected != Some(user_id) {
+        return Err(Box::new(
+            api_error(StatusCode::CONFLICT, "session_changed", "会话身份已变化，请重新确认操作")
+                .into_response(),
+        ));
+    }
+    Ok(())
 }

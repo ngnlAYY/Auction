@@ -24,7 +24,10 @@ pub(crate) async fn fetch_my_bids(bid_page: i64, proxy_page: i64) -> Result<MyBi
 async fn fetch_my_bids_once(url: &str) -> Result<MyBidsPage, String> {
     let response = send_get(url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
+        let status = response.status();
+        let code = decoder::decode_error_code(response).await;
+        super::session::observe_public_session_failure(status, &code);
+        return Err(code);
     }
     decoder::decode_my_bids(response).await
 }
@@ -41,7 +44,10 @@ pub(crate) async fn fetch_my_proxy(lot_id: String) -> Result<Option<OwnedProxy>,
 async fn fetch_my_proxy_once(url: &str, lot_id: &str) -> Result<Option<OwnedProxy>, String> {
     let response = send_get(url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
-        return Err(decoder::decode_error_code(response).await);
+        let status = response.status();
+        let code = decoder::decode_error_code(response).await;
+        super::session::observe_public_session_failure(status, &code);
+        return Err(code);
     }
     Ok(decoder::decode_my_proxy(response, lot_id).await?.authorization)
 }

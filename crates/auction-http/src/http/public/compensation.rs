@@ -154,7 +154,8 @@ pub(crate) async fn movements(
 
     let equipment_urls = resolve_movement_equipment_urls(&state, &result).await?;
     let mut headers = HeaderMap::new();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    // 流水含完整装备 key，与 lot 目录/详情一致，禁止浏览器或中间缓存保存。
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((
         headers,
         Json(ApiResponse::ok("补偿池流水已加载", map_movement_page(result, page, &equipment_urls))),

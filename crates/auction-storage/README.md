@@ -37,6 +37,9 @@
 提供 generation 首锁、active 凭据版本/世界/名称锁验，以及最终写入前 `clock_timestamp()` 的 30 秒证据时效门禁。
 证据 helper 返回 `MailEvidenceTransactionError::{Sqlx, Rejected}`：外层先按 SQLSTATE 40001/40P01 分类整事务重试，
 再转换脱敏应用错误，不通过错误文本决定重试。
+凭据 owner 的首次永久撤销通过结构化日志记录凭据类型及闭集原因
+（`probe_failed`、`session_unavailable`、`check_cancelled`、`internal_use_revoked`）；不记录连接错误原文、凭据或账号。
+后续成功探测不能恢复已撤销 owner，重建必须由新进程重新取得 advisory lock 并推进邮件 generation。
 
 ## 竞价事务和后端入口
 
@@ -84,6 +87,8 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。
 Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
+结算报告在同一 Serializable 快照内读取汇总与明细，序列化冲突最多尝试三次；明细排除不参与结算的
+`withdrawn` 标的，其余 lot 缺失结算事实时失败关闭。赢家累计领先时长由追加式 bid 重建，无领先事实时为零。
 `leader_since` 按全部接受事实判断连续领先是否中断（普通出价后被原领先者快速代理反超也重新计时）；`000037` 只重建
 可由追加式 bid 证明的未结算 live lot 投影，不改已结算金额、终态 lot 或历史审计。
 

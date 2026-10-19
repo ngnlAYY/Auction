@@ -12,6 +12,6 @@ mod proxy;
 mod retry;
 
 pub(super) use bid::{BidForm, BidFormInput, BidSuccess};
-pub(super) use common::{BidConfirmCommand, ProxyConfirmCommand};
+pub(super) use common::{BidConfirmCommand, ProxyConfirmCommand, PublicCommandIdentity};
 pub(super) use proxy::{ProxyFormInput, proxy_form};
 pub(super) use retry::BidRetry;

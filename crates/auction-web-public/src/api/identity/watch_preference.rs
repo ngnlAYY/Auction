@@ -25,6 +25,7 @@ pub(crate) async fn set_lot_watch_preference(
     let response = send_request(|abort_signal| {
         Request::put(PATH)
             .abort_signal(abort_signal)
+            .header(auction_contracts::PUBLIC_EXPECTED_USER_ID_HEADER, user_id)
             .json(command)
             .map_err(|_| TransportError::Network(None))
     })
@@ -64,5 +65,6 @@ async fn decode(
 }
 
 fn failure(code: &str, status: u16) -> CommandError {
+    super::session::observe_public_session_failure(status, code);
     CommandError { code: code.to_owned(), status }
 }

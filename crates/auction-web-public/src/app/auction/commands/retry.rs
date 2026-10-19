@@ -40,7 +40,7 @@ pub(crate) fn BidRetry(
                 command.submit(
                     pending,
                     move |pending| async move {
-                        place_bid(lot_id, pending.amount, pending.command_id).await
+                        place_bid(pending.user_id, lot_id, pending.amount, pending.command_id).await
                     },
                     CommandError::outcome_uncertain,
                     move |result| {
@@ -110,11 +110,11 @@ pub(super) fn ProxyRetry(
                     pending.clone(),
                     move |pending| async move {
                         match pending {
-                            PendingProxyCommand::Create { amount, mode, command_id } => {
-                                create_proxy_authorization(lot_id, amount, mode, command_id).await
+                            PendingProxyCommand::Create { user_id, amount, mode, command_id } => {
+                                create_proxy_authorization(user_id, lot_id, amount, mode, command_id).await
                             }
-                            PendingProxyCommand::Lower { amount, authorization_id, command_id } => {
-                                lower_proxy_authorization(lot_id, authorization_id, amount, command_id).await
+                            PendingProxyCommand::Lower { user_id, amount, authorization_id, command_id } => {
+                                lower_proxy_authorization(user_id, lot_id, authorization_id, amount, command_id).await
                             }
                         }
                     },

@@ -192,6 +192,7 @@ async fn postgres_report_once(
     };
 
     let lots = if settlement.is_some() {
+        // 撤回标的不参与结算金额；其余 lot 保留 LEFT JOIN，缺少结算事实时仍失败关闭。
         let rows = sqlx::query(
             r#"SELECT
                    l.id,
@@ -211,7 +212,7 @@ async fn postgres_report_once(
                    settlement.compensation_amount AS compensation_amount,
                    settlement.hold_ppm AS hold_ppm,
                    settlement.adjustment_ppm AS adjustment_ppm,
-                   COALESCE((SELECT SUM(GREATEST(0, LEAST(
+                   (SELECT COALESCE(SUM(GREATEST(0, LEAST(
                          EXTRACT(EPOCH FROM (COALESCE(b.next_at, l.effective_end_at) - b.created_at)) * 1000000000,
                          EXTRACT(EPOCH FROM (l.effective_end_at - b.created_at)) * 1000000000
                      )))::bigint, 0)
@@ -231,7 +232,7 @@ async fn postgres_report_once(
                    ON submission.id = l.submission_id
                LEFT JOIN public.users AS winner ON winner.id = l.leader_user_id
                LEFT JOIN public.lot_settlements AS settlement ON settlement.lot_id = l.id
-               WHERE l.auction_id = $1
+               WHERE l.auction_id = $1 AND l.status <> 'withdrawn'
                ORDER BY l.lot_number, l.id"#,
         )
         .bind(stored_auction_id)

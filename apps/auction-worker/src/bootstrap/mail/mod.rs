@@ -29,10 +29,11 @@ pub(super) async fn configure_mail_poll(
     Option<Arc<dyn SettlementFulfillmentEvidenceReader>>,
     Option<Arc<dyn SettlementFulfillmentCustodyReader>>,
     Option<Arc<dyn auction_application::SettlementInternalEvidenceReader>>,
+    Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 )> {
     let mail_config = &config.worker.mooglemail;
     if !mail_config.enabled {
-        return Ok((Vec::new(), None, None, None, None));
+        return Ok((Vec::new(), None, None, None, None, None));
     }
 
     #[cfg(not(feature = "postgres"))]
@@ -51,7 +52,7 @@ pub(super) async fn configure_mail_poll(
             StandardCronSchedule::parse(&mail_config.schedule)
                 .context("parse MoogleMail standard cron schedule")?,
         );
-        let credentials =
+        let (credentials, ownership) =
             credentials::load_credentials(config, mail_config, &world_configs, Arc::clone(&store))
                 .await?;
         let endpoint = Url::parse(&mail_config.endpoint).context("parse MoogleMail endpoint")?;
@@ -117,6 +118,7 @@ pub(super) async fn configure_mail_poll(
             Some(evidence_reader),
             Some(custody_reader),
             Some(gateway),
+            ownership,
         ))
     }
 }

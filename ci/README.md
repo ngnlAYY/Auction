@@ -128,8 +128,9 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 
 检查 job 不安装 dx、不构建页面，只有满足上述条件的 artifacts job 安装 dx 并构建完整包。`allow_missing` 只保证
 无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，dx 按需下载 esbuild 仅供构建。
-payload 复用只在本脚本内生效：本 surface 及其共享层、清单、工具链版本与已存清单全部一致才跳过 dx，
-因此只改 native 代码或文档不会重跑 WASM；任何一项不同即整目录重建。
+payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、工具链版本与已存清单
+全部一致才跳过 dx；只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
+只改 native 代码或文档不会重跑 WASM；任何输入不同即整目录重建。
 release.sh 在构建前冻结构建输入（代码、迁移、内嵌模板、清单与发布脚本）并在各阶段复查，纯文档修改不触发重建；
 核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、
 统一时间、两次相同 archive、内外哈希和依赖摘要；正式 package 要求干净工作树。分体包为 Public、Admin、Worker、

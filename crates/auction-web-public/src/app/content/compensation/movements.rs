@@ -11,6 +11,13 @@ pub(super) fn CompensationMovementDetails(
     on_movement_page_size_change: EventHandler<i64>,
     on_retry_movements: EventHandler<()>,
 ) -> Element {
+    let equation = t!(
+        "compensation-equation",
+        opening: format_amount(round.opening_balance),
+        income: format_amount(round.tax_income),
+        outflow: format_amount(round.compensation_out),
+        closing: format_amount(round.closing_balance)
+    );
     rsx! {
         section { class: "public-compensation-movements", aria_labelledby: "compensation-movements-title",
             h2 { id: "compensation-movements-title", class: "public-visually-hidden",
@@ -30,27 +37,32 @@ pub(super) fn CompensationMovementDetails(
                 },
                 Some(Ok(None)) => rsx! { p { class: "public-auction-page__status", {t!("data-empty")} } },
                 Some(Ok(Some(page))) => rsx! {
-                    if page.movements.is_empty() {
-                        p { class: "public-auction-page__status", {t!("data-empty")} }
-                    } else {
-                        div { class: "public-compensation-movement-wrap ui-table--fit",
-                            table { class: "public-compensation-movement-table",
-                                auction_web_shared::TableColumns { layout: "public-compensation-movements", widths: vec![8, 28, 8, 10, 10, 12, 10, 14] }
-                                thead {
-                                    tr {
-                                        th { {t!("compensation-lot")} }
-                                        th { {t!("compensation-equipment")} }
-                                        th { {t!("compensation-world")} }
-                                        th { class: "public-compensation-number", {t!("compensation-hold")} }
-                                        th { class: "public-compensation-number", {t!("compensation-adjustment")} }
-                                        th { class: "public-compensation-number", {t!("compensation-held-time")} }
-                                        th { {t!("compensation-kind")} }
-                                        th { class: "public-compensation-number", {t!("compensation-amount")} }
-                                    }
+                    div { class: "public-compensation-movement-wrap ui-table--fit",
+                        table { class: "public-compensation-movement-table",
+                            auction_web_shared::TableColumns { layout: "public-compensation-movements", widths: vec![8, 28, 8, 10, 10, 12, 10, 14] }
+                            thead {
+                                tr {
+                                    th { {t!("compensation-lot")} }
+                                    th { {t!("compensation-equipment")} }
+                                    th { {t!("compensation-world")} }
+                                    th { class: "public-compensation-number", {t!("compensation-hold")} }
+                                    th { class: "public-compensation-number", {t!("compensation-adjustment")} }
+                                    th { class: "public-compensation-number", {t!("compensation-held-time")} }
+                                    th { {t!("compensation-kind")} }
+                                    th { class: "public-compensation-number", {t!("compensation-amount")} }
                                 }
-                                tbody {
-                                    for movement in page.movements {
-                                        CompensationMovementRow { movement, world_id: round.world_id.clone() }
+                            }
+                            tbody {
+                                // 期初、期末账本事实仍由 API 分页；页面只展示真实收支，避免重复占位行。
+                                for movement in page.movements.into_iter().filter(|movement| !matches!(movement.kind.as_str(), "opening" | "closing")) {
+                                    CompensationMovementRow { movement, world_id: round.world_id.clone() }
+                                }
+                            }
+                            tfoot {
+                                tr {
+                                    td { colspan: 8, class: "public-compensation-equation",
+                                        // 使用整期权威汇总，每一页都固定保留同一跨列末行。
+                                        TruncatedText { value: equation, size: "wide", portal: true }
                                     }
                                 }
                             }
@@ -67,15 +79,6 @@ pub(super) fn CompensationMovementDetails(
                         on_page_size_change: on_movement_page_size_change,
                     }
                 },
-            }
-            p { class: "public-compensation-equation",
-                {t!(
-                    "compensation-equation",
-                    opening: format_amount(round.opening_balance),
-                    income: format_amount(round.tax_income),
-                    outflow: format_amount(round.compensation_out),
-                    closing: format_amount(round.closing_balance)
-                )}
             }
         }
     }

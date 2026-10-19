@@ -83,7 +83,10 @@ owner-only。未提供时从应用 URL 仅替换库名派生维护连接，应�
 
 `equipment_filter.qualities` 是硬性接收品质门槛，默认 `["Legendary", "Peerless"]`；低于该列表的拍卖装备邮件直接退回，`equipment_filter.enabled` 只控制前后缀、分类、类型和等级等附加过滤。空列表回退默认 L/P。
 `equipment_colors.rules` 控制论坛拍卖帖中的装备名称标色：可按装备类型（如 `One-Handed`）和装备种类（如 `Rapier`）过滤，按顺序首个命中；前缀/后缀分别标色，二者同时命中时整件装备使用 combined 颜色；Peerless 品质词固定彩虹色。该配置只影响论坛帖子，不改变 Public/Admin 装备展示。
-`bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感）：买家命中时结算不发 COD 邮件、直接走内部履约，流拍/撤拍返还命中时直接留存并完成义务；只影响新结算，已有 `manual_reconcile` 投递仍需人工收口。
+`bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感），Worker 启动时读取独立名单投影。
+命中名单的买家或流拍/撤拍返还收件人保留在内部履约路径；仅在真实远端身份、装备及资金证明全部通过后完成内部义务，
+流拍/撤拍装备留存。当前凭据身份与收件人不匹配时持久延期，不转普通外发，也不凭名单直接满足义务。
+修改名单须重启 Worker，只影响尚未生成 delivery 的新结算；已有 `manual_reconcile` 投递仍需人工收口。
 
 Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
 有效 UID、权限 0640，父目录受信且禁止 group/other 写入。A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换
@@ -94,6 +97,7 @@ Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；�
 | --- | --- | --- |
 | Admin listener/security/session、人工提前操作、equipment_source | Admin 启动快照 | Admin |
 | `worlds`、发件人 allowlist、`equipment_filter`、`equipment_colors`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务/论坛标色快照 | 受影响的 Admin/Worker |
+| `bot_players` | Admin 管理、Worker 内部履约收件人名单快照 | Worker |
 | `operations.economics` | 后续新拍卖的冻结经济模板 | Admin、Worker |
 | `operations.schedule` | 后续周排期的时区/星期/时间/world | Admin、Worker |
 | `operations.forum` | 论坛开关、批量、分页和请求/任务预算 | Worker |

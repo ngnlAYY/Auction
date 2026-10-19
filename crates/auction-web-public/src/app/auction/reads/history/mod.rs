@@ -75,61 +75,83 @@ pub(crate) fn history() -> Element {
         _ => vec!["main".to_owned(), "isekai".to_owned()],
     };
 
+    let active_filter_count = history_active_filter_count(&applied_query());
+    let has_search = active_filter_count > 0;
     let history = use_resource(move || {
         let _ = refresh_generation();
-        fetch_price_history(applied_query(), page_size())
-    });
-    let history_unsupported =
-        matches!(&*history.read_unchecked(), Some(Err(PriceHistoryFetchError::Unsupported)));
-    let body = match &*history.read_unchecked() {
-        None => rsx! {
-            p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
-        },
-        Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Empty,
-                title: t!("page-history-title"),
-                detail: t!("page-history-unsupported"),
+        let query = applied_query();
+        let requested_page_size = page_size();
+        async move {
+            // 空查询只展示搜索入口；输入草稿在提交并写回 URL 后才触发权威历史读取。
+            if history_active_filter_count(&query) == 0 {
+                return None;
             }
-        },
-        Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
-            AsyncState {
-                kind: AsyncStateKind::Error,
-                title: t!("page-history-title"),
-                detail: t!("data-error"),
-                retry_label: t!("data-retry"),
-                on_retry: move |_| {
-                    refresh_generation.set(refresh_generation().saturating_add(1));
-                },
-            }
-        },
-        Some(Ok(page))
-            if !public_page_matches(
-                page.page,
-                page.page_size,
-                applied_query().page,
-                page_size(),
-            ) =>
-        {
-            rsx! {
-                p { role: "status", {t!("data-loading")} }
-            }
+            let result = fetch_price_history(query.clone(), requested_page_size).await;
+            Some((query, requested_page_size, result))
         }
-        Some(Ok(page)) => rsx! {
-            PriceHistoryTable {
-                page: page.clone(),
-                current_page: applied_query().page,
-                on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
-                on_page_change: move |next_page: i64| {
-                    let next_page = next_page.max(1);
-                    update_public_query_state(
-                        query_state_signal,
-                        |query| query.page = next_page,
-                        QueryWriteMode::Push,
-                    );
-                },
+    });
+    // Resource 会保留旧结果；重置或切换查询后不能把前一次装备列表装配到当前搜索条件。
+    let history_snapshot = history.read_unchecked();
+    let history_result = history_snapshot
+        .as_ref()
+        .and_then(Option::as_ref)
+        .filter(|(query, size, _)| *query == applied_query() && *size == page_size())
+        .map(|(_, _, result)| result);
+    let history_unsupported =
+        matches!(history_result, Some(Err(PriceHistoryFetchError::Unsupported)));
+    let body = if !has_search {
+        rsx! {}
+    } else {
+        match history_result {
+            None => rsx! {
+                p { class: "public-auction-page__status", role: "status", {t!("data-loading")} }
+            },
+            Some(Err(PriceHistoryFetchError::Unsupported)) => rsx! {
+                AsyncState {
+                    kind: AsyncStateKind::Empty,
+                    title: t!("page-history-title"),
+                    detail: t!("page-history-unsupported"),
+                }
+            },
+            Some(Err(PriceHistoryFetchError::Unavailable)) => rsx! {
+                AsyncState {
+                    kind: AsyncStateKind::Error,
+                    title: t!("page-history-title"),
+                    detail: t!("data-error"),
+                    retry_label: t!("data-retry"),
+                    on_retry: move |_| {
+                        refresh_generation.set(refresh_generation().saturating_add(1));
+                    },
+                }
+            },
+            Some(Ok(page))
+                if !public_page_matches(
+                    page.page,
+                    page.page_size,
+                    applied_query().page,
+                    page_size(),
+                ) =>
+            {
+                rsx! {
+                    p { role: "status", {t!("data-loading")} }
+                }
             }
-        },
+            Some(Ok(page)) => rsx! {
+                PriceHistoryTable {
+                    page: page.clone(),
+                    current_page: applied_query().page,
+                    on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
+                    on_page_change: move |next_page: i64| {
+                        let next_page = next_page.max(1);
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| query.page = next_page,
+                            QueryWriteMode::Push,
+                        );
+                    },
+                }
+            },
+        }
     };
 
     let apply_filters = move |_| {
@@ -256,10 +278,14 @@ pub(crate) fn history() -> Element {
             QueryWriteMode::Push,
         );
     };
-    let active_filter_count = history_active_filter_count(&applied_query());
+    let page_class = if has_search {
+        "public-history-page"
+    } else {
+        "public-history-page public-history-page--search"
+    };
 
     rsx! {
-        section { class: "public-history-page", aria_labelledby: "price-history-title",
+        section { class: page_class, aria_labelledby: "price-history-title",
             h1 { id: "price-history-title", {t!("page-history-title")} }
             p { class: "public-history-intro", {t!("page-history-note")} }
             if !history_unsupported {

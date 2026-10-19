@@ -84,11 +84,14 @@ pub(crate) async fn logout_session(
         return authentication_error();
     };
     let now = Utc::now();
-    if let Err(error) = session.current(raw_token.clone(), now).await {
-        if is_unauthenticated(&error) {
-            return authentication_error();
+    match session.current(raw_token.clone(), now).await {
+        Ok(identity) => {
+            if let Err(response) = check_public_expected_user(&headers, identity.user_id) {
+                return *response;
+            }
         }
-        return session_unavailable();
+        Err(error) if is_unauthenticated(&error) => return authentication_error(),
+        Err(_) => return session_unavailable(),
     }
     if session.logout(raw_token, now).await.is_err() {
         return session_unavailable();

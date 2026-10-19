@@ -32,9 +32,11 @@ pub(crate) fn LiveCatalogActions(
     });
     // lot UUID 唯一归属拍卖；用户或 lot 改变即销毁原命令与任务，不能跨上下文复用 ID。
     let command_scope = format!("{lot_id}:{}", owner.as_deref().unwrap_or_default());
+    let authenticated = authenticated && owner.is_some();
     rsx! {
         ScopedCatalogActions {
             key: "{command_scope}",
+            user_id: owner,
             lot_id,
             lot_code,
             can_bid,
@@ -44,7 +46,7 @@ pub(crate) fn LiveCatalogActions(
             allow_slow,
             session_ready,
             block_ordinary_for_active_proxy,
-            authenticated: authenticated && owner.is_some(),
+            authenticated,
             leading,
             show_view,
             show_proxy_summary,
@@ -55,6 +57,7 @@ pub(crate) fn LiveCatalogActions(
 /// 命令状态仅存在于宿主确定的 lot/用户作用域内。
 #[component]
 fn ScopedCatalogActions(
+    user_id: Option<String>,
     lot_id: String,
     lot_code: String,
     can_bid: bool,
@@ -69,6 +72,11 @@ fn ScopedCatalogActions(
     show_view: bool,
     show_proxy_summary: bool,
 ) -> Element {
+    let user_id = user_id
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        .unwrap_or_else(uuid::Uuid::nil);
+    use_context_provider(|| commands::PublicCommandIdentity(user_id));
     let refresh_generation = use_context::<Signal<u64>>();
     let mut action = use_signal(|| None::<String>);
     let requested_lot_id = lot_id.clone();

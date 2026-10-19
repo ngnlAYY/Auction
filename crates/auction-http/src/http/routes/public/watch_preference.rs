@@ -34,7 +34,7 @@ pub(crate) async fn set_watch_preference(
     if let Some(response) = session_guard(&state, &parts.headers, address, true, false) {
         return response;
     }
-    let identity = match authenticated_public_identity(&state, &parts.headers).await {
+    let identity = match authenticated_public_mutation_identity(&state, &parts.headers).await {
         Ok(value) => value,
         Err(response) => return *response,
     };

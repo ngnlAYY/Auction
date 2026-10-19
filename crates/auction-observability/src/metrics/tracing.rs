@@ -1,6 +1,9 @@
 //! tracing 健康状态的 Prometheus collector。
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use prometheus::{
     Gauge, IntCounter, Opts,
@@ -35,6 +38,8 @@ pub(super) struct TracingCollector {
     degraded: Gauge,
     dropped_spans: IntCounter,
     export_failures: IntCounter,
+    last_dropped_spans: AtomicU64,
+    last_export_failures: AtomicU64,
     last_success: Gauge,
     last_failure: Gauge,
 }
@@ -63,6 +68,8 @@ impl TracingCollector {
                 "Total tracing export failures.",
             ))
             .map_err(MetricsError::Registry)?,
+            last_dropped_spans: AtomicU64::new(0),
+            last_export_failures: AtomicU64::new(0),
             last_success: Gauge::with_opts(Opts::new(
                 "auction_tracing_export_last_success_timestamp_seconds",
                 "Unix timestamp of the last successful tracing export, or zero.",
@@ -76,11 +83,12 @@ impl TracingCollector {
         })
     }
 
-    fn sync_counter(counter: &IntCounter, value: i64) {
+    fn sync_counter(counter: &IntCounter, last: &AtomicU64, value: i64) {
         let target = u64::try_from(value).unwrap_or(0);
-        let current = counter.get();
-        if target > current {
-            counter.inc_by(target - current);
+        // 并行 scrape 原子领取各自的增量，避免同时读取旧 counter 后重复累计同一批失败。
+        let previous = last.fetch_max(target, Ordering::Relaxed);
+        if target > previous {
+            counter.inc_by(target - previous);
         }
     }
 
@@ -108,8 +116,16 @@ impl Collector for TracingCollector {
         let health = self.reader.snapshot();
         self.enabled.set(f64::from(!matches!(health.status, TracingStatus::Disabled)));
         self.degraded.set(f64::from(health.status == TracingStatus::Degraded));
-        Self::sync_counter(&self.dropped_spans, health.dropped_span_count);
-        Self::sync_counter(&self.export_failures, health.export_failure_count);
+        Self::sync_counter(
+            &self.dropped_spans,
+            &self.last_dropped_spans,
+            health.dropped_span_count,
+        );
+        Self::sync_counter(
+            &self.export_failures,
+            &self.last_export_failures,
+            health.export_failure_count,
+        );
         self.last_success.set(Self::timestamp_seconds(health.last_success_at));
         self.last_failure.set(Self::timestamp_seconds(health.last_failure_at));
 

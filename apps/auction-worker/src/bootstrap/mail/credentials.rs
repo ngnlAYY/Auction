@@ -7,8 +7,8 @@ pub(super) async fn load_credentials(
     mail_config: &auction_config::MoogleMailWorkerConfig,
     world_configs: &[auction_config::MoogleMailWorldConfig],
     store: Arc<DatabaseStore>,
-) -> anyhow::Result<MoogleMailCredentialSet> {
-    let credentials = if let Some((key_id, key_material)) =
+) -> anyhow::Result<(MoogleMailCredentialSet, Option<Arc<dyn AdminCredentialRuntimeOwnership>>)> {
+    let (credentials, ownership) = if let Some((key_id, key_material)) =
         config.credential_data_key_id().zip(config.credential_data_key())
     {
         let data_key = Arc::new(
@@ -79,7 +79,14 @@ pub(super) async fn load_credentials(
             });
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();
-        MoogleMailCredentialSet::from_runtime_credentials(cookies, invalidator, ownership)
+        (
+            MoogleMailCredentialSet::from_runtime_credentials(
+                cookies,
+                invalidator,
+                ownership.clone(),
+            ),
+            ownership,
+        )
     } else if let Some(path) = &mail_config.keyenv_file {
         let keyenv = load_mooglemail_keyenv(path).context("load MoogleMail keyenv")?;
         let ownership = Arc::new(
@@ -88,10 +95,13 @@ pub(super) async fn load_credentials(
                 .await
                 .context("acquire configured MoogleMail credential ownership")?,
         ) as Arc<dyn AdminCredentialRuntimeOwnership>;
-        MoogleMailCredentialSet::from_owned_cookie(
-            MoogleMailCookie::new(keyenv.bot_cookie())
-                .map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ownership,
+        (
+            MoogleMailCredentialSet::from_owned_cookie(
+                MoogleMailCookie::new(keyenv.bot_cookie())
+                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                ownership.clone(),
+            ),
+            Some(ownership),
         )
     } else {
         let cookie = config.mooglemail_cookie().context(
@@ -103,10 +113,16 @@ pub(super) async fn load_credentials(
                 .await
                 .context("acquire configured MoogleMail credential ownership")?,
         ) as Arc<dyn AdminCredentialRuntimeOwnership>;
-        MoogleMailCredentialSet::from_owned_cookie(
-            MoogleMailCookie::new(cookie).map_err(|error| anyhow::Error::msg(error.to_string()))?,
-            ownership,
+        (
+            MoogleMailCredentialSet::from_owned_cookie(
+                MoogleMailCookie::new(cookie)
+                    .map_err(|error| anyhow::Error::msg(error.to_string()))?,
+                ownership.clone(),
+            ),
+            Some(ownership),
         )
     };
-    credentials.map_err(|error| anyhow::Error::msg(error.to_string()))
+    credentials
+        .map(|credentials| (credentials, ownership))
+        .map_err(|error| anyhow::Error::msg(error.to_string()))
 }

@@ -35,6 +35,93 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-19 Public 展示调整补发部署（已上线）
+
+此前的限定热修复只更新 Admin 与 Worker，本次单独更新 `auction-public-api`，将 `auction-web-public` 的
+补偿流水与历史成交价调整上线。期初/期末占位流水隐藏，整期结算等式固定在每页跨八列的表尾；
+历史成交价空查询只展示居中搜索区，提交筛选后读取装备列表。复核补齐“清空”按钮：复用重置回调，
+同步清除已应用 URL 条件、旧结果与草稿，返回居中搜索态。配套 Public HTTP 可选预期身份头与会话绑定同版构建，
+沿用已记录的 v1 兼容契约，无新增迁移。
+
+完整工作树 `just verify` 退出 0；Public WASM 与原生内嵌制品重新构建。六个 payload 文件通过清单哈希校验，
+WASM/CSS 含补偿表尾及居中搜索标记，原生制品含同一 payload 指纹与服务端身份头校验，未混入 Admin 页面。
+Public SHA-256 为 `5faee02917534f207cb0a8ca89c48fc9fc6cee84a183da84dbc32b7fdc6332cc`，
+payload 为 `f926107ea41dcd5b1d04c3820f30faefffb16675c6325048f3169d2f8feb4056`。
+
+15:28:16 UTC 单独停止并原子替换 Public，15:28:19 确认新 PID 71120 active/running、自动重启计数为零，
+运行 ELF 与新制品哈希一致；Admin PID 70668、Worker PID 70666 的 InvocationID、运行哈希及 active 状态均保持。
+旧 Public 制品、哈希及切换回执保留在部署目录 `.bf/public-ui-20261019/`，本地
+`target/dist/public-ui-20261019/` 保存 source patch、构建清单、payload 清单与制品。未新增或运行行为测试、
+发送业务 HTTP 请求、迁移或修改配置；本次证据来自静态分析、编译、制品检查、进程状态与运行映像。
+
+### 2026-10-19 云端结算报告与 MM 所有权恢复热修复（已部署，自动轮询恢复）
+
+只读云端证据确认：Admin 正在运行的报告 SQL 与旧源码逐字一致，14:19:58 UTC PostgreSQL 记录
+`syntax error at or near "FROM"`，对应报告返回 503；主世界第 1 场结算及非撤回 lot 事实齐全。
+MM 自 10:20:28 UTC 持续 `credential_unavailable`；凭据记录仍 active，邮件 advisory lock 消失，
+运行 generation 仍为启动时的 25，自动调度与手动触发均继续到达凭据选择层。
+
+`auction-storage` 保留本轮报告 SQL 修复，并为凭据 owner 首次永久撤销记录闭集安全原因；
+`auction-http` 报告读取与投影校验失败记录拍卖标识和闭集失败码。Worker 观察邮件 owner 的已知失效状态，
+沿用十秒有界排空，成功排空也非零退出，由进程管理器重建并重新取得 advisory lock、推进 generation。
+保留原有失效后停止外呼、sending 未知结果隔离和 generation 行锁，不在旧进程内重新抢锁。
+
+完整工作树 `just verify` 退出 0，定向独立复审未发现阻断问题；未新增或运行行为测试。
+发布从基线 `b27320f9c1c2ce47b54cf45a88a0c8396008b84f` 隔离九个代码/清单文件，仅更新 Admin 与 Worker，
+不夹带其余待发布源码调整。Admin Web 在隔离树重新构建，八个 payload 文件通过哈希清单核验；无新增迁移。
+两条报告 SELECT 在目标 PostgreSQL 的只读事务内完成 `PREPARE`/`DEALLOCATE`，语法、表与列引用检查通过，
+未执行报告业务查询或修改 schema。
+
+14:49:47 UTC 按 Public → Admin → Worker 停止，原子替换两个制品后按 Worker → Admin → Public 启动；
+14:49:52 三角色 active/running，自动重启计数均为零，运行 ELF 与上传制品哈希一致，Public 仍使用原制品。
+Admin SHA-256 为 `630c51b6dd00a3ab4f8b72b7834f5b04d16505d74082a539f3e295252745f410`，
+Worker 为 `ff1d1aa322862d8e18479b74719c3f56738244829a1a2ad60a87cf2bea36e498`；
+Admin 内嵌 payload 为 `ebf3ef2fd8346e3795547fc71ab7b5f8594f1e00367a92ec40e31ffc2e4dc05e`。
+制品内固定查询逐字匹配修复 SQL，旧错误查询已排除；管理端读取错误同时具有闭集安全诊断事件。
+
+新邮件 owner 于 14:49:47 UTC 激活 generation 26，邮件与论坛 advisory lock 均存在。
+14:50:22 UTC 日常自动任务完成三页维护及收件批次，`mail_poll_state` 的连续失败次数为零、失败码/时间为空，
+下一次计划为 14:55 UTC；本轮未手动触发 MM、登录或发送业务 HTTP 请求。
+旧制品与哈希及切换回执保留在部署目录 `.bf/hotfix-20261019-report-mm/`；
+本地 `target/dist/hotfix-20261019-report-mm/` 保存 source patch、构建清单、payload 清单和双制品。
+未执行迁移、修改配置、重写结算或未知发送事实；Admin 启动依照既有契约撤销旧管理会话，需要重新登录。
+
+### 2026-10-19 全仓审计修复与 Public 展示调整（静态检查通过）
+
+修复六项源码问题：`auction-storage` 更正结算报告累计领先时长 SQL，排除不参与结算的撤回标的，保留其余缺事实错误；
+Web payload 指纹加入 `auction-contracts`；`auction-config` 将 bot 名单独立投影给 Worker；
+`auction-observability` 原子领取 tracing 指标增量，防止并行 scrape 重复累计。
+Public 的竞价、代理、标记、警告渠道和注销绑定确认宿主身份，HTTP 在当前 Cookie 认证后核对可选预期用户头；
+未提供头的旧 v1 客户端保留原语义。跨标签页认证通知、聚焦和恢复可见均重读会话，同账号重登保留未知命令 ID。
+
+补偿流水隐藏期初/期末占位行，将整期权威结算等式放在每页跨全列的固定表尾；历史成交价默认只显示居中搜索区，
+提交筛选或恢复带筛选 URL 后才读取装备列表，重置回搜索态。
+
+最终工作树 `just verify` 退出 0：策略/格式、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）
+及双端 WASM 检查通过；受影响发布脚本通过 `bash -n` 与 ShellCheck。只读 PostgreSQL 语法解析覆盖 50 份迁移执行视图
+及 907 条完整 Storage SQL，四处动态模板片段按调用方人工核对；`git diff --check` 通过。
+本轮保留原有未提交改动，未新增或运行行为测试、连接业务数据库、构建发布制品或部署。
+
+### 2026-10-19 补偿池修复制品重建（完成，用户手动更新）
+用户明确授权后执行 `just build-release`，退出 0；Public WASM 重建，Admin payload 复用，分体四程序输出到
+`target/dist/artifacts/embedded/bin/`。`auction-public-api` SHA-256 为
+`81546ebb38e11bb49740d53cf6948aa82d6bc8aa281e32b0c12036863026a52b`；Public payload 为
+`7734af9afcd91f485367ef014d04b69a4951cadc24df5fe58e3f93bafdc7f424`。双端 payload 文件及清单哈希一致，
+Public 二进制包含新 Public 标记且无 Admin 标记；`BUILD-INFO` 标记为含本次未提交修复的 dirty 工作树。
+本轮仅构建与静态制品检查，未运行行为测试、上传制品或操作云端服务；手动更新后的页面恢复仍待核验。
+
+### 2026-10-19 补偿池前端链接误判（源码已修复，未构建部署）
+用户要求结合云端日志续查：Public 在 03:47 UTC 的批次/流水请求均为 200（流水 request_id
+`f7d56ce5e41645a3982ce9e32a4c9207`）；停机前留存的 200 响应含 23 条流水、21 个完整装备链接，
+旧 Web 校验却只允许 ID，导致合法 ID/key 链接被判为 `invalid_response`，前 10 条中的 9 个链接同样受影响。
+`auction-web-public::api::decoder` 改为复用目录完整链接校验，仍拒绝空串、keyless 与非法 URL；
+`auction-http::public::compensation` 将含 key 的流水响应改为 `no-store`，分页、JSON 字段及结算事实不变。
+
+03:50:43 UTC Public 收到 SIGTERM 后正常停止；03:57 UTC 只读复核三角色均 inactive，页面及两项 API 为 502，
+Caddy 记录 `dial unix /run/hv-auction/public.sock: connect: no such file or directory`。本轮只读云端日志/状态和公开请求，
+未启动角色、迁移或改写线上数据。格式、两处变更路径主动 LSP、repository/layout/config/i18n 与 diff 检查通过；
+未新增测试、执行编译或部署，Public WASM 与内嵌 Public 二进制待重建，页面恢复待另行核验。
+
 ### 2026-10-17 资金迁移保留字与本地云端副本迁移
 `566f5e7` 后由正式总控继续：44 修复两条时间倒退并追加 2 条审计，45/46 提交；47 因 `settlement_funding_commands.authorization` 未加引号被 PostgreSQL
 保留字拒绝回滚；只读复核 46、时间倒退 0、未知投递 88、三角色停止，storage 兼容层按 47 固定描述加双引号，语义与已发布 checksum 不变。

@@ -70,6 +70,10 @@ application 会话凭据校验，拒绝生成不可登录的配置。
 
 共享 runtime 只含非敏感候选，保存后须重启受影响进程。Admin 的 listener、metrics/tracing 等按 runtime 覆盖；
 Public/Worker 的 metrics 来自公共文件，tracing 来自各自角色文件，OTLP headers 始终只在角色敏感 TOML 中。
+
+Worker 将 `bot_players` 单独保留为 `AppConfig.worker_bot_players` 窄投影，不持有完整 Admin runtime 文档；名单只用于
+选择内部履约证据路径，实际完成仍须通过当前远端身份及资产/资金核验。
+
 `operations` 的 economics、schedule、forum、alerts、worker、mail 六组 `managed` 默认关闭：经济与排期仅影响新拍卖/
 后续轮次并须重启 Admin/Worker，其余组重启 Worker；接管任一组时预检要求共用同一 runtime 且有效模板/排期一致，
 MoogleMail 凭据、transport、mailbox 身份和全局启用仍归部署配置。浏览器补齐的未接管候选不代表进程当前值。
