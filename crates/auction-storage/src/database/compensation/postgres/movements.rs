@@ -115,19 +115,22 @@ pub(crate) async fn movements(
             equipment.external_equipment_id,
             settlement.hold_ppm,
             settlement.adjustment_ppm,
-            COALESCE((SELECT SUM(GREATEST(0, LEAST(
-                  EXTRACT(EPOCH FROM (COALESCE(b.next_at, lot.effective_end_at) - b.created_at)) * 1000000000,
-                  EXTRACT(EPOCH FROM (lot.effective_end_at - b.created_at)) * 1000000000
-              )))::bigint, 0)
-              FROM (
-                  SELECT bid.bidder_user_id, bid.created_at,
-                         LEAD(bid.created_at) OVER (
-                             ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
-                         ) AS next_at
-                  FROM public.bids AS bid
-                  WHERE bid.lot_id = lot.id
-              ) AS b
-              WHERE b.bidder_user_id = lot.leader_user_id) AS leader_held_nanos
+            CASE WHEN ledger.lot_id IS NULL THEN NULL ELSE COALESCE(
+                (SELECT SUM(GREATEST(0, LEAST(
+                    EXTRACT(EPOCH FROM (COALESCE(b.next_at, lot.effective_end_at) - b.created_at)) * 1000000000,
+                    EXTRACT(EPOCH FROM (lot.effective_end_at - b.created_at)) * 1000000000
+                )))
+                FROM (
+                    SELECT bid.bidder_user_id, bid.created_at,
+                           LEAD(bid.created_at) OVER (
+                               ORDER BY bid.accepted_state_version, bid.fact_index, bid.id
+                           ) AS next_at
+                    FROM public.bids AS bid
+                    WHERE bid.lot_id = lot.id
+                ) AS b
+                WHERE b.bidder_user_id = lot.leader_user_id)::bigint,
+                0
+            ) END AS leader_held_nanos
          FROM public.compensation_ledger AS ledger
          LEFT JOIN public.lots AS lot ON lot.id = ledger.lot_id
          LEFT JOIN public.equipment AS equipment ON equipment.id = lot.equipment_id
