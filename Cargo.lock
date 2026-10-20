@@ -543,6 +543,7 @@ dependencies = [
  "auction-config",
  "auction-contracts",
  "auction-integrations",
+ "auction-observability",
  "auction-storage",
  "chrono",
  "clap",

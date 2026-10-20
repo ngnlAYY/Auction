@@ -27,8 +27,20 @@ pub(crate) enum PublicRealtimeTarget {
     Checking,
     Anonymous,
     SessionError,
-    Discovery,
-    Auction { auction_id: String, world: String, preview_revision: i64 },
+    /// 已确认未进入竞价期；世界进入 key，切换世界不会保留上一世界的连接目标。
+    Inactive {
+        world: String,
+        preview: bool,
+    },
+    /// 当前场次读取失败，不把失败伪装为没有拍卖或健康的实时连接。
+    CurrentError {
+        world: String,
+    },
+    Auction {
+        auction_id: String,
+        world: String,
+        preview_revision: i64,
+    },
 }
 
 impl PublicRealtimeTarget {
@@ -37,7 +49,10 @@ impl PublicRealtimeTarget {
             Self::Checking => "checking".to_owned(),
             Self::Anonymous => "anonymous".to_owned(),
             Self::SessionError => "session-error".to_owned(),
-            Self::Discovery => "discovery".to_owned(),
+            Self::Inactive { world, preview } => {
+                format!("inactive:world:{world}:preview:{preview}")
+            }
+            Self::CurrentError { world } => format!("current-error:world:{world}"),
             Self::Auction { auction_id, world, preview_revision } => {
                 format!("auction:{auction_id}:world:{world}:preview:{preview_revision}")
             }
@@ -92,7 +107,15 @@ pub(crate) fn PublicRealtimeOwner(
                     realtime_state.set(LiveConnectionState::Manual);
                     return;
                 }
-                PublicRealtimeTarget::Discovery => (None, None),
+                PublicRealtimeTarget::Inactive { .. } => {
+                    // 核心实时四态保持原契约；页头由明确停用目标显示 idle/预览，且不创建 WS。
+                    realtime_state.set(LiveConnectionState::Manual);
+                    return;
+                }
+                PublicRealtimeTarget::CurrentError { .. } => {
+                    realtime_state.set(LiveConnectionState::Degraded);
+                    return;
+                }
                 PublicRealtimeTarget::Auction { auction_id, world, preview_revision } => {
                     let initial_after = auction_after
                         .peek()
@@ -222,12 +245,12 @@ pub(crate) fn PublicRealtimeOwner(
     rsx! {}
 }
 
-/// 按旧 `PublicApp` 的优先级把 readiness、session、current 与核心实时四态合成为页头六态。
+/// readiness 与身份仍优先；明确停用的场次显示 idle，读取失败显示降级，不借用旧实时成功态。
 pub(crate) fn public_connection_state(
     readiness: PublicReadinessState,
     session_pending: bool,
     authenticated: bool,
-    has_current_auction: bool,
+    target: &PublicRealtimeTarget,
     live_state: LiveConnectionState,
 ) -> PublicConnectionState {
     if readiness == PublicReadinessState::Checking {
@@ -239,14 +262,14 @@ pub(crate) fn public_connection_state(
     if session_pending {
         return PublicConnectionState::Connecting;
     }
+    match target {
+        PublicRealtimeTarget::Inactive { .. } => return PublicConnectionState::Idle,
+        PublicRealtimeTarget::CurrentError { .. } => return PublicConnectionState::Degraded,
+        PublicRealtimeTarget::Checking => return PublicConnectionState::Connecting,
+        _ => {}
+    }
     if !authenticated {
         return PublicConnectionState::Manual;
-    }
-    if !has_current_auction && live_state == LiveConnectionState::Live {
-        return PublicConnectionState::Idle;
-    }
-    if !has_current_auction && live_state == LiveConnectionState::Degraded {
-        return PublicConnectionState::Degraded;
     }
     match live_state {
         LiveConnectionState::Connecting => PublicConnectionState::Connecting,

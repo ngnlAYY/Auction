@@ -54,7 +54,6 @@ pub(super) async fn authorize(
     {
         return Err(FenceError::Rejected);
     }
-    let cash = evidence.main_cash.as_ref().ok_or(FenceError::Rejected)?;
     crate::lock_mail_runtime_generation(tx, &evidence.identity.runtime).await?;
     // 持久world code字典序；Main现金与Isekai身份只共享账号，不能搬用世界事实。
     let world = match evidence.identity.world {
@@ -122,7 +121,7 @@ pub(super) async fn authorize(
         if !account.ready() {
             return Err(FenceError::Rejected);
         }
-        if !funding::check_funding_cash(tx, &account, cash.credits).await? {
+        if !funding::check_funding_evidence(tx, &account, evidence).await? {
             // B的账实缺口冻结必须提交；绝不能把该提交当作发送成功。
             return Ok(DeliveryFenceOutcome::Deferred);
         }
@@ -144,6 +143,9 @@ pub(super) async fn authorize(
         funding::start_funded_delivery(tx, &account, claim.delivery_id).await?;
     } else if protected {
         // 有其他受保护账户但无法解释当前账号时失败关闭，不凭缺关联自动legacy。
+        return Err(FenceError::Rejected);
+    } else if evidence.main_cash.is_none() {
+        // 未开户legacy仍按旧strict证据形状，不把缺现金证明本身当成record_only授权。
         return Err(FenceError::Rejected);
     }
     crate::validate_mail_evidence_time(tx, evidence).await?;

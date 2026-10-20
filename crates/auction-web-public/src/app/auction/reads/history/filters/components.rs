@@ -3,7 +3,7 @@
 use super::super::world_label;
 use super::{
     HistoryFilterError, HistoryPriceUnit, history_date_error, history_month_label,
-    history_price_error,
+    history_name_error, history_name_value, history_price_error,
 };
 use auction_web_shared::legacy_t as t;
 use dioxus::prelude::*;
@@ -31,6 +31,12 @@ pub(crate) fn PriceHistoryFilters(
     on_reset: EventHandler<()>,
 ) -> Element {
     let current_error = filter_error();
+    let name_error = history_name_error(current_error);
+    let name_description = if name_error.is_some() {
+        "public-history-name-hint public-history-name-error"
+    } else {
+        "public-history-name-hint"
+    };
     rsx! {
         form {
             class: "public-history-filters",
@@ -53,16 +59,26 @@ pub(crate) fn PriceHistoryFilters(
                             }
                         }
                     }
-                    label {
+                    label { r#for: "public-history-name",
                         span { {t!("history-filter-name")} }
                         input {
+                            id: "public-history-name",
+                            name: "name",
                             r#type: "search",
                             value: name(),
                             placeholder: t!("history-filter-name-placeholder"),
                             maxlength: "1024",
+                            aria_invalid: name_error.is_some().to_string(),
+                            aria_describedby: name_description,
                             oninput: move |event| {
                                 name.set(event.value());
                                 filter_error.set(None);
+                            },
+                            onblur: move |_| {
+                                let error = history_name_value(&name()).err();
+                                if error.is_some() || history_name_error(filter_error()).is_some() {
+                                    filter_error.set(error);
+                                }
                             },
                         }
                     }
@@ -87,6 +103,12 @@ pub(crate) fn PriceHistoryFilters(
                             {t!("history-filter-apply")}
                         }
                     }
+                }
+                p { id: "public-history-name-hint", class: "public-history-name-hint",
+                    {t!("history-filter-name-hint")}
+                }
+                if let Some(ref error) = name_error {
+                    p { id: "public-history-name-error", class: "public-history-field-error", role: "alert", {error.clone()} }
                 }
                 if settings_open() {
                     div {
@@ -167,17 +189,12 @@ pub(crate) fn PriceHistoryFilters(
                             }
                         }
                         p { class: "public-history-price-hint", {t!("history-filter-price-hint")} }
+                        p { class: "public-history-player-hint", {t!("history-filter-player-hint")} }
                         div { class: "public-history-filter-actions",
                             button {
                                 r#type: "button",
-                                class: "public-history-filter-actions__reset",
-                                onclick: move |_| on_reset.call(()),
-                                {t!("history-filter-reset")}
-                            }
-                            button {
-                                r#type: "button",
                                 class: "public-history-filter-actions__clear",
-                                // 同步清除已应用的 URL 条件，回到居中搜索态并移除旧结果。
+                                // 同步清除已应用的 URL 条件，保留顶部搜索并移除旧结果。
                                 onclick: move |_| on_reset.call(()),
                                 {t!("history-filter-clear")}
                             }
@@ -253,8 +270,8 @@ fn HistoryPriceFilter(
     mut filter_error: Signal<Option<HistoryFilterError>>,
 ) -> Element {
     let input_mode = match price_unit() {
-        HistoryPriceUnit::K => "numeric",
-        HistoryPriceUnit::M => "decimal",
+        HistoryPriceUnit::C => "numeric",
+        HistoryPriceUnit::K | HistoryPriceUnit::M => "decimal",
     };
     rsx! {
         fieldset { class: "public-history-filter-cell",
@@ -279,6 +296,7 @@ fn HistoryPriceFilter(
                         price_unit.set(HistoryPriceUnit::from_str(&event.value()));
                         filter_error.set(None);
                     },
+                    option { value: "C", "C" }
                     option { value: "K", "K" }
                     option { value: "M", "M" }
                 }

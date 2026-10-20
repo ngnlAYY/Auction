@@ -5,6 +5,7 @@ use super::super::*;
 struct MoogleMailWorkerGateway {
     gateway: Arc<MoogleMailGateway>,
     world: MoogleMailWorld,
+    journal: Arc<dyn auction_application::MailPollReadJournal>,
 }
 
 pub(super) async fn build_poll_runtimes(
@@ -18,6 +19,7 @@ pub(super) async fn build_poll_runtimes(
 ) -> anyhow::Result<(Vec<MailPollRuntime>, HashMap<MoogleMailWorld, Arc<MoogleMailGateway>>)> {
     let world_configs = mail_config.configured_worlds();
     let store_port: Arc<dyn MailPollStore> = store.clone();
+    let journal: Arc<dyn auction_application::MailPollReadJournal> = store.clone();
     let mut gateways = HashMap::with_capacity(world_configs.len());
     let mut runtimes = Vec::with_capacity(world_configs.len());
     for world_config in world_configs {
@@ -52,7 +54,7 @@ pub(super) async fn build_poll_runtimes(
             .context("initialize or reconcile MoogleMail poll state")?;
         gateways.insert(world, Arc::clone(&gateway));
         let gateway_port: Arc<dyn MailPollGateway> =
-            Arc::new(MoogleMailWorkerGateway { gateway, world });
+            Arc::new(MoogleMailWorkerGateway { gateway, world, journal: Arc::clone(&journal) });
         let mut runtime = MailPollRuntime::new(
             Arc::clone(&store_port),
             gateway_port,
@@ -85,7 +87,27 @@ pub(super) async fn build_poll_runtimes(
 impl MailPollGateway for MoogleMailWorkerGateway {
     fn fetch(
         &self,
+        _request: MailPollFetchRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<MailPollPage, MailPollGatewayError>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            Err(MailPollGatewayError {
+                failure_code: "claim_required".to_owned(),
+                safe_detail: "MoogleMail 持久轮询必须携带当前租约".to_owned(),
+                temporary: false,
+            })
+        })
+    }
+
+    fn fetch_claimed(
+        &self,
         request: MailPollFetchRequest,
+        claim: auction_application::MailPollClaim,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<MailPollPage, MailPollGatewayError>>
@@ -94,9 +116,14 @@ impl MailPollGateway for MoogleMailWorkerGateway {
         >,
     > {
         let gateway = Arc::clone(&self.gateway);
+        let journal = Arc::clone(&self.journal);
         let world = self.world;
         Box::pin(async move {
-            if request.world_id != world.as_str() {
+            if request.world_id != world.as_str()
+                || request.mailbox_key != claim.mailbox_key
+                || request.cursor_value != claim.cursor_value
+                || !claim.validate()
+            {
                 return Err(MailPollGatewayError {
                     failure_code: "configuration".to_owned(),
                     safe_detail: "MoogleMail Worker 世界配置与 gateway 不一致".to_owned(),
@@ -104,11 +131,12 @@ impl MailPollGateway for MoogleMailWorkerGateway {
                 });
             }
             let page = gateway
-                .fetch_with_deadline(
+                .fetch_claimed(
                     world,
-                    request.cursor_value.as_deref(),
                     usize::from(request.limit),
                     request.deadline,
+                    journal.as_ref(),
+                    &claim,
                 )
                 .await
                 .map_err(|error| {

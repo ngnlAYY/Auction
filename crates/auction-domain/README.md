@@ -15,6 +15,7 @@
 | [src/watch](crates/auction-domain/src/watch) | 逐条竞价的连续领先周期；账号 MM/PM 渠道闭集，旧标记 MM 占位独立校验 |
 | [src/settlement](crates/auction-domain/src/settlement) | 结算策略、金额守恒与履约义务 |
 | [src/equipment](crates/auction-domain/src/equipment) | 装备标识与分类 |
+| [src/equipment/taxonomy](crates/auction-domain/src/equipment/taxonomy) | 统一装备语义词典、来源修订、纯名称解析及词缀推荐关系 |
 | [src/identity](crates/auction-domain/src/identity)、[src/errors](crates/auction-domain/src/errors) | 类型化 UUID 与领域错误 |
 
 ## 职责与实现边界
@@ -31,6 +32,31 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
   结算总额不截断，历史代理后续争价仍受 1B 约束。
 - 代理降额只能降低上限并推进版本，保持原模式和状态；`FinalFast → FinalFast` 不得退回普通活动状态。
 - 结算明细校验金额守恒与税/补偿互斥；`WinnerPaymentCarrierCod` 的派发世界固定为 `main`。
+
+### 装备语义词典
+
+`equipment::taxonomy` 是分类、品质、材质、部位及前后缀关系的唯一纯 Rust owner。词典以固定 Wiki 修订
+`Equipment_Basics` 65026、`Detailed_Equip_Characteristics` 66094、`Obsolete_Items` 65259 为来源，
+`TAXONOMY_REVISION` 标识本次审阅版本；每项携带 `Current`、`Legacy` 或 `BoundedGrammar` 状态与页面修订。
+外层按稳定契约投影给 Admin，不在浏览器维护第二份规则。
+
+确证清单包含七个规范大类、十个当前品质与历史 `Fine`/`Flimsy`、十二个当前护甲材质与历史 `Chainmail`，
+以及 77 个完整种类（22 个武器/盾牌、50 个当前护甲、5 个历史 Chainmail）。整族标色的
+`armor_material_category` 只识别原十二个当前材质，保留旧 scalar 精确匹配含义。Chain/Reactive 仅支持
+精确材质 token 与 Heavy 八个公共部位 token 的有界兼容读取，不将这些组合列作已确证完整种类。
+
+名称解析优先最长完整种类，保证 `Great Mace` 不被拆成自由前缀 `Great` 与种类 `Mace`；大类、种类和品质
+输出沿用既有 canonical 字符串，自由前后缀保留原大小写与可选 `the`，只规范空白。未知种类返回安全闭集错误；
+未知词缀继续保留，并区分推荐、历史和未分类状态。推荐关系保留 Wiki 总表与分项明确记载的兼容并集，
+不以推荐列表限制历史装备或自由词缀。`suffix_matches` 统一标色与识别的可选 `the` 比较口径。
+
+完整种类的名称匹配顺序仅初始化排序一次；同长度词条仍保留原词典顺序。名称解析中的词缀分类直接复用
+已识别的种类与大类，借用静态推荐片段，不重新识别种类或分配推荐列表；对外候选 API 仍返回原顺序的 `Vec`。
+字符串分类 API 只为确证完整种类、有限重甲语法或十二个可选材质建立上下文；未知种类的非空词缀统一标为
+`Unclassified`，不再仅凭金属词条推定 `Legacy`。这些优化不改变名称字段、自由词缀文本、推荐内容或收件政策。
+
+HTML 结构、等级与交易状态属于外部页面适配器；收件品质和交易资格属于应用准入，解析可识别历史品质或种类
+不会修改这些政策。词典不读网络或配置，不回写既有快照，也不改变规范指纹的字段或编码。
 
 ### 真实现金用途规则
 

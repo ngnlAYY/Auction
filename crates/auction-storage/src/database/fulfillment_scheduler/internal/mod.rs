@@ -22,7 +22,37 @@ mod transaction;
 #[cfg(feature = "postgres")]
 mod validation;
 
+#[cfg(feature = "postgres")]
+pub(crate) use conflicts::{assetless_mail_notification, exclude_legacy_self_asset_conflicts};
+
 impl SettlementInternalFulfillmentStore for crate::DatabaseStore {
+    fn legacy_self_reconciliation_uid(
+        &self,
+        obligation_id: uuid::Uuid,
+    ) -> ApplicationFuture<'_, Option<String>> {
+        Box::pin(async move {
+            let _ = obligation_id;
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    let mut tx =
+                        store.pool().begin().await.map_err(|_| {
+                            super::mapping::repository_error("旧自寄修复证明不可用")
+                        })?;
+                    let result = crate::database::settlement_legacy_repair::legacy_self_uid(
+                        &mut tx,
+                        obligation_id,
+                    )
+                    .await
+                    .map_err(|_| super::mapping::repository_error("旧自寄修复证明不匹配"))?;
+                    tx.commit()
+                        .await
+                        .map_err(|_| super::mapping::repository_error("旧自寄修复证明读取失败"))?;
+                    Ok(result)
+                }
+            }
+        })
+    }
     fn replay_internal(&self, command: SettlementInternalCommand) -> ApplicationFuture<'_, bool> {
         Box::pin(async move {
             let _ = &command;

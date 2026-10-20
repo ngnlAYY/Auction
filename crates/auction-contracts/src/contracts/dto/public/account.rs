@@ -247,6 +247,9 @@ pub struct AdminRuntimeConfigResponse {
     pub document: Value,
     pub fingerprint: String,
     pub restart_required: bool,
+    /// 仅显式请求词典投影时返回；省略时保持原 v1 响应字段集合。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_taxonomy: Option<EquipmentTaxonomyDto>,
 }
 
 /// Public 黑名单条目的稳定响应。

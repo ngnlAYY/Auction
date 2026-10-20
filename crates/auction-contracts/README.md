@@ -29,7 +29,16 @@ GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_ve
 
 ## 稳定投影
 
+[dto/admin/equipment.rs](crates/auction-contracts/src/contracts/dto/admin/equipment.rs) 定义统一装备词典的窄只读 DTO；
+`AdminRuntimeConfigResponse.equipment_taxonomy` 仅在三条 runtime 配置路由显式选择
+`include_equipment_taxonomy=true` 时返回，省略时保持原字段集合。词典与 `document` 分离，
+不进入 runtime TOML、fingerprint 或命令摘要，具体字段见[运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)。
+确证目录 `kinds` 与配置相关的 `resolved_kinds` 分开：后者仅包含本次文档中经领域有限语法识别的完整种类及
+对应词缀，最多 16 项、名称规范化去重，空集合省略且旧投影缺省为空；不会把可能组合加入确证目录。
+
 论坛同步开关和镜像 DTO 由 `dto/public/catalog/forum.rs` 唯一拥有，Admin 认证状态 GET 复用同一安全字段形状而不复制 DTO。
+成交价统计由 `dto/public/catalog/history.rs` 拥有；新增可选字符串 `median_exact` 表示规范十进制整数或 `.5`，
+缺失时兼容原整数 `median`。精确金额使用字符串保留，不经 JSON 浮点数传输，详见[历史读取契约](docs/contracts/routes.md#标的编号来源与历史读取)。
 
 - `HealthResponse` 的服务名和版本由装配根传入，不能用本 crate 版本代替运行进程版本。
 - `ApiErrorResponse` 是统一安全错误信封，列表与 dashboard 只暴露声明的安全字段，不透传内部 payload。

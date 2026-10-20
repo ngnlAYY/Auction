@@ -1,8 +1,42 @@
 //! 价格历史筛选器的错误文案、日期边界和金额规范化。
 
-use super::super::history_days_in_month;
+use super::super::{history_date_parts, history_days_in_month, history_is_valid_date};
 use super::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
 use auction_web_shared::legacy_t as t;
+
+/// 名称字段复用 HTTP 的空白/逗号拆词和应用端口字节边界；缩写片段均须命中装备名。
+pub(crate) fn history_name_value(value: &str) -> Result<Option<String>, HistoryFilterError> {
+    let value = value.trim();
+    if value.len() > 1_024 {
+        return Err(HistoryFilterError::NameTooLong);
+    }
+    let terms = value
+        .split(|character: char| character == ',' || character.is_whitespace())
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+    if terms.len() > 8 {
+        return Err(HistoryFilterError::NameTooManyTerms);
+    }
+    if terms.iter().any(|term| term.len() > 128) {
+        return Err(HistoryFilterError::NameTermTooLong);
+    }
+    if terms.iter().any(|term| term.chars().any(char::is_control)) {
+        return Err(HistoryFilterError::NameInvalid);
+    }
+    // 只有分隔符的输入与服务端的空词集合一致，不把它当成有效条件加载全部历史。
+    Ok((!terms.is_empty()).then(|| value.to_owned()))
+}
+
+/// 将名称字段的稳定错误分类转换为本 surface 的文案。
+pub(crate) fn history_name_error(error: Option<HistoryFilterError>) -> Option<String> {
+    match error? {
+        HistoryFilterError::NameTooManyTerms => Some(t!("history-filter-error-name-terms")),
+        HistoryFilterError::NameTermTooLong => Some(t!("history-filter-error-name-term-length")),
+        HistoryFilterError::NameTooLong => Some(t!("history-filter-error-name-length")),
+        HistoryFilterError::NameInvalid => Some(t!("history-filter-error-name-invalid")),
+        _ => None,
+    }
+}
 
 /// 将页面错误分类转换为对应的本地化日期错误。
 pub(crate) fn history_date_error(error: Option<HistoryFilterError>, from: bool) -> Option<String> {
@@ -26,6 +60,9 @@ pub(crate) fn history_price_error(
     minimum: bool,
 ) -> Option<String> {
     match (error?, minimum) {
+        (HistoryFilterError::MinimumPriceC, true) | (HistoryFilterError::MaximumPriceC, false) => {
+            Some(t!("history-filter-error-price-c"))
+        }
         (HistoryFilterError::MinimumPriceK, true) | (HistoryFilterError::MaximumPriceK, false) => {
             Some(t!("history-filter-error-price-k"))
         }
@@ -56,11 +93,12 @@ pub(crate) fn history_month_label(month: i32) -> String {
     }
 }
 
-/// 将年月输入转换为 API 使用的闭区间日期端点。
+/// 年月未改变时保留当前 URL 的精确日期；改变年月才生成整月的闭区间端点。
 pub(crate) fn history_date_value(
     month: &str,
     year: &str,
     end: bool,
+    applied: Option<&str>,
 ) -> Result<Option<String>, HistoryDateError> {
     let month = month.trim();
     let year = year.trim();
@@ -82,6 +120,14 @@ pub(crate) fn history_date_value(
     if year_number == 0 || !(1..=12).contains(&month_number) {
         return Err(HistoryDateError::Invalid);
     }
+    if let Some(applied) = applied.filter(|value| history_is_valid_date(value)) {
+        let (applied_month, applied_year) = history_date_parts(Some(applied));
+        if applied_month.parse::<u32>().ok() == Some(month_number)
+            && applied_year.parse::<u32>().ok() == Some(year_number)
+        {
+            return Ok(Some(applied.to_owned()));
+        }
+    }
     let day = if end { history_days_in_month(year_number, month_number) } else { 1 };
     Ok(Some(format!("{year_number:04}-{month_number:02}-{day:02}")))
 }
@@ -95,14 +141,19 @@ pub(crate) fn history_price_value(
     if value.is_empty() {
         return Ok(None);
     }
+    let precision = match unit {
+        HistoryPriceUnit::C => 0,
+        HistoryPriceUnit::K => 3,
+        HistoryPriceUnit::M => 6,
+    };
     let (whole, fraction) = match unit {
-        HistoryPriceUnit::K => {
+        HistoryPriceUnit::C => {
             if !value.chars().all(|character| character.is_ascii_digit()) {
                 return Err(HistoryPriceError::Invalid);
             }
             (value, "")
         }
-        HistoryPriceUnit::M => {
+        HistoryPriceUnit::K | HistoryPriceUnit::M => {
             let mut parts = value.split('.');
             let whole = parts.next().unwrap_or_default();
             let fraction = parts.next().unwrap_or_default();
@@ -110,7 +161,7 @@ pub(crate) fn history_price_value(
                 || whole.is_empty()
                 || !whole.chars().all(|character| character.is_ascii_digit())
                 || (fraction.is_empty() && value.contains('.'))
-                || fraction.len() > 2
+                || fraction.len() > precision
                 || !fraction.chars().all(|character| character.is_ascii_digit())
             {
                 return Err(HistoryPriceError::Invalid);
@@ -121,20 +172,18 @@ pub(crate) fn history_price_value(
     let Ok(whole) = whole.parse::<u64>() else {
         return Err(HistoryPriceError::Invalid);
     };
-    let credits = match unit {
-        HistoryPriceUnit::K => whole.checked_mul(1_000),
-        HistoryPriceUnit::M => {
-            let fraction_digits = fraction.len() as u32;
-            let fraction = fraction.parse::<u64>().unwrap_or_default();
-            whole
-                .checked_mul(1_000_000)
-                .and_then(|credits| credits.checked_add(fraction * 10u64.pow(6 - fraction_digits)))
-        }
-    };
+    // 仅对整数补足单位小数位；全程 checked 整数运算，不能用浮点或截断非整千 Credits。
+    let fraction_digits = fraction.len() as u32;
+    let fraction = fraction.parse::<u64>().unwrap_or_default();
+    let credits = whole.checked_mul(10u64.pow(precision as u32)).and_then(|credits| {
+        fraction
+            .checked_mul(10u64.pow(precision as u32 - fraction_digits))
+            .and_then(|fraction| credits.checked_add(fraction))
+    });
     let Some(credits) = credits else {
         return Err(HistoryPriceError::Invalid);
     };
-    if credits == 0 || credits > 9_007_199_254_740_991 {
+    if credits > 9_007_199_254_740_991 {
         return Err(HistoryPriceError::Invalid);
     }
     Ok(Some(credits.to_string()))

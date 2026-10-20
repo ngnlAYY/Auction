@@ -20,7 +20,13 @@ pub async fn reserve_funded_delivery(
         .await
         .map_err(storage);
     }
-    let row = sqlx::query("SELECT d.payload,o.id AS obligation_id,o.obligation_kind,o.lot_id,o.amount,o.carrier_credit FROM public.deliveries d JOIN public.settlement_obligations o ON d.origin_kind='settlement' AND d.origin_id=o.id::text JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id AND f.delivery_id=d.id WHERE d.id=$1 AND d.status IN ('prepared','pending','claimed') AND o.business_state='ready'")
+    let row = sqlx::query("SELECT d.payload,o.id AS obligation_id,o.obligation_kind,o.lot_id,o.amount,o.carrier_credit,
+        o.world_id AS obligation_world,f.dispatch_world,f.delivery_operation,
+        (SELECT e.world_id FROM public.equipment e WHERE e.id=o.equipment_id) AS equipment_world,
+        EXISTS(SELECT 1 FROM public.lots l JOIN public.lot_settlements s ON s.lot_id=l.id
+          WHERE l.id=o.lot_id AND l.auction_id=o.auction_id AND l.equipment_id=o.equipment_id
+            AND s.buyer_amount=o.amount) AS original_lot_bound
+        FROM public.deliveries d JOIN public.settlement_obligations o ON d.origin_kind='settlement' AND d.origin_id=o.id::text JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id AND f.delivery_id=d.id WHERE d.id=$1 AND d.status IN ('prepared','pending','claimed') AND o.business_state='ready'")
         .bind(delivery_id).fetch_optional(&mut **tx).await.map_err(storage)?.ok_or(FundingError::Unproven)?;
     let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
     let credits =
@@ -54,8 +60,38 @@ pub async fn reserve_funded_delivery(
             .await
             .map_err(storage)?;
     if purpose == "carrier" && current_amount == 0 {
-        let proprietary = allocation(tx, account.uid(), "proprietary", None, None).await?;
-        transfer(tx, account.uid(), command, proprietary, allocation_id, credits).await?;
+        if account.records_only() {
+            // 仅原Isekai付款的Main 1C载体记账；generic支出不能据此创建任意会计来源。
+            let buyer: i64 = row.try_get("amount").map_err(storage)?;
+            let cod = buyer.checked_add(1).ok_or(FundingError::Invalid)?;
+            let expected = serde_json::json!({"schema_version":1,"operation":"send","world":"main",
+                "template":"settlement_payment_carrier","variables":{"reference":obligation.to_string(),"amount":cod.to_string()},
+                "credits":1,"cod":cod,"equipment_secret_refs":[]});
+            if credits != 1
+                || buyer <= 0
+                || payload != expected
+                || row.try_get::<String, _>("obligation_world").map_err(storage)? != "isekai"
+                || row.try_get::<String, _>("equipment_world").map_err(storage)? != "isekai"
+                || row.try_get::<String, _>("dispatch_world").map_err(storage)? != "main"
+                || row.try_get::<String, _>("delivery_operation").map_err(storage)? != "send"
+                || !row.try_get::<bool, _>("original_lot_bound").map_err(storage)?
+            {
+                return Err(FundingError::Unproven);
+            }
+            let source = source(
+                tx,
+                account.uid(),
+                "record_carrier",
+                delivery_id,
+                1,
+                &command.request_digest,
+            )
+            .await?;
+            issue(tx, account.uid(), command, source, allocation_id, 1).await?;
+        } else {
+            let proprietary = allocation(tx, account.uid(), "proprietary", None, None).await?;
+            transfer(tx, account.uid(), command, proprietary, allocation_id, credits).await?;
+        }
     }
     let changed = sqlx::query("UPDATE public.settlement_funding_allocations SET state='reserved',delivery_id=$1,state_version=state_version+1 WHERE id=$2 AND uid=$3 AND state='available' AND amount=$4 AND (delivery_id IS NULL OR delivery_id=$1)")
         .bind(delivery_id).bind(allocation_id).bind(account.uid()).bind(credits).execute(&mut **tx).await.map_err(storage)?;
@@ -167,8 +203,17 @@ pub async fn return_funded_delivery(
     if proof.digest == [0; 32]
         || proof.amount <= 0
         || proof.delivery_id != delivery_id
-        || proof.cash.binding.authenticated_uid != account.uid()
-        || proof.cash.binding.world != auction_domain::SettlementWorld::Main
+        || !proof.binding.validate()
+        || proof.binding.authenticated_uid != account.uid()
+        || proof.binding.world != auction_domain::SettlementWorld::Main
+        || if account.records_only() {
+            proof.cash.is_some()
+        } else {
+            proof.cash.as_ref().is_none_or(|cash| {
+                !proof.binding.same_account(&cash.binding)
+                    || cash.binding.world != auction_domain::SettlementWorld::Main
+            })
+        }
         || proof.proof_reference.is_empty()
         || proof.proof_reference.len() > 256
         || proof.proof_reference.trim() != proof.proof_reference
@@ -177,7 +222,7 @@ pub async fn return_funded_delivery(
         return Err(FundingError::Invalid);
     }
     let fresh:bool=sqlx::query_scalar("SELECT $1 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp() AND $2 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp()")
-        .bind(proof.observed_at).bind(proof.cash.observed_at).fetch_one(&mut **tx).await.map_err(storage)?;
+        .bind(proof.observed_at).bind(proof.binding.observed_at).fetch_one(&mut **tx).await.map_err(storage)?;
     if !fresh {
         return Err(FundingError::Unproven);
     }
@@ -197,14 +242,24 @@ pub async fn return_funded_delivery(
         .bind(id).execute(&mut **tx).await.map_err(storage)?;
     let local:i64=sqlx::query_scalar("SELECT COALESCE(sum(amount),0)::bigint FROM public.settlement_funding_allocations WHERE uid=$1 AND state<>'spent'")
         .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
-    if local > proof.cash.credits {
-        return Err(FundingError::Unproven);
+    if let Some(cash) = &proof.cash {
+        let fresh: bool = sqlx::query_scalar(
+            "SELECT $1 BETWEEN clock_timestamp()-interval '30 seconds' AND clock_timestamp()",
+        )
+        .bind(cash.observed_at)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(storage)?;
+        if !fresh || local > cash.credits {
+            return Err(FundingError::Unproven);
+        }
     }
     let evidence = serde_json::json!({"kind":match proof.kind {FundingReturnKind::DefinitelyNotExecuted=>"definitely_not_executed",FundingReturnKind::ReturnedAndReceived=>"returned_and_received"},
         "reference":proof.proof_reference,"amount":amount,"observed_at":proof.observed_at,
-        "uid":proof.cash.binding.authenticated_uid,"credential_id":proof.cash.binding.credential_id,
-        "credential_version":proof.cash.binding.credential_version,"runtime_generation":proof.cash.binding.runtime.generation,
-        "cash_credits":proof.cash.credits,"cash_observed_at":proof.cash.observed_at,"cash_digest":proof.cash.digest});
+        "uid":proof.binding.authenticated_uid,"credential_id":proof.binding.credential_id,
+        "credential_version":proof.binding.credential_version,"runtime_generation":proof.binding.runtime.generation,
+        "cash_credits":proof.cash.as_ref().map(|cash|cash.credits),"cash_observed_at":proof.cash.as_ref().map(|cash|cash.observed_at),
+        "cash_digest":proof.cash.as_ref().map(|cash|cash.digest),"accounting_mode":if account.records_only(){"record_only"}else{"strict_cash"}});
     sqlx::query("INSERT INTO public.settlement_funding_returns(delivery_id,command_id,proof_digest,evidence) VALUES($1,$2,$3,$4)")
         .bind(delivery_id).bind(command.command_id).bind(proof.digest.as_slice()).bind(evidence).execute(&mut **tx).await.map_err(storage)?;
     let proof_command =

@@ -41,6 +41,10 @@ impl SettlementFulfillmentService {
         if store.replay_internal(replay).await? {
             return Ok(Outcome::InternallySatisfied { obligation_id: claim.obligation_id });
         }
+        let policy = self.funding_policy().await?;
+        // 历史桥不是新的外发授权；即使用户/配置随后变化，也只能由原证明 UID 内部处理。
+        let repaired_uid =
+            store.legacy_self_reconciliation_uid(claim.obligation_id.as_uuid()).await?;
         // 内部动作也遵守原义务的世界/金额/来源闭集，不绕过canonical intent校验。
         super::intent::build_delivery_intent(&claim)?;
         if claim.delivery_id.is_some()
@@ -76,6 +80,15 @@ impl SettlementFulfillmentService {
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
+        if !policy.matches_identity(&identity.snapshot().identity.authenticated_uid)
+            || repaired_uid.as_ref().is_some_and(|uid| {
+                identity.snapshot().identity.authenticated_uid != *uid
+                    || identity.snapshot().identity.player_name != claim.recipient
+            })
+        {
+            drop(identity);
+            return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
+        }
         // Admin 明确配置的 bot 名称与页面身份等值处理；其余情况仍要求远端身份精确匹配。
         if identity.snapshot().identity.player_name != claim.recipient
             && !self.is_configured_bot(&claim.recipient)
@@ -84,7 +97,7 @@ impl SettlementFulfillmentService {
                 drop(identity);
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
-            // 原外发授权还会读取余额，先释放非重入guard；发送owner仍须独立核验当前凭据。
+            // 后续授权可能读取外部证据，先释放非重入 guard；发送 owner 仍独立核验当前凭据。
             drop(identity);
             if claim.kind == auction_domain::SettlementObligationKind::BuyerRefund {
                 return self
@@ -113,7 +126,7 @@ impl SettlementFulfillmentService {
             &command,
             self.clock.now(),
             action.requires_equipment(),
-            action.requires_funding(),
+            action.requires_funding() && policy.observes_cash(),
         )?;
         request.deadline = request.deadline.min(deadline);
         let mut prepared = match reader.prepare_internal_evidence(request).await {
@@ -122,7 +135,11 @@ impl SettlementFulfillmentService {
                 return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;
             }
         };
-        if prepared.snapshot().identity.player_name != claim.recipient
+        if !policy.matches_identity(&prepared.snapshot().identity.authenticated_uid)
+            || prepared.snapshot().identity.player_name != claim.recipient
+            || repaired_uid
+                .as_ref()
+                .is_some_and(|uid| prepared.snapshot().identity.authenticated_uid != *uid)
             || prepared.check_current().await.is_err()
         {
             return self.defer_internal(claim, retry_delay, "internal_evidence_wait").await;

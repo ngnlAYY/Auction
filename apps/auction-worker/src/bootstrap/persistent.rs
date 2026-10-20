@@ -28,7 +28,7 @@ pub(super) async fn run_worker(
     config: &AppConfig,
     tracing_health: Arc<dyn TracingHealthReader>,
     metrics: Arc<ProcessMetrics>,
-    mail_owner_lost: tokio::sync::oneshot::Sender<()>,
+    credential_owner_lost: tokio::sync::oneshot::Sender<&'static str>,
     shutdown: ShutdownFuture,
 ) -> anyhow::Result<()> {
     let Some(database_url) = config.database_url() else {
@@ -59,7 +59,7 @@ pub(super) async fn run_worker(
     let slow_proxy_due: Arc<dyn SlowProxyDueReader> = store.clone();
     let slow_proxy_commands: Arc<dyn SlowProxyCommandPort> =
         Arc::new(DatabaseCompetitionCommands::new(Arc::clone(&store), Arc::new(SystemClock)));
-    let (forum_sync, forum_reply, forum_pm, forum_profile_reader) =
+    let (forum_sync, forum_reply, forum_pm, forum_profile_reader, forum_runtime_ownership) =
         configure_forum(config, Arc::clone(&store), config.worker.mooglemail.enabled).await?;
     let (
         mail_polls,
@@ -69,20 +69,27 @@ pub(super) async fn run_worker(
         internal_evidence_reader,
         mail_runtime_ownership,
     ) = configure_mail_poll(config, Arc::clone(&store), forum_profile_reader).await?;
-    let mut mail_owner_task = mail_runtime_ownership.map(|ownership| {
-        TaskGuard::new(tokio::spawn(async move {
-            // 只观察 sticky 状态，不发起探测或原地抢锁；失效后沿用装配根的有界排空。
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                interval.tick().await;
-                if !ownership.is_valid() {
-                    let _ = mail_owner_lost.send(());
-                    return;
+    let runtime_owners = [
+        ("mail_owner_invalid", mail_runtime_ownership),
+        ("forum_owner_invalid", forum_runtime_ownership),
+    ];
+    let mut credential_owner_task =
+        runtime_owners.iter().any(|(_, owner)| owner.is_some()).then(|| {
+            TaskGuard::new(tokio::spawn(async move {
+                // 两类已取得的 owner 都只观察 sticky 状态；失效后有界排空，不原地抢锁。
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    interval.tick().await;
+                    for (reason, ownership) in &runtime_owners {
+                        if ownership.as_ref().is_some_and(|owner| !owner.is_valid()) {
+                            let _ = credential_owner_lost.send(*reason);
+                            return;
+                        }
+                    }
                 }
-            }
-        }))
-    });
+            }))
+        });
     let mail_owner: Option<Arc<dyn AdminMailPort>> = if config.worker.mooglemail.enabled {
         Some(Arc::new(DatabaseAdminMailCommands::new(Arc::clone(&store), Arc::new(SystemClock))))
     } else {
@@ -115,6 +122,7 @@ pub(super) async fn run_worker(
             Arc::clone(&evidence_reader),
             Arc::new(SystemClock),
         )
+        .with_funding_policy_reader(store.clone())
         .with_bot_players(config.worker_bot_players.clone())
         .with_evidence_poll_delay(chrono::Duration::seconds(
             i64::try_from(config.worker.fulfillment.evidence_poll_seconds).unwrap_or(300),
@@ -208,7 +216,8 @@ pub(super) async fn run_worker(
                 store.clone(),
                 balance_reader,
             )
-            .map_err(|error| anyhow::Error::msg(error.to_owned()))?;
+            .map_err(|error| anyhow::Error::msg(error.to_owned()))?
+            .with_funding_policy_reader(store.clone());
             Some(
                 RecoveryHealthRuntime::new(
                     Arc::new(health_service),
@@ -353,8 +362,8 @@ pub(super) async fn run_worker(
     .await;
     control.mark_draining();
     pm_drain.send_replace(true);
-    abort_worker_task(&mail_owner_task);
-    join_worker_task(&mut mail_owner_task, "MoogleMail ownership monitor").await;
+    abort_worker_task(&credential_owner_task);
+    join_worker_task(&mut credential_owner_task, "credential ownership monitor").await;
     // 主循环已有有界 drain；不再追加论坛长预算。剩余 PM 中止后仅按持久租约恢复，
     // claimed 可重领，任何 sending 只读对账，绝不因关闭把未知写入回 pending。
     abort_worker_task(&pm_task);

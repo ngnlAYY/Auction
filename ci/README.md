@@ -2,11 +2,12 @@
 
 [文档导航](docs/README.md) · [开发指南](docs/guide/development.md) · [部署手册](ops/README.md)
 
-日常只需 `just verify`；构建发布用 `just release-check`。本目录保留五个实现文件，各有明确用途：
+日常只需 `just verify`；构建发布用 `just release-check`。本目录各实现文件有明确用途：
 
 | 文件 | 用途 |
 | --- | --- |
 | [check.sh](ci/checks/check.sh) | 本地和 CI 共用的策略、Cargo 与依赖检查命令 |
+| [equipment-contract.sh](ci/checks/equipment-contract.sh) | 只读比对装备来源错误码枚举、最新 SQL 约束、Admin 解码及五语言说明 |
 | [web-bundle.sh](ci/release/web-bundle.sh) | 按 Public/Admin 构建 WASM，生成固定权限、mtime 和 payload 哈希；输入未变时复用既有 payload |
 | [release.sh](ci/release/release.sh) | API-only / 内嵌档构建、资源隔离、身份校验和确定性归档 |
 | [release-single.sh](ci/release/release-single.sh) | 由 release.sh 加载的合并服务变体，复用分体门禁；不是独立执行入口 |
@@ -18,6 +19,7 @@
 | --- | --- | --- |
 | 默认静态验证 | `just verify` | 与 `bash ci/checks/check.sh all rust` 等价 |
 | 仓库 / 布局 / 配置 / 五语言 | 无单独 recipe，直接调用 check.sh | repository / layout / config / i18n |
+| 装备诊断闭集契约 | 无单独 recipe，直接调用 check.sh | equipment-contract；纳入 all |
 | 格式 / 编译 / 独立 feature / Clippy / WASM | fmt / check / feature-check / lint / wasm-check | fmt / check / feature / lint / wasm；合称 rust |
 | RustSec 公告 / 未用依赖 | 无 recipe，直接调用 check.sh | dependency-audit / dependency-unused；不属于默认本地 verify |
 | 页面与发布 | web-build / build-api / build-release / build-single / release-check | 不由 check.sh 执行，见上方专用脚本 |
@@ -28,6 +30,9 @@ PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/rel
 不代表长期支持或业务验收。依赖 job 固定 cargo-audit 0.22.2、cargo-machete 0.9.2，audit 联网读取 RustSec，
 漏洞和全部警告均阻断且无忽略项；machete 只扫描直接依赖，不替代 feature、可达性和许可审查。
 
+装备诊断门禁只解析受控源码片段和最后一次同名 CHECK 定义，不连接数据库或执行解析/收件流程。
+原因集合、阶段分支或源码结构发生变化时必须同步核对；该门禁补充编译检查，不执行 PostgreSQL 迁移验证。
+
 ## 工作流调度
 
 唯一工作流 [ci.yml](.github/workflows/ci.yml) 接收所有 push、PR 默认事件及 `workflow_dispatch` 手动触发，
@@ -35,7 +40,7 @@ PostgreSQL/Redis 图、all-features Clippy 和两端 WASM 分别核验。`ci/rel
 
 | job | 前置条件 | 职责 |
 | --- | --- | --- |
-| docs | 无 | 去重判断；仓库/布局/配置/i18n、格式等廉价静态门禁 |
+| docs | 无 | 去重判断；仓库/布局/配置/i18n、装备诊断契约、格式等廉价静态门禁 |
 | verify | docs 通过且本轮需检查 | 工作区、独立 feature、Clippy 和双端 WASM 编译，不重复格式/策略检查 |
 | security-audit | 同上 | 固定版本工具安装与完整依赖审计 |
 | msrv | 同上 | 独立 MSRV 编译，与 verify/security-audit 并行 |
@@ -128,8 +133,10 @@ Linux 均兼容。构建、上传不启动程序、不连接业务数据库、�
 
 检查 job 不安装 dx、不构建页面，只有满足上述条件的 artifacts job 安装 dx 并构建完整包。`allow_missing` 只保证
 无页面也可编译，运行缺资源返回明确 503；web-bundle.sh 使用 wasm-release，dx 按需下载 esbuild 仅供构建。
-payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、工具链版本与已存清单
-全部一致才跳过 dx；只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
+payload 复用只在本脚本内生效：本 surface、`auction-web-shared`、`auction-contracts`、清单、构建身份脚本、工具链版本、
+构建环境与已存清单全部一致才跳过 dx；只改契约源码也会使双端 WASM 缓存失效，保证新后端内嵌同版 DTO 浏览器。
+原生与 WASM 共用环境摘要，覆盖 `CARGO_PROFILE_*`（包括 `CARGO_PROFILE_WASM_RELEASE_*`）、rustflags、
+目标 linker/target 及 rustc 包装器；`WEB-BUILD-INFO` 缺少摘要的旧缓存自动重建，环境值本身不写入清单。
 只改 native 代码或文档不会重跑 WASM；任何输入不同即整目录重建。
 release.sh 在构建前冻结构建输入（代码、迁移、内嵌模板、清单与发布脚本）并在各阶段复查，纯文档修改不触发重建；
 核验实际二进制标记、对端资源缺失与 Worker 依赖，再校验白名单、权限、

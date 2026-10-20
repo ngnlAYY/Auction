@@ -110,6 +110,9 @@ pub(crate) struct PublicBoardQuery {
     pub(crate) history_max_price: Option<String>,
     pub(crate) history_buyer: Option<String>,
     pub(crate) history_seller: Option<String>,
+    /// 成交历史独立的全局排序与本页展示方式，不复用目录的 type/status。
+    pub(crate) history_sort: String,
+    pub(crate) history_group: String,
     pub(crate) bid_log_lot: Option<String>,
     pub(crate) page: i64,
     pub(crate) page_size: i64,
@@ -145,6 +148,8 @@ impl Default for PublicBoardQuery {
             history_max_price: None,
             history_buyer: None,
             history_seller: None,
+            history_sort: "closed_desc".to_owned(),
+            history_group: "equipment".to_owned(),
             bid_log_lot: None,
             page: 1,
             page_size: stored_public_page_size(false),
@@ -201,13 +206,34 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
             "auction" => query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string()),
             "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
             "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
-            "name" => query.history_name = normalize_optional_query(&value, 1024),
+            "name" => {
+                // 名称非法值交给历史页显示字段错误；提前丢弃会扩大为无此条件的查询。
+                let value = value.trim();
+                query.history_name = (!value.is_empty()).then(|| value.to_owned());
+            }
             "from" => query.history_from = normalize_optional_query(&value, 10),
             "to" => query.history_to = normalize_optional_query(&value, 10),
-            "min_price" => query.history_min_price = normalize_optional_query(&value, 32),
-            "max_price" => query.history_max_price = normalize_optional_query(&value, 32),
+            "min_price" => {
+                query.history_min_price = (!value.is_empty()).then(|| value.into_owned());
+            }
+            "max_price" => {
+                query.history_max_price = (!value.is_empty()).then(|| value.into_owned());
+            }
             "buyer" => query.history_buyer = normalize_optional_query(&value, 256),
             "seller" => query.history_seller = normalize_optional_query(&value, 256),
+            "history_sort" => {
+                if matches!(
+                    value.as_ref(),
+                    "closed_desc" | "closed_asc" | "price_desc" | "price_asc"
+                ) {
+                    query.history_sort = value.into_owned();
+                }
+            }
+            "history_group" => {
+                if matches!(value.as_ref(), "flat" | "equipment" | "buyer" | "seller") {
+                    query.history_group = value.into_owned();
+                }
+            }
             "lot" => query.bid_log_lot = normalize_optional_query(&value, 128),
             "page" => {
                 if let Ok(page) = value.parse::<i64>()
@@ -330,6 +356,12 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
             pairs.push((key.to_owned(), value.to_owned()));
         }
     }
+    if query.history_sort != "closed_desc" {
+        pairs.push(("history_sort".to_owned(), query.history_sort.clone()));
+    }
+    if query.history_group != "equipment" {
+        pairs.push(("history_group".to_owned(), query.history_group.clone()));
+    }
     if query.page > 1 {
         pairs.push(("page".to_owned(), query.page.to_string()));
     }
@@ -364,6 +396,8 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
     "max_price",
     "buyer",
     "seller",
+    "history_sort",
+    "history_group",
     "lot",
     "page",
     "page_size",

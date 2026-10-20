@@ -8,6 +8,8 @@ pub struct LockedFundingAccount {
     pub(super) uid: String,
     pub(super) version: i64,
     pub(super) status: String,
+    pub(super) accounting_mode: auction_application::FundingAccountingMode,
+    pub(super) policy_version: i64,
     transaction_id: i64,
 }
 
@@ -20,6 +22,14 @@ impl LockedFundingAccount {
     }
     pub fn ready(&self) -> bool {
         self.status == "ready"
+    }
+    /// 只记录来源与责任，不把个人账号余额当作托管现金。
+    pub fn records_only(&self) -> bool {
+        self.accounting_mode == auction_application::FundingAccountingMode::RecordOnly
+    }
+    /// 固定策略版本独立于每次记账递增的账户版本。
+    pub fn policy_version(&self) -> i64 {
+        self.policy_version
     }
 }
 
@@ -62,13 +72,17 @@ pub async fn lock_funding_account(
 ) -> Result<Option<LockedFundingAccount>, FundingError> {
     auction_domain::FundingAccountKey::new(uid).map_err(invalid)?;
     lock_scope(tx).await?;
-    let row = sqlx::query("SELECT uid,state_version,status,txid_current() AS transaction_id FROM public.settlement_funding_accounts WHERE uid=$1 FOR UPDATE")
+    let row = sqlx::query("SELECT uid,state_version,status,accounting_mode,policy_version,txid_current() AS transaction_id FROM public.settlement_funding_accounts WHERE uid=$1 FOR UPDATE")
         .bind(uid).fetch_optional(&mut **tx).await.map_err(storage)?;
     row.map(|row| {
         Ok(LockedFundingAccount {
             uid: row.try_get("uid").map_err(storage)?,
             version: row.try_get("state_version").map_err(storage)?,
             status: row.try_get("status").map_err(storage)?,
+            accounting_mode: super::policy::mode(
+                &row.try_get::<String, _>("accounting_mode").map_err(storage)?,
+            )?,
+            policy_version: row.try_get("policy_version").map_err(storage)?,
             transaction_id: row.try_get("transaction_id").map_err(storage)?,
         })
     })
@@ -138,6 +152,9 @@ pub async fn check_funding_cash(
     observed_credits: i64,
 ) -> Result<bool, FundingError> {
     verify_locked(tx, account, true).await?;
+    if account.records_only() {
+        return Err(FundingError::Unsupported);
+    }
     if observed_credits < 0 {
         return Err(FundingError::Invalid);
     }
@@ -150,4 +167,26 @@ pub async fn check_funding_cash(
         return Ok(false);
     }
     Ok(!unknown)
+}
+
+/// 最终事务按已锁持久策略复核证据形状；record_only不采集/匹配余额，也不因其他lot未知而全局停账。
+pub async fn check_funding_evidence(
+    tx: &mut Transaction<'_, Postgres>,
+    account: &LockedFundingAccount,
+    evidence: &auction_application::SettlementInternalEvidenceSnapshot,
+) -> Result<bool, FundingError> {
+    verify_locked(tx, account, true).await?;
+    if evidence.identity.authenticated_uid != account.uid() || !evidence.validate() {
+        return Err(FundingError::Unproven);
+    }
+    crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
+    if account.records_only() {
+        if evidence.main_cash.is_some() {
+            return Err(FundingError::Unproven);
+        }
+        // 原allocation未知状态仍由reserve/finish/return按原delivery精确保留，不自动释放。
+        return Ok(true);
+    }
+    let cash = evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
+    check_funding_cash(tx, account, cash.credits).await
 }

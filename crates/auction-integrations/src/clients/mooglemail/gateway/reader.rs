@@ -10,6 +10,9 @@ use chrono::{DateTime, Utc};
 use super::super::protocol::valid_opaque_id;
 use super::*;
 use crate::clients::mooglemail::parser::subject_is_list_projection;
+use auction_application::{MailPollClaim, MailPollReadJournal, MailPollReadSummary};
+
+type ReadJournalContext<'a> = (&'a dyn MailPollReadJournal, &'a MailPollClaim);
 
 /// MoogleMail 收件箱读取 gateway。
 pub struct MoogleMailGateway {
@@ -67,6 +70,39 @@ impl MoogleMailGateway {
         limit: usize,
         requested_deadline: Option<std::time::Instant>,
     ) -> Result<MoogleMailPage, MoogleMailError> {
+        self.fetch_window(world, cursor, limit, requested_deadline, None).await
+    }
+
+    /// 持久轮询专用入口：先登记列表身份，已读但未提交的邮件按 MID 优先恢复。
+    pub async fn fetch_claimed(
+        &self,
+        world: MoogleMailWorld,
+        limit: usize,
+        requested_deadline: Option<std::time::Instant>,
+        journal: &dyn MailPollReadJournal,
+        claim: &MailPollClaim,
+    ) -> Result<MoogleMailPage, MoogleMailError> {
+        if !claim.validate() {
+            return Err(configuration(world));
+        }
+        self.fetch_window(
+            world,
+            claim.cursor_value.as_deref(),
+            limit,
+            requested_deadline,
+            Some((journal, claim)),
+        )
+        .await
+    }
+
+    async fn fetch_window(
+        &self,
+        world: MoogleMailWorld,
+        cursor: Option<&str>,
+        limit: usize,
+        requested_deadline: Option<std::time::Instant>,
+        journal: Option<ReadJournalContext<'_>>,
+    ) -> Result<MoogleMailPage, MoogleMailError> {
         if limit == 0
             || limit > MAX_FETCH_LIMIT
             || cursor.is_some_and(|value| !valid_opaque_id(value))
@@ -83,7 +119,7 @@ impl MoogleMailGateway {
         for _ in 0..64 {
             match tokio::time::timeout_at(
                 deadline,
-                self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline),
+                self.fetch_with_cookie(world, cursor, limit, session.cookie(), deadline, journal),
             )
             .await
             {
@@ -369,12 +405,49 @@ impl MoogleMailGateway {
         limit: usize,
         cookie: &MoogleMailCookie,
         deadline: tokio::time::Instant,
+        journal: Option<ReadJournalContext<'_>>,
     ) -> Result<MoogleMailPage, MoogleMailError> {
         let mut seen = HashSet::new();
         let mut window = VecDeque::with_capacity(limit);
+        if let Some((store, claim)) = journal {
+            let pending = store
+                .pending_reads(
+                    claim.clone(),
+                    world.as_str().to_owned(),
+                    u16::try_from(limit).map_err(|_| configuration(world))?,
+                )
+                .await
+                .map_err(|_| read_journal_unavailable(world))?;
+            if pending.len() > limit {
+                return Err(protocol_error(world));
+            }
+            for summary in pending.into_iter().rev() {
+                if !summary.validate()
+                    || summary.world_id != world.as_str()
+                    || !seen.insert(summary.external_mail_id.clone())
+                {
+                    return Err(protocol_error(world));
+                }
+                let summary = MoogleMailSummary {
+                    external_mail_id: summary.external_mail_id,
+                    world,
+                    sender: summary.sender,
+                    subject: summary.subject,
+                    received_at: summary.received_at,
+                };
+                if !summary.validate() || !self.allowed_sender(&summary.sender) {
+                    return Err(configuration(world));
+                }
+                window.push_back(summary);
+            }
+        }
+        let recovering = !window.is_empty();
         let mut found_cursor = false;
-        let mut reached_end = false;
+        let mut reached_end = recovering;
         for page_index in 0..self.config.maximum_pages {
+            if recovering {
+                break;
+            }
             if deadline.checked_duration_since(tokio::time::Instant::now()).is_none() {
                 return Err(fetch_budget_exhausted(world));
             }
@@ -418,6 +491,27 @@ impl MoogleMailGateway {
             return Err(protocol_error(world));
         }
         let had_candidates = !window.is_empty();
+        if had_candidates
+            && !recovering
+            && let Some((store, claim)) = journal
+        {
+            let summaries = window
+                .iter()
+                .rev()
+                .map(|summary| MailPollReadSummary {
+                    external_mail_id: summary.external_mail_id.clone(),
+                    world_id: world.as_str().to_owned(),
+                    sender: summary.sender.clone(),
+                    subject: summary.subject.clone(),
+                    received_at: summary.received_at,
+                })
+                .collect();
+            // 原子登记整窗后才允许首个详情 GET；取消或提交失败时队列仍可恢复。
+            store
+                .stage_reads(claim.clone(), world.as_str().to_owned(), summaries)
+                .await
+                .map_err(|_| read_journal_unavailable(world))?;
+        }
         let detail_deadline =
             deadline.checked_sub(std::time::Duration::from_millis(100)).unwrap_or(deadline);
         let mut messages = Vec::with_capacity(window.len());
@@ -476,6 +570,15 @@ impl MoogleMailGateway {
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(sender))
     }
+}
+
+fn read_journal_unavailable(world: MoogleMailWorld) -> MoogleMailError {
+    MoogleMailError::new(
+        MoogleMailOperation::Inbox,
+        world,
+        MoogleMailErrorCategory::PersistenceUnavailable,
+        true,
+    )
 }
 
 fn fetch_budget_exhausted(world: MoogleMailWorld) -> MoogleMailError {

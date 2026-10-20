@@ -3,8 +3,8 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use auction_application::{
-    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollStore, MailProcessor,
-    MailboxMaintenanceService, RecurringSchedule,
+    MAX_MAIL_POLL_BATCH_SIZE, MailDiagnosticRecorder, MailMessage, MailPollClaim, MailPollStore,
+    MailProcessor, MailboxMaintenanceService, RecurringSchedule,
 };
 use auction_observability::WorkerLoop;
 use chrono::{DateTime, Utc};
@@ -85,6 +85,15 @@ pub trait MailPollGateway: Send + Sync {
         &self,
         request: MailPollFetchRequest,
     ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>>;
+
+    /// 持久轮询入口；可能改变已读状态的适配器须覆盖此方法并在详情 GET 前登记恢复队列。
+    fn fetch_claimed(
+        &self,
+        request: MailPollFetchRequest,
+        _claim: MailPollClaim,
+    ) -> Pin<Box<dyn Future<Output = Result<MailPollPage, MailPollGatewayError>> + Send + '_>> {
+        self.fetch(request)
+    }
 }
 
 /// 单个 MoogleMail 邮箱的独立调度、超时、续租与重试边界。

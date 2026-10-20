@@ -114,6 +114,7 @@ pub(crate) async fn list_price_history(
             "max_price",
             "buyer",
             "seller",
+            "sort",
             "page",
             "page_size",
             "cursor",
@@ -136,6 +137,13 @@ pub(crate) async fn list_price_history(
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let seller = parse_optional_history_text(query.get("seller"), 256)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
+    let sort = match query.get("sort").map(String::as_str) {
+        None | Some("closed_desc") => PublicPriceHistorySort::ClosedDesc,
+        Some("closed_asc") => PublicPriceHistorySort::ClosedAsc,
+        Some("price_desc") => PublicPriceHistorySort::PriceDesc,
+        Some("price_asc") => PublicPriceHistorySort::PriceAsc,
+        Some(_) => return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效")),
+    };
     let page = parse_positive_i64(query.get("page"), 1, None)
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
     let page_size = parse_positive_i64(query.get("page_size"), 50, None)
@@ -146,7 +154,8 @@ pub(crate) async fn list_price_history(
         .map(decode_public_price_history_cursor)
         .transpose()
         .map_err(|_| api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"))?;
-    if cursor.is_some() && page != 1 {
+    // v1/type5 游标绑定旧时间倒序；不能拿同一边界解释成价格或时间升序。
+    if cursor.is_some() && (page != 1 || sort != PublicPriceHistorySort::ClosedDesc) {
         return Err(api_error(StatusCode::BAD_REQUEST, "invalid_query", "查询参数无效"));
     }
     let offset = if cursor.is_some() {
@@ -166,6 +175,7 @@ pub(crate) async fn list_price_history(
         maximum_price,
         buyer,
         seller,
+        sort,
         limit: page_size,
         offset,
         cursor,
@@ -199,6 +209,7 @@ pub(crate) async fn list_price_history(
         || cursor_raw.is_some() != page_result.total.is_none()
         || cursor_raw.is_some() != page_result.stats.is_none()
         || cursor_raw.is_none() && (page_result.next_cursor.is_some() || page_result.has_more)
+        || page_result.stats.as_ref().is_some_and(|stats| stats.validate().is_err())
         || page_result.entries.iter().any(|entry| {
             entry.lot_id.is_nil()
                 || entry.auction_id.is_nil()

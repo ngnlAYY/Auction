@@ -27,8 +27,8 @@ Worker 不监听业务写入 HTTP，不创建第二套拍卖状态机。应用�
 `with_cash_evidence_gateway`，PM sender 与只读资料 reader 仅 `forum.enabled` 时装配
 （见[外部适配器](crates/auction-integrations/README.md)）。SIGINT/SIGTERM 将 control 标记为 draining、停止新 claim，
 在途任务沿原租约和结果证明路径收口；10 秒 drain 后停止心跳，第二次信号强制收口，最后按配置限时刷新 tracing exporter。
-邮件 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
-重建 Worker。监督只读取 owner 已知失效状态；无 active 邮件凭据时不启动该监督，不增加数据库探测。失效后的新外呼继续
+邮件或论坛 owner 永久失效时，监督任务在一秒观察周期内通知装配根，沿用同一 10 秒排空上限并非零退出，由 systemd 等进程管理器
+重建 Worker。监督只读取已取得 owner 的已知失效状态；关闭功能或无 active 凭据时不启动对应监督，不增加数据库探测。失效后的新外呼继续
 失败关闭，在途发送保留原 sending/未知结果对账语义；新进程取得 advisory lock、提交新 generation 后才恢复邮件操作。
 
 ## 部署配置与 runtime
@@ -41,6 +41,8 @@ transport、凭据、mailbox identity 和全局启用仍由 Worker 部署配置�
 
 `bot_players` 经独立窄投影注入履约服务；收件人命中名单但当前远端身份不匹配时保留内部证据等待，不进入外发。
 只有真实身份及相应资产/资金证明齐备后才能内部满足义务。
+资金策略由同一数据库窄端口注入履约、投递及恢复健康；`record_only` 跳过自动余额采集与比较，仍保留真实身份、库存、
+原收款与发送证据。现金健康明确为不适用，恢复积压及真实投递失败继续刷新；默认 `strict_cash` 保持现金保护。
 
 ## 拍卖邮件起拍价
 
@@ -68,6 +70,10 @@ Credits/COD 为零；同封其他 lot 不受影响，已 Take 的邮件不能整
 每个 world 有独立 cron、抖动和手动唤醒器，读取、处理、重试及续租均受预算约束；重启只把过晚的 due 向当前
 调度收敛，不恢复暂停邮箱、越过活动 claim 或压缩失败退避。批次只提交完成前缀，确定性错误立即收口，只有
 Retryable/超时进入有界重试（参数见[论坛与邮件配置](ops/config/README.md#论坛与邮件)，编排见 [auction-jobs](crates/auction-jobs/README.md)）。
+
+详情 GET 可能把无附件邮件标为已读。轮询先在当前 claim 下持久登记整窗 MID 和列表摘要，再读取详情；重启或取消后优先
+按持久队列直接读取 MID，入站事实、命令账本与 cursor 提交时原子删除完成前缀。队列沿用 batch limit，已有 cursor 保留；
+allowlist 改动使待读发件人不再获准时失败关闭并保留队列，须核对配置后恢复，不静默丢弃待读项。新队列不补造升级前已丢失的 MID。
 
 ## 持久化与外部结果证明
 

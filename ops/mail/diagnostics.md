@@ -153,8 +153,19 @@ MoogleMail Worker 每个 cron 周期（默认 5 分钟，仅 main）在收件轮
 
 Admin A18 详情可展示装备 ID、1-based 附件位置、`stage`（`request`、`response`、`parse`、`validate`）、闭集 `category`、可选
 `detail_code`、真实可用的 HTTP status、`elapsed_millis`（最多 300000）、evidence UUID 和 retention status/error。
-`snapshot_invalid` 与 `filter_rejected` 才允许对应闭集 `detail_code`，其它 category 不带细节原文；网络、超时、截断或超大
-响应只标记 `body_unavailable`，不伪称取得完整响应。
+`snapshot_invalid` 与 `filter_rejected` 允许原有对应闭集 `detail_code`；
+`stage=parse/category=protocol_drift` 另允许装备来源解析的九个闭集原因：
+`equipment_name_invalid`、`equipment_quality_unknown`、`equipment_kind_unknown`、
+`equipment_category_unknown`、`equipment_category_mismatch`、`equipment_level_invalid`、
+`equipment_page_structure_invalid`、`equipment_attributes_invalid`、`equipment_canonical_mismatch`。
+它们只描述失败位置，不含原名称、属性、URL、key 或响应正文；历史缺省细节仍有效，其它组合拒绝来源细节码。
+Admin 手工来源失败沿用原 HTTP 错误契约，仅在安全日志记录闭集原因；MM 留存使用现有诊断 sidecar，
+不改变业务拒收决定或重放路径。网络、超时、截断或超大响应只标记 `body_unavailable`，不伪称取得完整响应。
+
+这些来源原因的数据库许可由追加迁移 `000056_equipment_source_diagnostic_codes` 提供。
+按[停机迁移流程](ops/README.md)先应用迁移，再启动同版角色；旧 CHECK 只允许这类诊断的原因为空，
+不能仅更新 Worker 二进制。迁移只扩展允许的来源原因，不重写旧收件、账本、游标或证据。
+`equipment-contract` 静态门禁比对应用原因枚举、最新 SQL 约束、Admin 解码和五语言说明，已纳入 `just verify`。
 
 管理列表和详情将已知代码译为说明，同时保留原始代码便于关联日志；装备拒收的摘要位于详情顶部，优先显示留存的具体诊断，
 没有 sidecar 时使用已有业务 `reason_code`，都缺失时不猜测原因。`auction_equipment_rejected` 只是拒收总码；

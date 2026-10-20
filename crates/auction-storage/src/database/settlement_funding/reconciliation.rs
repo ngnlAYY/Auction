@@ -99,6 +99,15 @@ async fn apply(
     // 完整对账是低频全局操作，按统一顺序锁完整财务责任集合而不是抽样。
     lock_rows(tx, "SELECT id FROM public.worlds ORDER BY id FOR UPDATE").await?;
     let account = lock_funding_account(tx, &command.expected_uid).await?;
+    if account.as_ref().is_some_and(LockedFundingAccount::records_only) {
+        return Err(FundingError::Conflict);
+    }
+    // scope锁覆盖反向开户：已有record_only时旧strict入口也不能新建另一UID形成混用。
+    let record_only_exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.settlement_funding_accounts WHERE accounting_mode='record_only')")
+        .fetch_one(&mut **tx).await.map_err(storage)?;
+    if record_only_exists {
+        return Err(FundingError::Conflict);
+    }
     if account.as_ref().map_or(0, LockedFundingAccount::version) != command.expected_version {
         return Err(FundingError::Conflict);
     }

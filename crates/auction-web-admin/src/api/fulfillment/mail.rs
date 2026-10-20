@@ -405,6 +405,18 @@ fn decode_mail_equipment_diagnostic(
         return Ok(());
     };
     let detail_valid = match (value.category.as_str(), value.detail_code.as_deref()) {
+        ("protocol_drift", Some(detail)) if value.stage == "parse" => matches!(
+            detail,
+            "equipment_name_invalid"
+                | "equipment_quality_unknown"
+                | "equipment_kind_unknown"
+                | "equipment_category_unknown"
+                | "equipment_category_mismatch"
+                | "equipment_level_invalid"
+                | "equipment_page_structure_invalid"
+                | "equipment_attributes_invalid"
+                | "equipment_canonical_mismatch"
+        ),
         ("snapshot_invalid", Some(detail)) => matches!(
             detail,
             "adapter_invalid"

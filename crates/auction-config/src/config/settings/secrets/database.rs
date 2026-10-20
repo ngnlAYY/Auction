@@ -84,16 +84,68 @@ pub(super) fn resolve_database_url(
     };
     value
         .map(|value| {
-            // 仅接受 PostgreSQL 协议；拒绝未知协议且不回显连接串，不静默切换数据库。
-            let postgres = value.split_once(':').is_some_and(|(scheme, _)| {
-                scheme.eq_ignore_ascii_case("postgres") || scheme.eq_ignore_ascii_case("postgresql")
-            });
-            if !postgres {
-                return Err(ConfigError::InvalidDatabaseConfig("database_url"));
-            }
-            SecretString::new("database_url", value)
+            // 不让驱动以 PG* 环境变量或当前账号补齐遗漏的目标；保留原文凭据编码。
+            SecretString::new("database_url", explicit_database_url(value)?)
         })
         .transpose()
+}
+
+/// 旧 URI 保留驱动的凭据、TLS 和查询覆盖语义，但 host/socket 与库名必须明确。
+/// 省略端口使用 PostgreSQL 的固定默认值，不继承进程环境中的 PGPORT。
+fn explicit_database_url(value: String) -> Result<String, ConfigError> {
+    let invalid = || ConfigError::InvalidDatabaseConfig("database_url");
+    if value != value.trim() || !valid_url_encoding(&value) {
+        return Err(invalid());
+    }
+    let Some((scheme, _)) = value.split_once("://") else { return Err(invalid()) };
+    if !scheme.eq_ignore_ascii_case("postgres") && !scheme.eq_ignore_ascii_case("postgresql") {
+        return Err(invalid());
+    }
+    let url = Url::parse(&value).map_err(|_| invalid())?;
+    if url.cannot_be_a_base() || url.fragment().is_some() {
+        return Err(invalid());
+    }
+    let mut host = url.host_str().is_some_and(|host| !host.is_empty());
+    let mut database = !url.path().trim_start_matches('/').is_empty();
+    let mut port = url.port();
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "host" | "hostaddr" => host = !value.is_empty(),
+            "dbname" => database = !value.is_empty(),
+            "port" => port = Some(value.parse::<u16>().map_err(|_| invalid())?),
+            _ => {}
+        }
+    }
+    if !host || !database || port == Some(0) {
+        return Err(invalid());
+    }
+    if port.is_none() {
+        let separator = if value.contains('?') { '&' } else { '?' };
+        Ok(format!("{value}{separator}port=5432"))
+    } else {
+        Ok(value)
+    }
+}
+
+/// URL 解析会容忍坏转义，查询解码还会替换非法 UTF-8；在此拒绝，避免目标被静默改写。
+fn valid_url_encoding(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let mut decoded = Vec::with_capacity(value.len());
+    while let Some(byte) = bytes.next() {
+        let byte = if byte == b'%' {
+            let Some(high) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
+                return false;
+            };
+            let Some(low) = bytes.next().and_then(|byte| char::from(byte).to_digit(16)) else {
+                return false;
+            };
+            (high * 16 + low) as u8
+        } else {
+            byte
+        };
+        decoded.push(byte);
+    }
+    std::str::from_utf8(&decoded).is_ok_and(|value| !value.chars().any(char::is_control))
 }
 
 fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(), ConfigError> {

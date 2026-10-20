@@ -52,6 +52,8 @@ mod postgres_restore;
 
 #[path = "runtime/bot_funds/mod.rs"]
 mod bot_funds;
+#[path = "runtime/bot_funds_record_only/mod.rs"]
+mod bot_funds_record_only;
 #[path = "runtime/cli.rs"]
 mod cli;
 #[path = "runtime/deployment.rs"]
@@ -60,6 +62,8 @@ mod deployment;
 mod deployment_identity;
 #[path = "runtime/dispatch.rs"]
 mod dispatch;
+#[path = "runtime/legacy_settlement/mod.rs"]
+mod legacy_settlement;
 #[path = "runtime/mail_diagnostics/mod.rs"]
 mod mail_diagnostics;
 #[cfg(unix)]

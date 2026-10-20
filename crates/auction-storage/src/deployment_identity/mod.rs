@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+#[cfg(feature = "postgres")]
+use std::borrow::Cow;
+
 mod strict;
 pub use strict::strict_deployment_database_identity;
 
@@ -18,13 +21,21 @@ pub struct DeploymentDatabaseIdentity {
 #[error("{0}")]
 pub struct DeploymentDatabaseIdentityError(&'static str);
 
-/// 让 SQLx 按规范化后的最终 TCP IPv6 host 查找 pgpass；保留查询覆盖与密码优先级。
-/// Unix socket、用户名、密码和 TLS 继续由驱动解析，不能用原 URI authority 覆盖最终目标。
+/// 连接前要求 URI 明确提供 host/socket 和库名；省略端口固定为 5432，不继承 PGPORT。
+/// 让 SQLx 按最终 TCP IPv6 host 查找 pgpass；Unix socket、凭据和 TLS 仍由驱动解析。
 #[cfg(feature = "postgres")]
 pub(crate) fn postgres_connect_options(
     database_url: &str,
 ) -> Result<sqlx::postgres::PgConnectOptions, sqlx::Error> {
-    let options = database_url.parse::<sqlx::postgres::PgConnectOptions>()?;
+    let port = explicit_postgres_port(database_url)?;
+    // SQLx 在 FromStr 返回前已经查找 pgpass；必须在首次解析前固定端口，避免先选中 PGPORT 的密码。
+    let connection_url = if port.is_some() {
+        Cow::Borrowed(database_url)
+    } else {
+        let separator = if database_url.contains('?') { '&' } else { '?' };
+        Cow::Owned(format!("{database_url}{separator}port=5432"))
+    };
+    let options = connection_url.parse::<sqlx::postgres::PgConnectOptions>()?;
     if options.get_socket().is_some() {
         return Ok(options);
     }
@@ -37,10 +48,37 @@ pub(crate) fn postgres_connect_options(
         return Ok(options);
     };
     // 丢弃首次解析取得的密码，重新让驱动按最终裸 IPv6 查找 pgpass；显式密码优先级不变。
-    // 只追加 ASCII host；fragment 不参与连接，原查询参数仍先经驱动逐项校验。
-    let target = database_url.split_once('#').map_or(database_url, |(target, _)| target);
-    let separator = if target.contains('?') { '&' } else { '?' };
-    format!("{target}{separator}host={address}").parse()
+    // 只追加 ASCII host；原查询参数仍先经驱动逐项校验，二次解析保留已固定的端口。
+    let separator = if connection_url.contains('?') { '&' } else { '?' };
+    format!("{connection_url}{separator}host={address}").parse()
+}
+
+/// 适配器也守住显式目标边界，不能依赖调用方一定经过配置 loader 或部署预检。
+#[cfg(feature = "postgres")]
+fn explicit_postgres_port(database_url: &str) -> Result<Option<u16>, sqlx::Error> {
+    crate::database::DatabaseBackend::from_url(database_url)
+        .map_err(|error| sqlx::Error::Configuration(Box::new(error)))?;
+    let invalid = || {
+        sqlx::Error::Configuration(Box::new(DeploymentDatabaseIdentityError(
+            "PostgreSQL 连接必须显式指定 host/socket 和数据库，端口必须为非零 u16",
+        )))
+    };
+    let url = url::Url::parse(database_url).map_err(|_| invalid())?;
+    let mut host = url.host_str().is_some_and(|host| !host.is_empty());
+    let mut database = !url.path().trim_start_matches('/').is_empty();
+    let mut port = url.port();
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "host" | "hostaddr" => host = !value.is_empty(),
+            "dbname" => database = !value.is_empty(),
+            "port" => port = Some(value.parse::<u16>().map_err(|_| invalid())?),
+            _ => {}
+        }
+    }
+    if !host || !database || port == Some(0) {
+        return Err(invalid());
+    }
+    Ok(port)
 }
 
 /// 解析部署目标；调用方须先拒绝 PostgreSQL 的隐式目标和未知参数。

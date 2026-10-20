@@ -48,6 +48,12 @@ allowlist、runtime 开关和数据库 enabled world 的交集中新建，已有
 Fulfillment pending 通过 `prepare_next` 区分 External 与 `InternallySatisfied`：内部成功立即结束 claim，不 activate、
 不生成 delivery ID。pending 身份准备与 enqueued 收款核对采用不超过有效 lease/30 秒的单一超时，覆盖 guard 排队、
 只读请求及数据库提交，不 detach future；提交阶段取消由 opaque guard 撤销 owner，普通证据/资金等待由应用持久延期。
+自动恢复健康与履约复用数据库资金策略：仅记账账户跳过 Balance 请求，现金状态标为不适用，仍更新恢复积压及真实投递状态。
+
+Recovery take 的新 prepare 命令绑定 action 与来源 MID，activate 从该 prepare 派生；同轮领取/重试不改变身份，
+真实新退件获得独立身份。旧 prepared/enqueued 保留原 prepare/activate；pending 先只读恢复精确匹配的旧 prepare，
+覆盖 prepare 已提交、action 未关联的升级窗口，避免同一 MID 产生第二个 take。退件消费唯一性及计数由 storage
+同事务保证，Worker 不清除消费历史。
 
 Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上限 1）。发送前无凭据、compose prepare 失败或超时
 只释放 claim/在本轮排除该 world 的 Send，下轮重新读取真实 compose；Take/Return 独立运行，`batch_limit=1` 也能继续
@@ -62,6 +68,8 @@ Delivery 有效并发取配置与 transport 的较小值（MoogleMail 当前上�
 Mail 仅对可重试错误与超时做有界 inline retry，处理前先查持久化完成证明。批次预算独立于 lease，耗尽只提交已完成
 连续前缀及 cursor；处理中途确定失败时同一 fenced 提交保存成功前缀与失败退避，不采用失败页整体 next_cursor。
 完成证明和已接受决定允许恢复提交前已完成的步骤，不能按取件后的资产变化重新解释旧邮件。
+轮询将当前 claim 传给 `fetch_claimed`；生产 MoogleMail gateway 在首个详情 GET 前持久登记整窗列表身份，优先恢复同邮箱、
+同 world 的待读前缀。完成 cursor 与队列前缀在同一 fenced 事务提交，读取取消或业务失败保留未完成后缀，不能靠未读列表恢复。
 
 Forum 目录每帖最多 150 件、从 #1 连续分页，系统日志在最后一个目录页之后、用户回帖再接下一楼。全部固定帖的
 exact post ID、拍卖/页码标记与本地持久化身份齐备后才导入普通出价；历史已尝试/发布/未知主题按冻结单页布局继续

@@ -2,16 +2,20 @@
 
 mod account;
 mod cash_gate;
+mod classification;
 mod deliveries;
 mod ledger;
+mod legacy;
 mod obligations;
+mod policy;
 mod preview;
 mod receipt;
 mod reconciliation;
+mod record_only;
 
 pub use account::{
-    LockedFundingAccount, check_funding_cash, funding_requires_authorization,
-    lock_funded_delivery_account, lock_funding_account,
+    LockedFundingAccount, check_funding_cash, check_funding_evidence,
+    funding_requires_authorization, lock_funded_delivery_account, lock_funding_account,
 };
 pub use deliveries::{
     finish_funded_delivery, reserve_funded_delivery, return_funded_delivery, start_funded_delivery,

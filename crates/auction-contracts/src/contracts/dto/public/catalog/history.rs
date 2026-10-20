@@ -69,6 +69,9 @@ pub struct PublicPriceHistoryStatsResponse {
     pub min: i64,
     pub max: i64,
     pub median: i64,
+    /// 精确中位数；规范十进制整数或 .5，缺失时沿用旧整数 median。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub median_exact: Option<String>,
 }
 
 /// Public 价格历史响应；cursor 页不携带 stats/total。

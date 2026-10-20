@@ -2,6 +2,8 @@
 
 #[cfg(feature = "postgres")]
 mod evidence;
+#[cfg(feature = "postgres")]
+pub(super) use evidence::build_for_world;
 
 use clap::Args;
 use uuid::Uuid;

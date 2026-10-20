@@ -88,6 +88,10 @@ pub(super) async fn snapshot(
     let pools = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY world_id),'[]') FROM public.settlement_pools p").await?;
     let all_accounts = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid),'[]') FROM public.settlement_funding_accounts a").await?;
     let allocations = array(tx,"SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY uid,id),'[]') FROM public.settlement_funding_allocations a").await?;
+    let repaired = super::classification::repaired_deliveries(tx, uid).await?;
+    let assetless = super::classification::assetless_notifications(tx).await?;
+    let mut excluded = super::classification::ids(&repaired);
+    excluded.extend(super::classification::ids(&assetless));
     let mut blockers = Vec::new();
     let mut liabilities = 0i64;
     let mut compensation = 0i64;
@@ -161,6 +165,10 @@ pub(super) async fn snapshot(
         }
     }
     for delivery in deliveries.as_array().ok_or(FundingError::Storage)? {
+        // 只解除该旧投递的未知结果门；不标成功、不重发，也不授予任何可消费资金。
+        if delivery["id"].as_str().is_some_and(|id| excluded.contains(id)) {
+            continue;
+        }
         let state = delivery["status"].as_str().ok_or(FundingError::Storage)?;
         if matches!(state, "sending" | "manual_reconcile")
             || (state == "failed" && !delivery["sending_at"].is_null())
@@ -249,7 +257,11 @@ pub(super) async fn snapshot(
     liabilities = liabilities.saturating_sub(isolated).max(0);
     blockers.sort();
     blockers.dedup();
-    let facts = json!({"lots":lots,"deliveries":deliveries,"recovery_actions":recovery_actions,"economics":economics,"pools":pools,"accounts":all_accounts,"allocations":allocations});
+    let record_only_eligible = all_accounts.as_array().ok_or(FundingError::Storage)?.is_empty();
+    let facts = json!({"lots":lots,"deliveries":deliveries,"recovery_actions":recovery_actions,"economics":economics,"pools":pools,"accounts":all_accounts,"allocations":allocations,
+        "record_only_initialization":{"eligible":record_only_eligible,
+            "reason":if record_only_eligible {"no_existing_account"}else{"existing_account_requires_dedicated_transition"}},
+        "verified_legacy_self_deliveries":repaired,"assetless_notification_deliveries":assetless});
     let digest = Sha256::digest(
         serde_json::to_vec(&json!({"version":1,"uid":uid,"facts":facts})).map_err(invalid)?,
     )

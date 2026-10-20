@@ -9,6 +9,10 @@ use uuid::Uuid;
 
 use super::{AdminMailPollState, ApplicationFuture, MailDisplaySnapshot};
 
+#[path = "poll/reads.rs"]
+mod reads;
+pub use reads::{MailPollReadJournal, MailPollReadSummary};
+
 /// 单次 MoogleMail 拉取允许提交的最大邮件数。
 pub const MAX_MAIL_POLL_BATCH_SIZE: u16 = 1000;
 /// 轮询失败码允许的最大字节数。
@@ -129,7 +133,7 @@ impl MailPollBatch {
 }
 
 /// `claim_due`、`renew`、`commit` 和 `fail` 必须由同一数据库 owner 实现租约 fence。远程 GET
-/// 只发生在 `claim_due` 提交之后；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
+/// 只发生在 `claim_due` 提交之后，详情 GET 还须先经 MailPollReadJournal 提交恢复身份；入站事实和 cursor 只有在 `commit` 的本地事务中同时写入成功
 /// 后才能推进，避免远端成功而本地丢游标或重复执行不受控。
 pub trait MailPollStore: Send + Sync {
     /// 在业务处理器或外部副作用前核验一封邮件是否已有完整处理证明。

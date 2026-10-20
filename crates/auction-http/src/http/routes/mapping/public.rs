@@ -353,5 +353,6 @@ pub(crate) fn map_price_history_stats(
         min: stats.minimum,
         max: stats.maximum,
         median: stats.median,
+        median_exact: stats.median_exact,
     }
 }

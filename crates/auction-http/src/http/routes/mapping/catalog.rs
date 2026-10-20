@@ -394,6 +394,7 @@ pub(crate) fn decode_public_bid_log_cursor(raw: &str) -> Result<PublicBidLogCurs
 }
 
 pub(crate) fn encode_public_price_history_cursor(cursor: &PublicPriceHistoryCursor) -> String {
+    // v1/type5 的词法只表达 closed_desc，其他排序在 HTTP 与应用请求校验中拒绝 cursor。
     match cursor {
         PublicPriceHistoryCursor::Start => "start".to_owned(),
         PublicPriceHistoryCursor::Boundary { closed_at, auction_sequence, lot_number, lot_id } => {

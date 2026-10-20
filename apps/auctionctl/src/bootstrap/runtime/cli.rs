@@ -17,6 +17,18 @@ pub(super) enum Command {
         #[command(flatten)]
         args: super::bot_funds::BotFundsArgs,
     },
+    /// 默认数据库预览；显式确认后用真实身份开户为只记账模式，不读取余额。
+    #[command(name = "bot-funds-record-only")]
+    BotFundsRecordOnly {
+        #[command(flatten)]
+        args: super::bot_funds_record_only::BotFundsRecordOnlyArgs,
+    },
+    /// 默认仅数据库预览；逐笔精确确认后以真实只读证据修复旧结算。
+    #[command(name = "legacy-settlement")]
+    LegacySettlement {
+        #[command(subcommand)]
+        action: super::legacy_settlement::LegacySettlementAction,
+    },
     /// 只读检查旧草稿；只有显式 execute 和完整确认才修正软截止为900/900秒。
     #[command(name = "repair-draft-soft-close")]
     RepairDraftSoftClose {

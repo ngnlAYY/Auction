@@ -104,11 +104,11 @@ use auction_application::{
     PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicMyBid,
     PublicMyBidsPage, PublicMyBidsRequest, PublicOwnedProxy, PublicPreviewLotDetail,
     PublicPreviewLotSummary, PublicPriceHistoryCursor, PublicPriceHistoryEntry,
-    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistoryStats, PublicProxyBid,
-    PublicProxyTransition, PublicSessionIdentity, RecoveryCommandError, RecoveryConfirmationAction,
-    RecoveryConfirmationCommand, RecoveryConfirmationResult, RecoveryReport, RequestHash,
-    SessionError, SettlementReport, WorldSnapshot, allowed_recovery_commands,
-    format_public_time_wire,
+    PublicPriceHistoryListRequest, PublicPriceHistoryPage, PublicPriceHistorySort,
+    PublicPriceHistoryStats, PublicProxyBid, PublicProxyTransition, PublicSessionIdentity,
+    RecoveryCommandError, RecoveryConfirmationAction, RecoveryConfirmationCommand,
+    RecoveryConfirmationResult, RecoveryReport, RequestHash, SessionError, SettlementReport,
+    WorldSnapshot, allowed_recovery_commands, format_public_time_wire,
 };
 use auction_contracts::{
     AdminAuctionCommandResponse, AdminAuctionLifecycleRequest, AdminAuctionLifecycleResponse,

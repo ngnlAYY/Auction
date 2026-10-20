@@ -23,6 +23,9 @@ use serde_json::Value;
 
 use super::AdminApiState;
 
+#[path = "runtime_config/taxonomy.rs"]
+mod taxonomy;
+
 /// 读取当前 runtime TOML 的安全文档和 fingerprint。
 pub(crate) async fn get(
     State(state): State<AdminApiState>,
@@ -36,14 +39,10 @@ pub(crate) async fn get(
     if let Err(response) = super::authenticated_admin_session(&state, &headers).await {
         return *response;
     }
-    if super::parse_query(&uri, &[]).is_err() {
-        return super::api_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_query",
-            "runtime 配置不接受查询参数",
-        )
-        .into_response();
-    }
+    let include_taxonomy = match taxonomy_projection(&uri) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let Some(port) = state.admin_runtime() else {
         return feature_unavailable();
     };
@@ -51,7 +50,7 @@ pub(crate) async fn get(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot) {
+    let response = match map_snapshot(snapshot, include_taxonomy) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -74,9 +73,10 @@ pub(crate) async fn validate(
     if let Err(response) = super::authenticated_admin_mutation(&state, &headers, address).await {
         return *response;
     }
-    if let Some(response) = mutation_boundary(&uri) {
-        return response;
-    }
+    let include_taxonomy = match taxonomy_projection(&uri) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let input: AdminRuntimeConfigValidateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
@@ -95,7 +95,7 @@ pub(crate) async fn validate(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot) {
+    let response = match map_snapshot(snapshot, include_taxonomy) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -119,9 +119,10 @@ pub(crate) async fn update(
         Ok(result) => result,
         Err(response) => return *response,
     };
-    if let Some(response) = mutation_boundary(&uri) {
-        return response;
-    }
+    let include_taxonomy = match taxonomy_projection(&uri) {
+        Ok(value) => value,
+        Err(response) => return *response,
+    };
     let input: AdminRuntimeConfigUpdateRequest = match serde_json::from_slice(&body) {
         Ok(input) => input,
         Err(_) => {
@@ -158,7 +159,7 @@ pub(crate) async fn update(
         Ok(snapshot) => snapshot,
         Err(error) => return map_error(error),
     };
-    let response = match map_snapshot(snapshot) {
+    let response = match map_snapshot(snapshot, include_taxonomy) {
         Ok(response) => response,
         Err(response) => return *response,
     };
@@ -185,12 +186,14 @@ fn parse_document(value: Value) -> Result<AdminRuntimeDocument, Box<Response>> {
 
 fn map_snapshot(
     snapshot: AdminRuntimeSnapshot,
+    include_taxonomy: bool,
 ) -> Result<AdminRuntimeConfigResponse, Box<Response>> {
     snapshot.validate().map_err(|_| Box::new(super::internal_error()))?;
     let mut document = snapshot.document;
     // 升级前的 Rust runtime 文件没有旧版三组业务字段。HTTP 投影补齐旧版默认值，使管理端
     // 能立即编辑完整契约；物理文件在首次成功保存前仍保持原指纹，避免破坏 durable 重放。
     document.materialize_business_defaults();
+    let equipment_taxonomy = include_taxonomy.then(|| taxonomy::equipment_taxonomy(&document));
     let mut document =
         serde_json::to_value(document).map_err(|_| Box::new(super::internal_error()))?;
     // `false` 在物理文档中省略以保持旧指纹；浏览器投影显式补齐开关，避免隐藏默认行为。
@@ -204,21 +207,28 @@ fn map_snapshot(
         document,
         fingerprint: snapshot.fingerprint,
         restart_required: snapshot.restart_required,
+        equipment_taxonomy,
     })
 }
 
-fn mutation_boundary(uri: &Uri) -> Option<Response> {
-    if uri.query().is_some_and(|query| !query.is_empty()) {
-        return Some(
+// 词典仅扩展明确选择的响应投影；旧客户端仍收到原字段集合，查询不参与文档或命令摘要。
+fn taxonomy_projection(uri: &Uri) -> Result<bool, Box<Response>> {
+    let invalid = || {
+        Box::new(
             super::api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_query",
-                "runtime 配置命令不接受查询参数",
+                "runtime 配置只接受 include_equipment_taxonomy=true",
             )
             .into_response(),
-        );
+        )
+    };
+    let query = super::parse_query(uri, &["include_equipment_taxonomy"]).map_err(|_| invalid())?;
+    match query.get("include_equipment_taxonomy").map(String::as_str) {
+        None => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => Err(invalid()),
     }
-    None
 }
 
 fn feature_unavailable() -> Response {

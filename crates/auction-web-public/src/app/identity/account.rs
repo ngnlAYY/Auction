@@ -1,4 +1,4 @@
-//! Public 账户竞价与代理页面。
+//! Public 账户当前标记装备、竞价与代理页面。
 //! 页面只展示服务端已经完成权限过滤的账户 projection。普通竞价与代理授权分别使用旧版的
 //! 独立页码，查询状态保留在 URL 中，登录后由服务端快照重新读取。
 
@@ -18,6 +18,9 @@ use super::{
 };
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 10;
+
+#[path = "account/watches/mod.rs"]
+mod watches;
 
 pub(super) fn page() -> Element {
     let mut session = use_context::<PublicSessionResource>();
@@ -64,6 +67,7 @@ pub(super) fn page() -> Element {
                 h1 { id: "account-title", {t!("page-account-title")} }
                 // 偏好宿主位于分页异步分支外；身份变化销毁旧意图，不因列表重读卸载。
                 OutbidNotifications { key: "preference-{identity.user_id}", user_id: identity.user_id.clone() }
+                watches::CurrentWatches { key: "watches-{identity.user_id}", user_id: identity.user_id.clone() }
                 AuthenticatedAccountData { key: "bids-{identity.user_id}" }
             }
         },

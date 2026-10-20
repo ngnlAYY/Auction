@@ -9,6 +9,6 @@ mod validation;
 pub(crate) use components::PriceHistoryFilters;
 pub(crate) use model::{HistoryDateError, HistoryFilterError, HistoryPriceError, HistoryPriceUnit};
 pub(crate) use validation::{
-    history_date_error, history_date_value, history_month_label, history_price_error,
-    history_price_value,
+    history_date_error, history_date_value, history_month_label, history_name_error,
+    history_name_value, history_price_error, history_price_value,
 };

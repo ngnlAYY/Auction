@@ -18,6 +18,15 @@ impl MoogleMailDeliveryTransport {
         self
     }
 
+    /// 复用数据库资金策略；记账模式仍取得真实身份与原独占会话，不读取现金余额。
+    pub fn with_funding_policy_reader(
+        mut self,
+        reader: Arc<dyn auction_application::FundingPolicyReader>,
+    ) -> Self {
+        self.funding_policy_reader = Some(reader);
+        self
+    }
+
     pub(super) async fn prepare_cash_authorized(
         &self,
         claim: DeliveryWorkClaim,
@@ -29,6 +38,14 @@ impl MoogleMailDeliveryTransport {
         // 同一绝对预算覆盖guard排队、原clean-compose和A的全部GET。
         let deadline = auction_application::internal_evidence_deadline(deadline);
         tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+            let policy = match &self.funding_policy_reader {
+                Some(reader) => reader.funding_policy().await.map_err(|_| cash_unproven())?,
+                None => auction_application::FundingPolicy {
+                    mode: auction_application::FundingAccountingMode::StrictCash,
+                    expected_uid: None,
+                    policy_version: 0,
+                },
+            };
             let world = match claim.origin_kind.as_str() {
                 "settlement" => decode_settlement_payload(&claim)?.1,
                 _ => decode_payload(&claim)?.1,
@@ -48,7 +65,7 @@ impl MoogleMailDeliveryTransport {
                         MoogleMailWorld::Isekai => SettlementWorld::Isekai,
                     },
                     equipment: None,
-                    observe_main_cash: true,
+                    observe_main_cash: policy.observes_cash(),
                     deadline,
                 };
                 let snapshot = gateway
@@ -64,6 +81,9 @@ impl MoogleMailDeliveryTransport {
                         );
                         cash_unproven()
                     })?;
+                if !policy.matches_identity(&snapshot.identity.authenticated_uid) {
+                    return Err(cash_unproven());
+                }
                 Some(
                     PreparedSettlementInternalEvidence::new(
                         snapshot,
@@ -80,6 +100,9 @@ impl MoogleMailDeliveryTransport {
                     })?,
                 )
             } else {
+                if !policy.observes_cash() {
+                    return Err(cash_unproven());
+                }
                 // 这不是授权。DB必须在同事务scope锁下证明无账户保护且无持久关联。
                 None
             };

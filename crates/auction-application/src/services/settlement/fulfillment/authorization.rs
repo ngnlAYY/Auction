@@ -21,7 +21,9 @@ pub(super) enum AuthorizationResult<T> {
     ManualReconcile { obligation_id: auction_domain::SettlementId, failure_code: &'static str },
 }
 
-/// pending/prepared 每次推进都必须重新读取当前收件人，并复核退款 custody 与余额。
+/// pending/prepared 每次推进都复核收件人和退款 custody；现金观察遵守持久资金策略。
+// 这些依赖仍由应用用例显式传入；余额开关仅决定读侧观察，发送事务会重新核验策略。
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn authorize_pending_or_prepared(
     store: &dyn SettlementFulfillmentStore,
     recipients: &dyn SettlementFulfillmentRecipientReader,
@@ -30,6 +32,7 @@ pub(super) async fn authorize_pending_or_prepared(
     clock: &dyn Clock,
     claim: SettlementFulfillmentClaim,
     retry_delay: Duration,
+    observe_cash: bool,
 ) -> Result<
     AuthorizationResult<(SettlementFulfillmentClaim, SettlementDeliveryIntent)>,
     ApplicationError,
@@ -112,7 +115,7 @@ pub(super) async fn authorize_pending_or_prepared(
         }
     }
 
-    if intent.credits > 0 {
+    if intent.credits > 0 && observe_cash {
         let observed_at = clock.now();
         let balance = match evidence.read_balance(claim.world, observed_at).await {
             Ok(balance) => balance,

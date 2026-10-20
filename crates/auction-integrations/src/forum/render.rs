@@ -290,7 +290,7 @@ pub struct ForumThreadRenderer {
 }
 
 impl ForumThreadRenderer {
-    /// 使用已校验的装备标色规则构造渲染器。
+    /// 使用启动时已校验的装备标色规则构造渲染器；保留多选维度与规则优先级。
     pub fn with_colors(colors: Vec<EquipmentColorRule>) -> Self {
         Self { colors }
     }

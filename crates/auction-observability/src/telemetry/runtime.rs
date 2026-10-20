@@ -86,6 +86,22 @@ pub fn init(service: &str, configured_filter: Option<&str>) -> Result<(), InitEr
     init_with_config(service, "unknown", "unknown", configured_filter, None, None).map(|_| ())
 }
 
+/// 安装仅写 stderr 的 JSON subscriber，不启用 OTLP，也不读取环境过滤器。
+/// 调用方显式选择安全 target；事件不附加父 span 字段，避免污染结构化命令输出或夹带上下文。
+pub fn init_json_stderr(configured_filter: &str) -> Result<(), InitError> {
+    let filter = EnvFilter::try_new(configured_filter)
+        .map_err(|error| InitError { message: error.to_string() })?;
+    let subscriber = tracing_subscriber::registry().with(filter).with(
+        tracing_subscriber::fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_current_span(false)
+            .with_span_list(false)
+            .with_writer(std::io::stderr),
+    );
+    subscriber.try_init().map_err(|error| InitError { message: error.to_string() })
+}
+
 /// 初始化 JSON tracing subscriber，并按运行配置挂载一个有界 OTLP/HTTP span exporter。
 pub fn init_with_config(
     service: &str,

@@ -30,7 +30,9 @@ impl SettlementFulfillmentService {
                 .map(Box::new)
                 .map(Outcome::External);
         }
-        let mut request = evidence_request(&command, self.clock.now(), true, true)?;
+        let policy = self.funding_policy().await?;
+        let mut request =
+            evidence_request(&command, self.clock.now(), true, policy.observes_cash())?;
         request.deadline = request.deadline.min(deadline);
         let mut prepared = match reader.prepare_internal_evidence(request).await {
             Ok(prepared) => prepared,
@@ -40,7 +42,9 @@ impl SettlementFulfillmentService {
                     .await;
             }
         };
-        if prepared.check_current().await.is_err() {
+        if !policy.matches_identity(&prepared.snapshot().identity.authenticated_uid)
+            || prepared.check_current().await.is_err()
+        {
             return self.defer_internal(claim, retry_delay, "refund_funding_evidence_wait").await;
         }
         let guard = prepared.begin_commit().map_err(|_| repository_error("退款证据预算失效"))?;

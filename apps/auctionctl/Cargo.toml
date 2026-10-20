@@ -12,6 +12,7 @@ auction-config.workspace = true
 auction-application = { workspace = true, optional = true }
 auction-contracts = { workspace = true, optional = true }
 auction-integrations = { workspace = true, optional = true }
+auction-observability = { workspace = true, optional = true }
 auction-storage.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -32,6 +33,7 @@ postgres = [
     "dep:auction-application",
     "dep:auction-contracts",
     "dep:auction-integrations",
+    "dep:auction-observability",
 ]
 
 [lints]

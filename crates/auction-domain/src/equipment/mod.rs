@@ -7,6 +7,8 @@ use std::fmt;
 use serde::ser::Serializer;
 use thiserror::Error;
 
+pub mod taxonomy;
+
 const EQUIPMENT_KEY_LENGTH: usize = 10;
 const ENVELOPE_NONCE_LENGTH: usize = 12;
 const MIN_CIPHERTEXT_LENGTH: usize = 16;

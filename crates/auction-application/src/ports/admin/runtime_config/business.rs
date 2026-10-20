@@ -63,16 +63,27 @@ impl Default for AdminRuntimeEquipmentFilterConfig {
     }
 }
 
-/// 单个装备类型的论坛名称标色规则。
+/// 单条论坛名称标色规则；类型、种类、品质各维度内多选为 OR，维度间为 AND。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeEquipmentColorRule {
-    /// 装备类型，例如 `One-Handed`；空字符串表示所有装备类型。
+    /// 兼容旧单值装备类型；不得与非空 `categories` 同时使用。
     pub category: String,
-    /// 装备种类，例如 `Rapier`；空字符串表示所有种类。
+    /// 兼容旧单值装备种类；不得与非空 `equipment_types` 同时使用。
     pub equipment_type: String,
-    /// 精确品质；空字符串表示所有品质。
+    /// 兼容旧单值品质；不得与非空 `qualities` 同时使用。
     pub quality: String,
+    /// 装备类型多选；空数组沿用旧单值，二者均空表示所有类型。
+    /// 空数组不编码，保持旧文档 fingerprint 与 durable 命令摘要。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+    /// 装备种类多选，支持十二种护甲材质族或精确完整种类；空数组沿用旧单值。
+    /// 材质族须同时匹配实际装备大类和完整种类首词，二者均空表示所有种类。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub equipment_types: Vec<String>,
+    /// 品质多选；空数组沿用旧单值，二者均空表示所有品质。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub qualities: Vec<String>,
     pub level: AdminRuntimeEquipmentLevelConfig,
     pub prefixes: Vec<String>,
     pub suffixes: Vec<String>,
@@ -87,6 +98,9 @@ impl Default for AdminRuntimeEquipmentColorRule {
             category: String::new(),
             equipment_type: String::new(),
             quality: String::new(),
+            categories: Vec::new(),
+            equipment_types: Vec::new(),
+            qualities: Vec::new(),
             level: AdminRuntimeEquipmentLevelConfig::default(),
             prefixes: Vec::new(),
             suffixes: Vec::new(),
@@ -113,6 +127,9 @@ impl AdminRuntimeEquipmentColorsConfig {
                 category: rule.category.clone(),
                 equipment_type: rule.equipment_type.clone(),
                 quality: rule.quality.clone(),
+                categories: rule.categories.clone(),
+                equipment_types: rule.equipment_types.clone(),
+                qualities: rule.qualities.clone(),
                 level_min: rule.level.min,
                 level_max: rule.level.max,
                 prefixes: rule.prefixes.clone(),

@@ -7,4 +7,6 @@ mod processor;
 mod runtime;
 
 pub use config::{InitError, ShutdownError, TracingConfig};
-pub use runtime::{TracingRuntime, attach_remote_trace_context, init, init_with_config};
+pub use runtime::{
+    TracingRuntime, attach_remote_trace_context, init, init_json_stderr, init_with_config,
+};

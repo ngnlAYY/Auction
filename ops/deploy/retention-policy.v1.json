@@ -3,7 +3,7 @@
   "format": "auction-retention-policy.v1",
   "policy_id": "auction-retention-policy",
   "version": 1,
-  "database_schema_version": 23,
+  "database_schema_version": 55,
   "authority": "repository-conservative-default",
   "inventory_authorizes_mutation": false,
   "families": [
@@ -117,8 +117,11 @@
         "compensation_ledger",
         "settlement_obligations",
         "settlement_obligation_fulfillments",
+        "settlement_legacy_self_reconciliations",
+        "settlement_legacy_bot_seller_claims",
         "settlement_recoveries",
         "settlement_recovery_actions",
+        "settlement_recovery_return_consumptions",
         "settlement_recovery_commands",
         "settlement_recovery_health",
         "deliveries",
@@ -135,6 +138,7 @@
         "public_sessions",
         "admin_sessions",
         "auction_forum_reply_cursors",
+        "mail_poll_pending_reads",
         "auction_intake_targets"
       ]
     },

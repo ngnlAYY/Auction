@@ -1,7 +1,8 @@
 //! 运行时配置页面的安全表单状态与完整 JSON 投影转换。
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
+use auction_contracts::{AdminRuntimeConfigResponse, EquipmentTaxonomyDto};
 use serde_json::{Map, Number, Value};
 
 use super::operational_fields;
@@ -72,11 +73,13 @@ pub(super) struct RuntimeMailboxForm {
     pub(super) mailbox_key: String,
 }
 
-/// 论坛装备标色规则的前端编辑状态；数字和列表按文本保留中间态。
+/// 论坛装备标色规则的前端编辑状态；多选列表按行保存，兼容旧单值规则回填。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct RuntimeEquipmentColorForm {
     pub(super) category: String,
     pub(super) equipment_type: String,
+    /// 旧材质单值保持精确匹配，用户主动改种类后才转换为新材质族多选。
+    pub(super) legacy_equipment_type: Option<String>,
     pub(super) quality: String,
     pub(super) level_min: String,
     pub(super) level_max: String,
@@ -95,6 +98,7 @@ pub(super) struct RuntimeConfigForm {
     mailboxes: Vec<RuntimeMailboxForm>,
     equipment_colors: Vec<RuntimeEquipmentColorForm>,
     had_equipment_colors: bool,
+    equipment_taxonomy: Option<Rc<EquipmentTaxonomyDto>>,
 }
 
 impl RuntimeConfigForm {
@@ -103,7 +107,10 @@ impl RuntimeConfigForm {
         &self.document
     }
 
-    pub(super) fn from_document(document: &Value) -> Result<Self, ()> {
+    /// 词典由同次响应单独下发，既不并入业务文档，也不参与其 fingerprint。
+    pub(super) fn from_response(response: &AdminRuntimeConfigResponse) -> Result<Self, ()> {
+        let taxonomy = response.equipment_taxonomy.as_ref().ok_or(())?;
+        let document = &response.document;
         let mut inputs = BTreeMap::new();
         for path in TEXT_FIELDS.iter().chain(operational_fields::TEXT_FIELDS) {
             let value = nested_value(document, path).and_then(Value::as_str).ok_or(())?;
@@ -171,21 +178,14 @@ impl RuntimeConfigForm {
                     .map(|rule| {
                         let object = rule.as_object().ok_or(())?;
                         Ok(RuntimeEquipmentColorForm {
-                            category: object
-                                .get("category")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            equipment_type: object
-                                .get("equipment_type")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            quality: object
-                                .get("quality")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
+                            category: color_selection_text(object, "categories", "category")?,
+                            equipment_type: color_selection_text(
+                                object,
+                                "equipment_types",
+                                "equipment_type",
+                            )?,
+                            legacy_equipment_type: legacy_material_selection(object, taxonomy),
+                            quality: color_selection_text(object, "qualities", "quality")?,
                             level_min: object
                                 .get("level")
                                 .and_then(|level| level.get("min"))
@@ -227,7 +227,48 @@ impl RuntimeConfigForm {
             mailboxes,
             equipment_colors,
             had_equipment_colors,
+            equipment_taxonomy: Some(Rc::new(taxonomy.clone())),
         })
+    }
+
+    pub(super) fn equipment_taxonomy(&self) -> Option<Rc<EquipmentTaxonomyDto>> {
+        self.equipment_taxonomy.clone()
+    }
+
+    /// 刷新候选元数据不改草稿或旧单值标记；历史值始终保留到用户明确编辑。
+    pub(super) fn refresh_equipment_taxonomy(&mut self, taxonomy: &EquipmentTaxonomyDto) {
+        let mut refreshed = taxonomy.clone();
+        if let Some(previous) = self.equipment_taxonomy.as_deref()
+            && previous.revision == refreshed.revision
+        {
+            // GET 只描述服务端文档；冲突草稿仍可能引用服务端已移除的有限种类。
+            // 同版本仅保留草稿仍选中的既有权威候选，新响应同名优先，不在浏览器推断语法。
+            for kind in &previous.resolved_kinds {
+                let selected = self.equipment_colors.iter().any(|rule| {
+                    rule.equipment_type.lines().any(|value| value.eq_ignore_ascii_case(&kind.name))
+                });
+                if selected
+                    && !refreshed
+                        .resolved_kinds
+                        .iter()
+                        .any(|current| current.name.eq_ignore_ascii_case(&kind.name))
+                {
+                    refreshed.resolved_kinds.push(kind.clone());
+                }
+            }
+        }
+        if self.equipment_taxonomy.as_deref() != Some(&refreshed) {
+            self.equipment_taxonomy = Some(Rc::new(refreshed));
+        }
+    }
+
+    /// 服务端词典独立演进不构成待保存修改，非法数字等原始编辑中间态仍参与比较。
+    pub(super) fn same_edits_as(&self, other: &Self) -> bool {
+        self.document == other.document
+            && self.inputs == other.inputs
+            && self.mailboxes == other.mailboxes
+            && self.equipment_colors == other.equipment_colors
+            && self.had_equipment_colors == other.had_equipment_colors
     }
 
     pub(super) fn input(&self, path: &str) -> String {
@@ -289,6 +330,7 @@ impl RuntimeConfigForm {
         self.equipment_colors.push(RuntimeEquipmentColorForm {
             category: String::new(),
             equipment_type: String::new(),
+            legacy_equipment_type: None,
             quality: String::new(),
             level_min: "0".to_owned(),
             level_max: "0".to_owned(),
@@ -317,7 +359,12 @@ impl RuntimeConfigForm {
         let Some(rule) = self.equipment_colors.get_mut(index) else { return };
         match field {
             "category" => rule.category = value,
-            "equipment_type" => rule.equipment_type = value,
+            "equipment_type" => {
+                if rule.equipment_type != value {
+                    rule.legacy_equipment_type = None;
+                }
+                rule.equipment_type = value;
+            }
             "quality" => rule.quality = value,
             "level_min" => rule.level_min = value,
             "level_max" => rule.level_max = value,
@@ -386,18 +433,23 @@ impl RuntimeConfigForm {
                 .iter()
                 .map(|rule| {
                     let mut object = Map::new();
-                    object.insert(
-                        "category".to_owned(),
-                        Value::String(rule.category.trim().to_owned()),
-                    );
-                    object.insert(
-                        "equipment_type".to_owned(),
-                        Value::String(rule.equipment_type.trim().to_owned()),
-                    );
-                    object.insert(
-                        "quality".to_owned(),
-                        Value::String(rule.quality.trim().to_owned()),
-                    );
+                    // 保存统一使用多选数组；清空兼容单值，避免同一维度存在两个解释。
+                    for (plural, singular, values) in [
+                        ("categories", "category", &rule.category),
+                        ("equipment_types", "equipment_type", &rule.equipment_type),
+                        ("qualities", "quality", &rule.quality),
+                    ] {
+                        if singular == "equipment_type"
+                            && let Some(legacy) = &rule.legacy_equipment_type
+                        {
+                            // 旧单值材质原来只精确匹配，不能因编辑其他维度扩大成全族。
+                            object.insert(plural.to_owned(), Value::Array(Vec::new()));
+                            object.insert(singular.to_owned(), Value::String(legacy.clone()));
+                        } else {
+                            object.insert(plural.to_owned(), Value::Array(lines(values)));
+                            object.insert(singular.to_owned(), Value::String(String::new()));
+                        }
+                    }
                     object.insert(
                         "level".to_owned(),
                         serde_json::json!({
@@ -470,6 +522,38 @@ fn list_text(value: Option<&Value>) -> Result<String, ()> {
         .collect::<Option<Vec<_>>>()
         .map(|values| values.join("\n"))
         .ok_or(())
+}
+
+/// 新数组和旧单值互斥；旧规则回填为一个已选项，双重非空输入失败关闭。
+fn color_selection_text(
+    object: &Map<String, Value>,
+    plural: &str,
+    singular: &str,
+) -> Result<String, ()> {
+    let scalar = match object.get(singular) {
+        Some(value) => value.as_str().ok_or(())?,
+        None => "",
+    };
+    let selected = match object.get(plural) {
+        Some(value) => list_text(Some(value))?,
+        None => String::new(),
+    };
+    if !selected.is_empty() && !scalar.is_empty() {
+        return Err(());
+    }
+    Ok(if selected.is_empty() { scalar.to_owned() } else { selected })
+}
+
+fn legacy_material_selection(
+    object: &Map<String, Value>,
+    taxonomy: &EquipmentTaxonomyDto,
+) -> Option<String> {
+    let single = object.get("equipment_type")?.as_str()?;
+    taxonomy
+        .materials
+        .iter()
+        .any(|material| material.name.eq_ignore_ascii_case(single))
+        .then(|| single.to_owned())
 }
 
 fn lines(value: &str) -> Vec<Value> {

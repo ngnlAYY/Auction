@@ -26,10 +26,21 @@ where
             }
         };
     };
-    let activate_command_id = CommandId::from_uuid(deterministic_uuid(
+    let legacy_prepare_command_id = CommandId::from_uuid(deterministic_uuid(
         CommandId::from_uuid(claim.action_id.as_uuid()),
-        "recovery-delivery-activate",
+        if claim.kind == "payment_reminder" {
+            "recovery-payment-reminder-prepare"
+        } else {
+            "recovery-take-prepare"
+        },
         1,
+    ));
+    // 原 prepared 或已激活未回写的旧任务继续原 activation；新轮次跟随持久 prepare 身份。
+    let legacy = prepare_command_id == legacy_prepare_command_id;
+    let activate_command_id = CommandId::from_uuid(deterministic_uuid(
+        if legacy { CommandId::from_uuid(claim.action_id.as_uuid()) } else { prepare_command_id },
+        "recovery-delivery-activate",
+        if legacy { 1 } else { 2 },
     ));
     let request = RecoveryActivationRequest {
         action_id: claim.action_id.as_uuid(),

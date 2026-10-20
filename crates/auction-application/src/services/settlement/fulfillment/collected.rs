@@ -33,7 +33,8 @@ impl SettlementFulfillmentService {
         if store.replay_internal(command.clone()).await? {
             return Ok(result(SettlementFulfillmentReconcileStatus::Satisfied));
         }
-        let request = evidence_request(&command, self.clock.now(), false, true)?;
+        let policy = self.funding_policy().await?;
+        let request = evidence_request(&command, self.clock.now(), false, policy.observes_cash())?;
         let target = InternalSentCollectionTarget {
             external_mail_id: proof.reference.clone(),
             world: claim.world,
@@ -56,7 +57,9 @@ impl SettlementFulfillmentService {
                 return Ok(deferred);
             }
         };
-        if prepared.check_current().await.is_err() {
+        if !policy.matches_identity(&prepared.snapshot().identity.authenticated_uid)
+            || prepared.check_current().await.is_err()
+        {
             let deferred = result(SettlementFulfillmentReconcileStatus::Deferred);
             self.defer_internal(claim, retry_delay, "collected_funding_evidence_wait").await?;
             return Ok(deferred);

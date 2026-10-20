@@ -6,9 +6,57 @@ use serde::Deserialize;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
+mod intake;
+
+struct AssetConflictTarget<'a> {
+    kind: auction_domain::SettlementObligationKind,
+    obligation_id: auction_domain::SettlementId,
+    lot_id: auction_domain::LotId,
+    external_equipment_id: &'a str,
+    equipment_world: auction_domain::SettlementWorld,
+}
+
 pub(super) async fn exclude_asset_conflicts(
     tx: &mut Transaction<'_, Postgres>,
     c: &SettlementFulfillmentClaim,
+) -> Result<(), FundingError> {
+    let target = AssetConflictTarget {
+        kind: c.kind,
+        obligation_id: c.obligation_id,
+        lot_id: c.lot_id,
+        external_equipment_id: &c.external_equipment_id,
+        equipment_world: c.equipment_world,
+    };
+    exclude_conflicts(tx, &target, None).await
+}
+
+/// 专用修复先核验原 manual 身份及完整新鲜库存，再在同一事务忽略这一条被处置的旧投递。
+pub(crate) async fn exclude_legacy_self_asset_conflicts(
+    tx: &mut Transaction<'_, Postgres>,
+    target: &auction_application::LegacySelfReconciliationTarget,
+    lot_id: uuid::Uuid,
+) -> Result<(), FundingError> {
+    let asset = AssetConflictTarget {
+        kind: match target.action {
+            auction_application::LegacySelfReconciliationAction::KeepUnsold => {
+                auction_domain::SettlementObligationKind::UnsoldReturn
+            }
+            auction_application::LegacySelfReconciliationAction::ReopenPayment => {
+                auction_domain::SettlementObligationKind::WinnerEquipmentCod
+            }
+        },
+        obligation_id: auction_domain::SettlementId::from_uuid(target.obligation_id),
+        lot_id: auction_domain::LotId::from_uuid(lot_id),
+        external_equipment_id: &target.external_equipment_id,
+        equipment_world: target.world,
+    };
+    exclude_conflicts(tx, &asset, Some(target.delivery_id)).await
+}
+
+async fn exclude_conflicts(
+    tx: &mut Transaction<'_, Postgres>,
+    c: &AssetConflictTarget<'_>,
+    ignored_delivery: Option<Uuid>,
 ) -> Result<(), FundingError> {
     // 仅原equipment_recovered门已闭合且原handoff有明确Sent成功时排除该旧出站。
     // prepared/sending/manual_reconcile及未知结果不在此例外内，也不改写旧义务。
@@ -18,7 +66,7 @@ pub(super) async fn exclude_asset_conflicts(
         sqlx::query_scalar("SELECT d.id FROM public.settlement_recoveries r JOIN public.settlement_obligation_fulfillments h ON h.obligation_id=r.equipment_obligation_id JOIN public.deliveries d ON d.id=h.delivery_id JOIN public.settlement_recovery_actions a ON a.recovery_id=r.id AND a.kind='recover_equipment_take' WHERE r.buyer_refund_obligation_id=$1 AND r.stage='refunding' AND r.resolution='equipment_recovered' AND r.custody_proof_digest=a.proof_digest AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL AND h.execution_state='enqueued' AND d.status='succeeded' AND d.result_metadata->>'proof'='sent_exact_payload_v1' AND d.result_metadata->>'external_reference_proven'='true'")
             .bind(c.obligation_id.as_uuid()).fetch_optional(&mut **tx).await.map_err(sql_error)?
     } else {
-        None
+        ignored_delivery
     };
     let conflict: bool = sqlx::query_scalar(
         "SELECT
@@ -43,7 +91,7 @@ pub(super) async fn exclude_asset_conflicts(
            JOIN public.equipment e ON e.id=o.equipment_id
            WHERE e.external_equipment_id=$1 AND e.world_id=$2
              AND a.execution_state<>'satisfied')"
-    ).bind(&c.external_equipment_id).bind(world(c.equipment_world)).bind(c.obligation_id.as_uuid())
+    ).bind(c.external_equipment_id).bind(world(c.equipment_world)).bind(c.obligation_id.as_uuid())
         .bind(c.lot_id.as_uuid()).bind(recovered_handoff).fetch_one(&mut **tx).await.map_err(sql_error)?;
     if conflict {
         return Err(FundingError::Unproven);
@@ -85,10 +133,12 @@ pub(super) async fn exclude_asset_conflicts(
             unrelated_attachments.push(delivery.try_get::<Uuid, _>("id").map_err(sql_error)?);
         }
     }
+    // 当前标的的最终入库证明只闭合精确绑定的 take 及更早已完成 return；
+    // 未知、后续动作或其他标的历史仍进入原有冲突门，不能仅凭 succeeded 放行。
+    unrelated_attachments.extend(intake::closed_source_history(tx, c).await?);
     // JSON只用于定位出站资产，不是资金授权。schema损坏/未知世界无法排除关联，保守阻断。
     // 成功delivery必须有对应的已满足fulfillment或recovery action；孤儿成功也不是清白。
-    let outgoing: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM public.deliveries d
+    let outgoing_query = "SELECT EXISTS(SELECT 1 FROM public.deliveries d
          WHERE d.id IS DISTINCT FROM $3 AND (
            d.payload->'schema_version' IS DISTINCT FROM '1'::jsonb
            OR d.payload->>'world' IS NULL OR d.payload->>'world' NOT IN ('main','isekai')
@@ -155,9 +205,19 @@ pub(super) async fn exclude_asset_conflicts(
            AND NOT EXISTS(SELECT 1 FROM public.settlement_obligation_fulfillments f
                WHERE f.delivery_id=d.id AND f.execution_state='satisfied' AND f.proof_digest IS NOT NULL)
            AND NOT EXISTS(SELECT 1 FROM public.settlement_recovery_actions a
-               WHERE a.delivery_id=d.id AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL))"
-    ).bind(&c.external_equipment_id).bind(world(c.equipment_world)).bind(recovered_handoff)
-        .bind(&unrelated_attachments).fetch_one(&mut **tx).await.map_err(sql_error)?;
+               WHERE a.delivery_id=d.id AND a.execution_state='satisfied' AND a.proof_digest IS NOT NULL)
+           AND NOT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations r
+               WHERE /* trusted_legacy_self */))".replace("/* trusted_legacy_self */",
+                   crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE);
+    // 替换值仅来自已审查的编译期 SQL 常量，不插入业务文本。
+    let outgoing: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(outgoing_query.as_str()))
+        .bind(c.external_equipment_id)
+        .bind(world(c.equipment_world))
+        .bind(recovered_handoff)
+        .bind(&unrelated_attachments)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(sql_error)?;
     if outgoing {
         return Err(FundingError::Unproven);
     }
@@ -181,13 +241,33 @@ struct AttachmentPayload {
     attachment_ids: Vec<String>,
 }
 
+/// 资金责任预览仅忽略闭集普通入站通知的零资产历史，不将其标记成功或恢复写入权限。
+pub(crate) fn assetless_mail_notification(
+    value: &serde_json::Value,
+    origin_id: &str,
+    command_id: Uuid,
+) -> bool {
+    let Ok(payload) = serde_json::from_value::<AttachmentPayload>(value.clone()) else {
+        return false;
+    };
+    payload.schema_version == 1
+        && matches!(payload.world.as_str(), "main" | "isekai")
+        && payload.operation == "send"
+        && payload.credits == 0
+        && payload.cod == 0
+        && payload.attachment_ids.is_empty()
+        && auction_application::valid_external_positive_id(&payload.external_mail_id)
+        && valid_attachment_origin(&payload, "mail_intake", origin_id, command_id, false)
+        && valid_notification(&payload, "mail_intake")
+}
+
 fn unrelated_attachment_payload(
     value: &serde_json::Value,
     origin: &str,
     origin_id: &str,
     command_id: Uuid,
     forum_notice_owner: bool,
-    claim: &SettlementFulfillmentClaim,
+    claim: &AssetConflictTarget<'_>,
 ) -> bool {
     let Ok(payload) = serde_json::from_value::<AttachmentPayload>(value.clone()) else {
         return false;

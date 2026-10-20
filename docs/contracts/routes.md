@@ -158,9 +158,23 @@ P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000
 
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与 `equipment.category` 组合解释为 `One01`、`Two01` 等编码，不是全局身份。详情和写命令只以 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。P10 竞价日志额外保留 `world` 与 `lot` 筛选；`lot` 可以是 lot UUID 或 `One01` 一类分类编码，二者在内部请求中互斥，并在 storage 的全局结果集分页前应用，不能只筛选当前页面。条目按 `created_at`、`lot_id`、`accepted_state_version`、`fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值；
 带 cursor 的返回使用 next_cursor/has_more，不得把未知总数伪装成精确 total。可选 `source` 只允许 `forum`/`proxy`：论坛普通竞价仅在账本保存真实楼层时同时返回 `source_post_number`；若同一账本还能证明真实 thread/post ID，则增加规范 `source_post_url`。链接身份不得由楼层号或数字论坛账号 ID 推算，玩家展示继续用名称；代理事实不区分 fast/slow 且不携带楼层或帖子链接；普通 Web 出价三者都为空；历史论坛事实楼层未知时只标记论坛来源。P09/P11 的 preview/live 装备投影可选返回按 `Strength, Dexterity, Agility, Endurance, Intelligence, Wisdom` 固定顺序生成的 `primary_attribute_initials`，缺少对应属性时省略而不是伪造。
-P12 保留 `name`、`world`、日期、价格、buyer/seller 筛选，编号页附带完整过滤集 `stats`，cursor 页不返回统计；成交读取必须基于 settlement 事实链，不能把状态列或空集合当作成交证明。
+P12 保留 `name`、`world`、日期、价格、buyer/seller 筛选；名称按 Unicode 空白或英文逗号拆词，忽略空词后进行忽略大小写的
+字面包含 AND 匹配，不要求词条相邻或依输入顺序出现；例如 `Leg Sav Pow Hel Bal` 可匹配 `Legendary Savage Power Helmet of Balance`。
+原逗号形式继续支持，总长最多 1024 UTF-8 字节、最多八词、每词最多 128 字节；拆后词条中的控制字符拒绝，
+`%`、`_` 与反斜杠按字面转义。编号与 cursor 及完整筛选集统计共用相同条件；buyer/seller 忽略大小写精确匹配。
+编号页新增可选 `sort=closed_desc`（默认兼容）、`closed_asc`、`price_desc`、`price_asc`，排序在完整筛选集分页前应用；
+主排序值相同时沿用成交时间倒序、场次倒序、内部 lot 顺序和 UUID 升序。旧 `v1/type5` opaque cursor 固定 `closed_desc`，
+非默认排序与 cursor 组合返回 `400 invalid_query`，旧 token 词法保持不变。
+编号页附带同一读取快照内完整过滤集的 `stats`，cursor 页不返回统计；`count/min/max/median` 继续保留，
+新增可选 `median_exact` 十进制字符串（无前导零，整数或 `.5`，范围 `0..=9,007,199,254,740,991`），空集为 `"0"`。
+中位数以排序后中间一至两笔价格的精确平均值计算，不经浮点数；`median` 保留向最近整数取整、半数取偶的旧数值口径
+（例如 `2.5 → 2`、`3.5 → 4`），`median_exact` 始终保留精确值。
+应用与 HTTP 同时校验精确值在最低/最高价区间内，并与兼容整数一致；旧适配器缺失 `median_exact` 仍可读取。
+成交读取必须基于 settlement 事实链，价格取成交时 lot 的 `current_price`、时间取 `effective_end_at`，不能把状态列或空集合当作成交证明。
 
 P03/P04 的查询、事件 JSON、`after` 游标、缺口高水位、会话复核、配额与关闭 code/reason 由[事件契约](docs/contracts/events.md)登记；P03 是持久化 Catch-up，P04 是服务端单事件推送，发现流必须显式指定 `scope=auctions`。不得把 sequence 改成时间戳，或用 HTTP 分页替代长连接通知。
+Public 浏览器仅在已认证且当前拍卖为 `live`/`final` 时启用 P04；预览及其他非竞价阶段停用拍卖与发现流连接，
+通过既有当前场次权威读取确认开拍后再连接。服务端 P03/P04 的请求与响应契约不变，客户端展示策略由[Public 设计](crates/auction-web-public/DESIGN.md#7-数据时间与实时状态)拥有。
 
 ### Public 时间词法
 
@@ -301,6 +315,9 @@ Return/Take 使用独立 action proof。baseline/scan、精确匹配和结果未
 
 ### Recovery 与实时运维
 
+恢复健康中的 `balance_status` 与 `evidence_status` 增加成对的 `not_applicable`：UID 账户为 `record_only` 时自动刷新仅更新恢复计数，不读取余额。
+旧余额及观察时间保留为历史，管理页显示“仅记账，无需核对余额”并隐藏旧数值和余额证据年龄；真实履约失败及恢复积压继续参与健康判断。
+
 A14 为 PostgreSQL 完整档的版本 fence、证据复核、账本、退款激活、guarded relist、审计及预览目录事件事务；结算为获胜 lot 同事务建立 recovery case，Worker 按 `case → return → action → relist → refund` 持久化处理；已付款退货的退款确认要求 handoff 义务为 `ready` 且未满足，仍须完整取回证据，不能以付款前 `blocked` 替代；Delivery 人工 retry/reconcile-retry 在原命令事务恢复匹配的 Recovery action 与父任务阻断，不改变外部成功证明门禁。真实 MoogleMail 回执与部署证据见[验证状态](docs/status.md)。
 
 A21–A24、A43 提供事件元数据、lag/failure 与 replay 安全边界，未装配端口返回 501；A24 命令重放、兼容 ID 派生与追加事件/审计见[事件契约](docs/contracts/events.md#worker-消费游标与重放边界)，不代表外部广播成功。A25 的 GET、POST 候选校验和 PUT 发布由规则 owner 拥有；PUT 以 `command_id`、`expected_revision`、请求摘要在 Serializable 事务做 revision CAS、账本与审计。
@@ -323,6 +340,11 @@ A02 已接入 Admin session、严格空查询校验和 PostgreSQL 的 `service_h
 fulfillment、recovery 复用 operations-alert source 的履约/恢复安全水位；credential aggregation 和 alerting section 也已接入安全投影。已登记 dashboard section 都有 owner；owner 未装配或读取失败返回 `unknown`，不伪造状态。三个进程装配根已有启动和周期心跳路径，SIGINT/SIGTERM 下停止周期任务并发布停止心跳；每轮周期心跳重新检查数据库和全部内嵌 migration，读取进程内饱和的审计写入失败计数，并由各自 tracing owner 提供安全状态；Public 同时检查 relay 新鲜度，Worker control 同时投影论坛循环的终止故障和可恢复降级。
 数据库、schema、审计完整性或必须运行的 relay 异常令 readiness 为 false，tracing degraded 令 heartbeat status 降级但不单独改变应用 readiness。外部广播不属于当前 dashboard 契约。
 
+fulfillment 的 `pending` 只统计业务状态为 `ready` 且执行阶段为 `pending/prepared/enqueued` 的义务，与 Worker
+可领取的业务状态一致；`oldest_backlog_age_seconds` 由这些义务及独立的未终结 `blocked` 义务计算。
+尚未触发的 `contingent` 退款不计入待处理或积压年龄，原业务与执行状态保持不变；`blocked`、`failed`、
+`manual_reconcile` 的独立计数保持原语义。Dashboard 与 operations alert 使用同一权威水位，不增加响应字段。
+
 ### 邮件审查与轮询
 
 A16-A19 已接入 PostgreSQL 完整档：轮询状态和入站审查读取使用邮箱边界、严格查询校验与安全 DTO，列表读取保持同一读取快照；暂停/恢复使用 Admin session/CSRF、`command_id` 和 state-version fence，在 Serializable 事务内写入 `mail_poll_state`、`mail_admin_commands` 与追加审计。A17 列表字段仅增加可空 `sender`/`subject` 与 `has_message_display`，不返回正文；A18 详情返回同样的 `sender`、`subject`，`message_display` 只返回 schema/redaction version、已脱敏正文、附件外部 ID、Credits 和 COD；
@@ -336,6 +358,36 @@ A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON
 启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
 Admin 重启后 `allow_manual_early_open` 与 `allow_manual_early_settlement` 分别决定人工提前开放、人工提前结算 capability 和对应锁内校验，两者默认关闭，计划时间已到的正常开放仍允许。`[equipment_source]` 冻结为装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时及 Admin 手工录入的可交易装备开关（默认关闭且不放宽来源安全或邮件过滤）；固定 HTTPS origin、无重定向、精确 world 路径及流式有界读取始终失败关闭。Admin WebUI 把该闭集投影映射为分组开关、数字、列表与文本输入，保存仍提交完整候选文档，因此所有页面修改最终由 PUT 的原子文件替换边界写回，不存在只在浏览器内生效的旁路。
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁，锁竞争返回 `503 storage_unavailable`，客户端可复用原 command ID 重试。
+
+GET `/api/v1/admin/config`、POST `/api/v1/admin/config:validate` 与 PUT `/api/v1/admin/config` 均接受可选
+`include_equipment_taxonomy=true`，只扩展响应；重复、未知参数及其它值返回 `400 invalid_query`。
+省略时维持原有 `document`、`fingerprint`、`restart_required` 三字段集合，兼容旧客户端严格解码。
+显式选择时增加 `equipment_taxonomy`：`revision`、`categories`、`qualities[{name,legacy}]`、
+`kinds[{name,category,material,slot,legacy,prefixes,suffixes}]` 和
+`materials[{name,category,prefixes,suffixes}]`；`kinds` 的 `material`/`slot` 可空，部位使用 `head/body/hands/legs/feet`。
+词典由领域唯一生成：含现行与历史品质、明确完整种类及原十二个可选择护甲材质族，有限 Chain/Reactive 语法不展开成确证种类。
+本次文档标色规则的 `equipment_type`/`equipment_types` 若包含合法有限兼容完整名，另附
+`resolved_kinds[{name,category,material,slot,prefixes,suffixes}]`；仅由领域 `resolve_kind` 识别并规范化，
+最多 16 项、忽略 ASCII 大小写去重，与确证种类及材质族名称互斥，`material`/`slot` 为非空字符串。
+该集合为空时省略，旧投影缺省为空；GET 使用读取文档，校验和保存响应分别使用本次候选或已保存文档，
+不只关联已保存的旧值。HTTP 用进程内 `OnceLock` 缓存固定词典主体，每次克隆后附加这份文档相关集合，
+不缓存文档或改变既有 `no-store` 响应头；附加集合也不改变主词典 `revision`。
+Admin 显式请求并校验该投影，缺失或无效返回页面既有加载错误；候选版本变化只更新推荐元数据，不清除草稿或已选历史值。
+词典不进入 runtime 文档、配置指纹、命令摘要、持久化响应或装备快照，校验和更新请求体保持原形状。
+
+`equipment_colors.rules[]` 增加可选数组 `categories`、`equipment_types`、`qualities`，分别承载装备类型、
+具体种类和品质的多选条件；省略或空数组沿用该维旧的 `category`、`equipment_type`、`quality` 单值，
+两者均为空表示不限。同维单值与非空数组不能同时提供；数组内任一项命中即可，不同维度之间必须同时满足。
+新 `equipment_types` 数组也允许十二种护甲材质：Cotton、Gossamer、Ironsilk、Phase、Leather、Drakehide、
+Kevlar、Shade、Plate、Chain、Reactive、Power；材质选项匹配所属护甲大类下该材质的全部部位，
+具体装备名称仍须全名匹配，旧单值 `equipment_type` 保持原有精确匹配语义。
+Admin 表单把旧单值恢复成一个已选项，保存多选时清空相应旧字段；不把一条规则拆成多条组合规则。
+旧 `equipment_type` 恰为材质名时，未主动编辑该维度继续保存原精确单值；主动修改种类选择后才转换为数组条件。
+表单切换类型或种类只刷新推荐候选，所有其它维度已选值继续可见并保留，只有用户显式取消才移除。
+推荐词表不充当已有规则的合法性白名单，避免历史种类被清空成不限条件，或合法历史前后缀被自动删除。
+空数组省略序列化以保留旧文档指纹和命令摘要，已有前后缀、颜色及优先级语义保持原样。
+实际论坛渲染规则由 Worker 启动时载入；首次保存多选前，Admin、Worker 和读取 runtime 的 `auctionctl`
+必须部署支持数组的同版程序，保存仍返回 `restart_required`。
 
 ### Runtime 六组接管
 

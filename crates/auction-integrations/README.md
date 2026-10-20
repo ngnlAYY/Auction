@@ -25,7 +25,9 @@ E-Hentai、MoogleMail、装备来源及密钥信封的外部适配器。实现�
 超时或截断不伪称取得完整响应，用户正文中的“登录”等文字不能作为凭据失效证明。HTML 解析使用 scraper 0.27 /
 selectors 0.38，关闭默认 CLI feature 但保留 `errors`，仅使用库 API，不以手写解析器替代协议边界。
 
-- MoogleMail 读取：列表/详情身份与资产一致，完整定位 cursor 后按旧到新返回连续详情前缀。
+- MoogleMail 读取：列表/详情身份与资产一致，完整定位 cursor 后按旧到新返回连续详情前缀。持久轮询经 `fetch_claimed`
+  先提交整窗 MID/列表身份，再发详情 GET；已有待读队列时优先直接读取 MID，恢复已读但尚未提交的无附件命令。
+  journal 不可用时返回 `persistence_unavailable` 并停止详情读取，摘要或 world 无效时失败关闭；allowlist 不再允许的待读项保留待核对。
 - ComposeSend：首次 POST 前取得 Sent baseline，之后独立扫描，只接受新增、唯一且 world、收件人、正文摘要、
   Credits/COD、装备精确匹配的 MID。
 - Return / Take：写前核对 sender 与预期资产；Return 证明精确 MID 消失，Take 证明身份不变、资产归零及唯一回执。
@@ -61,6 +63,10 @@ POST、布局回读及可选正文校验成本，配置预算校验只是单目�
 截断装备；续页重复分类标题，旧主题按持久化 `legacy_single` 保持一页。解析器只合并紧邻首帖、同作者且拍卖/页码
 标记匹配的目录续页，随后按完整目录解析用户命令，不按正文跳过帖子；Worker 的 HTML 路径要求相同数字作者 ID，
 只读纯文本预览仅比较可选作者标签。系统更新楼紧接最后一页，用户回帖从再下一楼开始。
+装备名称标色消费 Worker 启动时冻结的应用窄规则：类型、种类、品质各自多选任一匹配，维度间同时满足，
+按原规则顺序取首个前缀或后缀命中；空多选兼容旧单值，前后缀及 Peerless 彩虹规则保持原义。
+渲染器不拆分多选规则，也不把 Admin 候选词表变成装备采集或品质接收政策。
+新种类数组可选择十二种护甲材质族，由应用规则核对实际大类和完整种类的首词/部位边界；完整部位选项及旧种类单值精确匹配。
 `forum/render/log.rs` 分类显示 pending、警告、忽略记录及总数，优先 pending 再取最近记录、最多 100 条且受正文预算
 约束，超出时明确显示已展示/总条数。`forum/render/countdown.rs` 只在首帖顶部生成 `List Timer` 与 `Auction Timer` 的
 `[img]` 链接，使用已配置 Public origin 下的[自托管动态 SVG](docs/contracts/routes.md#p22-自托管论坛倒计时)，
@@ -103,6 +109,30 @@ HTTPS origin、精确 world 路径、响应类型或身份校验。`equipment/ga
 沿用原 ComposeSend/Sent 证明与 manual_reconcile；账号警告渠道由应用冻结，PM 使用独立 `ForumPmSender` 端口，
 不伪造 MoogleMail delivery、不降级双发。
 
+装备分类、品质、完整种类和名称识别统一来自
+[domain taxonomy](crates/auction-domain/src/equipment/taxonomy)，依据
+[Equipment Basics](https://ehwiki.org/wiki/Equipment_Basics)、
+[Detailed Equip Characteristics](https://ehwiki.org/wiki/Detailed_Equip_Characteristics) 和
+[旧装备说明](https://ehwiki.org/wiki/Obsolete_Items#Equipment) 保存当前及历史兼容元数据。
+集成层不维护第二份品质、种类或 header 大类词表：`parser/html.rs` 提取 DOM 与属性，`parser/identity.rs` 适配领域名称识别，
+`parser/header.rs` 解析等级/交易状态并复用领域大类映射，`parser/page.rs` 组合并交叉校验。
+HTML 与 canonical JSON 使用同一个领域识别结果，完整长种类优先，来源大类或 JSON 声明不一致均失败关闭；
+原名称、词缀文本、既有属性字段及 fingerprint 格式保持原义，不将领域兼容元数据加入历史摘要。
+
+HTML 来源要求唯一 header、存在 `.eq` 属性区域且至少读取到一项属性；缺少必要结构或空属性不能成为成功快照。
+主属性按 `Base:` 声明或带符号数字前导的文本识别，符号后须紧接数字或小数点，必须同时具有合法 Base 和名称/数值；其它普通说明的 `title`
+不要求包含 Base。`.ex/.ep` 分组属性仍采用二至三子项及原单位协议，带 Base 或数值标记的残缺行、额外列、非法 Base
+均明确拒绝；不带这些标记的零至一子项标题/说明保留可选语义。重复属性、数量及数值边界沿用原校验。
+这些 DOM 完整性要求只约束真实 HTML 来源，不改变手工 canonical JSON 允许空统计集合的历史输入与摘要格式。
+邮件诊断读取与普通来源读取共用 URL 校验，固定 origin/world 路径、ID/key 和业务 allowlist 不再由两条路径分别解释。
+
+内部等级区分未声明、`Unassigned`、数字等级和合法 Soulbound Tier；只在现有 DTO/属性/fingerprint 边界投影为原
+`Option<i32>`，未赋等级不伪造零级，数字范围与三个 Tier 值仍沿用原校验。领域可识别十档当前品质及 Flimsy/Fine
+历史品质，交易资格及默认 Legendary/Peerless 收件门槛仍由应用策略决定，识别能力不授予收件资格。
+解析失败使用九种闭集 `EquipmentSourceDetailCode`：Admin 的来源适配日志只含固定来源和原因码，HTTP 继续返回原
+`InvalidSource`；MM 仅在 `Parse/ProtocolDrift` 组合携带来源码并写入既有 `detail_code`，其它阶段及旧空值保持原义。
+原页面仍只进入既有敏感证据归档，原因码不包含原名称、header、页面、URL 或 key；不修改既有装备、编号或幂等结果。
+
 ## 凭据 owner 与取消传播
 
 Worker 凭据 owner 随集合传给 gateway、克隆客户端、发送器和分页上下文，装备来源也共用 MoogleMail owner；
@@ -114,8 +144,11 @@ Character Equipment 的唯一 `let uid`、[论坛目标资料](crates/auction-in
 为 None 也读取。[Sent 组合读取](crates/auction-integrations/src/clients/mooglemail/gateway/sent_evidence.rs) 复用同
 session 的既有列表/详情解析，精确匹配 MID/world/收件人/主题及可选可信 sent_at。Armory 仅接纳七类 organize 的完整
 计数、同 world/MAIN_URL/action、正常非 disabled 且 id/value/行 handler 同一 EID 的正向行，还须同 session 干净 compose。
+organize 表单省略或留空 `action` 时按当前固定 world/category 请求 URL 解析；显式地址仍须同源、同 world 且四项 query 完全匹配。
 准备、限速、所有 GET/body 和提交共享不超过 30 秒的绝对预算并保留一秒提交余量；内部提交只接受数据库 active
 ID/version 与持久 generation，配置 Cookie 或旧 owner 明确 Unsupported。
+`record_only` 由应用从持久账户策略决定是否请求现金，transport 在原 session 中保留身份和发送授权，但不读取余额。
+联合证据失败仅记录闭集阶段和错误类别；论坛目标资料另记录结构阶段及目标 MID 数量，不记录 UID、整页、URL 或凭据。
 
 ## 维护与验证
 

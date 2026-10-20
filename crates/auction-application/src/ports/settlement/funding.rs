@@ -4,6 +4,19 @@ use serde::{Deserialize, Serialize};
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
 
+#[path = "funding/legacy.rs"]
+mod legacy;
+#[path = "funding/policy.rs"]
+mod policy;
+#[path = "funding/record_only.rs"]
+mod record_only;
+pub use legacy::{
+    LegacyBotSellerCommand, LegacyBotSellerCommitOutcome, LegacyBotSellerPreview,
+    LegacyBotSellerResult, LegacyBotSellerStore,
+};
+pub use policy::{FundingAccountingMode, FundingPolicy, FundingPolicyReader};
+pub use record_only::{FundingRecordOnlyCommand, FundingRecordOnlyStore};
+
 /// 资金错误保持低基数，不回显数据库或远端正文。
 #[derive(Debug, thiserror::Error)]
 pub enum FundingError {
@@ -67,18 +80,21 @@ pub struct FundingReturnProof {
     pub delivery_id: Uuid,
     pub amount: i64,
     pub proof_reference: String,
-    pub cash: crate::VerifiedMainCashObservation,
+    /// 同一真实账号身份始终必需；record_only无需为了返还读取余额。
+    pub binding: crate::MailAccountEvidenceBinding,
+    /// strict_cash必填，record_only必须省略；精确未执行/退回证明本身仍必需。
+    pub cash: Option<crate::VerifiedMainCashObservation>,
     pub observed_at: chrono::DateTime<chrono::Utc>,
     pub digest: [u8; 32],
 }
 
-/// C从同一排他session精确Sent-collected读取产生的安全实收绑定；不接受Balance替代。
+/// 同一排他session精确Sent-collected的安全实收绑定；不接受Balance替代。
 #[derive(Debug)]
 pub struct FundingCollectedReceipt<'a> {
     pub payment_obligation_id: Uuid,
     pub delivery_id: Uuid,
     pub buyer_credits: i64,
-    /// 借用A同一次prepared/commit guard的完整快照，含唯一Sent观察及Main现金。
+    /// 借用A同一次prepared/commit guard快照；record_only保留唯一Sent观察并省略Main余额。
     pub evidence: &'a crate::SettlementInternalEvidenceSnapshot,
 }
 

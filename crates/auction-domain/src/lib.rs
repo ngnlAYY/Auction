@@ -2,7 +2,7 @@
 
 mod auction;
 mod bidding;
-mod equipment;
+pub mod equipment;
 mod errors;
 mod identity;
 mod proxy;

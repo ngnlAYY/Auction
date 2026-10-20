@@ -172,6 +172,10 @@
 }
 
 .public-connection-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
   min-block-size: var(--size-target);
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
@@ -186,6 +190,29 @@
 .public-connection-refresh:focus-visible {
   color: var(--color-text);
   border-color: var(--color-accent);
+}
+
+.public-connection-refresh__spinner {
+  display: inline-block;
+  animation: public-connection-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes public-connection-refresh-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-connection-refresh__spinner {
+    animation: none;
+  }
+}
+
+.public-connection-refresh__error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  white-space: normal;
 }
 
 @media (hover: hover) {
@@ -836,23 +863,15 @@
 
 /* ===== 历史筛选（主筛选 / 设置面板 / 筛选网格） ===== */
 
-.public-shell__content:has(> .public-history-page--search) {
-  display: grid;
-  place-items: center;
-}
-
-.public-history-page--search {
-  inline-size: min(100%, 64rem);
+/* 搜索与成交结果独立占满内容区；表格列宽和字号适配只作用于结果区域。 */
+.public-history-search-region,
+.public-history-output {
+  inline-size: 100%;
   min-inline-size: 0;
 }
 
-.public-history-page--search > h1,
-.public-history-page--search > .public-history-intro {
-  text-align: center;
-}
-
-.public-history-page--search > .public-history-intro {
-  margin-block-end: var(--space-6);
+.public-history-search-region {
+  font-size: var(--text-base);
 }
 
 .public-history-filters {
@@ -880,6 +899,7 @@
 }
 
 .public-history-primary-filters > label,
+.public-history-view-controls > label,
 .public-history-filter-cell {
   display: grid;
   gap: var(--space-1);
@@ -889,6 +909,7 @@
 
 .public-history-primary-filters input,
 .public-history-primary-filters select,
+.public-history-view-controls select,
 .public-history-filter-cell input,
 .public-history-filter-cell select {
   inline-size: 100%;
@@ -904,6 +925,7 @@
 
 .public-history-primary-filters input:focus-visible,
 .public-history-primary-filters select:focus-visible,
+.public-history-view-controls select:focus-visible,
 .public-history-filter-cell input:focus-visible,
 .public-history-filter-cell select:focus-visible {
   border-color: var(--color-accent);
@@ -912,6 +934,7 @@
 @media (hover: hover) {
   .public-history-primary-filters input:hover,
   .public-history-primary-filters select:hover,
+  .public-history-view-controls select:hover,
   .public-history-filter-cell input:hover,
   .public-history-filter-cell select:hover {
     border-color: var(--color-accent);
@@ -1027,6 +1050,9 @@
   font-size: var(--text-xs);
 }
 
+.public-history-name-hint,
+.public-history-player-hint,
+.public-history-results-scope,
 .public-history-price-hint {
   margin-block: var(--space-3) 0;
   color: var(--color-text-muted);
@@ -1112,11 +1138,87 @@
 
 /* ===== 历史表格 / 统计 / 分页 ===== */
 
+.public-history-result-groups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.public-history-group-panel {
+  min-inline-size: 0;
+  overflow-x: clip;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.public-history-group-heading {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-base);
+}
+
 .public-history-table-wrap {
   overflow-x: clip;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+}
+
+.public-history-group-panel > .public-history-table-wrap {
+  border: 0;
+  border-block-start: var(--border-width) solid var(--color-border);
+  border-radius: 0;
+}
+
+.public-history-view-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  inline-size: min(100%, 36rem);
+  margin-block-start: var(--space-4);
+}
+
+.public-history-results-scope {
+  margin-block-end: var(--space-3);
+}
+
+.public-history-group-toggle,
+.public-history-player-filter {
+  min-inline-size: 0;
+  min-block-size: 1.5rem;
+  max-inline-size: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.public-history-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  text-align: start;
+}
+
+.public-history-group-count {
+  margin-inline-start: auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.public-history-player-filter {
+  display: inline-flex;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.public-history-group-toggle:focus-visible,
+.public-history-player-filter:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .public-history-table {
@@ -1784,10 +1886,18 @@
 
 /* ===== 目录操作 / 内联表单 / 对话框 ===== */
 
-.public-auction-catalog__actions {
+.public-shell .public-auction-catalog td.public-auction-catalog__actions {
   min-inline-size: 0;
   text-align: left;
   white-space: normal;
+}
+
+.public-auction-catalog__action-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-1);
+  min-inline-size: 0;
 }
 
 .public-auction-catalog__actions-list {
@@ -1806,17 +1916,43 @@
   white-space: nowrap;
 }
 
-.public-auction-catalog .public-auction-catalog__actions-list {
-  display: flex;
-  flex-wrap: wrap;
+/* 左半列容纳等宽出价、代理，右半列容纳标记；三按钮及间距占满操作列，文字在按钮内适配窄屏。 */
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: visible;
+  white-space: normal;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions :is(.public-auction-catalog__actions-list, .public-lot-watch) > :is(button, a),
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch__login {
+  justify-content: center;
   inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding-block: var(--space-1);
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-lot-watch {
+  display: grid;
+  min-inline-size: 0;
 }
 
 .public-auction-catalog .public-auction-catalog__leading-reason {
-  flex: 1 1 100%;
+  grid-column: 1 / -1;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.public-shell .public-auction-catalog td.public-auction-catalog__actions .public-auction-catalog__actions-list > a {
+  grid-column: 1 / -1;
 }
 
 .public-auction-catalog__inline-form {
@@ -2078,8 +2214,7 @@
 
 /* ===== 轮次列表 ===== */
 
-.public-auction-rounds__intro,
-.public-history-intro {
+.public-auction-rounds__intro {
   margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
 }
@@ -2533,6 +2668,7 @@
   }
 
   .public-history-primary-filters,
+  .public-history-view-controls,
   .public-history-settings-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3047,13 +3183,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1);
   min-block-size: 2rem;
   max-inline-size: 100%;
   padding: 0 var(--space-2);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
-  background: var(--color-surface);
+  background: var(--color-surface-raised);
   font-size: var(--text-sm);
   white-space: nowrap;
 }
@@ -3068,7 +3205,26 @@
 .public-lot-watch__toggle[aria-pressed="true"] {
   border-color: var(--color-accent);
   color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
   font-weight: var(--font-weight-strong);
+}
+
+.public-lot-watch__icon {
+  flex: 0 0 auto;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.public-lot-watch__label {
+  min-inline-size: 0;
+}
+
+@media (hover: hover) {
+  .public-lot-watch__toggle:not(:disabled):hover {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+  }
 }
 
 .public-lot-watch button:disabled {

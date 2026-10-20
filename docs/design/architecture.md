@@ -22,7 +22,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 
 | owner | 拥有的事实或边界 | 实现说明 |
 | --- | --- | --- |
-| auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态与结算守恒 | [README](crates/auction-domain/README.md) |
+| auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态、结算守恒及统一装备分类/命名词典 | [README](crates/auction-domain/README.md) |
 | auction-application | 用例、事务编排、命令幂等与窄端口 | [README](crates/auction-application/README.md) |
 | auction-contracts | REST/实时 DTO、错误、分页与版本 | [README](crates/auction-contracts/README.md) |
 | auction-storage | PostgreSQL SQL、连接池、锁、账本与追加迁移 | [README](crates/auction-storage/README.md) |
@@ -31,7 +31,7 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](crates/auction-jobs/README.md) |
 | auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定、静态响应与 CDN 缓存门禁 | [README](crates/auction-http/README.md) |
 | auction-web-public | Public 页面、路由、API 消费、实时恢复与译文 | [README](crates/auction-web-public/README.md) |
-| auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、入站诊断代码的展示说明与译文 | [README](crates/auction-web-admin/README.md) |
+| auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、装备词典 DTO 的候选筛选与原生复选框交互（`config/form/equipment_colors/`）、入站诊断代码的展示说明与译文 | [README](crates/auction-web-admin/README.md) |
 | auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](crates/auction-web-shared/README.md) |
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](crates/auction-config/README.md) |
 | auction-observability | tracing、metrics、健康与心跳安全投影 | [README](crates/auction-observability/README.md) |
@@ -42,6 +42,12 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 目录，不得用共享大结构体、私有持久化访问或 `common`/`misc` 绕过 owner。数据库对象、事件和路由的唯一 owner 分别
 登记在 [schema](docs/contracts/schema.md)、[events](docs/contracts/events.md)和[routes](docs/contracts/routes.md)。
 
+- 装备词典：`auction-domain::equipment::taxonomy` 唯一拥有分类、种类、材质、部位、品质、词缀关联及当前/历史/有限语法元数据；
+  integrations 拥有页面提取、等级状态及来源校验，application 独立执行收件策略和标色匹配。
+  `auction-http::http::admin::runtime_config::taxonomy` 缓存词典的静态只读 DTO，并为当前文档中已解析的有限语法种类补充候选；
+  Admin 消费候选且保留已选历史值，不导入领域或集成适配器；该投影不进入 runtime 文档或配置指纹。
+  配套解析诊断的数据库 CHECK 由 storage 和追加迁移 `000056` 拥有，不新增表、事件、路由或运行配置字段；
+  词典响应扩展须显式查询选择，边界见[运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
@@ -69,6 +75,12 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | 邮件身份基础 | PostgreSQL `000045` 保存可选预期完整玩家名称及既有凭据版本；预期值不是身份证明 |
 | Bot 可信证据 | `000046` 全局 mail generation；数据库 active 凭据、联合远端身份、精确正向库存及持有至提交的操作 guard；配置 Cookie 不伪造持久身份 |
 | Bot 现金与内部履约 | `000047` 真实资产及全部责任对账、来源唯一资金账本/预留、统一现金发送门；`000048` 独立内部证明与原义务依赖原子推进；初始自有资金为 0，未对账及未知资金不开放 |
+| COD 退件去重 | `000051` 由 recovery owner 追加退件消费事实，与退回计数、回收动作同事务；每封退件派生独立且可重放的投递命令 |
+| 邮件详情恢复 | `000052` 由 mail-poll owner 持久保存待读邮件摘要；应用层提供窄日志端口，集成层读取详情前入队，完成前缀与入站事实同事务移除 |
+| 装备读取诊断 | application 定义安全原因闭集，storage/mail_poll 通过 `000036` sidecar 和 `000056` 扩展 CHECK 保存首个拒收诊断；诊断不参与命令摘要、完成证明或游标身份 |
+| 旧自寄履约核对 | `000053` 由 application 结算修复端口与 storage legacy repair owner 保存只追加的身份、库存和旧投递关联证明；单笔显式命令处理已核实的 Bot 自持装备，保留原发送证据与命令身份 |
+| 旧实收责任接管 | `000054` 由 application funding 端口与 storage settlement funding owner 保存逐笔接管事实；同账号精确 Sent-collected 证明将已隔离责任转入对应标的用途，卖家留存不重复发行旧收款或增加自有额度 |
+| Bot 仅记账策略 | `000055` 由 funding owner 持久化 UID 账户策略；显式初始化 `record_only`，按单笔冻结经济记录有限会计来源和用途，不采集或比较账号现金；默认 `strict_cash` 维持原现金门 |
 
 以上为源码能力，运行与独立复审状态见[状态页](docs/status.md)，输入、成功与缺失状态由
 [HTTP 契约](docs/contracts/routes.md)拥有；新增持久化能力先登记范围与 owner，再更新
@@ -109,7 +121,9 @@ fence 与只读对账；`000042` 的账号偏好 SQL 由 storage 独占，旧 wa
 
 Worker 只负责持久调度、重试与执行时机；due、游标、attempt、lease、fencing 及命令结果由数据库持有，Final 与调度
 完成 fence 同事务提交，`scheduled_rounds.schedule_snapshot` 固定自动排期的本地时区来源。关闭世界阻止新场次、不取消
-已有履约/恢复，drain 后各 owner 停止领取。外部副作用只在本地提交后执行：入站按连续前缀提交完成证明及 cursor，
+已有履约/恢复，drain 后各 owner 停止领取。实际取得的邮件或论坛 credential owner 永久失效时，装配根触发有界 drain 并
+非零退出，由进程管理器重建。外部副作用只在本地提交后执行：入站详情 GET 前按有效租约保存邮件摘要，
+崩溃后优先按持久 MID 恢复；按连续前缀提交完成证明、cursor 并移除对应待读项，
 未知写入先人工对账，不能凭本地 UUID 或成功页面重发，流拍/撤拍逐件 Send 原装备，不能 Return 已取件原邮件。
 
 ComposeSend 先取 Sent baseline，再接受新增、唯一且精确匹配的 MID，Take/Return 各有独立动作证明；每种 Cookie 只有
@@ -160,6 +174,11 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 URL 更新与 `preferences.rs` 本地偏好，shared `Pager`/`components/pager/size.rs` 只提供可选数字分页与页码限制。
 装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存，服务器为唯一权威，不增加业务表列，
 也不把装备链接、代理上限或凭据写入标记缓存。
+Public `identity/account/watches/` 拥有“我的”当期标记列表，组合既有当前场次、账号标记与完整公开目录 API，
+按账号、世界和场次隔离结果；分页完整读取后复核场次与标记版本，再以真实交集本地分页，不新增服务端写入或持久化 owner。
+同账号/世界的后台重读保留已完成列表与分页，不订阅只改变价格的普通竞价通知；身份变化立即隔离旧结果。
+Public `surface/router.rs` 与 `surface/board/realtime.rs` 拥有浏览器实时启用策略，仅登录后的 `live`/`final` 场次建立连接，
+预览及其他非竞价状态停用，通过既有 60 秒权威场次读取发现开拍。显式“立即刷新”先呈现忙碌反馈再整页重载，自动同步保持原地更新。
 
 首次设置 UI 位于 Admin crate，由独立 `auction-setup` 服务提供，不使用正式 Admin 会话或持久化凭据，端口与周排期归
 setup DTO。REST/WebSocket DTO 由 contracts 拥有；通知只提示重读，

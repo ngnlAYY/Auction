@@ -325,9 +325,47 @@ fn valid_price_history_entry(value: &Value) -> bool {
 
 fn valid_price_history_stats(value: &Value) -> bool {
     object(value).is_some_and(|value| {
-        only(value, &["count", "min", "max", "median"], &[])
+        only(value, &["count", "min", "max", "median"], &["median_exact"])
             && ["count", "min", "max", "median"].iter().all(|key| nonnegative(value.get(*key)))
+            && valid_exact_history_median(value)
     })
+}
+
+// 精确字段只接受规范整数或 .5；以二倍整数核对范围，并保留旧 median 的 ties-to-even 口径。
+fn valid_exact_history_median(value: &Map<String, Value>) -> bool {
+    let exact = match value.get("median_exact") {
+        None | Some(Value::Null) => return true,
+        Some(Value::String(exact)) => exact,
+        _ => return false,
+    };
+    let (whole, half) = match exact.split_once('.') {
+        Some((whole, "5")) => (whole, true),
+        Some(_) => return false,
+        None => (exact.as_str(), false),
+    };
+    if whole.is_empty()
+        || whole.len() > 1 && whole.starts_with('0')
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let (Ok(whole), Some(minimum), Some(maximum), Some(median)) = (
+        whole.parse::<i128>(),
+        int(value.get("min")),
+        int(value.get("max")),
+        int(value.get("median")),
+    ) else {
+        return false;
+    };
+    let Some(doubled) = whole.checked_mul(2).and_then(|value| value.checked_add(i128::from(half)))
+    else {
+        return false;
+    };
+    let rounded = whole + i128::from(half && whole % 2 == 1);
+    doubled <= 9_007_199_254_740_991_i128 * 2
+        && doubled >= i128::from(minimum) * 2
+        && doubled <= i128::from(maximum) * 2
+        && rounded == i128::from(median)
 }
 
 fn valid_rules(value: &Value) -> bool {

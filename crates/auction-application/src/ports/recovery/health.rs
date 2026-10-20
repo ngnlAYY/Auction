@@ -1,3 +1,5 @@
+//! 恢复健康的安全状态与刷新端口；记账模式明确区分现金不适用和证据读取失败。
+
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -9,6 +11,8 @@ use super::ApplicationFuture;
 /// recovery health 中余额来源的有限状态集合。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryBalanceStatus {
+    /// 记账模式不采集或比较账号余额。
+    NotApplicable,
     Unknown,
     Ok,
     Low,
@@ -21,6 +25,7 @@ impl RecoveryBalanceStatus {
     /// 返回迁移表和运维投影使用的稳定状态名。
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::NotApplicable => "not_applicable",
             Self::Unknown => "unknown",
             Self::Ok => "ok",
             Self::Low => "low",
@@ -34,6 +39,8 @@ impl RecoveryBalanceStatus {
 /// recovery health 中外部证据的有限状态集合。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryEvidenceStatus {
+    /// 当前健康来源为现金观察，记账模式明确不适用。
+    NotApplicable,
     Unknown,
     Fresh,
     Stale,
@@ -44,6 +51,7 @@ impl RecoveryEvidenceStatus {
     /// 返回迁移表和运维投影使用的稳定状态名。
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::NotApplicable => "not_applicable",
             Self::Unknown => "unknown",
             Self::Fresh => "fresh",
             Self::Stale => "stale",
@@ -73,6 +81,11 @@ impl RecoveryHealthUpdate {
             return Err("recovery health 更新时间无效");
         }
         let has_balance = self.balance_credits.is_some() || self.balance_observed_at.is_some();
+        if (self.balance_status == RecoveryBalanceStatus::NotApplicable)
+            != (self.evidence_status == RecoveryEvidenceStatus::NotApplicable)
+        {
+            return Err("recovery health 现金不适用状态必须成对出现");
+        }
         if has_balance != (self.balance_credits.is_some() && self.balance_observed_at.is_some())
             || self.balance_credits.is_some_and(|credits| credits < 0)
             || self.balance_observed_at.is_some_and(|observed_at| {
@@ -93,7 +106,8 @@ impl RecoveryHealthUpdate {
             {
                 return Err("recovery health 余额状态缺少观测值");
             }
-            RecoveryBalanceStatus::Unknown
+            RecoveryBalanceStatus::NotApplicable
+            | RecoveryBalanceStatus::Unknown
             | RecoveryBalanceStatus::Busy
             | RecoveryBalanceStatus::Unavailable
                 if has_balance =>
@@ -109,7 +123,9 @@ impl RecoveryHealthUpdate {
             {
                 return Err("recovery health 证据状态缺少成功时间");
             }
-            RecoveryEvidenceStatus::Unknown | RecoveryEvidenceStatus::Unavailable
+            RecoveryEvidenceStatus::NotApplicable
+            | RecoveryEvidenceStatus::Unknown
+            | RecoveryEvidenceStatus::Unavailable
                 if self.evidence_last_success_at.is_some() =>
             {
                 return Err("recovery health 不可用证据状态不应携带成功时间");
@@ -127,7 +143,7 @@ pub trait RecoveryHealthStore: Send + Sync {
 }
 
 pub trait RecoveryHealthRefreshPort: Send + Sync {
-    /// 按配置的 world 集合读取外部余额并刷新持久化安全投影。
+    /// 按持久资金策略与 world 集合刷新安全投影；记账模式仅刷新非现金计数。
     fn refresh(&self, now: DateTime<Utc>) -> ApplicationFuture<'_, ()>;
 }
 

@@ -1190,6 +1190,60 @@
   padding: 0.15rem;
 }
 
+.admin-runtime-color-multi {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  margin: 0;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--admin-text-label);
+}
+
+.admin-runtime-color-multi legend {
+  padding-inline: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.admin-runtime-color-multi > button {
+  justify-self: start;
+}
+
+.admin-runtime-color-multi__options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-2);
+  max-block-size: 18rem;
+  overflow-y: auto;
+}
+
+.admin-runtime-color-multi__option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-inline-size: 0;
+  padding: var(--space-1);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.admin-runtime-color-multi__option input {
+  flex: 0 0 auto;
+  accent-color: var(--color-accent);
+}
+
+.admin-runtime-color-multi__option input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.admin-runtime-color-multi small {
+  color: var(--color-text-muted);
+  font-size: var(--admin-text-caption);
+}
+
 .admin-runtime-mailboxes {
   display: grid;
   gap: var(--space-3);
@@ -1231,6 +1285,10 @@
   .admin-runtime-field-grid,
   .admin-runtime-template-grid,
   .admin-runtime-mailbox {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-runtime-color-multi__options {
     grid-template-columns: 1fr;
   }
 

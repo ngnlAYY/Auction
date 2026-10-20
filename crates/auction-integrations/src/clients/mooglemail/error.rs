@@ -17,6 +17,8 @@ pub enum MoogleMailErrorCategory {
     RateLimited,
     /// 网络、超时或远端 5xx 等可重试失败。
     RemoteTemporary,
+    /// 详情读取恢复队列未能确认持久化，禁止继续读取详情。
+    PersistenceUnavailable,
     ResponseTooLarge,
     /// 页面结构、字段或内容类型不再符合冻结协议。
     ProtocolDrift,
@@ -39,6 +41,7 @@ impl MoogleMailErrorCategory {
             Self::AccountBusy => "account_busy",
             Self::RateLimited => "rate_limited",
             Self::RemoteTemporary => "remote_temporary",
+            Self::PersistenceUnavailable => "persistence_unavailable",
             Self::ResponseTooLarge => "response_too_large",
             Self::ProtocolDrift => "protocol_drift",
             Self::IdentityMismatch => "identity_mismatch",

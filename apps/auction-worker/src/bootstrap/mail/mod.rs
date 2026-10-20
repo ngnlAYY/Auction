@@ -108,8 +108,11 @@ pub(super) async fn configure_mail_poll(
             .or_else(|| gateways.get(&MoogleMailWorld::Isekai))
             .cloned()
             .context("MoogleMail enabled but no world gateway is configured")?;
-        let delivery_transport: Arc<dyn DeliveryTransport> =
-            Arc::new(delivery_transport.with_cash_evidence_gateway(gateway.clone()));
+        let delivery_transport: Arc<dyn DeliveryTransport> = Arc::new(
+            delivery_transport
+                .with_cash_evidence_gateway(gateway.clone())
+                .with_funding_policy_reader(store.clone()),
+        );
         let evidence_reader: Arc<dyn SettlementFulfillmentEvidenceReader> =
             Arc::new(MoogleMailFulfillmentEvidenceReader { gateways });
         Ok((

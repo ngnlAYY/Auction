@@ -15,4 +15,5 @@ pub struct MoogleMailDeliveryTransport {
     pub(crate) settlement_equipment_opener: Option<EquipmentKeyOpener>,
     pub(crate) templates: MoogleMailNotificationTemplates,
     pub(crate) cash_evidence_gateway: Option<Arc<super::super::super::MoogleMailGateway>>,
+    pub(crate) funding_policy_reader: Option<Arc<dyn auction_application::FundingPolicyReader>>,
 }

@@ -16,6 +16,7 @@
 | [src/bootstrap/postgres_rebuild](apps/auctionctl/src/bootstrap/postgres_rebuild) | 独立破坏性重建 |
 | [src/bootstrap/postgres_restore](apps/auctionctl/src/bootstrap/postgres_restore) | 单事务恢复与后置证明 |
 | [src/bootstrap/postgres_legacy_v28](apps/auctionctl/src/bootstrap/postgres_legacy_v28) | v28 专用备份与接管 |
+| [src/bootstrap/runtime/legacy_settlement](apps/auctionctl/src/bootstrap/runtime/legacy_settlement) | 旧 Bot 自寄和实收责任的单目标预览、真实证据与显式修复 |
 
 ## 职责与实现边界
 
@@ -42,6 +43,7 @@ CLI 只装配配置、应用/存储端口和受控外部工具，不能绕过领
 | 旧草稿软截止修正 | `repair-draft-soft-close` | [默认只读、显式确认写入](#草稿软截止显式修正) |
 | 装备 PM 运维 | `lot-watch-pm list/reconcile` | [仅请求只读对账](#装备-pm-只读对账) |
 | Bot 资金 | `bot-funds` | [默认零写预览、显式真实对账](#bot资金对账) |
+| 旧 Bot 结算修复 | `legacy-settlement self-send/adopt-collected` | [单目标、默认只读及真实证据](#旧-bot-结算修复) |
 | 保留盘点与恢复预检 | `retention-inventory`、`recovery-preflight` | 本页及恢复手册 |
 | 当前格式备份/恢复/重建 | `postgres-backup`、`postgres-backup-verify`、`postgres-restore`、`postgres-rebuild` | [恢复手册](ops/deploy/RECOVERY.md) |
 | 历史 v28 | `postgres-legacy-v28-backup`、`postgres-legacy-v28-backup-verify`、`postgres-adopt-legacy-v28` | [接管手册](ops/deploy/LEGACY_V28_ADOPTION.md) |
@@ -85,6 +87,44 @@ Main/shared 邮件、论坛凭据，同版 CLI 取得原 advisory owner 后推�
 或付款关联 delivery 缺失时，preview/apply 都以 `lot:<lot_id>:payment_collection_unclosed` 阻断 opening。
 [升级门禁](ops/README.md#bot-内部履约与资金保护升级)包含顺序迁移至 `000048` 和全 writer 停机。
 
+## Bot只记账开户
+
+独立 `bot-funds-record-only` 为尚未开户的 UID 建立持久化 `record_only` 策略；已有严格资金账户不能用此命令切换。
+旧 `bot-funds` 的参数、确认短语及幂等摘要保持兼容。只记账模式允许人工消费 Credits，系统保留结算责任、
+真实收款与投递结果的账本，不以远端现金数量核对或限制个人消费。
+
+```bash
+AUCTION_CONFIG_FILE=/etc/auction/worker.toml /opt/auction/bin/auctionctl bot-funds-record-only --expected-uid <UID>
+```
+
+默认仅数据库预览，输出账户版本、责任摘要与 `confirm_write`，不取得 owner 或访问远端。执行追加
+`--execute --command-id <UUID> --actor <ACTOR> --expected-version 0 --preview-digest <HEX>`，以及逐字
+`--confirm-write 'INITIALIZE RECORD ONLY BOT FUNDS <UID> 0 <DIGEST>'`；不接收余额、用途额度或专用账号声明。
+须先停止 Worker，让同版 CLI 取得原 mail/forum owner；以真实联合身份、干净 compose 和 generation 的 opaque guard
+提交开户，全程不读取 Balance、不寄信、不领取或清理草稿。版本与完整摘要在同一事务重核，账户策略与命令、审计一起保存。
+`committed/replayed` 表示完成；已提交命令按原 ID 与全部参数重放，`outcome_unknown` 同样保留原参数核对，不能换 ID 猜测重试。
+
+执行证据时仅将安全闭集阶段的 JSON 日志写入 stderr，stdout 保留命令 JSON；纯预览不初始化日志，也不启用 OTLP。
+
+## 旧 Bot 结算修复
+
+`legacy-settlement self-send --obligation-id <UUID> --expected-uid <UID>` 与
+`legacy-settlement adopt-collected --obligation-id <UUID> --expected-uid <UID>` 默认仅数据库预览，输出
+`expected_state_version`、`expected_digest`、`confirm_write` 与安全目标，不取得 owner 或访问远端。
+
+执行在同一命令追加 `--execute --command-id <UUID> --actor <ACTOR> --expected-state-version <VERSION>
+--expected-digest <HEX> --confirm-write '<预览原文>'`；self-send 另要求 `--reason <原因>`。
+确认短语分别为 `REPAIR LEGACY SELF SEND <OBLIGATION> <UID> <VERSION> <DIGEST>` 与
+`CLAIM LEGACY BOT SELLER <OBLIGATION> <UID> <VERSION> <DIGEST>`，逐字使用预览值。
+CLI 共用三十秒绝对预算和原 mail/forum owner，真实身份、库存或精确原 Sent 与现金在 opaque guard 内借用至提交结束；
+Worker 必须先停止。命令不寄信、不领取、不清理草稿，原发送、错误、金额和命令历史保留。
+
+self-send 对已核实自持的流拍装备追加留存事实；成交自寄明确拒绝的核验仅恢复受同 UID 约束的内部付款准备，
+不表示买家已付款。adopt-collected 从已隔离责任转为旧 Bot 卖家留存，不再次发行旧收款或授予自有额度。
+执行输出 `committed/replayed` 才表示完成；`rolled_back` 为确定回滚，`evidence_unavailable` 为提交前证据未通过，
+`outcome_unknown` 须保留原命令和全部参数核对，`funding_deferred` 表示资金门已提交冻结或保留未知占用且认领未完成。
+开户、旧责任认领及恢复同版 Worker 的完整顺序见[运维流程](ops/README.md#旧-bot-结算的显式核对)。
+
 ## 稳定退出码
 
 | 退出码 | 含义 |
@@ -93,7 +133,7 @@ Main/shared 邮件、论坛凭据，同版 CLI 取得原 advisory owner 后推�
 | `2` | 参数解析，或 check-config/deployment-check 失败 |
 | `3` | 迁移、初始建库、盘点、备份/恢复/重建/v28 接管命令失败 |
 | `4` | deployment 命令失败 |
-| `5` | 凭据/规则导入、论坛/结算核验、邮件证据、草稿软截止修正、Bot资金对账命令失败或已提交冻结 |
+| `5` | 凭据/规则导入、论坛/结算核验、邮件证据、草稿软截止修正、Bot资金对账/只记账开户命令失败或已提交冻结 |
 
 退出码按命令类别分配，不按底层错误类型重新分类；调用方不应解析脱敏错误文本。
 

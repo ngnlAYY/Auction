@@ -38,7 +38,9 @@ idle/absolute 为 1800/604800 秒，Admin runtime 对应独立默认值 900/2880
 
 [settings/secrets](crates/auction-config/src/config/settings/secrets) 严格定义敏感字段，不接受任意键值透传。
 PostgreSQL `[database]` 接收 host、port、username、password、name 并统一编码为 URL，与兼容 `database_url` 互斥；
-需要 Unix socket 或显式 TLS profile 时使用兼容 URL，端口必须非零，输入与 `Debug` 均不得泄密。Admin actor/secret
+需要 Unix socket 或显式 TLS profile 时使用兼容 URL。旧 URI 必须明确指定 host/socket 和库名，省略端口固定为 5432；
+显式端口必须非零，不通过 PG* 环境补齐目标。缩略 URI、fragment、控制字符和无效百分号/UTF-8 转义失败关闭，凭据编码
+与其余驱动参数保持原文，输入与 `Debug` 均不得泄密。Admin actor/secret
 必须成对且 secret 至少 16 字节；装备、外部凭据、用户登录 key 各自使用独立数据密钥与非秘密 key ID，密钥为
 32 字节标准 Base64，不得互相复用。敏感文件禁止提交、限运行账号访问，字段与跨角色一致性见
 [敏感配置](ops/config/README.md#敏感字段)。`AUCTION_CONFIG_FILE` 仅选择角色配置文件，不覆盖任何单个字段。
@@ -70,6 +72,12 @@ application 会话凭据校验，拒绝生成不可登录的配置。
 
 共享 runtime 只含非敏感候选，保存后须重启受影响进程。Admin 的 listener、metrics/tracing 等按 runtime 覆盖；
 Public/Worker 的 metrics 来自公共文件，tracing 来自各自角色文件，OTLP headers 始终只在角色敏感 TOML 中。
+
+`equipment_colors.rules` 的类型、种类和品质支持 `categories`、`equipment_types`、`qualities` 多选，
+由共享 runtime DTO 原样读写并投影为 Worker 窄规则；空数组省略编码，兼容旧单值字段和旧指纹。
+每维新旧字段不能同时非空，同维 OR、维度间 AND，不展开为多条规则。Worker 启动时冻结规则，保存后须重启生效；
+含非空新数组的文件需要支持该契约的 Admin、Worker 与配置运维工具读取，旧版本的未知字段拒绝保持不变。
+新种类数组支持十二种护甲材质族及完整部位名称的并集，材质族核对实际分类和首词/部位边界；旧种类单值保持精确匹配。
 
 Worker 将 `bot_players` 单独保留为 `AppConfig.worker_bot_players` 窄投影，不持有完整 Admin runtime 文档；名单只用于
 选择内部履约证据路径，实际完成仍须通过当前远端身份及资产/资金核验。

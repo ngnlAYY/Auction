@@ -29,6 +29,21 @@ read_build_info() {
 	awk -F= -v wanted="$key" '$1 == wanted { print substr($0, length($1) + 2); exit }' "$file"
 }
 
+# 原生制品与 Web payload 共用构建环境指纹；profile、工具包装器及目标参数变化都必须失效缓存。
+# 名称和值用 NUL 分隔后只输出摘要，避免分隔符歧义，也不把环境原文写进制品元数据。
+build_env_fingerprint() {
+	local name
+	{
+		while IFS= read -r name; do
+			case "$name" in
+			CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTDOCFLAGS | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER)
+				printf '%s\0%s\0' "$name" "${!name-}"
+				;;
+			esac
+		done < <(compgen -e | LC_ALL=C sort)
+	} | sha256sum | awk '{print $1}'
+}
+
 # 指定路径的输入指纹：只覆盖影响该产物的文件，用于跳过与产物无关的改动。
 # 路径为仓库根相对；缺失路径按内容为空记录，仍参与身份。
 path_fingerprint() {

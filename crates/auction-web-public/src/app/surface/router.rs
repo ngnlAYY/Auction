@@ -119,6 +119,8 @@ pub(crate) fn PublicShell() -> Element {
     let mut location_generation = use_signal(|| 0_u64);
     let mut navigation_open = use_signal(|| false);
     let mut refresh_generation = use_signal(|| 0_u64);
+    let mut manual_refresh_busy = use_signal(|| false);
+    let mut manual_refresh_error = use_signal(|| false);
     let bid_refresh = PublicBidRefresh(use_signal(|| 0_u64));
     let mut readiness_generation = use_signal(|| 0_u64);
     // 发现流游标属于整个 Public 外壳；current-auction 刷新导致实时 owner 按 key 重建时也不能丢失。
@@ -258,22 +260,39 @@ pub(crate) fn PublicShell() -> Element {
     let realtime_target_candidate = match session_snapshot {
         None => PublicRealtimeTarget::Checking,
         Some(Err(_)) => PublicRealtimeTarget::SessionError,
-        Some(Ok(Some(identity))) if identity.authenticated => {
-            match current_auction.read().clone() {
-                Some((loaded_world, Ok(Some(auction)))) if loaded_world == selected_world_value => {
-                    PublicRealtimeTarget::Auction {
-                        auction_id: auction.id,
-                        world: auction.world,
-                        preview_revision: auction.preview_revision,
+        Some(Ok(_)) => match current_auction.read().clone() {
+            Some((loaded_world, Ok(Some(auction))))
+                if loaded_world == selected_world_value
+                    && matches!(auction.status.as_str(), "live" | "final")
+                    && authenticated =>
+            {
+                PublicRealtimeTarget::Auction {
+                    auction_id: auction.id,
+                    world: auction.world,
+                    preview_revision: auction.preview_revision,
+                }
+            }
+            Some((loaded_world, Ok(Some(auction)))) if loaded_world == selected_world_value => {
+                if matches!(auction.status.as_str(), "live" | "final") {
+                    PublicRealtimeTarget::Anonymous
+                } else {
+                    PublicRealtimeTarget::Inactive {
+                        world: selected_world_value.clone(),
+                        preview: auction.status == "preview",
                     }
                 }
-                Some((loaded_world, _)) if loaded_world == selected_world_value => {
-                    PublicRealtimeTarget::Discovery
-                }
-                _ => PublicRealtimeTarget::Checking,
             }
-        }
-        Some(Ok(None)) | Some(Ok(Some(_))) => PublicRealtimeTarget::Anonymous,
+            Some((loaded_world, Ok(None))) if loaded_world == selected_world_value => {
+                PublicRealtimeTarget::Inactive {
+                    world: selected_world_value.clone(),
+                    preview: false,
+                }
+            }
+            Some((loaded_world, Err(_))) if loaded_world == selected_world_value => {
+                PublicRealtimeTarget::CurrentError { world: selected_world_value.clone() }
+            }
+            _ => PublicRealtimeTarget::Checking,
+        },
     };
     // 同一 world 的权威 current 快照重读期间保留既有目标；首屏、登出和 world 切换仍失败关闭。
     let remembered_target = stable_realtime_target();
@@ -282,7 +301,9 @@ pub(crate) fn PublicShell() -> Element {
             PublicRealtimeTarget::Auction { world, .. } if world == &selected_world_value => {
                 remembered_target
             }
-            PublicRealtimeTarget::Discovery => remembered_target,
+            PublicRealtimeTarget::Inactive { world, .. } if world == &selected_world_value => {
+                remembered_target
+            }
             _ => PublicRealtimeTarget::Checking,
         },
         target => target,
@@ -298,17 +319,24 @@ pub(crate) fn PublicShell() -> Element {
     let realtime_key = realtime_target.key();
     // Dioxus 的 key 特殊属性会消费该值，但 WASM release 展开后仍会产生误报。
     let _ = realtime_key.as_str();
-    let has_current_auction = matches!(&realtime_target, PublicRealtimeTarget::Auction { .. });
+    let inactive = matches!(&realtime_target, PublicRealtimeTarget::Inactive { .. });
+    let preview = matches!(&realtime_target, PublicRealtimeTarget::Inactive { preview: true, .. });
     let connection_state = public_connection_state(
         readiness_state,
         session_pending,
         authenticated,
-        has_current_auction,
+        &realtime_target,
         realtime_state(),
     );
     let connection_class = public_connection_class(connection_state);
     let connection_state_name = public_connection_state_name(connection_state);
-    let connection_message = realtime::public_connection_message(connection_state);
+    let connection_message = if preview && connection_state == PublicConnectionState::Idle {
+        t!("auction-status-preview")
+    } else {
+        realtime::public_connection_message(connection_state)
+    };
+    let connection_label =
+        if inactive { connection_message.clone() } else { t!("realtime-connection-label") };
     let can_manual_refresh =
         matches!(connection_state, PublicConnectionState::Degraded | PublicConnectionState::Manual);
 
@@ -384,18 +412,46 @@ pub(crate) fn PublicShell() -> Element {
                         class: "public-connection-badge {connection_class}",
                         "data-state": connection_state_name,
                         role: "status",
-                        aria_label: t!("realtime-connection-label"),
+                        aria_label: connection_label,
                         {connection_message}
                     }
-                    if can_manual_refresh {
+                    if can_manual_refresh || inactive {
                         button {
                             class: "public-connection-refresh",
                             r#type: "button",
+                            disabled: manual_refresh_busy(),
+                            aria_busy: manual_refresh_busy().to_string(),
                             onclick: move |_| {
-                                refresh_generation.set(refresh_generation().saturating_add(1));
+                                if *manual_refresh_busy.peek() {
+                                    return;
+                                }
+                                manual_refresh_error.set(false);
+                                manual_refresh_busy.set(true);
+                                spawn(async move {
+                                    // 先让忙碌文案和图标进入一帧，再响应用户的整页刷新意图。
+                                    // 自动轮询继续只读资源，不经过此处，也不会触发页面 reload。
+                                    gloo_timers::future::TimeoutFuture::new(80).await;
+                                    let reloaded = web_sys::window()
+                                        .is_some_and(|window| window.location().reload().is_ok());
+                                    if !reloaded {
+                                        manual_refresh_busy.set(false);
+                                        manual_refresh_error.set(true);
+                                        // 浏览器拒绝导航时仍补读权威资源，并明确展示失败，不回显原始异常。
+                                        let next_refresh = refresh_generation.peek().saturating_add(1);
+                                        refresh_generation.set(next_refresh);
+                                    }
+                                });
                             },
-                            {t!("realtime-refresh")}
+                            if manual_refresh_busy() {
+                                span { class: "public-connection-refresh__spinner", aria_hidden: "true", "↻" }
+                                {t!("realtime-refreshing")}
+                            } else {
+                                {t!("realtime-refresh")}
+                            }
                         }
+                    }
+                    if manual_refresh_error() {
+                        span { class: "public-connection-refresh__error", role: "alert", {t!("data-error")} }
                     }
                     LanguagePicker {
                         label: t!("language-label"),

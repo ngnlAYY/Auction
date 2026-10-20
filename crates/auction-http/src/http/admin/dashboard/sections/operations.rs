@@ -91,11 +91,13 @@ pub(crate) fn map_recovery(
         Some("payment_overdue")
     } else if snapshot.relist_pending_count > 0 {
         Some("relist_pending")
-    } else if snapshot
-        .worlds
-        .iter()
-        .any(|world| world.balance_status != "ok" || world.evidence_status != "fresh")
-    {
+    } else if snapshot.worlds.iter().any(|world| {
+        // 只记账策略将两项现金来源同时标为不适用；混合或未知状态仍需告警。
+        !matches!(
+            (world.balance_status.as_str(), world.evidence_status.as_str()),
+            ("ok", "fresh") | ("not_applicable", "not_applicable")
+        )
+    }) {
         Some("recovery_source_degraded")
     } else {
         None
