@@ -3,7 +3,7 @@
 use super::{LotEnvelope, LotItems};
 
 /// 公开价格历史的旧版筛选与分页参数。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PriceHistoryQuery {
     pub world: Option<String>,
     pub name: Option<String>,
@@ -13,7 +13,25 @@ pub(crate) struct PriceHistoryQuery {
     pub max_price: Option<String>,
     pub buyer: Option<String>,
     pub seller: Option<String>,
+    pub sort: String,
     pub page: i64,
+}
+
+impl Default for PriceHistoryQuery {
+    fn default() -> Self {
+        Self {
+            world: None,
+            name: None,
+            from: None,
+            to: None,
+            min_price: None,
+            max_price: None,
+            buyer: None,
+            seller: None,
+            sort: "closed_desc".to_owned(),
+            page: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

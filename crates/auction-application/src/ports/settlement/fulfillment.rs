@@ -354,7 +354,8 @@ pub trait SettlementFulfillmentStore: Send + Sync {
         activate_command_id: CommandId,
         activate_request_hash: RequestHash,
         activated_at: DateTime<Utc>,
-        // COD/货款在激活时就对齐到下一个 MM 追踪窗口；其它义务为空。
+        // 保留参数以兼容既有适配器；当前激活继续持有 claim，调用方须传 None。
+        // COD/货款的下次 MM 追踪时间在 reconcile 释放 claim 的同一事务内写入。
         next_attempt_at: Option<DateTime<Utc>>,
     ) -> ApplicationFuture<'_, SettlementFulfillmentActivationResult>;
 

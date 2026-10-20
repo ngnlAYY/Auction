@@ -539,14 +539,17 @@ pub(super) fn DashboardContent(snapshot: AdminDashboardSnapshot, children: Eleme
                                 div { class: "admin-dashboard-card", key: "{world_name}",
                                     div { class: "admin-dashboard-value",
                                         span { class: "admin-dashboard-recovery-world",
-                                            span {
-                                                if balance_known {
-                                                    {t!(
-                                                        "dashboard-legacy-recovery-balance-credits",
-                                                        credits: world.balance_credits
-                                                    )}
-                                                } else {
-                                                    {t!("dashboard-legacy-no-data")}
+                                            // 只记账状态保留后端历史观察，但不能把旧金额呈为当前余额。
+                                            if world.balance_status != "not_applicable" {
+                                                span {
+                                                    if balance_known {
+                                                        {t!(
+                                                            "dashboard-legacy-recovery-balance-credits",
+                                                            credits: world.balance_credits
+                                                        )}
+                                                    } else {
+                                                        {t!("dashboard-legacy-no-data")}
+                                                    }
                                                 }
                                             }
                                             {badge(
@@ -726,6 +729,7 @@ fn fulfillment_status(state: &str) -> String {
 
 fn recovery_balance_status(status: &str) -> String {
     match status {
+        "not_applicable" => t!("dashboard-legacy-recovery-balance-not-applicable"),
         "ok" => t!("dashboard-legacy-recovery-balance-ok"),
         "low" => t!("dashboard-legacy-recovery-balance-low"),
         "stale" => t!("dashboard-legacy-recovery-balance-stale"),
@@ -737,6 +741,7 @@ fn recovery_balance_status(status: &str) -> String {
 
 fn recovery_evidence_status(status: &str) -> String {
     match status {
+        "not_applicable" => t!("dashboard-legacy-recovery-evidence-not-applicable"),
         "fresh" => t!("dashboard-legacy-recovery-evidence-fresh"),
         "stale" => t!("dashboard-legacy-recovery-evidence-stale"),
         "unavailable" => t!("dashboard-legacy-recovery-evidence-unavailable"),

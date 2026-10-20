@@ -15,6 +15,9 @@
 
 ## 实现布局与 tracing
 
+`init_json_stderr(configured_filter)` 提供运维命令专用的 JSON stderr 入口：只使用调用方显式过滤器，不读环境、不启用 OTLP，
+不附加父 span 字段，保留 stdout 命令结果；调用方负责限定已审查的安全 target。
+
 `init(service, configured_filter)` 安装 JSON tracing，缺省过滤器为 `info,{service}=debug`；`init_with_config`
 可增加默认关闭的 OTLP/HTTP exporter，使用异步有界队列和有界退出刷新。Public/Worker 参数来自角色配置，
 Admin 可由 runtime 覆盖，应用装配只传入敏感 TOML 中的 OTLP headers；exporter 不监听操作系统信号，

@@ -16,7 +16,7 @@
 
 ## 基线与 owner 规则
 
-当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000048`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
+当前运行 SQL 来自 `migrations/postgres/` 和 `auction-storage` 的查询/映射，只支持 PostgreSQL；SQL owner 统一为 `auction-storage`，下表的逻辑 owner 决定业务事实含义，不另行拥有 SQL。PostgreSQL 迁移为 `000001`—`000056`，已发布文件不修改或删除；历史 SQL 的编号、对象和修复边界仍可追溯，实现与运行证据见[状态说明](docs/status.md)。
 
 ### 追加迁移与历史事实
 
@@ -33,20 +33,22 @@
 
 ### Bot 内部履约对象
 
-新增持久化能力由追加的 `000046`—`000048` 定义；本轮只做源码及静态验证，未执行迁移。以下是实际对象及 owner，不修改 `000045` 或历史证据。
+基础持久化能力由 `000046`—`000048` 定义，旧结算核对与账户策略由 `000053`—`000055` 追加；实际执行证据见[状态页](docs/status.md)。以下是对象及 owner，不修改已发布迁移或历史证据。
 
 | 对象 | 唯一逻辑 / SQL owner | 职责 |
 | --- | --- | --- |
 | mail_runtime_generation | application credentials / storage credentials | 对齐全局 mail_cookie advisory lock 的单调 generation；取得 owner 后、任何远端操作前推进，内部事务锁验到提交 |
-| settlement_funding_accounts | application settlement funding / storage settlement_funding | 按认证 UID、Main、Credits 固定账户身份及对账状态；凭据轮换不重置资金，初始自有可用为 0 |
-| settlement_funding_entries / settlement_funding_sources / settlement_funding_commands | application settlement funding / storage settlement_funding | 真实资产及责任对账、资金来源唯一性、稳定命令重放及追加分录；不把理论结算池当实收，不修改历史来源 |
+| settlement_funding_accounts | application settlement funding / storage settlement_funding | 按认证 UID、Main、Credits 固定账户身份、状态及 `000055` 账户策略；默认 `strict_cash`，`record_only` 由显式命令初始化 |
+| settlement_funding_entries / settlement_funding_sources / settlement_funding_commands | application settlement funding / storage settlement_funding | 按账户策略核对真实资产或记录拍卖责任；来源唯一、稳定命令重放及追加分录；记账来源与真实现金区分，不修改历史来源 |
 | settlement_funding_allocations | application settlement funding / storage settlement_funding | 资金用途与外发占用；unknown 不按 TTL 或人工 failed 自动释放，全部现金发送复用同一门禁 |
 | settlement_funding_scope | application settlement funding / storage settlement_funding | 固定 mail_cookie 资金 scope，串行化账户启用与无证据 legacy 发送门 |
 | settlement_funding_receipts / settlement_funding_lots | application settlement funding / storage settlement_funding | 精确收款和 payment/delivery/UID+MID 唯一绑定、lot 来源与互斥用途，不回填旧 collected |
 | settlement_funding_returns | application settlement funding / storage settlement_funding | 每 delivery 唯一精确返还证据；本轮未开放人工返还入口 |
 | settlement_internal_commands | application settlement fulfillment / storage fulfillment_scheduler | 独立非敏感完整证明与稳定命令账本；obligation/action 唯一，原义务满足、资金、审计和直接依赖解除同事务 |
+| settlement_legacy_self_reconciliations | application settlement legacy repair / storage settlement_legacy_repair | `000053` 单笔显式自寄核验、真实 UID/库存证据、原投递及履约版本快照与结果，只追加；恢复付款准备不表示付款成功 |
+| settlement_legacy_bot_seller_claims | application settlement funding / storage settlement_funding/legacy | `000054` 旧实收责任逐标的唯一认领；精确 Sent-collected 及账户策略核对后将既有隔离责任转为卖家留存，不再次发行 B |
 
-内部证明不伪造 Sent、delivery ID 或远端收款；存量资金与旧未知投递不自动回填/结清。资金运维预览严格只读数据库责任、版本及摘要，不推进 generation，也不把未观测余额展示为可用额度；仅显式执行阶段取得真实身份/余额，并复核完整责任、稳定命令、版本与精确确认。历史账户归属缺证据时仅作保守隔离，不伪造当前账号实收；编译期现金门能力不代替所有相关程序同版升级的运维前提。
+内部证明不伪造 Sent、delivery ID 或远端收款；存量资金与旧未知投递不自动回填/结清。资金运维预览严格只读数据库责任、版本、策略及摘要，不推进 generation，也不把未观测余额展示为可用额度；显式执行复核真实身份、完整责任、稳定命令、版本与精确确认。`strict_cash` 另核真实现金；`record_only` 不读取或比较账号余额，仅记录每笔冻结金额及用途，允许所有人自行使用 Credits。历史账户归属缺证据时仅保留责任，不伪造当前账号实收；同版升级门禁适用于两种策略。
 
 ### 迁移语义与兼容边界
 
@@ -149,11 +151,17 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | settlement_obligations | auction-domain + auction-application：settlement | 买家/卖家履约义务 |
 | settlement_obligation_fulfillments | auction-application：settlement | 履约交付证明与状态 |
 | settlement_recoveries | auction-application：settlement-recovery | 付款/交付异常恢复聚合；冻结 `cod_return_limit`（默认 3） |
+| settlement_recovery_return_consumptions | auction-application + auction-storage：settlement-recovery | 退件消费追加事实；`return_mail_id` 主键保证每封邮件只消费一次，与计数/恢复动作同事务提交 |
 | settlement_recovery_actions | auction-application：settlement-recovery | 恢复动作及 durable claim；`buyer_blacklist` 冻结公开理由 |
 | settlement_recovery_commands | auction-application：settlement-recovery | 恢复确认命令幂等账本 |
-| settlement_recovery_health | auction-application + auction-storage + auction-jobs | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用以 `busy` 投影并保留最后成功余额 |
+| settlement_recovery_health | auction-application + auction-storage + auction-jobs | 恢复阻塞和健康投影；Worker 刷新，Admin 只读；战斗页暂时占用为 `busy`；仅记账策略的现金/现金证据状态成对为 `not_applicable`，不读取余额或产生现金不足告警，原数值只作历史保留且页面隐藏 |
 | deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |
 | delivery_admin_commands | auction-application：delivery | Admin 交付命令幂等账本 |
+
+`000051` 给退件建立持久消费事实，回填当前退件指针、回收动作来源和历史 recovery take 投递可证明已消费的
+入站邮件，保留原计数；重寄清空当前指针也不释放消费身份。take prepare 的新命令身份绑定 action 与来源 MID，
+activate 跟随持久 prepare；同轮重试保持稳定，不同真实退件互不冲突。旧 prepared/enqueued 保留原身份；旧 prepare
+已提交但 action 尚未关联时先只读精确匹配原来源、摘要、收件人和完整 payload，不能为同一 MID 创建第二个 take。
 
 ## 邮件、论坛与外部集成
 
@@ -162,6 +170,7 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | inbound_mail | auction-storage：mail projection | 入站邮件事实索引及 Admin 审查安全投影；`sender`/`subject` 为可空标量，`message_display` 为受限脱敏快照 |
 | mail_commands | auction-application + auction-jobs：mail intake | 入站完成命令账本，绑定 `inbound_mail`、32 字节内容摘要与处理结果；发送 outbox 由 `deliveries` 拥有 |
 | mail_poll_state | auction-storage：mail state | MoogleMail 轮询游标、租约、失败退避和状态 |
+| mail_poll_pending_reads | auction-storage：mail poll；auction-application：MailPollReadJournal | 详情 GET 前持久登记的 mailbox/world、MID 与列表身份；按持久序号恢复，随完成前缀原子删除；不含正文或凭据 |
 | mail_admin_commands | auction-storage：mail admin command ledger | Admin 邮件控制命令幂等账本 |
 | auction_forum_sync | auction-storage：forum sync/reply；auction-integrations + auction-jobs：forum | 论坛主题发布状态、租约、fencing、冻结 lot 编号/分页方案、目录页数，以及首帖/系统日志身份、内容版本、逐主题调度、真实连续处理楼层、最近成功时间和有界安全错误 |
 | auction_forum_catalog_pages | auction-storage：forum/catalog；auction-integrations + auction-jobs：forum | 目录续页的连续楼层、真实 post ID 与正文证明；与主记录同事务发布及 CAS 更新，不是竞价权威事实 |
@@ -173,6 +182,7 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 用户注册/重绑的 `user_mail_commands` 归上文 Users owner，SQL 位于 `database/users/mail/postgres/`；它不是由邮件传输维护的第二份发送账本，故不在本分组重复登记。
 
 A16-A19 使用 `auction-storage` 的邮件表做 PostgreSQL 完整档状态与审查投影；A20 的全局 Worker control 唤醒不写入额外触发表；`000008_mooglemail_polling` 追加 `mail_poll_state` 的 lease/fencing 与失败字段，Worker 在同一事务中提交 `inbound_mail`、`mail_commands` 和 cursor。应用层定义命令与查询端口，`auction-jobs`/`auction-integrations` 负责远程读取；基础通知和结算 delivery 已进入 outbox transport，结算 send 的 Sent/Balance 严格解析、exact remote ID 查找和自动 proof 对账已接入 PostgreSQL Worker，无法证明远端 ID 时进入 `manual_reconcile`。
+`000052_mail_poll_pending_reads` 新建详情读取恢复队列；无附件邮件详情 GET 会改变远端已读状态，因此同一 claim 下先持久登记整窗列表摘要，再读取详情。`database/mail_poll/reads.rs` 独占队列 SQL，主键 `read_sequence` 保存处理顺序，`(mailbox_key, external_mail_id)` 唯一且外键绑定 `mail_poll_state`；world 为 main/isekai，MID/发件人/主题有界并拒绝控制字符，不保存正文、HTML、Cookie、token 或装备 key。读取/登记先锁邮箱行，再以数据库实时钟重验 token、owner、版本、有效期及 world；重复 MID 必须身份一致。Worker 优先按 MID 恢复最早待读前缀，已存在 cursor 不重置；提交入站事实、命令账本与 cursor 时同事务删除队列完成前缀，失败或取消保留后缀。allowlist 或 world 变更与待读项冲突时保留队列并失败关闭；迁移不猜测升级前已读但未记录的 MID。查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
 论坛主题写入未知时先按精确标题只读对账，未命中必须由 `forum_sync_admin_commands` 的持久授权打开下一次 POST。所有固定目录页与系统日志的 post ID 未持久化时，用户回帖不得导入；固定楼层更新以前一内容版本 CAS 收口，每个主题另以独立 lease/fencing 串行刷新，并在完成时把 `content_next_scan_at` 推进到下一次论坛轮询周期；`processed_through_post_number` 只由完整主题读取按远端楼层顺序推进，待重试命令使水位停在其前一楼。`auction_forum_bid_commands.last_error_code` 保存 jobs 分类的具体拒绝码，`last_error_detail` 保留本地有界诊断；
 应用读模型同时投影二者，Worker 按[安全英文展示规则](docs/contracts/invariants.md#i-08-外部写入发生在本地提交之后)解释；旧通用拒绝不回填、不重新执行，错误展示复用既有列，不改变自然键、尝试次数或终态。
 
@@ -185,6 +195,11 @@ MoogleMail 异常原始数据不进入数据库 schema：Worker 按独立运维�
 主动 ComposeSend 的 Sent proof 使用既有 delivery/outcome metadata 与外部引用字段，不新增表、列或 migration；`sent_verified`、`external_reference_proven`、`proof` 和 `mooglemail:world:send:mid` 仍属于成功写回的安全结果投影，Sent baseline/scan 失败只保留 `manual_reconcile`，不伪造新的数据库事实。
 
 `migrations/postgres/000036_mail_intake_equipment_diagnostic` 仅为 PostgreSQL 完整档的 `inbound_mail` 增加 nullable `equipment_diagnostic` sidecar；它只在装备邮件被拒绝且首个装备读取失败时保存非权威安全投影，不能进入 `decision_metadata`、command digest、completion proof 或 cursor；成功读取只丢弃已加密准备内容。
+
+`000056_equipment_source_diagnostic_codes` 在同一追加迁移中替换该 sidecar 的 CHECK，
+仅为 `stage=parse/category=protocol_drift` 放行[装备来源解析的九个原因码](ops/mail/diagnostics.md#装备读取失败诊断)。
+原有诊断结构、大小/身份/证据边界、snapshot/filter 原因及历史空原因保持兼容，不更新任何历史行；
+SQL owner 仍为 storage/mail_poll。新版 Worker 启动前必须应用此迁移，否则新原因会使入站事实与游标的原子提交失败。
 
 ## 实时事件与运维告警
 

@@ -69,6 +69,11 @@ chmod 600 ops/config/auction.secret.toml
 Unix socket 或显式 TLS 策略使用带参数 URL，其他协议不受支持。数据库凭据只在敏感文件中，外部备份工具同样要求显式
 host/port，不从环境补齐目标。
 
+旧 URI 必须在 authority/路径或查询覆盖中明确指定最终 host（含 Unix socket）和库名；拒绝 `postgres:` 缩略形式、
+空目标、fragment、控制字符及无效百分号或 UTF-8 转义。URI/query 显式端口须非零；省略端口固定为 5432，配置层只追加
+该默认端口，不重写原文凭据编码。普通角色与直接存储连接都不使用 `PGHOST`、`PGPORT`、`PGDATABASE` 补齐目标；用户名、
+密码、pgpass、IPv6、socket 和 TLS 参数保留原驱动语义。
+
 ## PostgreSQL 维护凭据
 
 `postgres-bootstrap` 加载 Public 应用配置，`postgres-rebuild` 加载 Worker 应用配置。其独立维护 TOML 只接受 `[database]` 或
@@ -83,6 +88,15 @@ owner-only。未提供时从应用 URL 仅替换库名派生维护连接，应�
 
 `equipment_filter.qualities` 是硬性接收品质门槛，默认 `["Legendary", "Peerless"]`；低于该列表的拍卖装备邮件直接退回，`equipment_filter.enabled` 只控制前后缀、分类、类型和等级等附加过滤。空列表回退默认 L/P。
 `equipment_colors.rules` 控制论坛拍卖帖中的装备名称标色：可按装备类型（如 `One-Handed`）和装备种类（如 `Rapier`）过滤，按顺序首个命中；前缀/后缀分别标色，二者同时命中时整件装备使用 combined 颜色；Peerless 品质词固定彩虹色。该配置只影响论坛帖子，不改变 Public/Admin 装备展示。
+类型、种类、品质分别用 `categories`、`equipment_types`、`qualities` 数组多选，同维 OR、维度间 AND；
+每组最多 256 项，每项为去首尾空白后的 1–64 字节名称、无控制字符且不重复（忽略 ASCII 大小写）。空数组沿用旧
+`category`、`equipment_type`、`quality` 单值，两者均空表示该维不过滤；同维新旧字段均非空拒绝。
+空数组编码时省略，以保持旧配置指纹及命令重放；新非空数组须使用支持该契约的 Admin、Worker 和 `auctionctl`，
+保存后按下表重启，Worker 以启动时的单条多选规则渲染，不拆成多条规则。
+新 `equipment_types` 数组的材质族闭集为 Cloth 的 Cotton/Gossamer/Ironsilk/Phase、Light 的
+Leather/Drakehide/Kevlar/Shade、Heavy 的 Plate/Chain/Reactive/Power。材质族匹配要求实际装备大类正确、
+完整种类首词精确相等并以空格连接非空部位，不作子串匹配；其他数组选项精确匹配完整种类。
+例如 `["Phase", "Shade Helmet"]` 匹配所有 Phase 部位或精确的 Shade Helmet；旧 `equipment_type` 单值仍只精确匹配完整名称。
 `bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感），Worker 启动时读取独立名单投影。
 命中名单的买家或流拍/撤拍返还收件人保留在内部履约路径；仅在真实远端身份、装备及资金证明全部通过后完成内部义务，
 流拍/撤拍装备留存。当前凭据身份与收件人不匹配时持久延期，不转普通外发，也不凭名单直接满足义务。

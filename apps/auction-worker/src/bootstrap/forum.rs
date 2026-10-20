@@ -13,10 +13,11 @@ pub(super) async fn configure_forum(
     Option<auction_jobs::ForumReplyRuntime>,
     Option<auction_jobs::LotWatchPmRuntime>,
     Option<Arc<dyn auction_application::ForumTargetProfileReader>>,
+    Option<Arc<dyn AdminCredentialRuntimeOwnership>>,
 )> {
     let forum_config = &config.worker.forum;
     if !forum_config.enabled {
-        return Ok((None, None, None, None));
+        return Ok((None, None, None, None, None));
     }
     if store.backend() != DatabaseBackend::Postgres {
         anyhow::bail!("E-Hentai 论坛同步仅支持 PostgreSQL 完整档");
@@ -24,6 +25,7 @@ pub(super) async fn configure_forum(
 
     let credential_world = AdminCredentialWorld::parse(&forum_config.credential_world)
         .context("forum credential_world must be main, isekai, or shared")?;
+    let mut runtime_ownership = None;
     let credentials = if let Some((key_id, key_material)) =
         config.credential_data_key_id().zip(config.credential_data_key())
     {
@@ -61,6 +63,7 @@ pub(super) async fn configure_forum(
         }
         let invalidator: Arc<dyn AdminCredentialRuntimeWriter> = store.clone();
         if let Some(ownership) = ownership {
+            runtime_ownership = Some(Arc::clone(&ownership));
             EhentaiCredentialSet::from_owned_runtime_cookies(cookies, invalidator, ownership)
         } else {
             EhentaiCredentialSet::from_runtime_cookies(cookies, invalidator)
@@ -75,6 +78,7 @@ pub(super) async fn configure_forum(
                 .await
                 .context("acquire configured E-Hentai forum credential ownership")?,
         ) as Arc<dyn AdminCredentialRuntimeOwnership>;
+        runtime_ownership = Some(Arc::clone(&ownership));
         EhentaiCredentialSet::from_owned_cookie(
             EhentaiCookie::from_bytes(cookie.as_bytes())
                 .map_err(|error| anyhow::Error::msg(error.to_string()))?,
@@ -177,5 +181,5 @@ pub(super) async fn configure_forum(
         std::time::Duration::from_secs(forum_config.lease_duration_seconds),
     )
     .map_err(anyhow::Error::msg)?;
-    Ok((sync, reply, Some(pm), Some(gateway)))
+    Ok((sync, reply, Some(pm), Some(gateway), runtime_ownership))
 }

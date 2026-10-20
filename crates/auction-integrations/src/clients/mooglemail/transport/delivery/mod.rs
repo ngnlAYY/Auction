@@ -53,6 +53,7 @@ impl MoogleMailDeliveryTransport {
             settlement_equipment_opener: None,
             templates,
             cash_evidence_gateway: None,
+            funding_policy_reader: None,
         }
     }
 

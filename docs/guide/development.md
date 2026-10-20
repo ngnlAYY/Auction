@@ -18,7 +18,8 @@ just verify
 ```
 
 分项顺序见 [Justfile](Justfile)，实现及 CI/MSRV 范围见[CI 说明](ci/README.md)。`cargo check --all-targets` 只编译
-已有目标，文档门禁只核验链接、锚点、导航和包 README。未经明确要求，不新增或运行单元、集成、功能、端到端、
+已有目标；`equipment-contract` 只读核对装备诊断原因的 Rust/SQL/Admin/译文闭集，纳入默认静态门禁。
+文档链接、锚点、导航和包 README 由人工核对。未经明确要求，不新增或运行单元、集成、功能、端到端、
 浏览器测试及手工冒烟，保留已有测试。依赖审计独立联网获取 RustSec，不启动产品或修改锁图：
 
 ```bash
@@ -73,7 +74,8 @@ just release-check --single-binary
 
 Web 使用 `wasm-release`；dx 的 esbuild 仅供构建，不增加 Node/npm 运行链。`build-*` 变体按 `BUILD-INFO` 判定复用，
 构建输入（代码、迁移、内嵌模板、发布脚本）、`Cargo.lock`、feature 与构建环境完全一致且制品完整时直接复用，
-只改文档不重跑 WASM 或 Fat LTO；Web payload 另按 surface、共享层与工具链版本单独复用。本机可选用
+只改文档不重跑 WASM 或 Fat LTO；Web payload 另按 surface、共享层、契约、工具链版本及同一构建环境摘要单独复用，
+修改 `CARGO_PROFILE_WASM_RELEASE_*` 或 rustflags 会重新构建页面。本机可选用
 `RUSTC_WRAPPER=sccache SCCACHE_DIR=target/sccache`（sccache 0.18.0）与
 `RUSTFLAGS="-C link-arg=-fuse-ld=lld"`（lld 链接）前缀，两者只在本地生效，不改变 feature、资源隔离或归档契约。复用判定、指纹实现、
 资源隔离与 `--allow-dirty` 限制归[CI 说明](ci/README.md#发布边界)及[发布手册](ops/README.md#发布制品)；

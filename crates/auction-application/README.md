@@ -60,8 +60,16 @@ Sent 对账，不能重寄未知写入。
 
 ## 结算与恢复端口
 
+Recovery 每封退件由 storage 在同一事务追加唯一消费事实、增加计数并建立回收动作，重寄不释放原消费身份。
+重复使用的 action 按来源 MID 区分新的 take prepare/activate，同轮重试保持原命令；
+`MailDeliveryEnqueuer::find_recovery_preparation` 只读恢复旧版 prepare 已提交而 action 未关联的窗口，完整来源、
+摘要和 payload 冲突失败关闭。旧 prepared/enqueued 不改写命令或外部结果。
+
 [services/settlement](crates/auction-application/src/services/settlement) 拥有结算与履约用例，重放必须用冻结策略、
 资金池、lot 事实和义务验证原结果；历史账本通过独立防腐入口重建只读结果，缺失证据不回退到写入。
+履约激活继续沿用同一 claim 的 token/fencing，租约存在期间不写 `next_attempt_at`；紧接的
+reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖家货款对齐共享五分钟窗口，
+其它装备寄送沿用普通重试间隔，保持发送 owner 与履约 owner 分离。
 [services/recovery](crates/auction-application/src/services/recovery) 统一 Admin/Worker 确认与版本门禁。履约 intent、
 payload、稳定身份及摘要不得包含装备 secret，派发世界与装备来源世界分别建模；`SettlementFulfillmentBotIdentityReader`
 只读当前 active Cookie/world 的 `VerifiedMailPlayerIdentity`，无预期绑定也远端核验，无法证明时返回错误。
@@ -85,6 +93,22 @@ preview 只读数据库、不读远端身份/余额、不输出自由额度；ap
 `FundingCashGateProvider` 默认无能力，只有完整现金发送门接线后才能 apply；补偿仅资金化已冻结需求，旧无 UID 责任
 只能隔离扣占；新 COD 另需当前同 session 精确收款与 UID 绑定，不得从旧 collected 或总余额生成第二份现金来源。
 
+UID 账户另有显式 `record_only` 策略，由独立命令初始化缺失账户并纳入预览摘要及事务版本；默认 `strict_cash` 沿用上述现金对账。
+仅记账模式保留真实身份、干净 compose、正向库存及精确 Sent 证据，省略账号余额采集和额度比较；按每笔冻结 B/C 建立唯一有限的
+会计来源，允许所有人自行使用 Credits。账本仍保护原义务、用途、未知投递和 B+C=S+T，不把记账来源当作现金证明。
+
+### 旧结算显式核对
+
+[ports/settlement/legacy_repair](crates/auction-application/src/ports/settlement/legacy_repair) 为旧自寄提供单目标、
+默认只读的修复端口。写入绑定稳定命令、完整预览摘要、原版本、操作者与原因，使用同一 opaque guard 下的真实
+UID、干净 compose 和精确装备库存；流拍装备可按事实留存，明确自寄拒绝后的成交付款仅恢复内部准备。
+原 delivery、发送时间、错误及全部指针快照形成只追加历史桥，后续内部付款必须沿用已核 UID，不降级外发。
+
+[ports/settlement/funding/legacy.rs](crates/auction-application/src/ports/settlement/funding/legacy.rs) 为旧实收的
+Bot 卖家款提供独立责任认领：同账号精确 Sent-collected、冻结金额和账户策略通过后，将已隔离责任转入原标的
+卖家用途再留存。命令与目标均唯一，不重复发行旧 B，不把留存收入增加为自有可消费额度。
+两条路径均由 `auctionctl legacy-settlement` 装配，预览不取得凭据 owner；执行遵守[停机修复流程](ops/README.md#旧-bot-结算的显式核对)。
+
 ## 管理、Public 读模型与运维投影
 
 [ports/admin](crates/auction-application/src/ports/admin) 与 [services/admin](crates/auction-application/src/services/admin)
@@ -93,6 +117,14 @@ runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architect
 从开始到收口持有 `WorkflowGuard`，文件发布后只能向前恢复账本，结果未知不得恢复旧文件（见
 [运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)）。
 
+装备标色规则的 `categories`、`equipment_types`、`qualities` 保存同一条规则的多选条件：同维任一匹配，
+维度间同时满足；每维空数组沿用旧单值字段，两者均空则不过滤。同维新旧字段同时非空、重复或未规范化条目
+均拒绝。空数组不序列化，旧文档指纹和命令摘要保持原义；标色不改变收件品质门槛、装备事实或价格。
+新 `equipment_types` 数组中的十二种护甲材质族同时匹配其所属实际大类和完整装备种类的首词/部位边界，
+其余选项精确匹配完整种类。旧 `equipment_type` 单值始终保持精确匹配，不继承材质族语义。
+材质归类和后缀 `the ` 兼容比较复用 `auction-domain::equipment::taxonomy`，应用层只拥有规则命中语义，
+不再维护分类副本；词典扩展不改变现有收件允许列表、绑定要求、等级门槛或旧标色单值含义。
+
 [ports/auction/queries](crates/auction-application/src/ports/auction/queries) 定义拍卖、lot、竞价/价格历史及账户安全投影，
 [ports/public](crates/auction-application/src/ports/public) 定义规则、黑名单、补偿与装备链接等读取端口；
 [queries/countdown.rs](crates/auction-application/src/ports/auction/queries/countdown.rs) 定义论坛图片所需的公开时间快照，
@@ -100,6 +132,10 @@ runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architect
 （见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）；规则缓存只接收有效可重建快照，miss、损坏、过期或
 后端失败均回源；完整装备 URL 仅能移交已授权的 HTTP DTO 或论坛渲染边界。Admin 装备录入把来源读取、key 加密和持锁
 写入分成窄端口，来源/策略拒绝发生在写事务前。
+成交价格历史的 `PublicPriceHistorySort` 限定时间、价格的升降序，旧 cursor 仅支持默认时间倒序；
+名称按 Unicode 空白或英文逗号拆成最多八个词条，各词按字面包含并以 AND 组合，不要求相邻或依输入顺序出现；
+完整筛选集统计的可选 `median_exact` 用规范十进制字符串保存整数或半个 Credit，应用与 HTTP 共同校验
+安全范围、最低/最高价区间及旧整数中位数的一致性，不通过浮点重算金额。
 
 [ports/forum](crates/auction-application/src/ports/forum) 区分公开镜像、外部同步与回帖命令，真实处理楼层不能由 post ID
 或内容版本推算；`ForumTopicPublication` 区分真实创建回执与找到既有主题，Admin 状态读取复用公开安全投影端口而不获得
@@ -125,8 +161,13 @@ token/fencing 和数据库实时租约，过期不得复活；release 只接受�
 [ports/mail](crates/auction-application/src/ports/mail) 与 [services/mail](crates/auction-application/src/services/mail)
 拥有轮询、用户命令、装备入站及 delivery outbox 编排：处理前检查持久化完成证明，原接受决定可恢复，不能因取件后
 资产变化改判退件；`MailPollStore::fail_after_prefix` 要求同一 fenced 事务提交连续成功前缀、游标和失败退避。
+`MailPollReadJournal` 是详情 GET 前的窄持久队列端口，只传列表身份与当前 claim。读取与登记均核对 mailbox/world、token、
+owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘要，后续只随已完成前缀的入站事务删除，不把正文或凭据交给队列。
 仅 `Retryable` 错误与超时进入有界重试；原始邮件/响应只进入独立加密诊断，不参与命令摘要、完成证明或 cursor
 （见[邮件诊断](ops/mail/diagnostics.md)）。
+`ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
+只有 parse/protocol_drift 组合可投影到原有 sidecar 的 `detail_code`；不接受原始来源错误文本，
+不参与业务决定、命令摘要或历史记录重写。
 
 [ports/scheduling](crates/auction-application/src/ports/scheduling) 只表达冻结轮次与下一 UTC 触发时刻（cron 解析在配置层），
 定时器不能替代持久化 due、游标和租约；[ports/operations](crates/auction-application/src/ports/operations) 定义安全水位、

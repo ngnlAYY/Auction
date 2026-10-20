@@ -36,7 +36,7 @@ use crate::{
 use super::{
     config::{DEFAULT_USER_AGENT, EquipmentSourceConfigurationError, EquipmentSourcePolicy},
     model::{EquipmentFacts, canonical_facts, canonical_fingerprint, sha256},
-    parser::{parse_equipment_page, parse_equipment_url},
+    parser::{EquipmentParseError, parse_equipment_page, parse_equipment_url},
 };
 
 #[path = "reader/diagnostics.rs"]
@@ -139,7 +139,8 @@ impl EquipmentSourceAdapter {
             parse_equipment_url(&self.endpoint, &self.policy, &world_id, &equipment_url)?;
         let world = MoogleMailWorld::parse(&world_id).ok_or(AdminIntakeError::InvalidCommand)?;
         let body = self.fetch_document_for_world(world, target).await?;
-        let facts = parse_equipment_page(&body, &equipment_id)?;
+        let facts = parse_equipment_page(&body, &equipment_id)
+            .map_err(|reason| diagnostics::source_parse_error("html", reason))?;
         let key = EquipmentKey::new(&key).map_err(|_| AdminIntakeError::InvalidSource)?;
         let attributes = facts.attributes()?;
         let mut fingerprint_input = Vec::new();
@@ -154,7 +155,7 @@ impl EquipmentSourceAdapter {
             external_equipment_id: equipment_id,
             name: facts.name,
             category: facts.category,
-            level: facts.level,
+            level: facts.level.legacy_level(),
             tradeable: facts.tradeable,
             attributes,
             collected_at: Utc::now(),
@@ -412,11 +413,20 @@ impl EquipmentSourceAdapter {
         };
         let prefix = if context.world_id == "isekai" { "/isekai/equip/" } else { "/equip/" };
         let target = match attachment.key.with_bytes(|bytes| {
-            std::str::from_utf8(bytes).map(|key| {
-                let mut target = self.endpoint.clone();
-                target.set_path(&format!("{prefix}{}/{}", context.external_equipment_id, key));
-                target
-            })
+            std::str::from_utf8(bytes).map_err(|_| AdminIntakeError::InvalidSource).and_then(
+                |key| {
+                    let mut target = self.endpoint.clone();
+                    target.set_path(&format!("{prefix}{}/{}", context.external_equipment_id, key));
+                    // 与手工 URL 读取复用唯一 origin/world/ID/key/allowlist 门，诊断不另开宽松路径。
+                    parse_equipment_url(
+                        &self.endpoint,
+                        &self.policy,
+                        &context.world_id,
+                        target.as_str(),
+                    )
+                    .map(|(target, _, _)| target)
+                },
+            )
         }) {
             Ok(Ok(target)) => target,
             _ => {
@@ -497,9 +507,8 @@ impl EquipmentSourceAdapter {
                     ),
                 },
             },
-            Err(error) => MailEquipmentReadOutcome::Failed {
-                error: ApplicationError::from(error),
-                observation: diagnostics::prepare_observation(
+            Err(reason) => {
+                let mut observation = diagnostics::prepare_observation(
                     self,
                     context,
                     MailEquipmentDiagnosticStage::Parse,
@@ -507,8 +516,13 @@ impl EquipmentSourceAdapter {
                     response_status,
                     response_elapsed,
                     Some(owned_body),
-                ),
-            },
+                );
+                observation.source_detail_code = Some(reason);
+                MailEquipmentReadOutcome::Failed {
+                    error: ApplicationError::from(diagnostics::source_parse_error("html", reason)),
+                    observation,
+                }
+            }
         }
     }
 
@@ -521,7 +535,8 @@ impl EquipmentSourceAdapter {
             return Err(AdminIntakeError::InvalidCommand);
         }
         input.validate()?;
-        let facts = canonical_facts(&input)?;
+        let facts = canonical_facts(&input)
+            .map_err(|reason| diagnostics::source_parse_error("canonical_json", reason))?;
         let key = EquipmentKey::new(&input.key).map_err(|_| AdminIntakeError::InvalidSource)?;
         let fingerprint = canonical_fingerprint(&world_id, &facts)?;
         let attributes = facts.attributes()?;
@@ -531,7 +546,7 @@ impl EquipmentSourceAdapter {
             external_equipment_id: facts.external_equipment_id,
             name: facts.name,
             category: facts.category,
-            level: facts.level,
+            level: facts.level.legacy_level(),
             tradeable: facts.tradeable,
             attributes,
             collected_at: Utc::now(),
@@ -629,7 +644,7 @@ fn facts_to_snapshot(
         external_equipment_id: facts.external_equipment_id,
         name: facts.name,
         category: facts.category,
-        level: facts.level,
+        level: facts.level.legacy_level(),
         tradeable: facts.tradeable,
         attributes,
         collected_at: Utc::now(),

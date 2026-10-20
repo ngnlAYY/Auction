@@ -6,6 +6,10 @@
 集成层，SQL 模型与行映射不越过存储边界。表、迁移与查询归属见[对象契约](docs/contracts/schema.md)，
 锁序、幂等与审计语义见[领域不变量](docs/contracts/invariants.md)。
 
+PostgreSQL 连接入口独立校验 URI：拒绝缩略形式、fragment、控制字符和无效编码，host/socket 与库名必须由 URI/query
+明确给出；省略端口固定为 5432，不能由 PG* 环境补齐目标。凭据、pgpass、IPv6、socket 与 TLS 查询覆盖仍交给驱动，
+连接错误不回显 URI。配置字段规则见[连接参数](ops/config/README.md#postgresql-连接参数)。
+
 ## 源码入口
 
 | 入口 | 职责 |
@@ -64,6 +68,12 @@ suppressed 且不回退 MM；sending 永不回 pending，过期 sending 只转 m
 
 ## 持久调度与慢速代理
 
+`mail_poll/reads.rs` 实现详情读取的 `MailPollReadJournal`；`000052` 的 `mail_poll_pending_reads` 只保存 mailbox/world、MID、
+发件人、主题与收件时间，身份列有界且默认调试输出脱敏。短事务锁定当前邮箱 claim，并在取得行锁后及提交前重验实时租约；
+同 MID 重复登记须身份一致，不能覆盖旧值。队列按持久序号返回最早前缀；`poll::commit` 在入站事实、命令账本和 cursor 的
+同一事务删除完成前缀，失败、取消、租约丢失和未完成后缀均保留。更改 allowlist 或 mailbox/world 后遇旧待读项时失败关闭，
+不由启动或迁移丢弃队列。查询使用运行时绑定 SQL，无新增 SQLx 宏离线元数据。
+
 scheduler 保存 due、租约、尝试次数和失败状态；完成/失败须匹配 owner、精确租约及版本，Admin 改期清除旧租约并推进
 版本，陈旧任务不能收口。已存在轮次按冻结事实读取，配置变更不改写旧命令或时间；自动 Draft 不提前物化运行期结束
 时间，后继 SQL 规则列与快照同取新模板。slow proxy 扫描在 LIMIT 前排除已到截止的 lot，执行由竞价事务复核
@@ -86,13 +96,24 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 [auctions/countdown.rs](crates/auction-storage/src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。
+`price_history/postgres/numbered.rs` 在同一 Serializable 快照内按完整筛选集计算统计和服务端排序分页；
+编号页与 cursor 共用名称字面包含词条及 `ILIKE ALL`：空白或逗号分隔的缩写逐词 AND，仍转义 `%`、`_` 与反斜杠。
+排序仅接受时间、价格升降序，价格相同后沿用时间、场次、内部 lot 顺序与 UUID 保持稳定。
+中位数选中间一至两笔价格后按 `numeric` 求均值，`median_exact` 返回规范十进制字符串，旧 `median` 显式半数取偶保留整数兼容口径；
+不先相加 bigint、不经浮点数，旧 cursor 继续固定时间倒序。
 Admin 读取不为补全投影临时写入；邮件展示和诊断 sidecar 均非权威数据，不参与幂等、完成证明或 cursor。
+`operations_alert/snapshot/reads.rs` 的履约待处理水位与 Worker 领取的业务状态一致，只计 `ready` 义务的
+`pending/prepared/enqueued` 阶段；最老积压按这批义务及独立的未终结 `blocked` 义务计算。
+`contingent` 退款保持未触发事实，不进入待处理与积压年龄；`blocked/failed/manual_reconcile` 保持各自计数，
+Dashboard 与 operations alert 共用该投影，字段契约见[Dashboard 与 readiness](docs/contracts/routes.md#dashboard-与-readiness)。
 结算报告在同一 Serializable 快照内读取汇总与明细，序列化冲突最多尝试三次；明细排除不参与结算的
 `withdrawn` 标的，其余 lot 缺失结算事实时失败关闭。赢家累计领先时长由追加式 bid 重建，无领先事实时为零。
 `leader_since` 按全部接受事实判断连续领先是否中断（普通出价后被原领先者快速代理反超也重新计时）；`000037` 只重建
 可由追加式 bid 证明的未结算 live lot 投影，不改已结算金额、终态 lot 或历史审计。
 
 Delivery 进入 sending 前须证明命令已提交，未知发送结果进入 manual_reconcile，不自动重寄。
+Fulfillment 激活后保留原 claim 的 token/fencing 继续对账，领取期间 `next_attempt_at` 始终为空；
+COD 与卖家货款的下次共享追踪窗口由对账延期在清除 claim 的同一事务持久化，不在激活事务提前写入。
 [delivery_scheduler/cash](crates/auction-storage/src/database/delivery_scheduler/cash) 统一新旧 sending 入口：有证据时按
 generation→排序 worlds→资金 scope/account→必要业务/凭据→义务→delivery→fulfillment→allocation 加锁，无证据时早锁
 scope 及持久 allocation 关联；完整 payload、recipient、command/hash 及 token/fencing/实时 lease 锁内精确匹配。
@@ -136,6 +157,12 @@ Recovery action 终态先锁父 case 再锁 action，确认路径按 UUID 预锁
 RetryFailed/ReconcileRetry，SQLSTATE 原样交 runner。源码静态结果见[状态页](docs/status.md)，迁移、SQL 执行、并发与
 大库锁成本仍需独立运行证据。
 
+`000051` 追加 `settlement_recovery_return_consumptions`，以退件 `return_mail_id` 全局唯一地保存消费事实，
+禁止更新或删除；记录、计数和后续 action 在同一 Serializable 事务提交。重寄清空 recovery 当前指针仍排除旧邮件，
+升级只回填当前指针、回收动作和历史 take 投递可证明的消费，不修正旧计数。新 take/activate 身份按真实退件区分，
+同一 MID 的重试保持稳定；`mail_delivery/preparation.rs` 只读恢复旧 prepare 已提交但尚未关联 action 的窗口，
+完整来源/摘要/payload 不符失败关闭，已有 prepared/enqueued 沿用原身份。
+
 ## 真实现金账户与事务 helper
 
 [settlement_funding](crates/auction-storage/src/database/settlement_funding) 独占迁移 `000047` 的资金 scope、稳定 UID
@@ -148,6 +175,30 @@ delivery 锁之前按持久 allocation 关联早锁原账户，孤儿/歧义失�
 新 COD 要求精确 MID/当前账号实收绑定、全局 payment/source 唯一且发送晚于最近 opening 边界。
 `delivery_scheduler/capability.rs` 是当前构建唯一 V1 提供者，非 postgres 档位返回 None；`delivery_admin` 仅为明确
 失效的 watch preflight 保留无 sending 时间的严格投影。
+
+`000055` 将 `strict_cash`/`record_only` 策略持久化至 UID 账户，旧账户默认前者。
+仅记账初始化复用原责任预览、稳定命令、追加账本和审计，不读取现金；锁内复核策略及版本，各进程不能按配置暗切换。
+内部购买和补偿从原标的冻结 B/C 生成唯一有限的会计来源，旧责任先隔离再按精确原收款认领；原有真实现金路径保持现金门。
+跨世界外部付款的 1C 载体绑定原 Isekai 义务、完整 canonical payload 和 delivery 唯一来源，只记入对应 carrier 用途。
+仅记账不因个人用款或其他标的的现金未知而冻结全局，原标的的用途、未知占用、禁止重发及装备冲突仍受原事务保护。
+
+[settlement_legacy_repair](crates/auction-storage/src/database/settlement_legacy_repair) 独占 `000053` 的旧自寄核对。
+单笔 Serializable 事务验证原版本及完整快照、真实 UID 和正向库存，追加原投递/履约指针与新证明；流拍留存满足
+原义务，成交自寄明确被拒后的修复仅把当前执行投影恢复为无外发 pending。原投递及错误证据保留，后续内部付款
+受持久修复事实的 UID 约束。库存与资金预览只按完整匹配的事实解除对应旧投递占用。
+
+`fulfillment_scheduler/internal/conflicts/intake.rs` 仅为已核验新鲜正向库存的竞得装备付款与流拍留存，
+从当前标的投稿精确绑定已接受入站及成功领取，闭合该次入库和更早由各自拒收账本绑定的已完成退回。
+世界、装备、MID、发件人、附件集合与数量、动作证明及完成先后均需匹配；未知、后续或其他标的动作继续阻断，
+历史投递与入站事实保持原样，卖家留款等无库存动作不使用该例外。
+
+[settlement_funding/legacy](crates/auction-storage/src/database/settlement_funding/legacy) 独占 `000054` 的旧 Bot
+卖家款认领：锁定既有隔离用途、原付款/卖家义务与同账号精确 Sent-collected 证明，逐标的将隔离责任转为卖家留存，
+不再次创建旧收款 source 或发行 B。两种修复保存稳定命令、唯一目标、完整证明及追加审计，未知提交只查询原命令。
+旧款认领另接受原维护产生的 `sent_recovered_reference_v1` 闭集事实，精确核对原 MID、收件人及恢复时资产矩阵；
+恢复时尚未付款的历史保留原状，本次仍须用同一真实会话证明该 MID 已收款且无剩余资产。普通新收款继续只接受
+`sent_exact_payload_v1`；旧恢复证明不改标、不新增来源，开户前时间边界、完整原载荷和 prepare/activate 绑定保持不变。
+资金预览仅对严格解码且零 Credits、零 COD、无附件的纯通知排除资金未知阻塞，保留通知本身的人工核对状态。
 
 ## 后端选择、连接池与验证
 
@@ -173,6 +224,8 @@ cargo check --locked -p auction-storage --no-default-features --features postgre
 ## 迁移
 
 [PostgreSQL 迁移](migrations/postgres/README.md)只追加；普通启动不隐式迁移，执行门禁见[执行边界](migrations/postgres/README.md#执行边界)。
+`000056` 仅扩展入站装备诊断的 parse/protocol_drift 原因闭集，保留历史诊断及原子入站/游标语义；
+新版 Worker 启动前必须完成迁移，字段和值域见[数据库契约](docs/contracts/schema.md)。
 `initialization/` 只供确认后的合并首次空库初始化：同一专用连接持 SQLx 迁移锁，拒绝已有用户对象与其他客户端，
 不建库、不删对象、不升级已有库。普通迁移与初始化共用受限执行视图：`000005`/`000015` 修正历史别名，`000044` 在
 ALTER 前执行已排队的 `user_forum_identity_account_id_check` 延迟约束，`000047` 为保留字列 `authorization` 加双引号。

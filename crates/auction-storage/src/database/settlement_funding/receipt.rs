@@ -12,16 +12,44 @@ pub(super) async fn validate_receipt(
     payment: Uuid,
     buyer: i64,
 ) -> Result<(), FundingError> {
+    validate_receipt_boundary(tx, account, receipt, payment, buyer, false).await
+}
+
+/// 开户前已收款只能重认既有隔离责任；复用原付款精确协议，不创建第二个收款来源。
+pub(super) async fn validate_legacy_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    account: &LockedFundingAccount,
+    receipt: &FundingCollectedReceipt<'_>,
+    payment: Uuid,
+    buyer: i64,
+) -> Result<(), FundingError> {
+    validate_receipt_boundary(tx, account, receipt, payment, buyer, true).await
+}
+
+async fn validate_receipt_boundary(
+    tx: &mut Transaction<'_, Postgres>,
+    account: &LockedFundingAccount,
+    receipt: &FundingCollectedReceipt<'_>,
+    payment: Uuid,
+    buyer: i64,
+    legacy: bool,
+) -> Result<(), FundingError> {
     let evidence = receipt.evidence;
     let sent = evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
-    let cash = evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
+    let cash = evidence.main_cash.as_ref();
     if !evidence.validate()
         || receipt.payment_obligation_id != payment
         || receipt.buyer_credits != buyer
         || sent.binding.authenticated_uid != account.uid()
         || sent.binding.world != SettlementWorld::Main
-        || cash.binding.world != SettlementWorld::Main
-        || cash.binding.authenticated_uid != account.uid()
+        || if account.records_only() {
+            cash.is_some()
+        } else {
+            cash.is_none_or(|cash| {
+                cash.binding.world != SettlementWorld::Main
+                    || cash.binding.authenticated_uid != account.uid()
+            })
+        }
         || !auction_application::valid_external_positive_id(&sent.external_mail_id)
     {
         return Err(FundingError::Unproven);
@@ -43,13 +71,17 @@ pub(super) async fn validate_receipt(
           AND d.command_id=f.prepare_command_id AND d.request_digest=f.prepare_request_digest
           AND d.activation_command_id=f.activate_command_id
           AND d.activation_request_digest=f.activate_request_digest
-          AND d.sending_at > (SELECT max(created_at) FROM public.settlement_funding_sources
-                             WHERE uid=$4 AND kind='reconciliation')"#,
+          AND (($5 AND d.sending_at <= (SELECT min(created_at) FROM public.settlement_funding_sources
+                             WHERE uid=$4 AND kind=$6))
+            OR (NOT $5 AND d.sending_at > (SELECT max(created_at) FROM public.settlement_funding_sources
+                             WHERE uid=$4 AND kind=$6)))"#,
     )
     .bind(payment)
     .bind(receipt.delivery_id)
     .bind(&sent.external_mail_id)
     .bind(account.uid())
+    .bind(legacy)
+    .bind(if account.records_only() {"record_opening"} else {"reconciliation"})
     .fetch_optional(&mut **tx)
     .await
     .map_err(storage)?
@@ -88,17 +120,53 @@ pub(super) async fn validate_receipt(
         "variables":variables,"credits":carrier,"cod":cod,"equipment_secret_refs":equipment});
     let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
     let metadata: serde_json::Value = row.try_get("result_metadata").map_err(storage)?;
+    let exact = metadata["proof"] == "sent_exact_payload_v1"
+        && metadata["sent_verified"] == true
+        && metadata["settlement_obligation_id"] == payment.to_string();
+    // 开户前的既有责任允许使用原维护恢复事实；新收款仍只接受发送时的 exact 证明。
+    // 此分支不升级旧 proof，也不代替本次同账号、精确 MID 的已收款联合证据。
+    let recovered = legacy
+        && legacy_recovered_proof(&metadata, &sent.external_mail_id, &sent.recipient, cod, carrier);
     if payload != expected
         || metadata["operation"] != "send"
         || metadata["template"] != template
         || metadata["external_reference_proven"] != true
-        || metadata["sent_verified"] != true
-        || metadata["proof"] != "sent_exact_payload_v1"
-        || metadata["settlement_obligation_id"] != payment.to_string()
+        || !(exact || recovered)
     {
         return Err(FundingError::Unproven);
     }
     Ok(())
+}
+
+/// 原维护恢复的闭集事实：恢复时可以尚未付款，本次收款仍由 opaque Sent 证明。
+fn legacy_recovered_proof(
+    metadata: &serde_json::Value,
+    mid: &str,
+    recipient: &str,
+    cod: i64,
+    carrier: i64,
+) -> bool {
+    let Some(collected) = metadata["collected"].as_bool() else {
+        return false;
+    };
+    let (pending, credits, equipment_count) =
+        if collected { (0, 0, 0) } else { (cod, carrier, i64::from(carrier == 0)) };
+    let sweep = &metadata["mailbox_sweep"];
+    let observed = |value: &serde_json::Value| {
+        value.as_str().is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok())
+    };
+    metadata["proof"] == "sent_recovered_reference_v1"
+        && metadata["sent_recovered"] == true
+        && metadata["recovered_mid"] == mid
+        && metadata["recipient"] == recipient
+        && metadata["cod_pending"] == pending
+        && observed(&metadata["observed_at"])
+        && sweep["mid"] == mid
+        && sweep["collected"] == collected
+        && sweep["cod_pending"] == pending
+        && sweep["remaining_credits"] == credits
+        && sweep["remaining_equipment_count"] == equipment_count
+        && observed(&sweep["observed_at"])
 }
 
 pub(super) async fn store_receipt(
@@ -107,7 +175,7 @@ pub(super) async fn store_receipt(
     receipt: &FundingCollectedReceipt<'_>,
 ) -> Result<(), FundingError> {
     let sent = receipt.evidence.sent_collection.as_ref().ok_or(FundingError::Unproven)?;
-    let cash = receipt.evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
+    let cash = receipt.evidence.main_cash.as_ref();
     let evidence = json!({"credential_id":sent.binding.credential_id,
         "credential_version":sent.binding.credential_version,"runtime_generation":sent.binding.runtime.generation,
         "uid":sent.binding.authenticated_uid,"player_name":sent.binding.player_name,
@@ -116,8 +184,8 @@ pub(super) async fn store_receipt(
         "collected":sent.collected,"remaining_credits":sent.remaining_credits,"cod_pending":sent.cod_pending,
         "remaining_equipment_ids":sent.remaining_equipment_ids,
         "receipt_observed_at":sent.observed_at,"receipt_digest":sent.digest,
-        "binding_digest":sent.binding.digest,"cash_credits":cash.credits,
-        "cash_observed_at":cash.observed_at,"cash_digest":cash.digest,"snapshot_digest":receipt.evidence.digest});
+        "binding_digest":sent.binding.digest,"cash_credits":cash.map(|cash|cash.credits),
+        "cash_observed_at":cash.map(|cash|cash.observed_at),"cash_digest":cash.map(|cash|cash.digest),"snapshot_digest":receipt.evidence.digest});
     sqlx::query("INSERT INTO public.settlement_funding_receipts(source_id,uid,payment_obligation_id,delivery_id,external_mail_id,evidence) VALUES($1,$2,$3,$4,$5,$6)")
         .bind(source).bind(&sent.binding.authenticated_uid).bind(receipt.payment_obligation_id)
         .bind(receipt.delivery_id).bind(&sent.external_mail_id).bind(evidence)

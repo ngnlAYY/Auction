@@ -139,7 +139,7 @@ where
     };
     let page = match tokio::time::timeout(
         fetch_remaining,
-        fetch_with_retry(gateway.as_ref(), request, config, metric_context.clone()),
+        fetch_with_retry(gateway.as_ref(), request, claim.clone(), config, metric_context.clone()),
     )
     .await
     {
@@ -348,7 +348,7 @@ where
         mailbox_key: claim.mailbox_key.clone(),
         claim_token: claim.claim_token,
         // cursor 由最后一封已完成邮件推进；预算耗尽时未完成后缀不进入本批次，下一轮从
-        // 该 cursor 继续读取，已完成前缀由入站/命令账本幂等校验防止重复副作用。
+        // 持久待读队列优先恢复；已完成前缀由入站/命令账本幂等校验防止重复副作用。
         next_cursor: last_completed_external_mail_id.or(page.next_cursor),
         polled_at,
         next_poll_at,

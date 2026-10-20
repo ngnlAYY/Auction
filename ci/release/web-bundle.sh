@@ -51,7 +51,9 @@ fi
 source_identity=$(path_fingerprint \
   "Cargo.toml" "Cargo.lock" "rust-toolchain.toml" \
   "crates/$package" "crates/auction-web-shared" "crates/auction-contracts" \
-  "ci/release/web-bundle.sh")
+  "ci/release/web-bundle.sh" "ci/release/build-identity.sh")
+# WASM 自定义 profile 与 rustflags 同样影响页面产物，不能只使外层原生二进制缓存失效。
+build_environment=$(build_env_fingerprint)
 
 # payload 结构门禁：入口、标题与文件类型；复用与新构建都必须通过。
 verify_payload_files() {
@@ -110,7 +112,7 @@ verify_payload_manifest() {
   fi
 }
 
-# 复用条件：源码身份、dx/rustc 版本与 profile 全部一致，且已存在可校验的 payload。
+# 复用条件：源码身份、dx/rustc 版本、profile 与构建环境全部一致，且已有可校验的 payload。
 # 命中后既不重新运行 dx，也不改写 mtime，保证内嵌资源与上一份制品逐字节相同。
 web_payload_reusable() {
   if [[ ! -d "$stable_root" || -L "$stable_root" ]]; then
@@ -124,7 +126,8 @@ web_payload_reusable() {
     $(read_build_info "$web_build_info" profile) != wasm-release ||
     $(read_build_info "$web_build_info" dx_version) != "$dx_version" ||
     $(read_build_info "$web_build_info" rustc_version) != "$rustc_version" ||
-    $(read_build_info "$web_build_info" source_fingerprint) != "$source_identity" ]]; then
+    $(read_build_info "$web_build_info" source_fingerprint) != "$source_identity" ||
+    $(read_build_info "$web_build_info" build_env_sha256) != "$build_environment" ]]; then
     return 1
   fi
   verify_payload_files || return 1
@@ -191,6 +194,7 @@ printf '%s\n' \
   "dx_version=$dx_version" \
   "rustc_version=$rustc_version" \
   "source_fingerprint=$source_identity" \
+  "build_env_sha256=$build_environment" \
   > "$web_build_info"
 chmod 0644 "$web_build_info"
 

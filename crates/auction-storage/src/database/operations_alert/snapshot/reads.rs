@@ -72,12 +72,17 @@ async fn delivery_snapshot(
     pool: &super::super::TrackedPool<sqlx::Postgres>,
     now: DateTime<Utc>,
 ) -> Result<OperationsAlertDeliverySnapshot, ApplicationError> {
-    let row = sqlx::query(
-        r#"SELECT
+    // 仅完整匹配追加修复事实及原投递身份的 failed 才已解决；不能仅凭 metadata 消除告警。
+    // 替换内容只有已审核的编译期 SQL 常量，不插入任何运行时业务值。
+    let query = r#"SELECT
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status IN ('prepared', 'pending', 'claimed', 'sending')) AS pending,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
-                AND status = 'failed') AS failed,
+                AND status = 'failed'
+                AND NOT EXISTS (
+                    SELECT 1 FROM public.settlement_legacy_self_reconciliations r
+                    WHERE /* trusted_legacy_self */
+                )) AS failed,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
                 AND status = 'manual_reconcile') AS manual_reconcile,
             COUNT(*) FILTER (WHERE origin_kind <> 'operations_alert'
@@ -96,11 +101,16 @@ async fn delivery_snapshot(
                 AND result_metadata @>
                     '{"reason_code":"recipient_not_found","take_required":true}'::jsonb)
                 AS oldest_returned_mail,
-            MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update"#,
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|_| storage_error("读取 operations alert delivery 水位失败"))?;
+            MAX(updated_at) FILTER (WHERE origin_kind <> 'operations_alert') AS last_update
+         FROM public.deliveries d"#
+        .replace(
+            "/* trusted_legacy_self */",
+            crate::database::settlement_legacy_repair::TRUSTED_DELIVERY_PREDICATE,
+        );
+    let row = sqlx::query(sqlx::AssertSqlSafe(query.as_str()))
+        .fetch_one(pool)
+        .await
+        .map_err(|_| storage_error("读取 operations alert delivery 水位失败"))?;
     let pending: i64 =
         row.try_get("pending").map_err(|_| storage_error("读取 delivery 积压计数失败"))?;
     let failed: i64 =
@@ -143,7 +153,9 @@ async fn fulfillment_snapshot(
 ) -> Result<OperationsAlertFulfillmentSnapshot, ApplicationError> {
     let row = sqlx::query(
         "SELECT
-            COUNT(*) FILTER (WHERE fulfillment.execution_state IN
+            -- 与履约领取一致：只有 ready 义务进入待处理，未触发的 contingent 退款不形成积压。
+            COUNT(*) FILTER (WHERE obligation.business_state = 'ready'
+                AND fulfillment.execution_state IN
                 ('pending', 'prepared', 'enqueued')) AS pending,
             -- 买家退回未付款 COD 后卖家收款义务按失败收口；失败的 blocked 不再计入积压。
             COUNT(*) FILTER (WHERE obligation.business_state = 'blocked'
@@ -152,7 +164,8 @@ async fn fulfillment_snapshot(
             COUNT(*) FILTER (WHERE fulfillment.execution_state = 'failed') AS failed,
             COUNT(*) FILTER (WHERE fulfillment.execution_state = 'manual_reconcile')
                 AS manual_reconcile,
-            MIN(CASE WHEN fulfillment.execution_state IN ('pending', 'prepared', 'enqueued')
+            MIN(CASE WHEN (obligation.business_state = 'ready'
+                         AND fulfillment.execution_state IN ('pending', 'prepared', 'enqueued'))
                      OR (obligation.business_state = 'blocked'
                          AND COALESCE(fulfillment.execution_state, '') NOT IN ('failed', 'satisfied'))
                 THEN COALESCE(fulfillment.created_at, obligation.created_at) END) AS oldest_backlog

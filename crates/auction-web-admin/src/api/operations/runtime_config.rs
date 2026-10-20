@@ -4,6 +4,8 @@
 
 #[path = "runtime_config/operations.rs"]
 mod operations;
+#[path = "runtime_config/taxonomy.rs"]
+mod taxonomy;
 
 pub(crate) use auction_contracts::AdminRuntimeConfigResponse as AdminRuntimeConfig;
 use auction_contracts::{AdminRuntimeConfigUpdateRequest, AdminRuntimeConfigValidateRequest};
@@ -23,7 +25,9 @@ pub(crate) type AdminRuntimeConfigApiError = AdminApiFailure;
 
 pub(crate) async fn fetch_admin_runtime_config()
 -> Result<AdminRuntimeConfig, AdminRuntimeConfigApiError> {
-    let response = send_get("/api/v1/admin/config").await.map_err(AdminApiFailure::client)?;
+    let response = send_get("/api/v1/admin/config?include_equipment_taxonomy=true")
+        .await
+        .map_err(AdminApiFailure::client)?;
     if !response.ok() {
         return Err(response_failure(response).await);
     }
@@ -41,7 +45,7 @@ pub(crate) async fn validate_admin_runtime_config(
         super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let command = AdminRuntimeConfigValidateRequest { document };
     let response = send_request(|abort_signal| {
-        Request::post("/api/v1/admin/config:validate")
+        Request::post("/api/v1/admin/config:validate?include_equipment_taxonomy=true")
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&command)
@@ -68,7 +72,7 @@ pub(crate) async fn update_admin_runtime_config(
         super::fetch_csrf_token().await.map_err(|code| AdminApiFailure { status: None, code })?;
     let command = AdminRuntimeConfigUpdateRequest { command_id, expected_fingerprint, document };
     let response = send_request(|abort_signal| {
-        Request::put("/api/v1/admin/config")
+        Request::put("/api/v1/admin/config?include_equipment_taxonomy=true")
             .abort_signal(abort_signal)
             .header("x-csrf-token", &csrf_token)
             .json(&command)
@@ -93,6 +97,7 @@ fn decode_runtime_config(
     if value.restart_required != expected_restart_required
         || !valid_fingerprint(&value.fingerprint)
         || !valid_runtime_document(&value.document)
+        || !value.equipment_taxonomy.as_ref().is_some_and(taxonomy::valid_equipment_taxonomy)
     {
         return Err("runtime_config");
     }
@@ -172,22 +177,41 @@ fn valid_equipment_colors(value: &Value) -> bool {
 }
 
 fn valid_equipment_color_rule(value: &Value) -> bool {
-    let Some(rule) = exact_object(
+    let Some(rule) = optional_keys_object(
         value,
         &[
+            "categories",
             "category",
             "combined_color",
             "equipment_type",
+            "equipment_types",
             "level",
             "prefix_color",
             "prefixes",
             "quality",
+            "qualities",
             "suffix_color",
             "suffixes",
         ],
     ) else {
         return false;
     };
+    if [
+        "category",
+        "combined_color",
+        "equipment_type",
+        "level",
+        "prefix_color",
+        "prefixes",
+        "quality",
+        "suffix_color",
+        "suffixes",
+    ]
+    .iter()
+    .any(|key| !rule.contains_key(*key))
+    {
+        return false;
+    }
     let Some(category) = string_field(rule, "category") else {
         return false;
     };
@@ -210,9 +234,9 @@ fn valid_equipment_color_rule(value: &Value) -> bool {
     let suffixes_valid = valid_string_list(&rule["suffixes"], 256, 128, true);
     let has_prefix_or_suffix = rule["prefixes"].as_array().is_some_and(|values| !values.is_empty())
         || rule["suffixes"].as_array().is_some_and(|values| !values.is_empty());
-    valid_text(category, 64, true)
-        && valid_text(equipment_type, 64, true)
-        && valid_text(quality, 64, true)
+    valid_color_selection(category, rule.get("categories"))
+        && valid_color_selection(equipment_type, rule.get("equipment_types"))
+        && valid_color_selection(quality, rule.get("qualities"))
         && (0..=1000).contains(&minimum)
         && (0..=1000).contains(&maximum)
         && (maximum == 0 || maximum >= minimum)
@@ -222,6 +246,27 @@ fn valid_equipment_color_rule(value: &Value) -> bool {
         && ["prefix_color", "suffix_color", "combined_color"]
             .iter()
             .all(|key| rule[*key].as_str().is_some_and(valid_hex_color))
+}
+
+/// 多选维度沿用旧单值兼容，数组内按 ASCII 忽略大小写去重且不能同时声明非空单值。
+fn valid_color_selection(singular: &str, plural: Option<&Value>) -> bool {
+    if !valid_text(singular, 64, true) {
+        return false;
+    }
+    let Some(plural) = plural else { return true };
+    let Some(values) = plural.as_array() else { return false };
+    values.len() <= 256
+        && (values.is_empty() || singular.is_empty())
+        && values.iter().enumerate().all(|(index, value)| {
+            value.as_str().is_some_and(|text| {
+                valid_text(text, 64, false)
+                    && values[..index].iter().all(|previous| {
+                        previous
+                            .as_str()
+                            .is_some_and(|previous| !previous.eq_ignore_ascii_case(text))
+                    })
+            })
+        })
 }
 
 fn valid_hex_color(value: &str) -> bool {

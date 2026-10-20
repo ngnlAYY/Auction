@@ -26,8 +26,9 @@ pub(super) fn use_config_draft() {
     let command = use_signal(|| None::<ConfigCommand>);
     let notice = use_signal(|| None::<ConfigNotice>);
     let restart_required = use_signal(|| false);
-    let dirty =
-        use_memo(move || baseline.read().as_ref().is_some_and(|initial| initial != &*form.read()));
+    let dirty = use_memo(move || {
+        baseline.read().as_ref().is_some_and(|initial| !initial.same_edits_as(&form.read()))
+    });
     use_context_provider(|| ConfigDraft {
         form,
         baseline,

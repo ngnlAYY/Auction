@@ -48,7 +48,7 @@ pub(crate) async fn record_return_postgres(
              AND inbound.received_at <= $1
              AND NOT EXISTS (
                  SELECT 1
-                 FROM public.settlement_recoveries AS consumed
+                 FROM public.settlement_recovery_return_consumptions AS consumed
                  WHERE consumed.return_mail_id = inbound.id
              )
            ORDER BY inbound.received_at, inbound.id, recovery.id
@@ -102,6 +102,17 @@ pub(crate) async fn record_return_postgres(
         .checked_add(1)
         .filter(|count| *count <= row.cod_return_limit)
         .ok_or_else(|| repository_error("recovery COD 退回次数超出上限"))?;
+    // 消费唯一事实与计数、后续动作同事务提交；重寄只能清当前指针，不能释放原邮件。
+    sqlx::query(
+        "INSERT INTO public.settlement_recovery_return_consumptions
+             (return_mail_id, recovery_id, recorded_at) VALUES ($1, $2, $3)",
+    )
+    .bind(row.return_mail_id)
+    .bind(row.recovery_id)
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .map_err(map_storage_error)?;
     let updated = sqlx::query(
         r#"UPDATE public.settlement_recoveries
            SET return_mail_id = $1,

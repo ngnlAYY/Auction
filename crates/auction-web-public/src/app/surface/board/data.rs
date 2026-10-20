@@ -1,6 +1,30 @@
 //! Public 拍卖数据加载、倒计时和目录展示编排。
 
 use super::*;
+use crate::api::LotEnvelope;
+
+/// 目录读取与展示的上下文；预览修订号不属于上下文，允许同场后台更新时保留已确认目录。
+#[derive(Clone, PartialEq)]
+struct CatalogScope {
+    auction_id: String,
+    world: String,
+    historical: bool,
+    status: String,
+    presentation_mode: String,
+    bidding_open: bool,
+    session_ready: bool,
+    user_id: Option<String>,
+    category: String,
+    page: i64,
+    page_size: i64,
+}
+
+/// 行、数量及分页来自同一次权威响应，后台更新不能混用不同修订的字段。
+#[derive(Clone)]
+struct CatalogSnapshot {
+    page: Rc<LotEnvelope>,
+    rows: Rc<Vec<CatalogRow>>,
+}
 
 #[component]
 pub(crate) fn AuctionData(
@@ -45,13 +69,33 @@ pub(crate) fn AuctionData(
             refresh_generation.set(next_generation);
         }
     });
-    let auction_id = auction.id.clone();
     let mut session = use_context::<PublicSessionResource>();
     let session_view = PublicSessionView::from_snapshot(session.read().as_ref());
     let viewer_player_id = session_view.viewer_player_id.clone();
     let session_ready = session_view.ready;
     let session_error = session_view.error;
     let authenticated = session_view.authenticated;
+    let catalog_scope =
+        use_memo(use_reactive((&auction, &historical), move |(auction, historical)| {
+            let identity = session.read();
+            let identity = identity.as_ref().and_then(|result| result.as_ref().ok());
+            CatalogScope {
+                auction_id: auction.id,
+                world: auction.world,
+                historical,
+                status: auction.status,
+                presentation_mode: auction.presentation_mode,
+                bidding_open: auction.bidding_open,
+                session_ready: identity.is_some(),
+                user_id: identity
+                    .and_then(Option::as_ref)
+                    .filter(|identity| identity.authenticated)
+                    .map(|identity| identity.user_id.clone()),
+                category: active_category(),
+                page: page_number(),
+                page_size: requested_page_size(),
+            }
+        }));
     let history_switch = use_resource({
         let world = auction.world.clone();
         let should_load = historical || auction.presentation_mode != "live";
@@ -71,22 +115,27 @@ pub(crate) fn AuctionData(
     let lots = use_resource(move || {
         let _ = refresh_generation();
         let _ = lots_refresh_generation();
-        let auction_id = auction_id.clone();
-        let category = active_category();
-        let page = page_number();
-        let category = (category != "all").then_some(category);
-        let page_size = requested_page_size();
-        async move { fetch_current_lots(auction_id, category, page, page_size).await }
+        let scope = catalog_scope();
+        async move {
+            let category = (scope.category != "all").then(|| scope.category.clone());
+            let result =
+                fetch_current_lots(scope.auction_id.clone(), category, scope.page, scope.page_size)
+                    .await
+                    .map(|page| CatalogSnapshot {
+                        rows: Rc::new(page.rows()),
+                        page: Rc::new(page),
+                    });
+            (scope, result)
+        }
     });
     use_bid_refresh(lots, true);
-    // 目录行是 lots 快照的纯派生：用 memo 收敛为仅在资源结果变化时重建，
-    // 并以 Rc 共享给分组/表格，传参链路不再逐字段克隆整表。
-    let rows = use_memo(move || match &*lots.read() {
-        Some(Ok(page)) => Rc::new(page.rows()),
-        _ => Rc::new(Vec::new()),
-    });
-    let aligned = match &*lots.read_unchecked() {
-        Some(Ok(page)) => {
+    let scope = catalog_scope();
+    let loaded = lots.read();
+    // Resource 重读会保留旧值，先核对请求上下文，避免跨账号、世界、筛选或阶段复用。
+    let current = loaded.as_ref().filter(|(loaded_scope, _)| loaded_scope == &scope);
+    let aligned = match current {
+        Some((_, Ok(snapshot))) => {
+            let page = &snapshot.page;
             page.auction_id == auction.id
                 && page.auction_status == auction.status
                 && page.presentation_mode == auction.presentation_mode
@@ -96,7 +145,7 @@ pub(crate) fn AuctionData(
         _ => true,
     };
     // 首次揭示要等主要目录已有成功或失败结果；辅助视图切换继续局部异步，避免拖慢整页。
-    use_app_boot_ready(boot_prerequisites_ready && lots.read().is_some());
+    use_app_boot_ready(boot_prerequisites_ready && current.is_some());
     let alignment_key = format!(
         "{}:{}:{}:{}:{}",
         auction.id,
@@ -106,7 +155,7 @@ pub(crate) fn AuctionData(
         auction.preview_revision
     );
     let mut alignment_attempt = use_signal(|| None::<String>);
-    use_effect(move || {
+    use_effect(use_reactive((&aligned, &alignment_key), move |(aligned, alignment_key)| {
         if aligned {
             if alignment_attempt().is_some() {
                 alignment_attempt.set(None);
@@ -115,7 +164,7 @@ pub(crate) fn AuctionData(
             alignment_attempt.set(Some(alignment_key.clone()));
             lots_refresh_generation.set(lots_refresh_generation().saturating_add(1));
         }
-    });
+    }));
     let status_label = auction_status_label(&auction.status);
     let is_live_presentation = auction.presentation_mode == "live";
     let is_opening_presentation = auction.presentation_mode == "opening";
@@ -131,11 +180,38 @@ pub(crate) fn AuctionData(
         // settling/settled 已进入终态收口，不再把过去的计划截止时间渲染为“落锤中…”。
         None
     };
-    let catalog = match &*lots.read_unchecked() {
-        None => {
-            rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } }
+    let preview_snapshot =
+        use_hook(|| Rc::new(RefCell::new(None::<(CatalogScope, CatalogSnapshot)>)));
+    let quiet_preview = scope.session_ready && scope.presentation_mode == "preview";
+    let ready_snapshot = current.and_then(|(_, result)| result.as_ref().ok()).filter(|snapshot| {
+        aligned
+            && public_page_matches(
+                snapshot.page.page,
+                snapshot.page.page_size,
+                scope.page,
+                scope.page_size,
+            )
+    });
+    // 只缓存当前上下文已对齐的预览；明确失败、切换上下文或离开预览立即清除。
+    {
+        let mut retained = preview_snapshot.borrow_mut();
+        if !quiet_preview
+            || retained.as_ref().is_some_and(|(retained_scope, _)| retained_scope != &scope)
+            || current.is_some_and(|(_, result)| result.is_err())
+        {
+            *retained = None;
         }
-        Some(Err(error)) => {
+        if quiet_preview && let Some(snapshot) = ready_snapshot {
+            *retained = Some((scope.clone(), snapshot.clone()));
+        }
+    }
+    let visible_snapshot = ready_snapshot.cloned().or_else(|| {
+        quiet_preview
+            .then(|| preview_snapshot.borrow().as_ref().map(|(_, snapshot)| snapshot.clone()))
+            .flatten()
+    });
+    let catalog = match (current, visible_snapshot) {
+        (Some((_, Err(error))), _) => {
             rsx! {
                 AsyncState {
                     kind: AsyncStateKind::Error,
@@ -149,29 +225,18 @@ pub(crate) fn AuctionData(
                 }
             }
         }
-        Some(Ok(page))
-            if !aligned
-                || !public_page_matches(
-                    page.page,
-                    page.page_size,
-                    page_number(),
-                    requested_page_size(),
-                ) =>
-        {
-            rsx! {
-                p { class: "public-page-status", role: "status", {t!("common-loading")} }
-            }
-        }
-        Some(Ok(page)) => {
+        (_, Some(snapshot)) => {
+            let page = &snapshot.page;
             let page_size = page.page_size.unwrap_or(requested_page_size());
             // 旧 lot 外壳为详情和列表共用，列表 total 可以省略且没有 has_more 字段；满页时
             // 保留一次向后探测，避免把“当前页长度”伪装成总数并永久隐藏下一页。
             let has_more = page.total.is_none()
-                && i64::try_from(rows.read().len()).is_ok_and(|row_count| row_count >= page_size);
+                && i64::try_from(snapshot.rows.len()).is_ok_and(|row_count| row_count >= page_size);
             rsx! {
                 CatalogTable {
-                    rows: rows(),
+                    rows: snapshot.rows.clone(),
                     projection_kind: page.projection_kind.clone(),
+                    auction_status: page.auction_status.clone(),
                     category_counts: page.category_counts.clone().unwrap_or_default(),
                     active_category: active_category(),
                     page_number: page_number(),
@@ -204,6 +269,7 @@ pub(crate) fn AuctionData(
                 }
             }
         }
+        _ => rsx! { p { class: "public-page-status", role: "status", {t!("common-loading")} } },
     };
 
     rsx! {

@@ -95,6 +95,17 @@ async fn apply(
     crate::lock_mail_evidence_credentials(tx, evidence).await.map_err(evidence_error)?;
     locks::after_credentials(tx, &command.claim).await?;
     validation::validate(tx, command, evidence, proof.is_some(), external_refund).await?;
+    if proof.is_none()
+        && !external_refund
+        && crate::database::settlement_legacy_repair::legacy_self_uid(
+            tx,
+            command.claim.obligation_id.as_uuid(),
+        )
+        .await?
+        .is_some_and(|uid| uid != evidence.identity.authenticated_uid)
+    {
+        return Err(FundingError::Unproven);
+    }
     super::graph::validate_graph(tx, &command.claim).await?;
     let mutation =
         FundingMutation { command_id: command.command_id, request_digest: command.request_digest };
@@ -104,9 +115,8 @@ async fn apply(
             return Err(FundingError::Unavailable);
         }
         if let Some(account) = &account {
-            let cash = evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
-            // 同一有效现金证明先核对既有占用；缺口只提交冻结，不满足付款或解除依赖。
-            if !settlement_funding::check_funding_cash(tx, account, cash.credits).await? {
+            // 同一持久策略决定现金或纯记账证明；缺口只提交冻结，不满足付款或解除依赖。
+            if !settlement_funding::check_funding_evidence(tx, account, evidence).await? {
                 crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
                 return Ok(true);
             }
@@ -134,8 +144,7 @@ async fn apply(
         if action.requires_funding() {
             let account =
                 account.as_ref().filter(|a| a.ready()).ok_or(FundingError::Unavailable)?;
-            let cash = evidence.main_cash.as_ref().ok_or(FundingError::Unproven)?;
-            if !settlement_funding::check_funding_cash(tx, account, cash.credits).await? {
+            if !settlement_funding::check_funding_evidence(tx, account, evidence).await? {
                 crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
                 return Ok(true);
             }
@@ -195,7 +204,6 @@ async fn validate_collected(
         || proof.reference != sent.external_mail_id
         || sent.recipient != c.recipient
         || sent.binding.world != c.world
-        || evidence.main_cash.is_none()
         || !matches!(
             c.kind,
             auction_domain::SettlementObligationKind::WinnerEquipmentCod

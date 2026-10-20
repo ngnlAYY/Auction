@@ -58,6 +58,17 @@ Admin 装备录入读取外部 URL 或 canonical JSON 时，raw 装备 key 只�
 
 PostgreSQL 完整档的录入必须在同一 Serializable 事务中完成命令账本占位、世界级目标锁、玩家资格检查、装备与密文、submission、pending lot、拍卖版本、审计记录和实时事件，任一项失败都必须回滚；外部来源读取发生在写事务之前，来源失败不能留下半个 lot；相同 command_id 只重放脱敏结果，不得再次抓取来源或重复写入事实，能力缺失必须明确报告，不能伪装成成功。唯一录入目标可以指向 Draft 或 Preview，但必须与拍卖的真实状态精确匹配；Preview 不是冻结目录：此阶段新增的 Admin/MM 装备仍属于本期，并必须在同一事务把新 lot 追加到 `auction_preview_items`、推进 `preview_revision` 后再发布目录重读事件。正常生命周期中只有 Preview 正式进入 Live 的事务才能创建下一期 Draft 并移动录入目标，唯一例外是 Preview 被取消时取消事务必须建立后继 Draft，避免该世界失去可用录入目标；与开拍或取消并发的录入要么完整进入原场次，要么在目标切换后完整进入下一期，不能跨两期拆分。
 
+装备名称与分类的纯语义词典由 `auction-domain::equipment::taxonomy` 唯一拥有，`auction-integrations` 提取页面并完成来源交叉校验：
+完整种类优先于短名称匹配（例如 `Great Mace` 不得拆成 `Mace` 与伪前缀），名称解析的大类必须与页面或 canonical JSON 声明的大类一致。
+当前、历史与有限兼容语法携带来源版本；未知种类拒绝，未知前后缀在长度/文本边界内保留原文，不被推荐候选自动删除。
+现行十档和历史两档品质的识别不授予收件资格。明确的 `Level Unassigned` 在来源模型中与数值等级、Tier 及缺失状态区分，
+输出既有快照时仍映射为缺省等级，不能伪造为 0 或当前玩家等级；其它非数字等级仍拒绝。扩充 Wiki 装备种类及历史名称兼容只改变来源识别，
+不跳过可交易性、品质允许列表、等级限制或录入资格，不修改既有装备快照与审计事实。精确词表及受限兼容语法见
+[装备词典说明](crates/auction-domain/README.md)及[装备来源说明](crates/auction-integrations/README.md)。
+HTML 来源必须具有唯一 header、必要属性区域和非空属性集合；已识别属性行的 Base、数值或列结构损坏时拒绝，
+不能静默删掉该行再写入残缺快照，合法可选说明行保持兼容。手工 URL 与 MM 诊断读取复用同一来源 URL/allowlist 门禁，
+在凭据访问与远端请求之前核验。手工 canonical JSON 的原字段及指纹协议保持不变。
+
 ### I-05b Admin 论坛预览是有界的纯本地操作
 
 Admin 论坛预览请求必须在 HTML 与纯文本中恰好选择一个非空输入，输入体积不得超过 2 MiB；解析器只能在内存中生成 catalog、posts、warnings 和命令预览，解析失败必须返回明确的输入错误，不能产生数据库写入、远程抓取、回帖或“已发布”的成功信号；预览输出不得包含 Cookie、密钥或其他外部认证材料，远程发布仍由后续 Worker 的已提交事实和外部投递边界负责。
@@ -110,6 +121,9 @@ PostgreSQL 完整档还必须在数据库边界保护拍卖聚合身份不可变
 ### I-08 外部写入发生在本地提交之后
 
 论坛发帖、邮件发送、通知广播和其他外部副作用只能消费已提交的本地事实；外部失败必须进入可重试、可观测的任务状态，不能撤销已接受的竞价，也不能把外部成功当成本地事务已经提交的证明。
+
+论坛装备标色只影响名称展示。类型、种类、品质的多选条件保持在单条规则内，各维度 OR、维度间 AND，空数组沿用旧单值、两者均空为任意；同维新旧选择同时非空或非法重复条目失败关闭。空数组省略序列化，保留旧 runtime 文档指纹与命令重放；规则仍按顺序首个前后缀命中，不改变装备采集接受政策、身份事实和经济计算。Worker 启动冻结配置，新字段须由支持该契约的程序读取并重启生效。
+只有新 `equipment_types` 数组赋予十二种护甲材质族匹配语义：实际装备大类须与材质所属 Cloth/Light/Heavy 一致，完整种类以该材质首词、空格和非空部位组成；其他数组值与旧种类单值均精确匹配，不采用前缀子串或放宽采集接受规则。
 
 论坛系统更新楼的拒绝提示只按持久错误码生成安全英文，区分已领先、金额过低/无效、截止、资格及状态等原因；原始有界诊断仍只留本地账本，不输出 SQL、凭据、代理上限或任意错误原文。旧 `command_rejected` 或空码只对完整白名单诊断格式做展示映射，金额诊断须含规范 i64，数值不回显；未知新码不得借旧详情重新解释，统一返回通用提示。展示映射不改历史记录、不重放拒绝出价，pending 仍表示将重试且阻止完成水位；正常镜像更新仍受活动主题、租约、写入证明及未知结果门禁约束。
 
@@ -170,6 +184,11 @@ Delivery 的创建/准备/激活、claim、进入发送、释放、成功、失�
 
 PostgreSQL fulfillment 和 recovery 必须使用各自的持久化领取循环、批次、并发、lease、单项总时限、重试和 `poll + [0, jitter]` cadence；一个 owner 的领取、依赖或持久化失败只能影响自身下一轮，不能阻塞其它 owner 或终止整个 Worker，循环任务 panic 或意外退出仍必须失败关闭。Fulfillment 只能按并发波次领取，避免尚未开始的工作提前耗尽 lease；Recovery 必须按 `case → return → action → relist → refund` 依次尝试全部 phase，单个 phase 失败不能跳过后续 phase，action 仍由 fencing 和持久化重试保护。默认 60 秒轮询、5 秒抖动、100 条批次、8 并发、60 秒 lease/重试和 30 秒单项时限属于当前运行契约；等待买家支付 COD 或卖家领取货款时使用按绝对时间对齐的共享窗口（`worker.fulfillment.evidence_poll_seconds`，默认 300 秒）：同一窗口内到期的所有 COD/货款履约一起领取读取，窗口内新增的履约会等到下一个窗口，不各自建立五分钟计时；普通失败重试节奏不变。
 
+退件消费必须以入站邮件唯一身份追加持久事实，与退回计数、恢复阶段及后续 action 同事务提交；重寄清空当前
+`return_mail_id` 不解除原邮件的消费。迁移只回填可证明已消费的来源，不自动修正既有计数。每次真实退件的 take
+prepare 与 activate 必须拥有独立且同轮稳定的命令身份，不能随 claim、租约或重试次数改变；旧 prepared/enqueued
+继续原身份，旧 prepare 已提交但未关联 action 时先完整核对原投递，不能为同一 MID 另建 take。
+
 ### I-09f Auction 生命周期与结算必须独立于集成轮询
 
 Auction 生命周期和结算 owner 必须立即执行首轮，再使用自己的 `poll + [0, jitter]` cadence；邮件唤醒、论坛、realtime 或其它集成 tick 不得额外触发 Auction，也不得延迟它。生命周期与结算各自拥有完整 batch 上限并按共同并发波次领取，一类 claim 或单项失败仍必须尝试另一类，且只影响主循环下一轮。默认 60 秒轮询、5 秒抖动、每类 100 条、并发 8 和 30 秒单项总时限属于当前运行契约。
@@ -190,6 +209,9 @@ PM 不进入 MM deliveries/Sent/COD 链，独立队列只有 pending/claimed/sen
 
 ### I-09h Bot 内部履约与现金保护
 
+账户以持久策略区分 `strict_cash` 与 `record_only`，缺失账户及旧账户默认前者。
+下文的整号现金覆盖、专用账号及自有额度门禁适用于 `strict_cash`；共同的身份、装备、义务、精确投递、幂等及审计规则适用于两者。
+
 - 身份来自同一 MM Cookie 认证 HV UID 与该 UID 的论坛目标资料名；论坛 Cookie 只提供读取权限，不取页头登录者。forum.enabled 关闭或证据缺失明确延期，不暗中启用论坛，不把 MM Cookie 发往论坛。
 - 当前持有只接受批准七类 Armory organize 的精确 world/form/完整计数、非 disabled canonical eqids[] 及同 EID 行 handler，同 session compose 必须干净，且同 EID/world 历史出站、恢复及其他义务占用无冲突；详情可读不是库存证明。Isekai 独立读取且与 Main 同 UID，未知形状仅阻断相应分支，不复制 Main 库存。资产冲突依据真实 origin/payload 闭集 schema：已验证无装备通知不构成 EID 占用，attachment_ids 按外部 EID/world，secret 引用按实际装备 EID/world 核对；缺失/畸形/未知 schema、真实同资产占用仍失败关闭，不凭 succeeded 放行，不解除旧 unknown，保留精确 recovered_handoff 例外与来源关联检查。
 - 内部提交要求数据库 active credential ID/version、全局 mail_cookie generation 与最长 30 秒的新鲜证据；原 operation guard 持有到事务确定结束，开始可能提交后取消或结果未知同步撤销 owner，先查原稳定命令，不转外发。所有取得 mail owner 的新版程序（含配置 Cookie）先推进 generation 并提交，配置/keyenv 不伪造持久凭据身份。
@@ -197,10 +219,19 @@ PM 不进入 MM deliveries/Sent/COD 链，独立队列只有 pending/claimed/sen
 - 仅从未 prepare/activate/delivery 的新 pending 可内部满足；原稳定命令重放、资金动作、独立证明、satisfied、清 claim/版本、审计与直接 blocked 依赖解除同事务；prepared/enqueued/unknown 不转换，contingent 退款不自动激活。保持 B+C=S+T、原义务 ID 和 payment→handoff→seller；历史 `write_unknown` 投递只允许在 Sent 中 reference 与收件人唯一匹配、金额/资产矩阵一致时绑定 `sent_recovered_reference_v1` 并重新排队，绝不重发邮件；内部 carrier 不派发、不虚构 1C、无伪 delivery 或 Sent。bot 流拍与撤拍均直接留装备；配置在 `bot_players` 中的买家按内部 Purchase 分配真实 B/C，卖方 S 转 retained 或正常寄出；新配置只影响尚未生成 delivery 的新结算。
 - 资金账户固定认证 UID/Main/Credits，Cookie 换代不清余额或占用；普通 Balance/理论 pool 不是自有额度；preview 数据库零写、不取 owner、不计算已证明可用额度。apply 经真实现金及完整责任核对、版本/摘要和精确确认才开额度；旧无 UID 责任只保守隔离；新外部 COD 须同 session 精确 Sent-collected、原 exact-payload/冻结金额及唯一来源，且发送晚于 opening 边界、发行后占用不超过新鲜现金；历史/跨边界来源继续等待，不释放 quarantine。未资金化 Main 装备 COD/跨世界现金 carrier 已外发而收款事实未闭合，或关联 delivery 缺失，均阻断 preview/apply opening；不从本地未 satisfied 推断未收款，确定尚未外发的 pending/prepared 付款不误判为已收责任。补偿及隔离新增需求有零下界，既有 allocation 全计占用；collected 在满足/发行/解依赖之前，以已锁账户和同一有效 Main cash 检查既有占用，缺口确定提交冻结并返回 FundingDeferred，不满足义务、不发行、不解除依赖。
 - retained、税与受限补偿不自动再投资；退款仅原恢复授权、同 UID 支付来源及装备恢复/卖方互斥责任闭合后转移原资金；原 internal 才恢复原 proprietary，外部 collected 内部退款转受限留存，不新增经济权利或内部取消退款。
+- 旧 Bot 自寄仅通过单笔显式修复命令处理：原版本与完整摘要、真实同 UID 身份、干净 compose 和正向库存同事务核验，原投递、错误及全部指针快照形成只追加事实。流拍可留存；成交付款还要求明确自寄拒绝及原草稿清理证明，只恢复受持久 UID 约束的内部准备，不伪造付款、Sent 或收款，不降级为外发。旧实收的 Bot 卖家款须独立精确 Sent-collected 与当前现金证明，从已隔离责任逐标的转为留存，唯一目标防止双计，不重复发行旧 B 或增加自有额度。
 - 全部受保护现金 Send（含 carrier、generic、旧入口）按精确原义务/payload 预留；reserved→in_flight 与 sending fence 同事务，fence 成功及续租确认后才首次 poll。现金 fence 从 prepared 继承原单调绝对截止，等待/确认/存储预算取原证据、有效租约及 finalize 截止最小值，同一 commit guard 覆盖重试，不从交接重建 30 秒。数据库每次只用原剩余整毫秒与 UTC 证据窗口的交集设置 PostgreSQL 18 transaction_timeout，覆盖锁/审计/COMMIT；零预算拒绝，不以 0 禁用超时；旧有证据入口缺精确单调期限拒绝；过晚/错误/取消或提交未知撤销 owner，不 poll 发送。保留准备续租与慢续租公平性，无映射延期；余额缺口提交冻结且不发送。Sent 记 spent，失败/未知保留 unknown 占用；TTL、重启、人工 failed 不释放。无证据 legacy 只在同事务 scope 锁下排除所有保护账户和持久 allocation 后才可发送，缺 UID 不是其他账号证明。
 - 有 allocation 的新 Release/RetryFailed/ReconcileRetry/ReconcileSucceeded/ReconcileFailed 均 Invalid，原成功命令先重放；无 allocation 的旧 retry 按 recovery scope→中间业务锁→actions→delivery→fulfillment/reset 预锁，不增加人工权限；本轮无资金未知重发或人工返还入口，旧 32 条未知投递与草稿仍须另行核对。
 
-正式升级及专用账号约束见[运维手册](ops/README.md#bot-内部履约与资金保护升级)。
+`record_only` 由显式命令以真实 UID、干净 compose、原责任预览、版本和摘要初始化，只记录拍卖资金责任，不采集或比较账号现金，允许账号所有人自行使用 Credits。
+策略保存在 UID 账户并参与预览摘要；各进程从数据库读取，提交时在原 scope/account 锁下复核，不由 TOML 或命令默认值暗切换。
+首次仅登记已知旧责任；内部购买及补偿按原标的冻结的 B/C 建立有限、唯一的记账来源，不要求人工补齐全局预算，保持 B+C=S+T。
+真实跨世界外部付款的载体只按原 Isekai 义务及完整 canonical payload 登记每个 delivery 唯一的 1C 来源；内部付款仍不生成载体。
+这些来源表示会计记录，不作为实际现金证明；旧实收认领仍需精确 Sent-collected，只转移原隔离责任，不重复记入收入。
+个人用款或其他标的的现金未知结果不触发全局余额冻结；原标的未知占用、资产冲突、禁止无证据重发/返还及真实卖家投递继续保留。
+本次仅提供缺失账户的显式初始化，已有 `strict_cash` 账户不通过该命令转换。
+
+正式升级、账户策略及专用账号约束见[运维手册](ops/README.md#bot-内部履约与资金保护升级)。
 
 ### I-10 缓存不是权威数据源
 

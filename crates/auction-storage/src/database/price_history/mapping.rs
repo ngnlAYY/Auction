@@ -79,16 +79,7 @@ pub(crate) fn equipment_level(attributes: Value) -> Option<i64> {
 pub(crate) fn validate_stats(
     stats: PublicPriceHistoryStats,
 ) -> Result<PublicPriceHistoryStats, ApplicationError> {
-    if stats.count < 0
-        || stats.count == 0 && (stats.minimum != 0 || stats.maximum != 0 || stats.median != 0)
-        || stats.count > 0
-            && (stats.minimum <= 0
-                || stats.maximum < stats.minimum
-                || stats.median < stats.minimum
-                || stats.median > stats.maximum)
-    {
-        return Err(storage_error("公开价格历史统计无效"));
-    }
+    stats.validate().map_err(storage_error)?;
     Ok(stats)
 }
 

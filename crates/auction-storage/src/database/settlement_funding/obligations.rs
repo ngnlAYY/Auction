@@ -49,8 +49,6 @@ async fn fund_lot(
     sqlx::query("INSERT INTO public.settlement_funding_lots(lot_id,uid,payment_obligation_id,source_kind) VALUES($1,$2,$3,$4)")
         .bind(lot_id).bind(account.uid()).bind(payment_id).bind(if collected {"collected"} else {"internal"})
         .execute(&mut **tx).await.map_err(storage)?;
-    let proprietary = allocation(tx, account.uid(), "proprietary", None, None).await?;
-    let compensation = allocation(tx, account.uid(), "compensation", None, None).await?;
     let seller = allocation(tx, account.uid(), "seller", Some(lot_id), Some(seller_id)).await?;
     let tax = allocation(tx, account.uid(), "tax", Some(lot_id), None).await?;
     if collected {
@@ -69,12 +67,43 @@ async fn fund_lot(
         .await?;
         store_receipt(tx, source, receipt).await?;
         issue(tx, account.uid(), command, source, seller, split.buyer.value()).await?;
+    } else if account.records_only() {
+        // 原lot冻结B的有限会计来源，不读取个人现金，也不创建可任意消费的proprietary预算。
+        let source = source(
+            tx,
+            account.uid(),
+            "record_internal_purchase",
+            payment_id,
+            split.buyer.value(),
+            &command.request_digest,
+        )
+        .await?;
+        issue(tx, account.uid(), command, source, seller, split.buyer.value()).await?;
     } else {
+        let proprietary = allocation(tx, account.uid(), "proprietary", None, None).await?;
         transfer(tx, account.uid(), command, proprietary, seller, split.buyer.value()).await?;
     }
-    transfer(tx, account.uid(), command, compensation, seller, split.compensation.value()).await?;
+    if account.records_only() {
+        if split.compensation.value() > 0 {
+            // C同样只来自该lot冻结值；唯一source_key和资金命令阻止重放再次登记。
+            let source = source(
+                tx,
+                account.uid(),
+                "record_compensation",
+                payment_id,
+                split.compensation.value(),
+                &command.request_digest,
+            )
+            .await?;
+            issue(tx, account.uid(), command, source, seller, split.compensation.value()).await?;
+        }
+    } else {
+        let compensation = allocation(tx, account.uid(), "compensation", None, None).await?;
+        transfer(tx, account.uid(), command, compensation, seller, split.compensation.value())
+            .await?;
+    }
     transfer(tx, account.uid(), command, seller, tax, split.tax.value()).await?;
-    if let Some(cash) = cash {
+    if let Some(cash) = cash.filter(|_| !account.records_only()) {
         let local:i64=sqlx::query_scalar("SELECT COALESCE(sum(amount),0)::bigint FROM public.settlement_funding_allocations WHERE uid=$1 AND state<>'spent'")
             .bind(account.uid()).fetch_one(&mut **tx).await.map_err(storage)?;
         if local > cash.credits {
@@ -87,7 +116,8 @@ async fn fund_lot(
     complete(tx, account, command, action, lot_id).await
 }
 
-/// B来自已授权自有，C来自实际资金化补偿；不重算B+C=S+T。
+/// strict_cash从既有自有/补偿用途转移；record_only按该lot冻结B/C登记有限会计来源。
+/// 两种模式均不重算B+C=S+T，同一付款只登记一次，不能创建任意P/C消费额度。
 pub async fn fund_internal_purchase(
     tx: &mut Transaction<'_, Postgres>,
     account: &LockedFundingAccount,
@@ -180,7 +210,9 @@ pub async fn refund_funded_purchase(
     // 撤销本lot原S/T分配，将B返原用途、C返受限补偿；不更改经济池。
     transfer(tx, account.uid(), command, tax, seller, tax_amount).await?;
     let target = if internal {
-        if row.try_get::<String, _>("source_kind").map_err(storage)? == "internal" {
+        if !account.records_only()
+            && row.try_get::<String, _>("source_kind").map_err(storage)? == "internal"
+        {
             allocation(tx, account.uid(), "proprietary", None, None).await?
         } else {
             // 外部来源的bot退款仅留存，不能凭退款自动授权再投资。

@@ -102,7 +102,7 @@ where
             };
             source_external_mail_id
         };
-        let command_id = CommandId::from_uuid(deterministic_uuid(
+        let legacy_command_id = CommandId::from_uuid(deterministic_uuid(
             CommandId::from_uuid(action_id),
             if is_payment_reminder {
                 "recovery-payment-reminder-prepare"
@@ -111,6 +111,16 @@ where
             },
             1,
         ));
+        // action 可跨多次退件复用；MID 固定本轮，领取版本/租约变化不能改变命令身份。
+        let mut command_id = if is_payment_reminder {
+            legacy_command_id
+        } else {
+            CommandId::from_uuid(deterministic_uuid(
+                CommandId::from_uuid(action_id),
+                &format!("recovery-take-prepare:{external_mail_id}"),
+                2,
+            ))
+        };
         let request_hash = if is_payment_reminder {
             let request = RecoveryPaymentReminderRequest {
                 recovery_id: claim.recovery_id.as_uuid(),
@@ -145,7 +155,7 @@ where
                 .await;
             }
         };
-        let command = MailDeliveryCommand {
+        let mut command = MailDeliveryCommand {
             command_id,
             request_hash,
             origin: MailDeliveryOrigin::SettlementRecoveryAction,
@@ -172,6 +182,29 @@ where
             },
             notification_body: None,
         };
+        if !is_payment_reminder {
+            // 升级前可能已 prepare 提交却未 link；先精确恢复原 ID，避免同 MID 再建一个 take。
+            let mut legacy_command = command.clone();
+            legacy_command.command_id = legacy_command_id;
+            match delivery.find_recovery_preparation(legacy_command.clone()).await {
+                Ok(Some(_)) => {
+                    command_id = legacy_command_id;
+                    command = legacy_command;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "recovery legacy preparation lookup failed");
+                    return release_recovery_action(
+                        store,
+                        clock,
+                        claim,
+                        retry_delay,
+                        "recovery_prepare_identity_unproven",
+                    )
+                    .await;
+                }
+            }
+        }
         let delivery_id = match delivery.prepare_recovery(command).await {
             Ok(result) if !result.delivery_id.is_nil() => result.delivery_id,
             Ok(_) => {

@@ -4,45 +4,43 @@ use auction_web_shared::TruncatedText;
 #[component]
 pub(crate) fn PriceHistoryTable(
     page: PriceHistoryPage,
+    grouping: String,
     current_page: i64,
+    on_buyer_filter: EventHandler<String>,
+    on_seller_filter: EventHandler<String>,
     on_page_change: EventHandler<i64>,
     on_page_size_change: EventHandler<i64>,
 ) -> Element {
     let page_size = page.page_size.max(1);
-    let rows = page.rows.clone();
+    let empty = page.rows.is_empty();
+    let groups = history_groups(page.rows.clone(), &grouping);
     rsx! {
         div { class: "public-history-results",
             if let Some(stats) = page.stats.clone().filter(|stats| stats.count > 0) {
                 PriceHistoryStatsView { stats }
             }
-            if rows.is_empty() {
+            if empty {
                 div { class: "public-auction-empty", role: "status",
                     p { class: "public-auction-empty__title", {t!("history-empty-title")} }
                     p { class: "public-auction-empty__hint", {t!("history-empty-hint")} }
                 }
             } else {
-                div { class: "public-history-table-wrap",
-                    table {
-                        class: "public-history-table ui-table--responsive",
-                        caption { class: "public-visually-hidden", {t!("page-history-title")} }
-                        auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![27, 9, 5, 7, 6, 11, 9, 9, 17] }
-                        thead {
-                            tr {
-                                th { scope: "col", {t!("history-item")} }
-                                th { scope: "col", {t!("history-category")} }
-                                th { scope: "col", class: "public-history-number", {t!("history-level")} }
-                                th { scope: "col", {t!("history-world")} }
-                                th { scope: "col", {t!("history-round")} }
-                                th { scope: "col", class: "public-history-number", {t!("history-price")} }
-                                th { scope: "col", {t!("history-buyer")} }
-                                th { scope: "col", {t!("history-seller")} }
-                                th { scope: "col", {t!("history-closed")} }
+                div { class: "public-history-result-groups",
+                    for group in groups {
+                        if grouping == "flat" {
+                            PriceHistoryRowsTable {
+                                rows: group.rows,
+                                title: t!("page-history-title"),
+                                on_buyer_filter,
+                                on_seller_filter,
                             }
-                        }
-                        tbody {
-                            for row in rows {
-                                // 成交价历史每个 lot 只成交一次，lot_id 可作稳定 key。
-                                PriceHistoryRow { key: "{row.lot_id}", row }
+                        } else {
+                            PriceHistoryGroupPanel {
+                                key: "{grouping}:{current_page}:{page_size}:{group.key}",
+                                label: group.label,
+                                rows: group.rows,
+                                on_buyer_filter,
+                                on_seller_filter,
                             }
                         }
                     }
@@ -61,8 +59,73 @@ pub(crate) fn PriceHistoryTable(
     }
 }
 
+/// 每组独立呈现结果框；组头始终保留，折叠只卸载本组表格，不读取其他分页。
+#[component]
+fn PriceHistoryGroupPanel(
+    label: String,
+    rows: Vec<PriceHistoryEntry>,
+    on_buyer_filter: EventHandler<String>,
+    on_seller_filter: EventHandler<String>,
+) -> Element {
+    let mut expanded = use_signal(|| true);
+    let count = rows.len();
+    rsx! {
+        section { class: "public-history-group-panel", aria_label: label.clone(),
+            h2 { class: "public-history-group-heading",
+                button { r#type: "button", class: "public-history-group-toggle",
+                    aria_expanded: expanded().to_string(),
+                    onclick: move |_| expanded.set(!expanded()),
+                    span { aria_hidden: "true", if expanded() { "−" } else { "+" } }
+                    TruncatedText { value: label.clone(), size: "wide", focusable: false, portal: true }
+                    span { class: "public-history-group-count", {t!("history-group-count", count: count)} }
+                }
+            }
+            if expanded() {
+                PriceHistoryRowsTable { rows, title: label.clone(), on_buyer_filter, on_seller_filter }
+            }
+        }
+    }
+}
+
+/// 各结果框复用相同九列表头与列宽，标题关联当前组；窄屏仍保留原生表格结构。
+#[component]
+fn PriceHistoryRowsTable(
+    rows: Vec<PriceHistoryEntry>,
+    title: String,
+    on_buyer_filter: EventHandler<String>,
+    on_seller_filter: EventHandler<String>,
+) -> Element {
+    rsx! {
+        div { class: "public-history-table-wrap",
+            table { class: "public-history-table ui-table--responsive",
+                caption { class: "public-visually-hidden", "{title}" }
+                auction_web_shared::TableColumns { layout: "public-price-history", widths: vec![27, 9, 5, 7, 6, 11, 9, 9, 17] }
+                thead {
+                    tr {
+                        th { scope: "col", {t!("history-item")} }
+                        th { scope: "col", {t!("history-category")} }
+                        th { scope: "col", class: "public-history-number", {t!("history-level")} }
+                        th { scope: "col", {t!("history-world")} }
+                        th { scope: "col", {t!("history-round")} }
+                        th { scope: "col", class: "public-history-number", {t!("history-price")} }
+                        th { scope: "col", {t!("history-buyer")} }
+                        th { scope: "col", {t!("history-seller")} }
+                        th { scope: "col", {t!("history-closed")} }
+                    }
+                }
+                tbody {
+                    for row in rows {
+                        PriceHistoryRow { key: "{row.lot_id}", row, on_buyer_filter, on_seller_filter }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub(crate) fn PriceHistoryStatsView(stats: PriceHistoryStats) -> Element {
+    let median = history_median_amount(&stats);
     rsx! {
         dl { class: "public-history-stats", aria_label: t!("history-statistics"),
             div { class: "public-history-stat",
@@ -79,28 +142,36 @@ pub(crate) fn PriceHistoryStatsView(stats: PriceHistoryStats) -> Element {
             }
             div { class: "public-history-stat",
                 dt { {t!("history-median")} }
-                dd { "{super::format_amount(stats.median)}" }
+                dd { "{median}" }
             }
         }
     }
 }
 
 #[component]
-pub(crate) fn PriceHistoryRow(row: PriceHistoryEntry) -> Element {
+pub(crate) fn PriceHistoryRow(
+    row: PriceHistoryEntry,
+    on_buyer_filter: EventHandler<String>,
+    on_seller_filter: EventHandler<String>,
+) -> Element {
     let lot_href = format!("/lots/{}", row.lot_id);
     let auction_href = history_auction_href(&row.auction_id, &row.world_id);
+    let lot_code = lot_code_for(&row.equipment_category, row.lot_number);
+    let equipment_label = format!("{lot_code} · {}", row.equipment_name);
     let level =
         row.equipment_level.map(|level| level.to_string()).unwrap_or_else(|| t!("value-empty"));
     let world = super::world_label(&row.world_id);
     let category =
         super::catalog_category_label(super::catalog_category_key(&row.equipment_category));
     let price = super::format_amount(row.price);
+    let buyer = row.buyer_name.clone();
+    let seller = row.seller_name.clone();
     rsx! {
         tr {
             td { class: "public-history-equipment", "data-label": t!("history-item"),
-                Link { to: lot_href, title: row.equipment_name.clone(), aria_label: row.equipment_name.clone(),
+                Link { to: lot_href, title: equipment_label.clone(), aria_label: equipment_label.clone(),
                     TruncatedText {
-                        value: row.equipment_name.clone(),
+                        value: equipment_label,
                         size: "wide",
                         focusable: false,
                         portal: true,
@@ -119,10 +190,24 @@ pub(crate) fn PriceHistoryRow(row: PriceHistoryEntry) -> Element {
                 "{price}"
             }
             td { "data-label": t!("history-buyer"),
-                TruncatedText { value: row.buyer_name, size: "compact", portal: true }
+                button { r#type: "button", class: "public-history-player-filter",
+                    aria_label: t!("history-filter-by-buyer", name: buyer.clone()),
+                    title: t!("history-filter-by-buyer", name: buyer.clone()),
+                    onclick: move |_| on_buyer_filter.call(buyer.clone()),
+                    TruncatedText { value: row.buyer_name, size: "compact", focusable: false, portal: true }
+                }
             }
             td { "data-label": t!("history-seller"),
-                TruncatedText { value: row.seller_name, size: "compact", portal: true }
+                if seller == "—" {
+                    TruncatedText { value: row.seller_name, size: "compact", portal: true }
+                } else {
+                    button { r#type: "button", class: "public-history-player-filter",
+                        aria_label: t!("history-filter-by-seller", name: seller.clone()),
+                        title: t!("history-filter-by-seller", name: seller.clone()),
+                        onclick: move |_| on_seller_filter.call(seller.clone()),
+                        TruncatedText { value: row.seller_name, size: "compact", focusable: false, portal: true }
+                    }
+                }
             }
             td { "data-label": t!("history-closed"),
                 Time { value: row.closed_at.clone() }

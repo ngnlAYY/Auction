@@ -109,7 +109,7 @@ pub(in crate::database::recovery_commands) async fn advance_cod_return_postgres(
     }))
 }
 
-/// 第 1、2 次退回：重置原 COD 投递与履约，等下一轮重新发送。
+/// 未达冻结上限的退回：重置原 COD 投递与履约；追加消费事实保留，原退件不会再次计数。
 #[cfg(feature = "postgres")]
 async fn resend_cod(
     transaction: &mut Transaction<'_, Postgres>,

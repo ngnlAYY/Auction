@@ -40,9 +40,15 @@ impl MoogleMailParser {
         {
             return Err(fail());
         }
-        let base =
+        let mut base =
             Url::parse(&format!("https://hentaiverse.org{}", world.path())).map_err(|_| fail())?;
-        let action = base.join(form.attr("action").ok_or_else(fail)?).map_err(|_| fail())?;
+        base.query_pairs_mut()
+            .append_pair("s", "Bazaar")
+            .append_pair("ss", "am")
+            .append_pair("screen", "organize")
+            .append_pair("filter", category.as_str());
+        // 生产 organize 表单省略 action，按当前固定请求 URL 提交；显式 action 仍须通过下方闭集校验。
+        let action = base.join(form.attr("action").unwrap_or_default()).map_err(|_| fail())?;
         let mut pairs = BTreeMap::new();
         for (key, value) in action.query_pairs() {
             if pairs.insert(key.into_owned(), value.into_owned()).is_some() {

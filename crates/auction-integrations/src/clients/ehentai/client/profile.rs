@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use auction_application::{
-    ForumTargetProfileEvidence, InternalEvidenceError, valid_external_positive_id,
+    ForumPmError, ForumTargetProfileEvidence, InternalEvidenceError, valid_external_positive_id,
     valid_mail_player_name,
 };
 use scraper::{ElementRef, Node};
@@ -11,13 +11,72 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 
+#[derive(Clone, Copy)]
+enum ProfileStage {
+    Client,
+    Get,
+    Owner,
+    NameLayout,
+    OptionsLayout,
+    ContainerLayout,
+    NameShape,
+    NameValue,
+    MidLayout,
+    MidQuery,
+    MidBinding,
+}
+
+impl ProfileStage {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Get => "profile_get",
+            Self::Owner => "owner",
+            Self::NameLayout => "name_layout",
+            Self::OptionsLayout => "options_layout",
+            Self::ContainerLayout => "container_layout",
+            Self::NameShape => "name_shape",
+            Self::NameValue => "name_value",
+            Self::MidLayout => "mid_layout",
+            Self::MidQuery => "mid_query",
+            Self::MidBinding => "mid_binding",
+        }
+    }
+}
+
+// 只记录闭集阶段与应用错误；目标 UID、名称、URL 和原始资料页都不进入日志。
+fn profile_failure(stage: ProfileStage, error: InternalEvidenceError) -> InternalEvidenceError {
+    tracing::warn!(stage = stage.as_str(), error = ?error, "Forum target profile evidence failed");
+    error
+}
+
+// ForumPmError 全部为不携带文本的 unit variant；仅输出固定分类，不格式化传输错误。
+fn profile_get_failure(error: ForumPmError) -> InternalEvidenceError {
+    let category = match error {
+        ForumPmError::Unavailable => "unavailable",
+        ForumPmError::Authentication => "authentication",
+        ForumPmError::RateLimited => "rate_limited",
+        ForumPmError::InvalidRecipient => "invalid_recipient",
+        ForumPmError::Protocol => "protocol",
+        ForumPmError::OutcomeUnknown => "outcome_unknown",
+    };
+    tracing::warn!(
+        stage = ProfileStage::Get.as_str(),
+        category,
+        "Forum target profile read rejected"
+    );
+    InternalEvidenceError::Unavailable
+}
+
 impl EhentaiClient {
     pub(in crate::clients::ehentai) async fn read_target_profile(
         &self,
         target_uid: &str,
         cookie: &EhentaiCookie,
     ) -> Result<ForumTargetProfileEvidence, InternalEvidenceError> {
-        self.validate_pm_client().map_err(|_| InternalEvidenceError::Unavailable)?;
+        self.validate_pm_client().map_err(|_| {
+            profile_failure(ProfileStage::Client, InternalEvidenceError::Unavailable)
+        })?;
         if !valid_external_positive_id(target_uid) {
             return Err(InternalEvidenceError::InvalidRequest);
         }
@@ -25,12 +84,11 @@ impl EhentaiClient {
             .index_url(&[("showuser", target_uid)], EhentaiOperation::CheckSession)
             .map_err(|_| InternalEvidenceError::InvalidRequest)?;
         // 仅 GET 资料；复用强制不重定向的安全池，不经过发帖或 PM 准备流程。
-        let source = self
-            .pm_get(target.clone(), cookie)
-            .await
-            .map_err(|_| InternalEvidenceError::Unavailable)?;
+        let source = self.pm_get(target.clone(), cookie).await.map_err(profile_get_failure)?;
         let name = parse_target_profile(&source, &target, target_uid)?;
-        self.check_ownership().await.map_err(|_| InternalEvidenceError::Revoked)?;
+        self.check_ownership()
+            .await
+            .map_err(|_| profile_failure(ProfileStage::Owner, InternalEvidenceError::Revoked))?;
         let observed_at = chrono::Utc::now();
         let protocol_version = "forum_target_profile_mid_v1";
         let mut hash = Sha256::new();
@@ -73,22 +131,27 @@ fn parse_target_profile(
     target: &Url,
     uid: &str,
 ) -> Result<String, InternalEvidenceError> {
-    let fail = InternalEvidenceError::Unproven;
+    let fail = |stage| profile_failure(stage, InternalEvidenceError::Unproven);
     let document = Html::parse_document(source);
-    let name = select_one(&document, "#profilename")?;
-    let options = select_one(&document, "#profile-options")?;
-    let name_frame = borderwrap(name).ok_or(fail)?;
+    let name = select_one(&document, "#profilename")
+        .map_err(|error| profile_failure(ProfileStage::NameLayout, error))?;
+    let options = select_one(&document, "#profile-options")
+        .map_err(|error| profile_failure(ProfileStage::OptionsLayout, error))?;
+    let name_frame = borderwrap(name).ok_or_else(|| fail(ProfileStage::ContainerLayout))?;
     if borderwrap(options).map(|node| node.id()) != Some(name_frame.id()) {
-        return Err(fail);
+        return Err(fail(ProfileStage::ContainerLayout));
     }
-    let container = name_frame.parent().and_then(ElementRef::wrap).ok_or(fail)?;
+    let container = name_frame
+        .parent()
+        .and_then(ElementRef::wrap)
+        .ok_or_else(|| fail(ProfileStage::ContainerLayout))?;
     if container.value().name() != "div"
         || container.attr("class").is_some()
         || container.parent().and_then(ElementRef::wrap).is_none_or(|node| {
             node.value().name() != "div" || !node.value().classes().any(|class| class == "page")
         })
     {
-        return Err(fail);
+        return Err(fail(ProfileStage::ContainerLayout));
     }
     // 只接受已观察的 FONT/文本名称；不把隐藏脚本、图像替代文字当显示名。
     for node in name.descendants().skip(1) {
@@ -98,18 +161,18 @@ fn parse_target_profile(
                 if value.name() == "font"
                     && value.attr("style").is_none()
                     && value.attr("hidden").is_none() => {}
-            _ => return Err(fail),
+            _ => return Err(fail(ProfileStage::NameShape)),
         }
     }
     let full_name = name.text().collect::<String>().trim().to_owned();
     if !valid_mail_player_name(&full_name) {
-        return Err(fail);
+        return Err(fail(ProfileStage::NameValue));
     }
-    let selector = Selector::parse("a[href]").map_err(|_| fail)?;
+    let selector = Selector::parse("a[href]").map_err(|_| fail(ProfileStage::MidLayout))?;
     let mut matches = 0;
     for anchor in container.select(&selector) {
-        let reference = anchor.attr("href").ok_or(fail)?;
-        let url = target.join(reference).map_err(|_| fail)?;
+        let reference = anchor.attr("href").ok_or_else(|| fail(ProfileStage::MidLayout))?;
+        let url = target.join(reference).map_err(|_| fail(ProfileStage::MidLayout))?;
         let is_target_action = anchor.text().collect::<String>().trim()
             == "Send a Personal Message"
             || url.query_pairs().any(|(key, _)| key == "MID");
@@ -122,14 +185,14 @@ fn parse_target_profile(
             || url.password().is_some()
             || url.fragment().is_some()
         {
-            return Err(fail);
+            return Err(fail(ProfileStage::MidLayout));
         }
         let mut pairs = BTreeMap::new();
         for (key, value) in url.query_pairs() {
             if !["s", "act", "CODE", "MID"].contains(&key.as_ref())
                 || pairs.insert(key.into_owned(), value.into_owned()).is_some()
             {
-                return Err(fail);
+                return Err(fail(ProfileStage::MidQuery));
             }
         }
         // 旧论坛 session query 只在当前内存剥离，永不作为后续请求参数或证据字段。
@@ -141,12 +204,16 @@ fn parse_target_profile(
                 ("MID".to_owned(), uid.to_owned()),
             ])
         {
-            return Err(fail);
+            return Err(fail(ProfileStage::MidBinding));
         }
         matches += 1;
     }
     if matches != 1 {
-        return Err(fail);
+        // 数量只用于区分按钮缺失与目标歧义，不记录任何链接或页面内容。
+        let error = InternalEvidenceError::Unproven;
+        tracing::warn!(stage = "mid_count", mid_count = matches, error = ?error,
+            "Forum target profile evidence failed");
+        return Err(error);
     }
     Ok(full_name)
 }

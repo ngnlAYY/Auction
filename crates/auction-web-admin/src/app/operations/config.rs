@@ -81,8 +81,18 @@ pub(super) fn page() -> Element {
     use_effect(move || {
         let snapshot = config.read_unchecked().clone();
         if let Some(Ok(value)) = snapshot {
+            let Some(taxonomy) = value.equipment_taxonomy.as_ref() else {
+                form_ready.set(false);
+                notice.set(Some(ConfigNotice::InvalidForm));
+                return;
+            };
             // 返回本页时保留当前会话草稿；外部版本变化也不能静默覆盖尚未保存的输入。
             if baseline.peek().is_some() {
+                // 词典可独立于 document fingerprint 更新，不覆盖草稿或制造脏状态。
+                form.write().refresh_equipment_taxonomy(taxonomy);
+                if let Some(initial) = baseline.write().as_mut() {
+                    initial.refresh_equipment_taxonomy(taxonomy);
+                }
                 if fingerprint.peek().as_deref() == Some(value.fingerprint.as_str()) {
                     form_ready.set(true);
                     return;
@@ -94,7 +104,7 @@ pub(super) fn page() -> Element {
                     return;
                 }
             }
-            match RuntimeConfigForm::from_document(&value.document) {
+            match RuntimeConfigForm::from_response(&value) {
                 Ok(next_form) => {
                     baseline.set(Some(next_form.clone()));
                     form.set(next_form);
@@ -247,9 +257,7 @@ pub(super) fn page() -> Element {
                                 busy.set(true);
                                 spawn(async move {
                                     match validate_admin_runtime_config(document).await {
-                                        Ok(result) => match RuntimeConfigForm::from_document(
-                                            &result.document,
-                                        ) {
+                                        Ok(result) => match RuntimeConfigForm::from_response(&result) {
                                             Ok(next_form) => match next_form.signature() {
                                                 Ok(signature) => {
                                                     form.set(next_form);
@@ -434,9 +442,7 @@ pub(super) fn page() -> Element {
                                                     )
                                                     .await
                                                     {
-                                                        Ok(result) => match RuntimeConfigForm::from_document(
-                                                            &result.document,
-                                                        ) {
+                                                        Ok(result) => match RuntimeConfigForm::from_response(&result) {
                                                             Ok(next_form) => {
                                                                 baseline.set(Some(next_form.clone()));
                                                                 form.set(next_form);

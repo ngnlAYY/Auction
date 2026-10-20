@@ -1,11 +1,11 @@
 //! MoogleMail Worker 持久化适配器装配；状态与租约在 `state.rs`，轮询 claim/commit/fail 在
 //! `poll.rs`，入站事实与命令幂等写入在 `inbound.rs`。外部 GET 不在事务内执行，Worker 拿到
-//! claim 后才调 gateway，并在 commit 中原子写入事实与 cursor。
+//! claim 后才调 gateway；`reads.rs` 在详情 GET 前登记恢复队列，commit 原子写入事实、cursor 并删除完成前缀。
 
 use auction_application::{
     AdminMailPollState, ApplicationFuture, MAX_MAIL_POLL_BATCH_SIZE,
     MAX_MAIL_POLL_FAILURE_CODE_BYTES, MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch,
-    MailPollClaim, MailPollCompletion, MailPollStore,
+    MailPollClaim, MailPollCompletion, MailPollReadJournal, MailPollReadSummary, MailPollStore,
 };
 use chrono::{DateTime, Utc};
 
@@ -16,7 +16,62 @@ mod inbound;
 #[cfg(feature = "postgres")]
 mod poll;
 #[cfg(feature = "postgres")]
+mod reads;
+#[cfg(feature = "postgres")]
 mod state;
+
+impl MailPollReadJournal for DatabaseStore {
+    fn pending_reads(
+        &self,
+        claim: MailPollClaim,
+        world_id: String,
+        limit: u16,
+    ) -> ApplicationFuture<'_, Vec<MailPollReadSummary>> {
+        Box::pin(async move {
+            if !claim.validate()
+                || !matches!(world_id.as_str(), "main" | "isekai")
+                || !(1..=MAX_MAIL_POLL_BATCH_SIZE).contains(&limit)
+            {
+                return Err(storage_error("MoogleMail 待读查询参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    reads::pending(store.pool(), &claim, &world_id, limit).await
+                }
+            }
+        })
+    }
+
+    fn stage_reads(
+        &self,
+        claim: MailPollClaim,
+        world_id: String,
+        summaries: Vec<MailPollReadSummary>,
+    ) -> ApplicationFuture<'_, ()> {
+        Box::pin(async move {
+            let mut seen = std::collections::HashSet::new();
+            if !claim.validate()
+                || !matches!(world_id.as_str(), "main" | "isekai")
+                || summaries.is_empty()
+                || summaries.len() > usize::from(MAX_MAIL_POLL_BATCH_SIZE)
+                || summaries.iter().any(|summary| {
+                    !summary.validate()
+                        || summary.world_id != world_id
+                        || !seen.insert(summary.external_mail_id.as_str())
+                })
+            {
+                return Err(storage_error("MoogleMail 待读登记参数无效"));
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => {
+                    reads::stage(store.pool(), &claim, &world_id, &summaries).await
+                }
+            }
+        })
+    }
+}
 
 impl MailPollStore for DatabaseStore {
     fn lookup_completion(

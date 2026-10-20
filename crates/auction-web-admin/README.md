@@ -13,10 +13,13 @@ Dioxus 纯客户端渲染的管理端 SPA，拥有管理认证、查询、命令
 | [src/app/surface/pagination](crates/auction-web-admin/src/app/surface/pagination) | 每表数量 URL、本地偏好、共享 Pager 译文与请求身份门禁 |
 | [src/app/surface/pending](crates/auction-web-admin/src/app/surface/pending) | 当前路由已提交命令的稀疏宿主、累计未知结果与原样重试区 |
 | [src/api/pagination](crates/auction-web-admin/src/api/pagination) | 显式分页请求的安全乘法与既有服务端边界校验 |
+| [runtime_config/taxonomy.rs](crates/auction-web-admin/src/api/operations/runtime_config/taxonomy.rs) | 服务端装备词典投影的界限、唯一性及引用完整性校验 |
 | [src/app/auction](crates/auction-web-admin/src/app/auction) | 拍卖、lot、录入、结算/恢复页面 |
 | [src/app/identity](crates/auction-web-admin/src/app/identity) | Users、改名与凭据管理 |
 | [src/app/fulfillment](crates/auction-web-admin/src/app/fulfillment) | 邮件审查与 delivery 操作 |
 | [src/app/operations](crates/auction-web-admin/src/app/operations) | dashboard、runtime、实时运维及首次设置 |
+| [equipment_colors/options](crates/auction-web-admin/src/app/operations/config/form/equipment_colors/options) | 按服务端装备词典投影计算标色候选的筛选和去重并集 |
+| [equipment_colors/selection.rs](crates/auction-web-admin/src/app/operations/config/form/equipment_colors/selection.rs) | 原生复选框多选、旧候选保留及多类别种类/词缀并集关联 |
 | [src/app/content](crates/auction-web-admin/src/app/content)、[src/api](crates/auction-web-admin/src/api) | 规则工作区、同源请求与严格 DTO 解码 |
 | [assets](crates/auction-web-admin/assets)、[i18n](crates/auction-web-admin/i18n) | Admin 样式与五语言译文 |
 
@@ -92,6 +95,9 @@ UID），forum Cookie 不接受该字段；可信自身身份页面协议未闭�
 既有 delivery 列表兼容独立 `lot_watch` 来源并使用五语言类型标签，只为 `lot_watch_invalidated` 的明确 failed/无 sending/
 无租约/无外部引用/零 COD 投影接受 preflight 时间链且不提供重试入口（见[Admin 契约](docs/contracts/routes.md#admin)）。
 
+装备读取的解析失败在原有诊断详情中展示九种低基数原因及原始代码，覆盖名称、品质、种类、大类及其不一致、等级、
+页面结构、属性和结构化数据不一致；仅接受 `stage=parse/category=protocol_drift` 的对应原因组合，历史无明细记录继续可读。
+
 ## 规则及运行配置
 
 规则按 locale 读取与编辑，校验/发布期间禁止语言切换，迟到结果复核目标语言及草稿；只有最近校验过的草稿可携带
@@ -99,6 +105,22 @@ revision fence 发布，冲突后重新读取。Runtime 编辑发送非敏感 JS
 fingerprint 与稳定命令，六组 operations 的 managed 默认关闭，未接管候选不代表当前生效配置；经济模板/排期只影响
 后续拍卖，保存后重启受影响进程、不热加载。Runtime world 开关只控制 Worker 候选，数据库业务世界由独立版本化命令
 管理（见[配置手册](ops/config/README.md#runtime-共享与重启)）。
+
+论坛标色的装备类型、装备种类、品质和前后缀均使用原生复选框多选；前三项未勾选表示全部，同一项内取并集、不同项之间取交集。
+旧单值规则回填为一个已选项，保存统一写 `categories/equipment_types/qualities` 数组并清空对应旧单值；旧单值恰为材质名且
+未主动编辑种类时保留精确旧值，标签明确标注，避免编辑其他字段时扩大匹配。编辑、重排、导入导出
+仍使用同一完整 runtime 文档与 fingerprint/稳定命令。GET、校验及保存请求均显式携带
+`include_equipment_taxonomy=true`，候选只读取响应中独立的 `equipment_taxonomy`；缺少或无效词典明确报错，
+不回退浏览器旧词表。词典不进入保存文档或 fingerprint，更新推荐候选不覆盖草稿，也不造成未保存提示。
+完整种类与材质族分别取服务端投影，族选项显示“全部部位”，前后缀按所选大类及精确种类或材质求去重并集。
+本次配置中的合法有限兼容完整名由服务端单独放入 `resolved_kinds`，页面据此提供该精确种类的前后缀候选，
+不在浏览器复制语法或按名称首词猜测材质。GET、校验及保存均按各自文档补充，候选不只限于已保存值；
+旧投影未提供该集合时按空列表读取，确证目录仍保持独立。
+刷新与外部冲突时，同一词典 revision 保留草稿仍选中的既有服务端有限种类候选，新响应同名项优先；
+revision 变化则使用新词典。合并只更新候选元数据，不进入保存文档、指纹或脏状态比较。
+切换分类只更新候选，所有已选种类和词缀保留原文并继续可见，包括未知、历史及暂不相容的选项，直到用户手动取消，
+避免精确种类被自动清空成“全部”。后缀的可选 `the ` 前导词按服务端相同的大小写规则匹配。
+展示与词典更新边界见 [Admin 设计](crates/auction-web-admin/DESIGN.md#运行配置)。
 
 ## 认证与首屏边界
 

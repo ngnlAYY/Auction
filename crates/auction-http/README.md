@@ -21,6 +21,9 @@ Public/Admin HTTP 路由、认证、安全、DTO 映射和静态资源适配。�
 [HTTP 契约](docs/contracts/routes.md)是路由、状态码、DTO、分页和能力清单；Public 指定列表的 `page_size` 不设 200 条上限，仍严格检查正整数、
 offset 溢出及 cursor 互斥；[assets/routes.rs](crates/auction-http/src/assets/routes.rs)
 与 Dioxus Route 共同限定 15 条 Public、21 条正式 Admin 浏览器路径，修改任一方必须同步其余两处。
+P12 成交价编号页的 `sort` 仅接受 `closed_desc`（默认）、`closed_asc`、`price_desc`、`price_asc`；
+名称同时接受 Unicode 空白及英文逗号分词，空词忽略，原有总长 1024 字节、最多八词及每词 128 字节边界保留；
+旧 cursor 仅配默认排序，其他组合返回 400。可选 `stats.median_exact` 保留精确半个 Credit，原整数 `median` 继续兼容。
 `http/mod.rs` 与各 `mod.rs` 只做装配/导出，`shared/state/{public,admin}.rs` 分别持有两个表面的窄端口、不能互用。
 
 [public/countdown](crates/auction-http/src/http/public/countdown) 拥有论坛动态 SVG 的 HTTP、固定英文视图及有界 CSS 动画，
@@ -31,6 +34,12 @@ GET/PUT：两者复用会话、来源/CSRF、限流、strict JSON、JSON 405 与
 词法错误 400、业务错误 422、命令/版本冲突 409、依赖缺失或集合超限 503，旧 channel 只接受 mm 占位。
 [admin/forum/status.rs](crates/auction-http/src/http/admin/forum/status.rs) 拥有 Admin 认证论坛状态 GET，
 严格空查询、`no-store`、不访远端论坛、不执行恢复授权。
+[admin/runtime_config/taxonomy.rs](crates/auction-http/src/http/admin/runtime_config/taxonomy.rs) 把领域统一装备词典
+投影为只读 DTO；GET/validate/PUT 仅在显式 `include_equipment_taxonomy=true` 时附带该字段，
+旧请求保持原响应字段集合，查询不进入配置指纹或命令摘要。映射器不复制分类词表、不执行收件策略。
+固定词典主体使用进程内 `OnceLock` 缓存公开 DTO；每次响应克隆主体，再从本次读取、校验或保存文档的标色规则
+单值及数组中，经领域 `resolve_kind` 为合法有限兼容种类补充独立 `resolved_kinds`（最多 16 项）。
+缓存不持有配置或草稿，不改变既有 `no-store` 响应头、词典 revision、文档指纹或命令重放结果。
 
 ## 请求边界与能力边界
 

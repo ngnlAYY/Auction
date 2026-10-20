@@ -68,6 +68,9 @@ pub use forum_profile::*;
 #[path = "settlement/evidence/mod.rs"]
 mod settlement_evidence;
 pub use settlement_evidence::*;
+#[path = "settlement/legacy_repair/mod.rs"]
+mod settlement_legacy_repair;
+pub use settlement_legacy_repair::*;
 #[path = "forum/pm.rs"]
 mod forum_pm;
 pub use forum_pm::*;
@@ -358,7 +361,7 @@ pub use mail_maintenance::{
 pub use mail_poll::{
     MAX_MAIL_POLL_BATCH_SIZE, MAX_MAIL_POLL_DECISION_BYTES, MAX_MAIL_POLL_FAILURE_CODE_BYTES,
     MAX_MAIL_POLL_FAILURE_DETAIL_BYTES, MailPollBatch, MailPollClaim, MailPollCompletion,
-    MailPollIntake, MailPollStore,
+    MailPollIntake, MailPollReadJournal, MailPollReadSummary, MailPollStore,
 };
 pub use mail_processing::{
     MailAuctionAcceptance, MailAuctionIntakeCommand, MailAuctionIntakeLookup,
@@ -395,9 +398,9 @@ pub use queries::{
     PublicLotListRequest, PublicLotPage, PublicLotReader, PublicMyBid, PublicMyBidsPage,
     PublicMyBidsRequest, PublicOwnedProxy, PublicPreviewLotDetail, PublicPreviewLotSummary,
     PublicPriceHistoryCursor, PublicPriceHistoryEntry, PublicPriceHistoryListRequest,
-    PublicPriceHistoryPage, PublicPriceHistoryReader, PublicPriceHistoryStats, PublicProxyBid,
-    PublicProxyCapabilities, PublicProxyTransition, PublicRealtimeAuctionStatus, WorldReader,
-    WorldSnapshot,
+    PublicPriceHistoryPage, PublicPriceHistoryReader, PublicPriceHistorySort,
+    PublicPriceHistoryStats, PublicProxyBid, PublicProxyCapabilities, PublicProxyTransition,
+    PublicRealtimeAuctionStatus, WorldReader, WorldSnapshot,
 };
 pub use readiness::ProcessReadinessPort;
 pub use realtime::{

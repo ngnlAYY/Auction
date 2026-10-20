@@ -6,6 +6,7 @@ use auction_observability::WorkerRetryKind;
 pub(super) async fn fetch_with_retry(
     gateway: &dyn MailPollGateway,
     request: MailPollFetchRequest,
+    claim: MailPollClaim,
     config: MailPollRuntimeConfig,
     metric_context: MailPollMetricContext,
 ) -> Result<MailPollPage, MailPollGatewayError> {
@@ -21,7 +22,7 @@ pub(super) async fn fetch_with_retry(
         let request = MailPollFetchRequest { deadline: Some(deadline), ..request.clone() };
         let result = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
-            gateway.fetch(request),
+            gateway.fetch_claimed(request, claim.clone()),
         )
         .await;
         match result {

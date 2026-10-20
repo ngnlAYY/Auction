@@ -179,12 +179,6 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
             td { "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
-            td { class: "public-auction-catalog__actions", "data-label": t!("catalog-actions"),
-                span { class: "public-auction-catalog__actions-list",
-                    Link { to: lot_detail_href(&row.lot_id), {t!("catalog-view")} }
-                    LotWatchButton { lot_id: row.lot_id.clone(), lot_code: row.code.clone() }
-                }
-            }
         }
     }
 }

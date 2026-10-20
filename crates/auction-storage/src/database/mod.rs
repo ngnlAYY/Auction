@@ -156,6 +156,8 @@ mod realtime_admin;
 #[cfg(feature = "postgres")]
 mod realtime_consumer;
 #[cfg(feature = "postgres")]
+mod settlement_legacy_repair;
+#[cfg(feature = "postgres")]
 pub use realtime_consumer::{RealtimeConsumerOwnership, RealtimeConsumerOwnershipError};
 #[cfg(feature = "postgres")]
 #[path = "recovery_commands/commands.rs"]

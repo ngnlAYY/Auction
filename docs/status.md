@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | HTTP 与页面 | Public 26、Admin 46 条 feature API；15/21 条浏览器入口 | 每条流程已经通过浏览器或部署验收 |
 | PostgreSQL | 完整竞价、结算/恢复、论坛、邮件、凭据、运维 owner | 真实外部服务与生产数据正确性已获证明 |
-| 迁移 | PostgreSQL 48 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
+| 迁移 | PostgreSQL 56 个追加迁移文件 | 任一目标数据库已经运行到该版本 |
 | 发布 | API-only/embedded 隔离、payload 清单、确定性归档门禁及默认分支/手动 Actions 制品任务 | 新工作流已经完成制品上传、部署或运行验收 |
 | 无配置首次启动 | 默认 loopback 设置页、五字段数据库输入；合并入口支持显式 HTTPS 代理及确认后空库初始化/启动 | 本轮已在真实主机完成设置、迁移、登录或浏览器验收 |
 | 可选合并制品 | `auction-server` 自管三角色子进程，`auctionctl` 独立；默认分体包不变 | 已完成信号、父进程强杀、代理、迁移失败和升级运行验收 |
@@ -34,6 +34,468 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 各记录只覆盖注明的工作树与验证范围，不代表运行验收。下文 `verify全绿` 指完整 `just verify` 通过：文档份数（未注明为 45 份）、格式/仓库/布局/配置/i18n、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）及双端 WASM。检查入口见[开发指南](docs/guide/development.md#默认检查)。
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
+
+### 2026-10-20 统一装备解析与复审修复（R20 已上线，schema 56）
+
+经明确部署授权，将下述统一词典、分层解析、Admin 服务端候选及复审修复一并发布到现有分体环境。
+owner 为 domain、integrations、application、contracts/HTTP、Admin 与 storage；新增 `000056` 扩展诊断约束，
+保留历史数据和前 55 条迁移校验和。原静态检查范围及外部契约见后两条源码记录。
+
+embedded 发布构建与独立封存通过；四个 GNU/Linux x86_64 程序均更新，使用通用 CPU 配置，
+16 项文件清单、双端 payload 隔离及全部 56 条内嵌迁移核对通过。
+构建起止源码指纹为 `e03b559f2070966ecc4e5570005ab043151afcfd15ac4b980433457e2e236c21`，
+`SHA256SUMS` 摘要为 `e02b8406e3adc7d8ce7d37b022d3851a2accd8402c75bfc34c3868cf56b017fe`。
+Public payload 为 `5c1bce09d5ab4933723135574cb5f2e47ff403550d1ec7e7b42cd2d861423953`，
+Admin payload 为 `3476c548b5c2ad46fd3cc4a0306ff976b9bbe9bf31b1fe52be387c3c99ddbb02`。
+
+2026-10-20 13:18:17 UTC 完成正常 Worker 排空与三角色停止；使用旧版控制器完成 schema 55 数据库备份，
+新版控制器离线核验归档及 manifest 后原子替换四程序，由 `deployment start` 持锁执行 55→56 迁移。
+13:18:18 UTC 完成 Worker → Admin → Public 启动；13:18:23 UTC 独立后验确认三 readiness 均为 200，
+四个磁盘/运行映像与发布包一致，全部 56 条迁移成功且 checksum 匹配，启动回执与 PID/InvocationID 一致。
+13:19:45 UTC 复核 PID 未变、自动重启为零，新进程日志均为 INFO；八份配置与本次部署前快照一致，
+保留了上次发布后用户对 runtime 的修改。迁移尝试后的失败路径只安全停机，不自动恢复旧程序或数据库。
+
+静态资源后验中，两端 Unix 源站各七项文件全部返回 200 且 SHA-256 匹配封存包；公网 Public 的
+payload 标记和 WASM 同样匹配。公网首页为 Cloudflare `DYNAMIC`/`no-store` 响应，
+源站首页 5,425 字节与封存一致，公网增加 1,472 字节并改写模块 script 类型，涉及 Rocket Loader、
+Insights 与 challenge-platform；原资源引用保留。因此保留原始 17 项检查中的首页字节不等结果，
+另存 `index-https-comparison-r20/` 的差异证据。仅移除三段已识别 Cloudflare 注入脚本、模块类型动态前缀
+及额外换行后，剩余 HTML 与源站/封存逐字节一致；没有修改 CDN 或代理配置。
+
+封存包在 `target/dist/equipment-audit-fixes-20261020-schema56-r20/`，构建、封包、安装回执及
+124 项已核验云端证据在 `target/dist/equipment-audit-fixes-20261020-ops-r20/`。
+云端证据与旧四程序/配置备份在 `backups/equipment-audit-fixes-20261020-schema56-r20/`，
+数据库归档及 manifest 保留于独立 root 私有目录。
+本次执行发布构建、迁移及部署后验，没有新增或运行行为测试套件。
+
+### 2026-10-20 装备重构复审修复（源码完成，静态检查通过）
+
+本次复审发现前轮解析诊断的 Rust 闭集扩展未同步数据库 CHECK；storage 追加 `000056`，
+仅为 parse/protocol_drift 放行九个来源原因，保留原证据约束和历史空原因，避免解析拒收被旁路诊断阻断入站/游标事务。
+`ci/checks/equipment-contract.sh` 只读比对枚举、最新约束、Admin 解码和五语言说明，接入默认 `all`/`just verify`。
+迁移、执行顺序与不改写历史数据的边界见[数据库契约](docs/contracts/schema.md)及[诊断说明](ops/mail/diagnostics.md#装备读取失败诊断)。
+
+integrations 对 HTML 唯一 header、必要属性区域和非空属性集合进行校验；已识别属性行的非法 Base 或列损坏明确报错，
+保留合法可选说明，普通连字符文本不视为数值。MM 诊断读取复用 URL/allowlist 校验，canonical JSON 字段/指纹不变。
+domain 缓存最长种类匹配顺序并复用已解析种类和静态词缀切片；HTTP 缓存静态词典主体，
+为当前文档已有的合法有限语法种类增加独立 `resolved_kinds`，不混入确证目录或配置指纹。
+Admin 精确关联这些候选，并在同词典版本刷新时保留草稿仍选中的既有服务端解析项。
+没有新增依赖、路由、运行配置字段或业务表；相关 owner 和响应契约同步于模块文档及[架构](docs/design/architecture.md)。
+
+定向 domain/integrations/contracts/HTTP/Admin 编译、格式、Shell 语法与 ShellCheck、诊断静态门禁通过；
+各实现已交叉源码复核。完整 `just verify` 退出 0，覆盖新增诊断闭集门禁、仓库/布局/配置/i18n、格式、
+工作区全部目标、独立 PostgreSQL/Redis feature、全特性 Clippy（`-D warnings`）及双端 WASM；
+日志为 `target/audits/equipment-audit-fixes-20261020/verify.log`，最终差异检查通过。
+本次未新增或运行行为测试，未执行数据库迁移、服务启动或云端部署。以下历史验证记录保留原样。
+
+### 2026-10-20 统一装备词典与分层解析重构（源码完成，静态检查通过）
+
+`auction-domain::equipment::taxonomy` 唯一拥有七大类、77 个确证完整种类、十二个可选材质族和历史
+Chainmail、十档现行及两档历史品质、五个语义部位、词缀推荐和历史兼容关系。词条保留 Wiki 来源及修订，
+Chain/Reactive 的八个 Heavy 部位仅作受限读取语法，不展开为确证候选；最长完整种类优先，
+未知种类和非法名称明确拒绝，未知前后缀保留原文。Astral/Quintessential 的历史识别限武器大类，
+自由词缀、规范身份字段及旧 `the ` 比较口径保持兼容。
+
+`auction-integrations` 将页面提取、header 等级/交易状态和领域身份适配分离；HTML 与 canonical JSON
+共用词典并交叉校验大类。未赋等级、普通等级、Tier 和未声明等级在进程内分开，既有 DTO、属性 JSON
+和指纹仍投影为原 `Option<i32>`。`auction-application` 保持原收件品质、交易资格、等级条件与旧标色
+单值精确匹配，材质归类及后缀比较改为复用领域词典；既有装备、审计、命令摘要和配置指纹不重写。
+
+contracts/HTTP 为三条 runtime 配置路由增加显式 `include_equipment_taxonomy=true` 的只读投影选择，
+无查询请求仍返回旧三字段集合；Admin 删除本地分类和词缀副本，读取服务端候选、保留已选历史值，
+词典刷新独立于草稿和保存文档。来源解析的九项闭集原因接入现有 MM 诊断 sidecar 和五语言说明，
+Admin 手工录入保留原 HTTP 错误并记录安全闭集诊断。没有新增依赖、数据库迁移、运行配置字段或路由。
+owner、兼容边界和响应字段见[架构](docs/design/architecture.md#crate-所有权)、
+[装备录入不变量](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)及
+[运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)。
+
+完成领域/集成交叉源码复核、HTTP/DTO/诊断链独立复核；初次及最终源码的完整 `just verify` 均退出 0，
+覆盖格式、仓库/布局/配置/i18n、工作区全部目标、独立 feature、全特性 Clippy 和双端 WASM。
+静态证据位于 `target/audits/equipment-taxonomy-20261020/verify.log` 与 `verify-final.log`；
+本轮没有新增或运行行为测试，也未执行云端部署。
+此前 R19 的发布证据和历史结果保留如下。
+
+### 2026-10-20 Wiki 装备解析与标色兼容修复（R19 包已上线）
+
+本轮针对 Wiki 核对发现的五项问题：装备解析补齐种类、纠正 `Leather Helmet`、按完整名称识别 `Great Mace`，
+并将明确的 `Level Unassigned` 映射为缺省等级。精确词表共 77 项，包含 22 项武器/盾牌、50 项护甲和
+5 项旧 Chainmail 完整种类；Chain/Reactive 仅按精确材质及八个 Heavy 公共部位提供受限读取语法，
+不将所有组合声明为确证的表单选项。来源适配仍校验种类与大类一致，
+默认收件品质、可交易性、等级限制及录入事务沿用原有规则，既有装备快照与审计事实不自动改写。
+Admin 标色表单切换类型或种类只更新推荐候选，保留其它维度的全部已选值；
+历史精确种类不会被自动清空成不限条件，历史前后缀也不会因当前推荐列表缺项而消失。
+模块 owner 为 `auction-integrations` 与 `auction-web-admin`，没有新增 HTTP/JSON 字段、配置字段或数据库迁移。
+契约见[装备录入不变量](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)
+及[标色编辑规则](docs/contracts/routes.md#runtime-配置与文件事务)。
+
+完整 `just verify` 退出 0，覆盖格式、仓库/布局/配置/i18n、工作区全部目标、独立 feature、
+全特性 Clippy 及双端 WASM。解析器与 Admin 变更分别完成独立源码复核。
+正式 embedded 发布构建与封存退出 0；16 项清单、42 项 Public 和 21 项 Admin 标记、GNU/glibc、
+无 CPU 特化、资源隔离及全部 55 项迁移校验和通过。构建起止源码指纹均为
+`fa57f191708d6d3d93e85245c41ac4b27ef4e2811b7300e93e76acec11a60c9f`，`SHA256SUMS` 摘要为
+`4fd7c91d6061f7f8c826e86eac1003c85968d3d0a13e43736511a4b2ef5cee7e`。
+R19 包更新 Admin/Worker 内容；Public 与 `auctionctl` 字节复用 R18，并在部署计划及安装回执中分别记录包版本和内容版本。
+Public payload 仍为 `5c1bce09d5ab4933723135574cb5f2e47ff403550d1ec7e7b42cd2d861423953`，
+Admin payload 为 `7d8f059e9fa501c260c19d996f697c0f4734c8743b2046e6fbfe5508b4435cc6`。
+
+2026-10-20 11:24:19 UTC 完成正常 Worker 排空及三角色停止，验证停机数据库备份后原子替换四程序；
+11:24:21 UTC 总控完成 Worker → Admin → Public 恢复，迁移为 schema 55 的 no-op。
+11:24:26 UTC 独立后验确认三 readiness 均为 200、三 receipt matched，`started` 回执与实际
+PID/InvocationID/单调启动时间一致，自动重启为零。Worker/Admin/Public PID 分别为 163634/163650/163658，
+四个运行或磁盘映像均匹配 R19 包清单；线上 runtime 配置八文件哈希保持原样。
+本轮执行静态检查、发布构建和受控部署检查，没有新增或运行行为测试套件。
+
+封存包在 `target/dist/equipment-parser-compat-20261020-schema55-r19/`；静态日志 `verify-r19.log`、
+构建封存回执、安装回执及 124 项已逐项核对的云端证据在
+`target/dist/equipment-parser-compat-20261020-ops-r19/`。
+`final-all-r19-confirmed.json` SHA-256 为
+`e22077f5ab158746bb791315c40eb44599bf4d252b32d34ff11aa1351987ce30`。
+云端记录在 `backups/equipment-parser-compat-20261020T190000Z-r19/`，数据库备份独立保存在
+root 私有目录并已验证归档及 manifest 校验和；旧四程序与八份配置备份保留。
+
+### 2026-10-20 预览静默更新、已结算列与标色多选（R18 已上线）
+
+Public 的 `surface/board` 按账号 UUID、世界、场次、阶段及筛选分页隔离完整目录快照；预览继续每 60 秒
+在可见页面后台读取、恢复可见时补读。同一上下文更新期间保留已对齐目录，修订对齐后整体替换，不再用加载提示替换列表。
+首次读取、上下文切换和明确失败继续使用既有反馈，对齐补读显式订阅状态与修订键。`surface/catalog` 按权威
+`auction_status=settled` 同步去掉列宽、表头和行操作单元格，保留真实成交投影及完整十一列百分比布局。
+
+Admin 的 `operations/config/form/equipment_colors` 使用原生复选框选择类型、种类、品质与前后缀；
+支持 72 个完整种类、12 个护甲材质总类、10 档品质。护甲按材质选择全部部位或按完整种类精确选择，词缀按多选范围求并集。
+应用与配置 owner 增加可省略空数组的 `categories`、`equipment_types`、`qualities`，同维 OR、跨维 AND；
+新种类数组支持带实际大类及完整词边界校验的材质族，旧单值继续精确匹配，表单保留未编辑的旧材质精确规则。
+HTTP、runtime TOML、持久命令及论坛渲染沿用同一完整文档；规则仍在 Worker 启动时冻结，收件允许策略和 schema 不变。
+契约与说明同步至 [HTTP 契约](docs/contracts/routes.md#runtime-配置与文件事务)、[Admin 设计](crates/auction-web-admin/DESIGN.md#运行配置)
+及 [Public 设计](crates/auction-web-public/DESIGN.md#6-竞价与代理交互)。
+
+完整 `just verify`、正式 embedded 发布构建和封存均退出 0；16 项清单、42 项 Public 及 20 项 Admin 标记、
+GNU/glibc、无 CPU 特化、资源隔离及全部 55 项迁移校验和通过。R18 构建起止源码指纹均为
+`5aa19aa0b7c79eaf239a38f582a33d31f023f961586db447a9e71ec604813f19`，`SHA256SUMS` 摘要为
+`76296b4163a07efbc317763b96c7c2e86570cb240158e1819dc1f2552d5e03c3`。
+首次部署预检因 systemd 基础属性返回标量而在停止服务前退出；保留该记录，修正部署脚本后使用同一封存包重试。
+
+2026-10-20 10:29:59 UTC 完成正常 Worker 排空及三角色停止，验证停机数据库备份后原子替换四程序，
+10:30:01 UTC 由新总控按 Worker → Admin → Public 恢复；迁移为 schema 55 的 no-op。10:30:04 UTC 独立后验确认
+三 readiness 均为 200、三 receipt matched、`started` 回执与实际 PID/InvocationID/单调启动时间一致，自动重启为零。
+Worker/Admin/Public PID 分别为 141407/141428/141436，四个运行或磁盘映像均匹配 R18。
+本轮仅更新程序，线上 runtime 配置八文件哈希保持原样，没有运行行为测试套件或修改线上标色规则。
+
+封存包在 `target/dist/preview-silent-settled-actions-20261020-schema55-r18/`，构建与静态证据在
+`target/dist/preview-silent-settled-actions-20261020-ops/`，成功部署证据在同名 `-ops-retry1/`；
+124 项云端证据已下载并逐项核对，`final-all-r18-confirmed.json` SHA-256 为
+`f27656742b74c85fa168481eef2ee1e8478193a169e81df6fa2970001545cdef`。
+云端记录在 `backups/preview-silent-multiselect-settled-20261020T180000Z-retry1/`，数据库备份独立保存在
+root 私有目录并已验证归档及 manifest 校验和；旧四程序与八份配置备份保留。
+
+### 2026-10-20 全装备大类标色词缀核对（Admin 已上线）
+
+`auction-web-admin` 的 `operations/config/form/equipment_colors/options/` 独占标色表单的分类选项，
+按 Equipment Basics 的大类与 Detailed Equip Characteristics 的材质、种类关联词缀。
+原先 Cloth、Light、Heavy 共用护甲总表，导致分类混用且漏掉 Shade、Power 等专属词条；现在各大类按本类材质求去重并集，
+Light/Heavy 分开，兼容后缀 `the `/`The `，已有候选原文保留，显式切换分类后才清理不兼容选项。
+其他五大类也已逐项核对：补齐六种武器/盾牌候选、Rapier 的 Swiftness、Katalox 的熟练度后缀；
+Wiki 总表与分项说明不一致时采用两处明确词条的兼容并集。七大类、22 种武器/盾牌及 12 种护甲材质的展示口径、
+来源与完整 Light/Heavy 对应表见 [Admin 设计](crates/auction-web-admin/DESIGN.md#运行配置)。
+模块说明及架构 owner 同步；HTTP/DTO、配置字段、采集接受策略、数据库与既有规则值均沿用原契约。
+
+完整 `just verify`、正式 embedded 发布构建及封存门禁均退出 0；十六项清单、37 项 Public 与 13 项 Admin 资源标记、
+GNU/glibc、无 CPU 特化、双端资源隔离及 1–55 全部迁移 checksum 核对通过。
+R16 构建起止源码指纹均为 `1a6435c92eeb915c3dca8ea9765cfe38ded60c933c26c7fe9a1001e1f3a8a366`，
+`SHA256SUMS` 摘要为 `6d74a111470bb088c1960a9b56d72f69d8faa0931cc5372aa676caaf8a21e605`；
+Admin payload 为 `86a92fbd90eab8e672f2a0b276e4756121a135e1fe42ced5c4952988a431014b`，
+Admin ELF 为 `6b85a6cec3c88c5160e11390d3b303ebb7aec4acd84a7b49edf427709a418018`，Public payload 与 ELF 均保持 R14。
+
+生产预检核对 55 项 SQLx checksum、进程/磁盘映像、既有回执与停止依赖闭包：Public 的反向停止关系为空，
+Admin 的 RequiredBy 精确仅为本次受控的 Public，其他停止传播关系及两个停止钩子均为空；Worker 的 StopWhenUnneeded 为 no。
+仅按 Public → Admin 停止 HTTP 角色，原子替换 Admin，再按 Admin → Public 启动，以满足既有 Worker < Admin < Public
+启动时间硬门，并通过旧总控 all-running `start` 取得 `adopted` 回执。2026-10-20 09:45:08 UTC 完成安装，
+09:45:11 UTC 后验三个 Unix readiness 均为 200、三份 receipt 均 matched、自动重启为零。
+Admin PID 123303 运行映像匹配 R16；Public PID 123319 继续使用 R14 映像。
+Worker PID 97793 的映像、InvocationID、单调启动时间和磁盘 `auctionctl` 均保持 R9，数据库未迁移。
+
+R16 封存包在 `target/dist/equipment-color-taxonomy-all-20261020-schema55-r16/`，本地证据在
+`target/dist/equipment-color-taxonomy-all-20261020-ops/`，云端证据在 `backups/equipment-color-taxonomy-all-20261020T094000Z/`。
+158 项云端证据已下载并逐项核对；`final-admin-r16.json` SHA-256 为
+`4ab55b4383ec6c7be4cdec65b53a9391bc4bcf5b1cf23d6c7452e0582dfd201b`。
+本轮范围为源码与 Wiki 核对、静态检查、制品检查、已授权发布及就绪/回执观察；没有运行行为测试套件或修改线上标色配置。
+
+### 2026-10-20 操作顺序、账户后台更新及手动刷新反馈（Public 已上线）
+
+`auction-web-public` 将开拍操作列调整为 18%，装备名称列为 22%；按钮按出价、代理、标记的 DOM 顺序显示，
+两级等分 grid 为完整标记文字分配较宽位置，保留窄屏换行与键盘顺序。五语言未选中文字同步为“未标记”等对应译文。
+账户当期标记列表在后台加载时保留已完成快照和表格节点，取消与竞价事件无关的重读；异步身份复核使用非订阅读取，
+渲染身份校验与切换隔离保留。实时 owner 仅在已认证且权威场次为 `live` 或 `final` 时创建 WebSocket；
+预览显示“预览”，其余非竞价阶段停用实时，继续使用既有分钟轮询与恢复可见刷新发现开拍。
+“立即刷新”显示旋转图标和五语言忙碌文字、禁用重复点击，随后执行整页 reload；保留 reduced-motion 与导航失败提示。
+自动更新仍由资源读取完成。模块说明、Public 设计、架构、表格与客户端实时启用说明同步；外部 wire、配置及 schema 保持既有契约。
+
+完整 `just verify` 与正式 embedded 发布构建均退出 0；十六项封存、GNU/glibc、无 CPU 特化、双端资源隔离及旧页面标记检查通过。
+R14 构建起止源码指纹均为 `48bc0dfa9450ac8c28801e08e99eda8e598fd56b49d64268db19110a63d84620`，
+`SHA256SUMS` 摘要为 `c0ab51ddf738f35e2015d2f267cda058e0378affbe440c3dcb50004dfe5820c7`；
+Public payload 为 `0e477510373829d120d1c6dbe38f83494c1b31f95e39f037859b9f7b95c16043`，
+Public ELF 为 `0981c27bf01c05c459281b7a2b8493996deca3dd1024a244f402c5c93f5d4f26`。
+
+生产预检只读核对 schema 55 全部 SQLx checksum；2026-10-20 08:57:26 UTC 仅 Public 更新至 R14，
+随后既有总控以 all-running `start` 完成 `adopted` 回执。08:57:29 UTC 后验确认三份 receipt 均 matched、
+三个 Unix readiness 均为 200、自动重启为零，Public PID 104088 的运行映像与上述 ELF 一致。
+Worker PID 97793、Admin PID 97809 的运行映像、InvocationID 与单调启动时间，以及磁盘 `auctionctl` 均保持 R9；数据库未迁移。
+
+用户授权的真实账号只读观察中，旧版账户表格在分钟更新时被移除；R14 同一表格节点跨过该周期仍保留。
+全新已登录浏览器会话观察中，预览徽标为 `Preview`/`idle`，没有创建 WebSocket；
+点击“立即刷新”观察到忙碌文字与真实页面导航。跨版本旧会话观察单独保留，网络计数以全新 R14 会话为准。
+本轮没有新增或运行测试套件，没有修改标记、竞价、代理或通知偏好；预览页面观察不覆盖开拍后的竞价流程。
+
+R14 封存包在 `target/dist/public-actions-state-20261020-schema55-r14/`，本地部署及页面观察证据在
+`target/dist/public-actions-state-20261020-ops/`，云端证据在 `backups/public-actions-state-20261020T085000Z/`。
+76 项云端证据已下载并逐项核对，最终 `final-public-r14.json` SHA-256 为
+`8d4456f4dfedacfe585510dcf98ca29dfc1cb14fff7b4dc15a732ae5212b694f`。
+
+### 2026-10-20 当期标记装备与操作列（Public 已上线）
+
+`auction-web-public` 将开拍目录的操作列从 15% 加宽到 22%，显示操作表头，标记、出价及代理按钮保留完整文字并在本列换行。
+标记按钮使用空心/实心星形和原有本地化文字，继续消费权威状态、身份隔离、版本与原命令重试。
+预览目录同时移除操作列的列宽、表头和行单元格，保持十列，编号仍进入详情。
+账户 `identity/account/watches/` 组合既有当前场次、完整账号标记及公开目录，显示各启用世界当期装备的编号、真实名称、
+世界场次、状态与详情入口，包含预览场次；目录完整有界读取、末尾复核及失败关闭后，按真实交集本地分页。
+五语言、模块说明、架构 owner 及第 28 张表格登记同步；本轮没有修改 HTTP、DTO、数据库或配置契约。
+
+R12 和收紧账户数量提示留白后的 R13，完整 `just verify`、正式 embedded 发布构建及十六项封存检查均退出 0；
+GNU/glibc、无 CPU 特化、双端资源隔离、旧补偿/历史搜索标记与新账户/操作列标记核对通过。
+R13 构建起止源码指纹为 `01ab84b97840f85697b2606652314ab87aba4fef9a11b6837baf4d0e703120bc`，
+`SHA256SUMS` 摘要为 `9e7f19351940e376a6986773c1a25a477916ef6816f3cbc41263ef17ad5eca15`；
+Public payload 为 `1f22428473a2b920e84898bd07deae4e66d7d033e7f075a3f60189e5310ef224`，
+Public ELF 为 `9615d77b48d964b3fbf910c1b884fc93e3720f6f75e8c9ea16c020db0c6784bf`，Admin 资源与 R11 相同。
+
+生产预检只读核对 schema 55 全部已发布 SQLx checksum。08:06:57 UTC 首次安装 R12，
+08:14:38 UTC 仅停止 Public，08:14:39 UTC R13 readiness 为 200 并完成既有总控 all-running `start` 的 `adopted` 回执。
+08:14:42 UTC 后验确认三个 Unix readiness 均为 200、三份 receipt 均 matched、自动重启均为零；Public PID 103231 运行映像匹配 R13。
+Worker PID 97793、Admin PID 97809 的映像、InvocationID、单调启动时间及磁盘 `auctionctl` 全程保持 R9，数据库未迁移。
+
+经用户授权使用真实账号只读查看公开站点的预览目录、账户和装备详情：预览表的 colgroup、表头、每行均为十列；
+账户显示已有的一件 One01 标记及真实装备名、详情入口；数量提示实际为左对齐、无额外块级内边距。
+等待详情的权威标记读取完成后，选中按钮显示 `★Marked` 且 `aria-pressed=true`。
+本轮没有新增或运行测试套件，没有修改用户标记、竞价、代理或通知偏好；当前预览场次的页面观察不覆盖开拍后的竞价流程。
+
+R12 证据保留在 `target/dist/watch-actions-20261020-ops/` 与云端 `backups/watch-actions-20261020T080000Z/`；
+最终 R13 封存包在 `target/dist/watch-actions-spacing-20261020-schema55-r13/`，本地证据在
+`target/dist/watch-actions-spacing-20261020-ops/`，云端证据在 `backups/watch-actions-spacing-20261020T081000Z/`。
+两个版本各 76 项部署证据已下载并逐项核对；R13 `final-public-r13.json` SHA-256 为
+`99c664683428ccabe14a86d9d9f3b11f6bee66f61d14c1418de08a71ffcec920`。
+
+### 2026-10-20 历史成交价缩写搜索与独立容器（Public 已上线）
+
+按用户提供的保存网页及固定提交参考源码核对，`auction-web-public` 将搜索区置于页面顶部的独立全宽容器，
+与结果区域为兄弟容器，表格列宽与字号适配只作用于结果；移除可见页面标题和介绍，保留隐藏的可访问标题与导航名称。
+默认及清空后按装备名分组，每组独立边框、展开按钮及完整九列表格；组内笔数仅代表当前页，完整匹配集排序、统计与整体分页保留。
+Public URL 与表单统一按 Unicode 空白或英文逗号拆词，五语言提示加入 `Leg Sav Pow Hel Bal` 示例。
+`auction-http` 同步名称分隔符，应用端八词、每词 128 字节、总长 1024 字节及控制字符边界保留；
+`auction-storage` 的字面转义和全部词条忽略大小写包含匹配保持原义，未改变金额、排序、游标、DTO 或 schema。
+外部名称查询契约见[路由](docs/contracts/routes.md)，容器及展示 owner 见[Public 模块](crates/auction-web-public/README.md)。
+
+最终源码完整 `just verify`、定向原生/WASM 编译、i18n、格式和 diff 检查，以及 `just build-release` 均退出 0。
+R11 十六项清单、GNU/glibc、无 CPU 特化、双端隔离、独立搜索及结果框标记、隐藏标题源码核对通过；
+构建起止指纹均为 `50c78f910aa32dc3d3f6fd0687d761b64c4bbe2fe56533000bec43638c88ba39`，
+`SHA256SUMS` 摘要为 `3e1f19007107154519f5d9720d0739178071030627a9148a8e889693f2f091f2`。
+Public payload 为 `76fc5b9bd4c87dfc171d18df011a5b7170d9d12e2980982b21a43a9e876ddd19`，
+Public ELF 为 `a0df350a66f7007a8b7de74ca96f1b1fd3079358ba6b6c4b72b2b8661e319a31`；Admin 资源与 R10 相同。
+
+生产预检只读核对全部 55 项已发布 SQLx checksum；2026-10-20 07:07:23 UTC 仅停止 Public，
+07:07:24 UTC 新进程 readiness 为 200，07:07:25 UTC 以既有总控 all-running `start` 完成 `adopted` 回执。
+实际仅 Public 更新到 R11，Worker、Admin 与磁盘 `auctionctl` 保持 R9，数据库保持 schema 55，未执行迁移。
+07:07:52 UTC 只读后验确认三个 Unix readiness 均为 200、三份 receipt 均 matched、自动重启均为零；
+Public PID 101148 的运行映像匹配新 ELF，Worker PID 97793、Admin PID 97809 的运行映像、InvocationID 和单调启动时间全程不变。
+
+云端证据在 `backups/history-search-prefix-20261020T065000Z/`，本地证据在
+`target/dist/history-search-prefix-20261020-ops/`，封存包在 `target/dist/history-search-prefix-20261020-schema55-r11/`。
+最终 `final-public-r11.json` 的 SHA-256 为 `2db7b992134218e6fcd6934c879ddedf82f04430e39865d39c8d3d284a776bba`。
+本轮范围为保存网页静态分析、源码及制品检查、Public 单角色切换和进程/readiness 观察；未新增或运行行为测试。
+
+### 2026-10-20 历史成交价参考改进（Public 已上线）
+
+`auction-web-public` 参考固定提交的 AmyBotV2-web 交互，独立实现装备名、买家或卖家的本页分组、
+展开收起及玩家快捷筛选。页面明确分组仅包含当前页，默认逐条展示；默认居中搜索且提交有效条件后才加载列表。
+Public URL 分别持久化 `history_sort`、`history_group`，排序改变回第一页，切换分组不重取相同成交页。
+金额输入支持整数 C、最多三位小数 K 和六位小数 M，以 checked 整数运算转换，允许 0；非法条件保留字段错误并阻止请求。
+原名称与日期端点校验、补偿池跨列末行保留，五种语言同步。
+
+`auction-application` 拥有排序闭集及统计校验，`auction-storage` 在同一读取快照内对完整过滤集排序、分页和统计，
+`auction-http` 为既有 P12 增加可选 `sort`，非默认排序与旧 cursor 组合返回 400。
+`auction-contracts` 增加可选 `stats.median_exact`，中位数以精确 numeric 计算并保留半 C，旧整数 `median`
+保持半数取偶兼容口径；Public 优先显示精确字段。外部契约见[路由](docs/contracts/routes.md)，展示范围见
+[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)，参考来源与 owner 见
+[Public 模块](crates/auction-web-public/README.md)。
+
+完整 `just verify`、定向原生/WASM 编译、i18n 与 diff 检查，以及 `just build-release` 均退出 0。
+编号页 SQL 的静态语法及十一项参数绑定核对通过；十六项制品清单、GNU/glibc、无 CPU 特化、双端资源隔离及新旧页面标记核对通过。
+构建起止源码指纹均为 `1761ac0b07b892dcde22a847e987599a4bb1d5e490d204a5857c278ba3968b57`，
+R10 `SHA256SUMS` 摘要为 `0c1bfe0070e669cf2b6180b37d26b4b38f55c3ae12cc815671f31409a4a16a67`。
+Public payload 为 `e741846b892f01af887ff48f931d3281590ebfdd48d9a8150538f12368e5eb2a`，
+实际部署 Public ELF 为 `deccd6a18ec120532d537b914f0ffa1f464173ea3bf2b8f787e4e1fcc31c3f14`。
+
+生产预检只读核对 `auction_test` 已发布 1–55 全部 SQLx checksum 与源码一致，未迁移数据库。
+首次叶子门因 `systemctl show` 省略空的 ExecStop 数组而在停止服务前退出，失败证据保留；
+改用 systemd D-Bus 显式核对两个停止钩子的类型化空数组，并在停止前再次复核五项反向依赖及两个钩子。
+2026-10-20 06:13:32 UTC 仅停止 Public，06:13:33 UTC 新进程 readiness 为 200，06:13:34 UTC 发布完成。
+Worker、Admin 和磁盘 `auctionctl` 保持 R9，未安装封存包中的其他三个新程序；Worker PID 97793、Admin PID 97809
+的 InvocationID、单调启动时间及运行映像全程不变。既有总控以 all-running `start` 刷新 `adopted` 回执，未触发迁移或其他角色启停。
+06:13:46 UTC 只读后验确认三个 Unix readiness 均为 200、三份 receipt 均 matched、自动重启均为零，
+Public PID 100235 的实际运行映像与上述制品一致。
+
+云端证据在 `backups/history-reference-20261020T055000Z/`，本地证据在
+`target/dist/history-reference-20261020-ops/`，封存包在 `target/dist/history-reference-20261020-schema55-r10/`。
+最终后验 `final-public-r10.json` 的 SHA-256 为
+`ddab24208e22171c9b2bbe67ccec2c60f7e7f0f340932f782c51469d0cadac10`。
+本轮范围为静态检查、制品核对、Public 单角色切换及进程/readiness 观察；未新增或运行行为测试。
+
+### 2026-10-20 履约激活、待处理计数与历史成交价修复（已上线）
+
+只读生产日志确认 Katana 卖家款的激活事务违反既有
+`settlement_obligation_fulfillments_check2`：仍持有 claim 时提前写入 `next_attempt_at`。
+`auction-storage` 激活继续保留 token/fencing 且将该字段保持为空；`auction-application` 在紧接的
+reconcile 释放 claim 时原子写入共享追踪窗口，COD、carrier、卖家货款维持五分钟窗口，普通装备维持原重试间隔。
+存储的履约水位只将 `ready` 的 `pending/prepared/enqueued` 计为待处理，contingent 退款保留原事实，
+不进入待处理及积压年龄；独立的阻塞、失败、人工核对计数保持原义。响应字段及 schema 55 均未变更。
+
+`auction-web-public` 补齐名称的表单与 URL 同规则校验；非法名称显示五语字段错误并阻止请求，纯分隔符视为空条件。
+年月未变时保留 URL 原有日端点，清空按钮合并为一个；装备名旁显示既有分类标的号。
+默认不加载装备列表、居中搜索、完整查询与分页大小绑定响应，以及补偿池跨全列表尾均保留；没有新增 API、DTO 或排序参数。
+
+完整 `just verify` 与 `just build-release` 退出 0，定向 Public 原生和 WASM check、i18n、格式与 diff 检查通过。
+R9 封存制品的十六项清单、GNU/glibc、无 CPU 特化、双端资源隔离和迁移内嵌核对通过，
+`000053`–`000055` checksum 与已发布 R8 一致。源码指纹始末为
+`ba08d01bf3847168a856effa0b356bdfb219c163e8b7e819c1adc5719eb68c03`；
+新 Public payload 为 `a23118ca4ca22ee4582ba7895c78149d1a1e34793160e86d0fdd5fa80037c1b2`，
+Admin 资源保持 `f859d5a6e135b9c9aecb2da719fc6a54a87467e15ec6d61aa923eda683230a07`。
+
+2026-10-20 04:27:24 UTC 停止三角色，验证最终停机备份后替换四程序，04:27:33 UTC 经部署总控恢复。
+三份启动 receipt、实际运行 ELF 与新制品匹配，三个 Unix readiness 均为 200，自动重启为零。
+04:27:57 UTC 只读后验为总义务 74、旧计数 22、新待处理 1、未触发退款 21，履约阻塞/失败/人工核对均为零；
+十笔自寄修复与七笔旧收款认领逐笔通过，来源及分录守恒，现金健康 N/A 且没有新增余额观察。
+旧租约于 04:30:06 UTC 自然到期后，新进程于 04:30:44 UTC 成功激活原卖家 delivery，清除 claim 并写入下一共享追踪时间。
+04:32:27 UTC 首次发送成功，精确 Sent MID 为 `3120097`，`sent_exact_payload_v1`、Sent 验证及外部引用证明均为真；
+Main、Nagoriha、49,000 C 完整载荷、原义务以及 prepare/activate 身份逐项匹配，发送 lease 已释放。
+剩余一项履约为等待卖家领取的正常 enqueued，下一次领取核验为 04:35 UTC；未将已发款误记为对方已领取。
+04:33:49 UTC 发款后再验十七笔原修复事实、资金来源及分录守恒均通过，未知/发送中用途为零，
+49,000 C 已记入 spent，现金健康仍为 N/A 且没有新增余额观察。
+日常 MM 于 04:30:20 UTC 自动成功，连续失败及待恢复读取均为零，下一轮为 04:35 UTC。
+04:34:49 UTC 最终复核三份启动 receipt 和运行映像仍匹配，三个 readiness 均为 200，三角色自动重启仍为零。
+
+最终备份 `before-upgrade-r9.dump` 的 SHA-256 为
+`57e3a685fa14987247c4747c2568c1736d65136eb829b2cc796c6296b04395b6`，已下载本地并匹配 manifest。
+云端证据保留在 `backups/bookkeeping-repair-20261020T023903Z/`，本地在
+`target/dist/fulfillment-repair-20261020-ops/`，封存包在
+`target/dist/fulfillment-repair-20261020-schema55-r9/`。验证范围为静态检查、停机备份、制品/运行映像、
+只读后验与正常自动调度观察；未新增或运行行为测试。
+
+### 2026-10-20 旧 Bot 结算修复与仅记账启用（schema 55 已上线）
+
+按用户授权在既有 PostgreSQL 18.6 `auction_test` 完成 `000053`–`000055`，迁移 checksum 与源码一致，
+升级前保存并验证停机备份。最终 R8 制品来自 `72e6ad1` 后未提交工作树，源码指纹为
+`1529a2cae0859bab93f75e54caa01a98c78e72847306f4c18192aa332f853992`；
+完整 `just verify` 与 `just build-release` 退出 0，四程序、双端内嵌资源及十六项包清单核对通过。
+2026-10-20 04:04:10 UTC 由部署总控按 Worker → Admin → Public 恢复；三份启动 receipt、运行 ELF
+及 Unix readiness 200 均匹配，04:06 UTC 自动重启计数为零。
+
+显式修复逐笔提交九件旧流拍自持、一件成交自寄重新进入内部付款，以及七件旧 Bot 卖家已收款认领。
+七笔合计留存 6,185,400 C、税 390,064 C，仅转移原隔离责任，没有重复收款来源或收入。
+账号所有人选择持久 `record_only`；初始化登记原责任 9,433,706 C，不读取账号余额、不预发 P/C 额度。
+Katana 的 Bot 买家内部付款于 04:04:15 UTC 完成，有限来源为 B 48,000 C 与补偿 1,000 C，未产生买家外部寄信。
+04:05:58 UTC 的 UTC 只读后验确认十笔自寄修复、七笔认领、资金来源及分录守恒全部匹配，原投递历史保留，
+现金健康为 `not_applicable`，仅记账启用后没有新增余额观察。
+
+04:06 UTC 仍有一笔 Katana 卖家款 49,000 C 处于 prepared，后续激活修复另行登记；
+二十一条未触发买家退款仍为 contingent，旧待处理投影将它们计入，计数修复与该卖家款分开处理。
+另外两条旧零资产拒收通知保留人工核对：Sent 中存在多个同收件人、同正文候选，未重发或强行绑定。
+日常 MM 于 04:05:18 UTC 自动成功，暂停为 false、连续失败为零、待恢复读取为空，下一轮为 04:10 UTC。
+
+受控证据在云端 `backups/fulfillment-repair-20261020T014800Z/`、
+`backups/bookkeeping-repair-20261020T023903Z/`，本地证据在
+`target/dist/fulfillment-repair-20261020-ops/`，封存制品在
+`target/dist/fulfillment-repair-20261020-schema55-r8/`。验证范围为静态检查、备份/迁移、逐笔授权修复、
+运行映像与正常调度观察；未新增或运行行为测试。
+
+### 2026-10-19 Bot 仅记账策略（源码与静态检查通过）
+
+按账号所有人的明确要求，新增 `000055` 与独立 `bot-funds-record-only`：仅对全局尚无资金账户的场景显式初始化
+UID 的持久 `record_only` 策略，默认 `strict_cash` 维持原现金保护。初始化仍需真实联合 UID、干净 compose、原责任
+预览、版本、摘要、稳定命令及精确确认，不读取或比较账号现金，也不要求停止个人用款或人为设置 P/C 预算。
+内部购买和补偿仅按原标的冻结 B/C 创建唯一有限的会计来源，旧卖家款保留精确 Sent-collected 与隔离责任内转，
+不重复记入旧收入；跨世界外部付款的 1C 载体另绑定原 Isekai 义务、完整 payload 及 delivery 唯一来源。
+未知投递、装备冲突、退款授权及实际发送证据继续按原义务保护。
+
+应用、投递适配器与存储最终事务复核同一持久策略；两种模式不混开户，不提供隐式转换。
+自动恢复健康的现金/现金证据状态明确为 `not_applicable`，停止自动余额读取及余额不足告警，仍刷新真实履约积压；
+管理页五语言显示仅记账状态并隐藏旧余额及现金证据年龄。联合 MM/论坛证据增加闭集失败阶段和原 typed 错误类别诊断，
+显式 CLI 证据执行使用独立 JSON stderr 订阅器，stdout 保留命令结果，不输出原始页面、HTTP/SQL错误正文、父 span 或凭据。
+
+完整 `just verify` 退出 0，覆盖格式/策略、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）
+和双端 WASM；补齐模式混用、跨世界载体及 CLI 诊断后再次完整通过。55 份迁移执行视图及 980 条完整存储 SQL 字面量语法解析通过，
+`000055` 新增函数通过 PL/pgSQL 解析；动态 SQL 沿用已核对组装，后续数据库语义校验及部署证据单独登记。
+修正旧自寄预览的物理列引用为 `leader_user_id`；该修正版六条关键查询已在目标数据库只读 `PREPARE` 成功。
+未新增或运行行为测试。
+
+### 2026-10-19 旧 Bot 结算显式修复（源码与静态检查通过）
+
+追加 `000053`/`000054` 及 `auctionctl legacy-settlement self-send/adopt-collected`，默认单目标数据库只读预览。
+执行以原版本、摘要、稳定命令、真实联合 UID、干净 compose、精确库存或原 Sent-collected/当前现金为门禁；
+旧自寄原投递与指针快照永久追加保存。流拍按真实自持事实满足，明确拒绝的成交付款只恢复内部准备，
+后续固定修复 UID 且不外发；已处置旧投递永久拒绝新的通用 Admin 可变动作，原成功命令保持重放。
+旧 Bot 卖家款只从开户已隔离责任转为原标的税/留存，不新增 source、receipt 或发行旧 B。
+
+投递健康聚合补齐 `FROM public.deliveries`，failed 水位只按完整可信修复事实排除已结清的旧自寄，
+历史投递状态和原失败证据保留。资金预览精确排除对应已修复旧投递及严格解码的零资产纯通知，
+不消除通知本身的人工核对状态，不放行未知现金/装备责任。
+
+完整 `just verify` 退出 0，覆盖格式/策略、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）
+和双端 WASM；`git diff --check` 通过。54 份迁移执行视图、959 条完整 SQL 字面量静态解析通过，
+四处新增动态谓词组装后的完整查询单独解析通过，四处既有片段沿用调用组装复核；新增两份函数通过 PL/pgSQL 解析。
+本条记录止于源码与静态检查，后续制品、迁移及真实修复证据独立登记；未新增或运行行为测试。
+
+### 2026-10-19 重审修复全量升级（已上线至 schema 52）
+
+按用户授权更新云端 `/home/ngnl/HV-Auction`，目标为 PostgreSQL 18.6 的既有 `auction_test`，
+2026-10-20 00:23:38 UTC 停止三角色，00:23:40 UTC 按 Worker → Admin → Public 完成启动及就绪。
+先保存旧四程序与配置，使用匹配 schema 50 的旧 `auctionctl` 生成停机最终备份，
+再以新工具校验归档、应用 `000051`/`000052` 并替换四程序。迁移历史 1–52 连续成功，
+新增迁移 checksum 与源码一致；两张新表的十项约束均 validated，只追加触发器已启用。
+十四张既有业务表在停机、备份后及迁移后的行数和内容摘要一致。
+
+制品来自 `72e6ad1` 后六项修复的未提交工作树，源码指纹为
+`2c877ec9298725a7965fd81ebaa4ddef451fc3386d6d3af645cc143aa2ef72a1`。
+`just build-release` 完成双端 WASM 与 GNU 四程序构建；十六项包清单、页面内嵌隔离及目标 glibc 兼容核对通过。
+
+| 程序 | 上线 SHA-256 |
+| --- | --- |
+| Public | `65ef21afcd898eaf2c855c275cfe0364466a2a24a7800cb47e62d75557ce4b49` |
+| Admin | `f6271ad0e09212cbcba658f8adf6468d10eb83f03ed1fd9d27bb43723b256420` |
+| Worker | `158711f4a6d116fbf5ebb3326682f55cfe0dd7a6758ca107e72c622f2344847e` |
+| auctionctl | `e6a18d28378c0b91a02865619f7ef8fc46c26d2aba6ed269afbdebacd1b92df2` |
+
+00:25:54 UTC 复核三角色均 active/running、自动重启为零、运行映像匹配，三个 Unix readiness 均为 200。
+日常 MM 于 00:25:27 UTC 自动完成三页维护及收件轮询；连续失败为零、失败码/时间为空、claim 已释放，
+待恢复读取队列为空，下一次计划为 00:30 UTC。本次启动后至该观察点的三角色日志无 WARN/ERROR。
+部署验证限于备份校验、迁移后验、服务就绪、运行映像及正常调度观察，未手动触发邮件或执行业务流程测试。
+
+最终备份及旧制品保留在云端 `backups/schema52-20261020T001402Z/`；`final.dump` 的 SHA-256 为
+`07a12c18c38e1728b40a98f24649709605d1f26313d047bf6309a0b623b76f21`，已下载本地并核对归档与 manifest。
+本地受控目录 `target/dist/upgrade-20261019-schema52-ops/` 保存备份、部署与只读观察回执；
+对应封存制品及构建清单在 `target/dist/upgrade-20261019-schema52/`。未执行数据库恢复。
+
+### 2026-10-19 提交后重审六项修复（静态检查通过）
+
+以 `72e6ad1` 为基线重新审计后，修复六项问题。Recovery 在 `000051` 增加只追加的退件消费事实，
+与计数、动作同事务写入；新回收命令按 action 与来源 MID 派生，激活跟随持久 prepare，旧投递继续原身份。
+Mail-poll 在 `000052` 增加详情读取前的持久摘要队列，按 MID 恢复已读但未提交的邮件，
+入站事实、命令账本、cursor 与队列完成前缀同事务提交；论坛 owner 失效接入 Worker 既有有界排空及非零退出。
+
+配置与直接存储连接拒绝缩略或缺少明确目标的 PostgreSQL URI；合法旧 URI 省略端口时，在 SQLx 首次解析及
+pgpass 查找前固定为 5432。原生与 Web 缓存共用构建环境摘要，profile、rustflags、目标参数或包装器变化使缓存失效。
+同步架构、对象、不变量、模块说明和停机升级流程；保留政策绑定 schema 52，并登记两张新表，未增加删除授权。
+
+完整 `just verify` 退出 0，包含格式、策略、工作区全部目标、独立 PostgreSQL/Redis、全特性 Clippy（`-D warnings`）
+及双端 WASM；发布脚本 `bash -n`、ShellCheck 和 `git diff --check` 通过。52 份迁移执行视图及 915 条完整 Storage SQL
+通过只读语法解析，四处既有动态模板片段按组装调用复核；新增消费表函数另通过 PL/pgSQL 静态解析。
+本轮仅静态验证，未新增或运行行为测试、执行迁移或部署云端；并发、故障恢复及真实邮件/论坛协议仍待运行验证。
 
 ### 2026-10-19 Public 展示调整补发部署（已上线）
 

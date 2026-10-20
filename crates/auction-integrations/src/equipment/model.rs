@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use auction_application::{AdminIntakeError, CanonicalEquipment};
 use serde::Serialize;
 
-use super::parser::{normalize_stat_value, parse_identity};
+use super::parser::{EquipmentLevel, EquipmentParseError, normalize_stat_value, parse_identity};
 
 pub(super) struct EquipmentFacts {
     pub(super) external_equipment_id: String,
@@ -15,7 +15,7 @@ pub(super) struct EquipmentFacts {
     pub(super) quality: String,
     pub(super) prefix: String,
     pub(super) suffix: String,
-    pub(super) level: Option<i32>,
+    pub(super) level: EquipmentLevel,
     pub(super) tradeable: bool,
     pub(super) stats: BTreeMap<String, EquipmentStat>,
 }
@@ -34,7 +34,7 @@ impl EquipmentFacts {
             "quality": self.quality,
             "prefix": self.prefix,
             "suffix": self.suffix,
-            "level": self.level,
+            "level": self.level.legacy_level(),
             "tradeable": self.tradeable,
             "stats": self.stats,
         }))
@@ -44,40 +44,42 @@ impl EquipmentFacts {
 
 pub(super) fn canonical_facts(
     input: &CanonicalEquipment,
-) -> Result<EquipmentFacts, AdminIntakeError> {
-    let (quality, prefix, equipment_type, suffix) = parse_identity(&input.name)?;
-    if quality != input.quality
-        || prefix != input.prefix
-        || equipment_type != input.equipment_type
-        || suffix != input.suffix
-        || super::parser::category_for_type(&input.equipment_type).as_deref()
-            != Some(input.category.as_str())
+) -> Result<EquipmentFacts, EquipmentParseError> {
+    let identity = parse_identity(&input.name)?;
+    if identity.category.as_str() != input.category {
+        return Err(EquipmentParseError::CategoryMismatch);
+    }
+    if identity.quality != input.quality
+        || identity.prefix != input.prefix
+        || identity.equipment_type != input.equipment_type
+        || identity.suffix != input.suffix
     {
-        return Err(AdminIntakeError::InvalidSource);
+        return Err(EquipmentParseError::CanonicalMismatch);
     }
     let stats = input
         .stats
         .iter()
         .map(|(name, stat)| {
-            let value = normalize_stat_value(&stat.value).ok_or(AdminIntakeError::InvalidSource)?;
+            let value =
+                normalize_stat_value(&stat.value).ok_or(EquipmentParseError::InvalidAttributes)?;
             if stat
                 .base
                 .is_some_and(|base| !base.is_finite() || !(0.0..=1_000_000.0).contains(&base))
             {
-                return Err(AdminIntakeError::InvalidSource);
+                return Err(EquipmentParseError::InvalidAttributes);
             }
             Ok((name.clone(), EquipmentStat { value, base: stat.base }))
         })
-        .collect::<Result<BTreeMap<_, _>, AdminIntakeError>>()?;
+        .collect::<Result<BTreeMap<_, _>, EquipmentParseError>>()?;
     Ok(EquipmentFacts {
         external_equipment_id: input.external_equipment_id.clone(),
         name: input.name.clone(),
         category: input.category.clone(),
-        equipment_type,
-        quality,
-        prefix,
-        suffix,
-        level: input.level,
+        equipment_type: identity.equipment_type,
+        quality: identity.quality,
+        prefix: identity.prefix,
+        suffix: identity.suffix,
+        level: EquipmentLevel::from_legacy(input.level),
         tradeable: input.tradeable,
         stats,
     })
@@ -111,7 +113,7 @@ pub(super) fn canonical_fingerprint(
         quality: &facts.quality,
         prefix: &facts.prefix,
         suffix: &facts.suffix,
-        level: facts.level,
+        level: facts.level.legacy_level(),
         tradeable: facts.tradeable,
         stats: &facts.stats,
     })

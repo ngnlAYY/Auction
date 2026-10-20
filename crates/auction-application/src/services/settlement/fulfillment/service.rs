@@ -42,6 +42,7 @@ pub struct SettlementFulfillmentService {
         Arc<dyn crate::SettlementInternalFulfillmentStore>,
         Arc<dyn crate::SettlementInternalEvidenceReader>,
     )>,
+    pub(super) funding_policy_reader: Option<Arc<dyn crate::FundingPolicyReader>>,
     /// Admin runtime 配置的 bot 显示名；命中时不做外部寄信，直接走内部履约。
     pub(super) bot_players: Vec<String>,
     /// 等待买家支付 COD 或卖家领取货款的共享 MM 追踪窗口；默认五分钟。
@@ -64,6 +65,7 @@ impl SettlementFulfillmentService {
             evidence_reader,
             clock,
             internal: None,
+            funding_policy_reader: None,
             bot_players: Vec::new(),
             evidence_poll_delay: Duration::seconds(300),
         }
@@ -73,6 +75,28 @@ impl SettlementFulfillmentService {
     pub fn with_evidence_poll_delay(mut self, delay: Duration) -> Self {
         self.evidence_poll_delay = delay;
         self
+    }
+
+    /// 余额是否参与履约由数据库持久策略决定，默认保留严格现金检查。
+    pub fn with_funding_policy_reader(
+        mut self,
+        reader: Arc<dyn crate::FundingPolicyReader>,
+    ) -> Self {
+        self.funding_policy_reader = Some(reader);
+        self
+    }
+
+    pub(super) async fn funding_policy(&self) -> Result<crate::FundingPolicy, ApplicationError> {
+        match &self.funding_policy_reader {
+            Some(reader) => {
+                reader.funding_policy().await.map_err(|_| repository_error("资金记账策略暂不可用"))
+            }
+            None => Ok(crate::FundingPolicy {
+                mode: crate::FundingAccountingMode::StrictCash,
+                expected_uid: None,
+                policy_version: 0,
+            }),
+        }
     }
 
     /// COD 付款与卖家收款共用同一个五分钟窗口；新邮件也等到下一个窗口再读取。
@@ -128,6 +152,7 @@ impl SettlementFulfillmentService {
             self.clock.as_ref(),
             claim,
             retry_delay,
+            self.funding_policy().await?.observes_cash(),
         )
         .await?
         {
@@ -195,6 +220,7 @@ impl SettlementFulfillmentService {
             self.clock.as_ref(),
             claim,
             retry_delay,
+            self.funding_policy().await?.observes_cash(),
         )
         .await?
         {
@@ -228,8 +254,8 @@ impl SettlementFulfillmentService {
         let activation_command_id = stable_activate_command_id(claim.obligation_id);
         let activation_request_hash =
             activation_request_hash(claim.obligation_id, delivery_id, prepare_request_hash)?;
-        // COD/货款从激活起直接对齐到下一个共享窗口，避免每封邮件各自计时。
-        let next_attempt_at = self.collection_next_poll(&claim, activated_at);
+        // 激活继续复用当前 claim；持有租约时 next_attempt_at 必须为空。
+        // 下方 reconcile 释放 claim 时再把 COD/货款对齐到共享追踪窗口。
         Ok(SettlementFulfillmentPhaseResult::Advanced(
             self.store
                 .activate_delivery(
@@ -237,7 +263,7 @@ impl SettlementFulfillmentService {
                     activation_command_id,
                     activation_request_hash,
                     activated_at,
-                    next_attempt_at,
+                    None,
                 )
                 .await?,
         ))
@@ -331,11 +357,17 @@ impl SettlementFulfillmentService {
             SettlementFulfillmentDeliveryStatus::Pending
             | SettlementFulfillmentDeliveryStatus::Claimed
             | SettlementFulfillmentDeliveryStatus::Sending => {
+                // 发送与履约是独立循环；先释放本阶段 claim，再以同一事务写入追踪时间。
+                // COD/货款沿用共享窗口，其余装备寄送保持普通重试间隔。
+                let poll_delay = self
+                    .collection_next_poll(&claim, observed_at)
+                    .map(|next| next - observed_at)
+                    .unwrap_or(retry_delay);
                 return self
                     .defer_now(
                         claim,
                         delivery_id,
-                        retry_delay,
+                        poll_delay,
                         "evidence_not_observed",
                         "delivery 尚未进入可对账终态",
                     )

@@ -1,5 +1,7 @@
 //! 论坛装备名称标色规则；只影响外部帖子渲染，不参与价格、资格或结算。
 
+use auction_domain::equipment::taxonomy::{armor_material_category, suffix_matches};
+
 /// 一条按顺序匹配的论坛装备标色规则。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EquipmentColorRule {
@@ -9,6 +11,12 @@ pub struct EquipmentColorRule {
     pub equipment_type: String,
     /// 精确品质；空字符串表示不过滤。
     pub quality: String,
+    /// 装备类型多选；非空时同维任一匹配，且旧 `category` 必须为空。
+    pub categories: Vec<String>,
+    /// 装备种类多选；支持十二种护甲材质族或精确完整种类，且旧 `equipment_type` 必须为空。
+    pub equipment_types: Vec<String>,
+    /// 品质多选；非空时同维任一匹配，且旧 `quality` 必须为空。
+    pub qualities: Vec<String>,
     /// 等级下限；0 表示不限制。
     pub level_min: i32,
     /// 等级上限；0 表示不限制。
@@ -28,7 +36,8 @@ pub struct EquipmentColorMatch {
 }
 
 impl EquipmentColorRule {
-    /// 按顺序命中第一条；类型、品质、等级、前缀、后缀全部满足才返回。
+    /// 类型、种类、品质各维度内任一匹配、维度间同时满足，再校验等级和前后缀。
+    /// 新旧选择同维并存时失败关闭；规则顺序及前后缀任一命中的行为保持不变。
     pub fn matches(
         &self,
         category: &str,
@@ -38,15 +47,15 @@ impl EquipmentColorRule {
         prefix: &str,
         suffix: &str,
     ) -> Option<EquipmentColorMatch> {
-        if !self.category.is_empty() && !self.category.eq_ignore_ascii_case(category) {
-            return None;
-        }
-        if !self.equipment_type.is_empty()
-            && !self.equipment_type.eq_ignore_ascii_case(equipment_type)
+        if !selection_matches(&self.category, &self.categories, category)
+            || !equipment_type_matches(
+                &self.equipment_type,
+                &self.equipment_types,
+                category,
+                equipment_type,
+            )
+            || !selection_matches(&self.quality, &self.qualities, quality)
         {
-            return None;
-        }
-        if !self.quality.is_empty() && !self.quality.eq_ignore_ascii_case(quality) {
             return None;
         }
         if self.level_min > 0 || self.level_max > 0 {
@@ -77,23 +86,16 @@ pub fn validate_equipment_color_rules(rules: &[EquipmentColorRule]) -> Result<()
         return Err("equipment_colors.rules 最多 200 条".to_owned());
     }
     for (index, rule) in rules.iter().enumerate() {
-        if rule.category.len() > 64
-            || rule.category != rule.category.trim()
-            || rule.category.chars().any(char::is_control)
-        {
-            return Err(format!("equipment_colors.rules[{index}].category 无效"));
-        }
-        if rule.equipment_type.len() > 64
-            || rule.equipment_type != rule.equipment_type.trim()
-            || rule.equipment_type.chars().any(char::is_control)
-        {
-            return Err(format!("equipment_colors.rules[{index}].equipment_type 无效"));
-        }
-        if rule.quality.len() > 64
-            || rule.quality != rule.quality.trim()
-            || rule.quality.chars().any(char::is_control)
-        {
-            return Err(format!("equipment_colors.rules[{index}].quality 无效"));
+        for (field, single, values) in [
+            ("categories", &rule.category, &rule.categories),
+            ("equipment_types", &rule.equipment_type, &rule.equipment_types),
+            ("qualities", &rule.quality, &rule.qualities),
+        ] {
+            if !valid_selection(single, values) {
+                return Err(format!(
+                    "equipment_colors.rules[{index}].{field} 无效：单值与多选不能并存，条目须规范且不重复"
+                ));
+            }
         }
         if !(0..=1000).contains(&rule.level_min)
             || !(0..=1000).contains(&rule.level_max)
@@ -128,17 +130,48 @@ pub fn validate_equipment_color_rules(rules: &[EquipmentColorRule]) -> Result<()
     Ok(())
 }
 
-/// 后缀匹配忽略大小写和可选的 `the ` 前缀；标色仍使用帖子中的完整后缀文本。
-fn suffix_matches(rule: &str, actual: &str) -> bool {
-    let actual = strip_the(actual);
-    !actual.is_empty() && strip_the(rule).eq_ignore_ascii_case(actual)
+fn selection_matches(single: &str, values: &[String], actual: &str) -> bool {
+    if values.is_empty() {
+        single.is_empty() || single.eq_ignore_ascii_case(actual)
+    } else {
+        single.is_empty() && values.iter().any(|value| value.eq_ignore_ascii_case(actual))
+    }
 }
 
-fn strip_the(value: &str) -> &str {
-    value
-        .get(..4)
-        .filter(|prefix| prefix.eq_ignore_ascii_case("the "))
-        .map_or(value, |_| &value[4..])
+// 材质族只赋予新多选数组语义；旧单值继续精确匹配，不能因升级扩大历史规则。
+// 同时核对实际大类与完整种类的词边界，避免前缀子串或跨类别名称被视为护甲。
+fn equipment_type_matches(single: &str, values: &[String], category: &str, actual: &str) -> bool {
+    if values.is_empty() {
+        return single.is_empty() || single.eq_ignore_ascii_case(actual);
+    }
+    if !single.is_empty() {
+        return false;
+    }
+    values.iter().any(|value| match armor_material_category(value) {
+        Some(expected_category) => {
+            category.eq_ignore_ascii_case(expected_category.as_str())
+                && actual.split_once(' ').is_some_and(|(material, slot)| {
+                    material.eq_ignore_ascii_case(value) && !slot.trim().is_empty()
+                })
+        }
+        None => value.eq_ignore_ascii_case(actual),
+    })
+}
+
+// 接受历史自定义名称，不把 Admin 候选词表变成采集白名单；保存值须已去首尾空白，
+// 大小写不敏感的重复条目会产生同一匹配，统一拒绝，避免文档与执行语义分叉。
+fn valid_selection(single: &str, values: &[String]) -> bool {
+    let valid_text = |value: &str| {
+        value.len() <= 64 && value == value.trim() && !value.chars().any(char::is_control)
+    };
+    valid_text(single)
+        && (single.is_empty() || values.is_empty())
+        && values.len() <= 256
+        && values.iter().enumerate().all(|(index, value)| {
+            !value.is_empty()
+                && valid_text(value)
+                && !values[..index].iter().any(|previous| previous.eq_ignore_ascii_case(value))
+        })
 }
 
 fn valid_hex_color(value: &str) -> bool {

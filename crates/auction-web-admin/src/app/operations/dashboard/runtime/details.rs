@@ -1,7 +1,7 @@
 //! Admin Dashboard 运行时安全详情组件。
 
-use dioxus::prelude::*;
 use auction_web_shared::legacy_t as t;
+use dioxus::prelude::*;
 
 use crate::api::AdminDashboardSnapshot;
 
@@ -253,14 +253,22 @@ pub(crate) fn DashboardRuntimeDetails(snapshot: AdminDashboardSnapshot) -> Eleme
                         for world in &recovery_data.worlds {
                             DashboardDetailCard {
                                 title: world.world.clone(),
-                                detail: t!(
-                                    "dashboard-runtime-recovery-world-detail",
-                                    balance: world.balance_credits,
-                                    balance_status: runtime_status(&world.balance_status),
-                                    evidence_status: runtime_status(&world.evidence_status),
-                                    evidence_age: world.evidence_age_seconds.unwrap_or(0),
-                                    updated: format_admin_time(&world.updated_at)
-                                ),
+                                detail: if world.balance_status == "not_applicable"
+                                    && world.evidence_status == "not_applicable" {
+                                    t!(
+                                        "dashboard-runtime-recovery-world-record-only",
+                                        updated: format_admin_time(&world.updated_at)
+                                    )
+                                } else {
+                                    t!(
+                                        "dashboard-runtime-recovery-world-detail",
+                                        balance: world.balance_credits,
+                                        balance_status: runtime_status(&world.balance_status),
+                                        evidence_status: runtime_status(&world.evidence_status),
+                                        evidence_age: world.evidence_age_seconds.unwrap_or(0),
+                                        updated: format_admin_time(&world.updated_at)
+                                    )
+                                },
                                 tone: runtime_tone(&world.balance_status),
                             }
                         }

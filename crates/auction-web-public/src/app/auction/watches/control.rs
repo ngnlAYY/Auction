@@ -76,9 +76,14 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
                         expected_version: version,
                     }));
                 },
-                if busy { {t!("watch-saving")} }
-                else if watched { {t!("watch-on")} }
-                else { {t!("watch-off")} }
+                span { class: "public-lot-watch__icon", aria_hidden: "true",
+                    if watched { "★" } else { "☆" }
+                }
+                span { class: "public-lot-watch__label",
+                    if busy { {t!("watch-saving")} }
+                    else if watched { {t!("watch-on")} }
+                    else { {t!("watch-off")} }
+                }
             }
             if error.is_some() {
                 span { id: error_id.clone(), class: "public-lot-watch__error", role: "alert", "{error_message}" }

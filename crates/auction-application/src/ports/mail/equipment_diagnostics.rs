@@ -8,6 +8,11 @@ use uuid::Uuid;
 use super::{AdminIntakeSourceSnapshot, PreparedMailEvidence};
 use crate::ApplicationError;
 
+#[path = "equipment_diagnostics/reason.rs"]
+mod reason;
+
+pub use reason::EquipmentSourceDetailCode;
+
 /// 单次装备读取的安全关联字段；附件位置从一开始，不包含装备 key 或 URL。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailEquipmentDiagnosticContext {
@@ -143,6 +148,11 @@ impl MailEquipmentDiagnosticSnapshot {
     /// 校验版本、枚举和留存状态矩阵，禁止任意说明文本或敏感内容进入投影。
     pub fn validate(&self) -> bool {
         let detail_valid = match (self.category, self.detail_code.as_deref()) {
+            (MailEquipmentDiagnosticCategory::ProtocolDrift, Some(value))
+                if self.stage == MailEquipmentDiagnosticStage::Parse =>
+            {
+                EquipmentSourceDetailCode::from_code(value).is_some()
+            }
             (MailEquipmentDiagnosticCategory::SnapshotInvalid, Some(value)) => matches!(
                 value,
                 "adapter_invalid"
@@ -203,6 +213,7 @@ pub struct MailEquipmentObservation {
     pub context: MailEquipmentDiagnosticContext,
     pub stage: MailEquipmentDiagnosticStage,
     pub category: MailEquipmentDiagnosticCategory,
+    pub source_detail_code: Option<EquipmentSourceDetailCode>,
     pub http_status: Option<u16>,
     pub elapsed_millis: Option<u64>,
     pub prepared: Option<PreparedMailEvidence>,
@@ -217,6 +228,7 @@ impl MailEquipmentObservation {
             context,
             stage: MailEquipmentDiagnosticStage::Request,
             category: MailEquipmentDiagnosticCategory::ProtocolDrift,
+            source_detail_code: None,
             http_status: None,
             elapsed_millis: None,
             prepared: None,

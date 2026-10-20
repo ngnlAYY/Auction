@@ -91,6 +91,13 @@ pub enum SettlementInternalCommitOutcome {
 
 /// 不接收管理员拼装证明；调用者必须借用活跃 opaque prepared 的完整 snapshot。
 pub trait SettlementInternalFulfillmentStore: Send + Sync {
+    /// 经显式修复的旧自寄付款仅可由原证明 UID 内部执行；损坏证明必须返回错误。
+    fn legacy_self_reconciliation_uid(
+        &self,
+        _obligation_id: Uuid,
+    ) -> ApplicationFuture<'_, Option<String>> {
+        Box::pin(async { Ok(None) })
+    }
     fn replay_internal(&self, command: SettlementInternalCommand) -> ApplicationFuture<'_, bool>;
 
     fn satisfy_internal<'a>(

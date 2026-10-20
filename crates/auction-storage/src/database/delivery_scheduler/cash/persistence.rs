@@ -50,7 +50,6 @@ pub(super) async fn persist_sending(
     let mut metadata =
         worker_state_metadata("sending", claim.fencing_version, claim.attempt_count, None);
     if let Some(evidence) = evidence {
-        let cash = evidence.main_cash.as_ref().ok_or(FenceError::Rejected)?;
         // 追加非敏感瞬时证明，不把generation/观测时间混入稳定reserve命令摘要。
         metadata["cash_authorization"] = serde_json::json!({
             "operation_id": evidence.operation_id,
@@ -59,8 +58,9 @@ pub(super) async fn persist_sending(
             "observed_from": evidence.observed_from,
             "expires_at": evidence.expires_at,
             "identity": binding_metadata(&evidence.identity),
-            "cash": {"binding": binding_metadata(&cash.binding), "credits": cash.credits,
-                "observed_at": cash.observed_at, "digest": cash.digest},
+            "cash": evidence.main_cash.as_ref().map(|cash|serde_json::json!({"binding": binding_metadata(&cash.binding), "credits": cash.credits,
+                "observed_at": cash.observed_at, "digest": cash.digest})),
+            "accounting_mode": if evidence.main_cash.is_none() {"record_only"} else {"strict_cash"},
         });
     }
     append_delivery_audit(

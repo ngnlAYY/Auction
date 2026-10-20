@@ -3,10 +3,12 @@
 use super::*;
 
 mod filters;
+mod presentation;
 mod table;
 mod values;
 
 pub(crate) use filters::*;
+use presentation::*;
 pub(crate) use table::*;
 pub(crate) use values::*;
 pub(crate) fn history() -> Element {
@@ -15,7 +17,7 @@ pub(crate) fn history() -> Element {
     let query_state = use_public_query_state();
     let query_state_signal = query_state.state;
     let page_size = use_memo(move || query_state_signal().page_size);
-    // 已应用查询沿用旧版内存 normalize（非法日期/价格/区间被丢弃，但不改写地址栏）。
+    // 日期沿用既有恢复规则；非法名称/金额保留为字段错误并阻止查询，不改写地址栏。
     let applied_query = use_memo(move || {
         let query = normalize_history_query(query_state_signal());
         PriceHistoryQuery {
@@ -27,6 +29,7 @@ pub(crate) fn history() -> Element {
             max_price: query.history_max_price.clone(),
             buyer: query.history_buyer.clone(),
             seller: query.history_seller.clone(),
+            sort: query.history_sort.clone(),
             page: query.page.max(1),
         }
     });
@@ -48,8 +51,18 @@ pub(crate) fn history() -> Element {
     let mut maximum_price_unit_filter = use_signal(|| maximum_price_unit);
     let mut buyer_filter = use_signal(|| initial.buyer.clone().unwrap_or_default());
     let mut seller_filter = use_signal(|| initial.seller.clone().unwrap_or_default());
-    let mut settings_open = use_signal(|| false);
-    let mut filter_error = use_signal(|| None::<HistoryFilterError>);
+    let initial_error = history_query_error(&initial);
+    let mut settings_open = use_signal(|| {
+        matches!(
+            initial_error,
+            Some(
+                HistoryFilterError::MinimumPriceC
+                    | HistoryFilterError::MaximumPriceC
+                    | HistoryFilterError::PriceRange
+            )
+        )
+    });
+    let mut filter_error = use_signal(|| initial_error);
     use_effect(move || {
         let applied = applied_query();
         world_filter.set(applied.world.clone().unwrap_or_else(|| "all".to_owned()));
@@ -68,6 +81,18 @@ pub(crate) fn history() -> Element {
         maximum_price_unit_filter.set(maximum_price_unit);
         buyer_filter.set(applied.buyer.clone().unwrap_or_default());
         seller_filter.set(applied.seller.clone().unwrap_or_default());
+        let error = history_query_error(&applied);
+        if matches!(
+            error,
+            Some(
+                HistoryFilterError::MinimumPriceC
+                    | HistoryFilterError::MaximumPriceC
+                    | HistoryFilterError::PriceRange
+            )
+        ) {
+            settings_open.set(true);
+        }
+        filter_error.set(error);
     });
     let worlds = use_resource(fetch_worlds);
     let world_options = match &*worlds.read_unchecked() {
@@ -76,14 +101,14 @@ pub(crate) fn history() -> Element {
     };
 
     let active_filter_count = history_active_filter_count(&applied_query());
-    let has_search = active_filter_count > 0;
+    let has_search = active_filter_count > 0 && history_query_error(&applied_query()).is_none();
     let history = use_resource(move || {
         let _ = refresh_generation();
         let query = applied_query();
         let requested_page_size = page_size();
         async move {
             // 空查询只展示搜索入口；输入草稿在提交并写回 URL 后才触发权威历史读取。
-            if history_active_filter_count(&query) == 0 {
+            if history_active_filter_count(&query) == 0 || history_query_error(&query).is_some() {
                 return None;
             }
             let result = fetch_price_history(query.clone(), requested_page_size).await;
@@ -99,6 +124,7 @@ pub(crate) fn history() -> Element {
         .map(|(_, _, result)| result);
     let history_unsupported =
         matches!(history_result, Some(Err(PriceHistoryFetchError::Unsupported)));
+    let table_scope_key = format!("{:?}:{}", applied_query(), page_size());
     let body = if !has_search {
         rsx! {}
     } else {
@@ -138,8 +164,22 @@ pub(crate) fn history() -> Element {
             }
             Some(Ok(page)) => rsx! {
                 PriceHistoryTable {
+                    key: "{table_scope_key}",
                     page: page.clone(),
+                    grouping: query_state_signal().history_group,
                     current_page: applied_query().page,
+                    on_buyer_filter: move |name| {
+                        update_public_query_state(query_state_signal, |query| {
+                            query.history_buyer = Some(name);
+                            query.page = 1;
+                        }, QueryWriteMode::Push);
+                    },
+                    on_seller_filter: move |name| {
+                        update_public_query_state(query_state_signal, |query| {
+                            query.history_seller = Some(name);
+                            query.page = 1;
+                        }, QueryWriteMode::Push);
+                    },
                     on_page_size_change: move |size| update_public_page_size(query_state_signal, size),
                     on_page_change: move |next_page: i64| {
                         let next_page = next_page.max(1);
@@ -155,8 +195,22 @@ pub(crate) fn history() -> Element {
     };
 
     let apply_filters = move |_| {
+        let name = match history_name_value(&name_filter()) {
+            Ok(value) => value,
+            Err(error) => {
+                filter_error.set(Some(error));
+                return;
+            }
+        };
+        // 每次提交都以当前已应用查询为锚点，路由恢复和前一次提交不会留下旧日期边界。
+        let applied = applied_query();
         let mut validation_error = None;
-        let from = match history_date_value(&from_month_filter(), &from_year_filter(), false) {
+        let from = match history_date_value(
+            &from_month_filter(),
+            &from_year_filter(),
+            false,
+            applied.from.as_deref(),
+        ) {
             Ok(value) => value,
             Err(error) => {
                 validation_error = Some(match error {
@@ -166,7 +220,12 @@ pub(crate) fn history() -> Element {
                 None
             }
         };
-        let to = match history_date_value(&to_month_filter(), &to_year_filter(), true) {
+        let to = match history_date_value(
+            &to_month_filter(),
+            &to_year_filter(),
+            true,
+            applied.to.as_deref(),
+        ) {
             Ok(value) => value,
             Err(error) => {
                 if validation_error.is_none() {
@@ -189,6 +248,7 @@ pub(crate) fn history() -> Element {
                 Err(HistoryPriceError::Invalid) => {
                     if validation_error.is_none() {
                         validation_error = Some(match minimum_price_unit_filter() {
+                            HistoryPriceUnit::C => HistoryFilterError::MinimumPriceC,
                             HistoryPriceUnit::K => HistoryFilterError::MinimumPriceK,
                             HistoryPriceUnit::M => HistoryFilterError::MinimumPriceM,
                         });
@@ -202,6 +262,7 @@ pub(crate) fn history() -> Element {
                 Err(HistoryPriceError::Invalid) => {
                     if validation_error.is_none() {
                         validation_error = Some(match maximum_price_unit_filter() {
+                            HistoryPriceUnit::C => HistoryFilterError::MaximumPriceC,
                             HistoryPriceUnit::K => HistoryFilterError::MaximumPriceK,
                             HistoryPriceUnit::M => HistoryFilterError::MaximumPriceM,
                         });
@@ -222,13 +283,14 @@ pub(crate) fn history() -> Element {
         filter_error.set(None);
         let next_query = PriceHistoryQuery {
             world: (world_filter() != "all").then_some(world_filter()),
-            name: optional_filter_value(&name_filter()),
+            name,
             from,
             to,
             min_price: minimum_price,
             max_price: maximum_price,
             buyer: optional_filter_value(&buyer_filter()),
             seller: optional_filter_value(&seller_filter()),
+            sort: applied.sort,
             page: 1,
         };
         update_public_query_state(
@@ -273,44 +335,61 @@ pub(crate) fn history() -> Element {
                 query.history_max_price = None;
                 query.history_buyer = None;
                 query.history_seller = None;
+                query.history_sort = "closed_desc".to_owned();
+                query.history_group = "equipment".to_owned();
                 query.page = 1;
             },
             QueryWriteMode::Push,
         );
     };
-    let page_class = if has_search {
-        "public-history-page"
-    } else {
-        "public-history-page public-history-page--search"
-    };
-
     rsx! {
-        section { class: page_class, aria_labelledby: "price-history-title",
-            h1 { id: "price-history-title", {t!("page-history-title")} }
-            p { class: "public-history-intro", {t!("page-history-note")} }
+        section { class: "public-history-page", aria_labelledby: "price-history-title",
+            h1 { id: "price-history-title", class: "public-visually-hidden", {t!("page-history-title")} }
             if !history_unsupported {
-                PriceHistoryFilters {
-                    world: world_filter,
-                    name: name_filter,
-                    from_month: from_month_filter,
-                    from_year: from_year_filter,
-                    to_month: to_month_filter,
-                    to_year: to_year_filter,
-                    minimum_price: minimum_price_filter,
-                    minimum_price_unit: minimum_price_unit_filter,
-                    maximum_price: maximum_price_filter,
-                    maximum_price_unit: maximum_price_unit_filter,
-                    buyer: buyer_filter,
-                    seller: seller_filter,
-                    world_options,
-                    active_filter_count,
-                    settings_open,
-                    filter_error,
-                    on_apply: apply_filters,
-                    on_reset: reset_filters,
+                div { class: "public-history-search-region",
+                    PriceHistoryFilters {
+                        world: world_filter,
+                        name: name_filter,
+                        from_month: from_month_filter,
+                        from_year: from_year_filter,
+                        to_month: to_month_filter,
+                        to_year: to_year_filter,
+                        minimum_price: minimum_price_filter,
+                        minimum_price_unit: minimum_price_unit_filter,
+                        maximum_price: maximum_price_filter,
+                        maximum_price_unit: maximum_price_unit_filter,
+                        buyer: buyer_filter,
+                        seller: seller_filter,
+                        world_options,
+                        active_filter_count,
+                        settings_open,
+                        filter_error,
+                        on_apply: apply_filters,
+                        on_reset: reset_filters,
+                    }
                 }
             }
-            {body}
+            if has_search {
+                div { class: "public-history-output",
+                    HistoryResultControls {
+                        sort: applied_query().sort,
+                        grouping: query_state_signal().history_group,
+                        on_sort_change: move |sort| {
+                            update_public_query_state(query_state_signal, |query| {
+                                query.history_sort = sort;
+                                query.page = 1;
+                            }, QueryWriteMode::Push);
+                        },
+                        on_group_change: move |group| {
+                            // 分组只重排已取回的本页，不能改变 API 查询或重新读取相同成交集合。
+                            update_public_query_state(query_state_signal, |query| {
+                                query.history_group = group;
+                            }, QueryWriteMode::Push);
+                        },
+                    }
+                    {body}
+                }
+            }
         }
     }
 }

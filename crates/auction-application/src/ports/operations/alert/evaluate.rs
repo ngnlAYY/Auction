@@ -263,8 +263,12 @@ fn evaluate_recovery(
             return Err(OperationsAlertError::Invalid);
         }
         worlds.push(world.world.clone());
+        if (world.balance_status == "not_applicable") != (world.evidence_status == "not_applicable")
+        {
+            return Err(OperationsAlertError::Invalid);
+        }
         match world.balance_status.as_str() {
-            "ok" => {}
+            "ok" | "not_applicable" => {}
             "low" => signals.push(OperationsAlertSignal::new(
                 OperationsAlertKind::BalanceLow,
                 world.world.clone(),
@@ -280,7 +284,7 @@ fn evaluate_recovery(
             _ => return Err(OperationsAlertError::Invalid),
         }
         match world.evidence_status.as_str() {
-            "fresh" => {}
+            "fresh" | "not_applicable" => {}
             "stale" => signals.push(OperationsAlertSignal::new(
                 OperationsAlertKind::EvidenceStale,
                 world.world.clone(),

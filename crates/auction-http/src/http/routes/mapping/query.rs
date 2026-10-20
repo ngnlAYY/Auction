@@ -91,8 +91,9 @@ pub(crate) fn parse_history_name_terms(value: Option<&String>) -> Result<Vec<Str
     if value.len() > 1024 {
         return Err(());
     }
+    // 空白缩写与旧逗号参数共同拆成 AND 词条；包含匹配及 SQL 通配符转义仍由存储负责。
     let terms = value
-        .split(',')
+        .split(|character: char| character == ',' || character.is_whitespace())
         .map(str::trim)
         .filter(|term| !term.is_empty())
         .map(ToOwned::to_owned)

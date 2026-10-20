@@ -1,8 +1,9 @@
 //! 价格历史筛选器的单位和错误模型。
 
-/// 价格输入使用旧版页面的千（K）或百万（M）单位。
+/// 价格输入支持 Credits（C）、千（K）和百万（M），最终均提交整数 Credits。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HistoryPriceUnit {
+    C,
     K,
     M,
 }
@@ -10,13 +11,18 @@ pub(crate) enum HistoryPriceUnit {
 impl HistoryPriceUnit {
     pub(super) fn as_str(self) -> &'static str {
         match self {
+            Self::C => "C",
             Self::K => "K",
             Self::M => "M",
         }
     }
 
     pub(super) fn from_str(value: &str) -> Self {
-        if value == "M" { Self::M } else { Self::K }
+        match value {
+            "C" => Self::C,
+            "M" => Self::M,
+            _ => Self::K,
+        }
     }
 }
 
@@ -36,13 +42,19 @@ pub(crate) enum HistoryPriceError {
 /// 价格历史筛选器向页面反馈的稳定错误分类。
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HistoryFilterError {
+    NameTooManyTerms,
+    NameTermTooLong,
+    NameTooLong,
+    NameInvalid,
     FromDateIncomplete,
     FromDateInvalid,
     ToDateIncomplete,
     ToDateInvalid,
     DateRange,
+    MinimumPriceC,
     MinimumPriceK,
     MinimumPriceM,
+    MaximumPriceC,
     MaximumPriceK,
     MaximumPriceM,
     PriceRange,

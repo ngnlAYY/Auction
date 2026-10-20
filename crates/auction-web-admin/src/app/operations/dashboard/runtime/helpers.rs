@@ -21,6 +21,7 @@ pub(crate) fn runtime_bool(value: bool) -> String {
 
 pub(crate) fn runtime_status(value: &str) -> String {
     match value {
+        "not_applicable" => t!("dashboard-legacy-recovery-balance-not-applicable"),
         "ok" | "ready" | "available" | "fresh" => t!("dashboard-runtime-status-good"),
         "degraded" | "low" | "stale" | "starting" => t!("dashboard-runtime-status-warning"),
         "busy" => t!("dashboard-legacy-recovery-balance-busy"),

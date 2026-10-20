@@ -256,6 +256,7 @@ pub(crate) async fn fetch_price_history(
         }
     }
     params
+        .append_pair("sort", &query.sort)
         .append_pair("page", &query.page.max(1).to_string())
         .append_pair("page_size", &page_size.to_string());
     let url = format!("/api/v1/price-history?{}", params.finish());

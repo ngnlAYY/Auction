@@ -90,6 +90,7 @@ pub(in crate::config::settings) fn apply_equipment_colors(
     config: &mut ForumSyncWorkerConfig,
     document: &AdminRuntimeDocument,
 ) {
+    // 保留单条规则中的多选维度；展开组合会改变规则优先级及运行时文档身份。
     config.equipment_colors =
         document.equipment_colors.as_ref().map(|colors| colors.to_rules()).unwrap_or_default();
 }

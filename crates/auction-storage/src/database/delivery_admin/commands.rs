@@ -116,6 +116,18 @@ async fn execute_transaction(
         transaction.commit().await?;
         return Ok(result);
     }
+    // 旧投递已由追加修复事实永久退役；当前 fulfillment 指针复建后也不能把它当作普通孤儿重发。
+    // 原成功命令已在上方重放；这里只拒绝新动作，因此不依赖用于放行的 trusted 证明匹配。
+    let retired: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM public.settlement_legacy_self_reconciliations WHERE delivery_id=$1)",
+    )
+    .bind(command.delivery_id)
+    .fetch_one(transaction.connection()?)
+    .await
+    .map_err(DeliveryAdminTransactionError::Sqlx)?;
+    if retired {
+        return Err(DeliveryAdminError::Invalid.into());
+    }
     if current.fencing_version != command.expected_fencing_version {
         return Err(DeliveryAdminTransactionError::Business(DeliveryAdminError::Stale));
     }

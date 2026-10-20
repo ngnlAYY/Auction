@@ -125,6 +125,18 @@ pub struct MailDeliveryActivation {
 pub trait MailDeliveryEnqueuer: Send + Sync {
     fn enqueue(&self, command: MailDeliveryCommand) -> ApplicationFuture<'_, MailDeliveryResult>;
 
+    /// 只读恢复旧版已准备但尚未关联 action 的同邮件投递；完整负载不符必须失败关闭。
+    /// 返回 None 只表示该旧命令尚不存在，或已绑定另一次退件，调用者才能准备新轮次。
+    /// 未装配查询能力的实现明确拒绝，不能把未知当作原投递不存在。
+    fn find_recovery_preparation(
+        &self,
+        _command: MailDeliveryCommand,
+    ) -> ApplicationFuture<'_, Option<MailDeliveryResult>> {
+        Box::pin(async {
+            Err(crate::ApplicationError::CapabilityUnavailable("recovery preparation lookup"))
+        })
+    }
+
     /// 以 prepared 状态写入 recovery delivery；普通通知仍直接进入 pending。
     fn prepare_recovery(
         &self,

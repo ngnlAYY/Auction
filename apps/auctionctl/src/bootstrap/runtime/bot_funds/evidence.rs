@@ -23,6 +23,21 @@ pub(super) async fn build(
     config: &AppConfig,
     store: Arc<DatabaseStore>,
 ) -> anyhow::Result<Arc<dyn SettlementInternalEvidenceReader>> {
+    build_for_world(config, store, MoogleMailWorld::Main).await
+}
+
+/// 显式维护命令复用数据库凭据和原 owner；只装配指定世界的只读联合证据能力。
+pub(crate) async fn build_for_world(
+    config: &AppConfig,
+    store: Arc<DatabaseStore>,
+    world: MoogleMailWorld,
+) -> anyhow::Result<Arc<dyn SettlementInternalEvidenceReader>> {
+    // 只在显式证据执行时安装；固定闭集诊断 target，其他HTTP/SQL日志与父span字段均不输出。
+    auction_observability::init_json_stderr(concat!(
+        "off,auction_integrations::clients::mooglemail::gateway::internal::diagnostics=warn,",
+        "auction_integrations::clients::ehentai::client::profile=warn"
+    ))
+    .context("初始化安全证据阶段日志失败")?;
     anyhow::ensure!(config.worker.forum.enabled, "联合身份读取要求已启用的论坛读取能力");
     let (key_id, key_material) = config
         .credential_data_key_id()
@@ -32,9 +47,12 @@ pub(super) async fn build(
         DataKey::from_base64(key_id, key_material).context("invalid credential data key")?,
     );
     let opener = CredentialSealer::new(key);
-    let records =
-        store.list_active(AdminCredentialKind::MailCookie, AdminCredentialWorld::Main).await?;
-    anyhow::ensure!(records.len() == 1, "require exactly one active Main/shared mail credential");
+    let credential_world = match world {
+        MoogleMailWorld::Main => AdminCredentialWorld::Main,
+        MoogleMailWorld::Isekai => AdminCredentialWorld::Isekai,
+    };
+    let records = store.list_active(AdminCredentialKind::MailCookie, credential_world).await?;
+    anyhow::ensure!(records.len() == 1, "require exactly one active world/shared mail credential");
     let record = records.into_iter().next().context("mail credential unavailable")?;
     let mail_owner = Arc::new(
         store.acquire_credential_runtime_ownership(AdminCredentialKind::MailCookie).await?,
@@ -53,7 +71,7 @@ pub(super) async fn build(
             {
                 None
             } else {
-                Some(MoogleMailWorld::Main)
+                Some(world)
             },
             cookie,
         }],

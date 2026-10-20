@@ -15,6 +15,8 @@ mod common;
 mod disposition;
 #[cfg(feature = "postgres")]
 mod outbox;
+#[cfg(feature = "postgres")]
+mod preparation;
 mod validation;
 
 #[cfg(feature = "postgres")]
@@ -39,6 +41,28 @@ impl MailDeliveryEnqueuer for DatabaseStore {
                 Self::Postgres(store) => {
                     enqueue_postgres(store.pool(), &command).await.map_err(ApplicationError::from)
                 }
+            }
+        })
+    }
+
+    fn find_recovery_preparation(
+        &self,
+        command: MailDeliveryCommand,
+    ) -> auction_application::ApplicationFuture<'_, Option<MailDeliveryResult>> {
+        Box::pin(async move {
+            validate_command(&command)?;
+            if command.origin != MailDeliveryOrigin::SettlementRecoveryAction
+                || command.operation != auction_application::MailDeliveryOperation::Take
+            {
+                return Err(
+                    RepositoryError::Failed("旧准备查询只接受 recovery take".to_owned()).into()
+                );
+            }
+            match self {
+                #[cfg(feature = "postgres")]
+                Self::Postgres(store) => preparation::find_postgres(store.pool(), &command)
+                    .await
+                    .map_err(ApplicationError::from),
             }
         })
     }

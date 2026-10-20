@@ -147,6 +147,13 @@ pub(crate) async fn commit(
         insert_or_verify_mail_command(&mut transaction, &claim.mailbox_key, item).await?;
     }
 
+    super::reads::complete_prefix(
+        &mut transaction,
+        &claim.mailbox_key,
+        batch.next_cursor.as_deref(),
+    )
+    .await?;
+
     let cursor = batch.next_cursor.as_deref().or(claim.cursor_value.as_deref());
     let updated = sqlx::query(
         "UPDATE public.mail_poll_state

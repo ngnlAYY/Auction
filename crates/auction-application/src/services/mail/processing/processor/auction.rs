@@ -134,6 +134,7 @@ where
                 // 错误关联的证据不能归入本封邮件；诊断损坏仍不得改变原始读取结果。
                 observation.context = context;
                 observation.prepared = None;
+                observation.source_detail_code = None;
                 observation.preparation_status = MailEquipmentEvidenceStatus::PrepareFailed;
                 observation.preparation_error = Some("invalid_context".to_owned());
             }

@@ -211,6 +211,7 @@ run_checks() {
 		layout) check_layout ;;
 		config) check_config_examples ;;
 		i18n) check_i18n ;;
+		equipment-contract) bash ci/checks/equipment-contract.sh ;;
 		repository) check_repository_contracts ;;
 		fmt) cargo fmt --all -- --check ;;
 		check) cargo check --locked --workspace --all-targets ;;
@@ -225,7 +226,7 @@ run_checks() {
 			;;
 		dependency-audit) cargo audit --deny warnings ;;
 		dependency-unused) cargo machete ;;
-		all) run_checks repository layout config i18n ;;
+		all) run_checks repository layout config i18n equipment-contract ;;
 		rust) run_checks fmt check feature lint wasm ;;
 		*)
 			printf '未知静态检查：%s\n' "$check" >&2

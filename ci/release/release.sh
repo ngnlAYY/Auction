@@ -59,21 +59,6 @@ worktree_state() {
 	fi
 }
 
-# 影响构建产物的环境变量摘要；复用判定要求逐项一致。
-# 只记录名称与值，不包含凭据；CARGO_PROFILE_* 覆盖会改变优化档，必须参与判定。
-build_env_fingerprint() {
-	local name value summary=''
-	while IFS= read -r name; do
-		case "$name" in
-		CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | RUSTDOCFLAGS | RUSTFLAGS | RUSTC_WRAPPER)
-			value=${!name-}
-			summary+="$name=$value;"
-			;;
-		esac
-	done < <(compgen -e | LC_ALL=C sort)
-	printf '%s' "$summary" | sha256sum | awk '{print $1}'
-}
-
 # 影响可执行产物的构建输入：装配根、全部 crate、内嵌迁移与模板、清单与发布脚本。
 # 文档与运维正文不进入，避免只改说明就重跑 WASM 与 Fat LTO 链接。
 build_inputs_fingerprint() {

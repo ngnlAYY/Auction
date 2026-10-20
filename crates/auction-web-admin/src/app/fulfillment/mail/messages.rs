@@ -96,6 +96,15 @@ pub(super) fn evidence_error_message(code: &str) -> String {
 
 fn detail_message(code: &str) -> Option<String> {
     Some(match code {
+        "equipment_name_invalid" => t!("admin-mail-detail-source-name-invalid"),
+        "equipment_quality_unknown" => t!("admin-mail-detail-source-quality-unknown"),
+        "equipment_kind_unknown" => t!("admin-mail-detail-source-kind-unknown"),
+        "equipment_category_unknown" => t!("admin-mail-detail-source-category-unknown"),
+        "equipment_category_mismatch" => t!("admin-mail-detail-source-category-mismatch"),
+        "equipment_level_invalid" => t!("admin-mail-detail-source-level-invalid"),
+        "equipment_page_structure_invalid" => t!("admin-mail-detail-source-page-structure-invalid"),
+        "equipment_attributes_invalid" => t!("admin-mail-detail-source-attributes-invalid"),
+        "equipment_canonical_mismatch" => t!("admin-mail-detail-source-canonical-mismatch"),
         "adapter_invalid" => t!("admin-mail-detail-adapter-invalid"),
         "fingerprint_invalid" => t!("admin-mail-detail-fingerprint-invalid"),
         "equipment_id_invalid" => t!("admin-mail-detail-equipment-id-invalid"),

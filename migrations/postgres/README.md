@@ -68,10 +68,16 @@ PostgreSQL 完整 schema 的追加迁移；结构修正只能增加新文件。
 | [000048_internal_fulfillment.up.sql](migrations/postgres/000048_internal_fulfillment.up.sql) | 内部履约/真实 collected/原退款用途的稳定命令与非敏感证明，原义务链不变 |
 | [000049_cod_return_retry.up.sql](migrations/postgres/000049_cod_return_retry.up.sql) | COD 退回计数；前两次重发、第三次退回卖家并记录理由 |
 | [000050_cod_return_policy.up.sql](migrations/postgres/000050_cod_return_policy.up.sql) | 每个 recovery 冻结可配置退回上限（默认 3）；buyer_blacklist action 保存冻结理由 |
+| [000051_settlement_recovery_return_consumptions.up.sql](migrations/postgres/000051_settlement_recovery_return_consumptions.up.sql) | 追加退件消费事实并回填可证明的来源，防止重寄后重复计数 |
+| [000052_mail_poll_pending_reads.up.sql](migrations/postgres/000052_mail_poll_pending_reads.up.sql) | 邮件详情 GET 前登记安全摘要，支持已读但未提交邮件按 MID 恢复 |
+| [000053_settlement_legacy_self_reconciliations.up.sql](migrations/postgres/000053_settlement_legacy_self_reconciliations.up.sql) | 只追加旧自寄核验事实与原版本快照，显式留存已证明在库的装备或恢复明确拒绝后的内部付款准备 |
+| [000054_legacy_bot_seller_claims.up.sql](migrations/postgres/000054_legacy_bot_seller_claims.up.sql) | 只追加旧实收的 Bot 卖家责任认领证明，从已隔离用途逐笔留存，不重复发行收款 |
+| [000055_funding_record_only_policy.up.sql](migrations/postgres/000055_funding_record_only_policy.up.sql) | UID 账户持久策略及有限记账来源，默认真实现金模式；不自动开户或转换旧账户 |
+| [000056_equipment_source_diagnostic_codes.up.sql](migrations/postgres/000056_equipment_source_diagnostic_codes.up.sql) | 为 parse/protocol_drift 诊断允许九个来源解析原因，保留历史空原因和原证据约束 |
 
 ## 原则与基线
 
-当前 `000001`–`000050` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
+当前 `000001`–`000056` 覆盖完整档数据库对象；文件存在只表示 schema 定义，不代表全部业务表面完成验收。`bid_proxies`
 是只读兼容视图，权威写入进入授权与转换历史表。执行门禁见[执行边界](migrations/postgres/README.md#执行边界)，对象归属见[数据库契约](docs/contracts/schema.md)。
 
 ## 追加迁移语义
@@ -119,11 +125,13 @@ canonical PostgreSQL v28 使用[专用接管手册](ops/deploy/LEGACY_V28_ADOPTI
 
 ## 执行边界
 
-当前执行器注册 `000001`–`000050`；`000041`–`000050` 必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
+当前执行器注册 `000001`–`000056`；新增迁移必须用内嵌最新迁移的 auctionctl 走受控停机升级，普通重启不执行迁移。
 `000050` 为每个 recovery 冻结 `cod_return_limit`（默认 3，范围 1–10），并把退回上限从固定三次改为该列，同时给
 `buyer_blacklist` action 增加冻结的公开理由。
-旧 `000039` 环境按序处理 `000040`–`000050`，所有相关 writer 同版，禁止滚动混跑，前提见
-[Bot 升级门禁](ops/README.md#bot-内部履约与资金保护升级)。这八份只追加事实：不回填旧 MM payload/digest、用户创建时间、
+`000051` 只从当前退件指针、回收动作及既有 take 来源回填消费身份，保留历史退回计数；`000052` 初始队列为空，
+不猜测升级前未登记的已读邮件。两者同版升级与核对范围见[邮件详情恢复与退件消费升级](ops/README.md#邮件详情恢复与退件消费升级)。
+旧 `000039` 环境按序处理 `000040`–`000052`，所有相关 writer 同版，禁止滚动混跑，前提见
+[Bot 升级门禁](ops/README.md#bot-内部履约与资金保护升级)。这些追加迁移不回填旧 MM payload/digest、用户创建时间、
 旧凭据、旧资金、身份或内部成功，不允许新旧通知 writer 混跑，升级前 settled 主题明确豁免且完成版本保持 NULL。
 草稿软截止修正走[显式单目标命令](apps/auctionctl/README.md#草稿软截止显式修正)，不放入自动迁移。
 

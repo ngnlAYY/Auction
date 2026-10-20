@@ -19,6 +19,7 @@ pub(super) fn prepare_observation(
             context,
             stage,
             category,
+            source_detail_code: None,
             http_status: status,
             elapsed_millis: elapsed,
             prepared: None,
@@ -36,6 +37,7 @@ pub(super) fn prepare_observation(
             context,
             stage,
             category,
+            source_detail_code: None,
             http_status: status,
             elapsed_millis: elapsed,
             prepared: Some(prepared),
@@ -46,6 +48,7 @@ pub(super) fn prepare_observation(
             context,
             stage,
             category,
+            source_detail_code: None,
             http_status: status,
             elapsed_millis: elapsed,
             prepared: None,
@@ -86,6 +89,15 @@ pub(super) async fn retain_failure(
     category: MailEquipmentDiagnosticCategory,
     detail_code: Option<String>,
 ) -> MailEquipmentDiagnosticSnapshot {
+    // 来源码只能由闭集枚举提供，且仅可落到真正的页面解析失败；其它阶段保留原诊断语义。
+    let source_detail = if stage == MailEquipmentDiagnosticStage::Parse
+        && category == MailEquipmentDiagnosticCategory::ProtocolDrift
+    {
+        observation.source_detail_code.map(|reason| reason.as_str().to_owned())
+    } else {
+        None
+    };
+    let detail_code = detail_code.or(source_detail);
     let evidence_id = observation.prepared.as_ref().map(PreparedMailEvidence::evidence_id);
     let mut snapshot = base_snapshot(&observation, stage, category, detail_code.clone());
     let Some(prepared) = observation.prepared else {
@@ -143,6 +155,15 @@ pub(super) async fn retain_failure(
     snapshot.evidence_status = status;
     snapshot.retention_error = error;
     report(reporter.as_ref(), &observation.context, snapshot)
+}
+
+/// 仅记录固定来源与闭集原因，不把原名称、header、页面、URL 或 key 拼入错误和日志。
+pub(super) fn source_parse_error(
+    source_kind: &'static str,
+    reason: EquipmentParseError,
+) -> AdminIntakeError {
+    tracing::warn!(source_kind, reason = reason.as_str(), "equipment source parsing rejected");
+    AdminIntakeError::InvalidSource
 }
 
 fn report(
