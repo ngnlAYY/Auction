@@ -21,6 +21,8 @@
 与 Admin 保持独立路由、监听、静态产物和资源类型；隔离由依赖图和显式 feature 保证，不依赖链接器裁剪。
 装备 URL 需成对有效的 `equipment_data_key_id`/`equipment_data_key`：缺失时 P09/P11 返回 503，无效时启动失败，
 URL 只在最终 `no-store` DTO 映射时生成；OTLP headers 只从敏感 TOML 读取。
+目录读取端口由 `DatabaseStore.public_lot_reader` 装配，使用共享 runtime 的装备规则启动快照判定稀有/融合，
+公开名称保持原样；规则同源、旧配置升级与重启范围见[配置手册](ops/config/README.md#runtime-共享与重启)。
 `PublicApiState::with_lot_watches`、`with_lot_watch_preference` 注入同一 PostgreSQL store 支撑标记与 P25/P26，
 未编译或未装配数据库时这些接口明确 503，不增加进程、配置或外部依赖。
 

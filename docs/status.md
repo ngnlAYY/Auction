@@ -35,6 +35,98 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-20 公开页装备列移除分组标记（R22 已部署，schema 56）
+
+按用户要求，Public 的实时、已结算及预览目录装备列仅显示名称；顶部装备分组筛选及详情分组字段保留。
+owner 为 `auction-web-public`，路由、DTO、分组规则、配置和数据库结构保持一致；当前展示契约与玩家指南同步。
+
+完整 `just verify`、`just build-api`、`just build-release`、`just verify-artifacts` 均退出 0，封存源码指纹为
+`5b7a3c41c15cadccd90e26e73ae8a9d707246172830d8818b349e61fa12165da`。
+制品位于 `target/dist/equipment-groups-20261020-schema56-r22/`，证据位于
+`target/dist/equipment-groups-20261020-ops-r22/`。相对 R21 仅 Public 程序和公开页 payload 变化，
+已备份数据库、R21 四程序、配置与服务定义，按现有完整发布流程切换。
+全部配置及 56 条迁移校验和一致，三服务 readiness 均为 200、自动重启为 0，启动日志 error/warning 为 0。
+
+双端 origin 资源与 Public HTTPS manifest/WASM 共 16 项逐字节匹配封存；浏览器只读核对默认列表及稀有筛选，
+两次可见的 10 个装备名称单元格均无分组标记，筛选仍位于类型上方，稀有筛选返回总数 17。
+回执为 `final-r22-confirmed.json`、`web-postflight-r22.json`、`browser-postflight-r22.json`；未新增或运行其他行为测试。
+
+### 2026-10-20 装备解析与公开页分组（R21 已部署，schema 56）
+
+将下述装备种类/部位解析、Admin 三品质候选及配置默认收起、Public 分组筛选发布到现有云端分体环境。
+owner 为 domain、application、storage、integrations、contracts/HTTP、config 与双端 Web；本次未新增迁移，
+全部 56 条迁移校验和保持一致。正式拍品排序和编号保持原值，测试帖排序与重新编号仍仅用于展示验证。
+
+部署前完整 `just verify`、`just build-api`、`just build-release`、`just verify-artifacts` 均退出 0。
+封存源码指纹为 `ee0067cde242959c5ebe52cc20de68043d43076096697c45b84aeded9944ae65`；制品目录为
+`target/dist/equipment-groups-20261020-schema56-r21/`，运维证据为 `target/dist/equipment-groups-20261020-ops-r21/`。
+已备份并核验数据库，同时保存旧四程序、配置及服务定义；Public 配置增加对现有 `runtime/admin.toml` 的引用，
+其余配置保持一致。按 Worker → Admin → Public 启动后，四程序哈希匹配封存，三服务 readiness 均为 200、
+自动重启次数为 0，本次启动日志的 error/warning 计数均为 0。
+
+限定只读部署核对确认预览装备共 44 件，其中稀有 17 件、融合 27 件；稀有分页和“融合 + 布甲”16 件结果正确，
+原有装备字段、编号与顺序保持一致。浏览器确认装备分组位于类型上方；双端 origin 资源与公开 HTTPS manifest/WASM
+共 16 项逐字节匹配封存。回执为 `final-r21-confirmed.json`、`public-postflight-r21.json`、`web-postflight-r21.json`；
+本次未执行竞价或管理业务写入验证。
+
+### 2026-10-20 云端预览装备的论坛标色展示（单帖验证完成）
+
+按用户明确授权，只读云端实际两条标色规则、Main 第 2 期 preview 的 44 件装备及原始属性；
+快照为 `preview_revision=15`、`state_version=17`。临时 Rust helper 复用当前 `ForumThreadRenderer`，
+去掉正式运行标记、倒计时和竞价操作说明，加入展示测试声明，经已登录浏览器在 Test Forum（板块 4）发布
+[测试主题 302239](https://forums.e-hentai.org/index.php?showtopic=302239)。发布后页面确认 44 个装备链接、
+16 件红色后缀、1 件 Peerless 彩虹品质词、27 件未标色装备，测试声明保留，未新增续帖。
+输入快照、正文及发布回读计数/哈希保存在 `target/audits/forum-color-preview-20261020/`，最终回执为
+`published-result.json`。本次覆盖论坛渲染与真实发帖展示；未部署新 Public 分组功能，也未修改云端配置或拍卖数据。
+
+随后按用户选定的测试帖范围，在同一主题内按装备类型、纯种类、前缀、护甲部位、后缀及品质排序，
+各类型从 `01` 连续生成示例编号，44 件中 38 件编号变化；同种类与前缀连续展示。
+排序使用当前名称解析，纠正快照中一件 `Great Mace` 被旧属性拆为 `Mace` / `Ethereal Great` 的排序键。
+本地逐装备核对除编号外的行内容与链接一致，提交后重新打开主题确认 44 件顺序与编号全部匹配，
+仍为 17 件上色、27 件未上色。原正文、编号对照、局部校验及发布回读分别保存为
+`test-post-original.json`、`renumbering.json`、`sort-verification.json` 和 `sort-published-result.json`；
+本轮仅调整展示测试 helper 与测试帖，正式编号和云端拍卖数据保持原样。
+
+用户进一步明确 `Great Mace` 与 `Mace` 是同一种类的新旧名称。测试 helper 随后将二者归为同一排序组，
+保留装备名称原文，按前缀将三件双手武器依次编号为 `Two01` Demonic Mace、`Two02` Ethereal Great Mace、
+`Two03` Tempestuous Great Mace；其他类别的排序和编号保持一致。更新同一测试帖后回读确认全部 44 件
+顺序和编号匹配，标色计数保持 17 / 27；上一轮制品保存在 `*-pre-mace-alias.json`，本轮回执为
+`mace-alias-published-result.json`。此别名归组仅应用于测试展示。
+
+随后按用户要求，仅将测试帖布甲改为后缀、纯种类、前缀、部位、品质的优先顺序，16 件布甲按
+`Clo01`—`Clo16` 连续编号，其中 14 件编号较上一版变化；非布甲顺序、编号及 Mace 别名归组保持一致。
+本地核对逐装备正文除编号外完全一致，发布回读确认全部 44 件顺序与编号匹配、标色计数仍为 17 / 27。
+上一版保存在 `*-pre-cloth-suffix.json`，本轮回执为 `cloth-suffix-published-result.json`；范围仍为展示测试。
+
+### 2026-10-20 公开页稀有与融合分组（源码完成，静态检查通过）
+
+application 统一论坛实际标色与装备分组判定，Peerless 固定彩虹归稀有；Public 消费 `rare` / `fusion`，
+分组筛选位于装备类型上方，列表标签与详情字段共用服务端结果。URL、翻页、返回与实时刷新保留组合条件。
+storage 在同一 Serializable 快照中先按分组筛选和统计，再读取当前页；不选分组保留既有 SQL 分页路径。
+HTTP/DTO、严格浏览器解码、五语文案与配置说明同步，字段和统计范围见[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)。
+
+Public 从三角色共享 runtime 读取装备规则窄投影，分体/合并预检要求同源且规则快照一致；初始配置生成和示例同步。
+没有新增迁移或改写装备/拍卖事实。旧部署的 Public runtime 引用及 Public/Worker 重启要求见
+[配置说明](ops/config/README.md#runtime-共享与重启)。
+
+完整 `just verify` 退出 0，覆盖策略、格式、工作区全部目标、独立 PostgreSQL/Redis feature、全特性 Clippy
+（`-D warnings`）及双端 WASM；日志为 `target/audits/equipment-groups-20261020/verify.log`。
+最后补充 Admin 保存后的重启提示及模块文档，仓库/布局/配置/i18n 门禁、Admin WASM 编译和 `git diff --check` 再次通过；
+补充编译日志为 `target/audits/equipment-groups-20261020/admin-wasm-final.log`。
+本轮未新增或运行行为测试，未发布部署；浏览器交互及真实数据库执行留待明确授权后的运行验证。
+
+### 2026-10-20 装备种类与护甲部位拆分（源码完成，静态检查通过）
+
+domain 名称结果独立保存种类、部位词与语义部位，仅 Cloth/Light/Heavy 有部位；类型仍取详情 header 并交叉校验。
+Legendary 新来源名称必须具有前后缀，Magnificent 保留可缺词缀；解析词典保留其它品质兼容。
+integrations 将历史完整基础名明确映射到 canonical `equipment_type`、快照 `attributes.type` 及既有指纹，
+保留历史数据、精确规则和命令结果。Admin 新种类候选只列非护甲种类及护甲种类族，已有完整名继续回显，
+品质推荐候选仅含 Peerless/Legendary/Magnificent；相关边界见[装备录入不变量](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)。
+
+Rust 1.99.0 下完整 `just verify` 退出 0，覆盖策略、格式、工作区全部目标、独立 PostgreSQL/Redis feature、
+全特性 Clippy（`-D warnings`）及双端 WASM；日志为 `target/audits/equipment-name-semantics-20261020/verify.log`。
+本次仅完成源码与静态检查，未新增或运行行为测试，未发布部署；下述 R20 发布证据保留为原版本记录。
+
 ### 2026-10-20 统一装备解析与复审修复（R20 已上线，schema 56）
 
 经明确部署授权，将下述统一词典、分层解析、Admin 服务端候选及复审修复一并发布到现有分体环境。

@@ -102,6 +102,7 @@ pub(crate) struct PublicBoardQuery {
     pub(crate) world: Option<String>,
     pub(crate) auction_id: Option<String>,
     pub(crate) category: Option<String>,
+    pub(crate) equipment_group: Option<String>,
     pub(crate) status: Option<String>,
     pub(crate) history_name: Option<String>,
     pub(crate) history_from: Option<String>,
@@ -140,6 +141,7 @@ impl Default for PublicBoardQuery {
             world: None,
             auction_id: None,
             category: None,
+            equipment_group: None,
             status: None,
             history_name: None,
             history_from: None,
@@ -205,6 +207,10 @@ fn parse_public_query(pathname: &str, search: &str) -> PublicBoardQuery {
             "world" => query.world = normalize_world_query(&value),
             "auction" => query.auction_id = Uuid::parse_str(&value).ok().map(|id| id.to_string()),
             "type" if is_catalog_category(&value) => query.category = Some(value.into_owned()),
+            "equipment_group" => {
+                query.equipment_group =
+                    matches!(value.as_ref(), "rare" | "fusion").then(|| value.into_owned());
+            }
             "status" if is_history_status(&value) => query.status = Some(value.into_owned()),
             "name" => {
                 // 名称非法值交给历史页显示字段错误；提前丢弃会扩大为无此条件的查询。
@@ -336,6 +342,9 @@ pub(crate) fn public_query_pairs(query: &PublicBoardQuery) -> Vec<(String, Strin
     if let Some(auction_id) = query.auction_id.as_deref() {
         pairs.push(("auction".to_owned(), auction_id.to_owned()));
     }
+    if let Some(equipment_group) = query.equipment_group.as_deref() {
+        pairs.push(("equipment_group".to_owned(), equipment_group.to_owned()));
+    }
     if let Some(category) = query.category.as_deref() {
         pairs.push(("type".to_owned(), category.to_owned()));
     }
@@ -388,6 +397,7 @@ const PUBLIC_QUERY_KEYS: &[&str] = &[
     "world",
     "auction",
     "type",
+    "equipment_group",
     "status",
     "name",
     "from",

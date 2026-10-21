@@ -57,6 +57,12 @@ auction-history-link-bidlog = Bid log
 
 
 filter-label = Filter lots by type
+filter-equipment-group-label = Filter lots by equipment group
+filter-equipment-type = Equipment type
+equipment-group = Equipment group
+equipment-group-rare = Rare
+equipment-group-fusion = Fusion
+catalog-empty-filtered = No lots match this equipment group and type.
 filter-all = All
 
 category-one-handed = One-Handed

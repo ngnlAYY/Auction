@@ -25,7 +25,7 @@ pub(super) fn RuntimeConfigFields(
 
     rsx! {
         div { class: "admin-runtime-fields",
-            RuntimeSection { title: t!("admin-runtime-section-auction"), open: true,
+            RuntimeSection { title: t!("admin-runtime-section-auction"), open: false,
                 div { class: "admin-runtime-field-grid",
                     SwitchField { form, disabled, path: "allow_manual_early_open", label: t!("admin-runtime-manual-open"), on_dirty: on_dirty }
                     SwitchField { form, disabled, path: "allow_manual_early_settlement", label: t!("admin-runtime-manual-settlement"), on_dirty: on_dirty }
@@ -33,7 +33,7 @@ pub(super) fn RuntimeConfigFields(
                 }
             }
 
-            RuntimeSection { title: t!("admin-runtime-section-worlds"), open: true,
+            RuntimeSection { title: t!("admin-runtime-section-worlds"), open: false,
                 div { class: "admin-runtime-world-grid",
                     RuntimeGroup { title: t!("admin-runtime-world-main"),
                         SwitchField { form, disabled, path: "worlds.main.enabled", label: t!("admin-runtime-world-enabled"), on_dirty: on_dirty }
@@ -50,7 +50,7 @@ pub(super) fn RuntimeConfigFields(
 
             operations::OperationalConfigFields { form, disabled, on_dirty }
 
-            RuntimeSection { title: t!("admin-runtime-section-equipment"), open: true,
+            RuntimeSection { title: t!("admin-runtime-section-equipment"), open: false,
                 RuntimeGroup { title: t!("admin-runtime-equipment-filter-title"),
                     p { class: "admin-runtime-section-note", {t!("admin-runtime-quality-gate-note")} }
                     div { class: "admin-runtime-field-grid",

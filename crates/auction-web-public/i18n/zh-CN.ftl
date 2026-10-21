@@ -56,6 +56,12 @@ auction-history-link-bidlog = 出价记录
 
 
 filter-label = 按类型筛选拍品
+filter-equipment-group-label = 按装备分组筛选拍品
+filter-equipment-type = 装备类型
+equipment-group = 装备分组
+equipment-group-rare = 稀有
+equipment-group-fusion = 融合
+catalog-empty-filtered = 暂无符合当前装备分组和类型的拍品。
 filter-all = 全部
 
 category-one-handed = 单手武器

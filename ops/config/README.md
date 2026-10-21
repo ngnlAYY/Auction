@@ -29,7 +29,7 @@
 | [common.toml](ops/config/examples/common.toml) | 日志、指标、缓存、拍卖策略 | 三角色必填 `common_file`，必须指向同一普通文件 |
 | [public.toml](ops/config/examples/public.toml)、[admin.toml](ops/config/examples/admin.toml)、[worker.toml](ops/config/examples/worker.toml) | 角色 listener、tracing、realtime、session 或任务调度 | 默认 `ops/config/{role}.toml`；`AUCTION_CONFIG_FILE` 仅改选文件 |
 | [敏感模板](ops/config/examples/secrets.toml) | PostgreSQL、Cookie、密钥等敏感字段 | 每角色必填 `secrets_file` |
-| [runtime/admin.toml](ops/config/examples/runtime/admin.toml) | 可审计的 Admin 参数、邮件业务策略、可接管运行参数 | Admin/Worker 可共享 `runtime_config_file`，Public 不读取 |
+| [runtime/admin.toml](ops/config/examples/runtime/admin.toml) | 可审计的 Admin 参数、邮件业务策略、装备规则、可接管运行参数 | 三角色共享 `runtime_config_file`；Public 只使用装备分组规则投影 |
 | [维护凭据](ops/config/examples/secrets/postgres-rebuild.toml) | 短期建库/重建权限 | 仅 CLI 的 `--maintenance-secrets-file` |
 
 loader 先固定角色文件的绝对位置，再以其目录解析相对引用，包括默认发现和相对的配置选择器；不支持逐项环境变量覆盖。
@@ -87,30 +87,40 @@ owner-only。未提供时从应用 URL 仅替换库名派生维护连接，应�
 ## Runtime 共享与重启
 
 `equipment_filter.qualities` 是硬性接收品质门槛，默认 `["Legendary", "Peerless"]`；低于该列表的拍卖装备邮件直接退回，`equipment_filter.enabled` 只控制前后缀、分类、类型和等级等附加过滤。空列表回退默认 L/P。
-`equipment_colors.rules` 控制论坛拍卖帖中的装备名称标色：可按装备类型（如 `One-Handed`）和装备种类（如 `Rapier`）过滤，按顺序首个命中；前缀/后缀分别标色，二者同时命中时整件装备使用 combined 颜色；Peerless 品质词固定彩虹色。该配置只影响论坛帖子，不改变 Public/Admin 装备展示。
+`equipment_colors.rules` 控制论坛拍卖帖中的装备名称标色：可按装备类型（如 `One-Handed`）和装备种类（如 `Rapier`）过滤，按顺序首个命中；前缀/后缀分别标色，二者同时命中时整件装备使用 combined 颜色；Peerless 品质词固定彩虹色。
+Public 从同一规则快照判定装备分组：Peerless 或命中规则的装备为 `rare`（稀有），其余为 `fusion`（融合）。公开页展示文字标签和分组筛选，装备名称不上论坛颜色；Admin 装备列表保持原展示。
 类型、种类、品质分别用 `categories`、`equipment_types`、`qualities` 数组多选，同维 OR、维度间 AND；
 每组最多 256 项，每项为去首尾空白后的 1–64 字节名称、无控制字符且不重复（忽略 ASCII 大小写）。空数组沿用旧
 `category`、`equipment_type`、`quality` 单值，两者均空表示该维不过滤；同维新旧字段均非空拒绝。
-空数组编码时省略，以保持旧配置指纹及命令重放；新非空数组须使用支持该契约的 Admin、Worker 和 `auctionctl`，
-保存后按下表重启，Worker 以启动时的单条多选规则渲染，不拆成多条规则。
+空数组编码时省略，以保持旧配置指纹及命令重放；新非空数组须使用支持该契约的三角色和 `auctionctl`，
+保存后按下表重启，Public/Worker 以启动时的单条多选规则判定或渲染，不拆成多条规则。
 新 `equipment_types` 数组的材质族闭集为 Cloth 的 Cotton/Gossamer/Ironsilk/Phase、Light 的
 Leather/Drakehide/Kevlar/Shade、Heavy 的 Plate/Chain/Reactive/Power。材质族匹配要求实际装备大类正确、
 完整种类首词精确相等并以空格连接非空部位，不作子串匹配；其他数组选项精确匹配完整种类。
 例如 `["Phase", "Shade Helmet"]` 匹配所有 Phase 部位或精确的 Shade Helmet；旧 `equipment_type` 单值仍只精确匹配完整名称。
+Admin 新种类候选只显示武器/法杖/盾牌种类及 `Phase` 等护甲种类，护甲选项覆盖全部部位；已有 `Shade Helmet` 等
+完整名规则继续显示且保持精确匹配，取消后不再作为新种类候选。品质候选仅列 `Peerless`、`Legendary`、`Magnificent`，
+已有其它品质选择继续保留；候选范围不修改 `equipment_filter.qualities` 收件门槛。
 `bot_players` 是 runtime 顶层的 bot 显示名列表（最多 16 个，匹配大小写不敏感），Worker 启动时读取独立名单投影。
 命中名单的买家或流拍/撤拍返还收件人保留在内部履约路径；仅在真实远端身份、装备及资金证明全部通过后完成内部义务，
 流拍/撤拍装备留存。当前凭据身份与收件人不匹配时持久延期，不转普通外发，也不凭名单直接满足义务。
 修改名单须重启 Worker，只影响尚未生成 delivery 的新结算；已有 `manual_reconcile` 投递仍需人工收口。
 
-Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
+三角色共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；共享文件须使用同一运行账号，文件归加载/更新进程
 有效 UID、权限 0640，父目录受信且禁止 group/other 写入。A26/A27 提交完整候选，以 fingerprint fence、命令账本和原子替换
 落盘，不热加载。Admin 启动恢复失败（含结果未知/需人工核对）即阻断启动，不沿用旧安全配置；恢复改变已加载指纹须重新部署
 重启。
 
+升级已使用 runtime 的部署时，在 `public.toml` 顶层补充与 Admin/Worker 相同的 `runtime_config_file` 引用；Public 完整校验文件，
+只保留装备规则窄投影，不接管 Admin listener、安全、会话或 Worker `operations`。分体及合并预检要求三角色引用同一文件且规则
+快照一致，或三角色全部省略。全部省略时使用空规则，Peerless 仍归稀有，其余归融合。
+规则保存后协调重启 Public 和 Worker，使公开页分组与之后生成的论坛帖子使用同版规则；已发布帖子在后续实际同步前保留原内容。
+
 | 配置组 | 责任与生效范围 | 重启范围 |
 | --- | --- | --- |
 | Admin listener/security/session、人工提前操作、equipment_source | Admin 启动快照 | Admin |
-| `worlds`、发件人 allowlist、`equipment_filter`、`equipment_colors`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务/论坛标色快照 | 受影响的 Admin/Worker |
+| `worlds`、发件人 allowlist、`equipment_filter`、14 个 `mail_templates` | Admin 管理、Worker 邮件业务快照 | 受影响的 Admin/Worker |
+| `equipment_colors` | Admin 管理、Public 装备分组与 Worker 论坛标色启动快照 | Public、Worker |
 | `bot_players` | Admin 管理、Worker 内部履约收件人名单快照 | Worker |
 | `operations.economics` | 后续新拍卖的冻结经济模板 | Admin、Worker |
 | `operations.schedule` | 后续周排期的时区/星期/时间/world | Admin、Worker |
@@ -120,7 +130,7 @@ Admin/Worker 共用 [runtime 模板](ops/config/examples/runtime/admin.toml)；�
 | `operations.mail` | 邮件 cron、批量、分页、HTTP/处理预算、续租和退避 | Worker |
 
 六组 `operations` 默认 `managed=false`，接管后才覆盖公共/角色参数，表单候选不代表运行配置。预检始终要求 Admin/Worker 有效
-拍卖、结算模板和排期一致，接管任一组还须共用 runtime。配置不回写已有拍卖快照、due、游标、账本或租约；论坛 endpoint/
+拍卖、结算模板和排期一致，runtime 同源要求不依赖接管开关。配置不回写已有拍卖快照、due、游标、账本或租约；论坛 endpoint/
 scope/公开链接/测试板块/世界板块 ID（`main_board_id` 默认 77、`isekai_board_id` 默认 90）及 MoogleMail transport/凭据/mailbox identity/全局启用仍归部署配置。省略 `operations` 或
 `operations.mail` 保持旧指纹，显式 null 拒绝；邮件 `batch_timeout_seconds` 默认 600 秒，默认值不序列化，新增字段不单独改变
 旧指纹。cron 与 Worker 共用解析器，保存不立即轮询；可选 `dashboard_mailboxes` 仅投影非敏感范围，须匹配 Worker 实际

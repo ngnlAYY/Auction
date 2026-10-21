@@ -49,6 +49,8 @@ fn base_taxonomy() -> EquipmentTaxonomyDto {
         categories: taxonomy::categories().iter().map(|entry| entry.name.to_owned()).collect(),
         qualities: taxonomy::qualities()
             .iter()
+            // 标色表单只推荐这三档品质；名称解析兼容和已有规则仍由各自 owner 保留。
+            .filter(|entry| matches!(entry.name, "Peerless" | "Legendary" | "Magnificent"))
             .map(|entry| EquipmentQualityOptionDto {
                 name: entry.name.to_owned(),
                 legacy: entry.metadata.status == TaxonomyStatus::Legacy,

@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 
 use auction_application::{
-    ApplicationError, ApplicationFuture, PublicAuctionProjection, PublicEquipment,
-    PublicEquipmentStat, PublicFinalRestriction, PublicLiveLotDetail, PublicLiveLotSummary,
-    PublicLotDetail, PublicLotListRequest, PublicLotPage, PublicLotReader, PublicPreviewLotDetail,
-    PublicPreviewLotSummary, RepositoryError,
+    ApplicationError, ApplicationFuture, EquipmentColorFacts, EquipmentColorRule, EquipmentGroup,
+    PublicAuctionProjection, PublicEquipment, PublicEquipmentStat, PublicFinalRestriction,
+    PublicLiveLotDetail, PublicLiveLotSummary, PublicLotDetail, PublicLotListRequest,
+    PublicLotPage, PublicLotReader, PublicPreviewLotDetail, PublicPreviewLotSummary,
+    RepositoryError, equipment_color_decision,
 };
 use auction_domain::{AuctionRules, BidAmount, EquipmentId};
 use chrono::{DateTime, Utc};
@@ -22,6 +23,50 @@ use super::PostgresStore;
 
 const CATEGORY_KEYS: [&str; 8] = ["all", "one", "two", "sta", "shd", "clo", "lig", "hea"];
 
+/// 装配根注入有效装备标色规则的公开只读适配器，规则在进程启动时冻结。
+#[derive(Debug, Clone)]
+pub struct DatabasePublicLotReader {
+    store: DatabaseStore,
+    colors: Vec<EquipmentColorRule>,
+}
+
+impl DatabaseStore {
+    /// 与论坛渲染器使用同一份已校验规则，统一公开页标签和分页前筛选。
+    pub fn public_lot_reader(&self, colors: Vec<EquipmentColorRule>) -> DatabasePublicLotReader {
+        DatabasePublicLotReader { store: self.clone(), colors }
+    }
+}
+
+impl PublicLotReader for DatabasePublicLotReader {
+    fn list_public_lots(
+        &self,
+        auction_id: Uuid,
+        request: PublicLotListRequest,
+    ) -> ApplicationFuture<'_, Option<PublicLotPage>> {
+        Box::pin(async move {
+            validate_lot_request(auction_id, &request)?;
+            match &self.store {
+                DatabaseStore::Postgres(store) => {
+                    list_postgres(store, auction_id, request, &self.colors).await
+                }
+            }
+        })
+    }
+
+    fn public_lot(&self, lot_id: Uuid) -> ApplicationFuture<'_, Option<PublicLotDetail>> {
+        Box::pin(async move {
+            if lot_id.is_nil() {
+                return Err(storage_error("公开 lot 标识无效"));
+            }
+            match &self.store {
+                DatabaseStore::Postgres(store) => {
+                    detail_postgres(store, lot_id, &self.colors).await
+                }
+            }
+        })
+    }
+}
+
 impl PublicLotReader for DatabaseStore {
     fn list_public_lots(
         &self,
@@ -32,7 +77,9 @@ impl PublicLotReader for DatabaseStore {
             validate_lot_request(auction_id, &request)?;
             match self {
                 #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => list_postgres(store, auction_id, request).await,
+                DatabaseStore::Postgres(store) => {
+                    list_postgres(store, auction_id, request, &[]).await
+                }
             }
         })
     }
@@ -44,7 +91,7 @@ impl PublicLotReader for DatabaseStore {
             }
             match self {
                 #[cfg(feature = "postgres")]
-                DatabaseStore::Postgres(store) => detail_postgres(store, lot_id).await,
+                DatabaseStore::Postgres(store) => detail_postgres(store, lot_id, &[]).await,
             }
         })
     }
@@ -59,7 +106,7 @@ pub(super) fn map_forum_equipment(
     category: &str,
     attributes: Value,
 ) -> Result<PublicEquipment, ApplicationError> {
-    map_equipment(world_id, external_id, name, category, attributes, true)
+    map_equipment(world_id, external_id, name, category, attributes, true, &[])
 }
 
 mod mapping;

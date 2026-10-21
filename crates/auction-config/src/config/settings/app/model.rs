@@ -1,6 +1,7 @@
 //! 应用配置输入模型、构建中间值和脱敏后的公共配置模型。
 
 use super::super::*;
+use auction_application::EquipmentColorRule;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,8 +22,8 @@ pub(super) struct FileConfig {
     pub(super) realtime: RealtimeConfig,
     /// 必填的敏感 TOML 相对或绝对路径。
     pub(super) secrets_file: PathBuf,
-    /// 可选的 Admin 管理 runtime 非敏感 TOML 路径；Admin 读取完整文档，Worker 只投影
-    /// MoogleMail world、发件人、装备过滤、通知模板及 bot 内部履约名单。
+    /// 可选的 Admin 管理 runtime 非敏感 TOML 路径；三角色共享同一文件，Public 只投影
+    /// 装备分组规则，Worker 投影邮件业务、论坛规则及 bot 内部履约名单。
     #[serde(default)]
     pub(super) runtime_config_file: Option<PathBuf>,
     /// 可选 Worker 区块；省略时并发为 8，轮询为 60 秒。
@@ -94,10 +95,12 @@ pub struct AppConfig {
     pub common_config_path: Option<PathBuf>,
     /// 敏感配置文件路径；主配置加载时由必填 secrets_file 解析得到。
     pub secrets_path: Option<PathBuf>,
-    /// Admin 管理 runtime 文件路径；Admin/Worker 可配置，Public 或省略时为 None。
+    /// Admin 管理 runtime 文件路径；三角色可配置，省略时为 None。
     pub runtime_config_path: Option<PathBuf>,
-    /// 已校验并应用到 Admin 进程的 runtime 文档；Worker 只保留投影后的启动配置，因此为 None。
+    /// 已校验并应用到 Admin 进程的 runtime 文档；Public/Worker 只保留窄投影，因此为 None。
     pub admin_runtime: Option<AdminRuntimeDocument>,
+    /// 三角色同源的装备规则启动快照；Public 判定稀有/融合，Worker 用于论坛名称标色。
+    pub equipment_colors: Vec<EquipmentColorRule>,
     /// 仅供 Worker 内部履约使用的 runtime bot 显示名投影；其他角色或未配置时为空。
     pub worker_bot_players: Vec<String>,
     pub(super) secrets: AppSecrets,

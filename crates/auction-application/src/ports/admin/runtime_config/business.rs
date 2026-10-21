@@ -111,7 +111,7 @@ impl Default for AdminRuntimeEquipmentColorRule {
     }
 }
 
-/// Admin 可编辑、Worker 论坛渲染时冻结的装备标色规则集合。
+/// Admin 可编辑、Public 分组与 Worker 论坛渲染在启动时冻结的装备标色规则集合。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeEquipmentColorsConfig {
@@ -119,7 +119,7 @@ pub struct AdminRuntimeEquipmentColorsConfig {
 }
 
 impl AdminRuntimeEquipmentColorsConfig {
-    /// 转换为论坛渲染使用的窄规则类型。
+    /// 转换为公开装备分组与论坛渲染共用的窄规则类型。
     pub fn to_rules(&self) -> Vec<crate::EquipmentColorRule> {
         self.rules
             .iter()

@@ -38,6 +38,8 @@ pub struct PublicEquipmentStatResponse {
 pub struct PublicEquipmentResponse {
     pub name: String,
     pub category: String,
+    /// 与论坛标色规则同源的装备分组：`rare` 或 `fusion`。
+    pub equipment_group: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i64>,
     #[serde(
@@ -88,6 +90,8 @@ pub struct PublicPreviewLotResponse {
     pub seller_name: String,
     pub start_price: i64,
     pub equipment_name: String,
+    /// 与正式目录共用的装备分组：`rare` 或 `fusion`。
+    pub equipment_group: String,
     #[serde(
         default,
         deserialize_with = "deserialize_optional_nonempty_string",
@@ -112,6 +116,8 @@ pub struct PublicPreviewLotResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct PublicPreviewEquipmentResponse {
     pub name: String,
+    /// 必须与预览摘要的装备分组相同。
+    pub equipment_group: String,
     #[serde(
         default,
         deserialize_with = "deserialize_optional_nonempty_string",

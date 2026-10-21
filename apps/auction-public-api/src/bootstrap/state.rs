@@ -228,7 +228,8 @@ pub(super) async fn configure_state(
     let compensation: Arc<dyn PublicCompensationReader> = store.clone();
     let forum: Arc<dyn PublicForumReader> = store.clone();
     let auctions: Arc<dyn AuctionReader> = store.clone();
-    let lots: Arc<dyn PublicLotReader> = store.clone();
+    let lots: Arc<dyn PublicLotReader> =
+        Arc::new(store.public_lot_reader(config.equipment_colors.clone()));
     let equipment_links = configure_equipment_links(config, &store)?;
     let bid_log: Arc<dyn PublicBidLogReader> = store.clone();
     let price_history: Arc<dyn PublicPriceHistoryReader> = store.clone();

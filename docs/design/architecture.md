@@ -23,14 +23,14 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 | owner | 拥有的事实或边界 | 实现说明 |
 | --- | --- | --- |
 | auction-domain | 金额、标识、竞价计划、代理转换、拍卖状态、结算守恒及统一装备分类/命名词典 | [README](crates/auction-domain/README.md) |
-| auction-application | 用例、事务编排、命令幂等与窄端口 | [README](crates/auction-application/README.md) |
+| auction-application | 用例、事务编排、命令幂等与窄端口，论坛标色与公开装备分组的共用判定 | [README](crates/auction-application/README.md) |
 | auction-contracts | REST/实时 DTO、错误、分页与版本 | [README](crates/auction-contracts/README.md) |
-| auction-storage | PostgreSQL SQL、连接池、锁、账本与追加迁移 | [README](crates/auction-storage/README.md) |
+| auction-storage | PostgreSQL SQL、连接池、锁、账本与追加迁移；公开目录在同一快照中按应用分组判定筛选、统计及分页 | [README](crates/auction-storage/README.md) |
 | auction-cache | 可重建数据的 disabled/Redis 适配器 | [README](crates/auction-cache/README.md) |
 | auction-integrations | 论坛、邮件、装备来源、凭据加密与外部证明 | [README](crates/auction-integrations/README.md) |
 | auction-jobs | 持久调度、重试、游标、租约与本机 Worker control | [README](crates/auction-jobs/README.md) |
 | auction-http | 两个 surface 的路由、安全边界、TCP/Unix 绑定、静态响应与 CDN 缓存门禁 | [README](crates/auction-http/README.md) |
-| auction-web-public | Public 页面、路由、API 消费、实时恢复与译文 | [README](crates/auction-web-public/README.md) |
+| auction-web-public | Public 页面、路由、API 消费、实时恢复与译文；装备分组在类型筛选上方，标签消费服务端结果 | [README](crates/auction-web-public/README.md) |
 | auction-web-admin | 管理页面、命令交互、API 消费、论坛只读状态刷新与正文诊断、装备词典 DTO 的候选筛选与原生复选框交互（`config/form/equipment_colors/`）、入站诊断代码的展示说明与译文 | [README](crates/auction-web-admin/README.md) |
 | auction-web-shared | 无业务偏向的组件、传输、格式化、语言与设计变量 | [README](crates/auction-web-shared/README.md) |
 | auction-config | TOML、默认值、校验、cron 与 runtime 文件适配 | [README](crates/auction-config/README.md) |
@@ -43,11 +43,17 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
 登记在 [schema](docs/contracts/schema.md)、[events](docs/contracts/events.md)和[routes](docs/contracts/routes.md)。
 
 - 装备词典：`auction-domain::equipment::taxonomy` 唯一拥有分类、种类、材质、部位、品质、词缀关联及当前/历史/有限语法元数据；
-  integrations 拥有页面提取、等级状态及来源校验，application 独立执行收件策略和标色匹配。
+  名称结果独立保存种类及仅限 Cloth/Light/Heavy 的部位，Legendary 的前后缀由领域强制存在。
+  integrations 拥有页面提取、详情类型、等级状态及来源校验，并将历史完整基础名映射至既有 canonical/快照字段；
+  application 独立执行收件策略和标色匹配。
   `auction-http::http::admin::runtime_config::taxonomy` 缓存词典的静态只读 DTO，并为当前文档中已解析的有限语法种类补充候选；
-  Admin 消费候选且保留已选历史值，不导入领域或集成适配器；该投影不进入 runtime 文档或配置指纹。
+  Admin 新种类候选只使用无部位的武器/法杖/盾牌名称及护甲种类，保留已选历史完整名与其精确匹配，
+  不导入领域或集成适配器；该投影不进入 runtime 文档或配置指纹。
   配套解析诊断的数据库 CHECK 由 storage 和追加迁移 `000056` 拥有，不新增表、事件、路由或运行配置字段；
   词典响应扩展须显式查询选择，边界见[运行配置契约](docs/contracts/routes.md#runtime-配置与文件事务)。
+- 公开装备分组：`auction-application::ports::forum::colors` 统一拥有稀有/融合与论坛实际标色判定；
+  `auction-storage::database::lots::postgres::selection` 拥有同一读取快照内的轻量身份扫描、分组计数及当前页 ID 选择，
+  不复制匹配规则到 SQL。Public 装配只读规则快照，HTTP 映射稳定字段，Web 独占分组筛选、标签和五语展示。
 - 草稿软截止：`auction-application::draft_soft_close` 拥有修正规则与窄端口，
   `auction-storage::database::draft_soft_close` 独占一致快照检查、Serializable/CAS、原命令账本及追加审计，
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。

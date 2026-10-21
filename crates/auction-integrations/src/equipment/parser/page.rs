@@ -20,7 +20,8 @@ pub(crate) fn parse_equipment_page(
         external_equipment_id: external_equipment_id.to_owned(),
         name: fields.name,
         category: header.category.as_str().to_owned(),
-        equipment_type: identity.equipment_type,
+        // 快照的历史 type 字段仍保存完整基础名，领域种类和护甲部位在名称解析中独立存在。
+        base_name: identity.kind.name,
         quality: identity.quality,
         prefix: identity.prefix,
         suffix: identity.suffix,

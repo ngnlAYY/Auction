@@ -306,7 +306,8 @@ pub use equipment_link::{
 };
 pub use forum::{PUBLIC_FORUM_STATUSES, PublicForumReader, PublicForumThread};
 pub use forum_colors::{
-    EquipmentColorMatch, EquipmentColorRule, PEERLESS_COLORS, validate_equipment_color_rules,
+    EquipmentColorDecision, EquipmentColorFacts, EquipmentColorMatch, EquipmentColorRule,
+    EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,
 };
 pub use forum_reply::{
     ForumActiveProxy, ForumBidCommandRecord, ForumBidderIdentity, ForumCatalogPage,

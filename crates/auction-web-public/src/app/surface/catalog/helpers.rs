@@ -80,6 +80,15 @@ pub(crate) fn catalog_category_label(category: &str) -> String {
     }
 }
 
+/// 稀有与融合独立于装备品质和类型；此处仅翻译服务端给出的分组。
+pub(crate) fn equipment_group_label(equipment_group: &str) -> String {
+    match equipment_group {
+        "rare" => t!("equipment-group-rare"),
+        "fusion" => t!("equipment-group-fusion"),
+        _ => t!("value-empty"),
+    }
+}
+
 pub(crate) fn lot_status_label(status: &str) -> String {
     match status {
         "pending" => t!("status-pending"),

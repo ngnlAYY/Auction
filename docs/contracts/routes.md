@@ -154,6 +154,23 @@ P07 拍卖编号页的 `total` 表示完整筛选集总数，与当前页来自�
 
 P18-P20 新提交的普通出价、代理创建/降低金额最高为 1B（1,000,000,000 Credits），仍要求 1000 网格；新命令由领域层校验并沿用 `invalid_amount`/`invalid_maximum_amount`，既有 command_id 的成功重放不被重新解释。P09/P11 的 `next_bid` 保留数学最低价和严格抬价关系；超过 1B 时表示没有可提交的新出价，浏览器显示“已达上限”，不能压低到 1B 后提交。普通输入使用整数 K；代理输入扩展为 K/M/B，M/B 最多三/六位小数，均须精确落在 1K 网格且不超过 1B。P16/P17 的活动代理能力投影不把“上限不足完整下一口”当作损坏：合法慢速等待仍返回 `waiting=true`，上限不高于降额绑定下限时返回 `can_lower=false`；例如默认 5% 加价、当前价 99,000、慢速上限 100,000 时允许等待并反超，不因下一口 104,000 返回 503；P19 的降额约束不放宽。
 
+### P09/P11 装备分组
+
+P09 的可选 `equipment_group` 查询参数只接受 `rare`、`fusion`，省略表示全部；空值、`all`、未知值、重复参数返回 400。
+它与既有 `category` 组合，并在分页前应用。`category_counts` 统计所选装备分组下各类型的总数，
+`total` 统计再叠加类型条件后的总数；数量与当前页来自同一数据库读取快照，越界空页仍保留真实总数。
+未选择分组时沿用现有 SQL 计数和分页；选择分组时流式读取轻量身份，用应用层统一规则筛选，
+仅保留请求页的 ID，再在同一事务中读取完整拍品，保持既有顺序。
+
+P09/P11 的正式装备对象、预览摘要与预览详情装备对象均返回必填 `equipment_group: "rare" | "fusion"`；
+预览摘要与详情值必须相同。分组由应用层与论坛共用的标色判定生成：Peerless 固定彩虹或首条匹配规则实际产生名称颜色时为
+`rare`，其余为 `fusion`。Public 只展示文字分组，不应用论坛颜色；分组独立于品质与装备类型，不决定收录、价格、出价或结算。
+当前、预览及历史拍卖目录都使用进程启动时载入的规则；规则不写入装备身份、拍卖快照或历史审计。
+
+公开页把“全部／稀有／融合”置于装备类型筛选上方，默认全部；任一筛选变化回到第一页，并保留另一筛选及每页数量。
+URL、异步请求作用域与实时刷新携带同一分组；列表装备列仅显示名称，装备详情展示服务端分组。
+Public API 与内嵌页面需同版升级，配置共享与重启要求见[配置说明](ops/config/README.md)。
+
 ### 标的编号、来源与历史读取
 
 所有 lot/竞价/账户/成交投影中的 `lot_number` 都是装备分类内从 1 开始的用户可见编号，必须与 `equipment.category` 组合解释为 `One01`、`Two01` 等编码，不是全局身份。详情和写命令只以 `lot_id` UUID 定位，价格历史的 opaque cursor 继续绑定内部场次顺序，不能由可重复的分类编号重建。P10 竞价日志额外保留 `world` 与 `lot` 筛选；`lot` 可以是 lot UUID 或 `One01` 一类分类编码，二者在内部请求中互斥，并在 storage 的全局结果集分页前应用，不能只筛选当前页面。条目按 `created_at`、`lot_id`、`accepted_state_version`、`fact_index`、`id` 降序排列，cursor 是绑定这五个字段的版本化 opaque 值；
@@ -355,7 +372,7 @@ A17 列表不增加该字段，不返回 payload、装备 key 或正文。上限
 ### Runtime 配置与文件事务
 
 A26/A27 已接入 PostgreSQL 完整档：GET 返回非敏感 TOML 文档的 JSON 投影和稳定 `sha256:` fingerprint，POST `:validate` 只执行严格候选校验，PUT 使用 `command_id` 与 fingerprint fence 写入 durable pending/applied/unknown 命令账本，并通过同目录临时文件、权限校验、fsync、rename 和目录同步原子替换。文件替换成功后若账本应用出错，保留新文件并返回 `503 reconciliation_required`；同一命令重试或启动恢复按数据库实际 pending/applied 状态向前收口，不能把提交确认丢失当成可回滚旧文件。
-启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由 Admin/Worker 主 TOML 的 `runtime_config_file` 选择；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
+启动恢复任何失败（含结果未知或需人工核对）都阻断 Admin 监听，仅恢复成功且文件指纹匹配启动快照才继续装配。成功更新返回 `restart_required`，不伪造热加载。运行时文件路径由三角色主 TOML 的 `runtime_config_file` 选择；Public 仅消费装备标色规则用于公开分组，Admin/Worker 继续按各自边界应用其余字段；文档还含兼容 main/isekai、发件人 allowlist、装备过滤和 14 个通知模板，Worker 对 MoogleMail 只把这些业务字段投影为启动快照；transport、凭据、mailbox identity 和全局启用开关仍由 Worker 主配置拥有，敏感 TOML、Cookie、密钥和连接串不进入该文档。
 Admin 重启后 `allow_manual_early_open` 与 `allow_manual_early_settlement` 分别决定人工提前开放、人工提前结算 capability 和对应锁内校验，两者默认关闭，计划时间已到的正常开放仍允许。`[equipment_source]` 冻结为装备来源适配器的 host/path allowlist、响应上限、共享请求间隔、全请求超时及 Admin 手工录入的可交易装备开关（默认关闭且不放宽来源安全或邮件过滤）；固定 HTTPS origin、无重定向、精确 world 路径及流式有界读取始终失败关闭。Admin WebUI 把该闭集投影映射为分组开关、数字、列表与文本输入，保存仍提交完整候选文档，因此所有页面修改最终由 PUT 的原子文件替换边界写回，不存在只在浏览器内生效的旁路。
 更新和启动恢复从首次读取到文件/账本收口持有同一跨进程 workflow 锁，锁竞争返回 `503 storage_unavailable`，客户端可复用原 command ID 重试。
 
@@ -364,8 +381,12 @@ GET `/api/v1/admin/config`、POST `/api/v1/admin/config:validate` 与 PUT `/api/
 省略时维持原有 `document`、`fingerprint`、`restart_required` 三字段集合，兼容旧客户端严格解码。
 显式选择时增加 `equipment_taxonomy`：`revision`、`categories`、`qualities[{name,legacy}]`、
 `kinds[{name,category,material,slot,legacy,prefixes,suffixes}]` 和
-`materials[{name,category,prefixes,suffixes}]`；`kinds` 的 `material`/`slot` 可空，部位使用 `head/body/hands/legs/feet`。
-词典由领域唯一生成：含现行与历史品质、明确完整种类及原十二个可选择护甲材质族，有限 Chain/Reactive 语法不展开成确证种类。
+`materials[{name,category,prefixes,suffixes}]`；`kinds` 的 `material`/`slot` 仅在 Cloth、Light、Heavy 同时有值，
+武器、法杖、盾牌均为空；部位使用 `head/body/hands/legs/feet`。
+词典条目由领域唯一提供：品质候选仅投影 `Peerless`、`Legendary`、`Magnificent`，名称解析仍保留其它品质的兼容识别；
+`kinds` 保留完整基础名索引以关联旧精确规则及词缀；Admin 新种类候选仅取其中无部位的武器/法杖/盾牌名称，
+加上 `materials` 提供的十二个护甲种类（如 `Phase`），不把 `Phase Robe` 等种类与部位的组合列为新候选。
+有限 Chain/Reactive 语法不展开成确证基础名。
 本次文档标色规则的 `equipment_type`/`equipment_types` 若包含合法有限兼容完整名，另附
 `resolved_kinds[{name,category,material,slot,prefixes,suffixes}]`；仅由领域 `resolve_kind` 识别并规范化，
 最多 16 项、忽略 ASCII 大小写去重，与确证种类及材质族名称互斥，`material`/`slot` 为非空字符串。
@@ -373,6 +394,7 @@ GET `/api/v1/admin/config`、POST `/api/v1/admin/config:validate` 与 PUT `/api/
 不只关联已保存的旧值。HTTP 用进程内 `OnceLock` 缓存固定词典主体，每次克隆后附加这份文档相关集合，
 不缓存文档或改变既有 `no-store` 响应头；附加集合也不改变主词典 `revision`。
 Admin 显式请求并校验该投影，缺失或无效返回页面既有加载错误；候选版本变化只更新推荐元数据，不清除草稿或已选历史值。
+已选护甲完整名（含 `resolved_kinds`）继续回显并精确关联词缀，用户手动取消后不再列为新种类候选。
 词典不进入 runtime 文档、配置指纹、命令摘要、持久化响应或装备快照，校验和更新请求体保持原形状。
 
 `equipment_colors.rules[]` 增加可选数组 `categories`、`equipment_types`、`qualities`，分别承载装备类型、

@@ -11,7 +11,8 @@ pub(super) struct EquipmentFacts {
     pub(super) external_equipment_id: String,
     pub(super) name: String,
     pub(super) category: String,
-    pub(super) equipment_type: String,
+    /// 历史完整基础名；只在 canonical JSON、属性和指纹边界映射到原 type 字段。
+    pub(super) base_name: String,
     pub(super) quality: String,
     pub(super) prefix: String,
     pub(super) suffix: String,
@@ -30,7 +31,7 @@ pub(super) struct EquipmentStat {
 impl EquipmentFacts {
     pub(super) fn attributes(&self) -> Result<serde_json::Value, AdminIntakeError> {
         serde_json::to_value(serde_json::json!({
-            "type": self.equipment_type,
+            "type": self.base_name,
             "quality": self.quality,
             "prefix": self.prefix,
             "suffix": self.suffix,
@@ -51,7 +52,8 @@ pub(super) fn canonical_facts(
     }
     if identity.quality != input.quality
         || identity.prefix != input.prefix
-        || identity.equipment_type != input.equipment_type
+        // canonical JSON 的历史 equipment_type 是完整基础名，不是领域拆分后的纯种类。
+        || identity.kind.name != input.equipment_type
         || identity.suffix != input.suffix
     {
         return Err(EquipmentParseError::CanonicalMismatch);
@@ -75,7 +77,7 @@ pub(super) fn canonical_facts(
         external_equipment_id: input.external_equipment_id.clone(),
         name: input.name.clone(),
         category: input.category.clone(),
-        equipment_type: identity.equipment_type,
+        base_name: identity.kind.name,
         quality: identity.quality,
         prefix: identity.prefix,
         suffix: identity.suffix,
@@ -109,7 +111,8 @@ pub(super) fn canonical_fingerprint(
         external_equipment_id: &facts.external_equipment_id,
         name: &facts.name,
         category: &facts.category,
-        equipment_type: &facts.equipment_type,
+        // 保持 manual-json-v1 的字段及完整基础名口径，避免同一输入的历史指纹漂移。
+        equipment_type: &facts.base_name,
         quality: &facts.quality,
         prefix: &facts.prefix,
         suffix: &facts.suffix,

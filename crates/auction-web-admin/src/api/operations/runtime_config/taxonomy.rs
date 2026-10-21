@@ -14,6 +14,7 @@ pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {
         && valid_names(value.resolved_kinds.iter().map(|option| option.name.as_str()), 16, 64, true)
         && value.materials.iter().all(|option| {
             value.categories.contains(&option.category)
+                && is_armor_category(&option.category)
                 && valid_affixes(&option.prefixes)
                 && valid_affixes(&option.suffixes)
         })
@@ -23,7 +24,9 @@ pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {
                     .materials
                     .iter()
                     .all(|material| !material.name.eq_ignore_ascii_case(&option.name))
-                && option.material.is_some() == option.slot.is_some()
+                // 只有三类护甲有独立种类与部位，武器、法杖及盾牌均不携带这两个字段。
+                && option.material.is_some() == is_armor_category(&option.category)
+                && option.slot.is_some() == is_armor_category(&option.category)
                 && option.material.as_deref().is_none_or(|name| valid_text(name, 64, false))
                 && option
                     .slot
@@ -41,6 +44,7 @@ pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {
         })
         && value.resolved_kinds.iter().all(|option| {
             value.categories.contains(&option.category)
+                && is_armor_category(&option.category)
                 && value.kinds.iter().all(|kind| !kind.name.eq_ignore_ascii_case(&option.name))
                 && value
                     .materials
@@ -54,6 +58,10 @@ pub(super) fn valid_equipment_taxonomy(value: &EquipmentTaxonomyDto) -> bool {
                 && valid_affixes(&option.prefixes)
                 && valid_affixes(&option.suffixes)
         })
+}
+
+fn is_armor_category(category: &str) -> bool {
+    matches!(category, "Cloth" | "Light" | "Heavy")
 }
 
 fn valid_affixes(values: &[String]) -> bool {

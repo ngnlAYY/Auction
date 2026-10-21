@@ -284,7 +284,8 @@ pub use services::{
 pub use services::{MailboxMaintenanceReport, MailboxMaintenanceService};
 
 pub use ports::{
-    EquipmentColorMatch, EquipmentColorRule, PEERLESS_COLORS, validate_equipment_color_rules,
+    EquipmentColorDecision, EquipmentColorFacts, EquipmentColorMatch, EquipmentColorRule,
+    EquipmentGroup, PEERLESS_COLORS, equipment_color_decision, validate_equipment_color_rules,
 };
 pub use ports::{
     LegacyBotSellerCommand, LegacyBotSellerCommitOutcome, LegacyBotSellerPreview,

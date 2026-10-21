@@ -41,6 +41,7 @@ pub(crate) struct CatalogRow {
     pub name: String,
     pub game_equipment_url: String,
     pub category: String,
+    pub equipment_group: String,
     pub status: String,
     pub seller_name: String,
     pub level: Option<i64>,
@@ -70,6 +71,7 @@ impl LotEnvelopeRows for LotEnvelope {
                     game_equipment_url: lot.game_equipment_url.clone(),
                     // 缺失分类沿用旧版归入 Other，但不把缺失重新编码成 wire 空字符串。
                     category: lot.equipment_category.clone().unwrap_or_else(|| "other".to_owned()),
+                    equipment_group: lot.equipment_group.clone(),
                     status: lot.status.clone(),
                     seller_name: lot.seller_name.clone(),
                     level: lot.equipment_level,
@@ -90,6 +92,7 @@ impl LotEnvelopeRows for LotEnvelope {
                     name: lot.equipment.name.clone(),
                     game_equipment_url: lot.equipment.game_equipment_url.clone(),
                     category: lot.equipment.category.clone(),
+                    equipment_group: lot.equipment.equipment_group.clone(),
                     status: lot.status.clone(),
                     seller_name: lot.seller_name.clone(),
                     level: lot.equipment.level,

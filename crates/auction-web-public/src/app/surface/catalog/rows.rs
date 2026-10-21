@@ -86,31 +86,46 @@ pub(crate) fn BidHistoryParticipant(
     }
 }
 
-/// 装备名称保持单行截断；直接导航真实装备 URL，历史无链接投影保留纯文本。
+/// 装备详情以独立文字标签表达服务端装备分组。
+#[component]
+pub(crate) fn EquipmentGroupBadge(equipment_group: String) -> Element {
+    let class = if equipment_group == "rare" {
+        "public-equipment-group public-equipment-group--rare"
+    } else {
+        "public-equipment-group"
+    };
+    rsx! {
+        span { class, {equipment_group_label(&equipment_group)} }
+    }
+}
+
+/// 装备列仅展示名称，保持单行截断并直接导航真实装备 URL。
 #[component]
 pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> Element {
     rsx! {
-        if game_equipment_url.is_empty() {
-            TruncatedText {
-                value: name.clone(),
-                class_name: "ui-equipment-name",
-                portal: true,
-                legacy_dom: true,
-            }
-        } else {
-            a {
-                class: "public-auction-catalog__equipment-link",
-                href: game_equipment_url,
-                target: "_blank",
-                rel: "noopener noreferrer",
-                aria_label: name.clone(),
-                title: name.clone(),
+        span { class: "public-auction-catalog__equipment",
+            if game_equipment_url.is_empty() {
                 TruncatedText {
                     value: name.clone(),
                     class_name: "ui-equipment-name",
-                    focusable: false,
                     portal: true,
                     legacy_dom: true,
+                }
+            } else {
+                a {
+                    class: "public-auction-catalog__equipment-link",
+                    href: game_equipment_url,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    aria_label: name.clone(),
+                    title: name.clone(),
+                    TruncatedText {
+                        value: name.clone(),
+                        class_name: "ui-equipment-name",
+                        focusable: false,
+                        portal: true,
+                        legacy_dom: true,
+                    }
                 }
             }
         }

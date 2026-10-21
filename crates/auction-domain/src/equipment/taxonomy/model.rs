@@ -41,7 +41,7 @@ impl EquipmentCategory {
     }
 }
 
-/// 护甲的语义部位；具体名称仍保留在完整种类中。
+/// 布甲、轻甲和重甲的语义部位；名称中的部位词另行保留。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSlot {
     /// 头部。
@@ -124,10 +124,10 @@ pub struct MaterialEntry {
     pub metadata: TaxonomyMetadata,
 }
 
-/// 已确证的完整种类，受限语法不会被展开到此清单。
+/// 已确证的完整基础名；护甲由种类和部位组成，受限语法不会被展开到此清单。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KindEntry {
-    /// 完整规范名称。
+    /// 完整规范基础名；例如 Phase Robe，武器和盾牌不带独立部位。
     pub name: &'static str,
     /// 所属大类。
     pub category: EquipmentCategory,
@@ -139,10 +139,10 @@ pub struct KindEntry {
     pub metadata: TaxonomyMetadata,
 }
 
-/// 一次解析识别的完整种类，可以来自确证清单或有限兼容语法。
+/// 一次解析识别的完整基础名，可以来自确证清单或有限兼容语法。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedKind {
-    /// 完整规范名称。
+    /// 完整规范基础名；供名称匹配及历史 canonical JSON 边界使用。
     pub name: String,
     /// 所属大类。
     pub category: EquipmentCategory,
@@ -152,6 +152,29 @@ pub struct ResolvedKind {
     pub slot: Option<EquipmentSlot>,
     /// 保留确证或有限语法来源。
     pub metadata: TaxonomyMetadata,
+}
+
+impl ResolvedKind {
+    /// 返回名称中的装备种类；护甲剥离部位，武器和盾牌保留完整种类名称。
+    pub fn kind_name(&self) -> &str {
+        match self.category {
+            EquipmentCategory::Cloth | EquipmentCategory::Light | EquipmentCategory::Heavy => {
+                self.material.unwrap_or(&self.name)
+            }
+            _ => &self.name,
+        }
+    }
+
+    /// 返回护甲名称中的规范部位词；武器、法杖和盾牌没有独立部位。
+    pub fn slot_name(&self) -> Option<&str> {
+        self.slot?;
+        match self.category {
+            EquipmentCategory::Cloth | EquipmentCategory::Light | EquipmentCategory::Heavy => {
+                self.name.strip_prefix(self.material?)?.strip_prefix(' ')
+            }
+            _ => None,
+        }
+    }
 }
 
 impl From<&KindEntry> for ResolvedKind {
@@ -197,11 +220,15 @@ pub struct EquipmentIdentity {
     pub quality: String,
     /// 规范空白后的原前缀文本。
     pub prefix: String,
-    /// 规范完整种类，保持既有 canonical JSON 字段口径。
+    /// 名称中的规范装备种类；护甲为 Phase 等种类，武器和盾牌保留完整种类。
     pub equipment_type: String,
+    /// 仅 Cloth、Light、Heavy 具有的规范部位词，例如 Robe。
+    pub slot_name: Option<String>,
+    /// 护甲的语义部位，例如 Body；武器、法杖和盾牌为空。
+    pub slot: Option<EquipmentSlot>,
     /// 规范空白后的原后缀文本，保留可选的 the。
     pub suffix: String,
-    /// 类型化大类，供 HTML 与 JSON 共用交叉校验。
+    /// 词典种类所属类型，仅供详情 header 与 JSON 交叉校验；名称中没有类型词条。
     pub category: EquipmentCategory,
     /// 种类、材质、部位与来源。
     pub kind: ResolvedKind,

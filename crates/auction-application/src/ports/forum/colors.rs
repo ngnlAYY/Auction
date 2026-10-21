@@ -1,4 +1,4 @@
-//! 论坛装备名称标色规则；只影响外部帖子渲染，不参与价格、资格或结算。
+//! 论坛装备名称标色与公开页装备分组共用的规则；不参与价格、资格或结算。
 
 use auction_domain::equipment::taxonomy::{armor_material_category, suffix_matches};
 
@@ -33,6 +33,86 @@ pub struct EquipmentColorRule {
 pub struct EquipmentColorMatch {
     pub prefix: bool,
     pub suffix: bool,
+}
+
+/// 公开页的装备分组；按同一规则是否实际渲染论坛颜色确定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EquipmentGroup {
+    Rare,
+    Fusion,
+}
+
+impl EquipmentGroup {
+    /// 返回稳定的公开 JSON 和查询参数值。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rare => "rare",
+            Self::Fusion => "fusion",
+        }
+    }
+
+    /// 只接受已定义分组；全部分组由查询参数省略表示。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "rare" => Some(Self::Rare),
+            "fusion" => Some(Self::Fusion),
+            _ => None,
+        }
+    }
+}
+
+/// 论坛和公开页使用的同一份装备身份；种类保留存储中的完整基础名称。
+#[derive(Debug, Clone, Copy)]
+pub struct EquipmentColorFacts<'a> {
+    pub name: &'a str,
+    pub category: &'a str,
+    pub equipment_type: &'a str,
+    pub quality: &'a str,
+    pub level: Option<i64>,
+    pub prefix: &'a str,
+    pub suffix: &'a str,
+}
+
+/// 一次匹配同时给出论坛渲染方案和公开页分组，保持首条规则优先级一致。
+#[derive(Debug, Clone, Copy)]
+pub struct EquipmentColorDecision<'a> {
+    pub peerless: bool,
+    pub matched: Option<(&'a EquipmentColorRule, EquipmentColorMatch)>,
+    pub equipment_group: EquipmentGroup,
+}
+
+/// Peerless 固定彩虹视为稀有；普通装备只有首条命中规则实际给名称片段上色才是稀有。
+/// 等级 0 按论坛快照视为未知等级；历史属性与名称不一致时，单边词缀在名称中找不到仍保持融合，与论坛的纯文本回退一致。
+pub fn equipment_color_decision<'a>(
+    rules: &'a [EquipmentColorRule],
+    facts: EquipmentColorFacts<'_>,
+) -> EquipmentColorDecision<'a> {
+    let peerless = facts.quality.eq_ignore_ascii_case("Peerless")
+        && facts.name.get(..8).is_some_and(|value| value.eq_ignore_ascii_case("Peerless"));
+    let matched = rules.iter().find_map(|rule| {
+        rule.matches(
+            facts.category,
+            facts.equipment_type,
+            facts.quality,
+            facts.level.filter(|level| *level > 0),
+            facts.prefix,
+            facts.suffix,
+        )
+        .map(|matched| (rule, matched))
+    });
+    let colored = peerless
+        || matched.is_some_and(|(_, matched)| {
+            matched.prefix && matched.suffix
+                || matched.prefix
+                    && facts.name.to_ascii_lowercase().contains(&facts.prefix.to_ascii_lowercase())
+                || matched.suffix
+                    && facts.name.to_ascii_lowercase().contains(&facts.suffix.to_ascii_lowercase())
+        });
+    EquipmentColorDecision {
+        peerless,
+        matched,
+        equipment_group: if colored { EquipmentGroup::Rare } else { EquipmentGroup::Fusion },
+    }
 }
 
 impl EquipmentColorRule {

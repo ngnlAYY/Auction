@@ -221,6 +221,7 @@ pub(crate) fn map_preview_lot(lot: PublicPreviewLotSummary) -> PublicPreviewLotR
         seller_name: lot.seller_name,
         start_price: lot.start_price,
         equipment_name: lot.equipment_name,
+        equipment_group: lot.equipment_group.as_str().to_owned(),
         equipment_category: (!lot.equipment_category.is_empty()).then_some(lot.equipment_category),
         equipment_level: lot.equipment_level,
         primary_attribute_initials: lot.primary_attribute_initials,
@@ -250,6 +251,7 @@ fn map_preview_equipment(equipment: PublicEquipment) -> PublicPreviewEquipmentRe
         .collect();
     PublicPreviewEquipmentResponse {
         name: equipment.name,
+        equipment_group: equipment.equipment_group.as_str().to_owned(),
         category: (!equipment.category.is_empty()).then_some(equipment.category),
         level: equipment.level,
         primary_attribute_initials,
@@ -278,6 +280,7 @@ pub(crate) fn map_equipment(
     PublicEquipmentResponse {
         name: equipment.name,
         category: equipment.category,
+        equipment_group: equipment.equipment_group.as_str().to_owned(),
         level: equipment.level,
         primary_attribute_initials,
         info_summary: equipment.info_summary,

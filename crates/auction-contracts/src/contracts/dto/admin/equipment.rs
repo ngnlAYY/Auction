@@ -16,7 +16,7 @@ pub struct EquipmentTaxonomyDto {
     pub resolved_kinds: Vec<EquipmentBoundedKindOptionDto>,
 }
 
-/// 当前或历史品质；可识别范围独立于自动收件品质策略。
+/// 管理端推荐品质候选；候选范围独立于名称解析兼容和自动收件品质策略。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentQualityOptionDto {
@@ -24,13 +24,16 @@ pub struct EquipmentQualityOptionDto {
     pub legacy: bool,
 }
 
-/// 已明确的完整种类；有限兼容语法不展开为确证种类候选。
+/// 已明确的完整基础名索引；护甲组合用于兼容旧精确规则，新种类候选使用独立 materials。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentKindOptionDto {
+    /// 历史基础名，例如 `Phase Robe`；其种类与部位分别在 material、slot 中表达。
     pub name: String,
     pub category: String,
+    /// 护甲种类；仅 Cloth、Light、Heavy 有值，与 slot 同时存在。
     pub material: Option<String>,
+    /// 护甲语义部位；武器、法杖和盾牌为 None。
     pub slot: Option<String>,
     pub legacy: bool,
     pub prefixes: Vec<String>,
@@ -55,7 +58,7 @@ pub struct EquipmentBoundedKindOptionDto {
     pub suffixes: Vec<String>,
 }
 
-/// 多选规则支持的护甲材质族；历史单值仍按完整文本精确匹配。
+/// 多选规则支持的护甲种类；沿用 materials 字段名，同种类覆盖全部部位。
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EquipmentMaterialOptionDto {

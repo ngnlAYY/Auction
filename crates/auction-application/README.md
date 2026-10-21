@@ -124,6 +124,10 @@ runtime 邮箱开关分开建模（能力见[能力矩阵](docs/design/architect
 其余选项精确匹配完整种类。旧 `equipment_type` 单值始终保持精确匹配，不继承材质族语义。
 材质归类和后缀 `the ` 兼容比较复用 `auction-domain::equipment::taxonomy`，应用层只拥有规则命中语义，
 不再维护分类副本；词典扩展不改变现有收件允许列表、绑定要求、等级门槛或旧标色单值含义。
+[ports/forum/colors.rs](crates/auction-application/src/ports/forum/colors.rs) 的 `equipment_color_decision` 同时拥有
+论坛渲染方案及公开页 `EquipmentGroup`：实际会上色为 `rare`，其余为 `fusion`；Peerless 固定彩虹属于稀有。
+首条规则只命中单边词缀时，名称中找不到对应片段仍按论坛纯文本回退归为融合；等级 0 与论坛快照一致视为未知。
+Public lot 查询允许装备分组与类型组合筛选，应用投影为预览、正式摘要和详情携带同一分组，页面验证复核筛选归属。
 
 [ports/auction/queries](crates/auction-application/src/ports/auction/queries) 定义拍卖、lot、竞价/价格历史及账户安全投影，
 [ports/public](crates/auction-application/src/ports/public) 定义规则、黑名单、补偿与装备链接等读取端口；

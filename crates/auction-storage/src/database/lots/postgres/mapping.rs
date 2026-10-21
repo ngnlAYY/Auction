@@ -25,6 +25,7 @@ pub(super) fn map_postgres_projection(
 pub(super) fn map_postgres_preview(
     row: sqlx::postgres::PgRow,
     world_id: &str,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicPreviewLotSummary, ApplicationError> {
     let attributes: sqlx::types::Json<Value> = row
         .try_get("equipment_attributes")
@@ -51,6 +52,7 @@ pub(super) fn map_postgres_preview(
         row.try_get("equipment_category")
             .map_err(|_| storage_error("读取 PostgreSQL 预览装备分类失败"))?,
         attributes.0,
+        colors,
     )
 }
 
@@ -58,6 +60,7 @@ pub(super) fn map_postgres_preview(
 pub(super) fn map_postgres_preview_detail(
     row: sqlx::postgres::PgRow,
     world_id: &str,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicPreviewLotDetail, ApplicationError> {
     let attributes: sqlx::types::Json<Value> = row
         .try_get("equipment_attributes")
@@ -89,7 +92,8 @@ pub(super) fn map_postgres_preview_detail(
     let category: String = row
         .try_get("equipment_category")
         .map_err(|_| storage_error("读取 PostgreSQL 预览详情装备分类失败"))?;
-    let equipment = map_equipment(world_id, &external_id, &name, &category, attributes.0, false)?;
+    let equipment =
+        map_equipment(world_id, &external_id, &name, &category, attributes.0, false, colors)?;
     let primary_attribute_initials = equipment.primary_attribute_initials();
     let summary = PublicPreviewLotSummary {
         id,
@@ -104,6 +108,7 @@ pub(super) fn map_postgres_preview_detail(
         start_price,
         equipment_name: name,
         equipment_category: category,
+        equipment_group: equipment.equipment_group,
         equipment_level: equipment.level,
         primary_attribute_initials,
         avg_roll: equipment.avg_roll,
@@ -116,6 +121,7 @@ pub(super) fn map_postgres_preview_detail(
 pub(super) fn map_postgres_live(
     row: sqlx::postgres::PgRow,
     world_id: &str,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicLiveLotSummary, ApplicationError> {
     let attributes: sqlx::types::Json<Value> = row
         .try_get("equipment_attributes")
@@ -156,6 +162,7 @@ pub(super) fn map_postgres_live(
         row.try_get("equipment_category")
             .map_err(|_| storage_error("读取 PostgreSQL 正式装备分类失败"))?,
         attributes.0,
+        colors,
     )
 }
 

@@ -26,13 +26,15 @@ impl AppConfig {
             secrets_path.as_deref().map(load_secret_file).transpose()?.unwrap_or_default();
         let secrets = AppSecrets::from_file(secret_file)?;
 
-        let runtime_document = if matches!(role, Role::Admin | Role::Worker) {
-            runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?
-        } else {
-            None
-        };
+        let runtime_document =
+            runtime_config_path.as_deref().map(load_admin_runtime_file).transpose()?;
         let admin_runtime =
             (role == Role::Admin).then(|| runtime_document.as_ref().cloned()).flatten();
+        let equipment_colors = runtime_document
+            .as_ref()
+            .and_then(|runtime| runtime.equipment_colors.as_ref())
+            .map(|colors| colors.to_rules())
+            .unwrap_or_default();
         // Worker 只保留履约所需的名单，不能依赖只由 Admin 持有的完整 runtime 文档。
         let worker_bot_players = if role == Role::Worker {
             runtime_document.as_ref().map(|runtime| runtime.bot_players.clone()).unwrap_or_default()
@@ -41,7 +43,10 @@ impl AppConfig {
         };
         let mut auction = auction;
         let mut worker = worker;
-        if let Some(runtime) = &runtime_document {
+        // Public 只消费装备分组规则；创建者模板和 Worker 运行参数仍由原角色拥有。
+        if matches!(role, Role::Admin | Role::Worker)
+            && let Some(runtime) = &runtime_document
+        {
             apply_runtime_operations(&mut auction, &mut worker, role, runtime);
         }
         if role == Role::Worker
@@ -215,6 +220,7 @@ impl AppConfig {
             secrets_path,
             runtime_config_path,
             admin_runtime,
+            equipment_colors,
             worker_bot_players,
             secrets,
         })

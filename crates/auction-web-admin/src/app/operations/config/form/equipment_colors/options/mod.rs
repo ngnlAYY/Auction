@@ -7,15 +7,13 @@ pub(super) fn equipment_kinds_for(taxonomy: &EquipmentTaxonomyDto, category: &st
     taxonomy
         .kinds
         .iter()
-        .filter(|option| selected_category(&categories, &option.category))
+        // 护甲种类由单独的族投影提供；具体部位完整名只保留为已有规则的精确选中值。
+        .filter(|option| {
+            option.material.is_none()
+                && option.slot.is_none()
+                && selected_category(&categories, &option.category)
+        })
         .map(|option| option.name.clone())
-        .chain(
-            taxonomy
-                .resolved_kinds
-                .iter()
-                .filter(|option| selected_category(&categories, &option.category))
-                .map(|option| option.name.clone()),
-        )
         .chain(
             taxonomy
                 .materials
