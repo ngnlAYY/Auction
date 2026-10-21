@@ -35,6 +35,24 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-21 GitHub CI 证书依赖安全审计修复（本地静态检查）
+
+提交 `ad87dd4` 的 [Actions 运行](https://github.com/ngnlAYY/Auction/actions/runs/39615922774)
+在 `security-audit` 命中新公布的三个证书信任公告；同次 docs、verify 与 MSRV job 已通过，制品 job 被阻断。
+依赖 owner 为根 `Cargo.lock`，仅更新 `rustls-webpki 0.103.15 → 0.103.16`、
+`webpki-root-certs 1.0.9 → 1.0.10` 和 `webpki-roots 1.0.9 → 1.0.10`，对应
+[RUSTSEC-2026-0382](https://github.com/RustSec/advisory-db/blob/main/crates/rustls-webpki/RUSTSEC-2026-0382.md)、
+[RUSTSEC-2026-0383](https://github.com/RustSec/advisory-db/blob/main/crates/webpki-root-certs/RUSTSEC-2026-0383.md) 和
+[RUSTSEC-2026-0381](https://github.com/RustSec/advisory-db/blob/main/crates/webpki-roots/RUSTSEC-2026-0381.md)。
+锁图仍为 537 个包，其余版本与依赖关系保持一致；三个补丁的 MSRV 均为 1.71，项目最低版本仍为 1.94.1。
+CI 保留 `cargo audit --deny warnings`，未增加忽略项或调整 TLS feature、信任配置及应用外部契约。
+
+完整 `just verify`、`cargo +1.94.1 check --locked --workspace --all-targets --all-features`、
+`bash ci/checks/check.sh dependency-audit` 和 `dependency-unused` 均退出 0。
+使用与 CI 相同的 cargo-audit 0.22.2、cargo-machete 0.9.2；RustSec 数据库提交
+`4b587f00996ebe5c05a73eaef105ef241e876414` 共 1348 条公告，审计为零漏洞、零警告。
+日志位于 `target/github-security-fix-{verify,msrv,audit,unused}.log`；本轮未运行行为测试。
+
 ### 2026-10-20 装备详情事实栏单行排列（R24 已部署，schema 56）
 
 owner 为 `auction-web-public`。详情将装备分组、分组值、标记按钮、分类、等级与平均 Roll 保持在同一行，
