@@ -20,6 +20,14 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                 EquipmentCard {
                     equipment: EquipmentCardData::from(lot.equipment.clone()),
                     leading: false,
+                    watch_control: rsx! {
+                        if matches!(lot.summary.status.as_str(), "pending" | "live") {
+                            LotWatchButton {
+                                lot_id: lot.summary.id.clone(),
+                                lot_code: lot.summary.code.clone(),
+                            }
+                        }
+                    },
                 }
                 div { class: "public-auction-lot__bidding",
                     dl {
@@ -27,12 +35,6 @@ pub(crate) fn PreviewLotDetailView(lot: crate::api::PreviewLotDetail) -> Element
                         dd { class: "public-auction-lot__price", "{format_amount(lot.summary.start_price)}" }
                     }
                     p { class: "public-auction-page__status", {t!("lot-not-live")} }
-                    if matches!(lot.summary.status.as_str(), "pending" | "live") {
-                        LotWatchButton {
-                            lot_id: lot.summary.id.clone(),
-                            lot_code: lot.summary.code.clone(),
-                        }
-                    }
                 }
             }
         }
@@ -100,6 +102,14 @@ pub(crate) fn LiveLotDetailView(
                 EquipmentCard {
                     equipment: EquipmentCardData::from(lot.equipment.clone()),
                     leading: is_leading,
+                    watch_control: rsx! {
+                        if auction_status == "live" && lot.status == "live" {
+                            LotWatchButton {
+                                lot_id: lot.id.clone(),
+                                lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
+                            }
+                        }
+                    },
                 }
                 div { class: "public-auction-lot__bidding",
                     dl {
@@ -147,12 +157,8 @@ pub(crate) fn LiveLotDetailView(
                     if session_error {
                         p { role: "alert", {t!("session-error")} }
                     }
-                    // 拍卖或拍品结束后不再展示标记、出价、代理，只保留结果与历史。
+                    // 拍卖或拍品结束后不再展示出价、代理，装备分组行的标记沿用同一状态门禁。
                     if auction_status == "live" && lot.status == "live" {
-                        LotWatchButton {
-                            lot_id: lot.id.clone(),
-                            lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),
-                        }
                         LiveCatalogActions {
                             lot_id: lot.id.clone(),
                             lot_code: lot_code_for(&lot.equipment.category, lot.lot_number),

@@ -196,7 +196,12 @@ pub(super) fn ProxyCreateForm(
                         id: maximum_id,
                         r#type: "text",
                         autofocus: true,
-                        inputmode: "decimal",
+                        // 代理上限允许 K/M 缩写，手机键盘必须保留字母输入入口。
+                        inputmode: "text",
+                        enterkeyhint: "done",
+                        autocapitalize: "none",
+                        autocomplete: "off",
+                        spellcheck: "false",
                         aria_describedby: "public-proxy-amount-hint",
                         disabled: submitting() || blocked,
                         value: "{maximum_amount}",

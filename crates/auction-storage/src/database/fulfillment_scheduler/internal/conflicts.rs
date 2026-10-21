@@ -138,6 +138,7 @@ async fn exclude_conflicts(
     unrelated_attachments.extend(intake::closed_source_history(tx, c).await?);
     // JSON只用于定位出站资产，不是资金授权。schema损坏/未知世界无法排除关联，保守阻断。
     // 成功delivery必须有对应的已满足fulfillment或recovery action；孤儿成功也不是清白。
+    // 竞得装备正文只接受精确旧三变量或新八变量；缺字段、未知字段和非字符串值仍视为冲突。
     let outgoing_query = "SELECT EXISTS(SELECT 1 FROM public.deliveries d
          WHERE d.id IS DISTINCT FROM $3 AND (
            d.payload->'schema_version' IS DISTINCT FROM '1'::jsonb
@@ -166,10 +167,20 @@ async fn exclude_conflicts(
                  'settlement_seller_payout','settlement_buyer_refund'),false)
              OR jsonb_typeof(d.payload->'variables') IS DISTINCT FROM 'object'
              OR d.payload->'variables' IS DISTINCT FROM CASE d.payload->>'template'
-                 WHEN 'settlement_winner_equipment_cod' THEN jsonb_build_object(
-                     'amount',d.payload->'variables'->'amount',
-                     'item_name',d.payload->'variables'->'item_name',
-                     'reference',d.payload->'variables'->'reference')
+                 WHEN 'settlement_winner_equipment_cod' THEN CASE
+                     WHEN d.payload->'variables' ? 'hold_ppm' THEN jsonb_build_object(
+                         'amount',d.payload->'variables'->'amount',
+                         'item_name',d.payload->'variables'->'item_name',
+                         'reference',d.payload->'variables'->'reference',
+                         'hold_ppm',d.payload->'variables'->'hold_ppm',
+                         'adjustment_ppm',d.payload->'variables'->'adjustment_ppm',
+                         'winning_bid',d.payload->'variables'->'winning_bid',
+                         'adjusted_price',d.payload->'variables'->'adjusted_price',
+                         'pool_credit',d.payload->'variables'->'pool_credit')
+                     ELSE jsonb_build_object(
+                         'amount',d.payload->'variables'->'amount',
+                         'item_name',d.payload->'variables'->'item_name',
+                         'reference',d.payload->'variables'->'reference') END
                  WHEN 'settlement_equipment_handoff' THEN jsonb_build_object(
                      'item_name',d.payload->'variables'->'item_name',
                      'reference',d.payload->'variables'->'reference')

@@ -58,6 +58,21 @@
   --space-5: 1.5rem;
   --space-6: 2rem;
   --size-target: 2.75rem;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  /* 支持 VisualViewport 时由共享生命周期更新；其余浏览器保留 CSS 回退。 */
+  --visual-viewport-width: 100%;
+  --visual-viewport-height: 100vh;
+  --visual-viewport-left: 0px;
+  --visual-viewport-top: 0px;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --visual-viewport-height: 100dvh;
+  }
 }
 
 *,
@@ -314,6 +329,7 @@ button:disabled {
   max-block-size: min(60vh, 30rem, var(--truncated-text-tooltip-max-height));
   padding: var(--space-2);
   overflow: auto;
+  overscroll-behavior: contain;
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text);
@@ -331,12 +347,18 @@ button:disabled {
   transform: translateY(-100%);
 }
 
-@media (max-width: 48rem) {
-  body,
-  input,
-  select,
-  textarea {
+@media (max-width: 48rem), (max-width: 64rem) and (pointer: coarse) {
+  body {
     font-size: 1rem;
+  }
+
+  /* 保持编辑字段为 16px；优先级覆盖两端紧凑筛选器的字号继承。 */
+  html body :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+    font-size: 1rem;
+  }
+
+  html body :is(input, select):not([type="checkbox"]):not([type="radio"]) {
+    min-block-size: var(--size-target);
   }
 }
 
@@ -365,8 +387,11 @@ button:disabled {
 .ui-pager__jump,
 .ui-pager__label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .ui-pager button,
@@ -603,6 +628,12 @@ table {
     white-space: nowrap;
   }
 
+  /* 弹窗虽可由表格动作挂载，确认按钮仍需显示完整文字并在窄屏换行。 */
+  :is(.public-shell, .admin-shell) table :is(th, td):not([colspan]) .ui-dialog__panel button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   /* 单元格需要截断内容，焦点轮廓向内偏移以免同时被裁掉。 */
   :is(.public-shell, .admin-shell, .shared-markdown) table :is(th, td) :focus-visible {
     outline-offset: calc(-2 * var(--border-width));
@@ -616,23 +647,35 @@ table {
 
 .ui-dialog {
   position: fixed;
-  inset: 0;
+  inset: var(--visual-viewport-top) auto auto var(--visual-viewport-left);
+  inline-size: var(--visual-viewport-width);
+  block-size: var(--visual-viewport-height);
   z-index: var(--z-dialog);
   display: grid;
   place-items: center;
-  padding: var(--space-5);
+  padding: max(var(--space-5), var(--safe-area-top))
+    max(var(--space-5), var(--safe-area-right))
+    max(var(--space-5), var(--safe-area-bottom))
+    max(var(--space-5), var(--safe-area-left));
   background: var(--color-overlay);
 }
 
 .ui-dialog__panel {
   overflow: auto;
+  overscroll-behavior: contain;
   inline-size: min(32rem, 100%);
-  max-block-size: calc(100dvh - 2 * var(--space-5));
+  min-inline-size: 0;
+  min-block-size: 0;
+  max-block-size: calc(var(--visual-viewport-height) - max(var(--space-5), var(--safe-area-top)) - max(var(--space-5), var(--safe-area-bottom)));
+  scroll-padding-block: var(--space-4);
   padding: var(--space-5);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-2);
+  overflow-wrap: anywhere;
+  /* 表格操作中的弹窗不能继承单元格的单行截断。 */
+  white-space: normal;
 }
 
 .ui-dialog__header {
@@ -645,10 +688,12 @@ table {
 
 .ui-dialog__title {
   margin: 0;
+  min-inline-size: 0;
   font-size: var(--text-lg);
 }
 
 .ui-dialog__close {
+  flex: 0 0 auto;
   min-block-size: var(--size-target);
   padding: var(--space-1) var(--space-3);
   border: var(--border-width) solid var(--color-border);
@@ -672,7 +717,8 @@ table {
 
 /* 移动形态（sheet 变体）：`.ui-dialog--sheet` 为显式 opt-in 修饰类（加在遮罩根上，
    任意断点强制抽屉形态）；同时 bp-sm（48rem）以下通过媒体查询对所有 `.ui-dialog`
-   自动生效——上口圆角、宽度撑满、最大高度约束在视口 85%。组件无需感知断点。 */
+   以及 bp-md（64rem）以下触控横屏自动生效，上口圆角、宽度撑满，
+   最大高度约束在可见视口 85%，为键盘和系统安全区保留空间。组件无需感知断点。 */
 
 .ui-dialog--sheet {
   padding: 0;
@@ -682,14 +728,17 @@ table {
 
 .ui-dialog--sheet .ui-dialog__panel {
   inline-size: 100%;
-  max-block-size: 85dvh;
-  padding: var(--space-4);
+  max-block-size: min(calc(var(--visual-viewport-height) * 0.85), calc(var(--visual-viewport-height) - var(--safe-area-top)));
+  padding: var(--space-4)
+    max(var(--space-4), var(--safe-area-right))
+    max(var(--space-4), var(--safe-area-bottom))
+    max(var(--space-4), var(--safe-area-left));
   border-block-end: none;
   border-inline: none;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
-@media (max-width: 48rem) {
+@media (max-width: 48rem), (max-width: 64rem) and (pointer: coarse) {
   .ui-dialog {
     padding: 0;
     align-items: end;
@@ -698,8 +747,11 @@ table {
 
   .ui-dialog__panel {
     inline-size: 100%;
-    max-block-size: 85dvh;
-    padding: var(--space-4);
+    max-block-size: min(calc(var(--visual-viewport-height) * 0.85), calc(var(--visual-viewport-height) - var(--safe-area-top)));
+    padding: var(--space-4)
+      max(var(--space-4), var(--safe-area-right))
+      max(var(--space-4), var(--safe-area-bottom))
+      max(var(--space-4), var(--safe-area-left));
     border-block-end: none;
     border-inline: none;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;

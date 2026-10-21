@@ -158,6 +158,13 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                     game_equipment_url: row.game_equipment_url.clone(),
                 }
             }
+            td { "data-label": t!("catalog-group"),
+                TruncatedText {
+                    value: equipment_group_label(&row.equipment_group),
+                    portal: true,
+                    legacy_dom: true,
+                }
+            }
             td {
                 class: "public-auction-catalog__avg-roll public-auction-catalog__number",
                 "data-label": t!("equipment-avg-roll"),

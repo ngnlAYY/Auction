@@ -106,7 +106,11 @@ fn validate_runtime_mail_templates(
     let templates = [
         (config.auction_assets_rejected.as_str(), &[][..], &[][..]),
         (config.auction_no_attachments.as_str(), &[][..], &[][..]),
-        (config.auction_equipment_rejected.as_str(), &["reason_code"][..], &["reason_code"][..]),
+        (
+            config.auction_equipment_rejected.as_str(),
+            &[][..],
+            &["reason_code", "reason_text", "next_steps", "mail_reference"][..],
+        ),
         (config.user_assets_rejected.as_str(), &[][..], &[][..]),
         (
             config.register_key.as_str(),
@@ -118,7 +122,7 @@ fn validate_runtime_mail_templates(
         (
             config.settlement_winner_equipment_cod.as_str(),
             &["item_name", "amount", "reference"][..],
-            &["item_name", "amount", "reference"][..],
+            &["item_name", "amount", "reference", "price_breakdown"][..],
         ),
         (
             config.settlement_payment_carrier.as_str(),
@@ -145,6 +149,15 @@ fn validate_runtime_mail_templates(
     ];
     for (value, required, allowed) in templates {
         validate_runtime_template_body(value, required, allowed)?;
+    }
+    // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
+    if !config.auction_equipment_rejected.contains("{reason_code}")
+        && !config.auction_equipment_rejected.contains("{reason_text}")
+    {
+        return Err(AdminRuntimeConfigError::InvalidDocument(
+            "mail_templates.auction_equipment_rejected 必须包含 reason_code 或 reason_text"
+                .to_owned(),
+        ));
     }
     Ok(())
 }

@@ -30,44 +30,196 @@ pub struct MoogleMailNotificationTemplates {
 impl Default for MoogleMailNotificationTemplates {
     fn default() -> Self {
         Self::from_values(BTreeMap::from([
-            ("auction_assets_rejected".to_owned(), "Auction assets rejected".to_owned()),
-            ("auction_no_attachments".to_owned(), "Auction has no attachments".to_owned()),
+            (
+                "auction_assets_rejected".to_owned(),
+                concat!(
+                    "Your auction submission was not accepted.\n",
+                    "\n",
+                    "Auction submissions must contain equipment only.\n",
+                    "Please remove Credits, CoD and other item types\n",
+                    "before submitting again.",
+                )
+                .to_owned(),
+            ),
+            (
+                "auction_no_attachments".to_owned(),
+                concat!(
+                    "No equipment attachments were found in your message.\n",
+                    "\n",
+                    "Attach the equipment you want to submit,\n",
+                    "then send a new message with the subject \"auction\".",
+                )
+                .to_owned(),
+            ),
             (
                 "auction_equipment_rejected".to_owned(),
-                "Auction equipment rejected: {reason_code}".to_owned(),
+                concat!(
+                    "Your auction submission was not accepted.\n",
+                    "\n",
+                    "Reason:\n",
+                    "{reason_text}\n",
+                    "\n",
+                    "Equipment return:\n",
+                    "A return has been requested for all equipment\n",
+                    "in your original message.\n",
+                    "\n",
+                    "If you submitted multiple items together,\n",
+                    "the entire submission will be returned.\n",
+                    "\n",
+                    "What to do next:\n",
+                    "{next_steps}\n",
+                    "\n",
+                    "Original mail reference: {mail_reference}",
+                )
+                .to_owned(),
             ),
-            ("user_assets_rejected".to_owned(), "User assets rejected".to_owned()),
-            ("register_key".to_owned(), "Registration key {login_key} for {username}".to_owned()),
+            (
+                "user_assets_rejected".to_owned(),
+                concat!(
+                    "Your account request was not accepted.\n",
+                    "\n",
+                    "Account requests must not include equipment,\n",
+                    "Credits, other items or CoD.\n",
+                    "\n",
+                    "Please resend your request without these assets.",
+                )
+                .to_owned(),
+            ),
+            (
+                "register_key".to_owned(),
+                concat!(
+                    "Your HV-Auction login key is ready.\n",
+                    "\n",
+                    "Player: {username}\n",
+                    "\n",
+                    "Login key:\n",
+                    "{login_key}\n",
+                    "\n",
+                    "Use this key to sign in to HV-Auction.\n",
+                    "Keep it private.",
+                )
+                .to_owned(),
+            ),
             (
                 "register_result".to_owned(),
-                "Registration result {result_code} {username}".to_owned(),
+                concat!(
+                    "Your registration could not be completed.\n",
+                    "\n",
+                    "Player: {username}\n",
+                    "Result code: {result_code}\n",
+                    "\n",
+                    "Contact the auction operator if you need help\n",
+                    "resolving this issue.",
+                )
+                .to_owned(),
             ),
-            ("rebind_result".to_owned(), "Rebind result {result_code} {username}".to_owned()),
+            (
+                "rebind_result".to_owned(),
+                concat!(
+                    "Your account rebind request has been processed.\n",
+                    "\n",
+                    "Player: {username}\n",
+                    "Result code: {result_code}\n",
+                    "\n",
+                    "Contact the auction operator if you need help\n",
+                    "understanding the result.",
+                )
+                .to_owned(),
+            ),
             (
                 "settlement_winner_equipment_cod".to_owned(),
-                "Auction item {item_name}; COD {amount}; reference {reference}".to_owned(),
+                concat!(
+                    "Your auction item is ready to collect.\n",
+                    "\n",
+                    "Item: {item_name}\n",
+                    "\n",
+                    "{price_breakdown}Amount due (CoD): {amount} Credits\n",
+                    "\n",
+                    "Collect the attached equipment to pay the CoD\n",
+                    "and receive your item.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
             (
                 "settlement_payment_carrier".to_owned(),
-                "Auction payment request {amount}; reference {reference}".to_owned(),
+                concat!(
+                    "This mail collects payment for your Isekai auction item.\n",
+                    "\n",
+                    "CoD: {amount} Credits\n",
+                    "\n",
+                    "Collect the attached Credits to pay the CoD.\n",
+                    "Your equipment will be sent separately in Isekai\n",
+                    "after payment is confirmed.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
             (
                 "settlement_payment_reminder".to_owned(),
-                "Auction payment is overdue; reference {reference}".to_owned(),
+                concat!(
+                    "Payment for this auction transaction is overdue.\n",
+                    "\n",
+                    "Please check your original auction payment mail.\n",
+                    "If you have already paid, contact the auction\n",
+                    "operator with the reference below.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
             (
                 "settlement_equipment_handoff".to_owned(),
-                "Auction item {item_name}; reference {reference}".to_owned(),
+                concat!(
+                    "The following equipment is attached.\n",
+                    "\n",
+                    "Item: {item_name}\n",
+                    "\n",
+                    "Please collect the attachment.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
             (
                 "settlement_seller_payout".to_owned(),
-                "Auction seller payout {amount}; reference {reference}".to_owned(),
+                concat!(
+                    "Your auction payout is attached.\n",
+                    "\n",
+                    "Amount: {amount} Credits\n",
+                    "\n",
+                    "Please collect the attached Credits.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
             (
                 "settlement_buyer_refund".to_owned(),
-                "Auction buyer refund {amount}; reference {reference}".to_owned(),
+                concat!(
+                    "Your auction refund is attached.\n",
+                    "\n",
+                    "Amount: {amount} Credits\n",
+                    "\n",
+                    "Please collect the attached Credits.\n",
+                    "\n",
+                    "Reference: {reference}",
+                )
+                .to_owned(),
             ),
-            ("operations_alert".to_owned(), "Operations alert: {summary}".to_owned()),
+            (
+                "operations_alert".to_owned(),
+                concat!(
+                    "An auction service issue needs attention.\n",
+                    "\n",
+                    "{summary}\n",
+                    "\n",
+                    "Please review the Admin dashboard for details.",
+                )
+                .to_owned(),
+            ),
         ]))
         .unwrap_or_else(|error| panic!("内置 MoogleMail 模板必须通过启动校验: {error}"))
     }
@@ -120,14 +272,15 @@ fn validate_template_body(key: &str, value: &str) -> Result<(), String> {
     }
     let (required, allowed): (&[&str], &[&str]) = match key {
         "auction_assets_rejected" | "auction_no_attachments" | "user_assets_rejected" => (&[], &[]),
-        "auction_equipment_rejected" => (&["reason_code"], &["reason_code"]),
+        "auction_equipment_rejected" => {
+            (&[], &["reason_code", "reason_text", "next_steps", "mail_reference"])
+        }
         "register_key" => (&["login_key", "username"], &["login_key", "username"]),
-        "register_result" | "rebind_result" => {
-            (&["result_code", "username"], &["result_code", "username"])
-        }
-        "settlement_winner_equipment_cod" => {
-            (&["item_name", "amount", "reference"], &["item_name", "amount", "reference"])
-        }
+        "register_result" | "rebind_result" => (&["result_code"], &["result_code", "username"]),
+        "settlement_winner_equipment_cod" => (
+            &["item_name", "amount", "reference"],
+            &["item_name", "amount", "reference", "price_breakdown"],
+        ),
         "settlement_payment_carrier" | "settlement_seller_payout" | "settlement_buyer_refund" => {
             (&["amount", "reference"], &["amount", "reference"])
         }
@@ -155,8 +308,12 @@ fn validate_template_body(key: &str, value: &str) -> Result<(), String> {
         }
         cursor = end + 1;
     }
+    // 拒收原因兼容旧原因码与新可读正文，和配置入口保持相同的至少一项约束。
     if value[cursor..].contains('}')
         || required.iter().any(|placeholder| !seen.contains(placeholder))
+        || key == "auction_equipment_rejected"
+            && !seen.contains(&"reason_code")
+            && !seen.contains(&"reason_text")
     {
         return Err(format!("MoogleMail mail_templates.{key} 缺少必需占位符"));
     }

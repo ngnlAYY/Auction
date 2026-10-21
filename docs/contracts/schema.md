@@ -158,6 +158,15 @@ MoogleMail preflight 释放由 delivery_scheduler 独占，同事务撤销有效
 | deliveries | auction-application + auction-jobs：delivery | 外部投递 outbox、claim 和重试 |
 | delivery_admin_commands | auction-application：delivery | Admin 交付命令幂等账本 |
 
+买家装备 COD 的 `settlement_winner_equipment_cod` 投递沿用 schema-v1，`variables` 接受精确旧三字段
+`amount/item_name/reference`，或加上 `hold_ppm/adjustment_ppm/winning_bid/adjusted_price/pool_credit` 的完整八字段；
+不接受部分明细或未知变量。新字段均为规范整数字符串，来自对应不可变 `lot_settlements`；`adjusted_price` 为冻结
+`buyer_amount + compensation_amount`，`pool_credit` 为后者，必须满足 `adjusted_price - pool_credit = amount = COD`。
+领域统一核对冻结费率按整数向下取整后的调整价格；只有负费率允许奖池抵扣，且不超过基础折扣。
+比例使用原 PPM，正文格式化不参与结算或 canonical 摘要计算。已准备或派发的旧三变量任务保留原 payload、摘要和身份，
+新模板的价格明细展开为空；新八变量写入后要求发送、核对及运维工具使用支持该扩展的版本，升级边界见
+[邮件正文模板](ops/config/README.md#邮件正文模板)。此扩展不增加数据库列或迁移。
+
 `000051` 给退件建立持久消费事实，回填当前退件指针、回收动作来源和历史 recovery take 投递可证明已消费的
 入站邮件，保留原计数；重寄清空当前指针也不释放消费身份。take prepare 的新命令身份绑定 action 与来源 MID，
 activate 跟随持久 prepare；同轮重试保持稳定，不同真实退件互不冲突。旧 prepared/enqueued 保留原身份；旧 prepare

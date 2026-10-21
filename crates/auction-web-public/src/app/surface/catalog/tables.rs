@@ -131,9 +131,9 @@ pub(crate) fn LiveCatalogTable(
 ) -> Element {
     // 语义化 colgroup 分配完整百分比宽度；窄屏仍保留表头与行列，不切换为卡片。
     let (layout, widths) = if show_actions {
-        ("public-catalog-live", vec![6, 22, 5, 4, 4, 6, 8, 8, 6, 7, 6, 18])
+        ("public-catalog-live", vec![6, 18, 4, 5, 4, 4, 6, 8, 8, 6, 7, 6, 18])
     } else {
-        ("public-catalog-settled", vec![7, 30, 6, 5, 5, 8, 10, 9, 8, 6, 6])
+        ("public-catalog-settled", vec![7, 25, 5, 6, 5, 5, 8, 10, 9, 8, 6, 6])
     };
     rsx! {
         div { class: "public-auction-catalog",
@@ -144,6 +144,7 @@ pub(crate) fn LiveCatalogTable(
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
                         th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", {t!("catalog-group")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
                         th { scope: "col", {t!("catalog-primary-attributes")} }
@@ -184,12 +185,13 @@ pub(crate) fn PreviewCatalogTable(rows: Rc<Vec<CatalogRow>>, indices: Vec<usize>
         div { class: "public-auction-catalog",
             table { class: "public-auction-catalog__table public-auction-catalog__table--preview ui-table--responsive",
                 caption { class: "public-visually-hidden", {t!("auction-preview-lots")} }
-                // 预览目录不提供行内操作；colgroup、表头与行同时保留十列，编号仍可进入详情。
-                auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: vec![6, 36, 7, 5, 7, 13, 12, 4, 4, 6] }
+                // 预览目录不提供行内操作；装备名称后独立显示分组，表头、行和列宽保持十一列。
+                auction_web_shared::TableColumns { layout: "public-catalog-preview", widths: vec![6, 30, 6, 7, 5, 7, 13, 12, 4, 4, 6] }
                 thead {
                     tr {
                         th { scope: "col", {t!("catalog-code")} }
                         th { scope: "col", {t!("catalog-item")} }
+                        th { scope: "col", {t!("catalog-group")} }
                         th { scope: "col", class: "public-auction-catalog__number", {t!("equipment-avg-roll")} }
                         th { scope: "col", {t!("catalog-level")} }
                         th { scope: "col", {t!("catalog-primary-attributes")} }
@@ -288,6 +290,13 @@ pub(crate) fn LiveCatalogRow(
                         class: "public-visually-hidden",
                         {t!("bid-leading")}
                     }
+                }
+            }
+            td { "data-label": t!("catalog-group"),
+                TruncatedText {
+                    value: equipment_group_label(&row.equipment_group),
+                    portal: true,
+                    legacy_dom: true,
                 }
             }
             td {

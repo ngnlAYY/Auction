@@ -13,7 +13,9 @@ mod plan;
 mod policy;
 
 pub use amount::SettlementAmount;
-pub use facts::{SettlementFact, SettlementLine, SettlementWorld};
+pub use facts::{
+    SettlementFact, SettlementLine, SettlementWorld, validate_settlement_price_breakdown,
+};
 pub use obligations::{SettlementObligation, SettlementObligationKind, SettlementObligationState};
 pub use plan::{SettlementPlan, floor_ppm, proportional_floor};
 pub use policy::{

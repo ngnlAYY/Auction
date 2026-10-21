@@ -4,6 +4,8 @@ use super::mapping::*;
 
 use super::*;
 
+mod pricing;
+
 #[cfg(feature = "postgres")]
 pub(super) async fn claim_postgres(
     pool: &crate::database::TrackedPool<Postgres>,
@@ -88,6 +90,10 @@ pub(super) async fn claim_postgres(
                   o.recipient_game_identity, o.amount, o.carrier_credit, o.equipment_id,
                   equipment.id AS equipment_row_id, equipment.world_id AS equipment_world,
                   equipment.external_equipment_id, equipment.name AS equipment_name,
+                  settlement.lot_id AS settlement_lot_id,
+                  settlement.end_price, settlement.listed_price, settlement.buyer_amount,
+                  settlement.seller_amount, settlement.tax_amount, settlement.compensation_amount,
+                  settlement.hold_ppm, settlement.adjustment_ppm,
                   o.submission_id, submission.source_kind AS submission_source_kind,
                   submission.source_reference AS submission_source_reference,
                   submission.mailbox_key AS submission_mailbox_key,
@@ -100,6 +106,8 @@ pub(super) async fn claim_postgres(
                ON o.id = f.obligation_id
            LEFT JOIN public.equipment AS equipment
                ON equipment.id = o.equipment_id
+           LEFT JOIN public.lot_settlements AS settlement
+               ON settlement.lot_id = o.lot_id AND o.obligation_kind = 'winner_equipment_cod'
            LEFT JOIN public.users AS recipient_user
                ON recipient_user.id = o.recipient_user_id
            LEFT JOIN public.auction_submissions AS submission
@@ -487,6 +495,7 @@ pub(super) fn map_claim(
         external_equipment_id: string_column(row, "external_equipment_id")
             .map_err(ClaimMappingError::Context)?,
         equipment_name: string_column(row, "equipment_name").map_err(ClaimMappingError::Context)?,
+        settlement_line: pricing::map_settlement_line(row).map_err(ClaimMappingError::Context)?,
         submission_id: submission_id.map(SubmissionId::from_uuid),
         submission_source_kind: row
             .try_get("submission_source_kind")

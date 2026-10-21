@@ -75,6 +75,7 @@ category-other = 其他
 
 catalog-code = 編號
 catalog-item = 裝備
+catalog-group = 分組
 catalog-level = 等級
 catalog-primary-attributes = 屬性腿
 catalog-seller = 賣家
@@ -504,8 +505,6 @@ watch-toggle = 標記裝備 { $code }
 watch-on = 已標記
 watch-off = 未標記
 watch-login = 登入後標記
-watch-loading = 正在讀取伺服器標記… 同步完成前不可修改。
-watch-unsynced = 目前為未同步的本機快取，不可用於儲存修改。
 watch-load-error = 無法讀取伺服器標記，請重新整理後再修改。
 watch-refresh = 重新整理標記
 watch-saving = 正在儲存…

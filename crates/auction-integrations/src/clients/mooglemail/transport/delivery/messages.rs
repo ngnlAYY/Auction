@@ -82,6 +82,7 @@ impl MoogleMailDeliveryTransport {
                 result_code,
                 login_key.as_ref(),
                 &claim.recipient,
+                &payload.world,
                 &payload.external_mail_id,
             )
             .ok_or_else(invalid_payload)?

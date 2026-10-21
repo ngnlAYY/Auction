@@ -35,6 +35,59 @@ HTTP、竞价、结算、浏览器及 canonical PostgreSQL v28 接管/灾备曾�
 
 2026-10-14 四轮依赖调整的公告审计共用 cargo-audit 0.22.2、`cargo audit --deny yanked --deny unsound --deny unmaintained`、1310 条公告及公告库提交 `6aed84668c23d7f535077a9fe918bf1fa0f6a5bc`；“审计修复”的不同策略单列。
 
+### 2026-10-20 装备详情事实栏单行排列（R24 已部署，schema 56）
+
+owner 为 `auction-web-public`。详情将装备分组、分组值、标记按钮、分类、等级与平均 Roll 保持在同一行，
+标签和值、星形与标记状态同行；移除分组跨行和手机端纵排规则。窄屏仅此信息栏支持触控及键盘横向查看，
+保留按钮命中区域、焦点提示与错误反馈。路由、DTO、标记命令、配置及数据库契约保持一致。
+
+完整 `just verify`、`just web-build`、`just build-api`、`just build-release`、`just verify-artifacts` 均退出 0。
+按既有部署授权封存当前工作树，源码指纹为 `5e1d6d826cbb5ad92d2875603d600665fe3999d5ae5ef34d3a1ec7383141dcdb`；
+制品位于 `target/dist/inline-facts-20261020-schema56-r24/`，运维证据位于 `target/dist/inline-facts-20261020-ops-r24/`。
+相对 R23 仅 Public 程序及其 Web payload 变化，其他三个程序逐字节一致。
+
+已验证数据库备份并保留 R23 四程序、八份配置及服务定义，按 Worker → Admin → Public 完成切换。
+56 项迁移校验和一致，迁移检查为 no-op；配置内容与权限保持一致。独立后验的三项 readiness 均为 200，
+自动重启次数为 0，本次启动日志 error/warning 均为 0，双端 origin 与 Public HTTPS manifest/WASM 共 16 项资源匹配封存。
+回执为 `cloud-evidence-r24/final-r24-confirmed.json`、`web-postflight-r24.json`、`DEPLOYMENT-SUMMARY.json`。
+本轮完成源码、构建资源及部署核对，未运行浏览器或业务流程测试。
+
+### 2026-10-20 移动适配、独立分组列与 MM 正文（R23 已部署，schema 56）
+
+按用户要求，将双端手机布局、公开页“装备 → 分组 → 平均 Roll”列顺序、详情分组行标记按钮、同步提示精简及
+英文 MM 正文发布到现有云端分体环境。Web owner 为 Public/Admin/shared；邮件模板与价格明细由
+domain/application/config/storage/integrations 共同承接，旧三变量待发任务继续兼容，新竞得通知使用冻结结算明细。
+
+完整 `just verify`、`just build-api`、`just build-release`、`just verify-artifacts` 均退出 0。
+本次按用户明确部署授权封存当前工作树，记录实际 dirty 状态、HEAD、全部文件状态与构建前后相同的源码指纹
+`310240ddeb5c762376e5f937c1308519342dcc000e105114112228fe0877fc76`；制品位于
+`target/dist/mobile-mail-20261020-schema56-r23/`，运维证据位于 `target/dist/mobile-mail-20261020-ops-r23/`。
+
+已验证数据库备份，保留 R22 四程序、现场全部配置及服务定义；停稳后持有部署锁和既有 runtime 文件锁，
+核对配置命令账本无 pending/unknown，仅替换 `runtime/admin.toml` 的 14 项 `mail_templates` 值。
+其余解析值、模板表之外的原始字节、各配置 owner/mode 均保持一致。新正文在共享 runtime 中显式生效，
+未修改邮件启用开关、发送预算、凭据或其他业务参数。尝试启动新版本后，因八变量待发任务的兼容边界，禁止自动回退 R22。
+
+56 条迁移校验和全部一致，迁移检查为 no-op；按 Worker → Admin → Public 启动后，四程序和运行进程摘要匹配封存，
+三项 readiness 均为 200，自动重启次数为 0，本次启动日志 error/warning 均为 0。
+双端 origin 资源与 Public HTTPS manifest/WASM 共 16 项逐字节匹配；回执为
+`cloud-evidence-r23/final-r23-confirmed.json`、`web-postflight-r23.json` 和 `DEPLOYMENT-SUMMARY.json`。
+本次运行核对限定为部署、配置、schema、服务就绪及静态资源，未进行真实竞价、测试寄信或手机浏览器流程验证。
+
+### 2026-10-20 双端移动适配与公开页独立分组列（本地静态检查）
+
+owner 为 `auction-web-public`、`auction-web-admin` 和 `auction-web-shared`。双端增加手机与触控横屏布局、
+安全区、原生输入提示及触控操作间距；共享层按 VisualViewport 调整弹窗可见范围，完善隐藏控件焦点过滤和
+弹窗内长文本浮层。业务表保留原生表头、行列及完整百分比宽度，管理端黑名单历史支持点击查看。
+
+公开页预览、竞价与已结算目录新增纯文字分组列，顺序统一为“装备、分组、平均 Roll”；详情标记按钮移到装备分组行。
+移除服务器标记加载及未同步缓存提示，保留加载忙碌语义、失败反馈与修改门禁。路由、DTO、配置和数据库结构保持一致。
+
+Rust 1.99.0 / Dioxus CLI 0.7.10 下，完整 `just verify` 退出 0；双端 Web 发布资源构建成功，
+随后 `just web-build` 核对源码指纹与 payload 清单并复用成功，每端 6 个文件。完整静态日志为
+`target/mobile-ui-verify-final.log`，构建日志为 `target/mobile-public-build.log`、`target/mobile-admin-build.log`。
+本次未运行行为测试或部署到云端；手机浏览器实际操作仍待单独验证。
+
 ### 2026-10-20 公开页装备列移除分组标记（R22 已部署，schema 56）
 
 按用户要求，Public 的实时、已结算及预览目录装备列仅显示名称；顶部装备分组筛选及详情分组字段保留。

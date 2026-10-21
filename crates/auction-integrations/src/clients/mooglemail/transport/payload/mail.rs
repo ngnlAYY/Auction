@@ -125,12 +125,21 @@ pub(crate) fn decode_payload(
                     }
                 }
                 Some(
-                    "auction_assets_rejected"
-                    | "auction_no_attachments"
-                    | "auction_equipment_rejected"
-                    | "user_assets_rejected",
+                    "auction_assets_rejected" | "auction_no_attachments" | "user_assets_rejected",
                 ) => {
                     if claim.origin_kind != "mail_intake" || payload.user_key_user_id.is_some() {
+                        return Err(invalid_payload());
+                    }
+                }
+                Some("auction_equipment_rejected") => {
+                    if claim.origin_kind != "mail_intake"
+                        || payload.user_key_user_id.is_some()
+                        || payload
+                            .result_code
+                            .as_deref()
+                            .and_then(equipment_rejection_copy)
+                            .is_none()
+                    {
                         return Err(invalid_payload());
                     }
                 }

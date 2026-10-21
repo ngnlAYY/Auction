@@ -59,6 +59,12 @@ PostgreSQL、Redis、反向代理和系统服务是外部组件，实现与验�
   `auctionctl` 只装配命令，不在迁移中批量更正旧场次。
 - 身份证明：credentials owner 拥有预期 `player_name`、校验及版本传递，integrations 复用其 ownership，无预期名称
   也核验 HV 认证 UID 与论坛目标资料名，缺证据返回 `identity_unproven`，不建第二 Cookie 客户端。
+- 邮件正文：domain 拥有冻结费率与价格明细的一致性校验，application 拥有通知身份与冻结结算 intent；storage 的
+  [claims/pricing.rs](crates/auction-storage/src/database/fulfillment_scheduler/claims/pricing.rs) 投影不可变结算明细；integrations 的
+  [settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs) 仅校验和格式化价格解释，
+  [outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs) 仅将闭集拒收码转为安全文案。
+  14 项 runtime 模板由 application 定义、config 解析；变量兼容与同版升级见
+  [邮件正文模板](ops/config/README.md#邮件正文模板)及[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
 - Bot 内部履约：credentials 增加全局 mail generation，integrations 联合核验身份并读取精确库存，application 编排
   内部义务与资金用途，storage `settlement_funding` 独占来源/分配/追加账本，fulfillment 独占内部满足事实，
   delivery 经资金窄端口保护现金外发；预期名、普通余额或装备详情可读都不构成证明，论坛资料 reader 复用已启用
@@ -178,6 +184,8 @@ Public/Admin 是分离的 Dioxus CSR SPA，各有路由、译文、产物和 HTT
 [Public](crates/auction-web-public/DESIGN.md) 和 [Admin](crates/auction-web-admin/DESIGN.md)；五语言与 `hv.lang` 保持
 稳定，列宽/截断/窄屏结构见[表格契约](docs/design/table-layouts.md)。Public `surface/pagination/` 拥有列表数量、译文、
 URL 更新与 `preferences.rs` 本地偏好，shared `Pager`/`components/pager/size.rs` 只提供可选数字分页与页码限制。
+shared `media/viewport.rs` 拥有 VisualViewport 监听及 CSS 变量生命周期，`style/base.css` 拥有安全区、
+弹窗可见高度与触控字段基础样式；两端 assets 分别拥有手机导航、筛选和原表格列内的操作布局。
 装备标记只允许登录用户修改，Public 按 user UUID 与 auction UUID 隔离本地缓存，服务器为唯一权威，不增加业务表列，
 也不把装备链接、代理上限或凭据写入标记缓存。
 Public `identity/account/watches/` 拥有“我的”当期标记列表，组合既有当前场次、账号标记与完整公开目录 API，

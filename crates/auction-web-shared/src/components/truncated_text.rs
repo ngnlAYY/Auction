@@ -60,6 +60,7 @@ struct TooltipRequest {
 #[cfg(target_arch = "wasm32")]
 struct TooltipDismissHandle {
     window: web_sys::Window,
+    viewport: Option<web_sys::VisualViewport>,
     resize_callback: Closure<dyn FnMut()>,
     scroll_callback: Closure<dyn FnMut(web_sys::Event)>,
     _popup_listeners: Option<PopupListeners>,
@@ -77,6 +78,16 @@ impl Drop for TooltipDismissHandle {
             self.scroll_callback.as_ref().unchecked_ref(),
             true,
         );
+        if let Some(viewport) = &self.viewport {
+            let _ = viewport.remove_event_listener_with_callback(
+                "resize",
+                self.resize_callback.as_ref().unchecked_ref(),
+            );
+            let _ = viewport.remove_event_listener_with_callback(
+                "scroll",
+                self.scroll_callback.as_ref().unchecked_ref(),
+            );
+        }
     }
 }
 
@@ -242,7 +253,36 @@ pub fn TruncatedText(
                 }
                 return;
             }
-            let popup_listeners = window
+            // 手机软键盘与页面缩放只改变可见视口时，window 不一定派发 resize/scroll。
+            // 沿用窗口变动时关闭浮层的策略，避免保留已经偏离触发文本的旧坐标。
+            let viewport = window.visual_viewport();
+            let mut handle = TooltipDismissHandle {
+                window,
+                viewport,
+                resize_callback,
+                scroll_callback,
+                _popup_listeners: None,
+            };
+            if let Some(viewport) = &handle.viewport {
+                let resize_added = viewport
+                    .add_event_listener_with_callback(
+                        "resize",
+                        handle.resize_callback.as_ref().unchecked_ref(),
+                    )
+                    .is_ok();
+                let scroll_added = viewport
+                    .add_event_listener_with_callback(
+                        "scroll",
+                        handle.scroll_callback.as_ref().unchecked_ref(),
+                    )
+                    .is_ok();
+                if !resize_added || !scroll_added {
+                    // handle 同时清理已注册的 window 与可见视口监听，包含部分注册失败路径。
+                    return;
+                }
+            }
+            handle._popup_listeners = handle
+                .window
                 .document()
                 .and_then(|document| document.get_element_by_id(&popup_id))
                 .and_then(|element| {
@@ -253,12 +293,7 @@ pub fn TruncatedText(
                         defer_close,
                     )
                 });
-            *effect_handle.borrow_mut() = Some(TooltipDismissHandle {
-                window,
-                resize_callback,
-                scroll_callback,
-                _popup_listeners: popup_listeners,
-            });
+            *effect_handle.borrow_mut() = Some(handle);
         });
     }
 
@@ -496,24 +531,22 @@ fn show_tooltip(
     }
 
     let rectangle = element.get_bounding_client_rect();
-    let (viewport_width, viewport_height) = web_sys::window()
-        .map(|window| {
-            (
-                window.inner_width().ok().and_then(|value| value.as_f64()).unwrap_or(1024.0),
-                window.inner_height().ok().and_then(|value| value.as_f64()).unwrap_or(768.0),
-            )
-        })
-        .unwrap_or((1024.0, 768.0));
+    let (viewport_left, viewport_top, viewport_width, viewport_height) = tooltip_viewport_bounds();
     let width = 360.0_f64.min((viewport_width - 16.0).max(1.0));
     let gap = 8.0;
     let margin = 8.0;
-    let available_above = (rectangle.top() - gap - margin).max(1.0);
-    let available_below = (viewport_height - rectangle.bottom() - gap - margin).max(1.0);
+    let minimum_top = viewport_top + margin;
+    let maximum_top = (viewport_top + viewport_height - margin).max(minimum_top);
+    let above_top = (rectangle.top() - gap).clamp(minimum_top, maximum_top);
+    let below_top = (rectangle.bottom() + gap).clamp(minimum_top, maximum_top);
+    let available_above = (above_top - minimum_top).max(1.0);
+    let available_below = (maximum_top - below_top).max(1.0);
     let above = available_above > available_below;
-    let maximum_left = (viewport_width - width - margin).max(margin);
+    let minimum_left = viewport_left + margin;
+    let maximum_left = (viewport_left + viewport_width - width - margin).max(minimum_left);
     let position = TooltipPosition {
-        left: rectangle.left().max(margin).min(maximum_left),
-        top: if above { rectangle.top() - gap } else { rectangle.bottom() + gap },
+        left: rectangle.left().clamp(minimum_left, maximum_left),
+        top: if above { above_top } else { below_top },
         width,
         maximum_height: if above { available_above } else { available_below },
         placement: if above { "above" } else { "below" },
@@ -521,6 +554,7 @@ fn show_tooltip(
     if request.portal
         && !render_portal_tooltip(
             &mut portal_element,
+            &element,
             &request.value,
             &request.tooltip_id,
             &request.class_name,
@@ -530,6 +564,32 @@ fn show_tooltip(
         return;
     }
     tooltip_position.set(Some(position));
+}
+
+/// 返回相对布局视口的可见区域；旧浏览器回退到完整窗口，不限制用户缩放。
+#[cfg(target_arch = "wasm32")]
+fn tooltip_viewport_bounds() -> (f64, f64, f64, f64) {
+    let Some(window) = web_sys::window() else {
+        return (0.0, 0.0, 1024.0, 768.0);
+    };
+    if let Some(viewport) = window.visual_viewport() {
+        let (left, top, width, height) =
+            (viewport.offset_left(), viewport.offset_top(), viewport.width(), viewport.height());
+        if [left, top, width, height].iter().all(|value| value.is_finite())
+            && width > 0.0
+            && height > 0.0
+        {
+            return (left, top, width, height);
+        }
+    }
+    let width = window.inner_width().ok().and_then(|value| value.as_f64());
+    let height = window.inner_height().ok().and_then(|value| value.as_f64());
+    (
+        0.0,
+        0.0,
+        width.filter(|value| value.is_finite() && *value > 0.0).unwrap_or(1024.0),
+        height.filter(|value| value.is_finite() && *value > 0.0).unwrap_or(768.0),
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -559,6 +619,7 @@ fn remove_tooltip(mut portal_element: Signal<Option<web_sys::HtmlElement>>) {
 #[cfg(target_arch = "wasm32")]
 fn render_portal_tooltip(
     portal_element: &mut Signal<Option<web_sys::HtmlElement>>,
+    trigger: &web_sys::Element,
     value: &str,
     tooltip_id: &str,
     tooltip_class_name: &str,
@@ -567,16 +628,17 @@ fn render_portal_tooltip(
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return false;
     };
-    let Some(body) = document.body() else {
+    // 弹窗里的浮层留在所属焦点范围与层叠上下文内，避免 body portal 落到遮罩后面。
+    let parent = trigger
+        .closest("[role=\"dialog\"][aria-modal=\"true\"]")
+        .ok()
+        .flatten()
+        .or_else(|| document.body().map(Into::into));
+    let Some(parent) = parent else {
         return false;
     };
     let tooltip = match portal_element() {
-        Some(tooltip) => {
-            if tooltip.parent_node().is_none() && body.append_child(&tooltip).is_err() {
-                return false;
-            }
-            tooltip
-        }
+        Some(tooltip) => tooltip,
         None => {
             let Ok(element) = document.create_element("span") else {
                 return false;
@@ -584,12 +646,14 @@ fn render_portal_tooltip(
             let Ok(tooltip) = element.dyn_into::<web_sys::HtmlElement>() else {
                 return false;
             };
-            if body.append_child(&tooltip).is_err() {
-                return false;
-            }
             tooltip
         }
     };
+    if !tooltip.parent_node().is_some_and(|current| current.is_same_node(Some(parent.as_ref())))
+        && parent.append_child(&tooltip).is_err()
+    {
+        return false;
+    }
     let _ = tooltip.set_attribute("id", tooltip_id);
     let _ = tooltip.set_attribute("class", tooltip_class_name);
     let _ = tooltip.set_attribute("role", "tooltip");

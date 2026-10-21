@@ -223,8 +223,8 @@ pub(crate) fn validate_mooglemail_notification_templates(
         (
             "auction_equipment_rejected",
             config.auction_equipment_rejected.as_str(),
-            &["reason_code"][..],
-            &["reason_code"][..],
+            &[][..],
+            &["reason_code", "reason_text", "next_steps", "mail_reference"][..],
         ),
         ("user_assets_rejected", config.user_assets_rejected.as_str(), &[][..], &[][..]),
         (
@@ -249,7 +249,7 @@ pub(crate) fn validate_mooglemail_notification_templates(
             "settlement_winner_equipment_cod",
             config.settlement_winner_equipment_cod.as_str(),
             &["item_name", "amount", "reference"][..],
-            &["item_name", "amount", "reference"][..],
+            &["item_name", "amount", "reference", "price_breakdown"][..],
         ),
         (
             "settlement_payment_carrier",
@@ -285,6 +285,14 @@ pub(crate) fn validate_mooglemail_notification_templates(
     ];
     for (_name, value, required, allowed) in templates {
         validate_mooglemail_template_body(value, required, allowed)?;
+    }
+    // 保留旧自定义正文的原因码，也允许新正文用可读原因替代；至少展示其中一种原因。
+    if !config.auction_equipment_rejected.contains("{reason_code}")
+        && !config.auction_equipment_rejected.contains("{reason_text}")
+    {
+        return Err(ConfigError::InvalidMoogleMailConfig(
+            "mail_templates.auction_equipment_rejected 必须包含 reason_code 或 reason_text",
+        ));
     }
     Ok(())
 }

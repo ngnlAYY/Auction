@@ -22,7 +22,7 @@ pub(crate) fn LotWatchButton(lot_id: String, lot_code: String) -> Element {
             Some(Err(_)) => rsx! {
                 span { class: "public-lot-watch__error", role: "alert", {t!("session-error")} }
             },
-            _ => rsx! { span { role: "status", {t!("watch-loading")} } },
+            _ => rsx! {},
         };
     }
 

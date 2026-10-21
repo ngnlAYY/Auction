@@ -2,7 +2,7 @@
 
 use super::*;
 use auction_application::{FundingCollectedReceipt, canonical_settlement_fulfillment_subject};
-use auction_domain::{SettlementId, SettlementObligationKind, SettlementWorld};
+use auction_domain::{SETTLEMENT_PPM, SettlementId, SettlementObligationKind, SettlementWorld};
 use serde_json::json;
 
 pub(super) async fn validate_receipt(
@@ -58,11 +58,15 @@ async fn validate_receipt_boundary(
     crate::validate_mail_evidence_time(tx, evidence).await.map_err(evidence_error)?;
     let row = sqlx::query(
         r#"SELECT o.obligation_kind,o.amount,o.carrier_credit,o.equipment_id,
-        e.name AS equipment_name,d.payload,d.recipient,d.result_metadata
+        e.name AS equipment_name,d.payload,d.recipient,d.result_metadata,
+        s.end_price AS settlement_end_price,s.buyer_amount AS settlement_buyer_amount,
+        s.compensation_amount AS settlement_compensation_amount,
+        s.hold_ppm AS settlement_hold_ppm,s.adjustment_ppm AS settlement_adjustment_ppm
         FROM public.settlement_obligations o
         JOIN public.equipment e ON e.id=o.equipment_id
         JOIN public.settlement_obligation_fulfillments f ON f.obligation_id=o.id
         JOIN public.deliveries d ON d.id=f.delivery_id
+        LEFT JOIN public.lot_settlements s ON s.lot_id=o.lot_id
         WHERE o.id=$1 AND d.id=$2 AND f.execution_state='satisfied'
           AND f.proof_kind='mooglemail_sent_collected' AND f.proof_reference=$3
           AND f.proof_digest IS NOT NULL AND d.status='succeeded'
@@ -108,17 +112,28 @@ async fn validate_receipt_boundary(
     {
         return Err(FundingError::Unproven);
     }
+    let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
     let mut variables = json!({"reference":payment.to_string(),"amount":cod.to_string()});
     let equipment = if carrier == 0 {
         variables["item_name"] =
             row.try_get::<String, _>("equipment_name").map_err(storage)?.into();
+        // 精确旧三变量保留原证明；新明细必须从同一事务中的冻结结算事实重建，不能信任 payload 自报数值。
+        let legacy_variables =
+            payload.get("variables").and_then(serde_json::Value::as_object).is_some_and(|values| {
+                values.len() == 3
+                    && ["amount", "item_name", "reference"]
+                        .iter()
+                        .all(|key| values.contains_key(*key))
+            });
+        if !legacy_variables {
+            append_frozen_pricing(&row, buyer, &mut variables)?;
+        }
         json!([{"kind":"auction_equipment_key","id":row.try_get::<Uuid,_>("equipment_id").map_err(storage)?.to_string()}])
     } else {
         json!([])
     };
     let expected = json!({"schema_version":1,"operation":"send","world":"main","template":template,
         "variables":variables,"credits":carrier,"cod":cod,"equipment_secret_refs":equipment});
-    let payload: serde_json::Value = row.try_get("payload").map_err(storage)?;
     let metadata: serde_json::Value = row.try_get("result_metadata").map_err(storage)?;
     let exact = metadata["proof"] == "sent_exact_payload_v1"
         && metadata["sent_verified"] == true
@@ -135,6 +150,45 @@ async fn validate_receipt_boundary(
     {
         return Err(FundingError::Unproven);
     }
+    Ok(())
+}
+
+/// 只补入可由冻结结算证明的新变量；完整 payload 等值校验仍负责拒绝缺项、未知项及数值漂移。
+fn append_frozen_pricing(
+    row: &sqlx::postgres::PgRow,
+    buyer: i64,
+    variables: &mut serde_json::Value,
+) -> Result<(), FundingError> {
+    let amount = |column: &str| {
+        row.try_get::<Option<i64>, _>(column).map_err(storage)?.ok_or(FundingError::Unproven)
+    };
+    let winning_bid = amount("settlement_end_price")?;
+    let buyer_amount = amount("settlement_buyer_amount")?;
+    let pool_credit = amount("settlement_compensation_amount")?;
+    let adjusted_price = buyer_amount.checked_add(pool_credit).ok_or(FundingError::Unproven)?;
+    let hold_ppm = row
+        .try_get::<Option<i64>, _>("settlement_hold_ppm")
+        .map_err(storage)?
+        .ok_or(FundingError::Unproven)?;
+    let adjustment_ppm = row
+        .try_get::<Option<i64>, _>("settlement_adjustment_ppm")
+        .map_err(storage)?
+        .ok_or(FundingError::Unproven)?;
+    if buyer_amount != buyer || !(0..=SETTLEMENT_PPM).contains(&hold_ppm) {
+        return Err(FundingError::Unproven);
+    }
+    auction_domain::validate_settlement_price_breakdown(
+        winning_bid,
+        adjustment_ppm,
+        adjusted_price,
+        pool_credit,
+    )
+    .map_err(|_| FundingError::Unproven)?;
+    variables["hold_ppm"] = hold_ppm.to_string().into();
+    variables["adjustment_ppm"] = adjustment_ppm.to_string().into();
+    variables["winning_bid"] = winning_bid.to_string().into();
+    variables["adjusted_price"] = adjusted_price.to_string().into();
+    variables["pool_credit"] = pool_credit.to_string().into();
     Ok(())
 }
 

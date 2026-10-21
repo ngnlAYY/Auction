@@ -314,7 +314,11 @@ fn valid_equipment_filter(value: &Value) -> bool {
 fn valid_mail_templates(value: &Value) -> bool {
     const TEMPLATES: [(&str, &[&str], &[&str]); 14] = [
         ("auction_assets_rejected", &[], &[]),
-        ("auction_equipment_rejected", &["reason_code"], &["reason_code"]),
+        (
+            "auction_equipment_rejected",
+            &[],
+            &["reason_code", "reason_text", "next_steps", "mail_reference"],
+        ),
         ("auction_no_attachments", &[], &[]),
         ("operations_alert", &["summary"], &["summary"]),
         ("rebind_result", &["result_code"], &["result_code", "username"]),
@@ -328,7 +332,7 @@ fn valid_mail_templates(value: &Value) -> bool {
         (
             "settlement_winner_equipment_cod",
             &["item_name", "amount", "reference"],
-            &["item_name", "amount", "reference"],
+            &["item_name", "amount", "reference", "price_breakdown"],
         ),
         ("user_assets_rejected", &[], &[]),
     ];
@@ -337,7 +341,13 @@ fn valid_mail_templates(value: &Value) -> bool {
         return false;
     };
     TEMPLATES.iter().all(|(name, required, allowed)| {
-        templates[*name].as_str().is_some_and(|body| valid_template(body, required, allowed))
+        templates[*name].as_str().is_some_and(|body| {
+            valid_template(body, required, allowed)
+                // 和配置入口、发送端一致：拒收正文保留旧原因码或新可读原因之一。
+                && (*name != "auction_equipment_rejected"
+                    || body.contains("{reason_code}")
+                    || body.contains("{reason_text}"))
+        })
     })
 }
 

@@ -11,7 +11,7 @@
   -->
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="color-scheme" content="dark light">
     <link rel="icon" href="/favicon.ico">
     <title>{app_title}</title>
@@ -65,7 +65,7 @@
         min-block-size: 100dvh;
         margin-inline: auto;
         align-content: start;
-        padding: 1rem 1.25rem;
+        padding: max(1rem, env(safe-area-inset-top, 0px)) max(1.25rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1.25rem, env(safe-area-inset-left, 0px));
         overflow: hidden;
         background: #0e1116;
         pointer-events: none;
@@ -151,7 +151,7 @@
 
       @media (max-width: 48rem) {
         .app-boot {
-          padding-inline: 0.75rem;
+          padding-inline: max(0.75rem, env(safe-area-inset-left, 0px)) max(0.75rem, env(safe-area-inset-right, 0px));
         }
       }
 

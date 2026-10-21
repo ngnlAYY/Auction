@@ -286,6 +286,7 @@ pub(super) fn AdminUserRow(
 #[component]
 fn BlacklistHistoryCell(user: AdminUser) -> Element {
     let mut focused = use_signal(|| false);
+    let mut history_open = use_signal(|| false);
     let mut tooltip_position = use_signal(|| None::<HistoryTooltipPosition>);
     let tooltip_id = use_signal(|| {
         format!(
@@ -307,6 +308,7 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
                 r#type: "button",
                 class: "admin-users-history-trigger",
                 aria_describedby: described_by,
+                aria_haspopup: "dialog",
                 aria_label: t!(
                     "admin-users-blacklist-history-label",
                     count: user.blacklist_count
@@ -340,6 +342,11 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
                     focused.set(false);
                     tooltip_position.set(None);
                 },
+                // 触控和键盘激活都进入可滚动详情，长历史不依赖只读的悬浮提示。
+                onclick: move |_| {
+                    tooltip_position.set(None);
+                    history_open.set(true);
+                },
                 {latest.public_reason}
             }
             if let Some(position) = tooltip {
@@ -355,21 +362,39 @@ fn BlacklistHistoryCell(user: AdminUser) -> Element {
                             count: user.blacklist_count
                         )}
                     }
-                    ol {
-                        for entry in user.blacklist_history.iter().cloned() {
-                            li {
-                                span { {entry.public_reason} }
-                                Time { value: entry.blacklisted_at.clone() }
-                            }
-                        }
-                    }
-                    if user.blacklist_count > user.blacklist_history.len() as i64 {
-                        p { {t!("admin-users-blacklist-history-limited")} }
+                    BlacklistHistoryEntries { user: user.clone() }
+                }
+            }
+            if history_open() {
+                Dialog {
+                    title: t!("admin-users-blacklist-history-title", count: user.blacklist_count),
+                    close_label: t!("admin-users-blacklist-history-close"),
+                    on_close: move |_| history_open.set(false),
+                    div { class: "admin-users-history-details",
+                        BlacklistHistoryEntries { user: user.clone() }
                     }
                 }
             }
         } else {
             span { class: "admin-users-history-empty", {t!("admin-users-blacklist-never")} }
+        }
+    }
+}
+
+/// 悬浮摘要与触控详情使用同一份已加载历史，不发起额外用户查询。
+#[component]
+fn BlacklistHistoryEntries(user: AdminUser) -> Element {
+    rsx! {
+        ol {
+            for entry in user.blacklist_history.iter().cloned() {
+                li {
+                    span { {entry.public_reason} }
+                    Time { value: entry.blacklisted_at.clone() }
+                }
+            }
+        }
+        if user.blacklist_count > user.blacklist_history.len() as i64 {
+            p { {t!("admin-users-blacklist-history-limited")} }
         }
     }
 }

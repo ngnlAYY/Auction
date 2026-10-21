@@ -63,6 +63,7 @@ pub(super) fn build_delivery_intent(
         credits: 0,
         cod: 0,
         equipment_id: None,
+        settlement_line: None,
     };
 
     match claim.kind {
@@ -72,6 +73,28 @@ pub(super) fn build_delivery_intent(
             intent.item_name = claim.equipment_name.clone();
             intent.cod = claim.amount;
             intent.equipment_id = Some(claim.equipment_id.as_uuid());
+            // 已准备/派发的旧任务继续使用原三变量载荷，避免升级后同一 command_id 摘要冲突。
+            // 仅精确识别旧变量集；其他未知形状仍由完整 canonical 快照比较拒绝。
+            let legacy_payload = claim.delivery_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .payload
+                    .get("variables")
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|variables| {
+                        variables.len() == 3
+                            && ["amount", "item_name", "reference"]
+                                .iter()
+                                .all(|key| variables.contains_key(*key))
+                    })
+            });
+            if !legacy_payload {
+                let line = claim
+                    .settlement_line
+                    .as_ref()
+                    .filter(|line| line.lot_id == claim.lot_id)
+                    .ok_or_else(|| repository_error("竞得装备邮件缺少对应的冻结结算明细"))?;
+                intent.settlement_line = Some(line.clone());
+            }
         }
         SettlementObligationKind::WinnerPaymentCarrierCod => {
             intent.template = "settlement_payment_carrier";
@@ -140,6 +163,20 @@ pub(super) fn build_canonical_delivery(
                 "settlement_winner_equipment_cod" => {
                     variables.insert("amount", intent.cod.to_string());
                     variables.insert("item_name", intent.item_name.clone());
+                    if let Some(line) = &intent.settlement_line {
+                        variables.insert("hold_ppm", line.hold_ppm.to_string());
+                        variables.insert("adjustment_ppm", line.adjustment_ppm.to_string());
+                        variables.insert("winning_bid", line.end_price.value().to_string());
+                        // 补偿在奖惩后额外扣除；正调整时 listed_price 不含加价，不能用于买方账单。
+                        let adjusted_price = line
+                            .buyer_amount
+                            .value()
+                            .checked_add(line.compensation_amount.value())
+                            .ok_or_else(|| repository_error("竞得装备邮件调整后价格溢出"))?;
+                        variables.insert("adjusted_price", adjusted_price.to_string());
+                        variables
+                            .insert("pool_credit", line.compensation_amount.value().to_string());
+                    }
                 }
                 "settlement_payment_carrier" => {
                     variables.insert("amount", intent.cod.to_string());

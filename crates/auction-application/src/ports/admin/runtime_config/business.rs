@@ -143,18 +143,20 @@ impl AdminRuntimeEquipmentColorsConfig {
 }
 
 /// Admin 可编辑、Worker 启动时冻结的 MoogleMail 通知模板。
-/// 字段闭集和默认正文逐项保持 Auction-BF runtime 文档契约；模板正文仍在应用边界严格
-/// 校验占位符，不能通过自由键值表引入未审计的消费者。
+/// 字段闭集和默认正文与 Worker 部署配置保持一致；模板正文在应用边界严格校验
+/// 占位符，不能通过自由键值表引入未审计的消费者。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AdminRuntimeMailTemplatesConfig {
     pub auction_assets_rejected: String,
     pub auction_no_attachments: String,
+    /// 原因至少保留 `{reason_code}` 或 `{reason_text}`；另支持 `{next_steps}`、`{mail_reference}`。
     pub auction_equipment_rejected: String,
     pub user_assets_rejected: String,
     pub register_key: String,
     pub register_result: String,
     pub rebind_result: String,
+    /// 支持可选 `{price_breakdown}`；旧载荷没有冻结结算明细时该块为空。
     pub settlement_winner_equipment_cod: String,
     pub settlement_payment_carrier: String,
     pub settlement_payment_reminder: String,
@@ -167,26 +169,154 @@ pub struct AdminRuntimeMailTemplatesConfig {
 impl Default for AdminRuntimeMailTemplatesConfig {
     fn default() -> Self {
         Self {
-            auction_assets_rejected: "Auction assets rejected".to_owned(),
-            auction_no_attachments: "Auction has no attachments".to_owned(),
-            auction_equipment_rejected: "Auction equipment rejected: {reason_code}".to_owned(),
-            user_assets_rejected: "User assets rejected".to_owned(),
-            register_key: "Registration key {login_key} for {username}".to_owned(),
-            register_result: "Registration result {result_code} {username}".to_owned(),
-            rebind_result: "Rebind result {result_code} {username}".to_owned(),
-            settlement_winner_equipment_cod:
-                "Auction item {item_name}; COD {amount}; reference {reference}".to_owned(),
-            settlement_payment_carrier: "Auction payment request {amount}; reference {reference}"
-                .to_owned(),
-            settlement_payment_reminder: "Auction payment is overdue; reference {reference}"
-                .to_owned(),
-            settlement_equipment_handoff: "Auction item {item_name}; reference {reference}"
-                .to_owned(),
-            settlement_seller_payout: "Auction seller payout {amount}; reference {reference}"
-                .to_owned(),
-            settlement_buyer_refund: "Auction buyer refund {amount}; reference {reference}"
-                .to_owned(),
-            operations_alert: "Operations alert: {summary}".to_owned(),
+            auction_assets_rejected: concat!(
+                "Your auction submission was not accepted.\n",
+                "\n",
+                "Auction submissions must contain equipment only.\n",
+                "Please remove Credits, CoD and other item types\n",
+                "before submitting again.",
+            )
+            .to_owned(),
+            auction_no_attachments: concat!(
+                "No equipment attachments were found in your message.\n",
+                "\n",
+                "Attach the equipment you want to submit,\n",
+                "then send a new message with the subject \"auction\".",
+            )
+            .to_owned(),
+            auction_equipment_rejected: concat!(
+                "Your auction submission was not accepted.\n",
+                "\n",
+                "Reason:\n",
+                "{reason_text}\n",
+                "\n",
+                "Equipment return:\n",
+                "A return has been requested for all equipment\n",
+                "in your original message.\n",
+                "\n",
+                "If you submitted multiple items together,\n",
+                "the entire submission will be returned.\n",
+                "\n",
+                "What to do next:\n",
+                "{next_steps}\n",
+                "\n",
+                "Original mail reference: {mail_reference}",
+            )
+            .to_owned(),
+            user_assets_rejected: concat!(
+                "Your account request was not accepted.\n",
+                "\n",
+                "Account requests must not include equipment,\n",
+                "Credits, other items or CoD.\n",
+                "\n",
+                "Please resend your request without these assets.",
+            )
+            .to_owned(),
+            register_key: concat!(
+                "Your HV-Auction login key is ready.\n",
+                "\n",
+                "Player: {username}\n",
+                "\n",
+                "Login key:\n",
+                "{login_key}\n",
+                "\n",
+                "Use this key to sign in to HV-Auction.\n",
+                "Keep it private.",
+            )
+            .to_owned(),
+            register_result: concat!(
+                "Your registration could not be completed.\n",
+                "\n",
+                "Player: {username}\n",
+                "Result code: {result_code}\n",
+                "\n",
+                "Contact the auction operator if you need help\n",
+                "resolving this issue.",
+            )
+            .to_owned(),
+            rebind_result: concat!(
+                "Your account rebind request has been processed.\n",
+                "\n",
+                "Player: {username}\n",
+                "Result code: {result_code}\n",
+                "\n",
+                "Contact the auction operator if you need help\n",
+                "understanding the result.",
+            )
+            .to_owned(),
+            settlement_winner_equipment_cod: concat!(
+                "Your auction item is ready to collect.\n",
+                "\n",
+                "Item: {item_name}\n",
+                "\n",
+                "{price_breakdown}Amount due (CoD): {amount} Credits\n",
+                "\n",
+                "Collect the attached equipment to pay the CoD\n",
+                "and receive your item.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            settlement_payment_carrier: concat!(
+                "This mail collects payment for your Isekai auction item.\n",
+                "\n",
+                "CoD: {amount} Credits\n",
+                "\n",
+                "Collect the attached Credits to pay the CoD.\n",
+                "Your equipment will be sent separately in Isekai\n",
+                "after payment is confirmed.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            settlement_payment_reminder: concat!(
+                "Payment for this auction transaction is overdue.\n",
+                "\n",
+                "Please check your original auction payment mail.\n",
+                "If you have already paid, contact the auction\n",
+                "operator with the reference below.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            settlement_equipment_handoff: concat!(
+                "The following equipment is attached.\n",
+                "\n",
+                "Item: {item_name}\n",
+                "\n",
+                "Please collect the attachment.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            settlement_seller_payout: concat!(
+                "Your auction payout is attached.\n",
+                "\n",
+                "Amount: {amount} Credits\n",
+                "\n",
+                "Please collect the attached Credits.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            settlement_buyer_refund: concat!(
+                "Your auction refund is attached.\n",
+                "\n",
+                "Amount: {amount} Credits\n",
+                "\n",
+                "Please collect the attached Credits.\n",
+                "\n",
+                "Reference: {reference}",
+            )
+            .to_owned(),
+            operations_alert: concat!(
+                "An auction service issue needs attention.\n",
+                "\n",
+                "{summary}\n",
+                "\n",
+                "Please review the Admin dashboard for details.",
+            )
+            .to_owned(),
         }
     }
 }

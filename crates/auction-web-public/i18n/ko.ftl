@@ -75,6 +75,7 @@ category-other = 기타
 
 catalog-code = 코드
 catalog-item = 장비
+catalog-group = 그룹
 catalog-level = 레벨
 catalog-primary-attributes = 주요 속성
 catalog-seller = 판매자
@@ -504,8 +505,6 @@ watch-toggle = 장비 { $code } 표시
 watch-on = 표시됨
 watch-off = 미표시
 watch-login = 로그인하여 표시
-watch-loading = 서버 표시를 불러오는 중… 동기화 전에는 변경할 수 없습니다.
-watch-unsynced = 현재 캐시는 동기화되지 않았으며 변경 저장에 사용할 수 없습니다.
 watch-load-error = 서버 표시를 불러오지 못했습니다. 새로 고친 후 변경하세요.
 watch-refresh = 표시 새로 고침
 watch-saving = 저장 중…

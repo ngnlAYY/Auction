@@ -119,3 +119,30 @@ impl SettlementLine {
         Ok(())
     }
 }
+
+/// 校验冻结费率与买方价格明细一致；不读取现行曲线，也不改变已有结算事实。
+/// 奖惩先按整数向下取整，奖池仅对折扣追加抵扣且最多抵扣一份基础折扣。
+pub fn validate_settlement_price_breakdown(
+    end_price: i64,
+    adjustment_ppm: i64,
+    adjusted_price: i64,
+    pool_credit: i64,
+) -> Result<(), DomainError> {
+    if end_price <= 0
+        || adjusted_price <= 0
+        || pool_credit < 0
+        || !(-SETTLEMENT_PPM..=SETTLEMENT_PPM).contains(&adjustment_ppm)
+    {
+        return Err(DomainError::InvalidSettlementFacts("结算价格明细范围无效"));
+    }
+    let end_price = i128::from(end_price);
+    let magnitude = end_price * i128::from(adjustment_ppm).abs() / i128::from(SETTLEMENT_PPM);
+    let expected_price =
+        if adjustment_ppm < 0 { end_price - magnitude } else { end_price + magnitude };
+    let maximum_pool_credit = if adjustment_ppm < 0 { magnitude } else { 0 };
+    if i128::from(adjusted_price) != expected_price || i128::from(pool_credit) > maximum_pool_credit
+    {
+        return Err(DomainError::InvalidSettlementFacts("结算价格明细与冻结奖惩比例不一致"));
+    }
+    Ok(())
+}

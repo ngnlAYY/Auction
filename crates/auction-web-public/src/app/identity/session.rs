@@ -82,6 +82,9 @@ pub(super) fn login(return_to: Option<String>) -> Element {
                     id: "public-login-key",
                     r#type: "password",
                     autocomplete: "current-password",
+                    autocapitalize: "none",
+                    spellcheck: "false",
+                    enterkeyhint: "go",
                     maxlength: "1024",
                     placeholder: if submitting() || failed {
                         "••••••••••••••••••••••••••••••••".to_owned()

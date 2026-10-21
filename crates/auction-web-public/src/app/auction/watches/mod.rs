@@ -111,23 +111,16 @@ fn ScopedLotWatches(user_id: Option<String>, auction_id: String, children: Eleme
     let mut retry = context.clone();
 
     rsx! {
-        div { class: "public-lot-watches",
-            if authenticated && !ready {
+        div { class: "public-lot-watches", aria_busy: (authenticated && !ready && !failed).to_string(),
+            if authenticated && !ready && failed {
                 div {
                     class: "public-lot-watches__sync",
-                    role: if failed { "alert" } else { "status" },
-                    p {
-                        if failed { {t!("watch-load-error")} } else { {t!("watch-loading")} }
-                    }
-                    if cached.read().is_some() {
-                        p { {t!("watch-unsynced")} }
-                    }
-                    if failed {
-                        button {
-                            r#type: "button",
-                            onclick: move |_| retry.invalidate(),
-                            {t!("watch-refresh")}
-                        }
+                    role: "alert",
+                    p { {t!("watch-load-error")} }
+                    button {
+                        r#type: "button",
+                        onclick: move |_| retry.invalidate(),
+                        {t!("watch-refresh")}
                     }
                 }
             }

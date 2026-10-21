@@ -221,6 +221,7 @@ impl MoogleMailMaintenanceAdapter {
                 result_code,
                 login_key.as_ref(),
                 &candidate.recipient,
+                &candidate.world_id,
                 &candidate.inbound_mail_id,
             ) else {
                 return Ok(None);

@@ -141,6 +141,27 @@ mailbox/world。
 Worker 执行。`equipment_source.require_tradeable` 默认关闭，仅影响 Admin 手工录入，邮件过滤独立拒绝不可交易来源。装备请求
 固定 HTTPS origin、禁重定向、精确 world 路径和有界响应；示例预算为 2 MiB、250 ms 间隔、10 秒总超时。
 
+### 邮件正文模板
+
+`mail_templates` 保持既有 14 个配置键，默认正文使用分段英文，字段与完整正文见
+[runtime 示例](ops/config/examples/runtime/admin.toml)。已有文件中显式填写的模板继续使用原文；升级不会自动覆盖自定义内容。
+采用新正文时须在管理页保存模板并重启 Worker，使新的邮件渲染使用更新后的启动快照；同时重启管理端可同步其加载快照。
+
+| 模板 | 占位符与事实来源 |
+| --- | --- |
+| `auction_equipment_rejected` | `{reason_text}` 为可读拒收原因，`{next_steps}` 为后续处理建议，`{mail_reference}` 为 `world:external_mail_id`；旧 `{reason_code}` 仍可选用 |
+| `settlement_winner_equipment_cod` | `{price_breakdown}` 使用冻结结算事实，列出领先时长占比、带符号费率、成交价、费率调整后价格及适用时的奖池抵扣；`{amount}` 始终为实际收取的 COD |
+
+其它模板的占位符范围保持不变。拒收邮件中的退回提示表示已请求单独执行整封邮件 Return，退回完成仍以对应投递的远端
+证明为准。正文说明不改变金额、结算或退回决定，模板保存不改写已持久化正文、摘要或投递身份。
+超价 MM 提醒由应用层固定生成，包含已接受价格、网站继续出价提示和 lot reference，不增加第 15 个可配置模板；正文随
+通知创建冻结，旧提醒保留原正文及摘要。
+
+买家 COD 明细扩展既有 schema-v1 投递载荷，不新增数据库迁移；完整字段及旧三变量兼容见
+[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。升级时成套更新 Public、Admin、Worker 与 `auctionctl`，使模板
+校验、持久载荷读取和发送端支持同一版本。已生成扩展载荷后，回退版本也须支持新变量集，不能仅凭数据库 schema 未变
+回退旧解码器。旧三变量投递继续使用原 canonical 载荷和摘要，`{price_breakdown}` 展开为空，不补造历史价格明细。
+
 ## 敏感字段
 
 | 字段 | 用途与限制 |

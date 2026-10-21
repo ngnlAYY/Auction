@@ -5,6 +5,8 @@ use auction_domain::{SettlementId, SettlementObligationKind};
 
 use super::super::*;
 
+mod pricing;
+
 const MAXIMUM_PAYLOAD_BYTES: usize = 64 << 10;
 const MAXIMUM_REFERENCES: usize = 100;
 
@@ -104,18 +106,24 @@ pub(crate) fn render_settlement(
         _ => return None,
     };
     let subject = canonical_settlement_fulfillment_subject(kind, obligation_id)?;
+    let amount = payload
+        .variables
+        .get("amount")
+        .and_then(|value| value.parse::<i64>().ok())
+        .map(pricing::format_credits);
     let body = match payload.template.as_str() {
         "settlement_winner_equipment_cod" => templates.render(
             "settlement_winner_equipment_cod",
             &[
                 ("item_name", payload.variables.get("item_name")?),
-                ("amount", payload.variables.get("amount")?),
+                ("amount", amount.as_deref()?),
                 ("reference", reference),
+                ("price_breakdown", &pricing::render_price_breakdown(&payload.variables)?),
             ],
         )?,
         "settlement_payment_carrier" => templates.render(
             "settlement_payment_carrier",
-            &[("amount", payload.variables.get("amount")?), ("reference", reference)],
+            &[("amount", amount.as_deref()?), ("reference", reference)],
         )?,
         "settlement_equipment_handoff" => templates.render(
             "settlement_equipment_handoff",
@@ -123,11 +131,11 @@ pub(crate) fn render_settlement(
         )?,
         "settlement_seller_payout" => templates.render(
             "settlement_seller_payout",
-            &[("amount", payload.variables.get("amount")?), ("reference", reference)],
+            &[("amount", amount.as_deref()?), ("reference", reference)],
         )?,
         "settlement_buyer_refund" => templates.render(
             "settlement_buyer_refund",
-            &[("amount", payload.variables.get("amount")?), ("reference", reference)],
+            &[("amount", amount.as_deref()?), ("reference", reference)],
         )?,
         _ => return None,
     };
@@ -150,7 +158,7 @@ fn valid_settlement_variables(template: &str, variables: &BTreeMap<String, Strin
     let valid_reference = reference.is_some_and(canonical_uuid);
     match template {
         "settlement_winner_equipment_cod" => {
-            exact_variables(variables, &["amount", "item_name", "reference"])
+            pricing::valid_winner_variables(variables)
                 && variables.get("item_name").is_some_and(|value| valid_line(value, 512, false))
                 && variables.get("amount").is_some_and(|value| valid_positive_amount(value))
                 && valid_reference
