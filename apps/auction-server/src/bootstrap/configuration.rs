@@ -86,7 +86,13 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
     )?;
     let common =
         worker.common_config_path.as_ref().context("common_file required")?.canonicalize()?;
+    let runtime = worker.runtime_config_path.as_ref().map(fs::canonicalize).transpose()?;
     for plan in &plans {
+        if plan.config.runtime_config_path.as_ref().map(fs::canonicalize).transpose()? != runtime
+            || plan.config.equipment_colors != worker.equipment_colors
+        {
+            bail!("三角色必须共用同一 runtime_config_file（或全部省略），且装备规则快照一致");
+        }
         if auction_storage::strict_deployment_database_identity(
             plan.config.database_url().context("database required")?,
         )? != expected
@@ -102,7 +108,6 @@ pub(super) fn load(directory: &Path) -> anyhow::Result<Vec<RolePlan>> {
         }
     }
     if admin.auction != worker.auction
-        || admin.runtime_config_path != worker.runtime_config_path
         || admin.worker_control_socket_path() != worker.worker.control.socket_path
         || admin.equipment_data_key_id() != worker.equipment_data_key_id()
         || admin.equipment_data_key() != worker.equipment_data_key()

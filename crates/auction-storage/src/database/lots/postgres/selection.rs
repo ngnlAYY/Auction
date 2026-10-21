@@ -1,0 +1,79 @@
+//! 装备分组的分页前筛选：只流式扫描身份字段，完整规则仍由应用层统一判断。
+
+use futures_util::TryStreamExt;
+
+use super::super::*;
+
+pub(super) struct GroupPageSelection {
+    pub category_counts: BTreeMap<String, i64>,
+    pub lot_ids: Vec<Uuid>,
+}
+
+/// 统计选定分组内的各类型，并只保留当前页 UUID；不把全场装备或属性数组留在内存。
+/// 与完整页查询共用同一 Serializable 快照，筛选始终先于 offset/limit。
+pub(super) async fn select_group_page(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    auction_id: Uuid,
+    request: &PublicLotListRequest,
+    equipment_group: EquipmentGroup,
+    colors: &[EquipmentColorRule],
+) -> Result<GroupPageSelection, ApplicationError> {
+    let mut rows = sqlx::query(
+        "SELECT l.id, e.name, e.category, e.attributes - 'stats' AS identity_attributes
+         FROM public.lots AS l
+         JOIN public.auctions AS a ON a.id = l.auction_id
+         JOIN public.worlds AS w ON w.id = a.world_id AND (w.enabled OR a.status = 'settled')
+         JOIN public.equipment AS e ON e.id = l.equipment_id
+         WHERE l.auction_id = $1
+           AND ((a.status = 'preview' AND l.status = 'pending')
+             OR (a.status IN ('live', 'final', 'settling') AND l.status IN ('live', 'sold', 'unsold'))
+             OR (a.status = 'settled' AND l.status IN ('sold', 'unsold')))
+         ORDER BY l.lot_number, l.id",
+    )
+    .bind(auction_id)
+    .fetch(&mut **transaction);
+    let mut counts = [0_i64; 8];
+    let mut matched_count = 0_i64;
+    let mut lot_ids = Vec::new();
+    while let Some(row) =
+        rows.try_next().await.map_err(|_| storage_error("读取公开装备分组候选失败"))?
+    {
+        let name: &str = row.try_get("name").map_err(|_| storage_error("读取分组装备名称失败"))?;
+        let category: &str =
+            row.try_get("category").map_err(|_| storage_error("读取分组装备类型失败"))?;
+        let attributes: sqlx::types::Json<Value> = row
+            .try_get("identity_attributes")
+            .map_err(|_| storage_error("读取分组装备身份失败"))?;
+        if map_equipment_group(name, category, attributes.0, colors)? != equipment_group {
+            continue;
+        }
+        counts[0] = increment_count(counts[0])?;
+        let category_index = match category {
+            "One-Handed" => Some(1),
+            "Two-Handed" => Some(2),
+            "Staff" => Some(3),
+            "Shield" => Some(4),
+            "Cloth" => Some(5),
+            "Light" => Some(6),
+            "Heavy" => Some(7),
+            _ => None,
+        };
+        if let Some(index) = category_index {
+            counts[index] = increment_count(counts[index])?;
+        }
+        if request.category.as_deref().is_some_and(|requested| {
+            category_index.is_none_or(|index| CATEGORY_KEYS[index] != requested)
+        }) {
+            continue;
+        }
+        if matched_count >= request.offset && (lot_ids.len() as u64) < request.limit as u64 {
+            lot_ids.push(row.try_get("id").map_err(|_| storage_error("读取分组 lot 标识失败"))?);
+        }
+        matched_count = increment_count(matched_count)?;
+    }
+    Ok(GroupPageSelection { category_counts: map_counts(counts)?, lot_ids })
+}
+
+fn increment_count(count: i64) -> Result<i64, ApplicationError> {
+    count.checked_add(1).ok_or_else(|| storage_error("公开 lot 分组数量溢出"))
+}

@@ -7,6 +7,7 @@ use super::mapping::{map_postgres_live, map_postgres_preview_detail, map_postgre
 pub(in crate::database::lots) async fn detail_postgres(
     store: &PostgresStore,
     lot_id: Uuid,
+    colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotDetail>, ApplicationError> {
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启公开 lot 详情事务失败"))?;
@@ -55,7 +56,7 @@ pub(in crate::database::lots) async fn detail_postgres(
         PublicLotDetail {
             equipment_id,
             projection,
-            preview: Some(map_postgres_preview_detail(row, &world_id)?),
+            preview: Some(map_postgres_preview_detail(row, &world_id, colors)?),
             live: None,
         }
     } else {
@@ -103,7 +104,7 @@ pub(in crate::database::lots) async fn detail_postgres(
             row.try_get("equipment_id")
                 .map_err(|_| storage_error("读取 PostgreSQL 正式装备标识失败"))?,
         );
-        let summary = map_postgres_live(row, &projection.world_id)?;
+        let summary = map_postgres_live(row, &projection.world_id, colors)?;
         let attributes = summary.equipment.attributes.clone();
         PublicLotDetail {
             equipment_id,

@@ -66,6 +66,8 @@ POST、布局回读及可选正文校验成本，配置预算校验只是单目�
 装备名称标色消费 Worker 启动时冻结的应用窄规则：类型、种类、品质各自多选任一匹配，维度间同时满足，
 按原规则顺序取首个前缀或后缀命中；空多选兼容旧单值，前后缀及 Peerless 彩虹规则保持原义。
 渲染器不拆分多选规则，也不把 Admin 候选词表变成装备采集或品质接收政策。
+渲染器与公开页使用应用层 `equipment_color_decision` 的同一命中结果；名称片段缺失的纯文本回退、首条规则优先级及
+Peerless 彩虹共同决定公开页稀有/融合分组。BBCode 上色只在论坛执行，公开页消费分组字段。
 新种类数组可选择十二种护甲材质族，由应用规则核对实际大类和完整种类的首词/部位边界；完整部位选项及旧种类单值精确匹配。
 `forum/render/log.rs` 分类显示 pending、警告、忽略记录及总数，优先 pending 再取最近记录、最多 100 条且受正文预算
 约束，超出时明确显示已展示/总条数。`forum/render/countdown.rs` 只在首帖顶部生成 `List Timer` 与 `Auction Timer` 的
@@ -116,8 +118,11 @@ HTTPS origin、精确 world 路径、响应类型或身份校验。`equipment/ga
 [旧装备说明](https://ehwiki.org/wiki/Obsolete_Items#Equipment) 保存当前及历史兼容元数据。
 集成层不维护第二份品质、种类或 header 大类词表：`parser/html.rs` 提取 DOM 与属性，`parser/identity.rs` 适配领域名称识别，
 `parser/header.rs` 解析等级/交易状态并复用领域大类映射，`parser/page.rs` 组合并交叉校验。
-HTML 与 canonical JSON 使用同一个领域识别结果，完整长种类优先，来源大类或 JSON 声明不一致均失败关闭；
-原名称、词缀文本、既有属性字段及 fingerprint 格式保持原义，不将领域兼容元数据加入历史摘要。
+HTML 与 canonical JSON 使用同一个领域识别结果，完整基础名优先匹配后拆分种类与护甲部位，来源大类或 JSON 声明不一致均失败关闭。
+名称只有 Cloth、Light、Heavy 携带独立部位词，类型读取详情 header；Legendary 缺任一前后缀或只有 `of the` 时拒绝，
+Magnificent 及其他兼容品质允许缺词缀。领域拆分如 `Phase`/`Robe`，集成层内部 `base_name` 明确保留 `Phase Robe`，
+用于 canonical JSON 的历史 `equipment_type`、快照 `attributes.type` 及 `manual-json-v1` 指纹，保持原字段与编码。
+原名称、词缀文本保持原义，不将拆分字段或领域兼容元数据加入历史摘要，也不回写已有快照。
 
 HTML 来源要求唯一 header、存在 `.eq` 属性区域且至少读取到一项属性；缺少必要结构或空属性不能成为成功快照。
 主属性按 `Base:` 声明或带符号数字前导的文本识别，符号后须紧接数字或小数点，必须同时具有合法 Base 和名称/数值；其它普通说明的 `title`

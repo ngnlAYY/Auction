@@ -12,6 +12,7 @@ pub(in crate::database::lots) async fn list_postgres(
     store: &PostgresStore,
     auction_id: Uuid,
     request: PublicLotListRequest,
+    colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotPage>, ApplicationError> {
     let mut transaction =
         store.pool().begin().await.map_err(|_| storage_error("开启公开 lot 读取事务失败"))?;
@@ -19,7 +20,7 @@ pub(in crate::database::lots) async fn list_postgres(
         .execute(&mut *transaction)
         .await
         .map_err(|_| storage_error("设置公开 lot 读取隔离级别失败"))?;
-    let page = list_postgres_transaction(&mut transaction, auction_id, request).await?;
+    let page = list_postgres_transaction(&mut transaction, auction_id, request, colors).await?;
     transaction.commit().await.map_err(|_| storage_error("提交公开 lot 读取事务失败"))?;
     Ok(page)
 }
@@ -29,11 +30,21 @@ async fn list_postgres_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     auction_id: Uuid,
     request: PublicLotListRequest,
+    colors: &[EquipmentColorRule],
 ) -> Result<Option<PublicLotPage>, ApplicationError> {
     let Some(projection) = postgres_list_projection(transaction, auction_id).await? else {
         return Ok(None);
     };
-    let counts = postgres_category_counts(transaction, auction_id, &projection).await?;
+    // 未选择分组时保留原 SQL 统计和分页；选定分组才扫描身份，避免默认列表额外遍历规则。
+    let (counts, page_ids) = if let Some(group) = request.equipment_group {
+        let selection =
+            super::selection::select_group_page(transaction, auction_id, &request, group, colors)
+                .await?;
+        (selection.category_counts, Some(selection.lot_ids))
+    } else {
+        (postgres_category_counts(transaction, auction_id, &projection).await?, None)
+    };
+    let query_offset = if page_ids.is_some() { 0 } else { request.offset };
     let total = request
         .category
         .as_deref()
@@ -80,19 +91,21 @@ async fn list_postgres_transaction(
                    WHEN 'lig' THEN 'Light'
                    WHEN 'hea' THEN 'Heavy'
                END)
+               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
              ORDER BY l.lot_number, l.id
              LIMIT $3 OFFSET $4",
         )
         .bind(auction_id)
         .bind(request.category.as_deref())
         .bind(request.limit)
-        .bind(request.offset)
+        .bind(query_offset)
+        .bind(page_ids.as_deref())
         .fetch_all(&mut **transaction)
         .await
         .map_err(|_| storage_error("读取 PostgreSQL 预览 lot 列表失败"))?;
         page.preview = rows
             .into_iter()
-            .map(|row| map_postgres_preview(row, &projection.world_id))
+            .map(|row| map_postgres_preview(row, &projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     } else {
         let rows = sqlx::query(
@@ -135,22 +148,25 @@ async fn list_postgres_transaction(
                    WHEN 'lig' THEN 'Light'
                    WHEN 'hea' THEN 'Heavy'
                END)
+               AND ($5::uuid[] IS NULL OR l.id = ANY($5))
              ORDER BY l.lot_number, l.id
              LIMIT $3 OFFSET $4",
         )
         .bind(auction_id)
         .bind(request.category.as_deref())
         .bind(request.limit)
-        .bind(request.offset)
+        .bind(query_offset)
+        .bind(page_ids.as_deref())
         .fetch_all(&mut **transaction)
         .await
         .map_err(|_| storage_error("读取 PostgreSQL 正式 lot 列表失败"))?;
         page.live = rows
             .into_iter()
-            .map(|row| map_postgres_live(row, &projection.world_id))
+            .map(|row| map_postgres_live(row, &projection.world_id, colors))
             .collect::<Result<_, _>>()?;
     }
     page.validate(auction_id, request.category.as_deref()).map_err(storage_error)?;
+    page.validate_equipment_group(request.equipment_group).map_err(storage_error)?;
     Ok(Some(page))
 }
 

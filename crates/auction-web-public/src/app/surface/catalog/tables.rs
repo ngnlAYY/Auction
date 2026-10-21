@@ -11,6 +11,8 @@ pub(crate) fn CatalogTable(
     auction_status: String,
     category_counts: BTreeMap<String, i64>,
     active_category: String,
+    active_equipment_group: String,
+    on_equipment_group_change: EventHandler<String>,
     page_number: i64,
     on_category_change: EventHandler<String>,
     on_page_change: EventHandler<i64>,
@@ -32,7 +34,24 @@ pub(crate) fn CatalogTable(
     let all_count = catalog_count(&category_counts, "all", &rows);
 
     rsx! {
+        nav { class: "public-auction-filter", aria_label: t!("filter-equipment-group-label"),
+            span { class: "public-auction-filter__label", {t!("equipment-group")} }
+            for equipment_group in ["all", "rare", "fusion"] {
+                button {
+                    class: "public-auction-filter__tab",
+                    r#type: "button",
+                    aria_current: if active_equipment_group == equipment_group { "true" } else { "false" },
+                    onclick: move |_| on_equipment_group_change.call(equipment_group.to_owned()),
+                    if equipment_group == "all" {
+                        {t!("filter-all")}
+                    } else {
+                        {equipment_group_label(equipment_group)}
+                    }
+                }
+            }
+        }
         nav { class: "public-auction-filter", aria_label: t!("filter-label"),
+            span { class: "public-auction-filter__label", {t!("filter-equipment-type")} }
             button {
                 class: "public-auction-filter__tab",
                 r#type: "button",
@@ -56,7 +75,9 @@ pub(crate) fn CatalogTable(
         if groups.is_empty() {
             div { class: "ui-empty-state", role: "status",
                 p { class: "ui-empty-state__title",
-                    if active == "all" {
+                    if active_equipment_group != "all" {
+                        {t!("catalog-empty-filtered")}
+                    } else if active == "all" {
                         {t!("catalog-empty-all")}
                     } else {
                         {t!("catalog-empty-category")}

@@ -131,6 +131,7 @@ pub struct AdminCanonicalEquipmentRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub category: Option<String>,
+    /// 历史 canonical 基础名，护甲仍为种类与部位的组合（如 `Phase Robe`）。
     #[serde(default)]
     pub equipment_type: Option<String>,
     #[serde(default)]

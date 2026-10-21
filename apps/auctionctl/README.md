@@ -140,8 +140,8 @@ self-send 对已核实自持的流拍装备追加留存事实；成交自寄明�
 ## 部署预检
 
 `deployment-check` 只读三角色及其公共、runtime、敏感文件，核对同一公共文件/数据库目标、listener 冲突、
-Admin/Worker control socket、三组数据密钥和有效拍卖/结算模板与排期；启用 runtime `operations` 任一组时还要求
-Admin/Worker 引用同一 runtime 文件。默认报告权限警告，生产使用 `--strict-permissions`，配置目录和文件均不得是
+Admin/Worker control socket、三组数据密钥和有效拍卖/结算模板与排期；三角色必须引用同一 runtime 文件且装备规则快照一致，
+或全部省略 runtime。默认报告权限警告，生产使用 `--strict-permissions`，配置目录和文件均不得是
 符号链接；命令不连接数据库、迁移、启动服务或访问外部服务。目标比较复用 SQLx 解析并允许不同数据库账号，
 PostgreSQL 显式提供 host、非零 port 和库名，允许受支持的 host/hostaddr/port/dbname 覆盖及 Unix socket，
 拒绝未知参数和 `options`，DNS 别名不解析，IPv6 URI 方括号在实际 TCP/libpq host 中去除（见[配置手册](ops/config/README.md)）。

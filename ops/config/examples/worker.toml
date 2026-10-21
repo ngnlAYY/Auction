@@ -4,7 +4,7 @@
 common_file = "common.toml"
 # 必填：敏感 TOML 路径；相对路径相对于本文件所在目录解析。
 secrets_file = "secrets.toml"
-# 可选：Admin/Worker 共享的非敏感 runtime TOML；邮件业务策略及已接管的 operations 参数重启后生效。
+# 可选：三角色共享的非敏感 runtime TOML；邮件业务、论坛标色及已接管的 operations 参数重启后生效。
 runtime_config_file = "runtime/admin.toml"
 
 # 可选区块：Worker OTLP/HTTP tracing；省略整个区块等同于关闭导出。

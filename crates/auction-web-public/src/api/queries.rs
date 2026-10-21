@@ -69,7 +69,7 @@ pub(crate) async fn fetch_current_auction(
 /// 旧 v1 lot wire 不包含世界、场次号和计划结束时间；这些展示上下文必须从拍卖目录
 /// 读取，不能通过扩张 lot 响应破坏旧客户端的严格字段闭集。
 pub(crate) async fn fetch_historical_auction(auction_id: String) -> Result<CurrentAuction, String> {
-    let envelope = fetch_current_lots(auction_id, None, 1, 10).await?;
+    let envelope = fetch_current_lots(auction_id, None, None, 1, 10).await?;
     let status = envelope.auction_status.clone();
     if !matches!(status.as_str(), "live" | "final" | "settled") {
         return fetch_matching_current_auction(&envelope.auction_id, &status).await;
@@ -279,41 +279,54 @@ pub(crate) async fn fetch_price_history(
 pub(crate) async fn fetch_current_lots(
     auction_id: String,
     category: Option<String>,
+    equipment_group: Option<String>,
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
-    if let Ok(lots) =
-        fetch_current_lots_once(&auction_id, category.as_deref(), page, page_size).await
+    if let Ok(lots) = fetch_current_lots_once(
+        &auction_id,
+        category.as_deref(),
+        equipment_group.as_deref(),
+        page,
+        page_size,
+    )
+    .await
     {
         return Ok(lots);
     }
     // 旧 Public QueryClient 对目录读取固定再尝试一次；错误壳只在第二次失败后出现。
     TimeoutFuture::new(PUBLIC_QUERY_RETRY_DELAY_MILLIS).await;
-    fetch_current_lots_once(&auction_id, category.as_deref(), page, page_size).await
+    fetch_current_lots_once(
+        &auction_id,
+        category.as_deref(),
+        equipment_group.as_deref(),
+        page,
+        page_size,
+    )
+    .await
 }
 
 async fn fetch_current_lots_once(
     auction_id: &str,
     category: Option<&str>,
+    equipment_group: Option<&str>,
     page: i64,
     page_size: i64,
 ) -> Result<LotEnvelope, String> {
-    let category_query = category
-        .map(|value| {
-            let encoded = form_urlencoded::Serializer::new(String::new())
-                .append_pair("category", value)
-                .finish();
-            format!("&{encoded}")
-        })
-        .unwrap_or_default();
-    let url = format!(
-        "/api/v1/auctions/{auction_id}/lots?page={page}&page_size={page_size}{category_query}"
-    );
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("page", &page.to_string()).append_pair("page_size", &page_size.to_string());
+    if let Some(category) = category {
+        query.append_pair("category", category);
+    }
+    if let Some(equipment_group) = equipment_group {
+        query.append_pair("equipment_group", equipment_group);
+    }
+    let url = format!("/api/v1/auctions/{auction_id}/lots?{}", query.finish());
     let response = send_get(&url).await.map_err(|error| error.code().to_owned())?;
     if !response.ok() {
         return Err(decoder::decode_error_code(response).await);
     }
-    decoder::decode_lot_list(response, auction_id, category).await
+    decoder::decode_lot_list(response, auction_id, category, equipment_group).await
 }
 
 pub(crate) async fn fetch_lot_detail(lot_id: String) -> Result<LotEnvelope, LotDetailFetchError> {

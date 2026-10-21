@@ -44,6 +44,7 @@ pub struct CanonicalEquipment {
     pub external_equipment_id: String,
     pub name: String,
     pub category: String,
+    /// 历史 canonical 字段保存完整基础名（如 `Phase Robe`）；来源适配器与领域种类/部位分开映射。
     pub equipment_type: String,
     pub quality: String,
     pub prefix: String,

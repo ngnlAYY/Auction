@@ -125,6 +125,7 @@ pub(super) fn deployment_check(config_dir: &Path, strict_permissions: bool) -> a
     {
         anyhow::bail!("Public、Admin 与 Worker 必须引用同一份 common_file");
     }
+    validate_runtime_topology(&public.config, &admin.config, &worker.config)?;
     validate_admin_worker_topology(&admin.config, &worker.config)?;
 
     let public_listener = public_deployment_listener(&public.config)?;
@@ -192,7 +193,6 @@ fn deployment_listeners_conflict(left: &DeploymentListener, right: &DeploymentLi
 }
 
 fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
-    validate_runtime_topology(admin, worker)?;
     if admin.worker_control_socket_path() != worker.worker.control.socket_path.as_str() {
         anyhow::bail!("Admin 与 Worker 必须配置相同的 Worker control socket_path");
     }
@@ -232,37 +232,31 @@ fn validate_admin_worker_topology(admin: &AppConfig, worker: &AppConfig) -> anyh
     Ok(())
 }
 
-/// 管理页接管参数后，两类创建者必须从同一 runtime 文件取得一致的新场次模板。
-fn validate_runtime_topology(admin: &AppConfig, worker: &AppConfig) -> anyhow::Result<()> {
-    let managed = [admin, worker]
-        .iter()
-        .filter_map(|config| config.admin_runtime.as_ref())
-        .filter_map(|runtime| runtime.operations.as_ref())
-        .any(|operations| {
-            operations.economics.managed
-                || operations.schedule.managed
-                || operations.forum.managed
-                || operations.alerts.managed
-                || operations.worker.managed
-                || operations.mail.as_ref().is_some_and(|mail| mail.managed)
-        });
-    if managed {
-        let admin_path = admin
+/// 装备分组与论坛标色共用启动规则；两类创建者继续使用一致的新场次模板。
+fn validate_runtime_topology(
+    public: &AppConfig,
+    admin: &AppConfig,
+    worker: &AppConfig,
+) -> anyhow::Result<()> {
+    let expected = public
+        .runtime_config_path
+        .as_deref()
+        .map(fs::canonicalize)
+        .transpose()
+        .context("读取 Public runtime 文件身份失败")?;
+    for config in [admin, worker] {
+        let path = config
             .runtime_config_path
             .as_deref()
             .map(fs::canonicalize)
             .transpose()
-            .context("读取 Admin runtime 文件身份失败")?;
-        let worker_path = worker
-            .runtime_config_path
-            .as_deref()
-            .map(fs::canonicalize)
-            .transpose()
-            .context("读取 Worker runtime 文件身份失败")?;
-        if admin_path.is_none() || admin_path != worker_path {
-            anyhow::bail!(
-                "启用 operations 接管后，Admin 与 Worker 必须引用同一份 runtime_config_file"
-            );
+            .context("读取部署 runtime 文件身份失败")?;
+        if path != expected {
+            anyhow::bail!("Public、Admin 与 Worker 必须引用同一份 runtime_config_file，或全部省略");
+        }
+        // 同一路径可能在三次加载之间被管理端替换；规则快照也必须一致。
+        if config.equipment_colors != public.equipment_colors {
+            anyhow::bail!("Public、Admin 与 Worker 加载的装备分组与论坛标色规则不一致");
         }
     }
     if admin.auction != worker.auction {

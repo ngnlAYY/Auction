@@ -56,6 +56,12 @@ auction-history-link-bidlog = 입찰 로그
 
 
 filter-label = 유형별로 출품 필터링
+filter-equipment-group-label = 장비 그룹별로 출품 필터링
+filter-equipment-type = 장비 유형
+equipment-group = 장비 그룹
+equipment-group-rare = 희귀
+equipment-group-fusion = 융합
+catalog-empty-filtered = 선택한 장비 그룹과 유형에 해당하는 출품이 없어요.
 filter-all = 전체
 
 category-one-handed = 한손 무기

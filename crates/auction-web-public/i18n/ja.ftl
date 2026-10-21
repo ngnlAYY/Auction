@@ -56,6 +56,12 @@ auction-history-link-bidlog = 入札ログ
 
 
 filter-label = 種類で出品を絞り込む
+filter-equipment-group-label = 装備グループで出品を絞り込む
+filter-equipment-type = 装備タイプ
+equipment-group = 装備グループ
+equipment-group-rare = レア
+equipment-group-fusion = 融合
+catalog-empty-filtered = 選択した装備グループとタイプに一致する出品がありません。
 filter-all = すべて
 
 category-one-handed = 片手武器

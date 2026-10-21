@@ -63,7 +63,7 @@
 /run/hv-auction/worker/           # Worker control socket
 ```
 
-三个 common_file 指向同一只读普通文件；敏感 TOML 仅对应服务账号可读，父目录不得 group/other 可写，Admin runtime 按 0640
+三个 common_file 指向同一只读普通文件；三角色 runtime 须同源且装备规则快照一致，或全部省略。敏感 TOML 仅对应服务账号可读，父目录不得 group/other 可写，Admin runtime 按 0640
 管理。连接串、Cookie、登录 key、数据密钥不得进入 unit、参数、代理配置或日志。三角色须同一数据库目标，可用不同账号；
 统一规范主机名或 Unix socket 目录，显式填写 host/port，目标比较及未知参数/options 拒绝规则见
 [部署预检](apps/auctionctl/README.md#部署预检)。runtime 共享、operations 接管、恢复指纹变化后的重新部署重启见
@@ -474,7 +474,7 @@ StateDirectory=auction/deployment 创建私有状态目录；总控持非阻塞�
 绝对路径，归有效用户所有、权限至多 0700。回执仅含 unit、InvocationID、PID、单调启动时间及观察时间，不含配置/凭据。
 全部已运行时 start 复核 readiness/顺序并发布 adopted 回执；部分运行或转换中拒绝。须预建 auction-worker-control 组并纳入
 Worker/Admin supplementary group；TOML group、allowlist 须匹配实际 UID/GID，禁止照抄数字 ID。Admin/Worker 须匹配 control
-路径、三组数据密钥及有效拍卖/结算/排期；operations 接管须共用 runtime。保存不热加载，重启范围见
+路径、三组数据密钥及有效拍卖/结算/排期；三角色须共用 runtime 或全部省略。保存不热加载，重启范围见
 [配置说明](ops/config/README.md#runtime-共享与重启)。
 
 ### 可写目录

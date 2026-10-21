@@ -144,6 +144,8 @@ mod lot_watch_pm;
 #[cfg(feature = "postgres")]
 mod lots;
 #[cfg(feature = "postgres")]
+pub use lots::DatabasePublicLotReader;
+#[cfg(feature = "postgres")]
 mod operations_alert;
 #[cfg(feature = "postgres")]
 mod price_history;

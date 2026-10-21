@@ -3,6 +3,7 @@
 mod detail;
 mod list;
 mod mapping;
+mod selection;
 
 pub(super) use detail::detail_postgres;
 pub(super) use list::list_postgres;

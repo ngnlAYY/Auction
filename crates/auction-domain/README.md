@@ -45,8 +45,16 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
 `armor_material_category` 只识别原十二个当前材质，保留旧 scalar 精确匹配含义。Chain/Reactive 仅支持
 精确材质 token 与 Heavy 八个公共部位 token 的有界兼容读取，不将这些组合列作已确证完整种类。
 
-名称解析优先最长完整种类，保证 `Great Mace` 不被拆成自由前缀 `Great` 与种类 `Mace`；大类、种类和品质
-输出沿用既有 canonical 字符串，自由前后缀保留原大小写与可选 `the`，只规范空白。未知种类返回安全闭集错误；
+名称按“品质、可选前缀、装备种类、护甲部位、可选后缀”拆分，只有 Cloth、Light、Heavy 有部位词。
+例如 `Legendary Radiant Phase Robe of Fenrir` 的种类为 `Phase`、部位词为 `Robe`、语义部位为 `Body`；
+`Oak Staff`、`Force Shield` 的完整词组均属于种类，不拆出部位。类型不占名称字段，词典所属类型供详情 header
+和 canonical JSON 交叉校验。Legendary 必须同时具有前缀和实义后缀，孤立 `of the` 视为缺少后缀；
+Magnificent 及其他兼容品质保留可缺词缀的识别规则。
+
+名称解析先按最长完整基础名匹配，保证 `Great Mace` 不被拆成自由前缀 `Great` 与种类 `Mace`，再分离护甲部位。
+`EquipmentIdentity.equipment_type` 输出纯种类，`slot_name`、`slot` 分别保留名称部位词和语义部位；
+`ResolvedKind.name` 继续保留完整基础名，由集成层映射到既有 canonical、快照和指纹字段。
+自由前后缀保留原大小写与可选 `the`，只规范空白。未知种类返回安全闭集错误；
 未知词缀继续保留，并区分推荐、历史和未分类状态。推荐关系保留 Wiki 总表与分项明确记载的兼容并集，
 不以推荐列表限制历史装备或自由词缀。`suffix_matches` 统一标色与识别的可选 `the` 比较口径。
 

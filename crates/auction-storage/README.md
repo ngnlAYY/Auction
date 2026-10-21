@@ -93,6 +93,12 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
 编号页 total 与当前页来自一致快照，禁用 world 的活动投影不能公开，已 settled 历史按契约读取。
+Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标色规则，由应用共用判定生成稀有/融合分组。
+[lots/postgres/selection.rs](crates/auction-storage/src/database/lots/postgres/selection.rs) 在选择分组时流式扫描
+本场可见装备的身份字段（不读取 stats），先计算该分组内的类型统计，再按类型及 offset/limit 保留当前页 UUID；
+同一 Serializable 事务按 UUID 读取完整页并保持原排序，`total` 包含两层筛选。内存只保留计数和当前页 UUID，
+选择分组的计算量随本场装备数量增长；未选分组时保留原 SQL 统计和分页。预览、当前场次和历史详情使用相同规则，
+不增加持久分组字段或迁移，装备事实和竞价语义不变。
 [auctions/countdown.rs](crates/auction-storage/src/database/auctions/countdown.rs) 用单条 SQL 读取同场公开时间及数据库
 时钟，不加载装备、凭据或论坛正文，不公开草稿、取消场次或被遮蔽的预览，无需新增表和迁移。Public 拍卖、竞价日志、
 成交历史与补偿批次的游标查询仅对额外探测行使用饱和加法，不截断请求数量（见[分页契约](docs/contracts/routes.md#public-分页世界与金额)）。

@@ -61,7 +61,7 @@ async fn load_catalog(
     let mut seen = BTreeSet::new();
     let mut result = Vec::new();
     loop {
-        let envelope = fetch_current_lots(auction.id.clone(), None, page_number, PAGE_SIZE)
+        let envelope = fetch_current_lots(auction.id.clone(), None, None, page_number, PAGE_SIZE)
             .await
             .map_err(|_| ())?;
         let total = envelope.total.ok_or(())?;

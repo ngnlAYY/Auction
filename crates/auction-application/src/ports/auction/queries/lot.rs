@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::ApplicationFuture;
+use crate::{ApplicationFuture, EquipmentGroup};
 
 /// 公开 lot 读取允许的最大 legacy offset，防止深分页拖垮数据库。
 pub const MAX_PUBLIC_LOT_OFFSET: i64 = 10_000;
@@ -19,6 +19,7 @@ pub const PUBLIC_LOT_CATEGORIES: [&str; 8] =
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLotListRequest {
     pub category: Option<String>,
+    pub equipment_group: Option<EquipmentGroup>,
     pub limit: i64,
     pub offset: i64,
 }
@@ -140,6 +141,7 @@ pub struct PublicEquipmentStat {
 pub struct PublicEquipment {
     pub name: String,
     pub category: String,
+    pub equipment_group: EquipmentGroup,
     pub level: Option<i64>,
     pub info_summary: String,
     pub stats: BTreeMap<String, PublicEquipmentStat>,
@@ -290,6 +292,7 @@ pub struct PublicPreviewLotSummary {
     pub start_price: i64,
     pub equipment_name: String,
     pub equipment_category: String,
+    pub equipment_group: EquipmentGroup,
     pub equipment_level: Option<i64>,
     pub primary_attribute_initials: Option<String>,
     pub avg_roll: Option<f64>,
@@ -336,6 +339,7 @@ impl PublicPreviewLotDetail {
         self.equipment.validate(false)?;
         if self.equipment.name != self.summary.equipment_name
             || self.equipment.category != self.summary.equipment_category
+            || self.equipment.equipment_group != self.summary.equipment_group
             || self.equipment.level != self.summary.equipment_level
             || self.equipment.primary_attribute_initials()
                 != self.summary.primary_attribute_initials
@@ -403,6 +407,20 @@ pub struct PublicLotPage {
 }
 
 impl PublicLotPage {
+    /// 分组筛选必须在分页前完成，返回页的两种投影均不得夹入其他分组。
+    pub fn validate_equipment_group(
+        &self,
+        equipment_group: Option<EquipmentGroup>,
+    ) -> Result<(), &'static str> {
+        if equipment_group.is_some_and(|group| {
+            self.preview.iter().any(|lot| lot.equipment_group != group)
+                || self.live.iter().any(|lot| lot.equipment.equipment_group != group)
+        }) {
+            return Err("公开 lot 页装备分组无效");
+        }
+        Ok(())
+    }
+
     /// 校验列表的完整投影、分页、分类统计和筛选归属。
     pub fn validate(&self, auction_id: Uuid, category: Option<&str>) -> Result<(), &'static str> {
         if auction_id.is_nil()

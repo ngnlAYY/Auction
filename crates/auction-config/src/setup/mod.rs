@@ -220,6 +220,7 @@ impl FirstRunConfig {
             Value::Array(vec![Value::String("127.0.0.1/32".to_owned())]);
         public["realtime"]["poll_interval_millis"] =
             Value::Integer(self.realtime_poll_interval_millis as i64);
+        public["runtime_config_file"] = Value::String("runtime/admin.toml".to_owned());
         write_toml(directory.join("public.toml"), &public, 0o640)?;
 
         let mut admin = template(include_str!("../../../../ops/config/examples/admin.toml"))?;

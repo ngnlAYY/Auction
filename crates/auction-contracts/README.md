@@ -29,6 +29,9 @@ GET/PUT（响应 user_id/channel/version，请求 command_id/channel/expected_ve
 
 ## 稳定投影
 
+公开拍品的正式装备、预览摘要与预览详情装备使用必填 `equipment_group` 表达 `rare` / `fusion`；
+DTO 只传递服务端结果，匹配逻辑与论坛颜色留在应用/集成层，见[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)。
+
 [dto/admin/equipment.rs](crates/auction-contracts/src/contracts/dto/admin/equipment.rs) 定义统一装备词典的窄只读 DTO；
 `AdminRuntimeConfigResponse.equipment_taxonomy` 仅在三条 runtime 配置路由显式选择
 `include_equipment_taxonomy=true` 时返回，省略时保持原字段集合。词典与 `document` 分离，

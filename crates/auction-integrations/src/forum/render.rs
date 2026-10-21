@@ -10,10 +10,11 @@ mod log;
 mod settlement;
 
 use auction_application::{
-    EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot, ForumCurrentBidSource,
-    ForumLotSnapshot, ForumRenderError, ForumRenderedPost, ForumRenderedThread, ForumRenderer,
-    ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS, PEERLESS_COLORS, PublicEquipmentGameLink,
-    forum_catalog_page_marker, forum_world_name,
+    EquipmentColorFacts, EquipmentColorRule, FORUM_CATALOG_PAGE_SIZE, ForumAuctionSnapshot,
+    ForumCurrentBidSource, ForumLotSnapshot, ForumRenderError, ForumRenderedPost,
+    ForumRenderedThread, ForumRenderer, ForumSystemLogEntry, MAX_FORUM_CATALOG_LOTS,
+    PEERLESS_COLORS, PublicEquipmentGameLink, equipment_color_decision, forum_catalog_page_marker,
+    forum_world_name,
 };
 use auction_domain::{AuctionId, SettlementWorld};
 use sha2::{Digest, Sha256};
@@ -323,8 +324,19 @@ impl ForumRenderer for ForumThreadRenderer {
 
 /// 按规则给装备名加 BBCode 颜色；Peerless 品质词固定彩虹，规则只作用于其余部分。
 fn colored_equipment_name(lot: &ForumLotSnapshot, colors: &[EquipmentColorRule]) -> String {
-    let peerless = lot.equipment_quality.eq_ignore_ascii_case("Peerless")
-        && lot.name.get(..8).is_some_and(|value| value.eq_ignore_ascii_case("Peerless"));
+    let decision = equipment_color_decision(
+        colors,
+        EquipmentColorFacts {
+            name: &lot.name,
+            category: &lot.category,
+            equipment_type: &lot.equipment_type,
+            quality: &lot.equipment_quality,
+            level: lot.equipment_level,
+            prefix: &lot.equipment_prefix,
+            suffix: &lot.equipment_suffix,
+        },
+    );
+    let peerless = decision.peerless;
     let rest = if peerless {
         lot.name.get(8..).unwrap_or_default().trim_start()
     } else {
@@ -342,18 +354,7 @@ fn colored_equipment_name(lot: &ForumLotSnapshot, colors: &[EquipmentColorRule])
         }
         out.push(' ');
     }
-    let matched = colors.iter().find_map(|rule| {
-        rule.matches(
-            &lot.category,
-            &lot.equipment_type,
-            &lot.equipment_quality,
-            lot.equipment_level,
-            &lot.equipment_prefix,
-            &lot.equipment_suffix,
-        )
-        .map(|matched| (rule, matched))
-    });
-    match matched {
+    match decision.matched {
         Some((rule, matched)) if matched.prefix && matched.suffix => {
             let _ = write!(out, "[color={}]{}[/color]", rule.combined_color, bbcode_segment(rest));
         }

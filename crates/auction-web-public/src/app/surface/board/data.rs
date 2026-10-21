@@ -15,6 +15,7 @@ struct CatalogScope {
     session_ready: bool,
     user_id: Option<String>,
     category: String,
+    equipment_group: String,
     page: i64,
     page_size: i64,
 }
@@ -36,12 +37,15 @@ pub(crate) fn AuctionData(
     // 倒计时显示的秒针订阅已下沉到 AuctionHeaderCountdown / LiveRowCountdown 叶子组件，
     // 顶层不再持有每秒变化的时钟信号，避免整个 AuctionData 子树每秒全量重渲染。
     let tick = use_second_tick();
-    // 分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
+    // 装备分组、分类与页码与地址栏双向同步：初值取自 URL，浏览器前进/后退由 hook 恢复。
     let query_state = use_public_query_state();
-    // Signal 为 Copy，两个 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
+    // Signal 为 Copy，各字段 memo 共享同一状态信号，只在各自字段变化时通知订阅者。
     let query_state_signal = query_state.state;
     let active_category =
         use_memo(move || query_state_signal().category.clone().unwrap_or_else(|| "all".to_owned()));
+    let active_equipment_group = use_memo(move || {
+        query_state_signal().equipment_group.clone().unwrap_or_else(|| "all".to_owned())
+    });
     let page_number = use_memo(move || query_state_signal().page.max(1));
     let requested_page_size = use_memo(move || query_state_signal().page_size);
     let realtime_state = use_context::<Signal<LiveConnectionState>>();
@@ -92,6 +96,7 @@ pub(crate) fn AuctionData(
                     .filter(|identity| identity.authenticated)
                     .map(|identity| identity.user_id.clone()),
                 category: active_category(),
+                equipment_group: active_equipment_group(),
                 page: page_number(),
                 page_size: requested_page_size(),
             }
@@ -118,13 +123,17 @@ pub(crate) fn AuctionData(
         let scope = catalog_scope();
         async move {
             let category = (scope.category != "all").then(|| scope.category.clone());
-            let result =
-                fetch_current_lots(scope.auction_id.clone(), category, scope.page, scope.page_size)
-                    .await
-                    .map(|page| CatalogSnapshot {
-                        rows: Rc::new(page.rows()),
-                        page: Rc::new(page),
-                    });
+            let equipment_group =
+                (scope.equipment_group != "all").then(|| scope.equipment_group.clone());
+            let result = fetch_current_lots(
+                scope.auction_id.clone(),
+                category,
+                equipment_group,
+                scope.page,
+                scope.page_size,
+            )
+            .await
+            .map(|page| CatalogSnapshot { rows: Rc::new(page.rows()), page: Rc::new(page) });
             (scope, result)
         }
     });
@@ -239,6 +248,18 @@ pub(crate) fn AuctionData(
                     auction_status: page.auction_status.clone(),
                     category_counts: page.category_counts.clone().unwrap_or_default(),
                     active_category: active_category(),
+                    active_equipment_group: active_equipment_group(),
+                    on_equipment_group_change: move |equipment_group: String| {
+                        update_public_query_state(
+                            query_state_signal,
+                            |query| {
+                                query.equipment_group = (equipment_group != "all")
+                                    .then_some(equipment_group.clone());
+                                query.page = 1;
+                            },
+                            QueryWriteMode::Push,
+                        );
+                    },
                     page_number: page_number(),
                     on_category_change: move |category: String| {
                         update_public_query_state(

@@ -35,7 +35,7 @@ pub fn resolve_kind(value: &str) -> Result<ResolvedKind, TaxonomyError> {
     bounded_heavy_kind(value).ok_or(TaxonomyError::UnknownKind)
 }
 
-/// 分解完整装备名称，优先最长完整种类；自由词缀保留原文并单独标记识别状态。
+/// 按品质、前缀、种类、护甲部位和后缀分解名称；Legendary 必须有前后缀。
 pub fn parse_equipment_name(name: &str) -> Result<EquipmentIdentity, TaxonomyError> {
     if name.len() > 512 || name.chars().any(char::is_control) {
         return Err(TaxonomyError::InvalidName);
@@ -59,7 +59,7 @@ pub fn parse_equipment_name(name: &str) -> Result<EquipmentIdentity, TaxonomyErr
     };
     let joined = type_fields.join(" ");
     let mut selected = None;
-    // Great Mace 和带材质的完整种类先匹配，沿用旧解析器的规范字段和自由前缀拆分。
+    // 先匹配 Great Mace 等完整基础名，再从护甲基础名拆出种类和部位，避免误切长种类。
     for &candidate in name_matching_kinds() {
         if let Some(prefix) = preceding_prefix(&joined, candidate.name) {
             selected = Some((ResolvedKind::from(candidate), prefix.to_owned()));
@@ -71,12 +71,20 @@ pub fn parse_equipment_name(name: &str) -> Result<EquipmentIdentity, TaxonomyErr
     if !valid_optional_affix(&prefix) || !valid_optional_affix(&suffix) {
         return Err(TaxonomyError::InvalidName);
     }
+    // Legendary 的前后缀是名称结构必填项；孤立冠词不构成后缀，其余品质保留兼容识别。
+    if quality.name == "Legendary"
+        && (prefix.is_empty() || suffix.is_empty() || suffix.eq_ignore_ascii_case("the"))
+    {
+        return Err(TaxonomyError::InvalidName);
+    }
     Ok(EquipmentIdentity {
         quality: quality.name.to_owned(),
         prefix_compatibility: classify_resolved_prefix(&kind, &prefix),
         suffix_compatibility: classify_resolved_suffix(&kind, &suffix),
         prefix,
-        equipment_type: kind.name.clone(),
+        equipment_type: kind.kind_name().to_owned(),
+        slot_name: kind.slot_name().map(str::to_owned),
+        slot: kind.slot,
         suffix,
         category: kind.category,
         kind,

@@ -14,8 +14,10 @@ pub(crate) async fn decode_lot_list(
     response: Response,
     auction_id: &str,
     category: Option<&str>,
+    equipment_group: Option<&str>,
 ) -> Result<LotEnvelope, String> {
-    decode_success(response, |value| valid_lot_list(value, auction_id, category)).await
+    decode_success(response, |value| valid_lot_list(value, auction_id, category, equipment_group))
+        .await
 }
 
 pub(crate) async fn decode_lot_detail(
@@ -63,7 +65,12 @@ pub(crate) async fn decode_lower_proxy_command(
     .map(|response| response.authorization)
 }
 
-fn valid_lot_list(value: &Value, auction_id: &str, category: Option<&str>) -> bool {
+fn valid_lot_list(
+    value: &Value,
+    auction_id: &str,
+    category: Option<&str>,
+    equipment_group: Option<&str>,
+) -> bool {
     let Some(value) = object(value) else { return false };
     if !only(
         value,
@@ -101,13 +108,25 @@ fn valid_lot_list(value: &Value, auction_id: &str, category: Option<&str>) -> bo
     }
     let Some(lots) = value.get("lots").and_then(Value::as_array) else { return false };
     lots.iter().all(|lot| {
-        if value.get("projection_kind") == Some(&Value::String("preview".to_owned())) {
+        let preview = string(value.get("projection_kind")) == Some("preview");
+        let valid = if preview {
             valid_preview_lot(lot, auction_id, None, false)
         } else {
             valid_live_lot(lot, auction_id, None)
                 && (value.get("auction_status") != Some(&Value::String("settled".to_owned()))
                     || object(lot).and_then(|lot| string(lot.get("status"))) != Some("live"))
-        }
+        };
+        // 请求分组和每行服务端判定必须一致，防止响应串用或分页遗漏条件。
+        valid
+            && equipment_group.is_none_or(|expected| {
+                let equipment = if preview {
+                    object(lot)
+                } else {
+                    object(lot).and_then(|lot| lot.get("equipment")).and_then(object)
+                };
+                equipment.and_then(|equipment| string(equipment.get("equipment_group")))
+                    == Some(expected)
+            })
     })
 }
 
@@ -271,6 +290,7 @@ fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, deta
             "seller_name",
             "start_price",
             "equipment_name",
+            "equipment_group",
             "game_equipment_url",
         ],
         optional,
@@ -282,6 +302,7 @@ fn valid_preview_lot(value: &Value, auction_id: &str, lot_id: Option<&str>, deta
         && nonempty(value.get("seller_name"))
         && positive(value.get("start_price"))
         && nonempty(value.get("equipment_name"))
+        && valid_equipment_group(value.get("equipment_group"))
         && optional_nonempty(value, "equipment_category")
         && optional_nonnegative(value, "equipment_level")
         && optional_primary_attribute_initials(value, "primary_attribute_initials")
@@ -298,6 +319,7 @@ fn valid_preview_detail_equipment(summary: &Map<String, Value>) -> bool {
         return false;
     }
     string(equipment.get("name")) == string(summary.get("equipment_name"))
+        && string(equipment.get("equipment_group")) == string(summary.get("equipment_group"))
         && optional_string(equipment, "category") == optional_string(summary, "equipment_category")
         && optional_int(equipment, "level") == optional_int(summary, "equipment_level")
         && optional_string(equipment, "primary_attribute_initials")
@@ -308,9 +330,10 @@ fn valid_preview_detail_equipment(summary: &Map<String, Value>) -> bool {
 fn valid_preview_equipment(value: &Map<String, Value>) -> bool {
     only(
         value,
-        &["name", "game_equipment_url"],
+        &["name", "equipment_group", "game_equipment_url"],
         &["category", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"],
     ) && nonempty(value.get("name"))
+        && valid_equipment_group(value.get("equipment_group"))
         && optional_nonempty(value, "category")
         && optional_nonnegative(value, "level")
         && optional_primary_attribute_initials(value, "primary_attribute_initials")
@@ -322,11 +345,12 @@ fn valid_preview_equipment(value: &Map<String, Value>) -> bool {
 
 fn valid_equipment(value: Option<&Value>, full: bool) -> bool {
     let Some(value) = value.and_then(object) else { return false };
-    let required = ["name", "category", "game_equipment_url"];
+    let required = ["name", "category", "equipment_group", "game_equipment_url"];
     let optional =
         ["attributes", "level", "primary_attribute_initials", "info_summary", "stats", "avg_roll"];
     only(value, &required, &optional)
         && nonempty(value.get("name"))
+        && valid_equipment_group(value.get("equipment_group"))
         && nonempty(value.get("category"))
         && optional_nonnegative(value, "level")
         && optional_primary_attribute_initials(value, "primary_attribute_initials")
@@ -336,6 +360,10 @@ fn valid_equipment(value: Option<&Value>, full: bool) -> bool {
         && game_url(value.get("game_equipment_url"))
         && (!full || optional_attributes(value, "attributes"))
         && (!full || value.get("attributes").is_none() || valid_attributes(value.get("attributes")))
+}
+
+fn valid_equipment_group(value: Option<&Value>) -> bool {
+    matches!(string(value), Some("rare" | "fusion"))
 }
 
 fn valid_attributes(value: Option<&Value>) -> bool {

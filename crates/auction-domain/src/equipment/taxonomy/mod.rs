@@ -19,5 +19,5 @@ pub use model::{
 };
 pub use parse::{category_from_header, parse_equipment_name, resolve_kind};
 
-/// 词典审阅版本；三个数字依次为 Basics、Detailed 和 Obsolete 的 MediaWiki oldid。
-pub const TAXONOMY_REVISION: &str = "ehwiki-65026-66094-65259-v1";
+/// 词典审阅版本；数字为三个 Wiki oldid，v2 分离护甲种类与部位并校验 Legendary 词缀。
+pub const TAXONOMY_REVISION: &str = "ehwiki-65026-66094-65259-v2";

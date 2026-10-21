@@ -140,8 +140,9 @@
 - 运行配置一律 TOML；`AUCTION_CONFIG_FILE` 只选择角色文件，不覆盖单项设置。
 - 三角色必填 `common_file` 指向同一非敏感公共文件，分别必填 `secrets_file`；相对路径以角色文件所在目录解析。
   公共文件拥有日志过滤器、指标、缓存和拍卖策略；角色文件拥有 listener、tracing、realtime、会话或 Worker 调度。
-- Admin/Worker 可共享 `runtime_config_file`。`operations` 六组分别接管新拍卖经济模板、自动排期、论坛同步、
-  告警、Worker 循环及邮件预算；`managed` 默认关闭。启用任一组时预检同一 runtime 文件及有效模板/排期一致。
+- 三角色任一配置 `runtime_config_file` 时，部署预检要求全部引用同一文件并保持装备标色规则快照一致；Public 只应用
+  装备分组规则。`operations` 六组仍由 Admin/Worker 接管新拍卖经济模板、自动排期、论坛同步、告警、Worker 循环
+  及邮件预算；`managed` 默认关闭。启用接管时另校验有效模板/排期一致。
 - runtime 保存后重启相应进程生效，不回写拍卖快照、任务游标或租约。MoogleMail transport、凭据、mailbox identity
   和全局启用仍由部署配置拥有；省略 `operations.mail` 保持旧指纹，cron 校验/保存/启动复用配置解析器。
 - `[database]`、`database_url`、`redis_url`、Cookie、`session_signing_key`、`admin_actor/admin_secret` 只进敏感 TOML。

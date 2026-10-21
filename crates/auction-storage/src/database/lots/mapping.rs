@@ -51,6 +51,7 @@ pub(super) fn map_preview_fields(
     equipment_name: String,
     equipment_category: String,
     attributes: Value,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicPreviewLotSummary, ApplicationError> {
     if lot_number <= 0 {
         return Err(storage_error("公开预览 lot 序号无效"));
@@ -62,6 +63,7 @@ pub(super) fn map_preview_fields(
         &equipment_category,
         attributes,
         false,
+        colors,
     )?;
     let primary_attribute_initials = equipment.primary_attribute_initials();
     let summary = PublicPreviewLotSummary {
@@ -74,6 +76,7 @@ pub(super) fn map_preview_fields(
         start_price,
         equipment_name,
         equipment_category,
+        equipment_group: equipment.equipment_group,
         equipment_level: equipment.level,
         primary_attribute_initials,
         avg_roll: equipment.avg_roll,
@@ -105,6 +108,7 @@ pub(super) fn map_live_fields(
     equipment_name: String,
     equipment_category: String,
     attributes: Value,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicLiveLotSummary, ApplicationError> {
     if start_price <= 0 {
         return Err(storage_error("公开 lot 起始价不是正数"));
@@ -148,6 +152,7 @@ pub(super) fn map_live_fields(
         &equipment_category,
         attributes,
         true,
+        colors,
     )?;
     let summary = PublicLiveLotSummary {
         id,
@@ -183,6 +188,7 @@ pub(super) fn map_equipment(
     category: &str,
     attributes: Value,
     category_required: bool,
+    colors: &[EquipmentColorRule],
 ) -> Result<PublicEquipment, ApplicationError> {
     if !matches!(world_id, "main" | "isekai")
         || external_id.is_empty()
@@ -195,16 +201,7 @@ pub(super) fn map_equipment(
     {
         return Err(storage_error("公开装备字段无效"));
     }
-    let stored: StoredEquipmentAttributes = serde_json::from_value(attributes.clone())
-        .map_err(|_| storage_error("公开装备属性无效"))?;
-    if !public_text(&stored.quality, 128)
-        || (!stored.type_name.is_empty() && !public_text(&stored.type_name, 128))
-        || (!stored.prefix.is_empty() && !public_text(&stored.prefix, 128))
-        || (!stored.suffix.is_empty() && !public_text(&stored.suffix, 128))
-        || stored.level.is_some_and(|level| level < 0)
-    {
-        return Err(storage_error("公开装备属性字段无效"));
-    }
+    let stored = parse_stored_equipment(attributes.clone())?;
     let info_summary =
         if stored.type_name.is_empty() { category.to_owned() } else { stored.type_name.clone() };
     let info_summary =
@@ -215,6 +212,7 @@ pub(super) fn map_equipment(
         return Err(storage_error("公开装备摘要无效"));
     }
     let quality = quality_range(&stored.quality);
+    let equipment_group = stored.equipment_group(name, category, colors);
     let mut stats = BTreeMap::new();
     let mut rolls = Vec::new();
     for (stat_name, stat) in stored.stats {
@@ -243,6 +241,7 @@ pub(super) fn map_equipment(
     let equipment = PublicEquipment {
         name: name.to_owned(),
         category: category.to_owned(),
+        equipment_group,
         level: stored.level,
         info_summary,
         stats,
@@ -252,6 +251,35 @@ pub(super) fn map_equipment(
     };
     equipment.validate(category_required).map_err(storage_error)?;
     Ok(equipment)
+}
+
+/// 分组扫描只需身份字段；SQL 去掉 stats 后仍复用正式映射的严格属性解码。
+pub(super) fn map_equipment_group(
+    name: &str,
+    category: &str,
+    attributes: Value,
+    colors: &[EquipmentColorRule],
+) -> Result<EquipmentGroup, ApplicationError> {
+    if !public_text(name, 512) || !category.is_empty() && !public_text(category, 128) {
+        return Err(storage_error("公开装备分组身份无效"));
+    }
+    Ok(parse_stored_equipment(attributes)?.equipment_group(name, category, colors))
+}
+
+fn parse_stored_equipment(
+    attributes: Value,
+) -> Result<StoredEquipmentAttributes, ApplicationError> {
+    let stored: StoredEquipmentAttributes =
+        serde_json::from_value(attributes).map_err(|_| storage_error("公开装备属性无效"))?;
+    if !public_text(&stored.quality, 128)
+        || (!stored.type_name.is_empty() && !public_text(&stored.type_name, 128))
+        || (!stored.prefix.is_empty() && !public_text(&stored.prefix, 128))
+        || (!stored.suffix.is_empty() && !public_text(&stored.suffix, 128))
+        || stored.level.is_some_and(|level| level < 0)
+    {
+        return Err(storage_error("公开装备属性字段无效"));
+    }
+    Ok(stored)
 }
 
 pub(super) fn public_text(value: &str, maximum: usize) -> bool {
@@ -301,6 +329,29 @@ struct StoredEquipmentAttributes {
     _tradeable: bool,
     #[serde(default)]
     stats: BTreeMap<String, StoredEquipmentStat>,
+}
+
+impl StoredEquipmentAttributes {
+    fn equipment_group(
+        &self,
+        name: &str,
+        category: &str,
+        colors: &[EquipmentColorRule],
+    ) -> EquipmentGroup {
+        equipment_color_decision(
+            colors,
+            EquipmentColorFacts {
+                name,
+                category,
+                equipment_type: &self.type_name,
+                quality: &self.quality,
+                level: self.level,
+                prefix: &self.prefix,
+                suffix: &self.suffix,
+            },
+        )
+        .equipment_group
+    }
 }
 
 #[derive(Debug, Deserialize)]

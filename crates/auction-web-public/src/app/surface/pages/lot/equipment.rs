@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 pub(crate) struct EquipmentCardData {
     pub(crate) name: String,
     pub(crate) category: Option<String>,
+    pub(crate) equipment_group: String,
     pub(crate) level: Option<i64>,
     pub(crate) stats: BTreeMap<String, PublicEquipmentStatResponse>,
     pub(crate) avg_roll: Option<f64>,
@@ -20,6 +21,7 @@ impl From<EquipmentDetail> for EquipmentCardData {
     fn from(equipment: EquipmentDetail) -> Self {
         Self {
             name: equipment.name,
+            equipment_group: equipment.equipment_group,
             category: Some(equipment.category),
             level: equipment.level,
             stats: equipment.stats,
@@ -33,6 +35,7 @@ impl From<PreviewEquipmentDetail> for EquipmentCardData {
     fn from(equipment: PreviewEquipmentDetail) -> Self {
         Self {
             name: equipment.name,
+            equipment_group: equipment.equipment_group,
             category: equipment.category,
             level: equipment.level,
             stats: equipment.stats,
@@ -96,33 +99,35 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Elem
                     }
                 }
             }
-            if category_label.is_some() || equipment.level.is_some() || equipment.avg_roll.is_some() {
-                div { class: "public-auction-equipment__facts",
-                    dl { class: "public-auction-equipment__facts-list",
-                        if let Some(category) = category_label.as_deref() {
-                            div { class: "public-auction-equipment__fact",
-                                dt { {t!("equipment-category")} }
-                                dd {
-                                    TruncatedText {
-                                        value: category.to_owned(),
-                                        size: "compact",
-                                        class_name: "public-auction-equipment__fact-value",
-                                        portal: true,
-                                    }
+            div { class: "public-auction-equipment__facts",
+                dl { class: "public-auction-equipment__facts-list",
+                    div { class: "public-auction-equipment__fact",
+                        dt { {t!("equipment-group")} }
+                        dd { EquipmentGroupBadge { equipment_group: equipment.equipment_group.clone() } }
+                    }
+                    if let Some(category) = category_label.as_deref() {
+                        div { class: "public-auction-equipment__fact",
+                            dt { {t!("equipment-category")} }
+                            dd {
+                                TruncatedText {
+                                    value: category.to_owned(),
+                                    size: "compact",
+                                    class_name: "public-auction-equipment__fact-value",
+                                    portal: true,
                                 }
                             }
                         }
-                        if let Some(level) = equipment.level {
-                            div { class: "public-auction-equipment__fact",
-                                dt { {t!("equipment-level")} }
-                                dd { "{level}" }
-                            }
+                    }
+                    if let Some(level) = equipment.level {
+                        div { class: "public-auction-equipment__fact",
+                            dt { {t!("equipment-level")} }
+                            dd { "{level}" }
                         }
-                        if let Some(avg_roll) = equipment.avg_roll {
-                            div { class: "public-auction-equipment__fact",
-                                dt { {t!("equipment-avg-roll")} }
-                                dd { class: "public-auction-equipment__avg-roll", "{avg_roll:.1}%" }
-                            }
+                    }
+                    if let Some(avg_roll) = equipment.avg_roll {
+                        div { class: "public-auction-equipment__fact",
+                            dt { {t!("equipment-avg-roll")} }
+                            dd { class: "public-auction-equipment__avg-roll", "{avg_roll:.1}%" }
                         }
                     }
                 }
