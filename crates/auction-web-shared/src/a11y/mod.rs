@@ -278,8 +278,12 @@ fn current_focusable(document: &web_sys::Document) -> Option<web_sys::HtmlElemen
 #[cfg(target_arch = "wasm32")]
 fn is_focusable(element: &web_sys::HtmlElement) -> bool {
     element.matches(FOCUSABLE_SELECTOR).unwrap_or(false)
-        && !element.hidden()
-        && element.get_attribute("aria-hidden").as_deref() != Some("true")
+        && element.is_connected()
+        // 手机折叠菜单、关闭的 details 与隐藏祖先不能成为焦点循环的首尾控件。
+        && element.closest("[hidden], [inert], [aria-hidden=\"true\"]").ok().flatten().is_none()
+        && element.get_client_rects().length() > 0
+        && web_sys::window().and_then(|window| window.get_computed_style(element).ok().flatten())
+            .is_none_or(|style| !matches!(style.get_property_value("visibility").ok().as_deref(), Some("hidden" | "collapse")))
 }
 
 #[cfg(target_arch = "wasm32")]

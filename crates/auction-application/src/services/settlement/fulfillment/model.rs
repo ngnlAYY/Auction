@@ -1,6 +1,8 @@
 //! 结算履约跨 owner 传递的无 secret 模型。
 
-use auction_domain::SettlementObligationKind;
+use auction_domain::{
+    SettlementLine, SettlementObligationKind, validate_settlement_price_breakdown,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -20,6 +22,8 @@ pub(super) struct SettlementDeliveryIntent {
     pub(super) credits: i64,
     pub(super) cod: i64,
     pub(super) equipment_id: Option<Uuid>,
+    /// 新建竞得装备发送时冻结；历史三变量载荷保持原摘要。
+    pub(super) settlement_line: Option<SettlementLine>,
 }
 
 impl SettlementDeliveryIntent {
@@ -31,6 +35,25 @@ impl SettlementDeliveryIntent {
             || !trimmed_non_empty(&self.recipient)
             || self.credits < 0
             || self.cod < 0
+            || self.settlement_line.as_ref().is_some_and(|line| {
+                self.kind != SettlementObligationKind::WinnerEquipmentCod
+                    || line.validate().is_err()
+                    || line.end_price.value() <= 0
+                    || line.buyer_amount.value() != self.cod
+                    || line
+                        .buyer_amount
+                        .value()
+                        .checked_add(line.compensation_amount.value())
+                        .is_none_or(|adjusted_price| {
+                            validate_settlement_price_breakdown(
+                                line.end_price.value(),
+                                line.adjustment_ppm,
+                                adjusted_price,
+                                line.compensation_amount.value(),
+                            )
+                            .is_err()
+                        })
+            })
         {
             return false;
         }

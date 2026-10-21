@@ -46,7 +46,12 @@ impl From<PreviewEquipmentDetail> for EquipmentCardData {
 }
 
 #[component]
-pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Element {
+pub(crate) fn EquipmentCard(
+    equipment: EquipmentCardData,
+    leading: bool,
+    /// 可见性由详情页沿用拍卖/拍品状态判断，装备卡片只负责事实栏的布局。
+    watch_control: Element,
+) -> Element {
     let mut stats_page = use_signal(|| 1_i64);
     let stats_page_size = 10_i64;
     let current_stats_page = stats_page().max(1);
@@ -99,11 +104,18 @@ pub(crate) fn EquipmentCard(equipment: EquipmentCardData, leading: bool) -> Elem
                     }
                 }
             }
-            div { class: "public-auction-equipment__facts",
+            div {
+                class: "public-auction-equipment__facts",
+                role: "group",
+                aria_label: t!("equipment-stats"),
+                tabindex: "0",
                 dl { class: "public-auction-equipment__facts-list",
-                    div { class: "public-auction-equipment__fact",
+                    div { class: "public-auction-equipment__fact public-auction-equipment__fact--group",
                         dt { {t!("equipment-group")} }
-                        dd { EquipmentGroupBadge { equipment_group: equipment.equipment_group.clone() } }
+                        dd {
+                            EquipmentGroupBadge { equipment_group: equipment.equipment_group.clone() }
+                            {watch_control}
+                        }
                     }
                     if let Some(category) = category_label.as_deref() {
                         div { class: "public-auction-equipment__fact",

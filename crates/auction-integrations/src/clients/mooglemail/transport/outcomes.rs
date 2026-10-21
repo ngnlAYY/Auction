@@ -1,5 +1,9 @@
 use super::*;
 
+mod rejection;
+
+pub(crate) use rejection::equipment_rejection_copy;
+
 pub(crate) fn exact_action_expectation(
     state: &MoogleMailActionState,
     expected: &ActionExpectation,
@@ -136,6 +140,7 @@ pub(crate) fn render_notification(
     result_code: &str,
     login_key: Option<&MailLoginKey>,
     recipient: &str,
+    world: &str,
     reference: &str,
 ) -> Option<(String, String)> {
     match (template, result_code) {
@@ -147,18 +152,23 @@ pub(crate) fn render_notification(
             "Auction mail rejected".to_owned(),
             templates.render("auction_no_attachments", &[])?,
         )),
-        (
-            "auction_equipment_rejected",
-            "auction_equipment_rejected"
-            | "start_price_invalid"
-            | "start_price_missing"
-            | "start_price_duplicate"
-            | "start_price_identity_mismatch"
-            | "start_price_attachment_not_found",
-        ) => Some((
-            "Auction mail rejected".to_owned(),
-            templates.render("auction_equipment_rejected", &[("reason_code", result_code)])?,
-        )),
+        ("auction_equipment_rejected", reason_code) => {
+            let (reason_text, next_steps) = equipment_rejection_copy(reason_code)?;
+            // 使用入站世界和邮件 ID 关联原提交；拒绝通知不复制装备 URL 或 key。
+            let mail_reference = format!("{world}:{reference}");
+            Some((
+                "Auction mail rejected".to_owned(),
+                templates.render(
+                    "auction_equipment_rejected",
+                    &[
+                        ("reason_code", reason_code),
+                        ("reason_text", reason_text),
+                        ("next_steps", next_steps),
+                        ("mail_reference", &mail_reference),
+                    ],
+                )?,
+            ))
+        }
         ("user_assets_rejected", "user_assets_rejected") => Some((
             "Account mail rejected".to_owned(),
             templates.render("user_assets_rejected", &[])?,
@@ -190,7 +200,13 @@ pub(crate) fn render_notification(
         )),
         ("forum_auction_notice", "forum_auction_notice") => Some((
             "Forum auction notification".to_owned(),
-            format!("Forum auction notification for {recipient}"),
+            format!(
+                "Hello {recipient},\n\n\
+                 This is the auction notification you requested\n\
+                 from the forum.\n\n\
+                 Please check the auction page for the latest\n\
+                 item details and bidding status."
+            ),
         )),
         ("recovery_payment_reminder", "payment_overdue") => Some((
             "Auction payment overdue".to_owned(),

@@ -75,6 +75,7 @@ category-other = その他
 
 catalog-code = コード
 catalog-item = 装備
+catalog-group = グループ
 catalog-level = レベル
 catalog-primary-attributes = 主要属性
 catalog-seller = 出品者
@@ -504,8 +505,6 @@ watch-toggle = 装備 { $code } をマーク
 watch-on = マーク済み
 watch-off = 未マーク
 watch-login = ログインしてマーク
-watch-loading = サーバーのマークを読み込み中… 同期完了まで変更できません。
-watch-unsynced = 表示中のキャッシュは未同期です。変更の保存には使用できません。
 watch-load-error = サーバーのマークを取得できません。再取得してから変更してください。
 watch-refresh = マークを再取得
 watch-saving = 保存中…

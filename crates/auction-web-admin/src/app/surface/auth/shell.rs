@@ -1,4 +1,6 @@
 use super::*;
+use dioxus::html::{Key, MountedData};
+use std::rc::Rc;
 
 /// 已认证的管理端外壳与注销动作。
 #[component]
@@ -15,10 +17,13 @@ pub(crate) fn AdminAuthenticatedShell(
     // `use_second_tick` 订阅同一个 interval，不再各自起定时器。
     use_second_ticker();
     let mut navigation_open = use_signal(|| false);
+    let mut navigation_toggle = use_signal(|| None::<Rc<MountedData>>);
     let mut logging_out = use_signal(|| false);
     let mut logout_error = use_signal(|| None::<String>);
     let current_route = use_route::<Route>();
     let settlement_route = matches!(&current_route, Route::Settlement {});
+    // 浏览器前进/后退和页面内跳转也收起手机导航；页面焦点仍由路由 hook 接管。
+    use_effect(use_reactive((&current_route,), move |_| navigation_open.set(false)));
     use_route_focus(format!("{current_route:?}"), "admin-content");
     rsx! {
         div {
@@ -37,6 +42,7 @@ pub(crate) fn AdminAuthenticatedShell(
                     r#type: "button",
                     aria_controls: "admin-primary-navigation",
                     aria_expanded: navigation_open().to_string(),
+                    onmounted: move |event| navigation_toggle.set(Some(event.data())),
                     onclick: move |_| navigation_open.set(!navigation_open()),
                     {t!("nav-label")}
                 }
@@ -87,6 +93,18 @@ pub(crate) fn AdminAuthenticatedShell(
                     },
                     aria_label: t!("nav-label"),
                     onclick: move |_| navigation_open.set(false),
+                    onkeydown: move |event| {
+                        if event.key() == Key::Escape && navigation_open() {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            navigation_open.set(false);
+                            if let Some(toggle) = navigation_toggle() {
+                                spawn(async move {
+                                    let _ = toggle.set_focus(true).await;
+                                });
+                            }
+                        }
+                    },
                     Link {
                         class: admin_nav_class(matches!(&current_route, Route::Dashboard {})),
                         to: Route::Dashboard {},

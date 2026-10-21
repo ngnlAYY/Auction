@@ -92,6 +92,11 @@ generation、due、授权与资格；调度字段与确定性命令持久化，�
 | 论坛、凭据与告警 | `forum/`、`credentials/`、`operations_alert/` |
 | 规则、审计与 readiness 水位 | `rules/`、`admin_audit/`、`health/`、`audit_health/` |
 
+[fulfillment_scheduler/claims/pricing.rs](crates/auction-storage/src/database/fulfillment_scheduler/claims/pricing.rs)
+在履约领取中投影并验证不可变 `lot_settlements`，向应用层传递可选 `SettlementLine`；买家 COD 正文据此冻结明细，
+不从当前策略或可变竞价状态补算。此投影不新增表或迁移，持久载荷兼容范围见
+[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
+
 编号页 total 与当前页来自一致快照，禁用 world 的活动投影不能公开，已 settled 历史按契约读取。
 Public 的 `DatabaseStore::public_lot_reader` 接受启动时冻结的装备标色规则，由应用共用判定生成稀有/融合分组。
 [lots/postgres/selection.rs](crates/auction-storage/src/database/lots/postgres/selection.rs) 在选择分组时流式扫描
@@ -179,6 +184,8 @@ delivery 锁之前按持久 allocation 关联早锁原账户，孤儿/歧义失�
 责任 preview 使用 Serializable READ ONLY，apply 锁完整责任集合、核对预览摘要/版本和真实现金，既有 allocation 全部扣占。
 未资金化付款已外发但收款未闭合（或关联 delivery 缺失）时 preview/apply 增加 `payment_collection_unclosed` blocker；
 新 COD 要求精确 MID/当前账号实收绑定、全局 payment/source 唯一且发送晚于最近 opening 边界。
+[settlement_funding/receipt.rs](crates/auction-storage/src/database/settlement_funding/receipt.rs) 在同一查询读取冻结结算明细，
+重建买家装备 COD 的扩展变量并完整比较 payload；精确旧三变量和 carrier 原两变量保持兼容，不接受 payload 自报价格替代事实。
 `delivery_scheduler/capability.rs` 是当前构建唯一 V1 提供者，非 postgres 档位返回 None；`delivery_admin` 仅为明确
 失效的 watch preflight 保留无 sending 时间的严格投影。
 

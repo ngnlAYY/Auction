@@ -86,8 +86,13 @@ pub fn lot_watch_notification(
         &uuid::Uuid::NAMESPACE_URL,
         format!("auction/lot-watch-v1/{lot_id}/{user_id}/{cycle}").as_bytes(),
     );
+    // 英文正文随领先周期冻结，并继续参与原请求摘要。
     let body = format!(
-        "Your leading bid on lot {lot_id} was outbid. Accepted price: {amount} credits. Check auction website for current status."
+        "Your leading bid has been outbid.\n\n\
+         Accepted bid: {amount} Credits\n\n\
+         Check the auction website for the latest price\n\
+         and place another bid if you wish to continue.\n\n\
+         Lot reference: {lot_id}"
     );
     let hash = RequestHash::from_request(
         "lot_watch_notification",

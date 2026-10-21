@@ -76,6 +76,7 @@ category-other = Other
 
 catalog-code = Code
 catalog-item = Item
+catalog-group = Group
 catalog-level = Level
 catalog-primary-attributes = Pa
 catalog-seller = Seller
@@ -505,8 +506,6 @@ watch-toggle = Mark equipment { $code }
 watch-on = Marked
 watch-off = Unmarked
 watch-login = Log in to mark
-watch-loading = Loading server marks… Changes are disabled until synchronized.
-watch-unsynced = Cached marks are not synchronized. They cannot be used to save changes.
 watch-load-error = Could not load server marks. Refresh before making changes.
 watch-refresh = Refresh marks
 watch-saving = Saving…

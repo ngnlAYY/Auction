@@ -200,7 +200,12 @@ pub(super) fn ProxyAuthorizationForm(
                             id: maximum_id,
                             r#type: "text",
                             autofocus: true,
-                            inputmode: "decimal",
+                            // 与创建代理一致，允许在手机键盘输入 K/M 缩写。
+                            inputmode: "text",
+                            enterkeyhint: "done",
+                            autocapitalize: "none",
+                            autocomplete: "off",
+                            spellcheck: "false",
                             aria_describedby: "public-proxy-lower-hint",
                             disabled: submitting(),
                             value: "{maximum_amount}",

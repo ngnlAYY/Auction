@@ -65,6 +65,9 @@ pub(crate) fn PriceHistoryFilters(
                             id: "public-history-name",
                             name: "name",
                             r#type: "search",
+                            enterkeyhint: "search",
+                            autocapitalize: "none",
+                            spellcheck: "false",
                             value: name(),
                             placeholder: t!("history-filter-name-placeholder"),
                             maxlength: "1024",
@@ -167,6 +170,9 @@ pub(crate) fn PriceHistoryFilters(
                                 span { {t!("history-filter-buyer")} }
                                 input {
                                     r#type: "search",
+                                    enterkeyhint: "search",
+                                    autocapitalize: "none",
+                                    spellcheck: "false",
                                     value: buyer(),
                                     maxlength: "256",
                                     oninput: move |event| {
@@ -179,6 +185,9 @@ pub(crate) fn PriceHistoryFilters(
                                 span { {t!("history-filter-seller")} }
                                 input {
                                     r#type: "search",
+                                    enterkeyhint: "search",
+                                    autocapitalize: "none",
+                                    spellcheck: "false",
                                     value: seller(),
                                     maxlength: "256",
                                     oninput: move |event| {

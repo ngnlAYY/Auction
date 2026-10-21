@@ -3,6 +3,9 @@
 
 use dioxus::prelude::*;
 
+mod viewport;
+pub(crate) use viewport::use_visual_viewport;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, closure::Closure};
 

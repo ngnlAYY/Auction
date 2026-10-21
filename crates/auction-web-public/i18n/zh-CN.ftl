@@ -75,6 +75,7 @@ category-other = 其他
 
 catalog-code = 编号
 catalog-item = 装备
+catalog-group = 分组
 catalog-level = 等级
 catalog-primary-attributes = 属性腿
 catalog-seller = 卖家
@@ -504,8 +505,6 @@ watch-toggle = 标记装备 { $code }
 watch-on = 已标记
 watch-off = 未标记
 watch-login = 登录后标记
-watch-loading = 正在读取服务器标记… 同步完成前不可修改。
-watch-unsynced = 当前为未同步的本地缓存，不可用于保存修改。
 watch-load-error = 无法读取服务器标记，请刷新后再修改。
 watch-refresh = 刷新标记
 watch-saving = 正在保存…

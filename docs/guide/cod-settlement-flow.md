@@ -7,21 +7,25 @@
 
 | 义务 `kind` | 世界 | 邮件模板 | Credits | COD | 收件人 | 前置义务 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `winner_equipment_cod` | main | `settlement_winner_equipment_cod` | 0 | 成交价 | 买家 | 无 |
-| `winner_payment_carrier_cod` | main | `settlement_payment_carrier` | 1（载体） | 成交价+1 | 异世界买家 | 无 |
+| `winner_equipment_cod` | main | `settlement_winner_equipment_cod` | 0 | 买方应付 | 买家 | 无 |
+| `winner_payment_carrier_cod` | main | `settlement_payment_carrier` | 1（载体） | 买方应付+1 | 异世界买家 | 无 |
 | `winner_equipment_handoff` | isekai | `settlement_equipment_handoff` | 0 | 0 | 异世界买家 | carrier 实收 |
 | `seller_payout` | main | `settlement_seller_payout` | 卖家应得 | 0 | 卖家 | 装备 COD（iseskai 时为 handoff） |
 | `buyer_refund` | main | `settlement_buyer_refund` | 金额 | 0 | 买家（contingent） | 装备 COD |
 | `unsold_return` / `withdrawn_return` | 原世界 | `settlement_equipment_handoff` | 0 | 0 | 原卖家 | 无 |
 
+买方应付是冻结的 `buyer_amount`，已包含奖惩与额外奖池抵扣。主世界竞得邮件分开列出成交价、费率调整后价格和最终 CoD，
+并显示赢家累计领先时长占比及奖惩比例；有奖池抵扣时单列金额。正文与历史任务兼容规则见
+[邮件正文模板](ops/config/README.md#邮件正文模板)。
+
 ## 主世界成交
 
 ```mermaid
 flowchart TD
-  A[live/final 结束<br/>settlement Worker 结算] --> B[建立 winner_equipment_cod<br/>amount=成交价]
+  A[live/final 结束<br/>settlement Worker 结算] --> B[建立 winner_equipment_cod<br/>amount=买方应付]
   B --> C{收件人是 Bot 自己?}
   C -- 否 --> D[compose 预检: 必须干净<br/>否则 preflight_unproven]
-  D --> E[POST 发送: 装备1件<br/>Credits=0, COD=成交价]
+  D --> E[POST 发送: 装备1件<br/>Credits=0, COD=买方应付]
   E --> F[Sent 精确证明<br/>mid+world+recipient+subject+digest+COD+装备]
   F -- 证明成功 --> G[delivery=succeeded<br/>external_reference=mooglemail:main:send:MID]
   F -- 证明失败 --> H[write_unknown → manual_reconcile<br/>不自动重发]
@@ -37,7 +41,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A[结算] --> B[winner_payment_carrier_cod<br/>main, credits=1, COD=成交价+1]
+  A[结算] --> B[winner_payment_carrier_cod<br/>main, credits=1, COD=买方应付+1]
   B --> C[买家领取载体并支付 COD]
   C --> D[carrier 义务 satisfied]
   D --> E[winner_equipment_handoff 解锁<br/>isekai, COD=0, 装备1件]
@@ -92,7 +96,7 @@ MoogleMail 无法给自己发信（`recipient_is_sender`），因此义务在领
 
 | 义务 | Bot 作为收件人时的内部动作 |
 | --- | --- |
-| `winner_equipment_cod` / `winner_payment_carrier_cod` | `Purchase`：装备留存，按成交价内部记账 |
+| `winner_equipment_cod` / `winner_payment_carrier_cod` | `Purchase`：装备留存，按买方应付内部记账 |
 | `winner_equipment_handoff` | `Handoff`：异世界装备直接留存 |
 | `unsold_return` | `KeepUnsold`：流拍装备留存，不产生邮件 |
 | `seller_payout` | `RetainSeller`：Credits 内部入账 |
@@ -103,7 +107,7 @@ MoogleMail 无法给自己发信（`recipient_is_sender`），因此义务在领
 `bot_players`（大小写不敏感）里配置的 bot 显示名。**已经生成外部 delivery 的历史行不会退回内部路径**：
 这类行会以 `recipient_is_sender` 进入 `manual_reconcile`，必须人工核对后收口；新配置只影响后续新结算。
 
-买家是 bot 时不会产生 COD 邮件：内部 `Purchase` 直接按成交价分配资金并解锁 `seller_payout`，
+买家是 bot 时不会产生 COD 邮件：内部 `Purchase` 直接按买方应付分配资金并解锁 `seller_payout`，
 卖家仍按正常 credits 邮件收款（卖家是 bot 时走 `RetainSeller` 内部入账）。
 
 ## 已知盲区

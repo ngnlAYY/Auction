@@ -248,6 +248,7 @@ fn bid_form(input: BidFormInput) -> Element {
                     r#type: "text",
                     autofocus: true,
                     inputmode: "numeric",
+                    enterkeyhint: "done",
                     pattern: "[0-9]*",
                     autocomplete: "off",
                     spellcheck: "false",

@@ -30,6 +30,7 @@ pub const FAVICON: Asset = asset!("/assets/favicon.svg");
 #[component]
 pub fn BaseStylesheet() -> Element {
     table_hints::use_table_hints();
+    crate::media::use_visual_viewport();
     // favicon 由两个 surface 的静态 HTML 通过稳定 `/favicon.ico` 路径声明；这里保留 asset
     // 引用，使构建产物继续携带供 HTTP 映射使用的同一份带 hash SVG。
     let _ = FAVICON;

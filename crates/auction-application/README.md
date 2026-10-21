@@ -50,7 +50,8 @@ Admin/Worker 生命周期；取得权威锁后才读取命令时刻，同一计�
 装备标记由 [ports/public/watch.rs](crates/auction-application/src/ports/public/watch.rs) 与
 [services/public/watch.rs](crates/auction-application/src/services/public/watch.rs) 拥有：稳定命令摘要包含会话用户，
 Serializable 锁内重放/CAS，同值新命令仍推进 fence；超价通知身份按 lot/用户/领先周期确定，冻结正文只含公开标识和
-已接受价格，外部发送不在竞价事务内执行。账号渠道由
+已接受价格。MM 正文使用固定分段英文，提示到网站查看最新价格并继续出价；正文仍参与原请求摘要，旧通知沿用已冻结负载，
+不增加 runtime 模板键。外部发送不在竞价事务内执行。账号渠道由
 [ports/public/watch_preference.rs](crates/auction-application/src/ports/public/watch_preference.rs) 与
 [services/public/preferences](crates/auction-application/src/services/public/preferences) 拥有，只锁 user、账本先于 CAS、
 旧 watch.channel=mm 不变。[services/public/watch_notification.rs](crates/auction-application/src/services/public/watch_notification.rs)
@@ -73,6 +74,9 @@ reconcile 释放 claim 时原子写入下次追踪时间。COD、carrier 与卖�
 [services/recovery](crates/auction-application/src/services/recovery) 统一 Admin/Worker 确认与版本门禁。履约 intent、
 payload、稳定身份及摘要不得包含装备 secret，派发世界与装备来源世界分别建模；`SettlementFulfillmentBotIdentityReader`
 只读当前 active Cookie/world 的 `VerifiedMailPlayerIdentity`，无预期绑定也远端核验，无法证明时返回错误。
+买家装备 COD intent 从 claim 的对应 `SettlementLine` 冻结价格变量；调整后价格取买家应付与奖池抵扣之和，不使用现行策略
+重算。精确旧三变量的 prepared/enqueued 快照沿用原 canonical 字节与摘要；新八变量形状及兼容边界见
+[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
 
 [ports/settlement/internal](crates/auction-application/src/ports/settlement/internal) 与履约服务的 `internal.rs`、
 `collected.rs`、`refund.rs` 拥有新 pending 的真实身份分支、内部满足、外部 COD 资金化及原合法退款用途授权：
@@ -172,6 +176,10 @@ owner、版本和锁后数据库实时租约；详情读取前先提交整窗摘
 `ports/mail/equipment_diagnostics/reason.rs` 拥有来源解析的九项闭集诊断码，进程内观察使用枚举，
 只有 parse/protocol_drift 组合可投影到原有 sidecar 的 `detail_code`；不接受原始来源错误文本，
 不参与业务决定、命令摘要或历史记录重写。
+
+可配置 MM 正文仍为 14 项，默认使用分段英文；模板只展示已决定的拒收、结算与账户事实，不重新决定退回或金额。
+买家装备 COD 的 `{price_breakdown}` 只消费冻结结算明细，`{amount}` 保持实际 COD；已冻结正文与幂等摘要不因默认文案升级
+重写。模板占位符与保存生效范围见[配置手册](ops/config/README.md#邮件正文模板)。
 
 [ports/scheduling](crates/auction-application/src/ports/scheduling) 只表达冻结轮次与下一 UTC 触发时刻（cron 解析在配置层），
 定时器不能替代持久化 due、游标和租约；[ports/operations](crates/auction-application/src/ports/operations) 定义安全水位、

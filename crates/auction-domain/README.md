@@ -32,6 +32,7 @@ Dioxus、SQLx、reqwest、环境读取或日志初始化，依赖限于领域安
   结算总额不截断，历史代理后续争价仍受 1B 约束。
 - 代理降额只能降低上限并推进版本，保持原模式和状态；`FinalFast → FinalFast` 不得退回普通活动状态。
 - 结算明细校验金额守恒与税/补偿互斥；`WinnerPaymentCarrierCod` 的派发世界固定为 `main`。
+- `validate_settlement_price_breakdown` 按冻结费率校验展示金额的整数取整、加价/折扣及奖池上限，供履约与邮件边界复用；不读取现行策略。
 
 ### 装备语义词典
 

@@ -3,7 +3,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use auction_domain::{
-    AuctionId, CommandId, EquipmentId, EquipmentKeyEnvelope, LotId, SettlementId,
+    AuctionId, CommandId, EquipmentId, EquipmentKeyEnvelope, LotId, SettlementId, SettlementLine,
     SettlementObligationKind, SettlementWorld, SubmissionId,
 };
 
@@ -114,6 +114,8 @@ pub struct SettlementFulfillmentClaim {
     pub external_equipment_id: String,
     /// 结算通知正文使用的装备名称；只允许来自同一数据库快照。
     pub equipment_name: String,
+    /// 竞得装备邮件使用的冻结结算明细；不从当前竞价或现行奖惩配置重算。
+    pub settlement_line: Option<SettlementLine>,
     pub submission_id: Option<SubmissionId>,
     /// 投稿来源闭集；流拍与撤拍均根据来源授权逐件发送原装备。
     pub submission_source_kind: Option<String>,

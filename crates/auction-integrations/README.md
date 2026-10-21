@@ -46,6 +46,17 @@ Compose 成功页、空 compose 或本地 UUID 均不能替代 Sent 证明；资
 旧 `prepare/send` 拒绝非零 Credits Send，新授权入口缺 gateway 时只返回 legacy 候选。回执、诊断与人工核对要求见
 [邮件诊断](ops/mail/diagnostics.md)与[领域不变量](docs/contracts/invariants.md)。
 
+[transport/outcomes/rejection.rs](crates/auction-integrations/src/clients/mooglemail/transport/outcomes/rejection.rs)
+负责将闭集拒收码映射为安全英文原因和处理建议；`auction_equipment_rejected` 新增 `{reason_text}`、`{next_steps}` 与
+`{mail_reference}`（`world:external_mail_id`），保留旧 `{reason_code}`。正文不包含原始来源错误，整封邮件退回由独立 Return
+投递及其远端证明负责。模板键仍为 14 项；买家 COD 价格明细只使用应用层冻结的结算事实，金额与幂等身份保持原义。
+完整占位符与升级方式见[邮件正文模板](ops/config/README.md#邮件正文模板)。
+
+[transport/payload/settlement/pricing.rs](crates/auction-integrations/src/clients/mooglemail/transport/payload/settlement/pricing.rs)
+校验买家装备 COD 的完整价格变量并格式化千分位金额、带符号百分比与适用的奖池抵扣；旧三变量载荷仅省略价格明细，
+不补零或套用现行曲线。只接受精确旧三变量或完整新八变量，字段集合与金额关系见
+[交付载荷契约](docs/contracts/schema.md#结算恢复与交付)。
+
 ## 凭据装配与外部请求
 
 Worker 配置数据库凭据能力后读取唯一 active Cookie 并解密，暂缺时保持 degraded，不退回另一来源；未配置该能力才
