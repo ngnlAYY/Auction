@@ -5,6 +5,10 @@ set -euo pipefail
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
+# 工具选择与身份共用同一入口；回执校验失败时不进入任何发布操作。
+source ci/release/build-identity.sh
+configure_build_tools
+
 artifact_root="$repository_root/target/dist/artifacts"
 api_artifact_root="$artifact_root/api"
 embedded_artifact_root="$artifact_root/embedded"
@@ -16,8 +20,6 @@ single_artifact_root="$artifact_root/single"
 single_build_root="$repository_root/target/dist/build/single"
 export single_build_root
 source ci/release/release-single.sh
-# 源码身份与 BUILD-INFO 字段解析由共享实现拥有；web-bundle.sh 复用同一份指纹。
-source ci/release/build-identity.sh
 package_output_root="$repository_root/target/dist/package"
 api_only_public_root="$repository_root/target/dist/api-only-assets/public"
 api_only_admin_root="$repository_root/target/dist/api-only-assets/admin"
@@ -57,16 +59,6 @@ worktree_state() {
 	else
 		printf 'dirty\n'
 	fi
-}
-
-# 影响可执行产物的构建输入：装配根、全部 crate、内嵌迁移与模板、清单与发布脚本。
-# 文档与运维正文不进入，避免只改说明就重跑 WASM 与 Fat LTO 链接。
-build_inputs_fingerprint() {
-	path_fingerprint \
-		apps crates migrations \
-		ops/config/examples \
-		ops/deploy/retention-policy.v1.json \
-		Cargo.toml Cargo.lock rust-toolchain.toml ci/release
 }
 
 write_build_info() {

@@ -2,6 +2,25 @@
 # 构建身份字段的唯一实现；由 release.sh 与 web-bundle.sh 在仓库根目录 source。
 # 调用方负责先 cd 到仓库根，并自行决定何时冻结身份，避免两个脚本对同一份源码给出不同指纹。
 
+# 发布与 Web 共用工具选择；按工具字节身份隔离 sccache daemon，避免新客户端连接旧进程。
+configure_build_tools() {
+	local tools_identity repository_identity name uses_sccache=false
+	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
+	export PATH="$PWD/target/build-tools/bin:$PATH" NO_DOWNLOADS=1
+	for name in RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER; do
+		if [[ ${!name-} == sccache || ${!name-} == */sccache ]]; then
+			printf -v "$name" '%s' "$PWD/target/build-tools/bin/sccache"
+			export "${name?}"
+			uses_sccache=true
+		fi
+	done
+	if [[ "$uses_sccache" == true ]]; then
+		repository_identity=$(printf '%s' "$PWD" | sha256sum | awk '{print $1}')
+		# Linux 抽象 UDS 不受工作区绝对路径长度影响；同用户/仓库/工具身份才共享 daemon。
+		export SCCACHE_SERVER_UDS="\\x00auction-$UID-${repository_identity:0:16}-${tools_identity:0:24}"
+	fi
+}
+
 # 源码身份指纹覆盖全部已跟踪及未忽略的未跟踪文件，同时记录删除和 mode 变化；target 与敏感忽略文件不进入。
 source_fingerprint() {
 	{
@@ -32,11 +51,14 @@ read_build_info() {
 # 原生制品与 Web payload 共用构建环境指纹；profile、工具包装器及目标参数变化都必须失效缓存。
 # 名称和值用 NUL 分隔后只输出摘要，避免分隔符歧义，也不把环境原文写进制品元数据。
 build_env_fingerprint() {
-	local name
+	local name tools_identity
+	# 同版本工具修复后字节也会改变；工具回执参与输入身份，避免复用旧工具生成的制品。
+	tools_identity=$(bash ci/tools/bootstrap.sh identity release) || return 1
 	{
+		printf 'auction-build-tools\0%s\0' "$tools_identity"
 		while IFS= read -r name; do
 			case "$name" in
-			CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTDOCFLAGS | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER)
+			CARGO_PROFILE_* | CARGO_BUILD_RUSTFLAGS | CARGO_ENCODED_RUSTFLAGS | CARGO_BUILD_TARGET | CARGO_TARGET_*_RUSTFLAGS | CARGO_TARGET_*_LINKER | RUSTDOCFLAGS | RUSTFLAGS | RUSTC | RUSTC_WRAPPER | RUSTC_WORKSPACE_WRAPPER | SCCACHE_SERVER_UDS)
 				printf '%s\0%s\0' "$name" "${!name-}"
 				;;
 			esac
@@ -70,4 +92,23 @@ path_fingerprint() {
 			done | LC_ALL=C sort -z
 		)
 	} | sha256sum | awk '{print $1}'
+}
+
+# 应用发布与封存复用同一份输入范围；工具配方也属于产物身份。
+build_inputs_fingerprint() {
+	path_fingerprint \
+		apps crates migrations \
+		ops/config/examples \
+		ops/deploy/retention-policy.v1.json \
+		Cargo.toml Cargo.lock rust-toolchain.toml ci/release ci/tools
+}
+
+# Web payload 与封存复用同一份输入范围，surface 严格闭集。
+web_inputs_fingerprint() {
+	local surface=$1
+	case "$surface" in public | admin) ;; *) return 2 ;; esac
+	path_fingerprint \
+		Cargo.toml Cargo.lock rust-toolchain.toml \
+		"crates/auction-web-$surface" crates/auction-web-shared crates/auction-contracts \
+		ci/release/web-bundle.sh ci/release/build-identity.sh ci/tools
 }

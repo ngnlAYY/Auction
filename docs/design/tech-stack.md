@@ -16,8 +16,8 @@
 | Tokio | 声明 ~1.53.3，锁定 1.53.3 | 官方 1.53.x LTS，后续只接收该分支补丁 |
 | HTTP | Axum 0.8.9、Hyper、hyper-util、Tower | 共用连接栈，Public/Admin 路由分离 |
 | 浏览器 | Dioxus 0.7.10 | 纯 CSR，禁 fullstack/server |
-| Web 构建工具 | dx CLI 0.7.10 | Actions 使用官方 Linux x86_64 归档并固定 SHA-256，命中缓存仍校验；仅作构建工具 |
-| 编译缓存工具 | sccache 0.18.0 | 本地 `RUSTC_WRAPPER=sccache` 构建与 CI artifacts 使用；官方 musl 归档固定 SHA-256，产物仍由 `BUILD-INFO` 判定 |
+| Web 构建工具 | dx CLI 0.7.10，独立 TLS 修复锁 | 固定源码包重建、禁自动下载；配套工具及 SHA-256 由[工具 owner](ci/tools/README.md)维护 |
+| 编译缓存工具 | sccache 0.18.0，独立 TLS 修复锁 | 固定源码包重建，只启用本地/GHA；安装回执和二进制身份进入 `BUILD-INFO` |
 | CI Actions | checkout 7.0.1、rust-cache 2.9.2、cache 6.1.0、upload-artifact 7.0.2、github-script 9.0.0 | 固定完整提交 SHA；权限、缓存与下载保留边界由 [CI 说明](ci/README.md)拥有 |
 | 国际化 | dioxus-i18n 0.6.0、unic-langid 0.9.6 | Fluent 编译期内嵌，五语言键一致 |
 | 数据库 | SQLx 0.9.0、PostgreSQL | 显式 postgres feature、SQL、事务与行锁 |

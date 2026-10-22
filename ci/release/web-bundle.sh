@@ -5,6 +5,10 @@ set -euo pipefail
 repository_root=$(git rev-parse --show-toplevel)
 cd "$repository_root"
 
+# 回执验证、工具选择和指纹与原生发布入口共用同一份实现。
+source ci/release/build-identity.sh
+configure_build_tools
+
 surface=${1:-}
 case "$surface" in
   public)
@@ -20,10 +24,6 @@ case "$surface" in
     exit 2
     ;;
 esac
-
-# 源码身份与路径指纹与 release.sh 共用同一实现，避免两处解释不一致。
-# 两个脚本都已 cd 到仓库根，静态相对路径便于 shellcheck 直接解析。
-source ci/release/build-identity.sh
 
 stable_root="$repository_root/target/dx/build/$package/web"
 payload_root="$stable_root/public"
@@ -48,10 +48,7 @@ if [[ -z "$dx_version" || -z "$rustc_version" ]]; then
   exit 1
 fi
 # payload 指纹覆盖本 surface、共享层与契约源码；DTO 变化必须重建两个浏览器，避免内嵌旧协议。
-source_identity=$(path_fingerprint \
-  "Cargo.toml" "Cargo.lock" "rust-toolchain.toml" \
-  "crates/$package" "crates/auction-web-shared" "crates/auction-contracts" \
-  "ci/release/web-bundle.sh" "ci/release/build-identity.sh")
+source_identity=$(web_inputs_fingerprint "$surface")
 # WASM 自定义 profile 与 rustflags 同样影响页面产物，不能只使外层原生二进制缓存失效。
 build_environment=$(build_env_fingerprint)
 
