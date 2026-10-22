@@ -46,6 +46,7 @@ apps 默认不含数据库驱动或 Web，自行调用 cargo 须显式选 postgr
 ## 当前交付边界
 - 公开目录的稀有/融合分组、筛选和分页由[装备分组契约](docs/contracts/routes.md#p09p11-装备分组)定义；
   名称拆分、详情类型及历史快照兼容由[装备录入契约](docs/contracts/invariants.md#i-05a-admin-装备录入的敏感边界和原子集合)定义。
+- 公开装备目录支持列显隐和浏览器本地记忆，宽屏使用可用区域；交互与边界见[Public 设计](crates/auction-web-public/DESIGN.md#5-表格与信息密度)。
 - 新场次软截止窗口/延长默认均为 900 秒，不改既有显式配置或冻结快照；
   老配置与草稿的处理见[截止升级说明](ops/README.md#截止规则与邮件发送隔离升级)。
 - MoogleMail 在发送 fence 前只读检查草稿；Bot 内部履约依赖联合身份、正向库存、资金账本及统一现金发送门。

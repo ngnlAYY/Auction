@@ -133,7 +133,7 @@ pub(crate) fn CatalogEquipmentName(name: String, game_equipment_url: String) -> 
 }
 
 #[component]
-pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
+pub(crate) fn PreviewCatalogRow(row: CatalogRow, visibility: CatalogVisibility) -> Element {
     let status_label = lot_status_label(&row.status);
     let status_class = lot_status_class(&row.status);
     let level = row.level.map(|value| value.to_string()).unwrap_or_else(|| t!("value-empty"));
@@ -145,20 +145,20 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
 
     rsx! {
         tr {
-            td { "data-label": t!("catalog-code"),
+            td { hidden: !visibility.contains(CatalogColumn::Code), "data-label": t!("catalog-code"),
                 Link {
                     class: "public-auction-catalog__code",
                     to: lot_detail_href(&row.lot_id),
                     "{row.code}"
                 }
             }
-            td { class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
+            td { hidden: !visibility.contains(CatalogColumn::Item), class: "public-auction-catalog__name", "data-label": t!("catalog-item"),
                 CatalogEquipmentName {
                     name: row.name.clone(),
                     game_equipment_url: row.game_equipment_url.clone(),
                 }
             }
-            td { "data-label": t!("catalog-group"),
+            td { hidden: !visibility.contains(CatalogColumn::Group), "data-label": t!("catalog-group"),
                 TruncatedText {
                     value: equipment_group_label(&row.equipment_group),
                     portal: true,
@@ -166,6 +166,7 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                 }
             }
             td {
+                hidden: !visibility.contains(CatalogColumn::AverageRoll),
                 class: "public-auction-catalog__avg-roll public-auction-catalog__number",
                 "data-label": t!("equipment-avg-roll"),
                 if let Some(avg_roll) = avg_roll {
@@ -174,13 +175,14 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                     span { class: "public-auction-catalog__none", {t!("value-empty")} }
                 }
             }
-            td { "data-label": t!("catalog-level"), "{level}" }
+            td { hidden: !visibility.contains(CatalogColumn::Level), "data-label": t!("catalog-level"), "{level}" }
             td {
+                hidden: !visibility.contains(CatalogColumn::Attributes),
                 class: "public-auction-catalog__primary-attributes",
                 "data-label": t!("catalog-primary-attributes"),
                 "{primary_attribute_initials}"
             }
-            td { "data-label": t!("catalog-seller"),
+            td { hidden: !visibility.contains(CatalogColumn::Seller), "data-label": t!("catalog-seller"),
                 TruncatedText {
                     value: seller,
                     portal: true,
@@ -188,17 +190,18 @@ pub(crate) fn PreviewCatalogRow(row: CatalogRow) -> Element {
                 }
             }
             td {
+                hidden: !visibility.contains(CatalogColumn::Price),
                 class: "public-auction-catalog__amount public-auction-catalog__number",
                 "data-label": t!("catalog-start-price"),
                 "{start_price}"
             }
-            td { class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
+            td { hidden: !visibility.contains(CatalogColumn::Leader), class: "public-auction-catalog__participant-cell", "data-label": t!("catalog-leader"),
                 span { class: "public-auction-catalog__none", {t!("value-empty")} }
             }
-            td { "data-label": t!("catalog-remaining"),
+            td { hidden: !visibility.contains(CatalogColumn::Remaining), "data-label": t!("catalog-remaining"),
                 span { class: "public-auction-countdown--none", {t!("value-empty")} }
             }
-            td { "data-label": t!("catalog-status"),
+            td { hidden: !visibility.contains(CatalogColumn::Status), "data-label": t!("catalog-status"),
                 span { class: "public-auction-status public-auction-status--{status_class}", "{status_label}" }
             }
         }

@@ -24,7 +24,8 @@ url.workspace = true
 wasm-bindgen.workspace = true
 uuid.workspace = true
 # 必填：补齐 Dioxus 的 `Location`、精确 GET 与跨标签页会话通知所需 `StorageEvent`，其余 feature 见根清单。
-web-sys = { workspace = true, features = ["StorageEvent"] }
+# 列设置直接使用浏览器存储与焦点 API，显式声明 feature，不依赖其他包顺带启用。
+web-sys = { workspace = true, features = ["Document", "Element", "HtmlElement", "Storage", "StorageEvent", "Window"] }
 
 [lints]
 # 可选：继承工作区统一 lint 策略，不在单包放宽。
